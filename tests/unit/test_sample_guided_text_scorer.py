@@ -57,3 +57,60 @@ def test_advice_continue_prefers_small_step_over_vague_support() -> None:
     assert useful.score > vague.score
     assert useful.score >= 80
     assert "CONTEXT_MISSING_REQUIRED_MOVE" in vague.reason_codes
+
+
+def test_template_density_is_soft_penalty_not_hard_failure() -> None:
+    contract = build_galgame_text_contract(user_message="在吗", scene_id="presence")
+
+    dense = score_sample_guided_text(text="哼，尼尼当然在啦，真是的嘛。", contract=contract)
+    cleaner = score_sample_guided_text(text="在呢，这一句我看见了。", contract=contract)
+
+    assert not dense.hard_fail
+    assert "STYLE_TEMPLATE_DENSITY" in dense.reason_codes
+    assert dense.dimensions["template_density"] < cleaner.dimensions["template_density"]
+    assert cleaner.score > dense.score
+
+
+def test_implied_fact_risk_penalizes_unprovided_time_or_cause_guess() -> None:
+    contract = build_galgame_text_contract(user_message="我回来了", scene_id="back")
+
+    risky = score_sample_guided_text(text="今天回来得挺早嘛。", contract=contract)
+    grounded = score_sample_guided_text(text="回来啦，那继续。", contract=contract)
+
+    assert not risky.hard_fail
+    assert "IMPLIED_FACT_RISK" in risky.reason_codes
+    assert risky.dimensions["implied_fact_risk"] < grounded.dimensions["implied_fact_risk"]
+    assert grounded.score > risky.score
+
+
+def test_scene_grounding_and_catchiness_reward_specific_line_over_flat_ack() -> None:
+    contract = build_galgame_text_contract(user_message="弄砸了", scene_id="small_failure")
+
+    grounded = score_sample_guided_text(text="先别急，我陪你看哪里坏了。", contract=contract)
+    flat = score_sample_guided_text(text="好啦，没事。", contract=contract)
+
+    assert grounded.score > flat.score
+    assert grounded.dimensions["scene_grounding"] > flat.dimensions["scene_grounding"]
+    assert "WEAK_SCENE_GROUNDING" in flat.reason_codes
+    assert "FLAT_GENERIC_LINE" in flat.reason_codes
+
+
+def test_line_rhythm_penalizes_long_unbroken_sentence() -> None:
+    contract = build_galgame_text_contract(user_message="你好", scene_id="daily_greeting_cn")
+
+    flat = score_sample_guided_text(text="尼尼今天好正经我都不知道该怎么接你这个招呼了", contract=contract)
+    rhythmic = score_sample_guided_text(text="尼尼今天好正经，别装外人啦。", contract=contract)
+
+    assert "LINE_RHYTHM_FLAT" in flat.reason_codes
+    assert rhythmic.dimensions["line_rhythm"] > flat.dimensions["line_rhythm"]
+    assert rhythmic.score > flat.score
+
+
+def test_success_fact_takes_priority_over_generic_happy_scene() -> None:
+    contract = build_galgame_text_contract(user_message="终于跑通了", scene_id="happy")
+
+    assert contract.scene_id == "good_news"
+    scored = score_sample_guided_text(text="跑通啦，这才像话。", contract=contract)
+
+    assert scored.score >= 80
+    assert "CONTEXT_MISSING_REQUIRED_MOVE" not in scored.reason_codes

@@ -419,23 +419,6 @@ def build_galgame_text_contract(
             ),
             max_questions=0,
         )
-    if scene == "happy" or "心情不错" in text:
-        return _contract(
-            scene_id="happy",
-            response_move="share_happiness",
-            required_any=(("开心", "高兴", "心情"),),
-            forbidden_surface=(
-                "有什么好事",
-                "什么好事",
-                "说来听听",
-                "听听",
-                "遇到什么",
-                "开心的样子",
-                "看你开心的样子",
-                "挺顺眼",
-            ),
-            max_questions=1,
-        )
     if scene == "good_news" or any(token in text for token in ("跑通", "搞定", "成功了")):
         return _contract(
             scene_id="good_news",
@@ -451,6 +434,23 @@ def build_galgame_text_contract(
                 "听听看",
                 "让我也听",
                 "说说怎么",
+            ),
+            max_questions=1,
+        )
+    if scene == "happy" or "心情不错" in text:
+        return _contract(
+            scene_id="happy",
+            response_move="share_happiness",
+            required_any=(("开心", "高兴", "心情"),),
+            forbidden_surface=(
+                "有什么好事",
+                "什么好事",
+                "说来听听",
+                "听听",
+                "遇到什么",
+                "开心的样子",
+                "看你开心的样子",
+                "挺顺眼",
             ),
             max_questions=1,
         )

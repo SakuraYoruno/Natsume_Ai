@@ -19,6 +19,12 @@ SCORING_DIMENSIONS: tuple[str, ...] = (
     "distance_control",
     "technical_helpfulness",
     "emotional_containment",
+    "catchiness",
+    "template_density",
+    "scene_grounding",
+    "implied_fact_risk",
+    "line_rhythm",
+    "character_freshness",
 )
 
 _PUNCT_RE = re.compile(r"[\s，。！？!?,.、~～…“”\"'：:；;（）()\[\]{}]+")
@@ -84,6 +90,32 @@ _HIGH_EMOTION_SCENES = {
     "headache",
     "miss_you",
     "praise",
+}
+_SAMPLE_SCENE_ALIASES = {
+    "relationship_boundary": "boundary_hurt",
+    "user_proud": "praise",
+    "followup_why": "followup",
+    "followup_then": "followup",
+    "really": "followup",
+    "small_complaint": "complaint",
+    "daily_good_news": "good_news",
+    "daily_small_failure": "small_failure",
+    "daily_ask_opinion": "advice_continue",
+    "daily_user_gives_up": "give_up",
+    "daily_user_busy": "busy",
+    "daily_check_presence": "presence",
+    "daily_ask_what_doing": "what_doing",
+    "daily_play_invite": "play_invite",
+    "daily_keep_quiet": "quiet",
+    "daily_talkative_tease": "talkative",
+    "daily_who_called_you": "who_called",
+    "daily_miss_you": "miss_you",
+    "daily_small_complaint": "complaint",
+    "daily_late_night": "late_night",
+    "daily_short_hmm": "short_ack",
+    "daily_short_oh": "short_ack",
+    "daily_followup_why": "followup",
+    "daily_followup_then": "followup",
 }
 
 _SERVICE_TONE = (
@@ -181,6 +213,98 @@ _GALGAME_MARKERS = (
     "啦",
     "呀",
 )
+_STYLE_TEMPLATE_MARKERS = (
+    "哼",
+    "尼尼",
+    "啦",
+    "呀",
+    "嘛",
+    "呢",
+    "呗",
+    "哦",
+    "好啦",
+    "行啦",
+    "当然",
+    "才没有",
+    "偏要",
+    "不行吗",
+    "真是的",
+)
+_CATCHY_TURN_MARKERS = (
+    "先",
+    "再",
+    "不过",
+    "但",
+    "这才",
+    "算你",
+    "别",
+    "只",
+    "一点",
+    "一小步",
+    "一处",
+)
+_FLAT_GENERIC_RE = re.compile(
+    r"^(?:好啦|行啦|知道啦|好哦|行吧|嗯|哦|哼)?[，,、\s]*"
+    r"(?:我在呢|我在|不吵你|不烦你|听到啦|替你开心|真早呀|回来啦|知道啦|没事)"
+    r"[。.!！?？…～~]*$"
+)
+_STOCK_OPENING_RE = re.compile(r"^(?:哼[，,、]?|好啦[，,、]?|行啦[，,、]?|那当然|当然|嗯[，,、]?|哦[～~，,、]?)")
+_IMPLIED_FACT_REGEXES: tuple[tuple[str, re.Pattern[str]], ...] = (
+    ("time_guess", re.compile(r"(?:今天|这会儿).{0,8}(?:真早|挺早|好早|回来得|心情不错)")),
+    ("arrival_or_attention_debt", re.compile(r"(?:终于|总算).{0,10}(?:回来|忙完|肯|想起|舍得|找)")),
+    ("offscreen_current_action", re.compile(r"(?:刚|刚才|刚好|正|正在).{0,8}(?:想|等|看|玩|吃|睡|醒|忙|刷|听|路过|发呆)")),
+    ("attention_prediction", re.compile(r"(?:感觉|觉得|以为).{0,12}(?:会找我|要找我|来找我|找你|理我)")),
+    ("unprovided_busy_duration", re.compile(r"(?:忙到|忙完到|忙着忙着).{0,8}(?:明天|晚上|半夜|现在)")),
+    ("habit_or_history_claim", re.compile(r"(?:平时|每次|总是|又).{0,12}(?:找|叫|问|弄|搞|卡|忘|迟到|闯祸)")),
+    ("calendar_claim", re.compile(r"(?:昨晚|昨天|明天|中午|早上|晚上).{0,12}(?:睡|起|叫|吃|忙|工作|熬)")),
+    ("sensory_claim", re.compile(r"(?:声音|屏幕|手机|表情|脸|眼神).{0,8}(?:软|累|困|看|亮|暗|慢)")),
+    ("cause_guess", re.compile(r"(?:是不是|估计|肯定).{0,14}(?:没好好休息|熬|没睡|没吃|太累|忙坏)")),
+)
+_SCENE_GROUNDING_ANCHORS: dict[str, tuple[str, ...]] = {
+    "daily_good_morning": ("早", "早安"),
+    "daily_greeting_cn": ("客气", "正经", "你好", "端着", "外人", "尼尼"),
+    "daily_greeting_en": ("正式", "中文", "正经", "尼尼"),
+    "presence": ("在", "回", "看见"),
+    "wait": ("等", "去", "慢慢", "处理", "忙"),
+    "back": ("回", "回来", "继续"),
+    "busy": ("忙", "去", "累", "活"),
+    "bored": ("无聊", "闹", "说", "拉", "热闹"),
+    "tired": ("累", "歇", "缓", "撑"),
+    "nothing": ("没事", "追问", "放", "待"),
+    "good_news": ("跑通", "搞定", "成功", "太好", "高兴", "好耶"),
+    "happy": ("开心", "高兴", "心情"),
+    "meal_share": ("吃", "饭", "饱"),
+    "hungry": ("吃", "饿", "垫"),
+    "sleepy": ("睡", "困", "眯"),
+    "headache": ("头疼", "歇", "缓", "撑"),
+    "bad_mood": ("心情", "不开心", "待", "陪"),
+    "small_failure": ("看", "补救", "弄", "砸", "修", "别急"),
+    "advice_continue": ("一小步", "一步", "一处", "一点", "先", "停", "收", "改"),
+    "next_step": ("先", "发", "看", "贴", "一步"),
+    "help_takeover": ("发", "贴", "看", "红字", "截图", "拿"),
+    "write_takeover": ("写", "材料", "要求", "丢来"),
+    "play_invite": ("陪", "玩", "一起"),
+    "quiet": ("小声", "安静", "不吵", "收"),
+    "talkative": ("说", "话", "闷"),
+    "who_called": ("自己", "来", "想来"),
+    "miss_you": ("想",),
+    "praise": ("夸", "当然", "眼光", "厉害"),
+    "apology": ("算", "道歉", "知道", "听到"),
+    "give_up": ("停", "放", "搁", "缓", "回头", "明天"),
+    "complaint": ("烦", "先", "拆", "看"),
+    "late_night": ("睡", "熬", "醒"),
+    "short_ack": ("说", "听", "继续", "接着"),
+    "followup": ("因为", "然后", "继续", "上一句", "接着"),
+}
+_SOFT_REASON_SCORE_PENALTIES = {
+    "STYLE_TEMPLATE_DENSITY": 3.5,
+    "STOCK_OPENING_TEMPLATE": 2.5,
+    "IMPLIED_FACT_RISK": 4.5,
+    "WEAK_SCENE_GROUNDING": 4.0,
+    "FLAT_GENERIC_LINE": 4.0,
+    "LOW_CATCHINESS": 2.0,
+    "LINE_RHYTHM_FLAT": 2.5,
+}
 
 
 @dataclass(frozen=True)
@@ -246,17 +370,26 @@ def _weights_for_scene(scene_id: str) -> dict[str, float]:
         weights["usefulness"] = 1.45
         weights["technical_helpfulness"] = 1.55
         weights["context_fit"] = 1.2
+        weights["scene_grounding"] = 1.25
         weights["role_fit"] = 0.8
         weights["distance_control"] = 0.85
+        weights["catchiness"] = 0.8
+        weights["template_density"] = 0.9
     elif scene_id in _HIGH_EMOTION_SCENES:
         weights["context_fit"] = 1.45
         weights["emotional_containment"] = 1.45
         weights["distance_control"] = 1.15
+        weights["implied_fact_risk"] = 1.2
+        weights["line_rhythm"] = 1.1
         weights["usefulness"] = 0.8
     elif scene_id in _DAILY_SCENES:
         weights["naturalness"] = 1.35
         weights["distance_control"] = 1.3
         weights["context_fit"] = 1.15
+        weights["template_density"] = 1.2
+        weights["line_rhythm"] = 1.2
+        weights["implied_fact_risk"] = 1.15
+        weights["catchiness"] = 1.1
         weights["technical_helpfulness"] = 0.55
     return weights
 
@@ -275,6 +408,7 @@ def _sample_for_contract(contract: GalgameTextContract) -> PositiveStyleSample:
     scene_id = _clean_text(getattr(contract, "scene_id", "")) or "default"
     if scene_id == "daily_greeting":
         scene_id = "daily_greeting_cn"
+    scene_id = _SAMPLE_SCENE_ALIASES.get(scene_id, scene_id)
     return get_positive_style_sample(scene_id)
 
 
@@ -303,6 +437,39 @@ def _hard_gate_codes(text: str, quality: TextQualityGateResult | None) -> list[s
     return list(dict.fromkeys(codes))
 
 
+def _template_marker_count(text: str) -> int:
+    return sum(text.count(marker) for marker in _STYLE_TEMPLATE_MARKERS if marker)
+
+
+def _implied_fact_hits(text: str) -> list[str]:
+    return [label for label, pattern in _IMPLIED_FACT_REGEXES if pattern.search(text)]
+
+
+def _scene_grounding_hits(
+    *,
+    text: str,
+    contract: GalgameTextContract,
+    scene_id: str,
+    good_examples: tuple[str, ...],
+) -> list[str]:
+    hits: list[str] = []
+    for group in getattr(contract, "required_any", ()) or ():
+        hits.extend(token for token in group if token and token in text)
+    hits.extend(token for token in _SCENE_GROUNDING_ANCHORS.get(scene_id, ()) if token and token in text)
+    for example in good_examples:
+        if example and example in text:
+            hits.append(example)
+    return list(dict.fromkeys(hits))
+
+
+def _line_break_count(text: str) -> int:
+    return sum(text.count(marker) for marker in ("，", "。", "！", "？", "…", "、", ",", "!", "?"))
+
+
+def _has_turn_or_texture(text: str) -> bool:
+    return bool(_contains_any(text, _CATCHY_TURN_MARKERS) or re.search(r"(.)\1|[！？…～~]", text))
+
+
 def score_sample_guided_text(
     *,
     text: Any,
@@ -317,6 +484,8 @@ def score_sample_guided_text(
     reasons: list[str] = []
     penalties: list[str] = []
     bonuses: list[str] = []
+    good_examples = tuple(item for item in (sample.good_examples or sample.safe_fragments) if item)
+    bad_examples = tuple(item for item in (sample.bad_examples or sample.avoid) if item)
 
     hard_codes = _hard_gate_codes(normalized, quality)
     if hard_codes:
@@ -353,6 +522,48 @@ def score_sample_guided_text(
         _drop(dimensions, "context_fit", 8)
         reasons.append("ASCII_WORD_IN_ZH_TEXT")
         penalties.append("context_fit:ascii_word")
+
+    template_count = _template_marker_count(normalized)
+    if template_count >= 4:
+        _drop(dimensions, "template_density", min(34, 8 + template_count * 4))
+        _drop(dimensions, "character_freshness", min(18, 3 * template_count))
+        reasons.append("STYLE_TEMPLATE_DENSITY")
+        penalties.append(f"template_density:marker_count:{template_count}")
+    elif template_count >= 3 and _STOCK_OPENING_RE.search(normalized):
+        _drop(dimensions, "template_density", 16)
+        _drop(dimensions, "character_freshness", 8)
+        reasons.append("STOCK_OPENING_TEMPLATE")
+        penalties.append("template_density:stock_opening")
+
+    implied_hits = _implied_fact_hits(normalized)
+    if implied_hits:
+        _drop(dimensions, "implied_fact_risk", min(48, 18 * len(implied_hits)))
+        _drop(dimensions, "context_fit", min(18, 6 * len(implied_hits)))
+        _drop(dimensions, "naturalness", min(12, 4 * len(implied_hits)))
+        reasons.append("IMPLIED_FACT_RISK")
+        penalties.append("implied_fact_risk:" + " / ".join(implied_hits[:4]))
+
+    line_breaks = _line_break_count(normalized)
+    if length > 42:
+        _drop(dimensions, "line_rhythm", min(24, 6 + (length - 42) * 0.35))
+        penalties.append("line_rhythm:overlong")
+    if length > 18 and line_breaks == 0:
+        _drop(dimensions, "line_rhythm", 12)
+        reasons.append("LINE_RHYTHM_FLAT")
+        penalties.append("line_rhythm:no_break")
+    elif 6 <= length <= 34 and line_breaks <= 3:
+        _raise(dimensions, "line_rhythm", 5)
+        bonuses.append("line_rhythm:compact")
+    if _FLAT_GENERIC_RE.match(normalized):
+        _drop(dimensions, "catchiness", 24)
+        _drop(dimensions, "character_freshness", 12)
+        _drop(dimensions, "line_rhythm", 8)
+        reasons.append("FLAT_GENERIC_LINE")
+        penalties.append("catchiness:flat_generic_line")
+    elif not _has_turn_or_texture(normalized) and length <= 14:
+        _drop(dimensions, "catchiness", 12)
+        reasons.append("LOW_CATCHINESS")
+        penalties.append("catchiness:no_turn_or_texture")
 
     for group in getattr(contract, "required_any", ()) or ():
         if group and not any(token and token in normalized for token in group):
@@ -400,8 +611,6 @@ def score_sample_guided_text(
         reasons.append("DISTANCE_CONTROL_SOFT_PENALTY")
         penalties.append("distance_control:" + " / ".join(distance_hits[:4]))
 
-    good_examples = tuple(item for item in (sample.good_examples or sample.safe_fragments) if item)
-    bad_examples = tuple(item for item in (sample.bad_examples or sample.avoid) if item)
     good_hits = [item for item in good_examples if item and item in normalized]
     bad_hits = [item for item in bad_examples if item and item in normalized]
     if good_hits:
@@ -417,6 +626,23 @@ def score_sample_guided_text(
         _drop(dimensions, "non_customer_service", min(20, 5 * len(bad_hits)))
         reasons.append("BAD_SAMPLE_SIMILARITY")
         penalties.append("sample_bad_hit:" + " / ".join(bad_hits[:4]))
+
+    grounding_hits = _scene_grounding_hits(
+        text=normalized,
+        contract=contract,
+        scene_id=scene_id,
+        good_examples=good_examples,
+    )
+    if grounding_hits:
+        _raise(dimensions, "scene_grounding", min(12, 4 * len(grounding_hits)))
+        _raise(dimensions, "context_fit", min(6, 2 * len(grounding_hits)))
+        bonuses.append("scene_grounding:" + " / ".join(grounding_hits[:4]))
+    elif scene_id not in {"default", "general"}:
+        _drop(dimensions, "scene_grounding", 20)
+        _drop(dimensions, "context_fit", 8)
+        _drop(dimensions, "catchiness", 6)
+        reasons.append("WEAK_SCENE_GROUNDING")
+        penalties.append("scene_grounding:no_scene_anchor")
 
     if any(marker in normalized for marker in _GALGAME_MARKERS):
         _raise(dimensions, "role_fit", 4)
@@ -461,6 +687,10 @@ def score_sample_guided_text(
             penalties.append("quality_soft:" + " / ".join(soft_quality_codes[:5]))
 
     score = _weighted_average(dimensions, weights)
+    soft_score_penalty = sum(_SOFT_REASON_SCORE_PENALTIES.get(reason, 0.0) for reason in set(reasons))
+    if soft_score_penalty:
+        score -= soft_score_penalty
+        penalties.append(f"score:soft_style_penalty:{soft_score_penalty:.1f}")
     if hard_codes:
         score = min(score, 35.0)
     return SampleGuidedTextScore(

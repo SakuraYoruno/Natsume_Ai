@@ -66,9 +66,23 @@ class ReplyControlPacket(BaseModel):
 6. `score_isolated_surface_candidates(...)`
    - 使用现有 hard gate 拦截绝对错误。
    - 使用 sample-guided scorer 做 soft scoring。
+   - scorer 显式输出 galgame 质感维度：`catchiness`、`template_density`、`scene_grounding`、`implied_fact_risk`、`line_rhythm`、`character_freshness`。
    - 对 `must_include`、`must_not_do`、`question_budget` 做控制面扣分。
 7. `select_best_isolated_candidate(...)`
    - 在 hard gate 通过后，优先选无控制面违约且分数最高的候选。
+
+## Galgame Soft Scoring
+
+`sample_guided_text_scorer` 的新增维度只做软评分，不把口癖或上下文相关词全局硬禁。
+
+- `catchiness`：区分有台词钩子的短句和“好啦/知道啦/没事”式平板回复。
+- `template_density`：对 `哼`、`尼尼`、`啦/呀/嘛` 等堆叠口癖扣分，但不直接拒绝。
+- `scene_grounding`：要求候选落到当前 scene 的动作，比如成功分享要接住“跑通/搞定”，小失败要能“一起看/补救”。
+- `implied_fact_risk`：对未提供的现实状态暗示扣分，比如“刚发呆”“忙到明天”“感觉你会来找我”。
+- `line_rhythm`：偏好可发送的一到两段私聊台词，扣长而无停顿的直线句。
+- `character_freshness`：对 stock opening 和机械傲娇模板降权，避免只靠口癖冒充角色感。
+
+这些维度会影响 rerank 和通过分，但不会新增 hard forbidden pattern。
 
 ## Original-Derived Style Anchors
 
