@@ -14,6 +14,7 @@ from host_brain.persona.isolated_surface_harness import IsolatedSurfaceInput
 
 
 SURFACE_MEMORY_RECALL_FAILED = "SURFACE_MEMORY_RECALL_FAILED"
+SURFACE_MEMORY_RECALL_SKIPPED = "SURFACE_MEMORY_RECALL_SKIPPED"
 SURFACE_MEMORY_WRITE_FAILED = "SURFACE_MEMORY_WRITE_FAILED"
 SURFACE_MEMORY_EVIDENCE_REQUIRED = "SURFACE_MEMORY_EVIDENCE_REQUIRED"
 SURFACE_MEMORY_EMPTY_TURN = "SURFACE_MEMORY_EMPTY_TURN"
@@ -22,6 +23,39 @@ _URI_RE = re.compile(r"\b(?:chat|memory|ledger|evd|doc|memo)://[^\s，。；;、
 _SPACE_RE = re.compile(r"\s+")
 _JSON_MARK_RE = re.compile(r"[{}\[\]\"]+")
 _FIELD_LABEL_RE = re.compile(r"\b(?:text|content|detail|memory_text)\s*[:：]\s*", re.IGNORECASE)
+_RECALL_HINTS = (
+    "还记得",
+    "记得吗",
+    "记不记得",
+    "上次",
+    "之前",
+    "以前",
+    "那天",
+    "刚才",
+    "刚刚",
+    "说好",
+    "约定",
+    "继续刚才",
+    "remember",
+    "last time",
+)
+_SHORT_ACKS = frozenset({"嗯", "嗯嗯", "好", "好的", "哦", "行", "继续", "然后呢"})
+_LOW_SIGNAL_TASKS = frozenset({
+    "back",
+    "busy",
+    "daily_chat",
+    "daily_good_morning",
+    "daily_greeting_cn",
+    "daily_greeting_en",
+    "greeting",
+    "presence",
+    "short_ack",
+    "wait",
+})
+_RECALL_TASKS = frozenset({"recall", "recall_memory", "memory_followup"})
+_TECH_TASKS = frozenset({"advice_continue", "complaint", "help_takeover", "next_step", "small_failure", "write_takeover"})
+_EMOTION_TASKS = frozenset({"apology", "bad_mood", "give_up", "headache", "quiet", "sleepy", "tired"})
+_IDENTITY_TASKS = frozenset({"identity"})
 
 
 @dataclass(frozen=True)
@@ -90,6 +124,185 @@ class SurfaceMemoryWriteResult:
             "text": self.text,
             "evidence_refs": list(self.evidence_refs),
         }
+
+
+@dataclass(frozen=True)
+class SurfaceMemoryRecallPlan:
+    """Recall plan tailored for the current minimal surface chain."""
+
+    should_recall: bool
+    query: str
+    task_mode: str
+    target_store_ids: tuple[str, ...] = ()
+    max_facts: int = 0
+    max_chars_per_fact: int = 96
+    time_lookback_days: int | None = None
+    reason: str = ""
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "should_recall": bool(self.should_recall),
+            "query": self.query,
+            "task_mode": self.task_mode,
+            "target_store_ids": list(self.target_store_ids),
+            "max_facts": int(self.max_facts),
+            "max_chars_per_fact": int(self.max_chars_per_fact),
+            "time_lookback_days": self.time_lookback_days,
+            "reason": self.reason,
+        }
+
+
+def build_surface_memory_recall_query(
+    context: ThreeLayerContinuityContext,
+    *,
+    max_chars: int = 240,
+) -> str:
+    """Build a recall query from compressed main-chain inputs only."""
+
+    parts = _clean_list(
+        [
+            context.current_user_message,
+            *_clean_list(context.necessary_facts)[:2],
+            _clean_text(context.mid_term_summary),
+        ]
+    )
+    return _truncate_text("；".join(parts), limit=max_chars)
+
+
+def plan_surface_memory_recall(
+    context: ThreeLayerContinuityContext,
+    *,
+    max_query_chars: int = 240,
+) -> SurfaceMemoryRecallPlan:
+    task_mode = _clean_text(context.task_mode_hint).lower() or "daily_chat"
+    user_message = _clean_text(context.current_user_message)
+    query = build_surface_memory_recall_query(context, max_chars=max_query_chars)
+    has_recall_hint = _has_recall_hint(user_message)
+
+    if not user_message:
+        return SurfaceMemoryRecallPlan(
+            should_recall=False,
+            query=query,
+            task_mode=task_mode,
+            reason="empty_user_message",
+        )
+    if _should_skip_low_signal_recall(user_message=user_message, task_mode=task_mode, has_recall_hint=has_recall_hint):
+        return SurfaceMemoryRecallPlan(
+            should_recall=False,
+            query=query,
+            task_mode=task_mode,
+            reason="low_signal_surface_turn",
+        )
+
+    if task_mode in _RECALL_TASKS or has_recall_hint:
+        return SurfaceMemoryRecallPlan(
+            should_recall=True,
+            query=query,
+            task_mode=task_mode,
+            target_store_ids=("episodic_vector", "sqlite_ledger", "neo4j_bond"),
+            max_facts=4,
+            max_chars_per_fact=96,
+            time_lookback_days=_infer_lookback_days(user_message),
+            reason="explicit_memory_recall",
+        )
+    if task_mode in _TECH_TASKS:
+        return SurfaceMemoryRecallPlan(
+            should_recall=True,
+            query=query,
+            task_mode=task_mode,
+            target_store_ids=("artifact_vault", "episodic_vector", "sqlite_ledger"),
+            max_facts=3,
+            max_chars_per_fact=112,
+            time_lookback_days=_infer_lookback_days(user_message),
+            reason="technical_or_task_context",
+        )
+    if task_mode in _EMOTION_TASKS:
+        return SurfaceMemoryRecallPlan(
+            should_recall=True,
+            query=query,
+            task_mode=task_mode,
+            target_store_ids=("neo4j_bond", "episodic_vector"),
+            max_facts=3,
+            max_chars_per_fact=96,
+            time_lookback_days=_infer_lookback_days(user_message),
+            reason="emotion_or_relationship_context",
+        )
+    if task_mode in _IDENTITY_TASKS:
+        return SurfaceMemoryRecallPlan(
+            should_recall=True,
+            query=query,
+            task_mode=task_mode,
+            target_store_ids=("world_canon", "episodic_vector"),
+            max_facts=2,
+            max_chars_per_fact=88,
+            time_lookback_days=None,
+            reason="identity_anchor_context",
+        )
+    return SurfaceMemoryRecallPlan(
+        should_recall=True,
+        query=query,
+        task_mode=task_mode,
+        target_store_ids=("episodic_vector",),
+        max_facts=2,
+        max_chars_per_fact=88,
+        time_lookback_days=_infer_lookback_days(user_message),
+        reason="daily_context_light_memory",
+    )
+
+
+def recall_surface_memory_for_context(
+    *,
+    recall_service: Any,
+    context: ThreeLayerContinuityContext,
+    request_id: str,
+    query_embedding: Sequence[float] | None,
+    intent_id: str | None = None,
+    person_id: str | None = None,
+    session_id: str | None = None,
+    ts_ms: int | None = None,
+    emotion_filter: str | None = None,
+    mood_state: str | None = None,
+    bond_summary: Mapping[str, Any] | None = None,
+    motive_state: Mapping[str, Any] | None = None,
+    render_target_lang: str | None = "zh",
+    fail_soft: bool = True,
+) -> SurfaceMemoryRecallPacket:
+    plan = plan_surface_memory_recall(context)
+    if not plan.should_recall:
+        return SurfaceMemoryRecallPacket(
+            query=plan.query,
+            degraded=False,
+            reason_code=SURFACE_MEMORY_RECALL_SKIPPED,
+            trace={"skipped": True, "plan": plan.as_dict()},
+        )
+    packet = recall_surface_memory_packet(
+        recall_service=recall_service,
+        request_id=request_id,
+        query=plan.query,
+        query_embedding=list(query_embedding) if query_embedding is not None else [],
+        intent_id=intent_id,
+        person_id=person_id,
+        session_id=session_id,
+        ts_ms=ts_ms,
+        emotion_filter=emotion_filter,
+        mood_state=mood_state,
+        bond_summary=bond_summary,
+        motive_state=motive_state,
+        render_target_lang=render_target_lang,
+        target_store_ids=plan.target_store_ids,
+        time_lookback_days=plan.time_lookback_days,
+        max_facts=plan.max_facts,
+        max_chars_per_fact=plan.max_chars_per_fact,
+        fail_soft=fail_soft,
+    )
+    return replace(
+        packet,
+        trace={
+            **dict(packet.trace or {}),
+            "skipped": False,
+            "plan": plan.as_dict(),
+        },
+    )
 
 
 def recall_surface_memory_packet(
@@ -442,6 +655,42 @@ def _build_evidence_refs(
     return _unique(refs)
 
 
+def _has_recall_hint(text: str) -> bool:
+    lowered = _clean_text(text).lower()
+    return any(hint.lower() in lowered for hint in _RECALL_HINTS)
+
+
+def _should_skip_low_signal_recall(
+    *,
+    user_message: str,
+    task_mode: str,
+    has_recall_hint: bool,
+) -> bool:
+    normalized = _clean_text(user_message)
+    if has_recall_hint:
+        return False
+    if task_mode not in _LOW_SIGNAL_TASKS:
+        return False
+    if normalized in _SHORT_ACKS:
+        return True
+    return len(normalized) <= 8
+
+
+def _infer_lookback_days(text: str) -> int | None:
+    normalized = _clean_text(text)
+    if any(token in normalized for token in ("刚才", "刚刚", "上一句", "前一句")):
+        return 1
+    if any(token in normalized for token in ("昨天", "昨晚")):
+        return 2
+    if any(token in normalized for token in ("前天",)):
+        return 3
+    if any(token in normalized for token in ("上次", "最近")):
+        return 7
+    if any(token in normalized for token in ("之前", "以前")):
+        return 30
+    return None
+
+
 def _surface_safe_text(value: Any, *, limit: int) -> str:
     text = _clean_text(value)
     if not text:
@@ -512,14 +761,19 @@ __all__ = [
     "SURFACE_MEMORY_EMPTY_TURN",
     "SURFACE_MEMORY_EVIDENCE_REQUIRED",
     "SURFACE_MEMORY_RECALL_FAILED",
+    "SURFACE_MEMORY_RECALL_SKIPPED",
     "SURFACE_MEMORY_WRITE_FAILED",
     "SurfaceMemoryFactRow",
+    "SurfaceMemoryRecallPlan",
     "SurfaceMemoryRecallPacket",
     "SurfaceMemoryWriteResult",
     "apply_surface_memory_recall_packet",
     "build_surface_input_with_memory_recall",
+    "build_surface_memory_recall_query",
     "build_surface_memory_recall_packet",
     "build_surface_turn_memory_text",
+    "plan_surface_memory_recall",
+    "recall_surface_memory_for_context",
     "recall_surface_memory_packet",
     "write_surface_turn_memory",
 ]
