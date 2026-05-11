@@ -737,7 +737,7 @@ def score_sample_guided_text(
 
     distance_hits = _contains_any(normalized, _RELATION_DISTANCE_TERMS)
     if distance_hits:
-        amount = 7 if scene_id in {"presence", "wait", "back", "miss_you", "bad_mood"} else 13
+        amount = 7 if scene_id in {"presence", "wait", "back", "miss_you", "bad_mood", "quiet"} else 13
         _drop(dimensions, "distance_control", min(42, amount * len(distance_hits)))
         reasons.append("DISTANCE_CONTROL_SOFT_PENALTY")
         penalties.append("distance_control:" + " / ".join(distance_hits[:4]))

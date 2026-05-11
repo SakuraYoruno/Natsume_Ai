@@ -219,12 +219,20 @@ _MEMORY_FACT_PREFIXES = (
 _CJK_SEQUENCE_RE = re.compile(r"[\u4e00-\u9fff]{2,}")
 _ASCII_TERM_RE = re.compile(r"[A-Za-z][A-Za-z0-9_+.-]{1,}")
 _FACT_SPLIT_RE = re.compile(r"[，。；、,.!?！？;:\s]+")
+_CANDIDATE_LABEL_SPLIT_RE = re.compile(
+    r"(?:^|[\r\n\s]+)(?:candidate|response|reply|候选|回复)\s*\d*[\s:：、.-]*",
+    re.IGNORECASE,
+)
+_CANDIDATE_LINE_RE = re.compile(r"^\s*(?:[-*]|\d+[.)、]|候选\s*\d*[:：]|回复\s*\d*[:：])\s*(.+?)\s*$")
 _MEMORY_ALIGNMENT_TASKS = frozenset(
     {
         "back",
         "identity",
         "memory_followup",
         "next_step",
+        "happy",
+        "headache",
+        "quiet",
         "recall",
         "recall_memory",
         "relationship_boundary",
@@ -439,6 +447,19 @@ def _memory_alignment_relevant(request: IsolatedSurfaceInput) -> bool:
     return any(hint in user_message for hint in _MEMORY_ALIGNMENT_HINTS)
 
 
+def memory_candidate_guidance(request: IsolatedSurfaceInput) -> str:
+    if not memory_carryover_facts(request) or not _memory_alignment_relevant(request):
+        return ""
+    lines = [
+        "## 候选集合要求",
+        "当前输入如果在追问或延续必要事实，3 到 5 个候选里至少 1 个候选要自然落到一条具体事实；另保留至少 1 个更轻口语的候选，交给评分器选择。",
+    ]
+    if any(_ASCII_TERM_RE.fullmatch(term) for term in memory_alignment_terms(request)):
+        lines.append("技术或代码事实里的英文标识符，要在至少 1 个候选中原样保留；不要全部改写成泛泛的“报错”“那个”。")
+    lines.append("关系事实只控制语气距离，不要改写成身份说明；不要输出“事实”“线索”“召回”“根据记忆”“证据”等过程词，也不要因为事实承接而升格亲密或编现实动作。")
+    return "\n".join(lines)
+
+
 def _memory_alignment_hits(text: str, terms: Sequence[str]) -> list[str]:
     lowered = text.lower()
     hits: list[str] = []
@@ -581,6 +602,9 @@ def build_isolated_surface_messages(
         "## 必要事实",
         "\n".join(f"- {item}" for item in surface_prompt_facts(request)) or "- 无",
     ]
+    candidate_guidance = memory_candidate_guidance(request)
+    if candidate_guidance:
+        user_parts.extend(["", candidate_guidance])
     user_parts.extend(
         [
             "",
@@ -590,6 +614,46 @@ def build_isolated_surface_messages(
     )
     user_prompt = "\n".join(user_parts)
     return [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}]
+
+
+def build_minimal_repair_messages(
+    request: IsolatedSurfaceInput,
+    failed: IsolatedCandidateScore,
+    *,
+    use_style_reference_bank: bool = True,
+) -> list[dict[str, str]]:
+    messages = build_isolated_surface_messages(request, use_style_reference_bank=use_style_reference_bank)
+    dimensions = {key: round(float(value), 3) for key, value in dict(failed.dimensions).items()}
+    repair_payload = {
+        "failed_text": failed.text,
+        "score": round(float(failed.score), 3),
+        "passed": bool(failed.passed),
+        "reason_codes": list(failed.reason_codes),
+        "control_violations": list(failed.control_violations),
+        "dimensions": dimensions,
+    }
+    messages[0]["content"] = "\n".join(
+        (
+            messages[0]["content"],
+            "",
+            "现在只做最高候选的最小修补：保留可用语气，补齐缺失的当前话题、必要事实或距离控制；不要整段扩写。",
+            "输出仍然必须是 JSON 对象：{\"candidates\":[\"修补候选1\",\"修补候选2\"]}。",
+        )
+    )
+    messages[1]["content"] = "\n".join(
+        (
+            messages[1]["content"],
+            "",
+            "## 需要最小修补的候选",
+            json.dumps(repair_payload, ensure_ascii=False, indent=2, sort_keys=True),
+            "",
+            "## 修补要求",
+            "- 给 2 到 3 个候选，只改必要处。",
+            "- 如果缺少必要事实承接，只补一处事实锚点；不要说“事实/线索/召回/根据记忆/证据”。",
+            "- 如果距离或上下文太弱，优先让句子贴住当前用户输入，不要新增身份说明或现实动作。",
+        )
+    )
+    return messages
 
 
 def _payload_candidates(payload: Any) -> list[str]:
@@ -662,6 +726,20 @@ def _extract_embedded_candidate_arrays(raw: str) -> list[str]:
     return candidates
 
 
+def _split_labeled_candidate_text(raw: str) -> list[str]:
+    parts = [part.strip(" \t\r\n,，;；") for part in _CANDIDATE_LABEL_SPLIT_RE.split(raw)]
+    labeled_parts = [part for part in parts if part]
+    if len(labeled_parts) >= 2:
+        return _clean_list(labeled_parts)
+
+    line_items: list[str] = []
+    for line in raw.splitlines():
+        match = _CANDIDATE_LINE_RE.match(line)
+        if match:
+            line_items.append(match.group(1))
+    return _clean_list(line_items)
+
+
 def parse_surface_candidates(raw_output: Any) -> list[str]:
     raw = _clean_text(raw_output)
     if not raw:
@@ -677,6 +755,8 @@ def parse_surface_candidates(raw_output: Any) -> list[str]:
     candidates = _payload_candidates(payload)
     if not candidates:
         candidates = _extract_embedded_candidate_arrays(raw)
+    if not candidates:
+        candidates = _split_labeled_candidate_text(raw)
     if not candidates:
         candidates.append(raw)
     return _clean_list(candidates)[:5]
@@ -735,7 +815,7 @@ def score_isolated_surface_candidates(
         memory_hits = _memory_alignment_hits(quality.normalized_text or candidate, memory_terms)
         if memory_terms:
             if memory_hits:
-                bonus = min(6.0, 2.0 + 1.5 * len(memory_hits))
+                bonus = min(6.0, 2.5 + 1.5 * len(memory_hits))
                 if any(
                     code in _MEMORY_BONUS_BLOCKING_QUALITY_CODES or code.startswith("QUALITY_SOFT_")
                     for code in reason_codes
@@ -744,6 +824,7 @@ def score_isolated_surface_candidates(
                 score += bonus
                 dimensions["memory_alignment"] = min(100.0, 86.0 + min(10.0, 2.0 * len(memory_hits)))
                 dimensions["context_fit"] = min(100.0, float(dimensions.get("context_fit", 86.0)) + min(4.0, len(memory_hits)))
+                dimensions["scene_grounding"] = min(100.0, float(dimensions.get("scene_grounding", 86.0)) + min(6.0, 2.0 * len(memory_hits)))
                 reason_codes.append("MEMORY_ALIGNMENT_HIT:" + ",".join(memory_hits[:4]))
             elif memory_relevant:
                 score -= 5.0
@@ -818,7 +899,9 @@ __all__ = [
     "merged_facts",
     "merged_must_not_do",
     "memory_alignment_terms",
+    "memory_candidate_guidance",
     "memory_carryover_facts",
+    "build_minimal_repair_messages",
     "parse_surface_candidates",
     "run_isolated_surface_generation",
     "score_isolated_surface_candidates",

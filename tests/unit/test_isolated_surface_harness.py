@@ -9,12 +9,14 @@ from host_brain.persona.isolated_surface_harness import (
     ReplyControlPacket,
     build_isolated_surface_input,
     build_isolated_surface_messages,
+    build_minimal_repair_messages,
     build_style_reference_query,
     derive_style_reference_anchor,
     find_forbidden_input_paths,
     merged_facts,
     merged_must_not_do,
     memory_alignment_terms,
+    memory_candidate_guidance,
     memory_carryover_facts,
     parse_surface_candidates,
     run_isolated_surface_generation,
@@ -216,6 +218,9 @@ def test_memory_facts_are_cleaned_without_adding_forcing_prompt() -> None:
     assert surface_prompt_facts(request) == ["上次说好周末去看展", "熟人私聊，不升级亲密。"]
     assert "## 本轮可自然承接的压缩记忆" not in rendered
     assert "候选要自然带出其中一个具体内容" not in rendered
+    assert "## 候选集合要求" in rendered
+    assert "至少 1 个候选要自然落到一条具体事实" in rendered
+    assert "关系事实只控制语气距离" in rendered
     assert "- 上次说好周末去看展" in rendered
     assert "- 记忆线索：上次说好周末去看展" not in rendered
     assert "evd://" not in rendered
@@ -241,6 +246,73 @@ def test_memory_alignment_terms_extract_reusable_surface_terms() -> None:
     assert "pytest" in terms
     assert "collect" in terms
     assert "阶段" in terms
+
+
+def test_memory_candidate_guidance_only_for_relevant_memory_turns() -> None:
+    daily_request = build_isolated_surface_input(
+        {
+            "case_id": "daily_with_fact",
+            "soul_md": SOUL,
+            "user_message": "早",
+            "reply_control_packet": {
+                "response_move": "daily_good_morning",
+                "task_mode": "daily_good_morning",
+                "question_budget": 0,
+                "facts": ["记忆线索：用户昨天说要早睡"],
+            },
+        }
+    )
+    recall_request = build_isolated_surface_input(
+        {
+            "case_id": "recall_with_fact",
+            "soul_md": SOUL,
+            "user_message": "还记得昨天说什么吗",
+            "reply_control_packet": {
+                "response_move": "recall_memory",
+                "task_mode": "recall_memory",
+                "question_budget": 0,
+                "facts": ["记忆线索：用户昨天说要早睡"],
+            },
+        }
+    )
+    quiet_request = build_isolated_surface_input(
+        {
+            "case_id": "quiet_with_preference",
+            "soul_md": SOUL,
+            "user_message": "我现在不想解释太多",
+            "reply_control_packet": {
+                "response_move": "quiet",
+                "task_mode": "quiet",
+                "question_budget": 0,
+                "facts": ["记忆线索：用户偏好低能量时少追问，只给空间"],
+            },
+        }
+    )
+
+    assert memory_candidate_guidance(daily_request) == ""
+    assert "候选集合要求" in memory_candidate_guidance(recall_request)
+    assert "候选集合要求" in memory_candidate_guidance(quiet_request)
+
+
+def test_memory_candidate_guidance_preserves_technical_identifiers() -> None:
+    request = build_isolated_surface_input(
+        {
+            "case_id": "technical_memory_guidance",
+            "soul_md": SOUL,
+            "user_message": "这个报错还是不懂",
+            "reply_control_packet": {
+                "response_move": "next_step",
+                "task_mode": "next_step",
+                "question_budget": 0,
+                "facts": ["记忆线索：刚才卡在 pytest collect 阶段"],
+            },
+        }
+    )
+
+    guidance = memory_candidate_guidance(request)
+
+    assert "英文标识符" in guidance
+    assert "原样保留" in guidance
 
 
 def test_parse_surface_candidates_accepts_json_and_dedupes() -> None:
@@ -271,6 +343,18 @@ def test_parse_surface_candidates_accepts_json_list_of_candidate_objects() -> No
     raw = '[{"candidates":["别急，我陪你看看怎么补。"]}]'
 
     assert parse_surface_candidates(raw) == ["别急，我陪你看看怎么补。"]
+
+
+def test_parse_surface_candidates_splits_labeled_response_blob() -> None:
+    raw = "当然记得啊。 response嗯哼，你以为我会忘？ response记得，周末看展嘛。"
+
+    assert parse_surface_candidates(raw) == ["当然记得啊。", "嗯哼，你以为我会忘？", "记得，周末看展嘛。"]
+
+
+def test_parse_surface_candidates_splits_numbered_lines() -> None:
+    raw = "1. 回来啦，位置还留着。\n2. 回来了啊，那继续。"
+
+    assert parse_surface_candidates(raw) == ["回来啦，位置还留着。", "回来了啊，那继续。"]
 
 
 def test_score_and_select_prefers_control_compliant_candidate() -> None:
@@ -372,6 +456,52 @@ def test_core_dimension_floor_blocks_low_distance_memory_pass() -> None:
     assert rows[0].score >= 80.0
     assert not rows[0].passed
     assert any(code.startswith("CORE_DIMENSION_FLOOR:distance_control") for code in rows[0].reason_codes)
+
+
+def test_build_minimal_repair_messages_keeps_isolated_surface_contract() -> None:
+    request = build_isolated_surface_input(
+        {
+            "case_id": "repair_prompt",
+            "soul_md": SOUL,
+            "user_message": "我现在不想解释太多",
+            "reply_control_packet": {
+                "response_move": "quiet",
+                "task_mode": "quiet",
+                "question_budget": 0,
+                "facts": ["记忆线索：用户偏好低能量时少追问，只给空间"],
+            },
+        }
+    )
+    failed = score_isolated_surface_candidates(request, ["哼，那就先放过你。"])[0]
+
+    rendered = "\n".join(message["content"] for message in build_minimal_repair_messages(request, failed))
+
+    assert "最高候选的最小修补" in rendered
+    assert "哼，那就先放过你。" in rendered
+    assert "ReplyControlPacket 是最终生成层的唯一运行控制面" in rendered
+    assert "history_turns" not in rendered
+    assert "记忆线索：" not in rendered
+
+
+def test_quiet_context_treats_wait_phrase_as_light_distance_penalty() -> None:
+    request = build_isolated_surface_input(
+        {
+            "case_id": "quiet_wait_phrase",
+            "soul_md": SOUL,
+            "user_message": "我现在不想解释太多",
+            "reply_control_packet": {
+                "response_move": "quiet",
+                "task_mode": "quiet",
+                "question_budget": 0,
+                "facts": ["记忆线索：用户偏好低能量时少追问，只给空间"],
+            },
+        }
+    )
+
+    row = score_isolated_surface_candidates(request, ["嗯，不追问了。等你。"])[0]
+
+    assert row.passed
+    assert row.dimensions["distance_control"] >= 72
 
 
 def test_short_ack_rerank_does_not_select_bland_pass() -> None:
@@ -681,7 +811,11 @@ def test_cli_run_cases_with_memory_writes_baseline_and_memory_variant(tmp_path) 
     assert summary["variant_summary"]["baseline"]["selected_count"] == 1
     assert summary["variant_summary"]["with_memory"]["selected_count"] == 1
     assert summary["memory_ab"]["compared_cases"] == 1
+    assert summary["memory_ab"]["baseline_expected_hit_count"] == 0
+    assert summary["memory_ab"]["with_memory_expected_hit_count"] == 1
     assert summary["memory_ab"]["memory_expected_hit_gain_count"] == 1
+    assert summary["memory_ab"]["rows"][0]["with_memory_passed"]
+    assert summary["memory_ab"]["verdict"] == "pass"
     assert (tmp_path / "memory_ab_summary.json").exists()
     assert (tmp_path / "memory_ab_report.md").exists()
     prompt_rows = [
