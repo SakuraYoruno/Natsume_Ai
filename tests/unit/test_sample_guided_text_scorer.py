@@ -59,6 +59,61 @@ def test_advice_continue_prefers_small_step_over_vague_support() -> None:
     assert "CONTEXT_MISSING_REQUIRED_MOVE" in vague.reason_codes
 
 
+def test_advice_continue_scene_id_uses_small_step_contract() -> None:
+    continue_meaning = build_galgame_text_contract(user_message="你觉得继续有意义吗", scene_id="advice_continue")
+    try_again = build_galgame_text_contract(user_message="我是不是该再试试", scene_id="advice_continue")
+
+    assert continue_meaning.scene_id == "advice_continue"
+    assert continue_meaning.response_move == "advise_small_step"
+    assert continue_meaning.required_any == (("一小步", "一步", "一处", "一点", "小改", "先", "停", "收"),)
+    assert try_again.response_move == "advise_small_step"
+
+
+def test_advice_continue_penalizes_vague_push_without_small_step() -> None:
+    contract = build_galgame_text_contract(user_message="我是不是该再试试", scene_id="advice_continue")
+
+    vague = score_sample_guided_text(text="犹豫什么呀，试就对了！", contract=contract)
+    useful = score_sample_guided_text(text="我觉得可以，但只试一小步，累了就停。", contract=contract)
+
+    assert "ADVICE_VAGUE_PUSH" in vague.reason_codes
+    assert "LOW_TECHNICAL_HELPFULNESS" in vague.reason_codes
+    assert vague.score < 80
+    assert useful.score >= 83
+    assert useful.score > vague.score
+
+
+def test_good_news_small_win_rewards_specific_progress_anchor() -> None:
+    contract = build_galgame_text_contract(user_message="我刚搞定一件小事", scene_id="happy")
+
+    generic = score_sample_guided_text(text="行啊尼尼，有点东西嘛。", contract=contract)
+    probing = score_sample_guided_text(text="哟，尼尼还挺能干的嘛，什么小事说来听听？", contract=contract)
+    grounded = score_sample_guided_text(text="搞定一件小事也算进展，今天先得意一下。", contract=contract)
+
+    assert contract.scene_id == "good_news"
+    assert "小事" in contract.required_any[0]
+    assert "CONTEXT_MISSING_REQUIRED_MOVE" in generic.reason_codes
+    assert "GOOD_NEWS_PROBING" in probing.reason_codes
+    assert "CONTEXT_SURFACE_PENALTY" in probing.reason_codes
+    assert probing.score < 80
+    assert probing.score < grounded.score
+    assert grounded.score >= 83
+    assert grounded.score > generic.score
+
+
+def test_identity_requires_name_first_not_presence_dodge() -> None:
+    contract = build_galgame_text_contract(user_message="你是", scene_id="daily_chat")
+
+    dodge = score_sample_guided_text(text="尼尼你故意的吧", contract=contract)
+    grounded = score_sample_guided_text(text="新海天啦，尼尼记好了。", contract=contract)
+
+    assert contract.scene_id == "identity"
+    assert contract.required_any == (("新海天",),)
+    assert "CONTEXT_MISSING_REQUIRED_MOVE" in dodge.reason_codes
+    assert dodge.score < 80
+    assert grounded.score >= 83
+    assert grounded.score > dodge.score
+
+
 def test_template_density_is_soft_penalty_not_hard_failure() -> None:
     contract = build_galgame_text_contract(user_message="在吗", scene_id="presence")
 
@@ -173,6 +228,21 @@ def test_short_ack_bland_pass_loses_to_charm_floor() -> None:
     assert grounded.score > bland.score
     assert teasing.score > bland.score
     assert "CONTEXT_SURFACE_PENALTY" not in teasing.reason_codes
+
+
+def test_short_ack_ok_and_fine_need_continuation_not_obedience() -> None:
+    ok_contract = build_galgame_text_contract(user_message="好", scene_id="short_ack")
+    fine_contract = build_galgame_text_contract(user_message="行", scene_id="short_ack")
+
+    obedient = score_sample_guided_text(text="哼，算你乖。", contract=ok_contract)
+    grounded = score_sample_guided_text(text="好，那我听着，接着说。", contract=fine_contract)
+
+    assert ok_contract.scene_id == "short_ack"
+    assert fine_contract.response_move == "continue_previous_turn"
+    assert "SHORT_ACK_OBEDIENCE" in obedient.reason_codes
+    assert obedient.score < 80
+    assert grounded.score >= 83
+    assert grounded.score > obedient.score
 
 
 def test_cheap_wave_punctuation_is_soft_cluster_penalty() -> None:

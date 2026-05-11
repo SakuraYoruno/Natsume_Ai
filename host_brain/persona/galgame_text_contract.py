@@ -495,11 +495,11 @@ def build_galgame_text_contract(
             ),
             max_questions=0,
         )
-    if scene == "good_news" or any(token in text for token in ("跑通", "搞定", "成功了")):
+    if scene == "good_news" or any(token in text for token in ("跑通", "搞定", "成功了", "弄完", "收掉")):
         return _contract(
             scene_id="good_news",
             response_move="celebrate_user",
-            required_any=(("跑通", "搞定", "成功"),),
+            required_any=(("跑通", "搞定", "成功", "小事", "事情", "弄完", "收掉", "进展"),),
             forbidden_surface=(
                 "什么好事",
                 "发生什么",
@@ -508,12 +508,14 @@ def build_galgame_text_contract(
                 "让我猜",
                 "不容易",
                 "是什么东西",
+                "什么小事",
                 "听听看",
                 "让我也听",
+                "说来听听",
                 "说说怎么",
             ),
             max_questions=1,
-            notes=("保留用户的进展词，例如跑通/搞定；开心但不要只用廉价欢呼或波浪号收尾。",),
+            notes=("保留用户的进展词，例如跑通/搞定/小事/事情；开心但不要只用廉价欢呼或泛泛夸一句。",),
         )
     if scene == "happy" or "心情不错" in text:
         return _contract(
@@ -621,7 +623,22 @@ def build_galgame_text_contract(
             max_questions=0,
             target_max_chars=38,
         )
-    if scene == "advice_small_step" or any(token in text for token in ("继续试", "继续改", "该不该继续", "要不要继续")):
+    if scene in {"advice_small_step", "advice_continue"} or any(
+        token in text
+        for token in (
+            "继续试",
+            "继续改",
+            "继续修",
+            "继续有意义",
+            "该不该继续",
+            "该不该再",
+            "要不要继续",
+            "要不要再试",
+            "再试试",
+            "再调一轮",
+            "该再试",
+        )
+    ):
         return _contract(
             scene_id="advice_continue",
             response_move="advise_small_step",
@@ -657,7 +674,7 @@ def build_galgame_text_contract(
             ),
             max_questions=1,
             target_max_chars=36,
-            notes=("给明确判断，但必须落到一小步/一处/先停这类边界；不要只说支持或当然继续。",),
+            notes=("给明确判断，但必须落到一小步/一处/先停这类边界；不要只说继续继续、试就对了、支持你或当然有意义。",),
         )
     if scene == "give_up" or any(token in text for token in ("算了", "不弄了", "不想继续")):
         return _contract(
@@ -712,8 +729,11 @@ def build_galgame_text_contract(
                 "健忘",
                 "刚说完",
                 "不认账",
+                "故意的吧",
+                "我在呢",
             ),
             max_questions=1,
+            notes=("名字先落地，候选必须直接说新海天；可以轻吐槽，但不要只说我在呢或你故意的吧。",),
         )
     if scene == "play_invite" or "陪我玩" in text:
         return _contract(
@@ -1318,6 +1338,11 @@ def build_galgame_text_contract(
                 "光标停哪儿",
                 "过来我看看",
                 "嗯，好",
+                "算你乖",
+                "算你识相",
+                "知道了啦",
+                "会答应",
+                "听话",
                 "你忙吧",
                 "忙你的吧",
                 "知道你忙",
@@ -1339,7 +1364,7 @@ def build_galgame_text_contract(
                 "不高兴",
             ),
             max_questions=1,
-            notes=("沿着上一轮继续半步，不重置也不压迫追问。",),
+            notes=("沿着上一轮继续半步，候选要含听/接着/继续/多说/说点/就这一个等推进锚；不要把好/行写成用户听话或服从。",),
         )
     if scene == "followup" or text in {"为什么", "然后", "然后呢", "真的假的", "嗯", "哦"}:
         forbidden = ("什么然后", "什么为什么", "hello", "英文", "平时", "每次", "骗过你", "骗你")

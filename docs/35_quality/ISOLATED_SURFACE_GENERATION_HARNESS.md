@@ -265,16 +265,17 @@ python tools/quality_cluster_report.py `
 - raw live low score: `17`
 - raw live hard fail: `1`
 - raw live avg selected score: `86.628`
-- retry run: `artifacts/isolated_surface_harness/daily_goal_500_retry_20260511`
-- retry cases: `41`
-- retry attempts: `82`
-- merged pass: `497/500`
-- merged low score: `3`
+- retry run: `artifacts/isolated_surface_harness/daily_goal_500_after_identity_contract_retry_20260511`
+- retry cases: `40`
+- retry attempts: `80`
+- merged pass: `500/500`
+- merged low score: `0`
 - merged hard fail: `0`
-- merged avg selected score: `87.217`
-- cluster report: `artifacts/isolated_surface_harness/daily_goal_500_retry_20260511/cluster_report`
+- merged avg selected score: `87.348`
+- weak pass remaining: `5`
+- cluster report: `artifacts/isolated_surface_harness/daily_goal_500_after_identity_contract_retry_20260511/cluster_report`
 
-剩余 3 个低分不是新增 hard forbidden 的理由：主要是 `advice_continue` 的帮助性不足和 `proud` 场景缺少更明确的接住动作，应继续按 cluster 调整 prompt/scorer 权重或样本参考。
+本轮 500 条低分清零不是通过扩大 hard forbidden 获得的：`advice_continue`、`good_news`、`short_ack`、`identity` 都只补了 scene-level contract notes、good/bad sample 与 soft penalty。
 
 本轮修复的 cluster：
 
@@ -284,6 +285,10 @@ python tools/quality_cluster_report.py `
 - `good_news` scene grounding：`happy` 中出现“跑通/搞定”时使用 `good_news` contract。
 - `meal_share` stuffed scolding：吃撑时接“先缓一下”，不训人、不推越界身体照顾。
 - write takeover usefulness：写作任务的 `内容/要求/题目/丢来` 计入 technical helpfulness。
+- `advice_continue` small-step contract：`task_mode=advice_continue` 和“再试试/继续有意义吗”统一落到“小步判断”，不再生成“试就对了/继续继续”。
+- `good_news` probing：小成就场景接住“搞定/小事/进展”，压低“什么小事说来听听”式追问。
+- `short_ack` obedience：`好/行/嗯/哦` 不写成“算你乖/算你识相”，必须沿上一轮用听着/接着/多说等推进锚。
+- `identity` name-first：`你是` 必须先落“新海天”，不再用“我在呢/你故意的吧”躲开身份确认。
 
 ## Migration Rule
 

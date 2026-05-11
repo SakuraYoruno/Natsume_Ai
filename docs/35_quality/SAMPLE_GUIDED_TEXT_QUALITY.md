@@ -91,10 +91,11 @@ Hard gate 只处理绝对不可发送的问题：
 - generated cases: `artifacts/isolated_surface_harness/daily_goal_500_20260511/cases.jsonl`
 - prompt build: `500/500`，errors `0`
 - raw live: `483/500` pass，`17` low score，`1` hard fail，avg `86.628`
-- failure-only retry: `41` cases / `82` attempts
-- merged result: `497/500` pass，`3` low score，`0` hard fail，avg `87.217`
+- failure-only retry: `40` cases / `80` attempts
+- merged result: `500/500` pass，`0` low score，`0` hard fail，avg `87.348`
+- weak pass remaining: `5`
 
-剩余低分继续按 cluster 优化，不把单句变成新 regex，也不扩大 scene-specific hard forbidden surface。
+本轮继续按 cluster 优化，没有把单句变成 hard regex，也没有扩大 scene-specific hard forbidden surface。新增/强化的是 soft cluster：`ADVICE_VAGUE_PUSH`、`GOOD_NEWS_PROBING`、`SHORT_ACK_OBEDIENCE`，以及 `identity` 的 name-first contract。
 
 ## Test Migration
 

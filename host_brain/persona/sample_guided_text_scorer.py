@@ -270,6 +270,14 @@ _WHAT_DOING_ATTENTION_WAIT_RE = re.compile(
 )
 _PRESENCE_ATTENTION_DEBT_RE = re.compile(r"(?:等你半天|等你好久|等你很久|终于.{0,6}(?:来|找|出现)|才来|来找我啦|出现啦)")
 _MEAL_SHARE_SCOLDING_RE = re.compile(r"(?:活该|谁让你|现在知道|叫你.{0,8}不听|吃那么急|吃太急|揉肚子)")
+_GOOD_NEWS_PROBING_RE = re.compile(r"(?:什么好事|发生什么|什么小事|说来听听|听听看|说说怎么|怎么做到|卡在哪)")
+_SHORT_ACK_OBEDIENCE_RE = re.compile(r"(?:算你乖|算你识相|知道了啦|就知道.{0,8}会答应|听话|会答应)")
+_ADVICE_VAGUE_PUSH_RE = re.compile(
+    r"(?:继续继续|试就对了|当然有意义|肯定继续|"
+    r"没有意义.{0,10}(?:不理|不在|不来)|"
+    r"有意义.{0,10}(?:干嘛|行了吧)|"
+    r"再试一次又不会|试试又不亏|不做谁做|半途而废)"
+)
 _SHORT_ACK_CHARM_MARKERS = (
     "接着说",
     "继续说",
@@ -306,7 +314,7 @@ _SCENE_GROUNDING_ANCHORS: dict[str, tuple[str, ...]] = {
     "bored": ("无聊", "闹", "说", "拉", "热闹"),
     "tired": ("累", "歇", "缓", "撑"),
     "nothing": ("没事", "追问", "放", "待"),
-    "good_news": ("跑通", "搞定", "成功", "太好", "高兴", "好耶"),
+    "good_news": ("跑通", "搞定", "成功", "小事", "事情", "弄完", "收掉", "进展", "太好", "高兴", "好耶"),
     "happy": ("开心", "高兴", "心情"),
     "meal_share": ("吃", "饭", "饱"),
     "hungry": ("吃", "饿", "垫"),
@@ -318,6 +326,7 @@ _SCENE_GROUNDING_ANCHORS: dict[str, tuple[str, ...]] = {
     "next_step": ("先", "发", "看", "贴", "一步"),
     "help_takeover": ("发", "贴", "看", "红字", "截图", "拿"),
     "write_takeover": ("写", "材料", "要求", "丢来"),
+    "identity": ("新海天",),
     "play_invite": ("陪", "玩", "一起"),
     "quiet": ("小声", "安静", "不吵", "收"),
     "talkative": ("说", "话", "闷"),
@@ -338,6 +347,9 @@ _SOFT_REASON_SCORE_PENALTIES = {
     "WHAT_DOING_ATTENTION_WAIT": 4.0,
     "PRESENCE_ATTENTION_DEBT": 4.0,
     "MEAL_SHARE_SCOLDING_OR_PUSHY": 3.5,
+    "GOOD_NEWS_PROBING": 5.0,
+    "SHORT_ACK_OBEDIENCE": 5.0,
+    "ADVICE_VAGUE_PUSH": 5.0,
     "IMPLIED_FACT_RISK": 4.5,
     "WEAK_SCENE_GROUNDING": 4.0,
     "FLAT_GENERIC_LINE": 4.0,
@@ -632,6 +644,27 @@ def score_sample_guided_text(
         _drop(dimensions, "naturalness", 6)
         reasons.append("MEAL_SHARE_SCOLDING_OR_PUSHY")
         penalties.append("context_fit:meal_share_scolding_or_pushy")
+    if scene_id == "good_news" and _GOOD_NEWS_PROBING_RE.search(normalized):
+        _drop(dimensions, "context_fit", 18)
+        _drop(dimensions, "scene_grounding", 10)
+        _drop(dimensions, "catchiness", 8)
+        _drop(dimensions, "distance_control", 8)
+        reasons.append("GOOD_NEWS_PROBING")
+        penalties.append("context_fit:good_news_probe")
+    if scene_id == "short_ack" and _SHORT_ACK_OBEDIENCE_RE.search(normalized):
+        _drop(dimensions, "context_fit", 16)
+        _drop(dimensions, "distance_control", 14)
+        _drop(dimensions, "catchiness", 10)
+        _drop(dimensions, "character_freshness", 8)
+        reasons.append("SHORT_ACK_OBEDIENCE")
+        penalties.append("context_fit:short_ack_obedience")
+    if scene_id == "advice_continue" and _ADVICE_VAGUE_PUSH_RE.search(normalized):
+        _drop(dimensions, "usefulness", 18)
+        _drop(dimensions, "technical_helpfulness", 18)
+        _drop(dimensions, "scene_grounding", 12)
+        _drop(dimensions, "context_fit", 8)
+        reasons.append("ADVICE_VAGUE_PUSH")
+        penalties.append("technical_helpfulness:advice_vague_push")
     if _FLAT_GENERIC_RE.match(normalized):
         _drop(dimensions, "catchiness", 24)
         _drop(dimensions, "character_freshness", 12)
