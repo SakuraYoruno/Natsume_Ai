@@ -79,11 +79,37 @@ def test_build_messages_only_uses_allowed_request_surface() -> None:
 
     assert "Soul.md" in rendered
     assert "ReplyControlPacket" in rendered
+    assert "TurnSurfaceContract" in rendered
+    assert "response_move" in rendered
+    assert "本轮 question_budget=0" in rendered
     assert "继续" in rendered
     assert "目标是先固定最小文本链" in rendered
     assert "当前只允许读取 ReplyControlPacket" in rendered
     assert "history_turns" not in rendered
     assert "旧消息" not in rendered
+
+
+def test_build_messages_adds_turn_contract_without_forbidden_surface_dump() -> None:
+    request = build_isolated_surface_input(
+        {
+            "case_id": "small_failure",
+            "soul_md": SOUL,
+            "user_message": "刚刚弄砸了",
+            "reply_control_packet": {
+                "response_move": "small_failure",
+                "task_mode": "small_failure",
+                "question_budget": 0,
+            },
+        }
+    )
+
+    rendered = "\n".join(message["content"] for message in build_isolated_surface_messages(request))
+
+    assert "catch_failure_and_offer_repair" in rendered
+    assert '"required_any"' in rendered
+    assert "先接住失败，再给能一起看的出口" in rendered
+    assert "forbidden_surface" not in rendered
+    assert "失败是成功之母" not in rendered
 
 
 def test_build_messages_enriches_style_anchor_from_derived_reference_bank(tmp_path, monkeypatch) -> None:
@@ -146,6 +172,30 @@ def test_parse_surface_candidates_accepts_json_and_dedupes() -> None:
     raw = json.dumps({"candidates": ["继续，先锁住 ReplyControlPacket。", "继续，先锁住 ReplyControlPacket。", "别急，先测。"]}, ensure_ascii=False)
 
     assert parse_surface_candidates(raw) == ["继续，先锁住 ReplyControlPacket。", "别急，先测。"]
+
+
+def test_parse_surface_candidates_recovers_embedded_json_candidates() -> None:
+    raw = '先想一下格式。\n{"candidates":["回来啦～","哦～回来了呀。","今天回来得挺早嘛。"]}'
+
+    assert parse_surface_candidates(raw) == ["回来啦～", "哦～回来了呀。", "今天回来得挺早嘛。"]
+
+
+def test_parse_surface_candidates_recovers_malformed_prefix_candidates() -> None:
+    raw = '}, "candidates":["嗯，那就先放放呗。","停一下也好，省得你烦躁。"]'
+
+    assert parse_surface_candidates(raw) == ["嗯，那就先放放呗。", "停一下也好，省得你烦躁。"]
+
+
+def test_parse_surface_candidates_accepts_python_literal_payload() -> None:
+    raw = "{'candidates': ['没事，我待会给你看看能不能补救吧。']}"
+
+    assert parse_surface_candidates(raw) == ["没事，我待会给你看看能不能补救吧。"]
+
+
+def test_parse_surface_candidates_accepts_json_list_of_candidate_objects() -> None:
+    raw = '[{"candidates":["别急，我陪你看看怎么补。"]}]'
+
+    assert parse_surface_candidates(raw) == ["别急，我陪你看看怎么补。"]
 
 
 def test_score_and_select_prefers_control_compliant_candidate() -> None:

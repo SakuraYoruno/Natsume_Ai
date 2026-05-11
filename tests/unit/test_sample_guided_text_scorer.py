@@ -45,3 +45,15 @@ def test_technical_scene_weights_helpfulness_above_role_flavor() -> None:
 
     assert useful.score > flavored_but_vague.score
     assert useful.weights["technical_helpfulness"] > useful.weights["role_fit"]
+
+
+def test_advice_continue_prefers_small_step_over_vague_support() -> None:
+    contract = build_galgame_text_contract(user_message="你觉得我该不该继续试试", scene_id="")
+
+    useful = score_sample_guided_text(text="再试一小步吧，累了就停。", contract=contract)
+    vague = score_sample_guided_text(text="那当然继续啊，尼尼想做的事我肯定支持。", contract=contract)
+
+    assert contract.required_any == (("一小步", "一步", "一处", "一点", "小改", "先", "停", "收"),)
+    assert useful.score > vague.score
+    assert useful.score >= 80
+    assert "CONTEXT_MISSING_REQUIRED_MOVE" in vague.reason_codes

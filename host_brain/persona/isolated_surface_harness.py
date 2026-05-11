@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import inspect
 import json
 import re
@@ -377,9 +378,25 @@ def build_isolated_surface_messages(
 ) -> list[dict[str, str]]:
     request = enrich_request_style_anchor(request, use_style_reference_bank=use_style_reference_bank)
     control = request.control
+    turn_contract = build_galgame_text_contract(
+        user_message=request.user_message,
+        facts={},
+        scene_id=control.task_mode,
+    )
+    turn_contract_payload = turn_contract.as_dict()
+    turn_contract_payload["max_questions"] = min(
+        int(turn_contract.max_questions),
+        int(control.question_budget),
+    )
+    turn_contract_payload.pop("forbidden_surface", None)
     control_payload = _model_dump(control)
     control_payload["facts"] = merged_facts(request)
     control_payload["must_not_do"] = merged_must_not_do(request)
+    no_question_line = (
+        "本轮 question_budget=0：候选里不要出现 ? 或 ？；不要用反问句撑角色感。"
+        if int(control.question_budget) <= 0
+        else f"本轮最多 {int(control.question_budget)} 个问句；优先陈述句完成当前动作。"
+    )
     system_prompt = "\n".join(
         (
             "你是隔离的最终表层文本生成器，只负责产出可发送的中文私聊候选。",
@@ -388,7 +405,8 @@ def build_isolated_surface_messages(
             "ReplyControlPacket 是最终生成层的唯一运行控制面；不得要求更多 runtime state。",
             "输出必须是 JSON 对象：{\"candidates\":[\"候选1\",\"候选2\",\"候选3\"]}。",
             "给 3 到 5 个候选。每个候选必须是用户可见文本，不要 Markdown、括号动作、字段名或解释。",
-            f"question_budget={int(control.question_budget)}；超过预算的候选会被扣分。",
+            no_question_line,
+            "每个候选都必须完成 TurnSurfaceContract.response_move；不要只写空泛支持、空泛安慰或单纯撒娇。",
             "",
             "## Soul.md",
             request.soul_md.strip(),
@@ -402,6 +420,9 @@ def build_isolated_surface_messages(
             "## ReplyControlPacket",
             json.dumps(control_payload, ensure_ascii=False, indent=2, sort_keys=True),
             "",
+            "## TurnSurfaceContract",
+            json.dumps(turn_contract_payload, ensure_ascii=False, indent=2, sort_keys=True),
+            "",
             "## 必要事实",
             "\n".join(f"- {item}" for item in merged_facts(request)) or "- 无",
             "",
@@ -412,15 +433,7 @@ def build_isolated_surface_messages(
     return [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}]
 
 
-def parse_surface_candidates(raw_output: Any) -> list[str]:
-    raw = _clean_text(raw_output)
-    if not raw:
-        return []
-    payload: Any
-    try:
-        payload = json.loads(raw)
-    except json.JSONDecodeError:
-        payload = raw
+def _payload_candidates(payload: Any) -> list[str]:
     candidates: list[str] = []
     if isinstance(payload, Mapping):
         raw_candidates = payload.get("candidates")
@@ -430,8 +443,82 @@ def parse_surface_candidates(raw_output: Any) -> list[str]:
         if reply:
             candidates.append(reply)
     elif isinstance(payload, list):
-        candidates.extend(_clean_text(item) for item in payload)
-    else:
+        for item in payload:
+            if isinstance(item, (Mapping, list)):
+                candidates.extend(_payload_candidates(item))
+            else:
+                candidates.append(_clean_text(item))
+    return candidates
+
+
+def _balanced_segment(text: str, start: int, *, opener: str = "[", closer: str = "]") -> str:
+    if start < 0 or start >= len(text) or text[start] != opener:
+        return ""
+    depth = 0
+    quote = ""
+    escaped = False
+    for index in range(start, len(text)):
+        char = text[index]
+        if quote:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == quote:
+                quote = ""
+            continue
+        if char in {'"', "'"}:
+            quote = char
+            continue
+        if char == opener:
+            depth += 1
+        elif char == closer:
+            depth -= 1
+            if depth == 0:
+                return text[start : index + 1]
+    return ""
+
+
+def _parse_candidate_array_at(raw: str, start: int) -> list[str]:
+    try:
+        value, _ = json.JSONDecoder().raw_decode(raw[start:])
+    except json.JSONDecodeError:
+        segment = _balanced_segment(raw, start)
+        if not segment:
+            return []
+        try:
+            value = ast.literal_eval(segment)
+        except (SyntaxError, ValueError):
+            return []
+    return _payload_candidates(value)
+
+
+def _extract_embedded_candidate_arrays(raw: str) -> list[str]:
+    candidates: list[str] = []
+    for match in re.finditer(r"[\"']candidates[\"']\s*:", raw):
+        start = raw.find("[", match.end())
+        if start == -1:
+            continue
+        candidates.extend(_parse_candidate_array_at(raw, start))
+    return candidates
+
+
+def parse_surface_candidates(raw_output: Any) -> list[str]:
+    raw = _clean_text(raw_output)
+    if not raw:
+        return []
+    payload: Any
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError:
+        try:
+            payload = ast.literal_eval(raw)
+        except (SyntaxError, ValueError):
+            payload = raw
+    candidates = _payload_candidates(payload)
+    if not candidates:
+        candidates = _extract_embedded_candidate_arrays(raw)
+    if not candidates:
         candidates.append(raw)
     return _clean_list(candidates)[:5]
 

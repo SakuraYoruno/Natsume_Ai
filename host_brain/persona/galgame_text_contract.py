@@ -538,11 +538,10 @@ def build_galgame_text_contract(
             target_max_chars=38,
         )
     if scene == "advice_small_step" or any(token in text for token in ("继续试", "继续改", "该不该继续", "要不要继续")):
-        required = ("改", "停", "一步", "继续") if "改" in text else ("试", "停", "一步", "继续")
         return _contract(
             scene_id="advice_continue",
             response_move="advise_small_step",
-            required_any=(required,),
+            required_any=(("一小步", "一步", "一处", "一点", "小改", "先", "停", "收"),),
             forbidden_surface=(
                 "少块肉",
                 "掉块肉",
@@ -574,6 +573,7 @@ def build_galgame_text_contract(
             ),
             max_questions=1,
             target_max_chars=36,
+            notes=("给明确判断，但必须落到一小步/一处/先停这类边界；不要只说支持或当然继续。",),
         )
     if scene == "give_up" or any(token in text for token in ("算了", "不弄了", "不想继续")):
         return _contract(
