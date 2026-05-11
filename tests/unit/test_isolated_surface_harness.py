@@ -508,3 +508,47 @@ def test_cli_run_cases_writes_prompts_and_scores(tmp_path) -> None:
     assert summary["scored_cases"] == 1
     assert (tmp_path / "prompts.jsonl").exists()
     assert (tmp_path / "scores.jsonl").exists()
+
+
+def test_cli_run_cases_with_memory_writes_baseline_and_memory_variant(tmp_path) -> None:
+    case = {
+        "case_id": "memory_compare",
+        "user_message": "还记得上次说的展吗",
+        "reply_control_packet": {
+            "response_move": "recall_memory",
+            "task_mode": "recall_memory",
+            "question_budget": 0,
+        },
+        "memory_recall_packet": {
+            "query": "还记得上次说的展吗",
+            "facts": ["记忆线索：上次说好周末看展"],
+            "relationship_clues": ["关系线索：熟人私聊，不升级亲密。"],
+            "style_anchor": ["承接压缩记忆"],
+            "must_not_do": ["不要在回复里暴露 memory:// 或 evd://"],
+            "confidence": 0.9,
+            "evidence_refs": ["evd://episodic/mem-1"],
+            "source_refs": ["memory://episodic/mem-1"],
+        },
+        "candidates": ["记得啊，周末看展这事我没忘。", "别急，先把这个展的事接上。"],
+    }
+
+    summary = run_cases([case], soul_md=SOUL, out_dir=tmp_path, with_memory=True)
+
+    assert summary["cases"] == 1
+    assert summary["memory_cases"] == 1
+    assert summary["prompt_variants"] == 2
+    assert summary["scored_cases"] == 2
+    prompt_rows = [
+        json.loads(line)
+        for line in (tmp_path / "prompts.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    variants = {row["variant"]: "\n".join(message["content"] for message in row["messages"]) for row in prompt_rows}
+
+    assert set(variants) == {"baseline", "with_memory"}
+    assert "记忆线索：上次说好周末看展" not in variants["baseline"]
+    assert "记忆线索：上次说好周末看展" in variants["with_memory"]
+    assert "关系线索：熟人私聊，不升级亲密。" in variants["with_memory"]
+    assert "不要在回复里暴露 memory:// 或 evd://" in variants["with_memory"]
+    assert "memory://episodic/mem-1" not in variants["with_memory"]
+    assert "evd://episodic/mem-1" not in variants["with_memory"]

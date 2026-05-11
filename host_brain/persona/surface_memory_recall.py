@@ -77,13 +77,33 @@ class SurfaceMemoryFactRow:
 
 
 @dataclass(frozen=True)
-class SurfaceMemoryRecallPacket:
+class MemoryRecallPacket:
     """Compressed recall output allowed to cross into the final surface layer."""
 
-    query: str
     facts: tuple[str, ...] = ()
-    rows: tuple[SurfaceMemoryFactRow, ...] = ()
+    style_anchor: tuple[str, ...] = ()
+    relationship_clues: tuple[str, ...] = ()
+    must_not_do: tuple[str, ...] = ()
+    confidence: float = 0.0
     evidence_refs: tuple[str, ...] = ()
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "facts": list(self.facts),
+            "style_anchor": list(self.style_anchor),
+            "relationship_clues": list(self.relationship_clues),
+            "must_not_do": list(self.must_not_do),
+            "confidence": round(float(self.confidence or 0.0), 6),
+            "evidence_refs": list(self.evidence_refs),
+        }
+
+
+@dataclass(frozen=True)
+class SurfaceMemoryRecallPacket(MemoryRecallPacket):
+    """Detailed packet kept for recall diagnostics before the surface boundary."""
+
+    query: str = ""
+    rows: tuple[SurfaceMemoryFactRow, ...] = ()
     source_refs: tuple[str, ...] = ()
     route_ids: tuple[str, ...] = ()
     candidate_count: int = 0
@@ -92,18 +112,20 @@ class SurfaceMemoryRecallPacket:
     trace: Mapping[str, Any] | None = None
 
     def as_dict(self) -> dict[str, Any]:
-        return {
-            "query": self.query,
-            "facts": list(self.facts),
-            "rows": [row.as_dict() for row in self.rows],
-            "evidence_refs": list(self.evidence_refs),
-            "source_refs": list(self.source_refs),
-            "route_ids": list(self.route_ids),
-            "candidate_count": int(self.candidate_count),
-            "degraded": bool(self.degraded),
-            "reason_code": self.reason_code,
-            "trace": dict(self.trace or {}),
-        }
+        payload = super().as_dict()
+        payload.update(
+            {
+                "query": self.query,
+                "rows": [row.as_dict() for row in self.rows],
+                "source_refs": list(self.source_refs),
+                "route_ids": list(self.route_ids),
+                "candidate_count": int(self.candidate_count),
+                "degraded": bool(self.degraded),
+                "reason_code": self.reason_code,
+                "trace": dict(self.trace or {}),
+            }
+        )
+        return payload
 
 
 @dataclass(frozen=True)
@@ -380,12 +402,19 @@ def build_surface_memory_recall_packet(
     evidence_refs = tuple(_unique(row.evidence_ref for row in rows if row.evidence_ref))
     source_refs = tuple(_unique(row.source_ref for row in rows if row.source_ref))
     route_ids = tuple(_extract_route_ids(output))
+    relationship_clues = tuple(row.fact for row in rows if _is_relationship_store(row.store_id))
+    must_not_do = tuple(_build_packet_must_not_do(candidates=candidates, rows=rows, degraded=bool(output.get("degraded", False))))
+    style_anchor = tuple(_build_packet_style_anchor(rows))
     store_counts: dict[str, int] = {}
     for row in rows:
         store_counts[row.store_id] = store_counts.get(row.store_id, 0) + 1
     return SurfaceMemoryRecallPacket(
         query=_clean_text(query if query is not None else output.get("query")),
         facts=tuple(row.fact for row in rows),
+        style_anchor=style_anchor,
+        relationship_clues=relationship_clues,
+        must_not_do=must_not_do,
+        confidence=_packet_confidence(rows, output=output),
         rows=tuple(rows),
         evidence_refs=evidence_refs,
         source_refs=source_refs,
@@ -406,26 +435,29 @@ def build_surface_memory_recall_packet(
 
 def apply_surface_memory_recall_packet(
     context: ThreeLayerContinuityContext,
-    packet: SurfaceMemoryRecallPacket,
+    packet: MemoryRecallPacket,
 ) -> ThreeLayerContinuityContext:
-    recall_facts = _clean_list([*context.recall_facts, *packet.facts])
+    recall_facts = _clean_list([*context.recall_facts, *packet.facts, *packet.relationship_clues])
     style_anchor = _clean_list(
         [
             *context.style_anchor,
-            "多路召回压缩" if packet.facts else "",
+            *packet.style_anchor,
+            "多路召回压缩" if packet.facts or packet.relationship_clues else "",
         ]
     )
+    must_not_do = _clean_list([*context.must_not_do, *packet.must_not_do])
     return replace(
         context,
         recall_facts=tuple(recall_facts),
         style_anchor=tuple(style_anchor),
+        must_not_do=tuple(must_not_do),
     )
 
 
 def build_surface_input_with_memory_recall(
     context: ThreeLayerContinuityContext,
     *,
-    packet: SurfaceMemoryRecallPacket,
+    packet: MemoryRecallPacket,
     soul_md: str,
     case_id: str = "",
     max_facts: int = 6,
@@ -437,6 +469,23 @@ def build_surface_input_with_memory_recall(
         case_id=case_id,
         max_facts=max_facts,
         max_recent_turns=max_recent_turns,
+    )
+
+
+def memory_recall_packet_from_mapping(raw: Mapping[str, Any] | MemoryRecallPacket) -> MemoryRecallPacket:
+    """Coerce an already-compressed packet from tests/tools without accepting raw memory."""
+
+    if isinstance(raw, MemoryRecallPacket):
+        return raw
+    if not isinstance(raw, Mapping):
+        raise ValueError("memory recall packet must be a mapping")
+    return MemoryRecallPacket(
+        facts=tuple(_clean_list(_coerce_sequence(raw.get("facts")))),
+        style_anchor=tuple(_clean_list(_coerce_sequence(raw.get("style_anchor")))),
+        relationship_clues=tuple(_clean_list(_coerce_sequence(raw.get("relationship_clues")))),
+        must_not_do=tuple(_clean_list(_coerce_sequence(raw.get("must_not_do")))),
+        confidence=_clamp01(_coerce_float(raw.get("confidence"))),
+        evidence_refs=tuple(_clean_list(_coerce_sequence(raw.get("evidence_refs")))),
     )
 
 
@@ -620,6 +669,48 @@ def _fact_prefix(store_id: str) -> str:
     return "召回线索"
 
 
+def _is_relationship_store(store_id: str) -> bool:
+    return _clean_text(store_id).lower() in {"neo4j_bond", "bond_graph"}
+
+
+def _build_packet_style_anchor(rows: Sequence[SurfaceMemoryFactRow]) -> list[str]:
+    if not rows:
+        return []
+    anchors = ["记忆只作为压缩事实承接，不展示召回过程"]
+    store_ids = {_clean_text(row.store_id).lower() for row in rows}
+    if store_ids & {"neo4j_bond", "bond_graph"}:
+        anchors.append("按关系线索控制距离，不因为记忆升格亲密")
+    if "artifact_vault" in store_ids:
+        anchors.append("技术线索优先转成最小可执行下一步")
+    return _clean_list(anchors)
+
+
+def _build_packet_must_not_do(
+    *,
+    candidates: Sequence[Mapping[str, Any]],
+    rows: Sequence[SurfaceMemoryFactRow],
+    degraded: bool,
+) -> list[str]:
+    rules: list[str] = []
+    for candidate in candidates:
+        metadata = dict(candidate.get("metadata") or {}) if isinstance(candidate.get("metadata"), Mapping) else {}
+        rules.extend(_coerce_sequence(candidate.get("must_not_do")))
+        rules.extend(_coerce_sequence(metadata.get("must_not_do")))
+    if any(row.evidence_ref or row.source_ref for row in rows):
+        rules.append("不要在回复里暴露 memory://、evd://、chat:// 或召回来源")
+    if any("不升级亲密" in row.fact or "别升级亲密" in row.fact for row in rows):
+        rules.append("不要根据记忆升级亲密关系")
+    if degraded:
+        rules.append("不要声称记得未召回的细节")
+    return _clean_list(rules)
+
+
+def _packet_confidence(rows: Sequence[SurfaceMemoryFactRow], *, output: Mapping[str, Any]) -> float:
+    if rows:
+        return _clamp01(max(float(row.score or 0.0) for row in rows))
+    return _clamp01(_coerce_float(output.get("confidence")))
+
+
 def _extract_route_ids(output: Mapping[str, Any]) -> list[str]:
     route_ids: list[str] = []
     for route in list(output.get("routes") or []):
@@ -743,6 +834,17 @@ def _unique(values: Sequence[Any] | Any) -> list[str]:
     return _clean_list(items)
 
 
+def _coerce_sequence(value: Any) -> list[Any]:
+    if value is None:
+        return []
+    if isinstance(value, (str, bytes, bytearray)):
+        text = _clean_text(value)
+        return [text] if text else []
+    if isinstance(value, Sequence):
+        return list(value)
+    return [value]
+
+
 def _coerce_float(value: Any, *, default: float = 0.0) -> float:
     try:
         return float(value)
@@ -757,7 +859,12 @@ def _coerce_int(value: Any, *, default: int = 0) -> int:
         return int(default)
 
 
+def _clamp01(value: float) -> float:
+    return max(0.0, min(1.0, float(value or 0.0)))
+
+
 __all__ = [
+    "MemoryRecallPacket",
     "SURFACE_MEMORY_EMPTY_TURN",
     "SURFACE_MEMORY_EVIDENCE_REQUIRED",
     "SURFACE_MEMORY_RECALL_FAILED",
@@ -772,6 +879,7 @@ __all__ = [
     "build_surface_memory_recall_query",
     "build_surface_memory_recall_packet",
     "build_surface_turn_memory_text",
+    "memory_recall_packet_from_mapping",
     "plan_surface_memory_recall",
     "recall_surface_memory_for_context",
     "recall_surface_memory_packet",

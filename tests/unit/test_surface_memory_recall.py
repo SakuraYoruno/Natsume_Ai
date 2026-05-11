@@ -5,12 +5,14 @@ from types import SimpleNamespace
 from host_brain.persona.isolated_surface_continuity import ThreeLayerContinuityContext
 from host_brain.persona.isolated_surface_harness import build_isolated_surface_messages
 from host_brain.persona.surface_memory_recall import (
+    MemoryRecallPacket,
     SURFACE_MEMORY_EVIDENCE_REQUIRED,
     SURFACE_MEMORY_RECALL_SKIPPED,
     SurfaceMemoryRecallPacket,
     build_surface_input_with_memory_recall,
     build_surface_memory_recall_packet,
     build_surface_memory_recall_query,
+    memory_recall_packet_from_mapping,
     plan_surface_memory_recall,
     recall_surface_memory_for_context,
     recall_surface_memory_packet,
@@ -91,8 +93,36 @@ def test_surface_memory_recall_packet_compresses_multi_route_candidates() -> Non
         "evd://bond/bond-1",
         "evd://world/world-1",
     )
+    assert packet.relationship_clues == ("关系线索：关系阶段：熟人私聊，别升级亲密。",)
+    assert packet.confidence == 0.93
+    assert "不要根据记忆升级亲密关系" in packet.must_not_do
+    assert "按关系线索控制距离，不因为记忆升格亲密" in packet.style_anchor
     assert "chat://session" not in "\n".join(packet.facts)
     assert "{" not in "\n".join(packet.facts)
+
+
+def test_memory_recall_packet_is_safe_boundary_shape_without_rows() -> None:
+    packet = memory_recall_packet_from_mapping(
+        {
+            "query": "还记得上次说的展吗",
+            "facts": ["记忆线索：上次说好周末看展"],
+            "relationship_clues": ["关系线索：熟人私聊，不升级亲密。"],
+            "style_anchor": ["承接压缩记忆"],
+            "must_not_do": ["不要暴露召回来源"],
+            "confidence": 0.82,
+            "evidence_refs": ["evd://episodic/mem-1"],
+            "source_refs": ["memory://episodic/mem-1"],
+            "route_ids": ["episodic"],
+            "candidate_count": 1,
+        }
+    )
+
+    assert isinstance(packet, MemoryRecallPacket)
+    assert packet.facts == ("记忆线索：上次说好周末看展",)
+    assert packet.relationship_clues == ("关系线索：熟人私聊，不升级亲密。",)
+    payload = packet.as_dict()
+    assert "rows" not in payload
+    assert payload["confidence"] == 0.82
 
 
 def test_recall_surface_memory_packet_calls_recall_and_surface_gets_only_facts() -> None:
