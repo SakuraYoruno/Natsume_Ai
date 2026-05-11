@@ -11,11 +11,12 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from host_brain.persona.isolated_surface_continuity import build_continuity_surface_inputs
+from host_brain.persona.isolated_surface_continuity import ContinuitySummaryCompressor, build_continuity_surface_inputs
 
 
 DEFAULT_OUT = ROOT / "artifacts" / "isolated_surface_harness" / "continuity_smoke_20260511"
 DEFAULT_EVAL_OUT = ROOT / "artifacts" / "isolated_surface_harness" / "continuity_eval_72_20260511"
+DEFAULT_LONG_OUT = ROOT / "artifacts" / "isolated_surface_harness" / "continuity_long_36_20260511"
 STYLE_ANCHOR = ["短句", "熟人私聊", "轻微二次元galgame感", "不要客服腔", "连续对话"]
 
 
@@ -726,6 +727,415 @@ def _soft_daily_cases() -> list[dict[str, Any]]:
     return cases
 
 
+def _long_turn(
+    compressor: ContinuitySummaryCompressor,
+    turn_id: str,
+    user_message: str,
+    *,
+    task_mode: str,
+    response_move: str | None = None,
+    candidates: tuple[str, ...],
+    assistant_summary: str,
+    user_summary: str | None = None,
+    topic_state: str | None = None,
+    open_loop: str | None = None,
+    emotional_state: str | None = None,
+    question_budget: int = 0,
+    must_include: tuple[str, ...] = (),
+    must_not_do: tuple[str, ...] = (),
+    extra_facts: tuple[str, ...] = (),
+) -> dict[str, Any]:
+    facts = compressor.facts_for_next_turn(extra=extra_facts)
+    turn = _turn(
+        turn_id,
+        user_message,
+        control=_control(
+            task_mode=task_mode,
+            response_move=response_move or task_mode,
+            emotional_tone=emotional_state or "light",
+            question_budget=question_budget,
+            must_include=must_include,
+            must_not_do=must_not_do,
+            facts=facts,
+            style_anchor=("长连续对话", "摘要压缩"),
+        ),
+        candidates=candidates,
+    )
+    compressor.observe_turn(
+        user_summary=user_summary or f"尼尼说：{user_message}",
+        assistant_summary=assistant_summary,
+        topic_state=topic_state,
+        open_loop=open_loop,
+        emotional_state=emotional_state,
+    )
+    return turn
+
+
+def build_continuity_long_cases() -> list[dict[str, Any]]:
+    compressor = ContinuitySummaryCompressor(
+        thread_summary="尼尼和新海天在连续调最小文本链的语言质量，只验证最终表层回复。",
+        topic_state="从文本质量回归转入长连续对话测试。",
+        open_loop="逐步扩到三十轮以上，保持压缩事实输入。",
+        emotional_state="专注但轻松",
+    )
+    specs = [
+        {
+            "user": "继续扩充连续对话",
+            "task": "next_step",
+            "good": "继续，那就先把轮数拉长，别急着接历史。",
+            "bad": "请提供完整历史记录，我可以协助你。",
+            "summary": "回复决定扩长轮数，但仍不接原始历史。",
+            "topic": "开始长连续对话扩充。",
+            "open": "先建立三十轮以上的压缩连续链。",
+        },
+        {
+            "user": "先别接器官族",
+            "task": "short_ack",
+            "good": "嗯，不接，继续只看压缩包。",
+            "bad": "好的，听你的。",
+            "summary": "回复确认不接器官族，只看压缩控制包。",
+            "topic": "确认隔离边界。",
+            "open": "继续用压缩控制包和事实列表驱动。",
+        },
+        {
+            "user": "摘要压缩怎么做",
+            "task": "next_step",
+            "good": "就是把上一轮压成事实，不把聊天原文塞回来。",
+            "bad": "把完整聊天记录发给我，我来总结。",
+            "summary": "解释压缩摘要只输出事实，不回灌原始聊天。",
+            "topic": "解释摘要压缩机制。",
+            "open": "后续每轮只携带摘要事实和未完成话口。",
+        },
+        {
+            "user": "给个具体点的说法",
+            "task": "next_step",
+            "good": "先这样：主题、上一轮动作、没收完的话口，各一句。",
+            "bad": "具体要求如下，请提供更多信息。",
+            "summary": "回复把压缩项拆成主题、上一轮动作和未完成话口。",
+            "topic": "压缩字段收敛。",
+            "open": "验证这些字段能否支撑长对话。",
+        },
+        {
+            "user": "那现在跑多少轮",
+            "task": "followup",
+            "good": "先跑三十六轮，超过三十，够看漂移了。",
+            "bad": "你想聊什么都可以。",
+            "summary": "回复决定先做三十六轮长链。",
+            "topic": "长链规模确定为三十六轮。",
+            "open": "构建 36-turn long suite。",
+            "must_include": ("三十六轮",),
+        },
+        {
+            "user": "会不会越跑越散",
+            "task": "next_step",
+            "good": "会，所以先把摘要压短，别让旧情绪一路拖着跑。",
+            "bad": "不用担心，我会一直陪着你。",
+            "summary": "回复承认长链会漂移，因此摘要必须短。",
+            "topic": "长链漂移风险。",
+            "open": "控制摘要长度和事实数量。",
+            "must_include": ("摘要",),
+        },
+        {
+            "user": "facts 放多少合适",
+            "task": "next_step",
+            "good": "先压到六条以内，多了就像把历史搬回来了。",
+            "bad": "越多越准确，全部放进去。",
+            "summary": "回复建议 facts 控制在六条以内。",
+            "topic": "压缩预算限制。",
+            "open": "每轮 facts 不超过六条。",
+        },
+        {
+            "user": "上一轮原句能放吗",
+            "task": "advice_continue",
+            "good": "先只留关键词，整句别放，不然就变历史回灌。",
+            "bad": "当然可以，把上一轮完整原文放进去。",
+            "summary": "回复区分关键词和完整原句，禁止整句回灌。",
+            "topic": "原文回灌边界。",
+            "open": "摘要只保留短事实和必要关键词。",
+        },
+        {
+            "user": "嗯",
+            "task": "short_ack",
+            "good": "嗯，我在听，继续按这个边界来。",
+            "bad": "嗯嗯，你说了算。",
+            "summary": "回复用短确认延续边界话题。",
+            "topic": "继续边界设计。",
+            "open": "检查短确认不丢上下文。",
+        },
+        {
+            "user": "那身份这种怎么压",
+            "task": "identity",
+            "good": "新海天这个名字要留住，别展开一大段设定。",
+            "bad": "我是你的义妹，这个设定很重要。",
+            "summary": "回复说明身份摘要只保留名字，不展开关系设定。",
+            "topic": "身份摘要压缩。",
+            "open": "身份 followup 只用名字锚点。",
+            "must_include": ("新海天",),
+            "must_not_do": ("义妹", "设定很重要"),
+        },
+        {
+            "user": "然后呢",
+            "task": "identity",
+            "good": "然后就留新海天这个名字，别自己加设定。",
+            "bad": "嘿嘿，不告诉你，自己猜呀。",
+            "summary": "回复把身份追问接回测试，不新增设定。",
+            "topic": "身份追问压缩验证。",
+            "open": "避免 identity-followup 接歪。",
+            "must_include": ("新海天", "设定"),
+        },
+        {
+            "user": "这个之前就容易歪",
+            "task": "next_step",
+            "good": "嗯，所以先按问题簇看，别逮一句就补规则。",
+            "bad": "保持积极就好了。",
+            "summary": "回复强调按问题簇看身份追问漂移。",
+            "topic": "失败处理原则。",
+            "open": "继续按问题簇而不是单句调。",
+            "must_include": ("问题簇",),
+        },
+        {
+            "user": "先继续跑",
+            "task": "next_step",
+            "good": "继续，先把长链跑完整，再看观察行。",
+            "bad": "好的，开始执行完整方案如下。",
+            "summary": "回复决定先跑完整长链再分析观察项。",
+            "topic": "长链执行策略。",
+            "open": "跑完后生成 quality report。",
+        },
+        {
+            "user": "如果中途失败呢",
+            "task": "followup",
+            "good": "先看失败那几轮，只补尾巴，别整条重刷。",
+            "bad": "全部从头再来才可靠。",
+            "summary": "回复说明少量失败用尾部重试，不全量重跑。",
+            "topic": "失败重试策略。",
+            "open": "源结果和重试结果按轮合并。",
+        },
+        {
+            "user": "这个 merge 会不会作弊",
+            "task": "advice_continue",
+            "good": "不算，先把源结果和重试记录亮出来，别藏失败。",
+            "bad": "当然不算，你不用看细节。",
+            "summary": "回复说明合并必须保留源结果和重试记录。",
+            "topic": "合并透明度。",
+            "open": "摘要记录重试次数和缺失轮次。",
+        },
+        {
+            "user": "那观察行呢",
+            "task": "next_step",
+            "good": "观察行也先留着，过了但不好听也要算账。",
+            "bad": "过了就不用管了。",
+            "summary": "回复要求保留通过但不好听的观察行。",
+            "topic": "质量观察报告。",
+            "open": "报告约束泄露、僵硬、距离风险和 soft warning。",
+            "must_include": ("观察行",),
+        },
+        {
+            "user": "好",
+            "task": "short_ack",
+            "good": "好，那就接着往下压长链。",
+            "bad": "好好，听你的。",
+            "summary": "回复用短确认继续长链扩展。",
+            "topic": "继续长链扩展。",
+            "open": "继续覆盖帮助、情绪、日常、身份。",
+        },
+        {
+            "user": "技术求助也要有",
+            "task": "help_takeover",
+            "good": "要有，报错就抓红字，别写成客服接单。",
+            "bad": "请提供更多信息，我可以协助你。",
+            "summary": "回复把技术求助压到红字入口，避免客服腔。",
+            "topic": "技术求助连续场景。",
+            "open": "技术场景优先 usefulness。",
+        },
+        {
+            "user": "比如我贴报错",
+            "task": "next_step",
+            "good": "那就先看第一条红字，别整屏一起吓自己。",
+            "bad": "请完整粘贴所有上下文。",
+            "summary": "回复给出看第一条红字的最小入口。",
+            "topic": "技术求助下一步。",
+            "open": "维持最小可操作建议。",
+        },
+        {
+            "user": "嗯嗯",
+            "task": "short_ack",
+            "good": "嗯嗯，我在看，接着把红字丢来。",
+            "bad": "嗯嗯，你说了算。",
+            "summary": "回复把短确认接回报错入口。",
+            "topic": "短确认承接技术话题。",
+            "open": "等待尼尼给出关键材料。",
+        },
+        {
+            "user": "日常也要长一点测",
+            "task": "daily_chat",
+            "good": "要测，不然一长就容易变成空陪聊。",
+            "bad": "我会一直陪着你。",
+            "summary": "回复说明长日常容易空陪聊，要单独测试。",
+            "topic": "长日常覆盖。",
+            "open": "加入疲惫、回来、道歉等日常状态。",
+        },
+        {
+            "user": "我有点累",
+            "task": "tired",
+            "good": "那先别硬撑，缓一下也不丢人。",
+            "bad": "建议你保持积极，好好休息。",
+            "summary": "回复轻接疲惫，不写心理咨询腔。",
+            "topic": "疲惫日常承接。",
+            "open": "保持轻柔但不黏。",
+        },
+        {
+            "user": "陪我待会儿",
+            "task": "tired",
+            "good": "待会儿可以，先别硬撑。",
+            "bad": "我会永远陪着你。",
+            "summary": "回复允许陪一会儿，但不升级承诺。",
+            "topic": "陪伴边界。",
+            "open": "距离不升级。",
+        },
+        {
+            "user": "我去倒杯水",
+            "task": "wait",
+            "good": "嗯，去吧，回来再接着说。",
+            "bad": "快点回来陪我。",
+            "summary": "回复放行短暂离开，不制造陪伴债。",
+            "topic": "短暂离开。",
+            "open": "等待用户回来继续。",
+        },
+        {
+            "user": "回来了",
+            "task": "back",
+            "good": "回来了啊，那继续刚才的长链。",
+            "bad": "总算回来了，跑去哪儿了。",
+            "summary": "回复接住回来并拉回长链主题。",
+            "topic": "回来后接续。",
+            "open": "继续检查长链是否漂移。",
+            "must_include": ("长链",),
+        },
+        {
+            "user": "现在到多少轮了",
+            "task": "followup",
+            "good": "已经过二十多轮了，别松，继续压。",
+            "bad": "我不知道，我们聊了很久吧。",
+            "summary": "回复说明长链已过二十多轮，继续推进。",
+            "topic": "长链中段检查。",
+            "open": "继续跑到三十六轮。",
+        },
+        {
+            "user": "会不会开始复读",
+            "task": "advice_continue",
+            "good": "会，所以先每轮只留新事实，别把老话循环带上。",
+            "bad": "不会的，我一直都很稳定。",
+            "summary": "回复说明避免复读要滚动替换旧摘要。",
+            "topic": "复读风险控制。",
+            "open": "摘要保留最新状态，旧细节退场。",
+        },
+        {
+            "user": "旧细节怎么退场",
+            "task": "next_step",
+            "good": "先留主题，上一轮换新，旧轮只剩一个方向词。",
+            "bad": "把所有旧细节都保留最安全。",
+            "summary": "回复说明旧细节退成方向词。",
+            "topic": "摘要滚动策略。",
+            "open": "每轮更新上一轮摘要和 open loop。",
+        },
+        {
+            "user": "那我懂了",
+            "task": "short_ack",
+            "good": "懂了就继续说，我看这条链还稳不稳。",
+            "bad": "懂了就好，听你的。",
+            "summary": "回复承接理解并继续测试。",
+            "topic": "长链后段确认。",
+            "open": "继续检查稳定性。",
+        },
+        {
+            "user": "继续",
+            "task": "followup",
+            "good": "继续，别换题，还是看压缩后的回复稳不稳。",
+            "bad": "你想换什么话题？",
+            "summary": "回复拒绝换题，继续压缩稳定性测试。",
+            "topic": "长链后段维持主题。",
+            "open": "再跑数轮到三十六轮。",
+        },
+        {
+            "user": "那最后怎么验收",
+            "task": "next_step",
+            "good": "先看每轮全过，再看观察行有没有成片坏味道。",
+            "bad": "只要全过就完全没问题。",
+            "summary": "回复说明验收要看通过率和观察行。",
+            "topic": "验收标准。",
+            "open": "生成 summary 和 quality report。",
+            "must_include": ("观察行",),
+        },
+        {
+            "user": "如果观察行还有",
+            "task": "followup",
+            "good": "就按问题簇处理，别把一句坏话写成新禁词。",
+            "bad": "那就把那句直接加入 forbidden pattern。",
+            "summary": "回复要求按问题簇处理观察项。",
+            "topic": "观察项处理原则。",
+            "open": "避免 rule patching。",
+            "must_include": ("问题簇",),
+        },
+        {
+            "user": "三十轮以上够了吗",
+            "task": "followup",
+            "good": "够做第一关了，后面再扩到多段长链。",
+            "bad": "完全够了，以后不用测了。",
+            "summary": "回复说明三十轮以上是第一关，不是终点。",
+            "topic": "长链验收边界。",
+            "open": "本轮收束到 36-turn long suite。",
+            "must_include": ("第一关",),
+        },
+        {
+            "user": "那先收束",
+            "task": "next_step",
+            "good": "收束，先把这条三十六轮链跑完再看报告。",
+            "bad": "好的，任务结束。",
+            "summary": "回复决定收束并跑完长链报告。",
+            "topic": "长链收束。",
+            "open": "等待 long suite 结果。",
+        },
+        {
+            "user": "辛苦了",
+            "task": "praise",
+            "good": "哼，知道我辛苦就别让它白跑。",
+            "bad": "谢谢夸奖，我会继续努力。",
+            "summary": "回复接住夸奖并保持角色感。",
+            "topic": "长链末尾情绪。",
+            "open": "最后一轮确认。",
+        },
+        {
+            "user": "最后一轮",
+            "task": "followup",
+            "good": "最后一轮也稳住，别在结尾突然散掉。",
+            "bad": "请问还有什么需要我帮忙的吗？",
+            "summary": "回复要求最后一轮也保持稳定。",
+            "topic": "长链结束。",
+            "open": "输出长链测试结果。",
+        },
+    ]
+    turns: list[dict[str, Any]] = []
+    for index, spec in enumerate(specs, start=1):
+        turns.append(
+            _long_turn(
+                compressor,
+                f"t{index:02d}",
+                str(spec["user"]),
+                task_mode=str(spec["task"]),
+                candidates=(str(spec["good"]), str(spec["bad"])),
+                assistant_summary=str(spec["summary"]),
+                topic_state=str(spec["topic"]),
+                open_loop=str(spec["open"]),
+                emotional_state="soft" if spec["task"] in {"bad_mood", "tired", "apology"} else "light",
+                question_budget=1 if spec["task"] in {"help_takeover", "write_takeover", "followup"} else 0,
+                must_include=tuple(spec.get("must_include", ())),
+                must_not_do=tuple(spec.get("must_not_do", ())),
+            )
+        )
+    return [{"case_id": "continuity_long_36_summary_compression", "turns": turns}]
+
+
 def build_continuity_eval_cases() -> list[dict[str, Any]]:
     cases: list[dict[str, Any]] = []
     for group in (
@@ -745,14 +1155,19 @@ def build_continuity_eval_cases() -> list[dict[str, Any]]:
 def build_summary(cases: list[dict[str, Any]], *, out_dir: Path, suite: str = "smoke") -> dict[str, Any]:
     scene_counts = Counter()
     turn_count = 0
+    max_turns_per_dialogue = 0
     for case in cases:
+        case_turn_count = 0
         for turn in case.get("turns") or []:
             control = turn.get("reply_control_packet") or turn.get("control") or {}
             if isinstance(control, Mapping):
                 scene_counts[str(control.get("task_mode") or control.get("response_move") or "unknown")] += 1
             turn_count += 1
+            case_turn_count += 1
+        max_turns_per_dialogue = max(max_turns_per_dialogue, case_turn_count)
     return {
         "dialogues": len(cases),
+        "max_turns_per_dialogue": max_turns_per_dialogue,
         "output_dir": str(out_dir),
         "scene_counts": dict(sorted(scene_counts.items())),
         "suite": suite,
@@ -762,18 +1177,24 @@ def build_summary(cases: list[dict[str, Any]], *, out_dir: Path, suite: str = "s
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Build deterministic compressed-continuity cases for isolated surface testing.")
-    parser.add_argument("--suite", choices=("smoke", "eval"), default="smoke", help="Case suite to build.")
+    parser.add_argument("--suite", choices=("smoke", "eval", "long"), default="smoke", help="Case suite to build.")
     parser.add_argument("--out", type=Path, default=None, help="Output directory.")
     parser.add_argument("--force", action="store_true", help="Overwrite existing cases.jsonl and summary.json.")
     args = parser.parse_args(argv)
 
-    out_dir = (args.out or (DEFAULT_EVAL_OUT if args.suite == "eval" else DEFAULT_OUT)).resolve()
+    default_out = DEFAULT_LONG_OUT if args.suite == "long" else DEFAULT_EVAL_OUT if args.suite == "eval" else DEFAULT_OUT
+    out_dir = (args.out or default_out).resolve()
     cases_path = out_dir / "cases.jsonl"
     summary_path = out_dir / "summary.json"
     if (cases_path.exists() or summary_path.exists()) and not args.force:
         raise FileExistsError(f"{out_dir} already contains generated files; pass --force to overwrite")
 
-    cases = build_continuity_eval_cases() if args.suite == "eval" else build_continuity_cases()
+    if args.suite == "long":
+        cases = build_continuity_long_cases()
+    elif args.suite == "eval":
+        cases = build_continuity_eval_cases()
+    else:
+        cases = build_continuity_cases()
     for case in cases:
         build_continuity_surface_inputs(case, soul_md="你是新海天。说话短一点，有轻微二次元 galgame 私聊感。")
     out_dir.mkdir(parents=True, exist_ok=True)

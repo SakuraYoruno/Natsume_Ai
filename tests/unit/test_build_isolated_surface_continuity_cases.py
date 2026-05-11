@@ -3,7 +3,12 @@ from __future__ import annotations
 from pathlib import Path
 
 from host_brain.persona.isolated_surface_continuity import build_continuity_surface_inputs
-from tools.build_isolated_surface_continuity_cases import build_continuity_cases, build_continuity_eval_cases, build_summary
+from tools.build_isolated_surface_continuity_cases import (
+    build_continuity_cases,
+    build_continuity_eval_cases,
+    build_continuity_long_cases,
+    build_summary,
+)
 
 
 SOUL = "你是新海天。说话短一点，有轻微二次元 galgame 私聊感。"
@@ -52,3 +57,29 @@ def test_build_continuity_eval_cases_are_valid_and_larger() -> None:
     assert summary["suite"] == "eval"
     assert summary["turns"] == 72
     assert summary["scene_counts"]["short_ack"] >= 8
+
+
+def test_build_continuity_long_case_uses_compressed_summary_budget() -> None:
+    cases = build_continuity_long_cases()
+
+    assert len(cases) == 1
+    assert len(cases[0]["turns"]) >= 31
+
+    turns = build_continuity_surface_inputs(cases[0], soul_md=SOUL)
+    assert len(turns) == len(cases[0]["turns"])
+
+    for turn in turns:
+        facts = turn.request.control.facts
+        rendered_fact_text = "\n".join(facts)
+        assert len(facts) <= 6
+        assert "连续摘要：" in rendered_fact_text
+        assert "conversation_history" not in rendered_fact_text
+        assert "messages" not in rendered_fact_text
+
+    assert "上一轮摘要：" in "\n".join(turns[1].request.control.facts)
+
+    summary = build_summary(cases, out_dir=Path("out"), suite="long")
+    assert summary["suite"] == "long"
+    assert summary["dialogues"] == 1
+    assert summary["max_turns_per_dialogue"] >= 31
+    assert summary["turns"] == len(turns)

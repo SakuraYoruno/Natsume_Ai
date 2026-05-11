@@ -28,6 +28,96 @@ class ContinuityTurnSurfaceInput:
         }
 
 
+@dataclass(frozen=True)
+class CompressedContinuitySnapshot:
+    turn_count: int = 0
+    thread_summary: str = ""
+    topic_state: str = ""
+    last_turn_summary: str = ""
+    open_loop: str = ""
+    emotional_state: str = ""
+    distance_note: str = "熟人私聊，不升级亲密。"
+
+    def facts(self, *, extra: Sequence[str] | None = None, max_facts: int = 6) -> tuple[str, ...]:
+        rows = [
+            f"连续摘要：{self.thread_summary}" if self.thread_summary else "",
+            f"当前主题：{self.topic_state}" if self.topic_state else "",
+            f"上一轮摘要：{self.last_turn_summary}" if self.last_turn_summary else "",
+            f"未完成话口：{self.open_loop}" if self.open_loop else "",
+            *list(extra or ()),
+            f"情绪状态：{self.emotional_state}" if self.emotional_state else "",
+            f"关系距离：{self.distance_note}" if self.distance_note else "",
+        ]
+        return tuple(_clean_list(rows)[: max(1, int(max_facts or 6))])
+
+
+def _clean_list(values: Sequence[Any] | None) -> list[str]:
+    cleaned: list[str] = []
+    seen: set[str] = set()
+    for value in list(values or []):
+        text = _clean_text(value)
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        cleaned.append(text)
+    return cleaned
+
+
+class ContinuitySummaryCompressor:
+    """Deterministic rolling summary for long isolated continuity tests.
+
+    It stores compressed state labels and short summaries, not raw message
+    arrays. Runtime can replace this with a model or state-machine compressor,
+    as long as the final surface layer still receives only the emitted facts.
+    """
+
+    def __init__(
+        self,
+        *,
+        thread_summary: str,
+        topic_state: str = "",
+        open_loop: str = "",
+        emotional_state: str = "平稳",
+        distance_note: str = "熟人私聊，不升级亲密。",
+    ) -> None:
+        self._snapshot = CompressedContinuitySnapshot(
+            thread_summary=_clean_text(thread_summary),
+            topic_state=_clean_text(topic_state),
+            open_loop=_clean_text(open_loop),
+            emotional_state=_clean_text(emotional_state),
+            distance_note=_clean_text(distance_note),
+        )
+
+    @property
+    def snapshot(self) -> CompressedContinuitySnapshot:
+        return self._snapshot
+
+    def facts_for_next_turn(self, *, extra: Sequence[str] | None = None, max_facts: int = 6) -> tuple[str, ...]:
+        return self._snapshot.facts(extra=extra, max_facts=max_facts)
+
+    def observe_turn(
+        self,
+        *,
+        user_summary: str,
+        assistant_summary: str,
+        topic_state: str | None = None,
+        open_loop: str | None = None,
+        emotional_state: str | None = None,
+        distance_note: str | None = None,
+    ) -> CompressedContinuitySnapshot:
+        last_turn_summary = "；".join(_clean_list([user_summary, assistant_summary]))
+        self._snapshot = CompressedContinuitySnapshot(
+            turn_count=self._snapshot.turn_count + 1,
+            thread_summary=self._snapshot.thread_summary,
+            topic_state=_clean_text(topic_state if topic_state is not None else self._snapshot.topic_state),
+            last_turn_summary=last_turn_summary,
+            open_loop=_clean_text(open_loop if open_loop is not None else self._snapshot.open_loop),
+            emotional_state=_clean_text(emotional_state if emotional_state is not None else self._snapshot.emotional_state),
+            distance_note=_clean_text(distance_note if distance_note is not None else self._snapshot.distance_note),
+        )
+        return self._snapshot
+
+
 _CASE_KEYS = {
     "case_id",
     "soul_md",
@@ -141,6 +231,8 @@ def build_continuity_surface_inputs(
 
 
 __all__ = [
+    "CompressedContinuitySnapshot",
+    "ContinuitySummaryCompressor",
     "ContinuityTurnSurfaceInput",
     "build_continuity_surface_inputs",
     "find_forbidden_continuity_input_paths",

@@ -5,6 +5,7 @@ import json
 import pytest
 
 from host_brain.persona.isolated_surface_continuity import (
+    ContinuitySummaryCompressor,
     build_continuity_surface_inputs,
     find_forbidden_continuity_input_paths,
 )
@@ -92,6 +93,31 @@ def test_continuity_turns_build_isolated_prompts_from_compressed_facts_only() ->
     assert "连续事实：本轮的“厉害吧”指刚才跑通。" in rendered
     assert "跑通啦，这才像话。" not in rendered
     assert "conversation_history" not in rendered
+
+
+def test_continuity_summary_compressor_emits_bounded_rolling_facts() -> None:
+    compressor = ContinuitySummaryCompressor(
+        thread_summary="尼尼和新海天在调最小文本链。",
+        topic_state="先验证连续对话。",
+        open_loop="扩到三十轮以上。",
+        emotional_state="专注",
+    )
+
+    first_facts = compressor.facts_for_next_turn(extra=["额外事实：只保留压缩标签。"], max_facts=6)
+    snapshot = compressor.observe_turn(
+        user_summary="尼尼问摘要压缩怎么做",
+        assistant_summary="回复说明只传事实列表",
+        topic_state="解释摘要压缩。",
+        open_loop="下一轮继续检查事实预算。",
+    )
+    second_facts = compressor.facts_for_next_turn(max_facts=6)
+
+    assert snapshot.turn_count == 1
+    assert len(first_facts) <= 6
+    assert len(second_facts) <= 6
+    assert "连续摘要：尼尼和新海天在调最小文本链。" in second_facts
+    assert "上一轮摘要：尼尼问摘要压缩怎么做；回复说明只传事实列表" in second_facts
+    assert not any("messages" in fact or "conversation_history" in fact for fact in second_facts)
 
 
 def test_continuity_short_ack_rerank_uses_compressed_previous_turn_fact() -> None:

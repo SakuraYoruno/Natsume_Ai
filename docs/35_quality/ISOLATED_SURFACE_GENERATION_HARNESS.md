@@ -113,6 +113,21 @@ class ReplyControlPacket(BaseModel):
 
 `candidates`、`model_output`、`candidate_payload` 只允许作为离线评分 artifact 字段出现，永远不会进入 `build_isolated_surface_messages()`。
 
+### 摘要压缩怎么做
+
+当前长连续对话先用确定性的 `ContinuitySummaryCompressor` 做滚动压缩。它不保存原始消息数组，只保存会进入 `ReplyControlPacket.facts` 的短标签：
+
+- `thread_summary`：整条对话的长期方向。
+- `topic_state`：当前局部主题。
+- `last_turn_summary`：上一轮用户意图和助手动作的短摘要。
+- `open_loop`：下一轮还没收完的话口。
+- `emotional_state`：当前情绪状态标签。
+- `distance_note`：关系距离边界。
+
+每轮生成前只取最多 `6` 条 facts。生成后，上游用本轮的用户意图摘要、助手动作摘要、主题和未完成话口更新 snapshot；下一轮只看到更新后的压缩事实，看不到旧轮原文。也就是说，旧细节会退成主题词或方向词，上一轮摘要会被新一轮覆盖，避免把连续对话变成历史全文回灌。
+
+36 轮长链专门验证这个机制：从第 1 轮到第 36 轮，每个 turn 进入最终表层生成层的输入仍然只有 `Soul.md + 当前用户输入 + ReplyControlPacket + facts + must_not_do`。
+
 构建 smoke case：
 
 ```powershell
@@ -136,6 +151,30 @@ python tools/build_isolated_surface_continuity_cases.py `
 - `72` 个 turn
 - prompt/scorer strict: `72/72`
 - errors: `0`
+
+构建 36 轮 long case：
+
+```powershell
+python tools/build_isolated_surface_continuity_cases.py `
+  --suite long `
+  --out artifacts/isolated_surface_harness/continuity_long_36_20260511 `
+  --force
+```
+
+当前 36-turn long baseline：
+
+- case: `artifacts/isolated_surface_harness/continuity_long_36_20260511`
+- dialogue: `1`
+- turns: `36`
+- max_turns_per_dialogue: `36`
+- prompt/scorer strict: `36/36`
+- live run: `artifacts/isolated_surface_harness/continuity_long_36_live_final_zh_20260511`
+- live result: `36/36` turn pass，`1/1` dialogue pass
+- low score: `0`
+- hard fail: `0`
+- control violation: `0`
+- avg selected score: `87.956`
+- quality report watch rows: `5`
 
 校验 prompt 和离线候选 rerank：
 
