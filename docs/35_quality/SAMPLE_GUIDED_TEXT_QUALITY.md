@@ -49,6 +49,17 @@ Hard gate 只处理绝对不可发送的问题：
 - `接着说`、`听着呢`、`多说几个字`、`说点好听的`、`就这一个...` 这类有推进或轻吐槽的短句获得 `short_ack_charm` 加成。
 - rerank 应让 bland pass 输给有推进、有反应、有一点角色味的候选。
 
+### Cluster Soft Penalties
+
+近期 100 条日常 goal live retry 暴露的坏味道按 cluster 收束为 soft penalty：
+
+- `CHEAP_WAVE_PUNCTUATION`：`~` / `～` 不再算“有纹理”，会压低 `catchiness`、`character_freshness`、`line_rhythm` 和 `naturalness`；生成提示也要求角色感不要靠波浪号。
+- `WHAT_DOING_ATTENTION_WAIT`：只在 `what_doing` 场景扣“没干嘛，就等你找我聊天”这类注意力债务，不把 `找我`、`等你` 全局 hard ban。
+- `PRESENCE_ATTENTION_DEBT`：只在 `presence` 场景扣“等你半天/终于来找我”，让 `在吗` 回到“我在/看见了”。
+- `MEAL_SHARE_SCOLDING_OR_PUSHY`：只在 `meal_share` 场景扣“谁让你吃太急/活该/揉肚子”这类训人或越界照顾。
+- `QUALITY_SOFT_TRAILING_INCOMPLETE_QUESTION`：尾巴像问题但没收句的表层完整性问题会从 weak pass 压到 retry。
+- 写作/技术场景的 usefulness 锚点包含 `内容`、`要求`、`题目`、`丢来`，避免把“我来写，内容给我”误判为低技术帮助。
+
 ## Sample Bank
 
 `PositiveStyleSample` 新增样本字段：
@@ -64,12 +75,13 @@ Hard gate 只处理绝对不可发送的问题：
 当前主链是隔离表层文本链，不再以 `ChatKernelV2` 作为文本质量验收对象：
 
 1. `build_isolated_surface_messages()` 只接收 `Soul.md`、当前用户输入、`ReplyControlPacket`、必要事实和 `must_not_do`。
-2. 模型一次输出 3 到 5 个候选，真实生成层不能读取原始历史、原始记忆、器官族原文、工具候选或未压缩 RAG。
-3. `parse_surface_candidates()` 最多解析 5 个候选。
-4. 每个候选进入 `score_isolated_surface_candidates()`，内部执行 minimal hard gate 与样本引导 soft scorer。
-5. `select_best_isolated_candidate()` 按 passed、hard gate、control violations、总分和长度 rerank。
-6. failure-only retry 只重跑失败或弱通过 case；merge 时必须证明 retry 候选在通过状态、hard gate、control violations 或分数上更好。
-7. 最终只做 minimal repair，不用整段重写或 canned fallback 伪装质量提升。
+2. `build_style_reference_query()` 以 `TurnSurfaceContract.scene_id` 为准，而不是只看上游 `task_mode`，例如 `task_mode=happy` 但用户说“终于跑通了”时切到 `good_news`。
+3. 模型一次输出 3 到 5 个候选，真实生成层不能读取原始历史、原始记忆、器官族原文、工具候选或未压缩 RAG。
+4. `parse_surface_candidates()` 最多解析 5 个候选。
+5. 每个候选进入 `score_isolated_surface_candidates()`，内部执行 minimal hard gate 与样本引导 soft scorer。
+6. `select_best_isolated_candidate()` 按 passed、hard gate、control violations、总分和长度 rerank。
+7. failure-only retry 只重跑失败或弱通过 case；merge 时必须证明 retry 候选在通过状态、hard gate、control violations 或分数上更好。
+8. 最终只做 minimal repair，不用整段重写或 canned fallback 伪装质量提升。
 
 ## Test Migration
 

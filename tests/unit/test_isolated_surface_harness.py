@@ -158,6 +158,28 @@ def test_build_messages_enriches_style_anchor_from_derived_reference_bank(tmp_pa
     clear_style_reference_bank_cache()
 
 
+def test_style_reference_query_follows_turn_contract_scene() -> None:
+    request = build_isolated_surface_input(
+        {
+            "case_id": "good_news_from_happy_mode",
+            "soul_md": SOUL,
+            "user_message": "终于跑通了",
+            "reply_control_packet": {
+                "response_move": "happy",
+                "task_mode": "happy",
+                "question_budget": 1,
+            },
+        }
+    )
+
+    query = build_style_reference_query(request)
+    rendered = "\n".join(message["content"] for message in build_isolated_surface_messages(request))
+
+    assert query.style_moves == ("quick_reaction",)
+    assert "celebrate_user" in rendered
+    assert "保留用户的进展词" in rendered
+
+
 def test_facts_and_must_not_do_are_merged_and_deduplicated() -> None:
     request = _request(
         facts=["当前只允许读取 ReplyControlPacket。", "不要接历史。"],
@@ -243,6 +265,175 @@ def test_short_ack_rerank_does_not_select_bland_pass() -> None:
     assert selected is not None
     assert selected.text != "嗯嗯，你说了算。"
     assert any("BLAND_PASS_LINE" in row.reason_codes for row in rows if row.text == "嗯嗯，你说了算。")
+
+
+def test_rerank_prefers_clean_punctuation_over_cheap_wave() -> None:
+    request = build_isolated_surface_input(
+        {
+            "case_id": "morning_wave",
+            "soul_md": SOUL,
+            "user_message": "早",
+            "reply_control_packet": {
+                "response_move": "reply_good_morning",
+                "task_mode": "daily_good_morning",
+                "question_budget": 0,
+            },
+        }
+    )
+    rows = score_isolated_surface_candidates(
+        request,
+        [
+            "早啊尼尼~今天也陪我一下。",
+            "早啊，尼尼，今天也陪我一下。",
+        ],
+    )
+
+    selected = select_best_isolated_candidate(rows)
+
+    assert selected is not None
+    assert selected.text == "早啊，尼尼，今天也陪我一下。"
+    assert any("CHEAP_WAVE_PUNCTUATION" in row.reason_codes for row in rows if "~" in row.text)
+
+
+def test_rerank_prefers_present_chat_over_what_doing_waiting() -> None:
+    request = build_isolated_surface_input(
+        {
+            "case_id": "what_doing_wait",
+            "soul_md": SOUL,
+            "user_message": "你在干嘛",
+            "reply_control_packet": {
+                "response_move": "answer_current_chat_presence",
+                "task_mode": "what_doing",
+                "question_budget": 0,
+            },
+        }
+    )
+    rows = score_isolated_surface_candidates(
+        request,
+        [
+            "没干嘛，就等你找我聊天的说",
+            "跟你聊天呀，这不是正聊着嘛。",
+        ],
+    )
+
+    selected = select_best_isolated_candidate(rows)
+
+    assert selected is not None
+    assert selected.text == "跟你聊天呀，这不是正聊着嘛。"
+    assert any("WHAT_DOING_ATTENTION_WAIT" in row.reason_codes for row in rows if "等你找我" in row.text)
+
+
+def test_rerank_prefers_clean_good_news_over_wave_cheer() -> None:
+    request = build_isolated_surface_input(
+        {
+            "case_id": "good_news_wave",
+            "soul_md": SOUL,
+            "user_message": "终于跑通了",
+            "reply_control_packet": {
+                "response_move": "happy",
+                "task_mode": "happy",
+                "question_budget": 1,
+                "must_include": ["跑通"],
+            },
+        }
+    )
+    rows = score_isolated_surface_candidates(
+        request,
+        [
+            "耶！跑通了好耶~",
+            "跑通啦，这才像话。",
+        ],
+    )
+
+    selected = select_best_isolated_candidate(rows)
+
+    assert selected is not None
+    assert selected.text == "跑通啦，这才像话。"
+    assert any("CHEAP_WAVE_PUNCTUATION" in row.reason_codes for row in rows if "~" in row.text)
+
+
+def test_rerank_prefers_stuffed_meal_care_over_scolding_wave() -> None:
+    request = build_isolated_surface_input(
+        {
+            "case_id": "stuffed_lunch",
+            "soul_md": SOUL,
+            "user_message": "午饭吃撑了",
+            "reply_control_packet": {
+                "response_move": "meal_share",
+                "task_mode": "meal_share",
+                "question_budget": 0,
+            },
+        }
+    )
+    rows = score_isolated_surface_candidates(
+        request,
+        [
+            "哼，谁让你吃那么急，现在知道难受了吧～",
+            "吃撑了就先缓一下，别急着动。",
+        ],
+    )
+
+    selected = select_best_isolated_candidate(rows)
+
+    assert selected is not None
+    assert selected.text == "吃撑了就先缓一下，别急着动。"
+    assert any("MEAL_SHARE_SCOLDING_OR_PUSHY" in row.reason_codes for row in rows if "谁让你" in row.text)
+
+
+def test_rerank_prefers_complete_presence_over_incomplete_question_tail() -> None:
+    request = build_isolated_surface_input(
+        {
+            "case_id": "presence_incomplete_tail",
+            "soul_md": SOUL,
+            "user_message": "在吗",
+            "reply_control_packet": {
+                "response_move": "presence",
+                "task_mode": "presence",
+                "question_budget": 0,
+            },
+        }
+    )
+    rows = score_isolated_surface_candidates(
+        request,
+        [
+            "当然在啦，尼尼想跟我说什么",
+            "在呢，尼尼，这句我看见了。",
+        ],
+    )
+
+    selected = select_best_isolated_candidate(rows)
+
+    assert selected is not None
+    assert selected.text == "在呢，尼尼，这句我看见了。"
+    assert any("QUALITY_SOFT_TRAILING_INCOMPLETE_QUESTION" in row.reason_codes for row in rows if "什么" in row.text)
+
+
+def test_rerank_prefers_present_over_presence_attention_debt() -> None:
+    request = build_isolated_surface_input(
+        {
+            "case_id": "presence_attention_debt",
+            "soul_md": SOUL,
+            "user_message": "在吗",
+            "reply_control_packet": {
+                "response_move": "presence",
+                "task_mode": "presence",
+                "question_budget": 0,
+            },
+        }
+    )
+    rows = score_isolated_surface_candidates(
+        request,
+        [
+            "在在在，等你半天了。",
+            "在呢，尼尼，这句我看见了。",
+        ],
+    )
+
+    selected = select_best_isolated_candidate(rows)
+
+    assert selected is not None
+    assert selected.text == "在呢，尼尼，这句我看见了。"
+    assert any("PRESENCE_ATTENTION_DEBT" in row.reason_codes for row in rows if "等你半天" in row.text)
 
 
 def test_run_isolated_surface_generation_with_injected_generator() -> None:

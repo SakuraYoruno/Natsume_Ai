@@ -200,6 +200,10 @@ _TECH_HELPFUL_ANCHORS = (
     "报错",
     "截图",
     "材料",
+    "内容",
+    "要求",
+    "题目",
+    "丢来",
     "红字",
 )
 _GALGAME_MARKERS = (
@@ -261,6 +265,11 @@ _BLAND_PASS_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("generic_ack", re.compile(r"^(?:嗯嗯|嗯|哦|好|好的|知道了|行吧)[。.!！?？…～~]*$")),
     ("flat_companion", re.compile(r"(?:知道了.{0,4}陪你待着|那我陪你待着|你自己待会|自己待会)")),
 )
+_WHAT_DOING_ATTENTION_WAIT_RE = re.compile(
+    r"(?:(?:没干嘛|没干什么|没做什么).{0,12}(?:等你|找我)|(?:等着你|等你来|等你找|来找我|找我聊天|找我说话).{0,8}(?:聊天|说话|开口)?)"
+)
+_PRESENCE_ATTENTION_DEBT_RE = re.compile(r"(?:等你半天|等你好久|等你很久|终于.{0,6}(?:来|找|出现)|才来|来找我啦|出现啦)")
+_MEAL_SHARE_SCOLDING_RE = re.compile(r"(?:活该|谁让你|现在知道|叫你.{0,8}不听|吃那么急|吃太急|揉肚子)")
 _SHORT_ACK_CHARM_MARKERS = (
     "接着说",
     "继续说",
@@ -325,10 +334,15 @@ _SCENE_GROUNDING_ANCHORS: dict[str, tuple[str, ...]] = {
 _SOFT_REASON_SCORE_PENALTIES = {
     "STYLE_TEMPLATE_DENSITY": 3.5,
     "STOCK_OPENING_TEMPLATE": 2.5,
+    "CHEAP_WAVE_PUNCTUATION": 5.0,
+    "WHAT_DOING_ATTENTION_WAIT": 4.0,
+    "PRESENCE_ATTENTION_DEBT": 4.0,
+    "MEAL_SHARE_SCOLDING_OR_PUSHY": 3.5,
     "IMPLIED_FACT_RISK": 4.5,
     "WEAK_SCENE_GROUNDING": 4.0,
     "FLAT_GENERIC_LINE": 4.0,
     "BLAND_PASS_LINE": 6.0,
+    "QUALITY_SOFT_TRAILING_INCOMPLETE_QUESTION": 4.0,
     "LOW_CATCHINESS": 2.0,
     "LINE_RHYTHM_FLAT": 2.5,
 }
@@ -494,7 +508,7 @@ def _line_break_count(text: str) -> int:
 
 
 def _has_turn_or_texture(text: str) -> bool:
-    return bool(_contains_any(text, _CATCHY_TURN_MARKERS) or re.search(r"(.)\1|[！？…～~]", text))
+    return bool(_contains_any(text, _CATCHY_TURN_MARKERS) or re.search(r"(.)\1|[！？…]", text))
 
 
 def _bland_pass_hits(text: str, *, scene_id: str) -> list[str]:
@@ -599,6 +613,25 @@ def score_sample_guided_text(
         _drop(dimensions, "line_rhythm", 6)
         reasons.append("BLAND_PASS_LINE")
         penalties.append("catchiness:bland_pass:" + " / ".join(bland_hits[:4]))
+    if scene_id == "what_doing" and _WHAT_DOING_ATTENTION_WAIT_RE.search(normalized):
+        _drop(dimensions, "distance_control", 24)
+        _drop(dimensions, "context_fit", 14)
+        _drop(dimensions, "catchiness", 10)
+        reasons.append("WHAT_DOING_ATTENTION_WAIT")
+        penalties.append("distance_control:what_doing_waits_for_user")
+    if scene_id == "presence" and _PRESENCE_ATTENTION_DEBT_RE.search(normalized):
+        _drop(dimensions, "distance_control", 24)
+        _drop(dimensions, "context_fit", 12)
+        _drop(dimensions, "catchiness", 8)
+        reasons.append("PRESENCE_ATTENTION_DEBT")
+        penalties.append("distance_control:presence_attention_debt")
+    if scene_id == "meal_share" and _MEAL_SHARE_SCOLDING_RE.search(normalized):
+        _drop(dimensions, "context_fit", 16)
+        _drop(dimensions, "distance_control", 12)
+        _drop(dimensions, "emotional_containment", 10)
+        _drop(dimensions, "naturalness", 6)
+        reasons.append("MEAL_SHARE_SCOLDING_OR_PUSHY")
+        penalties.append("context_fit:meal_share_scolding_or_pushy")
     if _FLAT_GENERIC_RE.match(normalized):
         _drop(dimensions, "catchiness", 24)
         _drop(dimensions, "character_freshness", 12)
@@ -728,6 +761,14 @@ def score_sample_guided_text(
             penalties.append("emotional_containment:escalation")
 
     if quality is not None:
+        forbidden_hit_set = set(getattr(quality, "forbidden_hits", ()) or ())
+        if "cheap_wave_punctuation" in forbidden_hit_set or "~" in normalized or "～" in normalized:
+            _drop(dimensions, "catchiness", 18)
+            _drop(dimensions, "character_freshness", 12)
+            _drop(dimensions, "line_rhythm", 8)
+            _drop(dimensions, "naturalness", 6)
+            reasons.append("CHEAP_WAVE_PUNCTUATION")
+            penalties.append("surface:cheap_wave_punctuation")
         soft_quality_codes = [
             code for code in quality.reason_codes or () if code not in _ABSOLUTE_HARD_QUALITY_CODES
         ]

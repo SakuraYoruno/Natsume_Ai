@@ -173,3 +173,97 @@ def test_short_ack_bland_pass_loses_to_charm_floor() -> None:
     assert grounded.score > bland.score
     assert teasing.score > bland.score
     assert "CONTEXT_SURFACE_PENALTY" not in teasing.reason_codes
+
+
+def test_cheap_wave_punctuation_is_soft_cluster_penalty() -> None:
+    contract = build_galgame_text_contract(user_message="早", scene_id="daily_good_morning")
+    gate = get_text_quality_gate()
+    wave_quality = gate.validate(text="早啊尼尼~今天也陪我一下。", render_profile="zh_text")
+    clean_quality = gate.validate(text="早啊，尼尼，今天也陪我一下。", render_profile="zh_text")
+
+    wave = score_sample_guided_text(text=wave_quality.normalized_text, contract=contract, quality=wave_quality)
+    clean = score_sample_guided_text(text=clean_quality.normalized_text, contract=contract, quality=clean_quality)
+
+    assert not wave.hard_fail
+    assert "CHEAP_WAVE_PUNCTUATION" in wave.reason_codes
+    assert wave.score < clean.score
+    assert wave.dimensions["catchiness"] < clean.dimensions["catchiness"]
+
+
+def test_what_doing_penalizes_waiting_for_user_attention() -> None:
+    contract = build_galgame_text_contract(user_message="你在干嘛", scene_id="what_doing")
+
+    waiting = score_sample_guided_text(text="没干嘛，就等你找我聊天的说", contract=contract)
+    present = score_sample_guided_text(text="跟你聊天呀，这不是正聊着嘛。", contract=contract)
+
+    assert "WHAT_DOING_ATTENTION_WAIT" in waiting.reason_codes
+    assert waiting.score < 80
+    assert present.score > waiting.score
+    assert "WHAT_DOING_ATTENTION_WAIT" not in present.reason_codes
+
+
+def test_good_news_clean_progress_beats_wave_cheer() -> None:
+    contract = build_galgame_text_contract(user_message="终于跑通了", scene_id="happy")
+    gate = get_text_quality_gate()
+    wave_quality = gate.validate(text="耶！跑通了好耶~", render_profile="zh_text")
+    clean_quality = gate.validate(text="跑通啦，这才像话。", render_profile="zh_text")
+
+    wave = score_sample_guided_text(text=wave_quality.normalized_text, contract=contract, quality=wave_quality)
+    clean = score_sample_guided_text(text=clean_quality.normalized_text, contract=contract, quality=clean_quality)
+
+    assert contract.scene_id == "good_news"
+    assert "CHEAP_WAVE_PUNCTUATION" in wave.reason_codes
+    assert clean.score >= 83
+    assert clean.score > wave.score
+
+
+def test_meal_share_penalizes_scolding_when_user_is_stuffed() -> None:
+    contract = build_galgame_text_contract(user_message="午饭吃撑了", scene_id="meal_share")
+
+    scolding = score_sample_guided_text(text="哼，谁让你吃那么急，现在知道难受了吧。", contract=contract)
+    gentle = score_sample_guided_text(text="吃撑了就先缓一下，别急着动。", contract=contract)
+
+    assert "MEAL_SHARE_SCOLDING_OR_PUSHY" in scolding.reason_codes
+    assert scolding.score < 80
+    assert gentle.score >= 83
+    assert gentle.score > scolding.score
+
+
+def test_trailing_incomplete_presence_question_is_not_weak_pass() -> None:
+    contract = build_galgame_text_contract(user_message="在吗", scene_id="presence")
+    gate = get_text_quality_gate()
+    incomplete_quality = gate.validate(text="当然在啦，尼尼想跟我说什么", render_profile="zh_text")
+    clean_quality = gate.validate(text="在呢，尼尼，这句我看见了。", render_profile="zh_text")
+
+    incomplete = score_sample_guided_text(
+        text=incomplete_quality.normalized_text,
+        contract=contract,
+        quality=incomplete_quality,
+    )
+    clean = score_sample_guided_text(text=clean_quality.normalized_text, contract=contract, quality=clean_quality)
+
+    assert "QUALITY_SOFT_TRAILING_INCOMPLETE_QUESTION" in incomplete.reason_codes
+    assert incomplete.score < 80
+    assert clean.score >= 83
+    assert clean.score > incomplete.score
+
+
+def test_presence_penalizes_attention_debt() -> None:
+    contract = build_galgame_text_contract(user_message="在吗", scene_id="presence")
+
+    debt = score_sample_guided_text(text="在在在，等你半天了。", contract=contract)
+    clean = score_sample_guided_text(text="在呢，尼尼，这句我看见了。", contract=contract)
+
+    assert "PRESENCE_ATTENTION_DEBT" in debt.reason_codes
+    assert debt.score < 80
+    assert clean.score > debt.score
+
+
+def test_write_takeover_content_anchor_counts_as_helpful() -> None:
+    contract = build_galgame_text_contract(user_message="帮我写一下这个", scene_id="daily_chat")
+
+    scored = score_sample_guided_text(text="放心啦，我来写。尼尼跟我说说内容就行，剩下的交给我。", contract=contract)
+
+    assert contract.scene_id == "write_takeover"
+    assert "LOW_TECHNICAL_HELPFULNESS" not in scored.reason_codes
+    assert scored.score >= 83

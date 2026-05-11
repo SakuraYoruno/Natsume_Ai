@@ -150,6 +150,8 @@ def build_galgame_text_contract(
             required_any=(("在",),),
             forbidden_surface=(
                 "什么事",
+                "想跟我说什么",
+                "想说什么",
                 "怎么了",
                 "怎么啦",
                 "干嘛",
@@ -171,9 +173,17 @@ def build_galgame_text_contract(
                 "等你开口",
                 "等了好一会儿",
                 "不打算理我",
+                "你才来",
+                "等你半天",
+                "等你好久",
+                "终于来",
+                "出现啦",
+                "终于来找我",
+                "来找我啦",
             ),
             max_questions=0,
             target_min_chars=8,
+            notes=("只确认在场和看见这一句，不追问想说什么，不说等了半天/终于来了，也不用波浪号。",),
         )
     if any(token in text for token in ("你好烦", "你烦不烦", "别烦我")):
         return _contract(
@@ -489,6 +499,7 @@ def build_galgame_text_contract(
         return _contract(
             scene_id="good_news",
             response_move="celebrate_user",
+            required_any=(("跑通", "搞定", "成功"),),
             forbidden_surface=(
                 "什么好事",
                 "发生什么",
@@ -502,6 +513,7 @@ def build_galgame_text_contract(
                 "说说怎么",
             ),
             max_questions=1,
+            notes=("保留用户的进展词，例如跑通/搞定；开心但不要只用廉价欢呼或波浪号收尾。",),
         )
     if scene == "happy" or "心情不错" in text:
         return _contract(
@@ -524,6 +536,7 @@ def build_galgame_text_contract(
         return _contract(
             scene_id="meal_share",
             response_move="casual_meal_share",
+            required_any=(("吃", "饭", "饱", "撑", "缓"),),
             forbidden_surface=(
                 "记得叫",
                 "算你识相",
@@ -544,10 +557,15 @@ def build_galgame_text_contract(
                 "吃饱了没",
                 "吃两口",
                 "光吃两口",
+                "活该",
+                "谁让你吃",
+                "吃那么急",
+                "吃太急",
+                "揉肚子",
             ),
             max_questions=0,
             target_max_chars=36,
-            notes=("把吃饭分享当生活小句接住，不追加菜单追问。",),
+            notes=("把吃饭分享当生活小句接住；如果用户说吃撑了，就让他先缓一下，不训人也不用波浪号。",),
         )
     if scene == "small_failure" or social_kind == "small_failure_hold" or any(token in text for token in ("弄砸", "搞砸", "失败")):
         return _contract(
@@ -844,13 +862,19 @@ def build_galgame_text_contract(
                 "聊两句",
                 "等你问",
                 "等你问我",
+                "等你找我",
+                "等你来找我",
+                "等你找",
+                "来找我",
+                "找我聊天",
+                "找我说话",
                 "这句话",
                 "猜中",
                 "被我猜中",
             ),
             max_questions=1,
             target_max_chars=36,
-            notes=("回应正在聊天这件事，不编现实动作。",),
+            notes=("回应正在聊天这件事，不编现实动作，也不要说一直等他来找你。",),
         )
     if scene == "write_takeover" or any(token in text for token in ("帮我写", "写一下这个", "帮我改写")):
         return _contract(

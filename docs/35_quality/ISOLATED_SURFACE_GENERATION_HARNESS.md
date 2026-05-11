@@ -61,6 +61,8 @@ class ReplyControlPacket(BaseModel):
    - `ReplyControlPacket.style_anchor` 会自动合并原作派生风格锚点。
    - 同步放入由当前用户输入 + `ReplyControlPacket.task_mode` 派生的 `TurnSurfaceContract`，只包含 response_move、required_any、问句预算、长度和 notes；不放 forbidden_surface 或 raw 上下文。
    - `TurnSurfaceContract` 允许当前用户文本纠正过粗或错误的 `task_mode`，例如 `你烦不烦` 优先落到 `annoying_tease`，`我刚忙完` 优先落到 `busy_done`。
+   - style reference query 以 `TurnSurfaceContract.scene_id` 为准，避免上游粗粒度 `task_mode` 把 `good_news`、`write_takeover` 等场景压回泛 daily/happy。
+   - 生成提示明确要求不要靠 `~` / `～` 当可爱语气，角色感必须来自用词、转折和节奏。
 4. `run_isolated_surface_generation(...)`
    - 只接收一个注入的 `generate(messages)` 函数。
    - harness 不知道 runtime state，也不从全局状态取上下文。
@@ -196,8 +198,8 @@ python tools/retry_isolated_surface_failures.py `
 
 ```powershell
 python tools/quality_cluster_report.py `
-  --scores artifacts/isolated_surface_harness/daily_goal_100_retry_charm_live_20260511/merged_scores.jsonl `
-  --out artifacts/isolated_surface_harness/daily_goal_100_retry_charm_live_20260511/quality_clusters `
+  --scores artifacts/isolated_surface_harness/daily_goal_100_retry_wave_whatdoing_goodnews_meal_presence_write_live_20260511/merged_scores.jsonl `
+  --out artifacts/isolated_surface_harness/daily_goal_100_retry_wave_whatdoing_goodnews_meal_presence_write_live_20260511/quality_clusters `
   --min-cluster-count 3
 ```
 
@@ -217,6 +219,26 @@ python tools/quality_cluster_report.py `
 - 只处理 cluster，不处理孤例。
 - 单个输出不能直接变成 hard forbidden 或专用 regex。
 - cluster 修复必须说明它泛化到哪些场景，并保留 soft scoring 优先。
+
+最新 100 条日常 goal live retry 基线：
+
+- run: `artifacts/isolated_surface_harness/daily_goal_100_retry_wave_whatdoing_goodnews_meal_presence_write_live_20260511`
+- cases: `100`
+- retry cases: `15`
+- pass: `100/100`
+- low score: `0`
+- weak pass: `0`
+- hard fail: `0`
+- avg selected score: `87.487`
+
+本轮修复的 cluster：
+
+- cheap wave punctuation：生成侧降噪 + scorer soft penalty。
+- `what_doing` attention wait：问“在干嘛”时不说一直等用户来找。
+- `presence` attention debt / incomplete question tail：确认在场，不追问需求或抱怨等待。
+- `good_news` scene grounding：`happy` 中出现“跑通/搞定”时使用 `good_news` contract。
+- `meal_share` stuffed scolding：吃撑时接“先缓一下”，不训人、不推越界身体照顾。
+- write takeover usefulness：写作任务的 `内容/要求/题目/丢来` 计入 technical helpfulness。
 
 ## Migration Rule
 

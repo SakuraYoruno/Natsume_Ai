@@ -310,7 +310,12 @@ def merged_must_not_do(request: IsolatedSurfaceInput) -> list[str]:
 
 
 def build_style_reference_query(request: IsolatedSurfaceInput, *, limit: int = 5) -> StyleReferenceQuery:
-    scene = _clean_text(request.control.task_mode or request.control.response_move) or "default"
+    contract = build_galgame_text_contract(
+        user_message=request.user_message,
+        facts={},
+        scene_id=request.control.task_mode,
+    )
+    scene = _clean_text(contract.scene_id or request.control.task_mode or request.control.response_move) or "default"
     mapped = _SCENE_STYLE_QUERY.get(scene) or _SCENE_STYLE_QUERY.get(request.control.response_move) or _SCENE_STYLE_QUERY["default"]
     return StyleReferenceQuery(
         lang="zh",
@@ -406,6 +411,7 @@ def build_isolated_surface_messages(
             "输出必须是 JSON 对象：{\"candidates\":[\"候选1\",\"候选2\",\"候选3\"]}。",
             "给 3 到 5 个候选。每个候选必须是用户可见文本，不要 Markdown、括号动作、字段名或解释。",
             no_question_line,
+            "避免用 ~ 或 ～ 当可爱语气；角色感靠用词、转折和节奏，不靠廉价符号。",
             "每个候选都必须完成 TurnSurfaceContract.response_move；不要只写空泛支持、空泛安慰或单纯撒娇。",
             "",
             "## Soul.md",
