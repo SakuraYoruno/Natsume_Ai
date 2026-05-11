@@ -152,6 +152,31 @@ isolated surface generator
 
 这里的 `recent_turns` 是上游压缩器输入，只用于生成 `上一轮摘要`、`当前主题`、`未完成话口` 等短 facts。`build_surface_input_from_three_layer_context(...)` 构造最终请求时只传 `current_user_message` 和压缩后的 `ReplyControlPacket`，不会把 `recent_turns`、`mid_term_summary` 字段名或原始历史文本传给 `build_isolated_surface_messages()`。
 
+三层压缩 surface case：
+
+```powershell
+python tools/build_three_layer_surface_cases.py `
+  --out artifacts/isolated_surface_harness/three_layer_surface_20260511 `
+  --force
+
+python tools/isolated_surface_harness.py `
+  --cases artifacts/isolated_surface_harness/three_layer_surface_20260511/cases.jsonl `
+  --out artifacts/isolated_surface_harness/three_layer_surface_20260511/prompt_build `
+  --strict
+```
+
+当前三层压缩 baseline：
+
+- cases: `8`
+- max facts per case: `6`
+- raw context crosses surface: `false`
+- prompt/scorer strict: `8/8`
+- errors: `0`
+- live run: `artifacts/isolated_surface_harness/three_layer_surface_live_20260511`
+- live result: `8/8`
+- live avg selected score: `88.854`
+- live low score / hard fail / control violation: `0 / 0 / 0`
+
 构建 smoke case：
 
 ```powershell
