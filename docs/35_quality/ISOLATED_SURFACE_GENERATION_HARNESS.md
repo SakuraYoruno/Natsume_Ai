@@ -76,6 +76,61 @@ class ReplyControlPacket(BaseModel):
 7. `select_best_isolated_candidate(...)`
    - 在 hard gate 通过后，优先选无控制面违约且分数最高的候选。
 
+## Continuity Harness
+
+500 条日常 goal 的 `new_500` 已经跑到 `500/500`，低分 `0`，hard fail `0`。下一步连续对话仍然不接原始历史，而是先验证“压缩连续性输入”能不能稳住表层文本。
+
+实现位置：
+
+- `host_brain/persona/isolated_surface_continuity.py`
+- `tools/build_isolated_surface_continuity_cases.py`
+- `tools/isolated_surface_continuity_harness.py`
+
+连续对话 case 的外层只有 `case_id` 和 `turns`。每个 turn 仍然只允许：
+
+- 当前 `user_message`
+- `ReplyControlPacket`
+- `facts`
+- `must_not_do`
+
+上一轮信息必须被上游压缩成事实，例如：
+
+```text
+上一轮摘要：尼尼说这版终于跑通了，回复已接住进展。
+连续事实：本轮的“厉害吧”指刚才跑通。
+```
+
+禁止把以下内容放进连续对话输入：
+
+- `conversation_history` / `history_turns` / `messages`
+- 原始助手回复列表
+- 原始长期记忆
+- 器官族原始输出
+- 工具候选列表
+- 未压缩 RAG 文档
+- 模块自然语言建议
+
+`candidates`、`model_output`、`candidate_payload` 只允许作为离线评分 artifact 字段出现，永远不会进入 `build_isolated_surface_messages()`。
+
+构建 smoke case：
+
+```powershell
+python tools/build_isolated_surface_continuity_cases.py `
+  --out artifacts/isolated_surface_harness/continuity_smoke_20260511 `
+  --force
+```
+
+校验 prompt 和离线候选 rerank：
+
+```powershell
+python tools/isolated_surface_continuity_harness.py `
+  --cases artifacts/isolated_surface_harness/continuity_smoke_20260511/cases.jsonl `
+  --out artifacts/isolated_surface_harness/continuity_smoke_20260511/prompt_build `
+  --strict
+```
+
+这个 harness 不是 runtime 集成。它只回答一个问题：在没有原始历史、没有状态树、没有器官族自然语言建议的情况下，压缩后的连续性事实能不能让最终表层生成自然接住上一轮。
+
 ## Galgame Soft Scoring
 
 `sample_guided_text_scorer` 的新增维度只做软评分，不把口癖或上下文相关词全局硬禁。

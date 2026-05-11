@@ -123,6 +123,17 @@ Hard gate 只处理绝对不可发送的问题：
 
 `good_news_proud` 现在是独立小场景：用户既表达进展，又在等一句夸时，contract 要求候选同时落到“进展词”和“认可/拌嘴词”。这次没有把坏句写成专用 regex，而是新增 sample bank、scene grounding 维度和 style query 映射；`收尾/结束/完成/弄成/做成` 也作为泛化进展词进入 good_news。
 
+## Continuity Step
+
+文本质量通过后，连续对话的第一步仍然走隔离表层链，而不是回到旧 runtime 主链或 `ChatKernelV2`。新增 continuity harness 的原则：
+
+- 多轮 case 只是一组 turn；每个 turn 进入最终生成层时仍被降成 `Soul.md + 当前用户输入 + ReplyControlPacket + facts + must_not_do`。
+- 上一轮只能以压缩事实进入，例如“上一轮摘要：尼尼说这版终于跑通了，回复已接住进展。”
+- 原始历史、原始助手回复、长期记忆、器官族输出、工具候选、RAG 原文和自然语言建议仍然禁止进入 prompt。
+- continuity case 里的 `candidates` 只用于离线 scorer/rerank，不属于生成输入。
+
+当前 smoke 覆盖：好消息后追夸、建议后要下一步、坏心情承接、在场到忙完回来、嫌烦后的收声修复、身份问答后的追问。
+
 ## Test Migration
 
 保留并改写的测试：
