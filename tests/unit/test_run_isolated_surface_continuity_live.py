@@ -64,7 +64,7 @@ def test_summarize_counts_dialogue_pass_only_after_all_turns_complete(tmp_path) 
         completed=2,
         results=[
             {"case_id": "dialogue_one", "ok": True, "selected": selected, "latency_ms": 10},
-            {"case_id": "dialogue_one", "ok": True, "selected": selected, "latency_ms": 12},
+            {"case_id": "dialogue_one", "ok": True, "selected": selected, "latency_ms": 12, "repair_attempted": True},
         ],
         started=started,
         provider="fake",
@@ -77,3 +77,4 @@ def test_summarize_counts_dialogue_pass_only_after_all_turns_complete(tmp_path) 
     assert partial["dialogue_pass_count"] == 0
     assert complete["dialogue_pass_count"] == 1
     assert complete["pass_count"] == 2
+    assert complete["repair_attempt_count"] == 1

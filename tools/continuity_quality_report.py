@@ -16,7 +16,8 @@ if str(ROOT) not in sys.path:
 _CONSTRAINT_LEAK_MARKERS = (
     "不能问问题",
     "不要问",
-    "规则",
+    "系统规则",
+    "规则要求",
     "系统",
     "候选",
     "must_include",
@@ -27,7 +28,6 @@ _CONSTRAINT_LEAK_MARKERS = (
 )
 _STIFF_MARKERS = (
     "具体点就是",
-    "直接贴",
     "先发我",
     "我帮你看看嘛",
     "听好了",
@@ -143,6 +143,23 @@ def build_report(rows: list[dict[str, Any]], *, weak_threshold: float = 83.0) ->
     }
 
 
+def strict_failed(
+    report: Mapping[str, Any],
+    *,
+    min_pass_rate: float = 1.0,
+    min_dialogue_pass_rate: float = 1.0,
+    max_watch_rows: int = 0,
+) -> bool:
+    pass_rate = float(report.get("pass_rate") or 0.0)
+    dialogue_pass_rate = float(report.get("dialogue_pass_rate") or 0.0)
+    watch_rows = list(report.get("watch_rows") or [])
+    return (
+        pass_rate < float(min_pass_rate)
+        or dialogue_pass_rate < float(min_dialogue_pass_rate)
+        or len(watch_rows) > int(max_watch_rows)
+    )
+
+
 def render_markdown(report: Mapping[str, Any], *, source: Path) -> str:
     lines = [
         "# Continuity Quality Report",
@@ -190,6 +207,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--scores", required=True, type=Path, help="live_scores.jsonl from continuity live runner.")
     parser.add_argument("--out", required=True, type=Path, help="Output directory.")
     parser.add_argument("--weak-threshold", type=float, default=83.0)
+    parser.add_argument("--strict", action="store_true", help="Return non-zero when continuity quality gates are not met.")
+    parser.add_argument("--min-pass-rate", type=float, default=1.0)
+    parser.add_argument("--min-dialogue-pass-rate", type=float, default=1.0)
+    parser.add_argument("--max-watch-rows", type=int, default=0)
     args = parser.parse_args(argv)
 
     args.out.mkdir(parents=True, exist_ok=True)
@@ -201,6 +222,13 @@ def main(argv: list[str] | None = None) -> int:
         newline="\n",
     )
     print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True))
+    if args.strict and strict_failed(
+        report,
+        min_pass_rate=float(args.min_pass_rate),
+        min_dialogue_pass_rate=float(args.min_dialogue_pass_rate),
+        max_watch_rows=int(args.max_watch_rows),
+    ):
+        return 2
     return 0
 
 

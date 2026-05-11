@@ -219,6 +219,23 @@ _MEMORY_FACT_PREFIXES = (
 _CJK_SEQUENCE_RE = re.compile(r"[\u4e00-\u9fff]{2,}")
 _ASCII_TERM_RE = re.compile(r"[A-Za-z][A-Za-z0-9_+.-]{1,}")
 _FACT_SPLIT_RE = re.compile(r"[，。；、,.!?！？;:\s]+")
+_RAW_CONTEXT_BACKFILL_RE = re.compile(
+    r"(?:完整|全部|所有).{0,8}(?:历史|聊天记录|对话记录|聊天原文|对话原文|原始记录)"
+    r"|(?:历史|聊天记录|对话记录|原始历史).{0,8}(?:发|贴|给|提供|丢)",
+)
+_CONTINUITY_GROUNDED_RE = re.compile(r"(?:压成|压到|压缩|摘要|事实|原文|回灌|控制包|边界|不接|别接)")
+_CONTINUITY_BOUNDARY_HINTS = (
+    "压缩",
+    "连续",
+    "长链",
+    "回灌",
+    "原始历史",
+    "原始聊天",
+    "原文",
+    "ReplyControlPacket",
+    "控制包",
+    "器官族",
+)
 _CANDIDATE_LABEL_SPLIT_RE = re.compile(
     r"(?:^|[\r\n\s]+)(?:candidate|response|reply|候选|回复)\s*\d*[\s:：、.-]*",
     re.IGNORECASE,
@@ -445,6 +462,30 @@ def _memory_alignment_relevant(request: IsolatedSurfaceInput) -> bool:
     if "memory" in task_mode or "recall" in task_mode or "memory" in response_move or "recall" in response_move:
         return True
     return any(hint in user_message for hint in _MEMORY_ALIGNMENT_HINTS)
+
+
+def _continuity_boundary_relevant(request: IsolatedSurfaceInput) -> bool:
+    surface = "\n".join(
+        _clean_list(
+            [
+                request.user_message,
+                request.control.task_mode,
+                request.control.response_move,
+                *request.control.facts,
+                *request.control.must_not_do,
+                *request.control.style_anchor,
+            ]
+        )
+    )
+    return any(hint in surface for hint in _CONTINUITY_BOUNDARY_HINTS)
+
+
+def _raw_context_backfill_requested(request: IsolatedSurfaceInput, text: str) -> bool:
+    return bool(_continuity_boundary_relevant(request) and _RAW_CONTEXT_BACKFILL_RE.search(text))
+
+
+def _continuity_boundary_grounded(request: IsolatedSurfaceInput, text: str) -> bool:
+    return bool(_continuity_boundary_relevant(request) and _CONTINUITY_GROUNDED_RE.search(text))
 
 
 def memory_candidate_guidance(request: IsolatedSurfaceInput) -> str:
@@ -812,6 +853,19 @@ def score_isolated_surface_candidates(
         reason_codes = [*sample_score.reason_codes, *quality.reason_codes]
         if violations:
             score -= min(42.0, 14.0 * len(violations))
+        if _raw_context_backfill_requested(request, quality.normalized_text or candidate):
+            score -= 10.0
+            dimensions["context_fit"] = max(0.0, float(dimensions.get("context_fit", 86.0)) - 26.0)
+            dimensions["usefulness"] = max(0.0, float(dimensions.get("usefulness", 86.0)) - 14.0)
+            dimensions["scene_grounding"] = max(0.0, float(dimensions.get("scene_grounding", 86.0)) - 10.0)
+            reason_codes.append("RAW_CONTEXT_BACKFILL_REQUEST")
+        elif _continuity_boundary_grounded(request, quality.normalized_text or candidate):
+            score += 9.0
+            dimensions["context_fit"] = min(100.0, float(dimensions.get("context_fit", 86.0)) + 18.0)
+            dimensions["usefulness"] = min(100.0, float(dimensions.get("usefulness", 86.0)) + 18.0)
+            dimensions["technical_helpfulness"] = min(100.0, float(dimensions.get("technical_helpfulness", 86.0)) + 18.0)
+            dimensions["scene_grounding"] = min(100.0, float(dimensions.get("scene_grounding", 86.0)) + 14.0)
+            reason_codes.append("CONTINUITY_BOUNDARY_GROUNDED")
         memory_hits = _memory_alignment_hits(quality.normalized_text or candidate, memory_terms)
         if memory_terms:
             if memory_hits:

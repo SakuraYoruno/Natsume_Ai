@@ -871,7 +871,7 @@ def build_galgame_text_contract(
         return _contract(
             scene_id="help_takeover",
             response_move="take_debug_help",
-            required_any=(("看", "发", "拿", "贴"),),
+            required_any=(("看", "发", "拿", "贴", "报错", "红字", "抓"),),
             forbidden_surface=(
                 "请提供完整错误信息",
                 "请提供",

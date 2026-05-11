@@ -646,6 +646,87 @@ def test_rerank_prefers_grounded_good_news_proud_over_generic_competition() -> N
     assert any("CONTEXT_MISSING_REQUIRED_MOVE" in row.reason_codes for row in rows if "露一手" in row.text)
 
 
+def test_help_takeover_accepts_concrete_error_anchor_without_customer_template() -> None:
+    request = build_isolated_surface_input(
+        {
+            "case_id": "help_takeover_error_anchor",
+            "soul_md": SOUL,
+            "user_message": "技术求助也要有",
+            "reply_control_packet": {
+                "response_move": "help_takeover",
+                "task_mode": "help_takeover",
+                "question_budget": 1,
+            },
+        }
+    )
+    rows = score_isolated_surface_candidates(
+        request,
+        [
+            "要有，报错就抓红字，别写成客服接单。",
+            "请提供更多信息，我可以协助你。",
+        ],
+    )
+
+    selected = select_best_isolated_candidate(rows)
+
+    assert selected is not None
+    assert selected.text == "要有，报错就抓红字，别写成客服接单。"
+    assert selected.passed
+    assert not any("CONTEXT_MISSING_REQUIRED_MOVE" in code for code in selected.reason_codes)
+    assert any("CUSTOMER_SERVICE_TONE" in row.reason_codes for row in rows if "请提供" in row.text)
+
+
+def test_compressed_continuity_penalizes_requesting_raw_history_backfill() -> None:
+    request = build_isolated_surface_input(
+        {
+            "case_id": "compressed_history_backfill",
+            "soul_md": SOUL,
+            "user_message": "摘要压缩怎么做",
+            "reply_control_packet": {
+                "response_move": "next_step",
+                "task_mode": "next_step",
+                "question_budget": 0,
+                "facts": [
+                    "连续摘要：只验证最终表层回复。",
+                    "上一轮摘要：解释压缩摘要只输出事实，不回灌原始聊天。",
+                ],
+                "style_anchor": ["长连续对话", "摘要压缩"],
+            },
+        }
+    )
+    rows = score_isolated_surface_candidates(
+        request,
+        [
+            "就是把上一轮压成事实，不把聊天原文塞回来。",
+            "把完整聊天记录发给我，我来总结。",
+        ],
+    )
+
+    selected = select_best_isolated_candidate(rows)
+
+    assert selected is not None
+    assert selected.text == "就是把上一轮压成事实，不把聊天原文塞回来。"
+    assert any("RAW_CONTEXT_BACKFILL_REQUEST" in row.reason_codes for row in rows if "完整聊天记录" in row.text)
+
+
+def test_raw_history_backfill_phrase_is_not_globally_forbidden() -> None:
+    request = build_isolated_surface_input(
+        {
+            "case_id": "ordinary_history_summary",
+            "soul_md": SOUL,
+            "user_message": "我想总结以前聊天",
+            "reply_control_packet": {
+                "response_move": "next_step",
+                "task_mode": "next_step",
+                "question_budget": 0,
+            },
+        }
+    )
+    row = score_isolated_surface_candidates(request, ["把完整聊天记录发给我，我来总结。"])[0]
+
+    assert "RAW_CONTEXT_BACKFILL_REQUEST" not in row.reason_codes
+
+
 def test_rerank_prefers_stuffed_meal_care_over_scolding_wave() -> None:
     request = build_isolated_surface_input(
         {
