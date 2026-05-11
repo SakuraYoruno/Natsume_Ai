@@ -586,31 +586,14 @@ def warmup_retrieval_runtime_basics() -> str:
             collection=store.chroma.default_collection,
         )
 
-        pipeline_name = "SKIPPED"
-        orchestrator_name = "SKIPPED"
-        try:
-            from host_brain.app.dependencies import (  # noqa: PLC0415
-                get_retrieval_orchestrator,
-                get_retrieval_pipeline,
-            )
-
-            pipeline = get_retrieval_pipeline()
-            orchestrator = get_retrieval_orchestrator()
-            pipeline_name = type(pipeline).__name__
-            orchestrator_name = type(orchestrator).__name__
-        except Exception as retrieval_exc:
-            pipeline_name = f"DEGRADED:{retrieval_exc.__class__.__name__}"
-            orchestrator_name = f"DEGRADED:{retrieval_exc.__class__.__name__}"
-            _logger.warning("Retrieval pipeline/orchestrator 预热跳过（降级）: %s", retrieval_exc)
-
         warmed_parts = [
             f"embed_model={warm_model_id}",
             f"embed_dim={len(warm_vector)}",
             f"collection={store.chroma.default_collection}",
             f"collection_dim={store._resolve_embedding_dim()}",
             f"chroma_hits={len(list(chroma_hits or []))}",
-            f"pipeline={pipeline_name}",
-            f"orchestrator={orchestrator_name}",
+            "legacy_pipeline=removed",
+            "legacy_orchestrator=removed",
         ]
         _logger.info("Retrieval runtime 预热完成: %s", warmed_parts)
         return f"OK ({', '.join(warmed_parts)})"

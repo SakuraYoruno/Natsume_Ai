@@ -22,15 +22,10 @@
       "unavailable_kind": "edge_rpc",
       "detail": "edge rpc transport timeout at startup"
     },
-    "host.retrieval.embedding": {
+    "host.retrieval.recall_fusion": {
       "available": false,
       "unavailable_kind": "dependency",
-      "detail": "embedding endpoint timeout at startup"
-    },
-    "host.retrieval.reranker": {
-      "available": false,
-      "unavailable_kind": "dependency",
-      "detail": "reranker endpoint timeout at startup"
+      "detail": "embedding endpoint timeout at startup; reranker endpoint timeout at startup"
     }
   }
 }

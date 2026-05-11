@@ -30,7 +30,7 @@ _CHAT_SCOPES = {
     "chat_agent", "chat_handler", "chat_context_builder", "prompt_builder",
     "cortex_prompt_builder", "prompt_context", "reflection_chain",
     "expression_adapter", "interaction_pattern_analyzer", "bond_aware_style",
-    "style_distiller", "proactive_voice", "intelligent_runtime",
+    "proactive_voice", "intelligent_runtime",
 }
 _EXECUTIVE_SCOPES = {
     "executive_router", "cortex_orchestrator", "http_hooks_runtime_helpers",

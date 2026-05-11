@@ -827,8 +827,6 @@ class SocialBrainAgent:
         result = self.resolve_style_canon(canon_id=canon_id)
         return str(result.get("content") or "").strip()
 
-    # ── T-141：style_distiller 族化入口 ──────────────────────────────────────
-
     def resolve_style_distillation(
         self,
         *,
@@ -837,60 +835,18 @@ class SocialBrainAgent:
         ja_lines_path: str | None = None,
         top_n: int = 20,
     ) -> dict[str, Any]:
-        """T-141：执行风格蒸馏，将 StyleDistiller 族化到 SocialBrainAgent。
+        """Legacy StyleDistiller compatibility shim.
 
-        SocialBrainAgent 作为风格蒸馏的唯一调用入口，确保蒸馏逻辑
-        不在上下文装配等模块中直接调用 StyleDistiller。
-
-        Args:
-            lang: 语言，"cn" 或 "ja"，默认 "cn"。
-            cn_lines_path: 中文台词文件路径（可选，None 使用默认路径）。
-            ja_lines_path: 日文台词文件路径（可选，None 使用默认路径）。
-            top_n: 返回的特征词汇数量，默认 20。
-
-        Returns:
-            StyleProfile 字典或空字典（降级）。
+        Current surface style anchoring is sample-guided and uses the style
+        reference bank directly. The old StyleDistiller/StyleCanon v5 path is
+        retired so it cannot reintroduce template-like style instructions.
         """
-        try:
-            from host_brain.retrieval.style_distiller import StyleDistiller  # noqa: PLC0415
-
-            kwargs: dict[str, Any] = {}
-            if cn_lines_path is not None:
-                kwargs["cn_lines_path"] = cn_lines_path
-            if ja_lines_path is not None:
-                kwargs["ja_lines_path"] = ja_lines_path
-            distiller = StyleDistiller(use_llm=True, **kwargs)
-
-            resolved_lang = str(lang or "cn").strip().lower()
-            if resolved_lang == "ja":
-                profile = distiller.distill_ja(top_n=int(top_n))
-            else:
-                profile = distiller.distill_cn(top_n=int(top_n))
-
-            result = profile.to_dict() if hasattr(profile, "to_dict") else {}
-            result["rendered_instruction"] = distiller.render_instruction(profile, lang=resolved_lang)
-            result["status"] = "OK"
-            result["lang"] = resolved_lang
-            self._touch_state(
-                key="last_style_distillation",
-                value={
-                    "lang": resolved_lang,
-                    "sentence_patterns_count": len(result.get("sentence_patterns") or []),
-                    "vocab_count": len(result.get("characteristic_vocab") or []),
-                },
-            )
-            import logging  # noqa: PLC0415
-            logging.getLogger("Natsume.tribe.social_brain_agent").debug(
-                "SocialBrainAgent.resolve_style_distillation: lang=%s patterns=%d",
-                resolved_lang, len(result.get("sentence_patterns") or []),
-            )
-            return result
-        except Exception as exc:
-            import logging  # noqa: PLC0415
-            logging.getLogger("Natsume.tribe.social_brain_agent").warning(
-                "SocialBrainAgent.resolve_style_distillation 失败（降级）: %s", exc
-            )
-            return {"status": "ERROR", "lang": str(lang or "cn"), "error": str(exc)}
+        resolved_lang = str(lang or "cn").strip().lower() or "cn"
+        return {
+            "status": "SKIPPED",
+            "lang": resolved_lang,
+            "reason_code": "LEGACY_STYLE_DISTILLER_REMOVED",
+        }
 
     async def _on_humor_landed_bond(self, event: Any) -> None:
         """处理 HUMOR_LANDED 事件：幽默成功时 bond_trend_hint 设为 progress。

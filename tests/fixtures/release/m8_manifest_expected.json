@@ -33,14 +33,48 @@
     "stale_reason_code": null
   },
   "service_registry_snapshot": [
-    {"service_id": "host.audit.sqlite_ledger", "owner": "host", "required": true, "status": "UP"},
-    {"service_id": "host.governor.decision", "owner": "host", "required": true, "status": "UP"},
-    {"service_id": "host.skills.loader", "owner": "host", "required": true, "status": "UP"},
-    {"service_id": "host.integrations.llm_gateway", "owner": "host", "required": true, "status": "UP"},
-    {"service_id": "host.retrieval.embedding", "owner": "host", "required": true, "status": "UP"},
-    {"service_id": "host.retrieval.reranker", "owner": "host", "required": true, "status": "UP"},
-    {"service_id": "host.vision.screen_ocr", "owner": "host", "required": true, "status": "UP"},
-    {"service_id": "host.vision.camera_recognizer", "owner": "host", "required": true, "status": "UP"}
+    {
+      "service_id": "host.audit.sqlite_ledger",
+      "owner": "host",
+      "required": true,
+      "status": "UP"
+    },
+    {
+      "service_id": "host.governor.decision",
+      "owner": "host",
+      "required": true,
+      "status": "UP"
+    },
+    {
+      "service_id": "host.skills.loader",
+      "owner": "host",
+      "required": true,
+      "status": "UP"
+    },
+    {
+      "service_id": "host.integrations.llm_gateway",
+      "owner": "host",
+      "required": true,
+      "status": "UP"
+    },
+    {
+      "service_id": "host.retrieval.recall_fusion",
+      "owner": "host",
+      "required": true,
+      "status": "UP"
+    },
+    {
+      "service_id": "host.vision.screen_ocr",
+      "owner": "host",
+      "required": true,
+      "status": "UP"
+    },
+    {
+      "service_id": "host.vision.camera_recognizer",
+      "owner": "host",
+      "required": true,
+      "status": "UP"
+    }
   ],
   "generated_at": "2026-03-03T12:00:00+00:00",
   "ts_ms": 1709467200000,

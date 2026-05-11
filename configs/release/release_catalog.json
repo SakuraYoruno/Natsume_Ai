@@ -54,8 +54,7 @@
       "checksums": {},
       "required_services": [
         "host.audit.sqlite_ledger",
-        "host.retrieval.embedding",
-        "host.retrieval.reranker"
+        "host.retrieval.recall_fusion"
       ],
       "config_snapshot_refs": [
         "cfg_snap::sha256:placeholder_host_snapshot",

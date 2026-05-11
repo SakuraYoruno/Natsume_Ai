@@ -114,8 +114,8 @@
   读者：MASTER、实现层（查阅对齐）。
 
 - docs/50_project/arch/AGENTIC_RAG_ARCHITECTURE.md
-  用途：Agentic RAG 智能检索架构（当前代码实况）。覆盖 `hippocampus_agent -> retrieval.orchestrator -> retrieval.pipeline` 的现行检索入口、5 路 store map、QueryPlanner / EvidenceEvaluator / AgenticRetrievalLoop，以及主链的 prompt_filter / RecallPackBuilder 回灌。
-  读者：MASTER、实现层（查阅对齐）。
+  用途：Agentic RAG 智能检索架构历史留痕。旧 `hippocampus_agent -> retrieval.orchestrator -> retrieval.pipeline` 主链已移除；当前表层主链只接收压缩后的 `ReplyControlPacket` 与 thin recall 输出，复杂 RAG/多智能体只能作为上游结构化事实来源重新接入。
+  读者：MASTER、实现层（历史对照）。
 
 - docs/50_project/arch/PHASE_X_INTELLIGENT_ORCHESTRATION.md
   用途：Phase X 智能编排层升级六大方案留痕（2026-03-29，2026-04-19 已加校准说明）。记录 `MemoryWorthEvaluator / AdaptivePromptBudget / SemanticDedup / BondAwareStyleEngine / ConsolidationTrigger / TtsContextRouter` 六项能力的原始设计意图；这些模块现已落库，但当前接线与接口应以现行契约文档和实际代码为准。
@@ -138,7 +138,7 @@
   读者：MASTER、Project（文档代理）。
 
 - docs/50_project/arch/PHASE_XIII_STYLE_SYSTEM_OVERHAUL.md
-  用途：Phase XIII 风格系统重构方案留痕（2026-03-30，2026-04-19 已加校准说明）。记录 `StyleDistiller / EmotionTaggedUtteranceIndex / persona_examples 独立注入 / style_canon 脱离 reranker` 的设计缘起；`EmotionTaggedUtteranceIndex` 已在 2026-05-12 旧召回清理中删除，当前最小主链风格参考以 `style_reference_bank` 与样本引导评分为准。
+  用途：Phase XIII 风格系统重构方案留痕（2026-03-30，2026-04-19 已加校准说明）。记录旧 `StyleDistiller / EmotionTaggedUtteranceIndex / persona_examples 独立注入 / style_canon 脱离 reranker` 的设计缘起；`StyleDistiller` 与 `EmotionTaggedUtteranceIndex` 已在 2026-05-12 旧链清理中删除，当前最小主链风格参考以 `style_reference_bank` 与样本引导评分为准。
   读者：MASTER、Project（文档代理）、实现层（历史对照）。
 
 - docs/50_project/arch/DIGITAL_LIFE_FUSION_V2_20260408.md
@@ -450,7 +450,7 @@
   读者：MASTER、Project（文档代理）、实现层（查阅对齐）。
 
 - docs/15_theory/RETRIEVAL_LAYER_CONTRACT.md
-  用途：host_brain/retrieval/ 层接口契约（当前代码实况）。覆盖 QueryPlanner、AgenticRetrievalLoop、EvidenceEvaluator、RetrievalPipelineContract、RetrievalOrchestrator、5 路 store map、缓存与 `build_retrieval_pipeline_from_env` 的当前装配关系。
+  用途：host_brain/retrieval/ 层接口契约历史留痕与 thin recall 迁移参考。旧 Agentic RAG pipeline/orchestrator/query planner/evidence evaluator 已从当前主链移除；现行入口以 RecallFusionServiceContract 和表层 memory recall adapter 为准。
   读者：MASTER、Project（文档代理）、实现层（查阅对齐）。
 
 - docs/15_theory/GOVERNOR_SCHEDULER_CONTRACT.md

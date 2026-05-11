@@ -16,14 +16,8 @@ from typing import Any, Mapping, Sequence
 from urllib.parse import urlparse
 
 from host_brain.core.key_profiles import resolve_secret_from_profiles
-from host_brain.memory.chroma_client import load_chroma_runtime_config
+from host_brain.memory.chroma_client import embed_text, load_chroma_runtime_config
 from host_brain.memory.canon_style_store import STYLE_CANON_KEY_MAP, STYLE_V5_FILE_NAME, StyleCanonStore
-from host_brain.retrieval.embedding import (
-    EmbeddingServiceContract,
-    build_embedding_provider_registry,
-    load_embedding_runtime_config,
-    resolve_embedding_route,
-)
 
 
 DEFAULT_STYLE_ROOT = "host_brain/canon/style"
@@ -112,45 +106,12 @@ def sync_canon_vector_index(
         raise RuntimeError(f"chroma runtime config invalid: {cfg_result.as_dict()}")
     cfg = cfg_result.config
 
-    embed_cfg_result = load_embedding_runtime_config(env=merged_env)
-    if not embed_cfg_result.success or embed_cfg_result.config is None:
-        raise RuntimeError(f"embedding runtime config invalid: {embed_cfg_result.as_dict()}")
-    embed_cfg = embed_cfg_result.config
     resolved_node_id = _resolve_runtime_node_id(env=merged_env, node_id=node_id)
-    resolved_key_profiles, resolved_secret_store, resolved_epoch = _resolve_key_materials(
-        key_profiles=key_profiles,
-        secret_store=secret_store,
-        current_epoch=current_epoch,
-    )
-    resolved_openai_key = _resolve_openai_api_key(
-        env=merged_env,
-        node_id=resolved_node_id,
-        key_profiles=resolved_key_profiles,
-        secret_store=resolved_secret_store,
-        current_epoch=resolved_epoch,
-    )
-    provider_registry = build_embedding_provider_registry(
-        env=merged_env,
-        openai_api_key=resolved_openai_key,
-    )
-    embedding_service = EmbeddingServiceContract(
-        runtime_config=embed_cfg,
-        provider_registry=provider_registry,
-        node_id=resolved_node_id,
-        available=True,
-    )
-    active_route = resolve_embedding_route(embed_cfg, node_id=resolved_node_id)
 
     target_collection = str(collection or DEFAULT_CANON_COLLECTION).strip() or DEFAULT_CANON_COLLECTION
     dim = int(collection_dim) if collection_dim is not None else _resolve_collection_dim(cfg, target_collection)
     if dim <= 0:
         raise ValueError(f"collection_dim must be > 0, got {dim}")
-    if int(active_route.dim) != int(dim):
-        raise ValueError(
-            "embedding/chroma dim mismatch: "
-            f"route_dim={int(active_route.dim)} collection_dim={int(dim)} "
-            f"(route_id={active_route.route_id}, provider={active_route.provider})"
-        )
 
     documents, issues = collect_canon_projection_documents(
         style_root=style_root,
@@ -173,20 +134,9 @@ def sync_canon_vector_index(
     style_count = 0
     world_count = 0
     for row in documents:
-        result = embedding_service.embed(
-            request_id=f"canon_sync::{row.vector_id}",
-            text=row.text,
-        )
-        if not result.success:
-            raise RuntimeError(
-                "canon vector embedding failed: "
-                f"vector_id={row.vector_id} reason={result.reason_code} detail={result.detail}"
-            )
-        output = dict(result.output or {})
-        embedding = [float(v) for v in list(output.get("embedding_vector") or [])]
-        model_id = str(output.get("embedding_model_id") or active_route.model_id)
-        provider = str(output.get("provider") or active_route.provider)
-        route_id = str(output.get("route_id") or active_route.route_id)
+        embedding, model_id = embed_text(row.text, dim=dim)
+        provider = "memory_chroma"
+        route_id = "canon_vector_projection"
         ids.append(row.vector_id)
         rows.append(row.text)
         metadata = dict(row.metadata)
@@ -222,9 +172,9 @@ def sync_canon_vector_index(
         "collection": target_collection,
         "vector_dim": dim,
         "backend": str(backend),
-        "embedding_provider": active_route.provider,
-        "embedding_model_id": active_route.model_id,
-        "embedding_route_id": active_route.route_id,
+        "embedding_provider": "memory_chroma",
+        "embedding_model_id": model_id if ids else None,
+        "embedding_route_id": "canon_vector_projection",
         "embedding_node_id": resolved_node_id,
         "style_docs_synced": style_count,
         "world_docs_synced": world_count,

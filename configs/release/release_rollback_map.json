@@ -17,8 +17,7 @@
       "rollback_target": "rel-m1-2026-03-01",
       "impact_scope": [
         "host.audit.sqlite_ledger",
-        "host.retrieval.embedding",
-        "host.retrieval.reranker"
+        "host.retrieval.recall_fusion"
       ],
       "milestone": "M2"
     },

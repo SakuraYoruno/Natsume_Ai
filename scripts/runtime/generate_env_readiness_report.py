@@ -29,16 +29,6 @@ from host_brain.memory.chroma_client import (
     build_chroma_probe_report,
     load_chroma_runtime_config,
 )
-from host_brain.retrieval.embedding import (
-    EmbeddingServiceContract,
-    build_embedding_provider_registry,
-    load_embedding_runtime_config,
-)
-from host_brain.retrieval.reranker import (
-    RerankerServiceContract,
-    build_reranker_provider_registry,
-    load_reranker_runtime_config,
-)
 from tools.replay.production_drill import run_drill_suite
 
 
@@ -190,70 +180,6 @@ def _probe_chroma_live(*, env_values: Mapping[str, Any]) -> dict[str, Any]:
     return build_chroma_dependency_status(report)
 
 
-def _probe_embedding_live(*, env_values: Mapping[str, Any], node_id: str) -> dict[str, Any]:
-    config_result = load_embedding_runtime_config(env=env_values)
-    if not config_result.success or config_result.config is None:
-        detail = config_result.issues[0].detail if config_result.issues else "embedding config invalid"
-        return {
-            "available": False,
-            "unavailable_kind": "dependency",
-            "detail": detail,
-        }
-    registry = build_embedding_provider_registry(env=env_values)
-    service = EmbeddingServiceContract(
-        runtime_config=config_result.config,
-        provider_registry=registry,
-        node_id=node_id,
-        available=True,
-    )
-    result = service.embed(request_id="req_probe_embed", text="readiness probe text", intent_id="probe.intent")
-    if result.status == "OK":
-        return {"available": True, "detail": "embedding dependency healthy"}
-    return {
-        "available": False,
-        "unavailable_kind": "dependency",
-        "detail": f"{result.reason_code}: {result.detail}",
-    }
-
-
-def _probe_reranker_live(*, env_values: Mapping[str, Any], node_id: str) -> dict[str, Any]:
-    config_result = load_reranker_runtime_config(env=env_values)
-    if not config_result.success or config_result.config is None:
-        detail = config_result.issues[0].detail if config_result.issues else "reranker config invalid"
-        return {
-            "available": False,
-            "unavailable_kind": "dependency",
-            "detail": detail,
-        }
-    registry = build_reranker_provider_registry(env=env_values)
-    service = RerankerServiceContract(
-        runtime_config=config_result.config,
-        provider_registry=registry,
-        node_id=node_id,
-        available=True,
-    )
-    result = service.rerank(
-        request_id="req_probe_rerank",
-        query="readiness probe",
-        candidates=[
-            {
-                "doc_id": "probe_doc_001",
-                "source_ref": "source://probe/001",
-                "snippet": "readiness probe snippet",
-                "metadata": {},
-            }
-        ],
-        intent_id="probe.intent",
-    )
-    if result.status == "OK":
-        return {"available": True, "detail": "reranker dependency healthy"}
-    return {
-        "available": False,
-        "unavailable_kind": "dependency",
-        "detail": f"{result.reason_code}: {result.detail}",
-    }
-
-
 def _build_graph_runtime_status(
     *,
     graph_config: Mapping[str, Any],
@@ -337,8 +263,11 @@ def _build_dependency_probe_matrix(
     probes: dict[str, dict[str, Any]] = {}
     probes["host.bond.neo4j"] = _probe_neo4j_live(env_values=env_values, secret_store=secret_store)
     probes["host.memory.chroma"] = _probe_chroma_live(env_values=env_values)
-    probes["host.retrieval.embedding"] = _probe_embedding_live(env_values=env_values, node_id=host_node_id)
-    probes["host.retrieval.reranker"] = _probe_reranker_live(env_values=env_values, node_id=host_node_id)
+    probes["host.retrieval.legacy_pipeline"] = {
+        "available": False,
+        "unavailable_kind": "removed",
+        "detail": "legacy embedding/reranker pipeline removed; surface recall uses compressed facts",
+    }
     return probes
 
 
@@ -391,9 +320,7 @@ def build_runtime_env_readiness_report(
 
     llm_available = bool(startup_runtime_statuses.get("host.integrations.llm_gateway", {}).get("available", True))
     edge_gateway_available = bool(startup_runtime_statuses.get("edge.rpc.gateway", {}).get("available", True))
-    retrieval_available = bool(dependency_probes.get("host.retrieval.embedding", {}).get("available", False)) and bool(
-        dependency_probes.get("host.retrieval.reranker", {}).get("available", False)
-    )
+    retrieval_available = bool(dependency_probes.get("host.memory.chroma", {}).get("available", False))
     graph_config = dict(graph_payload.get("graph") or graph_payload)
     graph_runtime = _build_graph_runtime_status(
         graph_config=graph_config,

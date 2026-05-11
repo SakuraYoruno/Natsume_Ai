@@ -29,7 +29,6 @@ from typing import Any, Dict, List, Mapping, Optional
 
 from fastapi import HTTPException, Query
 from pydantic import BaseModel, Field
-from host_brain.retrieval.model_suite import resolve_retrieval_model_suite
 
 from host_brain.app.obs_routes_core import (
     router,
@@ -417,11 +416,9 @@ def _get_retrieval_runtime_sync(request_id, limit, include_legacy):
     include_legacy = bool(include_legacy if isinstance(include_legacy, bool) else getattr(include_legacy, "default", False))
     now = _now_ms()
     ledger = _get_ledger()
-    from host_brain.retrieval.embedding import load_embedding_runtime_config
-    from host_brain.retrieval.reranker_config import load_reranker_runtime_config
-    suite = resolve_retrieval_model_suite(os.environ)
-    embed_cfg = load_embedding_runtime_config(env=os.environ).config
-    rerank_cfg = load_reranker_runtime_config(env=os.environ).config
+    suite = None
+    embed_cfg = None
+    rerank_cfg = None
     rows = []
     try:
         rows = [r for r in reversed(list(ledger.retrieval_event_log)) if str(r.get("op_kind") or "").strip().upper() == "PIPELINE"]

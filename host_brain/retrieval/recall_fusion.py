@@ -144,7 +144,6 @@ class RecallFusionServiceContract:
         ledger: SQLiteLedger | None = None,
         chroma_client: ChromaClientProtocol | None = None,
         neo4j_client: Any | None = None,
-        style_store: Any | None = None,
         world_store: Any | None = None,
         artifact_vault: Any | None = None,
         runtime_config: RecallRuntimeConfig | None = None,
@@ -158,7 +157,6 @@ class RecallFusionServiceContract:
         self.ledger = ledger
         self.chroma = chroma_client or build_runtime_chroma_client()
         self.neo4j = neo4j_client
-        self.style_store = style_store
         self.world_store = world_store
         self.artifact_vault = artifact_vault
         self.runtime_config = runtime_config or _default_runtime_config()
@@ -208,25 +206,6 @@ class RecallFusionServiceContract:
         from host_brain.retrieval.recall_fusion_stores import search_neo4j_bond
         return search_neo4j_bond(self, query=query, top_k=top_k)
 
-    def _search_style_canon(
-        self,
-        *,
-        query: str,
-        query_embedding: list[float],
-        top_k: int,
-        collection: str | None,
-        render_target_lang: str | None = None,
-    ) -> list[dict[str, Any]]:
-        from host_brain.retrieval.recall_fusion_stores import search_style_canon
-        return search_style_canon(
-            self,
-            query=query,
-            query_embedding=query_embedding,
-            top_k=top_k,
-            collection=collection,
-            render_target_lang=render_target_lang,
-        )
-
     def _search_world_canon(self, *, query: str, query_embedding: list[float], top_k: int, collection: str | None) -> list[dict[str, Any]]:
         from host_brain.retrieval.recall_fusion_stores import search_world_canon
         return search_world_canon(self, query=query, query_embedding=query_embedding, top_k=top_k, collection=collection)
@@ -234,27 +213,6 @@ class RecallFusionServiceContract:
     def _search_artifact_vault(self, *, query: str, top_k: int) -> list[dict[str, Any]]:
         from host_brain.retrieval.recall_fusion_stores import search_artifact_vault
         return search_artifact_vault(self, query=query, top_k=top_k)
-
-    def _search_persona_utterance(
-        self,
-        *,
-        query_embedding: list[float],
-        top_k: int,
-        collection: str | None,
-        render_target_lang: str | None = None,
-    ) -> list[dict[str, Any]]:
-        from host_brain.retrieval.recall_fusion_stores import search_persona_utterance
-        return search_persona_utterance(
-            self,
-            query_embedding=query_embedding,
-            top_k=top_k,
-            collection=collection,
-            render_target_lang=render_target_lang,
-        )
-
-    def _search_canon_projection_vector(self, *, query_embedding: list[float], top_k: int, collection: str | None, canon_kind: str, store_id: str) -> list[dict[str, Any]]:
-        from host_brain.retrieval.recall_fusion_stores import search_canon_projection_vector
-        return search_canon_projection_vector(self, query_embedding=query_embedding, top_k=top_k, collection=collection, canon_kind=canon_kind, store_id=store_id)
 
     # ── 混合检索（委托给 hybrid_fusion）──────────────────────────────────
     def _apply_hybrid_fusion(

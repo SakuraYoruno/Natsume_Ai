@@ -10,11 +10,6 @@ from __future__ import annotations
 import re
 from typing import Any, Dict, Mapping, Optional
 
-from host_brain.retrieval.orchestrator import (
-    build_degraded_retrieval_summary as _orchestrator_degraded_summary,
-    build_skipped_retrieval_summary as _orchestrator_skipped_summary,
-)
-
 _CONTEXTUAL_FOLLOWUP_RE = re.compile(
     r"^\s*(?:"
     r"什么意思|啥意思|什么情况|怎么理解|怎么说|这话什么意思|这句什么意思|刚才那句什么意思|你这是什么意思|你这话是什么意思|"
@@ -161,26 +156,50 @@ async def _run_retrieval(
     bond_summary: Mapping[str, Any] | None = None,
     motive_state: Mapping[str, Any] | None = None,
 ) -> tuple[Dict[str, Any], list[dict[str, Any]]]:
-    """并行执行检索，返回 (retrieval_summary, retrieval_evidence_items)。"""
-    from host_brain.tribe.hippocampus_agent import get_hippocampus_agent  # noqa: PLC0415
+    """Legacy retrieval bridge.
 
-    return await get_hippocampus_agent().recall(
-        request_id=request_id,
-        message=message,
-        person_id=person_id,
-        session_id=session_id,
-        ts_ms=ts_ms,
-        emotion_tag=emotion_tag,
-        render_target_lang=render_target_lang,
-        mood_state=mood_state,
-        bond_summary=bond_summary,
-        motive_state=motive_state,
+    The old app path used to call the legacy retrieval stack here.
+    The current main chain routes memory through surface_memory_recall and only
+    passes compressed facts to the final text layer, so this legacy bridge now
+    fails closed instead of rebuilding a large evidence pack.
+    """
+    return (
+        {
+            "request_id": request_id,
+            "status": "SKIPPED",
+            "reason_code": "LEGACY_RETRIEVAL_CHAIN_REMOVED",
+            "degraded": False,
+            "route_count": 0,
+            "candidate_count": 0,
+            "rerank_topk": 0,
+            "routes": [],
+            "query_plan": {"intent": "legacy_removed", "text_len": len(str(message or ""))},
+            "target_stores": [],
+            "ts_ms": int(ts_ms),
+        },
+        [],
     )
 
 
 def _build_skipped_retrieval_summary(reason_code: str) -> Dict[str, Any]:
-    return _orchestrator_skipped_summary(reason_code)
+    return {
+        "status": "SKIPPED",
+        "reason_code": str(reason_code or "RETRIEVAL_SKIPPED"),
+        "degraded": False,
+        "route_count": 0,
+        "candidate_count": 0,
+        "rerank_topk": 0,
+        "routes": [],
+    }
 
 
 def _build_degraded_retrieval_summary(reason_code: str) -> Dict[str, Any]:
-    return _orchestrator_degraded_summary(reason_code)
+    return {
+        "status": "DEGRADED",
+        "reason_code": str(reason_code or "RETRIEVAL_DEGRADED"),
+        "degraded": True,
+        "route_count": 0,
+        "candidate_count": 0,
+        "rerank_topk": 0,
+        "routes": [],
+    }

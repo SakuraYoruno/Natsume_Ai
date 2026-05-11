@@ -19,14 +19,10 @@
     "EDGE_RESOURCE_GATE_ENABLED": "true"
   },
   "dependency_probes": {
-    "host.retrieval.embedding": {
+    "host.retrieval.recall_fusion": {
       "available": false,
       "unavailable_kind": "dependency",
-      "detail": "embedding endpoint timeout at readiness check"
-    },
-    "host.retrieval.reranker": {
-      "available": true,
-      "detail": "reranker endpoint ok"
+      "detail": "embedding endpoint timeout at readiness check; reranker endpoint ok"
     },
     "edge.rpc.gateway": {
       "available": true,

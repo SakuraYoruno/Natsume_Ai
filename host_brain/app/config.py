@@ -569,23 +569,18 @@ def build_host_runtime_statuses(config: HostConfig) -> dict[str, dict[str, Any]]
             "detail": "llm gateway enabled",
         }
 
-    # --- host.retrieval.embedding / host.retrieval.reranker ---
+    # --- host.retrieval.recall_fusion ---
     if not config.enable_retrieval:
         retrieval_down = {
             "available": False,
             "unavailable_kind": "dependency",
             "detail": "retrieval disabled by config",
         }
-        statuses["host.retrieval.embedding"] = dict(retrieval_down)
-        statuses["host.retrieval.reranker"] = dict(retrieval_down)
+        statuses["host.retrieval.recall_fusion"] = dict(retrieval_down)
     else:
-        statuses["host.retrieval.embedding"] = {
+        statuses["host.retrieval.recall_fusion"] = {
             "available": True,
-            "detail": "retrieval embedding enabled",
-        }
-        statuses["host.retrieval.reranker"] = {
-            "available": True,
-            "detail": "retrieval reranker enabled",
+            "detail": "surface recall fusion enabled",
         }
 
     # --- host.vision.screen_ocr / host.vision.camera_recognizer ---

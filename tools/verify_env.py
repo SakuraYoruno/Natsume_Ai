@@ -155,26 +155,19 @@ if result.issues:
 
 # ── 6. 检索配置加载测试 ────────────────────────────────────────
 print()
-print("【6】检索配置加载测试")
-from host_brain.retrieval.embedding import load_embedding_runtime_config
-from host_brain.retrieval.reranker import load_reranker_runtime_config
+print("【6】表层召回配置加载测试")
 from host_brain.retrieval.recall_fusion import load_recall_runtime_config
 
-embed_result = load_embedding_runtime_config(env=env_values)
-rerank_result = load_reranker_runtime_config(env=env_values)
 recall_result = load_recall_runtime_config(env=env_values)
 
-for name, r in [("Embedding", embed_result), ("Reranker", rerank_result), ("Recall", recall_result)]:
-    icon = "OK" if r.success else "FAIL"
-    print(f"  [{icon}] {name}: success={r.success}", end="")
-    if r.success and r.config:
-        if hasattr(r.config, "default_route"):
-            print(f", default_route={r.config.default_route}", end="")
-        if hasattr(r.config, "routes"):
-            print(f", routes={list(r.config.routes.keys())}", end="")
-    if not r.success:
-        print(f", reason={r.reason_code}", end="")
-    print()
+icon = "OK" if recall_result.success else "FAIL"
+print(f"  [{icon}] RecallFusion: success={recall_result.success}", end="")
+if recall_result.success and recall_result.config:
+    print(f", default_route={recall_result.config.default_route}", end="")
+    print(f", routes={list(recall_result.config.routes.keys())}", end="")
+if not recall_result.success:
+    print(f", reason={recall_result.reason_code}", end="")
+print()
 
 # ── 7. 汇总 ───────────────────────────────────────────────────
 print()

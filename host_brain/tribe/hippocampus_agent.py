@@ -73,75 +73,23 @@ class HippocampusAgent:
         motive_state: Mapping[str, Any] | None = None,
         top_k: int | None = None,
     ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
-        from host_brain.app.dependencies import get_retrieval_orchestrator  # noqa: PLC0415
-        from host_brain.retrieval.orchestrator import RetrievalOrchestratorRequest  # noqa: PLC0415
-
-        if top_k is None:
-            try:
-                resolved_top_k = int(str(os.environ.get("HOST_RETR_TOP_K") or "8").strip())
-            except ValueError:
-                resolved_top_k = 8
-        else:
-            resolved_top_k = int(top_k)
-
-        normalized_bond_summary = dict(bond_summary) if isinstance(bond_summary, Mapping) and bond_summary else None
-        normalized_motive_state = dict(motive_state) if isinstance(motive_state, Mapping) and motive_state else None
-        session_state: dict[str, Any] = {
-            "person_id": person_id,
-            "session_id": session_id,
-            "emotion_tag": emotion_tag,
-        }
-        if mood_state:
-            session_state["mood_state"] = mood_state
-        if normalized_bond_summary:
-            session_state["bond_summary"] = dict(normalized_bond_summary)
-        if normalized_motive_state:
-            session_state["motive_state"] = dict(normalized_motive_state)
-        # T-49：将 ImmuneAgent 运行时状态注入 session_state，
-        # 供 RetrievalOrchestrator 在检索时参考安全状态（如 risk_level/block_rate）。
-        try:
-            _immune = get_immune_agent().export_runtime_state()
-            session_state["immune_state"] = {
-                "risk_level": _immune.get("risk_level", "none"),
-                "block_rate": _immune.get("block_rate", 0.0),
-                "last_decision": _immune.get("last_decision", "ALLOW"),
-            }
-        except Exception:
-            pass
-
-        orchestrator = get_retrieval_orchestrator()
-        result = await orchestrator.arun(
-            request=RetrievalOrchestratorRequest(
-                trace_id=request_id,
-                query=message,
-                session_state=session_state,
-                request_id=request_id,
-                person_id=person_id,
-                session_id=session_id,
-                top_k=max(1, resolved_top_k),
-                ts_ms=ts_ms,
-                emotion_context=emotion_tag,
-                mood_state=mood_state,
-                bond_summary=normalized_bond_summary,
-                motive_state=normalized_motive_state,
-                render_target_lang=render_target_lang,
-            )
-        )
-        retrieval_summary = dict(result.retrieval_summary)
-        retrieval_evidence_items = list(result.retrieval_evidence_items)
-        association_payload = await self._maybe_generate_association_summary(
-            request_id=request_id,
-            message=message,
-            person_id=person_id,
-            render_target_lang=render_target_lang,
-            retrieval_summary=retrieval_summary,
-            retrieval_evidence_items=retrieval_evidence_items,
-        )
-        if association_payload:
-            retrieval_summary.update(association_payload)
         return (
-            retrieval_summary,
-            retrieval_evidence_items,
+            {
+                "request_id": request_id,
+                "status": "SKIPPED",
+                "reason_code": "LEGACY_HIPPOCAMPUS_RECALL_REMOVED",
+                "degraded": False,
+                "route_count": 0,
+                "candidate_count": 0,
+                "rerank_topk": 0,
+                "routes": [],
+                "target_stores": [],
+                "query_plan": {"intent": "legacy_removed", "text_len": len(str(message or ""))},
+                "person_id": person_id,
+                "session_id": session_id,
+                "ts_ms": int(ts_ms),
+            },
+            [],
         )
 
     async def _maybe_generate_association_summary(

@@ -30,7 +30,7 @@ print("HOST_LLM_PROVIDER:", os.environ.get("HOST_LLM_PROVIDER"))
 
 from host_brain.app.chat_context_builder import build_chat_prompt_runtime_payload
 from host_brain.app.chat_runtime_input import build_chat_runtime_input
-from host_brain.app.dependencies import get_graph_runtime, get_ledger, get_retrieval_pipeline
+from host_brain.app.dependencies import get_graph_runtime, get_ledger
 from host_brain.app.emotion_context import resolve_chat_emotion_context
 from host_brain.app.graph_config_builder import (
     CHAT_GRAPH_NODE_ORDER,
@@ -48,7 +48,6 @@ print("\n--- dependency bootstrap ---")
 for name, getter in (
     ("ledger", get_ledger),
     ("graph_runtime", get_graph_runtime),
-    ("retrieval_pipeline", get_retrieval_pipeline),
 ):
     try:
         getter()

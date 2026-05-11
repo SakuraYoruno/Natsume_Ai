@@ -83,55 +83,6 @@ def search_route(
     raise RuntimeError(f"unsupported recall store_id: {store_id}")
 
 
-def _normalize_render_target_lang(render_target_lang: str | None) -> str | None:
-    normalized = str(render_target_lang or "").strip().lower()
-    if normalized in {"zh", "cn", "chinese", "zh-cn", "zh-hans"}:
-        return "zh"
-    if normalized in {"ja", "jp", "japanese"}:
-        return "ja"
-    return None
-
-
-def _matches_render_target_lang(
-    *,
-    render_target_lang: str | None,
-    lang_value: str | None = None,
-    canon_id: str | None = None,
-    tags: list[str] | None = None,
-) -> bool:
-    preferred = _normalize_render_target_lang(render_target_lang)
-    if preferred is None:
-        return True
-
-    normalized_lang = str(lang_value or "").strip().lower()
-    if preferred == "zh" and normalized_lang in {"zh", "cn", "chinese", "zh-cn", "zh-hans"}:
-        return True
-    if preferred == "ja" and normalized_lang in {"ja", "jp", "japanese"}:
-        return True
-
-    normalized_canon_id = str(canon_id or "").strip().lower()
-    if preferred == "zh" and (
-        normalized_canon_id.endswith("_cn")
-        or normalized_canon_id.endswith("_zh")
-        or "::zh::" in normalized_canon_id
-    ):
-        return True
-    if preferred == "ja" and (
-        normalized_canon_id.endswith("_ja")
-        or normalized_canon_id.endswith("_jp")
-        or "::ja::" in normalized_canon_id
-    ):
-        return True
-
-    normalized_tags = [str(tag or "").strip().lower() for tag in list(tags or []) if str(tag or "").strip()]
-    if preferred == "zh" and any(tag in {"zh", "cn", "chinese", "lang:zh", "lang:cn"} for tag in normalized_tags):
-        return True
-    if preferred == "ja" and any(tag in {"ja", "jp", "japanese", "lang:ja", "lang:jp"} for tag in normalized_tags):
-        return True
-
-    return False
-
-
 def search_sqlite_ledger(
     self: Any,
     *,
@@ -452,9 +403,8 @@ def search_canon_projection_vector(
     collection: str | None,
     canon_kind: str,
     store_id: str,
-    render_target_lang: str | None = None,
 ) -> list[dict[str, Any]]:
-    """向量投影检索（style_canon / world_canon 共用）。"""
+    """世界观 canon 向量投影检索。"""
     from host_brain.retrieval.recall_fusion_utils import (
         _coerce_non_negative_int,
         _coerce_score,
@@ -577,4 +527,3 @@ def search_artifact_vault(self: Any, *, query: str, top_k: int) -> list[dict[str
             },
         })
     return sorted(candidates, key=lambda c: -float(c["score"]))[: max(1, int(top_k))]
-

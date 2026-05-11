@@ -40,11 +40,6 @@ from host_brain.memory.episodic import EpisodicStore
 from host_brain.mcp.tool_broker import MCPToolBroker
 from host_brain.mcp.tool_registry import MCPToolRegistry
 from host_brain.observability.metrics import MetricsCollector
-from host_brain.retrieval.pipeline import (
-    RetrievalPipelineContract,
-    build_retrieval_pipeline_from_env,
-)
-from host_brain.retrieval.orchestrator import RetrievalOrchestrator
 from host_brain.reasoning.reflection_chain import ReflectionChain
 from host_brain.channels.multimodal_processor import MultimodalProcessor
 from host_brain.channels.tts_context_router import TtsContextRouter
@@ -112,8 +107,8 @@ _tool_broker: Optional[ToolBroker] = None
 _bond_stage_engine: Optional[BondStageEngine] = None
 _bond_update_queue: Optional[BondUpdateQueue] = None
 _episodic_store: Optional[EpisodicStore] = None
-_retrieval_pipeline: Optional[RetrievalPipelineContract] = None
-_retrieval_orchestrator: Optional[RetrievalOrchestrator] = None
+_retrieval_pipeline: Optional[Any] = None
+_retrieval_orchestrator: Optional[Any] = None
 _obs_metrics_collector: Optional[MetricsCollector] = None
 _graph_runtime: Optional[GraphRuntimeContract] = None
 
@@ -319,31 +314,12 @@ def get_session_tactic_ledger_store() -> SessionTacticLedgerStore:
 
 
 def _resolve_episodic_embedding_binding() -> tuple[Any, str, str]:
-    from host_brain.retrieval.embedding import (  # noqa: PLC0415
-        _invoke_embedding_provider,
-        build_embedding_provider_registry,
-        load_embedding_runtime_config,
-        resolve_embedding_route,
-    )
-
-    cfg_result = load_embedding_runtime_config(env=os.environ)
-    if not cfg_result.success or cfg_result.config is None:
-        raise RuntimeError(f"episodic embedding runtime config invalid: {cfg_result.as_dict()}")
-    node_id = str(
-        os.environ.get("HOST_RETR_NODE_ID")
-        or os.environ.get("Natsume_HOST_NODE_ID")
-        or "natsu-node-01"
-    ).strip() or "natsu-node-01"
-    route = resolve_embedding_route(cfg_result.config, node_id=node_id)
-    provider_registry = build_embedding_provider_registry(env=os.environ)
-    provider = provider_registry.get(route.provider)
-    if provider is None:
-        raise RuntimeError(f"episodic embedding provider unavailable: {route.provider}")
+    from host_brain.memory.chroma_client import embed_text  # noqa: PLC0415
 
     def _embed(text: str) -> tuple[list[float], str]:
-        return _invoke_embedding_provider(provider, str(text or "").strip(), route)
+        return embed_text(str(text or "").strip())
 
-    return _embed, str(route.model_id), str(route.provider)
+    return _embed, "memory.chroma_client.embed_text", "memory_chroma"
 
 
 def _build_episodic_embedding_callable() -> Any:
@@ -373,55 +349,19 @@ def get_episodic_store() -> EpisodicStore:
     return _episodic_store
 
 
-def get_retrieval_pipeline() -> RetrievalPipelineContract:
-    global _retrieval_pipeline
-    if _retrieval_pipeline is None:
-        node_id = str(
-            os.environ.get("HOST_RETR_NODE_ID")
-            or os.environ.get("Natsume_HOST_NODE_ID")
-            or "natsu-node-01"
-        ).strip() or "natsu-node-01"
-        _retrieval_pipeline = build_retrieval_pipeline_from_env(
-            env=os.environ,
-            ledger=get_ledger(),
-            node_id=node_id,
-        )
-    return _retrieval_pipeline
+def get_retrieval_pipeline() -> None:
+    """Legacy Agentic RAG pipeline compatibility shim.
+
+    The current main chain uses surface_memory_recall -> RecallFusionServiceContract
+    and compresses recall into ReplyControlPacket facts. The old pipeline entry is
+    intentionally inert so legacy imports do not pull the removed stack back in.
+    """
+    return None
 
 
-def get_retrieval_orchestrator() -> RetrievalOrchestrator:
-    global _retrieval_orchestrator
-    pipeline = get_retrieval_pipeline()
-    cache_enabled = _parse_bool_env("HOST_RETRIEVAL_CACHE_ENABLED", default=False)
-    cache_ttl_ms = _parse_int_env(
-        "HOST_RETRIEVAL_CACHE_TTL_MS",
-        default=3000,
-        minimum=0,
-        maximum=600000,
-    )
-    cache_max_entries = _parse_int_env(
-        "HOST_RETRIEVAL_CACHE_MAX_ENTRIES",
-        default=256,
-        minimum=1,
-        maximum=20000,
-    )
-    cache_signature = (
-        bool(cache_enabled and cache_ttl_ms > 0 and cache_max_entries > 0),
-        int(max(0, cache_ttl_ms)),
-        int(max(1, cache_max_entries)),
-    )
-    if (
-        _retrieval_orchestrator is None
-        or _retrieval_orchestrator.pipeline is not pipeline
-        or _retrieval_orchestrator.cache_config_signature != cache_signature
-    ):
-        _retrieval_orchestrator = RetrievalOrchestrator(
-            pipeline=pipeline,
-            cache_enabled=cache_enabled,
-            cache_ttl_ms=cache_ttl_ms,
-            cache_max_entries=cache_max_entries,
-        )
-    return _retrieval_orchestrator
+def get_retrieval_orchestrator() -> None:
+    """Legacy retrieval compatibility shim."""
+    return None
 
 
 def get_graph_runtime() -> GraphRuntimeContract:

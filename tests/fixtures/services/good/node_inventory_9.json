@@ -6,8 +6,7 @@
     "host.governor.decision",
     "host.skills.loader",
     "host.integrations.llm_gateway",
-    "host.retrieval.embedding",
-    "host.retrieval.reranker",
+    "host.retrieval.recall_fusion",
     "host.vision.screen_ocr",
     "host.vision.camera_recognizer",
     "edge.rpc.gateway",
@@ -55,8 +54,7 @@
       "region": "us-west-1",
       "role": "retrieval",
       "services": [
-        "host.retrieval.embedding",
-        "host.retrieval.reranker"
+        "host.retrieval.recall_fusion"
       ],
       "health_endpoint": "https://node04.Natsume.ai/healthz",
       "key_profile_id": "kpf-node-04"
@@ -111,7 +109,7 @@
       "role": "standby",
       "services": [
         "host.integrations.llm_gateway",
-        "host.retrieval.embedding",
+        "host.retrieval.recall_fusion",
         "edge.rpc.gateway"
       ],
       "health_endpoint": "https://node09.Natsume.ai/healthz",

@@ -1,43 +1,11 @@
-"""Host retrieval contracts exports."""
+"""Surface-chain recall exports.
 
-from host_brain.retrieval.embedding import (
-    RET_OP_EMBEDDING,
-    S_RET_EMBED_CONFIG,
-    S_RET_EMBEDDING,
-    STATUS_DEGRADED,
-    STATUS_OK,
-    EmbeddingConfigIssue,
-    EmbeddingConfigLoadResult,
-    EmbeddingRouteConfig,
-    EmbeddingResult,
-    EmbeddingRuntimeConfig,
-    EmbeddingServiceContract,
-    build_embedding_dependency_status,
-    load_embedding_runtime_config,
-    resolve_embedding_route,
-)
-from host_brain.retrieval.reranker import (
-    RET_OP_RERANK,
-    RERANK_MODEL_ID,
-    S_RET_RERANK_CONFIG,
-    S_RET_RERANK,
-    RerankConfigIssue,
-    RerankConfigLoadResult,
-    RerankRouteConfig,
-    RerankRuntimeConfig,
-    RerankerResult,
-    RerankerServiceContract,
-    build_reranker_dependency_status,
-    load_reranker_runtime_config,
-    resolve_reranker_route,
-)
-from host_brain.retrieval.evidence_pack import (
-    RET_OP_EVIDENCE_PACK,
-    S_RET_EVIDENCE_PACK,
-    SERIALIZATION_VERSION,
-    EvidencePackResult,
-    EvidencePackServiceContract,
-)
+The old Agentic RAG pipeline/orchestrator stack has been removed from this
+package. Current text generation uses RecallFusionServiceContract through
+host_brain.persona.surface_memory_recall and passes only compressed facts into
+ReplyControlPacket.
+"""
+
 from host_brain.retrieval.recall_fusion import (
     RET_OP_RECALL,
     S_RET_RECALL,
@@ -51,67 +19,11 @@ from host_brain.retrieval.recall_fusion import (
     load_recall_runtime_config,
     resolve_recall_routes,
 )
-from host_brain.retrieval.pipeline import (
-    RET_OP_PIPELINE,
-    S_RET_PIPELINE,
-    ChromaHttpSearchClient,
-    RetrievalPipelineContract,
-    RetrievalPipelineResult,
-    build_retrieval_pipeline_from_env,
-)
-from host_brain.retrieval.orchestrator import (
-    RETRIEVAL_PATH_ALL_FAILURE,
-    RETRIEVAL_PATH_PARTIAL_FAILURE,
-    RETRIEVAL_PATH_SUCCESS,
-    RetrievalOrchestrator,
-    RetrievalOrchestratorRequest,
-    RetrievalOrchestratorResult,
-    build_degraded_retrieval_summary,
-    build_skipped_retrieval_summary,
-    build_summary_from_pipeline_result,
-)
-from host_brain.retrieval.query_planner import (
-    QueryPlanner,
-    QueryPlan,
-)
-from host_brain.retrieval.evidence_evaluator import (
-    EvidenceEvaluator,
-    EvidenceEvaluation,
-)
-from host_brain.retrieval.agentic_retrieval_loop import (
-    AgenticRetrievalLoop,
-    AgenticRetrievalResult,
-)
 
 __all__ = [
-    "RET_OP_EMBEDDING",
-    "RET_OP_EVIDENCE_PACK",
-    "RET_OP_PIPELINE",
     "RET_OP_RECALL",
-    "RET_OP_RERANK",
-    "RERANK_MODEL_ID",
-    "SERIALIZATION_VERSION",
-    "S_RET_EMBED_CONFIG",
-    "S_RET_EMBEDDING",
-    "S_RET_EVIDENCE_PACK",
-    "S_RET_PIPELINE",
     "S_RET_RECALL",
     "S_RET_RECALL_CONFIG",
-    "S_RET_RERANK_CONFIG",
-    "S_RET_RERANK",
-    "STATUS_OK",
-    "STATUS_DEGRADED",
-    "EmbeddingConfigIssue",
-    "EmbeddingConfigLoadResult",
-    "EmbeddingRouteConfig",
-    "EmbeddingResult",
-    "EmbeddingRuntimeConfig",
-    "EmbeddingServiceContract",
-    "build_embedding_dependency_status",
-    "load_embedding_runtime_config",
-    "resolve_embedding_route",
-    "EvidencePackResult",
-    "EvidencePackServiceContract",
     "RecallConfigIssue",
     "RecallConfigLoadResult",
     "RecallFusionResult",
@@ -120,33 +32,4 @@ __all__ = [
     "RecallRuntimeConfig",
     "load_recall_runtime_config",
     "resolve_recall_routes",
-    "RetrievalPipelineContract",
-    "RetrievalPipelineResult",
-    "ChromaHttpSearchClient",
-    "build_retrieval_pipeline_from_env",
-    "RETRIEVAL_PATH_ALL_FAILURE",
-    "RETRIEVAL_PATH_PARTIAL_FAILURE",
-    "RETRIEVAL_PATH_SUCCESS",
-    "RetrievalOrchestrator",
-    "RetrievalOrchestratorRequest",
-    "RetrievalOrchestratorResult",
-    "build_degraded_retrieval_summary",
-    "build_skipped_retrieval_summary",
-    "build_summary_from_pipeline_result",
-    "RerankConfigIssue",
-    "RerankConfigLoadResult",
-    "RerankRouteConfig",
-    "RerankRuntimeConfig",
-    "RerankerResult",
-    "RerankerServiceContract",
-    "build_reranker_dependency_status",
-    "load_reranker_runtime_config",
-    "resolve_reranker_route",
-    # Agentic RAG (Phase X)
-    "QueryPlanner",
-    "QueryPlan",
-    "EvidenceEvaluator",
-    "EvidenceEvaluation",
-    "AgenticRetrievalLoop",
-    "AgenticRetrievalResult",
 ]

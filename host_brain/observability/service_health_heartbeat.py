@@ -43,8 +43,7 @@ _HEALTH_SID_TO_HEARTBEAT_SID: Dict[str, str] = {
     "host.governor.decision":         "llm_gateway",       # governor 依赖 LLM，映射到 llm_gateway
     "host.skills.loader":             "scheduler",          # skills loader 映射到 scheduler
     "host.integrations.llm_gateway":  "llm_gateway",
-    "host.retrieval.embedding":       "embedding",
-    "host.retrieval.reranker":        "reranker",
+    "host.retrieval.recall_fusion":   "recall_fusion",
     # Edge 侧映射
     "edge.rpc.gateway":               "edge_rpc",
     "edge.rpc.asr":                   "asr",

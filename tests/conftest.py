@@ -57,8 +57,6 @@ _RETIRED_PROMPT_SURFACE_COMPAT_TEST_FILES = {
     "test_repair_agent_handler.py",
     "test_self_model_helpers_extra.py",
     "test_self_reflection_helpers.py",
-    "test_style_distiller_helpers.py",
-    "test_style_distiller_prompt_templates.py",
     "test_sub_agent_protocol_templates.py",
     "test_trait_drift_guard_templates.py",
     "test_vision_ui_handler.py",

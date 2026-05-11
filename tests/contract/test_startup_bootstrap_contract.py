@@ -45,10 +45,10 @@ class TestStartupBootstrapContract(unittest.TestCase):
         self.assertEqual(S_SERVICE_BOOTSTRAP, report["stage"])
         self.assertEqual(BOOT_DEGRADED, report["summary"]["boot_status"])
         self.assertEqual(0, report["summary"]["issue_count"])
-        self.assertEqual(3, report["summary"]["probe_total"])
-        self.assertEqual(3, report["summary"]["probe_unavailable"])
+        self.assertEqual(2, report["summary"]["probe_total"])
+        self.assertEqual(2, report["summary"]["probe_unavailable"])
         self.assertEqual([], report["startup_issues"])
-        self.assertEqual(3, len(report["dependency_probes"]))
+        self.assertEqual(2, len(report["dependency_probes"]))
 
         llm_row = _pick_service(report, "host.integrations.llm_gateway")
         self.assertEqual(SERVICE_UNAVAILABLE_COLD_START, llm_row["reason_code"])
@@ -58,7 +58,7 @@ class TestStartupBootstrapContract(unittest.TestCase):
         self.assertEqual(SERVICE_UNAVAILABLE_EDGE_RPC, edge_row["reason_code"])
         self.assertEqual(S_SERVICE_HEALTH, edge_row["stage"])
 
-        retr_row = _pick_service(report, "host.retrieval.embedding")
+        retr_row = _pick_service(report, "host.retrieval.recall_fusion")
         self.assertEqual(SERVICE_UNAVAILABLE_DEPENDENCY, retr_row["reason_code"])
         self.assertEqual(S_SERVICE_HEALTH, retr_row["stage"])
 

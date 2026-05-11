@@ -114,7 +114,6 @@
 - `reflection_chain.contextual_fallback.greeting`：反思链最小兜底：问候（中日双语）
 - `reflection_chain.contextual_fallback.presence`：反思链最小兜底：在线确认（中日双语）
 - `reflection_chain.revision_empathy_prefix`：反思链负面情绪修正前缀（中日双语）
-- `style_distiller.render_instruction.templates`：StyleDistiller 风格蒸馏渲染与描述模板（JSON）
 - `bond_aware_style.style_templates.zh`：BondAwareStyle 中文镜像模板（按 canon 校准）
 - `bond_aware_style.style_templates.ja`：BondAwareStyle 日文镜像模板（按 canon 校准）
 - `expression_adapter.style_hint.templates.zh`：ExpressionAdapter 中文镜像模板（按 canon 校准）
