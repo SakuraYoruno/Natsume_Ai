@@ -915,3 +915,43 @@ def test_cli_run_cases_with_memory_writes_baseline_and_memory_variant(tmp_path) 
     assert "不要在回复里暴露 memory:// 或 evd://" in variants["with_memory"]
     assert "memory://episodic/mem-1" not in variants["with_memory"]
     assert "evd://episodic/mem-1" not in variants["with_memory"]
+
+
+def test_cli_run_cases_with_reply_surface_recall_writes_style_only_variant(tmp_path) -> None:
+    case = {
+        "case_id": "reply_surface_compare",
+        "user_message": "早",
+        "reply_control_packet": {
+            "response_move": "daily_good_morning",
+            "task_mode": "daily_good_morning",
+            "question_budget": 0,
+        },
+        "reply_surface_recall_packet": {
+            "style_anchor": ["历史表层风格：短句，少解释。"],
+            "must_not_do": ["不要照抄历史表层回复"],
+            "sample_digest": "abc123",
+            "raw_sample": "尼尼，早呀。",
+        },
+        "candidates_by_variant": {
+            "baseline": ["早。"],
+            "with_reply_surface": ["早啊，尼尼。"],
+        },
+    }
+
+    summary = run_cases([case], soul_md=SOUL, out_dir=tmp_path, with_reply_surface=True)
+
+    assert summary["cases"] == 1
+    assert summary["reply_surface_cases"] == 1
+    assert summary["prompt_variants"] == 2
+    assert summary["variant_summary"]["with_reply_surface"]["selected_count"] == 1
+    prompt_rows = [
+        json.loads(line)
+        for line in (tmp_path / "prompts.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    variants = {row["variant"]: "\n".join(message["content"] for message in row["messages"]) for row in prompt_rows}
+
+    assert set(variants) == {"baseline", "with_reply_surface"}
+    assert "历史表层风格：短句，少解释。" in variants["with_reply_surface"]
+    assert "不要照抄历史表层回复" in variants["with_reply_surface"]
+    assert "尼尼，早呀。" not in variants["with_reply_surface"]

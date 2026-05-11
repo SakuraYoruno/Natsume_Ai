@@ -26,6 +26,10 @@ from host_brain.persona.surface_memory_recall import (
     build_surface_input_with_memory_recall,
     memory_recall_packet_from_mapping,
 )
+from host_brain.persona.surface_reply_recall import (
+    build_surface_input_with_reply_surface_recall,
+    reply_surface_recall_packet_from_mapping,
+)
 
 
 _REQUEST_KEYS = {
@@ -38,6 +42,7 @@ _REQUEST_KEYS = {
     "user_message",
 }
 _MEMORY_PACKET_KEYS = ("memory_recall_packet", "memory_recall")
+_REPLY_SURFACE_PACKET_KEYS = ("reply_surface_recall_packet", "reply_surface_recall")
 
 
 def _read_json_or_jsonl(path: Path) -> list[dict[str, Any]]:
@@ -91,6 +96,14 @@ def _memory_packet_payload(case: Mapping[str, Any]) -> Mapping[str, Any] | None:
     return None
 
 
+def _reply_surface_packet_payload(case: Mapping[str, Any]) -> Mapping[str, Any] | None:
+    for key in _REPLY_SURFACE_PACKET_KEYS:
+        raw = case.get(key)
+        if isinstance(raw, Mapping):
+            return raw
+    return None
+
+
 def _context_from_request(request) -> ThreeLayerContinuityContext:
     control = request.control
     return ThreeLayerContinuityContext(
@@ -113,6 +126,7 @@ def _request_variants(
     *,
     soul_md: str,
     with_memory: bool,
+    with_reply_surface: bool = False,
 ) -> list[tuple[str, Any]]:
     baseline = build_isolated_surface_input(_case_request_payload(case, soul_md))
     variants: list[tuple[str, Any]] = [("baseline", baseline)]
@@ -123,6 +137,21 @@ def _request_variants(
             (
                 "with_memory",
                 build_surface_input_with_memory_recall(
+                    _context_from_request(baseline),
+                    packet=packet,
+                    soul_md=baseline.soul_md,
+                    case_id=baseline.case_id,
+                    max_facts=8,
+                ),
+            )
+        )
+    raw_reply_packet = _reply_surface_packet_payload(case)
+    if with_reply_surface and raw_reply_packet is not None:
+        packet = reply_surface_recall_packet_from_mapping(raw_reply_packet)
+        variants.append(
+            (
+                "with_reply_surface",
+                build_surface_input_with_reply_surface_recall(
                     _context_from_request(baseline),
                     packet=packet,
                     soul_md=baseline.soul_md,
@@ -390,13 +419,21 @@ def _write_memory_ab_report(path: Path, comparison: Mapping[str, Any], variant_s
     path.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8", newline="\n")
 
 
-def run_cases(cases: list[dict[str, Any]], *, soul_md: str, out_dir: Path, with_memory: bool = False) -> dict[str, Any]:
+def run_cases(
+    cases: list[dict[str, Any]],
+    *,
+    soul_md: str,
+    out_dir: Path,
+    with_memory: bool = False,
+    with_reply_surface: bool = False,
+) -> dict[str, Any]:
     out_dir.mkdir(parents=True, exist_ok=True)
     prompt_rows: list[dict[str, Any]] = []
     score_rows: list[dict[str, Any]] = []
     passed = 0
     scored = 0
     memory_cases = 0
+    reply_surface_cases = 0
     errors: list[dict[str, Any]] = []
     case_expectations: dict[str, list[str]] = {}
 
@@ -404,9 +441,16 @@ def run_cases(cases: list[dict[str, Any]], *, soul_md: str, out_dir: Path, with_
         case_id = str(case.get("case_id") or f"case_{index:03d}")
         case_expectations[case_id] = [str(term) for term in list(case.get("memory_expected_terms") or [])]
         try:
-            variants = _request_variants(case, soul_md=soul_md, with_memory=with_memory)
+            variants = _request_variants(
+                case,
+                soul_md=soul_md,
+                with_memory=with_memory,
+                with_reply_surface=with_reply_surface,
+            )
             if any(variant == "with_memory" for variant, _request in variants):
                 memory_cases += 1
+            if any(variant == "with_reply_surface" for variant, _request in variants):
+                reply_surface_cases += 1
             for variant, request in variants:
                 messages = build_isolated_surface_messages(request)
                 prompt_rows.append(
@@ -446,6 +490,7 @@ def run_cases(cases: list[dict[str, Any]], *, soul_md: str, out_dir: Path, with_
         "cases": len(cases),
         "errors": len(errors),
         "memory_cases": memory_cases,
+        "reply_surface_cases": reply_surface_cases,
         "output_dir": str(out_dir),
         "passed_scored_cases": passed,
         "prompt_variants": len(prompt_rows),
@@ -453,6 +498,7 @@ def run_cases(cases: list[dict[str, Any]], *, soul_md: str, out_dir: Path, with_
         "score_pass_rate": round(passed / scored, 4) if scored else None,
         "variant_summary": variant_summary,
         "with_memory": bool(with_memory),
+        "with_reply_surface": bool(with_reply_surface),
     }
     if with_memory:
         summary["memory_ab"] = memory_ab
@@ -465,6 +511,11 @@ def run_cases(cases: list[dict[str, Any]], *, soul_md: str, out_dir: Path, with_
 def _strict_failed(summary: Mapping[str, Any]) -> bool:
     if summary.get("errors"):
         return True
+    if summary.get("with_reply_surface"):
+        with_reply_surface = ((summary.get("variant_summary") or {}).get("with_reply_surface") or {})
+        selected = int(with_reply_surface.get("selected_count") or 0)
+        passed = int(with_reply_surface.get("pass_count") or 0)
+        return selected > 0 and passed != selected
     if summary.get("with_memory"):
         with_memory = ((summary.get("variant_summary") or {}).get("with_memory") or {})
         selected = int(with_memory.get("selected_count") or 0)
@@ -479,12 +530,19 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--soul", default=ROOT / "Soul.md", type=Path, help="Soul.md path.")
     parser.add_argument("--out", default=None, type=Path, help="Output directory for prompts/scores/summary.")
     parser.add_argument("--with-memory", action="store_true", help="Also build with_memory variants from compressed memory_recall_packet fields.")
+    parser.add_argument("--with-reply-surface", action="store_true", help="Also build variants from compressed reply_surface_recall_packet fields.")
     parser.add_argument("--strict", action="store_true", help="Return non-zero if any case errors or scored selected candidate fails.")
     args = parser.parse_args(argv)
 
     soul_md = args.soul.read_text(encoding="utf-8-sig")
     out_dir = args.out or (ROOT / "artifacts" / "isolated_surface_harness" / datetime.now().strftime("%Y%m%d_%H%M%S"))
-    summary = run_cases(_read_json_or_jsonl(args.cases), soul_md=soul_md, out_dir=out_dir, with_memory=args.with_memory)
+    summary = run_cases(
+        _read_json_or_jsonl(args.cases),
+        soul_md=soul_md,
+        out_dir=out_dir,
+        with_memory=args.with_memory,
+        with_reply_surface=args.with_reply_surface,
+    )
     print(json.dumps(summary, ensure_ascii=False, indent=2, sort_keys=True))
     if args.strict and _strict_failed(summary):
         return 2
