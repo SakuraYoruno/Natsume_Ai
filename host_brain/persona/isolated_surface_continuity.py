@@ -277,7 +277,7 @@ def build_reply_control_packet_from_context(
     snapshot = compress_three_layer_continuity_context(context, max_recent_turns=max_recent_turns)
     long_facts = [f"长期事实：{fact}" for fact in _clean_list(context.long_term_facts)[:2]]
     facts = snapshot.facts(
-        extra=[*long_facts, *_clean_list(context.necessary_facts)],
+        extra=[*_clean_list(context.necessary_facts), *long_facts],
         max_facts=max_facts,
     )
     task_mode = _clean_text(context.task_mode_hint) or "daily_chat"

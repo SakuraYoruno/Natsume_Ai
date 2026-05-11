@@ -203,6 +203,27 @@ python tools/isolated_surface_harness.py `
 - live avg selected score: `88.386`
 - live low score / hard fail / control violation: `0 / 0 / 0`
 
+三层压缩 actual-output 闭环：
+
+```powershell
+python tools/run_three_layer_chain_live_loop.py `
+  --out artifacts/isolated_surface_harness/three_layer_chain_36_closed_loop_v2_20260512 `
+  --progress-every 3
+```
+
+闭环 runner 是串行执行：第 `n` 轮 live selected reply 会进入第 `n+1` 轮的 `recent_turns`，但最终 prompt 只接收重新压缩后的 `ReplyControlPacket`。输出 artifact 里 `loop_trace.jsonl` 的 recent window 只保留 role、长度和 hash，不保存 raw recent 文本。
+
+当前 closed-loop baseline：
+
+- closed loop: `true`
+- actual feedback turns: `36`
+- result: `36/36` turn pass，`1/1` dialogue pass
+- avg selected score: `88.261`
+- low score / hard fail / control violation: `0 / 0 / 0`
+- raw recent leak count: `0`
+- recent window hash only: `true`
+- quality report watch rows: `4`
+
 构建 smoke case：
 
 ```powershell
