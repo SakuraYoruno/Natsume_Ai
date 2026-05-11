@@ -160,8 +160,10 @@ def test_recall_surface_memory_packet_calls_recall_and_surface_gets_only_facts()
 
     assert captured["request_id"] == "req-memory"
     assert captured["target_store_ids"] == ["episodic_vector", "neo4j_bond"]
-    assert "记忆线索：上次说好周末去看展" in rendered
-    assert "关系线索：关系阶段：熟人私聊，别升级亲密。" in rendered
+    assert "记忆线索：上次说好周末去看展" not in rendered
+    assert "关系线索：关系阶段：熟人私聊，别升级亲密。" not in rendered
+    assert "上次说好周末去看展" in rendered
+    assert "关系阶段：熟人私聊，别升级亲密。" in rendered
     assert "memory://episodic/mem-1" not in rendered
     assert "metadata" not in rendered
 

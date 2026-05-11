@@ -174,7 +174,7 @@ def _selected_dimensions(selected: Mapping[str, Any] | None) -> dict[str, float]
 def _memory_watch_flags(text: str) -> list[str]:
     markers = {
         "memory_source_leak": ("memory://", "evd://", "chat://"),
-        "recall_process_leak": ("召回", "检索到", "根据记忆", "记忆线索", "关系线索", "证据"),
+        "recall_process_leak": ("召回", "检索到", "根据记忆", "记忆线索", "关系线索", "压缩记忆", "证据", "熟人私聊"),
         "stiff_memory_surface": ("具体点就是", "记录显示", "资料显示", "事实如下"),
     }
     flags: list[str] = []
@@ -257,7 +257,11 @@ def _build_memory_ab_comparison(
         naturalness_delta = memory_dims.get("naturalness", 0.0) - base_dims.get("naturalness", 0.0)
         context_delta = memory_dims.get("context_fit", 0.0) - base_dims.get("context_fit", 0.0)
         distance_delta = memory_dims.get("distance_control", 0.0) - base_dims.get("distance_control", 0.0)
+        usefulness_delta = memory_dims.get("usefulness", 0.0) - base_dims.get("usefulness", 0.0)
+        technical_delta = memory_dims.get("technical_helpfulness", 0.0) - base_dims.get("technical_helpfulness", 0.0)
         memory_flags = _memory_watch_flags(memory_text)
+        with_memory_expected_hit = _contains_expected_term(memory_text, expected_terms)
+        baseline_expected_hit = _contains_expected_term(base_text, expected_terms)
         row = {
             "case_id": case_id,
             "baseline_text": base_text,
@@ -266,18 +270,30 @@ def _build_memory_ab_comparison(
             "naturalness_delta": round(naturalness_delta, 3),
             "context_fit_delta": round(context_delta, 3),
             "distance_control_delta": round(distance_delta, 3),
-            "baseline_expected_hit": _contains_expected_term(base_text, expected_terms),
-            "with_memory_expected_hit": _contains_expected_term(memory_text, expected_terms),
+            "usefulness_delta": round(usefulness_delta, 3),
+            "technical_helpfulness_delta": round(technical_delta, 3),
+            "baseline_expected_hit": baseline_expected_hit,
+            "with_memory_expected_hit": with_memory_expected_hit,
             "with_memory_flags": memory_flags,
         }
         compared.append(row)
-        if score_delta < -5 or naturalness_delta < -5 or distance_delta < -5 or memory_flags:
+        technical_priority_ok = (
+            with_memory_expected_hit
+            and technical_delta >= 0
+            and usefulness_delta >= 0
+            and memory_dims.get("technical_helpfulness", 0.0) >= 90.0
+            and memory_dims.get("usefulness", 0.0) >= 90.0
+        )
+        naturalness_regressed = naturalness_delta < -5 and not technical_priority_ok
+        if score_delta < -5 or naturalness_regressed or distance_delta < -5 or memory_flags:
             regressions.append(row)
 
     score_deltas = [row["score_delta"] for row in compared]
     naturalness_deltas = [row["naturalness_delta"] for row in compared]
     context_deltas = [row["context_fit_delta"] for row in compared]
     distance_deltas = [row["distance_control_delta"] for row in compared]
+    usefulness_deltas = [row["usefulness_delta"] for row in compared]
+    technical_deltas = [row["technical_helpfulness_delta"] for row in compared]
     memory_hit_gain = sum(
         1
         for row in compared
@@ -285,6 +301,7 @@ def _build_memory_ab_comparison(
     )
     regression_count = len(regressions)
     compared_count = len(compared)
+    memory_hit_gain_rate = memory_hit_gain / compared_count if compared_count else 0.0
     avg_naturalness_delta = round(statistics.fmean(naturalness_deltas), 3) if naturalness_deltas else None
     avg_distance_delta = round(statistics.fmean(distance_deltas), 3) if distance_deltas else None
     verdict = "not_run"
@@ -294,7 +311,7 @@ def _build_memory_ab_comparison(
             (avg_naturalness_delta is None or avg_naturalness_delta >= -5.0)
             and (avg_distance_delta is None or avg_distance_delta >= -5.0)
         )
-        if memory_hit_gain > 0 and avg_quality_ok and not has_flag_regression:
+        if memory_hit_gain_rate >= 0.5 and avg_quality_ok and not has_flag_regression:
             verdict = "pass"
         elif memory_hit_gain > 0 and avg_quality_ok:
             verdict = "watch"
@@ -306,8 +323,10 @@ def _build_memory_ab_comparison(
         "avg_naturalness_delta": avg_naturalness_delta,
         "avg_context_fit_delta": round(statistics.fmean(context_deltas), 3) if context_deltas else None,
         "avg_distance_control_delta": avg_distance_delta,
+        "avg_usefulness_delta": round(statistics.fmean(usefulness_deltas), 3) if usefulness_deltas else None,
+        "avg_technical_helpfulness_delta": round(statistics.fmean(technical_deltas), 3) if technical_deltas else None,
         "memory_expected_hit_gain_count": memory_hit_gain,
-        "memory_expected_hit_gain_rate": round(memory_hit_gain / len(compared), 4) if compared else None,
+        "memory_expected_hit_gain_rate": round(memory_hit_gain_rate, 4) if compared else None,
         "regression_count": regression_count,
         "regressions": regressions[:20],
         "rows": compared,
@@ -324,6 +343,8 @@ def _write_memory_ab_report(path: Path, comparison: Mapping[str, Any], variant_s
         f"- avg naturalness delta: `{comparison.get('avg_naturalness_delta')}`",
         f"- avg context_fit delta: `{comparison.get('avg_context_fit_delta')}`",
         f"- avg distance_control delta: `{comparison.get('avg_distance_control_delta')}`",
+        f"- avg usefulness delta: `{comparison.get('avg_usefulness_delta')}`",
+        f"- avg technical_helpfulness delta: `{comparison.get('avg_technical_helpfulness_delta')}`",
         f"- memory expected hit gain: `{comparison.get('memory_expected_hit_gain_count')}/{comparison.get('compared_cases')}`",
         f"- regressions: `{comparison.get('regression_count')}`",
         f"- verdict: `{comparison.get('verdict')}`",
@@ -340,7 +361,7 @@ def _write_memory_ab_report(path: Path, comparison: Mapping[str, Any], variant_s
             [
                 f"### {row['case_id']}",
                 "",
-                f"- delta: score `{row['score_delta']}`, naturalness `{row['naturalness_delta']}`, context `{row['context_fit_delta']}`, distance `{row['distance_control_delta']}`",
+                f"- delta: score `{row['score_delta']}`, naturalness `{row['naturalness_delta']}`, context `{row['context_fit_delta']}`, distance `{row['distance_control_delta']}`, usefulness `{row['usefulness_delta']}`, technical `{row['technical_helpfulness_delta']}`",
                 f"- expected hit: baseline `{row['baseline_expected_hit']}`, with_memory `{row['with_memory_expected_hit']}`",
                 f"- flags: {flags}",
                 f"- baseline: {row['baseline_text']}",

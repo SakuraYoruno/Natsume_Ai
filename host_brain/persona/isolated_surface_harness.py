@@ -209,6 +209,76 @@ _SCENE_STYLE_QUERY: dict[str, dict[str, tuple[str, ...] | str]] = {
     "daily_chat": {"intent_tags": ("daily",), "style_moves": ("quick_reaction",)},
     "default": {"intent_tags": ("daily",), "style_moves": ("quick_reaction",)},
 }
+_MEMORY_FACT_PREFIXES = (
+    "记忆线索：",
+    "关系线索：",
+    "世界事实：",
+    "制品线索：",
+    "召回线索：",
+)
+_CJK_SEQUENCE_RE = re.compile(r"[\u4e00-\u9fff]{2,}")
+_ASCII_TERM_RE = re.compile(r"[A-Za-z][A-Za-z0-9_+.-]{1,}")
+_FACT_SPLIT_RE = re.compile(r"[，。；、,.!?！？;:\s]+")
+_MEMORY_ALIGNMENT_TASKS = frozenset(
+    {
+        "back",
+        "identity",
+        "memory_followup",
+        "next_step",
+        "recall",
+        "recall_memory",
+        "relationship_boundary",
+    }
+)
+_MEMORY_ALIGNMENT_HINTS = (
+    "还记得",
+    "记得",
+    "上次",
+    "之前",
+    "以前",
+    "那天",
+    "刚才",
+    "刚刚",
+    "继续",
+    "回来",
+    "remember",
+    "last time",
+)
+_MEMORY_TERM_STOPS = frozenset(
+    {
+        "一个",
+        "一下",
+        "不会",
+        "不要",
+        "不能",
+        "不想",
+        "不是",
+        "事实",
+        "关系",
+        "关系线索",
+        "刚才",
+        "当前",
+        "新海天",
+        "时候",
+        "最近",
+        "用户",
+        "熟人",
+        "私聊",
+        "线索",
+        "记忆",
+        "说好",
+        "还是",
+        "这个",
+    }
+)
+_MEMORY_TERM_STOP_CHARS = frozenset("个的一是在了和也就都我你他她它")
+_MEMORY_BONUS_BLOCKING_QUALITY_CODES = frozenset({"FORBIDDEN_TEMPLATE_TEXT"})
+_CORE_PASS_DIMENSION_FLOORS = {
+    "context_fit": 72.0,
+    "distance_control": 72.0,
+    "implied_fact_risk": 72.0,
+    "naturalness": 75.0,
+}
 
 
 def _clean_text(raw: Any) -> str:
@@ -312,6 +382,82 @@ def merged_must_not_do(request: IsolatedSurfaceInput) -> list[str]:
     return _clean_list([*request.control.must_not_do, *request.must_not_do])
 
 
+def _strip_memory_fact_prefix(fact: str) -> str:
+    text = _clean_text(fact)
+    for prefix in _MEMORY_FACT_PREFIXES:
+        if text.startswith(prefix):
+            return _clean_text(text.removeprefix(prefix))
+    return text
+
+
+def surface_prompt_facts(request: IsolatedSurfaceInput) -> list[str]:
+    return _clean_list(_strip_memory_fact_prefix(fact) for fact in merged_facts(request))
+
+
+def memory_carryover_facts(request: IsolatedSurfaceInput) -> list[str]:
+    rows: list[str] = []
+    for fact in merged_facts(request):
+        text = _clean_text(fact)
+        stripped = _strip_memory_fact_prefix(text)
+        if stripped and stripped != text:
+            rows.append(stripped)
+    return _clean_list(rows)
+
+
+def memory_alignment_terms(request: IsolatedSurfaceInput) -> tuple[str, ...]:
+    terms: list[str] = []
+    for fact in memory_carryover_facts(request):
+        fact = _clean_text(fact)
+        for raw in _ASCII_TERM_RE.findall(fact):
+            term = raw.strip().lower()
+            if len(term) >= 2 and term not in _MEMORY_TERM_STOPS:
+                terms.append(term)
+        for part in _FACT_SPLIT_RE.split(fact):
+            text = _clean_text(part)
+            if not text:
+                continue
+            if len(text) <= 6 and text not in _MEMORY_TERM_STOPS:
+                terms.append(text)
+            for sequence in _CJK_SEQUENCE_RE.findall(text):
+                if len(sequence) <= 6 and sequence not in _MEMORY_TERM_STOPS:
+                    terms.append(sequence)
+                for index in range(max(0, len(sequence) - 1)):
+                    chunk = sequence[index : index + 2]
+                    if chunk not in _MEMORY_TERM_STOPS and not any(char in _MEMORY_TERM_STOP_CHARS for char in chunk):
+                        terms.append(chunk)
+    return tuple(_clean_list(terms)[:24])
+
+
+def _memory_alignment_relevant(request: IsolatedSurfaceInput) -> bool:
+    task_mode = _clean_text(request.control.task_mode or request.control.response_move).lower()
+    response_move = _clean_text(request.control.response_move).lower()
+    user_message = _clean_text(request.user_message).lower()
+    if task_mode in _MEMORY_ALIGNMENT_TASKS or response_move in _MEMORY_ALIGNMENT_TASKS:
+        return True
+    if "memory" in task_mode or "recall" in task_mode or "memory" in response_move or "recall" in response_move:
+        return True
+    return any(hint in user_message for hint in _MEMORY_ALIGNMENT_HINTS)
+
+
+def _memory_alignment_hits(text: str, terms: Sequence[str]) -> list[str]:
+    lowered = text.lower()
+    hits: list[str] = []
+    for term in terms:
+        needle = term.lower() if _ASCII_TERM_RE.fullmatch(term) else term
+        haystack = lowered if _ASCII_TERM_RE.fullmatch(term) else text
+        if needle and needle in haystack:
+            hits.append(term)
+    return _clean_list(hits)
+
+
+def _core_pass_dimension_violations(dimensions: Mapping[str, float]) -> list[str]:
+    violations: list[str] = []
+    for name, floor in _CORE_PASS_DIMENSION_FLOORS.items():
+        if float(dimensions.get(name, 100.0)) < floor:
+            violations.append(f"{name}<{floor:g}")
+    return violations
+
+
 def build_style_reference_query(request: IsolatedSurfaceInput, *, limit: int = 5) -> StyleReferenceQuery:
     contract = build_galgame_text_contract(
         user_message=request.user_message,
@@ -398,7 +544,7 @@ def build_isolated_surface_messages(
     )
     turn_contract_payload.pop("forbidden_surface", None)
     control_payload = _model_dump(control)
-    control_payload["facts"] = merged_facts(request)
+    control_payload["facts"] = surface_prompt_facts(request)
     control_payload["must_not_do"] = merged_must_not_do(request)
     no_question_line = (
         "本轮 question_budget=0：候选里不要出现 ? 或 ？；不要用反问句撑角色感。"
@@ -422,24 +568,27 @@ def build_isolated_surface_messages(
             request.soul_md.strip(),
         )
     )
-    user_prompt = "\n".join(
-        (
-            "## 当前用户输入",
-            request.user_message,
-            "",
-            "## ReplyControlPacket",
-            json.dumps(control_payload, ensure_ascii=False, indent=2, sort_keys=True),
-            "",
-            "## TurnSurfaceContract",
-            json.dumps(turn_contract_payload, ensure_ascii=False, indent=2, sort_keys=True),
-            "",
-            "## 必要事实",
-            "\n".join(f"- {item}" for item in merged_facts(request)) or "- 无",
+    user_parts = [
+        "## 当前用户输入",
+        request.user_message,
+        "",
+        "## ReplyControlPacket",
+        json.dumps(control_payload, ensure_ascii=False, indent=2, sort_keys=True),
+        "",
+        "## TurnSurfaceContract",
+        json.dumps(turn_contract_payload, ensure_ascii=False, indent=2, sort_keys=True),
+        "",
+        "## 必要事实",
+        "\n".join(f"- {item}" for item in surface_prompt_facts(request)) or "- 无",
+    ]
+    user_parts.extend(
+        [
             "",
             "## must_not_do",
             "\n".join(f"- {item}" for item in merged_must_not_do(request)) or "- 无",
-        )
+        ]
     )
+    user_prompt = "\n".join(user_parts)
     return [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}]
 
 
@@ -559,6 +708,8 @@ def score_isolated_surface_candidates(
         scene_id=request.control.task_mode,
     )
     quality_gate = get_text_quality_gate()
+    memory_terms = memory_alignment_terms(request)
+    memory_relevant = bool(memory_terms and _memory_alignment_relevant(request))
     rows: list[IsolatedCandidateScore] = []
     for candidate in _clean_list(candidates):
         quality = quality_gate.validate(
@@ -577,20 +728,42 @@ def score_isolated_surface_candidates(
         )
         violations = _control_violations(request, quality.normalized_text or candidate)
         score = float(sample_score.score)
+        dimensions = dict(sample_score.dimensions)
+        reason_codes = [*sample_score.reason_codes, *quality.reason_codes]
         if violations:
             score -= min(42.0, 14.0 * len(violations))
+        memory_hits = _memory_alignment_hits(quality.normalized_text or candidate, memory_terms)
+        if memory_terms:
+            if memory_hits:
+                bonus = min(6.0, 2.0 + 1.5 * len(memory_hits))
+                if any(
+                    code in _MEMORY_BONUS_BLOCKING_QUALITY_CODES or code.startswith("QUALITY_SOFT_")
+                    for code in reason_codes
+                ):
+                    bonus = min(bonus, 1.0)
+                score += bonus
+                dimensions["memory_alignment"] = min(100.0, 86.0 + min(10.0, 2.0 * len(memory_hits)))
+                dimensions["context_fit"] = min(100.0, float(dimensions.get("context_fit", 86.0)) + min(4.0, len(memory_hits)))
+                reason_codes.append("MEMORY_ALIGNMENT_HIT:" + ",".join(memory_hits[:4]))
+            elif memory_relevant:
+                score -= 5.0
+                dimensions["memory_alignment"] = 70.0
+                dimensions["context_fit"] = max(0.0, float(dimensions.get("context_fit", 86.0)) - 4.0)
+                reason_codes.append("MEMORY_ALIGNMENT_MISS")
+        core_dimension_violations = _core_pass_dimension_violations(dimensions)
+        reason_codes.extend(f"CORE_DIMENSION_FLOOR:{item}" for item in core_dimension_violations)
         score = max(0.0, min(100.0, score))
         hard_fail = bool(sample_score.hard_fail)
-        passed = bool(score >= 80.0 and not hard_fail and not violations)
+        passed = bool(score >= 80.0 and not hard_fail and not violations and not core_dimension_violations)
         rows.append(
             IsolatedCandidateScore(
                 text=quality.normalized_text or candidate,
                 score=score,
                 passed=passed,
                 hard_fail=hard_fail,
-                reason_codes=tuple(dict.fromkeys([*sample_score.reason_codes, *quality.reason_codes])),
+                reason_codes=tuple(dict.fromkeys(reason_codes)),
                 control_violations=tuple(violations),
-                dimensions=dict(sample_score.dimensions),
+                dimensions=dimensions,
                 quality=quality.as_dict(),
             )
         )
@@ -644,8 +817,11 @@ __all__ = [
     "find_forbidden_input_paths",
     "merged_facts",
     "merged_must_not_do",
+    "memory_alignment_terms",
+    "memory_carryover_facts",
     "parse_surface_candidates",
     "run_isolated_surface_generation",
     "score_isolated_surface_candidates",
     "select_best_isolated_candidate",
+    "surface_prompt_facts",
 ]

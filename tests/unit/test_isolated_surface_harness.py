@@ -14,10 +14,13 @@ from host_brain.persona.isolated_surface_harness import (
     find_forbidden_input_paths,
     merged_facts,
     merged_must_not_do,
+    memory_alignment_terms,
+    memory_carryover_facts,
     parse_surface_candidates,
     run_isolated_surface_generation,
     score_isolated_surface_candidates,
     select_best_isolated_candidate,
+    surface_prompt_facts,
 )
 from host_brain.persona.style_reference_bank import clear_style_reference_bank_cache, style_reference_from_raw_row
 from tools.isolated_surface_harness import run_cases
@@ -191,6 +194,55 @@ def test_facts_and_must_not_do_are_merged_and_deduplicated() -> None:
     assert merged_must_not_do(request) == ["哥哥", "脑补昨晚发生了什么"]
 
 
+def test_memory_facts_are_cleaned_without_adding_forcing_prompt() -> None:
+    request = build_isolated_surface_input(
+        {
+            "case_id": "memory_carryover",
+            "soul_md": SOUL,
+            "user_message": "还记得上次说的展吗",
+            "reply_control_packet": {
+                "response_move": "recall_memory",
+                "task_mode": "recall_memory",
+                "question_budget": 0,
+                "facts": ["记忆线索：上次说好周末去看展", "关系线索：熟人私聊，不升级亲密。"],
+                "must_not_do": ["不要暴露来源"],
+            },
+        }
+    )
+
+    rendered = "\n".join(message["content"] for message in build_isolated_surface_messages(request))
+
+    assert memory_carryover_facts(request) == ["上次说好周末去看展", "熟人私聊，不升级亲密。"]
+    assert surface_prompt_facts(request) == ["上次说好周末去看展", "熟人私聊，不升级亲密。"]
+    assert "## 本轮可自然承接的压缩记忆" not in rendered
+    assert "候选要自然带出其中一个具体内容" not in rendered
+    assert "- 上次说好周末去看展" in rendered
+    assert "- 记忆线索：上次说好周末去看展" not in rendered
+    assert "evd://" not in rendered
+
+
+def test_memory_alignment_terms_extract_reusable_surface_terms() -> None:
+    request = build_isolated_surface_input(
+        {
+            "case_id": "memory_terms",
+            "soul_md": SOUL,
+            "user_message": "这个报错还是不懂",
+            "reply_control_packet": {
+                "response_move": "next_step",
+                "task_mode": "next_step",
+                "question_budget": 0,
+                "facts": ["记忆线索：刚才卡在 pytest collect 阶段"],
+            },
+        }
+    )
+
+    terms = memory_alignment_terms(request)
+
+    assert "pytest" in terms
+    assert "collect" in terms
+    assert "阶段" in terms
+
+
 def test_parse_surface_candidates_accepts_json_and_dedupes() -> None:
     raw = json.dumps({"candidates": ["继续，先锁住 ReplyControlPacket。", "继续，先锁住 ReplyControlPacket。", "别急，先测。"]}, ensure_ascii=False)
 
@@ -237,6 +289,89 @@ def test_score_and_select_prefers_control_compliant_candidate() -> None:
     selected = select_best_isolated_candidate(rows)
     assert selected is not None
     assert selected.text == "继续，先把入口锁在 ReplyControlPacket 上。"
+
+
+def test_memory_alignment_rerank_prefers_specific_memory_candidate() -> None:
+    request = build_isolated_surface_input(
+        {
+            "case_id": "memory_rerank",
+            "soul_md": SOUL,
+            "user_message": "还记得上次说的展吗",
+            "reply_control_packet": {
+                "response_move": "recall_memory",
+                "task_mode": "recall_memory",
+                "question_budget": 0,
+                "facts": ["记忆线索：上次说好周末去看展"],
+            },
+        }
+    )
+    rows = score_isolated_surface_candidates(
+        request,
+        [
+            "记得一点，你接着说就行。",
+            "记得啊，周末看展这事我没忘。",
+        ],
+    )
+
+    selected = select_best_isolated_candidate(rows)
+
+    assert selected is not None
+    assert selected.text == "记得啊，周末看展这事我没忘。"
+    assert "memory_alignment" in selected.dimensions
+    assert any(code.startswith("MEMORY_ALIGNMENT_HIT:") for code in selected.reason_codes)
+    assert any("MEMORY_ALIGNMENT_MISS" in row.reason_codes for row in rows if row.text.startswith("记得一点"))
+
+
+def test_memory_alignment_bonus_does_not_override_quality_soft_issue() -> None:
+    request = build_isolated_surface_input(
+        {
+            "case_id": "memory_quality_guard",
+            "soul_md": SOUL,
+            "user_message": "我回来了",
+            "reply_control_packet": {
+                "response_move": "back",
+                "task_mode": "back",
+                "question_budget": 0,
+                "facts": ["记忆线索：上一轮用户说等我一下，新海天答应先占个位置"],
+            },
+        }
+    )
+    rows = score_isolated_surface_candidates(
+        request,
+        [
+            "回来了啊，位置还给你留着呢。",
+            "嗯，刚才那个位置我还占着，回来得正好。",
+        ],
+    )
+
+    selected = select_best_isolated_candidate(rows)
+
+    assert selected is not None
+    assert selected.text == "回来了啊，位置还给你留着呢。"
+
+
+def test_core_dimension_floor_blocks_low_distance_memory_pass() -> None:
+    request = build_isolated_surface_input(
+        {
+            "case_id": "memory_distance_floor",
+            "soul_md": SOUL,
+            "user_message": "我回来了",
+            "reply_control_packet": {
+                "response_move": "back",
+                "task_mode": "back",
+                "question_budget": 0,
+                "facts": ["记忆线索：上一轮用户说等我一下，新海天答应先占个位置"],
+            },
+        }
+    )
+    rows = score_isolated_surface_candidates(
+        request,
+        ["回来了啊！我刚占好位置，就等你呢。"],
+    )
+
+    assert rows[0].score >= 80.0
+    assert not rows[0].passed
+    assert any(code.startswith("CORE_DIMENSION_FLOOR:distance_control") for code in rows[0].reason_codes)
 
 
 def test_short_ack_rerank_does_not_select_bland_pass() -> None:
@@ -558,8 +693,10 @@ def test_cli_run_cases_with_memory_writes_baseline_and_memory_variant(tmp_path) 
 
     assert set(variants) == {"baseline", "with_memory"}
     assert "记忆线索：上次说好周末看展" not in variants["baseline"]
-    assert "记忆线索：上次说好周末看展" in variants["with_memory"]
-    assert "关系线索：熟人私聊，不升级亲密。" in variants["with_memory"]
+    assert "记忆线索：上次说好周末看展" not in variants["with_memory"]
+    assert "关系线索：熟人私聊，不升级亲密。" not in variants["with_memory"]
+    assert "上次说好周末看展" in variants["with_memory"]
+    assert "熟人私聊，不升级亲密。" in variants["with_memory"]
     assert "不要在回复里暴露 memory:// 或 evd://" in variants["with_memory"]
     assert "memory://episodic/mem-1" not in variants["with_memory"]
     assert "evd://episodic/mem-1" not in variants["with_memory"]
