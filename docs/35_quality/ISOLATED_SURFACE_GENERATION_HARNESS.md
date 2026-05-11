@@ -177,6 +177,32 @@ python tools/isolated_surface_harness.py `
 - live avg selected score: `88.854`
 - live low score / hard fail / control violation: `0 / 0 / 0`
 
+三层压缩 36 轮长链：
+
+```powershell
+python tools/build_three_layer_surface_cases.py `
+  --suite chain `
+  --out artifacts/isolated_surface_harness/three_layer_chain_36_20260512 `
+  --force
+
+python tools/isolated_surface_harness.py `
+  --cases artifacts/isolated_surface_harness/three_layer_chain_36_20260512/cases.jsonl `
+  --out artifacts/isolated_surface_harness/three_layer_chain_36_20260512/prompt_build `
+  --strict
+```
+
+当前三层 36 轮长链 baseline：
+
+- cases: `36`
+- max chain turns: `36`
+- max facts per case: `6`
+- raw context crosses surface: `false`
+- prompt/scorer strict: `36/36`
+- live run: `artifacts/isolated_surface_harness/three_layer_chain_36_live_20260512`
+- live result: `36/36`
+- live avg selected score: `88.386`
+- live low score / hard fail / control violation: `0 / 0 / 0`
+
 构建 smoke case：
 
 ```powershell

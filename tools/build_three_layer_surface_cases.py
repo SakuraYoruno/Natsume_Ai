@@ -15,15 +15,18 @@ from host_brain.persona.isolated_surface_continuity import (
     build_reply_control_packet_from_context,
 )
 from host_brain.persona.isolated_surface_harness import build_isolated_surface_input
+from tools.build_isolated_surface_continuity_cases import build_continuity_long_cases
 
 
 DEFAULT_OUT = ROOT / "artifacts" / "isolated_surface_harness" / "three_layer_surface_20260511"
+DEFAULT_CHAIN_OUT = ROOT / "artifacts" / "isolated_surface_harness" / "three_layer_chain_36_20260512"
 SOUL = "你是新海天。说话短一点，有轻微二次元 galgame 私聊感。"
 RAW_LEAK_SENTINELS = (
     "RAW_RECENT_DO_NOT_LEAK_USER_ALPHA",
     "RAW_RECENT_DO_NOT_LEAK_ASSISTANT_ALPHA",
     "RAW_RECENT_DO_NOT_LEAK_TECH_BETA",
 )
+RAW_CHAIN_SENTINEL_PREFIX = "RAW_CHAIN_DO_NOT_LEAK_"
 
 
 def _write_json(path: Path, payload: Mapping[str, Any]) -> None:
@@ -220,41 +223,99 @@ def build_three_layer_surface_cases() -> list[dict[str, Any]]:
     ]
 
 
-def build_summary(cases: list[dict[str, Any]], *, out_dir: Path) -> dict[str, Any]:
+def _raw_chain_turn(role: str, turn_index: int, text: str) -> dict[str, str]:
+    role_label = "USER" if role == "user" else "ASSISTANT"
+    return {
+        "role": role,
+        "content": f"{RAW_CHAIN_SENTINEL_PREFIX}{turn_index:02d}_{role_label} {text}",
+    }
+
+
+def build_three_layer_chain_cases() -> list[dict[str, Any]]:
+    long_case = build_continuity_long_cases()[0]
+    raw_recent: list[dict[str, str]] = []
+    cases: list[dict[str, Any]] = []
+    for turn_index, turn in enumerate(long_case["turns"], start=1):
+        control = turn.get("reply_control_packet") or turn.get("control") or {}
+        task_mode = str(control.get("task_mode") or control.get("response_move") or "daily_chat")
+        candidates = tuple(str(item) for item in list(turn.get("candidates") or []))
+        context = ThreeLayerContinuityContext(
+            current_user_message=str(turn.get("user_message") or ""),
+            recent_turns=tuple(raw_recent[-8:]),
+            mid_term_summary="尼尼和新海天在用三层压缩长链验证最终表层回复。",
+            long_term_facts=(
+                "最终生成层不能读取原始最近轮次。",
+                "最近 N 轮原文只能进入压缩器。",
+            ),
+            task_mode_hint=task_mode,
+            response_move_hint=str(control.get("response_move") or task_mode),
+            emotional_tone_hint=str(control.get("emotional_tone") or "light"),
+            relationship_distance=str(control.get("relationship_distance") or "familiar"),
+            information_budget=str(control.get("information_budget") or "short"),
+            question_budget=int(control.get("question_budget") or 0),
+            must_include=tuple(str(item) for item in list(control.get("must_include") or [])),
+            must_not_do=tuple(str(item) for item in list(control.get("must_not_do") or [])),
+            necessary_facts=("必要事实：本轮由三层上下文压缩成控制包。",),
+            style_anchor=("三层长链",),
+        )
+        case = _surface_case(
+            f"three_layer_chain_36_t{turn_index:02d}",
+            context,
+            candidates=candidates,
+        )
+        case["chain_id"] = "three_layer_chain_36"
+        case["turn_index"] = turn_index
+        cases.append(case)
+
+        raw_recent.append(_raw_chain_turn("user", turn_index, str(turn.get("user_message") or "")))
+        if candidates:
+            raw_recent.append(_raw_chain_turn("assistant", turn_index, candidates[0]))
+    return cases
+
+
+def build_summary(cases: list[dict[str, Any]], *, out_dir: Path, suite: str = "surface") -> dict[str, Any]:
     task_counts: dict[str, int] = {}
     max_facts = 0
+    chain_turns: dict[str, int] = {}
     for case in cases:
         control = case.get("reply_control_packet") or {}
         if isinstance(control, Mapping):
             task = str(control.get("task_mode") or "unknown")
             task_counts[task] = task_counts.get(task, 0) + 1
             max_facts = max(max_facts, len(list(control.get("facts") or [])))
+        chain_id = str(case.get("chain_id") or "")
+        if chain_id:
+            chain_turns[chain_id] = max(chain_turns.get(chain_id, 0), int(case.get("turn_index") or 0))
     return {
         "cases": len(cases),
+        "chain_count": len(chain_turns),
+        "max_chain_turns": max(chain_turns.values()) if chain_turns else 0,
         "max_facts_per_case": max_facts,
         "output_dir": str(out_dir),
         "raw_context_crosses_surface": False,
         "sentinel_count": len(RAW_LEAK_SENTINELS),
+        "suite": suite,
         "task_counts": dict(sorted(task_counts.items())),
     }
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Build three-layer compressed surface cases.")
-    parser.add_argument("--out", type=Path, default=DEFAULT_OUT, help="Output directory.")
+    parser.add_argument("--suite", choices=("surface", "chain"), default="surface", help="Case suite to build.")
+    parser.add_argument("--out", type=Path, default=None, help="Output directory.")
     parser.add_argument("--force", action="store_true", help="Overwrite existing cases.jsonl and summary.json.")
     args = parser.parse_args(argv)
 
-    out_dir = args.out.resolve()
+    out_dir = (args.out or (DEFAULT_CHAIN_OUT if args.suite == "chain" else DEFAULT_OUT)).resolve()
     cases_path = out_dir / "cases.jsonl"
     summary_path = out_dir / "summary.json"
     if (cases_path.exists() or summary_path.exists()) and not args.force:
         raise FileExistsError(f"{out_dir} already contains generated files; pass --force to overwrite")
 
-    cases = build_three_layer_surface_cases()
+    cases = build_three_layer_chain_cases() if args.suite == "chain" else build_three_layer_surface_cases()
     out_dir.mkdir(parents=True, exist_ok=True)
     _write_jsonl(cases_path, cases)
-    summary = build_summary(cases, out_dir=out_dir)
+    summary = build_summary(cases, out_dir=out_dir, suite=args.suite)
     _write_json(summary_path, summary)
     print(json.dumps(summary, ensure_ascii=False, indent=2, sort_keys=True))
     return 0
