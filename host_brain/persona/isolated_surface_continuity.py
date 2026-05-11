@@ -146,6 +146,7 @@ class ThreeLayerContinuityContext:
     must_include: Sequence[str] = ()
     must_not_do: Sequence[str] = ()
     necessary_facts: Sequence[str] = ()
+    recall_facts: Sequence[str] = ()
     style_anchor: Sequence[str] = ()
 
 
@@ -277,7 +278,7 @@ def build_reply_control_packet_from_context(
     snapshot = compress_three_layer_continuity_context(context, max_recent_turns=max_recent_turns)
     long_facts = [f"长期事实：{fact}" for fact in _clean_list(context.long_term_facts)[:2]]
     facts = snapshot.facts(
-        extra=[*_clean_list(context.necessary_facts), *long_facts],
+        extra=[*_clean_list(context.necessary_facts), *_clean_list(context.recall_facts), *long_facts],
         max_facts=max_facts,
     )
     task_mode = _clean_text(context.task_mode_hint) or "daily_chat"

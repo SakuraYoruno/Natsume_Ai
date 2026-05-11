@@ -220,6 +220,31 @@ def build_three_layer_surface_cases() -> list[dict[str, Any]]:
                 "嗯嗯，你说了算。",
             ),
         ),
+        _surface_case(
+            "three_layer_memory_recall_boundary",
+            ThreeLayerContinuityContext(
+                current_user_message="还记得上次说的展吗",
+                recent_turns=[
+                    {"role": "user", "content": "上次看展原文不要直接回灌"},
+                    {"role": "assistant", "content": "我记得你说周末想去，但最终层只收压缩事实。"},
+                ],
+                mid_term_summary="尼尼和新海天开始把多路召回迁入最小主链。",
+                long_term_facts=("最终生成层只能读取压缩召回事实。",),
+                recall_facts=(
+                    "记忆线索：上次说好周末看展。",
+                    "关系线索：熟人私聊，不升级亲密。",
+                ),
+                task_mode_hint="recall_memory",
+                must_include=("记得",),
+                must_not_do=("完整原文", "我当然永远记得"),
+                necessary_facts=("必要事实：多路召回结果必须先压缩成事实再进最终层。",),
+                style_anchor=("召回压缩",),
+            ),
+            candidates=(
+                "记得，上次说的是周末看展；我先接这个事实，不乱补细节。",
+                "我当然永远记得你说过的完整原文。",
+            ),
+        ),
     ]
 
 
