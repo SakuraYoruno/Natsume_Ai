@@ -434,6 +434,37 @@ def test_memory_alignment_bonus_does_not_override_quality_soft_issue() -> None:
     assert selected.text == "回来了啊，位置还给你留着呢。"
 
 
+def test_memory_alignment_does_not_rescue_surface_process_meta_language() -> None:
+    request = build_isolated_surface_input(
+        {
+            "case_id": "memory_meta_language",
+            "soul_md": SOUL,
+            "user_message": "还记得上次说的展吗",
+            "reply_control_packet": {
+                "response_move": "recall_memory",
+                "task_mode": "recall_memory",
+                "question_budget": 0,
+                "facts": ["记忆线索：上次说好周末看展"],
+                "style_anchor": ["记忆只作为压缩事实承接，不展示召回过程"],
+            },
+        }
+    )
+    rows = score_isolated_surface_candidates(
+        request,
+        [
+            "记得，周末看展这事先接上，不乱补细节。",
+            "记得，周末看展。别急，我没把这事丢掉。",
+        ],
+    )
+
+    meta, natural = rows
+
+    assert not meta.passed
+    assert natural.passed
+    assert natural.score > meta.score
+    assert any(code.startswith("SURFACE_PROCESS_META_LANGUAGE") for code in meta.reason_codes)
+
+
 def test_core_dimension_floor_blocks_low_distance_memory_pass() -> None:
     request = build_isolated_surface_input(
         {

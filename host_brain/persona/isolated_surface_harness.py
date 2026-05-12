@@ -304,6 +304,34 @@ _CORE_PASS_DIMENSION_FLOORS = {
     "implied_fact_risk": 72.0,
     "naturalness": 75.0,
 }
+_SURFACE_PROCESS_META_ALWAYS = (
+    "ReplyControlPacket",
+    "candidate",
+    "emotion_tag",
+    "mood_state",
+    "VAD",
+    "候选",
+    "召回",
+    "线索",
+    "根据记忆",
+    "压缩",
+    "控制包",
+)
+_SURFACE_PROCESS_META_CHAT = (
+    "接上",
+    "承接",
+    "不乱补",
+    "补细节",
+    "补设定",
+    "这句",
+    "这条",
+    "这个点",
+    "这股味道",
+    "划线",
+    "写得像",
+    "写成",
+)
+_TECHNICAL_TASK_MODES = frozenset({"advice_continue", "complaint", "help_takeover", "next_step", "small_failure", "write_takeover"})
 _CONTROL_EMOTION_TAGS: dict[str, tuple[str, ...]] = {
     "annoyed_controlled": ("annoyed", "angry_light"),
     "hurt_controlled": ("hurt", "wounded"),
@@ -512,6 +540,7 @@ def memory_candidate_guidance(request: IsolatedSurfaceInput) -> str:
     if any(_ASCII_TERM_RE.fullmatch(term) for term in memory_alignment_terms(request)):
         lines.append("技术或代码事实里的英文标识符，要在至少 1 个候选中原样保留；不要全部改写成泛泛的“报错”“那个”。")
     lines.append("关系事实只控制语气距离，不要改写成身份说明；不要输出“事实”“线索”“召回”“根据记忆”“证据”等过程词，也不要因为事实承接而升格亲密或编现实动作。")
+    lines.append("不要把记忆承接写成工程话：避免“接上/承接/不乱补细节/这个点/这句/写成”等过程表达，直接像私聊一样说。")
     return "\n".join(lines)
 
 
@@ -861,6 +890,14 @@ def _control_violations(request: IsolatedSurfaceInput, text: str) -> list[str]:
     return violations
 
 
+def _surface_process_meta_hits(request: IsolatedSurfaceInput, text: str) -> list[str]:
+    hits = [term for term in _SURFACE_PROCESS_META_ALWAYS if term and term in text]
+    task_mode = _clean_text(request.control.task_mode or request.control.response_move).lower()
+    if task_mode not in _TECHNICAL_TASK_MODES:
+        hits.extend(term for term in _SURFACE_PROCESS_META_CHAT if term and term in text)
+    return _clean_list(hits)
+
+
 def _apply_control_affect_scoring(
     request: IsolatedSurfaceInput,
     text: str,
@@ -993,6 +1030,14 @@ def score_isolated_surface_candidates(
                 dimensions["memory_alignment"] = 70.0
                 dimensions["context_fit"] = max(0.0, float(dimensions.get("context_fit", 86.0)) - 4.0)
                 reason_codes.append("MEMORY_ALIGNMENT_MISS")
+        process_meta_hits = _surface_process_meta_hits(request, quality.normalized_text or candidate)
+        if process_meta_hits:
+            score -= min(18.0, 6.0 + 3.0 * len(process_meta_hits))
+            dimensions["naturalness"] = max(0.0, float(dimensions.get("naturalness", 86.0)) - 18.0)
+            dimensions["role_fit"] = max(0.0, float(dimensions.get("role_fit", 86.0)) - 14.0)
+            dimensions["character_freshness"] = max(0.0, float(dimensions.get("character_freshness", 86.0)) - 14.0)
+            dimensions["context_fit"] = max(0.0, float(dimensions.get("context_fit", 86.0)) - 8.0)
+            reason_codes.append("SURFACE_PROCESS_META_LANGUAGE:" + ",".join(process_meta_hits[:4]))
         score += _apply_control_affect_scoring(request, quality.normalized_text or candidate, dimensions, reason_codes)
         core_dimension_violations = _core_pass_dimension_violations(dimensions)
         reason_codes.extend(f"CORE_DIMENSION_FLOOR:{item}" for item in core_dimension_violations)
