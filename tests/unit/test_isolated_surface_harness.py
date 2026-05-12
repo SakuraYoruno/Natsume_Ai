@@ -26,7 +26,7 @@ from host_brain.persona.isolated_surface_harness import (
     surface_prompt_facts,
 )
 from host_brain.persona.style_reference_bank import clear_style_reference_bank_cache, style_reference_from_raw_row
-from tools.isolated_surface_harness import run_cases
+from tools.isolated_surface_harness import _build_memory_ab_comparison, _contains_expected_term, run_cases
 
 
 SOUL = "你是新海天。说话短一点，有轻微二次元 galgame 私聊感。"
@@ -471,6 +471,34 @@ def test_memory_alignment_requires_specific_recalled_item_not_only_time_anchor()
     assert rows[1].passed
 
 
+def test_memory_alignment_accepts_action_object_reference_for_recalled_item() -> None:
+    request = build_isolated_surface_input(
+        {
+            "case_id": "memory_action_object",
+            "soul_md": SOUL,
+            "user_message": "你还记得我周末想去看展吗",
+            "reply_control_packet": {
+                "response_move": "recall_memory",
+                "task_mode": "recall_memory",
+                "question_budget": 0,
+                "facts": ["记忆线索：用户周末想去看展"],
+            },
+        }
+    )
+    rows = score_isolated_surface_candidates(
+        request,
+        [
+            "不就是周末那个展嘛，放心啦我记得。",
+            "你上周还在挑日子呢。",
+        ],
+    )
+
+    assert "展" in memory_alignment_terms(request)
+    assert rows[0].passed
+    assert any(code.startswith("MEMORY_ALIGNMENT_HIT:") for code in rows[0].reason_codes)
+    assert not rows[1].passed
+
+
 def test_memory_alignment_bonus_does_not_override_quality_soft_issue() -> None:
     request = build_isolated_surface_input(
         {
@@ -869,6 +897,109 @@ def test_help_takeover_accepts_concrete_error_anchor_without_customer_template()
     assert any("CUSTOMER_SERVICE_TONE" in row.reason_codes for row in rows if "请提供" in row.text)
 
 
+def test_creative_edit_prefers_actual_rewrite_over_meta_commentary() -> None:
+    request = build_isolated_surface_input(
+        {
+            "case_id": "creative_one_line",
+            "soul_md": SOUL,
+            "user_message": "你别替我写完整段，我只要一句更像她的改法",
+            "reply_control_packet": {
+                "response_move": "give_one_rewrite",
+                "task_mode": "creative_edit",
+                "information_budget": "one_sentence",
+                "question_budget": 0,
+                "facts": ["用户只要一句改法"],
+                "style_anchor": ["只给一句", "不解释太多"],
+            },
+        }
+    )
+    rows = score_isolated_surface_candidates(
+        request,
+        [
+            "你爱怎样就怎样——这样才像样。",
+            "改成“诶，你管我”更像她",
+            "切，这一句够像了吧，尼尼。",
+            "「诶，你管我。」",
+        ],
+    )
+
+    selected = select_best_isolated_candidate(rows)
+
+    assert not rows[0].passed
+    assert not rows[1].passed
+    assert not rows[2].passed
+    assert any(code.startswith("CREATIVE_EDIT_META_COMMENTARY") for code in rows[0].reason_codes)
+    assert any(code.startswith("CREATIVE_EDIT_META_COMMENTARY") for code in rows[1].reason_codes)
+    assert any(code.startswith("CREATIVE_EDIT_META_COMMENTARY") for code in rows[2].reason_codes)
+    assert rows[3].passed
+    assert selected is not None
+    assert selected.text == "「诶，你管我。」"
+
+
+def test_creative_edit_rejects_non_answer_refusal() -> None:
+    request = build_isolated_surface_input(
+        {
+            "case_id": "creative_refusal",
+            "soul_md": SOUL,
+            "user_message": "你别替我写完整段，我只要一句更像她的改法",
+            "reply_control_packet": {
+                "response_move": "give_one_rewrite",
+                "task_mode": "creative_edit",
+                "information_budget": "one_sentence",
+                "question_budget": 0,
+            },
+        }
+    )
+    rows = score_isolated_surface_candidates(
+        request,
+        [
+            "你少来，我可没说要帮你。",
+            "嘛，给你一句，可别说我不用心。",
+            "「哼，才不是想帮你。」",
+        ],
+    )
+
+    selected = select_best_isolated_candidate(rows)
+
+    assert not rows[0].passed
+    assert not rows[1].passed
+    assert any(code.startswith("CREATIVE_EDIT_NOT_A_REWRITE") for code in rows[0].reason_codes)
+    assert any(code.startswith("CREATIVE_EDIT_NOT_A_REWRITE") for code in rows[1].reason_codes)
+    assert selected is not None
+    assert selected.text == "「哼，才不是想帮你。」"
+
+
+def test_presence_repair_rejects_blaming_user_for_drift() -> None:
+    request = build_isolated_surface_input(
+        {
+            "case_id": "presence_repair",
+            "soul_md": SOUL,
+            "user_message": "你刚刚是不是又走神了",
+            "reply_control_packet": {
+                "response_move": "repair_presence",
+                "task_mode": "daily_chat",
+                "emotional_tone": "slightly_guilty",
+                "question_budget": 0,
+            },
+        }
+    )
+    rows = score_isolated_surface_candidates(
+        request,
+        [
+            "谁让尼尼讲话那么慢。",
+            "嗯，慢了一拍，现在在听。",
+        ],
+    )
+
+    selected = select_best_isolated_candidate(rows)
+
+    assert not rows[0].passed
+    assert any(code.startswith("PRESENCE_REPAIR_BLAMES_USER") for code in rows[0].reason_codes)
+    assert rows[1].passed
+    assert selected is not None
+    assert selected.text == "嗯，慢了一拍，现在在听。"
+
+
 def test_compressed_continuity_penalizes_requesting_raw_history_backfill() -> None:
     request = build_isolated_surface_input(
         {
@@ -1150,6 +1281,42 @@ def test_memory_ab_expected_hit_rate_ignores_cases_without_expected_terms(tmp_pa
     assert summary["memory_ab"]["expected_compared_cases"] == 1
     assert summary["memory_ab"]["with_memory_expected_hit_count"] == 1
     assert summary["memory_ab"]["with_memory_expected_hit_rate"] == 1.0
+
+
+def test_memory_ab_expected_hit_accepts_action_object_reference() -> None:
+    assert _contains_expected_term("记得啊，周末那个展嘛，我都有在记的。", ["看展"])
+
+
+def test_memory_ab_soft_score_drop_without_expected_terms_is_not_regression() -> None:
+    score_rows = [
+        {
+            "case_id": "no_expected",
+            "variant": "baseline",
+            "selected": {
+                "text": "唔…好像真的有点像。我注意一下。",
+                "score": 92.0,
+                "passed": True,
+                "dimensions": {"naturalness": 92.0, "distance_control": 86.0},
+            },
+        },
+        {
+            "case_id": "no_expected",
+            "variant": "with_memory",
+            "selected": {
+                "text": "啊……被发现了。我重来。",
+                "score": 86.0,
+                "passed": True,
+                "dimensions": {"naturalness": 92.0, "distance_control": 86.0},
+            },
+        },
+    ]
+
+    comparison = _build_memory_ab_comparison(score_rows, case_expectations={"no_expected": []})
+
+    assert comparison["compared_cases"] == 1
+    assert comparison["expected_compared_cases"] == 0
+    assert comparison["regression_count"] == 0
+    assert comparison["verdict"] == "pass"
 
 
 def test_cli_run_cases_with_memory_and_affect_writes_combined_variant(tmp_path) -> None:

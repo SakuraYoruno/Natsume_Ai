@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import statistics
 import sys
 from collections import Counter
@@ -43,6 +44,8 @@ _REQUEST_KEYS = {
 }
 _MEMORY_PACKET_KEYS = ("memory_recall_packet", "memory_recall")
 _AFFECT_PACKET_KEYS = ("affect_control_packet", "surface_affect_packet", "emotion_control_packet")
+_CJK_ONE_CHAR_RE = re.compile(r"^[\u4e00-\u9fff]$")
+_EXPECTED_ACTION_OBJECT_RE = re.compile(r"(?:想要|想|要|打算|准备)?(?:去)?(?:看|听|吃|写|改|修|买|玩|做)([\u4e00-\u9fff]{1,4})")
 
 
 def _read_json_or_jsonl(path: Path) -> list[dict[str, Any]]:
@@ -220,8 +223,24 @@ def _memory_watch_flags(text: str) -> list[str]:
 
 
 def _contains_expected_term(text: str, expected_terms: Iterable[Any]) -> bool:
-    terms = [str(term).strip() for term in expected_terms if str(term).strip()]
-    return bool(terms) and any(term in text for term in terms)
+    terms: list[str] = []
+    for raw_term in expected_terms:
+        term = str(raw_term).strip()
+        if not term:
+            continue
+        terms.append(term)
+        for match in _EXPECTED_ACTION_OBJECT_RE.finditer(term):
+            obj = match.group(1).strip()
+            if obj:
+                terms.append(obj)
+    for term in dict.fromkeys(terms):
+        if len(term) == 1 and _CJK_ONE_CHAR_RE.fullmatch(term):
+            if any(marker in text for marker in (f"那个{term}", f"这个{term}", f"看{term}", f"听{term}", f"吃{term}", f"{term}票", f"{term}嘛", f"{term}。", f"{term}，")):
+                return True
+            continue
+        if term in text:
+            return True
+    return False
 
 
 def _summarize_score_rows(score_rows: list[dict[str, Any]]) -> dict[str, Any]:
@@ -325,7 +344,10 @@ def _build_memory_ab_comparison(
             and memory_dims.get("usefulness", 0.0) >= 90.0
         )
         naturalness_regressed = naturalness_delta < -5 and not technical_priority_ok
-        if not with_memory_passed or score_delta < -5 or naturalness_regressed or distance_delta < -5 or memory_flags:
+        expected_case_regressed = bool(expected_terms) and (
+            score_delta < -5 or naturalness_regressed or distance_delta < -5
+        )
+        if not with_memory_passed or expected_case_regressed or memory_flags:
             regressions.append(row)
 
     score_deltas = [row["score_delta"] for row in compared]

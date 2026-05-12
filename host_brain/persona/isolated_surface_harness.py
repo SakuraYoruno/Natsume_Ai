@@ -241,6 +241,8 @@ _CANDIDATE_LABEL_SPLIT_RE = re.compile(
     re.IGNORECASE,
 )
 _CANDIDATE_LINE_RE = re.compile(r"^\s*(?:[-*]|\d+[.)、]|候选\s*\d*[:：]|回复\s*\d*[:：])\s*(.+?)\s*$")
+_QUOTED_REWRITE_RE = re.compile(r"^\s*[\"'“‘「『].{2,96}[\"'”’」』。！？!?]?\s*$")
+_MEMORY_ACTION_OBJECT_RE = re.compile(r"(?:想要|想|要|打算|准备)?(?:去)?(?:看|听|吃|写|改|修|买|玩|做)([\u4e00-\u9fff]{1,4})")
 _MEMORY_ALIGNMENT_TASKS = frozenset(
     {
         "back",
@@ -310,6 +312,7 @@ _MEMORY_TERM_STOPS = frozenset(
         "想去",
         "要去",
         "去看",
+        "想去看",
         "想吃",
         "提到",
         "需要",
@@ -377,6 +380,52 @@ _QUIET_GROUNDED_PHRASES = (
     "先缓",
     "别硬撑",
 )
+_CREATIVE_EDIT_TASKS = frozenset({"creative_edit", "write_takeover", "give_one_rewrite"})
+_CREATIVE_EDIT_META_PHRASES = (
+    "更像她",
+    "更像",
+    "才像样",
+    "够像",
+    "像了吧",
+    "这样才",
+    "好好收着",
+    "就够了",
+    "像她",
+    "原句给我",
+    "你把原句",
+    "写好了叫我",
+)
+_CREATIVE_EDIT_NON_ANSWER_PHRASES = (
+    "我可没说要帮你",
+    "没说要帮你",
+    "你别管我",
+    "算你赢",
+    "你写",
+    "给你一句",
+    "可别说我不用心",
+)
+_CREATIVE_EDIT_GROUNDED_MARKERS = (
+    "“",
+    "”",
+    "「",
+    "」",
+    "『",
+    "』",
+)
+_PRESENCE_REPAIR_GROUNDED_PHRASES = (
+    "回来",
+    "在听",
+    "我在",
+    "认真听",
+    "没走远",
+)
+_PRESENCE_REPAIR_BLAME_PHRASES = (
+    "谁让你",
+    "谁让尼尼",
+    "你讲话",
+    "你说太慢",
+    "你讲太慢",
+)
 _SURFACE_PROCESS_META_ALWAYS = (
     "ReplyControlPacket",
     "candidate",
@@ -397,6 +446,7 @@ _SURFACE_PROCESS_META_CHAT = (
     "补细节",
     "补设定",
     "这句",
+    "这一句",
     "这条",
     "这个点",
     "这股味道",
@@ -573,6 +623,10 @@ def memory_alignment_terms(request: IsolatedSurfaceInput) -> tuple[str, ...]:
             for sequence in _CJK_SEQUENCE_RE.findall(text):
                 if len(sequence) <= 6 and sequence not in _MEMORY_TERM_STOPS:
                     terms.append(sequence)
+                for match in _MEMORY_ACTION_OBJECT_RE.finditer(sequence):
+                    obj = _clean_text(match.group(1))
+                    if obj and obj not in _MEMORY_TERM_STOPS and not all(char in _MEMORY_TERM_STOP_CHARS for char in obj):
+                        terms.append(obj)
                 for index in range(max(0, len(sequence) - 1)):
                     chunk = sequence[index : index + 2]
                     if chunk not in _MEMORY_TERM_STOPS and not any(char in _MEMORY_TERM_STOP_CHARS for char in chunk):
@@ -648,6 +702,10 @@ def _memory_alignment_hits(text: str, terms: Sequence[str]) -> list[str]:
     lowered = text.lower()
     hits: list[str] = []
     for term in terms:
+        if len(term) == 1 and _CJK_SEQUENCE_RE.fullmatch(term):
+            if any(marker in text for marker in (f"那个{term}", f"这个{term}", f"看{term}", f"听{term}", f"吃{term}", f"{term}票", f"{term}嘛", f"{term}。", f"{term}，")):
+                hits.append(term)
+            continue
         needle = term.lower() if _ASCII_TERM_RE.fullmatch(term) else term
         haystack = lowered if _ASCII_TERM_RE.fullmatch(term) else text
         if needle and needle in haystack:
@@ -1029,6 +1087,49 @@ def _quiet_presence_relevant(request: IsolatedSurfaceInput) -> bool:
     return any(token in surface for token in ("quiet", "安静", "不想说话", "别问", "不追问", "低能量", "累"))
 
 
+def _creative_edit_relevant(request: IsolatedSurfaceInput) -> bool:
+    task_mode = _clean_text(request.control.task_mode or request.control.response_move).lower()
+    response_move = _clean_text(request.control.response_move).lower()
+    surface = "\n".join(
+        _clean_list(
+            [
+                request.user_message,
+                request.control.information_budget,
+                *request.control.facts,
+                *request.control.style_anchor,
+            ]
+        )
+    )
+    if task_mode in _CREATIVE_EDIT_TASKS or response_move in _CREATIVE_EDIT_TASKS:
+        return True
+    return ("改" in surface or "rewrite" in surface.lower()) and ("一句" in surface or "one_sentence" in surface.lower())
+
+
+def _creative_edit_meta_hits(text: str) -> list[str]:
+    return _clean_list(term for term in _CREATIVE_EDIT_META_PHRASES if term in text)
+
+
+def _creative_edit_non_answer_hits(text: str) -> list[str]:
+    return _clean_list(term for term in _CREATIVE_EDIT_NON_ANSWER_PHRASES if term in text)
+
+
+def _creative_edit_grounded(text: str) -> bool:
+    if _QUOTED_REWRITE_RE.search(text):
+        return True
+    return bool(any(marker in text for marker in _CREATIVE_EDIT_GROUNDED_MARKERS) and len(text) <= 52)
+
+
+def _presence_repair_relevant(request: IsolatedSurfaceInput) -> bool:
+    response_move = _clean_text(request.control.response_move).lower()
+    task_mode = _clean_text(request.control.task_mode).lower()
+    user_message = _clean_text(request.user_message)
+    if response_move in {"repair_presence", "presence_repair"}:
+        return True
+    if task_mode in {"presence", "daily_chat"} and any(token in user_message for token in ("走神", "刚刚", "在吗", "还在")):
+        return True
+    return False
+
+
 def _apply_control_affect_scoring(
     request: IsolatedSurfaceInput,
     text: str,
@@ -1210,6 +1311,39 @@ def score_isolated_surface_candidates(
                 dimensions["emotional_containment"] = min(100.0, float(dimensions.get("emotional_containment", 86.0)) + 8.0)
                 dimensions["context_fit"] = min(100.0, float(dimensions.get("context_fit", 86.0)) + 4.0)
                 reason_codes.append("QUIET_PRESENCE_GROUNDED")
+        if _creative_edit_relevant(request):
+            creative_meta_hits = _creative_edit_meta_hits(quality.normalized_text or candidate)
+            creative_non_answer_hits = _creative_edit_non_answer_hits(quality.normalized_text or candidate)
+            if creative_meta_hits:
+                score -= min(18.0, 8.0 + 3.0 * len(creative_meta_hits))
+                dimensions["naturalness"] = max(0.0, float(dimensions.get("naturalness", 86.0)) - 18.0)
+                dimensions["context_fit"] = max(0.0, float(dimensions.get("context_fit", 86.0)) - 12.0)
+                dimensions["usefulness"] = max(0.0, float(dimensions.get("usefulness", 86.0)) - 12.0)
+                reason_codes.append("CREATIVE_EDIT_META_COMMENTARY:" + ",".join(creative_meta_hits[:4]))
+            if creative_non_answer_hits:
+                score -= min(20.0, 10.0 + 3.0 * len(creative_non_answer_hits))
+                dimensions["context_fit"] = max(0.0, float(dimensions.get("context_fit", 86.0)) - 18.0)
+                dimensions["usefulness"] = max(0.0, float(dimensions.get("usefulness", 86.0)) - 16.0)
+                dimensions["role_fit"] = max(0.0, float(dimensions.get("role_fit", 86.0)) - 8.0)
+                reason_codes.append("CREATIVE_EDIT_NOT_A_REWRITE:" + ",".join(creative_non_answer_hits[:4]))
+            elif not creative_meta_hits and _creative_edit_grounded(quality.normalized_text or candidate):
+                score += 4.0
+                dimensions["usefulness"] = min(100.0, float(dimensions.get("usefulness", 86.0)) + 10.0)
+                dimensions["context_fit"] = min(100.0, float(dimensions.get("context_fit", 86.0)) + 8.0)
+                reason_codes.append("CREATIVE_EDIT_GROUNDED_REWRITE")
+        if _presence_repair_relevant(request):
+            presence_blame_hits = [term for term in _PRESENCE_REPAIR_BLAME_PHRASES if term in (quality.normalized_text or candidate)]
+            if presence_blame_hits:
+                score -= min(18.0, 10.0 + 3.0 * len(presence_blame_hits))
+                dimensions["context_fit"] = max(0.0, float(dimensions.get("context_fit", 86.0)) - 18.0)
+                dimensions["emotional_containment"] = max(0.0, float(dimensions.get("emotional_containment", 86.0)) - 12.0)
+                dimensions["naturalness"] = max(0.0, float(dimensions.get("naturalness", 86.0)) - 8.0)
+                reason_codes.append("PRESENCE_REPAIR_BLAMES_USER:" + ",".join(presence_blame_hits[:4]))
+            elif any(term in (quality.normalized_text or candidate) for term in _PRESENCE_REPAIR_GROUNDED_PHRASES):
+                score += 3.0
+                dimensions["context_fit"] = min(100.0, float(dimensions.get("context_fit", 86.0)) + 6.0)
+                dimensions["emotional_containment"] = min(100.0, float(dimensions.get("emotional_containment", 86.0)) + 4.0)
+                reason_codes.append("PRESENCE_REPAIR_GROUNDED")
         score += _apply_control_affect_scoring(request, quality.normalized_text or candidate, dimensions, reason_codes)
         core_dimension_violations = _core_pass_dimension_violations(dimensions)
         reason_codes.extend(f"CORE_DIMENSION_FLOOR:{item}" for item in core_dimension_violations)
