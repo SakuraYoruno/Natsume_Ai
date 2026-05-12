@@ -73,7 +73,8 @@ def _summarize(
     generated_count = sum(1 for row in results if row.get("ok"))
     hard_fail_count = sum(1 for row in selected if row.get("hard_fail"))
     control_violation_count = sum(1 for row in selected if row.get("control_violations"))
-    low_score_count = sum(1 for row in selected if float(row.get("score") or 0.0) < 80.0 or not row.get("passed"))
+    missing_selected_count = sum(1 for row in results if not isinstance(row.get("selected"), dict))
+    low_score_count = missing_selected_count + sum(1 for row in selected if float(row.get("score") or 0.0) < 80.0 or not row.get("passed"))
     style_degraded = sum(
         1
         for row in results
@@ -88,6 +89,7 @@ def _summarize(
         "generated_count": generated_count,
         "errors": completed - generated_count,
         "selected_count": len(selected),
+        "missing_selected_count": missing_selected_count,
         "pass_count": pass_count,
         "pass_rate": round(pass_count / len(selected), 4) if selected else None,
         "avg_selected_score": round(statistics.fmean(scores), 3) if scores else None,
@@ -148,7 +150,11 @@ async def _run_one(
                 base_url_override=base_url_override,
             )
             latency_ms = int((time.perf_counter() - started) * 1000)
+            if not str(raw_output or "").strip():
+                raise RuntimeError("empty model output")
             candidate_texts = parse_surface_candidates(raw_output)
+            if not candidate_texts:
+                raise RuntimeError("no surface candidates parsed")
             scores = score_isolated_surface_candidates(request, candidate_texts)
             selected = select_best_isolated_candidate(scores)
             repair_raw_output = ""

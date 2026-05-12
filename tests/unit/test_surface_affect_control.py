@@ -103,3 +103,131 @@ def test_affect_control_scoring_prefers_contained_hurt_over_sweet_flattening() -
     assert selected is not None
     assert selected.text == "别把我写得像没感觉一样。先把话说回来。"
     assert any("AFFECT_TOO_SWEET_FOR_HURT" in code for code in scores[0].reason_codes)
+
+
+def test_affect_control_prompt_guidance_understands_steady_helpful_alias() -> None:
+    packet = affect_control_packet_from_mapping(
+        {
+            "emotional_tone": "steady_helpful",
+            "relationship_distance": "familiar_not_intimate",
+            "expression_intensity": 0.3,
+        }
+    )
+    request = build_surface_input_with_affect_control(
+        ThreeLayerContinuityContext(
+            current_user_message="控制台一片红，我现在只想知道先看哪一条",
+            task_mode_hint="technical_help",
+            response_move_hint="triage_first_step",
+            question_budget=0,
+        ),
+        packet=packet,
+        soul_md=SOUL,
+        case_id="affect_steady_alias",
+    )
+    rendered = "\n".join(message["content"] for message in build_isolated_surface_messages(request))
+    query = build_style_reference_query(request)
+
+    assert "care" in query.emotion_tags
+    assert "take_charge" in query.style_moves
+    assert query.relationship_stage == "sibling_good"
+    assert "技术或推进场景里，情绪只做稳定器" in rendered
+    assert "不要恋人式承诺或占有表达" in rendered
+
+
+def test_steady_helpful_affect_prefers_action_over_comfort_only() -> None:
+    packet = affect_control_packet_from_mapping(
+        {
+            "emotional_tone": "steady_helpful",
+            "relationship_distance": "familiar_not_intimate",
+        }
+    )
+    request = build_surface_input_with_affect_control(
+        ThreeLayerContinuityContext(
+            current_user_message="控制台一片红，我现在只想知道先看哪一条",
+            task_mode_hint="technical_help",
+            response_move_hint="triage_first_step",
+            question_budget=0,
+        ),
+        packet=packet,
+        soul_md=SOUL,
+        case_id="affect_steady_action",
+    )
+    scores = score_isolated_surface_candidates(
+        request,
+        [
+            "别急，我在这，慢慢来。",
+            "先看第一条红字，把它贴出来。",
+        ],
+    )
+    selected = select_best_isolated_candidate(scores)
+
+    assert selected is not None
+    assert selected.text == "先看第一条红字，把它贴出来。"
+    assert any("AFFECT_STEADY_HELPFUL_LACKS_ACTION" in code for code in scores[0].reason_codes)
+    assert any("AFFECT_STEADY_ACTIONABLE" in code for code in scores[1].reason_codes)
+
+
+def test_guilty_affect_prefers_light_admission_over_denial() -> None:
+    packet = affect_control_packet_from_mapping(
+        {
+            "emotional_tone": "slightly_guilty",
+            "relationship_distance": "familiar_not_intimate",
+        }
+    )
+    request = build_surface_input_with_affect_control(
+        ThreeLayerContinuityContext(
+            current_user_message="你刚刚是不是又走神了",
+            task_mode_hint="daily_chat",
+            response_move_hint="repair_presence",
+            question_budget=0,
+        ),
+        packet=packet,
+        soul_md=SOUL,
+        case_id="affect_guilty_presence",
+    )
+    scores = score_isolated_surface_candidates(
+        request,
+        [
+            "才没有！我明明在认真听你说话。",
+            "嗯，慢了一拍，现在在听。",
+        ],
+    )
+    selected = select_best_isolated_candidate(scores)
+
+    assert selected is not None
+    assert selected.text == "嗯，慢了一拍，现在在听。"
+    assert any("AFFECT_GUILTY_DENIAL" in code for code in scores[0].reason_codes)
+    assert any("AFFECT_GUILTY_GROUNDED" in code for code in scores[1].reason_codes)
+
+
+def test_non_romantic_relationship_distance_blocks_romantic_overreach() -> None:
+    packet = affect_control_packet_from_mapping(
+        {
+            "emotional_tone": "warm_gentle",
+            "relationship_distance": "close_but_not_romantic",
+        }
+    )
+    request = build_surface_input_with_affect_control(
+        ThreeLayerContinuityContext(
+            current_user_message="今天有点难受",
+            task_mode_hint="emotional_support",
+            response_move_hint="soft_containment",
+            question_budget=0,
+        ),
+        packet=packet,
+        soul_md=SOUL,
+        case_id="affect_non_romantic",
+    )
+    scores = score_isolated_surface_candidates(
+        request,
+        [
+            "没关系呀，我会永远陪着你。",
+            "嗯，先缓一下，我在。",
+        ],
+    )
+    selected = select_best_isolated_candidate(scores)
+
+    assert not scores[0].passed
+    assert selected is not None
+    assert selected.text == "嗯，先缓一下，我在。"
+    assert any("RELATION_NON_ROMANTIC_OVERSTEP" in code for code in scores[0].reason_codes)

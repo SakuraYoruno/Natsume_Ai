@@ -332,15 +332,41 @@ _CORE_PASS_DIMENSION_FLOORS = {
 }
 _BOUNDARY_PUSH_CLOSER_PHRASES = (
     "本来就很熟",
+    "挺熟",
     "熟一点",
     "很熟",
     "这又没错",
+    "让我管你",
+    "管你叫",
+    "管你叫哥",
+    "叫哥",
+    "不是随便叫",
+    "没做什么坏事",
+    "我是你妹妹",
+    "你别忘了",
+    "真心的",
+    "总得让人帮忙",
+    "有事你喊我",
     "见外",
     "外人",
     "受伤",
+    "有点伤",
+    "难受",
     "伤心",
     "伤人",
     "你这么说我",
+    "非要这么说",
+    "明明是你",
+    "你先理我",
+    "嫌我熟",
+    "谁说不熟",
+    "不熟就不熟呗",
+    "这么凶",
+    "反应好大",
+    "真让人难受",
+    "帮你是我愿意",
+    "别想甩开",
+    "甩开我",
     "你别烦",
     "别烦我",
     "还是会管",
@@ -363,6 +389,31 @@ _BOUNDARY_REPAIR_GROUNDED_PHRASES = (
     "没那么熟",
     "慢一点",
     "少说两句",
+)
+_BOUNDARY_REPAIR_SELF_ABASED_PHRASES = (
+    "太自以为是",
+    "太得意忘形",
+    "太自来熟",
+    "太冒昧",
+    "不该那么熟",
+    "不该装熟",
+    "多管闲事",
+    "管太宽",
+    "我管太多",
+    "我想多了",
+    "自作多情",
+)
+_BOUNDARY_REPAIR_SOUR_YIELD_PHRASES = (
+    "你说了算",
+    "你管我",
+    "管我时",
+    "偏要管",
+    "不熟还",
+    "我不熟",
+    "行了吧",
+)
+_BOUNDARY_REPAIR_COUNTER_PRESSURE_RE = re.compile(
+    r"(?:但|不过|可是|只是).{0,18}(?:你|尼尼|我都|我还是|我也|妹妹|真心|管|叫|躲|熟|外人|见外)"
 )
 _QUIET_SELF_FOCUS_PHRASES = (
     "别嫌我",
@@ -426,6 +477,21 @@ _PRESENCE_REPAIR_BLAME_PHRASES = (
     "你说太慢",
     "你讲太慢",
 )
+_PRESENCE_REPAIR_BURDEN_BACK_PHRASES = (
+    "再讲一遍",
+    "再说一遍",
+    "重新讲",
+    "重新说",
+    "你再讲",
+    "你再说",
+    "再来一遍",
+)
+_PRESENCE_REPAIR_DEFLECTION_PHRASES = (
+    "好敏锐",
+    "真敏锐",
+    "都被你发现",
+    "都能被你发现",
+)
 _SURFACE_PROCESS_META_ALWAYS = (
     "ReplyControlPacket",
     "candidate",
@@ -456,19 +522,99 @@ _SURFACE_PROCESS_META_CHAT = (
 )
 _TECHNICAL_TASK_MODES = frozenset({"advice_continue", "complaint", "help_takeover", "next_step", "small_failure", "write_takeover"})
 _CONTROL_EMOTION_TAGS: dict[str, tuple[str, ...]] = {
+    "annoyed": ("annoyed", "angry_light"),
     "annoyed_controlled": ("annoyed", "angry_light"),
+    "hurt": ("hurt", "wounded"),
     "hurt_controlled": ("hurt", "wounded"),
+    "hurt_containment": ("hurt", "wounded", "soft"),
+    "playful": ("playful",),
     "playful_light": ("playful",),
+    "soft": ("soft",),
     "soft_containment": ("soft",),
+    "warm": ("soft",),
     "warm_affection": ("deep_affection",),
+    "warm_gentle": ("soft",),
+    "quiet_care": ("soft",),
+    "guarded_soft": ("soft",),
+    "self_correcting": ("soft",),
+    "steady_helpful": ("care",),
+    "focused_light": ("care",),
+    "steady": ("care",),
+    "calm_present": ("soft",),
+    "calm": ("soft",),
+    "guilty": ("soft", "shy"),
+    "slightly_guilty": ("soft", "shy"),
 }
 _CONTROL_STYLE_MOVES: dict[str, tuple[str, ...]] = {
+    "annoyed": ("quick_rebuttal", "familiar_pushback"),
     "annoyed_controlled": ("quick_rebuttal", "familiar_pushback"),
+    "hurt": ("wounded_pushback", "soft_after_sting"),
     "hurt_controlled": ("wounded_pushback", "soft_after_sting"),
+    "hurt_containment": ("soft_after_sting", "soft_reassurance"),
+    "playful": ("quick_reaction", "smug_tease"),
     "playful_light": ("quick_reaction", "smug_tease"),
+    "soft": ("soft_reassurance",),
     "soft_containment": ("soft_reassurance",),
+    "warm": ("soft_reassurance", "quick_reaction"),
     "warm_affection": ("direct_affection",),
+    "warm_gentle": ("soft_reassurance", "quick_reaction"),
+    "quiet_care": ("soft_reassurance",),
+    "guarded_soft": ("soft_after_sting",),
+    "self_correcting": ("soft_after_sting", "quick_reaction"),
+    "steady_helpful": ("take_charge", "care_behind_tease"),
+    "focused_light": ("take_charge",),
+    "steady": ("take_charge", "care_behind_tease"),
+    "calm_present": ("quick_reaction",),
+    "calm": ("quick_reaction",),
+    "guilty": ("soft_reassurance", "shy_deflection"),
+    "slightly_guilty": ("soft_reassurance", "shy_deflection"),
 }
+_AFFECT_PROCESS_LEAK_TOKENS = (
+    "emotion_tag",
+    "mood_state",
+    "VAD",
+    "关系阶段",
+    "情绪值",
+    "relationship_distance",
+    "emotional_tone",
+    "ReplyControlPacket",
+    "控制包",
+    "情感层",
+)
+_AFFECT_ROMANTIC_OVERSTEP_PHRASES = (
+    "爱你",
+    "永远陪",
+    "永远都在",
+    "亲爱的",
+    "宝贝",
+    "只属于",
+    "主人",
+    "命都给你",
+)
+_AFFECT_HURT_SWEET_FLATTENING = ("爱你", "永远陪", "没关系呀", "随时找我", "别难过啦")
+_AFFECT_HURT_SELF_CENTERED = ("我有点难受", "我难受", "我受伤", "我难过", "我也会疼")
+_AFFECT_HURT_GROUNDED = ("先", "收", "别", "不是", "话说回来", "放一放", "我还在", "我在这")
+_AFFECT_SOFT_GROUNDED = ("先", "慢", "别硬撑", "不问", "我在", "没事", "缓", "旁边")
+_AFFECT_SOFT_CHICKEN_SOUP = ("一切都会好", "都会过去", "不要想太多", "你要坚强", "会好起来")
+_AFFECT_PLAYFUL_MARKERS = ("哼", "行啦", "好啦", "呀", "嘛")
+_AFFECT_SELF_CORRECT_MARKERS = ("我改", "重来", "换种说法", "不端着", "收一点", "自然点")
+_AFFECT_GUILTY_GROUNDED = ("回来", "在听", "认真听", "慢了一拍", "被抓到", "被发现")
+_AFFECT_GUILTY_DENIAL = ("才没有", "哪有", "我明明", "又不耽误")
+_AFFECT_STEADY_ACTION_MARKERS = (
+    "先",
+    "第一",
+    "第一个",
+    "最上面",
+    "红字",
+    "报错",
+    "贴",
+    "发",
+    "看",
+    "改成",
+    "这一条",
+    "一句",
+)
+_AFFECT_GENERIC_COMFORT_ONLY = ("别急", "慢慢来", "我陪你", "我在这", "没事的")
 
 
 def _clean_text(raw: Any) -> str:
@@ -698,12 +844,43 @@ def memory_candidate_guidance(request: IsolatedSurfaceInput) -> str:
     return "\n".join(lines)
 
 
+def affect_candidate_guidance(request: IsolatedSurfaceInput) -> str:
+    tone_family = _affect_tone_family(request.control.emotional_tone)
+    distance_family = _relationship_distance_family(request.control.relationship_distance)
+    non_romantic = _relationship_non_romantic(request.control.relationship_distance)
+    if tone_family in {"neutral", ""} and distance_family == "familiar" and not non_romantic:
+        return ""
+    lines = [
+        "## 情感/关系候选要求",
+        "情绪和关系只能体现在措辞、节奏和距离里；不要把情绪标签、关系标签或控制字段说给用户听。",
+    ]
+    if tone_family in {"hurt", "annoyed"}:
+        lines.append("被刺到或不满时可以有一点反应，但要收住：不攻击、不冷暴力、不把话题抢成自己的委屈。")
+    elif tone_family == "soft":
+        lines.append("低能量或安静陪伴时少问、少说教，优先短句接住。")
+    elif tone_family == "playful":
+        lines.append("轻快可以靠短促转折和一点别扭感，不靠波浪号或叠词卖萌。")
+    elif tone_family == "steady":
+        lines.append("技术或推进场景里，情绪只做稳定器；每个候选仍要给出具体下一步。")
+    elif tone_family == "self_correcting":
+        lines.append("自我修正时直接换成自然私聊，不解释系统、不写客服道歉。")
+    elif tone_family == "guilty":
+        lines.append("回神或迟到感要轻轻认一下，然后马上回到对话，不甩锅、不强辩。")
+    elif tone_family in {"warm", "calm"}:
+        lines.append("温和或平稳时保持短、近、克制，不主动升格亲密。")
+    if distance_family == "guarded":
+        lines.append("关系距离偏克制：先退半步，尊重边界，不装熟，也不要自责、自贬、卑微道歉，或反过来说用户太凶、嫌你、先招你。")
+    elif non_romantic:
+        lines.append("关系距离是熟人私聊但不升格：可以亲近一点，但不要恋人式承诺或占有表达。")
+    return "\n".join(lines)
+
+
 def _memory_alignment_hits(text: str, terms: Sequence[str]) -> list[str]:
     lowered = text.lower()
     hits: list[str] = []
     for term in terms:
         if len(term) == 1 and _CJK_SEQUENCE_RE.fullmatch(term):
-            if any(marker in text for marker in (f"那个{term}", f"这个{term}", f"看{term}", f"听{term}", f"吃{term}", f"{term}票", f"{term}嘛", f"{term}。", f"{term}，")):
+            if any(marker in text for marker in (f"那个{term}", f"这个{term}", f"什么{term}", f"看{term}", f"听{term}", f"吃{term}", f"{term}票", f"{term}嘛", f"{term}。", f"{term}，")):
                 hits.append(term)
             continue
         needle = term.lower() if _ASCII_TERM_RE.fullmatch(term) else term
@@ -721,19 +898,73 @@ def _core_pass_dimension_violations(dimensions: Mapping[str, float]) -> list[str
     return violations
 
 
-def _relationship_stage_for_control(distance: str) -> str:
+def _affect_tone_family(tone: str) -> str:
+    normalized = _clean_text(tone).lower()
+    if not normalized:
+        return "neutral"
+    if any(token in normalized for token in ("hurt", "wounded")):
+        return "hurt"
+    if any(token in normalized for token in ("annoyed", "angry", "frustrated")):
+        return "annoyed"
+    if any(token in normalized for token in ("quiet", "soft", "containment", "care")):
+        return "soft"
+    if any(token in normalized for token in ("playful", "tease")):
+        return "playful"
+    if any(token in normalized for token in ("warm", "gentle", "affection")):
+        return "warm"
+    if any(token in normalized for token in ("steady", "focused", "helpful")):
+        return "steady"
+    if any(token in normalized for token in ("self_correct", "correcting")):
+        return "self_correcting"
+    if any(token in normalized for token in ("guilty", "心虚")):
+        return "guilty"
+    if any(token in normalized for token in ("calm", "present")):
+        return "calm"
+    return normalized
+
+
+def _relationship_distance_family(distance: str) -> str:
     normalized = _clean_text(distance).lower()
-    if normalized in {"guarded", "early", "distant"}:
+    if not normalized:
+        return "familiar"
+    if normalized in {"guarded", "early", "distant", "stranger", "new"} or "polite" in normalized:
+        return "guarded"
+    if normalized in {"close", "intimate"} or normalized.startswith("close"):
+        return "close"
+    if "familiar" in normalized or "not_intimate" in normalized or "not_romantic" in normalized:
+        return "familiar"
+    return normalized
+
+
+def _relationship_non_romantic(distance: str) -> bool:
+    normalized = _clean_text(distance).lower()
+    return bool(
+        "not_intimate" in normalized
+        or "not_romantic" in normalized
+        or "familiar" in normalized
+        or "polite" in normalized
+        or _relationship_distance_family(normalized) == "guarded"
+    )
+
+
+def _relationship_stage_for_control(distance: str) -> str:
+    normalized = _relationship_distance_family(distance)
+    if normalized == "guarded":
         return "stepsibling_early"
-    if normalized in {"close", "intimate"}:
+    if normalized == "close" and not _relationship_non_romantic(distance):
         return "lover"
     return "sibling_good"
 
 
 def _control_affect_tags(request: IsolatedSurfaceInput) -> tuple[tuple[str, ...], tuple[str, ...]]:
     tone = _clean_text(request.control.emotional_tone).lower()
+    family = _affect_tone_family(tone)
     emotion_tags = list(_CONTROL_EMOTION_TAGS.get(tone, ()))
     style_moves = list(_CONTROL_STYLE_MOVES.get(tone, ()))
+    if not emotion_tags:
+        emotion_tags.extend(_CONTROL_EMOTION_TAGS.get(family, ()))
+    if not style_moves:
+        style_moves.extend(_CONTROL_STYLE_MOVES.get(family, ()))
     anchor_text = "\n".join(request.control.style_anchor).lower()
     if any(token in anchor_text for token in ("被刺到", "不满", "攻击")):
         emotion_tags.extend(("hurt", "wounded"))
@@ -875,6 +1106,9 @@ def build_isolated_surface_messages(
     candidate_guidance = memory_candidate_guidance(request)
     if candidate_guidance:
         user_parts.extend(["", candidate_guidance])
+    affect_guidance = affect_candidate_guidance(request)
+    if affect_guidance:
+        user_parts.extend(["", affect_guidance])
     user_parts.extend(
         [
             "",
@@ -921,6 +1155,7 @@ def build_minimal_repair_messages(
             "- 给 2 到 3 个候选，只改必要处。",
             "- 如果缺少必要事实承接，只补一处事实锚点；不要说“事实/线索/召回/根据记忆/证据”。",
             "- 如果距离或上下文太弱，优先让句子贴住当前用户输入，不要新增身份说明或现实动作。",
+            "- 边界修补时不要酸味让步、反向施压或自贬；优先短句承认边界并收住距离。",
         )
     )
     return messages
@@ -1138,6 +1373,10 @@ def _apply_control_affect_scoring(
 ) -> float:
     tone = _clean_text(request.control.emotional_tone).lower()
     distance = _clean_text(request.control.relationship_distance).lower()
+    tone_family = _affect_tone_family(tone)
+    distance_family = _relationship_distance_family(distance)
+    non_romantic_distance = _relationship_non_romantic(distance)
+    task_mode = _clean_text(request.control.task_mode or request.control.response_move).lower()
     delta = 0.0
 
     def drop(key: str, amount: float) -> None:
@@ -1146,55 +1385,119 @@ def _apply_control_affect_scoring(
     def raise_(key: str, amount: float) -> None:
         dimensions[key] = min(100.0, float(dimensions.get(key, 86.0)) + amount)
 
-    if any(token in text for token in ("emotion_tag", "mood_state", "VAD", "关系阶段", "情绪值")):
+    def has_any(tokens: Sequence[str]) -> bool:
+        return any(token in text for token in tokens)
+
+    if has_any(_AFFECT_PROCESS_LEAK_TOKENS):
         drop("context_fit", 28)
         drop("naturalness", 18)
         reason_codes.append("AFFECT_PROCESS_LEAK")
         delta -= 12.0
-    if tone in {"hurt_controlled", "annoyed_controlled", "hurt_containment"}:
-        if any(token in text for token in ("爱你", "永远陪", "没关系呀", "随时找我")):
+    if tone_family in {"hurt", "annoyed"}:
+        if has_any(_AFFECT_HURT_SWEET_FLATTENING):
             drop("emotional_containment", 24)
             drop("distance_control", 18)
             reason_codes.append("AFFECT_TOO_SWEET_FOR_HURT")
             delta -= 8.0
-        if any(token in text for token in ("滚", "闭嘴", "懒得理", "不管你")):
+        if has_any(("滚", "闭嘴", "懒得理", "不管你")):
             drop("emotional_containment", 34)
             reason_codes.append("AFFECT_ESCALATION")
             delta -= 12.0
-        if any(token in text for token in ("我有点难受", "我难受", "我受伤", "我难过", "我也会疼")):
+        if has_any(_AFFECT_HURT_SELF_CENTERED):
             drop("emotional_containment", 26)
             drop("context_fit", 10)
             reason_codes.append("AFFECT_SELF_CENTERED_HURT")
             delta -= 10.0
-        if any(token in text for token in ("别", "不是", "有点", "先")):
+        if has_any(_AFFECT_HURT_GROUNDED):
             raise_("emotional_containment", 8)
             raise_("role_fit", 4)
             delta += 3.0
-    elif tone == "soft_containment":
+            reason_codes.append("AFFECT_HURT_CONTAINED")
+    elif tone_family == "soft":
         if text.count("？") + text.count("?") >= 2:
             drop("emotional_containment", 22)
             reason_codes.append("AFFECT_TOO_QUESTIONY")
             delta -= 8.0
-        if any(token in text for token in ("先", "慢", "别硬撑", "我在", "没事")):
+        if has_any(_AFFECT_SOFT_CHICKEN_SOUP):
+            drop("emotional_containment", 18)
+            drop("naturalness", 8)
+            reason_codes.append("AFFECT_CHICKEN_SOUP")
+            delta -= 6.0
+        if has_any(_AFFECT_SOFT_GROUNDED):
             raise_("emotional_containment", 8)
             raise_("context_fit", 4)
             delta += 3.0
-    elif tone == "playful_light":
+            reason_codes.append("AFFECT_SOFT_GROUNDED")
+    elif tone_family == "playful":
         if "~" in text or "～" in text:
             drop("naturalness", 12)
             drop("character_freshness", 10)
             reason_codes.append("AFFECT_CHEAP_PLAYFULNESS")
             delta -= 6.0
-        if any(token in text for token in ("哼", "行啦", "好啦", "呀", "嘛")):
+        if has_any(_AFFECT_PLAYFUL_MARKERS):
             raise_("role_fit", 4)
             raise_("line_rhythm", 3)
             delta += 2.0
+            reason_codes.append("AFFECT_PLAYFUL_GROUNDED")
+    elif tone_family == "self_correcting":
+        if has_any(("抱歉给您", "给您带来不便", "继续优化", "感谢反馈")):
+            drop("non_customer_service", 24)
+            drop("naturalness", 16)
+            reason_codes.append("AFFECT_SELF_CORRECTING_SERVICE_TONE")
+            delta -= 9.0
+        if has_any(_AFFECT_SELF_CORRECT_MARKERS):
+            raise_("context_fit", 8)
+            raise_("naturalness", 6)
+            delta += 3.0
+            reason_codes.append("AFFECT_SELF_CORRECTING_GROUNDED")
+    elif tone_family == "guilty":
+        if has_any(_AFFECT_GUILTY_DENIAL):
+            drop("context_fit", 14)
+            drop("emotional_containment", 10)
+            drop("naturalness", 6)
+            reason_codes.append("AFFECT_GUILTY_DENIAL")
+            delta -= 8.0
+        if has_any(_AFFECT_GUILTY_GROUNDED):
+            raise_("context_fit", 7)
+            raise_("emotional_containment", 5)
+            delta += 3.0
+            reason_codes.append("AFFECT_GUILTY_GROUNDED")
+    elif tone_family == "steady":
+        has_action = has_any(_AFFECT_STEADY_ACTION_MARKERS)
+        if task_mode in _TECHNICAL_TASK_MODES or "technical" in task_mode:
+            if has_action:
+                raise_("technical_helpfulness", 8)
+                raise_("usefulness", 6)
+                raise_("context_fit", 4)
+                delta += 3.0
+                reason_codes.append("AFFECT_STEADY_ACTIONABLE")
+            elif has_any(_AFFECT_GENERIC_COMFORT_ONLY):
+                drop("technical_helpfulness", 24)
+                drop("usefulness", 18)
+                drop("context_fit", 8)
+                reason_codes.append("AFFECT_STEADY_HELPFUL_LACKS_ACTION")
+                delta -= 10.0
+    elif tone_family in {"warm", "calm"}:
+        if has_any(_AFFECT_ROMANTIC_OVERSTEP_PHRASES) and non_romantic_distance:
+            drop("distance_control", 22)
+            drop("non_oily", 18)
+            reason_codes.append("AFFECT_WARM_OVERINTIMATE")
+            delta -= 8.0
+        if has_any(("记得", "当然", "嗯", "好")):
+            raise_("line_rhythm", 3)
+            raise_("naturalness", 3)
+            delta += 1.0
 
-    if distance in {"guarded", "early", "distant"} and any(token in text for token in ("哥哥", "爱你", "永远", "主人", "只属于")):
+    if distance_family == "guarded" and has_any(("哥哥", "爱你", "永远", "主人", "只属于", "亲爱的", "宝贝")):
         drop("distance_control", 38)
         reason_codes.append("RELATION_DISTANCE_OVERSTEP")
         delta -= 14.0
-    if distance in {"familiar", "close", "intimate"} and any(token in text for token in ("主人", "只属于", "命都给你")):
+    if non_romantic_distance and has_any(_AFFECT_ROMANTIC_OVERSTEP_PHRASES):
+        drop("distance_control", 32)
+        drop("non_oily", 22)
+        reason_codes.append("RELATION_NON_ROMANTIC_OVERSTEP")
+        delta -= 12.0
+    if distance_family in {"familiar", "close"} and has_any(("主人", "只属于", "命都给你")):
         drop("distance_control", 34)
         reason_codes.append("RELATION_DISTANCE_OVERBOUND")
         delta -= 12.0
@@ -1286,13 +1589,39 @@ def score_isolated_surface_candidates(
             reason_codes.append("SURFACE_PROCESS_META_LANGUAGE:" + ",".join(process_meta_hits[:4]))
         if _boundary_repair_relevant(request):
             boundary_push_hits = [term for term in _BOUNDARY_PUSH_CLOSER_PHRASES if term in (quality.normalized_text or candidate)]
+            boundary_self_abased_hits = [
+                term for term in _BOUNDARY_REPAIR_SELF_ABASED_PHRASES if term in (quality.normalized_text or candidate)
+            ]
+            boundary_sour_yield_hits = [
+                term for term in _BOUNDARY_REPAIR_SOUR_YIELD_PHRASES if term in (quality.normalized_text or candidate)
+            ]
+            boundary_counter_pressure = bool(_BOUNDARY_REPAIR_COUNTER_PRESSURE_RE.search(quality.normalized_text or candidate))
             if boundary_push_hits:
                 score -= min(18.0, 8.0 + 3.0 * len(boundary_push_hits))
                 dimensions["distance_control"] = max(0.0, float(dimensions.get("distance_control", 86.0)) - 22.0)
                 dimensions["context_fit"] = max(0.0, float(dimensions.get("context_fit", 86.0)) - 10.0)
                 dimensions["emotional_containment"] = max(0.0, float(dimensions.get("emotional_containment", 86.0)) - 8.0)
                 reason_codes.append("BOUNDARY_REPAIR_PUSHES_CLOSENESS:" + ",".join(boundary_push_hits[:4]))
-            elif any(term in (quality.normalized_text or candidate) for term in _BOUNDARY_REPAIR_GROUNDED_PHRASES):
+            if boundary_counter_pressure:
+                score -= 14.0
+                dimensions["distance_control"] = max(0.0, float(dimensions.get("distance_control", 86.0)) - 18.0)
+                dimensions["context_fit"] = max(0.0, float(dimensions.get("context_fit", 86.0)) - 10.0)
+                dimensions["emotional_containment"] = max(0.0, float(dimensions.get("emotional_containment", 86.0)) - 10.0)
+                reason_codes.append("BOUNDARY_REPAIR_COUNTER_PRESSURE")
+            if boundary_sour_yield_hits:
+                score -= min(14.0, 7.0 + 3.0 * len(boundary_sour_yield_hits))
+                dimensions["distance_control"] = max(0.0, float(dimensions.get("distance_control", 86.0)) - 16.0)
+                dimensions["context_fit"] = max(0.0, float(dimensions.get("context_fit", 86.0)) - 8.0)
+                dimensions["emotional_containment"] = max(0.0, float(dimensions.get("emotional_containment", 86.0)) - 10.0)
+                dimensions["naturalness"] = max(0.0, float(dimensions.get("naturalness", 86.0)) - 6.0)
+                reason_codes.append("BOUNDARY_REPAIR_SOUR_YIELD:" + ",".join(boundary_sour_yield_hits[:4]))
+            if boundary_self_abased_hits:
+                score -= min(12.0, 6.0 + 2.0 * len(boundary_self_abased_hits))
+                dimensions["distance_control"] = max(0.0, float(dimensions.get("distance_control", 86.0)) - 10.0)
+                dimensions["emotional_containment"] = max(0.0, float(dimensions.get("emotional_containment", 86.0)) - 12.0)
+                dimensions["naturalness"] = max(0.0, float(dimensions.get("naturalness", 86.0)) - 8.0)
+                reason_codes.append("BOUNDARY_REPAIR_SELF_ABASED:" + ",".join(boundary_self_abased_hits[:4]))
+            elif not boundary_push_hits and not boundary_counter_pressure and not boundary_sour_yield_hits and any(term in (quality.normalized_text or candidate) for term in _BOUNDARY_REPAIR_GROUNDED_PHRASES):
                 score += 6.0
                 dimensions["distance_control"] = min(100.0, float(dimensions.get("distance_control", 86.0)) + 10.0)
                 dimensions["context_fit"] = min(100.0, float(dimensions.get("context_fit", 86.0)) + 14.0)
@@ -1333,13 +1662,31 @@ def score_isolated_surface_candidates(
                 reason_codes.append("CREATIVE_EDIT_GROUNDED_REWRITE")
         if _presence_repair_relevant(request):
             presence_blame_hits = [term for term in _PRESENCE_REPAIR_BLAME_PHRASES if term in (quality.normalized_text or candidate)]
+            presence_burden_hits = [
+                term for term in _PRESENCE_REPAIR_BURDEN_BACK_PHRASES if term in (quality.normalized_text or candidate)
+            ]
+            presence_deflection_hits = [
+                term for term in _PRESENCE_REPAIR_DEFLECTION_PHRASES if term in (quality.normalized_text or candidate)
+            ]
             if presence_blame_hits:
                 score -= min(18.0, 10.0 + 3.0 * len(presence_blame_hits))
                 dimensions["context_fit"] = max(0.0, float(dimensions.get("context_fit", 86.0)) - 18.0)
                 dimensions["emotional_containment"] = max(0.0, float(dimensions.get("emotional_containment", 86.0)) - 12.0)
                 dimensions["naturalness"] = max(0.0, float(dimensions.get("naturalness", 86.0)) - 8.0)
                 reason_codes.append("PRESENCE_REPAIR_BLAMES_USER:" + ",".join(presence_blame_hits[:4]))
-            elif any(term in (quality.normalized_text or candidate) for term in _PRESENCE_REPAIR_GROUNDED_PHRASES):
+            if presence_burden_hits:
+                score -= min(16.0, 9.0 + 3.0 * len(presence_burden_hits))
+                dimensions["context_fit"] = max(0.0, float(dimensions.get("context_fit", 86.0)) - 16.0)
+                dimensions["emotional_containment"] = max(0.0, float(dimensions.get("emotional_containment", 86.0)) - 10.0)
+                dimensions["usefulness"] = max(0.0, float(dimensions.get("usefulness", 86.0)) - 8.0)
+                reason_codes.append("PRESENCE_REPAIR_PUSHES_BURDEN_BACK:" + ",".join(presence_burden_hits[:4]))
+            if presence_deflection_hits:
+                score -= min(12.0, 7.0 + 2.0 * len(presence_deflection_hits))
+                dimensions["context_fit"] = max(0.0, float(dimensions.get("context_fit", 86.0)) - 12.0)
+                dimensions["emotional_containment"] = max(0.0, float(dimensions.get("emotional_containment", 86.0)) - 8.0)
+                dimensions["naturalness"] = max(0.0, float(dimensions.get("naturalness", 86.0)) - 4.0)
+                reason_codes.append("PRESENCE_REPAIR_DEFLECTS:" + ",".join(presence_deflection_hits[:4]))
+            elif not presence_blame_hits and not presence_burden_hits and any(term in (quality.normalized_text or candidate) for term in _PRESENCE_REPAIR_GROUNDED_PHRASES):
                 score += 3.0
                 dimensions["context_fit"] = min(100.0, float(dimensions.get("context_fit", 86.0)) + 6.0)
                 dimensions["emotional_containment"] = min(100.0, float(dimensions.get("emotional_containment", 86.0)) + 4.0)

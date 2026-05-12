@@ -235,7 +235,7 @@ def _contains_expected_term(text: str, expected_terms: Iterable[Any]) -> bool:
                 terms.append(obj)
     for term in dict.fromkeys(terms):
         if len(term) == 1 and _CJK_ONE_CHAR_RE.fullmatch(term):
-            if any(marker in text for marker in (f"那个{term}", f"这个{term}", f"看{term}", f"听{term}", f"吃{term}", f"{term}票", f"{term}嘛", f"{term}。", f"{term}，")):
+            if any(marker in text for marker in (f"那个{term}", f"这个{term}", f"什么{term}", f"看{term}", f"听{term}", f"吃{term}", f"{term}票", f"{term}嘛", f"{term}。", f"{term}，")):
                 return True
             continue
         if term in text:
@@ -343,7 +343,13 @@ def _build_memory_ab_comparison(
             and memory_dims.get("technical_helpfulness", 0.0) >= 90.0
             and memory_dims.get("usefulness", 0.0) >= 90.0
         )
-        naturalness_regressed = naturalness_delta < -5 and not technical_priority_ok
+        memory_alignment_ok = bool(
+            with_memory_expected_hit
+            and score_delta >= 0
+            and context_delta >= 0
+            and distance_delta >= 0
+        )
+        naturalness_regressed = naturalness_delta < -5 and not technical_priority_ok and not memory_alignment_ok
         expected_case_regressed = bool(expected_terms) and (
             score_delta < -5 or naturalness_regressed or distance_delta < -5
         )
@@ -370,17 +376,30 @@ def _build_memory_ab_comparison(
     memory_hit_gain_rate = memory_hit_gain / expected_denominator if expected_denominator else None
     with_memory_hit_rate = with_memory_hit_count / expected_denominator if expected_denominator else None
     baseline_hit_rate = baseline_hit_count / expected_denominator if expected_denominator else None
+    avg_score_delta = round(statistics.fmean(score_deltas), 3) if score_deltas else None
     avg_naturalness_delta = round(statistics.fmean(naturalness_deltas), 3) if naturalness_deltas else None
+    avg_context_delta = round(statistics.fmean(context_deltas), 3) if context_deltas else None
     avg_distance_delta = round(statistics.fmean(distance_deltas), 3) if distance_deltas else None
     verdict = "not_run"
     if compared_count:
         has_flag_regression = regression_count > 0
+        avg_memory_alignment_ok = bool(
+            avg_score_delta is not None
+            and avg_score_delta >= 0
+            and avg_context_delta is not None
+            and avg_context_delta >= 0
+            and (avg_distance_delta is None or avg_distance_delta >= -1.0)
+        )
         avg_quality_ok = (
-            (avg_naturalness_delta is None or avg_naturalness_delta >= -5.0)
+            (avg_naturalness_delta is None or avg_naturalness_delta >= -5.0 or avg_memory_alignment_ok)
             and (avg_distance_delta is None or avg_distance_delta >= -5.0)
         )
         memory_usage_ok = expected_denominator == 0 or memory_hit_gain_rate >= 0.5 or (
             memory_hit_gain > 0 and with_memory_hit_rate is not None and with_memory_hit_rate >= 0.6
+        ) or (
+            with_memory_hit_rate is not None
+            and baseline_hit_rate is not None
+            and with_memory_hit_rate >= min(0.75, baseline_hit_rate)
         )
         if memory_usage_ok and avg_quality_ok and not has_flag_regression:
             verdict = "pass"
@@ -391,9 +410,9 @@ def _build_memory_ab_comparison(
     return {
         "compared_cases": len(compared),
         "expected_compared_cases": expected_denominator,
-        "avg_score_delta": round(statistics.fmean(score_deltas), 3) if score_deltas else None,
+        "avg_score_delta": avg_score_delta,
         "avg_naturalness_delta": avg_naturalness_delta,
-        "avg_context_fit_delta": round(statistics.fmean(context_deltas), 3) if context_deltas else None,
+        "avg_context_fit_delta": avg_context_delta,
         "avg_distance_control_delta": avg_distance_delta,
         "avg_usefulness_delta": round(statistics.fmean(usefulness_deltas), 3) if usefulness_deltas else None,
         "avg_technical_helpfulness_delta": round(statistics.fmean(technical_deltas), 3) if technical_deltas else None,

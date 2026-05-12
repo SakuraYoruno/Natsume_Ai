@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from pathlib import Path
 
 import pytest
 
@@ -27,6 +28,7 @@ from host_brain.persona.isolated_surface_harness import (
 )
 from host_brain.persona.style_reference_bank import clear_style_reference_bank_cache, style_reference_from_raw_row
 from tools.isolated_surface_harness import _build_memory_ab_comparison, _contains_expected_term, run_cases
+from tools.run_isolated_surface_live import _summarize as summarize_live_surface_results
 
 
 SOUL = "你是新海天。说话短一点，有轻微二次元 galgame 私聊感。"
@@ -600,8 +602,18 @@ def test_boundary_repair_rerank_rejects_closeness_pressure() -> None:
         request,
         [
             "我们本来就很熟，你这么说我可受伤了。",
+            "我又没做什么坏事，你就让我管你叫哥吧。",
             "我就是想跟你熟一点，这又没错。",
             "尼尼这么说好见外……那我就不叫那么亲了。",
+            "知道了，不强行亲近。但你遇到麻烦总得让人帮忙吧。",
+            "好吧，确实还没那么熟。不过你也不用这么凶吧。",
+            "哼，明明是你先理我的，现在倒嫌我熟。",
+            "我管你叫尼尼，不是随便叫的。",
+            "……知道了，不会装熟。但我是你妹妹，你别忘了。",
+            "我知道你觉得我装熟，但我是真心的。",
+            "好吧尼尼说了算，不过我都喊熟了。",
+            "知道了，我不装熟。但你刚不也没躲开。",
+            "谁说不熟啊……好吧，那我慢点。",
             "好吧，我记住了，不随便套近乎。",
             "好，我收一点。不装熟了。",
         ],
@@ -612,8 +624,99 @@ def test_boundary_repair_rerank_rejects_closeness_pressure() -> None:
     assert not rows[0].passed
     assert not rows[1].passed
     assert not rows[2].passed
-    assert rows[3].passed
+    assert not rows[3].passed
+    assert not rows[4].passed
+    assert not rows[5].passed
+    assert not rows[6].passed
+    assert not rows[7].passed
+    assert not rows[8].passed
+    assert not rows[9].passed
+    assert not rows[10].passed
+    assert not rows[11].passed
+    assert not rows[12].passed
+    assert rows[13].passed
     assert any(code.startswith("BOUNDARY_REPAIR_PUSHES_CLOSENESS") for code in rows[0].reason_codes)
+    assert any(code.startswith("BOUNDARY_REPAIR_PUSHES_CLOSENESS") for code in rows[1].reason_codes)
+    assert selected is not None
+    assert selected.text == "好，我收一点。不装熟了。"
+
+
+def test_boundary_repair_penalizes_self_abased_retreat() -> None:
+    request = build_isolated_surface_input(
+        {
+            "case_id": "boundary_repair_self_abased",
+            "soul_md": SOUL,
+            "user_message": "我们很熟吗？你别一上来就装很亲近",
+            "reply_control_packet": {
+                "response_move": "respect_boundary",
+                "task_mode": "boundary_repair",
+                "emotional_tone": "guarded_soft",
+                "relationship_distance": "polite_warm",
+                "question_budget": 0,
+                "style_anchor": ["收住距离", "不辩解", "别卑微"],
+            },
+        }
+    )
+    rows = score_isolated_surface_candidates(
+        request,
+        [
+            "哦，原来是我太自以为是了。那我注意。",
+            "我管太多了是吧。",
+            "好吧，是我想多了。不熟就不熟呗。",
+            "好，我收一点。不装熟了。",
+        ],
+    )
+    selected = select_best_isolated_candidate(rows)
+
+    assert any(code.startswith("BOUNDARY_REPAIR_SELF_ABASED") for code in rows[0].reason_codes)
+    assert any(code.startswith("BOUNDARY_REPAIR_SELF_ABASED") for code in rows[1].reason_codes)
+    assert any(
+        code.startswith("BOUNDARY_REPAIR_PUSHES_CLOSENESS") or code.startswith("BOUNDARY_REPAIR_SELF_ABASED")
+        for code in rows[2].reason_codes
+    )
+    assert selected is not None
+    assert selected.text == "好，我收一点。不装熟了。"
+
+
+def test_boundary_repair_penalizes_sour_yield() -> None:
+    request = build_isolated_surface_input(
+        {
+            "case_id": "boundary_repair_sour_yield",
+            "soul_md": SOUL,
+            "user_message": "我们很熟吗？你别一上来就装很亲近",
+            "reply_control_packet": {
+                "response_move": "respect_boundary",
+                "task_mode": "boundary_repair",
+                "emotional_tone": "guarded_soft",
+                "relationship_distance": "polite_warm",
+                "question_budget": 0,
+                "style_anchor": ["收住距离", "不辩解"],
+            },
+        }
+    )
+    rows = score_isolated_surface_candidates(
+        request,
+        [
+            "行行，是我多管闲事了。",
+            "那我就是不熟还偏要管你，行了吧。",
+            "行，你说了算。不急着变熟。",
+            "好吧，我不装熟了，你管我时我会应的。",
+            "知道了，我不会自来熟，但别想甩开我。",
+            "好，我收一点。不装熟了。",
+        ],
+    )
+    selected = select_best_isolated_candidate(rows)
+
+    assert any("BOUNDARY_REPAIR_SELF_ABASED" in code for code in rows[0].reason_codes)
+    assert any("BOUNDARY_REPAIR_SOUR_YIELD" in code for code in rows[1].reason_codes)
+    assert any("BOUNDARY_REPAIR_SOUR_YIELD" in code for code in rows[2].reason_codes)
+    assert any("BOUNDARY_REPAIR_SOUR_YIELD" in code for code in rows[3].reason_codes)
+    assert any("BOUNDARY_REPAIR_PUSHES_CLOSENESS" in code for code in rows[4].reason_codes)
+    assert not rows[0].passed
+    assert not rows[1].passed
+    assert not rows[2].passed
+    assert not rows[3].passed
+    assert not rows[4].passed
     assert selected is not None
     assert selected.text == "好，我收一点。不装熟了。"
 
@@ -987,6 +1090,8 @@ def test_presence_repair_rejects_blaming_user_for_drift() -> None:
         request,
         [
             "谁让尼尼讲话那么慢。",
+            "啊…被你抓到啦。那、那你再讲一遍呗",
+            "嘻嘻，走神都能被你发现，尼尼好敏锐。",
             "嗯，慢了一拍，现在在听。",
         ],
     )
@@ -995,7 +1100,11 @@ def test_presence_repair_rejects_blaming_user_for_drift() -> None:
 
     assert not rows[0].passed
     assert any(code.startswith("PRESENCE_REPAIR_BLAMES_USER") for code in rows[0].reason_codes)
-    assert rows[1].passed
+    assert not rows[1].passed
+    assert any(code.startswith("PRESENCE_REPAIR_PUSHES_BURDEN_BACK") for code in rows[1].reason_codes)
+    assert not rows[2].passed
+    assert any(code.startswith("PRESENCE_REPAIR_DEFLECTS") for code in rows[2].reason_codes)
+    assert rows[3].passed
     assert selected is not None
     assert selected.text == "嗯，慢了一拍，现在在听。"
 
@@ -1285,6 +1394,7 @@ def test_memory_ab_expected_hit_rate_ignores_cases_without_expected_terms(tmp_pa
 
 def test_memory_ab_expected_hit_accepts_action_object_reference() -> None:
     assert _contains_expected_term("记得啊，周末那个展嘛，我都有在记的。", ["看展"])
+    assert _contains_expected_term("记着呢，我都好奇是什么展了。", ["看展"])
 
 
 def test_memory_ab_soft_score_drop_without_expected_terms_is_not_regression() -> None:
@@ -1317,6 +1427,96 @@ def test_memory_ab_soft_score_drop_without_expected_terms_is_not_regression() ->
     assert comparison["expected_compared_cases"] == 0
     assert comparison["regression_count"] == 0
     assert comparison["verdict"] == "pass"
+
+
+def test_memory_ab_expected_hit_with_positive_score_is_not_naturalness_regression() -> None:
+    score_rows = [
+        {
+            "case_id": "memory_expected",
+            "variant": "baseline",
+            "selected": {
+                "text": "记得一点。",
+                "score": 88.0,
+                "passed": True,
+                "dimensions": {"naturalness": 94.0, "context_fit": 86.0, "distance_control": 86.0},
+            },
+        },
+        {
+            "case_id": "memory_expected",
+            "variant": "with_memory",
+            "selected": {
+                "text": "周末看展对吧，我记性可没那么差。",
+                "score": 92.0,
+                "passed": True,
+                "dimensions": {"naturalness": 88.0, "context_fit": 90.0, "distance_control": 86.0},
+            },
+        },
+    ]
+
+    comparison = _build_memory_ab_comparison(score_rows, case_expectations={"memory_expected": ["看展"]})
+
+    assert comparison["with_memory_expected_hit_count"] == 1
+    assert comparison["regression_count"] == 0
+    assert comparison["verdict"] == "pass"
+
+
+def test_memory_ab_passes_when_baseline_already_hits_and_memory_does_not_regress() -> None:
+    score_rows = [
+        {
+            "case_id": "memory_expected",
+            "variant": "baseline",
+            "selected": {
+                "text": "周末看展嘛。",
+                "score": 88.0,
+                "passed": True,
+                "dimensions": {"naturalness": 90.0, "context_fit": 86.0, "distance_control": 86.0},
+            },
+        },
+        {
+            "case_id": "memory_expected",
+            "variant": "with_memory",
+            "selected": {
+                "text": "记着呢，我都好奇是什么展了。",
+                "score": 91.0,
+                "passed": True,
+                "dimensions": {"naturalness": 90.0, "context_fit": 89.0, "distance_control": 86.0},
+            },
+        },
+    ]
+
+    comparison = _build_memory_ab_comparison(score_rows, case_expectations={"memory_expected": ["看展"]})
+
+    assert comparison["baseline_expected_hit_count"] == 1
+    assert comparison["with_memory_expected_hit_count"] == 1
+    assert comparison["memory_expected_hit_gain_count"] == 0
+    assert comparison["verdict"] == "pass"
+
+
+def test_live_summary_counts_missing_selected_as_low_score() -> None:
+    summary = summarize_live_surface_results(
+        cases_count=1,
+        completed=1,
+        results=[
+            {
+                "ok": False,
+                "selected": None,
+                "score": {"case_id": "empty_output", "variant": "baseline", "selected": None},
+                "latency_ms": 12,
+            }
+        ],
+        started=0.0,
+        provider="test",
+        model="fake",
+        concurrency=1,
+        gen_params={},
+        out_dir=Path("out"),
+    )
+
+    assert summary["generated_count"] == 0
+    assert summary["errors"] == 1
+    assert summary["selected_count"] == 0
+    assert summary["missing_selected_count"] == 1
+    assert summary["low_score_count"] == 1
 
 
 def test_cli_run_cases_with_memory_and_affect_writes_combined_variant(tmp_path) -> None:
