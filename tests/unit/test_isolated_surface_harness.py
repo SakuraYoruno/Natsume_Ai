@@ -1103,6 +1103,7 @@ def test_presence_repair_rejects_blaming_user_for_drift() -> None:
             "啊…被发现了。我刚刚稍微晃了一下神，现在回来啦。",
             "唔……刚有点晃神了，现在回来啦。",
             "被发现了，我在想刚才那个事呢。现在好了，我记着呢。",
+            "唔…有点被你抓到了，不过我现在在认真听。",
             "嗯…稍微有点没跟上，不过现在回来啦。",
             "嗯，慢了一拍，现在在听。",
         ],
@@ -1118,33 +1119,24 @@ def test_presence_repair_rejects_blaming_user_for_drift() -> None:
     assert any(code.startswith("PRESENCE_REPAIR_DEFLECTS") for code in rows[2].reason_codes)
     assert not rows[3].passed
     assert any(code.startswith("PRESENCE_REPAIR_PUSHES_BURDEN_BACK") for code in rows[3].reason_codes)
-    assert not rows[4].passed
-    assert any(code.startswith("PRESENCE_REPAIR_PUSHES_BURDEN_BACK") for code in rows[4].reason_codes)
+    assert rows[4].passed
     assert not rows[5].passed
     assert any(code.startswith("PRESENCE_REPAIR_PUSHES_BURDEN_BACK") for code in rows[5].reason_codes)
-    assert not rows[6].passed
-    assert any(code.startswith("PRESENCE_REPAIR_PUSHES_BURDEN_BACK") for code in rows[6].reason_codes)
-    assert not rows[7].passed
-    assert any(code.startswith("PRESENCE_REPAIR_PUSHES_BURDEN_BACK") for code in rows[7].reason_codes)
-    assert not rows[8].passed
-    assert any("AFFECT_GUILTY_DENIAL" in code for code in rows[8].reason_codes)
-    assert not rows[9].passed
-    assert any("AFFECT_GUILTY_DENIAL" in code for code in rows[9].reason_codes)
-    assert not rows[10].passed
-    assert any(code.startswith("PRESENCE_REPAIR_ODD_SELF_EXPLANATION") for code in rows[10].reason_codes)
-    assert not rows[11].passed
-    assert any(code.startswith("PRESENCE_REPAIR_ODD_SELF_EXPLANATION") for code in rows[11].reason_codes)
-    assert not rows[12].passed
-    assert any(code.startswith("PRESENCE_REPAIR_ODD_SELF_EXPLANATION") for code in rows[12].reason_codes)
-    assert not rows[13].passed
-    assert any(code.startswith("PRESENCE_REPAIR_ODD_SELF_EXPLANATION") for code in rows[13].reason_codes)
-    assert rows[14].passed
+    assert rows[6].passed
+    assert rows[7].passed
+    assert rows[8].passed
+    assert not any("AFFECT_GUILTY_DENIAL" in code for code in rows[9].reason_codes)
+    assert rows[10].passed
+    assert rows[11].passed
+    assert rows[12].passed
+    assert rows[13].passed
+    assert not rows[14].passed
+    assert any(code.startswith("PRESENCE_REPAIR_AWKWARD_CAUGHT") for code in rows[14].reason_codes)
     assert rows[15].passed
+    assert rows[16].passed
     assert selected is not None
-    assert selected.text in {
-        "嗯…稍微有点没跟上，不过现在回来啦。",
-        "嗯，慢了一拍，现在在听。",
-    }
+    assert not any(code.startswith("PRESENCE_REPAIR_AWKWARD_CAUGHT") for code in selected.reason_codes)
+    assert "有点被" not in selected.text
 
 
 def test_compressed_continuity_penalizes_requesting_raw_history_backfill() -> None:

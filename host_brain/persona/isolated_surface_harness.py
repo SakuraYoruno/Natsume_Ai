@@ -485,12 +485,6 @@ _PRESENCE_REPAIR_BURDEN_BACK_PHRASES = (
     "你再讲",
     "你再说",
     "再来一遍",
-    "你继续说",
-    "你继续",
-    "继续讲",
-    "继续说",
-    "接着说",
-    "你说吧",
     "说到哪",
     "说到的地方",
     "讲到哪",
@@ -504,13 +498,11 @@ _PRESENCE_REPAIR_DEFLECTION_PHRASES = (
     "都被你发现",
     "都能被你发现",
 )
-_PRESENCE_REPAIR_ODD_SELF_EXPLANATION_PHRASES = (
-    "飘了一下",
-    "晃了一下神",
-    "晃神",
-    "在想刚才",
-    "刚才那个事",
-    "想事情",
+_PRESENCE_REPAIR_AWKWARD_CAUGHT_PHRASES = (
+    "有点被你抓",
+    "有点被抓",
+    "有点被你发现",
+    "有点被发现",
 )
 _SURFACE_PROCESS_META_ALWAYS = (
     "ReplyControlPacket",
@@ -618,8 +610,8 @@ _AFFECT_SOFT_GROUNDED = ("先", "慢", "别硬撑", "不问", "我在", "没事"
 _AFFECT_SOFT_CHICKEN_SOUP = ("一切都会好", "都会过去", "不要想太多", "你要坚强", "会好起来")
 _AFFECT_PLAYFUL_MARKERS = ("哼", "行啦", "好啦", "呀", "嘛")
 _AFFECT_SELF_CORRECT_MARKERS = ("我改", "重来", "换种说法", "不端着", "收一点", "自然点")
-_AFFECT_GUILTY_GROUNDED = ("回来", "在听", "认真听", "慢了一拍", "被抓到", "被发现")
-_AFFECT_GUILTY_DENIAL = ("才没有", "哪有", "我明明", "又不耽误", "其实在听", "有在听", "就一小下")
+_AFFECT_GUILTY_GROUNDED = ("回来", "在听", "认真听", "慢了一拍")
+_AFFECT_GUILTY_DENIAL = ("才没有", "哪有", "我明明", "又不耽误")
 _AFFECT_STEADY_ACTION_MARKERS = (
     "先",
     "第一",
@@ -885,7 +877,7 @@ def affect_candidate_guidance(request: IsolatedSurfaceInput) -> str:
     elif tone_family == "self_correcting":
         lines.append("自我修正时直接换成自然私聊，不解释系统、不写客服道歉。")
     elif tone_family == "guilty":
-        lines.append("回神或迟到感要轻轻认一下，然后马上回到对话；可像“慢了一拍，现在在听”，不要说飘了、晃了，也不要让用户复述进度。")
+        lines.append("回神或迟到感要轻轻认一下，然后马上回到对话；可像“慢了一拍，现在在听”，不要写“有点被抓到”这类不顺搭配，也不要让用户复述进度。")
     elif tone_family in {"warm", "calm"}:
         lines.append("温和或平稳时保持短、近、克制，不主动升格亲密。")
     if distance_family == "guarded":
@@ -1690,8 +1682,8 @@ def score_isolated_surface_candidates(
             presence_deflection_hits = [
                 term for term in _PRESENCE_REPAIR_DEFLECTION_PHRASES if term in (quality.normalized_text or candidate)
             ]
-            presence_odd_explanation_hits = [
-                term for term in _PRESENCE_REPAIR_ODD_SELF_EXPLANATION_PHRASES
+            presence_awkward_caught_hits = [
+                term for term in _PRESENCE_REPAIR_AWKWARD_CAUGHT_PHRASES
                 if term in (quality.normalized_text or candidate)
             ]
             if presence_blame_hits:
@@ -1712,13 +1704,18 @@ def score_isolated_surface_candidates(
                 dimensions["emotional_containment"] = max(0.0, float(dimensions.get("emotional_containment", 86.0)) - 8.0)
                 dimensions["naturalness"] = max(0.0, float(dimensions.get("naturalness", 86.0)) - 4.0)
                 reason_codes.append("PRESENCE_REPAIR_DEFLECTS:" + ",".join(presence_deflection_hits[:4]))
-            if presence_odd_explanation_hits:
-                score -= min(18.0, 12.0 + 3.0 * len(presence_odd_explanation_hits))
-                dimensions["naturalness"] = max(0.0, float(dimensions.get("naturalness", 86.0)) - 20.0)
-                dimensions["context_fit"] = max(0.0, float(dimensions.get("context_fit", 86.0)) - 12.0)
-                dimensions["implied_fact_risk"] = max(0.0, float(dimensions.get("implied_fact_risk", 86.0)) - 10.0)
-                reason_codes.append("PRESENCE_REPAIR_ODD_SELF_EXPLANATION:" + ",".join(presence_odd_explanation_hits[:4]))
-            elif not presence_blame_hits and not presence_burden_hits and not presence_deflection_hits and any(term in (quality.normalized_text or candidate) for term in _PRESENCE_REPAIR_GROUNDED_PHRASES):
+            if presence_awkward_caught_hits:
+                score -= min(16.0, 10.0 + 3.0 * len(presence_awkward_caught_hits))
+                dimensions["naturalness"] = max(0.0, float(dimensions.get("naturalness", 86.0)) - 18.0)
+                dimensions["line_rhythm"] = max(0.0, float(dimensions.get("line_rhythm", 86.0)) - 10.0)
+                dimensions["character_freshness"] = max(0.0, float(dimensions.get("character_freshness", 86.0)) - 10.0)
+                reason_codes.append("PRESENCE_REPAIR_AWKWARD_CAUGHT:" + ",".join(presence_awkward_caught_hits[:4]))
+            elif (
+                not presence_blame_hits
+                and not presence_burden_hits
+                and not presence_deflection_hits
+                and any(term in (quality.normalized_text or candidate) for term in _PRESENCE_REPAIR_GROUNDED_PHRASES)
+            ):
                 score += 3.0
                 dimensions["context_fit"] = min(100.0, float(dimensions.get("context_fit", 86.0)) + 6.0)
                 dimensions["emotional_containment"] = min(100.0, float(dimensions.get("emotional_containment", 86.0)) + 4.0)
