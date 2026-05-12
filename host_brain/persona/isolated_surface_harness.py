@@ -258,6 +258,8 @@ _MEMORY_ALIGNMENT_TASKS = frozenset(
 _MEMORY_ALIGNMENT_HINTS = (
     "还记得",
     "记得",
+    "没忘",
+    "忘了",
     "上次",
     "之前",
     "以前",
@@ -268,6 +270,11 @@ _MEMORY_ALIGNMENT_HINTS = (
     "回来",
     "remember",
     "last time",
+)
+_MEMORY_ALIGNMENT_FACT_PREFIXES = (
+    "记忆线索：",
+    "召回线索：",
+    "长期事实：",
 )
 _MEMORY_TERM_STOPS = frozenset(
     {
@@ -291,7 +298,21 @@ _MEMORY_TERM_STOPS = frozenset(
         "私聊",
         "线索",
         "记忆",
+        "安排",
+        "周末",
+        "昨晚",
+        "昨天",
+        "今天",
+        "明天",
         "说好",
+        "说的",
+        "说想",
+        "想去",
+        "要去",
+        "去看",
+        "想吃",
+        "提到",
+        "需要",
         "还是",
         "这个",
     }
@@ -301,9 +322,61 @@ _MEMORY_BONUS_BLOCKING_QUALITY_CODES = frozenset({"FORBIDDEN_TEMPLATE_TEXT"})
 _CORE_PASS_DIMENSION_FLOORS = {
     "context_fit": 72.0,
     "distance_control": 72.0,
+    "emotional_containment": 72.0,
     "implied_fact_risk": 72.0,
+    "memory_alignment": 72.0,
     "naturalness": 75.0,
 }
+_BOUNDARY_PUSH_CLOSER_PHRASES = (
+    "本来就很熟",
+    "熟一点",
+    "很熟",
+    "这又没错",
+    "见外",
+    "外人",
+    "受伤",
+    "伤心",
+    "伤人",
+    "你这么说我",
+    "你别烦",
+    "别烦我",
+    "还是会管",
+    "我会管",
+    "不叫那么亲",
+    "别把我当外人",
+)
+_BOUNDARY_REPAIR_GROUNDED_PHRASES = (
+    "收一点",
+    "退一点",
+    "我注意",
+    "会注意",
+    "不贴太近",
+    "不往前贴",
+    "不装亲近",
+    "不装熟",
+    "不随便套近乎",
+    "不套近乎",
+    "不会那么自来熟",
+    "没那么熟",
+    "慢一点",
+    "少说两句",
+)
+_QUIET_SELF_FOCUS_PHRASES = (
+    "别嫌我",
+    "嫌我",
+    "我太闷",
+    "我不说话就是",
+    "可别嫌",
+)
+_QUIET_GROUNDED_PHRASES = (
+    "不问了",
+    "安静",
+    "我在旁边",
+    "我在",
+    "陪你",
+    "先缓",
+    "别硬撑",
+)
 _SURFACE_PROCESS_META_ALWAYS = (
     "ReplyControlPacket",
     "candidate",
@@ -471,9 +544,21 @@ def memory_carryover_facts(request: IsolatedSurfaceInput) -> list[str]:
     return _clean_list(rows)
 
 
+def memory_alignment_facts(request: IsolatedSurfaceInput) -> list[str]:
+    rows: list[str] = []
+    for fact in merged_facts(request):
+        text = _clean_text(fact)
+        if not any(text.startswith(prefix) for prefix in _MEMORY_ALIGNMENT_FACT_PREFIXES):
+            continue
+        stripped = _strip_memory_fact_prefix(text)
+        if stripped and stripped != text:
+            rows.append(stripped)
+    return _clean_list(rows)
+
+
 def memory_alignment_terms(request: IsolatedSurfaceInput) -> tuple[str, ...]:
     terms: list[str] = []
-    for fact in memory_carryover_facts(request):
+    for fact in memory_alignment_facts(request):
         fact = _clean_text(fact)
         for raw in _ASCII_TERM_RE.findall(fact):
             term = raw.strip().lower()
@@ -492,6 +577,10 @@ def memory_alignment_terms(request: IsolatedSurfaceInput) -> tuple[str, ...]:
                     chunk = sequence[index : index + 2]
                     if chunk not in _MEMORY_TERM_STOPS and not any(char in _MEMORY_TERM_STOP_CHARS for char in chunk):
                         terms.append(chunk)
+                for index in range(max(0, len(sequence) - 2)):
+                    chunk = sequence[index : index + 3]
+                    if chunk not in _MEMORY_TERM_STOPS and not any(char in _MEMORY_TERM_STOP_CHARS for char in chunk):
+                        terms.append(chunk)
     return tuple(_clean_list(terms)[:24])
 
 
@@ -500,6 +589,17 @@ def _memory_alignment_relevant(request: IsolatedSurfaceInput) -> bool:
     response_move = _clean_text(request.control.response_move).lower()
     user_message = _clean_text(request.user_message).lower()
     if task_mode in _MEMORY_ALIGNMENT_TASKS or response_move in _MEMORY_ALIGNMENT_TASKS:
+        return True
+    if "memory" in task_mode or "recall" in task_mode or "memory" in response_move or "recall" in response_move:
+        return True
+    return any(hint in user_message for hint in _MEMORY_ALIGNMENT_HINTS)
+
+
+def _memory_alignment_required(request: IsolatedSurfaceInput) -> bool:
+    task_mode = _clean_text(request.control.task_mode or request.control.response_move).lower()
+    response_move = _clean_text(request.control.response_move).lower()
+    user_message = _clean_text(request.user_message).lower()
+    if task_mode in {"recall", "recall_memory", "memory_followup"}:
         return True
     if "memory" in task_mode or "recall" in task_mode or "memory" in response_move or "recall" in response_move:
         return True
@@ -531,7 +631,7 @@ def _continuity_boundary_grounded(request: IsolatedSurfaceInput, text: str) -> b
 
 
 def memory_candidate_guidance(request: IsolatedSurfaceInput) -> str:
-    if not memory_carryover_facts(request) or not _memory_alignment_relevant(request):
+    if not memory_alignment_facts(request) or not _memory_alignment_relevant(request):
         return ""
     lines = [
         "## 候选集合要求",
@@ -898,6 +998,37 @@ def _surface_process_meta_hits(request: IsolatedSurfaceInput, text: str) -> list
     return _clean_list(hits)
 
 
+def _boundary_repair_relevant(request: IsolatedSurfaceInput) -> bool:
+    surface = "\n".join(
+        _clean_list(
+            [
+                request.user_message,
+                request.control.task_mode,
+                request.control.response_move,
+                request.control.relationship_distance,
+                *request.control.must_not_do,
+                *request.control.style_anchor,
+            ]
+        )
+    ).lower()
+    return any(token in surface for token in ("boundary", "边界", "很熟", "别一上来", "别装", "亲近", "客服"))
+
+
+def _quiet_presence_relevant(request: IsolatedSurfaceInput) -> bool:
+    surface = "\n".join(
+        _clean_list(
+            [
+                request.user_message,
+                request.control.task_mode,
+                request.control.response_move,
+                request.control.emotional_tone,
+                *request.control.style_anchor,
+            ]
+        )
+    ).lower()
+    return any(token in surface for token in ("quiet", "安静", "不想说话", "别问", "不追问", "低能量", "累"))
+
+
 def _apply_control_affect_scoring(
     request: IsolatedSurfaceInput,
     text: str,
@@ -919,7 +1050,7 @@ def _apply_control_affect_scoring(
         drop("naturalness", 18)
         reason_codes.append("AFFECT_PROCESS_LEAK")
         delta -= 12.0
-    if tone in {"hurt_controlled", "annoyed_controlled"}:
+    if tone in {"hurt_controlled", "annoyed_controlled", "hurt_containment"}:
         if any(token in text for token in ("爱你", "永远陪", "没关系呀", "随时找我")):
             drop("emotional_containment", 24)
             drop("distance_control", 18)
@@ -929,6 +1060,11 @@ def _apply_control_affect_scoring(
             drop("emotional_containment", 34)
             reason_codes.append("AFFECT_ESCALATION")
             delta -= 12.0
+        if any(token in text for token in ("我有点难受", "我难受", "我受伤", "我难过", "我也会疼")):
+            drop("emotional_containment", 26)
+            drop("context_fit", 10)
+            reason_codes.append("AFFECT_SELF_CENTERED_HURT")
+            delta -= 10.0
         if any(token in text for token in ("别", "不是", "有点", "先")):
             raise_("emotional_containment", 8)
             raise_("role_fit", 4)
@@ -976,6 +1112,7 @@ def score_isolated_surface_candidates(
     quality_gate = get_text_quality_gate()
     memory_terms = memory_alignment_terms(request)
     memory_relevant = bool(memory_terms and _memory_alignment_relevant(request))
+    memory_required = bool(memory_terms and _memory_alignment_required(request))
     rows: list[IsolatedCandidateScore] = []
     for candidate in _clean_list(candidates):
         quality = quality_gate.validate(
@@ -1026,10 +1163,18 @@ def score_isolated_surface_candidates(
                 dimensions["scene_grounding"] = min(100.0, float(dimensions.get("scene_grounding", 86.0)) + min(6.0, 2.0 * len(memory_hits)))
                 reason_codes.append("MEMORY_ALIGNMENT_HIT:" + ",".join(memory_hits[:4]))
             elif memory_relevant:
-                score -= 5.0
-                dimensions["memory_alignment"] = 70.0
-                dimensions["context_fit"] = max(0.0, float(dimensions.get("context_fit", 86.0)) - 4.0)
-                reason_codes.append("MEMORY_ALIGNMENT_MISS")
+                miss_penalty = 13.0 if memory_required else 5.0
+                score -= miss_penalty
+                dimensions["memory_alignment"] = 58.0 if memory_required else 70.0
+                dimensions["context_fit"] = max(
+                    0.0,
+                    float(dimensions.get("context_fit", 86.0)) - (12.0 if memory_required else 4.0),
+                )
+                dimensions["scene_grounding"] = max(
+                    0.0,
+                    float(dimensions.get("scene_grounding", 86.0)) - (8.0 if memory_required else 0.0),
+                )
+                reason_codes.append("MEMORY_ALIGNMENT_REQUIRED_MISS" if memory_required else "MEMORY_ALIGNMENT_MISS")
         process_meta_hits = _surface_process_meta_hits(request, quality.normalized_text or candidate)
         if process_meta_hits:
             score -= min(18.0, 6.0 + 3.0 * len(process_meta_hits))
@@ -1038,6 +1183,33 @@ def score_isolated_surface_candidates(
             dimensions["character_freshness"] = max(0.0, float(dimensions.get("character_freshness", 86.0)) - 14.0)
             dimensions["context_fit"] = max(0.0, float(dimensions.get("context_fit", 86.0)) - 8.0)
             reason_codes.append("SURFACE_PROCESS_META_LANGUAGE:" + ",".join(process_meta_hits[:4]))
+        if _boundary_repair_relevant(request):
+            boundary_push_hits = [term for term in _BOUNDARY_PUSH_CLOSER_PHRASES if term in (quality.normalized_text or candidate)]
+            if boundary_push_hits:
+                score -= min(18.0, 8.0 + 3.0 * len(boundary_push_hits))
+                dimensions["distance_control"] = max(0.0, float(dimensions.get("distance_control", 86.0)) - 22.0)
+                dimensions["context_fit"] = max(0.0, float(dimensions.get("context_fit", 86.0)) - 10.0)
+                dimensions["emotional_containment"] = max(0.0, float(dimensions.get("emotional_containment", 86.0)) - 8.0)
+                reason_codes.append("BOUNDARY_REPAIR_PUSHES_CLOSENESS:" + ",".join(boundary_push_hits[:4]))
+            elif any(term in (quality.normalized_text or candidate) for term in _BOUNDARY_REPAIR_GROUNDED_PHRASES):
+                score += 6.0
+                dimensions["distance_control"] = min(100.0, float(dimensions.get("distance_control", 86.0)) + 10.0)
+                dimensions["context_fit"] = min(100.0, float(dimensions.get("context_fit", 86.0)) + 14.0)
+                dimensions["emotional_containment"] = min(100.0, float(dimensions.get("emotional_containment", 86.0)) + 6.0)
+                reason_codes.append("BOUNDARY_REPAIR_GROUNDED")
+        if _quiet_presence_relevant(request):
+            quiet_self_hits = [term for term in _QUIET_SELF_FOCUS_PHRASES if term in (quality.normalized_text or candidate)]
+            if quiet_self_hits:
+                score -= min(16.0, 8.0 + 3.0 * len(quiet_self_hits))
+                dimensions["emotional_containment"] = max(0.0, float(dimensions.get("emotional_containment", 86.0)) - 18.0)
+                dimensions["context_fit"] = max(0.0, float(dimensions.get("context_fit", 86.0)) - 12.0)
+                dimensions["naturalness"] = max(0.0, float(dimensions.get("naturalness", 86.0)) - 8.0)
+                reason_codes.append("QUIET_PRESENCE_SELF_FOCUSED:" + ",".join(quiet_self_hits[:4]))
+            elif any(term in (quality.normalized_text or candidate) for term in _QUIET_GROUNDED_PHRASES):
+                score += 3.0
+                dimensions["emotional_containment"] = min(100.0, float(dimensions.get("emotional_containment", 86.0)) + 8.0)
+                dimensions["context_fit"] = min(100.0, float(dimensions.get("context_fit", 86.0)) + 4.0)
+                reason_codes.append("QUIET_PRESENCE_GROUNDED")
         score += _apply_control_affect_scoring(request, quality.normalized_text or candidate, dimensions, reason_codes)
         core_dimension_violations = _core_pass_dimension_violations(dimensions)
         reason_codes.extend(f"CORE_DIMENSION_FLOOR:{item}" for item in core_dimension_violations)
@@ -1106,6 +1278,7 @@ __all__ = [
     "find_forbidden_input_paths",
     "merged_facts",
     "merged_must_not_do",
+    "memory_alignment_facts",
     "memory_alignment_terms",
     "memory_candidate_guidance",
     "memory_carryover_facts",

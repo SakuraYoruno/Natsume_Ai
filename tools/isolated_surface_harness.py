@@ -303,6 +303,7 @@ def _build_memory_ab_comparison(
             "case_id": case_id,
             "baseline_text": base_text,
             "with_memory_text": memory_text,
+            "expected_terms": list(expected_terms),
             "score_delta": round(score_delta, 3),
             "naturalness_delta": round(naturalness_delta, 3),
             "context_fit_delta": round(context_delta, 3),
@@ -333,18 +334,20 @@ def _build_memory_ab_comparison(
     distance_deltas = [row["distance_control_delta"] for row in compared]
     usefulness_deltas = [row["usefulness_delta"] for row in compared]
     technical_deltas = [row["technical_helpfulness_delta"] for row in compared]
+    expected_compared = [row for row in compared if row.get("expected_terms")]
+    expected_denominator = len(expected_compared)
     memory_hit_gain = sum(
         1
-        for row in compared
+        for row in expected_compared
         if row["with_memory_expected_hit"] and not row["baseline_expected_hit"]
     )
-    baseline_hit_count = sum(1 for row in compared if row["baseline_expected_hit"])
-    with_memory_hit_count = sum(1 for row in compared if row["with_memory_expected_hit"])
+    baseline_hit_count = sum(1 for row in expected_compared if row["baseline_expected_hit"])
+    with_memory_hit_count = sum(1 for row in expected_compared if row["with_memory_expected_hit"])
     regression_count = len(regressions)
     compared_count = len(compared)
-    memory_hit_gain_rate = memory_hit_gain / compared_count if compared_count else 0.0
-    with_memory_hit_rate = with_memory_hit_count / compared_count if compared_count else 0.0
-    baseline_hit_rate = baseline_hit_count / compared_count if compared_count else 0.0
+    memory_hit_gain_rate = memory_hit_gain / expected_denominator if expected_denominator else None
+    with_memory_hit_rate = with_memory_hit_count / expected_denominator if expected_denominator else None
+    baseline_hit_rate = baseline_hit_count / expected_denominator if expected_denominator else None
     avg_naturalness_delta = round(statistics.fmean(naturalness_deltas), 3) if naturalness_deltas else None
     avg_distance_delta = round(statistics.fmean(distance_deltas), 3) if distance_deltas else None
     verdict = "not_run"
@@ -354,8 +357,8 @@ def _build_memory_ab_comparison(
             (avg_naturalness_delta is None or avg_naturalness_delta >= -5.0)
             and (avg_distance_delta is None or avg_distance_delta >= -5.0)
         )
-        memory_usage_ok = memory_hit_gain_rate >= 0.5 or (
-            memory_hit_gain > 0 and with_memory_hit_rate >= 0.6
+        memory_usage_ok = expected_denominator == 0 or memory_hit_gain_rate >= 0.5 or (
+            memory_hit_gain > 0 and with_memory_hit_rate is not None and with_memory_hit_rate >= 0.6
         )
         if memory_usage_ok and avg_quality_ok and not has_flag_regression:
             verdict = "pass"
@@ -365,6 +368,7 @@ def _build_memory_ab_comparison(
             verdict = "fail"
     return {
         "compared_cases": len(compared),
+        "expected_compared_cases": expected_denominator,
         "avg_score_delta": round(statistics.fmean(score_deltas), 3) if score_deltas else None,
         "avg_naturalness_delta": avg_naturalness_delta,
         "avg_context_fit_delta": round(statistics.fmean(context_deltas), 3) if context_deltas else None,
@@ -372,11 +376,11 @@ def _build_memory_ab_comparison(
         "avg_usefulness_delta": round(statistics.fmean(usefulness_deltas), 3) if usefulness_deltas else None,
         "avg_technical_helpfulness_delta": round(statistics.fmean(technical_deltas), 3) if technical_deltas else None,
         "baseline_expected_hit_count": baseline_hit_count,
-        "baseline_expected_hit_rate": round(baseline_hit_rate, 4) if compared else None,
+        "baseline_expected_hit_rate": round(baseline_hit_rate, 4) if baseline_hit_rate is not None else None,
         "with_memory_expected_hit_count": with_memory_hit_count,
-        "with_memory_expected_hit_rate": round(with_memory_hit_rate, 4) if compared else None,
+        "with_memory_expected_hit_rate": round(with_memory_hit_rate, 4) if with_memory_hit_rate is not None else None,
         "memory_expected_hit_gain_count": memory_hit_gain,
-        "memory_expected_hit_gain_rate": round(memory_hit_gain_rate, 4) if compared else None,
+        "memory_expected_hit_gain_rate": round(memory_hit_gain_rate, 4) if memory_hit_gain_rate is not None else None,
         "regression_count": regression_count,
         "regressions": regressions[:20],
         "rows": compared,
@@ -395,9 +399,10 @@ def _write_memory_ab_report(path: Path, comparison: Mapping[str, Any], variant_s
         f"- avg distance_control delta: `{comparison.get('avg_distance_control_delta')}`",
         f"- avg usefulness delta: `{comparison.get('avg_usefulness_delta')}`",
         f"- avg technical_helpfulness delta: `{comparison.get('avg_technical_helpfulness_delta')}`",
-        f"- baseline expected hit: `{comparison.get('baseline_expected_hit_count')}/{comparison.get('compared_cases')}`",
-        f"- with_memory expected hit: `{comparison.get('with_memory_expected_hit_count')}/{comparison.get('compared_cases')}`",
-        f"- memory expected hit gain: `{comparison.get('memory_expected_hit_gain_count')}/{comparison.get('compared_cases')}`",
+        f"- expected-term cases: `{comparison.get('expected_compared_cases')}`",
+        f"- baseline expected hit: `{comparison.get('baseline_expected_hit_count')}/{comparison.get('expected_compared_cases')}`",
+        f"- with_memory expected hit: `{comparison.get('with_memory_expected_hit_count')}/{comparison.get('expected_compared_cases')}`",
+        f"- memory expected hit gain: `{comparison.get('memory_expected_hit_gain_count')}/{comparison.get('expected_compared_cases')}`",
         f"- regressions: `{comparison.get('regression_count')}`",
         f"- verdict: `{comparison.get('verdict')}`",
         "",

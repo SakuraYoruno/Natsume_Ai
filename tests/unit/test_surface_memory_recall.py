@@ -3,7 +3,11 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from host_brain.persona.isolated_surface_continuity import ThreeLayerContinuityContext
-from host_brain.persona.isolated_surface_harness import build_isolated_surface_messages
+from host_brain.persona.isolated_surface_harness import (
+    build_isolated_surface_messages,
+    memory_alignment_facts,
+    memory_alignment_terms,
+)
 from host_brain.persona.surface_memory_recall import (
     MemoryRecallPacket,
     SURFACE_MEMORY_EVIDENCE_REQUIRED,
@@ -124,6 +128,33 @@ def test_memory_recall_packet_is_safe_boundary_shape_without_rows() -> None:
     payload = packet.as_dict()
     assert "rows" not in payload
     assert payload["confidence"] == 0.82
+
+
+def test_unprefixed_packet_facts_are_tagged_for_surface_alignment() -> None:
+    packet = memory_recall_packet_from_mapping(
+        {
+            "facts": ["用户周末想去看展"],
+            "relationship_clues": ["熟人私聊，不升级亲密。"],
+        }
+    )
+    request = build_surface_input_with_memory_recall(
+        ThreeLayerContinuityContext(
+            current_user_message="你还记得我周末想去看展吗",
+            task_mode_hint="recall_memory",
+            question_budget=0,
+        ),
+        packet=packet,
+        soul_md=SOUL,
+        case_id="unprefixed_memory_surface",
+        max_facts=8,
+    )
+    rendered = "\n".join(message["content"] for message in build_isolated_surface_messages(request))
+
+    assert memory_alignment_facts(request) == ["用户周末想去看展"]
+    assert "看展" in memory_alignment_terms(request)
+    assert "用户周末想去看展" in rendered
+    assert "记忆线索：用户周末想去看展" not in rendered
+    assert "关系线索：熟人私聊，不升级亲密。" not in rendered
 
 
 def test_recall_surface_memory_packet_calls_recall_and_surface_gets_only_facts() -> None:

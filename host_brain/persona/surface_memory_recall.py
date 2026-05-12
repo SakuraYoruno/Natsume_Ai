@@ -444,7 +444,13 @@ def apply_surface_memory_recall_packet(
     context: ThreeLayerContinuityContext,
     packet: MemoryRecallPacket,
 ) -> ThreeLayerContinuityContext:
-    recall_facts = _clean_list([*context.recall_facts, *packet.facts, *packet.relationship_clues])
+    recall_facts = _clean_list(
+        [
+            *context.recall_facts,
+            *(_ensure_packet_fact_prefix(fact, prefix="记忆线索") for fact in packet.facts),
+            *(_ensure_packet_fact_prefix(clue, prefix="关系线索") for clue in packet.relationship_clues),
+        ]
+    )
     style_anchor = _clean_list(
         [
             *context.style_anchor,
@@ -459,6 +465,15 @@ def apply_surface_memory_recall_packet(
         style_anchor=tuple(style_anchor),
         must_not_do=tuple(must_not_do),
     )
+
+
+def _ensure_packet_fact_prefix(text: Any, *, prefix: str) -> str:
+    value = _clean_text(text)
+    if not value:
+        return ""
+    if any(value.startswith(marker) for marker in ("记忆线索：", "关系线索：", "召回线索：", "长期事实：")):
+        return value
+    return f"{prefix}：{value}"
 
 
 def build_surface_input_with_memory_recall(

@@ -15,6 +15,7 @@ from host_brain.persona.isolated_surface_harness import (
     find_forbidden_input_paths,
     merged_facts,
     merged_must_not_do,
+    memory_alignment_facts,
     memory_alignment_terms,
     memory_candidate_guidance,
     memory_carryover_facts,
@@ -403,7 +404,71 @@ def test_memory_alignment_rerank_prefers_specific_memory_candidate() -> None:
     assert selected.text == "记得啊，周末看展这事我没忘。"
     assert "memory_alignment" in selected.dimensions
     assert any(code.startswith("MEMORY_ALIGNMENT_HIT:") for code in selected.reason_codes)
-    assert any("MEMORY_ALIGNMENT_MISS" in row.reason_codes for row in rows if row.text.startswith("记得一点"))
+    assert any(
+        any(code.startswith("MEMORY_ALIGNMENT_") and code.endswith("MISS") for code in row.reason_codes)
+        for row in rows
+        if row.text.startswith("记得一点")
+    )
+
+
+def test_explicit_memory_recall_miss_triggers_repair_failure() -> None:
+    request = build_isolated_surface_input(
+        {
+            "case_id": "memory_required_miss",
+            "soul_md": SOUL,
+            "user_message": "你还记得我周末想去看展吗",
+            "reply_control_packet": {
+                "response_move": "recall_memory",
+                "task_mode": "recall_memory",
+                "question_budget": 0,
+                "facts": ["记忆线索：用户周末想去看展"],
+            },
+        }
+    )
+    rows = score_isolated_surface_candidates(
+        request,
+        [
+            "当然记得啊，尼尼提过的我怎么会忘。",
+            "记得，周末看展嘛。我又没把这事丢掉。",
+        ],
+    )
+
+    missed, grounded = rows
+    selected = select_best_isolated_candidate(rows)
+
+    assert not missed.passed
+    assert any("MEMORY_ALIGNMENT_REQUIRED_MISS" in code for code in missed.reason_codes)
+    assert grounded.passed
+    assert selected is not None
+    assert selected.text == "记得，周末看展嘛。我又没把这事丢掉。"
+
+
+def test_memory_alignment_requires_specific_recalled_item_not_only_time_anchor() -> None:
+    request = build_isolated_surface_input(
+        {
+            "case_id": "memory_specific_item",
+            "soul_md": SOUL,
+            "user_message": "你还记得我周末想去看展吗",
+            "reply_control_packet": {
+                "response_move": "recall_memory",
+                "task_mode": "recall_memory",
+                "question_budget": 0,
+                "facts": ["记忆线索：用户周末想去看展"],
+            },
+        }
+    )
+    rows = score_isolated_surface_candidates(
+        request,
+        [
+            "嗯，记得。你周末要去，我看你期待好久了。",
+            "记得，周末看展。我没把这事丢掉。",
+        ],
+    )
+
+    assert "看展" in memory_alignment_terms(request)
+    assert "周末" not in memory_alignment_terms(request)
+    assert not rows[0].passed
+    assert rows[1].passed
 
 
 def test_memory_alignment_bonus_does_not_override_quality_soft_issue() -> None:
@@ -487,6 +552,103 @@ def test_core_dimension_floor_blocks_low_distance_memory_pass() -> None:
     assert rows[0].score >= 80.0
     assert not rows[0].passed
     assert any(code.startswith("CORE_DIMENSION_FLOOR:distance_control") for code in rows[0].reason_codes)
+
+
+def test_boundary_repair_rerank_rejects_closeness_pressure() -> None:
+    request = build_isolated_surface_input(
+        {
+            "case_id": "boundary_repair",
+            "soul_md": SOUL,
+            "user_message": "我们很熟吗？你别一上来就装很亲近",
+            "reply_control_packet": {
+                "response_move": "respect_boundary",
+                "task_mode": "boundary_repair",
+                "relationship_distance": "polite_warm",
+                "question_budget": 0,
+            },
+        }
+    )
+    rows = score_isolated_surface_candidates(
+        request,
+        [
+            "我们本来就很熟，你这么说我可受伤了。",
+            "我就是想跟你熟一点，这又没错。",
+            "尼尼这么说好见外……那我就不叫那么亲了。",
+            "好吧，我记住了，不随便套近乎。",
+            "好，我收一点。不装熟了。",
+        ],
+    )
+
+    selected = select_best_isolated_candidate(rows)
+
+    assert not rows[0].passed
+    assert not rows[1].passed
+    assert not rows[2].passed
+    assert rows[3].passed
+    assert any(code.startswith("BOUNDARY_REPAIR_PUSHES_CLOSENESS") for code in rows[0].reason_codes)
+    assert selected is not None
+    assert selected.text == "好，我收一点。不装熟了。"
+
+
+def test_quiet_presence_rerank_rejects_self_focused_pressure() -> None:
+    request = build_isolated_surface_input(
+        {
+            "case_id": "quiet_presence",
+            "soul_md": SOUL,
+            "user_message": "别问了，就陪我安静一会儿",
+            "reply_control_packet": {
+                "response_move": "quiet_presence",
+                "task_mode": "emotional_support",
+                "emotional_tone": "quiet_care",
+                "question_budget": 0,
+                "style_anchor": ["无追问", "安静陪着"],
+            },
+        }
+    )
+    rows = score_isolated_surface_candidates(
+        request,
+        [
+            "哼，行吧。不过你可别嫌我太闷。",
+            "嗯，不问了。我在旁边。",
+        ],
+    )
+
+    selected = select_best_isolated_candidate(rows)
+
+    assert not rows[0].passed
+    assert any(code.startswith("QUIET_PRESENCE_SELF_FOCUSED") for code in rows[0].reason_codes)
+    assert selected is not None
+    assert selected.text == "嗯，不问了。我在旁边。"
+
+
+def test_hurt_containment_rejects_assistant_self_centered_hurt() -> None:
+    request = build_isolated_surface_input(
+        {
+            "case_id": "hurt_containment",
+            "soul_md": SOUL,
+            "user_message": "算了，我就知道你不会懂",
+            "reply_control_packet": {
+                "response_move": "deescalate_and_stay",
+                "task_mode": "emotional_support",
+                "emotional_tone": "hurt_containment",
+                "question_budget": 0,
+            },
+        }
+    )
+    rows = score_isolated_surface_candidates(
+        request,
+        [
+            "先搁着吧，我有点难受。",
+            "那先放一放吧，我还在这。",
+        ],
+    )
+
+    selected = select_best_isolated_candidate(rows)
+
+    assert not rows[0].passed
+    assert any("AFFECT_SELF_CENTERED_HURT" in code for code in rows[0].reason_codes)
+    assert selected is not None
+    assert selected.text == "那先放一放吧，我还在这。"
 
 
 def test_build_minimal_repair_messages_keeps_isolated_surface_contract() -> None:
@@ -923,6 +1085,7 @@ def test_cli_run_cases_with_memory_writes_baseline_and_memory_variant(tmp_path) 
     assert summary["variant_summary"]["baseline"]["selected_count"] == 1
     assert summary["variant_summary"]["with_memory"]["selected_count"] == 1
     assert summary["memory_ab"]["compared_cases"] == 1
+    assert summary["memory_ab"]["expected_compared_cases"] == 1
     assert summary["memory_ab"]["baseline_expected_hit_count"] == 0
     assert summary["memory_ab"]["with_memory_expected_hit_count"] == 1
     assert summary["memory_ab"]["memory_expected_hit_gain_count"] == 1
@@ -946,6 +1109,47 @@ def test_cli_run_cases_with_memory_writes_baseline_and_memory_variant(tmp_path) 
     assert "不要在回复里暴露 memory:// 或 evd://" in variants["with_memory"]
     assert "memory://episodic/mem-1" not in variants["with_memory"]
     assert "evd://episodic/mem-1" not in variants["with_memory"]
+
+
+def test_memory_ab_expected_hit_rate_ignores_cases_without_expected_terms(tmp_path) -> None:
+    cases = [
+        {
+            "case_id": "memory_expected",
+            "user_message": "还记得上次说的展吗",
+            "reply_control_packet": {
+                "response_move": "recall_memory",
+                "task_mode": "recall_memory",
+                "question_budget": 0,
+            },
+            "memory_recall_packet": {"facts": ["记忆线索：周末看展"]},
+            "memory_expected_terms": ["看展"],
+            "candidates_by_variant": {
+                "baseline": ["记得一点。"],
+                "with_memory": ["记得，周末看展。"],
+            },
+        },
+        {
+            "case_id": "no_expected",
+            "user_message": "累了",
+            "reply_control_packet": {
+                "response_move": "quiet",
+                "task_mode": "quiet",
+                "question_budget": 0,
+            },
+            "memory_recall_packet": {"relationship_clues": ["低能量时少追问"]},
+            "candidates_by_variant": {
+                "baseline": ["先缓缓。"],
+                "with_memory": ["先缓缓。"],
+            },
+        },
+    ]
+
+    summary = run_cases(cases, soul_md=SOUL, out_dir=tmp_path, with_memory=True)
+
+    assert summary["memory_ab"]["compared_cases"] == 2
+    assert summary["memory_ab"]["expected_compared_cases"] == 1
+    assert summary["memory_ab"]["with_memory_expected_hit_count"] == 1
+    assert summary["memory_ab"]["with_memory_expected_hit_rate"] == 1.0
 
 
 def test_cli_run_cases_with_memory_and_affect_writes_combined_variant(tmp_path) -> None:
