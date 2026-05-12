@@ -381,7 +381,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--max-tokens", type=int, default=256)
     parser.add_argument("--progress-every", type=int, default=5)
     parser.add_argument("--with-memory", action="store_true", help="Run baseline and with_memory prompt variants from compressed memory_recall_packet fields.")
-    parser.add_argument("--with-affect", action="store_true", help="Run variants from compressed affect_control_packet fields.")
+    parser.add_argument("--with-affect", action="store_true", help="Run variants from compressed affect_control_packet fields or upstream affect_state fields.")
     parser.add_argument("--no-repair", action="store_true", help="Disable one-shot minimal repair when the selected candidate fails.")
     args = parser.parse_args(argv)
     summary = asyncio.run(run_live(args))

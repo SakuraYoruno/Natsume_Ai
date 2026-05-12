@@ -8,7 +8,7 @@ import sys
 from collections import Counter
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Iterable, Mapping
+from typing import Any, Iterable, Mapping, Sequence
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -24,7 +24,9 @@ from host_brain.persona.isolated_surface_harness import (
 )
 from host_brain.persona.isolated_surface_continuity import ThreeLayerContinuityContext
 from host_brain.persona.surface_affect_control import (
+    SurfaceAffectControlPacket,
     affect_control_packet_from_mapping,
+    build_surface_affect_control_packet,
     build_surface_input_with_affect_control,
 )
 from host_brain.persona.surface_memory_recall import (
@@ -44,6 +46,9 @@ _REQUEST_KEYS = {
 }
 _MEMORY_PACKET_KEYS = ("memory_recall_packet", "memory_recall")
 _AFFECT_PACKET_KEYS = ("affect_control_packet", "surface_affect_packet", "emotion_control_packet")
+_AFFECT_STATE_KEYS = ("affect_state", "emotion_state", "emotion_context")
+_AFFECT_BOND_KEYS = ("bond_summary", "relationship_summary", "relationship_state")
+_AFFECT_RELATIONSHIP_CLUE_KEYS = ("relationship_clues", "affect_relationship_clues")
 _CJK_ONE_CHAR_RE = re.compile(r"^[\u4e00-\u9fff]$")
 _EXPECTED_ACTION_OBJECT_RE = re.compile(r"(?:想要|想|要|打算|准备)?(?:去)?(?:看|听|吃|写|改|修|买|玩|做)([\u4e00-\u9fff]{1,4})")
 
@@ -85,6 +90,10 @@ def _write_jsonl(path: Path, rows: Iterable[Mapping[str, Any]]) -> None:
             file.write(json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n")
 
 
+def _clean_text(value: Any) -> str:
+    return str(value or "").replace("\u3000", " ").strip()
+
+
 def _case_request_payload(case: Mapping[str, Any], soul_md: str) -> dict[str, Any]:
     payload = {key: case[key] for key in _REQUEST_KEYS if key in case}
     payload["soul_md"] = str(case.get("soul_md") or soul_md)
@@ -99,12 +108,41 @@ def _memory_packet_payload(case: Mapping[str, Any]) -> Mapping[str, Any] | None:
     return None
 
 
-def _affect_packet_payload(case: Mapping[str, Any]) -> Mapping[str, Any] | None:
-    for key in _AFFECT_PACKET_KEYS:
+def _first_mapping(case: Mapping[str, Any], keys: tuple[str, ...]) -> Mapping[str, Any] | None:
+    for key in keys:
         raw = case.get(key)
         if isinstance(raw, Mapping):
             return raw
     return None
+
+
+def _first_sequence(case: Mapping[str, Any], keys: tuple[str, ...]) -> list[Any]:
+    for key in keys:
+        raw = case.get(key)
+        if isinstance(raw, Sequence) and not isinstance(raw, (str, bytes, bytearray)):
+            return list(raw)
+    return []
+
+
+def _affect_packet_payload(case: Mapping[str, Any], *, baseline: Any | None = None) -> SurfaceAffectControlPacket | None:
+    for key in _AFFECT_PACKET_KEYS:
+        raw = case.get(key)
+        if isinstance(raw, Mapping):
+            return affect_control_packet_from_mapping(raw)
+    raw_affect_state = _first_mapping(case, _AFFECT_STATE_KEYS)
+    if raw_affect_state is None:
+        return None
+    if baseline is not None:
+        task_mode = _clean_text(baseline.control.task_mode or baseline.control.response_move)
+    else:
+        raw_control = case.get("reply_control_packet") or case.get("control") or {}
+        task_mode = _clean_text(raw_control.get("task_mode") or raw_control.get("response_move")) if isinstance(raw_control, Mapping) else ""
+    return build_surface_affect_control_packet(
+        emotion_state=raw_affect_state,
+        bond_summary=_first_mapping(case, _AFFECT_BOND_KEYS),
+        relationship_clues=_first_sequence(case, _AFFECT_RELATIONSHIP_CLUE_KEYS),
+        task_mode=task_mode,
+    )
 
 
 def _context_from_request(request) -> ThreeLayerContinuityContext:
@@ -145,9 +183,8 @@ def _request_variants(
             max_facts=8,
         )
         variants.append(("with_memory", memory_request))
-    raw_affect_packet = _affect_packet_payload(case)
-    if with_affect and raw_affect_packet is not None:
-        affect_packet = affect_control_packet_from_mapping(raw_affect_packet)
+    affect_packet = _affect_packet_payload(case, baseline=baseline)
+    if with_affect and affect_packet is not None:
         affect_request = build_surface_input_with_affect_control(
             _context_from_request(baseline),
             packet=affect_packet,
@@ -581,7 +618,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--soul", default=ROOT / "Soul.md", type=Path, help="Soul.md path.")
     parser.add_argument("--out", default=None, type=Path, help="Output directory for prompts/scores/summary.")
     parser.add_argument("--with-memory", action="store_true", help="Also build with_memory variants from compressed memory_recall_packet fields.")
-    parser.add_argument("--with-affect", action="store_true", help="Also build variants from compressed affect_control_packet fields.")
+    parser.add_argument("--with-affect", action="store_true", help="Also build variants from compressed affect_control_packet fields or upstream affect_state fields.")
     parser.add_argument("--strict", action="store_true", help="Return non-zero if any case errors or scored selected candidate fails.")
     args = parser.parse_args(argv)
 

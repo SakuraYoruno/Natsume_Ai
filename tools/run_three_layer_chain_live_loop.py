@@ -28,6 +28,11 @@ from host_brain.persona.isolated_surface_harness import (  # noqa: E402
     score_isolated_surface_candidates,
     select_best_isolated_candidate,
 )
+from host_brain.persona.surface_affect_control import (  # noqa: E402
+    affect_control_packet_from_mapping,
+    apply_surface_affect_control_packet,
+    build_surface_affect_control_packet,
+)
 from tools.build_isolated_surface_continuity_cases import build_continuity_long_cases  # noqa: E402
 from tools.chat_ab_generate import _load_secret_store_provider_key, load_dotenv  # noqa: E402
 from tools.isolated_surface_harness import _read_json_or_jsonl  # noqa: E402
@@ -67,6 +72,37 @@ def _clean_list(values: Sequence[Any] | None) -> tuple[str, ...]:
         seen.add(text)
         cleaned.append(text)
     return tuple(cleaned)
+
+
+def _first_mapping(payload: Mapping[str, Any], keys: Sequence[str]) -> Mapping[str, Any] | None:
+    for key in keys:
+        raw = payload.get(key)
+        if isinstance(raw, Mapping):
+            return raw
+    return None
+
+
+def _first_sequence(payload: Mapping[str, Any], keys: Sequence[str]) -> tuple[str, ...]:
+    for key in keys:
+        raw = payload.get(key)
+        if isinstance(raw, Sequence) and not isinstance(raw, (str, bytes, bytearray)):
+            return _clean_list(raw)
+    return ()
+
+
+def _turn_affect_packet(turn: Mapping[str, Any], *, task_mode: str):
+    explicit = _first_mapping(turn, ("affect_control_packet", "surface_affect_packet", "emotion_control_packet"))
+    if explicit is not None:
+        return affect_control_packet_from_mapping(explicit)
+    raw_affect_state = _first_mapping(turn, ("affect_state", "emotion_state", "emotion_context"))
+    if raw_affect_state is None:
+        return None
+    return build_surface_affect_control_packet(
+        emotion_state=raw_affect_state,
+        bond_summary=_first_mapping(turn, ("bond_summary", "relationship_summary", "relationship_state")),
+        relationship_clues=_first_sequence(turn, ("relationship_clues", "affect_relationship_clues")),
+        task_mode=task_mode,
+    )
 
 
 def _percentile(values: list[int], q: float) -> int | None:
@@ -171,6 +207,9 @@ def build_loop_request(
         ),
         style_anchor=("三层闭环",),
     )
+    affect_packet = _turn_affect_packet(turn, task_mode=task_mode)
+    if affect_packet is not None:
+        context = apply_surface_affect_control_packet(context, affect_packet)
     reply_control = build_reply_control_packet_from_context(
         context,
         max_facts=max_facts,

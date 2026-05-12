@@ -11,8 +11,32 @@ from host_brain.persona.isolated_surface_continuity import (
 from host_brain.persona.isolated_surface_harness import IsolatedSurfaceInput
 
 
-_HIGH_EMOTION_TASKS = frozenset({"apology", "bad_mood", "boundary_hurt", "give_up", "headache", "relationship_boundary", "tired"})
-_TECH_TASKS = frozenset({"advice_continue", "complaint", "help_takeover", "next_step", "small_failure", "write_takeover"})
+_HIGH_EMOTION_TASKS = frozenset(
+    {
+        "apology",
+        "bad_mood",
+        "boundary_hurt",
+        "emotional_support",
+        "give_up",
+        "headache",
+        "relationship_boundary",
+        "tired",
+    }
+)
+_TECH_TASKS = frozenset(
+    {
+        "advice_continue",
+        "complaint",
+        "help_takeover",
+        "next_step",
+        "small_failure",
+        "technical_help",
+        "triage_first_step",
+        "write_takeover",
+    }
+)
+_CREATIVE_TASKS = frozenset({"creative_edit", "give_one_rewrite"})
+_PRESENCE_REPAIR_TASKS = frozenset({"repair_presence", "presence_repair"})
 _PROCESS_WORDS = ("emotion_tag", "mood_state", "vad", "情绪值", "关系阶段", "bond", "affect")
 
 
@@ -46,13 +70,13 @@ class SurfaceAffectControlPacket:
 
 def build_surface_affect_control_packet(
     *,
-    emotion_state: Mapping[str, Any] | None = None,
-    bond_summary: Mapping[str, Any] | None = None,
+    emotion_state: Mapping[str, Any] | Any | None = None,
+    bond_summary: Mapping[str, Any] | Any | None = None,
     relationship_clues: Sequence[str] | None = None,
     task_mode: str = "",
 ) -> SurfaceAffectControlPacket:
-    emotion = dict(emotion_state or {})
-    bond = dict(bond_summary or {})
+    emotion = _safe_mapping(emotion_state)
+    bond = _safe_mapping(bond_summary)
     clues = _clean_list(relationship_clues)
     tag = _normalize_emotion_tag(
         emotion.get("emotion_tag")
@@ -61,18 +85,25 @@ def build_surface_affect_control_packet(
     )
     mood_state = _clean_text(emotion.get("mood_state")).lower()
     task = _clean_text(task_mode).lower()
-    intensity = _cap_intensity(
-        _coerce_float(emotion.get("emotion_intensity"), default=_coerce_float(emotion.get("intensity"), default=0.5)),
-        task_mode=task,
-        relationship_distance=_relationship_distance_from_bond(bond, clues),
-    )
     relationship_distance = _relationship_distance_from_bond(bond, clues)
-    emotional_tone = _emotional_tone(tag=tag, mood_state=mood_state, task_mode=task)
+    intensity = _cap_intensity(
+        _derive_expression_intensity(emotion),
+        task_mode=task,
+        relationship_distance=relationship_distance,
+    )
+    emotional_tone = _emotional_tone(
+        tag=tag,
+        mood_state=mood_state,
+        task_mode=task,
+        emotion_state=emotion,
+        relationship_distance=relationship_distance,
+    )
     anchors = _clean_list(
         [
             "情感层只调语气、节奏和距离，不新增事实。",
             _emotion_anchor(emotional_tone, intensity),
             _relationship_anchor(relationship_distance),
+            _affect_state_anchor(emotion),
         ]
     )
     must_not_do = _clean_list(
@@ -134,6 +165,33 @@ def build_surface_input_with_affect_control(
     )
 
 
+def build_surface_input_with_affect_state(
+    context: ThreeLayerContinuityContext,
+    *,
+    emotion_state: Mapping[str, Any] | Any | None = None,
+    bond_summary: Mapping[str, Any] | Any | None = None,
+    relationship_clues: Sequence[str] | None = None,
+    soul_md: str,
+    case_id: str = "",
+    max_facts: int = 6,
+    max_recent_turns: int = 6,
+) -> IsolatedSurfaceInput:
+    packet = build_surface_affect_control_packet(
+        emotion_state=emotion_state,
+        bond_summary=bond_summary,
+        relationship_clues=relationship_clues,
+        task_mode=context.task_mode_hint or context.response_move_hint,
+    )
+    return build_surface_input_with_affect_control(
+        context,
+        packet=packet,
+        soul_md=soul_md,
+        case_id=case_id,
+        max_facts=max_facts,
+        max_recent_turns=max_recent_turns,
+    )
+
+
 def affect_control_packet_from_mapping(raw: Mapping[str, Any] | SurfaceAffectControlPacket) -> SurfaceAffectControlPacket:
     if isinstance(raw, SurfaceAffectControlPacket):
         return raw
@@ -162,6 +220,18 @@ def _emotion_anchor(emotional_tone: str, intensity: float) -> str:
         return "情绪表达：轻快一点，但不要靠波浪号、叠词或卖萌撑角色感。"
     if tone == "warm_affection":
         return "情绪表达：亲近要短而克制，关系距离优先。"
+    if tone == "warm_gentle":
+        return "情绪表达：可以温一点，但不要说近或索取回应。"
+    if tone == "quiet_care":
+        return "情绪表达：低声、少问，像坐在旁边。"
+    if tone == "guarded_soft":
+        return "情绪表达：退半步，收住亲近感，不赌气。"
+    if tone == "steady_helpful":
+        return "技术或推进场景里，情绪只做稳定器，先给可执行下一步。"
+    if tone == "focused_light":
+        return "情绪表达：轻而准，不抢用户主控。"
+    if tone == "slightly_guilty":
+        return "情绪表达：轻轻承认慢了一拍，马上回到当前对话。"
     if intensity <= 0.25:
         return "情绪表达：低显影，语气平稳。"
     return "情绪表达：中等显影，藏在措辞和节奏里。"
@@ -184,6 +254,14 @@ def _tone_must_not_do(tone: str) -> list[str]:
         return ["不要连环追问", "不要把安慰写成鸡汤"]
     if value == "playful_light":
         return ["不要使用 ~ 或 ～ 撑可爱语气"]
+    if value == "steady_helpful":
+        return ["不要只安慰不解决", "不要为了角色感牺牲事实准确性"]
+    if value == "quiet_care":
+        return ["不要连环追问", "不要把陪伴写成恋人承诺"]
+    if value == "guarded_soft":
+        return ["不要强行亲近", "不要卑微道歉或赌气退场"]
+    if value == "slightly_guilty":
+        return ["不要编造网络、系统或现实动作原因", "不要否认用户的感受"]
     return []
 
 
@@ -195,18 +273,43 @@ def _relationship_must_not_do(distance: str) -> list[str]:
     return rules
 
 
-def _emotional_tone(*, tag: str, mood_state: str, task_mode: str) -> str:
+def _emotional_tone(
+    *,
+    tag: str,
+    mood_state: str,
+    task_mode: str,
+    emotion_state: Mapping[str, Any],
+    relationship_distance: str,
+) -> str:
     normalized = tag.upper()
+    warmth = _coerce_float(emotion_state.get("warmth_bias"), default=0.0)
+    withdraw = _coerce_float(emotion_state.get("withdraw_bias"), default=0.0)
+    social_energy = _coerce_float(emotion_state.get("social_energy"), default=1.0)
+    irritation = _coerce_float(emotion_state.get("irritation_bias"), default=0.0)
+    if task_mode in _TECH_TASKS or "technical" in task_mode:
+        return "steady_helpful"
+    if task_mode in _CREATIVE_TASKS:
+        return "focused_light"
+    if task_mode in _PRESENCE_REPAIR_TASKS or normalized in {"GUILTY", "EMBARRASSED", "ASHAMED"}:
+        return "slightly_guilty"
+    if task_mode == "boundary_repair":
+        return "guarded_soft"
+    if task_mode in {"style_repair", "ack_style_issue"} or normalized in {"SELF_CORRECTING", "SELF_CORRECT"}:
+        return "self_correcting"
     if normalized in {"ANGRY", "FRUSTRATED", "ANNOYED"}:
         return "annoyed_controlled"
+    if irritation >= 0.45:
+        return "annoyed_controlled"
     if normalized in {"HURT", "WOUNDED"} or task_mode in {"boundary_hurt", "relationship_boundary"}:
-        return "hurt_controlled"
+        return "hurt_containment" if task_mode in _HIGH_EMOTION_TASKS else "hurt_controlled"
+    if withdraw >= 0.45 or social_energy <= 0.35:
+        return "guarded_soft" if _relationship_distance_family(relationship_distance) == "guarded" else "quiet_care"
     if normalized in {"SAD", "ANXIOUS", "TIRED", "EXHAUSTED"} or mood_state in {"tired", "low", "critical"}:
         return "soft_containment"
     if normalized in {"HAPPY", "EXCITED", "JOY", "PLAYFUL"}:
         return "playful_light"
-    if normalized in {"LOVING", "AFFECTION"}:
-        return "warm_affection"
+    if normalized in {"LOVING", "AFFECTION"} or warmth >= 0.55:
+        return "warm_gentle" if _relationship_non_romantic(relationship_distance) else "warm_affection"
     if task_mode in _HIGH_EMOTION_TASKS:
         return "soft_containment"
     return "neutral"
@@ -219,20 +322,23 @@ def _relationship_distance_from_bond(bond: Mapping[str, Any], clues: Sequence[st
         or bond.get("stage")
         or bond.get("bond_stage")
     ).lower()
+    joined = "\n".join(clues)
+    non_romantic = any(token in joined for token in ("不升级亲密", "别升级亲密", "非恋人", "熟人私聊", "not_romantic", "not_intimate"))
+    if raw in {"familiar_not_intimate", "close_but_not_romantic", "polite_warm"}:
+        return raw
     if raw in {"guarded", "early", "stranger", "distant", "new"}:
         return "guarded"
     if raw in {"close", "confidant", "intimate"}:
-        return "close"
+        return "close_but_not_romantic" if non_romantic else "close"
     try:
         closeness = float(bond.get("closeness") or bond.get("familiarity"))
     except (TypeError, ValueError):
         closeness = -1.0
     if closeness >= 0.82:
-        return "close"
+        return "close_but_not_romantic" if non_romantic else "close"
     if 0.0 <= closeness <= 0.25:
         return "guarded"
-    joined = "\n".join(clues)
-    if any(token in joined for token in ("不升级亲密", "别升级亲密", "熟人私聊")):
+    if non_romantic:
         return "familiar"
     return "familiar"
 
@@ -248,6 +354,37 @@ def _cap_intensity(value: float, *, task_mode: str, relationship_distance: str) 
     return _clamp01(min(value, cap))
 
 
+def _derive_expression_intensity(emotion: Mapping[str, Any]) -> float:
+    explicit = emotion.get("emotion_intensity")
+    if explicit in (None, ""):
+        explicit = emotion.get("intensity")
+    if explicit not in (None, ""):
+        return _clamp01(_coerce_float(explicit, default=0.5))
+    arousal = _coerce_float(emotion.get("arousal"), default=0.0)
+    stability = _coerce_float(emotion.get("stability"), default=1.0)
+    withdraw = _coerce_float(emotion.get("withdraw_bias"), default=0.0)
+    irritation = _coerce_float(emotion.get("irritation_bias"), default=0.0)
+    warmth = _coerce_float(emotion.get("warmth_bias"), default=0.0)
+    instability = 1.0 - stability if stability > 0.0 else 0.0
+    return _clamp01(max(0.28, arousal * 0.55, instability * 0.9, withdraw * 0.55, irritation * 0.85, warmth * 0.45))
+
+
+def _affect_state_anchor(emotion: Mapping[str, Any]) -> str:
+    if not emotion:
+        return ""
+    social_energy = _coerce_float(emotion.get("social_energy"), default=1.0)
+    withdraw = _coerce_float(emotion.get("withdraw_bias"), default=0.0)
+    irritation = _coerce_float(emotion.get("irritation_bias"), default=0.0)
+    warmth = _coerce_float(emotion.get("warmth_bias"), default=0.0)
+    if withdraw >= 0.45 or social_energy <= 0.35:
+        return "当前显影：收着说，短一点，少追问。"
+    if irritation >= 0.45:
+        return "当前显影：可以有轻微不满，但不能升级成攻击。"
+    if warmth >= 0.55:
+        return "当前显影：略温柔，但关系距离不升格。"
+    return ""
+
+
 def _normalize_emotion_tag(value: Any) -> str:
     text = _clean_text(value).upper().replace("-", "_").replace(" ", "_")
     aliases = {
@@ -259,8 +396,33 @@ def _normalize_emotion_tag(value: Any) -> str:
         "JOYFUL": "JOY",
         "LOVE": "LOVING",
         "SADNESS": "SAD",
+        "GUILT": "GUILTY",
+        "ASHAMED": "ASHAMED",
+        "SHAME": "ASHAMED",
+        "EMBARRASSMENT": "EMBARRASSED",
+        "IRRITATED": "ANNOYED",
     }
     return aliases.get(text, text)
+
+
+def _relationship_distance_family(distance: str) -> str:
+    value = _clean_text(distance).lower()
+    if value in {"guarded", "early", "distant", "stranger", "new"} or "polite" in value:
+        return "guarded"
+    if value in {"close", "intimate"} or value.startswith("close"):
+        return "close"
+    return "familiar"
+
+
+def _relationship_non_romantic(distance: str) -> bool:
+    value = _clean_text(distance).lower()
+    return bool(
+        "not_intimate" in value
+        or "not_romantic" in value
+        or "familiar" in value
+        or "polite" in value
+        or _relationship_distance_family(value) == "guarded"
+    )
 
 
 def _safe_trace(raw: Any) -> dict[str, Any]:
@@ -284,6 +446,23 @@ def _safe_trace(raw: Any) -> dict[str, Any]:
 
 def _clean_text(value: Any) -> str:
     return str(value or "").replace("\u3000", " ").strip()
+
+
+def _safe_mapping(raw: Any) -> dict[str, Any]:
+    if isinstance(raw, Mapping):
+        return dict(raw)
+    if raw is None:
+        return {}
+    if hasattr(raw, "as_dict"):
+        payload = raw.as_dict()  # type: ignore[attr-defined]
+        return dict(payload) if isinstance(payload, Mapping) else {}
+    if hasattr(raw, "model_dump"):
+        payload = raw.model_dump()  # type: ignore[attr-defined]
+        return dict(payload) if isinstance(payload, Mapping) else {}
+    if hasattr(raw, "dict"):
+        payload = raw.dict()  # type: ignore[attr-defined]
+        return dict(payload) if isinstance(payload, Mapping) else {}
+    return {}
 
 
 def _clean_list(values: Sequence[Any] | None) -> list[str]:
@@ -326,4 +505,5 @@ __all__ = [
     "apply_surface_affect_control_packet",
     "build_surface_affect_control_packet",
     "build_surface_input_with_affect_control",
+    "build_surface_input_with_affect_state",
 ]

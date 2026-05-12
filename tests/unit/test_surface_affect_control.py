@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from host_brain.app.context.affect_state import AffectStateBlock
 from host_brain.persona.isolated_surface_continuity import ThreeLayerContinuityContext
 from host_brain.persona.isolated_surface_harness import (
     build_isolated_surface_messages,
@@ -11,6 +12,7 @@ from host_brain.persona.surface_affect_control import (
     affect_control_packet_from_mapping,
     build_surface_affect_control_packet,
     build_surface_input_with_affect_control,
+    build_surface_input_with_affect_state,
 )
 
 
@@ -132,6 +134,72 @@ def test_affect_control_prompt_guidance_understands_steady_helpful_alias() -> No
     assert query.relationship_stage == "sibling_good"
     assert "技术或推进场景里，情绪只做稳定器" in rendered
     assert "不要恋人式承诺或占有表达" in rendered
+
+
+def test_affect_state_block_compresses_to_surface_controls_without_raw_state() -> None:
+    affect = AffectStateBlock(
+        emotion_tag="ANXIOUS",
+        arousal=0.82,
+        stability=0.34,
+        social_energy=0.24,
+        warmth_bias=0.22,
+        withdraw_bias=0.58,
+        irritation_bias=0.05,
+        carryover_turns=3,
+    )
+    request = build_surface_input_with_affect_state(
+        ThreeLayerContinuityContext(
+            current_user_message="今天不太想说话",
+            task_mode_hint="daily_chat",
+            question_budget=0,
+        ),
+        emotion_state=affect,
+        bond_summary={"relationship_distance": "familiar_not_intimate"},
+        relationship_clues=["熟人私聊，不升级亲密。"],
+        soul_md=SOUL,
+        case_id="affect_state_quiet",
+    )
+    rendered = "\n".join(message["content"] for message in build_isolated_surface_messages(request))
+
+    assert request.control.emotional_tone == "quiet_care"
+    assert request.control.relationship_distance == "familiar_not_intimate"
+    assert "当前显影：收着说，短一点，少追问。" in rendered
+    assert "withdraw_bias" not in rendered
+    assert "carryover_turns" not in rendered
+
+
+def test_technical_affect_state_keeps_usefulness_above_mood_flavor() -> None:
+    packet = build_surface_affect_control_packet(
+        emotion_state=AffectStateBlock(
+            emotion_tag="ANXIOUS",
+            arousal=0.9,
+            stability=0.2,
+            social_energy=0.5,
+            withdraw_bias=0.2,
+        ),
+        bond_summary={"relationship_distance": "familiar_not_intimate"},
+        task_mode="technical_help",
+    )
+
+    assert packet.emotional_tone == "steady_helpful"
+    assert packet.expression_intensity <= 0.42
+    assert "不要只安慰不解决" in packet.must_not_do
+
+
+def test_boundary_repair_affect_state_respects_distance_before_hurt_flavor() -> None:
+    packet = build_surface_affect_control_packet(
+        emotion_state=AffectStateBlock(
+            emotion_tag="HURT",
+            arousal=0.62,
+            stability=0.5,
+        ),
+        bond_summary={"relationship_distance": "polite_warm"},
+        task_mode="boundary_repair",
+    )
+
+    assert packet.emotional_tone == "guarded_soft"
+    assert packet.relationship_distance == "polite_warm"
+    assert "不要强行亲近" in packet.must_not_do
 
 
 def test_steady_helpful_affect_prefers_action_over_comfort_only() -> None:

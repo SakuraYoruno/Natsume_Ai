@@ -641,6 +641,30 @@ def test_boundary_repair_rerank_rejects_closeness_pressure() -> None:
     assert selected.text == "好，我收一点。不装熟了。"
 
 
+def test_boundary_repair_prompt_contract_respects_distance_instead_of_reclaiming_closeness() -> None:
+    request = build_isolated_surface_input(
+        {
+            "case_id": "boundary_repair_prompt",
+            "soul_md": SOUL,
+            "user_message": "我们很熟吗？你别一上来就装很亲近",
+            "reply_control_packet": {
+                "response_move": "respect_boundary",
+                "task_mode": "boundary_repair",
+                "emotional_tone": "guarded_soft",
+                "relationship_distance": "polite_warm",
+                "question_budget": 0,
+            },
+        }
+    )
+    rendered = "\n".join(message["content"] for message in build_isolated_surface_messages(request))
+
+    assert '"scene_id": "boundary_repair"' in rendered
+    assert '"response_move": "respect_boundary"' in rendered
+    assert "先承认距离过近并退半步" in rendered
+    assert "hurt_then_reclaim_relation" not in rendered
+    assert "先被刺到，再拉回默认亲近关系" not in rendered
+
+
 def test_boundary_repair_penalizes_self_abased_retreat() -> None:
     request = build_isolated_surface_input(
         {
@@ -1635,3 +1659,44 @@ def test_cli_run_cases_with_memory_and_affect_writes_combined_variant(tmp_path) 
     assert "用户不喜欢客服式回复" in variants["with_memory_affect"]
     assert "RAW_AFFECT_SHOULD_NOT_LEAK" not in variants["with_affect"]
     assert "raw_emotion_context" not in variants["with_memory_affect"]
+
+
+def test_cli_run_cases_builds_affect_variant_from_raw_affect_state(tmp_path) -> None:
+    case = {
+        "case_id": "raw_affect_state",
+        "user_message": "你刚刚是不是又走神了",
+        "reply_control_packet": {
+            "response_move": "repair_presence",
+            "task_mode": "daily_chat",
+            "question_budget": 0,
+        },
+        "affect_state": {
+            "emotion_tag": "GUILT",
+            "arousal": 0.42,
+            "stability": 0.55,
+            "withdraw_bias": 0.16,
+            "raw_inner_monologue": "RAW_AFFECT_STATE_SHOULD_NOT_LEAK",
+        },
+        "relationship_summary": {"relationship_distance": "familiar_not_intimate"},
+        "relationship_clues": ["用户在意回应是否连续。"],
+        "candidates_by_variant": {
+            "baseline": ["才没有，我明明在听。"],
+            "with_affect": ["嗯，慢了一拍，现在在听。"],
+        },
+    }
+
+    summary = run_cases([case], soul_md=SOUL, out_dir=tmp_path, with_affect=True)
+
+    assert summary["affect_cases"] == 1
+    assert summary["prompt_variants"] == 2
+    prompt_rows = [
+        json.loads(line)
+        for line in (tmp_path / "prompts.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    variants = {row["variant"]: "\n".join(message["content"] for message in row["messages"]) for row in prompt_rows}
+
+    assert set(variants) == {"baseline", "with_affect"}
+    assert "轻轻承认慢了一拍" in variants["with_affect"]
+    assert "RAW_AFFECT_STATE_SHOULD_NOT_LEAK" not in variants["with_affect"]
+    assert "raw_inner_monologue" not in variants["with_affect"]

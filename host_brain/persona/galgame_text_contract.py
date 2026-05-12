@@ -1268,6 +1268,16 @@ def build_galgame_text_contract(
             max_questions=1,
             notes=("给一个明确小步，不编现实到场或保证修好。",),
         )
+    if scene == "boundary_repair":
+        return _contract(
+            scene_id="boundary_repair",
+            response_move="respect_boundary",
+            required_any=(("收", "不装熟", "慢", "距离", "急", "节奏"),),
+            max_questions=0,
+            target_min_chars=10,
+            target_max_chars=38,
+            notes=("先承认距离过近并退半步；不要反向索取亲近，也不要自贬或赌气退场。",),
+        )
     if scene == "relationship_boundary" or any(token in text for token in ("为什么要帮", "很熟吗", "我们很熟", "熟吗")):
         return _contract(
             scene_id="relationship_boundary",
