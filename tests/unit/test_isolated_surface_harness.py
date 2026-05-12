@@ -1104,6 +1104,7 @@ def test_presence_repair_rejects_blaming_user_for_drift() -> None:
             "唔……刚有点晃神了，现在回来啦。",
             "被发现了，我在想刚才那个事呢。现在好了，我记着呢。",
             "唔…有点被你抓到了，不过我现在在认真听。",
+            "被尼尼抓到了，我马上回来",
             "嗯…稍微有点没跟上，不过现在回来啦。",
             "嗯，慢了一拍，现在在听。",
         ],
@@ -1131,12 +1132,46 @@ def test_presence_repair_rejects_blaming_user_for_drift() -> None:
     assert rows[12].passed
     assert rows[13].passed
     assert not rows[14].passed
-    assert any(code.startswith("PRESENCE_REPAIR_AWKWARD_CAUGHT") for code in rows[14].reason_codes)
-    assert rows[15].passed
+    assert any(code.startswith("AWKWARD_COLLOCATION") for code in rows[14].reason_codes)
+    assert not rows[15].passed
+    assert any(code.startswith("PRESENCE_REPAIR_FUTURE_RETURN") for code in rows[15].reason_codes)
     assert rows[16].passed
+    assert rows[17].passed
     assert selected is not None
-    assert not any(code.startswith("PRESENCE_REPAIR_AWKWARD_CAUGHT") for code in selected.reason_codes)
+    assert not any(code.startswith("AWKWARD_COLLOCATION") for code in selected.reason_codes)
     assert "有点被" not in selected.text
+
+
+def test_surface_fluency_penalizes_awkward_adverbial_passive_event() -> None:
+    request = build_isolated_surface_input(
+        {
+            "case_id": "fluency_collocation",
+            "soul_md": SOUL,
+            "user_message": "你刚刚是不是又走神了",
+            "reply_control_packet": {
+                "response_move": "repair_presence",
+                "task_mode": "daily_chat",
+                "emotional_tone": "slightly_guilty",
+                "question_budget": 0,
+            },
+        }
+    )
+    rows = score_isolated_surface_candidates(
+        request,
+        [
+            "唔…有点被你抓到了，不过我现在在认真听。",
+            "唔…就一小下，被你抓到了。现在在听。",
+            "嗯，刚刚晃神了一下，现在在听。",
+        ],
+    )
+    selected = select_best_isolated_candidate(rows)
+
+    assert not rows[0].passed
+    assert any(code.startswith("AWKWARD_COLLOCATION") for code in rows[0].reason_codes)
+    assert not any(code.startswith("AWKWARD_COLLOCATION") for code in rows[1].reason_codes)
+    assert not any(code.startswith("AWKWARD_COLLOCATION") for code in rows[2].reason_codes)
+    assert selected is not None
+    assert selected.text != "唔…有点被你抓到了，不过我现在在认真听。"
 
 
 def test_compressed_continuity_penalizes_requesting_raw_history_backfill() -> None:

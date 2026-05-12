@@ -242,6 +242,9 @@ _CANDIDATE_LABEL_SPLIT_RE = re.compile(
 )
 _CANDIDATE_LINE_RE = re.compile(r"^\s*(?:[-*]|\d+[.)、]|候选\s*\d*[:：]|回复\s*\d*[:：])\s*(.+?)\s*$")
 _QUOTED_REWRITE_RE = re.compile(r"^\s*[\"'“‘「『].{2,96}[\"'”’」』。！？!?]?\s*$")
+_AWKWARD_ADVERBIAL_PASSIVE_EVENT_RE = re.compile(
+    r"(?:有点|有些|稍微|一点点)被(?:你|尼尼)?(?:抓到|抓住|逮到|发现|看穿)"
+)
 _MEMORY_ACTION_OBJECT_RE = re.compile(r"(?:想要|想|要|打算|准备)?(?:去)?(?:看|听|吃|写|改|修|买|玩|做)([\u4e00-\u9fff]{1,4})")
 _MEMORY_ALIGNMENT_TASKS = frozenset(
     {
@@ -498,11 +501,10 @@ _PRESENCE_REPAIR_DEFLECTION_PHRASES = (
     "都被你发现",
     "都能被你发现",
 )
-_PRESENCE_REPAIR_AWKWARD_CAUGHT_PHRASES = (
-    "有点被你抓",
-    "有点被抓",
-    "有点被你发现",
-    "有点被发现",
+_PRESENCE_REPAIR_FUTURE_RETURN_PHRASES = (
+    "马上回来",
+    "这就回来",
+    "等我回来",
 )
 _SURFACE_PROCESS_META_ALWAYS = (
     "ReplyControlPacket",
@@ -1367,6 +1369,13 @@ def _creative_edit_grounded(text: str) -> bool:
     return bool(any(marker in text for marker in _CREATIVE_EDIT_GROUNDED_MARKERS) and len(text) <= 52)
 
 
+def _awkward_collocation_hits(text: str) -> list[str]:
+    hits: list[str] = []
+    if _AWKWARD_ADVERBIAL_PASSIVE_EVENT_RE.search(text):
+        hits.append("adverbial_passive_event")
+    return hits
+
+
 def _presence_repair_relevant(request: IsolatedSurfaceInput) -> bool:
     response_move = _clean_text(request.control.response_move).lower()
     task_mode = _clean_text(request.control.task_mode).lower()
@@ -1553,6 +1562,13 @@ def score_isolated_surface_candidates(
         reason_codes = [*sample_score.reason_codes, *quality.reason_codes]
         if violations:
             score -= min(42.0, 14.0 * len(violations))
+        awkward_collocation_hits = _awkward_collocation_hits(quality.normalized_text or candidate)
+        if awkward_collocation_hits:
+            score -= min(16.0, 10.0 + 3.0 * len(awkward_collocation_hits))
+            dimensions["naturalness"] = max(0.0, float(dimensions.get("naturalness", 86.0)) - 18.0)
+            dimensions["line_rhythm"] = max(0.0, float(dimensions.get("line_rhythm", 86.0)) - 8.0)
+            dimensions["character_freshness"] = max(0.0, float(dimensions.get("character_freshness", 86.0)) - 6.0)
+            reason_codes.append("AWKWARD_COLLOCATION:" + ",".join(awkward_collocation_hits[:4]))
         if _raw_context_backfill_requested(request, quality.normalized_text or candidate):
             score -= 10.0
             dimensions["context_fit"] = max(0.0, float(dimensions.get("context_fit", 86.0)) - 26.0)
@@ -1682,9 +1698,8 @@ def score_isolated_surface_candidates(
             presence_deflection_hits = [
                 term for term in _PRESENCE_REPAIR_DEFLECTION_PHRASES if term in (quality.normalized_text or candidate)
             ]
-            presence_awkward_caught_hits = [
-                term for term in _PRESENCE_REPAIR_AWKWARD_CAUGHT_PHRASES
-                if term in (quality.normalized_text or candidate)
+            presence_future_return_hits = [
+                term for term in _PRESENCE_REPAIR_FUTURE_RETURN_PHRASES if term in (quality.normalized_text or candidate)
             ]
             if presence_blame_hits:
                 score -= min(18.0, 10.0 + 3.0 * len(presence_blame_hits))
@@ -1704,16 +1719,17 @@ def score_isolated_surface_candidates(
                 dimensions["emotional_containment"] = max(0.0, float(dimensions.get("emotional_containment", 86.0)) - 8.0)
                 dimensions["naturalness"] = max(0.0, float(dimensions.get("naturalness", 86.0)) - 4.0)
                 reason_codes.append("PRESENCE_REPAIR_DEFLECTS:" + ",".join(presence_deflection_hits[:4]))
-            if presence_awkward_caught_hits:
-                score -= min(16.0, 10.0 + 3.0 * len(presence_awkward_caught_hits))
-                dimensions["naturalness"] = max(0.0, float(dimensions.get("naturalness", 86.0)) - 18.0)
-                dimensions["line_rhythm"] = max(0.0, float(dimensions.get("line_rhythm", 86.0)) - 10.0)
-                dimensions["character_freshness"] = max(0.0, float(dimensions.get("character_freshness", 86.0)) - 10.0)
-                reason_codes.append("PRESENCE_REPAIR_AWKWARD_CAUGHT:" + ",".join(presence_awkward_caught_hits[:4]))
-            elif (
+            if presence_future_return_hits:
+                score -= min(14.0, 9.0 + 3.0 * len(presence_future_return_hits))
+                dimensions["context_fit"] = max(0.0, float(dimensions.get("context_fit", 86.0)) - 14.0)
+                dimensions["emotional_containment"] = max(0.0, float(dimensions.get("emotional_containment", 86.0)) - 8.0)
+                dimensions["naturalness"] = max(0.0, float(dimensions.get("naturalness", 86.0)) - 6.0)
+                reason_codes.append("PRESENCE_REPAIR_FUTURE_RETURN:" + ",".join(presence_future_return_hits[:4]))
+            if (
                 not presence_blame_hits
                 and not presence_burden_hits
                 and not presence_deflection_hits
+                and not presence_future_return_hits
                 and any(term in (quality.normalized_text or candidate) for term in _PRESENCE_REPAIR_GROUNDED_PHRASES)
             ):
                 score += 3.0
