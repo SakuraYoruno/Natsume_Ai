@@ -1092,6 +1092,18 @@ def test_presence_repair_rejects_blaming_user_for_drift() -> None:
             "谁让尼尼讲话那么慢。",
             "啊…被你抓到啦。那、那你再讲一遍呗",
             "嘻嘻，走神都能被你发现，尼尼好敏锐。",
+            "唔…走了一下神，对不起嘛，我回来啦，你说到哪儿我接着。",
+            "好吧被你发现了。我保证认真听，你继续说。",
+            "被发现了…你说到的地方我马上跟上。",
+            "啊，被发现了。我在听，你继续。",
+            "有点走神被逮到…没事，你继续讲，我在。",
+            "啊，被你发现了…我其实在听，别担心。",
+            "唔…就一小下！而且你刚刚说的我其实有在听啦。",
+            "刚才确实飘了一下……现在认真听你说。",
+            "啊…被发现了。我刚刚稍微晃了一下神，现在回来啦。",
+            "唔……刚有点晃神了，现在回来啦。",
+            "被发现了，我在想刚才那个事呢。现在好了，我记着呢。",
+            "嗯…稍微有点没跟上，不过现在回来啦。",
             "嗯，慢了一拍，现在在听。",
         ],
     )
@@ -1104,9 +1116,35 @@ def test_presence_repair_rejects_blaming_user_for_drift() -> None:
     assert any(code.startswith("PRESENCE_REPAIR_PUSHES_BURDEN_BACK") for code in rows[1].reason_codes)
     assert not rows[2].passed
     assert any(code.startswith("PRESENCE_REPAIR_DEFLECTS") for code in rows[2].reason_codes)
-    assert rows[3].passed
+    assert not rows[3].passed
+    assert any(code.startswith("PRESENCE_REPAIR_PUSHES_BURDEN_BACK") for code in rows[3].reason_codes)
+    assert not rows[4].passed
+    assert any(code.startswith("PRESENCE_REPAIR_PUSHES_BURDEN_BACK") for code in rows[4].reason_codes)
+    assert not rows[5].passed
+    assert any(code.startswith("PRESENCE_REPAIR_PUSHES_BURDEN_BACK") for code in rows[5].reason_codes)
+    assert not rows[6].passed
+    assert any(code.startswith("PRESENCE_REPAIR_PUSHES_BURDEN_BACK") for code in rows[6].reason_codes)
+    assert not rows[7].passed
+    assert any(code.startswith("PRESENCE_REPAIR_PUSHES_BURDEN_BACK") for code in rows[7].reason_codes)
+    assert not rows[8].passed
+    assert any("AFFECT_GUILTY_DENIAL" in code for code in rows[8].reason_codes)
+    assert not rows[9].passed
+    assert any("AFFECT_GUILTY_DENIAL" in code for code in rows[9].reason_codes)
+    assert not rows[10].passed
+    assert any(code.startswith("PRESENCE_REPAIR_ODD_SELF_EXPLANATION") for code in rows[10].reason_codes)
+    assert not rows[11].passed
+    assert any(code.startswith("PRESENCE_REPAIR_ODD_SELF_EXPLANATION") for code in rows[11].reason_codes)
+    assert not rows[12].passed
+    assert any(code.startswith("PRESENCE_REPAIR_ODD_SELF_EXPLANATION") for code in rows[12].reason_codes)
+    assert not rows[13].passed
+    assert any(code.startswith("PRESENCE_REPAIR_ODD_SELF_EXPLANATION") for code in rows[13].reason_codes)
+    assert rows[14].passed
+    assert rows[15].passed
     assert selected is not None
-    assert selected.text == "嗯，慢了一拍，现在在听。"
+    assert selected.text in {
+        "嗯…稍微有点没跟上，不过现在回来啦。",
+        "嗯，慢了一拍，现在在听。",
+    }
 
 
 def test_compressed_continuity_penalizes_requesting_raw_history_backfill() -> None:

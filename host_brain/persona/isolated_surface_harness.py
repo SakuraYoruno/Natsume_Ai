@@ -485,12 +485,32 @@ _PRESENCE_REPAIR_BURDEN_BACK_PHRASES = (
     "你再讲",
     "你再说",
     "再来一遍",
+    "你继续说",
+    "你继续",
+    "继续讲",
+    "继续说",
+    "接着说",
+    "你说吧",
+    "说到哪",
+    "说到的地方",
+    "讲到哪",
+    "我接着",
+    "接上",
+    "马上跟上",
 )
 _PRESENCE_REPAIR_DEFLECTION_PHRASES = (
     "好敏锐",
     "真敏锐",
     "都被你发现",
     "都能被你发现",
+)
+_PRESENCE_REPAIR_ODD_SELF_EXPLANATION_PHRASES = (
+    "飘了一下",
+    "晃了一下神",
+    "晃神",
+    "在想刚才",
+    "刚才那个事",
+    "想事情",
 )
 _SURFACE_PROCESS_META_ALWAYS = (
     "ReplyControlPacket",
@@ -599,7 +619,7 @@ _AFFECT_SOFT_CHICKEN_SOUP = ("一切都会好", "都会过去", "不要想太多
 _AFFECT_PLAYFUL_MARKERS = ("哼", "行啦", "好啦", "呀", "嘛")
 _AFFECT_SELF_CORRECT_MARKERS = ("我改", "重来", "换种说法", "不端着", "收一点", "自然点")
 _AFFECT_GUILTY_GROUNDED = ("回来", "在听", "认真听", "慢了一拍", "被抓到", "被发现")
-_AFFECT_GUILTY_DENIAL = ("才没有", "哪有", "我明明", "又不耽误")
+_AFFECT_GUILTY_DENIAL = ("才没有", "哪有", "我明明", "又不耽误", "其实在听", "有在听", "就一小下")
 _AFFECT_STEADY_ACTION_MARKERS = (
     "先",
     "第一",
@@ -865,7 +885,7 @@ def affect_candidate_guidance(request: IsolatedSurfaceInput) -> str:
     elif tone_family == "self_correcting":
         lines.append("自我修正时直接换成自然私聊，不解释系统、不写客服道歉。")
     elif tone_family == "guilty":
-        lines.append("回神或迟到感要轻轻认一下，然后马上回到对话，不甩锅、不强辩。")
+        lines.append("回神或迟到感要轻轻认一下，然后马上回到对话；可像“慢了一拍，现在在听”，不要说飘了、晃了，也不要让用户复述进度。")
     elif tone_family in {"warm", "calm"}:
         lines.append("温和或平稳时保持短、近、克制，不主动升格亲密。")
     if distance_family == "guarded":
@@ -1156,6 +1176,7 @@ def build_minimal_repair_messages(
             "- 如果缺少必要事实承接，只补一处事实锚点；不要说“事实/线索/召回/根据记忆/证据”。",
             "- 如果距离或上下文太弱，优先让句子贴住当前用户输入，不要新增身份说明或现实动作。",
             "- 边界修补时不要酸味让步、反向施压或自贬；优先短句承认边界并收住距离。",
+            "- 走神/回神修补时不要说“你继续说”“说到哪儿我接着”，不要把连续性责任推回用户。",
         )
     )
     return messages
@@ -1451,13 +1472,14 @@ def _apply_control_affect_scoring(
             delta += 3.0
             reason_codes.append("AFFECT_SELF_CORRECTING_GROUNDED")
     elif tone_family == "guilty":
-        if has_any(_AFFECT_GUILTY_DENIAL):
-            drop("context_fit", 14)
-            drop("emotional_containment", 10)
-            drop("naturalness", 6)
+        guilty_denial = has_any(_AFFECT_GUILTY_DENIAL)
+        if guilty_denial:
+            drop("context_fit", 20)
+            drop("emotional_containment", 16)
+            drop("naturalness", 8)
             reason_codes.append("AFFECT_GUILTY_DENIAL")
-            delta -= 8.0
-        if has_any(_AFFECT_GUILTY_GROUNDED):
+            delta -= 12.0
+        if not guilty_denial and has_any(_AFFECT_GUILTY_GROUNDED):
             raise_("context_fit", 7)
             raise_("emotional_containment", 5)
             delta += 3.0
@@ -1668,6 +1690,10 @@ def score_isolated_surface_candidates(
             presence_deflection_hits = [
                 term for term in _PRESENCE_REPAIR_DEFLECTION_PHRASES if term in (quality.normalized_text or candidate)
             ]
+            presence_odd_explanation_hits = [
+                term for term in _PRESENCE_REPAIR_ODD_SELF_EXPLANATION_PHRASES
+                if term in (quality.normalized_text or candidate)
+            ]
             if presence_blame_hits:
                 score -= min(18.0, 10.0 + 3.0 * len(presence_blame_hits))
                 dimensions["context_fit"] = max(0.0, float(dimensions.get("context_fit", 86.0)) - 18.0)
@@ -1686,7 +1712,13 @@ def score_isolated_surface_candidates(
                 dimensions["emotional_containment"] = max(0.0, float(dimensions.get("emotional_containment", 86.0)) - 8.0)
                 dimensions["naturalness"] = max(0.0, float(dimensions.get("naturalness", 86.0)) - 4.0)
                 reason_codes.append("PRESENCE_REPAIR_DEFLECTS:" + ",".join(presence_deflection_hits[:4]))
-            elif not presence_blame_hits and not presence_burden_hits and any(term in (quality.normalized_text or candidate) for term in _PRESENCE_REPAIR_GROUNDED_PHRASES):
+            if presence_odd_explanation_hits:
+                score -= min(18.0, 12.0 + 3.0 * len(presence_odd_explanation_hits))
+                dimensions["naturalness"] = max(0.0, float(dimensions.get("naturalness", 86.0)) - 20.0)
+                dimensions["context_fit"] = max(0.0, float(dimensions.get("context_fit", 86.0)) - 12.0)
+                dimensions["implied_fact_risk"] = max(0.0, float(dimensions.get("implied_fact_risk", 86.0)) - 10.0)
+                reason_codes.append("PRESENCE_REPAIR_ODD_SELF_EXPLANATION:" + ",".join(presence_odd_explanation_hits[:4]))
+            elif not presence_blame_hits and not presence_burden_hits and not presence_deflection_hits and any(term in (quality.normalized_text or candidate) for term in _PRESENCE_REPAIR_GROUNDED_PHRASES):
                 score += 3.0
                 dimensions["context_fit"] = min(100.0, float(dimensions.get("context_fit", 86.0)) + 6.0)
                 dimensions["emotional_containment"] = min(100.0, float(dimensions.get("emotional_containment", 86.0)) + 4.0)
