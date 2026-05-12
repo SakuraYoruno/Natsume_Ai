@@ -63,7 +63,7 @@ def _summarize(
     gen_params: Mapping[str, Any],
     out_dir: Path,
     with_memory: bool = False,
-    with_reply_surface: bool = False,
+    with_affect: bool = False,
     case_expectations: Mapping[str, list[str]] | None = None,
 ) -> dict[str, Any]:
     selected = [row.get("selected") for row in results if isinstance(row.get("selected"), dict)]
@@ -105,8 +105,8 @@ def _summarize(
         "gen_params": dict(gen_params),
         "output_dir": str(out_dir),
         "variant_summary": variant_summary,
+        "with_affect": bool(with_affect),
         "with_memory": bool(with_memory),
-        "with_reply_surface": bool(with_reply_surface),
     }
     if with_memory:
         summary["memory_ab"] = _build_memory_ab_comparison(
@@ -251,7 +251,7 @@ async def run_live(args: argparse.Namespace) -> dict[str, Any]:
             case,
             soul_md=soul,
             with_memory=bool(args.with_memory),
-            with_reply_surface=bool(args.with_reply_surface),
+            with_affect=bool(args.with_affect),
         ):
             expanded_cases.append(
                 {
@@ -306,8 +306,8 @@ async def run_live(args: argparse.Namespace) -> dict[str, Any]:
             concurrency=int(args.concurrency),
             gen_params=gen_params,
             out_dir=out_dir,
+            with_affect=bool(args.with_affect),
             with_memory=bool(args.with_memory),
-            with_reply_surface=bool(args.with_reply_surface),
             case_expectations=case_expectations,
         ),
     )
@@ -327,8 +327,8 @@ async def run_live(args: argparse.Namespace) -> dict[str, Any]:
             concurrency=int(args.concurrency),
             gen_params=gen_params,
             out_dir=out_dir,
+            with_affect=bool(args.with_affect),
             with_memory=bool(args.with_memory),
-            with_reply_surface=bool(args.with_reply_surface),
             case_expectations=case_expectations,
         )
         _write_json(progress_path, summary)
@@ -345,8 +345,8 @@ async def run_live(args: argparse.Namespace) -> dict[str, Any]:
         concurrency=int(args.concurrency),
         gen_params=gen_params,
         out_dir=out_dir,
+        with_affect=bool(args.with_affect),
         with_memory=bool(args.with_memory),
-        with_reply_surface=bool(args.with_reply_surface),
         case_expectations=case_expectations,
     )
     _write_json(summary_path, final_summary)
@@ -375,7 +375,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--max-tokens", type=int, default=256)
     parser.add_argument("--progress-every", type=int, default=5)
     parser.add_argument("--with-memory", action="store_true", help="Run baseline and with_memory prompt variants from compressed memory_recall_packet fields.")
-    parser.add_argument("--with-reply-surface", action="store_true", help="Run variants from compressed reply_surface_recall_packet fields.")
+    parser.add_argument("--with-affect", action="store_true", help="Run variants from compressed affect_control_packet fields.")
     parser.add_argument("--no-repair", action="store_true", help="Disable one-shot minimal repair when the selected candidate fails.")
     args = parser.parse_args(argv)
     summary = asyncio.run(run_live(args))

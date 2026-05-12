@@ -917,33 +917,45 @@ def test_cli_run_cases_with_memory_writes_baseline_and_memory_variant(tmp_path) 
     assert "evd://episodic/mem-1" not in variants["with_memory"]
 
 
-def test_cli_run_cases_with_reply_surface_recall_writes_style_only_variant(tmp_path) -> None:
+def test_cli_run_cases_with_memory_and_affect_writes_combined_variant(tmp_path) -> None:
     case = {
-        "case_id": "reply_surface_compare",
-        "user_message": "早",
+        "case_id": "memory_affect_compare",
+        "user_message": "你怎么这么像客服",
         "reply_control_packet": {
-            "response_move": "daily_good_morning",
-            "task_mode": "daily_good_morning",
+            "response_move": "relationship_boundary",
+            "task_mode": "relationship_boundary",
             "question_budget": 0,
         },
-        "reply_surface_recall_packet": {
-            "style_anchor": ["历史表层风格：短句，少解释。"],
-            "must_not_do": ["不要照抄历史表层回复"],
-            "sample_digest": "abc123",
-            "raw_sample": "尼尼，早呀。",
+        "memory_recall_packet": {
+            "facts": ["记忆线索：用户不喜欢客服式回复"],
+            "relationship_clues": ["关系线索：熟人私聊，不升级亲密。"],
+            "style_anchor": ["承接压缩记忆"],
+            "must_not_do": ["不要暴露召回来源"],
+            "confidence": 0.9,
         },
+        "affect_control_packet": {
+            "emotional_tone": "hurt_controlled",
+            "relationship_distance": "familiar",
+            "expression_intensity": 0.7,
+            "style_anchor": ["情绪表达：可以有一点被刺到，但要收住。"],
+            "must_not_do": ["不要攻击用户或冷暴力"],
+            "raw_emotion_context": {"inner_monologue": "RAW_AFFECT_SHOULD_NOT_LEAK"},
+        },
+        "memory_expected_terms": ["客服"],
         "candidates_by_variant": {
-            "baseline": ["早。"],
-            "with_reply_surface": ["早啊，尼尼。"],
+            "baseline": ["不像客服，我会继续优化。"],
+            "with_memory": ["记得，你不喜欢客服式回复，我先收住。"],
+            "with_affect": ["别把我写得像没感觉一样。先把话说回来。"],
+            "with_memory_affect": ["记得，你不喜欢客服式回复。别把我写得像没感觉一样。"],
         },
     }
 
-    summary = run_cases([case], soul_md=SOUL, out_dir=tmp_path, with_reply_surface=True)
+    summary = run_cases([case], soul_md=SOUL, out_dir=tmp_path, with_memory=True, with_affect=True)
 
-    assert summary["cases"] == 1
-    assert summary["reply_surface_cases"] == 1
-    assert summary["prompt_variants"] == 2
-    assert summary["variant_summary"]["with_reply_surface"]["selected_count"] == 1
+    assert summary["affect_cases"] == 1
+    assert summary["memory_cases"] == 1
+    assert summary["prompt_variants"] == 4
+    assert summary["variant_summary"]["with_memory_affect"]["selected_count"] == 1
     prompt_rows = [
         json.loads(line)
         for line in (tmp_path / "prompts.jsonl").read_text(encoding="utf-8").splitlines()
@@ -951,7 +963,8 @@ def test_cli_run_cases_with_reply_surface_recall_writes_style_only_variant(tmp_p
     ]
     variants = {row["variant"]: "\n".join(message["content"] for message in row["messages"]) for row in prompt_rows}
 
-    assert set(variants) == {"baseline", "with_reply_surface"}
-    assert "历史表层风格：短句，少解释。" in variants["with_reply_surface"]
-    assert "不要照抄历史表层回复" in variants["with_reply_surface"]
-    assert "尼尼，早呀。" not in variants["with_reply_surface"]
+    assert set(variants) == {"baseline", "with_memory", "with_affect", "with_memory_affect"}
+    assert "情绪表达：可以有一点被刺到，但要收住。" in variants["with_affect"]
+    assert "用户不喜欢客服式回复" in variants["with_memory_affect"]
+    assert "RAW_AFFECT_SHOULD_NOT_LEAK" not in variants["with_affect"]
+    assert "raw_emotion_context" not in variants["with_memory_affect"]

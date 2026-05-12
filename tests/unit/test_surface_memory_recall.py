@@ -84,19 +84,20 @@ def test_surface_memory_recall_packet_compresses_multi_route_candidates() -> Non
     assert isinstance(packet, SurfaceMemoryRecallPacket)
     assert packet.facts == (
         "记忆线索：上次说好周末去看展",
-        "关系线索：关系阶段：熟人私聊，别升级亲密。",
-        "世界事实：新海天这个名字是身份锚点。",
+        "记忆线索：第二条同路由记忆应当在多路优先后再补位。",
     )
-    assert packet.route_ids == ("episodic", "bond", "world")
+    assert packet.route_ids == ("episodic", "bond")
     assert packet.evidence_refs == (
         "evd://episodic/mem-1",
         "evd://bond/bond-1",
-        "evd://world/world-1",
+        "evd://episodic/mem-2",
     )
     assert packet.relationship_clues == ("关系线索：关系阶段：熟人私聊，别升级亲密。",)
     assert packet.confidence == 0.93
     assert "不要根据记忆升级亲密关系" in packet.must_not_do
+    assert "用户事实记忆只补当前承接，不扩写成未确认细节" in packet.style_anchor
     assert "按关系线索控制距离，不因为记忆升格亲密" in packet.style_anchor
+    assert all("世界事实" not in fact for fact in packet.facts)
     assert "chat://session" not in "\n".join(packet.facts)
     assert "{" not in "\n".join(packet.facts)
 
@@ -229,8 +230,8 @@ def test_plan_surface_memory_recall_routes_task_modes_for_current_main_chain() -
         )
     )
 
-    assert tech.target_store_ids == ("artifact_vault", "episodic_vector", "sqlite_ledger")
-    assert identity.target_store_ids == ("world_canon", "episodic_vector")
+    assert tech.target_store_ids == ("episodic_vector", "sqlite_ledger")
+    assert identity.target_store_ids == ("neo4j_bond", "episodic_vector")
     assert tired.target_store_ids == ("neo4j_bond", "episodic_vector")
 
 
@@ -273,10 +274,10 @@ def test_recall_surface_memory_for_context_passes_current_chain_plan_to_recall()
         query_embedding=[0.2] * 16,
     )
 
-    assert captured["target_store_ids"] == ["artifact_vault", "episodic_vector", "sqlite_ledger"]
+    assert captured["target_store_ids"] == ["episodic_vector", "sqlite_ledger"]
     assert "技术场景优先 usefulness" in str(captured["query"])
-    assert len(packet.facts) <= 3
-    assert dict(packet.trace or {})["plan"]["reason"] == "technical_or_task_context"
+    assert len(packet.facts) <= 2
+    assert dict(packet.trace or {})["plan"]["reason"] == "technical_user_memory_context"
 
 
 def test_write_surface_turn_memory_writes_compact_evidence_gated_record() -> None:

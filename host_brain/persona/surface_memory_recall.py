@@ -56,6 +56,9 @@ _RECALL_TASKS = frozenset({"recall", "recall_memory", "memory_followup"})
 _TECH_TASKS = frozenset({"advice_continue", "complaint", "help_takeover", "next_step", "small_failure", "write_takeover"})
 _EMOTION_TASKS = frozenset({"apology", "bad_mood", "give_up", "headache", "quiet", "sleepy", "tired"})
 _IDENTITY_TASKS = frozenset({"identity"})
+SURFACE_USER_FACT_STORES = frozenset({"episodic_vector", "episodic", "sqlite_ledger"})
+SURFACE_BOND_STORES = frozenset({"neo4j_bond", "bond_graph"})
+SURFACE_MAIN_CHAIN_RECALL_STORES = SURFACE_USER_FACT_STORES | SURFACE_BOND_STORES
 
 
 @dataclass(frozen=True)
@@ -232,11 +235,11 @@ def plan_surface_memory_recall(
             should_recall=True,
             query=query,
             task_mode=task_mode,
-            target_store_ids=("artifact_vault", "episodic_vector", "sqlite_ledger"),
-            max_facts=3,
-            max_chars_per_fact=112,
+            target_store_ids=("episodic_vector", "sqlite_ledger"),
+            max_facts=2,
+            max_chars_per_fact=96,
             time_lookback_days=_infer_lookback_days(user_message),
-            reason="technical_or_task_context",
+            reason="technical_user_memory_context",
         )
     if task_mode in _EMOTION_TASKS:
         return SurfaceMemoryRecallPlan(
@@ -254,17 +257,17 @@ def plan_surface_memory_recall(
             should_recall=True,
             query=query,
             task_mode=task_mode,
-            target_store_ids=("world_canon", "episodic_vector"),
+            target_store_ids=("neo4j_bond", "episodic_vector"),
             max_facts=2,
             max_chars_per_fact=88,
             time_lookback_days=None,
-            reason="identity_anchor_context",
+            reason="identity_relationship_context",
         )
     return SurfaceMemoryRecallPlan(
         should_recall=True,
         query=query,
         task_mode=task_mode,
-        target_store_ids=("episodic_vector",),
+        target_store_ids=("episodic_vector", "neo4j_bond"),
         max_facts=2,
         max_chars_per_fact=88,
         time_lookback_days=_infer_lookback_days(user_message),
@@ -401,8 +404,10 @@ def build_surface_memory_recall_packet(
     )
     evidence_refs = tuple(_unique(row.evidence_ref for row in rows if row.evidence_ref))
     source_refs = tuple(_unique(row.source_ref for row in rows if row.source_ref))
-    route_ids = tuple(_extract_route_ids(output))
-    relationship_clues = tuple(row.fact for row in rows if _is_relationship_store(row.store_id))
+    route_ids = tuple(_extract_route_ids(output, allowed_store_ids=SURFACE_MAIN_CHAIN_RECALL_STORES))
+    memory_rows = tuple(row for row in rows if _is_user_fact_store(row.store_id))
+    relationship_rows = tuple(row for row in rows if _is_relationship_store(row.store_id))
+    relationship_clues = tuple(row.fact for row in relationship_rows)
     must_not_do = tuple(_build_packet_must_not_do(candidates=candidates, rows=rows, degraded=bool(output.get("degraded", False))))
     style_anchor = tuple(_build_packet_style_anchor(rows))
     store_counts: dict[str, int] = {}
@@ -410,7 +415,7 @@ def build_surface_memory_recall_packet(
         store_counts[row.store_id] = store_counts.get(row.store_id, 0) + 1
     return SurfaceMemoryRecallPacket(
         query=_clean_text(query if query is not None else output.get("query")),
-        facts=tuple(row.fact for row in rows),
+        facts=tuple(row.fact for row in memory_rows),
         style_anchor=style_anchor,
         relationship_clues=relationship_clues,
         must_not_do=must_not_do,
@@ -428,6 +433,8 @@ def build_surface_memory_recall_packet(
             "route_count": len(route_ids),
             "route_error_count": len(list(output.get("route_errors") or [])),
             "selected_fact_count": len(rows),
+            "selected_user_fact_count": len(memory_rows),
+            "selected_bond_count": len(relationship_rows),
             "store_counts": dict(sorted(store_counts.items())),
         },
     )
@@ -635,6 +642,8 @@ def _build_fact_row(
         or metadata.get("collection")
         or "episodic_vector"
     ).lower()
+    if store_id not in SURFACE_MAIN_CHAIN_RECALL_STORES:
+        return None
     text = _surface_safe_text(
         candidate.get("snippet") or candidate.get("text"),
         limit=max_chars_per_fact,
@@ -662,11 +671,11 @@ def _fact_prefix(store_id: str) -> str:
         return "记忆线索"
     if normalized in {"neo4j_bond", "bond_graph"}:
         return "关系线索"
-    if normalized == "world_canon":
-        return "世界事实"
-    if normalized == "artifact_vault":
-        return "制品线索"
     return "召回线索"
+
+
+def _is_user_fact_store(store_id: str) -> bool:
+    return _clean_text(store_id).lower() in SURFACE_USER_FACT_STORES
 
 
 def _is_relationship_store(store_id: str) -> bool:
@@ -678,10 +687,10 @@ def _build_packet_style_anchor(rows: Sequence[SurfaceMemoryFactRow]) -> list[str
         return []
     anchors = ["记忆只作为压缩事实承接，不展示召回过程"]
     store_ids = {_clean_text(row.store_id).lower() for row in rows}
+    if store_ids & SURFACE_USER_FACT_STORES:
+        anchors.append("用户事实记忆只补当前承接，不扩写成未确认细节")
     if store_ids & {"neo4j_bond", "bond_graph"}:
         anchors.append("按关系线索控制距离，不因为记忆升格亲密")
-    if "artifact_vault" in store_ids:
-        anchors.append("技术线索优先转成最小可执行下一步")
     return _clean_list(anchors)
 
 
@@ -711,10 +720,14 @@ def _packet_confidence(rows: Sequence[SurfaceMemoryFactRow], *, output: Mapping[
     return _clamp01(_coerce_float(output.get("confidence")))
 
 
-def _extract_route_ids(output: Mapping[str, Any]) -> list[str]:
+def _extract_route_ids(output: Mapping[str, Any], *, allowed_store_ids: Sequence[str] | set[str] | frozenset[str] | None = None) -> list[str]:
+    allowed = {_clean_text(item).lower() for item in list(allowed_store_ids or []) if _clean_text(item)}
     route_ids: list[str] = []
     for route in list(output.get("routes") or []):
         if isinstance(route, Mapping):
+            store_id = _clean_text(route.get("store_id") or route.get("collection") or route.get("id")).lower()
+            if allowed and store_id and store_id not in allowed:
+                continue
             route_id = _clean_text(route.get("route_id") or route.get("store_id") or route.get("id"))
         else:
             route_id = _clean_text(route)
@@ -722,6 +735,9 @@ def _extract_route_ids(output: Mapping[str, Any]) -> list[str]:
             route_ids.append(route_id)
     for row in list(output.get("route_rows") or []):
         if not isinstance(row, Mapping):
+            continue
+        store_id = _clean_text(row.get("store_id") or row.get("collection") or row.get("route_id")).lower()
+        if allowed and store_id and store_id not in allowed:
             continue
         route_id = _clean_text(row.get("route_id") or row.get("store_id"))
         if route_id and route_id not in route_ids:
@@ -870,6 +886,9 @@ __all__ = [
     "SURFACE_MEMORY_RECALL_FAILED",
     "SURFACE_MEMORY_RECALL_SKIPPED",
     "SURFACE_MEMORY_WRITE_FAILED",
+    "SURFACE_BOND_STORES",
+    "SURFACE_MAIN_CHAIN_RECALL_STORES",
+    "SURFACE_USER_FACT_STORES",
     "SurfaceMemoryFactRow",
     "SurfaceMemoryRecallPlan",
     "SurfaceMemoryRecallPacket",

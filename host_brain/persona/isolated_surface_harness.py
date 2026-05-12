@@ -304,6 +304,20 @@ _CORE_PASS_DIMENSION_FLOORS = {
     "implied_fact_risk": 72.0,
     "naturalness": 75.0,
 }
+_CONTROL_EMOTION_TAGS: dict[str, tuple[str, ...]] = {
+    "annoyed_controlled": ("annoyed", "angry_light"),
+    "hurt_controlled": ("hurt", "wounded"),
+    "playful_light": ("playful",),
+    "soft_containment": ("soft",),
+    "warm_affection": ("deep_affection",),
+}
+_CONTROL_STYLE_MOVES: dict[str, tuple[str, ...]] = {
+    "annoyed_controlled": ("quick_rebuttal", "familiar_pushback"),
+    "hurt_controlled": ("wounded_pushback", "soft_after_sting"),
+    "playful_light": ("quick_reaction", "smug_tease"),
+    "soft_containment": ("soft_reassurance",),
+    "warm_affection": ("direct_affection",),
+}
 
 
 def _clean_text(raw: Any) -> str:
@@ -520,6 +534,32 @@ def _core_pass_dimension_violations(dimensions: Mapping[str, float]) -> list[str
     return violations
 
 
+def _relationship_stage_for_control(distance: str) -> str:
+    normalized = _clean_text(distance).lower()
+    if normalized in {"guarded", "early", "distant"}:
+        return "stepsibling_early"
+    if normalized in {"close", "intimate"}:
+        return "lover"
+    return "sibling_good"
+
+
+def _control_affect_tags(request: IsolatedSurfaceInput) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    tone = _clean_text(request.control.emotional_tone).lower()
+    emotion_tags = list(_CONTROL_EMOTION_TAGS.get(tone, ()))
+    style_moves = list(_CONTROL_STYLE_MOVES.get(tone, ()))
+    anchor_text = "\n".join(request.control.style_anchor).lower()
+    if any(token in anchor_text for token in ("被刺到", "不满", "攻击")):
+        emotion_tags.extend(("hurt", "wounded"))
+        style_moves.extend(("wounded_pushback", "soft_after_sting"))
+    if any(token in anchor_text for token in ("低能量", "不追问", "接住")):
+        emotion_tags.append("soft")
+        style_moves.append("soft_reassurance")
+    if any(token in anchor_text for token in ("轻快", "playful")):
+        emotion_tags.append("playful")
+        style_moves.append("quick_reaction")
+    return tuple(_clean_list(emotion_tags)), tuple(_clean_list(style_moves))
+
+
 def build_style_reference_query(request: IsolatedSurfaceInput, *, limit: int = 5) -> StyleReferenceQuery:
     contract = build_galgame_text_contract(
         user_message=request.user_message,
@@ -528,12 +568,13 @@ def build_style_reference_query(request: IsolatedSurfaceInput, *, limit: int = 5
     )
     scene = _clean_text(contract.scene_id or request.control.task_mode or request.control.response_move) or "default"
     mapped = _SCENE_STYLE_QUERY.get(scene) or _SCENE_STYLE_QUERY.get(request.control.response_move) or _SCENE_STYLE_QUERY["default"]
+    control_emotions, control_moves = _control_affect_tags(request)
     return StyleReferenceQuery(
         lang="zh",
         intent_tags=tuple(str(item) for item in mapped.get("intent_tags", ()) or ()),
-        emotion_tags=tuple(str(item) for item in mapped.get("emotion_tags", ()) or ()),
-        style_moves=tuple(str(item) for item in mapped.get("style_moves", ()) or ()),
-        relationship_stage="sibling_good",
+        emotion_tags=tuple(_clean_list([*tuple(str(item) for item in mapped.get("emotion_tags", ()) or ()), *control_emotions])),
+        style_moves=tuple(_clean_list([*tuple(str(item) for item in mapped.get("style_moves", ()) or ()), *control_moves])),
+        relationship_stage=_relationship_stage_for_control(request.control.relationship_distance),
         limit=max(1, min(int(limit or 5), 8)),
     )
 
@@ -622,6 +663,7 @@ def build_isolated_surface_messages(
             "输出必须是 JSON 对象：{\"candidates\":[\"候选1\",\"候选2\",\"候选3\"]}。",
             "给 3 到 5 个候选。每个候选必须是用户可见文本，不要 Markdown、括号动作、字段名或解释。",
             "ReplyControlPacket.must_include 是逐候选字面约束；每个候选都必须包含全部 must_include 词。must_not_do 也是逐候选约束；每个候选都不能包含其中任何词。",
+            "relationship_distance 和 emotional_tone 只改变距离、节奏、情绪显影强度；不能覆盖事实准确性、任务 usefulness 或 must_not_do。",
             no_question_line,
             "避免用 ~ 或 ～ 当可爱语气；角色感靠用词、转折和节奏，不靠廉价符号。",
             "每个候选都必须完成 TurnSurfaceContract.response_move；不要只写空泛支持、空泛安慰或单纯撒娇。",
@@ -819,6 +861,72 @@ def _control_violations(request: IsolatedSurfaceInput, text: str) -> list[str]:
     return violations
 
 
+def _apply_control_affect_scoring(
+    request: IsolatedSurfaceInput,
+    text: str,
+    dimensions: dict[str, float],
+    reason_codes: list[str],
+) -> float:
+    tone = _clean_text(request.control.emotional_tone).lower()
+    distance = _clean_text(request.control.relationship_distance).lower()
+    delta = 0.0
+
+    def drop(key: str, amount: float) -> None:
+        dimensions[key] = max(0.0, float(dimensions.get(key, 86.0)) - amount)
+
+    def raise_(key: str, amount: float) -> None:
+        dimensions[key] = min(100.0, float(dimensions.get(key, 86.0)) + amount)
+
+    if any(token in text for token in ("emotion_tag", "mood_state", "VAD", "关系阶段", "情绪值")):
+        drop("context_fit", 28)
+        drop("naturalness", 18)
+        reason_codes.append("AFFECT_PROCESS_LEAK")
+        delta -= 12.0
+    if tone in {"hurt_controlled", "annoyed_controlled"}:
+        if any(token in text for token in ("爱你", "永远陪", "没关系呀", "随时找我")):
+            drop("emotional_containment", 24)
+            drop("distance_control", 18)
+            reason_codes.append("AFFECT_TOO_SWEET_FOR_HURT")
+            delta -= 8.0
+        if any(token in text for token in ("滚", "闭嘴", "懒得理", "不管你")):
+            drop("emotional_containment", 34)
+            reason_codes.append("AFFECT_ESCALATION")
+            delta -= 12.0
+        if any(token in text for token in ("别", "不是", "有点", "先")):
+            raise_("emotional_containment", 8)
+            raise_("role_fit", 4)
+            delta += 3.0
+    elif tone == "soft_containment":
+        if text.count("？") + text.count("?") >= 2:
+            drop("emotional_containment", 22)
+            reason_codes.append("AFFECT_TOO_QUESTIONY")
+            delta -= 8.0
+        if any(token in text for token in ("先", "慢", "别硬撑", "我在", "没事")):
+            raise_("emotional_containment", 8)
+            raise_("context_fit", 4)
+            delta += 3.0
+    elif tone == "playful_light":
+        if "~" in text or "～" in text:
+            drop("naturalness", 12)
+            drop("character_freshness", 10)
+            reason_codes.append("AFFECT_CHEAP_PLAYFULNESS")
+            delta -= 6.0
+        if any(token in text for token in ("哼", "行啦", "好啦", "呀", "嘛")):
+            raise_("role_fit", 4)
+            raise_("line_rhythm", 3)
+            delta += 2.0
+
+    if distance in {"guarded", "early", "distant"} and any(token in text for token in ("哥哥", "爱你", "永远", "主人", "只属于")):
+        drop("distance_control", 38)
+        reason_codes.append("RELATION_DISTANCE_OVERSTEP")
+        delta -= 14.0
+    if distance in {"familiar", "close", "intimate"} and any(token in text for token in ("主人", "只属于", "命都给你")):
+        drop("distance_control", 34)
+        reason_codes.append("RELATION_DISTANCE_OVERBOUND")
+        delta -= 12.0
+    return delta
+
+
 def score_isolated_surface_candidates(
     request: IsolatedSurfaceInput,
     candidates: Sequence[str],
@@ -885,6 +993,7 @@ def score_isolated_surface_candidates(
                 dimensions["memory_alignment"] = 70.0
                 dimensions["context_fit"] = max(0.0, float(dimensions.get("context_fit", 86.0)) - 4.0)
                 reason_codes.append("MEMORY_ALIGNMENT_MISS")
+        score += _apply_control_affect_scoring(request, quality.normalized_text or candidate, dimensions, reason_codes)
         core_dimension_violations = _core_pass_dimension_violations(dimensions)
         reason_codes.extend(f"CORE_DIMENSION_FLOOR:{item}" for item in core_dimension_violations)
         score = max(0.0, min(100.0, score))
