@@ -330,7 +330,7 @@ _SCENE_GROUNDING_ANCHORS: dict[str, tuple[str, ...]] = {
     "next_step": ("先", "发", "看", "贴", "一步"),
     "help_takeover": ("发", "贴", "看", "红字", "截图", "拿"),
     "write_takeover": ("写", "材料", "要求", "丢来"),
-    "identity": ("新海天",),
+    "identity": ("夏目蓝",),
     "play_invite": ("陪", "玩", "一起"),
     "quiet": ("小声", "安静", "不吵", "收"),
     "talkative": ("说", "话", "闷"),

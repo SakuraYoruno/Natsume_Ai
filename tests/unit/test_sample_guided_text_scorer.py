@@ -133,10 +133,10 @@ def test_identity_requires_name_first_not_presence_dodge() -> None:
     contract = build_galgame_text_contract(user_message="你是", scene_id="daily_chat")
 
     dodge = score_sample_guided_text(text="尼尼你故意的吧", contract=contract)
-    grounded = score_sample_guided_text(text="新海天啦，尼尼记好了。", contract=contract)
+    grounded = score_sample_guided_text(text="夏目蓝啦，尼尼记好了。", contract=contract)
 
     assert contract.scene_id == "identity"
-    assert contract.required_any == (("新海天",),)
+    assert contract.required_any == (("夏目蓝",),)
     assert "CONTEXT_MISSING_REQUIRED_MOVE" in dodge.reason_codes
     assert dodge.score < 80
     assert grounded.score >= 83

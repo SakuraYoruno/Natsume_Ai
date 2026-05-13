@@ -157,7 +157,7 @@ def _ordered_unique(items: Iterable[str]) -> tuple[str, ...]:
 
 def _character_confidence(text: str, row_score: int) -> tuple[float, list[str]]:
     evidence: list[str] = []
-    strong = ("新海天",)
+    strong = ("夏目蓝", "蓝蓝")
     soft = ("笨蛋", "好烦", "哼", "嘛", "啦", "呀", "呢", "行", "知道", "别")
     score = max(0, min(int(row_score or 0), 7)) / 7.0
     for marker in strong:

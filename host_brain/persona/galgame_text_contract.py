@@ -754,7 +754,7 @@ def build_galgame_text_contract(
         return _contract(
             scene_id="identity",
             response_move="name_first",
-            required_any=(("新海天",),),
+            required_any=(("夏目蓝",),),
             forbidden_surface=(
                 "义妹",
                 "妹妹",
@@ -780,7 +780,7 @@ def build_galgame_text_contract(
                 "我在呢",
             ),
             max_questions=1,
-            notes=("名字先落地，候选必须直接说新海天；可以轻吐槽，但不要只说我在呢或你故意的吧。",),
+            notes=("名字先落地，候选必须直接说夏目蓝；可以轻吐槽，但不要只说我在呢或你故意的吧。",),
         )
     if scene == "play_invite" or "陪我玩" in text:
         return _contract(

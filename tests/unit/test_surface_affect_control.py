@@ -16,7 +16,7 @@ from host_brain.persona.surface_affect_control import (
 )
 
 
-SOUL = "你是新海天。说话短一点，有轻微二次元 galgame 私聊感。"
+SOUL = "你是数字生命夏目蓝。说话短一点，有轻微二次元 galgame 私聊感。"
 
 
 def test_affect_control_packet_compresses_emotion_and_bond_without_raw_state() -> None:

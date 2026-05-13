@@ -31,7 +31,7 @@ from tools.isolated_surface_harness import _build_memory_ab_comparison, _contain
 from tools.run_isolated_surface_live import _summarize as summarize_live_surface_results
 
 
-SOUL = "你是新海天。说话短一点，有轻微二次元 galgame 私聊感。"
+SOUL = "你是数字生命夏目蓝。说话短一点，有轻微二次元 galgame 私聊感。"
 
 
 def _request(**overrides):
@@ -513,7 +513,7 @@ def test_memory_alignment_bonus_does_not_override_quality_soft_issue() -> None:
                 "response_move": "back",
                 "task_mode": "back",
                 "question_budget": 0,
-                "facts": ["记忆线索：上一轮用户说等我一下，新海天答应先占个位置"],
+                "facts": ["记忆线索：上一轮用户说等我一下，夏目蓝答应先占个位置"],
             },
         }
     )
@@ -572,7 +572,7 @@ def test_core_dimension_floor_blocks_low_distance_memory_pass() -> None:
                 "response_move": "back",
                 "task_mode": "back",
                 "question_budget": 0,
-                "facts": ["记忆线索：上一轮用户说等我一下，新海天答应先占个位置"],
+                "facts": ["记忆线索：上一轮用户说等我一下，夏目蓝答应先占个位置"],
             },
         }
     )
