@@ -124,13 +124,14 @@ def test_build_messages_adds_turn_contract_without_forbidden_surface_dump() -> N
 def test_build_messages_enriches_style_anchor_from_derived_reference_bank(tmp_path, monkeypatch) -> None:
     ref = style_reference_from_raw_row(
         {
-            "file": "data~.xp3\\scn\\b01.txt.scn",
+            "file": "original_cn_presence.scn",
             "index": 868,
             "kind": "dialogue",
             "sora_candidate_score": 7,
             "daily_style_safe": True,
-            "text": "「なんでっ！？ なんでにぃににはあたしが見えてんの！？」",
-        }
+            "text": "「你看见我了啊？那就别装没听见。」",
+        },
+        lang_hint="zh",
     )
     assert ref is not None
     bank_path = tmp_path / "style_bank.jsonl"
@@ -154,16 +155,17 @@ def test_build_messages_enriches_style_anchor_from_derived_reference_bank(tmp_pa
 
     query = build_style_reference_query(request)
     assert query.intent_tags == ("presence",)
+    assert query.relationship_stage == "familiar"
     derived = derive_style_reference_anchor(request)
-    assert any("原作台词派生风格特征" in item for item in derived.anchors)
+    assert any("中文风格样本派生特征" in item for item in derived.anchors)
     assert any("clingy_presence" in item for item in derived.anchors)
 
     rendered = "\n".join(message["content"] for message in build_isolated_surface_messages(request))
-    assert "原作台词派生风格特征" in rendered
+    assert "中文风格样本派生特征" in rendered
     assert "clingy_presence" in rendered
     assert "source_refs=" not in rendered
-    assert "なんでっ" not in rendered
-    assert "にぃににはあたしが見えてんの" not in rendered
+    assert "你看见我了啊" not in rendered
+    assert "别装没听见" not in rendered
     clear_style_reference_bank_cache()
 
 

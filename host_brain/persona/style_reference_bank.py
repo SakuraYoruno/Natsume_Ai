@@ -10,7 +10,7 @@ from typing import Any, Iterable, Mapping
 
 
 ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_STYLE_BANK_PATH = ROOT / "data" / "style_bank" / "sora_style_bank.jsonl"
+DEFAULT_STYLE_BANK_PATH = ROOT / "data" / "style_bank" / "original_cn_style_bank.jsonl"
 
 
 def _clean_text(raw: Any) -> str:
@@ -41,6 +41,33 @@ def normalize_source_ref(raw_file: Any, raw_index: Any) -> str:
         file_name = file_name[len(root_prefix) :]
     index = str(raw_index if raw_index is not None else "").strip()
     return f"{file_name}#{index}" if index else file_name
+
+
+def _normalize_relationship_stage(raw: Any) -> str:
+    value = str(raw or "").strip().lower()
+    aliases = {
+        "stepsibling_early": "stranger",
+        "sibling_good": "familiar",
+        "sibling_close": "close_friend",
+        "friend": "trusted_friend",
+        "close": "close_friend",
+        "intimate": "lover_early",
+        "lover": "lover_early",
+        "soulmate": "lover_stable",
+    }
+    return aliases.get(value, value)
+
+
+def _normalize_relationship_stages(raw_values: Iterable[Any]) -> tuple[str, ...]:
+    seen: set[str] = set()
+    out: list[str] = []
+    for raw in raw_values:
+        item = _normalize_relationship_stage(raw)
+        if not item or item in seen:
+            continue
+        seen.add(item)
+        out.append(item)
+    return tuple(out)
 
 
 @dataclass(frozen=True)
@@ -90,7 +117,7 @@ class StyleReference:
             style_moves=tuple(str(item) for item in payload.get("style_moves") or [] if str(item).strip()),
             rhythm_tags=tuple(str(item) for item in payload.get("rhythm_tags") or [] if str(item).strip()),
             lexical_cues=tuple(str(item) for item in payload.get("lexical_cues") or [] if str(item).strip()),
-            relationship_stages=tuple(str(item) for item in payload.get("relationship_stages") or [] if str(item).strip()),
+            relationship_stages=_normalize_relationship_stages(payload.get("relationship_stages") or []),
             evidence=tuple(str(item) for item in payload.get("evidence") or [] if str(item).strip()),
         )
 
@@ -130,18 +157,8 @@ def _ordered_unique(items: Iterable[str]) -> tuple[str, ...]:
 
 def _character_confidence(text: str, row_score: int) -> tuple[float, list[str]]:
     evidence: list[str] = []
-    strong = (
-        "にぃに",
-        "にいやん",
-        "あたし",
-        "お兄ちゃん",
-        "哥哥",
-        "老哥",
-        "尼尼",
-        "人家",
-        "喵都",
-    )
-    soft = ("うっさい", "うっせ", "怖い", "フフン", "笨蛋", "好烦", "哼", "嘛", "啦", "呀")
+    strong = ("新海天",)
+    soft = ("笨蛋", "好烦", "哼", "嘛", "啦", "呀", "呢", "行", "知道", "别")
     score = max(0, min(int(row_score or 0), 7)) / 7.0
     for marker in strong:
         if marker in text:
@@ -223,13 +240,17 @@ def _classify_intents(text: str) -> tuple[list[str], list[str], list[str], list[
 
 
 def _relationship_stages_for(intents: Iterable[str], emotions: Iterable[str]) -> tuple[str, ...]:
-    stages = ["sibling_good"]
+    stages = ["familiar", "trusted_friend", "close_friend"]
     intent_set = set(intents)
     emotion_set = set(emotions)
+    if {"presence", "daily", "bored"}.intersection(intent_set):
+        stages.extend(("new_acquaintance", "familiar"))
+    if {"help", "reassurance"}.intersection(intent_set) or {"care", "soft"}.intersection(emotion_set):
+        stages.extend(("familiar", "trusted_friend", "close_friend", "lover_early", "lover_stable"))
+    if {"annoyed", "boundary"}.intersection(intent_set) or {"hurt", "wounded", "annoyed"}.intersection(emotion_set):
+        stages.extend(("stranger", "new_acquaintance", "familiar", "trusted_friend", "close_friend", "ambiguous"))
     if "intimacy" in intent_set or "deep_affection" in emotion_set:
-        stages.extend(("lover", "soulmate"))
-    if "boundary" in intent_set or "hurt" in emotion_set:
-        stages.extend(("stepsibling_early", "sibling_good", "lover"))
+        stages.extend(("ambiguous", "pre_confession", "lover_early", "lover_stable"))
     return _ordered_unique(stages)
 
 
@@ -269,7 +290,7 @@ def style_reference_from_raw_row(row: Mapping[str, Any], *, lang_hint: str = "")
         return None
     source_ref = normalize_source_ref(row.get("file"), row.get("index"))
     digest = hashlib.sha1(text.encode("utf-8", errors="ignore")).hexdigest()[:16]
-    ref_id = f"sora_style::{lang}::{digest}"
+    ref_id = f"style_reference::{lang}::{digest}"
     return StyleReference(
         ref_id=ref_id,
         lang=lang,
@@ -294,17 +315,10 @@ class StyleReferenceBank:
     def select(self, query: StyleReferenceQuery) -> StyleReferenceSelection:
         lang = str(query.lang or "zh").strip() or "zh"
         candidates = [ref for ref in self.references if ref.lang == lang]
+        if not candidates:
+            return StyleReferenceSelection(query=query, degraded=True, reason=f"NO_{lang.upper()}_REFERENCES")
         degraded = False
         reason = ""
-        if not candidates:
-            # The bank stores derived style moves rather than raw wording. If
-            # Chinese-localized references are unavailable, Japanese canon
-            # references can still anchor rhythm/emotion without leaking text.
-            candidates = list(self.references)
-            degraded = True
-            reason = "CROSS_LINGUAL_DERIVED_STYLE"
-        if not candidates:
-            return StyleReferenceSelection(query=query, degraded=True, reason="NO_REFERENCES")
         intent_set = set(query.intent_tags)
         emotion_set = set(query.emotion_tags)
         move_set = set(query.style_moves)
@@ -370,10 +384,10 @@ def render_style_guidance(selection: StyleReferenceSelection, *, render_profile:
     rhythms = _ordered_unique(rhythm for ref in selection.references for rhythm in ref.rhythm_tags)
     cues = _ordered_unique(cue for ref in selection.references for cue in ref.lexical_cues)
     refs = selection.source_refs()[:5]
-    lang_label = "日语语音" if render_profile == "ja_voice" else "中文文字"
+    lang_label = "中文语音" if render_profile in {"zh_voice", "voice"} else "中文文字"
     lines = [
         f"语言轨道：{lang_label}。",
-        "来源：原作台词派生风格特征；禁止照抄或复述原台词。",
+        "来源：中文风格样本派生特征；禁止照抄或复述样本文本。",
         "可用动作：" + (" / ".join(moves[:8]) or "quick_reaction"),
         "情绪倾向：" + (" / ".join(emotions[:6]) or "neutral"),
     ]
@@ -383,7 +397,7 @@ def render_style_guidance(selection: StyleReferenceSelection, *, render_profile:
         lines.append("本轮匹配场景：" + " / ".join(selection.query.intent_tags[:5]))
     if selection.query.emotion_tags:
         lines.append("本轮匹配情绪：" + " / ".join(selection.query.emotion_tags[:5]))
-    lines.append("运行称呼必须服从 Soul：中文文字用尼尼；日语语音用にぃに。")
+    lines.append("运行称呼必须服从 Soul 和关系阶段：未熟时用你或省略称呼，熟悉后才可自然使用尼尼。")
     lines.append("source_refs=" + ", ".join(refs))
     return "\n".join(lines)
 

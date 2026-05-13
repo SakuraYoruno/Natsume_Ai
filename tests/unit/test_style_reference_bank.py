@@ -35,20 +35,20 @@ def test_style_reference_from_raw_row_derives_zh_boundary_features_without_copy_
     assert "别偷偷说" not in json.dumps(payload, ensure_ascii=False)
 
 
-def test_style_reference_from_raw_row_derives_ja_pushback_features() -> None:
+def test_style_reference_from_raw_row_derives_zh_pushback_features() -> None:
     row = {
-        "file": r"data~.xp3\scn\b01.txt.scn",
+        "file": r"zh.scn",
         "index": 738,
         "kind": "dialogue",
         "sora_candidate_score": 4,
         "daily_style_safe": True,
-        "text": "「うっさい！ 急に兄貴面すんな！」",
+        "text": "「好烦，别突然摆出一副很懂我的样子！」",
     }
 
-    ref = style_reference_from_raw_row(row)
+    ref = style_reference_from_raw_row(row, lang_hint="zh")
 
     assert ref is not None
-    assert ref.lang == "ja"
+    assert ref.lang == "zh"
     assert "annoyed" in ref.intent_tags
     assert "quick_rebuttal" in ref.style_moves
     assert "exclamation" in ref.rhythm_tags
@@ -72,9 +72,9 @@ def test_style_reference_bank_selects_by_language_and_tags() -> None:
         },
         lang_hint="zh",
     )
-    ja_ref = style_reference_from_raw_row(
+    other_ref = style_reference_from_raw_row(
         {
-            "file": "ja.scn",
+            "file": "other.scn",
             "index": 2,
             "kind": "dialogue",
             "sora_candidate_score": 4,
@@ -83,8 +83,8 @@ def test_style_reference_bank_selects_by_language_and_tags() -> None:
         }
     )
     assert zh_ref is not None
-    assert ja_ref is not None
-    bank = StyleReferenceBank([zh_ref, ja_ref])
+    assert other_ref is not None
+    bank = StyleReferenceBank([zh_ref, other_ref])
 
     selection = bank.select(StyleReferenceQuery(lang="zh", intent_tags=("help",), emotion_tags=("care",)))
 
@@ -93,10 +93,10 @@ def test_style_reference_bank_selects_by_language_and_tags() -> None:
     assert "help" in selection.references[0].intent_tags
 
 
-def test_style_reference_bank_falls_back_to_cross_lingual_derived_features() -> None:
-    ja_ref = style_reference_from_raw_row(
+def test_style_reference_bank_does_not_cross_language_fallback_for_zh_query() -> None:
+    non_zh_ref = style_reference_from_raw_row(
         {
-            "file": "ja.scn",
+            "file": "non_zh.scn",
             "index": 2,
             "kind": "dialogue",
             "sora_candidate_score": 4,
@@ -104,16 +104,14 @@ def test_style_reference_bank_falls_back_to_cross_lingual_derived_features() -> 
             "text": "「うっさい！ 急に兄貴面すんな！」",
         }
     )
-    assert ja_ref is not None
-    bank = StyleReferenceBank([ja_ref])
+    assert non_zh_ref is not None
+    bank = StyleReferenceBank([non_zh_ref])
 
     selection = bank.select(StyleReferenceQuery(lang="zh", intent_tags=("annoyed",)))
 
-    assert selection.references
+    assert not selection.references
     assert selection.degraded
-    assert selection.reason == "CROSS_LINGUAL_DERIVED_STYLE"
-    assert selection.references[0].lang == "ja"
-    assert "quick_rebuttal" in selection.references[0].style_moves
+    assert selection.reason == "NO_ZH_REFERENCES"
 
 
 def test_render_style_guidance_contains_derived_features_not_raw_dialogue() -> None:
@@ -136,7 +134,7 @@ def test_render_style_guidance_contains_derived_features_not_raw_dialogue() -> N
         render_profile="zh_text",
     )
 
-    assert "原作台词派生风格特征" in guidance
+    assert "中文风格样本派生特征" in guidance
     assert "禁止照抄" in guidance
     assert "wounded_pushback" in guidance
     assert "别偷偷说" not in guidance

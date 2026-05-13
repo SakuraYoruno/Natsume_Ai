@@ -139,22 +139,30 @@ async def _run_one(
         try:
             style_reference = derive_style_reference_anchor(request).as_dict()
             messages = build_isolated_surface_messages(request)
-            raw_output = await asyncio.to_thread(
-                invoke_llm_text,
-                provider_name=provider,
-                model_id=model,
-                api_key=api_key,
-                timeout_ms=timeout_ms,
-                messages=messages,
-                gen_params=dict(gen_params),
-                base_url_override=base_url_override,
-            )
+            raw_output = ""
+            candidate_texts: list[str] = []
+            last_error = ""
+            for attempt in range(2):
+                raw_output = await asyncio.to_thread(
+                    invoke_llm_text,
+                    provider_name=provider,
+                    model_id=model,
+                    api_key=api_key,
+                    timeout_ms=timeout_ms,
+                    messages=messages,
+                    gen_params=dict(gen_params),
+                    base_url_override=base_url_override,
+                )
+                if not str(raw_output or "").strip():
+                    last_error = "empty model output"
+                    continue
+                candidate_texts = parse_surface_candidates(raw_output)
+                if candidate_texts:
+                    break
+                last_error = "no surface candidates parsed"
             latency_ms = int((time.perf_counter() - started) * 1000)
-            if not str(raw_output or "").strip():
-                raise RuntimeError("empty model output")
-            candidate_texts = parse_surface_candidates(raw_output)
             if not candidate_texts:
-                raise RuntimeError("no surface candidates parsed")
+                raise RuntimeError(last_error or "no surface candidates parsed")
             scores = score_isolated_surface_candidates(request, candidate_texts)
             selected = select_best_isolated_candidate(scores)
             repair_raw_output = ""

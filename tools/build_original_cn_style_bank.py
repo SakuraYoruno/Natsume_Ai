@@ -20,20 +20,17 @@ from host_brain.persona.style_reference_bank import (  # noqa: E402
 )
 
 
-LOCAL_VN_TEXT_ROOT = Path(os.environ.get("SORA_STYLE_VN_TEXT_ROOT", r"C:\Natsume_Work\vn_text"))
+LOCAL_STYLE_TEXT_ROOT = Path(
+    os.environ.get(
+        "ORIGINAL_CN_STYLE_TEXT_ROOT",
+        ROOT / "data" / "style_bank" / "source_candidates",
+    )
+)
 
 CHINESE_DEFAULT_INPUTS = (
-    ROOT / "artifacts" / "vn_sora_chs" / "skycity_chs_strings_20260502_230811" / "sora_chinese_daily_candidates.jsonl",
-    ROOT / "artifacts" / "vn_sora_chs" / "newep_chs_strings_20260502_230811" / "sora_chinese_daily_candidates.jsonl",
-    LOCAL_VN_TEXT_ROOT / "skycity_chs_strings_20260502_230811" / "sora_chinese_daily_candidates.jsonl",
-    LOCAL_VN_TEXT_ROOT / "newep_chs_strings_20260502_230811" / "sora_chinese_daily_candidates.jsonl",
+    LOCAL_STYLE_TEXT_ROOT / "original_cn_style_candidates.jsonl",
 )
-JAPANESE_DEFAULT_INPUTS = (
-    ROOT / "artifacts" / "vn_sora_refresh" / "sora_daily_candidates.jsonl",
-    ROOT / "artifacts" / "vn_sora" / "skycity_ep2_20260509_161713" / "sora_daily_candidates.jsonl",
-    ROOT / "artifacts" / "vn_sora" / "nine_newEP_20260509_161027" / "sora_daily_candidates.jsonl",
-)
-DEFAULT_INPUTS = CHINESE_DEFAULT_INPUTS + JAPANESE_DEFAULT_INPUTS
+DEFAULT_INPUTS = CHINESE_DEFAULT_INPUTS
 
 
 def _display_input_path(path: Path) -> str:
@@ -51,7 +48,7 @@ def _default_inputs() -> list[Path]:
 
 def _lang_hint_from_path(path: Path) -> str:
     normalized = path.as_posix().lower()
-    if any(marker in normalized for marker in ("chinese", "chs", "evb_", "translated_cn", "中文", "汉化")):
+    if any(marker in normalized for marker in ("original_cn", "chinese", "chs", "evb_", "translated_cn", "中文", "汉化")):
         return "zh"
     return ""
 
@@ -103,9 +100,9 @@ def write_summary(path: Path, refs: list[StyleReference], *, inputs: list[Path])
     emotion_counts = Counter(tag for ref in refs for tag in ref.emotion_tags)
     move_counts = Counter(tag for ref in refs for tag in ref.style_moves)
     lines = [
-        "# Sora StyleReferenceBank Summary",
+        "# Original Chinese StyleReferenceBank Summary",
         "",
-        "This bank stores derived style features only. It intentionally does not duplicate raw VN dialogue text.",
+        "This bank stores derived Chinese style features only. It intentionally does not duplicate raw sample text.",
         "",
         "## Inputs",
         "",
@@ -131,7 +128,7 @@ def write_summary(path: Path, refs: list[StyleReference], *, inputs: list[Path])
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Build derived Sora StyleReferenceBank from extracted VN candidates.")
+    parser = argparse.ArgumentParser(description="Build derived original Chinese StyleReferenceBank from extracted candidates.")
     parser.add_argument("--input", action="append", help="Input extracted candidate JSONL. Can be repeated.")
     parser.add_argument("--out", default=str(DEFAULT_STYLE_BANK_PATH), help="Output derived style bank JSONL.")
     parser.add_argument("--summary", default="", help="Optional markdown summary path.")

@@ -51,7 +51,7 @@ def test_affect_control_packet_compresses_emotion_and_bond_without_raw_state() -
     assert "不要连环追问" in rendered
     assert "RAW_EMOTION_SECRET_SHOULD_NOT_LEAK" not in rendered
     assert "soft" in query.emotion_tags
-    assert query.relationship_stage == "sibling_good"
+    assert query.relationship_stage == "familiar"
 
 
 def test_affect_control_packet_from_mapping_ignores_raw_emotion_context() -> None:
@@ -131,7 +131,7 @@ def test_affect_control_prompt_guidance_understands_steady_helpful_alias() -> No
 
     assert "care" in query.emotion_tags
     assert "take_charge" in query.style_moves
-    assert query.relationship_stage == "sibling_good"
+    assert query.relationship_stage == "familiar"
     assert "技术或推进场景里，情绪只做稳定器" in rendered
     assert "不要恋人式承诺或占有表达" in rendered
 

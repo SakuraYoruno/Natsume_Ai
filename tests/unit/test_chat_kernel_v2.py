@@ -595,8 +595,8 @@ def test_build_chat_kernel_messages_include_derived_style_reference_guidance(tmp
     )
     system_prompt = messages[0]["content"]
 
-    assert "【原作风格证据】" in system_prompt
-    assert "原作台词派生风格特征" in system_prompt
+    assert "【中文风格样本证据】" in system_prompt
+    assert "中文风格样本派生特征" in system_prompt
     assert "wounded_pushback" in system_prompt
     assert "source_refs=zh.scn#1" in system_prompt
     assert "别偷偷说" not in system_prompt

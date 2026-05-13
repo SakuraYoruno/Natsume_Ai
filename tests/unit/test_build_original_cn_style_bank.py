@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import json
 
-from tools.build_sora_style_bank import _lang_hint_from_path, build_style_references, write_jsonl, write_summary
+from tools.build_original_cn_style_bank import _lang_hint_from_path, build_style_references, write_jsonl, write_summary
 
 
-def test_build_sora_style_bank_writes_derived_features_without_raw_text(tmp_path) -> None:
+def test_build_original_cn_style_bank_writes_derived_features_without_raw_text(tmp_path) -> None:
     source = tmp_path / "candidates.jsonl"
     source.write_text(
         "\n".join(
@@ -49,11 +49,11 @@ def test_build_sora_style_bank_writes_derived_features_without_raw_text(tmp_path
     assert '"intent_tags"' in payload
     assert "boundary" in payload
     assert "别偷偷说" not in payload
-    assert "does not duplicate raw VN dialogue text" in summary.read_text(encoding="utf-8")
+    assert "does not duplicate raw sample text" in summary.read_text(encoding="utf-8")
 
 
-def test_build_sora_style_bank_treats_chs_sources_as_zh(tmp_path) -> None:
-    source = tmp_path / "skycity_chs_strings_20260502_230811" / "sora_daily_candidates.jsonl"
+def test_build_original_cn_style_bank_treats_chs_sources_as_zh(tmp_path) -> None:
+    source = tmp_path / "original_cn_candidates" / "daily_candidates.jsonl"
     source.parent.mkdir(parents=True)
     source.write_text(
         json.dumps(

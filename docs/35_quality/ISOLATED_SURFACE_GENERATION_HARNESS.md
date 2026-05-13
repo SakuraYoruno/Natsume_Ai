@@ -51,15 +51,15 @@ class ReplyControlPacket(BaseModel):
    - 只接受允许字段。
    - 发现 `history`、`memory`、`organ`、`rag`、`tool_candidates`、`module_advice` 等 raw context key 时直接报错。
 2. `derive_style_reference_anchor(...)`
-   - 从 `data/style_bank/sora_style_bank.jsonl` 选择原作台词派生风格特征。
+   - 从 `data/style_bank/original_cn_style_bank.jsonl` 选择原创中文风格样本派生特征。
    - 只注入 `intent_tags`、`emotion_tags`、`style_moves`、`rhythm_tags`、`lexical_cues`、`source_refs` 等派生特征。
-   - 不把原作 raw 台词、解包文本或自然语言建议放入 prompt。
+   - 不把 raw 台词、解包文本或自然语言建议放入 prompt。
 3. `build_isolated_surface_messages(...)`
    - 生成固定双消息 prompt。
    - system 中放隔离边界、输出 JSON 要求和 `Soul.md`。
    - system 中明确 `must_include` / `must_not_do` 是逐候选字面约束，不允许候选池里只有一条满足。
    - user 中放当前输入、增强后的 `ReplyControlPacket`、facts、must_not_do。
-   - `ReplyControlPacket.style_anchor` 会自动合并原作派生风格锚点。
+   - `ReplyControlPacket.style_anchor` 会自动合并中文样本派生风格锚点。
    - 同步放入由当前用户输入 + `ReplyControlPacket.task_mode` 派生的 `TurnSurfaceContract`，只包含 response_move、required_any、问句预算、长度和 notes；不放 forbidden_surface 或 raw 上下文。
    - `TurnSurfaceContract` 允许当前用户文本纠正过粗或错误的 `task_mode`，例如 `你烦不烦` 优先落到 `annoying_tease`，`我刚忙完` 优先落到 `busy_done`。
    - style reference query 以 `TurnSurfaceContract.scene_id` 为准，避免上游粗粒度 `task_mode` 把 `good_news`、`write_takeover` 等场景压回泛 daily/happy。
@@ -361,24 +361,22 @@ python tools/continuity_quality_report.py `
 
 这些维度会影响 rerank 和通过分，但不会新增 hard forbidden pattern。
 
-## Original-Derived Style Anchors
+## Original Chinese Style Anchors
 
-仓库已有解包台词候选与派生风格库：
+仓库现在使用原创中文风格特征库：
 
-- 中文优先：`C:\Natsume_Work\vn_text\skycity_chs_strings_20260502_230811\sora_chinese_daily_candidates.jsonl`、`C:\Natsume_Work\vn_text\newep_chs_strings_20260502_230811\sora_chinese_daily_candidates.jsonl`。
-- 日文兜底：`artifacts/vn_sora_refresh/sora_daily_candidates.jsonl`。
-- `data/style_bank/sora_style_bank.jsonl`：不含 raw 台词的派生风格特征。
+- `data/style_bank/original_cn_style_bank.jsonl`：不含 raw 台词或继承角色台词的派生风格特征。
 
 隔离 harness 使用后者，而不是把原文塞给模型。生成层看到的是类似：
 
 ```text
-来源：原作台词派生风格特征；禁止照抄或复述原台词。
+来源：中文风格样本派生特征；禁止照抄或复述样本文本。
 可用动作：clingy_presence / pull_attention / question_chain
 情绪倾向：neutral
 节奏线索：rapid_followup / question / 反问/追问
 ```
 
-这让 `Soul.md` 继续只做语言风格锚定，同时让常见 scene 的 good reference 从人工短片段逐步迁移到原作派生特征。
+这让 `Soul.md` 继续只做语言风格锚定，同时让常见 scene 的 good reference 从人工短片段逐步迁移到原创中文样本派生特征。
 `source_refs` 只写入 harness trace，不进入生成 prompt。
 
 ## CLI

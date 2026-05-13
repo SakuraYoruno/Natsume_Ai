@@ -2154,7 +2154,7 @@ def build_chat_kernel_messages(request: ChatKernelRequest) -> list[dict[str, str
             "【本轮发话框架】\n" + turn_frame if turn_frame else "",
             "【本轮验收边界】\n" + scene_contract if scene_contract else "",
             "【精选正向风格抓手】\n" + positive_guidance if positive_guidance else "",
-            "【原作风格证据】\n" + style_guidance if style_guidance else "",
+            "【中文风格样本证据】\n" + style_guidance if style_guidance else "",
             "【最终输出】\n" + output_rules,
         )
         if _clean_text(part)

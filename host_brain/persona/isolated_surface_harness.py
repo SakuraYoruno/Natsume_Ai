@@ -941,9 +941,15 @@ def _relationship_distance_family(distance: str) -> str:
     normalized = _clean_text(distance).lower()
     if not normalized:
         return "familiar"
-    if normalized in {"guarded", "early", "distant", "stranger", "new"} or "polite" in normalized:
+    if normalized in {"guarded", "early", "distant", "stranger"} or "polite" in normalized:
         return "guarded"
-    if normalized in {"close", "intimate"} or normalized.startswith("close"):
+    if normalized in {"new", "new_acquaintance"}:
+        return "new_acquaintance"
+    if normalized in {"lover", "lover_early", "lover_stable", "intimate"}:
+        return "lover"
+    if normalized in {"ambiguous", "pre_confession"}:
+        return normalized
+    if normalized in {"close", "close_friend", "confidant", "trusted_friend"} or normalized.startswith("close"):
         return "close"
     if "familiar" in normalized or "not_intimate" in normalized or "not_romantic" in normalized:
         return "familiar"
@@ -962,12 +968,41 @@ def _relationship_non_romantic(distance: str) -> bool:
 
 
 def _relationship_stage_for_control(distance: str) -> str:
+    value = _clean_text(distance).lower()
+    if value in {
+        "stranger",
+        "new_acquaintance",
+        "familiar",
+        "trusted_friend",
+        "close_friend",
+        "ambiguous",
+        "pre_confession",
+        "lover_early",
+        "lover_stable",
+    }:
+        return value
+    if "lover_stable" in value or "stable_lover" in value or "soulmate" in value:
+        return "lover_stable"
+    if "lover_early" in value or value == "lover" or "romantic" in value or value == "intimate":
+        return "lover_early"
+    if "pre_confession" in value or "pre-confession" in value:
+        return "pre_confession"
+    if "ambiguous" in value:
+        return "ambiguous"
+    if "trusted" in value or "confidant" in value:
+        return "trusted_friend"
+    if "close_friend" in value or "close_but_not_romantic" in value:
+        return "close_friend"
     normalized = _relationship_distance_family(distance)
     if normalized == "guarded":
-        return "stepsibling_early"
-    if normalized == "close" and not _relationship_non_romantic(distance):
-        return "lover"
-    return "sibling_good"
+        return "stranger"
+    if normalized == "new_acquaintance":
+        return "new_acquaintance"
+    if normalized == "close":
+        return "close_friend"
+    if normalized == "lover":
+        return "lover_early"
+    return "familiar"
 
 
 def _control_affect_tags(request: IsolatedSurfaceInput) -> tuple[tuple[str, ...], tuple[str, ...]]:
