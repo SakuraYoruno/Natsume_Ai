@@ -1820,6 +1820,21 @@ async def chat_agent_sse_generator(
     ):
         trace_stage_meta["chat_sub_agent_suppressed"] = sub_agent_ctx.agent_id
         sub_agent_ctx = None
+    try:
+        from host_brain.app.surface_main_chain_adapter import (  # noqa: PLC0415
+            surface_main_chain_enabled,
+            surface_main_chain_sse_generator,
+        )
+
+        if surface_main_chain_enabled(agent_input, sub_agent_ctx=sub_agent_ctx):
+            async for event in surface_main_chain_sse_generator(
+                agent_input,
+                trace_stage_meta=trace_stage_meta,
+            ):
+                yield event
+            return
+    except Exception as _surface_main_exc:
+        _logger.debug("[%s] surface_main_chain gate skipped: %s", request_id, _surface_main_exc)
     if _should_use_chat_kernel_v2(agent_input, sub_agent_ctx):
         async for event in _chat_kernel_v2_sse_generator(
             agent_input,

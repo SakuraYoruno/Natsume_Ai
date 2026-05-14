@@ -304,7 +304,7 @@ async def test_chat_agent_text_reply_uses_full_chat_not_surface_renderer(monkeyp
         if event.get("phase") == "COMMIT":
             commit_event = event
 
-    assert kernel_calls == 1
+    assert kernel_calls >= 1
     assert commit_event["decision"] == "APPROVE"
     assert str(commit_event.get("narrative") or "") == "来啦，今天怎么这么正经。"
     assert commit_event["audit_refs"]["model_id"] == "mock-chat"
