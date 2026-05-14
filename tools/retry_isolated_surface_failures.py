@@ -25,6 +25,15 @@ from host_brain.persona.isolated_surface_harness import (  # noqa: E402
 from tools.chat_ab_generate import _load_secret_store_provider_key, load_dotenv  # noqa: E402
 from tools.isolated_surface_harness import _case_request_payload, _read_json_or_jsonl  # noqa: E402
 from tools.run_isolated_surface_live import _run_one  # noqa: E402
+from tools.surface_tool_contract import (  # noqa: E402
+    OFFLINE_FIXTURE_EVAL_LAYER,
+    SURFACE_LOW_LEVEL_ENTRYPOINT_ALLOWED as _SURFACE_LOW_LEVEL_ENTRYPOINT_ALLOWED,
+    surface_tool_contract_payload,
+)
+
+
+SURFACE_TOOL_LAYER = OFFLINE_FIXTURE_EVAL_LAYER
+SURFACE_LOW_LEVEL_ENTRYPOINT_ALLOWED = _SURFACE_LOW_LEVEL_ENTRYPOINT_ALLOWED
 
 
 async def _run_retry_attempt(
@@ -441,6 +450,7 @@ def summarize_merged(
     retry_latencies = [int(row.get("latency_ms") or 0) for row in retry_results if int(row.get("latency_ms") or 0) > 0]
     retry_reason_values = list(dict(retry_reasons or {}).values())
     return {
+        **surface_tool_contract_payload("retry_isolated_surface_failures"),
         "cases": int(cases_count),
         "source_scored_count": len(source_rows),
         "retry_case_count": len(retry_indexes),

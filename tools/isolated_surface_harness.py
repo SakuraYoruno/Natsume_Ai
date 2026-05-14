@@ -33,6 +33,15 @@ from host_brain.persona.surface_memory_recall import (
     build_surface_input_with_memory_recall,
     memory_recall_packet_from_mapping,
 )
+from tools.surface_tool_contract import (  # noqa: E402
+    OFFLINE_FIXTURE_EVAL_LAYER,
+    SURFACE_LOW_LEVEL_ENTRYPOINT_ALLOWED as _SURFACE_LOW_LEVEL_ENTRYPOINT_ALLOWED,
+    surface_tool_contract_payload,
+)
+
+
+SURFACE_TOOL_LAYER = OFFLINE_FIXTURE_EVAL_LAYER
+SURFACE_LOW_LEVEL_ENTRYPOINT_ALLOWED = _SURFACE_LOW_LEVEL_ENTRYPOINT_ALLOWED
 
 
 _REQUEST_KEYS = {
@@ -576,6 +585,7 @@ def run_cases(
     variant_summary = _summarize_score_rows(score_rows)
     memory_ab = _build_memory_ab_comparison(score_rows, case_expectations=case_expectations) if with_memory else {}
     summary = {
+        **surface_tool_contract_payload("isolated_surface_harness"),
         "cases": len(cases),
         "errors": len(errors),
         "affect_cases": affect_cases,
