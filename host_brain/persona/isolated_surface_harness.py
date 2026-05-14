@@ -28,6 +28,7 @@ from host_brain.persona.surface_original_quote_bank import (
     select_surface_original_quotes,
     surface_original_quote_similarity_hits,
 )
+from host_brain.persona.surface_scene_quality_pack import render_surface_scene_quality_guidance
 from host_brain.persona.surface_style_seed_bank import render_surface_style_seed_guidance
 from host_brain.persona.text_quality_gate import get_text_quality_gate
 
@@ -3500,6 +3501,13 @@ def build_isolated_surface_messages(
     positive_guidance = positive_stage_scene_candidate_guidance(request)
     if positive_guidance:
         user_parts.extend(["", positive_guidance])
+    scene_quality_guidance = render_surface_scene_quality_guidance(
+        user_message=request.user_message,
+        task_mode=control.task_mode,
+        response_move=control.response_move,
+    )
+    if scene_quality_guidance:
+        user_parts.extend(["", scene_quality_guidance])
     if _creative_edit_relevant(request):
         if _creative_edit_has_source_text(request):
             creative_line = "本轮已提供待改原句：候选必须直接给改写后的单句台词，保留原意再换成夏目蓝的口吻；不要再索要原句。"
@@ -4505,18 +4513,25 @@ def score_isolated_surface_candidates(
                     dimensions["scene_grounding"] = min(100.0, float(dimensions.get("scene_grounding", 86.0)) + min(6.0, 2.0 * len(memory_hits)))
                     reason_codes.append("MEMORY_ALIGNMENT_HIT:" + ",".join(memory_hits[:4]))
             elif memory_relevant:
-                miss_penalty = 13.0 if memory_required else 5.0
-                score -= miss_penalty
-                dimensions["memory_alignment"] = 58.0 if memory_required else 74.0
-                dimensions["context_fit"] = max(
-                    0.0,
-                    float(dimensions.get("context_fit", 86.0)) - (12.0 if memory_required else 4.0),
+                low_show_memory_scene = _short_continue_scene_relevant(request) or (
+                    _back_scene_relevant(request) and not memory_required
                 )
-                dimensions["scene_grounding"] = max(
-                    0.0,
-                    float(dimensions.get("scene_grounding", 86.0)) - (8.0 if memory_required else 0.0),
-                )
-                reason_codes.append("MEMORY_ALIGNMENT_REQUIRED_MISS" if memory_required else "MEMORY_ALIGNMENT_MISS")
+                if low_show_memory_scene:
+                    dimensions["memory_alignment"] = max(86.0, float(dimensions.get("memory_alignment", 86.0)))
+                    reason_codes.append("MEMORY_ALIGNMENT_LOW_SHOW_ALLOWED")
+                else:
+                    miss_penalty = 13.0 if memory_required else 5.0
+                    score -= miss_penalty
+                    dimensions["memory_alignment"] = 58.0 if memory_required else 74.0
+                    dimensions["context_fit"] = max(
+                        0.0,
+                        float(dimensions.get("context_fit", 86.0)) - (12.0 if memory_required else 4.0),
+                    )
+                    dimensions["scene_grounding"] = max(
+                        0.0,
+                        float(dimensions.get("scene_grounding", 86.0)) - (8.0 if memory_required else 0.0),
+                    )
+                    reason_codes.append("MEMORY_ALIGNMENT_REQUIRED_MISS" if memory_required else "MEMORY_ALIGNMENT_MISS")
         elif ungrounded_real_world_hits:
             score -= 10.0
             dimensions["implied_fact_risk"] = min(68.0, float(dimensions.get("implied_fact_risk", 68.0)))

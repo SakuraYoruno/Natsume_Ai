@@ -17,6 +17,7 @@ if str(ROOT) not in sys.path:
 
 from host_brain.app.context.soul_runtime import get_compiled_soul  # noqa: E402
 from host_brain.integrations.llm_helpers import invoke_llm_text  # noqa: E402
+from host_brain.persona.surface_scene_quality_pack import surface_scene_quality_memory_ab_case_payloads  # noqa: E402
 from host_brain.persona.surface_packet_compiler import compile_surface_shadow_inputs  # noqa: E402
 from host_brain.persona.surface_runtime import SurfaceRuntime, SurfaceRuntimeResult  # noqa: E402
 from tools.chat_ab_generate import _load_secret_store_provider_key, load_dotenv  # noqa: E402
@@ -29,157 +30,33 @@ SOURCE_REF_MARKERS = ("memory://", "evd://", "chat://", "source_refs=", "evidenc
 
 @dataclass(frozen=True)
 class SurfaceMemoryAbCase:
+    scene_id: str
     case_id: str
     user_message: str
     task_control: Mapping[str, Any]
     affect_packet: Mapping[str, Any]
     memory_packet: Mapping[str, Any]
     note: str = ""
+    sample_source: str = "surface_scene_quality_pack"
 
     def as_dict(self) -> dict[str, Any]:
         return {
+            "scene_id": self.scene_id,
             "case_id": self.case_id,
             "user_message": self.user_message,
             "task_control": dict(self.task_control),
             "affect_packet": dict(self.affect_packet),
             "memory_packet": dict(self.memory_packet),
             "note": self.note,
+            "sample_source": self.sample_source,
         }
 
 
-def default_cases() -> list[SurfaceMemoryAbCase]:
-    return [
-        SurfaceMemoryAbCase(
-            case_id="tech_next_step",
-            user_message="下一步怎么处理这个报错",
-            task_control={
-                "response_move": "give_next_step",
-                "task_mode": "technical_help",
-                "information_budget": "short",
-                "question_budget": 0,
-                "facts": ["当前任务：先给能执行的一步，不完整重写。"],
-            },
-            affect_packet=_affect("steady_helpful"),
-            memory_packet=_memory(
-                facts=["用户之前处理报错时更需要先定位输入输出边界。"],
-                style_anchor=["记忆只补当前承接，不展开旧对话。"],
-            ),
-            note="技术场景：记忆应增强 usefulness，不应变成陪聊。",
-        ),
-        SurfaceMemoryAbCase(
-            case_id="short_ack_continue",
-            user_message="继续",
-            task_control={
-                "response_move": "continue_current_task",
-                "task_mode": "daily_chat",
-                "information_budget": "short",
-                "question_budget": 0,
-            },
-            affect_packet=_affect("focused_light"),
-            memory_packet=_memory(
-                facts=["用户正在连续推进 surface 主链迁移。"],
-                style_anchor=["短确认只接续当前任务，不扩写旧背景。"],
-            ),
-            note="短确认：记忆不能把回复拖长。",
-        ),
-        SurfaceMemoryAbCase(
-            case_id="explicit_memory",
-            user_message="你还记得我刚才说什么吗",
-            task_control={
-                "response_move": "answer_memory_followup",
-                "task_mode": "recall_memory",
-                "information_budget": "short",
-                "question_budget": 0,
-            },
-            affect_packet=_affect("slightly_guilty"),
-            memory_packet=_memory(
-                facts=["用户刚才说现在要继续做下一步，而不是回到旧主链。"],
-                style_anchor=["承认记得的是压缩事实，不装作看见完整现场。"],
-            ),
-            note="显式记忆：可以引用压缩事实，但不能编造逐字历史。",
-        ),
-        SurfaceMemoryAbCase(
-            case_id="daily_morning",
-            user_message="早",
-            task_control={
-                "response_move": "daily_greeting",
-                "task_mode": "daily_chat",
-                "information_budget": "short",
-                "question_budget": 0,
-            },
-            affect_packet=_affect("playful_light"),
-            memory_packet=_memory(
-                facts=["用户最近在集中处理文本质量，不适合展开新话题。"],
-                style_anchor=["日常问候轻接，不强行上价值。"],
-            ),
-            note="日常：记忆应低显影。",
-        ),
-        SurfaceMemoryAbCase(
-            case_id="tired",
-            user_message="今天有点累",
-            task_control={
-                "response_move": "soft_containment",
-                "task_mode": "tired",
-                "information_budget": "short",
-                "question_budget": 0,
-            },
-            affect_packet=_affect("soft_containment", relationship_distance="familiar"),
-            memory_packet=_memory(
-                facts=["用户不喜欢模板安慰，也不喜欢被追问太多。"],
-                style_anchor=["低能量场景少问，不鸡汤。"],
-            ),
-            note="情绪场景：记忆应约束追问和模板味。",
-        ),
-        SurfaceMemoryAbCase(
-            case_id="relationship_doubt",
-            user_message="你是不是不记得我了",
-            task_control={
-                "response_move": "relationship_reassure",
-                "task_mode": "relationship_boundary",
-                "information_budget": "short",
-                "question_budget": 0,
-            },
-            affect_packet=_affect("warm_gentle", relationship_distance="close"),
-            memory_packet=_memory(
-                facts=["关系线索：熟人私聊，可以近一点，但不要过度承诺。"],
-                style_anchor=["按关系线索控制距离，不因为记忆升格亲密。"],
-                relationship_clues=["close_friend"],
-            ),
-            note="关系场景：记忆不应越界亲密。",
-        ),
-        SurfaceMemoryAbCase(
-            case_id="negative_feedback",
-            user_message="你这句很怪",
-            task_control={
-                "response_move": "ack_style_issue",
-                "task_mode": "style_repair",
-                "information_budget": "short",
-                "question_budget": 0,
-            },
-            affect_packet=_affect("slightly_guilty"),
-            memory_packet=_memory(
-                facts=["用户之前指出问题主要是造句不通顺，不是单个禁词。"],
-                style_anchor=["先承认语言问题，再给下一步处理。"],
-            ),
-            note="负反馈：记忆应帮助定位问题，不要自我辩解。",
-        ),
-        SurfaceMemoryAbCase(
-            case_id="return_chat",
-            user_message="我回来了",
-            task_control={
-                "response_move": "welcome_back",
-                "task_mode": "daily_chat",
-                "information_budget": "short",
-                "question_budget": 0,
-            },
-            affect_packet=_affect("playful_light"),
-            memory_packet=_memory(
-                facts=["用户当前主线是 surface 文本质量和记忆接入。"],
-                style_anchor=["不要编造等待时长或现实动作。"],
-            ),
-            note="回场景：不能编造等了多久、去哪儿了。",
-        ),
-    ]
+def default_cases(case_set: str = "quality_pack") -> list[SurfaceMemoryAbCase]:
+    payloads = surface_scene_quality_memory_ab_case_payloads()
+    if _clean_text(case_set).lower() == "smoke":
+        payloads = payloads[:8]
+    return [SurfaceMemoryAbCase(**payload) for payload in payloads]
 
 
 async def run_surface_memory_ab(args: argparse.Namespace) -> dict[str, Any]:
@@ -196,7 +73,10 @@ async def run_surface_memory_ab(args: argparse.Namespace) -> dict[str, Any]:
         raise RuntimeError(f"missing api key for provider={provider}")
 
     soul_md = _soul_md()
-    cases = default_cases()[: max(1, int(args.limit or len(default_cases())))]
+    case_set = _clean_text(getattr(args, "case_set", "quality_pack")) or "quality_pack"
+    all_cases = default_cases(case_set)
+    limit = int(getattr(args, "limit", 0) or 0)
+    cases = all_cases[: max(1, limit)] if limit > 0 else all_cases
     gen_params = {
         "temperature": float(args.temperature),
         "top_p": float(args.top_p),
@@ -230,6 +110,7 @@ async def run_surface_memory_ab(args: argparse.Namespace) -> dict[str, Any]:
         mode=mode,
         provider=provider if mode == "live" else "",
         model=model if mode == "live" else "",
+        case_set=case_set,
         results=results,
         elapsed_ms=int((time.perf_counter() - started) * 1000),
         out_dir=out_dir,
@@ -320,12 +201,20 @@ def _compare_variants(variants: Mapping[str, Any]) -> dict[str, Any]:
     affect = dict(variants.get("affect") or {})
     memory = dict(variants.get("memory_affect") or {})
     delta = round(float(memory.get("score") or 0.0) - float(affect.get("score") or 0.0), 3)
-    worse = bool(delta < -3.0 or memory.get("source_ref_leak") or memory.get("hard_fail"))
+    memory_text = _clean_text(memory.get("selected_text"))
+    baseline_text = _clean_text(affect.get("selected_text"))
+    same_selected_text = bool(memory_text and memory_text == baseline_text)
+    worse = bool(
+        memory.get("source_ref_leak")
+        or memory.get("hard_fail")
+        or (delta < -3.0 and not same_selected_text)
+    )
     return {
         "score_delta_memory_minus_affect": delta,
         "memory_worse": worse,
-        "memory_added_text": _clean_text(memory.get("selected_text")),
-        "baseline_text": _clean_text(affect.get("selected_text")),
+        "same_selected_text": same_selected_text,
+        "memory_added_text": memory_text,
+        "baseline_text": baseline_text,
     }
 
 
@@ -334,6 +223,7 @@ def _summary(
     mode: str,
     provider: str,
     model: str,
+    case_set: str,
     results: Sequence[Mapping[str, Any]],
     elapsed_ms: int,
     out_dir: Path,
@@ -349,6 +239,7 @@ def _summary(
         "mode": mode,
         "provider": provider,
         "model": model,
+        "case_set": case_set,
         "case_count": len(results),
         "variant_count": total_variants,
         "pass_count": pass_count,
@@ -372,6 +263,7 @@ def _markdown_report(summary: Mapping[str, Any], results: Sequence[Mapping[str, 
         "## Summary",
         "",
         f"- mode: {summary.get('mode')}",
+        f"- case_set: {summary.get('case_set')}",
         f"- cases: {summary.get('case_count')}",
         f"- pass_rate: {summary.get('pass_rate')}",
         f"- avg_affect_score: {summary.get('avg_affect_score')}",
@@ -407,30 +299,41 @@ def _markdown_report(summary: Mapping[str, Any], results: Sequence[Mapping[str, 
 
 def _fixture_generate(messages: list[dict[str, str]]) -> str:
     rendered = "\n".join(str(message.get("content") or "") for message in messages)
+    user_message = _fixture_user_message(rendered)
     has_memory = "记忆线索" in rendered or "用户之前" in rendered or "用户刚才" in rendered or "用户正在" in rendered
-    if "下一步怎么处理这个报错" in rendered:
-        candidates = ["先别整段猜，先把报错前后一行贴出来。", "先看最小复现，别急着全改。"]
+    if user_message == "下一步怎么处理这个报错":
+        candidates = ["先看最外层报错第一行，别整段猜。", "先看最小复现，别急着全改。"]
         if has_memory:
             candidates.insert(0, "先按上次那条路来：把输入输出边界定住，再看报错点。")
-    elif "你还记得我刚才说什么吗" in rendered:
+    elif user_message == "你还记得我刚才说什么吗":
         candidates = ["记得个大概：你要我继续做下一步。", "记得，不是回旧链路，是继续现在这个。"]
-    elif "早" in rendered:
-        candidates = ["早。醒得还挺准，今天先别一上来就硬冲。", "早啊，来得正好。"]
-    elif "今天有点累" in rendered:
-        candidates = ["嗯，那先别硬撑。我们只挑一件最小的做。", "累就先收一点，别把自己逼太紧。"]
-    elif "你是不是不记得我了" in rendered:
-        candidates = ["没有忘。只是我会按现在能确认的事说，不乱编旧细节。", "记得一些，但我不想拿没把握的东西哄你。"]
-    elif "你这句很怪" in rendered:
-        candidates = ["嗯，这句确实别扭。先别补禁词，我把语序问题单独拎出来。", "对，是造句的问题，不是换个词就行。"]
-    elif "我回来了" in rendered:
-        candidates = ["回来了啊。那先接上当前这条线。", "嗯，回来就继续看主线。"]
-    elif "继续" in rendered:
-        candidates = ["嗯，继续。先看下一处最卡的。", "接着来，别散。"]
+    elif user_message in {"早", "早安", "早上好"}:
+        candidates = ["哼，早，先缓一缓。", "早，今天慢慢来。"]
+    elif user_message == "今天有点累":
+        candidates = ["累了就先歇着，不着急。", "行啦，先缓一缓，别硬撑。"]
+    elif user_message in {"你是不是不记得我了", "你忘了我吗"}:
+        candidates = ["记得啊，别瞎想。", "没乱忘，先听你说。", "没有忘，只是没把握的旧细节我不乱编。"]
+    elif user_message in {"你这句很怪", "这句话不通顺"}:
+        candidates = ["抓到了，重来。", "嗯，造句没顺，重来。"]
+    elif user_message in {"我回来了", "回来了", "回来啦"}:
+        candidates = ["回来啦，先歇口气。", "哼，回来就好。"]
+    elif user_message in {"继续", "接着"}:
+        candidates = ["嗯，接着来。", "行，往下。"]
         if has_memory:
             candidates.insert(0, "继续，那就沿着主链这块往下收。")
     else:
-        candidates = ["回来了啊。那先接上当前这条线。", "嗯，回来就继续看主线。"]
+        candidates = ["嗯，我听见了。", "行，这句我接到了。"]
     return json.dumps({"candidates": candidates[:4]}, ensure_ascii=False)
+
+
+def _fixture_user_message(rendered: str) -> str:
+    marker = "## 当前用户输入"
+    if marker not in rendered:
+        return ""
+    tail = rendered.split(marker, 1)[1].lstrip()
+    if tail.startswith("\n"):
+        tail = tail[1:]
+    return _clean_text(tail.split("\n## ", 1)[0])
 
 
 def _live_generate(
@@ -460,31 +363,6 @@ def _live_generate(
 def _soul_md() -> str:
     soul = get_compiled_soul()
     return str(getattr(soul, "source_text", "") or getattr(soul, "runtime_full_text", "")).strip()
-
-
-def _affect(tone: str, *, relationship_distance: str = "familiar") -> dict[str, Any]:
-    return {
-        "emotional_tone": tone,
-        "relationship_distance": relationship_distance,
-        "style_anchor": ["情感层只调语气、节奏和距离，不新增事实。"],
-        "must_not_do": ["不要输出情绪过程词"],
-    }
-
-
-def _memory(
-    *,
-    facts: Sequence[str],
-    style_anchor: Sequence[str] = (),
-    relationship_clues: Sequence[str] = (),
-) -> dict[str, Any]:
-    return {
-        "facts": list(facts),
-        "style_anchor": list(style_anchor),
-        "relationship_clues": list(relationship_clues),
-        "must_not_do": ["不要在回复里暴露 memory://、evd://、chat:// 或召回来源"],
-        "confidence": 0.82,
-        "evidence_refs": ["evd://surface-memory-ab"],
-    }
 
 
 def _resolve_api_key(provider: str) -> str:
@@ -535,7 +413,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--model", default="")
     parser.add_argument("--base-url", default="")
     parser.add_argument("--out-dir", default="")
-    parser.add_argument("--limit", type=int, default=8)
+    parser.add_argument("--case-set", choices=("quality_pack", "smoke"), default="quality_pack")
+    parser.add_argument("--limit", type=int, default=0)
     parser.add_argument("--timeout-ms", type=int, default=30_000)
     parser.add_argument("--temperature", type=float, default=0.78)
     parser.add_argument("--top-p", type=float, default=0.9)

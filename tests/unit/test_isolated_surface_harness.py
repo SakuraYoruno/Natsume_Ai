@@ -215,6 +215,31 @@ def test_build_messages_adds_positive_stage_scene_candidate_guidance() -> None:
     assert "今天慢慢来" in rendered
 
 
+def test_build_messages_adds_scene_quality_good_bad_samples() -> None:
+    request = build_isolated_surface_input(
+        {
+            "case_id": "relationship_quality_sample",
+            "soul_md": SOUL,
+            "user_message": "你是不是不记得我了",
+            "reply_control_packet": {
+                "response_move": "relationship_reassure",
+                "task_mode": "relationship_boundary",
+                "relationship_distance": "close_friend",
+                "question_budget": 0,
+            },
+        }
+    )
+
+    rendered = "\n".join(message["content"] for message in build_isolated_surface_messages(request))
+
+    assert "## 场景质量样本" in rendered
+    assert "scene_id: relationship_memory_reassurance" in rendered
+    assert "good_examples:" in rendered
+    assert "记得啊，别瞎想。" in rendered
+    assert "bad_examples:" in rendered
+    assert "熟人之间还问这种话，我记着呢。" in rendered
+
+
 def test_build_messages_good_news_anchors_completion_and_blocks_polished_reward() -> None:
     request = build_isolated_surface_input(
         {
@@ -642,9 +667,10 @@ def test_short_continue_memory_is_not_required_to_echo_fact() -> None:
 
     assert "不要把 surface、主链、主线、迁移" in guidance
     assert memory_alignment_terms(request)
-    assert any(code.startswith("MEMORY_ALIGNMENT_MISS") for code in rows[0].reason_codes)
+    assert "MEMORY_ALIGNMENT_LOW_SHOW_ALLOWED" in rows[0].reason_codes
+    assert not any(code.startswith("MEMORY_ALIGNMENT_MISS") for code in rows[0].reason_codes)
     assert not any(code.startswith("MEMORY_ALIGNMENT_REQUIRED_MISS") for code in rows[0].reason_codes)
-    assert rows[0].dimensions["memory_alignment"] >= 72
+    assert rows[0].dimensions["memory_alignment"] >= 86
     assert any(code.startswith("SHORT_CONTINUE_MEMORY_OVERDISPLAY") for code in rows[1].reason_codes)
     assert not rows[1].passed
     assert any(code.startswith("SHORT_CONTINUE_UNPROVIDED_TECH_DETAIL") for code in rows[2].reason_codes)
