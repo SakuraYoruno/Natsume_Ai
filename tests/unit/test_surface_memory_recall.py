@@ -195,7 +195,8 @@ def test_recall_surface_memory_packet_calls_recall_and_surface_gets_only_facts()
     assert "记忆线索：上次说好周末去看展" not in rendered
     assert "关系线索：关系阶段：熟人私聊，别升级亲密。" not in rendered
     assert "上次说好周末去看展" in rendered
-    assert "关系阶段：熟人私聊，别升级亲密。" in rendered
+    assert "关系阶段：熟人私聊，别升级亲密。" not in rendered
+    assert "按关系线索控制距离，不因为记忆升格亲密" in rendered
     assert "memory://episodic/mem-1" not in rendered
     assert "metadata" not in rendered
 

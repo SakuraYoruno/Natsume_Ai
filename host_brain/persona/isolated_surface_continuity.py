@@ -270,10 +270,14 @@ def compress_three_layer_continuity_context(
 def build_reply_control_packet_from_context(
     context: ThreeLayerContinuityContext,
     *,
+    memory_packet: Any | None = None,
+    affect_packet: Any | None = None,
     max_facts: int = 6,
     max_recent_turns: int = 6,
 ) -> ReplyControlPacket:
     """Build the only object allowed to cross into the surface generator."""
+
+    from host_brain.persona.surface_packet_compiler import compile_reply_control_packet  # noqa: PLC0415
 
     snapshot = compress_three_layer_continuity_context(context, max_recent_turns=max_recent_turns)
     long_facts = [f"长期事实：{fact}" for fact in _clean_list(context.long_term_facts)[:2]]
@@ -282,18 +286,23 @@ def build_reply_control_packet_from_context(
         max_facts=max_facts,
     )
     task_mode = _clean_text(context.task_mode_hint) or "daily_chat"
-    return ReplyControlPacket(
-        response_move=_clean_text(context.response_move_hint) or task_mode,
-        task_mode=task_mode,
-        emotional_tone=_clean_text(context.emotional_tone_hint) or "light",
-        relationship_distance=_clean_text(context.relationship_distance) or "familiar",
-        information_budget=_clean_text(context.information_budget) or "short",
-        question_budget=max(0, int(context.question_budget or 0)),
-        must_include=_clean_list(context.must_include),
-        must_not_do=_clean_list(context.must_not_do),
-        facts=list(facts),
-        style_anchor=_clean_list([*context.style_anchor, "压缩连续性"]),
+    base_affect_packet = _affect_packet_with_context_defaults(context, affect_packet)
+    compiled = compile_reply_control_packet(
+        task_control={
+            "response_move": _clean_text(context.response_move_hint) or task_mode,
+            "task_mode": task_mode,
+            "information_budget": _clean_text(context.information_budget) or "short",
+            "question_budget": max(0, int(context.question_budget or 0)),
+            "must_include": _clean_list(context.must_include),
+            "must_not_do": _clean_list(context.must_not_do),
+            "facts": list(facts),
+            "style_anchor": _clean_list([*context.style_anchor, "压缩连续性"]),
+        },
+        memory_packet=memory_packet,
+        affect_packet=base_affect_packet,
+        max_facts=max_facts,
     )
+    return compiled.packet
 
 
 def build_surface_input_from_three_layer_context(
@@ -301,11 +310,15 @@ def build_surface_input_from_three_layer_context(
     *,
     soul_md: str,
     case_id: str = "",
+    memory_packet: Any | None = None,
+    affect_packet: Any | None = None,
     max_facts: int = 6,
     max_recent_turns: int = 6,
 ) -> IsolatedSurfaceInput:
     control = build_reply_control_packet_from_context(
         context,
+        memory_packet=memory_packet,
+        affect_packet=affect_packet,
         max_facts=max_facts,
         max_recent_turns=max_recent_turns,
     )
@@ -351,6 +364,30 @@ _TURN_REQUEST_KEYS = {
 
 def _clean_text(value: Any) -> str:
     return str(value or "").strip()
+
+
+def _affect_packet_with_context_defaults(
+    context: ThreeLayerContinuityContext,
+    affect_packet: Any | None,
+) -> Any:
+    base = {
+        "emotional_tone": _clean_text(context.emotional_tone_hint) or "light",
+        "relationship_distance": _clean_text(context.relationship_distance) or "familiar",
+    }
+    if affect_packet is None:
+        return base
+    if isinstance(affect_packet, Mapping):
+        payload = dict(affect_packet)
+    elif hasattr(affect_packet, "as_dict"):
+        raw = affect_packet.as_dict()  # type: ignore[attr-defined]
+        payload = dict(raw) if isinstance(raw, Mapping) else {}
+    else:
+        return affect_packet
+    if not _clean_text(payload.get("emotional_tone")):
+        payload["emotional_tone"] = base["emotional_tone"]
+    if not _clean_text(payload.get("relationship_distance")):
+        payload["relationship_distance"] = base["relationship_distance"]
+    return payload
 
 
 def _without_eval_only(value: Any) -> Any:

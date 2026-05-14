@@ -157,9 +157,10 @@ def build_surface_input_with_affect_control(
     max_recent_turns: int = 6,
 ) -> IsolatedSurfaceInput:
     return build_surface_input_from_three_layer_context(
-        apply_surface_affect_control_packet(context, packet),
+        context,
         soul_md=soul_md,
         case_id=case_id,
+        affect_packet=packet,
         max_facts=max_facts,
         max_recent_turns=max_recent_turns,
     )
