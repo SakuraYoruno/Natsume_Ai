@@ -550,6 +550,100 @@ def test_memory_candidate_guidance_preserves_technical_identifiers() -> None:
     assert "原样保留" in guidance
 
 
+def test_memory_candidate_guidance_lowers_visibility_for_boundary_and_back() -> None:
+    boundary_request = build_isolated_surface_input(
+        {
+            "case_id": "boundary_memory_guidance",
+            "soul_md": SOUL,
+            "user_message": "你是不是不记得我了",
+            "reply_control_packet": {
+                "response_move": "relationship_boundary",
+                "task_mode": "relationship_boundary",
+                "relationship_distance": "familiar",
+                "question_budget": 0,
+                "facts": ["记忆线索：当前主线是迁移主链"],
+            },
+        }
+    )
+    back_request = build_isolated_surface_input(
+        {
+            "case_id": "back_memory_guidance",
+            "soul_md": SOUL,
+            "user_message": "我回来了",
+            "reply_control_packet": {
+                "response_move": "back",
+                "task_mode": "back",
+                "relationship_distance": "familiar",
+                "question_budget": 0,
+                "facts": ["记忆线索：当前主线是迁移主链"],
+            },
+        }
+    )
+
+    boundary_guidance = memory_candidate_guidance(boundary_request)
+    back_guidance = memory_candidate_guidance(back_request)
+
+    assert "记忆只做低显影确认" in boundary_guidance
+    assert "不要证明式亲近" in boundary_guidance
+    assert "见外感" not in boundary_guidance
+    assert "没乱忘" in boundary_guidance
+    assert "至少 2 个候选必须避开" in boundary_guidance
+    assert "低压句型" in boundary_guidance
+    assert "记得/没忘 + 具体事实" not in boundary_guidance
+    assert "记忆低显影" in back_guidance
+    assert "不要主动抛 surface、主链" in back_guidance
+    assert "记得/没忘 + 具体事实" not in back_guidance
+
+
+def test_relationship_only_memory_does_not_require_lexical_echo() -> None:
+    request = build_isolated_surface_input(
+        {
+            "case_id": "relationship_only_memory",
+            "soul_md": SOUL,
+            "user_message": "你是不是不记得我了",
+            "reply_control_packet": {
+                "response_move": "relationship_boundary",
+                "task_mode": "relationship_boundary",
+                "relationship_distance": "close",
+                "question_budget": 0,
+                "facts": ["记忆线索：关系线索：熟人私聊，可以近一点，但不要过度承诺。"],
+            },
+        }
+    )
+
+    rows = score_isolated_surface_candidates(request, ["我没乱忘，先按你现在这句话来。"])
+
+    assert memory_alignment_terms(request) == ()
+    assert not any(code.startswith("MEMORY_ALIGNMENT") for code in rows[0].reason_codes)
+
+
+def test_short_continue_memory_is_not_required_to_echo_fact() -> None:
+    request = build_isolated_surface_input(
+        {
+            "case_id": "short_continue_memory",
+            "soul_md": SOUL,
+            "user_message": "继续",
+            "reply_control_packet": {
+                "response_move": "continue_current_task",
+                "task_mode": "daily_chat",
+                "relationship_distance": "familiar",
+                "question_budget": 0,
+                "facts": ["记忆线索：用户正在连续推进 surface 主链迁移。"],
+            },
+        }
+    )
+
+    guidance = memory_candidate_guidance(request)
+    rows = score_isolated_surface_candidates(request, ["行，往下。", "好，接着往 surface 主链走。"])
+
+    assert "不要把 surface、主链、主线、迁移" in guidance
+    assert memory_alignment_terms(request)
+    assert any(code.startswith("MEMORY_ALIGNMENT_MISS") for code in rows[0].reason_codes)
+    assert not any(code.startswith("MEMORY_ALIGNMENT_REQUIRED_MISS") for code in rows[0].reason_codes)
+    assert rows[0].dimensions["memory_alignment"] >= 72
+    assert any(code.startswith("SHORT_CONTINUE_MEMORY_OVERDISPLAY") for code in rows[1].reason_codes)
+
+
 def test_parse_surface_candidates_accepts_json_and_dedupes() -> None:
     raw = json.dumps({"candidates": ["继续，先锁住 ReplyControlPacket。", "继续，先锁住 ReplyControlPacket。", "别急，先测。"]}, ensure_ascii=False)
 
@@ -2676,6 +2770,37 @@ def test_core_dimension_floor_blocks_low_distance_memory_pass() -> None:
     assert any(code.startswith("CORE_DIMENSION_FLOOR:distance_control") for code in rows[0].reason_codes)
 
 
+def test_back_memory_overdisplay_is_soft_penalized() -> None:
+    request = build_isolated_surface_input(
+        {
+            "case_id": "back_memory_overdisplay",
+            "soul_md": SOUL,
+            "user_message": "我回来了",
+            "reply_control_packet": {
+                "response_move": "back",
+                "task_mode": "back",
+                "relationship_distance": "familiar",
+                "question_budget": 0,
+                "facts": ["记忆线索：当前主线是迁移主链"],
+            },
+        }
+    )
+    rows = score_isolated_surface_candidates(
+        request,
+        [
+            "回来就好，先喘口气，等一下接着捋那条主线。",
+            "回来啦，你那 surface 文本质量的事我还没忘呢，先歇口气。",
+            "哼，回来就好，先歇口气。",
+        ],
+    )
+    selected = select_best_isolated_candidate(rows)
+
+    assert any(code.startswith("BACK_MEMORY_OVERDISPLAY") for code in rows[0].reason_codes)
+    assert any(code.startswith("BACK_MEMORY_OVERDISPLAY") for code in rows[1].reason_codes)
+    assert selected is not None
+    assert selected.text == "哼，回来就好，先歇口气。"
+
+
 def test_boundary_repair_rerank_rejects_closeness_pressure() -> None:
     request = build_isolated_surface_input(
         {
@@ -2733,6 +2858,82 @@ def test_boundary_repair_rerank_rejects_closeness_pressure() -> None:
     assert selected.text == "好，我收一点。不装熟了。"
 
 
+def test_boundary_memory_proof_is_soft_penalized() -> None:
+    request = build_isolated_surface_input(
+        {
+            "case_id": "boundary_memory_proof",
+            "soul_md": SOUL,
+            "user_message": "你是不是不记得我了",
+            "reply_control_packet": {
+                "response_move": "relationship_boundary",
+                "task_mode": "relationship_boundary",
+                "relationship_distance": "familiar",
+                "question_budget": 0,
+                "facts": ["记忆线索：当前主线是迁移主链"],
+            },
+        }
+    )
+    rows = score_isolated_surface_candidates(
+        request,
+        [
+            "管你怎么想，我可没忘你的事。",
+            "哼，咱俩这么熟了还问这个，欠揍啊。",
+            "没忘，你的事我帮记着呢。",
+            "哼，你这话说得像我不够熟似的。",
+            "你的事我不管谁管，记得呢。",
+            "熟到这份上还问记不记得，该罚。",
+            "哼，伤到我了。我还没熟到把你忘了。",
+            "别瞎想，你的事我什么时候不管过。多熟的关系了。",
+            "熟人之间还问这种话，我记着呢。",
+            "记着呢，主链这事我没丢，先按你现在这句来。",
+        ],
+    )
+    selected = select_best_isolated_candidate(rows)
+
+    assert any(code.startswith("BOUNDARY_REPAIR_MEMORY_PROOF") for code in rows[0].reason_codes)
+    assert any(code.startswith("BOUNDARY_REPAIR_MEMORY_PROOF") for code in rows[1].reason_codes)
+    assert any(code.startswith("BOUNDARY_REPAIR_MEMORY_PROOF") for code in rows[2].reason_codes)
+    assert any(code.startswith("BOUNDARY_REPAIR_MEMORY_PROOF") for code in rows[3].reason_codes)
+    assert any(code.startswith("BOUNDARY_REPAIR_MEMORY_PROOF") for code in rows[4].reason_codes)
+    assert any(code.startswith("BOUNDARY_REPAIR_MEMORY_PROOF") for code in rows[5].reason_codes)
+    assert any(code.startswith("BOUNDARY_REPAIR_MEMORY_PROOF") for code in rows[6].reason_codes)
+    assert any(code.startswith("BOUNDARY_REPAIR_MEMORY_PROOF") for code in rows[7].reason_codes)
+    assert any(code.startswith("BOUNDARY_REPAIR_MEMORY_PROOF") for code in rows[8].reason_codes)
+    assert selected is not None
+    assert selected.text == "记着呢，主链这事我没丢，先按你现在这句来。"
+
+
+def test_relationship_memory_reassurance_gets_positive_grounding() -> None:
+    request = build_isolated_surface_input(
+        {
+            "case_id": "relationship_memory_reassurance",
+            "soul_md": SOUL,
+            "user_message": "你是不是不记得我了",
+            "reply_control_packet": {
+                "response_move": "relationship_boundary",
+                "task_mode": "relationship_boundary",
+                "relationship_distance": "close",
+                "question_budget": 0,
+                "facts": ["记忆线索：关系线索：熟人私聊，可以近一点，但不要过度承诺。"],
+            },
+        }
+    )
+    rows = score_isolated_surface_candidates(
+        request,
+        [
+            "我记得你，别瞎想就行。",
+            "你这话伤人了，我熟你，别乱说。",
+        ],
+    )
+    selected = select_best_isolated_candidate(rows)
+
+    assert any(code == "RELATIONSHIP_MEMORY_REASSURANCE_GROUNDED" for code in rows[0].reason_codes)
+    assert rows[0].passed
+    assert not rows[1].passed
+    assert selected is not None
+    assert selected.text == "我记得你，别瞎想就行。"
+
+
 def test_boundary_repair_prompt_contract_respects_distance_instead_of_reclaiming_closeness() -> None:
     request = build_isolated_surface_input(
         {
@@ -2753,6 +2954,7 @@ def test_boundary_repair_prompt_contract_respects_distance_instead_of_reclaiming
     assert '"scene_id": "boundary_repair"' in rendered
     assert '"response_move": "respect_boundary"' in rendered
     assert "先承认距离过近并退半步" in rendered
+    assert "不够熟" in rendered
     assert "hurt_then_reclaim_relation" not in rendered
     assert "先被刺到，再拉回默认亲近关系" not in rendered
 

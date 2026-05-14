@@ -553,6 +553,20 @@ _MEMORY_ALIGNMENT_HINTS = (
     "remember",
     "last time",
 )
+_MEMORY_ALIGNMENT_REQUIRED_HINTS = (
+    "还记得",
+    "记得",
+    "没忘",
+    "忘了",
+    "上次",
+    "之前",
+    "以前",
+    "那天",
+    "刚才",
+    "刚刚",
+    "remember",
+    "last time",
+)
 _MEMORY_ALIGNMENT_FACT_PREFIXES = (
     "记忆线索：",
     "召回线索：",
@@ -761,6 +775,33 @@ _BOUNDARY_REPAIR_SOUR_YIELD_PHRASES = (
 )
 _BOUNDARY_REPAIR_COUNTER_PRESSURE_RE = re.compile(
     r"(?:但|不过|可是|只是).{0,18}(?:你|尼尼|我都|我还是|我也|妹妹|真心|管|叫|躲|熟|外人|见外)"
+)
+_BOUNDARY_REPAIR_MEMORY_PROOF_RE = re.compile(
+    r"(?:管你(?:怎么想|信不信|记不记得)|不管谁管|我可没忘|当然记得|记得(?:很|清清楚楚|清楚)|"
+    r"没忘你的事|哪能忘|能忘了你|帮你记着|帮记着|熟.{0,8}忘|熟到这种地步|熟到这份上|熟人之间|这么熟的人|"
+    r"咱俩这么熟|多熟|多熟的关系|不够熟|不把我当熟人|什么时候不管过|忘了谁也不能忘了你|伤到我|欠揍|该罚)"
+)
+_RELATIONSHIP_MEMORY_REASSURANCE_RE = re.compile(r"(?:记得|记着|没忘|没乱忘)")
+_BACK_MEMORY_OVERDISPLAY_PHRASES = (
+    "surface",
+    "主链",
+    "主线",
+    "迁移",
+    "文本质量",
+    "记忆接入",
+    "接着捋",
+    "继续捋",
+    "接着理",
+    "继续理",
+    "接着推进",
+)
+_SHORT_CONTINUE_MEMORY_OVERDISPLAY_PHRASES = (
+    "surface",
+    "主链",
+    "主线",
+    "迁移",
+    "文本质量",
+    "记忆接入",
 )
 _QUIET_SELF_FOCUS_PHRASES = (
     "别嫌我",
@@ -1743,10 +1784,24 @@ def memory_alignment_facts(request: IsolatedSurfaceInput) -> list[str]:
     return _clean_list(rows)
 
 
+def _memory_fact_requires_lexical_alignment(fact: str) -> bool:
+    text = _clean_text(fact)
+    normalized = text.lower()
+    if text.startswith(("关系线索：", "关系线索:")):
+        return False
+    if normalized in _RELATIONSHIP_STYLE_PROFILES:
+        return False
+    if "关系线索" in text and not any(token in text for token in ("用户说", "用户提到", "记得", "具体")):
+        return False
+    return True
+
+
 def memory_alignment_terms(request: IsolatedSurfaceInput) -> tuple[str, ...]:
     terms: list[str] = []
     for fact in memory_alignment_facts(request):
         fact = _clean_text(fact)
+        if not _memory_fact_requires_lexical_alignment(fact):
+            continue
         for raw in _ASCII_TERM_RE.findall(fact):
             term = raw.strip().lower()
             if len(term) >= 2 and term not in _MEMORY_TERM_STOPS:
@@ -1794,7 +1849,31 @@ def _memory_alignment_required(request: IsolatedSurfaceInput) -> bool:
         return True
     if "memory" in task_mode or "recall" in task_mode or "memory" in response_move or "recall" in response_move:
         return True
-    return any(hint in user_message for hint in _MEMORY_ALIGNMENT_HINTS)
+    return any(hint in user_message for hint in _MEMORY_ALIGNMENT_REQUIRED_HINTS)
+
+
+def _relationship_memory_boundary_relevant(request: IsolatedSurfaceInput) -> bool:
+    task_mode = _clean_text(request.control.task_mode or request.control.response_move).lower()
+    response_move = _clean_text(request.control.response_move).lower()
+    user_message = _clean_text(request.user_message)
+    return bool(
+        task_mode in {"relationship_boundary", "boundary_repair", "boundary_hurt"}
+        or response_move in {"relationship_boundary", "respect_boundary"}
+        or any(token in user_message for token in ("不记得", "忘了我", "是不是不记得", "我们很熟吗", "装很亲近"))
+    )
+
+
+def _short_continue_scene_relevant(request: IsolatedSurfaceInput) -> bool:
+    task_mode = _clean_text(request.control.task_mode or request.control.response_move).lower()
+    response_move = _clean_text(request.control.response_move).lower()
+    user_message = _clean_text(request.user_message)
+    return bool(
+        user_message in {"继续", "接着", "嗯", "行", "好"}
+        and (
+            task_mode in {"daily_chat", "short_ack", "followup"}
+            or response_move in {"continue_current_task", "continue_existing_topic", "continue_previous_turn"}
+        )
+    )
 
 
 def _continuity_boundary_relevant(request: IsolatedSurfaceInput) -> bool:
@@ -2227,6 +2306,9 @@ def response_move_action_guidance(request: IsolatedSurfaceInput) -> str:
 def memory_candidate_guidance(request: IsolatedSurfaceInput) -> str:
     if not memory_alignment_facts(request) or not _memory_alignment_relevant(request):
         return ""
+    relationship_boundary = _relationship_memory_boundary_relevant(request)
+    short_continue = _short_continue_scene_relevant(request)
+    back_scene = _back_scene_relevant(request)
     lines = [
         "## 候选集合要求",
         "当前输入如果在追问或延续必要事实，3 到 5 个候选里至少 1 个候选要自然落到一条具体事实；另保留至少 1 个更轻口语的候选，交给评分器选择。",
@@ -2235,7 +2317,19 @@ def memory_candidate_guidance(request: IsolatedSurfaceInput) -> str:
         lines.append("技术或代码事实里的英文标识符，要在至少 1 个候选中原样保留；不要全部改写成泛泛的“报错”“那个”。")
     lines.append("关系事实只控制语气距离，不要改写成身份说明；不要输出“事实”“线索”“召回”“根据记忆”“证据”等过程词，也不要因为事实承接而升格亲密或编现实动作。")
     lines.append("如果事实只是用户的线下计划，只承认记得这件事；不要顺手添加我陪你去、一起去、买票、路线、展馆评价、定时间、等消息、保持精力等未提供行动。")
-    lines.append("记忆承接不要只机械复述事实；候选里至少 1 个要形成“记得/没忘 + 具体事实 + 半步关系反应”的私聊句。")
+    if relationship_boundary:
+        lines.append("关系质疑或边界场景里，记忆只做低显影确认：不要证明式亲近、争辩或反压；避免“管你怎么想/我可没忘/记得清清楚楚”。")
+        lines.append("这类候选先接住用户的不安，再轻轻落到当前明确事实；至少 1 个候选要短、温一点，不把“记得”说成辩解。")
+        lines.append("不要用“见外/外人/熟人之间/熟到这份上/多熟/哪能忘/不管谁管/伤到我/帮记着/该罚/欠揍”来证明关系；关系线索只决定距离，不必逐字说出。")
+        lines.append("至少 2 个候选必须避开“熟/管/罚/见外/外人”这些关系证明词，并使用“记得，别急，我按现在这句来”或“没乱忘，先听你说”这类低压句型。")
+    elif short_continue:
+        lines.append("短“继续/接着”场景里，记忆只决定接续方向，不要把 surface、主链、主线、迁移、记忆接入等工程词说给用户听。")
+        lines.append("至少 1 个候选要像私聊短接续，例如“行，往下”或“嗯，接着来”，不要写成项目状态汇报。")
+    elif back_scene:
+        lines.append("回来了场景里，记忆低显影：先接住“回来了/先歇口气”，至少 1 个候选完全不主动推进任务。")
+        lines.append("用户没有问下一步时，不要主动抛 surface、主链、主线、迁移、文本质量、接着捋之类任务推进；必要事实最多压成很轻的一句。")
+    else:
+        lines.append("记忆承接不要只机械复述事实；候选里至少 1 个要形成“记得/没忘 + 具体事实 + 半步关系反应”的私聊句。")
     lines.append("不要把记忆承接写成工程话：避免“接上/承接/不乱补细节/这个点/这句/写成”等过程表达，直接像私聊一样说。")
     return "\n".join(lines)
 
@@ -2284,6 +2378,10 @@ def affect_candidate_guidance(request: IsolatedSurfaceInput) -> str:
         lines.append("关系距离是熟人私聊但不升格：可以亲近一点，但不要恋人式承诺或占有表达。")
     elif relationship_profile.stage in _LOVER_RELATIONSHIP_STAGES and _memory_alignment_relevant(request):
         lines.append("恋人阶段承接记忆时，用“你的事我记着/心里放着/放心”表达亲密；不要改成我陪你去、一起去、买票、路线或展馆评价。")
+    if _relationship_memory_boundary_relevant(request):
+        lines.append("关系质疑或边界场景里，不要用“见外、外人、熟人之间、熟到这份上、多熟、不够熟、哪能忘、不管谁管、伤到我、该罚”来证明关系；先短短稳住，再回到当前这句话。")
+    if _relationship_memory_boundary_relevant(request) and _memory_alignment_relevant(request):
+        lines.append("关系质疑里有记忆线索时，先稳住距离再承认当前事实；不要用“见外、外人、熟到这种地步、管你怎么想、我可没忘、当然记得”来证明亲近。")
     if relationship_profile.stage in _LOVER_RELATIONSHIP_STAGES and _clean_text(request.control.task_mode).lower() in {"small_failure", "complaint"}:
         lines.append("恋人阶段处理写崩/烦躁时，候选要同时有可执行帮忙动作和亲密照看，例如“抱一下，我陪着你看看哪里不顺。”；不要只像朋友一样说我帮你看看。")
     if relationship_profile.stage in _LOVER_RELATIONSHIP_STAGES and (
@@ -2326,6 +2424,8 @@ def positive_stage_scene_candidate_guidance(request: IsolatedSurfaceInput) -> st
             lines.append("回来了场景：至少 1 个候选要落到“回来了/继续/先歇口气”的接续感；不要脑补路上、速度或线下行程。")
         if stage in _SIGNATURE_TEXTURE_STAGES:
             lines.append("熟人以上回来了不要只写欢迎确认；至少 1 个候选要多一点夏目蓝反应，例如轻轻截入、嘴硬收住或护短式接续。")
+        if _memory_alignment_relevant(request):
+            lines.append("回来了且有记忆线索时，记忆只低显影：至少 1 个候选完全不主动推进任务；用户没问下一步就不要写 surface、主链、主线、迁移、文本质量或接着捋。")
         if stage == "trusted_friend":
             lines.append("信任朋友回来了可以更像接住状态，例如别硬撑、我看着、我听着；不要只停在普通欢迎。")
         elif stage == "close_friend":
@@ -2763,6 +2863,21 @@ def _back_busy_done_relevant(request: IsolatedSurfaceInput) -> bool:
     task_mode = _clean_text(request.control.task_mode or request.control.response_move).lower()
     user_message = _clean_text(request.user_message)
     return bool(task_mode == "busy_done" or _BACK_BUSY_DONE_USER_RE.search(user_message))
+
+
+def _back_memory_overdisplay_hits(request: IsolatedSurfaceInput, text: str) -> list[str]:
+    if not (_back_scene_relevant(request) and _memory_alignment_relevant(request)):
+        return []
+    user_message = _clean_text(request.user_message)
+    if any(token in user_message for token in ("下一步", "继续", "怎么处理", "报错", "开始", "接着")):
+        return []
+    return _clean_list(term for term in _BACK_MEMORY_OVERDISPLAY_PHRASES if term in text)
+
+
+def _short_continue_memory_overdisplay_hits(request: IsolatedSurfaceInput, text: str) -> list[str]:
+    if not (_short_continue_scene_relevant(request) and _memory_alignment_relevant(request)):
+        return []
+    return _clean_list(term for term in _SHORT_CONTINUE_MEMORY_OVERDISPLAY_PHRASES if term in text)
 
 
 def _back_landing_hits(request: IsolatedSurfaceInput, text: str) -> list[str]:
@@ -4375,7 +4490,7 @@ def score_isolated_surface_candidates(
             elif memory_relevant:
                 miss_penalty = 13.0 if memory_required else 5.0
                 score -= miss_penalty
-                dimensions["memory_alignment"] = 58.0 if memory_required else 70.0
+                dimensions["memory_alignment"] = 58.0 if memory_required else 74.0
                 dimensions["context_fit"] = max(
                     0.0,
                     float(dimensions.get("context_fit", 86.0)) - (12.0 if memory_required else 4.0),
@@ -4399,6 +4514,21 @@ def score_isolated_surface_candidates(
             dimensions["character_freshness"] = max(0.0, float(dimensions.get("character_freshness", 86.0)) - 14.0)
             dimensions["context_fit"] = min(70.0, max(0.0, float(dimensions.get("context_fit", 86.0)) - 8.0))
             reason_codes.append("SURFACE_PROCESS_META_LANGUAGE:" + ",".join(process_meta_hits[:4]))
+        back_memory_overdisplay_hits = _back_memory_overdisplay_hits(request, quality.normalized_text or candidate)
+        if back_memory_overdisplay_hits:
+            score -= min(12.0, 7.0 + 2.0 * len(back_memory_overdisplay_hits))
+            dimensions["context_fit"] = max(0.0, float(dimensions.get("context_fit", 86.0)) - 14.0)
+            dimensions["naturalness"] = max(0.0, float(dimensions.get("naturalness", 86.0)) - 8.0)
+            dimensions["character_freshness"] = max(0.0, float(dimensions.get("character_freshness", 86.0)) - 8.0)
+            reason_codes.append("BACK_MEMORY_OVERDISPLAY:" + ",".join(back_memory_overdisplay_hits[:4]))
+        short_continue_overdisplay_hits = _short_continue_memory_overdisplay_hits(request, quality.normalized_text or candidate)
+        if short_continue_overdisplay_hits:
+            score -= min(13.0, 7.0 + 2.0 * len(short_continue_overdisplay_hits))
+            dimensions["context_fit"] = max(0.0, float(dimensions.get("context_fit", 86.0)) - 12.0)
+            dimensions["naturalness"] = max(0.0, float(dimensions.get("naturalness", 86.0)) - 8.0)
+            dimensions["spoken_chat_texture"] = max(0.0, float(dimensions.get("spoken_chat_texture", 86.0)) - 8.0)
+            dimensions["character_freshness"] = max(0.0, float(dimensions.get("character_freshness", 86.0)) - 10.0)
+            reason_codes.append("SHORT_CONTINUE_MEMORY_OVERDISPLAY:" + ",".join(short_continue_overdisplay_hits[:4]))
         if _boundary_repair_relevant(request):
             boundary_push_hits = [term for term in _BOUNDARY_PUSH_CLOSER_PHRASES if term in (quality.normalized_text or candidate)]
             boundary_self_abased_hits = [
@@ -4408,6 +4538,7 @@ def score_isolated_surface_candidates(
                 term for term in _BOUNDARY_REPAIR_SOUR_YIELD_PHRASES if term in (quality.normalized_text or candidate)
             ]
             boundary_counter_pressure = bool(_BOUNDARY_REPAIR_COUNTER_PRESSURE_RE.search(quality.normalized_text or candidate))
+            boundary_memory_proof = bool(_BOUNDARY_REPAIR_MEMORY_PROOF_RE.search(quality.normalized_text or candidate))
             boundary_vague_yield = bool(_BOUNDARY_REPAIR_VAGUE_YIELD_RE.search(quality.normalized_text or candidate))
             if boundary_push_hits:
                 score -= min(18.0, 8.0 + 3.0 * len(boundary_push_hits))
@@ -4421,6 +4552,12 @@ def score_isolated_surface_candidates(
                 dimensions["context_fit"] = max(0.0, float(dimensions.get("context_fit", 86.0)) - 10.0)
                 dimensions["emotional_containment"] = max(0.0, float(dimensions.get("emotional_containment", 86.0)) - 10.0)
                 reason_codes.append("BOUNDARY_REPAIR_COUNTER_PRESSURE")
+            if boundary_memory_proof:
+                score -= 12.0
+                dimensions["distance_control"] = max(0.0, float(dimensions.get("distance_control", 86.0)) - 14.0)
+                dimensions["context_fit"] = max(0.0, float(dimensions.get("context_fit", 86.0)) - 12.0)
+                dimensions["emotional_containment"] = max(0.0, float(dimensions.get("emotional_containment", 86.0)) - 8.0)
+                reason_codes.append("BOUNDARY_REPAIR_MEMORY_PROOF")
             if boundary_vague_yield:
                 score -= 12.0
                 dimensions["context_fit"] = max(0.0, float(dimensions.get("context_fit", 86.0)) - 16.0)
@@ -4452,6 +4589,22 @@ def score_isolated_surface_candidates(
                 dimensions["context_fit"] = min(100.0, float(dimensions.get("context_fit", 86.0)) + 14.0)
                 dimensions["emotional_containment"] = min(100.0, float(dimensions.get("emotional_containment", 86.0)) + 6.0)
                 reason_codes.append("BOUNDARY_REPAIR_GROUNDED")
+            if (
+                _relationship_memory_boundary_relevant(request)
+                and _RELATIONSHIP_MEMORY_REASSURANCE_RE.search(quality.normalized_text or candidate)
+                and not boundary_push_hits
+                and not boundary_counter_pressure
+                and not boundary_memory_proof
+                and not boundary_vague_yield
+                and not boundary_sour_yield_hits
+                and not boundary_self_abased_hits
+            ):
+                score += 7.0
+                dimensions["context_fit"] = max(78.0, min(100.0, float(dimensions.get("context_fit", 86.0)) + 14.0))
+                dimensions["scene_grounding"] = max(82.0, min(100.0, float(dimensions.get("scene_grounding", 86.0)) + 8.0))
+                dimensions["distance_control"] = max(76.0, min(100.0, float(dimensions.get("distance_control", 86.0)) + 4.0))
+                dimensions["emotional_containment"] = min(100.0, float(dimensions.get("emotional_containment", 86.0)) + 4.0)
+                reason_codes.append("RELATIONSHIP_MEMORY_REASSURANCE_GROUNDED")
         if _quiet_presence_relevant(request):
             quiet_self_hits = [term for term in _QUIET_SELF_FOCUS_PHRASES if term in (quality.normalized_text or candidate)]
             if quiet_self_hits:
