@@ -13,7 +13,7 @@ def _parse_sse(raw: str) -> dict:
 
 
 @pytest.mark.asyncio
-async def test_chat_agent_uses_surface_main_chain_when_enabled(monkeypatch) -> None:
+async def test_chat_agent_uses_surface_main_chain_by_default(monkeypatch) -> None:
     calls: list[dict] = []
 
     async def _fake_surface_generator(agent_input, *, trace_stage_meta=None):  # noqa: ANN001
@@ -36,7 +36,7 @@ async def test_chat_agent_uses_surface_main_chain_when_enabled(monkeypatch) -> N
     async def _unexpected_kernel(*_args, **_kwargs):  # noqa: ANN002, ANN003
         raise AssertionError("chat_kernel_v2 should not run when surface main chain gate is enabled")
 
-    monkeypatch.setenv("HOST_SURFACE_MAIN_CHAIN_ENABLED", "true")
+    monkeypatch.delenv("HOST_SURFACE_MAIN_CHAIN_ENABLED", raising=False)
     monkeypatch.setattr(
         "host_brain.app.surface_main_chain_adapter.surface_main_chain_sse_generator",
         _fake_surface_generator,

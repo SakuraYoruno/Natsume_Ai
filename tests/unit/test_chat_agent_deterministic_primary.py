@@ -280,6 +280,7 @@ async def test_chat_agent_text_reply_uses_full_chat_not_surface_renderer(monkeyp
     monkeypatch.setenv("HOST_CHAT_KERNEL_V2_LIGHT_DAILY_CANDIDATES", "1")
     monkeypatch.setenv("HOST_STREAM_TTS_ENABLED", "false")
     monkeypatch.setenv("HOST_TTS_SENTENCE_STREAM_ENABLED", "false")
+    monkeypatch.setenv("HOST_SURFACE_MAIN_CHAIN_ENABLED", "false")
 
     agent_input = ChatAgentInput(
         request_id="req-text-full-chat-no-surface",

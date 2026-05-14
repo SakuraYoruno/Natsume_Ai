@@ -65,6 +65,8 @@ async def test_chat_agent_commit_includes_timing_breakdown(monkeypatch) -> None:
     )
     monkeypatch.setenv("HOST_STREAM_TTS_ENABLED", "false")
     monkeypatch.setenv("HOST_TTS_SENTENCE_STREAM_ENABLED", "false")
+    monkeypatch.setenv("HOST_SURFACE_MAIN_CHAIN_ENABLED", "false")
+    monkeypatch.setenv("HOST_CHAT_KERNEL_V2_ENABLED", "false")
 
     agent_input = ChatAgentInput(
         request_id="req-timing-breakdown",

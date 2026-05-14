@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from types import SimpleNamespace
 
@@ -86,6 +87,7 @@ def test_build_surface_main_chain_input_from_chat_input_compresses_app_context(m
 @pytest.mark.asyncio
 async def test_surface_main_chain_sse_generator_calls_chat_surface_pool(monkeypatch) -> None:
     calls: list[dict] = []
+    post_process_calls: list[dict] = []
 
     monkeypatch.setattr(
         "host_brain.app.surface_main_chain_adapter.get_compiled_soul",
@@ -109,7 +111,11 @@ async def test_surface_main_chain_sse_generator_calls_chat_surface_pool(monkeypa
             final_model="mock-chat",
         )
 
+    async def _fake_post_process(**kwargs):  # noqa: ANN003
+        post_process_calls.append(kwargs)
+
     monkeypatch.setattr("host_brain.integrations.llm_helpers.acomplete_llm_with_pool", _fake_complete)
+    monkeypatch.setattr("host_brain.app.agent_runtime_shared._async_post_process", _fake_post_process)
 
     events = [_parse_sse(chunk) async for chunk in surface_main_chain_sse_generator(_agent_input())]
     commit = next(event for event in events if event.get("phase") == "COMMIT")
@@ -119,14 +125,23 @@ async def test_surface_main_chain_sse_generator_calls_chat_surface_pool(monkeypa
     assert commit["audit_refs"]["path"] == "chat_agent:surface_main_chain"
     assert commit["audit_refs"]["trace_stage_meta"]["surface_main_chain_used"] is True
     assert commit["audit_refs"]["trace_stage_meta"]["chat_kernel_v2_used"] is False
+    assert "timings_ms" in commit["audit_refs"]
     assert "输入输出" in commit["narrative"]
+    await asyncio.sleep(0)
+    assert post_process_calls
+    assert post_process_calls[0]["trace_stage_meta"]["surface_main_chain_used"] is True
+    assert post_process_calls[0]["trace_stage_meta"]["chat_kernel_v2_used"] is False
+    assert post_process_calls[0]["reply_plan"]["primary_topic"] == "technical_help"
 
 
-def test_surface_main_chain_enabled_is_explicit_and_text_only(monkeypatch) -> None:
+def test_surface_main_chain_enabled_defaults_to_normal_text_only(monkeypatch) -> None:
     monkeypatch.delenv("HOST_SURFACE_MAIN_CHAIN_ENABLED", raising=False)
+    assert surface_main_chain_enabled(_agent_input()) is True
+
+    monkeypatch.setenv("HOST_SURFACE_MAIN_CHAIN_ENABLED", "false")
     assert surface_main_chain_enabled(_agent_input()) is False
 
     monkeypatch.setenv("HOST_SURFACE_MAIN_CHAIN_ENABLED", "true")
-    assert surface_main_chain_enabled(_agent_input()) is True
     assert surface_main_chain_enabled(_agent_input(attachments=[{"kind": "image"}])) is False
     assert surface_main_chain_enabled(_agent_input(response_form="sticker")) is False
+    assert surface_main_chain_enabled(_agent_input(intent_draft={"route": "delegate"})) is False
