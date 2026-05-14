@@ -53,7 +53,16 @@ _LOW_SIGNAL_TASKS = frozenset({
     "wait",
 })
 _RECALL_TASKS = frozenset({"recall", "recall_memory", "memory_followup"})
-_TECH_TASKS = frozenset({"advice_continue", "complaint", "help_takeover", "next_step", "small_failure", "write_takeover"})
+_TECH_TASKS = frozenset({
+    "advice_continue",
+    "complaint",
+    "help_takeover",
+    "next_step",
+    "small_failure",
+    "technical_help",
+    "triage_first_step",
+    "write_takeover",
+})
 _EMOTION_TASKS = frozenset({"apology", "bad_mood", "give_up", "headache", "quiet", "sleepy", "tired"})
 _IDENTITY_TASKS = frozenset({"identity"})
 SURFACE_USER_FACT_STORES = frozenset({"episodic_vector", "episodic", "sqlite_ledger"})

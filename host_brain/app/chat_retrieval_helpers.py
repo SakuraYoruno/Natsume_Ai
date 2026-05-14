@@ -155,29 +155,207 @@ async def _run_retrieval(
     mood_state: Optional[str] = None,
     bond_summary: Mapping[str, Any] | None = None,
     motive_state: Mapping[str, Any] | None = None,
+    intent_draft: Mapping[str, Any] | None = None,
 ) -> tuple[Dict[str, Any], list[dict[str, Any]]]:
-    """Legacy retrieval bridge.
+    """Surface memory recall bridge.
 
-    The old app path used to call the legacy retrieval stack here.
-    The current main chain routes memory through surface_memory_recall and only
-    passes compressed facts to the final text layer, so this legacy bridge now
-    fails closed instead of rebuilding a large evidence pack.
+    The old app path used to call the legacy retrieval stack here. The current
+    main chain only needs a compressed surface_memory_recall_packet; raw recall
+    rows and evidence packs must not be returned to the final text layer.
     """
-    return (
-        {
-            "request_id": request_id,
-            "status": "SKIPPED",
-            "reason_code": "LEGACY_RETRIEVAL_CHAIN_REMOVED",
-            "degraded": False,
-            "route_count": 0,
-            "candidate_count": 0,
-            "rerank_topk": 0,
-            "routes": [],
-            "query_plan": {"intent": "legacy_removed", "text_len": len(str(message or ""))},
-            "target_stores": [],
-            "ts_ms": int(ts_ms),
+    try:
+        from dataclasses import replace  # noqa: PLC0415
+
+        from host_brain.persona.isolated_surface_continuity import ThreeLayerContinuityContext  # noqa: PLC0415
+        from host_brain.persona.surface_memory_recall import (  # noqa: PLC0415
+            SURFACE_MEMORY_RECALL_SKIPPED,
+            SurfaceMemoryRecallPacket,
+            plan_surface_memory_recall,
+            recall_surface_memory_packet,
+        )
+
+        context = ThreeLayerContinuityContext(
+            current_user_message=str(message or ""),
+            task_mode_hint=_surface_task_mode_from_intent(message=message, intent_draft=intent_draft),
+            relationship_distance=_surface_relationship_distance(bond_summary),
+            necessary_facts=_surface_memory_query_facts(
+                mood_state=mood_state,
+                bond_summary=bond_summary,
+                motive_state=motive_state,
+            ),
+        )
+        plan = plan_surface_memory_recall(context)
+        embedding_model_id = ""
+        if not plan.should_recall:
+            packet = SurfaceMemoryRecallPacket(
+                query=plan.query,
+                degraded=False,
+                reason_code=SURFACE_MEMORY_RECALL_SKIPPED,
+                trace={"skipped": True, "plan": plan.as_dict()},
+            )
+        else:
+            query_embedding, embedding_model_id = _embed_surface_memory_query(plan.query)
+            packet = recall_surface_memory_packet(
+                recall_service=_build_surface_memory_recall_service(),
+                request_id=request_id,
+                query=plan.query,
+                query_embedding=query_embedding,
+                intent_id=_surface_intent_id(intent_draft),
+                person_id=person_id,
+                session_id=session_id,
+                ts_ms=ts_ms,
+                emotion_filter=emotion_tag,
+                mood_state=mood_state,
+                bond_summary=bond_summary,
+                motive_state=motive_state,
+                render_target_lang=render_target_lang,
+                target_store_ids=plan.target_store_ids,
+                time_lookback_days=plan.time_lookback_days,
+                max_facts=plan.max_facts,
+                max_chars_per_fact=plan.max_chars_per_fact,
+                fail_soft=True,
+            )
+            packet = replace(
+                packet,
+                trace={
+                    **dict(packet.trace or {}),
+                    "skipped": False,
+                    "plan": plan.as_dict(),
+                },
+            )
+        return _surface_memory_retrieval_summary(
+            request_id=request_id,
+            ts_ms=ts_ms,
+            packet=packet,
+            embedding_model_id=embedding_model_id,
+        ), []
+    except Exception as exc:
+        return (
+            {
+                "request_id": request_id,
+                "status": "DEGRADED",
+                "reason_code": "SURFACE_MEMORY_RECALL_BRIDGE_FAILED",
+                "error": type(exc).__name__,
+                "degraded": True,
+                "route_count": 0,
+                "candidate_count": 0,
+                "rerank_topk": 0,
+                "routes": [],
+                "query_plan": {"intent": "surface_memory_recall", "text_len": len(str(message or ""))},
+                "target_stores": [],
+                "ts_ms": int(ts_ms),
+            },
+            [],
+        )
+
+
+def _surface_memory_retrieval_summary(
+    *,
+    request_id: str,
+    ts_ms: int,
+    packet: Any,
+    embedding_model_id: str,
+) -> Dict[str, Any]:
+    trace = dict(getattr(packet, "trace", None) or {})
+    plan = dict(trace.get("plan") or {}) if isinstance(trace.get("plan"), Mapping) else {}
+    reason_code = str(getattr(packet, "reason_code", None) or "").strip()
+    skipped = bool(trace.get("skipped")) or reason_code == "SURFACE_MEMORY_RECALL_SKIPPED"
+    degraded = bool(getattr(packet, "degraded", False))
+    status = "SKIPPED" if skipped else "DEGRADED" if degraded else "OK"
+    route_count = int(dict(trace).get("route_count") or 0)
+    return {
+        "request_id": request_id,
+        "status": status,
+        "reason_code": reason_code or ("SURFACE_MEMORY_RECALL_SKIPPED" if skipped else "SURFACE_MEMORY_RECALL_OK"),
+        "degraded": degraded,
+        "route_count": route_count,
+        "candidate_count": int(getattr(packet, "candidate_count", 0) or 0),
+        "rerank_topk": 0,
+        "routes": list(getattr(packet, "route_ids", ()) or []),
+        "query_plan": {
+            "intent": "surface_memory_recall",
+            "task_mode": str(plan.get("task_mode") or ""),
+            "reason": str(plan.get("reason") or ""),
+            "text_len": len(str(getattr(packet, "query", "") or "")),
         },
-        [],
+        "target_stores": list(plan.get("target_store_ids") or []),
+        "embedding_model_id": embedding_model_id,
+        "surface_memory_recall_packet": packet.as_dict() if hasattr(packet, "as_dict") else {},
+        "ts_ms": int(ts_ms),
+    }
+
+
+def _surface_task_mode_from_intent(*, message: str, intent_draft: Mapping[str, Any] | None) -> str:
+    draft = dict(intent_draft or {}) if isinstance(intent_draft, Mapping) else {}
+    raw = str(
+        draft.get("task_mode")
+        or draft.get("route")
+        or draft.get("intent")
+        or draft.get("primary_topic")
+        or ""
+    ).strip().lower()
+    if raw:
+        return raw
+    text = str(message or "").strip()
+    if any(token in text for token in ("还记得", "记得吗", "上次", "之前", "刚才")):
+        return "recall_memory"
+    if any(token in text for token in ("报错", "错误", "测试", "提交", "仓库", "代码", "怎么改", "下一步")):
+        return "technical_help"
+    if any(token in text for token in ("累", "困", "难受", "头疼")):
+        return "tired"
+    return "daily_chat"
+
+
+def _surface_relationship_distance(bond_summary: Mapping[str, Any] | None) -> str:
+    bond = dict(bond_summary or {}) if isinstance(bond_summary, Mapping) else {}
+    return str(
+        bond.get("relationship_distance")
+        or bond.get("stage")
+        or bond.get("stage_label")
+        or "familiar"
+    ).strip()
+
+
+def _surface_intent_id(intent_draft: Mapping[str, Any] | None) -> str | None:
+    draft = dict(intent_draft or {}) if isinstance(intent_draft, Mapping) else {}
+    value = str(draft.get("intent_id") or draft.get("id") or "").strip()
+    return value or None
+
+
+def _surface_memory_query_facts(
+    *,
+    mood_state: Optional[str],
+    bond_summary: Mapping[str, Any] | None,
+    motive_state: Mapping[str, Any] | None,
+) -> list[str]:
+    facts: list[str] = []
+    if mood_state:
+        facts.append(f"当前语气状态：{str(mood_state).strip()}")
+    distance = _surface_relationship_distance(bond_summary)
+    if distance:
+        facts.append(f"关系距离：{distance}")
+    motive = dict(motive_state or {}) if isinstance(motive_state, Mapping) else {}
+    topic = str(motive.get("topic") or motive.get("focus") or "").strip()
+    if topic:
+        facts.append(f"当前关注：{topic}")
+    return facts[:3]
+
+
+def _embed_surface_memory_query(query: str) -> tuple[list[float], str]:
+    from host_brain.memory.chroma_client import embed_text  # noqa: PLC0415
+
+    values, model_id = embed_text(str(query or "").strip())
+    return list(values or []), str(model_id or "")
+
+
+def _build_surface_memory_recall_service() -> Any:
+    from host_brain.app.dependencies import get_ledger  # noqa: PLC0415
+    from host_brain.retrieval.recall_fusion import RecallFusionServiceContract  # noqa: PLC0415
+
+    return RecallFusionServiceContract(
+        ledger=get_ledger(),
+        node_id="surface_main_chain_memory_recall",
+        use_hybrid=False,
     )
 
 

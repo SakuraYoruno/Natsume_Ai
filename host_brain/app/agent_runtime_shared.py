@@ -2465,6 +2465,7 @@ async def _cortex_orchestrator_sse_generator_impl(
                     mood_state=retrieval_mood_state,
                     bond_summary=bond_summary or None,
                     motive_state=retrieval_motive_state or None,
+                    intent_draft=intent_draft,
                 )
             )
     except Exception as retrieval_exc:
