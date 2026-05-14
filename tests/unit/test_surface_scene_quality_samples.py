@@ -5,6 +5,7 @@ import json
 from tools.surface_scene_quality_samples import (
     build_surface_scene_quality_sample_report,
     harvest_surface_scene_quality_samples,
+    merge_reviewed_surface_scene_samples,
 )
 
 
@@ -70,3 +71,44 @@ def test_build_surface_scene_quality_sample_report_reads_details_and_exports_pac
     assert report["current_pack"]["sample_kind"] == "surface_scene_quality_pack"
     assert report["harvested"][0]["scene_id"] == "short_continue"
     assert report["harvested"][0]["good_examples"][0]["source_report"] == str(details_path)
+
+
+def test_merge_reviewed_surface_scene_samples_appends_without_duplicates() -> None:
+    pack = {
+        "schema_version": 1,
+        "sample_kind": "surface_scene_quality_pack",
+        "scenes": [
+            {
+                "scene_id": "short_continue",
+                "title": "短继续",
+                "user_markers": ["继续"],
+                "required_move": "短接。",
+                "good_examples": ["嗯，接着来。"],
+                "bad_examples": ["继续主链。"],
+                "should_not_surface": ["主链"],
+                "source": "manual_gold",
+                "source_note": "初始。",
+            }
+        ],
+    }
+    reviewed = {
+        "schema_version": 1,
+        "sample_kind": "surface_scene_quality_reviewed",
+        "scenes": [
+            {
+                "scene_id": "short_continue",
+                "good_examples": ["嗯，接着来。", {"text": "哼，接着说。"}],
+                "bad_examples": ["好，接着往 surface 主链走。"],
+                "should_not_surface": ["surface"],
+                "source_note": "review batch 1。",
+            }
+        ],
+    }
+
+    merged = merge_reviewed_surface_scene_samples(pack, reviewed)
+    scene = merged["scenes"][0]
+
+    assert scene["good_examples"] == ["嗯，接着来。", "哼，接着说。"]
+    assert scene["bad_examples"] == ["继续主链。", "好，接着往 surface 主链走。"]
+    assert scene["should_not_surface"] == ["主链", "surface"]
+    assert scene["source"] == "manual_gold+reviewed"

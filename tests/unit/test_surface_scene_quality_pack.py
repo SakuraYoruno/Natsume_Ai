@@ -1,16 +1,23 @@
 from __future__ import annotations
 
+import json
+
 from host_brain.persona.surface_scene_quality_pack import (
+    DEFAULT_SURFACE_SCENE_QUALITY_PACK_PATH,
+    clear_surface_scene_quality_pack_cache,
     get_surface_scene_quality_pack,
+    load_surface_scene_quality_pack,
     render_surface_scene_quality_guidance,
     select_surface_scene_quality_sample,
     surface_scene_quality_memory_ab_case_payloads,
+    surface_scene_quality_pack_payload,
 )
 
 
 def test_surface_scene_quality_pack_has_named_sources() -> None:
     samples = get_surface_scene_quality_pack()
 
+    assert DEFAULT_SURFACE_SCENE_QUALITY_PACK_PATH.exists()
     assert len(samples) >= 8
     assert {sample.scene_id for sample in samples} >= {
         "technical_next_step",
@@ -21,6 +28,50 @@ def test_surface_scene_quality_pack_has_named_sources() -> None:
     assert all(sample.source for sample in samples)
     assert all(sample.good_examples for sample in samples)
     assert all(sample.bad_examples for sample in samples)
+
+
+def test_surface_scene_quality_pack_payload_is_json_data_backed() -> None:
+    payload = surface_scene_quality_pack_payload()
+
+    assert payload["sample_kind"] == "surface_scene_quality_pack"
+    assert len(payload["scenes"]) >= 8
+    assert {scene["scene_id"] for scene in payload["scenes"]} >= {"short_continue", "return_chat"}
+
+
+def test_surface_scene_quality_pack_can_be_overridden(tmp_path, monkeypatch) -> None:  # noqa: ANN001
+    pack_path = tmp_path / "surface_scene_quality_pack.json"
+    pack_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "sample_kind": "surface_scene_quality_pack",
+                "scenes": [
+                    {
+                        "scene_id": "short_continue",
+                        "title": "短继续 override",
+                        "user_markers": ["继续"],
+                        "required_move": "只短接。",
+                        "scoring_focus": ["naturalness"],
+                        "good_examples": ["行，继续。"],
+                        "bad_examples": ["继续主链。"],
+                        "should_not_surface": ["主链"],
+                        "source": "test_override",
+                    }
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("HOST_SURFACE_SCENE_QUALITY_PACK_PATH", str(pack_path))
+    clear_surface_scene_quality_pack_cache()
+
+    samples = get_surface_scene_quality_pack()
+
+    assert len(samples) == 1
+    assert samples[0].scene_id == "short_continue"
+    assert samples[0].good_examples == ("行，继续。",)
+    assert load_surface_scene_quality_pack(pack_path)[0].source == "test_override"
 
 
 def test_scene_quality_selector_prefers_relationship_memory_reassurance() -> None:

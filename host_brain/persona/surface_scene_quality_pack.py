@@ -1,11 +1,23 @@
 from __future__ import annotations
 
+import json
+import os
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Any, Sequence
+from pathlib import Path
+from typing import Any
+
+
+ROOT = Path(__file__).resolve().parents[2]
+DEFAULT_SURFACE_SCENE_QUALITY_PACK_PATH = ROOT / "data" / "style_bank" / "surface_scene_quality_pack.json"
 
 
 def _clean_text(value: Any) -> str:
     return str(value or "").strip()
+
+
+def _clean_list(values: Any) -> tuple[str, ...]:
+    return tuple(dict.fromkeys(item for item in (_clean_text(value) for value in values or ()) if item))
 
 
 def _contains_any(text: str, markers: Sequence[str]) -> bool:
@@ -24,6 +36,21 @@ class SurfaceSceneQualitySample:
     bad_examples: tuple[str, ...] = field(default_factory=tuple)
     source: str = "manual_gold"
     source_note: str = ""
+
+    @classmethod
+    def from_dict(cls, payload: Mapping[str, Any]) -> "SurfaceSceneQualitySample":
+        return cls(
+            scene_id=_clean_text(payload.get("scene_id")),
+            title=_clean_text(payload.get("title")),
+            user_markers=_clean_list(payload.get("user_markers")),
+            required_move=_clean_text(payload.get("required_move")),
+            should_not_surface=_clean_list(payload.get("should_not_surface")),
+            scoring_focus=_clean_list(payload.get("scoring_focus")),
+            good_examples=_clean_list(payload.get("good_examples")),
+            bad_examples=_clean_list(payload.get("bad_examples")),
+            source=_clean_text(payload.get("source")) or "manual_gold",
+            source_note=_clean_text(payload.get("source_note")),
+        )
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -58,7 +85,7 @@ class SurfaceSceneQualitySample:
         return "\n".join(lines)
 
 
-SURFACE_SCENE_QUALITY_PACK: tuple[SurfaceSceneQualitySample, ...] = (
+_FALLBACK_SURFACE_SCENE_QUALITY_PACK: tuple[SurfaceSceneQualitySample, ...] = (
     SurfaceSceneQualitySample(
         scene_id="technical_next_step",
         title="技术下一步",
@@ -158,23 +185,77 @@ SURFACE_SCENE_QUALITY_PACK: tuple[SurfaceSceneQualitySample, ...] = (
 )
 
 
-_PACK_BY_SCENE = {sample.scene_id: sample for sample in SURFACE_SCENE_QUALITY_PACK}
+def _surface_scene_quality_pack_path(path: str | os.PathLike[str] | None = None) -> Path:
+    return Path(
+        path
+        or os.environ.get("HOST_SURFACE_SCENE_QUALITY_PACK_PATH")
+        or DEFAULT_SURFACE_SCENE_QUALITY_PACK_PATH
+    )
 
 
-def get_surface_scene_quality_pack() -> tuple[SurfaceSceneQualitySample, ...]:
-    return SURFACE_SCENE_QUALITY_PACK
+def load_surface_scene_quality_pack(
+    path: str | os.PathLike[str] | None = None,
+) -> tuple[SurfaceSceneQualitySample, ...]:
+    pack_path = _surface_scene_quality_pack_path(path)
+    if not pack_path.exists():
+        return _FALLBACK_SURFACE_SCENE_QUALITY_PACK
+    try:
+        payload = json.loads(pack_path.read_text(encoding="utf-8-sig"))
+    except (OSError, json.JSONDecodeError):
+        return _FALLBACK_SURFACE_SCENE_QUALITY_PACK
+    if not isinstance(payload, Mapping):
+        return _FALLBACK_SURFACE_SCENE_QUALITY_PACK
+    raw_scenes = payload.get("scenes")
+    if not isinstance(raw_scenes, list):
+        return _FALLBACK_SURFACE_SCENE_QUALITY_PACK
+    samples = tuple(
+        sample
+        for sample in (
+            SurfaceSceneQualitySample.from_dict(item)
+            for item in raw_scenes
+            if isinstance(item, Mapping)
+        )
+        if sample.scene_id and sample.good_examples and sample.bad_examples
+    )
+    return samples or _FALLBACK_SURFACE_SCENE_QUALITY_PACK
+
+
+_PACK_CACHE: dict[str, tuple[SurfaceSceneQualitySample, ...]] = {}
+
+
+def get_surface_scene_quality_pack(
+    path: str | os.PathLike[str] | None = None,
+) -> tuple[SurfaceSceneQualitySample, ...]:
+    pack_path = _surface_scene_quality_pack_path(path)
+    key = str(pack_path.resolve())
+    cached = _PACK_CACHE.get(key)
+    if cached is None:
+        cached = load_surface_scene_quality_pack(pack_path)
+        _PACK_CACHE[key] = cached
+    return cached
+
+
+def clear_surface_scene_quality_pack_cache() -> None:
+    _PACK_CACHE.clear()
+
+
+def _pack_by_scene(path: str | os.PathLike[str] | None = None) -> dict[str, SurfaceSceneQualitySample]:
+    return {sample.scene_id: sample for sample in get_surface_scene_quality_pack(path)}
 
 
 def get_surface_scene_quality_sample(scene_id: str) -> SurfaceSceneQualitySample | None:
-    return _PACK_BY_SCENE.get(_clean_text(scene_id))
+    return _pack_by_scene().get(_clean_text(scene_id))
 
 
 def surface_scene_quality_pack_payload() -> dict[str, Any]:
     return {
         "schema_version": 1,
         "sample_kind": "surface_scene_quality_pack",
-        "scenes": [sample.as_dict() for sample in SURFACE_SCENE_QUALITY_PACK],
+        "scenes": [sample.as_dict() for sample in get_surface_scene_quality_pack()],
     }
+
+
+SURFACE_SCENE_QUALITY_PACK = get_surface_scene_quality_pack()
 
 
 def select_surface_scene_quality_sample(
@@ -186,22 +267,23 @@ def select_surface_scene_quality_sample(
     text = _clean_text(user_message)
     task = _clean_text(task_mode).lower()
     move = _clean_text(response_move).lower()
+    by_scene = _pack_by_scene()
     if _contains_any(text, ("不记得", "忘了我", "忘记我", "记不记得", "是不是忘")):
-        return _PACK_BY_SCENE["relationship_memory_reassurance"]
+        return by_scene.get("relationship_memory_reassurance")
     if task in {"technical_help", "next_step"} or move in {"give_next_step", "technical_next_step"}:
-        return _PACK_BY_SCENE["technical_next_step"]
+        return by_scene.get("technical_next_step")
     if text in {"继续", "接着", "嗯", "行", "好"}:
-        return _PACK_BY_SCENE["short_continue"]
+        return by_scene.get("short_continue")
     if task in {"recall_memory", "memory_followup", "recall"} or _contains_any(text, ("还记得", "刚才说", "上次说")):
-        return _PACK_BY_SCENE["explicit_memory"]
+        return by_scene.get("explicit_memory")
     if text in {"早", "早安", "早上好"} or task in {"daily_good_morning", "good_morning"}:
-        return _PACK_BY_SCENE["daily_morning"]
+        return by_scene.get("daily_morning")
     if task in {"tired", "headache", "sleepy", "bad_mood"} or _contains_any(text, ("累", "有点累", "好累", "困")):
-        return _PACK_BY_SCENE["tired"]
+        return by_scene.get("tired")
     if task in {"style_repair", "ack_style_issue"} or _contains_any(text, ("怪", "不通顺", "不像人话", "人机")):
-        return _PACK_BY_SCENE["negative_feedback"]
+        return by_scene.get("negative_feedback")
     if task in {"back", "daily_back"} or move in {"welcome_back", "back", "reply_back"} or _contains_any(text, ("我回来了", "回来了", "回来啦")):
-        return _PACK_BY_SCENE["return_chat"]
+        return by_scene.get("return_chat")
     return None
 
 
@@ -456,9 +538,12 @@ def _memory(
 
 
 __all__ = [
+    "DEFAULT_SURFACE_SCENE_QUALITY_PACK_PATH",
     "SurfaceSceneQualitySample",
+    "clear_surface_scene_quality_pack_cache",
     "get_surface_scene_quality_pack",
     "get_surface_scene_quality_sample",
+    "load_surface_scene_quality_pack",
     "render_surface_scene_quality_guidance",
     "select_surface_scene_quality_sample",
     "surface_scene_quality_memory_ab_case_payloads",

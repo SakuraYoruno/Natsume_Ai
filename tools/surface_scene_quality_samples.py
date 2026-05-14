@@ -99,6 +99,11 @@ def _load_details(path: Path) -> list[Mapping[str, Any]]:
     return []
 
 
+def _load_json_mapping(path: Path) -> Mapping[str, Any]:
+    payload = json.loads(path.read_text(encoding="utf-8-sig"))
+    return payload if isinstance(payload, Mapping) else {}
+
+
 def _candidate_examples(
     *,
     row: Mapping[str, Any],
@@ -326,6 +331,92 @@ def _dedupe_dict_examples(examples: Sequence[Mapping[str, Any]], *, reverse: boo
     )
 
 
+def _reviewed_example_texts(value: Any) -> tuple[str, ...]:
+    if not isinstance(value, list):
+        return ()
+    texts: list[str] = []
+    for item in value:
+        if isinstance(item, Mapping):
+            texts.append(_clean_text(item.get("text")))
+        else:
+            texts.append(_clean_text(item))
+    return _clean_list(texts)
+
+
+def _append_unique(base: Sequence[Any], additions: Sequence[Any]) -> list[str]:
+    return list(_clean_list([*list(base or ()), *list(additions or ())]))
+
+
+def merge_reviewed_surface_scene_samples(
+    pack_payload: Mapping[str, Any],
+    reviewed_payload: Mapping[str, Any],
+) -> dict[str, Any]:
+    pack = dict(pack_payload or {})
+    scenes = [dict(scene) for scene in list(pack.get("scenes") or ()) if isinstance(scene, Mapping)]
+    by_scene = {
+        _clean_text(scene.get("scene_id")): scene
+        for scene in scenes
+        if _clean_text(scene.get("scene_id"))
+    }
+    reviewed_scenes = reviewed_payload.get("scenes") or reviewed_payload.get("reviewed") or ()
+    if not isinstance(reviewed_scenes, list):
+        reviewed_scenes = ()
+    for raw_review in reviewed_scenes:
+        if not isinstance(raw_review, Mapping):
+            continue
+        scene_id = _clean_text(raw_review.get("scene_id"))
+        if not scene_id:
+            continue
+        scene = by_scene.get(scene_id)
+        if scene is None:
+            scene = {
+                "scene_id": scene_id,
+                "title": _clean_text(raw_review.get("title")) or scene_id,
+                "user_markers": list(_clean_list(raw_review.get("user_markers") or ())),
+                "required_move": _clean_text(raw_review.get("required_move")),
+                "should_not_surface": [],
+                "scoring_focus": list(_clean_list(raw_review.get("scoring_focus") or ())),
+                "good_examples": [],
+                "bad_examples": [],
+                "source": "reviewed",
+                "source_note": "人工 reviewed 样本晋升。",
+            }
+            scenes.append(scene)
+            by_scene[scene_id] = scene
+        good = _reviewed_example_texts(raw_review.get("good_examples"))
+        bad = _reviewed_example_texts(raw_review.get("bad_examples"))
+        should_not = _reviewed_example_texts(raw_review.get("should_not_surface"))
+        if good:
+            scene["good_examples"] = _append_unique(scene.get("good_examples") or (), good)
+        if bad:
+            scene["bad_examples"] = _append_unique(scene.get("bad_examples") or (), bad)
+        if should_not:
+            scene["should_not_surface"] = _append_unique(scene.get("should_not_surface") or (), should_not)
+        if good or bad or should_not:
+            source = _clean_text(scene.get("source")) or "manual_gold"
+            if "reviewed" not in source:
+                scene["source"] = f"{source}+reviewed"
+            note = _clean_text(scene.get("source_note"))
+            review_note = _clean_text(raw_review.get("source_note")) or "人工 reviewed 样本晋升。"
+            if review_note and review_note not in note:
+                scene["source_note"] = f"{note} {review_note}".strip()
+    pack["schema_version"] = int(pack.get("schema_version") or 1)
+    pack["sample_kind"] = "surface_scene_quality_pack"
+    pack["scenes"] = scenes
+    return pack
+
+
+def merge_reviewed_surface_scene_sample_files(
+    *,
+    reviewed_paths: Sequence[Path],
+    base_pack: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    merged = dict(base_pack or surface_scene_quality_pack_payload())
+    for path in reviewed_paths:
+        merged = merge_reviewed_surface_scene_samples(merged, _load_json_mapping(path))
+    return merged
+
+
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Harvest surface scene quality samples from AB details.")
     parser.add_argument("--details", action="append", default=[])
@@ -334,6 +425,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-bad-score", type=float, default=70.0)
     parser.add_argument("--max-per-scene", type=int, default=8)
     parser.add_argument("--no-current-pack", action="store_true")
+    parser.add_argument("--reviewed", action="append", default=[])
+    parser.add_argument("--merge-out", default="")
     return parser
 
 
@@ -352,7 +445,16 @@ def main() -> None:
     out_path = Path(args.out)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    print(json.dumps({"output": str(out_path), "scene_count": len(payload["harvested"])}, ensure_ascii=False))
+    result = {"output": str(out_path), "scene_count": len(payload["harvested"])}
+    reviewed_paths = [Path(item) for item in args.reviewed]
+    if args.merge_out:
+        merged_pack = merge_reviewed_surface_scene_sample_files(reviewed_paths=reviewed_paths)
+        merge_out = Path(args.merge_out)
+        merge_out.parent.mkdir(parents=True, exist_ok=True)
+        merge_out.write_text(json.dumps(merged_pack, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        result["merged_pack_output"] = str(merge_out)
+        result["merged_scene_count"] = len(merged_pack.get("scenes") or [])
+    print(json.dumps(result, ensure_ascii=False))
 
 
 if __name__ == "__main__":
