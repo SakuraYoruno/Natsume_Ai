@@ -113,23 +113,24 @@ def test_build_surface_main_chain_input_derives_reply_plan_without_passing_histo
         lambda: SimpleNamespace(source_text=SOUL, runtime_full_text=SOUL),
     )
 
-    def _fake_build_cortex_prompt(**kwargs):  # noqa: ANN003
-        assert kwargs["include_runtime_payload"] is True
-        return (
-            [{"role": "system", "content": "RAW HISTORY PROMPT SHOULD NOT REACH SURFACE"}],
-            {},
-            {
-                "reply_plan": {
-                    "primary_topic": "presence_ping",
-                    "interaction_move": "answer_current_chat_presence",
-                    "response_form": "text",
-                    "max_questions": 0,
-                },
-                "conversation_history": {"turns_injected": 2, "summary_present": True},
-            },
-        )
+    def _blocked_build_cortex_prompt(**_kwargs):  # noqa: ANN003
+        raise AssertionError("surface main chain must not build legacy cortex prompt messages")
 
-    monkeypatch.setattr("host_brain.app.cortex_prompt_builder.build_cortex_prompt", _fake_build_cortex_prompt)
+    def _fake_surface_context_packet(**kwargs):  # noqa: ANN003
+        assert kwargs["user_message"] == "这段我不会改"
+        return {
+            "reply_plan": {
+                "primary_topic": "presence_ping",
+                "interaction_move": "answer_current_chat_presence",
+                "response_form": "text",
+                "max_questions": 0,
+            },
+            "conversation_history": {"turns_injected": 2, "summary_present": True},
+            "legacy_messages": [{"content": "RAW HISTORY PROMPT SHOULD NOT REACH SURFACE"}],
+        }
+
+    monkeypatch.setattr("host_brain.app.cortex_prompt_builder.build_cortex_prompt", _blocked_build_cortex_prompt)
+    monkeypatch.setattr("host_brain.app.surface_context_packet.build_surface_context_packet", _fake_surface_context_packet)
 
     payload = build_surface_main_chain_input_from_chat_input(
         _agent_input(render_policy={}, surface_task_control={}),

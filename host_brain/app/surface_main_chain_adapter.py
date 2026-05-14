@@ -368,9 +368,9 @@ def _build_surface_runtime_payload(
     trace_stage_meta: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     try:
-        from host_brain.app.cortex_prompt_builder import build_cortex_prompt  # noqa: PLC0415
+        from host_brain.app.surface_context_packet import build_surface_context_packet  # noqa: PLC0415
 
-        prompt_result = build_cortex_prompt(
+        runtime_payload = build_surface_context_packet(
             user_message=str(getattr(agent_input, "user_message", "") or ""),
             render_target_lang=str(getattr(agent_input, "render_target_lang", "") or "zh"),
             emotion_context=_safe_mapping(getattr(agent_input, "emotion_context", None)),
@@ -382,15 +382,9 @@ def _build_surface_runtime_payload(
             request_id=str(getattr(agent_input, "request_id", "") or ""),
             thread_id=getattr(agent_input, "thread_id", None),
             bond_summary=_safe_mapping(getattr(agent_input, "bond_summary", None)),
-            attachments=list(getattr(agent_input, "attachments", None) or []),
-            multimodal_observations=_safe_mapping(getattr(agent_input, "multimodal_observations", None)),
-            attachment_summary=str(getattr(agent_input, "attachment_summary", "") or "").strip(),
+            intent_draft=_safe_mapping(getattr(agent_input, "intent_draft", None)),
             eval_history_turns=list(getattr(agent_input, "eval_history_turns", None) or []),
-            include_runtime_payload=True,
         )
-        if not (isinstance(prompt_result, tuple) and len(prompt_result) >= 3):
-            return {}
-        runtime_payload = dict(prompt_result[2] or {}) if isinstance(prompt_result[2], Mapping) else {}
         _merge_surface_trace(trace_stage_meta, runtime_payload)
         return runtime_payload
     except Exception as exc:
