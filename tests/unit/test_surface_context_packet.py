@@ -77,6 +77,16 @@ def test_build_surface_context_packet_extracts_compressed_context_only(monkeypat
     packet = build_surface_context_packet(
         user_message="continue",
         render_target_lang="zh",
+        emotion_context={"emotion_tag": "ANXIOUS", "emotion_intensity": 0.6},
+        retrieval_summary={
+            "status": "OK",
+            "surface_memory_recall_packet": {
+                "facts": ["用户上次卡在输入输出边界。"],
+                "relationship_clues": ["熟人私聊，不升级亲密。"],
+                "source_refs": ["memory://raw/should-not-pass"],
+                "evidence_refs": ["evd://memory/1"],
+            },
+        },
         request_id="req-surface-context",
         session_id="sess-surface-context",
         person_id="user-1",
@@ -98,6 +108,11 @@ def test_build_surface_context_packet_extracts_compressed_context_only(monkeypat
     }
     assert "recent_turns" not in packet
     assert "summary" not in packet
+    assert packet["surface_memory_recall_packet"]["facts"] == ["用户上次卡在输入输出边界。"]
+    assert packet["surface_memory_recall_packet"]["relationship_clues"] == ["熟人私聊，不升级亲密。"]
+    assert "source_refs" not in packet["surface_memory_recall_packet"]
+    assert packet["surface_affect_packet"]["emotional_tone"] == "steady_helpful"
+    assert packet["surface_affect_packet"]["relationship_distance"] == "familiar"
 
 
 def test_build_surface_context_packet_reassembles_compact_lane(monkeypatch) -> None:

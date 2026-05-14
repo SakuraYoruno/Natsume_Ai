@@ -126,6 +126,18 @@ def test_build_surface_main_chain_input_derives_reply_plan_without_passing_histo
                 "max_questions": 0,
             },
             "conversation_history": {"turns_injected": 2, "summary_present": True},
+            "surface_affect_packet": {
+                "emotional_tone": "slightly_guilty",
+                "relationship_distance": "familiar_not_intimate",
+                "style_anchor": ["轻轻承认慢了一拍，马上回到当前对话。"],
+                "must_not_do": ["不要把慢了一拍写成现实动作"],
+            },
+            "surface_memory_recall_packet": {
+                "facts": ["用户刚刚指出上一句不通顺。"],
+                "relationship_clues": ["熟人私聊，不升级亲密。"],
+                "source_refs": ["memory://raw/should-not-pass"],
+                "evidence_refs": ["evd://memory/1"],
+            },
             "legacy_messages": [{"content": "RAW HISTORY PROMPT SHOULD NOT REACH SURFACE"}],
         }
 
@@ -140,9 +152,13 @@ def test_build_surface_main_chain_input_derives_reply_plan_without_passing_histo
 
     assert payload.task_control["task_mode"] == "presence_ping"
     assert payload.task_control["response_move"] == "answer_current_chat_presence"
+    assert payload.affect_packet.emotional_tone == "slightly_guilty"
+    assert tuple(payload.memory_packet.facts) == ("用户刚刚指出上一句不通顺。",)
     assert trace["conversation_history"] == {"turns_injected": 2, "summary_present": True}
     assert trace["reply_plan"]["primary_topic"] == "presence_ping"
+    assert trace["surface_affect_packet"]["emotional_tone"] == "slightly_guilty"
     assert "RAW HISTORY PROMPT SHOULD NOT REACH SURFACE" not in rendered
+    assert "memory://raw/should-not-pass" not in rendered
 
 
 @pytest.mark.asyncio

@@ -6,6 +6,8 @@ from typing import Any
 from host_brain.app.chat_runtime_input import build_chat_runtime_input
 from host_brain.app.context.prompt_context_plane import assemble_prompt_context_plane
 from host_brain.app.relational_chat_detector import detect_relational_chat_topic
+from host_brain.persona.surface_affect_control import build_surface_affect_control_packet
+from host_brain.persona.surface_memory_recall import MemoryRecallPacket, memory_recall_packet_from_mapping
 
 
 SURFACE_CONTEXT_NODE_ID = "surface_main_chain_context"
@@ -28,6 +30,11 @@ _COMPACT_LANE_THREADS = {
     "phatic",
     "assistant_reply_followup",
 }
+_MEMORY_PACKET_KEYS = (
+    "surface_memory_recall_packet",
+    "memory_recall_packet",
+    "memory_packet",
+)
 
 
 def build_surface_context_packet(
@@ -88,7 +95,13 @@ def build_surface_context_packet(
             history_max_turns=6,
             allow_older_summary=False,
         )
-    return _surface_context_payload_from_plane(context_plane)
+    return _surface_context_payload_from_plane(
+        context_plane,
+        emotion_context=emotion_context,
+        emotion_snapshot=emotion_snapshot,
+        bond_summary=bond_summary,
+        retrieval_summary=retrieval_summary,
+    )
 
 
 def _build_surface_runtime_payload(
@@ -150,8 +163,33 @@ def _build_surface_runtime_payload(
     return payload
 
 
-def _surface_context_payload_from_plane(context_plane: Any) -> dict[str, Any]:
+def _surface_context_payload_from_plane(
+    context_plane: Any,
+    *,
+    emotion_context: Mapping[str, Any] | None,
+    emotion_snapshot: Mapping[str, Any] | None,
+    bond_summary: Mapping[str, Any] | None,
+    retrieval_summary: Mapping[str, Any] | None,
+) -> dict[str, Any]:
     continuity = getattr(context_plane, "continuity", None)
+    reply_plan = dict(getattr(getattr(context_plane, "reply_plan", None), "state", {}) or {})
+    memory_packet = _memory_packet_from_retrieval_summary(retrieval_summary)
+    affect_state_payload = _state_as_dict(getattr(getattr(context_plane, "affect", None), "state", None))
+    relationship_state_payload = _state_as_dict(getattr(getattr(context_plane, "relationship", None), "state", None))
+    affect_packet = build_surface_affect_control_packet(
+        emotion_state=affect_state_payload or dict(emotion_context or {}) or dict(emotion_snapshot or {}),
+        bond_summary={
+            **dict(bond_summary or {}),
+            **relationship_state_payload,
+        },
+        relationship_clues=tuple(memory_packet.relationship_clues if memory_packet else ()),
+        task_mode=str(
+            reply_plan.get("task_mode")
+            or reply_plan.get("primary_topic")
+            or reply_plan.get("response_goal")
+            or ""
+        ),
+    )
     payload: dict[str, Any] = {
         "conversation_history": {
             "turns_injected": int(getattr(continuity, "turns_injected", 0) or 0),
@@ -164,8 +202,11 @@ def _surface_context_payload_from_plane(context_plane: Any) -> dict[str, Any]:
             "skipped_empty_count": int(getattr(continuity, "skipped_empty_count", 0) or 0),
             "deduped_same_role_count": int(getattr(continuity, "deduped_same_role_count", 0) or 0),
         },
-        "reply_plan": dict(getattr(getattr(context_plane, "reply_plan", None), "state", {}) or {}),
+        "reply_plan": reply_plan,
+        "surface_affect_packet": affect_packet.as_dict(),
     }
+    if memory_packet is not None:
+        payload["surface_memory_recall_packet"] = memory_packet.as_dict()
     for output_key, plane_attr in (
         ("conversation_interpretation", "conversation_interpretation"),
         ("interaction_thread", "interaction_thread"),
@@ -190,6 +231,15 @@ def _should_use_compact_surface_context(*, relational_topic: str, context_plane:
     topic = _extract_context_topic(context_plane).lower()
     thread_name = _extract_context_thread(context_plane).lower()
     return topic in _COMPACT_LANE_TOPICS or thread_name in _COMPACT_LANE_THREADS
+
+
+def _memory_packet_from_retrieval_summary(retrieval_summary: Mapping[str, Any] | None) -> MemoryRecallPacket | None:
+    summary = dict(retrieval_summary or {})
+    for key in _MEMORY_PACKET_KEYS:
+        raw = summary.get(key)
+        if isinstance(raw, (MemoryRecallPacket, Mapping)):
+            return memory_recall_packet_from_mapping(raw)
+    return None
 
 
 def _extract_context_topic(context_plane: Any) -> str:

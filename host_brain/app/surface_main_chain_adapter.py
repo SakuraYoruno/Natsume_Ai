@@ -10,7 +10,11 @@ from typing import Any
 from host_brain.app.context.soul_runtime import get_compiled_soul
 from host_brain.app.reply_envelope import ReplyEnvelope
 from host_brain.app.response_form_contract import normalize_response_form
-from host_brain.persona.surface_affect_control import build_surface_affect_control_packet
+from host_brain.persona.surface_affect_control import (
+    SurfaceAffectControlPacket,
+    affect_control_packet_from_mapping,
+    build_surface_affect_control_packet,
+)
 from host_brain.persona.surface_main_chain import SurfaceMainChain, SurfaceMainChainInput, SurfaceMainChainResult
 from host_brain.persona.surface_memory_recall import MemoryRecallPacket, memory_recall_packet_from_mapping
 
@@ -31,6 +35,8 @@ _TRACE_RUNTIME_PAYLOAD_KEYS = (
     "relationship_state",
     "drive_state",
     "reply_plan",
+    "surface_affect_packet",
+    "surface_memory_recall_packet",
 )
 _TEXT_RESPONSE_FORMS = {"", "text", "plain_text", "chat_text", "zh_text"}
 
@@ -56,19 +62,13 @@ def build_surface_main_chain_input_from_chat_input(
     soul = get_compiled_soul()
     reply_plan = _resolve_surface_reply_plan(agent_input, trace_stage_meta=trace_stage_meta)
     task_control = _surface_task_control_from_reply_plan(agent_input=agent_input, reply_plan=reply_plan)
-    affect_packet = build_surface_affect_control_packet(
-        emotion_state=_safe_mapping(getattr(agent_input, "emotion_context", None))
-        or _safe_mapping(getattr(agent_input, "emotion_snapshot", None)),
-        bond_summary=_safe_mapping(getattr(agent_input, "bond_summary", None)),
-        relationship_clues=_relationship_clues(agent_input),
-        task_mode=str(task_control.get("task_mode") or ""),
-    )
+    affect_packet = _affect_packet(agent_input, task_control=task_control, trace_stage_meta=trace_stage_meta)
     return SurfaceMainChainInput(
         soul_md=str(getattr(soul, "source_text", "") or getattr(soul, "runtime_full_text", "")).strip(),
         user_message=str(getattr(agent_input, "user_message", "") or "").strip(),
         case_id=str(getattr(agent_input, "request_id", "") or "").strip(),
         task_control=task_control,
-        memory_packet=_memory_packet(agent_input),
+        memory_packet=_memory_packet(agent_input, trace_stage_meta=trace_stage_meta),
         affect_packet=affect_packet,
         necessary_facts=_necessary_facts(agent_input),
         must_not_do=(),
@@ -438,8 +438,32 @@ def _surface_task_control_from_reply_plan(*, agent_input: Any, reply_plan: Mappi
     }
 
 
-def _memory_packet(agent_input: Any) -> MemoryRecallPacket | None:
+def _affect_packet(
+    agent_input: Any,
+    *,
+    task_control: Mapping[str, Any],
+    trace_stage_meta: Mapping[str, Any] | None = None,
+) -> SurfaceAffectControlPacket:
     for container in (
+        _safe_mapping(trace_stage_meta),
+        _safe_mapping(getattr(agent_input, "trace_stage_meta", None)),
+    ):
+        for key in ("surface_affect_packet", "affect_control_packet", "affect_packet"):
+            raw = container.get(key)
+            if isinstance(raw, (SurfaceAffectControlPacket, Mapping)):
+                return affect_control_packet_from_mapping(raw)
+    return build_surface_affect_control_packet(
+        emotion_state=_safe_mapping(getattr(agent_input, "emotion_context", None))
+        or _safe_mapping(getattr(agent_input, "emotion_snapshot", None)),
+        bond_summary=_safe_mapping(getattr(agent_input, "bond_summary", None)),
+        relationship_clues=_relationship_clues(agent_input),
+        task_mode=str(task_control.get("task_mode") or ""),
+    )
+
+
+def _memory_packet(agent_input: Any, *, trace_stage_meta: Mapping[str, Any] | None = None) -> MemoryRecallPacket | None:
+    for container in (
+        _safe_mapping(trace_stage_meta),
         _safe_mapping(getattr(agent_input, "trace_stage_meta", None)),
         _safe_mapping(getattr(agent_input, "retrieval_summary", None)),
     ):
