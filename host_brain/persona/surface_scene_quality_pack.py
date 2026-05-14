@@ -169,6 +169,14 @@ def get_surface_scene_quality_sample(scene_id: str) -> SurfaceSceneQualitySample
     return _PACK_BY_SCENE.get(_clean_text(scene_id))
 
 
+def surface_scene_quality_pack_payload() -> dict[str, Any]:
+    return {
+        "schema_version": 1,
+        "sample_kind": "surface_scene_quality_pack",
+        "scenes": [sample.as_dict() for sample in SURFACE_SCENE_QUALITY_PACK],
+    }
+
+
 def select_surface_scene_quality_sample(
     *,
     user_message: str,
@@ -454,4 +462,5 @@ __all__ = [
     "render_surface_scene_quality_guidance",
     "select_surface_scene_quality_sample",
     "surface_scene_quality_memory_ab_case_payloads",
+    "surface_scene_quality_pack_payload",
 ]
