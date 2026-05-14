@@ -1401,6 +1401,61 @@ def runtime_lifespan(
                 new_module_statuses["long_term_distillation_catalog"] = f"DEGRADED: {_lt_exc}"
                 logger.warning("长期蒸馏工具注册失败（降级）: %s", _lt_exc)
 
+            try:
+                from host_brain.app.automation.task_scheduler import (  # noqa: PLC0415
+                    ScheduledTask,
+                    TaskPriority,
+                    get_scheduler,
+                )
+                from host_brain.app.dependencies import get_security_immune_agent  # noqa: PLC0415
+
+                _security_agent = get_security_immune_agent()
+                _security_policy = _security_agent.policy
+                if not _background_tasks_enabled:
+                    new_module_statuses["security_immune_agent"] = (
+                        "SKIPPED: HOST_BACKGROUND_TASKS_ENABLED=false"
+                    )
+                elif not bool(_security_policy.enabled):
+                    new_module_statuses["security_immune_agent"] = (
+                        "SKIPPED: SECURITY_IMMUNE_ENABLED=false"
+                    )
+                else:
+                    _security_scheduler = get_scheduler()
+
+                    async def _run_security_immune_task() -> None:
+                        await get_security_immune_agent().run_once(reason="scheduled")
+
+                    _security_task = ScheduledTask(
+                        task_id="security_immune_periodic",
+                        name="内网安全免疫巡检",
+                        fn=_run_security_immune_task,
+                        interval_s=float(_security_policy.scan_interval_seconds),
+                        max_retries=1,
+                        retry_delay_s=15.0,
+                        enabled=True,
+                        priority=TaskPriority.P1,
+                    )
+                    if not any(
+                        str(task.get("task_id") or "") == _security_task.task_id
+                        for task in _security_scheduler.get_all_tasks_status()
+                    ):
+                        _security_scheduler.register(_security_task)
+                    if _parse_bool_env("SECURITY_IMMUNE_RUN_ON_STARTUP", default=True):
+                        await _security_agent.run_once(reason="startup")
+                    new_module_statuses["security_immune_agent"] = (
+                        f"OK (mode={_security_policy.mode.value}, "
+                        f"task_id={_security_task.task_id}, "
+                        f"interval={int(_security_policy.scan_interval_seconds)}s)"
+                    )
+                    logger.info(
+                        "SecurityImmuneAgent registered: mode=%s interval=%ss",
+                        _security_policy.mode.value,
+                        int(_security_policy.scan_interval_seconds),
+                    )
+            except Exception as _security_immune_exc:
+                new_module_statuses["security_immune_agent"] = f"DEGRADED: {_security_immune_exc}"
+                logger.warning("SecurityImmuneAgent startup degraded: %s", _security_immune_exc)
+
             dependency_probes = _edge_health
             if dependency_probes is None:
                 dependency_probes = await probe_edge_rpc_health()

@@ -147,6 +147,7 @@ _session_topic_ledger_store: Optional[SessionTopicLedgerStore] = None
 _session_tactic_ledger_store: Optional[SessionTacticLedgerStore] = None
 _reply_surface_memory_store: Optional[ReplySurfaceMemoryStore] = None
 _reply_surface_memory_primed: bool = False
+_security_immune_agent: Optional[Any] = None
 
 # ── 进程级 HardState 存储（ModeTransitionService 依赖） ──
 _hard_state_lock = __import__("threading").Lock()
@@ -243,6 +244,16 @@ def get_ledger() -> SQLiteLedger:
         db_path = os.environ.get("Natsume_AUDIT_DB", "host_brain/data/audit.sqlite3")
         _ledger = SQLiteLedger(db_path=db_path, check_same_thread=False)
     return _ledger
+
+
+def get_security_immune_agent():
+    """获取内网安全免疫智能体单例。"""
+    global _security_immune_agent
+    if _security_immune_agent is None:
+        from host_brain.security_immune.agent import get_security_immune_agent as _get_agent  # noqa: PLC0415
+
+        _security_immune_agent = _get_agent(ledger_provider=get_ledger)
+    return _security_immune_agent
 
 
 def get_prompt_template_store() -> PromptTemplateStore:
