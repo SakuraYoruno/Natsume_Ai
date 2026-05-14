@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 
 from host_brain.persona.style_reference_bank import (
+    StyleReference,
     StyleReferenceBank,
     StyleReferenceQuery,
     clear_style_reference_bank_cache,
@@ -93,6 +94,46 @@ def test_style_reference_bank_selects_by_language_and_tags() -> None:
     assert "help" in selection.references[0].intent_tags
 
 
+def test_style_reference_bank_prefers_matching_relationship_stage() -> None:
+    stranger_ref = StyleReference(
+        ref_id="stranger",
+        lang="zh",
+        source_ref="stranger.scn#1",
+        source_digest="s1",
+        confidence=0.65,
+        character_confidence=0.7,
+        intent_tags=("presence",),
+        emotion_tags=("soft",),
+        style_moves=("quick_reaction",),
+        relationship_stages=("stranger",),
+    )
+    lover_ref = StyleReference(
+        ref_id="lover",
+        lang="zh",
+        source_ref="lover.scn#1",
+        source_digest="l1",
+        confidence=0.65,
+        character_confidence=0.7,
+        intent_tags=("presence",),
+        emotion_tags=("soft",),
+        style_moves=("quick_reaction",),
+        relationship_stages=("lover_stable",),
+    )
+    bank = StyleReferenceBank([stranger_ref, lover_ref])
+
+    selection = bank.select(
+        StyleReferenceQuery(
+            lang="zh",
+            intent_tags=("presence",),
+            emotion_tags=("soft",),
+            relationship_stage="lover_stable",
+        )
+    )
+
+    assert selection.references
+    assert selection.references[0].ref_id == "lover"
+
+
 def test_style_reference_bank_does_not_cross_language_fallback_for_zh_query() -> None:
     non_zh_ref = style_reference_from_raw_row(
         {
@@ -134,7 +175,7 @@ def test_render_style_guidance_contains_derived_features_not_raw_dialogue() -> N
         render_profile="zh_text",
     )
 
-    assert "中文风格样本派生特征" in guidance
+    assert "原作台词派生风格特征" in guidance
     assert "禁止照抄" in guidance
     assert "wounded_pushback" in guidance
     assert "别偷偷说" not in guidance

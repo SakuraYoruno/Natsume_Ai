@@ -58,6 +58,26 @@ def _normalize_relationship_stage(raw: Any) -> str:
     return aliases.get(value, value)
 
 
+_RELATIONSHIP_STAGE_ORDER = (
+    "stranger",
+    "new_acquaintance",
+    "familiar",
+    "trusted_friend",
+    "close_friend",
+    "ambiguous",
+    "pre_confession",
+    "lover_early",
+    "lover_stable",
+)
+
+
+def _relationship_stage_distance(left: str, right: str) -> int | None:
+    try:
+        return abs(_RELATIONSHIP_STAGE_ORDER.index(left) - _RELATIONSHIP_STAGE_ORDER.index(right))
+    except ValueError:
+        return None
+
+
 def _normalize_relationship_stages(raw_values: Iterable[Any]) -> tuple[str, ...]:
     seen: set[str] = set()
     out: list[str] = []
@@ -322,15 +342,30 @@ class StyleReferenceBank:
         intent_set = set(query.intent_tags)
         emotion_set = set(query.emotion_tags)
         move_set = set(query.style_moves)
-        stage = str(query.relationship_stage or "").strip()
+        stage = _normalize_relationship_stage(query.relationship_stage)
 
         def score(ref: StyleReference) -> float:
             value = float(ref.confidence)
             value += len(intent_set.intersection(ref.intent_tags)) * 0.35
             value += len(emotion_set.intersection(ref.emotion_tags)) * 0.25
             value += len(move_set.intersection(ref.style_moves)) * 0.2
-            if stage and stage in ref.relationship_stages:
-                value += 0.12
+            if stage:
+                if stage in ref.relationship_stages:
+                    value += 0.34
+                else:
+                    distances = [
+                        distance
+                        for ref_stage in ref.relationship_stages
+                        if (distance := _relationship_stage_distance(stage, ref_stage)) is not None
+                    ]
+                    if distances:
+                        nearest = min(distances)
+                        if nearest == 1:
+                            value += 0.12
+                        elif nearest == 2:
+                            value += 0.04
+                        else:
+                            value -= 0.12
             if intent_set and not intent_set.intersection(ref.intent_tags):
                 value -= 0.2
             return value
@@ -387,7 +422,7 @@ def render_style_guidance(selection: StyleReferenceSelection, *, render_profile:
     lang_label = "中文语音" if render_profile in {"zh_voice", "voice"} else "中文文字"
     lines = [
         f"语言轨道：{lang_label}。",
-        "来源：中文风格样本派生特征；禁止照抄或复述样本文本。",
+        "来源：原作台词派生风格特征；禁止照抄或复述原台词。",
         "可用动作：" + (" / ".join(moves[:8]) or "quick_reaction"),
         "情绪倾向：" + (" / ".join(emotions[:6]) or "neutral"),
     ]
@@ -397,7 +432,9 @@ def render_style_guidance(selection: StyleReferenceSelection, *, render_profile:
         lines.append("本轮匹配场景：" + " / ".join(selection.query.intent_tags[:5]))
     if selection.query.emotion_tags:
         lines.append("本轮匹配情绪：" + " / ".join(selection.query.emotion_tags[:5]))
-    lines.append("运行称呼必须服从 Soul 和关系阶段：未熟时用你或省略称呼，熟悉后才可自然使用尼尼。")
+    if selection.query.relationship_stage:
+        lines.append("本轮关系阶段：" + selection.query.relationship_stage)
+    lines.append("运行称呼必须服从 Soul 和关系阶段：未熟时用你或省略称呼，熟悉后才可自然使用尼尼；关系阶段只改变距离和语气，不改变身份。")
     lines.append("source_refs=" + ", ".join(refs))
     return "\n".join(lines)
 

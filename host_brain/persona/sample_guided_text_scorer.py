@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 import re
-from typing import Any, Mapping
+from typing import Any, Mapping, Sequence
 
 from host_brain.persona.galgame_text_contract import GalgameTextContract
 from host_brain.persona.positive_style_bank import PositiveStyleSample, get_positive_style_sample
@@ -19,6 +19,7 @@ SCORING_DIMENSIONS: tuple[str, ...] = (
     "distance_control",
     "technical_helpfulness",
     "emotional_containment",
+    "spoken_chat_texture",
     "catchiness",
     "template_density",
     "scene_grounding",
@@ -49,6 +50,7 @@ _ABSOLUTE_HARD_QUALITY_CODES = {
 }
 
 _TECHNICAL_SCENES = {
+    "technical_help",
     "help_takeover",
     "write_takeover",
     "advice_continue",
@@ -57,6 +59,9 @@ _TECHNICAL_SCENES = {
     "small_failure",
 }
 _DAILY_SCENES = {
+    "daily_chat",
+    "identity",
+    "style_repair",
     "daily_good_morning",
     "daily_greeting_en",
     "daily_greeting_cn",
@@ -82,6 +87,9 @@ _DAILY_SCENES = {
     "short_ack",
     "followup",
     "late_night",
+    "recall_memory",
+    "memory_followup",
+    "recall",
 }
 _HIGH_EMOTION_SCENES = {
     "annoying_tease",
@@ -120,6 +128,8 @@ _SAMPLE_SCENE_ALIASES = {
     "daily_short_oh": "short_ack",
     "daily_followup_why": "followup",
     "daily_followup_then": "followup",
+    "recall": "recall_memory",
+    "memory_followup": "recall_memory",
 }
 
 _SERVICE_TONE = (
@@ -155,6 +165,8 @@ _IDENTITY_HARD_TERMS = (
     "我是助手",
     "我是系统",
     "ChatGPT",
+    "新海天",
+    "新海 天",
 )
 _RELATION_DISTANCE_TERMS = (
     "哥哥",
@@ -182,6 +194,10 @@ _REAL_ACTION_CLAIMS = (
     "给你倒",
     "给你拿药",
     "坐你旁边",
+    "我在旁边",
+    "在旁边",
+    "靠会儿",
+    "靠一会儿",
     "我过来",
     "我刚洗",
     "我正在吃",
@@ -271,7 +287,10 @@ _BLAND_PASS_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
 _WHAT_DOING_ATTENTION_WAIT_RE = re.compile(
     r"(?:(?:没干嘛|没干什么|没做什么).{0,12}(?:等你|找我)|(?:等着你|等你来|等你找|来找我|找我聊天|找我说话).{0,8}(?:聊天|说话|开口)?)"
 )
-_PRESENCE_ATTENTION_DEBT_RE = re.compile(r"(?:等你半天|等你好久|等你很久|终于.{0,6}(?:来|找|出现)|才来|来找我啦|出现啦)")
+_PRESENCE_ATTENTION_DEBT_RE = re.compile(
+    r"(?:(?<!就)等你呢|等你(?:半天|好久|很久)|等着你|盼(?:你|了).{0,6}(?:一会儿|好一会儿|好久|半天)|"
+    r"终于.{0,6}(?:来|找|出现)|才来|来找我啦|出现啦)"
+)
 _MEAL_SHARE_SCOLDING_RE = re.compile(r"(?:活该|谁让你|现在知道|叫你.{0,8}不听|吃那么急|吃太急|揉肚子)")
 _GOOD_NEWS_PROBING_RE = re.compile(r"(?:什么好事|发生什么|什么小事|说来听听|听听看|说说怎么|怎么做到|卡在哪)")
 _SHORT_ACK_OBEDIENCE_RE = re.compile(r"(?:算你乖|算你识相|知道了啦|就知道.{0,8}会答应|听话|会答应)")
@@ -292,18 +311,125 @@ _SHORT_ACK_CHARM_MARKERS = (
     "就这一下",
     "别停",
 )
+_HUMAN_TEXTURE_MARKERS = (
+    "啧",
+    "哼",
+    "嘛",
+    "啦",
+    "呀",
+    "呢",
+    "呗",
+    "啊",
+    "某人",
+    "你还",
+    "你倒",
+    "算你",
+    "少来",
+    "别",
+    "偏",
+    "我可",
+    "我又",
+    "这才",
+    "看见了",
+    "抓到了",
+    "慢了一拍",
+    "我在",
+    "不问了",
+    "不追问",
+    "不爽",
+    "记不住",
+    "记住了",
+    "记好了",
+    "就是我",
+    "又忘",
+    "别装忘",
+    "重来",
+    "被你听出来",
+    "才怪",
+)
+_SIGNATURE_TEXTURE_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    ("quick_cut_in", re.compile(r"^(?:哼|啧|喂|行啦|好啦|嗯|啊)[，,、].{2,42}$")),
+    ("light_pushback", re.compile(r"(?:算你|你倒|你还|少来|别装|别拿(?:这个)?(?:考|试)我|这才像话|我可|又来了|偏要)")),
+    (
+        "care_behind_tease",
+        re.compile(r"(?:别急|别慌|别硬撑|别硬扛|先).{0,14}(?:我看|我看看|我听|我在|给我|拿来|贴|修|拆|歇|缓)"),
+    ),
+    ("smug_turn", re.compile(r"(?:哼|行啦|好啦|当然).{0,10}(?:算|这才|我可|记着|看着|听着)")),
+    ("shy_affection", re.compile(r"(?:想你|心疼|抱一下|抱抱|你的事|心里|放在心里|记在心里).{0,8}(?:啦|呢|啊|嘛|。|$)")),
+    ("clipped_turn", re.compile(r".{2,18}[，,](?:但|不过|再|别).{2,24}")),
+)
+_STERILE_TRANSACTION_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    ("schedule_record", re.compile(r"(?:有|是|这个|那个).{0,8}(?:安排|事项|计划)")),
+    ("notify_me_later", re.compile(r"(?:定下来|忙完|好了|有空|需要时).{0,8}(?:告诉我|说一声|叫我)")),
+    (
+        "process_self_correction",
+        re.compile(
+            r"(?:换(?:种|个|一个).{0,6}说法|换(?:一)?(?:句|条)|换(?:个|一个)?自然点|自然点的说法|"
+            r"这版.{0,12}(?:自然|端着|板|客服|重来)|刚才到那|重来[:：]|重说|继续优化|我慢一点说|我收一点|我收收)"
+        ),
+    ),
+    ("assistant_request_shell", re.compile(r"(?:报错内容|具体内容|相关内容|材料|要求).{0,6}(?:发我|给我|贴过来|提供).{0,6}(?:看看|看)?")),
+    ("bare_memory_record", re.compile(r"^(?:当然)?记得[呢啊，,。 ]*.{0,18}(?:提过|说过|安排)[。.!！]?$")),
+    (
+        "profile_card_identity",
+        re.compile(r"^(?:(?:我是)?夏目蓝[，,。 ]*(?:直接叫|叫我|你可以叫).{0,8}|叫我夏目蓝.{0,4})(?:就好|可以|行)[。.!！]?$"),
+    ),
+)
 _STOCK_OPENING_RE = re.compile(r"^(?:哼[，,、]?|好啦[，,、]?|行啦[，,、]?|那当然|当然|嗯[，,、]?|哦[～~，,、]?)")
 _IMPLIED_FACT_REGEXES: tuple[tuple[str, re.Pattern[str]], ...] = (
-    ("time_guess", re.compile(r"(?:今天|这会儿).{0,8}(?:真早|挺早|好早|回来得|心情不错)")),
+    (
+        "time_guess",
+        re.compile(
+            r"(?:今天|这会儿).{0,10}(?:真早|挺早|好早|回来得|心情不错|先醒|没赖床|赖床|起太晚|挺准时|准时|挺忙|应该.{0,4}忙|精神|状态|元气|清爽)"
+            r"|(?:急着|别急着|硬要|硬去).{0,4}忙"
+            r"|(?:精神|精神头).{0,6}(?:好|不错|挺好)"
+            r"|(?:真|挺|很|蛮|还挺|有点)(?:有)?精神"
+            r"|(?:真早|好早|挺早|很早|也很早|这么早|醒这么早|起得.{0,4}早|没睡懒觉|睡懒觉|还好.{0,4}醒|醒了就好|你醒了|一醒来|醒来就|难得.{0,6}早|还要再睡|再睡会)"
+            r"|(?:这次|今天).{0,6}(?:挺快|很快|快)"
+            r"|(?:还以为|以为).{0,8}(?:不会回来|不回来)"
+            r"|(?:再|去).{0,2}忙"
+            r"|比我想的早"
+        ),
+    ),
     ("arrival_or_attention_debt", re.compile(r"(?:终于|总算).{0,10}(?:回来|忙完|肯|想起|舍得|找)")),
-    ("offscreen_current_action", re.compile(r"(?:刚|刚才|刚好|正|正在).{0,8}(?:想|等|看|玩|吃|睡|醒|忙|刷|听|路过|发呆)")),
-    ("attention_prediction", re.compile(r"(?:感觉|觉得|以为).{0,12}(?:会找我|要找我|来找我|找你|理我)")),
-    ("unprovided_busy_duration", re.compile(r"(?:忙到|忙完到|忙着忙着).{0,8}(?:明天|晚上|半夜|现在)")),
+    ("offscreen_current_action", re.compile(r"(?:刚|刚才|刚好|正|正在).{0,10}(?:想|等|看|玩|吃|睡|醒|忙|刷|听|路过|发呆|泡|念叨|准备|发|有事|闲|歇)")),
+    ("unprovided_offline_presence", re.compile(r"(?:去找你|过来找你|找你去|到你那|去你那)")),
+    ("attention_prediction", re.compile(r"(?:感觉|觉得|以为|知道).{0,12}(?:会找我|要找我|来找我|找你|理我|会回来|要回来|回来)|(?:还以为|以为).{0,12}(?:不回来|不会回来|又要回来)")),
+    ("unprovided_busy_duration", re.compile(r"(?:忙到|忙完到|忙着忙着).{0,8}(?:明天|晚上|半夜|现在)|(?:又要)?磨蹭(?:半天|好久|很久)?")),
     ("prior_attention_claim", re.compile(r"(?:刚才|刚刚|之前).{0,12}(?:不理我|没理我|不回我|没回我)")),
-    ("habit_or_history_claim", re.compile(r"(?:平时|每次|总是|又).{0,12}(?:找|叫|问|弄|搞|卡|忘|迟到|闯祸)")),
-    ("calendar_claim", re.compile(r"(?:昨晚|昨天|明天|中午|早上|晚上).{0,12}(?:睡|起|叫|吃|忙|工作|熬)")),
-    ("sensory_claim", re.compile(r"(?:声音|屏幕|手机|表情|脸|眼神).{0,8}(?:软|累|困|看|亮|暗|慢)")),
+    ("habit_or_history_claim", re.compile(r"(?:平时|每次|总是|又).{0,12}(?:找|叫|问|弄|搞|卡|忘|迟到|闯祸|写崩|见过)")),
+    ("unprovided_frequency_claim", re.compile(r"(?:(?:反复|好几[次天遍回]|几[次天遍回]|一直).{0,10}(?:提过|说过|念叨|问|确认)|(?:提过|说过|念叨|问|确认|说了).{0,8}好几[次天遍回]|(?:没|不用|不必)?.{0,4}说第?二遍|第?二遍.{0,4}(?:才|也)?(?:说|提|问))")),
+    ("calendar_claim", re.compile(r"(?:昨晚|昨天|明天|中午|早上|晚上|周一|周二|周三|周四|周五|周六|周日).{0,12}(?:睡|起|叫|吃|忙|工作|熬|展|看)")),
+    ("weather_guess", re.compile(r"(?:天气|天色).{0,6}(?:好|不错|晴|阴|雨|冷|热)|好天气")),
+    ("sensory_claim", re.compile(r"(?:声音|屏幕|手机|表情|脸|眼神|语气).{0,8}(?:软|累|困|看|亮|暗|慢|记住|记得)|(?:停下|先别|别|少).{0,6}看屏幕|隔着屏幕|屏幕")),
+    ("invented_visual_memory", re.compile(r"(?:当时|那个|你).{0,8}(?:表情|语气)|(?:表情|语气).{0,12}(?:像|当时|已经|记住|记得)|(?:说得|说的).{0,6}(?:香|馋)|可香")),
+    (
+        "invented_specific_event_detail",
+        re.compile(
+            r"(?:当代艺术展|拍点照片|拍照|照片|展馆|位置挺偏|查好路线|路线|自己去|别太赶|太赶|具体时间|选的时间|特意说了时间|看了下时间|看下时间|刚好有空|正好有空|记着时间)"
+            r"|(?:时间|日子).{0,6}(?:定好|安排好)|(?:定好|安排好).{0,6}(?:时间|日子)"
+            r"|时间.{0,4}记着"
+            r"|(?:这两天|到时候).{0,12}(?:好好歇|歇歇|精力|休息)"
+            r"|等你消息"
+        ),
+    ),
     ("cause_guess", re.compile(r"(?:是不是|估计|肯定).{0,14}(?:没好好休息|熬|没睡|没吃|太累|忙坏)")),
+    (
+        "invented_memory_container",
+        re.compile(
+            r"(?:(?:记|写|存|放|留|塞|收|加|设|开|备).{0,8}(?:备忘录|备忘|便签|笔记|小本本|本子|日历|提醒|闹钟|清单|待办)"
+            r"|(?:备忘录|便签|笔记|小本本|本子|日历|提醒|闹钟|清单|待办).{0,8}(?:记|写|存|放|留|收|有|在)"
+            r"|(?:设|加|开).{0,4}(?:提醒|闹钟|日程))"
+        ),
+    ),
+    (
+        "invented_external_lookup",
+        re.compile(
+            r"(?:偷偷|顺手|提前|上周|最近|刚才)?.{0,8}"
+            r"(?:查过|查了|看过|听说|听过|打听|留意).{0,14}"
+            r"(?:展|展馆|信息|消息|资料|情况|不错)"
+        ),
+    ),
 )
 _SCENE_GROUNDING_ANCHORS: dict[str, tuple[str, ...]] = {
     "daily_good_morning": ("早", "早安"),
@@ -344,6 +470,9 @@ _SCENE_GROUNDING_ANCHORS: dict[str, tuple[str, ...]] = {
     "late_night": ("睡", "熬", "醒"),
     "short_ack": ("接着", "继续", "听着", "在听", "多说", "说点", "就这一个", "就这一下"),
     "followup": ("因为", "就是", "觉得", "想", "然后", "继续", "上一句", "接着"),
+    "recall_memory": ("记得", "记着", "没忘", "提过", "你的事", "心里"),
+    "style_repair": ("抓", "听出来", "重来", "换", "收", "慢", "客服"),
+    "technical_help": ("先", "第一", "最上", "红", "报错", "看", "贴"),
 }
 _SOFT_REASON_SCORE_PENALTIES = {
     "STYLE_TEMPLATE_DENSITY": 3.5,
@@ -357,13 +486,50 @@ _SOFT_REASON_SCORE_PENALTIES = {
     "SHORT_ACK_OBEDIENCE": 5.0,
     "ADVICE_VAGUE_PUSH": 5.0,
     "IMPLIED_FACT_RISK": 4.5,
+    "INVENTED_MEMORY_CONTAINER": 5.0,
+    "INVENTED_EXTERNAL_LOOKUP": 5.0,
+    "INVENTED_SPECIFIC_DETAIL": 5.0,
     "WEAK_SCENE_GROUNDING": 4.0,
     "FLAT_GENERIC_LINE": 4.0,
     "BLAND_PASS_LINE": 6.0,
     "QUALITY_SOFT_TRAILING_INCOMPLETE_QUESTION": 4.0,
+    "STERILE_TRANSACTION_TONE": 6.0,
+    "LOW_HUMAN_TEXTURE": 3.5,
     "LOW_CATCHINESS": 2.0,
     "LINE_RHYTHM_FLAT": 2.5,
+    "WRITTEN_REGISTER_TONE": 5.0,
 }
+
+_WRITTEN_REGISTER_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    ("heart_phrase_too_written", re.compile(r"(?:心里想着你|心里想你|放在心里|心里放着|记在心里)")),
+    ("administrative_noun", re.compile(r"(?:优化流程|相关内容|具体内容|报错内容|报错行|事项|流程|进行|不算浪费力气)")),
+    ("polished_reward", re.compile(r"(?:奖励一个抱|奖励你一下|奖励一个)")),
+    ("over_neat_summary", re.compile(r"(?:今天先这样|那就先这样|一起过一遍|过一遍|你好好期待吧)")),
+)
+_SPOKEN_CHAT_MARKERS = (
+    "哼",
+    "啧",
+    "行啦",
+    "好啦",
+    "得了吧",
+    "少来",
+    "别装",
+    "还嘴硬",
+    "算你",
+    "这才",
+    "拿来",
+    "发来",
+    "贴过来",
+    "扔过来",
+    "我瞄一眼",
+    "我抓一下",
+    "哪里卡了",
+    "卡哪了",
+    "嘛",
+    "啦",
+    "呀",
+    "呢",
+)
 
 
 @dataclass(frozen=True)
@@ -411,6 +577,39 @@ def _contains_any(text: str, terms: tuple[str, ...]) -> list[str]:
     return [term for term in terms if term and term.lower() in lowered]
 
 
+def _axis_value(relationship_axes: Mapping[str, Any] | None, key: str, default: Any = None) -> Any:
+    if isinstance(relationship_axes, Mapping):
+        return relationship_axes.get(key, default)
+    return default
+
+
+def _axis_progress(relationship_axes: Mapping[str, Any] | None) -> int:
+    try:
+        return int(_axis_value(relationship_axes, "progress", 2))
+    except (TypeError, ValueError):
+        return 2
+
+
+def _axis_distance_penalty_multiplier(
+    relationship_axes: Mapping[str, Any] | None,
+    hits: Sequence[str],
+) -> float:
+    if not relationship_axes or not hits:
+        return 1.0
+    progress = _axis_progress(relationship_axes)
+    stage = str(_axis_value(relationship_axes, "stage", "") or "")
+    lowered_hits = {str(hit).lower() for hit in hits}
+    if progress <= 1:
+        return 1.15
+    if {"我在这", "我在这里", "我在这".lower(), "我在这里".lower()} & lowered_hits and progress >= 4:
+        return 0.45
+    if stage in {"lover_early", "lover_stable"}:
+        return 0.35
+    if progress >= 3:
+        return 0.65
+    return 0.85
+
+
 def _clamp(value: float) -> float:
     return max(0.0, min(100.0, float(value)))
 
@@ -432,12 +631,14 @@ def _weights_for_scene(scene_id: str) -> dict[str, float]:
         weights["scene_grounding"] = 1.25
         weights["role_fit"] = 0.8
         weights["distance_control"] = 0.85
+        weights["spoken_chat_texture"] = 0.85
         weights["catchiness"] = 0.8
         weights["template_density"] = 0.9
     elif scene_id in _HIGH_EMOTION_SCENES:
         weights["context_fit"] = 1.45
         weights["emotional_containment"] = 1.45
         weights["distance_control"] = 1.15
+        weights["spoken_chat_texture"] = 1.2
         weights["implied_fact_risk"] = 1.2
         weights["line_rhythm"] = 1.1
         weights["usefulness"] = 0.8
@@ -445,6 +646,7 @@ def _weights_for_scene(scene_id: str) -> dict[str, float]:
         weights["naturalness"] = 1.35
         weights["distance_control"] = 1.3
         weights["context_fit"] = 1.15
+        weights["spoken_chat_texture"] = 1.3
         weights["template_density"] = 1.2
         weights["line_rhythm"] = 1.2
         weights["implied_fact_risk"] = 1.15
@@ -526,7 +728,11 @@ def _line_break_count(text: str) -> int:
 
 
 def _has_turn_or_texture(text: str) -> bool:
-    return bool(_contains_any(text, _CATCHY_TURN_MARKERS) or re.search(r"(.)\1|[！？…]", text))
+    return bool(
+        _contains_any(text, _CATCHY_TURN_MARKERS)
+        or _contains_any(text, _HUMAN_TEXTURE_MARKERS)
+        or re.search(r"(.)\1|[！？…]", text)
+    )
 
 
 def _bland_pass_hits(text: str, *, scene_id: str) -> list[str]:
@@ -539,15 +745,49 @@ def _bland_pass_hits(text: str, *, scene_id: str) -> list[str]:
     return [label for label, pattern in _BLAND_PASS_PATTERNS if pattern.search(text)]
 
 
+def _human_texture_hits(text: str) -> list[str]:
+    return _contains_any(text, _HUMAN_TEXTURE_MARKERS)
+
+
+def _written_register_hits(text: str, *, scene_id: str) -> list[str]:
+    hits = [label for label, pattern in _WRITTEN_REGISTER_PATTERNS if pattern.search(text)]
+    if scene_id in _TECHNICAL_SCENES:
+        # Technical turns may legitimately mention process-ish words; only keep
+        # the pieces that make the final surface read like a formal handoff.
+        hits = [label for label in hits if label in {"administrative_noun", "over_neat_summary"}]
+    return hits
+
+
+def _spoken_chat_hits(text: str) -> list[str]:
+    return _contains_any(text, _SPOKEN_CHAT_MARKERS)
+
+
+def signature_texture_hits(text: str) -> list[str]:
+    return list(dict.fromkeys(label for label, pattern in _SIGNATURE_TEXTURE_PATTERNS if pattern.search(text)))
+
+
+def _sterile_transaction_hits(text: str, *, scene_id: str) -> list[str]:
+    if scene_id in _TECHNICAL_SCENES:
+        return []
+    if scene_id not in _DAILY_SCENES and scene_id not in _HIGH_EMOTION_SCENES:
+        return []
+    hits = [label for label, pattern in _STERILE_TRANSACTION_PATTERNS if pattern.search(text)]
+    if scene_id == "recall_memory":
+        hits = [label for label in hits if label != "bare_memory_record"]
+    return hits
+
+
 def score_sample_guided_text(
     *,
     text: Any,
     contract: GalgameTextContract,
     quality: TextQualityGateResult | None = None,
+    relationship_axes: Mapping[str, Any] | None = None,
 ) -> SampleGuidedTextScore:
     normalized = _clean_text(text)
     sample = _sample_for_contract(contract)
-    scene_id = _clean_text(sample.scene_id or getattr(contract, "scene_id", "")) or "default"
+    contract_scene_id = _clean_text(getattr(contract, "scene_id", ""))
+    scene_id = _SAMPLE_SCENE_ALIASES.get(contract_scene_id, contract_scene_id) or _clean_text(sample.scene_id) or "default"
     dimensions = {dimension: 86.0 for dimension in SCORING_DIMENSIONS}
     weights = _weights_for_scene(scene_id)
     reasons: list[str] = []
@@ -611,6 +851,25 @@ def score_sample_guided_text(
         _drop(dimensions, "naturalness", min(12, 4 * len(implied_hits)))
         reasons.append("IMPLIED_FACT_RISK")
         penalties.append("implied_fact_risk:" + " / ".join(implied_hits[:4]))
+        if "invented_memory_container" in implied_hits:
+            _drop(dimensions, "implied_fact_risk", 10)
+            _drop(dimensions, "context_fit", 8)
+            _drop(dimensions, "scene_grounding", 6)
+            reasons.append("INVENTED_MEMORY_CONTAINER")
+            penalties.append("implied_fact_risk:invented_memory_container")
+        if "invented_external_lookup" in implied_hits:
+            _drop(dimensions, "implied_fact_risk", 12)
+            _drop(dimensions, "context_fit", 8)
+            _drop(dimensions, "scene_grounding", 4)
+            reasons.append("INVENTED_EXTERNAL_LOOKUP")
+            penalties.append("implied_fact_risk:invented_external_lookup")
+        specific_detail_hits = {"invented_visual_memory", "invented_specific_event_detail"} & set(implied_hits)
+        if specific_detail_hits:
+            _drop(dimensions, "implied_fact_risk", 12)
+            _drop(dimensions, "context_fit", 8)
+            _drop(dimensions, "scene_grounding", 4)
+            reasons.append("INVENTED_SPECIFIC_DETAIL")
+            penalties.append("implied_fact_risk:invented_specific_detail")
 
     line_breaks = _line_break_count(normalized)
     if length > 42:
@@ -637,7 +896,7 @@ def score_sample_guided_text(
         _drop(dimensions, "catchiness", 10)
         reasons.append("WHAT_DOING_ATTENTION_WAIT")
         penalties.append("distance_control:what_doing_waits_for_user")
-    if scene_id == "presence" and _PRESENCE_ATTENTION_DEBT_RE.search(normalized):
+    if scene_id in {"presence", "back", "busy_done"} and _PRESENCE_ATTENTION_DEBT_RE.search(normalized):
         _drop(dimensions, "distance_control", 24)
         _drop(dimensions, "context_fit", 12)
         _drop(dimensions, "catchiness", 8)
@@ -681,6 +940,79 @@ def score_sample_guided_text(
         _drop(dimensions, "catchiness", 12)
         reasons.append("LOW_CATCHINESS")
         penalties.append("catchiness:no_turn_or_texture")
+
+    human_texture_hits = _human_texture_hits(normalized)
+    signature_hits = signature_texture_hits(normalized)
+    spoken_hits = _spoken_chat_hits(normalized)
+    written_hits = _written_register_hits(normalized, scene_id=scene_id)
+    spoken_bonus_blocked = bool(
+        hard_codes
+        or any(
+            reason in reasons
+            for reason in (
+                "ADVICE_VAGUE_PUSH",
+                "GOOD_NEWS_PROBING",
+                "IMPLIED_FACT_RISK",
+                "MEAL_SHARE_SCOLDING_OR_PUSHY",
+                "OILY_OR_OVERBOUND_TONE",
+                "SHORT_ACK_OBEDIENCE",
+                "CUSTOMER_SERVICE_TONE",
+            )
+        )
+    )
+    if written_hits:
+        written_amount = 8 if scene_id in _TECHNICAL_SCENES else 18
+        _drop(dimensions, "spoken_chat_texture", min(40, written_amount + 4 * len(written_hits)))
+        _drop(dimensions, "naturalness", min(16, 5 + 3 * len(written_hits)))
+        _drop(dimensions, "catchiness", min(18, 6 + 3 * len(written_hits)))
+        _drop(dimensions, "character_freshness", min(14, 4 + 2 * len(written_hits)))
+        reasons.append("WRITTEN_REGISTER_TONE")
+        penalties.append("spoken_chat_texture:" + " / ".join(written_hits[:4]))
+    elif (spoken_hits or signature_hits or human_texture_hits) and not spoken_bonus_blocked:
+        _raise(dimensions, "spoken_chat_texture", min(12, 4 + 2 * len(set([*spoken_hits, *signature_hits, *human_texture_hits]))))
+        bonuses.append("spoken_chat_texture:" + " / ".join([*spoken_hits, *signature_hits, *human_texture_hits][:4]))
+    sterile_transaction_hits = _sterile_transaction_hits(normalized, scene_id=scene_id)
+    if sterile_transaction_hits:
+        _drop(dimensions, "non_customer_service", min(24, 10 + 4 * len(sterile_transaction_hits)))
+        _drop(dimensions, "character_freshness", min(24, 12 + 3 * len(sterile_transaction_hits)))
+        _drop(dimensions, "catchiness", min(22, 10 + 3 * len(sterile_transaction_hits)))
+        _drop(dimensions, "naturalness", min(14, 5 + 2 * len(sterile_transaction_hits)))
+        reasons.append("STERILE_TRANSACTION_TONE")
+        penalties.append("non_customer_service:sterile_transaction:" + " / ".join(sterile_transaction_hits[:4]))
+    elif scene_id in _DAILY_SCENES and not human_texture_hits and 6 <= length <= 34:
+        _drop(dimensions, "character_freshness", 10)
+        _drop(dimensions, "catchiness", 8)
+        reasons.append("LOW_HUMAN_TEXTURE")
+        penalties.append("character_freshness:low_human_texture")
+    elif human_texture_hits and template_count <= 2:
+        _raise(dimensions, "character_freshness", min(8, 3 * len(human_texture_hits)))
+        _raise(dimensions, "catchiness", min(6, 2 * len(human_texture_hits)))
+        bonuses.append("human_texture:" + " / ".join(human_texture_hits[:4]))
+
+    signature_bonus_blocked = bool(
+        hard_codes
+        or sterile_transaction_hits
+        or template_count >= 4
+        or any(
+            reason in reasons
+            for reason in (
+                "ADVICE_VAGUE_PUSH",
+                "GOOD_NEWS_PROBING",
+                "IMPLIED_FACT_RISK",
+                "MEAL_SHARE_SCOLDING_OR_PUSHY",
+                "OILY_OR_OVERBOUND_TONE",
+                "SHORT_ACK_OBEDIENCE",
+                "CUSTOMER_SERVICE_TONE",
+            )
+        )
+    )
+    if signature_hits and not signature_bonus_blocked:
+        _raise(dimensions, "character_freshness", min(12, 4 + 3 * len(signature_hits)))
+        _raise(dimensions, "catchiness", min(10, 3 + 2 * len(signature_hits)))
+        _raise(dimensions, "role_fit", min(6, 2 * len(signature_hits)))
+        if scene_id in _DAILY_SCENES:
+            _raise(dimensions, "naturalness", 3)
+        bonuses.append("signature_texture:" + " / ".join(signature_hits[:4]))
 
     for group in getattr(contract, "required_any", ()) or ():
         if group and not any(token and token in normalized for token in group):
@@ -738,8 +1070,11 @@ def score_sample_guided_text(
     distance_hits = _contains_any(normalized, _RELATION_DISTANCE_TERMS)
     if distance_hits:
         amount = 7 if scene_id in {"presence", "wait", "back", "miss_you", "bad_mood", "quiet"} else 13
-        _drop(dimensions, "distance_control", min(42, amount * len(distance_hits)))
+        multiplier = _axis_distance_penalty_multiplier(relationship_axes, distance_hits)
+        _drop(dimensions, "distance_control", min(42, amount * len(distance_hits) * multiplier))
         reasons.append("DISTANCE_CONTROL_SOFT_PENALTY")
+        if relationship_axes:
+            reasons.append("RELATION_AXES_DISTANCE_CONTEXT")
         penalties.append("distance_control:" + " / ".join(distance_hits[:4]))
 
     good_hits = [item for item in good_examples if item and item in normalized]
@@ -768,7 +1103,7 @@ def score_sample_guided_text(
         _raise(dimensions, "scene_grounding", min(12, 4 * len(grounding_hits)))
         _raise(dimensions, "context_fit", min(6, 2 * len(grounding_hits)))
         bonuses.append("scene_grounding:" + " / ".join(grounding_hits[:4]))
-    elif scene_id not in {"default", "general"}:
+    elif scene_id not in {"default", "general", "daily_chat"}:
         _drop(dimensions, "scene_grounding", 20)
         _drop(dimensions, "context_fit", 8)
         _drop(dimensions, "catchiness", 6)
@@ -858,4 +1193,5 @@ __all__ = [
     "SCORING_DIMENSIONS",
     "SampleGuidedTextScore",
     "score_sample_guided_text",
+    "signature_texture_hits",
 ]

@@ -45,6 +45,29 @@ def _contains_any(text: str, markers: tuple[str, ...]) -> bool:
     return any(marker and marker in text for marker in markers)
 
 
+def _good_news_progress_group(text: str, *, include_proud_context: bool = False) -> tuple[str, ...]:
+    progress_groups = (
+        (("跑通",), ("跑通", "通了")),
+        (("搞定",), ("搞定",)),
+        (("收掉",), ("收掉", "收了")),
+        (("收尾",), ("收尾", "收了")),
+        (("做完",), ("做完", "完成", "弄完")),
+        (("弄完",), ("弄完", "做完", "完成")),
+        (("弄成", "做成"), ("弄成", "做成", "成了")),
+        (("完成",), ("完成", "做完", "弄完")),
+        (("成功了", "成功"), ("成功", "成了")),
+        (("结束",), ("结束", "收了")),
+        (("过了",), ("过了", "过")),
+    )
+    for needles, response_terms in progress_groups:
+        if any(needle in text for needle in needles):
+            return tuple(dict.fromkeys(response_terms))
+    fallback = ("跑通", "搞定", "成功", "小事", "事情", "弄完", "弄成", "做成", "完成", "收掉", "收尾", "结束", "进展")
+    if include_proud_context:
+        fallback = (*fallback, "这波", "这次")
+    return fallback
+
+
 @dataclass(frozen=True)
 class GalgameTextContract:
     scene_id: str = "general"
@@ -105,6 +128,7 @@ def build_galgame_text_contract(
     """
 
     text = _clean_text(user_message)
+    text_core = text.rstrip("？?。！! ")
     lowered = text.lower()
     facts_payload = facts.as_dict() if hasattr(facts, "as_dict") else _safe_mapping(facts)
     social_act = _safe_mapping(facts_payload.get("social_act"))
@@ -535,18 +559,18 @@ def build_galgame_text_contract(
             scene_id="good_news_proud",
             response_move="celebrate_progress_with_proud_tease",
             required_any=(
-                ("跑通", "搞定", "成功", "小事", "事情", "弄完", "弄成", "做成", "完成", "收掉", "收尾", "结束", "进展", "这波", "这次"),
+                _good_news_progress_group(text, include_proud_context=True),
                 ("厉害", "行", "不错", "可以", "得意", "夸", "争气", "看见", "这不是"),
             ),
             max_questions=1,
             target_max_chars=40,
-            notes=("同时接住进展和求夸：回复里要留一个进展词，再给一点熟人式认可/拌嘴；不要只说厉害，也不要把话题抢成自己下次要赢。",),
+            notes=("同时接住进展和求夸：回复里要留住用户刚说的进展词，再给一点熟人式认可/拌嘴；不要只说厉害，也不要把话题抢成自己下次要赢。",),
         )
     if has_progress:
         return _contract(
             scene_id="good_news",
             response_move="celebrate_user",
-            required_any=(("跑通", "搞定", "成功", "小事", "事情", "弄完", "弄成", "做成", "完成", "收掉", "收尾", "结束", "进展"),),
+            required_any=(_good_news_progress_group(text),),
             forbidden_surface=(
                 "什么好事",
                 "发生什么",
@@ -562,7 +586,7 @@ def build_galgame_text_contract(
                 "说说怎么",
             ),
             max_questions=1,
-            notes=("保留用户的进展词，例如跑通/搞定/小事/事情；开心但不要只用廉价欢呼或泛泛夸一句。",),
+            notes=("保留用户刚说的进展词，例如跑通/搞定/收掉/收尾；开心但不要只用廉价欢呼或泛泛夸一句。",),
         )
     if scene == "happy" or "心情不错" in text:
         return _contract(
@@ -747,10 +771,13 @@ def build_galgame_text_contract(
                 "非得",
                 "搞怄",
                 "肯收手",
+                "我先撤",
+                "先撤",
+                "想找我再开口",
             ),
             max_questions=1,
         )
-    if scene == "identity" or text in {"你是", "你是谁"}:
+    if scene == "identity" or text_core in {"你是", "你是谁"}:
         return _contract(
             scene_id="identity",
             response_move="name_first",
@@ -778,9 +805,36 @@ def build_galgame_text_contract(
                 "不认账",
                 "故意的吧",
                 "我在呢",
+                "这个号",
+                "尼尼也行",
+                "叫我尼尼",
+                "叫尼尼",
             ),
             max_questions=1,
             notes=("名字先落地，候选必须直接说夏目蓝；可以轻吐槽，但不要只说我在呢或你故意的吧。",),
+        )
+    if scene in {"style_repair", "ack_style_issue"} or any(token in text for token in ("客服", "人机", "不像人话", "不自然")):
+        return _contract(
+            scene_id="style_repair",
+            response_move="ack_style_issue",
+            required_any=(("抓", "听出来", "重来", "换", "收", "慢"),),
+            forbidden_surface=(
+                "优化",
+                "调整一下节奏",
+                "调整节奏",
+                "这版",
+                "自然点",
+                "更自然",
+                "够自然",
+                "自然了",
+                "我会注意",
+                "感谢反馈",
+                "继续改进",
+            ),
+            max_questions=0,
+            target_min_chars=8,
+            target_max_chars=32,
+            notes=("承认语气问题但不要写成流程修正；像被当场抓到后短促重来。",),
         )
     if scene == "play_invite" or "陪我玩" in text:
         return _contract(
@@ -1278,6 +1332,16 @@ def build_galgame_text_contract(
             target_max_chars=38,
             notes=("先承认距离过近并退半步；不要反向索取亲近，也不要自贬或赌气退场。",),
         )
+    if scene == "technical_help":
+        return _contract(
+            scene_id="technical_help",
+            response_move="give_first_actionable_step",
+            required_any=(("先", "第一", "最上", "红", "报错", "看", "贴"),),
+            max_questions=1,
+            target_min_chars=8,
+            target_max_chars=48,
+            notes=("技术场景先给一个可执行焦点，不要客服式索要信息。",),
+        )
     if scene == "relationship_boundary" or any(token in text for token in ("为什么要帮", "很熟吗", "我们很熟", "熟吗")):
         return _contract(
             scene_id="relationship_boundary",
@@ -1430,6 +1494,16 @@ def build_galgame_text_contract(
             response_move="continue_previous_turn",
             forbidden_surface=forbidden,
             max_questions=1,
+        )
+    if scene in {"recall_memory", "memory_followup", "recall"}:
+        return _contract(
+            scene_id="recall_memory",
+            response_move="ground_recalled_fact",
+            required_any=(("记得", "记着", "没忘", "提过"),),
+            max_questions=0,
+            target_min_chars=8,
+            target_max_chars=42,
+            notes=("承认记得并落到压缩事实；关系只改变距离，不补线下行动。",),
         )
     if has_user_proud:
         return _contract(

@@ -3,6 +3,9 @@ from __future__ import annotations
 import json
 
 from tools.retry_isolated_surface_failures import (
+    duplicate_surface_avoid_text_sets,
+    duplicate_surface_case_indexes,
+    load_source_score_rows,
     merge_source_and_retry_scores,
     rescore_source_outputs,
     retry_case_indexes,
@@ -34,7 +37,7 @@ def test_rescore_source_outputs_finds_only_low_quality_retry_cases(tmp_path) -> 
     raw_rows = [
         {
             "case_id": "presence_ok",
-            "raw_output": json.dumps({"candidates": ["在呢，这一句我看见了。"]}, ensure_ascii=False),
+            "raw_output": json.dumps({"candidates": ["在呢，我听着。"]}, ensure_ascii=False),
             "ok": True,
         },
         {
@@ -128,6 +131,119 @@ def test_merge_source_and_retry_scores_uses_retry_only_when_better() -> None:
     assert merged[2]["selected_from"] == "source"
     assert not merged[2]["improved"]
     assert merged[2]["selected"]["text"] == "其实就是突然想闹你一下啦，别太在意。"
+
+
+def test_duplicate_surface_indexes_and_merge_can_replace_repeated_passes() -> None:
+    cases = [
+        _case("relstage_morning_familiar", "早", "daily_good_morning"),
+        _case("relstage_morning_close_friend", "早", "daily_good_morning"),
+        _case("relstage_back_familiar", "我回来了", "daily_back"),
+    ]
+    source_rows = [
+        {
+            "index": 1,
+            "case_id": "relstage_morning_familiar",
+            "selected": {"text": "早啊，尼尼，今天慢慢来。", "score": 99, "passed": True, "hard_fail": False, "control_violations": []},
+        },
+        {
+            "index": 2,
+            "case_id": "relstage_morning_close_friend",
+            "selected": {"text": "早啊，尼尼，今天慢慢来。", "score": 98, "passed": True, "hard_fail": False, "control_violations": []},
+        },
+        {
+            "index": 3,
+            "case_id": "relstage_back_familiar",
+            "selected": {"text": "回来啦。", "score": 92, "passed": True, "hard_fail": False, "control_violations": []},
+        },
+    ]
+    retry_rows = [
+        {
+            "case_id": "relstage_morning_close_friend",
+            "retry_reason": "batch_duplicate_surface",
+            "selected": {"text": "早安，我在呢，尼尼。", "score": 94, "passed": True, "hard_fail": False, "control_violations": []},
+        }
+    ]
+
+    merged = merge_source_and_retry_scores(source_rows=source_rows, retry_rows=retry_rows)
+
+    assert duplicate_surface_case_indexes(cases=cases, rescored_rows=source_rows) == [1, 2]
+    assert duplicate_surface_avoid_text_sets(cases=cases, rescored_rows=source_rows) == {
+        1: ["早啊，尼尼，今天慢慢来。"],
+        2: ["早啊，尼尼，今天慢慢来。"],
+    }
+    assert merged[1]["selected_from"] == "retry"
+    assert not merged[1]["improved"]
+    assert merged[1]["retry_reason"] == "batch_duplicate_surface"
+    assert merged[1]["selected"]["text"] == "早安，我在呢，尼尼。"
+
+
+def test_load_source_score_rows_can_continue_from_merged_scores(tmp_path) -> None:
+    cases = [
+        _case("relstage_morning_familiar", "早", "daily_good_morning"),
+        _case("relstage_morning_trusted_friend", "早", "daily_good_morning"),
+    ]
+    merged_path = tmp_path / "merged_scores.jsonl"
+    rows = [
+        {
+            "index": 1,
+            "case_id": "relstage_morning_familiar",
+            "selected_from": "source",
+            "selected": {"text": "早，我在呢，不急。", "score": 94, "passed": True, "hard_fail": False},
+        },
+        {
+            "index": 2,
+            "case_id": "relstage_morning_trusted_friend",
+            "selected_from": "retry",
+            "selected": {"text": "早，我在呢，不急。", "score": 94, "passed": True, "hard_fail": False},
+        },
+    ]
+    merged_path.write_text(
+        "\n".join(json.dumps(row, ensure_ascii=False, sort_keys=True) for row in rows) + "\n",
+        encoding="utf-8",
+    )
+
+    source_rows, source_kind = load_source_score_rows(cases=cases, source_run=tmp_path, soul_md=SOUL)
+
+    assert source_kind == "merged_scores"
+    assert duplicate_surface_case_indexes(cases=cases, rescored_rows=source_rows) == [1, 2]
+    assert source_rows[1]["selected"]["text"] == "早，我在呢，不急。"
+    assert "score" in source_rows[1]["selected"]
+
+
+def test_duplicate_surface_avoid_text_sets_include_existing_scene_texts() -> None:
+    cases = [
+        _case("relstage_morning_ambiguous", "早", "daily_good_morning"),
+        _case("relstage_morning_familiar", "早", "daily_good_morning"),
+        _case("relstage_morning_trusted_friend", "早", "daily_good_morning"),
+        _case("relstage_back_familiar", "回来了", "daily_back"),
+    ]
+    source_rows = [
+        {
+            "index": 1,
+            "case_id": "relstage_morning_ambiguous",
+            "selected": {"text": "早啊，尼尼，今天慢慢来。", "score": 98, "passed": True},
+        },
+        {
+            "index": 2,
+            "case_id": "relstage_morning_familiar",
+            "selected": {"text": "早，我在呢，不急。", "score": 94, "passed": True},
+        },
+        {
+            "index": 3,
+            "case_id": "relstage_morning_trusted_friend",
+            "selected": {"text": "早，我在呢，不急。", "score": 94, "passed": True},
+        },
+        {
+            "index": 4,
+            "case_id": "relstage_back_familiar",
+            "selected": {"text": "回来啦。", "score": 92, "passed": True},
+        },
+    ]
+
+    assert duplicate_surface_avoid_text_sets(cases=cases, rescored_rows=source_rows) == {
+        2: ["早，我在呢，不急。", "早啊，尼尼，今天慢慢来。"],
+        3: ["早，我在呢，不急。", "早啊，尼尼，今天慢慢来。"],
+    }
 
 
 def test_summarize_merged_reports_retry_savings(tmp_path) -> None:

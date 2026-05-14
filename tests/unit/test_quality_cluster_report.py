@@ -65,6 +65,36 @@ def test_quality_cluster_report_groups_reason_surface_and_dimensions() -> None:
     assert "reason:BLAND_PASS_LINE" in rendered
 
 
+def test_quality_cluster_report_flags_repeated_selected_text_by_scene() -> None:
+    report = build_quality_cluster_report(
+        [
+            _row("relstage_morning_familiar", "早啊，尼尼，今天慢慢来。", 98.0),
+            _row("relstage_morning_close_friend", "早啊，尼尼，今天慢慢来。", 97.0),
+            _row("relstage_back_familiar", "回来啦，先歇口气。", 95.0),
+        ],
+        min_cluster_count=1,
+    )
+
+    clusters = {cluster["cluster"]: cluster for cluster in report["clusters"]}
+    morning = next(row for row in report["scene_diversity"] if row["scene"] == "morning")
+
+    assert report["duplicate_surface_group_count"] == 1
+    assert report["duplicate_surface_case_count"] == 2
+    assert report["duplicate_surface_groups"][0]["case_ids"] == [
+        "relstage_morning_familiar",
+        "relstage_morning_close_friend",
+    ]
+    assert clusters["batch_duplicate_surface"]["count"] == 2
+    assert morning["count"] == 2
+    assert morning["unique_text_count"] == 1
+    assert morning["duplicate_count"] == 1
+
+    rendered = render_markdown_report(report)
+    assert "Batch Diversity" in rendered
+    assert "Repeated Selected Text" in rendered
+    assert "早啊，尼尼，今天慢慢来。" in rendered
+
+
 def test_quality_cluster_report_cli_writes_json_and_markdown(tmp_path) -> None:
     scores = tmp_path / "merged_scores.jsonl"
     scores.write_text(

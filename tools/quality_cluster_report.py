@@ -96,6 +96,32 @@ def _family_from_case_id(case_id: str) -> str:
     return "_".join(parts[:2]) if len(parts) >= 2 else case_id
 
 
+_SCENE_TOKENS = (
+    "morning",
+    "back",
+    "tired",
+    "recall",
+    "broken",
+    "failure",
+    "presence",
+    "quiet",
+    "creative",
+    "technical",
+    "daily",
+)
+
+
+def _scene_from_case_id(case_id: str) -> str:
+    normalized = case_id.lower()
+    for token in _SCENE_TOKENS:
+        if f"_{token}_" in f"_{normalized}_" or normalized.endswith(f"_{token}") or normalized.startswith(f"{token}_"):
+            return token
+    parts = [part for part in normalized.split("_") if part and not part.isdigit()]
+    if len(parts) >= 2:
+        return parts[1] if parts[0] in {"relstage", "case"} else parts[0]
+    return normalized or "unknown"
+
+
 def _control_cluster_name(violation: str) -> str:
     return "control:" + violation.split(":", 1)[0]
 
@@ -151,10 +177,12 @@ def clusters_for_selected(
 
 
 def _example_payload(row: Mapping[str, Any], selected: Mapping[str, Any], *, index: int) -> dict[str, Any]:
+    case_id = _case_id(row, index)
     return {
         "index": int(row.get("index") or index),
-        "case_id": _case_id(row, index),
-        "case_family": _family_from_case_id(_case_id(row, index)),
+        "case_id": case_id,
+        "case_family": _family_from_case_id(case_id),
+        "scene": _scene_from_case_id(case_id),
         "score": round(_score(selected), 3),
         "passed": bool(selected.get("passed")),
         "hard_fail": bool(selected.get("hard_fail")),
@@ -203,6 +231,54 @@ def _is_redundant_issue_cluster(cluster_name: str) -> bool:
     }
 
 
+def _duplicate_surface_groups(selected_rows: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    rows_by_text: dict[str, list[Mapping[str, Any]]] = defaultdict(list)
+    for row in selected_rows:
+        text = _clean_text(row.get("text"))
+        if text:
+            rows_by_text[text].append(row)
+    groups: list[dict[str, Any]] = []
+    for text, rows in rows_by_text.items():
+        if len(rows) < 2:
+            continue
+        groups.append(
+            {
+                "text": text,
+                "count": len(rows),
+                "scenes": sorted({str(row.get("scene") or "unknown") for row in rows}),
+                "case_ids": [str(row.get("case_id") or "") for row in rows],
+                "scores": [float(row.get("score") or 0.0) for row in rows],
+            }
+        )
+    return sorted(groups, key=lambda item: (-int(item["count"]), item["text"]))
+
+
+def _scene_diversity(selected_rows: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    rows_by_scene: dict[str, list[Mapping[str, Any]]] = defaultdict(list)
+    for row in selected_rows:
+        rows_by_scene[str(row.get("scene") or "unknown")].append(row)
+    diversity: list[dict[str, Any]] = []
+    for scene, rows in sorted(rows_by_scene.items()):
+        texts = [_clean_text(row.get("text")) for row in rows if _clean_text(row.get("text"))]
+        unique_texts = set(texts)
+        duplicate_count = max(0, len(texts) - len(unique_texts))
+        diversity.append(
+            {
+                "scene": scene,
+                "count": len(rows),
+                "unique_text_count": len(unique_texts),
+                "duplicate_count": duplicate_count,
+                "unique_rate": round(len(unique_texts) / len(texts), 4) if texts else None,
+                "repeated_texts": [
+                    {"text": text, "count": count}
+                    for text, count in Counter(texts).most_common()
+                    if count > 1
+                ],
+            }
+        )
+    return diversity
+
+
 def build_quality_cluster_report(
     rows: Sequence[Mapping[str, Any]],
     *,
@@ -235,6 +311,17 @@ def build_quality_cluster_report(
             cluster_rows[cluster].append(example)
 
     total = len(selected_rows)
+    duplicate_surface_groups = _duplicate_surface_groups(selected_rows)
+    duplicate_case_ids = {
+        case_id
+        for group in duplicate_surface_groups
+        for case_id in group.get("case_ids", [])
+    }
+    if duplicate_case_ids:
+        for row in selected_rows:
+            if row["case_id"] in duplicate_case_ids:
+                cluster_rows["batch_duplicate_surface"].append(row)
+    scene_diversity = _scene_diversity(selected_rows)
     scores = [float(row["score"]) for row in selected_rows]
     alert_count = min_cluster_count
     if alert_count is None:
@@ -282,6 +369,10 @@ def build_quality_cluster_report(
         "weak_pass_count": weak_pass_count,
         "hard_fail_count": sum(1 for row in selected_rows if row["hard_fail"]),
         "source_counts": dict(source_counts),
+        "duplicate_surface_group_count": len(duplicate_surface_groups),
+        "duplicate_surface_case_count": len(duplicate_case_ids),
+        "duplicate_surface_groups": duplicate_surface_groups,
+        "scene_diversity": scene_diversity,
         "cluster_count": len(clusters),
         "large_cluster_count": len(large_clusters),
         "diagnostic_cluster_count": len(diagnostic_clusters),
@@ -318,6 +409,7 @@ def render_markdown_report(report: Mapping[str, Any]) -> str:
         f"- pass: {report.get('pass_count')} ({report.get('pass_rate')})",
         f"- avg_score: {report.get('avg_score')} / min_score: {report.get('min_score')}",
         f"- low_score: {report.get('low_score_count')} / weak_pass: {report.get('weak_pass_count')} / hard_fail: {report.get('hard_fail_count')}",
+        f"- duplicate_surface_groups: {report.get('duplicate_surface_group_count')} / duplicate_cases: {report.get('duplicate_surface_case_count')}",
         f"- large_cluster_threshold: >= {report.get('cluster_alert_count')} cases",
         "",
         "## Large Issue Clusters",
@@ -368,6 +460,52 @@ def render_markdown_report(report: Mapping[str, Any]) -> str:
         )
     else:
         lines.append("No large redundant diagnostic cluster.")
+    lines.extend(["", "## Batch Diversity", ""])
+    scene_diversity = list(report.get("scene_diversity") or [])
+    if scene_diversity:
+        lines.extend(
+            _markdown_table(
+                [
+                    ("scene", "count", "unique", "unique_rate", "duplicates", "top_repeated"),
+                    *[
+                        (
+                            row["scene"],
+                            row["count"],
+                            row["unique_text_count"],
+                            row["unique_rate"],
+                            row["duplicate_count"],
+                            " / ".join(
+                                f"{item['count']}x {item['text']}" for item in (row.get("repeated_texts") or [])[:2]
+                            ),
+                        )
+                        for row in scene_diversity
+                    ],
+                ]
+            )
+        )
+    else:
+        lines.append("No scene diversity data.")
+    duplicate_groups = list(report.get("duplicate_surface_groups") or [])
+    lines.extend(["", "## Repeated Selected Text", ""])
+    if duplicate_groups:
+        lines.extend(
+            _markdown_table(
+                [
+                    ("count", "scenes", "case_ids", "text"),
+                    *[
+                        (
+                            group["count"],
+                            ", ".join(group.get("scenes") or []),
+                            ", ".join(group.get("case_ids") or []),
+                            group["text"],
+                        )
+                        for group in duplicate_groups[:12]
+                    ],
+                ]
+            )
+        )
+    else:
+        lines.append("No exact selected text repeated.")
     watch_clusters = list(report.get("watch_clusters") or [])
     lines.extend(["", "## Watch Clusters", ""])
     if watch_clusters:
@@ -483,6 +621,7 @@ def main(argv: list[str] | None = None) -> int:
                 "selected_count": report["selected_count"],
                 "pass_rate": report["pass_rate"],
                 "large_cluster_count": report["large_cluster_count"],
+                "duplicate_surface_group_count": report["duplicate_surface_group_count"],
                 "output_dir": str(args.out),
             },
             ensure_ascii=False,
