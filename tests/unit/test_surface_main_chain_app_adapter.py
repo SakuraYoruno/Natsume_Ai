@@ -198,6 +198,56 @@ def test_build_surface_main_chain_input_derives_reply_plan_without_passing_histo
     assert "memory://raw/should-not-pass" not in rendered
 
 
+def test_build_surface_main_chain_input_reuses_prepared_context_packet(monkeypatch) -> None:
+    trace: dict[str, object] = {
+        "surface_context_packet_prepared": True,
+        "reply_plan": {
+            "primary_topic": "prepared_presence",
+            "interaction_move": "reply_from_prepared_packet",
+            "response_form": "text",
+            "max_questions": 0,
+        },
+        "surface_affect_packet": {
+            "emotional_tone": "slightly_guilty",
+            "relationship_distance": "familiar_not_intimate",
+            "style_anchor": ["承认刚才慢了一点，但别扩写。"],
+            "must_not_do": ["不要重建旧上下文"],
+        },
+        "surface_memory_recall_packet": {
+            "facts": ["用户正在让主链继续迁移。"],
+            "style_anchor": ["只承接当前任务。"],
+            "source_refs": ["memory://raw/should-not-pass"],
+            "evidence_refs": ["evd://memory/prepared"],
+        },
+    }
+
+    monkeypatch.setattr(
+        "host_brain.app.surface_main_chain_adapter.get_compiled_soul",
+        lambda: SimpleNamespace(source_text=SOUL, runtime_full_text=SOUL),
+    )
+
+    def _blocked_surface_context_packet(**_kwargs):  # noqa: ANN003
+        raise AssertionError("prepared surface context packet should be reused")
+
+    monkeypatch.setattr(
+        "host_brain.app.surface_context_packet.build_surface_context_packet",
+        _blocked_surface_context_packet,
+    )
+
+    payload = build_surface_main_chain_input_from_chat_input(
+        _agent_input(render_policy={}, surface_task_control={}),
+        trace_stage_meta=trace,
+    )
+    rendered = json.dumps(payload.as_dict(), ensure_ascii=False)
+
+    assert payload.task_control["task_mode"] == "prepared_presence"
+    assert payload.task_control["response_move"] == "reply_from_prepared_packet"
+    assert payload.affect_packet.emotional_tone == "slightly_guilty"
+    assert tuple(payload.memory_packet.facts) == ("用户正在让主链继续迁移。",)
+    assert trace["surface_selected_reply_plan"]["primary_topic"] == "prepared_presence"
+    assert "memory://raw/should-not-pass" not in rendered
+
+
 @pytest.mark.asyncio
 async def test_surface_main_chain_sse_generator_calls_chat_surface_pool(monkeypatch) -> None:
     calls: list[dict] = []

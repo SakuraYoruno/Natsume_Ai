@@ -70,7 +70,9 @@ def build_surface_main_chain_input_from_chat_input(
     trace_stage_meta: dict[str, Any] | None = None,
 ) -> SurfaceMainChainInput:
     soul = get_compiled_soul()
-    runtime_payload = _build_surface_runtime_payload(agent_input, trace_stage_meta=trace_stage_meta, merge_trace=False)
+    runtime_payload = _prepared_surface_runtime_payload(trace_stage_meta)
+    if not runtime_payload:
+        runtime_payload = _build_surface_runtime_payload(agent_input, trace_stage_meta=trace_stage_meta, merge_trace=False)
     reply_plan = _resolve_surface_reply_plan(
         agent_input,
         trace_stage_meta=trace_stage_meta,
@@ -429,7 +431,18 @@ def _build_surface_runtime_payload(
     except Exception as exc:
         if isinstance(trace_stage_meta, dict):
             trace_stage_meta["surface_context_prepare_failed"] = type(exc).__name__
+    return {}
+
+
+def _prepared_surface_runtime_payload(trace_stage_meta: Mapping[str, Any] | None = None) -> dict[str, Any]:
+    trace = _safe_mapping(trace_stage_meta)
+    if not bool(trace.get("surface_context_packet_prepared")):
         return {}
+    return {
+        key: dict(value)
+        for key in _TRACE_RUNTIME_PAYLOAD_KEYS
+        if isinstance((value := trace.get(key)), Mapping) and value
+    }
 
 
 def _merge_surface_trace(trace_stage_meta: dict[str, Any] | None, runtime_payload: Mapping[str, Any]) -> None:
@@ -490,8 +503,8 @@ def _affect_packet(
     if _is_technical_task(task_control):
         return _derived_affect_packet(agent_input, task_control=task_control, runtime_payload=runtime_payload)
     for container in (
-        _safe_mapping(runtime_payload),
         _safe_mapping(trace_stage_meta),
+        _safe_mapping(runtime_payload),
         _safe_mapping(getattr(agent_input, "trace_stage_meta", None)),
     ):
         for key in ("surface_affect_packet", "affect_control_packet", "affect_packet"):
@@ -540,8 +553,8 @@ def _memory_packet(
     runtime_payload: Mapping[str, Any] | None = None,
 ) -> MemoryRecallPacket | None:
     for container in (
-        _safe_mapping(runtime_payload),
         _safe_mapping(trace_stage_meta),
+        _safe_mapping(runtime_payload),
         _safe_mapping(getattr(agent_input, "trace_stage_meta", None)),
         _safe_mapping(getattr(agent_input, "retrieval_summary", None)),
     ):
