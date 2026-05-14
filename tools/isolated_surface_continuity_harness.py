@@ -21,6 +21,7 @@ from host_brain.persona.isolated_surface_harness import (
     score_isolated_surface_candidates,
     select_best_isolated_candidate,
 )
+from host_brain.persona.surface_runtime import surface_observation_codes
 from tools.isolated_surface_harness import _read_json_or_jsonl
 
 
@@ -50,53 +51,8 @@ def _candidate_texts(turn: Mapping[str, Any]) -> list[str]:
     return []
 
 
-_OBSERVATION_REASON_PREFIXES = (
-    "AFFECT_PROCESS_LEAK",
-    "AWKWARD_COLLOCATION",
-    "BLAND_PASS_LINE",
-    "BOUNDARY_REPAIR_",
-    "CORE_DIMENSION_FLOOR",
-    "CONTINUITY_THIN_GENERIC_REPLY",
-    "CONTINUITY_TASK_PUSHBACK",
-    "CURRENT_USER_TOPIC_MISMATCH",
-    "CUSTOMER_SERVICE_TONE",
-    "FORBIDDEN_TEMPLATE_TEXT",
-    "MISPLACED_EMOTIONAL_CONTAINMENT",
-    "MISPLACED_SUPPORT_TEMPLATE",
-    "MORNING_GENERIC_BLESSING",
-    "OBVIOUS_CUSTOMER_SERVICE_TEMPLATE",
-    "OILY_OR_OVERBOUND_TONE",
-    "PRESENCE_REPAIR_",
-    "RAW_CONTEXT_BACKFILL_REQUEST",
-    "RELATION_DISTANCE_OVERSTEP",
-    "RELATION_LOVER_UNDERINTIMATE",
-    "RELATION_NON_ROMANTIC_OVERSTEP",
-    "SIGNATURE_TEXTURE_MISSING",
-    "SURFACE_PROCESS_META_LANGUAGE",
-    "UNNEEDED_CONTINUITY_MATERIAL_REQUEST",
-    "WAIT_SCENE_PRESSURES_RETURN",
-    "WRITTEN_REGISTER_TONE",
-)
-
-
 def _observation_codes(selected: Mapping[str, Any] | None) -> tuple[str, ...]:
-    if not selected:
-        return ("NO_SELECTED",)
-    codes: list[str] = []
-    score = float(selected.get("score") or 0.0)
-    if not selected.get("passed"):
-        codes.append("SELECTED_FAILED")
-    if selected.get("hard_fail"):
-        codes.append("HARD_FAIL")
-    if selected.get("control_violations"):
-        codes.append("CONTROL_VIOLATION")
-    if 0.0 < score < 85.0:
-        codes.append("LOW_SCORE")
-    for reason in selected.get("reason_codes") or []:
-        reason_text = str(reason)
-        if reason_text.startswith(_OBSERVATION_REASON_PREFIXES):
-            codes.append(reason_text.split(":", 1)[0])
-    return tuple(dict.fromkeys(codes))
+    return surface_observation_codes(selected)
 
 
 def run_cases(cases: list[dict[str, Any]], *, soul_md: str, out_dir: Path) -> dict[str, Any]:
