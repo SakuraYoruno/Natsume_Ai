@@ -136,6 +136,7 @@ class ChatAgentInput:
 
     # ── 行为约束策略（可由上游直接传入，缺省时从 prompt runtime_payload 回填）──
     render_policy: Dict[str, Any] = field(default_factory=dict)
+    surface_task_control: Dict[str, Any] = field(default_factory=dict)
     attachments: List[Dict[str, Any]] = field(default_factory=list)
     multimodal_observations: Dict[str, Any] = field(default_factory=dict)
     attachment_summary: str = ""

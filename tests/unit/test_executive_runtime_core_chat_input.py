@@ -10,6 +10,8 @@ def test_build_chat_input_preserves_gateway_voice_delivery_flags() -> None:
         reply_channel="wechat",
         suppress_edge_tts=True,
         suppress_edge_vts=True,
+        render_policy={"primary_topic": "technical_help"},
+        surface_task_control={"task_mode": "technical_help", "response_move": "technical_next_step"},
     )
 
     chat_input = _build_chat_input(
@@ -34,6 +36,8 @@ def test_build_chat_input_preserves_gateway_voice_delivery_flags() -> None:
     assert chat_input.reply_channel == "wechat"
     assert chat_input.suppress_edge_tts is True
     assert chat_input.suppress_edge_vts is True
+    assert chat_input.render_policy == {"primary_topic": "technical_help"}
+    assert chat_input.surface_task_control == {"task_mode": "technical_help", "response_move": "technical_next_step"}
 
 
 def test_build_chat_input_upgrades_base_runtime_to_chat_agent_runtime(monkeypatch) -> None:

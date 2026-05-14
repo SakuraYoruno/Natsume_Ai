@@ -84,6 +84,66 @@ def test_build_surface_main_chain_input_from_chat_input_compresses_app_context(m
     assert "memory://episodic/1" not in json.dumps(payload.as_dict(), ensure_ascii=False)
 
 
+def test_build_surface_main_chain_input_prefers_surface_task_control(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "host_brain.app.surface_main_chain_adapter.get_compiled_soul",
+        lambda: SimpleNamespace(source_text=SOUL, runtime_full_text=SOUL),
+    )
+
+    payload = build_surface_main_chain_input_from_chat_input(
+        _agent_input(
+            surface_task_control={
+                "task_mode": "style_repair",
+                "response_move": "ack_style_issue",
+                "response_form": "text",
+                "question_budget": 0,
+            }
+        )
+    )
+
+    assert payload.task_control["task_mode"] == "style_repair"
+    assert payload.task_control["response_move"] == "ack_style_issue"
+
+
+def test_build_surface_main_chain_input_derives_reply_plan_without_passing_history(monkeypatch) -> None:
+    trace: dict[str, object] = {}
+
+    monkeypatch.setattr(
+        "host_brain.app.surface_main_chain_adapter.get_compiled_soul",
+        lambda: SimpleNamespace(source_text=SOUL, runtime_full_text=SOUL),
+    )
+
+    def _fake_build_cortex_prompt(**kwargs):  # noqa: ANN003
+        assert kwargs["include_runtime_payload"] is True
+        return (
+            [{"role": "system", "content": "RAW HISTORY PROMPT SHOULD NOT REACH SURFACE"}],
+            {},
+            {
+                "reply_plan": {
+                    "primary_topic": "presence_ping",
+                    "interaction_move": "answer_current_chat_presence",
+                    "response_form": "text",
+                    "max_questions": 0,
+                },
+                "conversation_history": {"turns_injected": 2, "summary_present": True},
+            },
+        )
+
+    monkeypatch.setattr("host_brain.app.cortex_prompt_builder.build_cortex_prompt", _fake_build_cortex_prompt)
+
+    payload = build_surface_main_chain_input_from_chat_input(
+        _agent_input(render_policy={}, surface_task_control={}),
+        trace_stage_meta=trace,
+    )
+    rendered = json.dumps(payload.as_dict(), ensure_ascii=False)
+
+    assert payload.task_control["task_mode"] == "presence_ping"
+    assert payload.task_control["response_move"] == "answer_current_chat_presence"
+    assert trace["conversation_history"] == {"turns_injected": 2, "summary_present": True}
+    assert trace["reply_plan"]["primary_topic"] == "presence_ping"
+    assert "RAW HISTORY PROMPT SHOULD NOT REACH SURFACE" not in rendered
+
+
 @pytest.mark.asyncio
 async def test_surface_main_chain_sse_generator_calls_chat_surface_pool(monkeypatch) -> None:
     calls: list[dict] = []

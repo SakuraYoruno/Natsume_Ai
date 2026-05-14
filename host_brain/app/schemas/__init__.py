@@ -89,6 +89,14 @@ class ChatRequest(BaseModel):
         None,
         description="Optional desired response form, e.g. text or voice.",
     )
+    render_policy: Optional[Dict[str, Any]] = Field(
+        None,
+        description="Optional compressed reply policy for the text surface layer.",
+    )
+    surface_task_control: Optional[Dict[str, Any]] = Field(
+        None,
+        description="Optional compressed surface task controls used before final ReplyControlPacket compile.",
+    )
     attachments: Optional[List[Dict[str, Any]]] = Field(None, description="Optional structured inbound attachments")
     multimodal_observations: Optional[Dict[str, Any]] = Field(
         None,

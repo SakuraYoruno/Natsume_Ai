@@ -1020,6 +1020,8 @@ def _build_chat_input(
         intent_draft=dict(intent_draft or {}),
         trace_stage_meta=dict(trace_stage_meta or {}),
         llm_runtime=resolved_llm_runtime,
+        render_policy=dict(getattr(request_body, "render_policy", {}) or {}),
+        surface_task_control=dict(getattr(request_body, "surface_task_control", {}) or {}),
         attachments=list(getattr(request_body, "attachments", []) or []),
         multimodal_observations=dict(getattr(request_body, "multimodal_observations", {}) or {}),
         attachment_summary=str(getattr(request_body, "attachment_summary", "") or "").strip(),

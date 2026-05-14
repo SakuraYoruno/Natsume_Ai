@@ -20,6 +20,18 @@ _MEMORY_PACKET_KEYS = (
     "memory_recall_packet",
     "memory_packet",
 )
+_TRACE_RUNTIME_PAYLOAD_KEYS = (
+    "conversation_history",
+    "conversation_interpretation",
+    "interaction_thread",
+    "interaction_state",
+    "topic_ledger",
+    "tactic_ledger",
+    "affect_state",
+    "relationship_state",
+    "drive_state",
+    "reply_plan",
+)
 _TEXT_RESPONSE_FORMS = {"", "text", "plain_text", "chat_text", "zh_text"}
 
 
@@ -36,43 +48,20 @@ def surface_main_chain_enabled(agent_input: Any, *, sub_agent_ctx: Any | None = 
     return response_form in _TEXT_RESPONSE_FORMS
 
 
-def build_surface_main_chain_input_from_chat_input(agent_input: Any) -> SurfaceMainChainInput:
+def build_surface_main_chain_input_from_chat_input(
+    agent_input: Any,
+    *,
+    trace_stage_meta: dict[str, Any] | None = None,
+) -> SurfaceMainChainInput:
     soul = get_compiled_soul()
-    reply_plan = _reply_plan(agent_input)
-    task_mode = _first_nonempty(
-        reply_plan.get("primary_topic"),
-        reply_plan.get("response_form_reason"),
-        reply_plan.get("response_goal"),
-        _safe_mapping(getattr(agent_input, "intent_draft", None)).get("route"),
-        "daily_chat",
-    )
-    response_move = _first_nonempty(
-        reply_plan.get("interaction_move"),
-        reply_plan.get("response_goal"),
-        reply_plan.get("tactic_variant"),
-        task_mode,
-    )
-    task_control = {
-        "response_move": response_move,
-        "task_mode": task_mode,
-        "information_budget": _first_nonempty(reply_plan.get("information_budget"), "short"),
-        "question_budget": _coerce_int(reply_plan.get("max_questions"), default=0),
-        "must_include": _clean_list(_coerce_sequence(reply_plan.get("must_include"))),
-        "must_not_do": _clean_list(_coerce_sequence(reply_plan.get("must_not_do"))),
-        "facts": _task_facts(agent_input=agent_input, reply_plan=reply_plan),
-        "style_anchor": _clean_list(
-            [
-                "app_surface_main_chain",
-                _first_nonempty(reply_plan.get("style_anchor"), ""),
-            ]
-        ),
-    }
+    reply_plan = _resolve_surface_reply_plan(agent_input, trace_stage_meta=trace_stage_meta)
+    task_control = _surface_task_control_from_reply_plan(agent_input=agent_input, reply_plan=reply_plan)
     affect_packet = build_surface_affect_control_packet(
         emotion_state=_safe_mapping(getattr(agent_input, "emotion_context", None))
         or _safe_mapping(getattr(agent_input, "emotion_snapshot", None)),
         bond_summary=_safe_mapping(getattr(agent_input, "bond_summary", None)),
         relationship_clues=_relationship_clues(agent_input),
-        task_mode=task_mode,
+        task_mode=str(task_control.get("task_mode") or ""),
     )
     return SurfaceMainChainInput(
         soul_md=str(getattr(soul, "source_text", "") or getattr(soul, "runtime_full_text", "")).strip(),
@@ -87,7 +76,11 @@ def build_surface_main_chain_input_from_chat_input(agent_input: Any) -> SurfaceM
     )
 
 
-async def run_surface_main_chain_for_chat_input(agent_input: Any) -> SurfaceMainChainResult:
+async def run_surface_main_chain_for_chat_input(
+    agent_input: Any,
+    *,
+    trace_stage_meta: dict[str, Any] | None = None,
+) -> SurfaceMainChainResult:
     llm_runtime = _safe_mapping(getattr(agent_input, "llm_runtime", None))
     request_id = str(getattr(agent_input, "request_id", "") or "").strip()
 
@@ -110,7 +103,12 @@ async def run_surface_main_chain_for_chat_input(agent_input: Any) -> SurfaceMain
         )
         return str(getattr(result, "content", "") or "").strip()
 
-    return await SurfaceMainChain(_generate).run(build_surface_main_chain_input_from_chat_input(agent_input))
+    return await SurfaceMainChain(_generate).run(
+        build_surface_main_chain_input_from_chat_input(
+            agent_input,
+            trace_stage_meta=trace_stage_meta,
+        )
+    )
 
 
 async def surface_main_chain_sse_generator(
@@ -122,7 +120,7 @@ async def surface_main_chain_sse_generator(
     trace = dict(trace_stage_meta or {})
     request_id = str(getattr(agent_input, "request_id", "") or "").strip()
     try:
-        result = await run_surface_main_chain_for_chat_input(agent_input)
+        result = await run_surface_main_chain_for_chat_input(agent_input, trace_stage_meta=trace)
     except Exception as exc:
         total_latency_ms = max(0, int(time.time() * 1000) - started_ms)
         envelope = ReplyEnvelope.no_reply(
@@ -304,7 +302,7 @@ def _schedule_surface_post_process(
                 llm_input_digest=json.dumps(_public_result_trace(result), ensure_ascii=False)[:500],
                 retrieval_evidence_items=list(getattr(agent_input, "retrieval_evidence_items", None) or []),
                 motive_state=None,
-                reply_plan=_reply_plan(agent_input),
+                reply_plan=_reply_plan(agent_input, trace_stage_meta),
                 trace_stage_meta=trace,
             )
         )
@@ -334,11 +332,116 @@ def _response_form(agent_input: Any) -> str:
     )
 
 
-def _reply_plan(agent_input: Any) -> dict[str, Any]:
-    for raw in (getattr(agent_input, "reply_plan", None), getattr(agent_input, "render_policy", None)):
+def _resolve_surface_reply_plan(
+    agent_input: Any,
+    *,
+    trace_stage_meta: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    direct = _reply_plan(agent_input, trace_stage_meta)
+    if direct:
+        return direct
+    runtime_payload = _build_surface_runtime_payload(agent_input, trace_stage_meta=trace_stage_meta)
+    reply_plan = _safe_mapping(runtime_payload.get("reply_plan"))
+    if reply_plan:
+        _set_agent_input_mapping(agent_input, "render_policy", reply_plan)
+        return reply_plan
+    return {}
+
+
+def _reply_plan(agent_input: Any, trace_stage_meta: Mapping[str, Any] | None = None) -> dict[str, Any]:
+    trace = _safe_mapping(trace_stage_meta)
+    for raw in (
+        getattr(agent_input, "surface_task_control", None),
+        trace.get("surface_task_control"),
+        trace.get("reply_plan"),
+        getattr(agent_input, "reply_plan", None),
+        getattr(agent_input, "render_policy", None),
+    ):
         if isinstance(raw, Mapping):
             return dict(raw)
     return {}
+
+
+def _build_surface_runtime_payload(
+    agent_input: Any,
+    *,
+    trace_stage_meta: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    try:
+        from host_brain.app.cortex_prompt_builder import build_cortex_prompt  # noqa: PLC0415
+
+        prompt_result = build_cortex_prompt(
+            user_message=str(getattr(agent_input, "user_message", "") or ""),
+            render_target_lang=str(getattr(agent_input, "render_target_lang", "") or "zh"),
+            emotion_context=_safe_mapping(getattr(agent_input, "emotion_context", None)),
+            emotion_snapshot=_safe_mapping(getattr(agent_input, "emotion_snapshot", None)),
+            retrieval_summary=_safe_mapping(getattr(agent_input, "retrieval_summary", None)) or {"status": "SKIPPED"},
+            retrieval_evidence_items=list(getattr(agent_input, "retrieval_evidence_items", None) or []),
+            person_id=str(getattr(agent_input, "person_id", "") or ""),
+            session_id=str(getattr(agent_input, "session_id", "") or ""),
+            request_id=str(getattr(agent_input, "request_id", "") or ""),
+            thread_id=getattr(agent_input, "thread_id", None),
+            bond_summary=_safe_mapping(getattr(agent_input, "bond_summary", None)),
+            attachments=list(getattr(agent_input, "attachments", None) or []),
+            multimodal_observations=_safe_mapping(getattr(agent_input, "multimodal_observations", None)),
+            attachment_summary=str(getattr(agent_input, "attachment_summary", "") or "").strip(),
+            eval_history_turns=list(getattr(agent_input, "eval_history_turns", None) or []),
+            include_runtime_payload=True,
+        )
+        if not (isinstance(prompt_result, tuple) and len(prompt_result) >= 3):
+            return {}
+        runtime_payload = dict(prompt_result[2] or {}) if isinstance(prompt_result[2], Mapping) else {}
+        _merge_surface_trace(trace_stage_meta, runtime_payload)
+        return runtime_payload
+    except Exception as exc:
+        if isinstance(trace_stage_meta, dict):
+            trace_stage_meta["surface_context_prepare_failed"] = type(exc).__name__
+        return {}
+
+
+def _merge_surface_trace(trace_stage_meta: dict[str, Any] | None, runtime_payload: Mapping[str, Any]) -> None:
+    if not isinstance(trace_stage_meta, dict):
+        return
+    for key in _TRACE_RUNTIME_PAYLOAD_KEYS:
+        value = runtime_payload.get(key)
+        if isinstance(value, Mapping) and value:
+            trace_stage_meta[key] = dict(value)
+
+
+def _surface_task_control_from_reply_plan(*, agent_input: Any, reply_plan: Mapping[str, Any]) -> dict[str, Any]:
+    task_mode = _first_nonempty(
+        reply_plan.get("task_mode"),
+        reply_plan.get("primary_topic"),
+        reply_plan.get("response_form_reason"),
+        reply_plan.get("response_goal"),
+        _safe_mapping(getattr(agent_input, "intent_draft", None)).get("route"),
+        "daily_chat",
+    )
+    response_move = _first_nonempty(
+        reply_plan.get("response_move"),
+        reply_plan.get("interaction_move"),
+        reply_plan.get("response_goal"),
+        reply_plan.get("tactic_variant"),
+        task_mode,
+    )
+    return {
+        "response_move": response_move,
+        "task_mode": task_mode,
+        "information_budget": _first_nonempty(reply_plan.get("information_budget"), "short"),
+        "question_budget": _coerce_int(
+            _first_nonempty(reply_plan.get("question_budget"), reply_plan.get("max_questions")),
+            default=0,
+        ),
+        "must_include": _clean_list(_coerce_sequence(reply_plan.get("must_include"))),
+        "must_not_do": _clean_list(_coerce_sequence(reply_plan.get("must_not_do"))),
+        "facts": _task_facts(reply_plan=reply_plan),
+        "style_anchor": _clean_list(
+            [
+                "app_surface_main_chain",
+                _first_nonempty(reply_plan.get("style_anchor"), ""),
+            ]
+        ),
+    }
 
 
 def _memory_packet(agent_input: Any) -> MemoryRecallPacket | None:
@@ -365,10 +468,10 @@ def _relationship_clues(agent_input: Any) -> tuple[str, ...]:
     return tuple(clues)
 
 
-def _task_facts(*, agent_input: Any, reply_plan: Mapping[str, Any]) -> tuple[str, ...]:
+def _task_facts(*, reply_plan: Mapping[str, Any]) -> tuple[str, ...]:
     facts = [
         f"当前任务：{_first_nonempty(reply_plan.get('reply_contract'), reply_plan.get('response_goal'), '')}",
-        f"当前意图：{_first_nonempty(reply_plan.get('primary_topic'), reply_plan.get('interaction_move'), '')}",
+        f"当前意图：{_first_nonempty(reply_plan.get('task_mode'), reply_plan.get('primary_topic'), reply_plan.get('interaction_move'), '')}",
     ]
     return tuple(_clean_list(facts))
 
@@ -418,6 +521,13 @@ def _safe_mapping(value: Any) -> dict[str, Any]:
     if isinstance(value, Mapping):
         return dict(value)
     return {}
+
+
+def _set_agent_input_mapping(agent_input: Any, name: str, value: Mapping[str, Any]) -> None:
+    try:
+        setattr(agent_input, name, dict(value))
+    except Exception:
+        return
 
 
 def _clean_list(values: Sequence[Any] | None) -> list[str]:
