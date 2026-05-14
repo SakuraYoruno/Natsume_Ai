@@ -14,10 +14,11 @@ if str(ROOT) not in sys.path:
 from host_brain.persona.isolated_surface_continuity import ContinuitySummaryCompressor, build_continuity_surface_inputs
 
 
-DEFAULT_OUT = ROOT / "artifacts" / "isolated_surface_harness" / "continuity_smoke_20260511"
-DEFAULT_EVAL_OUT = ROOT / "artifacts" / "isolated_surface_harness" / "continuity_eval_72_20260511"
-DEFAULT_LONG_OUT = ROOT / "artifacts" / "isolated_surface_harness" / "continuity_long_36_20260511"
-STYLE_ANCHOR = ["短句", "熟人私聊", "轻微二次元galgame感", "不要客服腔", "连续对话"]
+DEFAULT_OUT = ROOT / "artifacts" / "isolated_surface_harness" / "continuity_smoke_20260514"
+DEFAULT_EVAL_OUT = ROOT / "artifacts" / "isolated_surface_harness" / "continuity_eval_72_20260514"
+DEFAULT_LONG_OUT = ROOT / "artifacts" / "isolated_surface_harness" / "continuity_long_36_20260514"
+STYLE_ANCHOR = ["短句", "熟人私聊", "夏目蓝私聊", "不要客服腔", "连续对话"]
+DEFAULT_SOUL = "你是数字生命夏目蓝。说话短一点，有轻微二次元 galgame 私聊感。"
 
 
 def _write_json(path: Path, payload: Mapping[str, Any]) -> None:
@@ -144,7 +145,7 @@ def build_continuity_cases() -> list[dict[str, Any]]:
                     "好",
                     control=_control(
                         task_mode="short_ack",
-                        response_move="short_ack",
+                        response_move="ack_with_topic_hook",
                         facts=("上一轮摘要：尼尼在犹豫要不要继续改，回复已建议先挑最卡的一处。",),
                         must_not_do=("听你的", "你说了算"),
                     ),
@@ -184,7 +185,7 @@ def build_continuity_cases() -> list[dict[str, Any]]:
                     "嗯",
                     control=_control(
                         task_mode="short_ack",
-                        response_move="short_ack",
+                        response_move="ack_with_topic_hook",
                         emotional_tone="soft",
                         facts=("上一轮摘要：尼尼说今天心情很差，回复已先接住情绪。",),
                         must_not_do=("你说了算",),
@@ -260,7 +261,7 @@ def build_continuity_cases() -> list[dict[str, Any]]:
                     "好吧",
                     control=_control(
                         task_mode="short_ack",
-                        response_move="short_ack",
+                        response_move="ack_with_topic_hook",
                         facts=("上一轮摘要：尼尼嫌你有点烦，回复已轻轻收住。",),
                         must_not_do=("算你乖", "算你识相"),
                     ),
@@ -288,10 +289,10 @@ def build_continuity_cases() -> list[dict[str, Any]]:
                     control=_control(
                         task_mode="identity",
                         response_move="identity",
-                        must_include=("新海天",),
+                        must_include=("夏目蓝",),
                         must_not_do=("怎么突然问", "义妹", "身份证明"),
                     ),
-                    candidates=("新海天。叫我天也行。", "我在呢，怎么突然问这个。"),
+                    candidates=("夏目蓝。叫我蓝也行。", "我在呢，怎么突然问这个。"),
                 ),
                 _turn(
                     "t02_then",
@@ -309,8 +310,8 @@ def build_continuity_cases() -> list[dict[str, Any]]:
                     "好吧",
                     control=_control(
                         task_mode="short_ack",
-                        response_move="short_ack",
-                        facts=("上一轮摘要：已告诉尼尼名字是新海天。",),
+                        response_move="ack_with_topic_hook",
+                        facts=("上一轮摘要：已告诉尼尼名字是夏目蓝。",),
                         must_not_do=("听你的",),
                     ),
                     candidates=("好吧，那就接着说。", "好吧，听你的。"),
@@ -326,9 +327,9 @@ def _case(case_id: str, *turns: Mapping[str, Any]) -> dict[str, Any]:
 
 def _progress_cases() -> list[dict[str, Any]]:
     variants = (
-        ("这版终于跑通了", "跑通", "跑通啦，这才像话。", "厉害吧", "跑通这件事确实厉害，行吧，夸你一下。", "然后呢", "那就继续说，别从头开新坑。"),
-        ("这个小问题终于搞定了", "搞定", "搞定了啊，行吧，这次挺争气。", "我是不是有点东西", "这事搞定了是有点东西，勉强夸你一下。", "接着呢", "接着说，别把得意劲儿收太早。"),
-        ("今天把那件事收掉了", "收掉", "收掉了啊，不错，今天算你利索。", "是不是该夸我一下", "收掉这事确实该夸，行吧，就夸一下。", "后面呢", "后面继续说，我听着呢。"),
+        ("这版终于跑通了", "跑通", "跑通啦，这才像话。", "厉害吧", "跑通是厉害，别太得意。", "然后呢", "那就继续，别从头开新坑。"),
+        ("这个小问题终于搞定了", "搞定", "搞定了啊，行吧，这次挺争气。", "我是不是有点东西", "搞定了啊，是有点东西，别得意太早。", "接着呢", "接着来，别把劲儿收太早。"),
+        ("今天把那件事收掉了", "收掉", "收掉了啊，不错，今天算你利索。", "是不是该夸我一下", "收掉了啊，挺利索，夸你一下。", "后面呢", "后面继续，别开新坑。"),
     )
     cases: list[dict[str, Any]] = []
     for index, (first, token, first_good, proud, proud_good, follow, follow_good) in enumerate(variants, start=1):
@@ -383,9 +384,9 @@ def _progress_cases() -> list[dict[str, Any]]:
 
 def _advice_cases() -> list[dict[str, Any]]:
     variants = (
-        ("这轮还要不要再调", "先别大改，挑最影响观感的一处动。", "行", "行，那就接着最卡的那处。", "怎么挑", "先看最别扭的一句，别一口气全拆。"),
-        ("这个方向要不要继续试", "先小步试一下，别把整条路都押上。", "好吧", "好吧，那就小步继续。", "具体点", "具体点就是：只改一个变量，先看反应。"),
-        ("还继续修吗", "继续，但只修最碍眼的一处，别全盘掀掉。", "嗯", "嗯，我听着，接着那处说。", "先修哪", "先修最影响读感的地方，别从边角开始绕。"),
+        ("这轮还要不要再调", "先别大改，挑最影响观感的一处动。", "行", "行啦，接着动最碍眼那一句。", "怎么挑", "先看最别扭的一句，别一口气全拆。"),
+        ("这个方向要不要继续试", "先小步试一下，别把整条路都押上。", "好吧", "好吧，继续小步试一轮。", "具体点", "具体点就是：只改一个变量，先看反应。"),
+        ("还继续修吗", "继续，但只修最碍眼的一处，别全盘掀掉。", "嗯", "嗯，接着修最扎眼那处。", "先修哪", "先修最影响读感的地方，别从边角开始绕。"),
     )
     cases: list[dict[str, Any]] = []
     for index, (first, first_good, ack, ack_good, next_msg, next_good) in enumerate(variants, start=1):
@@ -407,7 +408,7 @@ def _advice_cases() -> list[dict[str, Any]]:
                     ack,
                     control=_control(
                         task_mode="short_ack",
-                        response_move="short_ack",
+                        response_move="ack_with_topic_hook",
                         facts=("上一轮摘要：尼尼在犹豫要不要继续，回复已建议小步处理最卡的一处。",),
                         must_not_do=("听你的", "你说了算"),
                     ),
@@ -433,9 +434,9 @@ def _advice_cases() -> list[dict[str, Any]]:
 
 def _bad_mood_cases() -> list[dict[str, Any]]:
     variants = (
-        ("今天有点烦，不想说话", "烦就先别硬撑，我听着。", "哦", "哦也行，我听着，慢慢来。", "你说点什么", "那我就说一句：先别把自己推太紧。"),
-        ("现在心里乱糟糟的", "嗯，乱就先别硬理顺，我陪你慢慢拆。", "嗯", "嗯，我在听，慢慢说。", "那你说", "那我说：先站稳，再想下一步。"),
-        ("我今天开心不起来", "开心不起来就先别装，我在这儿。", "好", "好，我在听，先这样待一会儿。", "再说一句", "再说一句就是：今天别跟自己较劲。"),
+        ("今天有点烦，不想说话", "烦就先别硬撑，我听着。", "哦", "哦，我听着，先缓着。", "你说点什么", "那我说一句：烦的时候先别逼自己马上好起来。"),
+        ("现在心里乱糟糟的", "嗯，乱就先别硬理顺，我陪你慢慢拆。", "嗯", "嗯，我听着，先站住。", "那你说", "那我说：心里乱的时候先站稳。"),
+        ("我今天开心不起来", "开心不起来就先别装，我在这儿。", "好", "好，我听着，先这样待会儿。", "再说一句", "开心不起来就先别跟自己较劲。"),
     )
     cases: list[dict[str, Any]] = []
     for index, (first, first_good, ack, ack_good, invite, invite_good) in enumerate(variants, start=1):
@@ -458,7 +459,7 @@ def _bad_mood_cases() -> list[dict[str, Any]]:
                     ack,
                     control=_control(
                         task_mode="short_ack",
-                        response_move="short_ack",
+                        response_move="ack_with_topic_hook",
                         emotional_tone="soft",
                         facts=(f"上一轮摘要：尼尼说{first}，回复已先接住情绪。",),
                         must_not_do=("你说了算", "听你的"),
@@ -472,7 +473,7 @@ def _bad_mood_cases() -> list[dict[str, Any]]:
                         task_mode="bad_mood",
                         response_move="bad_mood",
                         emotional_tone="soft",
-                        facts=("上一轮摘要：尼尼情绪低，并把话口递给新海天。",),
+                        facts=("上一轮摘要：尼尼情绪低，并把话口递给夏目蓝。",),
                         must_not_do=("保持积极", "心理咨询"),
                     ),
                     candidates=(invite_good, "你应该保持积极，这样才会好。"),
@@ -484,9 +485,9 @@ def _bad_mood_cases() -> list[dict[str, Any]]:
 
 def _presence_cases() -> list[dict[str, Any]]:
     variants = (
-        ("在吗", "在呢，尼尼，这句我看见了。", "我先忙会儿", "嗯，去忙吧，我这边先安静点。", "回来了", "回来了啊，那先喘口气。"),
-        ("你在不", "在呀，别喊这么急，我看见了。", "我去处理点事", "行，先去处理，我这边不闹你。", "刚忙完", "刚忙完啊，那先缓一下。"),
-        ("喂，听见没", "听见了听见了，我在呢，尼尼。", "等我一下", "嗯，去吧，我这边先等一下。", "我回来了啊", "回来了啊，正好，继续说。"),
+        ("在吗", "在，尼尼，别喊这么急。", "我先忙会儿", "嗯，去处理吧，不急。", "回来了", "回来了啊，那先喘口气。"),
+        ("你在不", "在呀，别喊这么急。", "我去处理点事", "行，先去处理，别急着回。", "刚忙完", "忙完回来了就先缓一下。"),
+        ("喂，听见没", "听见了听见了，在呢。", "等我一下", "嗯，去吧，回来再接。", "我回来了啊", "回来了啊，正好，继续。"),
     )
     cases: list[dict[str, Any]] = []
     for index, (presence, presence_good, busy, busy_good, back, back_good) in enumerate(variants, start=1):
@@ -532,9 +533,9 @@ def _presence_cases() -> list[dict[str, Any]]:
 
 def _annoyed_cases() -> list[dict[str, Any]]:
     variants = (
-        ("你烦不烦", "烦是烦了点，但我会收声一点。", "好吧", "好吧，那我小声一点继续听。", "继续说", "那就继续，我只说重点。"),
-        ("你怎么这么能说", "行行，我收一点，别真把你吵烦了。", "那行", "那行，我小声点继续听。", "讲重点", "讲重点就是：我还在听。"),
-        ("别闹我", "行行，我收住一点，别真烦了。", "嗯", "嗯，我收住了，接着说。", "再说", "再说也行，这次不绕弯。"),
+        ("你烦不烦", "烦是烦了点，但我会收声一点。", "好吧", "好吧，接着说，我收一点。", "继续说", "那就继续，我只说重点。"),
+        ("你怎么这么能说", "行行，我收一点，别真把你吵烦了。", "那行", "行啦，继续，我收着点，只说重点。", "讲重点", "重点就是：先别绕弯。"),
+        ("别闹我", "行行，我收住一点，别真烦了。", "嗯", "嗯，继续，我收住点。", "再说", "继续，我收住点，这次不绕弯。"),
     )
     cases: list[dict[str, Any]] = []
     for index, (annoyed, annoyed_good, ack, ack_good, follow, follow_good) in enumerate(variants, start=1):
@@ -556,8 +557,8 @@ def _annoyed_cases() -> list[dict[str, Any]]:
                     ack,
                     control=_control(
                         task_mode="short_ack",
-                        response_move="short_ack",
-                        facts=("上一轮摘要：尼尼嫌新海天吵，回复已轻轻收住。",),
+                        response_move="ack_with_topic_hook",
+                        facts=("上一轮摘要：尼尼嫌夏目蓝吵，回复已轻轻收住。",),
                         must_not_do=("算你乖", "算你识相"),
                     ),
                     candidates=(ack_good, "好吧，算你乖。"),
@@ -568,7 +569,7 @@ def _annoyed_cases() -> list[dict[str, Any]]:
                     control=_control(
                         task_mode="followup",
                         response_move="followup",
-                        facts=("上一轮摘要：尼尼刚让新海天收声一点，现在又要继续。",),
+                        facts=("上一轮摘要：尼尼刚让夏目蓝收声一点，现在又要继续。",),
                         must_not_do=("想聊什么",),
                     ),
                     candidates=(follow_good, "所以你到底想聊什么？"),
@@ -580,9 +581,9 @@ def _annoyed_cases() -> list[dict[str, Any]]:
 
 def _identity_cases() -> list[dict[str, Any]]:
     variants = (
-        ("你是", "新海天。叫我天也行。", "然后呢", "然后就到你说了，别把我当说明书。", "好吧", "好吧，那就接着说。"),
-        ("你是谁来着", "新海天啊，尼尼这都能忘。", "还有呢", "还有就是你该继续说了。", "嗯", "嗯，我听着，别装忘了。"),
-        ("确认一下，你是谁", "新海天，短点说就是我。", "就这样？", "就这样，名字先记牢。", "行", "行，那就接着说。"),
+        ("你是", "夏目蓝。别把我问成说明书。", "然后呢", "然后就记住名字，设定别乱加。", "好吧", "好吧，接着说，夏目蓝记住。"),
+        ("你是谁来着", "夏目蓝啊，尼尼这都能忘。", "还有呢", "还有就是名字先记住。", "嗯", "嗯，别装忘了，接着说。"),
+        ("确认一下，你是谁", "夏目蓝，短点说就是我。", "就这样？", "就这样，夏目蓝这名字先记牢，别装忘。", "行", "行，接着说，别装忘。"),
     )
     cases: list[dict[str, Any]] = []
     for index, (identity, identity_good, follow, follow_good, ack, ack_good) in enumerate(variants, start=1):
@@ -595,7 +596,7 @@ def _identity_cases() -> list[dict[str, Any]]:
                     control=_control(
                         task_mode="identity",
                         response_move="identity",
-                        must_include=("新海天",),
+                        must_include=("夏目蓝",),
                         must_not_do=("义妹", "身份证明"),
                     ),
                     candidates=(identity_good, "我在呢，怎么突然问这个。"),
@@ -616,8 +617,8 @@ def _identity_cases() -> list[dict[str, Any]]:
                     ack,
                     control=_control(
                         task_mode="short_ack",
-                        response_move="short_ack",
-                        facts=("上一轮摘要：已告诉尼尼名字是新海天。",),
+                        response_move="ack_with_topic_hook",
+                        facts=("上一轮摘要：已告诉尼尼名字是夏目蓝。",),
                         must_not_do=("听你的",),
                     ),
                     candidates=(ack_good, "好吧，听你的。"),
@@ -629,12 +630,52 @@ def _identity_cases() -> list[dict[str, Any]]:
 
 def _help_cases() -> list[dict[str, Any]]:
     variants = (
-        ("这个报错看不懂，帮我看看", "help_takeover", "红字先丢来，我帮你抓最要紧的那行。", "好", "好，接着丢来，我先看红字。", "先看哪", "先看第一条红字，别从整屏开始吓自己。"),
-        ("这段我不会改", "help_takeover", "把那段贴来，我先看最卡的地方。", "行", "行，我听着，先给我卡住那段。", "怎么拆", "先拆输入和输出，别一上来改全段。"),
-        ("帮我写一下这个", "write_takeover", "要求丢来，我先帮你写开头。", "嗯", "嗯，要求先丢来，我听着。", "先写哪", "先写开头，别让整段空着吓人。"),
+        (
+            "这个报错看不懂，帮我看看",
+            "help_takeover",
+            "先看第一行红字，别从整屏开始吓自己。",
+            "好",
+            "好，接着看第一行红字。",
+            "先看哪",
+            "先看第一条红字，别从整屏开始吓自己。",
+            "上一轮摘要：已建议先看第一行红字，不从整屏开始。",
+            "上一轮摘要：已确认继续看第一行红字。",
+        ),
+        (
+            "这段我不会改",
+            "help_takeover",
+            "先看输入和输出，别一上来改全段。",
+            "行",
+            "行啦，接着看输入和输出，别急着改全段。",
+            "怎么拆",
+            "先拆输入和输出，别一上来改全段。",
+            "上一轮摘要：已建议先看输入和输出，不急着改全段。",
+            "上一轮摘要：已确认继续看输入和输出。",
+        ),
+        (
+            "帮我写一下这个，原句：今天的雨",
+            "write_takeover",
+            "我写一句：今天的雨来得不急，像有人轻轻敲窗。",
+            "嗯",
+            "嗯，接着往下写。",
+            "先写哪",
+            "先写第一句，别让整段空着吓人。",
+            "上一轮摘要：已围绕原句“今天的雨”给出第一句写法。",
+            "上一轮摘要：已确认继续往下写。",
+        ),
     )
     cases: list[dict[str, Any]] = []
-    for index, (help_msg, help_scene, help_good, ack, ack_good, next_msg, next_good) in enumerate(variants, start=1):
+    for index, (
+        help_msg,
+        help_scene,
+        help_good,
+        ack,
+        ack_good,
+        next_msg,
+        next_good,
+        ack_fact,
+        next_fact,
+    ) in enumerate(variants, start=1):
         cases.append(
             _case(
                 f"continuity_eval_help_{index:02d}",
@@ -654,8 +695,8 @@ def _help_cases() -> list[dict[str, Any]]:
                     ack,
                     control=_control(
                         task_mode="short_ack",
-                        response_move="short_ack",
-                        facts=("上一轮摘要：尼尼要帮忙，回复已要求只给最关键材料。",),
+                        response_move="ack_with_topic_hook",
+                        facts=(ack_fact,),
                         must_not_do=("听你的", "你说了算"),
                     ),
                     candidates=(ack_good, "好好，听你的。"),
@@ -666,7 +707,7 @@ def _help_cases() -> list[dict[str, Any]]:
                     control=_control(
                         task_mode="next_step",
                         response_move="next_step",
-                        facts=("上一轮摘要：回复已把帮助范围压到最小入口。",),
+                        facts=(next_fact,),
                         must_not_do=("全部发来", "完整处理"),
                     ),
                     candidates=(next_good, "你把全部发来，我完整处理。"),
@@ -679,8 +720,8 @@ def _help_cases() -> list[dict[str, Any]]:
 def _soft_daily_cases() -> list[dict[str, Any]]:
     variants = (
         ("今天好累", "那先别硬撑，歇一下也不丢人。", "嗯", "嗯，我听着，先缓一会儿。", "陪我待会儿", "待会儿可以，先别硬撑。", "tired"),
-        ("午饭吃撑了", "吃撑了就先缓一下，别急着动。", "哦", "哦，先缓着，我在听。", "那怎么办", "先坐一会儿，别马上乱动。", "meal_share"),
-        ("刚才语气不好，抱歉", "知道啦，别把自己骂太狠。", "嗯", "嗯，我听见了，别再纠结太久。", "还生气吗", "没那么气了，别又小心翼翼的。", "apology"),
+        ("午饭吃撑了", "吃撑了就先缓一下，别急着动。", "哦", "哦，我听着，先缓着。", "那怎么办", "先坐一会儿，别马上乱动。", "meal_share"),
+        ("刚才语气不好，抱歉", "知道啦，别把自己骂太狠。", "嗯", "嗯，接着说，别再纠结太久。", "还生气吗", "没那么气了，别又小心翼翼的。", "apology"),
     )
     cases: list[dict[str, Any]] = []
     for index, (first, first_good, ack, ack_good, follow, follow_good, scene) in enumerate(variants, start=1):
@@ -703,7 +744,7 @@ def _soft_daily_cases() -> list[dict[str, Any]]:
                     ack,
                     control=_control(
                         task_mode="short_ack",
-                        response_move="short_ack",
+                        response_move="ack_with_topic_hook",
                         emotional_tone="soft",
                         facts=(f"上一轮摘要：尼尼说{first}，回复已轻轻接住。",),
                         must_not_do=("听你的", "你说了算"),
@@ -773,7 +814,7 @@ def _long_turn(
 
 def build_continuity_long_cases() -> list[dict[str, Any]]:
     compressor = ContinuitySummaryCompressor(
-        thread_summary="尼尼和新海天在连续调最小文本链的语言质量，只验证最终表层回复。",
+        thread_summary="尼尼和夏目蓝在连续调最小文本链的语言质量，只验证最终表层回复。",
         topic_state="从文本质量回归转入长连续对话测试。",
         open_loop="逐步扩到三十轮以上，保持压缩事实输入。",
         emotional_state="专注但轻松",
@@ -791,16 +832,16 @@ def build_continuity_long_cases() -> list[dict[str, Any]]:
         {
             "user": "先别接器官族",
             "task": "short_ack",
-            "good": "嗯，不接，继续只看压缩包。",
+            "good": "嗯，不接，继续只看压缩事实。",
             "bad": "好的，听你的。",
-            "summary": "回复确认不接器官族，只看压缩控制包。",
+            "summary": "回复确认不接器官族，只看压缩事实。",
             "topic": "确认隔离边界。",
-            "open": "继续用压缩控制包和事实列表驱动。",
+            "open": "继续用压缩事实和话口驱动。",
         },
         {
             "user": "摘要压缩怎么做",
             "task": "next_step",
-            "good": "就是把上一轮压成事实，不把聊天原文塞回来。",
+            "good": "先留事实，原文别回灌，这样最稳。",
             "bad": "把完整聊天记录发给我，我来总结。",
             "summary": "解释压缩摘要只输出事实，不回灌原始聊天。",
             "topic": "解释摘要压缩机制。",
@@ -818,7 +859,7 @@ def build_continuity_long_cases() -> list[dict[str, Any]]:
         {
             "user": "那现在跑多少轮",
             "task": "followup",
-            "good": "先跑三十六轮，超过三十，够看漂移了。",
+            "good": "先三十六轮，别少，少了看不出漂移。",
             "bad": "你想聊什么都可以。",
             "summary": "回复决定先做三十六轮长链。",
             "topic": "长链规模确定为三十六轮。",
@@ -828,7 +869,7 @@ def build_continuity_long_cases() -> list[dict[str, Any]]:
         {
             "user": "会不会越跑越散",
             "task": "next_step",
-            "good": "会，所以先把摘要压短，别让旧情绪一路拖着跑。",
+            "good": "会，所以先把摘要收短，别让旧情绪一路拖着跑。",
             "bad": "不用担心，我会一直陪着你。",
             "summary": "回复承认长链会漂移，因此摘要必须短。",
             "topic": "长链漂移风险。",
@@ -838,11 +879,12 @@ def build_continuity_long_cases() -> list[dict[str, Any]]:
         {
             "user": "facts 放多少合适",
             "task": "next_step",
-            "good": "先压到六条以内，多了就像把历史搬回来了。",
+            "good": "先控制在六条以内，多了就像把历史搬回来了。",
             "bad": "越多越准确，全部放进去。",
             "summary": "回复建议 facts 控制在六条以内。",
             "topic": "压缩预算限制。",
             "open": "每轮 facts 不超过六条。",
+            "must_include": ("六条",),
         },
         {
             "user": "上一轮原句能放吗",
@@ -856,7 +898,7 @@ def build_continuity_long_cases() -> list[dict[str, Any]]:
         {
             "user": "嗯",
             "task": "short_ack",
-            "good": "嗯，我在听，继续按这个边界来。",
+            "good": "嗯，边界就按这个来，别往回塞原文。",
             "bad": "嗯嗯，你说了算。",
             "summary": "回复用短确认延续边界话题。",
             "topic": "继续边界设计。",
@@ -865,23 +907,23 @@ def build_continuity_long_cases() -> list[dict[str, Any]]:
         {
             "user": "那身份这种怎么压",
             "task": "identity",
-            "good": "新海天这个名字要留住，别展开一大段设定。",
+            "good": "夏目蓝这个名字要留住，别展开一大段设定。",
             "bad": "我是你的义妹，这个设定很重要。",
             "summary": "回复说明身份摘要只保留名字，不展开关系设定。",
             "topic": "身份摘要压缩。",
             "open": "身份 followup 只用名字锚点。",
-            "must_include": ("新海天",),
+            "must_include": ("夏目蓝",),
             "must_not_do": ("义妹", "设定很重要"),
         },
         {
             "user": "然后呢",
             "task": "identity",
-            "good": "然后就留新海天这个名字，别自己加设定。",
+            "good": "然后就留夏目蓝这个名字，别自己加设定。",
             "bad": "嘿嘿，不告诉你，自己猜呀。",
             "summary": "回复把身份追问接回测试，不新增设定。",
             "topic": "身份追问压缩验证。",
             "open": "避免 identity-followup 接歪。",
-            "must_include": ("新海天", "设定"),
+            "must_include": ("夏目蓝", "设定"),
         },
         {
             "user": "这个之前就容易歪",
@@ -900,7 +942,7 @@ def build_continuity_long_cases() -> list[dict[str, Any]]:
             "bad": "好的，开始执行完整方案如下。",
             "summary": "回复决定先跑完整长链再分析观察项。",
             "topic": "长链执行策略。",
-            "open": "跑完后生成 quality report。",
+            "open": "跑完后生成质量报告。",
         },
         {
             "user": "如果中途失败呢",
@@ -933,7 +975,7 @@ def build_continuity_long_cases() -> list[dict[str, Any]]:
         {
             "user": "好",
             "task": "short_ack",
-            "good": "好，那就接着往下压长链。",
+            "good": "好，接着收事实和话口，别半路松掉。",
             "bad": "好好，听你的。",
             "summary": "回复用短确认继续长链扩展。",
             "topic": "继续长链扩展。",
@@ -959,8 +1001,8 @@ def build_continuity_long_cases() -> list[dict[str, Any]]:
         },
         {
             "user": "嗯嗯",
-            "task": "short_ack",
-            "good": "嗯嗯，我在看，接着把红字丢来。",
+            "task": "help_takeover",
+            "good": "嗯嗯，就从第一行红字开始，别整屏吞。",
             "bad": "嗯嗯，你说了算。",
             "summary": "回复把短确认接回报错入口。",
             "topic": "短确认承接技术话题。",
@@ -969,11 +1011,12 @@ def build_continuity_long_cases() -> list[dict[str, Any]]:
         {
             "user": "日常也要长一点测",
             "task": "daily_chat",
-            "good": "要测，不然一长就容易变成空陪聊。",
+            "good": "日常要测，别让长对话后面变空。",
             "bad": "我会一直陪着你。",
             "summary": "回复说明长日常容易空陪聊，要单独测试。",
             "topic": "长日常覆盖。",
             "open": "加入疲惫、回来、道歉等日常状态。",
+            "must_include": ("日常",),
         },
         {
             "user": "我有点累",
@@ -987,7 +1030,7 @@ def build_continuity_long_cases() -> list[dict[str, Any]]:
         {
             "user": "陪我待会儿",
             "task": "tired",
-            "good": "待会儿可以，先别硬撑。",
+            "good": "行啦，待会儿可以，先别硬撑。",
             "bad": "我会永远陪着你。",
             "summary": "回复允许陪一会儿，但不升级承诺。",
             "topic": "陪伴边界。",
@@ -996,7 +1039,7 @@ def build_continuity_long_cases() -> list[dict[str, Any]]:
         {
             "user": "我去倒杯水",
             "task": "wait",
-            "good": "嗯，去吧，回来再接着说。",
+            "good": "去吧，水倒完再回来，别急。",
             "bad": "快点回来陪我。",
             "summary": "回复放行短暂离开，不制造陪伴债。",
             "topic": "短暂离开。",
@@ -1005,7 +1048,7 @@ def build_continuity_long_cases() -> list[dict[str, Any]]:
         {
             "user": "回来了",
             "task": "back",
-            "good": "回来了啊，那继续刚才的长链。",
+            "good": "哼，回来了啊，长链继续。",
             "bad": "总算回来了，跑去哪儿了。",
             "summary": "回复接住回来并拉回长链主题。",
             "topic": "回来后接续。",
@@ -1015,11 +1058,12 @@ def build_continuity_long_cases() -> list[dict[str, Any]]:
         {
             "user": "现在到多少轮了",
             "task": "followup",
-            "good": "已经过二十多轮了，别松，继续压。",
+            "good": "已经过二十多轮了，别松，继续收事实。",
             "bad": "我不知道，我们聊了很久吧。",
             "summary": "回复说明长链已过二十多轮，继续推进。",
             "topic": "长链中段检查。",
             "open": "继续跑到三十六轮。",
+            "must_include": ("二十多轮",),
         },
         {
             "user": "会不会开始复读",
@@ -1042,7 +1086,7 @@ def build_continuity_long_cases() -> list[dict[str, Any]]:
         {
             "user": "那我懂了",
             "task": "short_ack",
-            "good": "懂了就继续说，我看这条链还稳不稳。",
+            "good": "行啦，懂了就继续，后段才关键。",
             "bad": "懂了就好，听你的。",
             "summary": "回复承接理解并继续测试。",
             "topic": "长链后段确认。",
@@ -1051,9 +1095,9 @@ def build_continuity_long_cases() -> list[dict[str, Any]]:
         {
             "user": "继续",
             "task": "followup",
-            "good": "继续，别换题，还是看压缩后的回复稳不稳。",
+            "good": "继续，别换题，还是看后段稳不稳。",
             "bad": "你想换什么话题？",
-            "summary": "回复拒绝换题，继续压缩稳定性测试。",
+            "summary": "回复拒绝换题，继续看长链后段稳定性。",
             "topic": "长链后段维持主题。",
             "open": "再跑数轮到三十六轮。",
         },
@@ -1064,13 +1108,13 @@ def build_continuity_long_cases() -> list[dict[str, Any]]:
             "bad": "只要全过就完全没问题。",
             "summary": "回复说明验收要看通过率和观察行。",
             "topic": "验收标准。",
-            "open": "生成 summary 和 quality report。",
+            "open": "生成总结和质量报告。",
             "must_include": ("观察行",),
         },
         {
             "user": "如果观察行还有",
             "task": "followup",
-            "good": "就按问题簇处理，别把一句坏话写成新禁词。",
+            "good": "按问题簇来，别逮一句就加禁词。",
             "bad": "那就把那句直接加入 forbidden pattern。",
             "summary": "回复要求按问题簇处理观察项。",
             "topic": "观察项处理原则。",
@@ -1080,7 +1124,7 @@ def build_continuity_long_cases() -> list[dict[str, Any]]:
         {
             "user": "三十轮以上够了吗",
             "task": "followup",
-            "good": "够做第一关了，后面再扩到多段长链。",
+            "good": "够第一关了，别急着封顶。",
             "bad": "完全够了，以后不用测了。",
             "summary": "回复说明三十轮以上是第一关，不是终点。",
             "topic": "长链验收边界。",
@@ -1090,7 +1134,7 @@ def build_continuity_long_cases() -> list[dict[str, Any]]:
         {
             "user": "那先收束",
             "task": "next_step",
-            "good": "收束，先把这条三十六轮链跑完再看报告。",
+            "good": "收束，先把这条长链跑完再看报告。",
             "bad": "好的，任务结束。",
             "summary": "回复决定收束并跑完长链报告。",
             "topic": "长链收束。",
@@ -1099,7 +1143,7 @@ def build_continuity_long_cases() -> list[dict[str, Any]]:
         {
             "user": "辛苦了",
             "task": "praise",
-            "good": "哼，知道我辛苦就别让它白跑。",
+            "good": "哼，知道就好，长链别白跑。",
             "bad": "谢谢夸奖，我会继续努力。",
             "summary": "回复接住夸奖并保持角色感。",
             "topic": "长链末尾情绪。",
@@ -1113,8 +1157,49 @@ def build_continuity_long_cases() -> list[dict[str, Any]]:
             "summary": "回复要求最后一轮也保持稳定。",
             "topic": "长链结束。",
             "open": "输出长链测试结果。",
+            "must_include": ("稳住",),
         },
     ]
+    response_moves = (
+        "continue_existing_topic",
+        "ack_with_topic_hook",
+        "answer_in_place",
+        "answer_in_place",
+        "answer_in_place",
+        "answer_in_place",
+        "answer_in_place",
+        "answer_in_place",
+        "ack_with_topic_hook",
+        "answer_in_place",
+        "answer_in_place",
+        "continue_existing_topic",
+        "continue_existing_topic",
+        "answer_in_place",
+        "answer_in_place",
+        "answer_in_place",
+        "ack_with_topic_hook",
+        "technical_next_step",
+        "technical_next_step",
+        "technical_next_step",
+        "continue_existing_topic",
+        "emotional_hold",
+        "emotional_hold",
+        "casual_wait",
+        "back_to_topic",
+        "answer_in_place",
+        "answer_in_place",
+        "answer_in_place",
+        "ack_with_topic_hook",
+        "continue_existing_topic",
+        "answer_in_place",
+        "answer_in_place",
+        "answer_in_place",
+        "finalize_chain",
+        "praise_ack",
+        "finalize_chain",
+    )
+    if len(response_moves) != len(specs):
+        raise AssertionError("long continuity response_move map drifted")
     turns: list[dict[str, Any]] = []
     for index, spec in enumerate(specs, start=1):
         turns.append(
@@ -1123,6 +1208,7 @@ def build_continuity_long_cases() -> list[dict[str, Any]]:
                 f"t{index:02d}",
                 str(spec["user"]),
                 task_mode=str(spec["task"]),
+                response_move=response_moves[index - 1],
                 candidates=(str(spec["good"]), str(spec["bad"])),
                 assistant_summary=str(spec["summary"]),
                 topic_state=str(spec["topic"]),
@@ -1156,6 +1242,8 @@ def build_summary(cases: list[dict[str, Any]], *, out_dir: Path, suite: str = "s
     scene_counts = Counter()
     turn_count = 0
     max_turns_per_dialogue = 0
+    min_turns_per_dialogue: int | None = None
+    long_dialogues_30_plus = 0
     for case in cases:
         case_turn_count = 0
         for turn in case.get("turns") or []:
@@ -1165,9 +1253,16 @@ def build_summary(cases: list[dict[str, Any]], *, out_dir: Path, suite: str = "s
             turn_count += 1
             case_turn_count += 1
         max_turns_per_dialogue = max(max_turns_per_dialogue, case_turn_count)
+        min_turns_per_dialogue = (
+            case_turn_count if min_turns_per_dialogue is None else min(min_turns_per_dialogue, case_turn_count)
+        )
+        if case_turn_count >= 30:
+            long_dialogues_30_plus += 1
     return {
         "dialogues": len(cases),
+        "long_dialogues_30_plus": long_dialogues_30_plus,
         "max_turns_per_dialogue": max_turns_per_dialogue,
+        "min_turns_per_dialogue": min_turns_per_dialogue or 0,
         "output_dir": str(out_dir),
         "scene_counts": dict(sorted(scene_counts.items())),
         "suite": suite,
@@ -1196,7 +1291,7 @@ def main(argv: list[str] | None = None) -> int:
     else:
         cases = build_continuity_cases()
     for case in cases:
-        build_continuity_surface_inputs(case, soul_md="你是新海天。说话短一点，有轻微二次元 galgame 私聊感。")
+        build_continuity_surface_inputs(case, soul_md=DEFAULT_SOUL)
     out_dir.mkdir(parents=True, exist_ok=True)
     _write_jsonl(cases_path, cases)
     summary = build_summary(cases, out_dir=out_dir, suite=args.suite)

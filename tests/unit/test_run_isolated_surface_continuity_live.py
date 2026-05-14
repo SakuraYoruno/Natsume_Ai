@@ -5,7 +5,7 @@ import time
 from tools.run_isolated_surface_continuity_live import _dialogue_turn_counts, _flatten_turns, _summarize
 
 
-SOUL = "你是新海天。说话短一点，有轻微二次元 galgame 私聊感。"
+SOUL = "你是数字生命夏目蓝。说话短一点，有轻微二次元 galgame 私聊感。"
 
 
 def _turn(turn_id: str, user_message: str, task_mode: str) -> dict:
@@ -43,13 +43,13 @@ def test_flatten_turns_preserves_dialogue_and_turn_trace() -> None:
 
 def test_summarize_counts_dialogue_pass_only_after_all_turns_complete(tmp_path) -> None:
     started = time.perf_counter()
-    selected = {"passed": True, "score": 88.0, "hard_fail": False, "control_violations": []}
+    selected = {"passed": True, "score": 88.0, "hard_fail": False, "control_violations": [], "reason_codes": []}
     partial = _summarize(
         dialogues_count=1,
         turns_count=2,
         expected_dialogue_turns={"dialogue_one": 2},
         completed=1,
-        results=[{"case_id": "dialogue_one", "ok": True, "selected": selected, "latency_ms": 10}],
+        results=[{"case_id": "dialogue_one", "ok": True, "selected": selected, "latency_ms": 10, "fact_count": 4}],
         started=started,
         provider="fake",
         model="fake-model",
@@ -63,8 +63,19 @@ def test_summarize_counts_dialogue_pass_only_after_all_turns_complete(tmp_path) 
         expected_dialogue_turns={"dialogue_one": 2},
         completed=2,
         results=[
-            {"case_id": "dialogue_one", "ok": True, "selected": selected, "latency_ms": 10},
-            {"case_id": "dialogue_one", "ok": True, "selected": selected, "latency_ms": 12, "repair_attempted": True},
+            {"case_id": "dialogue_one", "ok": True, "selected": selected, "latency_ms": 10, "fact_count": 4},
+            {
+                "case_id": "dialogue_one",
+                "ok": True,
+                "selected": {
+                    **selected,
+                    "score": 82.0,
+                    "reason_codes": ["WRITTEN_REGISTER_TONE"],
+                },
+                "latency_ms": 12,
+                "repair_attempted": True,
+                "fact_count": 7,
+            },
         ],
         started=started,
         provider="fake",
@@ -78,3 +89,8 @@ def test_summarize_counts_dialogue_pass_only_after_all_turns_complete(tmp_path) 
     assert complete["dialogue_pass_count"] == 1
     assert complete["pass_count"] == 2
     assert complete["repair_attempt_count"] == 1
+    assert complete["facts_budget_max"] == 7
+    assert complete["facts_budget_violations"] == 1
+    assert complete["max_turns_per_dialogue"] == 2
+    assert complete["observation_reason_counts"]["LOW_SCORE"] == 1
+    assert complete["observation_reason_counts"]["WRITTEN_REGISTER_TONE"] == 1

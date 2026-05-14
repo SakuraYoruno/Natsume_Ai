@@ -184,7 +184,7 @@ def _summarize_user_intent(text: str) -> str:
         return "用户用短确认延续当前话题。"
     if any(token in normalized for token in ("报错", "红字", "错误", "Traceback", "traceback")):
         return "用户在继续技术求助。"
-    if any(token in normalized for token in ("身份", "名字", "新海天", "设定")):
+    if any(token in normalized for token in ("身份", "名字", "夏目蓝", "新海天", "设定")):
         return "用户在追问身份锚点。"
     if any(token in normalized for token in ("累", "困", "头疼", "难受")):
         return "用户表达低能量状态。"
@@ -199,7 +199,7 @@ def _summarize_assistant_move(text: str) -> str:
         return ""
     if any(token in normalized for token in ("先", "一步", "一处", "看", "贴", "红字")):
         return "助手已给出最小下一步。"
-    if any(token in normalized for token in ("新海天", "名字", "设定")):
+    if any(token in normalized for token in ("夏目蓝", "新海天", "名字", "设定")):
         return "助手已收束身份锚点。"
     if any(token in normalized for token in ("压缩", "摘要", "事实", "历史")):
         return "助手已说明压缩边界。"
@@ -215,7 +215,7 @@ def _infer_topic_state(current_user_message: str, task_mode: str, long_term_fact
     task = _clean_text(task_mode)
     if any(token in text for token in ("摘要", "压缩", "历史", "facts")):
         return "连续性摘要压缩。"
-    if any(token in text for token in ("身份", "名字", "新海天", "设定")) or task == "identity":
+    if any(token in text for token in ("身份", "名字", "夏目蓝", "新海天", "设定")) or task == "identity":
         return "身份锚点压缩。"
     if any(token in text for token in ("报错", "红字", "错误")) or task in {"help_takeover", "write_takeover"}:
         return "技术求助最小入口。"
@@ -246,7 +246,7 @@ def compress_three_layer_continuity_context(
 
     turns = _recent_turns(context.recent_turns, max_recent_turns=max_recent_turns)
     last_user = _last_turn_with_role(turns, {"user", "human", "尼尼"})
-    last_assistant = _last_turn_with_role(turns, {"assistant", "ai", "新海天"})
+    last_assistant = _last_turn_with_role(turns, {"assistant", "ai", "夏目蓝", "新海天"})
     thread_summary = _clean_text(context.mid_term_summary) or "围绕当前对话继续。"
     last_turn_summary = "；".join(
         _clean_list(

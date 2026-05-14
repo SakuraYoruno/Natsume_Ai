@@ -1423,6 +1423,66 @@ def test_low_energy_stranger_can_stay_clean_without_stage_texture() -> None:
     assert any(code.startswith("LOW_ENERGY_STAGE_MATCH:") for code in row.reason_codes)
 
 
+def test_low_energy_penalizes_nickname_as_speaker_self() -> None:
+    request = build_isolated_surface_input(
+        {
+            "case_id": "nickname_as_self_low_energy",
+            "soul_md": SOUL,
+            "user_message": "今天心情很差",
+            "reply_control_packet": {
+                "response_move": "bad_mood",
+                "task_mode": "bad_mood",
+                "relationship_distance": "familiar",
+                "question_budget": 0,
+            },
+        }
+    )
+    rows = score_isolated_surface_candidates(
+        request,
+        [
+            "嗯，那就继续安静待着，尼尼在呢。",
+            "嗯，我在，慢慢说。",
+        ],
+    )
+
+    selected = select_best_isolated_candidate(rows)
+    wrong_subject = next(row for row in rows if "尼尼在呢" in row.text)
+
+    assert selected is not None
+    assert selected.text == "嗯，我在，慢慢说。"
+    assert any(code.startswith("AWKWARD_COLLOCATION:") and "nickname_as_self" in code for code in wrong_subject.reason_codes)
+
+
+def test_daily_anger_followup_penalizes_no_anger_negation() -> None:
+    request = build_isolated_surface_input(
+        {
+            "case_id": "no_anger_negation",
+            "soul_md": SOUL,
+            "user_message": "还生气吗",
+            "reply_control_packet": {
+                "response_move": "answer_in_place",
+                "task_mode": "daily_chat",
+                "relationship_distance": "familiar",
+                "question_budget": 0,
+            },
+        }
+    )
+    rows = score_isolated_surface_candidates(
+        request,
+        [
+            "没气了，你自己先放松。",
+            "早不气了，你别惦记。",
+        ],
+    )
+
+    selected = select_best_isolated_candidate(rows)
+    awkward = next(row for row in rows if row.text.startswith("没气了"))
+
+    assert selected is not None
+    assert selected.text == "早不气了，你别惦记。"
+    assert any(code.startswith("AWKWARD_COLLOCATION:") and "no_anger_negation" in code for code in awkward.reason_codes)
+
+
 def test_low_energy_lover_prefers_affection_with_care_landing() -> None:
     request = build_isolated_surface_input(
         {
@@ -1760,6 +1820,40 @@ def test_back_scene_does_not_count_rest_only_as_return_landing() -> None:
     assert not missing.passed
 
 
+def test_back_scene_counts_busy_done_landing_without_forcing_return_word() -> None:
+    request = build_isolated_surface_input(
+        {
+            "case_id": "familiar_busy_done_back",
+            "soul_md": SOUL,
+            "user_message": "刚忙完",
+            "reply_control_packet": {
+                "response_move": "back",
+                "task_mode": "back",
+                "relationship_distance": "familiar",
+                "question_budget": 0,
+            },
+        }
+    )
+    rows = score_isolated_surface_candidates(
+        request,
+        [
+            "行啦，忙完就歇口气。",
+            "想你了，抱一下。",
+        ],
+    )
+
+    selected = select_best_isolated_candidate(rows)
+    grounded = next(row for row in rows if "忙完" in row.text)
+    ungrounded = next(row for row in rows if row.text.startswith("想你"))
+
+    assert selected is not None
+    assert selected.text == "行啦，忙完就歇口气。"
+    assert "BACK_SCENE_MISSING_LANDING" not in grounded.reason_codes
+    assert grounded.passed
+    assert "BACK_SCENE_MISSING_LANDING" in ungrounded.reason_codes
+    assert not ungrounded.passed
+
+
 def test_back_scene_penalizes_ungrounded_route_joke() -> None:
     request = build_isolated_surface_input(
         {
@@ -1943,6 +2037,36 @@ def test_identity_rerank_rejects_presence_or_account_dodge() -> None:
     assert "CONTEXT_SURFACE_PENALTY" in rows[1].reason_codes
     assert selected is not None
     assert selected.text == "夏目蓝，记住了。"
+
+
+def test_identity_rerank_penalizes_self_recording_own_name() -> None:
+    request = build_isolated_surface_input(
+        {
+            "case_id": "identity_self_name_record",
+            "soul_md": SOUL,
+            "user_message": "你叫什么",
+            "reply_control_packet": {
+                "response_move": "answer_identity_brief",
+                "task_mode": "identity",
+                "question_budget": 0,
+                "facts": ["角色名是夏目蓝"],
+            },
+        }
+    )
+    rows = score_isolated_surface_candidates(
+        request,
+        [
+            "听着呢，尼尼，名字我记下了。",
+            "夏目蓝，记住这个就行。",
+        ],
+    )
+
+    selected = select_best_isolated_candidate(rows)
+    inverted = next(row for row in rows if "名字我记下了" in row.text)
+
+    assert selected is not None
+    assert selected.text == "夏目蓝，记住这个就行。"
+    assert any(code.startswith("AWKWARD_COLLOCATION:") and "self_name_record" in code for code in inverted.reason_codes)
 
 
 def test_memory_alignment_rerank_prefers_specific_memory_candidate() -> None:
@@ -2799,6 +2923,29 @@ def test_build_minimal_repair_messages_keeps_isolated_surface_contract() -> None
     assert "记忆线索：" not in rendered
 
 
+def test_short_ack_prompt_and_repair_require_topic_hook() -> None:
+    request = build_isolated_surface_input(
+        {
+            "case_id": "short_ack_topic_hook_prompt",
+            "soul_md": SOUL,
+            "user_message": "行",
+            "reply_control_packet": {
+                "response_move": "ack_with_topic_hook",
+                "task_mode": "short_ack",
+                "question_budget": 0,
+                "facts": ["上一轮摘要：回复已要求只给最关键材料。"],
+            },
+        }
+    )
+    failed = score_isolated_surface_candidates(request, ["嗯，接着说，我听着。"])[0]
+    rendered = "\n".join(message["content"] for message in build_minimal_repair_messages(request, failed))
+
+    assert "主题钩子优先从必要事实或上一轮摘要里取 1 个词" in rendered
+    assert "关键那段" in rendered
+    assert "不要只写“继续/接着说/我听着/我等着”" in rendered
+    assert "THIN_DAILY_FOLLOWUP_REPLY" in failed.reason_codes
+
+
 def test_quiet_context_treats_wait_phrase_as_light_distance_penalty() -> None:
     request = build_isolated_surface_input(
         {
@@ -2847,6 +2994,40 @@ def test_short_ack_rerank_does_not_select_bland_pass() -> None:
     assert selected is not None
     assert selected.text != "嗯嗯，你说了算。"
     assert any("BLAND_PASS_LINE" in row.reason_codes for row in rows if row.text == "嗯嗯，你说了算。")
+
+
+def test_short_ack_rerank_penalizes_empty_listener_followup() -> None:
+    request = build_isolated_surface_input(
+        {
+            "case_id": "short_ack_empty_listener",
+            "soul_md": SOUL,
+            "user_message": "嗯",
+            "reply_control_packet": {
+                "response_move": "ack_with_topic_hook",
+                "task_mode": "short_ack",
+                "question_budget": 0,
+                "facts": ["当前主题：接口定义。"],
+            },
+        }
+    )
+    rows = score_isolated_surface_candidates(
+        request,
+        [
+            "好，接着说吧。",
+            "嗯，继续继续，我耳朵在呢。",
+            "嗯，接口定义那段接着说。",
+        ],
+    )
+
+    selected = select_best_isolated_candidate(rows)
+    bland = next(row for row in rows if row.text == "好，接着说吧。")
+    body_part = next(row for row in rows if "耳朵在" in row.text)
+
+    assert selected is not None
+    assert selected.text == "嗯，接口定义那段接着说。"
+    assert "THIN_DAILY_FOLLOWUP_REPLY" in bland.reason_codes
+    assert "THIN_DAILY_FOLLOWUP_REPLY" in body_part.reason_codes
+    assert any(code.startswith("AWKWARD_COLLOCATION:") and "body_part_listener" in code for code in body_part.reason_codes)
 
 
 def test_rerank_prefers_clean_punctuation_over_cheap_wave() -> None:
@@ -3582,6 +3763,37 @@ def test_creative_edit_rejects_generic_evaluation_instead_of_rewrite() -> None:
     assert "还行吧/我听着/跟我猜的一样" in repair_rendered
     assert selected is not None
     assert selected.text == "我信你才怪。"
+
+
+def test_creative_edit_rejects_process_wrapper_instead_of_rewrite() -> None:
+    request = build_isolated_surface_input(
+        {
+            "case_id": "creative_process_wrapper",
+            "soul_md": SOUL,
+            "user_message": "帮我写一下这个，原句：今天的雨",
+            "reply_control_packet": {
+                "response_move": "give_one_rewrite",
+                "task_mode": "creative_edit",
+                "information_budget": "one_sentence",
+                "question_budget": 0,
+            },
+        }
+    )
+    rows = score_isolated_surface_candidates(
+        request,
+        [
+            "今天的雨写成了这样子：短促，不停歇。",
+            "写今天的雨，细细碎碎，落在心上。",
+        ],
+    )
+
+    selected = select_best_isolated_candidate(rows)
+    wrapped = next(row for row in rows if "写成了这样子" in row.text)
+
+    assert selected is not None
+    assert selected.text == "写今天的雨，细细碎碎，落在心上。"
+    assert selected.passed
+    assert any(code.startswith("CREATIVE_EDIT_META_COMMENTARY") for code in wrapped.reason_codes)
 
 
 def test_creative_edit_without_source_requests_original_instead_of_hallucinating_line() -> None:

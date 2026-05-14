@@ -11,7 +11,7 @@ from tools.build_isolated_surface_continuity_cases import (
 )
 
 
-SOUL = "你是新海天。说话短一点，有轻微二次元 galgame 私聊感。"
+SOUL = "你是数字生命夏目蓝。说话短一点，有轻微二次元 galgame 私聊感。"
 
 
 def test_build_continuity_cases_are_valid_compressed_turns() -> None:
@@ -28,6 +28,7 @@ def test_build_continuity_cases_are_valid_compressed_turns() -> None:
             assert turn.request.user_message
             assert turn.request.control.style_anchor
             assert "连续对话" in turn.request.control.style_anchor
+            assert "夏目蓝私聊" in turn.request.control.style_anchor
 
 
 def test_build_continuity_summary_counts_scenes() -> None:
@@ -77,9 +78,20 @@ def test_build_continuity_long_case_uses_compressed_summary_budget() -> None:
         assert "messages" not in rendered_fact_text
 
     assert "上一轮摘要：" in "\n".join(turns[1].request.control.facts)
+    assert turns[0].request.control.response_move == "continue_existing_topic"
+    assert turns[2].request.control.response_move == "answer_in_place"
+    assert any(turn.request.control.response_move == "technical_next_step" for turn in turns)
+    assert turns[-1].request.control.response_move == "finalize_chain"
 
     summary = build_summary(cases, out_dir=Path("out"), suite="long")
     assert summary["suite"] == "long"
     assert summary["dialogues"] == 1
     assert summary["max_turns_per_dialogue"] >= 31
+    assert summary["long_dialogues_30_plus"] == 1
     assert summary["turns"] == len(turns)
+    rendered = "\n".join(
+        "\n".join(turn.request.control.facts) + "\n" + "\n".join(turn.request.control.must_include)
+        for turn in turns
+    )
+    assert "夏目蓝" in rendered
+    assert "新海天" not in rendered

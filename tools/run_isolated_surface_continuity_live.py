@@ -28,6 +28,7 @@ from host_brain.persona.isolated_surface_harness import (  # noqa: E402
     select_best_isolated_candidate,
 )
 from tools.chat_ab_generate import _load_secret_store_provider_key, load_dotenv  # noqa: E402
+from tools.isolated_surface_continuity_harness import _observation_codes  # noqa: E402
 from tools.isolated_surface_harness import _read_json_or_jsonl  # noqa: E402
 
 
@@ -85,6 +86,11 @@ def _summarize(
     hard_fail_count = sum(1 for row in selected if row.get("hard_fail"))
     control_violation_count = sum(1 for row in selected if row.get("control_violations"))
     low_score_count = sum(1 for row in selected if float(row.get("score") or 0.0) < 80.0 or not row.get("passed"))
+    fact_counts = [int(row.get("fact_count") or 0) for row in results if int(row.get("fact_count") or 0) > 0]
+    observation_counts: dict[str, int] = {}
+    for selected_row in selected:
+        for code in _observation_codes(selected_row):
+            observation_counts[code] = observation_counts.get(code, 0) + 1
     repair_attempt_count = sum(1 for row in results if row.get("repair_attempted"))
     style_degraded = sum(
         1
@@ -123,8 +129,15 @@ def _summarize(
         "low_score_count": low_score_count,
         "hard_fail_count": hard_fail_count,
         "control_violation_count": control_violation_count,
+        "facts_budget_max": max(fact_counts) if fact_counts else 0,
+        "facts_budget_violations": sum(1 for count in fact_counts if count > 6),
         "repair_attempt_count": repair_attempt_count,
         "style_reference_degraded_count": style_degraded,
+        "long_dialogues_30_plus": sum(1 for count in expected_dialogue_turns.values() if count >= 30),
+        "max_turns_per_dialogue": max(expected_dialogue_turns.values()) if expected_dialogue_turns else 0,
+        "min_turns_per_dialogue": min(expected_dialogue_turns.values()) if expected_dialogue_turns else 0,
+        "observation_count": sum(observation_counts.values()),
+        "observation_reason_counts": dict(sorted(observation_counts.items())),
         "latency_ms_p50": _percentile(latencies, 0.5),
         "latency_ms_p95": _percentile(latencies, 0.95),
         "total_elapsed_ms": int((time.perf_counter() - started) * 1000),
@@ -153,6 +166,7 @@ async def _run_turn(
         trace = turn.as_trace()
         try:
             request = turn.request
+            fact_count = len(request.control.facts)
             style_reference = derive_style_reference_anchor(request).as_dict()
             messages = build_isolated_surface_messages(request)
             raw_output = await asyncio.to_thread(
@@ -207,6 +221,8 @@ async def _run_turn(
             score_row = {
                 **trace,
                 "candidates": [score.as_dict() for score in scores],
+                "fact_count": fact_count,
+                "observation_codes": list(_observation_codes(selected.as_dict() if selected else None)),
                 "selected": selected.as_dict() if selected else None,
                 "repair_attempted": repair_attempted,
                 "repair_candidates": repair_candidate_texts,
@@ -218,6 +234,7 @@ async def _run_turn(
                 "score": score_row,
                 "selected": score_row["selected"],
                 "style_reference": style_reference,
+                "fact_count": fact_count,
                 "ok": True,
                 "repair_attempted": repair_attempted,
                 "latency_ms": latency_ms,

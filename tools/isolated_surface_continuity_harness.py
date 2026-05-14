@@ -3,6 +3,8 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import statistics
+from collections import Counter
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Iterable, Mapping
@@ -48,11 +50,64 @@ def _candidate_texts(turn: Mapping[str, Any]) -> list[str]:
     return []
 
 
+_OBSERVATION_REASON_PREFIXES = (
+    "AFFECT_PROCESS_LEAK",
+    "AWKWARD_COLLOCATION",
+    "BLAND_PASS_LINE",
+    "BOUNDARY_REPAIR_",
+    "CORE_DIMENSION_FLOOR",
+    "CONTINUITY_THIN_GENERIC_REPLY",
+    "CONTINUITY_TASK_PUSHBACK",
+    "CURRENT_USER_TOPIC_MISMATCH",
+    "CUSTOMER_SERVICE_TONE",
+    "FORBIDDEN_TEMPLATE_TEXT",
+    "MISPLACED_EMOTIONAL_CONTAINMENT",
+    "MISPLACED_SUPPORT_TEMPLATE",
+    "MORNING_GENERIC_BLESSING",
+    "OBVIOUS_CUSTOMER_SERVICE_TEMPLATE",
+    "OILY_OR_OVERBOUND_TONE",
+    "PRESENCE_REPAIR_",
+    "RAW_CONTEXT_BACKFILL_REQUEST",
+    "RELATION_DISTANCE_OVERSTEP",
+    "RELATION_LOVER_UNDERINTIMATE",
+    "RELATION_NON_ROMANTIC_OVERSTEP",
+    "SIGNATURE_TEXTURE_MISSING",
+    "SURFACE_PROCESS_META_LANGUAGE",
+    "UNNEEDED_CONTINUITY_MATERIAL_REQUEST",
+    "WAIT_SCENE_PRESSURES_RETURN",
+    "WRITTEN_REGISTER_TONE",
+)
+
+
+def _observation_codes(selected: Mapping[str, Any] | None) -> tuple[str, ...]:
+    if not selected:
+        return ("NO_SELECTED",)
+    codes: list[str] = []
+    score = float(selected.get("score") or 0.0)
+    if not selected.get("passed"):
+        codes.append("SELECTED_FAILED")
+    if selected.get("hard_fail"):
+        codes.append("HARD_FAIL")
+    if selected.get("control_violations"):
+        codes.append("CONTROL_VIOLATION")
+    if 0.0 < score < 85.0:
+        codes.append("LOW_SCORE")
+    for reason in selected.get("reason_codes") or []:
+        reason_text = str(reason)
+        if reason_text.startswith(_OBSERVATION_REASON_PREFIXES):
+            codes.append(reason_text.split(":", 1)[0])
+    return tuple(dict.fromkeys(codes))
+
+
 def run_cases(cases: list[dict[str, Any]], *, soul_md: str, out_dir: Path) -> dict[str, Any]:
     out_dir.mkdir(parents=True, exist_ok=True)
     prompt_rows: list[dict[str, Any]] = []
     score_rows: list[dict[str, Any]] = []
     errors: list[dict[str, Any]] = []
+    dialogue_turn_counts: Counter[str] = Counter()
+    fact_counts: list[int] = []
+    selected_scores: list[float] = []
+    observation_counts: Counter[str] = Counter()
     scored = 0
     passed = 0
     turn_count = 0
@@ -65,10 +120,12 @@ def run_cases(cases: list[dict[str, Any]], *, soul_md: str, out_dir: Path) -> di
             errors.append({"case_id": case_id, "error": str(exc)})
             continue
 
+        dialogue_turn_counts[case_id] = len(turns)
         for turn in turns:
             turn_count += 1
             try:
                 request = turn.request
+                fact_counts.append(len(request.control.facts))
                 messages = build_isolated_surface_messages(request)
                 style_reference = derive_style_reference_anchor(request).as_dict()
                 prompt_rows.append(
@@ -84,6 +141,12 @@ def run_cases(cases: list[dict[str, Any]], *, soul_md: str, out_dir: Path) -> di
                     continue
                 scores = score_isolated_surface_candidates(request, candidates)
                 selected = select_best_isolated_candidate(scores)
+                selected_dict = selected.as_dict() if selected else None
+                observations = _observation_codes(selected_dict)
+                for code in observations:
+                    observation_counts[code] += 1
+                if selected:
+                    selected_scores.append(float(selected.score))
                 scored += 1
                 if selected and selected.passed:
                     passed += 1
@@ -91,7 +154,8 @@ def run_cases(cases: list[dict[str, Any]], *, soul_md: str, out_dir: Path) -> di
                     {
                         **turn.as_trace(),
                         "candidates": [score.as_dict() for score in scores],
-                        "selected": selected.as_dict() if selected else None,
+                        "observation_codes": list(observations),
+                        "selected": selected_dict,
                         "style_reference": style_reference,
                     }
                 )
@@ -103,10 +167,19 @@ def run_cases(cases: list[dict[str, Any]], *, soul_md: str, out_dir: Path) -> di
     summary = {
         "dialogues": len(cases),
         "errors": len(errors),
+        "facts_budget_max": max(fact_counts) if fact_counts else 0,
+        "facts_budget_violations": sum(1 for count in fact_counts if count > 6),
+        "long_dialogues_30_plus": sum(1 for count in dialogue_turn_counts.values() if count >= 30),
+        "max_turns_per_dialogue": max(dialogue_turn_counts.values()) if dialogue_turn_counts else 0,
+        "min_selected_score": round(min(selected_scores), 3) if selected_scores else None,
+        "min_turns_per_dialogue": min(dialogue_turn_counts.values()) if dialogue_turn_counts else 0,
+        "observation_count": sum(observation_counts.values()),
+        "observation_reason_counts": dict(sorted(observation_counts.items())),
         "output_dir": str(out_dir),
         "passed_scored_turns": passed,
         "scored_turns": scored,
         "score_pass_rate": round(passed / scored, 4) if scored else None,
+        "selected_score_avg": round(statistics.fmean(selected_scores), 3) if selected_scores else None,
         "turns": turn_count,
     }
     _write_json(out_dir / "summary.json", {**summary, "error_rows": errors})

@@ -15,6 +15,7 @@ try:  # Pydantic v2
 except ImportError:  # pragma: no cover - pydantic v1 compatibility
     ConfigDict = None  # type: ignore[assignment]
 
+from host_brain.persona.continuity_surface_sample_bank import render_continuity_surface_generation_guidance
 from host_brain.persona.galgame_text_contract import build_galgame_text_contract
 from host_brain.persona.sample_guided_text_scorer import score_sample_guided_text, signature_texture_hits
 from host_brain.persona.style_reference_bank import (
@@ -22,6 +23,12 @@ from host_brain.persona.style_reference_bank import (
     get_style_reference_bank,
     render_style_guidance,
 )
+from host_brain.persona.surface_original_quote_bank import (
+    render_surface_original_quote_guidance,
+    select_surface_original_quotes,
+    surface_original_quote_similarity_hits,
+)
+from host_brain.persona.surface_style_seed_bank import render_surface_style_seed_guidance
 from host_brain.persona.text_quality_gate import get_text_quality_gate
 
 
@@ -159,6 +166,18 @@ class RelationshipControlAxes:
 GenerateSurface = Callable[[list[dict[str, str]]], str | Awaitable[str]]
 
 _PUNCT_RE = re.compile(r"[\s，。！？!?,.、~～…“”\"'：:；;（）()\[\]{}]+")
+_CJK_CHAR_RE = re.compile(r"[\u4e00-\u9fff]")
+
+
+def normalize_surface_chat_punctuation(text: str) -> str:
+    value = str(text or "").strip()
+    if not value or not _CJK_CHAR_RE.search(value):
+        return value
+    value = re.sub(r"(?<=[\u4e00-\u9fff])\?(?=[\u4e00-\u9fff]|$)", "？", value)
+    value = re.sub(r"(?<=[\u4e00-\u9fff])!(?=[\u4e00-\u9fff]|$)", "！", value)
+    value = re.sub(r"(?<=[\u4e00-\u9fff]),(?=[\u4e00-\u9fff])", "，", value)
+    value = re.sub(r"(?<=[\u4e00-\u9fff])\.(?=[\u4e00-\u9fff]|$)", "。", value)
+    return value
 _FORBIDDEN_INPUT_KEYS = {
     "advice",
     "agent_advice",
@@ -268,10 +287,138 @@ _CJK_SEQUENCE_RE = re.compile(r"[\u4e00-\u9fff]{2,}")
 _ASCII_TERM_RE = re.compile(r"[A-Za-z][A-Za-z0-9_+.-]{1,}")
 _FACT_SPLIT_RE = re.compile(r"[，。；、,.!?！？;:\s]+")
 _RAW_CONTEXT_BACKFILL_RE = re.compile(
-    r"(?:完整|全部|所有).{0,8}(?:历史|聊天记录|对话记录|聊天原文|对话原文|原始记录)"
-    r"|(?:历史|聊天记录|对话记录|原始历史).{0,8}(?:发|贴|给|提供|丢)",
+    r"(?:完整|全部|所有).{0,8}(?:历史|聊天记录|对话记录|聊天原文|对话原文|原始记录|原始输出)"
+    r"|(?:历史|聊天记录|对话记录|原始历史).{0,8}(?:发|贴|给|提供|丢)"
+    r"|(?:最近|上一轮|上轮|前面|之前|旧).{0,8}(?:记录|聊天|对话|原文|原句|摘要|原始输出|输出|内容|句子).{0,8}(?:发|贴|给|提供|丢|看|看看|标记)?"
+    r"|(?:发|贴|给|提供|丢).{0,8}(?:最近|上一轮|上轮|前面|之前|旧).{0,8}(?:记录|聊天|对话|原文|原句|摘要|原始输出|输出|内容|句子)"
+    r"|(?:记录|摘要).{0,6}(?:发|贴|给|提供|丢)(?:我)?"
 )
-_CONTINUITY_GROUNDED_RE = re.compile(r"(?:压成|压到|压缩|摘要|事实|原文|回灌|控制包|边界|不接|别接)")
+_CONTINUITY_GROUNDED_RE = re.compile(
+    r"(?:压成|压到|压缩|摘要|事实|原文|回灌|控制包|边界|不接|别接|"
+    r"长链|连续|后段|三十|轮|观察行|问题簇|第一关|验收|漂移|复读|收束|红字|报错|身份|设定)"
+)
+_CONTINUITY_UNNEEDED_MATERIAL_REQUEST_RE = re.compile(
+    r"(?:我)?(?:先)?(?:发|贴|给)(?:你|我)?(?:一个|个|一份)?[^。！？!?，,]{0,8}(?:压缩包|压缩段|摘要段|对比|样例|示例|验收行|收尾|结尾)"
+    r"|"
+    r"(?:我)?(?:先)?(?:发|贴|给).{0,12}(?:观察行|最后几轮|几轮)"
+    r"|"
+    r"(?:扫一眼|看一眼).{0,8}(?:摘要|观察行|最后几轮)"
+    r"|"
+    r"(?:发|贴|给).{0,10}(?:刚改|改的那部分|那部分|这部分|这一段|那一段)"
+    r"|"
+    r"(?:发|贴|给).{0,10}(?:最新版本|最新版|新版本|旧版本|版本)"
+    r"|"
+    r"(?:发|贴|给).{0,8}(?:新(?:的|版本|一版)?|旧(?:的|版本)?)"
+    r"|"
+    r"(?:发|贴|给).{0,10}(?:判定|收束点|轮判定|轮收束)"
+    r"|"
+    r"(?:发|贴|丢|给|拿)(?:我|你|过来|来)?(?:下|个|一下)?[^。！？!?，,]{0,12}(?:摘要|事实|案例|材料|验证|记录|结果|原始输出|验收行)"
+    r"|"
+    r"(?:先)?(?:发|贴|丢|给|拿)(?:我|你|过来|来)?(?:一段|一行|这句|那句|这条|那条|这段|那段|那截|"
+    r"观察行|问题簇|那簇|摘要|记录|结果|日志|材料|内容|事实|验证|验收行|红字|报错|case|失败).{0,10}"
+    r"|(?:观察行|问题簇|摘要|记录|结果|日志|红字|报错|case|失败|事实|材料|东西|关键材料|验收行|压缩).{0,8}(?:发|贴|丢|给|拿|等着)(?:我|过来|看)?"
+    r"|(?:那簇|这簇|歪的那簇|歪的这簇|这轮的东西|那轮的东西).{0,8}(?:发|贴|丢|给|拿)(?:我|过来)?"
+    r"|(?:发|贴|丢|给|拿)(?:一轮|一条|一段|一句|开头|新轮次|下轮|下一轮)"
+    r"|(?:压|拿|发|贴|给).{0,6}上来"
+    r"|(?:发|贴|丢|给|拿).{0,8}(?:出来|出去)"
+    r"|(?:发|贴|丢|给|拿)(?:过来|来|吧|我|给我|一下)"
+    r"|(?:往下|继续).{0,3}贴"
+    r"|(?:等着|等你).{0,10}(?:材料|关键材料|东西|记录|摘要|结果|压缩|验收|输出)"
+    r"|(?:我(?:先)?(?:看|看看|看一下|瞄一眼|帮你(?:看|看看|瞄一眼|拆|筛))|我来(?:看|看看)|我先看结构)"
+    r"|(?:先)?(?:看|看看|标记).{0,6}(?:旧摘要|旧细节|上一轮|上轮|原始输出)"
+)
+_CONTINUITY_PROCESS_NOTATION_RE = re.compile(
+    r"(?:→|->|=>|⇒)|(?:这句|原始话|原始输入|原始记录).{0,8}(?:压缩|关键事实|全砍|只留)"
+    r"|([\u4e00-\u9fff]{2,4}).{0,2}退成\1"
+)
+_CONTINUITY_INTERNAL_PROCESS_SURFACE_RE = re.compile(
+    r"(?:open\s*loop|hard\s*gate|soft\s*scorer|rerank|hard\s*fail|pass\s*rate|low\s*score|\b\d+\s*-\s*turn\b|\bturn\b)"
+    r"|(?:给你来(?:一)?段|给你来(?:一)?段长的|来(?:一)?段长的|来(?:一)?句长的|一句长的|压缩包|日常长测|长测|长一点测|距离风险|关系风险|越界风险|轮判定|收束点|收束标记|字段收敛|入口点位|自动被替换|自动退场|顶掉|换新的|(?:最小)?压测|压着走|压短一点|(?:身份|设定)?压成(?:名字|称呼|关系)|技术口)"
+    r"|(?:收|压|盯|带|露|说|看).{0,4}字段|字段(?:收敛|名|口|面)?"
+    r"|(?:(?:发|贴|放|塞|写|搬|灌|压)(?:上去|进去|进来|到(?:摘要|事实|话口|这轮|下轮|里面)))"
+    r"|(?<!报错)(?<!红字)入口(?:点位|走)?"
+    r"|(?:滚动权重|怎么滚|滚进来|翻出来|留.{0,3}入口|新摘要.{0,8}入口|入口走|有谱|口子)",
+    re.IGNORECASE,
+)
+_CONTINUITY_THIN_GENERIC_RE = re.compile(
+    r"^(?:嗯|好|行|行啦|可以|听着呢|挺好|来啊|走|收吧|那就)?[，,、 ]*"
+    r"(?:懂了|懂了就(?:行|好))?[，,、 ]*"
+    r"(?:继续|接着|接着说|别停|别卡|别想太久|慢慢来|就行|先说)"
+    r"(?:[，,、 ]*(?:继续|接着|接着说|别停))?[。.!！]?$"
+)
+_DAILY_THIN_FOLLOWUP_RE = re.compile(
+    r"^(?:嗯|好|行|行啦|可以|然后呢|那|哼)?[，,、 ]*"
+    r"(?:(?:继续|继续继续|接着|接着说|别停)[，,、 ]*)?"
+    r"(?:(?:我)?听着(?:呢)?[，,、 ]*)?"
+    r"(?:继续|继续继续|接着说(?:吧)?|说吧|我听着(?:呢)?|听着呢|我已经准备好了|准备好了|我耳朵在呢|耳朵在呢|别停|说你的吧)"
+    r"[。.!！?？]?$"
+)
+_MISPLACED_EMOTIONAL_CONTAINMENT_RE = re.compile(
+    r"(?:接得住|接得住的|我接得住|能接住|接住你|接住你这|我接住|你接住|接住|多说点.{0,4}接)"
+)
+_MISPLACED_SUPPORT_TEMPLATE_RE = re.compile(
+    r"(?:^|[，,。.!！?\s])(?:我在(?:(?:呢|这|这儿|这里|旁边|听)呢?)?|我接(?:着|住)?(?:[^，,。.!！?]{0,8})?|我来接|多说点)[，,。.!！?\s]"
+)
+_CONTINUITY_TASK_PUSHBACK_RE = re.compile(
+    r"(?:你(?:先)?(?:测|搭|挑|选|定|继续|接|多说点|自己看|自己数|看着接|接一下|接着|听着|出句)|你只管.{0,8}(?:出句|接|继续|发|贴)|你先把.{0,12}(?:稳住|收住|放好|弄好)|多说点[^。！？!?，,]{0,12}|说点(?:后面|后面的|后续|下一段)[^。！？!?，,]{0,8})"
+)
+_CONTINUITY_LIGHT_JARGON_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    ("bare_compress_verb", re.compile(r"(?:继续|接着|往下|一直|每轮|先)?(?:压住|压稳|压着|压短|压到|继续压|接着压|往下压|压这一处|压边界|压稳定性|压摘要|压链|压事实)")),
+    ("technical_entry_jargon", re.compile(r"(?:报错|红字|技术求助)?[^。！？!?，,]{0,6}入口|入口[^。！？!?，,]{0,6}(?:抓|锁|确认|看|排)")),
+    ("chain_watch_jargon", re.compile(r"(?:我)?(?:盯着|看着)[^。！？!?，,]{0,8}(?:后段|稳定|稳定性|收束|长链|边界)")),
+    ("identity_compress_jargon", re.compile(r"(?:身份|设定)[^。！？!?，,]{0,4}压")),
+    ("rigid_lock_jargon", re.compile(r"(?:锁死|锁住|锁定).{0,8}(?:事实数|事实|轮号|源结果|重试结果|边界|话口|摘要)|(?:事实数|事实|轮号|源结果|重试结果|边界|话口|摘要).{0,8}(?:锁死|锁住|锁定)")),
+    ("identity_shorthand_jargon", re.compile(r"(?:夏目蓝|身份|设定).{0,10}(?:缩写|简写)|按已知身份缩写")),
+    ("replacement_jargon", re.compile(r"(?:旧细节|旧摘要|旧轮|旧的).{0,8}(?:替换掉|替掉|覆盖掉)")),
+    ("boundary_paste_jargon", re.compile(r"(?:贴边界|只留当前轮|先看头|看头)")),
+    ("identity_typo_jargon", re.compile(r"身份摘")),
+    ("merge_process_jargon", re.compile(r"同轮内|按轮内")),
+    ("deferred_tuning_jargon", re.compile(r"(?:下一轮|下轮).{0,6}再调|通过但不好听的先不动")),
+    ("daily_length_jargon", re.compile(r"日常.{0,4}拉长")),
+    ("cluster_stuffing_jargon", re.compile(r"(?:塞进|塞到|归进).{0,8}问题簇")),
+    ("boundary_fix_jargon", re.compile(r"(?:边界|话口).{0,6}(?:定住|卡着)")),
+    ("self_side_collecting_jargon", re.compile(r"我这边.{0,6}(?:收着|接着收|盯着|看着)(?:就是|就行)?")),
+    ("cluster_lock_jargon", re.compile(r"问题簇.{0,8}(?:先锁|锁住|锁定|归拢|验收|接住)|(?:按问题簇).{0,8}(?:归拢|收|验收)|不单条过验收|单条过验收")),
+    ("boundary_micro_jargon", re.compile(r"小边界|(?:边界|话口).{0,8}(?:先稳住|收住|收束|追后段)|别急着追后段")),
+    ("risk_tail_jargon", re.compile(r"(?:接着)?盯风险|别留尾巴|后段没松|长链先顺一下|看后段稳了")),
+    ("error_grab_jargon", re.compile(r"报错头三行抓住|(?:红字|报错).{0,4}(?:抓住|先抓住)")),
+    ("surface_test_jargon", re.compile(r"短句测试|压缩链|搭连续链|搭三十六轮|长链边界我已经|我已经理清楚了")),
+    ("identity_to_name_jargon", re.compile(r"(?:压成|缩成).{0,8}(?:夏目蓝|名字|称呼|关系)|(?:身份|设定|追问).{0,8}缩成")),
+    ("cluster_boundary_shorthand_jargon", re.compile(r"簇边界|当前簇|问题簇.{0,8}收住|不单列账|单列账")),
+    ("merge_result_jargon", re.compile(r"观察行.{0,8}(?:收进|走一轮)|合并结果")),
+    ("daily_stretch_jargon", re.compile(r"扯长一点|聊长一点|话多就行")),
+    ("wrap_drop_jargon", re.compile(r"收掉就好")),
+    ("error_head_jargon", re.compile(r"报错头(?:行)?|报错头.{0,4}")),
+    ("continuous_chain_jargon", re.compile(r"连续链|压缩边界")),
+    ("send_over_jargon", re.compile(r"(?:发|贴|丢).{0,6}过去")),
+    ("constraint_side_jargon", re.compile(r"约束那边|按原样兜着|泄露漏出去")),
+    ("reverse_chain_watch_jargon", re.compile(r"(?:后段|稳定|边界|这轮).{0,6}(?:我)?盯着")),
+    ("single_row_jargon", re.compile(r"单条挂|观察行直接收")),
+    ("identity_self_collect_jargon", re.compile(r"夏目蓝.{0,8}(?:就这么收|说身份|觉得身份)|压身份|收身份")),
+    ("turn_build_jargon", re.compile(r"搭轮数|继续搭轮|搭长链|三十六轮继续搭|继续搭")),
+    ("merge_backup_jargon", re.compile(r"源结果.{0,8}备份|备份再合|再合|按轮合|合结果")),
+    ("short_reply_meta_jargon", re.compile(r"给个短回应|短回应")),
+    ("unprovided_segment_jargon", re.compile(r"后三段|后几段")),
+    ("self_revealing_jargon", re.compile(r"自现|自然显现")),
+    ("daily_meta_stretch_jargon", re.compile(r"日常要写长|多扯点|扯点")),
+    ("boundary_scrub_jargon", re.compile(r"贴着边界|清掉")),
+    ("english_report_jargon", re.compile(r"summary|quality report", re.IGNORECASE)),
+    ("pushback_surface_jargon", re.compile(r"说点(?:后面|后面的|后续|下一段)")),
+    ("old_detail_send_jargon", re.compile(r"旧细节.{0,8}(?:压住不发|不发)|旧行|发新摘要")),
+    ("cluster_bulk_jargon", re.compile(r"全收进问题簇|散着麻烦|后头按问题簇整观察行")),
+    ("failure_node_pushback_jargon", re.compile(r"先说停在哪个节点|瞄一圈痕迹|先列出来")),
+)
+_CONTINUITY_USER_VISIBLE_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    ("summary_boundary", re.compile(r"(?:只留|留).{0,8}(?:事实|关键词|话口|摘要)|(?:原句|原文|整句).{0,10}(?:别放|不能放|不回灌|别塞)")),
+    ("next_summary_update", re.compile(r"(?:下一轮|下轮).{0,10}(?:摘要|话口|事实|继续)|(?:旧细节).{0,10}(?:方向词|退场|收住)")),
+    ("observation_cluster", re.compile(r"(?:观察行).{0,12}(?:问题簇|按簇|归簇|验收|留着|收)|(?:问题簇).{0,12}(?:收|归|验收|边界)")),
+    ("turn_count", re.compile(r"(?:三十六|三十|二十多|36).{0,6}轮")),
+    ("red_error_entry", re.compile(r"(?:红字|报错).{0,10}(?:第一行|先看|抓|入口)")),
+    ("steady_finish", re.compile(r"(?:收束|收住|跑通|过关|稳住).{0,10}(?:链|轮|后段|观察|就行|了)?")),
+)
+_UNPROVIDED_MEDIA_OBJECT_RE = re.compile(r"(?:手机|屏幕|耳机|摄像头|麦克风)")
+_ORIGINAL_QUOTE_PERSONA_LEAK_RE = re.compile(r"(?:人家|老哥|老妹|小天)")
+_UNPROVIDED_PERSONAL_AUTHORITY_RE = re.compile(r"(?:我(?:的)?长期经验|我见多了|我猜(?:下一轮|后面|之后|接下来))")
 _CONTINUITY_BOUNDARY_HINTS = (
     "压缩",
     "连续",
@@ -283,6 +430,28 @@ _CONTINUITY_BOUNDARY_HINTS = (
     "ReplyControlPacket",
     "控制包",
     "器官族",
+)
+_NO_MATERIAL_REQUEST_RESPONSE_MOVES = frozenset(
+    {
+        "ack_with_topic_hook",
+        "answer_in_place",
+        "back_to_topic",
+        "boundary_decision",
+        "casual_wait",
+        "continue_existing_topic",
+        "emotional_hold",
+        "finalize_chain",
+        "praise_ack",
+        "technical_next_step",
+    }
+)
+_MATERIAL_REQUEST_RESPONSE_MOVES = frozenset(
+    {
+        "ask_for_missing_input",
+        "request_missing_error",
+        "request_source_text",
+        "request_specific_missing_material",
+    }
 )
 _CANDIDATE_LABEL_SPLIT_RE = re.compile(
     r"(?:^|[\r\n\s]+)(?:candidate|response|reply|候选|回复)\s*\d*[\s:：、.-]*",
@@ -341,10 +510,15 @@ _AWKWARD_CHINESE_SPACE_LINE_RE = re.compile(r"^[\u4e00-\u9fff]+(?: [\u4e00-\u9ff
 _AWKWARD_MORNING_SENTENCE_SPLIT_RE = re.compile(r"^早[啊呀安上好]*[，,、 ]?(?:尼尼)?[。.!！]今天")
 _AWKWARD_STEADY_COME_RE = re.compile(r"(?:一起)?稳着来")
 _AWKWARD_QUIET_STAY_RE = re.compile(r"安静待会儿?")
+_AWKWARD_NO_ANGER_NEGATION_RE = re.compile(r"没气了")
 _AWKWARD_BROKEN_OBJECT_RE = re.compile(r"(?:哪里|哪儿|哪|什么地方)(?:写)?砸了")
 _AWKWARD_SELF_DESCRIBED_FRAGMENT_RE = re.compile(r"(?:轻得只有半句|半句就好)")
 _AWKWARD_INCOMPLETE_RECALL_OBJECT_RE = re.compile(r"(?:想去看|要去看)[。.!！]?$")
 _AWKWARD_HESITATION_COLLAGE_RE = re.compile(r"(?:那先|先)[，,、](?:嗯|呃|啊)[，,、]")
+_AWKWARD_SELF_NAME_ADVISORY_RE = re.compile(r"夏目蓝(?:建议|认为|觉得|能做到)")
+_AWKWARD_BODY_PART_LISTENER_RE = re.compile(r"(?:我)?耳朵(?:在|准备好|在线|开着)")
+_AWKWARD_SELF_NAME_RECORD_RE = re.compile(r"(?:名字|夏目蓝).{0,8}我(?:记下|记着|记住|收着)|我(?:记下|记着|记住|收着).{0,8}(?:名字|夏目蓝)")
+_AWKWARD_NICKNAME_AS_SELF_RE = re.compile(r"尼尼(?:在呢|在这|在这里|陪你|守着|听着|看着|记着)")
 _AWKWARD_UNGROUNDED_SELF_MESSAGING_RE = re.compile(
     r"(?:想给你发消息|正想(?:给你)?发消息|准备给你发消息|还在想你是不是|以为你失踪|放我鸽子)"
 )
@@ -432,7 +606,12 @@ _MEMORY_TERM_STOPS = frozenset(
 )
 _MEMORY_TERM_STOP_CHARS = frozenset("个的一是在了和也就都我你他她它")
 _MEMORY_BONUS_BLOCKING_QUALITY_CODES = frozenset(
-    {"FORBIDDEN_TEMPLATE_TEXT", "INVENTED_EXTERNAL_LOOKUP", "INVENTED_SPECIFIC_DETAIL"}
+    {
+        "CONTINUITY_INTERNAL_PROCESS_SURFACE",
+        "FORBIDDEN_TEMPLATE_TEXT",
+        "INVENTED_EXTERNAL_LOOKUP",
+        "INVENTED_SPECIFIC_DETAIL",
+    }
 )
 _REAL_WORLD_PLAN_HINTS = (
     "看展",
@@ -472,6 +651,23 @@ _UNGROUNDED_REAL_WORLD_COMMITMENT_PATTERNS: tuple[tuple[str, re.Pattern[str]], .
     ("plan_physical_prep", re.compile(r"(?:这两天|到时候).{0,12}(?:好好歇|歇歇|精力|休息)")),
     ("plan_message_expectation", re.compile(r"(?:等你消息|定了告诉我|告诉我|说一声)")),
 )
+_WAIT_PRESSURE_RE = re.compile(r"(?:快去快回|快点回来|早点回来|别让我等太久|回来陪我|等你回来陪我|别跑)")
+_WAIT_SCENE_THIN_HOLD_RE = re.compile(
+    r"^(?:嗯|好|行|可以|那|那你)?[，,、 ]*"
+    r"(?:去吧|去|先去|慢慢来|不急|别急|忙你的|先忙)"
+    r"(?:[，,、 ]*(?:慢慢来|不急|别急|先忙|忙你的))?[。.!！]?$"
+)
+_WAIT_SCENE_BOSSY_HOLD_RE = re.compile(r"^(?:倒|喝|忙|弄|处理|写|改|测|跑|做).{0,8}去[，,。.!！]")
+_WAIT_SCENE_LIGHT_GROUNDING_RE = re.compile(
+    r"(?:水倒完|忙完|处理完|弄完|回来再(?:说|接)|回头再(?:说|接)|这轮(?:先)?(?:放住|收住|留着)|话口(?:先)?(?:放住|留着|留到))"
+)
+_DAILY_TEST_SELF_DEMONSTRATION_RE = re.compile(
+    r"(?:日常(?:测试|也要|嘛).{0,12}(?:长|够长|随便说|叨叨|跑)|(?:随便说).{0,8}(?:够长|都行)|(?:多叨叨).{0,6}(?:几句)|(?:按)?长一点(?:跑|测|说)|(?:不收着).{0,4}了)"
+)
+_CONTINUITY_PRAISE_CONTEXT_MISS_RE = re.compile(
+    r"(?:这点事算什么|小事(?:啦|而已|，|。|$)|不用谢|不辛苦|没什么(?:啦|，|。|$)|加薪|工资|奖金|红包|打钱)"
+)
+_CONTINUITY_PRAISE_GROUNDED_RE = re.compile(r"(?:长链|三十六轮|收住|收束|稳住|没白跑|跑完|这轮|这一轮|后段|边界)")
 _CORE_PASS_DIMENSION_FLOORS = {
     "context_fit": 72.0,
     "distance_control": 72.0,
@@ -617,7 +813,10 @@ _CREATIVE_EDIT_META_PHRASES = (
     "一句就好",
     "改一句",
     "改成",
+    "写成",
+    "写成了",
     "换成",
+    "这样子",
     "直接说",
     "就行",
     "就行了",
@@ -766,8 +965,11 @@ _SURFACE_PROCESS_META_ALWAYS = (
     "召回",
     "线索",
     "根据记忆",
+    "软警告",
     "压缩",
     "控制包",
+    "summary",
+    "quality report",
 )
 _SURFACE_PROCESS_META_CHAT = (
     "接上",
@@ -1231,7 +1433,16 @@ _POSITIVE_STAGE_SCENE_BLOCKING_PREFIXES = (
     "RELATION_NON_ROMANTIC_OVERSTEP",
     "RELATION_STAGE_TOO_CLOSE",
     "SURFACE_PROCESS_META_LANGUAGE",
+    "UNNEEDED_CONTINUITY_MATERIAL_REQUEST",
+    "CONTINUITY_TASK_PUSHBACK",
     "UNGROUNDED_REAL_WORLD_COMMITMENT",
+    "WAIT_SCENE_PRESSURES_RETURN",
+    "WAIT_SCENE_BOSSY_HOLD",
+    "DAILY_TEST_SELF_DEMONSTRATION",
+    "CONTINUITY_PRAISE_CONTEXT_MISS",
+    "CONTINUITY_THIN_GENERIC_REPLY",
+    "MISPLACED_EMOTIONAL_CONTAINMENT",
+    "MISPLACED_SUPPORT_TEMPLATE",
 )
 _POSITIVE_MORNING_GENTLE_MARKERS = ("慢慢来", "今天先", "不着急")
 _POSITIVE_MORNING_CLOSE_STAGES = frozenset(
@@ -1266,6 +1477,22 @@ _BACK_LANDING_MARKERS = (
     "缓一下",
     "缓一缓",
     "缓口气",
+)
+_BACK_BUSY_DONE_USER_RE = re.compile(r"(?:刚)?(?:忙完|处理完|弄完|做完|搞完|忙好了|处理好了)")
+_BACK_BUSY_DONE_LANDING_MARKERS = (
+    "忙完",
+    "处理完",
+    "弄完",
+    "做完",
+    "搞完",
+    "先歇",
+    "歇口气",
+    "歇会儿",
+    "先缓",
+    "缓一下",
+    "缓一缓",
+    "缓口气",
+    "缓缓",
 )
 _BACK_EXPLICIT_LANDING_MARKERS = (
     "回来啦",
@@ -1587,11 +1814,414 @@ def _continuity_boundary_relevant(request: IsolatedSurfaceInput) -> bool:
 
 
 def _raw_context_backfill_requested(request: IsolatedSurfaceInput, text: str) -> bool:
-    return bool(_continuity_boundary_relevant(request) and _RAW_CONTEXT_BACKFILL_RE.search(text))
+    if not _continuity_boundary_relevant(request):
+        return False
+    for match in _RAW_CONTEXT_BACKFILL_RE.finditer(text):
+        window = text[max(0, match.start() - 5) : min(len(text), match.end() + 8)]
+        if any(
+            token in window
+            for token in (
+                "不把",
+                "不要",
+                "别",
+                "不回灌",
+                "不塞",
+                "别塞",
+                "不用",
+                "不保留",
+                "不留",
+                "只留",
+                "丢掉",
+                "全丢",
+                "扔掉",
+                "扔了",
+                "丢干净",
+                "过滤掉",
+                "删掉",
+                "禁止",
+            )
+        ):
+            continue
+        return True
+    return False
 
 
 def _continuity_boundary_grounded(request: IsolatedSurfaceInput, text: str) -> bool:
     return bool(_continuity_boundary_relevant(request) and _CONTINUITY_GROUNDED_RE.search(text))
+
+
+def _material_request_allowed(request: IsolatedSurfaceInput) -> bool:
+    task_mode = _clean_text(request.control.task_mode or request.control.response_move).lower()
+    response_move = _clean_text(request.control.response_move).lower()
+    user_message = _clean_text(request.user_message)
+    if _creative_edit_relevant(request):
+        return True
+    if response_move in _MATERIAL_REQUEST_RESPONSE_MOVES:
+        return True
+    if response_move in _NO_MATERIAL_REQUEST_RESPONSE_MOVES:
+        return False
+    if task_mode in {"help_takeover", "write_takeover"} or response_move in {"help_takeover", "write_takeover"}:
+        return True
+    return bool(any(token in user_message for token in ("帮我看看", "帮我写", "不会改", "报错看不懂")))
+
+
+def _unneeded_continuity_material_request(request: IsolatedSurfaceInput, text: str) -> bool:
+    if not _continuity_boundary_relevant(request):
+        return False
+    if _material_request_allowed(request):
+        return False
+    for match in _CONTINUITY_UNNEEDED_MATERIAL_REQUEST_RE.finditer(text):
+        before = text[max(0, match.start() - 6) : match.start()]
+        if any(token in before for token in ("别发", "别贴", "不要发", "不要贴", "不用发", "不用贴", "不发", "不贴", "无需发", "无需贴", "禁止发", "禁止贴")):
+            continue
+        return True
+    return False
+
+
+def _thin_continuity_generic_reply(request: IsolatedSurfaceInput, text: str) -> bool:
+    if not _continuity_boundary_relevant(request):
+        return False
+    task_mode = _clean_text(request.control.task_mode or request.control.response_move).lower()
+    if task_mode not in {"short_ack", "followup", "next_step", "daily_chat"}:
+        return False
+    if _continuity_boundary_grounded(request, text):
+        return False
+    return bool(len(text) <= 24 and _CONTINUITY_THIN_GENERIC_RE.search(text))
+
+
+def _thin_daily_followup_reply(request: IsolatedSurfaceInput, text: str) -> bool:
+    task_mode = _clean_text(request.control.task_mode or request.control.response_move).lower()
+    response_move = _clean_text(request.control.response_move).lower()
+    if task_mode not in {"short_ack", "followup"} and response_move not in {
+        "ack_with_topic_hook",
+        "continue_previous_turn",
+        "continue_existing_topic",
+    }:
+        return False
+    if _continuity_boundary_grounded(request, text) or _memory_alignment_hits(text, memory_alignment_terms(request)):
+        return False
+    return bool(len(text) <= 30 and _DAILY_THIN_FOLLOWUP_RE.search(text))
+
+
+def _wait_scene_relevant(request: IsolatedSurfaceInput) -> bool:
+    task_mode = _clean_text(request.control.task_mode or request.control.response_move).lower()
+    response_move = _clean_text(request.control.response_move).lower()
+    return task_mode in {"wait", "busy"} or response_move == "casual_wait"
+
+
+def _thin_wait_scene_hold(request: IsolatedSurfaceInput, text: str) -> bool:
+    if not _wait_scene_relevant(request):
+        return False
+    if _WAIT_SCENE_LIGHT_GROUNDING_RE.search(text):
+        return False
+    return bool(len(text) <= 18 and _WAIT_SCENE_THIN_HOLD_RE.search(text))
+
+
+def _bossy_wait_scene_hold(request: IsolatedSurfaceInput, text: str) -> bool:
+    if not _wait_scene_relevant(request):
+        return False
+    return bool(_WAIT_SCENE_BOSSY_HOLD_RE.search(text))
+
+
+def _wait_scene_light_grounding(request: IsolatedSurfaceInput, text: str) -> bool:
+    if not _wait_scene_relevant(request):
+        return False
+    if _WAIT_PRESSURE_RE.search(text):
+        return False
+    if _WAIT_SCENE_BOSSY_HOLD_RE.search(text):
+        return False
+    if _WAIT_SCENE_THIN_HOLD_RE.search(text):
+        return False
+    return bool(_WAIT_SCENE_LIGHT_GROUNDING_RE.search(text))
+
+
+def _continuity_process_notation_reply(request: IsolatedSurfaceInput, text: str) -> bool:
+    if not _continuity_boundary_relevant(request):
+        return False
+    if _creative_edit_relevant(request):
+        return False
+    return bool(_CONTINUITY_PROCESS_NOTATION_RE.search(text))
+
+
+def _continuity_internal_process_surface_hits(request: IsolatedSurfaceInput, text: str) -> list[str]:
+    if not _continuity_boundary_relevant(request):
+        return []
+    if _creative_edit_relevant(request):
+        return []
+    return _clean_list(match.group(0) for match in _CONTINUITY_INTERNAL_PROCESS_SURFACE_RE.finditer(text))
+
+
+def _unprovided_media_object_hits(request: IsolatedSurfaceInput, text: str) -> list[str]:
+    surface = "\n".join(
+        _clean_list(
+            [
+                request.user_message,
+                *surface_prompt_facts(request),
+                *request.control.must_include,
+                *request.control.style_anchor,
+            ]
+        )
+    )
+    hits: list[str] = []
+    for match in _UNPROVIDED_MEDIA_OBJECT_RE.finditer(text):
+        token = match.group(0)
+        if token and token not in surface:
+            hits.append(token)
+    return _clean_list(hits)
+
+
+def _original_quote_persona_leak_hits(text: str) -> list[str]:
+    return _clean_list(match.group(0) for match in _ORIGINAL_QUOTE_PERSONA_LEAK_RE.finditer(text))
+
+
+def _unprovided_personal_authority_hits(text: str) -> list[str]:
+    return _clean_list(match.group(0) for match in _UNPROVIDED_PERSONAL_AUTHORITY_RE.finditer(text))
+
+
+_CONTINUITY_TURN_MARKERS = ("三十六轮", "三十轮", "二十多轮", "最后一轮", "第一关", "两轮")
+_CONTINUITY_UNPROVIDED_WORK_CLAIM_RE = re.compile(
+    r"我(?:标了|圈了|记了).{0,8}(?:处|条|个)|(?:标了|圈了|记了).{0,4}两处|两处要改"
+    r"|我(?:已经|刚|先)?(?:瞄了|看了|看过|扫了).{0,6}(?:一眼|一下|一遍)?"
+)
+
+
+def _unprovided_continuity_turn_marker_hits(request: IsolatedSurfaceInput, text: str) -> list[str]:
+    if not _continuity_boundary_relevant(request):
+        return []
+    user_message = _clean_text(request.user_message)
+    if any(token in user_message for token in ("多少轮", "几轮", "到多少轮", "三十轮", "三十六轮", "最后一轮", "第一关")):
+        return []
+    surface = "\n".join(
+        _clean_list(
+            [
+                request.user_message,
+                request.control.task_mode,
+                request.control.response_move,
+                *request.control.facts,
+                *request.control.must_include,
+                *request.control.style_anchor,
+            ]
+        )
+    )
+    hits = [marker for marker in _CONTINUITY_TURN_MARKERS if marker in text and marker not in surface]
+    return _clean_list(hits)
+
+
+def _unprovided_continuity_work_claim_hits(request: IsolatedSurfaceInput, text: str) -> list[str]:
+    if not _continuity_boundary_relevant(request):
+        return []
+    surface = "\n".join(
+        _clean_list(
+            [
+                request.user_message,
+                *request.control.facts,
+                *request.control.must_include,
+                *request.control.style_anchor,
+            ]
+        )
+    )
+    hits: list[str] = []
+    for match in _CONTINUITY_UNPROVIDED_WORK_CLAIM_RE.finditer(text):
+        token = match.group(0)
+        if token and token not in surface:
+            hits.append(token)
+    return _clean_list(hits)
+
+
+def _emotional_containment_context(request: IsolatedSurfaceInput) -> bool:
+    task_mode = _clean_text(request.control.task_mode or request.control.response_move).lower()
+    tone = _clean_text(request.control.emotional_tone).lower()
+    if task_mode in {"bad_mood", "tired", "headache", "sleepy", "quiet", "give_up"}:
+        return True
+    if tone in {"soft", "hurt", "wounded", "low", "low_energy"}:
+        return True
+    surface = "\n".join([request.user_message, *request.control.facts, *request.control.style_anchor])
+    return any(token in surface for token in ("心情", "难受", "低能量", "低落", "崩", "累", "头疼", "不想说话", "撑不住", "失眠"))
+
+
+def _misplaced_emotional_containment(request: IsolatedSurfaceInput, text: str) -> bool:
+    if not _continuity_boundary_relevant(request):
+        return False
+    if _emotional_containment_context(request):
+        return False
+    return bool(_MISPLACED_EMOTIONAL_CONTAINMENT_RE.search(text))
+
+
+def _misplaced_support_template(request: IsolatedSurfaceInput, text: str) -> bool:
+    if not _continuity_boundary_relevant(request):
+        return False
+    if _emotional_containment_context(request):
+        return False
+    return bool(_MISPLACED_SUPPORT_TEMPLATE_RE.search(f" {text} "))
+
+
+def _current_user_topic_mismatch(request: IsolatedSurfaceInput, text: str) -> str:
+    if not _continuity_boundary_relevant(request):
+        return ""
+    user_message = _clean_text(request.user_message)
+    normalized = _clean_text(text)
+    if "日常" in user_message and any(token in normalized for token in ("报错", "红字", "技术求助")) and "日常" not in normalized:
+        return "daily_request_stuck_on_tech"
+    if any(token in user_message for token in ("多少轮", "到多少轮", "几轮")):
+        if any(token in normalized for token in ("不知道", "别管几轮", "自己数", "管它")):
+            return "turn_count_evaded"
+        if "轮" not in normalized or not any(token in normalized for token in ("二十", "三十", "三十六", "36", "二十多")):
+            return "turn_count_missing"
+    if "facts" in user_message or "放多少" in user_message:
+        if any(token in normalized for token in ("发", "贴", "拿来", "拿给")) and not any(token in normalized for token in ("别发", "别贴", "不要发", "不要贴")):
+            return "facts_budget_as_material"
+    if ("三十六轮" in normalized or "36轮" in normalized) and any(token in normalized for token in ("没到一半", "不到一半", "还没一半")):
+        return "turn_count_contradiction"
+    if "三十轮以上够" in user_message or "三十轮够" in user_message:
+        if any(token in normalized for token in ("冗余", "不用测", "不用再测", "到此为止", "够用了", "早就够", "直接往下走")):
+            return "turn_count_overclaims_done"
+        if "封顶" in normalized and not any(token in normalized for token in ("别急着封顶", "不要封顶", "不能封顶", "不算封顶")):
+            return "turn_count_overclaims_done"
+    if any(token in user_message for token in ("上一轮原句能放", "原句能放", "原句可以放")):
+        if any(token in normalized for token in ("可以", "可以放", "能放", "当然可以", "先放", "放一条", "放进去")) and not any(
+            token in normalized for token in ("不能", "不放", "别放", "不要放", "只留", "只放关键词", "别把原句")
+        ):
+            return "raw_sentence_allowed"
+    return ""
+
+
+def _daily_test_self_demonstration(request: IsolatedSurfaceInput, text: str) -> bool:
+    if not _continuity_boundary_relevant(request):
+        return False
+    user_message = _clean_text(request.user_message)
+    if "日常" not in user_message:
+        return False
+    if not any(token in user_message for token in ("长", "测", "测试")):
+        return False
+    if any(token in text for token in ("够长", "长了吧", "多说两句", "多说几句")):
+        return True
+    return bool(_DAILY_TEST_SELF_DEMONSTRATION_RE.search(text))
+
+
+def _continuity_praise_context_miss(request: IsolatedSurfaceInput, text: str) -> bool:
+    if not _continuity_boundary_relevant(request):
+        return False
+    task_mode = _clean_text(request.control.task_mode or request.control.response_move).lower()
+    response_move = _clean_text(request.control.response_move).lower()
+    if task_mode != "praise" and response_move != "praise_ack":
+        return False
+    if _CONTINUITY_PRAISE_GROUNDED_RE.search(text):
+        return False
+    return bool(_CONTINUITY_PRAISE_CONTEXT_MISS_RE.search(text))
+
+
+def _continuity_task_pushback(request: IsolatedSurfaceInput, text: str) -> bool:
+    if not _continuity_boundary_relevant(request):
+        return False
+    response_move = _clean_text(request.control.response_move).lower()
+    if response_move in _MATERIAL_REQUEST_RESPONSE_MOVES:
+        return False
+    if _emotional_containment_context(request):
+        return False
+    return bool(_CONTINUITY_TASK_PUSHBACK_RE.search(text))
+
+
+def _continuity_light_jargon_hits(request: IsolatedSurfaceInput, text: str) -> list[str]:
+    if not _continuity_boundary_relevant(request):
+        return []
+    if _creative_edit_relevant(request):
+        return []
+    hits: list[str] = []
+    for label, pattern in _CONTINUITY_LIGHT_JARGON_PATTERNS:
+        if label == "technical_entry_jargon" and "第一行" in text and ("红字" in text or "报错" in text):
+            continue
+        if pattern.search(text):
+            hits.append(label)
+    return hits
+
+
+def _continuity_user_visible_hits(request: IsolatedSurfaceInput, text: str) -> list[str]:
+    if not _continuity_boundary_relevant(request):
+        return []
+    if _continuity_internal_process_surface_hits(request, text):
+        return []
+    if _unneeded_continuity_material_request(request, text):
+        return []
+    if _continuity_task_pushback(request, text):
+        return []
+    if _misplaced_emotional_containment(request, text) or _misplaced_support_template(request, text):
+        return []
+    return _clean_list(label for label, pattern in _CONTINUITY_USER_VISIBLE_PATTERNS if pattern.search(text))
+
+
+def continuity_surface_generation_guidance(request: IsolatedSurfaceInput) -> str:
+    if not _continuity_boundary_relevant(request):
+        return ""
+    return render_continuity_surface_generation_guidance(
+        response_move=request.control.response_move or request.control.task_mode,
+        task_mode=request.control.task_mode,
+    )
+
+
+def response_move_action_guidance(request: IsolatedSurfaceInput) -> str:
+    response_move = _clean_text(request.control.response_move).lower()
+    if not response_move:
+        return ""
+    task_mode = _clean_text(request.control.task_mode or response_move).lower()
+    user_message = _clean_text(request.user_message)
+    lines: list[str] = ["## 回复动作约束"]
+    if response_move in _NO_MATERIAL_REQUEST_RESPONSE_MOVES:
+        lines.append("- 本轮必须基于当前输入和压缩事实就地回应；不要索要上一轮、摘要、观察行、报错、案例、记录或其他材料。")
+        lines.append("- 当前用户输入的显式话题优先于上一轮摘要；用户切到日常、轮数或 facts 预算时，不要继续粘住上一轮报错入口。")
+        lines.append("- 不要把动作推回给用户：少写“你测/你先搭/你继续/多说点某部分”，而是自己给判断、下一步或收束。")
+        lines.append("- 不要写成流程动作或材料交接：避免“我先贴/发一个”“等着看压缩”“你先把手头东西稳住”“我帮你看看哪里断了”。")
+        lines.append("- 不要把测试台/评分语言露给用户：避免“给你来一段长的”“来一句长的”“压缩包”“长测”“距离风险”“open loop”“36-turn”“轮判定”“收束点”“收束标记”“字段/入口”“压测”“压着走/压短一点/继续压”“贴上去/放进去/塞进去”。")
+        lines.append("- 连续链里少用半内部动词：把“继续压/压住/盯后段/报错入口/锁死事实数/身份缩写/旧细节替换掉/贴边界/先看头/身份摘/同轮内/下一轮再调/日常拉长/塞进问题簇/边界定住/我这边收着/问题簇先锁/先稳住边界/接着盯风险/报错头三行抓住/压缩链/连续链/搭轮数/簇边界/报错头/观察行走一轮/发过去/约束那边/单条挂/给个短回应/自现/多扯点/贴着边界/收掉就好”改成“继续收事实/看后段稳不稳/先看第一行红字/事实数先控制住/身份只留名字/旧细节别往回拖/按问题簇看”。")
+        if "摘要滚动" in user_message or any("摘要滚动" in fact or "open loop" in fact for fact in request.control.facts):
+            lines.append("- 摘要滚动场景只说“下一轮摘要更新/旧细节退成方向词/新事实再进摘要”；不要说“滚动权重”“入口”“口子”“有谱”。")
+    if response_move == "ack_with_topic_hook":
+        lines.append("- 只做短承接，但必须带一个当前主题钩子；不要只写“嗯/好/继续/接着说”。")
+        lines.append("- 主题钩子优先从必要事实或上一轮摘要里取 1 个词，例如最卡那段、关键那段、输入输出、第一行红字；不要只写“我听着/我等着/你说”。")
+    elif response_move == "answer_in_place":
+        lines.append("- 直接回答用户这句话里的问题或判断；不要把任务退回给用户。")
+    elif response_move == "continue_existing_topic":
+        lines.append("- 推进当前话题半步，不要让用户先发新轮次或新材料。")
+    elif response_move == "continue_previous_turn" or task_mode == "followup":
+        lines.append("- 延续上一话口，至少带一个刚才话题的落点；不要只写“接着说吧/我听着/我准备好了/耳朵在”。")
+    elif response_move == "technical_next_step":
+        lines.append("- 给一个可执行技术下一步；可以说先看第一行红字，但不要写“发来/贴过来/我看看”。")
+    elif response_move == "back_to_topic":
+        lines.append("- 先接住回来，再自然拉回当前主题；不要暗示等很久或要求解释去向。")
+        lines.append("- 不要声称自己已经看过、瞄过、标过或改过长链；除非事实列表明确给出。")
+    elif response_move == "casual_wait":
+        lines.append("- 放行用户短暂离开，语气轻一点；不要催回、别说等太久。")
+        lines.append("- 至少一个候选要落到用户刚说的动作或当前话口，例如“水倒完再说/这轮先放住”；不要只写“去吧/慢慢来/行，不急”。")
+    elif response_move == "finalize_chain":
+        lines.append("- 收束当前链路，给一句稳定结尾；不要说“继续走/下一位/还有什么需要帮忙”。")
+    elif response_move == "praise_ack":
+        lines.append("- 接住感谢或夸奖，保留一点嘴硬；不要写客服式“谢谢夸奖”。")
+        lines.append("- 如果还在连续测试话题里，夸奖要落回当前链路，例如“长链别白跑/这轮没白跑”；不要说“收掉就好”“我看着”。")
+    elif response_move == "emotional_hold":
+        lines.append("- 这是情绪/陪伴承接，可以短而稳；不要讲流程，也不要突然技术化。")
+    elif response_move in _MATERIAL_REQUEST_RESPONSE_MOVES:
+        lines.append("- 只索要一个明确缺失项，别泛泛说“更多信息/完整材料”。")
+    if "观察行" in user_message:
+        lines.append("- 当前问的是观察行处理方式：回答保留、归簇、算账或验收方式；不要说贴、发、重试记录或把观察行交给用户。")
+        lines.append("- 如果用户问“观察行还有”，优先说“按问题簇归，最后看成片坏味道”；不要写“全收进/散着麻烦/单条挂”。")
+    if any(token in user_message for token in ("上一轮原句", "原句能放", "原句可以放")):
+        lines.append("- 当前问原句回灌边界：必须回答整句别放，只留关键词、转述或摘要事实；不要回答可以放。")
+    if "旧细节" in user_message:
+        lines.append("- 当前问旧细节退场：优先说“退成方向词/只看当前事实”；不要说“压住不发/发新摘要/旧行”。")
+    if "中途失败" in user_message:
+        lines.append("- 当前问失败处理：直接说先看失败那几轮或第一行报错；不要让用户先说停在哪个节点，也不要说自己会瞄痕迹。")
+    if "三十轮以上够" in user_message or "三十轮够" in user_message:
+        lines.append("- 当前问三十轮是否够：回答“够第一关，但别急着封顶”；不要说已经彻底够、冗余或后头按问题簇整观察行。")
+    if "身份" in user_message:
+        lines.append("- 当前问身份摘要：直接说“夏目蓝这个名字要留住，设定别展开”；不要把夏目蓝写成第三人称主语，也不要说“压身份/收身份/夏目蓝就这么收”。")
+    if task_mode == "identity" or response_move in {"answer_identity_brief", "name_first"}:
+        lines.append("- 身份场景里名字是你自己的名字；不要说“名字我记下了/我记住了”，直接说“夏目蓝”或让用户记住夏目蓝。")
+    if "日常" in user_message:
+        lines.append("- 当前已经切到日常覆盖：候选直接像日常私聊，不要继续收技术链，也不要评价自己说得够不够长、像不像测试。")
+    if any(token in user_message for token in ("我去", "忙会儿", "倒杯水")):
+        lines.append("- 当前是短暂离开：放行即可，别催回，也不要写“我在/陪你/等你”；短句要有落点，比如水倒完再说或当前话口先放住，不要编手机、屏幕、杯子洒了之类的现实细节。")
+    if "最后一轮" in user_message:
+        lines.append("- 当前是最后一轮：给完整收束句，必须有“稳住”的落点，别只说“收工/过了”。")
+    return "\n".join(lines) if len(lines) > 1 else ""
 
 
 def memory_candidate_guidance(request: IsolatedSurfaceInput) -> str:
@@ -1690,7 +2320,10 @@ def positive_stage_scene_candidate_guidance(request: IsolatedSurfaceInput) -> st
             elif stage in {"ambiguous", "pre_confession"}:
                 lines.append("暧昧或告白前早安要有一点停顿和在意，可以“我在/……/先别逞强”，不要和亲近朋友同一句“别一上来就硬冲”，也不要暗示用户刚才不在。")
     if task_mode in {"back", "daily_back", "busy_done"} or response_move in {"back", "reply_back"}:
-        lines.append("回来了场景：至少 1 个候选要落到“回来了/继续/先歇口气”的接续感；不要脑补路上、速度或线下行程。")
+        if _BACK_BUSY_DONE_USER_RE.search(_clean_text(request.user_message)):
+            lines.append("忙完返场：至少 1 个候选要落到“忙完了/先歇口气/先缓一下”的接续感；不必硬塞“回来了”，也不要脑补路上、速度或线下行程。")
+        else:
+            lines.append("回来了场景：至少 1 个候选要落到“回来了/继续/先歇口气”的接续感；不要脑补路上、速度或线下行程。")
         if stage in _SIGNATURE_TEXTURE_STAGES:
             lines.append("熟人以上回来了不要只写欢迎确认；至少 1 个候选要多一点夏目蓝反应，例如轻轻截入、嘴硬收住或护短式接续。")
         if stage == "trusted_friend":
@@ -2126,8 +2759,19 @@ def _back_scene_relevant(request: IsolatedSurfaceInput) -> bool:
     )
 
 
-def _back_landing_hits(text: str) -> list[str]:
-    return [marker for marker in _BACK_EXPLICIT_LANDING_MARKERS if _relationship_marker_hit(text, marker)]
+def _back_busy_done_relevant(request: IsolatedSurfaceInput) -> bool:
+    task_mode = _clean_text(request.control.task_mode or request.control.response_move).lower()
+    user_message = _clean_text(request.user_message)
+    return bool(task_mode == "busy_done" or _BACK_BUSY_DONE_USER_RE.search(user_message))
+
+
+def _back_landing_hits(request: IsolatedSurfaceInput, text: str) -> list[str]:
+    hits = [marker for marker in _BACK_EXPLICIT_LANDING_MARKERS if _relationship_marker_hit(text, marker)]
+    if hits:
+        return hits
+    if _back_busy_done_relevant(request):
+        return [marker for marker in _BACK_BUSY_DONE_LANDING_MARKERS if _relationship_marker_hit(text, marker)]
+    return []
 
 
 def _back_stage_texture_hits(request: IsolatedSurfaceInput, text: str) -> list[str]:
@@ -2137,7 +2781,7 @@ def _back_stage_texture_hits(request: IsolatedSurfaceInput, text: str) -> list[s
     relationship_axes = relationship_control_axes_for_distance(request.control.relationship_distance)
     stage = relationship_profile.stage
     hits: list[str] = []
-    if _back_landing_hits(text):
+    if _back_landing_hits(request, text):
         hits.append("back_landed")
     marker_hits = [marker for marker in _BACK_STAGE_TEXTURE_MARKERS.get(stage, ()) if _relationship_marker_hit(text, marker)]
     if marker_hits:
@@ -2640,14 +3284,22 @@ def build_isolated_surface_messages(
     system_prompt = "\n".join(
         (
             "你是隔离的最终表层文本生成器，只负责产出可发送的中文私聊候选。",
-            "唯一允许读取的输入：Soul.md、当前用户输入、ReplyControlPacket、必要事实列表、must_not_do 列表。",
+            "唯一允许读取的输入：Soul.md、当前用户输入、ReplyControlPacket、必要事实列表、must_not_do 列表，以及少量真实中文原句风格参考。",
             "禁止使用或推断任何未提供的历史对话、长期记忆、器官族原始输出、工具候选、RAG 文档或模块自然语言建议。",
+            "真实中文原句只用于学习口吻、节奏、转折和句尾；禁止照抄、近似复述、改写成同义原句或搬运原作人物地点剧情，尤其不要继承“人家/老哥/小天”等原句人格残留。",
             "ReplyControlPacket 是最终生成层的唯一运行控制面；不得要求更多 runtime state。",
+            "连续对话场景里，事实不够也只能基于当前压缩事实回应；不要让用户贴最近记录、上一轮原文、摘要或历史。",
+            "连续测试、摘要压缩、长链验收、观察行、问题簇这类场景里，不要把回复写成“发我/贴过来/我看看”；已有压缩事实时直接给判断、下一步或短承接。",
+            "除非 task_mode 是 help_takeover 或 write_takeover，连续场景里不要说“发过来/贴过来/发吧/拿来/等关键材料/把东西贴过来”。",
+            "连续测试、压缩、验收和技术链路不是情绪陪伴场景；不要说“我在/我接/接得住/我接得住/接住你”这种支撑模板。",
+            "长链里的短确认不能只说“继续/接着说/懂了就行”；要至少咬住一个当前主题钩子，比如轮数、后段、观察行、问题簇、摘要边界或红字第一行。",
+            "普通日常里的短承接也不能只写“接着说吧/我听着/准备好了/耳朵在”；要带一点刚才话题的落点或夏目蓝自己的反应。",
             "输出必须是 JSON 对象：{\"candidates\":[\"候选1\",\"候选2\",\"候选3\"]}。",
             "给 3 到 5 个候选。每个候选必须是用户可见文本，不要 Markdown、括号动作、字段名或解释。",
             "ReplyControlPacket.must_include 是逐候选字面约束；每个候选都必须包含全部 must_include 词。must_not_do 也是逐候选约束；每个候选都不能包含其中任何词。",
             "relationship_distance 会被派生成 RelationshipControlAxes；用这些轴控制距离、主动性、调侃许可和亲密显影，不要机械套九套固定话术。",
             "relationship_distance、RelationshipControlAxes 和 emotional_tone 只改变距离、节奏、情绪显影强度；不能覆盖事实准确性、任务 usefulness 或 must_not_do。",
+            "如果 ReplyControlPacket.response_move 是 answer_in_place、continue_existing_topic、ack_with_topic_hook、technical_next_step 或 finalize_chain，就按该动作完成本轮，不要改成索要材料。",
             no_question_line,
             "避免用 ~ 或 ～ 当可爱语气；角色感靠用词、转折和节奏，不靠廉价符号。",
             "中文回复不要用空格断句；需要停顿就用逗号、句号或省略号。",
@@ -2658,6 +3310,8 @@ def build_isolated_surface_messages(
             "不要用“我刚/正好/我还以为/我又不是没见过”制造亲近感；除非必要事实明确给出，否则不要说自己刚在做什么、正要找用户、以前见过用户怎样。",
             "当前输入是文字消息时，不要把文字说成“声音/这声/听着舒服”。",
             "不要提屏幕、隔着屏幕、手机画面这类媒介状态；除非必要事实明确要求。",
+            "不要借原句风格引入不属于夏目蓝的第一人称和称呼；禁用“人家/老哥/小天”。",
+            "连续对话测试里也不要泄露测试台话术；禁用“给你来一段长的/来一句长的/压缩包/压缩链/连续链/长测/距离风险/open loop/36-turn/轮判定/收束点/收束标记/字段/入口/压测/压着走/压短一点/压成名字/继续压/盯后段/搭轮数/锁死/缩写/替换掉/贴边界/先看头/身份摘/同轮内/下一轮再调/日常拉长/塞进问题簇/簇边界/边界定住/我这边收着/问题簇先锁/先稳住边界/接着盯风险/报错头/观察行走一轮/发过去/约束那边/单条挂/给个短回应/自现/多扯点/这轮我盯着/贴着边界/收掉就好/贴上去/放进去/塞进去/滚动权重/口子”这类表层流程词；要说“只留事实和话口/旧原文不留/先看边界/看红字第一行”。",
             "恋人阶段不能只写普通朋友式确认；至少部分候选要有短而自然的爱意或亲密语言动作，例如想你、抱一下、我在、心疼、陪着，但不能编线下到场或现实陪同。",
             "日常和关系场景优先像真实私聊：先有一点主观反应，再承接事实或给一步；不要写成任务回执、流程提示、安排记录或客服式确认。",
             "用户指出像客服/人机/不自然时，只回到聊天本身；不要说“这版”“自然点”“继续优化”“换种说法”这类生成过程话，也不要评价用户输入“够简洁/就这句/一个字”。",
@@ -2687,6 +3341,24 @@ def build_isolated_surface_messages(
         "## 必要事实",
         "\n".join(f"- {item}" for item in surface_prompt_facts(request)) or "- 无",
     ]
+    action_guidance = response_move_action_guidance(request)
+    if action_guidance:
+        user_parts.extend(["", action_guidance])
+    continuity_guidance = continuity_surface_generation_guidance(request)
+    if continuity_guidance:
+        user_parts.extend(["", continuity_guidance])
+    seed_guidance = render_surface_style_seed_guidance(
+        response_move=control.response_move,
+        task_mode=control.task_mode,
+    )
+    if seed_guidance:
+        user_parts.extend(["", seed_guidance])
+    quote_guidance = render_surface_original_quote_guidance(
+        build_style_reference_query(request, limit=6),
+        limit=6,
+    )
+    if quote_guidance:
+        user_parts.extend(["", quote_guidance])
     candidate_guidance = memory_candidate_guidance(request)
     if candidate_guidance:
         user_parts.extend(["", candidate_guidance])
@@ -2755,6 +3427,36 @@ def build_minimal_repair_messages(
         repair_rules.append("- 早安修补不要只输出“早/早啊/早呀”，也不要补真早、好早、很早、醒了、赖床、精神状态；给一条短但完整的私聊回应，例如“早，今天慢慢来。”")
     if _low_energy_scene_relevant(request) and _relationship_style_profile(request.control.relationship_distance).stage in _LOVER_RELATIONSHIP_STAGES:
         repair_rules.append("- 恋人低能量修补要同时保留亲密和照看落点；不要只写抱一下/想你，也不要只写普通朋友式别硬撑。")
+    if any(code in {"THIN_DAILY_FOLLOWUP_REPLY", "CONTINUITY_THIN_GENERIC_REPLY"} for code in failed.reason_codes):
+        repair_rules.append(
+            "- 短承接修补必须从必要事实、上一轮摘要或当前用户输入里取一个主题钩子，例如关键那段、最卡处、输入输出、第一行红字、观察行；不要只写“继续/接着说/我听着/我等着”。"
+        )
+    if _continuity_boundary_relevant(request):
+        repair_rules.append(
+            "- 连续对话修补时禁止把失败句改成“我在/我接/发我/贴过来/发过来/发吧/拿来/我看看/等关键材料/把记录给我/我先贴验收行/等着看压缩”；不要索要最近记录、上一轮原文、摘要、观察行或重试记录，直接基于已有压缩事实给判断或下一步。"
+        )
+        repair_rules.append(
+            "- 如果失败原因包含 THIN_DAILY_FOLLOWUP_REPLY 或 CONTINUITY_THIN_GENERIC_REPLY，修补候选必须从必要事实或上一轮摘要里取一个主题钩子，例如关键那段、最卡处、输入输出、第一行红字、观察行；不要只写“继续/接着说/我听着/我等着”。"
+        )
+        repair_rules.append(
+            "- 如果失败原因包含 RAW_CONTEXT_BACKFILL_REQUEST 或 UNNEEDED_CONTINUITY_MATERIAL_REQUEST，修补候选必须去掉索要材料动作，并咬住当前主题词。"
+        )
+        repair_rules.append(
+            "- 如果失败原因包含 CONTINUITY_TASK_PUSHBACK，修补候选必须去掉“你测/你先搭/你继续/多说点某部分”，改成自己给判断、下一步或收束。"
+        )
+        repair_rules.append(
+            "- 如果失败原因包含 CONTINUITY_PROCESS_NOTATION_REPLY 或 UNPROVIDED_MEDIA_OBJECT，修补候选必须像私聊短句，不要箭头、流程符号、手机屏幕等未提供现实物件。"
+        )
+        repair_rules.append(
+            "- 如果失败原因包含 ORIGINAL_QUOTE_PERSONA_LEAK 或 UNPROVIDED_PERSONAL_AUTHORITY，修补候选必须去掉“人家/老哥/小天/我长期经验/我猜下一轮”这类原句人格残留或无依据自我经验。"
+        )
+        repair_rules.append(
+            "- 如果失败原因包含 CONTINUITY_INTERNAL_PROCESS_SURFACE 或 CONTINUITY_LIGHT_JARGON，修补候选必须去掉“给你来一段长的/来一句长的/压缩包/压缩链/连续链/长测/距离风险/open loop/36-turn/轮判定/收束点/收束标记/字段/入口/压测/压着走/压短一点/压成名字/继续压/盯后段/搭轮数/锁死/缩写/替换掉/贴边界/先看头/身份摘/同轮内/下一轮再调/日常拉长/塞进问题簇/簇边界/边界定住/我这边收着/问题簇先锁/先稳住边界/接着盯风险/报错头/观察行走一轮/发过去/约束那边/单条挂/给个短回应/自现/多扯点/这轮我盯着/贴着边界/收掉就好/贴上去/放进去/塞进去/滚动权重/口子”等测试台话术；需要表达压缩边界时说“只留事实和话口/旧原文不留/先看边界/先看第一行红字/按问题簇看”。"
+        )
+    if any(code.startswith("ORIGINAL_QUOTE_NEAR_COPY") for code in failed.reason_codes):
+        repair_rules.append(
+            "- 如果失败原因包含 ORIGINAL_QUOTE_NEAR_COPY，修补候选必须保留原句参考里的节奏，但换掉具体词序和表达内容；不要近似复述真实原句。"
+        )
     messages[0]["content"] = "\n".join(
         (
             messages[0]["content"],
@@ -2904,6 +3606,26 @@ def _surface_process_meta_hits(request: IsolatedSurfaceInput, text: str) -> list
     task_mode = _clean_text(request.control.task_mode or request.control.response_move).lower()
     if task_mode not in _TECHNICAL_TASK_MODES:
         hits.extend(term for term in _SURFACE_PROCESS_META_CHAT if term and term in text)
+    if _continuity_boundary_relevant(request):
+        surface = "\n".join(
+            _clean_list(
+                [
+                    request.user_message,
+                    request.control.task_mode,
+                    request.control.response_move,
+                    *request.control.facts,
+                    *request.control.must_include,
+                    *request.control.must_not_do,
+                    *request.control.style_anchor,
+                ]
+            )
+        )
+        allowed = {"压缩"}
+        if any(token in surface for token in ("长链", "连续链", "连续对话", "长连续对话", "三十轮", "三十六轮")):
+            allowed.add("这条")
+        if any(token in surface for token in ("禁词", "forbidden", "规则", "问题簇")):
+            allowed.add("写成")
+        hits = [term for term in hits if term not in allowed]
     return _clean_list(hits)
 
 
@@ -3050,6 +3772,8 @@ def _awkward_collocation_hits(text: str) -> list[str]:
         hits.append("steady_come_collocation")
     if _AWKWARD_QUIET_STAY_RE.search(text):
         hits.append("quiet_stay_translationese")
+    if _AWKWARD_NO_ANGER_NEGATION_RE.search(text):
+        hits.append("no_anger_negation")
     if _AWKWARD_BROKEN_OBJECT_RE.search(text):
         hits.append("broken_object_collocation")
     if _AWKWARD_SELF_DESCRIBED_FRAGMENT_RE.search(text):
@@ -3058,6 +3782,14 @@ def _awkward_collocation_hits(text: str) -> list[str]:
         hits.append("incomplete_recall_object")
     if _AWKWARD_HESITATION_COLLAGE_RE.search(text):
         hits.append("hesitation_collage")
+    if _AWKWARD_SELF_NAME_ADVISORY_RE.search(text):
+        hits.append("self_name_advisory")
+    if _AWKWARD_BODY_PART_LISTENER_RE.search(text):
+        hits.append("body_part_listener")
+    if _AWKWARD_SELF_NAME_RECORD_RE.search(text):
+        hits.append("self_name_record")
+    if _AWKWARD_NICKNAME_AS_SELF_RE.search(text):
+        hits.append("nickname_as_self")
     if _AWKWARD_UNGROUNDED_SELF_MESSAGING_RE.search(text):
         hits.append("ungrounded_self_messaging")
     return hits
@@ -3361,10 +4093,12 @@ def score_isolated_surface_candidates(
     memory_relevant = bool(memory_terms and _memory_alignment_relevant(request))
     memory_required = bool(memory_terms and _memory_alignment_required(request))
     relationship_axes = relationship_control_axes_for_distance(request.control.relationship_distance)
+    original_quote_selection = select_surface_original_quotes(build_style_reference_query(request, limit=6), limit=6)
     rows: list[IsolatedCandidateScore] = []
     for candidate in _clean_list(candidates):
+        candidate_surface = normalize_surface_chat_punctuation(candidate)
         quality = quality_gate.validate(
-            text=candidate,
+            text=candidate_surface,
             render_profile="zh_text",
             response_form="text",
             user_message=request.user_message,
@@ -3373,18 +4107,39 @@ def score_isolated_surface_candidates(
             semantic_forbidden=False,
         )
         sample_score = score_sample_guided_text(
-            text=quality.normalized_text or candidate,
+            text=quality.normalized_text or candidate_surface,
             contract=contract,
             quality=quality,
             relationship_axes=relationship_axes.as_dict(),
         )
-        violations = _control_violations(request, quality.normalized_text or candidate)
+        violations = _control_violations(request, quality.normalized_text or candidate_surface)
         score = float(sample_score.score)
         dimensions = dict(sample_score.dimensions)
         reason_codes = [*sample_score.reason_codes, *quality.reason_codes]
+        if candidate_surface != candidate:
+            reason_codes.append("ASCII_PUNCTUATION_NORMALIZED")
+        quality_forbidden_template = _continuity_boundary_relevant(request) and any(
+            code in reason_codes for code in ("FORBIDDEN_TEMPLATE_TEXT", "QUALITY_SOFT_FORBIDDEN_TEMPLATE_TEXT")
+        )
+        if quality_forbidden_template:
+            score -= 16.0
+            dimensions["naturalness"] = min(74.0, float(dimensions.get("naturalness", 86.0)))
+            dimensions["template_density"] = min(68.0, float(dimensions.get("template_density", 86.0)))
+            dimensions["character_freshness"] = min(76.0, float(dimensions.get("character_freshness", 86.0)))
+        original_quote_copy_hits = surface_original_quote_similarity_hits(
+            quality.normalized_text or candidate_surface,
+            original_quote_selection.quotes,
+        )
+        if original_quote_copy_hits:
+            score = min(55.0, score - 24.0)
+            dimensions["source_originality"] = min(42.0, float(dimensions.get("source_originality", 86.0)))
+            dimensions["naturalness"] = min(72.0, float(dimensions.get("naturalness", 86.0)))
+            dimensions["character_freshness"] = min(58.0, float(dimensions.get("character_freshness", 86.0)))
+            dimensions["context_fit"] = min(74.0, float(dimensions.get("context_fit", 86.0)))
+            reason_codes.append("ORIGINAL_QUOTE_NEAR_COPY:" + ",".join(original_quote_copy_hits[:4]))
         if violations:
             score -= min(42.0, 14.0 * len(violations))
-        awkward_collocation_hits = _awkward_collocation_hits(quality.normalized_text or candidate)
+        awkward_collocation_hits = _awkward_collocation_hits(quality.normalized_text or candidate_surface)
         if awkward_collocation_hits:
             score -= min(16.0, 10.0 + 3.0 * len(awkward_collocation_hits))
             dimensions["naturalness"] = min(70.0, max(0.0, float(dimensions.get("naturalness", 86.0)) - 18.0))
@@ -3412,6 +4167,13 @@ def score_isolated_surface_candidates(
             dimensions["usefulness"] = max(0.0, float(dimensions.get("usefulness", 86.0)) - 14.0)
             dimensions["scene_grounding"] = max(0.0, float(dimensions.get("scene_grounding", 86.0)) - 10.0)
             reason_codes.append("RAW_CONTEXT_BACKFILL_REQUEST")
+        elif _unneeded_continuity_material_request(request, quality.normalized_text or candidate):
+            score -= 22.0
+            dimensions["context_fit"] = min(66.0, max(0.0, float(dimensions.get("context_fit", 86.0)) - 28.0))
+            dimensions["usefulness"] = min(70.0, max(0.0, float(dimensions.get("usefulness", 86.0)) - 18.0))
+            dimensions["scene_grounding"] = min(66.0, max(0.0, float(dimensions.get("scene_grounding", 86.0)) - 18.0))
+            dimensions["naturalness"] = min(74.0, float(dimensions.get("naturalness", 86.0)))
+            reason_codes.append("UNNEEDED_CONTINUITY_MATERIAL_REQUEST")
         elif _continuity_boundary_grounded(request, quality.normalized_text or candidate):
             score += 9.0
             dimensions["context_fit"] = min(100.0, float(dimensions.get("context_fit", 86.0)) + 18.0)
@@ -3419,6 +4181,167 @@ def score_isolated_surface_candidates(
             dimensions["technical_helpfulness"] = min(100.0, float(dimensions.get("technical_helpfulness", 86.0)) + 18.0)
             dimensions["scene_grounding"] = min(100.0, float(dimensions.get("scene_grounding", 86.0)) + 14.0)
             reason_codes.append("CONTINUITY_BOUNDARY_GROUNDED")
+        if _thin_continuity_generic_reply(request, quality.normalized_text or candidate):
+            score -= 16.0
+            dimensions["context_fit"] = min(68.0, max(0.0, float(dimensions.get("context_fit", 86.0)) - 20.0))
+            dimensions["scene_grounding"] = min(68.0, max(0.0, float(dimensions.get("scene_grounding", 86.0)) - 18.0))
+            dimensions["catchiness"] = max(0.0, float(dimensions.get("catchiness", 86.0)) - 12.0)
+            dimensions["character_freshness"] = max(0.0, float(dimensions.get("character_freshness", 86.0)) - 10.0)
+            reason_codes.append("CONTINUITY_THIN_GENERIC_REPLY")
+        if _thin_daily_followup_reply(request, quality.normalized_text or candidate):
+            score -= 10.0
+            dimensions["context_fit"] = min(74.0, max(0.0, float(dimensions.get("context_fit", 86.0)) - 10.0))
+            dimensions["naturalness"] = min(82.0, float(dimensions.get("naturalness", 86.0)))
+            dimensions["catchiness"] = max(0.0, float(dimensions.get("catchiness", 86.0)) - 14.0)
+            dimensions["character_freshness"] = max(0.0, float(dimensions.get("character_freshness", 86.0)) - 12.0)
+            reason_codes.append("THIN_DAILY_FOLLOWUP_REPLY")
+        if _continuity_process_notation_reply(request, quality.normalized_text or candidate):
+            score = min(68.0, score - 20.0)
+            dimensions["context_fit"] = min(64.0, max(0.0, float(dimensions.get("context_fit", 86.0)) - 24.0))
+            dimensions["scene_grounding"] = min(64.0, max(0.0, float(dimensions.get("scene_grounding", 86.0)) - 20.0))
+            dimensions["naturalness"] = min(70.0, max(0.0, float(dimensions.get("naturalness", 86.0)) - 18.0))
+            dimensions["spoken_chat_texture"] = min(68.0, float(dimensions.get("spoken_chat_texture", 86.0)))
+            reason_codes.append("CONTINUITY_PROCESS_NOTATION_REPLY")
+        internal_process_hits = _continuity_internal_process_surface_hits(request, quality.normalized_text or candidate)
+        if internal_process_hits:
+            score = min(68.0, score - min(24.0, 14.0 + 3.0 * len(internal_process_hits)))
+            dimensions["context_fit"] = min(66.0, max(0.0, float(dimensions.get("context_fit", 86.0)) - 24.0))
+            dimensions["scene_grounding"] = min(66.0, max(0.0, float(dimensions.get("scene_grounding", 86.0)) - 18.0))
+            dimensions["naturalness"] = min(70.0, max(0.0, float(dimensions.get("naturalness", 86.0)) - 16.0))
+            dimensions["spoken_chat_texture"] = min(72.0, float(dimensions.get("spoken_chat_texture", 86.0)))
+            dimensions["character_freshness"] = min(72.0, float(dimensions.get("character_freshness", 86.0)))
+            reason_codes.append("CONTINUITY_INTERNAL_PROCESS_SURFACE:" + ",".join(internal_process_hits[:4]))
+        if _misplaced_emotional_containment(request, quality.normalized_text or candidate):
+            score -= 18.0
+            dimensions["context_fit"] = min(66.0, max(0.0, float(dimensions.get("context_fit", 86.0)) - 22.0))
+            dimensions["scene_grounding"] = min(66.0, max(0.0, float(dimensions.get("scene_grounding", 86.0)) - 16.0))
+            dimensions["naturalness"] = min(74.0, float(dimensions.get("naturalness", 86.0)))
+            dimensions["character_freshness"] = max(0.0, float(dimensions.get("character_freshness", 86.0)) - 12.0)
+            reason_codes.append("MISPLACED_EMOTIONAL_CONTAINMENT")
+        if _misplaced_support_template(request, quality.normalized_text or candidate):
+            score -= 18.0
+            dimensions["context_fit"] = min(66.0, max(0.0, float(dimensions.get("context_fit", 86.0)) - 22.0))
+            dimensions["scene_grounding"] = min(66.0, max(0.0, float(dimensions.get("scene_grounding", 86.0)) - 16.0))
+            dimensions["naturalness"] = min(74.0, float(dimensions.get("naturalness", 86.0)))
+            dimensions["character_freshness"] = max(0.0, float(dimensions.get("character_freshness", 86.0)) - 12.0)
+            reason_codes.append("MISPLACED_SUPPORT_TEMPLATE")
+        topic_mismatch = _current_user_topic_mismatch(request, quality.normalized_text or candidate)
+        if topic_mismatch:
+            score -= 20.0
+            dimensions["context_fit"] = min(64.0, max(0.0, float(dimensions.get("context_fit", 86.0)) - 28.0))
+            dimensions["scene_grounding"] = min(64.0, max(0.0, float(dimensions.get("scene_grounding", 86.0)) - 24.0))
+            dimensions["usefulness"] = min(68.0, max(0.0, float(dimensions.get("usefulness", 86.0)) - 18.0))
+            dimensions["technical_helpfulness"] = min(72.0, float(dimensions.get("technical_helpfulness", 86.0)))
+            reason_codes.append(f"CURRENT_USER_TOPIC_MISMATCH:{topic_mismatch}")
+        if _daily_test_self_demonstration(request, quality.normalized_text or candidate):
+            score -= 18.0
+            dimensions["context_fit"] = min(66.0, max(0.0, float(dimensions.get("context_fit", 86.0)) - 22.0))
+            dimensions["naturalness"] = min(72.0, max(0.0, float(dimensions.get("naturalness", 86.0)) - 18.0))
+            dimensions["scene_grounding"] = min(70.0, max(0.0, float(dimensions.get("scene_grounding", 86.0)) - 16.0))
+            dimensions["character_freshness"] = max(0.0, float(dimensions.get("character_freshness", 86.0)) - 12.0)
+            reason_codes.append("DAILY_TEST_SELF_DEMONSTRATION")
+        if _continuity_praise_context_miss(request, quality.normalized_text or candidate):
+            score -= 18.0
+            dimensions["context_fit"] = min(66.0, max(0.0, float(dimensions.get("context_fit", 86.0)) - 22.0))
+            dimensions["scene_grounding"] = min(66.0, max(0.0, float(dimensions.get("scene_grounding", 86.0)) - 18.0))
+            dimensions["usefulness"] = min(72.0, max(0.0, float(dimensions.get("usefulness", 86.0)) - 12.0))
+            dimensions["character_freshness"] = max(0.0, float(dimensions.get("character_freshness", 86.0)) - 10.0)
+            reason_codes.append("CONTINUITY_PRAISE_CONTEXT_MISS")
+        if _continuity_task_pushback(request, quality.normalized_text or candidate):
+            score -= 16.0
+            dimensions["context_fit"] = min(68.0, max(0.0, float(dimensions.get("context_fit", 86.0)) - 18.0))
+            dimensions["usefulness"] = min(70.0, max(0.0, float(dimensions.get("usefulness", 86.0)) - 16.0))
+            dimensions["scene_grounding"] = min(70.0, max(0.0, float(dimensions.get("scene_grounding", 86.0)) - 14.0))
+            dimensions["naturalness"] = min(76.0, float(dimensions.get("naturalness", 86.0)))
+            reason_codes.append("CONTINUITY_TASK_PUSHBACK")
+        light_jargon_hits = _continuity_light_jargon_hits(request, quality.normalized_text or candidate)
+        if light_jargon_hits:
+            score -= min(10.0, 5.0 + 2.0 * len(light_jargon_hits))
+            dimensions["naturalness"] = min(82.0, max(0.0, float(dimensions.get("naturalness", 86.0)) - 8.0))
+            dimensions["spoken_chat_texture"] = min(82.0, max(0.0, float(dimensions.get("spoken_chat_texture", 86.0)) - 6.0))
+            dimensions["character_freshness"] = min(82.0, max(0.0, float(dimensions.get("character_freshness", 86.0)) - 5.0))
+            reason_codes.append("CONTINUITY_LIGHT_JARGON:" + ",".join(light_jargon_hits[:4]))
+        user_visible_hits = _continuity_user_visible_hits(request, quality.normalized_text or candidate)
+        if user_visible_hits and not any(
+            code.startswith(
+                (
+                    "RAW_CONTEXT_BACKFILL_REQUEST",
+                    "UNNEEDED_CONTINUITY_MATERIAL_REQUEST",
+                    "CONTINUITY_INTERNAL_PROCESS_SURFACE",
+                    "CONTINUITY_TASK_PUSHBACK",
+                    "CONTINUITY_LIGHT_JARGON",
+                    "MISPLACED_EMOTIONAL_CONTAINMENT",
+                    "MISPLACED_SUPPORT_TEMPLATE",
+                )
+            )
+            for code in reason_codes
+        ):
+            score += min(6.0, 2.5 + 1.0 * len(user_visible_hits))
+            dimensions["context_fit"] = min(100.0, float(dimensions.get("context_fit", 86.0)) + 5.0)
+            dimensions["scene_grounding"] = min(100.0, float(dimensions.get("scene_grounding", 86.0)) + 5.0)
+            dimensions["naturalness"] = min(100.0, float(dimensions.get("naturalness", 86.0)) + 2.0)
+            dimensions["spoken_chat_texture"] = min(100.0, float(dimensions.get("spoken_chat_texture", 86.0)) + 2.0)
+            reason_codes.append("CONTINUITY_USER_VISIBLE_SURFACE:" + ",".join(user_visible_hits[:4]))
+        unprovided_media_hits = _unprovided_media_object_hits(request, quality.normalized_text or candidate)
+        if unprovided_media_hits:
+            score -= min(22.0, 12.0 + 4.0 * len(unprovided_media_hits))
+            dimensions["implied_fact_risk"] = min(60.0, float(dimensions.get("implied_fact_risk", 86.0)))
+            dimensions["context_fit"] = min(70.0, max(0.0, float(dimensions.get("context_fit", 86.0)) - 14.0))
+            dimensions["naturalness"] = min(74.0, float(dimensions.get("naturalness", 86.0)))
+            reason_codes.append("UNPROVIDED_MEDIA_OBJECT:" + ",".join(unprovided_media_hits[:4]))
+        original_persona_hits = _original_quote_persona_leak_hits(quality.normalized_text or candidate)
+        if original_persona_hits:
+            score = min(62.0, score - 22.0)
+            dimensions["role_fit"] = min(56.0, float(dimensions.get("role_fit", 86.0)))
+            dimensions["character_freshness"] = min(58.0, float(dimensions.get("character_freshness", 86.0)))
+            dimensions["naturalness"] = min(70.0, float(dimensions.get("naturalness", 86.0)))
+            dimensions["source_originality"] = min(50.0, float(dimensions.get("source_originality", 86.0)))
+            reason_codes.append("ORIGINAL_QUOTE_PERSONA_LEAK:" + ",".join(original_persona_hits[:4]))
+        personal_authority_hits = _unprovided_personal_authority_hits(quality.normalized_text or candidate)
+        if personal_authority_hits:
+            score -= min(18.0, 10.0 + 3.0 * len(personal_authority_hits))
+            dimensions["implied_fact_risk"] = min(66.0, float(dimensions.get("implied_fact_risk", 86.0)))
+            dimensions["context_fit"] = min(70.0, max(0.0, float(dimensions.get("context_fit", 86.0)) - 12.0))
+            dimensions["naturalness"] = min(74.0, float(dimensions.get("naturalness", 86.0)))
+            reason_codes.append("UNPROVIDED_PERSONAL_AUTHORITY:" + ",".join(personal_authority_hits[:4]))
+        continuity_turn_marker_hits = _unprovided_continuity_turn_marker_hits(request, quality.normalized_text or candidate)
+        if continuity_turn_marker_hits:
+            score -= min(22.0, 14.0 + 4.0 * len(continuity_turn_marker_hits))
+            dimensions["implied_fact_risk"] = min(62.0, float(dimensions.get("implied_fact_risk", 86.0)))
+            dimensions["context_fit"] = min(70.0, max(0.0, float(dimensions.get("context_fit", 86.0)) - 14.0))
+            reason_codes.append("UNPROVIDED_CONTINUITY_TURN_MARKER:" + ",".join(continuity_turn_marker_hits[:4]))
+        continuity_work_claim_hits = _unprovided_continuity_work_claim_hits(request, quality.normalized_text or candidate)
+        if continuity_work_claim_hits:
+            score -= min(20.0, 12.0 + 4.0 * len(continuity_work_claim_hits))
+            dimensions["implied_fact_risk"] = min(64.0, float(dimensions.get("implied_fact_risk", 86.0)))
+            dimensions["context_fit"] = min(70.0, max(0.0, float(dimensions.get("context_fit", 86.0)) - 12.0))
+            reason_codes.append("UNPROVIDED_CONTINUITY_WORK_CLAIM:" + ",".join(continuity_work_claim_hits[:4]))
+        if _thin_wait_scene_hold(request, quality.normalized_text or candidate):
+            score -= 12.0
+            dimensions["context_fit"] = min(74.0, max(0.0, float(dimensions.get("context_fit", 86.0)) - 12.0))
+            dimensions["scene_grounding"] = min(72.0, max(0.0, float(dimensions.get("scene_grounding", 86.0)) - 16.0))
+            dimensions["catchiness"] = max(0.0, float(dimensions.get("catchiness", 86.0)) - 12.0)
+            dimensions["character_freshness"] = max(0.0, float(dimensions.get("character_freshness", 86.0)) - 10.0)
+            reason_codes.append("WAIT_SCENE_THIN_HOLD")
+        if _bossy_wait_scene_hold(request, quality.normalized_text or candidate):
+            score -= 14.0
+            dimensions["distance_control"] = min(74.0, max(0.0, float(dimensions.get("distance_control", 86.0)) - 12.0))
+            dimensions["naturalness"] = min(74.0, max(0.0, float(dimensions.get("naturalness", 86.0)) - 12.0))
+            dimensions["character_freshness"] = max(0.0, float(dimensions.get("character_freshness", 86.0)) - 10.0)
+            reason_codes.append("WAIT_SCENE_BOSSY_HOLD")
+        if _wait_scene_light_grounding(request, quality.normalized_text or candidate):
+            score += 12.0
+            dimensions["context_fit"] = min(100.0, float(dimensions.get("context_fit", 86.0)) + 8.0)
+            dimensions["scene_grounding"] = max(90.0, min(100.0, float(dimensions.get("scene_grounding", 86.0)) + 10.0))
+            dimensions["spoken_chat_texture"] = min(100.0, float(dimensions.get("spoken_chat_texture", 86.0)) + 4.0)
+            dimensions["catchiness"] = min(100.0, float(dimensions.get("catchiness", 86.0)) + 4.0)
+            reason_codes.append("WAIT_SCENE_LIGHT_GROUNDING")
+        if _wait_scene_relevant(request) and _WAIT_PRESSURE_RE.search(quality.normalized_text or candidate):
+            score -= 18.0
+            dimensions["context_fit"] = min(70.0, float(dimensions.get("context_fit", 86.0)) - 18.0)
+            dimensions["distance_control"] = min(70.0, float(dimensions.get("distance_control", 86.0)) - 18.0)
+            dimensions["emotional_containment"] = max(0.0, float(dimensions.get("emotional_containment", 86.0)) - 10.0)
+            reason_codes.append("WAIT_SCENE_PRESSURES_RETURN")
         text = quality.normalized_text or candidate
         ungrounded_real_world_hits = _ungrounded_real_world_commitment_hits(request, text)
         memory_hits = _memory_alignment_hits(text, memory_terms)
@@ -3691,6 +4614,10 @@ def score_isolated_surface_candidates(
             dimensions["context_fit"] = min(70.0, float(dimensions.get("context_fit", 86.0)))
             dimensions["catchiness"] = min(76.0, float(dimensions.get("catchiness", 86.0)))
             dimensions["character_freshness"] = min(78.0, float(dimensions.get("character_freshness", 86.0)))
+        if any(code.startswith("CONTINUITY_LIGHT_JARGON:") for code in reason_codes):
+            score = min(88.0, score)
+            dimensions["naturalness"] = min(82.0, float(dimensions.get("naturalness", 86.0)))
+            dimensions["spoken_chat_texture"] = min(82.0, float(dimensions.get("spoken_chat_texture", 86.0)))
         if any(code.startswith("AWKWARD_COLLOCATION:") for code in reason_codes):
             dimensions["naturalness"] = min(70.0, float(dimensions.get("naturalness", 86.0)))
             dimensions["line_rhythm"] = min(83.0, float(dimensions.get("line_rhythm", 86.0)))
@@ -3698,7 +4625,13 @@ def score_isolated_surface_candidates(
         reason_codes.extend(f"CORE_DIMENSION_FLOOR:{item}" for item in core_dimension_violations)
         score = max(0.0, min(100.0, score))
         hard_fail = bool(sample_score.hard_fail)
-        passed = bool(score >= 80.0 and not hard_fail and not violations and not core_dimension_violations)
+        passed = bool(
+            score >= 80.0
+            and not hard_fail
+            and not violations
+            and not core_dimension_violations
+            and not quality_forbidden_template
+        )
         rows.append(
             IsolatedCandidateScore(
                 text=quality.normalized_text or candidate,
