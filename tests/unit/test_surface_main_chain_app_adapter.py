@@ -85,10 +85,39 @@ def test_build_surface_main_chain_input_from_chat_input_compresses_app_context(m
 
 
 def test_build_surface_main_chain_input_prefers_surface_task_control(monkeypatch) -> None:
+    trace: dict[str, object] = {}
+    calls: list[dict[str, object]] = []
+
     monkeypatch.setattr(
         "host_brain.app.surface_main_chain_adapter.get_compiled_soul",
         lambda: SimpleNamespace(source_text=SOUL, runtime_full_text=SOUL),
     )
+
+    def _fake_surface_context_packet(**kwargs):  # noqa: ANN003
+        calls.append(dict(kwargs))
+        return {
+            "reply_plan": {
+                "primary_topic": "context_fallback_should_not_win",
+                "interaction_move": "context_move_should_not_win",
+                "response_form": "text",
+                "max_questions": 0,
+            },
+            "conversation_history": {"turns_injected": 1, "summary_present": False},
+            "surface_affect_packet": {
+                "emotional_tone": "playful_light",
+                "relationship_distance": "familiar_not_intimate",
+                "style_anchor": ["轻一点接，但先处理当前句子。"],
+                "must_not_do": ["不要把上下文包写进回复"],
+            },
+            "surface_memory_recall_packet": {
+                "facts": ["用户刚刚要求继续迁移主链。"],
+                "style_anchor": ["记忆只补当前承接，不展开旧对话。"],
+                "source_refs": ["memory://raw/should-not-pass"],
+                "evidence_refs": ["evd://memory/2"],
+            },
+        }
+
+    monkeypatch.setattr("host_brain.app.surface_context_packet.build_surface_context_packet", _fake_surface_context_packet)
 
     payload = build_surface_main_chain_input_from_chat_input(
         _agent_input(
@@ -98,11 +127,19 @@ def test_build_surface_main_chain_input_prefers_surface_task_control(monkeypatch
                 "response_form": "text",
                 "question_budget": 0,
             }
-        )
+        ),
+        trace_stage_meta=trace,
     )
 
+    assert calls
     assert payload.task_control["task_mode"] == "style_repair"
     assert payload.task_control["response_move"] == "ack_style_issue"
+    assert payload.affect_packet.emotional_tone == "playful_light"
+    assert tuple(payload.memory_packet.facts) == ("用户刚刚要求继续迁移主链。",)
+    assert trace["surface_context_packet_prepared"] is True
+    assert trace["surface_selected_reply_plan"]["task_mode"] == "style_repair"
+    assert trace["reply_plan"]["primary_topic"] == "context_fallback_should_not_win"
+    assert "memory://raw/should-not-pass" not in json.dumps(payload.as_dict(), ensure_ascii=False)
 
 
 def test_build_surface_main_chain_input_derives_reply_plan_without_passing_history(monkeypatch) -> None:

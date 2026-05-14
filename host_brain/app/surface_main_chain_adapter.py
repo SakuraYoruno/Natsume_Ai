@@ -39,6 +39,16 @@ _TRACE_RUNTIME_PAYLOAD_KEYS = (
     "surface_memory_recall_packet",
 )
 _TEXT_RESPONSE_FORMS = {"", "text", "plain_text", "chat_text", "zh_text"}
+_TECHNICAL_TASK_MODES = {
+    "advice_continue",
+    "complaint",
+    "help_takeover",
+    "next_step",
+    "small_failure",
+    "technical_help",
+    "triage_first_step",
+    "write_takeover",
+}
 
 
 def surface_main_chain_enabled(agent_input: Any, *, sub_agent_ctx: Any | None = None) -> bool:
@@ -60,15 +70,32 @@ def build_surface_main_chain_input_from_chat_input(
     trace_stage_meta: dict[str, Any] | None = None,
 ) -> SurfaceMainChainInput:
     soul = get_compiled_soul()
-    reply_plan = _resolve_surface_reply_plan(agent_input, trace_stage_meta=trace_stage_meta)
+    runtime_payload = _build_surface_runtime_payload(agent_input, trace_stage_meta=trace_stage_meta, merge_trace=False)
+    reply_plan = _resolve_surface_reply_plan(
+        agent_input,
+        trace_stage_meta=trace_stage_meta,
+        runtime_payload=runtime_payload,
+    )
+    _merge_surface_trace(trace_stage_meta, runtime_payload)
+    if isinstance(trace_stage_meta, dict) and reply_plan:
+        trace_stage_meta["surface_selected_reply_plan"] = dict(reply_plan)
     task_control = _surface_task_control_from_reply_plan(agent_input=agent_input, reply_plan=reply_plan)
-    affect_packet = _affect_packet(agent_input, task_control=task_control, trace_stage_meta=trace_stage_meta)
+    affect_packet = _affect_packet(
+        agent_input,
+        task_control=task_control,
+        trace_stage_meta=trace_stage_meta,
+        runtime_payload=runtime_payload,
+    )
     return SurfaceMainChainInput(
         soul_md=str(getattr(soul, "source_text", "") or getattr(soul, "runtime_full_text", "")).strip(),
         user_message=str(getattr(agent_input, "user_message", "") or "").strip(),
         case_id=str(getattr(agent_input, "request_id", "") or "").strip(),
         task_control=task_control,
-        memory_packet=_memory_packet(agent_input, trace_stage_meta=trace_stage_meta),
+        memory_packet=_memory_packet(
+            agent_input,
+            trace_stage_meta=trace_stage_meta,
+            runtime_payload=runtime_payload,
+        ),
         affect_packet=affect_packet,
         necessary_facts=_necessary_facts(agent_input),
         must_not_do=(),
@@ -302,7 +329,7 @@ def _schedule_surface_post_process(
                 llm_input_digest=json.dumps(_public_result_trace(result), ensure_ascii=False)[:500],
                 retrieval_evidence_items=list(getattr(agent_input, "retrieval_evidence_items", None) or []),
                 motive_state=None,
-                reply_plan=_reply_plan(agent_input, trace_stage_meta),
+                reply_plan=_selected_reply_plan(agent_input, trace_stage_meta),
                 trace_stage_meta=trace,
             )
         )
@@ -336,16 +363,26 @@ def _resolve_surface_reply_plan(
     agent_input: Any,
     *,
     trace_stage_meta: dict[str, Any] | None = None,
+    runtime_payload: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     direct = _reply_plan(agent_input, trace_stage_meta)
     if direct:
         return direct
-    runtime_payload = _build_surface_runtime_payload(agent_input, trace_stage_meta=trace_stage_meta)
-    reply_plan = _safe_mapping(runtime_payload.get("reply_plan"))
+    payload = _safe_mapping(runtime_payload)
+    if not payload:
+        payload = _build_surface_runtime_payload(agent_input, trace_stage_meta=trace_stage_meta)
+    reply_plan = _safe_mapping(payload.get("reply_plan"))
     if reply_plan:
         _set_agent_input_mapping(agent_input, "render_policy", reply_plan)
         return reply_plan
     return {}
+
+
+def _selected_reply_plan(agent_input: Any, trace_stage_meta: Mapping[str, Any] | None = None) -> dict[str, Any]:
+    selected = _safe_mapping(trace_stage_meta).get("surface_selected_reply_plan")
+    if isinstance(selected, Mapping):
+        return dict(selected)
+    return _reply_plan(agent_input, trace_stage_meta)
 
 
 def _reply_plan(agent_input: Any, trace_stage_meta: Mapping[str, Any] | None = None) -> dict[str, Any]:
@@ -366,6 +403,7 @@ def _build_surface_runtime_payload(
     agent_input: Any,
     *,
     trace_stage_meta: dict[str, Any] | None = None,
+    merge_trace: bool = True,
 ) -> dict[str, Any]:
     try:
         from host_brain.app.surface_context_packet import build_surface_context_packet  # noqa: PLC0415
@@ -385,7 +423,8 @@ def _build_surface_runtime_payload(
             intent_draft=_safe_mapping(getattr(agent_input, "intent_draft", None)),
             eval_history_turns=list(getattr(agent_input, "eval_history_turns", None) or []),
         )
-        _merge_surface_trace(trace_stage_meta, runtime_payload)
+        if merge_trace:
+            _merge_surface_trace(trace_stage_meta, runtime_payload)
         return runtime_payload
     except Exception as exc:
         if isinstance(trace_stage_meta, dict):
@@ -396,9 +435,12 @@ def _build_surface_runtime_payload(
 def _merge_surface_trace(trace_stage_meta: dict[str, Any] | None, runtime_payload: Mapping[str, Any]) -> None:
     if not isinstance(trace_stage_meta, dict):
         return
+    if runtime_payload:
+        trace_stage_meta["surface_context_packet_prepared"] = True
     for key in _TRACE_RUNTIME_PAYLOAD_KEYS:
         value = runtime_payload.get(key)
-        if isinstance(value, Mapping) and value:
+        existing = trace_stage_meta.get(key)
+        if isinstance(value, Mapping) and value and not (isinstance(existing, Mapping) and existing):
             trace_stage_meta[key] = dict(value)
 
 
@@ -443,8 +485,12 @@ def _affect_packet(
     *,
     task_control: Mapping[str, Any],
     trace_stage_meta: Mapping[str, Any] | None = None,
+    runtime_payload: Mapping[str, Any] | None = None,
 ) -> SurfaceAffectControlPacket:
+    if _is_technical_task(task_control):
+        return _derived_affect_packet(agent_input, task_control=task_control, runtime_payload=runtime_payload)
     for container in (
+        _safe_mapping(runtime_payload),
         _safe_mapping(trace_stage_meta),
         _safe_mapping(getattr(agent_input, "trace_stage_meta", None)),
     ):
@@ -461,8 +507,40 @@ def _affect_packet(
     )
 
 
-def _memory_packet(agent_input: Any, *, trace_stage_meta: Mapping[str, Any] | None = None) -> MemoryRecallPacket | None:
+def _is_technical_task(task_control: Mapping[str, Any]) -> bool:
+    task_mode = str(task_control.get("task_mode") or "").strip().lower()
+    response_move = str(task_control.get("response_move") or "").strip().lower()
+    return task_mode in _TECHNICAL_TASK_MODES or response_move in _TECHNICAL_TASK_MODES
+
+
+def _derived_affect_packet(
+    agent_input: Any,
+    *,
+    task_control: Mapping[str, Any],
+    runtime_payload: Mapping[str, Any] | None = None,
+) -> SurfaceAffectControlPacket:
+    payload = _safe_mapping(runtime_payload)
+    return build_surface_affect_control_packet(
+        emotion_state=_safe_mapping(payload.get("affect_state"))
+        or _safe_mapping(getattr(agent_input, "emotion_context", None))
+        or _safe_mapping(getattr(agent_input, "emotion_snapshot", None)),
+        bond_summary={
+            **_safe_mapping(getattr(agent_input, "bond_summary", None)),
+            **_safe_mapping(payload.get("relationship_state")),
+        },
+        relationship_clues=_relationship_clues(agent_input),
+        task_mode=str(task_control.get("task_mode") or ""),
+    )
+
+
+def _memory_packet(
+    agent_input: Any,
+    *,
+    trace_stage_meta: Mapping[str, Any] | None = None,
+    runtime_payload: Mapping[str, Any] | None = None,
+) -> MemoryRecallPacket | None:
     for container in (
+        _safe_mapping(runtime_payload),
         _safe_mapping(trace_stage_meta),
         _safe_mapping(getattr(agent_input, "trace_stage_meta", None)),
         _safe_mapping(getattr(agent_input, "retrieval_summary", None)),
