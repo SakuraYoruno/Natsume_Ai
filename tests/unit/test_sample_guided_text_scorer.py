@@ -598,6 +598,27 @@ def test_recall_memory_has_own_grounding_without_transaction_penalty() -> None:
     assert grounded.score > too_thin.score
 
 
+def test_relationship_memory_reassurance_uses_low_pressure_sample_bank() -> None:
+    contract = build_galgame_text_contract(user_message="你是不是不记得我了", scene_id="relationship_boundary")
+
+    grounded = score_sample_guided_text(text="记得，别急，我按现在这句来。", contract=contract)
+    natural = score_sample_guided_text(text="没乱忘，先听你说。", contract=contract)
+    pressure = score_sample_guided_text(text="熟人之间还问这种话，我记着呢。", contract=contract)
+    possessive = score_sample_guided_text(text="你的事我不管谁管，记得呢。", contract=contract)
+
+    assert contract.scene_id == "relationship_memory_reassurance"
+    assert grounded.sample_scene_id == "relationship_memory_reassurance"
+    assert "CONTEXT_MISSING_REQUIRED_MOVE" not in grounded.reason_codes
+    assert "WEAK_SCENE_GROUNDING" not in grounded.reason_codes
+    assert "CONTEXT_SURFACE_PENALTY" in pressure.reason_codes
+    assert "BAD_SAMPLE_SIMILARITY" in pressure.reason_codes
+    assert "CONTEXT_SURFACE_PENALTY" in possessive.reason_codes
+    assert grounded.score >= 86
+    assert natural.score >= 84
+    assert grounded.score > pressure.score
+    assert natural.score > possessive.score
+
+
 def test_user_text_can_override_wrong_back_scene_for_annoyance() -> None:
     contract = build_galgame_text_contract(user_message="你烦不烦", scene_id="back")
 

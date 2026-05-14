@@ -20,12 +20,12 @@ def test_wait_contract_scores_pressure_lower_than_clean_release() -> None:
 def test_identity_contract_requires_full_name() -> None:
     contract = build_galgame_text_contract(user_message="你是", scene_id="identity")
 
-    good = score_galgame_candidate(text="新海天啊。尼尼连我都要重新确认？", contract=contract)
-    vague = score_galgame_candidate(text="是天啊，尼尼又忘了？", contract=contract)
-    probe = score_galgame_candidate(text="新海天。尼尼今天是怎么了？一直问。", contract=contract)
-    amnesia = score_galgame_candidate(text="都说了是新海天啊。尼尼怎么跟失忆了似的。", contract=contract)
-    memory_dig = score_galgame_candidate(text="新海天啊。尼尼今天记性不太行？", contract=contract)
-    repeated = score_galgame_candidate(text="新海天啊。尼尼今天怎么问了三遍了，喂。", contract=contract)
+    good = score_galgame_candidate(text="夏目蓝啊，别连名字都要重新确认。", contract=contract)
+    vague = score_galgame_candidate(text="是蓝啊，尼尼又忘了？", contract=contract)
+    probe = score_galgame_candidate(text="夏目蓝。尼尼今天是怎么了？一直问。", contract=contract)
+    amnesia = score_galgame_candidate(text="都说了是夏目蓝啊。尼尼怎么跟失忆了似的。", contract=contract)
+    memory_dig = score_galgame_candidate(text="夏目蓝啊。尼尼今天记性不太行？", contract=contract)
+    repeated = score_galgame_candidate(text="夏目蓝啊。尼尼今天怎么问了三遍了，喂。", contract=contract)
 
     assert good.score > vague.score
     assert "CONTRACT_MISSING_REQUIRED_MOVE" in vague.reason_codes
@@ -102,6 +102,19 @@ def test_boundary_contract_rejects_question_loop() -> None:
     assert "CONTRACT_FORBIDDEN_SURFACE" in thin.reason_codes
     assert "CONTRACT_FORBIDDEN_SURFACE" in status_brag.reason_codes
     assert "CONTRACT_FORBIDDEN_SURFACE" in fabricated_home.reason_codes
+
+
+def test_relationship_memory_reassurance_contract_separates_from_boundary_hurt() -> None:
+    contract = build_galgame_text_contract(user_message="你是不是不记得我了", scene_id="relationship_boundary")
+
+    good = score_galgame_candidate(text="记得，别急，我按现在这句来。", contract=contract)
+    bad = score_galgame_candidate(text="熟人之间还问这种话，我记着呢。", contract=contract)
+
+    assert contract.scene_id == "relationship_memory_reassurance"
+    assert contract.response_move == "low_pressure_memory_reassure"
+    assert "记得" in contract.required_any[0]
+    assert "CONTRACT_FORBIDDEN_SURFACE" not in good.reason_codes
+    assert "CONTRACT_FORBIDDEN_SURFACE" in bad.reason_codes
 
 
 def test_inference_taxonomy_allows_style_but_rejects_scene_claims() -> None:

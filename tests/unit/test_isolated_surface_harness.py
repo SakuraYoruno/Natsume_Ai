@@ -634,7 +634,11 @@ def test_short_continue_memory_is_not_required_to_echo_fact() -> None:
     )
 
     guidance = memory_candidate_guidance(request)
-    rows = score_isolated_surface_candidates(request, ["行，往下。", "好，接着往 surface 主链走。"])
+    rows = score_isolated_surface_candidates(
+        request,
+        ["行，往下。", "好，接着往 surface 主链走。", "先别冲太快，把第一条红字定稳再往下拆。"],
+    )
+    selected = select_best_isolated_candidate(rows)
 
     assert "不要把 surface、主链、主线、迁移" in guidance
     assert memory_alignment_terms(request)
@@ -642,6 +646,11 @@ def test_short_continue_memory_is_not_required_to_echo_fact() -> None:
     assert not any(code.startswith("MEMORY_ALIGNMENT_REQUIRED_MISS") for code in rows[0].reason_codes)
     assert rows[0].dimensions["memory_alignment"] >= 72
     assert any(code.startswith("SHORT_CONTINUE_MEMORY_OVERDISPLAY") for code in rows[1].reason_codes)
+    assert not rows[1].passed
+    assert any(code.startswith("SHORT_CONTINUE_UNPROVIDED_TECH_DETAIL") for code in rows[2].reason_codes)
+    assert not rows[2].passed
+    assert selected is not None
+    assert selected.text == "行，往下。"
 
 
 def test_parse_surface_candidates_accepts_json_and_dedupes() -> None:

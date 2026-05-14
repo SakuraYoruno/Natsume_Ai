@@ -803,6 +803,14 @@ _SHORT_CONTINUE_MEMORY_OVERDISPLAY_PHRASES = (
     "文本质量",
     "记忆接入",
 )
+_SHORT_CONTINUE_UNPROVIDED_TECH_DETAIL_PHRASES = (
+    "红字",
+    "报错",
+    "输入",
+    "输出",
+    "截图",
+    "日志",
+)
 _QUIET_SELF_FOCUS_PHRASES = (
     "别嫌我",
     "嫌我",
@@ -2880,6 +2888,15 @@ def _short_continue_memory_overdisplay_hits(request: IsolatedSurfaceInput, text:
     return _clean_list(term for term in _SHORT_CONTINUE_MEMORY_OVERDISPLAY_PHRASES if term in text)
 
 
+def _short_continue_unprovided_tech_detail_hits(request: IsolatedSurfaceInput, text: str) -> list[str]:
+    if not _short_continue_scene_relevant(request):
+        return []
+    source = "\n".join(_clean_list([request.user_message, *request.control.facts, *request.control.must_include]))
+    return _clean_list(
+        term for term in _SHORT_CONTINUE_UNPROVIDED_TECH_DETAIL_PHRASES if term in text and term not in source
+    )
+
+
 def _back_landing_hits(request: IsolatedSurfaceInput, text: str) -> list[str]:
     hits = [marker for marker in _BACK_EXPLICIT_LANDING_MARKERS if _relationship_marker_hit(text, marker)]
     if hits:
@@ -4523,12 +4540,22 @@ def score_isolated_surface_candidates(
             reason_codes.append("BACK_MEMORY_OVERDISPLAY:" + ",".join(back_memory_overdisplay_hits[:4]))
         short_continue_overdisplay_hits = _short_continue_memory_overdisplay_hits(request, quality.normalized_text or candidate)
         if short_continue_overdisplay_hits:
-            score -= min(13.0, 7.0 + 2.0 * len(short_continue_overdisplay_hits))
-            dimensions["context_fit"] = max(0.0, float(dimensions.get("context_fit", 86.0)) - 12.0)
-            dimensions["naturalness"] = max(0.0, float(dimensions.get("naturalness", 86.0)) - 8.0)
-            dimensions["spoken_chat_texture"] = max(0.0, float(dimensions.get("spoken_chat_texture", 86.0)) - 8.0)
-            dimensions["character_freshness"] = max(0.0, float(dimensions.get("character_freshness", 86.0)) - 10.0)
+            score -= min(24.0, 14.0 + 4.0 * len(short_continue_overdisplay_hits))
+            dimensions["context_fit"] = min(68.0, max(0.0, float(dimensions.get("context_fit", 86.0)) - 20.0))
+            dimensions["naturalness"] = min(74.0, max(0.0, float(dimensions.get("naturalness", 86.0)) - 12.0))
+            dimensions["spoken_chat_texture"] = min(72.0, max(0.0, float(dimensions.get("spoken_chat_texture", 86.0)) - 14.0))
+            dimensions["character_freshness"] = min(72.0, max(0.0, float(dimensions.get("character_freshness", 86.0)) - 16.0))
             reason_codes.append("SHORT_CONTINUE_MEMORY_OVERDISPLAY:" + ",".join(short_continue_overdisplay_hits[:4]))
+        short_continue_unprovided_tech_hits = _short_continue_unprovided_tech_detail_hits(
+            request, quality.normalized_text or candidate
+        )
+        if short_continue_unprovided_tech_hits:
+            score -= min(22.0, 12.0 + 4.0 * len(short_continue_unprovided_tech_hits))
+            dimensions["context_fit"] = min(66.0, max(0.0, float(dimensions.get("context_fit", 86.0)) - 22.0))
+            dimensions["scene_grounding"] = min(66.0, max(0.0, float(dimensions.get("scene_grounding", 86.0)) - 18.0))
+            dimensions["implied_fact_risk"] = min(66.0, float(dimensions.get("implied_fact_risk", 86.0)))
+            dimensions["naturalness"] = min(76.0, max(0.0, float(dimensions.get("naturalness", 86.0)) - 8.0))
+            reason_codes.append("SHORT_CONTINUE_UNPROVIDED_TECH_DETAIL:" + ",".join(short_continue_unprovided_tech_hits[:4]))
         if _boundary_repair_relevant(request):
             boundary_push_hits = [term for term in _BOUNDARY_PUSH_CLOSER_PHRASES if term in (quality.normalized_text or candidate)]
             boundary_self_abased_hits = [

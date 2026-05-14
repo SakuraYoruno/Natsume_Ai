@@ -96,6 +96,7 @@ _HIGH_EMOTION_SCENES = {
     "apology",
     "bad_mood",
     "boundary_hurt",
+    "relationship_memory_reassurance",
     "relationship_boundary",
     "give_up",
     "headache",
@@ -471,6 +472,7 @@ _SCENE_GROUNDING_ANCHORS: dict[str, tuple[str, ...]] = {
     "short_ack": ("接着", "继续", "听着", "在听", "多说", "说点", "就这一个", "就这一下"),
     "followup": ("因为", "就是", "觉得", "想", "然后", "继续", "上一句", "接着"),
     "recall_memory": ("记得", "记着", "没忘", "提过", "你的事", "心里"),
+    "relationship_memory_reassurance": ("记得", "记着", "没忘", "没乱忘", "别急", "先听", "按现在"),
     "style_repair": ("抓", "听出来", "重来", "换", "收", "慢", "客服"),
     "technical_help": ("先", "第一", "最上", "红", "报错", "看", "贴"),
 }

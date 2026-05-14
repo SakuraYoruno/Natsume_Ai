@@ -1342,6 +1342,38 @@ def build_galgame_text_contract(
             target_max_chars=48,
             notes=("技术场景先给一个可执行焦点，不要客服式索要信息。",),
         )
+    if (
+        scene in {"relationship_memory_reassurance", "relationship_boundary"}
+        and any(token in text for token in ("不记得", "忘了我", "忘记我", "记不记得", "是不是忘"))
+    ):
+        return _contract(
+            scene_id="relationship_memory_reassurance",
+            response_move="low_pressure_memory_reassure",
+            required_any=(("记得", "记着", "没忘", "没乱忘"),),
+            forbidden_surface=(
+                "见外",
+                "外人",
+                "熟人之间",
+                "熟到",
+                "多熟",
+                "不够熟",
+                "不管谁管",
+                "什么时候不管",
+                "管你信不信",
+                "管你记不记得",
+                "伤到我",
+                "该罚",
+                "欠揍",
+                "当然记得",
+                "记得清清楚楚",
+                "你的事我都记着",
+                "你的事我管",
+            ),
+            max_questions=0,
+            target_min_chars=8,
+            target_max_chars=34,
+            notes=("低压确认记得；不要拿熟不熟、管不管或受伤来证明关系。",),
+        )
     if scene == "relationship_boundary" or any(token in text for token in ("为什么要帮", "很熟吗", "我们很熟", "熟吗")):
         return _contract(
             scene_id="relationship_boundary",

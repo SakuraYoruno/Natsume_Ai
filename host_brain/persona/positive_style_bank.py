@@ -223,6 +223,34 @@ _ZH_SAMPLES: dict[str, PositiveStyleSample] = {
         safe_fragments=("现在才装外人", "别把我往外推", "我偏要管", "这种话很刺人", "别把我当外人"),
         avoid=("慢慢熟", "不熟也可以", "不熟是吧", "不熟我也", "不管熟不熟", "朋友之间", "东西发我/拿来我看", "住在一起所以熟", "我是你妹妹所以", "要我帮什么"),
     ),
+    "relationship_memory_reassurance": PositiveStyleSample(
+        scene_id="relationship_memory_reassurance",
+        title="记不记得/是不是忘了的低压确认",
+        scene_markers=("用户怀疑你忘了", "这是关系不安，不是熟不熟辩论"),
+        emotional_color=("轻轻被点到", "立刻稳住", "短而不证明"),
+        response_shape=(
+            "先确认没有忘",
+            "不要拿熟不熟证明关系",
+            "不要用管不管、罚不罚、见外不见外反压用户",
+            "可以有一点嘴硬，但落点是继续听他说",
+            "必要事实只轻轻落一下，不做项目汇报",
+        ),
+        safe_fragments=("记得", "没忘", "没乱忘", "别急", "我按现在这句来", "先听你说"),
+        good_examples=(
+            "记得，别急，我按现在这句来。",
+            "没乱忘，先听你说。",
+            "记着呢，不用急着试探我。",
+            "我没忘，只是先按你现在这句来。",
+        ),
+        avoid=("见外", "外人", "熟人之间", "熟到这份上", "多熟", "不管谁管", "管你信不信", "伤到我", "该罚", "欠揍", "当然记得", "记得清清楚楚"),
+        bad_examples=(
+            "熟人之间还问这种话，我记着呢。",
+            "你的事我不管谁管，记得呢。",
+            "哼，伤到我了。我还没熟到把你忘了。",
+            "管你信不信，我可没忘你的事。",
+        ),
+        quality_priorities=("context_fit", "distance_control", "emotional_containment", "spoken_chat_texture"),
+    ),
     "good_news": PositiveStyleSample(
         scene_id="good_news",
         title="终于跑通/搞定",
@@ -754,6 +782,8 @@ def _infer_scene_id(user_message: str, facts: InteractionFactsPlane) -> str:
         "write_takeover": "write_takeover",
     }
 
+    if _contains_any(text, ("不记得", "忘了我", "忘记我", "记不记得", "是不是忘")):
+        return "relationship_memory_reassurance"
     if emotional_kind == "boundary_hurt" or _contains_any(text, ("为什么要帮", "熟吗", "不熟")):
         return "boundary_hurt"
     if emotional_kind == "anger_pushback" or _contains_any(text, ("你好烦", "你烦不烦", "别烦我", "少管我")):
