@@ -20,8 +20,12 @@ _OFFLINE_FIXTURE_TOOL_FILES = {
     Path("tools/isolated_surface_harness.py"),
     Path("tools/retry_isolated_surface_failures.py"),
 }
+_SURFACE_RUNTIME_FACADE_FILES = {
+    Path("host_brain/persona/surface_main_chain.py"),
+}
 _BUILD_INPUT_CALL_RE = re.compile(r"\bbuild_isolated_surface_input\s*\(")
 _PACKET_CONSTRUCTOR_RE = re.compile(r"\bReplyControlPacket\s*\(")
+_SURFACE_RUNTIME_CONSTRUCTOR_RE = re.compile(r"\bSurfaceRuntime\s*\(")
 
 
 def _python_files(root: Path) -> list[Path]:
@@ -47,6 +51,12 @@ def test_surface_main_chain_direct_reply_control_packet_constructors_are_allowli
     direct_files = _direct_call_files(HOST_BRAIN, _PACKET_CONSTRUCTOR_RE)
 
     assert direct_files <= _LOW_LEVEL_SURFACE_FILES
+
+
+def test_surface_runtime_constructor_is_only_used_by_main_chain_facade() -> None:
+    direct_files = _direct_call_files(HOST_BRAIN, _SURFACE_RUNTIME_CONSTRUCTOR_RE)
+
+    assert direct_files <= _SURFACE_RUNTIME_FACADE_FILES
 
 
 def test_tools_direct_low_level_surface_builders_are_explicit_fixture_tools() -> None:
