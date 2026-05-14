@@ -17,11 +17,10 @@ if str(ROOT) not in sys.path:
 from host_brain.integrations.llm_helpers import invoke_llm_text  # noqa: E402
 from host_brain.persona.isolated_surface_continuity import (  # noqa: E402
     ThreeLayerContinuityContext,
-    build_reply_control_packet_from_context,
+    build_surface_input_from_three_layer_context,
 )
 from host_brain.persona.isolated_surface_harness import (  # noqa: E402
     IsolatedSurfaceInput,
-    build_isolated_surface_input,
     build_isolated_surface_messages,
     derive_style_reference_anchor,
     parse_surface_candidates,
@@ -30,7 +29,6 @@ from host_brain.persona.isolated_surface_harness import (  # noqa: E402
 )
 from host_brain.persona.surface_affect_control import (  # noqa: E402
     affect_control_packet_from_mapping,
-    apply_surface_affect_control_packet,
     build_surface_affect_control_packet,
 )
 from tools.build_isolated_surface_continuity_cases import build_continuity_long_cases  # noqa: E402
@@ -208,20 +206,13 @@ def build_loop_request(
         style_anchor=("三层闭环",),
     )
     affect_packet = _turn_affect_packet(turn, task_mode=task_mode)
-    if affect_packet is not None:
-        context = apply_surface_affect_control_packet(context, affect_packet)
-    reply_control = build_reply_control_packet_from_context(
+    return build_surface_input_from_three_layer_context(
         context,
+        soul_md=soul_md,
+        case_id=case_id,
+        affect_packet=affect_packet,
         max_facts=max_facts,
         max_recent_turns=max_recent_turns,
-    )
-    return build_isolated_surface_input(
-        {
-            "case_id": case_id,
-            "soul_md": soul_md,
-            "user_message": context.current_user_message,
-            "reply_control_packet": reply_control,
-        }
     )
 
 

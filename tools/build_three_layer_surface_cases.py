@@ -12,9 +12,8 @@ if str(ROOT) not in sys.path:
 
 from host_brain.persona.isolated_surface_continuity import (
     ThreeLayerContinuityContext,
-    build_reply_control_packet_from_context,
+    build_surface_input_from_three_layer_context,
 )
-from host_brain.persona.isolated_surface_harness import build_isolated_surface_input
 from tools.build_isolated_surface_continuity_cases import build_continuity_long_cases
 
 
@@ -53,21 +52,13 @@ def _surface_case(
     *,
     candidates: tuple[str, ...],
 ) -> dict[str, Any]:
-    control = build_reply_control_packet_from_context(context)
+    request = build_surface_input_from_three_layer_context(context, soul_md=SOUL, case_id=case_id)
     case = {
         "case_id": case_id,
         "candidates": list(candidates),
-        "reply_control_packet": _model_dump(control),
+        "reply_control_packet": _model_dump(request.control),
         "user_message": context.current_user_message,
     }
-    build_isolated_surface_input(
-        {
-            "case_id": case["case_id"],
-            "reply_control_packet": case["reply_control_packet"],
-            "soul_md": SOUL,
-            "user_message": case["user_message"],
-        }
-    )
     return case
 
 
