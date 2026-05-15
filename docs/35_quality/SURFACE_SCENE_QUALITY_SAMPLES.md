@@ -28,7 +28,8 @@ Samples come from four layers:
    ```powershell
    python tools\surface_scene_quality_samples.py `
      --details artifacts\surface_memory_ab\live_quality_pack_latest\details.json `
-     --out artifacts\surface_scene_quality\harvested_samples.json
+     --out artifacts\surface_scene_quality\harvested_samples.json `
+     --review-template-out artifacts\surface_scene_quality\review_template.json
    ```
 
 3. Review `harvested.good_examples` and `harvested.bad_examples` by `scene_id`.
@@ -61,6 +62,19 @@ Reviewed files use this shape:
     }
   ]
 }
+```
+
+The generated review template has `candidate_good_examples` and
+`candidate_bad_examples` for reference. These fields are ignored by merge.
+Only text manually copied into `good_examples`, `bad_examples`, or
+`should_not_surface` is promoted.
+
+Validate reviewed files before merging:
+
+```powershell
+python tools\surface_scene_quality_samples.py `
+  --reviewed artifacts\surface_scene_quality\reviewed_samples.json `
+  --validate-reviewed
 ```
 
 Merge reviewed samples into a candidate pack:

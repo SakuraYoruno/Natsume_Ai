@@ -31,6 +31,7 @@ BAD_REASON_PREFIXES = (
     "MISPLACED_SUPPORT_TEMPLATE",
     "MISPLACED_EMOTIONAL_CONTAINMENT",
 )
+REVIEWED_SAMPLE_KINDS = {"surface_scene_quality_reviewed", "surface_scene_quality_review_template"}
 
 
 @dataclass
@@ -77,6 +78,14 @@ def _bad_reason_hit(reason_codes: Sequence[str], observation_codes: Sequence[str
 def _valid_surface_text(text: str) -> bool:
     text = _clean_text(text)
     return bool(text and 1 <= len(text) <= 80 and not _source_leak(text))
+
+
+def _scene_ids_from_pack(pack_payload: Mapping[str, Any]) -> set[str]:
+    return {
+        _clean_text(scene.get("scene_id"))
+        for scene in list(pack_payload.get("scenes") or ())
+        if isinstance(scene, Mapping) and _clean_text(scene.get("scene_id"))
+    }
 
 
 def _load_details(path: Path) -> list[Mapping[str, Any]]:
@@ -343,14 +352,113 @@ def _reviewed_example_texts(value: Any) -> tuple[str, ...]:
     return _clean_list(texts)
 
 
+def _reviewed_scene_texts(scene: Mapping[str, Any], key: str) -> tuple[str, ...]:
+    return _reviewed_example_texts(scene.get(key))
+
+
 def _append_unique(base: Sequence[Any], additions: Sequence[Any]) -> list[str]:
     return list(_clean_list([*list(base or ()), *list(additions or ())]))
+
+
+def validate_reviewed_surface_scene_samples(
+    reviewed_payload: Mapping[str, Any],
+    *,
+    known_scene_ids: set[str] | None = None,
+    allow_template: bool = True,
+) -> list[str]:
+    errors: list[str] = []
+    if not isinstance(reviewed_payload, Mapping):
+        return ["reviewed payload must be a JSON object"]
+    sample_kind = _clean_text(reviewed_payload.get("sample_kind"))
+    allowed_kinds = REVIEWED_SAMPLE_KINDS if allow_template else {"surface_scene_quality_reviewed"}
+    if sample_kind not in allowed_kinds:
+        errors.append(f"sample_kind must be one of {sorted(allowed_kinds)}")
+    scenes = reviewed_payload.get("scenes") or reviewed_payload.get("reviewed")
+    if not isinstance(scenes, list):
+        return [*errors, "scenes must be a list"]
+    for index, raw_scene in enumerate(scenes):
+        if not isinstance(raw_scene, Mapping):
+            errors.append(f"scenes[{index}] must be an object")
+            continue
+        scene_id = _clean_text(raw_scene.get("scene_id"))
+        label = f"scenes[{index}]"
+        if not scene_id:
+            errors.append(f"{label}.scene_id is required")
+            continue
+        if known_scene_ids is not None and scene_id not in known_scene_ids:
+            missing = [
+                key
+                for key in ("title", "user_markers", "required_move", "scoring_focus")
+                if not raw_scene.get(key)
+            ]
+            if missing:
+                errors.append(f"{label} new scene {scene_id!r} missing fields: {', '.join(missing)}")
+        approved_good = _reviewed_scene_texts(raw_scene, "good_examples")
+        approved_bad = _reviewed_scene_texts(raw_scene, "bad_examples")
+        approved_should_not = _reviewed_scene_texts(raw_scene, "should_not_surface")
+        for key, texts in (
+            ("good_examples", approved_good),
+            ("bad_examples", approved_bad),
+            ("should_not_surface", approved_should_not),
+        ):
+            raw_value = raw_scene.get(key)
+            if raw_value is not None and not isinstance(raw_value, list):
+                errors.append(f"{label}.{key} must be a list")
+            for text in texts:
+                if not _valid_surface_text(text):
+                    errors.append(f"{label}.{key} contains invalid or source-leaking text: {text!r}")
+        overlap = set(approved_good) & set(approved_bad)
+        if overlap:
+            errors.append(f"{label} has examples in both good and bad: {sorted(overlap)}")
+    return errors
+
+
+def build_reviewed_surface_scene_template(
+    harvest_report: Mapping[str, Any],
+    *,
+    max_candidates: int = 4,
+) -> dict[str, Any]:
+    scenes: list[dict[str, Any]] = []
+    for raw_scene in list(harvest_report.get("harvested") or ()):
+        if not isinstance(raw_scene, Mapping):
+            continue
+        good_candidates = list(raw_scene.get("good_examples") or ())[: max(0, int(max_candidates or 0))]
+        bad_candidates = list(raw_scene.get("bad_examples") or ())[: max(0, int(max_candidates or 0))]
+        scenes.append(
+            {
+                "scene_id": _clean_text(raw_scene.get("scene_id")),
+                "case_ids": list(raw_scene.get("case_ids") or ()),
+                "good_examples": [],
+                "bad_examples": [],
+                "should_not_surface": [],
+                "candidate_good_examples": good_candidates,
+                "candidate_bad_examples": bad_candidates,
+                "source_note": "Move only approved candidate text into good_examples/bad_examples/should_not_surface.",
+            }
+        )
+    return {
+        "schema_version": 1,
+        "sample_kind": "surface_scene_quality_review_template",
+        "instructions": [
+            "Review candidate_* examples by scene_id.",
+            "Copy only approved text into good_examples, bad_examples, or should_not_surface.",
+            "candidate_* fields are ignored by merge and never auto-promoted.",
+        ],
+        "scenes": scenes,
+    }
 
 
 def merge_reviewed_surface_scene_samples(
     pack_payload: Mapping[str, Any],
     reviewed_payload: Mapping[str, Any],
 ) -> dict[str, Any]:
+    validation_errors = validate_reviewed_surface_scene_samples(
+        reviewed_payload,
+        known_scene_ids=_scene_ids_from_pack(pack_payload),
+        allow_template=False,
+    )
+    if validation_errors:
+        raise ValueError("invalid reviewed surface scene samples: " + "; ".join(validation_errors))
     pack = dict(pack_payload or {})
     scenes = [dict(scene) for scene in list(pack.get("scenes") or ()) if isinstance(scene, Mapping)]
     by_scene = {
@@ -417,6 +525,29 @@ def merge_reviewed_surface_scene_sample_files(
     return merged
 
 
+def validate_reviewed_surface_scene_sample_files(
+    *,
+    reviewed_paths: Sequence[Path],
+    base_pack: Mapping[str, Any] | None = None,
+    allow_template: bool = True,
+) -> list[str]:
+    known_scene_ids = _scene_ids_from_pack(base_pack or surface_scene_quality_pack_payload())
+    errors: list[str] = []
+    for path in reviewed_paths:
+        try:
+            payload = _load_json_mapping(path)
+        except (OSError, json.JSONDecodeError) as exc:
+            errors.append(f"{path}: cannot read JSON: {exc}")
+            continue
+        for error in validate_reviewed_surface_scene_samples(
+            payload,
+            known_scene_ids=known_scene_ids,
+            allow_template=allow_template,
+        ):
+            errors.append(f"{path}: {error}")
+    return errors
+
+
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Harvest surface scene quality samples from AB details.")
     parser.add_argument("--details", action="append", default=[])
@@ -425,7 +556,9 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-bad-score", type=float, default=70.0)
     parser.add_argument("--max-per-scene", type=int, default=8)
     parser.add_argument("--no-current-pack", action="store_true")
+    parser.add_argument("--review-template-out", default="")
     parser.add_argument("--reviewed", action="append", default=[])
+    parser.add_argument("--validate-reviewed", action="store_true")
     parser.add_argument("--merge-out", default="")
     return parser
 
@@ -446,7 +579,23 @@ def main() -> None:
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     result = {"output": str(out_path), "scene_count": len(payload["harvested"])}
+    if args.review_template_out:
+        template = build_reviewed_surface_scene_template(payload, max_candidates=int(args.max_per_scene))
+        template_out = Path(args.review_template_out)
+        template_out.parent.mkdir(parents=True, exist_ok=True)
+        template_out.write_text(json.dumps(template, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        result["review_template_output"] = str(template_out)
+        result["review_template_scene_count"] = len(template.get("scenes") or [])
     reviewed_paths = [Path(item) for item in args.reviewed]
+    if args.validate_reviewed:
+        validation_errors = validate_reviewed_surface_scene_sample_files(
+            reviewed_paths=reviewed_paths,
+            allow_template=True,
+        )
+        result["reviewed_validation_errors"] = validation_errors
+        result["reviewed_valid"] = not validation_errors
+        if validation_errors:
+            raise SystemExit(json.dumps(result, ensure_ascii=False))
     if args.merge_out:
         merged_pack = merge_reviewed_surface_scene_sample_files(reviewed_paths=reviewed_paths)
         merge_out = Path(args.merge_out)
