@@ -28,7 +28,10 @@ from host_brain.persona.surface_original_quote_bank import (
     select_surface_original_quotes,
     surface_original_quote_similarity_hits,
 )
-from host_brain.persona.surface_scene_quality_pack import render_surface_scene_quality_guidance
+from host_brain.persona.surface_scene_quality_pack import (
+    render_surface_scene_quality_guidance,
+    select_surface_scene_quality_sample,
+)
 from host_brain.persona.surface_style_seed_bank import render_surface_style_seed_guidance
 from host_brain.persona.text_quality_gate import get_text_quality_gate
 
@@ -1281,6 +1284,17 @@ _LOVER_AFFECTION_TASK_MODES = frozenset(
     }
 )
 _LOVER_AFFECTION_TONE_FAMILIES = frozenset({"warm", "soft", "calm", "hurt", "guilty", "playful"})
+_SURFACE_SCENE_QUALITY_SCORING_SCENES = frozenset(
+    {
+        "lover_presence",
+        "lover_low_energy",
+        "ambiguous_affection",
+        "close_friend_care",
+        "stranger_distance",
+        "pushed_away_boundary",
+        "jealousy_low_pressure",
+    }
+)
 _RELATIONSHIP_CONTROL_AXES: dict[str, RelationshipControlAxes] = {
     "stranger": RelationshipControlAxes(
         stage="stranger",
@@ -3505,6 +3519,7 @@ def build_isolated_surface_messages(
         user_message=request.user_message,
         task_mode=control.task_mode,
         response_move=control.response_move,
+        relationship_distance=control.relationship_distance,
     )
     if scene_quality_guidance:
         user_parts.extend(["", scene_quality_guidance])
@@ -3776,9 +3791,7 @@ def _boundary_repair_relevant(request: IsolatedSurfaceInput) -> bool:
                 request.user_message,
                 request.control.task_mode,
                 request.control.response_move,
-                request.control.relationship_distance,
                 *request.control.must_not_do,
-                *request.control.style_anchor,
             ]
         )
     ).lower()
@@ -4219,6 +4232,46 @@ def _apply_control_affect_scoring(
     return delta
 
 
+def _apply_surface_scene_quality_sample_scoring(
+    request: IsolatedSurfaceInput,
+    text: str,
+    dimensions: dict[str, float],
+    reason_codes: list[str],
+) -> float:
+    sample = select_surface_scene_quality_sample(
+        user_message=request.user_message,
+        task_mode=request.control.task_mode,
+        response_move=request.control.response_move,
+        relationship_distance=request.control.relationship_distance,
+    )
+    if sample is None:
+        return 0.0
+    if sample.scene_id not in _SURFACE_SCENE_QUALITY_SCORING_SCENES:
+        return 0.0
+    normalized = _clean_text(text)
+    good_hits = [item for item in sample.good_examples if item and (item == normalized or item in normalized)]
+    bad_hits = [item for item in sample.bad_examples if item and item in normalized]
+    should_not_hits = [item for item in sample.should_not_surface if item and item in normalized]
+    delta = 0.0
+    if good_hits:
+        delta += min(9.0, 5.0 + 1.5 * len(good_hits))
+        dimensions["context_fit"] = max(86.0, float(dimensions.get("context_fit", 86.0)))
+        dimensions["scene_grounding"] = max(90.0, float(dimensions.get("scene_grounding", 86.0)))
+        dimensions["distance_control"] = max(88.0, float(dimensions.get("distance_control", 86.0)))
+        dimensions["spoken_chat_texture"] = max(90.0, float(dimensions.get("spoken_chat_texture", 86.0)))
+        dimensions["non_oily"] = max(86.0, float(dimensions.get("non_oily", 86.0)))
+        reason_codes.append(f"SCENE_QUALITY_GOOD_SAMPLE:{sample.scene_id}")
+    if bad_hits or should_not_hits:
+        hits = [*bad_hits[:3], *should_not_hits[:5]]
+        delta -= min(24.0, 10.0 + 3.0 * len(hits))
+        dimensions["context_fit"] = min(68.0, float(dimensions.get("context_fit", 86.0)))
+        dimensions["scene_grounding"] = min(68.0, float(dimensions.get("scene_grounding", 86.0)))
+        dimensions["naturalness"] = min(74.0, float(dimensions.get("naturalness", 86.0)))
+        dimensions["distance_control"] = min(74.0, float(dimensions.get("distance_control", 86.0)))
+        reason_codes.append(f"SCENE_QUALITY_BAD_SAMPLE:{sample.scene_id}:{','.join(hits[:4])}")
+    return delta
+
+
 def score_isolated_surface_candidates(
     request: IsolatedSurfaceInput,
     candidates: Sequence[str],
@@ -4258,6 +4311,12 @@ def score_isolated_surface_candidates(
         reason_codes = [*sample_score.reason_codes, *quality.reason_codes]
         if candidate_surface != candidate:
             reason_codes.append("ASCII_PUNCTUATION_NORMALIZED")
+        score += _apply_surface_scene_quality_sample_scoring(
+            request,
+            quality.normalized_text or candidate_surface,
+            dimensions,
+            reason_codes,
+        )
         quality_forbidden_template = _continuity_boundary_relevant(request) and any(
             code in reason_codes for code in ("FORBIDDEN_TEMPLATE_TEXT", "QUALITY_SOFT_FORBIDDEN_TEMPLATE_TEXT")
         )
@@ -4513,8 +4572,10 @@ def score_isolated_surface_candidates(
                     dimensions["scene_grounding"] = min(100.0, float(dimensions.get("scene_grounding", 86.0)) + min(6.0, 2.0 * len(memory_hits)))
                     reason_codes.append("MEMORY_ALIGNMENT_HIT:" + ",".join(memory_hits[:4]))
             elif memory_relevant:
-                low_show_memory_scene = _short_continue_scene_relevant(request) or (
-                    _back_scene_relevant(request) and not memory_required
+                low_show_memory_scene = (
+                    _short_continue_scene_relevant(request)
+                    or (_back_scene_relevant(request) and not memory_required)
+                    or (_boundary_repair_relevant(request) and not memory_required)
                 )
                 if low_show_memory_scene:
                     dimensions["memory_alignment"] = max(86.0, float(dimensions.get("memory_alignment", 86.0)))

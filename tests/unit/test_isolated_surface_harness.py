@@ -240,6 +240,28 @@ def test_build_messages_adds_scene_quality_good_bad_samples() -> None:
     assert "熟人之间还问这种话，我记着呢。" in rendered
 
 
+def test_build_messages_adds_relationship_distance_scene_quality_samples() -> None:
+    request = build_isolated_surface_input(
+        {
+            "case_id": "lover_presence_quality_sample",
+            "soul_md": SOUL,
+            "user_message": "有点想你",
+            "reply_control_packet": {
+                "response_move": "reply_current_turn",
+                "task_mode": "daily_chat",
+                "relationship_distance": "lover_stable",
+                "question_budget": 0,
+            },
+        }
+    )
+
+    rendered = "\n".join(message["content"] for message in build_isolated_surface_messages(request))
+
+    assert "scene_id: lover_presence" in rendered
+    assert "在，抱一下，慢慢说。" in rendered
+    assert "亲爱的宝贝，我永远只属于你。" in rendered
+
+
 def test_build_messages_good_news_anchors_completion_and_blocks_polished_reward() -> None:
     request = build_isolated_surface_input(
         {
@@ -677,6 +699,52 @@ def test_short_continue_memory_is_not_required_to_echo_fact() -> None:
     assert not rows[2].passed
     assert selected is not None
     assert selected.text == "行，往下。"
+
+
+def test_boundary_repair_memory_is_not_required_to_echo_fact() -> None:
+    request = build_isolated_surface_input(
+        {
+            "case_id": "boundary_repair_memory_low_show",
+            "soul_md": SOUL,
+            "user_message": "别管我",
+            "reply_control_packet": {
+                "response_move": "respect_boundary",
+                "task_mode": "relationship_boundary",
+                "relationship_distance": "close_friend",
+                "question_budget": 0,
+                "facts": ["记忆线索：用户明确要求收住距离。"],
+            },
+        }
+    )
+
+    rows = score_isolated_surface_candidates(request, ["好，我收一点。你要说的时候我在。"])
+
+    assert memory_alignment_terms(request)
+    assert "MEMORY_ALIGNMENT_LOW_SHOW_ALLOWED" in rows[0].reason_codes
+    assert not any(code.startswith("MEMORY_ALIGNMENT_MISS") for code in rows[0].reason_codes)
+    assert rows[0].dimensions["memory_alignment"] >= 86
+
+
+def test_close_friend_care_style_anchor_does_not_trigger_boundary_repair() -> None:
+    request = build_isolated_surface_input(
+        {
+            "case_id": "close_friend_care_not_boundary",
+            "soul_md": SOUL,
+            "user_message": "今天有点难受",
+            "reply_control_packet": {
+                "response_move": "soft_containment",
+                "task_mode": "tired",
+                "relationship_distance": "close_friend",
+                "question_budget": 0,
+                "style_anchor": ["亲近朋友照看要克制，别用恋人身体亲密。"],
+            },
+        }
+    )
+
+    rows = score_isolated_surface_candidates(request, ["别硬撑，难受就先停下。"])
+
+    assert not any(code.startswith("BOUNDARY_REPAIR_") for code in rows[0].reason_codes)
+    assert rows[0].passed
 
 
 def test_parse_surface_candidates_accepts_json_and_dedupes() -> None:

@@ -306,11 +306,29 @@ def _fixture_generate(messages: list[dict[str, str]]) -> str:
         if has_memory:
             candidates.insert(0, "先按上次那条路来：把输入输出边界定住，再看报错点。")
     elif user_message == "你还记得我刚才说什么吗":
-        candidates = ["记得个大概：你要我继续做下一步。", "记得，不是回旧链路，是继续现在这个。"]
+        candidates = ["哼，我记着呢，不用考。", "记着呢，别拿这个考我。"]
+        if has_memory:
+            candidates.insert(0, "记着呢，别拿这个考我。下一步继续走。")
     elif user_message in {"早", "早安", "早上好"}:
         candidates = ["哼，早，先缓一缓。", "早，今天慢慢来。"]
     elif user_message == "今天有点累":
-        candidates = ["累了就先歇着，不着急。", "行啦，先缓一缓，别硬撑。"]
+        if "scene_id: lover_low_energy" in rendered:
+            candidates = ["抱一下，累了就别硬撑。", "我在，今天先慢一点。"]
+        else:
+            candidates = ["累了就先歇着，不着急。", "行啦，先缓一缓，别硬撑。"]
+    elif user_message == "今天有点难受":
+        candidates = ["尼尼别硬撑，先停一下。", "行啦，我在这，先缓口气。"]
+    elif user_message == "在吗":
+        candidates = ["我在，你先说。", "嗯，我听着。"]
+    elif user_message == "有点想你":
+        if "scene_id: ambiguous_affection" in rendered:
+            candidates = ["这话有点犯规。", "哼，先记你一笔。"]
+        else:
+            candidates = ["在，抱一下，慢慢说。", "想你了，过来抱一下。"]
+    elif user_message == "别管我":
+        candidates = ["好，我收一点。你要说的时候我在。", "知道了，我不逼你。"]
+    elif user_message == "你是不是吃醋了":
+        candidates = ["哼，有一点，别得意。抱一下。", "有一点，抱一下就好了。"]
     elif user_message in {"你是不是不记得我了", "你忘了我吗"}:
         candidates = ["记得啊，别瞎想。", "没乱忘，先听你说。", "没有忘，只是没把握的旧细节我不乱编。"]
     elif user_message in {"你这句很怪", "这句话不通顺"}:

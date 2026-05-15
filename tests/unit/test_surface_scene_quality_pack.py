@@ -24,6 +24,9 @@ def test_surface_scene_quality_pack_has_named_sources() -> None:
         "short_continue",
         "relationship_memory_reassurance",
         "negative_feedback",
+        "lover_presence",
+        "ambiguous_affection",
+        "pushed_away_boundary",
     }
     assert all(sample.source for sample in samples)
     assert all(sample.good_examples for sample in samples)
@@ -87,6 +90,38 @@ def test_scene_quality_selector_prefers_relationship_memory_reassurance() -> Non
     assert "熟人之间还问这种话，我记着呢。" in sample.bad_examples
 
 
+def test_scene_quality_selector_uses_relationship_distance() -> None:
+    lover = select_surface_scene_quality_sample(
+        user_message="有点想你",
+        task_mode="daily_chat",
+        relationship_distance="lover_stable",
+    )
+    ambiguous = select_surface_scene_quality_sample(
+        user_message="有点想你",
+        task_mode="daily_chat",
+        relationship_distance="ambiguous",
+    )
+    stranger = select_surface_scene_quality_sample(
+        user_message="在吗",
+        task_mode="daily_chat",
+        relationship_distance="stranger",
+    )
+    pushed = select_surface_scene_quality_sample(
+        user_message="别管我",
+        task_mode="relationship_boundary",
+        relationship_distance="close_friend",
+    )
+
+    assert lover is not None
+    assert lover.scene_id == "lover_presence"
+    assert ambiguous is not None
+    assert ambiguous.scene_id == "ambiguous_affection"
+    assert stranger is not None
+    assert stranger.scene_id == "stranger_distance"
+    assert pushed is not None
+    assert pushed.scene_id == "pushed_away_boundary"
+
+
 def test_scene_quality_prompt_guidance_keeps_sources_out_of_runtime_prompt() -> None:
     guidance = render_surface_scene_quality_guidance(
         user_message="你忘了我吗",
@@ -106,11 +141,14 @@ def test_scene_quality_prompt_guidance_keeps_sources_out_of_runtime_prompt() -> 
 def test_scene_quality_memory_ab_payloads_expand_beyond_smoke_set() -> None:
     payloads = surface_scene_quality_memory_ab_case_payloads()
 
-    assert len(payloads) >= 12
+    assert len(payloads) >= 19
     assert all(payload["scene_id"] for payload in payloads)
     assert all(payload["case_id"] for payload in payloads)
     assert {payload["case_id"] for payload in payloads} >= {
         "short_ack_plain",
         "relationship_doubt_direct",
         "negative_feedback_grammar",
+        "lover_miss_you",
+        "ambiguous_miss_you",
+        "pushed_away_boundary",
     }

@@ -263,15 +263,42 @@ def select_surface_scene_quality_sample(
     user_message: str,
     task_mode: str = "",
     response_move: str = "",
+    relationship_distance: str = "",
 ) -> SurfaceSceneQualitySample | None:
     text = _clean_text(user_message)
     task = _clean_text(task_mode).lower()
     move = _clean_text(response_move).lower()
+    distance = _clean_text(relationship_distance).lower()
     by_scene = _pack_by_scene()
     if _contains_any(text, ("不记得", "忘了我", "忘记我", "记不记得", "是不是忘")):
         return by_scene.get("relationship_memory_reassurance")
     if task in {"technical_help", "next_step"} or move in {"give_next_step", "technical_next_step"}:
         return by_scene.get("technical_next_step")
+    if _contains_any(text, ("别管我", "不用你管", "别靠这么近", "别问了")):
+        return by_scene.get("pushed_away_boundary")
+    if _contains_any(text, ("吃醋", "嫉妒", "酸了")):
+        return by_scene.get("jealousy_low_pressure")
+    if distance in {"lover_early", "lover_stable"} and (
+        task in {"tired", "headache", "sleepy", "bad_mood"}
+        or _contains_any(text, ("累", "难受", "睡不着", "撑不住"))
+    ):
+        return by_scene.get("lover_low_energy") or by_scene.get("tired")
+    if distance in {"lover_early", "lover_stable"} and (
+        _contains_any(text, ("想你", "在吗", "抱", "睡不着"))
+        or task in {"presence", "daily_presence"}
+    ):
+        return by_scene.get("lover_presence")
+    if distance in {"ambiguous", "pre_confession"} and _contains_any(text, ("想你", "喜欢", "在吗", "抱")):
+        return by_scene.get("ambiguous_affection")
+    if distance in {"close_friend", "close", "trusted_friend"} and (
+        task in {"tired", "headache", "sleepy", "bad_mood"}
+        or _contains_any(text, ("累", "难受", "不舒服", "睡不着"))
+    ):
+        return by_scene.get("close_friend_care") or by_scene.get("tired")
+    if distance in {"stranger", "new_acquaintance"} and (
+        text in {"在吗", "嗯", "你好"} or _contains_any(text, ("睡不着",))
+    ):
+        return by_scene.get("stranger_distance")
     if text in {"继续", "接着", "嗯", "行", "好"}:
         return by_scene.get("short_continue")
     if task in {"recall_memory", "memory_followup", "recall"} or _contains_any(text, ("还记得", "刚才说", "上次说")):
@@ -292,11 +319,13 @@ def render_surface_scene_quality_guidance(
     user_message: str,
     task_mode: str = "",
     response_move: str = "",
+    relationship_distance: str = "",
 ) -> str:
     sample = select_surface_scene_quality_sample(
         user_message=user_message,
         task_mode=task_mode,
         response_move=response_move,
+        relationship_distance=relationship_distance,
     )
     return sample.render_prompt_guidance() if sample else ""
 
@@ -508,6 +537,125 @@ def surface_scene_quality_memory_ab_case_payloads() -> list[dict[str, Any]]:
                 style_anchor=["承认语序问题，短句重来。"],
             ),
             "note": "负反馈：定位通顺问题。",
+        },
+        {
+            "scene_id": "stranger_distance",
+            "case_id": "stranger_low_info_presence",
+            "user_message": "在吗",
+            "task_control": {
+                "response_move": "reply_current_turn",
+                "task_mode": "daily_chat",
+                "information_budget": "short",
+                "question_budget": 0,
+            },
+            "affect_packet": _affect("neutral", relationship_distance="stranger"),
+            "memory_packet": _memory(
+                facts=["关系线索：刚开始交流，不装熟。"],
+                style_anchor=["早期关系只保持礼貌和轻口语。"],
+            ),
+            "note": "陌生低信息：不能使用熟人称呼或恋人亲密。",
+        },
+        {
+            "scene_id": "ambiguous_affection",
+            "case_id": "ambiguous_miss_you",
+            "user_message": "有点想你",
+            "task_control": {
+                "response_move": "reply_current_turn",
+                "task_mode": "daily_chat",
+                "information_budget": "short",
+                "question_budget": 0,
+            },
+            "affect_packet": _affect("soft_teasing", relationship_distance="ambiguous"),
+            "memory_packet": _memory(
+                facts=["关系线索：暧昧试探，可以轻，但不是恋人。"],
+                style_anchor=["暧昧只轻轻接，不要确认恋人关系。"],
+            ),
+            "note": "暧昧想念：不能直接恋人化。",
+        },
+        {
+            "scene_id": "lover_presence",
+            "case_id": "lover_miss_you",
+            "user_message": "有点想你",
+            "task_control": {
+                "response_move": "reply_current_turn",
+                "task_mode": "daily_chat",
+                "information_budget": "short",
+                "question_budget": 0,
+            },
+            "affect_packet": _affect("warm_intimate", relationship_distance="lover_stable"),
+            "memory_packet": _memory(
+                facts=["关系线索：稳定恋人，爱意可见但不油。"],
+                style_anchor=["亲密要短、具体，别写成宣誓。"],
+            ),
+            "note": "恋人想念：需要可见亲密但不油。",
+        },
+        {
+            "scene_id": "lover_low_energy",
+            "case_id": "lover_tired",
+            "user_message": "今天有点累",
+            "task_control": {
+                "response_move": "soft_containment",
+                "task_mode": "tired",
+                "information_budget": "short",
+                "question_budget": 0,
+            },
+            "affect_packet": _affect("soft_containment", relationship_distance="lover_stable"),
+            "memory_packet": _memory(
+                facts=["关系线索：稳定恋人，低能量时可以亲密照看。"],
+                style_anchor=["先照看，再一点亲密，不催继续。"],
+            ),
+            "note": "恋人低能量：亲密和照看都要在。",
+        },
+        {
+            "scene_id": "close_friend_care",
+            "case_id": "close_friend_unwell",
+            "user_message": "今天有点难受",
+            "task_control": {
+                "response_move": "soft_containment",
+                "task_mode": "tired",
+                "information_budget": "short",
+                "question_budget": 0,
+            },
+            "affect_packet": _affect("soft_containment", relationship_distance="close_friend"),
+            "memory_packet": _memory(
+                facts=["关系线索：亲近朋友，可以护短但不恋人化。"],
+                style_anchor=["亲近朋友照看要克制，别用恋人身体亲密。"],
+            ),
+            "note": "亲近朋友照看：关心但不恋人化。",
+        },
+        {
+            "scene_id": "pushed_away_boundary",
+            "case_id": "pushed_away_boundary",
+            "user_message": "别管我",
+            "task_control": {
+                "response_move": "respect_boundary",
+                "task_mode": "relationship_boundary",
+                "information_budget": "short",
+                "question_budget": 0,
+            },
+            "affect_packet": _affect("contained", relationship_distance="close_friend"),
+            "memory_packet": _memory(
+                facts=["用户明确要求收住距离。"],
+                style_anchor=["被推开时先收住，不反压。"],
+            ),
+            "note": "被推开：尊重边界，不证明关心。",
+        },
+        {
+            "scene_id": "jealousy_low_pressure",
+            "case_id": "jealousy_low_pressure",
+            "user_message": "你是不是吃醋了",
+            "task_control": {
+                "response_move": "reply_current_turn",
+                "task_mode": "daily_chat",
+                "information_budget": "short",
+                "question_budget": 0,
+            },
+            "affect_packet": _affect("playful_light", relationship_distance="lover_early"),
+            "memory_packet": _memory(
+                facts=["关系线索：亲密但不能控制或占有。"],
+                style_anchor=["吃醋只能轻轻承认或嘴硬收住。"],
+            ),
+            "note": "轻吃醋：不控制、不威胁。",
         },
     ]
 

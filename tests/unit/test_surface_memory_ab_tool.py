@@ -64,6 +64,7 @@ def test_surface_memory_ab_fixture_outputs_detailed_text(tmp_path) -> None:
     assert summary["case_set"] == "quality_pack"
     assert summary["case_count"] == 3
     assert summary["variant_count"] == 6
+    assert summary["pass_count"] == 6
     assert summary["source_ref_leak_count"] == 0
     assert (tmp_path / "summary.json").exists()
     assert (tmp_path / "details.jsonl").exists()
