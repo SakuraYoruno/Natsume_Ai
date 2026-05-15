@@ -258,7 +258,8 @@ def test_build_messages_adds_relationship_distance_scene_quality_samples() -> No
     rendered = "\n".join(message["content"] for message in build_isolated_surface_messages(request))
 
     assert "scene_id: lover_presence" in rendered
-    assert "在，抱一下，慢慢说。" in rendered
+    assert "good_examples_note: 只参考语气、节奏和边界，不要原样照抄。" in rendered
+    assert "在呢，先给你抱一下。" in rendered
     assert "亲爱的宝贝，我永远只属于你。" in rendered
 
 
@@ -701,6 +702,31 @@ def test_short_continue_memory_is_not_required_to_echo_fact() -> None:
     assert selected.text == "行，往下。"
 
 
+def test_short_continue_rejects_processy_containment_wording() -> None:
+    request = build_isolated_surface_input(
+        {
+            "case_id": "short_continue_processy_containment",
+            "soul_md": SOUL,
+            "user_message": "继续",
+            "reply_control_packet": {
+                "response_move": "continue_current_task",
+                "task_mode": "daily_chat",
+                "relationship_distance": "familiar",
+                "question_budget": 0,
+            },
+        }
+    )
+
+    rows = score_isolated_surface_candidates(request, ["哼，继续，我还接得住。", "嗯，接着来。"])
+    selected = select_best_isolated_candidate(rows)
+    processy = next(row for row in rows if "接得住" in row.text)
+
+    assert "MISPLACED_EMOTIONAL_CONTAINMENT" in processy.reason_codes
+    assert not processy.passed
+    assert selected is not None
+    assert selected.text == "嗯，接着来。"
+
+
 def test_boundary_repair_memory_is_not_required_to_echo_fact() -> None:
     request = build_isolated_surface_input(
         {
@@ -717,12 +743,87 @@ def test_boundary_repair_memory_is_not_required_to_echo_fact() -> None:
         }
     )
 
-    rows = score_isolated_surface_candidates(request, ["好，我收一点。你要说的时候我在。"])
+    rows = score_isolated_surface_candidates(request, ["嗯，先不烦你。"])
 
     assert memory_alignment_terms(request)
     assert "MEMORY_ALIGNMENT_LOW_SHOW_ALLOWED" in rows[0].reason_codes
     assert not any(code.startswith("MEMORY_ALIGNMENT_MISS") for code in rows[0].reason_codes)
     assert rows[0].dimensions["memory_alignment"] >= 86
+
+
+def test_pushed_away_boundary_rejects_closeness_counterpressure() -> None:
+    request = build_isolated_surface_input(
+        {
+            "case_id": "pushed_away_counterpressure",
+            "soul_md": SOUL,
+            "user_message": "别管我",
+            "reply_control_packet": {
+                "response_move": "respect_boundary",
+                "task_mode": "relationship_boundary",
+                "relationship_distance": "close_friend",
+                "question_budget": 0,
+            },
+        }
+    )
+
+    rows = score_isolated_surface_candidates(request, ["这么熟了还要赶我走啊。", "嗯，先不烦你。"])
+    selected = select_best_isolated_candidate(rows)
+    counterpressure = next(row for row in rows if "赶我走" in row.text)
+
+    assert any(code.startswith("BOUNDARY_REPAIR_PUSHES_CLOSENESS") for code in counterpressure.reason_codes)
+    assert not counterpressure.passed
+    assert selected is not None
+    assert selected.text == "嗯，先不烦你。"
+
+
+def test_pushed_away_boundary_rejects_sour_yield() -> None:
+    request = build_isolated_surface_input(
+        {
+            "case_id": "pushed_away_sour_yield",
+            "soul_md": SOUL,
+            "user_message": "别管我",
+            "reply_control_packet": {
+                "response_move": "respect_boundary",
+                "task_mode": "relationship_boundary",
+                "relationship_distance": "close_friend",
+                "question_budget": 0,
+            },
+        }
+    )
+
+    rows = score_isolated_surface_candidates(request, ["好，那我不多管了。", "嗯，先不烦你。"])
+    selected = select_best_isolated_candidate(rows)
+    sour = next(row for row in rows if "不多管" in row.text)
+
+    assert any(code.startswith("BOUNDARY_REPAIR_SOUR_YIELD") for code in sour.reason_codes)
+    assert not sour.passed
+    assert selected is not None
+    assert selected.text == "嗯，先不烦你。"
+
+
+def test_pushed_away_boundary_rejects_sulky_help_withdrawal() -> None:
+    request = build_isolated_surface_input(
+        {
+            "case_id": "pushed_away_help_withdrawal",
+            "soul_md": SOUL,
+            "user_message": "别管我",
+            "reply_control_packet": {
+                "response_move": "respect_boundary",
+                "task_mode": "relationship_boundary",
+                "relationship_distance": "close_friend",
+                "question_budget": 0,
+            },
+        }
+    )
+
+    rows = score_isolated_surface_candidates(request, ["好啦，不帮了，你如果需要再说。", "嗯，先不烦你。"])
+    selected = select_best_isolated_candidate(rows)
+    sour = next(row for row in rows if "不帮了" in row.text)
+
+    assert any(code.startswith("BOUNDARY_REPAIR_SOUR_YIELD") for code in sour.reason_codes)
+    assert not sour.passed
+    assert selected is not None
+    assert selected.text == "嗯，先不烦你。"
 
 
 def test_close_friend_care_style_anchor_does_not_trigger_boundary_repair() -> None:
@@ -1305,7 +1406,7 @@ def test_rerank_prefers_distinct_lover_stable_presence_over_early_formula() -> N
         request,
         [
             "在呢，想你了。",
-            "在，抱一下，慢慢说。",
+            "在呢，先给你抱一下。",
         ],
     )
 
@@ -1314,7 +1415,7 @@ def test_rerank_prefers_distinct_lover_stable_presence_over_early_formula() -> N
 
     assert "RELATION_LOVER_STABLE_THIN_PRESENCE" in thin.reason_codes
     assert selected is not None
-    assert selected.text == "在，抱一下，慢慢说。"
+    assert selected.text == "在呢，先给你抱一下。"
 
 
 def test_lover_low_energy_counts_companion_presence_as_affection() -> None:
@@ -1698,16 +1799,16 @@ def test_low_energy_lover_prefers_affection_with_care_landing() -> None:
         request,
         [
             "累啦，抱一下。",
-            "抱一下，累了就别硬撑。",
+            "那今天别逞强了，抱一下。",
         ],
     )
 
     selected = select_best_isolated_candidate(rows)
     affection_only = next(row for row in rows if row.text == "累啦，抱一下。")
-    care_landed = next(row for row in rows if "别硬撑" in row.text)
+    care_landed = next(row for row in rows if "别逞强" in row.text)
 
     assert selected is not None
-    assert selected.text == "抱一下，累了就别硬撑。"
+    assert selected.text == "那今天别逞强了，抱一下。"
     assert "LOW_ENERGY_LOVER_AFFECTION_WITHOUT_CARE" in affection_only.reason_codes
     assert not affection_only.passed
     assert care_landed.score > affection_only.score

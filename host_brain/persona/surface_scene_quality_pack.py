@@ -75,6 +75,7 @@ class SurfaceSceneQualitySample:
         if self.scoring_focus:
             lines.append("scoring_focus: " + " / ".join(self.scoring_focus[:5]))
         if self.good_examples:
+            lines.append("good_examples_note: 只参考语气、节奏和边界，不要原样照抄。")
             lines.append("good_examples:")
             lines.extend(f"- {item}" for item in self.good_examples[:max_examples])
         if self.bad_examples:

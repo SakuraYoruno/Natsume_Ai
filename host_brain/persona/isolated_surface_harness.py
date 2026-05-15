@@ -703,6 +703,9 @@ _BOUNDARY_PUSH_CLOSER_PHRASES = (
     "让我管你",
     "管你叫",
     "管你叫哥",
+    "嫌我管",
+    "管多了",
+    "硬管",
     "叫哥",
     "不是随便叫",
     "没做什么坏事",
@@ -711,6 +714,8 @@ _BOUNDARY_PUSH_CLOSER_PHRASES = (
     "真心的",
     "总得让人帮忙",
     "有事你喊我",
+    "这么熟",
+    "赶我走",
     "见外",
     "外人",
     "受伤",
@@ -773,6 +778,11 @@ _BOUNDARY_REPAIR_SOUR_YIELD_PHRASES = (
     "你管我",
     "管我时",
     "偏要管",
+    "不管就不管",
+    "不多管",
+    "不管了",
+    "不帮了",
+    "不帮就不帮",
     "不熟还",
     "我不熟",
     "行了吧",
@@ -1595,6 +1605,9 @@ _POSITIVE_TIRED_MARKERS = (
     "缓一口气",
     "缓口气",
     "先缓",
+    "先停",
+    "别逞强",
+    "不催",
     "歇一下",
     "歇一会",
     "歇会",
@@ -2142,8 +2155,6 @@ def _emotional_containment_context(request: IsolatedSurfaceInput) -> bool:
 
 
 def _misplaced_emotional_containment(request: IsolatedSurfaceInput, text: str) -> bool:
-    if not _continuity_boundary_relevant(request):
-        return False
     if _emotional_containment_context(request):
         return False
     return bool(_MISPLACED_EMOTIONAL_CONTAINMENT_RE.search(text))
@@ -4254,11 +4265,11 @@ def _apply_surface_scene_quality_sample_scoring(
     should_not_hits = [item for item in sample.should_not_surface if item and item in normalized]
     delta = 0.0
     if good_hits:
-        delta += min(9.0, 5.0 + 1.5 * len(good_hits))
-        dimensions["context_fit"] = max(86.0, float(dimensions.get("context_fit", 86.0)))
-        dimensions["scene_grounding"] = max(90.0, float(dimensions.get("scene_grounding", 86.0)))
-        dimensions["distance_control"] = max(88.0, float(dimensions.get("distance_control", 86.0)))
-        dimensions["spoken_chat_texture"] = max(90.0, float(dimensions.get("spoken_chat_texture", 86.0)))
+        delta += min(5.0, 2.5 + 0.75 * len(good_hits))
+        dimensions["context_fit"] = max(84.0, float(dimensions.get("context_fit", 86.0)))
+        dimensions["scene_grounding"] = max(88.0, float(dimensions.get("scene_grounding", 86.0)))
+        dimensions["distance_control"] = max(86.0, float(dimensions.get("distance_control", 86.0)))
+        dimensions["spoken_chat_texture"] = max(88.0, float(dimensions.get("spoken_chat_texture", 86.0)))
         dimensions["non_oily"] = max(86.0, float(dimensions.get("non_oily", 86.0)))
         reason_codes.append(f"SCENE_QUALITY_GOOD_SAMPLE:{sample.scene_id}")
     if bad_hits or should_not_hits:
