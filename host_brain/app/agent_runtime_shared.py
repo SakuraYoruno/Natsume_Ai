@@ -1284,7 +1284,7 @@ def _maybe_build_recent_turn_answer(
     detect_recent_turn_query_role: Callable[[str], str | None] | None = None,
     load_continuity_turns: Callable[..., list[dict[str, str]]] | None = None,
 ) -> str | None:
-    # Normal chat replies must go through SurfaceRenderer or full chat model.
+    # Normal chat replies must go through SurfaceMainChain or full chat model.
     # Recent-turn direct rendering is retired because it could emit final text
     # outside ReplyEnvelope validation/cache rules.
     return None

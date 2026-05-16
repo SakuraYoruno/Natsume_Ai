@@ -1824,7 +1824,7 @@ async def chat_agent_sse_generator(
             "",
         )
         trace_stage_meta["deterministic_primary_used"] = False
-        trace_stage_meta["deterministic_primary_reason"] = "disabled:surface_renderer_or_full_model_only"
+        trace_stage_meta["deterministic_primary_reason"] = "disabled:surface_main_chain_or_full_model_only"
 
     if social_reaction_form_only_plan and not deterministic_reply:
         social_reaction_started_ms = int(time.time() * 1000)

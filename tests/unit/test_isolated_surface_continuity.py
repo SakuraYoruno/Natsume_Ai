@@ -168,27 +168,27 @@ def test_continuity_short_ack_rerank_uses_compressed_previous_turn_fact() -> Non
         "case_id": "short_ack_continuity",
         "turns": [
             _turn("t01", "今天心情很差", "bad_mood"),
-            _turn(
-                "t02",
-                "嗯",
-                "short_ack",
-                facts=["上一轮摘要：尼尼说今天心情很差，回复已先接住情绪。"],
-            ),
-        ],
-    }
+                _turn(
+                    "t02",
+                    "嗯",
+                    "short_ack",
+                    facts=["上一轮摘要：尼尼说今天心情很差，回复已经先回应低落。"],
+                ),
+            ],
+        }
     request = build_continuity_surface_inputs(payload, soul_md=SOUL)[1].request
     scores = score_isolated_surface_candidates(
         request,
-        [
-            "嗯嗯，你说了算。",
-            "嗯，我在听，慢慢说。",
-        ],
-    )
+            [
+                "嗯嗯，你说了算。",
+                "嗯，我听着，慢慢来。",
+            ],
+        )
 
     selected = select_best_isolated_candidate(scores)
 
     assert selected is not None
-    assert selected.text == "嗯，我在听，慢慢说。"
+    assert selected.text == "嗯，我听着，慢慢来。"
     assert selected.passed
     assert any("BLAND_PASS_LINE" in row.reason_codes for row in scores if row.text == "嗯嗯，你说了算。")
 
