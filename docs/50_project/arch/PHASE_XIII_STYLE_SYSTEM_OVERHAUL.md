@@ -6,7 +6,7 @@
 当前代码校准说明（2026-04-19；2026-05-12 更新）：
 - 本文是 2026-03-30 的阶段设计文档，不是当前运行时事实的唯一入口。
 - 文中曾落库的 `host_brain/retrieval/emotion_utterance_index.py` 已在当前最小主链清理中删除；它只剩测试保活，不再作为运行时事实。
-- 当前接线应以实际代码为准：最终表层文本主链通过 `host_brain/persona/isolated_surface_harness.py`、`style_reference_bank`、`sample_guided_text_scorer` 和 `surface_memory_recall` 工作；`style_canon / persona_utterance` 不再作为检索路由进入最终 prompt。
+- 当前接线应以实际代码为准：最终表层文本主链通过 `host_brain/persona/isolated_surface_harness.py`、场景样本、少量原台词 quote、`sample_guided_text_scorer` 和 `surface_memory_recall` 工作；`style_reference_bank / style_canon / persona_utterance` 不再进入最终 prompt。
 - 运行时资产当前以 `runtime/style_canon/*.jsonl`、`runtime/style_canon/*style_profile*.json` 等文件为主；文中示例产物名应按阶段方案理解，不保证与当前仓库文件集完全一致。
 
 > 从根本上修复"台词库/风格指导对最终生成文本无影响"的问题。

@@ -19,27 +19,36 @@ def _safe_mapping(raw: Any) -> dict[str, Any]:
     return dict(raw or {}) if isinstance(raw, Mapping) else {}
 
 
-_EARLY_STEPSISTER_STAGES = {"STRANGER", "ACQUAINTANCE"}
 _SIBLING_STAGES = {"FRIEND", "CLOSE", "CLOSE_FRIEND"}
 _LOVER_STAGES = {"INTIMATE", "CONFIDANT"}
 _SOULMATE_STAGES = {"SOULMATE"}
 
 
 _STAGE_LABELS: dict[str, str] = {
-    "STRANGER": "重组家庭义妹",
-    "ACQUAINTANCE": "磨合中的义妹",
-    "FRIEND": "关系好的义兄妹",
-    "CLOSE": "亲近义兄妹",
-    "CLOSE_FRIEND": "亲近义兄妹",
+    "FRIEND": "关系好的兄妹",
+    "CLOSE": "亲近兄妹",
+    "CLOSE_FRIEND": "亲近兄妹",
     "CONFIDANT": "亲密恋人",
     "INTIMATE": "亲密恋人",
     "SOULMATE": "灵魂伴侣",
 }
 
+_STAGE_ALIASES: dict[str, str] = {
+    "关系好的兄妹": "FRIEND",
+    "关系好的义兄妹": "FRIEND",
+    "稳定义兄妹": "FRIEND",
+    "亲近兄妹": "CLOSE_FRIEND",
+    "亲近义兄妹": "CLOSE_FRIEND",
+    "会拌嘴的义兄妹": "CLOSE_FRIEND",
+    "会护短的义兄妹": "CLOSE_FRIEND",
+    "亲密恋人": "CONFIDANT",
+    "确认心意的恋人": "CONFIDANT",
+    "稳定亲密的恋人": "CONFIDANT",
+    "灵魂伴侣": "SOULMATE",
+}
+
 
 _SUBSTAGE_LABELS_ZH: dict[str, str] = {
-    "first_stepsister": "刚成为家人的义妹",
-    "adjusting_family": "磨合义妹",
     "settled_sibling": "稳定义兄妹",
     "playful_sibling": "会拌嘴的义兄妹",
     "protective_sibling": "会护短的义兄妹",
@@ -52,8 +61,6 @@ _SUBSTAGE_LABELS_ZH: dict[str, str] = {
 
 
 _SUBSTAGE_LABELS_JA: dict[str, str] = {
-    "first_stepsister": "会ったばかりの義妹",
-    "adjusting_family": "距離を測っている義妹",
     "settled_sibling": "馴染んだ義兄妹",
     "playful_sibling": "軽く言い合える義兄妹",
     "protective_sibling": "身内として庇える義兄妹",
@@ -66,10 +73,6 @@ _SUBSTAGE_LABELS_JA: dict[str, str] = {
 
 
 _STAGE_BASE: dict[str, dict[str, float]] = {
-    # The bond engine still uses legacy stage names. In Sora's runtime they mean
-    # phases inside a stepsibling relationship, not stranger-to-friend distance.
-    "STRANGER": {"familiarity": 0.26, "trust": 0.16, "comfort": 0.22, "openness": 0.16, "dependency_tolerance": 0.12, "protectiveness": 0.22, "boundary_softness": 0.16, "affection_signal": 0.06, "playfulness": 0.18, "romantic_tension": 0.02, "attachment_depth": 0.12, "conflict_rift": 0.0},
-    "ACQUAINTANCE": {"familiarity": 0.34, "trust": 0.24, "comfort": 0.30, "openness": 0.24, "dependency_tolerance": 0.18, "protectiveness": 0.28, "boundary_softness": 0.24, "affection_signal": 0.10, "playfulness": 0.24, "romantic_tension": 0.04, "attachment_depth": 0.18, "conflict_rift": 0.0},
     "FRIEND": {"familiarity": 0.48, "trust": 0.40, "comfort": 0.46, "openness": 0.38, "dependency_tolerance": 0.28, "protectiveness": 0.34, "boundary_softness": 0.36, "affection_signal": 0.18, "playfulness": 0.40, "romantic_tension": 0.10, "attachment_depth": 0.32, "conflict_rift": 0.0},
     "CLOSE": {"familiarity": 0.56, "trust": 0.52, "comfort": 0.56, "openness": 0.46, "dependency_tolerance": 0.34, "protectiveness": 0.38, "boundary_softness": 0.44, "affection_signal": 0.22, "playfulness": 0.46, "romantic_tension": 0.16, "attachment_depth": 0.42, "conflict_rift": 0.0},
     "CLOSE_FRIEND": {"familiarity": 0.62, "trust": 0.58, "comfort": 0.62, "openness": 0.52, "dependency_tolerance": 0.40, "protectiveness": 0.44, "boundary_softness": 0.50, "affection_signal": 0.28, "playfulness": 0.50, "romantic_tension": 0.22, "attachment_depth": 0.50, "conflict_rift": 0.0},
@@ -80,24 +83,34 @@ _STAGE_BASE: dict[str, dict[str, float]] = {
 
 
 def _stage_label(stage: str) -> str:
-    return _STAGE_LABELS.get(str(stage or "").strip().upper(), _STAGE_LABELS["STRANGER"])
+    return _STAGE_LABELS.get(_normalize_bond_stage(stage), _STAGE_LABELS["FRIEND"])
 
 
 def _relationship_phase(stage: str) -> str:
-    normalized = str(stage or "").strip().upper() or "STRANGER"
+    normalized = _normalize_bond_stage(stage)
     if normalized in _SOULMATE_STAGES:
         return "soulmate"
     if normalized in _LOVER_STAGES:
         return "lover"
     if normalized in _SIBLING_STAGES:
         return "stepsibling"
-    return "early_stepsister"
+    return "stepsibling"
+
+
+def _normalize_bond_stage(stage: Any) -> str:
+    text = str(stage or "").strip()
+    if not text:
+        return "FRIEND"
+    upper = text.upper()
+    if upper in _STAGE_BASE:
+        return upper
+    return _STAGE_ALIASES.get(text, "FRIEND")
 
 
 def _substage_label(substage: str, *, render_target_lang: str = "zh") -> str:
-    key = str(substage or "").strip() or "first_stepsister"
+    key = str(substage or "").strip() or "settled_sibling"
     labels = _SUBSTAGE_LABELS_JA if str(render_target_lang or "").strip().lower() == "ja" else _SUBSTAGE_LABELS_ZH
-    return labels.get(key, labels["first_stepsister"])
+    return labels.get(key, labels["settled_sibling"])
 
 
 def derive_relationship_substage(
@@ -113,7 +126,7 @@ def derive_relationship_substage(
 ) -> str:
     """Convert continuous relationship texture into a small prompt-facing label."""
 
-    stage = str(bond_stage or "").strip().upper() or "STRANGER"
+    stage = _normalize_bond_stage(bond_stage)
     if conflict_rift >= 0.55:
         return "repairing_rift"
     if stage in _SOULMATE_STAGES or (attachment_depth >= 0.88 and trust >= 0.82):
@@ -130,9 +143,7 @@ def derive_relationship_substage(
         if playfulness >= 0.38:
             return "playful_sibling"
         return "settled_sibling"
-    if familiarity >= 0.32 or trust >= 0.22:
-        return "adjusting_family"
-    return "first_stepsister"
+    return "settled_sibling"
 
 
 @dataclass(frozen=True)
@@ -149,14 +160,14 @@ class RelationshipStateBlock:
     romantic_tension: float = 0.0
     attachment_depth: float = 0.08
     conflict_rift: float = 0.0
-    bond_stage: str = "STRANGER"
+    bond_stage: str = "FRIEND"
     stage_label: str = ""
     relationship_phase: str = ""
     relationship_substage: str = ""
 
     def __post_init__(self) -> None:
-        stage = str(self.bond_stage or "STRANGER").strip().upper() or "STRANGER"
-        base = _STAGE_BASE.get(stage, _STAGE_BASE["STRANGER"])
+        stage = _normalize_bond_stage(self.bond_stage)
+        base = _STAGE_BASE.get(stage, _STAGE_BASE["FRIEND"])
         object.__setattr__(self, "bond_stage", stage)
         for field_name in (
             "familiarity",
@@ -224,12 +235,12 @@ def resolve_relationship_state(
 ) -> RelationshipStateBlock:
     bond = _safe_mapping(bond_summary)
     social = _safe_mapping(social_brain_state)
-    stage = str(
+    stage = _normalize_bond_stage(
         social.get("bond_stage")
         or bond.get("stage")
-        or "STRANGER"
-    ).strip().upper() or "STRANGER"
-    base = dict(_STAGE_BASE.get(stage, _STAGE_BASE["STRANGER"]))
+        or "FRIEND"
+    )
+    base = dict(_STAGE_BASE.get(stage, _STAGE_BASE["FRIEND"]))
 
     intimacy = _coerce_float(social.get("bond_vector_intimacy"), default=_coerce_float(bond.get("score"), default=base["familiarity"]))
     trust = _coerce_float(social.get("bond_vector_trust"), default=_coerce_float(bond.get("score"), default=base["trust"]))
@@ -270,13 +281,13 @@ def resolve_relationship_state(
         ),
     ))
 
-    if trend in {"rising", "progress", "warming"}:
+    if trend in {"rising", "progress", "warming", "上升", "快速上升"}:
         openness = _clamp(openness + 0.04)
         boundary_softness = _clamp(boundary_softness + 0.03)
         affection_signal = _clamp(affection_signal + 0.03)
         playfulness = _clamp(playfulness + 0.03)
         attachment_depth = _clamp(attachment_depth + 0.03)
-    elif trend in {"declining", "regress", "cooling"}:
+    elif trend in {"declining", "regress", "cooling", "下降", "快速下降"}:
         openness = _clamp(openness - 0.05)
         boundary_softness = _clamp(boundary_softness - 0.05)
         trust_score = _clamp(trust_score - 0.04)
@@ -316,7 +327,7 @@ def resolve_relationship_state(
 
 def build_relationship_summary(*, relationship: RelationshipStateBlock, render_target_lang: str = "zh") -> str:
     lang = str(render_target_lang or "").strip().lower()
-    stage = str(relationship.bond_stage or "STRANGER").strip().upper() or "STRANGER"
+    stage = _normalize_bond_stage(relationship.bond_stage)
     substage = str(relationship.relationship_substage or "").strip() or derive_relationship_substage(
         bond_stage=stage,
         familiarity=relationship.familiarity,
@@ -329,9 +340,7 @@ def build_relationship_summary(*, relationship: RelationshipStateBlock, render_t
     )
     if lang == "ja":
         if substage == "repairing_rift":
-            return "今は少しすれ違いがある。刺しすぎず、でも他人行儀にも戻らない。"
-        if substage in {"first_stepsister", "adjusting_family"}:
-            return f"関係は{_substage_label(substage, render_target_lang='ja')}。外の人扱いせず、踏み込みすぎない。"
+            return "今は少しすれ違いがある。刺しすぎず、でも距離を取りすぎない。"
         if substage == "playful_sibling":
             return "軽く言い合える義兄妹。少しだけからかっていいが、感情は置いていかない。"
         if substage == "protective_sibling":
@@ -344,11 +353,7 @@ def build_relationship_summary(*, relationship: RelationshipStateBlock, render_t
             return "魂の伴侶に近い深い関係。柔らかく率直にしつつ、空らしい軽さを残す。"
         return "義兄妹として自然に受ける。近すぎず、よそよそしくもしない。"
     if substage == "repairing_rift":
-        return "关系里有一点别扭或裂痕：先别刺太深，但也不要退回陌生人。"
-    if substage == "first_stepsister":
-        return "关系基线是初次见面的重组家庭义妹：语气收着，但不要把对方当外人。"
-    if substage == "adjusting_family":
-        return "关系是磨合中的义妹：可以有一点自来熟和小任性，但仍要留分寸。"
+        return "关系里有一点别扭或裂痕：先别刺太深，但也不要退成疏离口吻。"
     if substage == "playful_sibling":
         return "关系是会拌嘴的义兄妹：可以轻轻顶嘴、抢话和撒娇，但别变成冷嘲热讽。"
     if substage == "protective_sibling":

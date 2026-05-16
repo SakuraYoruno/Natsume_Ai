@@ -8,8 +8,6 @@ from unittest.mock import MagicMock
 from host_brain.bond.bond_dynamics import BondDynamicsWriter, BondUpdateResult
 from host_brain.bond.bond_stage_engine import (
     BondStageEngine,
-    STAGE_STRANGER,
-    STAGE_ACQUAINTANCE,
     STAGE_FRIEND,
     STAGE_CLOSE_FRIEND,
     STAGE_CONFIDANT,
@@ -161,34 +159,34 @@ class TestBackwardCompatibility:
 # ── T-BOND-INTEG-03: 自动晋级端到端 ──────────────────────────────────────────
 
 class TestAutoPromotion:
-    """T-BOND-INTEG-03: 积分累积到阈值时自动晋级（STRANGER→ACQUAINTANCE 需 10 分）。"""
+    """T-BOND-INTEG-03: 积分累积到阈值时自动晋级（FRIEND→CLOSE_FRIEND）。"""
 
     def test_promotion_triggered_after_threshold(self, writer_with_engine, stage_engine):
-        # INTERACTION=1 分，需要 10 次才能晋级到 ACQUAINTANCE
-        results = _apply(writer_with_engine, user_id="user_promo", update_kind="INTERACTION", n=10)
+        # INTERACTION=1 分，需要 70 次才能晋级到 CLOSE_FRIEND
+        results = _apply(writer_with_engine, user_id="user_promo", update_kind="INTERACTION", n=70)
         state = stage_engine.get_state("user_promo")
-        assert state.current_stage == STAGE_ACQUAINTANCE
-        assert state.total_score == 10
+        assert state.current_stage == STAGE_CLOSE_FRIEND
+        assert state.total_score == 70
 
     def test_promotion_event_has_promoted_status(self, writer_with_engine, stage_engine):
-        # 前 9 次 STABLE，第 10 次 PROMOTED
-        results = _apply(writer_with_engine, user_id="user_promo2", update_kind="INTERACTION", n=10)
+        # 前 69 次 STABLE，第 70 次 PROMOTED
+        results = _apply(writer_with_engine, user_id="user_promo2", update_kind="INTERACTION", n=70)
         last_st = results[-1].event["stage_transition"]
         assert last_st["transition_status"] == TRANSITION_STATUS_PROMOTED
-        assert last_st["from_stage"] == STAGE_STRANGER
-        assert last_st["to_stage"] == STAGE_ACQUAINTANCE
+        assert last_st["from_stage"] == STAGE_FRIEND
+        assert last_st["to_stage"] == STAGE_CLOSE_FRIEND
 
     def test_deep_talk_accelerates_promotion(self, writer_with_engine, stage_engine):
-        # DEEP_TALK=5 分，2 次 = 10 分，直接晋级
-        results = _apply(writer_with_engine, user_id="user_deep", update_kind="DEEP_TALK", n=2)
+        # DEEP_TALK=5 分，14 次 = 70 分，直接晋级
+        results = _apply(writer_with_engine, user_id="user_deep", update_kind="DEEP_TALK", n=14)
         state = stage_engine.get_state("user_deep")
-        assert state.current_stage == STAGE_ACQUAINTANCE
+        assert state.current_stage == STAGE_CLOSE_FRIEND
 
     def test_milestone_triggers_fast_promotion(self, writer_with_engine, stage_engine):
-        # MILESTONE=10 分，1 次直接晋级到 ACQUAINTANCE
-        results = _apply(writer_with_engine, user_id="user_mile", update_kind="MILESTONE", n=1)
+        # MILESTONE=10 分，7 次晋级到 CLOSE_FRIEND
+        results = _apply(writer_with_engine, user_id="user_mile", update_kind="MILESTONE", n=7)
         state = stage_engine.get_state("user_mile")
-        assert state.current_stage == STAGE_ACQUAINTANCE
+        assert state.current_stage == STAGE_CLOSE_FRIEND
 
 
 # ── T-BOND-INTEG-04: 拒绝事件不触发 stage_engine ─────────────────────────────
@@ -290,7 +288,7 @@ class TestMultiUserIsolation:
 
         assert alice_state.total_score == 30
         assert bob_state.total_score == 5
-        assert alice_state.current_stage != bob_state.current_stage
+        assert alice_state.total_score != bob_state.total_score
 
     def test_user_stages_independent(self, writer_with_engine, stage_engine):
         _apply(writer_with_engine, user_id="user_a", update_kind="EMOTIONAL_SUPPORT", n=10)  # 80 分
@@ -300,7 +298,7 @@ class TestMultiUserIsolation:
         b_stage = stage_engine.get_state("user_b").current_stage
 
         assert a_stage in [STAGE_CLOSE_FRIEND, STAGE_CONFIDANT]
-        assert b_stage == STAGE_STRANGER
+        assert b_stage == STAGE_FRIEND
 
 
 # ── T-BOND-INTEG-07: Bond Summary 端到端 ─────────────────────────────────────
@@ -309,10 +307,9 @@ class TestBondSummaryEndToEnd:
     """T-BOND-INTEG-07: apply_update 后 BondStageEngine.get_summary 返回正确 Summary。"""
 
     def test_summary_stage_matches_state(self, writer_with_engine, stage_engine):
-        _apply(writer_with_engine, user_id="user_sum", update_kind="INTERACTION", n=10)
+        _apply(writer_with_engine, user_id="user_sum", update_kind="INTERACTION", n=70)
         summary = stage_engine.get_summary("user_sum")
-        # M28-H：to_summary() 返回中文阶段名，ACQUAINTANCE 对应“相处中的义妹”
-        assert summary["stage"] == "相处中的义妹"
+        assert summary["stage"] == "亲近兄妹"
         assert "trend" in summary
         assert "capability_hint" in summary
 
@@ -333,8 +330,8 @@ class TestUpdateKindPropagation:
     def test_update_kind_propagated(self, neo4j_client):
         mock_engine = MagicMock(spec=BondStageEngine)
         mock_engine.apply_event.return_value = MagicMock(
-            from_stage=STAGE_STRANGER,
-            to_stage=STAGE_STRANGER,
+            from_stage=STAGE_FRIEND,
+            to_stage=STAGE_FRIEND,
             transition_status=TRANSITION_STATUS_STABLE,
             score_delta=1,
             total_score=1,

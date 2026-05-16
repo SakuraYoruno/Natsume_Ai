@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import asyncio
+from types import SimpleNamespace
+
 from host_brain.persona.reply_plan import build_reply_plan_from_inputs
 from host_brain.tribe.events import emit_tribe_event
 from host_brain.tribe.limbic_agent import LimbicAgent
+from host_brain.tribe.tribe_state import TribeStateRegistry
 
 
 def test_emit_tribe_event_publishes_to_internal_bus(monkeypatch) -> None:
@@ -82,6 +86,110 @@ def test_limbic_agent_build_snapshot_updates_state(monkeypatch) -> None:
     assert last["source"] == "chat"
     assert last["emotion_tag"] == "SAD"
     assert last["ts_ms"] == 123456
+
+
+def test_limbic_agent_keeps_asr_text_emotion_hint_untrusted(monkeypatch) -> None:
+    class _HardState:
+        emotion_tag = "NEUTRAL"
+        emotion_intensity = 0.0
+        mood_state = "steady"
+
+    class _Timeline:
+        def __init__(self) -> None:
+            self.rows: list[dict[str, object]] = []
+
+        def append(self, **kwargs):  # noqa: ANN003
+            self.rows.append(dict(kwargs))
+
+    hard_state = _HardState()
+    timeline = _Timeline()
+    monkeypatch.setattr("host_brain.app.dependencies.get_hard_state", lambda: hard_state)
+    monkeypatch.setattr("host_brain.app.dependencies.get_emotion_timeline", lambda: timeline)
+    monkeypatch.setattr("host_brain.tribe.edge_command_pusher.get_edge_command_pusher", lambda: None)
+    registry = TribeStateRegistry(persist_throttle=999999)
+    agent = LimbicAgent(state_registry=registry)
+
+    event = SimpleNamespace(
+        payload={
+            "emotion_tag": "SAD",
+            "emotion_intensity": 0.9,
+            "mood_state": "sad",
+            "emotion_source": "asr_text_bootstrap",
+            "emotion_modality": "asr_text",
+            "emotion_confidence": 0.55,
+            "emotion_inference_degraded": False,
+            "acoustic_emotion_available": False,
+            "session_id": "sess-asr",
+        },
+        source_agent="somatic_agent",
+        ts_ms=123,
+    )
+
+    asyncio.run(agent._on_emotion_inference_updated(event))
+
+    assert hard_state.emotion_tag == "NEUTRAL"
+    assert hard_state.emotion_intensity == 0.0
+    assert timeline.rows == []
+    limbic_state = dict((registry.get_state("limbic") or {}).get("state") or {})
+    hint = dict(limbic_state["last_voice_emotion_inference"])
+    assert hint["emotion_tag"] == "SAD"
+    assert hint["trusted_runtime_emotion"] is False
+    vitals = registry.aggregate_vital_signs()
+    assert vitals["voice_emotion_tag"] is None
+    assert vitals["voice_emotion_trusted"] is False
+    assert vitals["voice_emotion_source"] == "asr_text_bootstrap"
+
+
+def test_limbic_agent_accepts_explicit_or_acoustic_runtime_emotion(monkeypatch) -> None:
+    class _HardState:
+        emotion_tag = "NEUTRAL"
+        emotion_intensity = 0.0
+        mood_state = "steady"
+
+    class _Timeline:
+        def __init__(self) -> None:
+            self.rows: list[dict[str, object]] = []
+
+        def append(self, **kwargs):  # noqa: ANN003
+            self.rows.append(dict(kwargs))
+
+    hard_state = _HardState()
+    timeline = _Timeline()
+    monkeypatch.setattr("host_brain.app.dependencies.get_hard_state", lambda: hard_state)
+    monkeypatch.setattr("host_brain.app.dependencies.get_emotion_timeline", lambda: timeline)
+    monkeypatch.setattr("host_brain.tribe.edge_command_pusher.get_edge_command_pusher", lambda: None)
+    registry = TribeStateRegistry(persist_throttle=999999)
+    agent = LimbicAgent(state_registry=registry)
+
+    event = SimpleNamespace(
+        payload={
+            "emotion_tag": "HAPPY",
+            "emotion_intensity": 0.82,
+            "mood_state": "warm",
+            "emotion_source": "edge_explicit",
+            "emotion_modality": "explicit",
+            "emotion_confidence": 1.0,
+            "emotion_inference_degraded": False,
+            "acoustic_emotion_available": False,
+            "session_id": "sess-explicit",
+        },
+        source_agent="somatic_agent",
+        ts_ms=456,
+    )
+
+    asyncio.run(agent._on_emotion_inference_updated(event))
+
+    assert hard_state.emotion_tag == "HAPPY"
+    assert hard_state.emotion_intensity == 0.82
+    assert hard_state.mood_state == "warm"
+    assert timeline.rows[-1]["emotion_tag"] == "HAPPY"
+    limbic_state = dict((registry.get_state("limbic") or {}).get("state") or {})
+    hint = dict(limbic_state["last_voice_emotion_inference"])
+    assert hint["trusted_runtime_emotion"] is True
+    vitals = registry.aggregate_vital_signs()
+    assert vitals["voice_emotion_tag"] == "HAPPY"
+    assert vitals["voice_emotion_intensity"] == 0.82
+    assert vitals["voice_emotion_trusted"] is True
 
 
 def test_limbic_agent_handle_signal_records_state_and_event(monkeypatch) -> None:

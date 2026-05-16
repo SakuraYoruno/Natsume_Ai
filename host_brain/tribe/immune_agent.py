@@ -1218,8 +1218,7 @@ class ImmuneAgent:
 
         T-81：关系阶段越深（如 intimate），对越界内容的容忍度可适当提高，
         但对高风险内容的拦截始终保持严格。具体策略：
-        - stranger/acquaintance：维持默认阈值（0.55）
-        - friend：阈值略微放宽至 0.60（允许更多玩笑性内容）
+        - friend：默认阈值 0.60（允许更多兄妹式玩笑性内容）
         - close_friend：阈值放宽至 0.65
         - intimate：阈值放宽至 0.70（但 critical 风险始终拦截）
         阈值变更写入 TribeStateRegistry，供诊断端点查询。
@@ -1233,13 +1232,11 @@ class ImmuneAgent:
                 return
             # 各阶段对应的拦截阈值（仅影响 medium 风险，high/critical 始终拦截）
             _stage_threshold_map = {
-                "stranger": 0.55,
-                "acquaintance": 0.55,
                 "friend": 0.60,
                 "close_friend": 0.65,
                 "intimate": 0.70,
             }
-            new_threshold = _stage_threshold_map.get(new_stage, 0.55)
+            new_threshold = _stage_threshold_map.get(new_stage, 0.60)
             with self._lock:
                 self._bond_stage_threshold = new_threshold
             self.state_registry.set_state(

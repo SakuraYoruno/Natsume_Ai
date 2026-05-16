@@ -317,9 +317,9 @@ def _format_elapsed_compact(elapsed_ms: int) -> str:
     return f"{hours}h{minutes:02d}m"
 
 
-def render_quick_gateway_ack_text(*, user_message: str = "", bond_stage: str = "STRANGER", emotion_tag: str = "NEUTRAL", sender_name: str | None = None) -> str:
+def render_quick_gateway_ack_text(*, user_message: str = "", bond_stage: str = "FRIEND", emotion_tag: str = "NEUTRAL", sender_name: str | None = None) -> str:
     templates = _load_template_mapping("chat_agent.runtime_texts")
-    stage = str(bond_stage or "STRANGER").strip().upper() or "STRANGER"
+    stage = str(bond_stage or "FRIEND").strip().upper() or "FRIEND"
     etag = str(emotion_tag or "NEUTRAL").strip().upper() or "NEUTRAL"
     clean_sender = str(sender_name or "").strip()
     if _looks_like_open_app_request(user_message):
@@ -331,7 +331,7 @@ def render_quick_gateway_ack_text(*, user_message: str = "", bond_stage: str = "
     elif stage in _ACK_WARM_STAGES:
         text = _mapping_text(templates, "quick_ack_warm", sender_name=clean_sender)
     else:
-        text = _mapping_text(templates, "quick_ack_stranger", sender_name=clean_sender)
+        text = _mapping_text(templates, "quick_ack_default", sender_name=clean_sender)
     if not str(text or "").strip():
         text = _mapping_text(templates, "quick_ack_default", sender_name=clean_sender)
     if not str(text or "").strip():
@@ -343,7 +343,7 @@ def render_quick_gateway_ack_text(*, user_message: str = "", bond_stage: str = "
     return normalized
 
 
-def render_quick_gateway_progress_text(*, status: str = "UNKNOWN", target_id: str = "", progress_message: str = "", result_text: str = "", elapsed_ms: int = 0, bond_stage: str = "STRANGER", emotion_tag: str = "NEUTRAL", sender_name: str | None = None) -> str:
+def render_quick_gateway_progress_text(*, status: str = "UNKNOWN", target_id: str = "", progress_message: str = "", result_text: str = "", elapsed_ms: int = 0, bond_stage: str = "FRIEND", emotion_tag: str = "NEUTRAL", sender_name: str | None = None) -> str:
     templates = _load_template_mapping("chat_agent.runtime_texts")
     normalized_status = str(status or "UNKNOWN").strip().upper() or "UNKNOWN"
     elapsed = _format_elapsed_compact(int(elapsed_ms or 0))
@@ -369,7 +369,7 @@ def render_quick_gateway_progress_text(*, status: str = "UNKNOWN", target_id: st
     return normalized
 
 
-def render_quick_gateway_realign_text(*, sender_name: str | None = None, bond_stage: str = "STRANGER", emotion_tag: str = "NEUTRAL") -> str:
+def render_quick_gateway_realign_text(*, sender_name: str | None = None, bond_stage: str = "FRIEND", emotion_tag: str = "NEUTRAL") -> str:
     templates = _load_template_mapping("chat_agent.runtime_texts")
     clean_sender = str(sender_name or "").strip()
     text = _mapping_text(templates, "quick_realign_notice", sender_name=clean_sender)
@@ -780,7 +780,7 @@ def _should_buffer_stream_output(*, emotion_context: Any, bond_summary: Any, ren
     try:
         from host_brain.app.dependencies import get_reflection_chain
         reflection = get_reflection_chain()
-        return bool(reflection.should_reflect(emotion_tag=str((emotion_context or {}).get("emotion_tag") or ""), intent=str((bond_summary or {}).get("intent") or ""), bond_stage=str((bond_summary or {}).get("stage") or "STRANGER"), turn_count=int((emotion_context or {}).get("turn_count") or 1)))
+        return bool(reflection.should_reflect(emotion_tag=str((emotion_context or {}).get("emotion_tag") or ""), intent=str((bond_summary or {}).get("intent") or ""), bond_stage=str((bond_summary or {}).get("stage") or "FRIEND"), turn_count=int((emotion_context or {}).get("turn_count") or 1)))
     except Exception:
         return False
 

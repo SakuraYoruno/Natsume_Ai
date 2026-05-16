@@ -455,7 +455,7 @@ class TestPostScreenshot(unittest.TestCase):
 class TestResolveVtsExpressionFireAndForget(unittest.TestCase):
     def test_applied_result_triggers_edge_vts(self):
         """resolve_vts_expression 成功时，应 fire-and-forget 调用 post_vts。"""
-        from host_brain.channels.vts import resolve_vts_expression
+        from host_brain.channels.vts import EMOTION_TO_EXPRESSION_ID, resolve_vts_expression
 
         ledger = _make_ledger()
         fired_calls: list[dict] = []
@@ -482,7 +482,7 @@ class TestResolveVtsExpressionFireAndForget(unittest.TestCase):
 
         result = asyncio.run(_run())
         self.assertEqual(result.status, "APPLIED")
-        self.assertEqual(result.expression_id, "exp_happy_01")
+        self.assertEqual(result.expression_id, EMOTION_TO_EXPRESSION_ID["HAPPY"])
         # fire-and-forget 应已触发
         self.assertEqual(len(fired_calls), 1)
         self.assertEqual(fired_calls[0]["action"], "set_expression")

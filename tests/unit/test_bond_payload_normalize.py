@@ -62,3 +62,14 @@ class TestBondPayloadNormalize:
             emotion_intensity=0.9,
         )
         assert result["semantic_label"] == "冲突事件"
+
+    def test_emotion_valence_is_clamped_when_present(self):
+        """emotion_valence 被标准化到 [-1, 1]，供关系质感层使用。"""
+        result = _normalize_bond_payload(
+            payload={},
+            update_kind="INTERACTION",
+            emotion_tag="SAD",
+            emotion_intensity=0.8,
+            emotion_valence=-1.5,
+        )
+        assert result["emotion_valence"] == -1.0

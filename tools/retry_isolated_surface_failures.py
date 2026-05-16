@@ -20,9 +20,8 @@ from host_brain.persona.isolated_surface_harness import (  # noqa: E402
     build_isolated_surface_input,
     parse_surface_candidates,
     score_isolated_surface_candidates,
-    select_best_isolated_candidate,
 )
-from tools.chat_ab_generate import _load_secret_store_provider_key, load_dotenv  # noqa: E402
+from tools.live_env import load_dotenv, load_secret_store_provider_key  # noqa: E402
 from tools.isolated_surface_harness import _case_request_payload, _read_json_or_jsonl  # noqa: E402
 from tools.run_isolated_surface_live import _run_one  # noqa: E402
 from tools.surface_tool_contract import (  # noqa: E402
@@ -181,8 +180,8 @@ def rescore_source_outputs(
         try:
             request = build_isolated_surface_input(_case_request_payload(case, soul_md))
             candidate_texts = parse_surface_candidates(raw.get("raw_output"))
-            scores = score_isolated_surface_candidates(request, candidate_texts)
-            selected = select_best_isolated_candidate(scores)
+            scores = score_isolated_surface_candidates(request, candidate_texts[:1])
+            selected = scores[0] if scores else None
             rows.append(
                 {
                     "index": index,
@@ -217,7 +216,7 @@ def source_score_rows_from_existing(
         if selected_text:
             request = build_isolated_surface_input(_case_request_payload(case, soul_md))
             scores = score_isolated_surface_candidates(request, [selected_text])
-            rescored = select_best_isolated_candidate(scores)
+            rescored = scores[0] if scores else None
             selected = rescored.as_dict() if rescored else selected
         rows.append(
             {
@@ -526,7 +525,7 @@ async def run_retry(args: argparse.Namespace) -> dict[str, Any]:
         load_dotenv(ROOT / ".env")
         provider = str(args.provider or "deepseek").strip()
         model = str(args.model or os.environ.get("HOST_DEEPSEEK_MODEL_ID") or "deepseek-v4-flash").strip()
-        api_key = str(os.environ.get("DEEPSEEK_API_KEY") or "").strip() or _load_secret_store_provider_key(provider)
+        api_key = str(os.environ.get("DEEPSEEK_API_KEY") or "").strip() or load_secret_store_provider_key(provider)
         if not api_key:
             raise RuntimeError(f"missing api key for provider={provider}")
         base_url_override = str(args.base_url or os.environ.get("HOST_DEEPSEEK_BASE_URL") or "").strip() or None
@@ -564,7 +563,6 @@ async def run_retry(args: argparse.Namespace) -> dict[str, Any]:
                             timeout_ms=int(args.timeout_ms),
                             gen_params=gen_params,
                             base_url_override=base_url_override,
-                            repair_failed=True,
                         )
                     )
                 )

@@ -36,7 +36,7 @@ class InteractionFactsPlane:
     user_message: str = ""
     history_turns: list[dict[str, Any]] = field(default_factory=list)
     older_summary: str = ""
-    relationship_stage: str = "STRANGER"
+    relationship_stage: str = "FRIEND"
     relationship_state: dict[str, Any] = field(default_factory=dict)
     affect_state: dict[str, Any] = field(default_factory=dict)
     drive_state: dict[str, Any] = field(default_factory=dict)

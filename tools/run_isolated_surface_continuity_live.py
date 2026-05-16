@@ -19,15 +19,8 @@ from host_brain.persona.isolated_surface_continuity import (  # noqa: E402
     ContinuityTurnSurfaceInput,
     build_continuity_surface_inputs,
 )
-from host_brain.persona.isolated_surface_harness import (  # noqa: E402
-    build_minimal_repair_messages,
-    build_isolated_surface_messages,
-    derive_style_reference_anchor,
-    parse_surface_candidates,
-    score_isolated_surface_candidates,
-    select_best_isolated_candidate,
-)
-from tools.chat_ab_generate import _load_secret_store_provider_key, load_dotenv  # noqa: E402
+from host_brain.persona.surface_runtime import SurfaceRuntime  # noqa: E402
+from tools.live_env import load_dotenv, load_secret_store_provider_key  # noqa: E402
 from tools.isolated_surface_continuity_harness import _observation_codes  # noqa: E402
 from tools.isolated_surface_harness import _read_json_or_jsonl  # noqa: E402
 
@@ -91,12 +84,6 @@ def _summarize(
     for selected_row in selected:
         for code in _observation_codes(selected_row):
             observation_counts[code] = observation_counts.get(code, 0) + 1
-    repair_attempt_count = sum(1 for row in results if row.get("repair_attempted"))
-    style_degraded = sum(
-        1
-        for row in results
-        if ((row.get("style_reference") or {}).get("trace") or {}).get("degraded")
-    )
     dialogue_turns: dict[str, int] = {}
     dialogue_passed: dict[str, int] = {}
     for row in results:
@@ -131,8 +118,6 @@ def _summarize(
         "control_violation_count": control_violation_count,
         "facts_budget_max": max(fact_counts) if fact_counts else 0,
         "facts_budget_violations": sum(1 for count in fact_counts if count > 6),
-        "repair_attempt_count": repair_attempt_count,
-        "style_reference_degraded_count": style_degraded,
         "long_dialogues_30_plus": sum(1 for count in expected_dialogue_turns.values() if count >= 30),
         "max_turns_per_dialogue": max(expected_dialogue_turns.values()) if expected_dialogue_turns else 0,
         "min_turns_per_dialogue": min(expected_dialogue_turns.values()) if expected_dialogue_turns else 0,
@@ -159,7 +144,6 @@ async def _run_turn(
     timeout_ms: int,
     gen_params: Mapping[str, Any],
     base_url_override: str | None,
-    repair_failed: bool,
 ) -> dict[str, Any]:
     async with semaphore:
         started = time.perf_counter()
@@ -167,28 +151,9 @@ async def _run_turn(
         try:
             request = turn.request
             fact_count = len(request.control.facts)
-            style_reference = derive_style_reference_anchor(request).as_dict()
-            messages = build_isolated_surface_messages(request)
-            raw_output = await asyncio.to_thread(
-                invoke_llm_text,
-                provider_name=provider,
-                model_id=model,
-                api_key=api_key,
-                timeout_ms=timeout_ms,
-                messages=messages,
-                gen_params=dict(gen_params),
-                base_url_override=base_url_override,
-            )
-            latency_ms = int((time.perf_counter() - started) * 1000)
-            candidate_texts = parse_surface_candidates(raw_output)
-            scores = score_isolated_surface_candidates(request, candidate_texts)
-            selected = select_best_isolated_candidate(scores)
-            repair_raw_output = ""
-            repair_candidate_texts: list[str] = []
-            repair_attempted = bool(repair_failed and selected is not None and not selected.passed)
-            if repair_attempted and selected is not None:
-                repair_messages = build_minimal_repair_messages(request, selected)
-                repair_raw_output = await asyncio.to_thread(
+
+            async def generate(messages: list[Mapping[str, str]]) -> str:
+                return await asyncio.to_thread(
                     invoke_llm_text,
                     provider_name=provider,
                     model_id=model,
@@ -198,25 +163,24 @@ async def _run_turn(
                     gen_params=dict(gen_params),
                     base_url_override=base_url_override,
                 )
-                repair_candidate_texts = parse_surface_candidates(repair_raw_output)
-                repair_scores = score_isolated_surface_candidates(request, repair_candidate_texts)
-                scores = [*scores, *repair_scores]
-                selected = select_best_isolated_candidate(scores)
+
+            runtime = SurfaceRuntime(generate)
+            result = await runtime.run(request)
+            latency_ms = result.latency_ms or int((time.perf_counter() - started) * 1000)
+            scores = list(result.candidates)
+            selected = result.selected
             raw_row = {
                 **trace,
                 "ok": True,
                 "provider": provider,
                 "model": model,
                 "latency_ms": latency_ms,
-                "raw_output": str(raw_output or "").strip(),
-                "candidates": candidate_texts,
-                "repair_attempted": repair_attempted,
-                "repair_raw_output": str(repair_raw_output or "").strip(),
-                "repair_candidates": repair_candidate_texts,
+                "raw_output": str(result.raw_output or "").strip(),
+                "candidates": [score.text for score in scores],
+                "direct_text": result.selected_text,
                 "selected_text": selected.text if selected else "",
                 "selected_score": selected.score if selected else None,
                 "selected_passed": selected.passed if selected else False,
-                "style_reference": style_reference,
             }
             score_row = {
                 **trace,
@@ -224,19 +188,15 @@ async def _run_turn(
                 "fact_count": fact_count,
                 "observation_codes": list(_observation_codes(selected.as_dict() if selected else None)),
                 "selected": selected.as_dict() if selected else None,
-                "repair_attempted": repair_attempted,
-                "repair_candidates": repair_candidate_texts,
-                "style_reference": style_reference,
+                "selection": "direct_first",
             }
             return {
                 **trace,
                 "raw": raw_row,
                 "score": score_row,
                 "selected": score_row["selected"],
-                "style_reference": style_reference,
                 "fact_count": fact_count,
                 "ok": True,
-                "repair_attempted": repair_attempted,
                 "latency_ms": latency_ms,
             }
         except Exception as exc:  # pragma: no cover - live diagnostics
@@ -255,7 +215,6 @@ async def _run_turn(
                 "raw": raw_row,
                 "score": score_row,
                 "selected": None,
-                "style_reference": {},
                 "ok": False,
                 "latency_ms": latency_ms,
             }
@@ -265,7 +224,7 @@ async def run_live(args: argparse.Namespace) -> dict[str, Any]:
     load_dotenv(ROOT / ".env")
     provider = str(args.provider or "deepseek").strip()
     model = str(args.model or os.environ.get("HOST_DEEPSEEK_MODEL_ID") or "deepseek-v4-flash").strip()
-    api_key = str(os.environ.get("DEEPSEEK_API_KEY") or "").strip() or _load_secret_store_provider_key(provider)
+    api_key = str(os.environ.get("DEEPSEEK_API_KEY") or "").strip() or load_secret_store_provider_key(provider)
     if not api_key:
         raise RuntimeError(f"missing api key for provider={provider}")
     base_url_override = str(args.base_url or os.environ.get("HOST_DEEPSEEK_BASE_URL") or "").strip() or None
@@ -298,7 +257,6 @@ async def run_live(args: argparse.Namespace) -> dict[str, Any]:
                 timeout_ms=int(args.timeout_ms),
                 gen_params=gen_params,
                 base_url_override=base_url_override,
-                repair_failed=not bool(args.no_repair),
             )
         )
         for turn in turns
@@ -373,7 +331,6 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--top-p", type=float, default=0.8)
     parser.add_argument("--max-tokens", type=int, default=256)
     parser.add_argument("--progress-every", type=int, default=3)
-    parser.add_argument("--no-repair", action="store_true", help="Disable one-shot minimal repair when the selected candidate fails.")
     args = parser.parse_args(argv)
     summary = asyncio.run(run_live(args))
     print("FINAL " + json.dumps(summary, ensure_ascii=False, sort_keys=True), flush=True)

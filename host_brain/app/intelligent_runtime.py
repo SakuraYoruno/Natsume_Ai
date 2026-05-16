@@ -201,7 +201,7 @@ def build_prompt_intelligence(*, request_id: str, runtime_input: Any) -> dict[st
             custom={"confidence": float(predicted_state.confidence)},
         )
 
-    bond_stage = str(bond_summary.get("stage") or "STRANGER").strip().upper() or "STRANGER"
+    bond_stage = str(bond_summary.get("stage") or "FRIEND").strip().upper() or "FRIEND"
 
     # ── 获取共同记忆叙事片段（安全降级）──────────────────────────
     _shared_memory_hints: list[str] = []
@@ -364,7 +364,7 @@ def apply_response_intelligence(
         }
 
     emotion_tag = str((emotion_context or {}).get("emotion_tag") or "").strip()
-    bond_stage = str((bond_summary or {}).get("stage") or "STRANGER").strip().upper() or "STRANGER"
+    bond_stage = str((bond_summary or {}).get("stage") or "FRIEND").strip().upper() or "FRIEND"
     reflection_meta: dict[str, Any] = {"status": "SKIPPED", "reason_code": "NOT_TRIGGERED"}
     revised_text = raw_text
     force_reflect = _is_direct_affection_turn(user_message)
@@ -463,7 +463,7 @@ def resolve_tts_route(
     from host_brain.app.dependencies import get_meta_learning_loop, get_tts_context_router
 
     emotion_tag = str((emotion_context or {}).get("emotion_tag") or "").strip().upper()
-    bond_stage = str((bond_summary or {}).get("stage") or "STRANGER").strip().upper() or "STRANGER"
+    bond_stage = str((bond_summary or {}).get("stage") or "FRIEND").strip().upper() or "FRIEND"
     vad = dict((emotion_context or {}).get("vad_vector") or {})
     valence = _coerce_optional_float(vad.get("valence"))
     arousal = _coerce_optional_float(vad.get("arousal"))
@@ -551,7 +551,7 @@ def _build_skill_execution_context(runtime_input: Any) -> dict[str, Any]:
         "user_message": str(getattr(runtime_input, "user_message", "") or "").strip(),
         "emotion_context": emotion_state,
         "emotion_snapshot": emotion_snapshot,
-        "bond_stage": str(bond_summary.get("stage") or "STRANGER").strip().upper() or "STRANGER",
+        "bond_stage": str(bond_summary.get("stage") or "FRIEND").strip().upper() or "FRIEND",
         "bond_score": bond_summary.get("score"),
         "bond_texture": bond_summary,
         "turn_count": int(emotion_state.get("turn_count") or 0),
@@ -628,8 +628,6 @@ def _sanitize_narrative(*, text: str, bond_stage: str, render_lang: str) -> str:
     for pattern, replacement in replacements:
         sanitized = re.sub(pattern, replacement, sanitized, flags=re.IGNORECASE)
     sanitized = re.sub(r"\s+", " ", sanitized).strip().lstrip(" ，,、;；:：").strip()
-    if bond_stage == "STRANGER" and render_lang == "zh":
-        sanitized = sanitized.replace("呢。", "。").replace("呀。", "。")
     return sanitized
 
 

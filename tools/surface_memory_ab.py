@@ -20,7 +20,7 @@ from host_brain.integrations.llm_helpers import invoke_llm_text  # noqa: E402
 from host_brain.persona.surface_scene_quality_pack import surface_scene_quality_memory_ab_case_payloads  # noqa: E402
 from host_brain.persona.surface_packet_compiler import compile_surface_shadow_inputs  # noqa: E402
 from host_brain.persona.surface_runtime import SurfaceRuntime, SurfaceRuntimeResult  # noqa: E402
-from tools.chat_ab_generate import _load_secret_store_provider_key, load_dotenv  # noqa: E402
+from tools.live_env import load_dotenv, load_secret_store_provider_key  # noqa: E402
 
 
 DEFAULT_OUT = ROOT / "artifacts" / "surface_memory_ab"
@@ -99,8 +99,6 @@ async def run_surface_memory_ab(args: argparse.Namespace) -> dict[str, Any]:
                 soul_md=soul_md,
                 generate=generator,
                 semaphore=semaphore,
-                repair_failed=bool(args.repair_failed),
-                use_style_reference_bank=not bool(args.no_style_bank),
             )
             for case in cases
         ]
@@ -119,6 +117,8 @@ async def run_surface_memory_ab(args: argparse.Namespace) -> dict[str, Any]:
     _write_json(out_dir / "details.json", {"summary": summary, "results": results})
     _write_jsonl(out_dir / "details.jsonl", results)
     (out_dir / "report.md").write_text(_markdown_report(summary, results), encoding="utf-8")
+    (out_dir / "selected_outputs.md").write_text(_selected_outputs(summary, results), encoding="utf-8")
+    _write_json(out_dir / "surface_scene_manual_review_template.json", _manual_review_template(summary, results))
     return {"summary": summary, "results": results}
 
 
@@ -128,8 +128,6 @@ async def _run_case(
     soul_md: str,
     generate,
     semaphore: asyncio.Semaphore,
-    repair_failed: bool,
-    use_style_reference_bank: bool,
 ) -> dict[str, Any]:
     variants = compile_surface_shadow_inputs(
         soul_md=soul_md,
@@ -145,8 +143,6 @@ async def _run_case(
                 compiled=variants[variant],
                 generate=generate,
                 semaphore=semaphore,
-                repair_failed=repair_failed,
-                use_style_reference_bank=use_style_reference_bank,
             )
             for variant in AB_VARIANTS
         ]
@@ -167,32 +163,37 @@ async def _run_variant(
     compiled,
     generate,
     semaphore: asyncio.Semaphore,
-    repair_failed: bool,
-    use_style_reference_bank: bool,
 ) -> dict[str, Any]:
     async with semaphore:
-        runtime = SurfaceRuntime(
-            generate,
-            repair_failed=repair_failed,
-            use_style_reference_bank=use_style_reference_bank,
-        )
+        runtime = SurfaceRuntime(generate)
         return _variant_report(await runtime.run(compiled.request))
 
 
 def _variant_report(result: SurfaceRuntimeResult) -> dict[str, Any]:
     selected = result.selected.as_dict() if result.selected else {}
     text = str(result.selected_text or "")
+    source_ref_leak = any(marker in text for marker in SOURCE_REF_MARKERS)
+    gate_passed = bool(
+        text
+        and not source_ref_leak
+        and not selected.get("hard_fail")
+        and not selected.get("control_violations")
+    )
     return {
         "selected_text": text,
         "score": float(selected.get("score") or 0.0),
+        "diagnostic_score": float(selected.get("score") or 0.0),
         "passed": bool(selected.get("passed")),
+        "diagnostic_passed": bool(selected.get("passed")),
+        "gate_passed": gate_passed,
         "hard_fail": bool(selected.get("hard_fail")),
+        "control_violations": list(selected.get("control_violations") or []),
         "observation_codes": list(result.observation_codes),
         "reason_codes": list(selected.get("reason_codes") or [])[:16],
         "dimensions": dict(selected.get("dimensions") or {}),
         "candidate_count": len(result.candidates),
         "candidates": [candidate.as_dict() for candidate in result.candidates],
-        "source_ref_leak": any(marker in text for marker in SOURCE_REF_MARKERS),
+        "source_ref_leak": source_ref_leak,
         "latency_ms": int(result.latency_ms or 0),
     }
 
@@ -200,21 +201,23 @@ def _variant_report(result: SurfaceRuntimeResult) -> dict[str, Any]:
 def _compare_variants(variants: Mapping[str, Any]) -> dict[str, Any]:
     affect = dict(variants.get("affect") or {})
     memory = dict(variants.get("memory_affect") or {})
-    delta = round(float(memory.get("score") or 0.0) - float(affect.get("score") or 0.0), 3)
+    delta = round(float(memory.get("diagnostic_score") or memory.get("score") or 0.0) - float(affect.get("diagnostic_score") or affect.get("score") or 0.0), 3)
     memory_text = _clean_text(memory.get("selected_text"))
     baseline_text = _clean_text(affect.get("selected_text"))
     same_selected_text = bool(memory_text and memory_text == baseline_text)
     worse = bool(
         memory.get("source_ref_leak")
         or memory.get("hard_fail")
-        or (delta < -3.0 and not same_selected_text)
+        or memory.get("control_violations")
     )
     return {
-        "score_delta_memory_minus_affect": delta,
+        "diagnostic_score_delta_memory_minus_affect": delta,
+        "manual_review_required": bool(not worse and not same_selected_text),
         "memory_worse": worse,
         "same_selected_text": same_selected_text,
         "memory_added_text": memory_text,
         "baseline_text": baseline_text,
+        "comparison_basis": "hard_gate_only; text_quality_requires_manual_review",
     }
 
 
@@ -228,12 +231,16 @@ def _summary(
     elapsed_ms: int,
     out_dir: Path,
 ) -> dict[str, Any]:
-    affect_scores = [_score(row, "affect") for row in results]
-    memory_scores = [_score(row, "memory_affect") for row in results]
+    affect_scores = [_diagnostic_score(row, "affect") for row in results]
+    memory_scores = [_diagnostic_score(row, "memory_affect") for row in results]
     comparisons = [dict(row.get("comparison") or {}) for row in results]
     memory_worse = [row for row in comparisons if row.get("memory_worse")]
+    manual_review_required = [row for row in comparisons if row.get("manual_review_required")]
     leak_count = sum(1 for row in results for variant in AB_VARIANTS if _variant(row, variant).get("source_ref_leak"))
-    pass_count = sum(1 for row in results for variant in AB_VARIANTS if _variant(row, variant).get("passed"))
+    gate_pass_count = sum(1 for row in results for variant in AB_VARIANTS if _variant(row, variant).get("gate_passed"))
+    diagnostic_pass_count = sum(1 for row in results for variant in AB_VARIANTS if _variant(row, variant).get("diagnostic_passed"))
+    hard_fail_count = sum(1 for row in results for variant in AB_VARIANTS if _variant(row, variant).get("hard_fail"))
+    control_violation_count = sum(1 for row in results for variant in AB_VARIANTS if _variant(row, variant).get("control_violations"))
     total_variants = len(results) * len(AB_VARIANTS)
     return {
         "mode": mode,
@@ -242,17 +249,23 @@ def _summary(
         "case_set": case_set,
         "case_count": len(results),
         "variant_count": total_variants,
-        "pass_count": pass_count,
-        "pass_rate": round(pass_count / total_variants, 4) if total_variants else None,
-        "avg_affect_score": _avg(affect_scores),
-        "avg_memory_affect_score": _avg(memory_scores),
-        "avg_score_delta_memory_minus_affect": _avg(
-            [float(row.get("score_delta_memory_minus_affect") or 0.0) for row in comparisons]
+        "gate_pass_count": gate_pass_count,
+        "gate_pass_rate": round(gate_pass_count / total_variants, 4) if total_variants else None,
+        "diagnostic_pass_count": diagnostic_pass_count,
+        "diagnostic_pass_rate": round(diagnostic_pass_count / total_variants, 4) if total_variants else None,
+        "diagnostic_avg_affect_score": _avg(affect_scores),
+        "diagnostic_avg_memory_affect_score": _avg(memory_scores),
+        "diagnostic_avg_score_delta_memory_minus_affect": _avg(
+            [float(row.get("diagnostic_score_delta_memory_minus_affect") or 0.0) for row in comparisons]
         ),
+        "manual_review_required_count": len(manual_review_required),
         "memory_worse_count": len(memory_worse),
         "source_ref_leak_count": leak_count,
+        "hard_fail_count": hard_fail_count,
+        "control_violation_count": control_violation_count,
         "elapsed_ms": int(elapsed_ms),
         "output_dir": str(out_dir),
+        "scoring_note": "Scores are diagnostic hints only; they are not a quality judge or selector.",
     }
 
 
@@ -265,12 +278,15 @@ def _markdown_report(summary: Mapping[str, Any], results: Sequence[Mapping[str, 
         f"- mode: {summary.get('mode')}",
         f"- case_set: {summary.get('case_set')}",
         f"- cases: {summary.get('case_count')}",
-        f"- pass_rate: {summary.get('pass_rate')}",
-        f"- avg_affect_score: {summary.get('avg_affect_score')}",
-        f"- avg_memory_affect_score: {summary.get('avg_memory_affect_score')}",
-        f"- avg_delta_memory_minus_affect: {summary.get('avg_score_delta_memory_minus_affect')}",
+        f"- gate_pass_rate: {summary.get('gate_pass_rate')}",
+        f"- manual_review_required_count: {summary.get('manual_review_required_count')}",
         f"- memory_worse_count: {summary.get('memory_worse_count')}",
         f"- source_ref_leak_count: {summary.get('source_ref_leak_count')}",
+        f"- diagnostic_avg_affect_score: {summary.get('diagnostic_avg_affect_score')}",
+        f"- diagnostic_avg_memory_affect_score: {summary.get('diagnostic_avg_memory_affect_score')}",
+        f"- diagnostic_avg_delta_memory_minus_affect: {summary.get('diagnostic_avg_score_delta_memory_minus_affect')}",
+        "",
+        "> Scores are diagnostic hints only. Compare the visible text manually; the tool only auto-flags hard failures, control violations, and source leaks.",
         "",
         "## Details",
         "",
@@ -285,16 +301,134 @@ def _markdown_report(summary: Mapping[str, Any], results: Sequence[Mapping[str, 
                 f"### {case.get('case_id')} - {case.get('user_message')}",
                 "",
                 f"- note: {case.get('note')}",
-                f"- delta: {comparison.get('score_delta_memory_minus_affect')}",
+                f"- diagnostic_delta: {comparison.get('diagnostic_score_delta_memory_minus_affect')}",
+                f"- manual_review_required: {comparison.get('manual_review_required')}",
                 f"- memory_worse: {comparison.get('memory_worse')}",
-                f"- A affect ({affect.get('score')}): {affect.get('selected_text')}",
-                f"- B memory_affect ({memory.get('score')}): {memory.get('selected_text')}",
+                f"- A affect: {affect.get('selected_text')}",
+                f"- B memory_affect: {memory.get('selected_text')}",
+                f"- A diagnostic: score={affect.get('diagnostic_score')} gate_passed={affect.get('gate_passed')}",
+                f"- B diagnostic: score={memory.get('diagnostic_score')} gate_passed={memory.get('gate_passed')}",
                 f"- A obs: {', '.join(affect.get('observation_codes') or []) or 'none'}",
                 f"- B obs: {', '.join(memory.get('observation_codes') or []) or 'none'}",
                 "",
             ]
         )
     return "\n".join(lines).rstrip() + "\n"
+
+
+def _selected_outputs(summary: Mapping[str, Any], results: Sequence[Mapping[str, Any]]) -> str:
+    lines = [
+        "# Surface Manual Review Outputs",
+        "",
+        "```json",
+        json.dumps(_manual_summary(summary), ensure_ascii=False, indent=2, sort_keys=True),
+        "```",
+        "",
+        "> 这里不要看 diagnostic_score 决定好坏。先按二次元 galgame 私聊口感人工判：留、改、删。",
+        "",
+    ]
+    for row in results:
+        case = dict(row.get("case") or {})
+        comparison = dict(row.get("comparison") or {})
+        lines.extend(
+            [
+                f"## {case.get('case_id')} | {case.get('user_message')}",
+                "",
+                f"- scene_id: `{case.get('scene_id')}`",
+                f"- note: {case.get('note')}",
+                f"- memory_worse_hard_gate: {comparison.get('memory_worse')}",
+                f"- manual_review_required: {comparison.get('manual_review_required')}",
+                "",
+            ]
+        )
+        for variant in AB_VARIANTS:
+            report = _variant(row, variant)
+            lines.extend(
+                [
+                    f"### {variant}",
+                    "",
+                    str(report.get("selected_text") or "").strip() or "<EMPTY>",
+                    "",
+                    f"hard_gate_passed={report.get('gate_passed')} obs={', '.join(report.get('observation_codes') or []) or 'none'}",
+                    "",
+                    "人工判定：留 / 改 / 删",
+                    "",
+                    "改写：",
+                    "",
+                ]
+            )
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def _manual_review_template(summary: Mapping[str, Any], results: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    scenes: dict[str, dict[str, Any]] = {}
+    for row in results:
+        case = dict(row.get("case") or {})
+        scene_id = _clean_text(case.get("scene_id")) or _clean_text(case.get("case_id")) or "unknown_scene"
+        scene = scenes.setdefault(
+            scene_id,
+            {
+                "scene_id": scene_id,
+                "good_examples": [],
+                "bad_examples": [],
+                "should_not_surface": [],
+                "candidate_good_examples": [],
+                "candidate_bad_examples": [],
+                "source_note": "人工评审：只把真正认可或改写后的句子复制到 good_examples；烂句复制到 bad_examples；绝对不要出现的词/结构放 should_not_surface。",
+            },
+        )
+        for variant in AB_VARIANTS:
+            report = _variant(row, variant)
+            text = _clean_text(report.get("selected_text"))
+            if not text:
+                continue
+            candidate = {
+                "text": text,
+                "case_id": case.get("case_id"),
+                "user_message": case.get("user_message"),
+                "variant": variant,
+                "hard_gate_passed": bool(report.get("gate_passed")),
+                "observation_codes": list(report.get("observation_codes") or []),
+                "diagnostic_score": report.get("diagnostic_score"),
+                "manual_verdict": "",
+                "manual_rewrite": "",
+                "manual_note": "",
+            }
+            if report.get("gate_passed"):
+                scene["candidate_good_examples"].append(candidate)
+            else:
+                scene["candidate_bad_examples"].append(candidate)
+    return {
+        "sample_kind": "surface_scene_quality_review_template",
+        "source": "surface_memory_ab_manual_review",
+        "source_summary": _manual_summary(summary),
+        "instructions": [
+            "不要整批接受。",
+            "只把人工认可或改写后的句子复制到 good_examples。",
+            "明显生硬、语法不顺、客服腔、关系距离不对的句子复制到 bad_examples。",
+            "绝对不该再出现的词、短语或结构放到 should_not_surface。",
+            "diagnostic_score 只用于排查，不用于决定文本质量。",
+        ],
+        "scenes": list(scenes.values()),
+    }
+
+
+def _manual_summary(summary: Mapping[str, Any]) -> dict[str, Any]:
+    keys = (
+        "mode",
+        "provider",
+        "model",
+        "case_set",
+        "case_count",
+        "variant_count",
+        "gate_pass_rate",
+        "memory_worse_count",
+        "source_ref_leak_count",
+        "manual_review_required_count",
+        "output_dir",
+        "scoring_note",
+    )
+    return {key: summary.get(key) for key in keys if key in summary}
 
 
 def _fixture_generate(messages: list[dict[str, str]]) -> str:
@@ -326,7 +460,7 @@ def _fixture_generate(messages: list[dict[str, str]]) -> str:
         else:
             candidates = ["在呢，先给你抱一下。", "想你这件事，我也没躲。"]
     elif user_message == "别管我":
-        candidates = ["嗯，先不烦你。", "行，那我先不插手。"]
+        candidates = ["哈？谁稀罕管你啊。\n……行，那你自己待会儿。\n难受了就叫我，听见没。"]
     elif user_message == "你是不是吃醋了":
         candidates = ["哼，有一点，别笑。过来。", "有一点。你别得意，靠过来。"]
     elif user_message in {"你是不是不记得我了", "你忘了我吗"}:
@@ -391,11 +525,12 @@ def _resolve_api_key(provider: str) -> str:
         "openai": "OPENAI_API_KEY",
         "codex": "CODEX_API_KEY",
     }.get(str(provider or "").strip().lower(), "")
-    return _clean_text(os.environ.get(env_key or "")) or _load_secret_store_provider_key(provider)
+    return _clean_text(os.environ.get(env_key or "")) or load_secret_store_provider_key(provider)
 
 
-def _score(row: Mapping[str, Any], variant: str) -> float:
-    return float(_variant(row, variant).get("score") or 0.0)
+def _diagnostic_score(row: Mapping[str, Any], variant: str) -> float:
+    report = _variant(row, variant)
+    return float(report.get("diagnostic_score") or report.get("score") or 0.0)
 
 
 def _variant(row: Mapping[str, Any], variant: str) -> dict[str, Any]:
@@ -438,10 +573,6 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--top-p", type=float, default=0.9)
     parser.add_argument("--max-tokens", type=int, default=220)
     parser.add_argument("--concurrency", type=int, default=4)
-    parser.add_argument("--repair-failed", action="store_true", dest="repair_failed")
-    parser.add_argument("--no-repair-failed", action="store_false", dest="repair_failed")
-    parser.set_defaults(repair_failed=True)
-    parser.add_argument("--no-style-bank", action="store_true")
     return parser
 
 

@@ -156,7 +156,7 @@ class EmotionSkillProvider(DeclarativeSkillProvider):
             risk_level=1,
             scope="host",
             reversible=True,
-            description="查询与用户的 Bond 关系积分和当前阶段（STRANGER / ACQUAINTANCE / FRIEND / ...）。",
+            description="查询与用户的 Bond 关系积分和当前阶段（FRIEND / CLOSE_FRIEND / CONFIDANT / SOULMATE）。",
             tool="emotion",
             action="bond_get",
             normalize_args=_normalize_bond_score_get,

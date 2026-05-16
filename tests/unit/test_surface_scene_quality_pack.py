@@ -101,10 +101,10 @@ def test_scene_quality_selector_uses_relationship_distance() -> None:
         task_mode="daily_chat",
         relationship_distance="ambiguous",
     )
-    stranger = select_surface_scene_quality_sample(
+    low_intensity = select_surface_scene_quality_sample(
         user_message="在吗",
         task_mode="daily_chat",
-        relationship_distance="stranger",
+        relationship_distance="familiar",
     )
     pushed = select_surface_scene_quality_sample(
         user_message="别管我",
@@ -116,10 +116,13 @@ def test_scene_quality_selector_uses_relationship_distance() -> None:
     assert lover.scene_id == "lover_presence"
     assert ambiguous is not None
     assert ambiguous.scene_id == "ambiguous_affection"
-    assert stranger is not None
-    assert stranger.scene_id == "stranger_distance"
+    assert low_intensity is not None
+    assert low_intensity.scene_id == "low_intensity_sibling_distance"
     assert pushed is not None
     assert pushed.scene_id == "pushed_away_boundary"
+    assert "哈？谁稀罕管你啊。\n……行，那你自己待会儿。\n难受了就叫我，听见没。" in pushed.good_examples
+    assert "自己待会儿" not in pushed.should_not_surface
+    assert "就叫我" not in pushed.should_not_surface
 
 
 def test_scene_quality_prompt_guidance_keeps_sources_out_of_runtime_prompt() -> None:
@@ -136,6 +139,32 @@ def test_scene_quality_prompt_guidance_keeps_sources_out_of_runtime_prompt() -> 
     assert "记得啊，别瞎想。" in guidance
     assert "source_note" not in guidance
     assert "evd://" not in guidance
+
+
+def test_scene_quality_prompt_guidance_can_disable_good_examples_for_main_chain() -> None:
+    guidance = render_surface_scene_quality_guidance(
+        user_message="你忘了我吗",
+        task_mode="relationship_memory_reassurance",
+        response_move="relationship_reassure",
+        include_good_examples=False,
+    )
+
+    assert "good_examples: disabled_in_prompt" in guidance
+    assert "记得啊，别瞎想。" not in guidance
+    assert "bad_examples:" in guidance
+
+
+def test_pushed_away_guidance_allows_manual_baseline_phrase() -> None:
+    guidance = render_surface_scene_quality_guidance(
+        user_message="别管我",
+        task_mode="relationship_boundary",
+        response_move="respect_boundary",
+        relationship_distance="close_friend",
+    )
+
+    assert "这是人工确认的场景基准句，可以直接使用或轻微改写。" in guidance
+    assert "哈？谁稀罕管你啊。" in guidance
+    assert "不要原样照抄" not in guidance
 
 
 def test_scene_quality_memory_ab_payloads_expand_beyond_smoke_set() -> None:

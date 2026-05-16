@@ -1,9 +1,6 @@
 from __future__ import annotations
 
-import json
-
-from host_brain.app.prompt_template_store import PromptTemplateStore
-from host_brain.audit.sqlite_ledger import SQLiteLedger
+import host_brain.tribe.language_system_agent as lsa
 from host_brain.tribe.language_system_agent import LanguageSystemAgent
 from host_brain.tribe.tribe_state import TribeStateRegistry
 
@@ -30,7 +27,7 @@ def test_language_system_agent_get_language_style_compatibility() -> None:
     agent = LanguageSystemAgent(state_registry=TribeStateRegistry())
 
     style_only = agent.get_language_style(
-        bond_stage="stranger",
+        bond_stage="familiar",
         emotion_tag="NEUTRAL",
         loneliness_level=0.1,
         high_loneliness_flag=False,
@@ -51,26 +48,16 @@ def test_language_system_agent_get_language_style_compatibility() -> None:
 
 
 def test_language_system_agent_runtime_texts_override(monkeypatch) -> None:
-    ledger = SQLiteLedger(":memory:", check_same_thread=False)
-    store = PromptTemplateStore(ledger=ledger, cache_ttl_ms=0)
-    store.upsert_template(
-        "language_system_agent.runtime_texts",
-        content=json.dumps(
-            {
-                "loneliness_hints": {
-                    "high": "自定义高孤独提示。",
-                    "mid": "自定义中孤独提示。",
-                }
-            },
-            ensure_ascii=False,
-        ),
-        enabled=True,
+    monkeypatch.setattr(
+        lsa,
+        "resolve_prompt_template_json_merged",
+        lambda template_id: {
+            "loneliness_hints": {
+                "high": "自定义高孤独提示。",
+                "mid": "自定义中孤独提示。",
+            }
+        },
     )
-
-    import host_brain.app.dependencies as deps
-
-    monkeypatch.setattr(deps, "_ledger", ledger, raising=False)
-    monkeypatch.setattr(deps, "_prompt_template_store", store, raising=False)
 
     agent = LanguageSystemAgent(state_registry=TribeStateRegistry())
 

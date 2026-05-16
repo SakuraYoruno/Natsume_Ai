@@ -28,7 +28,7 @@
     "governor_decision": "APPROVE",
     "skill_status": "SUCCESS",
     "vts_status": "APPLIED",
-    "vts_expression_id": "exp_happy_01",
+    "vts_expression_id": "HK_Happy",
     "voice_status": "COMPLETED",
     "audit_trace_status": "COMPLETE",
     "audit_tables_present": ["channel_io_log", "intent_log", "governor_log", "skill_exec_log", "avatar_action_log", "voice_event_log"]

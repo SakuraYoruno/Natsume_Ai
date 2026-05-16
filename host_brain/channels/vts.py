@@ -16,6 +16,10 @@ from host_brain.core.errors import (
     VTS_DEGRADED_FALLBACK,
 )
 from host_brain.core.ids import new_request_id, now_ms
+from host_brain.channels.vts_runtime_mapping import (
+    VTS_EMOTION_TAG_ALIASES,
+    load_runtime_emotion_mapping,
+)
 
 _logger = logging.getLogger("Natsume.vts")
 
@@ -50,35 +54,16 @@ TALK_END = "TALK_END"
 TRIGGER_HOST = "HOST"
 TRIGGER_LLM = "LLM"
 
-EMOTION_TO_EXPRESSION_ID: dict[str, str] = {
-    # 原有 6 种
-    "NEUTRAL": "exp_neutral_01",
-    "HAPPY": "exp_happy_01",
-    "SAD": "exp_sad_01",
-    "ANGRY": "exp_angry_01",
-    "SURPRISED": "exp_surprised_01",
-    "THINKING": "exp_thinking_01",
-    # M28-L（OPT-34）：补全 10 种缺失情感的表情映射
-    "EXCITED": "exp_excited_01",
-    "CALM": "exp_calm_01",
-    "FRUSTRATED": "exp_frustrated_01",
-    "ANXIOUS": "exp_anxious_01",
-    "LOVING": "exp_loving_01",
-    "EMBARRASSED": "exp_embarrassed_01",
-    "CONFUSED": "exp_confused_01",
-    "BORED": "exp_bored_01",
-    "PROUD": "exp_proud_01",
-    "GRATEFUL": "exp_grateful_01",
-}
+EMOTION_TO_EXPRESSION_ID: dict[str, str] = load_runtime_emotion_mapping()
 
 # M28-L（OPT-34）：未知情感 fallback 映射（按情感极性分组）
 EMOTION_FALLBACK_MAP: dict[str, str] = {
     # 正向情感 → happy
-    "POSITIVE": "exp_happy_01",
+    "POSITIVE": EMOTION_TO_EXPRESSION_ID.get("HAPPY", "HK_Happy"),
     # 负向情感 → sad
-    "NEGATIVE": "exp_sad_01",
+    "NEGATIVE": EMOTION_TO_EXPRESSION_ID.get("SAD", "哭哭"),
     # 中性/未知 → neutral
-    "UNKNOWN": "exp_neutral_01",
+    "UNKNOWN": EMOTION_TO_EXPRESSION_ID.get("NEUTRAL", "移除所有按键表情"),
 }
 
 DEGRADED_FALLBACK_EXPRESSION_TAG = "NEUTRAL"
@@ -409,10 +394,10 @@ def resolve_vts_expression(
 
 
 def _normalize_emotion_tag(value: str | None) -> str | None:
-    normalized = str(value or "").strip().upper()
+    normalized = str(value or "").strip().upper().replace("-", "_").replace(" ", "_")
     if not normalized:
         return None
-    return normalized
+    return VTS_EMOTION_TAG_ALIASES.get(normalized, normalized)
 
 
 def _log_result(

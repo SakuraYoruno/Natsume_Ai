@@ -66,8 +66,8 @@ def test_persona_growth_tracker_prod_one_time_rule_is_not_reapplied() -> None:
     tracker = PersonaGrowthTracker(engine=PersonaEngine.get_instance())
     user_id = 'prod-growth-onetime-user'
 
-    first = tracker.on_stage_promoted(user_id, 'ACQUAINTANCE', 'FRIEND', ts_ms=1775123010000)
-    second = tracker.on_stage_promoted(user_id, 'ACQUAINTANCE', 'FRIEND', ts_ms=1775123011000)
+    first = tracker.on_stage_promoted(user_id, 'FRIEND', 'CLOSE_FRIEND', ts_ms=1775123010000)
+    second = tracker.on_stage_promoted(user_id, 'FRIEND', 'CLOSE_FRIEND', ts_ms=1775123011000)
 
     assert first.applied is True
     assert second.applied is False

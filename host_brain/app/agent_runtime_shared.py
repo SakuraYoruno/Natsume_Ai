@@ -60,11 +60,6 @@ from host_brain.core.soft_fail import soft_fail  # OPT-3 Batch B：业务路径�
 _logger = logging.getLogger("Natsume.agent_runtime_shared")
 
 
-def _chat_kernel_v2_enabled() -> bool:
-    raw = str(os.environ.get("HOST_CHAT_KERNEL_V2_ENABLED") or "true").strip().lower()
-    return raw not in {"0", "false", "no", "off"}
-
-
 def _resolve_post_process_executor_workers() -> int:
     raw = str(os.environ.get("HOST_POST_PROCESS_EXECUTOR_WORKERS") or "4").strip()
     try:
@@ -1869,7 +1864,7 @@ def _should_buffer_stream_output(
             reflection.should_reflect(
                 emotion_tag=str((emotion_context or {}).get("emotion_tag") or ""),
                 intent=str((bond_summary or {}).get("intent") or ""),
-                bond_stage=str((bond_summary or {}).get("stage") or "STRANGER"),
+                bond_stage=str((bond_summary or {}).get("stage") or "FRIEND"),
                 turn_count=int((emotion_context or {}).get("turn_count") or 1),
             )
         )
@@ -2127,16 +2122,12 @@ async def _cortex_orchestrator_sse_generator_impl(
         sanitized_message=sanitized_message,
     )
 
-    task_progress_answer = (
-        None
-        if _chat_kernel_v2_enabled()
-        else _task_progress_fastpath(
-            request_id=request_id,
-            session_id=session_id,
-            person_id=person_id,
-            user_message=sanitized_message,
-            render_target_lang=render_target_lang,
-        )
+    task_progress_answer = _task_progress_fastpath(
+        request_id=request_id,
+        session_id=session_id,
+        person_id=person_id,
+        user_message=sanitized_message,
+        render_target_lang=render_target_lang,
     )
     if task_progress_answer:
         narrative = _sanitize_output(str(task_progress_answer).strip())
@@ -2188,16 +2179,12 @@ async def _cortex_orchestrator_sse_generator_impl(
         )
         return
 
-    recent_turn_answer = (
-        None
-        if _chat_kernel_v2_enabled()
-        else _recent_turn_answer(
-            request_id=request_id,
-            session_id=session_id,
-            person_id=person_id,
-            user_message=sanitized_message,
-            render_target_lang=render_target_lang,
-        )
+    recent_turn_answer = _recent_turn_answer(
+        request_id=request_id,
+        session_id=session_id,
+        person_id=person_id,
+        user_message=sanitized_message,
+        render_target_lang=render_target_lang,
     )
     if recent_turn_answer:
         narrative = _sanitize_output(str(recent_turn_answer).strip())
@@ -2257,7 +2244,7 @@ async def _cortex_orchestrator_sse_generator_impl(
             user_message=sanitized_message,
             render_target_lang=render_target_lang,
         )
-        if (not _chat_kernel_v2_enabled()) and _parse_bool_env("HOST_CLARIFICATION_DIRECT_ENABLED", default=False)
+        if _parse_bool_env("HOST_CLARIFICATION_DIRECT_ENABLED", default=False)
         else None
     )
     if clarification_direct_answer:
@@ -2659,6 +2646,7 @@ async def _async_post_process(
     skip_default_mode_on_conversation_end = bool(
         normalized_trace_stage_meta.get("skip_default_mode_on_conversation_end")
     )
+    surface_main_chain_used = bool(normalized_trace_stage_meta.get("surface_main_chain_used"))
 
     try:
         from host_brain.tribe.default_mode_agent import mark_recent_foreground_interaction  # noqa: PLC0415
@@ -2666,6 +2654,36 @@ async def _async_post_process(
         mark_recent_foreground_interaction(ts_ms=int(time.time() * 1000))
     except Exception:
         pass
+
+    if surface_main_chain_used:
+        try:
+            from host_brain.app.surface_emotion_bond_flow import apply_surface_emotion_bond_flow  # noqa: PLC0415
+
+            surface_bond_result = apply_surface_emotion_bond_flow(
+                request_id=request_id,
+                person_id=person_id,
+                session_id=session_id,
+                user_message=user_message,
+                assistant_reply=narrative,
+                emotion_context=emotion_context,
+                bond_summary=bond_summary,
+                reply_plan=reply_plan,
+                retrieval_evidence_items=retrieval_evidence_items,
+                ts_ms=ts_ms,
+            )
+            normalized_trace_stage_meta = {
+                **normalized_trace_stage_meta,
+                "surface_emotion_bond_flow": surface_bond_result,
+            }
+        except Exception as exc:
+            _logger.debug("[%s] surface emotion-bond flow failed: %s", request_id, exc)
+            normalized_trace_stage_meta = {
+                **normalized_trace_stage_meta,
+                "surface_emotion_bond_flow": {
+                    "status": "DEGRADED",
+                    "reason_code": "SURFACE_EMOTION_BOND_FLOW_FAILED",
+                },
+            }
 
     try:
         await _persist_post_process_audit(
@@ -2784,18 +2802,21 @@ async def _async_post_process(
         except Exception as exc:
             _logger.debug("[%s] cortex_orchestrator post_process persona session_end failed: %s", request_id, exc)
 
-    try:
-        from host_brain.tribe.cortex_agent import get_cortex_agent  # noqa: PLC0415
+    if surface_main_chain_used:
+        _logger.debug("[%s] cortex_orchestrator skipped legacy bond update: surface flow handled it", request_id)
+    else:
+        try:
+            from host_brain.tribe.cortex_agent import get_cortex_agent  # noqa: PLC0415
 
-        await get_cortex_agent().post_process_bond_update(
-            request_id=request_id,
-            session_id=session_id,
-            user_message=user_message,
-            emotion_context=emotion_context,
-            ts_ms=ts_ms,
-        )
-    except Exception as exc:
-        _logger.debug("[%s] cortex_orchestrator post_process bond failed: %s", request_id, exc)
+            await get_cortex_agent().post_process_bond_update(
+                request_id=request_id,
+                session_id=session_id,
+                user_message=user_message,
+                emotion_context=emotion_context,
+                ts_ms=ts_ms,
+            )
+        except Exception as exc:
+            _logger.debug("[%s] cortex_orchestrator post_process bond failed: %s", request_id, exc)
 
     try:
         from host_brain.tribe.cortex_agent import get_cortex_agent as _get_cortex  # noqa: PLC0415

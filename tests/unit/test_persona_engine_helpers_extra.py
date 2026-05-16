@@ -137,12 +137,12 @@ def test_get_expression_adapter_handles_mid_openness_bright_and_subdued() -> Non
     bright = engine.get_expression_adapter(
         traits,
         {"label": "HAPPY", "valence": 0.7, "arousal": 0.85},
-        "ACQUAINTANCE",
+        "CLOSE_FRIEND",
     )
     subdued = engine.get_expression_adapter(
         traits,
         {"label": "SAD", "valence": -0.6, "arousal": 0.2},
-        "ACQUAINTANCE",
+        "CLOSE_FRIEND",
     )
 
     assert bright.style_hint == "自信坚定"

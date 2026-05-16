@@ -4,7 +4,7 @@
   "session_id": "session_bond_001",
   "topic_id": "topic_trust_support",
   "capability_hint": "SUPPORTIVE",
-  "stage": "STRANGER",
+  "stage": "FRIEND",
   "trend": "稳定",
   "evidence_refs": [
     "evidence::bond::summary::001"

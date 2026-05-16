@@ -57,8 +57,6 @@ _BOND_CARE_BONUS: dict[str, float] = {
     "CLOSE": 0.20,
     "CLOSE_FRIEND": 0.20,
     "FRIEND": 0.16,
-    "ACQUAINTANCE": 0.12,
-    "STRANGER": 0.08,
 }
 
 # willingness 低值对应 withdraw 增益
@@ -196,7 +194,7 @@ class MotiveEngine:
         loneliness = float(offline.get("loneliness_level") or 0.0)
         anticipation = float(offline.get("anticipation_level") or 0.0)
         anticipation_topics = list(offline.get("anticipation_topics") or [])
-        bond_stage = str(bond.get("stage") or "STRANGER").strip().upper()
+        bond_stage = str(bond.get("stage") or "FRIEND").strip().upper()
         shared_count = int(inp.shared_memory_count or bond.get("shared_memory_count") or 0)
         pending_topics = list(inp.pending_followup_topics or [])
         emotion_intensity = float(emotion.get("emotion_intensity") or 0.0)
@@ -340,11 +338,9 @@ class MotiveEngine:
             protect += 0.20
             reasons.append("protect:topic_resistance")
 
-        # Early stepsibling phase: keep a little restraint, but never treat it
-        # as stranger distance.
-        if bond_stage in {"STRANGER", "ACQUAINTANCE"}:
+        if bond_stage == "FRIEND":
             protect += 0.06
-            reasons.append("protect:early_stepsibling_boundary")
+            reasons.append("protect:sibling_baseline_boundary")
 
         # 反思保护
         if withdraw_hint:

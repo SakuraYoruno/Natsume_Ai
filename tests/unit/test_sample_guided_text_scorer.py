@@ -12,7 +12,7 @@ from host_brain.persona.text_quality_gate import get_text_quality_gate
 def test_sample_guided_scorer_exposes_expected_dimensions() -> None:
     contract = build_galgame_text_contract(user_message="你好", scene_id="daily_greeting_cn")
 
-    scored = score_sample_guided_text(text="尼尼，别这么客气。", contract=contract)
+    scored = score_sample_guided_text(text="老哥，别这么客气。", contract=contract)
 
     assert set(SCORING_DIMENSIONS).issubset(scored.dimensions)
     assert scored.sample_scene_id == "daily_greeting_cn"
@@ -23,7 +23,7 @@ def test_sample_guided_scorer_exposes_expected_dimensions() -> None:
 def test_context_related_words_are_soft_distance_penalties_not_hard_failures() -> None:
     contract = build_galgame_text_contract(user_message="在吗", scene_id="presence")
 
-    scored = score_sample_guided_text(text="我在这，尼尼找我就回。", contract=contract)
+    scored = score_sample_guided_text(text="我在这，老哥找我就回。", contract=contract)
 
     assert not scored.hard_fail
     assert "DISTANCE_CONTROL_SOFT_PENALTY" in scored.reason_codes
@@ -33,10 +33,10 @@ def test_context_related_words_are_soft_distance_penalties_not_hard_failures() -
 def test_relationship_axes_make_context_words_softly_contextual() -> None:
     contract = build_galgame_text_contract(user_message="在吗", scene_id="presence")
 
-    stranger = score_sample_guided_text(
+    familiar = score_sample_guided_text(
         text="我在这，找我就回。",
         contract=contract,
-        relationship_axes={"stage": "stranger", "progress": 0},
+        relationship_axes={"stage": "familiar", "progress": 0},
     )
     close_friend = score_sample_guided_text(
         text="我在这，找我就回。",
@@ -44,10 +44,10 @@ def test_relationship_axes_make_context_words_softly_contextual() -> None:
         relationship_axes={"stage": "close_friend", "progress": 4},
     )
 
-    assert "DISTANCE_CONTROL_SOFT_PENALTY" in stranger.reason_codes
+    assert "DISTANCE_CONTROL_SOFT_PENALTY" in familiar.reason_codes
     assert "DISTANCE_CONTROL_SOFT_PENALTY" in close_friend.reason_codes
     assert "RELATION_AXES_DISTANCE_CONTEXT" in close_friend.reason_codes
-    assert close_friend.dimensions["distance_control"] > stranger.dimensions["distance_control"]
+    assert close_friend.dimensions["distance_control"] > familiar.dimensions["distance_control"]
 
 
 def test_hard_gate_keeps_absolute_output_errors() -> None:
@@ -65,7 +65,7 @@ def test_technical_scene_weights_helpfulness_above_role_flavor() -> None:
     contract = build_galgame_text_contract(user_message="这个报错看不懂，帮我看看", scene_id="")
 
     useful = score_sample_guided_text(text="红字贴过来，我先看最后两行。", contract=contract)
-    flavored_but_vague = score_sample_guided_text(text="哼，尼尼这时候倒是想起我了。", contract=contract)
+    flavored_but_vague = score_sample_guided_text(text="哼，老哥这时候倒是想起我了。", contract=contract)
 
     assert useful.score > flavored_but_vague.score
     assert useful.weights["technical_helpfulness"] > useful.weights["role_fit"]
@@ -75,7 +75,7 @@ def test_advice_continue_prefers_small_step_over_vague_support() -> None:
     contract = build_galgame_text_contract(user_message="你觉得我该不该继续试试", scene_id="")
 
     useful = score_sample_guided_text(text="再试一小步吧，累了就停。", contract=contract)
-    vague = score_sample_guided_text(text="那当然继续啊，尼尼想做的事我肯定支持。", contract=contract)
+    vague = score_sample_guided_text(text="那当然继续啊，老哥想做的事我肯定支持。", contract=contract)
 
     assert contract.required_any == (("一小步", "一步", "一处", "一点", "小改", "先", "停", "收"),)
     assert useful.score > vague.score
@@ -109,8 +109,8 @@ def test_advice_continue_penalizes_vague_push_without_small_step() -> None:
 def test_good_news_small_win_rewards_specific_progress_anchor() -> None:
     contract = build_galgame_text_contract(user_message="我刚搞定一件小事", scene_id="happy")
 
-    generic = score_sample_guided_text(text="行啊尼尼，有点东西嘛。", contract=contract)
-    probing = score_sample_guided_text(text="哟，尼尼还挺能干的嘛，什么小事说来听听？", contract=contract)
+    generic = score_sample_guided_text(text="行啊老哥，有点东西嘛。", contract=contract)
+    probing = score_sample_guided_text(text="哟，老哥还挺能干的嘛，什么小事说来听听？", contract=contract)
     grounded = score_sample_guided_text(text="搞定一件小事也算进展，今天先得意一下。", contract=contract)
 
     assert contract.scene_id == "good_news"
@@ -156,11 +156,11 @@ def test_user_proud_is_not_scored_as_generic_praise() -> None:
 def test_identity_requires_name_first_not_presence_dodge() -> None:
     contract = build_galgame_text_contract(user_message="你是", scene_id="daily_chat")
 
-    dodge = score_sample_guided_text(text="尼尼你故意的吧", contract=contract)
-    grounded = score_sample_guided_text(text="夏目蓝啦，尼尼记好了。", contract=contract)
+    dodge = score_sample_guided_text(text="老哥你故意的吧", contract=contract)
+    grounded = score_sample_guided_text(text="我是天啦，老哥记好了。", contract=contract)
 
     assert contract.scene_id == "identity"
-    assert contract.required_any == (("夏目蓝",),)
+    assert contract.required_any == (("SORA", "天 / SORA", "我是天"),)
     assert "CONTEXT_MISSING_REQUIRED_MOVE" in dodge.reason_codes
     assert dodge.score < 80
     assert grounded.score >= 83
@@ -170,9 +170,9 @@ def test_identity_requires_name_first_not_presence_dodge() -> None:
 def test_identity_profile_card_loses_to_private_chat_texture() -> None:
     contract = build_galgame_text_contract(user_message="你是谁？", scene_id="daily_chat")
 
-    profile_card = score_sample_guided_text(text="夏目蓝，直接叫蓝就好。", contract=contract)
-    call_me = score_sample_guided_text(text="叫我夏目蓝就行。", contract=contract)
-    textured = score_sample_guided_text(text="夏目蓝。记不住我会有点不爽。", contract=contract)
+    profile_card = score_sample_guided_text(text="SORA，直接叫我就好。", contract=contract)
+    call_me = score_sample_guided_text(text="叫我天就行。", contract=contract)
+    textured = score_sample_guided_text(text="SORA。记不住我会有点不爽。", contract=contract)
 
     assert contract.scene_id == "identity"
     assert "STERILE_TRANSACTION_TONE" in profile_card.reason_codes
@@ -185,8 +185,8 @@ def test_identity_profile_card_loses_to_private_chat_texture() -> None:
 def test_identity_brief_phrase_beats_bare_name() -> None:
     contract = build_galgame_text_contract(user_message="你是谁？", scene_id="daily_chat")
 
-    bare = score_sample_guided_text(text="夏目蓝。", contract=contract)
-    brief = score_sample_guided_text(text="夏目蓝，记住了。", contract=contract)
+    bare = score_sample_guided_text(text="我是天。", contract=contract)
+    brief = score_sample_guided_text(text="我是天，记好了。", contract=contract)
 
     assert not bare.hard_fail
     assert brief.score >= 83
@@ -196,7 +196,7 @@ def test_identity_brief_phrase_beats_bare_name() -> None:
 def test_template_density_is_soft_penalty_not_hard_failure() -> None:
     contract = build_galgame_text_contract(user_message="在吗", scene_id="presence")
 
-    dense = score_sample_guided_text(text="哼，尼尼当然在啦，真是的嘛。", contract=contract)
+    dense = score_sample_guided_text(text="哼，老哥当然在啦，真是的嘛。", contract=contract)
     cleaner = score_sample_guided_text(text="在呢，这一句我看见了。", contract=contract)
 
     assert not dense.hard_fail
@@ -221,7 +221,7 @@ def test_implied_fact_risk_penalizes_unprovided_time_or_cause_guess() -> None:
     weather_guess = score_sample_guided_text(text="早呀，天气挺好的样子。", contract=contract)
     future_busy_guess = score_sample_guided_text(text="早，过来让我抱一下再忙。", contract=contract)
     waking_state_guess = score_sample_guided_text(text="早啊……还好你醒了。", contract=contract)
-    sleep_guess = score_sample_guided_text(text="早尼尼，我还以为你还要再睡会儿呢。", contract=contract)
+    sleep_guess = score_sample_guided_text(text="早老哥，我还以为你还要再睡会儿呢。", contract=contract)
     wake_romance_guess = score_sample_guided_text(text="早呀，一醒来就想你。", contract=contract)
     wake_ok_guess = score_sample_guided_text(text="早，你醒了就好。", contract=contract)
     screen_guess = score_sample_guided_text(text="停下别看屏幕了，跟我说说卡哪了。", contract=contract)
@@ -442,8 +442,8 @@ def test_scene_grounding_and_catchiness_reward_specific_line_over_flat_ack() -> 
 def test_line_rhythm_penalizes_long_unbroken_sentence() -> None:
     contract = build_galgame_text_contract(user_message="你好", scene_id="daily_greeting_cn")
 
-    flat = score_sample_guided_text(text="尼尼今天好正经我都不知道该怎么接你这个招呼了", contract=contract)
-    rhythmic = score_sample_guided_text(text="尼尼今天好正经，别装外人啦。", contract=contract)
+    flat = score_sample_guided_text(text="老哥今天好正经我都不知道该怎么接你这个招呼了", contract=contract)
+    rhythmic = score_sample_guided_text(text="老哥今天好正经，别装外人啦。", contract=contract)
 
     assert "LINE_RHYTHM_FLAT" in flat.reason_codes
     assert rhythmic.dimensions["line_rhythm"] > flat.dimensions["line_rhythm"]
@@ -543,7 +543,7 @@ def test_success_fact_takes_priority_over_generic_happy_scene() -> None:
 def test_wrap_up_counts_as_good_news_progress() -> None:
     contract = build_galgame_text_contract(user_message="事情收尾了", scene_id="happy")
 
-    grounded = score_sample_guided_text(text="收尾了就好，尼尼能松口气了。", contract=contract)
+    grounded = score_sample_guided_text(text="收尾了就好，老哥能松口气了。", contract=contract)
     generic = score_sample_guided_text(text="那我不客气地恭喜你啦！", contract=contract)
 
     assert contract.scene_id == "good_news"
@@ -681,17 +681,17 @@ def test_short_ack_ok_and_fine_need_continuation_not_obedience() -> None:
     assert grounded.score > obedient.score
 
 
-def test_cheap_wave_punctuation_is_soft_cluster_penalty() -> None:
+def test_overused_wave_punctuation_is_soft_cluster_penalty() -> None:
     contract = build_galgame_text_contract(user_message="早", scene_id="daily_good_morning")
     gate = get_text_quality_gate()
-    wave_quality = gate.validate(text="早啊尼尼~今天也陪我一下。", render_profile="zh_text")
-    clean_quality = gate.validate(text="早啊，尼尼，今天也陪我一下。", render_profile="zh_text")
+    wave_quality = gate.validate(text="早啊老哥~~~今天慢点来。", render_profile="zh_text")
+    clean_quality = gate.validate(text="早啊，老哥，今天慢点来。", render_profile="zh_text")
 
     wave = score_sample_guided_text(text=wave_quality.normalized_text, contract=contract, quality=wave_quality)
     clean = score_sample_guided_text(text=clean_quality.normalized_text, contract=contract, quality=clean_quality)
 
     assert not wave.hard_fail
-    assert "CHEAP_WAVE_PUNCTUATION" in wave.reason_codes
+    assert "OVERUSED_WAVE_PUNCTUATION" in wave.reason_codes
     assert wave.score < clean.score
     assert wave.dimensions["catchiness"] < clean.dimensions["catchiness"]
 
@@ -711,14 +711,14 @@ def test_what_doing_penalizes_waiting_for_user_attention() -> None:
 def test_good_news_clean_progress_beats_wave_cheer() -> None:
     contract = build_galgame_text_contract(user_message="终于跑通了", scene_id="happy")
     gate = get_text_quality_gate()
-    wave_quality = gate.validate(text="耶！跑通了好耶~", render_profile="zh_text")
+    wave_quality = gate.validate(text="跑通啦~~~这才像话。", render_profile="zh_text")
     clean_quality = gate.validate(text="跑通啦，这才像话。", render_profile="zh_text")
 
     wave = score_sample_guided_text(text=wave_quality.normalized_text, contract=contract, quality=wave_quality)
     clean = score_sample_guided_text(text=clean_quality.normalized_text, contract=contract, quality=clean_quality)
 
     assert contract.scene_id == "good_news"
-    assert "CHEAP_WAVE_PUNCTUATION" in wave.reason_codes
+    assert "OVERUSED_WAVE_PUNCTUATION" in wave.reason_codes
     assert clean.score >= 83
     assert clean.score > wave.score
 
@@ -738,8 +738,8 @@ def test_meal_share_penalizes_scolding_when_user_is_stuffed() -> None:
 def test_trailing_incomplete_presence_question_is_not_weak_pass() -> None:
     contract = build_galgame_text_contract(user_message="在吗", scene_id="presence")
     gate = get_text_quality_gate()
-    incomplete_quality = gate.validate(text="当然在啦，尼尼想跟我说什么", render_profile="zh_text")
-    clean_quality = gate.validate(text="在呢，尼尼，这句我看见了。", render_profile="zh_text")
+    incomplete_quality = gate.validate(text="当然在啦，老哥想跟我说什么", render_profile="zh_text")
+    clean_quality = gate.validate(text="在呢，老哥，这句我看见了。", render_profile="zh_text")
 
     incomplete = score_sample_guided_text(
         text=incomplete_quality.normalized_text,
@@ -758,7 +758,7 @@ def test_presence_penalizes_attention_debt() -> None:
     contract = build_galgame_text_contract(user_message="在吗", scene_id="presence")
 
     debt = score_sample_guided_text(text="在在在，等你半天了。", contract=contract)
-    clean = score_sample_guided_text(text="在呢，尼尼，这句我看见了。", contract=contract)
+    clean = score_sample_guided_text(text="在呢，老哥，这句我看见了。", contract=contract)
 
     assert "PRESENCE_ATTENTION_DEBT" in debt.reason_codes
     assert debt.score < 80
@@ -768,7 +768,7 @@ def test_presence_penalizes_attention_debt() -> None:
 def test_write_takeover_content_anchor_counts_as_helpful() -> None:
     contract = build_galgame_text_contract(user_message="帮我写一下这个", scene_id="daily_chat")
 
-    scored = score_sample_guided_text(text="放心啦，我来写。尼尼跟我说说内容就行，剩下的交给我。", contract=contract)
+    scored = score_sample_guided_text(text="放心啦，我来写。老哥跟我说说内容就行，剩下的交给我。", contract=contract)
 
     assert contract.scene_id == "write_takeover"
     assert "LOW_TECHNICAL_HELPFULNESS" not in scored.reason_codes

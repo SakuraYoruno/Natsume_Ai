@@ -12,8 +12,10 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import threading
 import time
+from dataclasses import dataclass
 from typing import Any, Mapping
 
 from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged
@@ -47,6 +49,54 @@ _SEMANTIC_EMOTION_TAG_ALIASES: dict[str, str] = {
     "AFFECTION": "LOVING",
     "LOVE": "LOVING",
 }
+
+
+@dataclass(frozen=True)
+class EmotionBootstrapResult:
+    emotion_tag: str
+    emotion_intensity: float
+    confidence: float
+    source: str
+    reason_codes: tuple[str, ...] = ()
+
+    @property
+    def applied(self) -> bool:
+        return bool(self.emotion_tag and self.emotion_tag != "NEUTRAL" and self.confidence >= 0.45)
+
+
+_BOOTSTRAP_EMOTION_MARKERS: dict[str, tuple[str, ...]] = {
+    "SAD": (
+        "难受", "难过", "低落", "崩溃", "委屈", "想哭", "哭了", "撑不住", "不想动",
+        "没力气", "好累", "累死", "心累", "失落", "孤独", "没人懂",
+    ),
+    "ANGRY": (
+        "生气", "烦死", "烦躁", "气死", "火大", "别烦", "滚", "闭嘴", "讨厌你",
+        "你很烦", "不想理你", "离我远点",
+    ),
+    "FRUSTRATED": (
+        "很烦", "真烦", "卡住", "搞不定", "烂", "垃圾", "离谱", "奇怪", "不通顺",
+        "没眼看", "惨不忍睹", "怎么又", "为什么还",
+    ),
+    "ANXIOUS": (
+        "焦虑", "慌", "紧张", "害怕", "怕", "担心", "不安", "完了", "怎么办",
+        "来不及", "压力好大",
+    ),
+    "HAPPY": (
+        "开心", "高兴", "舒服了", "好多了", "不错", "可以了", "好耶", "太好了",
+        "满意", "喜欢这个",
+    ),
+    "GRATEFUL": (
+        "谢谢", "谢了", "多谢", "辛苦", "帮大忙", "感谢",
+    ),
+    "LOVING": (
+        "喜欢你", "想你", "抱抱", "贴贴", "爱你",
+    ),
+    "CONFUSED": (
+        "看不懂", "没懂", "不明白", "什么意思", "啥意思", "为什么", "怎么回事",
+    ),
+}
+
+_BOOTSTRAP_INTENSIFIERS = ("很", "特别", "真的", "太", "超级", "非常", "有点", "一点")
 
 # ---------------------------------------------------------------------------
 # 线程安全锁——保护所有全局可变状态（Fix: 全局单例在 FastAPI 异步环境中的竞态条件）
@@ -198,7 +248,9 @@ def normalize_chat_emotion_context(raw: Mapping[str, Any] | None) -> dict[str, A
     allowed_emotion_tags = list(hard_snapshot.allowed_emotion_tags)
 
     emotion_tag = _normalize_runtime_emotion_tag(source.get("emotion_tag")) or "NEUTRAL"
-    if allowed_emotion_tags and emotion_tag not in allowed_emotion_tags:
+    inference_source = str(source.get("emotion_inference_source") or "").strip()
+    user_emotion_inferred = inference_source.startswith("text_bootstrap")
+    if allowed_emotion_tags and emotion_tag not in allowed_emotion_tags and not user_emotion_inferred:
         emotion_tag = allowed_emotion_tags[0]
 
     emotion_range_hint = str(source.get("emotion_range_hint") or "").strip() or hard_snapshot.emotion_range_hint
@@ -263,6 +315,17 @@ def normalize_chat_emotion_context(raw: Mapping[str, Any] | None) -> dict[str, A
         "emotion_tag": str(emotion_tag),
         "emotion_range_hint": str(emotion_range_hint),
         "emotion_intensity": emotion_intensity,
+        "emotion_inference_source": inference_source or "explicit_or_default",
+        "emotion_inference_confidence": _coerce_emotion_intensity(
+            source.get("emotion_inference_confidence"),
+            default=1.0 if str(source.get("emotion_inference_source") or "") == "explicit" else 0.0,
+        ),
+        "emotion_inference_degraded": bool(source.get("emotion_inference_degraded", False)),
+        "emotion_bootstrap_reason_codes": [
+            str(item)
+            for item in list(source.get("emotion_bootstrap_reason_codes") or [])
+            if str(item or "").strip()
+        ][:6],
         "allowed_emotion_tags": allowed_emotion_tags,
         "emotion_ts_ms": emotion_ts_ms,
         # Phase 1+2：持久化 VAD 向量（含衰减 + 混合后的值）
@@ -286,18 +349,138 @@ def _normalize_runtime_emotion_tag(value: Any) -> str | None:
     return _SEMANTIC_EMOTION_TAG_ALIASES.get(normalized, normalized)
 
 
+def infer_bootstrap_emotion_from_text(text: str) -> EmotionBootstrapResult:
+    """Infer a conservative emotion tag when the upstream start node is absent.
+
+    This is a safety net for the surface chain, not a replacement for sensors or
+    a richer emotion agent. It only returns a non-neutral tag when the current
+    user message contains clear affective signals.
+    """
+    normalized = _normalize_bootstrap_text(text)
+    if not normalized:
+        return EmotionBootstrapResult(
+            emotion_tag="NEUTRAL",
+            emotion_intensity=0.35,
+            confidence=0.0,
+            source="text_bootstrap_empty",
+            reason_codes=("EMPTY_TEXT",),
+        )
+
+    scores: dict[str, float] = {}
+    reasons: dict[str, list[str]] = {}
+    for tag, markers in _BOOTSTRAP_EMOTION_MARKERS.items():
+        for marker in markers:
+            if marker and marker in normalized:
+                scores[tag] = scores.get(tag, 0.0) + _marker_weight(marker, normalized)
+                reasons.setdefault(tag, []).append(f"marker:{marker}")
+
+    if not scores:
+        return EmotionBootstrapResult(
+            emotion_tag="NEUTRAL",
+            emotion_intensity=0.35,
+            confidence=0.0,
+            source="text_bootstrap_no_signal",
+            reason_codes=("NO_MARKER",),
+        )
+
+    best_tag, best_score = max(scores.items(), key=lambda item: item[1])
+    if "怎么办" in normalized and best_tag not in {"ANXIOUS", "CONFUSED"}:
+        best_tag = "ANXIOUS"
+        best_score = max(best_score, scores.get("ANXIOUS", 0.0) + 0.35)
+        reasons.setdefault(best_tag, []).append("phrase:怎么办")
+
+    confidence = min(0.92, 0.46 + best_score * 0.16)
+    intensity = min(0.95, 0.42 + best_score * 0.12)
+    if any(word in normalized for word in _BOOTSTRAP_INTENSIFIERS):
+        confidence = min(0.95, confidence + 0.05)
+        intensity = min(0.95, intensity + 0.08)
+
+    if confidence < 0.45:
+        return EmotionBootstrapResult(
+            emotion_tag="NEUTRAL",
+            emotion_intensity=0.35,
+            confidence=round(confidence, 4),
+            source="text_bootstrap_low_confidence",
+            reason_codes=tuple(reasons.get(best_tag, ())) or ("LOW_CONFIDENCE",),
+        )
+
+    return EmotionBootstrapResult(
+        emotion_tag=best_tag,
+        emotion_intensity=round(intensity, 4),
+        confidence=round(confidence, 4),
+        source="text_bootstrap_fallback",
+        reason_codes=tuple(reasons.get(best_tag, ()))[:4],
+    )
+
+
+def _extract_request_text(request_body: Any) -> str:
+    for key in ("message", "text", "content", "input_text", "user_message"):
+        value = getattr(request_body, key, None)
+        if value not in (None, ""):
+            return str(value or "").strip()
+    return ""
+
+
+def _normalize_bootstrap_text(text: str) -> str:
+    return re.sub(r"\s+", "", str(text or "").strip().lower())
+
+
+def _marker_weight(marker: str, text: str) -> float:
+    weight = 1.0
+    if len(marker) >= 3:
+        weight += 0.15
+    if any(prefix + marker in text for prefix in _BOOTSTRAP_INTENSIFIERS):
+        weight += 0.35
+    return weight
+
+
 def resolve_chat_emotion_context(*, request_body: Any) -> dict[str, Any]:
     raw: dict[str, Any] = {}
     if isinstance(getattr(request_body, "emotion_context", None), Mapping):
         raw.update(dict(request_body.emotion_context))
+    explicit_emotion_tag = _normalize_runtime_emotion_tag(raw.get("emotion_tag"))
     if getattr(request_body, "mood_state", None) is not None:
         raw["mood_state"] = request_body.mood_state
     if getattr(request_body, "emotion_tag", None) is not None:
         raw["emotion_tag"] = request_body.emotion_tag
+        explicit_emotion_tag = _normalize_runtime_emotion_tag(request_body.emotion_tag)
     if getattr(request_body, "emotion_range_hint", None) is not None:
         raw["emotion_range_hint"] = request_body.emotion_range_hint
     if getattr(request_body, "emotion_intensity", None) is not None:
         raw["emotion_intensity"] = request_body.emotion_intensity
+
+    user_text = _extract_request_text(request_body)
+    current_tag = _normalize_runtime_emotion_tag(raw.get("emotion_tag"))
+    current_confidence = _coerce_optional_float(
+        raw.get("emotion_inference_confidence")
+        or raw.get("inferred_confidence")
+        or raw.get("confidence")
+    )
+    should_bootstrap = (
+        explicit_emotion_tag is None
+        or current_tag in (None, "NEUTRAL")
+        or (current_tag == "NEUTRAL" and (current_confidence is None or current_confidence < 0.55))
+    )
+    if should_bootstrap:
+        bootstrap = infer_bootstrap_emotion_from_text(user_text)
+        if bootstrap.applied:
+            raw["emotion_tag"] = bootstrap.emotion_tag
+            raw.setdefault("emotion_intensity", bootstrap.emotion_intensity)
+            raw["emotion_inference_source"] = bootstrap.source
+            raw["emotion_inference_confidence"] = bootstrap.confidence
+            raw["emotion_inference_degraded"] = False
+            raw["emotion_bootstrap_reason_codes"] = list(bootstrap.reason_codes)
+        elif current_tag in (None, "NEUTRAL"):
+            raw.setdefault("emotion_tag", "NEUTRAL")
+            raw.setdefault("emotion_intensity", 0.35)
+            raw.setdefault("emotion_inference_source", "default_neutral")
+            raw.setdefault("emotion_inference_confidence", 0.0)
+            raw["emotion_inference_degraded"] = True
+            raw["emotion_bootstrap_reason_codes"] = ["NO_BOOTSTRAP_SIGNAL"]
+    elif current_tag:
+        raw.setdefault("emotion_inference_source", "explicit")
+        raw.setdefault("emotion_inference_confidence", 1.0)
+        raw.setdefault("emotion_inference_degraded", False)
     if "mood_state" not in raw:
         raw["mood_state"] = str(os.environ.get("HOST_DEFAULT_MOOD_STATE") or "steady").strip().lower() or "steady"
     if "emotion_tag" not in raw:
@@ -458,6 +641,15 @@ def _coerce_emotion_intensity(value: Any, *, default: float) -> float:
     if parsed > 1.0:
         return 1.0
     return float(parsed)
+
+
+def _coerce_optional_float(value: Any) -> float | None:
+    if value in (None, ""):
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
 
 
 # ---------------------------------------------------------------------------

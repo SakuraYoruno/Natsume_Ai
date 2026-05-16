@@ -92,7 +92,7 @@ def test_envelope_from_commit_rejects_empty_or_degraded_approved_text() -> None:
 def test_no_reply_preserves_response_form_for_observability() -> None:
     no_reply = ReplyEnvelope.no_reply(
         reason_code="QUALITY_REJECTED",
-        source="chat_kernel_v2",
+        source="surface_main_chain",
         response_form="voice",
     )
     rejected_voice = envelope_from_commit(
@@ -114,12 +114,12 @@ def test_no_reply_preserves_response_form_for_observability() -> None:
 def test_final_reply_serializes_first_class_performance() -> None:
     final = ReplyEnvelope.final_reply(
         text="别突然把我往外推啊。",
-        source="chat_kernel_v2",
+        source="surface_main_chain",
         performance=ReplyPerformance(
             emotion_tag="ANGRY",
             emotion_intensity=0.68,
             action="hands_on_hips",
-            source="chat_kernel_v2",
+            source="surface_main_chain",
             raw_emotion="hurt_sulk",
         ),
     )

@@ -15,7 +15,6 @@ from host_brain.app.context.interaction_thread import (
 )
 from host_brain.app.context.relationship_state import (
     RelationshipStateBlock,
-    _EARLY_STEPSISTER_STAGES,
     _LOVER_STAGES,
     _SOULMATE_STAGES,
     resolve_relationship_state,
@@ -382,7 +381,7 @@ def _qualitative_relationship_summary(
     interaction_thread: InteractionThreadState,
     render_target_lang: str,
 ) -> str:
-    stage = str(relationship.bond_stage or "STRANGER").strip().upper() or "STRANGER"
+    stage = str(relationship.bond_stage or "FRIEND").strip().upper() or "FRIEND"
     substage = str(getattr(relationship, "relationship_substage", "") or "").strip()
     conflict_rift = float(getattr(relationship, "conflict_rift", 0.0) or 0.0)
     topic = str(interpretation.literal_topic or "").strip().lower()
@@ -398,10 +397,6 @@ def _qualitative_relationship_summary(
     }
     micro_social_thread = thread_kind in {"image_social", "phatic"}
     if str(render_target_lang or "").strip().lower() == "ja":
-        if stage in _EARLY_STEPSISTER_STAGES and (micro_social_topic or micro_social_thread):
-            return "義妹としての関係は始まっている。まだ浅いが、よそよそしくしすぎず、目の前の小さな感情を自然に受ける。"
-        if stage in _EARLY_STEPSISTER_STAGES:
-            return "義妹としての関係は始まっているが、まだ距離は浅い。馴れ馴れしくしすぎず、他人扱いもしない。"
         if conflict_rift >= 0.45 or substage == "repairing_rift":
             return "少しすれ違いがある。刺しすぎず、でも義兄妹の距離まで戻りすぎない。"
         if substage == "ambiguous_affection":
@@ -415,10 +410,6 @@ def _qualitative_relationship_summary(
         if substage == "playful_sibling" or relationship.boundary_softness >= 0.5:
             return "義兄妹としてかなり馴染んでいる。軽く返していいが、言い過ぎない。"
         return "義兄妹として自然に受ける。近すぎず、よそよそしくもしない。"
-    if stage in _EARLY_STEPSISTER_STAGES and (micro_social_topic or micro_social_thread):
-        return "义妹关系已成立，只是刚开始相处；不用刻意拉开，轻轻接住眼前情绪。"
-    if stage in _EARLY_STEPSISTER_STAGES:
-        return "义妹关系已成立，但还在初次相处阶段；语气收着，不要装陌生也不要过度亲密。"
     if conflict_rift >= 0.45 or substage == "repairing_rift":
         return "关系里有一点别扭：可以顶一句，但要把话收回来，别真的推开对方。"
     if substage == "ambiguous_affection":

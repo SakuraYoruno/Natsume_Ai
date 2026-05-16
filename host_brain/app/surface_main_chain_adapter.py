@@ -54,6 +54,10 @@ _TECHNICAL_TASK_MODES = {
 def surface_main_chain_enabled(agent_input: Any, *, sub_agent_ctx: Any | None = None) -> bool:
     if not _surface_main_chain_default_enabled():
         return False
+    return surface_main_chain_required(agent_input, sub_agent_ctx=sub_agent_ctx)
+
+
+def surface_main_chain_required(agent_input: Any, *, sub_agent_ctx: Any | None = None) -> bool:
     if sub_agent_ctx is not None:
         return False
     if _is_non_surface_intent(agent_input):
@@ -192,7 +196,14 @@ async def surface_main_chain_sse_generator(
         text=narrative,
         response_form="text",
         source="surface_main_chain",
-        audit={"request_id": request_id, "observation_codes": list(result.observation_codes)},
+        audit={
+            "request_id": request_id,
+            "observation_codes": list(result.observation_codes),
+            "natsume_emotion_tag": result.natsume_emotion_tag,
+            "user_emotion_tag": result.user_emotion_tag,
+            "vts_expression_id": result.vts_expression_id,
+            "emotion_confidence": float(result.runtime.emotion_confidence or 0.0),
+        },
     )
     if narrative:
         yield _sse({"phase": "RENDER", "chunk": narrative})
@@ -221,7 +232,6 @@ async def surface_main_chain_sse_generator(
                 "trace_stage_meta": {
                     **trace,
                     "surface_main_chain_used": True,
-                    "chat_kernel_v2_used": False,
                     "reply_source": "surface_main_chain",
                     "surface_renderer": {
                         "status": "OK",
@@ -253,6 +263,10 @@ def _sse(data: Mapping[str, Any]) -> str:
 def _public_result_trace(result: SurfaceMainChainResult) -> dict[str, Any]:
     return {
         "selected_text": result.selected_text,
+        "natsume_emotion_tag": result.natsume_emotion_tag,
+        "user_emotion_tag": result.user_emotion_tag,
+        "vts_expression_id": result.vts_expression_id,
+        "emotion_confidence": float(result.runtime.emotion_confidence or 0.0),
         "observation_codes": list(result.observation_codes),
         "packet_trace": dict(result.compiled.trace),
         "score_trace": dict(result.runtime.score_trace),
@@ -299,7 +313,6 @@ def _schedule_surface_post_process(
         trace = {
             **dict(trace_stage_meta or {}),
             "surface_main_chain_used": True,
-            "chat_kernel_v2_used": False,
             "reply_source": "surface_main_chain",
             "reply_envelope": envelope.as_dict(),
             "surface_main_chain": _public_result_trace(result),
@@ -313,7 +326,7 @@ def _schedule_surface_post_process(
                 session_id=str(getattr(agent_input, "session_id", "") or ""),
                 user_message=str(getattr(agent_input, "user_message", "") or ""),
                 narrative=narrative,
-                emotion_context=_surface_emotion_context(agent_input),
+                emotion_context=_surface_emotion_context(agent_input, result=result),
                 bond_summary=_safe_mapping(getattr(agent_input, "bond_summary", None)),
                 ts_ms=_coerce_int(getattr(agent_input, "ts_ms", 0), default=0) or int(time.time() * 1000),
                 render_target_lang="zh",
@@ -339,12 +352,22 @@ def _schedule_surface_post_process(
         return
 
 
-def _surface_emotion_context(agent_input: Any) -> dict[str, Any]:
+def _surface_emotion_context(agent_input: Any, *, result: SurfaceMainChainResult | None = None) -> dict[str, Any]:
     emotion = _safe_mapping(getattr(agent_input, "emotion_context", None)) or _safe_mapping(
         getattr(agent_input, "emotion_snapshot", None)
     )
     if "emotion_tag" not in emotion:
         emotion["emotion_tag"] = "NEUTRAL"
+    if result is not None:
+        natsume_tag = str(result.natsume_emotion_tag or "NEUTRAL").strip().upper() or "NEUTRAL"
+        user_tag = str(result.user_emotion_tag or "NEUTRAL").strip().upper() or "NEUTRAL"
+        emotion["emotion_tag"] = natsume_tag
+        emotion["emotion_source"] = "surface_generation_model"
+        emotion["emotion_inference_source"] = "surface_generation_model"
+        emotion["emotion_inference_confidence"] = float(result.runtime.emotion_confidence or 0.0)
+        emotion["surface_user_emotion_tag"] = user_tag
+        emotion["surface_natsume_emotion_tag"] = natsume_tag
+        emotion["surface_vts_expression_id"] = str(result.vts_expression_id or "")
     return emotion
 
 
@@ -621,7 +644,7 @@ def _is_non_surface_intent(agent_input: Any) -> bool:
 
 def _surface_main_chain_default_enabled() -> bool:
     raw = str(os.environ.get("HOST_SURFACE_MAIN_CHAIN_ENABLED") or "").strip().lower()
-    if raw in {"0", "false", "no", "off", "legacy", "chat_kernel_v2"}:
+    if raw in {"0", "false", "no", "off", "legacy"}:
         return False
     return True
 
@@ -681,5 +704,6 @@ __all__ = [
     "build_surface_main_chain_input_from_chat_input",
     "run_surface_main_chain_for_chat_input",
     "surface_main_chain_enabled",
+    "surface_main_chain_required",
     "surface_main_chain_sse_generator",
 ]

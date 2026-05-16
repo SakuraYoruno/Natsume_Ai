@@ -509,13 +509,13 @@ def _persona_expression_stage(
         except Exception as _eg_exc:
             logger.debug("EmergentGrowthEngine 接入降级: %s", _eg_exc)
 
-        _bond_stage = "STRANGER"
+        _bond_stage = "FRIEND"
         try:
             from host_brain.tribe.social_brain_agent import get_social_brain_agent  # noqa: PLC0415
 
             _user_id = get_canonical_bond_user_id()
             _bond_stage = get_social_brain_agent().resolve_bond_stage(
-                person_id=_user_id, default="STRANGER"
+                person_id=_user_id, default="FRIEND"
             )
         except Exception:
             pass
@@ -647,11 +647,11 @@ def _bond_narrative_stage(payload: dict[str, Any]) -> None:
         from host_brain.tribe.social_brain_agent import get_social_brain_agent  # noqa: PLC0415
 
         _user_id_bn = get_canonical_bond_user_id()
-        _bn_bond_stage = "STRANGER"
+        _bn_bond_stage = "FRIEND"
         try:
             _bn_bond_stage = get_social_brain_agent().resolve_bond_stage(
                 person_id=_user_id_bn,
-                default="STRANGER",
+                default="FRIEND",
             )
         except Exception:
             pass
@@ -676,7 +676,7 @@ def _bond_style_stage(ctx: PromptPayloadContext, payload: dict[str, Any]) -> Non
 
         _prefrontal_agent = get_prefrontal_agent()
         _bas_user_id = get_canonical_bond_user_id()
-        _bas_bond_stage = "STRANGER"
+        _bas_bond_stage = "FRIEND"
         _bas_intimacy = 0.0
         _bas_rift_active = False
         _bas_rift_severity = "medium"
@@ -688,7 +688,7 @@ def _bond_style_stage(ctx: PromptPayloadContext, payload: dict[str, Any]) -> Non
 
             _bas_social = get_social_brain_agent().resolve_bond_snapshot(person_id=_bas_user_id)
             _bas_state = _bas_social.get("bond_state_obj")
-            _bas_bond_stage = str(_bas_social.get("bond_stage") or "STRANGER")
+            _bas_bond_stage = str(_bas_social.get("bond_stage") or "FRIEND")
             _bas_intimacy = float(_bas_social.get("intimacy_score") or 0.0)
             _bas_bond_trend = str(_bas_social.get("bond_trend") or "")
             if True:
@@ -919,7 +919,7 @@ def _cortex_supervisor_stage(ctx: PromptPayloadContext, payload: dict[str, Any])
             )
 
             _lang_agent = get_language_system_agent()
-            _bond_stage_for_lang = str(_vital_signs.get("bond_stage") or "stranger").strip().lower()
+            _bond_stage_for_lang = str(_vital_signs.get("bond_stage") or "friend").strip().lower()
             _emotion_tag_for_lang = str(_vital_signs.get("emotion_tag") or "NEUTRAL").strip().upper()
             _loneliness_for_lang = float(_vital_signs.get("loneliness_level") or 0.0)
             _high_loneliness_for_lang = bool(_vital_signs.get("high_loneliness_flag", False))
@@ -1097,7 +1097,7 @@ def _cortex_supervisor_stage(ctx: PromptPayloadContext, payload: dict[str, Any])
         _ans_state = dict(tribe_context.get("ans_state") or {})
         if _ans_state:
             payload["ans_state"] = {
-                "bond_stage": str(_ans_state.get("bond_stage") or "stranger"),
+                "bond_stage": str(_ans_state.get("bond_stage") or "friend"),
                 "recovery_mode": bool(_ans_state.get("recovery_mode", False)),
                 "proactive_multiplier": round(
                     float(_ans_state.get("proactive_multiplier") or 0.7), 4
@@ -1193,7 +1193,7 @@ def _cortex_supervisor_stage(ctx: PromptPayloadContext, payload: dict[str, Any])
         if _sba_state:
             _repair_needed = bool(_sba_state.get("repair_needed", False))
             payload["social_brain_state"] = {
-                "bond_stage": str(_sba_state.get("bond_stage") or "STRANGER"),
+                "bond_stage": str(_sba_state.get("bond_stage") or "FRIEND"),
                 "bond_trend": str(_sba_state.get("bond_trend") or "stable"),
                 "bond_vector_intimacy": round(
                     float(_sba_state.get("bond_vector_intimacy") or 0.0), 4

@@ -345,14 +345,12 @@ def _validate_bond_summary_slot(
         return
 
     _VALID_STAGES_CN = {
-        "初次见面的义妹",
-        "相处中的义妹",
         "关系好的兄妹",
         "亲近兄妹",
         "亲密恋人",
         "灵魂伴侣",
     }
-    _VALID_STAGES_EN = {"STRANGER", "ACQUAINTANCE", "FRIEND", "CLOSE_FRIEND", "CONFIDANT", "SOULMATE"}
+    _VALID_STAGES_EN = {"FRIEND", "CLOSE_FRIEND", "CONFIDANT", "SOULMATE"}
     _VALID_TRENDS_CN = {"上升", "稳定", "下降", "快速上升", "缓慢上升", "快速下降", "缓慢下降"}
     _VALID_TRENDS_EN = {"RISING", "STABLE", "DECLINING"}
 

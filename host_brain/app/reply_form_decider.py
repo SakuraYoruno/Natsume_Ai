@@ -49,8 +49,6 @@ _VOICE_EMOTION_TAGS: frozenset[str] = frozenset({
 })
 
 _VOICE_PROBABILITY_BY_BOND: dict[str, float] = {
-    "STRANGER": 0.0,
-    "ACQUAINTANCE": 0.0,
     "FRIEND": 0.10,
     "CLOSE_FRIEND": 0.20,
     "CONFIDANT": 0.30,
@@ -103,7 +101,7 @@ class ResponseFormDecider:
         user_msg_type: MsgType = MsgType.TEXT,
         narrative_zh: str,
         emotion_tag: str = "NEUTRAL",
-        bond_stage: str = "STRANGER",
+        bond_stage: str = "FRIEND",
         planned_primary: MsgType | None = None,
         planned_secondary: MsgType | None = None,
         planned_reason: str = "",

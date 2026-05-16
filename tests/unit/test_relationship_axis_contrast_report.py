@@ -39,14 +39,16 @@ def _score(scene: str, stage: str, text: str, score: float = 95.0) -> dict:
 
 def test_relationship_axis_contrast_report_flags_duplicate_adjacent_text() -> None:
     cases = [
-        _case("back", "stranger"),
-        _case("back", "new_acquaintance"),
         _case("back", "familiar"),
+        _case("back", "trusted_friend"),
+        _case("back", "close_friend"),
+        _case("back", "lover_early"),
     ]
     scores = [
-        _score("back", "stranger", "回来啦，先歇一下。"),
-        _score("back", "new_acquaintance", "回来啦，先歇一下。"),
-        _score("back", "familiar", "回来啦，尼尼，先歇一下。"),
+        _score("back", "familiar", "回来啦，先歇一下。"),
+        _score("back", "trusted_friend", "回来啦，先歇一下。"),
+        _score("back", "close_friend", "回来啦，我看着，先歇一下。"),
+        _score("back", "lover_early", "回来啦，尼尼，先歇一下。"),
     ]
 
     report = build_relationship_axis_contrast_report(cases=cases, score_rows=scores)
@@ -125,10 +127,10 @@ def test_write_relationship_axis_contrast_report_outputs_json_and_markdown(tmp_p
     cases_path = tmp_path / "cases.jsonl"
     scores_path = tmp_path / "scores.jsonl"
     out_dir = tmp_path / "contrast_report"
-    cases = [_case("back", "stranger"), _case("back", "new_acquaintance")]
+    cases = [_case("back", "familiar"), _case("back", "trusted_friend")]
     scores = [
-        _score("back", "stranger", "回来啦，先歇一下。"),
-        _score("back", "new_acquaintance", "回来啦，先歇一下。"),
+        _score("back", "familiar", "回来啦，先歇一下。"),
+        _score("back", "trusted_friend", "回来啦，先歇一下。"),
     ]
     cases_path.write_text("\n".join(json.dumps(item, ensure_ascii=False) for item in cases), encoding="utf-8")
     scores_path.write_text("\n".join(json.dumps(item, ensure_ascii=False) for item in scores), encoding="utf-8")

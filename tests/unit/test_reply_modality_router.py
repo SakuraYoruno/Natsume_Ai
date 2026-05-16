@@ -89,7 +89,7 @@ def test_router_routes_close_inbound_voice_to_voice() -> None:
 def test_router_honors_explicit_voice_request() -> None:
     decision = ReplyModalityRouter().route(
         interpretation=ConversationInterpretation(literal_topic="greeting"),
-        relationship_state=RelationshipStateBlock(bond_stage="STRANGER"),
+        relationship_state=RelationshipStateBlock(bond_stage="FRIEND"),
         multimodal={},
         requested_response_form="voice",
     )

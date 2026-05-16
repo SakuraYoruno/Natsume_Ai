@@ -425,7 +425,7 @@ class TribeStateRegistry:
         - endocrine_agent 写入的 gate_state / stress_index / energy_reserve / homeostasis_ok
         - limbic_agent 写入的 emotion_tag / mood_state / silence_willingness
         - social_brain_agent 写入的 bond_stage
-        - limbic_agent 写入的 last_voice_emotion_inference（语音情绪推断）
+        - limbic_agent 写入的 last_voice_emotion_inference（运行期情绪提示）
         - pain_reward_agent 写入的 hedonic_tone / pain_level / reward_level / net_valence（T-19）
 
         返回字段：
@@ -437,8 +437,8 @@ class TribeStateRegistry:
             mood_state (str): 当前心情状态
             silence_willingness (float): 沉默意愿 0.0 ~ 1.0
             bond_stage (str): 当前 Bond 阶段
-            voice_emotion_tag (str | None): 最近语音情绪推断结果
-            voice_emotion_intensity (float | None): 最近语音情绪强度
+            voice_emotion_tag (str | None): 最近可信语音/传感器情绪结果
+            voice_emotion_intensity (float | None): 最近可信语音/传感器情绪强度
             hedonic_tone (str): 享乐基调 "positive"|"neutral"|"negative"|"mixed"（T-19）
             pain_level (float): 当前痛觉强度 0.0 ~ 1.0（T-19）
             reward_level (float): 当前奖励强度 0.0 ~ 1.0（T-19）
@@ -465,36 +465,46 @@ class TribeStateRegistry:
         emotion_tag = "NEUTRAL"
         mood_state = "steady"
         silence_willingness = 0.5
+        limbic_state: dict[str, Any] = {}
         limbic_ns = states.get("limbic_agent") or states.get("limbic")
         if limbic_ns:
-            _ls = dict(limbic_ns.get("state") or {})
-            emotion_tag = str(_ls.get("emotion_tag") or "NEUTRAL").strip().upper() or "NEUTRAL"
-            mood_state = str(_ls.get("mood_state") or "steady").strip().lower() or "steady"
-            silence_willingness = _safe_float(_ls.get("silence_willingness"), 0.5)
+            limbic_state = dict(limbic_ns.get("state") or {})
+            emotion_tag = str(limbic_state.get("emotion_tag") or "NEUTRAL").strip().upper() or "NEUTRAL"
+            mood_state = str(limbic_state.get("mood_state") or "steady").strip().lower() or "steady"
+            silence_willingness = _safe_float(limbic_state.get("silence_willingness"), 0.5)
 
-        # ── 语音情绪推断（T-09 写入）────────────────────────────────────────
+        # ── 运行期情绪提示（T-09 写入）──────────────────────────────────────
         voice_emotion_tag: str | None = None
         voice_emotion_intensity: float | None = None
+        voice_emotion_source: str | None = None
+        voice_emotion_modality: str | None = None
+        voice_emotion_trusted = False
         voice_ns = states.get("last_voice_emotion_inference")
-        if voice_ns:
-            _vs = dict(voice_ns.get("state") or {})
+        voice_state = dict(voice_ns.get("state") or {}) if voice_ns else {}
+        if not voice_state and limbic_ns:
+            voice_state = dict(limbic_state.get("last_voice_emotion_inference") or {})
+        if voice_state:
+            _vs = dict(voice_state)
+            voice_emotion_source = str(_vs.get("emotion_source") or "").strip() or None
+            voice_emotion_modality = str(_vs.get("emotion_modality") or "").strip() or None
+            voice_emotion_trusted = _runtime_emotion_state_is_trusted(_vs)
             _vt = str(_vs.get("emotion_tag") or "").strip().upper()
-            if _vt:
+            if voice_emotion_trusted and _vt:
                 voice_emotion_tag = _vt
             _vi = _vs.get("emotion_intensity")
-            if _vi is not None:
+            if voice_emotion_trusted and _vi is not None:
                 try:
                     voice_emotion_intensity = float(_vi)
                 except (TypeError, ValueError):
                     pass
 
         # ── Bond 阶段 ────────────────────────────────────────────────────────
-        bond_stage = "stranger"
+        bond_stage = "friend"
         bond_vector: dict[str, Any] = {}
         social_ns = states.get("social_brain_agent") or states.get("social_brain")
         if social_ns:
             _ss = dict(social_ns.get("state") or {})
-            bond_stage = str(_ss.get("bond_stage") or "stranger").strip().lower() or "stranger"
+            bond_stage = str(_ss.get("bond_stage") or "friend").strip().lower() or "friend"
             raw_bond_vector = _ss.get("bond_vector")
             if isinstance(raw_bond_vector, dict):
                 bond_vector = {
@@ -749,6 +759,9 @@ class TribeStateRegistry:
             "voice_emotion_intensity": (
                 round(voice_emotion_intensity, 4) if voice_emotion_intensity is not None else None
             ),
+            "voice_emotion_source": voice_emotion_source,
+            "voice_emotion_modality": voice_emotion_modality,
+            "voice_emotion_trusted": voice_emotion_trusted,
             # T-19 享乐状态
             "hedonic_tone": hedonic_tone,
             "pain_level": round(pain_level, 4),
@@ -953,6 +966,39 @@ def _safe_float(value: Any, default: float) -> float:
         return float(value)
     except (TypeError, ValueError):
         return float(default)
+
+
+_TRUSTED_RUNTIME_EMOTION_SOURCES = frozenset(
+    {
+        "edge_explicit",
+        "face_capture",
+        "somatic_voice_acoustic",
+        "voice_acoustic",
+        "acoustic_emotion_model",
+    }
+)
+_TEXT_ONLY_EMOTION_SOURCES = frozenset(
+    {
+        "asr_text_bootstrap",
+        "asr_text_unavailable",
+        "text_heuristic",
+        "text_bootstrap_fallback",
+    }
+)
+
+
+def _runtime_emotion_state_is_trusted(state: Mapping[str, Any]) -> bool:
+    if bool(state.get("emotion_inference_degraded", False)):
+        return False
+    if "trusted_runtime_emotion" in state:
+        return bool(state.get("trusted_runtime_emotion"))
+    source = str(state.get("emotion_source") or "").strip().lower()
+    modality = str(state.get("emotion_modality") or "").strip().lower()
+    if source in _TEXT_ONLY_EMOTION_SOURCES or modality in {"asr_text", "text"}:
+        return False
+    if bool(state.get("acoustic_emotion_available", False)):
+        return True
+    return source in _TRUSTED_RUNTIME_EMOTION_SOURCES or modality in {"face_capture", "explicit"}
 
 
 def _avg_field(rows: list[dict[str, Any]], key: str) -> float:

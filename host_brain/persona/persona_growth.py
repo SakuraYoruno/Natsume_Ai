@@ -48,17 +48,11 @@ class GrowthRule:
 
 # Bond 阶段晋级成长规则
 STAGE_PROMOTION_RULES: dict[str, GrowthRule] = {
-    # ACQUAINTANCE → FRIEND
-    "ACQUAINTANCE→FRIEND": GrowthRule(
-        trigger="bond_stage_promoted:ACQUAINTANCE→FRIEND",
-        delta={"playfulness": 0.05},
-        description="首次成为朋友：俏皮度 +0.05",
-    ),
     # FRIEND → CLOSE_FRIEND
     "FRIEND→CLOSE_FRIEND": GrowthRule(
         trigger="bond_stage_promoted:FRIEND→CLOSE_FRIEND",
-        delta={"warmth": 0.03, "sensitivity": 0.02},
-        description="成为好友：温柔度 +0.03，敏感度 +0.02",
+        delta={"playfulness": 0.05, "warmth": 0.03, "sensitivity": 0.02},
+        description="关系更亲近：俏皮度 +0.05，温柔度 +0.03，敏感度 +0.02",
     ),
     # CLOSE_FRIEND → CONFIDANT
     "CLOSE_FRIEND→CONFIDANT": GrowthRule(
@@ -126,8 +120,8 @@ class PersonaGrowthTracker:
         tracker = PersonaGrowthTracker(engine=persona_engine)
         result = tracker.on_stage_promoted(
             user_id="user_1",
-            from_stage="ACQUAINTANCE",
-            to_stage="FRIEND",
+            from_stage="FRIEND",
+            to_stage="CLOSE_FRIEND",
         )
     """
 

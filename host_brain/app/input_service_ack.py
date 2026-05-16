@@ -47,12 +47,12 @@ def resolve_bond_stage_for_ack(*, payload: dict[str, Any]) -> str:
         return stage
     person_id = str(payload.get("person_id") or "").strip()
     if not person_id:
-        return "STRANGER"
+        return "FRIEND"
     try:
         from host_brain.tribe.social_brain_agent import get_social_brain_agent  # noqa: PLC0415
-        return get_social_brain_agent().resolve_bond_stage(person_id=person_id, default="STRANGER")
+        return get_social_brain_agent().resolve_bond_stage(person_id=person_id, default="FRIEND")
     except Exception:
-        return "STRANGER"
+        return "FRIEND"
 
 
 def resolve_emotion_tag_for_ack(*, payload: dict[str, Any]) -> str:

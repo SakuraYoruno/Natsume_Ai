@@ -63,7 +63,7 @@ class BondStageResponse(BaseModel):
     """GET /bond/stage/{user_id} 响应体。"""
     user_id: str
     current_stage: str = Field(..., description="当前 Bond 阶段")
-    stage_index: int = Field(..., description="阶段序号（0=STRANGER）")
+    stage_index: int = Field(..., description="阶段序号（0=FRIEND）")
     total_score: int = Field(..., description="累计积分")
     event_count: int = Field(..., description="事件总数")
     trend: str = Field(..., description="趋势: RISING/STABLE/DECLINING")

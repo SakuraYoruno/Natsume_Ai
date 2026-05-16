@@ -94,8 +94,6 @@ _FRAGILE_EMOTION_TAGS = frozenset({"sad", "fear", "angry", "anxious", "hurt", "p
 _CONTINUITY_HINT_KEYWORDS = ("上次", "之前", "后来", "还记得", "一起", "约定", "说好", "那天", "继续", "remember", "last time", "together", "promise")
 _WARM_HINT_KEYWORDS = ("一起", "陪你", "说好", "约定", "开心", "想你", "等你", "抱", "温柔", "高兴", "庆祝")
 _BOND_STAGE_DEPTH_MAP = {
-    "stranger": 0.10,
-    "acquaintance": 0.25,
     "familiar": 0.38,
     "friend": 0.62,
     "close_friend": 0.78,
@@ -825,12 +823,12 @@ def _apply_persona_recall_weight(
     reason_tags: list[str] = []
 
     if memory_flags["continuity_memory"]:
-        continuity_boost = 0.08 * continuity_bias + 0.06 * bond_depth
+        continuity_boost = 0.08 * continuity_bias + 0.03 * bond_depth
         multiplier += continuity_boost
         if continuity_boost > 0.0:
             reason_tags.append("continuity_boost")
-        if bond_depth >= 0.70:
-            multiplier += 0.04
+        if bond_depth >= 0.90 or shared_history_pull >= 0.70:
+            multiplier += 0.05 if shared_history_pull >= 0.70 else 0.04
             reason_tags.append("bond_depth_boost")
 
     if memory_flags["warm_memory"]:

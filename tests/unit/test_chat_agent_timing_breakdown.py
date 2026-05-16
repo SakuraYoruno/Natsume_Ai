@@ -18,7 +18,7 @@ def _parse_sse(chunk: str) -> dict:
 
 
 @pytest.mark.asyncio
-async def test_chat_agent_commit_includes_timing_breakdown(monkeypatch) -> None:
+async def test_chat_agent_surface_disabled_does_not_fall_back_to_legacy_prompt(monkeypatch) -> None:
     async def _fake_astream_llm_chunks(**kwargs):  # noqa: ANN003
         yield "你好呀。"
 
@@ -66,7 +66,6 @@ async def test_chat_agent_commit_includes_timing_breakdown(monkeypatch) -> None:
     monkeypatch.setenv("HOST_STREAM_TTS_ENABLED", "false")
     monkeypatch.setenv("HOST_TTS_SENTENCE_STREAM_ENABLED", "false")
     monkeypatch.setenv("HOST_SURFACE_MAIN_CHAIN_ENABLED", "false")
-    monkeypatch.setenv("HOST_CHAT_KERNEL_V2_ENABLED", "false")
 
     agent_input = ChatAgentInput(
         request_id="req-timing-breakdown",
@@ -93,27 +92,9 @@ async def test_chat_agent_commit_includes_timing_breakdown(monkeypatch) -> None:
         if event.get("phase") == "COMMIT":
             commit_event = event
 
-    assert commit_event["decision"] == "APPROVE"
-    timings = dict(commit_event["audit_refs"]["timings_ms"])
-    assert {
-        "prompt_build_ms",
-        "llm_runtime_resolve_ms",
-        "stream_after_first_token_ms",
-        "response_intelligence_ms",
-        "sanitize_egress_ms",
-        "precommit_log_ms",
-    }.issubset(timings)
-    assert all(int(value) >= 0 for value in timings.values())
+    assert commit_event["decision"] == "NO_REPLY"
+    assert commit_event["reason_code"] == "SURFACE_MAIN_CHAIN_DISABLED"
+    assert commit_event["audit_refs"]["surface_main_chain_required"] is True
+    assert commit_event["audit_refs"]["surface_main_chain_used"] is False
     await asyncio.sleep(0)
-    trace_stage_meta = dict(captured_post_process.get("trace_stage_meta") or {})
-    assert trace_stage_meta["conversation_history"] == {
-        "turns_injected": 2,
-        "fetched_turns": 2,
-        "older_turn_count": 4,
-        "summary_present": True,
-        "oldest_ts_ms": 1000,
-        "newest_ts_ms": 2000,
-        "skipped_corrupted_count": 0,
-        "skipped_empty_count": 0,
-        "deduped_same_role_count": 0,
-    }
+    assert captured_post_process == {}

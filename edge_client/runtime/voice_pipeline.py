@@ -328,6 +328,19 @@ class EdgeVoicePipeline:
         emotion_source = str(emotion_report.get("emotion_source") or "").strip()
         if emotion_source:
             payload["emotion_source"] = emotion_source
+        emotion_modality = str(emotion_report.get("emotion_modality") or "").strip()
+        if emotion_modality:
+            payload["emotion_modality"] = emotion_modality
+        emotion_confidence = emotion_report.get("emotion_confidence")
+        if isinstance(emotion_confidence, (int, float)):
+            payload["emotion_confidence"] = max(0.0, min(1.0, float(emotion_confidence)))
+        if "emotion_inference_degraded" in emotion_report:
+            payload["emotion_inference_degraded"] = bool(emotion_report.get("emotion_inference_degraded"))
+        if "acoustic_emotion_available" in emotion_report:
+            payload["acoustic_emotion_available"] = bool(emotion_report.get("acoustic_emotion_available"))
+        inference_note = str(emotion_report.get("inference_note") or "").strip()
+        if inference_note:
+            payload["emotion_inference_note"] = inference_note
         matched_terms = emotion_report.get("matched_terms")
         if isinstance(matched_terms, list) and matched_terms:
             payload["emotion_terms"] = list(matched_terms)
@@ -375,6 +388,22 @@ class EdgeVoicePipeline:
                 mood_state=mood_state or None,
                 emotion_source=emotion_source or None,
                 emotion_terms=list(matched_terms) if isinstance(matched_terms, list) else [],
+                emotion_modality=emotion_modality or None,
+                emotion_confidence=(
+                    max(0.0, min(1.0, float(emotion_confidence)))
+                    if isinstance(emotion_confidence, (int, float))
+                    else None
+                ),
+                emotion_inference_degraded=(
+                    bool(emotion_report.get("emotion_inference_degraded"))
+                    if "emotion_inference_degraded" in emotion_report
+                    else None
+                ),
+                acoustic_emotion_available=(
+                    bool(emotion_report.get("acoustic_emotion_available"))
+                    if "acoustic_emotion_available" in emotion_report
+                    else None
+                ),
             )
         return report_result
 
@@ -901,6 +930,10 @@ class EdgeVoicePipeline:
             report = {
                 "emotion_tag": explicit_tag,
                 "emotion_source": "edge_explicit",
+                "emotion_modality": str(event.get("emotion_modality") or "explicit").strip() or "explicit",
+                "emotion_confidence": 1.0,
+                "emotion_inference_degraded": False,
+                "acoustic_emotion_available": bool(event.get("acoustic_emotion_available", False)),
                 "mood_state": str(event.get("mood_state") or "").strip().lower() or "steady",
                 "matched_terms": [],
             }

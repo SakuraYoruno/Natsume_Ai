@@ -20,12 +20,12 @@
 
 - 旧链是“完整能力库”，不是当前 normal chat 文本质量阶段的 live 主链。
 - 当前新主链是“文本质量基线内核”，目标是先把中文文本质量拉到合格，再逐步迁回旧链能力。
-- 当前阶段的 normal chat 文本主链固定为：`input -> facts -> ChatKernelV2 -> TextQualityGate -> ReplyEnvelope`。
+- 当前阶段的 normal chat 文本主链固定为：`input -> ReplyControlPacket -> SurfaceMainChain -> TextQualityGate/Scorer -> ReplyEnvelope`。
 - 文本质量未过关前，不继续把旧链功能模块塞回 normal chat live path。
 - 后续每次只迁移一个旧链能力模块，并且必须通过 A/B 证明没有降低文本质量。
 - 被迁移的旧链模块只能提供 `facts / state / memory / perception / performance / media action`，不能写最终人格回复。
 - `reply_plan`、`validator`、fallback、fastpath、transport ack、thread resolver、cache、memory 都不得成为第二作者。
-- normal chat 最终文本作者只能是 `ChatKernelV2`；媒体场景的最终作者只能是结构化 reaction/media selector。
+- normal chat 最终文本作者只能是 `SurfaceMainChain`；媒体场景的最终作者只能是结构化 reaction/media selector。
 - 如果某个模块导致文本质量下降，它只保留在实验链或非聊天任务链，不进入 normal chat 主线。
 
 ## 1. 代码证据入口

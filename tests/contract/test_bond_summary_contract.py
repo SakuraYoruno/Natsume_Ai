@@ -24,7 +24,7 @@ class TestBondSummaryContract(unittest.TestCase):
             {"stage", "trend", "capability_hint", "event_id", "evidence_refs"},
             set(summary.keys()),
         )
-        self.assertEqual("STRANGER", summary["stage"])
+        self.assertEqual("FRIEND", summary["stage"])
         self.assertEqual("稳定", summary["trend"])
         self.assertEqual("SUPPORTIVE", summary["capability_hint"])
         self.assertEqual("bond_evt_summary_001", summary["event_id"])
@@ -57,4 +57,3 @@ class TestBondSummaryContract(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

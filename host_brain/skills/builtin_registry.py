@@ -54,14 +54,14 @@ def _bond_query_handler(args: dict[str, Any], ctx: dict[str, Any]) -> dict[str, 
     """查询当前会话的 Bond 积分和阶段。
 
     从 ctx 中读取 bond_stage / bond_score，返回 Bond 关系摘要。
-    若上下文中无 Bond 数据，返回 STRANGER 默认值。
+    若上下文中无 Bond 数据，返回 FRIEND 默认值。
     """
     ctx = ctx or {}
     bond_texture = ctx.get("bond_texture") or {}
     bond_stage = str(
         bond_texture.get("stage")
         or ctx.get("bond_stage")
-        or "STRANGER"
+        or "FRIEND"
     ).upper()
     bond_score = int(
         bond_texture.get("score")
@@ -197,7 +197,7 @@ def build_builtin_skill_registry() -> SkillRegistry:
         reversible=False,
         handler=_bond_query_handler,
         require_confirm=False,
-        description="查询当前会话的 Bond 积分和关系阶段（STRANGER / ACQUAINTANCE / FRIEND）。",
+        description="查询当前会话的 Bond 积分和关系阶段（FRIEND / CLOSE_FRIEND / CONFIDANT / SOULMATE）。",
     ))
 
     # session_summary：生成会话轻量摘要（最低风险，CACHE 通道）

@@ -67,24 +67,15 @@ class TestVIV1_StagePromotion:
     def teardown_method(self):
         _teardown_engine()
 
-    def test_acquaintance_to_friend(self):
-        """ACQUAINTANCE→FRIEND 触发 playfulness +0.05。"""
-        before = self.engine.get_traits("user1")
-        result = self.tracker.on_stage_promoted(
-            "user1", "ACQUAINTANCE", "FRIEND",
-        )
-        assert result.applied
-        after = self.engine.get_traits("user1")
-        assert after.playfulness == pytest.approx(before.playfulness + 0.05, abs=0.001)
-
     def test_friend_to_close_friend(self):
-        """FRIEND→CLOSE_FRIEND 触发 warmth +0.03, sensitivity +0.02。"""
+        """FRIEND→CLOSE_FRIEND 触发 playfulness +0.05、warmth +0.03、sensitivity +0.02。"""
         before = self.engine.get_traits("user1")
         result = self.tracker.on_stage_promoted(
             "user1", "FRIEND", "CLOSE_FRIEND",
         )
         assert result.applied
         after = self.engine.get_traits("user1")
+        assert after.playfulness == pytest.approx(before.playfulness + 0.05, abs=0.001)
         assert after.warmth == pytest.approx(before.warmth + 0.03, abs=0.001)
         assert after.sensitivity == pytest.approx(before.sensitivity + 0.02, abs=0.001)
 
@@ -113,22 +104,22 @@ class TestVIV1_StagePromotion:
     def test_unknown_transition_no_effect(self):
         """未定义的阶段转换 → 不触发。"""
         result = self.tracker.on_stage_promoted(
-            "user1", "STRANGER", "ACQUAINTANCE",
+            "user1", "FRIEND", "SOULMATE",
         )
         assert not result.applied
         assert "无匹配" in result.reason
 
     def test_one_time_rule_not_repeated(self):
         """one_time 规则不重复触发。"""
-        r1 = self.tracker.on_stage_promoted("user1", "ACQUAINTANCE", "FRIEND")
+        r1 = self.tracker.on_stage_promoted("user1", "FRIEND", "CLOSE_FRIEND")
         assert r1.applied
-        r2 = self.tracker.on_stage_promoted("user1", "ACQUAINTANCE", "FRIEND")
+        r2 = self.tracker.on_stage_promoted("user1", "FRIEND", "CLOSE_FRIEND")
         assert not r2.applied
         assert "one_time" in r2.reason
 
     def test_change_log_recorded(self):
         """成长变化记录到 PersonaEngine 审计链。"""
-        self.tracker.on_stage_promoted("user1", "ACQUAINTANCE", "FRIEND")
+        self.tracker.on_stage_promoted("user1", "CLOSE_FRIEND", "CONFIDANT")
         log = self.engine.get_change_log("user1")
         assert len(log) >= 1
         assert "bond_stage_promoted" in log[-1].reason
@@ -365,7 +356,7 @@ class TestVIV5_AuditAndRollback:
 
     def test_audit_log_created_on_growth(self):
         """成长后审计日志非空。"""
-        self.tracker.on_stage_promoted("user1", "ACQUAINTANCE", "FRIEND")
+        self.tracker.on_stage_promoted("user1", "FRIEND", "CLOSE_FRIEND")
         log = self.engine.get_change_log("user1")
         assert len(log) >= 1
         record = log[-1]
@@ -376,7 +367,7 @@ class TestVIV5_AuditAndRollback:
     def test_rollback_restores_previous_state(self):
         """回滚后特质恢复到变化前。"""
         before = self.engine.get_traits("user1")
-        self.tracker.on_stage_promoted("user1", "ACQUAINTANCE", "FRIEND")
+        self.tracker.on_stage_promoted("user1", "FRIEND", "CLOSE_FRIEND")
         after_growth = self.engine.get_traits("user1")
         assert after_growth.playfulness != before.playfulness
 
@@ -387,10 +378,10 @@ class TestVIV5_AuditAndRollback:
     def test_multiple_growths_and_rollback(self):
         """多次成长后逐次回滚。"""
         before = self.engine.get_traits("user1")
-        self.tracker.on_stage_promoted("user1", "ACQUAINTANCE", "FRIEND")
         self.tracker.on_stage_promoted("user1", "FRIEND", "CLOSE_FRIEND")
+        self.tracker.on_stage_promoted("user1", "CLOSE_FRIEND", "CONFIDANT")
 
-        # 回滚最后一次（FRIEND→CLOSE_FRIEND）
+        # 回滚最后一次（CLOSE_FRIEND→CONFIDANT）
         r1 = self.engine.rollback_last_change("user1")
         mid = self.engine.get_traits("user1")
         assert mid.warmth == pytest.approx(before.warmth + 0.03, abs=0.001) or \
@@ -398,20 +389,20 @@ class TestVIV5_AuditAndRollback:
 
     def test_tracker_weekly_cumulative_tracks(self):
         """成长后每周累计正确追踪。"""
-        self.tracker.on_stage_promoted("user1", "ACQUAINTANCE", "FRIEND")
+        self.tracker.on_stage_promoted("user1", "FRIEND", "CLOSE_FRIEND")
         weekly = self.tracker.get_weekly_cumulative("user1")
         assert weekly.get("playfulness", 0.0) == pytest.approx(0.05, abs=0.001)
 
     def test_tracker_change_history_tracks(self):
         """成长后变化历史正确追踪。"""
-        self.tracker.on_stage_promoted("user1", "ACQUAINTANCE", "FRIEND")
+        self.tracker.on_stage_promoted("user1", "FRIEND", "CLOSE_FRIEND")
         history = self.tracker.get_change_history("user1")
         assert len(history) >= 1
         assert history[-1].get("playfulness", 0.0) == pytest.approx(0.05, abs=0.001)
 
     def test_reset_weekly_cumulative(self):
         """重置每周累计。"""
-        self.tracker.on_stage_promoted("user1", "ACQUAINTANCE", "FRIEND")
+        self.tracker.on_stage_promoted("user1", "FRIEND", "CLOSE_FRIEND")
         self.tracker.reset_weekly_cumulative("user1")
         weekly = self.tracker.get_weekly_cumulative("user1")
         assert all(v == 0.0 for v in weekly.values())
@@ -479,7 +470,7 @@ class TestPhaseIV_EndToEnd:
 
         # 1. 晋级触发成长
         before = self.engine.get_traits("e2e_user")
-        r1 = tracker.on_stage_promoted("e2e_user", "ACQUAINTANCE", "FRIEND")
+        r1 = tracker.on_stage_promoted("e2e_user", "FRIEND", "CLOSE_FRIEND")
         assert r1.applied
 
         # 2. 验证特质变化
@@ -487,10 +478,10 @@ class TestPhaseIV_EndToEnd:
         assert after1.playfulness > before.playfulness
 
         # 3. 再次晋级
-        r2 = tracker.on_stage_promoted("e2e_user", "FRIEND", "CLOSE_FRIEND")
+        r2 = tracker.on_stage_promoted("e2e_user", "CLOSE_FRIEND", "CONFIDANT")
         assert r2.applied
         after2 = self.engine.get_traits("e2e_user")
-        assert after2.warmth > after1.warmth
+        assert after2.humor > after1.humor
 
         # 4. 审计链完整
         log = self.engine.get_change_log("e2e_user")
@@ -501,7 +492,7 @@ class TestPhaseIV_EndToEnd:
         assert restored is not None
         # 恢复到 after1 的状态
         current = self.engine.get_traits("e2e_user")
-        assert current.warmth == pytest.approx(after1.warmth, abs=0.001)
+        assert current.humor == pytest.approx(after1.humor, abs=0.001)
 
     def test_guard_protects_immutable_core(self):
         """完整流程中不可变核心保护生效。"""

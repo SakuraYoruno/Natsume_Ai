@@ -68,13 +68,11 @@ _TECHNICAL_SCENES = {"broken", "failure", "technical", "technical_help", "compla
 _AFFECTION_OPTIONAL_SCENES = {*_TECHNICAL_SCENES, "creative_edit"}
 _INTIMATE_COME_HERE_RE = re.compile(r"(?<!拿)(?<!贴)(?<!发)(?<!递)(?<!传)(?<!丢)(?<!给)过来")
 _RELATIONSHIP_STAGE_SUFFIXES = (
-    "new_acquaintance",
     "trusted_friend",
     "close_friend",
     "pre_confession",
     "lover_stable",
     "lover_early",
-    "stranger",
     "familiar",
     "ambiguous",
 )

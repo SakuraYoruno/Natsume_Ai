@@ -68,7 +68,7 @@ def test_build_style_hint_uses_template_override(monkeypatch) -> None:
             assertiveness=0.2,
         ),
         "NEUTRAL",
-        "STRANGER",
+        "FRIEND",
         ReactivityModifiers(),
         openness=0.3,
         pace=PACE_NORMAL,

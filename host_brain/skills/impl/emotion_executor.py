@@ -208,4 +208,4 @@ def _execute_bond_get(payload: dict[str, Any], context: dict[str, Any] | None) -
         except Exception as exc:
             _logger.debug("bond_stage_engine 查询失败: %s", exc)
 
-    return {"score": 0, "stage": "STRANGER", "user_id": user_id, "note": "no bond engine available"}
+    return {"score": 0, "stage": "FRIEND", "user_id": user_id, "note": "no bond engine available"}

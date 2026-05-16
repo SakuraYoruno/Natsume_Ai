@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 from host_brain.bond.bond_dynamics import BondDynamicsWriter
-from host_brain.bond.bond_stage_engine import BondStageEngine
+from host_brain.bond.bond_stage_engine import BondStageEngine, compute_affinity_delta_breakdown
 
 
 class TestBondDynamicsEmotionFields:
@@ -57,3 +57,41 @@ class TestBondDynamicsEmotionFields:
             emotion_intensity=0.6,
         )
         assert result.success
+
+    def test_negative_valence_dampens_plain_interaction_boost(self):
+        """短期负情绪不会把普通互动误加速成高好感。"""
+        engine = BondStageEngine()
+        result = engine.apply_event(
+            user_id="sad-plain",
+            update_kind="INTERACTION",
+            evidence_refs=["ev-plain"],
+            emotion_intensity=0.9,
+            emotion_valence=-0.8,
+        )
+        assert result.score_delta == 1
+
+    def test_negative_affect_support_has_clear_positive_affinity_delta(self):
+        """用户低落且被支持时，好感增长应强于基础支持事件。"""
+        breakdown = compute_affinity_delta_breakdown(
+            update_kind="EMOTIONAL_SUPPORT",
+            emotion_intensity=0.85,
+            emotion_valence=-0.8,
+        )
+        assert breakdown.base_delta == 8
+        assert breakdown.score_delta > breakdown.base_delta
+        assert "support_event" in breakdown.reason_code
+
+    def test_high_intensity_conflict_has_stronger_negative_delta(self):
+        """高强度冲突会更明显地拉低好感，但仍只影响积分，不直接改阶段。"""
+        low = compute_affinity_delta_breakdown(
+            update_kind="CONFLICT",
+            emotion_intensity=0.4,
+            emotion_valence=-0.5,
+        )
+        high = compute_affinity_delta_breakdown(
+            update_kind="CONFLICT",
+            emotion_intensity=0.85,
+            emotion_valence=-0.8,
+        )
+        assert low.score_delta == -4
+        assert high.score_delta < low.score_delta

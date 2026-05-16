@@ -1,4 +1,4 @@
-﻿import json
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -193,7 +193,7 @@ class TestCanonStoreContract(unittest.TestCase):
                 result = validate_prompt_context(
                     {
                         "hard_snapshot": {},
-                        "bond_summary": {"stage": "STRANGER"},
+                        "bond_summary": {"stage": "FRIEND"},
                         "authoritative": [authoritative],
                         "retrieval": [],
                         "style_pack": {
@@ -287,4 +287,3 @@ class TestCanonStoreContract(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

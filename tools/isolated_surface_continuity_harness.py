@@ -15,13 +15,10 @@ if str(ROOT) not in sys.path:
 
 from host_brain.persona.isolated_surface_continuity import build_continuity_surface_inputs
 from host_brain.persona.isolated_surface_harness import (
-    build_isolated_surface_messages,
-    derive_style_reference_anchor,
     parse_surface_candidates,
     score_isolated_surface_candidates,
-    select_best_isolated_candidate,
 )
-from host_brain.persona.surface_runtime import surface_observation_codes
+from host_brain.persona.surface_runtime import build_direct_surface_messages, surface_observation_codes
 from tools.isolated_surface_harness import _read_json_or_jsonl
 
 
@@ -82,21 +79,19 @@ def run_cases(cases: list[dict[str, Any]], *, soul_md: str, out_dir: Path) -> di
             try:
                 request = turn.request
                 fact_counts.append(len(request.control.facts))
-                messages = build_isolated_surface_messages(request)
-                style_reference = derive_style_reference_anchor(request).as_dict()
+                messages = build_direct_surface_messages(request)
                 prompt_rows.append(
                     {
                         **turn.as_trace(),
                         "messages": messages,
-                        "style_reference": style_reference,
                     }
                 )
 
                 candidates = _candidate_texts(turn.source_turn)
                 if not candidates:
                     continue
-                scores = score_isolated_surface_candidates(request, candidates)
-                selected = select_best_isolated_candidate(scores)
+                scores = score_isolated_surface_candidates(request, candidates[:1])
+                selected = scores[0] if scores else None
                 selected_dict = selected.as_dict() if selected else None
                 observations = _observation_codes(selected_dict)
                 for code in observations:
@@ -112,7 +107,7 @@ def run_cases(cases: list[dict[str, Any]], *, soul_md: str, out_dir: Path) -> di
                         "candidates": [score.as_dict() for score in scores],
                         "observation_codes": list(observations),
                         "selected": selected_dict,
-                        "style_reference": style_reference,
+                        "selection": "direct_first",
                     }
                 )
             except Exception as exc:

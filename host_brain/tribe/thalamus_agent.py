@@ -1002,7 +1002,7 @@ async def classify_task_intent_by_llm(
 
         ctx = dict(tribe_context or {})
         vital_signs = dict(ctx.get("vital_signs") or {})
-        bond_stage = str(vital_signs.get("bond_stage") or ctx.get("bond_stage") or "stranger").strip()
+        bond_stage = str(vital_signs.get("bond_stage") or ctx.get("bond_stage") or "friend").strip()
         emotion_label = str(vital_signs.get("emotion_label") or ctx.get("emotion_label") or "neutral").strip()
         tribe_summary = f"bond_stage={bond_stage}, emotion={emotion_label}"
 
@@ -1537,7 +1537,7 @@ class ThalamusAgent:
             language_understanding = get_language_system_agent().wernicke_understand(
                 user_text=user_message,
                 emotion_tag="NEUTRAL",
-                bond_stage="stranger",
+                bond_stage="friend",
             )
         except Exception as exc:
             _logger.debug("thalamus language understanding degraded: %s", exc)

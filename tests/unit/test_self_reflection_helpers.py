@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import json
 from types import SimpleNamespace
@@ -364,7 +364,7 @@ def test_align_self_reflection_pulse_prefers_guarded_tone_when_retreat_dominates
         {"self_awareness": "原始自省", "mood_awareness": "mood", "growth_note": "grow"},
         snapshot={"bond_growth_perception": "有些疏远"},
         offline_state={"offline_hours": 2.0},
-        bond_summary={"stage": "ACQUAINTANCE"},
+        bond_summary={"stage": "CLOSE_FRIEND"},
         motive_state={
             "reach_out_drive": 0.18,
             "care_drive": 0.22,

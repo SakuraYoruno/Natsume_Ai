@@ -1521,7 +1521,7 @@ async def _run_gateway_multimodal_async_job(
             narrative=str(pipeline_result.get("narrative") or "").strip(),
             tts_text_ja=str(audit_refs.get("tts_text_ja") or "").strip() or None,
             emotion_tag=str(audit_refs.get("emotion_tag") or "NEUTRAL").strip().upper(),
-            bond_stage=str((payload.get("bond_summary") or {}).get("stage") or "STRANGER").strip().upper(),
+            bond_stage=str((payload.get("bond_summary") or {}).get("stage") or "FRIEND").strip().upper(),
             user_msg_type=str(payload.get("msg_type") or "text").strip().lower(),
             response_form=_response_form,
             response_form_reason=_response_form_reason,
@@ -2220,7 +2220,7 @@ async def _deliver_gateway_reply(
     narrative: str,
     # Phase XV P4：ReplyFormDecider 所需的上下文
     emotion_tag: str = "NEUTRAL",
-    bond_stage: str = "STRANGER",
+    bond_stage: str = "FRIEND",
     user_msg_type: str = "text",
     response_form: str | None = None,
     response_form_reason: str | None = None,
@@ -3142,8 +3142,8 @@ async def _dispatch_to_graph_worker(
             _tts_text_ja = str(audit_refs.get("tts_text_ja") or "").strip() or None
             _response_form = str(audit_refs.get("response_form") or "").strip() or None
             _response_form_reason = str(audit_refs.get("response_form_reason") or "").strip() or None
-            # bond_stage 从 payload 的 bond_summary 取（若存在），否则用 STRANGER
-            _bond_stage = str((payload.get("bond_summary") or {}).get("stage") or "STRANGER").strip().upper()
+            # bond_stage 从 payload 的 bond_summary 取（若存在），否则用 FRIEND
+            _bond_stage = str((payload.get("bond_summary") or {}).get("stage") or "FRIEND").strip().upper()
             _user_msg_type = str(payload.get("msg_type") or "text").strip().lower()
 
             try:

@@ -18,7 +18,7 @@ class SocialBrainAgent:
         )
     )
     state_registry: TribeStateRegistry = field(default_factory=get_global_registry)  # T-31：使用全局单例
-    _bond_stage: str = field(default="stranger", init=False, repr=False)
+    _bond_stage: str = field(default="friend", init=False, repr=False)
 
     def describe(self) -> dict[str, Any]:
         return self.descriptor.to_dict()
@@ -39,7 +39,7 @@ class SocialBrainAgent:
             else {}
         )
         state_obj: Any = None
-        stage = "STRANGER"
+        stage = "FRIEND"
         trend = str(resolved_summary.get("trend") or "").strip()
         trend_intensity = ""
         capability_hint = str(resolved_summary.get("capability_hint") or "").strip()
@@ -72,8 +72,8 @@ class SocialBrainAgent:
                 getattr(state_obj, "current_stage", None)
                 or getattr(state_obj, "stage", None)
                 or resolved_summary.get("stage")
-                or "STRANGER"
-            ).strip() or "STRANGER"
+                or "FRIEND"
+            ).strip() or "FRIEND"
             trend = str(
                 (
                     state_obj.trend() if callable(getattr(state_obj, "trend", None)) else getattr(state_obj, "trend", "")
@@ -98,7 +98,7 @@ class SocialBrainAgent:
             intimacy_score = float(getattr(state_obj, "intimacy_score", 0.0) or 0.0)
             last_event_ts_ms = int(getattr(state_obj, "last_event_ts_ms", 0) or 0)
         else:
-            stage = str(resolved_summary.get("stage") or stage).strip() or "STRANGER"
+            stage = str(resolved_summary.get("stage") or stage).strip() or "FRIEND"
 
         if not resolved_summary:
             resolved_summary = {
@@ -121,11 +121,11 @@ class SocialBrainAgent:
             "rift": getattr(state_obj, "rift", None) if state_obj is not None else None,
         }
 
-    def resolve_bond_stage(self, *, person_id: str | None, default: str = "STRANGER") -> str:
+    def resolve_bond_stage(self, *, person_id: str | None, default: str = "FRIEND") -> str:
         snapshot = self.resolve_bond_snapshot(person_id=person_id)
         stage = str(snapshot.get("bond_stage") or "").strip().upper()
-        fallback = str(default or "STRANGER").strip().upper() or "STRANGER"
-        if snapshot.get("bond_state_obj") is None and stage in {"", "STRANGER", "UNKNOWN"}:
+        fallback = str(default or "FRIEND").strip().upper() or "FRIEND"
+        if snapshot.get("bond_state_obj") is None and stage in {"", "UNKNOWN"}:
             return fallback
         return stage or fallback
 
@@ -192,18 +192,16 @@ class SocialBrainAgent:
         bond_summary: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         snapshot = self.resolve_bond_snapshot(person_id=person_id, bond_summary=bond_summary)
-        stage = str(snapshot.get("bond_stage") or "STRANGER").strip().upper()
+        stage = str(snapshot.get("bond_stage") or "FRIEND").strip().upper()
         intimacy = max(0.0, min(1.0, float(snapshot.get("intimacy_score") or 0.0)))
 
         stage_baseline = {
-            "STRANGER": {"trust": 0.25, "affinity": 0.20, "safety": 0.32, "novelty": 0.72, "dependency": 0.06},
-            "ACQUAINTANCE": {"trust": 0.38, "affinity": 0.34, "safety": 0.45, "novelty": 0.62, "dependency": 0.14},
             "FRIEND": {"trust": 0.58, "affinity": 0.60, "safety": 0.64, "novelty": 0.48, "dependency": 0.32},
             "CLOSE_FRIEND": {"trust": 0.68, "affinity": 0.72, "safety": 0.74, "novelty": 0.42, "dependency": 0.44},
             "INTIMATE": {"trust": 0.82, "affinity": 0.86, "safety": 0.82, "novelty": 0.36, "dependency": 0.62},
             "SOULMATE": {"trust": 0.92, "affinity": 0.94, "safety": 0.90, "novelty": 0.28, "dependency": 0.76},
         }
-        base = dict(stage_baseline.get(stage, stage_baseline["STRANGER"]))
+        base = dict(stage_baseline.get(stage, stage_baseline["FRIEND"]))
         trend_hint = str((snapshot.get("bond_trend") or snapshot.get("bond_summary", {}).get("trend") or "")).strip().lower()
         if trend_hint in {"up", "progress"}:
             base["trust"] += 0.06
@@ -256,7 +254,7 @@ class SocialBrainAgent:
         resolved_user_id = str(user_id or "").strip() or None
         snapshot = self.resolve_bond_snapshot(person_id=resolved_user_id)
         vector = self.resolve_bond_vector(person_id=resolved_user_id, bond_summary=snapshot.get("bond_summary"))
-        self._bond_stage = str(snapshot.get("bond_stage") or "STRANGER").strip().lower() or "stranger"
+        self._bond_stage = str(snapshot.get("bond_stage") or "FRIEND").strip().lower() or "friend"
         self._touch_state(key="bond_stage", value=self._bond_stage)
         self._touch_state(key="bond_vector", value=vector)
         return {
@@ -338,7 +336,7 @@ class SocialBrainAgent:
                 snapshot = self.resolve_bond_snapshot(person_id=user_id or None)
                 bond_trend = str(snapshot.get("bond_trend") or "").strip().upper()
                 trend_intensity = float(snapshot.get("bond_trend_intensity") or 0.3)
-                bond_stage = str(snapshot.get("bond_stage") or "STRANGER").strip().upper()
+                bond_stage = str(snapshot.get("bond_stage") or "FRIEND").strip().upper()
 
                 if bond_trend == "PROGRESS":
                     emit_tribe_event(
@@ -394,7 +392,7 @@ class SocialBrainAgent:
             _log = logging.getLogger("Natsume.tribe.social_brain_agent")
             payload = dict(getattr(event, "payload", None) or {})
             user_id = str(payload.get("user_id") or "").strip()
-            bond_stage = str(payload.get("bond_stage") or "STRANGER").strip().upper() or "STRANGER"
+            bond_stage = str(payload.get("bond_stage") or "FRIEND").strip().upper() or "FRIEND"
             bond_trend = str(payload.get("bond_trend") or "PROGRESS").strip().upper()
             intensity = max(0.0, min(1.0, float(payload.get("intensity") or 0.3)))
             ts_ms = int(getattr(event, "ts_ms", 0) or 0)
@@ -452,7 +450,7 @@ class SocialBrainAgent:
     async def _on_bond_stage_changed(self, event: Any) -> None:
         try:
             payload = dict(getattr(event, "payload", None) or {})
-            to_stage = str(payload.get("to_stage") or "STRANGER").strip().lower() or "stranger"
+            to_stage = str(payload.get("to_stage") or "FRIEND").strip().lower() or "friend"
             self._bond_stage = to_stage
             self._touch_state(key="bond_stage", value=to_stage)
             self._refresh_bond_vector(user_id=payload.get("user_id"))
@@ -472,7 +470,7 @@ class SocialBrainAgent:
             _log = logging.getLogger("Natsume.tribe.social_brain_agent")
             payload = dict(getattr(event, "payload", None) or {})
             user_id = str(payload.get("user_id") or "").strip()
-            bond_stage = str(payload.get("bond_stage") or "STRANGER").strip().upper() or "STRANGER"
+            bond_stage = str(payload.get("bond_stage") or "FRIEND").strip().upper() or "FRIEND"
             bond_trend = str(payload.get("bond_trend") or "REGRESS").strip().upper()
             intensity = max(0.0, min(1.0, float(payload.get("intensity") or 0.4)))
             ts_ms = int(getattr(event, "ts_ms", 0) or 0)
@@ -913,7 +911,7 @@ class SocialBrainAgent:
                 get_milestone_tracker,
             )
 
-            resolved_stage = str(bond_stage or self._bond_stage or "STRANGER").strip().upper() or "STRANGER"
+            resolved_stage = str(bond_stage or self._bond_stage or "FRIEND").strip().upper() or "FRIEND"
             memory_index = get_shared_memory_index()
             milestone_tracker = get_milestone_tracker()
             layer = BondNarrativeLayer(
@@ -1135,7 +1133,7 @@ class SocialBrainAgent:
         repair_state = dict(state.get("repair_state") or {})
         last_milestone = dict(state.get("last_milestone_achieved") or {})
         return {
-            "bond_stage": str(state.get("bond_stage") or "STRANGER").strip().upper(),
+            "bond_stage": str(state.get("bond_stage") or "FRIEND").strip().upper(),
             "bond_trend": str(state.get("bond_trend") or "stable").strip().lower(),
             "bond_vector_intimacy": round(float(bond_vector.get("intimacy") or 0.0), 4),
             "bond_vector_trust": round(float(bond_vector.get("trust") or 0.0), 4),

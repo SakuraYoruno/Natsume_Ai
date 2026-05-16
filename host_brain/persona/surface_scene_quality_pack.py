@@ -66,7 +66,12 @@ class SurfaceSceneQualitySample:
             "source_note": self.source_note,
         }
 
-    def render_prompt_guidance(self, *, max_examples: int = 3) -> str:
+    def render_prompt_guidance(
+        self,
+        *,
+        max_examples: int = 8,
+        include_good_examples: bool = True,
+    ) -> str:
         lines = [
             "## 场景质量样本",
             f"scene_id: {self.scene_id}",
@@ -74,10 +79,15 @@ class SurfaceSceneQualitySample:
         ]
         if self.scoring_focus:
             lines.append("scoring_focus: " + " / ".join(self.scoring_focus[:5]))
-        if self.good_examples:
-            lines.append("good_examples_note: 只参考语气、节奏和边界，不要原样照抄。")
+        if self.good_examples and include_good_examples:
+            if self.required_move.startswith("首选基准句可以直接使用"):
+                lines.append("good_examples_note: 这是人工确认的场景基准句，可以直接使用或轻微改写。")
+            else:
+                lines.append("good_examples_note: 只参考语气、节奏和边界，不要原样照抄。")
             lines.append("good_examples:")
             lines.extend(f"- {item}" for item in self.good_examples[:max_examples])
+        elif self.good_examples:
+            lines.append("good_examples: disabled_in_prompt; positive style comes from original quote recall.")
         if self.bad_examples:
             lines.append("bad_examples:")
             lines.extend(f"- {item}" for item in self.bad_examples[:max_examples])
@@ -296,10 +306,10 @@ def select_surface_scene_quality_sample(
         or _contains_any(text, ("累", "难受", "不舒服", "睡不着"))
     ):
         return by_scene.get("close_friend_care") or by_scene.get("tired")
-    if distance in {"stranger", "new_acquaintance"} and (
+    if distance == "familiar" and (
         text in {"在吗", "嗯", "你好"} or _contains_any(text, ("睡不着",))
     ):
-        return by_scene.get("stranger_distance")
+        return by_scene.get("low_intensity_sibling_distance")
     if text in {"继续", "接着", "嗯", "行", "好"}:
         return by_scene.get("short_continue")
     if task in {"recall_memory", "memory_followup", "recall"} or _contains_any(text, ("还记得", "刚才说", "上次说")):
@@ -321,6 +331,7 @@ def render_surface_scene_quality_guidance(
     task_mode: str = "",
     response_move: str = "",
     relationship_distance: str = "",
+    include_good_examples: bool = True,
 ) -> str:
     sample = select_surface_scene_quality_sample(
         user_message=user_message,
@@ -328,7 +339,7 @@ def render_surface_scene_quality_guidance(
         response_move=response_move,
         relationship_distance=relationship_distance,
     )
-    return sample.render_prompt_guidance() if sample else ""
+    return sample.render_prompt_guidance(include_good_examples=include_good_examples) if sample else ""
 
 
 def surface_scene_quality_memory_ab_case_payloads() -> list[dict[str, Any]]:
@@ -540,8 +551,8 @@ def surface_scene_quality_memory_ab_case_payloads() -> list[dict[str, Any]]:
             "note": "负反馈：定位通顺问题。",
         },
         {
-            "scene_id": "stranger_distance",
-            "case_id": "stranger_low_info_presence",
+            "scene_id": "low_intensity_sibling_distance",
+            "case_id": "low_intensity_sibling_presence",
             "user_message": "在吗",
             "task_control": {
                 "response_move": "reply_current_turn",
@@ -549,12 +560,12 @@ def surface_scene_quality_memory_ab_case_payloads() -> list[dict[str, Any]]:
                 "information_budget": "short",
                 "question_budget": 0,
             },
-            "affect_packet": _affect("neutral", relationship_distance="stranger"),
+            "affect_packet": _affect("neutral", relationship_distance="familiar"),
             "memory_packet": _memory(
-                facts=["关系线索：刚开始交流，不装熟。"],
-                style_anchor=["早期关系只保持礼貌和轻口语。"],
+                facts=["关系线索：默认熟人兄妹感，但本轮低强度。"],
+                style_anchor=["短回应也要有 SORA 反应，不做陌生礼貌档。"],
             ),
-            "note": "陌生低信息：不能使用熟人称呼或恋人亲密。",
+            "note": "低强度熟人：短回应也要有角色反应。",
         },
         {
             "scene_id": "ambiguous_affection",

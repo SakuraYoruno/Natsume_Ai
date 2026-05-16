@@ -38,7 +38,7 @@ def test_surface_main_chain_runs_compiler_and_runtime() -> None:
         )
 
     result = asyncio.run(
-        SurfaceMainChain(generate, repair_failed=False, use_style_reference_bank=False).run(
+        SurfaceMainChain(generate).run(
             {
                 "case_id": "surface_main_chain_probe",
                 "soul_md": SOUL,
@@ -76,6 +76,8 @@ def test_surface_main_chain_runs_compiler_and_runtime() -> None:
     assert result.observation_codes == ()
     assert result.compiled.trace["surface_boundary"] == "ReplyControlPacket"
     assert result.as_dict()["surface_main_chain"] is True
+    assert result.as_dict()["natsume_emotion_tag"] == "NEUTRAL"
+    assert result.as_dict()["vts_expression_id"]
 
 
 def test_surface_main_chain_dataclass_input_compiles_to_isolated_request() -> None:
@@ -144,8 +146,6 @@ def test_run_surface_main_chain_convenience_function() -> None:
                     "facts": ["当前任务：接 surface main chain facade。"],
                 },
             },
-            repair_failed=False,
-            use_style_reference_bank=False,
         )
     )
 

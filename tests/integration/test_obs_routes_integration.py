@@ -240,7 +240,7 @@ def ledger():
         "reason_code": None,
         "stage": "S_BOND_STAGE",
         "evidence_refs": ["chat://request/req-int-002"],
-        "payload": {"from_stage": "STRANGER", "to_stage": "STRANGER", "total_score": 1},
+        "payload": {"from_stage": "FRIEND", "to_stage": "FRIEND", "total_score": 1},
         "detail": "stable",
         "ts_ms": now - 160,
     })

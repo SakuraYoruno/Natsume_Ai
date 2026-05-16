@@ -389,7 +389,7 @@ class TestVisionUiSseGenerator:
             user_message=request_body.message,
             reply=str(commit_event.get("narrative") or ""),
             emotion_tag="neutral",
-            bond_stage="STRANGER",
+            bond_stage="FRIEND",
         )
 
     @pytest.mark.asyncio
@@ -568,7 +568,7 @@ class TestVisionUiSseGenerator:
             user_message=request_body.message,
             reply=str(commit_event.get("narrative") or ""),
             emotion_tag="neutral",
-            bond_stage="STRANGER",
+            bond_stage="FRIEND",
         )
 
 

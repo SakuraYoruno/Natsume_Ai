@@ -80,7 +80,7 @@ def test_shallow_bond_week_gap_stays_reserved() -> None:
         context={
             "current_ts_ms": now_ts,
             "user_online": False,
-            "bond_stage": "ACQUAINTANCE",
+            "bond_stage": "CLOSE_FRIEND",
             "offline_state": {
                 "offline_duration_ms": 8 * 24 * 3600 * 1000,
                 "absence_band": "7d_plus",

@@ -474,7 +474,7 @@ class ReflectionChain:
                 user_message=user_message,
                 ai_response=ai_response,
                 emotion_tag=str(emotion_tag or "neutral"),
-                bond_stage=str(bond_stage or "STRANGER"),
+                bond_stage=str(bond_stage or "FRIEND"),
                 deterministic_result_json=json.dumps(deterministic_result.as_dict(), ensure_ascii=False),
                 dimensions_json=json.dumps(
                     {
@@ -627,11 +627,7 @@ class ReflectionChain:
         intimate_markers = ("笨蛋", "人家", "哼", "撒娇", "亲爱的")
         formal_markers = ("您好", "请问", "非常感谢", "期待")
 
-        if stage in ("STRANGER", "ACQUAINTANCE"):
-            if any(m in ai_resp for m in intimate_markers):
-                score -= 0.4
-                issues.append(f"在{stage}阶段使用了过于亲密的表达")
-        elif stage in ("SOULMATE", "CONFIDANT"):
+        if stage in ("SOULMATE", "CONFIDANT"):
             if any(m in ai_resp for m in formal_markers):
                 score -= 0.3
                 issues.append(f"在{stage}阶段使用了过于正式的表达")

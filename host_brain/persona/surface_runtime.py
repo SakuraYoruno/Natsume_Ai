@@ -1,20 +1,25 @@
 import inspect
+import json
+import re
 import time
-from collections.abc import Awaitable, Callable, Mapping, Sequence
+from collections.abc import Awaitable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
+from host_brain.channels.vts_runtime_mapping import (
+    load_runtime_emotion_mapping,
+    normalize_runtime_emotion_tag,
+    render_runtime_emotion_tag_guidance,
+    runtime_emotion_expression_id,
+)
 from host_brain.persona.isolated_surface_harness import (
     GenerateSurface,
     IsolatedCandidateScore,
     IsolatedSurfaceInput,
     build_isolated_surface_input,
     build_isolated_surface_messages,
-    build_minimal_repair_messages,
-    derive_style_reference_anchor,
     parse_surface_candidates,
     score_isolated_surface_candidates,
-    select_best_isolated_candidate,
 )
 
 
@@ -58,23 +63,23 @@ class SurfaceRuntimeResult:
     selected_text: str
     observation_codes: tuple[str, ...]
     score_trace: Mapping[str, Any]
-    style_reference: Mapping[str, Any]
-    repair_attempted: bool = False
-    repair_raw_output: str = ""
-    repair_candidates: tuple[str, ...] = ()
+    natsume_emotion_tag: str = "NEUTRAL"
+    user_emotion_tag: str = "NEUTRAL"
+    vts_expression_id: str = ""
+    emotion_confidence: float = 0.0
     latency_ms: int = 0
 
     def as_dict(self) -> dict[str, Any]:
         return {
             "selected_text": self.selected_text,
+            "natsume_emotion_tag": self.natsume_emotion_tag,
+            "user_emotion_tag": self.user_emotion_tag,
+            "vts_expression_id": self.vts_expression_id,
+            "emotion_confidence": round(float(self.emotion_confidence or 0.0), 4),
             "selected": self.selected.as_dict() if self.selected else None,
             "candidates": [candidate.as_dict() for candidate in self.candidates],
             "observation_codes": list(self.observation_codes),
             "score_trace": dict(self.score_trace),
-            "style_reference": dict(self.style_reference),
-            "repair_attempted": bool(self.repair_attempted),
-            "repair_raw_output": self.repair_raw_output,
-            "repair_candidates": list(self.repair_candidates),
             "latency_ms": int(self.latency_ms),
         }
 
@@ -88,15 +93,10 @@ def surface_observation_codes(selected: IsolatedCandidateScore | Mapping[str, An
         selected_map = dict(selected)
 
     codes: list[str] = []
-    score = float(selected_map.get("score") or 0.0)
-    if not selected_map.get("passed"):
-        codes.append("SELECTED_FAILED")
     if selected_map.get("hard_fail"):
         codes.append("HARD_FAIL")
     if selected_map.get("control_violations"):
         codes.append("CONTROL_VIOLATION")
-    if 0.0 < score < 85.0:
-        codes.append("LOW_SCORE")
     for reason in selected_map.get("reason_codes") or []:
         reason_text = str(reason)
         if reason_text.startswith(_OBSERVATION_REASON_PREFIXES):
@@ -109,14 +109,12 @@ def build_surface_score_trace(
     candidates: Sequence[IsolatedCandidateScore],
     selected: IsolatedCandidateScore | None,
     observation_codes: Sequence[str],
-    repair_attempted: bool = False,
 ) -> dict[str, Any]:
     return {
         "selected": selected.as_dict() if selected else None,
         "candidates": [candidate.as_dict() for candidate in candidates],
         "observation_codes": list(observation_codes),
         "candidate_count": len(candidates),
-        "repair_attempted": bool(repair_attempted),
     }
 
 
@@ -132,50 +130,274 @@ async def _maybe_await_text(value: str | Awaitable[str]) -> str:
     return str(value or "").strip()
 
 
+_DIRECT_PROMPT_REPLACEMENTS = (
+    (
+        "你是隔离的最终表层文本生成器，只负责产出可发送的中文私聊候选。",
+        "你是隔离的最终表层文本生成器，只负责一次性产出一条可发送的中文私聊回复，并给出夏目蓝说出这句时自己的 EmotionTag。",
+    ),
+    (
+        '输出必须是 JSON 对象：{"candidates":["候选1","候选2","候选3"]}。',
+        '输出必须是 JSON 对象：{"reply_text":"可直接发送给用户的一条中文回复","natsume_emotion_tag":"NEUTRAL","user_emotion_tag":"NEUTRAL","emotion_confidence":0.0}。',
+    ),
+    (
+        "给 3 到 5 个候选。每个候选必须是用户可见文本，不要 Markdown、括号动作、字段名或解释。",
+        "只给 1 条用户可见回复，放在 reply_text；不要 Markdown、括号动作、字段名或解释混进 reply_text。",
+    ),
+    (
+        "ReplyControlPacket.must_include 是逐候选字面约束；每个候选都必须包含全部 must_include 词。must_not_do 也是逐候选约束；每个候选都不能包含其中任何词。",
+        "ReplyControlPacket.must_include 是字面约束；最终回复必须包含全部 must_include 词。must_not_do 也是字面约束；最终回复不能包含其中任何词。",
+    ),
+    (
+        "候选之间要有口吻差异，可以用轻微别扭、短促顶嘴、护短、收住情绪、小得意；不要都写成“记得/好的/没忘/发我看看”的平铺句。",
+        "这唯一一条回复要有口吻：可以轻微别扭、短促顶嘴、护短、收住情绪或小得意；不要写成“记得/好的/没忘/发我看看”的平铺句。",
+    ),
+    (
+        "日常/关系候选里，至少 2 个要带 SORA 式发话动作：短促截入、轻顶嘴、撒娇耍赖、嘴硬关心、小得意、护短接手、不承认但在意。不是堆口癖，而是让句子有转身。",
+        "日常/关系回复里要带一点 SORA 式发话动作：短促截入、轻顶嘴、撒娇耍赖、嘴硬关心、小得意、护短接手、不承认但在意。不是堆口癖，而是让句子有转身。",
+    ),
+    (
+        "不要让 3 到 5 个候选都只是安全确认句；“早，今天慢慢来”“回来啦，先坐一下”“记得啊，周末看展”这类平句只能当保底，不能当最有角色感的候选。",
+        "不要让回复只是安全确认句；“早，今天慢慢来”“回来啦，先坐一下”“记得啊，周末看展”这类平句只能当保底，不能当最终质感。",
+    ),
+    (
+        "每个候选都必须完成 TurnSurfaceContract.response_move；不要只写空泛支持、空泛安慰或单纯撒娇。",
+        "最终回复必须完成 TurnSurfaceContract.response_move；不要只写空泛支持、空泛安慰或单纯撒娇。",
+    ),
+)
+_PROCESS_PREFACE_MARKERS = (
+    "_move",
+    "response_move",
+    "这个回复",
+    "候选",
+    "字段",
+    "满足",
+    "所以输出",
+    "只输出文本",
+)
+_PROCESS_PREFACE_SPLIT_RE = re.compile(
+    r"(?:所以输出(?:这条|文本)?[：:。]|只输出(?:一条)?(?:最终回复)?文本[：:。]|_move[^。！？!?]{0,24}[。！？!?])"
+)
+_QUOTED_REPLY_BEFORE_PROCESS_RE = re.compile(r"^[\"“「](.{2,120}?)[\"”」]\s*_move")
+
+def _direct_surface_messages(messages: Sequence[Mapping[str, str]]) -> list[dict[str, str]]:
+    direct: list[dict[str, str]] = []
+    for index, message in enumerate(messages):
+        role = str(message.get("role") or "")
+        content = str(message.get("content") or "")
+        if index == 0:
+            for source, replacement in _DIRECT_PROMPT_REPLACEMENTS:
+                content = content.replace(source, replacement)
+            content = "\n".join(
+                (
+                    content,
+                    "",
+                    "## 结构化直出要求",
+                    '只输出 JSON 对象：{"reply_text":"...","natsume_emotion_tag":"...","user_emotion_tag":"...","emotion_confidence":0.0}。',
+                    render_runtime_emotion_tag_guidance(),
+                    "user_emotion_tag 是你从当前用户文字语义中理解到的用户情绪；不确定就用 NEUTRAL。",
+                    "natsume_emotion_tag 是夏目蓝说出 reply_text 时自己的情绪，不是用户情绪，也不要为了显眼乱填高强度情绪。",
+                    "reply_text 里不能出现 JSON 字段名、EmotionTag、标签解释、候选、评分或内部分析。",
+                )
+            )
+        elif index == len(messages) - 1:
+            content = "\n".join(
+                (
+                    content,
+                    "",
+                    "## 输出要求",
+                    '只输出 JSON 对象，格式为 {"reply_text":"...","natsume_emotion_tag":"...","user_emotion_tag":"...","emotion_confidence":0.0}。',
+                    "不要候选列表，不要解释，不要把 EmotionTag 写进 reply_text。",
+                )
+            )
+        direct.append({"role": role, "content": content})
+    return direct
+
+
+def strip_surface_process_preface(text: str) -> str:
+    value = str(text or "").strip()
+    if not value or not any(marker in value for marker in _PROCESS_PREFACE_MARKERS):
+        return value
+    quoted = _QUOTED_REPLY_BEFORE_PROCESS_RE.search(value)
+    if quoted and _has_cjk(quoted.group(1)):
+        return quoted.group(1).strip()
+    split_parts = [part.strip() for part in _PROCESS_PREFACE_SPLIT_RE.split(value) if part.strip()]
+    if split_parts and split_parts[-1] != value and _has_cjk(split_parts[-1]):
+        return split_parts[-1]
+    visible_lines: list[str] = []
+    for line in value.splitlines():
+        item = line.strip()
+        if not item:
+            continue
+        if any(marker in item for marker in _PROCESS_PREFACE_MARKERS):
+            continue
+        if _has_cjk(item):
+            visible_lines.append(item)
+    return visible_lines[-1] if visible_lines else value
+
+
+def _has_cjk(text: str) -> bool:
+    return bool(re.search(r"[\u4e00-\u9fff]", str(text or "")))
+
+
+def build_direct_surface_messages(
+    payload: IsolatedSurfaceInput | Mapping[str, Any],
+) -> tuple[Mapping[str, str], ...]:
+    request = _coerce_surface_request(payload)
+    messages = build_isolated_surface_messages(request)
+    return tuple(_direct_surface_messages(messages))
+
+
+def parse_surface_generation_output(raw_output: Any) -> dict[str, Any]:
+    raw = str(raw_output or "").strip()
+    emotion_mapping = load_runtime_emotion_mapping()
+    payload = _load_json_object(raw)
+    if isinstance(payload, Mapping):
+        reply_text = _clean_reply_text(
+            payload.get("reply_text")
+            or payload.get("reply")
+            or payload.get("text")
+            or payload.get("narrative")
+            or ""
+        )
+        if not reply_text:
+            candidates = parse_surface_candidates(payload)
+            reply_text = _clean_reply_text(candidates[0] if candidates else "")
+        natsume_tag = _normalize_emotion_tag(
+            payload.get("natsume_emotion_tag")
+            or payload.get("assistant_emotion_tag")
+            or payload.get("emotion_tag")
+            or "NEUTRAL",
+            mapping=emotion_mapping,
+        )
+        user_tag = _normalize_emotion_tag(
+            payload.get("user_emotion_tag")
+            or payload.get("perceived_user_emotion_tag")
+            or "NEUTRAL",
+            mapping=emotion_mapping,
+        )
+        return {
+            "reply_text": reply_text,
+            "natsume_emotion_tag": natsume_tag,
+            "user_emotion_tag": user_tag,
+            "vts_expression_id": runtime_emotion_expression_id(natsume_tag, mapping=emotion_mapping),
+            "emotion_confidence": _coerce_confidence(
+                payload.get("emotion_confidence")
+                or payload.get("confidence")
+                or 0.0
+            ),
+        }
+
+    candidates = parse_surface_candidates(raw)
+    return {
+        "reply_text": _clean_reply_text(candidates[0] if candidates else ""),
+        "natsume_emotion_tag": "NEUTRAL",
+        "user_emotion_tag": "NEUTRAL",
+        "vts_expression_id": runtime_emotion_expression_id("NEUTRAL", mapping=emotion_mapping),
+        "emotion_confidence": 0.0,
+    }
+
+
+def _load_json_object(raw: str) -> Mapping[str, Any] | None:
+    if not raw:
+        return None
+    value = raw.strip()
+    if value.startswith("```"):
+        value = re.sub(r"^```(?:json)?\s*", "", value, flags=re.IGNORECASE).strip()
+        value = re.sub(r"\s*```$", "", value).strip()
+    for candidate in (value, _balanced_json_object(value)):
+        if not candidate:
+            continue
+        try:
+            decoded = json.loads(candidate)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(decoded, Mapping):
+            return decoded
+    return None
+
+
+def _balanced_json_object(raw: str) -> str:
+    start = raw.find("{")
+    if start < 0:
+        return ""
+    depth = 0
+    quote = ""
+    escaped = False
+    for index in range(start, len(raw)):
+        char = raw[index]
+        if quote:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == quote:
+                quote = ""
+            continue
+        if char in {'"', "'"}:
+            quote = char
+            continue
+        if char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                return raw[start : index + 1]
+    return ""
+
+
+def _clean_reply_text(value: Any) -> str:
+    return strip_surface_process_preface(str(value or "").strip())
+
+
+def _normalize_emotion_tag(value: Any, *, mapping: Mapping[str, str]) -> str:
+    return normalize_runtime_emotion_tag(value, mapping=mapping)
+
+
+def _coerce_confidence(value: Any) -> float:
+    try:
+        score = float(value)
+    except (TypeError, ValueError):
+        return 0.0
+    return max(0.0, min(1.0, score))
+
+
 class SurfaceRuntime:
     def __init__(
         self,
         generate: GenerateSurface,
         *,
-        repair_failed: bool = True,
-        use_style_reference_bank: bool = True,
+        empty_generation_retries: int = 1,
     ) -> None:
         self._generate = generate
-        self._repair_failed = bool(repair_failed)
-        self._use_style_reference_bank = bool(use_style_reference_bank)
+        self._empty_generation_retries = max(0, int(empty_generation_retries or 0))
 
     async def run(self, payload: IsolatedSurfaceInput | Mapping[str, Any]) -> SurfaceRuntimeResult:
         request = _coerce_surface_request(payload)
         started = time.perf_counter()
-        style_reference = derive_style_reference_anchor(request).as_dict()
-        messages = build_isolated_surface_messages(
-            request,
-            use_style_reference_bank=self._use_style_reference_bank,
-        )
+        messages = build_direct_surface_messages(request)
         raw_output = await _maybe_await_text(self._generate(messages))
-        scores = list(score_isolated_surface_candidates(request, parse_surface_candidates(raw_output)))
-        selected = select_best_isolated_candidate(scores)
-
-        repair_attempted = bool(self._repair_failed and selected is not None and not selected.passed)
-        repair_raw_output = ""
-        repair_candidate_texts: tuple[str, ...] = ()
-        if repair_attempted and selected is not None:
-            repair_messages = build_minimal_repair_messages(
-                request,
-                selected,
-                use_style_reference_bank=self._use_style_reference_bank,
-            )
-            repair_raw_output = await _maybe_await_text(self._generate(repair_messages))
-            repair_candidate_texts = tuple(parse_surface_candidates(repair_raw_output))
-            scores.extend(score_isolated_surface_candidates(request, repair_candidate_texts))
-            selected = select_best_isolated_candidate(scores)
-
+        structured = parse_surface_generation_output(raw_output)
+        candidate_texts = [structured["reply_text"]] if structured["reply_text"] else []
+        for _ in range(self._empty_generation_retries):
+            if candidate_texts:
+                break
+            retry_messages = [
+                *messages,
+                {
+                    "role": "user",
+                    "content": '上一次输出为空。只输出 JSON 对象：{"reply_text":"...","natsume_emotion_tag":"NEUTRAL","user_emotion_tag":"NEUTRAL","emotion_confidence":0.0}。',
+                },
+            ]
+            raw_output = await _maybe_await_text(self._generate(retry_messages))
+            structured = parse_surface_generation_output(raw_output)
+            candidate_texts = [structured["reply_text"]] if structured["reply_text"] else []
+        scores = list(score_isolated_surface_candidates(request, candidate_texts[:1]))
+        selected = scores[0] if scores else None
         observation_codes = surface_observation_codes(selected)
         score_trace = build_surface_score_trace(
             candidates=scores,
             selected=selected,
             observation_codes=observation_codes,
-            repair_attempted=repair_attempted,
         )
         return SurfaceRuntimeResult(
             request=request,
@@ -186,10 +408,10 @@ class SurfaceRuntime:
             selected_text=selected.text if selected else "",
             observation_codes=observation_codes,
             score_trace=score_trace,
-            style_reference=style_reference,
-            repair_attempted=repair_attempted,
-            repair_raw_output=repair_raw_output,
-            repair_candidates=repair_candidate_texts,
+            natsume_emotion_tag=str(structured.get("natsume_emotion_tag") or "NEUTRAL"),
+            user_emotion_tag=str(structured.get("user_emotion_tag") or "NEUTRAL"),
+            vts_expression_id=str(structured.get("vts_expression_id") or ""),
+            emotion_confidence=float(structured.get("emotion_confidence") or 0.0),
             latency_ms=int((time.perf_counter() - started) * 1000),
         )
 
@@ -197,6 +419,9 @@ class SurfaceRuntime:
 __all__ = [
     "SurfaceRuntime",
     "SurfaceRuntimeResult",
+    "build_direct_surface_messages",
     "build_surface_score_trace",
+    "parse_surface_generation_output",
+    "strip_surface_process_preface",
     "surface_observation_codes",
 ]

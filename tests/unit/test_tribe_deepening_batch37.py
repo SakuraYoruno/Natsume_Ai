@@ -174,14 +174,14 @@ class TestANSExportRuntimeState:
         agent = ANSAgent()
         agent._recovery_mode = False
 
-        agent._bond_stage = "stranger"
-        stranger_state = agent.export_runtime_state()
+        agent._bond_stage = "familiar"
+        familiar_state = agent.export_runtime_state()
 
         agent._bond_stage = "intimate"
         intimate_state = agent.export_runtime_state()
 
-        assert float(intimate_state["proactive_multiplier"]) > float(stranger_state["proactive_multiplier"]), \
-            "intimate 阶段的 proactive_multiplier 应高于 stranger"
+        assert float(intimate_state["proactive_multiplier"]) > float(familiar_state["proactive_multiplier"]), \
+            "intimate 阶段的 proactive_multiplier 应高于 familiar"
 
 
 # ── T-257 ────────────────────────────────────────────────────────────────────

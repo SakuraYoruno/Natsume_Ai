@@ -196,7 +196,7 @@ def test_get_bond_state_uses_session_id_identity() -> None:
     snapshot = engine.get_bond_state(session_id="session-bond-user")
 
     assert snapshot.user_id == "session-bond-user"
-    assert snapshot.stage == bond_mod.STAGE_STRANGER
+    assert snapshot.stage == bond_mod.STAGE_FRIEND
 
 
 def test_restore_state_prefers_stage_transition_payload_and_adds_delta(tmp_path: Path) -> None:
@@ -248,7 +248,7 @@ def test_restore_state_falls_back_to_accumulated_events_when_transition_payload_
     state = engine.get_state("fallback-user")
 
     assert state.total_score == 7
-    assert state.current_stage == bond_mod.STAGE_STRANGER
+    assert state.current_stage == bond_mod.STAGE_FRIEND
     assert state.event_count == 2
     assert state.last_event_ts_ms == 1200
 
@@ -258,8 +258,8 @@ def test_log_transition_falls_back_to_system_event_and_initial_state_can_noop() 
     engine = bond_mod.BondStageEngine(ledger=ledger)
     result = bond_mod.StageTransitionResult(
         user_id="sys-user",
-        from_stage=bond_mod.STAGE_STRANGER,
-        to_stage=bond_mod.STAGE_ACQUAINTANCE,
+        from_stage=bond_mod.STAGE_FRIEND,
+        to_stage=bond_mod.STAGE_CLOSE_FRIEND,
         transition_status=bond_mod.TRANSITION_STATUS_PROMOTED,
         score_delta=10,
         total_score=10,

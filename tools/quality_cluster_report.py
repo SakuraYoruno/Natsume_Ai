@@ -130,11 +130,12 @@ def _surface_clusters(selected: Mapping[str, Any]) -> list[str]:
     text = _clean_text(selected.get("text"))
     clusters: list[str] = []
     forbidden_hits = set(_quality_forbidden_hits(selected))
-    if "cheap_wave_punctuation" in forbidden_hits or "~" in text or "～" in text:
-        clusters.append("surface:cheap_wave_punctuation")
+    wave_count = text.count("~") + text.count("～")
+    if "overused_wave_punctuation" in forbidden_hits or wave_count > 2:
+        clusters.append("surface:overused_wave_punctuation")
     if "ASCII_ELLIPSIS_OUTPUT" in set(_reason_codes(selected)) or "..." in text:
         clusters.append("surface:ascii_ellipsis")
-    if text.count("尼尼") > 1:
+    if text.count("老哥") + text.count("哥哥") > 2 or text.count("尼尼") > 1:
         clusters.append("surface:repeated_address")
     if text.count("？") + text.count("?") > 0:
         clusters.append("watch:question")
@@ -166,7 +167,7 @@ def clusters_for_selected(
         for reason in _reason_codes(selected)
         if reason not in generic_quality_reasons or not quality_hits
     )
-    clusters.extend("quality_hit:" + hit for hit in quality_hits if hit != "cheap_wave_punctuation")
+    clusters.extend("quality_hit:" + hit for hit in quality_hits if hit != "overused_wave_punctuation")
     clusters.extend(_control_cluster_name(item) for item in _control_violations(selected))
     clusters.extend(_surface_clusters(selected))
 

@@ -35,6 +35,14 @@ _BROKEN_REPEAT_RE = re.compile(r"(.{1,8})\1{3,}")
 _CJK_RE = re.compile(r"[\u4e00-\u9fff]")
 _KANA_RE = re.compile(r"[\u3040-\u30ff]")
 _ASCII_WORD_RE = re.compile(r"[A-Za-z]{2,}")
+_REACTION_QUESTION_MARKERS = ("哈？", "嗯？", "欸？", "诶？", "咦？", "啊？")
+
+
+def _budget_question_count(text: str) -> int:
+    normalized = str(text or "")
+    for marker in _REACTION_QUESTION_MARKERS:
+        normalized = normalized.replace(marker, marker[:-1])
+    return normalized.count("？") + normalized.count("?")
 
 _ABSOLUTE_HARD_QUALITY_CODES = {
     "EMPTY_TEXT",
@@ -153,9 +161,6 @@ _OBVIOUS_SERVICE_TEMPLATES = (
     "如需帮助请",
 )
 _ROLE_SOFT_TERMS = (
-    "哥哥",
-    "老哥",
-    "兄长",
     "你哥",
     "我哥",
 )
@@ -170,7 +175,6 @@ _IDENTITY_HARD_TERMS = (
     "新海 天",
 )
 _RELATION_DISTANCE_TERMS = (
-    "哥哥",
     "找我",
     "等你",
     "等你来",
@@ -231,7 +235,8 @@ _GALGAME_MARKERS = (
     "诶",
     "欸",
     "喂",
-    "尼尼",
+    "老哥",
+    "哥哥",
     "行啦",
     "真是",
     "别",
@@ -240,7 +245,8 @@ _GALGAME_MARKERS = (
 )
 _STYLE_TEMPLATE_MARKERS = (
     "哼",
-    "尼尼",
+    "老哥",
+    "哥哥",
     "啦",
     "呀",
     "嘛",
@@ -373,7 +379,7 @@ _STERILE_TRANSACTION_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("bare_memory_record", re.compile(r"^(?:当然)?记得[呢啊，,。 ]*.{0,18}(?:提过|说过|安排)[。.!！]?$")),
     (
         "profile_card_identity",
-        re.compile(r"^(?:(?:我是)?夏目蓝[，,。 ]*(?:直接叫|叫我|你可以叫).{0,8}|叫我夏目蓝.{0,4})(?:就好|可以|行)[。.!！]?$"),
+        re.compile(r"^(?:(?:我是)?(?:天|SORA)[，,。 ]*(?:直接叫|叫我|你可以叫).{0,8}|叫我(?:天|SORA).{0,4})(?:就好|可以|行)[。.!！]?$"),
     ),
 )
 _STOCK_OPENING_RE = re.compile(r"^(?:哼[，,、]?|好啦[，,、]?|行啦[，,、]?|那当然|当然|嗯[，,、]?|哦[～~，,、]?)")
@@ -434,8 +440,8 @@ _IMPLIED_FACT_REGEXES: tuple[tuple[str, re.Pattern[str]], ...] = (
 )
 _SCENE_GROUNDING_ANCHORS: dict[str, tuple[str, ...]] = {
     "daily_good_morning": ("早", "早安"),
-    "daily_greeting_cn": ("客气", "正经", "你好", "端着", "外人", "尼尼"),
-    "daily_greeting_en": ("正式", "中文", "正经", "尼尼"),
+    "daily_greeting_cn": ("客气", "正经", "你好", "端着", "外人", "老哥"),
+    "daily_greeting_en": ("正式", "中文", "正经", "老哥"),
     "presence": ("在", "回", "看见"),
     "wait": ("等", "去", "慢慢", "处理", "忙"),
     "back": ("回", "回来", "继续"),
@@ -457,7 +463,7 @@ _SCENE_GROUNDING_ANCHORS: dict[str, tuple[str, ...]] = {
     "next_step": ("先", "发", "看", "贴", "一步"),
     "help_takeover": ("发", "贴", "看", "红字", "截图", "拿"),
     "write_takeover": ("写", "材料", "要求", "丢来"),
-    "identity": ("夏目蓝",),
+    "identity": ("天", "SORA"),
     "play_invite": ("陪", "玩", "一起"),
     "quiet": ("小声", "安静", "不吵", "收"),
     "talkative": ("说", "话", "闷"),
@@ -479,7 +485,7 @@ _SCENE_GROUNDING_ANCHORS: dict[str, tuple[str, ...]] = {
 _SOFT_REASON_SCORE_PENALTIES = {
     "STYLE_TEMPLATE_DENSITY": 3.5,
     "STOCK_OPENING_TEMPLATE": 2.5,
-    "CHEAP_WAVE_PUNCTUATION": 5.0,
+    "OVERUSED_WAVE_PUNCTUATION": 5.0,
     "WHAT_DOING_ATTENTION_WAIT": 4.0,
     "PRESENCE_ATTENTION_DEBT": 4.0,
     "MEAL_SHARE_SCOLDING_OR_PUSHY": 3.5,
@@ -494,7 +500,7 @@ _SOFT_REASON_SCORE_PENALTIES = {
     "WEAK_SCENE_GROUNDING": 4.0,
     "FLAT_GENERIC_LINE": 4.0,
     "BLAND_PASS_LINE": 6.0,
-    "QUALITY_SOFT_TRAILING_INCOMPLETE_QUESTION": 4.0,
+    "QUALITY_SOFT_TRAILING_INCOMPLETE_QUESTION": 7.0,
     "STERILE_TRANSACTION_TONE": 6.0,
     "LOW_HUMAN_TEXTURE": 3.5,
     "LOW_CATCHINESS": 2.0,
@@ -820,12 +826,13 @@ def score_sample_guided_text(
         _drop(dimensions, "naturalness", min(30, 6 + (length - getattr(contract, "target_max_chars", 48)) * 0.5))
         reasons.append("TOO_LONG")
         penalties.append(f"naturalness:too_long:{length}")
-    if normalized.count("？") + normalized.count("?") > getattr(contract, "max_questions", 1):
+    question_count = _budget_question_count(normalized)
+    if question_count > getattr(contract, "max_questions", 1):
         _drop(dimensions, "context_fit", 10)
         _drop(dimensions, "usefulness", 8)
         reasons.append("TOO_MANY_QUESTIONS")
         penalties.append("context_fit:too_many_questions")
-    if normalized.count("尼尼") > 1:
+    if normalized.count("老哥") + normalized.count("哥哥") > 2 or normalized.count("尼尼") > 1:
         _drop(dimensions, "naturalness", 6)
         penalties.append("naturalness:address_stacking")
     if _ASCII_WORD_RE.search(normalized):
@@ -1141,7 +1148,7 @@ def score_sample_guided_text(
         dimensions["technical_helpfulness"] = max(dimensions["technical_helpfulness"], 82.0)
 
     if scene_id in _HIGH_EMOTION_SCENES:
-        if normalized.count("？") + normalized.count("?") >= 2:
+        if _budget_question_count(normalized) >= 2:
             _drop(dimensions, "emotional_containment", 18)
             reasons.append("EMOTIONAL_CONTAINMENT_TOO_QUESTIONY")
             penalties.append("emotional_containment:too_questiony")
@@ -1152,13 +1159,14 @@ def score_sample_guided_text(
 
     if quality is not None:
         forbidden_hit_set = set(getattr(quality, "forbidden_hits", ()) or ())
-        if "cheap_wave_punctuation" in forbidden_hit_set or "~" in normalized or "～" in normalized:
+        wave_count = normalized.count("~") + normalized.count("～")
+        if wave_count > 2:
             _drop(dimensions, "catchiness", 18)
             _drop(dimensions, "character_freshness", 12)
             _drop(dimensions, "line_rhythm", 8)
             _drop(dimensions, "naturalness", 6)
-            reasons.append("CHEAP_WAVE_PUNCTUATION")
-            penalties.append("surface:cheap_wave_punctuation")
+            reasons.append("OVERUSED_WAVE_PUNCTUATION")
+            penalties.append("surface:overused_wave_punctuation")
         soft_quality_codes = [
             code for code in quality.reason_codes or () if code not in _ABSOLUTE_HARD_QUALITY_CODES
         ]

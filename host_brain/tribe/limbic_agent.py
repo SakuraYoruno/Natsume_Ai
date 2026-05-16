@@ -1,11 +1,49 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, field
 from typing import Any, Mapping
 
 from host_brain.tribe.base_agent import TribeAgentDescriptor
 from host_brain.tribe.events import emit_tribe_event
 from host_brain.tribe.tribe_state import TribeStateRegistry, get_global_registry
+
+
+_TRUSTED_RUNTIME_EMOTION_SOURCES = frozenset(
+    {
+        "edge_explicit",
+        "face_capture",
+        "somatic_voice_acoustic",
+        "voice_acoustic",
+        "acoustic_emotion_model",
+    }
+)
+_TEXT_ONLY_EMOTION_SOURCES = frozenset(
+    {
+        "asr_text_bootstrap",
+        "asr_text_unavailable",
+        "text_heuristic",
+        "text_bootstrap_fallback",
+    }
+)
+
+
+def _is_trusted_runtime_emotion_source(
+    *,
+    emotion_source: str,
+    emotion_modality: str,
+    acoustic_emotion_available: bool,
+    degraded: bool,
+) -> bool:
+    if degraded:
+        return False
+    source = str(emotion_source or "").strip().lower()
+    modality = str(emotion_modality or "").strip().lower()
+    if source in _TEXT_ONLY_EMOTION_SOURCES or modality in {"asr_text", "text"}:
+        return False
+    if acoustic_emotion_available:
+        return True
+    return source in _TRUSTED_RUNTIME_EMOTION_SOURCES or modality in {"face_capture", "explicit"}
 
 
 @dataclass(slots=True)
@@ -1201,11 +1239,11 @@ class LimbicAgent:
             )
 
     async def _on_emotion_inference_updated(self, event: Any) -> None:
-        """处理 EMOTION_INFERENCE_UPDATED 事件：接收 SomaticAgent 的语音情绪推断结果。
+        """处理 EMOTION_INFERENCE_UPDATED 事件：接收多源情绪提示。
 
-        T-09：SomaticAgent（edge_client）在语音处理完成后通过 EdgeTribeBridge 发布
-        emotion_inference_updated 事件，经 /internal/tribe_event 端点转发到 Bus，
-        LimbicAgent 订阅后更新情绪状态快照，供后续对话上下文使用。
+        T-09：SomaticAgent（edge_client）在运行期处理完成后通过 EdgeTribeBridge
+        发布 emotion_inference_updated 事件，经 /internal/tribe_event 端点转发到 Bus。
+        ASR 转写文本只作为低可信提示；可信情绪必须来自显式上游、视觉或声学模型。
         """
         try:
             import logging  # noqa: PLC0415
@@ -1214,13 +1252,23 @@ class LimbicAgent:
             emotion_tag = str(payload.get("emotion_tag") or "NEUTRAL").strip().upper() or "NEUTRAL"
             emotion_intensity = payload.get("emotion_intensity")
             mood_state = str(payload.get("mood_state") or "").strip().lower() or None
-            emotion_source = str(payload.get("emotion_source") or "somatic_voice").strip() or "somatic_voice"
+            emotion_source = str(payload.get("emotion_source") or "runtime_unknown").strip() or "runtime_unknown"
+            emotion_modality = str(payload.get("emotion_modality") or "").strip().lower()
+            emotion_confidence = payload.get("emotion_confidence")
+            acoustic_available = bool(payload.get("acoustic_emotion_available", False))
+            inference_degraded = bool(payload.get("emotion_inference_degraded", False))
             session_id = str(payload.get("session_id") or "").strip()
             _log.debug(
-                "LimbicAgent 收到 EMOTION_INFERENCE_UPDATED: emotion_tag=%s intensity=%s source=%s session=%s",
-                emotion_tag, emotion_intensity, emotion_source, session_id,
+                "LimbicAgent 收到 EMOTION_INFERENCE_UPDATED: emotion_tag=%s intensity=%s source=%s modality=%s degraded=%s session=%s",
+                emotion_tag, emotion_intensity, emotion_source, emotion_modality, inference_degraded, session_id,
             )
-            # 将语音情绪推断结果写入 TribeStateRegistry，供上下文装配主链读取
+            trusted_runtime_emotion = _is_trusted_runtime_emotion_source(
+                emotion_source=emotion_source,
+                emotion_modality=emotion_modality,
+                acoustic_emotion_available=acoustic_available,
+                degraded=inference_degraded,
+            )
+            # 将运行期情绪提示写入 TribeStateRegistry，供上下文装配主链读取。
             self._touch_state(
                 key="last_voice_emotion_inference",
                 value={
@@ -1228,13 +1276,23 @@ class LimbicAgent:
                     "emotion_intensity": emotion_intensity,
                     "mood_state": mood_state,
                     "emotion_source": emotion_source,
+                    "emotion_modality": emotion_modality or None,
+                    "emotion_confidence": emotion_confidence,
+                    "emotion_inference_degraded": inference_degraded,
+                    "acoustic_emotion_available": acoustic_available,
+                    "trusted_runtime_emotion": trusted_runtime_emotion,
                     "session_id": session_id,
                     "source_agent": str(event.source_agent or ""),
                     "ts_ms": int(event.ts_ms or 0),
                 },
             )
-            # 若情绪强度较高（>= 0.6），同步更新情绪上下文（影响当前对话情绪感知）
-            if isinstance(emotion_intensity, (int, float)) and float(emotion_intensity) >= 0.6:
+            # 只有明确传感器/显式上游情绪才同步 hard_state。ASR 文本兜底提示
+            # 交给 chat 入口按当前文本重新解析，避免把文本关键词误当成声学情绪。
+            if (
+                trusted_runtime_emotion
+                and isinstance(emotion_intensity, (int, float))
+                and float(emotion_intensity) >= 0.6
+            ):
                 try:
                     from host_brain.app.dependencies import get_hard_state  # noqa: PLC0415
                     hard_state = get_hard_state()
@@ -1245,29 +1303,31 @@ class LimbicAgent:
                     if mood_state and hasattr(hard_state, "mood_state"):
                         hard_state.mood_state = mood_state
                     _log.info(
-                        "LimbicAgent 语音情绪推断已同步到 hard_state: emotion_tag=%s intensity=%s",
+                        "LimbicAgent 可信运行期情绪已同步到 hard_state: emotion_tag=%s intensity=%s",
                         emotion_tag, emotion_intensity,
                     )
                 except Exception as _hs_exc:
                     _log.debug("LimbicAgent 同步 hard_state 失败（降级）: %s", _hs_exc)
-            # T-138：语音情绪推断自动写入 emotion_timeline
-            try:
-                self.write_emotion_timeline(
-                    emotion_tag=emotion_tag,
-                    valence=0.0,  # 语音推断暂无 VAD 数据，使用中性值
-                    arousal=float(emotion_intensity) * 0.5 if isinstance(emotion_intensity, (int, float)) else 0.0,
-                    source="somatic_voice",
-                    ts_ms=int(event.ts_ms or 0) or None,
-                )
-            except Exception as _tl_exc:
-                _log.debug("LimbicAgent write_emotion_timeline 失败（降级）: %s", _tl_exc)
+            if trusted_runtime_emotion:
+                # T-138：只有可信传感器/显式情绪写入 emotion_timeline。
+                # ASR 转写文本只能作为低可信提示，不能伪装成声学情绪进入长期情绪链路。
+                try:
+                    self.write_emotion_timeline(
+                        emotion_tag=emotion_tag,
+                        valence=0.0,  # 运行期上游暂无 VAD 数据，使用中性值
+                        arousal=float(emotion_intensity) * 0.5 if isinstance(emotion_intensity, (int, float)) else 0.0,
+                        source=emotion_source,
+                        ts_ms=int(event.ts_ms or 0) or None,
+                    )
+                except Exception as _tl_exc:
+                    _log.debug("LimbicAgent write_emotion_timeline 失败（降级）: %s", _tl_exc)
 
             # T-125：通过 EdgeCommandPusher 将情绪状态推送回 edge_client，驱动 vts_driver 表情
             # 实现 LimbicAgent → SomaticAgent 的下行反馈闭环（身心联动）
             try:
                 from host_brain.tribe.edge_command_pusher import get_edge_command_pusher  # noqa: PLC0415
                 _pusher = get_edge_command_pusher()
-                if _pusher is not None and _pusher.enabled:
+                if _pusher is not None and _pusher.enabled and trusted_runtime_emotion:
                     _push_result = await asyncio.to_thread(
                         _pusher.push_emotion_state,
                         emotion_tag=emotion_tag,

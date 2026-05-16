@@ -32,7 +32,7 @@ def collect_tribe_context(
         bond_context (dict): Bond/关系上下文
         endocrine_gate (dict): 内分泌门控状态
         silence_willingness (float): 沉默意愿
-        voice_emotion (dict | None): 最近语音情绪推断
+        voice_emotion (dict | None): 最近可信语音/传感器情绪
         hedonic_state (dict): 完整享乐状态（pain_level/reward_level/net_valence/hedonic_tone/...）（T-20）
         tribe_context_source (str): 数据来源标记
     """
@@ -77,6 +77,9 @@ def collect_tribe_context(
             result["voice_emotion"] = {
                 "emotion_tag": vital_signs["voice_emotion_tag"],
                 "emotion_intensity": vital_signs.get("voice_emotion_intensity"),
+                "emotion_source": vital_signs.get("voice_emotion_source"),
+                "emotion_modality": vital_signs.get("voice_emotion_modality"),
+                "trusted_runtime_emotion": bool(vital_signs.get("voice_emotion_trusted", False)),
             }
     except Exception:
         pass
@@ -232,7 +235,7 @@ def collect_tribe_context(
                 vital_signs = dict(result.get("vital_signs") or {})
                 dual_snapshot = language_agent.resolve_dual_system(
                     user_text=user_text,
-                    bond_stage=str(vital_signs.get("bond_stage") or "stranger"),
+                    bond_stage=str(vital_signs.get("bond_stage") or "friend"),
                     emotion_tag=str(vital_signs.get("emotion_tag") or "NEUTRAL"),
                     loneliness_level=float(vital_signs.get("loneliness_level") or 0.0),
                     high_loneliness_flag=bool(vital_signs.get("high_loneliness_flag", False)),

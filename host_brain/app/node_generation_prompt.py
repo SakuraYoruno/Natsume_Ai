@@ -179,7 +179,7 @@ def render_node_generation_prompt(
         if bond_aware:
             bond_aware_style_block = (
                 _mapping_text(_runtime_section_templates, "bond_aware_title")
-                + _mapping_text(_runtime_section_templates, "bond_stage_label", value=_truncate_for_prompt(bond_aware.get("bond_stage"), limit=32) or "STRANGER")
+                + _mapping_text(_runtime_section_templates, "bond_stage_label", value=_truncate_for_prompt(bond_aware.get("bond_stage"), limit=32) or "FRIEND")
                 + _mapping_text(_runtime_section_templates, "intimacy_level_label", value=f"{float(bond_aware.get('intimacy_level') or 0.0):.2f}")
                 + _mapping_text(_runtime_section_templates, "prompt_label", value=_truncate_for_prompt(bond_aware.get("prompt_injection"), limit=600) or "NONE")
                 + _mapping_text(_runtime_section_templates, "forbidden_patterns_label", value=", ".join(list(bond_aware.get("forbidden_patterns") or [])[:5]) or "NONE")
@@ -384,7 +384,7 @@ def render_node_generation_prompt(
     _tv_energy_reserve = float(_tribe_vital.get("energy_reserve") or 0.6)
     _tv_homeostasis_ok = bool(_tribe_vital.get("homeostasis_ok", True))
     _tv_mood_state = str(_tribe_vital.get("mood_state") or "steady").strip().lower()
-    _tv_bond_stage = str(_tribe_vital.get("bond_stage") or "stranger").strip().lower()
+    _tv_bond_stage = str(_tribe_vital.get("bond_stage") or "friend").strip().lower()
     _tv_voice_emotion_tag = str(_tribe_vital.get("voice_emotion_tag") or "").strip().upper()
     _tv_voice_emotion_intensity = _tribe_vital.get("voice_emotion_intensity")
     _tv_hedonic_tone = str(_tribe_vital.get("hedonic_tone") or "neutral").strip().lower()

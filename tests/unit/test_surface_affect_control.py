@@ -4,7 +4,7 @@ from host_brain.app.context.affect_state import AffectStateBlock
 from host_brain.persona.isolated_surface_continuity import ThreeLayerContinuityContext
 from host_brain.persona.isolated_surface_harness import (
     build_isolated_surface_messages,
-    build_style_reference_query,
+    build_surface_original_quote_query,
     score_isolated_surface_candidates,
     select_best_isolated_candidate,
 )
@@ -41,7 +41,7 @@ def test_affect_control_packet_compresses_emotion_and_bond_without_raw_state() -
         case_id="affect_soft",
     )
     rendered = "\n".join(message["content"] for message in build_isolated_surface_messages(request))
-    query = build_style_reference_query(request)
+    query = build_surface_original_quote_query(request)
 
     assert packet.emotional_tone == "soft_containment"
     assert packet.relationship_distance == "familiar"
@@ -127,7 +127,7 @@ def test_affect_control_prompt_guidance_understands_steady_helpful_alias() -> No
         case_id="affect_steady_alias",
     )
     rendered = "\n".join(message["content"] for message in build_isolated_surface_messages(request))
-    query = build_style_reference_query(request)
+    query = build_surface_original_quote_query(request)
 
     assert "care" in query.emotion_tags
     assert "take_charge" in query.style_moves
@@ -166,6 +166,41 @@ def test_affect_state_block_compresses_to_surface_controls_without_raw_state() -
     assert "当前显影：收着说，短一点，少追问。" in rendered
     assert "withdraw_bias" not in rendered
     assert "carryover_turns" not in rendered
+
+
+def test_degraded_emotion_bootstrap_stays_low_visibility() -> None:
+    packet = build_surface_affect_control_packet(
+        emotion_state={
+            "emotion_tag": "NEUTRAL",
+            "emotion_inference_degraded": True,
+            "emotion_inference_source": "default_neutral",
+        },
+        bond_summary={"relationship_distance": "familiar_not_intimate"},
+        task_mode="daily_chat",
+    )
+
+    assert packet.degraded is True
+    assert packet.reason_code == "EMOTION_BOOTSTRAP_DEGRADED"
+    assert packet.confidence < 0.5
+    assert "情绪识别不确定：低显影处理，不要装作知道用户情绪。" in packet.style_anchor
+    assert "不要直说你看起来很难过/生气，除非用户明说" in packet.must_not_do
+
+
+def test_bootstrapped_anxious_emotion_drives_soft_containment() -> None:
+    packet = build_surface_affect_control_packet(
+        emotion_state={
+            "emotion_tag": "ANXIOUS",
+            "emotion_intensity": 0.68,
+            "emotion_inference_source": "text_bootstrap_fallback",
+            "emotion_inference_degraded": False,
+        },
+        bond_summary={"relationship_distance": "familiar_not_intimate"},
+        task_mode="daily_chat",
+    )
+
+    assert packet.emotional_tone == "soft_containment"
+    assert packet.degraded is False
+    assert "不要连环追问" in packet.must_not_do
 
 
 def test_technical_affect_state_keeps_usefulness_above_mood_flavor() -> None:

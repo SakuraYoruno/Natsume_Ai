@@ -32,7 +32,7 @@ def test_load_compiled_soul_reads_markdown_and_derives_runtime_texts(
                 "",
                 "## 四、与“尼尼”关系模式",
                 "1. 默认称呼：尼尼 / にぃに",
-                "2. 关系定位：初次见面的义妹 -> 关系好的兄妹 -> 亲密的恋人 -> 灵魂伴侣",
+                "2. 关系定位：关系好的兄妹 -> 亲近兄妹 -> 亲密的恋人 -> 灵魂伴侣",
                 "3. 情感表达风格：不擅长直白告白，用任性代替“我在意你”",
                 "",
                 "## 五、AI伴侣语气风格",
@@ -114,7 +114,7 @@ def test_load_compiled_soul_reads_minimal_identity_core_bullets(
     assert "运行关系：重组家庭中的义妹" in compiled.identity_core
     assert "白泉学园" not in compiled.runtime_compact_text
     assert "存在感消除" not in compiled.runtime_compact_text
-    assert "二次元义妹私聊台词感" in compiled.zh_text_style_anchor
+    assert "二次元熟人兄妹感私聊台词" in compiled.zh_text_style_anchor
     assert "不追求完全真人腔" in compiled.zh_text_style_anchor
 
 
@@ -164,7 +164,7 @@ def test_context_assembler_keeps_state_blocks_without_soul() -> None:
     runtime_payload = {
         "request": {"user_message": "你好", "request_id": "req-1", "session_id": "sess-1", "person_id": "p1"},
         "render": {"target_lang": "zh"},
-        "prompt_context": {"payload": {"bond_summary": {"stage": "STRANGER"}}},
+        "prompt_context": {"payload": {"bond_summary": {"stage": "FRIEND"}}},
         "emotion_context": {"emotion_tag": "CALM"},
         "retrieval": {"status": "OK", "evidence_items": [{"id": "e1"}]},
     }
@@ -192,7 +192,7 @@ def test_context_assembler_preserves_multimodal_observations() -> None:
             "attachment_summary": "用户发来一张截图，更像是在问界面上这段提示是什么意思。",
         },
         "render": {"target_lang": "zh"},
-        "prompt_context": {"payload": {"bond_summary": {"stage": "STRANGER"}}},
+        "prompt_context": {"payload": {"bond_summary": {"stage": "FRIEND"}}},
         "emotion_context": {"emotion_tag": "CALM"},
         "retrieval": {"status": "OK", "evidence_items": []},
         "multimodal_input": {

@@ -98,9 +98,11 @@ def build_surface_affect_control_packet(
         emotion_state=emotion,
         relationship_distance=relationship_distance,
     )
+    degraded_emotion = bool(emotion.get("emotion_inference_degraded", False))
     anchors = _clean_list(
         [
             "情感层只调语气、节奏和距离，不新增事实。",
+            "情绪识别不确定：低显影处理，不要装作知道用户情绪。" if degraded_emotion else "",
             _emotion_anchor(emotional_tone, intensity),
             _relationship_anchor(relationship_distance),
             _affect_state_anchor(emotion),
@@ -110,6 +112,7 @@ def build_surface_affect_control_packet(
         [
             "不要把情绪状态当事实说出来",
             "不要输出 emotion_tag、mood_state、VAD、关系阶段等过程词",
+            "不要直说你看起来很难过/生气，除非用户明说" if degraded_emotion else "",
             *_tone_must_not_do(emotional_tone),
             *_relationship_must_not_do(relationship_distance),
         ]
@@ -120,7 +123,9 @@ def build_surface_affect_control_packet(
         expression_intensity=intensity,
         style_anchor=tuple(anchors),
         must_not_do=tuple(must_not_do),
-        confidence=0.78 if tag or relationship_distance else 0.0,
+        confidence=0.42 if degraded_emotion else (0.78 if tag or relationship_distance else 0.0),
+        degraded=degraded_emotion,
+        reason_code="EMOTION_BOOTSTRAP_DEGRADED" if degraded_emotion else None,
         trace={
             "emotion_tag": tag or "NEUTRAL",
             "task_mode": task,
@@ -317,20 +322,21 @@ def _emotional_tone(
 
 
 def _relationship_distance_from_bond(bond: Mapping[str, Any], clues: Sequence[str]) -> str:
-    raw = _clean_text(
-        bond.get("relationship_distance")
-        or bond.get("distance")
-        or bond.get("stage")
-        or bond.get("bond_stage")
-    ).lower()
+    explicit_distance = _clean_text(bond.get("relationship_distance") or bond.get("distance")).lower()
+    stage = _normalize_relationship_stage(bond.get("bond_stage") or bond.get("stage"))
+    phase = _clean_text(bond.get("relationship_phase")).lower()
     joined = "\n".join(clues)
     non_romantic = any(token in joined for token in ("不升级亲密", "别升级亲密", "非恋人", "熟人私聊", "not_romantic", "not_intimate"))
-    if raw in {"familiar_not_intimate", "close_but_not_romantic", "polite_warm"}:
-        return raw
-    if raw in {"guarded", "early", "stranger", "distant", "new"}:
+    if explicit_distance in {"familiar_not_intimate", "close_but_not_romantic", "polite_warm"}:
+        return explicit_distance
+    if explicit_distance in {"guarded", "early", "distant", "new"}:
         return "guarded"
-    if raw in {"close", "confidant", "intimate"}:
+    if explicit_distance in {"close", "confidant", "intimate"}:
         return "close_but_not_romantic" if non_romantic else "close"
+    if phase in {"lover", "soulmate"} or stage in {"CONFIDANT", "INTIMATE", "SOULMATE"}:
+        return "close_but_not_romantic" if non_romantic else "close"
+    if phase == "stepsibling" or stage in {"FRIEND", "CLOSE", "CLOSE_FRIEND"}:
+        return "familiar"
     try:
         closeness = float(bond.get("closeness") or bond.get("familiarity"))
     except (TypeError, ValueError):
@@ -342,6 +348,26 @@ def _relationship_distance_from_bond(bond: Mapping[str, Any], clues: Sequence[st
     if non_romantic:
         return "familiar"
     return "familiar"
+
+
+def _normalize_relationship_stage(value: Any) -> str:
+    text = _clean_text(value)
+    if not text:
+        return ""
+    upper = text.upper()
+    if upper in {"FRIEND", "CLOSE", "CLOSE_FRIEND", "CONFIDANT", "INTIMATE", "SOULMATE"}:
+        return upper
+    aliases = {
+        "关系好的兄妹": "FRIEND",
+        "关系好的义兄妹": "FRIEND",
+        "亲近兄妹": "CLOSE_FRIEND",
+        "亲近义兄妹": "CLOSE_FRIEND",
+        "亲密恋人": "CONFIDANT",
+        "确认心意的恋人": "CONFIDANT",
+        "稳定亲密的恋人": "CONFIDANT",
+        "灵魂伴侣": "SOULMATE",
+    }
+    return aliases.get(text, "")
 
 
 def _cap_intensity(value: float, *, task_mode: str, relationship_distance: str) -> float:
@@ -373,6 +399,8 @@ def _derive_expression_intensity(emotion: Mapping[str, Any]) -> float:
 def _affect_state_anchor(emotion: Mapping[str, Any]) -> str:
     if not emotion:
         return ""
+    if bool(emotion.get("emotion_inference_degraded", False)):
+        return "当前显影：情绪识别不确定，保持平稳，不主动替用户命名情绪。"
     social_energy = _coerce_float(emotion.get("social_energy"), default=1.0)
     withdraw = _coerce_float(emotion.get("withdraw_bias"), default=0.0)
     irritation = _coerce_float(emotion.get("irritation_bias"), default=0.0)
@@ -408,7 +436,7 @@ def _normalize_emotion_tag(value: Any) -> str:
 
 def _relationship_distance_family(distance: str) -> str:
     value = _clean_text(distance).lower()
-    if value in {"guarded", "early", "distant", "stranger", "new"} or "polite" in value:
+    if value in {"guarded", "early", "distant", "new"} or "polite" in value:
         return "guarded"
     if value in {"close", "intimate"} or value.startswith("close"):
         return "close"

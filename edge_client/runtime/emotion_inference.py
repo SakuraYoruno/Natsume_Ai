@@ -1,4 +1,9 @@
-"""Lightweight text emotion inference for Edge ASR events."""
+"""Lightweight text emotion hinting for Edge ASR events.
+
+This module does not infer acoustic emotion from voice. Current ASR upstreams
+only provide transcript text, so this is a conservative text bootstrap hint
+used when no dedicated voice-affect model is available.
+"""
 
 from __future__ import annotations
 
@@ -56,7 +61,12 @@ def infer_asr_emotion(
             "emotion_tag": "NEUTRAL",
             "emotion_intensity": 0.0,
             "mood_state": "calm",
-            "emotion_source": "text_heuristic",
+            "emotion_source": "asr_text_unavailable",
+            "emotion_modality": "asr_text",
+            "emotion_confidence": 0.0,
+            "emotion_inference_degraded": True,
+            "acoustic_emotion_available": False,
+            "inference_note": "asr_transcript_empty_no_acoustic_emotion_model",
             "matched_terms": [],
         }
 
@@ -107,12 +117,46 @@ def infer_asr_emotion(
 
     if emotion_tag == "NEUTRAL" and intensity < 0.18:
         intensity = 0.0
+    confidence_score = _confidence_from_signal(
+        matched_terms=matched_terms,
+        exclamation_count=exclamation_count,
+        question_count=question_count,
+        asr_confidence=confidence,
+        final=final,
+    )
+    degraded = not matched_terms
 
     return {
         "emotion_tag": emotion_tag,
         "emotion_intensity": intensity,
         "mood_state": mood_state,
-        "emotion_source": "text_heuristic",
+        "emotion_source": "asr_text_bootstrap",
+        "emotion_modality": "asr_text",
+        "emotion_confidence": confidence_score,
+        "emotion_inference_degraded": degraded,
+        "acoustic_emotion_available": False,
+        "inference_note": "text_semantic_hint_no_acoustic_emotion_model",
         "inference_level": 1,  # 方向 G：标记为 Level 1（关键词引擎）
         "matched_terms": matched_terms[:6],
     }
+
+
+def _confidence_from_signal(
+    *,
+    matched_terms: list[str],
+    exclamation_count: int,
+    question_count: int,
+    asr_confidence: float | None,
+    final: bool | None,
+) -> float:
+    if matched_terms:
+        confidence = 0.45 + min(0.30, 0.10 * len(set(matched_terms)))
+    elif question_count or exclamation_count:
+        confidence = 0.24
+    else:
+        confidence = 0.0
+    if asr_confidence is not None:
+        confidence *= max(0.45, min(1.0, float(asr_confidence)))
+    if final is False:
+        confidence *= 0.9
+    return max(0.0, min(0.95, round(confidence, 4)))

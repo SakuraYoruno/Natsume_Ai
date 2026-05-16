@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import asyncio
 import json
@@ -1680,7 +1680,7 @@ def test_run_gateway_proactive_progress_push_sends_update(monkeypatch) -> None:
             user_message="请执行任务",
             reply=str(kwargs["content"]),
             emotion_tag="neutral",
-            bond_stage="STRANGER",
+            bond_stage="FRIEND",
         )
     finally:
         ledger.close()
@@ -1763,7 +1763,7 @@ def test_maybe_realign_gateway_pipeline_retries_when_deviation(monkeypatch) -> N
             user_message="请帮我总结前端卡顿原因并给出修复方案",
             reply=str(result.get("narrative") or ""),
             emotion_tag="neutral",
-            bond_stage="STRANGER",
+            bond_stage="FRIEND",
         )
     finally:
         ledger.close()

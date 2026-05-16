@@ -38,7 +38,7 @@ class ANSAgent:
     )
     state_registry: Any = field(default=None)
     _loop: asyncio.AbstractEventLoop | None = field(default=None, init=False, repr=False)
-    _bond_stage: str = field(default="stranger", init=False, repr=False)  # T-37：记录当前关系阶段
+    _bond_stage: str = field(default="friend", init=False, repr=False)  # T-37：记录当前关系阶段
     _recovery_mode: bool = field(default=False, init=False, repr=False)  # T-203：Glymphatic 恢复窗口标志
     _recovery_mode_ts_ms: int = field(default=0, init=False, repr=False)  # T-203：恢复窗口开始时间戳
     _last_glymphatic_log_signature: tuple[bool, int] | None = field(default=None, init=False, repr=False)
@@ -97,7 +97,7 @@ class ANSAgent:
         可从任意线程调用（Timer 线程或 asyncio 线程均可）。
 
         T-43：自动将 _bond_stage 注入 payload，供 NatsumeScheduler 根据
-        关系亲密度动态调整 tick 间隔（stranger < acquaintance < friend < intimate）。
+        关系亲密度动态调整 tick 间隔（friend < close_friend < intimate）。
 
         T-148：在 tick 完成后，根据 tick_result 中的 proactive_voice_eligible 标志
         判断是否触发主动发声评估，打通 INNER_WORLD_TICKED → proactive_voice 联动链路。
@@ -114,17 +114,17 @@ class ANSAgent:
 
         # T-148：INNER_WORLD_TICKED 后判断是否触发主动发声
         # 触发条件：tick_result 中 proactive_voice_eligible=True，
-        # 或者 loneliness > 0.5 且 bond_stage 不是 stranger
+        # 或者 loneliness > 0.5 且关系阶段已存在
         try:
             _eligible = bool(payload.get("proactive_voice_eligible", False))
             _loneliness = float(payload.get("loneliness") or 0.0)
-            _bond = str(self._bond_stage or "stranger").lower()
+            _bond = str(self._bond_stage or "friend").lower()
             _voice_active = bool(getattr(self, "_voice_active", False))
             _should_trigger = (
                 not _voice_active  # 语音管线空闲时才触发
                 and (
                     _eligible
-                    or (_loneliness > 0.5 and _bond not in ("stranger",))
+                    or _loneliness > 0.5
                 )
             )
             if _should_trigger:
@@ -751,17 +751,15 @@ class ANSAgent:
         from host_brain.core.ids import now_ms as _now_ms  # noqa: PLC0415
         # 根据 bond_stage 推算 proactive_multiplier
         _stage_multiplier = {
-            "stranger": 0.55,
-            "acquaintance": 0.70,
             "friend": 0.85,
             "close_friend": 0.95,
             "intimate": 1.00,
         }
-        proactive_multiplier = _stage_multiplier.get(str(self._bond_stage or "stranger"), 0.70)
+        proactive_multiplier = _stage_multiplier.get(str(self._bond_stage or "friend"), 0.85)
         if self._recovery_mode:
             proactive_multiplier = round(proactive_multiplier * 0.35, 4)
         snapshot = {
-            "bond_stage": str(self._bond_stage or "stranger"),
+            "bond_stage": str(self._bond_stage or "friend"),
             "recovery_mode": bool(self._recovery_mode),
             "recovery_mode_ts_ms": int(self._recovery_mode_ts_ms or 0),
             "proactive_multiplier": round(proactive_multiplier, 4),

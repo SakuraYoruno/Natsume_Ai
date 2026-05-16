@@ -20,31 +20,13 @@ from host_brain.core.errors import (
     VTS_MAPPING_LOAD_FAILED,
 )
 from host_brain.core.ids import now_ms
+from host_brain.channels.vts_runtime_mapping import DEFAULT_EMOTION_TO_HOTKEY
 
 
 logger = logging.getLogger(__name__)
 
-# 默认映射表（与 channels/vts.py EMOTION_TO_EXPRESSION_ID 保持一致）
-DEFAULT_EMOTION_MAPPING: dict[str, str] = {
-    # 原有 6 种
-    "NEUTRAL": "exp_neutral_01",
-    "HAPPY": "exp_happy_01",
-    "SAD": "exp_sad_01",
-    "ANGRY": "exp_angry_01",
-    "SURPRISED": "exp_surprised_01",
-    "THINKING": "exp_thinking_01",
-    # M28-L（OPT-34）：补全 10 种缺失情感的表情映射
-    "EXCITED": "exp_excited_01",
-    "CALM": "exp_calm_01",
-    "FRUSTRATED": "exp_frustrated_01",
-    "ANXIOUS": "exp_anxious_01",
-    "LOVING": "exp_loving_01",
-    "EMBARRASSED": "exp_embarrassed_01",
-    "CONFUSED": "exp_confused_01",
-    "BORED": "exp_bored_01",
-    "PROUD": "exp_proud_01",
-    "GRATEFUL": "exp_grateful_01",
-}
+# 默认映射表（与 channels/vts.py / configs/vts/vts_hotkey_config.yaml 保持一致）
+DEFAULT_EMOTION_MAPPING: dict[str, str] = dict(DEFAULT_EMOTION_TO_HOTKEY)
 
 _SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS vts_expression_mapping (

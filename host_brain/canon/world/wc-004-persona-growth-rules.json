@@ -3,14 +3,9 @@
   "title": "人格成长规则配置",
   "body": "定义 AI 伴侣人格成长的触发规则和变化量。Master 可通过 Canon API 修改规则，无需改代码。所有规则变更自动走版本化审计链。stage_promotion_rules 定义 Bond 阶段晋级时的特质微调；milestone_rules 定义里程碑事件的特质微调；interaction_trait_map 定义交互驱动成长的特质权重映射。",
   "stage_promotion_rules": {
-    "ACQUAINTANCE→FRIEND": {
-      "delta": {"playfulness": 0.05},
-      "description": "首次成为朋友：俏皮度 +0.05",
-      "one_time": true
-    },
     "FRIEND→CLOSE_FRIEND": {
-      "delta": {"warmth": 0.03, "sensitivity": 0.02},
-      "description": "成为好友：温柔度 +0.03，敏感度 +0.02",
+      "delta": {"playfulness": 0.05, "warmth": 0.03, "sensitivity": 0.02},
+      "description": "关系更亲近：俏皮度 +0.05，温柔度 +0.03，敏感度 +0.02",
       "one_time": true
     },
     "CLOSE_FRIEND→CONFIDANT": {

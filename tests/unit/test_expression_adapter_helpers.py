@@ -65,7 +65,7 @@ def test_build_style_hint_covers_empathy_distance_and_rapid_pass_branch() -> Non
             assertiveness=0.2,
         ),
         "NEUTRAL",
-        "STRANGER",
+        "FRIEND",
         ReactivityModifiers(),
         openness=0.3,
         pace=PACE_NORMAL,

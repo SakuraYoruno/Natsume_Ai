@@ -111,7 +111,7 @@ def _reason_tags_of(interpretation: Any) -> tuple[str, ...]:
 
 
 def _relationship_stage(relationship_state: Any) -> str:
-    return str(getattr(relationship_state, "bond_stage", "") or "STRANGER").strip().upper() or "STRANGER"
+    return str(getattr(relationship_state, "bond_stage", "") or "FRIEND").strip().upper() or "FRIEND"
 
 
 def _is_close_enough_for_voice(relationship_state: Any) -> bool:

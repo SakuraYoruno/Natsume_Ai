@@ -270,7 +270,7 @@ class MirrorNeuronAgent:
         *,
         resonance_intensity: float = 0.0,
         user_emotion_tag: str = "NEUTRAL",
-        bond_stage: str = "stranger",
+        bond_stage: str = "friend",
     ) -> str | None:
         """共情回应建议：共鸣强度高时调用 LLM 生成共情回应策略。
 
@@ -300,7 +300,7 @@ class MirrorNeuronAgent:
             _user_prompt = _user_tpl.format(
                 resonance_intensity=round(float(resonance_intensity), 3),
                 user_emotion_tag=str(user_emotion_tag or "NEUTRAL").upper(),
-                bond_stage=str(bond_stage or "stranger"),
+                bond_stage=str(bond_stage or "friend"),
             )
             _pool_result = complete_llm_with_pool_sync(
                 request_id=f"mirror-empathy::{int(time.time() * 1000)}",
@@ -343,7 +343,7 @@ class MirrorNeuronAgent:
                             "empathy_hint": _hint,
                             "resonance_intensity": round(float(resonance_intensity), 3),
                             "user_emotion_tag": str(user_emotion_tag or "NEUTRAL").upper(),
-                            "bond_stage": str(bond_stage or "stranger"),
+                            "bond_stage": str(bond_stage or "friend"),
                         },
                     )
                 except Exception:

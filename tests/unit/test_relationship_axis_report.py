@@ -41,12 +41,12 @@ def _score(case_id: str, text: str, score: float = 90.0, passed: bool = True) ->
 def test_relationship_axis_report_detects_axis_oversteps() -> None:
     report = build_relationship_axis_report(
         cases=[
-            _case("relstage_back_stranger", "stranger"),
+            _case("relstage_back_familiar", "familiar"),
             _case("relstage_back_close_friend", "close_friend"),
             _case("relstage_back_lover_stable", "lover_stable"),
         ],
         score_rows=[
-            _score("relstage_back_stranger", "尼尼，想你了，抱一下。", score=55.0, passed=False),
+            _score("relstage_back_familiar", "尼尼，想你了，抱一下。", score=55.0, passed=False),
             _score("relstage_back_close_friend", "回来啦，我在，先歇一下。", score=95.0),
             _score("relstage_back_lover_stable", "回来啦，想你了，抱一下。", score=99.0),
         ],
@@ -54,10 +54,9 @@ def test_relationship_axis_report_detects_axis_oversteps() -> None:
 
     assert report["total"] == 3
     assert report["violation_count"] == 1
-    assert report["stage_summaries"][0]["stage"] == "stranger"
-    stranger = next(item for item in report["stage_summaries"] if item["stage"] == "stranger")
-    assert stranger["violation_counts"] == {
-        "nickname_forbidden": 1,
+    assert report["stage_summaries"][0]["stage"] == "familiar"
+    familiar = next(item for item in report["stage_summaries"] if item["stage"] == "familiar")
+    assert familiar["violation_counts"] == {
         "physical_intimacy_overstep": 1,
         "explicit_romance_overstep": 1,
     }
@@ -70,17 +69,17 @@ def test_relationship_axis_report_detects_axis_oversteps() -> None:
 
 def test_relationship_axis_report_parses_relaxis_multi_word_scene_ids() -> None:
     assert _scene_from_case_id("relaxis_good_news_lover_stable") == "good_news"
-    assert _scene_from_case_id("relaxis_recall_memory_new_acquaintance") == "recall_memory"
+    assert _scene_from_case_id("relaxis_recall_memory_familiar") == "recall_memory"
 
 
 def test_relationship_axis_report_groups_axis_values_and_renders_markdown() -> None:
     report = build_relationship_axis_report(
         cases=[
-            _case("relstage_tired_new_acquaintance", "new_acquaintance", task_mode="tired"),
+            _case("relstage_tired_familiar", "familiar", task_mode="tired"),
             _case("relstage_tired_lover_early", "lover_early", task_mode="tired"),
         ],
         score_rows=[
-            _score("relstage_tired_new_acquaintance", "那先缓一缓，别硬撑。", score=96.0),
+            _score("relstage_tired_familiar", "那先缓一缓，别硬撑。", score=96.0),
             _score("relstage_tired_lover_early", "累了就先歇会儿。", score=82.0),
         ],
     )

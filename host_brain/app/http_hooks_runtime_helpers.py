@@ -810,7 +810,7 @@ def build_digital_life_runtime_snapshot(*, current_topic: str = "") -> dict[str,
         if bond_state_obj is not None:
             bond_state = {
                 "user_id": persona_user_id,
-                "current_stage": str(social_snapshot.get("bond_stage") or "STRANGER").strip() or "STRANGER",
+                "current_stage": str(social_snapshot.get("bond_stage") or "FRIEND").strip() or "FRIEND",
                 "trend": str(social_snapshot.get("bond_trend") or "").strip(),
                 "trend_intensity": str(social_snapshot.get("bond_trend_intensity") or "").strip(),
                 "capability_hint": str(social_snapshot.get("capability_hint") or "").strip(),
@@ -923,7 +923,7 @@ def build_digital_life_runtime_snapshot(*, current_topic: str = "") -> dict[str,
         )
         narrative_result = narrative_layer.build_narrative(
             user_id=persona_user_id,
-            bond_stage=str(bond_state.get("current_stage") or "STRANGER").upper(),
+            bond_stage=str(bond_state.get("current_stage") or "FRIEND").upper(),
             now_ts_ms=now_ms,
         )
         bond_narrative = _as_plain_dict(
@@ -1150,8 +1150,8 @@ def build_digital_life_runtime_snapshot(*, current_topic: str = "") -> dict[str,
             bond_stage = str(
                 bond_state.get("current_stage")
                 or bond_summary.get("stage")
-                or "stranger"
-            ).strip().lower() or "stranger"
+                or "friend"
+            ).strip().lower() or "friend"
             emotion_tag = str(emotion_context.get("emotion_tag") or "NEUTRAL").strip().upper() or "NEUTRAL"
             loneliness_level = _coerce_float(
                 body_sense.get("loneliness"),

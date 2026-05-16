@@ -1,6 +1,6 @@
 # Sample-Guided Text Quality
 
-本次重构把中文 galgame 私聊质量从“继续补 forbidden pattern”迁到“多候选 + hard gate + 样本引导 soft scoring + rerank”。
+本次重构把中文 galgame 私聊质量从“继续补 forbidden pattern / rerank 挑句”迁到“直出主回复 + 评分观察”。主链不再保留候选 rerank 分支，避免把有角色反应的句子替换成安全但无味的短句。
 
 ## Hard Gate
 
@@ -47,7 +47,7 @@ Hard gate 只处理绝对不可发送的问题：
 - 不全局禁用 `嗯嗯`、`你说了算`、`听你的` 这类词。
 - 只在日常/短确认等容易滑平的场景里扣 `catchiness`、`character_freshness`、`context_fit` 和 `line_rhythm`。
 - `接着说`、`听着呢`、`多说几个字`、`说点好听的`、`就这一个...` 这类有推进或轻吐槽的短句获得 `short_ack_charm` 加成。
-- rerank 应让 bland pass 输给有推进、有反应、有一点角色味的候选。
+- 主链 direct 输出应优先保留有推进、有反应、有一点角色味的句子；`BLAND_PASS_LINE` 只作为观察信号，不自动换句。
 
 ### Cluster Soft Penalties
 
@@ -68,20 +68,19 @@ Hard gate 只处理绝对不可发送的问题：
 - `bad_examples`
 - `quality_priorities`
 
-未显式填写时，评分器复用既有 `safe_fragments` 作为 good reference，复用 `avoid` 作为 bad reference。样本用于 rerank 参考，不作为最终回复模板。
+未显式填写时，评分器复用既有 `safe_fragments` 作为 good reference，复用 `avoid` 作为 bad reference。样本只用于评分观察，不作为最终回复模板。
 
 ## Runtime Chain
 
-当前主链是隔离表层文本链，不再以 `ChatKernelV2` 作为文本质量验收对象：
+当前主链是隔离表层文本链；旧 `ChatKernelV2` 已移除，不能作为文本质量验收对象或 fallback：
 
 1. `build_isolated_surface_messages()` 只接收 `Soul.md`、当前用户输入、`ReplyControlPacket`、必要事实和 `must_not_do`。
-2. `build_style_reference_query()` 以 `TurnSurfaceContract.scene_id` 为准，而不是只看上游 `task_mode`，例如 `task_mode=happy` 但用户说“终于跑通了”时切到 `good_news`。
-3. 模型一次输出 3 到 5 个候选，真实生成层不能读取原始历史、原始记忆、器官族原文、工具候选或未压缩 RAG。
-4. `parse_surface_candidates()` 最多解析 5 个候选。
-5. 每个候选进入 `score_isolated_surface_candidates()`，内部执行 minimal hard gate 与样本引导 soft scorer。
-6. `select_best_isolated_candidate()` 按 passed、hard gate、control violations、总分和长度 rerank。
-7. failure-only retry 只重跑失败或弱通过 case；merge 时必须证明 retry 候选在通过状态、hard gate、control violations 或分数上更好。
-8. 最终只做 minimal repair，不用整段重写或 canned fallback 伪装质量提升。
+2. 原台词 quote 召回以 `TurnSurfaceContract.scene_id` 为准，而不是只看上游 `task_mode`，例如 `task_mode=happy` 但用户说“终于跑通了”时切到 `good_news`。
+3. 当前主链 prompt 只要求模型输出一条最终回复，真实生成层不能读取原始历史、原始记忆、器官族原文、工具候选或未压缩 RAG。
+4. `SurfaceRuntime` 直接采用模型第一条最终回复。
+5. `score_isolated_surface_candidates()` 仍会对 direct 回复做 minimal hard gate 与样本引导 soft scorer，但结果只进入 trace/报告，不再替换主回复。
+6. 候选 rerank、repair/fallback 选优已从 `SurfaceRuntime` 删除，不再作为 normal chat 主链或显式切换模式。
+7. 最终质量以直出文本的人味、角色反应和语境贴合为准，评分不能压过肉眼审美。
 
 ## Current Batch Baseline
 
@@ -125,12 +124,12 @@ Hard gate 只处理绝对不可发送的问题：
 
 ## Continuity Step
 
-文本质量通过后，连续对话的第一步仍然走隔离表层链，而不是回到旧 runtime 主链或 `ChatKernelV2`。新增 continuity harness 的原则：
+文本质量通过后，连续对话的第一步仍然走隔离表层链，而不是回到旧 runtime 主链。新增 continuity harness 的原则：
 
 - 多轮 case 只是一组 turn；每个 turn 进入最终生成层时仍被降成 `Soul.md + 当前用户输入 + ReplyControlPacket + facts + must_not_do`。
 - 上一轮只能以压缩事实进入，例如“上一轮摘要：尼尼说这版终于跑通了，回复已接住进展。”
 - 原始历史、原始助手回复、长期记忆、器官族输出、工具候选、RAG 原文和自然语言建议仍然禁止进入 prompt。
-- continuity case 里的 `candidates` 只用于离线 scorer/rerank，不属于生成输入。
+- continuity case 里的 `candidates` 只用于离线 scorer 观察，不属于生成输入。
 
 当前 smoke 覆盖：好消息后追夸、建议后要下一步、坏心情承接、在场到忙完回来、嫌烦后的收声修复、身份问答后的追问。
 
@@ -139,14 +138,13 @@ Hard gate 只处理绝对不可发送的问题：
 保留并改写的测试：
 
 - `test_sample_guided_text_scorer.py` 覆盖维度、样本场景、上下文词软扣分、技术场景权重。
-- `test_chat_ab_gold_score.py` 覆盖跨 case 重复输出 hard fail。
 - `test_galgame_text_quality.py` 保留 contract/taste/inference 可观测性，但断言迁到 soft penalty。
-- `test_isolated_surface_harness.py` 覆盖输入边界、多候选解析、候选评分和最终选择。
+- `test_isolated_surface_harness.py` 覆盖输入边界、多候选解析和候选评分。
+- `test_surface_runtime.py` 覆盖主链 direct 输出，确认评分只记录第一条回复。
 - `test_retry_isolated_surface_failures.py` 覆盖失败/弱通过重试和 source/retry merge 规则。
-- `test_chat_kernel_v2.py` 仅保留旧链路兼容性测试，不作为当前主链文本质量验收入口。
 
 应删除或重写的旧测试：
 
 - `test_text_quality_gate_rejects_daily_interaction_bad_patterns` 目前 `xfail`，因为它固化了“坏句表 hard reject”的旧方法论。后续应拆成样本银行 bad reference 与维度扣分测试。
-- 旧的 “fallback replaces low-score candidate” 类断言不再成立，应改成“候选 rerank + 分数解释”。
-- 旧的 “semantic reranker blocks daily scene into no_reply” 类断言不再成立，轻日常语义问题应优先在候选池内 rerank，而不是阻断发送。
+- 旧的 “fallback replaces low-score candidate” 类断言不再成立，应改成“direct 输出 + 评分观察”。
+- 旧的 “semantic reranker blocks daily scene into no_reply” 类断言不再成立，轻日常语义问题只能进入观察信号，不能阻断或替换发送。

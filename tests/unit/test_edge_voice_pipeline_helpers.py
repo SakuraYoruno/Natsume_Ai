@@ -572,6 +572,9 @@ class TestEdgeVoicePipelineHelpers(unittest.TestCase):
         )
         self.assertEqual("HAPPY", explicit["emotion_tag"])
         self.assertEqual("edge_explicit", explicit["emotion_source"])
+        self.assertEqual("explicit", explicit["emotion_modality"])
+        self.assertEqual(1.0, explicit["emotion_confidence"])
+        self.assertFalse(explicit["emotion_inference_degraded"])
         self.assertEqual(1.0, explicit["emotion_intensity"])
         self.assertEqual("joyful", explicit["mood_state"])
 
@@ -662,6 +665,14 @@ class TestEdgeVoicePipelineHelpers(unittest.TestCase):
         event_types = [str(item.get("event_type")) for item in bridge.events]
         self.assertIn("body_sense_updated", event_types)
         self.assertIn("emotion_inference_updated", event_types)
+        emotion_event = next(
+            item for item in bridge.events if str(item.get("event_type")) == "emotion_inference_updated"
+        )
+        emotion_payload = dict(emotion_event.get("payload") or {})
+        self.assertEqual("asr_text_bootstrap", emotion_payload["emotion_source"])
+        self.assertEqual("asr_text", emotion_payload["emotion_modality"])
+        self.assertFalse(emotion_payload["acoustic_emotion_available"])
+        self.assertIn("emotion_confidence", emotion_payload)
 
 
 if __name__ == "__main__":

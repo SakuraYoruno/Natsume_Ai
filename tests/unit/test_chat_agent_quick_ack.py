@@ -62,7 +62,7 @@ def test_render_quick_gateway_ack_falls_back_and_clamps_length(monkeypatch) -> N
 
     text = render_quick_gateway_ack_text(
         user_message="请帮我执行",
-        bond_stage="STRANGER",
+        bond_stage="FRIEND",
         emotion_tag="NEUTRAL",
         sender_name="测试用户",
     )
@@ -82,7 +82,7 @@ def test_render_quick_gateway_ack_prefers_open_app_template(monkeypatch) -> None
 
     text = render_quick_gateway_ack_text(
         user_message="可以帮我打开本地的酷狗音乐吗",
-        bond_stage="STRANGER",
+        bond_stage="FRIEND",
         emotion_tag="NEUTRAL",
     )
 
@@ -157,7 +157,7 @@ def test_render_quick_gateway_ack_actual_template_keeps_natsume_voice() -> None:
 def test_render_quick_gateway_ack_actual_template_for_open_app_is_specialized() -> None:
     text = render_quick_gateway_ack_text(
         user_message="可以帮我打开本地的酷狗音乐吗",
-        bond_stage="STRANGER",
+        bond_stage="FRIEND",
         emotion_tag="NEUTRAL",
     )
 
@@ -194,7 +194,7 @@ def test_render_quick_gateway_progress_failed_actual_template_stays_natural() ->
         user_message="翻译好了吗",
         reply=text,
         emotion_tag="neutral",
-        bond_stage="STRANGER",
+        bond_stage="FRIEND",
         max_chars=120,
         required_markers=("我",),
     )

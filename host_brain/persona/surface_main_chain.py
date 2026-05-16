@@ -88,10 +88,26 @@ class SurfaceMainChainResult:
     def observation_codes(self) -> tuple[str, ...]:
         return self.runtime.observation_codes
 
+    @property
+    def natsume_emotion_tag(self) -> str:
+        return self.runtime.natsume_emotion_tag
+
+    @property
+    def user_emotion_tag(self) -> str:
+        return self.runtime.user_emotion_tag
+
+    @property
+    def vts_expression_id(self) -> str:
+        return self.runtime.vts_expression_id
+
     def as_dict(self) -> dict[str, Any]:
         return {
             "surface_main_chain": True,
             "selected_text": self.selected_text,
+            "natsume_emotion_tag": self.natsume_emotion_tag,
+            "user_emotion_tag": self.user_emotion_tag,
+            "vts_expression_id": self.vts_expression_id,
+            "emotion_confidence": float(self.runtime.emotion_confidence or 0.0),
             "observation_codes": list(self.observation_codes),
             "packet_trace": dict(self.compiled.trace),
             "compiled": self.compiled.as_dict(),
@@ -102,18 +118,8 @@ class SurfaceMainChainResult:
 class SurfaceMainChain:
     """Narrow runtime facade for the current surface main chain."""
 
-    def __init__(
-        self,
-        generate: GenerateSurface,
-        *,
-        repair_failed: bool = True,
-        use_style_reference_bank: bool = True,
-    ) -> None:
-        self._runtime = SurfaceRuntime(
-            generate,
-            repair_failed=repair_failed,
-            use_style_reference_bank=use_style_reference_bank,
-        )
+    def __init__(self, generate: GenerateSurface) -> None:
+        self._runtime = SurfaceRuntime(generate)
 
     async def run(self, payload: SurfaceMainChainInput | Mapping[str, Any]) -> SurfaceMainChainResult:
         compiled = compile_surface_main_chain_input(payload)
@@ -142,15 +148,8 @@ def compile_surface_main_chain_input(payload: SurfaceMainChainInput | Mapping[st
 async def run_surface_main_chain(
     generate: GenerateSurface,
     payload: SurfaceMainChainInput | Mapping[str, Any],
-    *,
-    repair_failed: bool = True,
-    use_style_reference_bank: bool = True,
 ) -> SurfaceMainChainResult:
-    return await SurfaceMainChain(
-        generate,
-        repair_failed=repair_failed,
-        use_style_reference_bank=use_style_reference_bank,
-    ).run(payload)
+    return await SurfaceMainChain(generate).run(payload)
 
 
 def _coerce_surface_main_chain_payload(payload: SurfaceMainChainInput | Mapping[str, Any]) -> dict[str, Any]:

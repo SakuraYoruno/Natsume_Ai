@@ -342,9 +342,20 @@ def _surface_memory_query_facts(
 
 
 def _embed_surface_memory_query(query: str) -> tuple[list[float], str]:
-    from host_brain.memory.chroma_client import embed_text  # noqa: PLC0415
+    from host_brain.memory.chroma_client import DEFAULT_COLLECTION, embed_text, load_chroma_runtime_config  # noqa: PLC0415
 
-    values, model_id = embed_text(str(query or "").strip())
+    dim: int | None = None
+    try:
+        cfg_result = load_chroma_runtime_config()
+        cfg = cfg_result.config if cfg_result.success else None
+        profiles = dict(getattr(cfg, "collection_profiles", {}) or {})
+        default_collection = str(getattr(cfg, "default_collection", DEFAULT_COLLECTION) or DEFAULT_COLLECTION)
+        raw_dim = profiles.get(default_collection)
+        if raw_dim is not None:
+            dim = max(1, int(raw_dim))
+    except Exception:
+        dim = None
+    values, model_id = embed_text(str(query or "").strip(), dim=dim)
     return list(values or []), str(model_id or "")
 
 

@@ -3,7 +3,8 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from host_brain.app.agent_runtime_shared import _resolve_text_render_target_lang
-from host_brain.app.chat_agent import ChatAgentInput, _response_form_from_agent_input
+from host_brain.app.chat_agent import ChatAgentInput
+from host_brain.app.surface_main_chain_adapter import surface_main_chain_required
 
 
 def test_resolve_text_render_target_lang_uses_text_form_not_gateway_source() -> None:
@@ -81,7 +82,7 @@ def test_resolve_text_render_target_lang_uses_media_form_for_media_action() -> N
     assert resolved == "media"
 
 
-def test_chat_agent_response_form_is_not_inferred_from_render_profile() -> None:
+def test_surface_main_chain_text_form_is_not_inferred_from_render_profile() -> None:
     agent_input = ChatAgentInput(
         request_id="req-form",
         session_id="sess-form",
@@ -91,10 +92,10 @@ def test_chat_agent_response_form_is_not_inferred_from_render_profile() -> None:
         response_form="",
     )
 
-    assert _response_form_from_agent_input(agent_input) == "text"
+    assert surface_main_chain_required(agent_input) is True
 
 
-def test_chat_agent_response_form_uses_explicit_voice_form() -> None:
+def test_surface_main_chain_skips_explicit_voice_form() -> None:
     agent_input = ChatAgentInput(
         request_id="req-form",
         session_id="sess-form",
@@ -104,4 +105,4 @@ def test_chat_agent_response_form_uses_explicit_voice_form() -> None:
         response_form="voice",
     )
 
-    assert _response_form_from_agent_input(agent_input) == "voice"
+    assert surface_main_chain_required(agent_input) is False

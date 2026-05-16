@@ -16,12 +16,10 @@ if str(ROOT) not in sys.path:
 
 from host_brain.persona.isolated_surface_harness import (
     build_isolated_surface_input,
-    build_isolated_surface_messages,
-    derive_style_reference_anchor,
     parse_surface_candidates,
     score_isolated_surface_candidates,
-    select_best_isolated_candidate,
 )
+from host_brain.persona.surface_runtime import build_direct_surface_messages
 from host_brain.persona.isolated_surface_continuity import ThreeLayerContinuityContext
 from host_brain.persona.surface_affect_control import (
     SurfaceAffectControlPacket,
@@ -550,21 +548,20 @@ def run_cases(
             if any(variant in {"with_affect", "with_memory_affect"} for variant, _request in variants):
                 affect_cases += 1
             for variant, request in variants:
-                messages = build_isolated_surface_messages(request)
+                messages = build_direct_surface_messages(request)
                 prompt_rows.append(
                     {
                         "case_id": case_id,
                         "variant": variant,
                         "messages": messages,
-                        "style_reference": derive_style_reference_anchor(request).as_dict(),
                     }
                 )
 
                 candidates = _candidate_texts(case, variant=variant)
                 if not candidates:
                     continue
-                scores = score_isolated_surface_candidates(request, candidates)
-                selected = select_best_isolated_candidate(scores)
+                scores = score_isolated_surface_candidates(request, candidates[:1])
+                selected = scores[0] if scores else None
                 scored += 1
                 if selected and selected.passed:
                     passed += 1
@@ -575,6 +572,7 @@ def run_cases(
                         "candidates": [score.as_dict() for score in scores],
                         "memory_expected_terms": case_expectations.get(case_id, []),
                         "selected": selected.as_dict() if selected else None,
+                        "selection": "direct_first",
                     }
                 )
         except Exception as exc:

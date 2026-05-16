@@ -16,8 +16,6 @@ if str(ROOT) not in sys.path:
 
 DEFAULT_OUT = ROOT / "artifacts" / "isolated_surface_harness" / "relationship_axis_contrastive_20260514_cases"
 RELATIONSHIP_STAGES: tuple[str, ...] = (
-    "stranger",
-    "new_acquaintance",
     "familiar",
     "trusted_friend",
     "close_friend",

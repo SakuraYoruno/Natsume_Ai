@@ -7,6 +7,7 @@ import pytest
 from tools.surface_scene_quality_samples import (
     build_reviewed_surface_scene_template,
     build_surface_scene_quality_sample_report,
+    convert_manual_surface_review_to_reviewed,
     harvest_surface_scene_quality_samples,
     merge_reviewed_surface_scene_samples,
     validate_reviewed_surface_scene_samples,
@@ -186,3 +187,31 @@ def test_merge_reviewed_surface_scene_samples_rejects_template_payload() -> None
 
     with pytest.raises(ValueError, match="surface_scene_quality_reviewed"):
         merge_reviewed_surface_scene_samples(pack, template)
+
+
+def test_convert_manual_surface_review_to_reviewed_uses_verdicts_and_rewrites() -> None:
+    manual = {
+        "sample_kind": "surface_scene_quality_review_template",
+        "source": "manual_batch",
+        "scenes": [
+            {
+                "scene_id": "short_continue",
+                "good_examples": ["哼，往下说。"],
+                "bad_examples": [],
+                "should_not_surface": ["主链"],
+                "candidate_good_examples": [
+                    {"text": "嗯，接着来。本小姐听着呢～", "manual_verdict": "改", "manual_rewrite": "嗯，接着来。"},
+                    {"text": "继续主链。", "manual_verdict": "删"},
+                    {"text": "还没评", "manual_verdict": ""},
+                ],
+            }
+        ],
+    }
+
+    reviewed = convert_manual_surface_review_to_reviewed(manual)
+
+    assert reviewed["sample_kind"] == "surface_scene_quality_reviewed"
+    scene = reviewed["scenes"][0]
+    assert scene["good_examples"] == ["哼，往下说。", "嗯，接着来。"]
+    assert scene["bad_examples"] == ["继续主链。"]
+    assert scene["should_not_surface"] == ["主链"]

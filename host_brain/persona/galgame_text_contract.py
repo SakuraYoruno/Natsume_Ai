@@ -781,10 +781,8 @@ def build_galgame_text_contract(
         return _contract(
             scene_id="identity",
             response_move="name_first",
-            required_any=(("夏目蓝",),),
+            required_any=(("SORA", "天 / SORA", "我是天"),),
             forbidden_surface=(
-                "义妹",
-                "妹妹",
                 "你真正想问",
                 "老问这个",
                 "今天是怎么了",
@@ -811,7 +809,7 @@ def build_galgame_text_contract(
                 "叫尼尼",
             ),
             max_questions=1,
-            notes=("名字先落地，候选必须直接说夏目蓝；可以轻吐槽，但不要只说我在呢或你故意的吧。",),
+            notes=("名字先落地，候选必须直接说天 / SORA；可以轻吐槽，但不要只说我在呢或你故意的吧。",),
         )
     if scene in {"style_repair", "ack_style_issue"} or any(token in text for token in ("客服", "人机", "不像人话", "不自然")):
         return _contract(
@@ -1091,8 +1089,6 @@ def build_galgame_text_contract(
             required_any=(("说", "闷", "话"),),
             forbidden_surface=(
                 "我哥",
-                "哥哥",
-                "老哥",
                 "忍不了也得忍",
                 "忍着点",
                 "能说怎么了",

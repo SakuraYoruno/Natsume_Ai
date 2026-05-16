@@ -43,7 +43,7 @@ class TestBondSummarySemanticValidation:
 
     def test_all_valid_chinese_stages(self):
         """所有合法中文 stage 值均通过校验"""
-        valid_stages = ["初次见面的义妹", "相处中的义妹", "关系好的兄妹", "亲近兄妹", "亲密恋人", "灵魂伴侣"]
+        valid_stages = ["关系好的兄妹", "亲近兄妹", "亲密恋人", "灵魂伴侣"]
         for stage in valid_stages:
             result = _run_validation({"stage": stage, "trend": "稳定"})
             assert result.valid, f"stage='{stage}' 应通过校验，但失败：{result.violations}"

@@ -41,10 +41,10 @@ def test_quality_cluster_report_groups_reason_surface_and_dimensions() -> None:
             ),
             _row(
                 "dtq_daily_good_morning_001",
-                "早啊尼尼~今天也要好好陪我哦。",
+                "早啊老哥~~~今天先慢一点。",
                 87.069,
                 reasons=("QUALITY_SOFT_FORBIDDEN_TEMPLATE_TEXT", "FORBIDDEN_TEMPLATE_TEXT"),
-                quality_hits=("cheap_wave_punctuation",),
+                quality_hits=("overused_wave_punctuation",),
             ),
         ],
         min_cluster_count=1,
@@ -55,7 +55,7 @@ def test_quality_cluster_report_groups_reason_surface_and_dimensions() -> None:
     assert report["selected_count"] == 2
     assert report["low_score_count"] == 1
     assert clusters["reason:BLAND_PASS_LINE"]["count"] == 1
-    assert clusters["surface:cheap_wave_punctuation"]["count"] == 1
+    assert clusters["surface:overused_wave_punctuation"]["count"] == 1
     assert clusters["low_dimension:catchiness"]["count"] == 1
     assert all(cluster["cluster"] != "reason:LOW_CATCHINESS" for cluster in report["large_clusters"])
 
@@ -68,8 +68,8 @@ def test_quality_cluster_report_groups_reason_surface_and_dimensions() -> None:
 def test_quality_cluster_report_flags_repeated_selected_text_by_scene() -> None:
     report = build_quality_cluster_report(
         [
-            _row("relstage_morning_familiar", "早啊，尼尼，今天慢慢来。", 98.0),
-            _row("relstage_morning_close_friend", "早啊，尼尼，今天慢慢来。", 97.0),
+            _row("relstage_morning_familiar", "早啊，老哥，今天慢慢来。", 98.0),
+            _row("relstage_morning_close_friend", "早啊，老哥，今天慢慢来。", 97.0),
             _row("relstage_back_familiar", "回来啦，先歇口气。", 95.0),
         ],
         min_cluster_count=1,
@@ -92,7 +92,7 @@ def test_quality_cluster_report_flags_repeated_selected_text_by_scene() -> None:
     rendered = render_markdown_report(report)
     assert "Batch Diversity" in rendered
     assert "Repeated Selected Text" in rendered
-    assert "早啊，尼尼，今天慢慢来。" in rendered
+    assert "早啊，老哥，今天慢慢来。" in rendered
 
 
 def test_quality_cluster_report_cli_writes_json_and_markdown(tmp_path) -> None:

@@ -12,7 +12,12 @@ def _state(payload: dict) -> SimpleNamespace:
     return SimpleNamespace(as_dict=lambda: dict(payload))
 
 
-def _plane(*, topic: str = "technical_help", thread: str = "debug_help") -> SimpleNamespace:
+def _plane(
+    *,
+    topic: str = "technical_help",
+    thread: str = "debug_help",
+    relationship_payload: dict | None = None,
+) -> SimpleNamespace:
     return SimpleNamespace(
         continuity=SimpleNamespace(
             recent_turns=[{"role": "user", "content": "raw old turn"}],
@@ -40,7 +45,7 @@ def _plane(*, topic: str = "technical_help", thread: str = "debug_help") -> Simp
         topic_ledger=SimpleNamespace(state=_state({"active_topics": [topic]})),
         tactic_ledger=SimpleNamespace(state=_state({"recent_topics": [topic]})),
         affect=SimpleNamespace(state=_state({"emotion_tag": "NEUTRAL"})),
-        relationship=SimpleNamespace(state=_state({"bond_stage": "FRIEND"})),
+        relationship=SimpleNamespace(state=_state(relationship_payload or {"bond_stage": "FRIEND"})),
         drive=SimpleNamespace(state=_state({"continuity_drive": 0.4})),
         multimodal=SimpleNamespace(state=_state({})),
         reply_plan=SimpleNamespace(
@@ -144,3 +149,35 @@ def test_build_surface_context_packet_reassembles_compact_lane(monkeypatch) -> N
     assert calls[1]["history_max_turns"] == 6
     assert calls[1]["allow_older_summary"] is False
     assert packet["reply_plan"]["primary_topic"] == "presence_ping"
+
+
+def test_surface_context_packet_keeps_chinese_lover_stage_close(monkeypatch) -> None:
+    def _fake_detect_relational_chat_topic(_message):  # noqa: ANN001
+        return ""
+
+    def _fake_assemble_prompt_context_plane(**_kwargs):  # noqa: ANN003
+        return _plane(
+            relationship_payload={
+                "bond_stage": "CONFIDANT",
+                "relationship_phase": "lover",
+                "relationship_substage": "stable_lovers",
+            }
+        )
+
+    monkeypatch.setattr(
+        "host_brain.app.surface_context_packet.detect_relational_chat_topic",
+        _fake_detect_relational_chat_topic,
+    )
+    monkeypatch.setattr(
+        "host_brain.app.surface_context_packet.assemble_prompt_context_plane",
+        _fake_assemble_prompt_context_plane,
+    )
+
+    packet = build_surface_context_packet(
+        user_message="今天晚点陪我聊会儿？",
+        request_id="req-close-stage",
+        session_id="sess-close-stage",
+        bond_summary={"stage": "亲密恋人", "trend": "稳定"},
+    )
+
+    assert packet["surface_affect_packet"]["relationship_distance"] == "close"

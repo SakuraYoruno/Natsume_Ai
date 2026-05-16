@@ -33,15 +33,11 @@ async def test_chat_agent_uses_surface_main_chain_by_default(monkeypatch) -> Non
             ensure_ascii=False,
         ) + "\n\n"
 
-    async def _unexpected_kernel(*_args, **_kwargs):  # noqa: ANN002, ANN003
-        raise AssertionError("chat_kernel_v2 should not run when surface main chain gate is enabled")
-
     monkeypatch.delenv("HOST_SURFACE_MAIN_CHAIN_ENABLED", raising=False)
     monkeypatch.setattr(
         "host_brain.app.surface_main_chain_adapter.surface_main_chain_sse_generator",
         _fake_surface_generator,
     )
-    monkeypatch.setattr("host_brain.app.chat_agent._chat_kernel_v2_sse_generator", _unexpected_kernel)
 
     agent_input = ChatAgentInput(
         request_id="req-chat-agent-surface-main",

@@ -284,7 +284,7 @@ class InitiativeGovernorAgent:
         loneliness_level: float = 0.0,
         anticipation_level: float = 0.0,
         emotion_tag: str = "NEUTRAL",
-        bond_stage: str = "stranger",
+        bond_stage: str = "friend",
         recent_topics: str = "",
     ) -> str | None:
         """Governor 决策 ALLOW 时调用 LLM 生成主动发声的话题建议。
@@ -315,7 +315,7 @@ class InitiativeGovernorAgent:
                 loneliness_level=round(float(loneliness_level), 3),
                 anticipation_level=round(float(anticipation_level), 3),
                 emotion_tag=str(emotion_tag or "NEUTRAL").upper(),
-                bond_stage=str(bond_stage or "stranger"),
+                bond_stage=str(bond_stage or "friend"),
                 recent_topics=str(recent_topics or "")[:100],
             )
             _pool_result = complete_llm_with_pool_sync(

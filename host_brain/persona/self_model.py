@@ -973,7 +973,7 @@ def build_state_aligned_self_awareness(
     policy = dict(render_policy or {})
     runtime = dict(runtime_flags or {})
 
-    bond_stage = str(bond.get("stage") or "STRANGER").strip().upper()
+    bond_stage = str(bond.get("stage") or "FRIEND").strip().upper()
     deep_bond = bond_stage in _DEEP_BOND_STAGES
     bond_perception = str(snapshot.get("bond_growth_perception") or BOND_GROWTH_STABLE)
     absence_band = _resolve_alignment_absence_band(offline)

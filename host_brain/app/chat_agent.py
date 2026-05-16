@@ -143,225 +143,42 @@ class ChatAgentInput:
     eval_history_turns: List[Dict[str, Any]] = field(default_factory=list)
 
 
-def _chat_kernel_v2_enabled() -> bool:
-    raw = str(os.environ.get("HOST_CHAT_KERNEL_V2_ENABLED") or "true").strip().lower()
-    return raw not in {"0", "false", "no", "off"}
-
-
-def _response_form_from_agent_input(agent_input: ChatAgentInput) -> str:
-    runtime = dict(agent_input.llm_runtime or {}) if isinstance(agent_input.llm_runtime, Mapping) else {}
-    render_policy = dict(agent_input.render_policy or {}) if isinstance(agent_input.render_policy, Mapping) else {}
-    response_form = str(
-        agent_input.response_form
-        or runtime.get("response_form")
-        or runtime.get("planned_response_form")
-        or render_policy.get("response_form")
-        or ""
-    ).strip().lower()
-    if response_form:
-        return response_form
-    return "text"
-
-
-def _should_use_chat_kernel_v2(agent_input: ChatAgentInput, sub_agent_ctx: SubAgentContext | None) -> bool:
-    if not _chat_kernel_v2_enabled():
-        return False
-    if sub_agent_ctx is not None:
-        return False
-    multimodal = dict(agent_input.multimodal_observations or {})
-    multimodal_act = dict(multimodal.get("multimodal_act") or {}) if isinstance(multimodal.get("multimodal_act"), Mapping) else {}
-    primary_modality = str(multimodal.get("primary_modality") or multimodal_act.get("input_kind") or "").strip().lower()
-    user_intent = str(multimodal_act.get("user_intent") or "").strip().lower()
-    if (
-        primary_modality in {"emoji", "sticker", "gif"}
-        and user_intent in {"social_reaction", "image_social", "emoji_social"}
-        and not bool(multimodal_act.get("requires_text_answer"))
-    ):
-        return False
-    intent = dict(agent_input.intent_draft or {})
-    route = str(intent.get("route") or "").strip().lower()
-    target = str(intent.get("target_id") or intent.get("action") or "").strip().lower()
-    if route in {"skill", "delegate", "plan"} or target.endswith("_agent"):
-        return False
-    return True
-
-
-def _build_chat_kernel_runtime_payload(agent_input: ChatAgentInput, *, response_form: str, render_profile: str) -> dict[str, Any]:
-    if render_profile == "ja_voice":
-        render_target_lang = "ja"
-    elif render_profile == "media_action":
-        render_target_lang = "media"
-    else:
-        render_target_lang = "zh"
-    return {
-        "request": {
-            "request_id": agent_input.request_id,
-            "session_id": agent_input.session_id,
-            "person_id": agent_input.person_id,
-            "user_message": agent_input.user_message,
-            "render_target_lang": render_target_lang,
-            "render_profile": render_profile,
-            "response_form": response_form,
-            "attachment_summary": agent_input.attachment_summary,
-            "multimodal_observations": dict(agent_input.multimodal_observations or {}),
-        },
-        "render_target_lang": render_target_lang,
-        "response_form": response_form,
-        "render_profile": render_profile,
-        "intent_draft": dict(agent_input.intent_draft or {}),
-        "emotion_context": dict(agent_input.emotion_context or {}),
-        "emotion": {"state": dict(agent_input.emotion_snapshot or {})},
-        "bond_summary": dict(agent_input.bond_summary or {}),
-        "prompt_context": {"bond_summary": dict(agent_input.bond_summary or {})},
-        "retrieval": {
-            **dict(agent_input.retrieval_summary or {}),
-            "evidence_items": list(agent_input.retrieval_evidence_items or []),
-        },
-        "multimodal_input": {
-            "attachments": list(agent_input.attachments or []),
-            "observations": dict(agent_input.multimodal_observations or {}),
-        },
-        "ab_eval": {
-            "history_turns": list(agent_input.eval_history_turns or []),
-        },
-    }
-
-
-async def _chat_kernel_v2_sse_generator(
-    agent_input: ChatAgentInput,
-    *,
-    trace_stage_meta: dict[str, Any],
-) -> AsyncGenerator[str, None]:
-    from host_brain.app.chat_kernel_v2 import ChatKernelRequest, get_chat_kernel_v2  # noqa: PLC0415
-    from host_brain.app.context.interaction_facts_plane import assemble_interaction_facts_plane  # noqa: PLC0415
-    from host_brain.app.context.soul_runtime import get_compiled_soul  # noqa: PLC0415
-    from host_brain.app.response_form_contract import derive_render_profile_for_response_form, normalize_response_form  # noqa: PLC0415
-
-    started_ms = int(time.time() * 1000)
-    response_form = normalize_response_form(_response_form_from_agent_input(agent_input))
-    render_profile = derive_render_profile_for_response_form(response_form)
-    runtime_payload = _build_chat_kernel_runtime_payload(
-        agent_input,
-        response_form=response_form,
-        render_profile=render_profile,
-    )
-    facts = assemble_interaction_facts_plane(runtime_payload=runtime_payload)
-    result = await get_chat_kernel_v2().generate(
-        ChatKernelRequest(
-            request_id=agent_input.request_id,
-            session_id=agent_input.session_id,
-            person_id=agent_input.person_id,
-            user_message=agent_input.user_message,
-            history_turns=facts.history_turns,
-            compiled_soul=get_compiled_soul(),
-            interaction_facts=facts,
-            response_form=response_form,
-            render_profile=render_profile,
-            llm_runtime=dict(agent_input.llm_runtime or {}) if isinstance(agent_input.llm_runtime, Mapping) else {},
-            eval_mode=bool(trace_stage_meta.get("ab_eval")),
-        )
-    )
-    envelope = result.reply_envelope
-    narrative = str(envelope.text or "").strip()
-    performance = envelope.performance
-    total_latency_ms = max(0, int(time.time() * 1000) - started_ms)
-    kernel_trace = {
-        **dict(trace_stage_meta or {}),
-        "chat_agent_used": True,
-        "chat_kernel_v2_used": True,
-        "reply_source": "chat_kernel_v2",
-        "reply_envelope": envelope.as_dict(),
-        "performance": performance.as_dict(),
-        "text_quality_gate": dict(result.quality_flags or {}),
-        "skip_heavy_persona_postprocess": True,
-    }
-    if narrative:
-        yield _sse({"phase": "RENDER", "chunk": narrative})
-        yield _sse({"phase": "SENTENCE", "sentence": narrative, "sentence_index": 0})
-    commit_decision = "APPROVE" if envelope.sendable else "NO_REPLY"
-    yield _sse(
-        {
-            "phase": "COMMIT",
-            "done": True,
-            "decision": commit_decision,
-            "reason_code": envelope.reason_code,
-            "narrative": narrative,
-            "request_id": agent_input.request_id,
-            "reply_envelope": envelope.as_dict(),
-            "audit_refs": {
-                "request_id": agent_input.request_id,
-                "path": "chat_agent:chat_kernel_v2",
-                "latency_ms": total_latency_ms,
-                "llm_latency_ms": result.llm_latency_ms,
-                "first_token_ms": result.llm_latency_ms if narrative else None,
-                "model_id": result.model_id,
-                "provider_name": result.provider_name,
-                "response_form": response_form,
-                "render_profile": render_profile,
-                "emotion_tag": performance.emotion_tag,
-                "emotion_intensity": performance.emotion_intensity,
-                "performance": performance.as_dict(),
-                "prompt_digest": result.prompt_digest,
-                "reply_envelope": envelope.as_dict(),
-                "trace": result.trace,
-            },
-        }
-    )
-    ab_eval_mode = str(os.environ.get("AB_EVAL_MODE") or "").strip().lower() in {"1", "true", "yes", "on"} or bool(trace_stage_meta.get("ab_eval"))
-    if not ab_eval_mode and envelope.persistable:
-        try:
-            from host_brain.app.agent_runtime_shared import _async_post_process  # noqa: PLC0415
-
-            asyncio.create_task(
-                _async_post_process(
-                    request_id=agent_input.request_id,
-                    person_id=agent_input.person_id,
-                    session_id=agent_input.session_id,
-                    user_message=agent_input.user_message,
-                    narrative=narrative,
-                    emotion_context={
-                        **dict(agent_input.emotion_context or {}),
-                        "emotion_tag": performance.emotion_tag,
-                        "emotion_intensity": performance.emotion_intensity,
-                        "performance": performance.as_dict(),
-                    },
-                    bond_summary=dict(agent_input.bond_summary or {}),
-                    ts_ms=agent_input.ts_ms or int(time.time() * 1000),
-                    render_target_lang="ja" if render_profile == "ja_voice" else "zh",
-                    total_latency_ms=total_latency_ms,
-                    llm_latency_ms=result.llm_latency_ms,
-                    first_token_ms=result.llm_latency_ms if narrative else None,
-                    provider_name=result.provider_name,
-                    model_id=result.model_id,
-                    buffer_stream=True,
-                    delegated_agents=[],
-                    retrieval_summary=dict(agent_input.retrieval_summary or {}),
-                    gov_decision={"decision": commit_decision},
-                    pii_ingress_stats={},
-                    pii_egress_stats={},
-                    llm_input_digest=result.prompt_digest,
-                    retrieval_evidence_items=list(agent_input.retrieval_evidence_items or []),
-                    motive_state=None,
-                    reply_plan={
-                        "primary_topic": str(facts.conversation_interpretation.get("literal_topic") or "").strip(),
-                        "response_goal": "chat_kernel_v2",
-                        "response_form": response_form,
-                        "response_form_reason": "chat_kernel_v2",
-                        "plan_confidence": 1.0,
-                    },
-                    trace_stage_meta=kernel_trace,
-                )
-            )
-        except Exception as exc:
-            _logger.debug("[%s] chat_kernel_v2 post_process schedule failed: %s", agent_input.request_id, exc)
-
-
 # ---------------------------------------------------------------------------
 # 工具函数（从 cortex_orchestrator 链路复用）
 # ---------------------------------------------------------------------------
 
 def _sse(data: dict) -> str:
     return f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
+
+
+def _surface_main_no_reply_event(
+    *,
+    request_id: str,
+    reason_code: str,
+    ts_ms: int,
+    error: str = "",
+) -> str:
+    audit_refs: dict[str, Any] = {
+        "request_id": request_id,
+        "path": "chat_agent:surface_main_chain",
+        "surface_main_chain_required": True,
+        "surface_main_chain_used": False,
+        "reply_source": "surface_main_chain",
+        "latency_ms": max(0, int(time.time() * 1000) - int(ts_ms or 0)),
+    }
+    if error:
+        audit_refs["error"] = error
+    return _sse(
+        {
+            "phase": "COMMIT",
+            "done": True,
+            "decision": "NO_REPLY",
+            "reason_code": reason_code,
+            "narrative": "",
+            "request_id": request_id,
+            "audit_refs": audit_refs,
+        }
+    )
 
 
 def _env_flag(name: str, *, default: bool = False) -> bool:
@@ -656,14 +473,14 @@ def _looks_like_open_app_request(user_message: str) -> bool:
 def render_quick_gateway_ack_text(
     *,
     user_message: str = "",
-    bond_stage: str = "STRANGER",
+    bond_stage: str = "FRIEND",
     emotion_tag: str = "NEUTRAL",
     sender_name: str | None = None,
 ) -> str:
     """Render a low-latency persona ACK for gateway immediate feedback."""
 
     templates = _load_template_mapping("chat_agent.runtime_texts")
-    stage = str(bond_stage or "STRANGER").strip().upper() or "STRANGER"
+    stage = str(bond_stage or "FRIEND").strip().upper() or "FRIEND"
     etag = str(emotion_tag or "NEUTRAL").strip().upper() or "NEUTRAL"
     clean_sender = str(sender_name or "").strip()
 
@@ -676,7 +493,7 @@ def render_quick_gateway_ack_text(
     elif stage in _ACK_WARM_STAGES:
         text = _mapping_text(templates, "quick_ack_warm", sender_name=clean_sender)
     else:
-        text = _mapping_text(templates, "quick_ack_stranger", sender_name=clean_sender)
+        text = _mapping_text(templates, "quick_ack_default", sender_name=clean_sender)
 
     if not str(text or "").strip():
         text = _mapping_text(templates, "quick_ack_default", sender_name=clean_sender)
@@ -708,7 +525,7 @@ def render_quick_gateway_progress_text(
     progress_message: str = "",
     result_text: str = "",
     elapsed_ms: int = 0,
-    bond_stage: str = "STRANGER",
+    bond_stage: str = "FRIEND",
     emotion_tag: str = "NEUTRAL",
     sender_name: str | None = None,
 ) -> str:
@@ -716,7 +533,7 @@ def render_quick_gateway_progress_text(
 
     templates = _load_template_mapping("chat_agent.runtime_texts")
     normalized_status = str(status or "UNKNOWN").strip().upper() or "UNKNOWN"
-    _ = str(bond_stage or "STRANGER").strip().upper()
+    _ = str(bond_stage or "FRIEND").strip().upper()
     _ = str(emotion_tag or "NEUTRAL").strip().upper()
     elapsed = _format_elapsed_compact(int(elapsed_ms or 0))
     target = str(target_id or "").strip() or _mapping_text(templates, "default_task_target")
@@ -778,13 +595,13 @@ def render_quick_gateway_progress_text(
 def render_quick_gateway_realign_text(
     *,
     sender_name: str | None = None,
-    bond_stage: str = "STRANGER",
+    bond_stage: str = "FRIEND",
     emotion_tag: str = "NEUTRAL",
 ) -> str:
     """Render a low-latency persona notice when execution needs realignment."""
 
     templates = _load_template_mapping("chat_agent.runtime_texts")
-    _ = str(bond_stage or "STRANGER").strip().upper()
+    _ = str(bond_stage or "FRIEND").strip().upper()
     _ = str(emotion_tag or "NEUTRAL").strip().upper()
     clean_sender = str(sender_name or "").strip()
 
@@ -1694,7 +1511,7 @@ def _should_buffer_stream_output(
             reflection.should_reflect(
                 emotion_tag=str((emotion_context or {}).get("emotion_tag") or ""),
                 intent=str((bond_summary or {}).get("intent") or ""),
-                bond_stage=str((bond_summary or {}).get("stage") or "STRANGER"),
+                bond_stage=str((bond_summary or {}).get("stage") or "FRIEND"),
                 turn_count=int((emotion_context or {}).get("turn_count") or 1),
             )
         )
@@ -1824,9 +1641,11 @@ async def chat_agent_sse_generator(
     try:
         from host_brain.app.surface_main_chain_adapter import (  # noqa: PLC0415
             surface_main_chain_enabled,
+            surface_main_chain_required,
             surface_main_chain_sse_generator,
         )
 
+        surface_required = surface_main_chain_required(agent_input, sub_agent_ctx=sub_agent_ctx)
         if surface_main_chain_enabled(agent_input, sub_agent_ctx=sub_agent_ctx):
             async for event in surface_main_chain_sse_generator(
                 agent_input,
@@ -1834,15 +1653,23 @@ async def chat_agent_sse_generator(
             ):
                 yield event
             return
+        if surface_required:
+            yield _surface_main_no_reply_event(
+                request_id=request_id,
+                reason_code="SURFACE_MAIN_CHAIN_DISABLED",
+                ts_ms=ts_ms,
+            )
+            return
     except Exception as _surface_main_exc:
-        _logger.debug("[%s] surface_main_chain gate skipped: %s", request_id, _surface_main_exc)
-    if _should_use_chat_kernel_v2(agent_input, sub_agent_ctx):
-        async for event in _chat_kernel_v2_sse_generator(
-            agent_input,
-            trace_stage_meta=trace_stage_meta,
-        ):
-            yield event
-        return
+        _logger.debug("[%s] surface_main_chain unavailable: %s", request_id, _surface_main_exc)
+        if sub_agent_ctx is None:
+            yield _surface_main_no_reply_event(
+                request_id=request_id,
+                reason_code="SURFACE_MAIN_CHAIN_UNAVAILABLE",
+                ts_ms=ts_ms,
+                error=repr(_surface_main_exc),
+            )
+            return
     deterministic_reply = _build_deterministic_sub_agent_reply(
         sub_agent_ctx,
         render_target_lang=render_target_lang,

@@ -62,8 +62,8 @@ def test_persona_growth_tracker_prod_records_stage_milestone_and_interaction_gro
 
     promoted = tracker.on_stage_promoted(
         user_id=user_id,
-        from_stage='ACQUAINTANCE',
-        to_stage='FRIEND',
+        from_stage='FRIEND',
+        to_stage='CLOSE_FRIEND',
         ts_ms=1_700_000_000_000,
     )
     milestone = tracker.on_milestone(
@@ -81,7 +81,7 @@ def test_persona_growth_tracker_prod_records_stage_milestone_and_interaction_gro
     assert milestone.applied is True
     assert interaction.applied is True
     triggered = tracker.get_triggered_rules(user_id)
-    assert 'ACQUAINTANCE→FRIEND' in triggered
+    assert 'FRIEND→CLOSE_FRIEND' in triggered
     assert 'deep_talk_50' in triggered
     weekly = tracker.get_weekly_cumulative(user_id)
     assert weekly

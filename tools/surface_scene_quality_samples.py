@@ -32,6 +32,8 @@ BAD_REASON_PREFIXES = (
     "MISPLACED_EMOTIONAL_CONTAINMENT",
 )
 REVIEWED_SAMPLE_KINDS = {"surface_scene_quality_reviewed", "surface_scene_quality_review_template"}
+MANUAL_GOOD_VERDICTS = {"留", "好", "good", "keep", "accept", "accepted", "pass", "改", "rewrite"}
+MANUAL_BAD_VERDICTS = {"删", "坏", "差", "bad", "reject", "drop", "fail"}
 
 
 @dataclass
@@ -360,6 +362,58 @@ def _append_unique(base: Sequence[Any], additions: Sequence[Any]) -> list[str]:
     return list(_clean_list([*list(base or ()), *list(additions or ())]))
 
 
+def convert_manual_surface_review_to_reviewed(manual_payload: Mapping[str, Any]) -> dict[str, Any]:
+    """Convert a filled manual review template into mergeable reviewed samples."""
+    scenes: list[dict[str, Any]] = []
+    for raw_scene in list(manual_payload.get("scenes") or ()):
+        if not isinstance(raw_scene, Mapping):
+            continue
+        scene_id = _clean_text(raw_scene.get("scene_id"))
+        if not scene_id:
+            continue
+        good = list(_reviewed_example_texts(raw_scene.get("good_examples")))
+        bad = list(_reviewed_example_texts(raw_scene.get("bad_examples")))
+        should_not = list(_reviewed_example_texts(raw_scene.get("should_not_surface")))
+        for bucket_name in ("candidate_good_examples", "candidate_bad_examples"):
+            raw_candidates = raw_scene.get(bucket_name)
+            if not isinstance(raw_candidates, list):
+                continue
+            for raw_candidate in raw_candidates:
+                if not isinstance(raw_candidate, Mapping):
+                    continue
+                verdict = _manual_verdict(raw_candidate.get("manual_verdict"))
+                rewrite = _clean_text(raw_candidate.get("manual_rewrite"))
+                text = rewrite or _clean_text(raw_candidate.get("text"))
+                if not text:
+                    continue
+                if verdict in MANUAL_GOOD_VERDICTS:
+                    good.append(text)
+                elif verdict in MANUAL_BAD_VERDICTS:
+                    bad.append(_clean_text(raw_candidate.get("text")) or text)
+        scene_payload = {
+            "scene_id": scene_id,
+            "good_examples": list(_clean_list(good)),
+            "bad_examples": list(_clean_list(bad)),
+            "should_not_surface": list(_clean_list(should_not)),
+            "source_note": _clean_text(raw_scene.get("source_note")) or "manual surface review promoted.",
+        }
+        if scene_payload["good_examples"] or scene_payload["bad_examples"] or scene_payload["should_not_surface"]:
+            for key in ("title", "user_markers", "required_move", "scoring_focus"):
+                if raw_scene.get(key):
+                    scene_payload[key] = raw_scene.get(key)
+            scenes.append(scene_payload)
+    return {
+        "schema_version": 1,
+        "sample_kind": "surface_scene_quality_reviewed",
+        "source": _clean_text(manual_payload.get("source")) or "surface_manual_review",
+        "scenes": scenes,
+    }
+
+
+def _manual_verdict(value: Any) -> str:
+    return _clean_text(value).strip().lower()
+
+
 def validate_reviewed_surface_scene_samples(
     reviewed_payload: Mapping[str, Any],
     *,
@@ -560,6 +614,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--reviewed", action="append", default=[])
     parser.add_argument("--validate-reviewed", action="store_true")
     parser.add_argument("--merge-out", default="")
+    parser.add_argument("--manual-review", action="append", default=[])
+    parser.add_argument("--manual-reviewed-out", default="")
     return parser
 
 
@@ -587,6 +643,32 @@ def main() -> None:
         result["review_template_output"] = str(template_out)
         result["review_template_scene_count"] = len(template.get("scenes") or [])
     reviewed_paths = [Path(item) for item in args.reviewed]
+    manual_review_paths = [Path(item) for item in args.manual_review]
+    if args.manual_reviewed_out:
+        manual_payloads = [
+            convert_manual_surface_review_to_reviewed(_load_json_mapping(path))
+            for path in manual_review_paths
+        ]
+        combined_manual_reviewed = {
+            "schema_version": 1,
+            "sample_kind": "surface_scene_quality_reviewed",
+            "source": "surface_manual_review_combined",
+            "scenes": [
+                scene
+                for payload_item in manual_payloads
+                for scene in list(payload_item.get("scenes") or ())
+                if isinstance(scene, Mapping)
+            ],
+        }
+        manual_out = Path(args.manual_reviewed_out)
+        manual_out.parent.mkdir(parents=True, exist_ok=True)
+        manual_out.write_text(
+            json.dumps(combined_manual_reviewed, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        result["manual_reviewed_output"] = str(manual_out)
+        result["manual_reviewed_scene_count"] = len(combined_manual_reviewed.get("scenes") or [])
+        reviewed_paths.append(manual_out)
     if args.validate_reviewed:
         validation_errors = validate_reviewed_surface_scene_sample_files(
             reviewed_paths=reviewed_paths,

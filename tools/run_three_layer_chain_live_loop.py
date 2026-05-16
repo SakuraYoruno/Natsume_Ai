@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
 import os
 import statistics
@@ -19,20 +20,14 @@ from host_brain.persona.isolated_surface_continuity import (  # noqa: E402
     ThreeLayerContinuityContext,
     build_surface_input_from_three_layer_context,
 )
-from host_brain.persona.isolated_surface_harness import (  # noqa: E402
-    IsolatedSurfaceInput,
-    build_isolated_surface_messages,
-    derive_style_reference_anchor,
-    parse_surface_candidates,
-    score_isolated_surface_candidates,
-    select_best_isolated_candidate,
-)
+from host_brain.persona.isolated_surface_harness import IsolatedSurfaceInput  # noqa: E402
+from host_brain.persona.surface_runtime import SurfaceRuntime  # noqa: E402
 from host_brain.persona.surface_affect_control import (  # noqa: E402
     affect_control_packet_from_mapping,
     build_surface_affect_control_packet,
 )
 from tools.build_isolated_surface_continuity_cases import build_continuity_long_cases  # noqa: E402
-from tools.chat_ab_generate import _load_secret_store_provider_key, load_dotenv  # noqa: E402
+from tools.live_env import load_dotenv, load_secret_store_provider_key  # noqa: E402
 from tools.isolated_surface_harness import _read_json_or_jsonl  # noqa: E402
 
 
@@ -297,7 +292,7 @@ def run_live_loop(args: argparse.Namespace) -> dict[str, Any]:
     load_dotenv(ROOT / ".env")
     provider = _clean_text(args.provider or "deepseek")
     model = _clean_text(args.model or os.environ.get("HOST_DEEPSEEK_MODEL_ID") or "deepseek-v4-flash")
-    api_key = _clean_text(os.environ.get("DEEPSEEK_API_KEY")) or _load_secret_store_provider_key(provider)
+    api_key = _clean_text(os.environ.get("DEEPSEEK_API_KEY")) or load_secret_store_provider_key(provider)
     if not api_key:
         raise RuntimeError(f"missing api key for provider={provider}")
     base_url_override = _clean_text(args.base_url or os.environ.get("HOST_DEEPSEEK_BASE_URL")) or None
@@ -352,8 +347,20 @@ def run_live_loop(args: argparse.Namespace) -> dict[str, Any]:
                     max_recent_turns=int(args.max_recent_turns),
                     max_facts=int(args.max_facts),
                 )
-                style_reference = derive_style_reference_anchor(request).as_dict()
-                messages = build_isolated_surface_messages(request)
+                def generate(messages: Sequence[Mapping[str, str]]) -> str:
+                    return invoke_llm_text(
+                        provider_name=provider,
+                        model_id=model,
+                        api_key=api_key,
+                        timeout_ms=int(args.timeout_ms),
+                        messages=messages,
+                        gen_params=dict(gen_params),
+                        base_url_override=base_url_override,
+                    )
+
+                runtime = SurfaceRuntime(generate)
+                result = asyncio.run(runtime.run(request))
+                messages = list(result.messages)
                 leak_hashes = raw_recent_leak_hashes(messages, recent_for_turn)
                 raw_recent_leak_count += len(leak_hashes)
                 _append_jsonl(
@@ -366,24 +373,13 @@ def run_live_loop(args: argparse.Namespace) -> dict[str, Any]:
                         "messages": messages,
                         "recent_window": recent_window_trace(recent_for_turn),
                         "raw_recent_leak_hashes": list(leak_hashes),
-                        "style_reference": style_reference,
                     },
                 )
-                raw_output = invoke_llm_text(
-                    provider_name=provider,
-                    model_id=model,
-                    api_key=api_key,
-                    timeout_ms=int(args.timeout_ms),
-                    messages=messages,
-                    gen_params=dict(gen_params),
-                    base_url_override=base_url_override,
-                )
-                latency_ms = int((time.perf_counter() - turn_started) * 1000)
-                candidate_texts = parse_surface_candidates(raw_output)
-                scores = score_isolated_surface_candidates(request, candidate_texts)
-                selected = select_best_isolated_candidate(scores)
+                latency_ms = result.latency_ms or int((time.perf_counter() - turn_started) * 1000)
+                scores = list(result.candidates)
+                selected = result.selected
                 selected_payload = selected.as_dict() if selected else None
-                selected_text = selected.text if selected else ""
+                selected_text = result.selected_text
                 raw_row = {
                     "case_id": case_id,
                     "turn_id": turn_id,
@@ -394,12 +390,12 @@ def run_live_loop(args: argparse.Namespace) -> dict[str, Any]:
                     "model": model,
                     "latency_ms": latency_ms,
                     "user_message": request.user_message,
-                    "raw_output": _clean_text(raw_output),
-                    "candidates": candidate_texts,
+                    "raw_output": _clean_text(result.raw_output),
+                    "candidates": [score.text for score in scores],
+                    "direct_text": selected_text,
                     "selected_text": selected_text,
                     "selected_score": selected.score if selected else None,
                     "selected_passed": selected.passed if selected else False,
-                    "style_reference": style_reference,
                 }
                 score_row = {
                     "case_id": case_id,
@@ -408,7 +404,7 @@ def run_live_loop(args: argparse.Namespace) -> dict[str, Any]:
                     "surface_case_id": request.case_id,
                     "candidates": [score.as_dict() for score in scores],
                     "selected": selected_payload,
-                    "style_reference": style_reference,
+                    "selection": "direct_first",
                 }
                 result_row = {
                     "case_id": case_id,
@@ -416,7 +412,6 @@ def run_live_loop(args: argparse.Namespace) -> dict[str, Any]:
                     "turn_index": turn_index,
                     "ok": True,
                     "selected": selected_payload,
-                    "style_reference": style_reference,
                     "latency_ms": latency_ms,
                 }
                 _append_jsonl(raw_path, raw_row)
@@ -445,7 +440,6 @@ def run_live_loop(args: argparse.Namespace) -> dict[str, Any]:
                     "turn_index": turn_index,
                     "ok": False,
                     "selected": None,
-                    "style_reference": {},
                     "latency_ms": latency_ms,
                 }
                 _append_jsonl(

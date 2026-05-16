@@ -3,10 +3,9 @@
 DevSpec §25：Bond 阶段自动晋级。
 
 阶段定义（从低到高）：
-  STRANGER → ACQUAINTANCE → FRIEND → CLOSE_FRIEND → CONFIDANT → SOULMATE
+  FRIEND → CLOSE_FRIEND → CONFIDANT → SOULMATE
 
-注意：这些英文枚举是历史数据码。对新海天运行时而言，它们表示
-重组家庭义妹关系内部的成长阶段，而不是通用社交距离。
+注意：关系系统从“关系好的兄妹”开始。
 
 积分规则：
   - 每次 Bond 事件按 update_kind 贡献积分（可配置）
@@ -18,9 +17,10 @@ DevSpec §25：Bond 阶段自动晋级。
 from __future__ import annotations
 
 import logging
+import math
 import re
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Mapping
 
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.core.ids import new_request_id, now_ms
@@ -31,16 +31,12 @@ _logger = logging.getLogger("Natsume.bond_stage_engine")
 # 阶段枚举（有序）
 # ---------------------------------------------------------------------------
 
-STAGE_STRANGER = "STRANGER"
-STAGE_ACQUAINTANCE = "ACQUAINTANCE"
 STAGE_FRIEND = "FRIEND"
 STAGE_CLOSE_FRIEND = "CLOSE_FRIEND"
 STAGE_CONFIDANT = "CONFIDANT"
 STAGE_SOULMATE = "SOULMATE"
 
 STAGE_ORDER: list[str] = [
-    STAGE_STRANGER,
-    STAGE_ACQUAINTANCE,
     STAGE_FRIEND,
     STAGE_CLOSE_FRIEND,
     STAGE_CONFIDANT,
@@ -49,9 +45,7 @@ STAGE_ORDER: list[str] = [
 
 # 晋级所需累计积分阈值（到达该阶段需要的总积分）
 DEFAULT_STAGE_THRESHOLDS: dict[str, int] = {
-    STAGE_STRANGER: 0,
-    STAGE_ACQUAINTANCE: 10,
-    STAGE_FRIEND: 30,
+    STAGE_FRIEND: 0,
     STAGE_CLOSE_FRIEND: 70,
     STAGE_CONFIDANT: 150,
     STAGE_SOULMATE: 300,
@@ -68,10 +62,29 @@ DEFAULT_SCORE_MAP: dict[str, int] = {
     "EMOTIONAL_SUPPORT": 8,
     "SHARED_MEMORY": 3,
     "GIFT": 4,
+    "CONFLICT": -4,
+    "APOLOGY": 3,
+    "COMFORT": 2,
     "CONFLICT_RESOLVED": 6,
     "MILESTONE": 10,
     "IDLE_DECAY": -2,
 }
+
+_POSITIVE_AFFINITY_KINDS = frozenset(
+    {
+        "INTERACTION",
+        "INTERACTION_MINIMAL",
+        "INTERACTION_ENGAGED",
+        "INTERACTION_DEEP",
+        "DEEP_TALK",
+        "SHARED_MEMORY",
+        "GIFT",
+        "MILESTONE",
+    }
+)
+_SUPPORT_AFFINITY_KINDS = frozenset({"EMOTIONAL_SUPPORT", "COMFORT"})
+_REPAIR_AFFINITY_KINDS = frozenset({"APOLOGY", "CONFLICT_RESOLVED"})
+_NEGATIVE_AFFINITY_KINDS = frozenset({"CONFLICT", "IDLE_DECAY"})
 
 # 趋势判断窗口（最近 N 次事件）
 TREND_WINDOW = 5
@@ -86,8 +99,6 @@ STATUS_SUCCESS = "SUCCESS"
 
 # M28-H：阶段名称中文映射（OPT-21）
 _STAGE_CN_MAP: dict[str, str] = {
-    STAGE_STRANGER: "初次见面的义妹",
-    STAGE_ACQUAINTANCE: "相处中的义妹",
     STAGE_FRIEND: "关系好的兄妹",
     STAGE_CLOSE_FRIEND: "亲近兄妹",
     STAGE_CONFIDANT: "亲密恋人",
@@ -190,7 +201,7 @@ class BondEmotionalTexture:
             return "温暖亲密，可以更主动表达情感"
         if self.intimacy_temperature >= 0.4:
             return "关系融洽，保持自然互动"
-        return "义妹关系刚开始，收一点但不要当外人"
+        return "关系好的兄妹基线，收一点但不疏离"
 
 
 # M29-G：BondRiftState 裂痕-修复双轨机制（OPT-11）
@@ -227,7 +238,7 @@ class BondScoreState:
     """用户 Bond 积分状态快照。"""
     user_id: str
     total_score: int = 0
-    current_stage: str = STAGE_STRANGER
+    current_stage: str = STAGE_FRIEND
     event_count: int = 0
     last_event_ts_ms: int = 0
     recent_scores: list[int] = field(default_factory=list)  # 最近 TREND_WINDOW 次积分
@@ -268,8 +279,6 @@ class BondScoreState:
     def capability_hint(self) -> str:
         """根据阶段返回能力提示（降采样，不含数值）。"""
         hints = {
-            STAGE_STRANGER: "初次见面的义妹，收着但不当外人",
-            STAGE_ACQUAINTANCE: "相处中的义妹，可自然分享日常",
             STAGE_FRIEND: "关系好的兄妹，可轻松拌嘴",
             STAGE_CLOSE_FRIEND: "亲近兄妹，可倾诉心事",
             STAGE_CONFIDANT: "亲密恋人，深度信任",
@@ -339,6 +348,19 @@ class StageTransitionResult:
 
 
 @dataclass(frozen=True)
+class AffinityDeltaBreakdown:
+    """Auditable conversion from a short-term emotion event to affinity delta."""
+
+    update_kind: str
+    base_delta: int
+    emotion_intensity: float
+    emotion_valence: float | None
+    multiplier: float
+    score_delta: int
+    reason_code: str
+
+
+@dataclass(frozen=True)
 class _GrowthTrackerResult:
     applied: bool = False
     reason: str = ""
@@ -370,6 +392,124 @@ class _PrefrontalGrowthTrackerProxy:
             applied=bool((payload or {}).get("applied")),
             reason=str((payload or {}).get("reason") or ""),
         )
+
+
+def compute_affinity_delta(
+    update_kind: str,
+    *,
+    emotion_intensity: float = 0.5,
+    emotion_valence: float | None = None,
+    score_map: Mapping[str, int] | None = None,
+) -> int:
+    """Return the score delta used by the long-term bond stage engine.
+
+    This is intentionally small and deterministic: the surface layer may call it
+    for hints, while BondStageEngine remains the single writer of real state.
+    """
+    return compute_affinity_delta_breakdown(
+        update_kind=update_kind,
+        emotion_intensity=emotion_intensity,
+        emotion_valence=emotion_valence,
+        score_map=score_map,
+    ).score_delta
+
+
+def compute_affinity_delta_breakdown(
+    *,
+    update_kind: str,
+    emotion_intensity: float = 0.5,
+    emotion_valence: float | None = None,
+    score_map: Mapping[str, int] | None = None,
+) -> AffinityDeltaBreakdown:
+    """Convert short-term emotion into one auditable affinity delta.
+
+    Model:
+      1. update_kind supplies the base meaning of the turn.
+      2. emotion_intensity controls how strongly this one turn is remembered.
+      3. emotion_valence changes the meaning only in context:
+         - sad + supported => stronger positive bond growth
+         - sad + plain interaction => no artificial boost
+         - angry/conflict => stronger negative impact
+      4. relationship stage is never changed directly here; only total_score can
+         move the long-term stage threshold.
+    """
+    kind = str(update_kind or "INTERACTION").strip().upper()
+    scores = score_map or DEFAULT_SCORE_MAP
+    base_delta = int(scores.get(kind, 1))
+    intensity = _clamp01(emotion_intensity)
+    valence = _clamp11(emotion_valence) if emotion_valence is not None else None
+
+    multiplier = 1.0
+    reason = "base"
+
+    if base_delta < 0 or kind in _NEGATIVE_AFFINITY_KINDS:
+        reason = "negative_event"
+        if intensity > 0.7:
+            multiplier += 0.5
+            reason = "negative_event_high_intensity"
+        if valence is not None and valence >= 0.35:
+            multiplier = max(1.0, multiplier - 0.2)
+            reason = f"{reason}_softened_by_positive_valence"
+    elif kind in _SUPPORT_AFFINITY_KINDS:
+        reason = "support_event"
+        if intensity > 0.7:
+            multiplier += 0.5
+            reason = "support_event_high_intensity"
+        if valence is not None and valence <= -0.35:
+            multiplier += 0.15
+            reason = f"{reason}_negative_valence"
+    elif kind in _REPAIR_AFFINITY_KINDS:
+        reason = "repair_event"
+        if intensity > 0.7:
+            multiplier += 0.35
+            reason = "repair_event_high_intensity"
+        if valence is not None and valence <= -0.35:
+            multiplier += 0.15
+            reason = f"{reason}_negative_valence"
+    elif kind in _POSITIVE_AFFINITY_KINDS or base_delta > 0:
+        reason = "positive_event"
+        if intensity > 0.7:
+            multiplier += 0.5
+            reason = "positive_event_high_intensity"
+        if valence is not None and valence >= 0.35:
+            multiplier += 0.25
+            reason = f"{reason}_positive_valence"
+        elif valence is not None and valence <= -0.35:
+            multiplier = max(0.5, multiplier - 0.5)
+            reason = f"{reason}_negative_valence_dampened"
+
+    delta = _round_signed(base_delta * multiplier)
+    return AffinityDeltaBreakdown(
+        update_kind=kind,
+        base_delta=base_delta,
+        emotion_intensity=round(intensity, 4),
+        emotion_valence=round(valence, 4) if valence is not None else None,
+        multiplier=round(multiplier, 4),
+        score_delta=delta,
+        reason_code=reason,
+    )
+
+
+def _clamp01(value: Any) -> float:
+    try:
+        return max(0.0, min(1.0, float(value)))
+    except (TypeError, ValueError):
+        return 0.5
+
+
+def _clamp11(value: Any) -> float:
+    try:
+        return max(-1.0, min(1.0, float(value)))
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _round_signed(value: float) -> int:
+    if value > 0:
+        return max(1, int(math.floor(value + 0.5)))
+    if value < 0:
+        return min(-1, -int(math.floor(abs(value) + 0.5)))
+    return 0
 
 
 # ---------------------------------------------------------------------------
@@ -415,6 +555,7 @@ class BondStageEngine:
         request_id: str | None = None,
         ts_ms: int | None = None,
         emotion_intensity: float = 0.5,
+        emotion_valence: float | None = None,
     ) -> StageTransitionResult:
         """处理一次 Bond 事件，更新积分并判断阶段变化。
 
@@ -427,14 +568,15 @@ class BondStageEngine:
         state = self._get_or_create_state(uid)
         from_stage = state.current_stage
 
-        # 计算积分增量
-        base_delta = self._score_map.get(str(update_kind).strip(), 1)
-        # M27-E：情感强度加权
+        # 计算好感增量：短期情绪只调制本次事件权重，长期阶段仍由总好感积分决定。
         intensity = max(0.0, min(1.0, float(emotion_intensity)))
-        if intensity > 0.7:
-            delta = int(round(base_delta * 1.5))
-        else:
-            delta = base_delta
+        delta_breakdown = compute_affinity_delta_breakdown(
+            update_kind=str(update_kind),
+            emotion_intensity=intensity,
+            emotion_valence=emotion_valence,
+            score_map=self._score_map,
+        )
+        delta = delta_breakdown.score_delta
         state.total_score = max(0, state.total_score + delta)
         state.event_count += 1
         # 修复审计问题 #5：先保存旧时间戳，再更新，确保 response_gap_ms 能正确计算
@@ -445,15 +587,20 @@ class BondStageEngine:
             state.recent_scores = state.recent_scores[-TREND_WINDOW * 2:]
 
         # 修复审计问题 #5：更新 BondEmotionalTexture，激活亲密温度功能
-        # emotion_intensity 映射到 valence：[0,1] → [-1,1]（0.5 为中性）
-        emotion_valence = (intensity - 0.5) * 2.0
+        # 优先使用情绪系统给出的真实 valence；旧调用没有 valence 时保留
+        # intensity → valence 的兼容映射。
+        texture_valence = (
+            max(-1.0, min(1.0, float(emotion_valence)))
+            if emotion_valence is not None
+            else (intensity - 0.5) * 2.0
+        )
         # 使用事件间隔估算回复节奏（若有上次事件时间戳）
         response_gap_ms: float | None = None
         if _prev_event_ts_ms > 0 and ts > _prev_event_ts_ms:
             response_gap_ms = float(ts - _prev_event_ts_ms)
         state.texture = state.texture.update(
             response_gap_ms=response_gap_ms,
-            emotion_valence=emotion_valence,
+            emotion_valence=texture_valence,
         )
 
         # 判断阶段变化
@@ -475,7 +622,8 @@ class BondStageEngine:
         transition_id = f"bond_trans_{req_id}"
         detail = (
             f"{transition_status}: {from_stage}→{new_stage} "
-            f"(delta={delta:+d}, total={state.total_score})"
+            f"(affinity_delta={delta:+d}, total={state.total_score}, "
+            f"affinity_rule={delta_breakdown.reason_code})"
         )
 
         result = StageTransitionResult(
@@ -781,7 +929,7 @@ class BondStageEngine:
 
     def _compute_stage(self, total_score: int) -> str:
         """根据总积分计算当前阶段（取满足阈值的最高阶段）。"""
-        current = STAGE_STRANGER
+        current = STAGE_FRIEND
         for stage in STAGE_ORDER:
             threshold = self._thresholds.get(stage, 0)
             if total_score >= threshold:

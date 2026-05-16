@@ -1107,7 +1107,7 @@ def test_explicit_non_buffering_reply_plan_overrides_legacy_buffering_heuristics
     assert _render_policy_requires_buffering(reply_plan) is False
     assert _should_buffer_stream_output(
         emotion_context={"emotion_tag": "CALM", "turn_count": 1},
-        bond_summary={"stage": "STRANGER", "intent": "chat"},
+        bond_summary={"stage": "FRIEND", "intent": "chat"},
         render_policy=reply_plan,
     ) is False
 
@@ -1123,7 +1123,7 @@ def test_explicit_buffering_reply_plan_still_forces_buffering() -> None:
     assert _render_policy_requires_buffering(reply_plan) is True
     assert _should_buffer_stream_output(
         emotion_context={"emotion_tag": "CALM", "turn_count": 1},
-        bond_summary={"stage": "STRANGER", "intent": "chat"},
+        bond_summary={"stage": "FRIEND", "intent": "chat"},
         render_policy=reply_plan,
     ) is True
 

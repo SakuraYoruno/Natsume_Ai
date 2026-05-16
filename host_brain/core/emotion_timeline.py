@@ -295,7 +295,7 @@ def compute_emotion_echo(
         user_emotion_tag: 用户当前情感标签
         current_vector: Natsume 当前情绪向量
         echo_weight: 回声权重（0.0~1.0），默认 0.4
-        bond_stage: 当前关系阶段（STRANGER~SOULMATE），为空时按 FRIEND 处理
+        bond_stage: 当前关系阶段（FRIEND~SOULMATE），为空时按 FRIEND 处理
         personality_traits: PersonalityTraits 人格特质（可选，Phase II 新增）
 
     Returns:
@@ -345,13 +345,11 @@ def compute_emotion_echo(
     # Phase 5: 关系深度判定（shallow / medium / deep）
     _stage = str(bond_stage or "").strip().upper()
     _DEEP_STAGES = {"CLOSE_FRIEND", "CONFIDANT", "SOULMATE"}
-    _MEDIUM_STAGES = {"FRIEND", "ACQUAINTANCE"}
+    _MEDIUM_STAGES = {"FRIEND"}
     if _stage in _DEEP_STAGES:
         depth = "deep"
     elif _stage in _MEDIUM_STAGES:
         depth = "medium"
-    elif _stage in {"STRANGER"}:
-        depth = "shallow"
     else:
         depth = "medium"  # 默认按中等处理
 

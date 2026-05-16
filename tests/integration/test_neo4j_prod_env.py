@@ -119,7 +119,7 @@ def test_neo4j_prod_dependencies_and_bond_writer_use_real_client() -> None:
         assert result.success is True
         assert result.event['neo4j_event']['event_id'] == event_id
         assert fetched is not None and fetched['event_id'] == event_id
-        assert result.event['stage_transition']['to_stage'] in {'ACQUAINTANCE', 'FRIEND'}
+        assert result.event['stage_transition']['to_stage'] in {'FRIEND', 'CLOSE_FRIEND'}
     finally:
         _cleanup_event(client, database=config.database, event_id=event_id, user_id=user_id, session_id=session_id, topic_id=topic_id, capability_hint=capability_hint)
         client.close()

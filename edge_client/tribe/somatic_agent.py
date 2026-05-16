@@ -120,6 +120,10 @@ class SomaticAgent:
         mood_state: str | None,
         emotion_source: str | None,
         emotion_terms: list[str],
+        emotion_modality: str | None = None,
+        emotion_confidence: float | None = None,
+        emotion_inference_degraded: bool | None = None,
+        acoustic_emotion_available: bool | None = None,
     ) -> None:
         payload: dict[str, Any] = {
             "request_id": str(request_id or ""),
@@ -134,6 +138,18 @@ class SomaticAgent:
             "mood_state": str(mood_state).strip().lower() if mood_state else None,
             "emotion_source": str(emotion_source).strip() if emotion_source else None,
             "emotion_terms": list(emotion_terms or []),
+            "emotion_modality": str(emotion_modality or "").strip() or None,
+            "emotion_confidence": (
+                max(0.0, min(1.0, float(emotion_confidence)))
+                if isinstance(emotion_confidence, (int, float))
+                else None
+            ),
+            "emotion_inference_degraded": bool(emotion_inference_degraded)
+            if emotion_inference_degraded is not None
+            else None,
+            "acoustic_emotion_available": bool(acoustic_emotion_available)
+            if acoustic_emotion_available is not None
+            else None,
         }
         self._publish_event(
             event_type="emotion_inference_updated",
@@ -375,6 +391,10 @@ class SomaticAgent:
                 mood_state=None,
                 emotion_source="face_capture",
                 emotion_terms=[expression_tag.lower()],
+                emotion_modality="face_capture",
+                emotion_confidence=confidence,
+                emotion_inference_degraded=False,
+                acoustic_emotion_available=False,
             )
 
             _log.debug(

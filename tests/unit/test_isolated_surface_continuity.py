@@ -538,7 +538,7 @@ def test_continuity_blocks_original_quote_persona_leak() -> None:
     rows = score_isolated_surface_candidates(
         request,
         [
-            "回来啦。长链这段我先挡住了，没让人家乱动。",
+            "回来啦。长链这段我先挡住了，没让尼尼乱动。",
             "回来啦，长链接着来。",
         ],
     )
@@ -568,8 +568,8 @@ def test_continuity_blocks_unprovided_personal_authority() -> None:
     rows = score_isolated_surface_candidates(
         request,
         [
-            "尼尼，先看第一行红字，这是我长期经验。",
-            "尼尼，先看第一行红字。",
+            "老哥，先看第一行红字，这是我长期经验。",
+            "老哥，先看第一行红字。",
         ],
     )
     selected = select_best_isolated_candidate(rows)
@@ -578,7 +578,7 @@ def test_continuity_blocks_unprovided_personal_authority() -> None:
     assert not rows[0].passed
     assert rows[1].passed
     assert selected is not None
-    assert selected.text == "尼尼，先看第一行红字。"
+    assert selected.text == "老哥，先看第一行红字。"
 
 
 def test_continuity_blocks_soft_warning_process_language() -> None:
@@ -1559,7 +1559,7 @@ def test_self_name_advisory_is_awkward() -> None:
                 "身份怎么放",
                 "identity",
                 response_move="answer_in_place",
-                facts=["当前主题：身份边界。", "必要事实：名字是夏目蓝。"],
+                facts=["当前主题：身份边界。", "必要事实：名字是天。"],
             ),
         ],
     }
@@ -1567,8 +1567,8 @@ def test_self_name_advisory_is_awkward() -> None:
     rows = score_isolated_surface_candidates(
         request,
         [
-            "身份啊，夏目蓝建议单独记一行。",
-            "身份啊，把夏目蓝单独记一行就够。",
+            "身份啊，天建议单独记一行。",
+            "身份啊，把天单独记一行就够。",
         ],
     )
     selected = select_best_isolated_candidate(rows)
@@ -1577,7 +1577,7 @@ def test_self_name_advisory_is_awkward() -> None:
     assert not rows[0].passed
     assert rows[1].passed
     assert selected is not None
-    assert selected.text == "身份啊，把夏目蓝单独记一行就够。"
+    assert selected.text == "身份啊，把天单独记一行就够。"
 
 
 def test_quality_forbidden_template_text_blocks_selection() -> None:

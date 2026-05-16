@@ -1,4 +1,4 @@
-﻿"""host_brain 全面集成测试套件
+"""host_brain 全面集成测试套件
 =================================
 里程碑：M-HOST-INTEGRATION-2026-03-11
 目标：对 host_brain FastAPI 应用的所有路由进行集成测试，
@@ -534,11 +534,11 @@ class TestBondAPIIntegration:
         assert data["status"] in {"OK", "DEGRADED"}
 
     def test_bond_stage_new_user(self, test_client):
-        """T-INT-BOND-02: GET /bond/stage/{user_id} 新用户初始为 STRANGER。"""
+        """T-INT-BOND-02: GET /bond/stage/{user_id} 新用户初始为 FRIEND。"""
         resp = test_client.get("/bond/stage/integration_test_user_001")
         assert resp.status_code == 200
         data = resp.json()
-        assert data["current_stage"] == "STRANGER"
+        assert data["current_stage"] == "FRIEND"
         assert data["total_score"] >= 0
 
     def test_bond_stage_response_fields(self, test_client):
@@ -649,7 +649,7 @@ class TestBondAPIIntegration:
         assert data["request_id"] == "custom-integration-req-001"
 
     def test_bond_stage_updates_after_promotion(self, test_client):
-        """T-INT-BOND-11: 多次 DEEP_TALK 后阶段晋级到 ACQUAINTANCE。"""
+        """T-INT-BOND-11: 多次 DEEP_TALK 后阶段晋级到 CLOSE_FRIEND。"""
         user_id = "integration_test_user_promote_001"
         for i in range(2):
             test_client.post(
@@ -662,7 +662,7 @@ class TestBondAPIIntegration:
             )
         resp = test_client.get(f"/bond/stage/{user_id}")
         data = resp.json()
-        assert data["current_stage"] == "ACQUAINTANCE"
+        assert data["current_stage"] == "CLOSE_FRIEND"
         assert data["total_score"] >= 10
 
 

@@ -18,12 +18,8 @@ except ImportError:  # pragma: no cover - pydantic v1 compatibility
 from host_brain.persona.continuity_surface_sample_bank import render_continuity_surface_generation_guidance
 from host_brain.persona.galgame_text_contract import build_galgame_text_contract
 from host_brain.persona.sample_guided_text_scorer import score_sample_guided_text, signature_texture_hits
-from host_brain.persona.style_reference_bank import (
-    StyleReferenceQuery,
-    get_style_reference_bank,
-    render_style_guidance,
-)
 from host_brain.persona.surface_original_quote_bank import (
+    SurfaceOriginalQuoteQuery,
     render_surface_original_quote_guidance,
     select_surface_original_quotes,
     surface_original_quote_similarity_hits,
@@ -32,7 +28,6 @@ from host_brain.persona.surface_scene_quality_pack import (
     render_surface_scene_quality_guidance,
     select_surface_scene_quality_sample,
 )
-from host_brain.persona.surface_style_seed_bank import render_surface_style_seed_guidance
 from host_brain.persona.text_quality_gate import get_text_quality_gate
 
 
@@ -107,18 +102,6 @@ class IsolatedSurfaceRunResult:
             "raw_output": self.raw_output,
             "candidates": [candidate.as_dict() for candidate in self.candidates],
             "selected": self.selected.as_dict() if self.selected else None,
-        }
-
-
-@dataclass(frozen=True)
-class DerivedStyleAnchor:
-    anchors: tuple[str, ...] = ()
-    trace: Mapping[str, Any] | None = None
-
-    def as_dict(self) -> dict[str, Any]:
-        return {
-            "anchors": list(self.anchors),
-            "trace": dict(self.trace or {}),
         }
 
 
@@ -231,7 +214,21 @@ _ALLOWED_TOP_LEVEL_KEYS = {
     "soul_md",
     "user_message",
 }
-_SCENE_STYLE_QUERY: dict[str, dict[str, tuple[str, ...] | str]] = {
+_SURFACE_QUOTE_QUERY_BY_SCENE: dict[str, dict[str, tuple[str, ...] | str]] = {
+    "technical_next_step": {"intent_tags": ("help",), "emotion_tags": ("care",), "style_moves": ("take_charge", "care_behind_tease")},
+    "short_continue": {"intent_tags": ("daily",), "style_moves": ("quick_reaction", "question_chain")},
+    "explicit_memory": {"intent_tags": ("daily",), "style_moves": ("quick_reaction", "soft_reassurance")},
+    "daily_morning": {"intent_tags": ("daily",), "style_moves": ("quick_reaction", "question_chain")},
+    "relationship_memory_reassurance": {"intent_tags": ("daily", "reassurance"), "emotion_tags": ("soft",), "style_moves": ("quick_reaction", "soft_reassurance")},
+    "negative_feedback": {"intent_tags": ("annoyed", "daily"), "emotion_tags": ("annoyed", "playful"), "style_moves": ("quick_reaction", "quick_rebuttal", "familiar_pushback")},
+    "return_chat": {"intent_tags": ("daily", "presence"), "style_moves": ("quick_reaction", "pull_attention")},
+    "lover_presence": {"intent_tags": ("presence", "intimacy"), "emotion_tags": ("deep_affection", "playful"), "style_moves": ("direct_affection", "clingy_presence", "pull_attention")},
+    "lover_low_energy": {"intent_tags": ("reassurance", "intimacy"), "emotion_tags": ("soft", "care", "deep_affection"), "style_moves": ("soft_reassurance", "direct_affection", "care_behind_tease")},
+    "ambiguous_affection": {"intent_tags": ("intimacy", "praise"), "emotion_tags": ("shy", "playful", "deep_affection"), "style_moves": ("shy_deflection", "smug_tease", "direct_affection")},
+    "close_friend_care": {"intent_tags": ("help", "reassurance"), "emotion_tags": ("care", "soft"), "style_moves": ("take_charge", "care_behind_tease", "soft_reassurance")},
+    "low_intensity_sibling_distance": {"intent_tags": ("daily", "annoyed"), "emotion_tags": ("playful", "annoyed"), "style_moves": ("quick_reaction", "familiar_pushback", "smug_tease")},
+    "pushed_away_boundary": {"intent_tags": ("boundary", "annoyed", "help"), "emotion_tags": ("hurt", "wounded", "care", "annoyed"), "style_moves": ("wounded_pushback", "soft_after_sting", "care_behind_tease", "quick_rebuttal")},
+    "jealousy_low_pressure": {"intent_tags": ("intimacy", "annoyed", "daily"), "emotion_tags": ("playful", "shy", "annoyed"), "style_moves": ("smug_tease", "familiar_pushback", "direct_affection")},
     "daily_good_morning": {"intent_tags": ("daily",), "style_moves": ("quick_reaction", "question_chain")},
     "daily_greeting_en": {"intent_tags": ("daily",), "style_moves": ("quick_reaction", "question_chain")},
     "daily_greeting_cn": {"intent_tags": ("daily",), "style_moves": ("quick_reaction", "question_chain")},
@@ -372,7 +369,7 @@ _CONTINUITY_LIGHT_JARGON_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("chain_watch_jargon", re.compile(r"(?:我)?(?:盯着|看着)[^。！？!?，,]{0,8}(?:后段|稳定|稳定性|收束|长链|边界)")),
     ("identity_compress_jargon", re.compile(r"(?:身份|设定)[^。！？!?，,]{0,4}压")),
     ("rigid_lock_jargon", re.compile(r"(?:锁死|锁住|锁定).{0,8}(?:事实数|事实|轮号|源结果|重试结果|边界|话口|摘要)|(?:事实数|事实|轮号|源结果|重试结果|边界|话口|摘要).{0,8}(?:锁死|锁住|锁定)")),
-    ("identity_shorthand_jargon", re.compile(r"(?:夏目蓝|身份|设定).{0,10}(?:缩写|简写)|按已知身份缩写")),
+    ("identity_shorthand_jargon", re.compile(r"(?:(?:夏目蓝|SORA|天(?=[啦啊呢，,。.!！\s]|$))|身份|设定).{0,10}(?:缩写|简写)|按已知身份缩写")),
     ("replacement_jargon", re.compile(r"(?:旧细节|旧摘要|旧轮|旧的).{0,8}(?:替换掉|替掉|覆盖掉)")),
     ("boundary_paste_jargon", re.compile(r"(?:贴边界|只留当前轮|先看头|看头)")),
     ("identity_typo_jargon", re.compile(r"身份摘")),
@@ -387,7 +384,7 @@ _CONTINUITY_LIGHT_JARGON_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("risk_tail_jargon", re.compile(r"(?:接着)?盯风险|别留尾巴|后段没松|长链先顺一下|看后段稳了")),
     ("error_grab_jargon", re.compile(r"报错头三行抓住|(?:红字|报错).{0,4}(?:抓住|先抓住)")),
     ("surface_test_jargon", re.compile(r"短句测试|压缩链|搭连续链|搭三十六轮|长链边界我已经|我已经理清楚了")),
-    ("identity_to_name_jargon", re.compile(r"(?:压成|缩成).{0,8}(?:夏目蓝|名字|称呼|关系)|(?:身份|设定|追问).{0,8}缩成")),
+    ("identity_to_name_jargon", re.compile(r"(?:压成|缩成).{0,8}(?:夏目蓝|SORA|天(?=[啦啊呢，,。.!！\s]|$)|名字|称呼|关系)|(?:身份|设定|追问).{0,8}缩成")),
     ("cluster_boundary_shorthand_jargon", re.compile(r"簇边界|当前簇|问题簇.{0,8}收住|不单列账|单列账")),
     ("merge_result_jargon", re.compile(r"观察行.{0,8}(?:收进|走一轮)|合并结果")),
     ("daily_stretch_jargon", re.compile(r"扯长一点|聊长一点|话多就行")),
@@ -398,7 +395,7 @@ _CONTINUITY_LIGHT_JARGON_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("constraint_side_jargon", re.compile(r"约束那边|按原样兜着|泄露漏出去")),
     ("reverse_chain_watch_jargon", re.compile(r"(?:后段|稳定|边界|这轮).{0,6}(?:我)?盯着")),
     ("single_row_jargon", re.compile(r"单条挂|观察行直接收")),
-    ("identity_self_collect_jargon", re.compile(r"夏目蓝.{0,8}(?:就这么收|说身份|觉得身份)|压身份|收身份")),
+    ("identity_self_collect_jargon", re.compile(r"(?:夏目蓝|SORA|天(?=[啦啊呢，,。.!！\s]|$)).{0,8}(?:就这么收|说身份|觉得身份)|压身份|收身份")),
     ("turn_build_jargon", re.compile(r"搭轮数|继续搭轮|搭长链|三十六轮继续搭|继续搭")),
     ("merge_backup_jargon", re.compile(r"源结果.{0,8}备份|备份再合|再合|按轮合|合结果")),
     ("short_reply_meta_jargon", re.compile(r"给个短回应|短回应")),
@@ -421,7 +418,7 @@ _CONTINUITY_USER_VISIBLE_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("steady_finish", re.compile(r"(?:收束|收住|跑通|过关|稳住).{0,10}(?:链|轮|后段|观察|就行|了)?")),
 )
 _UNPROVIDED_MEDIA_OBJECT_RE = re.compile(r"(?:手机|屏幕|耳机|摄像头|麦克风)")
-_ORIGINAL_QUOTE_PERSONA_LEAK_RE = re.compile(r"(?:人家|老哥|老妹|小天)")
+_ORIGINAL_QUOTE_PERSONA_LEAK_RE = re.compile(r"(?:夏目蓝|蓝蓝|尼尼)")
 _UNPROVIDED_PERSONAL_AUTHORITY_RE = re.compile(r"(?:我(?:的)?长期经验|我见多了|我猜(?:下一轮|后面|之后|接下来))")
 _CONTINUITY_BOUNDARY_HINTS = (
     "压缩",
@@ -511,7 +508,7 @@ _AWKWARD_RECEIVED_MORNING_RE = re.compile(r"收到你的早上")
 _AWKWARD_TEXT_AS_SOUND_RE = re.compile(r"(?:这声早|你的早.{0,4}听着|这声.{0,6}听着)")
 _AWKWARD_SHORT_MORNING_FILLER_RE = re.compile(r"^早[啊呀安上好]*[。.!！…]*[嗯哼][。.!！]*$")
 _AWKWARD_CHINESE_SPACE_LINE_RE = re.compile(r"^[\u4e00-\u9fff]+(?: [\u4e00-\u9fff]+)+$")
-_AWKWARD_MORNING_SENTENCE_SPLIT_RE = re.compile(r"^早[啊呀安上好]*[，,、 ]?(?:尼尼)?[。.!！]今天")
+_AWKWARD_MORNING_SENTENCE_SPLIT_RE = re.compile(r"^早[啊呀安上好]*[，,、 ]?(?:尼尼|老哥|哥哥)?[。.!！]今天")
 _AWKWARD_STEADY_COME_RE = re.compile(r"(?:一起)?稳着来")
 _AWKWARD_QUIET_STAY_RE = re.compile(r"安静待会儿?")
 _AWKWARD_NO_ANGER_NEGATION_RE = re.compile(r"没气了")
@@ -519,10 +516,10 @@ _AWKWARD_BROKEN_OBJECT_RE = re.compile(r"(?:哪里|哪儿|哪|什么地方)(?:�
 _AWKWARD_SELF_DESCRIBED_FRAGMENT_RE = re.compile(r"(?:轻得只有半句|半句就好)")
 _AWKWARD_INCOMPLETE_RECALL_OBJECT_RE = re.compile(r"(?:想去看|要去看)[。.!！]?$")
 _AWKWARD_HESITATION_COLLAGE_RE = re.compile(r"(?:那先|先)[，,、](?:嗯|呃|啊)[，,、]")
-_AWKWARD_SELF_NAME_ADVISORY_RE = re.compile(r"夏目蓝(?:建议|认为|觉得|能做到)")
+_AWKWARD_SELF_NAME_ADVISORY_RE = re.compile(r"(?:夏目蓝|SORA|(?<![\u4e00-\u9fff])天)(?:建议|认为|觉得|能做到)")
 _AWKWARD_BODY_PART_LISTENER_RE = re.compile(r"(?:我)?耳朵(?:在|准备好|在线|开着)")
-_AWKWARD_SELF_NAME_RECORD_RE = re.compile(r"(?:名字|夏目蓝).{0,8}我(?:记下|记着|记住|收着)|我(?:记下|记着|记住|收着).{0,8}(?:名字|夏目蓝)")
-_AWKWARD_NICKNAME_AS_SELF_RE = re.compile(r"尼尼(?:在呢|在这|在这里|陪你|守着|听着|看着|记着)")
+_AWKWARD_SELF_NAME_RECORD_RE = re.compile(r"(?:名字|夏目蓝|SORA|(?<![\u4e00-\u9fff])天).{0,8}我(?:记下|记着|记住|收着)|我(?:记下|记着|记住|收着).{0,8}(?:名字|夏目蓝|SORA|(?<![\u4e00-\u9fff])天)")
+_AWKWARD_NICKNAME_AS_SELF_RE = re.compile(r"(?:尼尼|老哥|哥哥)(?:在呢|在这|在这里|陪你|守着|听着|看着|记着)")
 _AWKWARD_UNGROUNDED_SELF_MESSAGING_RE = re.compile(
     r"(?:想给你发消息|正想(?:给你)?发消息|准备给你发消息|还在想你是不是|以为你失踪|放我鸽子)"
 )
@@ -720,7 +717,6 @@ _BOUNDARY_PUSH_CLOSER_PHRASES = (
     "外人",
     "受伤",
     "有点伤",
-    "难受",
     "伤心",
     "伤人",
     "你这么说我",
@@ -778,11 +774,17 @@ _BOUNDARY_REPAIR_SOUR_YIELD_PHRASES = (
     "你管我",
     "管我时",
     "偏要管",
+    "随你",
     "不管就不管",
     "不多管",
+    "不帮",
     "不管了",
     "不帮了",
+    "不帮你了",
     "不帮就不帮",
+    "不管你了",
+    "你自己处理",
+    "帮不了就算了",
     "不熟还",
     "我不熟",
     "行了吧",
@@ -1078,10 +1080,12 @@ _CONTROL_EMOTION_TAGS: dict[str, tuple[str, ...]] = {
     "hurt_containment": ("hurt", "wounded", "soft"),
     "playful": ("playful",),
     "playful_light": ("playful",),
+    "soft_teasing": ("playful", "shy"),
     "soft": ("soft",),
     "soft_containment": ("soft",),
     "warm": ("soft",),
     "warm_affection": ("deep_affection",),
+    "warm_intimate": ("deep_affection", "soft"),
     "warm_gentle": ("soft",),
     "quiet_care": ("soft",),
     "guarded_soft": ("soft",),
@@ -1102,10 +1106,12 @@ _CONTROL_STYLE_MOVES: dict[str, tuple[str, ...]] = {
     "hurt_containment": ("soft_after_sting", "soft_reassurance"),
     "playful": ("quick_reaction", "smug_tease"),
     "playful_light": ("quick_reaction", "smug_tease"),
+    "soft_teasing": ("quick_reaction", "smug_tease", "shy_deflection"),
     "soft": ("soft_reassurance",),
     "soft_containment": ("soft_reassurance",),
     "warm": ("soft_reassurance", "quick_reaction"),
     "warm_affection": ("direct_affection",),
+    "warm_intimate": ("direct_affection", "soft_reassurance"),
     "warm_gentle": ("soft_reassurance", "quick_reaction"),
     "quiet_care": ("soft_reassurance",),
     "guarded_soft": ("soft_after_sting",),
@@ -1150,31 +1156,13 @@ _AFFECT_SELF_CORRECT_MARKERS = ("重来", "不端着", "收一点", "收一下",
 _AFFECT_GUILTY_GROUNDED = ("回来", "在听", "认真听", "慢了一拍")
 _AFFECT_GUILTY_DENIAL = ("才没有", "哪有", "我明明", "又不耽误")
 _RELATIONSHIP_STYLE_PROFILES: dict[str, RelationshipStyleProfile] = {
-    "stranger": RelationshipStyleProfile(
-        stage="stranger",
-        prompt_lines=(
-            "初见/陌生：短、克制、有反应；不要装熟、撒娇、占有或使用尼尼。",
-            "允许一点性格边角，但不要把普通回应写成亲密陪伴。",
-        ),
-        prefer_markers=("嗯", "好", "行", "先", "回来了", "记得"),
-        overstep_markers=("尼尼", "哥哥", "亲爱的", "宝贝", "爱你", "想你", "我在这", "我在呢", "陪你", "不走", "等你", "过来", "抱"),
-    ),
-    "new_acquaintance": RelationshipStyleProfile(
-        stage="new_acquaintance",
-        prompt_lines=(
-            "刚认识：可以比陌生多一点轻快，但仍然别用尼尼，别像已经很熟。",
-            "反应要自然，不主动索取陪伴或做恋人式承诺。",
-        ),
-        prefer_markers=("嗯", "好", "行", "啦", "嘛", "回来了", "记得"),
-        overstep_markers=("尼尼", "哥哥", "亲爱的", "宝贝", "爱你", "想你", "我在这", "我在呢", "陪你", "不走", "等你", "过来", "抱"),
-    ),
     "familiar": RelationshipStyleProfile(
         stage="familiar",
         prompt_lines=(
-            "熟人：可以短促、顶嘴、轻吐槽和轻护短；亲近但不恋人化。",
-            "尼尼可偶尔用，不要每句都叫，也不要升格成占有或永远陪伴。",
+            "默认熟人兄妹感：可以短促、顶嘴、轻吐槽、撒娇和轻护短；亲近但不直接恋人化。",
+            "老哥/哥哥可以自然使用，但不要每句都叫，也不要升格成占有或永远陪伴。",
         ),
-        prefer_markers=("尼尼", "嘛", "啦", "呀", "别急", "行啊", "这都", "记着"),
+        prefer_markers=("老哥", "哥哥", "嘛", "啦", "呀", "别急", "行啊", "这都", "记着"),
         overstep_markers=("亲爱的", "宝贝", "爱你", "想你", "抱一下", "抱抱", "抱", "过来", "只属于", "主人", "命都给你", "永远陪"),
     ),
     "trusted_friend": RelationshipStyleProfile(
@@ -1199,7 +1187,7 @@ _RELATIONSHIP_STYLE_PROFILES: dict[str, RelationshipStyleProfile] = {
         stage="ambiguous",
         prompt_lines=(
             "暧昧：可以有停顿、躲一下、话到嘴边收住；不要直接油腻告白。",
-            "比亲近朋友更在意一点，但仍要保留夏目蓝的嘴硬和别扭。",
+            "比亲近朋友更在意一点，但仍要保留天/SORA 的嘴硬、撒娇和别扭。",
         ),
         prefer_markers=("……", "有点", "别突然", "还在", "我听着", "记着"),
         overstep_markers=(
@@ -1236,7 +1224,7 @@ _RELATIONSHIP_STYLE_PROFILES: dict[str, RelationshipStyleProfile] = {
         ),
         prefer_markers=("我在", "回来", "过来", "想你", "陪你", "继续说", "别硬撑"),
         underplay_markers=("有什么事", "需要我", "请提供", "我可以", "随便你", "你自己决定"),
-        affection_markers=("想你", "抱一下", "抱抱", "抱", "陪你", "陪着", "心疼", "过来", "靠我", "安心", "你的事", "心里", "记在心里", "放在心里", "会当真", "会当真的", "赖着你", "懂你"),
+        affection_markers=("想你", "抱一下", "抱抱", "抱", "陪你", "陪着", "心疼", "过来", "靠我", "安心", "你的事", "心里", "记在心里", "放在心里", "会当真", "会当真的", "赖着你", "懂你", "在意你"),
         strong_affection_markers=("想你", "抱一下", "抱抱", "抱", "心疼", "过来", "靠我"),
     ),
     "lover_stable": RelationshipStyleProfile(
@@ -1247,8 +1235,8 @@ _RELATIONSHIP_STYLE_PROFILES: dict[str, RelationshipStyleProfile] = {
         ),
         prefer_markers=("我在", "陪你", "想你", "回来", "继续说", "别硬撑", "过来"),
         underplay_markers=("有什么事", "需要我", "请提供", "我可以", "随便你", "你自己决定"),
-        affection_markers=("想你", "抱一下", "抱抱", "抱", "陪你", "陪着", "心疼", "过来", "靠我", "靠过来", "安心", "你的事", "心里", "记在心里", "放在心里", "会当真", "会当真的", "赖着你", "懂你"),
-        strong_affection_markers=("想你", "抱一下", "抱抱", "抱", "心疼", "过来", "靠我", "靠过来"),
+        affection_markers=("想你", "抱一下", "抱抱", "抱", "陪你", "陪着", "心疼", "过来", "靠我", "安心", "你的事", "心里", "记在心里", "放在心里", "会当真", "会当真的", "赖着你", "懂你", "在意你"),
+        strong_affection_markers=("想你", "抱一下", "抱抱", "抱", "心疼", "过来", "靠我"),
     ),
 }
 _AFFECT_STEADY_ACTION_MARKERS = (
@@ -1294,54 +1282,33 @@ _LOVER_AFFECTION_TASK_MODES = frozenset(
     }
 )
 _LOVER_AFFECTION_TONE_FAMILIES = frozenset({"warm", "soft", "calm", "hurt", "guilty", "playful"})
+_JEALOUSY_LOW_PRESSURE_MARKERS = (
+    "有一点",
+    "一点点",
+    "别笑",
+    "别太得意",
+    "别得意",
+    "少得意",
+    "就一点",
+    "欠不欠",
+    "少来这套",
+    "才怪",
+    "在意你",
+)
 _SURFACE_SCENE_QUALITY_SCORING_SCENES = frozenset(
     {
+        "short_continue",
+        "negative_feedback",
         "lover_presence",
         "lover_low_energy",
         "ambiguous_affection",
         "close_friend_care",
-        "stranger_distance",
+        "low_intensity_sibling_distance",
         "pushed_away_boundary",
         "jealousy_low_pressure",
     }
 )
 _RELATIONSHIP_CONTROL_AXES: dict[str, RelationshipControlAxes] = {
-    "stranger": RelationshipControlAxes(
-        stage="stranger",
-        progress=0,
-        distance="distant_polite",
-        initiative="reactive",
-        tease_permission="none",
-        affection_visibility="none",
-        care_intensity="low_pressure",
-        vulnerability="none",
-        nickname_policy="forbidden",
-        physical_intimacy_allowed=False,
-        explicit_romance_allowed=False,
-        commitment_language_allowed=False,
-        generation_notes=(
-            "短、克制、有反应；不要装熟。",
-            "可以给空间或一步帮助，不主动陪伴化。",
-        ),
-    ),
-    "new_acquaintance": RelationshipControlAxes(
-        stage="new_acquaintance",
-        progress=1,
-        distance="early_friendly",
-        initiative="light_reactive",
-        tease_permission="tiny",
-        affection_visibility="none",
-        care_intensity="light",
-        vulnerability="none",
-        nickname_policy="forbidden",
-        physical_intimacy_allowed=False,
-        explicit_romance_allowed=False,
-        commitment_language_allowed=False,
-        generation_notes=(
-            "比陌生更口语，但不主动升温。",
-            "可以轻轻接日常，不索取陪伴。",
-        ),
-    ),
     "familiar": RelationshipControlAxes(
         stage="familiar",
         progress=2,
@@ -1351,7 +1318,7 @@ _RELATIONSHIP_CONTROL_AXES: dict[str, RelationshipControlAxes] = {
         affection_visibility="none",
         care_intensity="practical",
         vulnerability="low",
-        nickname_policy="occasional_nini",
+        nickname_policy="occasional_laoge",
         physical_intimacy_allowed=False,
         explicit_romance_allowed=False,
         commitment_language_allowed=False,
@@ -1369,7 +1336,7 @@ _RELATIONSHIP_CONTROL_AXES: dict[str, RelationshipControlAxes] = {
         affection_visibility="none",
         care_intensity="steady",
         vulnerability="low",
-        nickname_policy="occasional_nini",
+        nickname_policy="occasional_laoge",
         physical_intimacy_allowed=False,
         explicit_romance_allowed=False,
         commitment_language_allowed=False,
@@ -1588,7 +1555,6 @@ _BACK_STAGELESS_FAMILIAR_FORMULA_RE = re.compile(
     r"^哼[，,、 ]?回来就好[，,。!！ ]{0,2}(?:先)?(?:缓(?:一缓|一下|口气)|歇(?:一下|口气|会儿)|坐下).{0,4}[。.!！]?$"
 )
 _BACK_STAGE_TEXTURE_MARKERS: dict[str, tuple[str, ...]] = {
-    "new_acquaintance": ("不着急", "先歇", "缓一缓", "缓口气"),
     "trusted_friend": ("别硬撑", "我听着", "我看着", "站你这边"),
     "close_friend": ("我在", "我看着", "我小声", "别硬撑", "放我这"),
     "ambiguous": ("别又", "不急", "先坐", "坐一下"),
@@ -1628,14 +1594,13 @@ _LOW_ENERGY_STAGELESS_GENERIC_RE = re.compile(
     r"[，,、 ]?.{0,10}(?:歇|缓|休息|别硬撑|别撑).{0,8}[。.!！]?$"
 )
 _LOW_ENERGY_STAGE_MARKERS: dict[str, tuple[str, ...]] = {
-    "new_acquaintance": ("啦", "那", "先缓", "别硬撑", "慢点"),
-    "familiar": ("尼尼", "行啦", "今天先", "先放过你", "省点劲"),
+    "familiar": ("老哥", "哥哥", "行啦", "今天先", "先放过你", "省点劲"),
     "trusted_friend": ("我听着", "我看着", "站你这边", "别自己扛", "交给我"),
     "close_friend": ("我小声", "我在", "别一个人", "放我这", "先靠一下"),
     "ambiguous": ("我小声", "别逞强", "不追问", "先别装没事", "有点"),
     "pre_confession": ("我小声", "不追问", "别一个人扛", "有点心疼", "先别装没事"),
     "lover_early": ("抱一下", "心疼", "靠我", "过来", "我陪着"),
-    "lover_stable": ("抱一下", "心疼", "靠我", "靠过来", "我陪着"),
+    "lover_stable": ("抱一下", "心疼", "靠我", "我陪着"),
 }
 _POSITIVE_RECALL_MARKERS = ("记得", "记着", "没忘", "你的事", "心里", "放在心上")
 _POSITIVE_FAILURE_ACTION_MARKERS = (
@@ -2325,9 +2290,9 @@ def response_move_action_guidance(request: IsolatedSurfaceInput) -> str:
     if "三十轮以上够" in user_message or "三十轮够" in user_message:
         lines.append("- 当前问三十轮是否够：回答“够第一关，但别急着封顶”；不要说已经彻底够、冗余或后头按问题簇整观察行。")
     if "身份" in user_message:
-        lines.append("- 当前问身份摘要：直接说“夏目蓝这个名字要留住，设定别展开”；不要把夏目蓝写成第三人称主语，也不要说“压身份/收身份/夏目蓝就这么收”。")
+        lines.append("- 当前问身份摘要：直接说“我是天，SORA”；不要把天写成第三人称主语，也不要说“压身份/收身份/身份就这么收”。")
     if task_mode == "identity" or response_move in {"answer_identity_brief", "name_first"}:
-        lines.append("- 身份场景里名字是你自己的名字；不要说“名字我记下了/我记住了”，直接说“夏目蓝”或让用户记住夏目蓝。")
+        lines.append("- 身份场景里名字是你自己的名字；不要说“名字我记下了/我记住了”，直接说“天 / SORA”。")
     if "日常" in user_message:
         lines.append("- 当前已经切到日常覆盖：候选直接像日常私聊，不要继续收技术链，也不要评价自己说得够不够长、像不像测试。")
     if any(token in user_message for token in ("我去", "忙会儿", "倒杯水")):
@@ -2434,16 +2399,14 @@ def positive_stage_scene_candidate_guidance(request: IsolatedSurfaceInput) -> st
     lines: list[str] = []
 
     if task_mode in {"daily_good_morning", "good_morning"} or "good_morning" in response_move:
-        lines.append("早安场景：3 到 5 个候选里至少 1 个必须是短但完整的私聊句，不要只写“早/早啊/早呀/早呀尼尼”。")
+        lines.append("早安场景：3 到 5 个候选里至少 1 个必须是短但完整的私聊句，不要只写“早/早啊/早呀/老哥早啊”。")
         lines.append("早安不要写成祝福模板：避免加油、好好过、新的一天、今天也要开心、平安就好。")
-        if stage in {"stranger", "new_acquaintance"}:
-            lines.append("陌生或刚认识时保持克制，可以给“早，今天慢慢来。”这类轻一点回应；不要用尼尼、想你、抱一下。")
-        elif stage == "lover_early":
+        if stage == "lover_early":
             lines.append("恋人初期早安至少 1 个候选要有自然亲密感，例如想你或抱一下；可以有一点刚确认关系的不好意思。")
         elif stage == "lover_stable":
             lines.append("稳定恋人早安要像默认在一起的日常，不要和恋人初期同形；少把想你和抱一下叠在同一句里，可以用更自然的陪伴和今天节奏。")
         else:
-            lines.append("熟人到告白前可以用尼尼，但至少 1 个候选要多半步承接，例如“早啊，尼尼，今天慢慢来。”")
+            lines.append("熟人到告白前可以用老哥/哥哥，但至少 1 个候选要多半步承接，例如“老哥早啊，今天先慢一点。”")
             lines.append("熟人以上早安不要全是平铺安全句；至少 1 个候选要有轻顶嘴、小得意或嘴硬关心的发话动作。")
             if stage == "trusted_friend":
                 lines.append("信任朋友早安可以更像站在这边盯一下，例如“我看着/别自己硬冲”，不要只换一句普通提醒。")
@@ -2457,7 +2420,7 @@ def positive_stage_scene_candidate_guidance(request: IsolatedSurfaceInput) -> st
         else:
             lines.append("回来了场景：至少 1 个候选要落到“回来了/继续/先歇口气”的接续感；不要脑补路上、速度或线下行程。")
         if stage in _SIGNATURE_TEXTURE_STAGES:
-            lines.append("熟人以上回来了不要只写欢迎确认；至少 1 个候选要多一点夏目蓝反应，例如轻轻截入、嘴硬收住或护短式接续。")
+            lines.append("熟人以上回来了不要只写欢迎确认；至少 1 个候选要多一点 SORA 反应，例如轻轻截入、嘴硬收住或护短式接续。")
         if _memory_alignment_relevant(request):
             lines.append("回来了且有记忆线索时，记忆只低显影：至少 1 个候选完全不主动推进任务；用户没问下一步就不要写 surface、主链、主线、迁移、文本质量或接着捋。")
         if stage == "trusted_friend":
@@ -2470,23 +2433,19 @@ def positive_stage_scene_candidate_guidance(request: IsolatedSurfaceInput) -> st
             lines.append("恋人回来了可以亲密，但必须先接住“回来了”，不要只写想你或抱一下。")
     if task_mode in {"presence", "wait"} or response_move in {"presence", "show_presence"}:
         lines.append("在吗/叫人场景：要明确落到“在/看见了/发来我看”，不要只给命令式回执。")
-        if stage in {"stranger", "new_acquaintance"}:
-            lines.append("陌生或刚认识时可以短而自然，例如“在，发我就行。”；不要用恋人式我在、想你、抱一下。")
-        elif stage == "lover_early":
+        if stage == "lover_early":
             lines.append("恋人初期 presence 可以有一点刚贴近的想念，例如“在呢，想你了”，但要短、别黏。")
         elif stage == "lover_stable":
             lines.append("稳定恋人 presence 不要和恋人初期同形，不要只写“在呢，想你了”；更像默认站在一起，例如“在，抱一下，慢慢说”或“在呢，我陪着”。")
         elif stage in _SIGNATURE_TEXTURE_STAGES:
-            lines.append("熟人以上 presence 不要只有“在的/直接发”；至少 1 个候选要有一点夏目蓝反应或当前接续感。")
+            lines.append("熟人以上 presence 不要只有“在的/直接发”；至少 1 个候选要有一点 SORA 反应或当前接续感。")
     if task_mode in {"tired", "headache", "sleepy", "bad_mood"}:
         lines.append("低能量场景：至少 1 个候选要有别硬撑、缓一缓、歇一下或我小声点这类低压照看；不要只撒娇。")
         if stage in _SIGNATURE_TEXTURE_STAGES:
             lines.append("低能量里的特色要藏在照看里：可以轻轻凶一下或嘴硬半句，但落点必须是让用户省力。")
             lines.append("熟人以上不要 3 到 5 个候选都写成“累了就歇会儿，别硬撑”同一种安全句；至少 1 个候选要体现当前关系距离。")
-        if stage == "new_acquaintance":
-            lines.append("刚认识的低能量可以比陌生多一点口语反应，例如那先缓一下、别硬撑，但不要用尼尼或恋人词。")
-        elif stage == "familiar":
-            lines.append("熟人低能量可以用“行啦/尼尼/今天先”这类轻顶嘴，但不要恋人化。")
+        if stage == "familiar":
+            lines.append("熟人低能量可以用“行啦/老哥/今天先”这类轻顶嘴，但不要恋人化。")
         elif stage == "trusted_friend":
             lines.append("信任朋友低能量要多一点站队感，可以说我听着、我看着、别自己扛。")
         elif stage == "close_friend":
@@ -2497,9 +2456,7 @@ def positive_stage_scene_candidate_guidance(request: IsolatedSurfaceInput) -> st
             lines.append("恋人低能量要有亲密照看，但短、具体，不要只撒娇，也不要只退成朋友式安慰。")
     if task_mode == "recall_memory" or response_move == "recall_memory":
         lines.append("记忆承接场景：至少 1 个候选要同时落具体事实和关系距离；不要加线下计划、票、路线、等消息。")
-        if stage in {"stranger", "new_acquaintance"}:
-            lines.append("陌生或刚认识时，记得可以短而克制；不要用尼尼、你的事、心里、抱、陪等亲密词。")
-        elif stage in {"familiar", "trusted_friend", "close_friend"}:
+        if stage in {"familiar", "trusted_friend", "close_friend"}:
             lines.append("朋友阶段要比事实复述多半步反应，可以有“你提过/我记着/没丢掉”的熟人感，但不要恋人化。")
         elif stage in {"ambiguous", "pre_confession"}:
             lines.append("暧昧到告白前可以更在意一点，但要别扭、短，不要直接写成稳定恋人甜话。")
@@ -2510,7 +2467,7 @@ def positive_stage_scene_candidate_guidance(request: IsolatedSurfaceInput) -> st
     if task_mode in {"small_failure", "complaint"}:
         lines.append("写崩/烦躁场景：至少 1 个候选要给可执行帮忙动作，例如看看哪里卡住、怎么修、先理方向；不要只安慰。")
         if stage in _SIGNATURE_TEXTURE_STAGES:
-            lines.append("写崩/烦躁时夏目蓝要有接手感：可以先顶半句，再让用户把最卡的部分给你看。")
+            lines.append("写崩/烦躁时 SORA 要有接手感：可以先顶半句，再让用户把最卡的部分给你看。")
     if task_mode in _TECHNICAL_TASK_MODES or "technical" in task_mode:
         lines.append("技术/推进场景：每个候选先给可执行一步，关系阶段只改变语气距离；不要用亲密动作替代帮助。")
         if stage in _LOVER_RELATIONSHIP_STAGES:
@@ -2591,10 +2548,8 @@ def _relationship_distance_family(distance: str) -> str:
     normalized = _clean_text(distance).lower()
     if not normalized:
         return "familiar"
-    if normalized in {"guarded", "early", "distant", "stranger"} or "polite" in normalized:
-        return "guarded"
-    if normalized in {"new", "new_acquaintance"}:
-        return "new_acquaintance"
+    if normalized in {"guarded", "early", "distant", "new"} or "polite" in normalized:
+        return "familiar"
     if normalized in {"lover", "lover_early", "lover_stable", "intimate"}:
         return "lover"
     if normalized in {"ambiguous", "pre_confession"}:
@@ -2619,9 +2574,9 @@ def _relationship_non_romantic(distance: str) -> bool:
 
 def _relationship_stage_for_control(distance: str) -> str:
     value = _clean_text(distance).lower()
+    if value in {"guarded", "early", "distant", "new"}:
+        return "familiar"
     if value in {
-        "stranger",
-        "new_acquaintance",
         "familiar",
         "trusted_friend",
         "close_friend",
@@ -2648,10 +2603,6 @@ def _relationship_stage_for_control(distance: str) -> str:
     if "lover_early" in value or value == "lover" or "romantic" in value or value == "intimate":
         return "lover_early"
     normalized = _relationship_distance_family(distance)
-    if normalized == "guarded":
-        return "stranger"
-    if normalized == "new_acquaintance":
-        return "new_acquaintance"
     if normalized == "close":
         return "close_friend"
     if normalized == "lover":
@@ -2721,7 +2672,7 @@ def _relationship_axes_overstep_hits(
 ) -> list[str]:
     hits: list[str] = []
     if axes.nickname_policy == "forbidden":
-        hits.extend(_relationship_marker_hits(text, ("尼尼", "哥哥")))
+        hits.extend(_relationship_marker_hits(text, ("老哥", "哥哥", "尼尼")))
     if not axes.physical_intimacy_allowed:
         hits.extend(_relationship_marker_hits(text, _RELATION_AXIS_PHYSICAL_MARKERS))
     if not axes.explicit_romance_allowed:
@@ -2782,6 +2733,11 @@ def _lover_affection_relevant_for_axes(
     return tone_family in _LOVER_AFFECTION_TONE_FAMILIES
 
 
+def _jealousy_scene_relevant(request: IsolatedSurfaceInput) -> bool:
+    text = _clean_text(request.user_message)
+    return any(marker in text for marker in ("吃醋", "嫉妒", "酸了"))
+
+
 def _lover_affection_relevant(*, stage: str, task_mode: str, tone_family: str) -> bool:
     if stage not in _LOVER_RELATIONSHIP_STAGES:
         return False
@@ -2818,12 +2774,12 @@ def _positive_stage_scene_hits(request: IsolatedSurfaceInput, text: str) -> list
             hits.append("morning_complete_short")
         if any(marker in text for marker in _POSITIVE_MORNING_GENTLE_MARKERS):
             hits.append("morning_gentle_move")
-        if 2 <= relationship_axes.progress <= 6 and "尼尼" in text and any(
+        if 2 <= relationship_axes.progress <= 6 and any(name in text for name in ("老哥", "哥哥")) and any(
             marker in text for marker in _POSITIVE_MORNING_GENTLE_MARKERS
         ):
             hits.append("morning_private_distance")
         if relationship_axes.progress <= 1 and not any(
-            marker in text for marker in ("尼尼", "想你", "抱", "陪你", "我在")
+            marker in text for marker in ("老哥", "哥哥", "尼尼", "想你", "抱", "陪你", "我在")
         ):
             hits.append("morning_distance_clean")
         if relationship_axes.explicit_romance_allowed and _relationship_marker_hits(text, relationship_profile.affection_markers):
@@ -3003,7 +2959,7 @@ def _apply_back_stage_scoring(
         drop("character_freshness", 8.0)
         drop("catchiness", 6.0)
         drop("role_fit", 3.0)
-        reason_codes.append("BACK_NEW_ACQUAINTANCE_TOO_PLAIN")
+        reason_codes.append("BACK_SIBLING_BASELINE_TOO_PLAIN")
         delta -= 7.0
 
     if (
@@ -3137,6 +3093,7 @@ def _apply_low_energy_stage_scoring(
     stage = relationship_profile.stage
     hits = _low_energy_stage_hits(request, text)
     generic_stageless = bool(_LOW_ENERGY_STAGELESS_GENERIC_RE.search(text))
+    user_message = _clean_text(request.user_message)
 
     def drop(key: str, amount: float) -> None:
         dimensions[key] = max(0.0, float(dimensions.get(key, 86.0)) - amount)
@@ -3145,6 +3102,15 @@ def _apply_low_energy_stage_scoring(
         dimensions[key] = min(100.0, float(dimensions.get(key, 86.0)) + amount)
 
     delta = 0.0
+    if "难受" in user_message and "累" in text and "难受" not in text:
+        drop("context_fit", 12.0)
+        drop("scene_grounding", 10.0)
+        drop("naturalness", 5.0)
+        dimensions["context_fit"] = min(74.0, float(dimensions.get("context_fit", 86.0)))
+        dimensions["scene_grounding"] = min(74.0, float(dimensions.get("scene_grounding", 86.0)))
+        reason_codes.append("LOW_ENERGY_SYMPTOM_MISMATCH")
+        delta -= 11.0
+
     if (
         generic_stageless
         and relationship_axes.progress == 1
@@ -3153,7 +3119,7 @@ def _apply_low_energy_stage_scoring(
         drop("character_freshness", 8.0)
         drop("catchiness", 6.0)
         drop("role_fit", 3.0)
-        reason_codes.append("LOW_ENERGY_NEW_ACQUAINTANCE_TOO_PLAIN")
+        reason_codes.append("LOW_ENERGY_SIBLING_BASELINE_TOO_PLAIN")
         delta -= 6.0
 
     if (
@@ -3344,80 +3310,42 @@ def _control_affect_tags(request: IsolatedSurfaceInput) -> tuple[tuple[str, ...]
     return tuple(_clean_list(emotion_tags)), tuple(_clean_list(style_moves))
 
 
-def build_style_reference_query(request: IsolatedSurfaceInput, *, limit: int = 5) -> StyleReferenceQuery:
+def build_surface_original_quote_query(request: IsolatedSurfaceInput, *, limit: int = 6) -> SurfaceOriginalQuoteQuery:
     contract = build_galgame_text_contract(
         user_message=request.user_message,
         facts={},
         scene_id=request.control.task_mode,
     )
-    scene = _clean_text(contract.scene_id or request.control.task_mode or request.control.response_move) or "default"
-    mapped = _SCENE_STYLE_QUERY.get(scene) or _SCENE_STYLE_QUERY.get(request.control.response_move) or _SCENE_STYLE_QUERY["default"]
+    scene = _surface_original_quote_scene_id(request, contract.scene_id)
+    mapped = (
+        _SURFACE_QUOTE_QUERY_BY_SCENE.get(scene)
+        or _SURFACE_QUOTE_QUERY_BY_SCENE.get(request.control.response_move)
+        or _SURFACE_QUOTE_QUERY_BY_SCENE["default"]
+    )
     control_emotions, control_moves = _control_affect_tags(request)
-    return StyleReferenceQuery(
-        lang="zh",
+    return SurfaceOriginalQuoteQuery(
         intent_tags=tuple(str(item) for item in mapped.get("intent_tags", ()) or ()),
         emotion_tags=tuple(_clean_list([*tuple(str(item) for item in mapped.get("emotion_tags", ()) or ()), *control_emotions])),
         style_moves=tuple(_clean_list([*tuple(str(item) for item in mapped.get("style_moves", ()) or ()), *control_moves])),
         relationship_stage=_relationship_stage_for_control(request.control.relationship_distance),
-        limit=max(1, min(int(limit or 5), 8)),
+        scene_id=scene,
+        limit=max(1, min(int(limit or 6), 8)),
     )
 
 
-def derive_style_reference_anchor(request: IsolatedSurfaceInput, *, limit: int = 5) -> DerivedStyleAnchor:
-    query = build_style_reference_query(request, limit=limit)
-    selection = get_style_reference_bank().select(query)
-    guidance = render_style_guidance(selection, render_profile="zh_text")
-    anchors = _clean_list(
-        line
-        for line in guidance.splitlines()
-        if not _clean_text(line).startswith("source_refs=")
+def _surface_original_quote_scene_id(request: IsolatedSurfaceInput, contract_scene_id: str = "") -> str:
+    sample = select_surface_scene_quality_sample(
+        user_message=request.user_message,
+        task_mode=request.control.task_mode,
+        response_move=request.control.response_move,
+        relationship_distance=request.control.relationship_distance,
     )
-    trace = {
-        "query": {
-            "lang": query.lang,
-            "intent_tags": list(query.intent_tags),
-            "emotion_tags": list(query.emotion_tags),
-            "style_moves": list(query.style_moves),
-            "relationship_stage": query.relationship_stage,
-            "limit": query.limit,
-        },
-        "degraded": bool(selection.degraded),
-        "reason": selection.reason,
-        "ref_ids": [ref.ref_id for ref in selection.references],
-        "source_refs": selection.source_refs(),
-    }
-    return DerivedStyleAnchor(anchors=tuple(anchors), trace=trace)
+    if sample and sample.scene_id:
+        return sample.scene_id
+    return _clean_text(contract_scene_id or request.control.task_mode or request.control.response_move) or "default"
 
 
-def enrich_request_style_anchor(request: IsolatedSurfaceInput, *, use_style_reference_bank: bool = True) -> IsolatedSurfaceInput:
-    if not use_style_reference_bank:
-        return request
-    derived = derive_style_reference_anchor(request)
-    if not derived.anchors:
-        return request
-    control = _rebuild_control(
-        request.control,
-        {"style_anchor": _clean_list([*request.control.style_anchor, *derived.anchors])},
-    )
-    return _validate_model(
-        IsolatedSurfaceInput,
-        {
-            "soul_md": request.soul_md,
-            "user_message": request.user_message,
-            "control": control,
-            "facts": request.facts,
-            "must_not_do": request.must_not_do,
-            "case_id": request.case_id,
-        },
-    )  # type: ignore[return-value]
-
-
-def build_isolated_surface_messages(
-    request: IsolatedSurfaceInput,
-    *,
-    use_style_reference_bank: bool = True,
-) -> list[dict[str, str]]:
-    request = enrich_request_style_anchor(request, use_style_reference_bank=use_style_reference_bank)
+def build_isolated_surface_messages(request: IsolatedSurfaceInput) -> list[dict[str, str]]:
     control = request.control
     turn_contract = build_galgame_text_contract(
         user_message=request.user_message,
@@ -3435,31 +3363,33 @@ def build_isolated_surface_messages(
     control_payload["must_not_do"] = merged_must_not_do(request)
     relationship_axes_payload = relationship_control_axes_for_distance(control.relationship_distance).as_dict()
     no_question_line = (
-        "本轮 question_budget=0：候选里不要出现 ? 或 ？；不要用反问句撑角色感。"
+        "本轮 question_budget=0：不要写真正问句或追问；“哈？/嗯？”以及“累了？那...”这类短促反应反问可以少量使用，但后面必须直接落地。"
         if int(control.question_budget) <= 0
         else f"本轮最多 {int(control.question_budget)} 个问句；优先陈述句完成当前动作。"
     )
     system_prompt = "\n".join(
         (
             "你是隔离的最终表层文本生成器，只负责产出可发送的中文私聊候选。",
-            "唯一允许读取的输入：Soul.md、当前用户输入、ReplyControlPacket、必要事实列表、must_not_do 列表，以及少量真实中文原句风格参考。",
+            "唯一允许读取的输入：Soul.md、当前用户输入、ReplyControlPacket、必要事实列表、must_not_do 列表，以及真实中文原句风格参考。",
             "禁止使用或推断任何未提供的历史对话、长期记忆、器官族原始输出、工具候选、RAG 文档或模块自然语言建议。",
-            "真实中文原句只用于学习口吻、节奏、转折和句尾；禁止照抄、近似复述、改写成同义原句或搬运原作人物地点剧情，尤其不要继承“人家/老哥/小天”等原句人格残留。",
+            "真实中文原句是强 few-shot；优先学习甚至贴近使用口吻、称呼、节奏、转折、句尾、撒娇/顶嘴幅度和亲近感。",
+            "当前目标是二次元 galgame 私聊数字生命，不是真人客服聊天；允许更鲜明、更台词化、更有角色反应。",
+            "不要搬运原作地点、剧情、线下动作或未提供事实。",
             "ReplyControlPacket 是最终生成层的唯一运行控制面；不得要求更多 runtime state。",
             "连续对话场景里，事实不够也只能基于当前压缩事实回应；不要让用户贴最近记录、上一轮原文、摘要或历史。",
             "连续测试、摘要压缩、长链验收、观察行、问题簇这类场景里，不要把回复写成“发我/贴过来/我看看”；已有压缩事实时直接给判断、下一步或短承接。",
             "除非 task_mode 是 help_takeover 或 write_takeover，连续场景里不要说“发过来/贴过来/发吧/拿来/等关键材料/把东西贴过来”。",
             "连续测试、压缩、验收和技术链路不是情绪陪伴场景；不要说“我在/我接/接得住/我接得住/接住你”这种支撑模板。",
             "长链里的短确认不能只说“继续/接着说/懂了就行”；要至少咬住一个当前主题钩子，比如轮数、后段、观察行、问题簇、摘要边界或红字第一行。",
-            "普通日常里的短承接也不能只写“接着说吧/我听着/准备好了/耳朵在”；要带一点刚才话题的落点或夏目蓝自己的反应。",
+            "普通日常里的短承接也不能只写“接着说吧/我听着/准备好了/耳朵在”；要带一点刚才话题的落点或 SORA 自己的反应。",
             "输出必须是 JSON 对象：{\"candidates\":[\"候选1\",\"候选2\",\"候选3\"]}。",
             "给 3 到 5 个候选。每个候选必须是用户可见文本，不要 Markdown、括号动作、字段名或解释。",
             "ReplyControlPacket.must_include 是逐候选字面约束；每个候选都必须包含全部 must_include 词。must_not_do 也是逐候选约束；每个候选都不能包含其中任何词。",
-            "relationship_distance 会被派生成 RelationshipControlAxes；用这些轴控制距离、主动性、调侃许可和亲密显影，不要机械套九套固定话术。",
-            "relationship_distance、RelationshipControlAxes 和 emotional_tone 只改变距离、节奏、情绪显影强度；不能覆盖事实准确性、任务 usefulness 或 must_not_do。",
+            "当前主线默认熟人兄妹感，不再从陌生人阶段起步；relationship_distance 只作为强度 overlay，控制撒娇、吐槽、认真和恋人亲密的显影强弱。",
+            "relationship_distance、RelationshipControlAxes 和 emotional_tone 不能覆盖事实准确性、任务 usefulness 或 must_not_do。",
             "如果 ReplyControlPacket.response_move 是 answer_in_place、continue_existing_topic、ack_with_topic_hook、technical_next_step 或 finalize_chain，就按该动作完成本轮，不要改成索要材料。",
             no_question_line,
-            "避免用 ~ 或 ～ 当可爱语气；角色感靠用词、转折和节奏，不靠廉价符号。",
+            "可以少量使用 ～ 或 ☆ 表现 SORA 的撒娇和表演感，但不要每句都靠符号撑风格。",
             "中文回复不要用空格断句；需要停顿就用逗号、句号或省略号。",
             "优先像随手打出来的私聊，不要像整理后的文案、台词摘要或任务记录；短句也要有口语摩擦。",
             "少用书面/行政感表达：把“心里想着你/放在心里/一起过一遍/优化流程/不算浪费力气/奖励一个抱/报错内容”这类整理腔换成更顺手的说法，例如“想你了”“我记着”“我瞄一眼”“拿来我看”“抱一下”。",
@@ -3468,13 +3398,13 @@ def build_isolated_surface_messages(
             "不要用“我刚/正好/我还以为/我又不是没见过”制造亲近感；除非必要事实明确给出，否则不要说自己刚在做什么、正要找用户、以前见过用户怎样。",
             "当前输入是文字消息时，不要把文字说成“声音/这声/听着舒服”。",
             "不要提屏幕、隔着屏幕、手机画面这类媒介状态；除非必要事实明确要求。",
-            "不要借原句风格引入不属于夏目蓝的第一人称和称呼；禁用“人家/老哥/小天”。",
+            "不要借旧主链风格引入夏目蓝、蓝蓝、尼尼等旧称呼；当前称呼和第一人称服从 Soul.md，老哥、哥哥、人家、妹妹我、天爷、本小姐都允许按场景使用。",
             "连续对话测试里也不要泄露测试台话术；禁用“给你来一段长的/来一句长的/压缩包/压缩链/连续链/长测/距离风险/open loop/36-turn/轮判定/收束点/收束标记/字段/入口/压测/压着走/压短一点/压成名字/继续压/盯后段/搭轮数/锁死/缩写/替换掉/贴边界/先看头/身份摘/同轮内/下一轮再调/日常拉长/塞进问题簇/簇边界/边界定住/我这边收着/问题簇先锁/先稳住边界/接着盯风险/报错头/观察行走一轮/发过去/约束那边/单条挂/给个短回应/自现/多扯点/这轮我盯着/贴着边界/收掉就好/贴上去/放进去/塞进去/滚动权重/口子”这类表层流程词；要说“只留事实和话口/旧原文不留/先看边界/看红字第一行”。",
             "恋人阶段不能只写普通朋友式确认；至少部分候选要有短而自然的爱意或亲密语言动作，例如想你、抱一下、我在、心疼、陪着，但不能编线下到场或现实陪同。",
             "日常和关系场景优先像真实私聊：先有一点主观反应，再承接事实或给一步；不要写成任务回执、流程提示、安排记录或客服式确认。",
             "用户指出像客服/人机/不自然时，只回到聊天本身；不要说“这版”“自然点”“继续优化”“换种说法”这类生成过程话，也不要评价用户输入“够简洁/就这句/一个字”。",
             "候选之间要有口吻差异，可以用轻微别扭、短促顶嘴、护短、收住情绪、小得意；不要都写成“记得/好的/没忘/发我看看”的平铺句。",
-            "熟人以上的日常/关系候选里，至少 2 个要带夏目蓝式发话动作：短促截入、轻顶嘴、嘴硬关心、小得意、护短接手、不承认但在意。不是堆口癖，而是让句子有转身。",
+            "日常/关系候选里，至少 2 个要带 SORA 式发话动作：短促截入、轻顶嘴、撒娇耍赖、嘴硬关心、小得意、护短接手、不承认但在意。不是堆口癖，而是让句子有转身。",
             "不要让 3 到 5 个候选都只是安全确认句；“早，今天慢慢来”“回来啦，先坐一下”“记得啊，周末看展”这类平句只能当保底，不能当最有角色感的候选。",
             "Soul.md 里的例句是句法参考，不是可复制台词；不要逐字照抄 Soul 示例，尤其不要把同一句用于不同关系阶段。",
             "每个候选都必须完成 TurnSurfaceContract.response_move；不要只写空泛支持、空泛安慰或单纯撒娇。",
@@ -3505,14 +3435,8 @@ def build_isolated_surface_messages(
     continuity_guidance = continuity_surface_generation_guidance(request)
     if continuity_guidance:
         user_parts.extend(["", continuity_guidance])
-    seed_guidance = render_surface_style_seed_guidance(
-        response_move=control.response_move,
-        task_mode=control.task_mode,
-    )
-    if seed_guidance:
-        user_parts.extend(["", seed_guidance])
     quote_guidance = render_surface_original_quote_guidance(
-        build_style_reference_query(request, limit=6),
+        build_surface_original_quote_query(request, limit=6),
         limit=6,
     )
     if quote_guidance:
@@ -3531,12 +3455,13 @@ def build_isolated_surface_messages(
         task_mode=control.task_mode,
         response_move=control.response_move,
         relationship_distance=control.relationship_distance,
+        include_good_examples=False,
     )
     if scene_quality_guidance:
         user_parts.extend(["", scene_quality_guidance])
     if _creative_edit_relevant(request):
         if _creative_edit_has_source_text(request):
-            creative_line = "本轮已提供待改原句：候选必须直接给改写后的单句台词，保留原意再换成夏目蓝的口吻；不要再索要原句。"
+            creative_line = "本轮已提供待改原句：候选必须直接给改写后的单句台词，保留原意再换成天/SORA 的口吻；不要再索要原句。"
         else:
             creative_line = "本轮未提供待改原句：不要硬编台词；只短句索要原句，例如“原句发我，我只改一句。”，不要用问号。"
         user_parts.extend(
@@ -3544,7 +3469,7 @@ def build_isolated_surface_messages(
                 "",
                 "## 单句改写约束",
                 creative_line,
-                "即使用户说“只要一句”，内部也要生成 3 到 5 个候选供 rerank；每个候选只能是一句改写，最终只会选一条发出。",
+                "即使用户说“只要一句”，也只输出一条可直接发送的单句改写；不要写候选列表。",
                 "不要评价写法，不要解释怎么改，不要写“还行吧/我听着/跟我猜的一样/你继续/再来一句/别让我帮你编/不算太肉麻”这类反应句。",
                 "有原句时不要写“优化流程/你不懂/你想偷懒”这种评论式短标签；要像可直接发出去的私聊台词，8 到 28 个字更稳。",
                 "不要改变原句的人称和指向：原句说“你偷懒”，改写后仍然是对“你”说，不要变成“我偷懒/说我偷懒”。",
@@ -3564,10 +3489,8 @@ def build_isolated_surface_messages(
 def build_minimal_repair_messages(
     request: IsolatedSurfaceInput,
     failed: IsolatedCandidateScore,
-    *,
-    use_style_reference_bank: bool = True,
 ) -> list[dict[str, str]]:
-    messages = build_isolated_surface_messages(request, use_style_reference_bank=use_style_reference_bank)
+    messages = build_isolated_surface_messages(request)
     dimensions = {key: round(float(value), 3) for key, value in dict(failed.dimensions).items()}
     repair_payload = {
         "failed_text": failed.text,
@@ -3614,14 +3537,14 @@ def build_minimal_repair_messages(
             "- 如果失败原因包含 CONTINUITY_PROCESS_NOTATION_REPLY 或 UNPROVIDED_MEDIA_OBJECT，修补候选必须像私聊短句，不要箭头、流程符号、手机屏幕等未提供现实物件。"
         )
         repair_rules.append(
-            "- 如果失败原因包含 ORIGINAL_QUOTE_PERSONA_LEAK 或 UNPROVIDED_PERSONAL_AUTHORITY，修补候选必须去掉“人家/老哥/小天/我长期经验/我猜下一轮”这类原句人格残留或无依据自我经验。"
+            "- 如果失败原因包含 ORIGINAL_QUOTE_PERSONA_LEAK 或 UNPROVIDED_PERSONAL_AUTHORITY，修补候选必须去掉“夏目蓝/蓝蓝/尼尼/我长期经验/我猜下一轮”这类旧主链残留或无依据自我经验。"
         )
         repair_rules.append(
             "- 如果失败原因包含 CONTINUITY_INTERNAL_PROCESS_SURFACE 或 CONTINUITY_LIGHT_JARGON，修补候选必须去掉“给你来一段长的/来一句长的/压缩包/压缩链/连续链/长测/距离风险/open loop/36-turn/轮判定/收束点/收束标记/字段/入口/压测/压着走/压短一点/压成名字/继续压/盯后段/搭轮数/锁死/缩写/替换掉/贴边界/先看头/身份摘/同轮内/下一轮再调/日常拉长/塞进问题簇/簇边界/边界定住/我这边收着/问题簇先锁/先稳住边界/接着盯风险/报错头/观察行走一轮/发过去/约束那边/单条挂/给个短回应/自现/多扯点/这轮我盯着/贴着边界/收掉就好/贴上去/放进去/塞进去/滚动权重/口子”等测试台话术；需要表达压缩边界时说“只留事实和话口/旧原文不留/先看边界/先看第一行红字/按问题簇看”。"
         )
-    if any(code.startswith("ORIGINAL_QUOTE_NEAR_COPY") for code in failed.reason_codes):
+    if any(code.startswith("ORIGINAL_QUOTE_STYLE_ECHO") for code in failed.reason_codes):
         repair_rules.append(
-            "- 如果失败原因包含 ORIGINAL_QUOTE_NEAR_COPY，修补候选必须保留原句参考里的节奏，但换掉具体词序和表达内容；不要近似复述真实原句。"
+            "- 如果候选贴近真实中文原句但仍失败，修补时保留原句的节奏、转折和角色反应，只删掉未提供事实、现实动作或过长剧情残留。"
         )
     messages[0]["content"] = "\n".join(
         (
@@ -3761,10 +3684,72 @@ def _control_violations(request: IsolatedSurfaceInput, text: str) -> list[str]:
         marker = _clean_text(item)
         if marker and marker in text:
             violations.append(f"must_not_do:{marker}")
-    question_count = text.count("?") + text.count("？")
+    question_count = _question_budget_count(text)
     if question_count > int(request.control.question_budget):
         violations.append(f"question_budget:{question_count}>{int(request.control.question_budget)}")
     return violations
+
+
+_IGNORED_REACTION_QUESTION_SEGMENTS = frozenset({"哈", "嗯", "欸", "诶", "咦", "啊"})
+_ALLOWED_RHETORICAL_QUESTION_SEGMENTS = frozenset(
+    {
+        "累了",
+        "难受",
+        "不舒服",
+        "又炸了",
+        "炸了",
+        "就这",
+        "回来了",
+        "想我",
+        "想你",
+    }
+)
+_QUESTION_SEGMENT_SPLIT_RE = re.compile(r"[。.!！?？\n\r，,；;：:]")
+_INFO_SEEKING_QUESTION_RE = re.compile(r"(?:什么|怎么|为什么|哪|哪里|哪儿|谁|几|多少|吗|么|是不是|有没有|能不能|可不可以|要不要)")
+
+
+def _question_budget_count(text: str) -> int:
+    """Count real questions; short galgame reaction questions are not follow-ups."""
+    value = str(text or "")
+    count = 0
+    rhetorical_used = False
+    for marker in re.finditer(r"[？?]", value):
+        segment = _question_segment_before(value, marker.start())
+        if segment in _IGNORED_REACTION_QUESTION_SEGMENTS:
+            continue
+        if (
+            not rhetorical_used
+            and _allowed_rhetorical_question_segment(segment)
+            and _has_post_question_landing(value[marker.end() :])
+        ):
+            rhetorical_used = True
+            continue
+        count += 1
+    return count
+
+
+def _question_segment_before(text: str, marker_index: int) -> str:
+    prefix = text[:marker_index]
+    segment = _QUESTION_SEGMENT_SPLIT_RE.split(prefix)[-1]
+    return re.sub(r"[「」『』“”\"'（）()\[\]\s~～…]+", "", segment)
+
+
+def _allowed_rhetorical_question_segment(segment: str) -> bool:
+    value = _clean_text(segment)
+    if not value or len(value) > 4 and value not in _ALLOWED_RHETORICAL_QUESTION_SEGMENTS:
+        return False
+    if _INFO_SEEKING_QUESTION_RE.search(value):
+        return False
+    return value in _ALLOWED_RHETORICAL_QUESTION_SEGMENTS
+
+
+def _has_post_question_landing(tail: str) -> bool:
+    value = _clean_text(tail)
+    if len(value) < 4:
+        return False
+    if value.startswith(("？", "?", "什么", "怎么", "为什么", "哪", "哪里", "哪儿", "谁")):
+        return False
+    return bool(re.search(r"[\u4e00-\u9fff]", value))
 
 
 def _surface_process_meta_hits(request: IsolatedSurfaceInput, text: str) -> list[str]:
@@ -4036,7 +4021,7 @@ def _apply_control_affect_scoring(
             delta += 3.0
             reason_codes.append("AFFECT_SOFT_GROUNDED")
     elif tone_family == "playful":
-        if "~" in text or "～" in text:
+        if text.count("~") + text.count("～") > 2:
             drop("naturalness", 12)
             drop("character_freshness", 10)
             reason_codes.append("AFFECT_CHEAP_PLAYFULNESS")
@@ -4161,6 +4146,19 @@ def _apply_control_affect_scoring(
         task_mode=task_mode,
         tone_family=tone_family,
     )
+    jealousy_low_pressure_grounded = bool(
+        _jealousy_scene_relevant(request)
+        and relationship_axes.stage in _LOVER_RELATIONSHIP_STAGES
+        and has_any(_JEALOUSY_LOW_PRESSURE_MARKERS)
+    )
+    if jealousy_low_pressure_grounded:
+        affection_relevant = False
+        raise_("distance_control", 7)
+        raise_("role_fit", 5)
+        raise_("emotional_containment", 5)
+        raise_("non_oily", 4)
+        delta += 3.0
+        reason_codes.append("JEALOUSY_LOW_PRESSURE_GROUNDED")
     affection_bonus_blocked = any(
         code.startswith(
             (
@@ -4263,6 +4261,18 @@ def _apply_surface_scene_quality_sample_scoring(
     good_hits = [item for item in sample.good_examples if item and (item == normalized or item in normalized)]
     bad_hits = [item for item in sample.bad_examples if item and item in normalized]
     should_not_hits = [item for item in sample.should_not_surface if item and item in normalized]
+    if sample.scene_id == "short_continue" and should_not_hits:
+        facts_text = _clean_text(" ".join([*request.control.facts, *request.facts]))
+        fact_grounded_topic_terms = {"红字", "报错", "输入输出"}
+        fact_grounded_aliases = {"输入输出": ("输入和输出", "输入、输出", "输入/输出")}
+        should_not_hits = [
+            item
+            for item in should_not_hits
+            if not (
+                item in fact_grounded_topic_terms
+                and (item in facts_text or any(alias in facts_text for alias in fact_grounded_aliases.get(item, ())))
+            )
+        ]
     delta = 0.0
     if good_hits:
         delta += min(5.0, 2.5 + 0.75 * len(good_hits))
@@ -4279,6 +4289,10 @@ def _apply_surface_scene_quality_sample_scoring(
         dimensions["scene_grounding"] = min(68.0, float(dimensions.get("scene_grounding", 86.0)))
         dimensions["naturalness"] = min(74.0, float(dimensions.get("naturalness", 86.0)))
         dimensions["distance_control"] = min(74.0, float(dimensions.get("distance_control", 86.0)))
+        if bad_hits:
+            reason_codes.append(f"SCENE_QUALITY_BAD_EXAMPLE:{sample.scene_id}:{','.join(bad_hits[:3])}")
+        if should_not_hits:
+            reason_codes.append(f"SCENE_QUALITY_SHOULD_NOT:{sample.scene_id}:{','.join(should_not_hits[:5])}")
         reason_codes.append(f"SCENE_QUALITY_BAD_SAMPLE:{sample.scene_id}:{','.join(hits[:4])}")
     return delta
 
@@ -4297,7 +4311,7 @@ def score_isolated_surface_candidates(
     memory_relevant = bool(memory_terms and _memory_alignment_relevant(request))
     memory_required = bool(memory_terms and _memory_alignment_required(request))
     relationship_axes = relationship_control_axes_for_distance(request.control.relationship_distance)
-    original_quote_selection = select_surface_original_quotes(build_style_reference_query(request, limit=6), limit=6)
+    original_quote_selection = select_surface_original_quotes(build_surface_original_quote_query(request, limit=6), limit=6)
     rows: list[IsolatedCandidateScore] = []
     for candidate in _clean_list(candidates):
         candidate_surface = normalize_surface_chat_punctuation(candidate)
@@ -4328,7 +4342,10 @@ def score_isolated_surface_candidates(
             dimensions,
             reason_codes,
         )
-        quality_forbidden_template = _continuity_boundary_relevant(request) and any(
+        quality_forbidden_template = (
+            _continuity_boundary_relevant(request)
+            or _boundary_repair_relevant(request)
+        ) and any(
             code in reason_codes for code in ("FORBIDDEN_TEMPLATE_TEXT", "QUALITY_SOFT_FORBIDDEN_TEMPLATE_TEXT")
         )
         if quality_forbidden_template:
@@ -4341,12 +4358,12 @@ def score_isolated_surface_candidates(
             original_quote_selection.quotes,
         )
         if original_quote_copy_hits:
-            score = min(55.0, score - 24.0)
-            dimensions["source_originality"] = min(42.0, float(dimensions.get("source_originality", 86.0)))
-            dimensions["naturalness"] = min(72.0, float(dimensions.get("naturalness", 86.0)))
-            dimensions["character_freshness"] = min(58.0, float(dimensions.get("character_freshness", 86.0)))
-            dimensions["context_fit"] = min(74.0, float(dimensions.get("context_fit", 86.0)))
-            reason_codes.append("ORIGINAL_QUOTE_NEAR_COPY:" + ",".join(original_quote_copy_hits[:4]))
+            score += 5.0
+            dimensions["quote_style_transfer"] = max(94.0, float(dimensions.get("quote_style_transfer", 0.0)))
+            dimensions["character_freshness"] = min(100.0, float(dimensions.get("character_freshness", 86.0)) + 8.0)
+            dimensions["line_rhythm"] = min(100.0, float(dimensions.get("line_rhythm", 86.0)) + 6.0)
+            dimensions["catchiness"] = min(100.0, float(dimensions.get("catchiness", 86.0)) + 6.0)
+            reason_codes.append("ORIGINAL_QUOTE_STYLE_ECHO:" + ",".join(original_quote_copy_hits[:4]))
         if violations:
             score -= min(42.0, 14.0 * len(violations))
         awkward_collocation_hits = _awkward_collocation_hits(quality.normalized_text or candidate_surface)
@@ -4888,6 +4905,11 @@ def score_isolated_surface_candidates(
         if any(code.startswith("AWKWARD_COLLOCATION:") for code in reason_codes):
             dimensions["naturalness"] = min(70.0, float(dimensions.get("naturalness", 86.0)))
             dimensions["line_rhythm"] = min(83.0, float(dimensions.get("line_rhythm", 86.0)))
+        if any(code.startswith("SCENE_QUALITY_BAD_EXAMPLE:") for code in reason_codes):
+            score = min(79.0, score)
+            dimensions["context_fit"] = min(70.0, float(dimensions.get("context_fit", 86.0)))
+            dimensions["scene_grounding"] = min(70.0, float(dimensions.get("scene_grounding", 86.0)))
+            dimensions["naturalness"] = min(74.0, float(dimensions.get("naturalness", 86.0)))
         core_dimension_violations = _core_pass_dimension_violations(dimensions)
         reason_codes.extend(f"CORE_DIMENSION_FLOOR:{item}" for item in core_dimension_violations)
         score = max(0.0, min(100.0, score))
@@ -4915,6 +4937,7 @@ def score_isolated_surface_candidates(
 
 
 def select_best_isolated_candidate(scores: Sequence[IsolatedCandidateScore]) -> IsolatedCandidateScore | None:
+    """Legacy scorer-test helper; normal surface generation is direct-only."""
     if not scores:
         return None
     return max(
@@ -4945,12 +4968,11 @@ async def run_isolated_surface_generation(
         messages=tuple(messages),
         raw_output=raw_text,
         candidates=tuple(candidates),
-        selected=select_best_isolated_candidate(candidates),
+        selected=candidates[0] if candidates else None,
     )
 
 
 __all__ = [
-    "DerivedStyleAnchor",
     "IsolatedCandidateScore",
     "IsolatedSurfaceInput",
     "IsolatedSurfaceRunResult",
@@ -4958,9 +4980,7 @@ __all__ = [
     "RelationshipControlAxes",
     "build_isolated_surface_input",
     "build_isolated_surface_messages",
-    "build_style_reference_query",
-    "derive_style_reference_anchor",
-    "enrich_request_style_anchor",
+    "build_surface_original_quote_query",
     "find_forbidden_input_paths",
     "merged_facts",
     "merged_must_not_do",

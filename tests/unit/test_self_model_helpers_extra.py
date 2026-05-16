@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import json
 from dataclasses import dataclass
@@ -277,7 +277,7 @@ def test_build_state_aligned_self_awareness_uses_template_override(monkeypatch) 
     aligned = sm.build_state_aligned_self_awareness(
         {"bond_growth_perception": "稳定"},
         offline_state={"offline_hours": 80.0},
-        bond_summary={"stage": "ACQUAINTANCE"},
+        bond_summary={"stage": "CLOSE_FRIEND"},
         motive_state={"continuity_drive": 0.8},
         render_policy={"should_be_brief": True},
         runtime_flags={"sys_mode": "normal"},
@@ -454,4 +454,3 @@ def test_self_model_localized_ja_templates_override(monkeypatch) -> None:
     assert "このやり取りの温度を保っていたいです" in aligned["self_awareness"]
     assert "このやり取りを静かにつなぎたいです" in aligned["self_awareness"]
     assert "だから今は短く返したいです。" in aligned["self_awareness"]
-

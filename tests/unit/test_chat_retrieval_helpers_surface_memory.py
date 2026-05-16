@@ -93,3 +93,29 @@ async def test_run_retrieval_skips_low_signal_short_turn_without_embedding(monke
     assert summary["status"] == "SKIPPED"
     assert summary["reason_code"] == "SURFACE_MEMORY_RECALL_SKIPPED"
     assert summary["surface_memory_recall_packet"]["trace"]["plan"]["reason"] == "low_signal_surface_turn"
+
+
+def test_embed_surface_memory_query_uses_configured_collection_dim(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    class _Config:
+        collection_profiles = {"episodic": 1024}
+        default_collection = "episodic"
+
+    class _Result:
+        success = True
+        config = _Config()
+
+    def _fake_embed(text: str, *, dim=None):  # noqa: ANN001
+        captured["text"] = text
+        captured["dim"] = dim
+        return [0.0] * int(dim), "hash-embed-v1"
+
+    monkeypatch.setattr("host_brain.memory.chroma_client.load_chroma_runtime_config", lambda: _Result())
+    monkeypatch.setattr("host_brain.memory.chroma_client.embed_text", _fake_embed)
+
+    values, model_id = helpers._embed_surface_memory_query("记得上次的事吗")
+
+    assert len(values) == 1024
+    assert captured == {"text": "记得上次的事吗", "dim": 1024}
+    assert model_id == "hash-embed-v1"

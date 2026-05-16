@@ -24,7 +24,7 @@ def route_intent(
     vital_signs = dict(ctx.get("vital_signs") or {})
     gate_state = str(vital_signs.get("gate_state") or ctx.get("gate_state") or "open").strip().lower()
     silence_willingness = float(vital_signs.get("silence_willingness") or ctx.get("silence_willingness") or 0.5)
-    bond_stage = str(vital_signs.get("bond_stage") or ctx.get("bond_stage") or "stranger").strip().lower()
+    bond_stage = str(vital_signs.get("bond_stage") or ctx.get("bond_stage") or "friend").strip().lower()
     homeostasis_ok = bool(vital_signs.get("homeostasis_ok", True))
     interoception_state = dict(ctx.get("interoception_state") or {})
     vestibular_state = dict(ctx.get("vestibular_state") or {})

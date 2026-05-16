@@ -1,10 +1,10 @@
-﻿{
+{
   "prompt_context": {
     "hard_snapshot": {
       "sys_mode": "normal"
     },
     "bond_summary": {
-      "stage": "STRANGER",
+      "stage": "FRIEND",
       "trend": "稳定",
       "capability_hint": "SUPPORTIVE",
       "event_id": "bond_evt_001",
@@ -26,4 +26,3 @@
   },
   "api_key": "sk-test-hidden"
 }
-

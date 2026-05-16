@@ -171,7 +171,7 @@ class PrefrontalAgent:
             hint = adapter.adapt(
                 traits,
                 emotion_vector,
-                str(bond_stage or "STRANGER"),
+                str(bond_stage or "FRIEND"),
                 user_emotion_tag=str(user_emotion_tag or "NEUTRAL"),
                 user_message=str(user_message or ""),
                 render_target_lang=str(render_target_lang or "zh"),
@@ -180,7 +180,7 @@ class PrefrontalAgent:
             hint = adapter.adapt(
                 traits,
                 emotion_vector,
-                str(bond_stage or "STRANGER"),
+                str(bond_stage or "FRIEND"),
                 user_emotion_tag=str(user_emotion_tag or "NEUTRAL"),
                 user_message=str(user_message or ""),
             )
@@ -247,7 +247,7 @@ class PrefrontalAgent:
         if self._bond_style_engine is None:
             self._bond_style_engine = BondAwareStyleEngine()
         result = self._bond_style_engine.generate(
-            bond_stage=str(bond_stage or "STRANGER"),
+            bond_stage=str(bond_stage or "FRIEND"),
             intimacy_score=float(intimacy_score or 0.0),
             mood_state=str(mood_state or "neutral"),
             natsume_mood=str(natsume_mood or "NEUTRAL"),
@@ -278,7 +278,7 @@ class PrefrontalAgent:
                 )
                 or 0.0
             ),
-            "bond_stage": str(as_dict_payload.get("bond_stage") or bond_stage or "STRANGER"),
+            "bond_stage": str(as_dict_payload.get("bond_stage") or bond_stage or "FRIEND"),
         }
 
     def run_self_reflection_cycle(
@@ -371,7 +371,7 @@ class PrefrontalAgent:
         user_message: str,
         motive_state: Mapping[str, Any] | None = None,
         recall_summary: str = "",
-        bond_stage: str = "STRANGER",
+        bond_stage: str = "FRIEND",
         bond_intimacy: float = 0.0,
         immune_risk_level: str = "none",
         drift_alert_level: str = "NONE",
@@ -475,7 +475,7 @@ class PrefrontalAgent:
                 emotion_tag=str(emotion_tag or "NEUTRAL"),
                 valence=round(float(valence), 3),
                 arousal=round(float(arousal), 3),
-                bond_stage=str(bond_stage or "STRANGER"),
+                bond_stage=str(bond_stage or "FRIEND"),
                 bond_intimacy=round(float(bond_intimacy), 3),
                 motive_care=_care,
                 motive_continuity=_continuity,
@@ -844,8 +844,8 @@ class PrefrontalAgent:
         try:
             result = tracker.on_stage_promoted(
                 user_id=str(user_id or "user_1"),
-                from_stage=str(from_stage or "STRANGER"),
-                to_stage=str(to_stage or "STRANGER"),
+                from_stage=str(from_stage or "FRIEND"),
+                to_stage=str(to_stage or "FRIEND"),
                 ts_ms=int(ts_ms),
             )
             return {
@@ -1231,7 +1231,7 @@ class PrefrontalAgent:
             ts_ms = int(getattr(event, "ts_ms", 0) or 0)
 
             _STAGE_ORDER = [
-                "STRANGER", "ACQUAINTANCE", "FRIEND",
+                "FRIEND",
                 "CLOSE_FRIEND", "INTIMATE", "SOULMATE",
             ]
             from_idx = _STAGE_ORDER.index(from_stage) if from_stage in _STAGE_ORDER else -1

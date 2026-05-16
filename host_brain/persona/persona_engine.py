@@ -230,15 +230,13 @@ class PersonaEngine:
         # ── Bond 阶段开放度系数 ───────────────────────────────────────────
         # 越亲密，特质和情感对表达的影响越大
         _BOND_OPENNESS: dict[str, float] = {
-            "STRANGER": 0.45,
-            "ACQUAINTANCE": 0.55,
             "FRIEND": 0.7,
             "CLOSE_FRIEND": 0.85,
             "CONFIDANT": 0.95,
             "SOULMATE": 1.0,
         }
-        stage = str(bond_stage or "STRANGER").strip().upper()
-        openness = _BOND_OPENNESS.get(stage, 0.5)
+        stage = str(bond_stage or "FRIEND").strip().upper()
+        openness = _BOND_OPENNESS.get(stage, _BOND_OPENNESS["FRIEND"])
 
         # ── 特质组合效应 ──────────────────────────────────────────────────
         # 组合效应优先于单特质判断，捕捉更细腻的人格表达

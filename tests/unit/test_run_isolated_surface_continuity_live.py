@@ -73,7 +73,6 @@ def test_summarize_counts_dialogue_pass_only_after_all_turns_complete(tmp_path) 
                     "reason_codes": ["WRITTEN_REGISTER_TONE"],
                 },
                 "latency_ms": 12,
-                "repair_attempted": True,
                 "fact_count": 7,
             },
         ],
@@ -88,9 +87,8 @@ def test_summarize_counts_dialogue_pass_only_after_all_turns_complete(tmp_path) 
     assert partial["dialogue_pass_count"] == 0
     assert complete["dialogue_pass_count"] == 1
     assert complete["pass_count"] == 2
-    assert complete["repair_attempt_count"] == 1
+    assert "repair_attempt_count" not in complete
     assert complete["facts_budget_max"] == 7
     assert complete["facts_budget_violations"] == 1
     assert complete["max_turns_per_dialogue"] == 2
-    assert complete["observation_reason_counts"]["LOW_SCORE"] == 1
     assert complete["observation_reason_counts"]["WRITTEN_REGISTER_TONE"] == 1

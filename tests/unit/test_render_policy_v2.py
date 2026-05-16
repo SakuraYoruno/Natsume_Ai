@@ -14,7 +14,7 @@ from host_brain.persona.reply_validator import infer_reply_tactic_shape
 def test_reply_plan_first_identity_uses_brief_name_only() -> None:
     plan = build_reply_plan_from_inputs(
         emotion_context={"emotion_tag": "CALM"},
-        bond_summary={"stage": "STRANGER", "score": 0.12},
+        bond_summary={"stage": "FRIEND", "score": 0.12},
         motive_state={"continuity_drive": 0.42},
         conversation_interpretation={
             "literal_topic": "identity",
@@ -64,7 +64,7 @@ def test_reply_plan_rotates_identity_tactic_on_third_repeat() -> None:
     )
     plan = build_reply_plan_from_inputs(
         emotion_context={"emotion_tag": "CALM"},
-        bond_summary={"stage": "STRANGER", "score": 0.12},
+        bond_summary={"stage": "FRIEND", "score": 0.12},
         motive_state={"continuity_drive": 0.42},
         conversation_interpretation={
             "literal_topic": "identity",
@@ -136,7 +136,7 @@ def test_reply_plan_keeps_expanding_identity_trajectory_after_four_turns() -> No
     )
     plan = build_reply_plan_from_inputs(
         emotion_context={"emotion_tag": "CALM"},
-        bond_summary={"stage": "STRANGER", "score": 0.12},
+        bond_summary={"stage": "FRIEND", "score": 0.12},
         motive_state={"continuity_drive": 0.42},
         conversation_interpretation={
             "literal_topic": "identity",
@@ -210,7 +210,7 @@ def test_reply_plan_candidates_expand_identity_tactics_without_reusing_recent_si
     )
     plans = build_reply_plan_candidates_from_inputs(
         emotion_context={"emotion_tag": "CALM"},
-        bond_summary={"stage": "STRANGER", "score": 0.12},
+        bond_summary={"stage": "FRIEND", "score": 0.12},
         motive_state={"continuity_drive": 0.42},
         conversation_interpretation={
             "literal_topic": "identity",
@@ -276,7 +276,7 @@ def test_reply_plan_boundary_repeat_avoids_recent_boundary_tactic() -> None:
     )
     plan = build_reply_plan_from_inputs(
         emotion_context={"emotion_tag": "CALM"},
-        bond_summary={"stage": "STRANGER", "score": 0.12},
+        bond_summary={"stage": "FRIEND", "score": 0.12},
         motive_state={"continuity_drive": 0.22},
         conversation_interpretation={
             "literal_topic": "motivation",
@@ -325,7 +325,7 @@ def test_reply_plan_help_repeat_does_not_repromise() -> None:
 def test_reply_plan_mid_repeat_identity_now_keeps_quality_gate_enabled() -> None:
     plan = build_reply_plan_from_inputs(
         emotion_context={"emotion_tag": "CALM"},
-        bond_summary={"stage": "STRANGER", "score": 0.22},
+        bond_summary={"stage": "FRIEND", "score": 0.22},
         motive_state={"continuity_drive": 0.41},
         conversation_interpretation={
             "literal_topic": "identity",
@@ -344,7 +344,7 @@ def test_reply_plan_mid_repeat_identity_now_keeps_quality_gate_enabled() -> None
 def test_reply_plan_challenging_late_repeat_keeps_buffering_guard() -> None:
     plan = build_reply_plan_from_inputs(
         emotion_context={"emotion_tag": "CALM"},
-        bond_summary={"stage": "STRANGER", "score": 0.22},
+        bond_summary={"stage": "FRIEND", "score": 0.22},
         motive_state={"continuity_drive": 0.18},
         conversation_interpretation={
             "literal_topic": "identity",
@@ -412,7 +412,7 @@ def test_reply_plan_summaries_are_qualitative_chinese_only() -> None:
         body_sense={"fatigue": 0.2},
         offline_state={"loneliness_level": 0.2},
         silence_state={"response_willingness": 0.55},
-        bond_summary={"stage": "STRANGER", "score": 0.08},
+        bond_summary={"stage": "FRIEND", "score": 0.08},
         conversation_interpretation={
             "literal_topic": "identity",
             "interaction_move": "reconfirm",
@@ -517,7 +517,7 @@ def test_reply_plan_sticker_like_image_with_social_act_uses_reaction_form() -> N
 def test_reply_plan_generic_social_image_does_not_force_emotion_guess() -> None:
     plan = build_reply_plan_from_inputs(
         emotion_context={"emotion_tag": "NEUTRAL"},
-        bond_summary={"stage": "STRANGER", "score": 0.0},
+        bond_summary={"stage": "FRIEND", "score": 0.0},
         motive_state={"continuity_drive": 0.0},
         conversation_interpretation={
             "literal_topic": "emoji_social_reply",
@@ -569,7 +569,7 @@ def test_reply_plan_social_sticker_prefers_form_only_reaction_path() -> None:
 def test_reply_plan_social_image_with_dry_signal_prefers_soft_ack_not_tease() -> None:
     plan = build_reply_plan_from_inputs(
         emotion_context={"emotion_tag": "NEUTRAL"},
-        bond_summary={"stage": "STRANGER", "score": 0.0},
+        bond_summary={"stage": "FRIEND", "score": 0.0},
         motive_state={"continuity_drive": 0.0},
         conversation_interpretation={
             "literal_topic": "emoji_social_reply",
@@ -719,7 +719,7 @@ def test_reply_plan_presence_ping_uses_phatic_form() -> None:
 def test_reply_plan_screenshot_analysis_uses_multimodal_tactic() -> None:
     plan = build_reply_plan_from_inputs(
         emotion_context={"emotion_tag": "CALM"},
-        bond_summary={"stage": "STRANGER", "score": 0.05},
+        bond_summary={"stage": "FRIEND", "score": 0.05},
         motive_state={"continuity_drive": 0.22},
         conversation_interpretation={
             "literal_topic": "screenshot_analysis",
@@ -744,7 +744,7 @@ def test_reply_plan_screenshot_analysis_uses_multimodal_tactic() -> None:
 def test_reply_plan_plain_image_share_uses_visual_observation_without_scan_report() -> None:
     plan = build_reply_plan_from_inputs(
         emotion_context={"emotion_tag": "CALM"},
-        bond_summary={"stage": "STRANGER", "score": 0.05},
+        bond_summary={"stage": "FRIEND", "score": 0.05},
         motive_state={"continuity_drive": 0.22},
         conversation_interpretation={
             "literal_topic": "attachment_only_no_question",
@@ -772,7 +772,7 @@ def test_reply_plan_plain_image_share_uses_visual_observation_without_scan_repor
 def test_reply_plan_preserves_multimodal_payload_for_runtime_and_coercion() -> None:
     plan = build_reply_plan_from_inputs(
         emotion_context={"emotion_tag": "CALM"},
-        bond_summary={"stage": "STRANGER", "score": 0.12},
+        bond_summary={"stage": "FRIEND", "score": 0.12},
         motive_state={"continuity_drive": 0.42},
         conversation_interpretation={
             "literal_topic": "literal_description",
@@ -938,7 +938,7 @@ def test_reply_plan_open_image_social_thread_never_falls_back_to_plain_hold() ->
 def test_reply_plan_assistant_reply_followup_never_falls_back_to_plain_hold() -> None:
     plan = build_reply_plan_from_inputs(
         emotion_context={"emotion_tag": "CALM"},
-        bond_summary={"stage": "STRANGER", "score": 0.08},
+        bond_summary={"stage": "FRIEND", "score": 0.08},
         motive_state={"continuity_drive": 0.35},
         conversation_interpretation={
             "literal_topic": "assistant_reply_followup",
@@ -972,7 +972,7 @@ def test_reply_plan_assistant_reply_followup_never_falls_back_to_plain_hold() ->
 def test_reply_plan_assistant_filler_followup_keeps_source_context() -> None:
     plan = build_reply_plan_from_inputs(
         emotion_context={"emotion_tag": "CALM"},
-        bond_summary={"stage": "STRANGER", "score": 0.08},
+        bond_summary={"stage": "FRIEND", "score": 0.08},
         motive_state={"continuity_drive": 0.35},
         conversation_interpretation={
             "literal_topic": "assistant_reply_followup",
@@ -1002,10 +1002,10 @@ def test_reply_plan_assistant_filler_followup_keeps_source_context() -> None:
     assert "语气词" in plan.reply_contract
 
 
-def test_reply_plan_image_social_followup_softens_stranger_relationship_summary() -> None:
+def test_reply_plan_image_social_followup_softens_familiar_relationship_summary() -> None:
     plan = build_reply_plan_from_inputs(
         emotion_context={"emotion_tag": "CALM"},
-        bond_summary={"stage": "STRANGER", "score": 0.08},
+        bond_summary={"stage": "FRIEND", "score": 0.08},
         motive_state={"continuity_drive": 0.35},
         conversation_interpretation={
             "literal_topic": "emoji_social_followup",

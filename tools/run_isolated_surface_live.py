@@ -16,15 +16,8 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from host_brain.integrations.llm_helpers import invoke_llm_text  # noqa: E402
-from host_brain.persona.isolated_surface_harness import (  # noqa: E402
-    build_minimal_repair_messages,
-    build_isolated_surface_messages,
-    derive_style_reference_anchor,
-    parse_surface_candidates,
-    score_isolated_surface_candidates,
-    select_best_isolated_candidate,
-)
-from tools.chat_ab_generate import _load_secret_store_provider_key, load_dotenv  # noqa: E402
+from host_brain.persona.surface_runtime import SurfaceRuntime  # noqa: E402
+from tools.live_env import load_dotenv, load_secret_store_provider_key  # noqa: E402
 from tools.isolated_surface_harness import (  # noqa: E402
     _build_memory_ab_comparison,
     _read_json_or_jsonl,
@@ -75,14 +68,8 @@ def _summarize(
     control_violation_count = sum(1 for row in selected if row.get("control_violations"))
     missing_selected_count = sum(1 for row in results if not isinstance(row.get("selected"), dict))
     low_score_count = missing_selected_count + sum(1 for row in selected if float(row.get("score") or 0.0) < 80.0 or not row.get("passed"))
-    style_degraded = sum(
-        1
-        for row in results
-        if ((row.get("style_reference") or {}).get("trace") or {}).get("degraded")
-    )
     score_rows = [dict(row.get("score") or {}) for row in results if isinstance(row.get("score"), Mapping)]
     variant_summary = _summarize_score_rows(score_rows)
-    repair_attempt_count = sum(1 for row in score_rows if row.get("repair_attempted"))
     summary = {
         "cases": cases_count,
         "completed": completed,
@@ -96,8 +83,6 @@ def _summarize(
         "low_score_count": low_score_count,
         "hard_fail_count": hard_fail_count,
         "control_violation_count": control_violation_count,
-        "style_reference_degraded_count": style_degraded,
-        "repair_attempt_count": repair_attempt_count,
         "latency_ms_p50": _percentile(latencies, 0.5),
         "latency_ms_p95": _percentile(latencies, 0.95),
         "total_elapsed_ms": int((time.perf_counter() - started) * 1000),
@@ -132,18 +117,12 @@ async def _run_one(
     timeout_ms: int,
     gen_params: Mapping[str, Any],
     base_url_override: str | None,
-    repair_failed: bool,
 ) -> dict[str, Any]:
     async with semaphore:
         started = time.perf_counter()
         try:
-            style_reference = derive_style_reference_anchor(request).as_dict()
-            messages = build_isolated_surface_messages(request)
-            raw_output = ""
-            candidate_texts: list[str] = []
-            last_error = ""
-            for attempt in range(2):
-                raw_output = await asyncio.to_thread(
+            async def generate(messages: list[Mapping[str, str]]) -> str:
+                return await asyncio.to_thread(
                     invoke_llm_text,
                     provider_name=provider,
                     model_id=model,
@@ -153,37 +132,12 @@ async def _run_one(
                     gen_params=dict(gen_params),
                     base_url_override=base_url_override,
                 )
-                if not str(raw_output or "").strip():
-                    last_error = "empty model output"
-                    continue
-                candidate_texts = parse_surface_candidates(raw_output)
-                if candidate_texts:
-                    break
-                last_error = "no surface candidates parsed"
-            latency_ms = int((time.perf_counter() - started) * 1000)
-            if not candidate_texts:
-                raise RuntimeError(last_error or "no surface candidates parsed")
-            scores = score_isolated_surface_candidates(request, candidate_texts)
-            selected = select_best_isolated_candidate(scores)
-            repair_raw_output = ""
-            repair_candidate_texts: list[str] = []
-            repair_attempted = bool(repair_failed and selected is not None and not selected.passed)
-            if repair_attempted and selected is not None:
-                repair_messages = build_minimal_repair_messages(request, selected)
-                repair_raw_output = await asyncio.to_thread(
-                    invoke_llm_text,
-                    provider_name=provider,
-                    model_id=model,
-                    api_key=api_key,
-                    timeout_ms=timeout_ms,
-                    messages=repair_messages,
-                    gen_params=dict(gen_params),
-                    base_url_override=base_url_override,
-                )
-                repair_candidate_texts = parse_surface_candidates(repair_raw_output)
-                repair_scores = score_isolated_surface_candidates(request, repair_candidate_texts)
-                scores = [*scores, *repair_scores]
-                selected = select_best_isolated_candidate(scores)
+
+            runtime = SurfaceRuntime(generate)
+            result = await runtime.run(request)
+            latency_ms = result.latency_ms or int((time.perf_counter() - started) * 1000)
+            scores = list(result.candidates)
+            selected = result.selected
             raw_row = {
                 "index": index,
                 "case_id": case_id,
@@ -192,15 +146,12 @@ async def _run_one(
                 "provider": provider,
                 "model": model,
                 "latency_ms": latency_ms,
-                "raw_output": str(raw_output or "").strip(),
-                "candidates": candidate_texts,
-                "repair_attempted": repair_attempted,
-                "repair_raw_output": str(repair_raw_output or "").strip(),
-                "repair_candidates": repair_candidate_texts,
+                "raw_output": str(result.raw_output or "").strip(),
+                "candidates": [score.text for score in scores],
+                "direct_text": result.selected_text,
                 "selected_text": selected.text if selected else "",
                 "selected_score": selected.score if selected else None,
                 "selected_passed": selected.passed if selected else False,
-                "style_reference": style_reference,
             }
             score_row = {
                 "index": index,
@@ -209,15 +160,12 @@ async def _run_one(
                 "candidates": [score.as_dict() for score in scores],
                 "memory_expected_terms": memory_expected_terms,
                 "selected": selected.as_dict() if selected else None,
-                "repair_attempted": repair_attempted,
-                "repair_candidates": repair_candidate_texts,
-                "style_reference": style_reference,
+                "selection": "direct_first",
             }
             return {
                 "raw": raw_row,
                 "score": score_row,
                 "selected": score_row["selected"],
-                "style_reference": style_reference,
                 "ok": True,
                 "latency_ms": latency_ms,
             }
@@ -238,7 +186,6 @@ async def _run_one(
                 "raw": raw_row,
                 "score": score_row,
                 "selected": None,
-                "style_reference": {},
                 "ok": False,
                 "latency_ms": latency_ms,
             }
@@ -248,7 +195,7 @@ async def run_live(args: argparse.Namespace) -> dict[str, Any]:
     load_dotenv(ROOT / ".env")
     provider = str(args.provider or "deepseek").strip()
     model = str(args.model or os.environ.get("HOST_DEEPSEEK_MODEL_ID") or "deepseek-v4-flash").strip()
-    api_key = str(os.environ.get("DEEPSEEK_API_KEY") or "").strip() or _load_secret_store_provider_key(provider)
+    api_key = str(os.environ.get("DEEPSEEK_API_KEY") or "").strip() or load_secret_store_provider_key(provider)
     if not api_key:
         raise RuntimeError(f"missing api key for provider={provider}")
     base_url_override = str(args.base_url or os.environ.get("HOST_DEEPSEEK_BASE_URL") or "").strip() or None
@@ -303,7 +250,6 @@ async def run_live(args: argparse.Namespace) -> dict[str, Any]:
                 timeout_ms=int(args.timeout_ms),
                 gen_params=gen_params,
                 base_url_override=base_url_override,
-                repair_failed=not bool(args.no_repair),
             )
         )
         for index, item in enumerate(expanded_cases, start=1)
@@ -390,7 +336,6 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--progress-every", type=int, default=5)
     parser.add_argument("--with-memory", action="store_true", help="Run baseline and with_memory prompt variants from compressed memory_recall_packet fields.")
     parser.add_argument("--with-affect", action="store_true", help="Run variants from compressed affect_control_packet fields or upstream affect_state fields.")
-    parser.add_argument("--no-repair", action="store_true", help="Disable one-shot minimal repair when the selected candidate fails.")
     args = parser.parse_args(argv)
     summary = asyncio.run(run_live(args))
     print("FINAL " + json.dumps(summary, ensure_ascii=False, sort_keys=True), flush=True)

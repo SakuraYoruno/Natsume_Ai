@@ -124,7 +124,7 @@ def test_build_and_coerce_interaction_state_cover_thread_fallback_target_and_rea
             "source_topic": "emoji_social_reply",
         },
         affect_state={"emotion_tag": "CALM"},
-        relationship_state={"bond_stage": "STRANGER"},
+        relationship_state={"bond_stage": "FRIEND"},
         drive_state={"continuity_drive": 0.4},
         topic_ledger={"active_topics": ["emoji_social_reply"]},
         tactic_ledger={"recent_topics": ["emoji_social_reply"]},

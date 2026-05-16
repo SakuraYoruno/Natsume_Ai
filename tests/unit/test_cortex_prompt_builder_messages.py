@@ -59,7 +59,7 @@ def _plane() -> SimpleNamespace:
                     "followup_target": "identity",
                     "ongoing_thread": "identity_loop",
                     "affect": {"emotion_tag": "CALM"},
-                    "relationship": {"bond_stage": "STRANGER"},
+                    "relationship": {"bond_stage": "FRIEND"},
                     "drive": {"continuity_drive": 0.42},
                     "topic_ledger": {"active_topics": ["identity"]},
                     "tactic_ledger": {"recent_topics": ["identity"]},
@@ -103,7 +103,7 @@ def _plane() -> SimpleNamespace:
         relationship=SimpleNamespace(
             state=SimpleNamespace(
                 as_dict=lambda: {
-                    "bond_stage": "STRANGER",
+                    "bond_stage": "FRIEND",
                     "trust": 0.12,
                     "openness": 0.14,
                     "boundary_softness": 0.10,
@@ -280,7 +280,7 @@ def test_build_cortex_prompt_uses_full_soul_for_short_text_chat() -> None:
                 "followup_target": "",
                 "ongoing_thread": "",
                 "affect": {"emotion_tag": "CALM"},
-                "relationship": {"bond_stage": "STRANGER"},
+                "relationship": {"bond_stage": "FRIEND"},
                 "drive": {"continuity_drive": 0.42},
                 "topic_ledger": {"active_topics": ["mood_reflection"]},
                 "tactic_ledger": {"recent_topics": ["mood_reflection"]},
@@ -363,7 +363,7 @@ def test_build_cortex_prompt_exposes_conversation_history_meta() -> None:
     assert runtime_payload["topic_ledger"]["active_topics"] == ["identity"]
     assert "tactic_ledger" in runtime_payload
     assert runtime_payload["affect_state"]["emotion_tag"] == "CALM"
-    assert runtime_payload["relationship_state"]["bond_stage"] == "STRANGER"
+    assert runtime_payload["relationship_state"]["bond_stage"] == "FRIEND"
     assert runtime_payload["drive_state"]["continuity_drive"] == 0.42
 
 
@@ -412,7 +412,7 @@ def test_build_cortex_prompt_injects_image_social_thread_summary() -> None:
                 "followup_target": "emoji_social_reply",
                 "ongoing_thread": "image_social",
                 "affect": {"emotion_tag": "CALM"},
-                "relationship": {"bond_stage": "STRANGER"},
+                "relationship": {"bond_stage": "FRIEND"},
                 "drive": {"continuity_drive": 0.42},
                 "topic_ledger": {"active_topics": ["emoji_social_reply"]},
                 "tactic_ledger": {"recent_topics": ["emoji_social_reply"]},
@@ -496,7 +496,7 @@ def test_build_cortex_prompt_uses_full_soul_for_image_social_followup() -> None:
                 "followup_target": "emoji_social_reply",
                 "ongoing_thread": "image_social",
                 "affect": {"emotion_tag": "CALM"},
-                "relationship": {"bond_stage": "STRANGER"},
+                "relationship": {"bond_stage": "FRIEND"},
                 "drive": {"continuity_drive": 0.42},
                 "topic_ledger": {"active_topics": ["emoji_social_reply"]},
                 "tactic_ledger": {"recent_topics": ["emoji_social_reply"]},
@@ -624,7 +624,7 @@ def test_build_cortex_prompt_structured_state_carries_boundary_action_tags() -> 
                 "followup_target": "",
                 "ongoing_thread": "boundary_probe",
                 "affect": {"emotion_tag": "CALM"},
-                "relationship": {"bond_stage": "STRANGER"},
+                "relationship": {"bond_stage": "FRIEND"},
                 "drive": {"continuity_drive": 0.42},
                 "topic_ledger": {"active_topics": ["relationship_boundary"]},
                 "tactic_ledger": {"recent_topics": ["relationship_boundary"]},

@@ -53,8 +53,8 @@ def _safe_mapping(raw: Any) -> dict[str, Any]:
 class SocialAct:
     """Non-negative daily interaction act for normal chat.
 
-    This is not final wording. It gives ChatKernelV2 a concrete social move so
-    light chat does not collapse into asking for requirements.
+    This is not final wording. It gives the surface main chain a concrete
+    social move so light chat does not collapse into asking for requirements.
     """
 
     act_kind: str = "neutral"

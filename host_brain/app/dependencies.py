@@ -499,7 +499,7 @@ def get_bond_stage_engine() -> BondStageEngine:
     if _bond_stage_engine is None:
         # 修复问题F：Bond 积分阈值可配置化
         # 支持通过环境变量覆盖默认阈值，格式：JSON 字符串
-        # 示例：HOST_BOND_STAGE_THRESHOLDS='{"STRANGER":0,"ACQUAINTANCE":5,"FRIEND":20}'
+        # 示例：HOST_BOND_STAGE_THRESHOLDS='{"FRIEND":0,"CLOSE_FRIEND":70,"CONFIDANT":150,"SOULMATE":300}'
         import json as _json
         from host_brain.bond.bond_stage_engine import DEFAULT_STAGE_THRESHOLDS, DEFAULT_SCORE_MAP
 
@@ -876,7 +876,7 @@ class _BondAwareStyleEngineProxy:
         from host_brain.tribe.prefrontal_agent import get_prefrontal_agent  # noqa: PLC0415
 
         payload = get_prefrontal_agent().resolve_bond_style_payload(
-            bond_stage=str(bond_stage or "STRANGER"),
+            bond_stage=str(bond_stage or "FRIEND"),
             intimacy_score=float(intimacy_score or 0.0),
             mood_state=str(mood_state or "neutral"),
             natsume_mood=str(natsume_mood or "NEUTRAL"),

@@ -199,7 +199,7 @@ def test_apply_response_intelligence_sanitizes_without_authoring_fallback(monkey
         user_message="我今天很难过",
         narrative="您好，作为一个AI，我建议您冷静一下。",
         emotion_context={"emotion_tag": "sadness", "turn_count": 1},
-        bond_summary={"stage": "STRANGER"},
+        bond_summary={"stage": "FRIEND"},
         render_lang="zh",
         allow_rewrite=True,
     )
@@ -224,7 +224,7 @@ def test_apply_response_intelligence_extracts_narrative_text_from_structured_jso
         user_message="上一句是什么",
         narrative='{"narrative":{"text":"嗯……你是指，之前那一句吗？"},"intent_draft":{},"meta":{"draft_only":true}}',
         emotion_context={"emotion_tag": "NEUTRAL", "turn_count": 1},
-        bond_summary={"stage": "STRANGER"},
+        bond_summary={"stage": "FRIEND"},
         render_lang="zh",
         allow_rewrite=False,
     )
@@ -240,7 +240,7 @@ def test_apply_response_intelligence_extracts_narrative_text_from_fenced_json(mo
         user_message="那现在呢",
         narrative='```json\n{"narrative":{"text":"嗯，是这样啊……不过，我这边还没看到上一句。"},"intent_draft":{},"meta":{"draft_only":true}}\n```',
         emotion_context={"emotion_tag": "NEUTRAL", "turn_count": 1},
-        bond_summary={"stage": "STRANGER"},
+        bond_summary={"stage": "FRIEND"},
         render_lang="zh",
         allow_rewrite=False,
     )
@@ -257,7 +257,7 @@ def test_apply_response_intelligence_does_not_author_affection_question_reply(mo
         user_message="你喜欢我吗",
         narrative=original,
         emotion_context={"emotion_tag": "NEUTRAL", "turn_count": 1},
-        bond_summary={"stage": "STRANGER"},
+        bond_summary={"stage": "FRIEND"},
         render_lang="zh",
         allow_rewrite=True,
     )
@@ -281,7 +281,7 @@ def test_apply_response_intelligence_does_not_author_affection_disclosure_reply(
         user_message="我喜欢你",
         narrative=original,
         emotion_context={"emotion_tag": "NEUTRAL", "turn_count": 1},
-        bond_summary={"stage": "STRANGER"},
+        bond_summary={"stage": "FRIEND"},
         render_lang="zh",
         allow_rewrite=True,
     )
@@ -302,7 +302,7 @@ def test_resolve_tts_route_maps_canonical_sad_to_semantic_style(monkeypatch) -> 
     route = resolve_tts_route(
         text="你今天很难过啊。是发生什么事了吗？",
         emotion_context={"emotion_tag": "SAD"},
-        bond_summary={"stage": "STRANGER"},
+        bond_summary={"stage": "FRIEND"},
     )
 
     assert route.get("emotion_tag") == "sadness"
@@ -314,7 +314,7 @@ def test_resolve_tts_route_maps_canonical_calm_to_comfort_style(monkeypatch) -> 
     route = resolve_tts_route(
         text="没关系的，我会陪着你。",
         emotion_context={"emotion_tag": "CALM"},
-        bond_summary={"stage": "STRANGER"},
+        bond_summary={"stage": "FRIEND"},
     )
 
     assert route.get("emotion_tag") == "comfort"
@@ -327,7 +327,7 @@ def test_reflection_chain_revise_does_not_author_empty_reply() -> None:
         user_message="你喜欢我吗",
         ai_response="",
         emotion_tag="",
-        bond_stage="ACQUAINTANCE",
+        bond_stage="CLOSE_FRIEND",
     )
 
     assert result.revised_text == ""
@@ -341,7 +341,7 @@ def test_reflection_chain_revise_drops_too_short_reply_without_fallback() -> Non
         user_message="你喜欢我吗",
         ai_response="嗯",
         emotion_tag="",
-        bond_stage="ACQUAINTANCE",
+        bond_stage="CLOSE_FRIEND",
     )
 
     assert result.revised_text == ""
@@ -355,7 +355,7 @@ def test_reflection_chain_revise_does_not_author_japanese_fallback() -> None:
         user_message="いる？",
         ai_response="",
         emotion_tag="",
-        bond_stage="ACQUAINTANCE",
+        bond_stage="CLOSE_FRIEND",
         render_target_lang="ja",
     )
 

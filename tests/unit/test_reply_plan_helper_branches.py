@@ -103,12 +103,12 @@ def test_qualitative_affect_summary_covers_zh_and_ja_branches() -> None:
 def test_qualitative_relationship_summary_softens_micro_social_and_respects_stage() -> None:
     interpretation = ConversationInterpretation(literal_topic="emoji_social_followup")
     thread = InteractionThreadState(thread_kind="image_social", open=True)
-    stranger = RelationshipStateBlock(bond_stage="STRANGER", boundary_softness=0.1)
+    familiar = RelationshipStateBlock(bond_stage="FRIEND", boundary_softness=0.1)
     friend = RelationshipStateBlock(bond_stage="FRIEND", boundary_softness=0.6)
 
     assert (
         _qualitative_relationship_summary(
-            relationship=stranger,
+            relationship=familiar,
             interpretation=interpretation,
             interaction_thread=thread,
             render_target_lang="zh",
@@ -117,7 +117,7 @@ def test_qualitative_relationship_summary_softens_micro_social_and_respects_stag
     )
     assert (
         _qualitative_relationship_summary(
-            relationship=stranger,
+            relationship=familiar,
             interpretation=ConversationInterpretation(literal_topic="motivation"),
             interaction_thread=InteractionThreadState(),
             render_target_lang="ja",
@@ -126,7 +126,7 @@ def test_qualitative_relationship_summary_softens_micro_social_and_respects_stag
     )
     assert (
         _qualitative_relationship_summary(
-            relationship=RelationshipStateBlock(bond_stage="ACQUAINTANCE", boundary_softness=0.2),
+            relationship=RelationshipStateBlock(bond_stage="CLOSE_FRIEND", boundary_softness=0.2),
             interpretation=ConversationInterpretation(literal_topic="greeting"),
             interaction_thread=InteractionThreadState(),
             render_target_lang="ja",
@@ -183,26 +183,26 @@ def test_qualitative_relationship_summary_uses_vector_substage_not_only_stage() 
 
 
 def test_decide_response_form_covers_social_and_default_modes() -> None:
-    stranger = RelationshipStateBlock(bond_stage="STRANGER")
+    familiar = RelationshipStateBlock(bond_stage="FRIEND")
 
     assert _decide_response_form(
         interpretation=ConversationInterpretation(literal_topic="emoji_social_followup"),
-        relationship_state=stranger,
+        relationship_state=familiar,
         multimodal={"primary_modality": "image"},
     ) == ("text", "", "image_social_followup", False)
     assert _decide_response_form(
         interpretation=ConversationInterpretation(literal_topic="emoji_social_reply"),
-        relationship_state=stranger,
+        relationship_state=familiar,
         multimodal={"primary_modality": "emoji"},
     ) == ("sticker", "", "social_reaction", True)
     assert _decide_response_form(
         interpretation=ConversationInterpretation(literal_topic="attachment_only_no_question"),
-        relationship_state=stranger,
+        relationship_state=familiar,
         multimodal={"primary_modality": "emoji"},
     ) == ("sticker", "", "social_reaction", True)
     assert _decide_response_form(
         interpretation=ConversationInterpretation(literal_topic="mood_reflection"),
-        relationship_state=stranger,
+        relationship_state=familiar,
         multimodal=None,
     ) == ("text", "", "default_text", False)
 
@@ -514,7 +514,7 @@ def test_build_topic_trajectory_options_cover_multimodal_boundary_and_help_varia
 def test_build_reply_plan_from_inputs_refines_multimodal_contracts_and_japanese_relationship_copy() -> None:
     image_plan = build_reply_plan_from_inputs(
         emotion_context={"emotion_tag": "CALM"},
-        bond_summary={"stage": "STRANGER", "score": 0.12},
+        bond_summary={"stage": "FRIEND", "score": 0.12},
         conversation_interpretation={
             "literal_topic": "attachment_only_no_question",
             "interaction_move": "share_attachment",
@@ -526,7 +526,7 @@ def test_build_reply_plan_from_inputs_refines_multimodal_contracts_and_japanese_
     )
     ja_plan = build_reply_plan_from_inputs(
         emotion_context={"emotion_tag": "CALM"},
-        bond_summary={"stage": "ACQUAINTANCE", "score": 0.2},
+        bond_summary={"stage": "CLOSE_FRIEND", "score": 0.2},
         conversation_interpretation={
             "literal_topic": "greeting",
             "interaction_move": "greeting",
@@ -548,7 +548,7 @@ def test_build_reply_plan_from_inputs_refines_multimodal_contracts_and_japanese_
 
 def test_build_reply_plan_and_candidates_cover_thread_fallback_and_plain_hold_paths() -> None:
     affect = AffectStateBlock()
-    relationship = RelationshipStateBlock(bond_stage="STRANGER")
+    relationship = RelationshipStateBlock(bond_stage="FRIEND")
     drive = DriveStateBlock(continuity_drive=0.2)
     empty_topic_ledger = TopicLedgerBlock()
     empty_tactic_ledger = TacticLedgerBlock()
@@ -597,7 +597,7 @@ def test_build_reply_plan_and_candidates_cover_thread_fallback_and_plain_hold_pa
 def test_build_reply_plan_from_inputs_covers_rejection_and_japanese_identity() -> None:
     rejection_plan = build_reply_plan_from_inputs(
         emotion_context={"emotion_tag": "CALM"},
-        bond_summary={"stage": "STRANGER"},
+        bond_summary={"stage": "FRIEND"},
         conversation_interpretation={
             "literal_topic": "rejection",
             "interaction_move": "repair_needed",
@@ -608,7 +608,7 @@ def test_build_reply_plan_from_inputs_covers_rejection_and_japanese_identity() -
     )
     ja_identity = build_reply_plan_from_inputs(
         emotion_context={"emotion_tag": "CALM"},
-        bond_summary={"stage": "STRANGER"},
+        bond_summary={"stage": "FRIEND"},
         conversation_interpretation={
             "literal_topic": "identity",
             "interaction_move": "first_ask",

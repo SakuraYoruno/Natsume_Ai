@@ -265,11 +265,14 @@ async def test_surface_main_chain_sse_generator_calls_chat_surface_pool(monkeypa
         assert "ReplyControlPacket" in rendered
         assert "memory://episodic/1" not in rendered
         return SimpleNamespace(
-            content=_candidate_payload(
-                [
-                    "上次卡在输入输出，这轮先盯那一块。",
-                    "先别整段改，输入输出那块先看清。",
-                ]
+            content=json.dumps(
+                {
+                    "reply_text": "上次卡在输入输出，这轮先盯那一块。",
+                    "natsume_emotion_tag": "THINKING",
+                    "user_emotion_tag": "ANXIOUS",
+                    "emotion_confidence": 0.68,
+                },
+                ensure_ascii=False,
             ),
             final_provider="mock",
             final_model="mock-chat",
@@ -288,14 +291,18 @@ async def test_surface_main_chain_sse_generator_calls_chat_surface_pool(monkeypa
     assert commit["decision"] == "APPROVE"
     assert commit["audit_refs"]["path"] == "chat_agent:surface_main_chain"
     assert commit["audit_refs"]["trace_stage_meta"]["surface_main_chain_used"] is True
-    assert commit["audit_refs"]["trace_stage_meta"]["chat_kernel_v2_used"] is False
     assert "timings_ms" in commit["audit_refs"]
     assert "输入输出" in commit["narrative"]
+    assert commit["reply_envelope"]["audit"]["natsume_emotion_tag"] == "THINKING"
+    assert commit["reply_envelope"]["audit"]["vts_expression_id"]
+    assert commit["audit_refs"]["surface_main_chain"]["user_emotion_tag"] == "ANXIOUS"
     await asyncio.sleep(0)
     assert post_process_calls
     assert post_process_calls[0]["trace_stage_meta"]["surface_main_chain_used"] is True
-    assert post_process_calls[0]["trace_stage_meta"]["chat_kernel_v2_used"] is False
     assert post_process_calls[0]["reply_plan"]["primary_topic"] == "technical_help"
+    assert post_process_calls[0]["emotion_context"]["emotion_tag"] == "THINKING"
+    assert post_process_calls[0]["emotion_context"]["surface_user_emotion_tag"] == "ANXIOUS"
+    assert post_process_calls[0]["emotion_context"]["surface_vts_expression_id"]
 
 
 def test_surface_main_chain_enabled_defaults_to_normal_text_only(monkeypatch) -> None:

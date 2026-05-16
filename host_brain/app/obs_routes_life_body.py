@@ -192,8 +192,6 @@ MODE_META = {
     "locked": {"label": "锁定"},
 }
 STAGE_LABELS = {
-    "STRANGER": "初见义妹",
-    "ACQUAINTANCE": "相处义妹",
     "FRIEND": "关系好的兄妹",
     "CLOSE": "亲近",
     "CLOSE_FRIEND": "亲近兄妹",

@@ -2,7 +2,9 @@
 
 目的：先把 `Soul.md + System Prompt` 的最终表层文本生成稳定下来，再接历史、状态、传感器或器官族输出。
 
-状态：这是当前 normal chat 文本质量阶段的主链基线。旧 `ChatKernelV2` 链路只作为历史参考，不参与本阶段文本质量验收和调参。
+状态：这是当前 normal chat 文本质量阶段的主链基线。旧 `ChatKernelV2` 链路已移除，不参与文本生成、验收、调参或 fallback。
+
+当前 normal chat 主链采用 direct-only：最终表层 prompt 只要求一条可发送回复，`SurfaceRuntime` 直接采用模型输出。候选 rerank、repair/fallback 选优分支已删除；评分器只保留给 trace 和批测观察，不能替换直出文本。
 
 ## Boundary
 
@@ -50,20 +52,19 @@ class ReplyControlPacket(BaseModel):
 1. `build_isolated_surface_input(...)`
    - 只接受允许字段。
    - 发现 `history`、`memory`、`organ`、`rag`、`tool_candidates`、`module_advice` 等 raw context key 时直接报错。
-2. `derive_style_reference_anchor(...)`
-   - 从 `data/style_bank/original_cn_style_bank.jsonl` 选择原创中文风格样本派生特征。
-   - 只注入 `intent_tags`、`emotion_tags`、`style_moves`、`rhythm_tags`、`lexical_cues`、`source_refs` 等派生特征。
-   - 不把 raw 台词、解包文本或自然语言建议放入 prompt。
-3. `build_isolated_surface_messages(...)`
+2. `build_isolated_surface_messages(...)`
    - 生成固定双消息 prompt。
-   - system 中放隔离边界、输出 JSON 要求和 `Soul.md`。
-   - system 中明确 `must_include` / `must_not_do` 是逐候选字面约束，不允许候选池里只有一条满足。
-   - user 中放当前输入、增强后的 `ReplyControlPacket`、facts、must_not_do。
-   - `ReplyControlPacket.style_anchor` 会自动合并中文样本派生风格锚点。
+   - system 中放隔离边界、输出约束和 `Soul.md`。
+   - 离线 harness 可要求 JSON 候选；normal chat 主链会在 `SurfaceRuntime` 中改写成单条 direct 输出要求。
+   - user 中放当前输入、`ReplyControlPacket`、facts、must_not_do。
    - 同步放入由当前用户输入 + `ReplyControlPacket.task_mode` 派生的 `TurnSurfaceContract`，只包含 response_move、required_any、问句预算、长度和 notes；不放 forbidden_surface 或 raw 上下文。
    - `TurnSurfaceContract` 允许当前用户文本纠正过粗或错误的 `task_mode`，例如 `你烦不烦` 优先落到 `annoying_tease`，`我刚忙完` 优先落到 `busy_done`。
-   - style reference query 以 `TurnSurfaceContract.scene_id` 为准，避免上游粗粒度 `task_mode` 把 `good_news`、`write_takeover` 等场景压回泛 daily/happy。
+   - 只保留少量真实中文原句 quote 作为质感参考；已删除 `style_reference_bank` 和泛化 style seed 注入。
    - 生成提示明确要求不要靠 `~` / `～` 当可爱语气，角色感必须来自用词、转折和节奏。
+3. `SurfaceRuntime(...)`
+   - normal chat 默认路径。
+   - 只取模型直接输出的第一条最终回复。
+   - scorer 只记录观察信号，不再按分数重选、repair 或 fallback。
 4. `run_isolated_surface_generation(...)`
    - 只接收一个注入的 `generate(messages)` 函数。
    - harness 不知道 runtime state，也不从全局状态取上下文。
@@ -74,8 +75,9 @@ class ReplyControlPacket(BaseModel):
    - 使用 sample-guided scorer 做 soft scoring。
    - scorer 显式输出 galgame 质感维度：`catchiness`、`template_density`、`scene_grounding`、`implied_fact_risk`、`line_rhythm`、`character_freshness`。
    - 对 `must_include`、`must_not_do`、`question_budget` 做控制面扣分。
-7. `select_best_isolated_candidate(...)`
-   - 在 hard gate 通过后，优先选无控制面违约且分数最高的候选。
+8. 候选选择器
+   - `SurfaceRuntime` 不再调用候选选择器。
+   - 老的多候选选择逻辑只允许留在离线 harness 内做历史对照，不得重新接回 normal chat 主链。
 
 ## Continuity Harness
 
@@ -272,7 +274,7 @@ python tools/build_isolated_surface_continuity_cases.py `
 - avg selected score: `87.956`
 - quality report watch rows: `5`
 
-校验 prompt 和离线候选 rerank：
+校验 prompt 和离线候选评分：
 
 ```powershell
 python tools/isolated_surface_continuity_harness.py `
@@ -294,7 +296,7 @@ python tools/run_isolated_surface_continuity_live.py `
 live 输出：
 
 - `live_raw_generations.jsonl`：每个 turn 的模型原始输出、候选和选中项。
-- `live_scores.jsonl`：每个 turn 的 scorer/rerank 明细。
+- `live_scores.jsonl`：每个 turn 的 scorer 明细。
 - `summary.json`：turn pass rate、dialogue pass rate、低分数、hard fail、control violation 和延迟统计。
 
 少量失败、低分或尾部超时可以只补跑对应 turn，再合并：
@@ -359,22 +361,15 @@ python tools/continuity_quality_report.py `
 - `line_rhythm`：偏好可发送的一到两段私聊台词，扣长而无停顿的直线句。
 - `character_freshness`：对 stock opening 和机械傲娇模板降权，避免只靠口癖冒充角色感。
 
-这些维度会影响 rerank 和通过分，但不会新增 hard forbidden pattern。
+这些维度会影响观察分，但不会新增 hard forbidden pattern，也不会替换直出文本。
 
-## Original Chinese Style Anchors
+## Original Chinese Quote References
 
-仓库现在使用原创中文风格特征库：
+仓库只保留少量真实中文原句 quote 作为质感参考：
 
-- `data/style_bank/original_cn_style_bank.jsonl`：不含 raw 台词或继承角色台词的派生风格特征。
+- `data/style_bank/surface_original_quote_bank.jsonl`：保存可提示的短台词、标签和来源摘要。
 
-隔离 harness 使用后者，而不是把原文塞给模型。生成层看到的是类似：
-
-```text
-来源：中文风格样本派生特征；禁止照抄或复述样本文本。
-可用动作：clingy_presence / pull_attention / question_chain
-情绪倾向：neutral
-节奏线索：rapid_followup / question / 反问/追问
-```
+隔离 harness 不再注入抽象派生风格特征，也不再使用 `style_reference_bank` 或泛化 style seed。
 
 这让 `Soul.md` 继续只做语言风格锚定，同时让常见 scene 的 good reference 从人工短片段逐步迁移到原创中文样本派生特征。
 `source_refs` 只写入 harness trace，不进入生成 prompt。

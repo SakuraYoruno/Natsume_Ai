@@ -64,10 +64,10 @@ def test_social_brain_resolve_bond_snapshot_uses_fallback_summary(monkeypatch) -
 
     snapshot = SocialBrainAgent().resolve_bond_snapshot(
         person_id="user_2",
-        bond_summary={"stage": "STRANGER", "trend": "steady", "capability_hint": "short_chat"},
+        bond_summary={"stage": "FRIEND", "trend": "steady", "capability_hint": "short_chat"},
     )
 
-    assert snapshot["bond_stage"] == "STRANGER"
+    assert snapshot["bond_stage"] == "FRIEND"
     assert snapshot["bond_trend"] == "steady"
     assert snapshot["capability_hint"] == "short_chat"
     assert snapshot["bond_state_obj"] is None

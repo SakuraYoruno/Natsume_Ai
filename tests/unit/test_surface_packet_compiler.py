@@ -193,7 +193,7 @@ def test_shadow_e2e_baseline_memory_affect_have_no_quality_regression() -> None:
             ]
         )
 
-    runtime = SurfaceRuntime(generate, repair_failed=False, use_style_reference_bank=False)
+    runtime = SurfaceRuntime(generate)
     results = {
         name: asyncio.run(runtime.run(compiled.request))
         for name, compiled in variants.items()
@@ -203,7 +203,8 @@ def test_shadow_e2e_baseline_memory_affect_have_no_quality_regression() -> None:
     for name, result in results.items():
         assert result.selected is not None, name
         assert result.selected.passed, result.selected.as_dict()
-        assert result.observation_codes == (), result.as_dict()
+        assert not result.selected.hard_fail, result.selected.as_dict()
+        assert not result.selected.control_violations, result.selected.as_dict()
         assert "输入输出" in result.selected_text
         assert "raw" not in result.selected_text.lower()
         assert "召回来源" not in result.selected_text
