@@ -43,16 +43,22 @@ _SHORT_ACKS = frozenset({"嗯", "嗯嗯", "好", "好的", "哦", "行", "继续
 _LOW_SIGNAL_TASKS = frozenset({
     "back",
     "busy",
+    "chat",
     "daily_chat",
     "daily_good_morning",
     "daily_greeting_cn",
     "daily_greeting_en",
+    "first_ask",
     "greeting",
+    "phatic",
+    "plain_answer",
+    "plain_hold",
     "presence",
     "short_ack",
     "wait",
 })
-_RECALL_TASKS = frozenset({"recall", "recall_memory", "memory_followup"})
+_RECALL_TASKS = frozenset({"recall", "recall_memory", "memory_followup", "memory_recall"})
+_MEMORY_WRITE_TASKS = frozenset({"memory_write", "memory_store", "remember"})
 _TECH_TASKS = frozenset({
     "advice_continue",
     "complaint",
@@ -227,6 +233,13 @@ def plan_surface_memory_recall(
             task_mode=task_mode,
             reason="low_signal_surface_turn",
         )
+    if task_mode in _MEMORY_WRITE_TASKS or _looks_like_memory_write(user_message):
+        return SurfaceMemoryRecallPlan(
+            should_recall=False,
+            query=query,
+            task_mode=task_mode,
+            reason="memory_write_current_turn_only",
+        )
 
     if task_mode in _RECALL_TASKS or has_recall_hint:
         return SurfaceMemoryRecallPlan(
@@ -273,14 +286,10 @@ def plan_surface_memory_recall(
             reason="identity_relationship_context",
         )
     return SurfaceMemoryRecallPlan(
-        should_recall=True,
+        should_recall=False,
         query=query,
         task_mode=task_mode,
-        target_store_ids=("episodic_vector", "neo4j_bond"),
-        max_facts=2,
-        max_chars_per_fact=88,
-        time_lookback_days=_infer_lookback_days(user_message),
-        reason="daily_context_light_memory",
+        reason="no_memory_recall_needed",
     )
 
 
@@ -408,6 +417,7 @@ def build_surface_memory_recall_packet(
     candidates = _candidate_list(output)
     rows = _select_fact_rows(
         candidates,
+        query=query,
         max_facts=max_facts,
         max_chars_per_fact=max_chars_per_fact,
     )
@@ -629,6 +639,7 @@ def _candidate_list(output: Mapping[str, Any]) -> list[dict[str, Any]]:
 def _select_fact_rows(
     candidates: Sequence[Mapping[str, Any]],
     *,
+    query: str | None = None,
     max_facts: int,
     max_chars_per_fact: int,
 ) -> list[SurfaceMemoryFactRow]:
@@ -637,6 +648,7 @@ def _select_fact_rows(
         return []
     rows = [_build_fact_row(item, max_chars_per_fact=max_chars_per_fact) for item in candidates]
     rows = [row for row in rows if row is not None]
+    rows = _filter_rows_for_explicit_memory_query(rows, query=query)
     selected: list[SurfaceMemoryFactRow] = []
     seen_stores: set[str] = set()
     for row in rows:
@@ -653,6 +665,22 @@ def _select_fact_rows(
             continue
         selected.append(row)
     return selected
+
+
+def _filter_rows_for_explicit_memory_query(
+    rows: Sequence[SurfaceMemoryFactRow],
+    *,
+    query: str | None,
+) -> list[SurfaceMemoryFactRow]:
+    if not rows:
+        return []
+    query_text = _clean_text(query)
+    if not _looks_like_explicit_memory_content_query(query_text):
+        return list(rows)
+    preferred = [row for row in rows if _looks_like_explicit_memory_fact(row.fact)]
+    if preferred:
+        return preferred
+    return list(rows)
 
 
 def _build_fact_row(
@@ -790,6 +818,28 @@ def _build_evidence_refs(
 def _has_recall_hint(text: str) -> bool:
     lowered = _clean_text(text).lower()
     return any(hint.lower() in lowered for hint in _RECALL_HINTS)
+
+
+def _looks_like_memory_write(text: str) -> bool:
+    normalized = _clean_text(text)
+    return any(token in normalized for token in ("记一下", "记住", "帮我记", "替我记", "记着", "记下来"))
+
+
+def _looks_like_explicit_memory_content_query(text: str) -> bool:
+    normalized = _clean_text(text)
+    return bool(normalized) and (
+        any(token in normalized for token in ("让你记", "叫你记", "刚才记", "刚刚记", "记了什么", "记住什么", "记一下"))
+        or ("我" in normalized and "记" in normalized and "什么" in normalized)
+    )
+
+
+def _looks_like_explicit_memory_fact(text: str) -> bool:
+    normalized = _clean_text(text)
+    if any(token in normalized for token in ("记一下", "记住", "帮我记", "替我记", "记着", "记下来")):
+        return True
+    if any(token in normalized for token in ("喜欢", "不喜欢", "偏好", "讨厌", "常喝", "常吃")):
+        return True
+    return False
 
 
 def _should_skip_low_signal_recall(

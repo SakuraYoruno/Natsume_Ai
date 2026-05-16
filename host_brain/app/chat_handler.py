@@ -72,6 +72,65 @@ def _should_use_inline_governor(intent_draft: Dict[str, Any] | None) -> bool:
     return False
 
 
+def _surface_control_requests_memory_recall(surface_task_control: Any) -> bool:
+    if not isinstance(surface_task_control, dict) or not surface_task_control:
+        return False
+    task_mode = str(surface_task_control.get("task_mode") or "").strip().lower()
+    response_move = str(surface_task_control.get("response_move") or "").strip().lower()
+    recall_markers = {
+        "memory_recall",
+        "memory_followup",
+        "recall_memory",
+        "recall_preference",
+        "recall_relationship",
+    }
+    return task_mode in recall_markers or response_move in recall_markers
+
+
+def _normalize_surface_memory_recall_intent(
+    *,
+    intent_draft: Dict[str, Any] | None,
+    request_body: ChatRequest,
+    request_id: str,
+    session_id: str,
+) -> Dict[str, Any] | None:
+    if not _surface_control_requests_memory_recall(getattr(request_body, "surface_task_control", None)):
+        return intent_draft
+    draft = dict(intent_draft or {})
+    target_id = str(draft.get("target_id") or draft.get("skill_id") or "").strip().lower()
+    action = str(draft.get("action") or "").strip().lower()
+    if target_id not in {"", "memory_recall"} and action != "memory_recall":
+        return intent_draft
+
+    task_text = str(draft.get("task") or getattr(request_body, "message", "") or "").strip()
+    args_payload = dict(draft.get("args") or {}) if isinstance(draft.get("args"), dict) else {}
+    original_route = {
+        "route": draft.get("route"),
+        "target_id": draft.get("target_id"),
+        "action": draft.get("action"),
+        "reason_code": draft.get("reason_code") or draft.get("route_reason"),
+    }
+    draft.update(
+        {
+            "schema_version": str(draft.get("schema_version") or "Natsume.intent.v1"),
+            "id": str(draft.get("id") or f"intent::{request_id}"),
+            "session_id": str(draft.get("session_id") or session_id),
+            "type": "query",
+            "action": "exec_intent",
+            "route": "chat",
+            "target_id": "",
+            "target": str(draft.get("target") or "host"),
+            "task": task_text,
+            "route_reason": "SURFACE_MAIN_CHAIN_MEMORY_RECALL",
+            "reason_code": "SURFACE_MAIN_CHAIN_MEMORY_RECALL",
+            "args": {"text": str(args_payload.get("text") or task_text)},
+            "nonce": str(draft.get("nonce") or f"nonce::{request_id}"),
+            "_surface_route_override": original_route,
+        }
+    )
+    return draft
+
+
 async def _evaluate_governor_with_timing(
     *,
     engine: Any,
@@ -262,6 +321,13 @@ async def _unified_chat_sse_generator(
                 str((dict(intent_draft or {})).get("route") or ""),
                 str((dict(intent_draft or {})).get("route_reason") or (dict(intent_draft or {})).get("reason_code") or ""),
             )
+
+        intent_draft = _normalize_surface_memory_recall_intent(
+            intent_draft=intent_draft,
+            request_body=request_body,
+            request_id=request_id,
+            session_id=session_id,
+        )
 
         emotion_context = resolve_chat_emotion_context(request_body=request_body)
         governance_snapshot = build_chat_governance_snapshot(

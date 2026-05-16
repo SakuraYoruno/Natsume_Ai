@@ -1298,6 +1298,8 @@ _JEALOUSY_LOW_PRESSURE_MARKERS = (
 _SURFACE_SCENE_QUALITY_SCORING_SCENES = frozenset(
     {
         "short_continue",
+        "tired",
+        "self_doubt",
         "negative_feedback",
         "lover_presence",
         "lover_low_energy",
@@ -1586,6 +1588,24 @@ _POSITIVE_TIRED_MARKERS = (
     "别一个人扛",
 )
 _LOW_ENERGY_TASKS = frozenset({"tired", "headache", "sleepy", "bad_mood", "quiet"})
+_LOW_ENERGY_USER_MARKERS = (
+    "累",
+    "困",
+    "头疼",
+    "心情不好",
+    "不想说话",
+    "没睡好",
+    "脑子糊",
+    "睡不好",
+    "犯困",
+)
+_LOW_ENERGY_OVERHARSH_TEASE_PHRASES = (
+    "活该",
+    "自找",
+    "谁让你",
+    "报应",
+    "又把自己",
+)
 _LOW_ENERGY_STAGE_TEXTURE_STAGES = frozenset(
     {"familiar", "trusted_friend", "close_friend", "ambiguous", "pre_confession", "lover_early", "lover_stable"}
 )
@@ -1602,6 +1622,41 @@ _LOW_ENERGY_STAGE_MARKERS: dict[str, tuple[str, ...]] = {
     "lover_early": ("抱一下", "心疼", "靠我", "过来", "我陪着"),
     "lover_stable": ("抱一下", "心疼", "靠我", "我陪着"),
 }
+_SELF_DOUBT_TASKS = frozenset({"self_doubt", "self_doubt_small_step", "give_up"})
+_SELF_DOUBT_USER_MARKERS = ("做不好", "不适合", "放弃", "没用", "废物")
+_SELF_DOUBT_BAD_DEFERRAL_PHRASES = (
+    "明天再说",
+    "先放一放",
+    "先搁着",
+    "回头再看",
+    "回头再说",
+    "别想太多",
+    "保持积极",
+    "你一定可以",
+    "一切都会好",
+)
+_SELF_DOUBT_DEMEANING_PHRASES = (
+    "白痴",
+    "弱智",
+    "蠢货",
+    "傻子都能",
+    "笨蛋都能",
+)
+_SELF_DOUBT_SMALL_STEP_MARKERS = (
+    "一步",
+    "一件",
+    "小事",
+    "最小",
+    "最卡",
+    "拿出来",
+    "做完",
+    "收尾",
+    "拆",
+    "挑",
+    "发我",
+    "列出来",
+)
+_SELF_DOUBT_UNGROUNDED_TECH_TERMS = ("代码", "报错", "项目", "bug", "测试")
 _POSITIVE_RECALL_MARKERS = ("记得", "记着", "没忘", "你的事", "心里", "放在心上")
 _POSITIVE_FAILURE_ACTION_MARKERS = (
     "看看",
@@ -3051,7 +3106,7 @@ def _low_energy_scene_relevant(request: IsolatedSurfaceInput) -> bool:
     return bool(
         task_mode in _LOW_ENERGY_TASKS
         or response_move in _LOW_ENERGY_TASKS
-        or any(marker in user_message for marker in ("累", "困", "头疼", "心情不好", "不想说话"))
+        or any(marker in user_message for marker in _LOW_ENERGY_USER_MARKERS)
     )
 
 
@@ -3102,6 +3157,18 @@ def _apply_low_energy_stage_scoring(
         dimensions[key] = min(100.0, float(dimensions.get(key, 86.0)) + amount)
 
     delta = 0.0
+    overharsh_hits = [marker for marker in _LOW_ENERGY_OVERHARSH_TEASE_PHRASES if marker in text]
+    if overharsh_hits:
+        drop("emotional_containment", 24.0)
+        drop("distance_control", 16.0)
+        drop("naturalness", 12.0)
+        drop("context_fit", 10.0)
+        dimensions["emotional_containment"] = min(58.0, float(dimensions.get("emotional_containment", 86.0)))
+        dimensions["distance_control"] = min(68.0, float(dimensions.get("distance_control", 86.0)))
+        dimensions["naturalness"] = min(72.0, float(dimensions.get("naturalness", 86.0)))
+        reason_codes.append("LOW_ENERGY_OVERHARSH_TEASE:" + ",".join(overharsh_hits[:4]))
+        delta -= 24.0
+
     if "难受" in user_message and "累" in text and "难受" not in text:
         drop("context_fit", 12.0)
         drop("scene_grounding", 10.0)
@@ -3160,6 +3227,99 @@ def _apply_low_energy_stage_scoring(
         else:
             delta += 1.5
         reason_codes.append("LOW_ENERGY_STAGE_MATCH:" + ",".join(hits[:4]))
+    return delta
+
+
+def _self_doubt_scene_relevant(request: IsolatedSurfaceInput) -> bool:
+    task_mode = _clean_text(request.control.task_mode or request.control.response_move).lower()
+    response_move = _clean_text(request.control.response_move).lower()
+    user_message = _clean_text(request.user_message)
+    user_has_marker = any(marker in user_message for marker in _SELF_DOUBT_USER_MARKERS)
+    return bool(
+        task_mode in _SELF_DOUBT_TASKS
+        or response_move in _SELF_DOUBT_TASKS
+        or (task_mode == "high_emotion" and user_has_marker)
+        or user_has_marker
+    )
+
+
+def _apply_self_doubt_scene_scoring(
+    request: IsolatedSurfaceInput,
+    text: str,
+    dimensions: dict[str, float],
+    reason_codes: list[str],
+) -> float:
+    if not _self_doubt_scene_relevant(request):
+        return 0.0
+
+    def drop(key: str, amount: float) -> None:
+        dimensions[key] = max(0.0, float(dimensions.get(key, 86.0)) - amount)
+
+    def raise_(key: str, amount: float) -> None:
+        dimensions[key] = min(100.0, float(dimensions.get(key, 86.0)) + amount)
+
+    delta = 0.0
+    bad_hits = [marker for marker in _SELF_DOUBT_BAD_DEFERRAL_PHRASES if marker in text]
+    demeaning_hits = [marker for marker in _SELF_DOUBT_DEMEANING_PHRASES if marker in text]
+    small_step_grounded = any(marker in text for marker in _SELF_DOUBT_SMALL_STEP_MARKERS)
+    context_text = _clean_text(" ".join([request.user_message, *request.control.facts, *request.facts]))
+    ungrounded_tech_hits = [
+        marker
+        for marker in _SELF_DOUBT_UNGROUNDED_TECH_TERMS
+        if marker in text and marker not in context_text
+    ]
+    cjk_len = len(re.findall(r"[\u4e00-\u9fff]", text))
+
+    if bad_hits:
+        drop("emotional_containment", 18.0)
+        drop("context_fit", 18.0)
+        drop("usefulness", 16.0)
+        drop("naturalness", 8.0)
+        dimensions["context_fit"] = min(66.0, float(dimensions.get("context_fit", 86.0)))
+        dimensions["usefulness"] = min(66.0, float(dimensions.get("usefulness", 86.0)))
+        reason_codes.append("SELF_DOUBT_THIN_DEFERRAL:" + ",".join(bad_hits[:4]))
+        delta -= 20.0
+
+    if demeaning_hits:
+        drop("emotional_containment", 24.0)
+        drop("distance_control", 16.0)
+        drop("naturalness", 12.0)
+        dimensions["emotional_containment"] = min(58.0, float(dimensions.get("emotional_containment", 86.0)))
+        dimensions["distance_control"] = min(68.0, float(dimensions.get("distance_control", 86.0)))
+        reason_codes.append("SELF_DOUBT_DEMEANING_SMALL_STEP:" + ",".join(demeaning_hits[:4]))
+        delta -= 22.0
+
+    if not small_step_grounded:
+        drop("usefulness", 14.0)
+        drop("context_fit", 10.0)
+        dimensions["usefulness"] = min(72.0, float(dimensions.get("usefulness", 86.0)))
+        dimensions["context_fit"] = min(74.0, float(dimensions.get("context_fit", 86.0)))
+        reason_codes.append("SELF_DOUBT_LACKS_SMALL_STEP")
+        delta -= 12.0
+
+    if ungrounded_tech_hits:
+        drop("context_fit", 16.0)
+        drop("scene_grounding", 14.0)
+        drop("implied_fact_risk", 20.0)
+        dimensions["context_fit"] = min(66.0, float(dimensions.get("context_fit", 86.0)))
+        dimensions["scene_grounding"] = min(66.0, float(dimensions.get("scene_grounding", 86.0)))
+        dimensions["implied_fact_risk"] = min(58.0, float(dimensions.get("implied_fact_risk", 86.0)))
+        reason_codes.append("SELF_DOUBT_UNGROUNDED_TECH_OBJECT:" + ",".join(ungrounded_tech_hits[:4]))
+        delta -= 18.0
+
+    if cjk_len <= 8:
+        drop("scene_grounding", 12.0)
+        drop("emotional_containment", 8.0)
+        dimensions["scene_grounding"] = min(70.0, float(dimensions.get("scene_grounding", 86.0)))
+        reason_codes.append("SELF_DOUBT_REPLY_TOO_THIN")
+        delta -= 8.0
+
+    if small_step_grounded and not bad_hits:
+        raise_("usefulness", 6.0)
+        raise_("context_fit", 5.0)
+        raise_("emotional_containment", 4.0)
+        reason_codes.append("SELF_DOUBT_SMALL_STEP_GROUNDED")
+        delta += 4.0
     return delta
 
 
@@ -4889,6 +5049,7 @@ def score_isolated_surface_candidates(
         score += _apply_back_stage_scoring(request, quality.normalized_text or candidate, dimensions, reason_codes)
         score += _apply_morning_stage_scoring(request, quality.normalized_text or candidate, dimensions, reason_codes)
         score += _apply_low_energy_stage_scoring(request, quality.normalized_text or candidate, dimensions, reason_codes)
+        score += _apply_self_doubt_scene_scoring(request, quality.normalized_text or candidate, dimensions, reason_codes)
         if "WRITTEN_REGISTER_TONE" in reason_codes:
             score -= 8.0
             dimensions["spoken_chat_texture"] = min(76.0, float(dimensions.get("spoken_chat_texture", 86.0)))

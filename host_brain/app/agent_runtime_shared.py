@@ -2122,12 +2122,16 @@ async def _cortex_orchestrator_sse_generator_impl(
         sanitized_message=sanitized_message,
     )
 
-    task_progress_answer = _task_progress_fastpath(
-        request_id=request_id,
-        session_id=session_id,
-        person_id=person_id,
-        user_message=sanitized_message,
-        render_target_lang=render_target_lang,
+    task_progress_answer = (
+        _task_progress_fastpath(
+            request_id=request_id,
+            session_id=session_id,
+            person_id=person_id,
+            user_message=sanitized_message,
+            render_target_lang=render_target_lang,
+        )
+        if _parse_bool_env("HOST_LEGACY_DIRECT_TEXT_ROUTES_ENABLED", default=False)
+        else None
     )
     if task_progress_answer:
         narrative = _sanitize_output(str(task_progress_answer).strip())
@@ -2179,12 +2183,16 @@ async def _cortex_orchestrator_sse_generator_impl(
         )
         return
 
-    recent_turn_answer = _recent_turn_answer(
-        request_id=request_id,
-        session_id=session_id,
-        person_id=person_id,
-        user_message=sanitized_message,
-        render_target_lang=render_target_lang,
+    recent_turn_answer = (
+        _recent_turn_answer(
+            request_id=request_id,
+            session_id=session_id,
+            person_id=person_id,
+            user_message=sanitized_message,
+            render_target_lang=render_target_lang,
+        )
+        if _parse_bool_env("HOST_LEGACY_DIRECT_TEXT_ROUTES_ENABLED", default=False)
+        else None
     )
     if recent_turn_answer:
         narrative = _sanitize_output(str(recent_turn_answer).strip())

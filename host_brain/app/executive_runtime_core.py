@@ -62,6 +62,65 @@ _MULTI_STEP_MARKERS = (
 )
 
 _ACTION_SPLIT_RE = re.compile(r"(?:然后|并且|同时|接着|之后|再把|再去|再来)")
+_SIMPLE_TECH_ADVICE_TERMS = (
+    "报错",
+    "错误",
+    "异常",
+    "失败",
+    "缺包",
+    "导入",
+    "端口",
+    "日志",
+    "启动",
+    "连接不上",
+    "连不上",
+    "没响应",
+    "无响应",
+    "排查",
+    "怎么查",
+    "怎么排查",
+    "该怎么",
+    "怎么办",
+    "如何",
+    "先看",
+    "看什么",
+    "module not found",
+    "modulenotfounderror",
+    "no module named",
+    "openai_api_key",
+    "环境变量",
+    "neo4j",
+    "bolt://",
+    "chroma",
+    "chromadb",
+    "http://",
+    "https://",
+    "why",
+    "error",
+    "port",
+    "timeout",
+)
+_SIMPLE_TECH_ACTION_BLOCKERS = (
+    "开始处理",
+    "开始做",
+    "继续做",
+    "直接改",
+    "帮我改",
+    "修改",
+    "修复",
+    "实现",
+    "重构",
+    "删除",
+    "清理",
+    "整理仓库",
+    "提交",
+    "跑测试",
+    "执行",
+    "接入",
+    "迁移",
+    "写代码",
+)
+_SIMPLE_TASK_SPLIT_RE = re.compile(r"(?:下一步|接下来|后面|任务).{0,12}(?:拆成|分成|列成).{0,8}(?:三|3)件", re.IGNORECASE)
 _SKILL_EXEC_FAIL_STATUS = {"failed", "rejected", "degraded", "error"}
 _SKILL_EXEC_FAIL_CODES = {
     "SCHED_NO_CONTENT",
@@ -314,11 +373,31 @@ def _extract_delegate_target(intent_draft: dict[str, Any]) -> str:
     return ""
 
 
+def _surface_control_requests_memory_recall(surface_task_control: Any, intent_draft: dict[str, Any]) -> bool:
+    if not isinstance(surface_task_control, dict) or not surface_task_control:
+        return False
+    task_mode = _normalize_text(surface_task_control.get("task_mode"), lower=True)
+    response_move = _normalize_text(surface_task_control.get("response_move"), lower=True)
+    target_hint = _normalize_text(intent_draft.get("target_id") or intent_draft.get("skill_id"), lower=True)
+    action_hint = _normalize_text(intent_draft.get("action"), lower=True)
+    recall_markers = {
+        "memory_recall",
+        "memory_followup",
+        "recall_memory",
+        "recall_preference",
+        "recall_relationship",
+    }
+    if task_mode in recall_markers or response_move in recall_markers:
+        return True
+    return target_hint == "memory_recall" or action_hint == "memory_recall"
+
+
 def _hard_rule_route(
     *,
     intent_draft: dict[str, Any],
     sanitized_message: str,
     skill_registry: Any,
+    surface_task_control: Any | None = None,
     allow_plan_detection: bool = True,
 ) -> _RouteSelection:
     """两层路由判断。
@@ -328,6 +407,9 @@ def _hard_rule_route(
     """
     route_hint = _normalize_text(intent_draft.get("route"), lower=True)
     target_hint = _normalize_text(intent_draft.get("target_id"))
+    if _surface_control_requests_memory_recall(surface_task_control, intent_draft):
+        return _RouteSelection("chat", "", "hard_rule:surface_memory_recall")
+
     if route_hint in {"recent_turn", "task_progress", "chat"}:
         return _RouteSelection(route_hint, target_hint, f"intent_draft:{route_hint}")
 
@@ -337,6 +419,10 @@ def _hard_rule_route(
 
     if route_hint == "plan":
         return _RouteSelection("plan", target_hint or "skill_dag", "intent_draft:plan")
+    if _looks_like_simple_technical_advice(sanitized_message, intent_draft):
+        return _RouteSelection("chat", "", "hard_rule:surface_technical_advice")
+    if _looks_like_simple_task_split_advice(sanitized_message, intent_draft):
+        return _RouteSelection("chat", "", "hard_rule:surface_task_split")
     if route_hint == "skill" and target_hint:
         return _RouteSelection("skill", target_hint, "intent_draft:skill")
     if route_hint == "delegate" and target_hint:
@@ -387,6 +473,36 @@ def _hard_rule_route(
         return _RouteSelection("plan", "skill_dag", "hard_rule:multi_step")
 
     return _RouteSelection("chat", "", "default:chat")
+
+
+def _looks_like_simple_technical_advice(user_message: str, intent_draft: dict[str, Any] | None = None) -> bool:
+    text = _normalize_text(user_message, lower=True)
+    if not text:
+        return False
+    if any(token in text for token in _SIMPLE_TECH_ACTION_BLOCKERS):
+        return False
+    if not any(token in text for token in _SIMPLE_TECH_ADVICE_TERMS):
+        return False
+    if not any(token in text for token in ("怎么", "如何", "怎么办", "该", "排查", "查", "先看", "看什么", "?", "？")):
+        return False
+    draft = dict(intent_draft or {}) if isinstance(intent_draft, dict) else {}
+    target_id = _normalize_text(draft.get("target_id") or draft.get("skill_id"), lower=True)
+    if target_id and target_id not in {"", "codex_worker", "intent_agent"}:
+        return False
+    return True
+
+
+def _looks_like_simple_task_split_advice(user_message: str, intent_draft: dict[str, Any] | None = None) -> bool:
+    text = _normalize_text(user_message, lower=True)
+    if not text or not _SIMPLE_TASK_SPLIT_RE.search(text):
+        return False
+    if any(token in text for token in _SIMPLE_TECH_ACTION_BLOCKERS):
+        return False
+    draft = dict(intent_draft or {}) if isinstance(intent_draft, dict) else {}
+    target_id = _normalize_text(draft.get("target_id") or draft.get("skill_id"), lower=True)
+    if target_id and target_id not in {"", "intent_agent", "codex_worker"}:
+        return False
+    return True
 
 
 def _should_force_complex_plan(
@@ -1736,6 +1852,7 @@ async def _executive_runtime_core_impl(
         intent_draft=dict(intent_draft or {}),
         sanitized_message=sanitized_message,
         skill_registry=skill_registry,
+        surface_task_control=dict(getattr(request_body, "surface_task_control", {}) or {}),
     )
 
     # 应用器官族路由覆盖（仅覆盖 skill/delegate/plan，不覆盖 recent_turn/task_progress）
@@ -1863,11 +1980,14 @@ async def _executive_runtime_core_impl(
     runtime_capability_payload = None
     relational_reason = build_relational_chat_reason_code(sanitized_message)
     if route.route_type == "chat":
+        simple_surface_technical_advice = _looks_like_simple_technical_advice(sanitized_message, intent_draft)
+        simple_surface_task_split = _looks_like_simple_task_split_advice(sanitized_message, intent_draft)
+        surface_main_chain_forced = str(route.reason_code or "").startswith("hard_rule:surface_")
         # Phase D: PREFRONTAL_PLAN_ENABLED 时，前额叶已规划，跳过 runtime_capability 合成
         _skip_capability_synthesis = (
             _prefrontal_plan_enabled
             and bool(_prefrontal_plan.get("action"))
-        )
+        ) or surface_main_chain_forced or simple_surface_technical_advice or simple_surface_task_split
         if not _skip_capability_synthesis:
             runtime_capability_payload = _maybe_synthesize_runtime_capability(
                 request_id=request_id,
@@ -1880,8 +2000,8 @@ async def _executive_runtime_core_impl(
             )
         else:
             _logger.debug(
-                "[%s] Phase D: prefrontal_plan 已存在，跳过 runtime_capability 合成 action=%s",
-                request_id, _prefrontal_plan.get("action"),
+                "[%s] skip runtime_capability synthesis prefrontal_action=%s surface_main_chain_forced=%s simple_surface_technical_advice=%s simple_surface_task_split=%s",
+                request_id, _prefrontal_plan.get("action"), surface_main_chain_forced, simple_surface_technical_advice, simple_surface_task_split,
             )
         if runtime_capability_payload is not None and not relational_reason:
             route = _RouteSelection(

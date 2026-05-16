@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import re
 import time
 from typing import Any, AsyncGenerator
@@ -151,6 +152,8 @@ async def try_handle_recent_turn_direct_route(
     sse_fn,
     record_dispatch_handoff_fn,
 ) -> list[str] | None:
+    if not _legacy_direct_text_routes_enabled():
+        return None
     if str(route or "").strip().lower() != "recent_turn":
         return None
 
@@ -241,6 +244,8 @@ async def try_handle_task_progress_direct_route(
     sse_fn,
     record_dispatch_handoff_fn,
 ) -> list[str] | None:
+    if not _legacy_direct_text_routes_enabled():
+        return None
     if str(route or "").strip().lower() != "task_progress":
         return None
 
@@ -448,6 +453,11 @@ async def _executive_runtime_core_sse_generator_impl(
         pii_ingress_stats=pii_ingress_stats,
     ):
         yield event
+
+
+def _legacy_direct_text_routes_enabled() -> bool:
+    raw = str(os.environ.get("HOST_LEGACY_DIRECT_TEXT_ROUTES_ENABLED") or "").strip().lower()
+    return raw in {"1", "true", "yes", "on"}
 
 
 __all__ = [

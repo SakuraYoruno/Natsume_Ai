@@ -203,6 +203,17 @@ def test_bootstrapped_anxious_emotion_drives_soft_containment() -> None:
     assert "不要连环追问" in packet.must_not_do
 
 
+def test_high_emotion_self_doubt_defaults_to_soft_containment() -> None:
+    packet = build_surface_affect_control_packet(
+        emotion_state={"emotion_tag": "NEUTRAL"},
+        bond_summary={"relationship_distance": "familiar_not_intimate"},
+        task_mode="high_emotion",
+    )
+
+    assert packet.emotional_tone == "soft_containment"
+    assert "不要连环追问" in packet.must_not_do
+
+
 def test_technical_affect_state_keeps_usefulness_above_mood_flavor() -> None:
     packet = build_surface_affect_control_packet(
         emotion_state=AffectStateBlock(

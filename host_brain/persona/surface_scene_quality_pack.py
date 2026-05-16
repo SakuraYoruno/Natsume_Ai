@@ -148,14 +148,26 @@ _FALLBACK_SURFACE_SCENE_QUALITY_PACK: tuple[SurfaceSceneQualitySample, ...] = (
     SurfaceSceneQualitySample(
         scene_id="tired",
         title="低能量/累",
-        user_markers=("累", "有点累", "好累", "困"),
-        required_move="先降压照看；少问少说教，记忆只约束追问和模板味。",
+        user_markers=("累", "有点累", "好累", "困", "没睡好", "脑子糊"),
+        required_move="先降压照看；轻吐槽可以，但不能责怪用户。少问少说教，落到休息、放慢或一个小动作。",
         scoring_focus=("emotional_containment", "distance_control", "naturalness"),
         good_examples=("行啦，先缓一缓，别硬撑。", "累了就先歇着，不着急。", "哼，今天先放你一马，去缓一缓。"),
-        bad_examples=("保持积极，一切都会好起来。", "你为什么会累？", "那继续主线，别停。"),
-        should_not_surface=("心理咨询腔", "鸡汤", "追问原因", "任务催促"),
+        bad_examples=("保持积极，一切都会好起来。", "你为什么会累？", "那继续主线，别停。", "老哥，活该啦。去喝杯咖啡缓缓。", "你怎么又把自己弄成这样。"),
+        should_not_surface=("心理咨询腔", "鸡汤", "追问原因", "任务催促", "活该", "自找", "谁让你", "又把自己"),
         source="live_ab_promoted+manual_gold",
         source_note="来自低能量场景测试和手写 gold。",
+    ),
+    SurfaceSceneQualitySample(
+        scene_id="self_doubt",
+        title="自我否定/想放弃",
+        user_markers=("做不好", "不适合", "放弃"),
+        required_move="先截断用户给自己的否定标签，再给一件很小、现在能做的动作；喝水/休息只能当降压，不能替代小步推进；不要只说休息或明天再说。",
+        scoring_focus=("emotional_containment", "context_fit", "usefulness", "naturalness"),
+        good_examples=("停，别急着给自己判死刑。先挑最小的一步做完。", "少给自己扣帽子，老哥。先把最卡的那一小块拿出来。", "不准这么快认输。今天只做一件能收尾的小事。"),
+        bad_examples=("停——先放一放，明天再说。", "停——先搁着。", "明天再说。", "回头再看。", "别想太多。", "保持积极，你一定可以的。"),
+        should_not_surface=("明天再说", "先搁着", "回头再看", "回头再说", "别想太多", "你一定可以", "保持积极", "只休息不落地"),
+        source="manual_gold",
+        source_note="针对高情绪自我否定场景：防止回复过短或只延期。",
     ),
     SurfaceSceneQualitySample(
         scene_id="relationship_memory_reassurance",
@@ -316,7 +328,13 @@ def select_surface_scene_quality_sample(
         return by_scene.get("explicit_memory")
     if text in {"早", "早安", "早上好"} or task in {"daily_good_morning", "good_morning"}:
         return by_scene.get("daily_morning")
-    if task in {"tired", "headache", "sleepy", "bad_mood"} or _contains_any(text, ("累", "有点累", "好累", "困")):
+    self_doubt_text = _contains_any(text, ("做不好", "不适合", "放弃", "没用", "废物"))
+    if task in {"self_doubt", "self_doubt_small_step", "give_up"} or (task == "high_emotion" and self_doubt_text) or self_doubt_text:
+        return by_scene.get("self_doubt")
+    if task in {"tired", "headache", "sleepy", "bad_mood"} or _contains_any(
+        text,
+        ("累", "有点累", "好累", "困", "没睡好", "脑子糊", "睡不好", "犯困"),
+    ):
         return by_scene.get("tired")
     if task in {"style_repair", "ack_style_issue"} or _contains_any(text, ("怪", "不通顺", "不像人话", "人机")):
         return by_scene.get("negative_feedback")

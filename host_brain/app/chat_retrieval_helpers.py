@@ -24,6 +24,36 @@ _LOW_SIGNAL_SHORT_QUERY_MAX_LEN = 12
 _LOW_SIGNAL_SCORE_FLOOR = 0.12
 _LOW_SIGNAL_CONFIDENCE_FLOOR = 0.65
 _LOW_SIGNAL_COVERAGE_FLOOR = 0.25
+_EXPLICIT_MEMORY_WRITE_MARKERS: tuple[str, ...] = (
+    "帮我记住",
+    "替我记住",
+    "给我记住",
+    "帮我记一下",
+    "替我记一下",
+    "给我记一下",
+    "帮我记",
+    "替我记",
+    "记下来",
+    "记一下",
+    "记着",
+    "记住",
+)
+_EXPLICIT_MEMORY_QUERY_ANCHORS: tuple[str, ...] = (
+    "让你记",
+    "叫你记",
+    "要你记",
+    "帮我记",
+    "替我记",
+    "给我记",
+    "你记了",
+    "你记住",
+    "你刚才记",
+    "你刚刚记",
+)
+_EXPLICIT_MEMORY_QUERY_WORDS: tuple[str, ...] = ("什么", "啥", "哪", "哪些", "内容")
+_GENERIC_SURFACE_TASK_MODES: frozenset[str] = frozenset(
+    {"chat", "daily_chat", "first_ask", "neutral", "phatic", "plain_answer", "plain_hold"}
+)
 
 
 def _coerce_float(value: Any) -> float | None:
@@ -186,6 +216,25 @@ async def _run_retrieval(
         )
         plan = plan_surface_memory_recall(context)
         embedding_model_id = ""
+        short_term_memory_facts = _recent_explicit_memory_facts(
+            message=message,
+            session_id=session_id,
+            request_id=request_id,
+        )
+        if plan.should_recall and short_term_memory_facts:
+            packet = SurfaceMemoryRecallPacket(
+                facts=tuple(short_term_memory_facts),
+                confidence=1.0,
+                query=plan.query,
+                route_ids=("recent_turn_explicit_memory",),
+                candidate_count=len(short_term_memory_facts),
+                trace={
+                    "skipped": False,
+                    "plan": plan.as_dict(),
+                    "route_count": 1,
+                    "short_term_explicit_memory": True,
+                },
+            )
         if not plan.should_recall:
             packet = SurfaceMemoryRecallPacket(
                 query=plan.query,
@@ -193,7 +242,7 @@ async def _run_retrieval(
                 reason_code=SURFACE_MEMORY_RECALL_SKIPPED,
                 trace={"skipped": True, "plan": plan.as_dict()},
             )
-        else:
+        elif not short_term_memory_facts:
             query_embedding, embedding_model_id = _embed_surface_memory_query(plan.query)
             packet = recall_surface_memory_packet(
                 recall_service=_build_surface_memory_recall_service(),
@@ -294,9 +343,11 @@ def _surface_task_mode_from_intent(*, message: str, intent_draft: Mapping[str, A
         or draft.get("primary_topic")
         or ""
     ).strip().lower()
-    if raw:
+    if raw and raw not in _GENERIC_SURFACE_TASK_MODES:
         return raw
     text = str(message or "").strip()
+    if any(token in text for token in ("记一下", "记住", "帮我记", "替我记", "记着", "记下来")):
+        return "memory_write"
     if any(token in text for token in ("还记得", "记得吗", "上次", "之前", "刚才")):
         return "recall_memory"
     if any(token in text for token in ("报错", "错误", "测试", "提交", "仓库", "代码", "怎么改", "下一步")):
@@ -339,6 +390,61 @@ def _surface_memory_query_facts(
     if topic:
         facts.append(f"当前关注：{topic}")
     return facts[:3]
+
+
+def _recent_explicit_memory_facts(*, message: str, session_id: str, request_id: str) -> list[str]:
+    if not _looks_like_explicit_memory_content_query(message):
+        return []
+    normalized_session_id = str(session_id or "").strip()
+    if not normalized_session_id:
+        return []
+    try:
+        from host_brain.app.dependencies import get_conversation_history  # noqa: PLC0415
+
+        turns = get_conversation_history().fetch_recent_turns(
+            session_id=normalized_session_id,
+            max_turns=8,
+            exclude_request_id=str(request_id or "").strip() or None,
+        )
+    except Exception:
+        return []
+
+    for turn in reversed(list(turns or [])):
+        if getattr(turn, "role", "") != "user":
+            continue
+        payload = _extract_explicit_memory_write_payload(getattr(turn, "content", ""))
+        if payload:
+            return [f"记忆线索：用户刚才让你记住：{payload}"]
+    return []
+
+
+def _looks_like_explicit_memory_content_query(message: str) -> bool:
+    text = _normalize_memory_text(message)
+    if not text:
+        return False
+    if not any(word in text for word in _EXPLICIT_MEMORY_QUERY_WORDS):
+        return False
+    return any(anchor in text for anchor in _EXPLICIT_MEMORY_QUERY_ANCHORS)
+
+
+def _extract_explicit_memory_write_payload(text: str) -> str:
+    normalized = _normalize_memory_text(text)
+    if not normalized:
+        return ""
+    for marker in sorted(_EXPLICIT_MEMORY_WRITE_MARKERS, key=len, reverse=True):
+        index = normalized.find(marker)
+        if index < 0:
+            continue
+        payload = normalized[index + len(marker) :]
+        payload = payload.lstrip(" ，,。.!！?？:：；;、")
+        payload = payload.strip(" \t\r\n，,。.!！?？；;")
+        if len(payload) >= 2:
+            return payload[:96].rstrip("，,、 ")
+    return ""
+
+
+def _normalize_memory_text(value: str) -> str:
+    return re.sub(r"\s+", " ", str(value or "").strip())
 
 
 def _embed_surface_memory_query(query: str) -> tuple[list[float], str]:

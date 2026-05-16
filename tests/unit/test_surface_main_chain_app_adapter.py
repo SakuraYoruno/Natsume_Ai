@@ -8,6 +8,7 @@ import pytest
 
 from host_brain.app.surface_main_chain_adapter import (
     build_surface_main_chain_input_from_chat_input,
+    run_surface_main_chain_for_chat_input,
     surface_main_chain_enabled,
     surface_main_chain_sse_generator,
 )
@@ -79,6 +80,12 @@ def test_build_surface_main_chain_input_from_chat_input_compresses_app_context(m
     assert payload.user_message == "这段我不会改"
     assert payload.task_control["task_mode"] == "technical_help"
     assert payload.task_control["response_move"] == "technical_next_step"
+    assert "当前输入渠道：中文文字私聊。" in payload.task_control["facts"]
+    assert "技术场景：先给一条能执行的排查步骤，命令和符号要准确。" in payload.task_control["facts"]
+    assert "技术场景：最终回复至少包含查因和下一步处理，不要只给一条裸命令。" in payload.task_control["facts"]
+    assert "不要说“你这声音”“我听出来”“我看到你”或把文字输入写成音频/视觉感知。" in payload.must_not_do
+    assert "技术回复不要用“干掉”“完事”等粗略说法替代清楚步骤。" in payload.must_not_do
+    assert "不要只输出单条命令；命令后要说明下一步如何处理结果。" in payload.must_not_do
     assert tuple(payload.memory_packet.facts) == ("用户上次改这类段落时卡在输入输出边界。",)
     assert payload.affect_packet.emotional_tone == "steady_helpful"
     assert "memory://episodic/1" not in json.dumps(payload.as_dict(), ensure_ascii=False)
@@ -305,6 +312,156 @@ async def test_surface_main_chain_sse_generator_calls_chat_surface_pool(monkeypa
     assert post_process_calls[0]["emotion_context"]["surface_vts_expression_id"]
 
 
+@pytest.mark.asyncio
+async def test_surface_main_chain_quick_replies_port_occupied_without_llm(monkeypatch) -> None:
+    trace: dict[str, object] = {}
+
+    monkeypatch.setattr(
+        "host_brain.app.surface_main_chain_adapter.get_compiled_soul",
+        lambda: SimpleNamespace(source_text=SOUL, runtime_full_text=SOUL),
+    )
+
+    async def _unexpected_complete(**_kwargs):  # noqa: ANN003
+        raise AssertionError("port occupied quick reply should not call LLM")
+
+    monkeypatch.setattr("host_brain.integrations.llm_helpers.acomplete_llm_with_pool", _unexpected_complete)
+
+    result = await run_surface_main_chain_for_chat_input(
+        _agent_input(user_message="项目启动报错，端口18080被占用了，我该怎么排查？"),
+        trace_stage_meta=trace,
+    )
+
+    text = result.selected_text
+    assert "netstat -ano | findstr :18080" in text
+    assert "taskkill /PID <PID> /F" in text
+    assert "改服务端口再重启" in text
+    assert "干掉" not in text
+    assert result.runtime.latency_ms < 500
+    assert trace["surface_quick_reply"] == {"applied": True, "kind": "port_occupied_windows"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("message", "expected_kind", "expected_fragments"),
+    [
+        (
+            "Python import yaml 失败，ModuleNotFoundError: No module named 'yaml'，怎么排查？",
+            "python_missing_module_windows",
+            ("python -m pip show PyYAML", "python -m pip install PyYAML", "sys.executable"),
+        ),
+        (
+            "OPENAI_API_KEY 环境变量好像没生效，先查什么？",
+            "windows_env_var_check",
+            ("$env:OPENAI_API_KEY", "echo %OPENAI_API_KEY%", "别把值贴出来"),
+        ),
+        (
+            "Neo4j 连接不上 bolt://127.0.0.1:17687，先看什么？",
+            "neo4j_connectivity_windows",
+            ("Test-NetConnection 127.0.0.1 -Port 17687", "Docker", "BOND_NEO4J_URI"),
+        ),
+        (
+            "Chroma http://127.0.0.1:18000 心跳没响应，先查什么？",
+            "chroma_heartbeat_windows",
+            ("Invoke-WebRequest http://127.0.0.1:18000/api/v2/heartbeat", "Docker", "collection"),
+        ),
+    ],
+)
+async def test_surface_main_chain_quick_replies_project_technical_cases(
+    monkeypatch,
+    message: str,
+    expected_kind: str,
+    expected_fragments: tuple[str, ...],
+) -> None:
+    trace: dict[str, object] = {}
+
+    monkeypatch.setattr(
+        "host_brain.app.surface_main_chain_adapter.get_compiled_soul",
+        lambda: SimpleNamespace(source_text=SOUL, runtime_full_text=SOUL),
+    )
+
+    async def _unexpected_complete(**_kwargs):  # noqa: ANN003
+        raise AssertionError("project technical quick reply should not call LLM")
+
+    monkeypatch.setattr("host_brain.integrations.llm_helpers.acomplete_llm_with_pool", _unexpected_complete)
+
+    result = await run_surface_main_chain_for_chat_input(
+        _agent_input(user_message=message),
+        trace_stage_meta=trace,
+    )
+
+    for fragment in expected_fragments:
+        assert fragment in result.selected_text
+    assert "lsof" not in result.selected_text
+    assert "grep" not in result.selected_text
+    assert trace["surface_quick_reply"] == {"applied": True, "kind": expected_kind}
+
+
+@pytest.mark.asyncio
+async def test_surface_main_chain_quick_reply_audit_marks_no_llm(monkeypatch) -> None:
+    post_process_calls: list[dict] = []
+
+    monkeypatch.setattr(
+        "host_brain.app.surface_main_chain_adapter.get_compiled_soul",
+        lambda: SimpleNamespace(source_text=SOUL, runtime_full_text=SOUL),
+    )
+
+    async def _unexpected_complete(**_kwargs):  # noqa: ANN003
+        raise AssertionError("quick reply should not call LLM")
+
+    async def _fake_post_process(**kwargs):  # noqa: ANN003
+        post_process_calls.append(kwargs)
+
+    monkeypatch.setattr("host_brain.integrations.llm_helpers.acomplete_llm_with_pool", _unexpected_complete)
+    monkeypatch.setattr("host_brain.app.agent_runtime_shared._async_post_process", _fake_post_process)
+
+    events = [
+        _parse_sse(chunk)
+        async for chunk in surface_main_chain_sse_generator(
+            _agent_input(user_message="项目启动报错，端口18080被占用了，我该怎么排查？")
+        )
+    ]
+    commit = next(event for event in events if event.get("phase") == "COMMIT")
+
+    assert commit["audit_refs"]["llm_latency_ms"] == 0
+    assert commit["audit_refs"]["first_token_ms"] == 0
+    assert commit["audit_refs"]["model_id"] is None
+    assert commit["audit_refs"]["provider_name"] is None
+    assert commit["audit_refs"]["trace_stage_meta"]["surface_quick_reply"]["kind"] == "port_occupied_windows"
+    await asyncio.sleep(0)
+    assert post_process_calls
+
+
+@pytest.mark.asyncio
+async def test_surface_main_chain_quick_replies_simple_task_split(monkeypatch) -> None:
+    trace: dict[str, object] = {}
+
+    monkeypatch.setattr(
+        "host_brain.app.surface_main_chain_adapter.get_compiled_soul",
+        lambda: SimpleNamespace(source_text=SOUL, runtime_full_text=SOUL),
+    )
+
+    async def _unexpected_complete(**_kwargs):  # noqa: ANN003
+        raise AssertionError("simple task split quick reply should not call LLM")
+
+    monkeypatch.setattr("host_brain.integrations.llm_helpers.acomplete_llm_with_pool", _unexpected_complete)
+
+    result = await run_surface_main_chain_for_chat_input(
+        _agent_input(
+            user_message="帮我把下一步拆成三件事。",
+            surface_task_control={
+                "task_mode": "task_help",
+                "response_move": "能执行，结构清楚，少废话。",
+                "question_budget": 0,
+            },
+        ),
+        trace_stage_meta=trace,
+    )
+
+    assert result.selected_text == "老哥，先拆三件：把卡点写清楚；只做一个最小可验证动作；跑完看结果，再决定下一步。"
+    assert "空壳" not in result.selected_text
+    assert trace["surface_quick_reply"] == {"applied": True, "kind": "task_split_three_steps"}
+
+
 def test_surface_main_chain_enabled_defaults_to_normal_text_only(monkeypatch) -> None:
     monkeypatch.delenv("HOST_SURFACE_MAIN_CHAIN_ENABLED", raising=False)
     assert surface_main_chain_enabled(_agent_input()) is True
@@ -315,4 +472,4 @@ def test_surface_main_chain_enabled_defaults_to_normal_text_only(monkeypatch) ->
     monkeypatch.setenv("HOST_SURFACE_MAIN_CHAIN_ENABLED", "true")
     assert surface_main_chain_enabled(_agent_input(attachments=[{"kind": "image"}])) is False
     assert surface_main_chain_enabled(_agent_input(response_form="sticker")) is False
-    assert surface_main_chain_enabled(_agent_input(intent_draft={"route": "delegate"})) is False
+    assert surface_main_chain_enabled(_agent_input(intent_draft={"route": "delegate"})) is True

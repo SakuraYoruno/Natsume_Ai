@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from host_brain.app import chat_retrieval_helpers as helpers
+from host_brain.conversation.schema import Turn
 
 
 @pytest.mark.asyncio
@@ -93,6 +94,114 @@ async def test_run_retrieval_skips_low_signal_short_turn_without_embedding(monke
     assert summary["status"] == "SKIPPED"
     assert summary["reason_code"] == "SURFACE_MEMORY_RECALL_SKIPPED"
     assert summary["surface_memory_recall_packet"]["trace"]["plan"]["reason"] == "low_signal_surface_turn"
+
+
+@pytest.mark.asyncio
+async def test_run_retrieval_skips_generic_plain_answer_without_memory_hint(monkeypatch) -> None:
+    def _unexpected_embed(_query):  # noqa: ANN001
+        raise AssertionError("generic daily turns should not build embeddings")
+
+    def _unexpected_service():
+        raise AssertionError("generic daily turns should not build recall services")
+
+    monkeypatch.setattr(helpers, "_embed_surface_memory_query", _unexpected_embed)
+    monkeypatch.setattr(helpers, "_build_surface_memory_recall_service", _unexpected_service)
+
+    summary, evidence_items = await helpers._run_retrieval(
+        request_id="req-skip-plain-answer",
+        message="今天先随便聊两句吧。",
+        person_id="person-1",
+        session_id="sess-1",
+        ts_ms=654,
+        emotion_tag="NEUTRAL",
+        render_target_lang="zh",
+        intent_draft={"route": "plain_answer"},
+    )
+
+    assert evidence_items == []
+    assert summary["status"] == "SKIPPED"
+    assert summary["surface_memory_recall_packet"]["trace"]["plan"]["reason"] == "no_memory_recall_needed"
+
+
+@pytest.mark.asyncio
+async def test_run_retrieval_prefers_recent_explicit_memory_write(monkeypatch) -> None:
+    def _unexpected_embed(_query):  # noqa: ANN001
+        raise AssertionError("recent explicit memory should not need vector embedding")
+
+    def _unexpected_service():
+        raise AssertionError("recent explicit memory should bypass vector recall")
+
+    class _History:
+        def fetch_recent_turns(self, *, session_id, max_turns, exclude_request_id=None):  # noqa: ANN001
+            assert session_id == "sess-1"
+            assert max_turns == 8
+            assert exclude_request_id == "req-current"
+            return [
+                Turn(
+                    turn_id="turn-1",
+                    session_id="sess-1",
+                    person_id="person-1",
+                    request_id="req-old",
+                    role="user",
+                    content="记一下，我昨晚没睡好。",
+                    ts_ms=1,
+                    turn_index=1,
+                ),
+                Turn(
+                    turn_id="turn-2",
+                    session_id="sess-1",
+                    person_id="person-1",
+                    request_id="req-old",
+                    role="assistant",
+                    content="记住了。",
+                    ts_ms=2,
+                    turn_index=2,
+                ),
+                Turn(
+                    turn_id="turn-3",
+                    session_id="sess-1",
+                    person_id="person-1",
+                    request_id="req-write",
+                    role="user",
+                    content="记一下，我喜欢芒果，不喜欢太甜的奶茶。",
+                    ts_ms=3,
+                    turn_index=3,
+                ),
+                Turn(
+                    turn_id="turn-4",
+                    session_id="sess-1",
+                    person_id="person-1",
+                    request_id="req-write",
+                    role="assistant",
+                    content="芒果记住了。",
+                    ts_ms=4,
+                    turn_index=4,
+                ),
+            ]
+
+    monkeypatch.setattr(helpers, "_embed_surface_memory_query", _unexpected_embed)
+    monkeypatch.setattr(helpers, "_build_surface_memory_recall_service", _unexpected_service)
+    monkeypatch.setattr("host_brain.app.dependencies.get_conversation_history", lambda: _History())
+
+    summary, evidence_items = await helpers._run_retrieval(
+        request_id="req-current",
+        message="我刚才让你记了什么？",
+        person_id="person-1",
+        session_id="sess-1",
+        ts_ms=789,
+        emotion_tag="NEUTRAL",
+        render_target_lang="zh",
+        intent_draft={"route": "recall_memory"},
+    )
+
+    packet = summary["surface_memory_recall_packet"]
+    assert evidence_items == []
+    assert summary["status"] == "OK"
+    assert summary["routes"] == ["recent_turn_explicit_memory"]
+    assert packet["facts"] == ["记忆线索：用户刚才让你记住：我喜欢芒果，不喜欢太甜的奶茶"]
+    assert packet["confidence"] == 1.0
+    assert packet["trace"]["short_term_explicit_memory"] is True
+    assert "昨晚" not in str(packet["facts"])
 
 
 def test_embed_surface_memory_query_uses_configured_collection_dim(monkeypatch) -> None:

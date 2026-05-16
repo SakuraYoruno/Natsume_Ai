@@ -554,17 +554,16 @@ def get_milestone_tracker() -> MilestoneTracker:
 
 
 def get_bond_neo4j_client():
-    """根据生产配置选择 Bond SSOT 客户端。
+    """根据运行配置选择 Bond SSOT 客户端。
 
     优先级：
     1. HOST_BOND_BACKEND=sqlite → SqliteBondClient
     2. HOST_BOND_BACKEND=memory → InMemoryNeo4jBondClient
     3. HOST_BOND_BACKEND=neo4j → Neo4jBondClient
-    4. 未显式指定时：prod + BOND_NEO4J_ENABLED=true → Neo4jBondClient
+    4. 未显式指定时：BOND_NEO4J_ENABLED=true → Neo4jBondClient
     5. 其它情况回退 sqlite / memory
     """
     backend_raw = str(os.environ.get("HOST_BOND_BACKEND") or "").strip().lower()
-    runtime_env = str(os.environ.get("Natsume_ENV") or "dev").strip().lower()
     sqlite_path = str(os.environ.get("HOST_BOND_SQLITE_PATH") or "").strip()
 
     if backend_raw == "sqlite" or (sqlite_path and backend_raw != "neo4j"):
@@ -574,14 +573,17 @@ def get_bond_neo4j_client():
 
     config_result = load_neo4j_runtime_config()
     if config_result.success and config_result.config is not None:
-        prefers_neo4j = backend_raw == "neo4j" or (not backend_raw and runtime_env == "prod")
+        prefers_neo4j = backend_raw == "neo4j" or (
+            not backend_raw and bool(config_result.config.enabled)
+        )
         if prefers_neo4j:
             try:
                 client = build_neo4j_bond_client(config=config_result.config)
                 if client is not None:
                     return client
             except Exception:
-                pass
+                if backend_raw == "neo4j" or bool(config_result.config.enabled):
+                    raise
 
     if sqlite_path:
         return SqliteBondClient(db_path=sqlite_path or None)
@@ -597,7 +599,15 @@ def get_bond_update_queue() -> BondUpdateQueue:
         maximum=100000,
     )
     worker_enabled = _parse_bool_env("HOST_BOND_QUEUE_ENABLED", default=True)
-    signature = (int(max_queue_size), bool(worker_enabled))
+    signature = (
+        int(max_queue_size),
+        bool(worker_enabled),
+        str(os.environ.get("HOST_BOND_BACKEND") or "").strip().lower(),
+        str(os.environ.get("BOND_NEO4J_ENABLED") or "").strip().lower(),
+        str(os.environ.get("BOND_NEO4J_URI") or "").strip(),
+        str(os.environ.get("BOND_NEO4J_DATABASE") or "").strip(),
+        str(os.environ.get("BOND_NEO4J_AUTH_REF") or "").strip(),
+    )
 
     # 修复审计问题 #10：writer_factory 使用 get_bond_neo4j_client() 而非硬编码
     # InMemoryNeo4jBondClient，确保 Bond 事件写入持久化客户端（SQLite 或内存）。

@@ -45,11 +45,26 @@ _OBSERVATION_REASON_PREFIXES = (
     "RELATION_LOVER_UNDERINTIMATE",
     "RELATION_NON_ROMANTIC_OVERSTEP",
     "SIGNATURE_TEXTURE_MISSING",
+    "LOW_ENERGY_OVERHARSH_TEASE",
+    "SELF_DOUBT_THIN_DEFERRAL",
+    "SELF_DOUBT_LACKS_SMALL_STEP",
+    "SELF_DOUBT_REPLY_TOO_THIN",
     "SURFACE_PROCESS_META_LANGUAGE",
     "THIN_DAILY_FOLLOWUP_REPLY",
     "UNNEEDED_CONTINUITY_MATERIAL_REQUEST",
     "WAIT_SCENE_PRESSURES_RETURN",
     "WRITTEN_REGISTER_TONE",
+)
+_SOFT_QUALITY_RETRY_PREFIXES = (
+    "MISPLACED_EMOTIONAL_CONTAINMENT",
+    "MISPLACED_SUPPORT_TEMPLATE",
+    "LOW_ENERGY_OVERHARSH_TEASE",
+    "SELF_DOUBT_THIN_DEFERRAL",
+    "SELF_DOUBT_LACKS_SMALL_STEP",
+    "SELF_DOUBT_REPLY_TOO_THIN",
+    "SELF_DOUBT_UNGROUNDED_TECH_OBJECT",
+    "SELF_DOUBT_DEMEANING_SMALL_STEP",
+    "UNNEEDED_CONTINUITY_MATERIAL_REQUEST",
 )
 
 
@@ -102,6 +117,46 @@ def surface_observation_codes(selected: IsolatedCandidateScore | Mapping[str, An
         if reason_text.startswith(_OBSERVATION_REASON_PREFIXES):
             codes.append(reason_text.split(":", 1)[0])
     return tuple(dict.fromkeys(codes))
+
+
+def _soft_quality_retry_reason_codes(selected: IsolatedCandidateScore | None) -> tuple[str, ...]:
+    if not selected:
+        return ()
+    codes: list[str] = []
+    for reason in selected.reason_codes:
+        reason_text = str(reason)
+        if reason_text.startswith(_SOFT_QUALITY_RETRY_PREFIXES):
+            codes.append(reason_text.split(":", 1)[0])
+    return tuple(dict.fromkeys(codes))
+
+
+def _minimal_soft_quality_repair(
+    request: IsolatedSurfaceInput,
+    text: str,
+    reason_codes: Sequence[str],
+) -> str:
+    value = str(text or "").strip()
+    if not value:
+        return ""
+    reasons = tuple(str(item) for item in reason_codes)
+    self_doubt_soft = any(item.startswith("SELF_DOUBT_") for item in reasons)
+    if self_doubt_soft:
+        value = re.sub(r"(?:先)?(?:把(?:手头)?这事)?放(?:一)?(?:下|放)[，,、 ]*", "", value)
+        value = re.sub(r"(?:先)?搁(?:一)?(?:下|搁|着)[。.!！？，,、 ]*", "", value)
+        value = re.sub(r"回头(?:再(?:看|说))?[，,、 ]*", "", value)
+        value = re.sub(r"(?:换个思路)?再试[。.!！]?", "", value)
+        value = re.sub(r"明天再(?:看|说)[，,、 ]*", "", value)
+        if not re.search(r"(一步|一件|小事|最小|最卡|拎出来|拿出来|做完|试试|突破口)", value):
+            value = value.rstrip("。.!！") + "。先把最卡的那一步拎出来。"
+        elif any(item.startswith("SELF_DOUBT_LACKS_SMALL_STEP") for item in reasons):
+            value = value.rstrip("。.!！") + "。先把最卡的那一步拎出来。"
+    if any(item.startswith("SELF_DOUBT_DEMEANING_SMALL_STEP") for item in reasons):
+        value = re.sub(r"(?:白痴|弱智|蠢货|傻子|笨蛋)都能做的", "很小的", value)
+        value = re.sub(r"(?:白痴|弱智|蠢货)", "", value)
+    if any(item.startswith("MISPLACED_EMOTIONAL_CONTAINMENT") for item in reasons):
+        value = value.replace("接得住", "听着").replace("接住", "回应")
+        value = re.sub(r"我接(?:着|住)?", "我听着", value)
+    return value.strip()
 
 
 def build_surface_score_trace(
@@ -178,6 +233,17 @@ _PROCESS_PREFACE_SPLIT_RE = re.compile(
     r"(?:所以输出(?:这条|文本)?[：:。]|只输出(?:一条)?(?:最终回复)?文本[：:。]|_move[^。！？!?]{0,24}[。！？!?])"
 )
 _QUOTED_REPLY_BEFORE_PROCESS_RE = re.compile(r"^[\"“「](.{2,120}?)[\"”」]\s*_move")
+_TEXT_INPUT_SENSORY_PATTERNS = (
+    re.compile(r"(?:你这|你的|你那|老哥这|尼尼这).{0,3}声音"),
+    re.compile(r"(?:一听|听起来|听上去|听得出|听出来).{0,16}(?:你|老哥|尼尼|昨晚|没睡|困|累|声音)"),
+    re.compile(r"(?:我|本小姐).{0,6}(?:看到|看见|瞧见).{0,8}(?:你|老哥|尼尼|屏幕|画面)"),
+    re.compile(r"(?:你|老哥|尼尼).{0,8}(?:脸色|表情|屏幕|画面|镜头)"),
+)
+_INTERNAL_LEAK_PATTERNS = (
+    re.compile(r"cortex_orchestrator|ReplyControlPacket|score_trace|candidate_count", re.IGNORECASE),
+    re.compile(r"候选|评分|控制包|内部字段|EmotionTag", re.IGNORECASE),
+    re.compile(r"^\s*[\{\[]"),
+)
 
 def _direct_surface_messages(messages: Sequence[Mapping[str, str]]) -> list[dict[str, str]]:
     direct: list[dict[str, str]] = []
@@ -361,6 +427,47 @@ def _coerce_confidence(value: Any) -> float:
     return max(0.0, min(1.0, score))
 
 
+def _surface_hard_gate_violations(request: IsolatedSurfaceInput, text: str) -> tuple[str, ...]:
+    value = str(text or "").strip()
+    if not value:
+        return ()
+    codes: list[str] = []
+    if _text_input_boundary_active(request) and any(pattern.search(value) for pattern in _TEXT_INPUT_SENSORY_PATTERNS):
+        codes.append("SENSORY_SOURCE_HALLUCINATION")
+    if any(pattern.search(value) for pattern in _INTERNAL_LEAK_PATTERNS):
+        codes.append("SURFACE_INTERNAL_LEAK")
+    return tuple(dict.fromkeys(codes))
+
+
+def _text_input_boundary_active(request: IsolatedSurfaceInput) -> bool:
+    joined = "\n".join(
+        [
+            *list(getattr(request.control, "facts", []) or []),
+            *list(getattr(request, "facts", []) or []),
+            *list(getattr(request.control, "must_not_do", []) or []),
+            *list(getattr(request, "must_not_do", []) or []),
+        ]
+    )
+    if "音频输入：有" in joined or "语音输入：有" in joined:
+        return False
+    return True
+
+
+def _minimal_hard_gate_repair(request: IsolatedSurfaceInput, text: str) -> str:
+    value = str(text or "").strip()
+    if not value:
+        return ""
+    chunks = [chunk.strip() for chunk in re.split(r"(?<=[。！？!?])", value) if chunk.strip()]
+    if len(chunks) <= 1:
+        return ""
+    kept: list[str] = []
+    for chunk in chunks:
+        if _surface_hard_gate_violations(request, chunk):
+            continue
+        kept.append(chunk)
+    return "".join(kept).strip()
+
+
 class SurfaceRuntime:
     def __init__(
         self,
@@ -378,6 +485,35 @@ class SurfaceRuntime:
         raw_output = await _maybe_await_text(self._generate(messages))
         structured = parse_surface_generation_output(raw_output)
         candidate_texts = [structured["reply_text"]] if structured["reply_text"] else []
+        hard_gate_observations: tuple[str, ...] = ()
+        if candidate_texts:
+            hard_gate_observations = _surface_hard_gate_violations(request, candidate_texts[0])
+        if hard_gate_observations:
+            retry_messages = [
+                *messages,
+                {
+                    "role": "user",
+                    "content": (
+                        "上一条回复违反最终文本 hard gate："
+                        + "、".join(hard_gate_observations)
+                        + "。重新生成一条；保留当前关系口吻，但不要编造音频/视觉/现实感知，不要泄露内部状态。"
+                    ),
+                },
+            ]
+            raw_output = await _maybe_await_text(self._generate(retry_messages))
+            structured = parse_surface_generation_output(raw_output)
+            candidate_texts = [structured["reply_text"]] if structured["reply_text"] else []
+            hard_gate_observations = (
+                _surface_hard_gate_violations(request, candidate_texts[0])
+                if candidate_texts
+                else ()
+            )
+            if hard_gate_observations and candidate_texts:
+                repaired = _minimal_hard_gate_repair(request, candidate_texts[0])
+                if repaired and not _surface_hard_gate_violations(request, repaired):
+                    structured = {**structured, "reply_text": repaired}
+                    candidate_texts = [repaired]
+                    hard_gate_observations = ()
         for _ in range(self._empty_generation_retries):
             if candidate_texts:
                 break
@@ -393,7 +529,48 @@ class SurfaceRuntime:
             candidate_texts = [structured["reply_text"]] if structured["reply_text"] else []
         scores = list(score_isolated_surface_candidates(request, candidate_texts[:1]))
         selected = scores[0] if scores else None
-        observation_codes = surface_observation_codes(selected)
+        soft_quality_retry_reasons = _soft_quality_retry_reason_codes(selected)
+        if soft_quality_retry_reasons:
+            retry_messages = [
+                *messages,
+                {
+                    "role": "user",
+                    "content": (
+                        "上一条回复存在日常情绪或支撑模板质量问题："
+                        + "、".join(soft_quality_retry_reasons)
+                        + "。重新生成一条；保留夏目蓝的嘴硬和轻顶嘴，但低能量场景不能责怪用户；"
+                        "自我否定场景要先截断否定，再给一件现在能做的小步推进，不要只让用户喝水或休息；"
+                        "没有代码/报错上下文时，不要脑补成“发代码/发报错”；"
+                        "不要用“白痴/弱智/蠢货/傻子都能”这类贬损词形容小步；"
+                        "不要把“接住/接得住/我接/我在”这类内部支撑模板写进用户可见文本。"
+                        "不要只说“明天再说/回头再看/别想太多/保持积极”。"
+                    ),
+                },
+            ]
+            raw_output = await _maybe_await_text(self._generate(retry_messages))
+            structured = parse_surface_generation_output(raw_output)
+            candidate_texts = [structured["reply_text"]] if structured["reply_text"] else []
+            hard_gate_observations = (
+                _surface_hard_gate_violations(request, candidate_texts[0])
+                if candidate_texts
+                else ()
+            )
+            scores = list(score_isolated_surface_candidates(request, candidate_texts[:1]))
+            selected = scores[0] if scores else None
+            remaining_soft_reasons = _soft_quality_retry_reason_codes(selected)
+            if remaining_soft_reasons and selected:
+                repaired = _minimal_soft_quality_repair(request, selected.text, remaining_soft_reasons)
+                if repaired and repaired != selected.text:
+                    repaired_scores = list(score_isolated_surface_candidates(request, [repaired]))
+                    repaired_selected = repaired_scores[0] if repaired_scores else None
+                    if repaired_selected and not _soft_quality_retry_reason_codes(repaired_selected):
+                        structured = {**structured, "reply_text": repaired}
+                        candidate_texts = [repaired]
+                        scores = repaired_scores
+                        selected = repaired_selected
+        observation_codes = tuple(
+            dict.fromkeys([*surface_observation_codes(selected), *hard_gate_observations])
+        )
         score_trace = build_surface_score_trace(
             candidates=scores,
             selected=selected,

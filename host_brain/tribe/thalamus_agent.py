@@ -307,6 +307,32 @@ _TASK_ENTERTAINMENT_RE = re.compile(
     r"(动漫|漫画|番剧|动画|电影|电视剧|剧集|综艺|音乐|歌曲|歌手|专辑|小说|读书|游戏|爱好|兴趣|趣味)",
     re.IGNORECASE,
 )
+_SIMPLE_TECH_ADVICE_RE = re.compile(
+    r"(报错|错误|异常|失败|缺包|导入|import|ModuleNotFoundError|No module named|端口|port|日志|启动|连接不上|连不上"
+    r"|没响应|无响应|timeout|http://|https://|bolt://|neo4j|chroma|chromadb|OPENAI_API_KEY|环境变量)",
+    re.IGNORECASE,
+)
+_SIMPLE_TECH_QUESTION_RE = re.compile(r"(怎么|如何|怎么办|该|排查|查|先看|看什么|先试|试什么|\?|？)", re.IGNORECASE)
+_SIMPLE_TECH_ACTION_BLOCKERS: tuple[str, ...] = (
+    "开始处理",
+    "开始做",
+    "继续做",
+    "直接改",
+    "帮我改",
+    "修改",
+    "修复",
+    "实现",
+    "重构",
+    "删除",
+    "清理",
+    "整理仓库",
+    "提交",
+    "跑测试",
+    "执行",
+    "接入",
+    "迁移",
+    "写代码",
+)
 
 
 def _normalize_text(value: Any, *, lower: bool = False) -> str:
@@ -328,6 +354,31 @@ def _normalize_confidence(value: Any) -> float | None:
 
 def _normalize_match_text(value: Any) -> str:
     return re.sub(r"\s+", " ", str(value or "").strip().lower())
+
+
+def _looks_like_simple_technical_advice(text: str) -> bool:
+    normalized = _normalize_text(text)
+    if not normalized:
+        return False
+    compact_lower = normalized.lower().replace(" ", "")
+    if any(marker in compact_lower for marker in _SIMPLE_TECH_ACTION_BLOCKERS):
+        return False
+    return bool(_SIMPLE_TECH_ADVICE_RE.search(normalized) and _SIMPLE_TECH_QUESTION_RE.search(normalized))
+
+
+def _build_simple_technical_chat_seed(text: str, *, route_source: str) -> dict[str, Any]:
+    normalized = _normalize_text(text)
+    return {
+        "route": "chat",
+        "target_id": "",
+        "task": normalized,
+        "reason_code": "THALAMUS_RULE_SIMPLE_TECH_CHAT",
+        "confidence": 0.98,
+        "route_source": route_source,
+        "args": {
+            "text": normalized,
+        },
+    }
 
 
 def _contains_any(text: str, markers: tuple[str, ...]) -> bool:
@@ -627,6 +678,9 @@ def _build_direct_route_seed(text: str) -> dict[str, Any] | None:
             },
         }
 
+    if _looks_like_simple_technical_advice(cleaned):
+        return _build_simple_technical_chat_seed(cleaned, route_source="thalamus.rule")
+
     if _TASK_INTENT_PLANNING_RE.search(cleaned):
         return {
             "route": "delegate",
@@ -899,6 +953,9 @@ def classify_task_intent_fastpath(text: str) -> dict[str, Any] | None:
                 "text": normalized,
             },
         }
+
+    if _looks_like_simple_technical_advice(normalized):
+        return _build_simple_technical_chat_seed(normalized, route_source="rule.fastpath")
 
     compact = re.sub(r"\s+", "", normalized).lower()
     if _TASK_PROGRESS_QUERY_RE.search(compact):

@@ -455,6 +455,31 @@ def test_classify_task_intent_fastpath_routes_connectivity_check_to_chat() -> No
     assert decision["reason_code"] == "THALAMUS_RULE_CONNECTIVITY_CHECK"
 
 
+def test_classify_task_intent_fastpath_routes_simple_project_technical_advice_to_chat() -> None:
+    decision = classify_task_intent_fastpath("Neo4j 连接不上 bolt://127.0.0.1:17687，先看什么？")
+
+    assert decision is not None
+    assert decision["route"] == "chat"
+    assert decision["target_id"] == ""
+    assert decision["route_source"] == "rule.fastpath"
+    assert decision["reason_code"] == "THALAMUS_RULE_SIMPLE_TECH_CHAT"
+
+
+def test_compile_simple_project_technical_advice_uses_narrative_action() -> None:
+    agent = ThalamusAgent()
+
+    compiled = agent.compile_intent_draft(
+        request_id="req-thalamus-neo4j",
+        session_id="session-thalamus-neo4j",
+        user_message="Neo4j 连接不上 bolt://127.0.0.1:17687，先看什么？",
+        raw_route_decision=classify_task_intent_fastpath("Neo4j 连接不上 bolt://127.0.0.1:17687，先看什么？"),
+    )
+
+    assert compiled["route"] == "chat"
+    assert compiled["action"] == "narrative_only"
+    assert compiled["args"]["text"] == "Neo4j 连接不上 bolt://127.0.0.1:17687，先看什么？"
+
+
 def test_classify_task_intent_keeps_real_test_work_on_codex() -> None:
     decision = classify_task_intent_by_rules("帮我跑一下测试，看看失败的用例")
 

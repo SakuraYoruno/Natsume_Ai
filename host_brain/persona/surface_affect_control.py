@@ -19,7 +19,9 @@ _HIGH_EMOTION_TASKS = frozenset(
         "emotional_support",
         "give_up",
         "headache",
+        "high_emotion",
         "relationship_boundary",
+        "self_doubt",
         "tired",
     }
 )

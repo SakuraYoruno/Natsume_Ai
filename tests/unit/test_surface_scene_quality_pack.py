@@ -90,6 +90,34 @@ def test_scene_quality_selector_prefers_relationship_memory_reassurance() -> Non
     assert "熟人之间还问这种话，我记着呢。" in sample.bad_examples
 
 
+def test_scene_quality_selector_catches_tired_sleep_loss_and_self_doubt() -> None:
+    tired = select_surface_scene_quality_sample(
+        user_message="昨晚没睡好，今天脑子有点糊。",
+        task_mode="daily_chat",
+        response_move="soft_containment",
+    )
+    self_doubt = select_surface_scene_quality_sample(
+        user_message="算了，我可能就是不适合做这个。",
+        task_mode="high_emotion",
+        response_move="soft_containment",
+    )
+    anger = select_surface_scene_quality_sample(
+        user_message="真烦，刚才又被人放鸽子。",
+        task_mode="high_emotion",
+        response_move="soft_containment",
+    )
+
+    assert tired is not None
+    assert tired.scene_id == "tired"
+    assert "活该" in tired.should_not_surface
+    assert "脑子糊" in tired.user_markers
+    assert self_doubt is not None
+    assert self_doubt.scene_id == "self_doubt"
+    assert "明天再说" in self_doubt.should_not_surface
+    assert "停——先放一放，明天再说。" in self_doubt.bad_examples
+    assert anger is None
+
+
 def test_scene_quality_selector_uses_relationship_distance() -> None:
     lover = select_surface_scene_quality_sample(
         user_message="有点想你",

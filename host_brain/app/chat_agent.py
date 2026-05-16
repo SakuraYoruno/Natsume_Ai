@@ -1638,6 +1638,7 @@ async def chat_agent_sse_generator(
     ):
         trace_stage_meta["chat_sub_agent_suppressed"] = sub_agent_ctx.agent_id
         sub_agent_ctx = None
+    surface_required = False
     try:
         from host_brain.app.surface_main_chain_adapter import (  # noqa: PLC0415
             surface_main_chain_enabled,
@@ -1662,7 +1663,7 @@ async def chat_agent_sse_generator(
             return
     except Exception as _surface_main_exc:
         _logger.debug("[%s] surface_main_chain unavailable: %s", request_id, _surface_main_exc)
-        if sub_agent_ctx is None:
+        if surface_required or sub_agent_ctx is None:
             yield _surface_main_no_reply_event(
                 request_id=request_id,
                 reason_code="SURFACE_MAIN_CHAIN_UNAVAILABLE",

@@ -242,6 +242,62 @@ def test_plan_surface_memory_recall_routes_memory_followup_to_core_memory_stores
     assert "RAW_RECENT_EXACT_REPLY" not in query
 
 
+def test_plan_surface_memory_recall_skips_memory_write_current_turn() -> None:
+    plan = plan_surface_memory_recall(
+        ThreeLayerContinuityContext(
+            current_user_message="记一下，我喜欢芒果，不喜欢太甜的奶茶。",
+            task_mode_hint="daily_chat",
+        )
+    )
+
+    assert not plan.should_recall
+    assert plan.reason == "memory_write_current_turn_only"
+
+
+def test_plan_surface_memory_recall_skips_generic_daily_turn_without_hint() -> None:
+    plan = plan_surface_memory_recall(
+        ThreeLayerContinuityContext(
+            current_user_message="今天先随便聊两句吧。",
+            task_mode_hint="plain_answer",
+        )
+    )
+
+    assert not plan.should_recall
+    assert plan.reason == "no_memory_recall_needed"
+    assert plan.target_store_ids == ()
+
+
+def test_explicit_memory_content_query_prefers_remembered_user_facts() -> None:
+    packet = build_surface_memory_recall_packet(
+        SimpleNamespace(
+            output={
+                "query": "我刚才让你记了什么？",
+                "status": "OK",
+                "candidate_count": 2,
+                "candidates": [
+                    {
+                        "snippet": "当前回合摘要：用户提到「昨晚没睡好，今天脑子有点糊。」",
+                        "confidence": 0.94,
+                        "metadata": {"store_id": "episodic_vector"},
+                    },
+                    {
+                        "snippet": "当前回合摘要：用户提到「记一下，我喜欢芒果，不喜欢太甜的奶茶。」",
+                        "confidence": 0.91,
+                        "metadata": {"store_id": "episodic_vector"},
+                    },
+                ],
+            }
+        ),
+        query="我刚才让你记了什么？",
+        max_facts=4,
+    )
+
+    joined = "\n".join(packet.facts)
+    assert "芒果" in joined
+    assert "奶茶" in joined
+    assert "昨晚没睡好" not in joined
+
+
 def test_plan_surface_memory_recall_routes_task_modes_for_current_main_chain() -> None:
     tech = plan_surface_memory_recall(
         ThreeLayerContinuityContext(

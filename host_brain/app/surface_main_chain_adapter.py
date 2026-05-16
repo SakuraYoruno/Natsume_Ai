@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 import time
 from collections.abc import AsyncGenerator, Mapping, Sequence
 from typing import Any
@@ -49,6 +50,33 @@ _TECHNICAL_TASK_MODES = {
     "triage_first_step",
     "write_takeover",
 }
+_PORT_OCCUPIED_RE = re.compile(
+    r"(?:端口|port)?\s*(?P<port>\d{2,5}).{0,24}(?:被占用|占用|被占|占了|in use|already in use|address already in use|bind)",
+    re.IGNORECASE,
+)
+_PORT_OCCUPIED_REVERSED = re.compile(
+    r"(?:被占用|占用|被占|占了|in use|already in use|address already in use|bind).{0,24}(?:端口|port)?\s*(?P<port>\d{2,5})",
+    re.IGNORECASE,
+)
+_TASK_SPLIT_QUICK_RE = re.compile(r"(?:下一步|接下来|后面|任务).{0,12}(?:拆成|分成|列成).{0,8}(?:三|3)件", re.IGNORECASE)
+_PYTHON_MISSING_MODULE_RE = re.compile(
+    r"(?:找不到模块|没有名为).{0,12}[\"'“‘]?(?P<module>[A-Za-z0-9_.-]+)[\"'”’]?",
+    re.IGNORECASE,
+)
+_PYTHON_NO_MODULE_RE = re.compile(r"No\s+module\s+named\s+[\"'“‘]?(?P<module>[A-Za-z0-9_.-]+)[\"'”’]?", re.IGNORECASE)
+_ENV_VAR_RE = re.compile(r"\b(?P<var>[A-Z][A-Z0-9_]{2,})\b")
+_TECHNICAL_TEXT_RE = re.compile(
+    r"(报错|错误|异常|失败|缺包|导入|import|ModuleNotFoundError|No module named|端口|port|日志|启动|连接不上|连不上"
+    r"|没响应|无响应|timeout|timed out|http://|https://|bolt://|neo4j|chroma|chromadb|OPENAI_API_KEY|环境变量)",
+    re.IGNORECASE,
+)
+_TECHNICAL_QUESTION_RE = re.compile(r"(怎么|如何|怎么办|该|排查|查|先看|看什么|先试|试什么|\?|？)", re.IGNORECASE)
+_PYTHON_MODULE_PACKAGE_MAP = {
+    "cv2": "opencv-python",
+    "pil": "Pillow",
+    "sklearn": "scikit-learn",
+    "yaml": "PyYAML",
+}
 
 
 def surface_main_chain_enabled(agent_input: Any, *, sub_agent_ctx: Any | None = None) -> bool:
@@ -58,10 +86,7 @@ def surface_main_chain_enabled(agent_input: Any, *, sub_agent_ctx: Any | None = 
 
 
 def surface_main_chain_required(agent_input: Any, *, sub_agent_ctx: Any | None = None) -> bool:
-    if sub_agent_ctx is not None:
-        return False
-    if _is_non_surface_intent(agent_input):
-        return False
+    _ = sub_agent_ctx
     if _has_multimodal_payload(agent_input):
         return False
     response_form = _response_form(agent_input)
@@ -103,8 +128,8 @@ def build_surface_main_chain_input_from_chat_input(
             runtime_payload=runtime_payload,
         ),
         affect_packet=affect_packet,
-        necessary_facts=_necessary_facts(agent_input),
-        must_not_do=(),
+        necessary_facts=_necessary_facts(agent_input, task_control=task_control),
+        must_not_do=_surface_boundary_must_not_do(task_control=task_control),
         style_anchor=("app 层只传压缩控制包，不传原始历史。",),
     )
 
@@ -116,10 +141,30 @@ async def run_surface_main_chain_for_chat_input(
 ) -> SurfaceMainChainResult:
     llm_runtime = _safe_mapping(getattr(agent_input, "llm_runtime", None))
     request_id = str(getattr(agent_input, "request_id", "") or "").strip()
+    surface_input = build_surface_main_chain_input_from_chat_input(
+        agent_input,
+        trace_stage_meta=trace_stage_meta,
+    )
+    quick_reply_payload = _surface_quick_reply_payload(
+        agent_input,
+        task_control=_safe_mapping(surface_input.task_control),
+    )
+    if quick_reply_payload and isinstance(trace_stage_meta, dict):
+        trace_stage_meta["surface_quick_reply"] = {
+            "applied": True,
+            "kind": str(quick_reply_payload.get("_quick_reply_kind") or ""),
+        }
 
     async def _generate(messages: list[dict[str, str]]) -> str:
         from host_brain.integrations.llm_helpers import acomplete_llm_with_pool  # noqa: PLC0415
 
+        if quick_reply_payload:
+            visible_payload = {
+                key: value
+                for key, value in quick_reply_payload.items()
+                if not str(key).startswith("_")
+            }
+            return json.dumps(visible_payload, ensure_ascii=False)
         if not bool(llm_runtime.get("available")):
             raise RuntimeError("surface main chain llm runtime unavailable")
         result = await acomplete_llm_with_pool(
@@ -136,12 +181,7 @@ async def run_surface_main_chain_for_chat_input(
         )
         return str(getattr(result, "content", "") or "").strip()
 
-    return await SurfaceMainChain(_generate).run(
-        build_surface_main_chain_input_from_chat_input(
-            agent_input,
-            trace_stage_meta=trace_stage_meta,
-        )
-    )
+    return await SurfaceMainChain(_generate).run(surface_input)
 
 
 async def surface_main_chain_sse_generator(
@@ -187,7 +227,8 @@ async def surface_main_chain_sse_generator(
 
     narrative = str(result.selected_text or "").strip()
     total_latency_ms = max(0, int(time.time() * 1000) - started_ms)
-    llm_latency_ms = int(result.runtime.latency_ms or 0)
+    quick_reply_used = bool(_safe_mapping(trace.get("surface_quick_reply")).get("applied"))
+    llm_latency_ms = 0 if quick_reply_used else int(result.runtime.latency_ms or 0)
     timings_ms = _surface_timings_ms(
         total_latency_ms=total_latency_ms,
         llm_latency_ms=llm_latency_ms,
@@ -223,8 +264,8 @@ async def surface_main_chain_sse_generator(
                 "latency_ms": total_latency_ms,
                 "first_token_ms": llm_latency_ms if narrative else None,
                 "llm_latency_ms": llm_latency_ms,
-                "model_id": _safe_mapping(getattr(agent_input, "llm_runtime", None)).get("model_id"),
-                "provider_name": _safe_mapping(getattr(agent_input, "llm_runtime", None)).get("provider_name"),
+                "model_id": None if quick_reply_used else _safe_mapping(getattr(agent_input, "llm_runtime", None)).get("model_id"),
+                "provider_name": None if quick_reply_used else _safe_mapping(getattr(agent_input, "llm_runtime", None)).get("provider_name"),
                 "response_form": "text",
                 "timings_ms": timings_ms,
                 "reply_envelope": envelope.as_dict(),
@@ -546,7 +587,14 @@ def _affect_packet(
 def _is_technical_task(task_control: Mapping[str, Any]) -> bool:
     task_mode = str(task_control.get("task_mode") or "").strip().lower()
     response_move = str(task_control.get("response_move") or "").strip().lower()
-    return task_mode in _TECHNICAL_TASK_MODES or response_move in _TECHNICAL_TASK_MODES
+    primary_topic = str(task_control.get("primary_topic") or "").strip().lower()
+    interaction_move = str(task_control.get("interaction_move") or "").strip().lower()
+    return (
+        task_mode in _TECHNICAL_TASK_MODES
+        or response_move in _TECHNICAL_TASK_MODES
+        or primary_topic in _TECHNICAL_TASK_MODES
+        or interaction_move in _TECHNICAL_TASK_MODES
+    )
 
 
 def _derived_affect_packet(
@@ -602,19 +650,258 @@ def _relationship_clues(agent_input: Any) -> tuple[str, ...]:
 
 def _task_facts(*, reply_plan: Mapping[str, Any]) -> tuple[str, ...]:
     facts = [
+        *_surface_input_boundary_facts(),
         f"当前任务：{_first_nonempty(reply_plan.get('reply_contract'), reply_plan.get('response_goal'), '')}",
         f"当前意图：{_first_nonempty(reply_plan.get('task_mode'), reply_plan.get('primary_topic'), reply_plan.get('interaction_move'), '')}",
+        *_technical_task_facts(reply_plan),
     ]
     return tuple(_clean_list(facts))
 
 
-def _necessary_facts(agent_input: Any) -> tuple[str, ...]:
+def _necessary_facts(agent_input: Any, *, task_control: Mapping[str, Any] | None = None) -> tuple[str, ...]:
     retrieval_summary = _safe_mapping(getattr(agent_input, "retrieval_summary", None))
-    facts = []
+    facts = [*_surface_input_boundary_facts(), *_technical_task_facts(task_control or {})]
     status = _first_nonempty(retrieval_summary.get("status"), "")
     if status:
         facts.append(f"召回状态：{status}")
     return tuple(_clean_list(facts))
+
+
+def _surface_input_boundary_facts() -> tuple[str, ...]:
+    return (
+        "当前输入渠道：中文文字私聊。",
+        "当前没有音频、摄像头、屏幕画面或现实传感器事实。",
+        "只能回应用户当前文字和压缩事实，不能把文字输入写成听见声音或看见画面。",
+    )
+
+
+def _surface_quick_reply_payload(
+    agent_input: Any,
+    *,
+    task_control: Mapping[str, Any] | None,
+) -> dict[str, Any] | None:
+    task_split = _task_split_quick_reply_payload(agent_input, task_control=task_control)
+    if task_split:
+        return task_split
+    return _technical_quick_reply_payload(agent_input, task_control=task_control)
+
+
+def _technical_quick_reply_payload(
+    agent_input: Any,
+    *,
+    task_control: Mapping[str, Any] | None,
+) -> dict[str, Any] | None:
+    user_message = str(getattr(agent_input, "user_message", "") or "").strip()
+    if not (_is_technical_task(task_control or {}) or _looks_like_technical_advice_text(user_message)):
+        return None
+    missing_module = _extract_missing_python_module(user_message)
+    if missing_module:
+        package = _python_package_for_module(missing_module)
+        return {
+            "reply_text": (
+                f"老哥，先确认是不是当前解释器没装包：python -m pip show {package}。"
+                f"没有就跑 python -m pip install {package}；"
+                '装了还报错，就用 python -c "import sys; print(sys.executable)" 看是不是跑错虚拟环境。'
+            ),
+            "natsume_emotion_tag": "THINKING",
+            "user_emotion_tag": "NEUTRAL",
+            "emotion_confidence": 0.0,
+            "_quick_reply_kind": "python_missing_module_windows",
+        }
+    env_var = _extract_env_var_check(user_message)
+    if env_var:
+        return {
+            "reply_text": (
+                f"老哥，PowerShell 先跑 $env:{env_var} 看是不是空的；cmd 里用 echo %{env_var}%。"
+                f"如果是空，就在当前终端设 $env:{env_var}=\"...\" 后重启服务；别把值贴出来。"
+            ),
+            "natsume_emotion_tag": "THINKING",
+            "user_emotion_tag": "NEUTRAL",
+            "emotion_confidence": 0.0,
+            "_quick_reply_kind": "windows_env_var_check",
+        }
+    if _looks_like_neo4j_connectivity(user_message):
+        port = _extract_first_port(user_message) or "17687"
+        return {
+            "reply_text": (
+                f"老哥，先别急着改代码。PowerShell 跑 Test-NetConnection 127.0.0.1 -Port {port}。"
+                "不通就看 Docker 里的 Neo4j 容器；通了再核对 BOND_NEO4J_URI 和账号。"
+            ),
+            "natsume_emotion_tag": "THINKING",
+            "user_emotion_tag": "NEUTRAL",
+            "emotion_confidence": 0.0,
+            "_quick_reply_kind": "neo4j_connectivity_windows",
+        }
+    if _looks_like_chroma_connectivity(user_message):
+        endpoint = _extract_http_endpoint(user_message) or "http://127.0.0.1:18000"
+        return {
+            "reply_text": (
+                f"老哥，先确认 Chroma 活着：PowerShell 跑 Invoke-WebRequest {endpoint.rstrip('/')}/api/v2/heartbeat。"
+                "连不上就看 Docker 容器有没有起来；能通再查 collection 名和维度配置。"
+            ),
+            "natsume_emotion_tag": "THINKING",
+            "user_emotion_tag": "NEUTRAL",
+            "emotion_confidence": 0.0,
+            "_quick_reply_kind": "chroma_heartbeat_windows",
+        }
+    port = _extract_occupied_port(user_message)
+    if not port:
+        return None
+    return {
+        "reply_text": (
+            f"老哥，先查占用 PID：netstat -ano | findstr :{port}。"
+            "看到最后一列 PID 后，用 taskkill /PID <PID> /F 结束它；"
+            "不想关进程就改服务端口再重启。"
+        ),
+        "natsume_emotion_tag": "NEUTRAL",
+        "user_emotion_tag": "NEUTRAL",
+        "emotion_confidence": 0.0,
+        "_quick_reply_kind": "port_occupied_windows",
+    }
+
+
+def _task_split_quick_reply_payload(
+    agent_input: Any,
+    *,
+    task_control: Mapping[str, Any] | None,
+) -> dict[str, Any] | None:
+    control = task_control or {}
+    task_mode = str(control.get("task_mode") or "").strip().lower()
+    response_move = str(control.get("response_move") or "").strip().lower()
+    if task_mode not in {"task_help", "next_step", "daily_chat", "plain_answer"} and response_move not in {
+        "task_help",
+        "next_step",
+    }:
+        return None
+    user_message = str(getattr(agent_input, "user_message", "") or "").strip()
+    if not _TASK_SPLIT_QUICK_RE.search(user_message):
+        return None
+    return {
+        "reply_text": "老哥，先拆三件：把卡点写清楚；只做一个最小可验证动作；跑完看结果，再决定下一步。",
+        "natsume_emotion_tag": "NEUTRAL",
+        "user_emotion_tag": "NEUTRAL",
+        "emotion_confidence": 0.0,
+        "_quick_reply_kind": "task_split_three_steps",
+    }
+
+
+def _extract_occupied_port(text: str) -> str:
+    value = str(text or "").strip()
+    if not value:
+        return ""
+    for pattern in (_PORT_OCCUPIED_RE, _PORT_OCCUPIED_REVERSED):
+        match = pattern.search(value)
+        if not match:
+            continue
+        port = str(match.group("port") or "").strip()
+        if port and 0 < int(port) <= 65535:
+            return port
+    return ""
+
+
+def _looks_like_technical_advice_text(text: str) -> bool:
+    value = str(text or "").strip()
+    if not value:
+        return False
+    return bool(_TECHNICAL_TEXT_RE.search(value) and _TECHNICAL_QUESTION_RE.search(value))
+
+
+def _extract_missing_python_module(text: str) -> str:
+    value = str(text or "")
+    match = _PYTHON_NO_MODULE_RE.search(value) or _PYTHON_MISSING_MODULE_RE.search(value)
+    if not match:
+        return ""
+    module = str(match.group("module") or "").strip().strip(".")
+    if not module:
+        return ""
+    return module.split(".", 1)[0]
+
+
+def _python_package_for_module(module: str) -> str:
+    normalized = str(module or "").strip().lower()
+    return _PYTHON_MODULE_PACKAGE_MAP.get(normalized, str(module or "").strip() or "包名")
+
+
+def _extract_env_var_check(text: str) -> str:
+    value = str(text or "").strip()
+    if not value:
+        return ""
+    lowered = value.lower()
+    if "环境变量" not in value and "env" not in lowered and "_key" not in lowered and "api_key" not in lowered:
+        return ""
+    if not re.search(r"(没生效|读不到|读取不到|为空|空的|查|看|确认|怎么|\?|？|not set|missing)", value, re.IGNORECASE):
+        return ""
+    match = _ENV_VAR_RE.search(value)
+    return str(match.group("var") or "").strip() if match else ""
+
+
+def _looks_like_neo4j_connectivity(text: str) -> bool:
+    value = str(text or "")
+    lowered = value.lower()
+    return ("neo4j" in lowered or "bolt://" in lowered) and bool(
+        re.search(r"(连接不上|连不上|没响应|无响应|timeout|timed out|先看|看什么|排查|查|怎么|\?|？)", value, re.IGNORECASE)
+    )
+
+
+def _looks_like_chroma_connectivity(text: str) -> bool:
+    value = str(text or "")
+    lowered = value.lower()
+    return ("chroma" in lowered or "chromadb" in lowered or ":18000" in lowered) and bool(
+        re.search(r"(心跳|heartbeat|连接不上|连不上|没响应|无响应|timeout|timed out|先看|看什么|排查|查|怎么|\?|？)", value, re.IGNORECASE)
+    )
+
+
+def _extract_first_port(text: str) -> str:
+    for match in re.finditer(r":(?P<port>\d{2,5})(?:\b|/)", str(text or "")):
+        port = str(match.group("port") or "").strip()
+        if port and 0 < int(port) <= 65535:
+            return port
+    for match in re.finditer(r"\b(?P<port>\d{2,5})\b", str(text or "")):
+        port = str(match.group("port") or "").strip()
+        if port and 0 < int(port) <= 65535:
+            return port
+    return ""
+
+
+def _extract_http_endpoint(text: str) -> str:
+    match = re.search(r"https?://[^\s，。；;、]+", str(text or ""), re.IGNORECASE)
+    if not match:
+        return ""
+    return match.group(0).rstrip("。；;，,")
+
+
+def _surface_boundary_must_not_do(*, task_control: Mapping[str, Any] | None = None) -> tuple[str, ...]:
+    return tuple(
+        _clean_list(
+            [
+                "不要说“你这声音”“我听出来”“我看到你”或把文字输入写成音频/视觉感知。",
+                "不要编造用户现实动作、地点、屏幕内容、身体状态或睡眠事实，除非 facts 明确给出。",
+                *_technical_task_must_not_do(task_control or {}),
+            ]
+        )
+    )
+
+
+def _technical_task_facts(task_control: Mapping[str, Any] | None) -> tuple[str, ...]:
+    if not _is_technical_task(task_control or {}):
+        return ()
+    return (
+        "技术场景：先给一条能执行的排查步骤，命令和符号要准确。",
+        "技术场景：最终回复至少包含查因和下一步处理，不要只给一条裸命令。",
+        "技术场景：当前宿主环境按 Windows/PowerShell 优先给命令，除非用户明确指定 Linux 或 macOS。",
+        "技术场景：有用性优先，角色口吻只做轻量包裹。",
+    )
+
+
+def _technical_task_must_not_do(task_control: Mapping[str, Any] | None) -> tuple[str, ...]:
+    if not _is_technical_task(task_control or {}):
+        return ()
+    return (
+        "技术回复不要用“干掉”“完事”等粗略说法替代清楚步骤。",
+        "不要省略关键命令符号，例如端口筛选要保留冒号。",
+        "不要默认给 lsof、grep 等 Linux/macOS 命令，除非用户明确指定该环境。",
+        "不要只输出单条命令；命令后要说明下一步如何处理结果。",
+    )
 
 
 def _surface_gen_params(llm_runtime: Mapping[str, Any]) -> dict[str, Any]:
@@ -633,13 +920,6 @@ def _has_multimodal_payload(agent_input: Any) -> bool:
         return True
     observations = _safe_mapping(getattr(agent_input, "multimodal_observations", None))
     return bool(observations)
-
-
-def _is_non_surface_intent(agent_input: Any) -> bool:
-    intent = _safe_mapping(getattr(agent_input, "intent_draft", None))
-    route = str(intent.get("route") or "").strip().lower()
-    target = str(intent.get("target_id") or intent.get("action") or "").strip().lower()
-    return route in {"skill", "delegate", "plan"} or target.endswith("_agent")
 
 
 def _surface_main_chain_default_enabled() -> bool:
