@@ -5,6 +5,7 @@ import json
 
 from tools.validate_long_run_digital_life_loop import (
     build_arg_parser,
+    _variation_threshold,
     run_long_run_digital_life_loop_validation,
 )
 
@@ -14,6 +15,14 @@ def test_long_run_parser_defaults_to_30_plus_turns() -> None:
 
     assert args.turns >= 30
     assert args.min_turns == 30
+
+
+def test_variation_threshold_scales_for_live_smoke_and_long_run() -> None:
+    assert _variation_threshold(1) == 1
+    assert _variation_threshold(3) == 2
+    assert _variation_threshold(5) == 2
+    assert _variation_threshold(6) == 3
+    assert _variation_threshold(32) == 3
 
 
 def test_long_run_fixture_validates_timeline_contract(tmp_path) -> None:
@@ -36,7 +45,12 @@ def test_long_run_fixture_validates_timeline_contract(tmp_path) -> None:
 
     summary = result["summary"]
     assert summary["passed"] is True
+    assert summary["service_boundary_passed"] is True
+    assert summary["service_boundary_components"]["chroma"]["runtime_class"] == "mock"
     assert summary["turn_count"] == 6
+    assert summary["checks"]["service_boundary.fixture_marks_mock_components"] is True
+    assert summary["checks"]["long_run.reaches_minimum_turns"] is True
+    assert "long_run.reaches_minimum_30_turns" not in summary["checks"]
     assert summary["checks"]["long_run.timeline_has_required_event_types"] is True
     assert summary["checks"]["long_run.each_turn_has_idle_private_thought"] is True
     assert summary["checks"]["long_run.all_turns_map_23_organs"] is True

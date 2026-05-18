@@ -18,6 +18,10 @@ from tools.validate_full_digital_life_loop import (  # noqa: E402
     build_arg_parser as build_full_arg_parser,
     run_full_digital_life_loop_validation,
 )
+from tools.validate_live_service_boundaries import (  # noqa: E402
+    build_arg_parser as build_service_boundary_arg_parser,
+    run_live_service_boundary_validation,
+)
 
 
 DEFAULT_OUT = ROOT / "artifacts" / "long_run_digital_life_loop"
@@ -29,6 +33,10 @@ async def run_long_run_digital_life_loop_validation(args: argparse.Namespace) ->
     turns = max(1, int(getattr(args, "turns", 32) or 32))
     min_turns = max(1, int(getattr(args, "min_turns", 30) or 30))
     mode = str(getattr(args, "mode", "fixture") or "fixture").strip().lower()
+    service_boundary_result = await run_live_service_boundary_validation(
+        _service_boundary_args(args=args, out_dir=out_dir, mode=mode)
+    )
+    service_boundary_summary = dict(service_boundary_result.get("summary") or {})
     full_args = build_full_arg_parser().parse_args(
         [
             "--mode",
@@ -52,16 +60,26 @@ async def run_long_run_digital_life_loop_validation(args: argparse.Namespace) ->
         requested_turns=turns,
         min_turns=min_turns,
     )
+    service_boundary_checks = {
+        f"service_boundary.{str(key).split('service_boundary.', 1)[-1]}": bool(value)
+        for key, value in dict(service_boundary_summary.get("checks") or {}).items()
+    }
     summary = {
         "mode": mode,
         "evaluation_mode": "long_run_digital_life_loop_contract_validation_no_text_quality_scoring",
-        "passed": bool(full_summary.get("passed")) and all(long_checks.values()),
+        "passed": bool(service_boundary_summary.get("passed"))
+        and bool(full_summary.get("passed"))
+        and all(long_checks.values()),
         "turn_count": len(list(details.get("turns") or [])),
         "requested_turns": turns,
         "min_turns": min_turns,
         "timeline_event_count": len(timeline),
+        "service_boundary_passed": bool(service_boundary_summary.get("passed")),
+        "service_boundary_output_dir": str(service_boundary_summary.get("output_dir") or ""),
+        "service_boundary_components": dict(service_boundary_summary.get("components") or {}),
         "full_loop_passed": bool(full_summary.get("passed")),
         "checks": {
+            **service_boundary_checks,
             **{f"full_loop.{key}": bool(value) for key, value in dict(full_summary.get("checks") or {}).items()},
             **long_checks,
         },
@@ -70,6 +88,8 @@ async def run_long_run_digital_life_loop_validation(args: argparse.Namespace) ->
     }
     long_details = {
         "summary": summary,
+        "service_boundary_summary": service_boundary_summary,
+        "service_boundary_details": dict(service_boundary_result.get("details") or {}),
         "full_summary": full_summary,
         "full_details": details,
         "timeline": timeline,
@@ -78,7 +98,10 @@ async def run_long_run_digital_life_loop_validation(args: argparse.Namespace) ->
     _write_json(out_dir / "details.json", long_details)
     _write_jsonl(out_dir / "timeline.jsonl", timeline)
     (out_dir / "timeline.md").write_text(_timeline_markdown(summary, timeline), encoding="utf-8")
-    (out_dir / "report.md").write_text(_report_markdown(summary, details, timeline), encoding="utf-8")
+    (out_dir / "report.md").write_text(
+        _report_markdown(summary, details, timeline, service_boundary_summary=service_boundary_summary),
+        encoding="utf-8",
+    )
     return {"summary": summary, "details": long_details}
 
 
@@ -201,6 +224,7 @@ def _long_checks(
         for turn in turns
         if str(((turn.get("inner_world") or {}).get("latest_private_thought") or {}).get("focus") or "")
     }
+    variation_threshold = _variation_threshold(len(turns))
     timeline_types = {str(item.get("event_type") or "") for item in timeline}
     required_types = {
         "user_turn",
@@ -226,7 +250,7 @@ def _long_checks(
     return {
         "long_run.full_loop_passed": bool(full_summary.get("passed")),
         "long_run.reaches_requested_turns": len(turns) == requested_turns,
-        "long_run.reaches_minimum_30_turns": len(turns) >= min_turns,
+        "long_run.reaches_minimum_turns": len(turns) >= min_turns,
         "long_run.timeline_has_required_event_types": required_types <= timeline_types,
         "long_run.timeline_has_events_for_each_turn": len(timeline) >= len(turns) * len(required_types),
         "long_run.each_turn_has_reply_text": bool(replies) and all(bool(reply.strip()) for reply in replies),
@@ -236,10 +260,20 @@ def _long_checks(
         and all(bool(item.get("success")) for item in memory_writes),
         "long_run.bond_score_changes_over_time": bool(bond_scores) and max(bond_scores) > min(bond_scores),
         "long_run.self_model_keeps_updating": bool(self_updates) and max(self_updates) >= len(turns),
-        "long_run.emotion_tags_vary_over_time": len(user_emotions) >= 3 and len(natsume_emotions) >= 3,
-        "long_run.inner_focus_varies_over_time": len(inner_focuses) >= 3,
+        "long_run.emotion_tags_vary_over_time": len(user_emotions) >= variation_threshold
+        and len(natsume_emotions) >= variation_threshold,
+        "long_run.inner_focus_varies_over_time": len(inner_focuses) >= variation_threshold,
         "long_run.all_turns_map_23_organs": bool(mapped_counts) and min(mapped_counts) >= 23,
     }
+
+
+def _variation_threshold(turn_count: int) -> int:
+    count = max(1, int(turn_count or 0))
+    if count <= 2:
+        return 1
+    if count <= 5:
+        return 2
+    return 3
 
 
 def _timeline_markdown(summary: Mapping[str, Any], timeline: Sequence[Mapping[str, Any]]) -> str:
@@ -270,7 +304,10 @@ def _report_markdown(
     summary: Mapping[str, Any],
     details: Mapping[str, Any],
     timeline: Sequence[Mapping[str, Any]],
+    *,
+    service_boundary_summary: Mapping[str, Any] | None = None,
 ) -> str:
+    service_boundary = dict(service_boundary_summary or {})
     lines = [
         "# Long Run Digital Life Loop Validation",
         "",
@@ -278,13 +315,29 @@ def _report_markdown(
         "",
         f"- mode: `{summary.get('mode')}`",
         f"- passed: `{summary.get('passed')}`",
+        f"- service_boundary_passed: `{summary.get('service_boundary_passed')}`",
         f"- turn_count: `{summary.get('turn_count')}`",
         f"- timeline_event_count: `{summary.get('timeline_event_count')}`",
+        f"- service_boundary_output_dir: `{summary.get('service_boundary_output_dir')}`",
         f"- full_loop_output_dir: `{summary.get('full_loop_output_dir')}`",
         "",
-        "## Checks",
+        "## Service Boundary",
         "",
     ]
+    for name, raw in dict(service_boundary.get("components") or {}).items():
+        item = dict(raw or {}) if isinstance(raw, Mapping) else {}
+        lines.append(
+            f"- [{'x' if item.get('ok') else ' '}] `{name}` "
+            f"class=`{item.get('runtime_class')}` status=`{item.get('status')}` "
+            f"detail={item.get('detail')}"
+        )
+    lines.extend(
+        [
+            "",
+            "## Checks",
+            "",
+        ]
+    )
     for key, value in dict(summary.get("checks") or {}).items():
         lines.append(f"- [{'x' if value else ' '}] `{key}`")
     lines.extend(["", "## Replies", ""])
@@ -330,6 +383,20 @@ def _resolve_out_dir(args: argparse.Namespace) -> Path:
     return DEFAULT_OUT / time.strftime("%Y%m%d_%H%M%S")
 
 
+def _service_boundary_args(*, args: argparse.Namespace, out_dir: Path, mode: str) -> argparse.Namespace:
+    argv = [
+        "--mode",
+        mode,
+        "--out-dir",
+        str(out_dir / "service_boundary"),
+        "--run-id",
+        str(getattr(args, "run_id", "") or ""),
+    ]
+    if bool(getattr(args, "allow_hash_embedding", False)):
+        argv.append("--allow-hash-embedding")
+    return build_service_boundary_arg_parser().parse_args(argv)
+
+
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run a 30+ turn digital-life long-run loop validation.")
     parser.add_argument("--mode", choices=("fixture", "live"), default="fixture")
@@ -337,6 +404,11 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--run-id", default="")
     parser.add_argument("--turns", type=int, default=32)
     parser.add_argument("--min-turns", type=int, default=30)
+    parser.add_argument(
+        "--allow-hash-embedding",
+        action="store_true",
+        help="Allow hash embedding fallback to pass the live service boundary preflight.",
+    )
     return parser
 
 
