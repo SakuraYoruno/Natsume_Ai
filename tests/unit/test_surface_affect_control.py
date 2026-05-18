@@ -345,3 +345,29 @@ def test_non_romantic_relationship_distance_blocks_romantic_overreach() -> None:
     assert selected is not None
     assert selected.text == "嗯，先缓一下，我在。"
     assert any("RELATION_NON_ROMANTIC_OVERSTEP" in code for code in scores[0].reason_codes)
+
+
+def test_affection_task_uses_ambiguous_distance_without_non_romantic_clue() -> None:
+    packet = build_surface_affect_control_packet(
+        emotion_state={"emotion_tag": "LOVE", "emotion_intensity": 0.5},
+        bond_summary={"stage": "FRIEND", "closeness": 0.72},
+        task_mode="affection",
+    )
+
+    assert packet.relationship_distance == "ambiguous"
+    assert "不要把暧昧写成已经稳定恋人" in packet.must_not_do
+    assert "不要因为关系线索升级为恋人、家人或主人关系" in packet.must_not_do
+
+
+def test_lover_task_can_surface_stable_lover_distance_from_intimate_bond() -> None:
+    packet = build_surface_affect_control_packet(
+        emotion_state={"emotion_tag": "LOVE", "emotion_intensity": 0.7},
+        bond_summary={"stage": "CONFIDANT", "bond_vector": {"intimacy": 0.86}},
+        task_mode="lover_affection",
+    )
+
+    assert packet.relationship_distance == "lover_stable"
+    assert packet.emotional_tone == "warm_affection"
+    assert "不要用永远陪着、只属于你等越界承诺" in packet.must_not_do
+    assert "不要把爱意写成长篇证明" in packet.must_not_do
+    assert "不要因为关系线索升级为恋人、家人或主人关系" not in packet.must_not_do

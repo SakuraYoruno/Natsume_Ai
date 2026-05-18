@@ -7,6 +7,7 @@ from typing import Any
 from host_brain.persona.isolated_surface_harness import GenerateSurface
 from host_brain.persona.surface_affect_control import SurfaceAffectControlPacket
 from host_brain.persona.surface_memory_recall import MemoryRecallPacket
+from host_brain.persona.surface_influence_packet import SurfaceInfluencePacket
 from host_brain.persona.surface_packet_compiler import (
     CompiledSurfaceInput,
     SurfaceTaskControl,
@@ -23,6 +24,7 @@ _ALLOWED_INPUT_KEYS = frozenset(
         "max_facts",
         "max_must_not_do",
         "max_style_anchors",
+        "influence_packet",
         "memory_packet",
         "memory_recall_packet",
         "must_not_do",
@@ -30,6 +32,7 @@ _ALLOWED_INPUT_KEYS = frozenset(
         "soul_md",
         "style_anchor",
         "surface_affect_packet",
+        "surface_influence_packet",
         "task_control",
         "user_message",
     }
@@ -51,6 +54,7 @@ class SurfaceMainChainInput:
     task_control: SurfaceTaskControl | Mapping[str, Any] | None = None
     memory_packet: MemoryRecallPacket | Mapping[str, Any] | None = None
     affect_packet: SurfaceAffectControlPacket | Mapping[str, Any] | None = None
+    influence_packet: SurfaceInfluencePacket | Mapping[str, Any] | None = None
     necessary_facts: Sequence[Any] = ()
     must_not_do: Sequence[Any] = ()
     style_anchor: Sequence[Any] = ()
@@ -66,6 +70,7 @@ class SurfaceMainChainInput:
             "task_control": _safe_payload(self.task_control),
             "memory_packet": _safe_payload(self.memory_packet),
             "affect_packet": _safe_payload(self.affect_packet),
+            "surface_influence_packet": _safe_payload(self.influence_packet),
             "necessary_facts": list(self.necessary_facts),
             "must_not_do": list(self.must_not_do),
             "style_anchor": list(self.style_anchor),
@@ -136,6 +141,7 @@ def compile_surface_main_chain_input(payload: SurfaceMainChainInput | Mapping[st
         task_control=values.get("task_control"),
         memory_packet=values.get("memory_packet") or values.get("memory_recall_packet"),
         affect_packet=values.get("affect_packet") or values.get("affect_control_packet") or values.get("surface_affect_packet"),
+        influence_packet=values.get("surface_influence_packet") or values.get("influence_packet"),
         necessary_facts=_coerce_sequence(values.get("necessary_facts")),
         must_not_do=_coerce_sequence(values.get("must_not_do")),
         style_anchor=_coerce_sequence(values.get("style_anchor")),

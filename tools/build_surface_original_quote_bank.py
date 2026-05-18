@@ -16,7 +16,7 @@ if str(ROOT) not in sys.path:
 from host_brain.persona.surface_original_quote_bank import to_prompt_style_text
 
 DEFAULT_INPUT = ROOT / "artifacts" / "style_source" / "original_cn_all.jsonl"
-DEFAULT_OUT = ROOT / "data" / "style_bank" / "surface_original_quote_bank.jsonl"
+DEFAULT_OUT = ROOT / "artifacts" / "style_source" / "surface_original_quote_legacy_sample.jsonl"
 
 KANA_RE = re.compile(r"[\u3040-\u30ff]")
 ASCII_WORD_RE = re.compile(r"[A-Za-z]{2,}")
@@ -312,7 +312,12 @@ def build_quote_bank(rows: Iterable[Mapping[str, Any]], *, max_quotes: int = 240
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Build raw Chinese quote bank for isolated surface few-shot style references.")
+    parser = argparse.ArgumentParser(
+        description=(
+            "Build a legacy review/sample JSONL from Chinese quotes. Runtime quote guidance "
+            "uses the Chroma surface_original_quotes collection instead."
+        )
+    )
     parser.add_argument("--input", default=str(DEFAULT_INPUT), help="Input daily-safe candidate JSONL from extract_vn_scn_strings.py.")
     parser.add_argument("--out", default=str(DEFAULT_OUT), help="Output raw quote JSONL.")
     parser.add_argument("--max-quotes", type=int, default=240)

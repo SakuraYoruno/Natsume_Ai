@@ -7,6 +7,7 @@ from host_brain.app.chat_runtime_input import build_chat_runtime_input
 from host_brain.app.context.prompt_context_plane import assemble_prompt_context_plane
 from host_brain.app.relational_chat_detector import detect_relational_chat_topic
 from host_brain.persona.surface_affect_control import build_surface_affect_control_packet
+from host_brain.persona.surface_influence_packet import build_surface_influence_packet
 from host_brain.persona.surface_memory_recall import MemoryRecallPacket, memory_recall_packet_from_mapping
 
 
@@ -51,6 +52,8 @@ def build_surface_context_packet(
     thread_id: str | None = None,
     bond_summary: Mapping[str, Any] | None = None,
     intent_draft: Mapping[str, Any] | None = None,
+    organ_context: Mapping[str, Any] | None = None,
+    surface_task_control: Mapping[str, Any] | None = None,
     eval_history_turns: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Build compressed app context for the surface main chain.
@@ -59,6 +62,13 @@ def build_surface_context_packet(
     layer receives only the compiled ReplyControlPacket, not raw history.
     """
 
+    resolved_organ_context, organ_context_meta = _resolve_surface_organ_context(
+        organ_context=organ_context,
+        user_message=user_message,
+        person_id=person_id,
+        session_id=session_id,
+        request_id=request_id,
+    )
     runtime_payload = _build_surface_runtime_payload(
         user_message=user_message,
         render_target_lang=render_target_lang,
@@ -72,6 +82,7 @@ def build_surface_context_packet(
         thread_id=thread_id,
         bond_summary=bond_summary,
         intent_draft=intent_draft,
+        surface_task_control=surface_task_control,
         eval_history_turns=eval_history_turns,
     )
     relational_topic = detect_relational_chat_topic(user_message)
@@ -101,6 +112,9 @@ def build_surface_context_packet(
         emotion_snapshot=emotion_snapshot,
         bond_summary=bond_summary,
         retrieval_summary=retrieval_summary,
+        organ_context=resolved_organ_context,
+        organ_context_meta=organ_context_meta,
+        surface_task_control=surface_task_control,
     )
 
 
@@ -118,6 +132,7 @@ def _build_surface_runtime_payload(
     thread_id: str | None,
     bond_summary: Mapping[str, Any] | None,
     intent_draft: Mapping[str, Any] | None,
+    surface_task_control: Mapping[str, Any] | None,
     eval_history_turns: list[dict[str, Any]] | None,
 ) -> dict[str, Any]:
     runtime_input = build_chat_runtime_input(
@@ -152,6 +167,7 @@ def _build_surface_runtime_payload(
     payload["emotion_context"] = dict(emotion_context or {})
     payload["emotion_snapshot"] = dict(emotion_snapshot or {})
     payload["intent_draft"] = dict(intent_draft or {})
+    payload["surface_task_control"] = dict(surface_task_control or {})
     if eval_history_turns:
         payload["ab_eval"] = {
             "history_turns": [
@@ -170,9 +186,15 @@ def _surface_context_payload_from_plane(
     emotion_snapshot: Mapping[str, Any] | None,
     bond_summary: Mapping[str, Any] | None,
     retrieval_summary: Mapping[str, Any] | None,
+    organ_context: Mapping[str, Any] | None = None,
+    organ_context_meta: Mapping[str, Any] | None = None,
+    surface_task_control: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     continuity = getattr(context_plane, "continuity", None)
-    reply_plan = dict(getattr(getattr(context_plane, "reply_plan", None), "state", {}) or {})
+    reply_plan = {
+        **dict(getattr(getattr(context_plane, "reply_plan", None), "state", {}) or {}),
+        **dict(surface_task_control or {}),
+    }
     memory_packet = _memory_packet_from_retrieval_summary(retrieval_summary)
     affect_state_payload = _state_as_dict(getattr(getattr(context_plane, "affect", None), "state", None))
     relationship_state_payload = _state_as_dict(getattr(getattr(context_plane, "relationship", None), "state", None))
@@ -190,20 +212,42 @@ def _surface_context_payload_from_plane(
             or ""
         ),
     )
+    continuity_payload = {
+        "turns_injected": int(getattr(continuity, "turns_injected", 0) or 0),
+        "fetched_turns": int(getattr(continuity, "fetched_turns", 0) or 0),
+        "older_turn_count": int(getattr(continuity, "older_turn_count", 0) or 0),
+        "summary_present": bool(getattr(continuity, "summary", "")),
+        "oldest_ts_ms": getattr(continuity, "oldest_ts_ms", None),
+        "newest_ts_ms": getattr(continuity, "newest_ts_ms", None),
+        "skipped_corrupted_count": int(getattr(continuity, "skipped_corrupted_count", 0) or 0),
+        "skipped_empty_count": int(getattr(continuity, "skipped_empty_count", 0) or 0),
+        "deduped_same_role_count": int(getattr(continuity, "deduped_same_role_count", 0) or 0),
+    }
+    surface_organ_context, surface_organ_context_meta = _attach_compressed_surface_route(
+        organ_context=organ_context,
+        organ_context_meta=organ_context_meta,
+        reply_plan=reply_plan,
+    )
+    influence_packet = build_surface_influence_packet(
+        reply_plan=reply_plan,
+        affect_packet=affect_packet.as_dict(),
+        affect_state=affect_state_payload,
+        relationship_state=relationship_state_payload,
+        drive_state=_state_as_dict(getattr(getattr(context_plane, "drive", None), "state", None)),
+        continuity=continuity_payload,
+        memory_packet=memory_packet.as_dict() if memory_packet is not None else {},
+        delivery={"response_form": str(reply_plan.get("response_form") or "text")},
+        organ_context=surface_organ_context,
+    )
     payload: dict[str, Any] = {
         "conversation_history": {
-            "turns_injected": int(getattr(continuity, "turns_injected", 0) or 0),
-            "fetched_turns": int(getattr(continuity, "fetched_turns", 0) or 0),
-            "older_turn_count": int(getattr(continuity, "older_turn_count", 0) or 0),
-            "summary_present": bool(getattr(continuity, "summary", "")),
-            "oldest_ts_ms": getattr(continuity, "oldest_ts_ms", None),
-            "newest_ts_ms": getattr(continuity, "newest_ts_ms", None),
-            "skipped_corrupted_count": int(getattr(continuity, "skipped_corrupted_count", 0) or 0),
-            "skipped_empty_count": int(getattr(continuity, "skipped_empty_count", 0) or 0),
-            "deduped_same_role_count": int(getattr(continuity, "deduped_same_role_count", 0) or 0),
+            **continuity_payload,
         },
         "reply_plan": reply_plan,
         "surface_affect_packet": affect_packet.as_dict(),
+        "surface_influence_packet": influence_packet.as_dict(),
+        "surface_organ_context_meta": surface_organ_context_meta,
+        "surface_organ_influence": dict(influence_packet.organ_trace),
     }
     if memory_packet is not None:
         payload["surface_memory_recall_packet"] = memory_packet.as_dict()
@@ -240,6 +284,89 @@ def _memory_packet_from_retrieval_summary(retrieval_summary: Mapping[str, Any] |
         if isinstance(raw, (MemoryRecallPacket, Mapping)):
             return memory_recall_packet_from_mapping(raw)
     return None
+
+
+def _attach_compressed_surface_route(
+    *,
+    organ_context: Mapping[str, Any] | None,
+    organ_context_meta: Mapping[str, Any] | None,
+    reply_plan: Mapping[str, Any] | None,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    payload = dict(organ_context or {})
+    meta = dict(organ_context_meta or {})
+    if not payload:
+        return payload, meta
+    if isinstance(payload.get("tribe_route"), Mapping) and payload.get("tribe_route"):
+        meta["key_count"] = len(payload)
+        meta["compressed_route_attached"] = False
+        return payload, meta
+
+    plan = dict(reply_plan or {})
+    task_mode = str(
+        plan.get("task_mode")
+        or plan.get("primary_topic")
+        or plan.get("response_goal")
+        or "chat"
+    ).strip() or "chat"
+    payload["tribe_route"] = {
+        "route": "surface_main_chain",
+        "reason": "compressed_surface_context",
+        "task_mode": task_mode,
+        "confidence": 1.0,
+    }
+    meta["key_count"] = len(payload)
+    meta["compressed_route_attached"] = True
+    return payload, meta
+
+
+def _resolve_surface_organ_context(
+    *,
+    organ_context: Mapping[str, Any] | None,
+    user_message: str,
+    person_id: str,
+    session_id: str,
+    request_id: str,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    if isinstance(organ_context, Mapping) and organ_context:
+        payload = dict(organ_context)
+        return payload, {
+            "status": "OK",
+            "source": "provided_surface_organ_context",
+            "key_count": len(payload),
+        }
+    try:
+        from host_brain.tribe.cortex_agent import get_cortex_agent  # noqa: PLC0415
+
+        request_body = {
+            "request_id": str(request_id or "").strip(),
+            "person_id": str(person_id or "").strip(),
+            "session_id": str(session_id or "").strip(),
+            "user_message": str(user_message or "").strip(),
+        }
+        raw = get_cortex_agent().collect_tribe_context(
+            request_body=request_body,
+            session_id=str(session_id or "").strip() or None,
+            user_id=str(person_id or "").strip() or None,
+        )
+    except Exception as exc:
+        return {}, {
+            "status": "DEGRADED",
+            "source": "cortex_collect_tribe_context",
+            "reason_code": type(exc).__name__,
+            "key_count": 0,
+        }
+    if not isinstance(raw, Mapping) or not raw:
+        return {}, {
+            "status": "EMPTY",
+            "source": "cortex_collect_tribe_context",
+            "key_count": 0,
+        }
+    payload = dict(raw)
+    return payload, {
+        "status": "OK",
+        "source": "cortex_collect_tribe_context",
+        "key_count": len(payload),
+    }
 
 
 def _extract_context_topic(context_plane: Any) -> str:

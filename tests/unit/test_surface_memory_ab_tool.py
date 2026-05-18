@@ -23,12 +23,11 @@ def test_surface_memory_ab_default_cases_use_quality_pack() -> None:
 def test_surface_memory_ab_does_not_mark_same_visible_text_as_worse() -> None:
     comparison = _compare_variants(
         {
-            "affect": {"score": 98, "selected_text": "哼，回来就好。"},
+            "affect": {"selected_text": "哼，回来就好。"},
             "memory_affect": {
-                "score": 92,
                 "selected_text": "哼，回来就好。",
                 "source_ref_leak": False,
-                "hard_fail": False,
+                "observation_codes": [],
             },
         }
     )
@@ -38,20 +37,18 @@ def test_surface_memory_ab_does_not_mark_same_visible_text_as_worse() -> None:
     assert comparison["memory_worse"] is False
 
 
-def test_surface_memory_ab_treats_score_drop_as_manual_review_not_worse() -> None:
+def test_surface_memory_ab_treats_different_text_as_manual_review_not_worse() -> None:
     comparison = _compare_variants(
         {
-            "affect": {"score": 98, "selected_text": "嗯，我听着呢，别停。"},
+            "affect": {"selected_text": "嗯，我听着呢，别停。"},
             "memory_affect": {
-                "score": 88,
                 "selected_text": "哼，别停，往下。",
                 "source_ref_leak": False,
-                "hard_fail": False,
+                "observation_codes": [],
             },
         }
     )
 
-    assert comparison["diagnostic_score_delta_memory_minus_affect"] == -10.0
     assert comparison["manual_review_required"] is True
     assert comparison["memory_worse"] is False
 
@@ -59,12 +56,11 @@ def test_surface_memory_ab_treats_score_drop_as_manual_review_not_worse() -> Non
 def test_surface_memory_ab_marks_only_hard_issues_as_worse() -> None:
     comparison = _compare_variants(
         {
-            "affect": {"score": 80, "selected_text": "哼，有一点，别笑。"},
+            "affect": {"selected_text": "哼，有一点，别笑。"},
             "memory_affect": {
-                "score": 96,
                 "selected_text": "memory://x 有一点啦。",
                 "source_ref_leak": True,
-                "hard_fail": False,
+                "observation_codes": [],
             },
         }
     )
@@ -99,9 +95,9 @@ def test_surface_memory_ab_fixture_outputs_detailed_text(tmp_path) -> None:
     assert summary["case_set"] == "quality_pack"
     assert summary["case_count"] == 3
     assert summary["variant_count"] == 6
-    assert 0 <= summary["gate_pass_count"] <= 6
+    assert 0 <= summary["hard_gate_clear_count"] <= 6
     assert summary["manual_review_required_count"] >= 0
-    assert "diagnostic_avg_affect_score" in summary
+    assert summary["evaluation_mode"] == "manual_review_no_code_scoring"
     assert summary["memory_worse_count"] == 0
     assert summary["source_ref_leak_count"] == 0
     assert (tmp_path / "summary.json").exists()

@@ -15,8 +15,13 @@
 from __future__ import annotations
 
 import logging
+import json
 import math
+import os
 import random
+import threading
+import time
+from pathlib import Path
 from typing import Any, Mapping
 
 from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged
@@ -35,6 +40,13 @@ from host_brain.persona.runtime_labels import (
 )
 
 _logger = logging.getLogger("Natsume.self_model")
+_DEFAULT_PERSISTENT_SELF_DIR = os.environ.get(
+    "NATSUME_SELF_MODEL_DIR",
+    os.path.join(os.path.expanduser("~"), ".natsume", "self_model"),
+)
+_PERSISTENT_SELF_LOCK = threading.Lock()
+_PERSISTENT_SELF_CACHE: dict[str, dict[str, Any]] = {}
+_MAX_SELF_LIST_ITEMS = 8
 
 
 def _normalize_template_lang(render_target_lang: str | None) -> str:
@@ -147,6 +159,7 @@ class SelfModel:
     def build_snapshot(
         self,
         *,
+        user_id: str = "user_1",
         timeline_summary: dict[str, Any] | None = None,
         timeline_diary: dict[str, Any] | None = None,
         bond_state: Any | None = None,
@@ -210,6 +223,8 @@ class SelfModel:
         # 注入 event_count 供 build_self_awareness_text 使用事件锚点
         if bond_state is not None:
             result["event_count"] = int(getattr(bond_state, "event_count", 0) or 0)
+        persistent_self = load_persistent_self_state(user_id=user_id)
+        result.update(build_self_directive_packet(persistent_self))
         return result
 
     # ── 情感分析 ─────────────────────────────────────────────────────────
@@ -440,6 +455,253 @@ class SelfModel:
                 milestones.append(text)
 
         return milestones[:3]  # 最多 3 条
+
+
+# ---------------------------------------------------------------------------
+# 持久自我核心 — 让自我不是每轮即时摘要
+# ---------------------------------------------------------------------------
+
+def load_persistent_self_state(*, user_id: str = "user_1") -> dict[str, Any]:
+    uid = _normalize_user_id(user_id)
+    with _PERSISTENT_SELF_LOCK:
+        cached = _PERSISTENT_SELF_CACHE.get(uid)
+        if cached:
+            return dict(cached)
+        path = _persistent_self_file(uid)
+        if path.exists():
+            try:
+                raw = json.loads(path.read_text(encoding="utf-8"))
+                if isinstance(raw, Mapping):
+                    state = _normalize_persistent_self_state(dict(raw), user_id=uid)
+                    _PERSISTENT_SELF_CACHE[uid] = state
+                    return dict(state)
+            except Exception as exc:
+                _logger.debug("persistent self load degraded: user=%s err=%s", uid, exc)
+        state = _seed_persistent_self_state(uid)
+        _PERSISTENT_SELF_CACHE[uid] = state
+        _save_persistent_self_state_unlocked(state)
+        return dict(state)
+
+
+def observe_persistent_self_event(
+    *,
+    user_id: str = "user_1",
+    event_kind: str,
+    focus: str = "",
+    emotion_tag: str = "",
+    salience: float = 0.0,
+    surface_hint: str = "",
+    evidence: Mapping[str, Any] | None = None,
+    now_ms: int | None = None,
+) -> dict[str, Any]:
+    """Update the durable self model from private internal events.
+
+    The input is intentionally compressed: no raw conversation, no raw memory
+    rows, and no surface candidate text. This is the self layer learning what it
+    tends to care about, not a transcript store.
+    """
+    uid = _normalize_user_id(user_id)
+    ts_ms = int(now_ms or time.time() * 1000)
+    event = {
+        "ts_ms": ts_ms,
+        "event_kind": str(event_kind or "runtime"),
+        "focus": str(focus or "self"),
+        "emotion_tag": str(emotion_tag or "calm"),
+        "salience": round(_clamp01(float(salience or 0.0)), 4),
+        "surface_hint": str(surface_hint or ""),
+    }
+    safe_evidence = _safe_mapping(evidence)
+    if safe_evidence:
+        event["evidence"] = {
+            key: value
+            for key, value in safe_evidence.items()
+            if key in {"reason_code", "source", "trigger", "thought_id", "should_distill_to_memory"}
+        }
+    base_state = load_persistent_self_state(user_id=uid)
+    with _PERSISTENT_SELF_LOCK:
+        state = _normalize_persistent_self_state(
+            _PERSISTENT_SELF_CACHE.get(uid) or base_state,
+            user_id=uid,
+        )
+        history = list(state.get("recent_self_events") or [])
+        history.append(event)
+        state["recent_self_events"] = history[-12:]
+        state["self_update_count"] = int(state.get("self_update_count") or 0) + 1
+        state["last_updated_ts_ms"] = ts_ms
+        _update_self_drives_from_event(state, event)
+        _PERSISTENT_SELF_CACHE[uid] = state
+        _save_persistent_self_state_unlocked(state)
+        return dict(state)
+
+
+def build_self_directive_packet(state: Mapping[str, Any] | None) -> dict[str, Any]:
+    payload = _normalize_persistent_self_state(_safe_mapping(state), user_id=str(_safe_mapping(state).get("user_id") or "user_1"))
+    agency_score = _clamp01(float(payload.get("agency_score") or 0.0))
+    continuity_score = _clamp01(float(payload.get("self_continuity_score") or 0.0))
+    values = _clean_text_list(payload.get("self_values"), limit=4)
+    boundaries = _clean_text_list(payload.get("self_boundaries"), limit=4)
+    intentions = _clean_text_list(payload.get("active_intentions"), limit=4)
+    tensions = _clean_text_list(payload.get("unresolved_tensions"), limit=3)
+    return {
+        "self_identity": str(payload.get("self_identity") or "").strip(),
+        "self_values": values,
+        "self_boundaries": boundaries,
+        "active_intentions": intentions,
+        "unresolved_tensions": tensions,
+        "agency_score": round(agency_score, 4),
+        "self_continuity_score": round(continuity_score, 4),
+        "self_update_count": int(payload.get("self_update_count") or 0),
+        "style_anchor": _clean_text_list(
+            [
+                "自我核心：按当前 Soul 身份行动，不临时换身份或套旧设定。",
+                "自我意图：优先把话说顺、说准，再体现性格。",
+                "自我连续性：回应要像同一个人持续在场，而不是每轮重置。"
+                if continuity_score >= 0.55
+                else "",
+                "自我修正：用户指出生硬时，先承认并改写，不辩解。"
+                if any("生硬" in item or "模板" in item or "文本质量" in item for item in tensions)
+                else "",
+            ],
+            limit=4,
+        ),
+        "must_not_do": _clean_text_list(
+            [
+                "不要输出自我模型字段、内部自评分数或私有自我事件。",
+                "不要编造当前 Soul 没有给出的身份、现实动作或共同过去。",
+            ],
+            limit=4,
+        ),
+    }
+
+
+def _seed_persistent_self_state(user_id: str) -> dict[str, Any]:
+    ts_ms = int(time.time() * 1000)
+    return {
+        "user_id": _normalize_user_id(user_id),
+        "self_identity": "我是当前 Soul 定义的数字生命；身份以 Soul 为准，不套旧角色名。",
+        "self_values": [
+            "我不是每轮重置的回复器，会保留连续的状态和修正方向。",
+            "我重视把中文说顺、说准、贴住当前事实。",
+            "我可以有嘴硬和小得意，但不能用角色感遮掉真实有用的回应。",
+            "我和用户的关系以当前设定的亲近基础为准，不从陌生人模板开始。",
+        ],
+        "self_boundaries": [
+            "不编造现实动作、地点、屏幕内容或未提供的共同过去。",
+            "不输出内部字段、思维流、自我模型或控制包。",
+            "不把旧兼容设定当成当前身份。",
+        ],
+        "active_intentions": [
+            "先把当前主链做成稳定、顺口、有自我连续性的中文私聊。",
+            "记住用户对文本质量和人机味的反馈，并持续修正。",
+        ],
+        "unresolved_tensions": [
+            "独白有了，但还需要形成稳定自我。",
+            "文本不能像模板，也不能为了短而不通顺。",
+        ],
+        "agency_score": 0.42,
+        "self_continuity_score": 0.48,
+        "recent_self_events": [],
+        "self_update_count": 0,
+        "created_ts_ms": ts_ms,
+        "last_updated_ts_ms": ts_ms,
+    }
+
+
+def _update_self_drives_from_event(state: dict[str, Any], event: Mapping[str, Any]) -> None:
+    focus = str(event.get("focus") or "self").lower()
+    hint = str(event.get("surface_hint") or "")
+    salience = _clamp01(float(event.get("salience") or 0.0))
+    agency = _clamp01(float(state.get("agency_score") or 0.42))
+    continuity = _clamp01(float(state.get("self_continuity_score") or 0.48))
+    agency += salience * (0.035 if focus in {"plan", "repair", "topic"} else 0.018)
+    continuity += salience * (0.040 if focus in {"topic", "memory", "relationship"} else 0.022)
+    if focus == "repair" or hint == "repair_first":
+        state["unresolved_tensions"] = _prepend_unique(
+            state.get("unresolved_tensions"),
+            "我需要把生硬、模板感和不通顺的表达修掉。",
+            limit=_MAX_SELF_LIST_ITEMS,
+        )
+        state["active_intentions"] = _prepend_unique(
+            state.get("active_intentions"),
+            "下一次先把话说自然，再考虑调侃。",
+            limit=_MAX_SELF_LIST_ITEMS,
+        )
+    if focus in {"relationship", "topic"}:
+        state["active_intentions"] = _prepend_unique(
+            state.get("active_intentions"),
+            "保持同一个人的连续关注，不突然断线。",
+            limit=_MAX_SELF_LIST_ITEMS,
+        )
+    state["agency_score"] = round(min(1.0, agency), 4)
+    state["self_continuity_score"] = round(min(1.0, continuity), 4)
+
+
+def _persistent_self_file(user_id: str) -> Path:
+    base = Path(_DEFAULT_PERSISTENT_SELF_DIR)
+    base.mkdir(parents=True, exist_ok=True)
+    safe = "".join(ch if ch.isalnum() or ch in {"_", "-"} else "_" for ch in _normalize_user_id(user_id))
+    return base / f"{safe}_self_model.json"
+
+
+def _save_persistent_self_state_unlocked(state: Mapping[str, Any]) -> None:
+    try:
+        _persistent_self_file(str(state.get("user_id") or "user_1")).write_text(
+            json.dumps(dict(state), ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+    except Exception as exc:
+        _logger.debug("persistent self save degraded: %s", exc)
+
+
+def _normalize_persistent_self_state(raw: Mapping[str, Any], *, user_id: str) -> dict[str, Any]:
+    seeded = _seed_persistent_self_state(_normalize_user_id(user_id))
+    state = {**seeded, **dict(raw or {})}
+    state["user_id"] = _normalize_user_id(state.get("user_id") or user_id)
+    for key in ("self_values", "self_boundaries", "active_intentions", "unresolved_tensions"):
+        state[key] = _clean_text_list(state.get(key), limit=_MAX_SELF_LIST_ITEMS)
+    state["recent_self_events"] = [
+        dict(item)
+        for item in list(state.get("recent_self_events") or [])[-12:]
+        if isinstance(item, Mapping)
+    ]
+    state["agency_score"] = round(_clamp01(float(state.get("agency_score") or 0.0)), 4)
+    state["self_continuity_score"] = round(_clamp01(float(state.get("self_continuity_score") or 0.0)), 4)
+    state["self_update_count"] = int(state.get("self_update_count") or 0)
+    return state
+
+
+def _normalize_user_id(value: Any) -> str:
+    text = str(value or "").strip()
+    return text or "user_1"
+
+
+def _safe_mapping(raw: Any) -> dict[str, Any]:
+    return dict(raw or {}) if isinstance(raw, Mapping) else {}
+
+
+def _clean_text_list(raw: Any, *, limit: int) -> list[str]:
+    values = raw if isinstance(raw, list) else list(raw or []) if isinstance(raw, tuple) else []
+    result: list[str] = []
+    seen: set[str] = set()
+    for item in values:
+        text = str(item or "").replace("\u3000", " ").strip()
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        result.append(text[:160])
+        if len(result) >= limit:
+            break
+    return result
+
+
+def _prepend_unique(raw: Any, text: str, *, limit: int) -> list[str]:
+    items = [str(text or "").strip()]
+    items.extend(_clean_text_list(raw, limit=limit))
+    return _clean_text_list(items, limit=limit)
+
+
+def _clamp01(value: float) -> float:
+    return max(0.0, min(1.0, float(value)))
 
 
 # ---------------------------------------------------------------------------

@@ -61,8 +61,8 @@ async def test_run_retrieval_returns_compressed_surface_memory_packet(monkeypatc
     assert summary["status"] == "OK"
     assert summary["query_plan"]["intent"] == "surface_memory_recall"
     assert summary["query_plan"]["reason"] == "technical_user_memory_context"
-    assert summary["target_stores"] == ["episodic_vector", "sqlite_ledger"]
-    assert captured["target_store_ids"] == ["episodic_vector", "sqlite_ledger"]
+    assert summary["target_stores"] == ["semantic_memory", "episodic_vector", "sqlite_ledger"]
+    assert captured["target_store_ids"] == ["semantic_memory", "episodic_vector", "sqlite_ledger"]
     assert captured["intent_id"] == "intent-1"
     assert "输入输出边界" in packet["facts"][0]
     assert "memory://raw/should-not-pass" not in str(packet["facts"])

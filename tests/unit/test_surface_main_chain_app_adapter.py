@@ -92,7 +92,13 @@ def test_build_surface_main_chain_input_from_chat_input_compresses_app_context(m
 
 
 def test_build_surface_main_chain_input_prefers_surface_task_control(monkeypatch) -> None:
-    trace: dict[str, object] = {}
+    trace: dict[str, object] = {
+        "organ_route_meta": {
+            "immune_risk_level": "high",
+            "motive_care": 0.44,
+            "cognitive_load_index": 0.81,
+        }
+    }
     calls: list[dict[str, object]] = []
 
     monkeypatch.setattr(
@@ -122,6 +128,14 @@ def test_build_surface_main_chain_input_prefers_surface_task_control(monkeypatch
                 "source_refs": ["memory://raw/should-not-pass"],
                 "evidence_refs": ["evd://memory/2"],
             },
+            "surface_influence_packet": {
+                "affect": {"emotional_tone": "playful_light"},
+                "relationship": {
+                    "relationship_distance": "familiar_not_intimate",
+                    "style_anchor": ["关系面只影响距离，不写关系阶段。"],
+                },
+                "safety": {"must_not_do": ["不要输出器官状态。"]},
+            },
         }
 
     monkeypatch.setattr("host_brain.app.surface_context_packet.build_surface_context_packet", _fake_surface_context_packet)
@@ -139,9 +153,14 @@ def test_build_surface_main_chain_input_prefers_surface_task_control(monkeypatch
     )
 
     assert calls
+    assert calls[0]["surface_task_control"]["task_mode"] == "style_repair"
+    assert calls[0]["organ_context"]["immune_state"]["risk_level"] == "high"
+    assert calls[0]["organ_context"]["motive_state"]["care_drive"] == 0.44
+    assert calls[0]["organ_context"]["proprioception_state"]["cognitive_load_index"] == 0.81
     assert payload.task_control["task_mode"] == "style_repair"
     assert payload.task_control["response_move"] == "ack_style_issue"
     assert payload.affect_packet.emotional_tone == "playful_light"
+    assert payload.influence_packet["relationship"]["relationship_distance"] == "familiar_not_intimate"
     assert tuple(payload.memory_packet.facts) == ("用户刚刚要求继续迁移主链。",)
     assert trace["surface_context_packet_prepared"] is True
     assert trace["surface_selected_reply_plan"]["task_mode"] == "style_repair"

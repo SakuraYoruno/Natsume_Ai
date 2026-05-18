@@ -4,7 +4,6 @@ import argparse
 import asyncio
 import json
 import os
-import statistics
 import sys
 import time
 from hashlib import sha256
@@ -233,30 +232,20 @@ def _summarize(
 ) -> dict[str, Any]:
     expected_dialogue_turns = _dialogue_turn_counts(cases)
     turns_count = sum(expected_dialogue_turns.values())
-    selected = [row.get("selected") for row in results if isinstance(row.get("selected"), dict)]
-    scores = [float(row.get("score") or 0.0) for row in selected]
+    outputs = [dict(row.get("output") or {}) for row in results if isinstance(row.get("output"), Mapping)]
     latencies = [int(row.get("latency_ms") or 0) for row in results if int(row.get("latency_ms") or 0) > 0]
-    pass_count = sum(1 for row in selected if row.get("passed"))
     generated_count = sum(1 for row in results if row.get("ok"))
-    hard_fail_count = sum(1 for row in selected if row.get("hard_fail"))
-    control_violation_count = sum(1 for row in selected if row.get("control_violations"))
-    low_score_count = sum(1 for row in selected if float(row.get("score") or 0.0) < 80.0 or not row.get("passed"))
     dialogue_turns: dict[str, int] = {}
-    dialogue_passed: dict[str, int] = {}
     for row in results:
         case_id = _clean_text(row.get("case_id"))
         if not case_id:
             continue
         dialogue_turns[case_id] = dialogue_turns.get(case_id, 0) + 1
-        selected_row = row.get("selected")
-        if isinstance(selected_row, Mapping) and selected_row.get("passed"):
-            dialogue_passed[case_id] = dialogue_passed.get(case_id, 0) + 1
-    dialogue_pass_count = sum(
+    dialogue_completed_count = sum(
         1
         for case_id, expected_count in expected_dialogue_turns.items()
         if expected_count > 0
         and dialogue_turns.get(case_id, 0) == expected_count
-        and dialogue_passed.get(case_id, 0) == expected_count
     )
     return {
         "closed_loop": True,
@@ -266,15 +255,11 @@ def _summarize(
         "completed": completed,
         "generated_count": generated_count,
         "errors": completed - generated_count,
-        "selected_count": len(selected),
-        "pass_count": pass_count,
-        "pass_rate": round(pass_count / len(selected), 4) if selected else None,
-        "dialogue_pass_count": dialogue_pass_count,
-        "dialogue_pass_rate": round(dialogue_pass_count / len(cases), 4) if cases else None,
-        "avg_selected_score": round(statistics.fmean(scores), 3) if scores else None,
-        "low_score_count": low_score_count,
-        "hard_fail_count": hard_fail_count,
-        "control_violation_count": control_violation_count,
+        "output_count": len(outputs),
+        "empty_output_count": sum(1 for row in outputs if not _clean_text(row.get("direct_text"))),
+        "dialogue_completed_count": dialogue_completed_count,
+        "dialogue_completion_rate": round(dialogue_completed_count / len(cases), 4) if cases else None,
+        "hard_gate_observation_count": sum(1 for row in outputs if row.get("observation_codes")),
         "raw_recent_leak_count": raw_recent_leak_count,
         "actual_feedback_turns": generated_count,
         "latency_ms_p50": _percentile(latencies, 0.5),
@@ -285,6 +270,7 @@ def _summarize(
         "concurrency": 1,
         "gen_params": dict(gen_params),
         "output_dir": str(out_dir),
+        "evaluation_mode": "manual_review_no_code_scoring",
     }
 
 
@@ -303,12 +289,12 @@ def run_live_loop(args: argparse.Namespace) -> dict[str, Any]:
     out_dir.mkdir(parents=True, exist_ok=True)
 
     raw_path = out_dir / "live_raw_generations.jsonl"
-    score_path = out_dir / "live_scores.jsonl"
+    output_path = out_dir / "live_outputs.jsonl"
     prompt_path = out_dir / "prompt_traces.jsonl"
     loop_path = out_dir / "loop_trace.jsonl"
     progress_path = out_dir / "progress.json"
     summary_path = out_dir / "summary.json"
-    for path in (raw_path, score_path, prompt_path, loop_path):
+    for path in (raw_path, output_path, prompt_path, loop_path):
         path.write_text("", encoding="utf-8")
 
     started = time.perf_counter()
@@ -376,7 +362,6 @@ def run_live_loop(args: argparse.Namespace) -> dict[str, Any]:
                     },
                 )
                 latency_ms = result.latency_ms or int((time.perf_counter() - turn_started) * 1000)
-                scores = list(result.candidates)
                 selected = result.selected
                 selected_payload = selected.as_dict() if selected else None
                 selected_text = result.selected_text
@@ -391,31 +376,23 @@ def run_live_loop(args: argparse.Namespace) -> dict[str, Any]:
                     "latency_ms": latency_ms,
                     "user_message": request.user_message,
                     "raw_output": _clean_text(result.raw_output),
-                    "candidates": [score.text for score in scores],
+                    "candidate_texts": [candidate.text for candidate in result.candidates],
                     "direct_text": selected_text,
                     "selected_text": selected_text,
-                    "selected_score": selected.score if selected else None,
-                    "selected_passed": selected.passed if selected else False,
-                }
-                score_row = {
-                    "case_id": case_id,
-                    "turn_id": turn_id,
-                    "turn_index": turn_index,
-                    "surface_case_id": request.case_id,
-                    "candidates": [score.as_dict() for score in scores],
                     "selected": selected_payload,
-                    "selection": "direct_first",
+                    "observation_codes": list(result.observation_codes),
+                    "generation_trace": dict(result.generation_trace),
                 }
                 result_row = {
                     "case_id": case_id,
                     "turn_id": turn_id,
                     "turn_index": turn_index,
                     "ok": True,
-                    "selected": selected_payload,
+                    "output": raw_row,
                     "latency_ms": latency_ms,
                 }
                 _append_jsonl(raw_path, raw_row)
-                _append_jsonl(score_path, score_row)
+                _append_jsonl(output_path, raw_row)
                 _append_jsonl(
                     loop_path,
                     {
@@ -427,6 +404,7 @@ def run_live_loop(args: argparse.Namespace) -> dict[str, Any]:
                         "recent_window": recent_window_trace(recent_for_turn),
                         "raw_recent_leak_hashes": list(leak_hashes),
                         "selected": selected_payload,
+                        "observation_codes": list(result.observation_codes),
                     },
                 )
                 raw_recent.append({"role": "user", "content": request.user_message})
@@ -439,7 +417,7 @@ def run_live_loop(args: argparse.Namespace) -> dict[str, Any]:
                     "turn_id": turn_id,
                     "turn_index": turn_index,
                     "ok": False,
-                    "selected": None,
+                    "output": None,
                     "latency_ms": latency_ms,
                 }
                 _append_jsonl(
@@ -455,7 +433,6 @@ def run_live_loop(args: argparse.Namespace) -> dict[str, Any]:
                         "error": repr(exc),
                     },
                 )
-                _append_jsonl(score_path, {"case_id": case_id, "turn_id": turn_id, "turn_index": turn_index, "error": repr(exc), "selected": None})
             completed += 1
             results.append(result_row)
             summary = _summarize(

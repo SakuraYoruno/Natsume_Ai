@@ -277,6 +277,18 @@ _SURFACE_QUOTE_QUERY_BY_SCENE: dict[str, dict[str, tuple[str, ...] | str]] = {
     "daily_chat": {"intent_tags": ("daily",), "style_moves": ("quick_reaction",)},
     "default": {"intent_tags": ("daily",), "style_moves": ("quick_reaction",)},
 }
+_SURFACE_QUOTE_SCENE_ALIASES = {
+    "affection": "ambiguous_affection",
+    "receive_affection_lightly": "ambiguous_affection",
+    "lover_affection": "lover_presence",
+    "return_affection_concretely": "lover_presence",
+    "relationship_reassurance": "jealousy_low_pressure",
+    "light_reassurance": "jealousy_low_pressure",
+    "boundary_repair": "pushed_away_boundary",
+    "step_back_but_stay_available": "pushed_away_boundary",
+    "style_repair": "negative_feedback",
+    "ack_style_issue": "negative_feedback",
+}
 _MEMORY_FACT_PREFIXES = (
     "记忆线索：",
     "关系线索：",
@@ -1598,7 +1610,13 @@ _LOW_ENERGY_USER_MARKERS = (
     "脑子糊",
     "睡不好",
     "犯困",
+    "熬夜",
+    "晚睡",
+    "很晚睡",
+    "晚才睡",
+    "很晚才睡",
 )
+_LOW_ENERGY_RESPONSE_MOVES = frozenset({"late_sleep_care"})
 _LOW_ENERGY_OVERHARSH_TEASE_PHRASES = (
     "活该",
     "自找",
@@ -2331,6 +2349,9 @@ def response_move_action_guidance(request: IsolatedSurfaceInput) -> str:
         lines.append("- 如果还在连续测试话题里，夸奖要落回当前链路，例如“长链别白跑/这轮没白跑”；不要说“收掉就好”“我看着”。")
     elif response_move == "emotional_hold":
         lines.append("- 这是情绪/陪伴承接，可以短而稳；不要讲流程，也不要突然技术化。")
+    elif response_move == "late_sleep_care":
+        lines.append("- 回答“会有一点生气/担心”可以，但底色是关心，不要责怪用户。")
+        lines.append("- 不要写“自找/活该/明天别喊困/明天后果/黑眼圈/早上叫你”；落到早点睡、别硬撑或现在先躺下。")
     elif response_move in _MATERIAL_REQUEST_RESPONSE_MOVES:
         lines.append("- 只索要一个明确缺失项，别泛泛说“更多信息/完整材料”。")
     if "观察行" in user_message:
@@ -3106,6 +3127,7 @@ def _low_energy_scene_relevant(request: IsolatedSurfaceInput) -> bool:
     return bool(
         task_mode in _LOW_ENERGY_TASKS
         or response_move in _LOW_ENERGY_TASKS
+        or response_move in _LOW_ENERGY_RESPONSE_MOVES
         or any(marker in user_message for marker in _LOW_ENERGY_USER_MARKERS)
     )
 
@@ -3470,7 +3492,7 @@ def _control_affect_tags(request: IsolatedSurfaceInput) -> tuple[tuple[str, ...]
     return tuple(_clean_list(emotion_tags)), tuple(_clean_list(style_moves))
 
 
-def build_surface_original_quote_query(request: IsolatedSurfaceInput, *, limit: int = 6) -> SurfaceOriginalQuoteQuery:
+def build_surface_original_quote_query(request: IsolatedSurfaceInput, *, limit: int = 16) -> SurfaceOriginalQuoteQuery:
     contract = build_galgame_text_contract(
         user_message=request.user_message,
         facts={},
@@ -3489,7 +3511,8 @@ def build_surface_original_quote_query(request: IsolatedSurfaceInput, *, limit: 
         style_moves=tuple(_clean_list([*tuple(str(item) for item in mapped.get("style_moves", ()) or ()), *control_moves])),
         relationship_stage=_relationship_stage_for_control(request.control.relationship_distance),
         scene_id=scene,
-        limit=max(1, min(int(limit or 6), 8)),
+        user_message=request.user_message,
+        limit=max(1, min(int(limit or 16), 24)),
     )
 
 
@@ -3501,8 +3524,17 @@ def _surface_original_quote_scene_id(request: IsolatedSurfaceInput, contract_sce
         relationship_distance=request.control.relationship_distance,
     )
     if sample and sample.scene_id:
-        return sample.scene_id
-    return _clean_text(contract_scene_id or request.control.task_mode or request.control.response_move) or "default"
+        return _SURFACE_QUOTE_SCENE_ALIASES.get(sample.scene_id, sample.scene_id)
+    for raw in (
+        request.control.task_mode,
+        request.control.response_move,
+        contract_scene_id,
+    ):
+        scene = _clean_text(raw)
+        if scene in _SURFACE_QUOTE_SCENE_ALIASES:
+            return _SURFACE_QUOTE_SCENE_ALIASES[scene]
+    scene = _clean_text(contract_scene_id or request.control.task_mode or request.control.response_move) or "default"
+    return _SURFACE_QUOTE_SCENE_ALIASES.get(scene, scene)
 
 
 def build_isolated_surface_messages(request: IsolatedSurfaceInput) -> list[dict[str, str]]:
@@ -3536,6 +3568,7 @@ def build_isolated_surface_messages(request: IsolatedSurfaceInput) -> list[dict[
             "当前目标是二次元 galgame 私聊数字生命，不是真人客服聊天；允许更鲜明、更台词化、更有角色反应。",
             "不要搬运原作地点、剧情、线下动作或未提供事实。",
             "ReplyControlPacket 是最终生成层的唯一运行控制面；不得要求更多 runtime state。",
+            "ReplyControlPacket.style_anchor 里的句法锚只学结构和节奏，不要逐字照抄锚点文本；同一类短句可以自然换词。",
             "连续对话场景里，事实不够也只能基于当前压缩事实回应；不要让用户贴最近记录、上一轮原文、摘要或历史。",
             "连续测试、摘要压缩、长链验收、观察行、问题簇这类场景里，不要把回复写成“发我/贴过来/我看看”；已有压缩事实时直接给判断、下一步或短承接。",
             "除非 task_mode 是 help_takeover 或 write_takeover，连续场景里不要说“发过来/贴过来/发吧/拿来/等关键材料/把东西贴过来”。",
@@ -3596,8 +3629,8 @@ def build_isolated_surface_messages(request: IsolatedSurfaceInput) -> list[dict[
     if continuity_guidance:
         user_parts.extend(["", continuity_guidance])
     quote_guidance = render_surface_original_quote_guidance(
-        build_surface_original_quote_query(request, limit=6),
-        limit=6,
+        build_surface_original_quote_query(request, limit=16),
+        limit=16,
     )
     if quote_guidance:
         user_parts.extend(["", quote_guidance])
@@ -4471,7 +4504,7 @@ def score_isolated_surface_candidates(
     memory_relevant = bool(memory_terms and _memory_alignment_relevant(request))
     memory_required = bool(memory_terms and _memory_alignment_required(request))
     relationship_axes = relationship_control_axes_for_distance(request.control.relationship_distance)
-    original_quote_selection = select_surface_original_quotes(build_surface_original_quote_query(request, limit=6), limit=6)
+    original_quote_selection = select_surface_original_quotes(build_surface_original_quote_query(request, limit=16), limit=16)
     rows: list[IsolatedCandidateScore] = []
     for candidate in _clean_list(candidates):
         candidate_surface = normalize_surface_chat_punctuation(candidate)

@@ -405,6 +405,8 @@ def _qualitative_relationship_summary(
             return "恋人に近い親密さがある。甘くしすぎず、近さと照れを両方残す。"
         if stage in _SOULMATE_STAGES or substage == "soulbound":
             return "魂の伴侶に近い深い関係。柔らかく率直にしつつ、空らしい軽さを残す。"
+        if micro_social_topic or micro_social_thread:
+            return "義兄妹として馴染んでいる。距離を作りすぎず、目の前の感情へ自然に返す。"
         if substage == "protective_sibling":
             return "身内として庇える義兄妹。軽く返していいが、味方でいることは外さない。"
         if substage == "playful_sibling" or relationship.boundary_softness >= 0.5:
@@ -417,7 +419,9 @@ def _qualitative_relationship_summary(
     if stage in _LOVER_STAGES or substage in {"confessed_lovers", "stable_lovers"}:
         return "关系进入亲密恋人阶段：可以更贴近，但别把亲密写成廉价甜话。"
     if stage in _SOULMATE_STAGES or substage == "soulbound":
-        return "关系接近灵魂伴侣：可以坦率柔软，但仍保持新海天的轻快和分寸。"
+        return "关系接近灵魂伴侣：可以坦率柔软，但仍保持天/SORA的轻快和分寸。"
+    if micro_social_topic or micro_social_thread:
+        return "关系是熟起来的义兄妹：不用刻意拉开，轻轻回应眼前情绪。"
     if substage == "protective_sibling":
         return "关系是会护短的义兄妹：嘴上可以不饶人，但实际要明显站在对方这边。"
     if substage == "playful_sibling" or relationship.boundary_softness >= 0.5:

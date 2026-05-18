@@ -15,6 +15,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from host_brain.persona.isolated_surface_harness import (
+    ReplyControlPacket,
     build_isolated_surface_input,
     parse_surface_candidates,
     score_isolated_surface_candidates,
@@ -31,6 +32,7 @@ from host_brain.persona.surface_memory_recall import (
     build_surface_input_with_memory_recall,
     memory_recall_packet_from_mapping,
 )
+from host_brain.persona.surface_low_info_guidance import low_info_guidance_for_user_message
 from tools.surface_tool_contract import (  # noqa: E402
     OFFLINE_FIXTURE_EVAL_LAYER,
     SURFACE_LOW_LEVEL_ENTRYPOINT_ALLOWED as _SURFACE_LOW_LEVEL_ENTRYPOINT_ALLOWED,
@@ -169,6 +171,51 @@ def _context_from_request(request) -> ThreeLayerContinuityContext:
     )
 
 
+def _with_low_info_guidance(request):
+    guidance = low_info_guidance_for_user_message(
+        request.user_message,
+        task_mode=request.control.task_mode,
+        response_move=request.control.response_move,
+    )
+    if not guidance.applied:
+        return request
+    control = request.control
+    guided_control = ReplyControlPacket(
+        response_move=control.response_move,
+        task_mode=control.task_mode,
+        emotional_tone=control.emotional_tone,
+        relationship_distance=control.relationship_distance,
+        information_budget=control.information_budget,
+        question_budget=control.question_budget,
+        must_include=list(control.must_include),
+        must_not_do=_prepend_unique(guidance.must_not_do, control.must_not_do),
+        facts=_prepend_unique(guidance.facts, control.facts),
+        style_anchor=_prepend_unique(guidance.style_anchor, control.style_anchor),
+    )
+    return build_isolated_surface_input(
+        {
+            "case_id": request.case_id,
+            "soul_md": request.soul_md,
+            "user_message": request.user_message,
+            "reply_control_packet": guided_control,
+            "facts": list(request.facts),
+            "must_not_do": list(request.must_not_do),
+        }
+    )
+
+
+def _prepend_unique(prefix: Sequence[Any], values: Sequence[Any]) -> list[str]:
+    merged: list[str] = []
+    seen: set[str] = set()
+    for value in [*list(prefix or []), *list(values or [])]:
+        text = _clean_text(value)
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        merged.append(text)
+    return merged
+
+
 def _request_variants(
     case: Mapping[str, Any],
     *,
@@ -176,7 +223,7 @@ def _request_variants(
     with_memory: bool,
     with_affect: bool = False,
 ) -> list[tuple[str, Any]]:
-    baseline = build_isolated_surface_input(_case_request_payload(case, soul_md))
+    baseline = _with_low_info_guidance(build_isolated_surface_input(_case_request_payload(case, soul_md)))
     variants: list[tuple[str, Any]] = [("baseline", baseline)]
     raw_packet = _memory_packet_payload(case)
     memory_request = None

@@ -19,12 +19,39 @@ _logger = logging.getLogger("Natsume.inner_activity_agent")
 _ALLOWED_FOCUS = {"self", "state", "plan", "topic"}
 _TEXT_WHITESPACE_RE = re.compile(r"\s+")
 _TEXT_QUESTION_RE = re.compile(r"[?？]+")
+_ABSTRACT_INNER_NOTE_TERMS = (
+    "自我连续性",
+    "连续性修正",
+    "文本自然度",
+    "模板感",
+    "模板",
+    "这句",
+    "下一句",
+    "句子",
+    "文本",
+    "接住",
+    "生成",
+    "回复",
+    "说顺",
+    "状态摘要",
+    "内部状态",
+    "控制包",
+    "验证链路",
+    "模块",
+    "模型",
+    "prompt",
+    "Prompt",
+)
 
 _INNER_ACTIVITY_SYSTEM_PROMPT = (
-    "You are an internal state summarizer. Output a single JSON object only. "
-    "Do not roleplay and do not write user-visible chat text. "
-    "Fields: note, focus. note is an internal short self-state note, focus is one of "
-    "self, state, plan, topic."
+    "Output one JSON object only. You generate a private inner monologue note, "
+    "not user-visible chat and not a state summary. Fields: note, focus. "
+    "note must be a concrete short Chinese thought that could occur inside her mind, "
+    "with a small intention or concern for the next response. Do not use abstract system words "
+    "like 自我连续性, 连续性修正, 文本自然度, 模板感, 内部状态, 控制包, 模块, 模型, prompt. "
+    "Do not write process-talk like 这句, 下一句, 句子, 文本, 模板, 接住, 生成, 回复, 说顺. "
+    "If text quality matters, think from her self and relationship, e.g. 别急着装可爱，先把他在意的地方弄清楚。 "
+    "focus is one of self, state, plan, topic."
 )
 _INNER_ACTIVITY_LLM_TIMEOUT_MS = max(
     800,
@@ -59,15 +86,18 @@ def _env_bool(name: str, *, default: bool) -> bool:
 
 
 def _inner_activity_llm_disabled_reason() -> str:
-    if not _env_bool("HOST_BACKGROUND_TASKS_ENABLED", default=False):
-        return "INNER_ACTIVITY_BACKGROUND_TASKS_DISABLED"
-    if os.environ.get("HOST_INNER_ACTIVITY_LLM_ENABLED") is not None:
+    if not _env_bool("HOST_CONTINUOUS_ORGAN_TICKS_ENABLED", default=True):
+        return "INNER_ACTIVITY_CONTINUOUS_ORGAN_TICKS_DISABLED"
+    explicit = os.environ.get("HOST_INNER_ACTIVITY_LLM_ENABLED")
+    if explicit is not None and not _env_bool("HOST_INNER_ACTIVITY_LLM_ENABLED", default=False):
+        return "INNER_ACTIVITY_LLM_DISABLED"
+    if not _env_bool("NATSUME_INNER_WORLD_LLM_ENABLED", default=True):
         return "INNER_ACTIVITY_LLM_DISABLED"
     return "INNER_ACTIVITY_LLM_DISABLED"
 
 
 def _inner_activity_llm_enabled() -> bool:
-    if not _env_bool("HOST_BACKGROUND_TASKS_ENABLED", default=False):
+    if not _env_bool("HOST_CONTINUOUS_ORGAN_TICKS_ENABLED", default=True):
         return False
     explicit = os.environ.get("HOST_INNER_ACTIVITY_LLM_ENABLED")
     if explicit is not None:
@@ -147,6 +177,12 @@ def generate_inner_activity_note(
             "no_user_direct_address": True,
             "prefer_self_related": True,
             "avoid_repeat_recent_inner_events": True,
+            "use_self_model_as_thought_source": True,
+            "prefer_active_intention_or_unresolved_tension": True,
+            "must_not_contradict_self_boundaries": True,
+            "must_be_concrete_private_thought": True,
+            "prefer_concrete_next_intention": True,
+            "avoid_abstract_system_terms": list(_ABSTRACT_INNER_NOTE_TERMS),
         },
     }
     prompt_text = json.dumps(prompt_payload, ensure_ascii=False)
@@ -376,6 +412,13 @@ def _build_inner_activity_context(
                 "last_deep_talk_days_ago",
                 "personality_changes",
                 "growth_milestones",
+                "self_identity",
+                "self_values",
+                "self_boundaries",
+                "active_intentions",
+                "unresolved_tensions",
+                "agency_score",
+                "self_continuity_score",
             ],
         ),
         "self_reflection_pulse": _project_mapping(
@@ -705,6 +748,8 @@ def _finalize_inner_note_text(raw_text: str) -> str:
     text = _TEXT_WHITESPACE_RE.sub(" ", str(raw_text or "").strip())
     if not text:
         return ""
+    if _looks_like_abstract_inner_note(text):
+        return ""
     text = _TEXT_QUESTION_RE.sub("。", text)
     text = text.strip("，,;； ")
     if not text:
@@ -714,6 +759,11 @@ def _finalize_inner_note_text(raw_text: str) -> str:
     if len(text) > 96:
         text = text[:96].rstrip("，,;；。.!！") + "。"
     return text
+
+
+def _looks_like_abstract_inner_note(text: str) -> bool:
+    value = str(text or "")
+    return any(term in value for term in _ABSTRACT_INNER_NOTE_TERMS)
 
 
 def _infer_focus_from_note(note: str) -> str:

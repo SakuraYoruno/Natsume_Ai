@@ -482,7 +482,6 @@ def warmup_chat_runtime_basics(*, eager_persona: bool = True) -> str:
         from host_brain.app.dependencies import (  # noqa: PLC0415
             get_intent_engine,
             get_routing_matrix,
-            prewarm_reply_surface_memory_store,
             get_state_write_arbiter,
         )
         from host_brain.app.context.soul_runtime import load_compiled_soul  # noqa: PLC0415
@@ -497,17 +496,6 @@ def warmup_chat_runtime_basics(*, eager_persona: bool = True) -> str:
             soul_id=str(getattr(compiled_soul, "soul_id", "") or "").strip(),
             source_path=str(getattr(compiled_soul, "source_path", "") or "").strip(),
         )
-        try:
-            reply_surface_prewarm_limit = int(
-                os.environ.get("HOST_REPLY_SURFACE_MEMORY_STARTUP_PREWARM_LIMIT") or 1024
-            )
-        except ValueError:
-            reply_surface_prewarm_limit = 1024
-        reply_surface_memory_count = prewarm_reply_surface_memory_store(
-            force=True,
-            limit=max(1, min(reply_surface_prewarm_limit, 20_000)),
-        )
-
         warmed_parts = [
             "prompt_templates=retired",
             "routing_matrix=ready",
@@ -516,7 +504,6 @@ def warmup_chat_runtime_basics(*, eager_persona: bool = True) -> str:
             "thalamus=ready",
             f"soul={compiled_soul.source_path}",
             f"soul_state={soul_runtime_state}",
-            f"reply_surface_memory=ready:{reply_surface_memory_count}",
         ]
 
         if eager_persona:

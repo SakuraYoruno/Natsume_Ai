@@ -113,7 +113,7 @@ def test_qualitative_relationship_summary_softens_micro_social_and_respects_stag
             interaction_thread=thread,
             render_target_lang="zh",
         )
-        == "义妹关系已成立，只是刚开始相处；不用刻意拉开，轻轻接住眼前情绪。"
+        == "关系是熟起来的义兄妹：不用刻意拉开，轻轻回应眼前情绪。"
     )
     assert (
         _qualitative_relationship_summary(
@@ -122,7 +122,7 @@ def test_qualitative_relationship_summary_softens_micro_social_and_respects_stag
             interaction_thread=InteractionThreadState(),
             render_target_lang="ja",
         )
-        == "義妹としての関係は始まっているが、まだ距離は浅い。馴れ馴れしくしすぎず、他人扱いもしない。"
+        == "義兄妹としてかなり馴染んでいる。軽く返していいが、言い過ぎない。"
     )
     assert (
         _qualitative_relationship_summary(
@@ -131,7 +131,7 @@ def test_qualitative_relationship_summary_softens_micro_social_and_respects_stag
             interaction_thread=InteractionThreadState(),
             render_target_lang="ja",
         )
-        == "義妹としての関係は始まっている。まだ浅いが、よそよそしくしすぎず、目の前の小さな感情を自然に受ける。"
+        == "義兄妹として馴染んでいる。距離を作りすぎず、目の前の感情へ自然に返す。"
     )
     assert (
         _qualitative_relationship_summary(
@@ -140,7 +140,7 @@ def test_qualitative_relationship_summary_softens_micro_social_and_respects_stag
             interaction_thread=InteractionThreadState(),
             render_target_lang="zh",
         )
-        == "关系是熟起来的义兄妹：可以轻轻顶嘴和撒娇，但别说得太满。"
+        == "关系是熟起来的义兄妹：不用刻意拉开，轻轻回应眼前情绪。"
     )
     assert (
         _qualitative_relationship_summary(
@@ -538,7 +538,7 @@ def test_build_reply_plan_from_inputs_refines_multimodal_contracts_and_japanese_
 
     assert "不要主动开始分析画面" in image_plan.reply_contract
     assert image_plan.contract.realization_steps
-    assert "義妹としての関係" in ja_plan.relationship_summary or "義妹としての関係" in _qualitative_relationship_summary(
+    assert "義兄妹" in ja_plan.relationship_summary or "義兄妹" in _qualitative_relationship_summary(
         relationship=RelationshipStateBlock(bond_stage="FRIEND", boundary_softness=0.2),
         interpretation=ConversationInterpretation(literal_topic="greeting"),
         interaction_thread=InteractionThreadState(),

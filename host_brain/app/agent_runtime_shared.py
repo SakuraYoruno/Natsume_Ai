@@ -1477,6 +1477,106 @@ async def _run_persona_session_end_hooks(
         _logger.debug("[%s] persona body_sense conversation_end failed: %s", request_id, exc)
 
 
+def _write_surface_main_chain_memory_sync(
+    *,
+    episodic_store: Any,
+    request_id: str,
+    person_id: str,
+    session_id: str,
+    user_message: str,
+    assistant_reply: str,
+    emotion_context: Mapping[str, Any],
+    ts_ms: int,
+    reply_plan: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    from host_brain.bond.user_identity import resolve_bond_user_id  # noqa: PLC0415
+    from host_brain.persona.surface_memory_recall import write_surface_turn_memory  # noqa: PLC0415
+
+    payload_emotion = dict(emotion_context or {})
+    resolved_person_id = resolve_bond_user_id(person_id or None, session_id=session_id or None)
+    memory_emotion_tag = str(
+        payload_emotion.get("surface_user_emotion_tag")
+        or payload_emotion.get("user_emotion_tag")
+        or payload_emotion.get("emotion_tag")
+        or "NEUTRAL"
+    ).strip().upper() or "NEUTRAL"
+    valence_context = {**payload_emotion, "emotion_tag": memory_emotion_tag}
+    valence, arousal = _resolve_persona_session_emotion(valence_context)
+    plan = dict(reply_plan or {}) if isinstance(reply_plan, Mapping) else {}
+    intent_id = str(
+        plan.get("intent_id")
+        or plan.get("task_mode")
+        or plan.get("primary_topic")
+        or plan.get("response_move")
+        or request_id
+    ).strip() or request_id
+    result = write_surface_turn_memory(
+        episodic_store=episodic_store,
+        request_id=request_id,
+        session_id=session_id,
+        person_id=resolved_person_id,
+        user_message=user_message,
+        assistant_reply=assistant_reply,
+        ts_ms=ts_ms,
+        intent_id=intent_id,
+        evidence_refs=[f"surface://reply/{request_id}"],
+        emotion_tag=memory_emotion_tag,
+        emotion_valence=valence,
+        emotion_arousal=arousal,
+    )
+    payload = result.as_dict() if hasattr(result, "as_dict") else dict(result or {})
+    payload["source"] = "surface_main_chain"
+    payload["intent_id"] = intent_id
+    payload["person_id"] = resolved_person_id
+    return payload
+
+
+def _run_surface_persona_session_end_sync(
+    *,
+    request_id: str,
+    person_id: str,
+    session_id: str,
+    user_message: str,
+    emotion_context: Mapping[str, Any],
+) -> dict[str, Any]:
+    from host_brain.bond.user_identity import get_canonical_bond_user_id  # noqa: PLC0415
+    from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: PLC0415
+
+    payload_emotion = dict(emotion_context or {})
+    user_emotion_tag = str(
+        payload_emotion.get("surface_user_emotion_tag")
+        or payload_emotion.get("user_emotion_tag")
+        or payload_emotion.get("emotion_tag")
+        or "NEUTRAL"
+    ).strip().upper() or "NEUTRAL"
+    valence, arousal = _resolve_persona_session_emotion({**payload_emotion, "emotion_tag": user_emotion_tag})
+    topic_preview = _build_reply_preview(user_message, limit=64)
+    _ = person_id
+    persona_user_id = get_canonical_bond_user_id()
+    pending_topics = [topic_preview] if topic_preview else []
+    state = get_limbic_agent().on_session_end(
+        person_id=persona_user_id,
+        valence=valence,
+        arousal=arousal,
+        pending_topics=pending_topics,
+    )
+    return {
+        "status": "OK",
+        "request_id": request_id,
+        "session_id": session_id,
+        "person_id": persona_user_id,
+        "emotion_tag": user_emotion_tag,
+        "valence": round(float(valence), 4),
+        "arousal": round(float(arousal), 4),
+        "pending_topics": pending_topics,
+        "inner_world": {
+            "continuity_score": dict(state or {}).get("continuity_score"),
+            "anticipation_topics": list(dict(state or {}).get("anticipation_topics") or [])[:5],
+            "inner_stream_size": dict(state or {}).get("inner_stream_size"),
+        },
+    }
+
+
 
 def _infer_emotion_tag_for_tts(
     narrative: str,
@@ -2764,7 +2864,6 @@ async def _async_post_process(
         _logger.debug("[%s] cortex_orchestrator post_process airlock classify failed: %s", request_id, exc)
 
     try:
-        from host_brain.app.observability_persist import persist_chat_episodic_memory  # noqa: PLC0415
         from host_brain.app.dependencies import get_episodic_store  # noqa: PLC0415
 
         store = None if suppress_final_reply else get_episodic_store()
@@ -2778,20 +2877,57 @@ async def _async_post_process(
                     mem_user = pii_scrub_if_enabled(user_message, context="memory_write_user")
                     mem_narrative = pii_scrub_if_enabled(narrative, context="memory_write_ai")
 
-            await _run_in_post_process_executor(
-                persist_chat_episodic_memory,
-                request_id=request_id,
-                intent_id=request_id,
-                person_id=person_id,
-                session_id=session_id,
-                user_message=mem_user,
-                assistant_reply=mem_narrative,
-                emotion_context=emotion_context,
-                ts_ms=ts_ms,
-                episodic_store=store,
-            )
+            if surface_main_chain_used:
+                surface_memory_write = await _run_in_post_process_executor(
+                    _write_surface_main_chain_memory_sync,
+                    episodic_store=store,
+                    request_id=request_id,
+                    person_id=person_id,
+                    session_id=session_id,
+                    user_message=mem_user,
+                    assistant_reply=mem_narrative,
+                    emotion_context=emotion_context,
+                    ts_ms=ts_ms,
+                    reply_plan=reply_plan,
+                )
+                normalized_trace_stage_meta = {
+                    **normalized_trace_stage_meta,
+                    "surface_memory_write": surface_memory_write,
+                }
+            else:
+                from host_brain.app.observability_persist import persist_chat_episodic_memory  # noqa: PLC0415
+
+                await _run_in_post_process_executor(
+                    persist_chat_episodic_memory,
+                    request_id=request_id,
+                    intent_id=request_id,
+                    person_id=person_id,
+                    session_id=session_id,
+                    user_message=mem_user,
+                    assistant_reply=mem_narrative,
+                    emotion_context=emotion_context,
+                    ts_ms=ts_ms,
+                    episodic_store=store,
+                )
     except Exception as exc:
         _logger.debug("[%s] cortex_orchestrator post_process episodic failed: %s", request_id, exc)
+
+    if skip_heavy_persona_postprocess and surface_main_chain_used:
+        try:
+            surface_session_end = await _run_in_post_process_executor(
+                _run_surface_persona_session_end_sync,
+                request_id=request_id,
+                person_id=person_id,
+                session_id=session_id,
+                user_message=user_message,
+                emotion_context=emotion_context,
+            )
+            normalized_trace_stage_meta = {
+                **normalized_trace_stage_meta,
+                "surface_persona_session_end": surface_session_end,
+            }
+        except Exception as exc:
+            _logger.debug("[%s] surface persona session_end failed: %s", request_id, exc)
 
     if skip_heavy_persona_postprocess:
         _logger.debug(
@@ -2830,8 +2966,13 @@ async def _async_post_process(
         from host_brain.tribe.cortex_agent import get_cortex_agent as _get_cortex  # noqa: PLC0415
 
         ec = dict(emotion_context or {})
+        event_user_id = str(person_id or "")
+        if surface_main_chain_used:
+            from host_brain.bond.user_identity import resolve_bond_user_id  # noqa: PLC0415
+
+            event_user_id = resolve_bond_user_id(event_user_id or None, session_id=session_id or None)
         _get_cortex().emit_conversation_ended(
-            user_id=str(person_id or ""),
+            user_id=event_user_id,
             session_id=str(session_id or ""),
             request_id=str(request_id or ""),
             emotion_tag=str(ec.get("emotion_tag") or "NEUTRAL").strip().upper(),

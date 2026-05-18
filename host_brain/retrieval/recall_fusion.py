@@ -63,6 +63,7 @@ from host_brain.retrieval.recall_fusion_stores import (
     STORE_SQLITE_LEDGER,
     STORE_NEO4J_BOND,
     STORE_EPISODIC_VECTOR,
+    STORE_SEMANTIC_MEMORY,
     STORE_WORLD_CANON,
     STORE_ARTIFACT_VAULT,
     search_route as _search_route_impl,
@@ -199,6 +200,10 @@ class RecallFusionServiceContract:
     def _search_sqlite_ledger(self, *, query: str, top_k: int, person_id: str | None = None, session_id: str | None = None, now_ts_ms: int | None = None) -> list[dict[str, Any]]:
         from host_brain.retrieval.recall_fusion_stores import search_sqlite_ledger
         return search_sqlite_ledger(self, query=query, top_k=top_k, person_id=person_id, session_id=session_id, now_ts_ms=now_ts_ms)
+
+    def _search_semantic_memory(self, *, query: str, top_k: int, now_ts_ms: int | None = None) -> list[dict[str, Any]]:
+        from host_brain.retrieval.recall_fusion_stores import search_semantic_memory
+        return search_semantic_memory(self, query=query, top_k=top_k, now_ts_ms=now_ts_ms)
 
     def _search_neo4j_bond(self, *, query: str, top_k: int) -> list[dict[str, Any]]:
         from host_brain.retrieval.recall_fusion_stores import search_neo4j_bond

@@ -72,7 +72,9 @@ def test_surface_main_chain_runs_compiler_and_runtime() -> None:
         "我知道你卡哪儿，先看输入输出。",
     }
     assert result.runtime.selected is not None
-    assert result.runtime.selected.passed
+    assert result.runtime.selected.as_dict()["text"] == result.selected_text
+    assert "score" not in result.runtime.selected.as_dict()
+    assert "passed" not in result.runtime.selected.as_dict()
     assert result.observation_codes == ()
     assert result.compiled.trace["surface_boundary"] == "ReplyControlPacket"
     assert result.as_dict()["surface_main_chain"] is True
@@ -151,4 +153,4 @@ def test_run_surface_main_chain_convenience_function() -> None:
 
     assert result.selected_text == "继续，先把 facade 接上。"
     assert result.runtime.selected is not None
-    assert result.runtime.selected.passed
+    assert result.runtime.selected.as_dict()["text"] == result.selected_text

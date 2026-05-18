@@ -39,6 +39,8 @@ _TECH_TASKS = frozenset(
 )
 _CREATIVE_TASKS = frozenset({"creative_edit", "give_one_rewrite"})
 _PRESENCE_REPAIR_TASKS = frozenset({"repair_presence", "presence_repair"})
+_AFFECTION_TASKS = frozenset({"affection", "ambiguous_affection", "receive_affection_lightly"})
+_LOVER_TASKS = frozenset({"lover_affection", "lover_presence", "return_affection_concretely"})
 _PROCESS_WORDS = ("emotion_tag", "mood_state", "vad", "情绪值", "关系阶段", "bond", "affect")
 
 
@@ -88,6 +90,12 @@ def build_surface_affect_control_packet(
     mood_state = _clean_text(emotion.get("mood_state")).lower()
     task = _clean_text(task_mode).lower()
     relationship_distance = _relationship_distance_from_bond(bond, clues)
+    relationship_distance = _relationship_distance_for_task(
+        task=task,
+        relationship_distance=relationship_distance,
+        bond=bond,
+        clues=clues,
+    )
     intensity = _cap_intensity(
         _derive_expression_intensity(emotion),
         task_mode=task,
@@ -249,6 +257,12 @@ def _relationship_anchor(distance: str) -> str:
     value = _clean_text(distance).lower()
     if value in {"guarded", "early", "distant"}:
         return "关系距离：偏克制，先尊重边界，不主动升温。"
+    if value == "ambiguous":
+        return "关系距离：暧昧但未确认，允许一点脸红和试探，不写成稳定恋人。"
+    if value in {"lover", "lover_early"}:
+        return "关系距离：恋人初期，可以短而明确地回亲密，但不要油。"
+    if value in {"lover_stable", "stable_lover"}:
+        return "关系距离：稳定亲密，爱意可以自然显影，少证明，多陪伴。"
     if value in {"close", "intimate"}:
         return "关系距离：可亲近，但不许越界承诺或强行亲密。"
     return "关系距离：熟人私聊，不升级亲密。"
@@ -275,7 +289,11 @@ def _tone_must_not_do(tone: str) -> list[str]:
 
 def _relationship_must_not_do(distance: str) -> list[str]:
     value = _clean_text(distance).lower()
+    if value in {"lover", "lover_early", "lover_stable", "stable_lover"}:
+        return ["不要用永远陪着、只属于你等越界承诺", "不要把爱意写成长篇证明"]
     rules = ["不要因为关系线索升级为恋人、家人或主人关系"]
+    if value == "ambiguous":
+        rules.append("不要把暧昧写成已经稳定恋人")
     if value in {"close", "intimate"}:
         rules.append("不要用爱你、永远陪着、只属于你等越界承诺")
     return rules
@@ -350,6 +368,29 @@ def _relationship_distance_from_bond(bond: Mapping[str, Any], clues: Sequence[st
     if non_romantic:
         return "familiar"
     return "familiar"
+
+
+def _relationship_distance_for_task(
+    *,
+    task: str,
+    relationship_distance: str,
+    bond: Mapping[str, Any],
+    clues: Sequence[str],
+) -> str:
+    value = _clean_text(relationship_distance).lower()
+    joined = "\n".join(clues)
+    non_romantic = any(token in joined for token in ("不升级亲密", "别升级亲密", "非恋人", "not_romantic", "not_intimate"))
+    if non_romantic:
+        return relationship_distance
+    if task in _LOVER_TASKS:
+        intimacy = _coerce_float(_safe_mapping(bond.get("bond_vector")).get("intimacy"), default=-1.0)
+        stage = _normalize_relationship_stage(bond.get("bond_stage") or bond.get("stage"))
+        if stage in {"CONFIDANT", "INTIMATE", "SOULMATE"} or intimacy >= 0.82 or value in {"close", "intimate"}:
+            return "lover_stable"
+        return "lover_early"
+    if task in _AFFECTION_TASKS and value in {"familiar", "close", "close_but_not_romantic", ""}:
+        return "ambiguous"
+    return relationship_distance
 
 
 def _normalize_relationship_stage(value: Any) -> str:
@@ -440,6 +481,10 @@ def _relationship_distance_family(distance: str) -> str:
     value = _clean_text(distance).lower()
     if value in {"guarded", "early", "distant", "new"} or "polite" in value:
         return "guarded"
+    if value in {"ambiguous", "pre_confession"}:
+        return "familiar"
+    if value in {"lover", "lover_early", "lover_stable", "stable_lover"}:
+        return "close"
     if value in {"close", "intimate"} or value.startswith("close"):
         return "close"
     return "familiar"

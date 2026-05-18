@@ -396,13 +396,31 @@ def _resolve_semantic_embedding_model_id() -> str:
 def _get_sentence_transformer_model() -> Any:
     """获取 SentenceTransformer 模型单例（懒加载 + 缓存）。"""
     model_id = _resolve_semantic_embedding_model_id()
-    cached = _sentence_transformer_models.get(model_id)
+    model_ref, local_only = _resolve_sentence_transformer_model_ref(model_id)
+    cache_key = f"local:{model_ref}" if local_only else model_id
+    cached = _sentence_transformer_models.get(cache_key)
     if cached is not None:
         return cached
     from sentence_transformers import SentenceTransformer  # type: ignore[import-untyped]
-    model = SentenceTransformer(model_id)
-    _sentence_transformer_models[model_id] = model
+    try:
+        model = SentenceTransformer(model_ref, local_files_only=local_only)
+    except TypeError:
+        model = SentenceTransformer(model_ref)
+    _sentence_transformer_models[cache_key] = model
     return model
+
+
+def _resolve_sentence_transformer_model_ref(model_id: str) -> tuple[str, bool]:
+    raw = str(model_id or "").strip()
+    if not raw:
+        return raw, False
+    candidates = [Path(raw)]
+    if not Path(raw).is_absolute():
+        candidates.append(Path(__file__).resolve().parents[2] / raw)
+    for candidate in candidates:
+        if candidate.exists():
+            return str(candidate.resolve()), True
+    return raw, False
 
 
 def load_chroma_runtime_config(

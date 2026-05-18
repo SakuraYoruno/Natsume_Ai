@@ -26,3 +26,10 @@ def test_embed_text_keeps_semantic_vector_when_requested_dim_matches(monkeypatch
 
     assert len(values) == 1024
     assert model_id == "models/Qwen3-Embedding-0.6B"
+
+
+def test_sentence_transformer_model_ref_prefers_repo_local_models() -> None:
+    model_ref, local_only = chroma_client._resolve_sentence_transformer_model_ref("models/Qwen3-Embedding-0.6B")
+
+    assert local_only
+    assert model_ref.endswith("models\\Qwen3-Embedding-0.6B") or model_ref.endswith("models/Qwen3-Embedding-0.6B")

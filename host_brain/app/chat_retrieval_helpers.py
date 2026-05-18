@@ -468,10 +468,58 @@ def _embed_surface_memory_query(query: str) -> tuple[list[float], str]:
 def _build_surface_memory_recall_service() -> Any:
     from host_brain.app.dependencies import get_ledger  # noqa: PLC0415
     from host_brain.retrieval.recall_fusion import RecallFusionServiceContract  # noqa: PLC0415
+    from host_brain.retrieval.recall_schemas import RecallRouteConfig, RecallRuntimeConfig  # noqa: PLC0415
 
+    node_id = "surface_main_chain_memory_recall"
+    routes = {
+        "surface_semantic": RecallRouteConfig(
+            route_id="surface_semantic",
+            store_id="semantic_memory",
+            collection="semantic_memory",
+            top_k=4,
+            score_weight=1.05,
+            node_selector=node_id,
+        ),
+        "surface_episodic": RecallRouteConfig(
+            route_id="surface_episodic",
+            store_id="episodic_vector",
+            collection="episodic",
+            top_k=8,
+            score_weight=1.0,
+            node_selector=node_id,
+        ),
+        "surface_sqlite": RecallRouteConfig(
+            route_id="surface_sqlite",
+            store_id="sqlite_ledger",
+            collection="sqlite_ledger",
+            top_k=4,
+            score_weight=0.85,
+            node_selector=node_id,
+        ),
+        "surface_bond": RecallRouteConfig(
+            route_id="surface_bond",
+            store_id="neo4j_bond",
+            collection="neo4j_bond",
+            top_k=4,
+            score_weight=0.95,
+            node_selector=node_id,
+        ),
+    }
+    try:
+        from host_brain.app.dependencies import get_bond_neo4j_client  # noqa: PLC0415
+
+        neo4j_client = get_bond_neo4j_client()
+    except Exception:
+        neo4j_client = None
     return RecallFusionServiceContract(
         ledger=get_ledger(),
-        node_id="surface_main_chain_memory_recall",
+        neo4j_client=neo4j_client,
+        runtime_config=RecallRuntimeConfig(
+            enabled=True,
+            default_route="surface_episodic",
+            routes=routes,
+        ),
+        node_id=node_id,
         use_hybrid=False,
     )
 

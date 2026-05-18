@@ -57,6 +57,20 @@ def _parse_bool_env(name: str, *, default: bool) -> bool:
     return _middleware_parse_bool_env(name, default=default)
 
 
+def _resolve_continuous_organ_ticks_enabled(*, background_tasks_enabled: bool) -> bool:
+    """Core life ticks are not the same thing as heavy background jobs.
+
+    `HOST_BACKGROUND_TASKS_ENABLED=false` should disable proactive push,
+    distillation, weekly growth, and other expensive jobs. It should not turn
+    off the minimal inner-world/body/emotion rhythm unless explicitly asked.
+    """
+    _ = background_tasks_enabled
+    return _parse_bool_env(
+        "HOST_CONTINUOUS_ORGAN_TICKS_ENABLED",
+        default=True,
+    )
+
+
 def _build_scheduler_emotion_state() -> dict[str, Any]:
     """构建调度器门控使用的情绪/内分泌快照。P3-2：委托给 http_hooks_middleware。"""
     return _middleware_build_scheduler_emotion_state()
@@ -83,112 +97,6 @@ def _build_audit_retention_task_config() -> Any:
         enabled=True,
         description="审计数据保留策略：每日 02:00 清理过期审计数据",
     )
-
-
-def _parse_int_env(name: str, *, default: int, minimum: int, maximum: int) -> int:
-    raw = str(os.environ.get(name) or "").strip()
-    try:
-        value = int(raw) if raw else int(default)
-    except ValueError:
-        value = int(default)
-    return max(int(minimum), min(int(maximum), value))
-
-
-def _build_reply_surface_cache_prewarm_task_config() -> Any:
-    from host_brain.scheduler.task_registry import (  # noqa: PLC0415
-        SchedulerTaskConfig,
-        TaskPriority,
-        TriggerMode,
-    )
-
-    hour = _parse_int_env(
-        "HOST_REPLY_SURFACE_MEMORY_DAILY_PREWARM_HOUR",
-        default=3,
-        minimum=0,
-        maximum=23,
-    )
-    minute = _parse_int_env(
-        "HOST_REPLY_SURFACE_MEMORY_DAILY_PREWARM_MINUTE",
-        default=10,
-        minimum=0,
-        maximum=59,
-    )
-    limit = _parse_int_env(
-        "HOST_REPLY_SURFACE_MEMORY_DAILY_PREWARM_LIMIT",
-        default=2048,
-        minimum=1,
-        maximum=20_000,
-    )
-
-    return SchedulerTaskConfig(
-        task_id="reply_surface_cache_prewarm_daily",
-        trigger_mode=TriggerMode.CRON,
-        trigger_config={"hour": hour, "minute": minute},
-        intent_template={
-            "skill_name": "reply_surface_cache_prewarm",
-            "args": {"limit": limit, "force": True},
-            "proposer_node_id": "scheduler",
-        },
-        priority=TaskPriority.LOW,
-        mode_allowlist=["normal", "sleep"],
-        enabled=_parse_bool_env("HOST_REPLY_SURFACE_MEMORY_DAILY_PREWARM_ENABLED", default=True),
-        description="Reply surface cache prewarm: daily refresh from real assistant turn history",
-    )
-
-
-def _seconds_until_daily_time(*, hour: int, minute: int, now_ts: float | None = None) -> float:
-    now_value = float(now_ts if now_ts is not None else time.time())
-    now_local = time.localtime(now_value)
-    target_tuple = (
-        now_local.tm_year,
-        now_local.tm_mon,
-        now_local.tm_mday,
-        max(0, min(int(hour), 23)),
-        max(0, min(int(minute), 59)),
-        0,
-        now_local.tm_wday,
-        now_local.tm_yday,
-        now_local.tm_isdst,
-    )
-    target_ts = time.mktime(target_tuple)
-    if target_ts <= now_value:
-        target_ts += 24 * 60 * 60
-    return max(1.0, float(target_ts - now_value))
-
-
-async def _reply_surface_cache_prewarm_daily_loop(*, logger: Any) -> None:
-    from host_brain.persona.reply_surface_prewarm import run_reply_surface_cache_prewarm  # noqa: PLC0415
-
-    while True:
-        hour = _parse_int_env(
-            "HOST_REPLY_SURFACE_MEMORY_DAILY_PREWARM_HOUR",
-            default=3,
-            minimum=0,
-            maximum=23,
-        )
-        minute = _parse_int_env(
-            "HOST_REPLY_SURFACE_MEMORY_DAILY_PREWARM_MINUTE",
-            default=10,
-            minimum=0,
-            maximum=59,
-        )
-        sleep_s = _seconds_until_daily_time(hour=hour, minute=minute)
-        await asyncio.sleep(sleep_s)
-        limit = _parse_int_env(
-            "HOST_REPLY_SURFACE_MEMORY_DAILY_PREWARM_LIMIT",
-            default=2048,
-            minimum=1,
-            maximum=20_000,
-        )
-        result = await asyncio.to_thread(
-            run_reply_surface_cache_prewarm,
-            limit=limit,
-            force=True,
-        )
-        if str(result.get("status") or "").upper() == "OK":
-            logger.info("ReplySurface fallback daily prewarm completed: %s", result)
-        else:
-            logger.warning("ReplySurface fallback daily prewarm failed: %s", result)
 
 
 def _build_personality_tick_status(*, registry: Any, task_ids: list[str]) -> str:
@@ -232,6 +140,146 @@ def _build_codex_immune_scheduler_task(*, interval_s: float) -> Any:
         enabled=True,
         priority=TaskPriority.P1,
     )
+
+
+def _build_scheduler_task_config(
+    *,
+    task_id: str,
+    skill_name: str,
+    interval_s: int,
+    description: str,
+    args: dict[str, Any] | None = None,
+) -> Any:
+    from host_brain.scheduler.task_registry import (  # noqa: PLC0415
+        SchedulerTaskConfig,
+        TaskPriority,
+        TriggerMode,
+    )
+
+    return SchedulerTaskConfig(
+        task_id=task_id,
+        trigger_mode=TriggerMode.INTERVAL,
+        trigger_config={"seconds": int(interval_s)},
+        intent_template={
+            "skill_name": skill_name,
+            "args": dict(args or {}),
+            "proposer_node_id": "scheduler",
+        },
+        priority=TaskPriority.LOW,
+        mode_allowlist=["normal", "focus", "gaming", "sleep"],
+        enabled=True,
+        description=description,
+    )
+
+
+def _build_core_organ_tick_task_configs() -> list[Any]:
+    return [
+        _build_scheduler_task_config(
+            task_id="inner_world_numeric_tick",
+            skill_name="inner_world_numeric_tick",
+            interval_s=int(os.environ.get("HOST_INNER_WORLD_NUMERIC_TICK_INTERVAL_SECONDS") or 60),
+            args={"user_id": "user_1"},
+            description="Core organ tick: advances numeric inner-world continuity without writing inner_stream.",
+        ),
+        _build_scheduler_task_config(
+            task_id="inner_world_monologue_tick",
+            skill_name="inner_world_monologue_tick",
+            interval_s=int(os.environ.get("HOST_INNER_WORLD_MONOLOGUE_TICK_INTERVAL_SECONDS") or 300),
+            args={"user_id": "user_1"},
+            description="Core organ tick: slow inner-world stream update; LLM note generation remains gated separately.",
+        ),
+        _build_scheduler_task_config(
+            task_id="silence_tick",
+            skill_name="silence_tick",
+            interval_s=60,
+            args={"user_id": "user_1"},
+            description="Core organ tick: recovers reply willingness and decays topic resistance.",
+        ),
+        _build_scheduler_task_config(
+            task_id="body_sense_tick",
+            skill_name="body_sense_tick",
+            interval_s=60,
+            args={"user_id": "user_1"},
+            description="Core organ tick: updates fatigue, sleepiness, and body-sense baseline.",
+        ),
+        _build_scheduler_task_config(
+            task_id="emotion_decay_tick",
+            skill_name="emotion_decay_tick",
+            interval_s=30,
+            args={},
+            description="Core organ tick: drives limbic decay, circadian baseline, interoception budget, and recovery window.",
+        ),
+    ]
+
+
+def _bootstrap_core_organ_tick_scheduler(
+    *,
+    logger: Any,
+    get_ledger: Callable[[], Any],
+    retention_policy: Any,
+) -> dict[str, str]:
+    from host_brain.scheduler.health import SchedulerHealthReporter  # noqa: PLC0415
+    from host_brain.scheduler.scheduler import NatsumeScheduler  # noqa: PLC0415
+    from host_brain.scheduler.scheduler_routes import set_scheduler_providers  # noqa: PLC0415
+    from host_brain.scheduler.task_registry import SchedulerTaskRegistry  # noqa: PLC0415
+
+    registry = SchedulerTaskRegistry.get_instance()
+    health_reporter = SchedulerHealthReporter(registry=registry)
+    set_scheduler_providers(
+        registry=registry,
+        health_reporter=health_reporter,
+    )
+
+    registered_task_ids: list[str] = []
+    for config in _build_core_organ_tick_task_configs():
+        try:
+            if registry.get(config.task_id) is None:
+                registry.register(config)
+                logger.info("Core organ tick registered: task_id=%s", config.task_id)
+            registered_task_ids.append(config.task_id)
+        except Exception as exc:
+            logger.warning("Core organ tick registration degraded: task_id=%s err=%s", config.task_id, exc)
+
+    def _ui_pusher(_message: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "success": False,
+            "status": "SKIPPED",
+            "detail": "core organ tick scheduler does not push UI messages",
+        }
+
+    def _intent_dispatcher(system_intent: dict[str, Any]) -> dict[str, Any]:
+        skill_name = str(system_intent.get("skill_name") or "").strip()
+        if skill_name == "proactive_talk":
+            return {
+                "status": "SKIPPED",
+                "reason_code": "CORE_ORGAN_TICK_SCHEDULER_NO_PROACTIVE_TALK",
+            }
+        return run_proactive_intent_dispatch(
+            system_intent,
+            logger=logger,
+            get_ledger=get_ledger,
+            retention_policy=retention_policy,
+            ui_pusher=_ui_pusher,
+        )
+
+    scheduler = NatsumeScheduler(
+        registry=registry,
+        health_reporter=health_reporter,
+        intent_dispatcher=_intent_dispatcher,
+        get_emotion_state=_build_scheduler_emotion_state,
+    )
+    scheduler.start()
+
+    return {
+        "organ_tick_scheduler": (
+            "OK "
+            f"(started; core_ticks={len(registered_task_ids)}; heavy_background_tasks=skip)"
+        ),
+        "personality_tick_registry": _build_personality_tick_status(
+            registry=registry,
+            task_ids=registered_task_ids,
+        ),
+    }
 
 
 def _bootstrap_personality_scheduler(
@@ -363,78 +411,12 @@ def _bootstrap_personality_scheduler(
         success_message="进化周期任务已注册: task_id=%s, cron=03:00",
         failure_message="进化周期任务注册失败（降级）: %s",
     )
-    _register_task(
-        config=SchedulerTaskConfig(
-            task_id="inner_world_numeric_tick",
-            trigger_mode=TriggerMode.INTERVAL,
-            trigger_config={"seconds": int(os.environ.get("HOST_INNER_WORLD_NUMERIC_TICK_INTERVAL_SECONDS") or 60)},
-            intent_template={
-                "skill_name": "inner_world_numeric_tick",
-                "args": {"user_id": "user_1"},
-                "proposer_node_id": "scheduler",
-            },
-            priority=TaskPriority.LOW,
-            mode_allowlist=["normal", "focus", "gaming", "sleep"],
-            enabled=True,
-            description="离线内心世界数值 tick：推进孤独感、期待值与情绪漂移，不写 inner_stream",
-        ),
-        success_message="离线内心世界数值任务已注册: task_id=%s, interval=60s",
-        failure_message="离线内心世界数值任务注册失败（降级）: %s",
-    )
-    _register_task(
-        config=SchedulerTaskConfig(
-            task_id="inner_world_monologue_tick",
-            trigger_mode=TriggerMode.INTERVAL,
-            trigger_config={"seconds": int(os.environ.get("HOST_INNER_WORLD_MONOLOGUE_TICK_INTERVAL_SECONDS") or 300)},
-            intent_template={
-                "skill_name": "inner_world_monologue_tick",
-                "args": {"user_id": "user_1"},
-                "proposer_node_id": "scheduler",
-            },
-            priority=TaskPriority.LOW,
-            mode_allowlist=["normal", "focus", "gaming", "sleep"],
-            enabled=True,
-            description="离线内心世界独白 tick：按较慢节奏生成 inner_stream 独白",
-        ),
-        success_message="离线内心世界独白任务已注册: task_id=%s, interval=300s",
-        failure_message="离线内心世界独白任务注册失败（降级）: %s",
-    )
-    _register_task(
-        config=SchedulerTaskConfig(
-            task_id="silence_tick",
-            trigger_mode=TriggerMode.INTERVAL,
-            trigger_config={"seconds": 60},
-            intent_template={
-                "skill_name": "silence_tick",
-                "args": {"user_id": "user_1"},
-                "proposer_node_id": "scheduler",
-            },
-            priority=TaskPriority.LOW,
-            mode_allowlist=["normal", "focus", "gaming", "sleep"],
-            enabled=True,
-            description="沉默引擎 tick：每分钟恢复意愿与话题抗拒衰减",
-        ),
-        success_message="沉默引擎 tick 任务已注册: task_id=%s, interval=60s",
-        failure_message="沉默引擎 tick 任务注册失败（降级）: %s",
-    )
-    _register_task(
-        config=SchedulerTaskConfig(
-            task_id="body_sense_tick",
-            trigger_mode=TriggerMode.INTERVAL,
-            trigger_config={"seconds": 60},
-            intent_template={
-                "skill_name": "body_sense_tick",
-                "args": {"user_id": "user_1"},
-                "proposer_node_id": "scheduler",
-            },
-            priority=TaskPriority.LOW,
-            mode_allowlist=["normal", "focus", "gaming", "sleep"],
-            enabled=True,
-            description="身体感知 tick：每分钟更新困倦感并恢复疲劳值",
-        ),
-        success_message="身体感知 tick 任务已注册: task_id=%s, interval=60s",
-        failure_message="身体感知 tick 任务注册失败（降级）: %s",
-    )
+    for _core_tick_config in _build_core_organ_tick_task_configs():
+        _register_task(
+            config=_core_tick_config,
+            success_message="核心器官 tick 已注册: task_id=%s",
+            failure_message="核心器官 tick 注册失败（降级）: %s",
+        )
     _register_task(
         config=SchedulerTaskConfig(
             task_id="gaming_companion_tick",
@@ -477,11 +459,6 @@ def _bootstrap_personality_scheduler(
         success_message="涌现式成长任务已注册: task_id=%s, cron=周日03:00",
         failure_message="涌现式成长任务注册失败（降级）: %s",
     )
-    _register_task(
-        config=_build_reply_surface_cache_prewarm_task_config(),
-        success_message="回复表层缓存预热任务已注册: task_id=%s",
-        failure_message="回复表层缓存预热任务注册失败（降级）: %s",
-    )
 
     scheduler.start()
 
@@ -491,6 +468,7 @@ def _bootstrap_personality_scheduler(
         "inner_world_monologue_tick",
         "silence_tick",
         "body_sense_tick",
+        "emotion_decay_tick",
     ]
     proactive_push_ready = proactive_push_state.get("client") is not None
     proactive_push_status = (
@@ -561,7 +539,6 @@ def runtime_lifespan(
     async def _lifespan() -> AsyncGenerator[None, None]:
         logger.info("Natsume AI Host Brain starting up ...")
         ledger = get_ledger()
-        _reply_surface_prewarm_task: asyncio.Task | None = None
         try:
             # 预初始化新模块，确保启动时即可感知降级状态
             # Phase XIV v4：移除 main_chain 和 routing_matrix（已被 cortex_orchestrator 架构取代）
@@ -580,6 +557,9 @@ def runtime_lifespan(
             _background_tasks_enabled = _parse_bool_env(
                 "HOST_BACKGROUND_TASKS_ENABLED",
                 default=True,
+            )
+            _continuous_organ_ticks_enabled = _resolve_continuous_organ_ticks_enabled(
+                background_tasks_enabled=_background_tasks_enabled,
             )
             if not _background_tasks_enabled:
                 logger.warning(
@@ -924,34 +904,6 @@ def runtime_lifespan(
                     new_module_statuses["audit_retention_scheduler"] = f"DEGRADED: {_ret_exc}"
                 logger.warning("AuditRetention 调度任务注册失败（降级）: %s", _ret_exc)
 
-            try:
-                if not _background_tasks_enabled:
-                    raise RuntimeError("HOST_BACKGROUND_TASKS_ENABLED=false")
-                from host_brain.scheduler.task_registry import SchedulerTaskRegistry  # noqa: PLC0415
-
-                _reply_surface_registry = SchedulerTaskRegistry.get_instance()
-                _reply_surface_task = _build_reply_surface_cache_prewarm_task_config()
-                if _reply_surface_registry.get(_reply_surface_task.task_id) is None:
-                    _reply_surface_registry.register(_reply_surface_task)
-                new_module_statuses["reply_surface_cache_prewarm_scheduler"] = (
-                    f"OK (task_id={_reply_surface_task.task_id}, "
-                    f"cron={_reply_surface_task.trigger_config.get('hour')}:"
-                    f"{int(_reply_surface_task.trigger_config.get('minute') or 0):02d}, "
-                    f"enabled={_reply_surface_task.enabled})"
-                )
-                logger.info(
-                    "ReplySurface cache prewarm task registered: task_id=%s trigger=%s config=%s",
-                    _reply_surface_task.task_id,
-                    _reply_surface_task.trigger_mode,
-                    _reply_surface_task.trigger_config,
-                )
-            except Exception as _reply_surface_exc:
-                if not _background_tasks_enabled:
-                    new_module_statuses["reply_surface_cache_prewarm_scheduler"] = "SKIPPED: HOST_BACKGROUND_TASKS_ENABLED=false; fallback loop pending"
-                else:
-                    new_module_statuses["reply_surface_cache_prewarm_scheduler"] = f"DEGRADED: {_reply_surface_exc}"
-                logger.warning("ReplySurface cache prewarm task registration degraded: %s", _reply_surface_exc)
-
             # [proactive_talk] 主动对话任务注册 + NatsumeScheduler 启动
             try:
                 if not _background_tasks_enabled:
@@ -1231,6 +1183,7 @@ def runtime_lifespan(
                     "inner_world_monologue_tick",
                     "silence_tick",
                     "body_sense_tick",
+                    "emotion_decay_tick",
                 ]
                 new_module_statuses["proactive_talk_scheduler"] = (
                     "OK "
@@ -1243,7 +1196,24 @@ def runtime_lifespan(
                 )
 
             except Exception as _proactive_exc:
-                if not _background_tasks_enabled:
+                if not _background_tasks_enabled and _continuous_organ_ticks_enabled:
+                    try:
+                        new_module_statuses.update(
+                            _bootstrap_core_organ_tick_scheduler(
+                                logger=logger,
+                                get_ledger=get_ledger,
+                                retention_policy=_retention_policy,
+                            )
+                        )
+                        new_module_statuses["proactive_talk_scheduler"] = (
+                            "SKIPPED: HOST_BACKGROUND_TASKS_ENABLED=false; "
+                            "core organ ticks handled by organ_tick_scheduler"
+                        )
+                    except Exception as _organ_tick_exc:
+                        new_module_statuses["organ_tick_scheduler"] = f"DEGRADED: {_organ_tick_exc}"
+                        new_module_statuses["proactive_talk_scheduler"] = "SKIPPED: HOST_BACKGROUND_TASKS_ENABLED=false"
+                        logger.warning("core organ tick scheduler startup degraded: %s", _organ_tick_exc)
+                elif not _background_tasks_enabled:
                     new_module_statuses["proactive_talk_scheduler"] = "SKIPPED: HOST_BACKGROUND_TASKS_ENABLED=false"
                 else:
                     new_module_statuses["proactive_talk_scheduler"] = f"DEGRADED: {_proactive_exc}"
@@ -1481,44 +1451,6 @@ def runtime_lifespan(
                     "HostTaskScheduler startup degraded: %s",
                     _host_task_scheduler_exc,
                 )
-            if (
-                not _background_tasks_enabled
-                and _parse_bool_env("HOST_REPLY_SURFACE_MEMORY_DAILY_PREWARM_ENABLED", default=True)
-            ):
-                try:
-                    _reply_surface_prewarm_task = asyncio.create_task(
-                        _reply_surface_cache_prewarm_daily_loop(logger=logger),
-                        name="reply-surface-cache-prewarm-daily",
-                    )
-                    _reply_surface_hour = _parse_int_env(
-                        "HOST_REPLY_SURFACE_MEMORY_DAILY_PREWARM_HOUR",
-                        default=3,
-                        minimum=0,
-                        maximum=23,
-                    )
-                    _reply_surface_minute = _parse_int_env(
-                        "HOST_REPLY_SURFACE_MEMORY_DAILY_PREWARM_MINUTE",
-                        default=10,
-                        minimum=0,
-                        maximum=59,
-                    )
-                    new_module_statuses["reply_surface_cache_prewarm_scheduler"] = (
-                        f"OK (fallback_loop=true, cron={_reply_surface_hour}:"
-                        f"{_reply_surface_minute:02d})"
-                    )
-                    logger.info(
-                        "ReplySurface fallback daily prewarm loop started: cron=%s:%02d",
-                        _reply_surface_hour,
-                        _reply_surface_minute,
-                    )
-                except Exception as _reply_surface_loop_exc:
-                    new_module_statuses["reply_surface_cache_prewarm_scheduler"] = (
-                        f"DEGRADED: {_reply_surface_loop_exc}"
-                    )
-                    logger.warning(
-                        "ReplySurface fallback daily prewarm loop startup degraded: %s",
-                        _reply_surface_loop_exc,
-                    )
             report = build_startup_report(
                 runtime_statuses=new_module_statuses,
                 dependency_probes=build_edge_dependency_probe_statuses(dependency_probes),
@@ -1740,14 +1672,6 @@ def runtime_lifespan(
             logger.warning("Startup probe degraded: %s", exc, exc_info=True)
         yield
         # ── Shutdown 阶段 ──
-        if _reply_surface_prewarm_task is not None:
-            _reply_surface_prewarm_task.cancel()
-            try:
-                await _reply_surface_prewarm_task
-            except asyncio.CancelledError:
-                logger.info("ReplySurface fallback daily prewarm loop stopped")
-            except Exception as _reply_surface_stop_exc:
-                logger.debug("ReplySurface fallback daily prewarm loop stop degraded: %s", _reply_surface_stop_exc)
         # 停止 ActivityMonitor
         try:
             if _activity_monitor is not None:

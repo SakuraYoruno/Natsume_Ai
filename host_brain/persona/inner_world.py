@@ -112,10 +112,53 @@ _NOISE_TOPIC_VALUES = {
     "是的呢",
     "好",
 }
+_ABSTRACT_INNER_NOTE_TERMS = (
+    "自我连续性",
+    "连续性修正",
+    "文本自然度",
+    "模板感",
+    "模板",
+    "这句",
+    "下一句",
+    "句子",
+    "文本",
+    "接住",
+    "生成",
+    "回复",
+    "说顺",
+    "状态摘要",
+    "内部状态",
+    "控制包",
+    "验证链路",
+    "模块",
+    "模型",
+    "prompt",
+    "Prompt",
+)
+_INNER_WORLD_MONOLOGUE_SYSTEM_PROMPT = (
+    "Output one JSON object only. Generate a private inner monologue note, not user-visible chat. "
+    "Fields: note, focus. note must be one concrete short Chinese thought with a small intention, "
+    "worry, or remembered thread. Do not use abstract system words such as 自我连续性, 连续性修正, "
+    "文本自然度, 模板感, 内部状态, 控制包, 模块, 模型, prompt. Do not write process-talk like 这句, 下一句, "
+    "句子, 文本, 模板, 接住, 生成, 回复, 说顺. If text quality matters, think from her self and relationship, "
+    "like 别急着装可爱，先把他在意的地方弄清楚。 focus is one of self, state, plan, topic."
+)
 _INNER_WORLD_LLM_CACHE_LOCK = threading.Lock()
 _INNER_WORLD_LLM_CACHE: dict[str, Any] = {
     "resolved_at_ms": 0,
     "runtime": None,
+}
+_INNER_WORLD_LLM_CIRCUIT_BREAKER_COOLDOWN_MS = max(
+    5_000,
+    int(float(os.environ.get("NATSUME_INNER_WORLD_LLM_CIRCUIT_BREAKER_COOLDOWN_S", "300")) * 1000),
+)
+_INNER_WORLD_LLM_CIRCUIT_LOCK = threading.Lock()
+_INNER_WORLD_LLM_CIRCUIT_STATE: dict[str, Any] = {
+    "opened_until_ms": 0,
+    "failure_count": 0,
+    "last_reason": "",
+    "last_failure_ts_ms": 0,
+    "last_success_ts_ms": 0,
 }
 
 
@@ -135,8 +178,74 @@ def _background_tasks_enabled() -> bool:
     return _env_bool("HOST_BACKGROUND_TASKS_ENABLED", default=False)
 
 
+def _continuous_organ_ticks_enabled() -> bool:
+    return _env_bool("HOST_CONTINUOUS_ORGAN_TICKS_ENABLED", default=True)
+
+
 def _inner_world_llm_enabled() -> bool:
-    return _background_tasks_enabled() and bool(_INNER_WORLD_LLM_ENABLED)
+    return _continuous_organ_ticks_enabled() and bool(_INNER_WORLD_LLM_ENABLED)
+
+
+def _inner_world_llm_circuit_snapshot(*, now_ms: int | None = None) -> dict[str, Any]:
+    ts_ms = int(now_ms or _now_ms())
+    with _INNER_WORLD_LLM_CIRCUIT_LOCK:
+        opened_until = int(_INNER_WORLD_LLM_CIRCUIT_STATE.get("opened_until_ms") or 0)
+        return {
+            "open": opened_until > ts_ms,
+            "opened_until_ms": opened_until,
+            "cooldown_remaining_ms": max(0, opened_until - ts_ms),
+            "failure_count": int(_INNER_WORLD_LLM_CIRCUIT_STATE.get("failure_count") or 0),
+            "last_reason": str(_INNER_WORLD_LLM_CIRCUIT_STATE.get("last_reason") or ""),
+            "last_failure_ts_ms": int(_INNER_WORLD_LLM_CIRCUIT_STATE.get("last_failure_ts_ms") or 0),
+            "last_success_ts_ms": int(_INNER_WORLD_LLM_CIRCUIT_STATE.get("last_success_ts_ms") or 0),
+        }
+
+
+def _open_inner_world_llm_circuit(*, reason: str, now_ms: int) -> dict[str, Any]:
+    normalized_reason = str(reason or "INNER_WORLD_LLM_UNAVAILABLE").strip()[:160]
+    with _INNER_WORLD_LLM_CIRCUIT_LOCK:
+        failure_count = int(_INNER_WORLD_LLM_CIRCUIT_STATE.get("failure_count") or 0) + 1
+        opened_until = int(now_ms) + _INNER_WORLD_LLM_CIRCUIT_BREAKER_COOLDOWN_MS
+        _INNER_WORLD_LLM_CIRCUIT_STATE.update(
+            {
+                "opened_until_ms": opened_until,
+                "failure_count": failure_count,
+                "last_reason": normalized_reason,
+                "last_failure_ts_ms": int(now_ms),
+            }
+        )
+        return {
+            "open": True,
+            "opened_until_ms": opened_until,
+            "cooldown_remaining_ms": _INNER_WORLD_LLM_CIRCUIT_BREAKER_COOLDOWN_MS,
+            "failure_count": failure_count,
+            "last_reason": normalized_reason,
+        }
+
+
+def _close_inner_world_llm_circuit(*, now_ms: int) -> None:
+    with _INNER_WORLD_LLM_CIRCUIT_LOCK:
+        _INNER_WORLD_LLM_CIRCUIT_STATE.update(
+            {
+                "opened_until_ms": 0,
+                "failure_count": 0,
+                "last_reason": "",
+                "last_success_ts_ms": int(now_ms),
+            }
+        )
+
+
+def _reset_inner_world_llm_circuit() -> None:
+    with _INNER_WORLD_LLM_CIRCUIT_LOCK:
+        _INNER_WORLD_LLM_CIRCUIT_STATE.update(
+            {
+                "opened_until_ms": 0,
+                "failure_count": 0,
+                "last_reason": "",
+                "last_failure_ts_ms": 0,
+                "last_success_ts_ms": 0,
+            }
+        )
 
 
 def _load_runtime_texts() -> dict[str, Any]:
@@ -351,6 +460,7 @@ class OfflineInnerWorld:
                     "continuity_score": round(float(state.continuity_score or 0.0), 3),
                     "spontaneous_event_count": int(state.spontaneous_event_count or 0),
                     "last_spontaneous_source": str(state.last_spontaneous_source or ""),
+                    "inner_world_llm_circuit": _inner_world_llm_circuit_snapshot(now_ms=now_ms),
                 }
 
             elapsed_ms = now_ms - last_tick
@@ -492,6 +602,7 @@ class OfflineInnerWorld:
             "last_spontaneous_note": str(state.last_spontaneous_note or ""),
             "last_spontaneous_source": str(state.last_spontaneous_source or ""),
             "inner_stream_size": len(list(state.inner_stream or [])),
+            "inner_world_llm_circuit": _inner_world_llm_circuit_snapshot(now_ms=now_ms),
         }
 
     # ── 唤醒事件 ──────────────────────────────────────────────────────────
@@ -822,13 +933,7 @@ def _build_inner_stream_event_content(
     )
     if llm_note:
         return llm_note, llm_focus or "self", "llm", ""
-    fallback_note, fallback_focus = _build_inner_stream_note_with_focus(
-        state=state,
-        absence_band=absence_band,
-        offline_hours=offline_hours,
-        now_ms=now_ms,
-    )
-    return fallback_note, fallback_focus or "self", "fallback", llm_reason
+    return "", "", "llm_unavailable", llm_reason
 
 
 def _generate_inner_stream_note_from_llm(
@@ -838,10 +943,6 @@ def _generate_inner_stream_note_from_llm(
     offline_hours: float,
     now_ms: int,
 ) -> tuple[str, str, str]:
-    if not _background_tasks_enabled():
-        return "", "", "INNER_WORLD_BACKGROUND_TASKS_DISABLED"
-
-    agent_reason_code = ""
     try:
         from host_brain.tribe.default_mode_agent import resolve_recent_foreground_interaction_state  # noqa: PLC0415
 
@@ -851,6 +952,11 @@ def _generate_inner_stream_note_from_llm(
     except Exception:
         pass
 
+    circuit = _inner_world_llm_circuit_snapshot(now_ms=now_ms)
+    if bool(circuit.get("open")):
+        return "", "", "INNER_WORLD_LLM_CIRCUIT_OPEN"
+
+    agent_reason_code = ""
     try:
         from host_brain.persona.inner_activity_agent import generate_inner_activity_note  # noqa: PLC0415
 
@@ -864,25 +970,45 @@ def _generate_inner_stream_note_from_llm(
             now_ms=now_ms,
             topic_phrase=topic_phrase,
         )
-        return str(note or ""), str(focus or ""), str(reason or "")
+        note = str(note or "").strip()
+        if note:
+            _close_inner_world_llm_circuit(now_ms=now_ms)
+            return note, str(focus or ""), ""
+        agent_reason_code = str(reason or "INNER_ACTIVITY_LLM_EMPTY")
     except Exception as agent_exc:
         agent_reason_code = f"INNER_ACTIVITY_AGENT_ERROR:{str(agent_exc)[:96]}"
 
     if not _inner_world_llm_enabled():
-        return "", "", "INNER_WORLD_LLM_DISABLED"
+        opened = _open_inner_world_llm_circuit(
+            reason=agent_reason_code or "INNER_WORLD_LLM_DISABLED",
+            now_ms=now_ms,
+        )
+        return "", "", f"INNER_WORLD_LLM_CIRCUIT_OPEN:{opened['last_reason']}"
 
     runtime = _resolve_inner_world_llm_runtime(now_ms=now_ms)
     if not isinstance(runtime, Mapping):
-        return "", "", "INNER_WORLD_LLM_RUNTIME_UNAVAILABLE"
+        opened = _open_inner_world_llm_circuit(
+            reason=agent_reason_code or "INNER_WORLD_LLM_RUNTIME_UNAVAILABLE",
+            now_ms=now_ms,
+        )
+        return "", "", f"INNER_WORLD_LLM_CIRCUIT_OPEN:{opened['last_reason']}"
     if not bool(runtime.get("available")):
-        return "", "", str(runtime.get("route_reason_code") or "INNER_WORLD_LLM_UNAVAILABLE")
+        opened = _open_inner_world_llm_circuit(
+            reason=agent_reason_code or str(runtime.get("route_reason_code") or "INNER_WORLD_LLM_UNAVAILABLE"),
+            now_ms=now_ms,
+        )
+        return "", "", f"INNER_WORLD_LLM_CIRCUIT_OPEN:{opened['last_reason']}"
 
     provider_name = str(runtime.get("provider_name") or "").strip()
     model_id = str(runtime.get("model_id") or "").strip()
     base_url_override = str(runtime.get("base_url_override") or "").strip() or None
     timeout_ms = max(800, min(int(runtime.get("timeout_ms") or _INNER_WORLD_LLM_TIMEOUT_MS), _INNER_WORLD_LLM_TIMEOUT_MS))
     if not provider_name or not model_id:
-        return "", "", (agent_reason_code or "INNER_WORLD_LLM_RUNTIME_INVALID")
+        opened = _open_inner_world_llm_circuit(
+            reason=agent_reason_code or "INNER_WORLD_LLM_RUNTIME_INVALID",
+            now_ms=now_ms,
+        )
+        return "", "", f"INNER_WORLD_LLM_CIRCUIT_OPEN:{opened['last_reason']}"
 
     topic = _pick_inner_stream_topic(state.anticipation_topics)
     topic_phrase = _topic_to_inner_phrase(topic)
@@ -901,7 +1027,16 @@ def _generate_inner_stream_note_from_llm(
 
     runtime_texts = _load_runtime_texts()
     llm_templates = dict(runtime_texts.get("inner_stream_llm_prompt") or {})
-    system_prompt = str(llm_templates.get("system_prompt") or "").strip()
+    system_prompt = str(llm_templates.get("system_prompt") or "").strip() or _INNER_WORLD_MONOLOGUE_SYSTEM_PROMPT
+    self_directive: dict[str, Any] = {}
+    try:
+        from host_brain.persona.self_model import build_self_directive_packet, load_persistent_self_state  # noqa: PLC0415
+
+        self_directive = build_self_directive_packet(
+            load_persistent_self_state(user_id=str(state.user_id or "user_1"))
+        )
+    except Exception as exc:
+        _logger.debug("inner_world self directive degraded: %s", exc)
     prompt_payload = {
         "absence_band": absence_band,
         "offline_hours": round(max(0.0, float(offline_hours)), 2),
@@ -911,11 +1046,17 @@ def _generate_inner_stream_note_from_llm(
         "drifted_arousal": round(float(state.drifted_arousal or 0.0), 3),
         "topic_phrase": topic_phrase or "",
         "recent_events": recent_events,
+        "self_directive": self_directive,
         "requirements": {
             "max_chars": 46,
             "must_be_inner_monologue": True,
             "must_not_repeat_recent_events": True,
             "focus_should_rotate": True,
+            "choose_content_from_self_identity_values_intentions_or_tensions": True,
+            "must_not_contradict_self_boundaries": True,
+            "must_be_concrete_private_thought": True,
+            "prefer_concrete_next_intention": True,
+            "avoid_abstract_system_terms": list(_ABSTRACT_INNER_NOTE_TERMS),
             "persona_style": str(llm_templates.get("persona_style") or ""),
         },
     }
@@ -941,22 +1082,33 @@ def _generate_inner_stream_note_from_llm(
             base_url_override=base_url_override,
         )
         if result.pool_exhausted:
-            return "", "", (agent_reason_code or "INNER_WORLD_LLM_POOL_EXHAUSTED")
+            opened = _open_inner_world_llm_circuit(
+                reason=agent_reason_code or "INNER_WORLD_LLM_POOL_EXHAUSTED",
+                now_ms=now_ms,
+            )
+            return "", "", f"INNER_WORLD_LLM_CIRCUIT_OPEN:{opened['last_reason']}"
         raw_text = str(result.content or "").strip()
         if not raw_text:
-            return "", "", "INNER_WORLD_LLM_EMPTY"
+            opened = _open_inner_world_llm_circuit(reason="INNER_WORLD_LLM_EMPTY", now_ms=now_ms)
+            return "", "", f"INNER_WORLD_LLM_CIRCUIT_OPEN:{opened['last_reason']}"
         parsed = _extract_llm_json_payload(raw_text)
         note = _finalize_inner_note_text(str(parsed.get("note") or ""))
         focus = str(parsed.get("focus") or "").strip().lower()
         if focus not in {"self", "state", "plan", "topic"}:
             focus = _infer_inner_stream_focus_from_note(note)
         if not note:
-            return "", "", "INNER_WORLD_LLM_NOTE_EMPTY"
+            opened = _open_inner_world_llm_circuit(reason="INNER_WORLD_LLM_NOTE_EMPTY", now_ms=now_ms)
+            return "", "", f"INNER_WORLD_LLM_CIRCUIT_OPEN:{opened['last_reason']}"
+        _close_inner_world_llm_circuit(now_ms=now_ms)
         return note, focus, ""
     except Exception as llm_exc:
-        if agent_reason_code:
-            return "", "", f"{agent_reason_code}|INNER_WORLD_LLM_ERROR:{str(llm_exc)[:96]}"
-        return "", "", f"INNER_WORLD_LLM_ERROR:{str(llm_exc)[:96]}"
+        reason = (
+            f"{agent_reason_code}|INNER_WORLD_LLM_ERROR:{str(llm_exc)[:96]}"
+            if agent_reason_code
+            else f"INNER_WORLD_LLM_ERROR:{str(llm_exc)[:96]}"
+        )
+        opened = _open_inner_world_llm_circuit(reason=reason, now_ms=now_ms)
+        return "", "", f"INNER_WORLD_LLM_CIRCUIT_OPEN:{opened['last_reason']}"
 
 
 def _extract_llm_json_payload(raw_text: str) -> dict[str, Any]:
@@ -1338,12 +1490,19 @@ def _finalize_inner_note_text(raw_text: str) -> str:
     text = re.sub(r"\s+", " ", text).strip(" ，,;；")
     if not text:
         return ""
+    if _looks_like_abstract_inner_note(text):
+        return ""
     text = re.sub(r"[。！!]{2,}$", "。", text)
     if text and text[-1] not in {"。", "！", "!"}:
         text = f"{text}。"
     if len(text) > 120:
         text = f"{text[:119].rstrip('，,；;。 ')}。"
     return text
+
+
+def _looks_like_abstract_inner_note(text: str) -> bool:
+    value = str(text or "")
+    return any(term in value for term in _ABSTRACT_INNER_NOTE_TERMS)
 
 
 def _select_inner_stream_note_candidate(
@@ -1486,6 +1645,24 @@ def _append_inner_stream_event(
     ):
         return
 
+    thought_payload: dict[str, Any] = {}
+    try:
+        from host_brain.persona.inner_monologue import build_private_inner_thought_event  # noqa: PLC0415
+
+        thought_payload = build_private_inner_thought_event(
+            note=note,
+            focus=focus,
+            source=source,
+            trigger="inner_world_tick",
+            now_ms=now_ms,
+            state=state.as_dict(),
+            offline_hours=offline_hours,
+            absence_band=absence_band,
+        ).as_dict()
+        note = str(thought_payload.get("private_text") or note).strip()
+    except Exception as exc:
+        _logger.debug("InnerWorld: private thought envelope degraded: %s", exc)
+
     event = {
         "ts_ms": int(now_ms),
         "focus": str(focus or "self"),
@@ -1496,6 +1673,8 @@ def _append_inner_stream_event(
         "anticipation": round(float(state.anticipation or 0.0), 3),
         "note": note,
     }
+    event.update(thought_payload)
+    event["note"] = note
     if fallback_reason:
         event["fallback_reason"] = str(fallback_reason)
     stream = list(state.inner_stream or [])

@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+import host_brain.persona.surface_original_quote_bank as quote_mod
 from host_brain.persona.isolated_surface_harness import (
     ReplyControlPacket,
     build_isolated_surface_input,
@@ -28,6 +29,27 @@ from host_brain.persona.isolated_surface_harness import (
 )
 from tools.isolated_surface_harness import _build_memory_ab_comparison, _contains_expected_term, run_cases
 from tools.run_isolated_surface_live import _summarize as summarize_live_surface_results
+
+
+def _patch_quote_vector_rows(monkeypatch, rows: list[dict] | None = None) -> None:  # noqa: ANN001
+    record = {
+        "quote_id": "surface_original_quote::demo",
+        "text": "才不是呢！接下来要怎么办！",
+        "source_ref": "quote.scn#1",
+        "source_digest": "demo",
+        "source_score": 5,
+        "confidence": 0.9,
+        "character_confidence": 0.8,
+        "intent_tags": json.dumps(["daily"], ensure_ascii=False),
+        "emotion_tags": json.dumps(["neutral"], ensure_ascii=False),
+        "style_moves": json.dumps(["quick_reaction", "question_chain"], ensure_ascii=False),
+        "rhythm_tags": json.dumps(["exclamation"], ensure_ascii=False),
+        "lexical_cues": json.dumps(["短促提高情绪"], ensure_ascii=False),
+        "relationship_stages": json.dumps(["familiar"], ensure_ascii=False),
+        "risk_tier": "safe_full_line",
+    }
+    payload = rows or [{"memory_id": record["quote_id"], "text": record["text"], "score": 0.9, "metadata": record}]
+    monkeypatch.setattr(quote_mod, "_query_surface_original_quote_collection", lambda query, *, top_k: payload[:top_k])
 
 
 SOUL = "你是数字生命夏目蓝。说话短一点，有轻微二次元 galgame 私聊感。"
@@ -373,7 +395,8 @@ def test_original_quote_query_follows_turn_contract_scene() -> None:
     assert "保留用户刚说的进展词" in rendered
 
 
-def test_original_quote_query_prefers_scene_quality_mapping_for_short_continue() -> None:
+def test_original_quote_query_prefers_scene_quality_mapping_for_short_continue(monkeypatch) -> None:
+    _patch_quote_vector_rows(monkeypatch)
     request = build_isolated_surface_input(
         {
             "case_id": "short_continue_quote_scene",

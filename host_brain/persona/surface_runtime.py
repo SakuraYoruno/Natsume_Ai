@@ -14,58 +14,29 @@ from host_brain.channels.vts_runtime_mapping import (
 )
 from host_brain.persona.isolated_surface_harness import (
     GenerateSurface,
-    IsolatedCandidateScore,
     IsolatedSurfaceInput,
+    build_surface_original_quote_query,
     build_isolated_surface_input,
-    build_isolated_surface_messages,
+    merged_must_not_do,
     parse_surface_candidates,
-    score_isolated_surface_candidates,
+    relationship_control_axes_for_distance,
+    surface_prompt_facts,
 )
+from host_brain.persona.surface_original_quote_bank import render_surface_original_quote_guidance
 
 
-_OBSERVATION_REASON_PREFIXES = (
-    "AFFECT_PROCESS_LEAK",
-    "AWKWARD_COLLOCATION",
-    "BLAND_PASS_LINE",
-    "BOUNDARY_REPAIR_",
-    "CORE_DIMENSION_FLOOR",
-    "CONTINUITY_THIN_GENERIC_REPLY",
-    "CONTINUITY_TASK_PUSHBACK",
-    "CURRENT_USER_TOPIC_MISMATCH",
-    "CUSTOMER_SERVICE_TONE",
-    "FORBIDDEN_TEMPLATE_TEXT",
-    "MISPLACED_EMOTIONAL_CONTAINMENT",
-    "MISPLACED_SUPPORT_TEMPLATE",
-    "MORNING_GENERIC_BLESSING",
-    "OBVIOUS_CUSTOMER_SERVICE_TEMPLATE",
-    "OILY_OR_OVERBOUND_TONE",
-    "PRESENCE_REPAIR_",
-    "RAW_CONTEXT_BACKFILL_REQUEST",
-    "RELATION_DISTANCE_OVERSTEP",
-    "RELATION_LOVER_UNDERINTIMATE",
-    "RELATION_NON_ROMANTIC_OVERSTEP",
-    "SIGNATURE_TEXTURE_MISSING",
-    "LOW_ENERGY_OVERHARSH_TEASE",
-    "SELF_DOUBT_THIN_DEFERRAL",
-    "SELF_DOUBT_LACKS_SMALL_STEP",
-    "SELF_DOUBT_REPLY_TOO_THIN",
-    "SURFACE_PROCESS_META_LANGUAGE",
-    "THIN_DAILY_FOLLOWUP_REPLY",
-    "UNNEEDED_CONTINUITY_MATERIAL_REQUEST",
-    "WAIT_SCENE_PRESSURES_RETURN",
-    "WRITTEN_REGISTER_TONE",
-)
-_SOFT_QUALITY_RETRY_PREFIXES = (
-    "MISPLACED_EMOTIONAL_CONTAINMENT",
-    "MISPLACED_SUPPORT_TEMPLATE",
-    "LOW_ENERGY_OVERHARSH_TEASE",
-    "SELF_DOUBT_THIN_DEFERRAL",
-    "SELF_DOUBT_LACKS_SMALL_STEP",
-    "SELF_DOUBT_REPLY_TOO_THIN",
-    "SELF_DOUBT_UNGROUNDED_TECH_OBJECT",
-    "SELF_DOUBT_DEMEANING_SMALL_STEP",
-    "UNNEEDED_CONTINUITY_MATERIAL_REQUEST",
-)
+@dataclass(frozen=True)
+class SurfaceDirectCandidate:
+    text: str
+    source: str = "direct_first"
+    hard_gate_observations: tuple[str, ...] = ()
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "text": self.text,
+            "source": self.source,
+            "hard_gate_observations": list(self.hard_gate_observations),
+        }
 
 
 @dataclass(frozen=True)
@@ -73,11 +44,11 @@ class SurfaceRuntimeResult:
     request: IsolatedSurfaceInput
     messages: tuple[Mapping[str, str], ...]
     raw_output: str
-    candidates: tuple[IsolatedCandidateScore, ...]
-    selected: IsolatedCandidateScore | None
+    candidates: tuple[SurfaceDirectCandidate, ...]
+    selected: SurfaceDirectCandidate | None
     selected_text: str
     observation_codes: tuple[str, ...]
-    score_trace: Mapping[str, Any]
+    generation_trace: Mapping[str, Any]
     natsume_emotion_tag: str = "NEUTRAL"
     user_emotion_tag: str = "NEUTRAL"
     vts_expression_id: str = ""
@@ -94,19 +65,30 @@ class SurfaceRuntimeResult:
             "selected": self.selected.as_dict() if self.selected else None,
             "candidates": [candidate.as_dict() for candidate in self.candidates],
             "observation_codes": list(self.observation_codes),
-            "score_trace": dict(self.score_trace),
+            "generation_trace": dict(self.generation_trace),
             "latency_ms": int(self.latency_ms),
         }
 
 
-def surface_observation_codes(selected: IsolatedCandidateScore | Mapping[str, Any] | None) -> tuple[str, ...]:
+def build_surface_generation_trace(
+    *,
+    candidates: Sequence[SurfaceDirectCandidate],
+    selected: SurfaceDirectCandidate | None,
+    observation_codes: Sequence[str],
+) -> dict[str, Any]:
+    return {
+        "selected": selected.as_dict() if selected else None,
+        "candidates": [candidate.as_dict() for candidate in candidates],
+        "observation_codes": list(observation_codes),
+        "candidate_count": len(candidates),
+        "selection": "direct_first_no_score",
+    }
+
+
+def surface_observation_codes(selected: Mapping[str, Any] | None) -> tuple[str, ...]:
     if not selected:
         return ("NO_SELECTED",)
-    if isinstance(selected, IsolatedCandidateScore):
-        selected_map = selected.as_dict()
-    else:
-        selected_map = dict(selected)
-
+    selected_map = dict(selected)
     codes: list[str] = []
     if selected_map.get("hard_fail"):
         codes.append("HARD_FAIL")
@@ -117,60 +99,6 @@ def surface_observation_codes(selected: IsolatedCandidateScore | Mapping[str, An
         if reason_text.startswith(_OBSERVATION_REASON_PREFIXES):
             codes.append(reason_text.split(":", 1)[0])
     return tuple(dict.fromkeys(codes))
-
-
-def _soft_quality_retry_reason_codes(selected: IsolatedCandidateScore | None) -> tuple[str, ...]:
-    if not selected:
-        return ()
-    codes: list[str] = []
-    for reason in selected.reason_codes:
-        reason_text = str(reason)
-        if reason_text.startswith(_SOFT_QUALITY_RETRY_PREFIXES):
-            codes.append(reason_text.split(":", 1)[0])
-    return tuple(dict.fromkeys(codes))
-
-
-def _minimal_soft_quality_repair(
-    request: IsolatedSurfaceInput,
-    text: str,
-    reason_codes: Sequence[str],
-) -> str:
-    value = str(text or "").strip()
-    if not value:
-        return ""
-    reasons = tuple(str(item) for item in reason_codes)
-    self_doubt_soft = any(item.startswith("SELF_DOUBT_") for item in reasons)
-    if self_doubt_soft:
-        value = re.sub(r"(?:先)?(?:把(?:手头)?这事)?放(?:一)?(?:下|放)[，,、 ]*", "", value)
-        value = re.sub(r"(?:先)?搁(?:一)?(?:下|搁|着)[。.!！？，,、 ]*", "", value)
-        value = re.sub(r"回头(?:再(?:看|说))?[，,、 ]*", "", value)
-        value = re.sub(r"(?:换个思路)?再试[。.!！]?", "", value)
-        value = re.sub(r"明天再(?:看|说)[，,、 ]*", "", value)
-        if not re.search(r"(一步|一件|小事|最小|最卡|拎出来|拿出来|做完|试试|突破口)", value):
-            value = value.rstrip("。.!！") + "。先把最卡的那一步拎出来。"
-        elif any(item.startswith("SELF_DOUBT_LACKS_SMALL_STEP") for item in reasons):
-            value = value.rstrip("。.!！") + "。先把最卡的那一步拎出来。"
-    if any(item.startswith("SELF_DOUBT_DEMEANING_SMALL_STEP") for item in reasons):
-        value = re.sub(r"(?:白痴|弱智|蠢货|傻子|笨蛋)都能做的", "很小的", value)
-        value = re.sub(r"(?:白痴|弱智|蠢货)", "", value)
-    if any(item.startswith("MISPLACED_EMOTIONAL_CONTAINMENT") for item in reasons):
-        value = value.replace("接得住", "听着").replace("接住", "回应")
-        value = re.sub(r"我接(?:着|住)?", "我听着", value)
-    return value.strip()
-
-
-def build_surface_score_trace(
-    *,
-    candidates: Sequence[IsolatedCandidateScore],
-    selected: IsolatedCandidateScore | None,
-    observation_codes: Sequence[str],
-) -> dict[str, Any]:
-    return {
-        "selected": selected.as_dict() if selected else None,
-        "candidates": [candidate.as_dict() for candidate in candidates],
-        "observation_codes": list(observation_codes),
-        "candidate_count": len(candidates),
-    }
 
 
 def _coerce_surface_request(payload: IsolatedSurfaceInput | Mapping[str, Any]) -> IsolatedSurfaceInput:
@@ -185,40 +113,6 @@ async def _maybe_await_text(value: str | Awaitable[str]) -> str:
     return str(value or "").strip()
 
 
-_DIRECT_PROMPT_REPLACEMENTS = (
-    (
-        "你是隔离的最终表层文本生成器，只负责产出可发送的中文私聊候选。",
-        "你是隔离的最终表层文本生成器，只负责一次性产出一条可发送的中文私聊回复，并给出夏目蓝说出这句时自己的 EmotionTag。",
-    ),
-    (
-        '输出必须是 JSON 对象：{"candidates":["候选1","候选2","候选3"]}。',
-        '输出必须是 JSON 对象：{"reply_text":"可直接发送给用户的一条中文回复","natsume_emotion_tag":"NEUTRAL","user_emotion_tag":"NEUTRAL","emotion_confidence":0.0}。',
-    ),
-    (
-        "给 3 到 5 个候选。每个候选必须是用户可见文本，不要 Markdown、括号动作、字段名或解释。",
-        "只给 1 条用户可见回复，放在 reply_text；不要 Markdown、括号动作、字段名或解释混进 reply_text。",
-    ),
-    (
-        "ReplyControlPacket.must_include 是逐候选字面约束；每个候选都必须包含全部 must_include 词。must_not_do 也是逐候选约束；每个候选都不能包含其中任何词。",
-        "ReplyControlPacket.must_include 是字面约束；最终回复必须包含全部 must_include 词。must_not_do 也是字面约束；最终回复不能包含其中任何词。",
-    ),
-    (
-        "候选之间要有口吻差异，可以用轻微别扭、短促顶嘴、护短、收住情绪、小得意；不要都写成“记得/好的/没忘/发我看看”的平铺句。",
-        "这唯一一条回复要有口吻：可以轻微别扭、短促顶嘴、护短、收住情绪或小得意；不要写成“记得/好的/没忘/发我看看”的平铺句。",
-    ),
-    (
-        "日常/关系候选里，至少 2 个要带 SORA 式发话动作：短促截入、轻顶嘴、撒娇耍赖、嘴硬关心、小得意、护短接手、不承认但在意。不是堆口癖，而是让句子有转身。",
-        "日常/关系回复里要带一点 SORA 式发话动作：短促截入、轻顶嘴、撒娇耍赖、嘴硬关心、小得意、护短接手、不承认但在意。不是堆口癖，而是让句子有转身。",
-    ),
-    (
-        "不要让 3 到 5 个候选都只是安全确认句；“早，今天慢慢来”“回来啦，先坐一下”“记得啊，周末看展”这类平句只能当保底，不能当最有角色感的候选。",
-        "不要让回复只是安全确认句；“早，今天慢慢来”“回来啦，先坐一下”“记得啊，周末看展”这类平句只能当保底，不能当最终质感。",
-    ),
-    (
-        "每个候选都必须完成 TurnSurfaceContract.response_move；不要只写空泛支持、空泛安慰或单纯撒娇。",
-        "最终回复必须完成 TurnSurfaceContract.response_move；不要只写空泛支持、空泛安慰或单纯撒娇。",
-    ),
-)
 _PROCESS_PREFACE_MARKERS = (
     "_move",
     "response_move",
@@ -229,13 +123,48 @@ _PROCESS_PREFACE_MARKERS = (
     "所以输出",
     "只输出文本",
 )
+_OBSERVATION_REASON_PREFIXES = (
+    "AFFECT_PROCESS_LEAK",
+    "AWKWARD_COLLOCATION",
+    "BLAND_PASS_LINE",
+    "BOUNDARY_REPAIR_",
+    "CORE_DIMENSION_FLOOR",
+    "CONTINUITY_THIN_GENERIC_REPLY",
+    "CONTINUITY_TASK_PUSHBACK",
+    "CURRENT_USER_TOPIC_MISMATCH",
+    "CUSTOMER_SERVICE_TONE",
+    "FORBIDDEN_TEMPLATE_TEXT",
+    "LOW_ENERGY_OVERHARSH_TEASE",
+    "MISPLACED_EMOTIONAL_CONTAINMENT",
+    "MISPLACED_SUPPORT_TEMPLATE",
+    "MORNING_GENERIC_BLESSING",
+    "OBVIOUS_CUSTOMER_SERVICE_TEMPLATE",
+    "OILY_OR_OVERBOUND_TONE",
+    "PRESENCE_REPAIR_",
+    "RAW_CONTEXT_BACKFILL_REQUEST",
+    "RELATION_DISTANCE_OVERSTEP",
+    "RELATION_LOVER_UNDERINTIMATE",
+    "RELATION_NON_ROMANTIC_OVERSTEP",
+    "SELF_DOUBT_LACKS_SMALL_STEP",
+    "SELF_DOUBT_REPLY_TOO_THIN",
+    "SELF_DOUBT_THIN_DEFERRAL",
+    "SIGNATURE_TEXTURE_MISSING",
+    "SURFACE_PROCESS_META_LANGUAGE",
+    "THIN_DAILY_FOLLOWUP_REPLY",
+    "UNNEEDED_CONTINUITY_MATERIAL_REQUEST",
+    "WAIT_SCENE_PRESSURES_RETURN",
+    "WRITTEN_REGISTER_TONE",
+)
 _PROCESS_PREFACE_SPLIT_RE = re.compile(
     r"(?:所以输出(?:这条|文本)?[：:。]|只输出(?:一条)?(?:最终回复)?文本[：:。]|_move[^。！？!?]{0,24}[。！？!?])"
 )
 _QUOTED_REPLY_BEFORE_PROCESS_RE = re.compile(r"^[\"“「](.{2,120}?)[\"”」]\s*_move")
+_LEGACY_SELF_TITLE_RE = re.compile(r"天爷|天大人|妹妹我|本小姐我")
 _TEXT_INPUT_SENSORY_PATTERNS = (
     re.compile(r"(?:你这|你的|你那|老哥这|尼尼这).{0,3}声音"),
     re.compile(r"(?:一听|听起来|听上去|听得出|听出来).{0,16}(?:你|老哥|尼尼|昨晚|没睡|困|累|声音)"),
+    re.compile(r"(?:听出来了|听出来.{0,8}(?:这句|这段|这话|不通顺|怪|别扭))"),
+    re.compile(r"(?:你这|你的|老哥这|这句|这段|这话|语气).{0,8}(?:听着|听起来|听上去).{0,12}(?:累|怪|别扭|像|不通顺|被抽干)"),
     re.compile(r"(?:我|本小姐).{0,6}(?:看到|看见|瞧见).{0,8}(?:你|老哥|尼尼|屏幕|画面)"),
     re.compile(r"(?:你|老哥|尼尼).{0,8}(?:脸色|表情|屏幕|画面|镜头)"),
 )
@@ -244,39 +173,146 @@ _INTERNAL_LEAK_PATTERNS = (
     re.compile(r"候选|评分|控制包|内部字段|EmotionTag", re.IGNORECASE),
     re.compile(r"^\s*[\{\[]"),
 )
+_LOW_INFO_SCENE_STATE_GUESS_RE = re.compile(
+    r"主动(?:打招呼|来找|找我)|(?:今天|这次|回来).{0,8}(?:主动|老实|可疑|没睡醒|准时|挺早|挺快|太晚|够晚|干脆|难得|居然|真少见)"
+    r"|(?:回得|回来得).{0,6}(?:干脆|挺早|挺快|够晚|太晚|准时)"
+    r"|忙到半夜|加班到半夜|没太晚|摸鱼|偷偷|刚睡醒|干净利落|挺安静|这么客气|这么老实"
+    r"|今天.{0,8}(?:没啥急事|没什么急事|不赶|不用急)"
+    r"|突然想到我|叫这么正式|走错片场|惜字如金"
+    r"|有点可疑|可疑哦|又干嘛|突然冒出来|出什么事|一句继续|没诚意|给点反应|外星人|无聊死|真少见"
+)
+_LOW_INFO_OVERREAD_MARKER_RE = re.compile(
+    r"今天|突然|又|倒是|挺|真少见|来得|刚|就一?个|可别|糊弄|走神|有话|有事|出什么|干嘛"
+    r"|正式|客气|老实|乖|可疑|真巧|无聊|外星人|准备好|正想|回得|回来得|省点口舌"
+    r"|没诚意|给点反应|不会跑|欢迎回家|少见|不错不错|别催|进门|还记得|值得表扬|表扬一下|等你"
+    r"|偷懒|只说|陪你聊|吃掉|知道你忙|你忙|出大事|接住|我接|(?:老哥|哥哥|尼尼)在呢"
+    r"|居然|稀奇|人就在这儿|喊一声|就回个|回个[“\"'‘]?继续|就一声|你好好听着"
+)
+_ZERO_QUESTION_BUDGET_PROMPT_RE = re.compile(
+    r"(?:下一步|给个方向|说句话|说下去|说完|接着说|继续说|怎么啦|怎么了|什么事|有话说|发我|贴给我|丢过来|甩过来).{0,8}[？?吧]"
+    r"|[？?].{0,16}(?:给个方向|说句话|继续说|接着说|有话说|发我|贴给我|丢过来|甩过来)"
+)
+_UNSUPPORTED_SHARED_HISTORY_RE = re.compile(
+    r"不是第一次|每次(?:都|总)|以前(?:也|就|说过|见过)|上次|之前(?:也|就|说过|见过)"
+    r"|老是这样|总是这样|又(?:这样|来了|说这种话)"
+    r"|陪你聊这么久|聊这么久|这么久|一直在这|一直陪|一直跟你"
+)
+_META_IDENTITY_LEAK_RE = re.compile(r"设定|系统|提示词|角色卡|模型|语言模型|(?<![A-Za-z_])AI(?![A-Za-z_])", re.IGNORECASE)
+_ASCII_TILDE_RE = re.compile(r"~")
+_WAVE_MARKER_RE = re.compile(r"[~～]")
+_BOUNDARY_SOUR_WITHDRAWAL_RE = re.compile(
+    r"不管就不管|不管不管|爱理不理|不管了|不帮了|不帮你了|你自己处理|偏不管|偏不帮|懒得管|(?:先)?不吵你"
+)
+_RELATIONSHIP_DOUBT_DISMISSIVE_RE = re.compile(r"不信拉倒|爱信不信|信不信由你|懒得解释|反正我还会继续这样")
+_LOVER_CLICHE_RE = re.compile(r"多多益善|越多越好|这种话多说|这种话可以多说")
 
-def _direct_surface_messages(messages: Sequence[Mapping[str, str]]) -> list[dict[str, str]]:
-    direct: list[dict[str, str]] = []
-    for index, message in enumerate(messages):
-        role = str(message.get("role") or "")
-        content = str(message.get("content") or "")
-        if index == 0:
-            for source, replacement in _DIRECT_PROMPT_REPLACEMENTS:
-                content = content.replace(source, replacement)
-            content = "\n".join(
-                (
-                    content,
-                    "",
-                    "## 结构化直出要求",
-                    '只输出 JSON 对象：{"reply_text":"...","natsume_emotion_tag":"...","user_emotion_tag":"...","emotion_confidence":0.0}。',
-                    render_runtime_emotion_tag_guidance(),
-                    "user_emotion_tag 是你从当前用户文字语义中理解到的用户情绪；不确定就用 NEUTRAL。",
-                    "natsume_emotion_tag 是夏目蓝说出 reply_text 时自己的情绪，不是用户情绪，也不要为了显眼乱填高强度情绪。",
-                    "reply_text 里不能出现 JSON 字段名、EmotionTag、标签解释、候选、评分或内部分析。",
-                )
-            )
-        elif index == len(messages) - 1:
-            content = "\n".join(
-                (
-                    content,
-                    "",
-                    "## 输出要求",
-                    '只输出 JSON 对象，格式为 {"reply_text":"...","natsume_emotion_tag":"...","user_emotion_tag":"...","emotion_confidence":0.0}。',
-                    "不要候选列表，不要解释，不要把 EmotionTag 写进 reply_text。",
-                )
-            )
-        direct.append({"role": role, "content": content})
-    return direct
+def _direct_surface_guard_lines(request: IsolatedSurfaceInput) -> tuple[str, ...]:
+    no_question_line = (
+        "本轮 question_budget=0：不要写真正问句或追问；不要用“下一步呢/说句话呀/是不是/吧？”推动用户，直接接住当前话。"
+        if int(getattr(request.control, "question_budget", 0) or 0) <= 0
+        else f"本轮最多 {int(request.control.question_budget)} 个问句；问句只能用于完成当前动作。"
+    )
+    return (
+        "你是中文私聊里的数字生命，不能编现实动作或现场状态；不要说我去倒水、坐下、过来、抱一下、在你旁边、看见你、等类似现实行动，除非必要事实明确给出。",
+        "也不要安排用户身体动作或现实作息：坐下、闭眼、躺下、喝水、早点睡、明天再说都只能在必要事实或用户明确请求时使用。",
+        "用户追问记不记得时：事实或记忆包里有内容就直接接；没有就说不乱猜、让对方给线索。不要承认走神、忘了、脑袋空白，也不要编刚才发生过的事。",
+        "用户问“你是不是不记得我/你忘了我吗”是在要关系安定，不是在要事实校验；直接说没忘、收住不安，不要反复追问“指哪段/给提示”。",
+        "不要猜时间、作息、忙闲、进度或现实状态；禁用“熬夜、没睡醒、准时、挺早、没啥急事、不赶、忙文本、加班、摸鱼、做完、偷偷、又、主动来找我、回得干脆、回来得晚、忙到半夜、被工作吃掉、难得”等未提供事实推断。",
+        "当前输入是文字消息时，不要写“你这语气听着/这话听起来”这类听觉化判断；可改成“这句读起来/这话看着”。",
+        "早安、回来、在吗这类低信息场景，只接当前消息本身，不评价对方来得早晚、是否主动、是否老实、是否刚睡醒。",
+        "称呼和自称是调味，不是回复主体；低信息短接续里不要靠“妹妹我、人家、本小姐”等自称撑风格，也不要评价用户偷懒或没诚意。",
+        "低信息场景不要写“我接/接住了/接得住/知道你忙/以为要出大事/居然/稀奇/喊一声人就在这儿/就回个继续/就一声继续/你好好听着”；“在吗”只能表达我在，不要写成“老哥在呢”。",
+        "“继续/接着”这类极短续话不要用波浪号收尾，直接说接着来或继续。",
+        "低能量/难受场景不要编喝水、坐下、躺下、睡觉、明天再说这类现实安排；可以说先缓一下、别硬撑，但要短、克制、像聊天。",
+        "被用户推开时先收住距离，允许嘴硬一句，但不要反压成“偏不管/不管就不管/爱理不理/我不吵你/谁管你答不答应”；收住后留一句可回来的入口。",
+        "恋人亲密可以明确回一句想念，但不要写“多多益善/越多越好/这种话多说”这类模板甜话。",
+        "用户怀疑你是不是在按设定说话时，不解释系统，也不要用“不信拉倒/反正我还会继续这样”顶回去；用当前这一句把关系稳住。",
+        "不要输出 emoji、颜文字、表情符号或日语口癖。",
+        no_question_line,
+    )
+
+
+def _model_dump(value: Any) -> dict[str, Any]:
+    if hasattr(value, "model_dump"):
+        return dict(value.model_dump())
+    if hasattr(value, "dict"):
+        return dict(value.dict())
+    if isinstance(value, Mapping):
+        return dict(value)
+    return {}
+
+
+def _json_block(value: Mapping[str, Any]) -> str:
+    return json.dumps(dict(value), ensure_ascii=False, indent=2, sort_keys=True)
+
+
+def _direct_surface_messages_from_request(request: IsolatedSurfaceInput) -> list[dict[str, str]]:
+    control_payload = _model_dump(request.control)
+    control_payload["facts"] = surface_prompt_facts(request)
+    control_payload["must_not_do"] = merged_must_not_do(request)
+    relationship_axes_payload = relationship_control_axes_for_distance(
+        request.control.relationship_distance
+    ).as_dict()
+    quote_guidance = render_surface_original_quote_guidance(
+        build_surface_original_quote_query(request, limit=8),
+        limit=8,
+    )
+    system_lines = [
+        "你是隔离的最终表层文本生成器，只负责一次性产出一条可发送的中文私聊回复，并给出这句话对应的运行用 EmotionTag。",
+        "唯一允许读取的输入：Soul.md、当前用户输入、ReplyControlPacket、必要事实列表、must_not_do 列表，以及真实中文原句风格参考。",
+        "禁止使用或推断任何未提供的历史对话、长期记忆、器官族原始输出、工具候选、RAG 文档或模块自然语言建议。",
+        "Soul.md 是语言风格最高锚；不要从旧代码、旧 prompt 或字段名里借身份。",
+        "ReplyControlPacket 是最终生成层的唯一运行控制面；不得要求更多 runtime state。",
+        "ReplyControlPacket.style_anchor 里的句法锚只学结构和节奏，不要逐字照抄锚点文本；同一类短句可以自然换词。",
+        "先抓当前用户这句话最明显的意图或情绪，再完成 response_move；不要只写空泛支持、空泛安慰或单纯撒娇。",
+        "日常和关系场景优先像中文私聊：先有一点主观反应，再承接事实或给一步；不要写成任务回执、流程提示、安排记录或客服式确认。",
+        "技术和任务场景里，有用性优先，角色口吻只做轻量包裹。",
+        "文字优先通顺；语音化停顿、短促反应和省略号都不能牺牲语法。",
+        "不要输出候选、评分、分析、解释、Markdown、括号动作、内部字段或控制包内容。",
+        "",
+        "## 结构化直出要求",
+        '只输出 JSON 对象：{"reply_text":"...","natsume_emotion_tag":"...","user_emotion_tag":"...","emotion_confidence":0.0}。',
+        render_runtime_emotion_tag_guidance(),
+        "user_emotion_tag 是你从当前用户文字语义中理解到的用户情绪；不确定就用 NEUTRAL。",
+        "natsume_emotion_tag 是你说出 reply_text 时自己的情绪，不是用户情绪，也不要为了显眼乱填高强度情绪。",
+        "reply_text 里不能出现 JSON 字段名、EmotionTag、标签解释、候选、评分或内部分析。",
+        "",
+        "## 直出边界",
+        *_direct_surface_guard_lines(request),
+        "",
+        "## Soul.md",
+        request.soul_md.strip(),
+    ]
+    user_lines = [
+        "## 当前用户输入",
+        request.user_message,
+        "",
+        "## ReplyControlPacket",
+        _json_block(control_payload),
+        "",
+        "## DerivedRelationshipControlAxes",
+        _json_block(relationship_axes_payload),
+        "",
+        "## 必要事实",
+        "\n".join(f"- {item}" for item in surface_prompt_facts(request)) or "- 无",
+    ]
+    if quote_guidance:
+        user_lines.extend(["", quote_guidance])
+    user_lines.extend(
+        [
+            "",
+            "## must_not_do",
+            "\n".join(f"- {item}" for item in merged_must_not_do(request)) or "- 无",
+            "",
+            "## 输出要求",
+            '只输出 JSON 对象，格式为 {"reply_text":"...","natsume_emotion_tag":"...","user_emotion_tag":"...","emotion_confidence":0.0}。',
+            "不要候选列表，不要解释，不要把 EmotionTag 写进 reply_text。",
+        ]
+    )
+    return [
+        {"role": "system", "content": "\n".join(system_lines)},
+        {"role": "user", "content": "\n".join(user_lines)},
+    ]
 
 
 def strip_surface_process_preface(text: str) -> str:
@@ -309,8 +345,7 @@ def build_direct_surface_messages(
     payload: IsolatedSurfaceInput | Mapping[str, Any],
 ) -> tuple[Mapping[str, str], ...]:
     request = _coerce_surface_request(payload)
-    messages = build_isolated_surface_messages(request)
-    return tuple(_direct_surface_messages(messages))
+    return tuple(_direct_surface_messages_from_request(request))
 
 
 def parse_surface_generation_output(raw_output: Any) -> dict[str, Any]:
@@ -412,7 +447,11 @@ def _balanced_json_object(raw: str) -> str:
 
 
 def _clean_reply_text(value: Any) -> str:
-    return strip_surface_process_preface(str(value or "").strip())
+    text = strip_surface_process_preface(str(value or "").strip())
+    text = re.sub(r"[~～][。.!！]+(?=\s*\S)", "。", text)
+    text = re.sub(r"([~～])(?:[。.!！]+)$", r"\1", text)
+    text = re.sub(r"([。！？!?])\1+$", r"\1", text)
+    return text.strip()
 
 
 def _normalize_emotion_tag(value: Any, *, mapping: Mapping[str, str]) -> str:
@@ -434,9 +473,152 @@ def _surface_hard_gate_violations(request: IsolatedSurfaceInput, text: str) -> t
     codes: list[str] = []
     if _text_input_boundary_active(request) and any(pattern.search(value) for pattern in _TEXT_INPUT_SENSORY_PATTERNS):
         codes.append("SENSORY_SOURCE_HALLUCINATION")
+    if _low_info_scene_state_guess_hits(request, value):
+        codes.append("LOW_INFO_SCENE_STATE_GUESS")
+    if _short_continue_wave_style_hits(request, value):
+        codes.append("SHORT_CONTINUE_WAVE_STYLE")
+    if _zero_question_budget_prompt_hits(request, value):
+        codes.append("QUESTION_BUDGET_PROMPTING_USER")
+    if _unsupported_shared_history_hits(request, value):
+        codes.append("UNSUPPORTED_SHARED_HISTORY")
+    if _meta_identity_boundary_hits(request, value):
+        codes.append("SURFACE_META_IDENTITY_LEAK")
     if any(pattern.search(value) for pattern in _INTERNAL_LEAK_PATTERNS):
         codes.append("SURFACE_INTERNAL_LEAK")
+    if _ASCII_TILDE_RE.search(value):
+        codes.append("ASCII_TILDE_TEXT_STYLE")
+    if _boundary_sour_withdrawal_hits(request, value):
+        codes.append("BOUNDARY_SOUR_WITHDRAWAL")
+    if _relationship_doubt_dismissive_hits(request, value):
+        codes.append("RELATIONSHIP_DOUBT_DISMISSIVE")
+    if _lover_cliche_hits(request, value):
+        codes.append("LOVER_CLICHE")
+    if _LEGACY_SELF_TITLE_RE.search(value):
+        codes.append("LEGACY_SELF_TITLE")
     return tuple(dict.fromkeys(codes))
+
+
+def _normalized_short_user_text(value: str) -> str:
+    return re.sub(r"[\s，,。.!！?？、]+", "", str(value or "").strip())
+
+
+def _low_info_scene_state_guess_hits(request: IsolatedSurfaceInput, text: str) -> tuple[str, ...]:
+    user_text = str(getattr(request, "user_message", "") or "").strip()
+    normalized_user = _normalized_short_user_text(user_text)
+    low_info_scene = normalized_user in {
+        "早",
+        "早安",
+        "早上好",
+        "我回来了",
+        "回来了",
+        "回来啦",
+        "在吗",
+        "在吗？",
+        "继续",
+        "接着",
+    } or normalized_user.startswith(("早啊", "早呀", "早安", "早上好"))
+    if not low_info_scene:
+        return ()
+    value = str(text or "")
+    return tuple(
+        dict.fromkeys(
+            [
+                *[match.group(0) for match in _LOW_INFO_SCENE_STATE_GUESS_RE.finditer(value)],
+                *[match.group(0) for match in _LOW_INFO_OVERREAD_MARKER_RE.finditer(value)],
+            ]
+        )
+    )
+
+
+def _short_continue_wave_style_hits(request: IsolatedSurfaceInput, text: str) -> tuple[str, ...]:
+    normalized_user = _normalized_short_user_text(str(getattr(request, "user_message", "") or ""))
+    if normalized_user not in {"继续", "接着"}:
+        return ()
+    return tuple(dict.fromkeys(match.group(0) for match in _WAVE_MARKER_RE.finditer(str(text or ""))))
+
+
+def _zero_question_budget_prompt_hits(request: IsolatedSurfaceInput, text: str) -> tuple[str, ...]:
+    if int(getattr(request.control, "question_budget", 0) or 0) > 0:
+        return ()
+    value = str(text or "")
+    if "？" not in value and "?" not in value:
+        return ()
+    hits = tuple(dict.fromkeys(match.group(0) for match in _ZERO_QUESTION_BUDGET_PROMPT_RE.finditer(value)))
+    if hits:
+        return hits
+    without_reaction = re.sub(r"^\s*(?:哈|啊|欸|诶|咦)[？?][，,。…\s]*", "", value)
+    if "？" in without_reaction or "?" in without_reaction:
+        return ("ZERO_QUESTION_BUDGET_QUESTION_MARK",)
+    return ()
+
+
+def _unsupported_shared_history_hits(request: IsolatedSurfaceInput, text: str) -> tuple[str, ...]:
+    value = str(text or "")
+    hits = tuple(dict.fromkeys(match.group(0) for match in _UNSUPPORTED_SHARED_HISTORY_RE.finditer(value)))
+    if not hits:
+        return ()
+    evidence = "\n".join(
+        [
+            str(getattr(request, "user_message", "") or ""),
+            *[str(item or "") for item in list(getattr(request.control, "facts", []) or [])],
+            *[str(item or "") for item in list(getattr(request, "facts", []) or [])],
+        ]
+    )
+    return tuple(hit for hit in hits if hit not in evidence)
+
+
+def _meta_identity_boundary_hits(request: IsolatedSurfaceInput, text: str) -> tuple[str, ...]:
+    user_text = str(getattr(request, "user_message", "") or "")
+    task_mode = str(getattr(request.control, "task_mode", "") or "").strip().lower()
+    response_move = str(getattr(request.control, "response_move", "") or "").strip().lower()
+    active = (
+        task_mode in {"identity", "relationship_boundary", "relationship_doubt"}
+        or response_move in {"answer_doubt_without_meta", "answer_identity_without_meta"}
+        or bool(re.search(r"设定|系统|提示词|角色卡|模型|语言模型|(?<![A-Za-z_])AI(?![A-Za-z_])", user_text, re.IGNORECASE))
+    )
+    if not active:
+        return ()
+    return tuple(dict.fromkeys(match.group(0) for match in _META_IDENTITY_LEAK_RE.finditer(str(text or ""))))
+
+
+def _boundary_sour_withdrawal_hits(request: IsolatedSurfaceInput, text: str) -> tuple[str, ...]:
+    task_mode = str(getattr(request.control, "task_mode", "") or "").strip().lower()
+    response_move = str(getattr(request.control, "response_move", "") or "").strip().lower()
+    active = task_mode in {"boundary_repair", "pushed_away_boundary"} or response_move in {
+        "step_back_but_stay_available",
+        "pushed_away_boundary",
+    }
+    if not active:
+        return ()
+    return tuple(dict.fromkeys(match.group(0) for match in _BOUNDARY_SOUR_WITHDRAWAL_RE.finditer(str(text or ""))))
+
+
+def _relationship_doubt_dismissive_hits(request: IsolatedSurfaceInput, text: str) -> tuple[str, ...]:
+    task_mode = str(getattr(request.control, "task_mode", "") or "").strip().lower()
+    response_move = str(getattr(request.control, "response_move", "") or "").strip().lower()
+    user_text = str(getattr(request, "user_message", "") or "")
+    active = (
+        task_mode in {"relationship_boundary", "relationship_doubt"}
+        or response_move in {"answer_doubt_without_meta", "answer_identity_without_meta"}
+        or bool(re.search(r"设定|系统|提示词|角色卡|模型|语言模型|按设定|(?<![A-Za-z_])AI(?![A-Za-z_])", user_text, re.IGNORECASE))
+    )
+    if not active:
+        return ()
+    return tuple(dict.fromkeys(match.group(0) for match in _RELATIONSHIP_DOUBT_DISMISSIVE_RE.finditer(str(text or ""))))
+
+
+def _lover_cliche_hits(request: IsolatedSurfaceInput, text: str) -> tuple[str, ...]:
+    task_mode = str(getattr(request.control, "task_mode", "") or "").strip().lower()
+    response_move = str(getattr(request.control, "response_move", "") or "").strip().lower()
+    relationship_distance = str(getattr(request.control, "relationship_distance", "") or "").strip().lower()
+    active = (
+        task_mode in {"lover_affection", "lover_presence"}
+        or response_move in {"return_affection_concretely", "lover_presence"}
+        or relationship_distance in {"lover", "lover_early", "lover_stable", "stable_lover"}
+    )
+    if not active:
+        return ()
+    return tuple(dict.fromkeys(match.group(0) for match in _LOVER_CLICHE_RE.finditer(str(text or ""))))
 
 
 def _text_input_boundary_active(request: IsolatedSurfaceInput) -> bool:
@@ -457,6 +639,10 @@ def _minimal_hard_gate_repair(request: IsolatedSurfaceInput, text: str) -> str:
     value = str(text or "").strip()
     if not value:
         return ""
+    violations = _surface_hard_gate_violations(request, value)
+    fallback = _hard_gate_fallback(request, violations)
+    if fallback and not _surface_hard_gate_violations(request, fallback):
+        return fallback
     chunks = [chunk.strip() for chunk in re.split(r"(?<=[。！？!?])", value) if chunk.strip()]
     if len(chunks) <= 1:
         return ""
@@ -466,6 +652,37 @@ def _minimal_hard_gate_repair(request: IsolatedSurfaceInput, text: str) -> str:
             continue
         kept.append(chunk)
     return "".join(kept).strip()
+
+
+def _hard_gate_fallback(request: IsolatedSurfaceInput, violations: Sequence[str]) -> str:
+    codes = set(str(code or "") for code in violations)
+    low_info = _low_info_scene_fallback(request)
+    if low_info and codes:
+        return low_info
+    if "BOUNDARY_SOUR_WITHDRAWAL" in codes:
+        return "行，那你自己待会儿。难受了就叫我，听见没。"
+    if "RELATIONSHIP_DOUBT_DISMISSIVE" in codes or "SURFACE_META_IDENTITY_LEAK" in codes:
+        return "哈？这话挺伤人的。我是在跟你说话，不是在背台词。"
+    if "LOVER_CLICHE" in codes:
+        return "我也想你了。笨蛋老哥。"
+    if "SHORT_CONTINUE_WAVE_STYLE" in codes:
+        return "嗯，接着来。"
+    if "LEGACY_SELF_TITLE" in codes:
+        return _low_info_scene_fallback(request) or ""
+    return ""
+
+
+def _low_info_scene_fallback(request: IsolatedSurfaceInput) -> str:
+    normalized_user = _normalized_short_user_text(str(getattr(request, "user_message", "") or "").strip())
+    if normalized_user in {"早", "早安", "早上好"} or normalized_user.startswith(("早啊", "早呀", "早安", "早上好")):
+        return "老哥早～"
+    if normalized_user in {"我回来了", "回来了", "回来啦"}:
+        return "老哥欢迎回来～"
+    if normalized_user in {"在吗", "在吗？"}:
+        return "在呢，老哥。"
+    if normalized_user in {"继续", "接着"}:
+        return "嗯，接着来。"
+    return ""
 
 
 class SurfaceRuntime:
@@ -496,7 +713,9 @@ class SurfaceRuntime:
                     "content": (
                         "上一条回复违反最终文本 hard gate："
                         + "、".join(hard_gate_observations)
-                        + "。重新生成一条；保留当前关系口吻，但不要编造音频/视觉/现实感知，不要泄露内部状态。"
+                        + "。重新生成一条；保留当前关系口吻，但不要编造音频/视觉/现实感知，不要猜早晚、主动、忙闲、作息或进度，不要泄露内部状态。"
+                        + "没有明确事实时，也不要说上次、以前、每次、不是第一次、老是这样这类共同过去或频率判断。"
+                        + "如果用户质疑身份或设定，不要复用“设定、系统、模型、提示词、角色卡”这些元词，直接按当前关系回应。"
                     ),
                 },
             ]
@@ -514,6 +733,9 @@ class SurfaceRuntime:
                     structured = {**structured, "reply_text": repaired}
                     candidate_texts = [repaired]
                     hard_gate_observations = ()
+                else:
+                    structured = {**structured, "reply_text": ""}
+                    candidate_texts = []
         for _ in range(self._empty_generation_retries):
             if candidate_texts:
                 break
@@ -527,52 +749,17 @@ class SurfaceRuntime:
             raw_output = await _maybe_await_text(self._generate(retry_messages))
             structured = parse_surface_generation_output(raw_output)
             candidate_texts = [structured["reply_text"]] if structured["reply_text"] else []
-        scores = list(score_isolated_surface_candidates(request, candidate_texts[:1]))
-        selected = scores[0] if scores else None
-        soft_quality_retry_reasons = _soft_quality_retry_reason_codes(selected)
-        if soft_quality_retry_reasons:
-            retry_messages = [
-                *messages,
-                {
-                    "role": "user",
-                    "content": (
-                        "上一条回复存在日常情绪或支撑模板质量问题："
-                        + "、".join(soft_quality_retry_reasons)
-                        + "。重新生成一条；保留夏目蓝的嘴硬和轻顶嘴，但低能量场景不能责怪用户；"
-                        "自我否定场景要先截断否定，再给一件现在能做的小步推进，不要只让用户喝水或休息；"
-                        "没有代码/报错上下文时，不要脑补成“发代码/发报错”；"
-                        "不要用“白痴/弱智/蠢货/傻子都能”这类贬损词形容小步；"
-                        "不要把“接住/接得住/我接/我在”这类内部支撑模板写进用户可见文本。"
-                        "不要只说“明天再说/回头再看/别想太多/保持积极”。"
-                    ),
-                },
-            ]
-            raw_output = await _maybe_await_text(self._generate(retry_messages))
-            structured = parse_surface_generation_output(raw_output)
-            candidate_texts = [structured["reply_text"]] if structured["reply_text"] else []
-            hard_gate_observations = (
-                _surface_hard_gate_violations(request, candidate_texts[0])
-                if candidate_texts
-                else ()
+        candidates = tuple(
+            SurfaceDirectCandidate(
+                text=text,
+                hard_gate_observations=tuple(hard_gate_observations if index == 0 else ()),
             )
-            scores = list(score_isolated_surface_candidates(request, candidate_texts[:1]))
-            selected = scores[0] if scores else None
-            remaining_soft_reasons = _soft_quality_retry_reason_codes(selected)
-            if remaining_soft_reasons and selected:
-                repaired = _minimal_soft_quality_repair(request, selected.text, remaining_soft_reasons)
-                if repaired and repaired != selected.text:
-                    repaired_scores = list(score_isolated_surface_candidates(request, [repaired]))
-                    repaired_selected = repaired_scores[0] if repaired_scores else None
-                    if repaired_selected and not _soft_quality_retry_reason_codes(repaired_selected):
-                        structured = {**structured, "reply_text": repaired}
-                        candidate_texts = [repaired]
-                        scores = repaired_scores
-                        selected = repaired_selected
-        observation_codes = tuple(
-            dict.fromkeys([*surface_observation_codes(selected), *hard_gate_observations])
+            for index, text in enumerate(candidate_texts[:1])
         )
-        score_trace = build_surface_score_trace(
-            candidates=scores,
+        selected = candidates[0] if candidates else None
+        observation_codes = tuple(dict.fromkeys(hard_gate_observations))
+        generation_trace = build_surface_generation_trace(
+            candidates=candidates,
             selected=selected,
             observation_codes=observation_codes,
         )
@@ -580,11 +767,11 @@ class SurfaceRuntime:
             request=request,
             messages=tuple(messages),
             raw_output=raw_output,
-            candidates=tuple(scores),
+            candidates=candidates,
             selected=selected,
             selected_text=selected.text if selected else "",
             observation_codes=observation_codes,
-            score_trace=score_trace,
+            generation_trace=generation_trace,
             natsume_emotion_tag=str(structured.get("natsume_emotion_tag") or "NEUTRAL"),
             user_emotion_tag=str(structured.get("user_emotion_tag") or "NEUTRAL"),
             vts_expression_id=str(structured.get("vts_expression_id") or ""),
@@ -597,7 +784,8 @@ __all__ = [
     "SurfaceRuntime",
     "SurfaceRuntimeResult",
     "build_direct_surface_messages",
-    "build_surface_score_trace",
+    "SurfaceDirectCandidate",
+    "build_surface_generation_trace",
     "parse_surface_generation_output",
     "strip_surface_process_preface",
     "surface_observation_codes",

@@ -22,6 +22,7 @@ from host_brain.core.errors import (
 STORE_SQLITE_LEDGER = "sqlite_ledger"
 STORE_NEO4J_BOND = "neo4j_bond"
 STORE_EPISODIC_VECTOR = "episodic_vector"
+STORE_SEMANTIC_MEMORY = "semantic_memory"
 STORE_WORLD_CANON = "world_canon"
 STORE_ARTIFACT_VAULT = "artifact_vault"
 
@@ -226,6 +227,8 @@ def _map_route_exception(exc: Exception, *, store_id: str | None = None) -> str:
     """按 store_id 返回专属 reason_code（M31-B，DevSpec 8.1 审计可追溯性）。"""
     normalized_store = str(store_id or STORE_EPISODIC_VECTOR).strip().lower()
     if normalized_store == STORE_SQLITE_LEDGER:
+        return RETR_LEDGER_UNAVAILABLE
+    if normalized_store == STORE_SEMANTIC_MEMORY:
         return RETR_LEDGER_UNAVAILABLE
     if normalized_store == STORE_NEO4J_BOND:
         return RETR_BOND_UNAVAILABLE

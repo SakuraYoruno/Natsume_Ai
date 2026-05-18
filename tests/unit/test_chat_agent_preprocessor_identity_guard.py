@@ -1076,16 +1076,6 @@ def test_deterministic_reply_fallback_prefers_cached_surface_text(monkeypatch) -
         force_buffering=True,
     )
 
-    class _MemoryStoreStub:
-        def sample(self, *, key: str, exclude=None) -> str:  # noqa: ANN001
-            _ = key, exclude
-            return "哥哥，好嘛，那我就当自己刚才多想了一点。"
-
-    monkeypatch.setattr(
-        "host_brain.app.dependencies.get_reply_surface_memory_store",
-        lambda: _MemoryStoreStub(),
-    )
-
     fallback = build_deterministic_reply_fallback(plan=plan, render_target_lang="zh")
 
     assert fallback != "哥哥，好嘛，那我就当自己刚才多想了一点。"

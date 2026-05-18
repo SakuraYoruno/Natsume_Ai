@@ -16,6 +16,7 @@ from host_brain.persona.surface_memory_recall import (
     build_surface_input_with_memory_recall,
     build_surface_memory_recall_packet,
     build_surface_memory_recall_query,
+    build_surface_turn_memory_text,
     memory_recall_packet_from_mapping,
     plan_surface_memory_recall,
     recall_surface_memory_for_context,
@@ -25,6 +26,18 @@ from host_brain.persona.surface_memory_recall import (
 
 
 SOUL = "你是新海天。说话短一点，有轻微二次元 galgame 私聊感。"
+
+
+def test_surface_turn_memory_text_uses_identity_neutral_attribution() -> None:
+    text = build_surface_turn_memory_text(
+        user_message="上次那个问题我又卡住了。",
+        assistant_reply="上次卡在输入输出，这轮先看那一块。",
+    )
+
+    assert "回复" in text
+    assert "夏目蓝" not in text
+    assert "新海天" not in text
+    assert "新海天回应" not in text
 
 
 def _recall_result() -> SimpleNamespace:
@@ -37,6 +50,7 @@ def _recall_result() -> SimpleNamespace:
             "reason_code": None,
             "routes": [
                 {"route_id": "episodic", "store_id": "episodic_vector"},
+                {"route_id": "semantic", "store_id": "semantic_memory"},
                 {"route_id": "bond", "store_id": "neo4j_bond"},
                 {"route_id": "world", "store_id": "world_canon"},
             ],
@@ -52,6 +66,14 @@ def _recall_result() -> SimpleNamespace:
                     "score": 0.93,
                     "confidence": 0.93,
                     "metadata": {"store_id": "episodic_vector"},
+                },
+                {
+                    "doc_id": "sem-1",
+                    "source_ref": "ledger://semantic_memory/sem-1",
+                    "evidence_ref": "semantic://sem-1",
+                    "snippet": "用户低能量时偏好少追问，先给一个小步骤。",
+                    "score": 0.88,
+                    "metadata": {"store_id": "semantic_memory"},
                 },
                 {
                     "doc_id": "bond-1",
@@ -88,22 +110,53 @@ def test_surface_memory_recall_packet_compresses_multi_route_candidates() -> Non
     assert isinstance(packet, SurfaceMemoryRecallPacket)
     assert packet.facts == (
         "记忆线索：上次说好周末去看展",
-        "记忆线索：第二条同路由记忆应当在多路优先后再补位。",
+        "长期记忆：用户低能量时偏好少追问，先给一个小步骤。",
     )
-    assert packet.route_ids == ("episodic", "bond")
+    assert packet.route_ids == ("episodic", "semantic", "bond")
     assert packet.evidence_refs == (
         "evd://episodic/mem-1",
+        "semantic://sem-1",
         "evd://bond/bond-1",
-        "evd://episodic/mem-2",
     )
     assert packet.relationship_clues == ("关系线索：关系阶段：熟人私聊，别升级亲密。",)
     assert packet.confidence == 0.93
     assert "不要根据记忆升级亲密关系" in packet.must_not_do
     assert "用户事实记忆只补当前承接，不扩写成未确认细节" in packet.style_anchor
+    assert "长期记忆只补稳定偏好和关系事实，不替代当前用户句子" in packet.style_anchor
     assert "按关系线索控制距离，不因为记忆升格亲密" in packet.style_anchor
     assert all("世界事实" not in fact for fact in packet.facts)
     assert "chat://session" not in "\n".join(packet.facts)
     assert "{" not in "\n".join(packet.facts)
+
+
+def test_surface_memory_recall_normalizes_legacy_assistant_attribution() -> None:
+    result = SimpleNamespace(
+        output={
+            "query": "还记得上次卡在哪里吗",
+            "status": "OK",
+            "stage": "S_RET_RECALL",
+            "degraded": False,
+            "routes": [{"route_id": "episodic", "store_id": "episodic_vector"}],
+            "route_rows": [],
+            "route_errors": [],
+            "candidate_count": 1,
+            "candidates": [
+                {
+                    "doc_id": "legacy-name",
+                    "snippet": "当前回合摘要：用户提到「上次那个问题我又卡住了。」；新海天回应「先看输入输出」。",
+                    "score": 0.93,
+                    "metadata": {"store_id": "episodic_vector"},
+                }
+            ],
+        }
+    )
+
+    packet = build_surface_memory_recall_packet(result)
+
+    rendered = "\n".join(packet.facts)
+    assert "回复" in rendered
+    assert "夏目蓝回应" not in rendered
+    assert "新海天回应" not in rendered
 
 
 def test_memory_recall_packet_is_safe_boundary_shape_without_rows() -> None:
@@ -163,7 +216,19 @@ def test_recall_surface_memory_packet_calls_recall_and_surface_gets_only_facts()
     class _RecallService:
         def recall(self, **kwargs):  # noqa: ANN003
             captured.update(kwargs)
-            return _recall_result()
+            result = _recall_result()
+            allowed = set(kwargs.get("target_store_ids") or [])
+            result.output["candidates"] = [
+                item
+                for item in result.output["candidates"]
+                if item.get("metadata", {}).get("store_id") in allowed
+            ]
+            result.output["routes"] = [
+                item
+                for item in result.output["routes"]
+                if item.get("store_id") in allowed
+            ]
+            return result
 
     packet = recall_surface_memory_packet(
         recall_service=_RecallService(),
@@ -235,7 +300,7 @@ def test_plan_surface_memory_recall_routes_memory_followup_to_core_memory_stores
 
     assert plan.should_recall
     assert plan.reason == "explicit_memory_recall"
-    assert plan.target_store_ids == ("episodic_vector", "sqlite_ledger", "neo4j_bond")
+    assert plan.target_store_ids == ("semantic_memory", "episodic_vector", "sqlite_ledger", "neo4j_bond")
     assert plan.max_facts == 4
     assert plan.time_lookback_days == 7
     assert "必要事实：用户说的上次是压缩后的记忆追问。" in query
@@ -318,9 +383,9 @@ def test_plan_surface_memory_recall_routes_task_modes_for_current_main_chain() -
         )
     )
 
-    assert tech.target_store_ids == ("episodic_vector", "sqlite_ledger")
-    assert identity.target_store_ids == ("neo4j_bond", "episodic_vector")
-    assert tired.target_store_ids == ("neo4j_bond", "episodic_vector")
+    assert tech.target_store_ids == ("semantic_memory", "episodic_vector", "sqlite_ledger")
+    assert identity.target_store_ids == ("neo4j_bond", "semantic_memory", "episodic_vector")
+    assert tired.target_store_ids == ("neo4j_bond", "semantic_memory", "episodic_vector")
 
 
 def test_recall_surface_memory_for_context_uses_plan_and_skips_without_calling_recall() -> None:
@@ -362,9 +427,9 @@ def test_recall_surface_memory_for_context_passes_current_chain_plan_to_recall()
         query_embedding=[0.2] * 16,
     )
 
-    assert captured["target_store_ids"] == ["episodic_vector", "sqlite_ledger"]
+    assert captured["target_store_ids"] == ["semantic_memory", "episodic_vector", "sqlite_ledger"]
     assert "技术场景优先 usefulness" in str(captured["query"])
-    assert len(packet.facts) <= 2
+    assert len(packet.facts) <= 3
     assert dict(packet.trace or {})["plan"]["reason"] == "technical_user_memory_context"
 
 

@@ -14,6 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from host_brain.audit.sqlite_ledger import SQLiteLedger
+from host_brain.app.obs_host_proxy import fetch_host_json
 
 logger = logging.getLogger("Natsume.obs")
 
@@ -282,10 +283,25 @@ def _clone_runtime_snapshot_response(
 
 
 def _build_runtime_snapshot_response(current_topic: str) -> DigitalLifeRuntimeSnapshotResponse:
-    from host_brain.app.http_hooks_runtime_helpers import build_digital_life_runtime_snapshot  # noqa: PLC0415
+    from host_brain.app.http_hooks_runtime_helpers import (  # noqa: PLC0415
+        _build_background_runtime_snapshot,
+        build_digital_life_runtime_snapshot,
+    )
 
     service = _get_mode_transition_service()
     payload = build_digital_life_runtime_snapshot(current_topic=current_topic)
+    host_scheduler_snapshot = fetch_host_json("/scheduler/health", timeout_s=1.5)
+    if host_scheduler_snapshot is not None:
+        try:
+            payload["background_runtime"] = _build_background_runtime_snapshot(
+                now_ms=int(payload.get("timestamp") or _now_ms()),
+                persona_user_id=str(payload.get("persona_user_id") or "user_1"),
+                inner_world_state=dict(payload.get("inner_world_state") or {}),
+                scheduler_snapshot_override=host_scheduler_snapshot,
+            )
+        except Exception as exc:
+            payload.setdefault("background_runtime", {})
+            payload["background_runtime"]["host_scheduler_overlay_error"] = str(exc)[:160]
     try:
         payload["sys_mode_status"] = dict(service.get_current_status() or {})
     except Exception as exc:
@@ -509,4 +525,3 @@ def post_sys_mode_event(
         "result": result,
         "timestamp": _now_ms(),
     }
-

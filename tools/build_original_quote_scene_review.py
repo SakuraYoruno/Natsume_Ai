@@ -18,7 +18,7 @@ from host_brain.persona.surface_original_quote_bank import to_prompt_style_text 
 from host_brain.persona.surface_scene_quality_pack import surface_scene_quality_pack_payload  # noqa: E402
 
 
-DEFAULT_QUOTE_BANK = ROOT / "data" / "style_bank" / "surface_original_quote_bank.jsonl"
+DEFAULT_QUOTE_BANK = ROOT / "artifacts" / "style_source" / "surface_original_quote_legacy_sample.jsonl"
 DEFAULT_CANDIDATE_SOURCES = (
     ROOT / "artifacts" / "style_source" / "original_cn_sora_candidates.jsonl",
 )

@@ -141,8 +141,10 @@ class DefaultModeAgent:
         now_ts_ms: int | None = None,
         inner_state: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
+        from host_brain.persona.inner_monologue import build_inner_monologue_digest  # noqa: PLC0415
         from host_brain.persona.inner_activity_agent import generate_inner_activity_note  # noqa: PLC0415
         from host_brain.persona.motive_runtime import build_offline_state_from_inner_state  # noqa: PLC0415
+        from host_brain.persona.self_model import build_self_directive_packet, observe_persistent_self_event  # noqa: PLC0415
 
         user_id = str(person_id or "user_1").strip() or "user_1"
         ts_ms = int(now_ts_ms or now_ms())
@@ -207,6 +209,33 @@ class DefaultModeAgent:
         )
         stream = list(resolved_inner_state.get("inner_stream") or [])
         stream_len = len(stream)
+        inner_monologue = build_inner_monologue_digest(
+            inner_state=resolved_inner_state,
+            last_note=note,
+            last_focus=focus,
+            offline_state={
+                "absence_band": absence_band,
+                "offline_hours": offline_hours,
+                "loneliness_level": loneliness,
+                "anticipation_level": anticipation_level,
+                "continuity_score": continuity_score,
+            },
+        ).as_surface_state()
+        self_model_state = observe_persistent_self_event(
+            user_id=user_id,
+            event_kind=str(source or "default_mode_tick"),
+            focus=str(inner_monologue.get("dominant_focus") or focus or "self"),
+            emotion_tag=str(inner_monologue.get("emotion_tag") or "calm"),
+            salience=float(inner_monologue.get("salience") or 0.0),
+            surface_hint="default_mode_inner_monologue",
+            evidence={
+                "source": source,
+                "reason_code": reason,
+                "should_distill_to_memory": inner_monologue.get("should_distill_to_memory"),
+            },
+            now_ms=ts_ms,
+        )
+        self_directive = build_self_directive_packet(self_model_state)
         result = {
             "user_id": user_id,
             "note": str(note).strip(),
@@ -220,6 +249,8 @@ class DefaultModeAgent:
                 "continuity_score": round(continuity_score, 4),
             },
             "proactive_voice_candidate": proactive_candidate,
+            "inner_monologue": inner_monologue,
+            "self_directive": self_directive,
             "inner_stream_size": stream_len,
             "reason_code": str(reason or ""),
             "llm_meta": dict(llm_meta or {}),
@@ -237,6 +268,20 @@ class DefaultModeAgent:
         prev_state["last_focus"] = result["focus"]
         prev_state["last_offline_state"] = dict(result["offline_state"])
         prev_state["proactive_voice_candidate"] = bool(result["proactive_voice_candidate"])
+        prev_state["inner_monologue"] = dict(inner_monologue)
+        prev_state["self_directive"] = dict(self_directive)
+        prev_state["self_identity"] = str(self_directive.get("self_identity") or "")
+        prev_state["self_values"] = list(self_directive.get("self_values") or [])
+        prev_state["self_boundaries"] = list(self_directive.get("self_boundaries") or [])
+        prev_state["active_intentions"] = list(self_directive.get("active_intentions") or [])
+        prev_state["unresolved_tensions"] = list(self_directive.get("unresolved_tensions") or [])
+        prev_state["agency_score"] = float(self_directive.get("agency_score") or 0.0)
+        prev_state["self_continuity_score"] = float(self_directive.get("self_continuity_score") or 0.0)
+        prev_state["care_drive"] = float(inner_monologue.get("care_drive") or 0.0)
+        prev_state["continuity_drive"] = float(inner_monologue.get("continuity_drive") or 0.0)
+        prev_state["repair_drive"] = float(inner_monologue.get("repair_drive") or 0.0)
+        prev_state["style_anchor"] = list(inner_monologue.get("style_anchor") or [])
+        prev_state["must_not_do"] = list(inner_monologue.get("must_not_do") or [])
         prev_state["inner_stream_size"] = stream_len
         prev_state["last_tick_source"] = result["source"]
         prev_state["last_tick_ts_ms"] = ts_ms
@@ -342,6 +387,9 @@ class DefaultModeAgent:
         return result
 
     def export_runtime_state(self) -> dict[str, Any]:
+        from host_brain.persona.inner_monologue import build_inner_monologue_digest  # noqa: PLC0415
+        from host_brain.persona.self_model import build_self_directive_packet, load_persistent_self_state  # noqa: PLC0415
+
         snap = self.state_registry.get_state("default_mode_agent") or {}
         state = dict(snap.get("state") or {})
         if not state:
@@ -350,6 +398,23 @@ class DefaultModeAgent:
             state = dict(snap.get("state") or {})
         last_tick = dict(state.get("last_tick") or {})
         offline_state = dict(last_tick.get("offline_state") or state.get("last_offline_state") or {})
+        inner_monologue = dict(state.get("inner_monologue") or {})
+        if not inner_monologue:
+            try:
+                from host_brain.persona.inner_world import get_inner_world  # noqa: PLC0415
+
+                raw_inner_state = dict(get_inner_world().get_state(user_id="user_1") or {})
+            except Exception:
+                raw_inner_state = {}
+            inner_monologue = build_inner_monologue_digest(
+                inner_state=raw_inner_state,
+                last_note=str(state.get("last_note") or ""),
+                last_focus=str(state.get("last_focus") or "self"),
+                offline_state=offline_state,
+            ).as_surface_state()
+        self_directive = dict(state.get("self_directive") or {})
+        if not self_directive:
+            self_directive = build_self_directive_packet(load_persistent_self_state(user_id="user_1"))
         return {
             "last_note": str(state.get("last_note") or ""),
             "last_focus": str(state.get("last_focus") or "self"),
@@ -357,6 +422,30 @@ class DefaultModeAgent:
             "continuity_score": float(offline_state.get("continuity_score") or 0.5),
             "loneliness_level": float(offline_state.get("loneliness_level") or 0.0),
             "anticipation_level": float(offline_state.get("anticipation_level") or 0.0),
+            "inner_monologue": inner_monologue,
+            "self_directive": self_directive,
+            "self_identity": str(self_directive.get("self_identity") or ""),
+            "self_values": list(self_directive.get("self_values") or []),
+            "self_boundaries": list(self_directive.get("self_boundaries") or []),
+            "active_intentions": list(self_directive.get("active_intentions") or []),
+            "unresolved_tensions": list(self_directive.get("unresolved_tensions") or []),
+            "agency_score": float(self_directive.get("agency_score") or 0.0),
+            "self_continuity_score": float(self_directive.get("self_continuity_score") or 0.0),
+            "thought_stream_active": bool(inner_monologue.get("thought_stream_active")),
+            "private_thought_count": int(inner_monologue.get("private_thought_count") or 0),
+            "dominant_focus": str(inner_monologue.get("dominant_focus") or "self"),
+            "emotion_tag": str(inner_monologue.get("emotion_tag") or "calm"),
+            "care_drive": float(inner_monologue.get("care_drive") or 0.0),
+            "continuity_drive": float(inner_monologue.get("continuity_drive") or 0.0),
+            "repair_drive": float(inner_monologue.get("repair_drive") or 0.0),
+            "style_anchor": [
+                *list(self_directive.get("style_anchor") or []),
+                *list(inner_monologue.get("style_anchor") or []),
+            ][:8],
+            "must_not_do": [
+                *list(self_directive.get("must_not_do") or []),
+                *list(inner_monologue.get("must_not_do") or []),
+            ][:8],
             "inner_stream_size": int(state.get("inner_stream_size") or 0),
             "tick_count": int(state.get("tick_count") or 0),
             "last_tick_ts_ms": int(state.get("last_tick_ts_ms") or now_ms()),

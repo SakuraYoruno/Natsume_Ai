@@ -37,6 +37,9 @@ _TRACE_RUNTIME_PAYLOAD_KEYS = (
     "drive_state",
     "reply_plan",
     "surface_affect_packet",
+    "surface_influence_packet",
+    "surface_organ_context_meta",
+    "surface_organ_influence",
     "surface_memory_recall_packet",
 )
 _TEXT_RESPONSE_FORMS = {"", "text", "plain_text", "chat_text", "zh_text"}
@@ -128,6 +131,11 @@ def build_surface_main_chain_input_from_chat_input(
             runtime_payload=runtime_payload,
         ),
         affect_packet=affect_packet,
+        influence_packet=_influence_packet(
+            agent_input,
+            trace_stage_meta=trace_stage_meta,
+            runtime_payload=runtime_payload,
+        ),
         necessary_facts=_necessary_facts(agent_input, task_control=task_control),
         must_not_do=_surface_boundary_must_not_do(task_control=task_control),
         style_anchor=("app 层只传压缩控制包，不传原始历史。",),
@@ -177,9 +185,17 @@ async def run_surface_main_chain_for_chat_input(
             timeout_ms=int(llm_runtime.get("timeout_ms") or 30_000),
             messages=messages,
             gen_params=_surface_gen_params(llm_runtime),
+            response_format={"type": "json_object"},
             base_url_override=str(llm_runtime.get("base_url_override") or "").strip() or None,
         )
-        return str(getattr(result, "content", "") or "").strip()
+        if isinstance(trace_stage_meta, dict):
+            trace_stage_meta["surface_llm_pool"] = _llm_pool_result_trace(result)
+        if bool(getattr(result, "pool_exhausted", False)):
+            raise RuntimeError("SURFACE_LLM_POOL_EXHAUSTED")
+        content = str(getattr(result, "content", "") or "").strip()
+        if not content:
+            raise RuntimeError("SURFACE_LLM_EMPTY_RESPONSE")
+        return content
 
     return await SurfaceMainChain(_generate).run(surface_input)
 
@@ -310,7 +326,7 @@ def _public_result_trace(result: SurfaceMainChainResult) -> dict[str, Any]:
         "emotion_confidence": float(result.runtime.emotion_confidence or 0.0),
         "observation_codes": list(result.observation_codes),
         "packet_trace": dict(result.compiled.trace),
-        "score_trace": dict(result.runtime.score_trace),
+        "generation_trace": dict(result.runtime.generation_trace),
         "latency_ms": int(result.runtime.latency_ms or 0),
     }
 
@@ -325,6 +341,29 @@ def _surface_timings_ms(*, total_latency_ms: int, llm_latency_ms: int) -> dict[s
         "precommit_log_ms": 0,
         "surface_main_chain_ms": max(0, int(total_latency_ms or 0)),
         "llm_latency_ms": max(0, int(llm_latency_ms or 0)),
+    }
+
+
+def _llm_pool_result_trace(result: Any) -> dict[str, Any]:
+    attempts = []
+    for item in list(getattr(result, "attempts", None) or []):
+        attempts.append(
+            {
+                "model": str(getattr(item, "model", "") or ""),
+                "provider": str(getattr(item, "provider", "") or ""),
+                "status": str(getattr(item, "status", "") or ""),
+                "reason_code": str(getattr(item, "reason_code", "") or ""),
+                "latency_ms": _coerce_int(getattr(item, "latency_ms", 0), default=0),
+                "detail": str(getattr(item, "detail", "") or ""),
+            }
+        )
+    return {
+        "pool_exhausted": bool(getattr(result, "pool_exhausted", False)),
+        "final_provider": str(getattr(result, "final_provider", "") or ""),
+        "final_model": str(getattr(result, "final_model", "") or ""),
+        "cached": bool(getattr(result, "cached", False)),
+        "total_latency_ms": _coerce_int(getattr(result, "total_latency_ms", 0), default=0),
+        "attempts": attempts,
     }
 
 
@@ -460,7 +499,7 @@ def _reply_plan(agent_input: Any, trace_stage_meta: Mapping[str, Any] | None = N
         getattr(agent_input, "reply_plan", None),
         getattr(agent_input, "render_policy", None),
     ):
-        if isinstance(raw, Mapping):
+        if isinstance(raw, Mapping) and raw:
             return dict(raw)
     return {}
 
@@ -473,6 +512,7 @@ def _build_surface_runtime_payload(
 ) -> dict[str, Any]:
     try:
         from host_brain.app.surface_context_packet import build_surface_context_packet  # noqa: PLC0415
+        direct_reply_plan = _reply_plan(agent_input, trace_stage_meta)
 
         runtime_payload = build_surface_context_packet(
             user_message=str(getattr(agent_input, "user_message", "") or ""),
@@ -487,6 +527,8 @@ def _build_surface_runtime_payload(
             thread_id=getattr(agent_input, "thread_id", None),
             bond_summary=_safe_mapping(getattr(agent_input, "bond_summary", None)),
             intent_draft=_safe_mapping(getattr(agent_input, "intent_draft", None)),
+            organ_context=_surface_organ_context(agent_input, trace_stage_meta=trace_stage_meta),
+            surface_task_control=direct_reply_plan,
             eval_history_turns=list(getattr(agent_input, "eval_history_turns", None) or []),
         )
         if merge_trace:
@@ -496,6 +538,72 @@ def _build_surface_runtime_payload(
         if isinstance(trace_stage_meta, dict):
             trace_stage_meta["surface_context_prepare_failed"] = type(exc).__name__
     return {}
+
+
+def _surface_organ_context(agent_input: Any, *, trace_stage_meta: Mapping[str, Any] | None = None) -> dict[str, Any]:
+    trace = _safe_mapping(trace_stage_meta)
+    agent_trace = _safe_mapping(getattr(agent_input, "trace_stage_meta", None))
+    for container in (trace, agent_trace):
+        for key in ("surface_organ_context", "organ_context", "tribe_context"):
+            raw = container.get(key)
+            if isinstance(raw, Mapping):
+                return dict(raw)
+
+    organ_route_meta = _safe_mapping(trace.get("organ_route_meta") or agent_trace.get("organ_route_meta"))
+    motive_state = _safe_mapping(trace.get("motive_state") or agent_trace.get("motive_state"))
+    if organ_route_meta and not motive_state:
+        motive_state = {
+            "withdraw_drive": organ_route_meta.get("motive_withdraw"),
+            "care_drive": organ_route_meta.get("motive_care"),
+            "continuity_drive": organ_route_meta.get("motive_continuity"),
+        }
+
+    vital_signs = _safe_mapping(
+        trace.get("tribe_vital_signs")
+        or agent_trace.get("tribe_vital_signs")
+        or trace.get("vital_signs")
+        or agent_trace.get("vital_signs")
+    )
+    immune_state = _safe_mapping(trace.get("immune_state") or agent_trace.get("immune_state"))
+    proprioception_state = _safe_mapping(trace.get("proprioception_state") or agent_trace.get("proprioception_state"))
+    if organ_route_meta:
+        if not immune_state:
+            immune_state = {
+                "risk_level": organ_route_meta.get("immune_risk_level"),
+                "last_decision": organ_route_meta.get("immune_last_decision"),
+            }
+        if not proprioception_state:
+            proprioception_state = {
+                "cognitive_load_index": organ_route_meta.get("cognitive_load_index"),
+                "interrupt_frequency": organ_route_meta.get("interrupt_frequency"),
+            }
+
+    context = {
+        "vital_signs": vital_signs,
+        "voice_emotion": _safe_mapping(trace.get("voice_emotion") or agent_trace.get("voice_emotion")),
+        "motive_state": motive_state,
+        "immune_state": immune_state,
+        "proprioception_state": proprioception_state,
+        "social_brain_state": _safe_mapping(trace.get("social_brain_state") or agent_trace.get("social_brain_state")),
+        "endocrine_gate": _safe_mapping(trace.get("endocrine_gate") or agent_trace.get("endocrine_gate")),
+        "hedonic_state": _safe_mapping(trace.get("hedonic_state") or agent_trace.get("hedonic_state")),
+        "somatic_state": _safe_mapping(trace.get("somatic_state") or agent_trace.get("somatic_state")),
+        "interoception_state": _safe_mapping(trace.get("interoception_state") or agent_trace.get("interoception_state")),
+        "circadian_state": _safe_mapping(trace.get("circadian_state") or agent_trace.get("circadian_state")),
+        "default_mode_state": _safe_mapping(trace.get("default_mode_state") or agent_trace.get("default_mode_state")),
+        "mirror_neuron_state": _safe_mapping(trace.get("mirror_neuron_state") or agent_trace.get("mirror_neuron_state")),
+        "language_dual_system": _safe_mapping(trace.get("language_dual_system") or agent_trace.get("language_dual_system")),
+        "motor_cortex_state": _safe_mapping(trace.get("motor_cortex_state") or agent_trace.get("motor_cortex_state")),
+        "cerebellum_state": _safe_mapping(trace.get("cerebellum_state") or agent_trace.get("cerebellum_state")),
+        "vestibular_state": _safe_mapping(trace.get("vestibular_state") or agent_trace.get("vestibular_state")),
+        "peripheral_state": _safe_mapping(trace.get("peripheral_state") or agent_trace.get("peripheral_state")),
+        "initiative_decision": _safe_mapping(trace.get("initiative_decision") or agent_trace.get("initiative_decision")),
+    }
+    return {
+        key: value
+        for key, value in context.items()
+        if isinstance(value, Mapping) and value
+    }
 
 
 def _prepared_surface_runtime_payload(trace_stage_meta: Mapping[str, Any] | None = None) -> dict[str, Any]:
@@ -633,6 +741,23 @@ def _memory_packet(
             raw = container.get(key)
             if isinstance(raw, (MemoryRecallPacket, Mapping)):
                 return memory_recall_packet_from_mapping(raw)
+    return None
+
+
+def _influence_packet(
+    agent_input: Any,
+    *,
+    trace_stage_meta: Mapping[str, Any] | None = None,
+    runtime_payload: Mapping[str, Any] | None = None,
+) -> Mapping[str, Any] | None:
+    for container in (
+        _safe_mapping(trace_stage_meta),
+        _safe_mapping(runtime_payload),
+        _safe_mapping(getattr(agent_input, "trace_stage_meta", None)),
+    ):
+        raw = container.get("surface_influence_packet") or container.get("influence_packet")
+        if isinstance(raw, Mapping):
+            return dict(raw)
     return None
 
 

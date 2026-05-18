@@ -19,6 +19,30 @@ def _resolve_background_tick_guard(*, now_ms: int | None = None) -> dict[str, An
         }
 
 
+def _env_bool(name: str, *, default: bool) -> bool:
+    import os  # noqa: PLC0415
+
+    raw = os.environ.get(name)
+    if raw is None:
+        return bool(default)
+    normalized = str(raw).strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    return bool(default)
+
+
+def _should_run_inline_default_mode_tick(*, emit_inner_stream: bool) -> bool:
+    if not emit_inner_stream:
+        return False
+    if not _env_bool("HOST_CONTINUOUS_ORGAN_TICKS_ENABLED", default=True):
+        return False
+    if _env_bool("HOST_BACKGROUND_TASKS_ENABLED", default=False):
+        return False
+    return _env_bool("HOST_CORE_INLINE_DEFAULT_MODE_TICK_ENABLED", default=True)
+
+
 def _resolve_user_id(args: dict[str, Any], context: dict[str, Any] | None) -> str:
     raw_user_id = str((args or {}).get("user_id") or (context or {}).get("user_id") or "").strip()
     if raw_user_id:
@@ -96,6 +120,39 @@ def _execute_inner_world_tick(
         pass
     last_spontaneous_ts_ms = int(result.get("last_spontaneous_ts_ms") or 0)
     now_ms = int(time.time() * 1000)
+    if _should_run_inline_default_mode_tick(emit_inner_stream=emit_inner_stream):
+        try:
+            from host_brain.tribe.default_mode_agent import get_default_mode_agent  # noqa: PLC0415
+
+            inner_state = dict(limbic.resolve_inner_world_state(person_id=user_id) or {})
+            topic_phrase = ""
+            for topic in list(inner_state.get("anticipation_topics") or []):
+                topic_phrase = str(topic or "").strip()
+                if topic_phrase:
+                    break
+            default_tick = get_default_mode_agent().tick_idle_cycle(
+                person_id=user_id,
+                topic_phrase=topic_phrase,
+                source=skill_name,
+                now_ts_ms=now_ms,
+                inner_state=inner_state,
+            )
+            result["default_mode_tick"] = {
+                "status": str(dict(default_tick or {}).get("status") or "OK"),
+                "focus": str(dict(default_tick or {}).get("focus") or ""),
+                "self_continuity_score": dict(dict(default_tick or {}).get("self_directive") or {}).get(
+                    "self_continuity_score"
+                ),
+                "background_side_effects_suppressed": bool(
+                    dict(default_tick or {}).get("background_side_effects_suppressed")
+                ),
+            }
+        except Exception as exc:
+            result["default_mode_tick"] = {
+                "status": "DEGRADED",
+                "reason_code": "DEFAULT_MODE_INLINE_TICK_FAILED",
+                "detail": str(exc)[:120],
+            }
     if last_spontaneous_ts_ms > 0 and (now_ms - last_spontaneous_ts_ms) <= 120_000:
         try:
             limbic.handle_signal(

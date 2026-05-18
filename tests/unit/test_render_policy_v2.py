@@ -1029,4 +1029,4 @@ def test_reply_plan_image_social_followup_softens_familiar_relationship_summary(
         render_target_lang="zh",
     )
 
-    assert plan.relationship_summary == "义妹关系已成立，只是刚开始相处；不用刻意拉开，轻轻接住眼前情绪。"
+    assert plan.relationship_summary == "关系是熟起来的义兄妹：不用刻意拉开，轻轻回应眼前情绪。"

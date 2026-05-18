@@ -118,6 +118,12 @@ def test_build_surface_context_packet_extracts_compressed_context_only(monkeypat
     assert "source_refs" not in packet["surface_memory_recall_packet"]
     assert packet["surface_affect_packet"]["emotional_tone"] == "steady_helpful"
     assert packet["surface_affect_packet"]["relationship_distance"] == "familiar"
+    assert packet["surface_influence_packet"]["task"]["task_mode"] == "technical_help"
+    assert packet["surface_influence_packet"]["affect"]["emotional_tone"] == "steady_helpful"
+    assert packet["surface_influence_packet"]["relationship"]["relationship_distance"] == "familiar"
+    rendered = str(packet)
+    assert "raw old turn" not in rendered
+    assert "raw older summary" not in rendered
 
 
 def test_build_surface_context_packet_reassembles_compact_lane(monkeypatch) -> None:
@@ -181,3 +187,95 @@ def test_surface_context_packet_keeps_chinese_lover_stage_close(monkeypatch) -> 
     )
 
     assert packet["surface_affect_packet"]["relationship_distance"] == "close"
+    assert packet["surface_influence_packet"]["relationship"]["relationship_distance"] == "close"
+
+
+def test_build_surface_context_packet_collects_live_tribe_context(monkeypatch) -> None:
+    calls: list[dict] = []
+
+    class _FakeCortex:
+        def collect_tribe_context(self, **kwargs):  # noqa: ANN003
+            calls.append(dict(kwargs))
+            return {
+                "vital_signs": {
+                    "stress_index": 0.74,
+                    "cognitive_load_index": 0.82,
+                    "immune_risk_level": "high",
+                    "loneliness_level": 0.62,
+                },
+                "emotion_context": {"emotion_tag": "ANGRY", "emotion_intensity": 0.6},
+                "bond_context": {
+                    "stage": "CONFIDANT",
+                    "bond_vector": {"intimacy": 0.86, "trust": 0.78},
+                },
+                "raw_organ_outputs": {"limbic": {"messages": ["RAW SHOULD NOT PASS"]}},
+            }
+
+    monkeypatch.setattr("host_brain.app.surface_context_packet.detect_relational_chat_topic", lambda _message: "")
+    monkeypatch.setattr("host_brain.app.surface_context_packet.assemble_prompt_context_plane", lambda **_kwargs: _plane())
+    monkeypatch.setattr("host_brain.tribe.cortex_agent.get_cortex_agent", lambda: _FakeCortex())
+
+    packet = build_surface_context_packet(
+        user_message="我有点烦",
+        request_id="req-live-organ",
+        session_id="sess-live-organ",
+        person_id="user-live",
+    )
+    rendered = str(packet)
+
+    assert calls
+    assert calls[0]["session_id"] == "sess-live-organ"
+    assert calls[0]["user_id"] == "user-live"
+    assert calls[0]["request_body"]["user_message"] == "我有点烦"
+    assert packet["surface_organ_context_meta"]["source"] == "cortex_collect_tribe_context"
+    assert packet["surface_organ_context_meta"]["status"] == "OK"
+    assert packet["surface_organ_context_meta"]["compressed_route_attached"] is True
+    assert packet["surface_influence_packet"]["organ_trace"]["risk_level"] == "high"
+    mapped_organs = packet["surface_influence_packet"]["organ_trace"]["mapped_organs"]
+    assert "limbic" in mapped_organs
+    assert "cortex" in mapped_organs
+    assert "thalamus" in mapped_organs
+    assert "RAW SHOULD NOT PASS" not in rendered
+
+
+def test_build_surface_context_packet_degrades_when_live_tribe_context_fails(monkeypatch) -> None:
+    class _FailingCortex:
+        def collect_tribe_context(self, **_kwargs):  # noqa: ANN003
+            raise RuntimeError("no tribe today")
+
+    monkeypatch.setattr("host_brain.app.surface_context_packet.detect_relational_chat_topic", lambda _message: "")
+    monkeypatch.setattr("host_brain.app.surface_context_packet.assemble_prompt_context_plane", lambda **_kwargs: _plane())
+    monkeypatch.setattr("host_brain.tribe.cortex_agent.get_cortex_agent", lambda: _FailingCortex())
+
+    packet = build_surface_context_packet(
+        user_message="继续",
+        request_id="req-live-organ-fail",
+        session_id="sess-live-organ-fail",
+    )
+
+    assert packet["surface_organ_context_meta"]["status"] == "DEGRADED"
+    assert packet["surface_organ_context_meta"]["reason_code"] == "RuntimeError"
+    assert packet["surface_influence_packet"]["organ_trace"]["mapped_organs"] == []
+
+
+def test_build_surface_context_packet_uses_surface_task_control_for_influence(monkeypatch) -> None:
+    monkeypatch.setattr("host_brain.app.surface_context_packet.detect_relational_chat_topic", lambda _message: "")
+    monkeypatch.setattr("host_brain.app.surface_context_packet.assemble_prompt_context_plane", lambda **_kwargs: _plane(topic="default_text", thread="phatic"))
+
+    packet = build_surface_context_packet(
+        user_message="端口18080被占用了",
+        request_id="req-task-control",
+        session_id="sess-task-control",
+        organ_context={"vital_signs": {"cognitive_load_index": 0.2}},
+        surface_task_control={
+            "task_mode": "technical_help",
+            "response_move": "technical_next_step",
+            "response_form": "text",
+            "question_budget": 0,
+        },
+    )
+
+    assert packet["reply_plan"]["primary_topic"] == "default_text"
+    assert packet["reply_plan"]["task_mode"] == "technical_help"
+    assert packet["surface_influence_packet"]["task"]["task_mode"] == "technical_help"
+    assert packet["surface_influence_packet"]["task"]["response_move"] == "technical_next_step"

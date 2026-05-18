@@ -4,6 +4,7 @@ import time
 
 from host_brain.skills.impl.inner_world_skill import (
     execute_inner_world_awaken,
+    execute_inner_world_monologue_tick,
     execute_inner_world_session_end,
     execute_inner_world_tick,
 )
@@ -25,6 +26,21 @@ class _FakeLimbicAgent:
             "anticipation": 0.5,
             "continuity_score": 0.7,
             "last_spontaneous_ts_ms": int(time.time() * 1000),
+        }
+
+    def resolve_inner_world_state(self, *, person_id: str | None):
+        return {
+            "user_id": str(person_id or "user_1"),
+            "anticipation_topics": ["测试链路"],
+            "inner_stream": [
+                {
+                    "focus": "topic",
+                    "private_text": "我先把没说完的事放在心里。",
+                    "emotion_tag": "calm",
+                    "salience": 0.66,
+                }
+            ],
+            "continuity_score": 0.7,
         }
 
     def handle_signal(self, **kwargs):
@@ -66,6 +82,35 @@ def test_inner_world_tick_emits_only_tick_when_spontaneous_too_old(monkeypatch) 
 
     event_types = [str(item.get("event_type")) for item in fake_limbic.calls]
     assert event_types == ["INNER_WORLD_TICKED"]
+
+
+def test_inner_world_monologue_tick_updates_default_mode_when_heavy_background_disabled(monkeypatch) -> None:
+    fake_limbic = _FakeLimbicAgent()
+    default_calls: list[dict[str, object]] = []
+
+    class _FakeDefaultMode:
+        def tick_idle_cycle(self, **kwargs):  # noqa: ANN003
+            default_calls.append(dict(kwargs))
+            return {
+                "status": "OK",
+                "focus": "topic",
+                "background_side_effects_suppressed": True,
+                "self_directive": {"self_continuity_score": 0.72},
+            }
+
+    monkeypatch.setenv("HOST_BACKGROUND_TASKS_ENABLED", "false")
+    monkeypatch.delenv("HOST_CONTINUOUS_ORGAN_TICKS_ENABLED", raising=False)
+    monkeypatch.setattr("host_brain.tribe.limbic_agent.get_limbic_agent", lambda: fake_limbic)
+    monkeypatch.setattr("host_brain.tribe.default_mode_agent.get_default_mode_agent", lambda: _FakeDefaultMode())
+
+    result = execute_inner_world_monologue_tick(args={"user_id": "u-inline"})
+
+    assert result["status"] == "OK"
+    assert default_calls
+    assert default_calls[0]["person_id"] == "u-inline"
+    assert default_calls[0]["topic_phrase"] == "测试链路"
+    assert default_calls[0]["source"] == "inner_world_monologue_tick"
+    assert result["default_mode_tick"]["self_continuity_score"] == 0.72
 
 
 def test_inner_world_tick_skips_during_recent_foreground_chat(monkeypatch) -> None:

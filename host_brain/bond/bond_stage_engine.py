@@ -17,6 +17,7 @@ DevSpec §25：Bond 阶段自动晋级。
 from __future__ import annotations
 
 import logging
+import json
 import math
 import re
 from dataclasses import dataclass, field
@@ -512,6 +513,22 @@ def _round_signed(value: float) -> int:
     return 0
 
 
+def _coerce_restore_float(value: Any, *, default: float) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return float(default)
+
+
+def _coerce_restore_optional_float(value: Any) -> float | None:
+    if value in (None, ""):
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
 # ---------------------------------------------------------------------------
 # BondStageEngine
 # ---------------------------------------------------------------------------
@@ -847,22 +864,19 @@ class BondStageEngine:
                         if saved_score > 0:
                             # 在 STAGE_TRANSITION 之后的增量事件也需要累加
                             delta_rows = conn.execute(
-                                "SELECT update_kind, COUNT(*) FROM bond_update_log "
+                                "SELECT update_kind, payload, ts_ms FROM bond_update_log "
                                 "WHERE update_kind NOT IN ('INIT','STAGE_TRANSITION') "
                                 "AND status IN ('OK','SUCCESS') "
                                 "AND ts_ms > ? "
                                 "AND user_id=? "
-                                "GROUP BY update_kind",
+                                "ORDER BY ts_ms ASC",
                                 (saved_ts, user_id),
                             ).fetchall()
-                            delta_score = 0
-                            delta_count = 0
-                            last_ts = saved_ts
-                            for kind, cnt in delta_rows:
-                                base = self._score_map.get(str(kind).strip(), 1)
-                                delta_score += base * cnt
-                                delta_count += cnt
-                            total_score = max(0, saved_score + delta_score)
+                            total_score, delta_count, last_delta_ts, recent_scores = self._restore_score_from_event_rows(
+                                delta_rows,
+                                initial_score=saved_score,
+                            )
+                            last_ts = max(saved_ts, last_delta_ts)
                             event_count_row = conn.execute(
                                 "SELECT COUNT(*), MAX(ts_ms) FROM bond_update_log "
                                 "WHERE update_kind NOT IN ('INIT','STAGE_TRANSITION') "
@@ -880,6 +894,7 @@ class BondStageEngine:
                                 current_stage=stage,
                                 event_count=event_count,
                                 last_event_ts_ms=last_ts,
+                                recent_scores=recent_scores,
                             )
                             _logger.info(
                                 "Bond 状态从 STAGE_TRANSITION 恢复: user=%s stage=%s score=%d events=%d",
@@ -891,22 +906,14 @@ class BondStageEngine:
 
                 # 策略2：无 STAGE_TRANSITION 时，累加所有历史事件积分（排除负分衰减事件）
                 event_rows = conn.execute(
-                    "SELECT update_kind, COUNT(*), MAX(ts_ms) FROM bond_update_log "
+                    "SELECT update_kind, payload, ts_ms FROM bond_update_log "
                     "WHERE update_kind NOT IN ('INIT','STAGE_TRANSITION','IDLE_DECAY') "
                     "AND status IN ('OK','SUCCESS') "
                     "AND user_id=? "
-                    "GROUP BY update_kind",
+                    "ORDER BY ts_ms ASC",
                     (user_id,),
                 ).fetchall()
-                total_score = 0
-                event_count = 0
-                last_ts = 0
-                for kind, cnt, max_ts in event_rows:
-                    base = self._score_map.get(str(kind).strip(), 1)
-                    total_score += base * cnt
-                    event_count += cnt
-                    if max_ts and int(max_ts) > last_ts:
-                        last_ts = int(max_ts)
+                total_score, event_count, last_ts, recent_scores = self._restore_score_from_event_rows(event_rows)
                 if total_score > 0:
                     stage = self._compute_stage(total_score)
                     state = BondScoreState(
@@ -915,6 +922,7 @@ class BondStageEngine:
                         current_stage=stage,
                         event_count=event_count,
                         last_event_ts_ms=last_ts,
+                        recent_scores=recent_scores,
                     )
                     _logger.info(
                         "Bond 状态从日志恢复: user=%s stage=%s score=%d events=%d",
@@ -926,6 +934,54 @@ class BondStageEngine:
         except Exception as exc:
             _logger.warning("Bond 状态恢复失败（降级为新状态）: %s", exc)
         return None
+
+    def _restore_score_from_event_rows(
+        self,
+        rows: Any,
+        *,
+        initial_score: int = 0,
+    ) -> tuple[int, int, int, list[int]]:
+        """Replay persisted bond events with the same emotion weighting as live updates."""
+
+        score = max(0, int(initial_score or 0))
+        event_count = 0
+        last_ts = 0
+        recent_scores: list[int] = []
+        for raw in list(rows or []):
+            try:
+                kind = str(raw[0] or "").strip().upper()
+                payload = self._decode_restore_payload(raw[1] if len(raw) > 1 else None)
+                ts_ms = int(raw[2] or 0) if len(raw) > 2 else 0
+            except Exception:
+                continue
+            if not kind:
+                continue
+            delta = compute_affinity_delta(
+                kind,
+                emotion_intensity=_coerce_restore_float(payload.get("emotion_intensity"), default=0.5),
+                emotion_valence=_coerce_restore_optional_float(payload.get("emotion_valence")),
+                score_map=self._score_map,
+            )
+            score = max(0, score + delta)
+            event_count += 1
+            if ts_ms > last_ts:
+                last_ts = ts_ms
+            recent_scores.append(delta)
+            if len(recent_scores) > TREND_WINDOW * 2:
+                recent_scores = recent_scores[-TREND_WINDOW * 2:]
+        return score, event_count, last_ts, recent_scores
+
+    @staticmethod
+    def _decode_restore_payload(raw: Any) -> dict[str, Any]:
+        if isinstance(raw, Mapping):
+            return dict(raw)
+        if not isinstance(raw, str) or not raw.strip():
+            return {}
+        try:
+            payload = json.loads(raw)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return {}
+        return dict(payload) if isinstance(payload, Mapping) else {}
 
     def _compute_stage(self, total_score: int) -> str:
         """根据总积分计算当前阶段（取满足阈值的最高阶段）。"""

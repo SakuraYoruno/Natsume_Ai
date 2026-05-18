@@ -71,7 +71,7 @@ _TECH_TASKS = frozenset({
 })
 _EMOTION_TASKS = frozenset({"apology", "bad_mood", "give_up", "headache", "quiet", "sleepy", "tired"})
 _IDENTITY_TASKS = frozenset({"identity"})
-SURFACE_USER_FACT_STORES = frozenset({"episodic_vector", "episodic", "sqlite_ledger"})
+SURFACE_USER_FACT_STORES = frozenset({"episodic_vector", "episodic", "sqlite_ledger", "semantic_memory"})
 SURFACE_BOND_STORES = frozenset({"neo4j_bond", "bond_graph"})
 SURFACE_MAIN_CHAIN_RECALL_STORES = SURFACE_USER_FACT_STORES | SURFACE_BOND_STORES
 
@@ -246,7 +246,7 @@ def plan_surface_memory_recall(
             should_recall=True,
             query=query,
             task_mode=task_mode,
-            target_store_ids=("episodic_vector", "sqlite_ledger", "neo4j_bond"),
+            target_store_ids=("semantic_memory", "episodic_vector", "sqlite_ledger", "neo4j_bond"),
             max_facts=4,
             max_chars_per_fact=96,
             time_lookback_days=_infer_lookback_days(user_message),
@@ -257,8 +257,8 @@ def plan_surface_memory_recall(
             should_recall=True,
             query=query,
             task_mode=task_mode,
-            target_store_ids=("episodic_vector", "sqlite_ledger"),
-            max_facts=2,
+            target_store_ids=("semantic_memory", "episodic_vector", "sqlite_ledger"),
+            max_facts=3,
             max_chars_per_fact=96,
             time_lookback_days=_infer_lookback_days(user_message),
             reason="technical_user_memory_context",
@@ -268,7 +268,7 @@ def plan_surface_memory_recall(
             should_recall=True,
             query=query,
             task_mode=task_mode,
-            target_store_ids=("neo4j_bond", "episodic_vector"),
+            target_store_ids=("neo4j_bond", "semantic_memory", "episodic_vector"),
             max_facts=3,
             max_chars_per_fact=96,
             time_lookback_days=_infer_lookback_days(user_message),
@@ -279,7 +279,7 @@ def plan_surface_memory_recall(
             should_recall=True,
             query=query,
             task_mode=task_mode,
-            target_store_ids=("neo4j_bond", "episodic_vector"),
+            target_store_ids=("neo4j_bond", "semantic_memory", "episodic_vector"),
             max_facts=2,
             max_chars_per_fact=88,
             time_lookback_days=None,
@@ -542,11 +542,11 @@ def build_surface_turn_memory_text(
     if not user_text and not assistant_text:
         return ""
     if user_text and assistant_text:
-        text = f"当前回合摘要：用户提到「{user_text}」；新海天回应「{assistant_text}」。"
+        text = f"当前回合摘要：用户提到「{user_text}」；回复「{assistant_text}」。"
     elif user_text:
         text = f"当前回合摘要：用户提到「{user_text}」。"
     else:
-        text = f"当前回合摘要：新海天回应「{assistant_text}」。"
+        text = f"当前回合摘要：回复「{assistant_text}」。"
     return _truncate_text(text, limit=max_chars)
 
 
@@ -720,6 +720,8 @@ def _build_fact_row(
 
 def _fact_prefix(store_id: str) -> str:
     normalized = _clean_text(store_id).lower()
+    if normalized == "semantic_memory":
+        return "长期记忆"
     if normalized in {"episodic_vector", "episodic", "sqlite_ledger"}:
         return "记忆线索"
     if normalized in {"neo4j_bond", "bond_graph"}:
@@ -742,6 +744,8 @@ def _build_packet_style_anchor(rows: Sequence[SurfaceMemoryFactRow]) -> list[str
     store_ids = {_clean_text(row.store_id).lower() for row in rows}
     if store_ids & SURFACE_USER_FACT_STORES:
         anchors.append("用户事实记忆只补当前承接，不扩写成未确认细节")
+    if "semantic_memory" in store_ids:
+        anchors.append("长期记忆只补稳定偏好和关系事实，不替代当前用户句子")
     if store_ids & {"neo4j_bond", "bond_graph"}:
         anchors.append("按关系线索控制距离，不因为记忆升格亲密")
     return _clean_list(anchors)
@@ -879,7 +883,8 @@ def _surface_safe_text(value: Any, *, limit: int) -> str:
         return ""
     text = _URI_RE.sub("", text)
     text = text.replace("memory written:", "")
-    text = text.replace("User:", "用户提到：").replace("Assistant:", "新海天回应：")
+    text = text.replace("User:", "用户提到：").replace("Assistant:", "回复：")
+    text = text.replace("新海天回应", "回复").replace("夏目蓝回应", "回复")
     text = _JSON_MARK_RE.sub("", text)
     text = _FIELD_LABEL_RE.sub("", text)
     text = _SPACE_RE.sub(" ", text).strip(" ,，;；、")

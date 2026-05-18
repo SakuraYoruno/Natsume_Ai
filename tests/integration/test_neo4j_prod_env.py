@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import time
 from pathlib import Path
 
 import pytest
@@ -158,6 +159,7 @@ def test_neo4j_prod_constraint_statements_and_events_ordering() -> None:
     session_id = 'codex_prod_session_order'
     topic_id = 'codex_prod_topic_order'
     capability_hint = 'codex_prod_capability_order'
+    base_ts_ms = int(time.time() * 1000)
     try:
         client.write_bond_event(
             writer_id=BOND_WRITER_ID,
@@ -168,7 +170,7 @@ def test_neo4j_prod_constraint_statements_and_events_ordering() -> None:
             capability_hint=capability_hint,
             evidence_refs=['evd://codex/prod/order/1'],
             payload={'order': 1},
-            ts_ms=1775120200001,
+            ts_ms=base_ts_ms,
         )
         client.write_bond_event(
             writer_id=BOND_WRITER_ID,
@@ -179,7 +181,7 @@ def test_neo4j_prod_constraint_statements_and_events_ordering() -> None:
             capability_hint=capability_hint,
             evidence_refs=['evd://codex/prod/order/2'],
             payload={'order': 2},
-            ts_ms=1775120201001,
+            ts_ms=base_ts_ms + 1,
         )
         events = client.events
         traced = client.trace_user_events(user_id)

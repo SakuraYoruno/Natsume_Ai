@@ -104,6 +104,23 @@ def test_compile_reply_control_packet_rejects_raw_context_keys() -> None:
         )
 
 
+def test_compile_reply_control_packet_makes_explicit_memory_answer_grounded() -> None:
+    compiled = compile_reply_control_packet(
+        user_message="还记得我之前说主链哪里最容易崩吗？",
+        task_control={
+            "response_move": "answer_from_memory",
+            "task_mode": "recall_memory",
+            "question_budget": 0,
+        },
+        memory_packet={
+            "facts": ["用户长期关注中文文本质量，尤其反感生硬、模板感和不通顺。"],
+        },
+    )
+
+    assert "生硬" in compiled.packet.must_include
+    assert "记忆追问：必须直接答出记忆事实本身" in "\n".join(compiled.packet.style_anchor)
+
+
 def test_compile_surface_input_only_renders_soul_user_and_reply_control_packet() -> None:
     compiled = compile_surface_input(
         soul_md=SOUL,
@@ -131,6 +148,46 @@ def test_compile_surface_input_only_renders_soul_user_and_reply_control_packet()
     assert "evd://episodic/1" not in rendered
     assert compiled.request.facts == []
     assert compiled.request.must_not_do == []
+
+
+@pytest.mark.parametrize(
+    ("user_message", "scene_kind", "fact_fragment", "must_not_fragment", "anchor_fragment"),
+    [
+        ("早啊", "daily_morning", "没有提供作息、精神状态", "不要提继续文本", "早安句法锚"),
+        ("我回来了", "return_chat", "没有提供用户去了哪里、离开多久", "不要编用户迷路", "回来了句法锚"),
+        ("在吗", "presence_check", "没有表示出急事、出大事", "不要写居然、稀奇", "在吗句法锚"),
+        ("继续", "short_continue", "不要评价用户只说了继续", "不要写这才像话", "短接续句法锚"),
+    ],
+)
+def test_compile_surface_input_adds_low_info_scene_guidance(
+    user_message: str,
+    scene_kind: str,
+    fact_fragment: str,
+    must_not_fragment: str,
+    anchor_fragment: str,
+) -> None:
+    compiled = compile_surface_input(
+        soul_md=SOUL,
+        user_message=user_message,
+        case_id=f"low_info_{scene_kind}",
+        task_control={
+            "response_move": scene_kind,
+            "task_mode": scene_kind,
+            "question_budget": 0,
+        },
+    )
+
+    assert compiled.trace["low_info_scene_guidance_applied"] is True
+    assert compiled.trace["low_info_scene_kind"] == scene_kind
+    assert fact_fragment in "\n".join(compiled.packet.facts)
+    assert must_not_fragment in "\n".join(compiled.packet.must_not_do)
+    assert anchor_fragment in "\n".join(compiled.packet.style_anchor)
+    assert "不要用天爷、天大人、本小姐" in "\n".join(compiled.packet.must_not_do)
+
+    rendered = "\n".join(message["content"] for message in build_isolated_surface_messages(compiled.request))
+    assert fact_fragment in rendered
+    assert must_not_fragment in rendered
+    assert anchor_fragment in rendered
 
 
 def test_shadow_e2e_baseline_memory_affect_have_no_quality_regression() -> None:
@@ -202,9 +259,10 @@ def test_shadow_e2e_baseline_memory_affect_have_no_quality_regression() -> None:
     assert set(results) == {"baseline", "memory", "affect", "memory_affect"}
     for name, result in results.items():
         assert result.selected is not None, name
-        assert result.selected.passed, result.selected.as_dict()
-        assert not result.selected.hard_fail, result.selected.as_dict()
-        assert not result.selected.control_violations, result.selected.as_dict()
+        assert result.selected.as_dict()["text"] == result.selected_text
+        assert "score" not in result.selected.as_dict()
+        assert "passed" not in result.selected.as_dict()
+        assert not result.observation_codes, result.selected.as_dict()
         assert "输入输出" in result.selected_text
         assert "raw" not in result.selected_text.lower()
         assert "召回来源" not in result.selected_text

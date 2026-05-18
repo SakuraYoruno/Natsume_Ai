@@ -3,9 +3,10 @@
 从 recall_fusion.py 拆分，包含 RecallFusionServiceContract 的各路 store 搜索实现：
   - Route 1: episodic_vector（Chroma 向量检索）
   - Route 2: sqlite_ledger（SQLite 意图日志 + 记忆操作日志）
-  - Route 3: neo4j_bond（Neo4j 关系图 / SQLite bond 日志降级）
-  - Route 4: world_canon（世界观典籍向量投影 + 文件降级）
-  - Route 5: artifact_vault（制品库 SSOT 接口）
+  - Route 3: semantic_memory（SQLite 长期语义记忆）
+  - Route 4: neo4j_bond（Neo4j 关系图 / SQLite bond 日志降级）
+  - Route 5: world_canon（世界观典籍向量投影 + 文件降级）
+  - Route 6: artifact_vault（制品库 SSOT 接口）
 
 Phase XIII 已废弃的路由（已彻底删除，不再保留向后兼容代码）：
   - style_canon → StyleCanon v5 常驻注入，不走路由
@@ -35,6 +36,7 @@ _SESSION_REF_PREFIX = "chat://session/"
 STORE_SQLITE_LEDGER = "sqlite_ledger"
 STORE_NEO4J_BOND = "neo4j_bond"
 STORE_EPISODIC_VECTOR = "episodic_vector"
+STORE_SEMANTIC_MEMORY = "semantic_memory"
 STORE_WORLD_CANON = "world_canon"
 STORE_ARTIFACT_VAULT = "artifact_vault"
 
@@ -68,6 +70,8 @@ def search_route(
             session_id=session_id,
             now_ts_ms=now_ts_ms,
         )
+    if store_id == STORE_SEMANTIC_MEMORY:
+        return search_semantic_memory(self, query=query, top_k=int(route.top_k), now_ts_ms=now_ts_ms)
     if store_id == STORE_NEO4J_BOND:
         return search_neo4j_bond(self, query=query, top_k=int(route.top_k))
     if store_id == STORE_WORLD_CANON:
@@ -260,6 +264,89 @@ def search_sqlite_ledger(
             scored,
             key=lambda pair: _sqlite_candidate_sort_key(score=pair[0], candidate=pair[1]),
         )[: max(1, int(top_k))]
+    ]
+
+
+def search_semantic_memory(
+    self: Any,
+    *,
+    query: str,
+    top_k: int,
+    now_ts_ms: int | None = None,
+) -> list[dict[str, Any]]:
+    """Route 3：SQLite semantic_memory 长期语义记忆检索。"""
+    from host_brain.retrieval.recall_fusion_utils import (
+        _coerce_non_negative_int,
+        _coerce_score,
+        _text_similarity_score,
+        _truncate_text_for_recall,
+    )
+
+    if self.ledger is None or not hasattr(self.ledger, "list_semantic_memories"):
+        raise RuntimeError("semantic memory ledger unavailable")
+    try:
+        rows, _total = self.ledger.list_semantic_memories(limit=max(1, int(top_k)) * 8, offset=0)
+    except Exception as exc:
+        raise RuntimeError(f"semantic memory ledger unavailable: {exc}") from exc
+
+    current_ts = int(now_ts_ms or 0)
+    scored: list[tuple[float, dict[str, Any]]] = []
+    for row in list(rows or []):
+        if not isinstance(row, Mapping):
+            continue
+        semantic_id = str(row.get("semantic_id") or "").strip()
+        summary = str(row.get("summary") or "").strip()
+        if not semantic_id or not summary:
+            continue
+        tags_raw = row.get("tags")
+        if isinstance(tags_raw, (list, tuple)):
+            tags = [str(tag).strip() for tag in tags_raw if str(tag).strip()]
+        else:
+            tags = [str(tags_raw).strip()] if str(tags_raw or "").strip() else []
+        text_for_score = " ".join([summary, *tags])
+        score = _text_similarity_score(query, text_for_score)
+        if score <= 0.0:
+            continue
+        confidence = _coerce_score(row.get("confidence"))
+        if confidence > 0.0:
+            score = round(min(1.0, score * 0.82 + confidence * 0.18), 6)
+        row_ts = _coerce_non_negative_int(row.get("ts_ms"), default=0)
+        recency_boost = 0.0
+        if current_ts > 0 and row_ts > 0:
+            age_ms = max(0, current_ts - row_ts)
+            if age_ms <= 30 * 24 * 60 * 60 * 1000:
+                recency_boost = 0.04
+        final_score = round(min(1.0, score + recency_boost), 6)
+        scored.append(
+            (
+                final_score,
+                {
+                    "memory_id": semantic_id,
+                    "text": _truncate_text_for_recall(summary, limit=512),
+                    "score": final_score,
+                    "metadata": {
+                        "store_id": STORE_SEMANTIC_MEMORY,
+                        "memory_layer": "semantic_long_term",
+                        "semantic_id": semantic_id,
+                        "distill_strategy": str(row.get("distill_strategy") or "merge_top_k"),
+                        "confidence": confidence,
+                        "tags": tags,
+                        "source_memory_ids": list(row.get("source_memory_ids") or []),
+                        "ts_ms": row_ts,
+                        "score_boost": {
+                            "recency_boost": recency_boost,
+                            "row_ts_ms": row_ts,
+                            "now_ts_ms": current_ts,
+                        },
+                        "source_ref": f"ledger://semantic_memory/{semantic_id}",
+                        "evidence_refs_primary": f"semantic://{semantic_id}",
+                    },
+                },
+            )
+        )
+    return [
+        item
+        for _score, item in sorted(scored, key=lambda pair: (-pair[0], -int(pair[1]["metadata"].get("ts_ms") or 0), str(pair[1].get("memory_id") or "")))[: max(1, int(top_k))]
     ]
 
 

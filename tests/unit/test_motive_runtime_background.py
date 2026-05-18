@@ -148,6 +148,11 @@ def test_inner_world_tick_uses_motive_state_to_adjust_offline_growth(monkeypatch
 
     now_ms = 28_800_000
     monkeypatch.setattr(inner_world_module, "_now_ms", lambda: now_ms)
+    monkeypatch.setattr(
+        inner_world_module,
+        "_generate_inner_stream_note_from_llm",
+        lambda **kwargs: ("我在按没说完的话题整理下一步。", "topic", ""),
+    )
 
     def _seed_world(base_dir: Path) -> OfflineInnerWorld:
         world = OfflineInnerWorld(state_dir=str(base_dir))
@@ -213,6 +218,11 @@ def test_inner_world_tick_respects_min_interval_for_spontaneous_events(
 
     now_holder = {"value": 43_200_000}
     monkeypatch.setattr(inner_world_module, "_now_ms", lambda: int(now_holder["value"]))
+    monkeypatch.setattr(
+        inner_world_module,
+        "_generate_inner_stream_note_from_llm",
+        lambda **kwargs: (f"我在整理收尾计划 {now_holder['value']}。", "topic", ""),
+    )
     monkeypatch.setattr(
         "host_brain.persona.motive_runtime.compute_runtime_motive_state",
         lambda **_kwargs: {

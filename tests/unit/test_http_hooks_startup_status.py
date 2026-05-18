@@ -2,17 +2,14 @@ from __future__ import annotations
 
 import json
 import logging
-import datetime
 
 from host_brain.app.automation.task_scheduler import TaskPriority as AutomationTaskPriority
 from host_brain.app.http_hooks import _build_codex_immune_scheduler_task
 from host_brain.app.http_hooks import _build_audit_retention_task_config
-from host_brain.app.http_hooks import _build_reply_surface_cache_prewarm_task_config
 from host_brain.app.http_hooks import _init_edge_command_pusher_status
 from host_brain.app.http_hooks import _build_personality_tick_status
 from host_brain.app.http_hooks import _sync_world_canon_index_on_startup
 from host_brain.app.http_hooks import _startup_status_is_degraded
-from host_brain.app.http_hooks import _seconds_until_daily_time
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.memory.canon_world_store import compute_world_canon_hash
 from host_brain.scheduler.task_registry import TaskPriority, TriggerMode
@@ -36,32 +33,6 @@ def test_build_audit_retention_task_config_uses_current_scheduler_contract() -> 
     assert task.intent_template["proposer_node_id"] == "scheduler"
     assert task.priority is TaskPriority.LOW
     assert task.enabled is True
-
-
-def test_build_reply_surface_cache_prewarm_task_config_uses_daily_cron(monkeypatch) -> None:
-    monkeypatch.setenv("HOST_REPLY_SURFACE_MEMORY_DAILY_PREWARM_HOUR", "4")
-    monkeypatch.setenv("HOST_REPLY_SURFACE_MEMORY_DAILY_PREWARM_MINUTE", "25")
-    monkeypatch.setenv("HOST_REPLY_SURFACE_MEMORY_DAILY_PREWARM_LIMIT", "4096")
-
-    task = _build_reply_surface_cache_prewarm_task_config()
-
-    assert task.task_id == "reply_surface_cache_prewarm_daily"
-    assert task.trigger_mode is TriggerMode.CRON
-    assert task.trigger_config == {"hour": 4, "minute": 25}
-    assert task.intent_template["skill_name"] == "reply_surface_cache_prewarm"
-    assert task.intent_template["args"] == {"limit": 4096, "force": True}
-    assert task.priority is TaskPriority.LOW
-    assert task.enabled is True
-
-
-def test_seconds_until_daily_time_rolls_to_next_day() -> None:
-    # 2026-04-24 03:09:30 local time.
-    before_target = datetime.datetime(2026, 4, 24, 3, 9, 30).timestamp()
-    assert _seconds_until_daily_time(hour=3, minute=10, now_ts=before_target) == 30.0
-
-    # 2026-04-24 03:10:00 local time should schedule tomorrow's run.
-    at_target = datetime.datetime(2026, 4, 24, 3, 10, 0).timestamp()
-    assert _seconds_until_daily_time(hour=3, minute=10, now_ts=at_target) == 24 * 60 * 60
 
 
 def test_build_codex_immune_scheduler_task_uses_current_scheduler_contract() -> None:

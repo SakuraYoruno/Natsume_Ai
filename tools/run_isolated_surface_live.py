@@ -4,7 +4,6 @@ import argparse
 import asyncio
 import json
 import os
-import statistics
 import sys
 import time
 from pathlib import Path
@@ -19,11 +18,8 @@ from host_brain.integrations.llm_helpers import invoke_llm_text  # noqa: E402
 from host_brain.persona.surface_runtime import SurfaceRuntime  # noqa: E402
 from tools.live_env import load_dotenv, load_secret_store_provider_key  # noqa: E402
 from tools.isolated_surface_harness import (  # noqa: E402
-    _build_memory_ab_comparison,
     _read_json_or_jsonl,
     _request_variants,
-    _summarize_score_rows,
-    _write_memory_ab_report,
 )
 
 
@@ -34,6 +30,26 @@ def _write_json(path: Path, payload: Mapping[str, Any]) -> None:
 def _append_jsonl(path: Path, payload: Mapping[str, Any]) -> None:
     with path.open("a", encoding="utf-8", newline="\n") as fh:
         fh.write(json.dumps(dict(payload), ensure_ascii=False, sort_keys=True) + "\n")
+
+
+def _variant_counts(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    summary: dict[str, Any] = {}
+    for row in rows:
+        variant = str(row.get("variant") or "unknown")
+        item = summary.setdefault(
+            variant,
+            {
+                "output_count": 0,
+                "empty_output_count": 0,
+                "hard_gate_observation_count": 0,
+            },
+        )
+        item["output_count"] += 1
+        if not str(row.get("direct_text") or "").strip():
+            item["empty_output_count"] += 1
+        if row.get("observation_codes"):
+            item["hard_gate_observation_count"] += 1
+    return summary
 
 
 def _percentile(values: list[int], q: float) -> int | None:
@@ -59,30 +75,19 @@ def _summarize(
     with_affect: bool = False,
     case_expectations: Mapping[str, list[str]] | None = None,
 ) -> dict[str, Any]:
-    selected = [row.get("selected") for row in results if isinstance(row.get("selected"), dict)]
-    scores = [float(row.get("score") or 0.0) for row in selected]
+    outputs = [dict(row.get("output") or {}) for row in results if isinstance(row.get("output"), Mapping)]
     latencies = [int(row.get("latency_ms") or 0) for row in results if int(row.get("latency_ms") or 0) > 0]
-    pass_count = sum(1 for row in selected if row.get("passed"))
     generated_count = sum(1 for row in results if row.get("ok"))
-    hard_fail_count = sum(1 for row in selected if row.get("hard_fail"))
-    control_violation_count = sum(1 for row in selected if row.get("control_violations"))
-    missing_selected_count = sum(1 for row in results if not isinstance(row.get("selected"), dict))
-    low_score_count = missing_selected_count + sum(1 for row in selected if float(row.get("score") or 0.0) < 80.0 or not row.get("passed"))
-    score_rows = [dict(row.get("score") or {}) for row in results if isinstance(row.get("score"), Mapping)]
-    variant_summary = _summarize_score_rows(score_rows)
+    empty_output_count = sum(1 for row in outputs if not str(row.get("direct_text") or "").strip())
+    hard_gate_observation_count = sum(1 for row in outputs if row.get("observation_codes"))
     summary = {
         "cases": cases_count,
         "completed": completed,
         "generated_count": generated_count,
         "errors": completed - generated_count,
-        "selected_count": len(selected),
-        "missing_selected_count": missing_selected_count,
-        "pass_count": pass_count,
-        "pass_rate": round(pass_count / len(selected), 4) if selected else None,
-        "avg_selected_score": round(statistics.fmean(scores), 3) if scores else None,
-        "low_score_count": low_score_count,
-        "hard_fail_count": hard_fail_count,
-        "control_violation_count": control_violation_count,
+        "output_count": len(outputs),
+        "empty_output_count": empty_output_count,
+        "hard_gate_observation_count": hard_gate_observation_count,
         "latency_ms_p50": _percentile(latencies, 0.5),
         "latency_ms_p95": _percentile(latencies, 0.95),
         "total_elapsed_ms": int((time.perf_counter() - started) * 1000),
@@ -91,16 +96,37 @@ def _summarize(
         "concurrency": concurrency,
         "gen_params": dict(gen_params),
         "output_dir": str(out_dir),
-        "variant_summary": variant_summary,
+        "variant_summary": _variant_counts(outputs),
         "with_affect": bool(with_affect),
         "with_memory": bool(with_memory),
+        "evaluation_mode": "manual_review_no_code_scoring",
     }
-    if with_memory:
-        summary["memory_ab"] = _build_memory_ab_comparison(
-            score_rows,
-            case_expectations=case_expectations or {},
-        )
     return summary
+
+
+def _write_manual_review_report(path: Path, rows: Sequence[Mapping[str, Any]]) -> None:
+    lines = [
+        "# Manual Surface Output Review",
+        "",
+        "No code scoring is applied in this report. Review text quality by reading the outputs below.",
+        "",
+    ]
+    for row in sorted((dict(item) for item in rows), key=lambda item: int(item.get("index") or 0)):
+        observations = ", ".join(str(item) for item in list(row.get("observation_codes") or [])) or "none"
+        lines.extend(
+            [
+                f"## {row.get('index')} · {row.get('case_id')} · {row.get('variant')}",
+                "",
+                f"- latency_ms: `{row.get('latency_ms')}`",
+                f"- hard_gate_observations: `{observations}`",
+                "",
+                "```text",
+                str(row.get("direct_text") or ""),
+                "```",
+                "",
+            ]
+        )
+    path.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
 
 
 async def _run_one(
@@ -136,8 +162,6 @@ async def _run_one(
             runtime = SurfaceRuntime(generate)
             result = await runtime.run(request)
             latency_ms = result.latency_ms or int((time.perf_counter() - started) * 1000)
-            scores = list(result.candidates)
-            selected = result.selected
             raw_row = {
                 "index": index,
                 "case_id": case_id,
@@ -147,25 +171,21 @@ async def _run_one(
                 "model": model,
                 "latency_ms": latency_ms,
                 "raw_output": str(result.raw_output or "").strip(),
-                "candidates": [score.text for score in scores],
+                "candidate_texts": [candidate.text for candidate in result.candidates],
                 "direct_text": result.selected_text,
-                "selected_text": selected.text if selected else "",
-                "selected_score": selected.score if selected else None,
-                "selected_passed": selected.passed if selected else False,
-            }
-            score_row = {
-                "index": index,
-                "case_id": case_id,
-                "variant": variant,
-                "candidates": [score.as_dict() for score in scores],
+                "selected_text": result.selected_text,
                 "memory_expected_terms": memory_expected_terms,
-                "selected": selected.as_dict() if selected else None,
-                "selection": "direct_first",
+                "selected": result.selected.as_dict() if result.selected else None,
+                "observation_codes": list(result.observation_codes),
+                "generation_trace": dict(result.generation_trace),
+                "natsume_emotion_tag": result.natsume_emotion_tag,
+                "user_emotion_tag": result.user_emotion_tag,
+                "vts_expression_id": result.vts_expression_id,
+                "emotion_confidence": result.emotion_confidence,
             }
             return {
                 "raw": raw_row,
-                "score": score_row,
-                "selected": score_row["selected"],
+                "output": raw_row,
                 "ok": True,
                 "latency_ms": latency_ms,
             }
@@ -181,11 +201,9 @@ async def _run_one(
                 "latency_ms": latency_ms,
                 "error": repr(exc),
             }
-            score_row = {"index": index, "case_id": case_id, "variant": variant, "error": repr(exc), "selected": None}
             return {
                 "raw": raw_row,
-                "score": score_row,
-                "selected": None,
+                "output": None,
                 "ok": False,
                 "latency_ms": latency_ms,
             }
@@ -225,11 +243,11 @@ async def run_live(args: argparse.Namespace) -> dict[str, Any]:
     out_dir = args.out
     out_dir.mkdir(parents=True, exist_ok=True)
     raw_path = out_dir / "live_raw_generations.jsonl"
-    score_path = out_dir / "live_scores.jsonl"
+    output_path = out_dir / "live_outputs.jsonl"
     progress_path = out_dir / "progress.json"
     summary_path = out_dir / "summary.json"
     raw_path.write_text("", encoding="utf-8")
-    score_path.write_text("", encoding="utf-8")
+    output_path.write_text("", encoding="utf-8")
 
     started = time.perf_counter()
     results: list[dict[str, Any]] = []
@@ -276,7 +294,8 @@ async def run_live(args: argparse.Namespace) -> dict[str, Any]:
         completed += 1
         results.append(row)
         _append_jsonl(raw_path, row["raw"])
-        _append_jsonl(score_path, row["score"])
+        if isinstance(row.get("output"), Mapping):
+            _append_jsonl(output_path, row["output"])
         summary = _summarize(
             cases_count=len(expanded_cases),
             completed=completed,
@@ -310,13 +329,10 @@ async def run_live(args: argparse.Namespace) -> dict[str, Any]:
         case_expectations=case_expectations,
     )
     _write_json(summary_path, final_summary)
-    if args.with_memory:
-        _write_json(out_dir / "memory_ab_summary.json", final_summary.get("memory_ab") or {})
-        _write_memory_ab_report(
-            out_dir / "memory_ab_report.md",
-            final_summary.get("memory_ab") or {},
-            final_summary.get("variant_summary") or {},
-        )
+    _write_manual_review_report(
+        out_dir / "manual_review_outputs.md",
+        [dict(row.get("output") or {}) for row in results if isinstance(row.get("output"), Mapping)],
+    )
     return final_summary
 
 

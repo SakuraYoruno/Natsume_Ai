@@ -42,8 +42,32 @@ def test_collect_bond_context_degrades_when_snapshot_fails(monkeypatch) -> None:
     assert state is None
 
 
-def test_generate_inner_activity_note_respects_background_task_disable(monkeypatch) -> None:
+def test_generate_inner_activity_note_ignores_heavy_background_disable(monkeypatch) -> None:
     monkeypatch.setenv("HOST_BACKGROUND_TASKS_ENABLED", "false")
+    monkeypatch.delenv("HOST_CONTINUOUS_ORGAN_TICKS_ENABLED", raising=False)
+    monkeypatch.setattr(
+        "host_brain.persona.inner_activity_agent._resolve_inner_activity_llm_runtime",
+        lambda *, now_ms: {"available": False, "route_reason_code": "NO_MODEL"},
+    )
+
+    note, focus, reason, meta = generate_inner_activity_note(
+        persona_user_id="user_42",
+        absence_band="recent",
+        offline_hours=0.0,
+        inner_state={},
+        now_ms=123456,
+        topic_phrase="",
+    )
+
+    assert note == ""
+    assert focus == ""
+    assert reason == "NO_MODEL"
+    assert meta == {}
+
+
+def test_generate_inner_activity_note_respects_continuous_tick_disable(monkeypatch) -> None:
+    monkeypatch.setenv("HOST_BACKGROUND_TASKS_ENABLED", "true")
+    monkeypatch.setenv("HOST_CONTINUOUS_ORGAN_TICKS_ENABLED", "false")
     monkeypatch.setattr(
         "host_brain.persona.inner_activity_agent._resolve_inner_activity_llm_runtime",
         lambda *, now_ms: (_ for _ in ()).throw(AssertionError("runtime should not resolve")),
@@ -60,5 +84,5 @@ def test_generate_inner_activity_note_respects_background_task_disable(monkeypat
 
     assert note == ""
     assert focus == ""
-    assert reason == "INNER_ACTIVITY_BACKGROUND_TASKS_DISABLED"
+    assert reason == "INNER_ACTIVITY_CONTINUOUS_ORGAN_TICKS_DISABLED"
     assert meta == {}

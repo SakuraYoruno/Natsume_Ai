@@ -4,7 +4,6 @@ import argparse
 import asyncio
 import json
 import os
-import statistics
 import sys
 import time
 from pathlib import Path
@@ -21,7 +20,6 @@ from host_brain.persona.isolated_surface_continuity import (  # noqa: E402
 )
 from host_brain.persona.surface_runtime import SurfaceRuntime  # noqa: E402
 from tools.live_env import load_dotenv, load_secret_store_provider_key  # noqa: E402
-from tools.isolated_surface_continuity_harness import _observation_codes  # noqa: E402
 from tools.isolated_surface_harness import _read_json_or_jsonl  # noqa: E402
 
 
@@ -71,35 +69,24 @@ def _summarize(
     gen_params: Mapping[str, Any],
     out_dir: Path,
 ) -> dict[str, Any]:
-    selected = [row.get("selected") for row in results if isinstance(row.get("selected"), dict)]
-    scores = [float(row.get("score") or 0.0) for row in selected]
+    outputs = [dict(row.get("output") or {}) for row in results if isinstance(row.get("output"), Mapping)]
     latencies = [int(row.get("latency_ms") or 0) for row in results if int(row.get("latency_ms") or 0) > 0]
-    pass_count = sum(1 for row in selected if row.get("passed"))
     generated_count = sum(1 for row in results if row.get("ok"))
-    hard_fail_count = sum(1 for row in selected if row.get("hard_fail"))
-    control_violation_count = sum(1 for row in selected if row.get("control_violations"))
-    low_score_count = sum(1 for row in selected if float(row.get("score") or 0.0) < 80.0 or not row.get("passed"))
     fact_counts = [int(row.get("fact_count") or 0) for row in results if int(row.get("fact_count") or 0) > 0]
     observation_counts: dict[str, int] = {}
-    for selected_row in selected:
-        for code in _observation_codes(selected_row):
+    for row in outputs:
+        for code in list(row.get("observation_codes") or []):
             observation_counts[code] = observation_counts.get(code, 0) + 1
     dialogue_turns: dict[str, int] = {}
-    dialogue_passed: dict[str, int] = {}
     for row in results:
         case_id = str(row.get("case_id") or "")
         if not case_id:
             continue
         dialogue_turns[case_id] = dialogue_turns.get(case_id, 0) + 1
-        selected_row = row.get("selected")
-        if isinstance(selected_row, Mapping) and selected_row.get("passed"):
-            dialogue_passed[case_id] = dialogue_passed.get(case_id, 0) + 1
-    dialogue_pass_count = sum(
+    dialogue_completed_count = sum(
         1
         for case_id, expected_count in expected_dialogue_turns.items()
-        if dialogue_turns.get(case_id, 0) == expected_count
-        and dialogue_passed.get(case_id, 0) == expected_count
-        and expected_count > 0
+        if dialogue_turns.get(case_id, 0) == expected_count and expected_count > 0
     )
     return {
         "dialogues": dialogues_count,
@@ -107,15 +94,10 @@ def _summarize(
         "turns": turns_count,
         "generated_count": generated_count,
         "errors": completed - generated_count,
-        "selected_count": len(selected),
-        "pass_count": pass_count,
-        "pass_rate": round(pass_count / len(selected), 4) if selected else None,
-        "dialogue_pass_count": dialogue_pass_count,
-        "dialogue_pass_rate": round(dialogue_pass_count / dialogues_count, 4) if dialogues_count else None,
-        "avg_selected_score": round(statistics.fmean(scores), 3) if scores else None,
-        "low_score_count": low_score_count,
-        "hard_fail_count": hard_fail_count,
-        "control_violation_count": control_violation_count,
+        "output_count": len(outputs),
+        "empty_output_count": sum(1 for row in outputs if not str(row.get("direct_text") or "").strip()),
+        "dialogue_completed_count": dialogue_completed_count,
+        "dialogue_completion_rate": round(dialogue_completed_count / dialogues_count, 4) if dialogues_count else None,
         "facts_budget_max": max(fact_counts) if fact_counts else 0,
         "facts_budget_violations": sum(1 for count in fact_counts if count > 6),
         "long_dialogues_30_plus": sum(1 for count in expected_dialogue_turns.values() if count >= 30),
@@ -131,6 +113,7 @@ def _summarize(
         "concurrency": concurrency,
         "gen_params": dict(gen_params),
         "output_dir": str(out_dir),
+        "evaluation_mode": "manual_review_no_code_scoring",
     }
 
 
@@ -167,8 +150,6 @@ async def _run_turn(
             runtime = SurfaceRuntime(generate)
             result = await runtime.run(request)
             latency_ms = result.latency_ms or int((time.perf_counter() - started) * 1000)
-            scores = list(result.candidates)
-            selected = result.selected
             raw_row = {
                 **trace,
                 "ok": True,
@@ -176,25 +157,18 @@ async def _run_turn(
                 "model": model,
                 "latency_ms": latency_ms,
                 "raw_output": str(result.raw_output or "").strip(),
-                "candidates": [score.text for score in scores],
+                "candidate_texts": [candidate.text for candidate in result.candidates],
                 "direct_text": result.selected_text,
-                "selected_text": selected.text if selected else "",
-                "selected_score": selected.score if selected else None,
-                "selected_passed": selected.passed if selected else False,
-            }
-            score_row = {
-                **trace,
-                "candidates": [score.as_dict() for score in scores],
+                "selected_text": result.selected_text,
                 "fact_count": fact_count,
-                "observation_codes": list(_observation_codes(selected.as_dict() if selected else None)),
-                "selected": selected.as_dict() if selected else None,
-                "selection": "direct_first",
+                "observation_codes": list(result.observation_codes),
+                "selected": result.selected.as_dict() if result.selected else None,
+                "generation_trace": dict(result.generation_trace),
             }
             return {
                 **trace,
                 "raw": raw_row,
-                "score": score_row,
-                "selected": score_row["selected"],
+                "output": raw_row,
                 "fact_count": fact_count,
                 "ok": True,
                 "latency_ms": latency_ms,
@@ -209,12 +183,10 @@ async def _run_turn(
                 "latency_ms": latency_ms,
                 "error": repr(exc),
             }
-            score_row = {**trace, "error": repr(exc), "selected": None}
             return {
                 **trace,
                 "raw": raw_row,
-                "score": score_row,
-                "selected": None,
+                "output": None,
                 "ok": False,
                 "latency_ms": latency_ms,
             }
@@ -236,11 +208,11 @@ async def run_live(args: argparse.Namespace) -> dict[str, Any]:
     out_dir = args.out
     out_dir.mkdir(parents=True, exist_ok=True)
     raw_path = out_dir / "live_raw_generations.jsonl"
-    score_path = out_dir / "live_scores.jsonl"
+    output_path = out_dir / "live_outputs.jsonl"
     progress_path = out_dir / "progress.json"
     summary_path = out_dir / "summary.json"
     raw_path.write_text("", encoding="utf-8")
-    score_path.write_text("", encoding="utf-8")
+    output_path.write_text("", encoding="utf-8")
 
     started = time.perf_counter()
     results: list[dict[str, Any]] = []
@@ -282,7 +254,8 @@ async def run_live(args: argparse.Namespace) -> dict[str, Any]:
         completed += 1
         results.append(row)
         _append_jsonl(raw_path, row["raw"])
-        _append_jsonl(score_path, row["score"])
+        if isinstance(row.get("output"), Mapping):
+            _append_jsonl(output_path, row["output"])
         summary = _summarize(
             dialogues_count=len(cases),
             turns_count=len(turns),

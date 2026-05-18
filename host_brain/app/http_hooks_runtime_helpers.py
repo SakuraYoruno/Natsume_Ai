@@ -205,28 +205,38 @@ def _build_background_runtime_snapshot(
     now_ms: int,
     persona_user_id: str,
     inner_world_state: dict[str, Any],
+    scheduler_snapshot_override: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     scheduler_snapshot: dict[str, Any] = {}
     scheduler_error = ""
-    try:
-        from host_brain.scheduler.scheduler_routes import get_scheduler_health_snapshot_safe  # noqa: PLC0415
+    if scheduler_snapshot_override is not None:
+        scheduler_snapshot = dict(scheduler_snapshot_override or {})
+    else:
+        try:
+            from host_brain.scheduler.scheduler_routes import get_scheduler_health_snapshot_safe  # noqa: PLC0415
 
-        scheduler_snapshot = dict(get_scheduler_health_snapshot_safe() or {})
-    except Exception as exc:
-        scheduler_error = str(exc)[:160]
-        scheduler_snapshot = {
-            "scheduler_status": "UNAVAILABLE",
-            "total_tasks": 0,
-            "enabled_tasks": 0,
-            "suspended_tasks": 0,
-            "error_tasks": 0,
-            "tasks": [],
-            "ts_ms": now_ms,
-        }
+            scheduler_snapshot = dict(get_scheduler_health_snapshot_safe() or {})
+        except Exception as exc:
+            scheduler_error = str(exc)[:160]
+            scheduler_snapshot = {
+                "scheduler_status": "UNAVAILABLE",
+                "total_tasks": 0,
+                "enabled_tasks": 0,
+                "suspended_tasks": 0,
+                "error_tasks": 0,
+                "tasks": [],
+                "ts_ms": now_ms,
+            }
 
     scheduler_status = str(scheduler_snapshot.get("scheduler_status") or "UNAVAILABLE").strip().upper()
     scheduler_active = scheduler_status in {"HEALTHY", "DEGRADED", "RUNNING", "UP", "OK"}
-    core_tick_ids = ["inner_world_numeric_tick", "inner_world_monologue_tick", "silence_tick", "body_sense_tick"]
+    core_tick_ids = [
+        "inner_world_numeric_tick",
+        "inner_world_monologue_tick",
+        "silence_tick",
+        "body_sense_tick",
+        "emotion_decay_tick",
+    ]
     proactive_task_id = "proactive_talk_periodic"
     tasks_by_id: dict[str, dict[str, Any]] = {}
     for item in list(scheduler_snapshot.get("tasks") or []):
@@ -292,6 +302,15 @@ def _build_background_runtime_snapshot(
     last_inner_world_tick_ts_ms = _coerce_int(inner_world_state.get("last_tick_ts_ms"), 0)
     if last_inner_world_tick_ts_ms <= 0:
         last_inner_world_tick_ts_ms = None
+    numeric_tick_last_run_ts = _coerce_int(
+        core_tick_tasks.get("inner_world_numeric_tick", {}).get("last_run_ts"),
+        0,
+    )
+    if numeric_tick_last_run_ts > 0 and (
+        last_inner_world_tick_ts_ms is None
+        or numeric_tick_last_run_ts > last_inner_world_tick_ts_ms
+    ):
+        last_inner_world_tick_ts_ms = numeric_tick_last_run_ts
     seconds_since_inner_world_tick = _seconds_since_timestamp(
         ts_ms=last_inner_world_tick_ts_ms,
         now_ms=now_ms,
@@ -1376,22 +1395,6 @@ def run_proactive_intent_dispatch(
 
     if skill_name == "long_term_memory_distillation":
         return run_long_term_distillation_handler(args, {})
-
-    if skill_name == "reply_surface_cache_prewarm":
-        try:
-            from host_brain.persona.reply_surface_prewarm import run_reply_surface_cache_prewarm  # noqa: PLC0415
-
-            return run_reply_surface_cache_prewarm(
-                limit=args.get("limit"),
-                force=bool(args.get("force", True)),
-            )
-        except Exception as prewarm_exc:
-            logger.warning("reply_surface_cache_prewarm 调度执行失败: %s", prewarm_exc)
-            return {
-                "status": "FAILED",
-                "reason_code": "REPLY_SURFACE_PREWARM_FAILED",
-                "detail": str(prewarm_exc),
-            }
 
     if skill_name == "evolution_cycle":
         return _run_evolution_cycle(system_intent=system_intent, logger=logger)

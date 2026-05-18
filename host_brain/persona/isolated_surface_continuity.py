@@ -288,6 +288,7 @@ def build_reply_control_packet_from_context(
     task_mode = _clean_text(context.task_mode_hint) or "daily_chat"
     base_affect_packet = _affect_packet_with_context_defaults(context, affect_packet)
     compiled = compile_reply_control_packet(
+        user_message=context.current_user_message,
         task_control={
             "response_move": _clean_text(context.response_move_hint) or task_mode,
             "task_mode": task_mode,

@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from host_brain.persona.isolated_surface_harness import (
@@ -17,6 +18,15 @@ from host_brain.persona.surface_memory_recall import (
     MemoryRecallPacket,
     memory_recall_packet_from_mapping,
 )
+from host_brain.persona.surface_influence_packet import (
+    SurfaceInfluencePacket,
+    surface_influence_facts,
+    surface_influence_must_not_do,
+    surface_influence_packet_from_mapping,
+    surface_influence_style_anchor,
+    surface_influence_trace,
+)
+from host_brain.persona.surface_low_info_guidance import low_info_guidance_for_user_message
 
 
 _FORBIDDEN_RAW_CONTEXT_KEYS = frozenset(
@@ -30,7 +40,6 @@ _FORBIDDEN_RAW_CONTEXT_KEYS = frozenset(
         "history",
         "history_turns",
         "long_term_memory",
-        "memory",
         "messages",
         "module_advice",
         "natural_language_advice",
@@ -121,9 +130,11 @@ class CompiledSurfaceInput:
 
 def compile_reply_control_packet(
     *,
+    user_message: str = "",
     task_control: SurfaceTaskControl | Mapping[str, Any] | None = None,
     memory_packet: MemoryRecallPacket | Mapping[str, Any] | None = None,
     affect_packet: SurfaceAffectControlPacket | Mapping[str, Any] | None = None,
+    influence_packet: SurfaceInfluencePacket | Mapping[str, Any] | None = None,
     necessary_facts: Sequence[Any] | None = None,
     must_not_do: Sequence[Any] | None = None,
     style_anchor: Sequence[Any] | None = None,
@@ -141,34 +152,53 @@ def compile_reply_control_packet(
     task = _coerce_task_control(task_control)
     memory = _coerce_memory_packet(memory_packet)
     affect = _coerce_affect_packet(affect_packet)
+    influence = _coerce_influence_packet(influence_packet)
+    affect = _affect_with_influence(affect, influence)
+    low_info_guidance = low_info_guidance_for_user_message(
+        user_message,
+        task_mode=task.task_mode,
+        response_move=task.response_move,
+    )
 
     emotional_tone = affect.emotional_tone or "neutral"
     relationship_distance = affect.relationship_distance or "familiar"
+    memory_recall_required_terms = _memory_recall_required_terms(
+        user_message=user_message,
+        task=task,
+        memory=memory,
+    )
     facts = _clean_list(
         [
+            *low_info_guidance.facts,
             *task.facts,
             *_coerce_sequence(necessary_facts),
             *(_ensure_memory_fact_prefix(fact) for fact in memory.facts),
+            *surface_influence_facts(influence),
         ],
         limit=max_facts,
         max_chars=180,
     )
     packet_style_anchor = _clean_list(
         [
+            *low_info_guidance.style_anchor,
             *task.style_anchor,
             *_coerce_sequence(style_anchor),
+            *_memory_recall_style_anchor(task=task, memory=memory),
             *memory.style_anchor,
             *affect.style_anchor,
+            *surface_influence_style_anchor(influence),
         ],
         limit=max_style_anchors,
         max_chars=180,
     )
     packet_must_not_do = _clean_list(
         [
+            *low_info_guidance.must_not_do,
             *task.must_not_do,
             *_coerce_sequence(must_not_do),
             *memory.must_not_do,
             *affect.must_not_do,
+            *surface_influence_must_not_do(influence),
         ],
         limit=max_must_not_do,
         max_chars=160,
@@ -180,7 +210,7 @@ def compile_reply_control_packet(
         relationship_distance=relationship_distance,
         information_budget=task.information_budget or "short",
         question_budget=max(0, int(task.question_budget or 0)),
-        must_include=list(task.must_include),
+        must_include=_string_list(_clean_list([*task.must_include, *memory_recall_required_terms], max_chars=80)),
         must_not_do=_string_list(packet_must_not_do),
         facts=_string_list(facts),
         style_anchor=_string_list(packet_style_anchor),
@@ -192,10 +222,15 @@ def compile_reply_control_packet(
         "memory_applied": bool(memory.facts or memory.style_anchor or memory.must_not_do),
         "memory_fact_count": len(memory.facts),
         "memory_relationship_clue_count": len(memory.relationship_clues),
+        "influence_applied": _influence_applied(influence),
+        "influence": surface_influence_trace(influence),
         "fact_count": len(packet.facts),
         "style_anchor_count": len(packet.style_anchor),
         "must_not_do_count": len(packet.must_not_do),
+        "must_include_count": len(packet.must_include),
         "dropped_memory_relationship_clues": bool(memory.relationship_clues),
+        "low_info_scene_guidance_applied": low_info_guidance.applied,
+        "low_info_scene_kind": low_info_guidance.scene_kind,
         "surface_boundary": "ReplyControlPacket",
     }
     return SurfacePacketCompileResult(packet=packet, trace=trace)
@@ -209,6 +244,7 @@ def compile_surface_input(
     task_control: SurfaceTaskControl | Mapping[str, Any] | None = None,
     memory_packet: MemoryRecallPacket | Mapping[str, Any] | None = None,
     affect_packet: SurfaceAffectControlPacket | Mapping[str, Any] | None = None,
+    influence_packet: SurfaceInfluencePacket | Mapping[str, Any] | None = None,
     necessary_facts: Sequence[Any] | None = None,
     must_not_do: Sequence[Any] | None = None,
     style_anchor: Sequence[Any] | None = None,
@@ -217,9 +253,11 @@ def compile_surface_input(
     max_must_not_do: int = 12,
 ) -> CompiledSurfaceInput:
     compiled = compile_reply_control_packet(
+        user_message=user_message,
         task_control=task_control,
         memory_packet=memory_packet,
         affect_packet=affect_packet,
+        influence_packet=influence_packet,
         necessary_facts=necessary_facts,
         must_not_do=must_not_do,
         style_anchor=style_anchor,
@@ -250,6 +288,7 @@ def compile_surface_shadow_inputs(
     task_control: SurfaceTaskControl | Mapping[str, Any] | None = None,
     memory_packet: MemoryRecallPacket | Mapping[str, Any] | None = None,
     affect_packet: SurfaceAffectControlPacket | Mapping[str, Any] | None = None,
+    influence_packet: SurfaceInfluencePacket | Mapping[str, Any] | None = None,
     necessary_facts: Sequence[Any] | None = None,
     must_not_do: Sequence[Any] | None = None,
     style_anchor: Sequence[Any] | None = None,
@@ -266,6 +305,7 @@ def compile_surface_shadow_inputs(
         "necessary_facts": necessary_facts,
         "must_not_do": must_not_do,
         "style_anchor": style_anchor,
+        "influence_packet": influence_packet,
         "max_facts": max_facts,
         "max_style_anchors": max_style_anchors,
         "max_must_not_do": max_must_not_do,
@@ -316,6 +356,97 @@ def _coerce_task_control(raw: SurfaceTaskControl | Mapping[str, Any] | None) -> 
     )
 
 
+def _memory_recall_style_anchor(*, task: SurfaceTaskControl, memory: MemoryRecallPacket) -> tuple[str, ...]:
+    haystack = " ".join(
+        [
+            str(task.task_mode or ""),
+            str(task.response_move or ""),
+        ]
+    ).lower()
+    if not memory.facts or not any(token in haystack for token in ("recall", "memory")):
+        return ()
+    return ("记忆追问：必须直接答出记忆事实本身；不要只说记得、没忘或让用户接着说。",)
+
+
+def _memory_recall_required_terms(
+    *,
+    user_message: str,
+    task: SurfaceTaskControl,
+    memory: MemoryRecallPacket,
+) -> tuple[str, ...]:
+    haystack = " ".join(
+        [
+            str(task.task_mode or ""),
+            str(task.response_move or ""),
+        ]
+    ).lower()
+    if not memory.facts or not any(token in haystack for token in ("recall", "memory")):
+        return ()
+    user_text = _clean_text(user_message)[:240]
+    if not _looks_like_explicit_memory_question(user_text):
+        return ()
+    memory_text = "\n".join(_clean_text(fact)[:240] for fact in memory.facts)
+    return tuple(_clean_list(_salient_memory_answer_terms(memory_text, user_text=user_text), limit=2, max_chars=32))
+
+
+def _looks_like_explicit_memory_question(user_message: str) -> bool:
+    text = str(user_message or "")
+    if not text:
+        return False
+    return any(token in text for token in ("记得", "还记", "之前", "上次", "哪里", "哪块", "什么", "哪个"))
+
+
+def _salient_memory_answer_terms(memory_text: str, *, user_text: str) -> list[str]:
+    priority_terms = (
+        "生硬",
+        "不通顺",
+        "输入输出",
+        "模板感",
+        "文本质量",
+        "台词召回",
+        "原台词",
+        "记忆召回",
+        "情绪层",
+        "关系层",
+        "主链",
+    )
+    result: list[str] = []
+    for term in priority_terms:
+        if term in memory_text and term not in result:
+            result.append(term)
+    if result:
+        return result
+    quoted = re.findall(r"[「“\"]([^」”\"]{2,60})[」”\"]", memory_text)
+    stop_terms = (
+        "用户",
+        "之前",
+        "上次",
+        "当前",
+        "回合",
+        "摘要",
+        "回复",
+        "记忆",
+        "线索",
+        "长期",
+        "事实",
+        "主链",
+        "哪里",
+        "什么",
+        "哪个",
+    )
+    for segment in quoted:
+        cleaned = _clean_text(segment)[:80]
+        if not cleaned or cleaned in user_text:
+            continue
+        for token in re.findall(r"[\u4e00-\u9fffA-Za-z0-9_]{2,12}", cleaned):
+            if token in user_text or any(stop in token for stop in stop_terms):
+                continue
+            result.append(token)
+            if len(result) >= 2:
+                return result
+    return result
+
+
 def _coerce_memory_packet(raw: MemoryRecallPacket | Mapping[str, Any] | None) -> MemoryRecallPacket:
     if raw is None:
         return MemoryRecallPacket()
@@ -334,6 +465,45 @@ def _coerce_affect_packet(raw: SurfaceAffectControlPacket | Mapping[str, Any] | 
     packet = affect_control_packet_from_mapping(raw)
     _reject_forbidden_raw_context(packet.as_dict(), source="affect_packet")
     return packet
+
+
+def _coerce_influence_packet(raw: SurfaceInfluencePacket | Mapping[str, Any] | None) -> SurfaceInfluencePacket:
+    if raw is None:
+        return SurfaceInfluencePacket()
+    if isinstance(raw, Mapping):
+        _reject_forbidden_raw_context(raw, source="influence_packet")
+    packet = surface_influence_packet_from_mapping(raw)
+    _reject_forbidden_raw_context(packet.as_dict(), source="influence_packet")
+    return packet
+
+
+def _affect_with_influence(
+    affect: SurfaceAffectControlPacket,
+    influence: SurfaceInfluencePacket,
+) -> SurfaceAffectControlPacket:
+    if not _influence_applied(influence):
+        return affect
+    emotional_tone = affect.emotional_tone or influence.affect.emotional_tone
+    relationship_distance = affect.relationship_distance or influence.relationship.relationship_distance
+    expression_intensity = affect.expression_intensity or influence.affect.expression_intensity
+    return replace(
+        affect,
+        emotional_tone=emotional_tone,
+        relationship_distance=relationship_distance,
+        expression_intensity=expression_intensity,
+    )
+
+
+def _influence_applied(influence: SurfaceInfluencePacket) -> bool:
+    return bool(
+        influence.task.task_mode
+        or influence.task.response_move
+        or influence.affect.emotional_tone
+        or influence.relationship.relationship_distance
+        or influence.memory.facts
+        or influence.continuity.recent_turns_injected
+        or influence.safety.must_not_do
+    )
 
 
 def _reject_forbidden_raw_context(value: Any, *, source: str, prefix: str = "") -> None:
