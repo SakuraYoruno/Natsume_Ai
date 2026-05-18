@@ -24,6 +24,17 @@ CONTRACT_FIELDS: tuple[str, ...] = (
     "surface_constraints",
     "delivery_delta",
 )
+MAIN_CHAIN_EFFECTS: tuple[str, ...] = (
+    "task",
+    "emotion",
+    "relationship",
+    "memory",
+    "inner_world",
+    "initiative",
+    "delivery",
+    "safety",
+    "surface_text",
+)
 _RAW_CONTEXT_KEYS = frozenset(
     {
         "agent_advice",
@@ -83,6 +94,24 @@ class OrganInfluenceContract:
 
 
 @dataclass(frozen=True)
+class OrganMainChainIntegration:
+    organ_id: str
+    contract_fields: tuple[str, ...]
+    main_chain_effects: tuple[str, ...]
+    role_summary: str
+    prompt_visibility: str = "contract_only"
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "organ_id": self.organ_id,
+            "contract_fields": list(self.contract_fields),
+            "main_chain_effects": list(self.main_chain_effects),
+            "role_summary": self.role_summary,
+            "prompt_visibility": self.prompt_visibility,
+        }
+
+
+@dataclass(frozen=True)
 class OrganInfluencePacket:
     task_delta: Mapping[str, Any] = field(default_factory=dict)
     emotion_delta: Mapping[str, Any] = field(default_factory=dict)
@@ -116,6 +145,22 @@ class OrganInfluencePacket:
 
 def organ_influence_contract_table() -> tuple[dict[str, Any], ...]:
     return tuple(contract.as_dict() for contract in _organ_contracts())
+
+
+def organ_main_chain_integration_table() -> tuple[dict[str, Any], ...]:
+    contracts = {row.organ_id: row for row in _organ_contracts()}
+    rows: list[OrganMainChainIntegration] = []
+    for organ_id in SURFACE_ORGAN_IDS:
+        contract = contracts[organ_id]
+        rows.append(
+            OrganMainChainIntegration(
+                organ_id=organ_id,
+                contract_fields=contract.allowed_fields,
+                main_chain_effects=_MAIN_CHAIN_EFFECTS_BY_ORGAN[organ_id],
+                role_summary=_MAIN_CHAIN_ROLE_BY_ORGAN[organ_id],
+            )
+        )
+    return tuple(row.as_dict() for row in rows)
 
 
 def build_organ_influence_packet(organ_context: Mapping[str, Any] | None) -> OrganInfluencePacket:
@@ -220,6 +265,58 @@ def _allowed_contract_fields(source_slots: Sequence[str]) -> tuple[str, ...]:
     return tuple(fields)
 
 
+_MAIN_CHAIN_EFFECTS_BY_ORGAN: Mapping[str, tuple[str, ...]] = {
+    "ans": ("emotion", "inner_world", "initiative", "surface_text"),
+    "cerebellum": ("delivery", "safety", "surface_text"),
+    "circadian": ("emotion", "inner_world", "initiative", "surface_text"),
+    "cortex": ("task", "safety", "surface_text"),
+    "default_mode": ("inner_world", "initiative", "surface_text"),
+    "endocrine": ("emotion", "inner_world", "initiative", "surface_text"),
+    "glymphatic": ("emotion", "inner_world", "initiative", "memory", "surface_text"),
+    "hippocampus": ("memory", "inner_world", "surface_text"),
+    "immune": ("task", "safety", "surface_text"),
+    "initiative_governor": ("task", "initiative", "inner_world", "surface_text"),
+    "interoception": ("emotion", "inner_world", "initiative", "surface_text"),
+    "language_system": ("delivery", "safety", "surface_text"),
+    "limbic": ("emotion", "initiative", "surface_text"),
+    "mirror_neuron": ("emotion", "relationship", "initiative", "surface_text"),
+    "motor_cortex": ("delivery", "safety", "surface_text"),
+    "pain_reward": ("emotion", "initiative", "surface_text"),
+    "peripheral": ("delivery", "safety", "surface_text"),
+    "prefrontal": ("task", "inner_world", "safety", "surface_text"),
+    "proprioception": ("task", "inner_world", "initiative", "surface_text"),
+    "social_brain": ("relationship", "initiative", "surface_text"),
+    "somatic": ("emotion", "inner_world", "initiative", "surface_text"),
+    "thalamus": ("task", "inner_world", "safety", "surface_text"),
+    "vestibular": ("task", "inner_world", "initiative", "surface_text"),
+}
+_MAIN_CHAIN_ROLE_BY_ORGAN: Mapping[str, str] = {
+    "ans": "Controls recovery mode and proactive throttle so replies become steadier when the body budget is low.",
+    "cerebellum": "Damps jitter and guards against unstable output or claimed actions.",
+    "circadian": "Adds sleep-pressure and recovery-window pressure to brevity, warmth, and initiative.",
+    "cortex": "Provides task route and current-goal guardrails for the surface main chain.",
+    "default_mode": "Feeds private continuity, care drive, and self-model seeds without leaking inner monologue.",
+    "endocrine": "Turns stress and homeostasis into emotional tone, withdrawal, and pacing pressure.",
+    "glymphatic": "Signals recovery and consolidation pressure, reducing expansion and marking memory consolidation relevance.",
+    "hippocampus": "Marks compressed memory availability and continuity relevance without passing raw memory rows.",
+    "immune": "Raises safety and risk guardrails while keeping task completion conservative.",
+    "initiative_governor": "Controls follow-up permission, question budget, and whether proactive branches should pause.",
+    "interoception": "Converts internal fatigue and body budget into emotional containment and shorter continuity.",
+    "language_system": "Controls output form and language-safety constraints without supplying candidate prose.",
+    "limbic": "Converts emotion tags and intensity into affect tone and drive pressure.",
+    "mirror_neuron": "Converts user resonance into co-regulated warmth, care, and relationship sensitivity.",
+    "motor_cortex": "Exposes only delivery/action boundary constraints, never raw action plans.",
+    "pain_reward": "Converts pain, reward, and loneliness into affect and motive pressure.",
+    "peripheral": "Controls platform/output channel constraints and prevents false device-action claims.",
+    "prefrontal": "Adds drift guardrails, planning stability, and self-control pressure.",
+    "proprioception": "Converts session/cognitive load into task budget and continuity pacing.",
+    "social_brain": "Converts bond state into relationship distance, teasing permission, and attachment drive.",
+    "somatic": "Converts fatigue and body sensation into lower heat, shorter replies, and recovery pacing.",
+    "thalamus": "Normalizes route confidence and handoff state into task/continuity guardrails.",
+    "vestibular": "Converts route instability into single-thread pacing and conservative task focus.",
+}
+
+
 def _memory_candidates(context: Mapping[str, Any]) -> list[str]:
     memory_layers = {
         **_safe_mapping(context.get("memory_layers")),
@@ -306,11 +403,14 @@ def _coerce_float(value: Any, *, default: float = 0.0) -> float:
 
 __all__ = [
     "CONTRACT_FIELDS",
+    "MAIN_CHAIN_EFFECTS",
     "OrganInfluenceContract",
     "OrganInfluencePacket",
+    "OrganMainChainIntegration",
     "SURFACE_ORGAN_IDS",
     "build_organ_influence_packet",
     "organ_influence_contract_table",
     "organ_influence_packet_from_mapping",
     "organ_influence_packet_from_overlay",
+    "organ_main_chain_integration_table",
 ]

@@ -14,8 +14,10 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from host_brain.persona.organ_influence_contract import (  # noqa: E402
+    MAIN_CHAIN_EFFECTS,
     build_organ_influence_packet,
     organ_influence_contract_table,
+    organ_main_chain_integration_table,
 )
 from host_brain.persona.surface_influence_packet import build_surface_influence_packet  # noqa: E402
 from host_brain.persona.surface_organ_influence import (  # noqa: E402
@@ -129,12 +131,17 @@ def _organ_influence_row(organ_id: str) -> dict[str, Any]:
     allowed_final_slots = _allowed_final_slots(rule["allowed_slots"])
     contract_fields = _changed_contract_fields(contract_packet)
     allowed_contract_fields = set(_contract_by_organ()[organ_id]["allowed_fields"])
+    integration = _integration_by_organ()[organ_id]
+    main_chain_effects = list(integration.get("main_chain_effects") or [])
     effect_hits_allowed_contract = bool(set(changed_slots) & allowed_final_slots)
     mapped_organs = list(dict(packet.get("organ_trace") or {}).get("mapped_organs") or [])
     return {
         "organ_id": organ_id,
         "allowed_slots": list(rule["allowed_slots"]),
         "allowed_final_slots": sorted(allowed_final_slots),
+        "contract_allowed_fields": sorted(allowed_contract_fields),
+        "main_chain_effects": main_chain_effects,
+        "role_summary": str(integration.get("role_summary") or ""),
         "mapped_organs": mapped_organs,
         "mapped_self": organ_id in mapped_organs,
         "overlay_slots": list(dict(packet.get("organ_trace") or {}).get("slots") or []),
@@ -189,6 +196,32 @@ def _checks(*, rows: Sequence[Mapping[str, Any]], full_probe: Mapping[str, Any])
             "organ_contract_table_covers_23_organs",
             set(_contract_by_organ()) == set(SURFACE_ORGAN_IDS) and len(_contract_by_organ()) == 23,
             {"organ_count": len(_contract_by_organ())},
+        ),
+        _check(
+            "main_chain_integration_table_covers_23_organs",
+            set(_integration_by_organ()) == set(SURFACE_ORGAN_IDS) and len(_integration_by_organ()) == 23,
+            {"organ_count": len(_integration_by_organ())},
+        ),
+        _check(
+            "main_chain_integration_effects_are_known",
+            all(
+                set(list(row.get("main_chain_effects") or [])) <= set(MAIN_CHAIN_EFFECTS)
+                and "surface_text" in list(row.get("main_chain_effects") or [])
+                for row in row_list
+            ),
+            {
+                "failed": [
+                    {
+                        "organ_id": row["organ_id"],
+                        "main_chain_effects": row.get("main_chain_effects"),
+                    }
+                    for row in row_list
+                    if not (
+                        set(list(row.get("main_chain_effects") or [])) <= set(MAIN_CHAIN_EFFECTS)
+                        and "surface_text" in list(row.get("main_chain_effects") or [])
+                    )
+                ]
+            },
         ),
         _check(
             "full_probe_maps_all_23_organs",
@@ -346,6 +379,10 @@ def _contract_by_organ() -> dict[str, dict[str, Any]]:
     return {str(row["organ_id"]): dict(row) for row in organ_influence_contract_table()}
 
 
+def _integration_by_organ() -> dict[str, dict[str, Any]]:
+    return {str(row["organ_id"]): dict(row) for row in organ_main_chain_integration_table()}
+
+
 def _allowed_final_slots(allowed_slots: Sequence[Any]) -> set[str]:
     result: set[str] = set()
     for slot in allowed_slots:
@@ -388,8 +425,10 @@ def _markdown_report(summary: Mapping[str, Any], details: Mapping[str, Any]) -> 
         if not isinstance(row, Mapping):
             continue
         lines.append(
-            "- `{organ}` mapped=`{mapped}` changed=`{changed}` allowed=`{allowed}`".format(
+            "- `{organ}` effects=`{effects}` fields=`{fields}` mapped=`{mapped}` changed=`{changed}` allowed=`{allowed}`".format(
                 organ=row.get("organ_id"),
+                effects=",".join(str(item) for item in list(row.get("main_chain_effects") or [])),
+                fields=",".join(str(item) for item in list(row.get("contract_allowed_fields") or [])),
                 mapped=",".join(str(item) for item in list(row.get("mapped_organs") or [])),
                 changed=",".join(str(item) for item in list(row.get("changed_slots") or [])),
                 allowed=",".join(str(item) for item in list(row.get("allowed_slots") or [])),
