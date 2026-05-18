@@ -38,6 +38,7 @@ from host_brain.persona.runtime_labels import (
     TIME_CONTEXT_SHORT_ABSENCE,
     TIME_CONTEXT_SPARSE_INTERACTION,
 )
+from host_brain.persona.identity import resolve_persona_self_id
 
 _logger = logging.getLogger("Natsume.self_model")
 _DEFAULT_PERSISTENT_SELF_DIR = os.environ.get(
@@ -159,7 +160,7 @@ class SelfModel:
     def build_snapshot(
         self,
         *,
-        user_id: str = "user_1",
+        user_id: str = "",
         timeline_summary: dict[str, Any] | None = None,
         timeline_diary: dict[str, Any] | None = None,
         bond_state: Any | None = None,
@@ -461,7 +462,7 @@ class SelfModel:
 # 持久自我核心 — 让自我不是每轮即时摘要
 # ---------------------------------------------------------------------------
 
-def load_persistent_self_state(*, user_id: str = "user_1") -> dict[str, Any]:
+def load_persistent_self_state(*, user_id: str = "") -> dict[str, Any]:
     uid = _normalize_user_id(user_id)
     with _PERSISTENT_SELF_LOCK:
         cached = _PERSISTENT_SELF_CACHE.get(uid)
@@ -485,7 +486,7 @@ def load_persistent_self_state(*, user_id: str = "user_1") -> dict[str, Any]:
 
 def observe_persistent_self_event(
     *,
-    user_id: str = "user_1",
+    user_id: str = "",
     event_kind: str,
     focus: str = "",
     emotion_tag: str = "",
@@ -535,7 +536,8 @@ def observe_persistent_self_event(
 
 
 def build_self_directive_packet(state: Mapping[str, Any] | None) -> dict[str, Any]:
-    payload = _normalize_persistent_self_state(_safe_mapping(state), user_id=str(_safe_mapping(state).get("user_id") or "user_1"))
+    state_map = _safe_mapping(state)
+    payload = _normalize_persistent_self_state(state_map, user_id=_normalize_user_id(state_map.get("user_id")))
     agency_score = _clamp01(float(payload.get("agency_score") or 0.0))
     continuity_score = _clamp01(float(payload.get("self_continuity_score") or 0.0))
     values = _clean_text_list(payload.get("self_values"), limit=4)
@@ -645,7 +647,7 @@ def _persistent_self_file(user_id: str) -> Path:
 
 def _save_persistent_self_state_unlocked(state: Mapping[str, Any]) -> None:
     try:
-        _persistent_self_file(str(state.get("user_id") or "user_1")).write_text(
+        _persistent_self_file(str(state.get("user_id") or "")).write_text(
             json.dumps(dict(state), ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
@@ -671,8 +673,7 @@ def _normalize_persistent_self_state(raw: Mapping[str, Any], *, user_id: str) ->
 
 
 def _normalize_user_id(value: Any) -> str:
-    text = str(value or "").strip()
-    return text or "user_1"
+    return resolve_persona_self_id(value)
 
 
 def _safe_mapping(raw: Any) -> dict[str, Any]:

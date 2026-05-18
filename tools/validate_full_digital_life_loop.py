@@ -21,10 +21,12 @@ from tools.validate_inner_world_self_loop import (  # noqa: E402
     FixtureInnerActivityModel,
     RuntimePatchContext,
     _build_loop_components,
+    _collect_state_files,
     _default_turns,
     _latest_inner_event,
     _load_soul_text,
     _project_inner_state,
+    _persona_identity_file_checks,
     _query_embedding_for_turn,
     _rewind_inner_world_for_idle_tick,
     _run_circuit_breaker_probe,
@@ -99,7 +101,9 @@ async def _run_loop(
 
     components = _build_loop_components(mode=mode, args=args, out_dir=out_dir)
     run_id = components.run_id
-    user_id = components.user_id
+    persona_self_id = components.persona_self_id
+    bond_user_id = components.bond_user_id
+    user_id = bond_user_id
     session_id = components.session_id
     base_ts_ms = int(components.base_ts_ms or int(time.time() * 1000))
     turns = _selected_turns(args)
@@ -108,12 +112,12 @@ async def _run_loop(
     soul_md = _load_soul_text()
     close_result: dict[str, Any] = {}
 
-    breaker_probe = _run_circuit_breaker_probe(out_dir=out_dir, user_id=f"{user_id}-breaker")
+    breaker_probe = _run_circuit_breaker_probe(out_dir=out_dir, user_id=f"{persona_self_id}-breaker")
     seed_memory = write_surface_turn_memory(
         episodic_store=components.store,
         request_id=f"req-{run_id}-seed-memory",
         session_id=session_id,
-        person_id=user_id,
+        person_id=bond_user_id,
         user_message="之前主链文本读起来很生硬。",
         assistant_reply="我会先把句子说顺，再考虑调侃。",
         ts_ms=base_ts_ms,
@@ -131,7 +135,7 @@ async def _run_loop(
     for index, turn in enumerate(turns, start=1):
         request_id = f"req-{run_id}-{index:02d}-{turn.case_id}"
         ts_ms = base_ts_ms + index * 60_000
-        before_self = build_self_directive_packet(load_persistent_self_state(user_id=user_id))
+        before_self = build_self_directive_packet(load_persistent_self_state(user_id=persona_self_id))
         query_embedding, query_embedding_model, query_embedding_source = _query_embedding_for_turn(
             mode=mode,
             fallback_embedding=components.query_embedding,
@@ -139,7 +143,7 @@ async def _run_loop(
             text=turn.user_message,
             service_status=components.service_status,
         )
-        awaken_snapshot = world.on_user_awaken(user_id=user_id).as_dict()
+        awaken_snapshot = world.on_user_awaken(user_id=persona_self_id).as_dict()
         recall_context = ThreeLayerContinuityContext(
             current_user_message=turn.user_message,
             task_mode_hint=turn.task_mode,
@@ -156,7 +160,7 @@ async def _run_loop(
             request_id=f"{request_id}-recall",
             query_embedding=query_embedding,
             intent_id=turn.task_mode,
-            person_id=user_id,
+            person_id=bond_user_id,
             session_id=session_id,
             ts_ms=ts_ms,
             emotion_filter=turn.emotion_tag,
@@ -174,9 +178,9 @@ async def _run_loop(
             relationship_clues=recall_packet.relationship_clues,
             task_mode=turn.task_mode,
         )
-        inner_state_before = world.get_state(user_id=user_id)
+        inner_state_before = world.get_state(user_id=persona_self_id)
         default_state_before = default_agent.export_runtime_state()
-        bond_state_before = components.bond_engine.get_state(user_id)
+        bond_state_before = components.bond_engine.get_state(bond_user_id)
         bond_summary_before = derive_bond_summary(
             {"event_id": request_id, "evidence_refs": list(recall_packet.evidence_refs)},
             bond_score_state=bond_state_before,
@@ -186,7 +190,7 @@ async def _run_loop(
             turn=turn,
             index=index,
             request_id=request_id,
-            user_id=user_id,
+            user_id=bond_user_id,
             session_id=session_id,
             default_state=default_state_before,
             recall_packet=recall_packet.as_dict(),
@@ -205,7 +209,7 @@ async def _run_loop(
             emotion_snapshot={},
             retrieval_summary={"status": "OK", "surface_memory_recall_packet": recall_packet.as_dict()},
             retrieval_evidence_items=[{"evidence_ref": ref} for ref in recall_packet.evidence_refs],
-            person_id=user_id,
+            person_id=bond_user_id,
             session_id=session_id,
             request_id=request_id,
             thread_id=f"thread-{run_id}",
@@ -254,7 +258,7 @@ async def _run_loop(
 
         bond_update = apply_surface_emotion_bond_flow(
             request_id=request_id,
-            person_id=user_id,
+            person_id=bond_user_id,
             session_id=session_id,
             user_message=turn.user_message,
             assistant_reply=surface_result.selected_text,
@@ -274,7 +278,7 @@ async def _run_loop(
             episodic_store=components.store,
             request_id=f"{request_id}-memory-write",
             session_id=session_id,
-            person_id=user_id,
+            person_id=bond_user_id,
             user_message=turn.user_message,
             assistant_reply=surface_result.selected_text,
             ts_ms=ts_ms,
@@ -286,30 +290,30 @@ async def _run_loop(
         )
 
         world.on_session_end(
-            user_id=user_id,
+            user_id=persona_self_id,
             valence=turn.emotion_valence,
             arousal=turn.emotion_arousal,
             pending_topics=[turn.topic],
             mood_baseline=-0.05,
         )
-        _rewind_inner_world_for_idle_tick(world, user_id=user_id, minutes=22, topics=[turn.topic])
-        tick_result = world.tick(user_id=user_id, emit_inner_stream=True)
-        inner_state_after_tick = world.get_state(user_id=user_id)
+        _rewind_inner_world_for_idle_tick(world, user_id=persona_self_id, minutes=22, topics=[turn.topic])
+        tick_result = world.tick(user_id=persona_self_id, emit_inner_stream=True)
+        inner_state_after_tick = world.get_state(user_id=persona_self_id)
         latest_inner_event = _latest_inner_event(inner_state_after_tick)
         private_note = str(latest_inner_event.get("private_text") or latest_inner_event.get("note") or "")
         if private_note:
             private_notes.append(private_note)
         default_tick = default_agent.tick_idle_cycle(
-            person_id=user_id,
+            person_id=persona_self_id,
             topic_phrase=turn.topic,
             source="full_digital_life_loop",
             now_ts_ms=ts_ms + 30_000,
             inner_state=inner_state_after_tick,
         )
-        after_self = build_self_directive_packet(load_persistent_self_state(user_id=user_id))
+        after_self = build_self_directive_packet(load_persistent_self_state(user_id=persona_self_id))
         default_state_after = default_agent.export_runtime_state()
         bond_payload = components.bond_queue.payloads[-1] if components.bond_queue.payloads else {}
-        bond_state_after = components.bond_engine.get_state(str(bond_payload.get("user_id") or user_id))
+        bond_state_after = components.bond_engine.get_state(str(bond_payload.get("user_id") or bond_user_id))
         safe_bond_summary = derive_bond_summary(
             {"event_id": request_id, "evidence_refs": list(bond_payload.get("evidence_refs") or [])},
             bond_score_state=bond_state_after,
@@ -384,7 +388,10 @@ async def _run_loop(
         "mode": components.mode,
         "evaluation_mode": "contract_validation_no_text_quality_scoring",
         "user_id": user_id,
+        "persona_self_id": persona_self_id,
+        "bond_user_id": bond_user_id,
         "session_id": session_id,
+        "state_files": _collect_state_files(out_dir),
         "seed_memory": seed_memory.as_dict(),
         "turns": turn_details,
         "inner_model_calls": list(inner_model.calls) if inner_model is not None else [],
@@ -624,7 +631,9 @@ def _checks(
         if item
     }
     bond_updates = [dict((turn.get("bond") or {}).get("update") or {}) for turn in turns]
+    identity_checks = _persona_identity_file_checks(details)
     return {
+        **identity_checks,
         "breaker_opens_when_model_unavailable": bool(dict(details.get("breaker_probe") or {}).get("passed")),
         "organ_context_collected_each_turn": bool(turns)
         and all(str(meta.get("status") or "") == "OK" for meta in organ_metas)

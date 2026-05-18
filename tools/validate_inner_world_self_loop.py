@@ -30,6 +30,14 @@ INTERNAL_MARKERS = (
     "self_directive",
     "self_model",
 )
+RESERVED_PERSONA_STATE_FILES = {
+    "default_self_model.json",
+    "system_self_model.json",
+    "user_1_self_model.json",
+    "default_inner_world.json",
+    "system_inner_world.json",
+    "user_1_inner_world.json",
+}
 
 
 @dataclass(frozen=True)
@@ -292,6 +300,8 @@ class SelfLoopComponents:
     query_embedding_source: str
     service_status: dict[str, Any]
     run_id: str
+    persona_self_id: str
+    bond_user_id: str
     user_id: str
     session_id: str
     base_ts_ms: int
@@ -322,7 +332,9 @@ async def _run_loop(
 
     components = _build_loop_components(mode=mode, args=args, out_dir=out_dir)
     run_id = components.run_id
-    user_id = components.user_id
+    persona_self_id = components.persona_self_id
+    bond_user_id = components.bond_user_id
+    user_id = bond_user_id
     session_id = components.session_id
     state_dir = out_dir / "inner_world_state"
     world = OfflineInnerWorld(state_dir=str(state_dir))
@@ -336,12 +348,12 @@ async def _run_loop(
     base_ts_ms = int(components.base_ts_ms or int(time.time() * 1000))
     close_result: dict[str, Any] = {}
 
-    breaker_probe = _run_circuit_breaker_probe(out_dir=out_dir, user_id=f"{user_id}-breaker")
+    breaker_probe = _run_circuit_breaker_probe(out_dir=out_dir, user_id=f"{persona_self_id}-breaker")
     seed_memory = write_surface_turn_memory(
         episodic_store=store,
         request_id=f"req-{run_id}-seed-memory",
         session_id=session_id,
-        person_id=user_id,
+        person_id=bond_user_id,
         user_message="之前主链文本读起来很生硬。",
         assistant_reply="我会先把句子说顺，再考虑调侃。",
         ts_ms=base_ts_ms,
@@ -360,7 +372,7 @@ async def _run_loop(
     for index, turn in enumerate(turns, start=1):
         request_id = f"req-{run_id}-{index:02d}-{turn.case_id}"
         ts_ms = base_ts_ms + index * 60_000
-        before_self = build_self_directive_packet(load_persistent_self_state(user_id=user_id))
+        before_self = build_self_directive_packet(load_persistent_self_state(user_id=persona_self_id))
         query_embedding, query_embedding_model, query_embedding_source = _query_embedding_for_turn(
             mode=mode,
             fallback_embedding=components.query_embedding,
@@ -369,7 +381,7 @@ async def _run_loop(
             service_status=components.service_status,
         )
 
-        awaken_snapshot = world.on_user_awaken(user_id=user_id).as_dict()
+        awaken_snapshot = world.on_user_awaken(user_id=persona_self_id).as_dict()
         recall_context = ThreeLayerContinuityContext(
             current_user_message=turn.user_message,
             task_mode_hint=turn.task_mode,
@@ -386,7 +398,7 @@ async def _run_loop(
             request_id=f"{request_id}-recall",
             query_embedding=query_embedding,
             intent_id=turn.task_mode,
-            person_id=user_id,
+            person_id=bond_user_id,
             session_id=session_id,
             ts_ms=ts_ms,
             emotion_filter=turn.emotion_tag,
@@ -404,7 +416,7 @@ async def _run_loop(
             relationship_clues=recall_packet.relationship_clues,
             task_mode=turn.task_mode,
         )
-        inner_state_before = world.get_state(user_id=user_id)
+        inner_state_before = world.get_state(user_id=persona_self_id)
         default_state_before = default_agent.export_runtime_state()
         influence_packet = build_surface_influence_packet(
             reply_plan={
@@ -476,7 +488,7 @@ async def _run_loop(
 
         bond_update = apply_surface_emotion_bond_flow(
             request_id=request_id,
-            person_id=user_id,
+            person_id=bond_user_id,
             session_id=session_id,
             user_message=turn.user_message,
             assistant_reply=surface_result.selected_text,
@@ -496,7 +508,7 @@ async def _run_loop(
             episodic_store=store,
             request_id=f"{request_id}-memory-write",
             session_id=session_id,
-            person_id=user_id,
+            person_id=bond_user_id,
             user_message=turn.user_message,
             assistant_reply=surface_result.selected_text,
             ts_ms=ts_ms,
@@ -508,30 +520,30 @@ async def _run_loop(
         )
 
         world.on_session_end(
-            user_id=user_id,
+            user_id=persona_self_id,
             valence=turn.emotion_valence,
             arousal=turn.emotion_arousal,
             pending_topics=[turn.topic],
             mood_baseline=-0.05,
         )
-        _rewind_inner_world_for_idle_tick(world, user_id=user_id, minutes=22, topics=[turn.topic])
-        tick_result = world.tick(user_id=user_id, emit_inner_stream=True)
-        inner_state_after_tick = world.get_state(user_id=user_id)
+        _rewind_inner_world_for_idle_tick(world, user_id=persona_self_id, minutes=22, topics=[turn.topic])
+        tick_result = world.tick(user_id=persona_self_id, emit_inner_stream=True)
+        inner_state_after_tick = world.get_state(user_id=persona_self_id)
         latest_inner_event = _latest_inner_event(inner_state_after_tick)
         private_note = str(latest_inner_event.get("private_text") or latest_inner_event.get("note") or "")
         if private_note:
             private_notes.append(private_note)
         default_tick = default_agent.tick_idle_cycle(
-            person_id=user_id,
+            person_id=persona_self_id,
             topic_phrase=turn.topic,
             source="inner_world_ticked",
             now_ts_ms=ts_ms + 30_000,
             inner_state=inner_state_after_tick,
         )
-        after_self = build_self_directive_packet(load_persistent_self_state(user_id=user_id))
+        after_self = build_self_directive_packet(load_persistent_self_state(user_id=persona_self_id))
         default_state_after = default_agent.export_runtime_state()
         bond_payload = bond_queue.payloads[-1] if bond_queue.payloads else {}
-        bond_state = bond_engine.get_state(str(bond_payload.get("user_id") or user_id))
+        bond_state = bond_engine.get_state(str(bond_payload.get("user_id") or bond_user_id))
         safe_bond_summary = derive_bond_summary(
             {"event_id": request_id, "evidence_refs": list(bond_payload.get("evidence_refs") or [])},
             bond_score_state=bond_state,
@@ -597,7 +609,10 @@ async def _run_loop(
         "mode": components.mode,
         "evaluation_mode": "contract_validation_no_text_quality_scoring",
         "user_id": user_id,
+        "persona_self_id": persona_self_id,
+        "bond_user_id": bond_user_id,
         "session_id": session_id,
+        "state_files": _collect_state_files(out_dir),
         "seed_memory": seed_memory.as_dict(),
         "breaker_probe": breaker_probe,
         "turns": turn_details,
@@ -632,11 +647,13 @@ async def _run_loop(
 def _build_loop_components(*, mode: str, args: argparse.Namespace, out_dir: Path) -> SelfLoopComponents:
     if mode == "fixture":
         from host_brain.bond.bond_stage_engine import BondStageEngine  # noqa: PLC0415
+        from host_brain.persona.identity import get_canonical_persona_self_id  # noqa: PLC0415
 
         store = FixtureEpisodicStore()
         recall_service = FixtureRecallService(store)
         bond_engine = BondStageEngine()
         run_id = str(getattr(args, "run_id", "") or uuid.uuid4().hex[:12])
+        bond_user_id = f"human-user-{run_id}"
         return SelfLoopComponents(
             mode="fixture",
             store=store,
@@ -648,12 +665,15 @@ def _build_loop_components(*, mode: str, args: argparse.Namespace, out_dir: Path
             query_embedding_source="fixture-static",
             service_status={"fixture": {"ok": True}},
             run_id=run_id,
-            user_id=f"inner-self-{run_id}",
+            persona_self_id=get_canonical_persona_self_id(),
+            bond_user_id=bond_user_id,
+            user_id=bond_user_id,
             session_id=f"sess-inner-self-{run_id}",
             base_ts_ms=int(time.time() * 1000),
         )
     if mode == "live":
         from tools.live_env import load_dotenv  # noqa: PLC0415
+        from host_brain.persona.identity import get_canonical_persona_self_id  # noqa: PLC0415
         from tools.validate_surface_memory_emotion_loop import _build_live_components  # noqa: PLC0415
 
         load_dotenv(ROOT / ".env")
@@ -677,6 +697,8 @@ def _build_loop_components(*, mode: str, args: argparse.Namespace, out_dir: Path
             query_embedding_source=str(live.query_embedding_source),
             service_status=dict(live.service_status),
             run_id=run_id,
+            persona_self_id=get_canonical_persona_self_id(),
+            bond_user_id=str(live.user_id),
             user_id=str(live.user_id),
             session_id=str(live.session_id),
             base_ts_ms=int(live.base_ts_ms),
@@ -966,7 +988,9 @@ def _checks(
         for code in list(((turn.get("surface") or {}).get("observation_codes") or []))
     ]
     generation_traces = [dict((turn.get("surface") or {}).get("generation_trace") or {}) for turn in turns]
+    identity_checks = _persona_identity_file_checks(details)
     return {
+        **identity_checks,
         "breaker_opens_when_model_unavailable": bool(dict(details.get("breaker_probe") or {}).get("passed")),
         "inner_world_generated_private_thoughts": bool(private_notes) and len(private_notes) == len(turns),
         "inner_world_uses_llm_source_only": bool(model_sources) and all(source == "llm" for source in model_sources),
@@ -1024,6 +1048,36 @@ def _checks(
             )
         ),
     }
+
+
+def _collect_state_files(out_dir: Path) -> dict[str, list[str]]:
+    result: dict[str, list[str]] = {}
+    for name in ("self_model_state", "inner_world_state"):
+        folder = out_dir / name
+        if not folder.exists():
+            result[name] = []
+            continue
+        result[name] = sorted(path.name for path in folder.glob("*.json") if path.is_file())
+    return result
+
+
+def _persona_identity_file_checks(details: Mapping[str, Any]) -> dict[str, bool]:
+    persona_self_id = str(details.get("persona_self_id") or "").strip()
+    safe = _safe_identity_file_prefix(persona_self_id)
+    state_files = dict(details.get("state_files") or {})
+    self_files = {str(item) for item in list(state_files.get("self_model_state") or [])}
+    inner_files = {str(item) for item in list(state_files.get("inner_world_state") or [])}
+    reserved_seen = bool((self_files | inner_files) & RESERVED_PERSONA_STATE_FILES)
+    return {
+        "persona_state_uses_canonical_self_id": bool(safe)
+        and f"{safe}_self_model.json" in self_files
+        and f"{safe}_inner_world.json" in inner_files,
+        "persona_state_has_no_reserved_default_system_user1_files": not reserved_seen,
+    }
+
+
+def _safe_identity_file_prefix(identity: str) -> str:
+    return "".join(ch if ch.isalnum() or ch in {"_", "-"} else "_" for ch in str(identity or "").strip())
 
 
 def _markdown_report(summary: Mapping[str, Any], details: Mapping[str, Any]) -> str:

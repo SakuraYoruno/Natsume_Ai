@@ -162,6 +162,11 @@ def generate_inner_activity_note(
         "recent_inner_events",
     ]
     context_digest = _build_context_digest(context)
+    recent_notes = {
+        str(item.get("note") or "").strip()
+        for item in list(context.get("recent_inner_events") or [])
+        if isinstance(item, Mapping)
+    }
 
     system_prompt = _INNER_ACTIVITY_SYSTEM_PROMPT
     prompt_payload = {
@@ -186,6 +191,7 @@ def generate_inner_activity_note(
         },
     }
     prompt_text = json.dumps(prompt_payload, ensure_ascii=False)
+    gen_params = dict(runtime.get("agent_gen_params") or {"temperature": 0.62, "top_p": 0.9})
 
     try:
         raw_text = _run_inner_activity_llm(
@@ -196,7 +202,7 @@ def generate_inner_activity_note(
             prompt_text=prompt_text,
             system_prompt=system_prompt,
             base_url_override=base_url_override,
-            gen_params=dict(runtime.get("agent_gen_params") or {"temperature": 0.62, "top_p": 0.9}),
+            gen_params=gen_params,
         )
     except Exception as exc:
         return "", "", f"INNER_ACTIVITY_LLM_ERROR:{str(exc)[:96]}", {"context_digest": context_digest}
@@ -208,14 +214,29 @@ def generate_inner_activity_note(
         focus = _infer_focus_from_note(note)
     if not note:
         return "", "", "INNER_ACTIVITY_LLM_NOTE_EMPTY", {"context_digest": context_digest}
-
-    recent_notes = {
-        str(item.get("note") or "").strip()
-        for item in list(context.get("recent_inner_events") or [])
-        if isinstance(item, Mapping)
-    }
     if note in recent_notes:
-        return "", "", "INNER_ACTIVITY_LLM_DUPLICATE", {"context_digest": context_digest}
+        retry_result = _retry_inner_activity_llm_after_duplicate(
+            provider_name=provider_name,
+            model_id=model_id,
+            api_key=api_key,
+            timeout_ms=timeout_ms,
+            base_url_override=base_url_override,
+            system_prompt=system_prompt,
+            prompt_payload=prompt_payload,
+            recent_notes=recent_notes,
+            gen_params=gen_params,
+        )
+        retry_note = str(retry_result.get("note") or "").strip()
+        if retry_note:
+            meta = {
+                "context_scope": context_scope,
+                "context_digest": context_digest,
+                "model_id": model_id,
+                "retry_count": 1,
+                "retry_reason": "duplicate_recent_inner_event",
+            }
+            return retry_note, str(retry_result.get("focus") or "self"), "", meta
+        return "", "", str(retry_result.get("reason") or "INNER_ACTIVITY_LLM_DUPLICATE"), {"context_digest": context_digest}
 
     meta = {
         "context_scope": context_scope,
@@ -223,6 +244,60 @@ def generate_inner_activity_note(
         "model_id": model_id,
     }
     return note, focus or "self", "", meta
+
+
+def _retry_inner_activity_llm_after_duplicate(
+    *,
+    provider_name: str,
+    model_id: str,
+    api_key: str,
+    timeout_ms: int,
+    base_url_override: str | None,
+    system_prompt: str,
+    prompt_payload: Mapping[str, Any],
+    recent_notes: set[str],
+    gen_params: Mapping[str, Any],
+) -> dict[str, str]:
+    retry_payload = dict(prompt_payload)
+    retry_payload["retry"] = {
+        "reason": "previous_output_repeated_recent_inner_event",
+        "must_avoid_exact_notes": sorted(recent_notes),
+        "must_choose_fresh_angle": True,
+        "fresh_angle_examples": [
+            "换成对下一次回应的具体担心",
+            "换成对未完话题的短促在意",
+            "换成对自己别逞强的提醒",
+        ],
+    }
+    retry_params = dict(gen_params or {})
+    try:
+        retry_params["temperature"] = min(0.86, float(retry_params.get("temperature") or 0.62) + 0.12)
+    except Exception:
+        retry_params["temperature"] = 0.74
+    try:
+        raw_retry = _run_inner_activity_llm(
+            provider_name=provider_name,
+            model_id=model_id,
+            api_key=api_key,
+            timeout_ms=timeout_ms,
+            prompt_text=json.dumps(retry_payload, ensure_ascii=False),
+            system_prompt=system_prompt,
+            base_url_override=base_url_override,
+            gen_params=retry_params,
+        )
+    except Exception as exc:
+        return {"reason": f"INNER_ACTIVITY_LLM_DUPLICATE_RETRY_FAILED:{str(exc)[:80]}"}
+
+    parsed = extract_llm_json_payload(raw_retry)
+    note = _finalize_inner_note_text(str(parsed.get("note") or ""))
+    focus = str(parsed.get("focus") or "").strip().lower()
+    if focus not in _ALLOWED_FOCUS:
+        focus = _infer_focus_from_note(note)
+    if not note:
+        return {"reason": "INNER_ACTIVITY_LLM_DUPLICATE_RETRY_EMPTY"}
+    if note in recent_notes:
+        return {"reason": "INNER_ACTIVITY_LLM_DUPLICATE"}
+    return {"note": note, "focus": focus or "self"}
 
 
 def extract_llm_json_payload(raw_text: str) -> dict[str, Any]:

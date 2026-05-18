@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from typing import Any, Mapping
 
 from host_brain.core.ids import now_ms
+from host_brain.persona.identity import get_canonical_persona_self_id, resolve_persona_self_id
 from host_brain.tribe.base_agent import TribeAgentDescriptor
 from host_brain.tribe.events import emit_tribe_event
 from host_brain.tribe.tribe_state import TribeStateRegistry, get_global_registry
@@ -100,12 +101,6 @@ def _is_recursive_glymphatic_tick_source(source: str) -> bool:
     return normalized.startswith("glymphatic_deep_clean")
 
 
-def _build_structural_idle_note(*, topic: str) -> str:
-    # Internal state only: never render this as a user-visible chat reply.
-    clean_topic = str(topic or "").strip()
-    return f"tracking topic: {clean_topic[:48]}" if clean_topic else ""
-
-
 @dataclass(slots=True)
 class DefaultModeAgent:
     descriptor: TribeAgentDescriptor = field(
@@ -135,7 +130,7 @@ class DefaultModeAgent:
     def tick_idle_cycle(
         self,
         *,
-        person_id: str = "user_1",
+        person_id: str = "",
         topic_phrase: str = "",
         source: str = "runtime",
         now_ts_ms: int | None = None,
@@ -146,7 +141,7 @@ class DefaultModeAgent:
         from host_brain.persona.motive_runtime import build_offline_state_from_inner_state  # noqa: PLC0415
         from host_brain.persona.self_model import build_self_directive_packet, observe_persistent_self_event  # noqa: PLC0415
 
-        user_id = str(person_id or "user_1").strip() or "user_1"
+        user_id = resolve_persona_self_id(person_id)
         ts_ms = int(now_ts_ms or now_ms())
         resolved_inner_state = dict(inner_state or {})
         if not resolved_inner_state:
@@ -196,10 +191,10 @@ class DefaultModeAgent:
                 reason = f"DEFAULT_MODE_NOTE_FAILED:{str(exc)[:64]}"
 
         if not note:
-            anticipation = list(offline_state.get("anticipation_topics") or [])
-            topic = str(anticipation[0] if anticipation else topic_phrase).strip()
-            note = _build_structural_idle_note(topic=topic)
-            focus = "plan" if topic else "self"
+            focus = str(focus or "self").strip() or "self"
+            if not bool(llm_meta.get("suppressed")):
+                llm_meta["note_unavailable"] = True
+                llm_meta["requires_model"] = True
 
         loneliness = _clamp(float(offline_state.get("loneliness_level") or 0.0))
         anticipation_level = _clamp(float(offline_state.get("anticipation_level") or 0.0))
@@ -392,8 +387,9 @@ class DefaultModeAgent:
 
         snap = self.state_registry.get_state("default_mode_agent") or {}
         state = dict(snap.get("state") or {})
+        persona_self_id = get_canonical_persona_self_id()
         if not state:
-            self.tick_idle_cycle(source="export_runtime_state")
+            self.tick_idle_cycle(person_id=persona_self_id, source="export_runtime_state")
             snap = self.state_registry.get_state("default_mode_agent") or {}
             state = dict(snap.get("state") or {})
         last_tick = dict(state.get("last_tick") or {})
@@ -403,7 +399,7 @@ class DefaultModeAgent:
             try:
                 from host_brain.persona.inner_world import get_inner_world  # noqa: PLC0415
 
-                raw_inner_state = dict(get_inner_world().get_state(user_id="user_1") or {})
+                raw_inner_state = dict(get_inner_world().get_state(user_id=persona_self_id) or {})
             except Exception:
                 raw_inner_state = {}
             inner_monologue = build_inner_monologue_digest(
@@ -414,7 +410,7 @@ class DefaultModeAgent:
             ).as_surface_state()
         self_directive = dict(state.get("self_directive") or {})
         if not self_directive:
-            self_directive = build_self_directive_packet(load_persistent_self_state(user_id="user_1"))
+            self_directive = build_self_directive_packet(load_persistent_self_state(user_id=persona_self_id))
         return {
             "last_note": str(state.get("last_note") or ""),
             "last_focus": str(state.get("last_focus") or "self"),
@@ -458,7 +454,7 @@ class DefaultModeAgent:
         ts_ms = int(getattr(event, "ts_ms", 0) or now_ms())
         await asyncio.to_thread(
             self.tick_idle_cycle,
-            person_id=str(payload.get("user_id") or "user_1"),
+            person_id=resolve_persona_self_id(payload.get("user_id")),
             topic_phrase=str(payload.get("topic_id") or ""),
             source="inner_world_ticked",
             now_ts_ms=ts_ms,
@@ -473,7 +469,7 @@ class DefaultModeAgent:
         ts_ms = int(getattr(event, "ts_ms", 0) or now_ms())
         await asyncio.to_thread(
             self.tick_idle_cycle,
-            person_id=str(payload.get("user_id") or "user_1"),
+            person_id=resolve_persona_self_id(payload.get("user_id")),
             topic_phrase="",
             source="conversation_ended",
             now_ts_ms=ts_ms,

@@ -38,6 +38,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged
+from host_brain.persona.identity import resolve_persona_self_id
 from host_brain.persona.offline_continuity import classify_absence_band
 
 _logger = logging.getLogger("Natsume.inner_world")
@@ -388,15 +389,15 @@ class OfflineInnerWorld:
         inner_world = OfflineInnerWorld()
 
         # 每分钟由 NatsumeScheduler 调用（tick 任务）
-        inner_world.tick(user_id="user_1")
+        inner_world.tick(user_id="natsume_ai")
 
         # 用户开始对话时调用，获取唤醒快照
-        snapshot = inner_world.on_user_awaken(user_id="user_1")
+        snapshot = inner_world.on_user_awaken(user_id="natsume_ai")
         # snapshot.awakening_hint → 注入 prompt
 
         # 对话结束时调用，更新话题和情绪
         inner_world.on_session_end(
-            user_id="user_1",
+            user_id="natsume_ai",
             valence=0.6,
             arousal=0.4,
             pending_topics=["topic_a"],
@@ -425,7 +426,7 @@ class OfflineInnerWorld:
         Returns:
             tick 结果摘要（用于调度器审计）
         """
-        uid = str(user_id).strip()
+        uid = resolve_persona_self_id(user_id)
         now_ms = _now_ms()
 
         with self._lock:
@@ -613,7 +614,7 @@ class OfflineInnerWorld:
         Returns:
             OfflineStateSnapshot，供 PromptBuilder 注入 offline_state 槽位
         """
-        uid = str(user_id).strip()
+        uid = resolve_persona_self_id(user_id)
         now_ms = _now_ms()
 
         with self._lock:
@@ -685,7 +686,7 @@ class OfflineInnerWorld:
             pending_topics: 本次对话中未完结的话题标签列表
             mood_baseline: 长期心情基线（可选，来自 EmotionTimeline）
         """
-        uid = str(user_id).strip()
+        uid = resolve_persona_self_id(user_id)
         now_ms = _now_ms()
 
         with self._lock:
@@ -720,14 +721,14 @@ class OfflineInnerWorld:
 
     def get_state(self, user_id: str) -> dict[str, Any]:
         """获取当前内心状态（用于监控/调试）。"""
-        uid = str(user_id).strip()
+        uid = resolve_persona_self_id(user_id)
         with self._lock:
             state = self._load_state(uid)
             return state.as_dict()
 
     def should_trigger_proactive(self, user_id: str) -> bool:
         """判断孤独感是否达到主动发声阈值。"""
-        uid = str(user_id).strip()
+        uid = resolve_persona_self_id(user_id)
         with self._lock:
             state = self._load_state(uid)
             return state.loneliness >= LONELINESS_PROACTIVE_THRESHOLD
@@ -735,17 +736,21 @@ class OfflineInnerWorld:
     # ── 持久化 ────────────────────────────────────────────────────────────
 
     def _state_file(self, user_id: str) -> Path:
-        return self._state_dir / f"{user_id}_inner_world.json"
+        uid = resolve_persona_self_id(user_id)
+        safe = "".join(ch if ch.isalnum() or ch in {"_", "-"} else "_" for ch in uid)
+        return self._state_dir / f"{safe}_inner_world.json"
 
     def _load_state(self, user_id: str) -> InnerWorldState:
         """从内存缓存或文件加载状态（调用前需持有锁）。"""
-        if user_id in self._states:
-            return self._states[user_id]
-        fp = self._state_file(user_id)
+        uid = resolve_persona_self_id(user_id)
+        if uid in self._states:
+            return self._states[uid]
+        fp = self._state_file(uid)
         if fp.exists():
             try:
                 data = json.loads(fp.read_text(encoding="utf-8"))
                 state = InnerWorldState.from_dict(data)
+                state.user_id = uid
                 state.anticipation_topics = _sanitize_anticipation_topics(state.anticipation_topics)
                 state.inner_stream = _sanitize_inner_stream_events(state.inner_stream)
                 if state.inner_stream:
@@ -760,12 +765,12 @@ class OfflineInnerWorld:
                     state.last_spontaneous_ts_ms = 0
                     state.last_spontaneous_source = ""
                     state.spontaneous_event_count = 0
-                self._states[user_id] = state
+                self._states[uid] = state
                 return state
             except Exception as exc:
-                _logger.warning("InnerWorld: 加载状态失败 user=%s err=%s", user_id, exc)
-        state = InnerWorldState(user_id=user_id)
-        self._states[user_id] = state
+                _logger.warning("InnerWorld: 加载状态失败 user=%s err=%s", uid, exc)
+        state = InnerWorldState(user_id=uid)
+        self._states[uid] = state
         return state
 
     def _save_state(self, state: InnerWorldState) -> None:
@@ -963,7 +968,7 @@ def _generate_inner_stream_note_from_llm(
         topic = _pick_inner_stream_topic(state.anticipation_topics)
         topic_phrase = _topic_to_inner_phrase(topic)
         note, focus, reason, _meta = generate_inner_activity_note(
-            persona_user_id=str(state.user_id or "user_1"),
+            persona_user_id=resolve_persona_self_id(state.user_id),
             absence_band=absence_band,
             offline_hours=offline_hours,
             inner_state=state.as_dict(),
@@ -1033,7 +1038,7 @@ def _generate_inner_stream_note_from_llm(
         from host_brain.persona.self_model import build_self_directive_packet, load_persistent_self_state  # noqa: PLC0415
 
         self_directive = build_self_directive_packet(
-            load_persistent_self_state(user_id=str(state.user_id or "user_1"))
+            load_persistent_self_state(user_id=resolve_persona_self_id(state.user_id))
         )
     except Exception as exc:
         _logger.debug("inner_world self directive degraded: %s", exc)
