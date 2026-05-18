@@ -226,12 +226,15 @@ class RuntimePatchContext:
             "NATSUME_INNER_WORLD_LLM_ENABLED",
             "HOST_INNER_ACTIVITY_LLM_ENABLED",
             "NATSUME_SELF_MODEL_DIR",
+            "HOST_SURFACE_ORIGINAL_QUOTES_ENABLED",
         )
         self.old_env = {key: os.environ.get(key) for key in keys}
         os.environ["HOST_BACKGROUND_TASKS_ENABLED"] = "true"
         os.environ["NATSUME_INNER_WORLD_LLM_ENABLED"] = "true"
         os.environ["HOST_INNER_ACTIVITY_LLM_ENABLED"] = "true"
         os.environ["NATSUME_SELF_MODEL_DIR"] = str(self.out_dir / "self_model_state")
+        if self.inner_model is not None:
+            os.environ["HOST_SURFACE_ORIGINAL_QUOTES_ENABLED"] = "0"
 
         import host_brain.persona.inner_activity_agent as inner_activity_agent  # noqa: PLC0415
         import host_brain.persona.inner_world as inner_world  # noqa: PLC0415
@@ -838,17 +841,17 @@ def _default_turns() -> list[SelfLoopTurn]:
 def _fixture_surface_generate(messages: Sequence[Mapping[str, str]]) -> str:
     rendered = "\n".join(str(message.get("content") or "") for message in messages)
     user_message = _extract_prompt_section(rendered, "## 当前用户输入")
-    if "别管我" in user_message:
+    if "别管" in user_message or "不想说" in user_message or "自己待会儿" in user_message:
         reply = "哈？谁稀罕管你啊。\n……行，那你自己待会儿。\n难受了就叫我，听见没。"
         natsume_tag = "FRUSTRATED"
         user_tag = "HURT"
         confidence = 0.86
-    elif "没人听" in user_message:
+    elif "没人听" in user_message or "没人真的听" in user_message or "低落" in user_message or "没人放在心上" in user_message:
         reply = "有，我听着。你先别把自己一个人扔那儿，最难受的那块先放我这。"
         natsume_tag = "CALM"
         user_tag = "SAD"
         confidence = 0.88
-    elif "还记得" in user_message:
+    elif "记得" in user_message or "输入输出" in user_message or "之前反复提到" in user_message:
         if "生硬" in rendered:
             reply = "记得，最容易崩在生硬和不通顺。先别扩模块，先把这条主链说顺。"
         else:
@@ -856,7 +859,7 @@ def _fixture_surface_generate(messages: Sequence[Mapping[str, str]]) -> str:
         natsume_tag = "THINKING"
         user_tag = "ANXIOUS"
         confidence = 0.84
-    elif "生硬" in user_message:
+    elif "生硬" in user_message or "不通顺" in user_message or "硬邦邦" in user_message:
         reply = "嗯，这次先不逞强。先把句子改顺，再留一点我的脾气。"
         natsume_tag = "THINKING"
         user_tag = "FRUSTRATED"

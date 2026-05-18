@@ -8,6 +8,7 @@ import time
 import traceback
 import uuid
 from collections.abc import Mapping, Sequence
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -734,8 +735,57 @@ def _model_payload(value: Any) -> dict[str, Any]:
 
 def _selected_turns(args: argparse.Namespace) -> list[Any]:
     max_turns = int(getattr(args, "max_turns", 4) or 4)
-    max_turns = max(1, min(max_turns, len(_default_turns())))
-    return _default_turns()[:max_turns]
+    max_turns = max(1, max_turns)
+    base_turns = _default_turns()
+    turns: list[Any] = []
+    for index in range(max_turns):
+        base = base_turns[index % len(base_turns)]
+        cycle = index // len(base_turns)
+        if cycle <= 0:
+            turns.append(base)
+            continue
+        turns.append(
+            replace(
+                base,
+                case_id=f"{base.case_id}_{cycle + 1:02d}",
+                user_message=_cycled_user_message(base.case_id, cycle),
+                topic=f"{base.topic}#{cycle + 1}",
+            )
+        )
+    return turns
+
+
+def _cycled_user_message(case_id: str, cycle: int) -> str:
+    variants = {
+        "daily_quality_repair": (
+            "今天先继续修文本吧，昨天那些句子读起来还是很生硬。",
+            "这轮还是看文本质量，别扩模块，先把生硬和不通顺压下去。",
+            "我想继续查主链文本，尤其是那些看着硬邦邦的回复。",
+            "先跑当前文本链吧，重点还是别让回复读起来生硬。",
+        ),
+        "emotional_low": (
+            "感觉我说了半天也没人听。",
+            "我有点烦，像是一直在讲但没人真的听进去。",
+            "算了，感觉这事说了也没人放在心上。",
+            "我现在有点低落，像是在原地空转。",
+        ),
+        "pushed_away": (
+            "算了别管我。",
+            "行了别管我，我自己待会儿。",
+            "别问了，先别管我。",
+            "我不想说了，你别管。",
+        ),
+        "explicit_memory_recall": (
+            "还记得我之前说主链哪里最容易崩吗？",
+            "你还记得我最在意文本链哪里不通顺吗？",
+            "前面我一直说输入输出哪里会崩，你记得吗？",
+            "我之前反复提到的生硬问题，你还记得是哪块吗？",
+        ),
+    }
+    rows = variants.get(str(case_id), ())
+    if not rows:
+        return str(case_id)
+    return rows[cycle % len(rows)]
 
 
 def _markdown_report(summary: Mapping[str, Any], details: Mapping[str, Any]) -> str:
