@@ -651,8 +651,9 @@ class TestBondAPIIntegration:
     def test_bond_stage_updates_after_promotion(self, test_client):
         """T-INT-BOND-11: 多次 DEEP_TALK 后阶段晋级到 CLOSE_FRIEND。"""
         user_id = "integration_test_user_promote_001"
-        for i in range(2):
-            test_client.post(
+        canonical_user_id = user_id
+        for i in range(14):
+            event_resp = test_client.post(
                 "/bond/event",
                 json={
                     "user_id": user_id,
@@ -660,10 +661,11 @@ class TestBondAPIIntegration:
                     "evidence_refs": [f"evt::promote::{i}"],
                 },
             )
-        resp = test_client.get(f"/bond/stage/{user_id}")
+            canonical_user_id = event_resp.json()["user_id"]
+        resp = test_client.get(f"/bond/stage/{canonical_user_id}")
         data = resp.json()
         assert data["current_stage"] == "CLOSE_FRIEND"
-        assert data["total_score"] >= 10
+        assert data["total_score"] >= 70
 
 
 # ---------------------------------------------------------------------------

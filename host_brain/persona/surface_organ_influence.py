@@ -107,24 +107,24 @@ ORGAN_SURFACE_RULES: tuple[SurfaceOrganRule, ...] = (
     SurfaceOrganRule("prefrontal", ("task", "safety"), 86),
     SurfaceOrganRule("limbic", ("affect", "drive"), 84),
     SurfaceOrganRule("social_brain", ("relationship", "drive"), 82),
-    SurfaceOrganRule("hippocampus", ("memory", "continuity"), 78),
+    SurfaceOrganRule("hippocampus", ("memory", "continuity", "task", "drive", "safety"), 78),
     SurfaceOrganRule("language_system", ("delivery", "safety"), 76),
     SurfaceOrganRule("endocrine", ("affect", "drive", "continuity"), 70),
     SurfaceOrganRule("immune", ("safety", "task"), 70),
     SurfaceOrganRule("pain_reward", ("affect", "drive"), 68),
-    SurfaceOrganRule("somatic", ("affect", "continuity"), 64),
-    SurfaceOrganRule("interoception", ("affect", "continuity"), 64),
-    SurfaceOrganRule("circadian", ("affect", "continuity"), 62),
-    SurfaceOrganRule("glymphatic", ("continuity", "affect"), 60),
-    SurfaceOrganRule("proprioception", ("task", "continuity"), 58),
+    SurfaceOrganRule("somatic", ("affect", "continuity", "task", "drive", "safety", "delivery"), 64),
+    SurfaceOrganRule("interoception", ("affect", "continuity", "task", "drive", "safety", "delivery"), 64),
+    SurfaceOrganRule("circadian", ("affect", "continuity", "task", "drive", "safety", "delivery"), 62),
+    SurfaceOrganRule("glymphatic", ("continuity", "affect", "task", "safety", "delivery"), 60),
+    SurfaceOrganRule("proprioception", ("task", "continuity", "affect", "safety", "delivery"), 58),
     SurfaceOrganRule("initiative_governor", ("task", "continuity"), 56),
-    SurfaceOrganRule("default_mode", ("drive", "continuity"), 52),
+    SurfaceOrganRule("default_mode", ("drive", "continuity", "safety"), 52),
     SurfaceOrganRule("mirror_neuron", ("affect", "drive"), 52),
     SurfaceOrganRule("motor_cortex", ("delivery", "safety"), 48),
-    SurfaceOrganRule("cerebellum", ("delivery", "safety"), 48),
-    SurfaceOrganRule("vestibular", ("task", "continuity"), 46),
+    SurfaceOrganRule("cerebellum", ("delivery", "safety", "task", "affect", "continuity"), 48),
+    SurfaceOrganRule("vestibular", ("task", "continuity", "affect", "safety", "delivery"), 46),
     SurfaceOrganRule("peripheral", ("delivery", "safety"), 44),
-    SurfaceOrganRule("ans", ("affect", "continuity"), 42),
+    SurfaceOrganRule("ans", ("affect", "continuity", "task", "safety", "delivery"), 42),
 )
 
 _RULE_BY_ORGAN = {rule.organ_id: rule for rule in ORGAN_SURFACE_RULES}
@@ -214,8 +214,8 @@ def build_surface_organ_influence_overlay(organ_context: Mapping[str, Any] | Non
     pain_level = _max_float(vital.get("pain_level"), hedonic.get("pain_level"), default=0.0)
     reward_level = _max_float(vital.get("reward_level"), hedonic.get("reward_level"), default=0.0)
     silence_willingness = _coerce_float(
-        vital.get("silence_willingness", context.get("silence_willingness", 0.5)),
-        default=0.5,
+        vital.get("silence_willingness", context.get("silence_willingness", 1.0)),
+        default=1.0,
     )
     ans_recovery_mode = _coerce_bool(ans.get("recovery_mode", vital.get("ans_recovery_mode", False)))
     ans_proactive_multiplier = _coerce_float(
@@ -295,7 +295,7 @@ def build_surface_organ_influence_overlay(organ_context: Mapping[str, Any] | Non
             ),
         }
     )
-    affect = _clean_mapping(
+    affect = _clean_signal_mapping(
         {
             "emotional_tone": _coarse_emotional_tone(emotion, vital, stress=stress, pain_level=pain_level),
             "warmth_bias": _clamp(max(reward_level * 0.48, loneliness * 0.36, mirror_resonance * 0.34)),
@@ -328,7 +328,7 @@ def build_surface_organ_influence_overlay(organ_context: Mapping[str, Any] | Non
         vital=vital,
         social=_safe_mapping(context.get("social_brain_state")),
     )
-    drive = _clean_mapping(
+    drive = _clean_signal_mapping(
         {
             "withdraw_drive": _clamp(
                 max(
@@ -377,28 +377,31 @@ def build_surface_organ_influence_overlay(organ_context: Mapping[str, Any] | Non
             ),
         }
     )
+    continuity_style_anchor = _clean_list(
+        [
+            "连续性面：有近期记忆线索，续上意图而不是复述来源。" if memory_active else "",
+            "连续性面：当前只续上必要信息，不主动开新分支。" if initiative_blocked or high_load else "",
+            "恢复面：当前减少扩展，给自我节律留恢复空间。" if recovery_pressure >= 0.55 or ans_recovery_mode else "",
+            "稳定性面：路由不稳时保持单线程，不跳话题。" if route_should_throttle or vestibular_jitter >= 0.65 else "",
+            *_coerce_text_sequence(default_mode.get("style_anchor")),
+            *_coerce_text_sequence(_safe_mapping(default_mode.get("inner_monologue")).get("style_anchor")),
+            *_coerce_text_sequence(_safe_mapping(default_mode.get("self_directive")).get("style_anchor")),
+        ],
+        limit=6,
+    )
     continuity = _clean_mapping(
         {
-            "should_be_brief": high_load or initiative_blocked or route_should_throttle,
-            "allow_followup": (
-                not initiative_blocked
-                and not route_should_throttle
-                and cognitive_load < 0.86
-                and sleep_pressure < 0.86
-                and recovery_pressure < 0.82
-            ),
-            "style_anchor": _clean_list(
-                [
-                    "连续性面：有近期记忆线索，续上意图而不是复述来源。" if memory_active else "",
-                    "连续性面：当前只续上必要信息，不主动开新分支。" if initiative_blocked or high_load else "",
-                    "恢复面：当前减少扩展，给自我节律留恢复空间。" if recovery_pressure >= 0.55 or ans_recovery_mode else "",
-                    "稳定性面：路由不稳时保持单线程，不跳话题。" if route_should_throttle or vestibular_jitter >= 0.65 else "",
-                    *_coerce_text_sequence(default_mode.get("style_anchor")),
-                    *_coerce_text_sequence(_safe_mapping(default_mode.get("inner_monologue")).get("style_anchor")),
-                    *_coerce_text_sequence(_safe_mapping(default_mode.get("self_directive")).get("style_anchor")),
-                ],
-                limit=6,
-            ),
+            "should_be_brief": True if high_load or initiative_blocked or route_should_throttle else None,
+            "allow_followup": False
+            if (
+                initiative_blocked
+                or route_should_throttle
+                or cognitive_load >= 0.86
+                or sleep_pressure >= 0.86
+                or recovery_pressure >= 0.82
+            )
+            else None,
+            "style_anchor": continuity_style_anchor,
         }
     )
     safety = tuple(
@@ -520,7 +523,7 @@ def _relationship_overlay(
         default=0.0,
     )
     phase = _relationship_phase(stage)
-    return _clean_mapping(
+    return _clean_signal_mapping(
         {
             "relationship_distance": _relationship_distance(stage=stage, intimacy=intimacy),
             "relationship_phase": phase,
@@ -680,6 +683,17 @@ def _clean_mapping(raw: Mapping[str, Any]) -> dict[str, Any]:
     return cleaned
 
 
+def _clean_signal_mapping(raw: Mapping[str, Any]) -> dict[str, Any]:
+    cleaned: dict[str, Any] = {}
+    for key, value in dict(raw).items():
+        if value in (None, "", [], {}, (), False):
+            continue
+        if _looks_numeric(value) and float(value) == 0.0:
+            continue
+        cleaned[str(key)] = value
+    return cleaned
+
+
 def _clean_text(value: Any, *, max_chars: int = 160) -> str:
     return str(value or "").replace("\u3000", " ").strip()[:max_chars]
 
@@ -720,6 +734,16 @@ def _coerce_float(value: Any, *, default: float = 0.0) -> float:
         return float(value)
     except (TypeError, ValueError):
         return float(default)
+
+
+def _looks_numeric(value: Any) -> bool:
+    if isinstance(value, bool):
+        return False
+    try:
+        float(value)
+    except (TypeError, ValueError):
+        return False
+    return True
 
 
 def _coerce_bool(value: Any) -> bool:
