@@ -6,6 +6,7 @@ from typing import Any
 from host_brain.app.chat_runtime_input import build_chat_runtime_input
 from host_brain.app.context.prompt_context_plane import assemble_prompt_context_plane
 from host_brain.app.relational_chat_detector import detect_relational_chat_topic
+from host_brain.persona.organ_influence_contract import build_organ_influence_packet
 from host_brain.persona.surface_affect_control import build_surface_affect_control_packet
 from host_brain.persona.surface_influence_packet import build_surface_influence_packet
 from host_brain.persona.surface_memory_recall import MemoryRecallPacket, memory_recall_packet_from_mapping
@@ -228,6 +229,7 @@ def _surface_context_payload_from_plane(
         organ_context_meta=organ_context_meta,
         reply_plan=reply_plan,
     )
+    organ_influence_packet = build_organ_influence_packet(surface_organ_context)
     influence_packet = build_surface_influence_packet(
         reply_plan=reply_plan,
         affect_packet=affect_packet.as_dict(),
@@ -237,7 +239,7 @@ def _surface_context_payload_from_plane(
         continuity=continuity_payload,
         memory_packet=memory_packet.as_dict() if memory_packet is not None else {},
         delivery={"response_form": str(reply_plan.get("response_form") or "text")},
-        organ_context=surface_organ_context,
+        organ_influence_packet=organ_influence_packet,
     )
     payload: dict[str, Any] = {
         "conversation_history": {
@@ -245,6 +247,7 @@ def _surface_context_payload_from_plane(
         },
         "reply_plan": reply_plan,
         "surface_affect_packet": affect_packet.as_dict(),
+        "organ_influence_packet": organ_influence_packet.as_dict(),
         "surface_influence_packet": influence_packet.as_dict(),
         "surface_organ_context_meta": surface_organ_context_meta,
         "surface_organ_influence": dict(influence_packet.organ_trace),

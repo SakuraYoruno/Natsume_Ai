@@ -118,6 +118,7 @@ def test_build_surface_context_packet_extracts_compressed_context_only(monkeypat
     assert "source_refs" not in packet["surface_memory_recall_packet"]
     assert packet["surface_affect_packet"]["emotional_tone"] == "steady_helpful"
     assert packet["surface_affect_packet"]["relationship_distance"] == "familiar"
+    assert packet["organ_influence_packet"]["source"] == "organ_influence_contract"
     assert packet["surface_influence_packet"]["task"]["task_mode"] == "technical_help"
     assert packet["surface_influence_packet"]["affect"]["emotional_tone"] == "steady_helpful"
     assert packet["surface_influence_packet"]["relationship"]["relationship_distance"] == "familiar"
@@ -230,6 +231,7 @@ def test_build_surface_context_packet_collects_live_tribe_context(monkeypatch) -
     assert packet["surface_organ_context_meta"]["source"] == "cortex_collect_tribe_context"
     assert packet["surface_organ_context_meta"]["status"] == "OK"
     assert packet["surface_organ_context_meta"]["compressed_route_attached"] is True
+    assert packet["organ_influence_packet"]["organ_trace"]["contract_version"] == 1
     assert packet["surface_influence_packet"]["organ_trace"]["risk_level"] == "high"
     mapped_organs = packet["surface_influence_packet"]["organ_trace"]["mapped_organs"]
     assert "limbic" in mapped_organs

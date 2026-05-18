@@ -10,6 +10,7 @@ from host_brain.persona.surface_influence_packet import (
     surface_influence_must_not_do,
     surface_influence_style_anchor,
 )
+from host_brain.persona.organ_influence_contract import build_organ_influence_packet
 from host_brain.persona.surface_organ_influence import (
     SURFACE_ORGAN_IDS,
     build_surface_organ_influence_overlay,
@@ -164,6 +165,36 @@ def test_surface_organ_context_compresses_to_influence_without_raw_state() -> No
     assert packet.task.question_budget == 0
     assert "不要为了角色感造不通顺短句。" in surface_influence_must_not_do(packet)
     assert packet.organ_trace["risk_level"] == "high"
+    assert "RAW SHOULD NOT PASS" not in rendered
+
+
+def test_surface_influence_can_derive_from_organ_contract_packet() -> None:
+    organ_influence_packet = build_organ_influence_packet(
+        {
+            "vital_signs": {
+                "stress_index": 0.82,
+                "cognitive_load_index": 0.78,
+                "immune_risk_level": "high",
+            },
+            "emotion_context": {"emotion_tag": "ANGRY", "emotion_intensity": 0.55},
+            "bond_context": {
+                "stage": "CONFIDANT",
+                "bond_vector": {"intimacy": 0.86, "trust": 0.82},
+            },
+            "raw_organ_outputs": {"limbic": {"messages": ["RAW SHOULD NOT PASS"]}},
+        }
+    )
+
+    packet = build_surface_influence_packet(
+        reply_plan={"primary_topic": "daily_chat", "interaction_move": "reply_current_turn"},
+        organ_influence_packet=organ_influence_packet,
+    )
+    rendered = json.dumps(packet.as_dict(), ensure_ascii=False)
+
+    assert packet.affect.emotional_tone == "soft_containment"
+    assert packet.relationship.relationship_distance == "close"
+    assert packet.task.information_budget == "very_short"
+    assert packet.organ_trace["contract_version"] == 1
     assert "RAW SHOULD NOT PASS" not in rendered
 
 

@@ -4,7 +4,11 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
-from host_brain.persona.surface_organ_influence import build_surface_organ_influence_overlay
+from host_brain.persona.organ_influence_contract import (
+    OrganInfluencePacket,
+    build_organ_influence_packet,
+    organ_influence_packet_from_mapping,
+)
 
 
 @dataclass(frozen=True)
@@ -170,6 +174,7 @@ def build_surface_influence_packet(
     memory_packet: Mapping[str, Any] | None = None,
     delivery: Mapping[str, Any] | None = None,
     organ_context: Mapping[str, Any] | None = None,
+    organ_influence_packet: OrganInfluencePacket | Mapping[str, Any] | None = None,
 ) -> SurfaceInfluencePacket:
     """Compress prompt-facing organ influence into a small typed packet.
 
@@ -178,17 +183,20 @@ def build_surface_influence_packet(
     natural-language module advice.
     """
 
-    organ_overlay = build_surface_organ_influence_overlay(organ_context)
+    organ_packet = _coerce_organ_influence_packet(
+        organ_context=organ_context,
+        organ_influence_packet=organ_influence_packet,
+    )
     plan = _safe_mapping(reply_plan)
-    organ_task = _safe_mapping(organ_overlay.task)
+    organ_task = _safe_mapping(organ_packet.task_delta)
     affect = _safe_mapping(affect_packet)
-    organ_affect = _safe_mapping(organ_overlay.affect)
+    organ_affect = _safe_mapping(organ_packet.emotion_delta)
     affect_block = _max_numeric_mapping(_safe_mapping(affect_state), organ_affect)
-    relationship = {**_safe_mapping(organ_overlay.relationship), **_safe_mapping(relationship_state)}
-    drive = _max_numeric_mapping(_safe_mapping(drive_state), _safe_mapping(organ_overlay.drive))
-    continuity_block = {**_safe_mapping(organ_overlay.continuity), **_safe_mapping(continuity)}
+    relationship = {**_safe_mapping(organ_packet.relationship_delta), **_safe_mapping(relationship_state)}
+    drive = _max_numeric_mapping(_safe_mapping(drive_state), _safe_mapping(organ_packet.drive_delta))
+    continuity_block = {**_safe_mapping(organ_packet.continuity_delta), **_safe_mapping(continuity)}
     memory = _safe_mapping(memory_packet)
-    delivery_payload = {**_safe_mapping(organ_overlay.delivery), **_safe_mapping(delivery)}
+    delivery_payload = {**_safe_mapping(organ_packet.delivery_delta), **_safe_mapping(delivery)}
 
     relationship_distance = _clean_text(
         affect.get("relationship_distance")
@@ -265,7 +273,7 @@ def build_surface_influence_packet(
             "不要输出器官名、器官状态、内部驱动值或控制包字段。",
             "不要把情绪、关系、记忆来源当作元信息解释给用户。",
             "不要让器官状态覆盖用户当前事实和任务目标。",
-            *_coerce_sequence(organ_overlay.safety),
+            *_coerce_sequence(organ_packet.surface_constraints),
         ],
         limit=8,
     )
@@ -342,7 +350,7 @@ def build_surface_influence_packet(
                 )
             ),
         ),
-        organ_trace=dict(organ_overlay.trace),
+        organ_trace=dict(organ_packet.organ_trace),
     )
 
 
@@ -423,6 +431,16 @@ def surface_influence_trace(packet: SurfaceInfluencePacket) -> dict[str, Any]:
         "continuity_turns": packet.continuity.recent_turns_injected,
         "organ_trace": dict(packet.organ_trace),
     }
+
+
+def _coerce_organ_influence_packet(
+    *,
+    organ_context: Mapping[str, Any] | None,
+    organ_influence_packet: OrganInfluencePacket | Mapping[str, Any] | None,
+) -> OrganInfluencePacket:
+    if organ_influence_packet is not None:
+        return organ_influence_packet_from_mapping(organ_influence_packet)
+    return build_organ_influence_packet(organ_context)
 
 
 def _task_from_mapping(raw: Any) -> TaskInfluence:

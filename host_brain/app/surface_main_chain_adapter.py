@@ -37,6 +37,7 @@ _TRACE_RUNTIME_PAYLOAD_KEYS = (
     "drive_state",
     "reply_plan",
     "surface_affect_packet",
+    "organ_influence_packet",
     "surface_influence_packet",
     "surface_organ_context_meta",
     "surface_organ_influence",

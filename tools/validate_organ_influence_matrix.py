@@ -13,6 +13,10 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from host_brain.persona.organ_influence_contract import (  # noqa: E402
+    build_organ_influence_packet,
+    organ_influence_contract_table,
+)
 from host_brain.persona.surface_influence_packet import build_surface_influence_packet  # noqa: E402
 from host_brain.persona.surface_organ_influence import (  # noqa: E402
     SURFACE_ORGAN_IDS,
@@ -48,6 +52,18 @@ ALLOWED_FINAL_SLOTS = {
     "delivery": {"delivery"},
     "drive": {"affect", "relationship", "continuity"},
 }
+CONTRACT_FIELDS = (
+    "task_delta",
+    "emotion_delta",
+    "relationship_delta",
+    "drive_delta",
+    "memory_candidates",
+    "continuity_delta",
+    "attention_focus",
+    "inner_world_seed",
+    "surface_constraints",
+    "delivery_delta",
+)
 
 
 def run_validation(*, out_dir: Path | None = None) -> dict[str, Any]:
@@ -84,6 +100,7 @@ def _organ_influence_row(organ_id: str) -> dict[str, Any]:
     context["raw_organ_outputs"] = {organ_id: {"messages": [RAW_LEAK_MARKER]}}
     baseline = _packet_payload({})
     packet = _packet_payload(context)
+    contract_packet = build_organ_influence_packet(context).as_dict()
     overlay = build_surface_organ_influence_overlay(context)
     compiled = compile_reply_control_packet(
         user_message="验证当前器官是否实际影响主链。",
@@ -99,6 +116,7 @@ def _organ_influence_row(organ_id: str) -> dict[str, Any]:
             "overlay": overlay.as_dict(),
             "packet": packet,
             "reply_control": compiled.packet.model_dump(),
+            "organ_influence_packet": contract_packet,
         },
         ensure_ascii=False,
         sort_keys=True,
@@ -109,6 +127,8 @@ def _organ_influence_row(organ_id: str) -> dict[str, Any]:
         if packet.get(slot) != baseline.get(slot)
     ]
     allowed_final_slots = _allowed_final_slots(rule["allowed_slots"])
+    contract_fields = _changed_contract_fields(contract_packet)
+    allowed_contract_fields = set(_contract_by_organ()[organ_id]["allowed_fields"])
     effect_hits_allowed_contract = bool(set(changed_slots) & allowed_final_slots)
     mapped_organs = list(dict(packet.get("organ_trace") or {}).get("mapped_organs") or [])
     return {
@@ -118,8 +138,10 @@ def _organ_influence_row(organ_id: str) -> dict[str, Any]:
         "mapped_organs": mapped_organs,
         "mapped_self": organ_id in mapped_organs,
         "overlay_slots": list(dict(packet.get("organ_trace") or {}).get("slots") or []),
+        "contract_fields": contract_fields,
         "changed_slots": changed_slots,
         "has_final_packet_effect": bool(changed_slots),
+        "contract_effect_hits_allowed_fields": bool(set(contract_fields) & allowed_contract_fields),
         "effect_hits_allowed_contract": effect_hits_allowed_contract,
         "raw_context_dropped": RAW_LEAK_MARKER not in rendered
         and int(dict(packet.get("organ_trace") or {}).get("dropped_raw_field_count") or 0) >= 1,
@@ -164,6 +186,11 @@ def _checks(*, rows: Sequence[Mapping[str, Any]], full_probe: Mapping[str, Any])
             {"organ_count": len(SURFACE_ORGAN_IDS)},
         ),
         _check(
+            "organ_contract_table_covers_23_organs",
+            set(_contract_by_organ()) == set(SURFACE_ORGAN_IDS) and len(_contract_by_organ()) == 23,
+            {"organ_count": len(_contract_by_organ())},
+        ),
+        _check(
             "full_probe_maps_all_23_organs",
             int(full_probe.get("mapped_organ_count") or 0) == 23 and not list(full_probe.get("missing_organs") or []),
             dict(full_probe),
@@ -190,6 +217,21 @@ def _checks(*, rows: Sequence[Mapping[str, Any]], full_probe: Mapping[str, Any])
                     }
                     for row in row_list
                     if not bool(row.get("effect_hits_allowed_contract"))
+                ]
+            },
+        ),
+        _check(
+            "each_organ_effect_hits_allowed_contract_fields",
+            all(bool(row.get("contract_effect_hits_allowed_fields")) for row in row_list),
+            {
+                "failed": [
+                    {
+                        "organ_id": row["organ_id"],
+                        "allowed_fields": _contract_by_organ()[str(row["organ_id"])]["allowed_fields"],
+                        "contract_fields": row.get("contract_fields"),
+                    }
+                    for row in row_list
+                    if not bool(row.get("contract_effect_hits_allowed_fields"))
                 ]
             },
         ),
@@ -300,11 +342,23 @@ def _rule_by_organ() -> dict[str, dict[str, Any]]:
     return {str(row["organ_id"]): dict(row) for row in organ_surface_rule_table()}
 
 
+def _contract_by_organ() -> dict[str, dict[str, Any]]:
+    return {str(row["organ_id"]): dict(row) for row in organ_influence_contract_table()}
+
+
 def _allowed_final_slots(allowed_slots: Sequence[Any]) -> set[str]:
     result: set[str] = set()
     for slot in allowed_slots:
         result.update(ALLOWED_FINAL_SLOTS.get(str(slot), set()))
     return result
+
+
+def _changed_contract_fields(packet: Mapping[str, Any]) -> list[str]:
+    return [
+        field_name
+        for field_name in CONTRACT_FIELDS
+        if packet.get(field_name) not in (None, "", [], {}, ())
+    ]
 
 
 def _check(name: str, passed: bool, details: Mapping[str, Any] | None = None) -> dict[str, Any]:
