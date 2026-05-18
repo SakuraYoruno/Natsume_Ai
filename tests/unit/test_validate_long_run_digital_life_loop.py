@@ -46,9 +46,14 @@ def test_long_run_fixture_validates_timeline_contract(tmp_path) -> None:
     summary = result["summary"]
     assert summary["passed"] is True
     assert summary["service_boundary_passed"] is True
+    assert summary["idle_loop_passed"] is True
+    assert summary["idle_loop_tick_count"] == 8
+    assert summary["idle_loop_simulated_hours"] == 24
     assert summary["service_boundary_components"]["chroma"]["runtime_class"] == "mock"
     assert summary["turn_count"] == 6
     assert summary["checks"]["service_boundary.fixture_marks_mock_components"] is True
+    assert summary["checks"]["idle_loop.idle_loop_has_no_surface_replies"] is True
+    assert summary["checks"]["idle_loop.inner_world_appends_new_private_event_each_tick"] is True
     assert summary["checks"]["long_run.reaches_minimum_turns"] is True
     assert "long_run.reaches_minimum_30_turns" not in summary["checks"]
     assert summary["checks"]["long_run.timeline_has_required_event_types"] is True

@@ -18,6 +18,10 @@ from tools.validate_full_digital_life_loop import (  # noqa: E402
     build_arg_parser as build_full_arg_parser,
     run_full_digital_life_loop_validation,
 )
+from tools.validate_idle_digital_life_loop import (  # noqa: E402
+    build_arg_parser as build_idle_arg_parser,
+    run_idle_digital_life_loop_validation,
+)
 from tools.validate_live_service_boundaries import (  # noqa: E402
     build_arg_parser as build_service_boundary_arg_parser,
     run_live_service_boundary_validation,
@@ -52,6 +56,12 @@ async def run_long_run_digital_life_loop_validation(args: argparse.Namespace) ->
     full_result = await run_full_digital_life_loop_validation(full_args)
     details = dict(full_result.get("details") or {})
     full_summary = dict(full_result.get("summary") or {})
+    idle_result = (
+        {"summary": {"passed": True, "checks": {}, "output_dir": "", "skipped": True}, "details": {}}
+        if bool(getattr(args, "skip_idle_validation", False))
+        else run_idle_digital_life_loop_validation(_idle_loop_args(args=args, out_dir=out_dir, mode=mode))
+    )
+    idle_summary = dict(idle_result.get("summary") or {})
     timeline = _build_timeline(details)
     long_checks = _long_checks(
         full_summary=full_summary,
@@ -64,11 +74,16 @@ async def run_long_run_digital_life_loop_validation(args: argparse.Namespace) ->
         f"service_boundary.{str(key).split('service_boundary.', 1)[-1]}": bool(value)
         for key, value in dict(service_boundary_summary.get("checks") or {}).items()
     }
+    idle_checks = {
+        f"idle_loop.{str(key).split('idle_loop.', 1)[-1]}": bool(value)
+        for key, value in dict(idle_summary.get("checks") or {}).items()
+    }
     summary = {
         "mode": mode,
         "evaluation_mode": "long_run_digital_life_loop_contract_validation_no_text_quality_scoring",
         "passed": bool(service_boundary_summary.get("passed"))
         and bool(full_summary.get("passed"))
+        and bool(idle_summary.get("passed"))
         and all(long_checks.values()),
         "turn_count": len(list(details.get("turns") or [])),
         "requested_turns": turns,
@@ -78,9 +93,14 @@ async def run_long_run_digital_life_loop_validation(args: argparse.Namespace) ->
         "service_boundary_output_dir": str(service_boundary_summary.get("output_dir") or ""),
         "service_boundary_components": dict(service_boundary_summary.get("components") or {}),
         "full_loop_passed": bool(full_summary.get("passed")),
+        "idle_loop_passed": bool(idle_summary.get("passed")),
+        "idle_loop_output_dir": str(idle_summary.get("output_dir") or ""),
+        "idle_loop_tick_count": int(idle_summary.get("tick_count") or 0),
+        "idle_loop_simulated_hours": float(idle_summary.get("simulated_hours") or 0.0),
         "checks": {
             **service_boundary_checks,
             **{f"full_loop.{key}": bool(value) for key, value in dict(full_summary.get("checks") or {}).items()},
+            **idle_checks,
             **long_checks,
         },
         "output_dir": str(out_dir),
@@ -92,6 +112,8 @@ async def run_long_run_digital_life_loop_validation(args: argparse.Namespace) ->
         "service_boundary_details": dict(service_boundary_result.get("details") or {}),
         "full_summary": full_summary,
         "full_details": details,
+        "idle_summary": idle_summary,
+        "idle_details": dict(idle_result.get("details") or {}),
         "timeline": timeline,
     }
     _write_json(out_dir / "summary.json", summary)
@@ -99,7 +121,13 @@ async def run_long_run_digital_life_loop_validation(args: argparse.Namespace) ->
     _write_jsonl(out_dir / "timeline.jsonl", timeline)
     (out_dir / "timeline.md").write_text(_timeline_markdown(summary, timeline), encoding="utf-8")
     (out_dir / "report.md").write_text(
-        _report_markdown(summary, details, timeline, service_boundary_summary=service_boundary_summary),
+        _report_markdown(
+            summary,
+            details,
+            timeline,
+            service_boundary_summary=service_boundary_summary,
+            idle_summary=idle_summary,
+        ),
         encoding="utf-8",
     )
     return {"summary": summary, "details": long_details}
@@ -306,8 +334,10 @@ def _report_markdown(
     timeline: Sequence[Mapping[str, Any]],
     *,
     service_boundary_summary: Mapping[str, Any] | None = None,
+    idle_summary: Mapping[str, Any] | None = None,
 ) -> str:
     service_boundary = dict(service_boundary_summary or {})
+    idle = dict(idle_summary or {})
     lines = [
         "# Long Run Digital Life Loop Validation",
         "",
@@ -316,10 +346,12 @@ def _report_markdown(
         f"- mode: `{summary.get('mode')}`",
         f"- passed: `{summary.get('passed')}`",
         f"- service_boundary_passed: `{summary.get('service_boundary_passed')}`",
+        f"- idle_loop_passed: `{summary.get('idle_loop_passed')}`",
         f"- turn_count: `{summary.get('turn_count')}`",
         f"- timeline_event_count: `{summary.get('timeline_event_count')}`",
         f"- service_boundary_output_dir: `{summary.get('service_boundary_output_dir')}`",
         f"- full_loop_output_dir: `{summary.get('full_loop_output_dir')}`",
+        f"- idle_loop_output_dir: `{summary.get('idle_loop_output_dir')}`",
         "",
         "## Service Boundary",
         "",
@@ -331,6 +363,19 @@ def _report_markdown(
             f"class=`{item.get('runtime_class')}` status=`{item.get('status')}` "
             f"detail={item.get('detail')}"
         )
+    lines.extend(
+        [
+            "",
+            "## Idle Loop",
+            "",
+            f"- passed: `{idle.get('passed')}`",
+            f"- tick_count: `{idle.get('tick_count')}`",
+            f"- simulated_hours: `{idle.get('simulated_hours')}`",
+            f"- private_thought_count: `{idle.get('private_thought_count')}`",
+            f"- self_update_count: `{idle.get('self_update_count')}`",
+            f"- surface_reply_count: `{idle.get('surface_reply_count')}`",
+        ]
+    )
     lines.extend(
         [
             "",
@@ -397,6 +442,25 @@ def _service_boundary_args(*, args: argparse.Namespace, out_dir: Path, mode: str
     return build_service_boundary_arg_parser().parse_args(argv)
 
 
+def _idle_loop_args(*, args: argparse.Namespace, out_dir: Path, mode: str) -> argparse.Namespace:
+    return build_idle_arg_parser().parse_args(
+        [
+            "--mode",
+            mode,
+            "--out-dir",
+            str(out_dir / "idle_loop"),
+            "--run-id",
+            f"{str(getattr(args, 'run_id', '') or 'long-run')}-idle",
+            "--ticks",
+            str(max(1, int(getattr(args, "idle_ticks", 8) or 8))),
+            "--tick-minutes",
+            str(max(5, int(getattr(args, "idle_tick_minutes", 180) or 180))),
+            "--min-hours",
+            str(max(0.0, float(getattr(args, "idle_min_hours", 24.0) or 24.0))),
+        ]
+    )
+
+
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run a 30+ turn digital-life long-run loop validation.")
     parser.add_argument("--mode", choices=("fixture", "live"), default="fixture")
@@ -408,6 +472,14 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "--allow-hash-embedding",
         action="store_true",
         help="Allow hash embedding fallback to pass the live service boundary preflight.",
+    )
+    parser.add_argument("--idle-ticks", type=int, default=8)
+    parser.add_argument("--idle-tick-minutes", type=int, default=180)
+    parser.add_argument("--idle-min-hours", type=float, default=24.0)
+    parser.add_argument(
+        "--skip-idle-validation",
+        action="store_true",
+        help="Skip the idle digital-life loop validation inside the long-run contract.",
     )
     return parser
 
