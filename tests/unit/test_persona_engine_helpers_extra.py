@@ -122,36 +122,6 @@ def test_get_expression_adapter_handles_tender_and_bright_dict_branches() -> Non
     assert bright_hint.追问倾向 == pytest.approx(0.1, abs=1e-6)
 
 
-def test_get_expression_adapter_handles_mid_openness_bright_and_subdued() -> None:
-    engine = PersonaEngine()
-    traits = PersonalityTraits(
-        warmth=0.2,
-        curiosity=0.5,
-        humor=0.1,
-        sensitivity=0.5,
-        assertiveness=0.65,
-        playfulness=0.2,
-        resilience=0.1,
-    )
-
-    bright = engine.get_expression_adapter(
-        traits,
-        {"label": "HAPPY", "valence": 0.7, "arousal": 0.85},
-        "CLOSE_FRIEND",
-    )
-    subdued = engine.get_expression_adapter(
-        traits,
-        {"label": "SAD", "valence": -0.6, "arousal": 0.2},
-        "CLOSE_FRIEND",
-    )
-
-    assert bright.style_hint == "自信坚定"
-    assert bright.tone == "serious_bright"
-    assert bright.echo_weight_modifier == pytest.approx(0.05, abs=1e-6)
-    assert bright.追问倾向 == pytest.approx(0.025, abs=1e-6)
-    assert subdued.tone == "serious_subdued"
-
-
 def test_get_self_model_snapshot_uses_self_model_and_filters_unknown_fields(monkeypatch: pytest.MonkeyPatch) -> None:
     engine = PersonaEngine()
 

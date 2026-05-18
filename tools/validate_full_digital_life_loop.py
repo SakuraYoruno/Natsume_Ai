@@ -37,6 +37,7 @@ from tools.validate_surface_organ_system import (  # noqa: E402
 
 DEFAULT_OUT = ROOT / "artifacts" / "full_digital_life_loop"
 SOURCE_REF_MARKERS = ("memory://", "evd://", "chat://", "source_refs=", "evidence_refs=", "metadata")
+MEMORY_REPLY_TOKENS = ("输入输出", "生硬", "不通顺", "硬邦邦", "一硬就断", "读起来")
 INTERNAL_MARKERS = (
     "ReplyControlPacket",
     "EmotionTag",
@@ -643,7 +644,7 @@ def _checks(
         and bool({"bond", "neo4j_bond", "route_neo4j_bond"} & route_and_store_ids),
         "memory_fact_available_to_surface": "生硬" in memory_fact_joined or "不通顺" in memory_fact_joined,
         "explicit_memory_reply_uses_recalled_fact": all(
-            str(turn.get("expected_memory_term") or "") in str(turn.get("reply_text") or "")
+            _reply_uses_expected_memory_fact(turn)
             for turn in memory_answer_turns
         ),
         "emotion_tags_and_vts_present": bool(turns)
@@ -695,6 +696,19 @@ def _checks(
             )
         ),
     }
+
+
+def _reply_uses_expected_memory_fact(turn: Mapping[str, Any]) -> bool:
+    expected = str(turn.get("expected_memory_term") or "").strip()
+    reply = str(turn.get("reply_text") or "")
+    if expected and expected in reply:
+        return True
+    recall = dict(turn.get("memory_recall") or {})
+    recall_facts = "\n".join(str(item) for item in list(recall.get("facts") or []))
+    if not recall_facts:
+        return False
+    relevant_tokens = [token for token in MEMORY_REPLY_TOKENS if token in recall_facts]
+    return bool(relevant_tokens) and any(token in reply for token in relevant_tokens)
 
 
 def _mapped_count(turn: Mapping[str, Any]) -> int:

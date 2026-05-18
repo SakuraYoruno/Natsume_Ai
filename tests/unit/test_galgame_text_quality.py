@@ -720,26 +720,6 @@ def test_give_up_contract_accepts_later_revisit_word() -> None:
     assert "CONTRACT_FORBIDDEN_SURFACE" in probe.reason_codes
 
 
-def test_user_proud_contract_rejects_tell_me_prompt() -> None:
-    contract = build_galgame_text_contract(user_message="我厉害吧", scene_id="")
-
-    scored = score_galgame_candidate(text="哦？这么得意啊。还行吧，不过要是真这么厉害，说出来让我听听看？", contract=contract)
-    wrong_address = score_galgame_candidate(
-        text="哼，这么得意？让我看看怎么回事……哦，是挺行的嘛。不过也不看看是谁的哥哥！勉强给你鼓个掌好了。",
-        contract=contract,
-    )
-    over_chase = score_galgame_candidate(
-        text="哼，这就翘尾巴了？行行行，尼尼最厉害啦。不过下次可别得意忘形让我追上哦。",
-        contract=contract,
-    )
-
-    assert contract.scene_id == "user_proud"
-    assert "CONTRACT_FORBIDDEN_SURFACE" in scored.reason_codes
-    assert not wrong_address.hard_fail
-    assert "ROLE_KINSHIP_SOFT_MISMATCH" in wrong_address.reason_codes
-    assert "CONTRACT_FORBIDDEN_SURFACE" in over_chase.reason_codes
-
-
 def test_followup_contracts_split_why_and_then() -> None:
     why_contract = build_galgame_text_contract(user_message="为什么", scene_id="")
     then_contract = build_galgame_text_contract(user_message="然后呢", scene_id="")

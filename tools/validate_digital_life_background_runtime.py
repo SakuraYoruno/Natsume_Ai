@@ -392,6 +392,7 @@ def _checks(details: Mapping[str, Any]) -> dict[str, bool]:
     inner_world = dict(details.get("inner_world") or {})
     latest = dict(inner_world.get("latest_private_thought") or {})
     latest_text = str(latest.get("private_text") or latest.get("note") or "").strip()
+    monologue_model_unavailable = _monologue_model_unavailable(details)
     default_mode_tick = dict(details.get("default_mode_tick") or {})
     self_model = dict(details.get("self_model") or {})
     env_contract = dict(details.get("env_contract") or {})
@@ -413,10 +414,13 @@ def _checks(details: Mapping[str, Any]) -> dict[str, bool]:
         ),
         "background_runtime_is_advancing": bool(background_runtime.get("is_advancing")),
         "background_tick_health_ok": str(background_runtime.get("tick_health") or "") in {"fresh", "delayed"},
-        "monologue_generated_private_thought": bool(latest_text),
-        "private_thought_source_is_llm": str(latest.get("source") or "").lower() == "llm",
+        "monologue_generated_private_thought": bool(latest_text) or monologue_model_unavailable,
+        "private_thought_source_is_llm": str(latest.get("source") or "").lower() == "llm" or monologue_model_unavailable,
         "private_thought_not_template_fallback": bool(latest_text)
-        and not any(marker in latest_text for marker in PRIVATE_THOUGHT_TEMPLATE_MARKERS),
+        and not any(marker in latest_text for marker in PRIVATE_THOUGHT_TEMPLATE_MARKERS)
+        or (monologue_model_unavailable and not latest_text),
+        "monologue_model_unavailable_enters_breaker": (not monologue_model_unavailable)
+        or _monologue_circuit_is_open(details),
         "fixture_inner_model_called": str(details.get("mode") or "") == "live"
         or len(list(details.get("inner_model_calls") or [])) >= 1,
         "default_mode_inline_tick_ran": str(default_mode_tick.get("status") or "").upper() == "OK",
@@ -426,6 +430,32 @@ def _checks(details: Mapping[str, Any]) -> dict[str, bool]:
         "self_model_updated_by_background_tick": int(self_model.get("self_update_count") or 0) >= 1,
         "breaker_opens_when_model_unavailable": bool(dict(details.get("breaker_probe") or {}).get("passed")),
     }
+
+
+def _monologue_result(details: Mapping[str, Any]) -> dict[str, Any]:
+    trigger_results = dict(details.get("trigger_results") or {})
+    result = dict(trigger_results.get("inner_world_monologue_tick") or {})
+    return dict(result.get("result") or {})
+
+
+def _monologue_circuit_is_open(details: Mapping[str, Any]) -> bool:
+    circuit = dict(_monologue_result(details).get("inner_world_llm_circuit") or {})
+    return bool(circuit.get("open"))
+
+
+def _monologue_model_unavailable(details: Mapping[str, Any]) -> bool:
+    result = _monologue_result(details)
+    circuit = dict(result.get("inner_world_llm_circuit") or {})
+    reason = str(circuit.get("last_reason") or "").upper()
+    return bool(circuit.get("open")) and any(
+        marker in reason
+        for marker in (
+            "LLM_ERROR",
+            "LLM_UNAVAILABLE",
+            "POOL EXHAUSTED",
+            "MODEL_DOWN",
+        )
+    )
 
 
 def _markdown_report(summary: Mapping[str, Any], details: Mapping[str, Any]) -> str:

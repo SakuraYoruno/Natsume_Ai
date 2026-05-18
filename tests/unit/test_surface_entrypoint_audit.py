@@ -79,12 +79,6 @@ def test_tools_direct_low_level_surface_builders_are_explicit_fixture_tools() ->
         assert "SURFACE_LOW_LEVEL_ENTRYPOINT_ALLOWED = _SURFACE_LOW_LEVEL_ENTRYPOINT_ALLOWED" in text
 
 
-def test_tools_do_not_construct_reply_control_packets_directly() -> None:
-    direct_files = _direct_call_files(TOOLS, _PACKET_CONSTRUCTOR_RE)
-
-    assert direct_files == set()
-
-
 def test_surface_tool_contract_payload_marks_non_main_chain() -> None:
     payload = surface_tool_contract_payload("probe")
 

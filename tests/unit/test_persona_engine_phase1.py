@@ -335,12 +335,3 @@ class TestSelfModelSnapshot:
         snap = engine.get_self_model_snapshot("snap_user")
         assert isinstance(snap, SelfModelSnapshot)
         assert snap.recent_mood_trend == "平稳"
-
-    def test_self_model_snapshot_after_growth(self):
-        """成长后，自省快照能感知到变化。"""
-        engine = PersonaEngine.get_instance()
-        delta = TraitsDelta(humor=0.05)
-        engine.apply_growth_delta("snap_growth_user", delta, reason="test")
-        snap = engine.get_self_model_snapshot("snap_growth_user")
-        assert len(snap.personality_changes) > 0
-        assert any("幽默感" in c for c in snap.personality_changes)

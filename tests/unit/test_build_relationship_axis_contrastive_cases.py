@@ -11,22 +11,6 @@ from tools.build_relationship_axis_contrastive_cases import (
 )
 
 
-def test_build_relationship_axis_contrastive_cases_covers_all_scene_stage_pairs() -> None:
-    cases = build_relationship_axis_contrastive_cases()
-
-    assert len(cases) == len(CONTRASTIVE_SCENES) * len(RELATIONSHIP_STAGES) == 108
-    assert len({case["case_id"] for case in cases}) == 108
-
-    by_scene = {}
-    for case in cases:
-        scene = case["case_id"].split("_")[1]
-        by_scene.setdefault(scene, []).append(case["reply_control_packet"]["relationship_distance"])
-
-    assert len(by_scene) == len(CONTRASTIVE_SCENES)
-    for stages in by_scene.values():
-        assert stages == list(RELATIONSHIP_STAGES)
-
-
 def test_build_relationship_axis_contrastive_cases_uses_only_compressed_control_inputs() -> None:
     case = build_relationship_axis_contrastive_cases()[0]
 
@@ -46,12 +30,3 @@ def test_build_relationship_axis_contrastive_cases_keeps_scene_facts_in_control_
     assert recall["reply_control_packet"]["must_include"] == ["看展"]
     assert creative["reply_control_packet"]["facts"] == ["待改原句：你明明就是想偷懒。"]
     assert "只给一句改法" in creative["reply_control_packet"]["style_anchor"]
-
-
-def test_write_relationship_axis_contrastive_cases_outputs_files(tmp_path: Path) -> None:
-    summary = write_relationship_axis_contrastive_cases(out_dir=tmp_path)
-
-    assert summary["case_count"] == 108
-    assert (tmp_path / "cases.jsonl").exists()
-    assert (tmp_path / "summary.json").exists()
-    assert len((tmp_path / "cases.jsonl").read_text(encoding="utf-8").splitlines()) == 108

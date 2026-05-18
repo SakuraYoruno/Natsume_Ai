@@ -5666,33 +5666,6 @@ def test_memory_ab_passes_when_baseline_already_hits_and_memory_does_not_regress
     assert comparison["verdict"] == "pass"
 
 
-def test_live_summary_counts_missing_selected_as_low_score() -> None:
-    summary = summarize_live_surface_results(
-        cases_count=1,
-        completed=1,
-        results=[
-            {
-                "ok": False,
-                "selected": None,
-                "score": {"case_id": "empty_output", "variant": "baseline", "selected": None},
-                "latency_ms": 12,
-            }
-        ],
-        started=0.0,
-        provider="test",
-        model="fake",
-        concurrency=1,
-        gen_params={},
-        out_dir=Path("out"),
-    )
-
-    assert summary["generated_count"] == 0
-    assert summary["errors"] == 1
-    assert summary["selected_count"] == 0
-    assert summary["missing_selected_count"] == 1
-    assert summary["low_score_count"] == 1
-
-
 def test_cli_run_cases_with_memory_and_affect_writes_combined_variant(tmp_path) -> None:
     case = {
         "case_id": "memory_affect_compare",

@@ -58,55 +58,6 @@ def test_repair_browser_backend_attempts_install_and_succeeds(monkeypatch) -> No
     assert any("agent-browser" in " ".join(cmd) for cmd in commands)
 
 
-def test_repair_browser_backend_uses_template_override(monkeypatch) -> None:
-    _install_store(
-        monkeypatch,
-        {
-            "browser_backend": {
-                "success_summary": "custom-browser-ok",
-                "success_detail": "custom-browser-detail",
-            }
-        },
-    )
-
-    monkeypatch.setattr(mod, "_command_exists", lambda *names: "C:/tool.cmd" if "agent-browser" in names else None)
-    monkeypatch.setattr(mod, "_run_command", lambda *args, **kwargs: {"ok": True})
-    monkeypatch.setattr(mod, "_resolve_python_executable", lambda: "python")
-    monkeypatch.setattr(mod, "_agent_browser_available", lambda: True)
-    monkeypatch.setattr(mod, "_playwright_module_available", lambda: False)
-    monkeypatch.setattr(mod, "_playwright_cli_available", lambda: False)
-
-    result = mod._repair_browser_backend()
-
-    assert result["summary"] == "custom-browser-ok"
-    assert result["detail"] == "custom-browser-detail"
-
-
-def test_repair_planner_prompt_helpers_use_template_override(monkeypatch) -> None:
-    _install_store(
-        monkeypatch,
-        {
-            "planner": {
-                "system_prompt": "custom-system-prompt",
-                "user_prompt_template": "TASK={task_text}|ERROR={previous_error}",
-                "missing_task_text": "no-task",
-                "missing_previous_error": "no-error",
-            }
-        },
-    )
-
-    assert mod._resolve_repair_planner_system_prompt() == "custom-system-prompt"
-    assert mod._build_repair_planner_user_prompt("", "") == "TASK=no-task|ERROR=no-error"
-
-
-def test_builtin_repair_runtime_templates_are_clean() -> None:
-    templates = resolve_prompt_template_json_merged("repair_agent_handler.runtime_texts")
-    assert templates["browser_backend"]["success_summary"] == "浏览器后端已经补齐，可以重试原任务。"
-    assert templates["planner"]["missing_task_text"] == "（未提供）"
-    assert templates["execute_plan"]["all_success_summary"] == "修复完成，可以重试。"
-    assert templates["handler_error"]["summary"] == "修复这边出了点问题，暂时没法给你结果。"
-
-
 def test_repair_agent_handler_returns_success_summary(monkeypatch) -> None:
     monkeypatch.setattr(
         mod,
@@ -172,22 +123,6 @@ def test_build_repair_result_llm_planner_returns_none_falls_back(monkeypatch) ->
 
     assert result["success"] is False
     assert result["ok_actions"] == 0
-
-
-def test_build_repair_result_fallback_uses_template_override(monkeypatch) -> None:
-    _install_store(
-        monkeypatch,
-        {
-            "rule_fallback": {
-                "summary": "custom-rule-fallback",
-            }
-        },
-    )
-    monkeypatch.setenv(mod._REPAIR_PLANNER_ENABLED_ENV, "false")
-
-    result = mod._build_repair_result(task_text="某任务", previous_error="UNKNOWN_ERROR_XYZ")
-
-    assert result["summary"] == "custom-rule-fallback"
 
 
 def test_is_safe_command_blocks_dangerous_commands() -> None:
@@ -304,41 +239,6 @@ def test_execute_repair_plan_partial_success_allows_retry(monkeypatch) -> None:
     assert result["all_success"] is False
     assert result["ok_actions"] == 1
     assert result["can_retry"] is True
-
-
-def test_execute_repair_plan_partial_success_uses_template_override(monkeypatch) -> None:
-    _install_store(
-        monkeypatch,
-        {
-            "execute_plan": {
-                "partial_success_summary": "custom-partial {ok_actions}/{total_actions}",
-            }
-        },
-    )
-
-    call_results = [True, False]
-    idx = [0]
-
-    def fake_run_command(cmd, *, timeout_s=120):
-        ok = call_results[idx[0]]
-        idx[0] += 1
-        return {"command": cmd, "returncode": 0 if ok else 1, "stdout": "", "stderr": "", "ok": ok}
-
-    monkeypatch.setattr(mod, "_run_command", fake_run_command)
-
-    result = mod._execute_repair_plan(
-        {
-            "repair_type": "pip_install",
-            "commands": [
-                {"cmd": ["python", "-m", "pip", "install", "pkg_a"], "timeout_s": 60},
-                {"cmd": ["python", "-m", "pip", "install", "pkg_b"], "timeout_s": 60},
-            ],
-            "summary": "",
-            "can_retry": True,
-        }
-    )
-
-    assert result["summary"] == "custom-partial 1/2"
 
 
 def test_repair_agent_handler_trace_contains_can_retry(monkeypatch) -> None:

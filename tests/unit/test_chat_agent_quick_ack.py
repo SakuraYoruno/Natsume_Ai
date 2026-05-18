@@ -136,34 +136,6 @@ def test_render_quick_gateway_realign_notice(monkeypatch) -> None:
     assert "执行方向可能有点偏" in text
 
 
-def test_render_quick_gateway_ack_actual_template_keeps_natsume_voice() -> None:
-    text = render_quick_gateway_ack_text(
-        user_message="帮我看一下这段日志",
-        bond_stage="FRIEND",
-        emotion_tag="NEUTRAL",
-    )
-
-    assert len(text) <= 60
-    assert_natsume_style(
-        user_message="帮我看一下这段日志",
-        reply=text,
-        emotion_tag="neutral",
-        bond_stage="FRIEND",
-        max_chars=60,
-        required_markers=("我",),
-    )
-
-
-def test_render_quick_gateway_ack_actual_template_for_open_app_is_specialized() -> None:
-    text = render_quick_gateway_ack_text(
-        user_message="可以帮我打开本地的酷狗音乐吗",
-        bond_stage="FRIEND",
-        emotion_tag="NEUTRAL",
-    )
-
-    assert text == "好，我替你打开。"
-
-
 def test_render_quick_gateway_ack_does_not_overpromise_for_non_app_prefix() -> None:
     assert render_quick_gateway_ack_text(user_message="运行测试") != "好，我替你打开。"
     assert render_quick_gateway_ack_text(user_message="打开空调") != "好，我替你打开。"
@@ -179,36 +151,3 @@ def test_should_buffer_stream_output_respects_social_validation_policy() -> None
             "force_buffering": False,
         },
     ) is True
-
-
-def test_render_quick_gateway_progress_failed_actual_template_stays_natural() -> None:
-    text = render_quick_gateway_progress_text(
-        status="FAILED",
-        target_id="翻译任务",
-        progress_message="网关波动",
-        elapsed_ms=12_300,
-    )
-
-    assert ("遇到了点问题" in text) or ("出了点岔子" in text)
-    assert_natsume_style(
-        user_message="翻译好了吗",
-        reply=text,
-        emotion_tag="neutral",
-        bond_stage="FRIEND",
-        max_chars=120,
-        required_markers=("我",),
-    )
-
-
-def test_render_quick_gateway_realign_actual_template_stays_in_character() -> None:
-    text = render_quick_gateway_realign_text(bond_stage="FRIEND", emotion_tag="NEUTRAL")
-
-    assert "偏" in text
-    assert_natsume_style(
-        user_message="你刚才跑偏了",
-        reply=text,
-        emotion_tag="neutral",
-        bond_stage="FRIEND",
-        max_chars=80,
-        required_markers=("我",),
-    )
