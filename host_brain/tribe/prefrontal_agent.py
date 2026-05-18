@@ -30,6 +30,24 @@ def _background_tasks_enabled() -> bool:
     return _env_bool("HOST_BACKGROUND_TASKS_ENABLED", default=False)
 
 
+def _resolve_prefrontal_persona_id(value: Any = None) -> str:
+    try:
+        from host_brain.persona.identity import resolve_persona_self_id  # noqa: PLC0415
+
+        return resolve_persona_self_id(value)
+    except Exception:
+        return str(value or "").strip() or "natsume_ai"
+
+
+def _resolve_prefrontal_bond_user_id(value: Any = None, *, session_id: str = "default") -> str:
+    try:
+        from host_brain.bond.user_identity import resolve_bond_user_id  # noqa: PLC0415
+
+        return resolve_bond_user_id(str(value or "").strip() or None, session_id=session_id)
+    except Exception:
+        return str(value or "").strip() or "default"
+
+
 @dataclass(slots=True)
 class PrefrontalAgent:
     descriptor: TribeAgentDescriptor = field(
@@ -68,8 +86,9 @@ class PrefrontalAgent:
         from host_brain.integrations.llm_helpers import build_pool_prompt_llm_fn  # noqa: PLC0415
 
         persona_engine = PersonaEngine.get_instance()
+        persona_user_id = _resolve_prefrontal_persona_id(persona_user_id)
         snapshot_obj = persona_engine.get_self_model_snapshot(
-            str(persona_user_id or "user_1"),
+            persona_user_id,
             timeline_summary=dict(timeline_summary or {}),
             timeline_diary=dict(timeline_diary or {}),
             bond_state=bond_state_obj,
@@ -139,7 +158,7 @@ class PrefrontalAgent:
         from host_brain.persona.personality_traits import PersonalityTraits  # noqa: PLC0415
 
         try:
-            return PersonaEngine.get_instance().get_traits(str(persona_user_id or "user_1"))
+            return PersonaEngine.get_instance().get_traits(_resolve_prefrontal_persona_id(persona_user_id))
         except Exception:
             return PersonalityTraits.from_baseline()
 
@@ -571,7 +590,7 @@ class PrefrontalAgent:
 
             orchestrator = EvolutionOrchestrator()
             args = dict((system_intent or {}).get("args") or {})
-            user_id = str(args.get("user_id") or "user_1")
+            user_id = _resolve_prefrontal_persona_id(args.get("user_id"))
             date = str(args.get("date") or _dt.date.today().isoformat())
 
             timeline_summary: dict[str, Any] = {}
@@ -629,7 +648,7 @@ class PrefrontalAgent:
         from host_brain.persona.persona_engine import PersonaEngine  # noqa: PLC0415
 
         entries = PersonaEngine.get_instance().get_change_log(
-            str(persona_user_id or "user_1"),
+            _resolve_prefrontal_persona_id(persona_user_id),
             limit=max(1, int(limit)),
         )
         if not isinstance(entries, list):
@@ -646,7 +665,7 @@ class PrefrontalAgent:
     def resolve_growth_summary(self, *, persona_user_id: str, now_ts_ms: int) -> dict[str, Any]:
         orchestrator = self._get_evolution_orchestrator()
         payload = orchestrator.get_growth_summary(
-            str(persona_user_id or "user_1"),
+            _resolve_prefrontal_persona_id(persona_user_id),
             now_ts_ms=int(now_ts_ms),
         )
         if isinstance(payload, Mapping):
@@ -738,7 +757,7 @@ class PrefrontalAgent:
         context: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
 
-        user_id = str(persona_user_id or "user_1").strip() or "user_1"
+        user_id = _resolve_prefrontal_persona_id(persona_user_id)
         narrative_text = str(narrative or "").strip()
         ctx = dict(context or {})
         trace_id = f"autobio_gate_{now_ms()}"
@@ -749,7 +768,7 @@ class PrefrontalAgent:
         stress_index = float(vitals.get("stress_index") or 0.0)
         bond_ctx = get_social_brain_agent().get_bond_context(
             session_id=str(ctx.get("session_id") or "default"),
-            user_id=user_id,
+            user_id=_resolve_prefrontal_bond_user_id(ctx.get("user_id"), session_id=str(ctx.get("session_id") or "default")),
         )
         bond_vector = dict(bond_ctx.get("bond_vector") or {})
         trust = float(bond_vector.get("trust") or 0.4)
@@ -823,7 +842,7 @@ class PrefrontalAgent:
         if str(gate.get("decision") or "").upper() != "ALLOW":
             return {"status": "BLOCKED", "gate": gate}
         write_result = get_hippocampus_agent().write_autobiographical_memory(
-            person_id=str(persona_user_id or "user_1"),
+            person_id=_resolve_prefrontal_persona_id(persona_user_id),
             narrative=str(narrative or ""),
             gate_result=gate,
             request_id=request_id,
@@ -843,7 +862,7 @@ class PrefrontalAgent:
             return {"applied": False, "reason": "tracker_unavailable"}
         try:
             result = tracker.on_stage_promoted(
-                user_id=str(user_id or "user_1"),
+                user_id=_resolve_prefrontal_persona_id(user_id),
                 from_stage=str(from_stage or "FRIEND"),
                 to_stage=str(to_stage or "FRIEND"),
                 ts_ms=int(ts_ms),
@@ -867,7 +886,7 @@ class PrefrontalAgent:
             return {"applied": False, "reason": "tracker_unavailable"}
         try:
             result = tracker.on_milestone(
-                user_id=str(user_id or "user_1"),
+                user_id=_resolve_prefrontal_persona_id(user_id),
                 milestone_key=str(milestone_key or ""),
                 ts_ms=int(ts_ms),
             )
@@ -900,39 +919,41 @@ class PrefrontalAgent:
         from host_brain.persona.persona_engine import PersonaEngine  # noqa: PLC0415
 
         if llm_fn is None:
+            resolved_user_id = _resolve_prefrontal_persona_id(user_id)
             return {
                 "status": "SKIPPED",
                 "reason_code": "EMERGENT_GROWTH_LLM_REQUIRED",
-                "user_id": str(user_id or "user_1"),
+                "user_id": resolved_user_id,
                 "lookback_days": max(1, int(lookback_days or 7)),
                 "pattern_result": {},
                 "growth_result": {},
             }
 
+        resolved_user_id = _resolve_prefrontal_persona_id(user_id)
         persona_engine = PersonaEngine.get_instance()
         analyzer = InteractionPatternAnalyzer(llm_fn=llm_fn, strict_llm=True)
         pattern_result = analyzer.analyze(
-            user_id=str(user_id or "user_1"),
+            user_id=resolved_user_id,
             episodic_store=episodic_store,
-            current_traits=persona_engine.get_traits(str(user_id or "user_1")),
+            current_traits=persona_engine.get_traits(resolved_user_id),
             lookback_days=max(1, int(lookback_days or 7)),
         )
         if str(getattr(pattern_result, "analysis_method", "") or "").strip().lower() != "llm":
             return {
                 "status": "SKIPPED",
                 "reason_code": "EMERGENT_GROWTH_LLM_REQUIRED",
-                "user_id": str(user_id or "user_1"),
+                "user_id": resolved_user_id,
                 "lookback_days": max(1, int(lookback_days or 7)),
                 "pattern_result": dict(pattern_result.as_dict() if hasattr(pattern_result, "as_dict") else {}),
                 "growth_result": {},
             }
         growth_result = self._get_emergent_growth_engine().apply(
-            user_id=str(user_id or "user_1"),
+            user_id=resolved_user_id,
             pattern_result=pattern_result,
         )
         return {
             "status": "OK" if bool(getattr(growth_result, "applied", False)) else "SKIPPED",
-            "user_id": str(user_id or "user_1"),
+            "user_id": resolved_user_id,
             "lookback_days": max(1, int(lookback_days or 7)),
             "pattern_result": dict(pattern_result.as_dict() if hasattr(pattern_result, "as_dict") else {}),
             "growth_result": dict(growth_result.as_dict() if hasattr(growth_result, "as_dict") else {}),
@@ -941,11 +962,12 @@ class PrefrontalAgent:
     def resolve_emergent_growth_status(self, *, user_id: str, recent_limit: int = 5) -> dict[str, Any]:
         engine = self._get_emergent_growth_engine()
         recent = max(1, int(recent_limit or 5))
-        growth_log = [record.as_dict() for record in engine.get_growth_log(str(user_id or "user_1"))[-recent:]]
+        resolved_user_id = _resolve_prefrontal_persona_id(user_id)
+        growth_log = [record.as_dict() for record in engine.get_growth_log(resolved_user_id)[-recent:]]
         return {
             "status": "OK",
-            "user_id": str(user_id or "user_1"),
-            "growth_summary": engine.get_growth_summary(str(user_id or "user_1")),
+            "user_id": resolved_user_id,
+            "growth_summary": engine.get_growth_summary(resolved_user_id),
             "recent_growth_log": growth_log,
         }
 
@@ -1024,7 +1046,7 @@ class PrefrontalAgent:
         """
         try:
             payload = dict(event.payload or {})
-            user_id = str(payload.get("user_id") or "user_1").strip() or "user_1"
+            user_id = _resolve_prefrontal_persona_id(payload.get("user_id"))
             reason = str(payload.get("reason") or "event_triggered").strip()
             _logger.info(
                 "PrefrontalAgent 收到 EVOLUTION_CYCLE_TRIGGERED: user_id=%s reason=%s",
@@ -1227,7 +1249,7 @@ class PrefrontalAgent:
             payload = dict(getattr(event, "payload", None) or {})
             from_stage = str(payload.get("from_stage") or "").strip().upper()
             to_stage = str(payload.get("to_stage") or "").strip().upper()
-            user_id = str(payload.get("user_id") or "user_1").strip() or "user_1"
+            user_id = _resolve_prefrontal_persona_id(payload.get("user_id"))
             ts_ms = int(getattr(event, "ts_ms", 0) or 0)
 
             _STAGE_ORDER = [
@@ -1265,7 +1287,7 @@ class PrefrontalAgent:
         try:
             payload = dict(getattr(event, "payload", None) or {})
             loneliness = max(0.0, min(1.0, float(payload.get("loneliness") or 0.0)))
-            user_id = str(payload.get("user_id") or "user_1").strip() or "user_1"
+            user_id = _resolve_prefrontal_persona_id(payload.get("user_id"))
             ts_ms = int(getattr(event, "ts_ms", 0) or 0)
 
             if loneliness > 0.6:
@@ -1320,7 +1342,7 @@ class PrefrontalAgent:
             # 仅高风险拦截才触发成长周期
             if risk_level not in ("high", "critical") and score < 0.7:
                 return
-            user_id = str(payload.get("user_id") or "user_1").strip() or "user_1"
+            user_id = _resolve_prefrontal_persona_id(payload.get("user_id"))
             _logger.info(
                 "PrefrontalAgent IMMUNE_BLOCK 触发安全审查成长: risk_level=%s score=%.3f session_id=%s",
                 risk_level, score, session_id,

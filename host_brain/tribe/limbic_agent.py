@@ -28,6 +28,19 @@ _TEXT_ONLY_EMOTION_SOURCES = frozenset(
 )
 
 
+def _resolve_limbic_persona_id(value: Any = None) -> str:
+    try:
+        from host_brain.persona.identity import resolve_persona_self_id  # noqa: PLC0415
+
+        return resolve_persona_self_id(value)
+    except Exception:
+        return str(value or "").strip() or "natsume_ai"
+
+
+def _canonical_limbic_persona_id() -> str:
+    return _resolve_limbic_persona_id(None)
+
+
 def _is_trusted_runtime_emotion_source(
     *,
     emotion_source: str,
@@ -167,7 +180,7 @@ class LimbicAgent:
         if self._emotion_persistence is None:
             self._emotion_persistence = EmotionPersistence()
 
-        user_id = str(person_id or "user_1").strip() or "user_1"
+        user_id = _resolve_limbic_persona_id(person_id)
         cur_valence = float(valence)
         cur_arousal = float(arousal)
         cur_dominance = float(dominance)
@@ -461,7 +474,7 @@ class LimbicAgent:
     def resolve_inner_world_state(self, *, person_id: str | None) -> dict[str, Any]:
         from host_brain.persona.inner_world import get_inner_world  # noqa: PLC0415
 
-        user_id = str(person_id or "user_1").strip() or "user_1"
+        user_id = _resolve_limbic_persona_id(person_id)
         payload = dict(get_inner_world().get_state(user_id) or {})
         self._touch_state(
             key="last_inner_world_state",
@@ -518,7 +531,7 @@ class LimbicAgent:
     def tick_inner_world(self, *, person_id: str | None, emit_inner_stream: bool = True) -> dict[str, Any]:
         from host_brain.persona.inner_world import get_inner_world  # noqa: PLC0415
 
-        user_id = str(person_id or "user_1").strip() or "user_1"
+        user_id = _resolve_limbic_persona_id(person_id)
         payload = dict(get_inner_world().tick(user_id=user_id, emit_inner_stream=emit_inner_stream) or {})
         payload.setdefault("status", "OK")
         payload.setdefault("user_id", user_id)
@@ -536,7 +549,7 @@ class LimbicAgent:
     def on_user_awaken(self, *, person_id: str | None) -> dict[str, Any]:
         from host_brain.persona.inner_world import get_inner_world  # noqa: PLC0415
 
-        user_id = str(person_id or "user_1").strip() or "user_1"
+        user_id = _resolve_limbic_persona_id(person_id)
         snapshot = get_inner_world().on_user_awaken(user_id=user_id)
         payload = dict(snapshot.as_dict() if hasattr(snapshot, "as_dict") else {})
         self._touch_state(
@@ -563,7 +576,7 @@ class LimbicAgent:
         engine = get_silence_engine()
         result = dict(
             engine.tick(
-                user_id=str(user_id or "user_1"),
+                user_id=_resolve_limbic_persona_id(user_id),
                 current_topic=str(current_topic or ""),
                 bond_summary=dict(bond_summary or {}) or None,
                 emotion_context=dict(emotion_context or {}) or None,
@@ -633,7 +646,7 @@ class LimbicAgent:
     ) -> dict[str, Any]:
         from host_brain.persona.inner_world import get_inner_world  # noqa: PLC0415
 
-        user_id = str(person_id or "user_1").strip() or "user_1"
+        user_id = _resolve_limbic_persona_id(person_id)
         get_inner_world().on_session_end(
             user_id,
             valence=float(valence),
@@ -910,7 +923,7 @@ class LimbicAgent:
                 # 以当前持久化情绪作为基础，混入新信号
                 try:
                     if self._emotion_persistence is not None:
-                        restored = self._emotion_persistence.restore(user_id="user_1")
+                        restored = self._emotion_persistence.restore(user_id=_canonical_limbic_persona_id())
                         base_vec = EmotionVector(
                             valence=float(getattr(restored, "valence", 0.0)),
                             arousal=float(getattr(restored, "arousal", 0.3)),
@@ -1141,7 +1154,7 @@ class LimbicAgent:
                     base_valence = 0.0
                     base_arousal = 0.3
                     if self._emotion_persistence is not None:
-                        restored = self._emotion_persistence.restore(user_id="user_1")
+                        restored = self._emotion_persistence.restore(user_id=_canonical_limbic_persona_id())
                         base_valence = float(getattr(restored, "valence", 0.0))
                         base_arousal = float(getattr(restored, "arousal", 0.3))
                     # 疲劳拉低唤醒度，孤独感拉低效价
@@ -1380,13 +1393,14 @@ class LimbicAgent:
                 try:
                     from host_brain.persona.emotion_persistence import EmotionPersistence  # noqa: PLC0415
                     _ep = self._emotion_persistence
-                    _restored = _ep.restore(user_id="user_1")
+                    _emotion_user_id = _canonical_limbic_persona_id()
+                    _restored = _ep.restore(user_id=_emotion_user_id)
                     _cur_valence = float(getattr(_restored, "valence", 0.0))
                     _cur_arousal = float(getattr(_restored, "arousal", 0.3))
                     _cur_dominance = float(getattr(_restored, "dominance", 0.0))
                     _new_valence = max(-1.0, min(1.0, _cur_valence + valence_boost))
                     _ep.persist(
-                        user_id="user_1",
+                        user_id=_emotion_user_id,
                         valence=_new_valence,
                         arousal=_cur_arousal,
                         dominance=_cur_dominance,
@@ -1455,13 +1469,14 @@ class LimbicAgent:
             if valence_drop > 0.01 and self._emotion_persistence is not None:
                 try:
                     _ep = self._emotion_persistence
-                    _restored = _ep.restore(user_id="user_1")
+                    _emotion_user_id = _canonical_limbic_persona_id()
+                    _restored = _ep.restore(user_id=_emotion_user_id)
                     _cur_valence = float(getattr(_restored, "valence", 0.0))
                     _cur_arousal = float(getattr(_restored, "arousal", 0.3))
                     _cur_dominance = float(getattr(_restored, "dominance", 0.0))
                     _new_valence = max(-1.0, min(1.0, _cur_valence - valence_drop))
                     _ep.persist(
-                        user_id="user_1",
+                        user_id=_emotion_user_id,
                         valence=_new_valence,
                         arousal=_cur_arousal,
                         dominance=_cur_dominance,
@@ -1510,13 +1525,14 @@ class LimbicAgent:
             if valence_boost > 0.01 and self._emotion_persistence is not None:
                 try:
                     _ep = self._emotion_persistence
-                    _restored = _ep.restore(user_id="user_1")
+                    _emotion_user_id = _canonical_limbic_persona_id()
+                    _restored = _ep.restore(user_id=_emotion_user_id)
                     _cur_valence = float(getattr(_restored, "valence", 0.0))
                     _cur_arousal = float(getattr(_restored, "arousal", 0.3))
                     _cur_dominance = float(getattr(_restored, "dominance", 0.0))
                     _new_valence = max(-1.0, min(1.0, _cur_valence + valence_boost))
                     _ep.persist(
-                        user_id="user_1",
+                        user_id=_emotion_user_id,
                         valence=_new_valence,
                         arousal=_cur_arousal,
                         dominance=_cur_dominance,
@@ -1552,14 +1568,15 @@ class LimbicAgent:
             if valence_boost > 0.01 and self._emotion_persistence is not None:
                 try:
                     _ep = self._emotion_persistence
-                    _restored = _ep.restore(user_id="user_1")
+                    _emotion_user_id = _canonical_limbic_persona_id()
+                    _restored = _ep.restore(user_id=_emotion_user_id)
                     _cur_valence = float(getattr(_restored, "valence", 0.0))
                     _cur_arousal = float(getattr(_restored, "arousal", 0.3))
                     _cur_dominance = float(getattr(_restored, "dominance", 0.0))
                     _new_valence = max(-1.0, min(1.0, _cur_valence + valence_boost))
                     _new_arousal = max(0.0, min(1.0, _cur_arousal + arousal_boost))
                     _ep.persist(
-                        user_id="user_1",
+                        user_id=_emotion_user_id,
                         valence=_new_valence,
                         arousal=_new_arousal,
                         dominance=_cur_dominance,
@@ -1598,14 +1615,15 @@ class LimbicAgent:
             if valence_drop > 0.01 and self._emotion_persistence is not None:
                 try:
                     _ep = self._emotion_persistence
-                    _restored = _ep.restore(user_id="user_1")
+                    _emotion_user_id = _canonical_limbic_persona_id()
+                    _restored = _ep.restore(user_id=_emotion_user_id)
                     _cur_valence = float(getattr(_restored, "valence", 0.0))
                     _cur_arousal = float(getattr(_restored, "arousal", 0.3))
                     _cur_dominance = float(getattr(_restored, "dominance", 0.0))
                     _new_valence = max(-1.0, min(1.0, _cur_valence - valence_drop))
                     _new_arousal = max(0.0, min(1.0, _cur_arousal - arousal_drop))
                     _ep.persist(
-                        user_id="user_1",
+                        user_id=_emotion_user_id,
                         valence=_new_valence,
                         arousal=_new_arousal,
                         dominance=_cur_dominance,
@@ -1650,13 +1668,14 @@ class LimbicAgent:
             if valence_drop > 0.01 and self._emotion_persistence is not None:
                 try:
                     _ep = self._emotion_persistence
-                    _restored = _ep.restore(user_id="user_1")
+                    _emotion_user_id = _canonical_limbic_persona_id()
+                    _restored = _ep.restore(user_id=_emotion_user_id)
                     _cur_valence = float(getattr(_restored, "valence", 0.0))
                     _cur_arousal = float(getattr(_restored, "arousal", 0.3))
                     _cur_dominance = float(getattr(_restored, "dominance", 0.0))
                     _new_valence = max(-1.0, min(1.0, _cur_valence - valence_drop))
                     _ep.persist(
-                        user_id="user_1",
+                        user_id=_emotion_user_id,
                         valence=_new_valence,
                         arousal=_cur_arousal,
                         dominance=_cur_dominance,
@@ -1787,7 +1806,8 @@ class LimbicAgent:
             # 读取当前持久化情绪状态
             if self._emotion_persistence is None:
                 return {"decayed": False, "reason": "no_persistence"}
-            restored = self._emotion_persistence.restore(user_id="user_1")
+            emotion_user_id = _canonical_limbic_persona_id()
+            restored = self._emotion_persistence.restore(user_id=emotion_user_id)
             cur_valence = float(getattr(restored, "valence", 0.0))
             cur_arousal = float(getattr(restored, "arousal", 0.3))
             cur_dominance = float(getattr(restored, "dominance", 0.0))
@@ -1832,7 +1852,7 @@ class LimbicAgent:
             # 将衰减后的情绪写回持久化存储
             try:
                 self._emotion_persistence.persist(
-                    user_id="user_1",
+                    user_id=emotion_user_id,
                     valence=decayed_vec.valence,
                     arousal=decayed_vec.arousal,
                     dominance=decayed_vec.dominance,

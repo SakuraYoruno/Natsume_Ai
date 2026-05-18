@@ -119,7 +119,7 @@ class PersonaGrowthTracker:
     用法：
         tracker = PersonaGrowthTracker(engine=persona_engine)
         result = tracker.on_stage_promoted(
-            user_id="user_1",
+            user_id="natsume_ai",
             from_stage="FRIEND",
             to_stage="CLOSE_FRIEND",
         )

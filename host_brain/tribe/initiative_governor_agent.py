@@ -265,11 +265,13 @@ class InitiativeGovernorAgent:
             # T-368：APPROVE 时联动 DefaultModeAgent.tick_idle_cycle()
             # 主动发声被批准是"我有能力主动表达"的自我叙事，应强化连续性
             try:
+                from host_brain.persona.identity import get_canonical_persona_self_id  # noqa: PLC0415
+
                 _dma = get_default_mode_agent()
                 if hasattr(_dma, "tick_idle_cycle"):
                     _dma.tick_idle_cycle(
                         source=f"initiative_approved:{action}",
-                        person_id="user_1",
+                        person_id=get_canonical_persona_self_id(),
                     )
             except Exception:
                 pass

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+from host_brain.bond.user_identity import get_canonical_bond_user_id
 from host_brain.tribe.social_brain_agent import SocialBrainAgent
 
 
@@ -42,7 +43,7 @@ class _FakeBondState:
 def test_social_brain_resolve_bond_snapshot_with_live_engine(monkeypatch) -> None:
     class _Engine:
         def get_state(self, user_id: str):
-            assert user_id == "user_1"
+            assert user_id == get_canonical_bond_user_id()
             return _FakeBondState()
 
     monkeypatch.setattr("host_brain.app.dependencies.get_bond_stage_engine", lambda: _Engine())

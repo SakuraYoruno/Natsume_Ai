@@ -236,11 +236,13 @@ class MirrorNeuronAgent:
             # T-378：高共情时联动 DefaultModeAgent.tick_idle_cycle()
             # 共情他人的情绪是自我叙事的重要素材（"我感受到了对方的感受"）
             try:
+                from host_brain.persona.identity import get_canonical_persona_self_id  # noqa: PLC0415
+
                 _dma = get_default_mode_agent()
                 if hasattr(_dma, "tick_idle_cycle"):
                     _dma.tick_idle_cycle(
                         source=f"mirror_high_resonance:{str(result.get('emotion_tag') or 'neutral').lower()}",
-                        person_id="user_1",
+                        person_id=get_canonical_persona_self_id(),
                     )
             except Exception:
                 pass
@@ -410,8 +412,16 @@ class MirrorNeuronAgent:
             or payload.get("intensity")
             or fallback_intensity
         )
-        user_id = str(payload.get("user_id") or payload.get("person_id") or "user_1").strip() or "user_1"
         session_id = str(payload.get("session_id") or payload.get("conversation_id") or "").strip()
+        try:
+            from host_brain.bond.user_identity import resolve_bond_user_id  # noqa: PLC0415
+
+            user_id = resolve_bond_user_id(
+                str(payload.get("user_id") or payload.get("person_id") or "").strip() or None,
+                session_id=session_id or None,
+            )
+        except Exception:
+            user_id = str(payload.get("user_id") or payload.get("person_id") or "").strip() or "default"
         ts_ms = int(getattr(event, "ts_ms", 0) or now_ms())
         self.apply_resonance(
             user_id=user_id,

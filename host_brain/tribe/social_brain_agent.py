@@ -8,6 +8,15 @@ from host_brain.tribe.events import emit_tribe_event
 from host_brain.tribe.tribe_state import TribeStateRegistry, get_global_registry
 
 
+def _resolve_social_bond_user_id(value: Any = None, *, session_id: str = "default") -> str:
+    try:
+        from host_brain.bond.user_identity import resolve_bond_user_id  # noqa: PLC0415
+
+        return resolve_bond_user_id(str(value or "").strip() or None, session_id=session_id)
+    except Exception:
+        return str(value or "").strip() or "default"
+
+
 @dataclass(slots=True)
 class SocialBrainAgent:
     descriptor: TribeAgentDescriptor = field(
@@ -32,7 +41,7 @@ class SocialBrainAgent:
         from host_brain.app.dependencies import get_bond_stage_engine  # noqa: PLC0415
         from host_brain.bond.summarizer import normalize_bond_summary  # noqa: PLC0415
 
-        resolved_person_id = str(person_id or "").strip()
+        resolved_person_id = _resolve_social_bond_user_id(person_id)
         resolved_summary = (
             normalize_bond_summary(dict(bond_summary))
             if isinstance(bond_summary, Mapping) and bond_summary
@@ -437,7 +446,7 @@ class SocialBrainAgent:
                 if hasattr(_dma, "tick_idle_cycle"):
                     _dma.tick_idle_cycle(
                         source=f"social_bond_progress:{bond_stage.lower()}",
-                        person_id=str(user_id or "user_1") or "user_1",
+                        person_id=_resolve_social_bond_user_id(user_id),
                     )
             except Exception:
                 pass
@@ -885,7 +894,7 @@ class SocialBrainAgent:
     def resolve_bond_narrative(
         self,
         *,
-        user_id: str = "user_1",
+        user_id: str = "",
         bond_stage: str | None = None,
         now_ts_ms: int | None = None,
         first_interaction_ts_ms: int | None = None,
@@ -896,7 +905,7 @@ class SocialBrainAgent:
         `BondNarrativeLayer.build_narrative()` 调用。
 
         Args:
-            user_id: 用户 ID，默认 "user_1"。
+            user_id: 用户 ID；空值使用 canonical bond user id。
             bond_stage: Bond 阶段（如 "FRIEND"/"INTIMATE" 等），None 时从内部状态读取。
             now_ts_ms: 当前时间戳（毫秒），None 使用当前时间。
             first_interaction_ts_ms: 首次互动时间戳（毫秒），可选。
@@ -912,6 +921,7 @@ class SocialBrainAgent:
             )
 
             resolved_stage = str(bond_stage or self._bond_stage or "FRIEND").strip().upper() or "FRIEND"
+            resolved_user_id = _resolve_social_bond_user_id(user_id)
             memory_index = get_shared_memory_index()
             milestone_tracker = get_milestone_tracker()
             layer = BondNarrativeLayer(
@@ -920,7 +930,7 @@ class SocialBrainAgent:
                 use_llm=True,
             )
             result = layer.build_narrative(
-                user_id=str(user_id or "user_1").strip() or "user_1",
+                user_id=resolved_user_id,
                 bond_stage=resolved_stage,
                 now_ts_ms=int(now_ts_ms) if now_ts_ms is not None else None,
                 first_interaction_ts_ms=int(first_interaction_ts_ms) if first_interaction_ts_ms is not None else None,
@@ -931,7 +941,7 @@ class SocialBrainAgent:
             slot_payload["bond_stage"] = resolved_stage
             payload = {
                 "status": "OK",
-                "user_id": str(user_id or "user_1").strip() or "user_1",
+                "user_id": resolved_user_id,
                 "bond_stage": resolved_stage,
                 "prompt_slot": slot_payload,
                 "narrative_count": len(slot_payload.get("narrative_items") or []),
@@ -941,7 +951,7 @@ class SocialBrainAgent:
             self._touch_state(
                 key="last_bond_narrative",
                 value={
-                    "user_id": str(user_id or "user_1"),
+                    "user_id": resolved_user_id,
                     "bond_stage": resolved_stage,
                     "narrative_count": len(slot_payload.get("narrative_items") or []),
                 },
@@ -959,7 +969,7 @@ class SocialBrainAgent:
             )
             return {
                 "status": "ERROR",
-                "user_id": str(user_id or "user_1"),
+                "user_id": _resolve_social_bond_user_id(user_id),
                 "prompt_slot": {},
                 "error": str(exc),
             }
@@ -1025,7 +1035,7 @@ class SocialBrainAgent:
     def resolve_milestone_tracker(
         self,
         *,
-        user_id: str = "user_1",
+        user_id: str = "",
         event_type: str | None = None,
         ts_ms: int | None = None,
         metadata: dict[str, Any] | None = None,
@@ -1036,7 +1046,7 @@ class SocialBrainAgent:
         `MilestoneTracker.on_event()` 调用。
 
         Args:
-            user_id: 用户 ID，默认 "user_1"。
+            user_id: 用户 ID；空值使用 canonical bond user id。
             event_type: Bond 事件类型（如 "INTERACTION_DEEP"/"STAGE_PROMOTED" 等），
                         None 时仅查询已达成里程碑，不触发新检测。
             ts_ms: 时间戳（毫秒），None 使用当前时间。
@@ -1053,11 +1063,12 @@ class SocialBrainAgent:
                 return {"status": "NO_TRACKER", "new_milestones": [], "achieved_count": 0}
 
             resolved_ts = int(ts_ms or _now_ms())
+            resolved_user_id = _resolve_social_bond_user_id(user_id)
             new_milestones: list[dict[str, Any]] = []
 
             if event_type is not None:
                 raw_milestones = tracker.on_event(
-                    user_id=str(user_id or "user_1"),
+                    user_id=resolved_user_id,
                     event_type=str(event_type or "").strip().upper(),
                     ts_ms=resolved_ts,
                     metadata=dict(metadata or {}),
@@ -1070,11 +1081,11 @@ class SocialBrainAgent:
             # 查询已达成里程碑总数
             achieved_count = 0
             if hasattr(tracker, "get_achieved"):
-                achieved_count = len(tracker.get_achieved(str(user_id or "user_1")) or [])
+                achieved_count = len(tracker.get_achieved(resolved_user_id) or [])
 
             result = {
                 "status": "OK",
-                "user_id": str(user_id or "user_1"),
+                "user_id": resolved_user_id,
                 "new_milestones": new_milestones,
                 "new_milestone_count": len(new_milestones),
                 "achieved_count": achieved_count,
@@ -1085,7 +1096,7 @@ class SocialBrainAgent:
                 self._touch_state(
                     key="last_milestone_achieved",
                     value={
-                        "user_id": str(user_id or "user_1"),
+                        "user_id": resolved_user_id,
                         "new_milestones": [m.get("milestone_id") for m in new_milestones],
                         "ts_ms": resolved_ts,
                     },
@@ -1099,7 +1110,7 @@ class SocialBrainAgent:
                             source=f"milestone_achieved:{len(new_milestones)}",
                             reward_level=_milestone_reward,
                             metadata={
-                                "user_id": str(user_id or "user_1"),
+                                "user_id": resolved_user_id,
                                 "milestone_ids": [m.get("milestone_id") for m in new_milestones],
                                 "achieved_count": achieved_count,
                                 "ts_ms": resolved_ts,

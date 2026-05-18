@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from typing import Any, Mapping
 
 from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged
+from host_brain.persona.identity import is_reserved_persona_self_id
 from host_brain.tribe.base_agent import TribeAgentDescriptor
 from host_brain.tribe.tribe_state import TribeStateRegistry, get_global_registry
 
@@ -42,6 +43,16 @@ def _truncate_text(text: Any, *, limit: int) -> str:
     if len(normalized) <= max(1, int(limit)):
         return normalized
     return normalized[: max(1, int(limit)) - 1].rstrip() + "…"
+
+
+def _clean_person_id(value: Any, *, fallback: str) -> str:
+    fallback_id = str(fallback or "").strip() or "default"
+    text = str(value or "").strip()
+    if not text:
+        return fallback_id
+    if is_reserved_persona_self_id(text) and text.lower() != "default":
+        return fallback_id
+    return text
 
 
 @dataclass(slots=True)
@@ -140,7 +151,7 @@ class HippocampusAgent:
         )
         user_prompt = user_template.format(
             message=_truncate_text(message, limit=180),
-            person_id=str(person_id or "").strip() or "user_1",
+            person_id=_clean_person_id(person_id, fallback=self.resolve_bond_user_id()),
             snippets="\n".join(snippets),
         )
         try:
@@ -397,7 +408,7 @@ class HippocampusAgent:
     def resolve_bond_user_id(
         self,
         *,
-        fallback: str = "user_1",
+        fallback: str = "default",
     ) -> str:
         """T-160：获取规范化 Bond 用户 ID，将 user_identity 族化到 HippocampusAgent。
 
@@ -406,7 +417,7 @@ class HippocampusAgent:
         上下文装配等模块中。
 
         Args:
-            fallback: 解析失败时的降级值，默认 "user_1"。
+            fallback: 解析失败时的降级值，默认 "default"。
 
         Returns:
             规范化 Bond 用户 ID 字符串。
@@ -421,7 +432,7 @@ class HippocampusAgent:
             logging.getLogger("Natsume.tribe.hippocampus_agent").debug(
                 "HippocampusAgent.resolve_bond_user_id 失败（降级）: %s", exc
             )
-            return str(fallback or "user_1")
+            return str(fallback or "default").strip() or "default"
 
     def _write_memory_scope(
         self,
@@ -478,7 +489,7 @@ class HippocampusAgent:
     ) -> dict[str, Any]:
         payload = {
             "episodic_last": {
-                "person_id": str(person_id or "user_1").strip() or "user_1",
+                "person_id": _clean_person_id(person_id, fallback=self.resolve_bond_user_id()),
                 "session_id": str(session_id or "default").strip() or "default",
                 "content": str(content or "").strip(),
                 "metadata": dict(metadata or {}),
@@ -509,7 +520,7 @@ class HippocampusAgent:
             if hasattr(_dma, "tick_idle_cycle"):
                 _dma.tick_idle_cycle(
                     source="hippocampus_episodic_write",
-                    person_id=str(person_id or "").strip() or "user_1",
+                    person_id=_clean_person_id(person_id, fallback=self.resolve_bond_user_id()),
                 )
         except Exception:
             pass
@@ -526,7 +537,7 @@ class HippocampusAgent:
     ) -> dict[str, Any]:
         payload = {
             "semantic_last": {
-                "person_id": str(person_id or "user_1").strip() or "user_1",
+                "person_id": _clean_person_id(person_id, fallback=self.resolve_bond_user_id()),
                 "fact": str(fact or "").strip(),
                 "source_refs": [str(item).strip() for item in list(source_refs or []) if str(item).strip()],
             }
@@ -573,7 +584,7 @@ class HippocampusAgent:
                     source="hippocampus_semantic_write",
                     intensity=0.20,
                     metadata={
-                        "person_id": str(person_id or "user_1"),
+                        "person_id": _clean_person_id(person_id, fallback=self.resolve_bond_user_id()),
                         "fact_preview": str(fact or "")[:48],
                     },
                 )
@@ -626,7 +637,7 @@ class HippocampusAgent:
             }
         payload = {
             "autobiographical_last": {
-                "person_id": str(person_id or "user_1").strip() or "user_1",
+                "person_id": _clean_person_id(person_id, fallback=self.resolve_bond_user_id()),
                 "narrative": str(narrative or "").strip(),
                 "gate_trace_id": str(gate.get("trace_id") or "").strip() or None,
             }
@@ -657,7 +668,7 @@ class HippocampusAgent:
             if hasattr(_dma, "tick_idle_cycle"):
                 _dma.tick_idle_cycle(
                     source="hippocampus_autobiographical_write",
-                    person_id=str(person_id or "").strip() or "user_1",
+                    person_id=_clean_person_id(person_id, fallback=self.resolve_bond_user_id()),
                 )
         except Exception:
             pass
@@ -670,7 +681,7 @@ class HippocampusAgent:
                     source="hippocampus_autobiographical_write",
                     intensity=0.35,
                     metadata={
-                        "person_id": str(person_id or "user_1"),
+                        "person_id": _clean_person_id(person_id, fallback=self.resolve_bond_user_id()),
                         "gate_trace_id": str(gate.get("trace_id") or ""),
                         "narrative_chars": len(str(narrative or "")),
                     },

@@ -372,7 +372,7 @@ class EmotionalSilenceEngine:
     def tick(
         self,
         *,
-        user_id: str = "user_1",
+        user_id: str = "",
         current_topic: str = "",
         bond_summary: dict[str, Any] | None = None,
         emotion_context: dict[str, Any] | None = None,
@@ -397,12 +397,14 @@ class EmotionalSilenceEngine:
         absence_recovery_factor = 1.0
         try:
             from host_brain.persona.inner_world import get_inner_world  # noqa: PLC0415
+            from host_brain.persona.identity import resolve_persona_self_id  # noqa: PLC0415
             from host_brain.persona.motive_runtime import (  # noqa: PLC0415
                 build_offline_state_from_inner_state,
                 compute_runtime_motive_state,
             )
 
-            inner_state = get_inner_world().get_state(str(user_id or "user_1").strip() or "user_1")
+            persona_user_id = resolve_persona_self_id(user_id)
+            inner_state = get_inner_world().get_state(persona_user_id)
             offline_state = build_offline_state_from_inner_state(inner_state, now_ms=now)
             absence_band = _resolve_absence_band(offline_state)
             absence_recovery_factor = _absence_recovery_factor(absence_band)
@@ -416,7 +418,7 @@ class EmotionalSilenceEngine:
             runtime_emotion_context.setdefault("mood_state", self._current_mood_state)
 
             motive_state = compute_runtime_motive_state(
-                persona_user_id=str(user_id or "user_1").strip() or "user_1",
+                persona_user_id=persona_user_id,
                 current_topic=current_topic,
                 bond_summary=bond_summary,
                 emotion_context=runtime_emotion_context,

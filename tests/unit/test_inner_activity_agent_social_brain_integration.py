@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from host_brain.persona.inner_activity_agent import _collect_bond_context, generate_inner_activity_note
+from host_brain.bond.user_identity import get_canonical_bond_user_id
 
 
 def test_collect_bond_context_uses_social_brain_snapshot(monkeypatch) -> None:
@@ -8,7 +9,7 @@ def test_collect_bond_context_uses_social_brain_snapshot(monkeypatch) -> None:
 
     class _SocialBrain:
         def resolve_bond_snapshot(self, *, person_id: str):
-            assert person_id == "user_42"
+            assert person_id == get_canonical_bond_user_id()
             return {
                 "bond_state_obj": state_sentinel,
                 "bond_summary": {"stage": "FRIEND", "trend": "RISING"},

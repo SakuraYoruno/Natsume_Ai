@@ -533,10 +533,12 @@ def _collect_body_sense() -> dict[str, Any]:
 
 def _collect_bond_context(*, persona_user_id: str) -> tuple[dict[str, Any], Any | None]:
     try:
+        from host_brain.bond.user_identity import get_canonical_bond_user_id  # noqa: PLC0415
         from host_brain.tribe.social_brain_agent import get_social_brain_agent  # noqa: PLC0415
 
+        bond_user_id = get_canonical_bond_user_id()
         snapshot = get_social_brain_agent().resolve_bond_snapshot(
-            person_id=str(persona_user_id or "user_1").strip() or "user_1",
+            person_id=bond_user_id,
         )
         state = snapshot.get("bond_state_obj")
         summary_raw = snapshot.get("bond_summary")

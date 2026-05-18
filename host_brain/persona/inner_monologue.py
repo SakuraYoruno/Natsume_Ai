@@ -119,7 +119,7 @@ def build_private_inner_thought_event(
         or bool(refs)
     )
     thought_id = _thought_id(
-        user_id=str(state_map.get("user_id") or "user_1"),
+        user_id=str(state_map.get("user_id") or "natsume_ai"),
         ts_ms=int(now_ms),
         text=text,
         focus=normalized_focus,

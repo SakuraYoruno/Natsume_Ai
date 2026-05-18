@@ -88,8 +88,9 @@ def compute_runtime_motive_state(
     now_ms: int | None = None,
 ) -> dict[str, Any]:
     from host_brain.persona.motive_engine import MotiveInput, compute_motive_state  # noqa: PLC0415
+    from host_brain.persona.identity import resolve_persona_self_id  # noqa: PLC0415
 
-    resolved_user_id = str(persona_user_id or "user_1").strip() or "user_1"
+    resolved_user_id = resolve_persona_self_id(persona_user_id)
     current_topic_text = str(current_topic or "").strip()
     silence_state_dict = _coerce_mapping(silence_state)
     body_sense_dict = _coerce_mapping(body_sense)

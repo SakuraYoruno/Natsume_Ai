@@ -40,6 +40,15 @@ _EMPTY_AWARENESS_TEMPLATE_DATA: dict[str, Any] = {
 }
 
 
+def _resolve_evolution_persona_id(value: Any = None) -> str:
+    try:
+        from host_brain.persona.identity import resolve_persona_self_id  # noqa: PLC0415
+
+        return resolve_persona_self_id(value)
+    except Exception:
+        return str(value or "").strip() or "natsume_ai"
+
+
 def _normalize_text_list(raw: Any, fallback: list[str]) -> list[str]:
     if isinstance(raw, list):
         normalized = [str(item).strip() for item in raw if str(item).strip()]
@@ -117,7 +126,7 @@ class EvolutionOrchestrator:
     用法（由 NatsumeScheduler 调用）：
         orchestrator = EvolutionOrchestrator()
         result = orchestrator.run_evolution_cycle(
-            user_id="user_1",
+            user_id="natsume_ai",
             date="2026-04-02",
             timeline_summary=...,
             timeline_diary=...,
@@ -165,7 +174,7 @@ class EvolutionOrchestrator:
     def run_evolution_cycle(
         self,
         *,
-        user_id: str = "user_1",
+        user_id: str = "",
         date: str = "",
         timeline_summary: dict[str, Any] | None = None,
         timeline_diary: dict[str, Any] | None = None,
@@ -202,6 +211,7 @@ class EvolutionOrchestrator:
         import uuid
         import datetime
 
+        user_id = _resolve_evolution_persona_id(user_id)
         ts = ts_ms or _now_ms()
         cycle_id = f"evo_{uuid.uuid4().hex[:12]}"
         date_str = date or datetime.date.today().isoformat()

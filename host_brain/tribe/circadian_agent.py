@@ -177,11 +177,13 @@ class CircadianAgent:
                 # T-377：日间/黎明相位切换时联动 DefaultModeAgent.tick_idle_cycle()
                 # 日间清醒是自我叙事的重要节点（"新的一天开始了"），应更新连续性
                 try:
+                    from host_brain.persona.identity import get_canonical_persona_self_id  # noqa: PLC0415
+
                     _dma = get_default_mode_agent()
                     if hasattr(_dma, "tick_idle_cycle"):
                         _dma.tick_idle_cycle(
                             source=f"circadian_wake:{next_phase}",
-                            person_id="user_1",
+                            person_id=get_canonical_persona_self_id(),
                         )
                 except Exception:
                     pass
