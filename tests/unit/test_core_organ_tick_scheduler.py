@@ -50,6 +50,15 @@ def test_bootstrap_core_organ_tick_scheduler_registers_only_core_ticks(monkeypat
         assert registry.get("silence_tick") is not None
         assert registry.get("body_sense_tick") is not None
         assert registry.get("emotion_decay_tick") is not None
+        for task_id in (
+            "inner_world_numeric_tick",
+            "inner_world_monologue_tick",
+            "silence_tick",
+            "body_sense_tick",
+        ):
+            task = registry.get(task_id)
+            assert task is not None
+            assert task.intent_template["args"]["user_id"] == "natsume_ai"
         assert registry.get("proactive_talk_periodic") is None
         assert registry.get("long_term_memory_distillation") is None
         assert registry.get("gaming_companion_tick") is None
@@ -101,8 +110,8 @@ def test_background_runtime_core_ticks_include_emotion_decay(monkeypatch) -> Non
 
     snapshot = _build_background_runtime_snapshot(
         now_ms=ts_ms,
-        persona_user_id="user_1",
-        inner_world_state={"user_id": "user_1", "last_tick_ts_ms": ts_ms},
+        persona_user_id="natsume_ai",
+        inner_world_state={"user_id": "natsume_ai", "last_tick_ts_ms": ts_ms},
     )
 
     assert snapshot["core_ticks_registered"] is True
@@ -147,8 +156,8 @@ def test_background_runtime_uses_scheduler_tick_when_inner_world_state_is_stale(
 
     snapshot = _build_background_runtime_snapshot(
         now_ms=ts_ms,
-        persona_user_id="user_1",
-        inner_world_state={"user_id": "user_1", "last_tick_ts_ms": ts_ms - 600_000},
+        persona_user_id="natsume_ai",
+        inner_world_state={"user_id": "natsume_ai", "last_tick_ts_ms": ts_ms - 600_000},
         scheduler_snapshot_override=scheduler_snapshot,
     )
 

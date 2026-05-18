@@ -69,6 +69,17 @@ def test_inner_world_tick_emits_tick_and_evolution_event(monkeypatch) -> None:
     assert event_types == ["INNER_WORLD_TICKED", "EVOLUTION_CYCLE_TRIGGERED"]
 
 
+def test_inner_world_tick_maps_reserved_user_id_to_persona_self(monkeypatch) -> None:
+    fake_limbic = _FakeLimbicAgent()
+    monkeypatch.setenv("HOST_BACKGROUND_TASKS_ENABLED", "true")
+    monkeypatch.setattr("host_brain.tribe.limbic_agent.get_limbic_agent", lambda: fake_limbic)
+
+    result = execute_inner_world_tick(args={"user_id": "user_1"})
+
+    assert result["user_id"] == "natsume_ai"
+    assert fake_limbic.tick_calls[0]["person_id"] == "natsume_ai"
+
+
 def test_inner_world_tick_emits_only_tick_when_spontaneous_too_old(monkeypatch) -> None:
     fake_limbic = _FakeLimbicAgent()
     fake_limbic.tick_inner_world = lambda *, person_id: {  # type: ignore[method-assign]

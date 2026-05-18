@@ -46,16 +46,18 @@ def _should_run_inline_default_mode_tick(*, emit_inner_stream: bool) -> bool:
 def _resolve_user_id(args: dict[str, Any], context: dict[str, Any] | None) -> str:
     raw_user_id = str((args or {}).get("user_id") or (context or {}).get("user_id") or "").strip()
     if raw_user_id:
-        return raw_user_id
-    try:
-        from host_brain.bond.user_identity import get_canonical_bond_user_id  # noqa: PLC0415
+        from host_brain.persona.identity import resolve_persona_self_id  # noqa: PLC0415
 
-        resolved = str(get_canonical_bond_user_id() or "").strip()
+        return resolve_persona_self_id(raw_user_id)
+    try:
+        from host_brain.persona.identity import get_canonical_persona_self_id  # noqa: PLC0415
+
+        resolved = str(get_canonical_persona_self_id() or "").strip()
         if resolved:
             return resolved
     except Exception:
         pass
-    return "user_1"
+    return "natsume_ai"
 
 
 def _normalize_topics(raw_topics: Any) -> list[str]:

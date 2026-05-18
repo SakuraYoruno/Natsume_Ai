@@ -29,6 +29,7 @@ from host_brain.app.http_hooks_middleware import (
     build_personality_tick_status as _middleware_build_personality_tick_status,
 )
 from host_brain.core.ids import new_request_id
+from host_brain.persona.identity import get_canonical_persona_self_id
 
 _AUDIT_SILENT_PATH_PREFIXES: tuple[str, ...] = (
     "/monitor/",
@@ -172,34 +173,38 @@ def _build_scheduler_task_config(
     )
 
 
+def _scheduler_persona_args(**extra: Any) -> dict[str, Any]:
+    return {"user_id": get_canonical_persona_self_id(), **dict(extra)}
+
+
 def _build_core_organ_tick_task_configs() -> list[Any]:
     return [
         _build_scheduler_task_config(
             task_id="inner_world_numeric_tick",
             skill_name="inner_world_numeric_tick",
             interval_s=int(os.environ.get("HOST_INNER_WORLD_NUMERIC_TICK_INTERVAL_SECONDS") or 60),
-            args={"user_id": "user_1"},
+            args=_scheduler_persona_args(),
             description="Core organ tick: advances numeric inner-world continuity without writing inner_stream.",
         ),
         _build_scheduler_task_config(
             task_id="inner_world_monologue_tick",
             skill_name="inner_world_monologue_tick",
             interval_s=int(os.environ.get("HOST_INNER_WORLD_MONOLOGUE_TICK_INTERVAL_SECONDS") or 300),
-            args={"user_id": "user_1"},
+            args=_scheduler_persona_args(),
             description="Core organ tick: slow inner-world stream update; LLM note generation remains gated separately.",
         ),
         _build_scheduler_task_config(
             task_id="silence_tick",
             skill_name="silence_tick",
             interval_s=60,
-            args={"user_id": "user_1"},
+            args=_scheduler_persona_args(),
             description="Core organ tick: recovers reply willingness and decays topic resistance.",
         ),
         _build_scheduler_task_config(
             task_id="body_sense_tick",
             skill_name="body_sense_tick",
             interval_s=60,
-            args={"user_id": "user_1"},
+            args=_scheduler_persona_args(),
             description="Core organ tick: updates fatigue, sleepiness, and body-sense baseline.",
         ),
         _build_scheduler_task_config(
@@ -400,7 +405,7 @@ def _bootstrap_personality_scheduler(
             trigger_config={"hour": 3, "minute": 0},
             intent_template={
                 "skill_name": "evolution_cycle",
-                "args": {"user_id": "user_1"},
+                "args": _scheduler_persona_args(),
                 "proposer_node_id": "scheduler",
             },
             priority=TaskPriority.MEDIUM,
@@ -424,10 +429,7 @@ def _bootstrap_personality_scheduler(
             trigger_config={"seconds": 300},
             intent_template={
                 "skill_name": "gaming_companion_tick",
-                "args": {
-                    "user_id": "user_1",
-                    "monitor": 1,
-                },
+                "args": _scheduler_persona_args(monitor=1),
                 "proposer_node_id": "scheduler",
             },
             priority=TaskPriority.LOW,
@@ -445,10 +447,7 @@ def _bootstrap_personality_scheduler(
             trigger_config={"day_of_week": 6, "hour": 3, "minute": 0},
             intent_template={
                 "skill_name": "emergent_growth_weekly",
-                "args": {
-                    "user_id": "user_1",
-                    "lookback_days": 7,
-                },
+                "args": _scheduler_persona_args(lookback_days=7),
                 "proposer_node_id": "scheduler",
             },
             priority=TaskPriority.LOW,
@@ -1003,7 +1002,7 @@ def runtime_lifespan(
                         trigger_config={"hour": 3, "minute": 0},
                         intent_template={
                             "skill_name": "evolution_cycle",
-                            "args": {},
+                            "args": _scheduler_persona_args(),
                             "proposer_node_id": "scheduler",
                         },
                         priority=TaskPriority.MEDIUM,
@@ -1025,7 +1024,7 @@ def runtime_lifespan(
                         trigger_config={"seconds": int(os.environ.get("HOST_INNER_WORLD_NUMERIC_TICK_INTERVAL_SECONDS") or 60)},
                         intent_template={
                             "skill_name": "inner_world_numeric_tick",
-                            "args": {},
+                            "args": _scheduler_persona_args(),
                             "proposer_node_id": "scheduler",
                         },
                         priority=TaskPriority.LOW,
@@ -1046,7 +1045,7 @@ def runtime_lifespan(
                         trigger_config={"seconds": int(os.environ.get("HOST_INNER_WORLD_MONOLOGUE_TICK_INTERVAL_SECONDS") or 300)},
                         intent_template={
                             "skill_name": "inner_world_monologue_tick",
-                            "args": {},
+                            "args": _scheduler_persona_args(),
                             "proposer_node_id": "scheduler",
                         },
                         priority=TaskPriority.LOW,
@@ -1068,7 +1067,7 @@ def runtime_lifespan(
                         trigger_config={"seconds": 60},  # 每分钟 tick 一次
                         intent_template={
                             "skill_name": "silence_tick",
-                            "args": {},
+                            "args": _scheduler_persona_args(),
                             "proposer_node_id": "scheduler",
                         },
                         priority=TaskPriority.LOW,
@@ -1090,7 +1089,7 @@ def runtime_lifespan(
                         trigger_config={"seconds": 60},  # 每分钟 tick 一次
                         intent_template={
                             "skill_name": "body_sense_tick",
-                            "args": {},
+                            "args": _scheduler_persona_args(),
                             "proposer_node_id": "scheduler",
                         },
                         priority=TaskPriority.LOW,
@@ -1112,9 +1111,7 @@ def runtime_lifespan(
                         trigger_config={"seconds": 300},  # 每 5 分钟截图分析一次
                         intent_template={
                             "skill_name": "gaming_companion_tick",
-                            "args": {
-                                "monitor": 1,
-                            },
+                            "args": _scheduler_persona_args(monitor=1),
                             "proposer_node_id": "scheduler",
                         },
                         priority=TaskPriority.LOW,
@@ -1136,9 +1133,7 @@ def runtime_lifespan(
                         trigger_config={"day_of_week": 6, "hour": 3, "minute": 0},  # 周日 03:00
                         intent_template={
                             "skill_name": "emergent_growth_weekly",
-                            "args": {
-                                "lookback_days": 7,
-                            },
+                            "args": _scheduler_persona_args(lookback_days=7),
                             "proposer_node_id": "scheduler",
                         },
                         priority=TaskPriority.LOW,

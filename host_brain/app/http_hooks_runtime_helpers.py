@@ -207,6 +207,13 @@ def _build_background_runtime_snapshot(
     inner_world_state: dict[str, Any],
     scheduler_snapshot_override: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
+    try:
+        from host_brain.persona.identity import resolve_persona_self_id  # noqa: PLC0415
+
+        persona_user_id = resolve_persona_self_id(persona_user_id)
+    except Exception:
+        persona_user_id = str(persona_user_id or "").strip() or "natsume_ai"
+
     scheduler_snapshot: dict[str, Any] = {}
     scheduler_error = ""
     if scheduler_snapshot_override is not None:
@@ -1499,7 +1506,15 @@ def run_proactive_intent_dispatch(
 
         current_topic = recent_topics[0] if recent_topics else ""
         limbic_agent = get_limbic_agent()
-        offline_state = limbic_agent.resolve_offline_state(person_id=persona_user_id or "user_1")
+        offline_persona_id = persona_user_id
+        if not offline_persona_id:
+            try:
+                from host_brain.persona.identity import get_canonical_persona_self_id  # noqa: PLC0415
+
+                offline_persona_id = get_canonical_persona_self_id()
+            except Exception:
+                offline_persona_id = "natsume_ai"
+        offline_state = limbic_agent.resolve_offline_state(person_id=offline_persona_id)
         silence_state = limbic_agent.resolve_silence_state(current_topic=current_topic)
         body_sense = limbic_agent.resolve_body_sense_state()
         render_policy = dict(
@@ -1601,6 +1616,13 @@ def _run_personality_scheduler_skill(
     }
 
     args = dict(system_intent.get("args") or {})
+    if not str(args.get("user_id") or context.get("user_id") or "").strip():
+        try:
+            from host_brain.persona.identity import get_canonical_persona_self_id  # noqa: PLC0415
+
+            context["user_id"] = get_canonical_persona_self_id()
+        except Exception:
+            context["user_id"] = "natsume_ai"
     try:
         result = meta.handler(args, context)
     except Exception as exc:

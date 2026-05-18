@@ -19,6 +19,8 @@ if str(ROOT) not in sys.path:
 
 from tools.validate_inner_world_self_loop import (  # noqa: E402
     FixtureInnerActivityModel,
+    _collect_state_files,
+    _persona_identity_file_checks,
     _run_circuit_breaker_probe,
     _rewind_inner_world_for_idle_tick,
 )
@@ -64,6 +66,7 @@ PRIVATE_THOUGHT_TEMPLATE_MARKERS = (
 @dataclass
 class RuntimePatchContext:
     out_dir: Path
+    persona_self_id: str = ""
     inner_model: FixtureInnerActivityModel | None = None
     old_env: dict[str, str | None] | None = None
     old_world: Any | None = None
@@ -82,6 +85,7 @@ class RuntimePatchContext:
             "HOST_CORE_INLINE_DEFAULT_MODE_TICK_ENABLED",
             "NATSUME_INNER_WORLD_LLM_ENABLED",
             "HOST_INNER_ACTIVITY_LLM_ENABLED",
+            "NATSUME_PERSONA_SELF_ID",
             "NATSUME_INNER_WORLD_DIR",
             "NATSUME_SELF_MODEL_DIR",
             "NATSUME_INNER_STREAM_MIN_INTERVAL_S",
@@ -96,6 +100,14 @@ class RuntimePatchContext:
         os.environ["HOST_CORE_INLINE_DEFAULT_MODE_TICK_ENABLED"] = "true"
         os.environ["NATSUME_INNER_WORLD_LLM_ENABLED"] = "true"
         os.environ["HOST_INNER_ACTIVITY_LLM_ENABLED"] = "true"
+        try:
+            from host_brain.persona.identity import get_canonical_persona_self_id, resolve_persona_self_id  # noqa: PLC0415
+
+            os.environ["NATSUME_PERSONA_SELF_ID"] = resolve_persona_self_id(
+                self.persona_self_id or os.environ.get("NATSUME_PERSONA_SELF_ID") or get_canonical_persona_self_id()
+            )
+        except Exception:
+            os.environ["NATSUME_PERSONA_SELF_ID"] = "natsume_ai"
         os.environ["NATSUME_INNER_WORLD_DIR"] = str(self.out_dir / "inner_world_state")
         os.environ["NATSUME_SELF_MODEL_DIR"] = str(self.out_dir / "self_model_state")
         os.environ["NATSUME_INNER_STREAM_MIN_INTERVAL_S"] = "0"
@@ -187,11 +199,21 @@ def run_background_runtime_validation(args: argparse.Namespace) -> dict[str, Any
     out_dir = _resolve_out_dir(args)
     out_dir.mkdir(parents=True, exist_ok=True)
     inner_model = FixtureInnerActivityModel() if mode == "fixture" else None
+    persona_self_id = _resolve_persona_self_id_arg(args)
     try:
-        with RuntimePatchContext(out_dir=out_dir, inner_model=inner_model):
+        with RuntimePatchContext(out_dir=out_dir, persona_self_id=persona_self_id, inner_model=inner_model):
             return _run_validation(args=args, out_dir=out_dir, mode=mode, inner_model=inner_model)
     except Exception as exc:
         return _write_failure_result(out_dir=out_dir, mode=mode, exc=exc)
+
+
+def _resolve_persona_self_id_arg(args: argparse.Namespace) -> str:
+    try:
+        from host_brain.persona.identity import get_canonical_persona_self_id, resolve_persona_self_id  # noqa: PLC0415
+
+        return resolve_persona_self_id(getattr(args, "user_id", "") or get_canonical_persona_self_id())
+    except Exception:
+        return "natsume_ai"
 
 
 def _run_validation(
@@ -207,6 +229,7 @@ def _run_validation(
         run_proactive_intent_dispatch,
     )
     from host_brain.persona.inner_world import _inner_world_llm_circuit_snapshot, get_inner_world  # noqa: PLC0415
+    from host_brain.persona.identity import get_canonical_persona_self_id, resolve_persona_self_id  # noqa: PLC0415
     from host_brain.persona.self_model import build_self_directive_packet, load_persistent_self_state  # noqa: PLC0415
     from host_brain.scheduler.health import SchedulerHealthReporter  # noqa: PLC0415
     from host_brain.scheduler.scheduler import NatsumeScheduler  # noqa: PLC0415
@@ -218,7 +241,8 @@ def _run_validation(
 
     logger = logging.getLogger("Natsume.validation.background_runtime")
     run_id = str(getattr(args, "run_id", "") or uuid.uuid4().hex[:8])
-    user_id = str(getattr(args, "user_id", "") or "user_1").strip() or "user_1"
+    persona_self_id = resolve_persona_self_id(getattr(args, "user_id", "") or get_canonical_persona_self_id())
+    user_id = persona_self_id
 
     registry = SchedulerTaskRegistry()
     health_reporter = SchedulerHealthReporter(registry=registry)
@@ -296,11 +320,14 @@ def _run_validation(
         "mode": mode,
         "run_id": run_id,
         "user_id": user_id,
+        "persona_self_id": persona_self_id,
         "env_contract": {
             "HOST_BACKGROUND_TASKS_ENABLED": os.environ.get("HOST_BACKGROUND_TASKS_ENABLED"),
             "HOST_CONTINUOUS_ORGAN_TICKS_ENABLED": os.environ.get("HOST_CONTINUOUS_ORGAN_TICKS_ENABLED"),
             "HOST_CORE_INLINE_DEFAULT_MODE_TICK_ENABLED": os.environ.get("HOST_CORE_INLINE_DEFAULT_MODE_TICK_ENABLED"),
+            "NATSUME_PERSONA_SELF_ID": os.environ.get("NATSUME_PERSONA_SELF_ID"),
         },
+        "state_files": _collect_state_files(out_dir),
         "registered_task_ids": [task.task_id for task in registry.all_tasks()],
         "heavy_background_task_ids": list(HEAVY_BACKGROUND_TASK_IDS),
         "trigger_results": trigger_results,
@@ -323,6 +350,7 @@ def _run_validation(
         "passed": all(checks.values()),
         "run_id": run_id,
         "user_id": user_id,
+        "persona_self_id": persona_self_id,
         "core_task_count": len(CORE_TASK_IDS),
         "registered_task_count": len(details["registered_task_ids"]),
         "private_thought_count": int(inner_state.get("spontaneous_event_count") or 0),
@@ -399,6 +427,7 @@ def _checks(details: Mapping[str, Any]) -> dict[str, bool]:
     heavy_tasks = set(HEAVY_BACKGROUND_TASK_IDS)
     core_tasks = set(CORE_TASK_IDS)
     return {
+        **_persona_identity_file_checks(details),
         "heavy_background_disabled": str(env_contract.get("HOST_BACKGROUND_TASKS_ENABLED") or "").lower() == "false",
         "continuous_core_ticks_enabled": str(env_contract.get("HOST_CONTINUOUS_ORGAN_TICKS_ENABLED") or "").lower() == "true",
         "core_tick_tasks_registered": core_tasks.issubset(registered),
@@ -467,6 +496,7 @@ def _markdown_report(summary: Mapping[str, Any], details: Mapping[str, Any]) -> 
         "",
         f"- mode: `{summary.get('mode')}`",
         f"- passed: `{summary.get('passed')}`",
+        f"- persona_self_id: `{summary.get('persona_self_id')}`",
         f"- core_task_count: `{summary.get('core_task_count')}`",
         f"- registered_task_count: `{summary.get('registered_task_count')}`",
         f"- tick_health: `{summary.get('tick_health')}`",
@@ -571,7 +601,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--mode", choices=["fixture", "live"], default="fixture")
     parser.add_argument("--out-dir", default="")
     parser.add_argument("--run-id", default="")
-    parser.add_argument("--user-id", default="user_1")
+    parser.add_argument("--user-id", default="")
     parser.add_argument("--rewind-minutes", type=int, default=30)
     return parser
 

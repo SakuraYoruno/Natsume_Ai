@@ -22,6 +22,8 @@ def get_canonical_persona_self_id() -> str:
         or os.environ.get("HOST_PERSONA_SELF_ID")
         or ""
     ).strip()
+    if value.lower() in RESERVED_PERSONA_SELF_IDS:
+        return DEFAULT_PERSONA_SELF_ID
     return value or DEFAULT_PERSONA_SELF_ID
 
 
