@@ -37,6 +37,23 @@ def collect_tribe_context(
         tribe_context_source (str): 数据来源标记
     """
     result: dict[str, Any] = {
+        "cortex_state": {
+            "context_collector_active": True,
+            "collector_source": "cortex_agent",
+            "request_id": _request_value(request_body, "request_id"),
+            "session_id": str(session_id or _request_value(request_body, "session_id") or ""),
+            "user_id": str(user_id or _request_value(request_body, "person_id") or _request_value(request_body, "user_id") or ""),
+        },
+        "thalamus_state": {
+            "route": "surface_main_chain",
+            "route_source": "cortex_context_collector",
+            "route_confidence": 1.0,
+        },
+        "tribe_route": {
+            "route": "surface_main_chain",
+            "reason": "cortex_context_collector",
+            "confidence": 1.0,
+        },
         "vital_signs": {},
         "emotion_context": {},
         "bond_context": {},
@@ -80,6 +97,40 @@ def collect_tribe_context(
                 "emotion_source": vital_signs.get("voice_emotion_source"),
                 "emotion_modality": vital_signs.get("voice_emotion_modality"),
                 "trusted_runtime_emotion": bool(vital_signs.get("voice_emotion_trusted", False)),
+            }
+    except Exception:
+        pass
+
+    # ── 1.5. 丘脑路由快照（ThalamusAgent）───────────────────────────────
+    try:
+        from host_brain.tribe.thalamus_agent import get_thalamus_agent  # noqa: PLC0415
+
+        thalamus_state = dict(get_thalamus_agent().export_runtime_state() or {})
+        if thalamus_state:
+            result["thalamus_state"] = {
+                **dict(result.get("thalamus_state") or {}),
+                **thalamus_state,
+            }
+            result["tribe_route"] = {
+                "route": str(
+                    thalamus_state.get("last_route")
+                    or thalamus_state.get("route")
+                    or result["tribe_route"].get("route")
+                    or "surface_main_chain"
+                ),
+                "reason": str(
+                    thalamus_state.get("route_reason")
+                    or thalamus_state.get("reason_code")
+                    or thalamus_state.get("source")
+                    or result["tribe_route"].get("reason")
+                    or "thalamus_agent"
+                ),
+                "confidence": float(
+                    thalamus_state.get("route_confidence")
+                    or thalamus_state.get("confidence")
+                    or result["tribe_route"].get("confidence")
+                    or 1.0
+                ),
             }
     except Exception:
         pass
@@ -377,6 +428,14 @@ def collect_tribe_context(
         pass
 
     return result
+
+
+def _request_value(request_body: Any, key: str) -> str:
+    if isinstance(request_body, dict):
+        return str(request_body.get(key) or "").strip()
+    if request_body is not None:
+        return str(getattr(request_body, key, "") or "").strip()
+    return ""
 
 
 __all__ = ["collect_tribe_context"]

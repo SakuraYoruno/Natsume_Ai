@@ -34,6 +34,7 @@ def test_organ_main_chain_integration_table_covers_current_contract() -> None:
 
     assert organ_ids == set(SURFACE_ORGAN_IDS)
     assert all(row["prompt_visibility"] == "contract_only" for row in rows)
+    assert all(row["context_keys"] for row in rows)
     assert all(row["contract_fields"] == contracts[row["organ_id"]]["allowed_fields"] for row in rows)
     assert all("surface_text" in row["main_chain_effects"] for row in rows)
     assert all(set(row["main_chain_effects"]) <= set(MAIN_CHAIN_EFFECTS) for row in rows)

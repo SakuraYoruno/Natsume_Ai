@@ -111,6 +111,11 @@ class _FakeVestibular:
         return {"stability_state": "stable", "jitter_index": 0.18}
 
 
+class _FakeThalamus:
+    def export_runtime_state(self) -> dict:
+        return {"last_route": "chat", "route_confidence": 0.88, "source": "unit_thalamus"}
+
+
 def test_cortex_collect_tribe_context_includes_extended_fields(monkeypatch) -> None:
     registry = TribeStateRegistry()
     registry.set_state(
@@ -139,13 +144,18 @@ def test_cortex_collect_tribe_context_includes_extended_fields(monkeypatch) -> N
     monkeypatch.setattr("host_brain.tribe.cerebellum_agent.get_cerebellum_agent", lambda: _FakeCerebellum())
     monkeypatch.setattr("host_brain.tribe.glymphatic_agent.get_glymphatic_agent", lambda: _FakeGlymphatic())
     monkeypatch.setattr("host_brain.tribe.vestibular_agent.get_vestibular_agent", lambda: _FakeVestibular())
+    monkeypatch.setattr("host_brain.tribe.thalamus_agent.get_thalamus_agent", lambda: _FakeThalamus())
 
     context = CortexAgent(state_registry=registry).collect_tribe_context(
-        request_body={"user_message": "为什么我有点焦虑"},
+        request_body={"request_id": "req-cortex", "user_message": "为什么我有点焦虑"},
         session_id="sess-cortex",
         user_id="u-cortex",
     )
 
+    assert context["cortex_state"]["context_collector_active"] is True
+    assert context["cortex_state"]["request_id"] == "req-cortex"
+    assert context["thalamus_state"]["last_route"] == "chat"
+    assert context["tribe_route"]["route"] == "chat"
     assert context["default_mode_state"]["last_focus"] == "reflection"
     assert context["mirror_neuron_state"]["last_emotion_tag"] == "SAD"
     assert context["memory_layers"]["last_write_type"] == "semantic"

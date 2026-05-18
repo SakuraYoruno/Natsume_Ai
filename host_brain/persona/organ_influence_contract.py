@@ -73,6 +73,31 @@ _SLOT_TO_CONTRACT_FIELDS: Mapping[str, tuple[str, ...]] = {
     "safety": ("surface_constraints",),
     "delivery": ("delivery_delta", "surface_constraints"),
 }
+ORGAN_CONTEXT_KEYS_BY_ORGAN: Mapping[str, tuple[str, ...]] = {
+    "ans": ("vital_signs", "ans_state"),
+    "cerebellum": ("cerebellum_state",),
+    "circadian": ("circadian_state",),
+    "cortex": ("cortex_state", "tribe_route"),
+    "default_mode": ("default_mode_state",),
+    "endocrine": ("vital_signs", "endocrine_gate"),
+    "glymphatic": ("glymphatic_state",),
+    "hippocampus": ("memory_layers", "hippocampus_state"),
+    "immune": ("vital_signs", "immune_state", "immune_risk_level"),
+    "initiative_governor": ("initiative_decision", "initiative_governor_state"),
+    "interoception": ("interoception_state",),
+    "language_system": ("language_dual_system", "language_style", "language_system_state"),
+    "limbic": ("vital_signs", "emotion_context", "voice_emotion"),
+    "mirror_neuron": ("mirror_neuron_state", "mirror_neuron_resonance"),
+    "motor_cortex": ("motor_cortex_state",),
+    "pain_reward": ("vital_signs", "hedonic_state", "pain_reward_state", "loneliness_level"),
+    "peripheral": ("peripheral_state",),
+    "prefrontal": ("prefrontal_state",),
+    "proprioception": ("vital_signs", "proprioception_state"),
+    "social_brain": ("bond_context", "bond_vector", "social_brain_state"),
+    "somatic": ("somatic_state",),
+    "thalamus": ("thalamus_state", "tribe_route"),
+    "vestibular": ("vestibular_state",),
+}
 
 
 @dataclass(frozen=True)
@@ -96,6 +121,7 @@ class OrganInfluenceContract:
 @dataclass(frozen=True)
 class OrganMainChainIntegration:
     organ_id: str
+    context_keys: tuple[str, ...]
     contract_fields: tuple[str, ...]
     main_chain_effects: tuple[str, ...]
     role_summary: str
@@ -104,6 +130,7 @@ class OrganMainChainIntegration:
     def as_dict(self) -> dict[str, Any]:
         return {
             "organ_id": self.organ_id,
+            "context_keys": list(self.context_keys),
             "contract_fields": list(self.contract_fields),
             "main_chain_effects": list(self.main_chain_effects),
             "role_summary": self.role_summary,
@@ -155,6 +182,7 @@ def organ_main_chain_integration_table() -> tuple[dict[str, Any], ...]:
         rows.append(
             OrganMainChainIntegration(
                 organ_id=organ_id,
+                context_keys=ORGAN_CONTEXT_KEYS_BY_ORGAN[organ_id],
                 contract_fields=contract.allowed_fields,
                 main_chain_effects=_MAIN_CHAIN_EFFECTS_BY_ORGAN[organ_id],
                 role_summary=_MAIN_CHAIN_ROLE_BY_ORGAN[organ_id],
@@ -407,6 +435,7 @@ __all__ = [
     "OrganInfluenceContract",
     "OrganInfluencePacket",
     "OrganMainChainIntegration",
+    "ORGAN_CONTEXT_KEYS_BY_ORGAN",
     "SURFACE_ORGAN_IDS",
     "build_organ_influence_packet",
     "organ_influence_contract_table",
