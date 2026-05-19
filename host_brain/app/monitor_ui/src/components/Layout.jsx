@@ -50,7 +50,7 @@ const NAV_SECTIONS = [
       { to: '/memory', icon: Database, label: '记忆' },
       { to: '/runtime-mode', icon: Zap, label: '存在态' },
       { to: '/inner-world', icon: MoonStar, label: '内在世界' },
-      { to: '/render-policy', icon: Sparkles, label: '回复策略' },
+      { to: '/response-policy', icon: Sparkles, label: '回复策略' },
       { to: '/self-model', icon: Brain, label: '自我模型' },
     ],
   },
@@ -106,7 +106,7 @@ function NavBadge({ value, severity = 'info' }) {
   )
 }
 
-function NavPill({ to, icon: Icon, label, onClick, badge = null }) {
+function NavPill({ to, icon: Icon, label, onClick, badge = null, compact = false }) {
   const handlePrefetch = () => {
     void preloadRoute(to)
   }
@@ -119,7 +119,9 @@ function NavPill({ to, icon: Icon, label, onClick, badge = null }) {
       onFocus={handlePrefetch}
       onTouchStart={handlePrefetch}
       className={({ isActive }) =>
-        `inline-flex items-center gap-1.5 rounded-xl border px-3 py-1.5 text-sm font-medium transition-all ${
+        `inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap border font-medium transition-all ${
+          compact ? 'rounded-lg px-2 py-1 text-xs' : 'rounded-xl px-3 py-1.5 text-sm'
+        } ${
           isActive
             ? 'border-primary-200 bg-gradient-to-r from-primary-50 to-cyan-50 text-primary shadow-sm'
             : 'border-transparent text-gray-600 hover:border-primary-200 hover:bg-primary-50/65 hover:text-gray-800'
@@ -133,25 +135,30 @@ function NavPill({ to, icon: Icon, label, onClick, badge = null }) {
   )
 }
 
-function SectionFlowRail({ sections }) {
+function DesktopNav({ sectionBadges, itemBadges }) {
   return (
-    <div className="lifeline-rail hidden h-11 items-center px-3 lg:flex">
-      <div className="lifeline-wave absolute inset-0 opacity-80" />
-      <div className="relative flex w-full items-center justify-between gap-2">
-        {sections.map((section, index) => (
-          <NavLink
-            key={`flow-${section.title}`}
-            to={section.items?.[0]?.to || '/digital-life'}
-            className="group inline-flex min-w-0 items-center gap-2 rounded-lg px-2 py-1 transition-colors hover:bg-primary-50/60"
-          >
-            <span className="lifeline-node shrink-0" style={{ animationDelay: `${index * 0.35}s` }} />
-            <span className="truncate text-[11px] font-semibold uppercase tracking-[0.08em] text-gray-600 group-hover:text-gray-800">
-              {section.title}
-            </span>
-          </NavLink>
-        ))}
-      </div>
-    </div>
+    <nav
+      className="hidden min-w-0 items-center gap-2 overflow-x-auto rounded-2xl border border-primary-100/70 bg-white/76 px-2 py-1.5 shadow-sm backdrop-blur-sm lg:flex"
+      role="navigation"
+      aria-label="主导航"
+    >
+      {NAV_SECTIONS.map((section) => (
+        <React.Fragment key={section.title}>
+          <span className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-primary-100/80 bg-primary-50/70 px-2 py-1 text-[11px] font-semibold text-primary-700">
+            {section.title}
+            {sectionBadges[section.title] ? (
+              <NavBadge
+                value={sectionBadges[section.title].value}
+                severity={sectionBadges[section.title].severity}
+              />
+            ) : null}
+          </span>
+          {section.items.map((item) => (
+            <NavPill key={item.to} {...item} badge={itemBadges[item.to]} compact />
+          ))}
+        </React.Fragment>
+      ))}
+    </nav>
   )
 }
 
@@ -230,7 +237,7 @@ export default function Layout() {
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,_rgba(41,112,255,0.08),_transparent_36%),radial-gradient(circle_at_bottom_right,_rgba(245,158,11,0.06),_transparent_30%)]" />
       </div>
       <header className="sticky top-0 z-50 border-b border-primary-100/70 bg-gradient-to-r from-primary-50/80 via-white/88 to-emerald-50/70 shadow-sm backdrop-blur-xl">
-        <div className="mx-auto w-full space-y-3 px-4 py-3 sm:px-6">
+        <div className="mx-auto w-full space-y-2 px-4 py-2 sm:px-6">
           <div className="flex items-center justify-between gap-4">
             <div className="flex items-center gap-2">
               <button
@@ -281,28 +288,7 @@ export default function Layout() {
             pollingTick={pollingTick}
           />
 
-          <nav className="hidden flex-wrap gap-3 lg:flex" role="navigation" aria-label="主导航">
-            {NAV_SECTIONS.map((section) => (
-              <div key={section.title} className="rounded-2xl border border-primary-100/70 bg-gradient-to-br from-white/86 to-primary-50/55 px-2.5 py-2 shadow-sm backdrop-blur-sm">
-                <div className="flex items-center gap-1.5 px-1 text-[11px] font-semibold uppercase tracking-wide text-gray-400">
-                  <span>{section.title}</span>
-                  {sectionBadges[section.title] ? (
-                    <NavBadge
-                      value={sectionBadges[section.title].value}
-                      severity={sectionBadges[section.title].severity}
-                    />
-                  ) : null}
-                </div>
-                <div className="mt-1 flex flex-wrap gap-1">
-                  {section.items.map((item) => (
-                    <NavPill key={item.to} {...item} badge={itemBadges[item.to]} />
-                  ))}
-                </div>
-              </div>
-            ))}
-          </nav>
-
-          <SectionFlowRail sections={NAV_SECTIONS} />
+          <DesktopNav sectionBadges={sectionBadges} itemBadges={itemBadges} />
         </div>
       </header>
 

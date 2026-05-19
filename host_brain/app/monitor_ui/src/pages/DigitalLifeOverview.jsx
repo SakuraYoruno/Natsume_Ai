@@ -225,7 +225,7 @@ export default function DigitalLifeOverview() {
           ? `意愿 ${silenceState.willingness_level} · 姿态 ${replyPosture}`
           : '策略系统已接入，但当前窗口缺少稳定快照。',
         status: !hasRuntimeSnapshot ? 'pending' : silenceState.willingness_level ? 'wired' : 'degraded',
-        actionTo: '/render-policy',
+        actionTo: '/response-policy',
         actionLabel: '查看策略',
       },
       {
@@ -383,6 +383,7 @@ export default function DigitalLifeOverview() {
           160
         )}
         gradientClass="from-primary-50 via-white to-pink-50"
+        showPulseRail={false}
         metaItems={[
           `存在态：${modeMeta.label}`,
           `最紧张器官：${lifeBodyModel.primaryOrgan?.name || '待判定'}`,
@@ -392,6 +393,7 @@ export default function DigitalLifeOverview() {
         aside={(
           <SampleMeta
             className="max-w-md"
+            compact
             loadState={overviewLoadState}
             loadStateDetail={error || refreshWarning}
             windowMinutes={windowMinutes}

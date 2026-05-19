@@ -102,6 +102,7 @@ export default function App() {
             <Route path="runtime-mode" element={withSuspense(<RuntimeMode />)} />
             <Route path="inner-world" element={withSuspense(<InnerWorldDashboard />)} />
             <Route path="response-policy" element={withSuspense(<RenderPolicyDashboard />)} />
+            <Route path="render-policy" element={<Navigate to="/response-policy" replace />} />
             <Route path="self-model" element={withSuspense(<SelfModelDashboard />)} />
             <Route path="canon" element={withSuspense(<Canon />)} />
             <Route path="bond" element={withSuspense(<Bond />)} />

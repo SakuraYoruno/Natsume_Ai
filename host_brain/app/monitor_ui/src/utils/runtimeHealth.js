@@ -139,7 +139,7 @@ export function buildDigitalLifeAlerts(snapshot, options = {}) {
       ts_ms: tsMs,
       severity: 'warning',
       source: 'runtime',
-      to: '/render-policy',
+      to: '/response-policy',
     })
   }
 
@@ -151,7 +151,7 @@ export function buildDigitalLifeAlerts(snapshot, options = {}) {
       ts_ms: tsMs,
       severity: 'info',
       source: 'runtime',
-      to: '/render-policy',
+      to: '/response-policy',
     })
   }
 

@@ -13,9 +13,10 @@ export default function SampleMeta({
   source,
   definition,
   className = '',
+  compact = false,
 }) {
   return (
-    <div className={`rounded-2xl border border-white/80 bg-white/75 p-3 shadow-sm backdrop-blur-sm ${className}`.trim()}>
+    <div className={`rounded-2xl border border-white/80 bg-white/75 shadow-sm backdrop-blur-sm ${compact ? 'p-2.5' : 'p-3'} ${className}`.trim()}>
       <div className="flex flex-wrap items-center gap-2">
         {loadState ? <LoadStateBadge state={loadState} detail={loadStateDetail} /> : null}
         {windowMinutes ? (
@@ -36,7 +37,12 @@ export default function SampleMeta({
         {updatedAt ? <FreshnessPill timestamp={updatedAt} /> : null}
       </div>
 
-      {definition ? (
+      {definition && compact ? (
+        <details className="mt-2 text-xs leading-5 text-gray-500">
+          <summary className="cursor-pointer select-none text-gray-500 hover:text-gray-700">说明</summary>
+          <div className="mt-1">{definition}</div>
+        </details>
+      ) : definition ? (
         <div className="mt-2 text-xs leading-5 text-gray-500">
           {definition}
         </div>

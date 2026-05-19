@@ -428,10 +428,9 @@ export default function EmotionDashboard() {
       </div>
 
       <div className="flex flex-wrap gap-2">
-        <Link to="/render-policy" className="btn-secondary text-sm">查看回复策略</Link>
+        <Link to="/response-policy" className="btn-secondary text-sm">查看回复策略</Link>
         <Link to="/self-model" className="btn-secondary text-sm">查看自我模型</Link>
       </div>
     </div>
   )
 }
-
