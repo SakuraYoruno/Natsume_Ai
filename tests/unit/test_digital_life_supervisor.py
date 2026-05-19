@@ -4,6 +4,10 @@ import json
 
 from host_brain.runtime import DigitalLifeRuntimeConfig, DigitalLifeSupervisor
 from tools.run_digital_life_host_runtime import build_arg_parser, run_host_runtime
+from tools.run_digital_life_wall_clock_soak import (
+    build_arg_parser as build_wall_clock_arg_parser,
+    run_wall_clock_soak,
+)
 
 
 def _foreground_runner(context: dict[str, object]) -> dict[str, object]:
@@ -100,3 +104,36 @@ def test_run_digital_life_host_runtime_writes_artifacts(tmp_path) -> None:
     assert (tmp_path / "report.md").exists()
     saved = json.loads((tmp_path / "summary.json").read_text(encoding="utf-8"))
     assert saved["run_id"] == "unit-host-runtime"
+
+
+def test_run_digital_life_wall_clock_soak_writes_incremental_checkpoints(tmp_path) -> None:
+    args = build_wall_clock_arg_parser().parse_args(
+        [
+            "--mode",
+            "fixture",
+            "--out-dir",
+            str(tmp_path),
+            "--run-id",
+            "unit-wall-clock-soak",
+            "--duration-seconds",
+            "1",
+            "--tick-interval-seconds",
+            "0",
+            "--max-ticks",
+            "1",
+        ]
+    )
+
+    result = run_wall_clock_soak(args)
+
+    summary = result["summary"]
+    assert summary["run_status"] == "COMPLETED"
+    assert summary["status"] == "PASS"
+    assert summary["idle_tick_count"] == 1
+    assert summary["checkpoint_count"] >= 2
+    assert (tmp_path / "summary.json").exists()
+    assert (tmp_path / "details.json").exists()
+    assert (tmp_path / "checkpoints.jsonl").exists()
+    assert (tmp_path / "report.md").exists()
+    saved = json.loads((tmp_path / "summary.json").read_text(encoding="utf-8"))
+    assert saved["run_id"] == "unit-wall-clock-soak"
