@@ -76,6 +76,7 @@ export default function DigitalLifeOverview() {
     sampledMemorySubsystemCount,
     configuredMemorySubsystemCount,
     activeSubsystemCount,
+    topEmotion,
     currentBondStage,
     currentEmotion,
     dominantMotive,

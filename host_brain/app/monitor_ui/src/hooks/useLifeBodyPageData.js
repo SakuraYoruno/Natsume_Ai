@@ -274,6 +274,7 @@ export default function useLifeBodyPageData({ windowMinutes = 360 } = {}) {
     sampledMemorySubsystemCount,
     configuredMemorySubsystemCount,
     activeSubsystemCount,
+    topEmotion,
     currentBondStage,
     currentEmotion,
     dominantMotive,
@@ -302,4 +303,3 @@ export default function useLifeBodyPageData({ windowMinutes = 360 } = {}) {
     refreshAll,
   }
 }
-
