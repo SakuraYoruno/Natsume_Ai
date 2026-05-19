@@ -1268,6 +1268,70 @@ function AdaptiveRepairPanel({ summary }) {
   )
 }
 
+function CapabilityWorkbench({ sections }) {
+  const items = Array.isArray(sections) ? sections.filter(Boolean) : []
+  const [selectedKey, setSelectedKey] = useState(items[0]?.key || '')
+  const selected = items.find((item) => item.key === selectedKey) || items[0]
+  if (!selected) {
+    return <EmptyStateCard title="暂无 BioOps 能力层数据" hint="等待 BioOps catalog 注册或日循环产物" />
+  }
+  const ActivePanel = selected.Panel
+  return (
+    <div className="grid grid-cols-1 gap-4 xl:grid-cols-[18rem_minmax(0,1fr)]">
+      <div className="overflow-hidden rounded-xl border border-white/80 bg-white/86 shadow-sm">
+        <div className="border-b border-gray-100 px-4 py-3">
+          <div className="text-sm font-semibold text-gray-900">能力层</div>
+          <div className="mt-0.5 text-xs text-gray-500">{items.length} 个分区 · 当前 {selected.title}</div>
+        </div>
+        <div className="max-h-[560px] divide-y divide-gray-100 overflow-y-auto">
+          {items.map((item) => {
+            const active = item.key === selected.key
+            return (
+              <button
+                type="button"
+                key={item.key}
+                className={`w-full px-4 py-3 text-left transition-colors ${
+                  active ? 'bg-primary-50' : 'bg-white hover:bg-gray-50'
+                }`}
+                onClick={() => setSelectedKey(item.key)}
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="truncate text-sm font-semibold text-gray-900">{item.title}</div>
+                    <div className="mt-0.5 truncate text-xs text-gray-500">{item.hint}</div>
+                  </div>
+                  <span className="rounded-full border border-gray-200 bg-white px-2 py-0.5 text-xs font-semibold text-gray-600">
+                    {item.count ?? '—'}
+                  </span>
+                </div>
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {Object.entries(item.statusCounts || {}).slice(0, 3).map(([status, count]) => (
+                    <span key={status} className="rounded-full border border-gray-200 bg-gray-50 px-2 py-0.5 text-[11px] text-gray-600">
+                      {STATUS_LABELS[status] || status}:{count}
+                    </span>
+                  ))}
+                </div>
+              </button>
+            )
+          })}
+        </div>
+      </div>
+      <div className="min-w-0 space-y-3">
+        <div className="rounded-xl border border-white/80 bg-white/86 p-4 shadow-sm">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h3 className="text-base font-semibold text-gray-900">{selected.title}</h3>
+              <p className="mt-1 text-sm leading-6 text-gray-600">{selected.subtitle}</p>
+            </div>
+            <StatusPill status={selected.status || 'REPORT_ONLY'} />
+          </div>
+        </div>
+        <ActivePanel summary={selected.summary} />
+      </div>
+    </div>
+  )
+}
+
 function RuntimeTraceList({ traces }) {
   const rows = Array.isArray(traces) ? traces : []
   if (!rows.length) {
@@ -1335,6 +1399,7 @@ export default function CodexBioOpsObservability() {
   const [dailyRunning, setDailyRunning] = useState(false)
   const [dailyRunResult, setDailyRunResult] = useState(null)
   const [dailyRunError, setDailyRunError] = useState(null)
+  const [showOwnerDeepDive, setShowOwnerDeepDive] = useState(false)
   const query = useCodexBioOpsObservabilityQuery({
     pollingEnabled: pollingEnabled && pageVisible,
     pollingInterval,
@@ -1363,6 +1428,153 @@ export default function CodexBioOpsObservability() {
     () => Object.values(statusCounts).reduce((sum, value) => sum + Number(value || 0), 0),
     [statusCounts]
   )
+  const capabilitySections = useMemo(() => [
+    {
+      key: 'inner_mechanisms',
+      title: 'Inner Mechanisms',
+      subtitle: '第三份文档的最小可落地机制：先纳入 BioOps 审计和 owner gate，再决定是否升级主路径。',
+      hint: 'Promise、反射弧、边界',
+      status: 'OWNER_GATED',
+      count: innerMechanisms.capability_count,
+      statusCounts: innerMechanisms.status_counts,
+      summary: innerMechanisms,
+      Panel: InnerMechanismPanel,
+    },
+    {
+      key: 'trust_foundation',
+      title: 'Trust Foundation',
+      subtitle: '可信基础层：授权梯度、真实约束、能力谦逊和不确定性表达统一变成可观测 gate。',
+      hint: '授权、真实、能力边界',
+      status: 'TRACED',
+      count: trustFoundation.capability_count,
+      statusCounts: trustFoundation.status_counts,
+      summary: trustFoundation,
+      Panel: TrustFoundationPanel,
+    },
+    {
+      key: 'natural_interaction',
+      title: 'Natural Interaction',
+      subtitle: '自然交互层：主观时间、情绪惯性、上下文重力和自我打断统一进入低风险 trace。',
+      hint: '呼吸式回复、主观时间',
+      status: 'TRACED',
+      count: naturalInteraction.capability_count,
+      statusCounts: naturalInteraction.status_counts,
+      summary: naturalInteraction,
+      Panel: NaturalInteractionPanel,
+    },
+    {
+      key: 'relationship_layer',
+      title: 'Relationship Layer',
+      subtitle: '长期关系层：契约、摩擦、修复曲线、依恋风格、沉默记忆和边界守护保持可观测。',
+      hint: '契约、摩擦、修复',
+      status: 'REPORT_ONLY',
+      count: relationshipLayer.capability_count,
+      statusCounts: relationshipLayer.status_counts,
+      summary: relationshipLayer,
+      Panel: RelationshipLayerPanel,
+    },
+    {
+      key: 'inner_life',
+      title: 'Inner Life',
+      subtitle: '内在生命层：梦境排练、象征记忆、记忆质感、自我模型、生命脉搏和个人神话保持报告模式。',
+      hint: '梦境、象征、自我模型',
+      status: 'REPORT_ONLY',
+      count: innerLife.capability_count,
+      statusCounts: innerLife.status_counts,
+      summary: innerLife,
+      Panel: InnerLifePanel,
+    },
+    {
+      key: 'self_governance',
+      title: 'Self Governance',
+      subtitle: '自我治理层：价值层级、伦理复盘、边界膜、尊严守护、身份连续性和内在议会保持可观测。',
+      hint: '价值、伦理、边界',
+      status: 'REPORT_ONLY',
+      count: selfGovernance.capability_count,
+      statusCounts: selfGovernance.status_counts,
+      summary: selfGovernance,
+      Panel: SelfGovernancePanel,
+    },
+    {
+      key: 'growth_closure',
+      title: 'Growth Closure',
+      subtitle: '成长与收束层：想法池、阶段门、存在负载、未闭环和认知卸载让项目能继续收尾。',
+      hint: '阶段、负载、收束',
+      status: 'REPORT_ONLY',
+      count: growthClosure.capability_count,
+      statusCounts: growthClosure.status_counts,
+      summary: growthClosure,
+      Panel: GrowthClosurePanel,
+    },
+    {
+      key: 'memory_narrative',
+      title: 'Memory Narrative',
+      subtitle: '记忆与叙事层：情节、书架、认知地标、叙事身份、自我连续性和梦化压缩保持可审计。',
+      hint: '情节、叙事、连续性',
+      status: 'REPORT_ONLY',
+      count: memoryNarrative.capability_count,
+      statusCounts: memoryNarrative.status_counts,
+      summary: memoryNarrative,
+      Panel: MemoryNarrativePanel,
+    },
+    {
+      key: 'affect_learning',
+      title: 'Affect Learning',
+      subtitle: '情绪学习层：内在温度、免疫耐受、情绪消化、后悔信号、喜悦强化和失败隔离保持报告模式。',
+      hint: '温度、消化、强化',
+      status: 'REPORT_ONLY',
+      count: affectLearning.capability_count,
+      statusCounts: affectLearning.status_counts,
+      summary: affectLearning,
+      Panel: AffectLearningPanel,
+    },
+    {
+      key: 'presence_channel',
+      title: 'Presence & Channel',
+      subtitle: '通道与存在感层：通道灵魂、长任务陪伴、注意力地形、静默陪伴、社交面具、仪式和温柔降级保持可观测。',
+      hint: '通道、陪伴、仪式',
+      status: 'REPORT_ONLY',
+      count: presenceChannel.capability_count,
+      statusCounts: presenceChannel.status_counts,
+      summary: presenceChannel,
+      Panel: PresenceChannelPanel,
+    },
+    {
+      key: 'drive_trust',
+      title: 'Drive & Trust',
+      subtitle: '驱动力与信任层：信任梯度、信任恒温器、意图代谢、驱动力冲突、愿望格和 Need/Want/Impulse 保持报告模式。',
+      hint: '信任、意图、愿望',
+      status: 'REPORT_ONLY',
+      count: driveTrust.capability_count,
+      statusCounts: driveTrust.status_counts,
+      summary: driveTrust,
+      Panel: DriveTrustPanel,
+    },
+    {
+      key: 'adaptive_repair',
+      title: 'Adaptive Repair',
+      subtitle: '适应与修复层：用户镜像、身体可塑、关系修复、叙事调试、隐性偏好和自愈故事保持可审计。',
+      hint: '镜像、修复、偏好',
+      status: 'OWNER_GATED',
+      count: adaptiveRepair.capability_count,
+      statusCounts: adaptiveRepair.status_counts,
+      summary: adaptiveRepair,
+      Panel: AdaptiveRepairPanel,
+    },
+  ], [
+    adaptiveRepair,
+    affectLearning,
+    driveTrust,
+    growthClosure,
+    innerLife,
+    innerMechanisms,
+    memoryNarrative,
+    naturalInteraction,
+    presenceChannel,
+    relationshipLayer,
+    selfGovernance,
+    trustFoundation,
+  ])
   const runDailyCycle = async () => {
     setDailyRunning(true)
     setDailyRunError(null)
@@ -1460,7 +1672,7 @@ export default function CodexBioOpsObservability() {
 
       {data?.artifact_available ? (
         <>
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-12">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5">
             <MetricTile
               icon={GitBranch}
               tone="green"
@@ -1484,102 +1696,6 @@ export default function CodexBioOpsObservability() {
               value={bioOps.capability_count ?? totalBioOps}
               status="TRACED"
               hint={`${statusCounts.PROPOSED || 0} proposals · ${statusCounts.CANDIDATE || 0} candidates`}
-            />
-            <MetricTile
-              icon={Activity}
-              tone="blue"
-              label="Inner 机制"
-              value={innerMechanisms.capability_count ?? '—'}
-              status="OWNER_GATED"
-              hint={`${innerMechanisms.status_counts?.PROPOSED || 0} proposals · ${innerMechanisms.status_counts?.CANDIDATE || 0} candidates`}
-            />
-            <MetricTile
-              icon={ShieldCheck}
-              tone="green"
-              label="可信基础"
-              value={trustFoundation.capability_count ?? '—'}
-              status="TRACED"
-              hint={`${trustFoundation.status_counts?.PROPOSED || 0} gates · ${trustFoundation.status_counts?.AUDITED || 0} audited`}
-            />
-            <MetricTile
-              icon={Activity}
-              tone="indigo"
-              label="自然交互"
-              value={naturalInteraction.capability_count ?? '—'}
-              status="TRACED"
-              hint={`${naturalInteraction.status_counts?.PROPOSED || 0} policies · ${naturalInteraction.status_counts?.AUDITED || 0} audited`}
-            />
-            <MetricTile
-              icon={ShieldCheck}
-              tone="amber"
-              label="关系层"
-              value={relationshipLayer.capability_count ?? '—'}
-              status="REPORT_ONLY"
-              hint={`${relationshipLayer.status_counts?.PROPOSED || 0} repairs · ${relationshipLayer.status_counts?.AUDITED || 0} audited`}
-            />
-            <MetricTile
-              icon={Sparkles}
-              tone="indigo"
-              label="内在生命"
-              value={innerLife.capability_count ?? '—'}
-              status="REPORT_ONLY"
-              hint={`${innerLife.status_counts?.PROPOSED || 0} reports · ${innerLife.status_counts?.AUDITED || 0} audited`}
-            />
-            <MetricTile
-              icon={ShieldCheck}
-              tone="slate"
-              label="自我治理"
-              value={selfGovernance.capability_count ?? '—'}
-              status="REPORT_ONLY"
-              hint={`${selfGovernance.status_counts?.PROPOSED || 0} gates · ${selfGovernance.status_counts?.AUDITED || 0} audited`}
-            />
-            <MetricTile
-              icon={Activity}
-              tone="green"
-              label="成长收束"
-              value={growthClosure.capability_count ?? '—'}
-              status="REPORT_ONLY"
-              hint={`${growthClosure.status_counts?.PROPOSED || 0} closures · ${growthClosure.status_counts?.AUDITED || 0} audited`}
-            />
-            <MetricTile
-              icon={Database}
-              tone="blue"
-              label="记忆叙事"
-              value={memoryNarrative.capability_count ?? '—'}
-              status="REPORT_ONLY"
-              hint={`${memoryNarrative.status_counts?.PROPOSED || 0} reports · ${memoryNarrative.status_counts?.AUDITED || 0} audited`}
-            />
-            <MetricTile
-              icon={Activity}
-              tone="amber"
-              label="情绪学习"
-              value={affectLearning.capability_count ?? '—'}
-              status="REPORT_ONLY"
-              hint={`${affectLearning.status_counts?.PROPOSED || 0} signals · ${affectLearning.status_counts?.AUDITED || 0} audited`}
-            />
-            <MetricTile
-              icon={Sparkles}
-              tone="blue"
-              label="通道存在"
-              value={presenceChannel.capability_count ?? '—'}
-              status="REPORT_ONLY"
-              hint={`${presenceChannel.status_counts?.PROPOSED || 0} reports · ${presenceChannel.status_counts?.AUDITED || 0} audited`}
-            />
-            <MetricTile
-              icon={ShieldCheck}
-              tone="slate"
-              label="驱动信任"
-              value={driveTrust.capability_count ?? '—'}
-              status="REPORT_ONLY"
-              hint={`${driveTrust.status_counts?.PROPOSED || 0} gates · ${driveTrust.status_counts?.AUDITED || 0} audited`}
-            />
-            <MetricTile
-              icon={Activity}
-              tone="green"
-              label="适应修复"
-              value={adaptiveRepair.capability_count ?? '—'}
-              status="OWNER_GATED"
-              hint={`${adaptiveRepair.status_counts?.CANDIDATE || 0} candidates · ${adaptiveRepair.status_counts?.PROPOSED || 0} reports`}
             />
             <MetricTile
               icon={ShieldCheck}
@@ -1624,57 +1740,28 @@ export default function CodexBioOpsObservability() {
                 onChanged={() => query.refetch?.()}
               />
             </div>
-            <OwnerInboxPanel runId={data.run_id} />
-            <FocusEffectList effects={bioOps.focused_effects} />
-            <GroupTable groups={bioOps.groups} />
+            <details
+              className="overflow-hidden rounded-xl border border-white/80 bg-white/86 shadow-sm"
+              onToggle={(event) => setShowOwnerDeepDive(event.currentTarget.open)}
+            >
+              <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 text-sm font-semibold text-gray-700">
+                <span>Owner 队列与效果明细</span>
+                <span className="rounded-full border border-gray-200 bg-gray-50 px-2 py-0.5 text-xs text-gray-500">
+                  {showOwnerDeepDive ? '已展开' : '展开'}
+                </span>
+              </summary>
+              {showOwnerDeepDive ? (
+                <div className="space-y-3 border-t border-gray-100 p-4">
+                  <OwnerInboxPanel runId={data.run_id} />
+                  <FocusEffectList effects={bioOps.focused_effects} />
+                  <GroupTable groups={bioOps.groups} />
+                </div>
+              ) : null}
+            </details>
           </Section>
 
-          <Section title="Inner Mechanisms" subtitle="第三份文档的最小可落地机制：先纳入 BioOps 审计和 owner gate，再决定是否升级主路径。">
-            <InnerMechanismPanel summary={innerMechanisms} />
-          </Section>
-
-          <Section title="Trust Foundation" subtitle="可信基础层：授权梯度、真实约束、能力谦逊和不确定性表达统一变成可观测 gate。">
-            <TrustFoundationPanel summary={trustFoundation} />
-          </Section>
-
-          <Section title="Natural Interaction" subtitle="自然交互层：主观时间、情绪惯性、上下文重力和自我打断统一进入低风险 trace。">
-            <NaturalInteractionPanel summary={naturalInteraction} />
-          </Section>
-
-          <Section title="Relationship Layer" subtitle="长期关系层：契约、摩擦、修复曲线、依恋风格、沉默记忆和边界守护保持可观测。">
-            <RelationshipLayerPanel summary={relationshipLayer} />
-          </Section>
-
-          <Section title="Inner Life" subtitle="内在生命层：梦境排练、象征记忆、记忆质感、自我模型、生命脉搏和个人神话保持报告模式。">
-            <InnerLifePanel summary={innerLife} />
-          </Section>
-
-          <Section title="Self Governance" subtitle="自我治理层：价值层级、伦理复盘、边界膜、尊严守护、身份连续性和内在议会保持可观测。">
-            <SelfGovernancePanel summary={selfGovernance} />
-          </Section>
-
-          <Section title="Growth Closure" subtitle="成长与收束层：想法池、阶段门、存在负载、未闭环和认知卸载让项目能继续收尾。">
-            <GrowthClosurePanel summary={growthClosure} />
-          </Section>
-
-          <Section title="Memory Narrative" subtitle="记忆与叙事层：情节、书架、认知地标、叙事身份、自我连续性和梦化压缩保持可审计。">
-            <MemoryNarrativePanel summary={memoryNarrative} />
-          </Section>
-
-          <Section title="Affect Learning" subtitle="情绪学习层：内在温度、免疫耐受、情绪消化、后悔信号、喜悦强化和失败隔离保持报告模式。">
-            <AffectLearningPanel summary={affectLearning} />
-          </Section>
-
-          <Section title="Presence & Channel" subtitle="通道与存在感层：通道灵魂、长任务陪伴、注意力地形、静默陪伴、社交面具、仪式和温柔降级保持可观测。">
-            <PresenceChannelPanel summary={presenceChannel} />
-          </Section>
-
-          <Section title="Drive & Trust" subtitle="驱动力与信任层：信任梯度、信任恒温器、意图代谢、驱动力冲突、愿望格和 Need/Want/Impulse 保持报告模式。">
-            <DriveTrustPanel summary={driveTrust} />
-          </Section>
-
-          <Section title="Adaptive Repair" subtitle="适应与修复层：用户镜像、身体可塑、关系修复、叙事调试、隐性偏好和自愈故事保持可审计。">
-            <AdaptiveRepairPanel summary={adaptiveRepair} />
+          <Section title="BioOps 能力层工作台" subtitle="把十几个机制分区收进一个可切换工作台，保留完整细节但不再把页面拉成卡片长卷。">
+            <CapabilityWorkbench sections={capabilitySections} />
           </Section>
 
           <Section title="Chat / Planner 运行时 trace" subtitle="能看到短确认是否走反射、复杂请求是否保持规划链、主动沉默为什么触发。">

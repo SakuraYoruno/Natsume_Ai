@@ -31,6 +31,18 @@ function emit(entry) {
   entry.listeners.forEach((listener) => listener())
 }
 
+function updateEntry(cacheKey, patch) {
+  const current = ensureEntry(cacheKey)
+  const next = {
+    ...current,
+    ...patch,
+    listeners: current.listeners,
+  }
+  queryCache.set(cacheKey, next)
+  emit(next)
+  return next
+}
+
 export function subscribeQuery(cacheKey, listener) {
   const entry = ensureEntry(cacheKey)
   entry.listeners.add(listener)
@@ -62,31 +74,34 @@ export async function executeQuery({
   }
 
   const hasResolvedData = entry.updatedAt != null
-  entry.status = hasResolvedData ? 'refreshing' : 'loading'
-  entry.error = null
-  emit(entry)
-
   const promise = Promise.resolve()
     .then(() => queryFn())
     .then((data) => {
-      entry.data = data
-      entry.error = null
-      entry.failureCount = 0
-      entry.status = 'success'
-      entry.updatedAt = Date.now()
-      entry.promise = null
-      emit(entry)
+      updateEntry(cacheKey, {
+        data,
+        error: null,
+        failureCount: 0,
+        status: 'success',
+        updatedAt: Date.now(),
+        promise: null,
+      })
       return data
     })
     .catch((error) => {
-      entry.error = error
-      entry.failureCount += 1
-      entry.status = hasResolvedData ? 'stale' : 'error'
-      entry.promise = null
-      emit(entry)
+      const current = ensureEntry(cacheKey)
+      updateEntry(cacheKey, {
+        error,
+        failureCount: (current.failureCount || 0) + 1,
+        status: hasResolvedData ? 'stale' : 'error',
+        promise: null,
+      })
       throw error
     })
 
-  entry.promise = promise
+  updateEntry(cacheKey, {
+    status: hasResolvedData ? 'refreshing' : 'loading',
+    error: null,
+    promise,
+  })
   return promise
 }

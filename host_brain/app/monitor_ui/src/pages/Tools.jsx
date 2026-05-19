@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react'
-import { Wrench } from 'lucide-react'
+import { Play, RefreshCw, Search, Wrench, X } from 'lucide-react'
 import {
   executeTool,
 } from '../api/tools.js'
@@ -39,35 +39,36 @@ function ToolCard({ tool, selected, onClick }) {
 
   return (
     <button
+      type="button"
       onClick={() => onClick(tool)}
-      className={`w-full rounded-lg border p-3 text-left transition-all ${
+      className={`grid w-full grid-cols-1 gap-2 px-3 py-2.5 text-left transition-colors md:grid-cols-[minmax(0,1fr)_8rem_7.5rem] md:items-center ${
         selected
-          ? 'border-blue-400 bg-blue-50 shadow-sm'
-          : 'border-gray-200 bg-white hover:border-gray-300 hover:shadow-sm'
+          ? 'bg-blue-50'
+          : 'bg-white hover:bg-gray-50'
       }`}
     >
-      <div className="flex items-start justify-between gap-2">
-        <div className="min-w-0 flex-1">
-          <div className="truncate text-sm font-medium text-gray-800">{tool.name}</div>
-          <div className="mt-0.5 truncate text-xs text-gray-500">{tool.id}</div>
-        </div>
-        <div className="flex shrink-0 flex-col items-end gap-1">
-          <span className={`rounded px-1.5 py-0.5 text-xs font-medium ${sideEffect.bg} ${sideEffect.text}`}>
-            {sideEffect.label}
-          </span>
-          <span className={`rounded px-1.5 py-0.5 text-xs ${auth.bg} ${auth.text}`}>{auth.label}</span>
-        </div>
+      <div className="min-w-0">
+        <div className="truncate text-sm font-semibold text-gray-800">{tool.name}</div>
+        <div className="mt-0.5 truncate font-mono text-xs text-gray-500">{tool.id}</div>
+        <div className="mt-1 line-clamp-1 text-xs text-gray-500">{tool.desc || '暂无描述'}</div>
       </div>
-      <div className="mt-1.5 line-clamp-2 text-xs text-gray-500">{tool.desc || '暂无描述'}</div>
-      {tool.domain_tags?.length > 0 && (
-        <div className="mt-1.5 flex flex-wrap gap-1">
-          {tool.domain_tags.slice(0, 3).map((tag) => (
+      <div className="flex flex-wrap gap-1 md:justify-start">
+        <span className={`rounded px-1.5 py-0.5 text-xs font-medium ${sideEffect.bg} ${sideEffect.text}`}>
+          {sideEffect.label}
+        </span>
+        <span className={`rounded px-1.5 py-0.5 text-xs ${auth.bg} ${auth.text}`}>{auth.label}</span>
+      </div>
+      <div className="flex min-w-0 flex-wrap gap-1 md:justify-end">
+        {tool.domain_tags?.length > 0 ? (
+          tool.domain_tags.slice(0, 3).map((tag) => (
             <span key={tag} className="rounded bg-gray-100 px-1.5 py-0.5 text-xs text-gray-500">
               {tag}
             </span>
-          ))}
-        </div>
-      )}
+          ))
+        ) : (
+          <span className="text-xs text-gray-400">无标签</span>
+        )}
+      </div>
     </button>
   )
 }
@@ -118,8 +119,8 @@ function ExecutePanel({ tool, onClose }) {
     <div className="space-y-3 rounded-lg border border-gray-200 bg-white p-4">
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-semibold text-gray-700">执行工具：{tool.name}</h3>
-        <button onClick={onClose} className="text-lg leading-none text-gray-400 hover:text-gray-600">
-          ×
+        <button onClick={onClose} className="inline-flex h-7 w-7 items-center justify-center rounded text-gray-400 hover:bg-gray-50 hover:text-gray-600">
+          <X size={15} />
         </button>
       </div>
 
@@ -168,8 +169,9 @@ function ExecutePanel({ tool, onClose }) {
       <button
         onClick={handleExecute}
         disabled={loading}
-        className="w-full rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700 disabled:opacity-50"
+        className="inline-flex w-full items-center justify-center gap-1.5 rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700 disabled:opacity-50"
       >
+        <Play size={14} />
         {loading ? '执行中…' : '执行'}
       </button>
 
@@ -207,6 +209,7 @@ export default function Tools() {
 
   const [selectedTool, setSelectedTool] = useState(null)
   const [executeTarget, setExecuteTarget] = useState(null)
+  const [showRuntimeContext, setShowRuntimeContext] = useState(false)
   const [filter, setFilter] = useState('ALL')
   const [query, setQuery] = useState('')
   const {
@@ -303,8 +306,9 @@ export default function Tools() {
         <button
           onClick={handleRefresh}
           disabled={loading || refreshing || runtimeLoading}
-          className="rounded border border-gray-300 px-3 py-1.5 text-xs hover:bg-gray-50 disabled:opacity-50"
+          className="btn-secondary"
         >
+          <RefreshCw size={14} className={loading || refreshing || runtimeLoading ? 'animate-spin' : ''} />
           {loading || refreshing || runtimeLoading
             ? '刷新中…'
             : '刷新'}
@@ -346,54 +350,85 @@ export default function Tools() {
         <NoticeBanner variant="info">当前系统还没有可观测的工具目录样本。</NoticeBanner>
       ) : null}
 
-      <OrganSystemOverview model={toolsOrganModel} />
-
-      <DigitalLifeRuntimeCard runtimeSnapshot={runtimeSnapshot} promptStats={promptStats} compact />
+      <details
+        className="overflow-hidden rounded-xl border border-white/80 bg-white/86 shadow-sm"
+        onToggle={(event) => setShowRuntimeContext(event.currentTarget.open)}
+      >
+        <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 text-sm font-semibold text-gray-700">
+          <span className="inline-flex min-w-0 items-center gap-2">
+            <Wrench size={14} className="text-gray-400" />
+            工具器官与运行时快照
+          </span>
+          <span className="rounded-full border border-gray-200 bg-gray-50 px-2 py-0.5 text-xs text-gray-500">
+            {showRuntimeContext ? '已展开' : '展开'}
+          </span>
+        </summary>
+        {showRuntimeContext ? (
+          <div className="space-y-4 border-t border-gray-100 p-4">
+            <OrganSystemOverview model={toolsOrganModel} />
+            <DigitalLifeRuntimeCard runtimeSnapshot={runtimeSnapshot} promptStats={promptStats} compact />
+          </div>
+        ) : null}
+      </details>
 
       {health ? (
-        <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+        <div className="overflow-hidden rounded-xl border border-white/80 bg-white/86 shadow-sm">
+          <div className="grid grid-cols-2 divide-x divide-y divide-gray-100 md:grid-cols-4 md:divide-y-0">
           {[
             { label: '引擎状态', value: health.status, color: health.status === 'OK' ? 'text-green-600' : 'text-yellow-600' },
             { label: '工具总数', value: health.catalog_size, color: 'text-gray-800' },
             { label: '只读工具', value: health.read_tools, color: 'text-green-600' },
             { label: '写入工具', value: health.write_tools, color: 'text-orange-600' },
           ].map(({ label, value, color }) => (
-            <div key={label} className="rounded-lg border border-gray-200 bg-white p-3 text-center">
+            <div key={label} className="px-4 py-3">
               <div className={`text-xl font-bold ${color}`}>{value}</div>
               <div className="mt-0.5 text-xs text-gray-500">{label}</div>
             </div>
           ))}
+          </div>
         </div>
       ) : null}
 
-      <div className="flex items-center gap-3">
-        <input
-          className="flex-1 rounded border border-gray-300 px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-300"
-          placeholder="搜索工具名或描述…"
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-        />
-        <div className="flex overflow-hidden rounded border border-gray-300 text-sm">
+      <div className="rounded-xl border border-white/80 bg-white/86 p-3 shadow-sm">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
+          <div className="relative min-w-0 flex-1">
+            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+            <input
+              className="w-full rounded-lg border border-gray-300 px-3 py-2 pl-9 text-sm focus:outline-none focus:ring-2 focus:ring-primary-200"
+              placeholder="搜索工具名或描述..."
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+            />
+          </div>
+          <div className="flex shrink-0 overflow-hidden rounded-lg border border-gray-200 bg-gray-50 p-1 text-sm">
           {[
             { key: 'ALL', label: `全部 (${tools.length})` },
             { key: 'READ', label: `只读（${readCount}）` },
             { key: 'WRITE', label: `写入（${writeCount}）` },
           ].map(({ key, label }) => (
             <button
+              type="button"
               key={key}
               onClick={() => setFilter(key)}
-              className={`px-3 py-1.5 transition-colors ${
-                filter === key ? 'bg-blue-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'
+              className={`whitespace-nowrap rounded-md px-3 py-1.5 text-xs font-semibold transition-colors ${
+                filter === key ? 'bg-white text-primary shadow-sm' : 'text-gray-500 hover:bg-white/70 hover:text-gray-700'
               }`}
             >
               {label}
             </button>
           ))}
+          </div>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-        <div className="space-y-2 overflow-y-auto pr-1 md:col-span-1 md:max-h-[600px]">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1.1fr)_minmax(360px,0.9fr)]">
+        <div className="overflow-hidden rounded-xl border border-white/80 bg-white/86 shadow-sm">
+          <div className="grid grid-cols-1 gap-2 border-b border-gray-100 bg-gray-50 px-3 py-2 text-xs font-semibold text-gray-500 md:grid-cols-[minmax(0,1fr)_8rem_7.5rem]">
+            <span>工具</span>
+            <span>权限</span>
+            <span className="md:text-right">标签</span>
+          </div>
+          <div className="max-h-[620px] divide-y divide-gray-100 overflow-y-auto">
           {loading && filteredTools.length === 0 ? (
             <NoticeBanner variant="info" title="加载中">
               正在同步工具目录…
@@ -413,9 +448,10 @@ export default function Tools() {
               />
             ))
           )}
+          </div>
         </div>
 
-        <div className="space-y-4 md:col-span-2">
+        <div className="space-y-4 lg:sticky lg:top-24 lg:self-start">
           {selectedTool ? (
             <>
               <div className="space-y-3 rounded-lg border border-gray-200 bg-white p-4">
@@ -469,9 +505,10 @@ export default function Tools() {
 
                 <button
                   onClick={() => setExecuteTarget(executeTarget?.id === selectedTool.id ? null : selectedTool)}
-                  className="w-full rounded border border-blue-300 px-4 py-2 text-sm font-medium text-blue-600 transition-colors hover:bg-blue-50"
+                  className="inline-flex w-full items-center justify-center gap-1.5 rounded border border-blue-300 px-4 py-2 text-sm font-medium text-blue-600 transition-colors hover:bg-blue-50"
                 >
-                  {executeTarget?.id === selectedTool.id ? '收起执行面板' : '▶ 执行该工具'}
+                  <Play size={14} />
+                  {executeTarget?.id === selectedTool.id ? '收起执行面板' : '执行该工具'}
                 </button>
               </div>
 
