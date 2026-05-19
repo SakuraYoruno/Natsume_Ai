@@ -3,6 +3,8 @@ import react from '@vitejs/plugin-react'
 import path from 'path'
 
 const devApiTarget = process.env.VITE_DEV_API_TARGET || 'http://127.0.0.1:18080'
+const devObsApiTarget = process.env.VITE_DEV_OBS_API_TARGET || devApiTarget
+const devHostApiTarget = process.env.VITE_DEV_HOST_API_TARGET || devApiTarget
 
 export default defineConfig({
   plugins: [react()],
@@ -45,36 +47,44 @@ export default defineConfig({
     port: 5173,
     proxy: {
       '/obs': {
-        target: devApiTarget,
+        target: devObsApiTarget,
         changeOrigin: true,
         ws: true,
       },
+      '/api': {
+        target: devObsApiTarget,
+        changeOrigin: true,
+      },
       '/metrics': {
-        target: devApiTarget,
+        target: devHostApiTarget,
         changeOrigin: true,
       },
       '/ui': {
-        target: devApiTarget,
+        target: devObsApiTarget,
         changeOrigin: true,
       },
       '/prompt-config': {
-        target: devApiTarget,
+        target: devHostApiTarget,
         changeOrigin: true,
       },
       '/canon': {
-        target: devApiTarget,
+        target: devHostApiTarget,
         changeOrigin: true,
       },
       '/bond': {
-        target: devApiTarget,
+        target: devHostApiTarget,
         changeOrigin: true,
       },
       '/tools': {
-        target: devApiTarget,
+        target: devHostApiTarget,
         changeOrigin: true,
       },
       '/scheduler': {
-        target: devApiTarget,
+        target: devHostApiTarget,
+        changeOrigin: true,
+      },
+      '/v1': {
+        target: devHostApiTarget,
         changeOrigin: true,
       },
     },

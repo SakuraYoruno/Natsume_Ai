@@ -112,6 +112,7 @@ export default function Canon() {
 
   return (
     <div className="space-y-4">
+      <h1 className="sr-only">设定管理</h1>
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <PageHero
           icon={BookOpen}
