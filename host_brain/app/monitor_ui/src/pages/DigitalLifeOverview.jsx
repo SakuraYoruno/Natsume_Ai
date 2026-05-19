@@ -15,6 +15,7 @@ import { LifeSection } from '../components/digitalLife/digitalLifeSectionShared.
 import SampleMeta from '../components/obs/SampleMeta.jsx'
 import ViewportLazySection from '../components/obs/ViewportLazySection.jsx'
 import DigitalLifeRuntimeCard from '../components/DigitalLifeRuntimeCard.jsx'
+import DigitalLifeWallClockSoakCard from '../components/DigitalLifeWallClockSoakCard.jsx'
 import EmptyStateCard from '../components/EmptyStateCard.jsx'
 import LifeBodyPathologyPanel from '../components/lifeBody/LifeBodyPathologyPanel.jsx'
 import LifeBodyFocusPanel from '../components/lifeBody/LifeBodyFocusPanel.jsx'
@@ -26,6 +27,7 @@ import PageHero from '../components/PageHero.jsx'
 import TimeWindowSelect from '../components/TimeWindowSelect.jsx'
 import VitalLoopSummaryPanel from '../components/VitalLoopSummaryPanel.jsx'
 import useLifeBodyPageData from '../hooks/useLifeBodyPageData.js'
+import { useDigitalLifeWallClockSoakQuery } from '../queries/digitalLifeQueries.js'
 import {
   compactText,
   formatTrend,
@@ -100,7 +102,19 @@ export default function DigitalLifeOverview() {
     gatewayLoopLoadState,
     memoryOverviewLoadState,
     lifeBodyModel,
+    pollingEnabled,
+    pollingInterval,
+    pollingTick,
   } = useLifeBodyPageData({ windowMinutes })
+  const wallClockSoakQuery = useDigitalLifeWallClockSoakQuery({
+    pollingEnabled,
+    pollingTick,
+    pollingInterval: Math.max(60, Number(pollingInterval || 60)),
+  })
+  const refreshDashboard = () => {
+    void refreshAll()
+    void wallClockSoakQuery.refetch()
+  }
   const forgeQualitySummary = capabilityGapData?.forge_runtime_quality?.summary || {}
   const forgeQualityItems = capabilityGapData?.forge_runtime_quality?.items || []
   const forgeRiskItems = [...forgeQualityItems]
@@ -299,8 +313,19 @@ export default function DigitalLifeOverview() {
         </div>
         <div className="flex items-center gap-2">
           <TimeWindowSelect value={windowMinutes} onChange={setWindowMinutes} options={WINDOW_OPTIONS} />
-          <button className="btn-secondary" onClick={refreshAll} disabled={loading || refreshing || runtimeLoading}>
-            <RefreshCw size={14} className={loading || refreshing || runtimeLoading ? 'animate-spin' : ''} />
+          <button
+            className="btn-secondary"
+            onClick={refreshDashboard}
+            disabled={loading || refreshing || runtimeLoading || wallClockSoakQuery.loading || wallClockSoakQuery.refreshing}
+          >
+            <RefreshCw
+              size={14}
+              className={
+                loading || refreshing || runtimeLoading || wallClockSoakQuery.loading || wallClockSoakQuery.refreshing
+                  ? 'animate-spin'
+                  : ''
+              }
+            />
             刷新
           </button>
         </div>
@@ -369,6 +394,19 @@ export default function DigitalLifeOverview() {
             : runtimeError}
         </NoticeBanner>
       ) : null}
+
+      <LifeSection
+        title="真实墙钟闭环验证"
+        hint="只读读取当前 24h wall-clock soak 记录，用来确认主链、器官映射与后台 tick 是否持续推进。"
+      >
+        <DigitalLifeWallClockSoakCard
+          data={wallClockSoakQuery.data}
+          loading={wallClockSoakQuery.loading}
+          refreshing={wallClockSoakQuery.refreshing}
+          error={wallClockSoakQuery.error}
+          onRefresh={wallClockSoakQuery.refetch}
+        />
+      </LifeSection>
 
       {runtimeSnapshot ? (
         <LifeSection
@@ -483,4 +521,3 @@ export default function DigitalLifeOverview() {
     </div>
   )
 }
-

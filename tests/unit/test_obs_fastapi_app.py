@@ -26,6 +26,7 @@ def test_obs_fastapi_app_exposes_obs_and_ui_routes():
     assert "/obs/trace-feed/snapshot" in paths
     assert "/obs/insights/summary-snapshot" in paths
     assert "/obs/digital-life/overview-snapshot" in paths
+    assert "/obs/digital-life/wall-clock-soak" in paths
     assert "/obs/codex-bio-ops" in paths
     assert "/api/ui/search-requests" in paths
     assert "/observability/trace" in paths

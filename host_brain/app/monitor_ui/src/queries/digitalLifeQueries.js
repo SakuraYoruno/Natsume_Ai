@@ -1,5 +1,5 @@
 import { useCallback } from 'react'
-import { fetchDigitalLifeOverviewSnapshot } from '../api/obs.js'
+import { fetchDigitalLifeOverviewSnapshot, fetchDigitalLifeWallClockSoak } from '../api/obs.js'
 import { OBS_STALE_TIMES } from './freshness.js'
 import { OBS_QUERY_KEYS } from './queryKeys.js'
 import useObservabilityQuery from './useObservabilityQuery.js'
@@ -40,4 +40,24 @@ export function useDigitalLifeOverviewQuery({
     humanoidLoopHotspotTrendData: query.data?.humanoidLoopHotspotTrendData ?? null,
     humanoidLoopSourceCorrelationData: query.data?.humanoidLoopSourceCorrelationData ?? null,
   }
+}
+
+export function useDigitalLifeWallClockSoakQuery({
+  pollingEnabled = false,
+  pollingTick = 0,
+  pollingInterval = 60,
+} = {}) {
+  const queryFn = useCallback(async () => fetchDigitalLifeWallClockSoak(), [])
+
+  return useObservabilityQuery({
+    queryKey: OBS_QUERY_KEYS.digitalLifeWallClockSoak(),
+    queryFn,
+    retryCount: 1,
+    retryDelayMs: 1_200,
+    pollingEnabled,
+    pollingTick,
+    pollingIntervalMs: pollingInterval * 1000,
+    minPollingIntervalMs: 60_000,
+    staleTimeMs: OBS_STALE_TIMES.wallClockSoak,
+  })
 }

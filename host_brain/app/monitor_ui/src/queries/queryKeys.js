@@ -4,6 +4,7 @@ export const OBS_QUERY_KEYS = Object.freeze({
   pathologies: (params) => ['pathologies', params],
   runtimeSignals: (windowMinutes) => ['runtime-signals', windowMinutes],
   digitalLifeOverview: (windowMinutes) => ['digital-life-overview', windowMinutes],
+  digitalLifeWallClockSoak: () => ['digital-life-wall-clock-soak'],
   codexBioOpsObservability: (runId) => ['codex-bio-ops-observability', runId || 'latest'],
   memoryOverview: (windowMinutes) => ['memory-overview', windowMinutes],
   gatewayOverview: (windowMinutes) => ['gateway-overview', windowMinutes],

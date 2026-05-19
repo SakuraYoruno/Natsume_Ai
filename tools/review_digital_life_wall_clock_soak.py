@@ -24,7 +24,9 @@ DEFAULT_EXPECTED_HOURS = 24.0
 def review_wall_clock_soak(args: argparse.Namespace) -> dict[str, Any]:
     run_dir = Path(str(getattr(args, "run_dir", "") or "")).resolve()
     out_dir = Path(str(getattr(args, "out_dir", "") or "")).resolve() if str(getattr(args, "out_dir", "") or "").strip() else run_dir.parent / "review"
-    out_dir.mkdir(parents=True, exist_ok=True)
+    write_outputs = bool(getattr(args, "write_outputs", True))
+    if write_outputs:
+        out_dir.mkdir(parents=True, exist_ok=True)
 
     summary_path = run_dir / "summary.json"
     checkpoints_path = run_dir / "checkpoints.jsonl"
@@ -104,9 +106,10 @@ def review_wall_clock_soak(args: argparse.Namespace) -> dict[str, Any]:
         "stdout_tail": stdout_text,
         "latest_checkpoints": checkpoints[-10:],
     }
-    _write_json(out_dir / "review_summary.json", review_summary)
-    _write_json(out_dir / "review_details.json", details)
-    (out_dir / "review_report.md").write_text(_markdown_report(review_summary, details), encoding="utf-8")
+    if write_outputs:
+        _write_json(out_dir / "review_summary.json", review_summary)
+        _write_json(out_dir / "review_details.json", details)
+        (out_dir / "review_report.md").write_text(_markdown_report(review_summary, details), encoding="utf-8")
     return {"summary": review_summary, "details": details}
 
 
