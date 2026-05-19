@@ -1,5 +1,5 @@
-import React, { useCallback, useMemo, useState } from 'react'
-import { Activity, History, ListChecks, Workflow } from 'lucide-react'
+import React, { useCallback, useEffect, useMemo, useState } from 'react'
+import { Activity, History, ListChecks, PauseCircle, Play, Power, RefreshCw, Search, Workflow } from 'lucide-react'
 import { useSearchParams } from 'react-router-dom'
 import {
   disableSchedulerTask,
@@ -65,11 +65,10 @@ function AutomationSection({ icon: Icon, title, description, actions = null, chi
   )
 }
 
-function TaskCard({ item, onEnable, onDisable, onTrigger, actionLoading }) {
-  const { task, health } = item
+function getTaskView(item) {
+  const { task = {}, health = {} } = item || {}
   const status = health?.status || 'PENDING'
   const style = STATUS_STYLES[status] || STATUS_STYLES.PENDING
-  const isLoading = actionLoading === task.task_id
   const lastReasonCode = String(health?.last_reason_code || '').trim()
   const lastGateState = String(health?.last_gate_state || '').trim()
   const lastMoodState = String(health?.last_mood_state || '').trim()
@@ -84,18 +83,99 @@ function TaskCard({ item, onEnable, onDisable, onTrigger, actionLoading }) {
   const lastEnergy = Number.isFinite(Number(health?.last_endocrine_energy))
     ? Number(health?.last_endocrine_energy).toFixed(2)
     : '—'
+  return {
+    task,
+    health,
+    status,
+    style,
+    lastReasonCode,
+    lastGateState,
+    lastMoodState,
+    lastImmuneDecision,
+    lastImmuneRisk,
+    lastImmuneReasonCodes,
+    lastCortisol,
+    lastEnergy,
+  }
+}
+
+function TaskRow({ item, selected, onSelect }) {
+  const {
+    task,
+    health,
+    status,
+    style,
+    lastReasonCode,
+    lastGateState,
+    lastImmuneDecision,
+    lastImmuneRisk,
+    lastCortisol,
+    lastEnergy,
+  } = getTaskView(item)
+  return (
+    <button
+      type="button"
+      className={`grid w-full grid-cols-1 gap-2 px-3 py-3 text-left transition-colors lg:grid-cols-[minmax(0,1fr)_8rem_8.5rem_8rem] lg:items-center ${
+        selected ? 'bg-violet-50' : 'bg-white hover:bg-gray-50'
+      } ${task.enabled ? '' : 'opacity-70 saturate-75'}`}
+      onClick={() => onSelect(task.task_id)}
+    >
+      <div className="min-w-0">
+        <div className="flex min-w-0 items-center gap-2">
+          <span className={`h-2 w-2 shrink-0 rounded-full ${style.dot}`} />
+          <span className="truncate font-mono text-sm font-semibold text-gray-800">{task.task_id}</span>
+        </div>
+        <div className="mt-0.5 truncate text-xs text-gray-500">{task.description || '暂无描述'}</div>
+      </div>
+      <div className="flex flex-wrap gap-1">
+        <span className={`rounded px-1.5 py-0.5 text-xs font-medium ${PRIORITY_STYLES[task.priority] || PRIORITY_STYLES.MEDIUM}`}>
+          {task.priority}
+        </span>
+        <span className={`rounded px-1.5 py-0.5 text-xs ${style.bg} ${style.text}`}>{status}</span>
+      </div>
+      <div className="min-w-0 text-xs text-gray-500">
+        <div className="truncate">reason {lastReasonCode || '—'}</div>
+        <div className="truncate">gate {lastGateState || '—'}</div>
+      </div>
+      <div className="min-w-0 text-xs text-gray-500 lg:text-right">
+        <div className="truncate">{lastImmuneDecision ? `${lastImmuneDecision}${lastImmuneRisk ? `/${lastImmuneRisk}` : ''}` : 'immune —'}</div>
+        <div className="truncate">cortisol {lastCortisol} · energy {lastEnergy}</div>
+      </div>
+    </button>
+  )
+}
+
+function TaskDetailPanel({ item, onEnable, onDisable, onTrigger, actionLoading }) {
+  if (!item) {
+    return <EmptyStateCard title="请选择一个节律任务" hint="左侧选择任务后，可查看健康、门控和操作入口。" />
+  }
+  const {
+    task,
+    health,
+    status,
+    style,
+    lastReasonCode,
+    lastGateState,
+    lastMoodState,
+    lastImmuneDecision,
+    lastImmuneRisk,
+    lastImmuneReasonCodes,
+    lastCortisol,
+    lastEnergy,
+  } = getTaskView(item)
+  const isLoading = actionLoading === task.task_id
 
   return (
-    <div className={`card-hover space-y-3 p-4 ${task.enabled ? '' : 'opacity-75 saturate-75'}`}>
-      <div className="flex items-start justify-between gap-2">
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
+    <div className={`space-y-4 rounded-xl border border-white/80 bg-white/86 p-4 shadow-sm ${task.enabled ? '' : 'opacity-80 saturate-75'}`}>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex min-w-0 items-center gap-2">
             <span className={`h-2 w-2 shrink-0 rounded-full ${style.dot}`} />
-            <span className="truncate text-sm font-medium text-gray-800">{task.task_id}</span>
+            <h3 className="truncate font-mono text-base font-semibold text-gray-900">{task.task_id}</h3>
           </div>
-          {task.description ? <div className="ml-4 mt-0.5 truncate text-xs text-gray-500">{task.description}</div> : null}
+          {task.description ? <p className="mt-1 text-sm leading-6 text-gray-600">{task.description}</p> : null}
         </div>
-        <div className="flex shrink-0 items-center gap-1.5">
+        <div className="flex shrink-0 flex-wrap items-center gap-1.5">
           <span className={`rounded px-1.5 py-0.5 text-xs font-medium ${PRIORITY_STYLES[task.priority] || PRIORITY_STYLES.MEDIUM}`}>
             {task.priority}
           </span>
@@ -130,34 +210,37 @@ function TaskCard({ item, onEnable, onDisable, onTrigger, actionLoading }) {
         </NoticeBanner>
       ) : null}
 
-      <div className="flex gap-2">
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
         <button
           onClick={() => onTrigger(task.task_id)}
           disabled={isLoading || !task.enabled}
-          className="btn-secondary flex-1 justify-center border-blue-200 text-xs text-blue-700 disabled:opacity-40"
+          className="btn-secondary justify-center border-blue-200 text-xs text-blue-700 disabled:opacity-40"
         >
-          {isLoading ? '处理中…' : '▶ 立即触发'}
+          <Play size={14} />
+          {isLoading ? '处理中…' : '立即触发'}
         </button>
         {task.enabled ? (
           <button
             onClick={() => onDisable(task.task_id)}
             disabled={isLoading}
-            className="btn-secondary flex-1 justify-center text-xs disabled:opacity-40"
+            className="btn-secondary justify-center text-xs disabled:opacity-40"
           >
+            <PauseCircle size={14} />
             暂停
           </button>
         ) : (
           <button
             onClick={() => onEnable(task.task_id)}
             disabled={isLoading}
-            className="btn-secondary flex-1 justify-center border-green-200 text-xs text-green-700 disabled:opacity-40"
+            className="btn-secondary justify-center border-green-200 text-xs text-green-700 disabled:opacity-40"
           >
+            <Power size={14} />
             启用
           </button>
         )}
       </div>
-      <div className="lifeline-rail h-1">
-        <div className="lifeline-wave h-full w-full" />
+      <div className="rounded-lg border border-gray-100 bg-gray-50 px-3 py-2 text-xs leading-6 text-gray-500">
+        trigger={task.trigger_mode || '—'} · mood={lastMoodState || '—'} · immune_reason={lastImmuneReasonCodes.join('|') || '—'}
       </div>
     </div>
   )
@@ -189,6 +272,11 @@ export default function Automation() {
   })
   const [actionLoading, setActionLoading] = useState('')
   const [actionResult, setActionResult] = useState(null)
+  const [taskSearch, setTaskSearch] = useState('')
+  const [selectedTaskId, setSelectedTaskId] = useState('')
+  const [showOrganContext, setShowOrganContext] = useState(false)
+  const [showImmuneOps, setShowImmuneOps] = useState(false)
+  const [showHistory, setShowHistory] = useState(false)
   const {
     tasks,
     health,
@@ -256,20 +344,52 @@ export default function Automation() {
   }, [searchParams, setSearchParams])
 
   const filteredTasks = useMemo(() => {
-    if (!hasTaskFilters) return tasks
+    const keyword = taskSearch.trim().toLowerCase()
     return tasks.filter((item) => {
       const taskReason = String(item?.health?.last_reason_code || '').trim().toUpperCase()
       const taskGate = String(item?.health?.last_gate_state || '').trim().toLowerCase()
       if (reasonFilter && taskReason !== reasonFilter) return false
       if (gateFilter && taskGate !== gateFilter) return false
+      if (keyword) {
+        const task = item?.task || {}
+        const health = item?.health || {}
+        const haystack = [
+          task.task_id,
+          task.description,
+          task.priority,
+          task.trigger_mode,
+          health.status,
+          health.last_reason_code,
+          health.last_gate_state,
+          health.last_immune_decision,
+          ...(Array.isArray(health.last_immune_reason_codes) ? health.last_immune_reason_codes : []),
+        ].map((value) => String(value || '').toLowerCase())
+        if (!haystack.some((value) => value.includes(keyword))) return false
+      }
       return true
     })
-  }, [tasks, hasTaskFilters, reasonFilter, gateFilter])
+  }, [tasks, reasonFilter, gateFilter, taskSearch])
 
   const enabledCount = useMemo(() => tasks.filter((item) => item.task?.enabled).length, [tasks])
   const runningCount = useMemo(() => tasks.filter((item) => item.health?.status === 'RUNNING').length, [tasks])
   const failedCount = useMemo(() => tasks.filter((item) => item.health?.status === 'FAILED').length, [tasks])
   const filteredCount = filteredTasks.length
+  const selectedTask = useMemo(
+    () => filteredTasks.find((item) => item.task?.task_id === selectedTaskId) || filteredTasks[0] || null,
+    [filteredTasks, selectedTaskId]
+  )
+  const hasAnyTaskFilter = hasTaskFilters || Boolean(taskSearch.trim())
+
+  useEffect(() => {
+    if (!filteredTasks.length) {
+      if (selectedTaskId) setSelectedTaskId('')
+      return
+    }
+    if (!filteredTasks.some((item) => item.task?.task_id === selectedTaskId)) {
+      setSelectedTaskId(filteredTasks[0].task?.task_id || '')
+    }
+  }, [filteredTasks, selectedTaskId])
+
   const schedulerState = useMemo(() => {
     const rawStatus = String(health?.scheduler_status || '').toUpperCase()
     if (typeof health?.running === 'boolean') {
@@ -333,9 +453,9 @@ export default function Automation() {
       label: '已筛选',
       value: String(filteredCount),
       tone: 'gray',
-      active: hasTaskFilters,
+      active: hasAnyTaskFilter,
     },
-  ]), [enabledCount, failedCount, filteredCount, hasTaskFilters, runningCount, schedulerState.label, schedulerState.running, tasks.length])
+  ]), [enabledCount, failedCount, filteredCount, hasAnyTaskFilter, runningCount, schedulerState.label, schedulerState.running, tasks.length])
   const endocrineOrganModel = useMemo(() => buildEndocrineOrganSystemModel({
     loadState: automationLoadState,
     updatedAt: lastUpdatedAt,
@@ -345,14 +465,14 @@ export default function Automation() {
     runningCount,
     failedCount,
     filteredCount,
-    hasTaskFilters,
+    hasTaskFilters: hasAnyTaskFilter,
     backgroundRuntime: runtimeSnapshot?.background_runtime,
   }), [
     automationLoadState,
     enabledCount,
     failedCount,
     filteredCount,
-    hasTaskFilters,
+    hasAnyTaskFilter,
     lastUpdatedAt,
     runningCount,
     runtimeSnapshot?.background_runtime,
@@ -362,29 +482,19 @@ export default function Automation() {
 
   return (
     <div className="space-y-6">
-      <div className="card space-y-3 p-5 md:p-6">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h1 className="text-xl font-bold text-gray-800">器官执行台</h1>
-            <p className="mt-0.5 text-sm text-gray-500">统一查看数字生命体常驻节律任务的状态、历史和手动触发入口。</p>
-          </div>
-          <button
-            onClick={refreshAll}
-            disabled={loading || refreshing || runtimeLoading}
-            className="btn-secondary text-xs disabled:opacity-50"
-          >
-            {loading || refreshing || runtimeLoading ? '刷新中…' : '刷新'}
-          </button>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h1 className="text-xl font-bold text-gray-800">器官执行台</h1>
+          <p className="mt-0.5 text-sm text-gray-500">统一查看常驻节律任务、免疫回放和历史脉络。</p>
         </div>
-        <div className="lifeline-rail h-1.5">
-          <div className="lifeline-wave h-full w-full" />
-        </div>
-        <div className="grid grid-cols-2 gap-2 text-xs text-gray-500 md:grid-cols-4">
-          <div className="rounded-lg border border-primary-100/70 bg-white/70 px-3 py-2">任务总数：{tasks.length}</div>
-          <div className="rounded-lg border border-primary-100/70 bg-white/70 px-3 py-2">已启用：{enabledCount}</div>
-          <div className="rounded-lg border border-primary-100/70 bg-white/70 px-3 py-2">推进中：{runningCount}</div>
-          <div className="rounded-lg border border-primary-100/70 bg-white/70 px-3 py-2">异常任务：{failedCount}</div>
-        </div>
+        <button
+          onClick={refreshAll}
+          disabled={loading || refreshing || runtimeLoading}
+          className="btn-secondary text-xs disabled:opacity-50"
+        >
+          <RefreshCw size={14} className={loading || refreshing || runtimeLoading ? 'animate-spin' : ''} />
+          {loading || refreshing || runtimeLoading ? '刷新中' : '刷新'}
+        </button>
       </div>
 
       <PageHero
@@ -419,62 +529,98 @@ export default function Automation() {
         <NoticeBanner variant="info">当前还没有已登记的节律任务样本。</NoticeBanner>
       ) : null}
 
-      <OrganSystemOverview model={endocrineOrganModel} />
-
-      <LivingPulseStrip
-        title="节律脉冲"
-        subtitle="先看这组器官节律当前怎么流动，再往下看免疫回放和任务卡。"
-        nodes={schedulerPulseNodes}
-      />
-
-      <AutomationSection
-        icon={Activity}
-        title="生命体运行与免疫护栏"
-        description="把生命体实时快照、免疫门禁统计和事件回放汇聚在同一段体内流。"
+      <details
+        className="overflow-hidden rounded-xl border border-white/80 bg-white/86 shadow-sm"
+        onToggle={(event) => setShowOrganContext(event.currentTarget.open)}
       >
-        <ViewportLazySection
-          rootMargin="240px 0px"
-          placeholder={(
-            <NoticeBanner variant="info" title="按需加载中">
-              免疫护栏与回放分区将在滚动进入视口后展开。
-            </NoticeBanner>
-          )}
-        >
-          <React.Suspense
-            fallback={(
-              <NoticeBanner variant="info" title="按需加载中">
-                正在装配生命体运行与免疫护栏分区…
-              </NoticeBanner>
-            )}
-          >
-            <AutomationImmuneSectionContent
-              pollingEnabled={pollingEnabled}
-              pollingInterval={pollingInterval}
-              pollingTick={pollingTick}
-              initialReplayRequestId={immuneReplayRequestId}
-              runtimeSnapshot={runtimeSnapshot}
-              promptStats={promptStats}
+        <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 text-sm font-semibold text-gray-700">
+          <span className="inline-flex items-center gap-2">
+            <Activity size={14} className="text-gray-400" />
+            器官上下文与节律脉冲
+          </span>
+          <span className="rounded-full border border-gray-200 bg-gray-50 px-2 py-0.5 text-xs text-gray-500">
+            {showOrganContext ? '已展开' : '展开'}
+          </span>
+        </summary>
+        {showOrganContext ? (
+          <div className="space-y-4 border-t border-gray-100 p-4">
+            <OrganSystemOverview model={endocrineOrganModel} />
+            <LivingPulseStrip
+              title="节律脉冲"
+              subtitle="这组节点用于快速判断节律中枢是否稳定。"
+              nodes={schedulerPulseNodes}
             />
-          </React.Suspense>
-        </ViewportLazySection>
-      </AutomationSection>
+          </div>
+        ) : null}
+      </details>
+
+      <details
+        className="overflow-hidden rounded-xl border border-white/80 bg-white/86 shadow-sm"
+        onToggle={(event) => setShowImmuneOps(event.currentTarget.open)}
+      >
+        <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 text-sm font-semibold text-gray-700">
+          <span className="inline-flex items-center gap-2">
+            <Activity size={14} className="text-gray-400" />
+            生命体运行与免疫护栏
+          </span>
+          <span className="rounded-full border border-gray-200 bg-gray-50 px-2 py-0.5 text-xs text-gray-500">
+            {showImmuneOps ? '已展开' : '展开'}
+          </span>
+        </summary>
+        {showImmuneOps ? (
+          <div className="border-t border-gray-100 p-4">
+            <ViewportLazySection
+              rootMargin="240px 0px"
+              placeholder={(
+                <NoticeBanner variant="info" title="按需加载中">
+                  免疫护栏与回放分区将在滚动进入视口后展开。
+                </NoticeBanner>
+              )}
+            >
+              <React.Suspense
+                fallback={(
+                  <NoticeBanner variant="info" title="按需加载中">
+                    正在装配生命体运行与免疫护栏分区…
+                  </NoticeBanner>
+                )}
+              >
+                <AutomationImmuneSectionContent
+                  pollingEnabled={pollingEnabled}
+                  pollingInterval={pollingInterval}
+                  pollingTick={pollingTick}
+                  initialReplayRequestId={immuneReplayRequestId}
+                  runtimeSnapshot={runtimeSnapshot}
+                  promptStats={promptStats}
+                />
+              </React.Suspense>
+            </ViewportLazySection>
+          </div>
+        ) : null}
+      </details>
 
       <AutomationSection
         icon={ListChecks}
         title="节律任务执行域"
         description="按器官节律对任务进行观测、筛选与即时干预。"
-        actions={hasTaskFilters ? (
-          <button onClick={clearTaskFilters} className="btn-secondary text-xs">
+        actions={hasAnyTaskFilter ? (
+          <button
+            onClick={() => {
+              clearTaskFilters()
+              setTaskSearch('')
+            }}
+            className="btn-secondary text-xs"
+          >
             清除筛选
           </button>
         ) : null}
       >
-        {hasTaskFilters ? (
+        {hasAnyTaskFilter ? (
           <NoticeBanner variant="info" title="已应用节律筛选">
             <span className="font-mono">
               {reasonFilter ? `reason=${reasonFilter}` : ''}
               {reasonFilter && gateFilter ? ' · ' : ''}
               {gateFilter ? `gate=${gateFilter}` : ''}
+              {taskSearch.trim() ? `${reasonFilter || gateFilter ? ' · ' : ''}keyword=${taskSearch.trim()}` : ''}
             </span>
             <span className="mx-1">，当前命中 {filteredCount} 个任务。</span>
           </NoticeBanner>
@@ -488,7 +634,7 @@ export default function Automation() {
               color: schedulerState.running ? 'text-green-600' : schedulerState.label === '未知' ? 'text-gray-500' : 'text-red-500',
             },
             { label: '任务总数', value: tasks.length, color: 'text-gray-800' },
-            { label: '当前展示', value: filteredCount, color: hasTaskFilters ? 'text-violet-600' : 'text-gray-500' },
+            { label: '当前展示', value: filteredCount, color: hasAnyTaskFilter ? 'text-violet-600' : 'text-gray-500' },
             { label: '已启用', value: enabledCount, color: 'text-blue-600' },
             {
               label: '推进中任务',
@@ -521,56 +667,97 @@ export default function Automation() {
           </NoticeBanner>
         ) : null}
 
+        <div className="rounded-xl border border-white/80 bg-white/86 p-3 shadow-sm">
+          <div className="relative">
+            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+            <input
+              className="w-full rounded-lg border border-gray-300 px-3 py-2 pl-9 text-sm focus:outline-none focus:ring-2 focus:ring-primary-200"
+              placeholder="搜索任务、原因、gate 或 immune reason..."
+              value={taskSearch}
+              onChange={(event) => setTaskSearch(event.target.value)}
+            />
+          </div>
+        </div>
+
         {loading && tasks.length === 0 ? (
           <LoadingTasksNotice />
         ) : tasks.length === 0 ? (
           <EmptyStateCard title="暂无登记任务" hint="请确认节律任务已注册。" />
         ) : filteredTasks.length === 0 ? (
-          <EmptyStateCard title="筛选条件无匹配任务" hint="可清除 reason/gate 筛选后重试。" />
+          <EmptyStateCard title="筛选条件无匹配任务" hint="可清除关键词、reason 或 gate 筛选后重试。" />
         ) : (
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
-            {filteredTasks.map((item) => (
-              <TaskCard
-                key={item.task?.task_id}
-                item={item}
+          <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1.15fr)_minmax(360px,0.85fr)]">
+            <div className="overflow-hidden rounded-xl border border-white/80 bg-white/86 shadow-sm">
+              <div className="grid grid-cols-1 gap-2 border-b border-gray-100 bg-gray-50 px-3 py-2 text-xs font-semibold text-gray-500 lg:grid-cols-[minmax(0,1fr)_8rem_8.5rem_8rem]">
+                <span>任务</span>
+                <span>状态</span>
+                <span>门控</span>
+                <span className="lg:text-right">免疫 / 内分泌</span>
+              </div>
+              <div className="max-h-[560px] divide-y divide-gray-100 overflow-y-auto">
+                {filteredTasks.map((item) => (
+                  <TaskRow
+                    key={item.task?.task_id}
+                    item={item}
+                    selected={selectedTask?.task?.task_id === item.task?.task_id}
+                    onSelect={setSelectedTaskId}
+                  />
+                ))}
+              </div>
+            </div>
+            <div className="xl:sticky xl:top-24 xl:self-start">
+              <TaskDetailPanel
+                item={selectedTask}
                 onEnable={(taskId) => handleAction(taskId, 'enable')}
                 onDisable={(taskId) => handleAction(taskId, 'disable')}
                 onTrigger={(taskId) => handleAction(taskId, 'trigger')}
                 actionLoading={actionLoading}
               />
-            ))}
+            </div>
           </div>
         )}
       </AutomationSection>
 
-      <AutomationSection
-        icon={History}
-        title="节律历史脉络"
-        description="回看近 24h 执行体征，识别门控阻断模式与失衡趋势。"
+      <details
+        className="overflow-hidden rounded-xl border border-white/80 bg-white/86 shadow-sm"
+        onToggle={(event) => setShowHistory(event.currentTarget.open)}
       >
-        <ViewportLazySection
-          rootMargin="240px 0px"
-          placeholder={(
-            <NoticeBanner variant="info" title="按需加载中">
-              节律历史脉络会在滚动接近后再展开，避免首屏提前拉取大块历史数据。
-            </NoticeBanner>
-          )}
-        >
-          <React.Suspense
-            fallback={(
-              <NoticeBanner variant="info" title="按需加载中">
-                正在装配节律历史脉络分区…
-              </NoticeBanner>
-            )}
-          >
-            <AutomationHistorySectionContent
-              pollingEnabled={pollingEnabled}
-              pollingInterval={pollingInterval}
-              pollingTick={pollingTick}
-            />
-          </React.Suspense>
-        </ViewportLazySection>
-      </AutomationSection>
+        <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 text-sm font-semibold text-gray-700">
+          <span className="inline-flex items-center gap-2">
+            <History size={14} className="text-gray-400" />
+            节律历史脉络
+          </span>
+          <span className="rounded-full border border-gray-200 bg-gray-50 px-2 py-0.5 text-xs text-gray-500">
+            {showHistory ? '已展开' : '展开'}
+          </span>
+        </summary>
+        {showHistory ? (
+          <div className="border-t border-gray-100 p-4">
+            <ViewportLazySection
+              rootMargin="240px 0px"
+              placeholder={(
+                <NoticeBanner variant="info" title="按需加载中">
+                  节律历史脉络会在滚动接近后再展开，避免首屏提前拉取大块历史数据。
+                </NoticeBanner>
+              )}
+            >
+              <React.Suspense
+                fallback={(
+                  <NoticeBanner variant="info" title="按需加载中">
+                    正在装配节律历史脉络分区…
+                  </NoticeBanner>
+                )}
+              >
+                <AutomationHistorySectionContent
+                  pollingEnabled={pollingEnabled}
+                  pollingInterval={pollingInterval}
+                  pollingTick={pollingTick}
+                />
+              </React.Suspense>
+            </ViewportLazySection>
+          </div>
+        ) : null}
+      </details>
     </div>
   )
 }
