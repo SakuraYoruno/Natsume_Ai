@@ -523,7 +523,7 @@ export default function Tools() {
       </div>
 
       <ViewportLazySection
-        rootMargin="0px 0px"
+        rootMargin="1200px 0px"
         placeholder={(
           <NoticeBanner variant="info" title="按需加载中">
             自定义 provider 与工具侧深层统计会在滚动接近后再展开。

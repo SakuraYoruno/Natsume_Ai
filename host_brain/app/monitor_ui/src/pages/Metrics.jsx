@@ -273,7 +273,7 @@ export default function Metrics() {
       )}
 
       <ViewportLazySection
-        rootMargin="240px 0px"
+        rootMargin="1600px 0px"
         placeholder={(
           <div className="card p-4">
             <NoticeBanner variant="info" title="按需加载中">

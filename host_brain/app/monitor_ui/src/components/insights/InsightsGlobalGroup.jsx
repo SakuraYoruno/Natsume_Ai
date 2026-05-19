@@ -243,6 +243,15 @@ function ErrorHeatmapSection({ windowMinutes, pollingEnabled = false, pollingInt
   }
 
   const hours = Array.from({ length: 24 }, (_, index) => index)
+  const nodeTotals = nodes
+    .map((node) => ({
+      node,
+      total: hours.reduce((sum, hour) => sum + (cellMap[hour]?.[node] ?? 0), 0),
+    }))
+    .filter((item) => item.total > 0)
+    .sort((left, right) => right.total - left.total)
+  const maxNodeTotal = Math.max(...nodeTotals.map((item) => item.total), 1)
+  const maxHourlyTotal = Math.max(...hourlyTotals.map((item) => item.total ?? 0), 1)
 
   return (
     <InsightSection icon={Flame} title="错误热力图" color="text-red-600">
@@ -255,64 +264,142 @@ function ErrorHeatmapSection({ windowMinutes, pollingEnabled = false, pollingInt
       {nodes.length === 0 ? (
         <div className="card p-6 text-center text-xs text-gray-400">✓ 窗口内无错误记录</div>
       ) : (
-        <div className="card overflow-x-auto p-4">
+        <div className="card p-4">
           <div className="mb-3 text-xs font-semibold text-gray-600">按小时 × 节点错误分布（颜色深度 = 错误数量）</div>
-          <table className="border-collapse text-xs">
-            <thead>
-              <tr>
-                <th className="w-36 pb-1 pr-2 text-left font-normal text-gray-400">节点 \ 小时</th>
-                {hours.map((hour) => (
-                  <th key={hour} className="w-6 pb-1 text-center font-normal text-gray-400" style={{ minWidth: '1.5rem' }}>
-                    {hour}
-                  </th>
+          <div className="space-y-3 sm:hidden">
+            <div className="grid grid-cols-6 gap-1.5">
+              {hours.map((hour) => {
+                const total = hourlyTotals.find((item) => item.hour === hour)?.total ?? 0
+                const intensity = total > 0 ? Math.max(total / maxHourlyTotal, 0.18) : 0
+                return (
+                  <div
+                    key={hour}
+                    className="rounded border border-gray-100 px-1.5 py-1 text-center"
+                    style={{ backgroundColor: total > 0 ? `rgba(239, 68, 68, ${intensity})` : 'rgba(249, 250, 251, 1)' }}
+                  >
+                    <div className="text-[10px] text-gray-400">{hour}:00</div>
+                    <div className={`text-xs font-semibold ${total > 0 ? 'text-red-600' : 'text-gray-300'}`}>{total || '·'}</div>
+                  </div>
+                )
+              })}
+            </div>
+            <div className="space-y-2">
+              {nodeTotals.slice(0, 5).map((item) => (
+                <div key={item.node} className="rounded-lg border border-gray-100 bg-gray-50 px-3 py-2">
+                  <div className="flex items-center justify-between gap-2 text-xs">
+                    <span className="min-w-0 truncate text-gray-600" title={item.node}>{item.node}</span>
+                    <span className="font-mono font-semibold text-red-600">{item.total}</span>
+                  </div>
+                  <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-white">
+                    <div className="h-full rounded-full bg-red-400" style={{ width: `${Math.max(5, (item.total / maxNodeTotal) * 100)}%` }} />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+          <div className="hidden overflow-x-auto sm:block">
+            <table className="border-collapse text-xs">
+              <thead>
+                <tr>
+                  <th className="w-36 pb-1 pr-2 text-left font-normal text-gray-400">节点 \ 小时</th>
+                  {hours.map((hour) => (
+                    <th key={hour} className="w-6 pb-1 text-center font-normal text-gray-400" style={{ minWidth: '1.5rem' }}>
+                      {hour}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {nodes.slice(0, 15).map((node) => (
+                  <tr key={node}>
+                    <td className="max-w-36 truncate py-0.5 pr-2 text-gray-600" title={node}>{node}</td>
+                    {hours.map((hour) => {
+                      const count = cellMap[hour]?.[node] ?? 0
+                      const intensity = count > 0 ? Math.max(count / maxCellCount, 0.15) : 0
+                      return (
+                        <td key={hour} className="px-0.5 py-0.5" title={count > 0 ? `${node} @ ${hour}:00 — ${count} 次错误` : ''}>
+                          <div
+                            className="h-5 w-5 rounded-sm"
+                            style={{
+                              backgroundColor: count > 0 ? `rgba(239, 68, 68, ${intensity})` : 'rgba(243, 244, 246, 1)',
+                            }}
+                          />
+                        </td>
+                      )
+                    })}
+                  </tr>
                 ))}
-              </tr>
-            </thead>
-            <tbody>
-              {nodes.slice(0, 15).map((node) => (
-                <tr key={node}>
-                  <td className="max-w-36 truncate py-0.5 pr-2 text-gray-600" title={node}>{node}</td>
+                <tr className="border-t border-gray-200">
+                  <td className="py-1 pr-2 font-medium text-gray-400">每小时合计</td>
                   {hours.map((hour) => {
-                    const count = cellMap[hour]?.[node] ?? 0
-                    const intensity = count > 0 ? Math.max(count / maxCellCount, 0.15) : 0
+                    const total = hourlyTotals.find((item) => item.hour === hour)?.total ?? 0
                     return (
-                      <td key={hour} className="px-0.5 py-0.5" title={count > 0 ? `${node} @ ${hour}:00 — ${count} 次错误` : ''}>
-                        <div
-                          className="h-5 w-5 rounded-sm"
-                          style={{
-                            backgroundColor: count > 0 ? `rgba(239, 68, 68, ${intensity})` : 'rgba(243, 244, 246, 1)',
-                          }}
-                        />
+                      <td key={hour} className="px-0.5 py-1 text-center">
+                        <span className={`font-mono text-xs ${total > 0 ? 'text-red-500' : 'text-gray-300'}`}>
+                          {total > 0 ? total : '·'}
+                        </span>
                       </td>
                     )
                   })}
                 </tr>
+              </tbody>
+            </table>
+            <div className="mt-3 flex items-center gap-3 text-xs text-gray-400">
+              <span>少</span>
+              {[0.15, 0.35, 0.55, 0.75, 1.0].map((value) => (
+                <div key={value} className="h-4 w-4 rounded-sm" style={{ backgroundColor: `rgba(239, 68, 68, ${value})` }} />
               ))}
-              <tr className="border-t border-gray-200">
-                <td className="py-1 pr-2 font-medium text-gray-400">每小时合计</td>
-                {hours.map((hour) => {
-                  const total = hourlyTotals.find((item) => item.hour === hour)?.total ?? 0
-                  return (
-                    <td key={hour} className="px-0.5 py-1 text-center">
-                      <span className={`font-mono text-xs ${total > 0 ? 'text-red-500' : 'text-gray-300'}`}>
-                        {total > 0 ? total : '·'}
-                      </span>
-                    </td>
-                  )
-                })}
-              </tr>
-            </tbody>
-          </table>
-          <div className="mt-3 flex items-center gap-3 text-xs text-gray-400">
-            <span>少</span>
-            {[0.15, 0.35, 0.55, 0.75, 1.0].map((value) => (
-              <div key={value} className="h-4 w-4 rounded-sm" style={{ backgroundColor: `rgba(239, 68, 68, ${value})` }} />
-            ))}
-            <span>多</span>
+              <span>多</span>
+            </div>
           </div>
         </div>
       )}
     </InsightSection>
+  )
+}
+
+function RecentErrors({ items = [] }) {
+  if (!items.length) return null
+
+  return (
+    <div className="card mt-4 overflow-hidden">
+      <div className="border-b border-gray-200 bg-gray-50 px-4 py-2.5 text-xs font-medium uppercase tracking-wide text-gray-500">
+        最近错误
+      </div>
+      <div className="divide-y divide-gray-100 sm:hidden">
+        {items.map((item, index) => (
+          <div key={index} className="space-y-2 px-4 py-3 text-xs">
+            <div className="flex items-center justify-between gap-3">
+              <span className="whitespace-nowrap text-gray-500">{formatTime(item.ts_ms)}</span>
+              <span className="rounded border border-red-100 bg-red-50 px-2 py-0.5 font-medium text-red-600">
+                {item.reason_code ? formatAlertTitle(item.reason_code) : '—'}
+              </span>
+            </div>
+            <div className="font-medium text-orange-600">{item.stage ? humanizeToken(item.stage) : '—'}</div>
+            <div className="break-words text-gray-500">{item.detail || '—'}</div>
+          </div>
+        ))}
+      </div>
+      <table className="hidden w-full table-fixed text-sm sm:table">
+        <thead className="border-b border-gray-200 bg-gray-50">
+          <tr>
+            {['时间', '环节', '原因码', '详情'].map((header) => (
+              <th key={header} className="px-4 py-2 text-left text-xs font-medium text-gray-500">{header}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-gray-100">
+          {items.map((item, index) => (
+            <tr key={index} className="hover:bg-gray-50">
+              <td className="whitespace-nowrap px-4 py-2 text-xs text-gray-500">{formatTime(item.ts_ms)}</td>
+              <td className="px-4 py-2 text-xs text-orange-600">{item.stage ? humanizeToken(item.stage) : '—'}</td>
+              <td className="px-4 py-2 text-xs text-red-600">{item.reason_code ? formatAlertTitle(item.reason_code) : '—'}</td>
+              <td className="truncate px-4 py-2 text-xs text-gray-500" title={item.detail}>{item.detail || '—'}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   )
 }
 
@@ -397,32 +484,7 @@ export default function InsightsGlobalGroup({
             />
           </InsightChartCard>
         </div>
-        {(errData?.recent?.length ?? 0) > 0 && (
-          <div className="card mt-4 overflow-hidden">
-            <div className="border-b border-gray-200 bg-gray-50 px-4 py-2.5 text-xs font-medium uppercase tracking-wide text-gray-500">
-              最近错误
-            </div>
-            <table className="w-full text-sm">
-              <thead className="border-b border-gray-200 bg-gray-50">
-                <tr>
-                  {['时间', '环节', '原因码', '详情'].map((header) => (
-                    <th key={header} className="px-4 py-2 text-left text-xs font-medium text-gray-500">{header}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100">
-                {(errData?.recent ?? []).map((item, index) => (
-                  <tr key={index} className="hover:bg-gray-50">
-                    <td className="whitespace-nowrap px-4 py-2 text-xs text-gray-500">{formatTime(item.ts_ms)}</td>
-                    <td className="px-4 py-2 text-xs text-orange-600">{item.stage ? humanizeToken(item.stage) : '—'}</td>
-                    <td className="px-4 py-2 text-xs text-red-600">{item.reason_code ? formatAlertTitle(item.reason_code) : '—'}</td>
-                    <td className="max-w-xs truncate px-4 py-2 text-xs text-gray-500" title={item.detail}>{item.detail || '—'}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
+        <RecentErrors items={errData?.recent ?? []} />
       </InsightSection>
       <ErrorHeatmapSection windowMinutes={windowMinutes} {...deepQueryProps} />
       <CapabilityGapStatsSection windowMinutes={windowMinutes} highlightForgeRisk={focusTarget === 'forge-risk'} {...deepQueryProps} />

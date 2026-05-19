@@ -477,6 +477,7 @@ export default function DigitalLifeOverview() {
 
       <ViewportLazySection
         rootMargin="180px 0px"
+        eagerAfterMs={1200}
         placeholder={(
           <LifeSection
             title="Capability Gap & Forge Loop"
@@ -510,6 +511,7 @@ export default function DigitalLifeOverview() {
 
       <ViewportLazySection
         rootMargin="240px 0px"
+        eagerAfterMs={1200}
         placeholder={(
           <LifeSection
             title="人体闭环健康（Gateway）"
@@ -543,6 +545,7 @@ export default function DigitalLifeOverview() {
 
       <ViewportLazySection
         rootMargin="200px 0px"
+        eagerAfterMs={1200}
         placeholder={(
           <LifeSection title="生命体次级分区" hint="体征、成长、器官联通态与体内快照会在进入视口后加载。">
             <NoticeBanner variant="info" title="按需加载中">

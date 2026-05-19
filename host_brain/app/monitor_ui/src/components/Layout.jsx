@@ -138,7 +138,7 @@ function NavPill({ to, icon: Icon, label, onClick, badge = null, compact = false
 function DesktopNav({ sectionBadges, itemBadges }) {
   return (
     <nav
-      className="hidden min-w-0 items-center gap-2 overflow-x-auto rounded-2xl border border-primary-100/70 bg-white/76 px-2 py-1.5 shadow-sm backdrop-blur-sm lg:flex"
+      className="hidden min-w-0 flex-wrap items-center gap-2 rounded-xl border border-primary-100/70 bg-white/76 px-2 py-1.5 shadow-sm backdrop-blur-sm lg:flex"
       role="navigation"
       aria-label="主导航"
     >
@@ -232,9 +232,8 @@ export default function Layout() {
   return (
     <div className="relative flex min-h-screen flex-col overflow-x-hidden">
       <div className="pointer-events-none absolute inset-0 overflow-hidden">
-        <div className="absolute -left-36 top-20 h-80 w-80 rounded-full bg-primary-100/35 blur-3xl animate-pulse" />
-        <div className="absolute right-[-6%] top-1/4 h-[28rem] w-[28rem] rounded-full bg-emerald-100/30 blur-3xl animate-pulse" />
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,_rgba(41,112,255,0.08),_transparent_36%),radial-gradient(circle_at_bottom_right,_rgba(245,158,11,0.06),_transparent_30%)]" />
+        <div className="absolute inset-0 bg-gradient-to-br from-slate-50 via-white to-cyan-50/45" />
+        <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-primary-100 to-transparent" />
       </div>
       <header className="sticky top-0 z-50 border-b border-primary-100/70 bg-gradient-to-r from-primary-50/80 via-white/88 to-emerald-50/70 shadow-sm backdrop-blur-xl">
         <div className="mx-auto w-full space-y-2 px-4 py-2 sm:px-6">

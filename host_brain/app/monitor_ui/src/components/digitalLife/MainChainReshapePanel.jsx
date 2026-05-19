@@ -97,8 +97,8 @@ export default function MainChainReshapePanel({ model }) {
   if (!model) return null
 
   return (
-    <section className="relative overflow-hidden rounded-3xl border border-white/80 bg-white/82 p-5 shadow-card backdrop-blur-sm">
-      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_left,_rgba(41,112,255,0.07),_transparent_36%),radial-gradient(circle_at_bottom_right,_rgba(16,185,129,0.06),_transparent_34%)]" />
+    <section className="relative overflow-hidden rounded-xl border border-white/80 bg-white/82 p-5 shadow-card backdrop-blur-sm">
+      <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-primary-100 to-transparent" />
       <div className="relative">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0">
