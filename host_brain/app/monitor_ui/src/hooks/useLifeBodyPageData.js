@@ -251,6 +251,7 @@ export default function useLifeBodyPageData({ windowMinutes = 360 } = {}) {
     overviewQuery: lifeBodyQuery,
     runtimeQuery,
     lifeBodyQuery,
+    lifeBodyDerived: derived,
     runtimeSnapshot,
     promptStats,
     vtsData,

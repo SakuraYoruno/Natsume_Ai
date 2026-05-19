@@ -16,6 +16,7 @@ import SampleMeta from '../components/obs/SampleMeta.jsx'
 import ViewportLazySection from '../components/obs/ViewportLazySection.jsx'
 import DigitalLifeRuntimeCard from '../components/DigitalLifeRuntimeCard.jsx'
 import DigitalLifeWallClockSoakCard from '../components/DigitalLifeWallClockSoakCard.jsx'
+import MainChainReshapePanel from '../components/digitalLife/MainChainReshapePanel.jsx'
 import EmptyStateCard from '../components/EmptyStateCard.jsx'
 import LifeBodyPathologyPanel from '../components/lifeBody/LifeBodyPathologyPanel.jsx'
 import LifeBodyFocusPanel from '../components/lifeBody/LifeBodyFocusPanel.jsx'
@@ -27,6 +28,7 @@ import PageHero from '../components/PageHero.jsx'
 import TimeWindowSelect from '../components/TimeWindowSelect.jsx'
 import VitalLoopSummaryPanel from '../components/VitalLoopSummaryPanel.jsx'
 import useLifeBodyPageData from '../hooks/useLifeBodyPageData.js'
+import { buildMainChainReshapeModel } from '../models/mainChainReshapeModel.js'
 import { useDigitalLifeWallClockSoakQuery } from '../queries/digitalLifeQueries.js'
 import {
   compactText,
@@ -102,6 +104,7 @@ export default function DigitalLifeOverview() {
     runtimeVitalsLoadState,
     gatewayLoopLoadState,
     memoryOverviewLoadState,
+    lifeBodyDerived,
     lifeBodyModel,
     pollingEnabled,
     pollingInterval,
@@ -112,6 +115,44 @@ export default function DigitalLifeOverview() {
     pollingTick,
     pollingInterval: Math.max(60, Number(pollingInterval || 60)),
   })
+  const mainChainReshapeModel = useMemo(
+    () => buildMainChainReshapeModel({
+      runtimeSnapshot,
+      lifeBodyModel,
+      lifeBodyDerived,
+      wallClockSoakData: wallClockSoakQuery.data,
+      hasRuntimeSnapshot,
+      hasMemoryData,
+      hasMemorySamples,
+      growthSignals,
+      humanoidLoopData,
+      runtimeAlerts,
+      nonLiveSlots,
+      currentEmotion,
+      currentBondStage,
+      dominantMotive,
+      replyPosture,
+      riskLevel,
+    }),
+    [
+      currentBondStage,
+      currentEmotion,
+      dominantMotive,
+      growthSignals,
+      hasMemoryData,
+      hasMemorySamples,
+      hasRuntimeSnapshot,
+      humanoidLoopData,
+      lifeBodyDerived,
+      lifeBodyModel,
+      nonLiveSlots,
+      replyPosture,
+      riskLevel,
+      runtimeAlerts,
+      runtimeSnapshot,
+      wallClockSoakQuery.data,
+    ]
+  )
   const refreshDashboard = () => {
     void refreshAll()
     void wallClockSoakQuery.refetch()
@@ -363,6 +404,7 @@ export default function DigitalLifeOverview() {
         )}
       />
 
+      <MainChainReshapePanel model={mainChainReshapeModel} />
       <LifeBodyVitalsStrip vitals={lifeBodyModel.vitalSigns} />
       <LifeBodyFocusPanel guidance={lifeBodyModel.diagnosticGuidance} />
 
