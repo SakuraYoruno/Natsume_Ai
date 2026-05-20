@@ -96,6 +96,68 @@ def test_dispatch_worker_gateway_completes_and_logs_completed() -> None:
         ledger.close()
 
 
+def test_dispatch_worker_gateway_queued_reply_stays_ok() -> None:
+    ledger = SQLiteLedger(":memory:", check_same_thread=False)
+    try:
+        with patch(
+            "host_brain.app.input_routes._run_cortex_orchestrator_pipeline",
+            new=AsyncMock(
+                return_value={
+                    "decision": "APPROVE",
+                    "reason_code": None,
+                    "narrative": "hello from top agent",
+                }
+            ),
+        ), patch(
+            "host_brain.app.input_routes._deliver_gateway_reply",
+            new=AsyncMock(
+                return_value={
+                    "success": True,
+                    "status": "queued",
+                    "reason_code": None,
+                    "detail": "outbound queued",
+                    "latency_ms": 23,
+                    "reply_text_len": 20,
+                    "reply_preview": "hello from top agent",
+                    "reply_form": "text",
+                    "reply_form_reason": "text_only",
+                    "voice_sent": False,
+                }
+            ),
+        ):
+            _run(
+                _dispatch_to_graph_worker(
+                    request_id="req_worker_queued",
+                    session_id="qq_dm_queued",
+                    source="GATEWAY",
+                    text="hi",
+                    payload={
+                        "platform": "qq",
+                        "conversation_id": "qq_dm_queued",
+                        "msg_id": "msg_queued",
+                    },
+                    ts_ms=123456,
+                    ledger=ledger,
+                    dispatch_mode="fire_and_forget.inline",
+                    run_in_thread=False,
+                )
+            )
+
+        completed = next(row for row in ledger.voice_event_log if row["event_type"] == "INPUT_COMPLETED")
+        completed_payload = dict(completed.get("payload") or {})
+        detail = str(completed.get("detail") or "")
+        assert completed["status"] == "OK"
+        assert completed.get("reason_code") is None
+        assert "gateway_success=true" in detail
+        assert "gateway_status=queued" in detail
+        assert "GATEWAY_REPLY_FAILED" not in detail
+        assert completed_payload["gateway_success"] is True
+        assert completed_payload["gateway_status"] == "queued"
+        assert completed_payload.get("gateway_reason_code") is None
+    finally:
+        ledger.close()
+
+
 def test_dispatch_worker_gateway_reply_failure_logs_completed_degraded() -> None:
     ledger = SQLiteLedger(":memory:", check_same_thread=False)
     try:

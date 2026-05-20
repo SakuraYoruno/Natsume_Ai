@@ -366,6 +366,35 @@ class TestEdgeRpcCalls(unittest.IsolatedAsyncioTestCase):
         self.assertEqual("GATEWAY_REPLY_CALL_FAILED", degraded.reason_code)
         self.assertIn("TimeoutError", degraded.detail)
 
+    async def test_post_to_gateway_treats_queued_as_success(self) -> None:
+        queued_response = MagicMock()
+        queued_response.status_code = 200
+        queued_response.json.return_value = {
+            "status": "queued",
+            "detail": "outbound queued",
+        }
+
+        client = AsyncMock()
+        client.__aenter__.return_value = client
+        client.__aexit__.return_value = False
+        client.post = AsyncMock(return_value=queued_response)
+
+        with patch(
+            "host_brain.channels.edge_rpc_client._resolve_gateway_base_urls",
+            return_value=["http://gateway.remote:19000"],
+        ):
+            with patch("httpx.AsyncClient", return_value=client):
+                with patch("host_brain.channels.edge_rpc_client._resolve_retries", return_value=0):
+                    result = await _post_to_gateway(
+                        path="/v1/gateway/reply",
+                        payload={"content": "hello", "wait_result": False},
+                    )
+
+        self.assertTrue(result.success)
+        self.assertEqual("queued", result.status)
+        self.assertIsNone(result.reason_code)
+        self.assertEqual("outbound queued", result.detail)
+
 
 class TestEdgeRpcWrappers(unittest.IsolatedAsyncioTestCase):
     async def test_wrapper_payloads_and_timeouts(self) -> None:

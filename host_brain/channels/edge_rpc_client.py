@@ -606,12 +606,14 @@ async def _post_to_gateway(
                 latency_ms = max(0, int(time.time() * 1000) - t0)
                 if resp.status_code == 200:
                     try:
-                        body = resp.json()
+                        raw_body = resp.json()
                     except Exception:
-                        body = {}
+                        raw_body = {}
+                    body = raw_body if isinstance(raw_body, Mapping) else {}
                     status_text = str(body.get("status") or "unknown").strip().lower()
-                    success = status_text == "sent" or bool(body.get("success"))
-                    reason_code = None if success else "GATEWAY_REPLY_FAILED"
+                    success_statuses = {"sent", "queued", "accepted", "ok"}
+                    success = status_text in success_statuses or bool(body.get("success"))
+                    reason_code = None if success else str(body.get("reason_code") or "GATEWAY_REPLY_FAILED")
                     detail = str(body.get("detail") or f"gateway reply status={status_text or 'unknown'}")
                     return EdgeRpcCallResult(
                         success=success,
