@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import inspect
 import json
 import logging
@@ -25,6 +26,9 @@ CORE_TICK_TASK_IDS: tuple[str, ...] = (
 PROACTIVE_TALK_TASK_ID = "proactive_talk_periodic"
 BACKGROUND_TICK_TASK_IDS: tuple[str, ...] = (PROACTIVE_TALK_TASK_ID,)
 DEFAULT_TICK_TASK_IDS: tuple[str, ...] = CORE_TICK_TASK_IDS + BACKGROUND_TICK_TASK_IDS
+PROACTIVE_OUTBOX_FILENAME = "proactive_outbox.jsonl"
+PROACTIVE_DELIVERY_RECEIPTS_FILENAME = "delivery_receipts.jsonl"
+PROACTIVE_INTERACTIONS_FILENAME = "proactive_interactions.jsonl"
 
 ForegroundTurnRunner = Callable[[Mapping[str, Any]], Mapping[str, Any]]
 
@@ -102,6 +106,10 @@ class DigitalLifeSupervisor:
         self._proactive_outbox_count = 0
         self._last_proactive_outbox_ts_ms = 0
         self._last_proactive_outbox_record: dict[str, Any] = {}
+        self._proactive_receipt_count = 0
+        self._last_proactive_receipt_record: dict[str, Any] = {}
+        self._proactive_interaction_count = 0
+        self._last_proactive_interaction_record: dict[str, Any] = {}
         self._last_user_message = ""
         self._last_reply_text = ""
         self._last_turn: ForegroundTurnResult | None = None
@@ -196,9 +204,10 @@ class DigitalLifeSupervisor:
         task_mode: str = "daily_chat",
         response_move: str = "reply_current_turn",
         metadata: Mapping[str, Any] | None = None,
+        request_id: str | None = None,
     ) -> dict[str, Any]:
         self._ensure_started()
-        request_id = new_request_id()
+        request_id = str(request_id or new_request_id())
         self._mark_user_awaken()
         runner = self.config.foreground_runner or self._default_foreground_runner
         context = {
@@ -233,6 +242,93 @@ class DigitalLifeSupervisor:
             "snapshot": self.snapshot(),
         }
         self._record_event("foreground_turn", event)
+        return event
+
+    def run_proactive_interaction_dry_run(
+        self,
+        *,
+        user_reply: str = "在啊，怎么啦？",
+        reply_text: str = "我在，刚才那句主动问候已经收到。",
+        generate_if_missing: bool = True,
+    ) -> dict[str, Any]:
+        self._ensure_started()
+        generation_event: dict[str, Any] = {}
+        outbound = self._latest_proactive_outbox_record()
+        if not outbound and generate_if_missing:
+            generation_event = self.run_idle_tick(task_ids=(PROACTIVE_TALK_TASK_ID,))
+            outbound = self._latest_proactive_outbox_record()
+        if not outbound:
+            event = {
+                "status": "SKIPPED",
+                "reason_code": "NO_PROACTIVE_OUTBOX_MESSAGE",
+                "generation_event": _strip_large(generation_event),
+                "snapshot": self.snapshot(),
+            }
+            self._record_event("proactive_interaction_dry_run", event)
+            return event
+
+        receipt = self._write_proactive_delivery_receipt(outbound)
+        request_id = new_request_id()
+        thalamus_draft = self._compile_proactive_reply_intent(
+            request_id=request_id,
+            user_reply=user_reply,
+            outbound=outbound,
+            receipt=receipt,
+        )
+        foreground = self.run_foreground_turn(
+            user_reply,
+            reply_text=reply_text,
+            metadata={
+                "source": "proactive_interaction_dry_run",
+                "proactive_outbound": _strip_large(outbound),
+                "delivery_receipt": _strip_large(receipt),
+                "thalamus_intent_draft": _strip_large(thalamus_draft),
+            },
+            request_id=request_id,
+        )
+        turn = dict(foreground.get("turn") or {})
+        route = str(thalamus_draft.get("route") or "")
+        reason = str(thalamus_draft.get("route_reason") or thalamus_draft.get("reason_code") or "")
+        receipt_status = str(receipt.get("delivery_status") or "")
+        status = (
+            "PASS"
+            if route == "chat"
+            and reason == "THALAMUS_RULE_PROACTIVE_REPLY_CONTINUATION"
+            and receipt_status == "DELIVERED_DRY_RUN"
+            and int(turn.get("mapped_organ_count") or 0) >= 23
+            else "FAILED"
+        )
+        interaction = {
+            "status": status,
+            "reason_code": None if status == "PASS" else "PROACTIVE_INTERACTION_DRY_RUN_FAILED",
+            "request_id": request_id,
+            "run_id": self.run_id,
+            "persona_self_id": self.persona_self_id,
+            "session_id": self.config.session_id,
+            "outbound_message_id": str(outbound.get("message_id") or ""),
+            "delivery_receipt_id": str(receipt.get("receipt_id") or ""),
+            "delivery_status": receipt_status,
+            "inbound_text": str(user_reply or ""),
+            "thalamus_route": route,
+            "thalamus_reason_code": reason,
+            "thalamus_route_source": str(thalamus_draft.get("route_source") or ""),
+            "foreground_turn_status": str(turn.get("status") or ""),
+            "mapped_organ_count": int(turn.get("mapped_organ_count") or 0),
+            "ts_ms": _now_ms(),
+        }
+        self._append_proactive_jsonl(self._proactive_interactions_path(), interaction)
+        self._proactive_interaction_count += 1
+        self._last_proactive_interaction_record = dict(interaction)
+        event = {
+            "status": status,
+            "generation_event": _strip_large(generation_event),
+            "delivery_receipt": receipt,
+            "thalamus_intent_draft": _strip_large(thalamus_draft),
+            "foreground_turn": _strip_large(foreground),
+            "interaction": interaction,
+            "snapshot": self.snapshot(),
+        }
+        self._record_event("proactive_interaction_dry_run", event)
         return event
 
     def snapshot(self) -> dict[str, Any]:
@@ -284,6 +380,7 @@ class DigitalLifeSupervisor:
             "scheduler": scheduler_snapshot,
             "background_runtime": background_runtime,
             "proactive_outbox": self._proactive_outbox_snapshot(),
+            "proactive_interaction": self._proactive_interaction_snapshot(),
             "last_tick_results": _strip_large(self._last_tick_results),
             "external_services": {
                 "chroma": {"status": "not_probed_by_supervisor"},
@@ -519,7 +616,82 @@ class DigitalLifeSupervisor:
     def _proactive_outbox_path(self) -> Path | None:
         if self.out_dir is None:
             return None
-        return self.out_dir / "proactive_outbox.jsonl"
+        return self.out_dir / PROACTIVE_OUTBOX_FILENAME
+
+    def _proactive_delivery_receipts_path(self) -> Path | None:
+        if self.out_dir is None:
+            return None
+        return self.out_dir / PROACTIVE_DELIVERY_RECEIPTS_FILENAME
+
+    def _proactive_interactions_path(self) -> Path | None:
+        if self.out_dir is None:
+            return None
+        return self.out_dir / PROACTIVE_INTERACTIONS_FILENAME
+
+    def _append_proactive_jsonl(self, path: Path | None, record: Mapping[str, Any]) -> None:
+        if path is None:
+            return
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8", newline="\n") as file:
+            file.write(json.dumps(dict(record), ensure_ascii=False, sort_keys=True) + "\n")
+
+    def _latest_proactive_outbox_record(self) -> dict[str, Any]:
+        if self._last_proactive_outbox_record:
+            return dict(self._last_proactive_outbox_record)
+        return _latest_jsonl_record(self._proactive_outbox_path())
+
+    def _write_proactive_delivery_receipt(self, outbound: Mapping[str, Any]) -> dict[str, Any]:
+        now = _now_ms()
+        message_id = str(outbound.get("message_id") or "")
+        receipt = {
+            "receipt_id": f"dryrun_receipt_{message_id or now}",
+            "message_id": message_id,
+            "run_id": self.run_id,
+            "persona_self_id": self.persona_self_id,
+            "session_id": self.config.session_id,
+            "delivery_channel": str(outbound.get("delivery_channel") or "safe_outbox"),
+            "delivery_status": "DELIVERED_DRY_RUN",
+            "gateway_mode": "dry_run",
+            "delivered_at_ms": now,
+            "outbound_queued_at_ms": int(outbound.get("queued_at_ms") or 0),
+        }
+        self._append_proactive_jsonl(self._proactive_delivery_receipts_path(), receipt)
+        self._proactive_receipt_count += 1
+        self._last_proactive_receipt_record = dict(receipt)
+        return receipt
+
+    def _compile_proactive_reply_intent(
+        self,
+        *,
+        request_id: str,
+        user_reply: str,
+        outbound: Mapping[str, Any],
+        receipt: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        from host_brain.tribe.thalamus_agent import get_thalamus_agent  # noqa: PLC0415
+
+        proactive_context = {
+            "in_reply_to_proactive": True,
+            "outbound_message_id": str(outbound.get("message_id") or ""),
+            "delivery_receipt_id": str(receipt.get("receipt_id") or ""),
+            "delivery_status": str(receipt.get("delivery_status") or ""),
+            "channel": str(receipt.get("delivery_channel") or outbound.get("delivery_channel") or "safe_outbox"),
+        }
+
+        async def _compile() -> dict[str, Any]:
+            return await get_thalamus_agent().classify_and_compile_intent_draft(
+                request_id=request_id,
+                session_id=self.config.session_id,
+                user_message=str(user_reply or ""),
+                person_id=self.persona_self_id,
+                source="proactive_interaction_dry_run",
+                input_source="PROACTIVE_DRY_RUN",
+                target="host",
+                ts_ms=_now_ms(),
+                tribe_context={"proactive_interaction": proactive_context},
+            )
+
+        return _run_coroutine_sync(_compile())
 
     def _proactive_outbox_snapshot(self) -> dict[str, Any]:
         outbox_path = self._proactive_outbox_path()
@@ -540,6 +712,27 @@ class DigitalLifeSupervisor:
             "last_delivery_status": str(latest.get("delivery_status") or ""),
             "last_queued_at_ms": int(latest.get("queued_at_ms") or 0),
             "last_content_preview": str(message.get("content") or "")[:120],
+        }
+
+    def _proactive_interaction_snapshot(self) -> dict[str, Any]:
+        receipts_path = self._proactive_delivery_receipts_path()
+        interactions_path = self._proactive_interactions_path()
+        receipt_count = _count_jsonl_rows(receipts_path)
+        interaction_count = _count_jsonl_rows(interactions_path)
+        last_receipt = dict(self._last_proactive_receipt_record or _latest_jsonl_record(receipts_path))
+        last_interaction = dict(self._last_proactive_interaction_record or _latest_jsonl_record(interactions_path))
+        return {
+            "enabled": True,
+            "delivery_receipts_path": str(receipts_path) if receipts_path is not None else "",
+            "interactions_path": str(interactions_path) if interactions_path is not None else "",
+            "delivery_receipt_count": max(int(self._proactive_receipt_count), int(receipt_count)),
+            "interaction_count": max(int(self._proactive_interaction_count), int(interaction_count)),
+            "last_delivery_status": str(last_receipt.get("delivery_status") or ""),
+            "last_receipt_id": str(last_receipt.get("receipt_id") or ""),
+            "last_status": str(last_interaction.get("status") or ""),
+            "last_thalamus_route": str(last_interaction.get("thalamus_route") or ""),
+            "last_thalamus_reason_code": str(last_interaction.get("thalamus_reason_code") or ""),
+            "last_mapped_organ_count": int(last_interaction.get("mapped_organ_count") or 0),
         }
 
     def _scheduler_emotion_state(self) -> dict[str, Any]:
@@ -769,6 +962,40 @@ def _strip_large(value: Any, *, limit: int = 6000) -> Any:
     if isinstance(value, str) and len(value) > limit:
         return value[: limit - 1].rstrip() + "..."
     return value
+
+
+def _latest_jsonl_record(path: Path | None) -> dict[str, Any]:
+    if path is None or not path.exists():
+        return {}
+    try:
+        lines = [line for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+        for line in reversed(lines):
+            try:
+                payload = json.loads(line)
+            except Exception:
+                continue
+            if isinstance(payload, dict):
+                return dict(payload)
+    except Exception:
+        return {}
+    return {}
+
+
+def _count_jsonl_rows(path: Path | None) -> int:
+    if path is None or not path.exists():
+        return 0
+    try:
+        return sum(1 for line in path.read_text(encoding="utf-8").splitlines() if line.strip())
+    except Exception:
+        return 0
+
+
+def _run_coroutine_sync(coro: Any) -> Any:
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(coro)
+    raise RuntimeError("cannot run proactive interaction dry-run from an active event loop")
 
 
 def _now_ms() -> int:

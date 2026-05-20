@@ -41,6 +41,7 @@ const LAYER_ICONS = {
   self_model: Brain,
   external_system: ShieldQuestion,
   proactive_loop: Radio,
+  proactive_interaction: Activity,
 }
 
 const LAYER_CLASS = {

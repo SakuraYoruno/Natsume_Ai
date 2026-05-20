@@ -283,6 +283,17 @@ def _build_soak_acceptance(
         if running
         else proactive_status or "UNKNOWN"
     )
+    proactive_interaction = _as_dict(final_snapshot.get("proactive_interaction"))
+    proactive_delivery_receipt_count = _as_int(proactive_interaction.get("delivery_receipt_count"), 0)
+    proactive_interaction_count = _as_int(proactive_interaction.get("interaction_count"), 0)
+    proactive_last_interaction_status = str(proactive_interaction.get("last_status") or "")
+    proactive_last_thalamus_reason = str(proactive_interaction.get("last_thalamus_reason_code") or "")
+    proactive_interaction_pass = (
+        proactive_delivery_receipt_count > 0
+        and proactive_interaction_count > 0
+        and proactive_last_interaction_status == "PASS"
+        and proactive_last_thalamus_reason == "THALAMUS_RULE_PROACTIVE_REPLY_CONTINUATION"
+    )
 
     layers = [
         _acceptance_layer(
@@ -379,6 +390,24 @@ def _build_soak_acceptance(
                 proactive_outbox_mode,
             ],
         ),
+        _acceptance_layer(
+            layer_id="proactive_interaction",
+            label="主动交互",
+            status="healthy" if proactive_interaction_pass else "unknown",
+            verdict="PASS" if proactive_interaction_pass else "NOT_COVERED",
+            value=f"{proactive_interaction_count} 次" if proactive_interaction_pass else "未覆盖",
+            detail=(
+                "主动消息已有 dry-run 送达回执，用户回复被 Thalamus 识别为主动会话续接并回到主链。"
+                if proactive_interaction_pass
+                else "尚未证明主动消息送达后，用户回复能回到 Thalamus 和主链。"
+            ),
+            evidence=[
+                f"receipts={proactive_delivery_receipt_count}",
+                f"interactions={proactive_interaction_count}",
+                proactive_last_interaction_status or "missing",
+                proactive_last_thalamus_reason or "missing",
+            ],
+        ),
     ]
 
     not_covered = [
@@ -390,12 +419,16 @@ def _build_soak_acceptance(
         not_covered.append(
             {"id": "proactive_loop", "label": "主动外呼", "reason": f"{proactive_task_id} 未启用或未产生 outbox 证据"}
         )
+    if not proactive_interaction_pass:
+        not_covered.append(
+            {"id": "proactive_interaction", "label": "主动交互", "reason": "缺少 dry-run 送达回执或 Thalamus 主动续接证据"}
+        )
 
     return {
         "title": "生命底盘 PASS，整系统外设未覆盖" if completed_pass else "真实墙钟生命闭环观测中",
         "headline": (
             "24 小时 soak 已证明生命底盘、23 器官主链、内心世界和自我模型持续存在；"
-            "通讯软件 gateway、ASR、VTS、主动外呼仍需单独验收。"
+            "通讯软件 gateway、ASR、VTS 仍需单独验收；主动外呼与主动交互按本页层级证据判定。"
             if completed_pass
             else "当前只读读取真实墙钟 soak 记录，最终结论会随 run_status 更新。"
         ),
@@ -411,6 +444,10 @@ def _build_soak_acceptance(
             "status": proactive_status,
             "outbox_queued_count": proactive_outbox_count,
             "outbox_delivery_mode": proactive_outbox_mode,
+            "delivery_receipt_count": proactive_delivery_receipt_count,
+            "interaction_count": proactive_interaction_count,
+            "last_interaction_status": proactive_last_interaction_status,
+            "last_thalamus_reason_code": proactive_last_thalamus_reason,
         },
         "inner_world": {
             "continuity_score": continuity_score,

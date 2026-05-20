@@ -1681,6 +1681,49 @@ def _build_multimodal_route_seed(
     }
 
 
+def _build_proactive_reply_route_seed(
+    text: str,
+    *,
+    tribe_context: Mapping[str, Any] | None = None,
+) -> dict[str, Any] | None:
+    ctx = dict(tribe_context or {})
+    raw_proactive = ctx.get("proactive_interaction") or ctx.get("proactive_context") or {}
+    proactive_context = dict(raw_proactive) if isinstance(raw_proactive, Mapping) else {}
+    if not proactive_context:
+        return None
+    in_reply = bool(proactive_context.get("in_reply_to_proactive"))
+    outbound_message_id = _normalize_text(
+        proactive_context.get("outbound_message_id")
+        or proactive_context.get("message_id")
+        or proactive_context.get("event_id")
+    )
+    if not in_reply and not outbound_message_id:
+        return None
+
+    normalized = _normalize_text(text) or "收到主动消息后的回复"
+    return {
+        "route": "chat",
+        "target_id": "",
+        "task": normalized,
+        "reason_code": "THALAMUS_RULE_PROACTIVE_REPLY_CONTINUATION",
+        "confidence": 0.99,
+        "route_source": "thalamus.rule",
+        "proactive_context": {
+            "in_reply_to_proactive": True,
+            "outbound_message_id": outbound_message_id,
+            "delivery_receipt_id": _normalize_text(proactive_context.get("delivery_receipt_id")),
+            "delivery_status": _normalize_text(proactive_context.get("delivery_status")),
+            "channel": _normalize_text(proactive_context.get("channel")) or "safe_outbox",
+        },
+        "args": {
+            "text": normalized,
+            "user_message": normalized,
+            "proactive_reply": True,
+            "outbound_message_id": outbound_message_id,
+        },
+    }
+
+
 def _llm_intent_confidence_threshold() -> float:
     try:
         import os  # noqa: PLC0415
@@ -1842,6 +1885,13 @@ async def classify_task_intent(
     import os as _os  # noqa: PLC0415
 
     normalized = _normalize_text(text)
+    proactive_seed = _build_proactive_reply_route_seed(
+        normalized,
+        tribe_context=tribe_context,
+    )
+    if proactive_seed is not None:
+        return proactive_seed
+
     multimodal_seed = _build_multimodal_route_seed(
         normalized,
         attachments=attachments,

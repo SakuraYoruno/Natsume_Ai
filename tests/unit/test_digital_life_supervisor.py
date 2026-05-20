@@ -8,6 +8,10 @@ from tools.run_digital_life_wall_clock_soak import (
     build_arg_parser as build_wall_clock_arg_parser,
     run_wall_clock_soak,
 )
+from tools.validate_proactive_interaction_loop import (
+    build_arg_parser as build_proactive_interaction_arg_parser,
+    run_validation as run_proactive_interaction_validation,
+)
 
 
 def _foreground_runner(context: dict[str, object]) -> dict[str, object]:
@@ -100,6 +104,41 @@ def test_digital_life_supervisor_runs_proactive_talk_into_safe_outbox(tmp_path) 
     assert final_snapshot["proactive_outbox"]["queued_count"] == 1
 
 
+def test_digital_life_supervisor_runs_proactive_interaction_dry_run(tmp_path) -> None:
+    supervisor = DigitalLifeSupervisor(
+        DigitalLifeRuntimeConfig(
+            mode="fixture",
+            run_id="unit-proactive-interaction",
+            out_dir=tmp_path,
+            foreground_runner=_foreground_runner,  # type: ignore[arg-type]
+        )
+    )
+
+    with supervisor:
+        event = supervisor.run_proactive_interaction_dry_run(user_reply="在啊，怎么啦？")
+        final_snapshot = supervisor.snapshot()
+
+    receipt_path = tmp_path / "delivery_receipts.jsonl"
+    interaction_path = tmp_path / "proactive_interactions.jsonl"
+    receipts = [json.loads(line) for line in receipt_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    interactions = [json.loads(line) for line in interaction_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+
+    assert event["status"] == "PASS"
+    assert event["delivery_receipt"]["delivery_status"] == "DELIVERED_DRY_RUN"
+    assert event["thalamus_intent_draft"]["route"] == "chat"
+    assert event["thalamus_intent_draft"]["route_reason"] == "THALAMUS_RULE_PROACTIVE_REPLY_CONTINUATION"
+    assert event["foreground_turn"]["turn"]["mapped_organ_count"] == 23
+    assert len(receipts) == 1
+    assert receipts[0]["gateway_mode"] == "dry_run"
+    assert len(interactions) == 1
+    assert interactions[0]["status"] == "PASS"
+    assert final_snapshot["foreground_turn_count"] == 1
+    assert final_snapshot["proactive_outbox"]["queued_count"] == 1
+    assert final_snapshot["proactive_interaction"]["delivery_receipt_count"] == 1
+    assert final_snapshot["proactive_interaction"]["interaction_count"] == 1
+    assert final_snapshot["proactive_interaction"]["last_thalamus_reason_code"] == "THALAMUS_RULE_PROACTIVE_REPLY_CONTINUATION"
+
+
 def test_run_digital_life_host_runtime_parser_defaults() -> None:
     args = build_arg_parser().parse_args([])
 
@@ -168,3 +207,28 @@ def test_run_digital_life_wall_clock_soak_writes_incremental_checkpoints(tmp_pat
     assert (tmp_path / "report.md").exists()
     saved = json.loads((tmp_path / "summary.json").read_text(encoding="utf-8"))
     assert saved["run_id"] == "unit-wall-clock-soak"
+
+
+def test_validate_proactive_interaction_loop_writes_artifacts(tmp_path) -> None:
+    args = build_proactive_interaction_arg_parser().parse_args(
+        [
+            "--out-dir",
+            str(tmp_path),
+            "--run-id",
+            "unit-proactive-interaction-validation",
+        ]
+    )
+
+    result = run_proactive_interaction_validation(args)
+
+    summary = result["summary"]
+    assert summary["status"] == "PASS"
+    assert summary["proactive_outbox_queued_count"] == 1
+    assert summary["delivery_receipt_count"] == 1
+    assert summary["interaction_count"] == 1
+    assert summary["thalamus_reason_code"] == "THALAMUS_RULE_PROACTIVE_REPLY_CONTINUATION"
+    assert summary["mapped_organ_count"] == 23
+    assert (tmp_path / "summary.json").exists()
+    assert (tmp_path / "details.json").exists()
+    assert (tmp_path / "state" / "delivery_receipts.jsonl").exists()
+    assert (tmp_path / "state" / "proactive_interactions.jsonl").exists()

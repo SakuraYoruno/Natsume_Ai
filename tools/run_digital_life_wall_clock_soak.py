@@ -267,6 +267,8 @@ def _summary(
         "last_private_source": str(projected.get("last_private_source") or ""),
         "proactive_task_status": str(projected.get("proactive_task_status") or ""),
         "proactive_outbox_queued_count": int(projected.get("proactive_outbox_queued_count") or 0),
+        "proactive_delivery_receipt_count": int(projected.get("proactive_delivery_receipt_count") or 0),
+        "proactive_interaction_count": int(projected.get("proactive_interaction_count") or 0),
         "error": dict(error or {}),
     }
 
@@ -279,6 +281,7 @@ def _project_snapshot(snapshot: Mapping[str, Any]) -> dict[str, Any]:
     latest_private = dict(data.get("latest_private_thought") or {})
     proactive_task = dict(background.get("proactive_task") or {})
     proactive_outbox = dict(data.get("proactive_outbox") or {})
+    proactive_interaction = dict(data.get("proactive_interaction") or {})
     return {
         "alive": bool(data.get("alive")),
         "mode": str(data.get("mode") or ""),
@@ -298,6 +301,8 @@ def _project_snapshot(snapshot: Mapping[str, Any]) -> dict[str, Any]:
         "last_private_salience": latest_private.get("salience"),
         "proactive_task_status": str(proactive_task.get("status") or ""),
         "proactive_outbox_queued_count": int(proactive_outbox.get("queued_count") or 0),
+        "proactive_delivery_receipt_count": int(proactive_interaction.get("delivery_receipt_count") or 0),
+        "proactive_interaction_count": int(proactive_interaction.get("interaction_count") or 0),
     }
 
 
@@ -318,6 +323,8 @@ def _markdown_report(summary: Mapping[str, Any]) -> str:
         f"- last_mapped_organ_count: `{summary.get('last_mapped_organ_count')}`",
         f"- proactive_task_status: `{summary.get('proactive_task_status')}`",
         f"- proactive_outbox_queued_count: `{summary.get('proactive_outbox_queued_count')}`",
+        f"- proactive_delivery_receipt_count: `{summary.get('proactive_delivery_receipt_count')}`",
+        f"- proactive_interaction_count: `{summary.get('proactive_interaction_count')}`",
         "",
     ]
     return "\n".join(lines)

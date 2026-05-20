@@ -170,6 +170,39 @@ def test_classify_and_compile_intent_draft_routes_hub_skill_list_from_natural_la
     assert compiled["route_source"] == "thalamus.rule"
 
 
+def test_classify_and_compile_intent_draft_routes_proactive_reply_continuation() -> None:
+    agent = ThalamusAgent()
+
+    compiled = _run(
+        agent.classify_and_compile_intent_draft(
+            request_id="req-thalamus-proactive-reply",
+            session_id="session-thalamus-proactive-reply",
+            user_message="在啊，怎么啦？",
+            source="proactive_interaction_dry_run",
+            input_source="PROACTIVE_DRY_RUN",
+            tribe_context={
+                "proactive_interaction": {
+                    "in_reply_to_proactive": True,
+                    "outbound_message_id": "evt_proactive_1",
+                    "delivery_receipt_id": "receipt_1",
+                    "delivery_status": "DELIVERED_DRY_RUN",
+                    "channel": "safe_outbox",
+                }
+            },
+            ts_ms=1776349003050,
+        )
+    )
+
+    assert compiled["route"] == "chat"
+    assert compiled["target_id"] == ""
+    assert compiled["route_reason"] == "THALAMUS_RULE_PROACTIVE_REPLY_CONTINUATION"
+    assert compiled["route_source"] == "thalamus.rule"
+    assert compiled["input_source"] == "PROACTIVE_DRY_RUN"
+    assert compiled["args"]["proactive_reply"] is True
+    assert compiled["proactive_context"]["outbound_message_id"] == "evt_proactive_1"
+    assert "proactive_context" in compiled["_thalamus_meta"]["extension_keys"]
+
+
 def test_classify_and_compile_intent_draft_routes_hub_skill_search_with_query() -> None:
     agent = ThalamusAgent()
 
