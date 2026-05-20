@@ -42,9 +42,17 @@ DEFAULT_SAMPLE_RATE = 32000
 DEFAULT_MAX_TEXT_LENGTH = 500
 DEFAULT_SYNTH_TIMEOUT_S = 30.0
 _TORCHAUDIO_LOAD_PATCHED = False
-_JAPANESE_TTS_LANGUAGE_ALIASES = frozenset({"ja", "jp", "ja-jp"})
-_JAPANESE_TTS_TEXT_RE = re.compile(r"[\u3040-\u30ff\u3400-\u9fff\uff66-\uff9f]")
-_LATIN_LETTER_RE = re.compile(r"[A-Za-z\u00C0-\u024F\uFF21-\uFF3A\uFF41-\uFF5A]")
+_TTS_LANGUAGE_ALIASES = {
+    "zh": "zh",
+    "cn": "zh",
+    "zh-cn": "zh",
+    "zh-hans": "zh",
+    "mandarin": "zh",
+    "ja": "ja",
+    "jp": "ja",
+    "ja-jp": "ja",
+    "auto": "auto",
+}
 
 
 class TtsState(str, Enum):
@@ -67,7 +75,7 @@ class TtsConfig:
     synth_timeout_s: float = DEFAULT_SYNTH_TIMEOUT_S
     ref_audio_path: str | None = None
     ref_text: str | None = None
-    language: str = "ja"
+    language: str = "zh"
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -462,18 +470,12 @@ class SoVITSModelManager:
             normalized_text = normalized_text[: self._config.max_text_length]
             logger.warning("Text truncated to %d chars", self._config.max_text_length)
 
-        normalized_language = _normalize_japanese_tts_language(language or self._config.language)
+        normalized_language = _normalize_tts_language(language or self._config.language)
         if normalized_language is None:
             return TtsSynthResult(
                 success=False,
                 reason_code=VOICE_SCHEMA_INVALID,
-                detail="unsupported tts language; only ja is supported",
-            )
-        if not _is_supported_japanese_tts_text(normalized_text):
-            return TtsSynthResult(
-                success=False,
-                reason_code=VOICE_SCHEMA_INVALID,
-                detail="tts text must contain Japanese characters and no Latin letters",
+                detail="unsupported tts language; supported values: zh, ja, auto",
             )
 
         if self._state != TtsState.READY or self._model is None:
@@ -1231,7 +1233,7 @@ class _ModernSoVITSAdapter:
         }
 
     def _normalize_language(self, language: str) -> str:
-        normalized = _normalize_japanese_tts_language(language) or "ja"
+        normalized = _normalize_tts_language(language) or "zh"
 
         languages = set(getattr(getattr(self._tts, "configs", None), "languages", []) or [])
         if normalized in languages:
@@ -1240,7 +1242,7 @@ class _ModernSoVITSAdapter:
             return "auto"
         if languages:
             return sorted(languages)[0]
-        return "ja"
+        return "zh"
 
 
 class _FreshProcessSoVITSAdapter:
@@ -1682,22 +1684,11 @@ def _looks_japanese_text(text: str) -> bool:
     return bool(re.search(r"[\u3040-\u30ff\u3400-\u9fff]", str(text)))
 
 
-def _normalize_japanese_tts_language(language: str | None) -> str | None:
+def _normalize_tts_language(language: str | None) -> str | None:
     normalized = str(language or "").strip().lower()
     if not normalized:
-        return "ja"
-    if normalized in _JAPANESE_TTS_LANGUAGE_ALIASES:
-        return "ja"
-    return None
-
-
-def _is_supported_japanese_tts_text(text: str) -> bool:
-    normalized = str(text or "").strip()
-    if not normalized:
-        return False
-    if _LATIN_LETTER_RE.search(normalized):
-        return False
-    return bool(_JAPANESE_TTS_TEXT_RE.search(normalized))
+        return "zh"
+    return _TTS_LANGUAGE_ALIASES.get(normalized)
 
 
 def _find_default_ref_audio(model_root: str) -> str | None:

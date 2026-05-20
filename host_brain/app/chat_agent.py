@@ -950,19 +950,21 @@ async def _post_speak_sentence(
     request_id: str,
     session_id: str,
 ) -> None:
-    """Phase XV P7：向 Edge 发送单句 TTS 请求（fire-and-forget）。
-
-    语音通道永远使用日语（lang_hint="ja"），不受 render_target_lang 影响。
-    """
+    """Phase XV P7：向 Edge 发送单句 TTS 请求（fire-and-forget）。"""
     try:
         from host_brain.channels.edge_rpc_client import post_speak  # noqa: PLC0415
+        from host_brain.channels.tts_context_router import TtsContextRouter  # noqa: PLC0415
+        tts_params = TtsContextRouter().route(text=text, emotion_tag=emotion_tag)
         await post_speak(
             text=text,
             utterance_id=utterance_id,
             request_id=request_id,
             session_id=session_id,
             emotion_tag=emotion_tag,
-            lang_hint="ja",  # Phase XV: 语音通道永远日语
+            speed=float(tts_params.speed_scale),
+            pitch=float(tts_params.pitch_shift),
+            style_note=str(tts_params.style_note or ""),
+            lang_hint=str(tts_params.lang_hint or "zh"),
         )
     except Exception as exc:
         _logger.debug("[%s] P7 sentence TTS failed (non-critical): %s", request_id, exc)
@@ -996,7 +998,7 @@ def _extract_visible_text(raw: str, *, render_target_lang: str = "zh") -> str:
     return text
 
 def _extract_tts_text(raw: str) -> str:
-    """提取 TTS 语音通道文本（日语，text_ja 字段）。"""
+    """提取 TTS 语音通道文本，优先使用中文 text_zh。"""
     text = raw.strip()
     if not text:
         return ""
@@ -1006,8 +1008,13 @@ def _extract_tts_text(raw: str) -> str:
             if isinstance(parsed, dict):
                 narrative = parsed.get("narrative")
                 if isinstance(narrative, dict):
-                    # Phase XV P6：TTS 语音通道取 text_ja
-                    return str(narrative.get("text_ja") or "").strip()
+                    return str(
+                        narrative.get("tts_text")
+                        or narrative.get("text_zh")
+                        or narrative.get("text")
+                        or narrative.get("text_ja")
+                        or ""
+                    ).strip()
         except (json.JSONDecodeError, ValueError):
             pass
     return ""
@@ -1370,15 +1377,26 @@ def _build_deterministic_sub_agent_reply(
     render_target_lang: str,
     user_message: str = "",
 ) -> str | None:
-    _ = user_message
     if ctx is None:
         return None
     agent_id = str(ctx.agent_id or "").strip()
     result_text = str(ctx.result_text or "").strip()
+    if agent_id in {"system_info", "process_list", "network_status", "open_app"}:
+        return _build_sub_agent_result_preserving_fallback_reply(
+            ctx,
+            render_target_lang=render_target_lang,
+            user_message=user_message,
+        )
     if agent_id == "plan_execution":
         return _build_plan_execution_reply_cn(ctx, render_target_lang=render_target_lang)
     if agent_id.startswith("skill:hub_skill_"):
         return _build_hub_skill_reply_cn(ctx, render_target_lang=render_target_lang)
+    if is_codex_runtime_skill(agent_id) or agent_id in {"translate_agent", "intent_agent"}:
+        return _build_sub_agent_result_preserving_fallback_reply(
+            ctx,
+            render_target_lang=render_target_lang,
+            user_message=user_message,
+        )
     if agent_id in {"recent_turn_direct", "task_progress_direct"}:
         visible = _extract_visible_text(result_text, render_target_lang=render_target_lang)
         return visible or result_text or None
@@ -2197,10 +2215,10 @@ async def chat_agent_sse_generator(
         and str(os.environ.get("HOST_TTS_SENTENCE_STREAM_ENABLED") or "true").strip().lower()
         not in ("0", "false", "no", "off")
     )
-    # 分句 TTS 用的 SentenceSplitter（对 text_ja 分句）
+    # 分句 TTS 用的 SentenceSplitter（优先对中文 TTS 文本分句）
     tts_splitter = SentenceSplitter() if _tts_sentence_stream_enabled else None  # type: ignore[assignment]
     tts_sentence_index = 0
-    # 追踪已渲染的 text_ja（用于增量提取）
+    # 追踪已渲染的 TTS 文本（用于增量提取）
     _tts_rendered_text = ""
 
     async def _collect_buffered_generation(messages_for_call: list[dict[str, str]]) -> tuple[str, int | None]:

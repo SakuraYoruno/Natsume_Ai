@@ -454,7 +454,7 @@ def test_receive_input_gateway_followup_restores_recent_multimodal_context() -> 
     input_routes_module._GATEWAY_RECENT_MULTIMODAL_CACHE.clear()
 
 
-def test_gateway_reply_text_uses_chinese_while_voice_summary_uses_japanese() -> None:
+def test_gateway_reply_text_and_voice_summary_use_chinese() -> None:
     reply_text = _build_gateway_reply_text(
         decision="APPROVE",
         narrative="我在呢，你慢慢说。",
@@ -464,14 +464,14 @@ def test_gateway_reply_text_uses_chinese_while_voice_summary_uses_japanese() -> 
     voice_text = _build_gateway_voice_text(
         reply_text=reply_text,
         tts_text_ja=None,
-        render_target_lang="ja",
+        render_target_lang="zh",
     )
 
     assert reply_text == "我在呢，你慢慢说。"
-    assert voice_text == ""
+    assert voice_text == "我在呢，你慢慢说。"
 
 
-def test_send_gateway_voice_reply_uses_japanese_tts_lang_hint() -> None:
+def test_send_gateway_voice_reply_uses_chinese_tts_lang_hint() -> None:
     post_speak_mock = AsyncMock(
         return_value=SimpleNamespace(
             success=True,
@@ -487,12 +487,12 @@ def test_send_gateway_voice_reply_uses_japanese_tts_lang_hint() -> None:
             _send_gateway_voice_reply(
                 platform="qq",
                 conversation_id="qq_dm_voice_lang_001",
-                tts_text="こんにちは。",
+                tts_text="我在呢。",
                 request_id="req_gateway_voice_lang",
             )
     )
 
     assert post_speak_mock.await_count == 1
-    assert post_speak_mock.await_args.kwargs["lang_hint"] == "ja"
+    assert post_speak_mock.await_args.kwargs["lang_hint"] == "zh"
     assert result["voice_status"] == "ACCEPTED"
     assert result["voice_success"] is True

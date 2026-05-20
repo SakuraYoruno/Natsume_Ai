@@ -3,6 +3,7 @@ from __future__ import annotations
 from host_brain.app.chat_agent import (
     SubAgentContext,
     _build_chat_agent_quality_fallback_reply,
+    _build_deterministic_sub_agent_reply as _build_runtime_deterministic_sub_agent_reply,
 )
 from host_brain.app.chat_agent_preprocessor import (
     _build_deterministic_sub_agent_reply,
@@ -118,6 +119,61 @@ def test_deterministic_reply_hides_intent_agent_result_for_relational_followup()
     )
 
     assert reply is None
+
+
+def test_deterministic_reply_formats_system_info_result() -> None:
+    ctx = SubAgentContext(
+        agent_id="system_info",
+        task="查一下系统状态",
+        result_text="{'cpu': {'percent': 56.2}}",
+        success=True,
+        payload={
+            "result": {
+                "status": "OK",
+                "action": "info",
+                "detail": {
+                    "platform": {"system": "Windows", "release": "10", "machine": "AMD64"},
+                    "cpu": {"count_logical": 16, "count_physical": 8, "percent": 56.2},
+                    "memory": {"total_gb": 31.15, "available_gb": 9.96, "percent": 68.0},
+                    "disk": {"total_gb": 1562.07, "free_gb": 633.17, "percent": 59.5},
+                },
+            },
+        },
+    )
+
+    reply = _build_deterministic_sub_agent_reply(ctx, render_target_lang="zh")
+
+    assert reply is not None
+    assert "系统状态查到了" in reply
+    assert "CPU 56.2%" in reply
+    assert "内存 68.0%" in reply
+    assert "磁盘 59.5%" in reply
+
+
+def test_runtime_deterministic_reply_formats_system_info_result() -> None:
+    ctx = SubAgentContext(
+        agent_id="system_info",
+        task="查一下系统状态",
+        result_text="{'cpu': {'percent': 12.3}}",
+        success=True,
+        payload={
+            "result": {
+                "status": "OK",
+                "action": "info",
+                "detail": {
+                    "cpu": {"count_logical": 16, "count_physical": 8, "percent": 12.3},
+                    "memory": {"total_gb": 32.0, "available_gb": 20.0, "percent": 37.5},
+                },
+            },
+        },
+    )
+
+    reply = _build_runtime_deterministic_sub_agent_reply(ctx, render_target_lang="zh")
+
+    assert reply is not None
+    assert "系统状态查到了" in reply
+    assert "CPU 12.3%" in reply
+    assert "内存 37.5%" in reply
 
 
 def test_quality_fallback_does_not_surface_intent_agent_result_for_relational_followup() -> None:

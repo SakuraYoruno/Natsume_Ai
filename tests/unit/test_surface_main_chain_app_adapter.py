@@ -492,3 +492,11 @@ def test_surface_main_chain_enabled_defaults_to_normal_text_only(monkeypatch) ->
     assert surface_main_chain_enabled(_agent_input(attachments=[{"kind": "image"}])) is False
     assert surface_main_chain_enabled(_agent_input(response_form="sticker")) is False
     assert surface_main_chain_enabled(_agent_input(intent_draft={"route": "delegate"})) is True
+    assert surface_main_chain_enabled(
+        _agent_input(),
+        sub_agent_ctx=SimpleNamespace(agent_id="system_info"),
+    ) is False
+    assert surface_main_chain_enabled(
+        _agent_input(),
+        sub_agent_ctx=SimpleNamespace(agent_id="codex_worker"),
+    ) is True

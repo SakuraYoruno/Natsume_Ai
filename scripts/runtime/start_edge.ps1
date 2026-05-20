@@ -905,7 +905,7 @@ if ([bool]$qqOneBotResult.enabled) {
 if ($EnforceCnAsrJaTtsMode) {
   $enforcedVoiceEnv = [ordered]@{
     EDGE_ASR_LANGUAGE = "zh"
-    EDGE_TTS_LANGUAGE = "ja"
+    EDGE_TTS_LANGUAGE = "zh"
     EDGE_BARGE_IN_ENABLED = "false"
   }
   foreach ($enforcedKey in $enforcedVoiceEnv.Keys) {
@@ -927,9 +927,9 @@ if ($EnforceCnAsrJaTtsMode) {
     $envValues["EDGE_ASR_LANGUAGE"] = "zh"
     $startupEnvDefaultsApplied += "EDGE_ASR_LANGUAGE=zh"
   }
-  if (Ensure-ProcessEnvDefault -Key "EDGE_TTS_LANGUAGE" -DefaultValue "ja") {
-    $envValues["EDGE_TTS_LANGUAGE"] = "ja"
-    $startupEnvDefaultsApplied += "EDGE_TTS_LANGUAGE=ja"
+  if (Ensure-ProcessEnvDefault -Key "EDGE_TTS_LANGUAGE" -DefaultValue "zh") {
+    $envValues["EDGE_TTS_LANGUAGE"] = "zh"
+    $startupEnvDefaultsApplied += "EDGE_TTS_LANGUAGE=zh"
   }
   if (Ensure-ProcessEnvDefault -Key "EDGE_BARGE_IN_ENABLED" -DefaultValue "false") {
     $envValues["EDGE_BARGE_IN_ENABLED"] = "false"

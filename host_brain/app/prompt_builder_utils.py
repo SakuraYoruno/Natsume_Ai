@@ -42,7 +42,7 @@ SCENE_GATEWAY = "GATEWAY"
 # Phase XV：双轨语言常量
 # ---------------------------------------------------------------------------
 TEXT_OUTPUT_LANG: str = "zh"
-TTS_INPUT_LANG: str = "ja"
+TTS_INPUT_LANG: str = "zh"
 
 
 def is_dual_lang_enabled() -> bool:

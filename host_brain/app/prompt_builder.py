@@ -341,15 +341,15 @@ def _mapping_list(
 # ---------------------------------------------------------------------------
 # 文字通道永远中文（用户看的文字，中文是母语）
 TEXT_OUTPUT_LANG: str = "zh"
-# 语音通道永远日语（TTS 声线模型是日语训练的，必须日语文本）
-TTS_INPUT_LANG: str = "ja"
+# 语音通道默认中文；日语仅作为显式日文内容的兼容声线。
+TTS_INPUT_LANG: str = "zh"
 
 
 def is_dual_lang_enabled() -> bool:
     """Phase XV P6：双轨语言输出永久启用。
 
-    文字通道永远中文（text_zh），TTS 语音通道永远日语（text_ja）。
-    这不是灰度开关，而是架构决定——旧的单语逻辑已删除。
+    文字通道与语音通道都以中文人格表达为主。
+    text_ja 只作为旧字段保留，新的 TTS 路由优先使用 text_zh。
     """
     return True
 
@@ -629,15 +629,14 @@ def render_host_generation_prompt(prompt_payload: dict[str, Any]) -> str:
         "evidence_empty",
     )
 
-    # Phase XV P6：双轨语言输出（永久生效，不再有旧的单语分支）
-    # text_zh = 文字通道（用户看的，永远中文）
-    # text_ja = TTS 语音通道（声线模型是日语训练的，永远日语）
+    # Phase XV P6 后续修正：文字与语音都以中文人格表达为主。
+    # text_ja 只保留为旧字段，避免旧解析器看到缺字段。
     language_rule = (
         "4. Output DUAL LANGUAGE: narrative must contain BOTH text_zh (Simplified Chinese, "
-        "for text display) AND text_ja (natural Japanese, for TTS voice synthesis). "
+        "for text display and TTS voice synthesis) AND text_ja (legacy compatibility mirror, may be empty). "
         "Schema: {\"narrative\":{\"text_zh\":\"...\",\"text_ja\":\"...\"}, ...}. "
-        "text_zh: concise spoken Simplified Chinese. "
-        "text_ja: natural conversational Japanese, TTS-friendly (no 〜 decorators, 1-3 sentences)."
+        "text_zh: concise spoken Simplified Chinese, TTS-friendly, 1-3 sentences. "
+        "text_ja: only fill this when the user explicitly asks for Japanese."
     )
 
     host_rules = _mapping_list(host_prompt_templates, "rules")

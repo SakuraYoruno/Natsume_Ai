@@ -392,6 +392,12 @@ class MotorCortexAgent:
             import asyncio as _asyncio  # noqa: PLC0415
 
             async def _do_speak() -> None:
+                from host_brain.channels.tts_context_router import TtsContextRouter  # noqa: PLC0415
+
+                tts_params = TtsContextRouter().route(
+                    text=resolved_text,
+                    emotion_tag=resolved_emotion_tag,
+                )
                 await post_speak(
                     text=resolved_text,
                     utterance_id=resolved_utterance_id,
@@ -399,7 +405,10 @@ class MotorCortexAgent:
                     session_id=str(session_id or ""),
                     emotion_tag=resolved_emotion_tag,
                     emotion_intensity=resolved_intensity,
-                    lang_hint="ja",
+                    speed=float(tts_params.speed_scale),
+                    pitch=float(tts_params.pitch_shift),
+                    style_note=str(tts_params.style_note or ""),
+                    lang_hint=str(tts_params.lang_hint or "zh"),
                 )
 
             try:

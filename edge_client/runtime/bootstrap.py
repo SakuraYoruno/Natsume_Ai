@@ -187,7 +187,7 @@ def build_edge_runtime(config: EdgeConfig) -> EdgeRuntime:
         ),
         ref_audio_path=_as_optional_text(_env_get(env_lookup, "EDGE_TTS_REF_AUDIO_PATH")),
         ref_text=_as_optional_text(_env_get(env_lookup, "EDGE_TTS_REF_TEXT")),
-        language=_as_text(_env_get(env_lookup, "EDGE_TTS_LANGUAGE"), "ja"),
+        language=_as_text(_env_get(env_lookup, "EDGE_TTS_LANGUAGE"), "zh"),
     )
     tts_playback_device_index = _parse_optional_int(
         _env_get(env_lookup, "EDGE_TTS_PLAYBACK_DEVICE_INDEX"),

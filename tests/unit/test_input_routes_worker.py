@@ -930,18 +930,18 @@ def test_build_gateway_route_started_voice_ack_text_uses_prompt_template_overrid
 def test_build_gateway_voice_text_uses_prompt_template_override(monkeypatch) -> None:
     _ = monkeypatch
     assert _build_gateway_voice_text(reply_text="```python\nprint('hi')\n```", tts_text_ja=None) == ""
-    assert _build_gateway_voice_text(reply_text="这是中文结果。", tts_text_ja=None) == ""
+    assert _build_gateway_voice_text(reply_text="这是中文结果。", tts_text_ja=None) == "这是中文结果。"
     assert _build_gateway_voice_text(reply_text="Result ready", tts_text_ja=None) == ""
-    assert _build_gateway_voice_text(reply_text="有结果但没有日语", tts_text_ja="") == ""
+    assert _build_gateway_voice_text(reply_text="有结果但没有日语", tts_text_ja="") == "有结果但没有日语"
 
 
-def test_build_gateway_voice_text_prefers_tts_text_ja_when_available() -> None:
+def test_build_gateway_voice_text_prefers_chinese_reply_over_legacy_tts_text() -> None:
     assert (
         _build_gateway_voice_text(
             reply_text="我记住了，你明天上午九点有个会。",
             tts_text_ja="明日の朝九時に会議があること、ちゃんと覚えてるよ。",
         )
-        == "明日の朝九時に会議があること、ちゃんと覚えてるよ。"
+        == "我记住了，你明天上午九点有个会。"
     )
 
 
@@ -1086,7 +1086,7 @@ def test_deliver_gateway_reply_can_still_emit_local_voice_when_auto_reply_disabl
 
     speak_mock.assert_awaited_once()
     voiced_text = speak_mock.await_args.kwargs["text"]
-    assert voiced_text == "こっちで先に読んであげる。"
+    assert voiced_text == "我先直接在你这边把结果念出来。"
     assert result["success"] is True
     assert result["status"] == "SKIPPED"
     assert result["reason_code"] == "GATEWAY_REPLY_DISABLED"
@@ -1150,6 +1150,7 @@ def test_deliver_gateway_reply_force_dual_voice_waits_for_edge_voice_result(monk
         )
 
     speak_mock.assert_awaited_once()
+    assert speak_mock.await_args.kwargs["text"] == "今天我会直接把结果说给你听。"
     assert result["success"] is True
     assert result["reply_form_reason"] == "force_dual_voice_reply"
     assert result["voice_sent"] is True
@@ -1213,6 +1214,7 @@ def test_deliver_gateway_reply_can_still_trigger_local_voice_when_primary_delive
         )
 
     speak_mock.assert_awaited_once()
+    assert speak_mock.await_args.kwargs["text"] == "就算文字发不出去，我也先把声音链路跑起来。"
     assert result["success"] is False
     assert result["reason_code"] == "WECHAT_SEND_FAILED"
     assert result["voice_sent"] is True

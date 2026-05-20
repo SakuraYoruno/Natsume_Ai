@@ -29,7 +29,17 @@ STATUS_REJECTED = "REJECTED"
 S_VOICE_ASR_INGRESS = "S_VOICE_ASR_INGRESS"
 S_VOICE_SPEAK_EGRESS = "S_VOICE_SPEAK_EGRESS"
 S_VOICE_BARGE_IN = "S_VOICE_BARGE_IN"
-_JAPANESE_TTS_LANGUAGE_ALIASES = frozenset({"ja", "jp", "ja-jp"})
+_TTS_LANGUAGE_ALIASES = {
+    "zh": "zh",
+    "cn": "zh",
+    "zh-cn": "zh",
+    "zh-hans": "zh",
+    "mandarin": "zh",
+    "ja": "ja",
+    "jp": "ja",
+    "ja-jp": "ja",
+    "auto": "auto",
+}
 
 
 @dataclass(frozen=True)
@@ -226,7 +236,7 @@ class VoiceRpcContract:
                 seq=int(seq) if isinstance(seq, int) else None,
                 stage=S_VOICE_SPEAK_EGRESS,
                 reason_code=VOICE_SCHEMA_INVALID,
-                detail="speak lang_hint must be ja when provided",
+                detail="speak lang_hint must be zh, ja, or auto when provided",
                 payload=payload,
                 ts_ms=now_value,
             )
@@ -443,7 +453,5 @@ def _normalize_alternates(value: Any) -> list[dict[str, Any]]:
 def _normalize_tts_lang_hint(value: Any) -> str | None:
     normalized = str(value or "").strip().lower()
     if not normalized:
-        return "ja"
-    if normalized in _JAPANESE_TTS_LANGUAGE_ALIASES:
-        return "ja"
-    return None
+        return "zh"
+    return _TTS_LANGUAGE_ALIASES.get(normalized)

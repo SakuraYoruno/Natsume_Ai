@@ -104,23 +104,23 @@ class TestTtsModelManagerLifecycle:
         assert not result.success
         assert result.reason_code == VOICE_SYNTH_FAILED
 
-    def test_synthesize_rejects_non_japanese_language(self):
+    def test_synthesize_rejects_unsupported_language(self):
         mgr = SoVITSModelManager(TtsConfig(device="cpu"))
         mgr._state = TtsState.READY
         mgr._model = MagicMock()
-        result = mgr.synthesize("\u3053\u3093\u306b\u3061\u306f", language="en")
+        result = mgr.synthesize("你好", language="fr")
         assert not result.success
         assert result.reason_code == VOICE_SCHEMA_INVALID
         mgr._model.synthesize.assert_not_called()
 
-    def test_synthesize_rejects_latin_text_before_backend_call(self):
+    def test_synthesize_accepts_chinese_text_before_backend_call(self):
         mgr = SoVITSModelManager(TtsConfig(device="cpu"))
         mgr._state = TtsState.READY
         mgr._model = MagicMock()
-        result = mgr.synthesize("hello")
-        assert not result.success
-        assert result.reason_code == VOICE_SCHEMA_INVALID
-        mgr._model.synthesize.assert_not_called()
+        mgr._model.synthesize.return_value = {"audio": [0.0, 0.1], "sample_rate": 32000}
+        result = mgr.synthesize("你好", language="zh")
+        assert result.success
+        mgr._model.synthesize.assert_called()
 
     def test_synthesize_when_model_not_ready_triggers_load(self):
         """When model is not ready, synthesize() attempts load first."""
@@ -183,7 +183,7 @@ class TestTtsConfig:
         cfg = TtsConfig()
         assert cfg.device == "cuda"
         assert cfg.sample_rate == 32000
-        assert cfg.language == "ja"
+        assert cfg.language == "zh"
 
     def test_as_dict_completeness(self):
         cfg = TtsConfig()

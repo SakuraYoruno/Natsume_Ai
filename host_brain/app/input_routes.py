@@ -82,7 +82,7 @@ _PLACEHOLDER_GATEWAY_CONVERSATIONS: set[str] = {
 }
 _ASR_PLACEHOLDER_PATTERN = re.compile(r"^\[[A-Z0-9_:\-]{3,}\]$")
 _ASR_SPEECH_CHAR_PATTERN = re.compile(r"[A-Za-z0-9\u4e00-\u9fff]")
-_VOICE_JA_CHAR_PATTERN = re.compile(r"[\u3040-\u30ff]")
+_VOICE_TEXT_CHAR_PATTERN = re.compile(r"[\u3040-\u30ff\u3400-\u9fff]")
 _VOICE_LATIN_PATTERN = re.compile(r"[A-Za-z]")
 _GATEWAY_DIRECT_OPEN_APP_RE = re.compile(r"(打开|启动|运行).*(酷狗|kugou|qq音乐|网易云|spotify|应用|软件|程序|播放器)", re.IGNORECASE)
 _GATEWAY_DEDUPE_CACHE: dict[str, float] = {}
@@ -931,13 +931,14 @@ def _build_gateway_voice_text(
 ) -> str:
     templates = _load_gateway_fallback_texts_localized(render_target_lang=render_target_lang)
     voice_templates = dict(templates.get("voice_summary") or {})
-    candidate = str(tts_text_ja or "").strip()
-    if candidate and _VOICE_JA_CHAR_PATTERN.search(candidate) and not _VOICE_LATIN_PATTERN.search(candidate):
-        return candidate
 
     normalized_reply = str(reply_text or "").strip()
-    if normalized_reply and _VOICE_JA_CHAR_PATTERN.search(normalized_reply) and not _VOICE_LATIN_PATTERN.search(normalized_reply):
+    if normalized_reply and _VOICE_TEXT_CHAR_PATTERN.search(normalized_reply) and not _VOICE_LATIN_PATTERN.search(normalized_reply):
         return normalized_reply
+
+    candidate = str(tts_text_ja or "").strip()
+    if candidate and _VOICE_TEXT_CHAR_PATTERN.search(candidate) and not _VOICE_LATIN_PATTERN.search(candidate):
+        return candidate
 
     if "```" in normalized_reply or _VOICE_LATIN_PATTERN.search(normalized_reply):
         return str(voice_templates.get("code_or_latin") or "")
@@ -2270,8 +2271,8 @@ async def _deliver_gateway_reply(
     reply_envelope_payload: dict[str, Any] | None = None,
     # Gateway 双轨语言约定：
     # - 文字回复：中文
-    # - 语音回复：日语（当前 TTS 模型是日语训练）
-    # tts_text_ja 为日语 TTS 文本（若存在则优先使用）
+    # - 语音回复：默认中文，遇到显式日文内容再路由日语
+    # tts_text_ja 是旧字段名；新的语音链路优先使用中文 narrative。
     tts_text_ja: str | None = None,
 ) -> dict[str, Any]:
     platform = str(payload.get("platform") or "").strip().lower()
@@ -2763,10 +2764,10 @@ async def _deliver_gateway_reply(
             **voice_result,
         }
 
-    # ── 双发模式：先文字字幕，再日语语音（不阻塞主回复）────────────
+    # ── 双发模式：先文字字幕，再语音（不阻塞主回复）────────────
     # Voice proof can be forced and optionally awaited during live gateway integration.
     if False and form_decision.is_dual:
-        # P3/P6 完整实现：用 tts_text_ja 做 TTS 合成后发语音
+        # P3/P6 完整实现：用已解析出的 TTS 文本做合成后发语音
         # P4 当前：发送一条文字作为语音消息的占位（保留接口，等 P6 双语输出完成后启用真正的 TTS）
         _voice_text = voice_text
         if _voice_text and form_decision.secondary == MsgType.VOICE:
@@ -2829,6 +2830,7 @@ async def _send_gateway_voice_reply(
     _vlogger = _logging.getLogger("Natsume.gateway_voice")
     try:
         from host_brain.channels.edge_rpc_client import post_speak  # noqa: PLC0415
+        from host_brain.channels.tts_context_router import TtsContextRouter  # noqa: PLC0415
         # 触发 TTS 合成（本地扬声器）——Gateway 用户在外面听不到，
         # 但这样可以验证 TTS 合成链路正常工作
         # P6/P7 完成后：获取合成音频 → 发送 voice 消息
@@ -2846,12 +2848,16 @@ async def _send_gateway_voice_reply(
                 "voice_event": {},
             }
 
+        tts_params = TtsContextRouter().route(
+            text=_tts_text_normalized,
+            emotion_tag=emotion_tag,
+        )
         result = await post_speak(
             text=_tts_text_normalized,
             request_id=request_id,
-            lang_hint="ja",  # Gateway 语音输出固定走日语 TTS
             emotion_tag=emotion_tag,
             emotion_intensity=emotion_intensity,
+            lang_hint=str(tts_params.lang_hint or "zh"),
         )
         voice_result = _extract_gateway_voice_result(result)
         _vlogger.debug(

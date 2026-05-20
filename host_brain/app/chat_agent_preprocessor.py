@@ -1039,8 +1039,137 @@ def _infer_open_app_name(task_text: str, *, render_target_lang: str) -> str:
     )
 
 
+_SYSTEM_RESULT_SKILL_IDS = {"system_info", "process_list", "network_status", "open_app"}
+
+
+def _mapping_from_any(value: Any) -> dict[str, Any]:
+    return dict(value or {}) if isinstance(value, Mapping) else {}
+
+
+def _skill_result_detail(ctx: SubAgentContext) -> dict[str, Any]:
+    payload = _mapping_from_any(ctx.payload)
+    result = _mapping_from_any(payload.get("result"))
+    detail = result.get("detail")
+    if isinstance(detail, Mapping):
+        return dict(detail)
+    payload_detail = payload.get("detail")
+    if isinstance(payload_detail, Mapping):
+        return dict(payload_detail)
+    return result
+
+
+def _format_percent(value: Any) -> str:
+    try:
+        return f"{float(value):.1f}%"
+    except (TypeError, ValueError):
+        return "-"
+
+
+def _format_gb(value: Any) -> str:
+    try:
+        return f"{float(value):.2f}GB"
+    except (TypeError, ValueError):
+        return "-"
+
+
+def _build_system_info_reply(ctx: SubAgentContext, *, render_target_lang: str = "zh") -> str | None:
+    detail = _skill_result_detail(ctx)
+    if not detail:
+        return None
+    platform = _mapping_from_any(detail.get("platform"))
+    cpu = _mapping_from_any(detail.get("cpu"))
+    memory = _mapping_from_any(detail.get("memory"))
+    disk = _mapping_from_any(detail.get("disk"))
+    parts: list[str] = []
+    system_label = " ".join(
+        item for item in (
+            str(platform.get("system") or "").strip(),
+            str(platform.get("release") or "").strip(),
+            str(platform.get("machine") or "").strip(),
+        )
+        if item
+    )
+    if system_label:
+        parts.append(system_label)
+    if cpu:
+        logical = cpu.get("count_logical")
+        physical = cpu.get("count_physical")
+        core_text = ""
+        if physical or logical:
+            core_text = f"（{physical or '-'}核/{logical or '-'}线程）"
+        parts.append(f"CPU {_format_percent(cpu.get('percent'))}{core_text}")
+    if memory:
+        parts.append(
+            f"内存 {_format_percent(memory.get('percent'))}"
+            f"（可用 {_format_gb(memory.get('available_gb'))}/总 {_format_gb(memory.get('total_gb'))}）"
+        )
+    if disk:
+        parts.append(
+            f"磁盘 {_format_percent(disk.get('percent'))}"
+            f"（空闲 {_format_gb(disk.get('free_gb'))}/总 {_format_gb(disk.get('total_gb'))}）"
+        )
+    if not parts:
+        return None
+    if _normalize_template_lang(render_target_lang) == "ja":
+        return "システム状態を確認したよ：" + "；".join(parts) + "。"
+    return "系统状态查到了：" + "；".join(parts) + "。"
+
+
+def _build_process_list_reply(ctx: SubAgentContext, *, render_target_lang: str = "zh") -> str | None:
+    detail = _skill_result_detail(ctx)
+    processes = list(detail.get("processes") or []) if isinstance(detail.get("processes"), list) else []
+    count = detail.get("count")
+    if not processes and count is None:
+        return None
+    previews: list[str] = []
+    for item in processes[:5]:
+        row = _mapping_from_any(item)
+        name = str(row.get("name") or "process").strip()
+        pid = row.get("pid")
+        cpu = _format_percent(row.get("cpu_percent"))
+        mem = _format_percent(row.get("memory_percent"))
+        previews.append(f"{name}(PID {pid or '-'}，CPU {cpu}，内存 {mem})")
+    total = count if count is not None else len(processes)
+    if _normalize_template_lang(render_target_lang) == "ja":
+        intro = f"プロセス一覧を確認したよ：{total} 件"
+    else:
+        intro = f"进程列表查到了：共 {total} 个"
+    if previews:
+        intro += "，前几项：" + "；".join(previews)
+    return intro + "。"
+
+
+def _build_network_status_reply(ctx: SubAgentContext, *, render_target_lang: str = "zh") -> str | None:
+    detail = _skill_result_detail(ctx)
+    if not detail:
+        return None
+    host = str(detail.get("host") or "").strip() or "目标主机"
+    port = detail.get("port")
+    reachable = detail.get("reachable")
+    if reachable is None and not host:
+        return None
+    endpoint = f"{host}:{port}" if port else host
+    if bool(reachable):
+        base = f"网络检测完成：{endpoint} 可达"
+    else:
+        base = f"网络检测完成：{endpoint} 不可达"
+    error = str(detail.get("error") or "").strip()
+    if error and not bool(reachable):
+        base += f"，原因：{error}"
+    public_ip = str(detail.get("public_ip") or "").strip()
+    if public_ip:
+        base += f"，公网 IP {public_ip}"
+    return base + "。"
+
+
 def _build_system_skill_reply(ctx: SubAgentContext, *, render_target_lang: str = "zh") -> str | None:
     agent_id = str(ctx.agent_id or "").strip()
+    if agent_id == "system_info":
+        return _build_system_info_reply(ctx, render_target_lang=render_target_lang)
+    if agent_id == "process_list":
+        return _build_process_list_reply(ctx, render_target_lang=render_target_lang)
+    if agent_id == "network_status":
+        return _build_network_status_reply(ctx, render_target_lang=render_target_lang)
     if agent_id != "open_app":
         return None
     templates = _load_template_mapping("chat_agent.system_skill.reply_templates")
@@ -1107,7 +1236,7 @@ def _build_sub_agent_result_preserving_fallback_reply(ctx: SubAgentContext | Non
     agent_id = str(ctx.agent_id or "").strip()
     if not _should_preserve_sub_agent_result_for_user(user_message=user_message, agent_id=agent_id):
         return None
-    if agent_id == "open_app":
+    if agent_id in _SYSTEM_RESULT_SKILL_IDS:
         return _build_system_skill_reply(ctx, render_target_lang=render_target_lang)
     if agent_id == "plan_execution":
         return _build_plan_execution_reply_cn(ctx, render_target_lang=render_target_lang)
@@ -1126,7 +1255,7 @@ def _build_deterministic_sub_agent_reply(ctx: SubAgentContext | None, *, render_
         return None
     agent_id = str(ctx.agent_id or "").strip()
     result_text = str(ctx.result_text or "").strip()
-    if agent_id == "open_app":
+    if agent_id in _SYSTEM_RESULT_SKILL_IDS:
         return _build_system_skill_reply(ctx, render_target_lang=render_target_lang)
     if agent_id == "plan_execution":
         return _build_plan_execution_reply_cn(ctx, render_target_lang=render_target_lang)
@@ -1209,7 +1338,13 @@ def _extract_tts_text(raw: str) -> str:
             if isinstance(parsed, dict):
                 narrative = parsed.get("narrative")
                 if isinstance(narrative, dict):
-                    return str(narrative.get("text_ja") or "").strip()
+                    return str(
+                        narrative.get("tts_text")
+                        or narrative.get("text_zh")
+                        or narrative.get("text")
+                        or narrative.get("text_ja")
+                        or ""
+                    ).strip()
         except (json.JSONDecodeError, ValueError):
             pass
     return ""

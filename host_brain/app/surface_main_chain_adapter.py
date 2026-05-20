@@ -44,6 +44,15 @@ _TRACE_RUNTIME_PAYLOAD_KEYS = (
     "surface_memory_recall_packet",
 )
 _TEXT_RESPONSE_FORMS = {"", "text", "plain_text", "chat_text", "zh_text"}
+_DETERMINISTIC_RESULT_AGENT_IDS = {
+    "system_info",
+    "process_list",
+    "network_status",
+    "open_app",
+    "plan_execution",
+    "recent_turn_direct",
+    "task_progress_direct",
+}
 _TECHNICAL_TASK_MODES = {
     "advice_continue",
     "complaint",
@@ -90,11 +99,21 @@ def surface_main_chain_enabled(agent_input: Any, *, sub_agent_ctx: Any | None = 
 
 
 def surface_main_chain_required(agent_input: Any, *, sub_agent_ctx: Any | None = None) -> bool:
-    _ = sub_agent_ctx
+    if _sub_agent_result_should_bypass_surface(sub_agent_ctx):
+        return False
     if _has_multimodal_payload(agent_input):
         return False
     response_form = _response_form(agent_input)
     return response_form in _TEXT_RESPONSE_FORMS
+
+
+def _sub_agent_result_should_bypass_surface(sub_agent_ctx: Any | None) -> bool:
+    if sub_agent_ctx is None:
+        return False
+    agent_id = str(getattr(sub_agent_ctx, "agent_id", "") or "").strip()
+    if not agent_id:
+        return False
+    return agent_id in _DETERMINISTIC_RESULT_AGENT_IDS or agent_id.startswith("skill:hub_skill_")
 
 
 def build_surface_main_chain_input_from_chat_input(

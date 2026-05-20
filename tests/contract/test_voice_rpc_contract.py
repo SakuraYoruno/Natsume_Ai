@@ -139,16 +139,34 @@ class TestVoiceRpcContract(unittest.TestCase):
         self.assertEqual(missing_text["request_id"], rows[1]["request_id"])
         self.assertEqual(S_VOICE_SPEAK_EGRESS, rows[0]["stage"])
 
-    def test_t_voice_02b_speak_rejects_non_japanese_lang_hint(self) -> None:
+    def test_t_voice_02b_speak_accepts_chinese_lang_hint(self) -> None:
         payload = {
             "session_id": "sess-voice-002b",
             "utterance_id": "utt-voice-002b",
-            "text": "\u3053\u3093\u306b\u3061\u306f",
-            "lang_hint": "en",
+            "text": "你好，开始说中文。",
+            "lang_hint": "zh-CN",
+        }
+
+        ok = self.rpc.speak(
+            request_id="req_voice_02b",
+            payload=payload,
+            ts_ms=self.now_ms + 12,
+        )
+
+        self.assertTrue(ok.success)
+        self.assertEqual(STATUS_ACCEPTED, ok.status)
+        self.assertEqual("zh", ok.event["lang_hint"])
+
+    def test_t_voice_02c_speak_rejects_unsupported_lang_hint(self) -> None:
+        payload = {
+            "session_id": "sess-voice-002c",
+            "utterance_id": "utt-voice-002c",
+            "text": "bonjour",
+            "lang_hint": "fr",
         }
 
         bad = self.rpc.speak(
-            request_id="req_voice_02b",
+            request_id="req_voice_02c",
             payload=payload,
             ts_ms=self.now_ms + 12,
         )
