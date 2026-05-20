@@ -465,17 +465,18 @@ class EpisodicStore:
         fetch_k = max(top_k * 3, top_k + 10)
         results = self.chroma.search(query_embedding=embedding, top_k=fetch_k)
 
-        # 过滤 LRU 已淘汰的幽灵记录（Chroma 中存在但内存中已移除）
-        results = [r for r in results if r.get("memory_id") in self._records]
-
         # Phase XVII：三层权重融合
         now_value = int(now_ts_ms if now_ts_ms is not None else now_ms())
         processed: list[dict[str, Any]] = []
         for r in results:
-            record = self._records.get(r.get("memory_id", ""))
+            memory_id = str(r.get("memory_id") or "")
+            record = self._records.get(memory_id)
+            if record is not None and record.deleted_at is not None:
+                continue
             score = float(r.get("score") or 0.0)
 
             if record is not None:
+                self._records.move_to_end(record.memory_id)
                 # 层1：时间衰减
                 if apply_decay:
                     decay_score = self.compute_memory_decay_score(record, now_ts_ms=now_value)
@@ -494,12 +495,12 @@ class EpisodicStore:
             r = dict(r)
             r["score"] = round(max(0.0, min(1.0, score)), 6)
             # 注入人性化字段到 metadata，供上层感知
+            meta = dict(r.get("metadata") or {})
             if record is not None:
-                meta = dict(r.get("metadata") or {})
                 meta["emotion_color_tag"] = record.emotion_color_tag
                 meta["suppression_flag"] = record.suppression_flag
                 meta["distortion_level"] = record.distortion_level
-                r["metadata"] = meta
+            r["metadata"] = meta
             processed.append(r)
 
         # M29-B：情感上下文加权
