@@ -285,6 +285,49 @@ def test_classify_and_compile_intent_draft_routes_network_status_tool() -> None:
     assert compiled["args"]["timeout_ms"] == 1500
 
 
+def test_classify_and_compile_intent_draft_routes_url_navigation_to_browser_tool() -> None:
+    agent = ThalamusAgent()
+
+    compiled = _run(
+        agent.classify_and_compile_intent_draft(
+            request_id="req-thalamus-browser-navigate",
+            session_id="session-thalamus-browser-navigate",
+            user_message="打开 https://example.com 看一下",
+            source="chat_handler",
+            ts_ms=1776349003113,
+        )
+    )
+
+    assert compiled["route"] == "skill"
+    assert compiled["target_id"] == "browser_navigate"
+    assert compiled["route_reason"] == "THALAMUS_RULE_BROWSER_NAVIGATE"
+    assert compiled["args"]["url"] == "https://example.com"
+
+
+def test_classify_and_compile_intent_draft_routes_url_scrape_to_browser_plan() -> None:
+    agent = ThalamusAgent()
+
+    compiled = _run(
+        agent.classify_and_compile_intent_draft(
+            request_id="req-thalamus-browser-scrape",
+            session_id="session-thalamus-browser-scrape",
+            user_message="抓取 https://example.com 页面文本",
+            source="chat_handler",
+            ts_ms=1776349003114,
+        )
+    )
+
+    assert compiled["route"] == "plan"
+    assert compiled["target_id"] == "skill_dag"
+    assert compiled["route_reason"] == "THALAMUS_RULE_BROWSER_SCRAPE_PLAN"
+    assert [step["target_id"] for step in compiled["planned_steps"]] == [
+        "browser_navigate",
+        "browser_scrape",
+    ]
+    assert compiled["planned_steps"][0]["args"]["url"] == "https://example.com"
+    assert compiled["planned_steps"][1]["args"]["selector"] == "body"
+
+
 def test_classify_and_compile_intent_draft_prefers_multimodal_chat_when_attachments_exist() -> None:
     agent = ThalamusAgent()
 

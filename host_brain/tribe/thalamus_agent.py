@@ -39,6 +39,9 @@ _LLM_DELEGATE_TARGET_ALLOWLIST: frozenset[str] = frozenset({
 })
 _LLM_SKILL_TARGET_ALLOWLIST: frozenset[str] = frozenset({
     "bond_query",
+    "browser_navigate",
+    "browser_scrape",
+    "browser_screenshot",
     "codex_dream_compile",
     "codex_inspect",
     "codex_organ_scan",
@@ -238,6 +241,15 @@ _TASK_CONTEXT_CONTINUATION_RE = re.compile(
 _TASK_OPEN_APP_VERB_RE = re.compile(r"(打开|启动|运行|开一下|帮我开|替我开|launch|open)", re.IGNORECASE)
 _TASK_OPEN_APP_HINT_RE = re.compile(
     r"(本地|应用|软件|程序|app|设置|系统设置|酷狗|kugou|qq音乐|网易云|spotify|浏览器|微信|qq|音乐)",
+    re.IGNORECASE,
+)
+_TASK_URL_RE = re.compile(r"https?://[^\s\]）)>,，。；;!?！？\"']+", re.IGNORECASE)
+_TASK_BROWSER_NAVIGATE_RE = re.compile(
+    r"(打开|访问|浏览|查看|看看|进入|open|visit|browse|navigate)",
+    re.IGNORECASE,
+)
+_TASK_BROWSER_SCRAPE_RE = re.compile(
+    r"(抓取|读取|提取|网页文本|页面文本|页面内容|scrape|extract|read)",
     re.IGNORECASE,
 )
 _TASK_SYSTEM_INFO_RE = re.compile(
@@ -752,6 +764,79 @@ def _build_system_observation_route_seed(text: str) -> dict[str, Any] | None:
     return None
 
 
+def _extract_first_url(text: str) -> str:
+    match = _TASK_URL_RE.search(_normalize_text(text))
+    return match.group(0).rstrip(".,;:!?，。；：！？") if match else ""
+
+
+def _build_browser_observation_route_seed(text: str) -> dict[str, Any] | None:
+    normalized = _normalize_text(text)
+    if not normalized:
+        return None
+    url = _extract_first_url(normalized)
+    if not url:
+        return None
+
+    if _TASK_BROWSER_SCRAPE_RE.search(normalized):
+        return {
+            "route": "plan",
+            "target_id": "skill_dag",
+            "task": normalized,
+            "reason_code": "THALAMUS_RULE_BROWSER_SCRAPE_PLAN",
+            "confidence": 0.95,
+            "route_source": "thalamus.rule",
+            "planned_steps": [
+                {
+                    "step_index": 1,
+                    "route": "skill",
+                    "target_id": "browser_navigate",
+                    "description": f"open {url}",
+                    "task_description": normalized,
+                    "route_reason": "THALAMUS_RULE_BROWSER_NAVIGATE",
+                    "allow_parallel": False,
+                    "risk_level": 2,
+                    "args": {
+                        "url": url,
+                        "wait_until": "load",
+                        "timeout_ms": 10000,
+                    },
+                },
+                {
+                    "step_index": 2,
+                    "route": "skill",
+                    "target_id": "browser_scrape",
+                    "description": "scrape page text",
+                    "task_description": normalized,
+                    "route_reason": "THALAMUS_RULE_BROWSER_SCRAPE",
+                    "allow_parallel": False,
+                    "risk_level": 2,
+                    "args": {
+                        "selector": "body",
+                        "extract": "text",
+                        "limit": 20,
+                    },
+                },
+            ],
+        }
+    if _TASK_BROWSER_NAVIGATE_RE.search(normalized):
+        return {
+            "route": "skill",
+            "target_id": "browser_navigate",
+            "task": normalized,
+            "reason_code": "THALAMUS_RULE_BROWSER_NAVIGATE",
+            "confidence": 0.94,
+            "route_source": "thalamus.rule",
+            "args": {
+                "url": url,
+                "wait_until": "load",
+                "timeout_ms": 10000,
+                "text": normalized,
+                "user_message": normalized,
+            },
+        }
+    return None
+
+
 def _has_explicit_route_seed(payload: Mapping[str, Any] | None) -> bool:
     data = dict(payload or {})
     route = _normalize_text(data.get("route"), lower=True)
@@ -858,6 +943,10 @@ def _build_direct_route_seed(text: str) -> dict[str, Any] | None:
     cleaned = _strip_step_lead_in(text)
     if not cleaned:
         return None
+
+    browser_seed = _build_browser_observation_route_seed(cleaned)
+    if browser_seed is not None:
+        return browser_seed
 
     if _looks_like_open_app_request(cleaned):
         return {

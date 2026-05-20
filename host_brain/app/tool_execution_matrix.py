@@ -18,6 +18,7 @@ from host_brain.app.executive_runtime_core import _execute_skill
 SAFE_SUCCESS_STATUSES = frozenset({"OK", "EXECUTED", "SUCCESS"})
 DEFAULT_MATRIX_SESSION_ID = "tool-execution-matrix"
 DEFAULT_MATRIX_PERSON_ID = "matrix-person"
+DEFAULT_MEMORY_CLOSED_LOOP_CONTENT = "tool execution matrix memory closed loop sentinel"
 
 
 @dataclass(frozen=True)
@@ -136,6 +137,33 @@ def build_default_tool_execution_matrix(repo_root: str | Path | None = None) -> 
             expected_scope="system",
             expected_tool="file",
             value_tier="workspace_observation",
+        ),
+    ]
+
+
+def build_browser_observation_matrix(url: str = "data:text/html,<h1>Natsume Browser Probe</h1>") -> list[ToolExecutionProbe]:
+    """Return safe browser observation probes.
+
+    These are kept out of the default matrix because real browser availability
+    depends on the local desktop/agent-browser/playwright setup.
+    """
+
+    return [
+        ToolExecutionProbe(
+            probe_id="browser-navigate",
+            skill_name="browser_navigate",
+            args={"url": url, "wait_until": "load", "timeout_ms": 5000},
+            expected_scope="system",
+            expected_tool="browser",
+            value_tier="web_observation",
+        ),
+        ToolExecutionProbe(
+            probe_id="browser-scrape-body",
+            skill_name="browser_scrape",
+            args={"selector": "body", "extract": "text", "limit": 5},
+            expected_scope="system",
+            expected_tool="browser",
+            value_tier="web_observation",
         ),
     ]
 
@@ -265,4 +293,128 @@ def run_tool_execution_matrix(
         "skipped": skipped_count,
         "critical_failed": len(critical_failed),
         "results": results,
+    }
+
+
+def _extract_memory_results(raw_result: dict[str, Any]) -> list[dict[str, Any]]:
+    detail = raw_result.get("detail")
+    if not isinstance(detail, dict):
+        return []
+    raw_items = detail.get("results")
+    if not isinstance(raw_items, list):
+        return []
+    return [dict(item or {}) for item in raw_items if isinstance(item, dict)]
+
+
+def run_memory_tool_closed_loop(
+    *,
+    content: str = DEFAULT_MEMORY_CLOSED_LOOP_CONTENT,
+    query: str | None = None,
+    request_prefix: str = "memory-tool-loop",
+    session_id: str = DEFAULT_MATRIX_SESSION_ID,
+    person_id: str = DEFAULT_MATRIX_PERSON_ID,
+) -> dict[str, Any]:
+    """Verify memory_store -> memory_search through the executive skill path.
+
+    The function intentionally uses the runtime dependency hooks that
+    _execute_skill uses in production. Tests can provide isolated in-memory
+    backends by monkeypatching those hooks, while live runs use configured
+    memory services.
+    """
+
+    search_query = str(query or content).strip()
+    store_request_id = f"{request_prefix}-store"
+    search_request_id = f"{request_prefix}-search"
+    store_outcome = _execute_skill(
+        request_body={
+            "args": {
+                "content": content,
+                "memory_type": "episodic",
+                "tags": ["task", "event"],
+                "importance": 0.7,
+                "source": "tool_execution_matrix",
+            }
+        },
+        request_id=store_request_id,
+        session_id=session_id,
+        person_id=person_id,
+        intent_id=f"intent::{store_request_id}",
+        skill_id="memory_store",
+        task_text=f"store memory probe: {content}",
+        user_message=f"store memory probe: {content}",
+        governor_result={"decision": "approve", "tokens": {}},
+        intent_draft={
+            "route": "skill",
+            "target_id": "memory_store",
+            "args": {
+                "content": content,
+                "memory_type": "episodic",
+                "tags": ["task", "event"],
+                "importance": 0.7,
+                "source": "tool_execution_matrix",
+            },
+        },
+        emotion_context={"mood_state": "NEUTRAL", "emotion_tag": "FOCUSED"},
+        render_target_lang="zh",
+    )
+    search_outcome = _execute_skill(
+        request_body={
+            "args": {
+                "query": search_query,
+                "memory_type": "all",
+                "top_k": 5,
+                "threshold": 0.0,
+                "tags": ["task", "event"],
+            }
+        },
+        request_id=search_request_id,
+        session_id=session_id,
+        person_id=person_id,
+        intent_id=f"intent::{search_request_id}",
+        skill_id="memory_search",
+        task_text=f"search memory probe: {search_query}",
+        user_message=f"search memory probe: {search_query}",
+        governor_result={"decision": "approve", "tokens": {}},
+        intent_draft={
+            "route": "skill",
+            "target_id": "memory_search",
+            "args": {
+                "query": search_query,
+                "memory_type": "all",
+                "top_k": 5,
+                "threshold": 0.0,
+                "tags": ["task", "event"],
+            },
+        },
+        emotion_context={"mood_state": "NEUTRAL", "emotion_tag": "FOCUSED"},
+        render_target_lang="zh",
+    )
+    store_raw = _raw_executor_result(dict(store_outcome.payload or {}))
+    search_raw = _raw_executor_result(dict(search_outcome.payload or {}))
+    search_results = _extract_memory_results(search_raw)
+    normalized_content = content.lower()
+    recalled = any(normalized_content in str(item.get("content") or item.get("text") or "").lower() for item in search_results)
+    passed = bool(store_outcome.success) and bool(search_outcome.success) and recalled
+    return {
+        "status": "PASSED" if passed else "FAILED",
+        "passed": passed,
+        "content": content,
+        "query": search_query,
+        "store": {
+            "success": bool(store_outcome.success),
+            "error": str(store_outcome.error_text or ""),
+            "raw_status": str(store_raw.get("status") or ""),
+            "raw_reason_code": str(store_raw.get("reason_code") or ""),
+            "raw_manifest_ref": str(store_raw.get("manifest_ref") or ""),
+        },
+        "search": {
+            "success": bool(search_outcome.success),
+            "error": str(search_outcome.error_text or ""),
+            "raw_status": str(search_raw.get("status") or ""),
+            "raw_reason_code": str(search_raw.get("reason_code") or ""),
+            "raw_manifest_ref": str(search_raw.get("manifest_ref") or ""),
+            "result_count": len(search_results),
+            "recalled": recalled,
+        },
+        "results": search_results,
     }
