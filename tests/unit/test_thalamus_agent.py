@@ -227,6 +227,64 @@ def test_classify_and_compile_intent_draft_routes_open_app_from_polite_phrase() 
     assert compiled["args"]["query"] == "可以帮我打开本地的酷狗音乐吗"
 
 
+def test_classify_and_compile_intent_draft_routes_system_info_tool() -> None:
+    agent = ThalamusAgent()
+
+    compiled = _run(
+        agent.classify_and_compile_intent_draft(
+            request_id="req-thalamus-system-info",
+            session_id="session-thalamus-system-info",
+            user_message="查看本机系统状态",
+            source="chat_handler",
+            ts_ms=1776349003110,
+        )
+    )
+
+    assert compiled["route"] == "skill"
+    assert compiled["target_id"] == "system_info"
+    assert compiled["route_reason"] == "THALAMUS_RULE_SYSTEM_INFO"
+    assert compiled["args"]["include_memory"] is True
+    assert compiled["route_source"] == "thalamus.rule"
+
+
+def test_classify_and_compile_intent_draft_routes_process_list_tool() -> None:
+    agent = ThalamusAgent()
+
+    compiled = _run(
+        agent.classify_and_compile_intent_draft(
+            request_id="req-thalamus-process-list",
+            session_id="session-thalamus-process-list",
+            user_message="列出当前进程",
+            source="chat_handler",
+            ts_ms=1776349003111,
+        )
+    )
+
+    assert compiled["route"] == "skill"
+    assert compiled["target_id"] == "process_list"
+    assert compiled["route_reason"] == "THALAMUS_RULE_PROCESS_LIST"
+    assert compiled["args"]["limit"] == 20
+
+
+def test_classify_and_compile_intent_draft_routes_network_status_tool() -> None:
+    agent = ThalamusAgent()
+
+    compiled = _run(
+        agent.classify_and_compile_intent_draft(
+            request_id="req-thalamus-network-status",
+            session_id="session-thalamus-network-status",
+            user_message="检查网络连通性",
+            source="chat_handler",
+            ts_ms=1776349003112,
+        )
+    )
+
+    assert compiled["route"] == "skill"
+    assert compiled["target_id"] == "network_status"
+    assert compiled["route_reason"] == "THALAMUS_RULE_NETWORK_STATUS"
+    assert compiled["args"]["timeout_ms"] == 1500
+
+
 def test_classify_and_compile_intent_draft_prefers_multimodal_chat_when_attachments_exist() -> None:
     agent = ThalamusAgent()
 

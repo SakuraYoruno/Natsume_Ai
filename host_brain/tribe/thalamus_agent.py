@@ -53,10 +53,15 @@ _LLM_SKILL_TARGET_ALLOWLIST: frozenset[str] = frozenset({
     "emotion_query",
     "hub_skill_list",
     "hub_skill_search",
+    "file_list",
+    "file_read",
     "memory_recall",
     "memory_store",
+    "network_status",
     "open_app",
+    "process_list",
     "session_summary",
+    "system_info",
 })
 _CANONICAL_ACTIONS = {
     "read_only_status",
@@ -233,6 +238,22 @@ _TASK_CONTEXT_CONTINUATION_RE = re.compile(
 _TASK_OPEN_APP_VERB_RE = re.compile(r"(打开|启动|运行|开一下|帮我开|替我开|launch|open)", re.IGNORECASE)
 _TASK_OPEN_APP_HINT_RE = re.compile(
     r"(本地|应用|软件|程序|app|设置|系统设置|酷狗|kugou|qq音乐|网易云|spotify|浏览器|微信|qq|音乐)",
+    re.IGNORECASE,
+)
+_TASK_SYSTEM_INFO_RE = re.compile(
+    r"((系统|本机|机器|主机|电脑|host|machine).{0,8}(状态|信息|资源|配置|运行情况|概况|负载)"
+    r"|(?:system|host|machine)\s+(?:info|status|overview|health))",
+    re.IGNORECASE,
+)
+_TASK_PROCESS_LIST_RE = re.compile(
+    r"((列出|查看|看看|读取|当前|运行中).{0,8}(进程|process)"
+    r"|(?:process\s+list|running\s+processes|list\s+processes))",
+    re.IGNORECASE,
+)
+_TASK_NETWORK_STATUS_RE = re.compile(
+    r"((检查|查看|看看|检测|测试).{0,8}(网络|联网|连通|连通性)"
+    r"|网络.{0,4}(状态|连通|检测)"
+    r"|(?:network|connectivity).{0,8}(?:status|check|test))",
     re.IGNORECASE,
 )
 _PHATIC_GREETING_RE = re.compile(
@@ -673,6 +694,64 @@ def _build_codex_workspace_route_seed(text: str) -> dict[str, Any] | None:
     }
 
 
+def _build_system_observation_route_seed(text: str) -> dict[str, Any] | None:
+    normalized = _normalize_text(text)
+    if not normalized:
+        return None
+
+    if _TASK_PROCESS_LIST_RE.search(normalized):
+        return {
+            "route": "skill",
+            "target_id": "process_list",
+            "task": normalized,
+            "reason_code": "THALAMUS_RULE_PROCESS_LIST",
+            "confidence": 0.95,
+            "route_source": "thalamus.rule",
+            "args": {
+                "limit": 20,
+                "sort_by": "pid",
+                "text": normalized,
+                "user_message": normalized,
+            },
+        }
+    if _TASK_NETWORK_STATUS_RE.search(normalized):
+        return {
+            "route": "skill",
+            "target_id": "network_status",
+            "task": normalized,
+            "reason_code": "THALAMUS_RULE_NETWORK_STATUS",
+            "confidence": 0.94,
+            "route_source": "thalamus.rule",
+            "args": {
+                "host": "8.8.8.8",
+                "port": 53,
+                "timeout_ms": 1500,
+                "get_public_ip": False,
+                "text": normalized,
+                "user_message": normalized,
+            },
+        }
+    if _TASK_SYSTEM_INFO_RE.search(normalized):
+        return {
+            "route": "skill",
+            "target_id": "system_info",
+            "task": normalized,
+            "reason_code": "THALAMUS_RULE_SYSTEM_INFO",
+            "confidence": 0.94,
+            "route_source": "thalamus.rule",
+            "args": {
+                "include_cpu": True,
+                "include_memory": True,
+                "include_disk": True,
+                "include_network": False,
+                "include_gpu": False,
+                "text": normalized,
+                "user_message": normalized,
+            },
+        }
+    return None
+
+
 def _has_explicit_route_seed(payload: Mapping[str, Any] | None) -> bool:
     data = dict(payload or {})
     route = _normalize_text(data.get("route"), lower=True)
@@ -733,6 +812,13 @@ def _infer_supported_step_route(text: str) -> tuple[str, str, str] | None:
         return ("skill", "bond_query", "THALAMUS_RULE_BOND_QUERY")
     if _contains_any(cleaned, _DIRECT_MEMORY_RECALL_MARKERS):
         return ("skill", "memory_recall", "THALAMUS_RULE_MEMORY_RECALL")
+    system_seed = _build_system_observation_route_seed(cleaned)
+    if system_seed is not None:
+        return (
+            "skill",
+            _normalize_text(system_seed.get("target_id")),
+            _normalize_text(system_seed.get("reason_code")) or "THALAMUS_RULE_SYSTEM_OBSERVATION",
+        )
 
     routed = classify_task_intent_by_rules(cleaned)
     if isinstance(routed, dict):
@@ -843,6 +929,10 @@ def _build_direct_route_seed(text: str) -> dict[str, Any] | None:
 
     if _looks_like_simple_technical_advice(cleaned):
         return _build_simple_technical_chat_seed(cleaned, route_source="thalamus.rule")
+
+    system_seed = _build_system_observation_route_seed(cleaned)
+    if system_seed is not None:
+        return system_seed
 
     if _TASK_CONTEXT_CONTINUATION_RE.match(cleaned):
         return {
