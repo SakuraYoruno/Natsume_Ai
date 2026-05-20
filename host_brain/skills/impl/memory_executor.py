@@ -105,8 +105,10 @@ def _execute_search(payload: dict[str, Any], context: dict[str, Any] | None) -> 
     threshold = float(payload.get("threshold") or 0.6)
     tags = payload.get("tags") or []
     session_id = payload.get("session_id")
+    session_filter = bool(payload.get("session_filter"))
     date_from = payload.get("date_from")
     date_to = payload.get("date_to")
+    _ = date_from, date_to
 
     # 尝试通过 context 中的 semantic_recaller 执行检索
     ctx = context or {}
@@ -118,29 +120,94 @@ def _execute_search(payload: dict[str, Any], context: dict[str, Any] | None) -> 
                 top_k=top_k,
                 threshold=threshold,
                 tags=tags,
-                session_id=session_id,
+                session_id=session_id if session_filter else None,
             )
-            _logger.info("记忆检索（semantic_recaller）: query=%s, results=%d", query[:40], len(results or []))
-            return {"query": query, "results": results or [], "source": "semantic_recaller"}
+            normalized = _normalize_search_results(results or [], source="semantic_recaller", threshold=threshold)
+            _logger.info("记忆检索（semantic_recaller）: query=%s, results=%d", query[:40], len(normalized))
+            if normalized or memory_type == "semantic":
+                return {"query": query, "results": normalized, "source": "semantic_recaller"}
         except Exception as exc:
             _logger.debug("semantic_recaller 调用失败: %s", exc)
 
     # 降级：通过 EpisodicStore 检索
     episodic_store = ctx.get("episodic_store")
-    if episodic_store is not None:
+    if episodic_store is not None and memory_type in {"all", "episodic"}:
         try:
-            results = episodic_store.search(
+            results = _search_episodic_store(
+                episodic_store,
                 query=query,
                 top_k=top_k,
                 threshold=threshold,
             )
-            _logger.info("记忆检索（episodic_store）: query=%s", query[:40])
-            return {"query": query, "results": results or [], "source": "episodic_store"}
+            normalized = _normalize_search_results(results or [], source="episodic_store", threshold=threshold)
+            _logger.info("记忆检索（episodic_store）: query=%s, results=%d", query[:40], len(normalized))
+            return {"query": query, "results": normalized, "source": "episodic_store"}
         except Exception as exc:
             _logger.debug("episodic_store 检索失败: %s", exc)
 
     _logger.info("记忆检索（无可用后端）: query=%s", query[:40])
     return {"query": query, "results": [], "source": "none", "note": "no memory backend available"}
+
+
+def _search_episodic_store(
+    episodic_store: Any,
+    *,
+    query: str,
+    top_k: int,
+    threshold: float,
+) -> list[Any]:
+    search = getattr(episodic_store, "search", None)
+    if callable(search):
+        return list(
+            search(
+                query=query,
+                top_k=top_k,
+                threshold=threshold,
+            )
+            or []
+        )
+    recall = getattr(episodic_store, "recall", None)
+    if callable(recall):
+        return list(
+            recall(
+                query_text=query,
+                top_k=top_k,
+            )
+            or []
+        )
+    return []
+
+
+def _normalize_search_results(items: list[Any], *, source: str, threshold: float) -> list[dict[str, Any]]:
+    normalized: list[dict[str, Any]] = []
+    for item in items:
+        if isinstance(item, dict):
+            row = dict(item)
+        else:
+            row = {
+                "memory_id": getattr(item, "memory_id", None) or getattr(item, "doc_id", None) or getattr(item, "id", None),
+                "content": getattr(item, "content", None) or getattr(item, "text", None),
+                "score": getattr(item, "score", None),
+                "metadata": getattr(item, "metadata", None),
+                "source": getattr(item, "source", None),
+            }
+        content = str(row.get("content") or row.get("text") or "")
+        memory_id = str(row.get("memory_id") or row.get("doc_id") or row.get("id") or "")
+        row["content"] = content
+        row.setdefault("text", content)
+        if memory_id:
+            row["memory_id"] = memory_id
+            row.setdefault("doc_id", memory_id)
+        row["source"] = str(row.get("source") or source)
+        try:
+            score = float(row.get("score"))
+        except (TypeError, ValueError):
+            score = 1.0 if content else 0.0
+        row["score"] = score
+        if threshold > 0.0 and score < threshold:
+            continue
+        normalized.append(row)
+    return normalized
 
 
 def _execute_store(payload: dict[str, Any], context: dict[str, Any] | None) -> dict[str, Any]:

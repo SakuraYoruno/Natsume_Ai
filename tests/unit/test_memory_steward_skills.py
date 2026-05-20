@@ -51,6 +51,51 @@ def test_memory_consolidate_builds_preference_and_task_candidates() -> None:
     assert any("主链工具闭环通过" in item["text"] for item in candidates)
 
 
+def test_memory_search_falls_back_to_episodic_recall_when_semantic_is_empty() -> None:
+    seen_semantic_args: dict[str, object] = {}
+
+    def semantic_recaller(**kwargs: object) -> list[dict[str, object]]:
+        seen_semantic_args.update(kwargs)
+        return []
+
+    class _EpisodicStoreStub:
+        def recall(self, *, query_text: str, top_k: int = 5) -> list[dict[str, object]]:
+            return [
+                {
+                    "memory_id": "mem-tool-loop-001",
+                    "text": f"Blue remembers {query_text}",
+                    "score": 0.91,
+                    "metadata": {"source": "unit"},
+                }
+            ][:top_k]
+
+    payload = {
+        "action": "search",
+        "manifest_ref": "memory_search::tool loop",
+        "query": "tool loop",
+        "memory_type": "all",
+        "top_k": 5,
+        "threshold": 0.0,
+        "session_id": "unit-session",
+        "session_filter": False,
+    }
+
+    result = execute_memory_skill(
+        payload,
+        {
+            "semantic_recaller": semantic_recaller,
+            "episodic_store": _EpisodicStoreStub(),
+        },
+    )
+
+    detail = result["detail"]
+    assert result["status"] == "OK"
+    assert seen_semantic_args["session_id"] is None
+    assert detail["source"] == "episodic_store"
+    assert detail["results"][0]["content"] == "Blue remembers tool loop"
+    assert detail["results"][0]["doc_id"] == "mem-tool-loop-001"
+
+
 def test_memory_registry_exposes_steward_skills_with_low_risk() -> None:
     registry = build_memory_skill_registry()
 

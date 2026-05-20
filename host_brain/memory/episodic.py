@@ -704,6 +704,7 @@ class EpisodicStore:
                 "text_hash": text_hash,
                 "visibility": record.visibility,
                 "evidence_refs": list(evidence_refs),
+                **_metadata_from_evidence_refs(evidence_refs),
                 "embedding_model_id": model_id,
                 "emotion_tag": record.emotion_tag,
                 "emotion_valence": record.emotion_valence,
@@ -797,6 +798,30 @@ def _normalize_evidence_refs(evidence_refs: list[str] | None) -> list[str]:
         if item and item not in normalized:
             normalized.append(item)
     return normalized
+
+
+def _metadata_from_evidence_refs(evidence_refs: list[str] | None) -> dict[str, Any]:
+    metadata: dict[str, Any] = {}
+    tags: list[str] = []
+    for ref in _normalize_evidence_refs(evidence_refs):
+        prefix, sep, value = ref.partition(":")
+        if not sep:
+            continue
+        key = prefix.strip().lower()
+        text = value.strip()
+        if not text:
+            continue
+        if key == "request":
+            metadata.setdefault("request_id", text)
+        elif key == "session":
+            metadata.setdefault("session_id", text)
+        elif key == "source":
+            metadata.setdefault("source", text)
+        elif key == "tag" and text not in tags:
+            tags.append(text)
+    if tags:
+        metadata["tags"] = list(tags)
+    return metadata
 
 
 def _normalize_memory_ids(memory_ids: list[str] | None) -> list[str]:
