@@ -50,6 +50,24 @@ def _checkpoints(now_ms: int) -> list[dict[str, object]]:
     ]
 
 
+def _completed_summary(now_ms: int) -> dict[str, object]:
+    summary = _summary(now_ms, run_id="unit-wall-clock-completed")
+    summary.update(
+        {
+            "checkpoint_count": 4,
+            "elapsed_seconds": 86_400.0,
+            "idle_tick_count": 2,
+            "progress_ratio": 1.0,
+            "run_status": "COMPLETED",
+            "status": "PASS",
+            "started_at_ms": now_ms - 86_400_000,
+            "tick_interval_seconds": 43_200.0,
+            "updated_at_ms": now_ms,
+        }
+    )
+    return summary
+
+
 def test_wall_clock_soak_payload_reads_latest_run_without_writing_review(tmp_path, monkeypatch) -> None:
     now_ms = int(time.time() * 1000)
     artifacts_root = tmp_path / "artifacts"
@@ -67,9 +85,94 @@ def test_wall_clock_soak_payload_reads_latest_run_without_writing_review(tmp_pat
     assert payload["summary"]["failed_checks"] == []
     assert payload["summary"]["registered_organ_count"] == 23
     assert payload["summary"]["last_mapped_organ_count"] == 23
+    assert payload["acceptance"]["base_status"] == "running"
+    assert payload["acceptance"]["layers"][0]["id"] == "life_base"
     assert payload["latestCheckpoints"][-1]["event_type"] == "idle_tick"
     assert payload["meta"]["readOnly"] is True
     assert not (run_dir.parent / "review").exists()
+
+
+def test_wall_clock_soak_payload_summarizes_completed_life_acceptance(tmp_path, monkeypatch) -> None:
+    now_ms = int(time.time() * 1000)
+    artifacts_root = tmp_path / "artifacts"
+    run_dir = artifacts_root / "real-24h-wall-clock-completed" / "run"
+    run_dir.mkdir(parents=True)
+    checkpoints = [
+        {"event_type": "runtime_started", "ts_ms": now_ms - 86_400_000, "tick_index": 0},
+        {"event_type": "foreground_turn", "ts_ms": now_ms - 86_399_000, "tick_index": 0},
+        {"event_type": "idle_tick", "ts_ms": now_ms - 300_000, "tick_index": 1},
+        {"event_type": "idle_tick", "ts_ms": now_ms - 1_000, "tick_index": 2},
+    ]
+    _write_json(run_dir / "summary.json", _completed_summary(now_ms))
+    _write_jsonl(run_dir / "checkpoints.jsonl", checkpoints)
+    _write_json(
+        run_dir / "details.json",
+        {
+            "final_snapshot": {
+                "background_runtime": {
+                    "core_tick_tasks": {
+                        "inner_world_numeric_tick": {"enabled": True, "status": "OK", "last_reason_code": None},
+                        "inner_world_monologue_tick": {"enabled": True, "status": "OK", "last_reason_code": None},
+                        "silence_tick": {"enabled": True, "status": "OK", "last_reason_code": None},
+                        "body_sense_tick": {"enabled": True, "status": "OK", "last_reason_code": None},
+                        "emotion_decay_tick": {"enabled": True, "status": "OK", "last_reason_code": None},
+                    },
+                    "proactive_task": {
+                        "task_id": "proactive_talk_periodic",
+                        "enabled": False,
+                        "status": "MISSING",
+                    },
+                },
+                "external_services": {
+                    "chroma": {"status": "not_probed_by_supervisor"},
+                    "neo4j": {"status": "not_probed_by_supervisor"},
+                    "sqlite": {"status": "managed_by_runtime_components"},
+                },
+            }
+        },
+    )
+    inner_dir = run_dir / "state" / "inner_world_state"
+    self_dir = run_dir / "state" / "self_model_state"
+    inner_dir.mkdir(parents=True)
+    self_dir.mkdir(parents=True)
+    _write_json(
+        inner_dir / "natsume_ai_inner_world.json",
+        {
+            "continuity_score": 0.8,
+            "loneliness": 1.0,
+            "anticipation": 0.76,
+            "total_offline_hours": 24.0,
+            "spontaneous_event_count": 435,
+            "last_spontaneous_source": "llm",
+            "inner_stream": [{"should_distill_to_memory": True}, {"should_distill_to_memory": True}],
+        },
+    )
+    _write_json(
+        self_dir / "natsume_ai_self_model.json",
+        {
+            "self_identity": "我是当前 Soul 定义的数字生命。",
+            "self_values": ["连续性"],
+            "self_boundaries": ["不编造"],
+            "active_intentions": ["继续成长"],
+            "agency_score": 1.0,
+            "self_continuity_score": 1.0,
+        },
+    )
+    monkeypatch.setenv("HOST_OBS_WALL_CLOCK_SOAK_ARTIFACTS_ROOT", str(artifacts_root))
+
+    payload = _build_wall_clock_soak_payload(require_complete=True)
+
+    acceptance = payload["acceptance"]
+    layers = {item["id"]: item for item in acceptance["layers"]}
+    assert acceptance["title"] == "生命底盘 PASS，整系统外设未覆盖"
+    assert acceptance["base_status"] == "healthy"
+    assert layers["life_base"]["status"] == "healthy"
+    assert layers["main_chain"]["status"] == "healthy"
+    assert layers["inner_world"]["status"] == "healthy"
+    assert layers["self_model"]["status"] == "healthy"
+    assert layers["external_system"]["verdict"] == "NOT_COVERED"
+    assert acceptance["inner_world"]["spontaneous_event_count"] == 435
+    assert acceptance["self_model"]["agency_score"] == 1.0
 
 
 def test_wall_clock_soak_payload_reports_missing_when_no_run_exists(tmp_path, monkeypatch) -> None:
@@ -79,4 +182,5 @@ def test_wall_clock_soak_payload_reports_missing_when_no_run_exists(tmp_path, mo
 
     assert payload["available"] is False
     assert payload["summary"]["verdict"] == "MISSING"
+    assert payload["acceptance"]["overall_status"] == "unknown"
     assert "wall_clock_soak_run_found" in payload["summary"]["failed_checks"]

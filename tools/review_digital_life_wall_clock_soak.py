@@ -173,7 +173,12 @@ def _checks(
     latest_age = metrics.get("latest_checkpoint_age_seconds")
     stale_seconds = float(metrics.get("stale_seconds") or 0.0)
     progress_ratio = float(metrics.get("progress_ratio") or 0.0)
-    expected_tick_minimum = max(1, int(expected_seconds // max(1.0, float(summary.get("tick_interval_seconds") or 300.0))))
+    raw_expected_tick_minimum = int(expected_seconds // max(1.0, float(summary.get("tick_interval_seconds") or 300.0)))
+    # Wall-clock scheduling is intentionally tolerant: host sleep, process wake-up
+    # jitter, and short start/stop windows can make a healthy 24h run land below
+    # the exact expected_seconds / tick_interval count. Staleness and final PASS
+    # checks still guard against a stuck runtime.
+    expected_tick_minimum = max(1, int(raw_expected_tick_minimum * 0.95))
     running_ok = run_status == "RUNNING" and not require_complete
     complete_ok = run_status == "COMPLETED" and str(summary.get("status") or "") == "PASS"
     stderr_lower = stderr_text.lower()

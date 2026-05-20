@@ -87,6 +87,38 @@ def test_review_wall_clock_soak_can_require_completed_pass(tmp_path: Path) -> No
     assert result["summary"]["failed_checks"] == []
 
 
+def test_review_wall_clock_soak_tolerates_wall_clock_tick_jitter(tmp_path: Path) -> None:
+    now_ms = int(time.time() * 1000)
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    checkpoints = [
+        {"event_type": "runtime_started", "ts_ms": now_ms - 1_000_000, "tick_index": 0},
+        {"event_type": "foreground_turn", "ts_ms": now_ms - 999_000, "tick_index": 0},
+        *[
+            {"event_type": "idle_tick", "ts_ms": now_ms - (9 - index) * 100_000, "tick_index": index + 1}
+            for index in range(9)
+        ],
+    ]
+    summary = _base_summary(now_ms=now_ms, run_status="COMPLETED")
+    summary.update(
+        {
+            "checkpoint_count": len(checkpoints),
+            "elapsed_seconds": 1_000.0,
+            "idle_tick_count": 9,
+            "target_seconds": 1_000.0,
+            "tick_interval_seconds": 100.0,
+        }
+    )
+    _write_json(run_dir / "summary.json", summary)
+    _write_jsonl(run_dir / "checkpoints.jsonl", checkpoints)
+    args = build_arg_parser().parse_args(["--run-dir", str(run_dir), "--require-complete"])
+
+    result = review_wall_clock_soak(args)
+
+    assert result["summary"]["verdict"] == "PASS"
+    assert "completed_reaches_expected_ticks" not in result["summary"]["failed_checks"]
+
+
 def test_review_wall_clock_soak_fails_stale_running_checkpoint(tmp_path: Path) -> None:
     now_ms = int(time.time() * 1000)
     old_ms = now_ms - 600_000

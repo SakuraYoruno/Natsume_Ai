@@ -2,11 +2,16 @@ import React from 'react'
 import {
   Activity,
   AlertTriangle,
+  Brain,
   CheckCircle2,
   Clock3,
   Gauge,
+  HeartPulse,
+  Radio,
   RefreshCw,
   Route,
+  ShieldQuestion,
+  Sparkles,
   TimerReset,
 } from 'lucide-react'
 import NoticeBanner from './NoticeBanner.jsx'
@@ -18,6 +23,32 @@ const VERDICT_LABELS = {
   PASS: '通过',
   FAIL: '失败',
   MISSING: '未发现',
+}
+
+const ACCEPTANCE_VERDICT_LABELS = {
+  PASS: '通过',
+  RUNNING: '验证中',
+  PARTIAL: '部分',
+  UNKNOWN: '待证据',
+  NOT_COVERED: '未覆盖',
+  FAIL: '失败',
+}
+
+const LAYER_ICONS = {
+  life_base: HeartPulse,
+  main_chain: Route,
+  inner_world: Sparkles,
+  self_model: Brain,
+  external_system: ShieldQuestion,
+  proactive_loop: Radio,
+}
+
+const LAYER_CLASS = {
+  healthy: 'border-emerald-200 bg-emerald-50/75',
+  running: 'border-blue-200 bg-blue-50/75',
+  degraded: 'border-orange-200 bg-orange-50/75',
+  down: 'border-red-200 bg-red-50/75',
+  unknown: 'border-gray-200 bg-gray-50/80',
 }
 
 function formatDuration(seconds) {
@@ -58,6 +89,45 @@ function MetricCell({ icon: Icon, label, value, hint }) {
   )
 }
 
+function verdictLabel(value) {
+  const key = String(value || '').toUpperCase()
+  return ACCEPTANCE_VERDICT_LABELS[key] || key || '--'
+}
+
+function LayerAcceptanceCard({ item }) {
+  const Icon = LAYER_ICONS[item?.id] || CheckCircle2
+  const status = String(item?.status || 'unknown').toLowerCase()
+  const className = LAYER_CLASS[status] || LAYER_CLASS.unknown
+  const evidence = Array.isArray(item?.evidence) ? item.evidence.filter(Boolean) : []
+
+  return (
+    <div className={`rounded-xl border p-3 shadow-sm ${className}`}>
+      <div className="flex items-start gap-2">
+        <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-white/80 bg-white/80 text-primary shadow-sm">
+          <Icon size={16} />
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="text-sm font-semibold text-gray-800">{item?.label || '--'}</div>
+            <StatusBadge status={status} label={verdictLabel(item?.verdict)} />
+          </div>
+          <div className="mt-1 text-lg font-semibold text-gray-900">{item?.value || '--'}</div>
+          <div className="mt-1 text-xs leading-5 text-gray-600">{item?.detail || '--'}</div>
+          {evidence.length ? (
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {evidence.slice(0, 4).map((text) => (
+                <span key={text} className="rounded-full border border-white/80 bg-white/75 px-2 py-0.5 text-[11px] text-gray-500">
+                  {text}
+                </span>
+              ))}
+            </div>
+          ) : null}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function CheckList({ failedChecks }) {
   if (!failedChecks?.length) {
     return (
@@ -88,9 +158,13 @@ export default function DigitalLifeWallClockSoakCard({
 }) {
   const summary = data?.summary || {}
   const meta = data?.meta || {}
+  const acceptance = data?.acceptance || {}
+  const acceptanceLayers = Array.isArray(acceptance.layers) ? acceptance.layers : []
+  const notCovered = Array.isArray(acceptance.not_covered) ? acceptance.not_covered : []
   const verdict = String(summary.verdict || (loading ? 'RUNNING' : 'MISSING'))
   const available = Boolean(data?.available)
   const status = verdictToStatus(verdict, available)
+  const acceptanceStatus = acceptance.overall_status || status
   const progress = Number(summary.progress_ratio)
   const checkpointAge = summary.latest_checkpoint_age_seconds
   const latestCheckpoints = Array.isArray(data?.latestCheckpoints) ? data.latestCheckpoints : []
@@ -108,6 +182,9 @@ export default function DigitalLifeWallClockSoakCard({
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
             <StatusBadge status={status} label={VERDICT_LABELS[verdict] || verdict} />
+            {acceptance.title ? (
+              <StatusBadge status={acceptanceStatus} label={acceptance.title} />
+            ) : null}
             {refreshing ? (
               <span className="inline-flex items-center gap-1 rounded-full border border-blue-100 bg-blue-50 px-2.5 py-1 text-xs text-blue-700">
                 <RefreshCw size={11} className="animate-spin" />
@@ -120,7 +197,12 @@ export default function DigitalLifeWallClockSoakCard({
               </span>
             ) : null}
           </div>
-          <div className="mt-2 text-base font-semibold text-gray-900">真实 24h 墙钟生命闭环验证</div>
+          <div className="mt-2 text-base font-semibold text-gray-900">
+            {acceptance.title || '真实 24h 墙钟生命闭环验证'}
+          </div>
+          {acceptance.headline ? (
+            <div className="mt-1 max-w-5xl text-sm leading-6 text-gray-600">{acceptance.headline}</div>
+          ) : null}
           <div className="mt-1 text-xs leading-5 text-gray-500">
             {available
               ? `run ${runId} · ${compactText(runDir, 120)}`
@@ -169,6 +251,14 @@ export default function DigitalLifeWallClockSoakCard({
         />
       </div>
 
+      {acceptanceLayers.length ? (
+        <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+          {acceptanceLayers.map((item) => (
+            <LayerAcceptanceCard key={item.id || item.label} item={item} />
+          ))}
+        </div>
+      ) : null}
+
       <div className="mt-4 grid gap-3 xl:grid-cols-[minmax(0,1fr)_minmax(260px,0.9fr)]">
         <div className="space-y-2">
           <CheckList failedChecks={failedChecks} />
@@ -192,6 +282,22 @@ export default function DigitalLifeWallClockSoakCard({
               hint={failedChecks.length ? '见失败检查' : '当前巡检无失败项'}
             />
           </div>
+          {notCovered.length ? (
+            <div className="rounded-xl border border-gray-200 bg-gray-50/80 px-3 py-2 text-xs text-gray-600">
+              <div className="flex items-center gap-1.5 font-medium text-gray-700">
+                <ShieldQuestion size={13} />
+                未覆盖项不是失败项
+              </div>
+              <div className="mt-2 grid gap-1.5 sm:grid-cols-2">
+                {notCovered.slice(0, 4).map((item) => (
+                  <div key={item.id || item.label} className="rounded-lg border border-white/80 bg-white/70 px-2 py-1.5">
+                    <div className="font-medium text-gray-700">{item.label}</div>
+                    <div className="mt-0.5 leading-4 text-gray-500">{item.reason}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
         </div>
 
         <div className="rounded-xl border border-white/80 bg-white/70 p-3 shadow-sm">
