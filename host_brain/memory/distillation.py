@@ -227,7 +227,12 @@ class MemoryDistillationEngine:
         distill_ts = int(ts_ms if ts_ms is not None else now_ms())
         top_k = min(max(1, top_k), 20)
 
-        recalled = self.episodic.recall(query_text=query_text, top_k=top_k)
+        recall_k = min(max(top_k * 3, top_k), 20)
+        recalled = [
+            row
+            for row in self.episodic.recall(query_text=query_text, top_k=recall_k)
+            if not _is_semantic_memory_projection(row)
+        ][:top_k]
         if not recalled:
             return DistillResult(
                 success=False,
@@ -349,6 +354,19 @@ def _compute_source_hash(source_ids: list[str]) -> str:
     sorted_ids = sorted(source_ids)
     payload = json.dumps(sorted_ids, ensure_ascii=False, sort_keys=True)
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _is_semantic_memory_projection(row: Mapping[str, Any]) -> bool:
+    memory_id = str(row.get("memory_id") or "").strip()
+    metadata = row.get("metadata")
+    meta = dict(metadata) if isinstance(metadata, Mapping) else {}
+    source_table = str(meta.get("source_table") or "").strip()
+    semantic_id = str(meta.get("semantic_id") or "").strip()
+    return (
+        memory_id.startswith("semantic::")
+        or source_table == "semantic_memory"
+        or bool(semantic_id)
+    )
 
 
 def _merge_texts(texts: list[str], *, query_text: str) -> str:

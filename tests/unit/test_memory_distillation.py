@@ -156,6 +156,41 @@ def test_distill_top_k_uses_persistent_chroma_rows_when_process_records_empty(tm
     assert items[0]["source_memory_ids"] == ["audit::mem_low_energy"]
 
 
+def test_distill_top_k_ignores_existing_semantic_memory_projection(tmp_path):
+    """蒸馏不能把已生成的 semantic_memory 再次当成源记忆，避免长期记忆自循环。"""
+    ledger = SQLiteLedger(db_path=str(tmp_path / "no_recursive.sqlite3"), check_same_thread=False)
+    chroma = FakeChromaClient(collection_profiles={"episodic": 3}, default_collection="episodic")
+    episodic = EpisodicStore(
+        ledger=ledger,
+        chroma_client=chroma,
+        embedding_fn=lambda _text: ([1.0, 0.0, 0.0], "test-embed"),
+    )
+    chroma.upsert(
+        memory_id="semantic::sem_existing",
+        text="已经蒸馏过的长期语义摘要。",
+        embedding=[1.0, 0.0, 0.0],
+        metadata={
+            "memory_layer": "long_term",
+            "source_table": "semantic_memory",
+            "semantic_id": "sem_existing",
+        },
+    )
+    chroma.upsert(
+        memory_id="audit::mem_source",
+        text="用户低能量时希望先得到一个小步骤，不要连续追问。",
+        embedding=[1.0, 0.0, 0.0],
+        metadata={"memory_layer": "long_term", "source_table": "memory_ops_log"},
+    )
+    engine = MemoryDistillationEngine(episodic_store=episodic, ledger=ledger)
+
+    result = engine.distill_top_k(query_text="低能量回应偏好", top_k=1, ts_ms=2000)
+
+    assert result.success is True
+    items, total = ledger.list_semantic_memories()
+    assert total == 1
+    assert items[0]["source_memory_ids"] == ["audit::mem_source"]
+
+
 # ---------------------------------------------------------------------------
 # T-Distill-04：list_semantic_memories 分页
 # ---------------------------------------------------------------------------
