@@ -1215,7 +1215,7 @@ if ($envValues.ContainsKey("EDGE_VTS_STEAM_APP_ID")) {
   if ($value.Trim()) { $vtsSteamAppId = $value.Trim() }
 }
 
-$vtsAutoStartWaitSeconds = 35
+$vtsAutoStartWaitSeconds = 120
 if ($envValues.ContainsKey("EDGE_VTS_AUTOSTART_WAIT_SECONDS")) {
   $candidate = [int]$envValues["EDGE_VTS_AUTOSTART_WAIT_SECONDS"]
   if ($candidate -gt 0) { $vtsAutoStartWaitSeconds = $candidate }
