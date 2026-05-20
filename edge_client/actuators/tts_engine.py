@@ -16,6 +16,7 @@ import sys
 import tempfile
 import threading
 import time
+import types
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from enum import Enum
@@ -1097,6 +1098,7 @@ def _load_modern_sovits_model(
 
     _ensure_modern_sdk_paths(model_root)
     _ensure_jieba_fast_alias()
+    _ensure_opencc_compat()
     _patch_torchaudio_load_fallback()
     _configure_modern_sv_path(model_root)
 
@@ -1336,6 +1338,36 @@ def _ensure_jieba_fast_alias() -> None:
     except ImportError:
         return
     sys.modules["jieba_fast"] = jieba_fallback
+
+
+def _ensure_opencc_compat() -> None:
+    try:
+        from opencc import OpenCC  # type: ignore[import-not-found]
+
+        converted = OpenCC("s2tw").convert("测试")
+        if isinstance(converted, str):
+            return
+    except Exception as exc:
+        logger.warning("OpenCC unavailable for GPT-SoVITS; using identity converter: %s", exc)
+
+    sys.modules.pop("opencc", None)
+    sys.modules.pop("opencc.clib", None)
+    sys.modules.pop("opencc.clib.opencc_clib", None)
+
+    module = types.ModuleType("opencc")
+
+    class _IdentityOpenCC:
+        def __init__(self, *_args: Any, **_kwargs: Any) -> None:
+            return None
+
+        @staticmethod
+        def convert(text: Any) -> str:
+            return str(text)
+
+    module.OpenCC = _IdentityOpenCC  # type: ignore[attr-defined]
+    module.CONFIGS = []  # type: ignore[attr-defined]
+    module.__version__ = "identity-fallback"  # type: ignore[attr-defined]
+    sys.modules["opencc"] = module
 
 
 def _patch_torchaudio_load_fallback() -> None:

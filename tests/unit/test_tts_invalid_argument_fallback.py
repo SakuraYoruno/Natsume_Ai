@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import builtins
 import sys
 from types import SimpleNamespace
 
@@ -13,6 +14,7 @@ from edge_client.actuators.tts_engine import (
     TtsState,
     TtsSynthResult,
     _ensure_modern_sdk_paths,
+    _ensure_opencc_compat,
     _is_retryable_invalid_argument_error,
     _synthesize_audio,
 )
@@ -104,6 +106,28 @@ def test_ensure_modern_sdk_paths_adds_bundled_runtime_site_packages(
     assert sys.path.index(str(runtime_site)) > sys.path.index(str(model_root / "GPT_SoVITS" / "eres2net"))
     assert dll_calls == [str(opencc_bin)]
     assert tts_engine._DLL_DIRECTORY_HANDLES == [dll_handle]
+
+
+def test_ensure_opencc_compat_installs_identity_fallback_when_opencc_is_broken(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original_import = builtins.__import__
+
+    def fake_import(name, globals=None, locals=None, fromlist=(), level=0):  # type: ignore[no-untyped-def]
+        if name == "opencc" or str(name).startswith("opencc."):
+            raise ImportError("broken opencc")
+        return original_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.delitem(sys.modules, "opencc", raising=False)
+    monkeypatch.delitem(sys.modules, "opencc.clib", raising=False)
+    monkeypatch.delitem(sys.modules, "opencc.clib.opencc_clib", raising=False)
+    monkeypatch.setattr(builtins, "__import__", fake_import)
+
+    _ensure_opencc_compat()
+
+    module = sys.modules["opencc"]
+    assert module.OpenCC("s2tw").convert("你好") == "你好"  # type: ignore[attr-defined]
+    assert module.__version__ == "identity-fallback"
 
 
 def test_model_manager_reloads_and_retries_after_invalid_argument(monkeypatch: pytest.MonkeyPatch) -> None:
