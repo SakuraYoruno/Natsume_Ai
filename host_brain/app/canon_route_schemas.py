@@ -20,9 +20,9 @@ class CanonProposalSubmitRequest(BaseModel):
 
 
 class CanonProposalApproveRequest(BaseModel):
-    proposed_title: str = Field(..., description="提案标题（与提交时一致）")
-    proposed_tags: List[str] = Field(default_factory=list, description="提案标签")
-    proposed_body: str = Field(..., description="提案正文（与提交时一致）")
+    proposed_title: Optional[str] = Field(None, description="提案标题（省略时使用提案记录中保存的内容）")
+    proposed_tags: Optional[List[str]] = Field(None, description="提案标签（省略时使用提案记录中保存的内容）")
+    proposed_body: Optional[str] = Field(None, description="提案正文（省略时使用提案记录中保存的内容）")
     approver_node_id: Optional[str] = Field(None, description="审核节点 ID（可选）")
 
 
@@ -54,6 +54,9 @@ class CanonProposalResponse(BaseModel):
     proposer_node_id: Optional[str]
     summary: Optional[str]
     proposed_hash: Optional[str]
+    proposed_title: Optional[str] = None
+    proposed_tags: List[str] = Field(default_factory=list)
+    proposed_body: Optional[str] = None
     base_version: Optional[int]
     proposed_version: Optional[int]
     ts_ms: Optional[int]

@@ -298,7 +298,7 @@ class SQLiteLedger(
         cols = [k for k, v in payload.items() if v is not None or k in ("proposal_id", "canon_kind", "target_id", "status", "ts_ms")]
         placeholders = ", ".join("?" for _ in cols)
         col_names = ", ".join(cols)
-        values = [payload[c] for c in cols]
+        values = [self._encode_value("canon_proposal_log", c, payload[c]) for c in cols]
         with self._write_lock:
             with self._conn:
                 self._conn.execute(
@@ -565,6 +565,36 @@ class SQLiteLedger(
                 )
         return cursor.rowcount > 0
 
+    def update_proposal_content(
+        self,
+        proposal_id: str,
+        *,
+        proposed_title: str,
+        proposed_tags: list[str] | None,
+        proposed_body: str,
+    ) -> bool:
+        """Backfill or update reviewable proposal content."""
+        with self._write_lock:
+            with self._conn:
+                cursor = self._conn.execute(
+                    """
+                    UPDATE canon_proposal_log
+                    SET proposed_title = ?, proposed_tags = ?, proposed_body = ?
+                    WHERE proposal_id = ?
+                    """,
+                    (
+                        str(proposed_title or "").strip(),
+                        self._encode_value(
+                            "canon_proposal_log",
+                            "proposed_tags",
+                            list(proposed_tags or []),
+                        ),
+                        str(proposed_body or "").strip(),
+                        proposal_id,
+                    ),
+                )
+        return cursor.rowcount > 0
+
     # -------------------------------------------------------------------
     # World Canon Doc
     # -------------------------------------------------------------------
@@ -721,3 +751,21 @@ class SQLiteLedger(
 
     def _ensure_schema(self) -> None:
         apply_schema(self._conn)
+        self._ensure_canon_proposal_content_columns()
+
+    def _ensure_canon_proposal_content_columns(self) -> None:
+        additions = {
+            "proposed_title": "TEXT",
+            "proposed_tags": "TEXT",
+            "proposed_body": "TEXT",
+        }
+        for column, ddl_type in additions.items():
+            if self._table_has_column("canon_proposal_log", column):
+                continue
+            with self._write_lock:
+                with self._conn:
+                    self._conn.execute(
+                        f"ALTER TABLE canon_proposal_log ADD COLUMN {column} {ddl_type}"
+                    )
+            with self._column_cache_lock:
+                self._column_cache.pop("canon_proposal_log", None)
