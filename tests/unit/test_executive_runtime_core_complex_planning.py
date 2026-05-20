@@ -152,10 +152,7 @@ def test_hard_rule_route_forces_relational_followup_back_to_chat() -> None:
 
 def test_hard_rule_route_keeps_simple_technical_advice_on_surface_chat() -> None:
     route = _hard_rule_route(
-        intent_draft={
-            "route": "skill",
-            "target_id": "codex_worker",
-        },
+        intent_draft={},
         sanitized_message="项目启动报错，端口18080被占用了，我该怎么排查？",
         skill_registry=_StubSkillRegistry(),
     )
@@ -167,10 +164,7 @@ def test_hard_rule_route_keeps_simple_technical_advice_on_surface_chat() -> None
 
 def test_hard_rule_route_keeps_project_service_probe_advice_on_surface_chat() -> None:
     route = _hard_rule_route(
-        intent_draft={
-            "route": "skill",
-            "target_id": "codex_worker",
-        },
+        intent_draft={},
         sanitized_message="Neo4j 连接不上 bolt://127.0.0.1:17687，先看什么？",
         skill_registry=_StubSkillRegistry(),
     )
@@ -216,10 +210,7 @@ def test_hard_rule_route_keeps_actionable_code_request_on_skill_route() -> None:
 
 def test_hard_rule_route_keeps_simple_task_split_on_surface_chat() -> None:
     route = _hard_rule_route(
-        intent_draft={
-            "route": "delegate",
-            "target_id": "intent_agent",
-        },
+        intent_draft={},
         sanitized_message="帮我把下一步拆成三件事。",
         skill_registry=_StubSkillRegistry(),
     )
@@ -227,6 +218,21 @@ def test_hard_rule_route_keeps_simple_task_split_on_surface_chat() -> None:
     assert route.route_type == "chat"
     assert route.target_id == ""
     assert route.reason_code == "hard_rule:surface_task_split"
+
+
+def test_hard_rule_route_respects_explicit_delegate_before_simple_task_split() -> None:
+    route = _hard_rule_route(
+        intent_draft={
+            "route": "delegate",
+            "target_id": "intent_agent",
+        },
+        sanitized_message="下一步应该怎么安排，给我三步建议。",
+        skill_registry=_StubSkillRegistry(),
+    )
+
+    assert route.route_type == "delegate"
+    assert route.target_id == "intent_agent"
+    assert route.reason_code == "intent_draft:delegate"
 
 
 def test_hard_rule_route_keeps_actionable_task_split_on_delegate() -> None:

@@ -422,14 +422,14 @@ def _hard_rule_route(
 
     if route_hint == "plan":
         return _RouteSelection("plan", target_hint or "skill_dag", "intent_draft:plan")
-    if _looks_like_simple_technical_advice(sanitized_message, intent_draft):
-        return _RouteSelection("chat", "", "hard_rule:surface_technical_advice")
-    if _looks_like_simple_task_split_advice(sanitized_message, intent_draft):
-        return _RouteSelection("chat", "", "hard_rule:surface_task_split")
     if route_hint == "skill" and target_hint:
         return _RouteSelection("skill", target_hint, "intent_draft:skill")
     if route_hint == "delegate" and target_hint:
         return _RouteSelection("delegate", target_hint, "intent_draft:delegate")
+    if _looks_like_simple_technical_advice(sanitized_message, intent_draft):
+        return _RouteSelection("chat", "", "hard_rule:surface_technical_advice")
+    if _looks_like_simple_task_split_advice(sanitized_message, intent_draft):
+        return _RouteSelection("chat", "", "hard_rule:surface_task_split")
 
     if _looks_like_task_progress_query(sanitized_message):
         return _RouteSelection("task_progress", "", "hard_rule:task_progress")
