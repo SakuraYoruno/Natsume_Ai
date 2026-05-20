@@ -192,19 +192,21 @@ class SemanticRecaller:
             )
 
             # 解析结果
+            ids = raw.get("ids", [[]])[0]
             docs = raw.get("documents", [[]])[0]
             metas = raw.get("metadatas", [[]])[0]
             distances = raw.get("distances", [[]])[0]
 
             total_found = len(docs)
             hits = []
-            for doc, meta, dist in zip(docs, metas, distances):
+            for idx, (doc, meta, dist) in enumerate(zip(docs, metas, distances)):
                 # ChromaDB 返回的是 L2 距离，转换为相似度分数
                 score = max(0.0, 1.0 - dist / 2.0)
                 if score < threshold:
                     continue
+                row_id = str(ids[idx] if idx < len(ids) else "")
                 hits.append(SemanticHit(
-                    doc_id=str(meta.get("doc_id", "")),
+                    doc_id=str(meta.get("doc_id") or meta.get("memory_id") or row_id),
                     content=str(doc),
                     score=round(score, 4),
                     metadata=dict(meta),

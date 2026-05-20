@@ -780,26 +780,69 @@ def get_semantic_recaller() -> SemanticRecaller:
     global _semantic_recaller
     if _semantic_recaller is None:
         import os as _os  # noqa: PLC0415
-        use_mock = _parse_bool_env("SEMANTIC_RECALL_USE_MOCK", default=True)
-        chroma_host = str(_os.environ.get("CHROMA_HOST") or "localhost").strip()
-        chroma_port = _parse_int_env("CHROMA_PORT", default=8000, minimum=1, maximum=65535)
+        from urllib.parse import urlparse  # noqa: PLC0415
+
+        from host_brain.memory.chroma_client import embed_text, load_chroma_runtime_config  # noqa: PLC0415
+
+        cfg_result = load_chroma_runtime_config(env=_os.environ)
+        cfg = cfg_result.config if cfg_result.success else None
+        default_use_mock = not bool(cfg is not None and cfg.enabled)
+        use_mock = _parse_bool_env("SEMANTIC_RECALL_USE_MOCK", default=default_use_mock)
+        collection_name = str(
+            _os.environ.get("SEMANTIC_RECALL_COLLECTION")
+            or _os.environ.get("SEMANTIC_RECALL_COLLECTION_NAME")
+            or (cfg.default_collection if cfg is not None else "")
+            or "episodic"
+        ).strip()
+        endpoint = str(
+            _os.environ.get("SEMANTIC_RECALL_CHROMA_ENDPOINT")
+            or (cfg.endpoint if cfg is not None else "")
+            or ""
+        ).strip()
+        parsed = urlparse(endpoint or "http://localhost:8000")
+        chroma_host = str(
+            _os.environ.get("SEMANTIC_RECALL_CHROMA_HOST")
+            or parsed.hostname
+            or _os.environ.get("CHROMA_HOST")
+            or "localhost"
+        ).strip()
+        chroma_port_default = int(parsed.port or 8000)
+        chroma_port = _parse_int_env(
+            "SEMANTIC_RECALL_CHROMA_PORT",
+            default=chroma_port_default,
+            minimum=1,
+            maximum=65535,
+        )
         top_k = _parse_int_env("SEMANTIC_RECALL_TOP_K", default=5, minimum=1, maximum=20)
         threshold_raw = str(_os.environ.get("SEMANTIC_RECALL_THRESHOLD") or "0.70").strip()
         try:
             threshold = float(threshold_raw)
         except ValueError:
             threshold = 0.70
+        profiles = dict(getattr(cfg, "collection_profiles", {}) or {})
+        vector_dim = _parse_int_env(
+            "SEMANTIC_RECALL_VECTOR_DIM",
+            default=int(profiles.get(collection_name) or profiles.get(str(getattr(cfg, "default_collection", "") or "")) or 1024),
+            minimum=1,
+            maximum=8192,
+        )
+
+        def _embed_for_runtime_collection(text: str) -> list[float]:
+            values, _model_id = embed_text(str(text or ""), dim=vector_dim)
+            return list(values or [])
+
         _semantic_recaller = SemanticRecaller(
-            collection_name="episodic_memory",
+            collection_name=collection_name,
             top_k=top_k,
             similarity_threshold=threshold,
             use_mock=use_mock,
             chroma_host=chroma_host,
             chroma_port=chroma_port,
+            embed_fn=_embed_for_runtime_collection,
         )
         _logger.info(
-            "SemanticRecaller 已初始化（use_mock=%s, chroma=%s:%d, top_k=%d, threshold=%.2f）",
-            use_mock, chroma_host, chroma_port, top_k, threshold,
+            "SemanticRecaller 已初始化（use_mock=%s, collection=%s, chroma=%s:%d, vector_dim=%d, top_k=%d, threshold=%.2f）",
+            use_mock, collection_name, chroma_host, chroma_port, vector_dim, top_k, threshold,
         )
     return _semantic_recaller
 

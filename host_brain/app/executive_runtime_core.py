@@ -277,6 +277,7 @@ def _build_memory_exec_context(
         threshold: float = 0.6,
         tags: list[str] | None = None,
         session_id: str | None = None,
+        search_scope: str | None = None,
     ) -> list[dict[str, Any]]:
         _ = tags
         if semantic_recaller is None:
@@ -285,6 +286,8 @@ def _build_memory_exec_context(
         session_ref = str(session_id or "").strip()
         if session_ref:
             filter_metadata["session_id"] = session_ref
+        if str(search_scope or "").strip().lower() == "long_term":
+            filter_metadata["memory_layer"] = "long_term"
         recall_result = _run_awaitable_sync(
             semantic_recaller.recall(
                 str(query or ""),

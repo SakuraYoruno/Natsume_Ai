@@ -128,6 +128,7 @@ def _execute_search(payload: dict[str, Any], context: dict[str, Any] | None) -> 
                 threshold=threshold,
                 tags=tags,
                 session_id=session_id if session_filter else None,
+                search_scope=search_scope,
             )
             normalized = _normalize_search_results(results or [], source="semantic_recaller", threshold=threshold)
             _logger.info("记忆检索（semantic_recaller）: query=%s, results=%d", query[:40], len(normalized))

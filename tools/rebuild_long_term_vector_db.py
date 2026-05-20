@@ -78,9 +78,17 @@ def _looks_like_test_memory(text: str, row: sqlite3.Row) -> bool:
         return True
     request_id = str(row["request_id"] or "").strip()
     intent_id = str(row["intent_id"] or "").strip()
+    evidence_refs = str(row["evidence_refs"] or "").strip()
     if not request_id and not intent_id:
         return True
+    route_text = f"{request_id} {intent_id} {evidence_refs}".lower()
+    if any(marker in route_text for marker in ("acceptance", "unit-", "test", "tool_execution_matrix")):
+        return True
     test_markers = (
+        "tool execution acceptance",
+        "closed loop sentinel",
+        "recent episode boundary sentinel",
+        "metrics test",
         "测试",
         "普通记忆",
         "重要的情感记忆",
@@ -327,6 +335,15 @@ def rebuild_vector_db(
         name=collection,
         metadata={"hnsw:space": "cosine", "vector_dim": dim, "memory_layer": "long_term"},
     )
+    removed_long_term_ids: list[str] = []
+    if not reset_all_collections:
+        try:
+            existing = coll.get(where={"memory_layer": "long_term"}, include=[])
+            removed_long_term_ids = [str(item) for item in list(existing.get("ids") or []) if str(item).strip()]
+            if removed_long_term_ids:
+                coll.delete(ids=removed_long_term_ids)
+        except Exception:
+            removed_long_term_ids = []
     inserted = 0
     for seed in seeds:
         embedding, model_id = _embed(seed.text, dim=dim)
@@ -351,6 +368,7 @@ def rebuild_vector_db(
         "target": target,
         "backup_path": str(backup_path) if backup_path else None,
         "deleted_collections": deleted_collections,
+        "removed_long_term_count": len(removed_long_term_ids),
         "collections": collections,
         "collection": collection,
         "vector_dim": dim,

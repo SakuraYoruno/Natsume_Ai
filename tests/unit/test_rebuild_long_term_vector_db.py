@@ -58,6 +58,22 @@ def _init_ledger(path: Path) -> None:
             102,
         ),
     )
+    conn.execute(
+        "INSERT INTO memory_ops_log VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+        (
+            3,
+            "live-tool-acceptance-store",
+            "intent::live-tool-acceptance-store",
+            "mem-acceptance",
+            '["source:tool_execution_matrix"]',
+            "SUCCESS",
+            "WRITE",
+            "memory written: tool execution acceptance live closed loop sentinel",
+            "default",
+            "internal",
+            103,
+        ),
+    )
     conn.commit()
     conn.close()
 
@@ -69,7 +85,7 @@ def test_load_long_term_memory_seeds_skips_requestless_test_rows(tmp_path: Path)
     seeds, stats = load_long_term_memory_seeds(ledger)
 
     assert [seed.memory_id for seed in seeds] == ["semantic::sem-1", "audit::mem-real"]
-    assert stats == {"semantic_memory": 1, "memory_ops_log": 1, "skipped_test_or_requestless": 1}
+    assert stats == {"semantic_memory": 1, "memory_ops_log": 1, "skipped_test_or_requestless": 2}
 
 
 def test_rebuild_vector_db_dry_run_reports_seed_count(tmp_path: Path) -> None:
