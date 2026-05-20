@@ -6,6 +6,13 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Mapping, Sequence
 
+from host_brain.app.prompt_builder import (
+    SCENE_CHAT,
+    SCENE_EXEC_INTENT,
+    SCENE_VISION_UI,
+    SCENE_WORK_CODE,
+    SCENE_WORK_TRANSLATE,
+)
 from host_brain.app.relational_chat_detector import (
     build_relational_chat_reason_code,
     detect_relational_chat_topic,
@@ -19,7 +26,38 @@ _logger = logging.getLogger("Natsume.thalamus_agent")
 
 _INTENT_SCHEMA_VERSION = "Natsume.intent.v1"
 _INTENT_CLASSIFICATION_TEMPLATE_ID = "thalamus_agent.intent_classification_prompts"
+THALAMUS_SCENE_TYPE_SOURCE = "thalamus_agent"
 _ROUTE_ALLOWLIST = {"chat", "delegate", "skill", "plan", "task_progress", "recent_turn"}
+_LLM_ROUTE_MIN_CONFIDENCE_DEFAULT = 0.72
+_LLM_CHATLIKE_ROUTES: frozenset[str] = frozenset({"chat", "task_progress", "recent_turn"})
+_LLM_DELEGATE_TARGET_ALLOWLIST: frozenset[str] = frozenset({
+    "emotion_agent",
+    "intent_agent",
+    "retrieval_agent",
+    "translate_agent",
+    "vision_agent",
+})
+_LLM_SKILL_TARGET_ALLOWLIST: frozenset[str] = frozenset({
+    "bond_query",
+    "codex_dream_compile",
+    "codex_inspect",
+    "codex_organ_scan",
+    "codex_persona_drift_audit",
+    "codex_research",
+    "codex_self_evolve",
+    "codex_self_heal",
+    "codex_skill_forge",
+    "codex_sql_audit",
+    "codex_translate_project",
+    "codex_worker",
+    "emotion_query",
+    "hub_skill_list",
+    "hub_skill_search",
+    "memory_recall",
+    "memory_store",
+    "open_app",
+    "session_summary",
+})
 _CANONICAL_ACTIONS = {
     "read_only_status",
     "narrative_only",
@@ -161,8 +199,13 @@ _TASK_CODE_RE = re.compile(
     r"|python|javascript|typescript|java|golang|rust|c\+\+|debug|bug|class|algorithm|implement|develop)",
     re.IGNORECASE,
 )
+_TASK_CODE_NEGATION_RE = re.compile(
+    r"(不要|不用|不需要|先别|别|无需).{0,6}(改代码|写代码|代码|实现|开发)|"
+    r"(no code changes|do not (?:write|change|modify) code|don't (?:write|change|modify) code)",
+    re.IGNORECASE,
+)
 _TASK_VISION_UI_RE = re.compile(
-    r"(screenshot|screen shot|截图|屏幕|界面|画面|看一下屏幕|看看这个界面|desktop|ui|window|interface|capture)",
+    r"(screenshot|screen shot|截图|屏幕|当前界面|这个界面|看一下屏幕|看看这个界面|desktop|window|interface|capture)",
     re.IGNORECASE,
 )
 _TASK_RECENT_TURN_RE = re.compile(
@@ -178,9 +221,18 @@ _TASK_INTENT_PLANNING_RE = re.compile(
     r"|next steps?|what should i do (?:first|next)|three[- ]step (?:advice|plan)|action plan|plan this out)",
     re.IGNORECASE,
 )
+_TASK_PLAN_REQUEST_RE = re.compile(
+    r"((给我|帮我|请|请你|麻烦|制定|出|写|整理|规划).{0,12}(方案|路线图|计划|plan|roadmap)"
+    r"|有没有.{0,12}(前端|后端|系统|仓库|项目|主链|路由|意图识别|优化).{0,12}(方案|路线图|计划|plan|roadmap))",
+    re.IGNORECASE,
+)
+_TASK_CONTEXT_CONTINUATION_RE = re.compile(
+    r"^\s*(开始吧|开始|继续|继续吧|接着|接着做|继续做|接下来呢|接下来|然后呢|后面呢|开工|go ahead|start|continue|proceed)\s*[。.!！?？]*\s*$",
+    re.IGNORECASE,
+)
 _TASK_OPEN_APP_VERB_RE = re.compile(r"(打开|启动|运行|开一下|帮我开|替我开|launch|open)", re.IGNORECASE)
 _TASK_OPEN_APP_HINT_RE = re.compile(
-    r"(本地|应用|软件|程序|app|酷狗|kugou|qq音乐|网易云|spotify|浏览器|微信|qq|音乐)",
+    r"(本地|应用|软件|程序|app|设置|系统设置|酷狗|kugou|qq音乐|网易云|spotify|浏览器|微信|qq|音乐)",
     re.IGNORECASE,
 )
 _PHATIC_GREETING_RE = re.compile(
@@ -303,8 +355,78 @@ _TASK_EXEC_ACTION_MARKERS: tuple[str, ...] = (
     "deploy",
     "search",
 )
+_GENERIC_ACTION_INTENT_MARKERS: tuple[str, ...] = (
+    "继续执行",
+    "执行",
+    "帮我做",
+    "帮忙做",
+    "设置",
+    "部署",
+    "创建",
+    "新建",
+    "提交",
+    "保存",
+    "安装",
+    "配置",
+    "启动",
+    "停止",
+    "重启",
+    "调用",
+    "查询",
+    "查一下",
+    "查下",
+    "检索",
+    "搜索",
+    "总结",
+    "归纳",
+    "整理",
+    "润色",
+    "改写",
+    "生成",
+    "安排",
+    "规划",
+    "run",
+    "execute",
+    "setup",
+    "deploy",
+    "build",
+    "submit",
+    "save",
+    "create",
+    "install",
+    "configure",
+    "search",
+    "summarize",
+    "rewrite",
+    "polish",
+    "plan",
+)
 _TASK_ENTERTAINMENT_RE = re.compile(
-    r"(动漫|漫画|番剧|动画|电影|电视剧|剧集|综艺|音乐|歌曲|歌手|专辑|小说|读书|游戏|爱好|兴趣|趣味)",
+    r"(动漫|漫画|番剧|动画|电影|电视剧|剧集|综艺|音乐|歌曲|歌手|专辑|这首歌|歌|小说|读书|游戏|爱好|兴趣|趣味)",
+    re.IGNORECASE,
+)
+_WORKSPACE_DOMAIN_RE = re.compile(
+    r"(仓库|代码库|项目|文件|目录|路径|主链|断链|闭环|器官族|前端|页面|组件|布局|卡片|路由|意图识别|thalamus"
+    r"|gateway|asr|vts|soul\.md|\.md\b|repo|repository|workspace|project|file|frontend|browser|playwright"
+    r"|headless|route|routing|intent)",
+    re.IGNORECASE,
+)
+_WORKSPACE_WRITE_RE = re.compile(
+    r"(开始|修复|优化|整理|清理|删除|移除|接入|重塑|重构|实现|修改|改造|创建|新建|提交|继续整理|继续.*提交"
+    r"|fix|optimi[sz]e|clean|remove|delete|refactor|implement|modify|commit)",
+    re.IGNORECASE,
+)
+_WORKSPACE_INSPECT_RE = re.compile(
+    r"(查看|看|验证|检查|分析|评估|梳理|审查|报告|完整|完成情况|接入情况"
+    r"|inspect|verify|check|analy[sz]e|review|audit|status)",
+    re.IGNORECASE,
+)
+_WORKSPACE_ACTIVE_VERIFY_RE = re.compile(
+    r"(无头浏览器|浏览器|playwright|前端效果|整个前端|跑测试|测试|pytest|单测|headless|browser|test)",
+    re.IGNORECASE,
+)
+_WORKSPACE_GIT_ACTION_RE = re.compile(
+    r"(整理提交|提交代码|提交仓库|提交到仓库|git\s+commit|commit)",
     re.IGNORECASE,
 )
 _SIMPLE_TECH_ADVICE_RE = re.compile(
@@ -364,6 +486,14 @@ def _looks_like_simple_technical_advice(text: str) -> bool:
     if any(marker in compact_lower for marker in _SIMPLE_TECH_ACTION_BLOCKERS):
         return False
     return bool(_SIMPLE_TECH_ADVICE_RE.search(normalized) and _SIMPLE_TECH_QUESTION_RE.search(normalized))
+
+
+def _looks_like_generic_action_intent(text: str) -> bool:
+    normalized = _normalize_text(text)
+    if not normalized:
+        return False
+    compact = normalized.lower().replace(" ", "")
+    return any(marker.lower().replace(" ", "") in compact for marker in _GENERIC_ACTION_INTENT_MARKERS)
 
 
 def _build_simple_technical_chat_seed(text: str, *, route_source: str) -> dict[str, Any]:
@@ -508,6 +638,39 @@ def _looks_like_open_app_request(text: str) -> bool:
     if not normalized:
         return False
     return bool(_TASK_OPEN_APP_VERB_RE.search(normalized) and _TASK_OPEN_APP_HINT_RE.search(normalized))
+
+
+def _build_codex_workspace_route_seed(text: str) -> dict[str, Any] | None:
+    normalized = _normalize_text(text)
+    if not normalized:
+        return None
+    has_git_action = bool(_WORKSPACE_GIT_ACTION_RE.search(normalized))
+    if not _WORKSPACE_DOMAIN_RE.search(normalized) and not has_git_action:
+        return None
+    has_write = bool(_WORKSPACE_WRITE_RE.search(normalized))
+    has_inspect = bool(_WORKSPACE_INSPECT_RE.search(normalized))
+    has_active_verify = bool(_WORKSPACE_ACTIVE_VERIFY_RE.search(normalized))
+    if not (has_write or has_inspect or has_active_verify or has_git_action):
+        return None
+
+    target_id = "codex_worker" if has_write or has_active_verify or has_git_action else "codex_inspect"
+    run_mode = "worker" if target_id == "codex_worker" else "inspect"
+    return {
+        "route": "skill",
+        "target_id": target_id,
+        "task": normalized,
+        "reason_code": f"THALAMUS_RULE_CODEX_WORKSPACE_{run_mode.upper()}",
+        "confidence": 0.94 if target_id == "codex_worker" else 0.91,
+        "route_source": "thalamus.rule",
+        "args": {
+            "task": normalized,
+            "problem_statement": normalized,
+            "run_mode": run_mode,
+            "workspace_strategy": "runtime_repo",
+            "text": normalized,
+            "user_message": normalized,
+        },
+    }
 
 
 def _has_explicit_route_seed(payload: Mapping[str, Any] | None) -> bool:
@@ -681,6 +844,20 @@ def _build_direct_route_seed(text: str) -> dict[str, Any] | None:
     if _looks_like_simple_technical_advice(cleaned):
         return _build_simple_technical_chat_seed(cleaned, route_source="thalamus.rule")
 
+    if _TASK_CONTEXT_CONTINUATION_RE.match(cleaned):
+        return {
+            "route": "delegate",
+            "target_id": "intent_agent",
+            "task": cleaned,
+            "reason_code": "RULE_CONTEXT_CONTINUATION",
+            "confidence": 0.88,
+            "route_source": "thalamus.rule",
+            "args": {
+                "text": cleaned,
+                "user_message": cleaned,
+            },
+        }
+
     if _TASK_INTENT_PLANNING_RE.search(cleaned):
         return {
             "route": "delegate",
@@ -690,6 +867,20 @@ def _build_direct_route_seed(text: str) -> dict[str, Any] | None:
             "confidence": 0.94,
             "route_source": "rule",
         }
+
+    if _TASK_PLAN_REQUEST_RE.search(cleaned):
+        return {
+            "route": "delegate",
+            "target_id": "intent_agent",
+            "task": cleaned,
+            "reason_code": "RULE_ACTION_INTENT",
+            "confidence": 0.86,
+            "route_source": "rule",
+        }
+
+    workspace_seed = _build_codex_workspace_route_seed(cleaned)
+    if workspace_seed is not None:
+        return workspace_seed
 
     step_segments = _split_explicit_step_segments(cleaned)
     if len(step_segments) > 1:
@@ -870,6 +1061,16 @@ def classify_task_intent_by_rules(text: str) -> dict[str, Any] | None:
             "route_source": "rule",
         }
 
+    if _TASK_PLAN_REQUEST_RE.search(normalized):
+        return {
+            "route": "delegate",
+            "target_id": "intent_agent",
+            "task": normalized,
+            "reason_code": "RULE_ACTION_INTENT",
+            "confidence": 0.86,
+            "route_source": "rule",
+        }
+
     if _TASK_MEMORY_RE.search(normalized):
         return {
             "route": "skill",
@@ -880,7 +1081,11 @@ def classify_task_intent_by_rules(text: str) -> dict[str, Any] | None:
             "route_source": "rule",
         }
 
-    if _TASK_CODE_RE.search(normalized) and not _TASK_ENTERTAINMENT_RE.search(normalized):
+    if (
+        _TASK_CODE_RE.search(normalized)
+        and not _TASK_ENTERTAINMENT_RE.search(normalized)
+        and not _TASK_CODE_NEGATION_RE.search(normalized)
+    ):
         codex_target = "codex_inspect" if _looks_like_lightweight_codex_request(normalized) else "codex_worker"
         return {
             "route": "skill",
@@ -901,10 +1106,97 @@ def classify_task_intent_by_rules(text: str) -> dict[str, Any] | None:
             "route_source": "rule",
         }
 
+    if _TASK_ENTERTAINMENT_RE.search(normalized):
+        return None
+
+    if _looks_like_generic_action_intent(normalized):
+        return {
+            "route": "delegate",
+            "target_id": "intent_agent",
+            "task": normalized,
+            "reason_code": "RULE_ACTION_INTENT",
+            "confidence": 0.86,
+            "route_source": "rule",
+        }
+
     compact_lower = normalized.lower().replace(" ", "")
     if any(marker in compact_lower for marker in _TASK_EXEC_ACTION_MARKERS):
         return None
     return None
+
+
+_WORK_CODE_TARGETS: frozenset[str] = frozenset({
+    "codex_worker",
+    "codex_inspect",
+    "code_agent",
+    "workbench_code_assist",
+})
+_WORK_TRANSLATE_TARGETS: frozenset[str] = frozenset({
+    "translate_agent",
+    "workbench_translate",
+})
+_VISION_UI_TARGETS: frozenset[str] = frozenset({
+    "vision_agent",
+    "vision_ui",
+    "multimodal_input",
+})
+
+
+def _decision_text(value: Any) -> str:
+    return str(value or "").strip().lower()
+
+
+def resolve_scene_type_from_intent_decision(
+    decision: Mapping[str, Any] | None,
+    *,
+    fallback_text: str | None = None,
+) -> str:
+    """Map the canonical Thalamus intent decision to the runtime scene type."""
+    draft = dict(decision or {}) if isinstance(decision, Mapping) else {}
+    route = _decision_text(draft.get("route"))
+    target_id = _decision_text(draft.get("target_id") or draft.get("target"))
+    action = _decision_text(draft.get("action"))
+    reason = _decision_text(draft.get("route_reason") or draft.get("reason_code"))
+    args = draft.get("args") if isinstance(draft.get("args"), Mapping) else {}
+    task_text = str(
+        draft.get("task")
+        or (args or {}).get("text")
+        or (args or {}).get("query")
+        or fallback_text
+        or ""
+    ).strip()
+
+    if (
+        target_id in _VISION_UI_TARGETS
+        or action in _VISION_UI_TARGETS
+        or "vision" in reason
+        or _TASK_VISION_UI_RE.search(task_text)
+    ):
+        return SCENE_VISION_UI
+    if (
+        target_id in _WORK_TRANSLATE_TARGETS
+        or action == "work_translate"
+        or "translate" in reason
+        or _TASK_TRANSLATE_RE.search(task_text)
+    ):
+        return SCENE_WORK_TRANSLATE
+    if (
+        target_id in _WORK_CODE_TARGETS
+        or target_id.startswith("codex_")
+        or action in {"work_code", "codex_worker", "codex_inspect"}
+        or action.startswith("codex_")
+        or "codex" in reason
+    ):
+        return SCENE_WORK_CODE
+    if route in {"delegate", "skill", "plan", "task_progress", "recent_turn"}:
+        return SCENE_EXEC_INTENT
+    return SCENE_CHAT
+
+
+def classify_scene_type_by_rules(text: str) -> str:
+    """Classify a scene using Thalamus rules only, without app-layer pre-routing."""
+    decision = classify_task_intent_by_rules(text)
+    return resolve_scene_type_from_intent_decision(decision, fallback_text=text)
 
 
 def classify_task_intent_fastpath(text: str) -> dict[str, Any] | None:
@@ -1024,6 +1316,74 @@ def _build_multimodal_route_seed(
     }
 
 
+def _llm_intent_confidence_threshold() -> float:
+    try:
+        import os  # noqa: PLC0415
+
+        configured = _normalize_confidence(os.environ.get("HOST_CORTEX_INTENT_LLM_MIN_CONFIDENCE"))
+    except Exception:
+        configured = None
+    return configured if configured is not None else _LLM_ROUTE_MIN_CONFIDENCE_DEFAULT
+
+
+def _normalize_llm_intent_route_candidate(
+    candidate: Mapping[str, Any] | None,
+    *,
+    fallback_text: str,
+) -> dict[str, Any] | None:
+    if not isinstance(candidate, Mapping):
+        return None
+
+    route = _normalize_text(candidate.get("route"), lower=True)
+    if route not in _ROUTE_ALLOWLIST:
+        return None
+
+    confidence = _normalize_confidence(candidate.get("confidence"))
+    if confidence is None:
+        confidence = 0.7
+    if confidence < _llm_intent_confidence_threshold():
+        return None
+
+    raw_target_id = _normalize_text(candidate.get("target_id") or candidate.get("target"), lower=True)
+    target_id = raw_target_id
+    if route in _LLM_CHATLIKE_ROUTES:
+        target_id = ""
+    elif route == "plan":
+        target_id = raw_target_id or "skill_dag"
+        if target_id != "skill_dag":
+            return None
+    elif route == "delegate":
+        if target_id not in _LLM_DELEGATE_TARGET_ALLOWLIST:
+            return None
+    elif route == "skill":
+        if target_id not in _LLM_SKILL_TARGET_ALLOWLIST:
+            return None
+    else:
+        return None
+
+    task = _normalize_text(candidate.get("task")) or _normalize_text(fallback_text)
+    reason = (
+        _normalize_text(candidate.get("reason_code"))
+        or _normalize_text(candidate.get("reason"))
+        or "LLM_INTENT_ROUTE"
+    )
+    normalized: dict[str, Any] = {
+        "route": route,
+        "target_id": target_id,
+        "task": task,
+        "reason_code": reason,
+        "confidence": confidence,
+        "route_source": "llm",
+    }
+    if route == "plan":
+        planned_steps = candidate.get("planned_steps")
+        if not isinstance(planned_steps, list):
+            planned_steps = candidate.get("steps")
+        if isinstance(planned_steps, list):
+            normalized["planned_steps"] = [dict(step) for step in planned_steps if isinstance(step, Mapping)]
+    return normalized
+
+
 async def classify_task_intent_by_llm(
     *,
     request_id: str,
@@ -1099,26 +1459,7 @@ async def classify_task_intent_by_llm(
             _logger.warning("[%s] thalamus_intent_llm_parse_failed output=%.180s", request_id, raw_text)
             return None
 
-        route = str(parsed.get("route") or "").strip().lower()
-        if route not in {"chat", "delegate", "skill", "task_progress", "recent_turn"}:
-            return None
-
-        target_id = str(parsed.get("target_id") or "").strip()
-        task = str(parsed.get("task") or text or "").strip()
-        reason = str(parsed.get("reason") or "LLM_INTENT_ROUTE").strip() or "LLM_INTENT_ROUTE"
-        try:
-            confidence = max(0.0, min(1.0, float(parsed.get("confidence") or 0.7)))
-        except (TypeError, ValueError):
-            confidence = 0.7
-
-        return {
-            "route": route,
-            "target_id": target_id,
-            "task": task,
-            "reason_code": reason,
-            "confidence": confidence,
-            "route_source": "llm",
-        }
+        return _normalize_llm_intent_route_candidate(parsed, fallback_text=text)
     except Exception as exc:
         _logger.warning("thalamus_intent_llm_failed request_id=%s error=%s", request_id, exc)
         return None
@@ -1180,12 +1521,13 @@ async def classify_task_intent(
         if _should_prefer_rule_seed(rule_result):
             return rule_result
 
-    llm_result = await classify_task_intent_by_llm(
+    raw_llm_result = await classify_task_intent_by_llm(
         request_id=request_id,
         session_id=session_id,
         text=normalized,
         tribe_context=tribe_context,
     )
+    llm_result = _normalize_llm_intent_route_candidate(raw_llm_result, fallback_text=normalized)
     if llm_result is not None:
         if _should_prefer_rule_seed(rule_result):
             merged = dict(rule_result or {})
@@ -1689,10 +2031,13 @@ def set_thalamus_agent(agent: ThalamusAgent | None) -> None:
 
 
 __all__ = [
+    "THALAMUS_SCENE_TYPE_SOURCE",
     "ThalamusAgent",
+    "classify_scene_type_by_rules",
     "classify_task_intent",
     "classify_task_intent_by_llm",
     "classify_task_intent_by_rules",
     "get_thalamus_agent",
+    "resolve_scene_type_from_intent_decision",
     "set_thalamus_agent",
 ]

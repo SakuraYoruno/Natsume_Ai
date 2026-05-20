@@ -662,7 +662,7 @@ async def _vision_ui_sse_generator(
             "request_id": request_id,
         })
 
-        # 图片上传策略（Phase XIV v4：SceneRouter 已移除，默认允许上传）
+        # 图片上传策略：视觉入口独立处理，默认允许上传。
         _user_consent = bool(getattr(request_body, "image_upload_consent", False))
         _img_allowed, _img_deny_reason = True, None
 

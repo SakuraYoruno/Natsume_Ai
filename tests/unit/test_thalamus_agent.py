@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, patch
 from host_brain.tribe.thalamus_agent import (
     ThalamusAgent,
     _resolve_intent_classification_prompt_templates,
+    classify_task_intent,
     classify_task_intent_fastpath,
     classify_task_intent_by_rules,
 )
@@ -408,6 +409,127 @@ def test_classify_and_compile_intent_draft_falls_back_to_cortex_classifier_when_
     assert compiled["route_source"] == "llm"
 
 
+def test_classify_task_intent_rejects_low_confidence_llm_route_when_rules_miss() -> None:
+    with (
+        patch("host_brain.tribe.thalamus_agent.classify_task_intent_by_rules", return_value=None),
+        patch(
+            "host_brain.tribe.thalamus_agent.classify_task_intent_by_llm",
+            new=AsyncMock(
+                return_value={
+                    "route": "skill",
+                    "target_id": "codex_worker",
+                    "task": "ambiguous fallback request",
+                    "reason_code": "LLM_ROUTE_codex_worker",
+                    "confidence": 0.41,
+                    "route_source": "llm",
+                }
+            ),
+        ),
+    ):
+        decision = _run(
+            classify_task_intent(
+                request_id="req-thalamus-low-llm",
+                session_id="session-thalamus-low-llm",
+                text="ambiguous fallback request",
+            )
+        )
+
+    assert decision["route"] == "chat"
+    assert decision["target_id"] == ""
+    assert decision["reason_code"] == "DEFAULT_CHAT"
+
+
+def test_classify_task_intent_rejects_unknown_llm_skill_target_when_rules_miss() -> None:
+    with (
+        patch("host_brain.tribe.thalamus_agent.classify_task_intent_by_rules", return_value=None),
+        patch(
+            "host_brain.tribe.thalamus_agent.classify_task_intent_by_llm",
+            new=AsyncMock(
+                return_value={
+                    "route": "skill",
+                    "target_id": "invented_runtime_skill",
+                    "task": "ambiguous fallback request",
+                    "reason_code": "LLM_ROUTE_INVENTED",
+                    "confidence": 0.96,
+                    "route_source": "llm",
+                }
+            ),
+        ),
+    ):
+        decision = _run(
+            classify_task_intent(
+                request_id="req-thalamus-unknown-llm-target",
+                session_id="session-thalamus-unknown-llm-target",
+                text="ambiguous fallback request",
+            )
+        )
+
+    assert decision["route"] == "chat"
+    assert decision["target_id"] == ""
+    assert decision["reason_code"] == "DEFAULT_CHAT"
+
+
+def test_classify_task_intent_normalizes_llm_plan_route_when_rules_miss() -> None:
+    with (
+        patch("host_brain.tribe.thalamus_agent.classify_task_intent_by_rules", return_value=None),
+        patch(
+            "host_brain.tribe.thalamus_agent.classify_task_intent_by_llm",
+            new=AsyncMock(
+                return_value={
+                    "route": "plan",
+                    "target_id": "",
+                    "task": "ambiguous fallback request",
+                    "reason_code": "LLM_ROUTE_PLAN",
+                    "confidence": 0.93,
+                    "route_source": "llm",
+                }
+            ),
+        ),
+    ):
+        decision = _run(
+            classify_task_intent(
+                request_id="req-thalamus-llm-plan",
+                session_id="session-thalamus-llm-plan",
+                text="ambiguous fallback request",
+            )
+        )
+
+    assert decision["route"] == "plan"
+    assert decision["target_id"] == "skill_dag"
+    assert decision["reason_code"] == "LLM_ROUTE_PLAN"
+    assert decision["route_source"] == "llm"
+
+
+def test_classify_task_intent_strips_llm_chat_target_when_rules_miss() -> None:
+    with (
+        patch("host_brain.tribe.thalamus_agent.classify_task_intent_by_rules", return_value=None),
+        patch(
+            "host_brain.tribe.thalamus_agent.classify_task_intent_by_llm",
+            new=AsyncMock(
+                return_value={
+                    "route": "chat",
+                    "target_id": "codex_worker",
+                    "task": "ambiguous fallback request",
+                    "reason_code": "LLM_ROUTE_CHAT",
+                    "confidence": 0.95,
+                    "route_source": "llm",
+                }
+            ),
+        ),
+    ):
+        decision = _run(
+            classify_task_intent(
+                request_id="req-thalamus-llm-chat",
+                session_id="session-thalamus-llm-chat",
+                text="ambiguous fallback request",
+            )
+        )
+
+    assert decision["route"] == "chat"
+    assert decision["target_id"] == ""
+    assert decision["reason_code"] == "LLM_ROUTE_CHAT"
+
+
 def test_classify_task_intent_by_rules_keeps_legacy_translate_rule() -> None:
     decision = classify_task_intent_by_rules("please translate this into English")
 
@@ -424,6 +546,98 @@ def test_classify_task_intent_by_rules_routes_planning_advice_to_intent_agent() 
     assert decision is not None
     assert decision["route"] == "delegate"
     assert decision["target_id"] == "intent_agent"
+
+
+def test_classify_task_intent_by_rules_routes_generic_execution_without_llm() -> None:
+    decision = classify_task_intent_by_rules("继续执行上一个任务")
+
+    assert decision is not None
+    assert decision["route"] == "delegate"
+    assert decision["target_id"] == "intent_agent"
+    assert decision["reason_code"] == "RULE_ACTION_INTENT"
+
+
+def test_classify_task_intent_by_rules_routes_short_continuation_to_intent_agent() -> None:
+    decision = classify_task_intent_by_rules("开始吧")
+
+    assert decision is not None
+    assert decision["route"] == "delegate"
+    assert decision["target_id"] == "intent_agent"
+    assert decision["reason_code"] == "RULE_CONTEXT_CONTINUATION"
+
+
+def test_classify_task_intent_by_rules_routes_open_settings_to_open_app() -> None:
+    decision = classify_task_intent_by_rules("打开设置")
+
+    assert decision is not None
+    assert decision["route"] == "skill"
+    assert decision["target_id"] == "open_app"
+    assert decision["reason_code"] == "THALAMUS_RULE_OPEN_APP"
+
+
+def test_classify_task_intent_by_rules_routes_workspace_inspection_to_codex_inspect() -> None:
+    decision = classify_task_intent_by_rules("查看完整主链")
+
+    assert decision is not None
+    assert decision["route"] == "skill"
+    assert decision["target_id"] == "codex_inspect"
+    assert decision["reason_code"] == "THALAMUS_RULE_CODEX_WORKSPACE_INSPECT"
+    assert decision["args"]["workspace_strategy"] == "runtime_repo"
+
+
+def test_classify_task_intent_by_rules_routes_workspace_work_to_codex_worker() -> None:
+    decision = classify_task_intent_by_rules("开始优化意图识别和路由")
+
+    assert decision is not None
+    assert decision["route"] == "skill"
+    assert decision["target_id"] == "codex_worker"
+    assert decision["reason_code"] == "THALAMUS_RULE_CODEX_WORKSPACE_WORKER"
+    assert decision["args"]["run_mode"] == "worker"
+
+
+def test_classify_task_intent_by_rules_routes_frontend_browser_verification_to_codex_worker() -> None:
+    decision = classify_task_intent_by_rules("使用无头浏览器验证前端效果")
+
+    assert decision is not None
+    assert decision["route"] == "skill"
+    assert decision["target_id"] == "codex_worker"
+    assert decision["reason_code"] == "THALAMUS_RULE_CODEX_WORKSPACE_WORKER"
+
+
+def test_classify_task_intent_by_rules_routes_repo_commit_phrase_to_codex_worker() -> None:
+    decision = classify_task_intent_by_rules("继续整理提交")
+
+    assert decision is not None
+    assert decision["route"] == "skill"
+    assert decision["target_id"] == "codex_worker"
+    assert decision["reason_code"] == "THALAMUS_RULE_CODEX_WORKSPACE_WORKER"
+
+
+def test_classify_task_intent_by_rules_routes_deploy_without_llm() -> None:
+    decision = classify_task_intent_by_rules("帮我部署这个服务")
+
+    assert decision is not None
+    assert decision["route"] == "delegate"
+    assert decision["target_id"] == "intent_agent"
+    assert decision["reason_code"] == "RULE_ACTION_INTENT"
+
+
+def test_classify_task_intent_by_rules_keeps_ui_preference_as_memory_store() -> None:
+    decision = classify_task_intent_by_rules("记住我喜欢偏冷色系UI")
+
+    assert decision is not None
+    assert decision["route"] == "skill"
+    assert decision["target_id"] == "memory_store"
+    assert decision["reason_code"] == "RULE_FORCE_MEMORY_STORE"
+
+
+def test_classify_task_intent_by_rules_readonly_code_plan_not_codex_worker() -> None:
+    decision = classify_task_intent_by_rules("给我一个完整方案，不要改代码")
+
+    assert decision is not None
+    assert decision["route"] == "delegate"
+    assert decision["target_id"] == "intent_agent"
+    assert decision["reason_code"] == "RULE_ACTION_INTENT"
 
 
 def test_classify_task_intent_by_rules_routes_relational_followup_to_chat() -> None:

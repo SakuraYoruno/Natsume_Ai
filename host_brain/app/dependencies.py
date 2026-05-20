@@ -24,16 +24,12 @@ from host_brain.governor.tokens import TokenService
 from host_brain.app.graph_config_builder import (
     AGENT_DISPATCH_HANDLER_ID,
     INTENT_AGENT_ENTRY_HANDLER_ID,
-    SCENE_ROUTER_ENTRY_HANDLER_ID,
-    SCENE_ROUTER_POST_CORE_HANDLER_ID,
     SUPERVISOR_DISPATCH_HANDLER_ID,
     CHAT_AGENT_HANDLER_ID,
     TRANSLATE_AGENT_HANDLER_ID,
     INTENT_AGENT_HANDLER_ID,
     JUDGE_AGENT_HANDLER_ID,
     RETRIEVAL_AGENT_HANDLER_ID,  # P11/P16 新增
-    graph_scene_router_entry_handler,
-    graph_scene_router_post_core_handler,
 )
 from host_brain.integrations.graph_runtime import GraphRuntimeContract
 from host_brain.memory.episodic import EpisodicStore
@@ -342,14 +338,6 @@ def get_graph_runtime() -> GraphRuntimeContract:
         _graph_runtime = GraphRuntimeContract(
             ledger=get_ledger(),
             default_timeout_ms=5_000,
-        )
-        _graph_runtime.register_node_handler(
-            SCENE_ROUTER_ENTRY_HANDLER_ID,
-            graph_scene_router_entry_handler,
-        )
-        _graph_runtime.register_node_handler(
-            SCENE_ROUTER_POST_CORE_HANDLER_ID,
-            graph_scene_router_post_core_handler,
         )
         # M-MA1：注册 Supervisor 分派 handler（trusted handler，可写 __next_node__）
         from host_brain.app.handlers.supervisor_dispatch_handler import supervisor_dispatch_handler  # noqa: PLC0415

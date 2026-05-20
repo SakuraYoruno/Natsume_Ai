@@ -1,6 +1,6 @@
 """Graph 配置构建模块。
 
-负责 Chat 图的配置构建和场景路由。
+负责 Chat 图的配置构建。意图识别与场景判定统一由 Thalamus 承接。
 """
 
 from __future__ import annotations
@@ -32,7 +32,6 @@ from host_brain.app.prompt_builder import (
     CHAT_RENDER_NODE_ID,
     SCENE_CHAT,
     SCENE_EXEC_INTENT,
-    SCENE_GATEWAY,
     SCENE_VISION_UI,
     SCENE_WORK_CODE,
     SCENE_WORK_TRANSLATE,
@@ -60,10 +59,6 @@ CHAT_GRAPH_NODE_ORDER: list[str] = [
     "workbench_code_assist",
 ]
 CHAT_INTENT_SOURCE_NODE_ID = "core_reasoner_primary"
-SCENE_ROUTER_ENTRY_NODE_ID = "scene_router_entry"
-SCENE_ROUTER_POST_CORE_NODE_ID = "scene_router_post_core"
-SCENE_ROUTER_ENTRY_HANDLER_ID = "scene_router_entry"
-SCENE_ROUTER_POST_CORE_HANDLER_ID = "scene_router_post_core"
 SCENE_TYPE_AUTO = "AUTO"
 
 # M-MA1：Supervisor 分派节点常量
@@ -94,7 +89,7 @@ AGENT_DISPATCH_HANDLER_ID = "agent_dispatch"  # 保留常量供其他模块引�
 # 供 chat_handler.py 校验客户端传入的 scene_type，统一维护避免两处同步
 # [选项一] SCENE_VISION_UI 已有完整实现（chat_handler_vision.py），加入白名单
 # 注意：VISION_UI 场景需要客户端传入 image_upload_consent=true 才允许上传图片
-# AUTO：显式走多 agent 编排（scene_router_entry → supervisor_dispatch）；默认已统一图+动态路由，可不传
+# AUTO：显式走多 agent 编排（supervisor_dispatch）；默认已统一图+动态路由，可不传
 ALLOWED_EXPLICIT_SCENE_TYPES: frozenset[str] = frozenset({
     SCENE_CHAT,
     SCENE_WORK_CODE,
@@ -121,37 +116,6 @@ _HOST_CHAT_14B_DEFAULT_BASE_URL = "http://127.0.0.1:11434/v1"
 _HOST_CHAT_CLOUD_DEFAULT_PROVIDER = PROVIDER_GEMINI
 _PROVIDERS_REQUIRING_API_KEY = frozenset({PROVIDER_OPENAI, PROVIDER_CODEX, PROVIDER_GEMINI, PROVIDER_DEEPSEEK})
 
-_PIC_VISION_UI_KEYWORDS = frozenset([
-    "screenshot", "screen", "ui", "window", "interface", "capture",
-    "screen shot", "desktop", "look at the screen",
-    "截图", "屏幕", "界面", "画面", "看一下屏幕", "看看这个界面",
-])
-_PIC_WORK_CODE_KEYWORDS = frozenset([
-    "code", "coding", "programming", "function", "script", "program",
-    "python", "javascript", "typescript", "java", "golang", "rust", "c++",
-    "debug", "bug", "class", "algorithm", "implement", "develop",
-    "代码", "编程", "写代码", "写个函数", "函数", "脚本", "调试", "类", "实现", "开发",
-])
-# 文化娱乐关键词白名单：命中时强制返回 SCENE_CHAT，避免被 WORK_CODE 误判
-_PIC_ENTERTAINMENT_KEYWORDS = frozenset([
-    "动漫", "漫画", "番剧", "动画", "アニメ", "マンガ", "漫",
-    "电影", "电视剧", "剧集", "综艺", "映画", "ドラマ",
-    "音乐", "歌曲", "歌手", "专辑", "音楽", "歌",
-    "小说", "书", "读书", "本", "読書",
-    "游戏", "ゲーム", "玩",
-    "爱好", "兴趣", "趣味",
-])
-_PIC_WORK_TRANSLATE_KEYWORDS = frozenset([
-    "translate", "translation", "translate to", "translate into",
-    "翻译", "翻成", "译成", "译为", "翻訳", "訳して",
-])
-_PIC_EXEC_INTENT_KEYWORDS = frozenset([
-    "execute", "run", "setup", "configure", "start", "stop", "install",
-    "执行", "运行", "设置", "配置", "启动", "关闭", "打开",
-    "帮我做", "部署", "创建", "新建", "修改", "更新", "安装",
-    "deploy", "build", "submit", "save",
-])
-
 
 def _parse_bool(value: Any, default: bool = False) -> bool:
     if value is None:
@@ -162,6 +126,46 @@ def _parse_bool(value: Any, default: bool = False) -> bool:
     if text in {"0", "false", "no", "off"}:
         return False
     return bool(default)
+
+
+def resolve_scene_node_sequence(scene_type: str) -> list[str]:
+    """Return the model-node sequence for explicit legacy graph profiles."""
+    scene = str(scene_type or SCENE_CHAT).strip().upper()
+    if scene == SCENE_EXEC_INTENT:
+        return [
+            "core_reasoner_primary",
+            "planner_constraints",
+            "tool_planner",
+            "safety_verifier",
+            "consistency_verifier",
+            "renderer_ja_c_style",
+        ]
+    if scene == SCENE_WORK_TRANSLATE:
+        return [
+            "core_reasoner_primary",
+            "workbench_translate",
+            "consistency_verifier",
+            "renderer_ja_c_style",
+        ]
+    if scene == SCENE_WORK_CODE:
+        return [
+            "core_reasoner_primary",
+            "workbench_code_assist",
+            "consistency_verifier",
+            "renderer_ja_c_style",
+        ]
+    return [CHAT_DIRECT_NODE_ID]
+
+
+def resolve_chat_retrieval_gate(*, scene_type: str) -> tuple[bool, str | None]:
+    if not _parse_bool(os.environ.get("HOST_ENABLE_RETRIEVAL"), default=True):
+        return False, "HOST_RETRIEVAL_DISABLED"
+    if (
+        str(scene_type or "").strip().upper() == SCENE_CHAT
+        and _parse_bool(os.environ.get("HOST_CHAT_DISABLE_RETRIEVAL"), default=False)
+    ):
+        return False, "HOST_CHAT_RETRIEVAL_DISABLED"
+    return True, None
 
 
 def _parse_int(value: Any, *, default: int, min_value: int, max_value: int) -> int:
@@ -833,7 +837,7 @@ def _build_graph_config_by_profile(
         )
         primary_budget_node_id = INTENT_AGENT_ENTRY_NODE_ID
     elif use_supervised:
-        # Supervised 图：supervisor_dispatch → agent_dispatch → judge_agent → renderer（无 scene_router_entry）
+        # Supervised 图：supervisor_dispatch → agent_dispatch → judge_agent → renderer
         scene_node_sequence = [
             SUPERVISOR_DISPATCH_NODE_ID,
             AGENT_DISPATCH_NODE_ID,
@@ -1251,37 +1255,6 @@ def resolve_subagent_llm_runtime(*, base_runtime: dict) -> dict:
     runtime["agent_role"] = "sub_agent"
     return runtime
 
-
-# ---------------------------------------------------------------------------
-# 聚合导入（P2-11 拆分后向后兼容）
-# ---------------------------------------------------------------------------
-# 场景路由函数已移至 graph_config_router.py
-from host_brain.app.graph_config_router import (  # noqa: F401, E402
-    pre_intent_classifier,
-    resolve_scene_node_sequence,
-    build_unified_route_decision,
-    resolve_graph_entry_scene_type,
-    graph_scene_router_entry_handler,
-    graph_scene_router_post_core_handler,
-    resolve_chat_scene_type,
-    resolve_chat_retrieval_gate,
-    SCENE_ROUTER_ENTRY_NODE_ID,
-    SCENE_ROUTER_POST_CORE_NODE_ID,
-    SCENE_ROUTER_ENTRY_HANDLER_ID,
-    SCENE_ROUTER_POST_CORE_HANDLER_ID,
-    SCENE_TYPE_AUTO,
-    SCENE_TYPE_SOURCE_TRIBE_DECIDER,
-    SCENE_TYPE_SOURCE_TRIBE_DECIDER_DEFAULT,
-    ALLOWED_EXPLICIT_SCENE_TYPES,
-    HOST_CHAT_ROUTE_HOST_14B,
-    HOST_CHAT_ROUTE_CLOUD,
-    HOST_CHAT_ROUTE_SKILLS,
-    ROUTE_DECISION_VERSION,
-    ROUTE_TARGET_HOST,
-    ROUTE_TARGET_EDGE,
-    ROUTE_TARGET_CLOUD,
-    ROUTE_TARGET_SKILLS,
-)
 
 # LLM 运行时解析函数已移至 graph_config_llm_runtime.py
 from host_brain.app.graph_config_llm_runtime import (  # noqa: F401, E402

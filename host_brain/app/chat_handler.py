@@ -5,7 +5,7 @@
   - _unified_chat_sse_generator：统一 SSE 生成器（Governor 鉴权 + 场景分类 + 路由分发）
 
 Phase XV 收口架构：
-  cortex_orchestrator 统一承接主入口，本模块负责 /v1/chat 的鉴权、场景判定与流式转发。
+  cortex_orchestrator 统一承接主入口，本模块负责 /v1/chat 的鉴权与流式转发。
 意图收口由 thalamus_agent.classify_and_compile_intent_draft 完成（Phase XV+），再按 canonical intent 路由分发到对应 handler。
 
 子模块职责：
@@ -35,13 +35,12 @@ from host_brain.app.emotion_context import (
 from host_brain.app.graph_config_builder import (
     ALLOWED_EXPLICIT_SCENE_TYPES,
     SCENE_CHAT,
-    SCENE_EXEC_INTENT,
-    SCENE_TYPE_SOURCE_TRIBE_DECIDER,
-    SCENE_TYPE_SOURCE_TRIBE_DECIDER_DEFAULT,
-    SCENE_WORK_CODE,
-    SCENE_WORK_TRANSLATE,
 )
-from host_brain.tribe.thalamus_agent import get_thalamus_agent
+from host_brain.tribe.thalamus_agent import (
+    THALAMUS_SCENE_TYPE_SOURCE,
+    get_thalamus_agent,
+    resolve_scene_type_from_intent_decision,
+)
 from host_brain.app.schemas import ChatRequest
 from host_brain.core.ids import new_request_id
 
@@ -241,7 +240,6 @@ Governor 鉴权后由 thalamus_agent 统一收口 canonical intent（Phase XV+�
             request_started_ms=request_started_ms,
             intent_draft=None,
             metrics=metrics,
-            _pre_classified_scene=None,  # Phase XV: 场景类型由 cortex_orchestrator 决定
         ),
         media_type="text/event-stream",
         headers={
@@ -260,7 +258,6 @@ async def _unified_chat_sse_generator(
     request_started_ms: int,
     intent_draft: Dict[str, Any] | None,
     metrics: Any,
-    _pre_classified_scene: str | None = None,
     _pre_recall_evidence: list[dict] | None = None,
     _pre_approved_governor_result: Dict[str, Any] | None = None,
 ) -> AsyncGenerator[str, None]:
@@ -271,7 +268,7 @@ async def _unified_chat_sse_generator(
       → thalamus canonical intent 收口（若未预传入）
       → Governor 鉴权（若 _pre_approved_governor_result 传入则跳过重复鉴权）
       → PRESENCE(GOV_APPROVED)
-      → Phase XV：场景类型由 cortex_orchestrator 内的 tribe 层决定（已废弃 pre_intent_classifier）
+      → Thalamus 根据 canonical intent 给出场景标签（仅记录/审计，不再走 app 预分类器）
       → cortex_orchestrator_sse_generator 统一处理
     """
     def _sse(data: dict) -> str:
@@ -395,7 +392,7 @@ async def _unified_chat_sse_generator(
         yield _sse({"phase": "PRESENCE", "event": "GOV_APPROVED", "request_id": request_id})
         await asyncio.sleep(0)
 
-        # ── 鉴权后分类场景 ────────────────────────────────────────────────
+        # ── 鉴权后记录场景标签 ────────────────────────────────────────────
         # 修复审计问题 #3：对客户端显式传入的 scene_type 进行合法性校验，
         # 防止客户端强制路由到任意场景（如 VISION_UI 等高门槛场景）。
         # ALLOWED_EXPLICIT_SCENE_TYPES 统一在 graph_config_builder 中维护，此处直接引用。
@@ -416,14 +413,12 @@ async def _unified_chat_sse_generator(
             else:
                 scene_type = explicit_scene_type
                 scene_type_source = "explicit"
-        elif _pre_classified_scene is not None:
-            # 复用 handle_chat 中已完成的预分类结果
-            scene_type = _pre_classified_scene
-            scene_type_source = SCENE_TYPE_SOURCE_TRIBE_DECIDER
         else:
-            # Phase XV：不再调用 pre_intent_classifier，scene_type 由 cortex_orchestrator 决定
-            scene_type = SCENE_CHAT
-            scene_type_source = SCENE_TYPE_SOURCE_TRIBE_DECIDER_DEFAULT
+            scene_type = resolve_scene_type_from_intent_decision(
+                intent_draft,
+                fallback_text=str(request_body.message or ""),
+            )
+            scene_type_source = THALAMUS_SCENE_TYPE_SOURCE
 
         _logger.info(
             "chat scene classified",

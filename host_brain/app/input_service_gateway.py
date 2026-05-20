@@ -1,46 +1,19 @@
-"""input_service_gateway.py — 输入路由 Gateway 意图路由服务层。
+"""input_service_gateway.py — 输入路由 Gateway 辅助服务层。
 
-从 input_routes.py 提取的 gateway 意图路由、规则路由、LLM 路由、强制覆盖相关函数。
+从 input_routes.py 提取的 Gateway 进度查询、执行意图启发式和 skill manifest 辅助函数。
+权威意图识别与路由由 thalamus_agent 统一完成。
 """
 
 from __future__ import annotations
 
 import json
-import logging
 import re
 from typing import Any
-
-_logger = logging.getLogger("Natsume.input_routes")
 
 # ---------------------------------------------------------------------------
 # 常量
 # ---------------------------------------------------------------------------
 
-_ALLOWED_LLM_ROUTE_TYPES: set[str] = {
-    "chat", "delegate", "skill", "plan", "recent_turn", "task_progress",
-}
-_ALLOWED_DELEGATE_TARGETS: set[str] = {
-    "intent_agent", "translate_agent",
-    "vision_agent", "repair_agent", "retrieval_agent", "judge_agent",
-}
-
-_GATEWAY_ROUTE_ACTION_PREFIXES: tuple[str, ...] = ("/", "!", "run ", "exec ")
-_GATEWAY_FORCE_TRANSLATE_RE = re.compile(
-    r"(翻译|译成|翻成|translate|translation|中译英|英译中|中译日|日译中)",
-    re.IGNORECASE,
-)
-_GATEWAY_FORCE_MEMORY_RE = re.compile(
-    r"(记住|记一下|记下来|写入记忆|保存.*记忆|记到记忆|remember this|save this memory|偏好是|我的偏好)",
-    re.IGNORECASE,
-)
-_GATEWAY_FORCE_CODE_RE = re.compile(
-    r"(报错|错误|异常|修复|修一下|改代码|写代码|单测|测试|diff|patch|traceback|stack trace|compile|build|修.*bug|bug.*修)",
-    re.IGNORECASE,
-)
-_GATEWAY_RECENT_TURN_RE = re.compile(
-    r"(我刚刚|上一句|上一条|上句话|你刚刚|what did i just say|what did you just say)",
-    re.IGNORECASE,
-)
 _GATEWAY_ACK_PROGRESS_QUERY_RE = re.compile(
     r"(进度|进展|状态|结果呢|有结果吗|完成了?吗|做完了?吗|好了没|搞定了?吗|到哪了|还要多久|eta|done\??|status|progress|update)",
     re.IGNORECASE,
@@ -236,69 +209,10 @@ def extract_first_json_object(raw_text: str) -> dict[str, Any] | None:
     return None
 
 
-# ---------------------------------------------------------------------------
-# LLM 路由决策归一化
-# ---------------------------------------------------------------------------
-
-def normalize_gateway_llm_route_decision(
-    *,
-    raw_decision: dict[str, Any],
-    skill_registry: Any,
-) -> dict[str, Any] | None:
-    """归一化 LLM 路由决策，验证合法性。"""
-    route = str(raw_decision.get("route") or "").strip().lower()
-    if route not in _ALLOWED_LLM_ROUTE_TYPES:
-        return None
-    target_id = str(raw_decision.get("target_id") or "").strip()
-    task = str(raw_decision.get("task") or raw_decision.get("query") or raw_decision.get("text") or "").strip()
-    reason = str(raw_decision.get("reason") or raw_decision.get("reason_code") or "LLM_ROUTE").strip() or "LLM_ROUTE"
-    confidence = normalize_route_confidence(raw_decision.get("confidence"))
-
-    if route in {"chat", "recent_turn", "task_progress"}:
-        target_id = ""
-    elif route == "plan":
-        target_id = target_id or "skill_dag"
-    elif route == "delegate":
-        if target_id not in _ALLOWED_DELEGATE_TARGETS:
-            target_id = "intent_agent"
-            reason = "LLM_ROUTE_INVALID_DELEGATE_TARGET"
-    elif route == "skill":
-        if not target_id:
-            return None
-        if skill_registry is None:
-            return None
-        try:
-            if skill_registry.get(target_id) is None:
-                return None
-        except Exception:
-            return None
-
-    return {
-        "route": route,
-        "target_id": target_id,
-        "task": task,
-        "reason_code": reason,
-        "confidence": confidence,
-        "route_source": "llm",
-        "llm_route_used": True,
-    }
-
-
-# ---------------------------------------------------------------------------
-# 规则路由决策（已废弃，规则逻辑已迁移到 thalamus_agent.classify_task_intent_by_rules）
-# ---------------------------------------------------------------------------
-
-# Phase XV 架构重设计：build_gateway_rule_route_decision、run_gateway_intent_route_llm、
-# apply_gateway_force_override、build_gateway_intent_draft 四个函数已删除。
-# 意图识别统一由 thalamus_agent 收口（规则 + LLM fallback）完成，
-# 所有来源（ASR/Web/GATEWAY）走同一套双层意图识别（规则 + LLM 兜底）。
-
-
 __all__ = [
     "looks_like_progress_query",
     "looks_like_execution_intent",
     "build_gateway_skill_manifest_lines",
     "extract_first_json_object",
     "normalize_route_confidence",
-    "normalize_gateway_llm_route_decision",
 ]

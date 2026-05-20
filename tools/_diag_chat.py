@@ -36,12 +36,12 @@ from host_brain.app.graph_config_builder import (
     CHAT_GRAPH_NODE_ORDER,
     build_chat_graph_config,
     resolve_chat_retrieval_gate,
-    resolve_chat_scene_type,
     resolve_host_llm_runtime,
 )
 from host_brain.app.prompt_builder import infer_render_target_lang
 from host_brain.app.schemas import ChatRequest
 from host_brain.integrations.llm_helpers import PROVIDER_GEMINI
+from host_brain.tribe.thalamus_agent import THALAMUS_SCENE_TYPE_SOURCE, classify_scene_type_by_rules
 
 
 print("\n--- dependency bootstrap ---")
@@ -60,7 +60,9 @@ request_body = ChatRequest(message="こんにちは、夏目。今日はどん�
 
 try:
     emotion_context = resolve_chat_emotion_context(request_body=request_body)
-    scene_type, scene_type_source = resolve_chat_scene_type(request_body=request_body)
+    explicit_scene_type = str(getattr(request_body, "scene_type", "") or "").strip().upper()
+    scene_type = explicit_scene_type or classify_scene_type_by_rules(str(request_body.message or ""))
+    scene_type_source = "explicit" if explicit_scene_type else THALAMUS_SCENE_TYPE_SOURCE
     retrieval_enabled, _ = resolve_chat_retrieval_gate(scene_type=scene_type)
     print(f"  scene_type: {scene_type}, retrieval_enabled: {retrieval_enabled}")
 

@@ -29,11 +29,14 @@ from .registry import HostTribeRegistry, get_host_tribe_registry
 from .social_brain_agent import SocialBrainAgent, get_social_brain_agent, set_social_brain_agent
 from .somatic_agent import SomaticAgent, get_somatic_agent, set_somatic_agent
 from .thalamus_agent import (
+    THALAMUS_SCENE_TYPE_SOURCE,
     ThalamusAgent,
+    classify_scene_type_by_rules,
     classify_task_intent,
     classify_task_intent_by_llm,
     classify_task_intent_by_rules,
     get_thalamus_agent,
+    resolve_scene_type_from_intent_decision,
     set_thalamus_agent,
 )
 from .tribe_state import TribeStateRegistry
@@ -69,6 +72,8 @@ __all__ = [
     "TribeAgentDescriptor",
     "TribeEvent",
     "TribeStateRegistry",
+    "THALAMUS_SCENE_TYPE_SOURCE",
+    "classify_scene_type_by_rules",
     "classify_task_intent",
     "classify_task_intent_by_llm",
     "classify_task_intent_by_rules",
@@ -98,6 +103,7 @@ __all__ = [
     "get_thalamus_agent",
     "get_vestibular_agent",
     "get_tribe_handoff_coordinator",
+    "resolve_scene_type_from_intent_decision",
     "set_limbic_agent",
     "set_prefrontal_agent",
     "set_social_brain_agent",

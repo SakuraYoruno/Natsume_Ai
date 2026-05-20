@@ -638,6 +638,143 @@ def test_run_cortex_orchestrator_pipeline_preserves_gateway_multimodal_fields() 
     assert request_body.attachment_summary == "用户发来一张轻轻撒娇的图片。"
 
 
+def test_run_cortex_orchestrator_pipeline_builds_canonical_thalamus_draft_for_gateway(monkeypatch) -> None:
+    monkeypatch.setenv("HOST_CORTEX_INTENT_LLM_ENABLED", "false")
+    captured_intent_drafts: list[dict[str, object]] = []
+
+    async def _fake_cortex_orchestrator_sse_generator(**kwargs):  # noqa: ANN003
+        captured_intent_drafts.append(dict(kwargs["intent_draft"]))
+        yield 'data: {"phase":"COMMIT","decision":"APPROVE","reason_code":null,"narrative":"我去看主链。"}'
+
+    with patch(
+        "host_brain.app.cortex_orchestrator.cortex_orchestrator_sse_generator",
+        new=_fake_cortex_orchestrator_sse_generator,
+    ):
+        result = _run(
+            _run_cortex_orchestrator_pipeline(
+                request_id="req_gateway_thalamus_canonical",
+                session_id="qq_dm_thalamus_canonical",
+                source="GATEWAY",
+                text="查看完整主链",
+                payload={
+                    "platform": "qq",
+                    "conversation_id": "qq_dm_thalamus_canonical",
+                    "from_id": "3414578517",
+                },
+                ts_ms=123456,
+            )
+        )
+
+    assert captured_intent_drafts
+    intent_draft = captured_intent_drafts[0]
+    assert intent_draft["schema_version"] == "Natsume.intent.v1"
+    assert intent_draft["route"] == "skill"
+    assert intent_draft["target_id"] == "codex_inspect"
+    assert intent_draft["route_source"] == "thalamus.rule"
+    assert result["route_decision"]["route"] == "skill"
+    assert result["route_decision"]["target_id"] == "codex_inspect"
+
+
+def test_run_cortex_orchestrator_pipeline_routes_gateway_samples_through_thalamus(monkeypatch) -> None:
+    monkeypatch.setenv("HOST_CORTEX_INTENT_LLM_ENABLED", "false")
+    captured_intent_drafts: list[dict[str, object]] = []
+
+    async def _fake_cortex_orchestrator_sse_generator(**kwargs):  # noqa: ANN003
+        captured_intent_drafts.append(dict(kwargs["intent_draft"]))
+        yield 'data: {"phase":"COMMIT","decision":"APPROVE","reason_code":null,"narrative":"收到。"}'
+
+    cases = [
+        ("开始吧", "delegate", "intent_agent"),
+        ("使用无头浏览器验证前端效果", "skill", "codex_worker"),
+        ("帮我翻译这段话", "delegate", "translate_agent"),
+        ("有没有更好的方案", "chat", ""),
+        ("帮我安装一下这首歌", "chat", ""),
+    ]
+
+    with patch(
+        "host_brain.app.cortex_orchestrator.cortex_orchestrator_sse_generator",
+        new=_fake_cortex_orchestrator_sse_generator,
+    ):
+        for index, (text, expected_route, expected_target) in enumerate(cases, start=1):
+            result = _run(
+                _run_cortex_orchestrator_pipeline(
+                    request_id=f"req_gateway_thalamus_matrix_{index}",
+                    session_id=f"qq_dm_thalamus_matrix_{index}",
+                    source="GATEWAY",
+                    text=text,
+                    payload={"platform": "qq", "conversation_id": f"qq_dm_thalamus_matrix_{index}"},
+                    ts_ms=123456 + index,
+                )
+            )
+            assert result["route_decision"]["route"] == expected_route
+            assert result["route_decision"]["target_id"] == expected_target
+
+    assert len(captured_intent_drafts) == len(cases)
+    assert all(intent_draft["schema_version"] == "Natsume.intent.v1" for intent_draft in captured_intent_drafts)
+
+
+def test_dispatch_worker_passes_canonical_thalamus_draft_to_gateway_pipeline(monkeypatch) -> None:
+    ledger = SQLiteLedger(":memory:", check_same_thread=False)
+    canonical_intent = {
+        "schema_version": "Natsume.intent.v1",
+        "route": "skill",
+        "target_id": "codex_worker",
+        "task": "使用无头浏览器验证前端效果",
+        "route_reason": "THALAMUS_RULE_CODEX_WORKSPACE_WORKER",
+        "reason_code": "THALAMUS_RULE_CODEX_WORKSPACE_WORKER",
+        "route_confidence": 0.94,
+        "route_source": "thalamus.rule",
+    }
+    fake_agent = SimpleNamespace(
+        classify_and_compile_intent_draft=AsyncMock(return_value=canonical_intent),
+    )
+
+    try:
+        with patch("host_brain.app.input_routes.get_thalamus_agent", return_value=fake_agent), patch(
+            "host_brain.app.input_routes._run_cortex_orchestrator_pipeline",
+            new=AsyncMock(
+                return_value={
+                    "decision": "APPROVE",
+                    "reason_code": None,
+                    "narrative": "开始验证。",
+                    "route_decision": {
+                        "route": "skill",
+                        "target_id": "codex_worker",
+                        "task": "使用无头浏览器验证前端效果",
+                    },
+                    "commit_event": {"phase": "COMMIT", "decision": "APPROVE"},
+                }
+            ),
+        ) as pipeline_mock, patch(
+            "host_brain.app.input_routes._deliver_gateway_reply",
+            new=AsyncMock(return_value={"success": True, "status": "OK", "latency_ms": 12, "reply_text_len": 5}),
+        ), patch(
+            "host_brain.app.input_routes._maybe_schedule_gateway_route_started_voice_ack",
+        ) as route_ack_mock:
+            _run(
+                _dispatch_to_graph_worker(
+                    request_id="req_gateway_worker_canonical",
+                    session_id="qq_dm_worker_canonical",
+                    source="GATEWAY",
+                    text="使用无头浏览器验证前端效果",
+                    payload={"platform": "qq", "conversation_id": "qq_dm_worker_canonical"},
+                    ts_ms=123456,
+                    ledger=ledger,
+                    dispatch_mode="fire_and_forget.inline",
+                    run_in_thread=False,
+                )
+            )
+
+        fake_agent.classify_and_compile_intent_draft.assert_awaited_once()
+        pipeline_mock.assert_awaited_once()
+        assert pipeline_mock.await_args.kwargs["intent_draft_override"] == canonical_intent
+        route_ack_mock.assert_called_once()
+        assert route_ack_mock.call_args.kwargs["route_type"] == "skill"
+        assert route_ack_mock.call_args.kwargs["target_id"] == "codex_worker"
+    finally:
+        ledger.close()
+
+
 def test_classify_task_intent_prefers_llm_route_when_rules_miss() -> None:
     with patch(
         "host_brain.tribe.thalamus_agent.classify_task_intent_by_rules",

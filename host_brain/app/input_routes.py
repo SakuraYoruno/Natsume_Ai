@@ -478,6 +478,51 @@ class _NoopMetrics:
         return _noop
 
 
+def _build_gateway_route_preview(text: str) -> dict[str, Any] | None:
+    """Rules-only route preview for non-authoritative Gateway acknowledgements."""
+    try:
+        from host_brain.tribe.thalamus_agent import classify_task_intent_by_rules  # noqa: PLC0415
+
+        preview = classify_task_intent_by_rules(text)
+        return dict(preview) if isinstance(preview, dict) else None
+    except Exception:
+        return None
+
+
+async def _build_input_thalamus_intent_draft(
+    *,
+    request_id: str,
+    session_id: str,
+    source: str,
+    text: str,
+    payload: dict[str, Any],
+    ts_ms: int,
+    person_id: str | None = None,
+) -> dict[str, Any]:
+    from host_brain.bond.user_identity import resolve_person_id  # noqa: PLC0415
+
+    reply_channel = str(payload.get("platform") or "").strip() or None
+    reply_target = str(payload.get("conversation_id") or "").strip() or None
+    resolved_person_id = resolve_person_id(
+        str(person_id or payload.get("person_id") or "").strip() or None,
+        session_id=session_id,
+        platform=reply_channel,
+        from_id=str(payload.get("from_id") or "").strip() or None,
+        conversation_id=reply_target,
+    )
+    return await get_thalamus_agent().classify_and_compile_intent_draft(
+        request_id=request_id,
+        session_id=session_id,
+        user_message=text,
+        person_id=resolved_person_id,
+        source="input_routes",
+        input_source=source,
+        ts_ms=ts_ms,
+        attachments=list(payload.get("attachments") or []),
+        multimodal_observations=dict(payload.get("multimodal_observations") or {}),
+    )
+
+
 def _should_send_gateway_immediate_ack(
     *,
     source: str,
@@ -2001,16 +2046,14 @@ async def _run_cortex_orchestrator_pipeline(
     )
     intent_draft = dict(intent_draft_override or {})
     if not intent_draft:
-        intent_draft = await get_thalamus_agent().classify_and_compile_intent_draft(
+        intent_draft = await _build_input_thalamus_intent_draft(
             request_id=request_id,
             session_id=session_id,
-            user_message=text,
+            source=source,
+            text=text,
+            payload=payload,
             person_id=person_id,
-            source="input_routes",
-            input_source=source,
             ts_ms=ts_ms,
-            attachments=attachments,
-            multimodal_observations=multimodal_observations,
         )
     governor_result: dict[str, Any] = {"decision": "APPROVE", "source": "input_routes"}
 
@@ -2873,14 +2916,9 @@ async def _dispatch_to_graph(
 
     run_in_thread = _parse_bool_env("HOST_INPUT_DISPATCH_IN_THREAD", default=True)
     dispatch_mode = "fire_and_forget.threaded" if run_in_thread else "fire_and_forget.inline"
-    preclassified_intent_draft: dict[str, Any] | None = None
+    gateway_route_preview: dict[str, Any] | None = None
     if source_upper == "GATEWAY":
-        try:
-            from host_brain.tribe.thalamus_agent import classify_task_intent_by_rules  # noqa: PLC0415
-
-            preclassified_intent_draft = classify_task_intent_by_rules(text)
-        except Exception as route_preclass_exc:
-            _logger.debug("[%s] gateway preclassify before ack failed: %s", request_id, route_preclass_exc)
+        gateway_route_preview = _build_gateway_route_preview(text)
 
     _log_input_event(
         ledger=ledger,
@@ -2900,7 +2938,7 @@ async def _dispatch_to_graph(
             source=source_upper,
             text=text,
             payload=payload,
-            intent_draft=preclassified_intent_draft,
+            intent_draft=gateway_route_preview,
             ledger=ledger,
         )
 
@@ -2913,7 +2951,6 @@ async def _dispatch_to_graph(
                 text=text,
                 payload=payload,
                 ts_ms=ts_ms,
-                preclassified_intent_draft=preclassified_intent_draft,
                 ledger=ledger,
                 dispatch_mode=dispatch_mode,
                 run_in_thread=run_in_thread,
@@ -2928,7 +2965,6 @@ async def _dispatch_to_graph(
         text=text,
         payload=payload,
         ts_ms=ts_ms,
-        preclassified_intent_draft=preclassified_intent_draft,
         ledger=ledger,
         dispatch_mode=dispatch_mode,
         run_in_thread=run_in_thread,
@@ -2943,7 +2979,6 @@ async def _dispatch_to_graph_worker(
     text: str,
     payload: dict[str, Any],
     ts_ms: int,
-    preclassified_intent_draft: dict[str, Any] | None = None,
     ledger: Any,
     dispatch_mode: str,
     run_in_thread: bool,
@@ -2954,6 +2989,7 @@ async def _dispatch_to_graph_worker(
     source_upper = str(source or "").strip().upper()
     progress_push_stop_event: asyncio.Event | None = None
     progress_push_task: asyncio.Task | None = None
+    thalamus_intent_draft: dict[str, Any] | None = None
     _log_input_event(
         ledger=ledger,
         request_id=request_id,
@@ -2965,29 +3001,38 @@ async def _dispatch_to_graph_worker(
         detail=f"dispatch_mode={dispatch_mode} source={source}",
         ts_ms=dispatch_ts,
     )
+    try:
+        thalamus_intent_draft = await _build_input_thalamus_intent_draft(
+            request_id=request_id,
+            session_id=session_id,
+            source=source,
+            text=text,
+            payload=payload,
+            ts_ms=ts_ms,
+        )
+    except Exception as intent_exc:
+        _logger.warning("[%s] thalamus intent draft build degraded before input dispatch: %s", request_id, intent_exc)
+        thalamus_intent_draft = None
+
     if source_upper == "GATEWAY":
         try:
-            if preclassified_intent_draft is None:
-                from host_brain.tribe.thalamus_agent import classify_task_intent_by_rules  # noqa: PLC0415
-
-                preclassified_intent_draft = classify_task_intent_by_rules(text)
             _maybe_schedule_gateway_route_started_voice_ack(
                 request_id=request_id,
                 session_id=session_id,
                 source=source_upper,
                 payload=payload,
-                route_type=str((preclassified_intent_draft or {}).get("route") or "").strip().lower(),
-                target_id=str((preclassified_intent_draft or {}).get("target_id") or "").strip(),
+                route_type=str((thalamus_intent_draft or {}).get("route") or "").strip().lower(),
+                target_id=str((thalamus_intent_draft or {}).get("target_id") or "").strip(),
                 ledger=ledger,
             )
         except Exception as route_ack_exc:
-            _logger.debug("[%s] gateway route-started ack preclassify failed: %s", request_id, route_ack_exc)
+            _logger.debug("[%s] gateway route-started ack intent draft failed: %s", request_id, route_ack_exc)
     if source_upper == "GATEWAY":
         should_push, push_reason = _should_start_gateway_progress_push(
             source=source_upper,
             text=text,
             payload=payload,
-            intent_draft=preclassified_intent_draft,
+            intent_draft=thalamus_intent_draft,
         )
         if should_push:
             _log_input_event(
@@ -3061,7 +3106,7 @@ async def _dispatch_to_graph_worker(
             text=text,
             payload=payload,
             ts_ms=ts_ms,
-            intent_draft_override=preclassified_intent_draft,
+            intent_draft_override=thalamus_intent_draft,
         )
         deviation_meta: dict[str, Any] | None = None
         if source_upper == "GATEWAY":

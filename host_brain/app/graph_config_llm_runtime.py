@@ -33,11 +33,17 @@ from host_brain.app.provider_factory import (
     resolve_host_llm_model_id,
 )
 from host_brain.app.model_router import resolve_gemini_model_route
-from host_brain.app.graph_config_router import (
-    HOST_CHAT_ROUTE_CLOUD,
-    HOST_CHAT_ROUTE_HOST_14B,
-    HOST_CHAT_ROUTE_SKILLS,
+from host_brain.app.prompt_builder import (
+    SCENE_CHAT,
+    SCENE_EXEC_INTENT,
+    SCENE_VISION_UI,
+    SCENE_WORK_CODE,
+    SCENE_WORK_TRANSLATE,
 )
+
+HOST_CHAT_ROUTE_HOST_14B = "host_14b"
+HOST_CHAT_ROUTE_CLOUD = "cloud"
+HOST_CHAT_ROUTE_SKILLS = "skills"
 
 _HOST_CHAT_14B_DEFAULT_PROVIDER = PROVIDER_OPENAI
 _HOST_CHAT_14B_DEFAULT_MODEL_ID = "qwen3:14b"
@@ -232,12 +238,11 @@ async def _resolve_host_14b_health_status_async(*, provider_name: str, timeout_m
 
 
 def _evaluate_host_chat_gray_rollout(*, rollout_key: str | None, scene_type: str | None) -> dict[str, Any]:
-    from host_brain.app.graph_config_router import SCENE_CHAT as _SCENE_CHAT
     enabled = _parse_bool(os.environ.get("HOST_CHAT_GRAY_ENABLED"), default=False)
     percent = _parse_int(os.environ.get("HOST_CHAT_GRAY_PERCENT"), default=100, min_value=0, max_value=100)
     scope_scenes = {str(item).strip().upper() for item in _parse_csv_tokens(os.environ.get("HOST_CHAT_GRAY_SCENES") or "CHAT") if str(item).strip()}
     allowlist = _parse_csv_tokens(os.environ.get("HOST_CHAT_GRAY_USER_ALLOWLIST"))
-    normalized_scene = str(scene_type or _SCENE_CHAT).strip().upper() or _SCENE_CHAT
+    normalized_scene = str(scene_type or SCENE_CHAT).strip().upper() or SCENE_CHAT
     key_value = str(rollout_key or "").strip()
     result: dict[str, Any] = {"enabled": enabled, "percent": percent, "scene_type": normalized_scene, "scope_scenes": sorted(scope_scenes), "rollout_key": (key_value or None), "bucket": None, "allowlist_hit": False, "in_rollout": True, "reason_code": "HOST_CHAT_GRAY_DISABLED", "detail": "gray rollout disabled"}
     if not enabled:
@@ -269,7 +274,6 @@ def _evaluate_host_chat_gray_rollout(*, rollout_key: str | None, scene_type: str
 
 async def _resolve_host_llm_runtime_core(*, rollout_key: str | None = None, scene_type: str | None = None, health_probe_async: bool = True) -> dict[str, Any]:
     """LLM 运行时解析公共核心逻辑。"""
-    from host_brain.app.graph_config_router import SCENE_CHAT as _SCENE_CHAT, SCENE_EXEC_INTENT as _SCENE_EXEC_INTENT, SCENE_WORK_CODE as _SCENE_WORK_CODE, SCENE_WORK_TRANSLATE as _SCENE_WORK_TRANSLATE, SCENE_VISION_UI as _SCENE_VISION_UI
     config_result = load_host_config()
     cloud_timeout_ms = 15_000
     gemini_api_key: str | None = None
@@ -414,8 +418,14 @@ async def _resolve_host_llm_runtime_core(*, rollout_key: str | None = None, scen
     try:
         from host_brain.app.dependencies import get_routing_matrix
         from host_brain.app.schemas.routing_types import TaskType as _TaskType, LatencyBudget as _LatencyBudget
-        _scene_to_task = {_SCENE_CHAT: _TaskType.CHAT, _SCENE_EXEC_INTENT: _TaskType.REASONING, _SCENE_WORK_CODE: _TaskType.CODE, _SCENE_WORK_TRANSLATE: _TaskType.TRANSLATE, _SCENE_VISION_UI: _TaskType.CHAT}
-        _task_type = _scene_to_task.get(str(scene_type or _SCENE_CHAT).strip().upper(), _TaskType.CHAT)
+        _scene_to_task = {
+            SCENE_CHAT: _TaskType.CHAT,
+            SCENE_EXEC_INTENT: _TaskType.REASONING,
+            SCENE_WORK_CODE: _TaskType.CODE,
+            SCENE_WORK_TRANSLATE: _TaskType.TRANSLATE,
+            SCENE_VISION_UI: _TaskType.CHAT,
+        }
+        _task_type = _scene_to_task.get(str(scene_type or SCENE_CHAT).strip().upper(), _TaskType.CHAT)
         _latency = _LatencyBudget.FAST if sys_mode == "gaming" else _LatencyBudget.NORMAL
         _matrix = get_routing_matrix()
         _decision = _matrix.select_with_fallback(task_type=_task_type, latency_budget=_latency)
