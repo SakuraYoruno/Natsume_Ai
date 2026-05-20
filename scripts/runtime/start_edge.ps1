@@ -203,7 +203,9 @@ function Invoke-SchtasksBreakaway {
     [bool]$InteractiveTask = $false
   )
   $sshSessionDetected = (-not [string]::IsNullOrWhiteSpace([string]$env:SSH_CONNECTION)) -or (-not [string]::IsNullOrWhiteSpace([string]$env:SSH_CLIENT))
-  if ($sshSessionDetected) {
+  # GUI launchers (VTube Studio, Steam URI) need the interactive desktop session.
+  # In SSH sessions WMI creates a detached non-interactive process, so skip it.
+  if ($sshSessionDetected -and -not $InteractiveTask) {
     try {
       $commandLine = "cmd.exe /c $TaskCommand"
       $createResult = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = $commandLine } -ErrorAction Stop
