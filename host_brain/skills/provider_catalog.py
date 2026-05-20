@@ -39,6 +39,7 @@ BUILTIN_SKILL_PROVIDER_SPECS: tuple[SkillProviderSpec, ...] = (
     SkillProviderSpec("HOST_SKILL_PERSONALITY_ENABLED", "host_brain.skills.personality_registry:PersonalitySkillProvider", "Personality Skills", "diary_writer / dream_generator / desktop_note / focus_mode / proactive_talk"),
     SkillProviderSpec("HOST_SKILL_DESKTOP_ENABLED", "host_brain.skills.desktop_registry:DesktopSkillProvider", "Desktop Skills", "desktop_screenshot / desktop_click / desktop_type / desktop_hotkey / clipboard_read / clipboard_write"),
     SkillProviderSpec("HOST_SKILL_MEMORY_ENABLED", "host_brain.skills.memory_registry:MemorySkillProvider", "Memory Skills", "memory_search / memory_store / memory_preference_extract / memory_consolidate / memory_forget"),
+    SkillProviderSpec("HOST_SKILL_REPO_ENABLED", "host_brain.skills.repo_registry:RepoSkillProvider", "Repo Doctor Skills", "repo_health_scan / test_failure_triage"),
     SkillProviderSpec("HOST_SKILL_EMOTION_ENABLED", "host_brain.skills.emotion_registry:EmotionSkillProvider", "Emotion Skills", "emotion_update / bond_score_update / emotion_get / bond_score_get"),
     SkillProviderSpec("HOST_SKILL_SCHEDULER_ENABLED", "host_brain.skills.scheduler_registry:SchedulerSkillProvider", "Scheduler Skills", "scheduler_add / scheduler_cancel / scheduler_list"),
     SkillProviderSpec("HOST_SKILL_SYSTEM_ENABLED", "host_brain.skills.system_registry:SystemSkillProvider", "System Skills", "system_info / process_list / process_kill / network_status / open_app"),

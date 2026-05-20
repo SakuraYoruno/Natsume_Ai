@@ -24,6 +24,8 @@ _DEFAULT_SKILL_FAMILY_BY_SKILL_ID: dict[str, str] = {
     "memory_preference_extract": "memory",
     "memory_consolidate": "memory",
     "memory_recall": "memory",
+    "repo_health_scan": "code",
+    "test_failure_triage": "code",
     "session_summary": "memory",
     "emotion_query": "emotion",
     "bond_query": "social",

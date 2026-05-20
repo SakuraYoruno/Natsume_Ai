@@ -117,6 +117,37 @@ def build_default_tool_execution_matrix(repo_root: str | Path | None = None) -> 
             value_tier="memory_steward",
         ),
         ToolExecutionProbe(
+            probe_id="repo-health-scan",
+            skill_name="repo_health_scan",
+            args={
+                "repo_root": str(root),
+                "include_git": True,
+                "include_tests": True,
+                "include_python": True,
+                "run_tests": False,
+                "max_files": 5000,
+            },
+            expected_scope="system",
+            expected_tool="repo",
+            value_tier="repo_doctor",
+        ),
+        ToolExecutionProbe(
+            probe_id="test-failure-triage",
+            skill_name="test_failure_triage",
+            args={
+                "output": (
+                    "FAILED tests/unit/test_demo.py::test_contract - AssertionError\n"
+                    "E   AssertionError: expected OK\n"
+                    "1 failed, 4 passed in 0.12s"
+                ),
+                "command": "pytest -q tests/unit/test_demo.py",
+                "max_failures": 5,
+            },
+            expected_scope="system",
+            expected_tool="repo",
+            value_tier="repo_doctor",
+        ),
+        ToolExecutionProbe(
             probe_id="system-info",
             skill_name="system_info",
             args={

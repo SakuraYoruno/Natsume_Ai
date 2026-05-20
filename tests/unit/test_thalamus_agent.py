@@ -438,6 +438,44 @@ def test_classify_and_compile_intent_draft_routes_memory_consolidate_tool() -> N
     assert compiled["args"]["include_preferences"] is True
 
 
+def test_classify_and_compile_intent_draft_routes_repo_health_scan_tool() -> None:
+    agent = ThalamusAgent()
+
+    compiled = _run(
+        agent.classify_and_compile_intent_draft(
+            request_id="req-thalamus-repo-health",
+            session_id="session-thalamus-repo-health",
+            user_message="仓库医生做一次健康扫描",
+            source="chat_handler",
+            ts_ms=1776349003157,
+        )
+    )
+
+    assert compiled["route"] == "skill"
+    assert compiled["target_id"] == "repo_health_scan"
+    assert compiled["route_reason"] == "THALAMUS_RULE_REPO_HEALTH_SCAN"
+    assert compiled["args"]["run_tests"] is False
+
+
+def test_classify_and_compile_intent_draft_routes_test_failure_triage_tool() -> None:
+    agent = ThalamusAgent()
+
+    compiled = _run(
+        agent.classify_and_compile_intent_draft(
+            request_id="req-thalamus-test-triage",
+            session_id="session-thalamus-test-triage",
+            user_message="分析这段测试失败日志：FAILED tests/unit/test_demo.py::test_contract - AssertionError",
+            source="chat_handler",
+            ts_ms=1776349003158,
+        )
+    )
+
+    assert compiled["route"] == "skill"
+    assert compiled["target_id"] == "test_failure_triage"
+    assert compiled["route_reason"] == "THALAMUS_RULE_TEST_FAILURE_TRIAGE"
+    assert compiled["args"]["max_failures"] == 12
+
+
 def test_classify_and_compile_intent_draft_builds_explicit_supported_plan() -> None:
     agent = ThalamusAgent()
 

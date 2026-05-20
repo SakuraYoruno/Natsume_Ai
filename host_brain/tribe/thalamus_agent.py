@@ -65,8 +65,10 @@ _LLM_SKILL_TARGET_ALLOWLIST: frozenset[str] = frozenset({
     "network_status",
     "open_app",
     "process_list",
+    "repo_health_scan",
     "session_summary",
     "system_info",
+    "test_failure_triage",
 })
 _CANONICAL_ACTIONS = {
     "read_only_status",
@@ -151,6 +153,17 @@ _MEMORY_PREFERENCE_EXTRACT_RE = re.compile(
 _MEMORY_CONSOLIDATE_RE = re.compile(
     r"((记忆管家|整理.{0,12}记忆|沉淀.{0,12}记忆|记忆候选|长期记忆候选|整理成记忆)"
     r"|(?:consolidate|summari[sz]e).{0,12}(?:memory|memories|memory candidates?))",
+    re.IGNORECASE,
+)
+_REPO_HEALTH_SCAN_RE = re.compile(
+    r"((仓库|repo|repository|项目).{0,12}(医生|体检|健康|扫描|自检|状态检查|health)"
+    r"|(?:repo|repository)\s+(?:doctor|health|scan|check))",
+    re.IGNORECASE,
+)
+_TEST_FAILURE_TRIAGE_RE = re.compile(
+    r"((分析|归因|triage).{0,16}(测试|单测|pytest|unittest).{0,16}(失败|报错|日志|输出)"
+    r"|(测试|单测|pytest|unittest).{0,16}(失败日志|失败输出|报错日志|报错输出|归因|triage)"
+    r"|(?:triage|analy[sz]e).{0,16}(?:test|pytest).{0,12}(?:failure|error|log))",
     re.IGNORECASE,
 )
 _SELF_HEAL_MARKERS = (
@@ -887,6 +900,45 @@ def _build_memory_steward_route_seed(text: str) -> dict[str, Any] | None:
     return None
 
 
+def _build_repo_doctor_route_seed(text: str) -> dict[str, Any] | None:
+    normalized = _normalize_text(text)
+    if not normalized:
+        return None
+    if _TEST_FAILURE_TRIAGE_RE.search(normalized):
+        return {
+            "route": "skill",
+            "target_id": "test_failure_triage",
+            "task": normalized,
+            "reason_code": "THALAMUS_RULE_TEST_FAILURE_TRIAGE",
+            "confidence": 0.94,
+            "route_source": "thalamus.rule",
+            "args": {
+                "output": normalized,
+                "text": normalized,
+                "max_failures": 12,
+                "user_message": normalized,
+            },
+        }
+    if _REPO_HEALTH_SCAN_RE.search(normalized):
+        return {
+            "route": "skill",
+            "target_id": "repo_health_scan",
+            "task": normalized,
+            "reason_code": "THALAMUS_RULE_REPO_HEALTH_SCAN",
+            "confidence": 0.94,
+            "route_source": "thalamus.rule",
+            "args": {
+                "include_git": True,
+                "include_tests": True,
+                "include_python": True,
+                "run_tests": False,
+                "text": normalized,
+                "user_message": normalized,
+            },
+        }
+    return None
+
+
 def _has_explicit_route_seed(payload: Mapping[str, Any] | None) -> bool:
     data = dict(payload or {})
     route = _normalize_text(data.get("route"), lower=True)
@@ -954,6 +1006,13 @@ def _infer_supported_step_route(text: str) -> tuple[str, str, str] | None:
             _normalize_text(memory_steward_seed.get("target_id")),
             _normalize_text(memory_steward_seed.get("reason_code")) or "THALAMUS_RULE_MEMORY_STEWARD",
         )
+    repo_doctor_seed = _build_repo_doctor_route_seed(cleaned)
+    if repo_doctor_seed is not None:
+        return (
+            "skill",
+            _normalize_text(repo_doctor_seed.get("target_id")),
+            _normalize_text(repo_doctor_seed.get("reason_code")) or "THALAMUS_RULE_REPO_DOCTOR",
+        )
     system_seed = _build_system_observation_route_seed(cleaned)
     if system_seed is not None:
         return (
@@ -1008,6 +1067,10 @@ def _build_direct_route_seed(text: str) -> dict[str, Any] | None:
     memory_steward_seed = _build_memory_steward_route_seed(cleaned)
     if memory_steward_seed is not None:
         return memory_steward_seed
+
+    repo_doctor_seed = _build_repo_doctor_route_seed(cleaned)
+    if repo_doctor_seed is not None:
+        return repo_doctor_seed
 
     if _looks_like_open_app_request(cleaned):
         return {
