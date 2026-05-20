@@ -150,6 +150,68 @@ def test_deterministic_reply_formats_system_info_result() -> None:
     assert "磁盘 59.5%" in reply
 
 
+def test_deterministic_reply_formats_system_info_runtime_vitals() -> None:
+    ctx = SubAgentContext(
+        agent_id="system_info",
+        task="查一下系统状态",
+        result_text="runtime vitals",
+        success=True,
+        payload={
+            "result": {
+                "status": "OK",
+                "action": "info",
+                "detail": {
+                    "runtime_vitals": {
+                        "status": "DEGRADED",
+                        "headline": "可用但有 1 个降级点",
+                        "resource_pressure": {
+                            "status": "NORMAL",
+                            "cpu_percent": 22.5,
+                            "memory_percent": 41.0,
+                            "disk_percent": 59.5,
+                        },
+                        "capabilities": {
+                            "qq_communication": {"status": "READY"},
+                            "tool_execution": {"status": "READY"},
+                            "memory_recall": {"status": "READY"},
+                            "voice_tts": {"status": "READY"},
+                            "avatar_vts": {"status": "DEGRADED"},
+                        },
+                        "gateway": {
+                            "status": "UP",
+                            "qq_onebot": {"status": "UP"},
+                        },
+                        "edge_components": {
+                            "vts": {"status": "DOWN", "detail": "connection refused"},
+                        },
+                        "issues": [
+                            {
+                                "severity": "warning",
+                                "component": "edge.vts",
+                                "status": "DOWN",
+                                "detail": "connection refused",
+                            }
+                        ],
+                        "recommendations": [
+                            "启动 VTube Studio 并确认插件端口 8001 可连接。",
+                        ],
+                    }
+                },
+            },
+        },
+    )
+
+    reply = _build_deterministic_sub_agent_reply(ctx, render_target_lang="zh")
+
+    assert reply is not None
+    assert "体征诊断：DEGRADED" in reply
+    assert "QQ通讯可用" in reply
+    assert "工具执行可用" in reply
+    assert "VTS降级" in reply
+    assert "edge.vts=DOWN" in reply
+    assert "启动 VTube Studio" in reply
+
+
 def test_runtime_deterministic_reply_formats_system_info_result() -> None:
     ctx = SubAgentContext(
         agent_id="system_info",

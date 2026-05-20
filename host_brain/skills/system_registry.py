@@ -23,6 +23,10 @@ def _normalize_system_info(args: dict[str, Any], ctx: dict[str, Any] | None) -> 
     include_network = bool(include_network_raw) if include_network_raw is not None else False
     include_gpu_raw = (args or {}).get("include_gpu")
     include_gpu = bool(include_gpu_raw) if include_gpu_raw is not None else False
+    include_runtime_vitals_raw = (args or {}).get("include_runtime_vitals")
+    include_runtime_vitals = bool(include_runtime_vitals_raw) if include_runtime_vitals_raw is not None else True
+    include_gateway_status_raw = (args or {}).get("include_gateway_status")
+    include_gateway_status = bool(include_gateway_status_raw) if include_gateway_status_raw is not None else True
 
     return {
         "include_cpu": include_cpu,
@@ -30,6 +34,8 @@ def _normalize_system_info(args: dict[str, Any], ctx: dict[str, Any] | None) -> 
         "include_disk": include_disk,
         "include_network": include_network,
         "include_gpu": include_gpu,
+        "include_runtime_vitals": include_runtime_vitals,
+        "include_gateway_status": include_gateway_status,
         "manifest_ref": "system_info::local",
         "session_id": str((ctx or {}).get("session_id") or "").strip() or None,
         "_context": ctx or {},
@@ -135,7 +141,7 @@ class SystemSkillProvider(DeclarativeSkillProvider):
             risk_level=1,
             scope="system",
             reversible=True,
-            description="获取本地系统信息（CPU / 内存 / 磁盘 / 操作系统版本 / 运行时长）。",
+            description="获取本地系统信息和运行体征诊断（Host / Edge / Gateway / QQ / ASR / TTS / VTS / 记忆 / 工具执行）。",
             tool="system",
             action="info",
             normalize_args=_normalize_system_info,

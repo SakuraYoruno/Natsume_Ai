@@ -1072,10 +1072,98 @@ def _format_gb(value: Any) -> str:
         return "-"
 
 
+def _format_runtime_capability(value: Any) -> str:
+    status = str(_mapping_from_any(value).get("status") or "UNKNOWN").strip().upper()
+    return {
+        "READY": "可用",
+        "UP": "可用",
+        "DOWN": "不可用",
+        "DEGRADED": "降级",
+        "DISABLED": "已关闭",
+        "DEFER": "建议延后",
+        "CAUTION": "谨慎执行",
+        "UNKNOWN": "未知",
+    }.get(status, status or "未知")
+
+
+def _build_system_info_vitals_reply(
+    detail: dict[str, Any],
+    *,
+    render_target_lang: str = "zh",
+) -> str | None:
+    vitals = _mapping_from_any(detail.get("runtime_vitals"))
+    if not vitals:
+        return None
+    resources = _mapping_from_any(vitals.get("resource_pressure"))
+    capabilities = _mapping_from_any(vitals.get("capabilities"))
+    gateway = _mapping_from_any(vitals.get("gateway"))
+    qq_onebot = _mapping_from_any(gateway.get("qq_onebot"))
+    edge_components = _mapping_from_any(vitals.get("edge_components"))
+    issues = list(vitals.get("issues") or []) if isinstance(vitals.get("issues"), list) else []
+    recommendations = (
+        list(vitals.get("recommendations") or [])
+        if isinstance(vitals.get("recommendations"), list)
+        else []
+    )
+
+    status = str(vitals.get("status") or "UNKNOWN").strip().upper()
+    headline = str(vitals.get("headline") or "").strip()
+    if _normalize_template_lang(render_target_lang) == "ja":
+        prefix = "システム体調診断"
+    else:
+        prefix = "体征诊断"
+
+    cpu_text = _format_percent(resources.get("cpu_percent"))
+    mem_text = _format_percent(resources.get("memory_percent"))
+    disk_text = _format_percent(resources.get("disk_percent"))
+    resource_status = str(resources.get("status") or "UNKNOWN").strip().upper()
+
+    capability_parts = [
+        f"QQ通讯{_format_runtime_capability(capabilities.get('qq_communication'))}",
+        f"工具执行{_format_runtime_capability(capabilities.get('tool_execution'))}",
+        f"记忆召回{_format_runtime_capability(capabilities.get('memory_recall'))}",
+        f"TTS{_format_runtime_capability(capabilities.get('voice_tts'))}",
+        f"VTS{_format_runtime_capability(capabilities.get('avatar_vts'))}",
+    ]
+    qq_status = str(qq_onebot.get("status") or "").strip().upper()
+    if qq_status and qq_status not in {"UNKNOWN", "SKIPPED"}:
+        capability_parts.insert(0, f"OneBot{_format_runtime_capability(qq_onebot)}")
+
+    issue_parts: list[str] = []
+    for raw_issue in issues[:3]:
+        issue = _mapping_from_any(raw_issue)
+        component = str(issue.get("component") or "组件").strip()
+        status_text = str(issue.get("status") or "").strip()
+        detail_text = str(issue.get("detail") or "").strip()
+        if detail_text:
+            issue_parts.append(f"{component}={status_text}（{_build_reply_preview(detail_text, limit=48)}）")
+        else:
+            issue_parts.append(f"{component}={status_text}")
+
+    rec_text = ""
+    if recommendations:
+        rec_text = f"建议：{_build_reply_preview(str(recommendations[0]), limit=90)}"
+
+    parts = [
+        f"{prefix}：{status}，{headline or '运行状态已读取'}",
+        "能力：" + "；".join(capability_parts),
+        f"资源：CPU {cpu_text}，内存 {mem_text}，磁盘 {disk_text}，压力 {resource_status}",
+    ]
+    if issue_parts:
+        parts.append("问题：" + "；".join(issue_parts))
+    if rec_text:
+        parts.append(rec_text)
+
+    return "。".join(part.rstrip("。") for part in parts if part).rstrip("。") + "。"
+
+
 def _build_system_info_reply(ctx: SubAgentContext, *, render_target_lang: str = "zh") -> str | None:
     detail = _skill_result_detail(ctx)
     if not detail:
         return None
+    vitals_reply = _build_system_info_vitals_reply(detail, render_target_lang=render_target_lang)
+    if vitals_reply:
+        return vitals_reply
     platform = _mapping_from_any(detail.get("platform"))
     cpu = _mapping_from_any(detail.get("cpu"))
     memory = _mapping_from_any(detail.get("memory"))

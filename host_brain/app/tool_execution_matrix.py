@@ -189,6 +189,7 @@ def build_default_tool_execution_matrix(repo_root: str | Path | None = None) -> 
                 "include_disk": False,
                 "include_network": False,
                 "include_gpu": False,
+                "include_runtime_vitals": False,
             },
             expected_scope="system",
             expected_tool="system",
