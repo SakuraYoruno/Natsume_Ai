@@ -101,6 +101,7 @@ def test_ensure_modern_sdk_paths_adds_bundled_runtime_site_packages(
     assert str(model_root / "GPT_SoVITS") in sys.path
     assert str(model_root / "GPT_SoVITS" / "eres2net") in sys.path
     assert str(runtime_site) in sys.path
+    assert sys.path.index(str(runtime_site)) > sys.path.index(str(model_root / "GPT_SoVITS" / "eres2net"))
     assert dll_calls == [str(opencc_bin)]
     assert tts_engine._DLL_DIRECTORY_HANDLES == [dll_handle]
 

@@ -1287,11 +1287,16 @@ def _ensure_modern_sdk_paths(model_root: str) -> None:
         model_root,
         os.path.join(model_root, "GPT_SoVITS"),
         os.path.join(model_root, "GPT_SoVITS", "eres2net"),
-        runtime_site_packages,
     ]
     for path in reversed(paths):
         if path and os.path.isdir(path) and path not in sys.path:
             sys.path.insert(0, path)
+    if (
+        runtime_site_packages
+        and os.path.isdir(runtime_site_packages)
+        and runtime_site_packages not in sys.path
+    ):
+        sys.path.append(runtime_site_packages)
     _ensure_model_runtime_dll_dirs(runtime_site_packages)
 
 
