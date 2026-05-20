@@ -18,6 +18,11 @@ def test_codex_runtime_skill_registry_contains_new_skill_ids() -> None:
         "codex_organ_scan",
         "codex_persona_drift_audit",
         "codex_dream_compile",
+        "codex_workbench_brief",
+        "codex_repo_sentinel",
+        "codex_memory_curator",
+        "codex_document_digest",
+        "codex_frontend_review",
     }.issubset(set(registry.list_skill_names()))
 
 
@@ -46,3 +51,27 @@ def test_codex_self_heal_skill_targets_immune_domain() -> None:
     order = payload["work_order"]
     assert order["domain"] == "immune"
     assert order["run_mode"] == "self_heal"
+
+
+def test_codex_production_skill_emits_async_persona_bounded_work_order() -> None:
+    registry = build_codex_runtime_skill_registry()
+    payload = registry.require("codex_memory_curator").handler(
+        {"task": "整理最近对话里的长期记忆候选", "start_background": False},
+        {"request_id": "req-production-memory"},
+    )
+
+    order = payload["work_order"]
+    metadata = order["metadata"]
+    boundary = metadata["persona_boundary"]
+
+    assert payload["tool"] == "codex_production"
+    assert payload["action"] == "enqueue"
+    assert payload["start_background"] is False
+    assert order["domain"] == "memory"
+    assert order["run_mode"] == "inspect"
+    assert metadata["codex_production"] is True
+    assert metadata["codex_background"] is True
+    assert metadata["surface_main_chain_required"] is True
+    assert boundary["surface_owner"] == "host_main_persona"
+    assert "write_long_term_memory" in order["forbidden_actions"]
+    assert "send_external_message" in order["forbidden_actions"]

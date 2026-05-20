@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any, Callable
 
 from host_brain.bio_ops import build_proposal_only_policy
+from host_brain.codex_runtime.production_studio import build_production_work_order, get_production_skill_profile
 from host_brain.codex_runtime.studios import (
     build_code_work_order,
     build_finance_work_order,
@@ -66,6 +67,20 @@ def _normalize_skill_forge(args: dict[str, Any], ctx: dict[str, Any] | None) -> 
 
 def _normalize_research(args: dict[str, Any], ctx: dict[str, Any] | None) -> dict[str, Any]:
     return _payload_from_work_order(build_research_work_order(_base_args(args, ctx)))
+
+
+def _normalize_production(skill_id: str) -> Callable[[dict[str, Any], dict[str, Any] | None], dict[str, Any]]:
+    def _normalize(args: dict[str, Any], ctx: dict[str, Any] | None) -> dict[str, Any]:
+        merged = _base_args(args, ctx)
+        payload = _payload_from_work_order(build_production_work_order(merged, skill_id=skill_id))
+        payload["start_background"] = bool(merged.get("start_background", True))
+        if "artifacts_root" in merged:
+            payload["artifacts_root"] = merged.get("artifacts_root")
+        if "runs_root" in merged:
+            payload["runs_root"] = merged.get("runs_root")
+        return payload
+
+    return _normalize
 
 
 def _normalize_bio_ops(capability: str, run_mode: str, skill_id: str) -> Callable[[dict[str, Any], dict[str, Any] | None], dict[str, Any]]:
@@ -261,6 +276,86 @@ class CodexRuntimeSkillProvider(DeclarativeSkillProvider):
             normalize_args=_normalize_bio_ops("dream_rehearsal", "inspect", "codex_dream_compile"),
             family="code",
             capability_tags=("codex", "dream"),
+            fallback_policy="strict_fail",
+        ),
+        DeclarativeSkillSpec(
+            skill_name="codex_workbench_brief",
+            method_name="codex_workbench_brief",
+            clearance="LOW",
+            risk_level=2,
+            scope="host",
+            reversible=False,
+            description=get_production_skill_profile("codex_workbench_brief").value_statement,
+            tool="codex_production",
+            action="enqueue",
+            normalize_args=_normalize_production("codex_workbench_brief"),
+            family="code",
+            capability_tags=tuple(get_production_skill_profile("codex_workbench_brief").capability_tags),
+            parallelizable=True,
+            fallback_policy="strict_fail",
+        ),
+        DeclarativeSkillSpec(
+            skill_name="codex_repo_sentinel",
+            method_name="codex_repo_sentinel",
+            clearance="LOW",
+            risk_level=2,
+            scope="host",
+            reversible=False,
+            description=get_production_skill_profile("codex_repo_sentinel").value_statement,
+            tool="codex_production",
+            action="enqueue",
+            normalize_args=_normalize_production("codex_repo_sentinel"),
+            family="code",
+            capability_tags=tuple(get_production_skill_profile("codex_repo_sentinel").capability_tags),
+            parallelizable=True,
+            fallback_policy="strict_fail",
+        ),
+        DeclarativeSkillSpec(
+            skill_name="codex_memory_curator",
+            method_name="codex_memory_curator",
+            clearance="LOW",
+            risk_level=2,
+            scope="host",
+            reversible=False,
+            description=get_production_skill_profile("codex_memory_curator").value_statement,
+            tool="codex_production",
+            action="enqueue",
+            normalize_args=_normalize_production("codex_memory_curator"),
+            family="code",
+            capability_tags=tuple(get_production_skill_profile("codex_memory_curator").capability_tags),
+            parallelizable=True,
+            fallback_policy="strict_fail",
+        ),
+        DeclarativeSkillSpec(
+            skill_name="codex_document_digest",
+            method_name="codex_document_digest",
+            clearance="LOW",
+            risk_level=2,
+            scope="host",
+            reversible=False,
+            description=get_production_skill_profile("codex_document_digest").value_statement,
+            tool="codex_production",
+            action="enqueue",
+            normalize_args=_normalize_production("codex_document_digest"),
+            family="code",
+            capability_tags=tuple(get_production_skill_profile("codex_document_digest").capability_tags),
+            parallelizable=True,
+            fallback_policy="strict_fail",
+        ),
+        DeclarativeSkillSpec(
+            skill_name="codex_frontend_review",
+            method_name="codex_frontend_review",
+            clearance="LOW",
+            risk_level=2,
+            scope="host",
+            reversible=False,
+            description=get_production_skill_profile("codex_frontend_review").value_statement,
+            tool="codex_production",
+            action="enqueue",
+            normalize_args=_normalize_production("codex_frontend_review"),
+            family="code",
+            capability_tags=tuple(get_production_skill_profile("codex_frontend_review").capability_tags),
+            parallelizable=True,
             fallback_policy="strict_fail",
         ),
     )

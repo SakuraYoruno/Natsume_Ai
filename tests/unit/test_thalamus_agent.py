@@ -1080,6 +1080,27 @@ def test_classify_and_compile_intent_draft_routes_self_heal_to_codex() -> None:
     assert compiled["args"]["include_dependency_probes"] is True
 
 
+def test_classify_and_compile_intent_draft_routes_production_brief_to_codex_background() -> None:
+    agent = ThalamusAgent()
+
+    compiled = _run(
+        agent.classify_and_compile_intent_draft(
+            request_id="req-thalamus-production-brief",
+            session_id="session-thalamus-production-brief",
+            user_message="生成一个今日工作简报，后台异步跑就行",
+            source="chat_handler",
+            ts_ms=1776349003520,
+        )
+    )
+
+    assert compiled["route"] == "skill"
+    assert compiled["target_id"] == "codex_workbench_brief"
+    assert compiled["route_reason"] == "THALAMUS_RULE_CODEX_PRODUCTION"
+    assert compiled["args"]["run_mode"] == "research"
+    assert compiled["args"]["start_background"] is True
+    assert compiled["args"]["workspace_strategy"] == "temp_workspace"
+
+
 def test_classify_and_compile_intent_draft_defaults_runtime_repo_for_codex_code_requests() -> None:
     agent = ThalamusAgent()
 

@@ -9,14 +9,22 @@ from host_brain.codex_runtime.work_order import CodexWorkOrder
 
 def build_codex_prompt(work_order: CodexWorkOrder, *, workspace: Path) -> str:
     input_pack = dict(work_order.input_pack or {})
+    metadata = dict(work_order.metadata or {})
+    is_production = bool(metadata.get("codex_production"))
     parts = [
         "You are executing a Codex WorkOrder for the Natsume host runtime.",
         f"WorkOrder ID: {work_order.work_order_id}",
         f"Domain: {work_order.domain}",
         f"Run mode: {work_order.run_mode}",
         f"Workspace: {workspace}",
-        "Return only the final user-facing result.",
     ]
+    if is_production:
+        parts.append(
+            "Production background role. You are a silent worker, not Natsume's persona. "
+            "Return structured worker findings only; the Host surface/main chain owns final user-facing expression."
+        )
+    else:
+        parts.append("Return only the final user-facing result.")
     if work_order.domain == "bio_ops":
         parts.append(
             "BioOps proposal-only execution. Read evidence and produce audit reports, candidates, or recommendations only. "
@@ -39,6 +47,23 @@ def build_codex_prompt(work_order: CodexWorkOrder, *, workspace: Path) -> str:
         parts.append("Allowed actions: " + ", ".join(work_order.allowed_actions))
     if work_order.forbidden_actions:
         parts.append("Forbidden actions: " + ", ".join(work_order.forbidden_actions))
+    if is_production:
+        boundary = dict(metadata.get("persona_boundary") or {})
+        result_contract = dict(metadata.get("result_contract") or {})
+        must_not = [str(item) for item in list(boundary.get("must_not") or []) if str(item).strip()]
+        must = [str(item) for item in list(boundary.get("must") or []) if str(item).strip()]
+        if must:
+            parts.append("Production persona boundary - must:\n" + "\n".join(f"- {item}" for item in must))
+        if must_not:
+            parts.append("Production persona boundary - must not:\n" + "\n".join(f"- {item}" for item in must_not))
+        allowed_sections = [str(item) for item in list(result_contract.get("allowed_sections") or []) if str(item).strip()]
+        forbidden_sections = [str(item) for item in list(result_contract.get("forbidden_sections") or []) if str(item).strip()]
+        if allowed_sections or forbidden_sections:
+            parts.append(
+                "Production result contract:\n"
+                + ("Allowed sections: " + ", ".join(allowed_sections) + "\n" if allowed_sections else "")
+                + ("Forbidden sections: " + ", ".join(forbidden_sections) if forbidden_sections else "")
+            )
     if work_order.acceptance_criteria:
         parts.append("Acceptance criteria:\n" + "\n".join(f"- {item}" for item in work_order.acceptance_criteria))
     if input_pack:

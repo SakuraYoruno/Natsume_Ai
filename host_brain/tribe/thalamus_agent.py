@@ -46,12 +46,17 @@ _LLM_SKILL_TARGET_ALLOWLIST: frozenset[str] = frozenset({
     "codex_inspect",
     "codex_organ_scan",
     "codex_persona_drift_audit",
+    "codex_document_digest",
+    "codex_frontend_review",
+    "codex_memory_curator",
     "codex_research",
+    "codex_repo_sentinel",
     "codex_self_evolve",
     "codex_self_heal",
     "codex_skill_forge",
     "codex_sql_audit",
     "codex_translate_project",
+    "codex_workbench_brief",
     "codex_worker",
     "emotion_query",
     "frontend_component_value_audit",
@@ -177,6 +182,33 @@ _FRONTEND_ROUTE_AUDIT_RE = re.compile(
 _FRONTEND_COMPONENT_VALUE_AUDIT_RE = re.compile(
     r"((前端|页面|ui|UI|组件|卡片|布局).{0,18}(低价值|无意义|重复|整合|组件|卡片|布局|优化|巡检|审计)"
     r"|(?:frontend|component|card|layout|ux).{0,18}(?:audit|duplicate|consolidat|low-value|optimi[sz]e))",
+    re.IGNORECASE,
+)
+_CODEX_PRODUCTION_BACKGROUND_RE = re.compile(
+    r"(codex|后台|异步|生产型|生产技能|深度|长期|每日|daily|background|production)",
+    re.IGNORECASE,
+)
+_CODEX_WORKBENCH_BRIEF_RE = re.compile(
+    r"((工作|任务|今日|每日).{0,10}(简报|brief|摘要)|(?:workbench|daily)\s+brief|brief\s+me)",
+    re.IGNORECASE,
+)
+_CODEX_REPO_SENTINEL_RE = re.compile(
+    r"((仓库|repo|repository|项目).{0,12}(哨兵|巡检|后台体检|深度体检)|repo\s+sentinel)",
+    re.IGNORECASE,
+)
+_CODEX_MEMORY_CURATOR_RE = re.compile(
+    r"((记忆|长期记忆).{0,12}(候选|管家|整理|沉淀).{0,12}(后台|异步|codex|深度)"
+    r"|(后台|异步|codex|深度).{0,12}(记忆候选|记忆管家)|memory\s+curator)",
+    re.IGNORECASE,
+)
+_CODEX_DOCUMENT_DIGEST_RE = re.compile(
+    r"((文档|资料|材料|网页摘录).{0,12}(消化|摘要|总结|digest)|document\s+digest)",
+    re.IGNORECASE,
+)
+_CODEX_FRONTEND_REVIEW_RE = re.compile(
+    r"((前端|页面|ui|UI|组件|卡片|布局).{0,18}(后台|异步|codex|深度).{0,18}(审查|巡检|优化|review)"
+    r"|(后台|异步|codex|深度).{0,18}(前端|页面|组件|布局).{0,18}(审查|巡检|优化|review)"
+    r"|frontend\s+review)",
     re.IGNORECASE,
 )
 _SELF_HEAL_MARKERS = (
@@ -762,6 +794,40 @@ def _build_codex_workspace_route_seed(text: str) -> dict[str, Any] | None:
     }
 
 
+def _build_codex_production_route_seed(text: str) -> dict[str, Any] | None:
+    normalized = _normalize_text(text)
+    if not normalized:
+        return None
+    target_id = ""
+    if _CODEX_WORKBENCH_BRIEF_RE.search(normalized):
+        target_id = "codex_workbench_brief"
+    elif _CODEX_REPO_SENTINEL_RE.search(normalized) and _CODEX_PRODUCTION_BACKGROUND_RE.search(normalized):
+        target_id = "codex_repo_sentinel"
+    elif _CODEX_MEMORY_CURATOR_RE.search(normalized):
+        target_id = "codex_memory_curator"
+    elif _CODEX_DOCUMENT_DIGEST_RE.search(normalized):
+        target_id = "codex_document_digest"
+    elif _CODEX_FRONTEND_REVIEW_RE.search(normalized):
+        target_id = "codex_frontend_review"
+    if not target_id:
+        return None
+    return {
+        "route": "skill",
+        "target_id": target_id,
+        "task": normalized,
+        "reason_code": "THALAMUS_RULE_CODEX_PRODUCTION",
+        "confidence": 0.93,
+        "route_source": "thalamus.rule",
+        "args": {
+            "task": normalized,
+            "problem_statement": normalized,
+            "start_background": True,
+            "text": normalized,
+            "user_message": normalized,
+        },
+    }
+
+
 def _build_system_observation_route_seed(text: str) -> dict[str, Any] | None:
     normalized = _normalize_text(text)
     if not normalized:
@@ -1068,6 +1134,13 @@ def _infer_supported_step_route(text: str) -> tuple[str, str, str] | None:
         return ("skill", "bond_query", "THALAMUS_RULE_BOND_QUERY")
     if _contains_any(cleaned, _DIRECT_MEMORY_RECALL_MARKERS):
         return ("skill", "memory_recall", "THALAMUS_RULE_MEMORY_RECALL")
+    codex_production_seed = _build_codex_production_route_seed(cleaned)
+    if codex_production_seed is not None:
+        return (
+            "skill",
+            _normalize_text(codex_production_seed.get("target_id")),
+            _normalize_text(codex_production_seed.get("reason_code")) or "THALAMUS_RULE_CODEX_PRODUCTION",
+        )
     memory_steward_seed = _build_memory_steward_route_seed(cleaned)
     if memory_steward_seed is not None:
         return (
@@ -1139,6 +1212,10 @@ def _build_direct_route_seed(text: str) -> dict[str, Any] | None:
     browser_seed = _build_browser_observation_route_seed(cleaned)
     if browser_seed is not None:
         return browser_seed
+
+    codex_production_seed = _build_codex_production_route_seed(cleaned)
+    if codex_production_seed is not None:
+        return codex_production_seed
 
     memory_steward_seed = _build_memory_steward_route_seed(cleaned)
     if memory_steward_seed is not None:
@@ -2129,6 +2206,11 @@ def _backfill_canonical_args(
             "codex_organ_scan",
             "codex_persona_drift_audit",
             "codex_dream_compile",
+            "codex_workbench_brief",
+            "codex_repo_sentinel",
+            "codex_memory_curator",
+            "codex_document_digest",
+            "codex_frontend_review",
         }:
             if not _normalize_text(merged.get("task")):
                 merged["task"] = _normalize_text(merged.get("problem_statement")) or fallback_text
@@ -2155,13 +2237,21 @@ def _backfill_canonical_args(
                     merged["run_mode"] = "translate"
                 elif normalized_target == "codex_sql_audit":
                     merged["run_mode"] = "audit"
+                elif normalized_target in {"codex_workbench_brief", "codex_document_digest"}:
+                    merged["run_mode"] = "research"
+                elif normalized_target in {"codex_repo_sentinel", "codex_memory_curator", "codex_frontend_review"}:
+                    merged["run_mode"] = "inspect"
                 elif _looks_like_lightweight_codex_request(_normalize_text(merged.get("task")) or fallback_text):
                     merged["run_mode"] = "inspect"
                 else:
                     merged["run_mode"] = "worker"
             resolved_run_mode = _normalize_text(merged.get("run_mode"), lower=True)
             if not explicit_workspace:
-                if resolved_run_mode == "inspect":
+                if normalized_target in {"codex_workbench_brief", "codex_memory_curator", "codex_document_digest"}:
+                    merged["workspace_strategy"] = "temp_workspace"
+                elif normalized_target in {"codex_repo_sentinel", "codex_frontend_review"}:
+                    merged["workspace_strategy"] = "runtime_repo"
+                elif resolved_run_mode == "inspect":
                     merged["allow_temp_workspace"] = True
                 elif not _normalize_text(merged.get("workspace_strategy"), lower=True):
                     merged["workspace_strategy"] = "runtime_repo"
