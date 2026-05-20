@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import inspect
+import json
 import logging
 import os
 import time
@@ -21,6 +22,9 @@ CORE_TICK_TASK_IDS: tuple[str, ...] = (
     "body_sense_tick",
     "emotion_decay_tick",
 )
+PROACTIVE_TALK_TASK_ID = "proactive_talk_periodic"
+BACKGROUND_TICK_TASK_IDS: tuple[str, ...] = (PROACTIVE_TALK_TASK_ID,)
+DEFAULT_TICK_TASK_IDS: tuple[str, ...] = CORE_TICK_TASK_IDS + BACKGROUND_TICK_TASK_IDS
 
 ForegroundTurnRunner = Callable[[Mapping[str, Any]], Mapping[str, Any]]
 
@@ -35,7 +39,7 @@ class DigitalLifeRuntimeConfig:
     start_scheduler_threads: bool = False
     manage_environment: bool = True
     reset_persona_state_for_run: bool = True
-    tick_task_ids: Sequence[str] = CORE_TICK_TASK_IDS
+    tick_task_ids: Sequence[str] = DEFAULT_TICK_TASK_IDS
     foreground_runner: ForegroundTurnRunner | None = None
 
 
@@ -95,6 +99,9 @@ class DigitalLifeSupervisor:
         self._tick_count = 0
         self._foreground_turn_count = 0
         self._idle_tick_count = 0
+        self._proactive_outbox_count = 0
+        self._last_proactive_outbox_ts_ms = 0
+        self._last_proactive_outbox_record: dict[str, Any] = {}
         self._last_user_message = ""
         self._last_reply_text = ""
         self._last_turn: ForegroundTurnResult | None = None
@@ -154,16 +161,17 @@ class DigitalLifeSupervisor:
 
     def run_idle_tick(self, *, task_ids: Sequence[str] | None = None) -> dict[str, Any]:
         self._ensure_started()
-        selected = tuple(task_ids or self.config.tick_task_ids or CORE_TICK_TASK_IDS)
+        selected = tuple(task_ids or self.config.tick_task_ids or DEFAULT_TICK_TASK_IDS)
         results: dict[str, Any] = {}
         for task_id in selected:
-            if task_id not in CORE_TICK_TASK_IDS:
-                results[str(task_id)] = {"status": "SKIPPED", "reason_code": "NOT_A_CORE_TICK"}
+            task_key = str(task_id)
+            if self.registry is not None and self.registry.get(task_key) is None:
+                results[task_key] = {"status": "SKIPPED", "reason_code": "TASK_NOT_REGISTERED"}
                 continue
             try:
-                results[str(task_id)] = self.scheduler.trigger_task_by_id(str(task_id))
+                results[task_key] = self.scheduler.trigger_task_by_id(task_key)
             except Exception as exc:  # pragma: no cover - diagnostic path
-                results[str(task_id)] = {
+                results[task_key] = {
                     "status": "ERROR",
                     "reason_code": type(exc).__name__,
                     "detail": str(exc)[:200],
@@ -275,6 +283,7 @@ class DigitalLifeSupervisor:
             },
             "scheduler": scheduler_snapshot,
             "background_runtime": background_runtime,
+            "proactive_outbox": self._proactive_outbox_snapshot(),
             "last_tick_results": _strip_large(self._last_tick_results),
             "external_services": {
                 "chroma": {"status": "not_probed_by_supervisor"},
@@ -381,7 +390,12 @@ class DigitalLifeSupervisor:
         from host_brain.scheduler.health import SchedulerHealthReporter  # noqa: PLC0415
         from host_brain.scheduler.scheduler import NatsumeScheduler  # noqa: PLC0415
         from host_brain.scheduler.scheduler_routes import set_scheduler_providers  # noqa: PLC0415
-        from host_brain.scheduler.task_registry import SchedulerTaskRegistry  # noqa: PLC0415
+        from host_brain.scheduler.task_registry import (  # noqa: PLC0415
+            SchedulerTaskConfig,
+            SchedulerTaskRegistry,
+            TaskPriority,
+            TriggerMode,
+        )
 
         self.registry = SchedulerTaskRegistry()
         self.health_reporter = SchedulerHealthReporter(registry=self.registry)
@@ -389,6 +403,29 @@ class DigitalLifeSupervisor:
         for config in _build_core_organ_tick_task_configs():
             if self.registry.get(config.task_id) is None:
                 self.registry.register(config)
+        if self.registry.get(PROACTIVE_TALK_TASK_ID) is None:
+            self.registry.register(
+                SchedulerTaskConfig(
+                    task_id=PROACTIVE_TALK_TASK_ID,
+                    trigger_mode=TriggerMode.INTERVAL,
+                    trigger_config={
+                        "seconds": int(os.environ.get("HOST_PROACTIVE_TALK_INTERVAL_SECONDS") or 180)
+                    },
+                    intent_template={
+                        "skill_name": "proactive_talk",
+                        "args": {
+                            "idle_threshold_ms": int(
+                                os.environ.get("HOST_PROACTIVE_TALK_IDLE_THRESHOLD_MS") or 2_700_000
+                            )
+                        },
+                        "proposer_node_id": "scheduler",
+                    },
+                    priority=TaskPriority.LOW,
+                    mode_allowlist=["normal", "sleep"],
+                    enabled=True,
+                    description="主动外呼：空闲阈值满足后写入安全 outbox，等待通讯网关接管。",
+                )
+            )
         self.scheduler = NatsumeScheduler(
             registry=self.registry,
             health_reporter=self.health_reporter,
@@ -401,20 +438,109 @@ class DigitalLifeSupervisor:
     def _dispatch_scheduler_intent(self, system_intent: dict[str, Any]) -> dict[str, Any]:
         from host_brain.app.http_hooks_runtime_helpers import run_proactive_intent_dispatch  # noqa: PLC0415
 
-        def _ui_pusher(_message: dict[str, Any]) -> dict[str, Any]:
-            return {
-                "success": False,
-                "status": "SKIPPED",
-                "detail": "digital life host runtime does not push UI messages directly",
-            }
-
         return run_proactive_intent_dispatch(
             dict(system_intent or {}),
             logger=self.logger,
             get_ledger=lambda: None,
             retention_policy=None,
-            ui_pusher=_ui_pusher,
+            ui_pusher=self._queue_proactive_outbox,
+            llm_generator_override=self._proactive_template_fallback_generator,
+            last_interaction_ts_override=self._last_interaction_or_outbound_ts(),
+            motive_state_override={
+                "reach_out_drive": 0.62,
+                "continuity_drive": 0.58,
+                "withdraw_drive": 0.0,
+                "self_protect_drive": 0.0,
+                "dominant_motive": "continuity",
+                "motive_reason_tags": ["digital_life_safe_outbox_acceptance"],
+            },
+            render_policy_override={
+                "allow_proactive_after_reply": True,
+                "should_be_withdrawn": False,
+                "max_chars": 120,
+            },
         )
+
+    def _last_interaction_or_outbound_ts(self) -> int | None:
+        latest = max(int(self._last_foreground_ts_ms or 0), int(self._last_proactive_outbox_ts_ms or 0))
+        return latest if latest > 0 else None
+
+    def _proactive_template_fallback_generator(self, _llm_input: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "greeting": "",
+            "content": "",
+            "fallback_to_template": True,
+            "fallback_reason": "DIGITAL_LIFE_SAFE_OUTBOX_TEMPLATE",
+        }
+
+    def _queue_proactive_outbox(self, message: dict[str, Any]) -> dict[str, Any]:
+        queued_at_ms = _now_ms()
+        message_id = str(message.get("event_id") or f"{PROACTIVE_TALK_TASK_ID}_{queued_at_ms}")
+        record = {
+            "message_id": message_id,
+            "run_id": self.run_id,
+            "persona_self_id": self.persona_self_id,
+            "session_id": self.config.session_id,
+            "delivery_channel": "safe_outbox",
+            "delivery_status": "QUEUED",
+            "queued_at_ms": queued_at_ms,
+            "message": dict(message or {}),
+        }
+        outbox_path = self._proactive_outbox_path()
+        try:
+            if outbox_path is not None:
+                outbox_path.parent.mkdir(parents=True, exist_ok=True)
+                with outbox_path.open("a", encoding="utf-8", newline="\n") as file:
+                    file.write(json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n")
+                record["outbox_path"] = str(outbox_path)
+            self._proactive_outbox_count += 1
+            self._last_proactive_outbox_ts_ms = queued_at_ms
+            self._last_proactive_outbox_record = dict(record)
+            return {
+                "success": True,
+                "status": "QUEUED",
+                "reason_code": None,
+                "delivery_mode": "safe_outbox",
+                "message_id": message_id,
+                "queued_at_ms": queued_at_ms,
+                "outbox_path": str(outbox_path) if outbox_path is not None else "",
+            }
+        except Exception as exc:  # pragma: no cover - filesystem diagnostic path
+            self.logger.warning("proactive outbox queue failed: %s", exc)
+            return {
+                "success": False,
+                "status": "FAILED",
+                "reason_code": type(exc).__name__,
+                "detail": str(exc)[:200],
+                "delivery_mode": "safe_outbox",
+                "message_id": message_id,
+            }
+
+    def _proactive_outbox_path(self) -> Path | None:
+        if self.out_dir is None:
+            return None
+        return self.out_dir / "proactive_outbox.jsonl"
+
+    def _proactive_outbox_snapshot(self) -> dict[str, Any]:
+        outbox_path = self._proactive_outbox_path()
+        file_count = 0
+        if outbox_path is not None and outbox_path.exists():
+            try:
+                file_count = sum(1 for line in outbox_path.read_text(encoding="utf-8").splitlines() if line.strip())
+            except Exception:
+                file_count = 0
+        latest = dict(self._last_proactive_outbox_record or {})
+        message = dict(latest.get("message") or {})
+        return {
+            "enabled": True,
+            "delivery_mode": "safe_outbox",
+            "outbox_path": str(outbox_path) if outbox_path is not None else "",
+            "queued_count": max(int(self._proactive_outbox_count), int(file_count)),
+            "last_message_id": str(latest.get("message_id") or ""),
+            "last_delivery_status": str(latest.get("delivery_status") or ""),
+            "last_queued_at_ms": int(latest.get("queued_at_ms") or 0),
+            "last_content_preview": str(message.get("content") or "")[:120],
+        }
 
     def _scheduler_emotion_state(self) -> dict[str, Any]:
         tag = ""

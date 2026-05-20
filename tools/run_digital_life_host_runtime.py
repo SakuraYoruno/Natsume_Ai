@@ -79,6 +79,8 @@ def _summary(
     background = dict(final_snapshot.get("background_runtime") or {})
     organ_runtime = dict(final_snapshot.get("organ_runtime") or {})
     scheduler = dict(final_snapshot.get("scheduler") or {})
+    proactive_task = dict(background.get("proactive_task") or {})
+    proactive_outbox = dict(final_snapshot.get("proactive_outbox") or {})
     return {
         "status": "PASS" if bool(final_snapshot.get("alive")) and bool(background.get("core_ticks_registered")) else "FAIL",
         "evaluation_mode": "digital_life_host_runtime_supervisor_no_text_quality_scoring",
@@ -95,6 +97,8 @@ def _summary(
         "core_ticks_registered": bool(background.get("core_ticks_registered")),
         "tick_health": str(background.get("tick_health") or ""),
         "is_advancing": bool(background.get("is_advancing")),
+        "proactive_task_status": str(proactive_task.get("status") or ""),
+        "proactive_outbox_queued_count": int(proactive_outbox.get("queued_count") or 0),
         "event_count": int(event_count),
         "snapshot_count": int(snapshot_count),
         "output_dir": str(out_dir),
@@ -119,6 +123,8 @@ def _markdown_report(summary: Mapping[str, Any], details: Mapping[str, Any]) -> 
         f"- scheduler_status: `{summary.get('scheduler_status')}`",
         f"- tick_health: `{summary.get('tick_health')}`",
         f"- is_advancing: `{summary.get('is_advancing')}`",
+        f"- proactive_task_status: `{summary.get('proactive_task_status')}`",
+        f"- proactive_outbox_queued_count: `{summary.get('proactive_outbox_queued_count')}`",
         "",
         "## Latest Private Thought",
         "",

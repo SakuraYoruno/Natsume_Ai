@@ -26,7 +26,7 @@ function formatTaskStatus(task) {
   if (!task) return '缺失'
   const key = String(task.status || '').toLowerCase()
   if (!key || key === 'unknown') return '未知'
-  if (['ok', 'healthy', 'done', 'success'].includes(key)) return '正常'
+  if (['ok', 'healthy', 'done', 'success', 'executed', 'queued'].includes(key)) return '正常'
   if (['running', 'active', 'processing'].includes(key)) return '运行中'
   if (['blocked', 'canceled', 'cancelled'].includes(key)) return '受阻'
   if (['failed', 'error'].includes(key)) return '异常'

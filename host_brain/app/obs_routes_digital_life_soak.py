@@ -269,6 +269,20 @@ def _build_soak_acceptance(
     proactive_enabled = bool(proactive_task.get("enabled"))
     proactive_status = str(proactive_task.get("status") or "")
     proactive_task_id = str(proactive_task.get("task_id") or "proactive_talk_periodic")
+    proactive_outbox = _as_dict(final_snapshot.get("proactive_outbox"))
+    proactive_outbox_count = _as_int(proactive_outbox.get("queued_count"), 0)
+    proactive_outbox_mode = str(proactive_outbox.get("delivery_mode") or "")
+    proactive_loop_pass = proactive_enabled and proactive_outbox_count > 0
+    proactive_loop_status = "healthy" if proactive_loop_pass else "running" if proactive_enabled else "unknown"
+    proactive_loop_verdict = (
+        "PASS"
+        if proactive_loop_pass
+        else "NOT_COVERED"
+        if not proactive_enabled
+        else "RUNNING"
+        if running
+        else proactive_status or "UNKNOWN"
+    )
 
     layers = [
         _acceptance_layer(
@@ -347,14 +361,22 @@ def _build_soak_acceptance(
         _acceptance_layer(
             layer_id="proactive_loop",
             label="主动外呼",
-            status="unknown" if not proactive_enabled else "running",
-            verdict="NOT_COVERED" if not proactive_enabled else proactive_status or "UNKNOWN",
-            value="未覆盖" if not proactive_enabled else proactive_status or "--",
-            detail="本次没有证明她会主动向外发起消息。" if not proactive_enabled else "主动外呼任务已启用，需要单独看发起与回执。",
+            status=proactive_loop_status,
+            verdict=proactive_loop_verdict,
+            value=f"queued {proactive_outbox_count}" if proactive_loop_pass else "未覆盖" if not proactive_enabled else proactive_status or "--",
+            detail=(
+                "主动外呼已写入安全 outbox，等待通讯软件 gateway 接管真实送达。"
+                if proactive_loop_pass
+                else "本次没有证明她会主动向外发起消息。"
+                if not proactive_enabled
+                else "主动外呼任务已启用，需要看到 outbox 排队或真实回执。"
+            ),
             evidence=[
                 proactive_task_id,
                 f"enabled={str(proactive_enabled).lower()}",
                 f"status={proactive_status or 'missing'}",
+                f"outbox={proactive_outbox_count}",
+                proactive_outbox_mode,
             ],
         ),
     ]
@@ -363,8 +385,11 @@ def _build_soak_acceptance(
         {"id": "communication_gateway", "label": "通讯软件 gateway", "reason": "不属于本次 24h soak 覆盖面"},
         {"id": "asr_vts", "label": "ASR / VTS", "reason": "语音输入输出链路未参与本次 soak"},
         {"id": "external_services", "label": "Chroma / Neo4j", "reason": "supervisor 标记为 not_probed_by_supervisor"},
-        {"id": "proactive_loop", "label": "主动外呼", "reason": f"{proactive_task_id} 未启用或未被本次 soak 验收"},
     ]
+    if not proactive_loop_pass:
+        not_covered.append(
+            {"id": "proactive_loop", "label": "主动外呼", "reason": f"{proactive_task_id} 未启用或未产生 outbox 证据"}
+        )
 
     return {
         "title": "生命底盘 PASS，整系统外设未覆盖" if completed_pass else "真实墙钟生命闭环观测中",
@@ -384,6 +409,8 @@ def _build_soak_acceptance(
             "task_id": proactive_task_id,
             "enabled": proactive_enabled,
             "status": proactive_status,
+            "outbox_queued_count": proactive_outbox_count,
+            "outbox_delivery_mode": proactive_outbox_mode,
         },
         "inner_world": {
             "continuity_score": continuity_score,

@@ -171,8 +171,58 @@ def test_wall_clock_soak_payload_summarizes_completed_life_acceptance(tmp_path, 
     assert layers["inner_world"]["status"] == "healthy"
     assert layers["self_model"]["status"] == "healthy"
     assert layers["external_system"]["verdict"] == "NOT_COVERED"
+    assert layers["proactive_loop"]["verdict"] == "NOT_COVERED"
     assert acceptance["inner_world"]["spontaneous_event_count"] == 435
     assert acceptance["self_model"]["agency_score"] == 1.0
+
+
+def test_wall_clock_soak_payload_accepts_proactive_safe_outbox(tmp_path, monkeypatch) -> None:
+    now_ms = int(time.time() * 1000)
+    artifacts_root = tmp_path / "artifacts"
+    run_dir = artifacts_root / "real-24h-wall-clock-proactive" / "run"
+    run_dir.mkdir(parents=True)
+    _write_json(run_dir / "summary.json", _completed_summary(now_ms))
+    _write_jsonl(run_dir / "checkpoints.jsonl", _checkpoints(now_ms))
+    _write_json(
+        run_dir / "details.json",
+        {
+            "final_snapshot": {
+                "background_runtime": {
+                    "core_tick_tasks": {
+                        "inner_world_numeric_tick": {"enabled": True, "status": "OK"},
+                        "inner_world_monologue_tick": {"enabled": True, "status": "OK"},
+                        "silence_tick": {"enabled": True, "status": "OK"},
+                        "body_sense_tick": {"enabled": True, "status": "OK"},
+                        "emotion_decay_tick": {"enabled": True, "status": "OK"},
+                    },
+                    "proactive_task": {
+                        "task_id": "proactive_talk_periodic",
+                        "enabled": True,
+                        "status": "OK",
+                    },
+                },
+                "proactive_outbox": {
+                    "delivery_mode": "safe_outbox",
+                    "queued_count": 1,
+                    "last_delivery_status": "QUEUED",
+                },
+                "external_services": {
+                    "chroma": {"status": "not_probed_by_supervisor"},
+                    "neo4j": {"status": "not_probed_by_supervisor"},
+                },
+            }
+        },
+    )
+    monkeypatch.setenv("HOST_OBS_WALL_CLOCK_SOAK_ARTIFACTS_ROOT", str(artifacts_root))
+
+    payload = _build_wall_clock_soak_payload()
+
+    layers = {item["id"]: item for item in payload["acceptance"]["layers"]}
+    assert layers["proactive_loop"]["status"] == "healthy"
+    assert layers["proactive_loop"]["verdict"] == "PASS"
+    assert layers["proactive_loop"]["value"] == "queued 1"
+    assert payload["acceptance"]["proactive_task"]["outbox_queued_count"] == 1
+    assert all(item["id"] != "proactive_loop" for item in payload["acceptance"]["not_covered"])
 
 
 def test_wall_clock_soak_payload_reports_missing_when_no_run_exists(tmp_path, monkeypatch) -> None:

@@ -265,6 +265,8 @@ def _summary(
         "persona_self_id": str(projected.get("persona_self_id") or ""),
         "last_private_focus": str(projected.get("last_private_focus") or ""),
         "last_private_source": str(projected.get("last_private_source") or ""),
+        "proactive_task_status": str(projected.get("proactive_task_status") or ""),
+        "proactive_outbox_queued_count": int(projected.get("proactive_outbox_queued_count") or 0),
         "error": dict(error or {}),
     }
 
@@ -275,6 +277,8 @@ def _project_snapshot(snapshot: Mapping[str, Any]) -> dict[str, Any]:
     organ = dict(data.get("organ_runtime") or {})
     scheduler = dict(data.get("scheduler") or {})
     latest_private = dict(data.get("latest_private_thought") or {})
+    proactive_task = dict(background.get("proactive_task") or {})
+    proactive_outbox = dict(data.get("proactive_outbox") or {})
     return {
         "alive": bool(data.get("alive")),
         "mode": str(data.get("mode") or ""),
@@ -292,6 +296,8 @@ def _project_snapshot(snapshot: Mapping[str, Any]) -> dict[str, Any]:
         "last_private_focus": str(latest_private.get("focus") or ""),
         "last_private_source": str(latest_private.get("source") or ""),
         "last_private_salience": latest_private.get("salience"),
+        "proactive_task_status": str(proactive_task.get("status") or ""),
+        "proactive_outbox_queued_count": int(proactive_outbox.get("queued_count") or 0),
     }
 
 
@@ -310,6 +316,8 @@ def _markdown_report(summary: Mapping[str, Any]) -> str:
         f"- tick_health: `{summary.get('tick_health')}`",
         f"- registered_organ_count: `{summary.get('registered_organ_count')}`",
         f"- last_mapped_organ_count: `{summary.get('last_mapped_organ_count')}`",
+        f"- proactive_task_status: `{summary.get('proactive_task_status')}`",
+        f"- proactive_outbox_queued_count: `{summary.get('proactive_outbox_queued_count')}`",
         "",
     ]
     return "\n".join(lines)

@@ -69,6 +69,37 @@ def test_digital_life_supervisor_runs_foreground_and_idle_tick(tmp_path, monkeyp
     assert inner_world._DEFAULT_STATE_DIR == original_inner_world_dir
 
 
+def test_digital_life_supervisor_runs_proactive_talk_into_safe_outbox(tmp_path) -> None:
+    supervisor = DigitalLifeSupervisor(
+        DigitalLifeRuntimeConfig(
+            mode="fixture",
+            run_id="unit-proactive-outbox",
+            out_dir=tmp_path,
+        )
+    )
+
+    with supervisor:
+        idle = supervisor.run_idle_tick(task_ids=("proactive_talk_periodic",))
+        final_snapshot = supervisor.snapshot()
+
+    result = idle["task_results"]["proactive_talk_periodic"]
+    nested = result["result"]
+    push_result = nested["push_result"]
+    outbox_path = tmp_path / "proactive_outbox.jsonl"
+    rows = [json.loads(line) for line in outbox_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+
+    assert result["status"] == "EXECUTED"
+    assert nested["message"]["type"] == "proactive_talk"
+    assert push_result["status"] == "QUEUED"
+    assert push_result["delivery_mode"] == "safe_outbox"
+    assert len(rows) == 1
+    assert rows[0]["delivery_status"] == "QUEUED"
+    assert rows[0]["message"]["type"] == "proactive_talk"
+    assert final_snapshot["background_runtime"]["proactive_task"]["enabled"] is True
+    assert final_snapshot["background_runtime"]["proactive_task"]["status"] == "OK"
+    assert final_snapshot["proactive_outbox"]["queued_count"] == 1
+
+
 def test_run_digital_life_host_runtime_parser_defaults() -> None:
     args = build_arg_parser().parse_args([])
 

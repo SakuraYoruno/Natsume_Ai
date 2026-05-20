@@ -1371,6 +1371,10 @@ def run_proactive_intent_dispatch(
     get_ledger: Callable[[], Any],
     retention_policy: Any,
     ui_pusher: Callable[[dict[str, Any]], dict[str, Any]],
+    llm_generator_override: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
+    last_interaction_ts_override: int | None = None,
+    motive_state_override: Mapping[str, Any] | None = None,
+    render_policy_override: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     from host_brain.skills.impl.proactive_talk import execute_proactive_talk  # noqa: PLC0415
 
@@ -1420,7 +1424,11 @@ def run_proactive_intent_dispatch(
             return personality_result
         return {"status": "SKIPPED", "reason_code": "UNKNOWN_SKILL", "skill_name": skill_name}
 
-    last_interaction_ts = _load_last_interaction_ts(get_ledger=get_ledger)
+    last_interaction_ts = (
+        int(last_interaction_ts_override)
+        if last_interaction_ts_override is not None
+        else _load_last_interaction_ts(get_ledger=get_ledger)
+    )
 
     bond_summary: dict[str, Any] = {}
     try:
@@ -1433,7 +1441,7 @@ def run_proactive_intent_dispatch(
     recent_topics = _load_recent_topics(get_ledger=get_ledger)
     diary_snippet = _load_recent_diary_snippet()
     dream_snippet = _load_recent_dream_snippet(get_ledger=get_ledger)
-    llm_generator = _build_llm_generator(
+    llm_generator = llm_generator_override or _build_llm_generator(
         logger=logger,
         recent_topics=recent_topics,
         diary_snippet=diary_snippet,
@@ -1482,54 +1490,56 @@ def run_proactive_intent_dispatch(
         or "normal"
     ).strip().lower() or "normal"
 
-    motive_state: dict[str, Any] = {}
-    try:
-        from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: PLC0415
+    motive_state: dict[str, Any] = dict(motive_state_override or {})
+    if motive_state_override is None:
+        try:
+            from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: PLC0415
 
-        current_topic = recent_topics[0] if recent_topics else ""
-        pending_topics = list(recent_topics[:3])
-        motive_state = get_limbic_agent().compute_runtime_motive_state(
-            persona_user_id=persona_user_id,
-            current_topic=current_topic,
-            bond_summary=bond_summary,
-            emotion_context=emotion_context,
-            pending_topics=pending_topics,
-            runtime_flags={"source": "proactive_talk", "sys_mode": resolved_sys_mode},
-        )
-    except Exception as motive_exc:
-        logger.debug("proactive motive_state compute failed（忽略）: %s", motive_exc)
-
-    render_policy: dict[str, Any] = {}
-    try:
-        from host_brain.persona.reply_plan import build_reply_plan_from_inputs  # noqa: PLC0415
-        from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: PLC0415
-
-        current_topic = recent_topics[0] if recent_topics else ""
-        limbic_agent = get_limbic_agent()
-        offline_persona_id = persona_user_id
-        if not offline_persona_id:
-            try:
-                from host_brain.persona.identity import get_canonical_persona_self_id  # noqa: PLC0415
-
-                offline_persona_id = get_canonical_persona_self_id()
-            except Exception:
-                offline_persona_id = "natsume_ai"
-        offline_state = limbic_agent.resolve_offline_state(person_id=offline_persona_id)
-        silence_state = limbic_agent.resolve_silence_state(current_topic=current_topic)
-        body_sense = limbic_agent.resolve_body_sense_state()
-        render_policy = dict(
-            build_reply_plan_from_inputs(
-                silence_state=silence_state,
-                body_sense=body_sense,
-                offline_state=offline_state,
+            current_topic = recent_topics[0] if recent_topics else ""
+            pending_topics = list(recent_topics[:3])
+            motive_state = get_limbic_agent().compute_runtime_motive_state(
+                persona_user_id=persona_user_id,
+                current_topic=current_topic,
                 bond_summary=bond_summary,
                 emotion_context=emotion_context,
-                motive_state=motive_state,
-            ).as_dict()
-            or {}
-        )
-    except Exception as policy_exc:
-        logger.debug("proactive render_policy compute failed（忽略）: %s", policy_exc)
+                pending_topics=pending_topics,
+                runtime_flags={"source": "proactive_talk", "sys_mode": resolved_sys_mode},
+            )
+        except Exception as motive_exc:
+            logger.debug("proactive motive_state compute failed（忽略）: %s", motive_exc)
+
+    render_policy: dict[str, Any] = dict(render_policy_override or {})
+    if render_policy_override is None:
+        try:
+            from host_brain.persona.reply_plan import build_reply_plan_from_inputs  # noqa: PLC0415
+            from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: PLC0415
+
+            current_topic = recent_topics[0] if recent_topics else ""
+            limbic_agent = get_limbic_agent()
+            offline_persona_id = persona_user_id
+            if not offline_persona_id:
+                try:
+                    from host_brain.persona.identity import get_canonical_persona_self_id  # noqa: PLC0415
+
+                    offline_persona_id = get_canonical_persona_self_id()
+                except Exception:
+                    offline_persona_id = "natsume_ai"
+            offline_state = limbic_agent.resolve_offline_state(person_id=offline_persona_id)
+            silence_state = limbic_agent.resolve_silence_state(current_topic=current_topic)
+            body_sense = limbic_agent.resolve_body_sense_state()
+            render_policy = dict(
+                build_reply_plan_from_inputs(
+                    silence_state=silence_state,
+                    body_sense=body_sense,
+                    offline_state=offline_state,
+                    bond_summary=bond_summary,
+                    emotion_context=emotion_context,
+                    motive_state=motive_state,
+                ).as_dict()
+                or {}
+            )
+        except Exception as policy_exc:
+            logger.debug("proactive render_policy compute failed（忽略）: %s", policy_exc)
 
     context = {
         "sys_mode": resolved_sys_mode,
