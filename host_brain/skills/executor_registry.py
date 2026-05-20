@@ -14,6 +14,7 @@ from host_brain.skills.impl.dream_generator import execute_dream_generator
 from host_brain.skills.impl.emotion_executor import execute_emotion_skill
 from host_brain.skills.impl.file_executor import execute_file_skill
 from host_brain.skills.impl.focus_mode import execute_focus_mode
+from host_brain.skills.impl.frontend_executor import execute_frontend_skill
 from host_brain.skills.impl.ide_executor import execute_ide_skill
 from host_brain.skills.impl.memory_executor import execute_memory_skill
 from host_brain.skills.impl.notification_executor import execute_notification_skill
@@ -102,6 +103,7 @@ def build_builtin_tool_executor_registry() -> ToolExecutorRegistry:
         ToolExecutorSpec("memory", _with_context(execute_memory_skill)),
         ToolExecutorSpec("emotion", _with_context(execute_emotion_skill)),
         ToolExecutorSpec("repo", _with_context(execute_repo_skill)),
+        ToolExecutorSpec("frontend", _with_context(execute_frontend_skill)),
         ToolExecutorSpec("scheduler", _with_context(execute_scheduler_skill)),
         ToolExecutorSpec("system", _with_context(execute_system_skill)),
         ToolExecutorSpec("web", _with_context(execute_web_skill)),

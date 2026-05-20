@@ -54,6 +54,8 @@ _LLM_SKILL_TARGET_ALLOWLIST: frozenset[str] = frozenset({
     "codex_translate_project",
     "codex_worker",
     "emotion_query",
+    "frontend_component_value_audit",
+    "frontend_route_audit",
     "hub_skill_list",
     "hub_skill_search",
     "file_list",
@@ -164,6 +166,17 @@ _TEST_FAILURE_TRIAGE_RE = re.compile(
     r"((分析|归因|triage).{0,16}(测试|单测|pytest|unittest).{0,16}(失败|报错|日志|输出)"
     r"|(测试|单测|pytest|unittest).{0,16}(失败日志|失败输出|报错日志|报错输出|归因|triage)"
     r"|(?:triage|analy[sz]e).{0,16}(?:test|pytest).{0,12}(?:failure|error|log))",
+    re.IGNORECASE,
+)
+_FRONTEND_ROUTE_AUDIT_RE = re.compile(
+    r"((前端|页面|ui|UI|monitor).{0,18}(路由|导航|断链|覆盖|巡检|审计|检查)"
+    r"|(路由|导航).{0,18}(断链|覆盖|巡检|审计|检查)"
+    r"|(?:frontend|route|navigation).{0,18}(?:audit|coverage|broken|check))",
+    re.IGNORECASE,
+)
+_FRONTEND_COMPONENT_VALUE_AUDIT_RE = re.compile(
+    r"((前端|页面|ui|UI|组件|卡片|布局).{0,18}(低价值|无意义|重复|整合|组件|卡片|布局|优化|巡检|审计)"
+    r"|(?:frontend|component|card|layout|ux).{0,18}(?:audit|duplicate|consolidat|low-value|optimi[sz]e))",
     re.IGNORECASE,
 )
 _SELF_HEAL_MARKERS = (
@@ -939,6 +952,44 @@ def _build_repo_doctor_route_seed(text: str) -> dict[str, Any] | None:
     return None
 
 
+def _build_frontend_audit_route_seed(text: str) -> dict[str, Any] | None:
+    normalized = _normalize_text(text)
+    if not normalized:
+        return None
+    if _FRONTEND_ROUTE_AUDIT_RE.search(normalized):
+        return {
+            "route": "skill",
+            "target_id": "frontend_route_audit",
+            "task": normalized,
+            "reason_code": "THALAMUS_RULE_FRONTEND_ROUTE_AUDIT",
+            "confidence": 0.94,
+            "route_source": "thalamus.rule",
+            "args": {
+                "include_static": False,
+                "max_files": 800,
+                "text": normalized,
+                "user_message": normalized,
+            },
+        }
+    if _FRONTEND_COMPONENT_VALUE_AUDIT_RE.search(normalized):
+        return {
+            "route": "skill",
+            "target_id": "frontend_component_value_audit",
+            "task": normalized,
+            "reason_code": "THALAMUS_RULE_FRONTEND_COMPONENT_VALUE_AUDIT",
+            "confidence": 0.93,
+            "route_source": "thalamus.rule",
+            "args": {
+                "min_repeated_label_count": 5,
+                "max_card_surfaces_per_file": 35,
+                "max_files": 800,
+                "text": normalized,
+                "user_message": normalized,
+            },
+        }
+    return None
+
+
 def _has_explicit_route_seed(payload: Mapping[str, Any] | None) -> bool:
     data = dict(payload or {})
     route = _normalize_text(data.get("route"), lower=True)
@@ -1013,6 +1064,13 @@ def _infer_supported_step_route(text: str) -> tuple[str, str, str] | None:
             _normalize_text(repo_doctor_seed.get("target_id")),
             _normalize_text(repo_doctor_seed.get("reason_code")) or "THALAMUS_RULE_REPO_DOCTOR",
         )
+    frontend_audit_seed = _build_frontend_audit_route_seed(cleaned)
+    if frontend_audit_seed is not None:
+        return (
+            "skill",
+            _normalize_text(frontend_audit_seed.get("target_id")),
+            _normalize_text(frontend_audit_seed.get("reason_code")) or "THALAMUS_RULE_FRONTEND_AUDIT",
+        )
     system_seed = _build_system_observation_route_seed(cleaned)
     if system_seed is not None:
         return (
@@ -1071,6 +1129,10 @@ def _build_direct_route_seed(text: str) -> dict[str, Any] | None:
     repo_doctor_seed = _build_repo_doctor_route_seed(cleaned)
     if repo_doctor_seed is not None:
         return repo_doctor_seed
+
+    frontend_audit_seed = _build_frontend_audit_route_seed(cleaned)
+    if frontend_audit_seed is not None:
+        return frontend_audit_seed
 
     if _looks_like_open_app_request(cleaned):
         return {

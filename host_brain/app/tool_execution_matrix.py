@@ -61,11 +61,18 @@ def _default_read_target(repo_root: Path) -> Path:
     return Path(__file__).resolve()
 
 
+def _default_frontend_root(repo_root: Path) -> Path:
+    candidate = repo_root / "host_brain" / "app" / "monitor_ui"
+    return candidate if candidate.exists() else repo_root
+
+
 def build_default_tool_execution_matrix(repo_root: str | Path | None = None) -> list[ToolExecutionProbe]:
     """Return safe, high-value probes for the first tool-execution acceptance gate."""
 
     root = Path(repo_root).resolve() if repo_root is not None else _repo_root()
     read_target = _default_read_target(root)
+    frontend_root = _default_frontend_root(root)
+    frontend_source_root = frontend_root / "src" if (frontend_root / "src").exists() else frontend_root
     return [
         ToolExecutionProbe(
             probe_id="builtin-read-only-status",
@@ -146,6 +153,32 @@ def build_default_tool_execution_matrix(repo_root: str | Path | None = None) -> 
             expected_scope="system",
             expected_tool="repo",
             value_tier="repo_doctor",
+        ),
+        ToolExecutionProbe(
+            probe_id="frontend-route-audit",
+            skill_name="frontend_route_audit",
+            args={
+                "app_root": str(frontend_root),
+                "source_root": str(frontend_source_root),
+                "include_static": False,
+                "max_files": 800,
+            },
+            expected_scope="system",
+            expected_tool="frontend",
+            value_tier="frontend_audit",
+        ),
+        ToolExecutionProbe(
+            probe_id="frontend-component-value-audit",
+            skill_name="frontend_component_value_audit",
+            args={
+                "source_root": str(frontend_source_root),
+                "min_repeated_label_count": 5,
+                "max_card_surfaces_per_file": 35,
+                "max_files": 800,
+            },
+            expected_scope="system",
+            expected_tool="frontend",
+            value_tier="frontend_audit",
         ),
         ToolExecutionProbe(
             probe_id="system-info",

@@ -476,6 +476,44 @@ def test_classify_and_compile_intent_draft_routes_test_failure_triage_tool() -> 
     assert compiled["args"]["max_failures"] == 12
 
 
+def test_classify_and_compile_intent_draft_routes_frontend_route_audit_tool() -> None:
+    agent = ThalamusAgent()
+
+    compiled = _run(
+        agent.classify_and_compile_intent_draft(
+            request_id="req-thalamus-frontend-route",
+            session_id="session-thalamus-frontend-route",
+            user_message="前端路由和导航断链巡检一下 monitor",
+            source="chat_handler",
+            ts_ms=1776349003159,
+        )
+    )
+
+    assert compiled["route"] == "skill"
+    assert compiled["target_id"] == "frontend_route_audit"
+    assert compiled["route_reason"] == "THALAMUS_RULE_FRONTEND_ROUTE_AUDIT"
+    assert compiled["args"]["include_static"] is False
+
+
+def test_classify_and_compile_intent_draft_routes_frontend_component_audit_tool() -> None:
+    agent = ThalamusAgent()
+
+    compiled = _run(
+        agent.classify_and_compile_intent_draft(
+            request_id="req-thalamus-frontend-component",
+            session_id="session-thalamus-frontend-component",
+            user_message="分析前端低价值卡片和重复组件，看看哪些可以整合",
+            source="chat_handler",
+            ts_ms=1776349003160,
+        )
+    )
+
+    assert compiled["route"] == "skill"
+    assert compiled["target_id"] == "frontend_component_value_audit"
+    assert compiled["route_reason"] == "THALAMUS_RULE_FRONTEND_COMPONENT_VALUE_AUDIT"
+    assert compiled["args"]["min_repeated_label_count"] == 5
+
+
 def test_classify_and_compile_intent_draft_builds_explicit_supported_plan() -> None:
     agent = ThalamusAgent()
 

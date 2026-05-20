@@ -33,6 +33,8 @@ def test_default_tool_execution_matrix_is_safe_and_value_focused() -> None:
         "memory_consolidate",
         "repo_health_scan",
         "test_failure_triage",
+        "frontend_route_audit",
+        "frontend_component_value_audit",
         "system_info",
         "process_list",
         "network_status",
@@ -58,8 +60,8 @@ def test_tool_execution_matrix_runs_safe_probes_through_executive_runtime(monkey
         dependencies._skill_registry = None
 
     assert summary["status"] == "PASSED"
-    assert summary["total"] == 13
-    assert summary["passed"] == 13
+    assert summary["total"] == 15
+    assert summary["passed"] == 15
     assert summary["failed"] == 0
     assert summary["skipped"] == 0
     assert summary["critical_failed"] == 0
@@ -73,6 +75,8 @@ def test_tool_execution_matrix_runs_safe_probes_through_executive_runtime(monkey
             "memory_consolidate",
             "repo_health_scan",
             "test_failure_triage",
+            "frontend_route_audit",
+            "frontend_component_value_audit",
             "system_info",
             "process_list",
             "network_status",
@@ -84,6 +88,8 @@ def test_tool_execution_matrix_runs_safe_probes_through_executive_runtime(monkey
         "memory_consolidate": "memory",
         "repo_health_scan": "repo",
         "test_failure_triage": "repo",
+        "frontend_route_audit": "frontend",
+        "frontend_component_value_audit": "frontend",
         "system_info": "system",
         "process_list": "system",
         "network_status": "system",
@@ -99,6 +105,8 @@ def test_tool_execution_matrix_runs_safe_probes_through_executive_runtime(monkey
         "memory_consolidate",
         "repo_health_scan",
         "test_failure_triage",
+        "frontend_route_audit",
+        "frontend_component_value_audit",
         "system_info",
         "process_list",
         "network_status",
