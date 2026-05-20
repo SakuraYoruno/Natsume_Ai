@@ -241,7 +241,7 @@ _TASK_MEMORY_RE = re.compile(
 )
 _TASK_CODE_RE = re.compile(
     r"(报错|错误|异常|修复|修一个|改代码|写代码|单测|测试|diff|patch|traceback|stack trace|compile|build|修.*bug|bug.*修"
-    r"|代码|编程|写.*函数|函数|脚本|调试|实现|开发|code|coding|programming|function|script|program"
+    r"|代码|编程|写.*函数|函数|脚本|调试|实现|开发|\bcode\b|coding|programming|function|script|program"
     r"|python|javascript|typescript|java|golang|rust|c\+\+|debug|bug|class|algorithm|implement|develop)",
     re.IGNORECASE,
 )
@@ -526,6 +526,17 @@ _SIMPLE_TECH_ACTION_BLOCKERS: tuple[str, ...] = (
     "迁移",
     "写代码",
 )
+_STATUS_REPLY_REQUEST_RE = re.compile(
+    r"("
+    r"用.{0,10}(?:一句|一句话|短句).{0,10}(?:回复|回答|告诉|说)"
+    r"|(?:回复|回答|告诉我|告诉一下).{0,32}(?:是否|是不是|有没有|能不能|能否|在线|正常|通过|可用|通不通)"
+    r")",
+    re.IGNORECASE,
+)
+_STATUS_REPLY_DOMAIN_RE = re.compile(
+    r"(主链|闭环|链路|gateway|onebot|qq|微信|wechat|edge|host|asr|tts|vts|thalamus|意图识别|场景路由|路由|在线|连通|可用)",
+    re.IGNORECASE,
+)
 
 
 def _normalize_text(value: Any, *, lower: bool = False) -> str:
@@ -557,6 +568,13 @@ def _looks_like_simple_technical_advice(text: str) -> bool:
     if any(marker in compact_lower for marker in _SIMPLE_TECH_ACTION_BLOCKERS):
         return False
     return bool(_SIMPLE_TECH_ADVICE_RE.search(normalized) and _SIMPLE_TECH_QUESTION_RE.search(normalized))
+
+
+def _looks_like_status_reply_chat(text: str) -> bool:
+    normalized = _normalize_text(text)
+    if not normalized:
+        return False
+    return bool(_STATUS_REPLY_REQUEST_RE.search(normalized) and _STATUS_REPLY_DOMAIN_RE.search(normalized))
 
 
 def _looks_like_generic_action_intent(text: str) -> bool:
@@ -1156,6 +1174,19 @@ def _build_direct_route_seed(text: str) -> dict[str, Any] | None:
             "task": cleaned,
             "reason_code": "THALAMUS_RULE_CONTEXT_CHAT",
             "confidence": 0.9,
+            "route_source": "thalamus.rule",
+            "args": {
+                "text": cleaned,
+            },
+        }
+
+    if _looks_like_status_reply_chat(cleaned):
+        return {
+            "route": "chat",
+            "target_id": "",
+            "task": cleaned,
+            "reason_code": "THALAMUS_RULE_STATUS_REPLY_CHECK",
+            "confidence": 0.98,
             "route_source": "thalamus.rule",
             "args": {
                 "text": cleaned,

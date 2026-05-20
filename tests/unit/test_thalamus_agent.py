@@ -907,6 +907,27 @@ def test_classify_task_intent_routes_connectivity_check_to_chat() -> None:
     assert decision["reason_code"] == "THALAMUS_RULE_CONNECTIVITY_CHECK"
 
 
+def test_classify_task_intent_routes_gateway_status_reply_check_to_chat() -> None:
+    decision = classify_task_intent_by_rules(
+        "Codex QQ gateway闭环验收：请用一句中文短句回复当前意图识别和场景路由是否在线。"
+    )
+
+    assert decision is not None
+    assert decision["route"] == "chat"
+    assert decision["target_id"] == ""
+    assert decision["route_source"] == "thalamus.rule"
+    assert decision["reason_code"] == "THALAMUS_RULE_STATUS_REPLY_CHECK"
+
+
+def test_classify_task_intent_does_not_treat_codex_name_as_code_request() -> None:
+    decision = classify_task_intent_by_rules("Codex 现在在线吗？")
+
+    assert decision is not None
+    assert decision["route"] == "chat"
+    assert decision["target_id"] == ""
+    assert decision["reason_code"] == "THALAMUS_RULE_CONNECTIVITY_CHECK"
+
+
 def test_classify_task_intent_fastpath_routes_connectivity_check_to_chat() -> None:
     decision = classify_task_intent_fastpath("测试下能不能回复")
 
