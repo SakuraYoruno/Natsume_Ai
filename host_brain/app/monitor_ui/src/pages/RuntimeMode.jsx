@@ -13,6 +13,7 @@ import {
   updateAutoRules,
 } from '../api/runtimeMode.js'
 import EmptyStateCard from '../components/EmptyStateCard.jsx'
+import LoadingNotice from '../components/LoadingNotice.jsx'
 import MetricCard from '../components/MetricCard.jsx'
 import NoticeBanner from '../components/NoticeBanner.jsx'
 import OrganSystemOverview from '../components/lifeBody/OrganSystemOverview.jsx'
@@ -274,7 +275,7 @@ export default function RuntimeMode() {
       />
 
       {loading && !status && !consoleError ? (
-        <NoticeBanner variant="info" title="加载中">正在同步生命体存在态轴快照…</NoticeBanner>
+        <LoadingNotice>正在同步生命体存在态轴快照…</LoadingNotice>
       ) : null}
 
       {switchResult ? (

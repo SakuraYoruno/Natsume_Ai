@@ -23,6 +23,7 @@ import LifeBodyFocusPanel from '../components/lifeBody/LifeBodyFocusPanel.jsx'
 import LifeBodyTimeline from '../components/lifeBody/LifeBodyTimeline.jsx'
 import LifeBodyTopology from '../components/lifeBody/LifeBodyTopology.jsx'
 import LifeBodyVitalsStrip from '../components/lifeBody/LifeBodyVitalsStrip.jsx'
+import { LazyLoadingNotice, LoadingNotice } from '../components/LoadingNotice.jsx'
 import NoticeBanner from '../components/NoticeBanner.jsx'
 import PageHero from '../components/PageHero.jsx'
 import TimeWindowSelect from '../components/TimeWindowSelect.jsx'
@@ -478,16 +479,16 @@ export default function DigitalLifeOverview() {
       <ViewportLazySection
         rootMargin="180px 0px"
         eagerAfterMs={1200}
-        placeholder={(
+        fallback={(
           <LifeSection
             title="Capability Gap & Forge Loop"
             hint="Expose gap pressure and forge runtime quality directly in the life-body overview."
             actionTo="/insights/global"
             actionLabel="Open Global Insights"
           >
-            <NoticeBanner variant="info" title="按需加载中">
+            <LazyLoadingNotice>
               正在准备 gap pressure 与 forge runtime 视图…
-            </NoticeBanner>
+            </LazyLoadingNotice>
           </LifeSection>
         )}
       >
@@ -498,10 +499,10 @@ export default function DigitalLifeOverview() {
               hint="Expose gap pressure and forge runtime quality directly in the life-body overview."
               actionTo="/insights/global"
               actionLabel="Open Global Insights"
-            >
-              <NoticeBanner variant="info" title="加载中">
+          >
+              <LoadingNotice>
                 正在载入 gap pressure 与 forge runtime 视图…
-              </NoticeBanner>
+              </LoadingNotice>
             </LifeSection>
           )}
         >
@@ -512,16 +513,16 @@ export default function DigitalLifeOverview() {
       <ViewportLazySection
         rootMargin="240px 0px"
         eagerAfterMs={1200}
-        placeholder={(
+        fallback={(
           <LifeSection
             title="人体闭环健康（Gateway）"
             hint="展示请求从即时确认、进度触达到偏航修复与终态收束的健康度。"
             actionTo="/gateway"
             actionLabel="查看通道详情"
           >
-            <NoticeBanner variant="info" title="按需加载中">
+            <LazyLoadingNotice>
               正在准备闭环趋势、病灶热区和自愈建议视图…
-            </NoticeBanner>
+            </LazyLoadingNotice>
           </LifeSection>
         )}
       >
@@ -532,10 +533,10 @@ export default function DigitalLifeOverview() {
               hint="展示请求从即时确认、进度触达到偏航修复与终态收束的健康度。"
               actionTo="/gateway"
               actionLabel="查看通道详情"
-            >
-              <NoticeBanner variant="info" title="加载中">
+          >
+              <LoadingNotice>
                 正在载入闭环趋势、病灶热区和自愈建议视图…
-              </NoticeBanner>
+              </LoadingNotice>
             </LifeSection>
           )}
         >
@@ -546,20 +547,20 @@ export default function DigitalLifeOverview() {
       <ViewportLazySection
         rootMargin="200px 0px"
         eagerAfterMs={1200}
-        placeholder={(
+        fallback={(
           <LifeSection title="生命体次级分区" hint="体征、成长、器官联通态与体内快照会在进入视口后加载。">
-            <NoticeBanner variant="info" title="按需加载中">
+            <LazyLoadingNotice>
               正在准备次级生命体分区…
-            </NoticeBanner>
+            </LazyLoadingNotice>
           </LifeSection>
         )}
       >
         <React.Suspense
           fallback={(
             <LifeSection title="生命体次级分区" hint="体征、成长、器官联通态与体内快照会在进入视口后加载。">
-              <NoticeBanner variant="info" title="加载中">
+              <LoadingNotice>
                 正在载入次级生命体分区…
-              </NoticeBanner>
+              </LoadingNotice>
             </LifeSection>
           )}
         >

@@ -20,7 +20,7 @@ const RUNTIME_PENDING_META = {
   emoji: '◌',
   label: '待连接',
   desc: '运行快照暂不可用',
-  semantic: '当前尚未接到数字生命体运行快照，顶部态势会以占位信息展示。',
+  semantic: '当前尚未接到数字生命体运行快照，顶部态势会以空态信息展示。',
 }
 
 export default function useLifeBodyPageData({ windowMinutes = 360 } = {}) {

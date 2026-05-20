@@ -6,6 +6,7 @@ import {
 import DigitalLifeRuntimeCard from '../components/DigitalLifeRuntimeCard.jsx'
 import EmptyStateCard from '../components/EmptyStateCard.jsx'
 import OrganSystemOverview from '../components/lifeBody/OrganSystemOverview.jsx'
+import { LazyLoadingNotice, LoadingNotice } from '../components/LoadingNotice.jsx'
 import NoticeBanner from '../components/NoticeBanner.jsx'
 import SampleMeta from '../components/obs/SampleMeta.jsx'
 import ViewportLazySection from '../components/obs/ViewportLazySection.jsx'
@@ -343,7 +344,7 @@ export default function Tools() {
       {catalogError ? <NoticeBanner variant="error">{catalogError}</NoticeBanner> : null}
 
       {!catalogError && !loading && !refreshing && toolsLoadState === LOAD_STATES.UNAVAILABLE ? (
-        <NoticeBanner variant="warning">工具目录接口当前未返回可用快照，页面会保留中性占位。</NoticeBanner>
+        <NoticeBanner variant="warning">工具目录接口当前未返回可用快照，页面会保留中性空态。</NoticeBanner>
       ) : null}
 
       {!catalogError && !loading && !refreshing && toolsLoadState === LOAD_STATES.NO_SAMPLE ? (
@@ -430,9 +431,7 @@ export default function Tools() {
           </div>
           <div className="max-h-[620px] divide-y divide-gray-100 overflow-y-auto">
           {loading && filteredTools.length === 0 ? (
-            <NoticeBanner variant="info" title="加载中">
-              正在同步工具目录…
-            </NoticeBanner>
+            <LoadingNotice>正在同步工具目录…</LoadingNotice>
           ) : filteredTools.length === 0 ? (
             <EmptyStateCard title="暂无工具" hint="调整筛选条件后再试试。" className="p-6" />
           ) : (
@@ -524,17 +523,17 @@ export default function Tools() {
 
       <ViewportLazySection
         rootMargin="1200px 0px"
-        placeholder={(
-          <NoticeBanner variant="info" title="按需加载中">
+        fallback={(
+          <LazyLoadingNotice>
             自定义 provider 与工具侧深层统计会在滚动接近后再展开。
-          </NoticeBanner>
+          </LazyLoadingNotice>
         )}
       >
         <React.Suspense
           fallback={(
-            <NoticeBanner variant="info" title="按需加载中">
+            <LoadingNotice>
               正在装配工具运维深层分区…
-            </NoticeBanner>
+            </LoadingNotice>
           )}
         >
           <ToolsOperationsSection

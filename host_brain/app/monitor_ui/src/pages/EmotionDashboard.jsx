@@ -265,7 +265,7 @@ export default function EmotionDashboard() {
       {!error && runtimeError ? <NoticeBanner variant="warning">{runtimeError}</NoticeBanner> : null}
       {!error && !loading && !refreshing && !runtimeLoading && emotionLoadState === LOAD_STATES.UNAVAILABLE ? (
         <NoticeBanner variant="warning">
-          情绪观测数据当前暂不可用，页面会保留中性占位并等待运行快照或 VTS 聚合恢复。
+          情绪观测数据当前暂不可用，页面会保留中性空态并等待运行快照或 VTS 聚合恢复。
         </NoticeBanner>
       ) : null}
       {!error && !loading && !refreshing && !runtimeLoading && emotionLoadState === LOAD_STATES.NO_SAMPLE ? (

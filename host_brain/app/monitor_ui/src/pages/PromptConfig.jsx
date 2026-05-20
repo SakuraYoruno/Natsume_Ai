@@ -10,6 +10,7 @@ import {
 } from 'lucide-react'
 import DigitalLifeRuntimeCard from '../components/DigitalLifeRuntimeCard.jsx'
 import EmptyStateCard from '../components/EmptyStateCard.jsx'
+import LoadingNotice from '../components/LoadingNotice.jsx'
 import MetricCard from '../components/MetricCard.jsx'
 import NoticeBanner from '../components/NoticeBanner.jsx'
 import SampleMeta from '../components/obs/SampleMeta.jsx'
@@ -217,7 +218,7 @@ export default function PromptConfig() {
           </div>
 
           <div className="flex items-center justify-between text-xs text-gray-500">
-            <span>{listLoading ? '加载中…' : listRefreshing ? '刷新中…' : `共 ${items.length} 项`}</span>
+            <span>{listLoading ? '同步中…' : listRefreshing ? '刷新中…' : `共 ${items.length} 项`}</span>
             <button className="text-primary hover:underline" onClick={() => void refetchList()}>刷新列表</button>
           </div>
 
@@ -259,9 +260,9 @@ export default function PromptConfig() {
           {selected ? (
             <React.Suspense
               fallback={(
-                <NoticeBanner variant="info" title="按需加载中">
+                <LoadingNotice>
                   正在装配模板详情只读区…
-                </NoticeBanner>
+                </LoadingNotice>
               )}
             >
               <PromptTemplateEditorPanel

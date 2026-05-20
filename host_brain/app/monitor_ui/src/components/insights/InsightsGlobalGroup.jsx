@@ -188,7 +188,7 @@ function CapabilityGapStatsSection({
                 ))}
               </div>
             ) : (
-              <EmptyStateCard title="No capability hotspots" hint="Waiting for gap events to accumulate." className="p-5" />
+              <EmptyStateCard title="暂无能力缺口热点" hint="等待缺口事件积累后展示高压候选。" className="p-5" />
             )}
           </div>
 
@@ -219,7 +219,7 @@ function CapabilityGapStatsSection({
                 })}
               </div>
             ) : (
-              <EmptyStateCard title="No Forge quality samples" hint="No proposal runtime result observed yet." className="p-5" />
+              <EmptyStateCard title="暂无 Forge 质量记录" hint="尚未观察到提案运行结果。" className="p-5" />
             )}
           </div>
         </div>

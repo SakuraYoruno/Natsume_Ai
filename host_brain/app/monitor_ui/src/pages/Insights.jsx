@@ -2,6 +2,7 @@ import React, { useEffect, useState, useCallback } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { RefreshCw, ShieldCheck, AlertTriangle, Bot, Database, Tv, GitMerge, Activity, ArrowLeft } from 'lucide-react'
 import DigitalLifeRuntimeCard from '../components/DigitalLifeRuntimeCard.jsx'
+import LoadingNotice from '../components/LoadingNotice.jsx'
 import LivingPulseStrip from '../components/LivingPulseStrip.jsx'
 import NoticeBanner from '../components/NoticeBanner.jsx'
 import SampleMeta from '../components/obs/SampleMeta.jsx'
@@ -267,9 +268,7 @@ export default function Insights() {
             <React.Suspense
               fallback={(
                 <div className="card p-4">
-                  <NoticeBanner variant="info" title="加载中">
-                    正在加载全局异常洞察…
-                  </NoticeBanner>
+                  <LoadingNotice>正在加载全局异常洞察…</LoadingNotice>
                 </div>
               )}
             >
@@ -287,9 +286,7 @@ export default function Insights() {
             <React.Suspense
               fallback={(
                 <div className="card p-4">
-                  <NoticeBanner variant="info" title="加载中">
-                    正在加载记忆器官洞察…
-                  </NoticeBanner>
+                  <LoadingNotice>正在加载记忆器官洞察…</LoadingNotice>
                 </div>
               )}
             >
@@ -306,9 +303,7 @@ export default function Insights() {
             <React.Suspense
               fallback={(
                 <div className="card p-4">
-                  <NoticeBanner variant="info" title="加载中">
-                    正在加载执行与推理洞察…
-                  </NoticeBanner>
+                  <LoadingNotice>正在加载执行与推理洞察…</LoadingNotice>
                 </div>
               )}
             >
@@ -325,9 +320,7 @@ export default function Insights() {
             <React.Suspense
               fallback={(
                 <div className="card p-4">
-                  <NoticeBanner variant="info" title="加载中">
-                    正在加载安全与护栏洞察…
-                  </NoticeBanner>
+                  <LoadingNotice>正在加载安全与护栏洞察…</LoadingNotice>
                 </div>
               )}
             >
@@ -343,9 +336,7 @@ export default function Insights() {
             <React.Suspense
               fallback={(
                 <div className="card p-4">
-                  <NoticeBanner variant="info" title="加载中">
-                    正在加载状态与规范洞察…
-                  </NoticeBanner>
+                  <LoadingNotice>正在加载状态与规范洞察…</LoadingNotice>
                 </div>
               )}
             >
@@ -360,9 +351,7 @@ export default function Insights() {
             <React.Suspense
               fallback={(
                 <div className="card p-4">
-                  <NoticeBanner variant="info" title="加载中">
-                    正在加载表情通道洞察…
-                  </NoticeBanner>
+                  <LoadingNotice>正在加载表情通道洞察…</LoadingNotice>
                 </div>
               )}
             >

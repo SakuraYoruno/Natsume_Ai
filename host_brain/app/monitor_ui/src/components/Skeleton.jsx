@@ -1,12 +1,12 @@
 import React from 'react'
 
 /**
- * 通用 Skeleton 加载占位组件。
+ * 通用 Skeleton 骨架屏组件。
  * 用法：
- *   <Skeleton className="h-4 w-32" />           — 单行文字占位
- *   <Skeleton className="h-24 w-full rounded-lg" /> — 卡片占位
- *   <SkeletonCard />                             — 统计卡片占位
- *   <SkeletonTable rows={5} cols={4} />          — 表格占位
+ *   <Skeleton className="h-4 w-32" />           — 单行文字骨架
+ *   <Skeleton className="h-24 w-full rounded-lg" /> — 卡片骨架
+ *   <SkeletonCard />                             — 统计卡片骨架
+ *   <SkeletonTable rows={5} cols={4} />          — 表格骨架
  */
 
 export function Skeleton({ className = '' }) {

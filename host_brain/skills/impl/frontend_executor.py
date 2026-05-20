@@ -389,6 +389,38 @@ def _line_hits_for_regex(text: str, pattern: re.Pattern[str], *, limit: int = 20
     return hits
 
 
+def _is_low_value_false_positive(line: str, marker: str) -> bool:
+    normalized = line.strip().lower()
+    marker_text = marker.lower()
+    if marker_text == "placeholder" and re.search(r"\bplaceholder\s*=", normalized):
+        return True
+    if marker_text == "placeholder" and re.search(r"\bplaceholder\s*[,:]", normalized):
+        return True
+    if marker_text == "mock" and (
+        "mock-fallback" in normalized
+        or "use_mock" in normalized
+        or "ismock" in normalized
+        or "mock_doc_count" in normalized
+    ):
+        return True
+    return False
+
+
+def _low_value_marker_hits(text: str, *, limit: int = 20) -> list[dict[str, Any]]:
+    hits: list[dict[str, Any]] = []
+    lines = text.splitlines()
+    for match in _LOW_VALUE_MARKER_RE.finditer(text):
+        line_number = _line_for_offset(text, match.start())
+        line = lines[line_number - 1] if 0 <= line_number - 1 < len(lines) else ""
+        marker = match.group(0)[:120]
+        if _is_low_value_false_positive(line, marker):
+            continue
+        hits.append({"line": line_number, "text": marker})
+        if len(hits) >= limit:
+            break
+    return hits
+
+
 def _execute_component_value_audit(payload: dict[str, Any]) -> dict[str, Any]:
     source_root = Path(str(payload.get("source_root") or Path.cwd())).expanduser().resolve()
     max_files = int(payload.get("max_files") or 800)
@@ -422,7 +454,7 @@ def _execute_component_value_audit(payload: dict[str, Any]) -> dict[str, Any]:
         empty_state_count = len(re.findall(r"\bEmptyStateCard\b", text)) if is_component_source else 0
         notice_count = len(re.findall(r"\bNoticeBanner\b", text)) if is_component_source else 0
         metric_count = len(re.findall(r"\bMetricCard\b", text)) if is_component_source else 0
-        low_markers = _line_hits_for_regex(text, _LOW_VALUE_MARKER_RE, limit=12)
+        low_markers = _low_value_marker_hits(text, limit=12)
 
         if components or labels or card_surface_count or low_markers:
             component_files.append(

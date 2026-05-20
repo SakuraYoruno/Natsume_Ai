@@ -11,6 +11,11 @@ import LivingPulseStrip from '../components/LivingPulseStrip.jsx'
 import NoticeBanner from '../components/NoticeBanner.jsx'
 import PageHero from '../components/PageHero.jsx'
 import StatusBadge from '../components/StatusBadge.jsx'
+import {
+  HomeSummaryCard,
+  TracePageFallback,
+  TraceSection,
+} from '../components/trace/TraceSurfaces.jsx'
 import { getTraceNodeDisplayName } from '../components/trace/traceNodeText.js'
 import {
   GROUPS,
@@ -369,48 +374,6 @@ function formatEventPayloadPreview(payload, maxLength = 180) {
   } catch {
     return 'payload 无法序列化'
   }
-}
-
-function HomeSummaryCard({ icon: Icon, title, value, caption, toneClassName = 'text-gray-900' }) {
-  return (
-    <div className="card p-4">
-      <div className="flex items-start gap-3">
-        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-primary-100/70 bg-white text-blue-600">
-          <Icon size={18} />
-        </span>
-        <div className="min-w-0 flex-1">
-          <div className="text-xs font-medium text-gray-500">{title}</div>
-          <div className={`mt-1 break-all text-sm font-semibold leading-6 ${toneClassName}`}>{value}</div>
-          {caption ? <div className="mt-1 break-all text-xs leading-5 text-gray-500">{caption}</div> : null}
-        </div>
-      </div>
-    </div>
-  )
-}
-
-function TraceSection({ title, hint, aside = null, children }) {
-  return (
-    <section className="card relative overflow-hidden p-4 md:p-5">
-      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_left,_rgba(41,112,255,0.05),_transparent_38%),radial-gradient(circle_at_bottom_right,_rgba(16,185,129,0.05),_transparent_34%)]" />
-      <div className="relative">
-        <div className="flex items-center gap-2 flex-wrap">
-          <span className="lifeline-node" />
-          <h2 className="text-sm font-semibold text-gray-900">{title}</h2>
-          {aside ? <div className="ml-auto">{aside}</div> : null}
-        </div>
-        {hint ? <p className="mt-1 text-xs text-gray-500">{hint}</p> : null}
-        <div className="lifeline-rail mt-3 h-4 px-2">
-          <div className="lifeline-wave absolute inset-0 opacity-65" />
-          <div className="relative flex h-full items-center justify-around">
-            {[0, 1, 2, 3].map((index) => (
-              <span key={index} className="lifeline-node" style={{ animationDelay: `${index * 0.24}s` }} />
-            ))}
-          </div>
-        </div>
-        <div className="mt-4">{children}</div>
-      </div>
-    </section>
-  )
 }
 
 const LiveTraceCard = React.memo(function LiveTraceCard({ item, selected, onSelect, onOpenDetail }) {
@@ -1114,7 +1077,7 @@ function TraceHome({ traceData, setTraceData, traceInfo, setTraceInfo, loading, 
     : '优先展示最近活跃的链路进度、当前节点和输出摘要。'
   const activeCountLabel = isHistorySearchMode ? '条搜索结果' : '条活跃请求'
   const historySectionHint = shouldAutoShowHistory
-    ? '当前没有活跃链路，自动回退展示历史请求（已默认隐藏测试会话与纯问号占位消息）。'
+    ? '当前没有活跃链路，自动回退展示历史请求（已默认隐藏测试会话与纯问号空态消息）。'
     : '历史请求默认收起；需要回看刚才跑过什么时，再从这里展开。'
   const canCollapseHistory = historyExpanded && !shouldAutoShowHistory
   const selectedTraceStageMeta = getTraceActiveStageMeta(traceData)
@@ -1491,7 +1454,7 @@ function TraceHome({ traceData, setTraceData, traceInfo, setTraceInfo, loading, 
 
             <div className="mt-3 space-y-3">
               {liveTraceLoading && liveTraceItems.length === 0 && (
-                <NoticeBanner variant="info" title="加载中" className="px-4 py-8">
+                <NoticeBanner variant="info" title="同步中" className="px-4 py-8">
                   正在加载最近请求的链路详情…
                 </NoticeBanner>
               )}
@@ -1537,11 +1500,7 @@ function TraceHome({ traceData, setTraceData, traceInfo, setTraceInfo, loading, 
         <div ref={inlineOverviewRef}>
           <React.Suspense
             fallback={(
-              <div className="card p-4">
-                <NoticeBanner variant="info" title="加载中">
-                  正在加载当前请求总览图…
-                </NoticeBanner>
-              </div>
+              <TracePageFallback>正在加载当前请求总览图…</TracePageFallback>
             )}
           >
             <TraceInlineFullChainOverview
@@ -1611,7 +1570,7 @@ function TraceHome({ traceData, setTraceData, traceInfo, setTraceInfo, loading, 
           <div className="divide-y divide-primary-100/70">
             {recentLoading && recentRequests.length === 0 && (
               <div className="px-4 py-4">
-                <NoticeBanner variant="info" title="加载中">
+                <NoticeBanner variant="info" title="同步中">
                   正在加载历史请求…
                 </NoticeBanner>
               </div>
@@ -1844,11 +1803,7 @@ export default function Trace() {
         element={(
           <React.Suspense
             fallback={(
-              <div className="card p-4">
-                <NoticeBanner variant="info" title="加载中">
-                  正在加载全链路拓扑图…
-                </NoticeBanner>
-              </div>
+              <TracePageFallback>正在加载全链路拓扑图…</TracePageFallback>
             )}
           >
             <TraceFullChainView traceData={traceData} />
@@ -1860,11 +1815,7 @@ export default function Trace() {
         element={(
           <React.Suspense
             fallback={(
-              <div className="card p-4">
-                <NoticeBanner variant="info" title="加载中">
-                  正在加载分组链路图…
-                </NoticeBanner>
-              </div>
+              <TracePageFallback>正在加载分组链路图…</TracePageFallback>
             )}
           >
             <TraceGroupDagRoute traceData={traceData} />
@@ -1876,11 +1827,7 @@ export default function Trace() {
         element={(
           <React.Suspense
             fallback={(
-              <div className="card p-4">
-                <NoticeBanner variant="info" title="加载中">
-                  正在打开请求级 Trace 详情…
-                </NoticeBanner>
-              </div>
+              <TracePageFallback>正在打开请求级 Trace 详情…</TracePageFallback>
             )}
           >
             <TraceRequestDetail />
@@ -1890,4 +1837,3 @@ export default function Trace() {
     </Routes>
   )
 }
-

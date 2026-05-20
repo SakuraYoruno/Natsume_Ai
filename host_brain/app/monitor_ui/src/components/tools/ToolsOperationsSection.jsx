@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import { installCustomSkillProvider } from '../../api/tools.js'
 import EmptyStateCard from '../EmptyStateCard.jsx'
+import LoadingNotice from '../LoadingNotice.jsx'
 import NoticeBanner from '../NoticeBanner.jsx'
 import SampleMeta from '../obs/SampleMeta.jsx'
 import { LOAD_STATES, resolveLoadState } from '../../models/loadState.js'
@@ -32,9 +33,9 @@ function ProviderStatusBadge({ status }) {
 
 function ProviderLoadingState() {
   return (
-    <NoticeBanner variant="info" title="加载中">
+    <LoadingNotice>
       正在同步自定义提供器列表…
-    </NoticeBanner>
+    </LoadingNotice>
   )
 }
 
@@ -135,7 +136,7 @@ function CustomSkillInstaller() {
             disabled={templateLoading || templateRefreshing}
             className="btn-secondary text-xs disabled:opacity-50"
           >
-            {templateLoading || templateRefreshing ? '加载中…' : '加载模板'}
+            {templateLoading || templateRefreshing ? '同步中…' : '加载模板'}
           </button>
           <button
             onClick={() => void refetchProviders()}

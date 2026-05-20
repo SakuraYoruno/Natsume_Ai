@@ -192,7 +192,7 @@ export default function WeChat() {
 
       {!channelError && !loading && !refreshing && wechatLoadState === LOAD_STATES.NO_SAMPLE ? (
         <NoticeBanner variant="info" title="当前窗口暂无通道事件">
-          WeChat 通道当前没有产生可观测事件，页面会保留中性占位。
+          WeChat 通道当前没有产生可观测事件，页面会保留中性空态。
         </NoticeBanner>
       ) : null}
 

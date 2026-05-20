@@ -15,6 +15,16 @@ import {
 } from 'lucide-react'
 import EmptyStateCard from '../components/EmptyStateCard.jsx'
 import NoticeBanner from '../components/NoticeBanner.jsx'
+import {
+  BioOpsSkeletonGrid,
+  EvidenceChips,
+  IconTile,
+  MetricTile,
+  Section,
+  STATUS_LABELS,
+  StatusPill,
+  classNames,
+} from '../components/bioOps/BioOpsSurfaces.jsx'
 import useAppStore from '../store/useAppStore.js'
 import {
   acceptCodexBioOpsAdoption,
@@ -34,66 +44,6 @@ import {
   runCodexBioOpsDailyCycle,
 } from '../api/obs.js'
 import { useCodexBioOpsObservabilityQuery } from '../queries/codexBioOpsQueries.js'
-
-const STATUS_STYLES = {
-  EXECUTED: 'border-green-200 bg-green-50 text-green-700',
-  PASS: 'border-green-200 bg-green-50 text-green-700',
-  AUDITED: 'border-blue-200 bg-blue-50 text-blue-700',
-  PROPOSED: 'border-cyan-200 bg-cyan-50 text-cyan-700',
-  CANDIDATE: 'border-amber-200 bg-amber-50 text-amber-700',
-  OWNER_GATED: 'border-amber-200 bg-amber-50 text-amber-700',
-  READY_FOR_OWNER_IMPORT: 'border-green-200 bg-green-50 text-green-700',
-  READY_FOR_ORGAN_CONSUMPTION: 'border-indigo-200 bg-indigo-50 text-indigo-700',
-  QUEUED_FOR_OWNER: 'border-purple-200 bg-purple-50 text-purple-700',
-  IMPORTED_FOR_OWNER_REVIEW: 'border-emerald-200 bg-emerald-50 text-emerald-700',
-  ALREADY_IMPORTED: 'border-slate-200 bg-slate-50 text-slate-700',
-  PENDING_OWNER_STATE_REVIEW: 'border-amber-200 bg-amber-50 text-amber-700',
-  OWNER_STATE_ACCEPTED: 'border-cyan-200 bg-cyan-50 text-cyan-700',
-  OWNER_STATE_REJECTED: 'border-slate-200 bg-slate-50 text-slate-700',
-  ACTIVE: 'border-cyan-200 bg-cyan-50 text-cyan-700',
-  INACTIVE: 'border-slate-200 bg-slate-50 text-slate-700',
-  PENDING_REVIEW: 'border-amber-200 bg-amber-50 text-amber-700',
-  REJECTED_BY_OWNER: 'border-slate-200 bg-slate-50 text-slate-700',
-  TRACED: 'border-indigo-200 bg-indigo-50 text-indigo-700',
-  REPORT_ONLY: 'border-slate-200 bg-slate-50 text-slate-700',
-  BLOCKED: 'border-red-200 bg-red-50 text-red-700',
-  FAILED: 'border-red-200 bg-red-50 text-red-700',
-  DEGRADED: 'border-orange-200 bg-orange-50 text-orange-700',
-  NEEDS_INPUT: 'border-orange-200 bg-orange-50 text-orange-700',
-  CHECK: 'border-orange-200 bg-orange-50 text-orange-700',
-  NOT_RUN: 'border-gray-200 bg-gray-50 text-gray-600',
-  UNKNOWN: 'border-gray-200 bg-gray-50 text-gray-600',
-}
-
-const STATUS_LABELS = {
-  EXECUTED: '已执行',
-  PASS: '通过',
-  AUDITED: '已审计',
-  PROPOSED: '提案',
-  CANDIDATE: '候选',
-  OWNER_GATED: 'Owner 接管',
-  READY_FOR_OWNER_IMPORT: '待 owner 导入',
-  READY_FOR_ORGAN_CONSUMPTION: '待 organ 消费',
-  QUEUED_FOR_OWNER: 'Owner 队列',
-  IMPORTED_FOR_OWNER_REVIEW: 'Owner 状态候选',
-  ALREADY_IMPORTED: '已导入',
-  PENDING_OWNER_STATE_REVIEW: '待 owner state 审核',
-  OWNER_STATE_ACCEPTED: 'State 已采纳',
-  OWNER_STATE_REJECTED: 'State 已拒绝',
-  ACTIVE: '活跃',
-  INACTIVE: '停用',
-  PENDING_REVIEW: '待审核',
-  REJECTED_BY_OWNER: 'Owner 拒绝',
-  TRACED: '已 trace',
-  REPORT_ONLY: '报告模式',
-  BLOCKED: '已阻断',
-  FAILED: '失败',
-  DEGRADED: '降级',
-  NEEDS_INPUT: '需输入',
-  CHECK: '需检查',
-  NOT_RUN: '未运行',
-  UNKNOWN: '未知',
-}
 
 const EFFECT_LABELS = {
   reflex_short_ack: '短确认反射',
@@ -285,84 +235,9 @@ const ADAPTIVE_REPAIR_LABELS = {
 
 const STATUS_ORDER = ['PROPOSED', 'CANDIDATE', 'AUDITED', 'BLOCKED', 'DEGRADED', 'FAILED', 'NOT_RUN']
 
-function classNames(...items) {
-  return items.filter(Boolean).join(' ')
-}
-
-function StatusPill({ status }) {
-  const normalized = String(status || 'UNKNOWN').toUpperCase()
-  return (
-    <span className={classNames(
-      'inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold',
-      STATUS_STYLES[normalized] || STATUS_STYLES.UNKNOWN
-    )}>
-      {STATUS_LABELS[normalized] || normalized}
-    </span>
-  )
-}
-
-function IconTile({ icon: Icon, tone = 'blue' }) {
-  const tones = {
-    blue: 'border-blue-100 bg-blue-50 text-blue-600',
-    green: 'border-green-100 bg-green-50 text-green-600',
-    amber: 'border-amber-100 bg-amber-50 text-amber-600',
-    red: 'border-red-100 bg-red-50 text-red-600',
-    indigo: 'border-indigo-100 bg-indigo-50 text-indigo-600',
-    slate: 'border-slate-100 bg-slate-50 text-slate-600',
-  }
-  return (
-    <span className={classNames('inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border', tones[tone] || tones.blue)}>
-      <Icon size={18} />
-    </span>
-  )
-}
-
-function MetricTile({ icon, tone, label, value, hint, status }) {
-  return (
-    <div className="rounded-xl border border-white/80 bg-white/82 p-4 shadow-sm">
-      <div className="flex items-start justify-between gap-3">
-        <IconTile icon={icon} tone={tone} />
-        {status ? <StatusPill status={status} /> : null}
-      </div>
-      <div className="mt-3 text-xs font-medium text-gray-500">{label}</div>
-      <div className="mt-1 text-2xl font-bold text-gray-900">{value ?? '—'}</div>
-      {hint ? <div className="mt-1 text-xs leading-5 text-gray-500">{hint}</div> : null}
-    </div>
-  )
-}
-
-function Section({ title, subtitle, children, aside = null }) {
-  return (
-    <section className="space-y-3">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h2 className="text-base font-semibold text-gray-900">{title}</h2>
-          {subtitle ? <p className="mt-0.5 text-sm text-gray-500">{subtitle}</p> : null}
-        </div>
-        {aside}
-      </div>
-      {children}
-    </section>
-  )
-}
-
-function EvidenceChips({ items }) {
-  const values = Array.isArray(items) ? items.filter(Boolean) : []
-  if (!values.length) return null
-  return (
-    <div className="mt-3 flex flex-wrap gap-1.5">
-      {values.map((item) => (
-        <span key={item} className="rounded-full border border-gray-200 bg-gray-50 px-2 py-0.5 text-[11px] font-medium text-gray-600">
-          {item}
-        </span>
-      ))}
-    </div>
-  )
-}
-
 function BenefitCard({ benefit }) {
   return (
-    <div className="rounded-xl border border-white/80 bg-white/82 p-4 shadow-sm">
+    <div className="rounded-lg border border-white/80 bg-white/82 p-4 shadow-sm">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="text-sm font-semibold text-gray-900">{benefit.title}</div>
@@ -379,7 +254,7 @@ function ContractFieldGrid({ inspect }) {
   const present = Array.isArray(inspect?.contract_fields_present) ? inspect.contract_fields_present : []
   const missing = Array.isArray(inspect?.contract_fields_missing) ? inspect.contract_fields_missing : []
   return (
-    <div className="rounded-xl border border-white/80 bg-white/82 p-4 shadow-sm">
+    <div className="rounded-lg border border-white/80 bg-white/82 p-4 shadow-sm">
       <div className="flex items-center justify-between gap-2">
         <div className="text-sm font-semibold text-gray-900">ResultContract 覆盖</div>
         <span className="text-xs font-medium text-gray-500">{present.length}/{present.length + missing.length}</span>
@@ -405,7 +280,7 @@ function ContractFieldGrid({ inspect }) {
 function CodexResultCard({ title, result, icon, tone }) {
   const riskFlags = Array.isArray(result?.risk_flags) ? result.risk_flags : []
   return (
-    <div className="rounded-xl border border-white/80 bg-white/82 p-4 shadow-sm">
+    <div className="rounded-lg border border-white/80 bg-white/82 p-4 shadow-sm">
       <div className="flex items-start justify-between gap-3">
         <div className="flex min-w-0 items-center gap-3">
           <IconTile icon={icon} tone={tone} />
@@ -450,7 +325,7 @@ function StatusDistribution({ counts }) {
     return <EmptyStateCard title="暂无 BioOps 分布" hint="等待日循环或观测脚本生成 artifacts" />
   }
   return (
-    <div className="rounded-xl border border-white/80 bg-white/82 p-4 shadow-sm">
+    <div className="rounded-lg border border-white/80 bg-white/82 p-4 shadow-sm">
       <div className="flex items-center justify-between gap-2">
         <div className="text-sm font-semibold text-gray-900">状态分布</div>
         <div className="text-xs font-medium text-gray-500">total {total}</div>
@@ -483,7 +358,7 @@ function FocusEffectList({ effects }) {
   return (
     <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">
       {items.map((item) => (
-        <div key={item.id} className="rounded-xl border border-white/80 bg-white/82 p-4 shadow-sm">
+        <div key={item.id} className="rounded-lg border border-white/80 bg-white/82 p-4 shadow-sm">
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
               <div className="text-sm font-semibold text-gray-900">{EFFECT_LABELS[item.id] || item.id}</div>
@@ -508,7 +383,7 @@ function GroupTable({ groups }) {
   const rows = Array.isArray(groups) ? groups : []
   if (!rows.length) return null
   return (
-    <div className="overflow-hidden rounded-xl border border-white/80 bg-white/82 shadow-sm">
+    <div className="overflow-hidden rounded-lg border border-white/80 bg-white/82 shadow-sm">
       <div className="grid grid-cols-[1.1fr_0.5fr_1.2fr_1.4fr] gap-3 border-b border-gray-100 bg-gray-50 px-4 py-2 text-xs font-semibold text-gray-500">
         <span>能力组</span>
         <span>数量</span>
@@ -542,7 +417,7 @@ function PendingAdoptions({ items, runId, onChanged }) {
   const [error, setError] = useState(null)
   if (!rows.length) {
     return (
-      <div className="rounded-xl border border-white/80 bg-white/82 p-4 text-sm text-gray-500 shadow-sm">
+      <div className="rounded-lg border border-white/80 bg-white/82 p-4 text-sm text-gray-500 shadow-sm">
         当前没有待 owner 接管的候选；报告类能力保持只读输出。
       </div>
     )
@@ -603,7 +478,7 @@ function PendingAdoptions({ items, runId, onChanged }) {
               type="button"
               key={item.candidate_id}
               className={classNames(
-                'w-full rounded-xl border p-4 text-left shadow-sm transition-colors',
+                'w-full rounded-lg border p-4 text-left shadow-sm transition-colors',
                 selected ? 'border-amber-300 bg-amber-50' : 'border-white/80 bg-white/82 hover:border-amber-200 hover:bg-amber-50/60'
               )}
               onClick={() => loadDetail(item.candidate_id)}
@@ -622,7 +497,7 @@ function PendingAdoptions({ items, runId, onChanged }) {
         })}
       </div>
 
-      <div className="rounded-xl border border-white/80 bg-white/82 p-4 shadow-sm">
+      <div className="rounded-lg border border-white/80 bg-white/82 p-4 shadow-sm">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0">
             <div className="text-sm font-semibold text-gray-900">Owner review</div>
@@ -846,7 +721,7 @@ function OwnerInboxPanel({ runId }) {
   const reviewCounts = ownerState?.review_status_counts || {}
 
   return (
-    <div className="rounded-xl border border-white/80 bg-white/82 p-4 shadow-sm">
+    <div className="rounded-lg border border-white/80 bg-white/82 p-4 shadow-sm">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <div className="text-sm font-semibold text-gray-900">Owner inbox</div>
@@ -1093,7 +968,7 @@ function CapabilitySetPanel({ summary, labels, note, emptyTitle }) {
   }
   return (
     <div className="grid grid-cols-1 gap-3 xl:grid-cols-[0.72fr_1.28fr]">
-      <div className="rounded-xl border border-white/80 bg-white/82 p-4 shadow-sm">
+      <div className="rounded-lg border border-white/80 bg-white/82 p-4 shadow-sm">
         <div className="flex items-start justify-between gap-3">
           <div>
             <div className="text-sm font-semibold text-gray-900">机制闭环</div>
@@ -1113,7 +988,7 @@ function CapabilitySetPanel({ summary, labels, note, emptyTitle }) {
           {note}
         </div>
       </div>
-      <div className="overflow-hidden rounded-xl border border-white/80 bg-white/82 shadow-sm">
+      <div className="overflow-hidden rounded-lg border border-white/80 bg-white/82 shadow-sm">
         <div className="grid grid-cols-[1.1fr_0.72fr_0.72fr_0.56fr] gap-3 border-b border-gray-100 bg-gray-50 px-4 py-2 text-xs font-semibold text-gray-500">
           <span>机制</span>
           <span>Owner</span>
@@ -1278,7 +1153,7 @@ function CapabilityWorkbench({ sections }) {
   const ActivePanel = selected.Panel
   return (
     <div className="grid grid-cols-1 gap-4 xl:grid-cols-[18rem_minmax(0,1fr)]">
-      <div className="overflow-hidden rounded-xl border border-white/80 bg-white/86 shadow-sm">
+      <div className="overflow-hidden rounded-lg border border-white/80 bg-white/86 shadow-sm">
         <div className="border-b border-gray-100 px-4 py-3">
           <div className="text-sm font-semibold text-gray-900">能力层</div>
           <div className="mt-0.5 text-xs text-gray-500">{items.length} 个分区 · 当前 {selected.title}</div>
@@ -1317,7 +1192,7 @@ function CapabilityWorkbench({ sections }) {
         </div>
       </div>
       <div className="min-w-0 space-y-3">
-        <div className="rounded-xl border border-white/80 bg-white/86 p-4 shadow-sm">
+        <div className="rounded-lg border border-white/80 bg-white/86 p-4 shadow-sm">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
               <h3 className="text-base font-semibold text-gray-900">{selected.title}</h3>
@@ -1340,7 +1215,7 @@ function RuntimeTraceList({ traces }) {
   return (
     <div className="grid grid-cols-1 gap-3 xl:grid-cols-3">
       {rows.map((trace) => (
-        <div key={trace.id} className="rounded-xl border border-white/80 bg-white/82 p-4 shadow-sm">
+        <div key={trace.id} className="rounded-lg border border-white/80 bg-white/82 p-4 shadow-sm">
           <div className="flex items-start justify-between gap-3">
             <div>
               <div className="text-sm font-semibold text-gray-900">{TRACE_LABELS[trace.id] || trace.id}</div>
@@ -1377,7 +1252,7 @@ function ArtifactList({ artifacts }) {
   const rows = Array.isArray(artifacts) ? artifacts : []
   if (!rows.length) return null
   return (
-    <div className="rounded-xl border border-white/80 bg-white/82 shadow-sm">
+    <div className="rounded-lg border border-white/80 bg-white/82 shadow-sm">
       {rows.map((artifact) => (
         <div key={artifact.id} className="grid grid-cols-1 gap-1 border-b border-gray-100 px-4 py-3 last:border-b-0 lg:grid-cols-[13rem_1fr] lg:gap-3">
           <div className="flex items-center gap-2 text-sm font-semibold text-gray-800">
@@ -1597,7 +1472,7 @@ export default function CodexBioOpsObservability() {
 
   return (
     <div className="space-y-6">
-      <div className="rounded-2xl border border-white/80 bg-white/86 p-5 shadow-card backdrop-blur-sm">
+      <div className="rounded-lg border border-white/80 bg-white/86 p-5 shadow-card backdrop-blur-sm">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="min-w-0">
             <div className="inline-flex items-center gap-2 rounded-full border border-primary-100 bg-primary-50 px-3 py-1 text-xs font-semibold text-primary">
@@ -1655,11 +1530,7 @@ export default function CodexBioOpsObservability() {
       ) : null}
 
       {query.loading && !data ? (
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
-          {[0, 1, 2, 3].map((item) => (
-            <div key={item} className="h-36 animate-pulse rounded-xl border border-white/80 bg-white/70 shadow-sm" />
-          ))}
-        </div>
+        <BioOpsSkeletonGrid />
       ) : null}
 
       {data && !data.artifact_available ? (
@@ -1741,7 +1612,7 @@ export default function CodexBioOpsObservability() {
               />
             </div>
             <details
-              className="overflow-hidden rounded-xl border border-white/80 bg-white/86 shadow-sm"
+              className="overflow-hidden rounded-lg border border-white/80 bg-white/86 shadow-sm"
               onToggle={(event) => setShowOwnerDeepDive(event.currentTarget.open)}
             >
               <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 text-sm font-semibold text-gray-700">

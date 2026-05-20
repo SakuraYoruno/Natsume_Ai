@@ -1,5 +1,6 @@
 import React from 'react'
 import EmptyStateCard from '../EmptyStateCard.jsx'
+import LoadingNotice from '../LoadingNotice.jsx'
 import NoticeBanner from '../NoticeBanner.jsx'
 import SampleMeta from '../obs/SampleMeta.jsx'
 import { LOAD_STATES, resolveLoadState } from '../../models/loadState.js'
@@ -101,9 +102,9 @@ export default function AutomationHistorySectionContent({
       />
 
       {loading && !data ? (
-        <NoticeBanner variant="info" title="加载中">
+        <LoadingNotice>
           正在同步节律历史脉络…
-        </NoticeBanner>
+        </LoadingNotice>
       ) : null}
 
       {historyError ? <NoticeBanner variant={data ? 'warning' : 'error'}>{historyError}</NoticeBanner> : null}

@@ -152,7 +152,7 @@ export const SLOT_STATUS_LABELS = {
   live: '在线',
   degraded: '降级',
   unavailable: '不可用',
-  loading: '加载中',
+  loading: '同步中',
   error: '异常',
   unknown: '未知',
 }

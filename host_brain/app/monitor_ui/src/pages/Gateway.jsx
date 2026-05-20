@@ -275,7 +275,7 @@ export default function Gateway() {
       {error ? <NoticeBanner variant="error">{error.message}</NoticeBanner> : null}
       {!error && !loading && !refreshing && gatewayLoadState === LOAD_STATES.UNAVAILABLE ? (
         <NoticeBanner variant="warning">
-          网关观测接口当前未返回可用数据，页面会保留中性占位，避免把不可用误判为空流量。
+          网关观测接口当前未返回可用数据，页面会保留中性空态，避免把不可用误判为空流量。
         </NoticeBanner>
       ) : null}
 

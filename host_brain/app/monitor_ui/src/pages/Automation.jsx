@@ -8,6 +8,7 @@ import {
 } from '../api/automation.js'
 import EmptyStateCard from '../components/EmptyStateCard.jsx'
 import LivingPulseStrip from '../components/LivingPulseStrip.jsx'
+import { LazyLoadingNotice, LoadingNotice } from '../components/LoadingNotice.jsx'
 import OrganSystemOverview from '../components/lifeBody/OrganSystemOverview.jsx'
 import NoticeBanner from '../components/NoticeBanner.jsx'
 import SampleMeta from '../components/obs/SampleMeta.jsx'
@@ -248,9 +249,7 @@ function TaskDetailPanel({ item, onEnable, onDisable, onTrigger, actionLoading }
 
 function LoadingTasksNotice() {
   return (
-    <NoticeBanner variant="info" title="加载中">
-      正在同步节律任务脉络…
-    </NoticeBanner>
+    <LoadingNotice>正在同步节律任务脉络…</LoadingNotice>
   )
 }
 
@@ -571,17 +570,17 @@ export default function Automation() {
           <div className="border-t border-gray-100 p-4">
             <ViewportLazySection
               rootMargin="240px 0px"
-              placeholder={(
-                <NoticeBanner variant="info" title="按需加载中">
+              fallback={(
+                <LazyLoadingNotice>
                   免疫护栏与回放分区将在滚动进入视口后展开。
-                </NoticeBanner>
+                </LazyLoadingNotice>
               )}
             >
               <React.Suspense
                 fallback={(
-                  <NoticeBanner variant="info" title="按需加载中">
+                  <LoadingNotice>
                     正在装配生命体运行与免疫护栏分区…
-                  </NoticeBanner>
+                  </LoadingNotice>
                 )}
               >
                 <AutomationImmuneSectionContent
@@ -735,17 +734,17 @@ export default function Automation() {
           <div className="border-t border-gray-100 p-4">
             <ViewportLazySection
               rootMargin="240px 0px"
-              placeholder={(
-                <NoticeBanner variant="info" title="按需加载中">
+              fallback={(
+                <LazyLoadingNotice>
                   节律历史脉络会在滚动接近后再展开，避免首屏提前拉取大块历史数据。
-                </NoticeBanner>
+                </LazyLoadingNotice>
               )}
             >
               <React.Suspense
                 fallback={(
-                  <NoticeBanner variant="info" title="按需加载中">
+                  <LoadingNotice>
                     正在装配节律历史脉络分区…
-                  </NoticeBanner>
+                  </LoadingNotice>
                 )}
               >
                 <AutomationHistorySectionContent

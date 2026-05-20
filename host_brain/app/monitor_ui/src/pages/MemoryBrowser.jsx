@@ -159,7 +159,7 @@ export default function MemoryBrowser() {
 
       {!error && !loading && !refreshing && memoryLoadState === LOAD_STATES.UNAVAILABLE ? (
         <NoticeBanner variant="warning">
-          记忆观测接口当前未返回可用数据，页面会保留中性占位而不是把不可用误报成 0。
+          记忆观测接口当前未返回可用数据，页面会保留中性空态而不是把不可用误报成 0。
         </NoticeBanner>
       ) : null}
 

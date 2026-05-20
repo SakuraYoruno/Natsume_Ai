@@ -336,7 +336,7 @@ export default function Sessions() {
 
       {!listError && suppressedCount > 0 ? (
         <NoticeBanner variant="info" title="已隐藏噪声记录">
-          当前页已自动隐藏 {suppressedCount} 条测试会话、纯问号占位消息或不可读摘要记录。
+          当前页已自动隐藏 {suppressedCount} 条测试会话、纯问号空态消息或不可读摘要记录。
         </NoticeBanner>
       ) : null}
 

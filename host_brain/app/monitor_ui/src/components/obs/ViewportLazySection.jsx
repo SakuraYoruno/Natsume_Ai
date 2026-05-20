@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react'
 
 export default function ViewportLazySection({
   children,
-  placeholder = null,
+  fallback = null,
   rootMargin = '320px 0px',
   className = '',
   eagerAfterMs = null,
@@ -46,7 +46,7 @@ export default function ViewportLazySection({
 
   return (
     <div ref={anchorRef} className={className}>
-      {visible ? children : placeholder}
+      {visible ? children : fallback}
     </div>
   )
 }

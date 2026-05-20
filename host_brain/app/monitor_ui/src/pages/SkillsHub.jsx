@@ -256,7 +256,7 @@ export default function SkillsHub() {
       {hubError && <NoticeBanner variant={data ? 'warning' : 'error'}>{hubError}</NoticeBanner>}
 
       {!hubError && !loading && !refreshing && skillsHubLoadState === LOAD_STATES.NO_SAMPLE && (
-        <NoticeBanner variant="info">当前还没有已加载技能样本，页面会保留中性占位。</NoticeBanner>
+        <NoticeBanner variant="info">当前还没有已加载技能样本，页面会保留中性空态。</NoticeBanner>
       )}
 
       <SummaryStrip data={data} filteredCount={filtered.length} />

@@ -27,11 +27,17 @@ import {
 } from '../api/obs.js'
 import EmptyStateCard from '../components/EmptyStateCard.jsx'
 import LivingPulseStrip from '../components/LivingPulseStrip.jsx'
+import LoadingNotice from '../components/LoadingNotice.jsx'
 import NoticeBanner from '../components/NoticeBanner.jsx'
 import CustomNode from '../components/trace/CustomNode.jsx'
 import NodeDetailPanel from '../components/trace/NodeDetailPanel.jsx'
 import PageHero from '../components/PageHero.jsx'
 import StatusBadge from '../components/StatusBadge.jsx'
+import {
+  TraceMetricCard as MetricCard,
+  TraceMiniStat as MiniStat,
+  TraceSectionCard as SectionCard,
+} from '../components/trace/TraceSurfaces.jsx'
 import { getTraceNodeDisplayName, normalizeTraceNodeKey } from '../components/trace/traceNodeText.js'
 import { useImmuneGateReplayQuery } from '../queries/automationQueries.js'
 import {
@@ -528,47 +534,6 @@ function JsonBlock({ data, emptyLabel = '暂无数据' }) {
   return <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-all rounded-lg border border-primary-100/70 bg-white/75 p-3 text-xs text-gray-700">{text}</pre>
 }
 
-function SectionCard({ icon: Icon, title, description, aside = null, children, className = '' }) {
-  return (
-    <section className={`card overflow-hidden rounded-2xl ${className}`}>
-      <div className="flex items-start gap-3 border-b border-primary-100/70 px-4 py-4">
-        <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-primary-100/70 bg-white/80 text-blue-600">
-          <Icon size={18} />
-        </span>
-        <div className="min-w-0 flex-1">
-          <div className="text-sm font-semibold text-gray-900">{title}</div>
-          {description ? <div className="mt-1 text-xs leading-5 text-gray-500">{description}</div> : null}
-        </div>
-        {aside}
-      </div>
-      <div className="lifeline-rail mx-4 mt-3 h-1.5">
-        <div className="lifeline-wave h-full w-full" />
-      </div>
-      <div className="p-4">{children}</div>
-    </section>
-  )
-}
-
-function MetricCard({ label, value, hint = null, valueClassName = '' }) {
-  return (
-    <div className="rounded-xl border border-primary-100/70 bg-white/82 p-4">
-      <div className="text-xs font-medium text-gray-500">{label}</div>
-      <div className={`mt-1 break-all text-lg font-semibold text-gray-900 ${valueClassName}`}>{value ?? '-'}</div>
-      {hint ? <div className="mt-1 text-xs text-gray-400">{hint}</div> : null}
-    </div>
-  )
-}
-
-function MiniStat({ label, value, hint = null, toneClassName = 'text-gray-900' }) {
-  return (
-    <div className="rounded-xl border border-primary-100/70 bg-white/72 p-3">
-      <div className="text-xs font-medium text-gray-500">{label}</div>
-      <div className={`mt-1 break-all text-sm font-semibold ${toneClassName}`}>{value ?? '-'}</div>
-      {hint ? <div className="mt-1 text-xs text-gray-500">{hint}</div> : null}
-    </div>
-  )
-}
-
 function TextPreviewCard({ label, text, emptyLabel, tone = 'default' }) {
   const toneClassName = tone === 'error'
     ? 'border-red-200 bg-red-50/65'
@@ -888,7 +853,7 @@ function StreamEventsPanel({ events, loading, error }) {
         <MiniStat label="最新节点" value={latestEvent?.node_id || '-'} hint={latestEvent ? formatDateTime(latestEvent.ts_ms) : '等待事件'} />
       </div>
 
-      {loading ? <NoticeBanner variant="info" title="加载中">正在拉取流式事件…</NoticeBanner> : null}
+      {loading ? <LoadingNotice>正在拉取流式事件…</LoadingNotice> : null}
       {error ? <NoticeBanner variant="error" title="流式事件拉取失败">{error}</NoticeBanner> : null}
       {!loading && !error && events.length === 0 ? <EmptyStateCard title="暂无流式事件" hint="该请求还没有可展示的事件记录。" className="p-4" /> : null}
       {!loading && !error && events.length > 0 ? (
@@ -923,11 +888,11 @@ function ImmuneReplayPanel({ replay, loading, error, requestId, onReload }) {
       description="按当前 request 回放免疫决策链，快速定位误拦截与规则命中。"
       aside={(
         <button className="btn-secondary text-xs" onClick={onReload} disabled={loading}>
-          {loading ? '加载中...' : '刷新回放'}
+          {loading ? '同步中...' : '刷新回放'}
         </button>
       )}
     >
-      {loading ? <NoticeBanner variant="info" title="加载中">正在拉取 immune replay…</NoticeBanner> : null}
+      {loading ? <LoadingNotice>正在拉取 immune replay…</LoadingNotice> : null}
       {error ? <NoticeBanner variant="error" title="回放拉取失败">{error}</NoticeBanner> : null}
       {!loading && !error && !replay ? (
         <EmptyStateCard title="当前请求暂无 immune 回放" hint="若未命中免疫流程，这里会保持为空。" className="p-4" />
@@ -1024,7 +989,7 @@ function TribeEventsPanel({ requestId, events, loading, error }) {
         />
       </div>
 
-      {loading ? <NoticeBanner variant="info" title="加载中">正在拉取 Tribe 事件…</NoticeBanner> : null}
+      {loading ? <LoadingNotice>正在拉取 Tribe 事件…</LoadingNotice> : null}
       {error ? <NoticeBanner variant="error" title="Tribe 事件拉取失败">{error}</NoticeBanner> : null}
       {!loading && !error && events.length === 0 ? (
         <EmptyStateCard title="暂无 Tribe 事件" hint="当前请求暂未观测到跨智能体事件。" className="p-4" />
@@ -1656,7 +1621,7 @@ export default function TraceRequestDetail() {
         </div>
       </div>
 
-      {loading ? <NoticeBanner variant="info" title="加载中">正在加载请求链路详情…</NoticeBanner> : null}
+      {loading ? <LoadingNotice>正在加载请求链路详情…</LoadingNotice> : null}
       {error ? <NoticeBanner variant="error" title="链路详情加载失败">{error}</NoticeBanner> : null}
       {!loading && !error && traceDegraded ? (
         <NoticeBanner variant="warning" title="当前为降级链路视图">
@@ -1778,4 +1743,3 @@ export default function TraceRequestDetail() {
     </div>
   )
 }
-

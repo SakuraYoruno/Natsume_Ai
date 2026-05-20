@@ -13,7 +13,7 @@ function ChartFallback({ title, height }) {
       <div className="text-center">
         <div className="text-2xl mb-1">📊</div>
         <div>{title}</div>
-        <div className="text-xs text-gray-300 mt-1">图表组件加载中…</div>
+        <div className="text-xs text-gray-300 mt-1">图表组件同步中…</div>
       </div>
     </div>
   )
