@@ -157,11 +157,15 @@ def test_digital_life_supervisor_runs_proactive_interaction_dry_run(tmp_path) ->
 
     receipt_path = tmp_path / "delivery_receipts.jsonl"
     interaction_path = tmp_path / "proactive_interactions.jsonl"
+    aftereffect_path = tmp_path / "proactive_aftereffects.jsonl"
     receipts = [json.loads(line) for line in receipt_path.read_text(encoding="utf-8").splitlines() if line.strip()]
     interactions = [json.loads(line) for line in interaction_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    aftereffects = [json.loads(line) for line in aftereffect_path.read_text(encoding="utf-8").splitlines() if line.strip()]
 
     assert event["status"] == "PASS"
     assert event["delivery_receipt"]["delivery_status"] == "DELIVERED_DRY_RUN"
+    assert event["aftereffect"]["outcome"] == "replied"
+    assert event["aftereffect"]["reply_mode"] == "warm_ack"
     assert event["thalamus_intent_draft"]["route"] == "chat"
     assert event["thalamus_intent_draft"]["route_reason"] == "THALAMUS_RULE_PROACTIVE_REPLY_CONTINUATION"
     assert event["foreground_turn"]["turn"]["mapped_organ_count"] == 23
@@ -169,8 +173,14 @@ def test_digital_life_supervisor_runs_proactive_interaction_dry_run(tmp_path) ->
     assert receipts[0]["gateway_mode"] == "dry_run"
     assert len(interactions) == 1
     assert interactions[0]["status"] == "PASS"
+    assert len(aftereffects) == 1
+    assert interactions[0]["aftereffect_id"] == aftereffects[0]["aftereffect_id"]
+    assert aftereffects[0]["outcome"] == "replied"
+    assert aftereffects[0]["loneliness_delta"] < 0
     assert final_snapshot["foreground_turn_count"] == 1
     assert final_snapshot["proactive_emotional_episode"]["episode_count"] == 1
+    assert final_snapshot["proactive_emotional_aftereffect"]["aftereffect_count"] == 1
+    assert final_snapshot["proactive_emotional_aftereffect"]["last_outcome"] == "replied"
     assert final_snapshot["proactive_outbox"]["queued_count"] == 1
     assert final_snapshot["proactive_interaction"]["delivery_receipt_count"] == 1
     assert final_snapshot["proactive_interaction"]["interaction_count"] == 1
@@ -264,6 +274,8 @@ def test_validate_proactive_interaction_loop_writes_artifacts(tmp_path) -> None:
     assert summary["proactive_outbox_queued_count"] == 1
     assert summary["proactive_episode_count"] == 1
     assert summary["proactive_episode_send_allowed"] is True
+    assert summary["proactive_aftereffect_count"] == 1
+    assert summary["proactive_aftereffect_outcome"] == "replied"
     assert summary["delivery_receipt_count"] == 1
     assert summary["interaction_count"] == 1
     assert summary["thalamus_reason_code"] == "THALAMUS_RULE_PROACTIVE_REPLY_CONTINUATION"
@@ -272,3 +284,4 @@ def test_validate_proactive_interaction_loop_writes_artifacts(tmp_path) -> None:
     assert (tmp_path / "details.json").exists()
     assert (tmp_path / "state" / "delivery_receipts.jsonl").exists()
     assert (tmp_path / "state" / "proactive_interactions.jsonl").exists()
+    assert (tmp_path / "state" / "proactive_aftereffects.jsonl").exists()

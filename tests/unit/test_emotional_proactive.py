@@ -7,7 +7,9 @@ from host_brain.persona.emotional_proactive import (
     ACTION_QUIET_PRESENCE,
     ACTION_SEND_LIGHT,
     ACTION_SEND_NORMAL,
+    build_emotional_proactive_aftereffect,
     build_emotional_proactive_episode,
+    classify_proactive_reply,
     episode_to_motive_state,
     episode_to_render_policy,
 )
@@ -86,3 +88,54 @@ def test_emotional_episode_can_start_from_first_presence_pull() -> None:
     assert episode.motive == "presence_check"
     assert "今天还没有真正和你建立过存在感" in episode.felt_reason
     assert "你忙的话不用回" in episode.opening_message
+
+
+def test_emotional_aftereffect_turns_warm_reply_into_state_update_hint() -> None:
+    episode = build_emotional_proactive_episode(
+        inner_state={},
+        bond_summary={},
+        now_ms=_ts_ms(13),
+        last_foreground_ts_ms=0,
+        last_proactive_outbox_ts_ms=0,
+    )
+
+    aftereffect = build_emotional_proactive_aftereffect(
+        episode=episode,
+        outcome="replied",
+        user_reply="在啊，怎么啦？",
+        reply_text="我在。",
+        now_ms=_ts_ms(13) + 60_000,
+        delivery_status="DELIVERED_DRY_RUN",
+        thalamus_reason_code="THALAMUS_RULE_PROACTIVE_REPLY_CONTINUATION",
+    )
+
+    assert aftereffect.episode_id == episode.episode_id
+    assert aftereffect.outcome == "replied"
+    assert aftereffect.reply_mode == "warm_ack"
+    assert aftereffect.reply_warmth >= 0.7
+    assert aftereffect.loneliness_delta < 0
+    assert aftereffect.memory_candidate["should_remember"] is True
+    assert "被接住了" in aftereffect.emotional_resolution
+
+
+def test_emotional_aftereffect_does_not_treat_transport_failure_as_rejection() -> None:
+    aftereffect = build_emotional_proactive_aftereffect(
+        episode={"episode_id": "ep_1", "motive": "presence_check"},
+        outcome="route_failed",
+        user_reply="",
+        now_ms=_ts_ms(13),
+        delivery_status="DELIVERED_DRY_RUN",
+        thalamus_reason_code="",
+    )
+
+    assert aftereffect.outcome == "route_failed"
+    assert aftereffect.loneliness_delta == 0
+    assert aftereffect.state_update_hint["technical_failure_is_not_rejection"] is True
+    assert "不解读为关系拒绝" in aftereffect.emotional_resolution
+
+
+def test_classify_proactive_reply_detects_boundary() -> None:
+    reply_mode, warmth = classify_proactive_reply("先别发了，我在忙")
+
+    assert reply_mode == "boundary"
+    assert warmth < 0.3

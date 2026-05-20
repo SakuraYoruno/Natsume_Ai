@@ -281,6 +281,7 @@ def _project_snapshot(snapshot: Mapping[str, Any]) -> dict[str, Any]:
     latest_private = dict(data.get("latest_private_thought") or {})
     proactive_task = dict(background.get("proactive_task") or {})
     proactive_episode = dict(data.get("proactive_emotional_episode") or {})
+    proactive_aftereffect = dict(data.get("proactive_emotional_aftereffect") or {})
     proactive_outbox = dict(data.get("proactive_outbox") or {})
     proactive_interaction = dict(data.get("proactive_interaction") or {})
     return {
@@ -305,6 +306,9 @@ def _project_snapshot(snapshot: Mapping[str, Any]) -> dict[str, Any]:
         "proactive_episode_motive": str(proactive_episode.get("last_motive") or ""),
         "proactive_episode_action": str(proactive_episode.get("last_chosen_action") or ""),
         "proactive_episode_send_allowed": bool(proactive_episode.get("last_send_allowed") or False),
+        "proactive_aftereffect_count": int(proactive_aftereffect.get("aftereffect_count") or 0),
+        "proactive_aftereffect_outcome": str(proactive_aftereffect.get("last_outcome") or ""),
+        "proactive_aftereffect_reply_mode": str(proactive_aftereffect.get("last_reply_mode") or ""),
         "proactive_outbox_queued_count": int(proactive_outbox.get("queued_count") or 0),
         "proactive_delivery_receipt_count": int(proactive_interaction.get("delivery_receipt_count") or 0),
         "proactive_interaction_count": int(proactive_interaction.get("interaction_count") or 0),
@@ -331,6 +335,9 @@ def _markdown_report(summary: Mapping[str, Any]) -> str:
         f"- proactive_episode_motive: `{summary.get('proactive_episode_motive')}`",
         f"- proactive_episode_action: `{summary.get('proactive_episode_action')}`",
         f"- proactive_episode_send_allowed: `{summary.get('proactive_episode_send_allowed')}`",
+        f"- proactive_aftereffect_count: `{summary.get('proactive_aftereffect_count')}`",
+        f"- proactive_aftereffect_outcome: `{summary.get('proactive_aftereffect_outcome')}`",
+        f"- proactive_aftereffect_reply_mode: `{summary.get('proactive_aftereffect_reply_mode')}`",
         f"- proactive_outbox_queued_count: `{summary.get('proactive_outbox_queued_count')}`",
         f"- proactive_delivery_receipt_count: `{summary.get('proactive_delivery_receipt_count')}`",
         f"- proactive_interaction_count: `{summary.get('proactive_interaction_count')}`",

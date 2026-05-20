@@ -264,6 +264,12 @@ def test_wall_clock_soak_payload_accepts_proactive_interaction_dry_run(tmp_path,
                     "last_thalamus_reason_code": "THALAMUS_RULE_PROACTIVE_REPLY_CONTINUATION",
                     "last_mapped_organ_count": 23,
                 },
+                "proactive_emotional_aftereffect": {
+                    "aftereffect_count": 1,
+                    "last_outcome": "replied",
+                    "last_reply_mode": "warm_ack",
+                    "last_resolution": "被接住了，主动冲动落地为安心。",
+                },
                 "external_services": {
                     "chroma": {"status": "not_probed_by_supervisor"},
                     "neo4j": {"status": "not_probed_by_supervisor"},
@@ -279,9 +285,13 @@ def test_wall_clock_soak_payload_accepts_proactive_interaction_dry_run(tmp_path,
     assert layers["proactive_loop"]["verdict"] == "PASS"
     assert layers["proactive_interaction"]["status"] == "healthy"
     assert layers["proactive_interaction"]["verdict"] == "PASS"
+    assert layers["proactive_aftereffect"]["status"] == "healthy"
+    assert layers["proactive_aftereffect"]["verdict"] == "PASS"
     assert payload["acceptance"]["proactive_task"]["delivery_receipt_count"] == 1
     assert payload["acceptance"]["proactive_task"]["interaction_count"] == 1
+    assert payload["acceptance"]["proactive_task"]["aftereffect_count"] == 1
     assert all(item["id"] != "proactive_interaction" for item in payload["acceptance"]["not_covered"])
+    assert all(item["id"] != "proactive_aftereffect" for item in payload["acceptance"]["not_covered"])
 
 
 def test_wall_clock_soak_payload_reports_missing_when_no_run_exists(tmp_path, monkeypatch) -> None:

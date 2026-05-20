@@ -27,6 +27,7 @@ PROACTIVE_TALK_TASK_ID = "proactive_talk_periodic"
 BACKGROUND_TICK_TASK_IDS: tuple[str, ...] = (PROACTIVE_TALK_TASK_ID,)
 DEFAULT_TICK_TASK_IDS: tuple[str, ...] = CORE_TICK_TASK_IDS + BACKGROUND_TICK_TASK_IDS
 PROACTIVE_EPISODES_FILENAME = "proactive_episodes.jsonl"
+PROACTIVE_AFTEREFFECTS_FILENAME = "proactive_aftereffects.jsonl"
 PROACTIVE_OUTBOX_FILENAME = "proactive_outbox.jsonl"
 PROACTIVE_DELIVERY_RECEIPTS_FILENAME = "delivery_receipts.jsonl"
 PROACTIVE_INTERACTIONS_FILENAME = "proactive_interactions.jsonl"
@@ -109,6 +110,8 @@ class DigitalLifeSupervisor:
         self._last_proactive_outbox_record: dict[str, Any] = {}
         self._proactive_episode_count = 0
         self._last_proactive_episode_record: dict[str, Any] = {}
+        self._proactive_aftereffect_count = 0
+        self._last_proactive_aftereffect_record: dict[str, Any] = {}
         self._proactive_receipt_count = 0
         self._last_proactive_receipt_record: dict[str, Any] = {}
         self._proactive_interaction_count = 0
@@ -319,6 +322,16 @@ class DigitalLifeSupervisor:
             "mapped_organ_count": int(turn.get("mapped_organ_count") or 0),
             "ts_ms": _now_ms(),
         }
+        aftereffect = self._write_proactive_aftereffect_record(
+            outbound=outbound,
+            receipt=receipt,
+            interaction=interaction,
+            user_reply=user_reply,
+            reply_text=reply_text,
+            outcome="replied" if status == "PASS" else "route_failed",
+        )
+        interaction["aftereffect_id"] = str(aftereffect.get("aftereffect_id") or "")
+        interaction["aftereffect_outcome"] = str(aftereffect.get("outcome") or "")
         self._append_proactive_jsonl(self._proactive_interactions_path(), interaction)
         self._proactive_interaction_count += 1
         self._last_proactive_interaction_record = dict(interaction)
@@ -329,6 +342,7 @@ class DigitalLifeSupervisor:
             "thalamus_intent_draft": _strip_large(thalamus_draft),
             "foreground_turn": _strip_large(foreground),
             "interaction": interaction,
+            "aftereffect": aftereffect,
             "snapshot": self.snapshot(),
         }
         self._record_event("proactive_interaction_dry_run", event)
@@ -383,6 +397,7 @@ class DigitalLifeSupervisor:
             "scheduler": scheduler_snapshot,
             "background_runtime": background_runtime,
             "proactive_emotional_episode": self._proactive_episode_snapshot(),
+            "proactive_emotional_aftereffect": self._proactive_aftereffect_snapshot(),
             "proactive_outbox": self._proactive_outbox_snapshot(),
             "proactive_interaction": self._proactive_interaction_snapshot(),
             "last_tick_results": _strip_large(self._last_tick_results),
@@ -669,6 +684,11 @@ class DigitalLifeSupervisor:
             return None
         return self.out_dir / PROACTIVE_EPISODES_FILENAME
 
+    def _proactive_aftereffects_path(self) -> Path | None:
+        if self.out_dir is None:
+            return None
+        return self.out_dir / PROACTIVE_AFTEREFFECTS_FILENAME
+
     def _append_proactive_jsonl(self, path: Path | None, record: Mapping[str, Any]) -> None:
         if path is None:
             return
@@ -757,6 +777,55 @@ class DigitalLifeSupervisor:
         self._last_proactive_receipt_record = dict(receipt)
         return receipt
 
+    def _write_proactive_aftereffect_record(
+        self,
+        *,
+        outbound: Mapping[str, Any],
+        receipt: Mapping[str, Any],
+        interaction: Mapping[str, Any],
+        user_reply: str,
+        reply_text: str,
+        outcome: str,
+    ) -> dict[str, Any]:
+        from host_brain.persona.emotional_proactive import build_emotional_proactive_aftereffect  # noqa: PLC0415
+
+        message = dict(outbound.get("message") or {})
+        episode = dict(message.get("proactive_episode") or {})
+        if not episode and self._last_proactive_episode_record:
+            episode = dict(self._last_proactive_episode_record.get("episode") or {})
+        aftereffect = build_emotional_proactive_aftereffect(
+            episode=episode,
+            outcome=outcome,
+            user_reply=user_reply,
+            reply_text=reply_text,
+            now_ms=_now_ms(),
+            delivery_status=str(receipt.get("delivery_status") or ""),
+            thalamus_reason_code=str(interaction.get("thalamus_reason_code") or ""),
+        ).as_dict()
+        record = {
+            "run_id": self.run_id,
+            "persona_self_id": self.persona_self_id,
+            "session_id": self.config.session_id,
+            "aftereffect_id": str(aftereffect.get("aftereffect_id") or ""),
+            "episode_id": str(aftereffect.get("episode_id") or ""),
+            "outbound_message_id": str(outbound.get("message_id") or ""),
+            "delivery_receipt_id": str(receipt.get("receipt_id") or ""),
+            "interaction_request_id": str(interaction.get("request_id") or ""),
+            "ts_ms": int(aftereffect.get("ts_ms") or _now_ms()),
+            "outcome": str(aftereffect.get("outcome") or ""),
+            "reply_mode": str(aftereffect.get("reply_mode") or ""),
+            "reply_warmth": aftereffect.get("reply_warmth"),
+            "loneliness_delta": aftereffect.get("loneliness_delta"),
+            "anticipation_delta": aftereffect.get("anticipation_delta"),
+            "emotional_resolution": str(aftereffect.get("emotional_resolution") or ""),
+            "aftereffect": aftereffect,
+        }
+        self._append_proactive_jsonl(self._proactive_aftereffects_path(), record)
+        self._proactive_aftereffect_count += 1
+        self._last_proactive_aftereffect_record = dict(record)
+        self._record_event("proactive_emotional_aftereffect", record)
+        return record
+
     def _compile_proactive_reply_intent(
         self,
         *,
@@ -808,6 +877,28 @@ class DigitalLifeSupervisor:
             "last_relationship_permission": episode.get("relationship_permission", latest.get("relationship_permission")),
             "last_felt_reason": str(latest.get("felt_reason") or episode.get("felt_reason") or ""),
             "last_opening_preview": str(latest.get("opening_message") or episode.get("opening_message") or "")[:120],
+        }
+
+    def _proactive_aftereffect_snapshot(self) -> dict[str, Any]:
+        aftereffects_path = self._proactive_aftereffects_path()
+        file_count = _count_jsonl_rows(aftereffects_path)
+        latest = dict(self._last_proactive_aftereffect_record or _latest_jsonl_record(aftereffects_path))
+        aftereffect = dict(latest.get("aftereffect") or {})
+        return {
+            "enabled": True,
+            "aftereffects_path": str(aftereffects_path) if aftereffects_path is not None else "",
+            "aftereffect_count": max(int(self._proactive_aftereffect_count), int(file_count)),
+            "last_aftereffect_id": str(latest.get("aftereffect_id") or aftereffect.get("aftereffect_id") or ""),
+            "last_episode_id": str(latest.get("episode_id") or aftereffect.get("episode_id") or ""),
+            "last_outcome": str(latest.get("outcome") or aftereffect.get("outcome") or ""),
+            "last_reply_mode": str(latest.get("reply_mode") or aftereffect.get("reply_mode") or ""),
+            "last_reply_warmth": aftereffect.get("reply_warmth", latest.get("reply_warmth")),
+            "last_loneliness_delta": aftereffect.get("loneliness_delta", latest.get("loneliness_delta")),
+            "last_anticipation_delta": aftereffect.get("anticipation_delta", latest.get("anticipation_delta")),
+            "last_resolution": str(latest.get("emotional_resolution") or aftereffect.get("emotional_resolution") or ""),
+            "last_memory_should_remember": bool(
+                dict(aftereffect.get("memory_candidate") or {}).get("should_remember") or False
+            ),
         }
 
     def _proactive_outbox_snapshot(self) -> dict[str, Any]:

@@ -302,6 +302,12 @@ def _build_soak_acceptance(
         and proactive_last_interaction_status == "PASS"
         and proactive_last_thalamus_reason == "THALAMUS_RULE_PROACTIVE_REPLY_CONTINUATION"
     )
+    proactive_aftereffect = _as_dict(final_snapshot.get("proactive_emotional_aftereffect"))
+    proactive_aftereffect_count = _as_int(proactive_aftereffect.get("aftereffect_count"), 0)
+    proactive_aftereffect_outcome = str(proactive_aftereffect.get("last_outcome") or "")
+    proactive_aftereffect_reply_mode = str(proactive_aftereffect.get("last_reply_mode") or "")
+    proactive_aftereffect_resolution = str(proactive_aftereffect.get("last_resolution") or "")
+    proactive_aftereffect_pass = proactive_aftereffect_count > 0 and bool(proactive_aftereffect_outcome)
 
     layers = [
         _acceptance_layer(
@@ -434,6 +440,24 @@ def _build_soak_acceptance(
                 proactive_last_thalamus_reason or "missing",
             ],
         ),
+        _acceptance_layer(
+            layer_id="proactive_aftereffect",
+            label="主动回流",
+            status="healthy" if proactive_aftereffect_pass else "unknown",
+            verdict="PASS" if proactive_aftereffect_pass else "NOT_COVERED",
+            value=f"{proactive_aftereffect_outcome or '--'} / {proactive_aftereffect_reply_mode or '--'}" if proactive_aftereffect_pass else "未覆盖",
+            detail=(
+                "主动消息的回应结果已经回流为情绪 aftereffect，能区分被接住、未回应、边界和技术失败。"
+                if proactive_aftereffect_pass
+                else "尚未证明主动消息之后的情绪状态会被回应结果更新。"
+            ),
+            evidence=[
+                f"aftereffects={proactive_aftereffect_count}",
+                proactive_aftereffect_outcome or "missing",
+                proactive_aftereffect_reply_mode or "missing",
+                proactive_aftereffect_resolution[:120] if proactive_aftereffect_resolution else "",
+            ],
+        ),
     ]
 
     not_covered = [
@@ -452,6 +476,10 @@ def _build_soak_acceptance(
     if not proactive_interaction_pass:
         not_covered.append(
             {"id": "proactive_interaction", "label": "主动交互", "reason": "缺少 dry-run 送达回执或 Thalamus 主动续接证据"}
+        )
+    if not proactive_aftereffect_pass:
+        not_covered.append(
+            {"id": "proactive_aftereffect", "label": "主动回流", "reason": "缺少主动 aftereffect：无法证明主动消息后的情绪状态会更新"}
         )
 
     return {
@@ -483,6 +511,10 @@ def _build_soak_acceptance(
             "interaction_count": proactive_interaction_count,
             "last_interaction_status": proactive_last_interaction_status,
             "last_thalamus_reason_code": proactive_last_thalamus_reason,
+            "aftereffect_count": proactive_aftereffect_count,
+            "aftereffect_outcome": proactive_aftereffect_outcome,
+            "aftereffect_reply_mode": proactive_aftereffect_reply_mode,
+            "aftereffect_resolution": proactive_aftereffect_resolution,
         },
         "inner_world": {
             "continuity_score": continuity_score,

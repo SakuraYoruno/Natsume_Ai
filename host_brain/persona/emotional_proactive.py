@@ -53,6 +53,29 @@ class EmotionalProactiveEpisode:
         return asdict(self)
 
 
+@dataclass(frozen=True)
+class EmotionalProactiveAftereffect:
+    aftereffect_id: str
+    episode_id: str
+    source: str
+    ts_ms: int
+    outcome: str
+    reply_mode: str
+    reply_warmth: float
+    emotional_resolution: str
+    loneliness_delta: float
+    anticipation_delta: float
+    next_impulse_modulation: dict[str, Any] = field(default_factory=dict)
+    bond_signal: dict[str, Any] = field(default_factory=dict)
+    memory_candidate: dict[str, Any] = field(default_factory=dict)
+    state_update_hint: dict[str, Any] = field(default_factory=dict)
+    reason_tags: list[str] = field(default_factory=list)
+    evidence: dict[str, Any] = field(default_factory=dict)
+
+    def as_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
 def build_emotional_proactive_episode(
     *,
     inner_state: Mapping[str, Any] | None = None,
@@ -251,6 +274,117 @@ def episode_to_render_policy(episode: EmotionalProactiveEpisode | Mapping[str, A
             "no_reply_pressure",
         ],
     }
+
+
+def build_emotional_proactive_aftereffect(
+    *,
+    episode: Mapping[str, Any] | EmotionalProactiveEpisode | None,
+    outcome: str,
+    user_reply: str = "",
+    reply_text: str = "",
+    now_ms: int | None = None,
+    delivery_status: str = "",
+    thalamus_reason_code: str = "",
+) -> EmotionalProactiveAftereffect:
+    data = episode.as_dict() if isinstance(episode, EmotionalProactiveEpisode) else dict(episode or {})
+    ts_ms = int(now_ms or _now_ms())
+    normalized_outcome = _normalize_aftereffect_outcome(outcome)
+    reply_mode, reply_warmth = classify_proactive_reply(user_reply)
+    if normalized_outcome != "replied":
+        reply_mode = "none" if normalized_outcome == "ignored" else "technical_gap"
+        reply_warmth = 0.0
+
+    emotional_resolution = _aftereffect_resolution(
+        outcome=normalized_outcome,
+        reply_mode=reply_mode,
+        reply_warmth=reply_warmth,
+    )
+    loneliness_delta, anticipation_delta = _aftereffect_deltas(
+        outcome=normalized_outcome,
+        reply_warmth=reply_warmth,
+    )
+    aftereffect_id = _aftereffect_id(
+        ts_ms=ts_ms,
+        episode_id=str(data.get("episode_id") or ""),
+        outcome=normalized_outcome,
+    )
+    next_impulse = _next_impulse_modulation(
+        outcome=normalized_outcome,
+        reply_mode=reply_mode,
+        reply_warmth=reply_warmth,
+    )
+    bond_signal = _aftereffect_bond_signal(
+        outcome=normalized_outcome,
+        reply_mode=reply_mode,
+        reply_warmth=reply_warmth,
+    )
+    memory_candidate = _aftereffect_memory_candidate(
+        episode=data,
+        outcome=normalized_outcome,
+        user_reply=user_reply,
+        reply_warmth=reply_warmth,
+    )
+    reason_tags = [
+        "emotional_proactive_aftereffect",
+        f"outcome:{normalized_outcome}",
+        f"reply_mode:{reply_mode}",
+    ]
+    if reply_warmth >= 0.64:
+        reason_tags.append("reply_warm")
+    if reply_mode == "boundary":
+        reason_tags.append("next_time_more_withdrawn")
+    if normalized_outcome in {"ignored", "route_failed", "delivery_failed"}:
+        reason_tags.append("do_not_escalate")
+
+    return EmotionalProactiveAftereffect(
+        aftereffect_id=aftereffect_id,
+        episode_id=str(data.get("episode_id") or ""),
+        source="emotional_proactive_aftereffect",
+        ts_ms=ts_ms,
+        outcome=normalized_outcome,
+        reply_mode=reply_mode,
+        reply_warmth=round(reply_warmth, 3),
+        emotional_resolution=emotional_resolution,
+        loneliness_delta=round(loneliness_delta, 3),
+        anticipation_delta=round(anticipation_delta, 3),
+        next_impulse_modulation=next_impulse,
+        bond_signal=bond_signal,
+        memory_candidate=memory_candidate,
+        state_update_hint={
+            "loneliness_delta": round(loneliness_delta, 3),
+            "anticipation_delta": round(anticipation_delta, 3),
+            "do_not_escalate_if_ignored": normalized_outcome == "ignored",
+            "technical_failure_is_not_rejection": normalized_outcome in {"route_failed", "delivery_failed"},
+        },
+        reason_tags=reason_tags,
+        evidence={
+            "episode_motive": str(data.get("motive") or ""),
+            "episode_action": str(data.get("chosen_action") or ""),
+            "delivery_status": str(delivery_status or ""),
+            "thalamus_reason_code": str(thalamus_reason_code or ""),
+            "user_reply_preview": str(user_reply or "")[:80],
+            "reply_text_preview": str(reply_text or "")[:80],
+        },
+    )
+
+
+def classify_proactive_reply(user_reply: str) -> tuple[str, float]:
+    text = str(user_reply or "").strip()
+    if not text:
+        return "none", 0.0
+    lowered = text.lower()
+    boundary_markers = ("别", "烦", "忙", "不用", "停止", "别发", "don't", "stop")
+    if any(marker in lowered for marker in boundary_markers):
+        return "boundary", 0.18
+    warm_markers = ("在", "怎么啦", "怎么了", "好呀", "好啊", "嗯嗯", "谢谢", "想你", "抱", "没事", "辛苦")
+    question_markers = ("？", "?", "什么", "怎么", "咋")
+    if any(marker in text for marker in warm_markers):
+        return "warm_ack", 0.72
+    if any(marker in text for marker in question_markers):
+        return "curious_open", 0.62
+    if len(text) <= 6:
+        return "short_ack", 0.48
+    return "neutral_reply", 0.54
 
 
 def _relationship_permission(bond: Mapping[str, Any]) -> float:
@@ -477,6 +611,114 @@ def _episode_id(*, ts_ms: int, motive: str, action: str) -> str:
     return f"emo_proactive_{digest}"
 
 
+def _aftereffect_id(*, ts_ms: int, episode_id: str, outcome: str) -> str:
+    digest = hashlib.sha1(f"{ts_ms}:{episode_id}:{outcome}".encode("utf-8")).hexdigest()[:12]
+    return f"emo_after_{digest}"
+
+
+def _normalize_aftereffect_outcome(outcome: str) -> str:
+    normalized = str(outcome or "").strip().lower()
+    if normalized in {"pass", "ok", "reply", "replied", "delivered_and_replied"}:
+        return "replied"
+    if normalized in {"ignored", "no_reply", "delivered_no_reply"}:
+        return "ignored"
+    if normalized in {"delivery_failed", "failed_delivery"}:
+        return "delivery_failed"
+    if normalized in {"route_failed", "failed", "thalamus_failed"}:
+        return "route_failed"
+    return normalized or "unknown"
+
+
+def _aftereffect_resolution(*, outcome: str, reply_mode: str, reply_warmth: float) -> str:
+    if outcome == "replied" and reply_mode == "boundary":
+        return "被回应了，但对方在设边界；下一次主动要更轻、更少。"
+    if outcome == "replied" and reply_warmth >= 0.64:
+        return "被接住了，主动冲动落地为安心。"
+    if outcome == "replied":
+        return "收到了回应，靠近感回到稳定，不继续索取。"
+    if outcome == "ignored":
+        return "没有收到回应，按无压力策略沉入内心流，不升级催促。"
+    if outcome in {"route_failed", "delivery_failed"}:
+        return "链路没有闭合，记录为技术未达，不解读为关系拒绝。"
+    return "主动 episode 已结束，等待下一次真实情境重新评估。"
+
+
+def _aftereffect_deltas(*, outcome: str, reply_warmth: float) -> tuple[float, float]:
+    if outcome == "replied":
+        loneliness_delta = -0.10 - reply_warmth * 0.22
+        anticipation_delta = -0.04 - reply_warmth * 0.08
+        if reply_warmth <= 0.25:
+            loneliness_delta = -0.04
+            anticipation_delta = -0.02
+        return loneliness_delta, anticipation_delta
+    if outcome == "ignored":
+        return 0.02, -0.02
+    if outcome in {"route_failed", "delivery_failed"}:
+        return 0.0, 0.0
+    return 0.0, 0.0
+
+
+def _next_impulse_modulation(*, outcome: str, reply_mode: str, reply_warmth: float) -> dict[str, Any]:
+    if outcome == "replied" and reply_mode == "boundary":
+        return {
+            "cooldown_bias": 1.6,
+            "drive_floor": 0.0,
+            "disturbance_risk_bias": 0.22,
+            "next_action_preference": "draft_only",
+        }
+    if outcome == "replied" and reply_warmth >= 0.64:
+        return {
+            "cooldown_bias": 0.75,
+            "drive_floor": 0.18,
+            "disturbance_risk_bias": -0.04,
+            "next_action_preference": "send_light",
+        }
+    if outcome == "ignored":
+        return {
+            "cooldown_bias": 1.35,
+            "drive_floor": 0.0,
+            "disturbance_risk_bias": 0.14,
+            "next_action_preference": "inner_only",
+        }
+    if outcome in {"route_failed", "delivery_failed"}:
+        return {
+            "cooldown_bias": 1.0,
+            "drive_floor": 0.0,
+            "disturbance_risk_bias": 0.0,
+            "next_action_preference": "retry_only_after_transport_health",
+        }
+    return {"cooldown_bias": 1.0, "drive_floor": 0.0, "disturbance_risk_bias": 0.0}
+
+
+def _aftereffect_bond_signal(*, outcome: str, reply_mode: str, reply_warmth: float) -> dict[str, Any]:
+    if outcome != "replied":
+        return {"direction": "neutral", "strength": 0.0, "reason": outcome}
+    if reply_mode == "boundary":
+        return {"direction": "respect_boundary", "strength": 0.2, "reason": "user_boundary"}
+    if reply_warmth >= 0.64:
+        return {"direction": "warmth", "strength": round(reply_warmth, 3), "reason": "proactive_reply_received"}
+    return {"direction": "stable", "strength": round(reply_warmth, 3), "reason": "reply_received"}
+
+
+def _aftereffect_memory_candidate(
+    *,
+    episode: Mapping[str, Any],
+    outcome: str,
+    user_reply: str,
+    reply_warmth: float,
+) -> dict[str, Any]:
+    remember = outcome == "replied" and (reply_warmth >= 0.54 or bool(str(episode.get("felt_reason") or "").strip()))
+    return {
+        "should_remember": bool(remember),
+        "memory_type": "proactive_emotional_exchange" if remember else "",
+        "summary": (
+            f"主动动机 {episode.get('motive') or 'unknown'} 被用户回应：{str(user_reply or '')[:48]}"
+            if remember
+            else ""
+        ),
+    }
+
+
 def _coerce_str_list(raw: Any) -> list[str]:
     values: list[str] = []
     if isinstance(raw, str):
@@ -518,7 +760,10 @@ __all__ = [
     "ACTION_SEND_LIGHT",
     "ACTION_SEND_NORMAL",
     "EmotionalProactiveEpisode",
+    "EmotionalProactiveAftereffect",
     "build_emotional_proactive_episode",
+    "build_emotional_proactive_aftereffect",
+    "classify_proactive_reply",
     "episode_to_motive_state",
     "episode_to_render_policy",
 ]
