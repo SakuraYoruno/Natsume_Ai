@@ -93,6 +93,30 @@ def build_default_tool_execution_matrix(repo_root: str | Path | None = None) -> 
             value_tier="relationship",
         ),
         ToolExecutionProbe(
+            probe_id="memory-preference-extract",
+            skill_name="memory_preference_extract",
+            args={
+                "text": "我喜欢冷色系 UI，不喜欢夸张动效。以后请直接给结论。",
+                "max_candidates": 5,
+                "source": "tool_execution_matrix",
+            },
+            expected_scope="memory",
+            expected_tool="memory",
+            value_tier="memory_steward",
+        ),
+        ToolExecutionProbe(
+            probe_id="memory-consolidate-candidates",
+            skill_name="memory_consolidate",
+            args={
+                "text": "今天确认主链工具闭环通过。下一步需要扩充有价值的 Host 侧技能。",
+                "max_candidates": 5,
+                "source": "tool_execution_matrix",
+            },
+            expected_scope="memory",
+            expected_tool="memory",
+            value_tier="memory_steward",
+        ),
+        ToolExecutionProbe(
             probe_id="system-info",
             skill_name="system_info",
             args={

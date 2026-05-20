@@ -11,10 +11,29 @@ host_brain/memory/ 模块执行。
 
 from __future__ import annotations
 
+import hashlib
 import logging
+import re
 from typing import Any
 
 _logger = logging.getLogger("Natsume.skills.memory_executor")
+_MEMORY_FRAGMENT_RE = re.compile(r"[\r\n。！？!?；;，,]+")
+_PREFERENCE_RULES: tuple[tuple[str, str, re.Pattern[str]], ...] = (
+    ("preference", "positive", re.compile(r"(?:我|本人|用户)?(?<!不)(?:更?喜欢|偏好|倾向于|习惯|常用)(?P<value>.+)", re.IGNORECASE)),
+    ("instruction", "positive", re.compile(r"(?:我|用户)?(?<!不)(?:希望你|希望|想要|需要|请你|请)(?P<value>.+)", re.IGNORECASE)),
+    ("preference", "negative", re.compile(r"(?:我|本人|用户)?(?:不喜欢|讨厌|不想要|不希望|不需要)(?P<value>.+)", re.IGNORECASE)),
+    ("instruction", "negative", re.compile(r"(?:不要|别再|别|请不要)(?P<value>.+)", re.IGNORECASE)),
+    ("preference", "positive", re.compile(r"(?:i|user)\s+(?:like|prefer|usually use|want|need)\s+(?P<value>.+)", re.IGNORECASE)),
+    ("preference", "negative", re.compile(r"(?:i|user)\s+(?:do not like|don't like|dislike|hate|do not want|don't want)\s+(?P<value>.+)", re.IGNORECASE)),
+)
+_TASK_MEMORY_HINT_RE = re.compile(
+    r"(确认|决定|完成|修复|接入|验证|下一步|待办|需要|开始|继续|todo|decision|confirmed|fixed|next)",
+    re.IGNORECASE,
+)
+_FACT_MEMORY_HINT_RE = re.compile(
+    r"(我是|我叫|我的|用户|项目|系统|主链|偏好|喜欢|不喜欢|is|am|prefer|likes|dislikes)",
+    re.IGNORECASE,
+)
 
 
 def execute_memory_skill(args: dict[str, Any], context: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -69,6 +88,10 @@ def _dispatch_memory_action(
         return _execute_search(payload, context)
     if action == "store":
         return _execute_store(payload, context)
+    if action == "preference_extract":
+        return _execute_preference_extract(payload, context)
+    if action == "consolidate":
+        return _execute_consolidate(payload, context)
     if action == "forget":
         return _execute_forget(payload, context)
     return {"note": f"unknown memory action: {action}"}
@@ -153,6 +176,181 @@ def _execute_store(payload: dict[str, Any], context: dict[str, Any] | None) -> d
         "reason_code": "MEMORY_WRITER_UNAVAILABLE",
         "detail": "no memory writer available",
         "content_length": len(content),
+    }
+
+
+def _split_memory_fragments(text: str) -> list[str]:
+    fragments: list[str] = []
+    for raw in _MEMORY_FRAGMENT_RE.split(str(text or "")):
+        item = " ".join(str(raw or "").strip().split())
+        if len(item) >= 3:
+            fragments.append(item)
+    return fragments
+
+
+def _candidate_id(kind: str, evidence_text: str) -> str:
+    digest = hashlib.sha1(f"{kind}:{evidence_text}".encode("utf-8")).hexdigest()[:12]
+    return f"memcand_{digest}"
+
+
+def _clean_candidate_value(value: str) -> str:
+    text = str(value or "").strip(" \t:：。！？!?，,；;")
+    text = re.sub(r"^(?:你|我|the|a|an)\s+", "", text, flags=re.IGNORECASE)
+    return text[:240]
+
+
+def _preference_candidate_text(*, kind: str, polarity: str, value: str) -> str:
+    if kind == "instruction":
+        if polarity == "negative":
+            return f"用户希望避免{value}"
+        return f"用户希望{value}"
+    if polarity == "negative":
+        return f"用户不喜欢{value}"
+    return f"用户喜欢{value}"
+
+
+def _extract_preference_candidates(text: str, *, max_candidates: int, source: str | None = None) -> list[dict[str, Any]]:
+    candidates: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for fragment in _split_memory_fragments(text):
+        for kind, polarity, pattern in _PREFERENCE_RULES:
+            match = pattern.search(fragment)
+            if match is None:
+                continue
+            value = _clean_candidate_value(match.group("value"))
+            if len(value) < 2:
+                continue
+            candidate_text = _preference_candidate_text(kind=kind, polarity=polarity, value=value)
+            key = f"{kind}:{polarity}:{candidate_text}".lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            tags = ["preference", polarity]
+            if kind == "instruction":
+                tags.append("interaction_style")
+            candidates.append(
+                {
+                    "candidate_id": _candidate_id(kind, fragment),
+                    "kind": kind,
+                    "polarity": polarity,
+                    "text": candidate_text,
+                    "value": value,
+                    "confidence": 0.9 if kind == "preference" else 0.84,
+                    "tags": tags,
+                    "evidence_text": fragment,
+                    "source": source or "memory_preference_extract",
+                    "write_policy": "soft_memory_candidate",
+                }
+            )
+            if len(candidates) >= max_candidates:
+                return candidates
+    return candidates
+
+
+def _execute_preference_extract(payload: dict[str, Any], context: dict[str, Any] | None) -> dict[str, Any]:
+    _ = context
+    text = str(
+        payload.get("text")
+        or payload.get("content")
+        or payload.get("source_text")
+        or payload.get("user_message")
+        or ""
+    )
+    max_candidates = int(payload.get("max_candidates") or 8)
+    max_candidates = max(1, min(50, max_candidates))
+    source = str(payload.get("source") or "").strip() or None
+    candidates = _extract_preference_candidates(text, max_candidates=max_candidates, source=source)
+    return {
+        "candidate_count": len(candidates),
+        "candidates": candidates,
+        "source": "rule_based_preference_extractor",
+        "write_policy": "candidate_only",
+    }
+
+
+def _infer_memory_candidate_kind(fragment: str) -> tuple[str, list[str], float] | None:
+    text = str(fragment or "").strip()
+    if not text:
+        return None
+    if _TASK_MEMORY_HINT_RE.search(text):
+        return ("task_event", ["task", "event"], 0.74)
+    if _FACT_MEMORY_HINT_RE.search(text):
+        return ("fact", ["fact"], 0.7)
+    if len(text) >= 18:
+        return ("conversation_note", ["conversation"], 0.58)
+    return None
+
+
+def _execute_consolidate(payload: dict[str, Any], context: dict[str, Any] | None) -> dict[str, Any]:
+    _ = context
+    raw_items = payload.get("items")
+    text_parts: list[str] = []
+    if isinstance(raw_items, list):
+        for item in raw_items:
+            if isinstance(item, dict):
+                value = item.get("text") or item.get("content") or item.get("message")
+            else:
+                value = item
+            item_text = str(value or "").strip()
+            if item_text:
+                text_parts.append(item_text)
+    text = str(
+        payload.get("text")
+        or payload.get("content")
+        or payload.get("source_text")
+        or "\n".join(text_parts)
+        or ""
+    )
+    max_candidates = int(payload.get("max_candidates") or 10)
+    max_candidates = max(1, min(50, max_candidates))
+    include_preferences = bool(payload.get("include_preferences", True))
+    source = str(payload.get("source") or "").strip() or "memory_consolidate"
+
+    candidates: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    if include_preferences:
+        for candidate in _extract_preference_candidates(text, max_candidates=max_candidates, source=source):
+            key = str(candidate.get("text") or "").lower()
+            seen.add(key)
+            candidates.append(candidate)
+            if len(candidates) >= max_candidates:
+                break
+
+    if len(candidates) < max_candidates:
+        preference_evidence = {str(item.get("evidence_text") or "") for item in candidates}
+        for fragment in _split_memory_fragments(text):
+            if fragment in preference_evidence:
+                continue
+            inferred = _infer_memory_candidate_kind(fragment)
+            if inferred is None:
+                continue
+            kind, tags, confidence = inferred
+            key = f"{kind}:{fragment}".lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            candidates.append(
+                {
+                    "candidate_id": _candidate_id(kind, fragment),
+                    "kind": kind,
+                    "polarity": "neutral",
+                    "text": fragment,
+                    "confidence": confidence,
+                    "tags": tags,
+                    "evidence_text": fragment,
+                    "source": source,
+                    "write_policy": "soft_memory_candidate",
+                }
+            )
+            if len(candidates) >= max_candidates:
+                break
+
+    return {
+        "candidate_count": len(candidates),
+        "candidates": candidates,
+        "summary": f"extracted {len(candidates)} memory candidates",
+        "source": "rule_based_memory_consolidator",
+        "write_policy": "candidate_only",
     }
 
 

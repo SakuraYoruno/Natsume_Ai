@@ -29,6 +29,8 @@ def test_default_tool_execution_matrix_is_safe_and_value_focused() -> None:
         "session_summary",
         "emotion_query",
         "bond_query",
+        "memory_preference_extract",
+        "memory_consolidate",
         "system_info",
         "process_list",
         "network_status",
@@ -54,8 +56,8 @@ def test_tool_execution_matrix_runs_safe_probes_through_executive_runtime(monkey
         dependencies._skill_registry = None
 
     assert summary["status"] == "PASSED"
-    assert summary["total"] == 9
-    assert summary["passed"] == 9
+    assert summary["total"] == 11
+    assert summary["passed"] == 11
     assert summary["failed"] == 0
     assert summary["skipped"] == 0
     assert summary["critical_failed"] == 0
@@ -64,8 +66,18 @@ def test_tool_execution_matrix_runs_safe_probes_through_executive_runtime(monkey
     assert {
         item["skill_name"]: item.get("handler_tool")
         for item in summary["results"]
-        if item["skill_name"] in {"system_info", "process_list", "network_status", "file_list", "file_read"}
+        if item["skill_name"] in {
+            "memory_preference_extract",
+            "memory_consolidate",
+            "system_info",
+            "process_list",
+            "network_status",
+            "file_list",
+            "file_read",
+        }
     } == {
+        "memory_preference_extract": "memory",
+        "memory_consolidate": "memory",
         "system_info": "system",
         "process_list": "system",
         "network_status": "system",
@@ -77,6 +89,8 @@ def test_tool_execution_matrix_runs_safe_probes_through_executive_runtime(monkey
         "session_summary",
         "emotion_query",
         "bond_query",
+        "memory_preference_extract",
+        "memory_consolidate",
         "system_info",
         "process_list",
         "network_status",

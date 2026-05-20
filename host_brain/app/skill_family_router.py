@@ -21,6 +21,8 @@ _DEFAULT_SKILL_FAMILY_BY_SKILL_ID: dict[str, str] = {
     "network_status": "system",
     "open_app": "system",
     "memory_store": "memory",
+    "memory_preference_extract": "memory",
+    "memory_consolidate": "memory",
     "memory_recall": "memory",
     "session_summary": "memory",
     "emotion_query": "emotion",
@@ -221,4 +223,3 @@ def build_skill_route_decision(
 
 
 __all__ = ["SkillRouteDecision", "build_skill_route_decision"]
-

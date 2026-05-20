@@ -58,6 +58,8 @@ _LLM_SKILL_TARGET_ALLOWLIST: frozenset[str] = frozenset({
     "hub_skill_search",
     "file_list",
     "file_read",
+    "memory_consolidate",
+    "memory_preference_extract",
     "memory_recall",
     "memory_store",
     "network_status",
@@ -140,6 +142,16 @@ _DIRECT_MEMORY_RECALL_MARKERS = (
     "回忆",
     "之前说过",
     "上次提到",
+)
+_MEMORY_PREFERENCE_EXTRACT_RE = re.compile(
+    r"((提取|抽取|识别|分析|整理).{0,12}(偏好|喜好|习惯|交互风格|禁忌)"
+    r"|(?:extract|mine|identify).{0,12}(?:preference|preferences|habit|style))",
+    re.IGNORECASE,
+)
+_MEMORY_CONSOLIDATE_RE = re.compile(
+    r"((记忆管家|整理.{0,12}记忆|沉淀.{0,12}记忆|记忆候选|长期记忆候选|整理成记忆)"
+    r"|(?:consolidate|summari[sz]e).{0,12}(?:memory|memories|memory candidates?))",
+    re.IGNORECASE,
 )
 _SELF_HEAL_MARKERS = (
     "self heal",
@@ -837,6 +849,44 @@ def _build_browser_observation_route_seed(text: str) -> dict[str, Any] | None:
     return None
 
 
+def _build_memory_steward_route_seed(text: str) -> dict[str, Any] | None:
+    normalized = _normalize_text(text)
+    if not normalized:
+        return None
+    if _MEMORY_PREFERENCE_EXTRACT_RE.search(normalized):
+        return {
+            "route": "skill",
+            "target_id": "memory_preference_extract",
+            "task": normalized,
+            "reason_code": "THALAMUS_RULE_MEMORY_PREFERENCE_EXTRACT",
+            "confidence": 0.94,
+            "route_source": "thalamus.rule",
+            "args": {
+                "text": normalized,
+                "max_candidates": 8,
+                "source": "thalamus",
+                "user_message": normalized,
+            },
+        }
+    if _MEMORY_CONSOLIDATE_RE.search(normalized):
+        return {
+            "route": "skill",
+            "target_id": "memory_consolidate",
+            "task": normalized,
+            "reason_code": "THALAMUS_RULE_MEMORY_CONSOLIDATE",
+            "confidence": 0.93,
+            "route_source": "thalamus.rule",
+            "args": {
+                "text": normalized,
+                "max_candidates": 10,
+                "include_preferences": True,
+                "source": "thalamus",
+                "user_message": normalized,
+            },
+        }
+    return None
+
+
 def _has_explicit_route_seed(payload: Mapping[str, Any] | None) -> bool:
     data = dict(payload or {})
     route = _normalize_text(data.get("route"), lower=True)
@@ -897,6 +947,13 @@ def _infer_supported_step_route(text: str) -> tuple[str, str, str] | None:
         return ("skill", "bond_query", "THALAMUS_RULE_BOND_QUERY")
     if _contains_any(cleaned, _DIRECT_MEMORY_RECALL_MARKERS):
         return ("skill", "memory_recall", "THALAMUS_RULE_MEMORY_RECALL")
+    memory_steward_seed = _build_memory_steward_route_seed(cleaned)
+    if memory_steward_seed is not None:
+        return (
+            "skill",
+            _normalize_text(memory_steward_seed.get("target_id")),
+            _normalize_text(memory_steward_seed.get("reason_code")) or "THALAMUS_RULE_MEMORY_STEWARD",
+        )
     system_seed = _build_system_observation_route_seed(cleaned)
     if system_seed is not None:
         return (
@@ -947,6 +1004,10 @@ def _build_direct_route_seed(text: str) -> dict[str, Any] | None:
     browser_seed = _build_browser_observation_route_seed(cleaned)
     if browser_seed is not None:
         return browser_seed
+
+    memory_steward_seed = _build_memory_steward_route_seed(cleaned)
+    if memory_steward_seed is not None:
+        return memory_steward_seed
 
     if _looks_like_open_app_request(cleaned):
         return {

@@ -91,6 +91,61 @@ def _normalize_memory_store(args: dict[str, Any], ctx: dict[str, Any] | None) ->
     }
 
 
+def _normalize_memory_preference_extract(args: dict[str, Any], ctx: dict[str, Any] | None) -> dict[str, Any]:
+    text = str(
+        (args or {}).get("text")
+        or (args or {}).get("content")
+        or (args or {}).get("source_text")
+        or (args or {}).get("user_message")
+        or ""
+    ).strip()
+    try:
+        max_candidates = max(1, min(50, int((args or {}).get("max_candidates") or 8)))
+    except (TypeError, ValueError):
+        max_candidates = 8
+    source = str((args or {}).get("source") or "").strip() or "user_text"
+
+    return {
+        "text": text,
+        "max_candidates": max_candidates,
+        "source": source,
+        "manifest_ref": f"memory_preference_extract::{text[:40]}",
+        "request_id": str((ctx or {}).get("request_id") or "").strip() or None,
+        "_context": ctx or {},
+    }
+
+
+def _normalize_memory_consolidate(args: dict[str, Any], ctx: dict[str, Any] | None) -> dict[str, Any]:
+    text = str(
+        (args or {}).get("text")
+        or (args or {}).get("content")
+        or (args or {}).get("source_text")
+        or (args or {}).get("user_message")
+        or ""
+    ).strip()
+    items = (args or {}).get("items")
+    if not isinstance(items, list):
+        items = []
+    try:
+        max_candidates = max(1, min(50, int((args or {}).get("max_candidates") or 10)))
+    except (TypeError, ValueError):
+        max_candidates = 10
+    include_preferences_raw = (args or {}).get("include_preferences")
+    include_preferences = bool(include_preferences_raw) if include_preferences_raw is not None else True
+    source = str((args or {}).get("source") or "").strip() or "memory_consolidate"
+
+    return {
+        "text": text,
+        "items": items,
+        "max_candidates": max_candidates,
+        "include_preferences": include_preferences,
+        "source": source,
+        "manifest_ref": f"memory_consolidate::{(text or str(len(items)) + '_items')[:40]}",
+        "request_id": str((ctx or {}).get("request_id") or "").strip() or None,
+        "_context": ctx or {},
+    }
+
+
 def _normalize_memory_forget(args: dict[str, Any], ctx: dict[str, Any] | None) -> dict[str, Any]:
     memory_id = str((args or {}).get("memory_id") or "").strip() or None
     tags_raw = (args or {}).get("tags")
@@ -138,6 +193,32 @@ class MemorySkillProvider(DeclarativeSkillProvider):
             tool="memory",
             action="store",
             normalize_args=_normalize_memory_store,
+        ),
+        DeclarativeSkillSpec(
+            skill_name="memory_preference_extract",
+            clearance="LOW",
+            risk_level=1,
+            scope="memory",
+            reversible=True,
+            description="从文本中提取用户偏好、交互风格和禁忌的软记忆候选（只生成候选，不直接写入长期记忆）。",
+            tool="memory",
+            action="preference_extract",
+            normalize_args=_normalize_memory_preference_extract,
+            family="memory",
+            capability_tags=("preference", "candidate", "safety"),
+        ),
+        DeclarativeSkillSpec(
+            skill_name="memory_consolidate",
+            clearance="LOW",
+            risk_level=1,
+            scope="memory",
+            reversible=True,
+            description="将对话片段或任务结果整理为可审核的记忆候选（只生成候选，不直接写入长期记忆）。",
+            tool="memory",
+            action="consolidate",
+            normalize_args=_normalize_memory_consolidate,
+            family="memory",
+            capability_tags=("episodic", "candidate", "consolidation"),
         ),
         DeclarativeSkillSpec(
             skill_name="memory_forget",

@@ -400,6 +400,44 @@ def test_classify_and_compile_intent_draft_backfills_memory_store_content() -> N
     assert compiled["args"]["query"] == "请记住：我明天上午9点开会。"
 
 
+def test_classify_and_compile_intent_draft_routes_preference_extract_tool() -> None:
+    agent = ThalamusAgent()
+
+    compiled = _run(
+        agent.classify_and_compile_intent_draft(
+            request_id="req-thalamus-pref-extract",
+            session_id="session-thalamus-pref-extract",
+            user_message="提取这段话里的偏好：我喜欢短结论，不喜欢夸张动效。",
+            source="chat_handler",
+            ts_ms=1776349003155,
+        )
+    )
+
+    assert compiled["route"] == "skill"
+    assert compiled["target_id"] == "memory_preference_extract"
+    assert compiled["route_reason"] == "THALAMUS_RULE_MEMORY_PREFERENCE_EXTRACT"
+    assert compiled["args"]["max_candidates"] == 8
+
+
+def test_classify_and_compile_intent_draft_routes_memory_consolidate_tool() -> None:
+    agent = ThalamusAgent()
+
+    compiled = _run(
+        agent.classify_and_compile_intent_draft(
+            request_id="req-thalamus-memory-consolidate",
+            session_id="session-thalamus-memory-consolidate",
+            user_message="记忆管家整理一下：今天确认主链工具闭环通过，下一步扩充 Host 侧技能。",
+            source="chat_handler",
+            ts_ms=1776349003156,
+        )
+    )
+
+    assert compiled["route"] == "skill"
+    assert compiled["target_id"] == "memory_consolidate"
+    assert compiled["route_reason"] == "THALAMUS_RULE_MEMORY_CONSOLIDATE"
+    assert compiled["args"]["include_preferences"] is True
+
+
 def test_classify_and_compile_intent_draft_builds_explicit_supported_plan() -> None:
     agent = ThalamusAgent()
 
