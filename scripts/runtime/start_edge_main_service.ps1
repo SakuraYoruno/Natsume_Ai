@@ -7,6 +7,7 @@ param(
   [int]$Port = 17800,
   [int]$WaitSeconds = 120,
   [switch]$ForceRestart,
+  [switch]$CleanQQOneBot,
   [string]$PythonPath = ""
 )
 
@@ -280,11 +281,16 @@ $envValues = Read-EnvFile -Path $EnvFile
 $cleanNapCatLauncher = Join-Path $RepoRoot 'scripts\runtime\launch_napcat_clean.ps1'
 $envValues['QQ_ONEBOT_API_BASE'] = 'http://127.0.0.1:3000'
 $envValues['EDGE_QQ_ONEBOT_AUTOSTART'] = 'true'
-$envValues['EDGE_QQ_ONEBOT_LAUNCHER_PATH'] = $cleanNapCatLauncher
-$envValues['EDGE_QQ_ONEBOT_LAUNCHER_ARGS'] = '{QQ_SELF_ID}'
+if ([string]::IsNullOrWhiteSpace([string]$envValues['EDGE_QQ_ONEBOT_LAUNCHER_PATH'])) {
+  $envValues['EDGE_QQ_ONEBOT_LAUNCHER_PATH'] = $cleanNapCatLauncher
+}
+if ([string]::IsNullOrWhiteSpace([string]$envValues['EDGE_QQ_ONEBOT_LAUNCHER_ARGS'])) {
+  $envValues['EDGE_QQ_ONEBOT_LAUNCHER_ARGS'] = '{QQ_SELF_ID}'
+}
 $envValues['EDGE_QQ_ONEBOT_HEALTH_URL'] = 'http://127.0.0.1:3000/get_status'
-$envValues['EDGE_QQ_ONEBOT_KILL_QQ_BEFORE_START'] = 'true'
-$envValues['EDGE_QQ_ONEBOT_FORCE_CLEAN_START'] = 'true'
+$qqCleanStartValue = if ($CleanQQOneBot.IsPresent) { 'true' } else { 'false' }
+$envValues['EDGE_QQ_ONEBOT_KILL_QQ_BEFORE_START'] = $qqCleanStartValue
+$envValues['EDGE_QQ_ONEBOT_FORCE_CLEAN_START'] = $qqCleanStartValue
 $effectiveEnvFile = Join-Path $runtimeRoot 'edge.runtime.env'
 Write-EnvFile -Path $effectiveEnvFile -Values $envValues
 if ($Port -le 0) {
