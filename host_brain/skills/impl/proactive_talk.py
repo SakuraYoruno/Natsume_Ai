@@ -381,6 +381,11 @@ def execute_proactive_talk(
     emotion_context: dict[str, Any] | None = ctx.get("emotion_context")
     emotion_hint = _build_emotion_hint_for_proactive(emotion_context)
     motive_state: dict[str, Any] = dict(ctx.get("motive_state") or {})
+    proactive_episode = motive_state.get("proactive_episode")
+    if isinstance(proactive_episode, Mapping):
+        proactive_episode = dict(proactive_episode)
+    else:
+        proactive_episode = {}
     motive_hint = _build_motive_hint_for_proactive(motive_state)
     render_policy: dict[str, Any] = _coerce_render_policy(ctx.get("render_policy"))
     scene_awareness: dict[str, Any] = _coerce_scene_awareness(ctx.get("scene_awareness"))
@@ -539,6 +544,7 @@ def execute_proactive_talk(
         # 方向 B：携带情感上下文供 UI 渲染（如表情切换）
         "emotion_tag": (emotion_context or {}).get("emotion_tag", "NEUTRAL"),
         "dominant_motive": motive_state.get("dominant_motive"),
+        "proactive_episode": proactive_episode,
         "scene_tags": list(scene_awareness.get("scene_tags") or []),
         "scene_activity": scene_awareness.get("current_activity"),
     }

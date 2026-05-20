@@ -280,6 +280,7 @@ def _project_snapshot(snapshot: Mapping[str, Any]) -> dict[str, Any]:
     scheduler = dict(data.get("scheduler") or {})
     latest_private = dict(data.get("latest_private_thought") or {})
     proactive_task = dict(background.get("proactive_task") or {})
+    proactive_episode = dict(data.get("proactive_emotional_episode") or {})
     proactive_outbox = dict(data.get("proactive_outbox") or {})
     proactive_interaction = dict(data.get("proactive_interaction") or {})
     return {
@@ -300,6 +301,10 @@ def _project_snapshot(snapshot: Mapping[str, Any]) -> dict[str, Any]:
         "last_private_source": str(latest_private.get("source") or ""),
         "last_private_salience": latest_private.get("salience"),
         "proactive_task_status": str(proactive_task.get("status") or ""),
+        "proactive_episode_count": int(proactive_episode.get("episode_count") or 0),
+        "proactive_episode_motive": str(proactive_episode.get("last_motive") or ""),
+        "proactive_episode_action": str(proactive_episode.get("last_chosen_action") or ""),
+        "proactive_episode_send_allowed": bool(proactive_episode.get("last_send_allowed") or False),
         "proactive_outbox_queued_count": int(proactive_outbox.get("queued_count") or 0),
         "proactive_delivery_receipt_count": int(proactive_interaction.get("delivery_receipt_count") or 0),
         "proactive_interaction_count": int(proactive_interaction.get("interaction_count") or 0),
@@ -322,6 +327,10 @@ def _markdown_report(summary: Mapping[str, Any]) -> str:
         f"- registered_organ_count: `{summary.get('registered_organ_count')}`",
         f"- last_mapped_organ_count: `{summary.get('last_mapped_organ_count')}`",
         f"- proactive_task_status: `{summary.get('proactive_task_status')}`",
+        f"- proactive_episode_count: `{summary.get('proactive_episode_count')}`",
+        f"- proactive_episode_motive: `{summary.get('proactive_episode_motive')}`",
+        f"- proactive_episode_action: `{summary.get('proactive_episode_action')}`",
+        f"- proactive_episode_send_allowed: `{summary.get('proactive_episode_send_allowed')}`",
         f"- proactive_outbox_queued_count: `{summary.get('proactive_outbox_queued_count')}`",
         f"- proactive_delivery_receipt_count: `{summary.get('proactive_delivery_receipt_count')}`",
         f"- proactive_interaction_count: `{summary.get('proactive_interaction_count')}`",

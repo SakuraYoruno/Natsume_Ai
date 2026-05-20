@@ -26,6 +26,7 @@ CORE_TICK_TASK_IDS: tuple[str, ...] = (
 PROACTIVE_TALK_TASK_ID = "proactive_talk_periodic"
 BACKGROUND_TICK_TASK_IDS: tuple[str, ...] = (PROACTIVE_TALK_TASK_ID,)
 DEFAULT_TICK_TASK_IDS: tuple[str, ...] = CORE_TICK_TASK_IDS + BACKGROUND_TICK_TASK_IDS
+PROACTIVE_EPISODES_FILENAME = "proactive_episodes.jsonl"
 PROACTIVE_OUTBOX_FILENAME = "proactive_outbox.jsonl"
 PROACTIVE_DELIVERY_RECEIPTS_FILENAME = "delivery_receipts.jsonl"
 PROACTIVE_INTERACTIONS_FILENAME = "proactive_interactions.jsonl"
@@ -106,6 +107,8 @@ class DigitalLifeSupervisor:
         self._proactive_outbox_count = 0
         self._last_proactive_outbox_ts_ms = 0
         self._last_proactive_outbox_record: dict[str, Any] = {}
+        self._proactive_episode_count = 0
+        self._last_proactive_episode_record: dict[str, Any] = {}
         self._proactive_receipt_count = 0
         self._last_proactive_receipt_record: dict[str, Any] = {}
         self._proactive_interaction_count = 0
@@ -379,6 +382,7 @@ class DigitalLifeSupervisor:
             },
             "scheduler": scheduler_snapshot,
             "background_runtime": background_runtime,
+            "proactive_emotional_episode": self._proactive_episode_snapshot(),
             "proactive_outbox": self._proactive_outbox_snapshot(),
             "proactive_interaction": self._proactive_interaction_snapshot(),
             "last_tick_results": _strip_large(self._last_tick_results),
@@ -535,44 +539,76 @@ class DigitalLifeSupervisor:
     def _dispatch_scheduler_intent(self, system_intent: dict[str, Any]) -> dict[str, Any]:
         from host_brain.app.http_hooks_runtime_helpers import run_proactive_intent_dispatch  # noqa: PLC0415
 
-        return run_proactive_intent_dispatch(
-            dict(system_intent or {}),
+        intent = dict(system_intent or {})
+        skill_name = str(intent.get("skill_name") or "").strip()
+        if skill_name != "proactive_talk":
+            return run_proactive_intent_dispatch(
+                intent,
+                logger=self.logger,
+                get_ledger=lambda: None,
+                retention_policy=None,
+                ui_pusher=self._queue_proactive_outbox,
+            )
+
+        episode = self._build_emotional_proactive_episode(intent)
+        episode_record = self._write_proactive_episode_record(episode, scheduler_intent=intent)
+        if not bool(episode.get("send_allowed")):
+            result = {
+                "status": "SKIPPED",
+                "reason_code": "EMOTIONAL_PROACTIVE_HELD",
+                "detail": str(episode.get("felt_reason") or ""),
+                "skill_name": skill_name,
+                "proactive_episode": episode_record,
+            }
+            self._record_event("proactive_episode_held", result)
+            return result
+
+        from host_brain.persona.emotional_proactive import (  # noqa: PLC0415
+            episode_to_motive_state,
+            episode_to_render_policy,
+        )
+
+        motive_state = episode_to_motive_state(episode)
+        render_policy = episode_to_render_policy(episode)
+        result = run_proactive_intent_dispatch(
+            intent,
             logger=self.logger,
             get_ledger=lambda: None,
             retention_policy=None,
             ui_pusher=self._queue_proactive_outbox,
             llm_generator_override=self._proactive_template_fallback_generator,
             last_interaction_ts_override=self._last_interaction_or_outbound_ts(),
-            motive_state_override={
-                "reach_out_drive": 0.62,
-                "continuity_drive": 0.58,
-                "withdraw_drive": 0.0,
-                "self_protect_drive": 0.0,
-                "dominant_motive": "continuity",
-                "motive_reason_tags": ["digital_life_safe_outbox_acceptance"],
-            },
-            render_policy_override={
-                "allow_proactive_after_reply": True,
-                "should_be_withdrawn": False,
-                "max_chars": 120,
-            },
+            motive_state_override=motive_state,
+            render_policy_override=render_policy,
         )
+        if isinstance(result, Mapping):
+            result = dict(result)
+            result["proactive_episode"] = episode_record
+        return result
 
     def _last_interaction_or_outbound_ts(self) -> int | None:
         latest = max(int(self._last_foreground_ts_ms or 0), int(self._last_proactive_outbox_ts_ms or 0))
         return latest if latest > 0 else None
 
-    def _proactive_template_fallback_generator(self, _llm_input: dict[str, Any]) -> dict[str, Any]:
+    def _proactive_template_fallback_generator(self, llm_input: dict[str, Any]) -> dict[str, Any]:
+        motive_state = dict((llm_input or {}).get("motive_state") or {})
+        episode = dict(motive_state.get("proactive_episode") or {})
+        if not episode and self._last_proactive_episode_record:
+            episode = dict(self._last_proactive_episode_record.get("episode") or {})
+        opening_message = str(episode.get("opening_message") or "").strip()
         return {
-            "greeting": "",
-            "content": "",
-            "fallback_to_template": True,
-            "fallback_reason": "DIGITAL_LIFE_SAFE_OUTBOX_TEMPLATE",
+            "greeting": opening_message,
+            "content": opening_message,
+            "fallback_to_template": not bool(opening_message),
+            "fallback_reason": "EMOTIONAL_PROACTIVE_EPISODE",
         }
 
     def _queue_proactive_outbox(self, message: dict[str, Any]) -> dict[str, Any]:
         queued_at_ms = _now_ms()
-        message_id = str(message.get("event_id") or f"{PROACTIVE_TALK_TASK_ID}_{queued_at_ms}")
+        message_payload = dict(message or {})
+        if not message_payload.get("proactive_episode") and self._last_proactive_episode_record:
+            message_payload["proactive_episode"] = dict(self._last_proactive_episode_record.get("episode") or {})
+        message_id = str(message_payload.get("event_id") or f"{PROACTIVE_TALK_TASK_ID}_{queued_at_ms}")
         record = {
             "message_id": message_id,
             "run_id": self.run_id,
@@ -581,7 +617,7 @@ class DigitalLifeSupervisor:
             "delivery_channel": "safe_outbox",
             "delivery_status": "QUEUED",
             "queued_at_ms": queued_at_ms,
-            "message": dict(message or {}),
+            "message": message_payload,
         }
         outbox_path = self._proactive_outbox_path()
         try:
@@ -628,6 +664,11 @@ class DigitalLifeSupervisor:
             return None
         return self.out_dir / PROACTIVE_INTERACTIONS_FILENAME
 
+    def _proactive_episodes_path(self) -> Path | None:
+        if self.out_dir is None:
+            return None
+        return self.out_dir / PROACTIVE_EPISODES_FILENAME
+
     def _append_proactive_jsonl(self, path: Path | None, record: Mapping[str, Any]) -> None:
         if path is None:
             return
@@ -639,6 +680,62 @@ class DigitalLifeSupervisor:
         if self._last_proactive_outbox_record:
             return dict(self._last_proactive_outbox_record)
         return _latest_jsonl_record(self._proactive_outbox_path())
+
+    def _build_emotional_proactive_episode(self, system_intent: Mapping[str, Any]) -> dict[str, Any]:
+        from host_brain.persona.emotional_proactive import build_emotional_proactive_episode  # noqa: PLC0415
+
+        bond_summary: dict[str, Any] = {}
+        try:
+            from host_brain.tribe.social_brain_agent import get_social_brain_agent  # noqa: PLC0415
+
+            bond_summary = dict(get_social_brain_agent().resolve_scheduler_bond_summary(session_id=self.config.session_id) or {})
+        except Exception as exc:
+            self.logger.debug("emotional proactive bond summary unavailable: %s", exc)
+
+        args = dict((system_intent or {}).get("args") or {})
+        scene_awareness = (
+            system_intent.get("scene_awareness")
+            or args.get("scene_awareness")
+            or {}
+        )
+        episode = build_emotional_proactive_episode(
+            inner_state=self._inner_world_state(),
+            bond_summary=bond_summary,
+            scene_awareness=dict(scene_awareness or {}) if isinstance(scene_awareness, Mapping) else {},
+            now_ms=_now_ms(),
+            last_foreground_ts_ms=int(self._last_foreground_ts_ms or 0),
+            last_proactive_outbox_ts_ms=int(self._last_proactive_outbox_ts_ms or 0),
+        )
+        return episode.as_dict()
+
+    def _write_proactive_episode_record(
+        self,
+        episode: Mapping[str, Any],
+        *,
+        scheduler_intent: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        record = {
+            "run_id": self.run_id,
+            "persona_self_id": self.persona_self_id,
+            "session_id": self.config.session_id,
+            "episode_id": str(episode.get("episode_id") or ""),
+            "ts_ms": int(episode.get("ts_ms") or _now_ms()),
+            "send_allowed": bool(episode.get("send_allowed")),
+            "chosen_action": str(episode.get("chosen_action") or ""),
+            "motive": str(episode.get("motive") or ""),
+            "felt_reason": str(episode.get("felt_reason") or ""),
+            "opening_message": str(episode.get("opening_message") or ""),
+            "disturbance_risk": episode.get("disturbance_risk"),
+            "emotional_drive": episode.get("emotional_drive"),
+            "relationship_permission": episode.get("relationship_permission"),
+            "episode": dict(episode or {}),
+            "scheduler_intent": _strip_large(dict(scheduler_intent or {}), limit=1600),
+        }
+        self._append_proactive_jsonl(self._proactive_episodes_path(), record)
+        self._proactive_episode_count += 1
+        self._last_proactive_episode_record = dict(record)
+        self._record_event("proactive_emotional_episode", record)
+        return record
 
     def _write_proactive_delivery_receipt(self, outbound: Mapping[str, Any]) -> dict[str, Any]:
         now = _now_ms()
@@ -693,6 +790,26 @@ class DigitalLifeSupervisor:
 
         return _run_coroutine_sync(_compile())
 
+    def _proactive_episode_snapshot(self) -> dict[str, Any]:
+        episodes_path = self._proactive_episodes_path()
+        file_count = _count_jsonl_rows(episodes_path)
+        latest = dict(self._last_proactive_episode_record or _latest_jsonl_record(episodes_path))
+        episode = dict(latest.get("episode") or {})
+        return {
+            "enabled": True,
+            "episodes_path": str(episodes_path) if episodes_path is not None else "",
+            "episode_count": max(int(self._proactive_episode_count), int(file_count)),
+            "last_episode_id": str(latest.get("episode_id") or episode.get("episode_id") or ""),
+            "last_motive": str(latest.get("motive") or episode.get("motive") or ""),
+            "last_chosen_action": str(latest.get("chosen_action") or episode.get("chosen_action") or ""),
+            "last_send_allowed": bool(latest.get("send_allowed") or episode.get("send_allowed") or False),
+            "last_emotional_drive": episode.get("emotional_drive", latest.get("emotional_drive")),
+            "last_disturbance_risk": episode.get("disturbance_risk", latest.get("disturbance_risk")),
+            "last_relationship_permission": episode.get("relationship_permission", latest.get("relationship_permission")),
+            "last_felt_reason": str(latest.get("felt_reason") or episode.get("felt_reason") or ""),
+            "last_opening_preview": str(latest.get("opening_message") or episode.get("opening_message") or "")[:120],
+        }
+
     def _proactive_outbox_snapshot(self) -> dict[str, Any]:
         outbox_path = self._proactive_outbox_path()
         file_count = 0
@@ -703,6 +820,7 @@ class DigitalLifeSupervisor:
                 file_count = 0
         latest = dict(self._last_proactive_outbox_record or {})
         message = dict(latest.get("message") or {})
+        episode = dict(message.get("proactive_episode") or {})
         return {
             "enabled": True,
             "delivery_mode": "safe_outbox",
@@ -712,6 +830,9 @@ class DigitalLifeSupervisor:
             "last_delivery_status": str(latest.get("delivery_status") or ""),
             "last_queued_at_ms": int(latest.get("queued_at_ms") or 0),
             "last_content_preview": str(message.get("content") or "")[:120],
+            "last_episode_id": str(episode.get("episode_id") or ""),
+            "last_episode_motive": str(episode.get("motive") or ""),
+            "last_episode_action": str(episode.get("chosen_action") or ""),
         }
 
     def _proactive_interaction_snapshot(self) -> dict[str, Any]:

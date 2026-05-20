@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import time
 
 from host_brain.runtime import DigitalLifeRuntimeConfig, DigitalLifeSupervisor
 from tools.run_digital_life_host_runtime import build_arg_parser, run_host_runtime
@@ -90,18 +91,54 @@ def test_digital_life_supervisor_runs_proactive_talk_into_safe_outbox(tmp_path) 
     nested = result["result"]
     push_result = nested["push_result"]
     outbox_path = tmp_path / "proactive_outbox.jsonl"
+    episode_path = tmp_path / "proactive_episodes.jsonl"
     rows = [json.loads(line) for line in outbox_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    episode_rows = [json.loads(line) for line in episode_path.read_text(encoding="utf-8").splitlines() if line.strip()]
 
     assert result["status"] == "EXECUTED"
     assert nested["message"]["type"] == "proactive_talk"
+    assert nested["message"]["proactive_episode"]["source"] == "emotional_impulse"
     assert push_result["status"] == "QUEUED"
     assert push_result["delivery_mode"] == "safe_outbox"
     assert len(rows) == 1
+    assert len(episode_rows) == 1
+    assert episode_rows[0]["send_allowed"] is True
     assert rows[0]["delivery_status"] == "QUEUED"
     assert rows[0]["message"]["type"] == "proactive_talk"
+    assert rows[0]["message"]["proactive_episode"]["episode_id"] == episode_rows[0]["episode_id"]
     assert final_snapshot["background_runtime"]["proactive_task"]["enabled"] is True
     assert final_snapshot["background_runtime"]["proactive_task"]["status"] == "OK"
+    assert final_snapshot["proactive_emotional_episode"]["episode_count"] == 1
+    assert final_snapshot["proactive_emotional_episode"]["last_send_allowed"] is True
     assert final_snapshot["proactive_outbox"]["queued_count"] == 1
+
+
+def test_digital_life_supervisor_holds_emotional_proactive_when_recent_outbound(tmp_path) -> None:
+    supervisor = DigitalLifeSupervisor(
+        DigitalLifeRuntimeConfig(
+            mode="fixture",
+            run_id="unit-proactive-held",
+            out_dir=tmp_path,
+        )
+    )
+
+    with supervisor:
+        supervisor._last_proactive_outbox_ts_ms = int(time.time() * 1000)
+        result = supervisor._dispatch_scheduler_intent({"skill_name": "proactive_talk", "args": {}})
+        final_snapshot = supervisor.snapshot()
+
+    episode_path = tmp_path / "proactive_episodes.jsonl"
+    outbox_path = tmp_path / "proactive_outbox.jsonl"
+    episode_rows = [json.loads(line) for line in episode_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+
+    assert result["status"] == "SKIPPED"
+    assert result["reason_code"] == "EMOTIONAL_PROACTIVE_HELD"
+    assert len(episode_rows) == 1
+    assert episode_rows[0]["send_allowed"] is False
+    assert not outbox_path.exists()
+    assert final_snapshot["proactive_emotional_episode"]["episode_count"] == 1
+    assert final_snapshot["proactive_emotional_episode"]["last_send_allowed"] is False
+    assert final_snapshot["proactive_outbox"]["queued_count"] == 0
 
 
 def test_digital_life_supervisor_runs_proactive_interaction_dry_run(tmp_path) -> None:
@@ -133,6 +170,7 @@ def test_digital_life_supervisor_runs_proactive_interaction_dry_run(tmp_path) ->
     assert len(interactions) == 1
     assert interactions[0]["status"] == "PASS"
     assert final_snapshot["foreground_turn_count"] == 1
+    assert final_snapshot["proactive_emotional_episode"]["episode_count"] == 1
     assert final_snapshot["proactive_outbox"]["queued_count"] == 1
     assert final_snapshot["proactive_interaction"]["delivery_receipt_count"] == 1
     assert final_snapshot["proactive_interaction"]["interaction_count"] == 1
@@ -224,6 +262,8 @@ def test_validate_proactive_interaction_loop_writes_artifacts(tmp_path) -> None:
     summary = result["summary"]
     assert summary["status"] == "PASS"
     assert summary["proactive_outbox_queued_count"] == 1
+    assert summary["proactive_episode_count"] == 1
+    assert summary["proactive_episode_send_allowed"] is True
     assert summary["delivery_receipt_count"] == 1
     assert summary["interaction_count"] == 1
     assert summary["thalamus_reason_code"] == "THALAMUS_RULE_PROACTIVE_REPLY_CONTINUATION"

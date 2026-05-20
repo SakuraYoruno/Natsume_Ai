@@ -269,6 +269,14 @@ def _build_soak_acceptance(
     proactive_enabled = bool(proactive_task.get("enabled"))
     proactive_status = str(proactive_task.get("status") or "")
     proactive_task_id = str(proactive_task.get("task_id") or "proactive_talk_periodic")
+    proactive_episode = _as_dict(final_snapshot.get("proactive_emotional_episode"))
+    proactive_episode_count = _as_int(proactive_episode.get("episode_count"), 0)
+    proactive_episode_motive = str(proactive_episode.get("last_motive") or "")
+    proactive_episode_action = str(proactive_episode.get("last_chosen_action") or "")
+    proactive_episode_send_allowed = bool(proactive_episode.get("last_send_allowed"))
+    proactive_episode_risk = proactive_episode.get("last_disturbance_risk")
+    proactive_episode_reason = str(proactive_episode.get("last_felt_reason") or "")
+    proactive_episode_pass = proactive_episode_count > 0 and bool(proactive_episode_motive)
     proactive_outbox = _as_dict(final_snapshot.get("proactive_outbox"))
     proactive_outbox_count = _as_int(proactive_outbox.get("queued_count"), 0)
     proactive_outbox_mode = str(proactive_outbox.get("delivery_mode") or "")
@@ -357,6 +365,24 @@ def _build_soak_acceptance(
             ],
         ),
         _acceptance_layer(
+            layer_id="emotional_proactive",
+            label="情感主动",
+            status="healthy" if proactive_episode_pass else "running" if proactive_enabled else "unknown",
+            verdict="PASS" if proactive_episode_pass else "RUNNING" if proactive_enabled and running else "NOT_COVERED",
+            value=f"{proactive_episode_action or '--'} / {proactive_episode_motive or '--'}" if proactive_episode_pass else "未覆盖",
+            detail=(
+                "主动外呼前已经产生情绪 episode，包含动机、打扰风险、行动选择和克制策略。"
+                if proactive_episode_pass
+                else "尚未看到情绪 episode 证据，无法判断主动对话是否来自情感冲动。"
+            ),
+            evidence=[
+                f"episodes={proactive_episode_count}",
+                f"send_allowed={str(proactive_episode_send_allowed).lower()}",
+                f"risk={proactive_episode_risk}" if proactive_episode_risk is not None else "",
+                proactive_episode_reason[:120] if proactive_episode_reason else "",
+            ],
+        ),
+        _acceptance_layer(
             layer_id="external_system",
             label="整系统外设",
             status="unknown",
@@ -419,6 +445,10 @@ def _build_soak_acceptance(
         not_covered.append(
             {"id": "proactive_loop", "label": "主动外呼", "reason": f"{proactive_task_id} 未启用或未产生 outbox 证据"}
         )
+    if not proactive_episode_pass:
+        not_covered.append(
+            {"id": "emotional_proactive", "label": "情感主动", "reason": "缺少情绪 episode：无法证明主动外呼来自情感冲动和克制决策"}
+        )
     if not proactive_interaction_pass:
         not_covered.append(
             {"id": "proactive_interaction", "label": "主动交互", "reason": "缺少 dry-run 送达回执或 Thalamus 主动续接证据"}
@@ -444,6 +474,11 @@ def _build_soak_acceptance(
             "status": proactive_status,
             "outbox_queued_count": proactive_outbox_count,
             "outbox_delivery_mode": proactive_outbox_mode,
+            "episode_count": proactive_episode_count,
+            "episode_motive": proactive_episode_motive,
+            "episode_action": proactive_episode_action,
+            "episode_send_allowed": proactive_episode_send_allowed,
+            "episode_disturbance_risk": proactive_episode_risk,
             "delivery_receipt_count": proactive_delivery_receipt_count,
             "interaction_count": proactive_interaction_count,
             "last_interaction_status": proactive_last_interaction_status,

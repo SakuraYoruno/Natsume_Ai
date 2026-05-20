@@ -96,6 +96,7 @@ def _summary(
     turn = dict(foreground.get("turn") or {})
     proactive_outbox = dict(final_snapshot.get("proactive_outbox") or {})
     proactive_interaction = dict(final_snapshot.get("proactive_interaction") or {})
+    proactive_episode = dict(final_snapshot.get("proactive_emotional_episode") or {})
     status = (
         "PASS"
         if str(event.get("status") or "") == "PASS"
@@ -113,6 +114,11 @@ def _summary(
         "alive": bool(final_snapshot.get("alive")),
         "foreground_turn_count": int(final_snapshot.get("foreground_turn_count") or 0),
         "idle_tick_count": int(final_snapshot.get("idle_tick_count") or 0),
+        "proactive_episode_count": int(proactive_episode.get("episode_count") or 0),
+        "proactive_episode_motive": str(proactive_episode.get("last_motive") or ""),
+        "proactive_episode_action": str(proactive_episode.get("last_chosen_action") or ""),
+        "proactive_episode_send_allowed": bool(proactive_episode.get("last_send_allowed") or False),
+        "proactive_episode_felt_reason": str(proactive_episode.get("last_felt_reason") or ""),
         "proactive_outbox_queued_count": int(proactive_outbox.get("queued_count") or 0),
         "delivery_receipt_count": int(proactive_interaction.get("delivery_receipt_count") or 0),
         "interaction_count": int(proactive_interaction.get("interaction_count") or 0),
@@ -133,6 +139,10 @@ def _markdown_report(summary: Mapping[str, Any]) -> str:
         "",
         f"- status: `{summary.get('status')}`",
         f"- run_id: `{summary.get('run_id')}`",
+        f"- proactive_episode_count: `{summary.get('proactive_episode_count')}`",
+        f"- proactive_episode_motive: `{summary.get('proactive_episode_motive')}`",
+        f"- proactive_episode_action: `{summary.get('proactive_episode_action')}`",
+        f"- proactive_episode_send_allowed: `{summary.get('proactive_episode_send_allowed')}`",
         f"- proactive_outbox_queued_count: `{summary.get('proactive_outbox_queued_count')}`",
         f"- delivery_receipt_count: `{summary.get('delivery_receipt_count')}`",
         f"- interaction_count: `{summary.get('interaction_count')}`",
