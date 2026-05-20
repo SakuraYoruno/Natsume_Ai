@@ -440,7 +440,7 @@ class DigitalLifeSupervisor:
         status = "RECORDED"
         reason_code = ""
         try:
-            from host_brain.app.surface_context_packet import build_surface_context_packet  # noqa: PLC0415
+            from host_brain.app.surface_main_chain_adapter import build_surface_context_payload_from_adapter  # noqa: PLC0415
             from host_brain.persona.surface_packet_compiler import compile_reply_control_packet  # noqa: PLC0415
             from host_brain.tribe.cortex_agent import get_cortex_agent  # noqa: PLC0415
 
@@ -456,7 +456,7 @@ class DigitalLifeSupervisor:
             )
             raw_context = dict(raw_context or {}) if isinstance(raw_context, Mapping) else {}
             raw_context_key_count = len(raw_context)
-            surface_context = build_surface_context_packet(
+            surface_context = build_surface_context_payload_from_adapter(
                 user_message=user_message,
                 request_id=request_id,
                 session_id=self.config.session_id,

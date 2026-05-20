@@ -446,7 +446,7 @@ class SocialBrainAgent:
                 if hasattr(_dma, "tick_idle_cycle"):
                     _dma.tick_idle_cycle(
                         source=f"social_bond_progress:{bond_stage.lower()}",
-                        person_id=_resolve_social_bond_user_id(user_id),
+                        person_id=user_id or _resolve_social_bond_user_id(user_id),
                     )
             except Exception:
                 pass

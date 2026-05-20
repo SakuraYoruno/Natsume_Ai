@@ -541,6 +541,43 @@ def _build_surface_runtime_payload(
     return {}
 
 
+def build_surface_context_payload_from_adapter(
+    *,
+    user_message: str,
+    request_id: str = "",
+    session_id: str = "",
+    person_id: str = "",
+    render_target_lang: str = "zh",
+    emotion_context: Mapping[str, Any] | None = None,
+    emotion_snapshot: Mapping[str, Any] | None = None,
+    retrieval_summary: Mapping[str, Any] | None = None,
+    retrieval_evidence_items: list[dict[str, Any]] | None = None,
+    bond_summary: Mapping[str, Any] | None = None,
+    intent_draft: Mapping[str, Any] | None = None,
+    organ_context: Mapping[str, Any] | None = None,
+    surface_task_control: Mapping[str, Any] | None = None,
+    eval_history_turns: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    from host_brain.app.surface_context_packet import build_surface_context_packet  # noqa: PLC0415
+
+    return build_surface_context_packet(
+        user_message=user_message,
+        render_target_lang=render_target_lang,
+        emotion_context=emotion_context,
+        emotion_snapshot=emotion_snapshot,
+        retrieval_summary=retrieval_summary or {"status": "SKIPPED"},
+        retrieval_evidence_items=list(retrieval_evidence_items or []),
+        person_id=person_id,
+        session_id=session_id,
+        request_id=request_id,
+        bond_summary=bond_summary,
+        intent_draft=intent_draft,
+        organ_context=organ_context,
+        surface_task_control=surface_task_control,
+        eval_history_turns=list(eval_history_turns or []),
+    )
+
+
 def _surface_organ_context(agent_input: Any, *, trace_stage_meta: Mapping[str, Any] | None = None) -> dict[str, Any]:
     trace = _safe_mapping(trace_stage_meta)
     agent_trace = _safe_mapping(getattr(agent_input, "trace_stage_meta", None))
@@ -1107,6 +1144,7 @@ def _coerce_int(value: Any, *, default: int) -> int:
 
 
 __all__ = [
+    "build_surface_context_payload_from_adapter",
     "build_surface_main_chain_input_from_chat_input",
     "run_surface_main_chain_for_chat_input",
     "surface_main_chain_enabled",
