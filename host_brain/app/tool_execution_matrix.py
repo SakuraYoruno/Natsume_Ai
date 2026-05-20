@@ -394,6 +394,11 @@ def _extract_memory_results(raw_result: dict[str, Any]) -> list[dict[str, Any]]:
     return [dict(item or {}) for item in raw_items if isinstance(item, dict)]
 
 
+def _extract_memory_detail(raw_result: dict[str, Any]) -> dict[str, Any]:
+    detail = raw_result.get("detail")
+    return dict(detail or {}) if isinstance(detail, dict) else {}
+
+
 def run_memory_tool_closed_loop(
     *,
     content: str = DEFAULT_MEMORY_CLOSED_LOOP_CONTENT,
@@ -449,7 +454,8 @@ def run_memory_tool_closed_loop(
         request_body={
             "args": {
                 "query": search_query,
-                "memory_type": "all",
+                "memory_type": "episodic",
+                "search_scope": "recent_episode",
                 "top_k": 5,
                 "threshold": 0.0,
                 "tags": ["task", "event"],
@@ -468,7 +474,8 @@ def run_memory_tool_closed_loop(
             "target_id": "memory_search",
             "args": {
                 "query": search_query,
-                "memory_type": "all",
+                "memory_type": "episodic",
+                "search_scope": "recent_episode",
                 "top_k": 5,
                 "threshold": 0.0,
                 "tags": ["task", "event"],
@@ -479,6 +486,7 @@ def run_memory_tool_closed_loop(
     )
     store_raw = _raw_executor_result(dict(store_outcome.payload or {}))
     search_raw = _raw_executor_result(dict(search_outcome.payload or {}))
+    search_detail = _extract_memory_detail(search_raw)
     search_results = _extract_memory_results(search_raw)
     normalized_content = content.lower()
     recalled = any(normalized_content in str(item.get("content") or item.get("text") or "").lower() for item in search_results)
@@ -501,6 +509,8 @@ def run_memory_tool_closed_loop(
             "raw_status": str(search_raw.get("status") or ""),
             "raw_reason_code": str(search_raw.get("reason_code") or ""),
             "raw_manifest_ref": str(search_raw.get("manifest_ref") or ""),
+            "source": str(search_detail.get("source") or ""),
+            "search_scope": str(search_detail.get("search_scope") or ""),
             "result_count": len(search_results),
             "recalled": recalled,
         },

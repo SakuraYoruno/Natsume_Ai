@@ -185,6 +185,18 @@ def test_memory_tool_closed_loop_stores_then_recalls_through_executive_runtime(m
             )
             return SimpleNamespace(success=True, reason_code=None, detail="ok", memory_id="mem-unit-001")
 
+        def recall(self, *, query_text: str, top_k: int = 5) -> list[dict[str, object]]:
+            _ = query_text
+            text = str(writes[-1]["text"]) if writes else ""
+            return [
+                {
+                    "memory_id": "mem-unit-001",
+                    "text": text,
+                    "score": 0.99,
+                    "metadata": {"source": "episodic_store"},
+                }
+            ][:top_k]
+
     class _SemanticRecallStub:
         async def recall(
             self,
@@ -226,11 +238,13 @@ def test_memory_tool_closed_loop_stores_then_recalls_through_executive_runtime(m
     assert summary["store"]["success"] is True
     assert summary["search"]["success"] is True
     assert summary["search"]["recalled"] is True
+    assert summary["search"]["source"] == "episodic_store"
+    assert summary["search"]["search_scope"] == "recent_episode"
     assert writes[0]["text"] == "Blue remembers the tool matrix closed loop"
     assert "source:tool_execution_matrix" in writes[0]["evidence_refs"]
 
 
-def test_memory_tool_closed_loop_recalls_from_episodic_fallback(monkeypatch) -> None:
+def test_memory_tool_closed_loop_uses_recent_episode_scope(monkeypatch) -> None:
     _prepare_registry(monkeypatch)
     writes: list[dict[str, object]] = []
 
@@ -297,5 +311,7 @@ def test_memory_tool_closed_loop_recalls_from_episodic_fallback(monkeypatch) -> 
 
     assert summary["status"] == "PASSED"
     assert summary["search"]["recalled"] is True
+    assert summary["search"]["source"] == "episodic_store"
+    assert summary["search"]["search_scope"] == "recent_episode"
     assert summary["results"][0]["source"] == "episodic_store"
     assert writes[0]["text"] == "Blue remembers episodic fallback after empty semantic recall"

@@ -12,10 +12,50 @@ from host_brain.skills.declarative import DeclarativeSkillProvider, DeclarativeS
 from host_brain.skills.registry import SkillRegistry
 
 _MEMORY_TYPES = frozenset({"episodic", "semantic", "working", "all"})
+_SEARCH_SCOPES = frozenset({"recent_episode", "long_term", "line", "hybrid"})
+_SEARCH_SCOPE_ALIASES = {
+    "recent": "recent_episode",
+    "recent_episodic": "recent_episode",
+    "episode": "recent_episode",
+    "episodic": "recent_episode",
+    "semantic": "long_term",
+    "longterm": "long_term",
+    "long_term_semantic": "long_term",
+    "quote": "line",
+    "quotes": "line",
+    "dialogue": "line",
+    "lines": "line",
+    "line_semantic": "line",
+    "mixed": "hybrid",
+    "auto": "",
+}
 _VALID_MEMORY_TAGS = frozenset({
     "conversation", "emotion", "event", "fact", "preference",
     "dream", "diary", "task", "reminder", "bond",
+    "quote", "line", "dialogue", "style",
 })
+_RECENT_EPISODE_TAGS = frozenset({"conversation", "event", "task", "reminder", "dream", "diary"})
+_LINE_SEMANTIC_TAGS = frozenset({"quote", "line", "dialogue", "style"})
+_LONG_TERM_TAGS = frozenset({"fact", "preference", "bond", "emotion"})
+
+
+def _normalize_search_scope(args: dict[str, Any], *, memory_type: str, tags: list[str]) -> str:
+    raw_scope = str((args or {}).get("search_scope") or (args or {}).get("scope") or "").strip().lower()
+    scope = _SEARCH_SCOPE_ALIASES.get(raw_scope, raw_scope)
+    if scope in _SEARCH_SCOPES:
+        return scope
+    tag_set = {str(tag or "").strip().lower() for tag in tags if str(tag or "").strip()}
+    if memory_type == "semantic":
+        return "long_term"
+    if memory_type in {"episodic", "working"}:
+        return "recent_episode"
+    if tag_set & _LINE_SEMANTIC_TAGS:
+        return "line"
+    if tag_set & _RECENT_EPISODE_TAGS:
+        return "recent_episode"
+    if tag_set & _LONG_TERM_TAGS:
+        return "long_term"
+    return "recent_episode"
 
 
 def _normalize_memory_search(args: dict[str, Any], ctx: dict[str, Any] | None) -> dict[str, Any]:
@@ -38,12 +78,14 @@ def _normalize_memory_search(args: dict[str, Any], ctx: dict[str, Any] | None) -
         tags = []
     session_filter_raw = (args or {}).get("session_filter")
     session_filter = bool(session_filter_raw) if session_filter_raw is not None else False
+    search_scope = _normalize_search_scope(args or {}, memory_type=memory_type, tags=tags)
     date_from = str((args or {}).get("date_from") or "").strip() or None
     date_to = str((args or {}).get("date_to") or "").strip() or None
 
     return {
         "query": query,
         "memory_type": memory_type,
+        "search_scope": search_scope,
         "top_k": top_k,
         "threshold": threshold,
         "tags": tags,
@@ -178,7 +220,7 @@ class MemorySkillProvider(DeclarativeSkillProvider):
             risk_level=1,
             scope="memory",
             reversible=True,
-            description="语义检索记忆库（Episodic / Semantic），返回相关记忆片段列表。",
+            description="按 search_scope 检索记忆：recent_episode 查最近事件；long_term 查长期语义记忆；line 查台词/风格语料；hybrid 显式混合。",
             tool="memory",
             action="search",
             normalize_args=_normalize_memory_search,

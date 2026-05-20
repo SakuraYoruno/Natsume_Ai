@@ -51,7 +51,7 @@ def test_memory_consolidate_builds_preference_and_task_candidates() -> None:
     assert any("主链工具闭环通过" in item["text"] for item in candidates)
 
 
-def test_memory_search_falls_back_to_episodic_recall_when_semantic_is_empty() -> None:
+def test_memory_search_defaults_task_events_to_recent_episode_without_semantic() -> None:
     seen_semantic_args: dict[str, object] = {}
 
     def semantic_recaller(**kwargs: object) -> list[dict[str, object]]:
@@ -74,6 +74,7 @@ def test_memory_search_falls_back_to_episodic_recall_when_semantic_is_empty() ->
         "manifest_ref": "memory_search::tool loop",
         "query": "tool loop",
         "memory_type": "all",
+        "tags": ["task", "event"],
         "top_k": 5,
         "threshold": 0.0,
         "session_id": "unit-session",
@@ -90,10 +91,87 @@ def test_memory_search_falls_back_to_episodic_recall_when_semantic_is_empty() ->
 
     detail = result["detail"]
     assert result["status"] == "OK"
-    assert seen_semantic_args["session_id"] is None
+    assert seen_semantic_args == {}
+    assert detail["search_scope"] == "recent_episode"
     assert detail["source"] == "episodic_store"
     assert detail["results"][0]["content"] == "Blue remembers tool loop"
     assert detail["results"][0]["doc_id"] == "mem-tool-loop-001"
+
+
+def test_memory_search_hybrid_falls_back_to_episodic_when_semantic_is_empty() -> None:
+    seen_semantic_args: dict[str, object] = {}
+
+    def semantic_recaller(**kwargs: object) -> list[dict[str, object]]:
+        seen_semantic_args.update(kwargs)
+        return []
+
+    class _EpisodicStoreStub:
+        def recall(self, *, query_text: str, top_k: int = 5) -> list[dict[str, object]]:
+            return [
+                {
+                    "memory_id": "mem-hybrid-001",
+                    "text": f"Hybrid fallback remembers {query_text}",
+                    "score": 0.93,
+                    "metadata": {"source": "unit"},
+                }
+            ][:top_k]
+
+    result = execute_memory_skill(
+        {
+            "action": "search",
+            "manifest_ref": "memory_search::hybrid",
+            "query": "tool loop",
+            "memory_type": "all",
+            "search_scope": "hybrid",
+            "top_k": 5,
+            "threshold": 0.0,
+            "session_id": "unit-session",
+            "session_filter": False,
+        },
+        {
+            "semantic_recaller": semantic_recaller,
+            "episodic_store": _EpisodicStoreStub(),
+        },
+    )
+
+    detail = result["detail"]
+    assert result["status"] == "OK"
+    assert seen_semantic_args["session_id"] is None
+    assert detail["search_scope"] == "hybrid"
+    assert detail["source"] == "episodic_store"
+    assert detail["results"][0]["content"] == "Hybrid fallback remembers tool loop"
+
+
+def test_memory_search_long_term_does_not_fall_back_to_recent_episode() -> None:
+    def semantic_recaller(**_: object) -> list[dict[str, object]]:
+        return []
+
+    class _EpisodicStoreStub:
+        def recall(self, *, query_text: str, top_k: int = 5) -> list[dict[str, object]]:
+            _ = query_text, top_k
+            return [{"memory_id": "mem-recent-001", "text": "recent event", "score": 1.0}]
+
+    result = execute_memory_skill(
+        {
+            "action": "search",
+            "manifest_ref": "memory_search::long_term",
+            "query": "user preference",
+            "memory_type": "semantic",
+            "search_scope": "long_term",
+            "top_k": 5,
+            "threshold": 0.0,
+        },
+        {
+            "semantic_recaller": semantic_recaller,
+            "episodic_store": _EpisodicStoreStub(),
+        },
+    )
+
+    detail = result["detail"]
+    assert result["status"] == "OK"
+    assert detail["search_scope"] == "long_term"
+    assert detail["source"] == "semantic_recaller"
+    assert detail["results"] == []
 
 
 def test_memory_registry_exposes_steward_skills_with_low_risk() -> None:

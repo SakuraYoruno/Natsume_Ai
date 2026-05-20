@@ -34,6 +34,8 @@ _FACT_MEMORY_HINT_RE = re.compile(
     r"(我是|我叫|我的|用户|项目|系统|主链|偏好|喜欢|不喜欢|is|am|prefer|likes|dislikes)",
     re.IGNORECASE,
 )
+_SEMANTIC_SEARCH_SCOPES = frozenset({"long_term", "line", "hybrid"})
+_EPISODIC_SEARCH_SCOPES = frozenset({"recent_episode", "hybrid"})
 
 
 def execute_memory_skill(args: dict[str, Any], context: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -98,9 +100,14 @@ def _dispatch_memory_action(
 
 
 def _execute_search(payload: dict[str, Any], context: dict[str, Any] | None) -> dict[str, Any]:
-    """语义检索记忆。"""
+    """检索记忆。
+
+    recent_episode 用确定性 EpisodicStore 处理刚写入/最近事件；
+    long_term 与 line 才进入语义召回；hybrid 必须显式指定。
+    """
     query = str(payload.get("query") or "")
     memory_type = str(payload.get("memory_type") or "all")
+    search_scope = _normalize_search_scope(str(payload.get("search_scope") or ""), memory_type=memory_type)
     top_k = int(payload.get("top_k") or 5)
     threshold = float(payload.get("threshold") or 0.6)
     tags = payload.get("tags") or []
@@ -113,7 +120,7 @@ def _execute_search(payload: dict[str, Any], context: dict[str, Any] | None) -> 
     # 尝试通过 context 中的 semantic_recaller 执行检索
     ctx = context or {}
     semantic_recaller = ctx.get("semantic_recaller")
-    if callable(semantic_recaller):
+    if search_scope in _SEMANTIC_SEARCH_SCOPES and callable(semantic_recaller):
         try:
             results = semantic_recaller(
                 query=query,
@@ -124,14 +131,14 @@ def _execute_search(payload: dict[str, Any], context: dict[str, Any] | None) -> 
             )
             normalized = _normalize_search_results(results or [], source="semantic_recaller", threshold=threshold)
             _logger.info("记忆检索（semantic_recaller）: query=%s, results=%d", query[:40], len(normalized))
-            if normalized or memory_type == "semantic":
-                return {"query": query, "results": normalized, "source": "semantic_recaller"}
+            if normalized or search_scope in {"long_term", "line"}:
+                return {"query": query, "results": normalized, "source": "semantic_recaller", "search_scope": search_scope}
         except Exception as exc:
             _logger.debug("semantic_recaller 调用失败: %s", exc)
 
     # 降级：通过 EpisodicStore 检索
     episodic_store = ctx.get("episodic_store")
-    if episodic_store is not None and memory_type in {"all", "episodic"}:
+    if search_scope in _EPISODIC_SEARCH_SCOPES and episodic_store is not None and memory_type in {"all", "episodic", "working"}:
         try:
             results = _search_episodic_store(
                 episodic_store,
@@ -141,12 +148,27 @@ def _execute_search(payload: dict[str, Any], context: dict[str, Any] | None) -> 
             )
             normalized = _normalize_search_results(results or [], source="episodic_store", threshold=threshold)
             _logger.info("记忆检索（episodic_store）: query=%s, results=%d", query[:40], len(normalized))
-            return {"query": query, "results": normalized, "source": "episodic_store"}
+            return {"query": query, "results": normalized, "source": "episodic_store", "search_scope": search_scope}
         except Exception as exc:
             _logger.debug("episodic_store 检索失败: %s", exc)
 
     _logger.info("记忆检索（无可用后端）: query=%s", query[:40])
-    return {"query": query, "results": [], "source": "none", "note": "no memory backend available"}
+    return {"query": query, "results": [], "source": "none", "search_scope": search_scope, "note": "no memory backend available"}
+
+
+def _normalize_search_scope(raw_scope: str, *, memory_type: str) -> str:
+    scope = str(raw_scope or "").strip().lower()
+    if scope in {"recent", "recent_episodic", "episode", "episodic"}:
+        return "recent_episode"
+    if scope in {"semantic", "longterm", "long_term_semantic"}:
+        return "long_term"
+    if scope in {"quote", "quotes", "dialogue", "lines", "line_semantic"}:
+        return "line"
+    if scope in {"recent_episode", "long_term", "line", "hybrid"}:
+        return scope
+    if str(memory_type or "").strip().lower() in {"semantic"}:
+        return "long_term"
+    return "recent_episode"
 
 
 def _search_episodic_store(
