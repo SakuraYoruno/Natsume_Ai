@@ -42,6 +42,8 @@ DEFAULT_SAMPLE_RATE = 32000
 DEFAULT_MAX_TEXT_LENGTH = 500
 DEFAULT_SYNTH_TIMEOUT_S = 30.0
 _TORCHAUDIO_LOAD_PATCHED = False
+_DLL_DIRECTORY_HANDLES: list[Any] = []
+_DLL_DIRECTORY_PATHS: set[str] = set()
 _TTS_LANGUAGE_ALIASES = {
     "zh": "zh",
     "cn": "zh",
@@ -1280,14 +1282,45 @@ class _FreshProcessSoVITSAdapter:
 
 
 def _ensure_modern_sdk_paths(model_root: str) -> None:
+    runtime_site_packages = os.path.join(model_root, "runtime", "Lib", "site-packages")
     paths = [
         model_root,
         os.path.join(model_root, "GPT_SoVITS"),
         os.path.join(model_root, "GPT_SoVITS", "eres2net"),
+        runtime_site_packages,
     ]
     for path in reversed(paths):
         if path and os.path.isdir(path) and path not in sys.path:
             sys.path.insert(0, path)
+    _ensure_model_runtime_dll_dirs(runtime_site_packages)
+
+
+def _ensure_model_runtime_dll_dirs(site_packages: str) -> None:
+    if not site_packages or not os.path.isdir(site_packages):
+        return
+    candidates = [
+        os.path.join(site_packages, "opencc", "clib", "bin"),
+    ]
+    for path in candidates:
+        if not os.path.isdir(path):
+            continue
+        normalized = os.path.normcase(os.path.abspath(path))
+        if normalized in _DLL_DIRECTORY_PATHS:
+            continue
+        _DLL_DIRECTORY_PATHS.add(normalized)
+        if hasattr(os, "add_dll_directory"):
+            try:
+                _DLL_DIRECTORY_HANDLES.append(os.add_dll_directory(path))  # type: ignore[attr-defined]
+                continue
+            except OSError as exc:
+                logger.debug("failed to add model runtime dll directory %s: %s", path, exc)
+        current_path = os.environ.get("PATH", "")
+        if normalized not in {
+            os.path.normcase(os.path.abspath(segment))
+            for segment in current_path.split(os.pathsep)
+            if segment
+        }:
+            os.environ["PATH"] = path + os.pathsep + current_path
 
 
 def _ensure_jieba_fast_alias() -> None:

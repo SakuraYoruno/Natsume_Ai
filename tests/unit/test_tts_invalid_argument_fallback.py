@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 from types import SimpleNamespace
 
 import pytest
@@ -11,6 +12,7 @@ from edge_client.actuators.tts_engine import (
     TtsConfig,
     TtsState,
     TtsSynthResult,
+    _ensure_modern_sdk_paths,
     _is_retryable_invalid_argument_error,
     _synthesize_audio,
 )
@@ -69,6 +71,38 @@ def test_retryable_invalid_argument_error_detection() -> None:
     assert _is_retryable_invalid_argument_error(OSError("[Errno 22] Invalid argument"))
     assert _is_retryable_invalid_argument_error(RuntimeError("invalid argument from backend"))
     assert not _is_retryable_invalid_argument_error(RuntimeError("backend exploded"))
+
+
+def test_ensure_modern_sdk_paths_adds_bundled_runtime_site_packages(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    model_root = tmp_path / "GPT-SoVITS"
+    (model_root / "GPT_SoVITS" / "eres2net").mkdir(parents=True)
+    runtime_site = model_root / "runtime" / "Lib" / "site-packages"
+    opencc_bin = runtime_site / "opencc" / "clib" / "bin"
+    opencc_bin.mkdir(parents=True)
+    dll_calls: list[str] = []
+    dll_handle = object()
+
+    monkeypatch.setattr(sys, "path", [])
+    monkeypatch.setattr(tts_engine, "_DLL_DIRECTORY_PATHS", set())
+    monkeypatch.setattr(tts_engine, "_DLL_DIRECTORY_HANDLES", [])
+    monkeypatch.setattr(
+        tts_engine.os,
+        "add_dll_directory",
+        lambda path: dll_calls.append(str(path)) or dll_handle,
+        raising=False,
+    )
+
+    _ensure_modern_sdk_paths(str(model_root))
+
+    assert str(model_root) in sys.path
+    assert str(model_root / "GPT_SoVITS") in sys.path
+    assert str(model_root / "GPT_SoVITS" / "eres2net") in sys.path
+    assert str(runtime_site) in sys.path
+    assert dll_calls == [str(opencc_bin)]
+    assert tts_engine._DLL_DIRECTORY_HANDLES == [dll_handle]
 
 
 def test_model_manager_reloads_and_retries_after_invalid_argument(monkeypatch: pytest.MonkeyPatch) -> None:
