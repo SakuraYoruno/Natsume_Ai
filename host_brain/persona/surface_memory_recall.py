@@ -737,6 +737,22 @@ def build_surface_memory_recall_packet(
         trace["selected_entity_items"] = selected_entity_items
     if validation_trace["required"]:
         trace["validation"] = validation_trace
+    trace["recall_receipt"] = _build_recall_receipt_trace(
+        candidates=candidates_for_selection,
+        rows=rows,
+        validation_trace=validation_trace,
+        temporal_scope=temporal_scope,
+        query_kind=query_kind,
+        target_domains=target_domains,
+        recall_contract_id=recall_contract_id,
+        primary_memory_layer=primary_memory_layer,
+        expected_memory_layers=expected_memory_layers,
+        min_collection_items=min_collection_items,
+        answer_obligations=answer_obligations,
+        selected_collection_items=selected_collection_items,
+        selected_entity_items=selected_entity_items,
+        ts_ms=_coerce_int(output.get("ts_ms")),
+    )
     if validation_failed:
         trace["validation_failed"] = True
         memory_rows = ()
@@ -920,6 +936,148 @@ def _evaluate_recall_validation_requirement(
         exact_echo = bool(query_text) and any(_clean_text(row.fact) == query_text for row in rows)
         return not exact_echo, f"exact query echo present={exact_echo}"
     return False, "unknown validation requirement"
+
+
+def _build_recall_receipt_trace(
+    *,
+    candidates: Sequence[Mapping[str, Any]],
+    rows: Sequence[SurfaceMemoryFactRow],
+    validation_trace: Mapping[str, Any],
+    temporal_scope: str,
+    query_kind: str,
+    target_domains: Sequence[str] | None,
+    recall_contract_id: str,
+    primary_memory_layer: str,
+    expected_memory_layers: Sequence[str] | None,
+    min_collection_items: int,
+    answer_obligations: Sequence[str] | None,
+    selected_collection_items: Sequence[Mapping[str, Any]],
+    selected_entity_items: Sequence[Mapping[str, Any]],
+    ts_ms: int,
+) -> dict[str, Any]:
+    """Compact receipt explaining why this recall set satisfies the current query."""
+
+    selected_candidates = _selected_candidates_for_rows(candidates=candidates, rows=rows)
+    candidate_basis = selected_candidates or [dict(item) for item in candidates if isinstance(item, Mapping)]
+    selected_store_counts: dict[str, int] = {}
+    for row in rows:
+        selected_store_counts[row.store_id] = selected_store_counts.get(row.store_id, 0) + 1
+    item_payloads = [dict(item) for item in [*selected_collection_items, *selected_entity_items] if isinstance(item, Mapping)]
+    selected_item_count = len(item_payloads)
+    if selected_item_count <= 0:
+        selected_item_count = max(_candidate_collection_item_counts(selected_candidates), default=0)
+    required_min = max(0, _coerce_int(min_collection_items))
+    exact_required = "collection_item_exact_count" in set(validation_trace.get("required") or [])
+    evidence_ref_count = len(_unique([row.evidence_ref for row in rows if row.evidence_ref]))
+    source_ref_count = len(_unique([row.source_ref for row in rows if row.source_ref]))
+    required = list(validation_trace.get("required") or [])
+    validation_passed = bool(validation_trace.get("passed", True))
+    if required and not validation_passed:
+        decision = "validation_failed"
+    elif required:
+        decision = "validated"
+    elif rows:
+        decision = "selected_without_contract"
+    else:
+        decision = "empty"
+    expected_scope_key = _expected_collection_scope_key(_clean_text(temporal_scope), ts_ms=ts_ms)
+    scope_keys = _candidate_scope_keys(candidate_basis)
+    titles = _unique(
+        [
+            _clean_text(item.get("title") or item.get("item_title") or item.get("entity_title"))
+            for item in item_payloads
+            if _clean_text(item.get("title") or item.get("item_title") or item.get("entity_title"))
+        ]
+    )
+    primary = _clean_text(primary_memory_layer)
+    selected_store_ids = set(selected_store_counts)
+    candidate_store_counts = _store_counts_from_candidates(candidate_basis)
+    expected_layer_set = {
+        _clean_text(item)
+        for item in list(expected_memory_layers or [])
+        if _clean_text(item)
+    }
+    selection_basis = _clean_list(
+        [
+            f"query_kind:{_clean_text(query_kind)}" if _clean_text(query_kind) else "",
+            f"temporal_scope:{_clean_text(temporal_scope)}" if _clean_text(temporal_scope) else "",
+            f"primary_layer:{primary}" if primary else "",
+            f"scope:{', '.join(scope_keys)}" if scope_keys else "",
+            f"items:{selected_item_count}" if selected_item_count else "",
+            "evidence_refs:present" if evidence_ref_count else "",
+        ]
+    )
+    return {
+        "decision": decision,
+        "validation_passed": validation_passed,
+        "missing": list(validation_trace.get("missing") or []),
+        "recall_contract_id": _clean_text(recall_contract_id),
+        "query_kind": _clean_text(query_kind),
+        "temporal_scope": _clean_text(temporal_scope),
+        "expected_scope_key": expected_scope_key,
+        "target_domains": list(_unique(list(target_domains or []))),
+        "primary_memory_layer": primary,
+        "expected_memory_layers": list(_unique(list(expected_memory_layers or []))),
+        "selected_store_counts": dict(sorted(selected_store_counts.items())),
+        "candidate_store_counts": dict(sorted(candidate_store_counts.items())),
+        "selected_candidate_count": len(selected_candidates),
+        "candidate_count": len(candidates),
+        "selected_scope_keys": scope_keys,
+        "selected_item_count": selected_item_count,
+        "selected_titles": titles[:24],
+        "evidence_ref_count": evidence_ref_count,
+        "source_ref_count": source_ref_count,
+        "meets_primary_layer": (not primary) or primary in selected_store_ids or primary in candidate_store_counts,
+        "meets_expected_layer": (
+            not expected_layer_set
+            or bool(selected_store_ids.intersection(expected_layer_set))
+            or bool(set(candidate_store_counts).intersection(expected_layer_set))
+        ),
+        "coverage": {
+            "min_collection_items": required_min,
+            "collection_min_passed": (selected_item_count >= required_min) if required_min > 0 else True,
+            "collection_exact_required": exact_required,
+            "collection_exact_passed": (selected_item_count == required_min) if exact_required and required_min > 0 else None,
+        },
+        "answer_obligations": list(_unique(list(answer_obligations or []))),
+        "selection_basis": selection_basis,
+    }
+
+
+def _selected_candidates_for_rows(
+    *,
+    candidates: Sequence[Mapping[str, Any]],
+    rows: Sequence[SurfaceMemoryFactRow],
+) -> list[dict[str, Any]]:
+    selected_refs = {
+        _clean_text(ref)
+        for row in rows
+        for ref in (row.source_ref, row.evidence_ref)
+        if _clean_text(ref)
+    }
+    if not selected_refs:
+        return []
+    out: list[dict[str, Any]] = []
+    for candidate in candidates:
+        if not isinstance(candidate, Mapping):
+            continue
+        metadata = _candidate_metadata(candidate)
+        refs = {
+            _clean_text(ref)
+            for ref in (
+                candidate.get("source_ref"),
+                candidate.get("evidence_ref"),
+                candidate.get("evidence_refs"),
+                metadata.get("source_ref"),
+                metadata.get("primary_ref"),
+                metadata.get("evidence_ref"),
+                metadata.get("evidence_refs_primary"),
+            )
+            if _clean_text(ref)
+        }
+        if refs.intersection(selected_refs):
+            out.append(dict(candidate))
+    return out
 
 
 def _expected_collection_scope_key(temporal_scope: str, *, ts_ms: int) -> str:

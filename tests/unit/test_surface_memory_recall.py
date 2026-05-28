@@ -701,6 +701,7 @@ def test_preference_rule_recall_does_not_leak_same_domain_collection_rows() -> N
 
     joined = "\n".join(packet.facts)
     validation = dict(dict(packet.trace or {})["validation"])
+    receipt = dict(dict(packet.trace or {})["recall_receipt"])
     assert plan.query_kind == "preference_lookup"
     assert plan.recall_contract_id == "preference"
     assert "state_preference_as_user_rule" in plan.answer_obligations
@@ -708,6 +709,8 @@ def test_preference_rule_recall_does_not_leak_same_domain_collection_rows() -> N
     assert "5月28日推荐" not in joined
     assert validation["passed"] is True
     assert validation["selected_store_counts"] == {"life_episode": 1}
+    assert receipt["meets_primary_layer"] is False
+    assert receipt["meets_expected_layer"] is True
 
 
 def test_recall_surface_memory_for_context_uses_plan_and_skips_without_calling_recall() -> None:
@@ -801,6 +804,7 @@ def test_recall_surface_memory_for_context_attaches_validation_receipt_for_colle
     )
 
     validation = dict(dict(packet.trace or {})["validation"])
+    receipt = dict(dict(packet.trace or {})["recall_receipt"])
     assert validation["passed"] is True
     assert validation["missing"] == []
     assert {item["name"] for item in validation["checks"]} == {
@@ -812,6 +816,18 @@ def test_recall_surface_memory_for_context_attaches_validation_receipt_for_colle
     }
     assert validation["min_collection_items"] == 3
     assert validation["candidate_store_counts"] == {"life_memory_collection": 1}
+    assert receipt["decision"] == "validated"
+    assert receipt["validation_passed"] is True
+    assert receipt["recall_contract_id"] == "collection_date"
+    assert receipt["temporal_scope"] == "yesterday"
+    assert receipt["expected_scope_key"] == "daily:2026-05-27"
+    assert receipt["selected_scope_keys"] == ["daily:2026-05-27"]
+    assert receipt["selected_item_count"] == 3
+    assert receipt["coverage"]["collection_min_passed"] is True
+    assert receipt["coverage"]["collection_exact_passed"] is True
+    assert receipt["evidence_ref_count"] == 1
+    assert receipt["meets_primary_layer"] is True
+    assert receipt["meets_expected_layer"] is True
 
 
 def test_recall_surface_memory_validation_flags_wrong_date_collection_scope() -> None:
@@ -860,6 +876,7 @@ def test_recall_surface_memory_validation_flags_wrong_date_collection_scope() ->
     )
 
     validation = dict(dict(packet.trace or {})["validation"])
+    receipt = dict(dict(packet.trace or {})["recall_receipt"])
     assert validation["passed"] is False
     assert "scope_match" in validation["missing"]
     scope_check = next(item for item in validation["checks"] if item["name"] == "scope_match")
@@ -870,6 +887,11 @@ def test_recall_surface_memory_validation_flags_wrong_date_collection_scope() ->
     assert packet.degraded is True
     assert packet.reason_code == SURFACE_MEMORY_RECALL_VALIDATION_FAILED
     assert any("召回校验失败" in item for item in packet.must_not_do)
+    assert receipt["decision"] == "validation_failed"
+    assert receipt["validation_passed"] is False
+    assert receipt["expected_scope_key"] == "daily:2026-05-27"
+    assert "scope_match" in receipt["missing"]
+    assert receipt["selected_item_count"] == 0
 
 
 def test_collection_scope_query_filters_self_echo_when_many_books_requested() -> None:
@@ -940,10 +962,16 @@ def test_collection_scope_query_filters_self_echo_when_many_books_requested() ->
     )
 
     joined = "\n".join(packet.facts)
+    receipt = dict(dict(packet.trace or {})["recall_receipt"])
     assert packet.reason_code is None
     assert "最近轻小说推荐集合，记录 15 个条目" in joined
     assert "记录 3 个条目" not in joined
     assert "用户提到" not in joined
+    assert receipt["decision"] == "validated"
+    assert receipt["selected_item_count"] == 15
+    assert receipt["coverage"]["min_collection_items"] == 10
+    assert receipt["coverage"]["collection_min_passed"] is True
+    assert receipt["selected_scope_keys"] == ["recent"]
 
 
 def test_many_book_collection_recall_fails_receipt_when_item_coverage_is_too_small() -> None:
@@ -990,11 +1018,15 @@ def test_many_book_collection_recall_fails_receipt_when_item_coverage_is_too_sma
     )
 
     validation = dict(dict(packet.trace or {})["validation"])
+    receipt = dict(dict(packet.trace or {})["recall_receipt"])
     assert validation["passed"] is False
     assert validation["min_collection_items"] == 10
     assert "collection_item_min_count" in validation["missing"]
     assert packet.facts == ()
     assert packet.reason_code == SURFACE_MEMORY_RECALL_VALIDATION_FAILED
+    assert receipt["decision"] == "validation_failed"
+    assert receipt["selected_item_count"] == 3
+    assert receipt["coverage"]["collection_min_passed"] is False
 
 
 def test_write_surface_turn_memory_writes_compact_evidence_gated_record() -> None:

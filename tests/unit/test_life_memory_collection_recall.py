@@ -333,6 +333,44 @@ def test_surface_plan_routes_many_book_listing_to_recent_collection() -> None:
     assert "preserve_item_identity" in plan.answer_obligations
 
 
+def test_surface_plan_routes_day_before_yesterday_collection_scope() -> None:
+    plan = plan_surface_memory_recall(
+        ThreeLayerContinuityContext(
+            current_user_message="前天三本呢？",
+            task_mode_hint="daily_chat",
+        )
+    )
+
+    assert plan.should_recall
+    assert plan.reason == "collection_memory_recall"
+    assert plan.query_kind == "date_lookup"
+    assert plan.temporal_scope == "day_before_yesterday"
+    assert plan.time_lookback_days == 3
+    assert plan.target_store_ids[0] == "life_memory_collection"
+    assert plan.recall_contract_id == "collection_date"
+    assert plan.min_collection_items == 3
+    assert "collection_item_exact_count" in plan.validation_requirements
+
+
+def test_surface_plan_routes_recent_many_book_selection_to_collection_with_deep_obligation() -> None:
+    plan = plan_surface_memory_recall(
+        ThreeLayerContinuityContext(
+            current_user_message="这几天十几本里哪本最好看？",
+            task_mode_hint="daily_chat",
+        )
+    )
+
+    assert plan.should_recall
+    assert plan.reason == "collection_memory_recall"
+    assert plan.query_kind == "collection_summary"
+    assert plan.temporal_scope == "recent_days"
+    assert plan.target_store_ids[0] == "life_memory_collection"
+    assert plan.min_collection_items == 10
+    assert "collection_item_min_count" in plan.validation_requirements
+    assert "compare_recalled_items_before_answering" in plan.answer_obligations
+    assert "read_detail_evidence_before_deep_quality_judgment" in plan.answer_obligations
+
+
 def test_recall_fusion_collection_route_builds_surface_packet_with_items() -> None:
     ledger = SQLiteLedger(db_path=":memory:")
     try:

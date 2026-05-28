@@ -36,6 +36,8 @@ class ScenarioExpectation:
     must_not_contain: str
     must_trace_key: str = ""
     must_trace_title: str = ""
+    must_receipt_min_items: int = 0
+    must_receipt_scope: str = ""
 
 
 class _NullChromaClient:
@@ -176,6 +178,12 @@ def _run_case(*, service: RecallFusionServiceContract, case: ScenarioExpectation
             isinstance(item, dict) and str(item.get("title") or "") == case.must_trace_title
             for item in trace_items
         )
+    receipt = dict(dict(packet.trace or {}).get("recall_receipt") or {})
+    checks["receipt"] = bool(receipt) and receipt.get("validation_passed") is True
+    if case.must_receipt_min_items:
+        checks["receipt_item_count"] = int(receipt.get("selected_item_count") or 0) >= int(case.must_receipt_min_items)
+    if case.must_receipt_scope:
+        checks["receipt_scope"] = case.must_receipt_scope in list(receipt.get("selected_scope_keys") or [])
     return {
         "case": asdict(case),
         "passed": all(checks.values()),
@@ -184,6 +192,7 @@ def _run_case(*, service: RecallFusionServiceContract, case: ScenarioExpectation
         "route_ids": list(packet.route_ids),
         "evidence_refs": list(packet.evidence_refs),
         "validation": validation,
+        "recall_receipt": receipt,
         "facts": list(packet.facts),
     }
 
@@ -259,6 +268,17 @@ def _scenario_expectations() -> list[ScenarioExpectation]:
             must_not_contain="5月28日推荐",
         ),
         ScenarioExpectation(
+            case_id="day_before_yesterday_collection",
+            message="前天三本呢？",
+            expected_reason="collection_memory_recall",
+            expected_kind="date_lookup",
+            must_route="surface_life_collection",
+            must_contain="5月26日推荐",
+            must_not_contain="5月28日推荐",
+            must_receipt_min_items=3,
+            must_receipt_scope="daily:2026-05-26",
+        ),
+        ScenarioExpectation(
             case_id="recent_collection",
             message="这几天推荐过哪些轻小说？",
             expected_reason="collection_memory_recall",
@@ -266,6 +286,16 @@ def _scenario_expectations() -> list[ScenarioExpectation]:
             must_route="surface_life_collection",
             must_contain="5月26日推荐",
             must_not_contain="DeepSeek",
+        ),
+        ScenarioExpectation(
+            case_id="recent_many_book_selection",
+            message="这几天十几本里哪本最好看？",
+            expected_reason="collection_memory_recall",
+            expected_kind="collection_summary",
+            must_route="surface_life_collection",
+            must_contain="记录 12 个条目",
+            must_not_contain="DeepSeek",
+            must_receipt_min_items=10,
         ),
         ScenarioExpectation(
             case_id="recent_many_book_listing",
