@@ -13,6 +13,7 @@ from host_brain.memory.life_memory import (
     RETENTION_COLD,
     RETENTION_GONE,
     RETENTION_WARM,
+    TRUTH_CORRECTED,
     TRUTH_SUPPRESSED,
 )
 
@@ -144,6 +145,64 @@ def test_correction_suppresses_episode_from_default_recall() -> None:
         assert audit.candidates
         assert audit.candidates[0]["metadata"]["truth_state"] == TRUTH_SUPPRESSED
         assert audit.candidates[0]["metadata"]["correction_count"] == 1
+    finally:
+        ledger.close()
+
+
+def test_corrected_episode_is_audit_only_not_default_fact() -> None:
+    ledger = SQLiteLedger(db_path=":memory:")
+    try:
+        store = LifeMemoryStore(ledger=ledger)
+        wrong = store.write_chat_episode(
+            request_id="req-life-corrected-wrong",
+            session_id="qq_dm_1",
+            person_id="user-1",
+            user_message="刚才那三本里你选哪本",
+            assistant_reply="我选封面有猫的那本。",
+            ts_ms=1_800_000_000_000,
+        )
+        correction = store.write_chat_episode(
+            request_id="req-life-corrected-fix",
+            session_id="qq_dm_1",
+            person_id="user-1",
+            user_message="不对，没有封面有猫这本。",
+            assistant_reply="你说得对，我把这个判断撤回。",
+            ts_ms=1_800_000_000_100,
+        )
+
+        store.correct_episode(
+            episode_id=wrong["episode_id"],
+            correction_kind="correction",
+            correction_episode_id=correction["episode_id"],
+            reason_code="USER_CORRECTED_FALSE_MEMORY",
+            detail="用户指出没有封面有猫这本。",
+            suppress=False,
+            ts_ms=1_800_000_000_200,
+        )
+
+        default = store.recall_episode_packet(
+            query="封面 猫",
+            top_k=3,
+            person_id="user-1",
+            session_id="qq_dm_1",
+            now_ts_ms_value=1_800_000_000_300,
+        )
+        audit = store.recall_episode_packet(
+            query="封面 猫",
+            top_k=3,
+            include_suppressed=True,
+            person_id="user-1",
+            session_id="qq_dm_1",
+            now_ts_ms_value=1_800_000_000_300,
+        )
+
+        default_ids = {item["memory_id"] for item in default.candidates}
+        audit_rows = {item["memory_id"]: item for item in audit.candidates}
+        assert wrong["episode_id"] not in default_ids
+        assert correction["episode_id"] in default_ids
+        assert wrong["episode_id"] in audit_rows
+        assert audit_rows[wrong["episode_id"]]["metadata"]["truth_state"] == TRUTH_CORRECTED
+        assert audit_rows[wrong["episode_id"]]["metadata"]["correction_count"] == 1
     finally:
         ledger.close()
 

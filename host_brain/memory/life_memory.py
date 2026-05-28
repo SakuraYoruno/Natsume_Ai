@@ -1447,8 +1447,8 @@ class LifeMemoryStore:
         anaphoric_query = _looks_like_anaphoric_selection_query(normalized_query)
         scoped_person_id = _clean_text(person_id)
         scoped_session_id = _clean_text(session_id)
-        where = "WHERE status != ? AND truth_state != ? AND COALESCE(retention_state, ?) != ?"
-        params: list[Any] = [STATUS_SUPPRESSED, TRUTH_SUPPRESSED, RETENTION_COLD, RETENTION_GONE]
+        where = "WHERE status != ? AND truth_state NOT IN (?, ?) AND COALESCE(retention_state, ?) != ?"
+        params: list[Any] = [STATUS_SUPPRESSED, TRUTH_SUPPRESSED, TRUTH_CORRECTED, RETENTION_COLD, RETENTION_GONE]
         if include_suppressed:
             where = ""
             params = []

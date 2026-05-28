@@ -124,6 +124,31 @@ def test_batch_recall_scenarios_route_to_the_right_memory_layer() -> None:
             assistant_reply="记住了，后面按更自然的卡片格式发。",
             ts_ms=_ts(28, 14),
         )
+        wrong = store.write_chat_episode(
+            request_id="req-corrected-wrong-cat-cover",
+            session_id="qq_dm_owner",
+            person_id="owner",
+            user_message="刚才那三本里你选哪本？",
+            assistant_reply="我选封面有猫的那本。",
+            ts_ms=_ts(28, 15),
+        )
+        correction = store.write_chat_episode(
+            request_id="req-corrected-fix-cat-cover",
+            session_id="qq_dm_owner",
+            person_id="owner",
+            user_message="不对，没有封面有猫这本。",
+            assistant_reply="你说得对，我把这个判断撤回。",
+            ts_ms=_ts(28, 16),
+        )
+        store.correct_episode(
+            episode_id=wrong["episode_id"],
+            correction_kind="correction",
+            correction_episode_id=correction["episode_id"],
+            reason_code="USER_CORRECTED_FALSE_MEMORY",
+            detail="用户指出没有封面有猫这本。",
+            suppress=False,
+            ts_ms=_ts(28, 17),
+        )
 
         cases = [
             {
@@ -165,6 +190,14 @@ def test_batch_recall_scenarios_route_to_the_right_memory_layer() -> None:
                 "must_route": "surface_life_episode",
                 "must_contain": "简介后应该换行",
                 "must_not_contain": "5月28日推荐",
+            },
+            {
+                "message": "你刚才是不是记错了封面猫那本？",
+                "expected_reason": "correction_recall",
+                "expected_kind": "correction",
+                "must_route": "surface_life_episode",
+                "must_contain": "没有封面有猫",
+                "must_not_contain": "我选封面有猫",
             },
         ]
 
