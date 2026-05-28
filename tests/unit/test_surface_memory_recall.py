@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 from host_brain.persona.isolated_surface_continuity import ThreeLayerContinuityContext
@@ -29,6 +30,11 @@ from host_brain.persona.surface_memory_recall import (
 
 
 SOUL = "你是新海天。说话短一点，有轻微二次元 galgame 私聊感。"
+CN_TZ = timezone(timedelta(hours=8))
+
+
+def _ts(year: int, month: int, day: int, hour: int = 12) -> int:
+    return int(datetime(year, month, day, hour, tzinfo=CN_TZ).timestamp() * 1000)
 
 
 def test_surface_turn_memory_text_uses_identity_neutral_attribution() -> None:
@@ -654,6 +660,114 @@ def test_recall_surface_memory_for_context_passes_current_chain_plan_to_recall()
     assert "技术场景优先 usefulness" in str(captured["query"])
     assert len(packet.facts) <= 3
     assert dict(packet.trace or {})["plan"]["reason"] == "technical_user_memory_context"
+
+
+def test_recall_surface_memory_for_context_attaches_validation_receipt_for_collection_scope() -> None:
+    class _RecallService:
+        def recall(self, **kwargs):  # noqa: ANN003
+            return SimpleNamespace(
+                output={
+                    "query": kwargs["query"],
+                    "status": "OK",
+                    "stage": "S_RET_RECALL",
+                    "degraded": False,
+                    "routes": [{"route_id": "surface_life_collection", "store_id": "life_memory_collection"}],
+                    "route_rows": [],
+                    "route_errors": [],
+                    "candidate_count": 1,
+                    "ts_ms": kwargs["ts_ms"],
+                    "candidates": [
+                        {
+                            "doc_id": "col-yesterday",
+                            "source_ref": "life_memory_collection://col-yesterday",
+                            "evidence_refs": ["gateway://message/yesterday/card/1"],
+                            "text": "2026-05-27 当天轻小说推荐集合；可比较证据：1. Yesterday A｜2. Yesterday B｜3. Yesterday C",
+                            "score": 0.91,
+                            "metadata": {
+                                "store_id": "life_memory_collection",
+                                "scope_key": "daily:2026-05-27",
+                                "item_count": 3,
+                                "evidence_refs_primary": "gateway://message/yesterday/card/1",
+                            },
+                        }
+                    ],
+                }
+            )
+
+    packet = recall_surface_memory_for_context(
+        recall_service=_RecallService(),
+        context=ThreeLayerContinuityContext(
+            current_user_message="昨天三本呢？",
+            task_mode_hint="daily_chat",
+        ),
+        request_id="req-yesterday-validation",
+        query_embedding=[0.1] * 16,
+        person_id="owner",
+        session_id="qq_dm_owner",
+        ts_ms=_ts(2026, 5, 28, 18),
+    )
+
+    validation = dict(dict(packet.trace or {})["validation"])
+    assert validation["passed"] is True
+    assert validation["missing"] == []
+    assert {item["name"] for item in validation["checks"]} == {
+        "scope_match",
+        "collection_items_present",
+        "evidence_refs_present",
+    }
+    assert validation["candidate_store_counts"] == {"life_memory_collection": 1}
+
+
+def test_recall_surface_memory_validation_flags_wrong_date_collection_scope() -> None:
+    class _RecallService:
+        def recall(self, **kwargs):  # noqa: ANN003
+            return SimpleNamespace(
+                output={
+                    "query": kwargs["query"],
+                    "status": "OK",
+                    "stage": "S_RET_RECALL",
+                    "degraded": False,
+                    "routes": [{"route_id": "surface_life_collection", "store_id": "life_memory_collection"}],
+                    "route_rows": [],
+                    "route_errors": [],
+                    "candidate_count": 1,
+                    "ts_ms": kwargs["ts_ms"],
+                    "candidates": [
+                        {
+                            "doc_id": "col-today",
+                            "source_ref": "life_memory_collection://col-today",
+                            "evidence_refs": ["gateway://message/today/card/1"],
+                            "text": "2026-05-28 当天轻小说推荐集合；可比较证据：1. Today A｜2. Today B｜3. Today C",
+                            "score": 0.91,
+                            "metadata": {
+                                "store_id": "life_memory_collection",
+                                "scope_key": "daily:2026-05-28",
+                                "item_count": 3,
+                                "evidence_refs_primary": "gateway://message/today/card/1",
+                            },
+                        }
+                    ],
+                }
+            )
+
+    packet = recall_surface_memory_for_context(
+        recall_service=_RecallService(),
+        context=ThreeLayerContinuityContext(
+            current_user_message="昨天三本呢？",
+            task_mode_hint="daily_chat",
+        ),
+        request_id="req-wrong-date-validation",
+        query_embedding=[0.1] * 16,
+        person_id="owner",
+        session_id="qq_dm_owner",
+        ts_ms=_ts(2026, 5, 28, 18),
+    )
+
+    validation = dict(dict(packet.trace or {})["validation"])
+    assert validation["passed"] is False
+    assert "scope_match" in validation["missing"]
+    scope_check = next(item for item in validation["checks"] if item["name"] == "scope_match")
+    assert "daily:2026-05-27" in scope_check["detail"]
 
 
 def test_write_surface_turn_memory_writes_compact_evidence_gated_record() -> None:

@@ -195,6 +195,11 @@ def test_batch_recall_scenarios_route_to_the_right_memory_layer() -> None:
             assert str(case["must_contain"]) in joined
             assert str(case["must_not_contain"]) not in joined
             assert packet.evidence_refs
+            validation = dict(dict(packet.trace or {}).get("validation") or {})
+            assert validation, case["message"]
+            assert validation["required"] == list(plan.validation_requirements)
+            assert validation["passed"] is True, validation
+            assert validation["missing"] == []
 
         assert failure["collection_index"]["status"] == "SKIPPED"
         assert preference["episode_id"]

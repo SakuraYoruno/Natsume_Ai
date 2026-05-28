@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from datetime import datetime, timedelta, timezone
 from dataclasses import dataclass, replace
 import re
 from typing import Any
@@ -11,7 +12,15 @@ from host_brain.persona.isolated_surface_continuity import (
     build_surface_input_from_three_layer_context,
 )
 from host_brain.persona.isolated_surface_harness import IsolatedSurfaceInput
-from host_brain.memory.life_memory_query import plan_life_memory_query
+from host_brain.memory.life_memory_query import (
+    TEMPORAL_CURRENT,
+    TEMPORAL_DAY_BEFORE_YESTERDAY,
+    TEMPORAL_RECENT_DAYS,
+    TEMPORAL_TODAY,
+    TEMPORAL_UNSPECIFIED,
+    TEMPORAL_YESTERDAY,
+    plan_life_memory_query,
+)
 
 
 SURFACE_MEMORY_RECALL_FAILED = "SURFACE_MEMORY_RECALL_FAILED"
@@ -32,6 +41,7 @@ _ANAPHORIC_SELECTION_RE = re.compile(
     r"(?:我问你|刚问你|问你).{0,12}哪|"
     r"(?:喜欢|想看|先看|推荐|选|挑).{0,8}哪)",
 )
+_LOCAL_MEMORY_TZ = timezone(timedelta(hours=8))
 _RECALL_HINTS = (
     "还记得",
     "记得吗",
@@ -455,6 +465,10 @@ def recall_surface_memory_for_context(
         time_lookback_days=plan.time_lookback_days,
         max_facts=plan.max_facts,
         max_chars_per_fact=plan.max_chars_per_fact,
+        validation_requirements=plan.validation_requirements,
+        temporal_scope=plan.temporal_scope,
+        query_kind=plan.query_kind,
+        target_domains=plan.target_domains,
         fail_soft=fail_soft,
     )
     return replace(
@@ -486,6 +500,10 @@ def recall_surface_memory_packet(
     time_lookback_days: int | None = None,
     max_facts: int = 4,
     max_chars_per_fact: int = 96,
+    validation_requirements: Sequence[str] | None = None,
+    temporal_scope: str = "",
+    query_kind: str = "",
+    target_domains: Sequence[str] | None = None,
     fail_soft: bool = True,
 ) -> SurfaceMemoryRecallPacket:
     try:
@@ -522,6 +540,10 @@ def recall_surface_memory_packet(
         query=query,
         max_facts=max_facts,
         max_chars_per_fact=max_chars_per_fact,
+        validation_requirements=validation_requirements,
+        temporal_scope=temporal_scope,
+        query_kind=query_kind,
+        target_domains=target_domains,
     )
 
 
@@ -531,6 +553,10 @@ def build_surface_memory_recall_packet(
     query: str | None = None,
     max_facts: int = 4,
     max_chars_per_fact: int = 96,
+    validation_requirements: Sequence[str] | None = None,
+    temporal_scope: str = "",
+    query_kind: str = "",
+    target_domains: Sequence[str] | None = None,
 ) -> SurfaceMemoryRecallPacket:
     output = _recall_output(recall_result)
     candidates = _candidate_list(output)
@@ -558,6 +584,28 @@ def build_surface_memory_recall_packet(
     store_counts: dict[str, int] = {}
     for row in rows:
         store_counts[row.store_id] = store_counts.get(row.store_id, 0) + 1
+    validation_trace = _build_recall_validation_trace(
+        candidates=candidates,
+        rows=rows,
+        output=output,
+        query=query if query is not None else output.get("query"),
+        validation_requirements=validation_requirements,
+        temporal_scope=temporal_scope,
+        query_kind=query_kind,
+        target_domains=target_domains,
+    )
+    trace = {
+        "status": _clean_text(output.get("status")),
+        "stage": _clean_text(output.get("stage")),
+        "route_count": len(route_ids),
+        "route_error_count": len(list(output.get("route_errors") or [])),
+        "selected_fact_count": len(rows),
+        "selected_user_fact_count": len(memory_rows),
+        "selected_bond_count": len(relationship_rows),
+        "store_counts": dict(sorted(store_counts.items())),
+    }
+    if validation_trace["required"]:
+        trace["validation"] = validation_trace
     return SurfaceMemoryRecallPacket(
         query=_clean_text(query if query is not None else output.get("query")),
         facts=tuple(row.fact for row in memory_rows),
@@ -572,17 +620,213 @@ def build_surface_memory_recall_packet(
         candidate_count=_coerce_int(output.get("candidate_count"), default=len(candidates)),
         degraded=bool(output.get("degraded", False)),
         reason_code=_clean_text(output.get("reason_code")) or None,
-        trace={
-            "status": _clean_text(output.get("status")),
-            "stage": _clean_text(output.get("stage")),
-            "route_count": len(route_ids),
-            "route_error_count": len(list(output.get("route_errors") or [])),
-            "selected_fact_count": len(rows),
-            "selected_user_fact_count": len(memory_rows),
-            "selected_bond_count": len(relationship_rows),
-            "store_counts": dict(sorted(store_counts.items())),
-        },
+        trace=trace,
     )
+
+
+def _build_recall_validation_trace(
+    *,
+    candidates: Sequence[Mapping[str, Any]],
+    rows: Sequence[SurfaceMemoryFactRow],
+    output: Mapping[str, Any],
+    query: Any,
+    validation_requirements: Sequence[str] | None,
+    temporal_scope: str,
+    query_kind: str,
+    target_domains: Sequence[str] | None,
+) -> dict[str, Any]:
+    required = [
+        _clean_text(item)
+        for item in list(validation_requirements or [])
+        if _clean_text(item)
+    ]
+    candidate_store_counts = _store_counts_from_candidates(candidates)
+    selected_store_counts: dict[str, int] = {}
+    for row in rows:
+        selected_store_counts[row.store_id] = selected_store_counts.get(row.store_id, 0) + 1
+    trace = {
+        "required": required,
+        "passed": True,
+        "missing": [],
+        "checks": [],
+        "query_kind": _clean_text(query_kind),
+        "temporal_scope": _clean_text(temporal_scope),
+        "target_domains": list(_unique(list(target_domains or []))),
+        "candidate_store_counts": dict(sorted(candidate_store_counts.items())),
+        "selected_store_counts": dict(sorted(selected_store_counts.items())),
+    }
+    if not required:
+        return trace
+
+    missing: list[str] = []
+    checks: list[dict[str, Any]] = []
+    for requirement in required:
+        passed, detail = _evaluate_recall_validation_requirement(
+            requirement,
+            candidates=candidates,
+            rows=rows,
+            output=output,
+            query=query,
+            temporal_scope=temporal_scope,
+        )
+        checks.append({"name": requirement, "passed": passed, "detail": detail})
+        if not passed:
+            missing.append(requirement)
+    trace["checks"] = checks
+    trace["missing"] = missing
+    trace["passed"] = not missing
+    return trace
+
+
+def _evaluate_recall_validation_requirement(
+    requirement: str,
+    *,
+    candidates: Sequence[Mapping[str, Any]],
+    rows: Sequence[SurfaceMemoryFactRow],
+    output: Mapping[str, Any],
+    query: Any,
+    temporal_scope: str,
+) -> tuple[bool, str]:
+    if requirement == "scope_match":
+        expected = _expected_collection_scope_key(temporal_scope, ts_ms=_coerce_int(output.get("ts_ms")))
+        scope_keys = _candidate_scope_keys(candidates)
+        if not expected:
+            return (bool(candidates), "all-time or unspecified scope accepts any non-empty candidate set")
+        if expected == "recent":
+            passed = "recent" in scope_keys or bool(scope_keys)
+            return passed, f"expected recent collection scope, seen={scope_keys}"
+        return expected in scope_keys, f"expected {expected}, seen={scope_keys}"
+    if requirement == "collection_items_present":
+        item_counts = [
+            _coerce_int(_candidate_metadata(candidate).get("item_count"))
+            for candidate in candidates
+            if _candidate_store_id(candidate) == "life_memory_collection"
+        ]
+        passed = any(count > 0 for count in item_counts)
+        return passed, f"collection item counts={item_counts}"
+    if requirement == "evidence_refs_present":
+        refs = _candidate_evidence_refs(candidates)
+        if not refs:
+            refs = [row.evidence_ref for row in rows if row.evidence_ref]
+        return bool(refs), f"evidence refs={len(refs)}"
+    if requirement == "collection_or_episode_hit":
+        stores = set(_store_counts_from_candidates(candidates)) | {row.store_id for row in rows}
+        passed = bool(stores.intersection({"life_memory_collection", "life_episode"}))
+        return passed, f"stores={sorted(stores)}"
+    if requirement == "source_ref_present":
+        refs = _candidate_source_refs(candidates)
+        if not refs:
+            refs = [row.source_ref for row in rows if row.source_ref]
+        return bool(refs), f"source refs={len(refs)}"
+    if requirement == "trusted_memory_hit":
+        passed = bool(rows) and not _contains_suppressed_candidate(candidates)
+        return passed, f"selected rows={len(rows)}, suppressed={_contains_suppressed_candidate(candidates)}"
+    if requirement == "error_episode_or_semantic_hit":
+        stores = set(_store_counts_from_candidates(candidates)) | {row.store_id for row in rows}
+        passed = bool(stores.intersection({"life_episode", "semantic_memory", "sqlite_ledger", "episodic_vector"}))
+        return passed, f"stores={sorted(stores)}"
+    if requirement == "correction_state_checked":
+        suppressed = _contains_suppressed_candidate(candidates)
+        return not suppressed, f"suppressed candidates present={suppressed}"
+    if requirement == "suppressed_not_fact":
+        suppressed = _contains_suppressed_candidate(candidates)
+        return not suppressed, f"suppressed candidates present={suppressed}"
+    if requirement == "no_self_echo":
+        query_text = _clean_text(query)
+        exact_echo = bool(query_text) and any(_clean_text(row.fact) == query_text for row in rows)
+        return not exact_echo, f"exact query echo present={exact_echo}"
+    return False, "unknown validation requirement"
+
+
+def _expected_collection_scope_key(temporal_scope: str, *, ts_ms: int) -> str:
+    scope = _clean_text(temporal_scope)
+    if scope in {TEMPORAL_CURRENT, TEMPORAL_RECENT_DAYS, TEMPORAL_UNSPECIFIED, ""}:
+        return "recent"
+    if ts_ms <= 0:
+        return ""
+    today = datetime.fromtimestamp(int(ts_ms) / 1000.0, tz=_LOCAL_MEMORY_TZ).date()
+    if scope == TEMPORAL_TODAY:
+        return f"daily:{today.isoformat()}"
+    if scope == TEMPORAL_YESTERDAY:
+        return f"daily:{(today - timedelta(days=1)).isoformat()}"
+    if scope == TEMPORAL_DAY_BEFORE_YESTERDAY:
+        return f"daily:{(today - timedelta(days=2)).isoformat()}"
+    return ""
+
+
+def _candidate_scope_keys(candidates: Sequence[Mapping[str, Any]]) -> list[str]:
+    return _unique(
+        [
+            _candidate_metadata(candidate).get("scope_key")
+            for candidate in candidates
+            if _candidate_store_id(candidate) == "life_memory_collection"
+        ]
+    )
+
+
+def _store_counts_from_candidates(candidates: Sequence[Mapping[str, Any]]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for candidate in candidates:
+        store_id = _candidate_store_id(candidate)
+        if not store_id:
+            continue
+        counts[store_id] = counts.get(store_id, 0) + 1
+    return counts
+
+
+def _candidate_store_id(candidate: Mapping[str, Any]) -> str:
+    metadata = _candidate_metadata(candidate)
+    return _clean_text(
+        candidate.get("store_id")
+        or metadata.get("store_id")
+        or metadata.get("collection")
+        or "episodic_vector"
+    ).lower()
+
+
+def _candidate_metadata(candidate: Mapping[str, Any]) -> dict[str, Any]:
+    metadata = candidate.get("metadata")
+    return dict(metadata) if isinstance(metadata, Mapping) else {}
+
+
+def _candidate_evidence_refs(candidates: Sequence[Mapping[str, Any]]) -> list[str]:
+    refs: list[Any] = []
+    for candidate in candidates:
+        metadata = _candidate_metadata(candidate)
+        for value in (
+            candidate.get("evidence_ref"),
+            candidate.get("evidence_refs"),
+            metadata.get("evidence_ref"),
+            metadata.get("evidence_refs"),
+            metadata.get("evidence_refs_primary"),
+        ):
+            refs.extend(_coerce_sequence(value))
+    return _unique(refs)
+
+
+def _candidate_source_refs(candidates: Sequence[Mapping[str, Any]]) -> list[str]:
+    refs: list[Any] = []
+    for candidate in candidates:
+        metadata = _candidate_metadata(candidate)
+        for value in (candidate.get("source_ref"), metadata.get("source_ref"), metadata.get("primary_ref")):
+            refs.extend(_coerce_sequence(value))
+    return _unique(refs)
+
+
+def _contains_suppressed_candidate(candidates: Sequence[Mapping[str, Any]]) -> bool:
+    for candidate in candidates:
+        metadata = _candidate_metadata(candidate)
+        values = (
+            candidate.get("status"),
+            candidate.get("truth_state"),
+            candidate.get("retention_state"),
+            metadata.get("status"),
+            metadata.get("truth_state"),
+            metadata.get("retention_state"),
+        )
+        if any(_clean_text(value).upper() in {"SUPPRESSED", "CORRECTED", "GONE"} for value in values):
+            return True
+    return False
 
 
 def apply_surface_memory_recall_packet(
