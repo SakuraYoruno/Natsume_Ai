@@ -142,6 +142,27 @@ def test_build_surface_main_chain_input_marks_anaphoric_memory_followup(monkeypa
     assert tuple(payload.memory_packet.facts) == ("记忆线索：我刚才推荐了 3 本书：1. A；2. B；3. C。",)
 
 
+def test_build_surface_main_chain_input_infers_anaphoric_followup_from_sanitized_packet(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "host_brain.app.surface_main_chain_adapter.get_compiled_soul",
+        lambda: SimpleNamespace(source_text=SOUL, runtime_full_text=SOUL),
+    )
+    trace = {
+        "surface_memory_recall_packet": {
+            "facts": ["记忆线索：我刚才推荐了 3 本书：1. A；2. B；3. C。"],
+            "style_anchor": ["指代选择追问：把记忆线索当作刚才对话的当前上下文。"],
+        }
+    }
+
+    payload = build_surface_main_chain_input_from_chat_input(
+        _agent_input(user_message="这三本书你喜欢哪本"),
+        trace_stage_meta=trace,
+    )
+
+    assert payload.task_control["task_mode"] == "memory_followup"
+    assert payload.task_control["response_move"] == "memory_followup"
+
+
 def test_build_surface_main_chain_input_prefers_surface_task_control(monkeypatch) -> None:
     trace: dict[str, object] = {
         "organ_route_meta": {

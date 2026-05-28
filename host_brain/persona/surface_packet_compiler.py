@@ -167,6 +167,7 @@ def compile_reply_control_packet(
         task=task,
         memory=memory,
     )
+    fact_max_chars = _memory_fact_max_chars(memory)
     facts = _clean_list(
         [
             *low_info_guidance.facts,
@@ -176,7 +177,7 @@ def compile_reply_control_packet(
             *surface_influence_facts(influence),
         ],
         limit=max_facts,
-        max_chars=320,
+        max_chars=fact_max_chars,
     )
     packet_style_anchor = _clean_list(
         [
@@ -225,6 +226,7 @@ def compile_reply_control_packet(
         "influence_applied": _influence_applied(influence),
         "influence": surface_influence_trace(influence),
         "fact_count": len(packet.facts),
+        "fact_max_chars": fact_max_chars,
         "style_anchor_count": len(packet.style_anchor),
         "must_not_do_count": len(packet.must_not_do),
         "must_include_count": len(packet.must_include),
@@ -445,6 +447,13 @@ def _salient_memory_answer_terms(memory_text: str, *, user_text: str) -> list[st
             if len(result) >= 2:
                 return result
     return result
+
+
+def _memory_fact_max_chars(memory: MemoryRecallPacket) -> int:
+    memory_text = "\n".join(_clean_text(fact) for fact in memory.facts)
+    if re.search(r"可比较证据|看点[:：]|简介[:：]|题材[:：]|更新[:：]|热度[:：]", memory_text):
+        return 900
+    return 320
 
 
 def _coerce_memory_packet(raw: MemoryRecallPacket | Mapping[str, Any] | None) -> MemoryRecallPacket:

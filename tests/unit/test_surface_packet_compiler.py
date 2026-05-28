@@ -121,6 +121,30 @@ def test_compile_reply_control_packet_makes_explicit_memory_answer_grounded() ->
     assert "记忆追问：必须直接答出记忆事实本身" in "\n".join(compiled.packet.style_anchor)
 
 
+def test_compile_reply_control_packet_keeps_structured_memory_comparison_detail() -> None:
+    long_fact = (
+        "我刚才推荐了 3 本轻小说：1. A；2. 1205.与神在河岸；3. 皇女结婚。；"
+        "可比较证据：1. A｜看点：恋爱日常、设定新鲜感｜简介：前美少女童星与搭把手后的关系展开。｜更新：2 小时前｜热度：8评论；"
+        "2. 1205.与神在河岸｜看点：公开信号较好：更新、热度或资料完整度较高｜简介：标题和简介带奇幻身份钩子，信息完整度比普通列表项更高。｜更新：1 小时前｜热度：79浏览 / 1评论；"
+        "3. 皇女结婚｜看点：奇幻身份钩子、设定新鲜感｜简介：异世界转移、皇女结婚、成为皇帝，路线直球但题材明确。｜更新：5/23｜热度：4.1w浏览 / 28评论"
+    )
+
+    compiled = compile_reply_control_packet(
+        user_message="这三本书，你喜欢哪本？",
+        task_control={
+            "response_move": "memory_followup",
+            "task_mode": "memory_followup",
+            "question_budget": 0,
+        },
+        memory_packet={"facts": [long_fact]},
+    )
+
+    rendered = "\n".join(compiled.packet.facts)
+    assert "皇女结婚｜看点：奇幻身份钩子" in rendered
+    assert "4.1w浏览" in rendered
+    assert compiled.trace["fact_max_chars"] == 900
+
+
 def test_compile_surface_input_only_renders_soul_user_and_reply_control_packet() -> None:
     compiled = compile_surface_input(
         soul_md=SOUL,

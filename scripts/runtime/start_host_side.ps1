@@ -242,6 +242,165 @@ function Wait-Http {
   return $false
 }
 
+function Test-TcpPortQuick {
+  param(
+    [string]$HostName,
+    [int]$Port,
+    [int]$TimeoutMs = 1000
+  )
+  if ([string]::IsNullOrWhiteSpace($HostName) -or $Port -le 0) {
+    return $false
+  }
+  $client = New-Object System.Net.Sockets.TcpClient
+  try {
+    $async = $client.BeginConnect($HostName, $Port, $null, $null)
+    $ok = $async.AsyncWaitHandle.WaitOne([Math]::Max(100, $TimeoutMs), $false)
+    if (-not $ok) {
+      return $false
+    }
+    $client.EndConnect($async)
+    return $client.Connected
+  } catch {
+    return $false
+  } finally {
+    try { $client.Close() } catch {}
+  }
+}
+
+function Test-HttpQuick {
+  param(
+    [string]$Url,
+    [int]$TimeoutSec = 3
+  )
+  if ([string]::IsNullOrWhiteSpace($Url)) {
+    return $false
+  }
+  try {
+    $resp = Invoke-WebRequest -Uri $Url -UseBasicParsing -TimeoutSec $TimeoutSec
+    return ($resp.StatusCode -ge 200 -and $resp.StatusCode -lt 300)
+  } catch {
+    return $false
+  }
+}
+
+function Resolve-UriHostPort {
+  param(
+    [string]$UriText,
+    [string]$DefaultHost,
+    [int]$DefaultPort
+  )
+  $hostValue = $DefaultHost
+  $portValue = $DefaultPort
+  $raw = [string]$UriText
+  if (-not [string]::IsNullOrWhiteSpace($raw)) {
+    try {
+      $uri = [System.Uri]$raw
+      if (-not [string]::IsNullOrWhiteSpace($uri.Host)) {
+        $hostValue = $uri.Host
+      }
+      if ($uri.Port -gt 0) {
+        $portValue = [int]$uri.Port
+      }
+    } catch {
+      if ($raw -match '^(?:[^:]+://)?([^/:]+):(\d+)') {
+        $hostValue = [string]$Matches[1]
+        $portValue = [int]$Matches[2]
+      }
+    }
+  }
+  if ($hostValue -eq "0.0.0.0" -or $hostValue -eq "::") {
+    $hostValue = "127.0.0.1"
+  }
+  return [ordered]@{
+    host = $hostValue
+    port = $portValue
+  }
+}
+
+function Get-EnvSetting {
+  param(
+    [hashtable]$Values,
+    [string]$Name,
+    [string]$DefaultValue
+  )
+  if ($Values -and $Values.ContainsKey($Name)) {
+    return [string]$Values[$Name]
+  }
+  $existing = [Environment]::GetEnvironmentVariable($Name, "Process")
+  if (-not [string]::IsNullOrWhiteSpace($existing)) {
+    return [string]$existing
+  }
+  return $DefaultValue
+}
+
+function Set-ObjectProperty {
+  param(
+    [AllowNull()][object]$Target,
+    [string]$Name,
+    [AllowNull()][object]$Value
+  )
+  if ($null -eq $Target -or [string]::IsNullOrWhiteSpace($Name)) {
+    return
+  }
+  if ($Target -is [System.Collections.IDictionary]) {
+    $Target[$Name] = $Value
+    return
+  }
+  $Target | Add-Member -NotePropertyName $Name -NotePropertyValue $Value -Force
+}
+
+function Test-ExternalServicesReadiness {
+  param(
+    [hashtable]$EnvValues,
+    [string]$Backend,
+    [bool]$StartupSkipped
+  )
+  $chromaEndpoint = Get-EnvSetting -Values $EnvValues -Name "CHROMA_ENDPOINT" -DefaultValue "http://127.0.0.1:18000"
+  $neo4jUri = Get-EnvSetting -Values $EnvValues -Name "BOND_NEO4J_URI" -DefaultValue "bolt://127.0.0.1:7687"
+  $redisUrl = Get-EnvSetting -Values $EnvValues -Name "HOST_RATE_LIMIT_REDIS_URL" -DefaultValue "redis://127.0.0.1:6379/0"
+  $chromaParsed = Resolve-UriHostPort -UriText $chromaEndpoint -DefaultHost "127.0.0.1" -DefaultPort 18000
+  $neo4jParsed = Resolve-UriHostPort -UriText $neo4jUri -DefaultHost "127.0.0.1" -DefaultPort 7687
+  $redisParsed = Resolve-UriHostPort -UriText $redisUrl -DefaultHost "127.0.0.1" -DefaultPort 6379
+  $chromaHeartbeat = ("http://{0}:{1}/api/v2/heartbeat" -f $chromaParsed.host, $chromaParsed.port)
+  $services = @(
+    [ordered]@{
+      service = "chroma"
+      endpoint = $chromaEndpoint
+      probe = $chromaHeartbeat
+      ok = [bool](Test-HttpQuick -Url $chromaHeartbeat -TimeoutSec 3)
+    },
+    [ordered]@{
+      service = "neo4j"
+      uri = $neo4jUri
+      host = $neo4jParsed.host
+      port = [int]$neo4jParsed.port
+      ok = [bool](Test-TcpPortQuick -HostName $neo4jParsed.host -Port ([int]$neo4jParsed.port) -TimeoutMs 1000)
+    },
+    [ordered]@{
+      service = "redis"
+      uri = $redisUrl
+      host = $redisParsed.host
+      port = [int]$redisParsed.port
+      ok = [bool](Test-TcpPortQuick -HostName $redisParsed.host -Port ([int]$redisParsed.port) -TimeoutMs 1000)
+    }
+  )
+  $missing = @()
+  foreach ($svc in $services) {
+    if (-not [bool]$svc.ok) {
+      $missing += [string]$svc.service
+    }
+  }
+  return [ordered]@{
+    status = if ($missing.Count -eq 0) { "ready" } else { "unready" }
+    backend = $Backend
+    startup_skipped = $StartupSkipped
+    degraded_for_recall_tests = [bool]($StartupSkipped -and $missing.Count -gt 0)
+    missing = $missing
+    services = $services
+    warning = if ($StartupSkipped) { "external service startup skipped; recall/vector tests require external_services_ready.status=ready" } else { "" }
+  }
+}
+
 function Parse-BoolValue {
   param(
     [AllowNull()][object]$Value,
@@ -553,6 +712,7 @@ if ($ExternalServicesBackend -eq "none") {
     status = "skipped"
     backend = "none"
     detail = "external service startup skipped by request"
+    degraded_for_recall_tests = $true
   }
 } else {
   $startDockerScript = Join-Path $PSScriptRoot "start_docker_services.ps1"
@@ -576,6 +736,20 @@ if ($ExternalServicesBackend -eq "none") {
     }
   }
 }
+$externalServicesReady = Test-ExternalServicesReadiness `
+  -EnvValues $envValues `
+  -Backend $ExternalServicesBackend `
+  -StartupSkipped ([bool]($ExternalServicesBackend -eq "none"))
+if ($ExternalServicesBackend -eq "none" -and [string]$externalServicesReady.status -eq "ready") {
+  Set-ObjectProperty -Target $localServices -Name "status" -Value "skipped_ready"
+  Set-ObjectProperty -Target $localServices -Name "detail" -Value "external service startup skipped by request; existing services are ready"
+  Set-ObjectProperty -Target $localServices -Name "degraded_for_recall_tests" -Value $false
+} elseif ($ExternalServicesBackend -eq "none") {
+  Set-ObjectProperty -Target $localServices -Name "status" -Value "skipped_unready"
+  Set-ObjectProperty -Target $localServices -Name "detail" -Value "external service startup skipped by request; recall/vector tests must not run until missing services are ready"
+  Set-ObjectProperty -Target $localServices -Name "degraded_for_recall_tests" -Value $true
+}
+Set-ObjectProperty -Target $localServices -Name "external_services_ready" -Value $externalServicesReady
 
 if (Test-Path -Path $pidFile) {
   $existingPidText = (Get-Content -Path $pidFile -Raw -Encoding ascii).Trim()
@@ -594,6 +768,8 @@ if (Test-Path -Path $pidFile) {
         health_url = "http://$probeHost`:$Port/health"
         env_file = $EnvFile
         local_services = $localServices
+        external_services_ready = $externalServicesReady
+        external_services_warning = [string]$externalServicesReady.warning
         local_ollama = $localOllama
         monitor_proxy_enabled = $monitorProxyEnabled
         monitor_proxy_status = "unknown"
@@ -626,6 +802,8 @@ if ($null -ne $listeningPid) {
         health_url = "http://$probeHost`:$Port/health"
         env_file = $EnvFile
         local_services = $localServices
+        external_services_ready = $externalServicesReady
+        external_services_warning = [string]$externalServicesReady.warning
         local_ollama = $localOllama
         monitor_proxy_enabled = $monitorProxyEnabled
         monitor_proxy_status = "unknown"
@@ -795,6 +973,13 @@ if ($obsEnabled) {
 $obsStatus = "ok"
 $mcpRegistryStatus = "ok"
 $startupWarnings = @()
+if ([string]$externalServicesReady.status -ne "ready") {
+  if ($ExternalServicesBackend -eq "none") {
+    $startupWarnings += "STARTUP_EXTERNAL_SERVICES_SKIPPED_UNREADY"
+  } else {
+    $startupWarnings += "STARTUP_EXTERNAL_SERVICES_UNREADY"
+  }
+}
 
 # 探测 /obs/metrics（优先命中 obs-sidecar，避免主进程再承担观测探针）
 $obsProbeHost = if ($obsProcessResult.PSObject.Properties.Name -contains "host") { [string]$obsProcessResult.host } else { $obsBindHost }
@@ -954,6 +1139,8 @@ $result = [ordered]@{
   stdout_log = $stdoutLog
   stderr_log = $stderrLog
   local_services = $localServices
+  external_services_ready = $externalServicesReady
+  external_services_warning = [string]$externalServicesReady.warning
   local_ollama = $localOllama
   obs_status = $obsStatus
   mcp_registry_status = $mcpRegistryStatus

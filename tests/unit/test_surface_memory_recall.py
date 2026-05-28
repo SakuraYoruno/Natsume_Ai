@@ -285,6 +285,65 @@ def test_surface_memory_recall_anaphoric_selection_uses_life_episode_not_self_ec
     assert any("指代选择追问" in item for item in packet.must_not_do)
 
 
+def test_surface_memory_recall_preserves_structured_recommendation_evidence_for_comparison() -> None:
+    packet = build_surface_memory_recall_packet(
+        SimpleNamespace(
+            output={
+                "query": "这三本书你喜欢哪本",
+                "status": "OK",
+                "candidate_count": 1,
+                "candidates": [
+                    {
+                        "snippet": (
+                            "codex_production lightnovel_recommendation_delivery COMPLETED；"
+                            "我刚才通过 qq 推荐了 3 本轻小说：1. A；2. 与神在河岸；3. C。"
+                        ),
+                        "confidence": 0.95,
+                        "metadata": {
+                            "store_id": "life_episode",
+                            "episode_kind": "action_episode",
+                            "episode_metadata": {
+                                "selected_recommendations": [
+                                    {
+                                        "title": "A",
+                                        "selection_reason": "资料完整度高",
+                                        "intro_snippet": "偏恋爱日常",
+                                        "update_time": "1 小时前",
+                                        "comment_count": "1",
+                                    },
+                                    {
+                                        "title": "与神在河岸",
+                                        "selection_reason": "公开信号较好、资料完整度高",
+                                        "intro_snippet": "奇幻身份钩子，设定新鲜",
+                                        "update_time": "1 小时前",
+                                        "view_count": "79",
+                                    },
+                                    {
+                                        "title": "C",
+                                        "selection_reason": "设定新鲜",
+                                        "intro_snippet": "转生皇帝路线",
+                                    },
+                                ],
+                            },
+                        },
+                    }
+                ],
+            }
+        ),
+        query="这三本书你喜欢哪本",
+        max_chars_per_fact=700,
+    )
+
+    joined = "\n".join(packet.facts)
+    assert "可比较证据" in joined
+    assert "看点：公开信号较好" in joined
+    assert "简介：奇幻身份钩子" in joined
+    assert "更新：1 小时前" in joined
+    assert "热度：79浏览" in joined
+    assert any("不要只看标题" in item for item in packet.style_anchor)
+    assert any("不要只按标题或名字判断" in item for item in packet.must_not_do)
+
+
 def test_memory_recall_packet_is_safe_boundary_shape_without_rows() -> None:
     packet = memory_recall_packet_from_mapping(
         {

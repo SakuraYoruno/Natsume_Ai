@@ -21,6 +21,7 @@ from typing import Any, Mapping
 
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.core.errors import (
+    CHROMA_ENDPOINT_UNAVAILABLE,
     RETR_RECALL_INPUT_INVALID,
     RETR_RECALL_UNAVAILABLE,
 )
@@ -174,6 +175,43 @@ _WARM_MOOD_BIAS = {
 }
 
 
+class _UnavailableChromaClient:
+    def __init__(self, *, reason: str) -> None:
+        self.reason = str(reason or CHROMA_ENDPOINT_UNAVAILABLE)
+
+    @property
+    def collection_profiles(self) -> Mapping[str, int]:
+        return {}
+
+    @property
+    def default_collection(self) -> str:
+        return "episodic"
+
+    def upsert(self, **_kwargs: Any) -> None:
+        raise RuntimeError(self.reason)
+
+    def delete(self, _memory_id: str, **_kwargs: Any) -> None:
+        raise RuntimeError(self.reason)
+
+    def get(self, _memory_id: str, **_kwargs: Any) -> None:
+        raise RuntimeError(self.reason)
+
+    def search(self, **_kwargs: Any) -> list[dict[str, Any]]:
+        raise RuntimeError(self.reason)
+
+    def validate_collection(self, _collection: str, *, vector_dim: int | None = None) -> tuple[bool, str | None]:
+        return False, self.reason
+
+
+def _build_optional_runtime_chroma_client() -> ChromaClientProtocol:
+    try:
+        return build_runtime_chroma_client()
+    except Exception as exc:
+        detail = str(exc).strip() or CHROMA_ENDPOINT_UNAVAILABLE
+        logger.warning("Chroma unavailable during recall service init; vector routes will degrade: %s", detail)
+        return _UnavailableChromaClient(reason=detail)
+
+
 class RecallFusionServiceContract:
     """Recall candidates from multiple routes and fuse into a stable list."""
 
@@ -194,7 +232,7 @@ class RecallFusionServiceContract:
         fts_db_path: str | None = None,
     ) -> None:
         self.ledger = ledger
-        self.chroma = chroma_client or build_runtime_chroma_client()
+        self.chroma = chroma_client or _build_optional_runtime_chroma_client()
         self.neo4j = neo4j_client
         self.world_store = world_store
         self.artifact_vault = artifact_vault
@@ -775,12 +813,24 @@ def _select_recent_anaphoric_life_primary(candidates: list[dict[str, Any]]) -> l
     return selected or [newest]
 
 
-def _anaphoric_primary_sort_key(candidate: Mapping[str, Any]) -> tuple[int, float, str]:
+def _anaphoric_primary_sort_key(candidate: Mapping[str, Any]) -> tuple[int, int, float, str]:
     return (
+        _candidate_anaphoric_action_priority(candidate),
         -_candidate_life_ts(candidate),
         -_coerce_score(candidate.get("score")),
         str(candidate.get("doc_id") or ""),
     )
+
+
+def _candidate_anaphoric_action_priority(candidate: Mapping[str, Any]) -> int:
+    action = _candidate_life_action(candidate)
+    if action in {"lightnovel_recommendation_delivery", "recommendation_delivery"} or action.endswith("_recommendation_delivery"):
+        return 0
+    if action in {"lightnovel_gateway_delivery", "gateway_delivery"} or action.endswith("_gateway_delivery"):
+        return 1
+    if action in {"lightnovel_recommendation_deep_review", "recommendation_deep_review"} or action.endswith("_deep_review"):
+        return 8
+    return 4
 
 
 def _candidate_life_action(candidate: Mapping[str, Any]) -> str:

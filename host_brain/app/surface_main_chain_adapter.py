@@ -1017,7 +1017,20 @@ def _surface_memory_plan_reason(trace_stage_meta: Mapping[str, Any] | None = Non
     packet = _safe_mapping(_safe_mapping(trace_stage_meta).get("surface_memory_recall_packet"))
     trace = _safe_mapping(packet.get("trace"))
     plan = _safe_mapping(trace.get("plan"))
-    return str(plan.get("reason") or "").strip()
+    reason = str(plan.get("reason") or "").strip()
+    if reason:
+        return reason
+    packet_text = "\n".join(
+        str(item or "")
+        for item in [
+            *list(packet.get("facts") or []),
+            *list(packet.get("style_anchor") or []),
+            *list(packet.get("must_not_do") or []),
+        ]
+    )
+    if "指代选择追问" in packet_text:
+        return "anaphoric_selection_recall"
+    return ""
 
 
 def _affect_packet(

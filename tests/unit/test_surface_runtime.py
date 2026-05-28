@@ -153,7 +153,7 @@ def test_surface_runtime_retries_memory_followup_when_reply_overreads_surprise()
     def generate(messages):
         calls.append(messages)
         if len(calls) == 1:
-            return _candidate_payload(["哈？老哥你居然会主动问我喜欢哪本……第二本《与神在河岸》吧，光名字就挺对胃口的。"])
+            return _candidate_payload(["哈？老哥你居然认真看完了啊……第二本《与神在河岸》吧，光名字就挺对胃口的。"])
         return _candidate_payload(["第二本《与神在河岸》吧，名字看着更有余味。"])
 
     result = asyncio.run(
@@ -213,6 +213,106 @@ def test_surface_runtime_retries_memory_followup_when_reply_only_echoes_title() 
     assert "MEMORY_FOLLOWUP_BARE_ECHO" in calls[1][-1]["content"]
 
 
+def test_surface_runtime_retries_memory_followup_when_reply_only_mentions_ordinal() -> None:
+    calls: list[list[dict[str, str]]] = []
+
+    def generate(messages):
+        calls.append(messages)
+        if len(calls) == 1:
+            return _candidate_payload(["第三本标题一看就是套路爽文，不过偶尔看看也挺乐的。"])
+        return _candidate_payload(["第三本《轉移到異世界後，與美少女皇女結婚的我成為皇帝》吧，标题看着够直球。"])
+
+    result = asyncio.run(
+        SurfaceRuntime(generate).run(
+            _payload(
+                user_message="这三本书，你喜欢哪本？",
+                reply_control_packet={
+                    "response_move": "memory_followup",
+                    "task_mode": "memory_followup",
+                    "emotional_tone": "light",
+                    "relationship_distance": "familiar",
+                    "information_budget": "short",
+                    "question_budget": 0,
+                    "facts": [
+                        "记忆线索：我刚才推荐了 3 本轻小说：1. A；2. 与神在河岸；3. 轉移到異世界後，與美少女皇女結婚的我成為皇帝。",
+                    ],
+                },
+            )
+        )
+    )
+
+    assert len(calls) == 2
+    assert "皇女" in result.selected_text
+    assert "MEMORY_FOLLOWUP_MISSING_TITLE_ANCHOR" in calls[1][-1]["content"]
+
+
+def test_surface_runtime_retries_memory_followup_when_rich_evidence_gets_title_only_reason() -> None:
+    calls: list[list[dict[str, str]]] = []
+
+    def generate(messages):
+        calls.append(messages)
+        if len(calls) == 1:
+            return _candidate_payload(["第二本《与神在河岸》吧，名字听起来更安静。"])
+        return _candidate_payload(["第二本《与神在河岸》吧，看点里说公开信号较好，简介里的奇幻身份钩子也更清楚。"])
+
+    result = asyncio.run(
+        SurfaceRuntime(generate).run(
+            _payload(
+                user_message="这三本书，你喜欢哪本？",
+                reply_control_packet={
+                    "response_move": "memory_followup",
+                    "task_mode": "memory_followup",
+                    "emotional_tone": "light",
+                    "relationship_distance": "familiar",
+                    "information_budget": "short",
+                    "question_budget": 0,
+                    "facts": [
+                        "记忆线索：我刚才推荐了 3 本轻小说；可比较证据：1. A｜看点：资料完整度高｜简介：偏恋爱日常；2. 与神在河岸｜看点：公开信号较好、资料完整度高｜简介：奇幻身份钩子；3. C｜看点：设定新鲜",
+                    ],
+                },
+            )
+        )
+    )
+
+    assert len(calls) == 2
+    assert "公开信号" in result.selected_text
+    assert "奇幻身份" in result.selected_text
+    assert "MEMORY_FOLLOWUP_SHALLOW_ANALYSIS" in calls[1][-1]["content"]
+
+
+def test_surface_runtime_retries_memory_followup_when_reply_only_uses_one_detail_dimension() -> None:
+    calls: list[list[dict[str, str]]] = []
+
+    def generate(messages):
+        calls.append(messages)
+        if len(calls) == 1:
+            return _candidate_payload(["第二本《与神在河岸》吧，公开信号和资料完整度都更稳。"])
+        return _candidate_payload(["第二本《与神在河岸》吧，公开信号更稳，简介里的奇幻身份钩子也更清楚。"])
+
+    result = asyncio.run(
+        SurfaceRuntime(generate).run(
+            _payload(
+                user_message="这三本书，你喜欢哪本？",
+                reply_control_packet={
+                    "response_move": "memory_followup",
+                    "task_mode": "memory_followup",
+                    "emotional_tone": "light",
+                    "relationship_distance": "familiar",
+                    "information_budget": "short",
+                    "question_budget": 0,
+                    "facts": [
+                        "记忆线索：我刚才推荐了 3 本轻小说；可比较证据：1. A｜看点：资料完整度高｜简介：偏恋爱日常；2. 与神在河岸｜看点：公开信号较好、资料完整度高｜简介：奇幻身份钩子；3. C｜看点：设定新鲜",
+                    ],
+                },
+            )
+        )
+    )
+
+    assert len(calls) == 2
+    assert result.selected_text == "第二本《与神在河岸》吧，公开信号更稳，简介里的奇幻身份钩子也更清楚。"
+    assert "MEMORY_FOLLOWUP_SHALLOW_ANALYSIS" in calls[1][-1]["content"]
+
+
 def test_surface_runtime_repairs_memory_followup_if_retry_still_ignores_recalled_object() -> None:
     def generate(_messages):
         return _candidate_payload(["哈？"])
@@ -237,6 +337,95 @@ def test_surface_runtime_repairs_memory_followup_if_retry_still_ignores_recalled
     )
 
     assert result.selected_text == "那三本里我会选第二本，与神在河岸。名字看着更有余味。"
+    assert result.observation_codes == ()
+
+
+def test_surface_runtime_repairs_rich_memory_followup_from_comparison_evidence_when_retry_disabled(monkeypatch) -> None:  # noqa: ANN001
+    monkeypatch.setenv("HOST_SURFACE_MAIN_CHAIN_HARD_GATE_RETRY_ENABLED", "false")
+
+    def generate(_messages):
+        return _candidate_payload(["哇，老哥你居然认真看了我推的那几本？那我选第二本吧，与神在河岸，标题有奇幻味。"])
+
+    result = asyncio.run(
+        SurfaceRuntime(generate).run(
+            _payload(
+                user_message="这三本书，你喜欢哪本？",
+                reply_control_packet={
+                    "response_move": "memory_followup",
+                    "task_mode": "memory_followup",
+                    "emotional_tone": "light",
+                    "relationship_distance": "familiar",
+                    "information_budget": "short",
+                    "question_budget": 0,
+                    "facts": [
+                        "记忆线索：我刚才推荐了 3 本轻小说：1. A；2. 与神在河岸；3. C。；可比较证据：1. A｜看点：资料完整度高｜简介：偏恋爱日常；2. 与神在河岸｜看点：公开信号较好、资料完整度高｜简介：奇幻身份钩子；3. C｜看点：设定新鲜",
+                    ],
+                },
+            )
+        )
+    )
+
+    assert result.selected_text == "那三本里我会选第二本，与神在河岸。公开信号更稳、资料完整度高；奇幻身份钩子。"
+    assert result.observation_codes == ()
+
+
+def test_surface_runtime_deep_review_selection_overrides_old_comparison_summary(monkeypatch) -> None:  # noqa: ANN001
+    monkeypatch.setenv("HOST_SURFACE_MAIN_CHAIN_HARD_GATE_RETRY_ENABLED", "false")
+
+    def generate(_messages):
+        return _candidate_payload(["那三本里我会选第二本，与神在河岸。更新、热度和资料完整度这几个信号更稳。"])
+
+    result = asyncio.run(
+        SurfaceRuntime(generate).run(
+            _payload(
+                user_message="这三本书，你喜欢哪本？",
+                reply_control_packet={
+                    "response_move": "memory_followup",
+                    "task_mode": "memory_followup",
+                    "emotional_tone": "light",
+                    "relationship_distance": "familiar",
+                    "information_budget": "short",
+                    "question_budget": 0,
+                    "facts": [
+                        "网页深读结果（含正文）：我回去打开详情页和正文比较了这些轻小说，当前更推荐第3本《[軽井広]轉移到異世界後，與美少女皇女結婚的我成為皇帝，享受悠閒的後宮生活 3》。原因：正文内容足够支撑判断；正文/简介有异世界皇女、皇帝或后宫路线，世界观钩子更直给；对白密度高，读感更偏轻快互动。另外我也看了第1本《A》、第2本《与神在河岸》。",
+                        "记忆线索：我刚才推荐了 3 本轻小说；可比较证据：1. A｜看点：恋爱日常｜简介：偏恋爱日常；2. 与神在河岸｜看点：公开信号较好、资料完整度高｜简介：奇幻身份钩子；3. 転移到異世界後與美少女皇女結婚｜看点：奇幻身份钩子",
+                    ],
+                },
+            )
+        )
+    )
+
+    assert result.selected_text == "我会先看第三本，《轉移到異世界後，與美少女皇女結婚的我成為皇帝，享受悠閒的後宮生活3》。皇女/皇帝这套设定也够直接，对白也轻快，比另外几本更想继续翻。"
+    assert result.observation_codes == ()
+
+
+def test_surface_runtime_repairs_deep_review_title_only_reply(monkeypatch) -> None:  # noqa: ANN001
+    monkeypatch.setenv("HOST_SURFACE_MAIN_CHAIN_HARD_GATE_RETRY_ENABLED", "false")
+
+    def generate(_messages):
+        return _candidate_payload(["唔，我比较喜欢第一本那个青梅竹马的。"])
+
+    result = asyncio.run(
+        SurfaceRuntime(generate).run(
+            _payload(
+                user_message="这三本书，你喜欢哪本？",
+                reply_control_packet={
+                    "response_move": "memory_followup",
+                    "task_mode": "memory_followup",
+                    "emotional_tone": "light",
+                    "relationship_distance": "familiar",
+                    "information_budget": "short",
+                    "question_budget": 0,
+                    "facts": [
+                        "网页深读结果（含正文）：我回去打开详情页和正文比较了这些轻小说，当前更推荐第1本《[2026.5.28校对施工至第二章][电击文库][折口良乃]我的青梅竹马发育得超超超超超级大[2.2 全书翻译完成]》。原因：正文内容足够支撑判断；正文开篇已经进入故事叙事，不只是资料卡；对白密度高，读感更偏轻快互动；读到的正文偏恋爱日常，核心在人物关系和亲密感推进；页面上还有章节/目录线索：序章 超超超超超级大的青梅竹马；后记。另外我也看了第3本《1206.公爵级和女仆级①》。",
+                        "记忆线索：我刚才通过 qq 给 qq_dm_3414578517 推荐了 3 本轻小说：1. 我的青梅竹马发育得超超超超超级大；2. 第二十九话：预兆；3. 1206.公爵级和女仆级①。",
+                    ],
+                },
+            )
+        )
+    )
+
+    assert result.selected_text == "我会先看第一本，《我的青梅竹马发育得超超超超超级大》。开篇就进正题，对白也轻快，比另外几本更想继续翻。"
     assert result.observation_codes == ()
 
 

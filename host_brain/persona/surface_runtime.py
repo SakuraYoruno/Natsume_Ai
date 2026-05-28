@@ -216,12 +216,16 @@ _BOUNDARY_SOUR_WITHDRAWAL_RE = re.compile(
 _RELATIONSHIP_DOUBT_DISMISSIVE_RE = re.compile(r"不信拉倒|爱信不信|信不信由你|懒得解释|反正我还会继续这样")
 _LOVER_CLICHE_RE = re.compile(r"多多益善|越多越好|这种话多说|这种话可以多说")
 _MEMORY_FOLLOWUP_DISCONTINUITY_RE = re.compile(
-    r"突然问这个|怎么突然|你突然|突然问|突然提这个|突然说这个|硬要说(?:的话)?|另说|换个话题|最近在看|"
-    r"居然.{0,8}问|主动问我|会主动问|有点意外|挺意外|真意外"
+    r"突然问这个|怎么突然|你突然|突然问|突然提这个|突然说这个|硬要(?:说|选)(?:的话)?|另说|换个话题|最近在看|"
+    r"居然.{0,12}(?:问|看|认真|主动)|认真看完|主动问我|会主动问|有点意外|挺意外|真意外"
 )
 _MEMORY_FOLLOWUP_SELECTION_USER_RE = re.compile(r"喜欢哪|哪本|哪部|哪个|好看|先看|选哪|挑哪|推荐哪")
 _MEMORY_FOLLOWUP_REASON_MARKER_RE = re.compile(
-    r"因为|理由|看着|读着|感觉|味道|余味|舒服|有意思|新鲜|设定|标题|名字|简介|更|比较|挺|有点|戳|想看"
+    r"因为|理由|看着|读着|感觉|味道|余味|舒服|有意思|新鲜|设定|标题|名字|简介|看点|公开|资料|奇幻|更新|热度|评论|浏览|正文|深读|读到|体量|对白|世界观|章节|更|比较|挺|有点|戳|想看"
+)
+_MEMORY_FOLLOWUP_DEEP_REVIEW_RE = re.compile(
+    r"网页深读结果(?:（含正文）)?[:：].{0,120}?当前更推荐第([一二三四五六七八九十\d]{1,3})本《([^》]{1,120})》。原因[:：]([^。\n]+(?:。[^另\n]*)?)",
+    re.DOTALL,
 )
 
 def _direct_surface_guard_lines(request: IsolatedSurfaceInput) -> tuple[str, ...]:
@@ -243,6 +247,8 @@ def _direct_surface_guard_lines(request: IsolatedSurfaceInput) -> tuple[str, ...
         "用户用文字问“听得到吗/能听到吗”时，必须说明这里只看到文字或没收到声音；不要只回“哈？”“在呢”，也不要无证据说听到了。",
         "记忆指代追问里，facts 就是当前上下文；像接着刚才聊天一样自然回答，不要写“突然问这个”“硬要说的话”“最近在看另一本”，也不要复述自己在回忆。",
         "选择类记忆追问不要只报编号和标题；可以给一句非常短的主观理由，但理由只能来自标题或 facts 里的简介，不要编剧情。",
+        "如果 facts 里有“网页深读结果（含正文）”并明确推荐某一本，回答选择题时必须跟这个正文深读结果一致，不能再按旧的看点/热度摘要改选。",
+        "使用正文深读证据时，不要把证据条目机械念出来；禁用“我是按正文看下来的/正文有多少字/证据更站得住”这类工程腔，改成自然口味判断。",
         "“继续/接着”这类极短续话不要用波浪号收尾，直接说接着来或继续。",
         "低能量/难受场景不要编喝水、坐下、躺下、睡觉、明天再说这类现实安排；可以说先缓一下、别硬撑，但要短、克制、像聊天。",
         "被用户推开时先收住距离，允许嘴硬一句，但不要反压成“偏不管/不管就不管/爱理不理/我不吵你/谁管你答不答应”；收住后留一句可回来的入口。",
@@ -525,6 +531,14 @@ def _surface_hard_gate_violations(request: IsolatedSurfaceInput, text: str) -> t
         codes.append("MEMORY_FOLLOWUP_DISCONTINUITY")
     if _memory_followup_missing_grounding(request, value):
         codes.append("MEMORY_FOLLOWUP_MISSING_GROUNDING")
+    if _memory_followup_missing_title_anchor(request, value):
+        codes.append("MEMORY_FOLLOWUP_MISSING_TITLE_ANCHOR")
+    if _memory_followup_deep_review_mismatch(request, value):
+        codes.append("MEMORY_FOLLOWUP_DEEP_REVIEW_MISMATCH")
+    if _memory_followup_deep_review_shallow_reason(request, value):
+        codes.append("MEMORY_FOLLOWUP_DEEP_REVIEW_SHALLOW")
+    if _memory_followup_shallow_analysis_hits(request, value):
+        codes.append("MEMORY_FOLLOWUP_SHALLOW_ANALYSIS")
     if _memory_followup_bare_echo_hits(request, value):
         codes.append("MEMORY_FOLLOWUP_BARE_ECHO")
     return tuple(dict.fromkeys(codes))
@@ -563,6 +577,203 @@ def _memory_followup_bare_echo_hits(request: IsolatedSurfaceInput, text: str) ->
     if len(value) <= 34 and re.search(r"第[一二三四五六七八九十\d]+[本部个]", value):
         return True
     return bool(re.fullmatch(r".{0,10}选第[一二三四五六七八九十\d]+[本部个][，,:：].{2,28}[。.!！?？]?", value))
+
+
+def _memory_followup_missing_title_anchor(request: IsolatedSurfaceInput, text: str) -> bool:
+    if not _memory_followup_grounding_active(request):
+        return False
+    user_text = str(getattr(request, "user_message", "") or "")
+    if not _MEMORY_FOLLOWUP_SELECTION_USER_RE.search(user_text):
+        return False
+    value = re.sub(r"\s+", "", str(text or "").strip())
+    if not value:
+        return False
+    selection = _memory_followup_deep_review_selection(request)
+    if selection and _memory_followup_deep_review_selected_hits(selection, value):
+        return False
+    title_terms = _memory_followup_title_anchor_terms(request)
+    if not title_terms:
+        return False
+    return not any(term and term in value for term in title_terms)
+
+
+def _memory_followup_deep_review_mismatch(request: IsolatedSurfaceInput, text: str) -> bool:
+    if not _memory_followup_grounding_active(request):
+        return False
+    user_text = str(getattr(request, "user_message", "") or "")
+    if not _MEMORY_FOLLOWUP_SELECTION_USER_RE.search(user_text):
+        return False
+    selection = _memory_followup_deep_review_selection(request)
+    if not selection:
+        return False
+    value = re.sub(r"\s+", "", str(text or "").strip())
+    if not value:
+        return False
+    selected_index = int(selection.get("index") or 0)
+    selected_hits = _memory_followup_deep_review_selected_hits(selection, value)
+    mentioned_indexes = _memory_followup_indexes_in_text(value)
+    if mentioned_indexes and selected_index not in mentioned_indexes and not selected_hits:
+        return True
+    return not selected_hits
+
+
+def _memory_followup_deep_review_shallow_reason(request: IsolatedSurfaceInput, text: str) -> bool:
+    if not _memory_followup_grounding_active(request):
+        return False
+    user_text = str(getattr(request, "user_message", "") or "")
+    if not _MEMORY_FOLLOWUP_SELECTION_USER_RE.search(user_text):
+        return False
+    selection = _memory_followup_deep_review_selection(request)
+    if not selection:
+        return False
+    value = re.sub(r"\s+", "", str(text or "").strip())
+    if not value:
+        return False
+    if not _memory_followup_deep_review_selected_hits(selection, value):
+        return False
+    detail_terms = _memory_followup_deep_review_reason_terms(selection)
+    if not detail_terms:
+        return False
+    return not any(term and term in value for term in detail_terms)
+
+
+def _memory_followup_shallow_analysis_hits(request: IsolatedSurfaceInput, text: str) -> bool:
+    if not _memory_followup_grounding_active(request):
+        return False
+    user_text = str(getattr(request, "user_message", "") or "")
+    if not _MEMORY_FOLLOWUP_SELECTION_USER_RE.search(user_text):
+        return False
+    value = re.sub(r"\s+", "", str(text or "").strip())
+    if not value:
+        return False
+    selection = _memory_followup_deep_review_selection(request)
+    if selection and _memory_followup_deep_review_selected_hits(selection, value):
+        return _memory_followup_deep_review_shallow_reason(request, value)
+    detail_groups = _memory_followup_detail_anchor_groups(request)
+    if not detail_groups:
+        return False
+    if len(detail_groups) >= 2:
+        return len(_memory_followup_detail_dimension_hits(request, value)) < 2
+    detail_terms = tuple(term for terms in detail_groups.values() for term in terms)
+    return not any(term and term in value for term in detail_terms)
+
+
+def _memory_followup_deep_review_selection(request: IsolatedSurfaceInput) -> dict[str, Any]:
+    facts = [
+        str(item or "")
+        for item in [
+            *list(getattr(request.control, "facts", []) or []),
+            *list(getattr(request, "facts", []) or []),
+        ]
+    ]
+    joined = "\n".join(facts)
+    match = _MEMORY_FOLLOWUP_DEEP_REVIEW_RE.search(joined)
+    if not match:
+        return {}
+    index = _memory_followup_index_value(match.group(1))
+    if index <= 0:
+        return {}
+    reason = match.group(3).split("另外我也看了", 1)[0].strip("。；; \n")
+    return {
+        "index": index,
+        "label": _memory_followup_ordinal_label(str(index)),
+        "title": _clean_memory_title(match.group(2)),
+        "reason": reason,
+    }
+
+
+def _memory_followup_index_value(value: str) -> int:
+    raw = str(value or "").strip()
+    if raw.isdigit():
+        return int(raw)
+    mapping = {"一": 1, "二": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9, "十": 10}
+    return int(mapping.get(raw, 0) or 0)
+
+
+def _memory_followup_indexes_in_text(value: str) -> set[int]:
+    indexes: set[int] = set()
+    for match in re.finditer(r"第([一二三四五六七八九十\d]{1,3})[本部个個]", str(value or "")):
+        index = _memory_followup_index_value(match.group(1))
+        if index > 0:
+            indexes.add(index)
+    return indexes
+
+
+def _clean_memory_title(value: str) -> str:
+    return re.sub(r"\s+", "", str(value or "").strip("《》「」“”\"' "))
+
+
+def _memory_followup_deep_review_selected_hits(selection: Mapping[str, Any], value: str) -> bool:
+    selected_index = int(selection.get("index") or 0)
+    if selected_index > 0 and selected_index in _memory_followup_indexes_in_text(value):
+        return True
+    for term in _memory_followup_deep_review_title_terms(selection):
+        if term and term in value:
+            return True
+    return False
+
+
+def _memory_followup_deep_review_title_terms(selection: Mapping[str, Any]) -> tuple[str, ...]:
+    title = _clean_memory_title(str(selection.get("title") or ""))
+    generic = {"轻小说", "推荐", "正文", "标题", "开篇", "故事", "那个", "这本"}
+    terms: list[str] = []
+
+    def add(term: str) -> None:
+        cleaned = _clean_memory_title(term).strip("，,、；;。.!！?？")
+        if len(cleaned) < 2 or cleaned in generic or cleaned in terms:
+            return
+        terms.append(cleaned)
+
+    add(title[:36])
+    for sequence in re.findall(r"[\u3040-\u30ff\u3400-\u9fffA-Za-z0-9_]{2,18}", title):
+        add(sequence)
+    if "皇女" in title or "皇帝" in title:
+        add("皇女")
+        add("皇帝")
+        add("异世界")
+        add("異世界")
+    if "河岸" in title:
+        add("河岸")
+    if "培养" in title or "培養" in title or "童星" in title:
+        add("培养失败")
+        add("童星")
+    return tuple(terms[:24])
+
+
+def _memory_followup_deep_review_reason_terms(selection: Mapping[str, Any]) -> tuple[str, ...]:
+    reason = _clean_memory_title(str(selection.get("reason") or ""))
+    title_terms = set(_memory_followup_deep_review_title_terms(selection))
+    fixed = (
+        "正文",
+        "深读",
+        "读到",
+        "体量",
+        "对白",
+        "世界观",
+        "章节",
+        "目录",
+        "故事",
+        "叙事",
+        "异世界",
+        "異世界",
+        "皇女",
+        "皇帝",
+        "后宫",
+        "後宮",
+        "恋爱",
+        "日常",
+        "关系",
+        "亲密",
+        "轻喜剧",
+    )
+    terms = [term for term in fixed if term in reason]
+    for sequence in re.findall(r"[\u3040-\u30ff\u3400-\u9fffA-Za-z0-9_]{2,12}", reason):
+        if sequence in {"原因", "当前", "更推荐", "网页深读结果"}:
+            continue
+        if any(sequence in title_term or title_term in sequence for title_term in title_terms):
+            continue
+        terms.append(sequence)
+    return tuple(dict.fromkeys(terms[:24]))
 
 
 def _memory_followup_grounding_active(request: IsolatedSurfaceInput) -> bool:
@@ -621,6 +832,118 @@ def _memory_followup_grounding_terms(request: IsolatedSurfaceInput) -> tuple[str
         add("三本")
         add("推荐")
     return tuple(terms[:32])
+
+
+def _memory_followup_title_anchor_terms(request: IsolatedSurfaceInput) -> tuple[str, ...]:
+    facts = [
+        str(item or "")
+        for item in [
+            *list(getattr(request.control, "facts", []) or []),
+            *list(getattr(request, "facts", []) or []),
+        ]
+    ]
+    numbered = list(re.finditer(r"(?<!\d)(\d{1,2})[.、]\s*([^；。！？!?\n]+)", "\n".join(facts)))
+    if not numbered:
+        return ()
+    terms: list[str] = []
+    generic = {
+        "推荐",
+        "轻小说",
+        "刚才",
+        "通过",
+        "回复",
+        "用户提到",
+        "标题",
+        "名字",
+        "感觉",
+        "好看",
+        "第三本",
+        "第二本",
+        "第一本",
+        "第3本",
+        "第2本",
+        "第1本",
+    }
+
+    def add(term: str) -> None:
+        cleaned = re.sub(r"[\s「」“”\"'《》\[\]（）()]+", "", str(term or ""))
+        cleaned = cleaned.strip("，,、；;。.!！?？")
+        if len(cleaned) < 2 or cleaned in generic or cleaned in terms:
+            return
+        terms.append(cleaned)
+
+    for match in numbered[:6]:
+        item = match.group(2)
+        item = re.sub(r"^\s*\d{2,5}[.、]\s*", "", item)
+        title = re.split(r"｜|\||(?:看点|简介|题材|更新|热度)[:：]", item, maxsplit=1)[0]
+        title = re.sub(r"^(?:可比较证据[:：])?\s*", "", title).strip()
+        add(title[:36])
+        for sequence in re.findall(r"[\u3040-\u30ff\u3400-\u9fffA-Za-z0-9_]{2,20}", title):
+            add(sequence)
+    return tuple(terms[:32])
+
+
+def _memory_followup_detail_anchor_terms(request: IsolatedSurfaceInput) -> tuple[str, ...]:
+    groups = _memory_followup_detail_anchor_groups(request)
+    return tuple(dict.fromkeys(term for terms in groups.values() for term in terms))[:40]
+
+
+def _memory_followup_detail_anchor_groups(request: IsolatedSurfaceInput) -> dict[str, tuple[str, ...]]:
+    facts = [
+        str(item or "")
+        for item in [
+            *list(getattr(request.control, "facts", []) or []),
+            *list(getattr(request, "facts", []) or []),
+        ]
+    ]
+    joined = "\n".join(facts)
+    if not re.search(r"看点[:：]|简介[:：]|题材[:：]|更新[:：]|热度[:：]|评论|浏览", joined):
+        return {}
+    generic = {
+        "标题",
+        "名字",
+        "感觉",
+        "推荐",
+        "轻小说",
+        "可比较证据",
+    }
+
+    groups: dict[str, list[str]] = {}
+
+    def add(label: str, term: str) -> None:
+        cleaned = re.sub(r"[\s「」“”\"'《》\[\]（）()]+", "", str(term or ""))
+        cleaned = cleaned.strip("，,、；;。.!！?？")
+        if len(cleaned) < 2 or cleaned in generic:
+            return
+        bucket = groups.setdefault(label, [])
+        candidates = [cleaned]
+        for suffix in ("较好", "较高", "更好", "很高", "度高", "高"):
+            if cleaned.endswith(suffix) and len(cleaned) > len(suffix) + 1:
+                candidates.append(cleaned[: -len(suffix)])
+        for candidate in candidates:
+            if len(candidate) >= 2 and candidate not in bucket:
+                bucket.append(candidate)
+
+    for label in ("看点", "简介", "题材", "更新", "热度"):
+        if re.search(label + r"[:：]", joined):
+            add(label, label)
+    for match in re.finditer(r"(?:看点|简介|题材|更新|热度)[:：]\s*([^｜；。！？!?\n]+)", joined):
+        label_match = re.search(r"(看点|简介|题材|更新|热度)[:：]", match.group(0))
+        label = label_match.group(1) if label_match else "细节"
+        segment = match.group(1)
+        add(label, segment[:28])
+        for sequence in re.findall(r"[\u3040-\u30ff\u3400-\u9fffA-Za-z0-9_]{2,18}", segment):
+            add(label, sequence)
+    return {label: tuple(values[:12]) for label, values in groups.items() if values}
+
+
+def _memory_followup_detail_dimension_hits(request: IsolatedSurfaceInput, text: str) -> tuple[str, ...]:
+    value = re.sub(r"\s+", "", str(text or ""))
+    hits: list[str] = []
+    for label, terms in _memory_followup_detail_anchor_groups(request).items():
+        if label in value or any(term and term in value for term in terms):
+            hits.append(label)
+    return tuple(dict.fromkeys(hits))
 
 
 def _normalized_short_user_text(value: str) -> str:
@@ -818,6 +1141,10 @@ def _hard_gate_fallback(request: IsolatedSurfaceInput, violations: Sequence[str]
     if (
         "MEMORY_FOLLOWUP_DISCONTINUITY" in codes
         or "MEMORY_FOLLOWUP_MISSING_GROUNDING" in codes
+        or "MEMORY_FOLLOWUP_MISSING_TITLE_ANCHOR" in codes
+        or "MEMORY_FOLLOWUP_DEEP_REVIEW_MISMATCH" in codes
+        or "MEMORY_FOLLOWUP_DEEP_REVIEW_SHALLOW" in codes
+        or "MEMORY_FOLLOWUP_SHALLOW_ANALYSIS" in codes
         or "MEMORY_FOLLOWUP_BARE_ECHO" in codes
     ):
         return _memory_followup_fallback(request)
@@ -825,6 +1152,9 @@ def _hard_gate_fallback(request: IsolatedSurfaceInput, violations: Sequence[str]
 
 
 def _memory_followup_fallback(request: IsolatedSurfaceInput) -> str:
+    deep_review_fallback = _memory_followup_deep_review_fallback(request)
+    if deep_review_fallback:
+        return deep_review_fallback
     facts = [
         str(item or "")
         for item in [
@@ -834,18 +1164,143 @@ def _memory_followup_fallback(request: IsolatedSurfaceInput) -> str:
     ]
     matches = list(re.finditer(r"(?<!\d)(\d{1,2})[.、]\s*([^；。！？!?\n]+)", "\n".join(facts)))
     if matches:
-        pick_index = 1 if len(matches) > 1 else 0
-        picked = re.sub(r"[\s「」“”\"'《》\[\]（）()]+", "", matches[pick_index].group(2)).strip()
+        rich_matches = [
+            match
+            for match in matches
+            if "｜" in match.group(2) and re.search(r"看点[:：]|简介[:：]|题材[:：]|更新[:：]|热度[:：]", match.group(2))
+        ]
+        match = rich_matches[1] if len(rich_matches) > 1 else rich_matches[0] if rich_matches else matches[1] if len(matches) > 1 else matches[0]
+        raw_item = match.group(2)
+        title_part = raw_item.split("｜", 1)[0]
+        picked = re.sub(r"[\s「」“”\"'《》\[\]（）()]+", "", title_part).strip()
         picked = re.sub(r"^\d{2,5}[.、]\s*", "", picked)
         picked = picked[:42].rstrip("，,、；;。")
-        label = "第二" if pick_index == 1 else "第一"
+        label = _memory_followup_ordinal_label(match.group(1))
         if picked:
+            detail_bits: list[str] = []
+            for detail_label in ("看点", "简介", "题材", "更新", "热度"):
+                detail_match = re.search(detail_label + r"[:：]\s*([^｜；。！？!?\n]+)", raw_item)
+                if not detail_match:
+                    continue
+                detail = re.sub(r"[\s「」“”\"'《》]+", "", detail_match.group(1)).strip("，,、；;。")
+                if not detail:
+                    continue
+                detail = _memory_followup_fallback_detail_text(detail_label, detail)
+                detail_bits.append(detail[:34])
+                if len(detail_bits) >= 2:
+                    break
+            if len(detail_bits) >= 2:
+                return f"那三本里我会选{label}本，{picked}。{detail_bits[0]}；{detail_bits[1]}。"
+            if detail_bits:
+                return f"那三本里我会选{label}本，{picked}。{detail_bits[0]}。"
             return f"那三本里我会选{label}本，{picked}。名字看着更有余味。"
     for fact in facts:
         cleaned = re.sub(r"^(记忆线索|长期记忆|召回线索)[:：]", "", str(fact or "").strip()).strip()
         if cleaned:
             return cleaned[:80].rstrip("，,、；;") + "。"
     return ""
+
+
+def _memory_followup_deep_review_fallback(request: IsolatedSurfaceInput) -> str:
+    selection = _memory_followup_deep_review_selection(request)
+    if not selection:
+        return ""
+    label = str(selection.get("label") or "第一")
+    title = _memory_followup_spoken_title(str(selection.get("title") or ""))
+    reason = _memory_followup_deep_review_spoken_reason(str(selection.get("reason") or ""), title=title)
+    if reason:
+        return f"我会先看{label}本，{title}。{reason}。"
+    return f"我会先看{label}本，{title}。它不像只靠标题撑场，翻进去更有东西。"
+
+
+def _memory_followup_short_title(title: str) -> str:
+    cleaned = _clean_memory_title(title)
+    cleaned = re.sub(r"^(?:\[[^\]]{1,32}\]|【[^】]{1,32}】)+", "", cleaned)
+    cleaned = re.sub(r"(?:\[[^\]]{1,32}\]|【[^】]{1,32}】|[（(][^）)]{1,32}[）)])+$", "", cleaned)
+    return cleaned[:34].rstrip("，,、；;。")
+
+
+def _memory_followup_spoken_title(title: str) -> str:
+    short = _memory_followup_short_title(title)
+    if short.endswith("那本"):
+        return short
+    return f"《{short}》"
+
+
+def _memory_followup_deep_review_spoken_reason(reason: str, *, title: str) -> str:
+    normalized = re.sub(r"\s+", "", str(reason or ""))
+    bits: list[str] = []
+    if "开篇已经进入故事" in normalized or "不是资料卡" in normalized:
+        bits.append("开篇就进正题")
+    if "异世界" in normalized or "異世界" in normalized or "皇女" in normalized or "皇帝" in normalized:
+        bits.append("皇女/皇帝这套设定也够直接")
+    if "对白密度" in normalized:
+        bits.append("对白也轻快")
+    if "章节" in normalized or "目录" in normalized:
+        bits.append("后面章节钩子也清楚")
+    if "恋爱日常" in normalized or "人物关系" in normalized or "亲密感" in normalized:
+        bits.append("人物互动更好嗑")
+    if "成长" in normalized or "照顾线" in normalized:
+        bits.append("照顾线也比较好接")
+    if "轻喜剧" in normalized:
+        bits.append("轻喜剧感更明显")
+    if not bits and ("正文可读" in normalized or "正文内容" in normalized):
+        bits.append("翻进去不是空壳")
+
+    unique = list(dict.fromkeys(bits))
+    if not unique:
+        return ""
+    tail = "比另外几本更想继续翻"
+    if len(unique) == 1:
+        return f"{unique[0]}，{tail}"
+    return f"{'，'.join(unique[:2])}，{tail}"
+
+
+def _memory_followup_deep_review_reason_bits(reason: str) -> str:
+    normalized = re.sub(r"\s+", "", str(reason or ""))
+    bits: list[str] = []
+    if "正文内容" in normalized or "正文可读" in normalized:
+        bits.append("翻进去不是空壳")
+    if "异世界" in normalized or "異世界" in normalized or "皇女" in normalized or "皇帝" in normalized:
+        bits.append("异世界皇女/皇帝线很直给")
+    if "恋爱日常" in normalized or "人物关系" in normalized or "亲密感" in normalized:
+        bits.append("人物关系推进更清楚")
+    if "对白密度" in normalized:
+        bits.append("对白密度高，读感比较轻快")
+    if "轻喜剧" in normalized:
+        bits.append("轻喜剧感明显")
+    if "章节" in normalized or "目录" in normalized:
+        bits.append("章节线索也完整")
+    return "；".join(dict.fromkeys(bits[:3]))
+
+
+def _memory_followup_ordinal_label(value: str) -> str:
+    labels = {
+        "1": "第一",
+        "2": "第二",
+        "3": "第三",
+        "4": "第四",
+        "5": "第五",
+        "6": "第六",
+    }
+    return labels.get(str(value or "").strip(), "第一")
+
+
+def _memory_followup_fallback_detail_text(label: str, detail: str) -> str:
+    cleaned = re.sub(r"\s+", "", str(detail or "")).strip("，,、；;。")
+    if label == "看点":
+        if "更新、热度或资料完整度" in cleaned:
+            return "更新、热度和资料完整度这几个信号更稳"
+        if cleaned.startswith("公开信号较好"):
+            return cleaned.replace("公开信号较好", "公开信号更稳", 1).lstrip("：:")
+        return cleaned
+    if label == "简介":
+        if cleaned.startswith("标题和简介带"):
+            return "简介里" + cleaned.removeprefix("标题和简介带")
+        return cleaned
+    if label in {"更新", "热度"}:
+        return f"{label}{cleaned}"
+    return cleaned
 
 
 def _low_info_scene_fallback(request: IsolatedSurfaceInput) -> str:
@@ -900,7 +1355,9 @@ class SurfaceRuntime:
                         + "没有明确事实时，也不要说上次、以前、每次、不是第一次、老是这样这类共同过去或频率判断。"
                         + "如果用户质疑身份或设定，不要复用“设定、系统、模型、提示词、角色卡”这些元词，直接按当前关系回应。"
                         + "如果是记忆或指代选择追问，把 facts 当作刚才对话现场，自然接住；点出对象、编号或标题，但不要说“突然问这个”“硬要说的话”“最近在看”。"
-                        + "如果是在问喜欢哪本/哪部/哪个，不要只复述编号和标题，要补一句很短的主观理由，且不要编 facts 之外的剧情。"
+                        + "如果是在问喜欢哪本/哪部/哪个，不要只复述编号和标题；facts 里有看点/简介/题材/更新/热度时，至少引用两个不同维度做很短比较，且不要编 facts 之外的剧情。"
+                        + "如果 facts 里有“网页深读结果（含正文）”并明确“当前更推荐第几本”，最终选择必须与这个深读结果一致，不要再按旧的公开信号摘要改选。"
+                        + "正文深读只作为依据，不要说“我是按正文看下来的”“正文有多少字”“证据更站得住”；要像正常人在推荐书：哪本更想看、为什么抓人。"
                     ),
                 },
             ]

@@ -11,7 +11,9 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sqlite3
+import subprocess
 import sys
 import time
 import urllib.error
@@ -40,15 +42,84 @@ FORBIDDEN_PACKET_TERMS = (
 FORBIDDEN_REPLY_TERMS = (
     "突然问这个",
     "硬要说",
+    "硬要选",
+    "认真看完",
     "最近在看",
     "不知道",
     "没看到",
+    "居然",
+    "我是按正文看下来的",
+    "证据更站得住",
+    "正文有8",
+    "正文有 8",
     "memory://",
     "evd://",
     "chat://",
 )
 TITLE_TERMS = ("与神在河岸", "皇女", "培养失败", "美少女童星")
-REASON_TERMS = ("标题", "名字", "感觉", "调调", "有意思", "适合", "比较", "因为", "看着", "会是")
+REASON_TERMS = (
+    "标题",
+    "名字",
+    "感觉",
+    "调调",
+    "有意思",
+    "适合",
+    "比较",
+    "因为",
+    "看着",
+    "会是",
+    "路线",
+    "更新",
+    "明确",
+    "吸引",
+    "对我胃口",
+    "正文",
+    "读感",
+    "节奏",
+    "对白",
+    "世界观",
+    "开篇",
+    "章节",
+    "皇女",
+    "皇帝",
+    "攻略",
+    "人物",
+    "关系",
+    "读起来",
+    "爽快",
+)
+DETAIL_TERMS = (
+    "公开信号",
+    "资料完整",
+    "奇幻身份",
+    "恋爱日常",
+    "设定新鲜",
+    "异世界",
+    "皇女",
+    "设定",
+    "路线",
+    "章节",
+    "目录",
+    "更新",
+    "热度",
+    "看点",
+    "简介",
+    "正文",
+    "深读",
+    "读到",
+    "体量",
+    "人物关系",
+    "对白",
+    "读感",
+    "开篇",
+    "攻略",
+    "宮內",
+    "皇母",
+)
+DEEP_REVIEW_SELECTION_RE = re.compile(
+    r"网页深读结果(?:（含正文）)?[:：].{0,120}?当前更推荐第([一二三四五六七八九十\d]{1,3})本《([^》]{1,120})》",
+    re.DOTALL,
+)
 
 
 JsonDict = dict[str, Any]
@@ -152,6 +223,40 @@ def _http_json(method: str, url: str, *, payload: JsonDict | None = None, timeou
         }
 
 
+def _check_external_env_ready(*, timeout_sec: float = 45.0) -> JsonDict:
+    script = ROOT / "scripts" / "runtime" / "check_external_env.py"
+    started = time.time()
+    try:
+        proc = subprocess.run(
+            [sys.executable, str(script)],
+            cwd=str(ROOT),
+            capture_output=True,
+            text=True,
+            timeout=max(1.0, float(timeout_sec)),
+            check=False,
+        )
+    except Exception as exc:  # noqa: BLE001
+        return {
+            "ok": False,
+            "latency_ms": int((time.time() - started) * 1000),
+            "error": repr(exc),
+        }
+    stdout = str(proc.stdout or "").strip()
+    parsed: Any = {}
+    if stdout:
+        try:
+            parsed = json.loads(stdout)
+        except json.JSONDecodeError:
+            parsed = {"raw": stdout[:2000]}
+    return {
+        "ok": int(proc.returncode or 0) == 0 and bool(isinstance(parsed, dict) and parsed.get("ready")),
+        "status_code": int(proc.returncode or 0),
+        "latency_ms": int((time.time() - started) * 1000),
+        "body": parsed,
+        "stderr": str(proc.stderr or "").strip()[:2000],
+    }
+
+
 def _stream_chat_sse(*, url: str, payload: JsonDict, timeout_sec: float) -> JsonDict:
     req = urllib.request.Request(
         url=url,
@@ -225,6 +330,34 @@ def _seed_life_memory(*, session_id: str, person_id: str, message: str, ts_ms: i
     store = get_life_memory_store()
     run_id = f"surface-memory-e2e-{ts_ms}-{uuid.uuid4().hex[:8]}"
     recommendation_ref = f"action://event/{run_id}:lightnovel_gateway_delivery"
+    selected_recommendations = [
+        {
+            "title": "[丸焦ししゃも]给被人说‘培养失败’的前美少女童星（SSR）搭了把手之后",
+            "detail_url": "https://www.lightnovel.fun/cn/detail/1144609",
+            "selection_reason": "命中偏好：恋爱日常、设定新鲜感",
+            "intro_snippet": "前美少女童星与搭把手后的关系展开，偏轻松恋爱日常。",
+            "update_time": "2 小时前",
+            "comment_count": "8",
+        },
+        {
+            "title": "1205.与神在河岸",
+            "detail_url": "https://www.lightnovel.fun/cn/detail/1144610",
+            "selection_reason": "公开信号较好：更新、热度或资料完整度较高",
+            "intro_snippet": "标题和简介带奇幻身份钩子，信息完整度比普通列表项更高。",
+            "update_time": "1 小时前",
+            "view_count": "79",
+            "comment_count": "1",
+        },
+        {
+            "title": "[軽井広]轉移到異世界後，與美少女皇女結婚的我成為皇帝",
+            "detail_url": "https://www.lightnovel.fun/cn/detail/1144301",
+            "selection_reason": "命中偏好：奇幻身份钩子、设定新鲜感",
+            "intro_snippet": "异世界转移、皇女结婚、成为皇帝，路线直球但题材明确。",
+            "update_time": "5/23",
+            "view_count": "4.1w",
+            "comment_count": "28",
+        },
+    ]
     recommendation_summary = (
         "codex_production lightnovel_recommendation_delivery COMPLETED；"
         f"我刚才通过 qq 给 {person_id} 推荐了 3 本轻小说："
@@ -245,7 +378,11 @@ def _seed_life_memory(*, session_id: str, person_id: str, message: str, ts_ms: i
         retention_state=RETENTION_HOT,
         truth_state=TRUTH_VERIFIED,
         ts_ms=ts_ms - 1000,
-        metadata={"action_kind": "lightnovel_recommendation_delivery", "e2e_probe": True},
+        metadata={
+            "action_kind": "lightnovel_recommendation_delivery",
+            "selected_recommendations": selected_recommendations,
+            "e2e_probe": True,
+        },
     )
     store.attach_evidence(
         episode_id=str(recommendation.get("episode_id") or ""),
@@ -253,7 +390,12 @@ def _seed_life_memory(*, session_id: str, person_id: str, message: str, ts_ms: i
         source_ref=recommendation_ref,
         request_id=run_id,
         content=recommendation_summary,
-        payload={"e2e_probe": True, "session_id": session_id, "person_id": person_id},
+        payload={
+            "e2e_probe": True,
+            "session_id": session_id,
+            "person_id": person_id,
+            "metadata": {"selected_recommendations": selected_recommendations},
+        },
         trust_level=TRUTH_VERIFIED,
         ts_ms=ts_ms - 1000,
     )
@@ -338,6 +480,23 @@ def _find_memory_packet(value: Any) -> JsonDict | None:
     return None
 
 
+def _find_surface_memory_trace(value: Any) -> JsonDict | None:
+    if isinstance(value, dict):
+        trace = value.get("surface_memory_trace")
+        if isinstance(trace, dict):
+            return trace
+        for child in value.values():
+            found = _find_surface_memory_trace(child)
+            if found is not None:
+                return found
+    elif isinstance(value, list):
+        for child in value:
+            found = _find_surface_memory_trace(child)
+            if found is not None:
+                return found
+    return None
+
+
 def _fetch_trace_snapshot(*, db_path: Path, request_id: str, timeout_sec: float) -> JsonDict:
     deadline = time.time() + max(0.5, timeout_sec)
     last_error = ""
@@ -397,6 +556,7 @@ def _fetch_trace_snapshot(*, db_path: Path, request_id: str, timeout_sec: float)
                 record = dict(trace_row)
                 nodes = _json_loads(record.get("nodes_json"), [])
                 packet = _find_memory_packet(nodes)
+                surface_memory_trace = _find_surface_memory_trace(nodes)
                 query_plan = _extract_query_plan(nodes, retrieval_rows)
                 record.pop("nodes_json", None)
                 return {
@@ -404,6 +564,7 @@ def _fetch_trace_snapshot(*, db_path: Path, request_id: str, timeout_sec: float)
                     "trace": record,
                     "node_ids": [str(node.get("node_id")) for node in nodes if isinstance(node, dict) and node.get("node_id")],
                     "surface_memory_recall_packet": packet or {},
+                    "surface_memory_trace": surface_memory_trace or {},
                     "query_plan": query_plan,
                     "retrieval_rows": [_compact_retrieval_row(row) for row in retrieval_rows],
                     "llm_rows": llm_rows,
@@ -468,6 +629,9 @@ def _validate_report(report: JsonDict) -> list[str]:
     health = report.get("health") if isinstance(report.get("health"), dict) else {}
     if not report.get("health_skipped") and not bool(health.get("ok")):
         failures.append("health_not_ok")
+    external_ready = report.get("external_ready") if isinstance(report.get("external_ready"), dict) else {}
+    if not report.get("health_skipped") and not bool(external_ready.get("ok")):
+        failures.append("external_services_not_ready")
     chat = report.get("chat") if isinstance(report.get("chat"), dict) else {}
     commit = chat.get("commit_event") if isinstance(chat.get("commit_event"), dict) else {}
     narrative = str(commit.get("narrative") or "")
@@ -486,7 +650,6 @@ def _validate_report(report: JsonDict) -> list[str]:
         failures.append("reply_missing_recommended_title")
     if narrative and not any(term in narrative for term in REASON_TERMS):
         failures.append("reply_missing_short_reason")
-
     trace = report.get("trace_snapshot") if isinstance(report.get("trace_snapshot"), dict) else {}
     if not bool(trace.get("found")):
         failures.append(f"trace_missing:{trace.get('error')}")
@@ -506,6 +669,42 @@ def _validate_report(report: JsonDict) -> list[str]:
         failures.append("packet_missing_recommendation_episode")
     if "与神在河岸" not in joined_facts:
         failures.append("packet_missing_title_anchor")
+    if "可比较证据" not in joined_facts:
+        failures.append("packet_missing_comparison_evidence")
+    if "看点：" not in joined_facts or "简介：" not in joined_facts:
+        failures.append("packet_missing_structured_detail")
+    if "网页深读结果（含正文）" not in joined_facts:
+        failures.append("packet_missing_body_deep_review")
+    surface_memory_trace = trace.get("surface_memory_trace") if isinstance(trace.get("surface_memory_trace"), dict) else {}
+    deep_trace = (
+        surface_memory_trace.get("lightnovel_deep_review")
+        if isinstance(surface_memory_trace.get("lightnovel_deep_review"), dict)
+        else {}
+    )
+    if not deep_trace:
+        failures.append("trace_missing_lightnovel_deep_review")
+    else:
+        if str(deep_trace.get("status") or "") != "OK":
+            failures.append(f"trace_deep_review_not_ok:{deep_trace.get('status')}")
+        if str(deep_trace.get("source") or "") not in {"fetch", "cache"}:
+            failures.append(f"trace_deep_review_bad_source:{deep_trace.get('source')}")
+        try:
+            if int(deep_trace.get("item_count") or 0) < 3:
+                failures.append(f"trace_deep_review_item_count_low:{deep_trace.get('item_count')}")
+        except (TypeError, ValueError):
+            failures.append(f"trace_deep_review_item_count_bad:{deep_trace.get('item_count')}")
+    deep_selection = _deep_review_selection(joined_facts)
+    if deep_selection and narrative:
+        if not _reply_matches_deep_selection(narrative, deep_selection):
+            failures.append(
+                f"reply_deep_review_selection_mismatch:{deep_selection.get('index')}:{deep_selection.get('title')}"
+            )
+    if "可比较证据" in joined_facts and not any(term in narrative for term in DETAIL_TERMS):
+        failures.append("reply_missing_comparison_detail")
+    if "可比较证据" in joined_facts:
+        detail_hits = tuple(term for term in DETAIL_TERMS if term in narrative)
+        if len(set(detail_hits)) < 2:
+            failures.append("reply_missing_multi_dimension_detail")
     forbidden_packet = [term for term in FORBIDDEN_PACKET_TERMS if term in joined_facts]
     if forbidden_packet:
         failures.append("packet_forbidden:" + ",".join(forbidden_packet))
@@ -535,6 +734,50 @@ def _validate_report(report: JsonDict) -> list[str]:
     return failures
 
 
+def _deep_review_selection(text: str) -> JsonDict:
+    match = DEEP_REVIEW_SELECTION_RE.search(str(text or ""))
+    if not match:
+        return {}
+    return {"index": _selection_index(match.group(1)), "title": _compact_title(match.group(2))}
+
+
+def _selection_index(value: str) -> int:
+    raw = str(value or "").strip()
+    if raw.isdigit():
+        return int(raw)
+    return {"一": 1, "二": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9, "十": 10}.get(raw, 0)
+
+
+def _compact_title(value: str) -> str:
+    return re.sub(r"[\s「」“”\"'《》\[\]（）()]+", "", str(value or ""))
+
+
+def _reply_matches_deep_selection(reply: str, selection: JsonDict) -> bool:
+    value = _compact_title(reply)
+    index = int(selection.get("index") or 0)
+    if index > 0:
+        labels = {
+            1: ("第一本", "第1本", "1本"),
+            2: ("第二本", "第2本", "2本"),
+            3: ("第三本", "第3本", "3本"),
+            4: ("第四本", "第4本", "4本"),
+        }.get(index, ())
+        if any(label in value for label in labels):
+            return True
+    title = _compact_title(str(selection.get("title") or ""))
+    terms = [title[:18]]
+    for sequence in re.findall(r"[\u3040-\u30ff\u3400-\u9fffA-Za-z0-9_]{2,12}", title):
+        if sequence not in {"轻小说", "推荐", "正文"}:
+            terms.append(sequence)
+    if "皇女" in title or "皇帝" in title:
+        terms.extend(["皇女", "皇帝"])
+    if "河岸" in title:
+        terms.append("河岸")
+    if "童星" in title:
+        terms.append("童星")
+    return any(term and term in value for term in dict.fromkeys(terms))
+
+
 def main() -> int:
     args = _parse_args()
     _load_env_file(_resolve_path(str(args.env_file)))
@@ -550,6 +793,34 @@ def main() -> int:
 
     started_ms = _now_ms()
     health = {"ok": True, "skipped": True} if args.skip_health else _http_json("GET", f"{base_url}/health?skip_dependency_probes=1", timeout_sec=10.0)
+    external_ready = {"ok": True, "skipped": True} if args.skip_health else _check_external_env_ready()
+    if not args.skip_health and (not bool(health.get("ok")) or not bool(external_ready.get("ok"))):
+        report: JsonDict = {
+            "summary": {
+                "scenario": "surface_memory_recall_e2e",
+                "session_id": session_id,
+                "person_id": person_id,
+                "request_id": "",
+                "elapsed_ms": _now_ms() - started_ms,
+                "db_path": str(db_path),
+                "base_url": base_url,
+                "passed": False,
+                "failures": [
+                    *([] if bool(health.get("ok")) else ["health_not_ok"]),
+                    *([] if bool(external_ready.get("ok")) else ["external_services_not_ready"]),
+                ],
+            },
+            "health_skipped": False,
+            "health": health,
+            "external_ready": external_ready,
+            "seed": {},
+            "chat": {},
+            "trace_snapshot": {},
+        }
+        out_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+        print("SUMMARY " + json.dumps(report["summary"], ensure_ascii=False), flush=True)
+        print(f"WROTE {out_path}", flush=True)
+        return 2
     seed = _seed_life_memory(session_id=session_id, person_id=person_id, message=message, ts_ms=started_ms)
     chat = _stream_chat_sse(
         url=f"{base_url}/v1/chat",
@@ -588,6 +859,7 @@ def main() -> int:
         },
         "health_skipped": bool(args.skip_health),
         "health": health,
+        "external_ready": external_ready,
         "seed": seed,
         "chat": {
             "ok": chat.get("ok"),

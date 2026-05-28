@@ -322,6 +322,7 @@ _EMOTION_INFER_KEYWORDS: list[tuple[str, str]] = [
 
 def _normalize_retrieval_summary_for_audit(summary: Mapping[str, Any] | None) -> dict[str, Any]:
     raw = dict(summary or {})
+    surface_memory_trace = _surface_memory_trace_for_audit(raw)
     route_rows = list(raw.get("route_rows") or []) if isinstance(raw.get("route_rows"), list) else []
     route_count = raw.get("route_count")
     if route_count in (None, ""):
@@ -350,7 +351,61 @@ def _normalize_retrieval_summary_for_audit(summary: Mapping[str, Any] | None) ->
     raw["degraded"] = degraded
     raw["reason_code"] = reason_code
     raw["error"] = error_text
+    if surface_memory_trace:
+        raw["surface_memory_trace"] = surface_memory_trace
     return raw
+
+
+def _surface_memory_trace_for_audit(summary: Mapping[str, Any] | None) -> dict[str, Any]:
+    packet = _coerce_trace_mapping(dict(summary or {}).get("surface_memory_recall_packet"))
+    trace = _coerce_trace_mapping(packet.get("trace"))
+    if not trace:
+        return {}
+
+    out: dict[str, Any] = {}
+    plan = _coerce_trace_mapping(trace.get("plan"))
+    if plan:
+        out["plan"] = {
+            "reason": str(plan.get("reason") or ""),
+            "task_mode": str(plan.get("task_mode") or ""),
+            "recall_policy": str(plan.get("recall_policy") or ""),
+            "max_facts": _safe_int(plan.get("max_facts"), default=0),
+            "target_store_ids": [str(item) for item in list(plan.get("target_store_ids") or [])[:8]],
+        }
+    for key in ("skipped", "route_count", "short_term_explicit_memory"):
+        if key in trace:
+            out[key] = bool(trace.get(key)) if key in {"skipped", "short_term_explicit_memory"} else _safe_int(trace.get(key), default=0)
+
+    deep = _coerce_trace_mapping(trace.get("lightnovel_deep_review"))
+    if deep:
+        selected = _coerce_trace_mapping(deep.get("selected"))
+        safe_deep = {
+            "status": str(deep.get("status") or ""),
+            "reason_code": str(deep.get("reason_code") or ""),
+            "item_count": _safe_int(deep.get("item_count"), default=0),
+            "latency_ms": _safe_int(deep.get("latency_ms"), default=0),
+            "cached": bool(deep.get("cached")),
+            "source": str(deep.get("source") or ""),
+            "recommendation_signature": str(deep.get("recommendation_signature") or ""),
+            "source_episode_id": str(deep.get("source_episode_id") or ""),
+            "persisted_episode_id": str(deep.get("persisted_episode_id") or ""),
+            "persist_status": str(deep.get("persist_status") or ""),
+            "evidence_ref_count": _safe_int(deep.get("evidence_ref_count"), default=0),
+        }
+        if selected:
+            safe_deep["selected"] = {
+                "index": _safe_int(selected.get("index"), default=0),
+                "title": str(selected.get("title") or "")[:120],
+            }
+        out["lightnovel_deep_review"] = safe_deep
+    return out
+
+
+def _safe_int(value: Any, *, default: int = 0) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return int(default)
 
 
 # _coerce_trace_mapping / _coerce_trace_score / _coerce_trace_bool /
@@ -736,6 +791,7 @@ async def _persist_post_process_audit(
                     "effective_embedding_provider": _rs.get("effective_embedding_provider"),
                     "fallback_embedding_used": bool(_rs.get("fallback_embedding_used", False)),
                     "fallback_embedding_reason_code": _rs.get("fallback_embedding_reason_code"),
+                    "surface_memory_trace": _rs.get("surface_memory_trace") or {},
                 },
                 "detail": (
                     f"candidate={_rs.get('candidate_count', 0)} "
@@ -766,6 +822,7 @@ async def _persist_post_process_audit(
         "effective_embedding_provider": _normalized_retrieval_summary.get("effective_embedding_provider"),
         "fallback_embedding_used": bool(_normalized_retrieval_summary.get("fallback_embedding_used", False)),
         "fallback_embedding_reason_code": _normalized_retrieval_summary.get("fallback_embedding_reason_code"),
+        "surface_memory_trace": _normalized_retrieval_summary.get("surface_memory_trace") or {},
     }
     _query_plan_output = _coerce_trace_mapping(_normalized_retrieval_summary.get("query_plan"))
     _agentic_rag_output = _coerce_trace_mapping(_normalized_retrieval_summary.get("agentic_meta"))
@@ -2002,6 +2059,25 @@ def _resolve_retrieval_timeout_seconds() -> float:
     return timeout_ms / 1000.0
 
 
+def _resolve_selection_followup_retrieval_timeout_seconds() -> float:
+    raw = str(os.environ.get("HOST_SELECTION_FOLLOWUP_RETRIEVAL_TIMEOUT_MS") or "").strip()
+    try:
+        timeout_ms = int(raw) if raw else 35_000
+    except ValueError:
+        timeout_ms = 35_000
+    timeout_ms = max(1_000, min(timeout_ms, 90_000))
+    return timeout_ms / 1000.0
+
+
+def _needs_selection_followup_retrieval_budget(message: str) -> bool:
+    text = re.sub(r"\s+", "", str(message or ""))
+    if not text:
+        return False
+    if not re.search(r"(哪本|哪部|哪个|哪個|喜欢哪|喜歡哪|好看|先看|选哪|選哪|挑哪|推荐哪|推薦哪)", text):
+        return False
+    return bool(re.search(r"(这几本|這幾本|这三本|這三本|这两本|這兩本|这本书|這本書|书|書|轻小说|輕小說|小说|小說)", text))
+
+
 def _is_low_risk_short_chat_route_reason(route_reason: str) -> bool:
     reason = str(route_reason or "").strip()
     if not reason:
@@ -3084,6 +3160,8 @@ async def _cortex_orchestrator_sse_generator_impl(
         try:
             retrieval_wait_started_ms = int(time.time() * 1000)
             retrieval_timeout_s = 0.45 if relational_fastlane else _resolve_timeout()
+            if not relational_fastlane and _needs_selection_followup_retrieval_budget(sanitized_message):
+                retrieval_timeout_s = max(retrieval_timeout_s, _resolve_selection_followup_retrieval_timeout_seconds())
             retrieval_summary, retrieval_evidence_items = await asyncio.wait_for(
                 retrieval_task,
                 timeout=retrieval_timeout_s,

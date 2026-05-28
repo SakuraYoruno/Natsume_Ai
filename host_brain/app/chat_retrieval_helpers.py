@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import re
+import time
 from typing import Any, Dict, Mapping, Optional
 
 _CONTEXTUAL_FOLLOWUP_RE = re.compile(
@@ -272,6 +273,14 @@ async def _run_retrieval(
                     "plan": plan.as_dict(),
                 },
             )
+        packet = await _maybe_apply_lightnovel_deep_review(
+            packet=packet,
+            message=message,
+            request_id=request_id,
+            person_id=person_id,
+            session_id=session_id,
+            ts_ms=ts_ms,
+        )
         return _surface_memory_retrieval_summary(
             request_id=request_id,
             ts_ms=ts_ms,
@@ -296,6 +305,91 @@ async def _run_retrieval(
             },
             [],
         )
+
+
+async def _maybe_apply_lightnovel_deep_review(
+    *,
+    packet: Any,
+    message: str,
+    request_id: str,
+    person_id: str,
+    session_id: str,
+    ts_ms: int,
+) -> Any:
+    try:
+        from dataclasses import replace  # noqa: PLC0415
+
+        from host_brain.codex_runtime.lightnovel_deep_reviewer import (  # noqa: PLC0415
+            review_lightnovel_selection_from_memory_packet,
+            should_deep_review_lightnovel_selection,
+        )
+    except Exception:
+        return packet
+    packet_payload = packet.as_dict() if hasattr(packet, "as_dict") else {}
+    if not should_deep_review_lightnovel_selection(user_message=message, packet=packet_payload):
+        return packet
+    started_ms = int(time.time() * 1000)
+    try:
+        import asyncio  # noqa: PLC0415
+
+        review = await asyncio.to_thread(
+            review_lightnovel_selection_from_memory_packet,
+            packet=packet_payload,
+            user_message=message,
+            request_id=request_id,
+            person_id=person_id,
+            session_id=session_id,
+            ts_ms=ts_ms,
+        )
+    except Exception as exc:
+        review = {
+            "status": "DEGRADED",
+            "reason_code": "LIGHTNOVEL_DEEP_REVIEW_FAILED",
+            "fact": f"我尝试回去查这些书的详情页，但深读步骤失败了：{type(exc).__name__}。",
+            "evidence_refs": [],
+            "cached": False,
+            "source": "error",
+        }
+    latency_ms = max(0, int(time.time() * 1000) - started_ms)
+    fact = str(review.get("fact") or "").strip()
+    if not fact:
+        return packet
+    trace = dict(getattr(packet, "trace", None) or {})
+    trace["lightnovel_deep_review"] = {
+        "status": str(review.get("status") or ""),
+        "reason_code": str(review.get("reason_code") or ""),
+        "selected": dict(review.get("selected") or {}) if isinstance(review.get("selected"), Mapping) else {},
+        "item_count": len(list(review.get("items") or [])),
+        "latency_ms": latency_ms,
+        "cached": bool(review.get("cached")),
+        "source": str(review.get("source") or ("cache" if bool(review.get("cached")) else "fetch")),
+        "recommendation_signature": str(review.get("recommendation_signature") or ""),
+        "source_episode_id": str(review.get("source_episode_id") or ""),
+        "persisted_episode_id": str(review.get("persisted_episode_id") or ""),
+        "persist_status": str(review.get("persist_status") or ""),
+        "evidence_ref_count": len(list(review.get("evidence_refs") or [])),
+    }
+    return replace(
+        packet,
+        facts=tuple([fact, *list(getattr(packet, "facts", ()) or [])]),
+        style_anchor=tuple(
+            [
+                "轻小说选择追问：优先使用网页/正文深读结果；像正常人聊书一样给口味判断，不要念证据条目。",
+                *list(getattr(packet, "style_anchor", ()) or []),
+            ]
+        ),
+        must_not_do=tuple(
+            [
+                "不要把轻小说选择追问只按标题、热度或旧推荐摘要回答；有网页/正文深读结果时必须基于深读证据。",
+                "不要直接说“我是按正文看下来的”“正文有多少字”“证据更站得住”；把证据转成自然理由。",
+                *list(getattr(packet, "must_not_do", ()) or []),
+            ]
+        ),
+        evidence_refs=tuple(
+            dict.fromkeys([*list(getattr(packet, "evidence_refs", ()) or []), *list(review.get("evidence_refs") or [])])
+        ),
+        trace=trace,
+    )
 
 
 def _surface_memory_retrieval_summary(

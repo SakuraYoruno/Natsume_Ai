@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 
 from host_brain.audit.sqlite_ledger import SQLiteLedger
+from host_brain.core.errors import CHROMA_ENDPOINT_UNAVAILABLE
 from host_brain.memory.chroma_client import embed_text
 from host_brain.memory.life_memory import EPISODE_ACTION, EPISODE_BACKGROUND, LifeMemoryStore
 from host_brain.retrieval.recall_fusion import RecallFusionServiceContract, load_recall_runtime_config
@@ -74,6 +75,78 @@ def test_life_episode_route_returns_episode_packet_candidate() -> None:
         ledger.close()
 
 
+def test_life_episode_route_still_runs_when_chroma_is_down(monkeypatch) -> None:  # noqa: ANN001
+    ledger = SQLiteLedger(db_path=":memory:")
+    try:
+        store = LifeMemoryStore(ledger=ledger)
+        written = store.write_chat_episode(
+            request_id="req-life-route-chroma-down",
+            session_id="qq_dm_1",
+            person_id="user-1",
+            user_message="刚才给我推荐了三本轻小说",
+            assistant_reply="我推荐了 A、B、C。",
+            ts_ms=1_800_000_000_000,
+        )
+        cfg_result = load_recall_runtime_config(
+            env={
+                "RETR_RECALL_ENABLED": "true",
+                "RETR_RECALL_DEFAULT_ROUTE": "route_life_episode",
+                "RETR_RECALL_ROUTES_JSON": json.dumps(
+                    {
+                        "route_life_episode": {
+                            "store_id": STORE_LIFE_EPISODE,
+                            "top_k": 5,
+                            "score_weight": 1.0,
+                            "node_selector": "*",
+                        },
+                        "route_episodic": {
+                            "store_id": STORE_EPISODIC_VECTOR,
+                            "collection": "episodic",
+                            "top_k": 5,
+                            "score_weight": 1.0,
+                            "node_selector": "*",
+                        },
+                    },
+                    ensure_ascii=False,
+                ),
+            }
+        )
+        assert cfg_result.success, cfg_result.as_dict()
+        assert cfg_result.config is not None
+        monkeypatch.setattr(
+            "host_brain.retrieval.recall_fusion.build_runtime_chroma_client",
+            lambda: (_ for _ in ()).throw(RuntimeError("chroma is down")),
+        )
+
+        service = RecallFusionServiceContract(
+            ledger=ledger,
+            runtime_config=cfg_result.config,
+            node_id="host-01",
+            available=True,
+            use_hybrid=False,
+        )
+        query_embedding, _ = embed_text("三本轻小说 哪本")
+        result = service.recall(
+            request_id="req-life-route-chroma-down-recall",
+            query="三本轻小说 哪本",
+            query_embedding=query_embedding,
+            person_id="user-1",
+            session_id="qq_dm_1",
+            ts_ms=1_800_000_000_100,
+        )
+
+        assert result.output["candidate_count"] >= 1
+        assert result.output["candidates"][0]["doc_id"] == written["episode_id"]
+        assert result.output["candidates"][0]["metadata"]["store_id"] == STORE_LIFE_EPISODE
+        assert result.output["degraded"] is True
+        assert any(
+            row["store_id"] == STORE_EPISODIC_VECTOR and row["reason_code"] == CHROMA_ENDPOINT_UNAVAILABLE
+            for row in result.output["route_rows"]
+        )
+    finally:
+        ledger.close()
+
+
 def test_anaphoric_selection_fusion_keeps_latest_delivery_not_old_recommendations_or_send_logs() -> None:
     ledger = SQLiteLedger(db_path=":memory:")
     try:
@@ -123,6 +196,20 @@ def test_anaphoric_selection_fusion_keeps_latest_delivery_not_old_recommendation
             ts_ms=1_800_000_600_050,
             metadata={"action_kind": "qq_reply_sent"},
         )
+        deep_review = store.upsert_episode(
+            episode_kind=EPISODE_ACTION,
+            evidence_refs=["action://event/deep-review"],
+            primary_ref="action://event/deep-review",
+            person_id="user-1",
+            session_id="qq_dm_1",
+            action="lightnovel_recommendation_deep_review",
+            summary="当时更偏向第1本《新 A》，因为开篇更抓人；也对比了另外 1 本。",
+            salience=0.95,
+            retention_state="HOT",
+            truth_state="VERIFIED",
+            ts_ms=1_800_000_600_090,
+            metadata={"action_kind": "lightnovel_recommendation_deep_review"},
+        )
 
         query = "这三本书，你喜欢哪本？"
         query_embedding, _ = embed_text(query)
@@ -168,6 +255,7 @@ def test_anaphoric_selection_fusion_keeps_latest_delivery_not_old_recommendation
         assert [item["doc_id"] for item in candidates] == [latest["episode_id"]]
         assert old["episode_id"] not in {item["doc_id"] for item in candidates}
         assert send_log["episode_id"] not in {item["doc_id"] for item in candidates}
+        assert deep_review["episode_id"] not in {item["doc_id"] for item in candidates}
         assert "新 A" in candidates[0]["snippet"]
         assert candidates[0]["metadata"]["action"] == "lightnovel_recommendation_delivery"
     finally:

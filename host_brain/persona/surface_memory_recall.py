@@ -268,7 +268,7 @@ def plan_surface_memory_recall(
             recall_policy=RECALL_POLICY_MUST,
             target_store_ids=("life_episode", "episodic_vector", "sqlite_ledger", "semantic_memory"),
             max_facts=4,
-            max_chars_per_fact=320,
+            max_chars_per_fact=700,
             time_lookback_days=1,
             reason="anaphoric_selection_recall",
         )
@@ -845,8 +845,114 @@ def _surface_fact_text(
     if not raw:
         return ""
     if _clean_text(store_id).lower() == "life_episode":
+        structured = _structured_life_episode_recall_text(raw, metadata=metadata, limit=limit)
+        if structured:
+            return _surface_safe_text(structured, limit=max(limit, 420))
         raw = _humanize_life_episode_recall_text(raw, metadata=metadata)
     return _surface_safe_text(raw, limit=limit)
+
+
+def _structured_life_episode_recall_text(text: str, *, metadata: Mapping[str, Any], limit: int) -> str:
+    items = _life_episode_recall_items(metadata)
+    if not items:
+        return ""
+    overview = _humanize_life_episode_recall_text(text, metadata=metadata)
+    overview = _truncate_text(overview, limit=min(max(120, limit // 2), 220))
+    item_lines: list[str] = []
+    for index, item in enumerate(items[:4], start=1):
+        title = _first_item_text(item, ("title", "title_display", "name", "label"), limit=74)
+        if not title:
+            continue
+        parts = [f"{index}. {title}"]
+        rationale = _first_item_text(item, ("selection_reason", "rationale", "reason", "why", "look_point"), limit=80)
+        intro = _first_item_text(item, ("intro_snippet", "intro", "description", "summary", "abstract"), limit=96)
+        topic = _first_item_text(item, ("genre", "category", "topic", "theme", "tags"), limit=50)
+        update = _first_item_text(item, ("update_time", "updated_at", "freshness"), limit=32)
+        heat = _heat_text(item)
+        detail_url = _first_item_text(item, ("detail_url", "url", "source_url"), limit=180)
+        if rationale:
+            parts.append(f"看点：{rationale}")
+        if intro and intro != rationale:
+            parts.append(f"简介：{intro}")
+        if topic:
+            parts.append(f"题材：{topic}")
+        if update:
+            parts.append(f"更新：{update}")
+        if heat:
+            parts.append(f"热度：{heat}")
+        if detail_url:
+            parts.append(f"详情：{detail_url}")
+        item_lines.append("｜".join(parts))
+    if not item_lines:
+        return ""
+    joined_items = "；".join(item_lines)
+    prefix = f"{overview}；" if overview else ""
+    return _clean_text(f"{prefix}可比较证据：{joined_items}")
+
+
+def _life_episode_recall_items(metadata: Mapping[str, Any]) -> list[Mapping[str, Any]]:
+    containers: list[Mapping[str, Any]] = []
+    episode_meta = metadata.get("episode_metadata")
+    if isinstance(episode_meta, Mapping):
+        containers.append(episode_meta)
+    for evidence in list(metadata.get("evidence") or []):
+        if not isinstance(evidence, Mapping):
+            continue
+        payload = evidence.get("payload")
+        if not isinstance(payload, Mapping):
+            continue
+        containers.append(payload)
+        payload_meta = payload.get("metadata")
+        if isinstance(payload_meta, Mapping):
+            containers.append(payload_meta)
+    containers.append(metadata)
+
+    items: list[Mapping[str, Any]] = []
+    for container in containers:
+        for key in (
+            "selected_recommendations",
+            "recommendations",
+            "selected_items",
+            "items",
+            "cards",
+            "delivered_items",
+        ):
+            raw = container.get(key)
+            if not isinstance(raw, Sequence) or isinstance(raw, (str, bytes, bytearray)):
+                continue
+            for item in raw:
+                if isinstance(item, Mapping) and item not in items:
+                    items.append(item)
+            if items:
+                return items
+    return items
+
+
+def _first_item_text(item: Mapping[str, Any], keys: Sequence[str], *, limit: int) -> str:
+    for key in keys:
+        raw = item.get(key)
+        if isinstance(raw, Sequence) and not isinstance(raw, (str, bytes, bytearray)):
+            raw = "、".join(_clean_text(value) for value in raw if _clean_text(value))
+        value = _truncate_text(_clean_text(raw), limit=limit)
+        if value:
+            return value
+    return ""
+
+
+def _heat_text(item: Mapping[str, Any]) -> str:
+    parts: list[str] = []
+    for key, label in (
+        ("view_count", "浏览"),
+        ("views", "浏览"),
+        ("comment_count", "评论"),
+        ("comments", "评论"),
+        ("hotness", "热度"),
+        ("heat", "热度"),
+    ):
+        value = _first_item_text(item, (key,), limit=24)
+        if value:
+            parts.append(f"{value}{label}" if not any(marker in value for marker in (label, "热度")) else value)
+    return " / ".join(dict.fromkeys(parts))
 
 
 def _humanize_life_episode_recall_text(text: str, *, metadata: Mapping[str, Any]) -> str:
@@ -910,6 +1016,8 @@ def _build_packet_style_anchor(rows: Sequence[SurfaceMemoryFactRow], *, query: s
     if _looks_like_anaphoric_selection_query(_clean_text(query)) and store_ids & SURFACE_USER_FACT_STORES:
         anchors.append("指代选择追问：把记忆线索当作刚才对话的当前上下文，自然接话，不要像查表或任务回执。")
         anchors.append("选择类追问：可以给一点主观口味，但不要只复述编号和标题，也不要编剧情。")
+        if any(_has_comparison_detail(row.fact) for row in rows):
+            anchors.append("选择类追问：基于已召回的看点、简介、题材、更新或热度做短比较，不要只看标题。")
     if store_ids & SURFACE_USER_FACT_STORES:
         anchors.append("用户事实记忆只补当前承接，不扩写成未确认细节")
     if "semantic_memory" in store_ids:
@@ -940,7 +1048,13 @@ def _build_packet_must_not_do(
     if _looks_like_anaphoric_selection_query(_clean_text(query)) and rows:
         rules.append("不要把指代选择追问当成无关新话题；不要说“突然问这个”“硬要说的话”“最近在看另一本”。")
         rules.append("不要只输出“第几本 + 标题”；需要像聊天一样给一句很短的偏好理由，理由只能来自标题或已召回简介。")
+        if any(_has_comparison_detail(row.fact) for row in rows):
+            rules.append("召回里有看点/简介/题材/更新/热度时，不要只按标题或名字判断。")
     return _clean_list(rules)
+
+
+def _has_comparison_detail(text: str) -> bool:
+    return bool(re.search(r"看点[:：]|简介[:：]|题材[:：]|更新[:：]|热度[:：]|评论|浏览", str(text or "")))
 
 
 def _packet_confidence(rows: Sequence[SurfaceMemoryFactRow], *, output: Mapping[str, Any]) -> float:

@@ -8,6 +8,9 @@ from host_brain.app.agent_runtime_shared import (
     _maybe_build_contextual_memory_answer,
     _maybe_build_contextual_session_answer,
     _maybe_build_contextual_style_answer,
+    _normalize_retrieval_summary_for_audit,
+    _needs_selection_followup_retrieval_budget,
+    _resolve_selection_followup_retrieval_timeout_seconds,
     _maybe_build_recent_turn_answer,
     _run_surface_persona_session_end_sync,
     _write_surface_main_chain_memory_sync,
@@ -32,6 +35,59 @@ def test_recent_turn_query_role_handles_where_we_left_off() -> None:
     assert _detect_recent_turn_query_role("刚才说到哪了") == "both"
     assert _detect_recent_turn_query_role("刚刚聊到哪了") == "both"
     assert _detect_recent_turn_query_role("你刚刚说了什么") == "assistant"
+
+
+def test_selection_followup_retrieval_budget_detects_book_choice(monkeypatch) -> None:  # noqa: ANN001
+    monkeypatch.setenv("HOST_SELECTION_FOLLOWUP_RETRIEVAL_TIMEOUT_MS", "42000")
+
+    assert _needs_selection_followup_retrieval_budget("这三本书，你喜欢哪本？")
+    assert _needs_selection_followup_retrieval_budget("这几本轻小说哪本好看")
+    assert not _needs_selection_followup_retrieval_budget("今天吃什么？")
+    assert _resolve_selection_followup_retrieval_timeout_seconds() == 42.0
+
+
+def test_normalize_retrieval_summary_keeps_safe_surface_memory_trace() -> None:
+    summary = _normalize_retrieval_summary_for_audit(
+        {
+            "status": "OK",
+            "candidate_count": 1,
+            "route_count": 4,
+            "surface_memory_recall_packet": {
+                "facts": ["网页深读结果（含正文）：..."],
+                "trace": {
+                    "plan": {
+                        "reason": "anaphoric_selection_recall",
+                        "task_mode": "daily_chat",
+                        "recall_policy": "MUST_RECALL",
+                        "max_facts": 3,
+                        "target_store_ids": ["life_episode", "semantic_memory"],
+                    },
+                    "route_count": 4,
+                    "lightnovel_deep_review": {
+                        "status": "OK",
+                        "reason_code": "LIGHTNOVEL_DEEP_REVIEW_CACHE_HIT",
+                        "selected": {"index": 3, "title": "异世界皇女"},
+                        "item_count": 3,
+                        "latency_ms": 27,
+                        "cached": True,
+                        "source": "cache",
+                        "recommendation_signature": "sig-1",
+                        "source_episode_id": "ep-cache",
+                        "persist_status": "",
+                        "evidence_ref_count": 3,
+                    },
+                },
+            },
+        }
+    )
+
+    trace = summary["surface_memory_trace"]
+    assert trace["plan"]["reason"] == "anaphoric_selection_recall"
+    assert trace["route_count"] == 4
+    assert trace["lightnovel_deep_review"]["cached"] is True
+    assert trace["lightnovel_deep_review"]["source_episode_id"] == "ep-cache"
+    assert trace["lightnovel_deep_review"]["selected"] == {"index": 3, "title": "异世界皇女"}
+    assert "facts" not in trace
 
 
 def test_recent_turn_answer_builds_direct_recap_and_skips_current_query(monkeypatch) -> None:

@@ -1120,6 +1120,9 @@ class LifeMemoryStore:
             episode_id = str(episode.get("episode_id") or "").strip()
             if not episode_id:
                 continue
+            episode_metadata = _json_loads(episode.get("metadata"), fallback={})
+            if not isinstance(episode_metadata, dict):
+                episode_metadata = {}
             evidence_rows = self._list_evidence(episode_id=episode_id)
             correction_rows = self._list_corrections(episode_id=episode_id)
             evidence_text = "\n".join(
@@ -1203,6 +1206,7 @@ class LifeMemoryStore:
                     "evidence_count": len(evidence_rows),
                     "evidence_refs": evidence_refs,
                     "evidence": evidence_rows,
+                    "episode_metadata": episode_metadata,
                     "corrections": correction_rows,
                     "correction_count": len(correction_rows),
                     "source_ref": str(episode.get("primary_ref") or f"life_episode://{episode_id}"),
