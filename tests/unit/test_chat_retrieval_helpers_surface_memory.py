@@ -476,6 +476,83 @@ async def test_run_retrieval_applies_lightnovel_deep_review_from_entity_trace(mo
 
 
 @pytest.mark.asyncio
+async def test_run_retrieval_uses_generic_evidence_review_for_missing_web_body(monkeypatch) -> None:
+    class _RecallService:
+        def recall(self, **_kwargs):  # noqa: ANN003
+            return {
+                "output": {
+                    "query": "昨天那个网页内容靠谱吗？依据是什么？",
+                    "status": "OK",
+                    "stage": "recall_fusion",
+                    "candidate_count": 1,
+                    "routes": [{"route_id": "surface_life_episode", "store_id": "life_episode"}],
+                    "candidates": [
+                        {
+                            "doc_id": "ep-web-summary-only",
+                            "source_ref": "https://example.com/report",
+                            "text": "昨天查过一个网页，结论是看起来还行。",
+                            "score": 0.94,
+                            "metadata": {
+                                "store_id": "life_episode",
+                                "source_ref": "https://example.com/report",
+                                "domain": "web",
+                            },
+                        }
+                    ],
+                }
+            }
+
+    def fake_review(**kwargs):  # noqa: ANN003
+        packet = kwargs["packet"]
+        assert packet["facts"] == []
+        assert packet["rows"][0]["source_ref"] == "https://example.com/report"
+        assert packet["trace"]["recall_answer_readiness"]["response_mode"] == "fetch_or_request_detail_evidence"
+        return {
+            "status": "OK",
+            "reason_code": "GENERIC_EVIDENCE_REVIEW_OK",
+            "fact": "证据补读结果：重新读取了 1 个来源（样本报告）。可用依据：报告正文列出了样本来源、更新时间和限制条件。",
+            "items": [{"kind": "url", "ref": "https://example.com/report", "review_status": "OK"}],
+            "evidence_refs": ["https://example.com/report"],
+            "cached": False,
+            "source": "fetch",
+            "persist_status": "OK",
+            "persisted_episode_id": "ep-generic-review",
+        }
+
+    monkeypatch.setattr(helpers, "_build_surface_memory_recall_service", lambda: _RecallService())
+    monkeypatch.setattr(helpers, "_embed_surface_memory_query", lambda query: ([0.2] * 16, "test-embedding"))
+    monkeypatch.setattr(
+        "host_brain.codex_runtime.generic_evidence_reviewer.review_generic_evidence_from_memory_packet",
+        fake_review,
+    )
+
+    summary, _evidence_items = await helpers._run_retrieval(
+        request_id="req-generic-evidence-review",
+        message="昨天那个网页内容靠谱吗？依据是什么？",
+        person_id="person-1",
+        session_id="sess-1",
+        ts_ms=123,
+        emotion_tag="NEUTRAL",
+        render_target_lang="zh",
+        intent_draft={"route": "chat"},
+    )
+
+    packet = summary["surface_memory_recall_packet"]
+    readiness = packet["trace"]["recall_answer_readiness"]
+    assert summary["status"] == "OK"
+    assert packet["facts"][0].startswith("证据补读结果")
+    assert packet["trace"]["generic_evidence_review"]["status"] == "OK"
+    assert packet["trace"]["generic_evidence_review"]["persisted_episode_id"] == "ep-generic-review"
+    assert packet["trace"]["coverage_failed_resolved_by_generic_evidence_review"] is True
+    assert packet["trace"]["answer_ready"] is True
+    assert readiness["status"] == "READY"
+    assert readiness["response_mode"] == "answer_from_evidence"
+    assert readiness["detail_evidence"]["basis"] == "generic_evidence_review"
+    assert packet["degraded"] is False
+    assert packet["reason_code"] is None
+
+
+@pytest.mark.asyncio
 async def test_run_retrieval_preserves_surface_memory_validation_contract(monkeypatch) -> None:
     class _RecallService:
         def recall(self, **_kwargs):  # noqa: ANN003

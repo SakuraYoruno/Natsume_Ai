@@ -372,11 +372,18 @@ def _surface_memory_trace_for_audit(summary: Mapping[str, Any] | None) -> dict[s
             "max_facts": _safe_int(plan.get("max_facts"), default=0),
             "target_store_ids": [str(item) for item in list(plan.get("target_store_ids") or [])[:8]],
         }
-    for key in ("skipped", "route_count", "short_term_explicit_memory", "answer_ready", "coverage_failed_resolved_by_deep_review"):
+    bool_trace_keys = {
+        "skipped",
+        "short_term_explicit_memory",
+        "answer_ready",
+        "coverage_failed_resolved_by_deep_review",
+        "coverage_failed_resolved_by_generic_evidence_review",
+    }
+    for key in ("skipped", "route_count", "short_term_explicit_memory", "answer_ready", "coverage_failed_resolved_by_deep_review", "coverage_failed_resolved_by_generic_evidence_review"):
         if key in trace:
             out[key] = (
                 bool(trace.get(key))
-                if key in {"skipped", "short_term_explicit_memory", "answer_ready", "coverage_failed_resolved_by_deep_review"}
+                if key in bool_trace_keys
                 else _safe_int(trace.get(key), default=0)
             )
 
@@ -509,6 +516,20 @@ def _surface_memory_trace_for_audit(summary: Mapping[str, Any] | None) -> dict[s
                 "title": str(selected.get("title") or "")[:120],
             }
         out["lightnovel_deep_review"] = safe_deep
+
+    generic = _coerce_trace_mapping(trace.get("generic_evidence_review"))
+    if generic:
+        out["generic_evidence_review"] = {
+            "status": str(generic.get("status") or ""),
+            "reason_code": str(generic.get("reason_code") or ""),
+            "item_count": _safe_int(generic.get("item_count"), default=0),
+            "latency_ms": _safe_int(generic.get("latency_ms"), default=0),
+            "cached": bool(generic.get("cached")),
+            "source": str(generic.get("source") or ""),
+            "persisted_episode_id": str(generic.get("persisted_episode_id") or ""),
+            "persist_status": str(generic.get("persist_status") or ""),
+            "evidence_ref_count": _safe_int(generic.get("evidence_ref_count"), default=0),
+        }
     return out
 
 

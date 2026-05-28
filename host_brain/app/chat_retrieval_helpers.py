@@ -304,6 +304,14 @@ async def _run_retrieval(
             session_id=session_id,
             ts_ms=ts_ms,
         )
+        packet = await _maybe_apply_generic_evidence_review(
+            packet=packet,
+            message=message,
+            request_id=request_id,
+            person_id=person_id,
+            session_id=session_id,
+            ts_ms=ts_ms,
+        )
         return _surface_memory_retrieval_summary(
             request_id=request_id,
             ts_ms=ts_ms,
@@ -445,6 +453,125 @@ async def _maybe_apply_lightnovel_deep_review(
             dict.fromkeys([*list(getattr(packet, "evidence_refs", ()) or []), *list(review.get("evidence_refs") or [])])
         ),
         confidence=max(float(getattr(packet, "confidence", 0.0) or 0.0), 0.85) if resolved_coverage_failure else getattr(packet, "confidence", 0.0),
+        degraded=False if resolved_coverage_failure else getattr(packet, "degraded", False),
+        reason_code=None if resolved_coverage_failure else getattr(packet, "reason_code", None),
+        trace=trace,
+    )
+
+
+async def _maybe_apply_generic_evidence_review(
+    *,
+    packet: Any,
+    message: str,
+    request_id: str,
+    person_id: str,
+    session_id: str,
+    ts_ms: int,
+) -> Any:
+    try:
+        from dataclasses import replace  # noqa: PLC0415
+
+        from host_brain.codex_runtime.generic_evidence_reviewer import (  # noqa: PLC0415
+            review_generic_evidence_from_memory_packet,
+            should_review_generic_evidence,
+        )
+    except Exception:
+        return packet
+    packet_payload = packet.as_dict() if hasattr(packet, "as_dict") else {}
+    if not should_review_generic_evidence(user_message=message, packet=packet_payload):
+        return packet
+    started_ms = int(time.time() * 1000)
+    try:
+        import asyncio  # noqa: PLC0415
+
+        review = await asyncio.to_thread(
+            review_generic_evidence_from_memory_packet,
+            packet=packet_payload,
+            user_message=message,
+            request_id=request_id,
+            person_id=person_id,
+            session_id=session_id,
+            ts_ms=ts_ms,
+        )
+    except Exception as exc:
+        review = {
+            "status": "DEGRADED",
+            "reason_code": "GENERIC_EVIDENCE_REVIEW_FAILED",
+            "fact": f"我尝试重新读取记忆里的证据来源，但补证据步骤失败了：{type(exc).__name__}。",
+            "evidence_refs": [],
+            "cached": False,
+            "source": "error",
+            "items": [],
+        }
+    latency_ms = max(0, int(time.time() * 1000) - started_ms)
+    fact = str(review.get("fact") or "").strip()
+    if not fact:
+        return packet
+    trace = dict(getattr(packet, "trace", None) or {})
+    trace["generic_evidence_review"] = {
+        "status": str(review.get("status") or ""),
+        "reason_code": str(review.get("reason_code") or ""),
+        "item_count": len(list(review.get("items") or [])),
+        "latency_ms": latency_ms,
+        "cached": bool(review.get("cached")),
+        "source": str(review.get("source") or "fetch"),
+        "persisted_episode_id": str(review.get("persisted_episode_id") or ""),
+        "persist_status": str(review.get("persist_status") or ""),
+        "evidence_ref_count": len(list(review.get("evidence_refs") or [])),
+    }
+    review_ok = str(review.get("status") or "").strip().upper() == "OK"
+    old_reason_code = str(getattr(packet, "reason_code", None) or "").strip()
+    resolved_coverage_failure = review_ok and old_reason_code == "SURFACE_MEMORY_RECALL_COVERAGE_FAILED"
+    if resolved_coverage_failure:
+        previous_readiness = dict(trace.get("recall_answer_readiness") or {}) if isinstance(trace.get("recall_answer_readiness"), Mapping) else {}
+        if previous_readiness:
+            trace["recall_answer_readiness_before_generic_evidence_review"] = previous_readiness
+        detail = dict(previous_readiness.get("detail_evidence") or {}) if isinstance(previous_readiness.get("detail_evidence"), Mapping) else {}
+        detail.update(
+            {
+                "required": True,
+                "ready_for_deep_review": True,
+                "basis": "generic_evidence_review",
+                "body_item_count": max(1, _coerce_int(detail.get("body_item_count"))),
+                "anchor_item_count": max(
+                    _coerce_int(detail.get("anchor_item_count")),
+                    len(list(review.get("evidence_refs") or [])),
+                ),
+            }
+        )
+        trace["recall_answer_readiness"] = {
+            **previous_readiness,
+            "status": "READY",
+            "ready_to_answer": True,
+            "response_mode": "answer_from_evidence",
+            "surface_action": "answer",
+            "reasons": [],
+            "coverage_passed": True,
+            "coverage_failed": False,
+            "detail_evidence": detail,
+        }
+        trace["answer_ready"] = True
+        trace["coverage_failed_resolved_by_generic_evidence_review"] = True
+    return replace(
+        packet,
+        facts=tuple([fact, *list(getattr(packet, "facts", ()) or [])]),
+        style_anchor=tuple(
+            [
+                "证据追问：优先使用刚补读到的网页/文件正文依据；回答时把证据转成自然判断，不要念调试字段。",
+                *list(getattr(packet, "style_anchor", ()) or []),
+            ]
+        ),
+        must_not_do=tuple(
+            [
+                "不要把只有旧摘要的记忆当成完整依据；有证据补读结果时必须基于补读正文回答。",
+                "不要暴露 memory://、evd://、chat:// 或内部 trace 字段。",
+                *list(getattr(packet, "must_not_do", ()) or []),
+            ]
+        ),
+        evidence_refs=tuple(
+            dict.fromkeys([*list(getattr(packet, "evidence_refs", ()) or []), *list(review.get("evidence_refs") or [])])
+        ),
+        confidence=max(float(getattr(packet, "confidence", 0.0) or 0.0), 0.82) if resolved_coverage_failure else getattr(packet, "confidence", 0.0),
         degraded=False if resolved_coverage_failure else getattr(packet, "degraded", False),
         reason_code=None if resolved_coverage_failure else getattr(packet, "reason_code", None),
         trace=trace,

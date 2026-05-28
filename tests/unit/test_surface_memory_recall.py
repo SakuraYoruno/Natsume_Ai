@@ -1219,6 +1219,59 @@ def test_generic_evidence_review_requires_body_or_detail_anchor() -> None:
     assert "missing_detail_evidence" in readiness["reasons"]
 
 
+def test_generic_evidence_review_url_anchor_still_requires_body_evidence() -> None:
+    packet = build_surface_memory_recall_packet(
+        SimpleNamespace(
+            output={
+                "query": "昨天那个网页内容靠谱吗？依据是什么？",
+                "status": "OK",
+                "stage": "S_RET_RECALL",
+                "degraded": False,
+                "routes": [{"route_id": "surface_life_episode", "store_id": "life_episode"}],
+                "candidate_count": 1,
+                "ts_ms": _ts(2026, 5, 29, 8),
+                "candidates": [
+                    {
+                        "doc_id": "ep-web-url-only",
+                        "source_ref": "https://example.com/report",
+                        "text": "昨天查过一个网页报告，旧摘要说看起来还行。",
+                        "score": 0.94,
+                        "metadata": {
+                            "store_id": "life_episode",
+                            "source_ref": "https://example.com/report",
+                            "domain": "web",
+                        },
+                    }
+                ],
+            }
+        ),
+        query="昨天那个网页内容靠谱吗？依据是什么？",
+        max_facts=4,
+        max_chars_per_fact=320,
+        temporal_scope="yesterday",
+        query_kind="evidence_review",
+        target_domains=("web", "content"),
+        recall_contract_id="evidence_review",
+        primary_memory_layer="life_episode",
+        expected_memory_layers=("life_episode", "semantic_memory"),
+        validation_requirements=("trusted_memory_hit", "source_ref_present", "target_domain_match"),
+        answer_obligations=("use_detail_or_body_evidence", "say_if_detail_evidence_is_missing"),
+    )
+
+    receipt = dict(dict(packet.trace or {})["recall_receipt"])
+    coverage = dict(dict(packet.trace or {})["recall_coverage"])
+    readiness = dict(dict(packet.trace or {})["recall_answer_readiness"])
+    assert receipt["detail_evidence"]["basis"] == "detail_anchor"
+    assert receipt["detail_evidence"]["ready_for_deep_review"] is True
+    assert coverage["passed"] is False
+    assert coverage["dimensions"]["detail_evidence"] == 0.0
+    assert "detail_evidence" in coverage["missing"]
+    assert packet.facts == ()
+    assert packet.reason_code == SURFACE_MEMORY_RECALL_COVERAGE_FAILED
+    assert readiness["response_mode"] == "fetch_or_request_detail_evidence"
+    assert "missing_detail_evidence" in readiness["reasons"]
+
+
 def test_generic_evidence_review_filters_wrong_domain_candidates() -> None:
     packet = build_surface_memory_recall_packet(
         SimpleNamespace(

@@ -989,9 +989,11 @@ def _build_recall_coverage_trace(
         _clean_text(recall_need.get("evidence_depth")) == "detail_or_body_evidence"
         or bool(detail_evidence.get("required"))
     )
+    body_required = detail_required and _clean_text(recall_need.get("need_type")) == "evidence_review"
     detail_body_count = max(0, _coerce_int(detail_evidence.get("body_item_count")))
     detail_anchor_count = max(0, _coerce_int(detail_evidence.get("anchor_item_count")))
     detail_ready = bool(detail_evidence.get("ready_for_deep_review"))
+    detail_ready_for_coverage = (detail_body_count > 0) if body_required else detail_ready
     dimensions = {
         "validation": round(required_score, 6),
         "primary_layer": 1.0 if (not primary or primary in selected_layers) else 0.0,
@@ -1005,17 +1007,17 @@ def _build_recall_coverage_trace(
         "source": 1.0 if source_ref_count > 0 else 0.0,
     }
     if detail_required:
-        dimensions["detail_evidence"] = 1.0 if detail_body_count > 0 else (0.75 if detail_ready else 0.0)
+        dimensions["detail_evidence"] = 1.0 if detail_body_count > 0 else (0.75 if detail_ready and not body_required else 0.0)
     if not required:
         dimensions["validation"] = 1.0 if selected_layers else 0.0
     score = round(sum(float(value) for value in dimensions.values()) / max(1, len(dimensions)), 6)
     coverage_missing = list(missing)
-    if detail_required and not detail_ready and "detail_evidence" not in coverage_missing:
+    if detail_required and not detail_ready_for_coverage and "detail_evidence" not in coverage_missing:
         coverage_missing.append("detail_evidence")
     return {
         "schema": "Natsume.surface_recall_coverage.v1",
         "score": score,
-        "passed": bool(validation_trace.get("passed", True)) and score >= 0.66 and (not detail_required or detail_ready),
+        "passed": bool(validation_trace.get("passed", True)) and score >= 0.66 and (not detail_required or detail_ready_for_coverage),
         "missing": coverage_missing,
         "dimensions": {key: round(float(value), 6) for key, value in dimensions.items()},
         "required_count": len(required),
@@ -1050,7 +1052,9 @@ def _build_recall_answer_readiness_trace(
     evidence_depth = _clean_text(recall_need.get("evidence_depth"))
     detail_evidence = dict(recall_coverage.get("detail_evidence") or {})
     detail_required = evidence_depth == "detail_or_body_evidence" or bool(detail_evidence.get("required"))
-    detail_ready = (not detail_required) or bool(detail_evidence.get("ready_for_deep_review"))
+    detail_body_count = max(0, _coerce_int(detail_evidence.get("body_item_count")))
+    body_required = detail_required and need_type == "evidence_review"
+    detail_ready = (not detail_required) or (detail_body_count > 0 if body_required else bool(detail_evidence.get("ready_for_deep_review")))
     coverage_passed = bool(recall_coverage.get("passed"))
     validation_passed = bool(validation_trace.get("passed", True))
     selected_items = max(0, _coerce_int(recall_coverage.get("selected_item_count")))
@@ -1149,7 +1153,7 @@ def _build_recall_answer_readiness_trace(
             "required": detail_required,
             "ready_for_deep_review": bool(detail_evidence.get("ready_for_deep_review")),
             "basis": _clean_text(detail_evidence.get("basis")),
-            "body_item_count": max(0, _coerce_int(detail_evidence.get("body_item_count"))),
+            "body_item_count": detail_body_count,
             "anchor_item_count": max(0, _coerce_int(detail_evidence.get("anchor_item_count"))),
             "structured_item_count": max(0, _coerce_int(detail_evidence.get("structured_item_count"))),
         },

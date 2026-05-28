@@ -167,6 +167,18 @@ def test_normalize_retrieval_summary_keeps_safe_surface_memory_trace() -> None:
                         "persist_status": "",
                         "evidence_ref_count": 3,
                     },
+                    "coverage_failed_resolved_by_generic_evidence_review": True,
+                    "generic_evidence_review": {
+                        "status": "OK",
+                        "reason_code": "GENERIC_EVIDENCE_REVIEW_OK",
+                        "item_count": 1,
+                        "latency_ms": 11,
+                        "cached": False,
+                        "source": "fetch",
+                        "persisted_episode_id": "ep-generic-review",
+                        "persist_status": "OK",
+                        "evidence_ref_count": 1,
+                    },
                 },
             },
         }
@@ -209,6 +221,18 @@ def test_normalize_retrieval_summary_keeps_safe_surface_memory_trace() -> None:
     assert trace["lightnovel_deep_review"]["cached"] is True
     assert trace["lightnovel_deep_review"]["source_episode_id"] == "ep-cache"
     assert trace["lightnovel_deep_review"]["selected"] == {"index": 3, "title": "异世界皇女"}
+    assert trace["coverage_failed_resolved_by_generic_evidence_review"] is True
+    assert trace["generic_evidence_review"] == {
+        "status": "OK",
+        "reason_code": "GENERIC_EVIDENCE_REVIEW_OK",
+        "item_count": 1,
+        "latency_ms": 11,
+        "cached": False,
+        "source": "fetch",
+        "persisted_episode_id": "ep-generic-review",
+        "persist_status": "OK",
+        "evidence_ref_count": 1,
+    }
     assert "facts" not in trace
 
 
