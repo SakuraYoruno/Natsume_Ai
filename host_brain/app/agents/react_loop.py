@@ -198,6 +198,7 @@ def _execute_tools_parallel(
         与 tool_calls 等长的结果列表，顺序与输入一致
     """
     ctx = dict(context or {})
+    ctx.setdefault("agent_id", agent_id)
     results: list[dict[str, Any] | None] = [None] * len(tool_calls)
 
     # 分离 READ 和 WRITE 工具

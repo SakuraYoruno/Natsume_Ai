@@ -192,6 +192,7 @@ def test_dispatcher_builds_bounded_agent_context_envelope() -> None:
             "gateway": "GW",
             "custom": "VALUE",
             "api_key": "should-not-leak",
+            "retrieval_summary": {"surface_memory_recall_packet": {"facts": ["重复的大块召回不应透传。"]}},
             "recent_turns": long_turns,
             "surface_memory_recall_packet": {
                 "facts": ["长期记忆：用户偏好推荐按卡片分段。"],
@@ -217,6 +218,7 @@ def test_dispatcher_builds_bounded_agent_context_envelope() -> None:
     assert payload["agent_context_envelope"] == envelope
     assert "recent_turns" not in payload
     assert "surface_memory_recall_packet" not in payload
+    assert "retrieval_summary" not in context
     assert context["custom"] == "VALUE"
     assert context["api_key"] == "[REDACTED]"
     assert len(envelope["conversation_window"]["recent_turns"]) == 8

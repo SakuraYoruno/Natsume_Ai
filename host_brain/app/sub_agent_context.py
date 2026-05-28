@@ -41,6 +41,7 @@ _BULKY_CONTEXT_KEYS = {
     "surface_memory_recall_packet",
     "episode_recall_packet",
     "retrieval_evidence_items",
+    "retrieval_summary",
     "evidence_pack",
     "raw_history",
     "raw_logs",
@@ -160,6 +161,53 @@ def project_legacy_context_for_sub_agent(context: Mapping[str, Any] | None) -> d
     return projected
 
 
+def hydrate_sub_agent_context(
+    context: Mapping[str, Any] | None,
+    *,
+    request_id: str,
+    session_id: str,
+    task: str = "",
+    user_message: str = "",
+    parent_agent_id: str = "",
+    timeout_ms: int | None = None,
+    history_max_turns: int = MAX_RECENT_TURNS,
+) -> dict[str, Any]:
+    """Fill common sub-agent context anchors before the envelope is built.
+
+    This is intentionally best-effort. If conversation history or retrieval
+    state is unavailable, the caller still gets a small, valid context.
+    """
+
+    hydrated = dict(context or {})
+    if parent_agent_id:
+        hydrated.setdefault("parent_agent_id", _text(parent_agent_id, limit=80))
+    hydrated.setdefault("source", "sub_agent_context_hydrator")
+    if task:
+        hydrated.setdefault("task_brief", _text(task, limit=1_200))
+    if user_message:
+        hydrated.setdefault("user_message", _text(user_message, limit=1_200))
+    if timeout_ms is not None:
+        budget = dict(hydrated.get("tool_budget") or hydrated.get("agent_budget") or {})
+        budget.setdefault("timeout_ms", int(timeout_ms))
+        hydrated["tool_budget"] = budget
+
+    retrieval_summary = hydrated.get("retrieval_summary")
+    if isinstance(retrieval_summary, Mapping):
+        packet = retrieval_summary.get("surface_memory_recall_packet")
+        if isinstance(packet, Mapping) and "surface_memory_recall_packet" not in hydrated:
+            hydrated["surface_memory_recall_packet"] = dict(packet)
+
+    if session_id and not isinstance(hydrated.get("conversation_window"), Mapping) and "recent_turns" not in hydrated:
+        window = _fetch_conversation_window(
+            session_id=session_id,
+            request_id=request_id,
+            max_turns=max(1, int(history_max_turns or MAX_RECENT_TURNS)),
+        )
+        if window:
+            hydrated["conversation_window"] = window
+    return hydrated
+
+
 def render_agent_context_envelope_for_prompt(context: Mapping[str, Any] | None) -> str:
     raw = dict(context or {})
     envelope = raw.get("agent_context_envelope")
@@ -176,6 +224,35 @@ def render_agent_context_envelope_for_prompt(context: Mapping[str, Any] | None) 
         "Use this bounded context only as task background. Do not assume raw history, "
         "raw logs, secrets, or unlisted retrieval rows are available.\n"
         f"{payload}"
+    )
+
+
+def _fetch_conversation_window(*, session_id: str, request_id: str, max_turns: int) -> dict[str, Any]:
+    try:
+        from host_brain.app.dependencies import get_conversation_history  # noqa: PLC0415
+
+        window = get_conversation_history().fetch_window_for_messages(
+            session_id=session_id,
+            max_turns=max_turns,
+            exclude_request_id=request_id or None,
+            render_target_lang="zh",
+        )
+    except Exception:
+        return {}
+    turns = []
+    for turn in list(getattr(window, "recent_turns", []) or []):
+        role = _text(getattr(turn, "role", ""), limit=32)
+        content = _text(getattr(turn, "content", ""), limit=MAX_TURN_CHARS)
+        if content:
+            turns.append({"role": role or "context", "content": content})
+    return _drop_empty(
+        {
+            "recent_turns": turns[-MAX_RECENT_TURNS:],
+            "older_summary": _text(getattr(window, "older_summary", ""), limit=MAX_SUMMARY_CHARS),
+            "older_turn_count": int(getattr(window, "older_turn_count", 0) or 0),
+            "turns_injected": len(turns[-MAX_RECENT_TURNS:]),
+            "fetched_turns": int(getattr(window, "fetched_count", 0) or len(turns)),
+        }
     )
 
 
@@ -394,6 +471,7 @@ def _drop_empty(value: dict[str, Any]) -> dict[str, Any]:
 __all__ = [
     "AgentContextEnvelope",
     "build_agent_context_envelope",
+    "hydrate_sub_agent_context",
     "project_legacy_context_for_sub_agent",
     "render_agent_context_envelope_for_prompt",
 ]

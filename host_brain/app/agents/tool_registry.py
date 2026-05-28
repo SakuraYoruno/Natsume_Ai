@@ -746,6 +746,20 @@ def _tool_dispatch_sub_agent(args: dict[str, Any]) -> dict[str, Any]:
     if isinstance(payload.get("context"), dict):
         sub_ctx.update(dict(payload.get("context") or {}))
     sub_ctx.setdefault("source", "intent_agent_tool_dispatch")
+    try:
+        from host_brain.app.sub_agent_context import hydrate_sub_agent_context  # noqa: PLC0415
+
+        sub_ctx = hydrate_sub_agent_context(
+            sub_ctx,
+            request_id=request_id,
+            session_id=session_id,
+            task=task_text,
+            user_message=user_message,
+            parent_agent_id=str(ctx.get("agent_id") or "intent_agent"),
+            timeout_ms=timeout_ms,
+        )
+    except Exception:
+        pass
 
     try:
         from host_brain.app.sub_agent_protocol import (  # noqa: PLC0415
