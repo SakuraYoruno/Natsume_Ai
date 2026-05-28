@@ -75,6 +75,20 @@ COLLECTION_RECOMMENDATION = "recommendation_collection"
 COLLECTION_SCOPE_DAILY = "daily"
 COLLECTION_SCOPE_RECENT = "recent"
 COLLECTION_SCOPE_DELIVERY = "delivery"
+COLLECTION_SCOPE_ROLLING_PREFIX = "rolling"
+COLLECTION_SCOPE_ROLLING_3D = "rolling:3d"
+COLLECTION_SCOPE_ROLLING_7D = "rolling:7d"
+COLLECTION_SCOPE_ROLLING_30D = "rolling:30d"
+COLLECTION_ROLLING_WINDOWS: tuple[tuple[str, int, str], ...] = (
+    (COLLECTION_SCOPE_ROLLING_3D, 3, "近 3 天"),
+    (COLLECTION_SCOPE_ROLLING_7D, 7, "近 7 天"),
+    (COLLECTION_SCOPE_ROLLING_30D, 30, "近 30 天"),
+)
+COLLECTION_SCOPE_RECENT_WINDOW_DAYS = 7
+MS_DAY = 24 * 60 * 60 * 1000
+
+ENTITY_KIND_BOOK = "book"
+ENTITY_KIND_ITEM = "item"
 
 _LOCAL_MEMORY_TZ = timezone(timedelta(hours=8))
 
@@ -232,6 +246,13 @@ def _clamp_unit(value: Any, *, default: float = 0.0) -> float:
     except (TypeError, ValueError):
         return float(default)
     return max(0.0, min(1.0, numeric))
+
+
+def _coerce_int(value: Any, *, default: int = 0) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return int(default)
 
 
 def _metadata_float(metadata: Mapping[str, Any] | None, key: str, *, default: float = 0.0) -> float:
@@ -837,8 +858,172 @@ class LifeMemoryStore:
                         _json_dumps(dict(metadata or {})),
                     ),
                 )
+                self._prune_collection_items_for_scope_locked(collection_id=cid)
                 self._refresh_collection_item_count_locked(collection_id=cid, ts_ms=created)
-        return {"status": "OK", "collection_id": cid, "collection_item_id": item_id, "item_key": key}
+        entity = self._index_entity_for_collection_item(
+            collection_id=cid,
+            collection_item_id=item_id,
+            episode_id=eid,
+            item_key=key,
+            item_title=item_title,
+            item_summary=item_summary,
+            source_ref=source_ref,
+            evidence_ref=evidence_ref,
+            position=position,
+            ts_ms=created,
+            metadata=metadata,
+        )
+        return {
+            "status": "OK",
+            "collection_id": cid,
+            "collection_item_id": item_id,
+            "item_key": key,
+            "entity_index": entity,
+        }
+
+    def upsert_entity(
+        self,
+        *,
+        entity_kind: str,
+        canonical_name: str,
+        normalized_key: str | None = None,
+        domain: str | None = None,
+        salience: float = 0.25,
+        memory_strength: float = 0.35,
+        retention_state: str = RETENTION_WARM,
+        ts_ms: int | None = None,
+        metadata: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        kind = _clean_text(entity_kind) or ENTITY_KIND_ITEM
+        name = _clean_text(canonical_name, limit=300)
+        if not name:
+            return {"status": "SKIPPED", "reason_code": "EMPTY_ENTITY_NAME"}
+        domain_key = _clean_text(domain)
+        key = _clean_text(normalized_key) or _entity_normalized_key(name)
+        if not key:
+            return {"status": "SKIPPED", "reason_code": "EMPTY_ENTITY_KEY"}
+        created = int(ts_ms if ts_ms is not None else now_ts_ms())
+        entity_id = _entity_id(entity_kind=kind, domain=domain_key, normalized_key=key)
+        metadata_payload = dict(metadata or {})
+        with self.ledger._write_lock:
+            with self.ledger._conn:
+                existing = self.ledger._conn.execute(
+                    "SELECT metadata FROM life_memory_entity WHERE entity_id = ?",
+                    (entity_id,),
+                ).fetchone()
+                if existing is None:
+                    self.ledger._conn.execute(
+                        """
+                        INSERT INTO life_memory_entity (
+                            entity_id, entity_kind, canonical_name, normalized_key, domain,
+                            first_seen_ts_ms, last_seen_ts_ms, mention_count,
+                            salience, memory_strength, retention_state, metadata
+                        )
+                        VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)
+                        """,
+                        (
+                            entity_id,
+                            kind,
+                            name,
+                            key,
+                            domain_key,
+                            created,
+                            created,
+                            _clamp_unit(salience),
+                            _clamp_unit(memory_strength),
+                            _clean_text(retention_state).upper() or RETENTION_WARM,
+                            _json_dumps(metadata_payload),
+                        ),
+                    )
+                else:
+                    merged_meta = _merge_metadata(existing["metadata"], metadata_payload)
+                    self.ledger._conn.execute(
+                        """
+                        UPDATE life_memory_entity
+                        SET
+                            canonical_name = COALESCE(NULLIF(?, ''), canonical_name),
+                            last_seen_ts_ms = MAX(COALESCE(last_seen_ts_ms, 0), ?),
+                            salience = MAX(COALESCE(salience, 0.0), ?),
+                            memory_strength = MAX(COALESCE(memory_strength, 0.0), ?),
+                            retention_state = COALESCE(NULLIF(?, ''), retention_state),
+                            metadata = ?
+                        WHERE entity_id = ?
+                        """,
+                        (
+                            name,
+                            created,
+                            _clamp_unit(salience),
+                            _clamp_unit(memory_strength),
+                            _clean_text(retention_state).upper() or RETENTION_WARM,
+                            _json_dumps(merged_meta),
+                            entity_id,
+                        ),
+                    )
+        return {
+            "status": "OK",
+            "entity_id": entity_id,
+            "entity_kind": kind,
+            "canonical_name": name,
+            "normalized_key": key,
+            "domain": domain_key,
+        }
+
+    def attach_entity_mention(
+        self,
+        *,
+        entity_id: str,
+        episode_id: str | None = None,
+        collection_id: str | None = None,
+        collection_item_id: str | None = None,
+        source_ref: str | None = None,
+        evidence_ref: str | None = None,
+        position: int = 0,
+        ts_ms: int | None = None,
+        metadata: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        eid = _clean_text(entity_id)
+        if not eid:
+            return {"status": "SKIPPED", "reason_code": "EMPTY_ENTITY_ID"}
+        created = int(ts_ms if ts_ms is not None else now_ts_ms())
+        mention_seed = "life_entity_mention:v1:" + "|".join([
+            eid,
+            _clean_text(episode_id),
+            _clean_text(collection_id),
+            _clean_text(collection_item_id),
+            _clean_text(source_ref),
+        ])
+        mention_id = f"ement_{_stable_hash(mention_seed, size=32)}"
+        with self.ledger._write_lock:
+            with self.ledger._conn:
+                self.ledger._conn.execute(
+                    """
+                    INSERT INTO life_memory_entity_mention (
+                        mention_id, entity_id, episode_id, collection_id, collection_item_id,
+                        source_ref, evidence_ref, position, created_ts_ms, metadata
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(entity_id, episode_id, collection_id, collection_item_id) DO UPDATE SET
+                        source_ref = COALESCE(NULLIF(excluded.source_ref, ''), source_ref),
+                        evidence_ref = COALESCE(NULLIF(excluded.evidence_ref, ''), evidence_ref),
+                        position = excluded.position,
+                        created_ts_ms = MIN(created_ts_ms, excluded.created_ts_ms),
+                        metadata = excluded.metadata
+                    """,
+                    (
+                        mention_id,
+                        eid,
+                        _clean_text(episode_id) or None,
+                        _clean_text(collection_id) or None,
+                        _clean_text(collection_item_id) or None,
+                        _clean_text(source_ref) or None,
+                        _clean_text(evidence_ref) or None,
+                        max(0, int(position or 0)),
+                        created,
+                        _json_dumps(dict(metadata or {})),
+                    ),
+                )
+                self._refresh_entity_mention_count_locked(entity_id=eid)
+        return {"status": "OK", "entity_id": eid, "mention_id": mention_id}
 
     def index_episode_collections(self, *, episode_id: str, ts_ms: int | None = None) -> dict[str, Any]:
         eid = _clean_text(episode_id)
@@ -882,6 +1067,14 @@ class LifeMemoryStore:
                 _collection_summary_text(day_key=day_key, domain=domain, items=items, scope_label="最近"),
             ),
         ]
+        for rolling_scope, _days, label in COLLECTION_ROLLING_WINDOWS:
+            collection_specs.append(
+                (
+                    rolling_scope,
+                    f"{label}{domain_label}集合",
+                    _collection_summary_text(day_key=day_key, domain=domain, items=items, scope_label=label),
+                )
+            )
         written: list[dict[str, Any]] = []
         for scope, title, summary in collection_specs:
             collection = self.upsert_collection(
@@ -1028,6 +1221,146 @@ class LifeMemoryStore:
                                 **dict(boost_meta or {}),
                                 "scope_boost": round(scope_boost, 6),
                                 "strength_boost": round(strength * 0.10, 6),
+                            },
+                        },
+                    },
+                )
+            )
+        candidates = [
+            item
+            for _score, item in sorted(
+                scored,
+                key=lambda pair: (
+                    -round(pair[0], 2),
+                    -int(pair[1]["metadata"].get("updated_ts_ms") or 0),
+                    str(pair[1].get("memory_id") or ""),
+                ),
+            )[: max(1, int(top_k))]
+        ]
+        return EpisodeRecallPacket(query=normalized_query, candidates=candidates)
+
+    def recall_entity_packet(
+        self,
+        *,
+        query: str,
+        top_k: int = 6,
+        person_id: str | None = None,
+        session_id: str | None = None,
+        now_ts_ms_value: int | None = None,
+    ) -> EpisodeRecallPacket:
+        from host_brain.retrieval.recall_fusion_utils import (  # noqa: PLC0415
+            _apply_sqlite_ledger_boost,
+            _text_similarity_score,
+            _truncate_text_for_recall,
+        )
+
+        normalized_query = _clean_text(query)
+        plan = plan_life_memory_query(normalized_query)
+        current = int(now_ts_ms_value if now_ts_ms_value is not None else now_ts_ms())
+        domains = set(str(item or "").strip() for item in getattr(plan, "target_domains", ()) if str(item or "").strip())
+        if DOMAIN_LIGHTNOVEL_RECOMMENDATION in domains:
+            domains.add(DOMAIN_RECOMMENDATION)
+        if DOMAIN_RECOMMENDATION in domains:
+            domains.add(DOMAIN_LIGHTNOVEL_RECOMMENDATION)
+        clauses = ["COALESCE(retention_state, ?) != ?"]
+        params: list[Any] = [RETENTION_WARM, RETENTION_GONE]
+        if domains:
+            placeholders = ", ".join("?" for _ in domains)
+            clauses.append(f"COALESCE(domain, '') IN ({placeholders})")
+            params.extend(sorted(domains))
+        rows = self.ledger._conn.execute(
+            f"""
+            SELECT *
+            FROM life_memory_entity
+            WHERE {' AND '.join(clauses)}
+            ORDER BY last_seen_ts_ms DESC, memory_strength DESC
+            LIMIT ?
+            """,
+            [*params, max(8, int(top_k) * 8)],
+        ).fetchall()
+        terms = _recall_like_terms(normalized_query)
+        scored: list[tuple[float, dict[str, Any]]] = []
+        for row in rows:
+            entity = dict(row)
+            metadata = _json_loads(entity.get("metadata"), fallback={})
+            if not isinstance(metadata, dict):
+                metadata = {}
+            entity_id = _clean_text(entity.get("entity_id"))
+            if not entity_id:
+                continue
+            mention_rows = self._list_entity_mentions(
+                entity_id=entity_id,
+                person_id=person_id,
+                session_id=session_id,
+                limit=8,
+            )
+            text_for_score = " ".join(
+                str(part or "")
+                for part in (
+                    entity.get("canonical_name"),
+                    entity.get("normalized_key"),
+                    entity.get("domain"),
+                    metadata.get("source_ref"),
+                    "\n".join(_entity_mention_recall_line(item) for item in mention_rows[:4]),
+                )
+            )
+            base_score = _text_similarity_score(normalized_query, text_for_score) if normalized_query else 0.0
+            keyword_hit = any(term and term in text_for_score.lower() for term in terms)
+            if normalized_query and base_score <= 0.0 and not keyword_hit:
+                continue
+            boosted_score, boost_meta = _apply_sqlite_ledger_boost(
+                base_score=max(base_score, 0.05 if keyword_hit else 0.02),
+                row_ts_ms=int(entity.get("last_seen_ts_ms") or 0),
+                now_ts_ms=current,
+                row_person_id=None,
+                target_person_id=_clean_text(person_id) or None,
+                row_session_id=None,
+                target_session_id=_clean_text(session_id) or None,
+            )
+            strength = _clamp_unit(entity.get("memory_strength"), default=_clamp_unit(entity.get("salience"), default=0.35))
+            mention_count = int(entity.get("mention_count") or len(mention_rows))
+            final_score = round(max(0.0, min(1.0, boosted_score + min(0.12, mention_count * 0.015) + strength * 0.08)), 6)
+            mention_lines = [_entity_mention_recall_line(item) for item in mention_rows[:5]]
+            text = _truncate_text_for_recall(
+                f"实体记忆：{entity.get('canonical_name')}；出现 {mention_count} 次；"
+                f"最近证据：{'；'.join(line for line in mention_lines if line)}",
+                limit=900,
+            )
+            evidence_refs = [
+                _clean_text(item.get("evidence_ref") or item.get("source_ref"))
+                for item in mention_rows
+                if _clean_text(item.get("evidence_ref") or item.get("source_ref"))
+            ]
+            scored.append(
+                (
+                    final_score,
+                    {
+                        "memory_id": entity_id,
+                        "text": text,
+                        "score": final_score,
+                        "metadata": {
+                            "store_id": "life_memory_entity",
+                            "memory_layer": "life_memory_entity",
+                            "entity_id": entity_id,
+                            "entity_kind": entity.get("entity_kind"),
+                            "canonical_name": entity.get("canonical_name"),
+                            "normalized_key": entity.get("normalized_key"),
+                            "domain": entity.get("domain"),
+                            "mention_count": mention_count,
+                            "mentions": mention_rows,
+                            "retention_state": entity.get("retention_state"),
+                            "memory_strength": strength,
+                            "created_ts_ms": int(entity.get("first_seen_ts_ms") or 0),
+                            "updated_ts_ms": int(entity.get("last_seen_ts_ms") or 0),
+                            "source_ref": f"life_memory_entity://{entity_id}",
+                            "evidence_refs_primary": evidence_refs[0] if evidence_refs else f"life_memory_entity://{entity_id}",
+                            "evidence_refs": evidence_refs,
+                            "query_plan": plan.as_dict(),
+                            "score_boost": {
+                                **dict(boost_meta or {}),
+                                "keyword_hit": bool(keyword_hit),
+                                "strength_boost": round(strength * 0.08, 6),
+                                "mention_count_boost": round(min(0.12, mention_count * 0.015), 6),
                             },
                         },
                     },
@@ -1888,6 +2221,136 @@ class LifeMemoryStore:
             "semantic_reference_protected": semantic_reference_protected,
         }
 
+    def _prune_collection_items_for_scope_locked(self, *, collection_id: str) -> None:
+        collection = self.ledger._conn.execute(
+            "SELECT scope_key FROM life_memory_collection WHERE collection_id = ?",
+            (_clean_text(collection_id),),
+        ).fetchone()
+        if collection is None:
+            return
+        days = _collection_scope_window_days(collection["scope_key"])
+        if days <= 0:
+            return
+        anchor_row = self.ledger._conn.execute(
+            """
+            SELECT MAX(created_ts_ms) AS max_ts
+            FROM life_memory_collection_item
+            WHERE collection_id = ?
+            """,
+            (_clean_text(collection_id),),
+        ).fetchone()
+        anchor_ts = int(anchor_row["max_ts"] or 0) if anchor_row is not None else 0
+        if anchor_ts <= 0:
+            return
+        anchor_date = datetime.fromtimestamp(anchor_ts / 1000.0, tz=_LOCAL_MEMORY_TZ).date()
+        cutoff_date = anchor_date - timedelta(days=max(0, int(days) - 1))
+        cutoff_dt = datetime(cutoff_date.year, cutoff_date.month, cutoff_date.day, tzinfo=_LOCAL_MEMORY_TZ)
+        cutoff = int(cutoff_dt.timestamp() * 1000)
+        self.ledger._conn.execute(
+            """
+            DELETE FROM life_memory_collection_item
+            WHERE collection_id = ?
+              AND created_ts_ms < ?
+            """,
+            (_clean_text(collection_id), cutoff),
+        )
+
+    def _refresh_entity_mention_count_locked(self, *, entity_id: str) -> None:
+        eid = _clean_text(entity_id)
+        if not eid:
+            return
+        row = self.ledger._conn.execute(
+            """
+            SELECT COUNT(1) AS mention_count, MAX(created_ts_ms) AS last_seen_ts_ms
+            FROM life_memory_entity_mention
+            WHERE entity_id = ?
+            """,
+            (eid,),
+        ).fetchone()
+        mention_count = int(row["mention_count"] or 0) if row is not None else 0
+        last_seen_ts_ms = int(row["last_seen_ts_ms"] or 0) if row is not None else 0
+        self.ledger._conn.execute(
+            """
+            UPDATE life_memory_entity
+            SET
+                mention_count = ?,
+                last_seen_ts_ms = MAX(COALESCE(last_seen_ts_ms, 0), ?)
+            WHERE entity_id = ?
+            """,
+            (mention_count, last_seen_ts_ms, eid),
+        )
+
+    def _index_entity_for_collection_item(
+        self,
+        *,
+        collection_id: str,
+        collection_item_id: str,
+        episode_id: str,
+        item_key: str,
+        item_title: str | None,
+        item_summary: str | None,
+        source_ref: str | None,
+        evidence_ref: str | None,
+        position: int,
+        ts_ms: int,
+        metadata: Mapping[str, Any] | None,
+    ) -> dict[str, Any]:
+        collection = self.ledger._conn.execute(
+            "SELECT collection_kind, domain, scope_key FROM life_memory_collection WHERE collection_id = ?",
+            (_clean_text(collection_id),),
+        ).fetchone()
+        if collection is None:
+            return {"status": "SKIPPED", "reason_code": "COLLECTION_NOT_FOUND"}
+        scope_key = _clean_text(collection["scope_key"])
+        if not scope_key.startswith(f"{COLLECTION_SCOPE_DELIVERY}:"):
+            return {"status": "SKIPPED", "reason_code": "ENTITY_INDEX_ONLY_DELIVERY_ITEMS"}
+        item_payload = dict(metadata or {})
+        title = _clean_text(item_title, limit=300) or _collection_item_title(item_payload)
+        if not title:
+            return {"status": "SKIPPED", "reason_code": "EMPTY_ENTITY_ITEM_TITLE"}
+        domain = _clean_text(collection["domain"])
+        source = _clean_text(source_ref) or _collection_item_source_ref(item_payload)
+        normalized_key = _entity_key_from_item(title=title, source_ref=source)
+        entity_kind = ENTITY_KIND_BOOK if domain == DOMAIN_LIGHTNOVEL_RECOMMENDATION else ENTITY_KIND_ITEM
+        entity = self.upsert_entity(
+            entity_kind=entity_kind,
+            canonical_name=title,
+            normalized_key=normalized_key,
+            domain=domain,
+            salience=0.36,
+            memory_strength=0.42,
+            retention_state=RETENTION_WARM,
+            ts_ms=ts_ms,
+            metadata={
+                "source_ref": source,
+                "first_item_key": _clean_text(item_key),
+                "domain": domain,
+                "source_collection_scope": scope_key,
+                "memory_layer": "life_memory_entity",
+            },
+        )
+        if entity.get("status") != "OK":
+            return entity
+        mention = self.attach_entity_mention(
+            entity_id=str(entity["entity_id"]),
+            episode_id=episode_id,
+            collection_id=collection_id,
+            collection_item_id=collection_item_id,
+            source_ref=source,
+            evidence_ref=evidence_ref or source,
+            position=position,
+            ts_ms=ts_ms,
+            metadata={
+                **item_payload,
+                "item_key": _clean_text(item_key),
+                "item_title": title,
+                "item_summary": _clean_text(item_summary, limit=900),
+                "collection_scope_key": scope_key,
+                "memory_layer": "life_memory_entity_mention",
+            },
+        )
+        return {**entity, "mention": mention}
+
     def _refresh_collection_item_count_locked(self, *, collection_id: str, ts_ms: int) -> None:
         self.ledger._conn.execute(
             """
@@ -2014,6 +2477,61 @@ class LifeMemoryStore:
             item["metadata"] = metadata if isinstance(metadata, dict) else {}
             items.append(item)
         return items
+
+    def _list_entity_mentions(
+        self,
+        *,
+        entity_id: str,
+        person_id: str | None = None,
+        session_id: str | None = None,
+        limit: int = 12,
+    ) -> list[dict[str, Any]]:
+        clauses = ["m.entity_id = ?"]
+        params: list[Any] = [_clean_text(entity_id)]
+        scoped_session = _clean_text(session_id)
+        scoped_person = _clean_text(person_id)
+        if scoped_session:
+            clauses.append("(COALESCE(ep.session_id, '') = ? OR COALESCE(ep.session_id, '') = '')")
+            params.append(scoped_session)
+        elif scoped_person:
+            aliases = _owner_alias_person_ids(scoped_person)
+            placeholders = ", ".join("?" for _ in aliases)
+            clauses.append(f"(COALESCE(ep.person_id, '') IN ({placeholders}) OR COALESCE(ep.person_id, '') = '')")
+            params.extend(aliases)
+        rows = self.ledger._conn.execute(
+            f"""
+            SELECT
+                m.*,
+                i.item_title,
+                i.item_summary,
+                i.source_ref AS item_source_ref,
+                i.evidence_ref AS item_evidence_ref,
+                i.metadata AS item_metadata,
+                c.scope_key,
+                c.domain AS collection_domain,
+                ep.person_id AS episode_person_id,
+                ep.session_id AS episode_session_id,
+                ep.created_ts_ms AS episode_created_ts_ms
+            FROM life_memory_entity_mention m
+            LEFT JOIN life_memory_collection_item i ON i.collection_item_id = m.collection_item_id
+            LEFT JOIN life_memory_collection c ON c.collection_id = m.collection_id
+            LEFT JOIN life_episode ep ON ep.episode_id = m.episode_id
+            WHERE {' AND '.join(clauses)}
+            ORDER BY m.created_ts_ms DESC, m.position ASC
+            LIMIT ?
+            """,
+            [*params, max(1, int(limit))],
+        ).fetchall()
+        mentions: list[dict[str, Any]] = []
+        for row in rows:
+            item = dict(row)
+            item.pop("id", None)
+            metadata = _json_loads(item.get("metadata"), fallback={})
+            item_metadata = _json_loads(item.get("item_metadata"), fallback={})
+            item["metadata"] = metadata if isinstance(metadata, dict) else {}
+            item["item_metadata"] = item_metadata if isinstance(item_metadata, dict) else {}
+            mentions.append(item)
+        return mentions
 
     def _list_evidence(self, *, episode_id: str) -> list[dict[str, Any]]:
         rows = self.ledger._conn.execute(
@@ -2454,6 +2972,36 @@ def _collection_id(
     return f"col_{_stable_hash(seed, size=32)}"
 
 
+def _entity_id(*, entity_kind: str, domain: str, normalized_key: str) -> str:
+    seed = f"life_entity:v1:{_clean_text(entity_kind)}:{_clean_text(domain)}:{_clean_text(normalized_key)}"
+    return f"ent_{_stable_hash(seed, size=32)}"
+
+
+def _entity_key_from_item(*, title: str, source_ref: str | None) -> str:
+    source = _clean_text(source_ref, limit=500).lower()
+    if source:
+        return f"source:{_stable_hash(source, size=28)}"
+    return _entity_normalized_key(title)
+
+
+def _entity_normalized_key(value: Any) -> str:
+    text = _clean_text(value, limit=300).lower()
+    text = re.sub(r"https?://", "", text)
+    text = re.sub(r"[\s\u3000]+", "", text)
+    text = re.sub(r"[《》「」『』【】\[\]（）()<>\"'`，。！？!?,.;:：；、|/\\]+", "", text)
+    return text[:180]
+
+
+def _collection_scope_window_days(scope_key: Any) -> int:
+    scope = _clean_text(scope_key).lower()
+    if scope == COLLECTION_SCOPE_RECENT:
+        return COLLECTION_SCOPE_RECENT_WINDOW_DAYS
+    match = re.fullmatch(rf"{COLLECTION_SCOPE_ROLLING_PREFIX}:(\d+)d", scope)
+    if not match:
+        return 0
+    return max(1, int(match.group(1)))
+
+
 def _collection_scope_key(*, scope: str, day_key: str, episode_id: str) -> str:
     normalized = _clean_text(scope)
     if normalized == COLLECTION_SCOPE_DAILY:
@@ -2469,11 +3017,16 @@ def _collection_day_key(ts_ms: int) -> str:
 
 def _scope_keys_for_collection_plan(*, plan: Any, now_ts_ms_value: int) -> list[str]:
     scope = str(getattr(plan, "temporal_scope", "") or "").strip()
+    lookback_days = _coerce_int(getattr(plan, "time_lookback_days", None))
     today = datetime.fromtimestamp(int(now_ts_ms_value) / 1000.0, tz=_LOCAL_MEMORY_TZ).date()
     if scope == TEMPORAL_CURRENT:
         return []
     if scope in {TEMPORAL_RECENT_DAYS, ""}:
-        return [COLLECTION_SCOPE_RECENT]
+        if lookback_days > 0 and lookback_days <= 3:
+            return [COLLECTION_SCOPE_ROLLING_3D, COLLECTION_SCOPE_RECENT]
+        if lookback_days > 7:
+            return [COLLECTION_SCOPE_ROLLING_30D, COLLECTION_SCOPE_RECENT]
+        return [COLLECTION_SCOPE_ROLLING_7D, COLLECTION_SCOPE_RECENT]
     if scope == TEMPORAL_TODAY:
         return [f"{COLLECTION_SCOPE_DAILY}:{today.isoformat()}"]
     if scope == TEMPORAL_YESTERDAY:
@@ -2568,6 +3121,8 @@ def _collection_summary_text_for_collection(
         prefix = f"{day_key} 当天{label}集合"
     elif scope_key.startswith(f"{COLLECTION_SCOPE_DELIVERY}:"):
         prefix = f"本次{label}集合"
+    elif scope_key.startswith(f"{COLLECTION_SCOPE_ROLLING_PREFIX}:"):
+        prefix = f"{_rolling_scope_label(scope_key)}{label}集合"
     elif scope_key == COLLECTION_SCOPE_RECENT:
         prefix = f"最近{label}集合"
     else:
@@ -2644,16 +3199,34 @@ def _collection_item_recall_line(item: Mapping[str, Any], index: int) -> str:
     return "｜".join(parts)
 
 
+def _entity_mention_recall_line(item: Mapping[str, Any]) -> str:
+    title = _clean_text(item.get("item_title") or (item.get("item_metadata") or {}).get("title"), limit=120)
+    summary = _clean_text(item.get("item_summary") or (item.get("item_metadata") or {}).get("item_summary"), limit=220)
+    scope_key = _clean_text(item.get("scope_key"))
+    source = _clean_text(item.get("source_ref") or item.get("item_source_ref"), limit=240)
+    when = ""
+    ts_ms = _coerce_int(item.get("episode_created_ts_ms") or item.get("created_ts_ms"))
+    if ts_ms > 0:
+        when = _collection_day_key(ts_ms)
+    parts = [part for part in (when, scope_key, title, summary) if part]
+    if source:
+        parts.append(f"来源：{source}")
+    return "｜".join(parts)
+
+
 def _collection_scope_boost(collection: Mapping[str, Any], *, plan: Any, now_ts_ms_value: int) -> float:
     scope_key = _clean_text(collection.get("scope_key"))
     temporal_scope = str(getattr(plan, "temporal_scope", ""))
     target_scope_keys = set(_scope_keys_for_collection_plan(plan=plan, now_ts_ms_value=now_ts_ms_value))
+    target_has_rolling = any(key.startswith(f"{COLLECTION_SCOPE_ROLLING_PREFIX}:") for key in target_scope_keys)
     boost = 0.0
     if target_scope_keys and scope_key in target_scope_keys:
         boost += 0.24
+    if scope_key.startswith(f"{COLLECTION_SCOPE_ROLLING_PREFIX}:") and scope_key in target_scope_keys:
+        boost += 0.06
     if scope_key.startswith(f"{COLLECTION_SCOPE_DELIVERY}:") and temporal_scope == TEMPORAL_CURRENT:
         boost += 0.28
-    if scope_key == COLLECTION_SCOPE_RECENT and temporal_scope in {TEMPORAL_CURRENT, TEMPORAL_RECENT_DAYS}:
+    if scope_key == COLLECTION_SCOPE_RECENT and temporal_scope in {TEMPORAL_CURRENT, TEMPORAL_RECENT_DAYS} and not target_has_rolling:
         boost += 0.18
     if int(collection.get("item_count") or 0) > 0:
         boost += 0.08
@@ -2806,7 +3379,16 @@ def _semantic_collection_scope_label(scope_key: str) -> str:
         return value.split(":", 1)[1] + " 的"
     if value == COLLECTION_SCOPE_RECENT:
         return "最近的"
+    if value.startswith(f"{COLLECTION_SCOPE_ROLLING_PREFIX}:"):
+        return _rolling_scope_label(value) + "的"
     return f"{value} "
+
+
+def _rolling_scope_label(scope_key: str) -> str:
+    days = _collection_scope_window_days(scope_key)
+    if days <= 0:
+        return "滚动窗口"
+    return f"近 {days} 天"
 
 
 def _semantic_collection_confidence(*, collection: Mapping[str, Any], item_count: int) -> float:

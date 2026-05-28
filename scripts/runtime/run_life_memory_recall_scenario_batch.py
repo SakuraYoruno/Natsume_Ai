@@ -190,6 +190,14 @@ def _service(ledger: SQLiteLedger) -> RecallFusionServiceContract:
             score_weight=1.25,
             node_selector=node_id,
         ),
+        "surface_life_entity": RecallRouteConfig(
+            route_id="surface_life_entity",
+            store_id="life_memory_entity",
+            collection="life_memory_entity",
+            top_k=5,
+            score_weight=0.9,
+            node_selector=node_id,
+        ),
         "surface_life_episode": RecallRouteConfig(
             route_id="surface_life_episode",
             store_id="life_episode",

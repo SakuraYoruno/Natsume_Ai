@@ -106,6 +106,29 @@ def _collection_service(ledger: SQLiteLedger) -> RecallFusionServiceContract:
     )
 
 
+def _entity_service(ledger: SQLiteLedger) -> RecallFusionServiceContract:
+    node_id = "surface_main_chain_memory_recall"
+    route = RecallRouteConfig(
+        route_id="surface_life_entity",
+        store_id="life_memory_entity",
+        collection="life_memory_entity",
+        top_k=5,
+        score_weight=1.0,
+        node_selector=node_id,
+    )
+    return RecallFusionServiceContract(
+        ledger=ledger,
+        chroma_client=FakeChromaClient(),
+        runtime_config=RecallRuntimeConfig(
+            enabled=True,
+            default_route="surface_life_entity",
+            routes={"surface_life_entity": route},
+        ),
+        node_id=node_id,
+        use_hybrid=False,
+    )
+
+
 def test_recommendation_delivery_indexes_delivery_daily_and_recent_collections() -> None:
     ledger = SQLiteLedger(db_path=":memory:")
     try:
@@ -113,8 +136,10 @@ def test_recommendation_delivery_indexes_delivery_daily_and_recent_collections()
         yesterday_episode = _write_delivery(store, prefix="Yesterday", ts_ms=_ts(2026, 5, 27))
         _write_delivery(store, prefix="Today", ts_ms=_ts(2026, 5, 28))
 
-        assert len(ledger.life_memory_collection) == 5
-        assert len(ledger.life_memory_collection_item) == 18
+        assert len(ledger.life_memory_collection) == 8
+        assert len(ledger.life_memory_collection_item) == 36
+        assert len(ledger.life_memory_entity) == 6
+        assert len(ledger.life_memory_entity_mention) == 6
         assert any(row["episode_id"] == yesterday_episode for row in ledger.life_memory_collection_item)
         delivery_collection = next(row for row in ledger.life_memory_collection if row["scope_key"] == f"delivery:{yesterday_episode}")
         assert delivery_collection["item_count"] == 3
@@ -124,6 +149,9 @@ def test_recommendation_delivery_indexes_delivery_daily_and_recent_collections()
         assert "记录 6 个条目" in recent_collection["summary"]
         assert "Yesterday A" in recent_collection["summary"]
         assert "Today C" in recent_collection["summary"]
+        rolling_collection = next(row for row in ledger.life_memory_collection if row["scope_key"] == "rolling:7d")
+        assert rolling_collection["item_count"] == 6
+        assert "近 7 天轻小说推荐集合" in rolling_collection["summary"]
 
         packet = store.recall_collection_packet(
             query="昨天三本呢",
@@ -194,9 +222,9 @@ def test_recent_days_collection_recalls_items_across_multiple_delivery_episodes(
 
         assert packet.candidates
         top = packet.candidates[0]
-        assert top["metadata"]["scope_key"] == "recent"
+        assert top["metadata"]["scope_key"] == "rolling:7d"
         assert top["metadata"]["item_count"] == 9
-        assert "最近轻小说推荐集合，记录 9 个条目" in top["text"]
+        assert "近 7 天轻小说推荐集合，记录 9 个条目" in top["text"]
         assert "DayBefore A" in top["text"]
         assert "Yesterday B" in top["text"]
         assert "Today C" in top["text"]
@@ -328,7 +356,7 @@ def test_surface_packet_keeps_many_recent_collection_items() -> None:
         joined = "\n".join(packet.facts)
 
         assert packet.reason_code is None
-        assert "最近轻小说推荐集合，记录 9 个条目" in joined
+        assert "轻小说推荐集合，记录 9 个条目" in joined
         assert "DayBefore A" in joined
         assert "Yesterday C" in joined
         assert "Today C" in joined
@@ -336,5 +364,84 @@ def test_surface_packet_keeps_many_recent_collection_items() -> None:
         trace_items = list((packet.trace or {}).get("selected_collection_items") or [])
         assert len(trace_items) == 9
         assert any(item["title"] == "DayBefore A" and item["detail_url"].endswith("daybefore-a") for item in trace_items)
+    finally:
+        ledger.close()
+
+
+def test_rolling_collections_prune_old_items_and_entity_index_dedupes_books() -> None:
+    ledger = SQLiteLedger(db_path=":memory:")
+    try:
+        store = LifeMemoryStore(ledger=ledger)
+        for day in range(20, 30):
+            _write_delivery(store, prefix=f"Day{day}", ts_ms=_ts(2026, 5, day))
+
+        rolling_3d = next(row for row in ledger.life_memory_collection if row["scope_key"] == "rolling:3d")
+        rolling_7d = next(row for row in ledger.life_memory_collection if row["scope_key"] == "rolling:7d")
+        rolling_30d = next(row for row in ledger.life_memory_collection if row["scope_key"] == "rolling:30d")
+        recent = next(row for row in ledger.life_memory_collection if row["scope_key"] == "recent")
+
+        assert rolling_3d["item_count"] == 9
+        assert "Day27 A" in rolling_3d["summary"]
+        assert "Day26 A" not in rolling_3d["summary"]
+        assert rolling_7d["item_count"] == 21
+        assert recent["item_count"] == 21
+        assert "Day23 A" in rolling_7d["summary"]
+        assert "Day22 A" not in rolling_7d["summary"]
+        assert rolling_30d["item_count"] == 30
+
+        packet = store.recall_collection_packet(
+            query="这几天推荐过哪些轻小说？",
+            top_k=1,
+            person_id="owner",
+            session_id="qq_dm_owner",
+            now_ts_ms_value=_ts(2026, 5, 29, 18),
+        )
+        assert packet.candidates
+        top = packet.candidates[0]
+        assert top["metadata"]["scope_key"] == "rolling:7d"
+        assert top["metadata"]["item_count"] == 21
+        assert "Day23 A" in top["text"]
+        assert "Day22 A" not in top["text"]
+
+        entity_packet = store.recall_entity_packet(
+            query="Day29 A 这本轻小说出现过吗？",
+            top_k=2,
+            person_id="owner",
+            session_id="qq_dm_owner",
+            now_ts_ms_value=_ts(2026, 5, 29, 18),
+        )
+        assert entity_packet.candidates
+        entity_top = entity_packet.candidates[0]
+        assert entity_top["metadata"]["store_id"] == "life_memory_entity"
+        assert entity_top["metadata"]["canonical_name"] == "Day29 A"
+        assert entity_top["metadata"]["mention_count"] == 1
+        assert "Day29 A" in entity_top["text"]
+    finally:
+        ledger.close()
+
+
+def test_recall_fusion_entity_route_returns_book_entity() -> None:
+    ledger = SQLiteLedger(db_path=":memory:")
+    try:
+        store = LifeMemoryStore(ledger=ledger)
+        _write_delivery(store, prefix="EntityRoute", ts_ms=_ts(2026, 5, 28))
+
+        result = _entity_service(ledger).recall(
+            request_id="req-entity-route",
+            query="EntityRoute B 这本轻小说出现过吗？",
+            query_embedding=[0.1] * 16,
+            person_id="owner",
+            session_id="qq_dm_owner",
+            ts_ms=_ts(2026, 5, 28, 18),
+            target_store_ids=["life_memory_entity"],
+        )
+
+        assert result.output["status"] == "OK"
+        assert result.output["routes"][0]["store_id"] == "life_memory_entity"
+        assert result.output["candidates"]
+        top = result.output["candidates"][0]
+        assert top["metadata"]["store_id"] == "life_memory_entity"
+        assert top["metadata"]["canonical_name"] == "EntityRoute B"
+        assert "EntityRoute B" in top["snippet"]
     finally:
         ledger.close()

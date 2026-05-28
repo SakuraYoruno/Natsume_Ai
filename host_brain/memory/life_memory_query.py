@@ -77,21 +77,21 @@ RECALL_INTENT_CONTRACTS: dict[str, RecallIntentContract] = {
     CONTRACT_COLLECTION_DATE: RecallIntentContract(
         contract_id=CONTRACT_COLLECTION_DATE,
         primary_memory_layer="life_memory_collection",
-        expected_memory_layers=("life_memory_collection",),
+        expected_memory_layers=("life_memory_collection", "life_memory_entity"),
         validation_requirements=("scope_match", "collection_items_present", "evidence_refs_present"),
         answer_obligations=("keep_requested_date_scope", "use_collection_items_not_chat_echo"),
     ),
     CONTRACT_COLLECTION_RECENT: RecallIntentContract(
         contract_id=CONTRACT_COLLECTION_RECENT,
         primary_memory_layer="life_memory_collection",
-        expected_memory_layers=("life_memory_collection",),
+        expected_memory_layers=("life_memory_collection", "life_memory_entity"),
         validation_requirements=("scope_match", "collection_items_present", "evidence_refs_present"),
         answer_obligations=("summarize_cross_day_collection", "preserve_item_identity"),
     ),
     CONTRACT_ANAPHORIC_SELECTION: RecallIntentContract(
         contract_id=CONTRACT_ANAPHORIC_SELECTION,
         primary_memory_layer="life_memory_collection",
-        expected_memory_layers=("life_memory_collection", "life_episode"),
+        expected_memory_layers=("life_memory_collection", "life_memory_entity", "life_episode"),
         validation_requirements=("collection_or_episode_hit", "evidence_refs_present", "no_self_echo"),
         answer_obligations=("ground_selection_in_recalled_items", "do_not_invent_unread_content"),
     ),
@@ -112,7 +112,7 @@ RECALL_INTENT_CONTRACTS: dict[str, RecallIntentContract] = {
     CONTRACT_EXPLICIT_MEMORY: RecallIntentContract(
         contract_id=CONTRACT_EXPLICIT_MEMORY,
         primary_memory_layer="life_episode",
-        expected_memory_layers=("life_episode", "semantic_memory", "sqlite_ledger", "episodic_vector", "neo4j_bond"),
+        expected_memory_layers=("life_episode", "life_memory_entity", "semantic_memory", "sqlite_ledger", "episodic_vector", "neo4j_bond"),
         validation_requirements=("trusted_memory_hit", "source_ref_present"),
         answer_obligations=("answer_from_trusted_memory", "say_when_memory_is_missing"),
     ),
@@ -139,7 +139,10 @@ _ANAPHORIC_SELECTION_RE = re.compile(
     r"(?:喜欢|想看|先看|推荐|选|挑|好看).{0,8}哪|"
     r"这(?:三|几|十几)?(?:本|部)|这些)"
 )
-_RECENT_COLLECTION_RE = re.compile(r"(?:最近|这几天|这两天|这三天|这周|近几天|这段时间|过去几天|过去一周|十几本|几本)")
+_RECENT_COLLECTION_RE = re.compile(
+    r"(?:最近|这几天|这两天|这三天|这周|本周|近几天|这段时间|过去几天|过去一周|"
+    r"过去三十天|近三十天|30天|一个月|本月|十几本|几本)"
+)
 _DATE_LOOKUP_RE = re.compile(r"(?:今天|今日|昨天|昨晚|前天|上次|之前|以前|过去|这周)")
 _BOOK_DOMAIN_RE = re.compile(r"(?:轻小说|小说|书籍|书|epub|lightnovel)", re.IGNORECASE)
 _RECOMMENDATION_RE = re.compile(r"(?:推荐|推送|发给我|发过|选书|书单)")
@@ -242,7 +245,7 @@ def plan_life_memory_query(text: Any, *, task_mode: str | None = None) -> LifeMe
             query_kind=QUERY_OPEN_LOOP,
             temporal_scope=temporal_scope,
             target_domains=domains,
-            target_store_ids=("life_episode", "semantic_memory", "episodic_vector", "sqlite_ledger", "neo4j_bond"),
+            target_store_ids=("life_episode", "life_memory_entity", "semantic_memory", "episodic_vector", "sqlite_ledger", "neo4j_bond"),
             time_lookback_days=_lookback_for_scope(temporal_scope, default=None),
             max_facts=4,
             max_chars_per_fact=180,
@@ -267,8 +270,8 @@ def plan_life_memory_query(text: Any, *, task_mode: str | None = None) -> LifeMe
             query_kind=QUERY_DATE_LOOKUP if temporal_scope in {TEMPORAL_TODAY, TEMPORAL_YESTERDAY, TEMPORAL_DAY_BEFORE_YESTERDAY} else QUERY_COLLECTION_SUMMARY,
             temporal_scope=scope,
             target_domains=domains,
-            target_store_ids=("life_memory_collection", "life_episode", "semantic_memory", "episodic_vector", "sqlite_ledger"),
-            time_lookback_days=_lookback_for_scope(scope, default=7),
+            target_store_ids=("life_memory_collection", "life_memory_entity", "life_episode", "semantic_memory", "episodic_vector", "sqlite_ledger"),
+            time_lookback_days=_lookback_for_text_and_scope(message, scope, default=7),
             max_facts=6,
             max_chars_per_fact=900,
             reason="collection_memory_recall",
@@ -287,8 +290,8 @@ def plan_life_memory_query(text: Any, *, task_mode: str | None = None) -> LifeMe
             query_kind=QUERY_ANAPHORIC_SELECTION,
             temporal_scope=temporal_scope if temporal_scope != TEMPORAL_UNSPECIFIED else TEMPORAL_CURRENT,
             target_domains=domains,
-            target_store_ids=("life_memory_collection", "life_episode", "episodic_vector", "sqlite_ledger", "semantic_memory"),
-            time_lookback_days=_lookback_for_scope(temporal_scope, default=1),
+            target_store_ids=("life_memory_collection", "life_memory_entity", "life_episode", "episodic_vector", "sqlite_ledger", "semantic_memory"),
+            time_lookback_days=_lookback_for_text_and_scope(message, temporal_scope, default=1),
             max_facts=5,
             max_chars_per_fact=760,
             reason="anaphoric_selection_recall",
@@ -313,8 +316,8 @@ def plan_life_memory_query(text: Any, *, task_mode: str | None = None) -> LifeMe
             query_kind=QUERY_DATE_LOOKUP if temporal_scope in {TEMPORAL_TODAY, TEMPORAL_YESTERDAY, TEMPORAL_DAY_BEFORE_YESTERDAY} else QUERY_COLLECTION_SUMMARY,
             temporal_scope=scope,
             target_domains=domains,
-            target_store_ids=("life_memory_collection", "life_episode", "semantic_memory", "episodic_vector", "sqlite_ledger"),
-            time_lookback_days=_lookback_for_scope(scope, default=7),
+            target_store_ids=("life_memory_collection", "life_memory_entity", "life_episode", "semantic_memory", "episodic_vector", "sqlite_ledger"),
+            time_lookback_days=_lookback_for_text_and_scope(message, scope, default=7),
             max_facts=6,
             max_chars_per_fact=900,
             reason="collection_memory_recall",
@@ -381,7 +384,7 @@ def plan_life_memory_query(text: Any, *, task_mode: str | None = None) -> LifeMe
             query_kind=query_kind,
             temporal_scope=temporal_scope,
             target_domains=domains,
-            target_store_ids=("life_episode", "semantic_memory", "episodic_vector", "sqlite_ledger", "neo4j_bond"),
+            target_store_ids=("life_episode", "life_memory_entity", "semantic_memory", "episodic_vector", "sqlite_ledger", "neo4j_bond"),
             time_lookback_days=_lookback_for_scope(temporal_scope, default=None),
             max_facts=4,
             max_chars_per_fact=180,
@@ -445,7 +448,28 @@ def _infer_temporal_scope(text: str) -> str:
         return TEMPORAL_DAY_BEFORE_YESTERDAY
     if "十几本" in text:
         return TEMPORAL_RECENT_DAYS
-    if any(token in text for token in ("最近", "这几天", "这两天", "这三天", "这周", "近几天", "这段时间", "过去几天", "过去一周", "过去一晚上", "过去一晚")):
+    if any(
+        token in text
+        for token in (
+            "最近",
+            "这几天",
+            "这两天",
+            "这三天",
+            "这周",
+            "本周",
+            "近几天",
+            "这段时间",
+            "过去几天",
+            "过去一周",
+            "过去一晚上",
+            "过去一晚",
+            "过去三十天",
+            "近三十天",
+            "30天",
+            "一个月",
+            "本月",
+        )
+    ):
         return TEMPORAL_RECENT_DAYS
     if any(token in text for token in ("之前", "以前", "一直", "所有", "全部")):
         return TEMPORAL_ALL_TIME
@@ -492,6 +516,20 @@ def _lookback_for_scope(scope: str, *, default: int | None) -> int | None:
     if scope == TEMPORAL_ALL_TIME:
         return None
     return default
+
+
+def _lookback_for_text_and_scope(text: str, scope: str, *, default: int | None) -> int | None:
+    if scope != TEMPORAL_RECENT_DAYS:
+        return _lookback_for_scope(scope, default=default)
+    if any(token in text for token in ("这两天", "两天", "2天")):
+        return 2
+    if any(token in text for token in ("这三天", "三天", "3天")):
+        return 3
+    if any(token in text for token in ("这周", "本周", "过去一周", "一周", "7天")):
+        return 7
+    if any(token in text for token in ("过去三十天", "近三十天", "三十天", "30天", "一个月", "本月")):
+        return 30
+    return _lookback_for_scope(scope, default=default)
 
 
 def _minimum_collection_items(text: str) -> int:

@@ -73,14 +73,14 @@ def test_collection_backfill_indexes_historical_recommendation_episode(tmp_path:
     applied = run_collection_backfill(db_path=db_path, apply=True)
     assert applied["planned_count"] == 1
     assert applied["indexed_count"] == 1
-    assert applied["collection_item_count"] == 9
+    assert applied["collection_item_count"] == 18
     assert applied["backup_path"]
 
     verify = SQLiteLedger(db_path=db_path)
     try:
         report = build_coverage_report(verify._conn, include_synthetic=True)
-        assert report["summary"]["collection_count"] == 3
-        assert report["summary"]["collection_item_count"] == 9
+        assert report["summary"]["collection_count"] == 6
+        assert report["summary"]["collection_item_count"] == 18
         assert report["summary"]["collection_issue_count"] == 0
     finally:
         verify.close()

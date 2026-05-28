@@ -36,6 +36,7 @@ _SESSION_REF_PREFIX = "chat://session/"
 STORE_SQLITE_LEDGER = "sqlite_ledger"
 STORE_LIFE_EPISODE = "life_episode"
 STORE_LIFE_MEMORY_COLLECTION = "life_memory_collection"
+STORE_LIFE_MEMORY_ENTITY = "life_memory_entity"
 STORE_NEO4J_BOND = "neo4j_bond"
 STORE_EPISODIC_VECTOR = "episodic_vector"
 STORE_SEMANTIC_MEMORY = "semantic_memory"
@@ -124,6 +125,15 @@ def search_route(
             session_id=session_id,
             now_ts_ms=now_ts_ms,
         )
+    if store_id == STORE_LIFE_MEMORY_ENTITY:
+        return search_life_memory_entity(
+            self,
+            query=query,
+            top_k=int(route.top_k),
+            person_id=person_id,
+            session_id=session_id,
+            now_ts_ms=now_ts_ms,
+        )
     if store_id == STORE_SEMANTIC_MEMORY:
         return search_semantic_memory(self, query=query, top_k=int(route.top_k), now_ts_ms=now_ts_ms)
     if store_id == STORE_NEO4J_BOND:
@@ -181,6 +191,30 @@ def search_life_memory_collection(
     from host_brain.memory.life_memory import LifeMemoryStore  # noqa: PLC0415
 
     packet = LifeMemoryStore(ledger=self.ledger).recall_collection_packet(
+        query=query,
+        top_k=top_k,
+        person_id=person_id,
+        session_id=session_id,
+        now_ts_ms_value=now_ts_ms,
+    )
+    return list(packet.candidates)
+
+
+def search_life_memory_entity(
+    self: Any,
+    *,
+    query: str,
+    top_k: int,
+    person_id: str | None = None,
+    session_id: str | None = None,
+    now_ts_ms: int | None = None,
+) -> list[dict[str, Any]]:
+    """Entity-level recall for repeated items inside lived collections."""
+    if self.ledger is None:
+        raise RuntimeError("life memory entity ledger unavailable")
+    from host_brain.memory.life_memory import LifeMemoryStore  # noqa: PLC0415
+
+    packet = LifeMemoryStore(ledger=self.ledger).recall_entity_packet(
         query=query,
         top_k=top_k,
         person_id=person_id,

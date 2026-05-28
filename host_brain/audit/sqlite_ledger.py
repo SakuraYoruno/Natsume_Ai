@@ -34,6 +34,8 @@ from host_brain.audit.ledger_constants import (
     LIFE_MEMORY_COMPACTION_COLUMNS,
     LIFE_MEMORY_COLLECTION_COLUMNS,
     LIFE_MEMORY_COLLECTION_ITEM_COLUMNS,
+    LIFE_MEMORY_ENTITY_COLUMNS,
+    LIFE_MEMORY_ENTITY_MENTION_COLUMNS,
     VAULT_MANIFEST_COLUMNS,
     VAULT_GC_COLUMNS,
     AIRLOCK_COLUMNS,
@@ -259,6 +261,14 @@ class SQLiteLedger(
     @property
     def life_memory_collection_item(self) -> list[dict[str, Any]]:
         return self._fetch_all("life_memory_collection_item")
+
+    @property
+    def life_memory_entity(self) -> list[dict[str, Any]]:
+        return self._fetch_all("life_memory_entity")
+
+    @property
+    def life_memory_entity_mention(self) -> list[dict[str, Any]]:
+        return self._fetch_all("life_memory_entity_mention")
 
     @property
     def vault_manifest_index(self) -> list[dict[str, Any]]:
@@ -505,6 +515,14 @@ class SQLiteLedger(
     def log_life_memory_collection_item(self, row: dict[str, Any]) -> None:
         payload = {key: row.get(key) for key in LIFE_MEMORY_COLLECTION_ITEM_COLUMNS}
         self._insert("life_memory_collection_item", payload)
+
+    def log_life_memory_entity(self, row: dict[str, Any]) -> None:
+        payload = {key: row.get(key) for key in LIFE_MEMORY_ENTITY_COLUMNS}
+        self._insert("life_memory_entity", payload)
+
+    def log_life_memory_entity_mention(self, row: dict[str, Any]) -> None:
+        payload = {key: row.get(key) for key in LIFE_MEMORY_ENTITY_MENTION_COLUMNS}
+        self._insert("life_memory_entity_mention", payload)
 
     def _log_life_audit_anchor(
         self,

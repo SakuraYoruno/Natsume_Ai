@@ -98,6 +98,7 @@ _EMOTION_TASKS = frozenset({"apology", "bad_mood", "give_up", "headache", "quiet
 _IDENTITY_TASKS = frozenset({"identity"})
 SURFACE_USER_FACT_STORES = frozenset({
     "life_memory_collection",
+    "life_memory_entity",
     "life_episode",
     "episodic_vector",
     "episodic",
@@ -355,6 +356,7 @@ def plan_surface_memory_recall(
             recall_policy=RECALL_POLICY_MUST,
             target_store_ids=life_query_plan.target_store_ids or (
                 "life_memory_collection",
+                "life_memory_entity",
                 "life_episode",
                 "episodic_vector",
                 "sqlite_ledger",
@@ -838,8 +840,8 @@ def _evaluate_recall_validation_requirement(
         if not expected:
             return (bool(candidates), "all-time or unspecified scope accepts any non-empty candidate set")
         if expected == "recent":
-            passed = "recent" in scope_keys or bool(scope_keys)
-            return passed, f"expected recent collection scope, seen={scope_keys}"
+            passed = any(key == "recent" or key.startswith("rolling:") for key in scope_keys)
+            return passed, f"expected recent/rolling collection scope, seen={scope_keys}"
         return expected in scope_keys, f"expected {expected}, seen={scope_keys}"
     if requirement == "collection_items_present":
         item_counts = [
@@ -1482,6 +1484,7 @@ def _surface_fact_row_rank(row: SurfaceMemoryFactRow) -> tuple[float, float, int
     ) else 0
     store_priority = {
         "life_memory_collection": 5,
+        "life_memory_entity": 4,
         "life_episode": 4,
         "semantic_memory": 3,
         "episodic_vector": 2,
@@ -1580,6 +1583,7 @@ def _filter_rows_for_collection_scope(
     if not collection_rows:
         return list(rows)
     collection_rows = _dedupe_collection_scope_rows(collection_rows)
+    collection_rows = sorted(collection_rows, key=_collection_row_prefer_key, reverse=True)[:1]
     return [
         *collection_rows,
         *(row for row in rows if _clean_text(row.store_id).lower() in {"neo4j_bond", "bond_graph"}),
@@ -1596,8 +1600,23 @@ def _dedupe_collection_scope_rows(rows: Sequence[SurfaceMemoryFactRow]) -> list[
     return list(best_by_scope.values())
 
 
-def _collection_row_prefer_key(row: SurfaceMemoryFactRow) -> tuple[int, float]:
-    return (_collection_item_count_from_fact(row.fact), float(row.score or 0.0))
+def _collection_row_prefer_key(row: SurfaceMemoryFactRow) -> tuple[int, float, int]:
+    return (
+        _collection_item_count_from_fact(row.fact),
+        float(row.score or 0.0),
+        _collection_scope_prefer_rank(_collection_scope_key_from_fact(row.fact)),
+    )
+
+
+def _collection_scope_prefer_rank(scope_key: str) -> int:
+    value = _clean_text(scope_key)
+    if value.startswith("rolling:"):
+        return 3
+    if value == "recent":
+        return 2
+    if value.startswith("daily:") or value.startswith("delivery:"):
+        return 1
+    return 0
 
 
 def _collection_item_count_from_fact(text: str) -> int:
@@ -1614,6 +1633,9 @@ def _collection_scope_key_from_fact(text: str) -> str:
     value = _clean_text(text)
     if "最近" in value[:16] and "集合" in value[:40]:
         return "recent"
+    match = re.search(r"近\s*(\d+)\s*天.{0,12}集合", value)
+    if match:
+        return f"rolling:{match.group(1)}d"
     match = re.search(r"(20\d{2}-\d{2}-\d{2}).{0,12}集合", value)
     if match:
         return f"daily:{match.group(1)}"
@@ -1752,6 +1774,9 @@ def _collection_overview_from_metadata(metadata: Mapping[str, Any], *, item_coun
     domain_label = "轻小说推荐" if "lightnovel" in domain or "轻小说" in domain else domain.replace("_", " ")
     if scope_key == "recent":
         return f"最近{domain_label}集合，记录 {count} 个条目"
+    rolling = re.fullmatch(r"rolling:(\d+)d", scope_key)
+    if rolling:
+        return f"近 {rolling.group(1)} 天{domain_label}集合，记录 {count} 个条目"
     if scope_key.startswith("daily:"):
         return f"{scope_key.removeprefix('daily:')} 当天{domain_label}集合，记录 {count} 个条目"
     if scope_key.startswith("delivery:"):
@@ -1865,6 +1890,8 @@ def _fact_prefix(store_id: str) -> str:
         return "长期记忆"
     if normalized == "life_memory_collection":
         return "集合记忆"
+    if normalized == "life_memory_entity":
+        return "实体记忆"
     if normalized in {"life_episode", "episodic_vector", "episodic", "sqlite_ledger"}:
         return "记忆线索"
     if normalized in {"neo4j_bond", "bond_graph"}:

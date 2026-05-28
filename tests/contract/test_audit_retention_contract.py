@@ -417,6 +417,8 @@ class TestAuditRetentionContract(unittest.TestCase):
             self.assertEqual("OK", written["collection_index"]["status"])
             before = ledger._conn.execute("SELECT COUNT(1) AS c FROM life_memory_collection_item").fetchone()
             self.assertGreater(int(before["c"]), 0)
+            entity_before = ledger._conn.execute("SELECT COUNT(1) AS c FROM life_memory_entity_mention").fetchone()
+            self.assertGreater(int(entity_before["c"]), 0)
             with ledger._write_lock:
                 with ledger._conn:
                     ledger._conn.execute(
@@ -461,6 +463,15 @@ class TestAuditRetentionContract(unittest.TestCase):
             for row in collections:
                 self.assertEqual(0, int(row["item_count"]))
                 self.assertEqual(0, int(row["actual_item_count"]))
+                self.assertEqual("GONE", row["retention_state"])
+            entity_mentions = ledger._conn.execute("SELECT COUNT(1) AS c FROM life_memory_entity_mention").fetchone()
+            self.assertEqual(0, int(entity_mentions["c"]))
+            entities = ledger._conn.execute(
+                "SELECT mention_count, retention_state FROM life_memory_entity"
+            ).fetchall()
+            self.assertGreaterEqual(len(entities), 1)
+            for row in entities:
+                self.assertEqual(0, int(row["mention_count"]))
                 self.assertEqual("GONE", row["retention_state"])
             report = build_coverage_report(ledger._conn, include_synthetic=True)
             self.assertEqual({}, report["collection_issue_counts"])

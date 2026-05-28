@@ -506,6 +506,7 @@ def _delete_life_memory_candidates(conn: Any, *, write_lock: Any, policy: Retent
             deleted = int(cursor.rowcount or 0)
             if deleted > 0:
                 _cleanup_life_memory_collections_locked(conn, now_ts_ms=now_ts_ms)
+                _cleanup_life_memory_entities_locked(conn, now_ts_ms=now_ts_ms)
     return deleted
 
 
@@ -543,6 +544,55 @@ def _cleanup_life_memory_collections_locked(conn: Any, *, now_ts_ms: int) -> Non
               FROM life_memory_collection_item i
               WHERE i.collection_id = life_memory_collection.collection_id
           ) = 0
+        """,
+        (int(now_ts_ms),),
+    )
+
+
+def _cleanup_life_memory_entities_locked(conn: Any, *, now_ts_ms: int) -> None:
+    if not _has_table(conn, "life_memory_entity") or not _has_table(conn, "life_memory_entity_mention"):
+        return
+    conn.execute(
+        """
+        DELETE FROM life_memory_entity_mention
+        WHERE episode_id IS NOT NULL
+          AND episode_id NOT IN (SELECT episode_id FROM life_episode)
+        """
+    )
+    if _has_table(conn, "life_memory_collection_item"):
+        conn.execute(
+            """
+            DELETE FROM life_memory_entity_mention
+            WHERE collection_item_id IS NOT NULL
+              AND collection_item_id NOT IN (
+                  SELECT collection_item_id FROM life_memory_collection_item
+              )
+            """
+        )
+    conn.execute(
+        """
+        UPDATE life_memory_entity
+        SET
+            mention_count = (
+                SELECT COUNT(1)
+                FROM life_memory_entity_mention m
+                WHERE m.entity_id = life_memory_entity.entity_id
+            ),
+            last_seen_ts_ms = COALESCE((
+                SELECT MAX(created_ts_ms)
+                FROM life_memory_entity_mention m
+                WHERE m.entity_id = life_memory_entity.entity_id
+            ), last_seen_ts_ms)
+        """
+    )
+    conn.execute(
+        """
+        UPDATE life_memory_entity
+        SET
+            retention_state = 'GONE',
+            last_seen_ts_ms = MAX(COALESCE(last_seen_ts_ms, 0), ?)
+        WHERE COALESCE(retention_state, 'WARM') != 'GONE'
+          AND COALESCE(mention_count, 0) = 0
         """,
         (int(now_ts_ms),),
     )

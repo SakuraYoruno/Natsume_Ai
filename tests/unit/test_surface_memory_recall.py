@@ -494,7 +494,7 @@ def test_plan_surface_memory_recall_routes_memory_followup_to_core_memory_stores
     assert plan.should_recall
     assert plan.recall_policy == RECALL_POLICY_MUST
     assert plan.reason == "explicit_memory_recall"
-    assert plan.target_store_ids == ("life_episode", "semantic_memory", "episodic_vector", "sqlite_ledger", "neo4j_bond")
+    assert plan.target_store_ids == ("life_episode", "life_memory_entity", "semantic_memory", "episodic_vector", "sqlite_ledger", "neo4j_bond")
     assert plan.max_facts == 4
     assert plan.time_lookback_days == 7
     assert "必要事实：用户说的上次是压缩后的记忆追问。" in query
@@ -528,7 +528,8 @@ def test_plan_surface_memory_recall_treats_anaphoric_selection_as_recall() -> No
     assert plan.recall_policy == RECALL_POLICY_MUST
     assert plan.reason == "anaphoric_selection_recall"
     assert plan.target_store_ids[0] == "life_memory_collection"
-    assert plan.target_store_ids[1] == "life_episode"
+    assert plan.target_store_ids[1] == "life_memory_entity"
+    assert "life_episode" in plan.target_store_ids
     assert plan.time_lookback_days == 1
 
 

@@ -39,6 +39,7 @@ SUPPORTED_RECALL_STORE_IDS: frozenset[str] = frozenset({
     "sqlite_ledger",
     "life_episode",
     "life_memory_collection",
+    "life_memory_entity",
     "neo4j_bond",
     "episodic_vector",
     "semantic_memory",
