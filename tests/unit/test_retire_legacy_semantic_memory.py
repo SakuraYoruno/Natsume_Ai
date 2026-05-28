@@ -36,17 +36,34 @@ def test_retire_legacy_semantic_memory_soft_deletes_non_life_consolidated_rows(t
                 "operator_node_id": "life_memory_consolidator",
             }
         )
+        ledger.log_semantic_memory(
+            {
+                "semantic_id": "sem-raw-life-noise",
+                "summary": "[语义摘要 | 查询: 用户日常习惯]\n- gateway qq_reply_sent sent 我通过 qq 发送了image消息；latency_ms=12",
+                "source_memory_ids": ["life_episode::ep-noisy"],
+                "source_hash": "raw-life-noise-hash",
+                "distill_strategy": "life_episode_merge_top_k",
+                "confidence": 0.5,
+                "tags": ["long_term_distill", "source:life_episode"],
+                "ts_ms": 1_800_000_000_002,
+                "operator_node_id": "long_term_distiller",
+            }
+        )
     finally:
         ledger.close()
 
     dry_run = retire_legacy_semantic_memory(db_path=db_path, apply=False)
-    assert dry_run["planned_count"] == 1
-    assert dry_run["active_after"] == 2
-    assert dry_run["samples"][0]["semantic_id"] == "sem-legacy"
+    assert dry_run["planned_count"] == 2
+    assert dry_run["active_after"] == 3
+    planned_ids = {row["semantic_id"] for row in dry_run["samples"]}
+    assert planned_ids == {"sem-legacy", "sem-raw-life-noise"}
+    raw_life = next(row for row in dry_run["samples"] if row["semantic_id"] == "sem-raw-life-noise")
+    assert "RAW_LIFE_DISTILLATION" in raw_life["reason_code"]
+    assert "SUMMARY_NOISE" in raw_life["reason_code"]
 
     applied = retire_legacy_semantic_memory(db_path=db_path, apply=True)
-    assert applied["planned_count"] == 1
-    assert applied["retired_count"] == 1
+    assert applied["planned_count"] == 2
+    assert applied["retired_count"] == 2
     assert applied["active_after"] == 1
     assert applied["backup_path"]
 

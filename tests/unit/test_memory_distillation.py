@@ -240,6 +240,84 @@ def test_distill_top_k_prefers_trusted_life_episode_sources(episodic, ledger):
     assert f"life_episode::{suppressed['episode_id']}" not in source_ids
     assert "source:life_episode" in items[0]["tags"]
     assert items[0]["distill_strategy"] == "life_episode_merge_top_k"
+    assert "用户偏好" in items[0]["summary"]
+    assert "User:" not in items[0]["summary"]
+    assert "Assistant:" not in items[0]["summary"]
+    assert "旧 episodic 噪音" not in items[0]["summary"]
+
+
+def test_distill_top_k_filters_noisy_life_episode_sources(episodic, ledger):
+    """长期语义蒸馏不能把发送日志、深读日志、后台 tick 升格为主动记忆。"""
+    life_store = LifeMemoryStore(ledger=ledger)
+    durable = life_store.write_chat_episode(
+        request_id="req-life-distill-durable-preference",
+        session_id="sess-life-distill-noise",
+        person_id="user-1",
+        user_message="以后轻小说推荐要总览一段，后面每本书按卡片分段。",
+        assistant_reply="收到，我会按总览和每本一卡片发送。",
+        ts_ms=1_800_000_100_000,
+    )
+    deep_review = life_store.write_background_episode(
+        event_source="surface_memory_recall",
+        event_id="deep-review-noise",
+        status="OK",
+        reason_code="LIGHTNOVEL_DEEP_REVIEW_OK",
+        detail="网页深读结果：轻小说推荐 分段 卡片；正文内容足够支撑判断；详情:https://www.lightnovel.fun/cn/detail/1",
+        ts_ms=1_800_000_100_100,
+        metadata={"action_kind": "lightnovel_recommendation_deep_review"},
+    )
+    gateway_send = life_store.write_background_episode(
+        event_source="gateway",
+        event_id="qq-send-noise",
+        status="SENT",
+        detail="我通过 qq 给 qq_dm_1 发送了image消息；轻小说推荐 分段 卡片；latency_ms=123",
+        ts_ms=1_800_000_100_200,
+        metadata={"action_kind": "qq_reply_sent"},
+    )
+    tick = life_store.write_background_episode(
+        event_source="scheduler",
+        event_id="tick-noise",
+        task_id="emotion_decay_tick",
+        status="OK",
+        detail="emotion_decay_tick 轻小说推荐 分段 卡片 health_check OK",
+        ts_ms=1_800_000_100_300,
+    )
+    inner = life_store.write_background_episode(
+        event_source="inner_world",
+        event_id="inner-not-user-pref",
+        status="OK",
+        detail="先把话磨得更像我自己，别再飘成一口空话。",
+        ts_ms=1_800_000_100_350,
+        metadata={"should_distill_to_memory": True, "action_kind": "inner_world_monologue_tick"},
+    )
+    engine = MemoryDistillationEngine(
+        episodic_store=episodic,
+        ledger=ledger,
+        life_memory_store=life_store,
+    )
+
+    result = engine.distill_top_k(
+        query_text="轻小说推荐 分段 卡片",
+        top_k=5,
+        tags=["preference"],
+        ts_ms=1_800_000_100_400,
+    )
+
+    assert result.success is True
+    items, total = ledger.list_semantic_memories()
+    assert total == 1
+    assert items[0]["source_memory_ids"] == [f"life_episode::{durable['episode_id']}"]
+    assert f"life_episode::{deep_review['episode_id']}" not in items[0]["source_memory_ids"]
+    assert f"life_episode::{gateway_send['episode_id']}" not in items[0]["source_memory_ids"]
+    assert f"life_episode::{tick['episode_id']}" not in items[0]["source_memory_ids"]
+    assert f"life_episode::{inner['episode_id']}" not in items[0]["source_memory_ids"]
+    summary = items[0]["summary"]
+    assert "用户偏好" in summary
+    assert "网页深读结果" not in summary
+    assert "发送了image消息" not in summary
+    assert "emotion_decay_tick" not in summary
+    assert "latency_ms" not in summary
+    assert "一口空话" not in summary
 
 
 # ---------------------------------------------------------------------------

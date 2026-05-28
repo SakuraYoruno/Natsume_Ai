@@ -10,6 +10,7 @@ import hashlib
 import json
 import threading
 import os
+import re
 import uuid
 from dataclasses import dataclass
 from collections.abc import Mapping
@@ -397,16 +398,21 @@ class MemoryDistillationEngine:
                 for item in LifeMemoryConsolidator(store=self.life_memory_store).build_semantic_candidates(limit=recall_k)
             ]
         rows: list[dict[str, Any]] = []
+        seen_texts: set[str] = set()
         for item in candidates:
             meta = dict(item.get("metadata") or {}) if isinstance(item.get("metadata"), Mapping) else {}
             episode_id = str(meta.get("episode_id") or item.get("memory_id") or "").strip()
             text = str(item.get("text") or "").strip()
             if not episode_id or not text:
                 continue
+            semantic_text = _sanitize_life_distillation_text(text=text, metadata=meta)
+            if not semantic_text or semantic_text in seen_texts:
+                continue
+            seen_texts.add(semantic_text)
             rows.append(
                 {
                     "memory_id": f"life_episode::{episode_id}",
-                    "text": text,
+                    "text": semantic_text,
                     "score": float(item.get("score") or meta.get("memory_strength") or meta.get("salience") or 0.0),
                     "metadata": {
                         **meta,
@@ -456,6 +462,226 @@ def _is_semantic_memory_projection(row: Mapping[str, Any]) -> bool:
         or source_table == "semantic_memory"
         or bool(semantic_id)
     )
+
+
+_LIFE_DISTILLATION_NOISE_ACTIONS = {
+    "lightnovel_recommendation_delivery",
+    "lightnovel_recommendation_deep_review",
+    "qq_reply_sent",
+    "wechat_reply_sent",
+    "gateway_reply_sent",
+    "channel_message_sent",
+    "avatar_action",
+    "emotion_decay_tick",
+    "body_sense_tick",
+    "inner_world_numeric_tick",
+    "silence_tick",
+    "health_check",
+    "heartbeat",
+}
+
+
+_LIFE_DISTILLATION_NOISE_TOKENS = (
+    "api_key",
+    "apikey",
+    "authorization:",
+    "cookie",
+    "token=",
+    "secret",
+    "密码",
+    "密钥",
+    "heartbeat",
+    "health_check",
+    "emotion_decay_tick",
+    "body_sense_tick",
+    "inner_world_numeric_tick",
+    "silence_tick",
+    "input_completed",
+    "input_ignored",
+    "input_rejected",
+    "cortex_orchestrator",
+    "surface_production_result_recall",
+    "latency_ms",
+    "decision=approve",
+    "_thalamus_meta",
+    "发送了text消息",
+    "发送了image消息",
+    "发送结果=sent",
+    "网页深读结果",
+    "正文内容足够支撑判断",
+    "lightnovel_recommendation_delivery",
+    "lightnovel_recommendation_deep_review",
+    "lightnovel_gateway_delivery",
+    "codexproductionjobcodex_lightnovel_recommender",
+    "轻小说推荐报告",
+    "详情:https://www.lightnovel.fun",
+    "详情：http://www.lightnovel.fun",
+    "请根据下面的真实片段",
+)
+
+
+def _sanitize_life_distillation_text(*, text: str, metadata: Mapping[str, Any]) -> str | None:
+    """Return a durable semantic statement, or None when the episode is audit/noise."""
+
+    action = _compact_text(metadata.get("action"))
+    episode_meta = metadata.get("episode_metadata")
+    if isinstance(episode_meta, Mapping):
+        action = action or _compact_text(episode_meta.get("action_kind"))
+        event_source = _compact_text(episode_meta.get("event_source"))
+        should_distill = bool(episode_meta.get("should_distill_to_memory"))
+    else:
+        event_source = ""
+        should_distill = False
+    if action in _LIFE_DISTILLATION_NOISE_ACTIONS:
+        return None
+    inner_event = event_source in {"inner_world", "inner_stream", "inner_activity"}
+    if inner_event and not should_distill:
+        return None
+
+    compact_whole = _compact_text(text)
+    if _life_distillation_text_is_noise(compact_whole):
+        return None
+
+    statements: list[str] = []
+    for raw_line in re.split(r"[\n\r]+", text):
+        line = str(raw_line or "").strip()
+        if not line:
+            continue
+        if re.match(r"^\s*(assistant|perception)\s*[:：]", line, flags=re.IGNORECASE):
+            continue
+        normalized = _normalize_life_semantic_statement(line)
+        semantic = _semantic_statement_from_life_text(
+            normalized,
+            action=action,
+            allow_user_preference=not inner_event,
+        )
+        if semantic and semantic not in statements:
+            statements.append(semantic)
+
+    if not statements:
+        normalized = _normalize_life_semantic_statement(text)
+        semantic = _semantic_statement_from_life_text(
+            normalized,
+            action=action,
+            allow_user_preference=not inner_event,
+        )
+        if semantic:
+            statements.append(semantic)
+
+    if not statements:
+        return None
+    return "；".join(statements[:3])
+
+
+def _normalize_life_semantic_statement(value: Any) -> str:
+    text = str(value or "").strip()
+    text = re.sub(r"^(User|Assistant|Perception)\s*[:：]\s*", "", text, flags=re.IGNORECASE).strip()
+    text = re.sub(r"^(记忆线索|长期记忆|召回线索)\s*[:：]\s*", "", text).strip()
+    text = re.sub(r"^行动记忆：[^；;]{1,120}[；;]\s*", "", text).strip()
+    text = re.sub(r"^(记住|请记住|以后记住)[，,：:\s]*", "", text).strip()
+    return text.strip("。；; \n\t")[:700]
+
+
+def _semantic_statement_from_life_text(statement: str, *, action: str, allow_user_preference: bool = True) -> str | None:
+    body = _life_semantic_body(statement)
+    if len(body) < 4:
+        return None
+    compact = _compact_text(body)
+    if _life_distillation_text_is_noise(compact):
+        return None
+    if allow_user_preference and _is_life_user_preference(compact):
+        return f"用户偏好：{body}"
+    if _is_life_commitment(compact):
+        return f"承诺和待办：{body}"
+    if _is_life_self_change(compact, action=action):
+        return f"自我改变：{body}"
+    if _is_life_failure_lesson(compact, action=action):
+        return f"故障经验：{body}"
+    if _is_life_stable_fact(compact):
+        return f"稳定事实：{body}"
+    return None
+
+
+def _life_semantic_body(statement: str) -> str:
+    text = str(statement or "").strip("。；; \n\t")
+    text = re.sub(r"^(用户明确要求|用户要求|用户偏好|偏好)[：:\s]*", "", text).strip()
+    if text.startswith("我喜欢"):
+        text = "用户喜欢" + text.removeprefix("我喜欢")
+    if text.startswith("我不喜欢"):
+        text = "用户不喜欢" + text.removeprefix("我不喜欢")
+    if text.startswith("不要") or text.startswith("别"):
+        text = "用户要求" + text
+    if text.startswith("主链"):
+        text = "用户要求" + text
+    return text[:360].rstrip("。；; ")
+
+
+def _life_distillation_text_is_noise(compact_text: str) -> bool:
+    return any(token in compact_text for token in _LIFE_DISTILLATION_NOISE_TOKENS)
+
+
+def _is_life_user_preference(compact: str) -> bool:
+    return any(
+        token in compact
+        for token in (
+            "用户喜欢",
+            "我喜欢",
+            "用户不喜欢",
+            "我不喜欢",
+            "用户要求",
+            "要求",
+            "偏好",
+            "以后",
+            "不要",
+            "别再",
+            "优先使用",
+            "主链不要",
+            "不要用pro",
+            "不用pro",
+            "分段",
+            "卡片",
+            "拟人化发送",
+        )
+    )
+
+
+def _is_life_commitment(compact: str) -> bool:
+    return any(token in compact for token in ("承诺", "待办", "todo", "openloop", "后续要", "下次继续", "未完成"))
+
+
+def _is_life_self_change(compact: str, *, action: str) -> bool:
+    if action in {"memory_compaction", "model_route_update", "capability_change"}:
+        return True
+    return any(token in compact for token in ("模型路由", "记忆系统", "能力被删除", "删除资源管理器", "策略被用户纠正", "自我改变", "主链迁移", "改成"))
+
+
+def _is_life_failure_lesson(compact: str, *, action: str) -> bool:
+    if "failed" in action or "failure" in action:
+        return True
+    return any(
+        token in compact
+        for token in (
+            "失败原因",
+            "失败",
+            "连不上",
+            "没起来",
+            "状态库被占用",
+            "被占用",
+            "chroma",
+            "neo4j",
+            "deepseek失败",
+            "gateway连不上",
+            "服务没起来",
+        )
+    )
+
+
+def _is_life_stable_fact(compact: str) -> bool:
+    return any(token in compact for token in ("onebot在edge", "onebot在", "qq会话", "conversation_id", "session_id", "在edge", "不在本机"))
+
+
+def _compact_text(value: Any) -> str:
+    return re.sub(r"\s+", "", str(value or "")).lower()
 
 
 def _merge_texts(texts: list[str], *, query_text: str) -> str:

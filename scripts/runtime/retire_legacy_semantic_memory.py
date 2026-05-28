@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Soft-retire legacy semantic_memory rows that bypass LifeMemory SSOT."""
+"""Soft-retire semantic_memory rows that bypass LifeMemory consolidation gates."""
 
 from __future__ import annotations
 
@@ -71,7 +71,10 @@ def retire_legacy_semantic_memory(
                                 "evidence_refs": [],
                                 "status": "SUCCESS",
                                 "reason_code": row["reason_code"],
-                                "detail": "Soft-retired legacy semantic_memory row not produced by LifeMemoryConsolidator.",
+                                "detail": (
+                                    "Soft-retired semantic_memory row not produced by "
+                                    "LifeMemoryConsolidator or containing raw distillation noise."
+                                ),
                                 "ts_ms": retired_ts_ms,
                             }
                         )
@@ -150,6 +153,8 @@ def _planned_rows(conn: sqlite3.Connection, *, limit: int) -> list[Mapping[str, 
 def _reason_code(row: Mapping[str, Any]) -> str:
     source_ids = [str(item or "") for item in _json_list(row.get("source_memory_ids"))]
     reasons: list[str] = ["LEGACY_NOT_LIFE_CONSOLIDATED"]
+    if any(item.startswith("life_episode::") for item in source_ids):
+        reasons.append("RAW_LIFE_DISTILLATION")
     if not any(item.startswith(("life_episode::", "life_memory_collection::")) for item in source_ids):
         reasons.append("NON_LIFE_SOURCE")
     if _summary_has_noise(row.get("summary")):
@@ -165,11 +170,24 @@ def _summary_has_noise(summary: Any) -> bool:
             "当前回合摘要：用户提到",
             "metrics test",
             "emotion_decay_tick",
+            "body_sense_tick",
             "inner_world_numeric_tick",
+            "silence_tick",
+            "lightnovel_recommendation_delivery",
+            "lightnovel_recommendation_deep_review",
+            "qq_reply_sent",
+            "wechat_reply_sent",
+            "gateway_reply_sent",
+            "网页深读结果",
+            "正文内容足够支撑判断",
             "发送了text消息",
             "发送了image消息",
             "latency_ms",
+            "cortex_orchestrator",
+            "decision=approve",
             "surface_production_result_recall",
+            "\n-user:",
+            "\n-assistant:",
         )
     )
 
