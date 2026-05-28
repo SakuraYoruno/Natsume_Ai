@@ -1306,20 +1306,22 @@ def _structured_life_episode_recall_text(text: str, *, metadata: Mapping[str, An
     items = _life_episode_recall_items(metadata)
     if not items:
         return ""
-    overview = _humanize_life_episode_recall_text(text, metadata=metadata)
+    overview = _collection_overview_from_metadata(metadata, item_count=len(items)) or _humanize_life_episode_recall_text(text, metadata=metadata)
     overview = _truncate_text(overview, limit=min(max(120, limit // 2), 220))
     item_lines: list[str] = []
-    for index, item in enumerate(items[:4], start=1):
-        title = _first_item_text(item, ("title", "title_display", "name", "label"), limit=74)
+    max_items = _structured_recall_item_limit(limit=limit, available=len(items))
+    compact_many = max_items > 4
+    for index, item in enumerate(items[:max_items], start=1):
+        title = _first_item_text(item, ("title", "title_display", "item_title", "name", "label"), limit=74)
         if not title:
             continue
         parts = [f"{index}. {title}"]
-        rationale = _first_item_text(item, ("selection_reason", "rationale", "reason", "why", "look_point"), limit=80)
-        intro = _first_item_text(item, ("intro_snippet", "intro", "description", "summary", "abstract"), limit=96)
+        rationale = _first_item_text(item, ("selection_reason", "rationale", "reason", "why", "look_point"), limit=50 if compact_many else 80)
+        intro = _first_item_text(item, ("intro_snippet", "intro", "description", "item_summary", "summary", "abstract"), limit=58 if compact_many else 96)
         topic = _first_item_text(item, ("genre", "category", "topic", "theme", "tags"), limit=50)
         update = _first_item_text(item, ("update_time", "updated_at", "freshness"), limit=32)
         heat = _heat_text(item)
-        detail_url = _first_item_text(item, ("detail_url", "url", "source_url"), limit=180)
+        detail_url = "" if compact_many else _first_item_text(item, ("detail_url", "url", "source_url", "source_ref"), limit=180)
         if rationale:
             parts.append(f"看点：{rationale}")
         if intro and intro != rationale:
@@ -1338,6 +1340,32 @@ def _structured_life_episode_recall_text(text: str, *, metadata: Mapping[str, An
     joined_items = "；".join(item_lines)
     prefix = f"{overview}；" if overview else ""
     return _clean_text(f"{prefix}可比较证据：{joined_items}")
+
+
+def _structured_recall_item_limit(*, limit: int, available: int) -> int:
+    budget = max(0, int(limit or 0))
+    if budget >= 1200:
+        return min(max(1, int(available or 0)), 12)
+    if budget >= 860:
+        return min(max(1, int(available or 0)), 10)
+    if budget >= 680:
+        return min(max(1, int(available or 0)), 8)
+    return min(max(1, int(available or 0)), 4)
+
+
+def _collection_overview_from_metadata(metadata: Mapping[str, Any], *, item_count: int) -> str:
+    if _clean_text(metadata.get("store_id")).lower() != "life_memory_collection":
+        return ""
+    scope_key = _clean_text(metadata.get("scope_key"))
+    domain = _clean_text(metadata.get("domain") or "collection")
+    count = _coerce_int(metadata.get("item_count"), default=max(0, int(item_count or 0)))
+    domain_label = "轻小说推荐" if "lightnovel" in domain or "轻小说" in domain else domain.replace("_", " ")
+    if scope_key == "recent":
+        return f"最近{domain_label}集合，记录 {count} 个条目"
+    if scope_key.startswith("daily:"):
+        return f"{scope_key.removeprefix('daily:')} 当天{domain_label}集合，记录 {count} 个条目"
+    title = _clean_text(metadata.get("title"))
+    return f"{title}，记录 {count} 个条目" if title else ""
 
 
 def _life_episode_recall_items(metadata: Mapping[str, Any]) -> list[Mapping[str, Any]]:

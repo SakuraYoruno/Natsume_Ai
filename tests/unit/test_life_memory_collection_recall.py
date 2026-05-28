@@ -202,3 +202,40 @@ def test_recall_fusion_collection_route_builds_surface_packet_with_items() -> No
         assert packet.evidence_refs
     finally:
         ledger.close()
+
+
+def test_surface_packet_keeps_many_recent_collection_items() -> None:
+    ledger = SQLiteLedger(db_path=":memory:")
+    try:
+        store = LifeMemoryStore(ledger=ledger)
+        _write_delivery(store, prefix="DayBefore", ts_ms=_ts(2026, 5, 26))
+        _write_delivery(store, prefix="Yesterday", ts_ms=_ts(2026, 5, 27))
+        _write_delivery(store, prefix="Today", ts_ms=_ts(2026, 5, 28))
+        result = _collection_service(ledger).recall(
+            request_id="req-recall-recent",
+            query="这几天推荐过哪些轻小说？",
+            query_embedding=[0.1] * 16,
+            person_id="owner",
+            session_id="qq_dm_owner",
+            ts_ms=_ts(2026, 5, 28, 18),
+            target_store_ids=["life_memory_collection"],
+        )
+
+        packet = build_surface_memory_recall_packet(
+            result,
+            query="这几天推荐过哪些轻小说？",
+            max_facts=4,
+            max_chars_per_fact=900,
+            temporal_scope="recent_days",
+            validation_requirements=("scope_match", "collection_items_present", "evidence_refs_present"),
+        )
+        joined = "\n".join(packet.facts)
+
+        assert packet.reason_code is None
+        assert "最近轻小说推荐集合，记录 9 个条目" in joined
+        assert "DayBefore A" in joined
+        assert "Yesterday C" in joined
+        assert "Today C" in joined
+        assert "详情：" not in joined
+    finally:
+        ledger.close()
