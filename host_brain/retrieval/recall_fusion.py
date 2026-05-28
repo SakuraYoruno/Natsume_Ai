@@ -64,6 +64,7 @@ from host_brain.retrieval.recall_fusion_config import (  # noqa: F401
 from host_brain.retrieval.recall_fusion_stores import (
     STORE_SQLITE_LEDGER,
     STORE_LIFE_EPISODE,
+    STORE_LIFE_MEMORY_COLLECTION,
     STORE_NEO4J_BOND,
     STORE_EPISODIC_VECTOR,
     STORE_SEMANTIC_MEMORY,
@@ -755,6 +756,7 @@ def _filter_anaphoric_selection_candidates(
         candidate
         for candidate in candidates
         if _is_significant_anaphoric_life_candidate(candidate)
+        or _is_significant_anaphoric_collection_candidate(candidate)
     ]
     if not primary:
         return candidates
@@ -770,7 +772,7 @@ def _filter_anaphoric_selection_candidates(
         updated = dict(candidate)
         metadata = dict(updated.get("metadata") or {})
         metadata["anaphoric_selection_primary"] = True
-        metadata["anaphoric_selection_filter"] = "life_episode_primary"
+        metadata["anaphoric_selection_filter"] = "collection_or_life_primary"
         updated["metadata"] = metadata
         kept.append(updated)
     relationship = [
@@ -823,6 +825,8 @@ def _anaphoric_primary_sort_key(candidate: Mapping[str, Any]) -> tuple[int, int,
 
 
 def _candidate_anaphoric_action_priority(candidate: Mapping[str, Any]) -> int:
+    if _candidate_store_id(candidate) == STORE_LIFE_MEMORY_COLLECTION:
+        return 0
     action = _candidate_life_action(candidate)
     if action in {"lightnovel_recommendation_delivery", "recommendation_delivery"} or action.endswith("_recommendation_delivery"):
         return 0
@@ -845,7 +849,7 @@ def _candidate_life_session(candidate: Mapping[str, Any]) -> str:
 
 def _candidate_life_ts(candidate: Mapping[str, Any]) -> int:
     metadata = _coerce_mapping(candidate.get("metadata"))
-    for key in ("last_touched_ts_ms", "created_ts_ms"):
+    for key in ("updated_ts_ms", "last_touched_ts_ms", "created_ts_ms"):
         try:
             value = int(metadata.get(key) or 0)
         except (TypeError, ValueError):
@@ -873,6 +877,18 @@ def _is_significant_anaphoric_life_candidate(candidate: Mapping[str, Any]) -> bo
         return False
     action = str(metadata.get("action") or metadata.get("action_kind") or "").strip().lower()
     if action in _ANAPHORIC_LOW_VALUE_ACTIONS:
+        return False
+    text = _candidate_text(candidate)
+    if not text or _looks_like_anaphoric_scheduler_noise(text):
+        return False
+    return True
+
+
+def _is_significant_anaphoric_collection_candidate(candidate: Mapping[str, Any]) -> bool:
+    if _candidate_store_id(candidate) != STORE_LIFE_MEMORY_COLLECTION:
+        return False
+    metadata = _coerce_mapping(candidate.get("metadata"))
+    if int(metadata.get("item_count") or 0) <= 0:
         return False
     text = _candidate_text(candidate)
     if not text or _looks_like_anaphoric_scheduler_noise(text):

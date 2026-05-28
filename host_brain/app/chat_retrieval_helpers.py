@@ -420,6 +420,10 @@ def _surface_memory_retrieval_summary(
             "task_mode": str(plan.get("task_mode") or ""),
             "recall_policy": str(plan.get("recall_policy") or ""),
             "reason": str(plan.get("reason") or ""),
+            "query_kind": str(plan.get("query_kind") or ""),
+            "temporal_scope": str(plan.get("temporal_scope") or ""),
+            "target_domains": list(plan.get("target_domains") or []),
+            "validation_requirements": list(plan.get("validation_requirements") or []),
             "text_len": len(str(getattr(packet, "query", "") or "")),
         },
         "target_stores": list(plan.get("target_store_ids") or []),
@@ -567,6 +571,14 @@ def _build_surface_memory_recall_service() -> Any:
 
     node_id = "surface_main_chain_memory_recall"
     routes = {
+        "surface_life_collection": RecallRouteConfig(
+            route_id="surface_life_collection",
+            store_id="life_memory_collection",
+            collection="life_memory_collection",
+            top_k=5,
+            score_weight=1.32,
+            node_selector=node_id,
+        ),
         "surface_life_episode": RecallRouteConfig(
             route_id="surface_life_episode",
             store_id="life_episode",

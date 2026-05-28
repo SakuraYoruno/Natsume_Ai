@@ -504,7 +504,8 @@ def test_plan_surface_memory_recall_treats_background_result_followup_as_recall(
 
     assert plan.should_recall
     assert plan.recall_policy == RECALL_POLICY_MUST
-    assert plan.reason == "explicit_memory_recall"
+    assert plan.reason == "failure_debug_recall"
+    assert plan.query_kind == "failure_debug"
     assert plan.target_store_ids[0] == "life_episode"
 
 
@@ -519,7 +520,8 @@ def test_plan_surface_memory_recall_treats_anaphoric_selection_as_recall() -> No
     assert plan.should_recall
     assert plan.recall_policy == RECALL_POLICY_MUST
     assert plan.reason == "anaphoric_selection_recall"
-    assert plan.target_store_ids[0] == "life_episode"
+    assert plan.target_store_ids[0] == "life_memory_collection"
+    assert plan.target_store_ids[1] == "life_episode"
     assert plan.time_lookback_days == 1
 
 

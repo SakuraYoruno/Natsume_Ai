@@ -38,6 +38,7 @@ DEFAULT_RENDER_TARGET_LANG_SELECTOR = "*"
 SUPPORTED_RECALL_STORE_IDS: frozenset[str] = frozenset({
     "sqlite_ledger",
     "life_episode",
+    "life_memory_collection",
     "neo4j_bond",
     "episodic_vector",
     "semantic_memory",

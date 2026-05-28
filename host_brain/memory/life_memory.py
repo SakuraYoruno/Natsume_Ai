@@ -9,6 +9,7 @@ they should not be the primary author of lived memory.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 import hashlib
 import json
 import re
@@ -18,6 +19,17 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 from host_brain.audit.sqlite_ledger import SQLiteLedger
+from host_brain.memory.life_memory_query import (
+    DOMAIN_LIGHTNOVEL_RECOMMENDATION,
+    DOMAIN_RECOMMENDATION,
+    TEMPORAL_ALL_TIME,
+    TEMPORAL_CURRENT,
+    TEMPORAL_DAY_BEFORE_YESTERDAY,
+    TEMPORAL_RECENT_DAYS,
+    TEMPORAL_TODAY,
+    TEMPORAL_YESTERDAY,
+    plan_life_memory_query,
+)
 
 
 TRUTH_CANDIDATE = "CANDIDATE"
@@ -58,6 +70,12 @@ DECAY_SLOW = "SLOW"
 DECAY_NORMAL = "NORMAL"
 DECAY_FAST = "FAST"
 DECAY_EPHEMERAL = "EPHEMERAL"
+
+COLLECTION_RECOMMENDATION = "recommendation_collection"
+COLLECTION_SCOPE_DAILY = "daily"
+COLLECTION_SCOPE_RECENT = "recent"
+
+_LOCAL_MEMORY_TZ = timezone(timedelta(hours=8))
 
 STRONG_EVIDENCE_PREFIXES: tuple[str, ...] = (
     "gateway://message/",
@@ -659,6 +677,366 @@ class LifeMemoryStore:
             "source_ref": source,
         }
 
+    def upsert_collection(
+        self,
+        *,
+        collection_kind: str,
+        domain: str,
+        scope_key: str,
+        title: str,
+        summary: str,
+        person_id: str | None = None,
+        session_id: str | None = None,
+        collection_id: str | None = None,
+        salience: float = 0.35,
+        memory_strength: float = 0.42,
+        retention_state: str = RETENTION_WARM,
+        ts_ms: int | None = None,
+        metadata: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        kind = _clean_text(collection_kind) or COLLECTION_RECOMMENDATION
+        domain_key = _clean_text(domain) or DOMAIN_RECOMMENDATION
+        scope = _clean_text(scope_key) or COLLECTION_SCOPE_RECENT
+        person = _clean_text(person_id) or None
+        session = _clean_text(session_id) or None
+        created = int(ts_ms if ts_ms is not None else now_ts_ms())
+        cid = _clean_text(collection_id) or _collection_id(
+            collection_kind=kind,
+            domain=domain_key,
+            scope_key=scope,
+            person_id=person,
+            session_id=session,
+        )
+        metadata_payload = dict(metadata or {})
+        with self.ledger._write_lock:
+            with self.ledger._conn:
+                existing = self.ledger._conn.execute(
+                    "SELECT metadata, item_count, created_ts_ms FROM life_memory_collection WHERE collection_id = ?",
+                    (cid,),
+                ).fetchone()
+                if existing is None:
+                    self.ledger._conn.execute(
+                        """
+                        INSERT INTO life_memory_collection (
+                            collection_id, collection_kind, domain, scope_key,
+                            person_id, session_id, title, summary, item_count,
+                            salience, memory_strength, retention_state,
+                            created_ts_ms, updated_ts_ms, metadata
+                        )
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            cid,
+                            kind,
+                            domain_key,
+                            scope,
+                            person,
+                            session,
+                            _clean_text(title, limit=240),
+                            _clean_text(summary, limit=1200),
+                            0,
+                            _clamp_unit(salience),
+                            _clamp_unit(memory_strength),
+                            _clean_text(retention_state).upper() or RETENTION_WARM,
+                            created,
+                            created,
+                            _json_dumps(metadata_payload),
+                        ),
+                    )
+                else:
+                    merged_meta = _merge_metadata(existing["metadata"], metadata_payload)
+                    for list_key in ("source_episode_ids",):
+                        old_values = _json_loads(existing["metadata"], fallback={})
+                        old_list = old_values.get(list_key) if isinstance(old_values, Mapping) else []
+                        new_list = metadata_payload.get(list_key)
+                        if isinstance(old_list, Sequence) and not isinstance(old_list, (str, bytes, bytearray)):
+                            merged = [str(item) for item in old_list if str(item).strip()]
+                        else:
+                            merged = []
+                        if isinstance(new_list, Sequence) and not isinstance(new_list, (str, bytes, bytearray)):
+                            merged.extend(str(item) for item in new_list if str(item).strip())
+                        if merged:
+                            merged_meta[list_key] = list(dict.fromkeys(merged))
+                    self.ledger._conn.execute(
+                        """
+                        UPDATE life_memory_collection
+                        SET
+                            title = COALESCE(NULLIF(?, ''), title),
+                            summary = COALESCE(NULLIF(?, ''), summary),
+                            salience = MAX(COALESCE(salience, 0.0), ?),
+                            memory_strength = MAX(COALESCE(memory_strength, 0.0), ?),
+                            retention_state = COALESCE(NULLIF(?, ''), retention_state),
+                            updated_ts_ms = MAX(COALESCE(updated_ts_ms, 0), ?),
+                            metadata = ?
+                        WHERE collection_id = ?
+                        """,
+                        (
+                            _clean_text(title, limit=240),
+                            _clean_text(summary, limit=1200),
+                            _clamp_unit(salience),
+                            _clamp_unit(memory_strength),
+                            _clean_text(retention_state).upper() or RETENTION_WARM,
+                            created,
+                            _json_dumps(merged_meta),
+                            cid,
+                        ),
+                    )
+        return {"status": "OK", "collection_id": cid, "collection_kind": kind, "domain": domain_key, "scope_key": scope}
+
+    def attach_collection_item(
+        self,
+        *,
+        collection_id: str,
+        episode_id: str,
+        item_key: str,
+        item_title: str | None = None,
+        item_summary: str | None = None,
+        source_ref: str | None = None,
+        evidence_ref: str | None = None,
+        position: int = 0,
+        ts_ms: int | None = None,
+        metadata: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        cid = _clean_text(collection_id)
+        eid = _clean_text(episode_id)
+        key = _clean_text(item_key) or _stable_hash(f"{cid}:{eid}:{position}:{item_title or item_summary or ''}", size=24)
+        if not cid or not eid:
+            return {"status": "SKIPPED", "reason_code": "EMPTY_COLLECTION_OR_EPISODE"}
+        created = int(ts_ms if ts_ms is not None else now_ts_ms())
+        item_id = f"coli_{_stable_hash('life_collection_item:v1:' + cid + ':' + key, size=32)}"
+        with self.ledger._write_lock:
+            with self.ledger._conn:
+                self.ledger._conn.execute(
+                    """
+                    INSERT INTO life_memory_collection_item (
+                        collection_item_id, collection_id, episode_id, item_key,
+                        item_title, item_summary, source_ref, evidence_ref,
+                        position, created_ts_ms, metadata
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(collection_id, item_key) DO UPDATE SET
+                        item_title = COALESCE(NULLIF(excluded.item_title, ''), item_title),
+                        item_summary = COALESCE(NULLIF(excluded.item_summary, ''), item_summary),
+                        source_ref = COALESCE(NULLIF(excluded.source_ref, ''), source_ref),
+                        evidence_ref = COALESCE(NULLIF(excluded.evidence_ref, ''), evidence_ref),
+                        position = excluded.position,
+                        metadata = excluded.metadata
+                    """,
+                    (
+                        item_id,
+                        cid,
+                        eid,
+                        key,
+                        _clean_text(item_title, limit=300),
+                        _clean_text(item_summary, limit=900),
+                        _clean_text(source_ref) or None,
+                        _clean_text(evidence_ref) or None,
+                        max(0, int(position or 0)),
+                        created,
+                        _json_dumps(dict(metadata or {})),
+                    ),
+                )
+                self._refresh_collection_item_count_locked(collection_id=cid, ts_ms=created)
+        return {"status": "OK", "collection_id": cid, "collection_item_id": item_id, "item_key": key}
+
+    def index_episode_collections(self, *, episode_id: str, ts_ms: int | None = None) -> dict[str, Any]:
+        eid = _clean_text(episode_id)
+        if not eid:
+            return {"status": "SKIPPED", "reason_code": "EMPTY_EPISODE_ID"}
+        row = self.ledger._conn.execute("SELECT * FROM life_episode WHERE episode_id = ?", (eid,)).fetchone()
+        if row is None:
+            return {"status": "SKIPPED", "reason_code": "EPISODE_NOT_FOUND", "episode_id": eid}
+        episode = dict(row)
+        metadata = _json_loads(episode.get("metadata"), fallback={})
+        if not isinstance(metadata, dict):
+            metadata = {}
+        items = _extract_collection_items_from_metadata(metadata)
+        if not items:
+            return {"status": "SKIPPED", "reason_code": "NO_COLLECTION_ITEMS", "episode_id": eid}
+        created = int(ts_ms if ts_ms is not None else (episode.get("created_ts_ms") or now_ts_ms()))
+        action = _clean_text(episode.get("action") or metadata.get("action_kind")).lower()
+        if "deep_review" in action or "analysis" in action:
+            return {"status": "SKIPPED", "reason_code": "DERIVED_ANALYSIS_NOT_COLLECTION_SOURCE", "episode_id": eid}
+        domain = _collection_domain_for_episode(action=action, summary=episode.get("summary"), metadata=metadata)
+        kind = COLLECTION_RECOMMENDATION if ("recommendation" in action or "推荐" in str(episode.get("summary") or "")) else "item_collection"
+        day_key = _collection_day_key(created)
+        person = _clean_text(episode.get("person_id")) or None
+        session = _clean_text(episode.get("session_id")) or None
+        source_ref = _clean_text(episode.get("primary_ref")) or f"life_episode://{eid}"
+        collection_specs = [
+            (
+                COLLECTION_SCOPE_DAILY,
+                f"{day_key} {domain} 集合",
+                _collection_summary_text(day_key=day_key, domain=domain, items=items, scope_label="当天"),
+            ),
+            (
+                COLLECTION_SCOPE_RECENT,
+                f"最近 {domain} 集合",
+                _collection_summary_text(day_key=day_key, domain=domain, items=items, scope_label="最近"),
+            ),
+        ]
+        written: list[dict[str, Any]] = []
+        for scope, title, summary in collection_specs:
+            collection = self.upsert_collection(
+                collection_kind=kind,
+                domain=domain,
+                scope_key=f"{scope}:{day_key}" if scope == COLLECTION_SCOPE_DAILY else scope,
+                person_id=person,
+                session_id=session,
+                title=title,
+                summary=summary,
+                salience=max(0.38, _clamp_unit(episode.get("salience"), default=0.38)),
+                memory_strength=max(0.44, _clamp_unit(episode.get("memory_strength"), default=0.44)),
+                retention_state=RETENTION_WARM,
+                ts_ms=created,
+                metadata={
+                    "source_episode_ids": [eid],
+                    "source_episode_id": eid,
+                    "source_ref": source_ref,
+                    "domain": domain,
+                    "scope": scope,
+                    "day_key": day_key,
+                    "memory_layer": "life_memory_collection",
+                },
+            )
+            collection_id = str(collection.get("collection_id") or "")
+            for index, item in enumerate(items, start=1):
+                self.attach_collection_item(
+                    collection_id=collection_id,
+                    episode_id=eid,
+                    item_key=_collection_item_key(episode_id=eid, item=item, index=index),
+                    item_title=_collection_item_title(item),
+                    item_summary=_collection_item_summary(item),
+                    source_ref=_collection_item_source_ref(item) or source_ref,
+                    evidence_ref=source_ref,
+                    position=index,
+                    ts_ms=created + index,
+                    metadata={**dict(item), "source_day": day_key, "source_episode_id": eid},
+                )
+            written.append(collection)
+        return {"status": "OK", "episode_id": eid, "collection_count": len(written), "collections": written}
+
+    def recall_collection_packet(
+        self,
+        *,
+        query: str,
+        top_k: int = 6,
+        person_id: str | None = None,
+        session_id: str | None = None,
+        now_ts_ms_value: int | None = None,
+    ) -> EpisodeRecallPacket:
+        from host_brain.retrieval.recall_fusion_utils import (  # noqa: PLC0415
+            _apply_sqlite_ledger_boost,
+            _text_similarity_score,
+            _truncate_text_for_recall,
+        )
+
+        normalized_query = _clean_text(query)
+        plan = plan_life_memory_query(normalized_query)
+        current = int(now_ts_ms_value if now_ts_ms_value is not None else now_ts_ms())
+        scoped_person_id = _clean_text(person_id)
+        scoped_session_id = _clean_text(session_id)
+        rows = self._fetch_collection_rows_for_plan(
+            plan=plan,
+            person_id=scoped_person_id,
+            session_id=scoped_session_id,
+            now_ts_ms_value=current,
+            limit=max(12, int(top_k) * 6),
+        )
+        scored: list[tuple[float, dict[str, Any]]] = []
+        for row in rows:
+            collection = dict(row)
+            collection_id = _clean_text(collection.get("collection_id"))
+            if not collection_id:
+                continue
+            metadata = _json_loads(collection.get("metadata"), fallback={})
+            if not isinstance(metadata, dict):
+                metadata = {}
+            items = self._list_collection_items(collection_id=collection_id, limit=24)
+            text_for_score = "\n".join(
+                part
+                for part in (
+                    str(collection.get("title") or ""),
+                    str(collection.get("summary") or ""),
+                    "\n".join(_collection_item_recall_line(item, idx) for idx, item in enumerate(items, start=1)),
+                )
+                if part
+            )
+            base_score = _text_similarity_score(normalized_query, text_for_score) if normalized_query else 0.0
+            scope_boost = _collection_scope_boost(collection, plan=plan, now_ts_ms_value=current)
+            if normalized_query and base_score <= 0.0 and scope_boost <= 0.0:
+                continue
+            boosted_score, boost_meta = _apply_sqlite_ledger_boost(
+                base_score=max(base_score, 0.04 + scope_boost),
+                row_ts_ms=int(collection.get("updated_ts_ms") or collection.get("created_ts_ms") or 0),
+                now_ts_ms=current,
+                row_person_id=str(collection.get("person_id") or "").strip() or None,
+                target_person_id=scoped_person_id,
+                row_session_id=str(collection.get("session_id") or "").strip() or None,
+                target_session_id=scoped_session_id,
+            )
+            strength = _clamp_unit(collection.get("memory_strength"), default=_clamp_unit(collection.get("salience"), default=0.4))
+            final_score = round(max(0.0, min(1.0, boosted_score + scope_boost + strength * 0.10)), 6)
+            item_lines = [_collection_item_recall_line(item, index) for index, item in enumerate(items, start=1)]
+            text = _truncate_text_for_recall(
+                f"{collection.get('summary') or collection.get('title') or ''}；可比较证据：{'；'.join(item_lines)}",
+                limit=1400,
+            )
+            evidence_refs = [
+                _clean_text(item.get("evidence_ref") or item.get("source_ref"))
+                for item in items
+                if _clean_text(item.get("evidence_ref") or item.get("source_ref"))
+            ]
+            scored.append(
+                (
+                    final_score,
+                    {
+                        "memory_id": collection_id,
+                        "text": text,
+                        "score": final_score,
+                        "metadata": {
+                            "store_id": "life_memory_collection",
+                            "memory_layer": "life_memory_collection",
+                            "collection_id": collection_id,
+                            "collection_kind": collection.get("collection_kind"),
+                            "domain": collection.get("domain"),
+                            "scope_key": collection.get("scope_key"),
+                            "person_id": collection.get("person_id"),
+                            "session_id": collection.get("session_id"),
+                            "title": collection.get("title"),
+                            "item_count": int(collection.get("item_count") or len(items)),
+                            "items": [dict(item) for item in items],
+                            "collection_metadata": metadata,
+                            "created_ts_ms": int(collection.get("created_ts_ms") or 0),
+                            "updated_ts_ms": int(collection.get("updated_ts_ms") or 0),
+                            "memory_strength": strength,
+                            "retention_state": collection.get("retention_state"),
+                            "source_ref": f"life_memory_collection://{collection_id}",
+                            "evidence_refs_primary": evidence_refs[0] if evidence_refs else f"life_memory_collection://{collection_id}",
+                            "evidence_refs": evidence_refs,
+                            "query_plan": plan.as_dict(),
+                            "score_boost": {
+                                **dict(boost_meta or {}),
+                                "scope_boost": round(scope_boost, 6),
+                                "strength_boost": round(strength * 0.10, 6),
+                            },
+                        },
+                    },
+                )
+            )
+        candidates = [
+            item
+            for _score, item in sorted(
+                scored,
+                key=lambda pair: (
+                    -round(pair[0], 2),
+                    -int(pair[1]["metadata"].get("updated_ts_ms") or 0),
+                    str(pair[1].get("memory_id") or ""),
+                ),
+            )[: max(1, int(top_k))]
+        ]
+        return EpisodeRecallPacket(query=normalized_query, candidates=candidates)
+
     def link_episode(
         self,
         *,
@@ -1029,11 +1407,13 @@ class LifeMemoryStore:
             trust_level=TRUTH_VERIFIED,
             ts_ms=created,
         )
+        collection_result = self.index_episode_collections(episode_id=episode_id, ts_ms=created)
         return {
             "status": "OK",
             "episode_id": episode_id,
             "episode_kind": episode_kind,
             "primary_ref": primary_ref,
+            "collection_index": collection_result,
         }
 
     def recall_episode_packet(
@@ -1491,6 +1871,89 @@ class LifeMemoryStore:
             "counts": counts,
         }
 
+    def _refresh_collection_item_count_locked(self, *, collection_id: str, ts_ms: int) -> None:
+        self.ledger._conn.execute(
+            """
+            UPDATE life_memory_collection
+            SET
+                item_count = (
+                    SELECT COUNT(1)
+                    FROM life_memory_collection_item
+                    WHERE collection_id = ?
+                ),
+                updated_ts_ms = MAX(COALESCE(updated_ts_ms, 0), ?)
+            WHERE collection_id = ?
+            """,
+            (collection_id, int(ts_ms), collection_id),
+        )
+
+    def _fetch_collection_rows_for_plan(
+        self,
+        *,
+        plan: Any,
+        person_id: str | None,
+        session_id: str | None,
+        now_ts_ms_value: int,
+        limit: int,
+    ) -> list[Any]:
+        clauses = ["COALESCE(retention_state, ?) != ?"]
+        params: list[Any] = [RETENTION_WARM, RETENTION_GONE]
+        domains = set(str(item or "").strip() for item in getattr(plan, "target_domains", ()) if str(item or "").strip())
+        if DOMAIN_LIGHTNOVEL_RECOMMENDATION in domains:
+            domains.add(DOMAIN_RECOMMENDATION)
+        if DOMAIN_RECOMMENDATION in domains:
+            domains.add(DOMAIN_LIGHTNOVEL_RECOMMENDATION)
+        if domains:
+            placeholders = ", ".join("?" for _ in domains)
+            clauses.append(f"COALESCE(domain, '') IN ({placeholders})")
+            params.extend(sorted(domains))
+        scope_keys = _scope_keys_for_collection_plan(plan=plan, now_ts_ms_value=now_ts_ms_value)
+        if scope_keys:
+            placeholders = ", ".join("?" for _ in scope_keys)
+            clauses.append(f"COALESCE(scope_key, '') IN ({placeholders})")
+            params.extend(scope_keys)
+        if session_id:
+            clauses.append("(COALESCE(session_id, '') = ? OR COALESCE(session_id, '') = '')")
+            params.append(session_id)
+        elif person_id:
+            clauses.append("(COALESCE(person_id, '') = ? OR COALESCE(person_id, '') = '')")
+            params.append(person_id)
+        return list(
+            self.ledger._conn.execute(
+                f"""
+                SELECT *
+                FROM life_memory_collection
+                WHERE {' AND '.join(clauses)}
+                ORDER BY updated_ts_ms DESC, memory_strength DESC
+                LIMIT ?
+                """,
+                [*params, max(1, int(limit))],
+            ).fetchall()
+        )
+
+    def _list_collection_items(self, *, collection_id: str, limit: int = 24) -> list[dict[str, Any]]:
+        rows = self.ledger._conn.execute(
+            """
+            SELECT *
+            FROM life_memory_collection_item
+            WHERE collection_id = ?
+            ORDER BY created_ts_ms ASC, position ASC, item_title ASC
+            LIMIT ?
+            """,
+            (_clean_text(collection_id), max(1, int(limit))),
+        ).fetchall()
+        items: list[dict[str, Any]] = []
+        for row in rows:
+            item = dict(row)
+            item.pop("id", None)
+            metadata = _json_loads(item.get("metadata"), fallback={})
+            if isinstance(metadata, dict):
+                for key, value in metadata.items():
+                    item.setdefault(key, value)
+            item["metadata"] = metadata if isinstance(metadata, dict) else {}
+            items.append(item)
+        return items
+
     def _list_evidence(self, *, episode_id: str) -> list[dict[str, Any]]:
         rows = self.ledger._conn.execute(
             """
@@ -1776,6 +2239,169 @@ def _background_salience(*, source: str, status: str | None, detail: str | None)
     if _clean_text(detail):
         score += 0.08
     return _clamp_unit(score)
+
+
+def _collection_id(
+    *,
+    collection_kind: str,
+    domain: str,
+    scope_key: str,
+    person_id: str | None,
+    session_id: str | None,
+) -> str:
+    owner = _clean_text(session_id) or _clean_text(person_id) or "global"
+    seed = f"life_collection:v1:{collection_kind}:{domain}:{scope_key}:{owner}"
+    return f"col_{_stable_hash(seed, size=32)}"
+
+
+def _collection_day_key(ts_ms: int) -> str:
+    return datetime.fromtimestamp(int(ts_ms) / 1000.0, tz=_LOCAL_MEMORY_TZ).strftime("%Y-%m-%d")
+
+
+def _scope_keys_for_collection_plan(*, plan: Any, now_ts_ms_value: int) -> list[str]:
+    scope = str(getattr(plan, "temporal_scope", "") or "").strip()
+    today = datetime.fromtimestamp(int(now_ts_ms_value) / 1000.0, tz=_LOCAL_MEMORY_TZ).date()
+    if scope in {TEMPORAL_CURRENT, TEMPORAL_RECENT_DAYS, ""}:
+        return [COLLECTION_SCOPE_RECENT]
+    if scope == TEMPORAL_TODAY:
+        return [f"{COLLECTION_SCOPE_DAILY}:{today.isoformat()}"]
+    if scope == TEMPORAL_YESTERDAY:
+        return [f"{COLLECTION_SCOPE_DAILY}:{(today - timedelta(days=1)).isoformat()}"]
+    if scope == TEMPORAL_DAY_BEFORE_YESTERDAY:
+        return [f"{COLLECTION_SCOPE_DAILY}:{(today - timedelta(days=2)).isoformat()}"]
+    if scope == TEMPORAL_ALL_TIME:
+        return []
+    return [COLLECTION_SCOPE_RECENT]
+
+
+def _extract_collection_items_from_metadata(metadata: Mapping[str, Any]) -> list[dict[str, Any]]:
+    containers: list[Mapping[str, Any]] = [metadata]
+    for nested_key in ("metadata", "result", "payload"):
+        nested = metadata.get(nested_key)
+        if isinstance(nested, Mapping):
+            containers.append(nested)
+    keys = (
+        "selected_recommendations",
+        "recommendations",
+        "selected_items",
+        "items",
+        "cards",
+        "delivered_items",
+    )
+    items: list[dict[str, Any]] = []
+    for container in containers:
+        for key in keys:
+            raw = container.get(key)
+            if not isinstance(raw, Sequence) or isinstance(raw, (str, bytes, bytearray)):
+                continue
+            for item in raw:
+                if not isinstance(item, Mapping):
+                    continue
+                normalized = dict(item)
+                if _collection_item_title(normalized) or _collection_item_source_ref(normalized):
+                    items.append(normalized)
+            if items:
+                return items
+    return items
+
+
+def _collection_domain_for_episode(*, action: str, summary: Any, metadata: Mapping[str, Any]) -> str:
+    explicit = _clean_text(
+        metadata.get("domain")
+        or metadata.get("recommendation_domain")
+        or metadata.get("content_domain")
+        or metadata.get("domain_event_kind")
+    ).lower()
+    text = " ".join([action, _clean_text(summary).lower(), _json_dumps(metadata) or ""]).lower()
+    if "lightnovel" in explicit or "lightnovel" in text or "轻小说" in text or "lightnovel.fun" in text:
+        return DOMAIN_LIGHTNOVEL_RECOMMENDATION
+    if "recommendation" in explicit or "recommendation" in text or "推荐" in text:
+        return DOMAIN_RECOMMENDATION
+    return explicit or "generic_item"
+
+
+def _collection_summary_text(
+    *,
+    day_key: str,
+    domain: str,
+    items: Sequence[Mapping[str, Any]],
+    scope_label: str,
+) -> str:
+    label = "轻小说推荐" if domain == DOMAIN_LIGHTNOVEL_RECOMMENDATION else domain.replace("_", " ")
+    titles = [_collection_item_title(item) for item in list(items or [])[:6] if _collection_item_title(item)]
+    title_text = "、".join(titles)
+    suffix = f"：{title_text}" if title_text else ""
+    return f"{day_key} {scope_label}{label}集合，记录 {len(list(items or []))} 个条目{suffix}。"
+
+
+def _collection_item_key(*, episode_id: str, item: Mapping[str, Any], index: int) -> str:
+    stable = _collection_item_source_ref(item) or _collection_item_title(item) or str(index)
+    return _stable_hash(f"{episode_id}:{index}:{stable}", size=28)
+
+
+def _collection_item_title(item: Mapping[str, Any]) -> str:
+    for key in ("title", "title_display", "name", "label"):
+        value = _clean_text(item.get(key), limit=160)
+        if value:
+            return value
+    return ""
+
+
+def _collection_item_summary(item: Mapping[str, Any]) -> str:
+    parts: list[str] = []
+    for label, keys in (
+        ("看点", ("selection_reason", "rationale", "reason", "why", "look_point")),
+        ("简介", ("intro_snippet", "intro", "description", "summary", "abstract")),
+        ("题材", ("genre", "category", "topic", "theme", "tags")),
+        ("更新", ("update_time", "updated_at", "freshness")),
+    ):
+        for key in keys:
+            value = item.get(key)
+            if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
+                value = "、".join(str(part) for part in value if str(part).strip())
+            text = _clean_text(value, limit=180)
+            if text:
+                parts.append(f"{label}：{text}")
+                break
+    source = _collection_item_source_ref(item)
+    if source:
+        parts.append(f"详情：{source}")
+    return "｜".join(parts)
+
+
+def _collection_item_source_ref(item: Mapping[str, Any]) -> str:
+    for key in ("detail_url", "url", "source_url", "href"):
+        value = _clean_text(item.get(key), limit=300)
+        if value:
+            return value
+    return ""
+
+
+def _collection_item_recall_line(item: Mapping[str, Any], index: int) -> str:
+    title = _clean_text(item.get("item_title") or _collection_item_title(item), limit=90)
+    if not title:
+        title = f"条目{index}"
+    summary = _clean_text(item.get("item_summary") or _collection_item_summary(item), limit=260)
+    source = _clean_text(item.get("source_ref") or _collection_item_source_ref(item), limit=260)
+    parts = [f"{index}. {title}"]
+    if summary:
+        parts.append(summary)
+    if source and source not in summary:
+        parts.append(f"详情：{source}")
+    return "｜".join(parts)
+
+
+def _collection_scope_boost(collection: Mapping[str, Any], *, plan: Any, now_ts_ms_value: int) -> float:
+    scope_key = _clean_text(collection.get("scope_key"))
+    target_scope_keys = set(_scope_keys_for_collection_plan(plan=plan, now_ts_ms_value=now_ts_ms_value))
+    boost = 0.0
+    if target_scope_keys and scope_key in target_scope_keys:
+        boost += 0.24
+    if scope_key == COLLECTION_SCOPE_RECENT and str(getattr(plan, "temporal_scope", "")) in {TEMPORAL_CURRENT, TEMPORAL_RECENT_DAYS}:
+        boost += 0.18
+    if int(collection.get("item_count") or 0) > 0:
+        boost += 0.08
+    return min(0.38, boost)
 
 
 def _semantic_proposals_from_episode(
@@ -2089,4 +2715,7 @@ __all__ = [
     "RETENTION_WARM",
     "RETENTION_COLD",
     "RETENTION_GONE",
+    "COLLECTION_RECOMMENDATION",
+    "COLLECTION_SCOPE_DAILY",
+    "COLLECTION_SCOPE_RECENT",
 ]

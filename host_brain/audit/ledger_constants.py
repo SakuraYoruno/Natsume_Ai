@@ -189,6 +189,38 @@ LIFE_MEMORY_COMPACTION_COLUMNS = (
     "metadata",
 )
 
+LIFE_MEMORY_COLLECTION_COLUMNS = (
+    "collection_id",
+    "collection_kind",
+    "domain",
+    "scope_key",
+    "person_id",
+    "session_id",
+    "title",
+    "summary",
+    "item_count",
+    "salience",
+    "memory_strength",
+    "retention_state",
+    "created_ts_ms",
+    "updated_ts_ms",
+    "metadata",
+)
+
+LIFE_MEMORY_COLLECTION_ITEM_COLUMNS = (
+    "collection_item_id",
+    "collection_id",
+    "episode_id",
+    "item_key",
+    "item_title",
+    "item_summary",
+    "source_ref",
+    "evidence_ref",
+    "position",
+    "created_ts_ms",
+    "metadata",
+)
+
 VAULT_MANIFEST_COLUMNS = (
     "request_id",
     "manifest_id",
@@ -501,6 +533,8 @@ JSON_FIELDS_BY_TABLE: dict[str, set[str]] = {
     "life_episode_link": {"metadata"},
     "life_memory_correction": {"metadata"},
     "life_memory_compaction": {"source_episode_ids", "dropped_details", "kept_facts", "metadata"},
+    "life_memory_collection": {"metadata"},
+    "life_memory_collection_item": {"metadata"},
     "canon_proposal_log": {"proposed_tags"},
     "vault_manifest_index": {"evidence_refs"},
     "vault_gc_log": {"deleted_manifest_ids", "deleted_artifact_ids", "blocked_manifest_ids", "evidence_refs"},
@@ -542,6 +576,8 @@ _ALLOWED_TABLES: frozenset[str] = frozenset({
     "life_episode_link",
     "life_memory_correction",
     "life_memory_compaction",
+    "life_memory_collection",
+    "life_memory_collection_item",
     "vault_manifest_index",
     "vault_gc_log",
     "airlock_log",

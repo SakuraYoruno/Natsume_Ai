@@ -11,6 +11,7 @@ from host_brain.persona.isolated_surface_continuity import (
     build_surface_input_from_three_layer_context,
 )
 from host_brain.persona.isolated_surface_harness import IsolatedSurfaceInput
+from host_brain.memory.life_memory_query import plan_life_memory_query
 
 
 SURFACE_MEMORY_RECALL_FAILED = "SURFACE_MEMORY_RECALL_FAILED"
@@ -84,7 +85,14 @@ _TECH_TASKS = frozenset({
 })
 _EMOTION_TASKS = frozenset({"apology", "bad_mood", "give_up", "headache", "quiet", "sleepy", "tired"})
 _IDENTITY_TASKS = frozenset({"identity"})
-SURFACE_USER_FACT_STORES = frozenset({"life_episode", "episodic_vector", "episodic", "sqlite_ledger", "semantic_memory"})
+SURFACE_USER_FACT_STORES = frozenset({
+    "life_memory_collection",
+    "life_episode",
+    "episodic_vector",
+    "episodic",
+    "sqlite_ledger",
+    "semantic_memory",
+})
 SURFACE_BOND_STORES = frozenset({"neo4j_bond", "bond_graph"})
 SURFACE_MAIN_CHAIN_RECALL_STORES = SURFACE_USER_FACT_STORES | SURFACE_BOND_STORES
 
@@ -192,6 +200,10 @@ class SurfaceMemoryRecallPlan:
     max_chars_per_fact: int = 96
     time_lookback_days: int | None = None
     reason: str = ""
+    query_kind: str = ""
+    temporal_scope: str = ""
+    target_domains: tuple[str, ...] = ()
+    validation_requirements: tuple[str, ...] = ()
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -204,6 +216,10 @@ class SurfaceMemoryRecallPlan:
             "max_chars_per_fact": int(self.max_chars_per_fact),
             "time_lookback_days": self.time_lookback_days,
             "reason": self.reason,
+            "query_kind": self.query_kind,
+            "temporal_scope": self.temporal_scope,
+            "target_domains": list(self.target_domains),
+            "validation_requirements": list(self.validation_requirements),
         }
 
 
@@ -233,7 +249,8 @@ def plan_surface_memory_recall(
     user_message = _clean_text(context.current_user_message)
     query = build_surface_memory_recall_query(context, max_chars=max_query_chars)
     anaphoric_selection = _looks_like_anaphoric_selection_query(user_message)
-    has_recall_hint = _has_recall_hint(user_message) or anaphoric_selection
+    life_query_plan = plan_life_memory_query(user_message, task_mode=task_mode)
+    has_recall_hint = _has_recall_hint(user_message) or anaphoric_selection or life_query_plan.should_recall
 
     if not user_message:
         return SurfaceMemoryRecallPlan(
@@ -242,6 +259,10 @@ def plan_surface_memory_recall(
             task_mode=task_mode,
             recall_policy=RECALL_POLICY_NO,
             reason="empty_user_message",
+            query_kind=life_query_plan.query_kind,
+            temporal_scope=life_query_plan.temporal_scope,
+            target_domains=life_query_plan.target_domains,
+            validation_requirements=life_query_plan.validation_requirements,
         )
     if _should_skip_low_signal_recall(user_message=user_message, task_mode=task_mode, has_recall_hint=has_recall_hint):
         return SurfaceMemoryRecallPlan(
@@ -250,6 +271,10 @@ def plan_surface_memory_recall(
             task_mode=task_mode,
             recall_policy=RECALL_POLICY_NO,
             reason="low_signal_surface_turn",
+            query_kind=life_query_plan.query_kind,
+            temporal_scope=life_query_plan.temporal_scope,
+            target_domains=life_query_plan.target_domains,
+            validation_requirements=life_query_plan.validation_requirements,
         )
     if task_mode in _MEMORY_WRITE_TASKS or _looks_like_memory_write(user_message):
         return SurfaceMemoryRecallPlan(
@@ -258,6 +283,27 @@ def plan_surface_memory_recall(
             task_mode=task_mode,
             recall_policy=RECALL_POLICY_NO,
             reason="memory_write_current_turn_only",
+            query_kind=life_query_plan.query_kind,
+            temporal_scope=life_query_plan.temporal_scope,
+            target_domains=life_query_plan.target_domains,
+            validation_requirements=life_query_plan.validation_requirements,
+        )
+
+    if life_query_plan.should_recall and life_query_plan.reason == "collection_memory_recall":
+        return SurfaceMemoryRecallPlan(
+            should_recall=True,
+            query=query,
+            task_mode=task_mode,
+            recall_policy=RECALL_POLICY_MUST,
+            target_store_ids=life_query_plan.target_store_ids,
+            max_facts=life_query_plan.max_facts,
+            max_chars_per_fact=life_query_plan.max_chars_per_fact,
+            time_lookback_days=life_query_plan.time_lookback_days,
+            reason=life_query_plan.reason,
+            query_kind=life_query_plan.query_kind,
+            temporal_scope=life_query_plan.temporal_scope,
+            target_domains=life_query_plan.target_domains,
+            validation_requirements=life_query_plan.validation_requirements,
         )
 
     if anaphoric_selection:
@@ -266,11 +312,21 @@ def plan_surface_memory_recall(
             query=query,
             task_mode=task_mode,
             recall_policy=RECALL_POLICY_MUST,
-            target_store_ids=("life_episode", "episodic_vector", "sqlite_ledger", "semantic_memory"),
-            max_facts=4,
-            max_chars_per_fact=700,
-            time_lookback_days=1,
+            target_store_ids=life_query_plan.target_store_ids or (
+                "life_memory_collection",
+                "life_episode",
+                "episodic_vector",
+                "sqlite_ledger",
+                "semantic_memory",
+            ),
+            max_facts=max(4, life_query_plan.max_facts),
+            max_chars_per_fact=max(700, life_query_plan.max_chars_per_fact),
+            time_lookback_days=life_query_plan.time_lookback_days or 1,
             reason="anaphoric_selection_recall",
+            query_kind=life_query_plan.query_kind,
+            temporal_scope=life_query_plan.temporal_scope,
+            target_domains=life_query_plan.target_domains,
+            validation_requirements=life_query_plan.validation_requirements,
         )
 
     if task_mode in _RECALL_TASKS or has_recall_hint:
@@ -279,11 +335,21 @@ def plan_surface_memory_recall(
             query=query,
             task_mode=task_mode,
             recall_policy=RECALL_POLICY_MUST,
-            target_store_ids=("life_episode", "semantic_memory", "episodic_vector", "sqlite_ledger", "neo4j_bond"),
-            max_facts=4,
-            max_chars_per_fact=96,
-            time_lookback_days=_infer_lookback_days(user_message),
-            reason="explicit_memory_recall",
+            target_store_ids=life_query_plan.target_store_ids or (
+                "life_episode",
+                "semantic_memory",
+                "episodic_vector",
+                "sqlite_ledger",
+                "neo4j_bond",
+            ),
+            max_facts=max(4, life_query_plan.max_facts),
+            max_chars_per_fact=max(96, life_query_plan.max_chars_per_fact),
+            time_lookback_days=life_query_plan.time_lookback_days if life_query_plan.should_recall else _infer_lookback_days(user_message),
+            reason=life_query_plan.reason if life_query_plan.should_recall else "explicit_memory_recall",
+            query_kind=life_query_plan.query_kind,
+            temporal_scope=life_query_plan.temporal_scope,
+            target_domains=life_query_plan.target_domains,
+            validation_requirements=life_query_plan.validation_requirements,
         )
     if task_mode in _TECH_TASKS:
         return SurfaceMemoryRecallPlan(
@@ -296,6 +362,10 @@ def plan_surface_memory_recall(
             max_chars_per_fact=96,
             time_lookback_days=_infer_lookback_days(user_message),
             reason="technical_user_memory_context",
+            query_kind=life_query_plan.query_kind,
+            temporal_scope=life_query_plan.temporal_scope,
+            target_domains=life_query_plan.target_domains,
+            validation_requirements=life_query_plan.validation_requirements,
         )
     if task_mode in _EMOTION_TASKS:
         return SurfaceMemoryRecallPlan(
@@ -308,6 +378,10 @@ def plan_surface_memory_recall(
             max_chars_per_fact=96,
             time_lookback_days=_infer_lookback_days(user_message),
             reason="emotion_or_relationship_context",
+            query_kind=life_query_plan.query_kind,
+            temporal_scope=life_query_plan.temporal_scope,
+            target_domains=life_query_plan.target_domains,
+            validation_requirements=life_query_plan.validation_requirements,
         )
     if task_mode in _IDENTITY_TASKS:
         return SurfaceMemoryRecallPlan(
@@ -320,6 +394,10 @@ def plan_surface_memory_recall(
             max_chars_per_fact=88,
             time_lookback_days=None,
             reason="identity_relationship_context",
+            query_kind=life_query_plan.query_kind,
+            temporal_scope=life_query_plan.temporal_scope,
+            target_domains=life_query_plan.target_domains,
+            validation_requirements=life_query_plan.validation_requirements,
         )
     return SurfaceMemoryRecallPlan(
         should_recall=False,
@@ -327,6 +405,10 @@ def plan_surface_memory_recall(
         task_mode=task_mode,
         recall_policy=RECALL_POLICY_NO,
         reason="no_memory_recall_needed",
+        query_kind=life_query_plan.query_kind,
+        temporal_scope=life_query_plan.temporal_scope,
+        target_domains=life_query_plan.target_domains,
+        validation_requirements=life_query_plan.validation_requirements,
     )
 
 
@@ -694,6 +776,7 @@ def _select_fact_rows(
     rows = [row for row in rows if row is not None]
     rows = _filter_rows_for_explicit_memory_query(rows, query=query)
     rows = _filter_rows_for_anaphoric_selection(rows, query=query)
+    rows = _filter_rows_for_collection_scope(rows, query=query)
     rows = sorted(rows, key=_surface_fact_row_rank, reverse=True)
     selected: list[SurfaceMemoryFactRow] = []
     seen_stores: set[str] = set()
@@ -721,6 +804,7 @@ def _surface_fact_row_rank(row: SurfaceMemoryFactRow) -> tuple[float, float, int
         and any(marker in fact_text for marker in ("FAILED", "COMPLETED", "LIGHTNOVEL_NATIVE_NO_RECOMMENDATIONS"))
     ) else 0
     store_priority = {
+        "life_memory_collection": 5,
         "life_episode": 4,
         "semantic_memory": 3,
         "episodic_vector": 2,
@@ -772,13 +856,40 @@ def _filter_rows_for_anaphoric_selection(
         scrubbed.append(row)
     if not scrubbed:
         return list(rows)
-    life_rows = [row for row in scrubbed if _clean_text(row.store_id).lower() == "life_episode"]
-    if life_rows:
+    primary_rows = [
+        row
+        for row in scrubbed
+        if _clean_text(row.store_id).lower() in {"life_memory_collection", "life_episode"}
+    ]
+    if primary_rows:
         return [
-            *life_rows,
+            *primary_rows,
             *(row for row in scrubbed if _clean_text(row.store_id).lower() in {"neo4j_bond", "bond_graph"}),
         ]
     return scrubbed
+
+
+def _filter_rows_for_collection_scope(
+    rows: Sequence[SurfaceMemoryFactRow],
+    *,
+    query: str | None,
+) -> list[SurfaceMemoryFactRow]:
+    if not rows:
+        return []
+    query_text = _clean_text(query)
+    if not _looks_like_collection_scope_query(query_text):
+        return list(rows)
+    collection_rows = [
+        row
+        for row in rows
+        if _clean_text(row.store_id).lower() == "life_memory_collection"
+    ]
+    if not collection_rows:
+        return list(rows)
+    return [
+        *collection_rows,
+        *(row for row in rows if _clean_text(row.store_id).lower() in {"neo4j_bond", "bond_graph"}),
+    ]
 
 
 def _looks_like_anaphoric_scheduler_noise(text: str) -> bool:
@@ -844,10 +955,11 @@ def _surface_fact_text(
     raw = _clean_text(candidate.get("snippet") or candidate.get("text"))
     if not raw:
         return ""
-    if _clean_text(store_id).lower() == "life_episode":
+    if _clean_text(store_id).lower() in {"life_episode", "life_memory_collection"}:
         structured = _structured_life_episode_recall_text(raw, metadata=metadata, limit=limit)
         if structured:
             return _surface_safe_text(structured, limit=max(limit, 420))
+    if _clean_text(store_id).lower() == "life_episode":
         raw = _humanize_life_episode_recall_text(raw, metadata=metadata)
     return _surface_safe_text(raw, limit=limit)
 
@@ -993,6 +1105,8 @@ def _fact_prefix(store_id: str) -> str:
     normalized = _clean_text(store_id).lower()
     if normalized == "semantic_memory":
         return "长期记忆"
+    if normalized == "life_memory_collection":
+        return "集合记忆"
     if normalized in {"life_episode", "episodic_vector", "episodic", "sqlite_ledger"}:
         return "记忆线索"
     if normalized in {"neo4j_bond", "bond_graph"}:
@@ -1115,6 +1229,17 @@ def _looks_like_anaphoric_selection_query(text: str) -> bool:
     if not normalized:
         return False
     return bool(_ANAPHORIC_SELECTION_RE.search(normalized))
+
+
+def _looks_like_collection_scope_query(text: str) -> bool:
+    normalized = _clean_text(text)
+    if not normalized:
+        return False
+    if any(token in normalized for token in ("昨天", "前天", "这几天", "最近", "今日", "今天")) and any(
+        token in normalized for token in ("推荐", "三本", "几本", "十几本", "哪些", "书", "小说")
+    ):
+        return True
+    return bool("推荐过" in normalized and any(token in normalized for token in ("哪些", "几", "最近")))
 
 
 def _looks_like_memory_write(text: str) -> bool:
