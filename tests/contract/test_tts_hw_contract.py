@@ -288,6 +288,52 @@ class TestSynthesizerCallbackFactory:
             })
         assert synthesize_mock.call_args.kwargs["language"] == "ja-jp"
 
+    def test_factory_callback_passes_speed_to_engine(self):
+        mgr = SoVITSModelManager(TtsConfig(device="cpu"))
+        with patch.object(mgr, "synthesize", return_value=TtsSynthResult(
+            success=True,
+            reason_code=None,
+            detail="ok",
+            audio_ref="memory://test",
+            audio_data=[0.0],
+            duration_s=0.1,
+            processing_time_s=0.01,
+            sample_rate=32000,
+        )) as synthesize_mock:
+            synth = make_sovits_synthesizer(mgr)
+            synth({
+                "text": "\u3053\u3093\u306b\u3061\u306f",
+                "speed": 0.72,
+            })
+        assert synthesize_mock.call_args.kwargs["speed_factor"] == 0.72
+
+    def test_factory_callback_adds_expressive_timing_metadata(self, monkeypatch):
+        mgr = SoVITSModelManager(TtsConfig(device="cpu"))
+        import numpy as np
+
+        monkeypatch.setenv("EDGE_TTS_EXPRESSIVE_TIMING", "true")
+        mock_audio = np.ones(32000, dtype=np.float32)
+        with patch.object(mgr, "synthesize", return_value=TtsSynthResult(
+            success=True,
+            reason_code=None,
+            detail="ok",
+            audio_ref="memory://test",
+            audio_data=mock_audio,
+            duration_s=1.0,
+            processing_time_s=0.01,
+            sample_rate=32000,
+        )):
+            synth = make_sovits_synthesizer(mgr)
+            result = synth({
+                "text": "没关系，我在这里。慢慢来，好吗？",
+                "emotion_tag": "COMFORT",
+                "emotion_intensity": 0.8,
+                "lang_hint": "zh",
+            })
+        assert len(result["audio_data"]) > len(mock_audio)
+        assert result["expressive_timing"]["inserted_pause_s"] > 0
+        assert result["expressive_timing"]["breath_count"] >= 1
+
 
 # ---------------------------------------------------------------------------
 # T-TTS-HW-01.6: Error Code Stability

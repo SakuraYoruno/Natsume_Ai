@@ -33,6 +33,7 @@ from host_brain.app.graph_config_builder import (
 )
 from host_brain.integrations.graph_runtime import GraphRuntimeContract
 from host_brain.memory.episodic import EpisodicStore
+from host_brain.memory.life_memory import LifeMemoryStore
 from host_brain.mcp.tool_broker import MCPToolBroker
 from host_brain.mcp.tool_registry import MCPToolRegistry
 from host_brain.observability.metrics import MetricsCollector
@@ -98,6 +99,7 @@ _tool_broker: Optional[ToolBroker] = None
 _bond_stage_engine: Optional[BondStageEngine] = None
 _bond_update_queue: Optional[BondUpdateQueue] = None
 _episodic_store: Optional[EpisodicStore] = None
+_life_memory_store: Optional[LifeMemoryStore] = None
 _retrieval_pipeline: Optional[Any] = None
 _retrieval_orchestrator: Optional[Any] = None
 _obs_metrics_collector: Optional[MetricsCollector] = None
@@ -146,11 +148,43 @@ _hard_state: Optional[Any] = None  # 实际类型: HardState
 _activity_monitor_ref: Optional[Any] = None
 _activity_monitor_lock = __import__("threading").Lock()
 
+# ── 进程级 SystemResourceManager 引用（整机资源自动监控） ──
+_resource_manager_ref: Optional[Any] = None
+_resource_manager_lock = __import__("threading").Lock()
+
 
 def set_activity_monitor(monitor) -> None:
     """注册进程级 ActivityMonitor 实例（由 http_hooks 启动时调用）。"""
     global _activity_monitor_ref
     _activity_monitor_ref = monitor
+
+
+def set_resource_manager(manager) -> None:
+    """注册进程级 SystemResourceManager 实例（由 http_hooks 启动时调用）。"""
+    global _resource_manager_ref
+    _resource_manager_ref = manager
+
+
+def get_resource_manager(*, create_if_missing: bool = False):
+    """获取进程级 SystemResourceManager，可选在缺失时懒启动。"""
+    global _resource_manager_ref
+    manager = _resource_manager_ref
+    if manager is not None or not create_if_missing:
+        return manager
+    if not _parse_bool_env("HOST_RESOURCE_MANAGER_ENABLED", default=False):
+        return None
+
+    with _resource_manager_lock:
+        manager = _resource_manager_ref
+        if manager is not None:
+            return manager
+        from host_brain.core.resource_manager import SystemResourceManager  # noqa: PLC0415
+
+        manager = SystemResourceManager()
+        manager.start()
+        _resource_manager_ref = manager
+        _logger.info("SystemResourceManager 已注册到 dependencies")
+        return manager
 
 
 def get_activity_monitor(*, create_if_missing: bool = False, ledger: Any | None = None):
@@ -315,6 +349,14 @@ def get_episodic_store() -> EpisodicStore:
             embedding_provider_hint=_embedding_provider,
         )
     return _episodic_store
+
+
+def get_life_memory_store() -> LifeMemoryStore:
+    global _life_memory_store
+    ledger = get_ledger()
+    if _life_memory_store is None or getattr(_life_memory_store, "ledger", None) is not ledger:
+        _life_memory_store = LifeMemoryStore(ledger=ledger)
+    return _life_memory_store
 
 
 def get_retrieval_pipeline() -> None:
@@ -1073,7 +1115,14 @@ def set_sys_mode(target_mode: str) -> dict:
     """
     global _hard_state
     import time as _time  # noqa: PLC0415
-    from host_brain.core.metabolism import evolve_hard_state  # noqa: PLC0415
+    from host_brain.core.metabolism import ALLOWED_SYS_MODES, evolve_hard_state  # noqa: PLC0415
+
+    normalized_target = str(target_mode or "").strip().lower()
+    if normalized_target not in ALLOWED_SYS_MODES:
+        raise ValueError(
+            "invalid sys_mode: "
+            f"{target_mode!r}; expected one of {', '.join(sorted(ALLOWED_SYS_MODES))}"
+        )
 
     with _hard_state_lock:
         current = get_hard_state()
@@ -1082,7 +1131,7 @@ def set_sys_mode(target_mode: str) -> dict:
 
         _hard_state = evolve_hard_state(
             current,
-            sys_mode=target_mode,
+            sys_mode=normalized_target,
             event_kind="mode_switch",
             ts_ms=ts,
         )

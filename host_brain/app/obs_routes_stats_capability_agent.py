@@ -345,17 +345,12 @@ class RetrievalRuntimeObservedItem(BaseModel):
     reason_code: Optional[str]
     detail: str
     candidate_count: int
-    rerank_topk: int
+    topk_count: int
     embedding_model_id: Optional[str]
     embedding_provider: Optional[str]
     effective_embedding_provider: Optional[str]
     fallback_embedding_used: bool
     fallback_embedding_reason_code: Optional[str]
-    rerank_model_id: Optional[str]
-    rerank_provider: Optional[str]
-    effective_rerank_provider: Optional[str]
-    fallback_reranker_used: bool
-    fallback_reranker_reason_code: Optional[str]
     runtime_fields_complete: bool = False
     ts_ms: int
 
@@ -367,12 +362,10 @@ class RetrievalRuntimeResponse(BaseModel):
     episodic_write_embedding_provider: Optional[str] = None
     read_write_model_aligned: bool = False
     embedding: RetrievalRuntimeConfiguredSection
-    reranker: RetrievalRuntimeConfiguredSection
     latest: Optional[RetrievalRuntimeObservedItem]
     recent: List[RetrievalRuntimeObservedItem]
     recent_total: int
     recent_embedding_fallbacks: int
-    recent_reranker_fallbacks: int
     timestamp: int
 
 
@@ -380,20 +373,15 @@ def _build_retrieval_runtime_observed_item(row: dict[str, Any]) -> RetrievalRunt
     payload = _safe_json(row.get("payload"))
     payload_dict = dict(payload) if isinstance(payload, dict) else {}
     embedding_model_id = str(payload_dict.get("embedding_model_id") or "").strip() or None
-    rerank_model_id = str(payload_dict.get("rerank_model_id") or "").strip() or None
     return RetrievalRuntimeObservedItem(
         request_id=str(row.get("request_id") or ""), status=str(row.get("status") or "UNKNOWN"),
         reason_code=(str(row.get("reason_code") or "").strip() or None), detail=str(row.get("detail") or ""),
-        candidate_count=int(payload_dict.get("candidate_count") or 0), rerank_topk=int(payload_dict.get("rerank_topk") or 0),
+        candidate_count=int(payload_dict.get("candidate_count") or 0), topk_count=int(payload_dict.get("topk_count") or 0),
         embedding_model_id=embedding_model_id, embedding_provider=(str(payload_dict.get("embedding_provider") or "").strip() or None),
         effective_embedding_provider=(str(payload_dict.get("effective_embedding_provider") or "").strip() or None),
         fallback_embedding_used=bool(payload_dict.get("fallback_embedding_used", False)),
         fallback_embedding_reason_code=(str(payload_dict.get("fallback_embedding_reason_code") or "").strip() or None),
-        rerank_model_id=rerank_model_id, rerank_provider=(str(payload_dict.get("rerank_provider") or "").strip() or None),
-        effective_rerank_provider=(str(payload_dict.get("effective_rerank_provider") or "").strip() or None),
-        fallback_reranker_used=bool(payload_dict.get("fallback_reranker_used", False)),
-        fallback_reranker_reason_code=(str(payload_dict.get("fallback_reranker_reason_code") or "").strip() or None),
-        runtime_fields_complete=bool(embedding_model_id or rerank_model_id), ts_ms=int(row.get("ts_ms") or 0),
+        runtime_fields_complete=bool(embedding_model_id), ts_ms=int(row.get("ts_ms") or 0),
     )
 
 
@@ -403,7 +391,7 @@ def _build_retrieval_runtime_route_items(config: Any, *, kind: str) -> List[Retr
         routes.append(RetrievalRuntimeRouteItem(
             route_id=str(route_id), provider=str(getattr(route, "provider", "") or ""), model_id=str(getattr(route, "model_id", "") or ""),
             dim=(int(getattr(route, "dim", 0)) if kind == "embedding" and getattr(route, "dim", None) is not None else None),
-            top_k=(int(getattr(route, "top_k", 0)) if kind == "reranker" and getattr(route, "top_k", None) is not None else None),
+            top_k=None,
             timeout_ms=int(getattr(route, "timeout_ms", 0) or 0), node_selector=str(getattr(route, "node_selector", "") or ""),
         ))
     return routes
@@ -418,7 +406,6 @@ def _get_retrieval_runtime_sync(request_id, limit, include_legacy):
     ledger = _get_ledger()
     suite = None
     embed_cfg = None
-    rerank_cfg = None
     rows = []
     try:
         rows = [r for r in reversed(list(ledger.retrieval_event_log)) if str(r.get("op_kind") or "").strip().upper() == "PIPELINE"]
@@ -484,10 +471,8 @@ def _get_retrieval_runtime_sync(request_id, limit, include_legacy):
         episodic_write_embedding_model_id=episodic_write_model_id, episodic_write_embedding_provider=episodic_write_provider,
         read_write_model_aligned=bool(episodic_write_model_id and latest_embed_model and episodic_write_model_id == latest_embed_model),
         embedding=RetrievalRuntimeConfiguredSection(enabled=bool(getattr(embed_cfg, "enabled", False)), default_route=str(getattr(embed_cfg, "default_route", "") or ""), routes=_build_retrieval_runtime_route_items(embed_cfg, kind="embedding") if embed_cfg is not None else []),
-        reranker=RetrievalRuntimeConfiguredSection(enabled=bool(getattr(rerank_cfg, "enabled", False)), default_route=str(getattr(rerank_cfg, "default_route", "") or ""), routes=_build_retrieval_runtime_route_items(rerank_cfg, kind="reranker") if rerank_cfg is not None else []),
         latest=latest_item, recent=recent_items, recent_total=len(recent_items),
         recent_embedding_fallbacks=sum(1 for item in recent_items if item.fallback_embedding_used),
-        recent_reranker_fallbacks=sum(1 for item in recent_items if item.fallback_reranker_used),
         timestamp=now,
     )
 

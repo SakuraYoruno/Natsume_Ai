@@ -246,6 +246,9 @@ class SpeechPlaybackQueue:
             "audio_ref": synth_event.get("audio_ref"),
             "ts_ms": now_value,
         }
+        if synth_event.get("audio_path"):
+            synth_log["audio_path"] = synth_event.get("audio_path")
+            synth_log["audio_mime"] = synth_event.get("audio_mime") or "audio/wav"
         self._log_event(
             request_id=request_id,
             session_id=session_id,
@@ -365,6 +368,9 @@ class SpeechPlaybackQueue:
             "audio_ref": synth_event.get("audio_ref"),
             "ts_ms": now_value,
         }
+        if synth_event.get("audio_path"):
+            playback_event["audio_path"] = synth_event.get("audio_path")
+            playback_event["audio_mime"] = synth_event.get("audio_mime") or "audio/wav"
         self._log_event(
             request_id=request_id,
             session_id=session_id,

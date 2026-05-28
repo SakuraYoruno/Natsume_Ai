@@ -31,6 +31,8 @@ from host_brain.channels.edge_rpc_client import (
 
 class TestEdgeRpcConfigHelpers(unittest.TestCase):
     def setUp(self) -> None:
+        self._old_gateway_action_memory = os.environ.get("HOST_GATEWAY_ACTION_MEMORY_ENABLED")
+        os.environ["HOST_GATEWAY_ACTION_MEMORY_ENABLED"] = "false"
         _EDGE_CLOCK_OFFSET_CACHE.update(
             {
                 "base_url": "",
@@ -39,6 +41,12 @@ class TestEdgeRpcConfigHelpers(unittest.TestCase):
             }
         )
         _EDGE_FAILURE_COOLDOWN_CACHE.clear()
+
+    def tearDown(self) -> None:
+        if self._old_gateway_action_memory is None:
+            os.environ.pop("HOST_GATEWAY_ACTION_MEMORY_ENABLED", None)
+        else:
+            os.environ["HOST_GATEWAY_ACTION_MEMORY_ENABLED"] = self._old_gateway_action_memory
 
     def test_invalidate_clock_offset_cache_respects_base_url_guard(self) -> None:
         _EDGE_CLOCK_OFFSET_CACHE.update(
@@ -461,6 +469,47 @@ class TestEdgeRpcWrappers(unittest.IsolatedAsyncioTestCase):
             },
             post_to_gateway.await_args.kwargs["payload"],
         )
+
+    def test_gateway_reply_action_memory_sync_writes_life_action(self) -> None:
+        import host_brain.channels.edge_rpc_client as edge_rpc
+
+        result = EdgeRpcCallResult(
+            success=True,
+            status="sent",
+            reason_code=None,
+            detail="ok",
+            event={"status": "sent"},
+            latency_ms=12,
+        )
+        calls: list[dict] = []
+
+        def _fake_persist_life_action_event_memory(**kwargs):  # noqa: ANN003
+            calls.append(dict(kwargs))
+            return {"status": "OK", "life_memory": {"episode_id": "ep_gateway"}}
+
+        with patch(
+            "host_brain.app.observability_persist.persist_life_action_event_memory",
+            _fake_persist_life_action_event_memory,
+        ):
+            write = edge_rpc._persist_gateway_reply_action_memory_sync(
+                {
+                    "request_id": "req-gateway-memory",
+                    "platform": "qq",
+                    "conversation_id": "qq_dm_owner",
+                    "content": "你好",
+                    "msg_type": "text",
+                    "raw_extra": {"reply_source": "unit_test", "person_id": "owner"},
+                },
+                result,
+            )
+
+        self.assertEqual("OK", write["status"])
+        self.assertEqual("gateway", calls[0]["event_source"])
+        self.assertEqual("qq_reply_sent", calls[0]["action_kind"])
+        self.assertEqual("owner", calls[0]["person_id"])
+        self.assertEqual("qq_dm_owner", calls[0]["session_id"])
+        self.assertIn("我通过 qq 给 qq_dm_owner 发送了 text 消息", calls[0]["action_summary"])
+        self.assertIn("gateway://message/req-gateway-memory", calls[0]["evidence_refs"])
 
     async def test_post_speak_and_post_automate_payloads(self) -> None:
         accepted = EdgeRpcCallResult(

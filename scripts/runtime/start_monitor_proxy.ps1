@@ -354,6 +354,19 @@ events {
 }
 
 http {
+    types {
+        text/html                             html htm;
+        text/css                              css;
+        application/javascript                js mjs;
+        application/json                      json map;
+        image/svg+xml                         svg svgz;
+        image/png                             png;
+        image/jpeg                            jpg jpeg;
+        image/gif                             gif;
+        image/x-icon                          ico;
+        font/woff2                            woff2;
+        font/woff                             woff;
+    }
     default_type  application/octet-stream;
     sendfile        on;
     tcp_nopush      on;
@@ -393,10 +406,21 @@ http {
         }
 
         location /monitor/assets/ {
+            types {
+                text/css               css;
+                application/javascript js mjs;
+                application/json       json map;
+                image/svg+xml          svg svgz;
+                image/png              png;
+                image/jpeg             jpg jpeg;
+                image/gif              gif;
+                image/x-icon           ico;
+                font/woff2             woff2;
+                font/woff              woff;
+            }
             alias $monitorAssetsPath;
             expires 30d;
             add_header Cache-Control "public, max-age=2592000, immutable";
-            try_files `$uri =404;
         }
 
         location = /monitor/index.html {

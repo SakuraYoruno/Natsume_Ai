@@ -641,7 +641,7 @@ def make_distillation_task_config() -> "SchedulerTaskConfig":
     return SchedulerTaskConfig(
         task_id="long_term_memory_distillation",
         trigger_mode=TriggerMode.CRON,
-        trigger_config={"hour": 3, "minute": 0},
+        trigger_config={"hour": 3, "minute": 0, "catch_up_window_minutes": 720},
         intent_template={
             "skill_name": "long_term_memory_distillation",
             "args": {"top_k": 5, "max_proposals": MAX_PROPOSALS_PER_CYCLE},
@@ -651,6 +651,12 @@ def make_distillation_task_config() -> "SchedulerTaskConfig":
         enabled=True,
         max_consecutive_failures=3,
         description="每日 03:00 执行长期记忆蒸馏，将 EpisodicMemory 蒸馏为 Canon 提案（M13-B）",
+        resource_profile={
+            "resource_class": "memory_heavy",
+            "uses_llm": True,
+            "uses_gpu": False,
+            "advisory_policy": "rule",
+        },
     )
 
 

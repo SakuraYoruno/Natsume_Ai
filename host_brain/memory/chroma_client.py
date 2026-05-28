@@ -352,6 +352,9 @@ def embed_text(text: str, *, dim: int | None = None) -> tuple[list[float], str]:
         (embedding_values, model_id) 元组。
     """
     normalized = str(text).strip()
+    if not _semantic_embedding_enabled():
+        return hash_embed_text(normalized, dim=(int(dim) if dim is not None else 16))
+
     # 尝试使用真实语义嵌入模型
     try:
         model = _get_sentence_transformer_model()
@@ -369,18 +372,24 @@ def embed_text(text: str, *, dim: int | None = None) -> tuple[list[float], str]:
         pass
     return hash_embed_text(normalized, dim=(int(dim) if dim is not None else 16))
 
-    # 降级：SHA-256 哈希伪嵌入（语义无关，仅用于测试/离线场景）
-    fallback_dim = int(dim) if dim is not None else 16
-    digest = hashlib.sha256(normalized.encode("utf-8")).digest()
-    values = []
-    for idx in range(fallback_dim):
-        byte_value = digest[idx % len(digest)]
-        values.append(round(byte_value / 255.0, 6))
-    return values, EMBEDDING_MODEL_ID
-
 
 # 模型单例缓存（避免每次调用重复加载）
 _sentence_transformer_models: dict[str, Any] = {}
+
+
+def _resolve_embedding_provider() -> str:
+    for key in ("RETR_EMBED_PROVIDER", "RETR_MODEL_SUITE_EMBED_PROVIDER"):
+        value = str(os.environ.get(key) or "").strip().lower()
+        if value:
+            return value
+    if not _parse_bool(os.environ.get("RETR_EMBED_ENABLED"), default=True):
+        return "hash"
+    return "sentence_transformers"
+
+
+def _semantic_embedding_enabled() -> bool:
+    provider = _resolve_embedding_provider()
+    return provider not in {"hash", "mock", "none", "off", "disabled", "false", "0"}
 
 
 def _resolve_semantic_embedding_model_id() -> str:
@@ -393,19 +402,52 @@ def _resolve_semantic_embedding_model_id() -> str:
     return SEMANTIC_EMBEDDING_MODEL_ID
 
 
+def _resolve_sentence_transformer_device() -> str | None:
+    explicit = str(
+        os.environ.get("RETR_EMBED_DEVICE")
+        or os.environ.get("RETR_MODEL_SUITE_EMBED_DEVICE")
+        or ""
+    ).strip()
+    if explicit:
+        normalized = explicit.lower()
+        return None if normalized in {"auto", "default"} else explicit
+
+    suite_device = str(os.environ.get("RETR_MODEL_SUITE_DEVICE") or "").strip()
+    if suite_device and not suite_device.lower().startswith("cuda"):
+        normalized_suite = suite_device.lower()
+        return None if normalized_suite in {"auto", "default"} else suite_device
+
+    cuda_allowed = _parse_bool(os.environ.get("RETR_EMBED_ALLOW_CUDA"), default=False) or _parse_bool(
+        os.environ.get("HOST_RETR_EMBED_ALLOW_CUDA"),
+        default=False,
+    )
+    if suite_device.lower().startswith("cuda") and cuda_allowed:
+        return suite_device
+    return "cpu"
+
+
 def _get_sentence_transformer_model() -> Any:
     """获取 SentenceTransformer 模型单例（懒加载 + 缓存）。"""
     model_id = _resolve_semantic_embedding_model_id()
     model_ref, local_only = _resolve_sentence_transformer_model_ref(model_id)
-    cache_key = f"local:{model_ref}" if local_only else model_id
+    device = _resolve_sentence_transformer_device()
+    cache_key = f"{'local:' + model_ref if local_only else model_id}:device={device or 'auto'}"
     cached = _sentence_transformer_models.get(cache_key)
     if cached is not None:
         return cached
     from sentence_transformers import SentenceTransformer  # type: ignore[import-untyped]
+    kwargs: dict[str, Any] = {"local_files_only": local_only}
+    if device:
+        kwargs["device"] = device
     try:
-        model = SentenceTransformer(model_ref, local_files_only=local_only)
+        model = SentenceTransformer(model_ref, **kwargs)
     except TypeError:
         model = SentenceTransformer(model_ref)
+        if device and hasattr(model, "to"):
+            try:
+                model.to(device)
+            except Exception:
+                pass
     _sentence_transformer_models[cache_key] = model
     return model
 
@@ -665,13 +707,15 @@ def _parse_collection_profiles(
     return profiles
 
 
-def _parse_bool(value: Any, *, default: bool) -> bool:
+def _parse_bool(value: Any, *, default: bool = False) -> bool:
     if value is None:
         return bool(default)
     text = str(value).strip().lower()
-    if text in {"1", "true", "yes", "on"}:
+    if not text:
+        return bool(default)
+    if text in {"1", "true", "yes", "y", "on"}:
         return True
-    if text in {"0", "false", "no", "off"}:
+    if text in {"0", "false", "no", "n", "off"}:
         return False
     return bool(default)
 

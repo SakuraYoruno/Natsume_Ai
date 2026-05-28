@@ -11,6 +11,17 @@ _MOTIVATION_RE = re.compile(r"(为什么要帮我|为什么帮我|为什么要�
 _HELP_CONTINUITY_RE = re.compile(r"(还会帮我吗|还会理我吗|还会管我吗)")
 _GREETING_RE = re.compile(r"^(?:你好|您好|嗨|哈喽|hello|hi|hey|早安|早上好|中午好|晚上好|晚安)[!！。…~\s]*$", re.IGNORECASE)
 _PRESENCE_PING_RE = re.compile(r"^(?:在吗|在不在|还在吗|忙吗|在嘛|有人吗)[?？!！。…~\s]*$")
+_AUDITORY_CHECK_RE = re.compile(
+    r"^(?:"
+    r"(?:你)?(?:能不能|能|可以|可不可以|有没有)?(?:听到|听见|听得到|听得见|听清|听清楚)"
+    r"(?:我|我说话|我讲话|声音)?(?:吗|么)?"
+    r"|(?:我)?(?:说话|讲话|发声|声音)(?:你)?(?:能不能|能|可以|可不可以)?"
+    r"(?:听到|听见|听得到|听得见|听清|听清楚)(?:吗|么)?"
+    r"|(?:有|有没有)(?:听到|听见)?声音(?:吗|么)?"
+    r"|(?:刚才|刚刚)?(?:我)?(?:说了|说话|讲话)(?:什么)?(?:你)?(?:听到|听见|听得到|听得见)(?:吗|么)?"
+    r")[?？!！。…~\s]*$",
+    re.IGNORECASE,
+)
 _LIGHT_ACK_RE = re.compile(r"^(?:嗯|嗯嗯|哦|哦哦|好的?|行|行吧|收到|ok|okay|好哦|好呀)[!！。…~\s]*$", re.IGNORECASE)
 _PLAYFUL_PING_RE = re.compile(r"^(?:戳戳|喂喂|嘿嘿|冒泡|路过|ping|戳一戳)[!！。…~\s]*$")
 _IMAGE_MESSAGE_RE = re.compile(
@@ -128,6 +139,8 @@ def _classify_user_topic(text: str) -> str:
         return "relationship_boundary"
     if _GREETING_RE.match(text):
         return "greeting"
+    if _AUDITORY_CHECK_RE.match(text):
+        return "auditory_check"
     if _PRESENCE_PING_RE.match(text):
         return "presence_ping"
     if _LIGHT_ACK_RE.match(text):
@@ -439,7 +452,7 @@ def resolve_interaction_thread(
                 turn_count=max(1, user_topics[-3:].count("help_commitment")),
                 reason_tags=("recent_help_reassurance",),
             )
-    if current_topic in {"greeting", "presence_ping", "light_ack", "playful_ping"}:
+    if current_topic in {"greeting", "presence_ping", "auditory_check", "light_ack", "playful_ping"}:
         return InteractionThreadState(
             thread_kind="phatic",
             source_topic=current_topic,

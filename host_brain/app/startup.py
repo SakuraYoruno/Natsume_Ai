@@ -18,11 +18,32 @@ import logging
 import os
 from pathlib import Path
 import threading
+import time
 from typing import Any, Awaitable, Callable, Mapping, TypeVar
 
 _logger = logging.getLogger("Natsume.startup")
 _AsyncT = TypeVar("_AsyncT")
 _SOUL_RUNTIME_STATE_PATH = Path(__file__).resolve().parents[1] / "data" / "runtime_soul_state.json"
+
+
+def _parse_bool_env(name: str, *, default: bool) -> bool:
+    raw = str(os.environ.get(name) or "").strip().lower()
+    if not raw:
+        return bool(default)
+    if raw in {"1", "true", "yes", "on"}:
+        return True
+    if raw in {"0", "false", "no", "off"}:
+        return False
+    return bool(default)
+
+
+def _parse_int_env(name: str, *, default: int, minimum: int, maximum: int) -> int:
+    raw = str(os.environ.get(name) or "").strip()
+    try:
+        value = int(raw) if raw else int(default)
+    except ValueError:
+        value = int(default)
+    return max(int(minimum), min(int(maximum), value))
 
 
 # ---------------------------------------------------------------------------
@@ -560,13 +581,104 @@ def warmup_chat_llm_runtime_profiles() -> str:
         return f"DEGRADED: {exc}"
 
 
+def warmup_codex_exec_intent_pool() -> str:
+    """预热 EXEC_INTENT 的 Codex app-server worker，避免首条聊天替后台分类付冷启动成本。"""
+    if not _parse_bool_env("HOST_STARTUP_CODEX_EXEC_INTENT_WARMUP_ENABLED", default=True):
+        return "SKIPPED (disabled)"
+    try:
+        from host_brain.integrations.codex_cli_provider import (  # noqa: PLC0415
+            invoke_codex_cli_text,
+            resolve_codex_cli_model,
+        )
+        from host_brain.integrations.llm_helpers import _codex_pool_migration_enabled  # noqa: PLC0415
+
+        if not _codex_pool_migration_enabled("EXEC_INTENT"):
+            return "SKIPPED (codex migration disabled or unavailable)"
+
+        model_id = resolve_codex_cli_model(
+            os.environ.get("HOST_LLM_POOL_CODEX_MODEL_ID") or os.environ.get("HOST_CODEX_MODEL_ID")
+        )
+        timeout_ms = _parse_int_env(
+            "HOST_CODEX_EXEC_INTENT_WARMUP_TIMEOUT_MS",
+            default=30_000,
+            minimum=1_000,
+            maximum=10 * 60 * 1000,
+        )
+        started_at = time.perf_counter()
+        raw_text = invoke_codex_cli_text(
+            model_id=model_id,
+            timeout_ms=timeout_ms,
+            response_format={"type": "json_object"},
+            feature_key="pool:EXEC_INTENT:C",
+            messages=[
+                {
+                    "role": "system",
+                    "content": 'Return exactly this JSON object and no extra text: {"route":"chat"}',
+                },
+                {"role": "user", "content": "startup warmup"},
+            ],
+        )
+        parsed = json.loads(str(raw_text or "").strip())
+        if not isinstance(parsed, Mapping):
+            raise RuntimeError("Codex EXEC_INTENT warmup returned non-object JSON")
+        latency_ms = int(round((time.perf_counter() - started_at) * 1000))
+        detail = f"model={model_id}, latency_ms={latency_ms}, route={parsed.get('route') or 'unknown'}"
+        _logger.info("Codex EXEC_INTENT 预热完成: %s", detail)
+        return f"OK ({detail})"
+    except Exception as exc:
+        _logger.warning("Codex EXEC_INTENT 预热失败（降级）: %s", exc)
+        return f"DEGRADED: {exc}"
+
+
 def warmup_retrieval_runtime_basics() -> str:
     """预热 retrieval / embedding / Chroma 关键冷启动路径，降低首轮完整 chat 抖动。"""
     try:
+        try:
+            from host_brain.core.resource_manager import assess_background_task_pressure  # noqa: PLC0415
+            from host_brain.skills.impl.system_executor import execute_system_skill  # noqa: PLC0415
+
+            snapshot_result = execute_system_skill(
+                {
+                    "action": "resource_snapshot",
+                    "manifest_ref": "startup_retrieval_warmup::resource_gate",
+                    "include_gpu": True,
+                    "include_processes": False,
+                    "include_network": False,
+                    "sample_seconds": 0,
+                }
+            )
+            snapshot_detail = dict(snapshot_result.get("detail") or {})
+            gate_decision = assess_background_task_pressure(
+                task_id="startup_retrieval_warmup",
+                pressure=dict(snapshot_detail.get("pressure") or {}),
+                priority="LOW",
+                task_type="retrieval_warmup",
+                uses_llm=False,
+                uses_gpu=True,
+                reason="startup",
+            )
+            if not bool(gate_decision.get("allowed", True)):
+                detail = (
+                    f"{gate_decision.get('reason_code') or 'RESOURCE_PRESSURE_DEFERRED'} "
+                    f"pressure={gate_decision.get('pressure_status')} "
+                    f"retry_after_s={gate_decision.get('retry_after_s')}"
+                )
+                _logger.info("Retrieval runtime 预热被资源管家延后: %s", detail)
+                return f"SKIPPED_RESOURCE_GATE: {detail}"
+        except Exception as gate_exc:
+            _logger.debug("Retrieval warmup resource gate skipped: %s", gate_exc)
+
         from host_brain.app.dependencies import get_episodic_store  # noqa: PLC0415
+        from host_brain.memory.chroma_client import hash_embed_text  # noqa: PLC0415
 
         store = get_episodic_store()
-        warm_vector, warm_model_id = store._embed_text("startup retrieval warmup")
+        warm_dim = store._resolve_embedding_dim()
+        if _parse_bool_env("HOST_STARTUP_RETRIEVAL_WARMUP_EMBEDDING", default=False):
+            warm_vector, warm_model_id = store._embed_text("startup retrieval warmup")
+            warmup_mode = "semantic_embedding"
+        else:
+            warm_vector, warm_model_id = hash_embed_text("startup retrieval warmup", dim=warm_dim)
+            warmup_mode = "chroma_hash_probe"
         chroma_hits = store.chroma.search(
             query_embedding=warm_vector,
             top_k=1,
@@ -576,8 +688,9 @@ def warmup_retrieval_runtime_basics() -> str:
         warmed_parts = [
             f"embed_model={warm_model_id}",
             f"embed_dim={len(warm_vector)}",
+            f"warmup_mode={warmup_mode}",
             f"collection={store.chroma.default_collection}",
-            f"collection_dim={store._resolve_embedding_dim()}",
+            f"collection_dim={warm_dim}",
             f"chroma_hits={len(list(chroma_hits or []))}",
             "legacy_pipeline=removed",
             "legacy_orchestrator=removed",
@@ -605,6 +718,7 @@ def warmup_all(*, eager: bool = False) -> dict[str, str]:
     statuses["graph_runtime"] = warmup_graph_runtime()
     statuses["chat_runtime"] = warmup_chat_runtime_basics(eager_persona=eager)
     statuses["chat_llm_runtime"] = warmup_chat_llm_runtime_profiles()
+    statuses["codex_exec_intent"] = warmup_codex_exec_intent_pool()
     statuses["retrieval_runtime"] = warmup_retrieval_runtime_basics()
 
     # 慢速预热（仅 eager 模式）
@@ -630,6 +744,7 @@ __all__ = [
     "warmup_graph_runtime",
     "warmup_chat_runtime_basics",
     "warmup_chat_llm_runtime_profiles",
+    "warmup_codex_exec_intent_pool",
     "warmup_retrieval_runtime_basics",
     "warmup_all",
 ]

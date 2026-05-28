@@ -179,3 +179,81 @@ def test_load_host_config_resolves_codex_key_ref_and_redacts_snapshot(tmp_path: 
     assert snapshot.snapshot is not None
     assert snapshot.snapshot["values"]["codex_api_key"] == "<redacted>"
     assert "CODEX_API_KEY" in snapshot.snapshot["redacted_keys"]
+
+
+def test_build_host_runtime_statuses_accepts_codex_cli_without_key(monkeypatch) -> None:
+    monkeypatch.setattr(host_config, "codex_cli_lm_available", lambda: True)
+
+    result = host_config.load_host_config(
+        env={
+            "Natsume_ENV": "dev",
+            "HOST_LLM_PROVIDER": "codex",
+            "HOST_COLD_START_ALLOWED": "true",
+        },
+    )
+
+    assert result.success, result.as_dict()
+    assert result.config is not None
+    statuses = host_config.build_host_runtime_statuses(result.config)
+
+    assert statuses["host.integrations.llm_gateway"]["available"] is True
+    assert statuses["host.integrations.llm_gateway"]["detail"] == "llm gateway enabled via Codex CLI"
+
+
+def test_load_host_config_resolves_auxiliary_provider_refs(tmp_path: Path, monkeypatch) -> None:
+    key_profiles_file = tmp_path / "key_profiles.runtime.json"
+    secret_store_file = tmp_path / "secret_store.runtime.local.json"
+
+    _write_json(
+        key_profiles_file,
+        {
+            "current_epoch": 20260301,
+            "host_node_id": "natsu-node-01",
+            "profiles": [
+                {
+                    "provider": "deepseek",
+                    "node_id": "natsu-node-01",
+                    "scope": "host.llm",
+                    "secret_ref": "sec://deepseek/natsu-node-01",
+                    "rotation_epoch": 20270101,
+                    "status": "active",
+                },
+                {
+                    "provider": "minimax",
+                    "node_id": "natsu-node-01",
+                    "scope": "host.llm",
+                    "secret_ref": "sec://minimax/natsu-node-01",
+                    "rotation_epoch": 20270101,
+                    "status": "active",
+                },
+            ],
+        },
+    )
+    _write_json(
+        secret_store_file,
+        {
+            "sec://deepseek/natsu-node-01": "sk-deepseek-demo-value",
+            "sec://minimax/natsu-node-01": "sk-minimax-demo-value",
+        },
+    )
+
+    monkeypatch.setattr(host_config, "DEFAULT_KEY_PROFILES", key_profiles_file)
+    monkeypatch.setattr(host_config, "DEFAULT_KEY_PROFILES_FALLBACK", key_profiles_file)
+    monkeypatch.setattr(host_config, "DEFAULT_SECRET_STORE", secret_store_file)
+    monkeypatch.setattr(host_config, "DEFAULT_SECRET_STORE_FALLBACK", secret_store_file)
+
+    result = host_config.load_host_config(
+        env={
+            "Natsume_ENV": "prod",
+            "HOST_LLM_PROVIDER": "deepseek",
+            "HOST_COLD_START_ALLOWED": "false",
+            "DEEPSEEK_API_KEY_REF": "sec://deepseek/natsu-node-01",
+            "MINIMAX_API_KEY_REF": "sec://minimax/natsu-node-01",
+        },
+    )
+
+    assert result.success, result.as_dict()
+    assert result.config is not None
+    assert result.config.deepseek_api_key == "sk-deepseek-demo-value"
+    assert result.config.minimax_api_key == "sk-minimax-demo-value"
+    assert result.config.llm_api_key == "sk-deepseek-demo-value"

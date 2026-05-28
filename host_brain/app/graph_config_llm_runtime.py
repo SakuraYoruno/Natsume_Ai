@@ -33,6 +33,7 @@ from host_brain.app.provider_factory import (
     resolve_host_llm_model_id,
 )
 from host_brain.app.model_router import resolve_gemini_model_route
+from host_brain.integrations.codex_cli_provider import codex_cli_lm_available, resolve_codex_cli_model
 from host_brain.app.prompt_builder import (
     SCENE_CHAT,
     SCENE_EXEC_INTENT,
@@ -51,6 +52,7 @@ _HOST_CHAT_14B_FALLBACK_API_KEY = "host-local-placeholder-key"
 _HOST_CHAT_14B_DEFAULT_BASE_URL = "http://127.0.0.1:11434/v1"
 _HOST_CHAT_CLOUD_DEFAULT_PROVIDER = PROVIDER_GEMINI
 _PROVIDERS_REQUIRING_API_KEY = frozenset({PROVIDER_OPENAI, PROVIDER_CODEX, PROVIDER_GEMINI, PROVIDER_DEEPSEEK, PROVIDER_MINIMAX})
+_AGENT_CODEX_MIGRATION_DEFAULT_EXCLUDED_ROLES = frozenset({"chat_agent"})
 
 
 def _parse_bool(value: Any, default: bool = False) -> bool:
@@ -82,6 +84,51 @@ def _parse_csv_tokens(value: Any) -> set[str]:
         if token:
             tokens.add(token)
     return tokens
+
+
+def _agent_codex_migration_enabled(role: str) -> bool:
+    if not _parse_bool(os.environ.get("HOST_AGENT_CODEX_MIGRATION_ENABLED"), default=False):
+        return False
+    normalized_role = str(role or "").strip().lower()
+    excluded = {
+        str(item or "").strip().lower()
+        for item in _parse_csv_tokens(
+            os.environ.get("HOST_AGENT_CODEX_MIGRATION_EXCLUDED_ROLES")
+            or ",".join(sorted(_AGENT_CODEX_MIGRATION_DEFAULT_EXCLUDED_ROLES))
+        )
+        if str(item or "").strip()
+    }
+    if normalized_role in excluded:
+        return False
+    included = {
+        str(item or "").strip().lower()
+        for item in _parse_csv_tokens(os.environ.get("HOST_AGENT_CODEX_MIGRATION_INCLUDED_ROLES"))
+        if str(item or "").strip()
+    }
+    if included and normalized_role not in included:
+        return False
+    return codex_cli_lm_available()
+
+
+def _resolve_agent_codex_model_id() -> str:
+    return resolve_codex_cli_model(os.environ.get("HOST_AGENT_CODEX_MODEL_ID") or os.environ.get("HOST_CODEX_MODEL_ID"))
+
+
+def _chat_agent_codex_experiment_enabled(role: str) -> bool:
+    if str(role or "").strip().lower() != "chat_agent":
+        return False
+    if not _parse_bool(os.environ.get("HOST_CHAT_AGENT_CODEX_EXPERIMENT_ENABLED"), default=False):
+        return False
+    return codex_cli_lm_available()
+
+
+def _resolve_chat_agent_codex_model_id() -> str:
+    return resolve_codex_cli_model(
+        os.environ.get("HOST_CHAT_AGENT_CODEX_MODEL_ID")
+        or os.environ.get("HOST_CHAT_AGENT_SPARK_MODEL_ID")
+        or os.environ.get("HOST_CODEX_CHAT_MODEL_ID")
+        or os.environ.get("HOST_CODEX_MODEL_ID")
+    )
 
 
 def _stable_bucket_0_99(value: str) -> int:
@@ -119,6 +166,8 @@ def _is_provider_available(*, provider_name: str, api_key: str | None, configure
         return False
     if provider == PROVIDER_DISABLED:
         return False
+    if provider == PROVIDER_CODEX and not str(api_key or "").strip() and codex_cli_lm_available():
+        return True
     if _provider_requires_api_key(provider) and not str(api_key or "").strip():
         return False
     return True
@@ -138,7 +187,7 @@ def _resolve_cloud_provider_model_id(*, chain_name: str) -> str:
     if normalized_chain == "gemini":
         return str(os.environ.get("HOST_GEMINI_MODEL_ID") or "gemini-2.5-flash-lite").strip() or "gemini-2.5-flash-lite"
     if normalized_chain == "codex":
-        return str(os.environ.get("HOST_CODEX_MODEL_ID") or "gpt-4o-mini").strip() or "gpt-4o-mini"
+        return resolve_codex_cli_model(os.environ.get("HOST_CODEX_MODEL_ID"))
     if normalized_chain == "deepseek":
         return str(os.environ.get("HOST_DEEPSEEK_MODEL_ID") or "deepseek-v4-flash").strip() or "deepseek-v4-flash"
     if normalized_chain == "minimax":
@@ -532,6 +581,57 @@ def _resolve_agent_llm_runtime_v2(*, base_runtime: dict[str, Any], role: str, mo
     selected_api_key = str(base_runtime.get("llm_api_key") or base_runtime.get("chat_llm_api_key") or "").strip() or None
     explicit_model_override = _first_non_empty_env(model_env_name, *fallback_model_env_names)
     model_route: dict[str, Any] = {}
+    if _chat_agent_codex_experiment_enabled(role):
+        model_id = _resolve_chat_agent_codex_model_id()
+        codex_timeout_ms = max(
+            timeout_ms,
+            _parse_int(
+                os.environ.get("HOST_CHAT_AGENT_CODEX_MIN_TIMEOUT_MS"),
+                default=45_000,
+                min_value=800,
+                max_value=10 * 60 * 1000,
+            ),
+        )
+        return {
+            **base_runtime,
+            "provider_name": PROVIDER_CODEX,
+            "model_id": model_id,
+            "chat_model_id": model_id,
+            "timeout_ms": codex_timeout_ms,
+            "chat_timeout_ms": codex_timeout_ms,
+            "llm_api_key": None,
+            "chat_llm_api_key": None,
+            "base_url_override": None,
+            "chat_base_url_override": None,
+            "available": True,
+            "chat_available": True,
+            "agent_gen_params": dict(gen_params),
+            "agent_role": role,
+            "agent_model_route": {"route": "codex_chat_experiment", "source": "HOST_CHAT_AGENT_CODEX_EXPERIMENT_ENABLED"},
+            "route_reason_code": "HOST_CHAT_AGENT_CODEX_SPARK_EXPERIMENT",
+            "route_detail": f"agent role {role} routed to local Codex CLI chat experiment",
+        }
+    if _agent_codex_migration_enabled(role):
+        model_id = _resolve_agent_codex_model_id()
+        return {
+            **base_runtime,
+            "provider_name": PROVIDER_CODEX,
+            "model_id": model_id,
+            "chat_model_id": model_id,
+            "timeout_ms": max(timeout_ms, _parse_int(os.environ.get("HOST_AGENT_CODEX_MIN_TIMEOUT_MS"), default=30_000, min_value=800, max_value=10 * 60 * 1000)),
+            "chat_timeout_ms": max(timeout_ms, _parse_int(os.environ.get("HOST_AGENT_CODEX_MIN_TIMEOUT_MS"), default=30_000, min_value=800, max_value=10 * 60 * 1000)),
+            "llm_api_key": None,
+            "chat_llm_api_key": None,
+            "base_url_override": None,
+            "chat_base_url_override": None,
+            "available": True,
+            "chat_available": True,
+            "agent_gen_params": dict(gen_params),
+            "agent_role": role,
+            "agent_model_route": {"route": "codex_cli_migration", "source": "HOST_AGENT_CODEX_MIGRATION_ENABLED"},
+            "route_reason_code": "HOST_AGENT_CODEX_CLI_MIGRATION",
+            "route_detail": f"agent role {role} routed to local Codex CLI",
+        }
     if provider_name == PROVIDER_GEMINI:
         model_route = resolve_gemini_model_route(role=role, preferred_api_key=selected_api_key, route_key=(str(base_runtime.get("route_reason_code") or "").strip() or str(base_runtime.get("route_target") or "").strip() or None))
         if explicit_model_override and explicit_model_override.lower().startswith("gemini-"):

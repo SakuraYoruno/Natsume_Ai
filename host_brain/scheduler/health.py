@@ -14,6 +14,9 @@ logger = logging.getLogger(__name__)
 
 # 任务运行状态
 STATUS_OK = "OK"
+STATUS_QUEUED = "QUEUED"
+STATUS_RETRYING = "RETRYING"
+STATUS_DEFERRED = "DEFERRED"
 STATUS_SUSPENDED = "SUSPENDED"
 STATUS_DISABLED = "DISABLED"
 STATUS_ERROR = "ERROR"
@@ -36,8 +39,10 @@ class SchedulerHealthReporter:
         last_run_ts: int | None = None,
         next_run_ts: int | None = None,
         error_count: int = 0,
+        retry_count: int = 0,
         suspended_reason: str | None = None,
         last_reason_code: str | None = None,
+        last_retry_reason_code: str | None = None,
         last_gate_state: str | None = None,
         last_mood_state: str | None = None,
         last_endocrine_cortisol: float | None = None,
@@ -53,8 +58,10 @@ class SchedulerHealthReporter:
             "last_run_ts": last_run_ts,
             "next_run_ts": next_run_ts,
             "error_count": error_count,
+            "retry_count": retry_count,
             "suspended_reason": suspended_reason,
             "last_reason_code": last_reason_code,
+            "last_retry_reason_code": last_retry_reason_code,
             "last_gate_state": last_gate_state,
             "last_mood_state": last_mood_state,
             "last_endocrine_cortisol": last_endocrine_cortisol,
@@ -101,8 +108,10 @@ class SchedulerHealthReporter:
                 "last_run_ts": state.get("last_run_ts"),
                 "next_run_ts": state.get("next_run_ts"),
                 "error_count": state.get("error_count", 0),
+                "retry_count": state.get("retry_count", 0),
                 "suspended_reason": state.get("suspended_reason"),
                 "last_reason_code": state.get("last_reason_code"),
+                "last_retry_reason_code": state.get("last_retry_reason_code"),
                 "last_gate_state": state.get("last_gate_state"),
                 "last_mood_state": state.get("last_mood_state"),
                 "last_endocrine_cortisol": state.get("last_endocrine_cortisol"),

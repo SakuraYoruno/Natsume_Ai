@@ -180,10 +180,10 @@ def _classify_retrieval_path_for_obs(
     degraded = bool(retrieval_summary.get("degraded", False))
     route_count = _coerce_non_negative_int(retrieval_summary.get("route_count"))
     candidate_count = _coerce_non_negative_int(retrieval_summary.get("candidate_count"))
-    rerank_topk = _coerce_non_negative_int(retrieval_summary.get("rerank_topk"))
+    topk_count = _coerce_non_negative_int(retrieval_summary.get("topk_count"))
     if status == "OK" and not degraded:
         return "success"
-    if route_count > 0 or candidate_count > 0 or rerank_topk > 0 or len(retrieval_evidence_items) > 0:
+    if route_count > 0 or candidate_count > 0 or topk_count > 0 or len(retrieval_evidence_items) > 0:
         return "partial_failure"
     return "all_failure"
 
@@ -295,7 +295,7 @@ def build_prompt_context_observability(
             "path": retrieval_path,
             "route_count": _coerce_non_negative_int(retrieval_summary.get("route_count")),
             "candidate_count": _coerce_non_negative_int(retrieval_summary.get("candidate_count")),
-            "rerank_topk": _coerce_non_negative_int(retrieval_summary.get("rerank_topk")),
+            "topk_count": _coerce_non_negative_int(retrieval_summary.get("topk_count")),
             "route_ids": route_ids,
             "cache_hit": bool(retrieval_summary.get("cache_hit", False)),
             "cache_ttl_ms": _coerce_non_negative_int(retrieval_summary.get("cache_ttl_ms")),

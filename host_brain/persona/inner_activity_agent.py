@@ -1,12 +1,18 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
 import re
+import shutil
+import subprocess
+import sys
+import tempfile
 import threading
 import time
 from collections.abc import Mapping
+from pathlib import Path
 from typing import Any
 
 from host_brain.persona.motive_runtime import (
@@ -67,6 +73,11 @@ _INNER_ACTIVITY_LLM_CACHE: dict[str, Any] = {
     "resolved_at_ms": 0,
     "runtime": None,
 }
+_INNER_ACTIVITY_CODEX_CLI_PROVIDER = "codex_cli"
+_INNER_ACTIVITY_RESULT_CACHE_LOCK = threading.Lock()
+_INNER_ACTIVITY_RESULT_CACHE: dict[str, tuple[int, str]] = {}
+_INNER_ACTIVITY_DIRECT_CALL_LOCK = threading.Lock()
+_INNER_ACTIVITY_LAST_DIRECT_CALL_MS = 0
 _INNER_ACTIVITY_SELF_REFLECTION_LOCK = threading.Lock()
 _INNER_ACTIVITY_SELF_REFLECTION: Any | None = None
 _INNER_ACTIVITY_SELF_MODEL_LOCK = threading.Lock()
@@ -83,6 +94,14 @@ def _env_bool(name: str, *, default: bool) -> bool:
     if normalized in {"0", "false", "no", "off"}:
         return False
     return bool(default)
+
+
+def _env_int(name: str, *, default: int, minimum: int, maximum: int) -> int:
+    try:
+        parsed = int(float(str(os.environ.get(name) or default).strip()))
+    except (TypeError, ValueError):
+        parsed = int(default)
+    return max(int(minimum), min(int(maximum), parsed))
 
 
 def _inner_activity_llm_disabled_reason() -> str:
@@ -138,7 +157,7 @@ def generate_inner_activity_note(
     )
     if not provider_name or not model_id:
         return "", "", "INNER_ACTIVITY_LLM_RUNTIME_INVALID", {}
-    if not api_key:
+    if not api_key and not _inner_activity_provider_uses_codex_cli(provider_name):
         return "", "", "INNER_ACTIVITY_LLM_KEY_MISSING", {}
 
     context = _build_inner_activity_context(
@@ -231,7 +250,9 @@ def generate_inner_activity_note(
             meta = {
                 "context_scope": context_scope,
                 "context_digest": context_digest,
+                "provider_name": provider_name,
                 "model_id": model_id,
+                "pool_bypass": bool(runtime.get("pool_bypass")),
                 "retry_count": 1,
                 "retry_reason": "duplicate_recent_inner_event",
             }
@@ -241,7 +262,9 @@ def generate_inner_activity_note(
     meta = {
         "context_scope": context_scope,
         "context_digest": context_digest,
+        "provider_name": provider_name,
         "model_id": model_id,
+        "pool_bypass": bool(runtime.get("pool_bypass")),
     }
     return note, focus or "self", "", meta
 
@@ -284,6 +307,7 @@ def _retry_inner_activity_llm_after_duplicate(
             system_prompt=system_prompt,
             base_url_override=base_url_override,
             gen_params=retry_params,
+            allow_burst=True,
         )
     except Exception as exc:
         return {"reason": f"INNER_ACTIVITY_LLM_DUPLICATE_RETRY_FAILED:{str(exc)[:80]}"}
@@ -703,28 +727,155 @@ def _run_inner_activity_llm(
     system_prompt: str,
     gen_params: dict[str, Any],
     base_url_override: str | None,
+    allow_burst: bool = False,
 ) -> str:
-    from host_brain.integrations.llm_helpers import complete_llm_with_pool_sync  # noqa: PLC0415
+    if _inner_activity_provider_uses_codex_cli(provider_name):
+        return _run_inner_activity_codex_cli(
+            provider_name=provider_name,
+            model_id=model_id,
+            timeout_ms=timeout_ms,
+            prompt_text=prompt_text,
+            system_prompt=system_prompt,
+            gen_params=gen_params,
+            allow_burst=allow_burst,
+        )
 
-    result = complete_llm_with_pool_sync(
-        request_id=f"inner_activity::{int(time.time() * 1000)}",
-        scene_type="INNER_ACTIVITY",
-        cognitive_tier="B",
+    from host_brain.integrations.llm_helpers import (  # noqa: PLC0415
+        _pop_last_provider_usage,
+        _set_last_provider_usage,
+        invoke_llm_text,
+    )
+
+    request_id = f"inner_activity_codex::{int(time.time() * 1000)}"
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": prompt_text},
+    ]
+    call_params = dict(gen_params or {})
+    call_params.setdefault("response_format", "json_object")
+    cache_key = _inner_activity_result_cache_key(
         provider_name=provider_name,
         model_id=model_id,
-        api_key=api_key,
-        timeout_ms=timeout_ms,
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": prompt_text},
-        ],
-        gen_params=gen_params,
-        response_format="json_object",
         base_url_override=base_url_override,
+        messages=messages,
+        gen_params=call_params,
     )
-    if result.pool_exhausted:
-        raise RuntimeError("inner activity llm pool exhausted")
-    return str(result.content or "").strip()
+    cached_text = _get_cached_inner_activity_result(cache_key)
+    if cached_text is not None:
+        return cached_text
+
+    if not allow_burst:
+        remaining_ms = _reserve_inner_activity_direct_call_slot()
+        if remaining_ms > 0:
+            raise RuntimeError(f"INNER_ACTIVITY_CODEX_RATE_LIMITED:{remaining_ms}")
+
+    _set_last_provider_usage(None)
+    try:
+        raw_text = invoke_llm_text(
+            provider_name=provider_name,
+            model_id=model_id,
+            api_key=api_key,
+            timeout_ms=timeout_ms,
+            messages=messages,
+            gen_params=call_params,
+            base_url_override=base_url_override,
+        )
+        provider_usage = _pop_last_provider_usage()
+    except Exception as exc:
+        provider_usage = _pop_last_provider_usage()
+        _log_inner_activity_direct_usage(
+            request_id=request_id,
+            provider_name=provider_name,
+            model_id=model_id,
+            messages=messages,
+            content="",
+            status="FAILED",
+            provider_usage=provider_usage,
+        )
+        raise exc
+
+    content = str(raw_text or "").strip()
+    _put_cached_inner_activity_result(cache_key, content)
+    _log_inner_activity_direct_usage(
+        request_id=request_id,
+        provider_name=provider_name,
+        model_id=model_id,
+        messages=messages,
+        content=content,
+        status="OK",
+        provider_usage=provider_usage,
+    )
+    return content
+
+
+def _inner_activity_provider_uses_codex_cli(provider_name: str) -> bool:
+    normalized = str(provider_name or "").strip().lower()
+    return normalized in {_INNER_ACTIVITY_CODEX_CLI_PROVIDER, "codex", "codex-cli", "cli"}
+
+
+def _run_inner_activity_codex_cli(
+    *,
+    provider_name: str,
+    model_id: str,
+    timeout_ms: int,
+    prompt_text: str,
+    system_prompt: str,
+    gen_params: Mapping[str, Any],
+    allow_burst: bool,
+) -> str:
+    request_id = f"inner_activity_codex_cli::{int(time.time() * 1000)}"
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": prompt_text},
+    ]
+    cli_prompt = _build_inner_activity_codex_cli_prompt(
+        system_prompt=system_prompt,
+        prompt_text=prompt_text,
+        gen_params=gen_params,
+    )
+    cache_key = _inner_activity_result_cache_key(
+        provider_name=provider_name,
+        model_id=model_id,
+        base_url_override="codex-cli",
+        messages=messages,
+        gen_params={"transport": "codex_cli", **dict(gen_params or {})},
+    )
+    cached_text = _get_cached_inner_activity_result(cache_key)
+    if cached_text is not None:
+        return cached_text
+
+    if not allow_burst:
+        remaining_ms = _reserve_inner_activity_direct_call_slot()
+        if remaining_ms > 0:
+            raise RuntimeError(f"INNER_ACTIVITY_CODEX_CLI_RATE_LIMITED:{remaining_ms}")
+
+    status = "FAILED"
+    content = ""
+    try:
+        from host_brain.integrations.codex_cli_provider import invoke_codex_cli_text  # noqa: PLC0415
+
+        content = invoke_codex_cli_text(
+            model_id=model_id,
+            messages=[{"role": "user", "content": cli_prompt}],
+            timeout_ms=timeout_ms,
+            response_format={"type": "json_object"},
+            feature_key="inner_activity",
+        ).strip()
+        if not content:
+            raise RuntimeError("INNER_ACTIVITY_CODEX_CLI_EMPTY")
+        status = "OK"
+        _put_cached_inner_activity_result(cache_key, content)
+        return content
+    finally:
+        _log_inner_activity_direct_usage(
+            request_id=request_id,
+            provider_name=_INNER_ACTIVITY_CODEX_CLI_PROVIDER,
+            model_id=model_id,
+            messages=messages,
+            content=content,
+            status=status,
+            provider_usage=None,
+        )
 
 
 def _stream_inner_activity_llm_chunks(
@@ -754,6 +905,355 @@ def _stream_inner_activity_llm_chunks(
     )
 
 
+def _resolve_inner_activity_codex_cli_command() -> str | None:
+    raw = str(os.environ.get("HOST_INNER_ACTIVITY_CODEX_CLI_PATH") or os.environ.get("HOST_CODEX_CLI_PATH") or "codex").strip()
+    if not raw:
+        return None
+    if raw.lower() == "codex" and not os.environ.get("HOST_INNER_ACTIVITY_CODEX_CLI_PATH") and not os.environ.get("HOST_CODEX_CLI_PATH"):
+        try:
+            from host_brain.integrations.codex_cli_provider import codex_cli_command  # noqa: PLC0415
+
+            resolved_provider_cmd = codex_cli_command()
+            if resolved_provider_cmd:
+                return str(resolved_provider_cmd)
+        except Exception:
+            pass
+    if Path(raw).exists():
+        return raw
+    if raw.lower() == "codex":
+        cmd = shutil.which("codex.cmd") or shutil.which("codex")
+        if cmd:
+            return str(cmd)
+    resolved = shutil.which(raw)
+    return str(resolved or "").strip() or None
+
+
+def _resolve_inner_activity_codex_cli_workspace() -> Path:
+    raw = str(os.environ.get("HOST_INNER_ACTIVITY_CODEX_CLI_WORKSPACE") or os.environ.get("NATSUME_REPO_ROOT") or "").strip()
+    if raw:
+        return Path(raw).expanduser().resolve()
+    return Path.cwd().resolve()
+
+
+def _build_inner_activity_codex_cli_command(
+    *,
+    codex_cmd: str,
+    model_id: str,
+    workspace: Path,
+    last_message_path: Path,
+) -> list[str]:
+    command = [str(codex_cmd), "exec"]
+    if _env_bool("HOST_INNER_ACTIVITY_CODEX_CLI_DISABLE_PLUGINS", default=True):
+        command.extend(["--disable", "plugins"])
+    if _env_bool("HOST_INNER_ACTIVITY_CODEX_CLI_DISABLE_SHELL_SNAPSHOT", default=True):
+        command.extend(["--disable", "shell_snapshot"])
+    if _env_bool("HOST_INNER_ACTIVITY_CODEX_CLI_FAST_MODE", default=True):
+        command.extend(["--enable", "fast_mode"])
+    model = str(model_id or "").strip()
+    if model:
+        command.extend(["-m", model])
+    reasoning_effort = str(
+        os.environ.get("HOST_INNER_ACTIVITY_CODEX_CLI_REASONING_EFFORT")
+        or os.environ.get("HOST_CODEX_RUNTIME_REASONING_EFFORT")
+        or "minimal"
+    ).strip()
+    if reasoning_effort:
+        command.extend(["-c", f'model_reasoning_effort="{reasoning_effort}"'])
+    command.extend(
+        [
+            "--sandbox",
+            "read-only",
+            "--skip-git-repo-check",
+            "--ephemeral",
+            "--json",
+            "-C",
+            str(workspace),
+            "-o",
+            str(last_message_path),
+            "-",
+        ]
+    )
+    if sys.platform == "win32" and str(codex_cmd).strip().lower().endswith((".cmd", ".bat")):
+        return ["cmd.exe", "/d", "/s", "/c", *command]
+    return command
+
+
+def _build_inner_activity_codex_cli_env() -> dict[str, str]:
+    env = dict(os.environ)
+    if _env_bool("HOST_INNER_ACTIVITY_CODEX_CLI_STRIP_API_KEYS", default=True):
+        for key in (
+            "OPENAI_API_KEY",
+            "CODEX_API_KEY",
+            "GEMINI_API_KEY",
+            "DEEPSEEK_API_KEY",
+            "MINIMAX_API_KEY",
+            "ANTHROPIC_API_KEY",
+        ):
+            env.pop(key, None)
+    return env
+
+
+def _run_inner_activity_codex_cli_process(
+    command: list[str],
+    *,
+    timeout: float,
+    input_text: str,
+    workspace: Path,
+    env: dict[str, str],
+) -> subprocess.CompletedProcess[str]:
+    proc = subprocess.Popen(
+        command,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        cwd=str(workspace),
+        env=env,
+        creationflags=_subprocess_creationflags(),
+    )
+    try:
+        stdout, stderr = proc.communicate(input=input_text, timeout=max(1.0, float(timeout)))
+    except subprocess.TimeoutExpired as exc:
+        _terminate_inner_activity_process_tree(proc, command=command)
+        try:
+            stdout, stderr = proc.communicate(timeout=5)
+        except Exception:
+            stdout, stderr = "", ""
+        detail = _compact_process_detail(stdout, stderr)
+        raise TimeoutError(f"INNER_ACTIVITY_CODEX_CLI_TIMEOUT:{int(timeout * 1000)}:{detail}") from exc
+    return subprocess.CompletedProcess(command, int(proc.returncode or 0), stdout=stdout, stderr=stderr)
+
+
+def _terminate_inner_activity_process_tree(proc: subprocess.Popen[str], *, command: list[str] | None = None) -> None:
+    try:
+        if sys.platform == "win32":
+            subprocess.run(
+                ["taskkill", "/PID", str(proc.pid), "/T", "/F"],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=10,
+                check=False,
+                creationflags=_subprocess_creationflags(),
+            )
+            marker = _codex_cli_command_marker(command or [])
+            if marker:
+                marker = marker.replace("'", "''")
+                ps = (
+                    "$marker = '"
+                    + marker
+                    + "'; "
+                    + "Get-CimInstance Win32_Process | "
+                    + "Where-Object { $_.CommandLine -and $_.CommandLine.Contains($marker) -and ($_.Name -eq 'node.exe' -or $_.Name -like 'codex*.exe') } | "
+                    + "ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"
+                )
+                subprocess.run(
+                    ["powershell", "-NoProfile", "-Command", ps],
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    timeout=10,
+                    check=False,
+                    creationflags=_subprocess_creationflags(),
+                )
+        else:
+            proc.kill()
+    except Exception:
+        try:
+            proc.kill()
+        except Exception:
+            pass
+
+
+def _codex_cli_command_marker(command: list[str]) -> str:
+    try:
+        if "-o" in command:
+            return str(Path(command[command.index("-o") + 1]).parent)
+    except Exception:
+        return ""
+    return ""
+
+
+def _build_inner_activity_codex_cli_prompt(
+    *,
+    system_prompt: str,
+    prompt_text: str,
+    gen_params: Mapping[str, Any],
+) -> str:
+    max_tokens = int(dict(gen_params or {}).get("max_output_tokens") or dict(gen_params or {}).get("max_tokens") or 180)
+    return "\n".join(
+        [
+            "You are a local Codex CLI subagent for Natsume's private inner activity.",
+            "Do not inspect files, do not run shell commands, do not edit anything, and do not explain your process.",
+            "Return exactly one compact JSON object and no Markdown.",
+            "Schema: {\"note\":\"short concrete Chinese private thought\",\"focus\":\"self|state|plan|topic\"}.",
+            f"Keep note under {max(32, min(220, max_tokens))} Chinese characters.",
+            "",
+            "System constraints:",
+            str(system_prompt or ""),
+            "",
+            "Input payload:",
+            str(prompt_text or ""),
+        ]
+    )
+
+
+def _read_codex_cli_last_message(path: Path, *, stdout: str) -> str:
+    try:
+        if path.exists():
+            return path.read_text(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+    return _extract_codex_cli_message_from_stdout(stdout)
+
+
+def _extract_codex_cli_message_from_stdout(stdout: str) -> str:
+    messages: list[str] = []
+    for raw_line in str(stdout or "").splitlines():
+        line = raw_line.strip()
+        if not line.startswith("{"):
+            continue
+        try:
+            payload = json.loads(line)
+        except Exception:
+            continue
+        if not isinstance(payload, Mapping):
+            continue
+        for key in ("message", "content", "text", "last_message"):
+            value = payload.get(key)
+            if isinstance(value, str) and value.strip():
+                messages.append(value.strip())
+    return messages[-1] if messages else ""
+
+
+def _compact_process_detail(*values: Any) -> str:
+    text = "\n".join(str(value or "").strip() for value in values if str(value or "").strip())
+    text = _TEXT_WHITESPACE_RE.sub(" ", text).strip()
+    return text[:480]
+
+
+def _subprocess_creationflags() -> int:
+    if sys.platform != "win32":
+        return 0
+    return int(getattr(subprocess, "CREATE_NO_WINDOW", 0))
+
+
+def _inner_activity_result_cache_ttl_ms() -> int:
+    return _env_int(
+        "HOST_INNER_ACTIVITY_RESULT_CACHE_TTL_MS",
+        default=600_000,
+        minimum=0,
+        maximum=30 * 60 * 1000,
+    )
+
+
+def _inner_activity_direct_min_interval_ms() -> int:
+    return _env_int(
+        "HOST_INNER_ACTIVITY_CODEX_MIN_INTERVAL_MS",
+        default=600_000,
+        minimum=0,
+        maximum=30 * 60 * 1000,
+    )
+
+
+def _inner_activity_result_cache_key(
+    *,
+    provider_name: str,
+    model_id: str,
+    base_url_override: str | None,
+    messages: list[Mapping[str, Any]],
+    gen_params: Mapping[str, Any],
+) -> str:
+    payload = {
+        "provider_name": str(provider_name or "").strip().lower(),
+        "model_id": str(model_id or "").strip(),
+        "base_url_override": str(base_url_override or "").strip(),
+        "messages": [dict(item) for item in list(messages or []) if isinstance(item, Mapping)],
+        "gen_params": dict(gen_params or {}),
+    }
+    encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(encoded.encode("utf-8", errors="ignore")).hexdigest()
+
+
+def _get_cached_inner_activity_result(cache_key: str) -> str | None:
+    ttl_ms = _inner_activity_result_cache_ttl_ms()
+    if ttl_ms <= 0:
+        return None
+    now_value = _now_ms()
+    with _INNER_ACTIVITY_RESULT_CACHE_LOCK:
+        item = _INNER_ACTIVITY_RESULT_CACHE.get(str(cache_key or ""))
+        if not item:
+            return None
+        expires_at_ms, content = item
+        if int(expires_at_ms) <= now_value:
+            _INNER_ACTIVITY_RESULT_CACHE.pop(str(cache_key or ""), None)
+            return None
+        return str(content or "")
+
+
+def _put_cached_inner_activity_result(cache_key: str, content: str) -> None:
+    ttl_ms = _inner_activity_result_cache_ttl_ms()
+    if ttl_ms <= 0:
+        return
+    with _INNER_ACTIVITY_RESULT_CACHE_LOCK:
+        _INNER_ACTIVITY_RESULT_CACHE[str(cache_key or "")] = (_now_ms() + ttl_ms, str(content or ""))
+
+
+def _reserve_inner_activity_direct_call_slot() -> int:
+    global _INNER_ACTIVITY_LAST_DIRECT_CALL_MS
+    min_interval_ms = _inner_activity_direct_min_interval_ms()
+    if min_interval_ms <= 0:
+        return 0
+    now_value = _now_ms()
+    with _INNER_ACTIVITY_DIRECT_CALL_LOCK:
+        remaining_ms = int(_INNER_ACTIVITY_LAST_DIRECT_CALL_MS + min_interval_ms - now_value)
+        if remaining_ms > 0:
+            return remaining_ms
+        _INNER_ACTIVITY_LAST_DIRECT_CALL_MS = now_value
+        return 0
+
+
+def _log_inner_activity_direct_usage(
+    *,
+    request_id: str,
+    provider_name: str,
+    model_id: str,
+    messages: list[Mapping[str, Any]],
+    content: str,
+    status: str,
+    provider_usage: Mapping[str, Any] | None,
+) -> None:
+    try:
+        from host_brain.app.dependencies import get_ledger  # noqa: PLC0415
+        from host_brain.observability.token_usage import build_llm_token_usage_row  # noqa: PLC0415
+
+        ledger = get_ledger()
+        if not hasattr(ledger, "log_llm_token_usage"):
+            return
+        ledger.log_llm_token_usage(
+            build_llm_token_usage_row(
+                request_id=request_id,
+                scene_type="INNER_ACTIVITY",
+                cognitive_tier="B",
+                provider=provider_name,
+                model_id=model_id,
+                messages=messages,
+                content=content,
+                attempts=[{"status": status, "provider": provider_name, "model": model_id}],
+                cached=False,
+                pool_exhausted=False,
+                ts_ms=_now_ms(),
+                provider_usage=provider_usage,
+            )
+        )
+    except Exception as exc:
+        _logger.debug("inner_activity direct token usage log skipped: %s", exc)
+
+
 def _resolve_inner_activity_llm_runtime(*, now_ms: int) -> dict[str, Any] | None:
     cache_now = int(now_ms)
     with _INNER_ACTIVITY_LLM_CACHE_LOCK:
@@ -762,35 +1262,53 @@ def _resolve_inner_activity_llm_runtime(*, now_ms: int) -> dict[str, Any] | None
         if cached_runtime and (cache_now - resolved_at) <= _INNER_ACTIVITY_LLM_CACHE_TTL_MS:
             return dict(cached_runtime) if isinstance(cached_runtime, Mapping) else None
 
-    runtime: dict[str, Any] | None = None
-    try:
-        from host_brain.app.graph_config_builder import (  # noqa: PLC0415
-            resolve_chat_agent_llm_runtime,
-            resolve_host_llm_runtime,
-        )
-
-        base_runtime = resolve_host_llm_runtime(
-            rollout_key="inner_activity_agent",
-            scene_type="CHAT",
-        )
-        runtime = resolve_chat_agent_llm_runtime(base_runtime=base_runtime)
-        model_override = str(
-            os.environ.get("HOST_INNER_ACTIVITY_AGENT_MODEL_ID")
-            or os.environ.get("HOST_INNER_WORLD_LLM_MODEL_ID")
-            or os.environ.get("HOST_DISPATCH_AGENT_MODEL_ID")
-            or "gemini-2.5-flash"
-        ).strip()
-        runtime["model_id"] = model_override
-        runtime["chat_model_id"] = model_override
-        runtime["agent_gen_params"] = {"temperature": 0.62, "top_p": 0.9}
-    except Exception as exc:
-        _logger.debug("inner_activity llm runtime resolve failed: %s", exc)
-        runtime = None
-
+    runtime = _resolve_inner_activity_direct_runtime()
     with _INNER_ACTIVITY_LLM_CACHE_LOCK:
         _INNER_ACTIVITY_LLM_CACHE["resolved_at_ms"] = cache_now
         _INNER_ACTIVITY_LLM_CACHE["runtime"] = dict(runtime) if isinstance(runtime, Mapping) else None
     return dict(runtime) if isinstance(runtime, Mapping) else None
+
+
+def _resolve_inner_activity_direct_runtime() -> dict[str, Any] | None:
+    try:
+        provider_name = str(
+            os.environ.get("HOST_INNER_ACTIVITY_AGENT_PROVIDER")
+            or os.environ.get("HOST_INNER_ACTIVITY_LLM_PROVIDER")
+            or _INNER_ACTIVITY_CODEX_CLI_PROVIDER
+        ).strip().lower()
+        model_id = str(
+            os.environ.get("HOST_INNER_ACTIVITY_AGENT_MODEL_ID")
+            or os.environ.get("HOST_INNER_ACTIVITY_CODEX_CLI_MODEL")
+            or os.environ.get("HOST_INNER_ACTIVITY_CODEX_MODEL_ID")
+            or (os.environ.get("HOST_CODEX_RUNTIME_MODEL") if _inner_activity_provider_uses_codex_cli(provider_name) else "")
+            or (os.environ.get("HOST_CODEX_MODEL_ID") if _inner_activity_provider_uses_codex_cli(provider_name) else "")
+            or os.environ.get("HOST_INNER_WORLD_LLM_MODEL_ID")
+            or ("gpt-5.4-mini" if _inner_activity_provider_uses_codex_cli(provider_name) else "")
+        ).strip()
+        timeout_ms = _env_int(
+            "HOST_INNER_ACTIVITY_CODEX_CLI_TIMEOUT_MS",
+            default=25_000,
+            minimum=5_000,
+            maximum=2 * 60 * 1000,
+        )
+        codex_cmd = _resolve_inner_activity_codex_cli_command() if _inner_activity_provider_uses_codex_cli(provider_name) else None
+        available = bool(provider_name and model_id and codex_cmd)
+        return {
+            "available": available,
+            "provider_name": provider_name,
+            "model_id": model_id,
+            "chat_model_id": model_id,
+            "llm_api_key": "",
+            "base_url_override": None,
+            "timeout_ms": timeout_ms,
+            "agent_gen_params": {"temperature": 0.62, "top_p": 0.9, "max_output_tokens": 180},
+            "route_reason_code": "INNER_ACTIVITY_CODEX_CLI" if available else "INNER_ACTIVITY_CODEX_CLI_UNAVAILABLE",
+            "pool_bypass": True,
+            "codex_cli_command": codex_cmd,
+        }
+    except Exception as exc:
+        _logger.debug("inner_activity direct llm runtime resolve failed: %s", exc)
+        return None
 
 
 def _build_context_digest(context: Mapping[str, Any]) -> dict[str, Any]:

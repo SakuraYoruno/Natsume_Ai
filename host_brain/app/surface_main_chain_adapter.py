@@ -11,6 +11,7 @@ from typing import Any
 from host_brain.app.context.soul_runtime import get_compiled_soul
 from host_brain.app.reply_envelope import ReplyEnvelope
 from host_brain.app.response_form_contract import normalize_response_form
+from host_brain.codex_runtime.skill_ids import is_codex_runtime_skill
 from host_brain.persona.surface_affect_control import (
     SurfaceAffectControlPacket,
     affect_control_packet_from_mapping,
@@ -44,8 +45,14 @@ _TRACE_RUNTIME_PAYLOAD_KEYS = (
     "surface_memory_recall_packet",
 )
 _TEXT_RESPONSE_FORMS = {"", "text", "plain_text", "chat_text", "zh_text"}
+_AUDIO_INPUT_SOURCES = {"asr", "audio", "voice", "speech", "mic", "microphone", "voice_chat"}
 _DETERMINISTIC_RESULT_AGENT_IDS = {
     "system_info",
+    "system_resource_snapshot",
+    "process_resource_top",
+    "resource_pressure_analysis",
+    "resource_manager_status",
+    "resource_release",
     "process_list",
     "network_status",
     "open_app",
@@ -63,33 +70,44 @@ _TECHNICAL_TASK_MODES = {
     "triage_first_step",
     "write_takeover",
 }
-_PORT_OCCUPIED_RE = re.compile(
-    r"(?:端口|port)?\s*(?P<port>\d{2,5}).{0,24}(?:被占用|占用|被占|占了|in use|already in use|address already in use|bind)",
+_ACCOUNT_LOGIN_TASK_RE = re.compile(
+    r"(登录|账号|账户|积分|轻币|购买|买|epub|电子书|lightnovel|轻小说)",
     re.IGNORECASE,
 )
-_PORT_OCCUPIED_REVERSED = re.compile(
-    r"(?:被占用|占用|被占|占了|in use|already in use|address already in use|bind).{0,24}(?:端口|port)?\s*(?P<port>\d{2,5})",
+_ACCOUNT_CREDENTIAL_REQUEST_RE = re.compile(
+    r"((账号信息|账户信息|账号密码|账户密码|密码|验证码|cookie|cookies|credentials?|password)"
+    r".{0,16}(丢|发|给|贴|提供|传|告诉|send|paste|provide)"
+    r"|(丢|发|给|贴|提供|传|告诉|send|paste|provide).{0,16}"
+    r"(账号信息|账户信息|账号密码|账户密码|密码|验证码|cookie|cookies|credentials?|password))",
     re.IGNORECASE,
 )
-_TASK_SPLIT_QUICK_RE = re.compile(r"(?:下一步|接下来|后面|任务).{0,12}(?:拆成|分成|列成).{0,8}(?:三|3)件", re.IGNORECASE)
-_PYTHON_MISSING_MODULE_RE = re.compile(
-    r"(?:找不到模块|没有名为).{0,12}[\"'“‘]?(?P<module>[A-Za-z0-9_.-]+)[\"'”’]?",
+_SURFACE_FASTPATH_CONTINUE_RE = re.compile(r"^(继续|接着|往下|继续说|接着说)[。.!！?？]*$", re.IGNORECASE)
+_SURFACE_FASTPATH_PRESENCE_RE = re.compile(
+    r"^(在吗|在嘛|在不在|你在吗|还在吗|喂|哈喽|hello|hi|嗯|嗯嗯|哦|好)[。.!！?？]*$",
     re.IGNORECASE,
 )
-_PYTHON_NO_MODULE_RE = re.compile(r"No\s+module\s+named\s+[\"'“‘]?(?P<module>[A-Za-z0-9_.-]+)[\"'”’]?", re.IGNORECASE)
-_ENV_VAR_RE = re.compile(r"\b(?P<var>[A-Z][A-Z0-9_]{2,})\b")
-_TECHNICAL_TEXT_RE = re.compile(
-    r"(报错|错误|异常|失败|缺包|导入|import|ModuleNotFoundError|No module named|端口|port|日志|启动|连接不上|连不上"
-    r"|没响应|无响应|timeout|timed out|http://|https://|bolt://|neo4j|chroma|chromadb|OPENAI_API_KEY|环境变量)",
+_SURFACE_FASTPATH_AUDIO_CHECK_RE = re.compile(
+    r"^(听得到吗|听得到不|能听到吗|能听见吗|听见吗|听得到嘛)[。.!！?？]*$",
     re.IGNORECASE,
 )
-_TECHNICAL_QUESTION_RE = re.compile(r"(怎么|如何|怎么办|该|排查|查|先看|看什么|先试|试什么|\?|？)", re.IGNORECASE)
-_PYTHON_MODULE_PACKAGE_MAP = {
-    "cv2": "opencv-python",
-    "pil": "Pillow",
-    "sklearn": "scikit-learn",
-    "yaml": "PyYAML",
-}
+_MAIN_CHAIN_META_CHAT_RE = re.compile(
+    r"(主链|链路|耗时|延迟|fallback|Codex|模型|路由|surface|thalamus|后台任务)",
+    re.IGNORECASE,
+)
+_BAD_TEASE_PREFIX_RE = re.compile(
+    r"^\s*(?:哈？|啊？|嘛，?)?[^。！？!?]{0,40}(?:乱七八糟|又在琢磨|又在研究)[^。！？!?]*[。！？!?]\s*",
+    re.IGNORECASE,
+)
+_PERCEPTION_EVIDENCE_REQUIRED_RE = re.compile(
+    r"(这几本|这几张|这几份|这张|哪张|图里|图上|图片|照片|截图|画面|看起来|"
+    r"image|photo|screenshot|cover)",
+    re.IGNORECASE,
+)
+_PERCEPTION_PRODUCTION_TASK_RE = re.compile(
+    r"(调用|推荐|抓|获取|找|搜索|采集|每日榜单|最新资源|轻小说|epub|封装|购买)",
+    re.IGNORECASE,
+)
+_CURRENT_COVER_CLAIM_RE = re.compile(r"(这|那|哪).{0,8}封面|封面(上|里|中|有|是|看起来)", re.IGNORECASE)
 
 
 def surface_main_chain_enabled(agent_input: Any, *, sub_agent_ctx: Any | None = None) -> bool:
@@ -113,6 +131,8 @@ def _sub_agent_result_should_bypass_surface(sub_agent_ctx: Any | None) -> bool:
     agent_id = str(getattr(sub_agent_ctx, "agent_id", "") or "").strip()
     if not agent_id:
         return False
+    if is_codex_runtime_skill(agent_id) or agent_id in {"translate_agent", "intent_agent"}:
+        return True
     return agent_id in _DETERMINISTIC_RESULT_AGENT_IDS or agent_id.startswith("skill:hub_skill_")
 
 
@@ -133,7 +153,11 @@ def build_surface_main_chain_input_from_chat_input(
     _merge_surface_trace(trace_stage_meta, runtime_payload)
     if isinstance(trace_stage_meta, dict) and reply_plan:
         trace_stage_meta["surface_selected_reply_plan"] = dict(reply_plan)
-    task_control = _surface_task_control_from_reply_plan(agent_input=agent_input, reply_plan=reply_plan)
+    task_control = _surface_task_control_from_reply_plan(
+        agent_input=agent_input,
+        reply_plan=reply_plan,
+        trace_stage_meta=trace_stage_meta,
+    )
     affect_packet = _affect_packet(
         agent_input,
         task_control=task_control,
@@ -156,8 +180,12 @@ def build_surface_main_chain_input_from_chat_input(
             trace_stage_meta=trace_stage_meta,
             runtime_payload=runtime_payload,
         ),
-        necessary_facts=_necessary_facts(agent_input, task_control=task_control),
-        must_not_do=_surface_boundary_must_not_do(task_control=task_control),
+        necessary_facts=_necessary_facts(agent_input, task_control=task_control, trace_stage_meta=trace_stage_meta),
+        must_not_do=_surface_boundary_must_not_do(
+            agent_input=agent_input,
+            task_control=task_control,
+            trace_stage_meta=trace_stage_meta,
+        ),
         style_anchor=("app 层只传压缩控制包，不传原始历史。",),
     )
 
@@ -173,26 +201,9 @@ async def run_surface_main_chain_for_chat_input(
         agent_input,
         trace_stage_meta=trace_stage_meta,
     )
-    quick_reply_payload = _surface_quick_reply_payload(
-        agent_input,
-        task_control=_safe_mapping(surface_input.task_control),
-    )
-    if quick_reply_payload and isinstance(trace_stage_meta, dict):
-        trace_stage_meta["surface_quick_reply"] = {
-            "applied": True,
-            "kind": str(quick_reply_payload.get("_quick_reply_kind") or ""),
-        }
-
     async def _generate(messages: list[dict[str, str]]) -> str:
         from host_brain.integrations.llm_helpers import acomplete_llm_with_pool  # noqa: PLC0415
 
-        if quick_reply_payload:
-            visible_payload = {
-                key: value
-                for key, value in quick_reply_payload.items()
-                if not str(key).startswith("_")
-            }
-            return json.dumps(visible_payload, ensure_ascii=False)
         if not bool(llm_runtime.get("available")):
             raise RuntimeError("surface main chain llm runtime unavailable")
         result = await acomplete_llm_with_pool(
@@ -228,10 +239,177 @@ async def surface_main_chain_sse_generator(
     started_ms = int(time.time() * 1000)
     trace = dict(trace_stage_meta or {})
     request_id = str(getattr(agent_input, "request_id", "") or "").strip()
+    evidence_gate_text = _surface_perception_evidence_gate_text(agent_input)
+    if evidence_gate_text:
+        total_latency_ms = max(0, int(time.time() * 1000) - started_ms)
+        envelope = ReplyEnvelope(
+            kind="final_reply",
+            text=evidence_gate_text,
+            response_form="text",
+            source="surface_evidence_gate",
+            sendable=True,
+            persistable=True,
+            cacheable=False,
+            degraded=False,
+            reason_code="SURFACE_PERCEPTION_EVIDENCE_REQUIRED",
+            audit={"request_id": request_id},
+            raw_extra={"evidence_gate": True},
+        )
+        yield _sse({"phase": "RENDER", "chunk": evidence_gate_text})
+        yield _sse({"phase": "SENTENCE", "sentence": evidence_gate_text, "sentence_index": 0})
+        yield _sse(
+            {
+                "phase": "COMMIT",
+                "done": True,
+                "decision": "APPROVE",
+                "reason_code": envelope.reason_code,
+                "narrative": evidence_gate_text,
+                "request_id": request_id,
+                "reply_envelope": envelope.as_dict(),
+                "audit_refs": {
+                    "request_id": request_id,
+                    "path": "chat_agent:surface_main_chain",
+                    "latency_ms": total_latency_ms,
+                    "first_token_ms": 0,
+                    "llm_latency_ms": 0,
+                    "model_id": "",
+                    "provider_name": "rule",
+                    "response_form": "text",
+                    "timings_ms": _surface_timings_ms(
+                        total_latency_ms=total_latency_ms,
+                        llm_latency_ms=0,
+                    ),
+                    "reply_envelope": envelope.as_dict(),
+                    "trace_stage_meta": {
+                        **trace,
+                        "surface_main_chain_used": True,
+                        "reply_source": "surface_evidence_gate",
+                        "surface_evidence_gate": {
+                            "status": "OK",
+                            "reason_code": "SURFACE_PERCEPTION_EVIDENCE_REQUIRED",
+                            "has_multimodal_payload": False,
+                        },
+                    },
+                },
+            }
+        )
+        return
+    fastpath_text = _surface_main_chain_fastpath_text(agent_input)
+    if fastpath_text:
+        total_latency_ms = max(0, int(time.time() * 1000) - started_ms)
+        envelope = ReplyEnvelope(
+            kind="final_reply",
+            text=fastpath_text,
+            response_form="text",
+            source="surface_main_chain_fastpath",
+            sendable=True,
+            persistable=True,
+            cacheable=True,
+            degraded=False,
+            reason_code="SURFACE_MAIN_CHAIN_FASTPATH",
+            audit={"request_id": request_id},
+            raw_extra={"fastpath": True, "reason_code": "LOW_INFO_RULE"},
+        )
+        yield _sse({"phase": "RENDER", "chunk": fastpath_text})
+        yield _sse({"phase": "SENTENCE", "sentence": fastpath_text, "sentence_index": 0})
+        yield _sse(
+            {
+                "phase": "COMMIT",
+                "done": True,
+                "decision": "APPROVE",
+                "reason_code": envelope.reason_code,
+                "narrative": fastpath_text,
+                "request_id": request_id,
+                "reply_envelope": envelope.as_dict(),
+                "audit_refs": {
+                    "request_id": request_id,
+                    "path": "chat_agent:surface_main_chain",
+                    "latency_ms": total_latency_ms,
+                    "first_token_ms": 0,
+                    "llm_latency_ms": 0,
+                    "model_id": "",
+                    "provider_name": "rule",
+                    "response_form": "text",
+                    "timings_ms": _surface_timings_ms(
+                        total_latency_ms=total_latency_ms,
+                        llm_latency_ms=0,
+                    ),
+                    "reply_envelope": envelope.as_dict(),
+                    "trace_stage_meta": {
+                        **trace,
+                        "surface_main_chain_used": True,
+                        "reply_source": "surface_main_chain_fastpath",
+                        "surface_renderer": {
+                            "status": "OK",
+                            "invoked": False,
+                            "affected_output": True,
+                            "source": "surface_main_chain_fastpath",
+                            "reason_code": "LOW_INFO_RULE",
+                        },
+                    },
+                },
+            }
+        )
+        return
     try:
         result = await run_surface_main_chain_for_chat_input(agent_input, trace_stage_meta=trace)
     except Exception as exc:
         total_latency_ms = max(0, int(time.time() * 1000) - started_ms)
+        fallback_text = _surface_failure_fallback_text(agent_input, exc=exc)
+        if fallback_text:
+            envelope = ReplyEnvelope(
+                kind="final_reply",
+                text=fallback_text,
+                response_form="text",
+                source="surface_main_chain_fallback",
+                sendable=True,
+                persistable=False,
+                cacheable=False,
+                degraded=False,
+                reason_code="SURFACE_MAIN_CHAIN_FALLBACK",
+                audit={"request_id": request_id, "error": type(exc).__name__},
+                raw_extra={
+                    "fallback": True,
+                    "degraded": True,
+                    "reason_code": "SURFACE_MAIN_CHAIN_FAILED",
+                },
+            )
+            yield _sse({"phase": "RENDER", "chunk": fallback_text})
+            yield _sse({"phase": "SENTENCE", "sentence": fallback_text, "sentence_index": 0})
+            yield _sse(
+                {
+                    "phase": "COMMIT",
+                    "done": True,
+                    "decision": "APPROVE",
+                    "reason_code": envelope.reason_code,
+                    "narrative": fallback_text,
+                    "request_id": request_id,
+                    "reply_envelope": envelope.as_dict(),
+                    "audit_refs": {
+                        "request_id": request_id,
+                        "path": "chat_agent:surface_main_chain",
+                        "latency_ms": total_latency_ms,
+                        "reason_code": "SURFACE_MAIN_CHAIN_FAILED",
+                        "timings_ms": _surface_timings_ms(
+                            total_latency_ms=total_latency_ms,
+                            llm_latency_ms=0,
+                        ),
+                        "trace_stage_meta": {
+                            **trace,
+                            "surface_main_chain_used": True,
+                            "reply_source": "surface_main_chain_fallback",
+                            "surface_renderer": {
+                                "status": "DEGRADED",
+                                "invoked": True,
+                                "affected_output": True,
+                                "source": "surface_main_chain_fallback",
+                                "reason_code": "SURFACE_MAIN_CHAIN_FAILED",
+                            },
+                        },
+                    },
+                }
+            )
+            return
         envelope = ReplyEnvelope.no_reply(
             reason_code="SURFACE_MAIN_CHAIN_FAILED",
             source="surface_main_chain",
@@ -262,13 +440,20 @@ async def surface_main_chain_sse_generator(
         return
 
     narrative = str(result.selected_text or "").strip()
+    narrative, account_guard_applied = _sanitize_account_login_reply(narrative, agent_input=agent_input)
+    narrative = _sanitize_main_chain_meta_reply(narrative, agent_input=agent_input)
+    if account_guard_applied:
+        trace["surface_account_login_guard"] = {
+            "applied": True,
+            "reason_code": "ACCOUNT_CREDENTIAL_REQUEST_REWRITTEN",
+        }
     total_latency_ms = max(0, int(time.time() * 1000) - started_ms)
-    quick_reply_used = bool(_safe_mapping(trace.get("surface_quick_reply")).get("applied"))
-    llm_latency_ms = 0 if quick_reply_used else int(result.runtime.latency_ms or 0)
+    llm_latency_ms = int(result.runtime.latency_ms or 0)
     timings_ms = _surface_timings_ms(
         total_latency_ms=total_latency_ms,
         llm_latency_ms=llm_latency_ms,
     )
+    model_audit = _surface_model_audit_fields(agent_input=agent_input, trace_stage_meta=trace)
     envelope = ReplyEnvelope.final_reply(
         text=narrative,
         response_form="text",
@@ -300,8 +485,8 @@ async def surface_main_chain_sse_generator(
                 "latency_ms": total_latency_ms,
                 "first_token_ms": llm_latency_ms if narrative else None,
                 "llm_latency_ms": llm_latency_ms,
-                "model_id": None if quick_reply_used else _safe_mapping(getattr(agent_input, "llm_runtime", None)).get("model_id"),
-                "provider_name": None if quick_reply_used else _safe_mapping(getattr(agent_input, "llm_runtime", None)).get("provider_name"),
+                "model_id": model_audit["model_id"],
+                "provider_name": model_audit["provider_name"],
                 "response_form": "text",
                 "timings_ms": timings_ms,
                 "reply_envelope": envelope.as_dict(),
@@ -335,6 +520,88 @@ async def surface_main_chain_sse_generator(
 
 def _sse(data: Mapping[str, Any]) -> str:
     return f"data: {json.dumps(dict(data), ensure_ascii=False)}\n\n"
+
+
+def _surface_failure_fallback_text(agent_input: Any, *, exc: BaseException) -> str:
+    if str(os.environ.get("HOST_SURFACE_MAIN_CHAIN_FAILURE_FALLBACK_ENABLED") or "true").strip().lower() in {
+        "0",
+        "false",
+        "no",
+        "off",
+    }:
+        return ""
+    _ = exc
+    message = str(getattr(agent_input, "user_message", "") or "").strip()
+    lowered = message.lower()
+    compact_continue = re.sub(r"\s+", "", message)
+    if (
+        re.fullmatch(r"(继续|接着|往下|继续说|接着说)(?:[，,、]?(?:短一句|短句|一句话))?[。.!！?？]*", compact_continue)
+        or lowered in {"continue", "go on"}
+    ):
+        return "接着来。"
+    if len(message) <= 6 or any(marker in message for marker in ("在吗", "嗯")):
+        return "在，刚才卡了一下。"
+    if any(marker in message for marker in ("风险", "继续观察", "迁到本机 Codex", "迁移到本机 Codex")):
+        return "我会先盯连接稳定性和失败回退质量。前者决定耗时会不会突然拉长，后者决定卡住时会不会把一句正常问题糊成废话。"
+    if any(marker in message for marker in ("耗时", "延迟", "慢", "哪一段", "哪段", "先怀疑")):
+        return "我会先怀疑入口路由和 surface 生成这两段。一个决定会不会误进后台任务，另一个决定真正等模型多久。"
+    if any(marker in message for marker in ("体感", "判断", "主链效果", "主链表现", "像正常聊天")):
+        return "体感上问题不在台词腔本身，而在链路不稳。路由和 fallback 一旦抖，正常聊天就会被挡在外面。"
+    return "我这边刚卡了一下，先接住你这句。"
+
+
+def _sanitize_main_chain_meta_reply(text: str, *, agent_input: Any) -> str:
+    message = str(getattr(agent_input, "user_message", "") or "").strip()
+    if not _MAIN_CHAIN_META_CHAT_RE.search(message):
+        return text
+    cleaned = _BAD_TEASE_PREFIX_RE.sub("", str(text or "").strip(), count=1).strip()
+    if not cleaned:
+        cleaned = str(text or "").strip()
+    if any(marker in message for marker in ("耗时", "延迟", "哪一段", "哪段", "先怀疑")) and not re.search(
+        r"(路由|surface|入口|thalamus|fallback|模型|生成|检索|回退)",
+        cleaned,
+        re.IGNORECASE,
+    ):
+        return _surface_failure_fallback_text(agent_input, exc=RuntimeError("SURFACE_META_REPLY_TOO_GENERIC"))
+    if any(marker in message for marker in ("体感", "判断", "主链效果", "主链表现")) and len(cleaned) < 18:
+        return _surface_failure_fallback_text(agent_input, exc=RuntimeError("SURFACE_META_REPLY_TOO_THIN"))
+    return cleaned
+
+
+def _surface_main_chain_fastpath_text(agent_input: Any) -> str:
+    if str(os.environ.get("HOST_SURFACE_MAIN_CHAIN_LOW_INFO_FASTPATH_ENABLED") or "true").strip().lower() in {
+        "0",
+        "false",
+        "no",
+        "off",
+    }:
+        return ""
+    message = str(getattr(agent_input, "user_message", "") or "").strip()
+    if not message or len(message) > 16:
+        return ""
+    compact = re.sub(r"\s+", "", message)
+    if _SURFACE_FASTPATH_CONTINUE_RE.fullmatch(compact):
+        return "接着来。"
+    if _SURFACE_FASTPATH_AUDIO_CHECK_RE.fullmatch(compact):
+        return "我这里只看到文字。"
+    if _SURFACE_FASTPATH_PRESENCE_RE.fullmatch(compact):
+        return "在。"
+    return ""
+
+
+def _surface_perception_evidence_gate_text(agent_input: Any) -> str:
+    if _has_multimodal_payload(agent_input):
+        return ""
+    message = str(getattr(agent_input, "user_message", "") or "").strip()
+    if not message:
+        return ""
+    if _PERCEPTION_PRODUCTION_TASK_RE.search(message) and not _CURRENT_COVER_CLAIM_RE.search(message):
+        return ""
+    if "《" in message and "》" in message and not re.search(r"(图|图片|照片|截图|封面|画面|看起来)", message):
+        return ""
+    if not (_PERCEPTION_EVIDENCE_REQUIRED_RE.search(message) or _CURRENT_COVER_CLAIM_RE.search(message)):
+        return ""
+    return "我这边没拿到图、附件或明确书名证据，不能装作看见了。你把图片或书名发过来，我再认真看。"
 
 
 def _public_result_trace(result: SurfaceMainChainResult) -> dict[str, Any]:
@@ -387,6 +654,15 @@ def _llm_pool_result_trace(result: Any) -> dict[str, Any]:
     }
 
 
+def _surface_model_audit_fields(*, agent_input: Any, trace_stage_meta: Mapping[str, Any]) -> dict[str, Any]:
+    runtime = _safe_mapping(getattr(agent_input, "llm_runtime", None))
+    pool_trace = _safe_mapping(trace_stage_meta.get("surface_llm_pool"))
+    return {
+        "model_id": str(pool_trace.get("final_model") or runtime.get("model_id") or "").strip(),
+        "provider_name": str(pool_trace.get("final_provider") or runtime.get("provider_name") or "").strip(),
+    }
+
+
 def _schedule_surface_post_process(
     *,
     agent_input: Any,
@@ -410,6 +686,7 @@ def _schedule_surface_post_process(
         from host_brain.app.agent_runtime_shared import _async_post_process  # noqa: PLC0415
 
         llm_runtime = _safe_mapping(getattr(agent_input, "llm_runtime", None))
+        model_audit = _surface_model_audit_fields(agent_input=agent_input, trace_stage_meta=trace_stage_meta)
         trace = {
             **dict(trace_stage_meta or {}),
             "surface_main_chain_used": True,
@@ -433,8 +710,8 @@ def _schedule_surface_post_process(
                 total_latency_ms=max(0, int(total_latency_ms or 0)),
                 llm_latency_ms=max(0, int(llm_latency_ms or 0)),
                 first_token_ms=max(0, int(llm_latency_ms or 0)) if narrative else None,
-                provider_name=str(llm_runtime.get("provider_name") or ""),
-                model_id=str(llm_runtime.get("model_id") or ""),
+                provider_name=str(model_audit.get("provider_name") or llm_runtime.get("provider_name") or ""),
+                model_id=str(model_audit.get("model_id") or llm_runtime.get("model_id") or ""),
                 buffer_stream=True,
                 delegated_agents=[],
                 retrieval_summary=_safe_mapping(getattr(agent_input, "retrieval_summary", None)),
@@ -446,6 +723,10 @@ def _schedule_surface_post_process(
                 motive_state=None,
                 reply_plan=_selected_reply_plan(agent_input, trace_stage_meta),
                 trace_stage_meta=trace,
+                attachments=list(getattr(agent_input, "attachments", None) or []),
+                multimodal_observations=_safe_mapping(getattr(agent_input, "multimodal_observations", None)),
+                attachment_summary=str(getattr(agent_input, "attachment_summary", "") or "").strip(),
+                reply_channel=str(getattr(agent_input, "reply_channel", "") or "").strip() or None,
             )
         )
     except Exception:
@@ -686,7 +967,13 @@ def _merge_surface_trace(trace_stage_meta: dict[str, Any] | None, runtime_payloa
             trace_stage_meta[key] = dict(value)
 
 
-def _surface_task_control_from_reply_plan(*, agent_input: Any, reply_plan: Mapping[str, Any]) -> dict[str, Any]:
+def _surface_task_control_from_reply_plan(
+    *,
+    agent_input: Any,
+    reply_plan: Mapping[str, Any],
+    trace_stage_meta: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    memory_plan_reason = _surface_memory_plan_reason(trace_stage_meta)
     task_mode = _first_nonempty(
         reply_plan.get("task_mode"),
         reply_plan.get("primary_topic"),
@@ -702,6 +989,9 @@ def _surface_task_control_from_reply_plan(*, agent_input: Any, reply_plan: Mappi
         reply_plan.get("tactic_variant"),
         task_mode,
     )
+    if memory_plan_reason == "anaphoric_selection_recall":
+        task_mode = "memory_followup"
+        response_move = "memory_followup"
     return {
         "response_move": response_move,
         "task_mode": task_mode,
@@ -712,14 +1002,22 @@ def _surface_task_control_from_reply_plan(*, agent_input: Any, reply_plan: Mappi
         ),
         "must_include": _clean_list(_coerce_sequence(reply_plan.get("must_include"))),
         "must_not_do": _clean_list(_coerce_sequence(reply_plan.get("must_not_do"))),
-        "facts": _task_facts(reply_plan=reply_plan),
+        "facts": _task_facts(reply_plan=reply_plan, agent_input=agent_input, trace_stage_meta=trace_stage_meta),
         "style_anchor": _clean_list(
             [
                 "app_surface_main_chain",
+                "指代追问要承接已召回的最近经历对象。" if memory_plan_reason == "anaphoric_selection_recall" else "",
                 _first_nonempty(reply_plan.get("style_anchor"), ""),
             ]
         ),
     }
+
+
+def _surface_memory_plan_reason(trace_stage_meta: Mapping[str, Any] | None = None) -> str:
+    packet = _safe_mapping(_safe_mapping(trace_stage_meta).get("surface_memory_recall_packet"))
+    trace = _safe_mapping(packet.get("trace"))
+    plan = _safe_mapping(trace.get("plan"))
+    return str(plan.get("reason") or "").strip()
 
 
 def _affect_packet(
@@ -830,9 +1128,14 @@ def _relationship_clues(agent_input: Any) -> tuple[str, ...]:
     return tuple(clues)
 
 
-def _task_facts(*, reply_plan: Mapping[str, Any]) -> tuple[str, ...]:
+def _task_facts(
+    *,
+    reply_plan: Mapping[str, Any],
+    agent_input: Any | None = None,
+    trace_stage_meta: Mapping[str, Any] | None = None,
+) -> tuple[str, ...]:
     facts = [
-        *_surface_input_boundary_facts(),
+        *_surface_input_boundary_facts(agent_input=agent_input, trace_stage_meta=trace_stage_meta),
         f"当前任务：{_first_nonempty(reply_plan.get('reply_contract'), reply_plan.get('response_goal'), '')}",
         f"当前意图：{_first_nonempty(reply_plan.get('task_mode'), reply_plan.get('primary_topic'), reply_plan.get('interaction_move'), '')}",
         *_technical_task_facts(reply_plan),
@@ -840,16 +1143,35 @@ def _task_facts(*, reply_plan: Mapping[str, Any]) -> tuple[str, ...]:
     return tuple(_clean_list(facts))
 
 
-def _necessary_facts(agent_input: Any, *, task_control: Mapping[str, Any] | None = None) -> tuple[str, ...]:
+def _necessary_facts(
+    agent_input: Any,
+    *,
+    task_control: Mapping[str, Any] | None = None,
+    trace_stage_meta: Mapping[str, Any] | None = None,
+) -> tuple[str, ...]:
     retrieval_summary = _safe_mapping(getattr(agent_input, "retrieval_summary", None))
-    facts = [*_surface_input_boundary_facts(), *_technical_task_facts(task_control or {})]
+    facts = [
+        *_surface_input_boundary_facts(agent_input=agent_input, trace_stage_meta=trace_stage_meta),
+        *_technical_task_facts(task_control or {}),
+        *_account_login_handoff_facts(agent_input, task_control=task_control),
+    ]
     status = _first_nonempty(retrieval_summary.get("status"), "")
     if status:
         facts.append(f"召回状态：{status}")
     return tuple(_clean_list(facts))
 
 
-def _surface_input_boundary_facts() -> tuple[str, ...]:
+def _surface_input_boundary_facts(
+    *,
+    agent_input: Any | None = None,
+    trace_stage_meta: Mapping[str, Any] | None = None,
+) -> tuple[str, ...]:
+    if _input_has_audio_evidence(agent_input=agent_input, trace_stage_meta=trace_stage_meta):
+        return (
+            "当前输入渠道：语音/ASR。",
+            "音频输入：有；可以确认收到了语音或语音转写。",
+            "不要编造未提供的音色、语气、环境声音、摄像头画面、屏幕画面或现实传感器事实。",
+        )
     return (
         "当前输入渠道：中文文字私聊。",
         "当前没有音频、摄像头、屏幕画面或现实传感器事实。",
@@ -857,211 +1179,73 @@ def _surface_input_boundary_facts() -> tuple[str, ...]:
     )
 
 
-def _surface_quick_reply_payload(
-    agent_input: Any,
+def _surface_boundary_must_not_do(
     *,
-    task_control: Mapping[str, Any] | None,
-) -> dict[str, Any] | None:
-    task_split = _task_split_quick_reply_payload(agent_input, task_control=task_control)
-    if task_split:
-        return task_split
-    return _technical_quick_reply_payload(agent_input, task_control=task_control)
-
-
-def _technical_quick_reply_payload(
-    agent_input: Any,
-    *,
-    task_control: Mapping[str, Any] | None,
-) -> dict[str, Any] | None:
-    user_message = str(getattr(agent_input, "user_message", "") or "").strip()
-    if not (_is_technical_task(task_control or {}) or _looks_like_technical_advice_text(user_message)):
-        return None
-    missing_module = _extract_missing_python_module(user_message)
-    if missing_module:
-        package = _python_package_for_module(missing_module)
-        return {
-            "reply_text": (
-                f"老哥，先确认是不是当前解释器没装包：python -m pip show {package}。"
-                f"没有就跑 python -m pip install {package}；"
-                '装了还报错，就用 python -c "import sys; print(sys.executable)" 看是不是跑错虚拟环境。'
-            ),
-            "natsume_emotion_tag": "THINKING",
-            "user_emotion_tag": "NEUTRAL",
-            "emotion_confidence": 0.0,
-            "_quick_reply_kind": "python_missing_module_windows",
-        }
-    env_var = _extract_env_var_check(user_message)
-    if env_var:
-        return {
-            "reply_text": (
-                f"老哥，PowerShell 先跑 $env:{env_var} 看是不是空的；cmd 里用 echo %{env_var}%。"
-                f"如果是空，就在当前终端设 $env:{env_var}=\"...\" 后重启服务；别把值贴出来。"
-            ),
-            "natsume_emotion_tag": "THINKING",
-            "user_emotion_tag": "NEUTRAL",
-            "emotion_confidence": 0.0,
-            "_quick_reply_kind": "windows_env_var_check",
-        }
-    if _looks_like_neo4j_connectivity(user_message):
-        port = _extract_first_port(user_message) or "17687"
-        return {
-            "reply_text": (
-                f"老哥，先别急着改代码。PowerShell 跑 Test-NetConnection 127.0.0.1 -Port {port}。"
-                "不通就看 Docker 里的 Neo4j 容器；通了再核对 BOND_NEO4J_URI 和账号。"
-            ),
-            "natsume_emotion_tag": "THINKING",
-            "user_emotion_tag": "NEUTRAL",
-            "emotion_confidence": 0.0,
-            "_quick_reply_kind": "neo4j_connectivity_windows",
-        }
-    if _looks_like_chroma_connectivity(user_message):
-        endpoint = _extract_http_endpoint(user_message) or "http://127.0.0.1:18000"
-        return {
-            "reply_text": (
-                f"老哥，先确认 Chroma 活着：PowerShell 跑 Invoke-WebRequest {endpoint.rstrip('/')}/api/v2/heartbeat。"
-                "连不上就看 Docker 容器有没有起来；能通再查 collection 名和维度配置。"
-            ),
-            "natsume_emotion_tag": "THINKING",
-            "user_emotion_tag": "NEUTRAL",
-            "emotion_confidence": 0.0,
-            "_quick_reply_kind": "chroma_heartbeat_windows",
-        }
-    port = _extract_occupied_port(user_message)
-    if not port:
-        return None
-    return {
-        "reply_text": (
-            f"老哥，先查占用 PID：netstat -ano | findstr :{port}。"
-            "看到最后一列 PID 后，用 taskkill /PID <PID> /F 结束它；"
-            "不想关进程就改服务端口再重启。"
-        ),
-        "natsume_emotion_tag": "NEUTRAL",
-        "user_emotion_tag": "NEUTRAL",
-        "emotion_confidence": 0.0,
-        "_quick_reply_kind": "port_occupied_windows",
-    }
-
-
-def _task_split_quick_reply_payload(
-    agent_input: Any,
-    *,
-    task_control: Mapping[str, Any] | None,
-) -> dict[str, Any] | None:
-    control = task_control or {}
-    task_mode = str(control.get("task_mode") or "").strip().lower()
-    response_move = str(control.get("response_move") or "").strip().lower()
-    if task_mode not in {"task_help", "next_step", "daily_chat", "plain_answer"} and response_move not in {
-        "task_help",
-        "next_step",
-    }:
-        return None
-    user_message = str(getattr(agent_input, "user_message", "") or "").strip()
-    if not _TASK_SPLIT_QUICK_RE.search(user_message):
-        return None
-    return {
-        "reply_text": "老哥，先拆三件：把卡点写清楚；只做一个最小可验证动作；跑完看结果，再决定下一步。",
-        "natsume_emotion_tag": "NEUTRAL",
-        "user_emotion_tag": "NEUTRAL",
-        "emotion_confidence": 0.0,
-        "_quick_reply_kind": "task_split_three_steps",
-    }
-
-
-def _extract_occupied_port(text: str) -> str:
-    value = str(text or "").strip()
-    if not value:
-        return ""
-    for pattern in (_PORT_OCCUPIED_RE, _PORT_OCCUPIED_REVERSED):
-        match = pattern.search(value)
-        if not match:
-            continue
-        port = str(match.group("port") or "").strip()
-        if port and 0 < int(port) <= 65535:
-            return port
-    return ""
-
-
-def _looks_like_technical_advice_text(text: str) -> bool:
-    value = str(text or "").strip()
-    if not value:
-        return False
-    return bool(_TECHNICAL_TEXT_RE.search(value) and _TECHNICAL_QUESTION_RE.search(value))
-
-
-def _extract_missing_python_module(text: str) -> str:
-    value = str(text or "")
-    match = _PYTHON_NO_MODULE_RE.search(value) or _PYTHON_MISSING_MODULE_RE.search(value)
-    if not match:
-        return ""
-    module = str(match.group("module") or "").strip().strip(".")
-    if not module:
-        return ""
-    return module.split(".", 1)[0]
-
-
-def _python_package_for_module(module: str) -> str:
-    normalized = str(module or "").strip().lower()
-    return _PYTHON_MODULE_PACKAGE_MAP.get(normalized, str(module or "").strip() or "包名")
-
-
-def _extract_env_var_check(text: str) -> str:
-    value = str(text or "").strip()
-    if not value:
-        return ""
-    lowered = value.lower()
-    if "环境变量" not in value and "env" not in lowered and "_key" not in lowered and "api_key" not in lowered:
-        return ""
-    if not re.search(r"(没生效|读不到|读取不到|为空|空的|查|看|确认|怎么|\?|？|not set|missing)", value, re.IGNORECASE):
-        return ""
-    match = _ENV_VAR_RE.search(value)
-    return str(match.group("var") or "").strip() if match else ""
-
-
-def _looks_like_neo4j_connectivity(text: str) -> bool:
-    value = str(text or "")
-    lowered = value.lower()
-    return ("neo4j" in lowered or "bolt://" in lowered) and bool(
-        re.search(r"(连接不上|连不上|没响应|无响应|timeout|timed out|先看|看什么|排查|查|怎么|\?|？)", value, re.IGNORECASE)
-    )
-
-
-def _looks_like_chroma_connectivity(text: str) -> bool:
-    value = str(text or "")
-    lowered = value.lower()
-    return ("chroma" in lowered or "chromadb" in lowered or ":18000" in lowered) and bool(
-        re.search(r"(心跳|heartbeat|连接不上|连不上|没响应|无响应|timeout|timed out|先看|看什么|排查|查|怎么|\?|？)", value, re.IGNORECASE)
-    )
-
-
-def _extract_first_port(text: str) -> str:
-    for match in re.finditer(r":(?P<port>\d{2,5})(?:\b|/)", str(text or "")):
-        port = str(match.group("port") or "").strip()
-        if port and 0 < int(port) <= 65535:
-            return port
-    for match in re.finditer(r"\b(?P<port>\d{2,5})\b", str(text or "")):
-        port = str(match.group("port") or "").strip()
-        if port and 0 < int(port) <= 65535:
-            return port
-    return ""
-
-
-def _extract_http_endpoint(text: str) -> str:
-    match = re.search(r"https?://[^\s，。；;、]+", str(text or ""), re.IGNORECASE)
-    if not match:
-        return ""
-    return match.group(0).rstrip("。；;，,")
-
-
-def _surface_boundary_must_not_do(*, task_control: Mapping[str, Any] | None = None) -> tuple[str, ...]:
+    agent_input: Any | None = None,
+    task_control: Mapping[str, Any] | None = None,
+    trace_stage_meta: Mapping[str, Any] | None = None,
+) -> tuple[str, ...]:
+    if _input_has_audio_evidence(agent_input=agent_input, trace_stage_meta=trace_stage_meta):
+        sensory_boundary = "不要编造音色、语气、环境声音、摄像头画面、屏幕画面或现实传感器事实。"
+    else:
+        sensory_boundary = "不要说“你这声音”“我听出来”“我看到你”或把文字输入写成音频/视觉感知。"
     return tuple(
         _clean_list(
             [
-                "不要说“你这声音”“我听出来”“我看到你”或把文字输入写成音频/视觉感知。",
+                sensory_boundary,
                 "不要编造用户现实动作、地点、屏幕内容、身体状态或睡眠事实，除非 facts 明确给出。",
                 *_technical_task_must_not_do(task_control or {}),
+                *_account_login_must_not_do(agent_input, task_control=task_control),
             ]
         )
     )
+
+
+def _input_has_audio_evidence(
+    *,
+    agent_input: Any | None = None,
+    trace_stage_meta: Mapping[str, Any] | None = None,
+) -> bool:
+    sources: list[Any] = []
+    containers = (
+        _safe_mapping(trace_stage_meta),
+        _safe_mapping(getattr(agent_input, "trace_stage_meta", None)) if agent_input is not None else {},
+        _safe_mapping(getattr(agent_input, "runtime_payload", None)) if agent_input is not None else {},
+    )
+    for container in containers:
+        sources.extend(
+            [
+                container.get("input_source"),
+                container.get("input_modality"),
+                container.get("source_modality"),
+                container.get("source"),
+            ]
+        )
+    if agent_input is not None:
+        sources.extend(
+            [
+                getattr(agent_input, "input_source", None),
+                getattr(agent_input, "input_modality", None),
+                getattr(agent_input, "source_modality", None),
+                getattr(agent_input, "source", None),
+            ]
+        )
+        observations = _safe_mapping(getattr(agent_input, "multimodal_observations", None))
+        if observations.get("audio") or observations.get("asr") or observations.get("speech_text"):
+            return True
+        for attachment in _coerce_sequence(getattr(agent_input, "attachments", None)):
+            attachment_map = _safe_mapping(attachment)
+            mime_type = str(attachment_map.get("mime_type") or attachment_map.get("content_type") or "").lower()
+            media_type = str(attachment_map.get("type") or attachment_map.get("kind") or "").lower()
+            if mime_type.startswith("audio/") or media_type in {"audio", "voice", "speech"}:
+                return True
+    for raw in sources:
+        normalized = str(raw or "").strip().lower().replace("-", "_")
+        if not normalized:
+            continue
+        if normalized in _AUDIO_INPUT_SOURCES or "asr" in normalized:
+            return True
+    return False
 
 
 def _technical_task_facts(task_control: Mapping[str, Any] | None) -> tuple[str, ...]:
@@ -1083,6 +1267,74 @@ def _technical_task_must_not_do(task_control: Mapping[str, Any] | None) -> tuple
         "不要省略关键命令符号，例如端口筛选要保留冒号。",
         "不要默认给 lsof、grep 等 Linux/macOS 命令，除非用户明确指定该环境。",
         "不要只输出单条命令；命令后要说明下一步如何处理结果。",
+    )
+
+
+def _account_login_sensitive(agent_input: Any | None, *, task_control: Mapping[str, Any] | None = None) -> bool:
+    if agent_input is None:
+        return False
+    sub_agent_ctx = getattr(agent_input, "sub_agent_context", None)
+    sub_agent_id = str(getattr(sub_agent_ctx, "agent_id", "") or "").strip()
+    if sub_agent_id == "codex_epub_builder":
+        return True
+    intent = _safe_mapping(getattr(agent_input, "intent_draft", None))
+    target_id = str(intent.get("target_id") or intent.get("action") or "").strip()
+    if target_id == "codex_epub_builder":
+        return True
+    text = " ".join(
+        str(part or "")
+        for part in (
+            getattr(agent_input, "user_message", ""),
+            _safe_mapping(task_control).get("reply_contract"),
+            _safe_mapping(task_control).get("response_goal"),
+            _safe_mapping(task_control).get("primary_topic"),
+        )
+    )
+    return bool(_ACCOUNT_LOGIN_TASK_RE.search(text)) and bool(
+        re.search(r"(登录|账号|账户|购买|积分|轻币|epub|lightnovel|轻小说)", text, re.IGNORECASE)
+    )
+
+
+def _account_login_handoff_facts(
+    agent_input: Any | None,
+    *,
+    task_control: Mapping[str, Any] | None = None,
+) -> tuple[str, ...]:
+    if not _account_login_sensitive(agent_input, task_control=task_control):
+        return ()
+    return (
+        "账号类任务：需要用户在本地浏览器完成登录或授权；系统只复用会话状态，不接收明文账号、密码、验证码或 Cookie。",
+        "涉及积分/购买：未明确确认书名、链接和最高消耗前，只能生成购买计划，不执行购买或解锁。",
+    )
+
+
+def _account_login_must_not_do(
+    agent_input: Any | None,
+    *,
+    task_control: Mapping[str, Any] | None = None,
+) -> tuple[str, ...]:
+    if not _account_login_sensitive(agent_input, task_control=task_control):
+        return ()
+    return (
+        "不要要求用户把账号、密码、验证码或 Cookie 发到聊天里。",
+        "不要说“账号信息丢过来”“把密码发给我”“贴 Cookie 给我”这类话。",
+        "不要暗示可以代填密码、绕过登录、绕过付费限制或未确认就消耗积分。",
+    )
+
+
+def _sanitize_account_login_reply(text: str, *, agent_input: Any | None = None) -> tuple[str, bool]:
+    narrative = str(text or "").strip()
+    if not narrative:
+        return narrative, False
+    if not _account_login_sensitive(agent_input):
+        return narrative, False
+    if not _ACCOUNT_CREDENTIAL_REQUEST_RE.search(narrative):
+        return narrative, False
+    return (
+        "需要登录没错，但别把账号、密码、验证码或 Cookie 发给我。"
+        "你在本地浏览器完成登录/授权，我只复用会话状态；涉及积分购买时，"
+        "还要你明确确认书名、链接和最高积分后才会继续。",
+        True,
     )
 
 

@@ -169,6 +169,51 @@ def test_probe_llm_nodes_skips_local_ollama_when_base_url_is_remote() -> None:
     assert "HOST_CHAT_HOST_14B_BASE_URL=http://192.168.1.101:11434" in result["host_local_14b"]["detail"]
 
 
+def test_run_once_defers_llm_probe_when_resource_gate_blocks(monkeypatch) -> None:
+    from host_brain.observability import service_health_heartbeat as heartbeat
+
+    class FakeResourceManager:
+        def assess_background_task(self, **kwargs):
+            return {
+                "allowed": False,
+                "reason_code": "RESOURCE_PRESSURE_HIGH",
+                "pressure_status": "HIGH",
+                "retry_after_s": 300,
+            }
+
+    with heartbeat._cache_lock:
+        heartbeat._cache.clear()
+
+    monkeypatch.setattr(
+        "host_brain.app.dependencies.get_resource_manager",
+        lambda create_if_missing=False: FakeResourceManager(),
+    )
+    with (
+        patch.object(
+            heartbeat,
+            "_probe_edge",
+            new=AsyncMock(return_value={"status": "UP", "latency_ms": 1, "sub_services": {}}),
+        ),
+        patch.object(
+            heartbeat,
+            "_probe_host",
+            new=AsyncMock(return_value={"overall_status": "UP", "latency_ms": 1, "sub_services": {}}),
+        ),
+        patch.object(
+            heartbeat,
+            "_probe_llm_nodes",
+            new=AsyncMock(side_effect=AssertionError("LLM probe should be resource-gated")),
+        ),
+    ):
+        asyncio.run(heartbeat.run_once())
+
+    for service_id in heartbeat.LLM_NODE_IDS:
+        cached = heartbeat.get_cached(service_id)
+        assert cached is not None
+        assert cached["status"] == "DEFERRED"
+        assert "RESOURCE_PRESSURE_HIGH" in str(cached.get("detail"))
+
+
 def test_write_core_service_cache_sets_vts_unknown_without_dedicated_probe_signal() -> None:
     from host_brain.observability import service_health_heartbeat as heartbeat
 

@@ -498,7 +498,7 @@ WHITELIST_PATHS:
 - 升级触发：连续 3 天 >10% 的 5h 窗口触达 1200+ → 升 Max ¥119
 - 联调期：临时升 Max ¥119 或 Max-极速 ¥199
 
-Gemini API 按项目现有 key pool 轮询，配合 MiniMax 作为备选。
+Gemini API 使用单 key；多模型降级由模型池和 MiniMax 备选承担。
 
 ### 6.3 成本分摊（按等级估算）
 

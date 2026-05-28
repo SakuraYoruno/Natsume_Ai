@@ -747,7 +747,7 @@ def test_run_cortex_orchestrator_pipeline_routes_gateway_samples_through_thalamu
 
     cases = [
         ("开始吧", "delegate", "intent_agent"),
-        ("使用无头浏览器验证前端效果", "skill", "codex_worker"),
+        ("使用无头浏览器验证前端效果", "skill", "codex_frontend_acceptance"),
         ("帮我翻译这段话", "delegate", "translate_agent"),
         ("有没有更好的方案", "chat", ""),
         ("帮我安装一下这首歌", "chat", ""),
@@ -1221,6 +1221,73 @@ def test_deliver_gateway_reply_force_dual_voice_waits_for_edge_voice_result(monk
     assert result["voice_started"] is True
     assert result["voice_vts_started"] is True
     assert result["voice_vts_expression_success"] is True
+
+
+def test_deliver_gateway_reply_smart_mode_keeps_short_presence_voice_with_legacy_force_env(monkeypatch) -> None:
+    monkeypatch.setenv("HOST_INPUT_GATEWAY_AUTO_REPLY", "true")
+    monkeypatch.setenv("HOST_GATEWAY_FORCE_DUAL_VOICE_REPLY", "true")
+    monkeypatch.setenv("HOST_GATEWAY_VOICE_SELECTION_MODE", "smart")
+    monkeypatch.setattr("host_brain.app.reply_form_decider.ResponseFormDecider._is_quiet_hours", staticmethod(lambda _now_ts: False))
+    post_gateway_reply_mock = AsyncMock(
+        return_value=SimpleNamespace(
+            success=True,
+            status="SENT",
+            reason_code=None,
+            detail="text sent",
+            latency_ms=24,
+        )
+    )
+    with patch(
+        "host_brain.channels.edge_rpc_client.post_gateway_reply",
+        new=post_gateway_reply_mock,
+    ), patch(
+        "host_brain.channels.edge_rpc_client.post_speak",
+        new=AsyncMock(
+            return_value=SimpleNamespace(
+                success=True,
+                status="ACCEPTED",
+                reason_code=None,
+                detail="tts queued; tts playback started",
+                latency_ms=120,
+                event={
+                    "event_type": "TTS_PLAYBACK_STARTED",
+                    "audio_path": "D:\\tmp\\presence.wav",
+                },
+            )
+        ),
+    ) as speak_mock:
+        result = _run(
+            _deliver_gateway_reply(
+                request_id="req_gateway_reply_smart_short_001",
+                payload={
+                    "platform": "qq",
+                    "conversation_id": "qq_dm_smart_short_001",
+                    "content": "？",
+                    "raw_extra": {
+                        "wait_voice_reply_result": True,
+                    },
+                },
+                decision="APPROVE",
+                reason_code=None,
+                narrative="哈？",
+                emotion_tag="SURPRISED",
+                bond_stage="CONFIDANT",
+                user_msg_type="text",
+            )
+        )
+
+    assert post_gateway_reply_mock.await_count == 1
+    assert post_gateway_reply_mock.await_args.kwargs["msg_type"] == "text"
+    speak_mock.assert_awaited_once()
+    assert speak_mock.await_args.kwargs["text"] == "哈？"
+    assert speak_mock.await_args.kwargs["export_audio"] is False
+    assert result["success"] is True
+    assert result["reply_form_reason"] == "embodied_presence_voice"
+    assert result["voice_sent"] is True
+    assert result["voice_waited"] is True
+    assert result["voice_started"] is True
+    assert result["voice_gateway_sent"] is False
+    assert "disabled" in result["voice_gateway_detail"].lower()
 
 
 def test_deliver_gateway_reply_can_still_trigger_local_voice_when_primary_delivery_fails(monkeypatch) -> None:

@@ -10,6 +10,9 @@ from host_brain.persona.isolated_surface_harness import (
 )
 from host_brain.persona.surface_memory_recall import (
     MemoryRecallPacket,
+    RECALL_POLICY_MAY,
+    RECALL_POLICY_MUST,
+    RECALL_POLICY_NO,
     SURFACE_MEMORY_EVIDENCE_REQUIRED,
     SURFACE_MEMORY_RECALL_SKIPPED,
     SurfaceMemoryRecallPacket,
@@ -159,6 +162,129 @@ def test_surface_memory_recall_normalizes_legacy_assistant_attribution() -> None
     assert "新海天回应" not in rendered
 
 
+def test_surface_memory_recall_prefers_high_score_life_episode_over_legacy_noise() -> None:
+    packet = build_surface_memory_recall_packet(
+        SimpleNamespace(
+            output={
+                "query": "刚才今日推荐的结果是什么",
+                "status": "OK",
+                "candidate_count": 2,
+                "candidates": [
+                    {
+                        "snippet": "当前回合摘要：用户提到「最近有什么好书推荐？」；回复「先说喜欢什么类型」。",
+                        "confidence": 0.64,
+                        "metadata": {"store_id": "episodic_vector"},
+                    },
+                    {
+                        "snippet": "User: 调用今日推荐：从每日榜单抓封面和简介推荐轻小说\nAssistant: 已创建轻小说推荐任务。",
+                        "confidence": 1.0,
+                        "metadata": {"store_id": "life_episode"},
+                    },
+                ],
+            }
+        ),
+        max_facts=2,
+    )
+
+    assert packet.facts[0].startswith("记忆线索：用户提到： 调用今日推荐")
+    assert "已创建轻小说推荐任务" in packet.facts[0]
+
+
+def test_surface_memory_recall_prioritizes_terminal_codex_production_result() -> None:
+    packet = build_surface_memory_recall_packet(
+        SimpleNamespace(
+            output={
+                "query": "现在今日推荐跑完了吗？如果失败就说失败原因。",
+                "status": "OK",
+                "candidate_count": 2,
+                "candidates": [
+                    {
+                        "snippet": "User: 现在今日推荐跑完了吗？\nAssistant: 还没拿到完成结果。",
+                        "confidence": 1.0,
+                        "metadata": {"store_id": "life_episode"},
+                    },
+                    {
+                        "snippet": "codex_production codex_lightnovel_recommender FAILED LIGHTNOVEL_NATIVE_NO_RECOMMENDATIONS；推荐候选：0",
+                        "confidence": 1.0,
+                        "metadata": {"store_id": "life_episode"},
+                    },
+                ],
+            }
+        ),
+        max_facts=2,
+    )
+
+    assert "LIGHTNOVEL_NATIVE_NO_RECOMMENDATIONS" in packet.facts[0]
+
+
+def test_surface_memory_recall_anaphoric_selection_uses_life_episode_not_self_echo() -> None:
+    packet = build_surface_memory_recall_packet(
+        SimpleNamespace(
+            output={
+                "query": "我问你喜欢哪本",
+                "status": "OK",
+                "candidate_count": 2,
+                "candidates": [
+                    {
+                        "snippet": "当前回合摘要：用户提到「我问你喜欢哪本」；回复「哈？最近在看一本讲宇宙和人的，挺有意思的。」。",
+                        "confidence": 0.99,
+                        "metadata": {"store_id": "episodic_vector"},
+                    },
+                    {
+                        "snippet": "scheduler emotion_decay_tick OK 后台任务记忆：emotion_decay_tick 状态=OK。",
+                        "confidence": 0.99,
+                        "metadata": {
+                            "store_id": "life_episode",
+                            "episode_kind": "background_episode",
+                        },
+                    },
+                    {
+                        "snippet": (
+                            "codex_production lightnovel_recommendation_delivery COMPLETED；"
+                            "我刚才通过 qq 给 qq_dm_1 推荐了 3 本轻小说："
+                            "1. [丸焦ししゃも]给被人说“培养失败”的前美少女童星（SSR）搭了把手之后；"
+                            "2. 1205.与神在河岸；"
+                            "3. [軽井広]轉移到異世界後，與美少女皇女結婚的我成為皇帝。"
+                        ),
+                        "confidence": 0.92,
+                        "metadata": {
+                            "store_id": "life_episode",
+                            "episode_kind": "action_episode",
+                        },
+                    },
+                    {
+                        "snippet": "_thalamus_meta: compiled_by: thalamus_agent, action: narrative_only, args: 我问你喜欢哪本",
+                        "confidence": 1.0,
+                        "metadata": {"store_id": "sqlite_ledger"},
+                    },
+                    {
+                        "snippet": "User: 我问你喜欢哪本\nAssistant: 难得难得。那三本里我最中意第二本，与神在河岸。",
+                        "confidence": 1.0,
+                        "metadata": {
+                            "store_id": "life_episode",
+                            "episode_kind": "chat_episode",
+                        },
+                    },
+                ],
+            }
+        ),
+        query="我问你喜欢哪本",
+        max_facts=3,
+        max_chars_per_fact=320,
+    )
+
+    joined = "\n".join(packet.facts)
+    assert packet.facts[0].startswith("记忆线索：我刚才通过 qq")
+    assert "1205.与神在河岸" in joined
+    assert "軽井広" in joined
+    assert "最近在看一本讲宇宙" not in joined
+    assert "难得难得" not in joined
+    assert "_thalamus_meta" not in joined
+    assert "emotion_decay_tick" not in joined
+    assert any("指代选择追问" in item for item in packet.style_anchor)
+    assert any("指代选择追问" in item for item in packet.must_not_do)
+
+
 def test_memory_recall_packet_is_safe_boundary_shape_without_rows() -> None:
     packet = memory_recall_packet_from_mapping(
         {
@@ -279,6 +405,7 @@ def test_plan_surface_memory_recall_skips_low_signal_phatic_turns() -> None:
     plan = plan_surface_memory_recall(context)
 
     assert not plan.should_recall
+    assert plan.recall_policy == RECALL_POLICY_NO
     assert plan.reason == "low_signal_surface_turn"
     assert plan.target_store_ids == ()
     assert "RAW_RECENT_SHOULD_NOT_JOIN_QUERY" not in plan.query
@@ -299,12 +426,42 @@ def test_plan_surface_memory_recall_routes_memory_followup_to_core_memory_stores
     query = build_surface_memory_recall_query(context)
 
     assert plan.should_recall
+    assert plan.recall_policy == RECALL_POLICY_MUST
     assert plan.reason == "explicit_memory_recall"
-    assert plan.target_store_ids == ("semantic_memory", "episodic_vector", "sqlite_ledger", "neo4j_bond")
+    assert plan.target_store_ids == ("life_episode", "semantic_memory", "episodic_vector", "sqlite_ledger", "neo4j_bond")
     assert plan.max_facts == 4
     assert plan.time_lookback_days == 7
     assert "必要事实：用户说的上次是压缩后的记忆追问。" in query
     assert "RAW_RECENT_EXACT_REPLY" not in query
+
+
+def test_plan_surface_memory_recall_treats_background_result_followup_as_recall() -> None:
+    plan = plan_surface_memory_recall(
+        ThreeLayerContinuityContext(
+            current_user_message="现在今日推荐跑完了吗？如果失败就说失败原因。",
+            task_mode_hint="daily_chat",
+        )
+    )
+
+    assert plan.should_recall
+    assert plan.recall_policy == RECALL_POLICY_MUST
+    assert plan.reason == "explicit_memory_recall"
+    assert plan.target_store_ids[0] == "life_episode"
+
+
+def test_plan_surface_memory_recall_treats_anaphoric_selection_as_recall() -> None:
+    plan = plan_surface_memory_recall(
+        ThreeLayerContinuityContext(
+            current_user_message="我问你喜欢哪本",
+            task_mode_hint="first_ask",
+        )
+    )
+
+    assert plan.should_recall
+    assert plan.recall_policy == RECALL_POLICY_MUST
+    assert plan.reason == "anaphoric_selection_recall"
+    assert plan.target_store_ids[0] == "life_episode"
+    assert plan.time_lookback_days == 1
 
 
 def test_plan_surface_memory_recall_skips_memory_write_current_turn() -> None:
@@ -316,6 +473,7 @@ def test_plan_surface_memory_recall_skips_memory_write_current_turn() -> None:
     )
 
     assert not plan.should_recall
+    assert plan.recall_policy == RECALL_POLICY_NO
     assert plan.reason == "memory_write_current_turn_only"
 
 
@@ -328,6 +486,7 @@ def test_plan_surface_memory_recall_skips_generic_daily_turn_without_hint() -> N
     )
 
     assert not plan.should_recall
+    assert plan.recall_policy == RECALL_POLICY_NO
     assert plan.reason == "no_memory_recall_needed"
     assert plan.target_store_ids == ()
 
@@ -383,9 +542,12 @@ def test_plan_surface_memory_recall_routes_task_modes_for_current_main_chain() -
         )
     )
 
-    assert tech.target_store_ids == ("semantic_memory", "episodic_vector", "sqlite_ledger")
-    assert identity.target_store_ids == ("neo4j_bond", "semantic_memory", "episodic_vector")
-    assert tired.target_store_ids == ("neo4j_bond", "semantic_memory", "episodic_vector")
+    assert tech.target_store_ids == ("life_episode", "semantic_memory", "episodic_vector", "sqlite_ledger")
+    assert tech.recall_policy == RECALL_POLICY_MAY
+    assert identity.target_store_ids == ("life_episode", "neo4j_bond", "semantic_memory", "episodic_vector")
+    assert identity.recall_policy == RECALL_POLICY_MAY
+    assert tired.target_store_ids == ("life_episode", "neo4j_bond", "semantic_memory", "episodic_vector")
+    assert tired.recall_policy == RECALL_POLICY_MAY
 
 
 def test_recall_surface_memory_for_context_uses_plan_and_skips_without_calling_recall() -> None:
@@ -427,7 +589,7 @@ def test_recall_surface_memory_for_context_passes_current_chain_plan_to_recall()
         query_embedding=[0.2] * 16,
     )
 
-    assert captured["target_store_ids"] == ["semantic_memory", "episodic_vector", "sqlite_ledger"]
+    assert captured["target_store_ids"] == ["life_episode", "semantic_memory", "episodic_vector", "sqlite_ledger"]
     assert "技术场景优先 usefulness" in str(captured["query"])
     assert len(packet.facts) <= 3
     assert dict(packet.trace or {})["plan"]["reason"] == "technical_user_memory_context"

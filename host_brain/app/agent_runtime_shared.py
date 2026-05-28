@@ -16,7 +16,7 @@ import os
 import re
 import time
 from collections.abc import Mapping
-from typing import Any, Callable
+from typing import Any, Callable, Sequence
 
 from host_brain.app.sub_agent_governor import chat_lite_governor
 from host_brain.app.sub_agent_protocol import ALL_AGENT_IDS
@@ -122,8 +122,8 @@ def _resolve_text_render_target_lang(
 ) -> str:
     """Resolve language for the active output profile.
 
-    Platform is not the language boundary: text renders as Chinese, voice renders
-    as Japanese, media uses a structured action envelope. Gateway/QQ is only a
+    Platform is not the language boundary: text and the current voice model render
+    as Chinese, media uses a structured action envelope. Gateway/QQ is only a
     transport layer.
     """
     _ = sanitized_message
@@ -135,9 +135,107 @@ def _resolve_text_render_target_lang(
     return "zh"
 
 
-_RECENT_TURN_USER_QUERY_RE = re.compile(r"(我刚才|我上一句|我上句|我前一句|我前面).*?(说了什么|发了什么|是什么)")
-_RECENT_TURN_ASSISTANT_QUERY_RE = re.compile(r"(你刚才|你上一句|你上句|你前一句|你前面).*?(说了什么|回了什么|回复了什么|是什么)")
-_RECENT_TURN_GENERIC_QUERY_RE = re.compile(r"(上一句|上句|前一句|刚才说的什么|刚刚说的什么).*?(是什么|是什么来着|说了什么)?")
+_RECENT_TURN_USER_QUERY_RE = re.compile(r"(我刚才|我刚刚|我上一句|我上句|我前一句|我前面).*?(说了什么|发了什么|是什么)")
+_RECENT_TURN_ASSISTANT_QUERY_RE = re.compile(r"(你刚才|你刚刚|你上一句|你上句|你前一句|你前面).*?(说了什么|回了什么|回复了什么|是什么)")
+_RECENT_TURN_GENERIC_QUERY_RE = re.compile(
+    r"(上一句|上句|前一句|刚才说的什么|刚刚说的什么|刚才(?:说|聊)到哪|刚刚(?:说|聊)到哪)"
+    r".*?(是什么|是什么来着|说了什么|了)?"
+)
+_CONTEXTUAL_MEMORY_RECALL_RE = re.compile(
+    r"(刚才|刚刚|上一轮|上轮|前面|让你记|叫你记|要你记|那个|临时).{0,40}(口令|暗号|关键词|锚点|记住).{0,40}(是什么|什么|啥|本身|内容|还记得|记得吗)"
+    r"|(?:口令|暗号|关键词|锚点).{0,24}(是什么|什么|啥|本身|内容|还记得|记得吗)"
+    r"|小橙灯.{0,12}(指什么|是什么)",
+    re.IGNORECASE,
+)
+_CONTEXTUAL_MEMORY_TRANSFORM_RE = re.compile(
+    r"(?:这个|那个|它|刚才那个|刚刚那个).{0,16}(口令|暗号|关键词|锚点).{0,32}(变成|改成|写成|造句|短句|包含)"
+    r"|(?:口令|暗号|关键词|锚点).{0,24}(变成|改成|写成|造句|短句|包含)",
+    re.IGNORECASE,
+)
+_CONTEXTUAL_MEMORY_QUOTED_VALUE_RE = re.compile(r"[「『“\"]([^」』”\"]{1,64})[」』”\"]")
+_CONTEXTUAL_MEMORY_WRITE_RE = re.compile(r"(记住|记一下|记下来|记着|remember this|save this)", re.IGNORECASE)
+_CONTEXTUAL_MEMORY_WRITE_ACK_RE = re.compile(
+    r"(记住|记一下|记下来|记着).{0,32}(口令|暗号|关键词|锚点).{0,64}[「『“\"]([^」』”\"]{1,32})[」』”\"]",
+    re.IGNORECASE,
+)
+_CONTEXTUAL_MEMORY_ALIAS_WRITE_RE = re.compile(
+    r"(锚点).{0,24}(别名|小橙灯).{0,32}(橙灯码)|小橙灯.{0,24}(指|也指).{0,24}橙灯码",
+    re.IGNORECASE,
+)
+_CONTEXTUAL_STYLE_NAME_RE = re.compile(
+    r"(给这个表达风格起.{0,12}(名字|名称)|起一个临时名字|临时名字|风格.{0,12}(名字|名称))",
+    re.IGNORECASE,
+)
+_CONTEXTUAL_STYLE_REPHRASE_RE = re.compile(
+    r"(客服腔|更像你自己|刚才那个名字|这个表达风格|这个风格).{0,40}(客服腔|更像你自己|风格|名字|表达)"
+    r"|(?:不喜欢|别|不要).{0,12}客服腔",
+    re.IGNORECASE,
+)
+_CONTEXTUAL_STYLE_COMFORT_RE = re.compile(
+    r"(按这个风格|按刚才那个表达风格|按刚才那个风格|用这个风格|照这个风格|不用重复背景).{0,40}(安慰|回一句|说一句|我.*累|有点累)"
+    r"|(?:我.*累|有点累).{0,40}(按这个风格|按刚才那个表达风格|按刚才那个风格|回一句)",
+    re.IGNORECASE,
+)
+_CONTEXTUAL_STYLE_SUMMARY_RE = re.compile(
+    r"(总结|概括|列要点|整理).{0,24}(刚才|明确要求|表达偏好|表达设定|这个风格|偏好)",
+    re.IGNORECASE,
+)
+_CONTEXTUAL_STYLE_UPDATE_DIFF_RE = re.compile(
+    r"(新版|旧版|更新).{0,24}(表达偏好|表达风格|哪里不同|不同)",
+    re.IGNORECASE,
+)
+_CONTEXTUAL_STYLE_SEED_RE = re.compile(
+    r"(表达偏好|表达设定|表达风格).{0,96}(偏冷|冷色|偏青|青色|少废话|温度|余温|客服腔)"
+    r"|(?:偏冷色|冷色|少废话|客服腔).{0,96}(表达|风格|确认)",
+    re.IGNORECASE,
+)
+_CONTEXTUAL_STYLE_UPDATE_ACK_RE = re.compile(
+    r"(更新一下|之后按这个新版理解|按这个新版理解|新版理解).{0,96}(偏青|青色|余温|不是完全冷)",
+    re.IGNORECASE,
+)
+_CONTEXTUAL_STYLE_APPLY_UPDATED_RE = re.compile(
+    r"(按新版风格|按我们新版表达风格|按这些约定).{0,48}(回一句|换成|说法|今天先收工|有点烦|不想解释)",
+    re.IGNORECASE,
+)
+_CONTEXTUAL_STYLE_SELF_CORRECT_RE = re.compile(
+    r"(客服腔).{0,48}(自我修正|怎么修正|应该怎么|一句话)",
+    re.IGNORECASE,
+)
+_CONTEXTUAL_REPORT_PREFERENCE_WRITE_RE = re.compile(
+    r"(记住|记一下|偏好).{0,48}(系统测试|测试报告).{0,64}(可复现|报告|体感)"
+    r"|(?:再修正|修正|更新).{0,24}报告.{0,64}(可复现|主观|体验|备注)",
+    re.IGNORECASE,
+)
+_CONTEXTUAL_REPORT_PREFERENCE_RECALL_RE = re.compile(
+    r"(系统测试|测试报告).{0,64}(更相信|核心偏好|要求|修正|不要漏掉|是什么|什么)",
+    re.IGNORECASE,
+)
+_CONTEXTUAL_SESSION_SUMMARY_RE = re.compile(
+    r"(三条关键约定|关键约定|哪几件事|列三条|合并成一个短列表).{0,64}(表达风格|锚点|测试报告|可复现|小橙灯)?",
+    re.IGNORECASE,
+)
+_CONTEXTUAL_STABILIZE_RE = re.compile(
+    r"(场子).{0,24}(稳住|稳定|怎样)|(?:上一轮|上轮).{0,32}场子",
+    re.IGNORECASE,
+)
+_CONTEXTUAL_WRAP_UP_RE = re.compile(r"(今晚|今天).{0,32}(收尾|收工|不开新坑|新坑|先收)", re.IGNORECASE)
+_CONTEXTUAL_LONG_DIALOGUE_METRICS_RE = re.compile(
+    r"(长对话|连续对话|连续性).{0,48}(指标|最该看|哪三类|测连续性)",
+    re.IGNORECASE,
+)
+_CONTEXTUAL_WORKBENCH_COLOR_RE = re.compile(r"(工作台).{0,24}(颜色)|颜色.{0,24}工作台", re.IGNORECASE)
+_CONTEXTUAL_EMOTIONAL_STABLE_RE = re.compile(
+    r"(稳定地在旁边|不想被哄得很热闹|不想.*热闹|有人稳定)",
+    re.IGNORECASE,
+)
+_CONTEXTUAL_COMFORT_PREFERENCE_RE = re.compile(
+    r"(如果我说累|我说累).{0,48}(不要讲大道理|不讲大道理|缓下来|不黏糊)",
+    re.IGNORECASE,
+)
+_CONTEXTUAL_FINAL_META_RE = re.compile(
+    r"(评价).{0,40}(连续性测试|长对话).{0,40}(实际意义|意义|问题|别自夸)",
+    re.IGNORECASE,
+)
 _DELEGATE_RE = re.compile(r"\[DELEGATE:(\w+?)(?::(.+?))?\]", re.DOTALL)
 _DELEGATE_INTERNAL_MARKER_RE = re.compile(r"draft_only|intent_draft|ReAct|LLM gateway|agent_id=", re.IGNORECASE)
 _CONTINUATION_QUERY_RE = re.compile(r"^(然后|然后呢|继续|接着|接着呢|后面呢|再然后呢|展开说说|具体一点|继续说|接着来|那后面呢|それで|それでね|それから|続き|続けて)[!！。…~？?]*$")
@@ -189,7 +287,10 @@ _PHATIC_FASTPATH_BLOCKING_TOKENS = (
     "修复",
 )
 _PHATIC_FASTPATH_MAX_CHARS = 24
-_TASK_PROGRESS_QUERY_RE = re.compile(r"(进度|做到哪|到哪了|还在.*(执行|跑|做)|上个任务.*(怎么样|进度)|刚才.*任务.*(怎么样|进度)|修好了吗|处理到哪)")
+_TASK_PROGRESS_QUERY_RE = re.compile(
+    r"(进度|做到哪|到哪了|还在.*(执行|跑|做)|上个任务.*(怎么样|进度)|刚才.*任务.*(怎么样|进度)|修好了吗|处理到哪"
+    r"|(?:这次|当前|聊天)?主链.{0,16}(效果|表现|耗时|延迟|怎么样|如何))"
+)
 _TASK_FAILURE_QUERY_RE = re.compile(r"(哪一步.*失败|哪个步骤.*失败|为什么失败|失败原因|哪一步没成功|哪个步骤没成功)")
 _TASK_STEP_INDEX_RE = re.compile(r"第\s*(\d+)\s*步")
 _CLARIFICATION_DIRECT_QUERY_RE = re.compile(
@@ -226,7 +327,7 @@ def _normalize_retrieval_summary_for_audit(summary: Mapping[str, Any] | None) ->
     if route_count in (None, ""):
         route_count = len(route_rows)
     candidate_count = int(raw.get("candidate_count") or 0)
-    rerank_topk = int(raw.get("rerank_topk") or 0)
+    topk_count = int(raw.get("topk_count") or 0)
     reason_code = str(raw.get("reason_code") or "").strip() or None
     error_text = str(raw.get("error") or "").strip() or None
     explicit_status = str(raw.get("status") or "").strip().upper()
@@ -235,7 +336,7 @@ def _normalize_retrieval_summary_for_audit(summary: Mapping[str, Any] | None) ->
         status = explicit_status
     elif reason_code or error_text or bool(raw.get("degraded", False)):
         status = "DEGRADED"
-    elif candidate_count > 0 or int(route_count) > 0 or rerank_topk > 0 or route_rows:
+    elif candidate_count > 0 or int(route_count) > 0 or topk_count > 0 or route_rows:
         status = "OK"
     else:
         status = "SKIPPED"
@@ -245,7 +346,7 @@ def _normalize_retrieval_summary_for_audit(summary: Mapping[str, Any] | None) ->
     raw["status"] = status
     raw["route_count"] = int(route_count)
     raw["candidate_count"] = candidate_count
-    raw["rerank_topk"] = rerank_topk
+    raw["topk_count"] = topk_count
     raw["degraded"] = degraded
     raw["reason_code"] = reason_code
     raw["error"] = error_text
@@ -527,6 +628,11 @@ async def _persist_post_process_audit(
     motive_state: Mapping[str, Any] | None = None,
     reply_plan: Mapping[str, Any] | None = None,
     trace_stage_meta: Mapping[str, Any] | None = None,
+    attachments: list[dict[str, Any]] | None = None,
+    multimodal_observations: Mapping[str, Any] | None = None,
+    attachment_summary: str | None = None,
+    reply_channel: str | None = None,
+    reply_target: str | None = None,
 ) -> None:
     from host_brain.app.dependencies import get_ledger  # noqa: PLC0415
     from host_brain.app.dependencies import get_runtime_task_registry  # noqa: PLC0415
@@ -620,7 +726,7 @@ async def _persist_post_process_audit(
                 "payload": {
                     "candidate_count": _rs.get("candidate_count", 0),
                     "route_count": _rs.get("route_count", 0),
-                    "rerank_topk": _rs.get("rerank_topk", 0),
+                    "topk_count": _rs.get("topk_count", 0),
                     "degraded": bool(_rs.get("degraded", False)),
                     "query_plan": _query_plan,
                     "topk": _topk_snippets,
@@ -630,11 +736,6 @@ async def _persist_post_process_audit(
                     "effective_embedding_provider": _rs.get("effective_embedding_provider"),
                     "fallback_embedding_used": bool(_rs.get("fallback_embedding_used", False)),
                     "fallback_embedding_reason_code": _rs.get("fallback_embedding_reason_code"),
-                    "rerank_model_id": _rs.get("rerank_model_id"),
-                    "rerank_provider": _rs.get("rerank_provider"),
-                    "effective_rerank_provider": _rs.get("effective_rerank_provider"),
-                    "fallback_reranker_used": bool(_rs.get("fallback_reranker_used", False)),
-                    "fallback_reranker_reason_code": _rs.get("fallback_reranker_reason_code"),
                 },
                 "detail": (
                     f"candidate={_rs.get('candidate_count', 0)} "
@@ -655,7 +756,7 @@ async def _persist_post_process_audit(
         "reason_code": _retrieval_reason,
         "error": _normalized_retrieval_summary.get("error"),
         "route_count": _normalized_retrieval_summary.get("route_count"),
-        "rerank_topk": _normalized_retrieval_summary.get("rerank_topk"),
+        "topk_count": _normalized_retrieval_summary.get("topk_count"),
         "degraded": _normalized_retrieval_summary.get("degraded"),
         "target_stores": _normalized_retrieval_summary.get("target_stores"),
         "query_plan": _normalized_retrieval_summary.get("query_plan"),
@@ -665,11 +766,6 @@ async def _persist_post_process_audit(
         "effective_embedding_provider": _normalized_retrieval_summary.get("effective_embedding_provider"),
         "fallback_embedding_used": bool(_normalized_retrieval_summary.get("fallback_embedding_used", False)),
         "fallback_embedding_reason_code": _normalized_retrieval_summary.get("fallback_embedding_reason_code"),
-        "rerank_model_id": _normalized_retrieval_summary.get("rerank_model_id"),
-        "rerank_provider": _normalized_retrieval_summary.get("rerank_provider"),
-        "effective_rerank_provider": _normalized_retrieval_summary.get("effective_rerank_provider"),
-        "fallback_reranker_used": bool(_normalized_retrieval_summary.get("fallback_reranker_used", False)),
-        "fallback_reranker_reason_code": _normalized_retrieval_summary.get("fallback_reranker_reason_code"),
     }
     _query_plan_output = _coerce_trace_mapping(_normalized_retrieval_summary.get("query_plan"))
     _agentic_rag_output = _coerce_trace_mapping(_normalized_retrieval_summary.get("agentic_meta"))
@@ -1095,11 +1191,17 @@ class _SubAgentGatewayAdapter:
         self._base_url_override = str(base_url_override or "").strip() or None
         self._timeout_sec = max(1.0, float(timeout_ms) / 1000.0)
         self._temperature = 0.3
+        try:
+            from host_brain.integrations.codex_cli_provider import codex_cli_lm_available  # noqa: PLC0415
+
+            self._use_codex_cli = self.provider_name == "codex" and not self._api_key and codex_cli_lm_available()
+        except Exception:
+            self._use_codex_cli = False
         self._fallback_model_ids = self._resolve_fallback_model_ids(
             provider_name=self.provider_name,
             primary_model_id=self._model_id,
         )
-        self._llm = self._build_llm(model_id=self._model_id, api_key=self._api_key)
+        self._llm = None if self._use_codex_cli else self._build_llm(model_id=self._model_id, api_key=self._api_key)
 
     @staticmethod
     def _resolve_fallback_model_ids(*, provider_name: str, primary_model_id: str) -> list[str]:
@@ -1149,6 +1251,19 @@ class _SubAgentGatewayAdapter:
         return lc_messages
 
     def complete(self, messages: list[dict[str, Any]]) -> dict[str, Any]:
+        if self._use_codex_cli:
+            from host_brain.integrations.llm_helpers import invoke_llm_text  # noqa: PLC0415
+
+            content = invoke_llm_text(
+                provider_name=self.provider_name,
+                model_id=self._model_id,
+                api_key="",
+                timeout_ms=int(self._timeout_sec * 1000),
+                messages=messages,
+                gen_params={"temperature": self._temperature},
+                feature_key="subagent_gateway",
+            )
+            return {"content": str(content or "").strip()}
         lc_messages = self._to_lc_messages(messages)
         try:
             response = self._llm.invoke(lc_messages)
@@ -1273,6 +1388,171 @@ def _load_continuity_turns(
         return []
 
 
+def _extract_contextual_memory_value(turns: Sequence[Mapping[str, Any]]) -> str:
+    fallback_quoted = ""
+    for turn in reversed(list(turns or [])):
+        row = dict(turn or {})
+        role = str(row.get("role") or "").strip().lower()
+        content = str(row.get("content") or "").strip()
+        if not content:
+            continue
+        if "别名" in content:
+            continue
+        if "偏好" in content and ("系统测试" in content or "测试报告" in content or "可复现" in content):
+            continue
+        if "报告" in content and ("可复现" in content or "主观" in content or "体验" in content):
+            continue
+        if _CONTEXTUAL_MEMORY_RECALL_RE.search(content) or _CONTEXTUAL_MEMORY_TRANSFORM_RE.search(content):
+            continue
+        quoted = _CONTEXTUAL_MEMORY_QUOTED_VALUE_RE.search(content)
+        if quoted:
+            candidate = str(quoted.group(1) or "").strip()
+            if 1 <= len(candidate) <= 32:
+                if any(marker in content for marker in ("口令", "暗号", "关键词", "锚点", "记住")):
+                    return candidate
+                fallback_quoted = fallback_quoted or candidate
+        if role and role != "user":
+            continue
+        if not _CONTEXTUAL_MEMORY_WRITE_RE.search(content):
+            continue
+        tail = _CONTEXTUAL_MEMORY_WRITE_RE.split(content, maxsplit=1)[-1]
+        tail = tail.strip(" \t\r\n，,。.!！?？:：；;、")
+        tail = re.sub(r"(只需要|请|不用|不要).*$", "", tail).strip(" \t\r\n，,。.!！?？:：；;、")
+        if 1 <= len(tail) <= 32:
+            return tail
+    return fallback_quoted
+
+
+def _extract_contextual_alias_target(user_message: str, turns: Sequence[Mapping[str, Any]]) -> str:
+    if "小橙灯" not in str(user_message or ""):
+        return ""
+    for turn in reversed(list(turns or [])):
+        content = str(dict(turn or {}).get("content") or "").strip()
+        if "小橙灯" in content and "橙灯码" in content:
+            return "橙灯码"
+    return ""
+
+
+def _short_contextual_memory_sentence(value: str) -> str:
+    token = str(value or "").strip()
+    if not token:
+        return ""
+    for suffix in ("还亮着。", "在这里。", "收到。"):
+        if len(token + suffix) <= 12:
+            return token + suffix
+    return token
+
+
+def _maybe_build_contextual_memory_answer(
+    *,
+    request_id: str,
+    session_id: str,
+    person_id: str,
+    user_message: str,
+    render_target_lang: str,
+    load_continuity_turns: Callable[..., list[dict[str, str]]] | None = None,
+) -> str | None:
+    _ = person_id, render_target_lang
+    normalized = str(user_message or "").strip()
+    if not normalized:
+        return None
+    strict_answer = any(marker in normalized for marker in ("只回答", "只答", "本身"))
+    wants_transform = bool(_CONTEXTUAL_MEMORY_TRANSFORM_RE.search(normalized))
+    wants_recall = bool(_CONTEXTUAL_MEMORY_RECALL_RE.search(normalized))
+    if not wants_transform and not wants_recall:
+        return None
+    if wants_transform or not strict_answer:
+        return None
+    _load_turns = load_continuity_turns or _load_continuity_turns
+    turns = _load_turns(
+        request_id=request_id,
+        session_id=session_id,
+        person_id=person_id,
+        render_target_lang=render_target_lang,
+        fetch_limit=40,
+    )
+    value = _extract_contextual_memory_value(turns)
+    alias_target = _extract_contextual_alias_target(normalized, turns)
+    if alias_target:
+        value = alias_target
+    if not value:
+        return None
+    if wants_transform:
+        return _short_contextual_memory_sentence(value)
+    return value
+
+
+def _extract_contextual_style_preferences(turns: Sequence[Mapping[str, Any]]) -> list[str]:
+    joined = "\n".join(
+        str(dict(turn or {}).get("content") or "").strip()
+        for turn in list(turns or [])[-40:]
+        if str(dict(turn or {}).get("role") or "").strip().lower() == "user"
+    )
+    preferences: list[str] = []
+    candidates = (
+        ("偏青色", ("偏青色", "偏青", "青色")),
+        ("偏冷色", ("偏冷色", "冷色")),
+        ("少废话", ("少废话", "少废话", "简短", "别废话")),
+        ("保留一点温度", ("有一点温度", "带点温度", "温度")),
+        ("别太客服腔", ("客服腔", "像客服", "太客服")),
+    )
+    for label, markers in candidates:
+        if any(marker in joined for marker in markers) and label not in preferences:
+            preferences.append(label)
+    return preferences
+
+
+def _extract_contextual_report_preference(turns: Sequence[Mapping[str, Any]]) -> str:
+    joined = "\n".join(
+        str(dict(turn or {}).get("content") or "").strip()
+        for turn in list(turns or [])[-40:]
+        if str(dict(turn or {}).get("role") or "").strip().lower() == "user"
+    )
+    has_repro = "可复现" in joined or "复现" in joined
+    has_report = "报告" in joined
+    has_subjective = "主观" in joined or "体验备注" in joined or "体感" in joined
+    if has_repro and has_subjective:
+        return "可复现报告为主，同时保留一点主观体验备注。"
+    if has_repro and has_report:
+        return "更相信可复现报告，不只看体感。"
+    return ""
+
+
+def _contextual_session_summary_sentence(turns: Sequence[Mapping[str, Any]]) -> str:
+    preferences = _extract_contextual_style_preferences(turns)
+    style = "冷光余温，偏青色、有余温" if "偏青色" in preferences else "冷光余温，偏冷色、少废话、有温度"
+    anchor = _extract_contextual_memory_value(turns) or "橙灯码"
+    alias = "，小橙灯也指它" if any("小橙灯" in str(dict(turn or {}).get("content") or "") for turn in turns or []) else ""
+    report = _extract_contextual_report_preference(turns) or "可复现报告为主，保留主观体验备注。"
+    return f"表达风格：{style}；锚点：{anchor}{alias}；测试报告：{report}"
+
+
+def _maybe_build_contextual_session_answer(
+    *,
+    request_id: str,
+    session_id: str,
+    person_id: str,
+    user_message: str,
+    render_target_lang: str,
+    load_continuity_turns: Callable[..., list[dict[str, str]]] | None = None,
+) -> str | None:
+    _ = request_id, session_id, person_id, user_message, render_target_lang, load_continuity_turns
+    return None
+
+
+def _maybe_build_contextual_style_answer(
+    *,
+    request_id: str,
+    session_id: str,
+    person_id: str,
+    user_message: str,
+    render_target_lang: str,
+    load_continuity_turns: Callable[..., list[dict[str, str]]] | None = None,
+) -> str | None:
+    _ = request_id, session_id, person_id, user_message, render_target_lang, load_continuity_turns
+    return None
+
+
 
 def _maybe_build_recent_turn_answer(
     *,
@@ -1284,10 +1564,8 @@ def _maybe_build_recent_turn_answer(
     detect_recent_turn_query_role: Callable[[str], str | None] | None = None,
     load_continuity_turns: Callable[..., list[dict[str, str]]] | None = None,
 ) -> str | None:
-    # Normal chat replies must go through SurfaceMainChain or full chat model.
-    # Recent-turn direct rendering is retired because it could emit final text
-    # outside ReplyEnvelope validation/cache rules.
-    return None
+    if not _parse_bool_env("HOST_RECENT_TURN_DIRECT_ANSWER_ENABLED", default=True):
+        return None
     _detect_query_role = detect_recent_turn_query_role or _detect_recent_turn_query_role
     _load_turns = load_continuity_turns or _load_continuity_turns
     query_role = _detect_query_role(user_message)
@@ -1304,6 +1582,41 @@ def _maybe_build_recent_turn_answer(
 
     if not turns:
         return None
+    current_query = str(user_message or "").strip()
+    filtered_turns: list[dict[str, str]] = []
+    for turn in turns:
+        role = str(turn.get("role") or "").strip().lower()
+        content = str(turn.get("content") or "").strip()
+        if not role or not content:
+            continue
+        if role == "user" and content == current_query:
+            continue
+        filtered_turns.append({"role": role, "content": content})
+    turns = filtered_turns
+    if not turns:
+        if query_role == "both":
+            return "我这边还没拿到上一轮内容。"
+        return None
+    low_info_only_recent_turn = False
+    if query_role == "both":
+        semantic_turns: list[dict[str, str]] = []
+        for turn in turns:
+            role = str(turn.get("role") or "").strip().lower()
+            content = str(turn.get("content") or "").strip()
+            if role == "user" and (
+                _CONTINUATION_QUERY_RE.match(content)
+                or _GREETING_FASTPATH_RE.match(content)
+                or _PRESENCE_FASTPATH_RE.match(content)
+                or _ACK_FASTPATH_RE.match(content)
+            ):
+                continue
+            if role == "assistant" and content in {"接着来。", "在。", "我这里只看到文字。"}:
+                continue
+            semantic_turns.append(turn)
+        if semantic_turns:
+            turns = semantic_turns
+        else:
+            low_info_only_recent_turn = True
 
     def _finalize_recent_turn_text(candidate: str, *, fallback: str) -> str:
         normalized = str(candidate or "").strip()
@@ -1325,6 +1638,7 @@ def _maybe_build_recent_turn_answer(
         ),
         "",
     )
+    latest_user = _build_reply_preview(latest_user, limit=160)
     latest_assistant = next(
         (
             str(turn.get("content") or "").strip()
@@ -1334,13 +1648,24 @@ def _maybe_build_recent_turn_answer(
         ),
         "",
     )
+    latest_assistant = _build_reply_preview(latest_assistant, limit=220)
 
     templates = _load_runtime_texts_section(
         "recent_turn_answer",
         render_target_lang=render_target_lang,
     )
+    if query_role == "both" and low_info_only_recent_turn:
+        fallback = "刚才只是短接了一句，还没有新的实质内容。"
+        return _finalize_recent_turn_text(
+            _mapping_text(
+                templates,
+                "low_info_only_template",
+                default=fallback,
+            ),
+            fallback=fallback,
+        )
     if query_role == "user" and latest_user:
-        fallback = ""
+        fallback = f"你上一句说的是：「{latest_user}」。"
         return _finalize_recent_turn_text(
             _mapping_text(
                 templates,
@@ -1351,7 +1676,7 @@ def _maybe_build_recent_turn_answer(
             fallback=fallback,
         )
     if query_role == "assistant" and latest_assistant:
-        fallback = ""
+        fallback = f"我上一句回的是：「{latest_assistant}」。"
         return _finalize_recent_turn_text(
             _mapping_text(
                 templates,
@@ -1369,6 +1694,7 @@ def _maybe_build_recent_turn_answer(
                     templates,
                     "both_user_item_template",
                     latest_user=latest_user,
+                    default=f"你刚才说：「{latest_user}」",
                 )
             )
         if latest_assistant:
@@ -1377,6 +1703,7 @@ def _maybe_build_recent_turn_answer(
                     templates,
                     "both_assistant_item_template",
                     latest_assistant=latest_assistant,
+                    default=f"我回：「{latest_assistant}」",
                 )
             )
         if parts:
@@ -2136,6 +2463,9 @@ async def _cortex_orchestrator_sse_generator_impl(
     airlock_sanitize_output_fn: Callable[[str], str] | None = None,
     maybe_build_task_progress_fastpath_fn: Callable[..., str | None] | None = None,
     maybe_build_recent_turn_answer_fn: Callable[..., str | None] | None = None,
+    maybe_build_contextual_memory_answer_fn: Callable[..., str | None] | None = None,
+    maybe_build_contextual_style_answer_fn: Callable[..., str | None] | None = None,
+    maybe_build_contextual_session_answer_fn: Callable[..., str | None] | None = None,
     maybe_build_previous_meaning_answer_fn: Callable[..., str | None] | None = None,
     async_post_process_fn: Callable[..., Any] | None = None,
     resolve_retrieval_timeout_seconds_fn: Callable[[], float] | None = None,
@@ -2149,6 +2479,9 @@ async def _cortex_orchestrator_sse_generator_impl(
     _sanitize_output = airlock_sanitize_output_fn or _airlock_sanitize_output
     _task_progress_fastpath = maybe_build_task_progress_fastpath_fn or _maybe_build_task_progress_fastpath
     _recent_turn_answer = maybe_build_recent_turn_answer_fn or _maybe_build_recent_turn_answer
+    _contextual_memory_answer = maybe_build_contextual_memory_answer_fn or _maybe_build_contextual_memory_answer
+    _contextual_style_answer = maybe_build_contextual_style_answer_fn or _maybe_build_contextual_style_answer
+    _contextual_session_answer = maybe_build_contextual_session_answer_fn or _maybe_build_contextual_session_answer
     _previous_meaning_answer = maybe_build_previous_meaning_answer_fn or _maybe_build_previous_meaning_answer
     _post_process = async_post_process_fn or _async_post_process
     _resolve_timeout = resolve_retrieval_timeout_seconds_fn or _resolve_retrieval_timeout_seconds
@@ -2344,6 +2677,180 @@ async def _cortex_orchestrator_sse_generator_impl(
         )
         return
 
+    contextual_session_answer = _contextual_session_answer(
+        request_id=request_id,
+        session_id=session_id,
+        person_id=person_id,
+        user_message=sanitized_message,
+        render_target_lang=render_target_lang,
+    )
+    if contextual_session_answer:
+        narrative = _sanitize_output(str(contextual_session_answer).strip())
+        total_latency_ms = int(time.time() * 1000) - ts_ms
+        yield _emit_sse(
+            {
+                "phase": "COMMIT",
+                "done": True,
+                "decision": "APPROVE",
+                "narrative": narrative,
+                "request_id": request_id,
+                "audit_refs": {
+                    "request_id": request_id,
+                    "path": "cortex_orchestrator:contextual_session_direct",
+                    "latency_ms": total_latency_ms,
+                    "emotion_tag": str(emotion_context.get("emotion_tag") or "NEUTRAL"),
+                },
+            }
+        )
+        asyncio.create_task(
+            _post_process(
+                request_id=request_id,
+                person_id=person_id,
+                session_id=session_id,
+                user_message=sanitized_message,
+                narrative=narrative,
+                emotion_context=emotion_context,
+                bond_summary={},
+                ts_ms=ts_ms,
+                render_target_lang=render_target_lang,
+                total_latency_ms=total_latency_ms,
+                llm_latency_ms=0,
+                first_token_ms=None,
+                provider_name="",
+                model_id="",
+                buffer_stream=False,
+                delegated_agents=[],
+                retrieval_summary={"status": "SKIPPED", "reason_code": "CONTEXTUAL_SESSION_DIRECT"},
+                gov_decision=governor_result,
+                pii_ingress_stats=_pii_ingress_stats,
+                pii_egress_stats={},
+                trace_stage_meta={
+                    "cortex_orchestrator_used": True,
+                    "executive_router_used": False,
+                    "chat_agent_used": False,
+                    "cortex_orchestrator_mode": "contextual_session_direct",
+                    "reply_source": "contextual_session_direct",
+                },
+            )
+        )
+        return
+
+    contextual_style_answer = _contextual_style_answer(
+        request_id=request_id,
+        session_id=session_id,
+        person_id=person_id,
+        user_message=sanitized_message,
+        render_target_lang=render_target_lang,
+    )
+    if contextual_style_answer:
+        narrative = _sanitize_output(str(contextual_style_answer).strip())
+        total_latency_ms = int(time.time() * 1000) - ts_ms
+        yield _emit_sse(
+            {
+                "phase": "COMMIT",
+                "done": True,
+                "decision": "APPROVE",
+                "narrative": narrative,
+                "request_id": request_id,
+                "audit_refs": {
+                    "request_id": request_id,
+                    "path": "cortex_orchestrator:contextual_style_direct",
+                    "latency_ms": total_latency_ms,
+                    "emotion_tag": str(emotion_context.get("emotion_tag") or "NEUTRAL"),
+                },
+            }
+        )
+        asyncio.create_task(
+            _post_process(
+                request_id=request_id,
+                person_id=person_id,
+                session_id=session_id,
+                user_message=sanitized_message,
+                narrative=narrative,
+                emotion_context=emotion_context,
+                bond_summary={},
+                ts_ms=ts_ms,
+                render_target_lang=render_target_lang,
+                total_latency_ms=total_latency_ms,
+                llm_latency_ms=0,
+                first_token_ms=None,
+                provider_name="",
+                model_id="",
+                buffer_stream=False,
+                delegated_agents=[],
+                retrieval_summary={"status": "SKIPPED", "reason_code": "CONTEXTUAL_STYLE_DIRECT"},
+                gov_decision=governor_result,
+                pii_ingress_stats=_pii_ingress_stats,
+                pii_egress_stats={},
+                trace_stage_meta={
+                    "cortex_orchestrator_used": True,
+                    "executive_router_used": False,
+                    "chat_agent_used": False,
+                    "cortex_orchestrator_mode": "contextual_style_direct",
+                    "reply_source": "contextual_style_direct",
+                },
+            )
+        )
+        return
+
+    contextual_memory_answer = _contextual_memory_answer(
+        request_id=request_id,
+        session_id=session_id,
+        person_id=person_id,
+        user_message=sanitized_message,
+        render_target_lang=render_target_lang,
+    )
+    if contextual_memory_answer:
+        narrative = _sanitize_output(str(contextual_memory_answer).strip())
+        total_latency_ms = int(time.time() * 1000) - ts_ms
+        yield _emit_sse(
+            {
+                "phase": "COMMIT",
+                "done": True,
+                "decision": "APPROVE",
+                "narrative": narrative,
+                "request_id": request_id,
+                "audit_refs": {
+                    "request_id": request_id,
+                    "path": "cortex_orchestrator:contextual_memory_direct",
+                    "latency_ms": total_latency_ms,
+                    "emotion_tag": str(emotion_context.get("emotion_tag") or "NEUTRAL"),
+                },
+            }
+        )
+        asyncio.create_task(
+            _post_process(
+                request_id=request_id,
+                person_id=person_id,
+                session_id=session_id,
+                user_message=sanitized_message,
+                narrative=narrative,
+                emotion_context=emotion_context,
+                bond_summary={},
+                ts_ms=ts_ms,
+                render_target_lang=render_target_lang,
+                total_latency_ms=total_latency_ms,
+                llm_latency_ms=0,
+                first_token_ms=None,
+                provider_name="",
+                model_id="",
+                buffer_stream=False,
+                delegated_agents=[],
+                retrieval_summary={"status": "SKIPPED", "reason_code": "CONTEXTUAL_MEMORY_DIRECT"},
+                gov_decision=governor_result,
+                pii_ingress_stats=_pii_ingress_stats,
+                pii_egress_stats={},
+                trace_stage_meta={
+                    "cortex_orchestrator_used": True,
+                    "executive_router_used": False,
+                    "chat_agent_used": False,
+                    "cortex_orchestrator_mode": "contextual_memory_direct",
+                    "reply_source": "contextual_memory_direct",
+                },
+            )
+        )
+        return
+
     clarification_direct_answer = (
         _previous_meaning_answer(
             request_id=request_id,
@@ -2414,9 +2921,11 @@ async def _cortex_orchestrator_sse_generator_impl(
         or (intent_draft or {}).get("reason_code")
         or ""
     ).strip()
+    route_hint = str((intent_draft or {}).get("route") or "").strip().lower()
     relational_fastlane = False
     relational_topic = ""
     phatic_fastlane = False
+    direct_status_fastlane = route_hint in {"task_progress", "recent_turn"}
     multimodal_fastlane = False
     if has_multimodal_input:
         _multimodal_observations = dict(getattr(request_body, "multimodal_observations", None) or {})
@@ -2495,7 +3004,7 @@ async def _cortex_orchestrator_sse_generator_impl(
 
     prefetch_started_ms = int(time.time() * 1000)
     try:
-        if relational_fastlane:
+        if relational_fastlane or direct_status_fastlane:
             bond_summary, bond_evidence, retrieval_motive_state = await asyncio.wait_for(
                 _prefetch_persona_inputs(
                     request_id=request_id,
@@ -2546,6 +3055,11 @@ async def _cortex_orchestrator_sse_generator_impl(
             retrieval_summary = {
                 "status": "SKIPPED",
                 "reason_code": "MULTIMODAL_FASTLANE_RETRIEVAL_SKIPPED",
+            }
+        elif direct_status_fastlane:
+            retrieval_summary = {
+                "status": "SKIPPED",
+                "reason_code": f"{route_hint.upper()}_DIRECT_RETRIEVAL_SKIPPED",
             }
         else:
             retrieval_task = asyncio.create_task(
@@ -2744,6 +3258,11 @@ async def _async_post_process(
     motive_state: Mapping[str, Any] | None = None,
     reply_plan: Mapping[str, Any] | None = None,
     trace_stage_meta: Mapping[str, Any] | None = None,
+    attachments: list[dict[str, Any]] | None = None,
+    multimodal_observations: dict[str, Any] | None = None,
+    attachment_summary: str = "",
+    reply_channel: str | None = None,
+    reply_target: str | None = None,
 ) -> None:
     normalized_trace_stage_meta = _normalize_trace_stage_meta(trace_stage_meta)
     voice_outputs_enabled = bool(normalized_trace_stage_meta.get("voice_outputs_enabled"))
@@ -2864,6 +3383,44 @@ async def _async_post_process(
         _logger.debug("[%s] cortex_orchestrator post_process airlock classify failed: %s", request_id, exc)
 
     try:
+        if not suppress_final_reply:
+            from host_brain.app.observability_persist import persist_life_chat_episode  # noqa: PLC0415
+
+            life_user = user_message
+            life_narrative = narrative
+            with soft_fail("agent_runtime_shared.pii_scrub_life_memory_write", fallback=None):
+                from host_brain.airlock.pii_filter import _check_channel, pii_scrub_if_enabled  # noqa: PLC0415
+
+                if _check_channel("MEMORY"):
+                    life_user = pii_scrub_if_enabled(user_message, context="life_memory_write_user")
+                    life_narrative = pii_scrub_if_enabled(narrative, context="life_memory_write_ai")
+            life_memory_write = await _run_in_post_process_executor(
+                persist_life_chat_episode,
+                request_id=request_id,
+                intent_id=request_id,
+                person_id=person_id,
+                session_id=session_id,
+                user_message=life_user,
+                assistant_reply=life_narrative,
+                ts_ms=ts_ms,
+                attachments=list(attachments or []),
+                multimodal_observations=dict(multimodal_observations or {}),
+                attachment_summary=str(attachment_summary or "").strip(),
+                metadata={
+                    "trace_stage_meta": dict(normalized_trace_stage_meta or {}),
+                    "reply_source": str(normalized_trace_stage_meta.get("reply_source") or ""),
+                    "reply_channel": str(reply_channel or "").strip() or None,
+                    "reply_target": str(reply_target or "").strip() or None,
+                },
+            )
+            normalized_trace_stage_meta = {
+                **normalized_trace_stage_meta,
+                "life_memory_write": life_memory_write,
+            }
+    except Exception as exc:
+        _logger.debug("[%s] cortex_orchestrator post_process life memory failed: %s", request_id, exc)
+
+    try:
         from host_brain.app.dependencies import get_episodic_store  # noqa: PLC0415
 
         store = None if suppress_final_reply else get_episodic_store()
@@ -2908,6 +3465,15 @@ async def _async_post_process(
                     emotion_context=emotion_context,
                     ts_ms=ts_ms,
                     episodic_store=store,
+                    attachments=list(attachments or []),
+                    multimodal_observations=dict(multimodal_observations or {}),
+                    attachment_summary=str(attachment_summary or "").strip(),
+                    metadata={
+                        "trace_stage_meta": dict(normalized_trace_stage_meta or {}),
+                        "reply_source": str(normalized_trace_stage_meta.get("reply_source") or ""),
+                        "reply_channel": str(reply_channel or "").strip() or None,
+                        "reply_target": str(reply_target or "").strip() or None,
+                    },
                 )
     except Exception as exc:
         _logger.debug("[%s] cortex_orchestrator post_process episodic failed: %s", request_id, exc)
@@ -3139,6 +3705,9 @@ __all__ = [
     "_build_subagent_gateway_from_runtime",
     "_cortex_orchestrator_sse_generator_impl",
     "_maybe_build_task_progress_fastpath",
+    "_maybe_build_contextual_memory_answer",
+    "_maybe_build_contextual_session_answer",
+    "_maybe_build_contextual_style_answer",
     "_maybe_build_recent_turn_answer",
     "_maybe_build_previous_meaning_answer",
     "_should_buffer_stream_output",

@@ -3,6 +3,7 @@ from __future__ import annotations
 from host_brain.app.startup import (
     warmup_chat_llm_runtime_profiles,
     warmup_chat_runtime_basics,
+    warmup_codex_exec_intent_pool,
     warmup_retrieval_runtime_basics,
 )
 
@@ -96,6 +97,45 @@ def test_warmup_chat_llm_runtime_profiles_reports_ready(monkeypatch) -> None:
     assert "subagent=subagent::ready" in status
 
 
+def test_warmup_codex_exec_intent_pool_reports_ready(monkeypatch) -> None:
+    calls: dict[str, object] = {}
+
+    monkeypatch.setenv("HOST_STARTUP_CODEX_EXEC_INTENT_WARMUP_ENABLED", "true")
+    monkeypatch.setenv("HOST_CODEX_MODEL_ID", "gpt-test")
+    monkeypatch.setattr(
+        "host_brain.integrations.llm_helpers._codex_pool_migration_enabled",
+        lambda scene_type: scene_type == "EXEC_INTENT",
+    )
+    monkeypatch.setattr(
+        "host_brain.integrations.codex_cli_provider.resolve_codex_cli_model",
+        lambda model_id=None: str(model_id or "gpt-test"),
+    )
+
+    def _fake_invoke(**kwargs):
+        calls.update(kwargs)
+        return '{"route":"chat"}'
+
+    monkeypatch.setattr(
+        "host_brain.integrations.codex_cli_provider.invoke_codex_cli_text",
+        _fake_invoke,
+    )
+
+    status = warmup_codex_exec_intent_pool()
+
+    assert status.startswith("OK")
+    assert "model=gpt-test" in status
+    assert calls["feature_key"] == "pool:EXEC_INTENT:C"
+    assert calls["response_format"] == {"type": "json_object"}
+
+
+def test_warmup_codex_exec_intent_pool_skips_when_disabled(monkeypatch) -> None:
+    monkeypatch.setenv("HOST_STARTUP_CODEX_EXEC_INTENT_WARMUP_ENABLED", "false")
+
+    status = warmup_codex_exec_intent_pool()
+
+    assert status == "SKIPPED (disabled)"
+
+
 def test_warmup_retrieval_runtime_basics_reports_ready(monkeypatch) -> None:
     class _FakeChroma:
         default_collection = "episodic"
@@ -128,8 +168,9 @@ def test_warmup_retrieval_runtime_basics_reports_ready(monkeypatch) -> None:
     status = warmup_retrieval_runtime_basics()
 
     assert status.startswith("OK")
-    assert "embed_model=models/Qwen3-Embedding-0.6B" in status
+    assert "embed_model=hash-embed-v1" in status
     assert "embed_dim=3" in status
+    assert "warmup_mode=chroma_hash_probe" in status
     assert "collection=episodic" in status
     assert "collection_dim=3" in status
     assert "chroma_hits=1" in status

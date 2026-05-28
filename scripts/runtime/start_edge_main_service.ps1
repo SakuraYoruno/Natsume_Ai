@@ -223,7 +223,7 @@ function Invoke-SchtasksBreakaway {
   $sshSessionDetected = (-not [string]::IsNullOrWhiteSpace([string]$env:SSH_CONNECTION)) -or (-not [string]::IsNullOrWhiteSpace([string]$env:SSH_CLIENT))
   if ($sshSessionDetected) {
     try {
-      $commandLine = "cmd.exe /c $TaskCommand"
+      $commandLine = "cmd.exe /c start `"`" /min $TaskCommand"
       $createResult = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = $commandLine } -ErrorAction Stop
       if ($null -ne $createResult -and [int]$createResult.ReturnValue -eq 0) {
         return
@@ -469,7 +469,12 @@ $launcherLines = @(
 Set-Content -Path $launcherScript -Value $launcherLines -Encoding ascii
 
 $taskName = "NatsumeEdgeMainOnly_$([Guid]::NewGuid().ToString('N').Substring(0, 10))"
-$taskCommand = "`"$launcherScript`""
+$sshSessionDetected = (-not [string]::IsNullOrWhiteSpace([string]$env:SSH_CONNECTION)) -or (-not [string]::IsNullOrWhiteSpace([string]$env:SSH_CLIENT))
+$taskCommand = if ($sshSessionDetected) {
+  "powershell -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$runnerEscaped`" -RepoRoot `"$repoEscaped`" -EnvFile `"$envEscaped`" -PythonPath `"$pythonEscaped`" -BindHost `"$bindEscaped`" -Port $Port 1>> `"$stdoutEscaped`" 2>> `"$stderrEscaped`""
+} else {
+  "`"$launcherScript`""
+}
 Invoke-SchtasksBreakaway -TaskName $taskName -TaskCommand $taskCommand
 
 $ready = Wait-Http -Url $healthUrl -TimeoutSeconds $WaitSeconds

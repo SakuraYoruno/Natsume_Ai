@@ -393,6 +393,9 @@ class EvolutionDesireEngine:
                 event_hint=event_hint,
                 emotion_hint=emotion_hint,
             )
+            if not str(prompt or "").strip():
+                _logger.debug("LLM 意愿生成 prompt 为空，跳过模型调用并降级到模板库")
+                return ""
             result = llm_fn(prompt)
             if result and isinstance(result, str) and len(result.strip()) >= 8:
                 text = result.strip()

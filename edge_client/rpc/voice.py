@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+import re
 from dataclasses import dataclass
 from typing import Any
 
@@ -40,6 +42,15 @@ _TTS_LANGUAGE_ALIASES = {
     "ja-jp": "ja",
     "auto": "auto",
 }
+
+
+def _normalize_emotion_tag(value: Any) -> str:
+    normalized = str(value or "").strip().upper()
+    return re.sub(r"[^A-Z0-9_]+", "_", normalized).strip("_")
+
+
+def _default_speak_emotion_tag() -> str:
+    return _normalize_emotion_tag(os.environ.get("EDGE_TTS_DEFAULT_EMOTION_TAG")) or "NEUTRAL"
 
 
 @dataclass(frozen=True)
@@ -248,21 +259,42 @@ class VoiceRpcContract:
                 emotion_intensity = max(0.0, min(1.0, float(raw_intensity)))
             except (TypeError, ValueError):
                 pass
+        speed: float | None = None
+        if payload.get("speed") is not None:
+            try:
+                speed = max(0.45, min(1.25, float(payload.get("speed"))))
+            except (TypeError, ValueError):
+                speed = None
+        pitch: float | None = None
+        if payload.get("pitch") is not None:
+            try:
+                pitch = max(-2.0, min(2.0, float(payload.get("pitch"))))
+            except (TypeError, ValueError):
+                pitch = None
         event = {
+            "request_id": request_id,
             "session_id": session_id,
             "event_type": EVENT_SPEAK,
             "direction": DIRECTION_HOST_TO_EDGE,
             "seq": int(seq) if isinstance(seq, int) else None,
             "utterance_id": utterance_id,
             "text": text,
-            "emotion_tag": str(payload.get("emotion_tag") or "NEUTRAL").strip().upper() or "NEUTRAL",
+            "emotion_tag": _normalize_emotion_tag(payload.get("emotion_tag")) or _default_speak_emotion_tag(),
             "interruptible": bool(payload.get("interruptible", True)),
             "voice_profile": str(payload.get("voice_profile") or "default"),
             "lang_hint": lang_hint,
             "ts_ms": now_value,
         }
+        if str(payload.get("export_audio") or "").strip().lower() in {"1", "true", "yes", "on"}:
+            event["export_audio"] = True
         if emotion_intensity is not None:
             event["emotion_intensity"] = emotion_intensity
+        if speed is not None:
+            event["speed"] = speed
+        if pitch is not None:
+            event["pitch"] = pitch
+        if payload.get("style_note"):
+            event["style_note"] = str(payload.get("style_note") or "").strip()
         return self._accept(
             request_id=request_id,
             session_id=session_id,

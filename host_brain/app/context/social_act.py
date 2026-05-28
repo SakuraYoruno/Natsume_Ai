@@ -22,6 +22,17 @@ _GOOD_NIGHT_RE = re.compile(r"^(?:我要睡了|我睡了|睡了|先睡了|去睡
 _MISS_YOU_RE = re.compile(r"(有点想你|想你了|想你)")
 _IDENTITY_RE = re.compile(r"^(?:你是|你谁|你是谁|你叫什么)[?？!！。…~\s]*$")
 _PRESENCE_RE = re.compile(r"^(?:在吗|在不在|还在吗|忙吗|在嘛|有人吗)[?？!！。…~\s]*$")
+_AUDITORY_CHECK_RE = re.compile(
+    r"^(?:"
+    r"(?:你)?(?:能不能|能|可以|可不可以|有没有)?(?:听到|听见|听得到|听得见|听清|听清楚)"
+    r"(?:我|我说话|我讲话|声音)?(?:吗|么)?"
+    r"|(?:我)?(?:说话|讲话|发声|声音)(?:你)?(?:能不能|能|可以|可不可以)?"
+    r"(?:听到|听见|听得到|听得见|听清|听清楚)(?:吗|么)?"
+    r"|(?:有|有没有)(?:听到|听见)?声音(?:吗|么)?"
+    r"|(?:刚才|刚刚)?(?:我)?(?:说了|说话|讲话)(?:什么)?(?:你)?(?:听到|听见|听得到|听得见)(?:吗|么)?"
+    r")[?？!！。…~\s]*$",
+    re.IGNORECASE,
+)
 _GREETING_RE = re.compile(r"^(?:你好|您好|嗨|哈喽|hello|hi|hey|早|早安|早上好|中午好|晚上好|晚安)[!！。…~\s]*$", re.IGNORECASE)
 _WAIT_RE = re.compile(r"^(?:等我一下|等我下|等下|等会|稍等|我离开一下|我一会回来|一会回来)[?？!！。…~\s]*$")
 _BACK_RE = re.compile(r"^(?:我回来了|回来了|我回来啦|回来啦|我回来了啊)[?？!！。…~\s]*$")
@@ -88,6 +99,18 @@ def _presence_act() -> SocialAct:
         avoid=("问有什么事", "问怎么了", "用问号收尾", "客服上线", "怨妇式等待"),
         zh_directive="回应在场就够了，别问需求，别用问句收尾；像熟人顺手接话。",
         ja_directive="いることを短く返す。用件確認や疑問形ではなく、軽く返す感じ。",
+    )
+
+
+def _auditory_check_act() -> SocialAct:
+    return SocialAct(
+        act_kind="auditory_check_grounded",
+        scene="auditory_check",
+        stance="grounded_light_confused",
+        should_do=("基于输入证据回应", "没有语音证据时说明只看到文字", "短而自然"),
+        avoid=("直接说听得到", "只回在呢", "假装听见声音", "客服式链路说明"),
+        zh_directive="如果当前只有文字而没有语音证据，问听得到吗时要像真实没听到声音那样轻轻困惑：没听见声音，只看到这条文字；不要只说在呢，不要假装听到。",
+        ja_directive="文字だけで聞こえるか聞かれた時は、音は聞こえていないことを短く自然に返す。聞こえたふりをしない。",
     )
 
 
@@ -456,6 +479,8 @@ def resolve_social_act(
         return _apology_act()
     if _MISS_YOU_RE.search(text):
         return _miss_you_act()
+    if literal_topic == "auditory_check" or _AUDITORY_CHECK_RE.match(text):
+        return _auditory_check_act()
     if literal_topic == "presence_ping" or _PRESENCE_RE.match(text):
         return _presence_act()
     if literal_topic == "greeting" or _GREETING_RE.match(text):

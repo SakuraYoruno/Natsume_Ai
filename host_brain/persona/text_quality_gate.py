@@ -280,7 +280,8 @@ _FORBIDDEN_TEXT_PATTERNS: tuple[str, ...] = (
     "有什么打算",
     "打算没",
     "精神不错",
-    "突然夸",
+    "我先收一下",
+    "不硬猜",
     "还困",
     "困着",
     "能睡",
@@ -737,6 +738,14 @@ _FORBIDDEN_TEXT_REGEXES: tuple[tuple[str, re.Pattern[str]], ...] = (
     (
         "light_touch_active_misread",
         re.compile(r"(早|早呀|早啊|早安|hello|你好).{0,24}(主动|突然|有空|报到|打招呼)|(?:这会儿|今天).{0,12}(主动|报到)")
+    ),
+    (
+        "staged_praise_reaction",
+        re.compile(
+            r"(?=.*(?:突然夸我干嘛|夸我干嘛|老哥你这话))"
+            r"(?=.*(?:怪让人不好意思|只许说一次|只准说一次|就收下啦|收下啦))",
+            re.DOTALL,
+        ),
     ),
     (
         "fabricated_attention_debt",

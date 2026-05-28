@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from host_brain.codex_runtime.work_order import CodexWorkOrder
@@ -63,6 +64,36 @@ def build_codex_prompt(work_order: CodexWorkOrder, *, workspace: Path) -> str:
                 "Production result contract:\n"
                 + ("Allowed sections: " + ", ".join(allowed_sections) + "\n" if allowed_sections else "")
                 + ("Forbidden sections: " + ", ".join(forbidden_sections) if forbidden_sections else "")
+            )
+        for title, key in (
+            ("Source policy", "source_policy"),
+            ("Account policy", "account_policy"),
+            ("Purchase policy", "purchase_policy"),
+            ("Artifact contract", "artifact_contract"),
+        ):
+            values = [str(item) for item in list(input_pack.get(key) or []) if str(item).strip()]
+            if values:
+                parts.append(title + ":\n" + "\n".join(f"- {item}" for item in values))
+        if input_pack.get("purchase_requested"):
+            parts.append(
+                "Purchase gate: account points/coins may be spent only when approval_policy.confirmed=true. "
+                "If confirmation is missing, produce a purchase_plan and stop before purchase/unlock controls."
+            )
+        workflow_keys = (
+            "output_kind",
+            "site_adapter",
+            "urls",
+            "browser_profile",
+            "cadence",
+            "driver_kind",
+            "workflow_owner",
+            "account_action_kind",
+        )
+        workflow_input = {key: input_pack.get(key) for key in workflow_keys if input_pack.get(key) not in (None, "", [], {})}
+        if workflow_input:
+            parts.append(
+                "Production workflow input:\n"
+                + json.dumps(workflow_input, ensure_ascii=False, indent=2, sort_keys=True)
             )
     if work_order.acceptance_criteria:
         parts.append("Acceptance criteria:\n" + "\n".join(f"- {item}" for item in work_order.acceptance_criteria))

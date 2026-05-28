@@ -175,6 +175,51 @@ class TestEdgeRpcGatewayContract(unittest.TestCase):
         self.assertTrue(body["event"]["degraded"])
         runtime.vts_driver.trigger_reconnect.assert_called_once()
 
+    def test_t_edge_rpc_02_vts_body_action_does_not_require_speech(self) -> None:
+        client = self._build_client()
+        runtime = client.app.state.edge_runtime
+        runtime.voice_pipeline.perform_body_action = MagicMock(return_value={
+            "success": True,
+            "state": "finished",
+            "detail": "body action wave finished",
+            "action_id": "wave",
+            "emotion_tag": "PLAYFUL",
+            "speech_required": False,
+            "frames_sent": 12,
+            "error_count": 0,
+        })
+
+        payload = _build_signed_envelope(
+            {
+                "request_id": "req-edge-vts-body-action-001",
+                "ts_ms": 1_800_101_000_000,
+                "nonce": "nonce-edge-vts-body-action-001",
+                "payload": {
+                    "action": "body_action",
+                    "action_id": "wave",
+                    "emotion_tag": "PLAYFUL",
+                    "emotion_intensity": 0.8,
+                    "duration_s": 1.2,
+                },
+            },
+            shared_key="edge-shared-key",
+        )
+
+        response = client.post("/v1/edge/vts", json=payload)
+        self.assertEqual(200, response.status_code)
+        body = response.json()
+
+        self.assertTrue(body["success"])
+        self.assertEqual("ACCEPTED", body["status"])
+        self.assertFalse(body["event"]["speech_required"])
+        self.assertEqual("wave", body["event"]["action_id"])
+        runtime.voice_pipeline.perform_body_action.assert_called_once_with(
+            action_id="wave",
+            emotion_tag="PLAYFUL",
+            intensity=0.8,
+            duration_s=1.2,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

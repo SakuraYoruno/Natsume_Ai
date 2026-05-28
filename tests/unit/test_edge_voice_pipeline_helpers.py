@@ -15,7 +15,12 @@ from edge_client.actuators.speech import (
 from edge_client.actuators.vts_driver import VtsDriverResult, VtsState
 from edge_client.rpc.event_reporter import BatchReportResult, EdgeEventReporter
 from edge_client.rpc.voice import EVENT_ASR_CHUNK, STATUS_ACCEPTED, VoiceRpcContract, VoiceRpcResult
-from edge_client.runtime.voice_pipeline import EdgeVoicePipeline
+from edge_client.runtime.voice_pipeline import (
+    EdgeVoicePipeline,
+    _body_action_config,
+    _life_motion_config,
+    _speech_motion_config,
+)
 from host_brain.core.errors import VOICE_PLAYBACK_FAILED
 
 
@@ -35,6 +40,8 @@ class _MockVtsDriver:
         self.expression_calls: list[tuple[str, float]] = []
         self.hotkey_calls: list[str] = []
         self.talk_start_calls = 0
+        self.reset_calls = 0
+        self.fail_talk_start = False
         self.connect_result = VtsDriverResult(
             success=True,
             reason_code=None,
@@ -43,13 +50,25 @@ class _MockVtsDriver:
         )
         self._mouth_parameter_plan = {"selected": ["ParamMouthOpenY"]}
         self.mouth_values: list[float] = []
+        self.mouth_include_companion_flags: list[bool] = []
+        self.mouth_batch_companion_flags: list[bool] = []
+        self.mouth_motion_values: list[dict[str, float]] = []
+        self.model_move_calls: list[dict[str, float | bool]] = []
         self.fail_probe = False
 
     def connect(self) -> VtsDriverResult:
         return self.connect_result
 
     def reset_to_neutral(self) -> VtsDriverResult:
-        return VtsDriverResult(success=True, reason_code=None, detail="reset", action="RESET")
+        self.reset_calls += 1
+        return VtsDriverResult(
+            success=True,
+            reason_code=None,
+            detail="reset",
+            action="RESET",
+            expression_id="reset_all",
+            emotion_tag="NEUTRAL",
+        )
 
     def transition_expression(
         self,
@@ -85,6 +104,13 @@ class _MockVtsDriver:
 
     def talk_start(self) -> VtsDriverResult:
         self.talk_start_calls += 1
+        if self.fail_talk_start:
+            return VtsDriverResult(
+                success=False,
+                reason_code="VTS_API_ERROR",
+                detail="talk start failed",
+                action="TALK_START",
+            )
         return VtsDriverResult(success=True, reason_code=None, detail="talk_start", action="TALK_START")
 
     def health(self) -> dict[str, object]:
@@ -96,9 +122,14 @@ class _MockVtsDriver:
         *,
         _retry_on_reconnect: bool = True,
         _include_companions: bool = True,
+        _batch_companions: bool = False,
+        _motion_values: dict[str, float] | None = None,
     ) -> VtsDriverResult:
-        _ = (_retry_on_reconnect, _include_companions)
+        _ = _retry_on_reconnect
         self.mouth_values.append(float(value))
+        self.mouth_include_companion_flags.append(bool(_include_companions))
+        self.mouth_batch_companion_flags.append(bool(_batch_companions))
+        self.mouth_motion_values.append(dict(_motion_values or {}))
         if self.fail_probe and len(self.mouth_values) == 1:
             return VtsDriverResult(
                 success=False,
@@ -111,6 +142,35 @@ class _MockVtsDriver:
             reason_code=None,
             detail="mouth level set",
             action="SET_MOUTH_OPEN_LEVEL",
+        )
+
+    def move_model(
+        self,
+        *,
+        position_x: float = 0.0,
+        position_y: float = 0.0,
+        rotation: float = 0.0,
+        size: float = 1.0,
+        relative: bool = True,
+        move_time_s: float = 0.12,
+        _retry_on_reconnect: bool = True,
+    ) -> VtsDriverResult:
+        _ = _retry_on_reconnect
+        self.model_move_calls.append(
+            {
+                "position_x": float(position_x),
+                "position_y": float(position_y),
+                "rotation": float(rotation),
+                "size": float(size),
+                "relative": bool(relative),
+                "move_time_s": float(move_time_s),
+            }
+        )
+        return VtsDriverResult(
+            success=True,
+            reason_code=None,
+            detail="model moved",
+            action="MOVE_MODEL",
         )
 
 
@@ -394,6 +454,29 @@ class TestEdgeVoicePipelineHelpers(unittest.TestCase):
         self.assertEqual(("JOY", 0.5), healthy_vts.expression_calls[0])
         self.assertEqual("missing_synth_event", debug["reason"])
 
+    def test_start_vts_for_payload_can_disable_voice_expression_hotkeys(self) -> None:
+        healthy_vts = _MockVtsDriver()
+        pipeline = self._build_pipeline(vts_driver=healthy_vts)
+
+        with patch.dict("os.environ", {"EDGE_VTS_VOICE_EXPRESSION_ENABLED": "false"}):
+            expression_result, talk_result, debug = pipeline._start_vts_for_payload(
+                {
+                    "emotion_tag": "happy",
+                    "emotion_intensity": 0.8,
+                    "sub_emotion": "playful",
+                },
+                synth_event={},
+            )
+
+        self.assertTrue(expression_result.success)
+        self.assertIn("voice expression disabled", expression_result.detail)
+        self.assertEqual("HAPPY", expression_result.emotion_tag)
+        self.assertTrue(talk_result.success)
+        self.assertEqual(0, healthy_vts.reset_calls)
+        self.assertEqual([], healthy_vts.expression_calls)
+        self.assertEqual([], healthy_vts.hotkey_calls)
+        self.assertEqual("missing_synth_event", debug["reason"])
+
     def test_start_vts_for_payload_without_driver_and_with_audio_path(self) -> None:
         no_vts_pipeline = self._build_pipeline(vts_driver=None)
         expression_result, talk_result, debug = no_vts_pipeline._start_vts_for_payload(
@@ -419,6 +502,28 @@ class TestEdgeVoicePipelineHelpers(unittest.TestCase):
         self.assertTrue(expression_result.success)
         self.assertTrue(talk_result.success)
         self.assertEqual("running", debug["state"])
+        mouth_sync_mock.assert_called_once()
+
+    def test_start_vts_for_payload_still_syncs_mouth_when_talk_gate_fails(self) -> None:
+        healthy_vts = _MockVtsDriver()
+        healthy_vts.fail_talk_start = True
+        pipeline = self._build_pipeline(vts_driver=healthy_vts)
+
+        with patch.object(
+            pipeline,
+            "_start_mouth_sync",
+            return_value={"state": "running", "started": True},
+        ) as mouth_sync_mock:
+            expression_result, talk_result, debug = pipeline._start_vts_for_payload(
+                {"emotion_tag": "happy", "emotion_intensity": 0.8},
+                synth_event={"audio_data": [0.1, 0.4], "sample_rate": 24000},
+            )
+
+        self.assertTrue(expression_result.success)
+        self.assertFalse(talk_result.success)
+        self.assertEqual("running", debug["state"])
+        self.assertFalse(debug["talk_gate_success"])
+        self.assertEqual("talk start failed", debug["talk_gate_detail"])
         mouth_sync_mock.assert_called_once()
 
     def test_synth_event_has_audio_variants(self) -> None:
@@ -472,13 +577,35 @@ class TestEdgeVoicePipelineHelpers(unittest.TestCase):
         self.assertEqual("finished", debug["state"])
         self.assertEqual("finished", pipeline._mouth_sync_debug["state"])
         self.assertEqual(5, len(success_vts.mouth_values))
+        self.assertEqual(0, pipeline._mouth_sync_debug["error_count"])
+        self.assertEqual(
+            [True, True, True, True, True],
+            success_vts.mouth_include_companion_flags,
+        )
+        self.assertEqual(
+            [True, True, True, True, True],
+            success_vts.mouth_batch_companion_flags,
+        )
+        self.assertTrue(debug["per_frame_companions"])
+        self.assertTrue(debug["per_frame_batch"])
+        self.assertTrue(debug["motion_enabled"])
+        self.assertGreater(pipeline._mouth_sync_debug["motion_parameter_count"], 20)
+        self.assertEqual(2, pipeline._mouth_sync_debug["motion_frames_sent"])
+        self.assertIn("FaceAngleY", success_vts.mouth_motion_values[2])
+        self.assertIn("FaceAngleY", success_vts.mouth_motion_values[3])
+        self.assertIn("MocopiBodyAngleY", success_vts.mouth_motion_values[2])
+        self.assertIn("HandRightPositionY", success_vts.mouth_motion_values[2])
+        self.assertIn("MocopiUpperArmRightAngleZ", success_vts.mouth_motion_values[2])
+        self.assertIn("HandDistance", success_vts.mouth_motion_values[2])
 
         alive_thread = _AliveThread()
         pipeline._mouth_sync_thread = alive_thread
         pipeline._mouth_sync_debug = {"state": "running"}
-        pipeline._stop_mouth_sync()
+        stopped = pipeline._stop_mouth_sync()
         self.assertTrue(alive_thread.join_called)
-        self.assertEqual("stopped", pipeline._mouth_sync_debug["state"])
+        self.assertFalse(stopped)
+        self.assertEqual("stopping", pipeline._mouth_sync_debug["state"])
+        self.assertTrue(pipeline._mouth_sync_debug["stop_timed_out"])
 
     def test_report_asr_rpc_result_ignores_non_asr_event(self) -> None:
         pipeline = self._build_pipeline()
@@ -506,6 +633,237 @@ class TestEdgeVoicePipelineHelpers(unittest.TestCase):
         self.assertEqual(3, len(envelope))
         self.assertTrue(all(0.0 <= value <= 1.0 for value in envelope))
         self.assertGreater(envelope[-1], envelope[0])
+
+        with patch.dict(
+            "os.environ",
+            {
+                "EDGE_VTS_MOUTH_SYNC_FPS": "24",
+                "EDGE_VTS_MOUTH_SYNC_GAIN": "1.0",
+                "EDGE_VTS_MOUTH_SYNC_MIN_OPEN": "0.3",
+                "EDGE_VTS_MOUTH_SYNC_SILENCE_THRESHOLD": "0.05",
+                "EDGE_VTS_MOUTH_SYNC_ATTACK": "1.0",
+                "EDGE_VTS_MOUTH_SYNC_RELEASE": "1.0",
+            },
+        ):
+            tuned = EdgeVoicePipeline._build_mouth_envelope([0.0, 0.1, 1.0], 24)
+        self.assertEqual([0.0, 0.3, 1.0], tuned)
+
+    def test_speech_motion_values_can_reset_and_move(self) -> None:
+        moving = EdgeVoicePipeline._speech_motion_values(
+            frame_index=12,
+            mouth_value=0.8,
+            fps=24.0,
+            config={
+                "enabled": True,
+                "gain": 1.0,
+                "nod_degrees": 2.0,
+                "sway_degrees": 2.0,
+                "tilt_degrees": 1.0,
+                "position_x": 0.02,
+                "position_y": 0.02,
+                "position_z": 0.01,
+                "full_body_enabled": True,
+                "mocopi_enabled": True,
+                "hand_enabled": True,
+                "arm_enabled": True,
+                "action_script_enabled": True,
+                "body_degrees": 6.0,
+                "body_position": 0.06,
+                "hand_position": 0.5,
+                "hand_angle_degrees": 12.0,
+                "arm_angle_degrees": 18.0,
+                "action_complexity": 1.2,
+                "gesture_gain": 1.0,
+                "beat_gain": 1.0,
+                "energy": 1.2,
+                "tempo": 1.1,
+                "frame_count": 48,
+            },
+        )
+        self.assertIn("FaceAngleX", moving)
+        self.assertNotEqual(0.0, moving["FaceAngleY"])
+        self.assertIn("FacePositionX", moving)
+        self.assertIn("FacePositionZ", moving)
+        self.assertIn("MocopiBodyAngleY", moving)
+        self.assertIn("HandRightPositionY", moving)
+        self.assertIn("MocopiUpperArmRightAngleZ", moving)
+        self.assertIn("HandDistance", moving)
+        reset = EdgeVoicePipeline._speech_motion_values(
+            frame_index=12,
+            mouth_value=0.8,
+            fps=24.0,
+            config={"enabled": False, "full_body_enabled": True, "hand_enabled": True},
+        )
+        self.assertIn("MocopiLowerArmRightAngleZ", reset)
+        self.assertIn("HandDistance", reset)
+        self.assertTrue(all(value == 0.0 for value in reset.values()))
+
+    def test_speech_motion_config_uses_emotion_energy(self) -> None:
+        happy = _speech_motion_config({"emotion_tag": "HAPPY", "emotion_intensity": 1.0})
+        sad = _speech_motion_config({"emotion_tag": "SAD", "emotion_intensity": 1.0})
+
+        self.assertGreater(float(happy["energy"]), float(sad["energy"]))
+        self.assertGreater(float(happy["tempo"]), float(sad["tempo"]))
+        self.assertTrue(happy["full_body_enabled"])
+
+    def test_face_capture_priority_disables_scripted_motion_overlays(self) -> None:
+        with patch.dict(
+            "os.environ",
+            {
+                "EDGE_VTS_FACE_CAPTURE_PRIORITY": "true",
+                "EDGE_VTS_SPEECH_MOTION_ENABLED": "true",
+                "EDGE_VTS_LIFE_MOTION_ENABLED": "true",
+            },
+        ):
+            speech = _speech_motion_config({"emotion_tag": "HAPPY", "emotion_intensity": 1.0})
+            life = _life_motion_config()
+
+        self.assertTrue(speech["face_capture_priority"])
+        self.assertFalse(speech["enabled"])
+        self.assertTrue(life["face_capture_priority"])
+        self.assertFalse(life["enabled"])
+
+    def test_mouth_sync_skips_motion_values_when_face_capture_has_priority(self) -> None:
+        vts = _MockVtsDriver()
+        pipeline = self._build_pipeline(vts_driver=vts)
+
+        with patch.dict("os.environ", {"EDGE_VTS_FACE_CAPTURE_PRIORITY": "true"}):
+            with patch.object(pipeline, "_build_mouth_envelope", return_value=[0.2, 0.4]):
+                with patch("edge_client.runtime.voice_pipeline.time.sleep", return_value=None):
+                    with patch(
+                        "edge_client.runtime.voice_pipeline.threading.Thread",
+                        side_effect=lambda **kwargs: _ImmediateThread(**kwargs),
+                    ):
+                        debug = pipeline._start_mouth_sync(
+                            {"audio_data": [0.1], "sample_rate": 24000}
+                        )
+
+        self.assertTrue(debug["started"])
+        self.assertFalse(debug["motion_enabled"])
+        self.assertEqual(0, debug["motion_parameter_count"])
+        self.assertEqual(0, pipeline._mouth_sync_debug["motion_frames_sent"])
+        self.assertTrue(all(not item for item in vts.mouth_motion_values))
+
+    def test_life_motion_values_use_bound_face_parameters_by_default(self) -> None:
+        config = _life_motion_config()
+        values, phase = EdgeVoicePipeline._life_motion_values(
+            frame_index=8,
+            elapsed_s=6.0,
+            config=config,
+            emotion_tag="PLAYFUL",
+        )
+
+        self.assertTrue(phase)
+        self.assertIn("FaceAngleY", values)
+        self.assertIn("MouthSmile", values)
+        self.assertNotIn("MocopiBodyAngleY", values)
+        self.assertNotIn("HandRightPositionY", values)
+        self.assertGreater(abs(float(values["FaceAngleY"])), 1.0)
+
+    def test_body_action_values_use_bound_face_parameters_by_default(self) -> None:
+        config = _body_action_config(
+            {"action_id": "wave", "emotion_tag": "PLAYFUL", "emotion_intensity": 0.9, "duration_s": 1.0}
+        )
+        values, phase = EdgeVoicePipeline._body_action_values(
+            action_id="wave",
+            frame_index=6,
+            progress=0.5,
+            elapsed_s=0.5,
+            config=config,
+            emotion_tag="PLAYFUL",
+        )
+
+        self.assertTrue(phase)
+        self.assertIn("FaceAngleY", values)
+        self.assertNotIn("MocopiBodyAngleY", values)
+        self.assertNotIn("MocopiUpperArmRightAngleY", values)
+        self.assertNotIn("HandRightPositionY", values)
+        self.assertIn("MouthSmile", values)
+
+    def test_perform_body_action_does_not_require_speech(self) -> None:
+        vts = _MockVtsDriver()
+        pipeline = self._build_pipeline(vts_driver=vts)
+
+        with patch.dict(
+            "os.environ",
+            {
+                "EDGE_VTS_BODY_ACTION_FPS": "4",
+                "EDGE_VTS_BODY_ACTION_GAIN": "0.8",
+                "EDGE_VTS_BODY_ACTION_MODEL_MOVE_ENABLED": "false",
+            },
+        ):
+            result = pipeline.perform_body_action(
+                action_id="wave",
+                emotion_tag="PLAYFUL",
+                intensity=0.8,
+                duration_s=1.0,
+            )
+
+        self.assertTrue(result["success"])
+        self.assertFalse(result["speech_required"])
+        self.assertEqual("wave", result["action_id"])
+        self.assertEqual(0, vts.talk_start_calls)
+        self.assertGreaterEqual(len(vts.mouth_values), 2)
+        self.assertTrue(all(value == 0.0 for value in vts.mouth_values))
+        self.assertTrue(all(vts.mouth_batch_companion_flags))
+        self.assertTrue(any("FaceAngleY" in item for item in vts.mouth_motion_values))
+        self.assertTrue(any("MouthSmile" in item for item in vts.mouth_motion_values))
+        self.assertEqual([], vts.model_move_calls)
+        health = pipeline.health()
+        self.assertFalse(health["body_action_active"])
+        self.assertEqual("wave", health["last_body_action"]["action_id"])
+        self.assertEqual(0, health["last_body_action"]["model_move_frames_sent"])
+
+    def test_perform_body_action_rejects_unknown_action(self) -> None:
+        vts = _MockVtsDriver()
+        pipeline = self._build_pipeline(vts_driver=vts)
+
+        result = pipeline.perform_body_action(action_id="dance_forever")
+
+        self.assertFalse(result["success"])
+        self.assertEqual("unknown_action_id", result["reason"])
+        self.assertEqual([], vts.mouth_values)
+
+    def test_model_move_helpers_generate_visible_offsets(self) -> None:
+        life = EdgeVoicePipeline._life_model_move(
+            elapsed_s=2.0,
+            config={
+                "gain": 1.0,
+                "model_move_position": 0.06,
+                "model_move_rotation": 3.0,
+            },
+            emotion_tag="PLAYFUL",
+        )
+        action = EdgeVoicePipeline._body_action_model_move(
+            action_id="look_around",
+            progress=0.3,
+            elapsed_s=0.6,
+            config={
+                "gain": 1.0,
+                "model_move_position": 0.16,
+                "model_move_rotation": 8.0,
+            },
+        )
+
+        self.assertNotEqual(0.0, life["x"])
+        self.assertNotEqual(0.0, life["rotation"])
+        self.assertNotEqual(0.0, action["x"])
+        self.assertNotEqual(0.0, action["rotation"])
+
+    def test_life_motion_start_stop_and_health(self) -> None:
+        vts = _MockVtsDriver()
+        pipeline = self._build_pipeline(vts_driver=vts)
+
+        with patch.dict("os.environ", {"EDGE_VTS_LIFE_MOTION_FPS": "12"}):
+            started = pipeline.start_life_motion()
+            health = pipeline.health()
+            stopped = pipeline.stop_life_motion()
+
+        self.assertTrue(started["started"])
+        self.assertTrue(health["life_motion_thread_alive"])
+        self.assertIn(health["life_motion"]["state"], {"running", "starting", "waiting_for_vts"})
+        self.assertEqual("stopped", stopped["state"])
+        self.assertFalse(pipeline.health()["life_motion_thread_alive"])
 
     def test_coerce_audio_samples_covers_numpy_and_fallback_paths(self) -> None:
         class _FakeArray:

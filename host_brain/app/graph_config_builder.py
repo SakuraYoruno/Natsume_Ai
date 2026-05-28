@@ -45,6 +45,7 @@ from host_brain.app.provider_factory import (
     resolve_host_llm_model_id,
 )
 from host_brain.app.model_router import resolve_gemini_model_route
+from host_brain.integrations.codex_cli_provider import codex_cli_lm_available, resolve_codex_cli_model
 
 CHAT_GRAPH_NODE_ORDER: list[str] = [
     CHAT_DIRECT_NODE_ID,
@@ -60,6 +61,7 @@ CHAT_GRAPH_NODE_ORDER: list[str] = [
 ]
 CHAT_INTENT_SOURCE_NODE_ID = "core_reasoner_primary"
 SCENE_TYPE_AUTO = "AUTO"
+_GRAPH_CODEX_MIGRATION_DEFAULT_EXCLUDED_SCENES = frozenset({SCENE_CHAT, SCENE_VISION_UI})
 
 # M-MA1：Supervisor 分派节点常量
 SUPERVISOR_DISPATCH_NODE_ID = "supervisor_dispatch"
@@ -188,6 +190,51 @@ def _parse_csv_tokens(value: Any) -> set[str]:
     return tokens
 
 
+def _graph_codex_migration_enabled(*, scene_type: str, execution_profile: str) -> bool:
+    if not _parse_bool(os.environ.get("HOST_GRAPH_CODEX_MIGRATION_ENABLED"), default=False):
+        return False
+    if str(execution_profile or "").strip() == PROFILE_CHAT_FAST:
+        return False
+    normalized_scene = str(scene_type or "").strip().upper()
+    excluded = {
+        str(item or "").strip().upper()
+        for item in _parse_csv_tokens(
+            os.environ.get("HOST_GRAPH_CODEX_MIGRATION_EXCLUDED_SCENES")
+            or ",".join(sorted(_GRAPH_CODEX_MIGRATION_DEFAULT_EXCLUDED_SCENES))
+        )
+        if str(item or "").strip()
+    }
+    if normalized_scene in excluded:
+        return False
+    included = {
+        str(item or "").strip().upper()
+        for item in _parse_csv_tokens(os.environ.get("HOST_GRAPH_CODEX_MIGRATION_INCLUDED_SCENES"))
+        if str(item or "").strip()
+    }
+    if included and normalized_scene not in included:
+        return False
+    return codex_cli_lm_available()
+
+
+def _chat_agent_codex_experiment_enabled(*, scene_type: str, execution_profile: str) -> bool:
+    if str(scene_type or "").strip().upper() != SCENE_CHAT:
+        return False
+    if str(execution_profile or "").strip() != PROFILE_CHAT_FAST:
+        return False
+    if not _parse_bool(os.environ.get("HOST_CHAT_AGENT_CODEX_EXPERIMENT_ENABLED"), default=False):
+        return False
+    return codex_cli_lm_available()
+
+
+def _resolve_chat_agent_codex_model_id() -> str:
+    return resolve_codex_cli_model(
+        os.environ.get("HOST_CHAT_AGENT_CODEX_MODEL_ID")
+        or os.environ.get("HOST_CHAT_AGENT_SPARK_MODEL_ID")
+        or os.environ.get("HOST_CODEX_CHAT_MODEL_ID")
+        or os.environ.get("HOST_CODEX_MODEL_ID")
+    )
+
+
 def _stable_bucket_0_99(value: str) -> int:
     text = str(value or "").strip()
     if not text:
@@ -298,6 +345,8 @@ def _is_provider_available(*, provider_name: str, api_key: str | None, configure
         return False
     if provider == PROVIDER_DISABLED:
         return False
+    if provider == PROVIDER_CODEX and not str(api_key or "").strip() and codex_cli_lm_available():
+        return True
     if _provider_requires_api_key(provider) and not str(api_key or "").strip():
         return False
     return True
@@ -317,10 +366,7 @@ def _resolve_cloud_provider_model_id(*, chain_name: str) -> str:
     if normalized_chain == "gemini":
         return str(os.environ.get("HOST_GEMINI_MODEL_ID") or "gemini-2.5-flash-lite").strip() or "gemini-2.5-flash-lite"
     if normalized_chain == "codex":
-        return (
-            str(os.environ.get("HOST_CODEX_MODEL_ID") or "gpt-4o-mini").strip()
-            or "gpt-4o-mini"
-        )
+        return resolve_codex_cli_model(os.environ.get("HOST_CODEX_MODEL_ID"))
     if normalized_chain == "deepseek":
         return str(os.environ.get("HOST_DEEPSEEK_MODEL_ID") or "deepseek-v4-flash").strip() or "deepseek-v4-flash"
     return "mock-default"
@@ -652,6 +698,22 @@ def _build_graph_config_by_profile(
     resolved_chat_provider = str(provider_name or _HOST_CHAT_14B_DEFAULT_PROVIDER).strip().lower() or _HOST_CHAT_14B_DEFAULT_PROVIDER
     resolved_chat_model_id = str(model_id or "").strip() or _HOST_CHAT_14B_DEFAULT_MODEL_ID
     resolved_chat_timeout_ms = max(800, int(timeout_ms))
+    chat_codex_experiment = _chat_agent_codex_experiment_enabled(
+        scene_type=resolved_scene_type,
+        execution_profile=execution_profile,
+    )
+    if chat_codex_experiment:
+        resolved_chat_provider = PROVIDER_CODEX
+        resolved_chat_model_id = _resolve_chat_agent_codex_model_id()
+        resolved_chat_timeout_ms = max(
+            resolved_chat_timeout_ms,
+            _parse_int(
+                os.environ.get("HOST_CHAT_AGENT_CODEX_MIN_TIMEOUT_MS"),
+                default=45_000,
+                min_value=800,
+                max_value=10 * 60 * 1000,
+            ),
+        )
     resolved_chat_base_url_override = (
         _normalize_openai_compat_base_url(chat_base_url_override)
         if resolved_chat_provider == PROVIDER_OPENAI
@@ -663,8 +725,10 @@ def _build_graph_config_by_profile(
         provider_name=resolved_chat_provider,
         preferred_api_key=str(api_key or "").strip() or None,
     )
+    if chat_codex_experiment:
+        resolved_chat_api_key = None
     if _provider_requires_api_key(resolved_chat_provider) and not resolved_chat_api_key:
-        if _parse_bool(os.environ.get("HOST_CHAT_HOST_14B_ALLOW_EMPTY_KEY"), default=True):
+        if resolved_chat_provider == PROVIDER_OPENAI and _parse_bool(os.environ.get("HOST_CHAT_HOST_14B_ALLOW_EMPTY_KEY"), default=True):
             resolved_chat_api_key = _HOST_CHAT_14B_FALLBACK_API_KEY
     resolved_chat_available = _is_provider_available(
         provider_name=resolved_chat_provider,
@@ -687,23 +751,40 @@ def _build_graph_config_by_profile(
         PROVIDER_DISABLED,
     }:
         resolved_cloud_provider = _HOST_CHAT_CLOUD_DEFAULT_PROVIDER
+    graph_codex_migrated = _graph_codex_migration_enabled(
+        scene_type=resolved_scene_type,
+        execution_profile=execution_profile,
+    )
+    if graph_codex_migrated:
+        resolved_cloud_provider = PROVIDER_CODEX
     resolved_cloud_timeout_ms = max(800, int(cloud_timeout_ms or resolved_chat_timeout_ms))
+    if graph_codex_migrated:
+        resolved_cloud_timeout_ms = max(
+            resolved_cloud_timeout_ms,
+            _parse_int(os.environ.get("HOST_GRAPH_CODEX_MIN_TIMEOUT_MS"), default=30_000, min_value=800, max_value=10 * 60 * 1000),
+        )
     resolved_cloud_model_id = (
-        str(cloud_model_id or "").strip() or resolve_host_llm_model_id(resolved_cloud_provider)
+        resolve_codex_cli_model(os.environ.get("HOST_GRAPH_CODEX_MODEL_ID") or os.environ.get("HOST_CODEX_MODEL_ID"))
+        if graph_codex_migrated
+        else (str(cloud_model_id or "").strip() or resolve_host_llm_model_id(resolved_cloud_provider))
     )
     resolved_cloud_base_url_override = (
         _normalize_openai_compat_base_url(cloud_base_url_override)
-        if resolved_cloud_provider in {PROVIDER_OPENAI, PROVIDER_CODEX}
+        if (not graph_codex_migrated and resolved_cloud_provider in {PROVIDER_OPENAI, PROVIDER_CODEX})
         else None
     )
-    resolved_cloud_api_key = _resolve_provider_api_key(
+    resolved_cloud_api_key = None if graph_codex_migrated else _resolve_provider_api_key(
         provider_name=resolved_cloud_provider,
         preferred_api_key=str(cloud_api_key or "").strip() or None,
     )
     resolved_cloud_available_flag = (
+        True
+        if graph_codex_migrated
+        else (
         bool(cloud_available)
         if cloud_available is not None
         else bool(resolved_cloud_provider != PROVIDER_DISABLED)
+        )
     )
     resolved_cloud_available = _is_provider_available(
         provider_name=resolved_cloud_provider,

@@ -78,6 +78,32 @@ def _resolve_minimal_fallback_text(*, kind: str, render_target_lang: str) -> str
     return ""
 
 
+def _has_image_social_signal_for_model(plan: Any) -> bool:
+    multimodal = dict(getattr(plan, "multimodal", {}) or {})
+    signals = [
+        str(item).strip()
+        for item in list(multimodal.get("emotion_signals") or [])
+        if str(item).strip()
+    ]
+    fields = [
+        *signals,
+        str(multimodal.get("social_signal") or "").strip(),
+        str(multimodal.get("meme_intent") or "").strip(),
+        str(multimodal.get("core_observation") or "").strip(),
+        str(multimodal.get("visual_facts") or "").strip(),
+    ]
+    joined = " ".join(item for item in fields if item).strip()
+    if not joined:
+        return False
+    generic = {
+        "表情包社交输入",
+        "收到一个表情包",
+        "收到一个表情包。",
+        "表情消息",
+        "[表情消息]",
+    }
+    return joined not in generic
+
 
 # ---------------------------------------------------------------------------
 # 输入/输出结构
@@ -1082,6 +1108,8 @@ def _render_plan_step_success_cn(step: Dict[str, Any], *, render_target_lang: st
         return _mapping_text(success_templates, "memory_store.default", render_target_lang=render_target_lang, step_index=step_index)
     if target_id == "system_info":
         return _mapping_text(success_templates, "system_info", render_target_lang=render_target_lang, step_index=step_index)
+    if target_id in {"system_resource_snapshot", "process_resource_top", "resource_pressure_analysis", "resource_manager_status", "resource_release"}:
+        return _mapping_text(success_templates, "system_info", render_target_lang=render_target_lang, step_index=step_index)
     if target_id == "process_list":
         return _mapping_text(success_templates, "process_list", render_target_lang=render_target_lang, step_index=step_index)
     if target_id == "network_status":
@@ -1381,7 +1409,7 @@ def _build_deterministic_sub_agent_reply(
         return None
     agent_id = str(ctx.agent_id or "").strip()
     result_text = str(ctx.result_text or "").strip()
-    if agent_id in {"system_info", "process_list", "network_status", "open_app"}:
+    if agent_id in {"system_info", "system_resource_snapshot", "process_resource_top", "resource_pressure_analysis", "resource_manager_status", "resource_release", "process_list", "network_status", "open_app"}:
         return _build_sub_agent_result_preserving_fallback_reply(
             ctx,
             render_target_lang=render_target_lang,
@@ -1511,6 +1539,7 @@ def _should_buffer_stream_output(
         "emoji_social_followup",
         "greeting",
         "presence_ping",
+        "auditory_check",
         "light_ack",
         "playful_ping",
         "identity",
@@ -1874,31 +1903,189 @@ async def chat_agent_sse_generator(
             "platform": platform,
             "reason_code": "REACTION_ASSET_SELECTED" if reaction_asset else "SOCIAL_REACTION_ASSET_MISSING",
         }
-        trace_stage_meta["image_social_full_chat_lane"] = {
-            "status": "SKIPPED",
-            "invoked": False,
-            "affected_output": False,
-            "source": "social_reaction_decider",
-            "reason_code": "social_reaction_form_only",
-        }
-        trace_stage_meta["surface_renderer"] = {
-            "status": "SKIPPED",
-            "invoked": False,
-            "affected_output": False,
-            "source": "social_reaction_decider",
-            "reason_code": "social_reaction_form_only",
-        }
-        timings_ms = {
-            "prompt_build_ms": prompt_build_ms,
-            "social_reaction_decider_ms": social_reaction_ms,
-            "llm_runtime_resolve_ms": 0,
-            "llm_latency_ms": 0,
-            "first_token_ms": 0,
-        }
         if reaction_asset is None:
-            reply_envelope = ReplyEnvelope.no_reply(
-                reason_code="SOCIAL_REACTION_ASSET_MISSING",
+            reply_plan = dict(reply_plan or {})
+            reply_plan["response_form"] = "text"
+            reply_plan["response_form_reason"] = "social_reaction_text_fallback"
+            reply_plan["allow_form_only_reply"] = False
+            reply_plan["force_buffering"] = True
+            reply_plan_decision = coerce_reply_plan(reply_plan)
+            social_reaction_form_only_plan = False
+            trace_stage_meta["social_reaction_decider"].update({
+                "affected_output": False,
+                "fallback_to_text": True,
+                "fallback_response_form": "text",
+            })
+            trace_stage_meta["image_social_full_chat_lane"] = {
+                "status": "FALLBACK_TO_TEXT",
+                "invoked": True,
+                "affected_output": True,
+                "source": "full_model",
+                "reason_code": "social_reaction_asset_missing_text_fallback",
+            }
+            context_only_social_reaction_fallback = False
+            if not _has_image_social_signal_for_model(reply_plan_decision):
+                if previous_assistant_text:
+                    reply_plan["response_form_reason"] = "social_reaction_context_only"
+                    reply_plan["force_buffering"] = True
+                    reply_plan_decision = coerce_reply_plan(reply_plan)
+                    context_only_social_reaction_fallback = True
+                    trace_stage_meta["social_reaction_decider"].update({
+                        "fallback_to_text": True,
+                        "fallback_suppressed": False,
+                        "context_only": True,
+                        "fallback_reason_code": "SOCIAL_REACTION_CONTEXT_ONLY_LOW_CONFIDENCE",
+                    })
+                    trace_stage_meta["image_social_full_chat_lane"].update({
+                        "status": "CONTEXT_ONLY_LOW_CONFIDENCE",
+                        "invoked": True,
+                        "affected_output": True,
+                        "source": "full_model",
+                        "reason_code": "social_reaction_context_only_low_confidence",
+                    })
+                else:
+                    trace_stage_meta["social_reaction_decider"].update({
+                        "fallback_to_text": False,
+                        "fallback_suppressed": True,
+                        "fallback_reason_code": "SOCIAL_REACTION_OBSERVATION_LOW_CONFIDENCE",
+                    })
+                    trace_stage_meta["image_social_full_chat_lane"].update({
+                        "status": "SKIPPED_LOW_CONFIDENCE",
+                        "invoked": False,
+                        "affected_output": False,
+                        "source": "validation_gate",
+                        "reason_code": "social_reaction_observation_low_confidence",
+                    })
+                    timings_ms = {
+                        "prompt_build_ms": prompt_build_ms,
+                        "social_reaction_decider_ms": social_reaction_ms,
+                        "llm_runtime_resolve_ms": 0,
+                        "llm_latency_ms": 0,
+                        "first_token_ms": 0,
+                    }
+                    reply_envelope = ReplyEnvelope.no_reply(
+                        reason_code="SOCIAL_REACTION_OBSERVATION_LOW_CONFIDENCE",
+                        source="validation_gate",
+                        response_form="text",
+                        audit={
+                            "request_id": request_id,
+                            "emotion": multimodal_act.emotion,
+                            "platform": platform,
+                            "response_form_reason": reply_plan_decision.response_form_reason,
+                        },
+                    )
+                    trace_stage_meta["reply_validation"] = {
+                        "fallback": {
+                            "used": False,
+                            "suppressed": True,
+                            "reason_code": "SOCIAL_REACTION_OBSERVATION_LOW_CONFIDENCE",
+                            "source": "social_reaction_observation_low_confidence",
+                        }
+                    }
+                    trace_stage_meta["fallback_used"] = False
+                    trace_stage_meta["reply_source"] = "suppressed_no_reply"
+                    yield _sse({
+                        "phase": "COMMIT",
+                        "done": True,
+                        "decision": "NO_REPLY",
+                        "reason_code": "SOCIAL_REACTION_OBSERVATION_LOW_CONFIDENCE",
+                        "narrative": "",
+                        "request_id": request_id,
+                        "reply_envelope": reply_envelope.as_dict(),
+                        "audit_refs": {
+                            "request_id": request_id,
+                            "path": "chat_agent:social_reaction",
+                            "latency_ms": social_reaction_ms,
+                            "first_token_ms": 0,
+                            "llm_latency_ms": 0,
+                            "emotion_tag": str(emotion_context.get("emotion_tag") or "NEUTRAL"),
+                            "stream_buffered": False,
+                            "model_id": "validation_gate",
+                            "render_target_lang": render_target_lang,
+                            "tts_text_ja": None,
+                            "response_form": "text",
+                            "response_form_reason": str(reply_plan_decision.response_form_reason or "social_reaction").strip(),
+                            "timings_ms": timings_ms,
+                            "response_intelligence": {
+                                "reflection": {
+                                    "status": "BYPASSED",
+                                    "reason_code": "SOCIAL_REACTION_OBSERVATION_LOW_CONFIDENCE",
+                                }
+                            },
+                            "pii_stats": {},
+                            "suppress_final_reply": True,
+                            "suppress_final_reply_reason_code": "SOCIAL_REACTION_OBSERVATION_LOW_CONFIDENCE",
+                            "reply_envelope": reply_envelope.as_dict(),
+                            "trace_stage_meta": trace_stage_meta,
+                        },
+                    })
+                    return
+            if context_only_social_reaction_fallback:
+                prompt_messages.append({
+                    "role": "system",
+                    "content": (
+                        "【表情包上下文回应】当前收到的是 QQ 表情/贴纸社交反应，但视觉内容没有可靠解析。"
+                        "你只能基于上一轮对话上下文回应，不能声称自己看见、看清或识别了表情/图片，"
+                        "也不要说“我看到了”“这个表情”“看起来”“不硬猜”“先收一下”。"
+                        "不要问“怎么了/什么情况”，不要解释系统看不清。"
+                        "如果这像是对你上一句的反应，就顺着上一句自然修正或接住；只写一句短中文。"
+                    ),
+                })
+            else:
+                trace_stage_meta["social_reaction_decider"].update({
+                    "fallback_to_text": True,
+                    "fallback_response_form": "text",
+                })
+                prompt_messages.append({
+                    "role": "system",
+                    "content": (
+                        "【输出降级】原本可以用贴纸回应这张表情包，但当前没有可发送的贴纸资产。"
+                        "请基于已经识别到的情绪信号生成一句自然、简短的中文回应；不要解释系统缺少资产，"
+                        "不要套用固定句式，不要盘问，也不要只复述画面。不要编造对方的位置、动作或心理，"
+                        "例如“房间里/一个人/装深沉/发呆/不说话”。"
+                    ),
+                })
+        else:
+            trace_stage_meta["image_social_full_chat_lane"] = {
+                "status": "SKIPPED",
+                "invoked": False,
+                "affected_output": False,
+                "source": "social_reaction_decider",
+                "reason_code": "social_reaction_form_only",
+            }
+            trace_stage_meta["surface_renderer"] = {
+                "status": "SKIPPED",
+                "invoked": False,
+                "affected_output": False,
+                "source": "social_reaction_decider",
+                "reason_code": "social_reaction_form_only",
+            }
+            timings_ms = {
+                "prompt_build_ms": prompt_build_ms,
+                "social_reaction_decider_ms": social_reaction_ms,
+                "llm_runtime_resolve_ms": 0,
+                "llm_latency_ms": 0,
+                "first_token_ms": 0,
+            }
+
+            response_form = str(reaction_asset.response_form or reply_plan_decision.response_form or "sticker").strip().lower() or "sticker"
+            if response_form not in {"sticker", "image", "gif"}:
+                response_form = "sticker"
+            raw_extra = {
+                **dict(reaction_asset.raw_extra or {}),
+                "media_ref": reaction_asset.media_ref,
+                "reaction_id": reaction_asset.reaction_id,
+                "content": reaction_asset.content,
+                "multimodal_act": multimodal_act.as_dict(),
+            }
+            reply_envelope = ReplyEnvelope.final_reply(
+                text="",
+                response_form=response_form,
                 source="reaction_catalog",
+                cacheable=False,
+                media_ref=str(reaction_asset.media_ref or "").strip(),
+                reaction_id=str(reaction_asset.reaction_id or "").strip(),
+                raw_extra=raw_extra,
                 audit={
                     "request_id": request_id,
                     "emotion": multimodal_act.emotion,
@@ -1909,9 +2096,9 @@ async def chat_agent_sse_generator(
             yield _sse({
                 "phase": "COMMIT",
                 "done": True,
-                "decision": "NO_REPLY",
-                "reason_code": "SOCIAL_REACTION_ASSET_MISSING",
-                "narrative": "",
+                "decision": "APPROVE",
+                "reason_code": None,
+                "narrative": reply_envelope.text,
                 "request_id": request_id,
                 "reply_envelope": reply_envelope.as_dict(),
                 "audit_refs": {
@@ -1925,77 +2112,21 @@ async def chat_agent_sse_generator(
                     "model_id": "reaction-catalog",
                     "render_target_lang": render_target_lang,
                     "tts_text_ja": None,
-                    "response_form": str(reply_plan_decision.response_form or "sticker").strip() or "sticker",
+                    "response_form": response_form,
                     "response_form_reason": str(reply_plan_decision.response_form_reason or "social_reaction").strip(),
                     "timings_ms": timings_ms,
                     "response_intelligence": {"reflection": {"status": "BYPASSED", "reason_code": "social_reaction_form_only"}},
-                    "suppress_final_reply": True,
-                    "suppress_final_reply_reason_code": "SOCIAL_REACTION_ASSET_MISSING",
+                    "pii_stats": {},
+                    "suppress_final_reply": False,
+                    "suppress_final_reply_reason_code": None,
+                    "media_ref": reply_envelope.media_ref,
+                    "reaction_id": reply_envelope.reaction_id,
+                    "raw_extra": raw_extra,
                     "reply_envelope": reply_envelope.as_dict(),
                     "trace_stage_meta": trace_stage_meta,
                 },
             })
             return
-
-        response_form = str(reaction_asset.response_form or reply_plan_decision.response_form or "sticker").strip().lower() or "sticker"
-        if response_form not in {"sticker", "image", "gif"}:
-            response_form = "sticker"
-        raw_extra = {
-            **dict(reaction_asset.raw_extra or {}),
-            "media_ref": reaction_asset.media_ref,
-            "reaction_id": reaction_asset.reaction_id,
-            "content": reaction_asset.content,
-            "multimodal_act": multimodal_act.as_dict(),
-        }
-        reply_envelope = ReplyEnvelope.final_reply(
-            text="",
-            response_form=response_form,
-            source="reaction_catalog",
-            cacheable=False,
-            media_ref=str(reaction_asset.media_ref or "").strip(),
-            reaction_id=str(reaction_asset.reaction_id or "").strip(),
-            raw_extra=raw_extra,
-            audit={
-                "request_id": request_id,
-                "emotion": multimodal_act.emotion,
-                "platform": platform,
-                "response_form_reason": reply_plan_decision.response_form_reason,
-            },
-        )
-        yield _sse({
-            "phase": "COMMIT",
-            "done": True,
-            "decision": "APPROVE",
-            "reason_code": None,
-            "narrative": reply_envelope.text,
-            "request_id": request_id,
-            "reply_envelope": reply_envelope.as_dict(),
-            "audit_refs": {
-                "request_id": request_id,
-                "path": "chat_agent:social_reaction",
-                "latency_ms": social_reaction_ms,
-                "first_token_ms": 0,
-                "llm_latency_ms": 0,
-                "emotion_tag": str(emotion_context.get("emotion_tag") or "NEUTRAL"),
-                "stream_buffered": False,
-                "model_id": "reaction-catalog",
-                "render_target_lang": render_target_lang,
-                "tts_text_ja": None,
-                "response_form": response_form,
-                "response_form_reason": str(reply_plan_decision.response_form_reason or "social_reaction").strip(),
-                "timings_ms": timings_ms,
-                "response_intelligence": {"reflection": {"status": "BYPASSED", "reason_code": "social_reaction_form_only"}},
-                "pii_stats": {},
-                "suppress_final_reply": False,
-                "suppress_final_reply_reason_code": None,
-                "media_ref": reply_envelope.media_ref,
-                "reaction_id": reply_envelope.reaction_id,
-                "raw_extra": raw_extra,
-                "reply_envelope": reply_envelope.as_dict(),
-                "trace_stage_meta": trace_stage_meta,
-            },
-        })
-        return
 
     # ── 2. 解析 LLM 运行时（ChatAgent 专用配置）─────────────────────
     if deterministic_reply:
@@ -2141,13 +2272,24 @@ async def chat_agent_sse_generator(
             "model": model_id,
         }
     if image_social_reply_plan and not deterministic_reply and not social_reaction_form_only_plan:
-        trace_stage_meta["image_social_full_chat_lane"] = {
-            "status": "ENABLED",
-            "invoked": True,
-            "affected_output": True,
-            "source": "full_model",
-            "reason_code": "image_social_text_uses_full_chat",
-        }
+        _existing_image_social_lane = dict(trace_stage_meta.get("image_social_full_chat_lane") or {})
+        if str(_existing_image_social_lane.get("status") or "") in {
+            "FALLBACK_TO_TEXT",
+            "CONTEXT_ONLY_LOW_CONFIDENCE",
+        }:
+            trace_stage_meta["image_social_full_chat_lane"] = {
+                **_existing_image_social_lane,
+                "full_chat_enabled": True,
+                "full_chat_reason_code": "image_social_text_uses_full_chat",
+            }
+        else:
+            trace_stage_meta["image_social_full_chat_lane"] = {
+                "status": "ENABLED",
+                "invoked": True,
+                "affected_output": True,
+                "source": "full_model",
+                "reason_code": "image_social_text_uses_full_chat",
+            }
 
     # ── 3. 流式生成 + SentenceSplitter ──────────────────────────────
     from host_brain.integrations.llm_helpers import (  # noqa: PLC0415
@@ -2258,6 +2400,7 @@ async def chat_agent_sse_generator(
             "emoji_social_followup",
             "greeting",
             "presence_ping",
+            "auditory_check",
             "light_ack",
             "playful_ping",
             "identity",
@@ -2341,6 +2484,8 @@ async def chat_agent_sse_generator(
             for item in list(getattr(validation_candidate, "reason_codes", ()) or ())
             if str(item or "").strip()
         }
+        if hasattr(validation_candidate, "safe_to_emit") and not bool(getattr(validation_candidate, "safe_to_emit", True)):
+            return False
         blocking_reasons = {
             "empty_reply",
             "symbol_only_reply",
@@ -2349,6 +2494,7 @@ async def chat_agent_sse_generator(
             "process_term_echo",
             "unsafe_content",
             "wrong_form",
+            "image_social_ungrounded_inference",
         }
         if reason_codes & blocking_reasons:
             return False
@@ -2656,11 +2802,6 @@ async def chat_agent_sse_generator(
         trace_stage_meta["reply_validation"]["initial_text"] = _trace_text_sample(narrative)
         if _is_validation_acceptable(_validation):
             trace_stage_meta["reply_validation"]["accepted_initial"] = True
-        elif image_social_reply_plan:
-            _apply_validation_fallback(
-                reason_codes=getattr(_validation, "reason_codes", ()) or (),
-                source="image_social_initial_invalid",
-            )
         elif _validation.should_retry:
             if image_social_reply_plan:
                 trace_stage_meta["reply_validation"]["image_social_retry_reason"] = "safe_initial_invalid"
@@ -2825,6 +2966,11 @@ async def chat_agent_sse_generator(
                         reason_codes=getattr(_validation, "reason_codes", ()) or (),
                         source="retry_empty_rescue_empty",
                     )
+        elif image_social_reply_plan:
+            _apply_validation_fallback(
+                reason_codes=getattr(_validation, "reason_codes", ()) or (),
+                source="image_social_initial_invalid",
+            )
         else:
             _rescue_raw_text, _rescue_first_token_ms = await _attempt_soul_rescue(
                 previous_candidate_text=narrative,
@@ -3040,6 +3186,7 @@ async def chat_agent_sse_generator(
             "suppress_final_reply": bool(suppress_final_reply),
             "suppress_final_reply_reason_code": suppress_final_reply_reason_code,
             "reply_envelope": reply_envelope.as_dict(),
+            "trace_stage_meta": trace_stage_meta,
         },
     })
 
@@ -3171,6 +3318,10 @@ async def chat_agent_sse_generator(
                     "reply_envelope": reply_envelope.as_dict(),
                     "voice_outputs_enabled": _voice_outputs_enabled,
                 },
+                attachments=list(agent_input.attachments or []),
+                multimodal_observations=dict(agent_input.multimodal_observations or {}),
+                attachment_summary=str(agent_input.attachment_summary or "").strip(),
+                reply_channel=str(agent_input.reply_channel or "").strip() or None,
             )
             )
     except Exception as _pp_exc:

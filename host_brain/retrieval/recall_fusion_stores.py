@@ -34,11 +34,46 @@ SQLITE_RECENCY_BOOST_1D = 0.05
 _SESSION_REF_PREFIX = "chat://session/"
 
 STORE_SQLITE_LEDGER = "sqlite_ledger"
+STORE_LIFE_EPISODE = "life_episode"
 STORE_NEO4J_BOND = "neo4j_bond"
 STORE_EPISODIC_VECTOR = "episodic_vector"
 STORE_SEMANTIC_MEMORY = "semantic_memory"
 STORE_WORLD_CANON = "world_canon"
 STORE_ARTIFACT_VAULT = "artifact_vault"
+_SCHEDULER_RECALL_STATUS_ALLOWLIST = {
+    "ERROR",
+    "FAILED",
+    "DEGRADED",
+    "SUSPENDED",
+    "DEFERRED",
+    "HEARTBEAT_ALERT",
+    "EDGE_PROBE_ALERT",
+}
+_SCHEDULER_RECALL_OK_TASK_ALLOWLIST = {
+    "daily_recommendation",
+    "diary_generate",
+    "diary_writer_daily",
+    "dream_generator_sleep",
+    "lightnovel_recommender_daily",
+    "long_term_memory_distillation",
+    "distillation_engine_periodic",
+    "memory_distillation",
+    "emergent_growth_weekly",
+    "evolution_cycle_daily",
+}
+
+
+def _scheduler_event_is_recallable(*, task_id: str, status: str, reason_code: str, detail: str) -> bool:
+    status_token = str(status or "").strip().upper()
+    task_key = str(task_id or "").strip().lower()
+    reason = str(reason_code or "").strip().upper()
+    if status_token in _SCHEDULER_RECALL_STATUS_ALLOWLIST:
+        return True
+    if status_token == "OK" and task_key in _SCHEDULER_RECALL_OK_TASK_ALLOWLIST:
+        return True
+    if reason == "LLM_POOL_EXHAUSTED":
+        return True
+    return bool(detail and status_token in {"ERROR", "FAILED", "DEGRADED"})
 
 
 def search_route(
@@ -70,6 +105,15 @@ def search_route(
             session_id=session_id,
             now_ts_ms=now_ts_ms,
         )
+    if store_id == STORE_LIFE_EPISODE:
+        return search_life_episode(
+            self,
+            query=query,
+            top_k=int(route.top_k),
+            person_id=person_id,
+            session_id=session_id,
+            now_ts_ms=now_ts_ms,
+        )
     if store_id == STORE_SEMANTIC_MEMORY:
         return search_semantic_memory(self, query=query, top_k=int(route.top_k), now_ts_ms=now_ts_ms)
     if store_id == STORE_NEO4J_BOND:
@@ -87,6 +131,31 @@ def search_route(
     raise RuntimeError(f"unsupported recall store_id: {store_id}")
 
 
+def search_life_episode(
+    self: Any,
+    *,
+    query: str,
+    top_k: int,
+    person_id: str | None = None,
+    session_id: str | None = None,
+    now_ts_ms: int | None = None,
+) -> list[dict[str, Any]]:
+    """Route 0: life_episode SSOT recall with evidence and correction state."""
+    if self.ledger is None:
+        raise RuntimeError("life episode ledger unavailable")
+    from host_brain.memory.life_memory import LifeMemoryStore  # noqa: PLC0415
+
+    packet = LifeMemoryStore(ledger=self.ledger).recall_episode_packet(
+        query=query,
+        top_k=top_k,
+        person_id=person_id,
+        session_id=session_id,
+        include_suppressed=False,
+        now_ts_ms_value=now_ts_ms,
+    )
+    return list(packet.candidates)
+
+
 def search_sqlite_ledger(
     self: Any,
     *,
@@ -96,7 +165,7 @@ def search_sqlite_ledger(
     session_id: str | None = None,
     now_ts_ms: int | None = None,
 ) -> list[dict[str, Any]]:
-    """Route 2：SQLite 意图日志 + 记忆操作日志检索。"""
+    """Route 2：SQLite 意图日志 + 记忆操作日志 + 后台调度事件检索。"""
     from host_brain.core.ids import now_ms
     from host_brain.retrieval.recall_fusion_utils import (
         _apply_sqlite_ledger_boost,
@@ -258,13 +327,94 @@ def search_sqlite_ledger(
                 },
             },
         ))
-    return [
-        item
-        for _score, item in sorted(
-            scored,
-            key=lambda pair: _sqlite_candidate_sort_key(score=pair[0], candidate=pair[1]),
-        )[: max(1, int(top_k))]
-    ]
+
+    for row in list(getattr(self.ledger, "scheduler_event_log", []) or []):
+        if not isinstance(row, Mapping):
+            continue
+        event_id = str(row.get("event_id") or row.get("id") or "").strip()
+        task_id = str(row.get("task_id") or "").strip()
+        status = str(row.get("status") or "").strip().upper()
+        reason_code = str(row.get("reason_code") or "").strip()
+        mode_at_trigger = str(row.get("mode_at_trigger") or "").strip()
+        error_detail = str(row.get("error_detail") or "").strip()
+        if not _scheduler_event_is_recallable(
+            task_id=task_id,
+            status=status,
+            reason_code=reason_code,
+            detail=error_detail,
+        ):
+            continue
+        intent_id = str(row.get("intent_id") or "").strip() or None
+        row_ts = _coerce_non_negative_int(row.get("ts_ms"), default=0)
+        trigger_ts = _coerce_non_negative_int(row.get("trigger_ts"), default=0)
+        memory_id = event_id or f"scheduler_{len(scored)}"
+        text = " ".join(
+            part
+            for part in (
+                "后台任务",
+                task_id,
+                status,
+                reason_code,
+                mode_at_trigger,
+                error_detail,
+                intent_id or "",
+            )
+            if part
+        ).strip()
+        score = _text_similarity_score(query, text)
+        if score <= 0.0:
+            continue
+        boosted_score, boost_meta = _apply_sqlite_ledger_boost(
+            base_score=score,
+            row_ts_ms=row_ts or trigger_ts,
+            now_ts_ms=current_ts,
+            row_person_id=None,
+            target_person_id=normalized_person_id,
+            row_session_id=None,
+            target_session_id=normalized_session_id,
+        )
+        evidence_refs = [f"scheduler://event/{memory_id}"]
+        if task_id:
+            evidence_refs.append(f"scheduler://task/{task_id}")
+        scored.append((
+            boosted_score,
+            {
+                "memory_id": memory_id,
+                "text": _truncate_text_for_recall(text, limit=512),
+                "score": boosted_score,
+                "metadata": {
+                    "store_id": STORE_SQLITE_LEDGER,
+                    "request_id": event_id or None,
+                    "intent_id": intent_id,
+                    "person_id": None,
+                    "session_id": None,
+                    "task_id": task_id or None,
+                    "status": status or None,
+                    "reason_code": reason_code or None,
+                    "mode_at_trigger": mode_at_trigger or None,
+                    "base_score": score,
+                    "score_boost": boost_meta,
+                    "evidence_refs": evidence_refs,
+                    "source_ref": f"ledger://scheduler_event_log/{memory_id}",
+                    "evidence_refs_primary": evidence_refs[0],
+                },
+            },
+        ))
+    deduped: list[dict[str, Any]] = []
+    seen_memory_ids: set[str] = set()
+    for _score, item in sorted(
+        scored,
+        key=lambda pair: _sqlite_candidate_sort_key(score=pair[0], candidate=pair[1]),
+    ):
+        memory_id = str(item.get("memory_id") or "").strip()
+        if memory_id and memory_id in seen_memory_ids:
+            continue
+        if memory_id:
+            seen_memory_ids.add(memory_id)
+        deduped.append(item)
+        if len(deduped) >= max(1, int(top_k)):
+            break
+    return deduped
 
 
 def search_semantic_memory(

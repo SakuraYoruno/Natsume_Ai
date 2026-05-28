@@ -48,3 +48,29 @@ def test_generate_desire_strict_llm_disables_template_fallback(
     )
 
     assert desire == ""
+
+
+def test_self_narrative_prompt_spec_has_desire_prompt() -> None:
+    templates = resolve_prompt_template_json_merged("persona.self_narrative_prompts")
+
+    assert isinstance(templates, dict)
+    assert str(templates.get("desire_prompt") or "").strip()
+
+
+def test_try_llm_desire_skips_empty_prompt(monkeypatch: pytest.MonkeyPatch) -> None:
+    engine = EvolutionDesireEngine(seed=0)
+    calls: list[str] = []
+
+    monkeypatch.setattr(ede, "_load_prompt_templates", lambda: {})
+
+    desire = engine._try_llm_desire(
+        llm_fn=lambda prompt: calls.append(str(prompt)) or "我想更自然一点。",
+        traits=PersonalityTraits.from_baseline(),
+        emotion_trend="平稳",
+        bond_stage="FRIEND",
+        event_count=0,
+        ts=1,
+    )
+
+    assert desire == ""
+    assert calls == []

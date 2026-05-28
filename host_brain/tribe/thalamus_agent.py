@@ -46,8 +46,12 @@ _LLM_SKILL_TARGET_ALLOWLIST: frozenset[str] = frozenset({
     "codex_inspect",
     "codex_organ_scan",
     "codex_persona_drift_audit",
+    "codex_browser_research",
     "codex_document_digest",
+    "codex_epub_builder",
+    "codex_frontend_acceptance",
     "codex_frontend_review",
+    "codex_lightnovel_recommender",
     "codex_memory_curator",
     "codex_research",
     "codex_repo_sentinel",
@@ -56,6 +60,7 @@ _LLM_SKILL_TARGET_ALLOWLIST: frozenset[str] = frozenset({
     "codex_skill_forge",
     "codex_sql_audit",
     "codex_translate_project",
+    "codex_web_corpus_collector",
     "codex_workbench_brief",
     "codex_worker",
     "emotion_query",
@@ -72,8 +77,13 @@ _LLM_SKILL_TARGET_ALLOWLIST: frozenset[str] = frozenset({
     "network_status",
     "open_app",
     "process_list",
+    "process_resource_top",
+    "resource_pressure_analysis",
     "repo_health_scan",
+    "resource_manager_status",
+    "resource_release",
     "session_summary",
+    "system_resource_snapshot",
     "system_info",
     "test_failure_triage",
 })
@@ -205,12 +215,59 @@ _CODEX_DOCUMENT_DIGEST_RE = re.compile(
     r"((文档|资料|材料|网页摘录).{0,12}(消化|摘要|总结|digest)|document\s+digest)",
     re.IGNORECASE,
 )
+_CODEX_BROWSER_RESEARCH_RE = re.compile(
+    r"((浏览器|网页|网站|网购|购物|商品|browser).{0,24}(研究|调研|查阅|比价|资料|证据|research)"
+    r"|(研究|调研|查阅|比价|资料|证据).{0,24}(浏览器|网页|网站|网购|商品|browser)"
+    r"|browser\s+(research|workbench))",
+    re.IGNORECASE,
+)
+_CODEX_FRONTEND_ACCEPTANCE_RE = re.compile(
+    r"((前端|页面|ui|UI|浏览器|无头浏览器|headless).{0,24}(验收|验证|截图|效果|控制台|console|网络错误|network|acceptance)"
+    r"|(验收|验证|截图|效果|控制台|console|网络错误|network).{0,24}(前端|页面|ui|UI|浏览器|无头浏览器|headless)"
+    r"|frontend\s+acceptance)",
+    re.IGNORECASE,
+)
 _CODEX_FRONTEND_REVIEW_RE = re.compile(
     r"((前端|页面|ui|UI|组件|卡片|布局).{0,18}(后台|异步|codex|深度).{0,18}(审查|巡检|优化|review)"
     r"|(后台|异步|codex|深度).{0,18}(前端|页面|组件|布局).{0,18}(审查|巡检|优化|review)"
     r"|frontend\s+review)",
     re.IGNORECASE,
 )
+_CODEX_WEB_CORPUS_COLLECTOR_RE = re.compile(
+    r"((网页|网站|公开|授权|web).{0,24}(语料|训练语料|数据集|corpus).{0,24}(收集|采集|整理|清洗|collector)"
+    r"|(语料|训练语料|数据集|corpus).{0,24}(网页|网站|公开|授权|web).{0,24}(收集|采集|整理|清洗|collector)"
+    r"|web\s+corpus)",
+    re.IGNORECASE,
+)
+_CODEX_LIGHTNOVEL_RECOMMENDER_RE = re.compile(
+    r"((轻小说|小说|lightnovel).{0,28}(推荐|榜单|每日榜|排行|最新资源|封面|简介|recommend)"
+    r"|(推荐|榜单|每日榜|排行|最新资源).{0,28}(轻小说|小说|lightnovel)"
+    r"|lightnovel\s+recommend)",
+    re.IGNORECASE,
+)
+_CODEX_EPUB_BUILDER_RE = re.compile(
+    r"((epub|电子书|轻小说|小说|文本|图片).{0,28}(封装|生成|制作|打包|构建|builder)"
+    r"|(网页|网站).{0,28}(轻小说|小说|文本|图片).{0,28}(epub|电子书|封装|打包)"
+    r"|epub\s+builder)",
+    re.IGNORECASE,
+)
+_CODEX_EPUB_RECOMMENDATION_SELECTION_RE = re.compile(
+    r"(?:推荐的?\s*(?:第\s*)?([一二三四五六七八九十]|\d{1,2})\s*(?:本|个|项)"
+    r"|(?:第\s*)?([一二三四五六七八九十]|\d{1,2})\s*(?:本|个|项).{0,16}(?:封装|打包|epub|电子书))",
+    re.IGNORECASE,
+)
+_CODEX_EPUB_RECOMMENDATION_INDEX_WORDS = {
+    "一": 1,
+    "二": 2,
+    "三": 3,
+    "四": 4,
+    "五": 5,
+    "六": 6,
+    "七": 7,
+    "八": 8,
+    "九": 9,
+    "十": 10,
+}
 _SELF_HEAL_MARKERS = (
     "self heal",
     "heal yourself",
@@ -277,6 +334,11 @@ _TASK_CODE_RE = re.compile(
     r"|python|javascript|typescript|java|golang|rust|c\+\+|debug|bug|class|algorithm|implement|develop)",
     re.IGNORECASE,
 )
+_TASK_PLUGIN_BUILD_RE = re.compile(
+    r"((?:做|写|实现|开发|创建|新建|接入|加|补).{0,18}(?:插件|plugin)"
+    r"|(?:插件|plugin).{0,18}(?:做|写|实现|开发|创建|新建|接入|加|补))",
+    re.IGNORECASE,
+)
 _TASK_CODE_NEGATION_RE = re.compile(
     r"(不要|不用|不需要|先别|别|无需).{0,6}(改代码|写代码|代码|实现|开发)|"
     r"(no code changes|do not (?:write|change|modify) code|don't (?:write|change|modify) code)",
@@ -287,11 +349,46 @@ _TASK_VISION_UI_RE = re.compile(
     re.IGNORECASE,
 )
 _TASK_RECENT_TURN_RE = re.compile(
-    r"(我刚刚|上一句|上一条|上句说|你刚刚|what did i just say|what did you just say)",
+    r"(我刚刚|上一句|上一条|上句说|你刚刚|刚才说到哪|刚刚说到哪|刚才聊到哪|刚刚聊到哪|what did i just say|what did you just say)",
+    re.IGNORECASE,
+)
+_TASK_RECENT_TURN_STRICT_RE = re.compile(
+    r"(上一句|上一条|上句说|刚才说到哪|刚刚说到哪|刚才聊到哪|刚刚聊到哪"
+    r"|你(?:刚才|刚刚).{0,8}(?:说了?什么|说的是?什么|回了?什么)"
+    r"|what did (?:i|you) just say)",
+    re.IGNORECASE,
+)
+_TASK_CONTEXTUAL_CHAT_FOLLOWUP_RE = re.compile(
+    r"(长对话|连续对话|连续性测试|上下文|前文|我刚才|我刚刚|你刚才|你刚刚|上一轮|上轮|前一轮|前面|刚才|刚刚|目前)"
+    r".{0,48}(口令|暗号|关键词|锚点|记住|让你记|是什么|什么|本身|短句|变成|改成|包含|表达偏好|表达风格|风格|偏好|约定|测试报告|报告|场子|稳住|收尾|评价|新版|旧版|客服腔|更相信)"
+    r"|(?:这个|那个|它|刚才那个|刚刚那个|临时).{0,24}(口令|暗号|关键词|锚点).{0,24}"
+    r"(是什么|什么|本身|短句|变成|改成|包含|还记得|记得吗)"
+    r"|(?:口令|暗号|关键词|锚点).{0,24}(是什么|什么|本身|短句|变成|改成|包含|还记得|记得吗)"
+    r"|(?:测试报告|系统测试).{0,32}(要求|偏好|更相信|可复现|主观|体验|备注)"
+    r"|评价.{0,40}(连续性测试|长对话).{0,40}(实际意义|意义|问题)"
+    r"|(?:长对话|连续性).{0,48}(指标|测连续性|最该看)"
+    r"|(?:再修正|修正|更新).{0,24}报告.{0,48}(可复现|主观|体验|备注)"
+    r"|锚点.{0,24}(别名|小橙灯)"
+    r"|小橙灯.{0,24}(指什么|是什么|也指)"
+    r"|给这个表达风格起.{0,16}(名字|名称)"
+    r"|(?:表达风格|表达偏好).{0,24}(名字|名称)"
+    r"|更新一下.{0,48}(偏青|余温|新版)"
+    r"|客服腔.{0,48}(自我修正|怎么修正|应该怎么)"
+    r"|如果我说累.{0,48}(大道理|缓下来|不黏糊)"
+    r"|按我们新版表达风格"
+    r"|(?:上一轮|上轮).{0,32}场子"
+    r"|稳定地在旁边"
+    r"|今天先收工",
+    re.IGNORECASE,
+)
+_TASK_CONTEXTUAL_CHAT_BLOCKER_RE = re.compile(
+    r"(代码|仓库|文件|目录|路径|脚本|函数|接口|服务|部署|启动|host|edge|gateway|pytest|单测|跑测试|修复|报错|bug|diff|patch)",
     re.IGNORECASE,
 )
 _TASK_PROGRESS_QUERY_RE = re.compile(
-    r"(进度|进展|任务状态|执行状态|结果呢|有结果吗|完成了\??|做好了吗|好了没|搞定了吗|到哪了|还要多久|eta|done\??|status|progress|update)",
+    r"(进度|进展|任务状态|执行状态|结果呢|有结果吗|完成了\??|做好了吗|好了没|搞定了吗|到哪了|还要多久"
+    r"|(?:这次|当前|聊天)?主链.{0,16}(效果|表现|耗时|延迟|怎么样|如何)"
+    r"|\b(?:eta|done|status|progress|update)\b\??)",
     re.IGNORECASE,
 )
 _TASK_INTENT_PLANNING_RE = re.compile(
@@ -306,6 +403,10 @@ _TASK_PLAN_REQUEST_RE = re.compile(
 )
 _TASK_CONTEXT_CONTINUATION_RE = re.compile(
     r"^\s*(开始吧|开始|继续|继续吧|接着|接着做|继续做|接下来呢|接下来|然后呢|后面呢|开工|go ahead|start|continue|proceed)\s*[。.!！?？]*\s*$",
+    re.IGNORECASE,
+)
+_TASK_CHAT_CONTINUATION_RE = re.compile(
+    r"^\s*(继续|继续吧|接着|接着来|继续说|接着说|然后呢|后面呢|那后面呢|continue|go on)\s*[。.!！?？]*\s*$",
     re.IGNORECASE,
 )
 _TASK_OPEN_APP_VERB_RE = re.compile(r"(打开|启动|运行|开一下|帮我开|替我开|launch|open)", re.IGNORECASE)
@@ -327,6 +428,35 @@ _TASK_SYSTEM_INFO_RE = re.compile(
     r"|(?:system|host|machine)\s+(?:info|status|overview|health))",
     re.IGNORECASE,
 )
+_TASK_RESOURCE_MANAGER_STATUS_RE = re.compile(
+    r"((自动)?资源(管家|管控|管理|监控).{0,12}(状态|运行|有没有|开着|启动|效果)"
+    r"|resource\s+manager\s+(?:status|health))",
+    re.IGNORECASE,
+)
+_TASK_RESOURCE_PRESSURE_ANALYSIS_RE = re.compile(
+    r"((分析|诊断|排查|查明|定位|为什么|原因|根因).{0,24}(内存|显存|vram|GPU|gpu|资源).{0,24}(爆|拉爆|飙|飙高|占满|高|满|压力|卡)"
+    r"|(内存|显存|vram|GPU|gpu|资源).{0,24}(爆|拉爆|飙|飙高|占满|高|满|压力|卡).{0,24}(分析|诊断|排查|查明|定位|为什么|原因|根因)"
+    r"|(?:resource|memory|vram|gpu).{0,16}(?:root cause|analysis|diagnose|why))",
+    re.IGNORECASE,
+)
+_TASK_RESOURCE_RELEASE_RE = re.compile(
+    r"((释放|清理|回收|腾出).{0,10}(资源|内存|显存|vram|GPU|gpu|CPU|cpu)"
+    r"|(资源|内存|显存|vram).{0,10}(释放|清理|回收|腾出)"
+    r"|(?:release|free|cleanup).{0,12}(?:resource|memory|vram|gpu))",
+    re.IGNORECASE,
+)
+_TASK_PROCESS_RESOURCE_TOP_RE = re.compile(
+    r"((谁|哪些|哪个|进程|process).{0,12}(占用|吃|耗|占).{0,12}(资源|内存|显存|cpu|CPU|gpu|GPU|vram)"
+    r"|(资源|内存|显存|cpu|CPU|gpu|GPU|vram).{0,12}(排行|热点|top|占用最高)"
+    r"|(?:process|resource).{0,12}(?:top|hotspot|usage))",
+    re.IGNORECASE,
+)
+_TASK_RESOURCE_SNAPSHOT_RE = re.compile(
+    r"((资源|内存|显存|vram|GPU|gpu|CPU|cpu).{0,12}(状态|压力|占用|负载|快照|监控|管控)"
+    r"|((系统|电脑|机器|本机).{0,12}(卡|卡顿|变慢|微妙的卡|资源压力))"
+    r"|(?:resource|memory|vram|gpu|cpu).{0,12}(?:snapshot|status|pressure|usage))",
+    re.IGNORECASE,
+)
 _TASK_PROCESS_LIST_RE = re.compile(
     r"((列出|查看|看看|读取|当前|运行中).{0,8}(进程|process)"
     r"|(?:process\s+list|running\s+processes|list\s+processes))",
@@ -343,6 +473,17 @@ _PHATIC_GREETING_RE = re.compile(
     re.IGNORECASE,
 )
 _PHATIC_PRESENCE_RE = re.compile(r"^(在吗|在不在|还在吗|忙吗|在嘛)[?？!！。…~]*$")
+_PHATIC_AUDITORY_CHECK_RE = re.compile(
+    r"^(?:"
+    r"(?:你)?(?:能不能|能|可以|可不可以|有没有)?(?:听到|听见|听得到|听得见|听清|听清楚)"
+    r"(?:我|我说话|我讲话|声音)?(?:吗|么)?"
+    r"|(?:我)?(?:说话|讲话|发声|声音)(?:你)?(?:能不能|能|可以|可不可以)?"
+    r"(?:听到|听见|听得到|听得见|听清|听清楚)(?:吗|么)?"
+    r"|(?:有|有没有)(?:听到|听见)?声音(?:吗|么)?"
+    r"|(?:刚才|刚刚)?(?:我)?(?:说了|说话|讲话)(?:什么)?(?:你)?(?:听到|听见|听得到|听得见)(?:吗|么)?"
+    r")[?？!！。…~]*$",
+    re.IGNORECASE,
+)
 _PHATIC_ACK_RE = re.compile(r"^(嗯|嗯嗯|哦|噢|好的|好呀|好啊|可以|可以啊|可以呀|收到|对|对啊|是的|行)[!！。…~]*$")
 _PHATIC_PUNCT_RE = re.compile(r"^[?？!！。…~、,.，]{1,4}$")
 _PHATIC_COMFORT_RE = re.compile(
@@ -569,6 +710,22 @@ _STATUS_REPLY_DOMAIN_RE = re.compile(
     r"(主链|闭环|链路|gateway|onebot|qq|微信|wechat|edge|host|asr|tts|vts|thalamus|意图识别|场景路由|路由|在线|连通|可用)",
     re.IGNORECASE,
 )
+_CONVERSATIONAL_OPINION_CHAT_RE = re.compile(
+    r"(你觉得|你认为|你看|怎么看|看法|体感|判断|评价|像正常聊天|直接说|用(?:一|两|2|三|几)句"
+    r"|不要列清单|别讲测试指标|最需要继续观察|风险是什么|会先怀疑哪一段|先怀疑哪一段|先怀疑哪段)",
+    re.IGNORECASE,
+)
+_CONVERSATIONAL_OPINION_ACTION_BLOCKER_RE = re.compile(
+    r"(开始|修复|优化|整理|清理|删除|移除|接入|重构|实现|修改|改造|创建|新建|提交|查看|检查|验证|跑测试"
+    r"|执行|打开|部署|改代码|写代码|应用|落地|补上|跑一下|测一下"
+    r"|fix|implement|modify|refactor|commit|inspect|check|verify|run|execute|deploy)",
+    re.IGNORECASE,
+)
+_WORKSPACE_EXPLICIT_INSPECT_RE = re.compile(
+    r"(查看|看一下|看下|看看|帮我看|验证|检查|分析|评估|梳理|审查|报告|完成情况|接入情况"
+    r"|inspect|verify|check|analy[sz]e|review|audit|status)",
+    re.IGNORECASE,
+)
 
 
 def _normalize_text(value: Any, *, lower: bool = False) -> str:
@@ -607,6 +764,32 @@ def _looks_like_status_reply_chat(text: str) -> bool:
     if not normalized:
         return False
     return bool(_STATUS_REPLY_REQUEST_RE.search(normalized) and _STATUS_REPLY_DOMAIN_RE.search(normalized))
+
+
+def _looks_like_conversational_opinion_chat(text: str) -> bool:
+    normalized = _normalize_text(text)
+    if not normalized:
+        return False
+    if not _CONVERSATIONAL_OPINION_CHAT_RE.search(normalized):
+        return False
+    if _CONVERSATIONAL_OPINION_ACTION_BLOCKER_RE.search(normalized):
+        return False
+    return True
+
+
+def _build_conversational_opinion_chat_seed(text: str, *, route_source: str) -> dict[str, Any]:
+    normalized = _normalize_text(text)
+    return {
+        "route": "chat",
+        "target_id": "",
+        "task": normalized,
+        "reason_code": "THALAMUS_RULE_CONVERSATIONAL_OPINION_CHAT",
+        "confidence": 0.98,
+        "route_source": route_source,
+        "args": {
+            "text": normalized,
+        },
+    }
 
 
 def _looks_like_generic_action_intent(text: str) -> bool:
@@ -664,6 +847,8 @@ def _detect_short_companion_chat_reason(text: str) -> str | None:
 
     if _PHATIC_GREETING_RE.match(cleaned):
         return "THALAMUS_RULE_PHATIC_GREETING"
+    if _PHATIC_AUDITORY_CHECK_RE.match(cleaned):
+        return "THALAMUS_RULE_PHATIC_AUDITORY_CHECK"
     if _PHATIC_PRESENCE_RE.match(cleaned):
         return "THALAMUS_RULE_PHATIC_PRESENCE"
     if _PHATIC_ACK_RE.match(cleaned):
@@ -703,6 +888,45 @@ def _looks_like_companion_open_chat(text: str) -> bool:
         if not any(marker in normalized for marker in calming_negations):
             return False
     return True
+
+
+def _looks_like_contextual_chat_followup(text: str) -> bool:
+    normalized = _normalize_text(text)
+    if not normalized:
+        return False
+    if not _TASK_CONTEXTUAL_CHAT_FOLLOWUP_RE.search(normalized):
+        return False
+    compact = re.sub(r"\s+", "", normalized).lower()
+    if "连续对话" in compact:
+        return True
+    if "长对话" in compact or "连续性测试" in compact:
+        return True
+    if "口令" in compact or "暗号" in compact or "关键词" in compact:
+        return True
+    if "锚点" in compact:
+        return True
+    if "测试报告" in compact or "系统测试" in compact:
+        return True
+    if "表达风格" in compact or "表达偏好" in compact:
+        return True
+    if "场子" in compact or "收尾" in compact:
+        return True
+    return not _TASK_CONTEXTUAL_CHAT_BLOCKER_RE.search(normalized)
+
+
+def _build_contextual_chat_followup_seed(text: str, *, route_source: str) -> dict[str, Any]:
+    normalized = _normalize_text(text)
+    return {
+        "route": "chat",
+        "target_id": "",
+        "task": normalized,
+        "reason_code": "RULE_CONTEXTUAL_CHAT_FOLLOWUP",
+        "confidence": 0.97,
+        "route_source": route_source,
+        "args": {
+            "text": normalized,
+        },
+    }
 
 
 def _strip_step_lead_in(text: str) -> str:
@@ -765,11 +989,13 @@ def _build_codex_workspace_route_seed(text: str) -> dict[str, Any] | None:
     normalized = _normalize_text(text)
     if not normalized:
         return None
+    if _looks_like_conversational_opinion_chat(normalized):
+        return None
     has_git_action = bool(_WORKSPACE_GIT_ACTION_RE.search(normalized))
     if not _WORKSPACE_DOMAIN_RE.search(normalized) and not has_git_action:
         return None
     has_write = bool(_WORKSPACE_WRITE_RE.search(normalized))
-    has_inspect = bool(_WORKSPACE_INSPECT_RE.search(normalized))
+    has_inspect = bool(_WORKSPACE_INSPECT_RE.search(normalized) and _WORKSPACE_EXPLICIT_INSPECT_RE.search(normalized))
     has_active_verify = bool(_WORKSPACE_ACTIVE_VERIFY_RE.search(normalized))
     if not (has_write or has_inspect or has_active_verify or has_git_action):
         return None
@@ -794,12 +1020,27 @@ def _build_codex_workspace_route_seed(text: str) -> dict[str, Any] | None:
     }
 
 
+def _parse_codex_recommendation_index(text: str) -> int | None:
+    match = _CODEX_EPUB_RECOMMENDATION_SELECTION_RE.search(_normalize_text(text))
+    if not match:
+        return None
+    raw = str(next((group for group in match.groups() if group), "")).strip()
+    if not raw:
+        return None
+    if raw.isdigit():
+        return max(1, int(raw))
+    return _CODEX_EPUB_RECOMMENDATION_INDEX_WORDS.get(raw)
+
+
 def _build_codex_production_route_seed(text: str) -> dict[str, Any] | None:
     normalized = _normalize_text(text)
     if not normalized:
         return None
     target_id = ""
-    if _CODEX_WORKBENCH_BRIEF_RE.search(normalized):
+    recommendation_index = _parse_codex_recommendation_index(normalized)
+    if recommendation_index:
+        target_id = "codex_epub_builder"
+    elif _CODEX_WORKBENCH_BRIEF_RE.search(normalized):
         target_id = "codex_workbench_brief"
     elif _CODEX_REPO_SENTINEL_RE.search(normalized) and _CODEX_PRODUCTION_BACKGROUND_RE.search(normalized):
         target_id = "codex_repo_sentinel"
@@ -807,10 +1048,34 @@ def _build_codex_production_route_seed(text: str) -> dict[str, Any] | None:
         target_id = "codex_memory_curator"
     elif _CODEX_DOCUMENT_DIGEST_RE.search(normalized):
         target_id = "codex_document_digest"
+    elif _CODEX_EPUB_BUILDER_RE.search(normalized):
+        target_id = "codex_epub_builder"
+    elif _CODEX_WEB_CORPUS_COLLECTOR_RE.search(normalized):
+        target_id = "codex_web_corpus_collector"
+    elif _CODEX_LIGHTNOVEL_RECOMMENDER_RE.search(normalized):
+        target_id = "codex_lightnovel_recommender"
+    elif _CODEX_FRONTEND_ACCEPTANCE_RE.search(normalized):
+        target_id = "codex_frontend_acceptance"
+    elif _CODEX_BROWSER_RESEARCH_RE.search(normalized):
+        target_id = "codex_browser_research"
     elif _CODEX_FRONTEND_REVIEW_RE.search(normalized):
         target_id = "codex_frontend_review"
     if not target_id:
         return None
+    url = _extract_first_url(normalized)
+    args = {
+        "task": normalized,
+        "problem_statement": normalized,
+        "start_background": True,
+        "text": normalized,
+        "user_message": normalized,
+    }
+    if url:
+        args["urls"] = [url]
+    if recommendation_index:
+        args["recommendation_index"] = recommendation_index
+    if target_id in {"codex_lightnovel_recommender", "codex_epub_builder"} or "lightnovel.fun" in normalized:
+        args["site_adapter"] = "lightnovel.fun"
     return {
         "route": "skill",
         "target_id": target_id,
@@ -818,13 +1083,7 @@ def _build_codex_production_route_seed(text: str) -> dict[str, Any] | None:
         "reason_code": "THALAMUS_RULE_CODEX_PRODUCTION",
         "confidence": 0.93,
         "route_source": "thalamus.rule",
-        "args": {
-            "task": normalized,
-            "problem_statement": normalized,
-            "start_background": True,
-            "text": normalized,
-            "user_message": normalized,
-        },
+        "args": args,
     }
 
 
@@ -833,6 +1092,84 @@ def _build_system_observation_route_seed(text: str) -> dict[str, Any] | None:
     if not normalized:
         return None
 
+    if _TASK_RESOURCE_PRESSURE_ANALYSIS_RE.search(normalized):
+        return {
+            "route": "skill",
+            "target_id": "resource_pressure_analysis",
+            "task": normalized,
+            "reason_code": "THALAMUS_RULE_RESOURCE_PRESSURE_ANALYSIS",
+            "confidence": 0.97,
+            "route_source": "thalamus.rule",
+            "args": {
+                "top_n": 40,
+                "sample_seconds": 0.5,
+                "persist": True,
+                "text": normalized,
+                "user_message": normalized,
+            },
+        }
+    if _TASK_RESOURCE_MANAGER_STATUS_RE.search(normalized):
+        return {
+            "route": "skill",
+            "target_id": "resource_manager_status",
+            "task": normalized,
+            "reason_code": "THALAMUS_RULE_RESOURCE_MANAGER_STATUS",
+            "confidence": 0.96,
+            "route_source": "thalamus.rule",
+            "args": {
+                "create_if_missing": False,
+                "text": normalized,
+                "user_message": normalized,
+            },
+        }
+    if _TASK_RESOURCE_RELEASE_RE.search(normalized):
+        return {
+            "route": "skill",
+            "target_id": "resource_release",
+            "task": normalized,
+            "reason_code": "THALAMUS_RULE_RESOURCE_RELEASE_DRY_RUN",
+            "confidence": 0.95,
+            "route_source": "thalamus.rule",
+            "args": {
+                "mode": "dry_run",
+                "dry_run": True,
+                "text": normalized,
+                "user_message": normalized,
+            },
+        }
+    if _TASK_PROCESS_RESOURCE_TOP_RE.search(normalized):
+        return {
+            "route": "skill",
+            "target_id": "process_resource_top",
+            "task": normalized,
+            "reason_code": "THALAMUS_RULE_PROCESS_RESOURCE_TOP",
+            "confidence": 0.96,
+            "route_source": "thalamus.rule",
+            "args": {
+                "limit": 20,
+                "sort_by": "memory",
+                "include_gpu": True,
+                "text": normalized,
+                "user_message": normalized,
+            },
+        }
+    if _TASK_RESOURCE_SNAPSHOT_RE.search(normalized):
+        return {
+            "route": "skill",
+            "target_id": "system_resource_snapshot",
+            "task": normalized,
+            "reason_code": "THALAMUS_RULE_SYSTEM_RESOURCE_SNAPSHOT",
+            "confidence": 0.96,
+            "route_source": "thalamus.rule",
+            "args": {
+                "include_gpu": True,
+                "include_processes": True,
+                "include_network": False,
+                "top_n": 12,
+                "text": normalized,
+                "user_message": normalized,
+            },
+        }
     if _TASK_PROCESS_LIST_RE.search(normalized):
         return {
             "route": "skill",
@@ -1120,6 +1457,8 @@ def _infer_supported_step_route(text: str) -> tuple[str, str, str] | None:
         return None
     if _looks_like_companion_open_chat(cleaned):
         return None
+    if _looks_like_conversational_opinion_chat(cleaned):
+        return None
 
     search_query = _extract_hub_skill_search_query(cleaned)
     if search_query:
@@ -1209,13 +1548,13 @@ def _build_direct_route_seed(text: str) -> dict[str, Any] | None:
     if not cleaned:
         return None
 
-    browser_seed = _build_browser_observation_route_seed(cleaned)
-    if browser_seed is not None:
-        return browser_seed
-
     codex_production_seed = _build_codex_production_route_seed(cleaned)
     if codex_production_seed is not None:
         return codex_production_seed
+
+    browser_seed = _build_browser_observation_route_seed(cleaned)
+    if browser_seed is not None:
+        return browser_seed
 
     memory_steward_seed = _build_memory_steward_route_seed(cleaned)
     if memory_steward_seed is not None:
@@ -1296,6 +1635,10 @@ def _build_direct_route_seed(text: str) -> dict[str, Any] | None:
             },
         }
 
+    system_seed = _build_system_observation_route_seed(cleaned)
+    if system_seed is not None:
+        return system_seed
+
     phatic_reason = _detect_short_companion_chat_reason(cleaned)
     if phatic_reason:
         return {
@@ -1313,9 +1656,28 @@ def _build_direct_route_seed(text: str) -> dict[str, Any] | None:
     if _looks_like_simple_technical_advice(cleaned):
         return _build_simple_technical_chat_seed(cleaned, route_source="thalamus.rule")
 
+    if _looks_like_contextual_chat_followup(cleaned):
+        return _build_contextual_chat_followup_seed(cleaned, route_source="thalamus.rule")
+
+    if _looks_like_conversational_opinion_chat(cleaned):
+        return _build_conversational_opinion_chat_seed(cleaned, route_source="thalamus.rule")
+
     system_seed = _build_system_observation_route_seed(cleaned)
     if system_seed is not None:
         return system_seed
+
+    if _TASK_CHAT_CONTINUATION_RE.match(cleaned):
+        return {
+            "route": "chat",
+            "target_id": "",
+            "task": cleaned,
+            "reason_code": "THALAMUS_RULE_PHATIC_CONTINUATION",
+            "confidence": 0.96,
+            "route_source": "thalamus.rule",
+            "args": {
+                "text": cleaned,
+            },
+        }
 
     if _TASK_CONTEXT_CONTINUATION_RE.match(cleaned):
         return {
@@ -1465,11 +1827,31 @@ def classify_task_intent_by_rules(text: str) -> dict[str, Any] | None:
     if not normalized:
         return None
 
+    if _TASK_RECENT_TURN_STRICT_RE.search(normalized):
+        return {
+            "route": "recent_turn",
+            "target_id": "",
+            "task": normalized,
+            "reason_code": "RULE_RECENT_TURN",
+            "confidence": 0.97,
+            "route_source": "rule",
+        }
+
     direct_seed = _build_direct_route_seed(normalized)
     if isinstance(direct_seed, dict):
         return direct_seed
 
     compact = re.sub(r"\s+", "", normalized).lower()
+
+    if _TASK_RECENT_TURN_RE.search(normalized):
+        return {
+            "route": "recent_turn",
+            "target_id": "",
+            "task": normalized,
+            "reason_code": "RULE_RECENT_TURN",
+            "confidence": 0.95,
+            "route_source": "rule",
+        }
 
     if _TASK_PROGRESS_QUERY_RE.search(compact):
         return {
@@ -1481,15 +1863,8 @@ def classify_task_intent_by_rules(text: str) -> dict[str, Any] | None:
             "route_source": "rule",
         }
 
-    if _TASK_RECENT_TURN_RE.search(normalized):
-        return {
-            "route": "recent_turn",
-            "target_id": "",
-            "task": normalized,
-            "reason_code": "RULE_RECENT_TURN",
-            "confidence": 0.95,
-            "route_source": "rule",
-        }
+    if _looks_like_contextual_chat_followup(normalized):
+        return _build_contextual_chat_followup_seed(normalized, route_source="rule")
 
     if _TASK_VISION_UI_RE.search(normalized):
         return {
@@ -1551,6 +1926,16 @@ def classify_task_intent_by_rules(text: str) -> dict[str, Any] | None:
             "task": normalized,
             "reason_code": "RULE_FORCE_MEMORY_STORE",
             "confidence": 0.95,
+            "route_source": "rule",
+        }
+
+    if _TASK_PLUGIN_BUILD_RE.search(normalized):
+        return {
+            "route": "skill",
+            "target_id": "codex_worker",
+            "task": normalized,
+            "reason_code": "RULE_FORCE_codex_worker",
+            "confidence": 0.93,
             "route_source": "rule",
         }
 
@@ -1723,14 +2108,17 @@ def classify_task_intent_fastpath(text: str) -> dict[str, Any] | None:
         return _build_simple_technical_chat_seed(normalized, route_source="rule.fastpath")
 
     compact = re.sub(r"\s+", "", normalized).lower()
-    if _TASK_PROGRESS_QUERY_RE.search(compact):
+    if _TASK_CHAT_CONTINUATION_RE.match(normalized):
         return {
-            "route": "task_progress",
+            "route": "chat",
             "target_id": "",
             "task": normalized,
-            "reason_code": "RULE_TASK_PROGRESS",
-            "confidence": 0.98,
+            "reason_code": "THALAMUS_RULE_PHATIC_CONTINUATION",
+            "confidence": 0.96,
             "route_source": "rule.fastpath",
+            "args": {
+                "text": normalized,
+            },
         }
 
     if _TASK_RECENT_TURN_RE.search(normalized):
@@ -1756,6 +2144,21 @@ def classify_task_intent_fastpath(text: str) -> dict[str, Any] | None:
             "route_source": "rule.fastpath",
             "bio_ops_reflex": bio_ops_reflex,
         }
+
+    if _TASK_PROGRESS_QUERY_RE.search(compact):
+        return {
+            "route": "task_progress",
+            "target_id": "",
+            "task": normalized,
+            "reason_code": "RULE_TASK_PROGRESS",
+            "confidence": 0.98,
+            "route_source": "rule.fastpath",
+        }
+
+    if _looks_like_contextual_chat_followup(normalized):
+        return _build_contextual_chat_followup_seed(normalized, route_source="rule.fastpath")
+    if _looks_like_conversational_opinion_chat(normalized):
+        return _build_conversational_opinion_chat_seed(normalized, route_source="rule.fastpath")
     return None
 
 
@@ -1947,17 +2350,29 @@ async def classify_task_intent_by_llm(
             return None
         user_prompt = user_prompt_template.format(tribe_summary=tribe_summary, text=str(text or "").strip())
 
-        timeout_ms = int(os.environ.get("HOST_CORTEX_INTENT_LLM_TIMEOUT_MS", "4000"))
+        thalamus_scene = str(os.environ.get("HOST_THALAMUS_INTENT_LLM_SCENE") or "THALAMUS_INTENT").strip().upper()
+        timeout_ms = int(
+            os.environ.get("HOST_THALAMUS_INTENT_LLM_TIMEOUT_MS")
+            or os.environ.get("HOST_CORTEX_INTENT_LLM_TIMEOUT_MS")
+            or "3000"
+        )
+        if provider_name == "codex":
+            _logger.info("[%s] thalamus_intent_llm_codex_runtime_ignored", request_id)
+            provider_name = ""
+            model_id = ""
+            api_key = ""
         base_url_override = str(router_runtime.get("base_url_override") or "").strip() or None
+        if not provider_name:
+            base_url_override = None
         agent_gen_params = dict(router_runtime.get("agent_gen_params") or {"temperature": 0.1, "top_p": 0.8})
 
         result = await acomplete_llm_with_pool(
             request_id=request_id,
-            scene_type="EXEC_INTENT",
+            scene_type=thalamus_scene,
             cognitive_tier="C",
-            provider_name=provider_name,
-            model_id=model_id,
-            api_key=api_key,
+            provider_name=provider_name or None,
+            model_id=model_id or None,
+            api_key=api_key or None,
             timeout_ms=timeout_ms,
             messages=[
                 {"role": "system", "content": system_prompt},
@@ -2211,6 +2626,11 @@ def _backfill_canonical_args(
             "codex_memory_curator",
             "codex_document_digest",
             "codex_frontend_review",
+            "codex_browser_research",
+            "codex_frontend_acceptance",
+            "codex_web_corpus_collector",
+            "codex_lightnovel_recommender",
+            "codex_epub_builder",
         }:
             if not _normalize_text(merged.get("task")):
                 merged["task"] = _normalize_text(merged.get("problem_statement")) or fallback_text
@@ -2237,19 +2657,33 @@ def _backfill_canonical_args(
                     merged["run_mode"] = "translate"
                 elif normalized_target == "codex_sql_audit":
                     merged["run_mode"] = "audit"
-                elif normalized_target in {"codex_workbench_brief", "codex_document_digest"}:
+                elif normalized_target in {
+                    "codex_workbench_brief",
+                    "codex_document_digest",
+                    "codex_browser_research",
+                }:
                     merged["run_mode"] = "research"
-                elif normalized_target in {"codex_repo_sentinel", "codex_memory_curator", "codex_frontend_review"}:
+                elif normalized_target in {"codex_repo_sentinel", "codex_memory_curator", "codex_frontend_review", "codex_frontend_acceptance"}:
                     merged["run_mode"] = "inspect"
+                elif normalized_target in {"codex_web_corpus_collector", "codex_lightnovel_recommender", "codex_epub_builder"}:
+                    merged["run_mode"] = "worker"
                 elif _looks_like_lightweight_codex_request(_normalize_text(merged.get("task")) or fallback_text):
                     merged["run_mode"] = "inspect"
                 else:
                     merged["run_mode"] = "worker"
             resolved_run_mode = _normalize_text(merged.get("run_mode"), lower=True)
             if not explicit_workspace:
-                if normalized_target in {"codex_workbench_brief", "codex_memory_curator", "codex_document_digest"}:
+                if normalized_target in {
+                    "codex_workbench_brief",
+                    "codex_memory_curator",
+                    "codex_document_digest",
+                    "codex_browser_research",
+                    "codex_web_corpus_collector",
+                    "codex_lightnovel_recommender",
+                    "codex_epub_builder",
+                }:
                     merged["workspace_strategy"] = "temp_workspace"
-                elif normalized_target in {"codex_repo_sentinel", "codex_frontend_review"}:
+                elif normalized_target in {"codex_repo_sentinel", "codex_frontend_review", "codex_frontend_acceptance"}:
                     merged["workspace_strategy"] = "runtime_repo"
                 elif resolved_run_mode == "inspect":
                     merged["allow_temp_workspace"] = True

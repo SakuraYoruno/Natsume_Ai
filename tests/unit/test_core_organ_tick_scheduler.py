@@ -27,6 +27,10 @@ def test_bootstrap_core_organ_tick_scheduler_registers_only_core_ticks(monkeypat
     old_registry_provider = scheduler_routes._registry
     old_health_provider = scheduler_routes._health_reporter
     monkeypatch.setattr(SchedulerTaskRegistry, "_instance", None)
+    monkeypatch.delenv("HOST_DIARY_WRITER_HOUR", raising=False)
+    monkeypatch.delenv("HOST_DIARY_WRITER_MINUTE", raising=False)
+    monkeypatch.delenv("HOST_DREAM_GENERATOR_HOUR", raising=False)
+    monkeypatch.delenv("HOST_DREAM_GENERATOR_MINUTE", raising=False)
 
     started = {"count": 0}
 
@@ -63,6 +67,67 @@ def test_bootstrap_core_organ_tick_scheduler_registers_only_core_ticks(monkeypat
         assert registry.get("long_term_memory_distillation") is None
         assert registry.get("gaming_companion_tick") is None
         assert registry.get("emergent_growth_weekly") is None
+    finally:
+        scheduler_routes._registry = old_registry_provider
+        scheduler_routes._health_reporter = old_health_provider
+
+
+def test_bootstrap_personality_scheduler_registers_lightnovel_recommender_without_daily_checkin(monkeypatch) -> None:
+    from host_brain.app.http_hooks import _bootstrap_personality_scheduler
+    from host_brain.scheduler import scheduler_routes
+    from host_brain.scheduler.task_registry import SchedulerTaskRegistry
+
+    old_registry_provider = scheduler_routes._registry
+    old_health_provider = scheduler_routes._health_reporter
+    monkeypatch.setattr(SchedulerTaskRegistry, "_instance", None)
+    monkeypatch.delenv("HOST_DIARY_WRITER_HOUR", raising=False)
+    monkeypatch.delenv("HOST_DIARY_WRITER_MINUTE", raising=False)
+    monkeypatch.delenv("HOST_DREAM_GENERATOR_HOUR", raising=False)
+    monkeypatch.delenv("HOST_DREAM_GENERATOR_MINUTE", raising=False)
+
+    started = {"count": 0}
+
+    def _fake_start(self) -> None:  # noqa: ANN001
+        started["count"] += 1
+
+    class _FakePushClient:
+        def push(self, message: dict) -> dict:
+            return {"status": "OK", "message": message}
+
+    monkeypatch.setattr("host_brain.scheduler.scheduler.NatsumeScheduler.start", _fake_start)
+
+    try:
+        statuses = _bootstrap_personality_scheduler(
+            logger=logging.getLogger("test"),
+            get_ledger=lambda: None,
+            retention_policy=None,
+            proactive_push_client_builder=lambda: _FakePushClient(),
+        )
+        registry = SchedulerTaskRegistry.get_instance()
+
+        assert started["count"] == 1
+        assert registry.get("proactive_talk_periodic") is not None
+        assert registry.get("evolution_cycle_daily") is not None
+        recommender_task = registry.get("lightnovel_recommender_daily")
+        assert recommender_task is not None
+        assert recommender_task.intent_template["skill_name"] == "codex_lightnovel_recommender"
+        assert recommender_task.trigger_config == {"hour": 10, "minute": 30, "catch_up_window_minutes": 180}
+        assert recommender_task.intent_template["args"]["workflow_owner"] == "natsume"
+        assert recommender_task.intent_template["args"]["driver_kind"] == "natsume_daily_recommendation"
+        diary_task = registry.get("diary_writer_daily")
+        assert diary_task is not None
+        assert diary_task.intent_template["skill_name"] == "diary_writer"
+        assert diary_task.trigger_config == {"hour": 23, "minute": 50}
+        dream_task = registry.get("dream_generator_sleep")
+        assert dream_task is not None
+        assert dream_task.intent_template["skill_name"] == "dream_generator"
+        assert dream_task.trigger_config == {"hour": 4, "minute": 20, "catch_up_window_minutes": 720}
+        assert registry.get("lightnovel_daily_checkin") is None
+        assert statuses["personality_tick_registry"].startswith("OK")
+        assert "lightnovel_recommender_daily[enabled]" in statuses["personality_tick_registry"]
+        assert "diary_writer_daily[enabled]" in statuses["personality_tick_registry"]
+        assert "dream_generator_sleep[enabled]" in statuses["personality_tick_registry"]
+        assert "lightnovel_daily_checkin" not in statuses["personality_tick_registry"]
     finally:
         scheduler_routes._registry = old_registry_provider
         scheduler_routes._health_reporter = old_health_provider

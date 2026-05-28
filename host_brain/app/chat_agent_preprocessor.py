@@ -766,6 +766,7 @@ def _should_buffer_stream_output(*, emotion_context: Any, bond_summary: Any, ren
         "emoji_social_followup",
         "greeting",
         "presence_ping",
+        "auditory_check",
         "light_ack",
         "playful_ping",
         "identity",
@@ -814,7 +815,7 @@ def _render_plan_step_success_cn(step: Dict[str, Any], *, render_target_lang: st
     result_text = str(step.get("result_text") or "").strip()
     description_or_target = description or target_id
     # 特殊 target_id 处理
-    special_targets = {"web_search", "memory_store", "system_info", "process_list", "network_status", "hub_skill_search", "hub_skill_list", "hub_skill_install", "hub_skill_remove", "file_read", "file_write", "file_list", *CODEX_RUNTIME_SKILL_IDS, "intent_agent"}
+    special_targets = {"web_search", "memory_store", "system_info", "system_resource_snapshot", "process_resource_top", "resource_pressure_analysis", "resource_manager_status", "resource_release", "process_list", "network_status", "hub_skill_search", "hub_skill_list", "hub_skill_install", "hub_skill_remove", "file_read", "file_write", "file_list", *CODEX_RUNTIME_SKILL_IDS, "intent_agent"}
     if target_id in special_targets:
         if target_id == "web_search":
             topic = description or _runtime_text("default_topic", render_target_lang=render_target_lang)
@@ -1039,7 +1040,17 @@ def _infer_open_app_name(task_text: str, *, render_target_lang: str) -> str:
     )
 
 
-_SYSTEM_RESULT_SKILL_IDS = {"system_info", "process_list", "network_status", "open_app"}
+_SYSTEM_RESULT_SKILL_IDS = {
+    "system_info",
+    "system_resource_snapshot",
+    "process_resource_top",
+    "resource_pressure_analysis",
+    "resource_manager_status",
+    "resource_release",
+    "process_list",
+    "network_status",
+    "open_app",
+}
 
 
 def _mapping_from_any(value: Any) -> dict[str, Any]:
@@ -1203,6 +1214,146 @@ def _build_system_info_reply(ctx: SubAgentContext, *, render_target_lang: str = 
     return "系统状态查到了：" + "；".join(parts) + "。"
 
 
+def _format_mb(value: Any) -> str:
+    try:
+        return f"{float(value):.0f}MB"
+    except (TypeError, ValueError):
+        return "-"
+
+
+def _format_process_resource_preview(item: Any) -> str:
+    row = _mapping_from_any(item)
+    name = str(row.get("name") or "process").strip()
+    pid = row.get("pid")
+    mem = _format_mb(row.get("memory_mb"))
+    vram = _format_mb(row.get("vram_mb"))
+    cpu = _format_percent(row.get("cpu_percent"))
+    role = str(row.get("role") or "").strip()
+    suffix = f"，{role}" if role else ""
+    return f"{name}(PID {pid or '-'}，CPU {cpu}，内存 {mem}，显存 {vram}{suffix})"
+
+
+def _build_system_resource_snapshot_reply(ctx: SubAgentContext, *, render_target_lang: str = "zh") -> str | None:
+    detail = _skill_result_detail(ctx)
+    if not detail:
+        return None
+    snapshot = _mapping_from_any(detail.get("snapshot"))
+    pressure = _mapping_from_any(detail.get("pressure"))
+    memory = _mapping_from_any(snapshot.get("memory"))
+    cpu = _mapping_from_any(snapshot.get("cpu"))
+    gpu = _mapping_from_any(snapshot.get("gpu"))
+    gpu_summary = _mapping_from_any(gpu.get("summary"))
+    process_top = _mapping_from_any(detail.get("process_top"))
+    processes = list(process_top.get("processes") or []) if isinstance(process_top.get("processes"), list) else []
+    recommendations = list(detail.get("recommendations") or []) if isinstance(detail.get("recommendations"), list) else []
+
+    parts = [
+        f"整机资源快照：压力 {str(pressure.get('status') or 'UNKNOWN').upper()}",
+        f"CPU {_format_percent(cpu.get('percent'))}",
+        (
+            f"内存 {_format_percent(memory.get('percent'))}"
+            f"（可用 {_format_gb(memory.get('available_gb'))}/总 {_format_gb(memory.get('total_gb'))}）"
+        ),
+    ]
+    if gpu_summary:
+        parts.append(
+            f"GPU {_format_percent(gpu_summary.get('utilization_percent'))}"
+            f"，显存 {_format_mb(gpu_summary.get('memory_used_mb'))}/{_format_mb(gpu_summary.get('memory_total_mb'))}"
+        )
+    if processes:
+        parts.append("热点：" + "；".join(_format_process_resource_preview(item) for item in processes[:4]))
+    if recommendations:
+        parts.append("建议：" + _build_reply_preview(str(recommendations[0]), limit=90))
+    return "。".join(part.rstrip("。") for part in parts if part).rstrip("。") + "。"
+
+
+def _build_process_resource_top_reply(ctx: SubAgentContext, *, render_target_lang: str = "zh") -> str | None:
+    detail = _skill_result_detail(ctx)
+    processes = list(detail.get("processes") or []) if isinstance(detail.get("processes"), list) else []
+    if not processes:
+        return None
+    sort_by = str(detail.get("sort_by") or "memory").strip()
+    preview = "；".join(_format_process_resource_preview(item) for item in processes[:5])
+    return f"资源热点进程查到了（按 {sort_by}）：{preview}。"
+
+
+def _build_resource_pressure_analysis_reply(ctx: SubAgentContext, *, render_target_lang: str = "zh") -> str | None:
+    detail = _skill_result_detail(ctx)
+    if not detail:
+        return None
+    summary = str(detail.get("summary") or "").strip()
+    hypotheses = list(detail.get("hypotheses") or []) if isinstance(detail.get("hypotheses"), list) else []
+    actions = _mapping_from_any(detail.get("actions"))
+    parts: list[str] = []
+    if summary:
+        parts.append(summary)
+    if hypotheses:
+        previews = []
+        for item in hypotheses[:3]:
+            row = _mapping_from_any(item)
+            title = str(row.get("title") or "").strip()
+            confidence = row.get("confidence")
+            severity = str(row.get("severity") or "").strip()
+            if title:
+                previews.append(f"{title}（{severity}，置信 {confidence}）")
+        if previews:
+            parts.append("主要根因：" + "；".join(previews))
+    next_steps = list(actions.get("next_steps") or []) if isinstance(actions.get("next_steps"), list) else []
+    if next_steps:
+        parts.append("下一步：" + _build_reply_preview(str(next_steps[0]), limit=100))
+    do_not_touch = list(actions.get("do_not_touch") or []) if isinstance(actions.get("do_not_touch"), list) else []
+    if do_not_touch:
+        parts.append("不可自动动：" + _build_reply_preview("；".join(str(item) for item in do_not_touch[:3]), limit=110))
+    if not parts:
+        return None
+    return "。".join(part.rstrip("。") for part in parts if part).rstrip("。") + "。"
+
+
+def _build_resource_manager_status_reply(ctx: SubAgentContext, *, render_target_lang: str = "zh") -> str | None:
+    detail = _skill_result_detail(ctx)
+    if not detail:
+        return None
+    if not bool(detail.get("registered")):
+        return "整机资源管家当前没有注册到 Host 进程里。"
+    running = "运行中" if bool(detail.get("running")) else "未运行"
+    decision = _mapping_from_any(detail.get("last_decision"))
+    snapshot = _mapping_from_any(detail.get("last_snapshot"))
+    pressure = _mapping_from_any(snapshot.get("pressure"))
+    summary = str(decision.get("summary") or "").strip()
+    if summary:
+        summary = "，最近判断：" + _build_reply_preview(summary, limit=90)
+    return (
+        f"整机资源管家{running}：采样间隔 {detail.get('interval_s')}s，"
+        f"LLM分析={'开' if bool(detail.get('llm_enabled')) else '关'}，"
+        f"自动GC={'开' if bool(detail.get('auto_gc_enabled')) else '关'}，"
+        f"自动工作集回收={'开' if bool(detail.get('auto_trim_enabled')) else '关'}，"
+        f"最近压力 {str(pressure.get('status') or 'UNKNOWN').upper()}{summary}。"
+    )
+
+
+def _build_resource_release_reply(ctx: SubAgentContext, *, render_target_lang: str = "zh") -> str | None:
+    detail = _skill_result_detail(ctx)
+    if not detail:
+        return None
+    if bool(detail.get("dry_run")):
+        candidates = list(detail.get("release_candidates") or []) if isinstance(detail.get("release_candidates"), list) else []
+        recommendations = list(detail.get("recommendations") or []) if isinstance(detail.get("recommendations"), list) else []
+        preview = "；".join(
+            f"{_mapping_from_any(item).get('name')}(PID {_mapping_from_any(item).get('pid')}，{_mapping_from_any(item).get('recommended_action')})"
+            for item in candidates[:4]
+        )
+        base = "资源释放预案已生成：默认不会自动强杀进程"
+        if preview:
+            base += "，候选：" + preview
+        if recommendations:
+            base += "。建议：" + _build_reply_preview(str(recommendations[0]), limit=90)
+        return base.rstrip("。") + "。"
+    mode = str(detail.get("mode") or "").strip()
+    if bool(detail.get("success")):
+        return f"资源释放动作已执行：mode={mode}，结果 {detail.get('trimmed', detail.get('collected', 'OK'))}。"
+    return f"资源释放未执行：{detail.get('reason_code') or detail.get('detail') or '需要确认'}。"
+
+
 def _build_process_list_reply(ctx: SubAgentContext, *, render_target_lang: str = "zh") -> str | None:
     detail = _skill_result_detail(ctx)
     processes = list(detail.get("processes") or []) if isinstance(detail.get("processes"), list) else []
@@ -1254,6 +1405,16 @@ def _build_system_skill_reply(ctx: SubAgentContext, *, render_target_lang: str =
     agent_id = str(ctx.agent_id or "").strip()
     if agent_id == "system_info":
         return _build_system_info_reply(ctx, render_target_lang=render_target_lang)
+    if agent_id == "system_resource_snapshot":
+        return _build_system_resource_snapshot_reply(ctx, render_target_lang=render_target_lang)
+    if agent_id == "process_resource_top":
+        return _build_process_resource_top_reply(ctx, render_target_lang=render_target_lang)
+    if agent_id == "resource_pressure_analysis":
+        return _build_resource_pressure_analysis_reply(ctx, render_target_lang=render_target_lang)
+    if agent_id == "resource_manager_status":
+        return _build_resource_manager_status_reply(ctx, render_target_lang=render_target_lang)
+    if agent_id == "resource_release":
+        return _build_resource_release_reply(ctx, render_target_lang=render_target_lang)
     if agent_id == "process_list":
         return _build_process_list_reply(ctx, render_target_lang=render_target_lang)
     if agent_id == "network_status":

@@ -8,6 +8,7 @@ DevSpec §21.6：
   DELETE /scheduler/tasks/{task_id}    注销任务
   POST   /scheduler/tasks/{task_id}/enable   启用任务
   POST   /scheduler/tasks/{task_id}/disable  禁用任务
+  POST   /scheduler/tasks/{task_id}/trigger  立即触发任务
   GET    /scheduler/health             所有任务健康快照
 """
 
@@ -36,16 +37,19 @@ router = APIRouter(prefix="/scheduler", tags=["scheduler"])
 # ── 全局注册表与健康报告器（由 app factory 注入） ──
 _registry: SchedulerTaskRegistry | None = None
 _health_reporter: SchedulerHealthReporter | None = None
+_scheduler: Any | None = None
 
 
 def set_scheduler_providers(
     registry: SchedulerTaskRegistry,
     health_reporter: SchedulerHealthReporter,
+    scheduler: Any | None = None,
 ) -> None:
     """由 app factory 在启动时注入调度器依赖。"""
-    global _registry, _health_reporter
+    global _registry, _health_reporter, _scheduler
     _registry = registry
     _health_reporter = health_reporter
+    _scheduler = scheduler
 
 
 def _get_registry() -> SchedulerTaskRegistry:
@@ -64,6 +68,15 @@ def _get_health() -> SchedulerHealthReporter:
             detail={"reason_code": "SCHEDULER_NOT_INITIALIZED", "detail": "scheduler health reporter not initialized"},
         )
     return _health_reporter
+
+
+def _get_scheduler() -> Any:
+    if _scheduler is None or not hasattr(_scheduler, "trigger_task_by_id_async"):
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"reason_code": "SCHEDULER_NOT_INITIALIZED", "detail": "scheduler async runtime not initialized"},
+        )
+    return _scheduler
 
 
 def _build_immune_gate_state() -> Dict[str, Any]:
@@ -236,6 +249,7 @@ class TaskCreateRequest(BaseModel):
     enabled: bool = Field(default=True, description="是否启用")
     max_consecutive_failures: int = Field(default=3, description="最大连续失败次数")
     description: str = Field(default="", description="任务描述")
+    resource_profile: Dict[str, Any] = Field(default_factory=dict, description="资源画像")
 
 
 class TaskPatchRequest(BaseModel):
@@ -246,6 +260,7 @@ class TaskPatchRequest(BaseModel):
     enabled: Optional[bool] = None
     max_consecutive_failures: Optional[int] = None
     description: Optional[str] = None
+    resource_profile: Optional[Dict[str, Any]] = None
 
 
 class TaskResponse(BaseModel):
@@ -258,6 +273,7 @@ class TaskResponse(BaseModel):
     enabled: bool
     max_consecutive_failures: int
     description: str
+    resource_profile: Dict[str, Any]
 
 
 class TaskWithHealthResponse(BaseModel):
@@ -278,6 +294,7 @@ def _task_to_response(task: SchedulerTaskConfig) -> TaskResponse:
         enabled=task.enabled,
         max_consecutive_failures=task.max_consecutive_failures,
         description=task.description,
+        resource_profile=dict(task.resource_profile or {}),
     )
 
 
@@ -327,6 +344,7 @@ async def create_task(req: TaskCreateRequest) -> TaskResponse:
         enabled=req.enabled,
         max_consecutive_failures=req.max_consecutive_failures,
         description=req.description,
+        resource_profile=dict(req.resource_profile or {}),
     )
 
     try:
@@ -407,6 +425,8 @@ async def update_task(task_id: str, req: TaskPatchRequest) -> TaskResponse:
         task.max_consecutive_failures = req.max_consecutive_failures
     if req.description is not None:
         task.description = req.description
+    if req.resource_profile is not None:
+        task.resource_profile = dict(req.resource_profile or {})
 
     return _task_to_response(task)
 
@@ -454,6 +474,43 @@ async def disable_task(task_id: str) -> TaskResponse:
 
     task.enabled = False
     return _task_to_response(task)
+
+
+@router.post("/tasks/{task_id}/trigger")
+async def trigger_task(task_id: str) -> Dict[str, Any]:
+    """POST /scheduler/tasks/{task_id}/trigger — 立即触发任务。"""
+    registry = _get_registry()
+    task = registry.get(task_id)
+    if task is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"reason_code": SCHED_TASK_NOT_FOUND, "detail": f"task not found: {task_id!r}"},
+        )
+    if not task.enabled:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"reason_code": "SCHED_TASK_DISABLED", "detail": f"task disabled: {task_id!r}"},
+        )
+
+    scheduler = _get_scheduler()
+    result = dict(scheduler.trigger_task_by_id_async(task_id) or {})
+    status_token = str(result.get("status") or "").strip().upper()
+    if status_token == "SUSPENDED":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "reason_code": result.get("reason_code") or "SCHED_TASK_SUSPENDED",
+                "detail": f"task suspended: {task_id!r}",
+                "result": result,
+            },
+        )
+    return {
+        "task_id": task_id,
+        "triggered": status_token not in {"", "SKIPPED", "REJECTED", "DEFERRED", "ERROR", "FAILED"},
+        "queued": status_token == "QUEUED",
+        "status": status_token or "UNKNOWN",
+        "result": result,
+    }
 
 
 @router.get("/health")

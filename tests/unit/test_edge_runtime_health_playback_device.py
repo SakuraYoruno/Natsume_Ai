@@ -49,6 +49,45 @@ def test_audio_playback_device_health_skips_device_probe_by_default() -> None:
     assert health["resolved_output_device"] is None
 
 
+def test_audio_playback_device_limits_audio_before_playback() -> None:
+    import numpy as np
+
+    captured: dict[str, object] = {}
+
+    class _PlayableSoundDevice:
+        @staticmethod
+        def play(audio_data, *, samplerate, device, blocking):  # type: ignore[no-untyped-def]
+            captured["audio_data"] = np.asarray(audio_data)
+            captured["samplerate"] = samplerate
+            captured["device"] = device
+            captured["blocking"] = blocking
+
+        @staticmethod
+        def wait() -> None:
+            captured["waited"] = True
+
+    device = AudioPlaybackDevice(sample_rate=32000, device_index=7)
+    audio = np.asarray([2.0, -2.0, 0.5], dtype=np.float32)
+
+    with patch.dict("sys.modules", {"sounddevice": _PlayableSoundDevice}), patch.dict(
+        "os.environ",
+        {
+            "EDGE_TTS_PLAYBACK_TARGET_PEAK": "0.5",
+            "EDGE_TTS_PLAYBACK_GAIN": "0.5",
+        },
+        clear=False,
+    ):
+        result = device.play(audio, blocking=True)
+
+    assert result.success
+    prepared = captured["audio_data"]
+    assert float(np.max(np.abs(prepared))) <= 0.26
+    health = device.health()
+    assert health["last_audio_stats"]["prepared"] is True
+    assert health["last_audio_stats"]["peak_before"] == 2.0
+    assert health["last_audio_stats"]["peak_after"] <= 0.26
+
+
 def test_collect_health_includes_tts_playback_device_component() -> None:
     runtime = SimpleNamespace(
         config=SimpleNamespace(

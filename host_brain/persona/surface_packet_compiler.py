@@ -176,7 +176,7 @@ def compile_reply_control_packet(
             *surface_influence_facts(influence),
         ],
         limit=max_facts,
-        max_chars=180,
+        max_chars=320,
     )
     packet_style_anchor = _clean_list(
         [
@@ -393,7 +393,7 @@ def _looks_like_explicit_memory_question(user_message: str) -> bool:
     text = str(user_message or "")
     if not text:
         return False
-    return any(token in text for token in ("记得", "还记", "之前", "上次", "哪里", "哪块", "什么", "哪个"))
+    return any(token in text for token in ("记得", "还记", "之前", "上次", "哪里", "哪块", "什么", "哪个", "哪本", "哪部"))
 
 
 def _salient_memory_answer_terms(memory_text: str, *, user_text: str) -> list[str]:

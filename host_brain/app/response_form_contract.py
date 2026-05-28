@@ -130,7 +130,7 @@ def has_structured_media_payload(
 def derive_render_profile_for_response_form(response_form: str | None) -> str:
     form_class = classify_response_form(response_form)
     if form_class == ResponseFormClass.VOICE:
-        return "ja_voice"
+        return "zh_voice"
     if form_class == ResponseFormClass.MEDIA:
         return "media_action"
     return "zh_text"

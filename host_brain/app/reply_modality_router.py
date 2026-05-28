@@ -24,6 +24,7 @@ _VISUAL_ANSWER_TOPICS = {
 _PHATIC_TEXT_TOPICS = {
     "greeting",
     "presence_ping",
+    "auditory_check",
     "light_ack",
     "phatic_punct",
     "playful_ping",

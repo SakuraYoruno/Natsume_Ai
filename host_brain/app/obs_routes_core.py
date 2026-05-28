@@ -17,6 +17,7 @@ from dataclasses import dataclass
 import json
 import logging
 import os
+from pathlib import Path
 import threading
 import time
 from typing import Any, Callable, Dict, List, Literal, Optional
@@ -60,6 +61,17 @@ def _env_int(name: str, default: int, *, minimum: int) -> int:
         return max(int(raw), minimum)
     except (TypeError, ValueError):
         return max(int(default), minimum)
+
+
+def _env_bool(name: str, default: bool) -> bool:
+    raw = str(os.getenv(name) or "").strip().lower()
+    if not raw:
+        return bool(default)
+    if raw in {"1", "true", "yes", "on"}:
+        return True
+    if raw in {"0", "false", "no", "off"}:
+        return False
+    return bool(default)
 
 
 _TRACE_BUILD_TIMEOUT_SEC = _env_float("OBS_TRACE_BUILD_TIMEOUT_SEC", 3.5, minimum=1.0)
@@ -967,11 +979,6 @@ def _summarize_recall(retrieval_rows: List[Dict[str, Any]]) -> Optional[Dict[str
             summary["route_error_count"] = payload_dict.get("route_error_count")
             if payload_dict.get("items"):
                 summary["items"] = payload_dict.get("items")
-        elif op_kind == "RERANK":
-            summary["topk_count"] = payload_dict.get("topk_count")
-            summary["rerank_provider"] = payload_dict.get("provider") or payload_dict.get("effective_provider")
-            if payload_dict.get("topk"):
-                summary["topk"] = payload_dict.get("topk")
         elif op_kind == "EVIDENCE_PACK":
             summary["evidence_refs_count"] = payload_dict.get("evidence_refs_count")
             summary["pack_id"] = payload_dict.get("pack_id")
@@ -1170,7 +1177,6 @@ def _build_retrieval_trace_nodes(
         "AGENTIC_RAG": "Agentic RAG",
         "EMBEDDING": "Recall Embedding",
         "RECALL": "Recall Fusion",
-        "RERANK": "Recall Rerank",
         "EVIDENCE_PACK": "Evidence Pack",
         "PIPELINE": "Retrieval Pipeline",
     }
@@ -1179,7 +1185,6 @@ def _build_retrieval_trace_nodes(
         "AGENTIC_RAG": "agentic_rag",
         "EMBEDDING": "retrieval_embedding",
         "RECALL": "recall_fusion",
-        "RERANK": "retrieval_rerank",
         "EVIDENCE_PACK": "retrieval_evidence_pack",
         "PIPELINE": "retrieval_pipeline",
     }
@@ -1189,6 +1194,8 @@ def _build_retrieval_trace_nodes(
     agentic_rag_emitted = False
     for row in retrieval_rows:
         op_kind = str(row.get("op_kind") or "").strip().upper() or "UNKNOWN"
+        if op_kind == "RERANK":
+            continue
         payload = _safe_json(row.get("payload"))
         payload_dict = dict(payload) if isinstance(payload, dict) else {}
         latency_ms = payload_dict.get("latency_ms")
@@ -1658,8 +1665,6 @@ def _trace_node_order_rank(node: TraceNode) -> int:
         return 30
     if node_id in ("recall_fusion",) or node_id.startswith("recall_fusion"):
         return 31
-    if node_id.startswith("retrieval_rerank"):
-        return 32
     if node_id.startswith("retrieval_evidence_pack"):
         return 33
     if node_id.startswith("retrieval_pipeline"):
@@ -3436,6 +3441,86 @@ def get_llm_nodes(
         ))
 
     return LlmNodesResponse(nodes=nodes, timestamp=_now_ms())
+
+
+def _load_resource_manager_status_file() -> dict[str, Any]:
+    status_path = Path(__file__).resolve().parents[1] / "data" / "runtime_resource_manager.json"
+    if not status_path.exists():
+        return {}
+    try:
+        payload = json.loads(status_path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        logger.debug("resource manager status file read failed: %s", exc)
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _compact_resource_manager_status(payload: dict[str, Any]) -> dict[str, Any]:
+    last_snapshot = payload.get("last_snapshot") if isinstance(payload.get("last_snapshot"), dict) else {}
+    last_decision = payload.get("last_decision") if isinstance(payload.get("last_decision"), dict) else {}
+    last_actions = payload.get("last_actions") if isinstance(payload.get("last_actions"), list) else []
+    last_gate_decisions = payload.get("last_gate_decisions") if isinstance(payload.get("last_gate_decisions"), list) else []
+    last_llm_attempts = payload.get("last_llm_attempts") if isinstance(payload.get("last_llm_attempts"), list) else []
+    return {
+        "running": bool(payload.get("running")),
+        "interval_s": payload.get("interval_s"),
+        "llm_enabled": bool(payload.get("llm_enabled")),
+        "auto_gc_enabled": bool(payload.get("auto_gc_enabled")),
+        "auto_trim_enabled": bool(payload.get("auto_trim_enabled")),
+        "last_tick_ts_ms": payload.get("last_tick_ts_ms"),
+        "tick_count": payload.get("tick_count") or 0,
+        "analysis_count": payload.get("analysis_count") or 0,
+        "auto_action_count": payload.get("auto_action_count") or 0,
+        "last_error": payload.get("last_error"),
+        "last_llm_error": payload.get("last_llm_error"),
+        "last_llm_attempts": last_llm_attempts[:8],
+        "last_snapshot": last_snapshot,
+        "last_decision": last_decision,
+        "last_actions": last_actions[:12],
+        "last_gate_decisions": last_gate_decisions[:20],
+        "status_path": payload.get("status_path"),
+    }
+
+
+@router.get("/resource-manager/status")
+def get_resource_manager_status():
+    """Whole-system resource manager status for scheduler explainability."""
+    if not _env_bool("HOST_RESOURCE_MANAGER_ENABLED", False):
+        return {
+            "status": "DISABLED",
+            "source": "disabled",
+            "timestamp": _now_ms(),
+            "running": False,
+            "registered": False,
+            "detail": "SystemResourceManager is disabled.",
+            "status_path": str(Path(__file__).resolve().parents[1] / "data" / "runtime_resource_manager.json"),
+        }
+
+    source = "unavailable"
+    raw_status: dict[str, Any] = {}
+    try:
+        from host_brain.app.dependencies import get_resource_manager  # noqa: PLC0415
+
+        manager = get_resource_manager(create_if_missing=False)
+        if manager is not None:
+            status = manager.get_status()
+            raw_status = status if isinstance(status, dict) else {}
+            source = "live_manager"
+    except Exception as exc:
+        logger.debug("resource manager live status unavailable: %s", exc)
+
+    if not raw_status:
+        raw_status = _load_resource_manager_status_file()
+        if raw_status:
+            source = "status_file"
+
+    status = "OK" if raw_status else "UNAVAILABLE"
+    return {
+        "status": status,
+        "source": source,
+        "timestamp": _now_ms(),
+        **_compact_resource_manager_status(raw_status),
+    }
 
 
 # ---------------------------------------------------------------------------

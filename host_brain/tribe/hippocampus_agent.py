@@ -92,7 +92,7 @@ class HippocampusAgent:
                 "degraded": False,
                 "route_count": 0,
                 "candidate_count": 0,
-                "rerank_topk": 0,
+                "topk_count": 0,
                 "routes": [],
                 "target_stores": [],
                 "query_plan": {"intent": "legacy_removed", "text_len": len(str(message or ""))},

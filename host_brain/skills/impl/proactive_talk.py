@@ -114,10 +114,7 @@ def _render_policy_blocks_proactive(render_policy: Mapping[str, Any] | None) -> 
     policy = _coerce_render_policy(render_policy)
     if not policy:
         return False
-    return (
-        not bool(policy.get("allow_proactive_after_reply", True))
-        or bool(policy.get("should_be_withdrawn", False))
-    )
+    return not bool(policy.get("allow_proactive_after_reply", True))
 
 
 def _apply_render_policy_to_proactive_text(text: str, render_policy: Mapping[str, Any] | None) -> str:
@@ -483,6 +480,7 @@ def execute_proactive_talk(
     llm_generator: LLMGenerator | None = ctx.get("llm_generator")
     greeting: str = ""
     fallback_to_template = False
+    fallback_reason: str | None = None
 
     if llm_generator:
         try:
@@ -505,6 +503,10 @@ def execute_proactive_talk(
             llm_result = llm_generator(llm_input)
             greeting = str(llm_result.get("greeting", llm_result.get("content", "")))
             fallback_to_template = bool(llm_result.get("fallback_to_template"))
+            fallback_reason = str(llm_result.get("fallback_reason") or "").strip() or None
+            if not greeting.strip():
+                fallback_to_template = True
+                fallback_reason = fallback_reason or "LLM_EMPTY_OUTPUT"
         except Exception as exc:
             logger.warning("LLM proactive talk failed: %s", exc)
             return {
@@ -583,4 +585,5 @@ def execute_proactive_talk(
             "forbidden_actions": [],
         },
         "template_fallback_used": fallback_to_template,
+        "template_fallback_reason": fallback_reason,
     }

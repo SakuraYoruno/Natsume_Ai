@@ -1,4 +1,5 @@
 import json
+import os
 import unittest
 from pathlib import Path
 
@@ -110,6 +111,9 @@ class TestVoiceRpcContract(unittest.TestCase):
         valid = _load_json(FIXTURES / "good" / "speak_valid.json")
         missing_text = _load_json(FIXTURES / "bad" / "speak_missing_text.json")
         valid["payload"]["lang_hint"] = "JA-JP"
+        valid["payload"]["speed"] = 1.18
+        valid["payload"]["pitch"] = -0.25
+        valid["payload"]["style_note"] = "soft but excited"
 
         ok = self.rpc.speak(
             request_id=valid["request_id"],
@@ -122,6 +126,9 @@ class TestVoiceRpcContract(unittest.TestCase):
         self.assertEqual(EVENT_SPEAK, ok.event["event_type"])
         self.assertEqual(DIRECTION_HOST_TO_EDGE, ok.event["direction"])
         self.assertEqual("ja", ok.event["lang_hint"])
+        self.assertEqual(1.18, ok.event["speed"])
+        self.assertEqual(-0.25, ok.event["pitch"])
+        self.assertEqual("soft but excited", ok.event["style_note"])
 
         bad = self.rpc.speak(
             request_id=missing_text["request_id"],
@@ -156,6 +163,31 @@ class TestVoiceRpcContract(unittest.TestCase):
         self.assertTrue(ok.success)
         self.assertEqual(STATUS_ACCEPTED, ok.status)
         self.assertEqual("zh", ok.event["lang_hint"])
+
+    def test_t_voice_02b_speak_uses_configured_default_emotion(self) -> None:
+        previous = os.environ.get("EDGE_TTS_DEFAULT_EMOTION_TAG")
+        os.environ["EDGE_TTS_DEFAULT_EMOTION_TAG"] = "happy"
+        try:
+            ok = self.rpc.speak(
+                request_id="req_voice_default_emotion",
+                payload={
+                    "session_id": "sess-voice-default-emotion",
+                    "utterance_id": "utt-voice-default-emotion",
+                    "text": "默认轻快一点。",
+                    "lang_hint": "zh",
+                    "export_audio": True,
+                },
+                ts_ms=self.now_ms + 13,
+            )
+        finally:
+            if previous is None:
+                os.environ.pop("EDGE_TTS_DEFAULT_EMOTION_TAG", None)
+            else:
+                os.environ["EDGE_TTS_DEFAULT_EMOTION_TAG"] = previous
+
+        self.assertTrue(ok.success)
+        self.assertEqual("HAPPY", ok.event["emotion_tag"])
+        self.assertTrue(ok.event["export_audio"])
 
     def test_t_voice_02c_speak_rejects_unsupported_lang_hint(self) -> None:
         payload = {

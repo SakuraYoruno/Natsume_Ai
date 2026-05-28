@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from host_brain.persona.galgame_text_contract import build_galgame_text_contract
 from host_brain.persona.galgame_text_scorer import score_galgame_candidate
-from host_brain.persona.text_quality_gate import TextQualityGateResult
+from host_brain.persona.text_quality_gate import TextQualityGateResult, get_text_quality_gate
 
 
 def test_wait_contract_scores_pressure_lower_than_clean_release() -> None:
@@ -478,12 +478,39 @@ def test_praise_contract_rejects_help_guess() -> None:
         text="哼，突然说这个干嘛……！尼尼今天是不是吃错药了。不过……谢啦。",
         contract=contract,
     )
+    staged = score_galgame_candidate(
+        text="哈？突然夸我干嘛。老哥你这话夹着怪让人不好意思的。不过我就收下啦，只许说一次喔。",
+        contract=contract,
+    )
+    natural = score_galgame_candidate(
+        text="突然这么夸我啊……行，我会当真的。",
+        contract=contract,
+    )
 
     assert contract.scene_id == "praise"
     assert "CONTRACT_FORBIDDEN_SURFACE" in scored.reason_codes
     assert "CONTRACT_FORBIDDEN_SURFACE" in indirect.reason_codes
     assert "CONTRACT_FORBIDDEN_SURFACE" in brag_probe.reason_codes
     assert "CONTRACT_FORBIDDEN_SURFACE" in odd_probe.reason_codes
+    assert "TASTE_STAGED_PRAISE_REACTION" in staged.reason_codes
+    assert "CONTRACT_FORBIDDEN_SURFACE" not in natural.reason_codes
+    assert "TASTE_STAGED_PRAISE_REACTION" not in natural.reason_codes
+
+
+def test_praise_quality_gate_rejects_staged_combo_not_single_words() -> None:
+    gate = get_text_quality_gate()
+
+    staged = gate.validate(
+        text="哈？突然夸我干嘛。老哥你这话夹着怪让人不好意思的。不过我就收下啦，只许说一次喔。",
+        scene_id="praise",
+    )
+    natural = gate.validate(
+        text="突然这么夸我啊……行，我会当真的。",
+        scene_id="praise",
+    )
+
+    assert "FORBIDDEN_TEMPLATE_TEXT" in staged.reason_codes
+    assert "FORBIDDEN_TEMPLATE_TEXT" not in natural.reason_codes
 
 
 def test_small_failure_contract_rejects_blaming_comfort() -> None:

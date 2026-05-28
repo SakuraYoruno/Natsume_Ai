@@ -90,6 +90,31 @@ class LedgerLogMixin:
         }
         self._insert("llm_pool_call_log", payload)  # type: ignore[attr-defined]
 
+    def log_llm_token_usage(self, row: dict[str, Any]) -> None:
+        """记录共享模型池调用的 token 用量或估算。"""
+        payload = {
+            "request_id": str(row.get("request_id") or ""),
+            "scene_type": str(row.get("scene_type") or ""),
+            "cognitive_tier": str(row.get("cognitive_tier") or ""),
+            "provider": str(row.get("provider") or ""),
+            "model_id": str(row.get("model_id") or ""),
+            "prompt_tokens": int(row.get("prompt_tokens") or 0),
+            "completion_tokens": int(row.get("completion_tokens") or 0),
+            "total_tokens": int(row.get("total_tokens") or 0),
+            "billable_prompt_tokens": int(row.get("billable_prompt_tokens") or 0),
+            "billable_completion_tokens": int(row.get("billable_completion_tokens") or 0),
+            "billable_total_tokens": int(row.get("billable_total_tokens") or 0),
+            "estimated": 1 if row.get("estimated", True) else 0,
+            "cached": 1 if row.get("cached") else 0,
+            "pool_exhausted": 1 if row.get("pool_exhausted") else 0,
+            "attempt_count": int(row.get("attempt_count") or 0),
+            "billable_attempt_count": int(row.get("billable_attempt_count") or 0),
+            "source": str(row.get("source") or "estimate"),
+            "detail_json": row.get("detail_json") or {},
+            "ts_ms": int(row.get("ts_ms") or 0),
+        }
+        self._insert("llm_token_usage_log", payload)  # type: ignore[attr-defined]
+
     def log_llm_route_config_change(self, row: dict[str, Any]) -> None:
         """记录 LLM 路由配置热更新变更（M26-C）。
         必填字段：request_id / before_hash / after_hash / changed_fields / ts_ms

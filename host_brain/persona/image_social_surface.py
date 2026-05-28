@@ -94,6 +94,11 @@ _JUDGMENT_FRAME_RE = re.compile(
     r"(?:别管它|别理它|算了|随它|这事|那事|这件事|那件事)|"
     r"(?:哥哥).{0,8}(?:最好了|最棒了|真好|好乖|真乖)"
 )
+_UNGROUNDED_INFERENCE_RE = re.compile(
+    r"(?:房间|宿舍|床上|家里|一个人|独自|躲起来|躲着|装深沉|发呆|不说话|没说话|"
+    r"不出声|没动静|沉默|憋着|硬撑|发表情包的样子|扔过来表情包.{0,8}好笑|"
+    r"在.{0,6}(?:想|干嘛|干什么|做什么))"
+)
 _EMOTION_LABEL_WORDS_RE = r"(?:无语|委屈|生气|不爽|尴尬|别扭|难过|伤心|哭|小吐槽|炸毛|服了)"
 _EMOTION_QUESTION_WORDS_RE = r"(?:什么|啥|怎么|干嘛|为什么|为啥|哪门子)"
 _EMOTION_LABEL_QUESTION_BACK_RE = re.compile(
@@ -200,6 +205,8 @@ def is_image_social_surface_sample_disallowed(text: str) -> bool:
         return True
     if any(marker in compact for marker in _OLD_TEMPLATE_MARKERS):
         return True
+    if any(marker in compact for marker in ("这一下是有点无语", "这一下我收到了", "我先收一下", "不硬猜")):
+        return True
     if compact.startswith(("怎么啦", "怎么了")):
         return True
     if any(marker in compact for marker in _VAGUE_SHAPES) and compact.endswith("吗"):
@@ -221,6 +228,8 @@ def is_image_social_surface_sample_disallowed(text: str) -> bool:
     if _VERBAL_MISFRAME_RE.search(compact):
         return True
     if _JUDGMENT_FRAME_RE.search(compact):
+        return True
+    if _UNGROUNDED_INFERENCE_RE.search(compact):
         return True
     if _EMOTION_LABEL_QUESTION_BACK_RE.search(compact):
         return True

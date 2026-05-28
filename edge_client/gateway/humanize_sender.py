@@ -10,7 +10,7 @@
   4. 配置灵活：可通过环境变量或参数覆盖所有行为
 
 环境变量：
-  EDGE_HUMANIZE_ENABLED          启用拟人化发送（默认 True）
+  EDGE_HUMANIZE_ENABLED          启用拟人化发送（默认 False）
   EDGE_HUMANIZE_TYPING_SPEED_CPS 打字速度（字符/秒，默认 12）
   EDGE_HUMANIZE_BASE_DELAY_S     基础延迟（秒，默认 0.3）
   EDGE_HUMANIZE_MAX_DELAY_S      单段最大延迟（秒，默认 8.0）
@@ -79,7 +79,7 @@ class HumanizeSendConfig:
     可通过 HumanizeSendConfig.from_env() 从环境变量加载，
     也可直接构造覆盖特定参数。
     """
-    enabled: bool = True
+    enabled: bool = False
     typing_speed_cps: float = 12.0       # 字符/秒（characters per second）
     base_delay_s: float = 0.3            # 基础延迟（模拟"看到消息→开始打字"的反应时间）
     max_delay_s: float = 8.0             # 单段最大延迟
@@ -94,7 +94,7 @@ class HumanizeSendConfig:
     def from_env(cls) -> HumanizeSendConfig:
         """从环境变量加载配置。"""
         return cls(
-            enabled=_env_bool("EDGE_HUMANIZE_ENABLED", True),
+            enabled=_env_bool("EDGE_HUMANIZE_ENABLED", False),
             typing_speed_cps=max(1.0, _env_float("EDGE_HUMANIZE_TYPING_SPEED_CPS", 12.0)),
             base_delay_s=max(0.0, _env_float("EDGE_HUMANIZE_BASE_DELAY_S", 0.3)),
             max_delay_s=max(0.5, _env_float("EDGE_HUMANIZE_MAX_DELAY_S", 8.0)),

@@ -20,6 +20,17 @@ _HELP_CONTINUITY_RE = re.compile(r"(还会帮我吗|还会理我吗|还会管我
 _REJECTION_RE = re.compile(r"(我不喜欢这样|我不喜欢你这样|别这么说|别这样说|别这么热心|别这样)")
 _GREETING_RE = re.compile(r"^(?:你好|您好|嗨|哈喽|hello|hi|hey|早安|早上好|中午好|晚上好|晚安)[!！。…~\s]*$", re.IGNORECASE)
 _PRESENCE_PING_RE = re.compile(r"^(?:在吗|在不在|还在吗|忙吗|在嘛|有人吗)[?？!！。…~\s]*$")
+_AUDITORY_CHECK_RE = re.compile(
+    r"^(?:"
+    r"(?:你)?(?:能不能|能|可以|可不可以|有没有)?(?:听到|听见|听得到|听得见|听清|听清楚)"
+    r"(?:我|我说话|我讲话|声音)?(?:吗|么)?"
+    r"|(?:我)?(?:说话|讲话|发声|声音)(?:你)?(?:能不能|能|可以|可不可以)?"
+    r"(?:听到|听见|听得到|听得见|听清|听清楚)(?:吗|么)?"
+    r"|(?:有|有没有)(?:听到|听见)?声音(?:吗|么)?"
+    r"|(?:刚才|刚刚)?(?:我)?(?:说了|说话|讲话)(?:什么)?(?:你)?(?:听到|听见|听得到|听得见)(?:吗|么)?"
+    r")[?？!！。…~\s]*$",
+    re.IGNORECASE,
+)
 _CONNECTIVITY_CHECK_RE = re.compile(
     r"^(?:测试(?:一下|下)?|test|ping|"
     r"(?:测试(?:一下|下)?(?:现在)?(?:能不能|能|会不会|会|可以)?(?:回|回复|收到)(?:吗|么)?)|"
@@ -198,6 +209,8 @@ def classify_literal_topic(message: str, multimodal_payload: Mapping[str, Any] |
         return ""
     if _GREETING_RE.match(text):
         return "greeting"
+    if _AUDITORY_CHECK_RE.match(text):
+        return "auditory_check"
     if _PRESENCE_PING_RE.match(text):
         return "presence_ping"
     if _CONNECTIVITY_CHECK_RE.match(text):
@@ -468,6 +481,8 @@ def interpret_conversation(
             interaction_move = "light_tease"
         else:
             interaction_move = "reconfirm"
+    elif literal_topic == "auditory_check":
+        interaction_move = "auditory_probe"
     elif literal_topic in {"greeting", "presence_ping", "light_ack", "phatic_punct"}:
         interaction_move = "light_ack"
     elif literal_topic in {"playful_ping", "emoji_social_reply"}:

@@ -41,7 +41,8 @@ def test_response_form_decider_honors_planned_sticker_primary() -> None:
     assert decision.reason == "text_plus_sticker"
 
 
-def test_response_form_decider_does_not_invent_voice_when_unplanned() -> None:
+def test_response_form_decider_adds_voice_for_warm_short_reply(monkeypatch) -> None:
+    monkeypatch.setattr(ResponseFormDecider, "_is_quiet_hours", staticmethod(lambda _now_ts: False))
     decider = ResponseFormDecider(voice_enabled=True, probability_scale=1.0)
 
     decision = decider.decide(
@@ -53,5 +54,72 @@ def test_response_form_decider_does_not_invent_voice_when_unplanned() -> None:
     )
 
     assert decision.primary == MsgType.TEXT
+    assert decision.secondary == MsgType.VOICE
+    assert decision.reason == "warmth_voice_supplement"
+
+
+def test_response_form_decider_voices_short_interjection_as_presence(monkeypatch) -> None:
+    monkeypatch.setattr(ResponseFormDecider, "_is_quiet_hours", staticmethod(lambda _now_ts: False))
+    decider = ResponseFormDecider(voice_enabled=True, probability_scale=1.0)
+
+    decision = decider.decide(
+        user_id="u3",
+        user_msg_type=MsgType.TEXT,
+        narrative_zh="哈？",
+        emotion_tag="SURPRISED",
+        bond_stage="CONFIDANT",
+    )
+
+    assert decision.primary == MsgType.TEXT
+    assert decision.secondary == MsgType.VOICE
+    assert decision.reason == "embodied_presence_voice"
+
+
+def test_response_form_decider_keeps_structured_reply_text_only() -> None:
+    decider = ResponseFormDecider(voice_enabled=True, probability_scale=1.0)
+
+    decision = decider.decide(
+        user_id="u3b",
+        user_msg_type=MsgType.TEXT,
+        narrative_zh="```python\nprint('hi')\n```",
+        emotion_tag="PLAYFUL",
+        bond_stage="SOULMATE",
+    )
+
+    assert decision.primary == MsgType.TEXT
     assert decision.secondary is None
-    assert decision.reason == "unplanned_default_text"
+    assert decision.reason == "voice_unsuitable_text_shape"
+
+
+def test_response_form_decider_echoes_voice_input_when_reply_is_speakable() -> None:
+    decider = ResponseFormDecider(voice_enabled=True, probability_scale=1.0, min_voice_interval_ms=0)
+
+    decision = decider.decide(
+        user_id="u4",
+        user_msg_type=MsgType.VOICE,
+        user_text="我用语音问一下",
+        narrative_zh="我听到了，这个我来慢慢跟你说。",
+        emotion_tag="NEUTRAL",
+        bond_stage="FRIEND",
+    )
+
+    assert decision.primary == MsgType.TEXT
+    assert decision.secondary == MsgType.VOICE
+    assert decision.reason == "voice_input_echo"
+
+
+def test_response_form_decider_respects_text_only_request() -> None:
+    decider = ResponseFormDecider(voice_enabled=True, probability_scale=1.0)
+
+    decision = decider.decide(
+        user_id="u5",
+        user_msg_type=MsgType.TEXT,
+        user_text="只发文字就行",
+        narrative_zh="我在呢，先用文字给你说清楚。",
+        emotion_tag="LOVING",
+        bond_stage="SOULMATE",
+    )
+
+    assert decision.primary == MsgType.TEXT
+    assert decision.secondary is None
+    assert decision.reason == "user_requested_text"

@@ -15,6 +15,7 @@ import pytest
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.memory.distillation import MemoryDistillationEngine
 from host_brain.memory.episodic import EpisodicStore
+from host_brain.memory.life_memory import LifeMemoryStore
 from host_brain.core.prompt_context import (
     validate_prompt_context,
     build_semantic_slot,
@@ -189,6 +190,56 @@ def test_distill_top_k_ignores_existing_semantic_memory_projection(tmp_path):
     items, total = ledger.list_semantic_memories()
     assert total == 1
     assert items[0]["source_memory_ids"] == ["audit::mem_source"]
+
+
+def test_distill_top_k_prefers_trusted_life_episode_sources(episodic, ledger):
+    """长期语义记忆应优先从可信 life_episode 蒸馏，而不是绕回旧 episodic 文本。"""
+    life_store = LifeMemoryStore(ledger=ledger)
+    trusted = life_store.write_chat_episode(
+        request_id="req-life-distill-trusted",
+        session_id="sess-life-distill",
+        person_id="user-1",
+        user_message="记住我喜欢轻小说推荐按总览和卡片分段",
+        assistant_reply="我会按总览一段、每本书一张卡片来发。",
+        ts_ms=1_800_000_000_000,
+    )
+    suppressed = life_store.write_chat_episode(
+        request_id="req-life-distill-suppressed",
+        session_id="sess-life-distill",
+        person_id="user-1",
+        user_message="错误偏好：推荐不要分段",
+        assistant_reply="已记录错误偏好。",
+        ts_ms=1_800_000_000_001,
+    )
+    life_store.correct_episode(
+        episode_id=suppressed["episode_id"],
+        correction_kind="suppression",
+        suppress=True,
+        detail="用户后来明确纠正推荐需要分段。",
+        ts_ms=1_800_000_000_100,
+    )
+    _write_memories(episodic, ["旧 episodic 噪音：用户其实不关心轻小说推荐格式"])
+    engine = MemoryDistillationEngine(
+        episodic_store=episodic,
+        ledger=ledger,
+        life_memory_store=life_store,
+    )
+
+    result = engine.distill_top_k(
+        query_text="轻小说推荐 分段 卡片",
+        top_k=3,
+        tags=["preference"],
+        ts_ms=1_800_000_000_200,
+    )
+
+    assert result.success is True
+    items, total = ledger.list_semantic_memories()
+    assert total == 1
+    source_ids = items[0]["source_memory_ids"]
+    assert source_ids == [f"life_episode::{trusted['episode_id']}"]
+    assert f"life_episode::{suppressed['episode_id']}" not in source_ids
+    assert "source:life_episode" in items[0]["tags"]
+    assert items[0]["distill_strategy"] == "life_episode_merge_top_k"
 
 
 # ---------------------------------------------------------------------------

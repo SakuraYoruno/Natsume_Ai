@@ -50,8 +50,16 @@ _TRACE_FEED_WARM_ENABLED = bool(
     .get_observability_settings()
     .obs_trace_feed_warm_enabled
 )
-_TRACE_FEED_WARM_INTERVAL_MS = max(int(_env_float("HOST_OBS_TRACE_FEED_WARM_INTERVAL_MS", 2500.0, minimum=500.0)), 500)
-_TRACE_FEED_WARM_STALE_MS = max(int(_env_float("HOST_OBS_TRACE_FEED_WARM_STALE_MS", 10000.0, minimum=1000.0)), 1000)
+_TRACE_FEED_WARM_INTERVAL_MS = max(int(_env_float("HOST_OBS_TRACE_FEED_WARM_INTERVAL_MS", 30000.0, minimum=500.0)), 500)
+_TRACE_FEED_WARM_STALE_MS = max(int(_env_float("HOST_OBS_TRACE_FEED_WARM_STALE_MS", 45000.0, minimum=1000.0)), 1000)
+_TRACE_FEED_WARM_STALE_FALLBACK_MS = max(
+    int(_env_float("HOST_OBS_TRACE_FEED_WARM_STALE_FALLBACK_MS", 300000.0, minimum=1000.0)),
+    int(_TRACE_FEED_WARM_STALE_MS),
+)
+_TRACE_FEED_WARM_FULL_REFRESH_MS = max(
+    int(_env_float("HOST_OBS_TRACE_FEED_WARM_FULL_REFRESH_MS", 120000.0, minimum=1000.0)),
+    int(_TRACE_FEED_WARM_INTERVAL_MS),
+)
 _TRACE_FEED_WARM_LIMIT = max(int(_env_float("HOST_OBS_TRACE_FEED_WARM_LIMIT", 6.0, minimum=1.0)), 1)
 _TRACE_FEED_WARM_WINDOW_MINUTES = max(int(_env_float("HOST_OBS_TRACE_FEED_WARM_WINDOW_MINUTES", 1440.0, minimum=1.0)), 1)
 _TRACE_FEED_WARM_ACTIVE_WITHIN_MS = max(int(_env_float("HOST_OBS_TRACE_FEED_WARM_ACTIVE_WITHIN_MS", 60000.0, minimum=1000.0)), 1000)
@@ -63,6 +71,7 @@ _trace_feed_warm_state: dict[str, Any] = {
     "updated_ts_ms": 0,
     "last_duration_ms": 0,
     "last_error": None,
+    "session_signature": None,
 }
 
 
@@ -327,9 +336,145 @@ def _build_trace_live_feed_snapshot_sync(
     )
 
 
+def _trace_feed_session_terminal(status: Any) -> bool:
+    return _normalize_trace_status(status, default="UNKNOWN") in {"OK", "FAIL", "REJECTED"}
+
+
+def _trace_feed_session_signature(
+    *,
+    limit: int,
+    window_minutes: int,
+    keyword: Optional[str],
+    active_within_ms: int,
+) -> tuple[tuple[str, int, str, int], ...]:
+    from host_brain.app.obs_routes_core import (  # noqa: PLC0415
+        _build_sessions_response,
+        _dedup_sessions_by_content,
+    )
+
+    fetch_size = min(int(limit) * 3, 36)
+    sessions_response = _build_sessions_response(
+        _get_ledger(),
+        page=1,
+        page_size=fetch_size,
+        status=None,
+        window_minutes=int(window_minutes),
+        keyword=keyword,
+    )
+    sessions = _dedup_sessions_by_content(sessions_response.items)[: int(limit)]
+    if not str(keyword or "").strip():
+        active_cutoff_ms = _now_ms() - max(0, int(active_within_ms))
+        sessions = [
+            session
+            for session in sessions
+            if int(getattr(session, "ts_ms", 0) or 0) >= active_cutoff_ms
+            or not _trace_feed_session_terminal(getattr(session, "status", None))
+        ]
+    signature: list[tuple[str, int, str, int]] = []
+    for session in sessions:
+        request_id = str(getattr(session, "request_id", "") or "").strip()
+        if not request_id:
+            continue
+        try:
+            latency_ms = int(getattr(session, "total_latency_ms", -1) or -1)
+        except (TypeError, ValueError):
+            latency_ms = -1
+        signature.append(
+            (
+                request_id,
+                int(getattr(session, "ts_ms", 0) or 0),
+                _normalize_trace_status(getattr(session, "status", None), default="UNKNOWN"),
+                latency_ms,
+            )
+        )
+    return tuple(signature)
+
+
+def _store_trace_feed_warm_snapshot(
+    snapshot: TraceLiveFeedSnapshot,
+    *,
+    started_at: int,
+    session_signature: tuple[tuple[str, int, str, int], ...] | None,
+    last_duration_ms: int | None = None,
+) -> None:
+    with _trace_feed_warm_lock:
+        _trace_feed_warm_state["value"] = _clone_trace_live_feed_snapshot(snapshot)
+        _trace_feed_warm_state["updated_ts_ms"] = _now_ms()
+        _trace_feed_warm_state["last_duration_ms"] = (
+            max(0, int(last_duration_ms))
+            if last_duration_ms is not None
+            else max(0, _now_ms() - started_at)
+        )
+        _trace_feed_warm_state["last_error"] = None
+        _trace_feed_warm_state["session_signature"] = session_signature
+
+
 def _refresh_trace_feed_warm_once() -> None:
     started_at = _now_ms()
+    release_slot = None
     try:
+        from host_brain.app.obs_resource_guard import (
+            release_obs_warm_slot,
+            should_defer_obs_warm_refresh,
+            try_acquire_obs_warm_slot,
+        )
+
+        deferred, reason = should_defer_obs_warm_refresh(task_name="trace_feed")
+        if deferred:
+            with _trace_feed_warm_lock:
+                _trace_feed_warm_state["last_error"] = f"deferred:{reason}"
+                _trace_feed_warm_state["last_duration_ms"] = 0
+            return
+        acquired, reason = try_acquire_obs_warm_slot(task_name="trace_feed")
+        if not acquired:
+            with _trace_feed_warm_lock:
+                _trace_feed_warm_state["last_error"] = f"deferred:{reason}"
+                _trace_feed_warm_state["last_duration_ms"] = 0
+            return
+        release_slot = release_obs_warm_slot
+    except Exception:
+        release_slot = None
+    try:
+        session_signature: tuple[tuple[str, int, str, int], ...] | None = None
+        try:
+            session_signature = _trace_feed_session_signature(
+                limit=_TRACE_FEED_WARM_LIMIT,
+                window_minutes=_TRACE_FEED_WARM_WINDOW_MINUTES,
+                keyword=None,
+                active_within_ms=_TRACE_FEED_WARM_ACTIVE_WITHIN_MS,
+            )
+        except Exception as exc:
+            logger.debug("trace feed warm session preflight failed: %s", exc)
+            session_signature = None
+
+        if session_signature == ():
+            _store_trace_feed_warm_snapshot(
+                TraceLiveFeedSnapshot(items=[], count=0, timestamp=_now_ms()),
+                started_at=started_at,
+                session_signature=session_signature,
+                last_duration_ms=0,
+            )
+            return
+
+        if session_signature is not None:
+            with _trace_feed_warm_lock:
+                previous_signature = _trace_feed_warm_state.get("session_signature")
+                previous_value = _trace_feed_warm_state.get("value")
+                previous_updated_ts_ms = int(_trace_feed_warm_state.get("updated_ts_ms") or 0)
+            if (
+                previous_value is not None
+                and previous_signature == session_signature
+                and previous_updated_ts_ms > 0
+                and _now_ms() - previous_updated_ts_ms < _TRACE_FEED_WARM_FULL_REFRESH_MS
+            ):
+                _store_trace_feed_warm_snapshot(
+                    _clone_trace_live_feed_snapshot(previous_value),
+                    started_at=started_at,
+                    session_signature=session_signature,
+                    last_duration_ms=0,
+                )
+                return
+
         snapshot = _build_trace_live_feed_snapshot_sync(
             limit=_TRACE_FEED_WARM_LIMIT,
             window_minutes=_TRACE_FEED_WARM_WINDOW_MINUTES,
@@ -342,12 +487,15 @@ def _refresh_trace_feed_warm_once() -> None:
             _trace_feed_warm_state["last_duration_ms"] = max(0, _now_ms() - started_at)
         logger.warning("trace feed warm refresh degraded: %s", exc)
         return
+    finally:
+        if release_slot is not None:
+            release_slot()
 
-    with _trace_feed_warm_lock:
-        _trace_feed_warm_state["value"] = _clone_trace_live_feed_snapshot(snapshot)
-        _trace_feed_warm_state["updated_ts_ms"] = _now_ms()
-        _trace_feed_warm_state["last_duration_ms"] = max(0, _now_ms() - started_at)
-        _trace_feed_warm_state["last_error"] = None
+    _store_trace_feed_warm_snapshot(
+        snapshot,
+        started_at=started_at,
+        session_signature=session_signature,
+    )
 
 
 def _trace_feed_warm_loop() -> None:
@@ -401,6 +549,7 @@ def get_trace_feed_warm_status() -> dict[str, Any]:
         "age_ms": age_ms,
         "interval_ms": int(_TRACE_FEED_WARM_INTERVAL_MS),
         "stale_after_ms": int(_TRACE_FEED_WARM_STALE_MS),
+        "full_refresh_ms": int(_TRACE_FEED_WARM_FULL_REFRESH_MS),
         "last_duration_ms": last_duration_ms,
         "last_error": last_error,
         "limit": int(_TRACE_FEED_WARM_LIMIT),
@@ -415,6 +564,7 @@ def _get_warmed_trace_feed_snapshot(
     window_minutes: int,
     keyword: Optional[str],
     active_within_ms: int,
+    allow_stale_ms: int | None = None,
 ) -> TraceLiveFeedSnapshot | None:
     if not _TRACE_FEED_WARM_ENABLED:
         return None
@@ -433,9 +583,19 @@ def _get_warmed_trace_feed_snapshot(
 
     if value is None or updated_ts_ms <= 0:
         return None
-    if max(0, _now_ms() - updated_ts_ms) > int(_TRACE_FEED_WARM_STALE_MS):
+    max_age_ms = int(allow_stale_ms) if allow_stale_ms is not None else int(_TRACE_FEED_WARM_STALE_MS)
+    if max(0, _now_ms() - updated_ts_ms) > max_age_ms:
         return None
     return _clone_trace_live_feed_snapshot(value)
+
+
+def _trace_feed_should_defer_build() -> tuple[bool, str]:
+    try:
+        from host_brain.app.obs_resource_guard import should_defer_obs_warm_refresh  # noqa: PLC0415
+
+        return should_defer_obs_warm_refresh(task_name="trace_feed_live")
+    except Exception:
+        return False, ""
 
 
 # ---------------------------------------------------------------------------
@@ -531,14 +691,18 @@ def get_trace_live_feed_snapshot(
     active_within_ms: int = Query(_TRACE_FEED_WARM_ACTIVE_WITHIN_MS, ge=1000, le=3600000),
     keyword: Optional[str] = Query(None),
 ):
+    deferred, _reason = _trace_feed_should_defer_build()
     warmed = _get_warmed_trace_feed_snapshot(
         limit=limit,
         window_minutes=window_minutes,
         keyword=keyword,
         active_within_ms=active_within_ms,
+        allow_stale_ms=_TRACE_FEED_WARM_STALE_FALLBACK_MS if deferred else None,
     )
     if warmed is not None:
         return warmed
+    if deferred:
+        return TraceLiveFeedSnapshot(items=[], count=0, timestamp=_now_ms())
     return _build_trace_live_feed_snapshot_sync(
         limit=limit,
         window_minutes=window_minutes,
@@ -575,14 +739,25 @@ async def stream_trace_live_feed(
             if await request.is_disconnected():
                 break
             try:
-                snapshot = await asyncio.to_thread(
-                    _build_trace_live_feed_snapshot,
-                    ledger,
+                deferred, reason = _trace_feed_should_defer_build()
+                snapshot = _get_warmed_trace_feed_snapshot(
                     limit=limit,
                     window_minutes=window_minutes,
                     keyword=keyword,
                     active_within_ms=active_within_ms,
+                    allow_stale_ms=_TRACE_FEED_WARM_STALE_FALLBACK_MS if deferred else None,
                 )
+                if snapshot is None and deferred:
+                    snapshot = last_snapshot or TraceLiveFeedSnapshot(items=[], count=0, timestamp=_now_ms())
+                if snapshot is None:
+                    snapshot = await asyncio.to_thread(
+                        _build_trace_live_feed_snapshot,
+                        ledger,
+                        limit=limit,
+                        window_minutes=window_minutes,
+                        keyword=keyword,
+                        active_within_ms=active_within_ms,
+                    )
                 signature = _trace_live_feed_signature(snapshot)
                 if signature != last_signature:
                     delta = _build_trace_live_feed_delta(last_snapshot, snapshot)
@@ -599,7 +774,7 @@ async def stream_trace_live_feed(
                 else:
                     yield _format_sse_event(
                         "heartbeat",
-                        {"type": "heartbeat", "count": snapshot.count, "timestamp": _now_ms()},
+                        {"type": "heartbeat", "count": snapshot.count, "deferred_reason": reason if deferred else None, "timestamp": _now_ms()},
                     )
             except Exception as exc:
                 logger.warning("trace live feed push error: %s", exc)

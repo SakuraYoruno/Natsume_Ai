@@ -12,6 +12,73 @@ from host_brain.skills.declarative import DeclarativeSkillProvider, DeclarativeS
 from host_brain.skills.registry import SkillMeta, SkillRegistry
 
 
+def _cron_profile(
+    *,
+    task_id: str,
+    hour: int,
+    minute: int,
+    description: str,
+    mode_allowlist: tuple[str, ...] = ("normal", "sleep"),
+    args: dict[str, Any] | None = None,
+    priority: str = "LOW",
+    resource_class: str = "background_llm",
+    uses_llm: bool | None = None,
+    uses_gpu: bool | None = None,
+    catch_up_window_minutes: int | None = None,
+    trigger_env: dict[str, dict[str, Any]] | None = None,
+    arg_env: dict[str, dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    trigger_config = {"hour": int(hour), "minute": int(minute)}
+    if catch_up_window_minutes is not None:
+        trigger_config["catch_up_window_minutes"] = int(catch_up_window_minutes)
+    return {
+        "auto_schedule": True,
+        "task_id": task_id,
+        "trigger_mode": "cron",
+        "trigger_config": trigger_config,
+        "trigger_env": dict(trigger_env or {}),
+        "priority": priority,
+        "mode_allowlist": list(mode_allowlist),
+        "args": dict(args or {}),
+        "arg_env": dict(arg_env or {}),
+        "resource_class": resource_class,
+        "uses_llm": uses_llm,
+        "uses_gpu": uses_gpu,
+        "advisory_policy": "rule",
+        "description": description,
+    }
+
+
+def _interval_profile(
+    *,
+    task_id: str,
+    seconds: int,
+    description: str,
+    mode_allowlist: tuple[str, ...] = ("normal", "focus", "gaming", "sleep"),
+    args: dict[str, Any] | None = None,
+    priority: str = "LOW",
+    resource_class: str = "light",
+    uses_llm: bool | None = None,
+    uses_gpu: bool | None = None,
+    trigger_env: dict[str, dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    return {
+        "auto_schedule": True,
+        "task_id": task_id,
+        "trigger_mode": "interval",
+        "trigger_config": {"seconds": int(seconds)},
+        "trigger_env": dict(trigger_env or {}),
+        "priority": priority,
+        "mode_allowlist": list(mode_allowlist),
+        "args": dict(args or {}),
+        "resource_class": resource_class,
+        "uses_llm": uses_llm,
+        "uses_gpu": uses_gpu,
+        "advisory_policy": "rule",
+        "description": description,
+    }
+
+
 def _normalize_diary_writer(args: dict[str, Any], ctx: dict[str, Any] | None) -> dict[str, Any]:
     base_dir = str((args or {}).get("base_dir") or "").strip()
     date = str((args or {}).get("date") or "").strip()
@@ -106,6 +173,23 @@ class PersonalitySkillProvider(DeclarativeSkillProvider):
             tool="diary_writer",
             action="generate",
             normalize_args=_normalize_diary_writer,
+            scheduler_profile=_cron_profile(
+                task_id="diary_writer_daily",
+                hour=23,
+                minute=50,
+                args={"base_dir": "runtime/diary"},
+                arg_env={
+                    "base_dir": {
+                        "name": "HOST_DIARY_WRITER_BASE_DIR",
+                        "default": "runtime/diary",
+                    },
+                },
+                trigger_env={
+                    "hour": {"name": "HOST_DIARY_WRITER_HOUR", "default": 23, "low": 0, "high": 23},
+                    "minute": {"name": "HOST_DIARY_WRITER_MINUTE", "default": 50, "low": 0, "high": 59},
+                },
+                description="每日日记：汇总当天对话、审计和 episodic 片段，沉淀为文件与 Episodic Memory。",
+            ),
         ),
         DeclarativeSkillSpec(
             skill_name="dream_generator",
@@ -117,6 +201,35 @@ class PersonalitySkillProvider(DeclarativeSkillProvider):
             tool="dream_generator",
             action="generate",
             normalize_args=_normalize_dream_generator,
+            scheduler_profile=_cron_profile(
+                task_id="dream_generator_sleep",
+                hour=4,
+                minute=20,
+                args={"max_episodic_entries": 20, "idle_threshold_ms": 90 * 60 * 1000},
+                arg_env={
+                    "max_episodic_entries": {
+                        "name": "HOST_DREAM_GENERATOR_MAX_EPISODIC_ENTRIES",
+                        "default": 20,
+                        "low": 1,
+                        "high": 100,
+                        "type": "int",
+                    },
+                    "idle_threshold_ms": {
+                        "name": "HOST_DREAM_GENERATOR_IDLE_THRESHOLD_MINUTES",
+                        "default": 90,
+                        "low": 1,
+                        "high": 24 * 60,
+                        "type": "int",
+                        "unit": "minutes_to_ms",
+                    },
+                },
+                trigger_env={
+                    "hour": {"name": "HOST_DREAM_GENERATOR_HOUR", "default": 4, "low": 0, "high": 23},
+                    "minute": {"name": "HOST_DREAM_GENERATOR_MINUTE", "default": 20, "low": 0, "high": 59},
+                },
+                description="睡眠/空闲梦境：在夜间回放 Episodic Memory，生成 narrative-only 梦境并写回记忆。",
+                catch_up_window_minutes=720,
+            ),
         ),
         DeclarativeSkillSpec(
             skill_name="desktop_note",
@@ -150,6 +263,14 @@ class PersonalitySkillProvider(DeclarativeSkillProvider):
             tool="proactive_talk",
             action="send",
             normalize_args=_normalize_proactive_talk,
+            scheduler_profile=_interval_profile(
+                task_id="proactive_talk_periodic",
+                seconds=180,
+                mode_allowlist=("normal", "sleep"),
+                args={"idle_threshold_ms": 2_700_000},
+                description="主动对话：每 3 分钟检查一次，空闲 45 分钟后尝试发起问候。",
+                resource_class="social_light_llm",
+            ),
         ),
     )
 
@@ -174,22 +295,11 @@ def _register_inner_world_skills(registry: SkillRegistry) -> None:
     from host_brain.skills.impl.inner_world_skill import (  # noqa: PLC0415
         execute_inner_world_monologue_tick,
         execute_inner_world_numeric_tick,
-        execute_inner_world_tick,
         execute_inner_world_awaken,
         execute_inner_world_session_end,
     )
 
     _inner_world_skills = (
-        SkillMeta(
-            skill_name="inner_world_tick",
-            clearance="LOW",
-            risk_level=1,
-            scope="host",
-            reversible=False,
-            handler=execute_inner_world_tick,
-            description="离线内心世界时钟 tick：每分钟由调度器调用，驱动孤独感/期待值/情绪漂移积累。",
-            scheduler_allowed=True,
-        ),
         SkillMeta(
             skill_name="inner_world_numeric_tick",
             clearance="LOW",
@@ -199,6 +309,21 @@ def _register_inner_world_skills(registry: SkillRegistry) -> None:
             handler=execute_inner_world_numeric_tick,
             description="离线内心世界数值 tick：推进数值状态，不写 inner_stream。",
             scheduler_allowed=True,
+            scheduler_profile=_interval_profile(
+                task_id="inner_world_numeric_tick",
+                seconds=60,
+                args={"user_id": "natsume_ai"},
+                trigger_env={
+                    "seconds": {
+                        "name": "HOST_INNER_WORLD_NUMERIC_TICK_INTERVAL_SECONDS",
+                        "default": 60,
+                        "low": 10,
+                        "high": 3600,
+                    },
+                },
+                description="Core organ tick: advances numeric inner-world continuity without writing inner_stream.",
+                resource_class="light",
+            ),
         ),
         SkillMeta(
             skill_name="inner_world_monologue_tick",
@@ -209,6 +334,21 @@ def _register_inner_world_skills(registry: SkillRegistry) -> None:
             handler=execute_inner_world_monologue_tick,
             description="离线内心世界独白 tick：按较慢节奏生成 inner_stream 独白。",
             scheduler_allowed=True,
+            scheduler_profile=_interval_profile(
+                task_id="inner_world_monologue_tick",
+                seconds=300,
+                args={"user_id": "natsume_ai"},
+                trigger_env={
+                    "seconds": {
+                        "name": "HOST_INNER_WORLD_MONOLOGUE_TICK_INTERVAL_SECONDS",
+                        "default": 300,
+                        "low": 30,
+                        "high": 7200,
+                    },
+                },
+                description="Core organ tick: slow inner-world stream update; LLM note generation remains gated separately.",
+                resource_class="background_llm",
+            ),
         ),
         SkillMeta(
             skill_name="inner_world_awaken",
@@ -260,6 +400,13 @@ def _register_silence_skills(registry: SkillRegistry) -> None:
             handler=execute_silence_tick,
             description="沉默引擎 tick：每分钟由调度器调用，驱动回复意愿自然恢复和话题抗拒衰减。",
             scheduler_allowed=True,
+            scheduler_profile=_interval_profile(
+                task_id="silence_tick",
+                seconds=60,
+                args={"user_id": "natsume_ai"},
+                description="Core organ tick: recovers reply willingness and decays topic resistance.",
+                resource_class="light",
+            ),
         ),
         SkillMeta(
             skill_name="silence_update_emotion",
@@ -312,6 +459,16 @@ def _register_gaming_companion_skills(registry: SkillRegistry) -> None:
                 "仅在 gaming 模式下运行，由 NatsumeScheduler 每 5 分钟触发一次。"
             ),
             scheduler_allowed=True,
+            scheduler_profile=_interval_profile(
+                task_id="gaming_companion_tick",
+                seconds=300,
+                mode_allowlist=("gaming",),
+                args={"user_id": "natsume_ai", "monitor": 1},
+                description="gaming 陪玩识图 tick：每 5 分钟截图分析并尝试陪玩反馈。",
+                resource_class="gpu_heavy",
+                uses_llm=True,
+                uses_gpu=True,
+            ),
         ),
     )
     for meta in _gaming_skills:
@@ -344,6 +501,13 @@ def _register_body_sense_skills(registry: SkillRegistry) -> None:
             handler=execute_body_sense_tick,
             description="身体感知 tick：每分钟由调度器调用，更新困倦感（基于时段）和疲劳自然恢复。",
             scheduler_allowed=True,
+            scheduler_profile=_interval_profile(
+                task_id="body_sense_tick",
+                seconds=60,
+                args={"user_id": "natsume_ai"},
+                description="Core organ tick: updates fatigue, sleepiness, and body-sense baseline.",
+                resource_class="light",
+            ),
         ),
         SkillMeta(
             skill_name="body_sense_conversation_start",
@@ -407,6 +571,17 @@ def _register_emergent_growth_skills(registry: SkillRegistry) -> None:
                 "分析近期对话模式 → LLM/关键词归纳特质变化建议 → 安全门控 → 应用特质微调。"
             ),
             scheduler_allowed=True,
+            scheduler_profile=_cron_profile(
+                task_id="emergent_growth_weekly",
+                hour=3,
+                minute=50,
+                args={"user_id": "natsume_ai", "lookback_days": 7},
+                mode_allowlist=("normal", "sleep"),
+                resource_class="background_llm",
+                description="涌现式成长：每周日 03:50 分析近期对话并沉淀人格微调。",
+                catch_up_window_minutes=1440,
+            )
+            | {"trigger_config": {"day_of_week": 6, "hour": 3, "minute": 50, "catch_up_window_minutes": 1440}},
         ),
         SkillMeta(
             skill_name="emergent_growth_status",

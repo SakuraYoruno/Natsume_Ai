@@ -20,6 +20,7 @@ from edge_client.actuators.tts_engine import (
     make_sovits_synthesizer,
 )
 from edge_client.actuators.vts_driver import ReconnectConfig, VTubeStudioDriver, VtsConfig
+from edge_client.actuators.vrm_bridge_driver import VrmBridgeConfig, VrmBridgeDriver
 from edge_client.config import EdgeConfig, build_edge_runtime_statuses
 from edge_client.rpc.event_reporter import EdgeEventCache, EdgeEventReporter, build_http_transport
 from edge_client.rpc.fallback_llm import EdgeFallbackRpcContract
@@ -48,7 +49,7 @@ class EdgeRuntime:
     asr_service: AsrService | None
     tts_model: SoVITSModelManager | None
     tts_playback_device: AudioPlaybackDevice | None
-    vts_driver: VTubeStudioDriver | None
+    vts_driver: VTubeStudioDriver | VrmBridgeDriver | None
     tribe_bridge: Any | None
     startup_threads: list[threading.Thread] = field(default_factory=list, repr=False)
 
@@ -61,7 +62,7 @@ class EdgeRuntime:
         return self.tts_model
 
     @property
-    def vts(self) -> VTubeStudioDriver | None:
+    def vts(self) -> VTubeStudioDriver | VrmBridgeDriver | None:
         return self.vts_driver
 
     @property
@@ -187,6 +188,7 @@ def build_edge_runtime(config: EdgeConfig) -> EdgeRuntime:
         ),
         ref_audio_path=_as_optional_text(_env_get(env_lookup, "EDGE_TTS_REF_AUDIO_PATH")),
         ref_text=_as_optional_text(_env_get(env_lookup, "EDGE_TTS_REF_TEXT")),
+        voice_bank_path=_as_optional_text(_env_get(env_lookup, "EDGE_TTS_VOICE_BANK_PATH")),
         language=_as_text(_env_get(env_lookup, "EDGE_TTS_LANGUAGE"), "zh"),
     )
     tts_playback_device_index = _parse_optional_int(
@@ -216,62 +218,72 @@ def build_edge_runtime(config: EdgeConfig) -> EdgeRuntime:
         playback_starter=playback_starter,
     )
 
-    vts_cfg = VtsConfig(
-        host=_as_text(_env_get(env_lookup, "EDGE_VTS_HOST"), "localhost"),
-        port=_parse_int(
-            _env_get(env_lookup, "EDGE_VTS_PORT"),
-            default=8001,
-            min_value=1,
-            max_value=65535,
-        ),
-        plugin_name=_as_text(_env_get(env_lookup, "EDGE_VTS_PLUGIN_NAME"), "NatsumeAi"),
-        plugin_developer=_as_text(_env_get(env_lookup, "EDGE_VTS_PLUGIN_DEVELOPER"), "Natsume"),
-        token_path=_as_text(_env_get(env_lookup, "EDGE_VTS_TOKEN_PATH"), ".vts_token"),
-        api_timeout_s=_parse_float(
-            _env_get(env_lookup, "EDGE_VTS_API_TIMEOUT_S"),
-            default=5.0,
-            min_value=0.1,
-            max_value=300.0,
-        ),
-        mouth_param_candidates=_parse_csv_tuple(
-            _env_get(env_lookup, "EDGE_VTS_MOUTH_PARAM_CANDIDATES"),
-            default=("MouthOpen", "ParamMouthOpenY"),
-        ),
-        mouth_volume_param_candidates=_parse_csv_tuple(
-            _env_get(env_lookup, "EDGE_VTS_MOUTH_VOLUME_PARAM_CANDIDATES"),
-            default=("VoiceVolumePlusMouthOpen", "VoiceVolume"),
-        ),
-        voice_silence_param_candidates=_parse_csv_tuple(
-            _env_get(env_lookup, "EDGE_VTS_VOICE_SILENCE_PARAM_CANDIDATES"),
-            default=("VoiceSilence",),
-        ),
-        reconnect=ReconnectConfig(
-            max_attempts=_parse_int(
-                _env_get(env_lookup, "EDGE_VTS_RECONNECT_MAX_ATTEMPTS"),
-                default=10,
+    avatar_backend = str(getattr(config, "avatar_backend", "vts") or "vts").strip().lower()
+    if avatar_backend == "vrm":
+        vts_driver = VrmBridgeDriver(
+            config=VrmBridgeConfig(
+                host=str(getattr(config, "vrm_bridge_host", "127.0.0.1") or "127.0.0.1"),
+                port=int(getattr(config, "vrm_bridge_port", 18770) or 18770),
+                api_timeout_s=float(getattr(config, "vrm_bridge_timeout_s", 1.5) or 1.5),
+                model_path=getattr(config, "vrm_model_path", None),
+            )
+        )
+    else:
+        vts_cfg = VtsConfig(
+            host=_as_text(_env_get(env_lookup, "EDGE_VTS_HOST"), "localhost"),
+            port=_parse_int(
+                _env_get(env_lookup, "EDGE_VTS_PORT"),
+                default=8001,
                 min_value=1,
-                max_value=1000,
+                max_value=65535,
             ),
-            base_delay_s=_parse_float(
-                _env_get(env_lookup, "EDGE_VTS_RECONNECT_BASE_DELAY_S"),
-                default=1.0,
+            plugin_name=_as_text(_env_get(env_lookup, "EDGE_VTS_PLUGIN_NAME"), "NatsumeAi"),
+            plugin_developer=_as_text(_env_get(env_lookup, "EDGE_VTS_PLUGIN_DEVELOPER"), "Natsume"),
+            token_path=_as_text(_env_get(env_lookup, "EDGE_VTS_TOKEN_PATH"), ".vts_token"),
+            api_timeout_s=_parse_float(
+                _env_get(env_lookup, "EDGE_VTS_API_TIMEOUT_S"),
+                default=5.0,
                 min_value=0.1,
                 max_value=300.0,
             ),
-            max_delay_s=_parse_float(
-                _env_get(env_lookup, "EDGE_VTS_RECONNECT_MAX_DELAY_S"),
-                default=16.0,
-                min_value=0.1,
-                max_value=3600.0,
+            mouth_param_candidates=_parse_csv_tuple(
+                _env_get(env_lookup, "EDGE_VTS_MOUTH_PARAM_CANDIDATES"),
+                default=("MouthOpen", "ParamMouthOpenY"),
             ),
-            auto_reconnect=_parse_bool(
-                _env_get(env_lookup, "EDGE_VTS_RECONNECT_AUTO"),
-                default=True,
+            mouth_volume_param_candidates=_parse_csv_tuple(
+                _env_get(env_lookup, "EDGE_VTS_MOUTH_VOLUME_PARAM_CANDIDATES"),
+                default=("VoiceVolumePlusMouthOpen", "VoiceVolume"),
             ),
-        ),
-    )
-
-    vts_driver = VTubeStudioDriver(config=vts_cfg)
+            voice_silence_param_candidates=_parse_csv_tuple(
+                _env_get(env_lookup, "EDGE_VTS_VOICE_SILENCE_PARAM_CANDIDATES"),
+                default=("VoiceSilence",),
+            ),
+            reconnect=ReconnectConfig(
+                max_attempts=_parse_int(
+                    _env_get(env_lookup, "EDGE_VTS_RECONNECT_MAX_ATTEMPTS"),
+                    default=10,
+                    min_value=1,
+                    max_value=1000,
+                ),
+                base_delay_s=_parse_float(
+                    _env_get(env_lookup, "EDGE_VTS_RECONNECT_BASE_DELAY_S"),
+                    default=1.0,
+                    min_value=0.1,
+                    max_value=300.0,
+                ),
+                max_delay_s=_parse_float(
+                    _env_get(env_lookup, "EDGE_VTS_RECONNECT_MAX_DELAY_S"),
+                    default=16.0,
+                    min_value=0.1,
+                    max_value=3600.0,
+                ),
+                auto_reconnect=_parse_bool(
+                    _env_get(env_lookup, "EDGE_VTS_RECONNECT_AUTO"),
+                    default=True,
+                ),
+            ),
+        )
+        vts_driver = VTubeStudioDriver(config=vts_cfg)
     event_report_host_url = _as_optional_text(_env_get(env_lookup, "EDGE_EVENT_REPORT_HOST_URL"))
     event_reporter = EdgeEventReporter(
         transport_fn=(
@@ -670,6 +682,7 @@ def _iter_lifecycle_components(runtime: EdgeRuntime) -> list[tuple[str, Any]]:
     ordered_names = (
         "tts",
         "vts",
+        "voice_pipeline",
         "asr",
         "resource_gate",
         "rpc_client",

@@ -6,7 +6,6 @@ import json
 import logging
 import os
 from pathlib import Path
-import shutil
 import subprocess
 import sys
 from typing import Any
@@ -20,6 +19,7 @@ from host_brain.codex_runtime.work_order import CodexWorkOrder
 from host_brain.codex_runtime.workspace_policy import WorkspacePolicy
 from host_brain.core.ids import new_event_id, now_ms
 from host_brain.evolution_lab import validate_evolution_branch
+from host_brain.integrations.codex_cli_provider import build_codex_cli_env, codex_cli_command
 
 logger = logging.getLogger(__name__)
 
@@ -178,6 +178,19 @@ def _build_codex_command(
     return command
 
 
+def _build_codex_subprocess_env(*, run_dir: Path) -> dict[str, str]:
+    env = build_codex_cli_env(run_dir, temp_dir_name=".codex_tmp")
+
+    home = str(Path.home())
+    if home and home != ".":
+        env.setdefault("HOME", home)
+        env.setdefault("USERPROFILE", home)
+        if os.name == "nt":
+            env.setdefault("APPDATA", str(Path(home) / "AppData" / "Roaming"))
+            env.setdefault("LOCALAPPDATA", str(Path(home) / "AppData" / "Local"))
+    return env
+
+
 class CodexRuntimeExecutor:
     def __init__(
         self,
@@ -243,7 +256,7 @@ class CodexRuntimeExecutor:
 
         prompt = build_codex_prompt(order, workspace=resolution.path)
         self.artifact_store.write_text(run_dir / "prompt.txt", prompt)
-        codex_cmd = shutil.which("codex")
+        codex_cmd = codex_cli_command()
         if codex_cmd is None:
             result = CodexRuntimeResult(
                 status="DEGRADED",
@@ -255,12 +268,12 @@ class CodexRuntimeExecutor:
                 risk_flags=["codex_cli_unavailable"],
                 review_required=self.review_policy.review_required(order),
                 reason_code="CODEX_CLI_UNAVAILABLE",
-                detail="codex CLI not found in PATH",
+                detail="codex CLI not found in PATH or disabled",
             )
             self._persist_result(run_dir, result, order=order, event_id=event_id, ts_ms=ts)
             return result.to_dict()
 
-        last_message_path = run_dir / "last_message.txt"
+        last_message_path = (run_dir / "last_message.txt").resolve()
         stdout_path = run_dir / "stdout.log"
         stderr_path = run_dir / "stderr.log"
         events_path = run_dir / "events.jsonl"
@@ -272,6 +285,8 @@ class CodexRuntimeExecutor:
             last_message_path=last_message_path,
             sandbox_mode=sandbox_mode,
         )
+        codex_env = _build_codex_subprocess_env(run_dir=run_dir)
+        codex_home = codex_env.get("CODEX_HOME")
 
         timeout_seconds = int(order.metadata.get("timeout_seconds") or order.verification_plan.get("timeout_seconds") or 300)
         before = _collect_git_summary(resolution.path)
@@ -282,6 +297,8 @@ class CodexRuntimeExecutor:
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
+                cwd=str(resolution.path),
+                env=codex_env,
                 text=True,
                 encoding="utf-8",
                 errors="replace",
@@ -324,6 +341,7 @@ class CodexRuntimeExecutor:
                     "workspace_source": resolution.source,
                     "sandbox_mode": sandbox_mode,
                     "prompt_profile": prompt_profile_name(order),
+                    "codex_home": codex_home,
                     "codex_model": _metadata_text(order, "codex_model", "HOST_CODEX_RUNTIME_MODEL") or None,
                     "codex_reasoning_effort": _metadata_text(
                         order,
@@ -375,6 +393,7 @@ class CodexRuntimeExecutor:
                     "workspace_source": resolution.source,
                     "sandbox_mode": sandbox_mode,
                     "prompt_profile": prompt_profile_name(order),
+                    "codex_home": codex_home,
                     "codex_model": _metadata_text(order, "codex_model", "HOST_CODEX_RUNTIME_MODEL") or None,
                     "codex_reasoning_effort": _metadata_text(
                         order,

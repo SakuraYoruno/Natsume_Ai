@@ -41,7 +41,7 @@ const TRACE_STAGE_GROUPS = [
     label: '检索规划',
     description: 'Query Planner、Agentic RAG 与 Recall Fusion 的检索收口。',
     icon: Filter,
-    nodeIds: ['query_planner', 'agentic_rag', 'recall_fusion', 'retrieval_embedding', 'retrieval_rerank', 'retrieval_evidence_pack', 'retrieval_pipeline'],
+    nodeIds: ['query_planner', 'agentic_rag', 'recall_fusion', 'retrieval_embedding', 'retrieval_evidence_pack', 'retrieval_pipeline'],
   },
   {
     id: 'persona',
@@ -466,25 +466,14 @@ function buildRetrievalRuntimeMeta(retrievalRuntime) {
       latest?.embedding_model_id
       || retrievalRuntime?.embedding?.routes?.[0]?.model_id
       || '未观测到',
-    rerankerModel:
-      latest?.rerank_model_id
-      || retrievalRuntime?.reranker?.routes?.[0]?.model_id
-      || '未观测到',
     embeddingProvider:
       latest?.effective_embedding_provider
       || latest?.embedding_provider
       || retrievalRuntime?.embedding?.routes?.[0]?.provider
       || '-',
-    rerankerProvider:
-      latest?.effective_rerank_provider
-      || latest?.rerank_provider
-      || retrievalRuntime?.reranker?.routes?.[0]?.provider
-      || '-',
     alignment: retrievalRuntime?.read_write_model_aligned ? '读写对齐' : '读写漂移',
     candidateCount: latest?.candidate_count ?? null,
-    rerankTopK: latest?.rerank_topk ?? null,
     embeddingFallbacks: retrievalRuntime?.recent_embedding_fallbacks ?? 0,
-    rerankerFallbacks: retrievalRuntime?.recent_reranker_fallbacks ?? 0,
     lastObservedAt: latest?.ts_ms ?? retrievalRuntime?.timestamp ?? null,
     latest,
   }

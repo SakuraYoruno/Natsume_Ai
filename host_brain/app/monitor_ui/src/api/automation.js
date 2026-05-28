@@ -3,6 +3,7 @@ export {
   enableSchedulerTask,
   fetchImmuneGateReplay,
   fetchImmuneGateStats,
+  fetchResourceManagerStatus,
   fetchSchedulerHealth,
   fetchSchedulerHistory,
   fetchSchedulerTasks,

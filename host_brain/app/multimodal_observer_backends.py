@@ -11,6 +11,8 @@ import shutil
 import subprocess
 import tempfile
 import time
+import urllib.error
+import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping, Protocol
@@ -62,7 +64,8 @@ _EMOJI_TONE_HINTS: dict[str, str] = {
     "怒": "语气可能带一点不满或吐槽",
     "哈": "更像在打趣或吐槽",
 }
-_GREETING_HINTS = ("hello", "hi", "你好", "您好", "早上好", "晚上好", "挥手", "招手", "打招呼")
+_GREETING_HINTS = ("你好", "您好", "早上好", "晚上好", "挥手", "招手", "打招呼")
+_GREETING_ENGLISH_WORDS = ("hello", "hi")
 _TESSERACT_LANG = "chi_sim+jpn+eng"
 _IMAGE_FILE_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp"}
 
@@ -85,6 +88,32 @@ def _coerce_float(value: Any, *, default: float = 0.0) -> float:
         return float(default)
 
 
+def _coerce_boolish(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    normalized = str(value or "").strip().lower()
+    if not normalized:
+        return False
+    if normalized in {"0", "false", "no", "off", "none", "null"}:
+        return False
+    return True
+
+
+def _coerce_safety_flags(value: Any) -> list[str]:
+    if isinstance(value, Mapping):
+        return [
+            str(key).strip()
+            for key, enabled in value.items()
+            if str(key).strip() and _coerce_boolish(enabled)
+        ]
+    if isinstance(value, (list, tuple, set)):
+        return [str(flag).strip() for flag in value if str(flag).strip()]
+    text = str(value or "").strip()
+    return [text] if text else []
+
+
 def _shorten(value: str, *, limit: int = 180) -> str:
     text = str(value or "").strip()
     if len(text) <= limit:
@@ -98,7 +127,7 @@ def _normalize_whitespace(value: str) -> str:
 
 def _derive_meme_intent(*, visual_summary: str, visible_text: str, fallback_hint: str = "") -> str:
     haystack = _normalize_whitespace(" ".join([visual_summary, visible_text, fallback_hint])).lower()
-    if any(token in haystack for token in _GREETING_HINTS):
+    if any(token in haystack for token in _GREETING_HINTS) or _has_english_word(haystack, _GREETING_ENGLISH_WORDS):
         return "像是在打招呼，语气轻松友好"
     if any(token in haystack for token in ("委屈", "难过", "伤心", "哭", "泪", "可怜", "呜呜", "哭唧唧", "撒娇", "抱抱", "摸摸")):
         return "更像是在委屈、撒娇，想让人接一下情绪"
@@ -111,6 +140,17 @@ def _derive_meme_intent(*, visual_summary: str, visible_text: str, fallback_hint
     if any(token in haystack for token in ("惊讶", "震惊", "吓", "懵", "呆住", "愣住")):
         return "更像是在惊讶或被整不会了，想让人接一下这个反应"
     return ""
+
+
+def _has_english_word(text: str, words: tuple[str, ...]) -> bool:
+    haystack = str(text or "").lower()
+    for word in words:
+        token = re.escape(str(word or "").lower())
+        if token and re.search(rf"(?<![a-z0-9]){token}(?![a-z0-9])", haystack):
+            return True
+    return False
+
+
 def _safe_read_bytes(path: Path, *, limit: int) -> bytes:
     with path.open("rb") as handle:
         return handle.read(limit)
@@ -638,7 +678,7 @@ class OpenAICompatMultimodalBackend:
             "is_screenshot": bool(is_screenshot),
             "confidence": confidence,
             "summary": summary,
-            "safety_flags": [str(flag).strip() for flag in list(parsed.get("safety_flags") or []) if str(flag).strip()],
+            "safety_flags": _coerce_safety_flags(parsed.get("safety_flags")),
             "followup_required": bool(parsed.get("followup_required", False)),
             "artifacts": {"raw_model_output": raw_text[:1200]},
         }
@@ -708,7 +748,7 @@ class OpenAICompatMultimodalBackend:
                 "scene_tags": scene_tags,
                 "confidence": confidence,
                 "summary": summary,
-                "safety_flags": [str(flag).strip() for flag in list(parsed.get("safety_flags") or []) if str(flag).strip()],
+                "safety_flags": _coerce_safety_flags(parsed.get("safety_flags")),
                 "followup_required": bool(parsed.get("followup_required", False)),
                 "artifacts": {
                     "frame_count": len(frame_paths),
@@ -767,7 +807,7 @@ class OpenAICompatMultimodalBackend:
             "scene_tags": [str(item).strip() for item in list(parsed.get("scene_tags") or []) if str(item).strip()],
             "confidence": confidence,
             "summary": summary,
-            "safety_flags": [str(flag).strip() for flag in list(parsed.get("safety_flags") or []) if str(flag).strip()],
+            "safety_flags": _coerce_safety_flags(parsed.get("safety_flags")),
             "followup_required": bool(parsed.get("followup_required", False)),
             "artifacts": {"raw_model_output": raw_text[:1200]},
         }
@@ -778,7 +818,7 @@ class OpenAICompatMultimodalBackend:
         result = complete_llm_with_pool_sync(
             request_id=f"multimodal::{self.backend_name}::{int(time.time() * 1000)}",
             scene_type="MULTIMODAL",
-            cognitive_tier="B",
+            cognitive_tier="MULTIMODAL",
             provider_name=self._provider_name,
             model_id=str(model_id or "").strip() or self._sync_model_id,
             api_key=self._api_key,
@@ -798,7 +838,7 @@ class OpenAICompatMultimodalBackend:
             return self._build_image_parts_from_path(local_path)
         remote_url = str(attachment.get("remote_url") or "").strip()
         if remote_url:
-            return [{"type": "image_url", "image_url": {"url": remote_url}}]
+            return self._build_image_parts_from_remote_url(remote_url)
         return []
 
     def _build_image_parts_from_path(self, local_path: str) -> list[dict[str, Any]]:
@@ -811,6 +851,47 @@ class OpenAICompatMultimodalBackend:
         mime_type = _guess_mime_type(path.name, str(path)) or "image/png"
         encoded = base64.b64encode(path.read_bytes()).decode("ascii")
         return [{"type": "image_url", "image_url": {"url": f"data:{mime_type};base64,{encoded}"}}]
+
+    def _build_image_parts_from_remote_url(self, remote_url: str) -> list[dict[str, Any]]:
+        url = str(remote_url or "").strip()
+        if not url:
+            return []
+        if url.startswith("data:"):
+            return [{"type": "image_url", "image_url": {"url": url}}]
+        if not url.startswith(("http://", "https://")):
+            return []
+
+        fetched = self._fetch_remote_image_as_data_url(url)
+        if fetched:
+            return [{"type": "image_url", "image_url": {"url": fetched}}]
+        if _coerce_boolish(os.environ.get("HOST_MULTIMODAL_ALLOW_REMOTE_URL_FALLBACK")):
+            return [{"type": "image_url", "image_url": {"url": url}}]
+        _logger.debug("multimodal remote image url fallback disabled url=%s", _shorten(url, limit=160))
+        return []
+
+    def _fetch_remote_image_as_data_url(self, remote_url: str) -> str:
+        timeout_s = max(1.0, _coerce_float(os.environ.get("HOST_MULTIMODAL_REMOTE_FETCH_TIMEOUT_MS"), default=3000.0) / 1000.0)
+        request = urllib.request.Request(
+            str(remote_url),
+            headers={"User-Agent": "NatsumeAi-MultimodalObserver/1.0"},
+            method="GET",
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=timeout_s) as response:  # noqa: S310 - URL comes from trusted gateway payload
+                content_type = str(response.headers.get("content-type") or "").split(";", 1)[0].strip().lower()
+                data = response.read(self._image_max_bytes + 1)
+        except (urllib.error.URLError, OSError, TimeoutError) as exc:
+            _logger.debug("multimodal remote image fetch skipped url=%s err=%s", _shorten(remote_url, limit=160), exc)
+            return ""
+        if not data or len(data) > self._image_max_bytes:
+            return ""
+        if content_type and not content_type.startswith("image/"):
+            return ""
+        mime_type = content_type or (_guess_mime_type("", remote_url) or "image/jpeg")
+        if not str(mime_type or "").lower().startswith("image/"):
+            return ""
+        encoded = base64.b64encode(data).decode("ascii")
+        return f"data:{mime_type};base64,{encoded}"
 
     def _looks_like_image_file(self, attachment: Mapping[str, Any]) -> bool:
         mime_type = str(attachment.get("mime_type") or "").strip().lower()

@@ -92,7 +92,6 @@ export function RecallSummaryPanel({ recall }) {
         <MiniStat label="候选数" value={recall?.candidate_count ?? '-'} hint={recall?.content_available ? '已持久化片段' : '仅阶段载荷'} />
         <MiniStat label="路由数" value={recall?.route_count ?? '-'} hint={recall?.route_error_count != null ? `错误 ${recall.route_error_count}` : '暂无路由错误'} />
         <MiniStat label="证据包" value={(recall?.evidence_refs_count ?? evidenceRefs.length) || '-'} hint={recall?.pack_id || '未生成 pack_id'} />
-        <MiniStat label="Rerank TopK" value={recall?.topk_count ?? recall?.rerank_topk ?? '-'} hint={recall?.rerank_provider || '未记录 reranker'} />
         <MiniStat label="覆盖信心" value={evaluation?.confidence != null ? `${Math.round(Number(evaluation.confidence) * 100)}%` : '-'} hint={evaluation?.suggestion || '无建议'} toneClassName={evaluation?.confidence != null && Number(evaluation.confidence) < 0.6 ? 'text-amber-600' : 'text-gray-900'} />
         <MiniStat label="覆盖结论" value={evaluation?.sufficient == null ? '-' : (evaluation.sufficient ? '充分' : '不足')} hint={evaluation?.top_score != null ? `Top score ${evaluation.top_score}` : '未记录 top score'} toneClassName={evaluation?.sufficient === false ? 'text-amber-600' : 'text-gray-900'} />
       </div>
@@ -166,8 +165,7 @@ export function RetrievalRuntimeOverviewPanel({ retrievalMeta, retrievalRuntime 
         <MiniStat label="Recall 候选" value={latest?.recall_candidates ?? latest?.candidate_count ?? '-'} hint={latest?.recall_candidates_deduped != null ? `去重后 ${latest.recall_candidates_deduped}` : '未记录去重后候选'} />
         <MiniStat label="证据引用" value={latest?.evidence_refs ?? latest?.evidence_refs_count ?? '-'} hint={selectedRefs.length > 0 ? `selected ${selectedRefs.length}` : '未记录 selected refs'} />
         <MiniStat label="Embedding 提供方" value={latest?.effective_embedding_provider || latest?.embedding_provider || retrievalMeta?.embeddingProvider || '-'} hint={latest?.embedding_model_id || retrievalMeta?.embeddingModel || '未记录 embedding model'} toneClassName={latest?.fallback_embedding_used ? 'text-amber-600' : 'text-gray-900'} />
-        <MiniStat label="Reranker 提供方" value={latest?.effective_rerank_provider || latest?.rerank_provider || retrievalMeta?.rerankerProvider || '-'} hint={latest?.rerank_model_id || retrievalMeta?.rerankerModel || '未记录 reranker model'} toneClassName={latest?.fallback_reranker_used ? 'text-amber-600' : 'text-gray-900'} />
-        <MiniStat label="Fallback" value={(latest?.fallback_embedding_used || latest?.fallback_reranker_used) ? '已发生' : '未发生'} hint={latest?.fallback_embedding_reason_code || latest?.fallback_reranker_reason_code || '无 fallback reason'} toneClassName={(latest?.fallback_embedding_used || latest?.fallback_reranker_used) ? 'text-amber-600' : 'text-gray-900'} />
+        <MiniStat label="Fallback" value={latest?.fallback_embedding_used ? '已发生' : '未发生'} hint={latest?.fallback_embedding_reason_code || '无 fallback reason'} toneClassName={latest?.fallback_embedding_used ? 'text-amber-600' : 'text-gray-900'} />
       </div>
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">

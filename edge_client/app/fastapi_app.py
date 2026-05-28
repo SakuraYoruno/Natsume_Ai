@@ -838,6 +838,42 @@ def _handle_vts(runtime: EdgeRuntime, envelope: EdgeRpcEnvelope) -> EdgeGatewayR
         result = runtime.vts_driver.talk_start()
     elif action == "talk_end":
         result = runtime.vts_driver.talk_end()
+    elif action in {"body_action", "perform_action"}:
+        action_id = str(envelope.payload.get("action_id") or "").strip()
+        if not action_id:
+            return EdgeGatewayResult(
+                success=False,
+                status=STATUS_REJECTED,
+                reason_code=VOICE_SCHEMA_INVALID,
+                stage="S_EDGE_VTS",
+                detail="body_action requires action_id",
+                event={},
+            )
+        voice_pipeline = getattr(runtime, "voice_pipeline", None)
+        if voice_pipeline is None:
+            return EdgeGatewayResult(
+                success=False,
+                status=STATUS_REJECTED,
+                reason_code=SERVICE_UNAVAILABLE_DEPENDENCY,
+                stage="S_EDGE_VTS",
+                detail="voice pipeline unavailable",
+                event={},
+            )
+        summary = voice_pipeline.perform_body_action(
+            action_id=action_id,
+            emotion_tag=envelope.payload.get("emotion_tag"),
+            intensity=envelope.payload.get("emotion_intensity"),
+            duration_s=envelope.payload.get("duration_s"),
+        )
+        success = bool(summary.get("success"))
+        return EdgeGatewayResult(
+            success=success,
+            status=(STATUS_ACCEPTED if success else STATUS_REJECTED),
+            reason_code=None if success else str(summary.get("reason") or VOICE_SCHEMA_INVALID),
+            stage="S_EDGE_VTS",
+            detail=str(summary.get("detail") or "body action completed"),
+            event=dict(summary),
+        )
     elif action == "set_expression":
         emotion = str(envelope.payload.get("emotion_tag") or "").strip()
         if not emotion:
@@ -889,7 +925,7 @@ def _handle_vts(runtime: EdgeRuntime, envelope: EdgeRpcEnvelope) -> EdgeGatewayR
             status=STATUS_REJECTED,
             reason_code=VOICE_SCHEMA_INVALID,
             stage="S_EDGE_VTS",
-            detail="vts action must be one of talk_start/talk_end/set_expression/reset",
+            detail="vts action must be one of talk_start/talk_end/set_expression/reset/body_action",
             event={},
         )
 

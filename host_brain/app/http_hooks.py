@@ -17,6 +17,7 @@ from host_brain.app.http_hooks_runtime_helpers import (
     read_episodic_latest_fact,
     read_style_canon_fact,
     read_world_canon_fact,
+    run_life_memory_sleep_replay_handler,
     run_long_term_distillation_handler,
     run_proactive_intent_dispatch,
 )
@@ -29,7 +30,6 @@ from host_brain.app.http_hooks_middleware import (
     build_personality_tick_status as _middleware_build_personality_tick_status,
 )
 from host_brain.core.ids import new_request_id
-from host_brain.persona.identity import get_canonical_persona_self_id
 
 _AUDIT_SILENT_PATH_PREFIXES: tuple[str, ...] = (
     "/monitor/",
@@ -56,6 +56,14 @@ def _startup_status_is_degraded(value: Any) -> bool:
 def _parse_bool_env(name: str, *, default: bool) -> bool:
     # P3-2：委托给 http_hooks_middleware.parse_bool_env
     return _middleware_parse_bool_env(name, default=default)
+
+
+def _resolve_scheduler_ledger(*, get_ledger: Callable[[], Any], logger: Any) -> Any | None:
+    try:
+        return get_ledger()
+    except Exception as exc:
+        logger.warning("Scheduler audit ledger unavailable: %s", exc)
+        return None
 
 
 def _resolve_continuous_organ_ticks_enabled(*, background_tasks_enabled: bool) -> bool:
@@ -87,7 +95,7 @@ def _build_audit_retention_task_config() -> Any:
     return SchedulerTaskConfig(
         task_id="audit_retention_daily",
         trigger_mode=TriggerMode.CRON,
-        trigger_config={"hour": 2, "minute": 0},
+        trigger_config={"hour": 2, "minute": 0, "catch_up_window_minutes": 1440},
         intent_template={
             "skill_name": "audit_retention",
             "args": {},
@@ -96,8 +104,39 @@ def _build_audit_retention_task_config() -> Any:
         priority=TaskPriority.LOW,
         mode_allowlist=["normal", "sleep"],
         enabled=True,
+        resource_profile={
+            "resource_class": "maintenance",
+            "uses_llm": False,
+            "uses_gpu": False,
+            "advisory_policy": "rule",
+        },
         description="审计数据保留策略：每日 02:00 清理过期审计数据",
     )
+
+
+def _build_lightnovel_recommender_task_config() -> Any:
+    from host_brain.scheduler.scheduling_center import get_scheduled_task_config_by_task_id  # noqa: PLC0415
+
+    return get_scheduled_task_config_by_task_id("lightnovel_recommender_daily")
+
+
+def _build_diary_writer_task_config() -> Any:
+    from host_brain.scheduler.scheduling_center import get_scheduled_task_config_by_task_id  # noqa: PLC0415
+
+    return get_scheduled_task_config_by_task_id("diary_writer_daily")
+
+
+def _build_dream_generator_task_config() -> Any:
+    from host_brain.scheduler.scheduling_center import get_scheduled_task_config_by_task_id  # noqa: PLC0415
+
+    return get_scheduled_task_config_by_task_id("dream_generator_sleep")
+
+
+def _build_memory_life_task_configs() -> list[Any]:
+    return [
+        _build_diary_writer_task_config(),
+        _build_dream_generator_task_config(),
+    ]
 
 
 def _build_personality_tick_status(*, registry: Any, task_ids: list[str]) -> str:
@@ -143,78 +182,13 @@ def _build_codex_immune_scheduler_task(*, interval_s: float) -> Any:
     )
 
 
-def _build_scheduler_task_config(
-    *,
-    task_id: str,
-    skill_name: str,
-    interval_s: int,
-    description: str,
-    args: dict[str, Any] | None = None,
-) -> Any:
-    from host_brain.scheduler.task_registry import (  # noqa: PLC0415
-        SchedulerTaskConfig,
-        TaskPriority,
-        TriggerMode,
-    )
-
-    return SchedulerTaskConfig(
-        task_id=task_id,
-        trigger_mode=TriggerMode.INTERVAL,
-        trigger_config={"seconds": int(interval_s)},
-        intent_template={
-            "skill_name": skill_name,
-            "args": dict(args or {}),
-            "proposer_node_id": "scheduler",
-        },
-        priority=TaskPriority.LOW,
-        mode_allowlist=["normal", "focus", "gaming", "sleep"],
-        enabled=True,
-        description=description,
-    )
-
-
-def _scheduler_persona_args(**extra: Any) -> dict[str, Any]:
-    return {"user_id": get_canonical_persona_self_id(), **dict(extra)}
-
-
 def _build_core_organ_tick_task_configs() -> list[Any]:
-    return [
-        _build_scheduler_task_config(
-            task_id="inner_world_numeric_tick",
-            skill_name="inner_world_numeric_tick",
-            interval_s=int(os.environ.get("HOST_INNER_WORLD_NUMERIC_TICK_INTERVAL_SECONDS") or 60),
-            args=_scheduler_persona_args(),
-            description="Core organ tick: advances numeric inner-world continuity without writing inner_stream.",
-        ),
-        _build_scheduler_task_config(
-            task_id="inner_world_monologue_tick",
-            skill_name="inner_world_monologue_tick",
-            interval_s=int(os.environ.get("HOST_INNER_WORLD_MONOLOGUE_TICK_INTERVAL_SECONDS") or 300),
-            args=_scheduler_persona_args(),
-            description="Core organ tick: slow inner-world stream update; LLM note generation remains gated separately.",
-        ),
-        _build_scheduler_task_config(
-            task_id="silence_tick",
-            skill_name="silence_tick",
-            interval_s=60,
-            args=_scheduler_persona_args(),
-            description="Core organ tick: recovers reply willingness and decays topic resistance.",
-        ),
-        _build_scheduler_task_config(
-            task_id="body_sense_tick",
-            skill_name="body_sense_tick",
-            interval_s=60,
-            args=_scheduler_persona_args(),
-            description="Core organ tick: updates fatigue, sleepiness, and body-sense baseline.",
-        ),
-        _build_scheduler_task_config(
-            task_id="emotion_decay_tick",
-            skill_name="emotion_decay_tick",
-            interval_s=30,
-            args={},
-            description="Core organ tick: drives limbic decay, circadian baseline, interoception budget, and recovery window.",
-        ),
-    ]
+    from host_brain.scheduler.scheduling_center import (  # noqa: PLC0415
+        CORE_ORGAN_TICK_TASK_IDS,
+        get_scheduled_task_configs_by_task_ids,
+    )
+
+    return get_scheduled_task_configs_by_task_ids(CORE_ORGAN_TICK_TASK_IDS)
 
 
 def _bootstrap_core_organ_tick_scheduler(
@@ -271,7 +245,13 @@ def _bootstrap_core_organ_tick_scheduler(
         registry=registry,
         health_reporter=health_reporter,
         intent_dispatcher=_intent_dispatcher,
+        ledger=_resolve_scheduler_ledger(get_ledger=get_ledger, logger=logger),
         get_emotion_state=_build_scheduler_emotion_state,
+    )
+    set_scheduler_providers(
+        registry=registry,
+        health_reporter=health_reporter,
+        scheduler=scheduler,
     )
     scheduler.start()
 
@@ -297,12 +277,11 @@ def _bootstrap_personality_scheduler(
     from host_brain.scheduler.health import SchedulerHealthReporter  # noqa: PLC0415
     from host_brain.scheduler.scheduler import NatsumeScheduler  # noqa: PLC0415
     from host_brain.scheduler.scheduler_routes import set_scheduler_providers  # noqa: PLC0415
-    from host_brain.scheduler.task_registry import (  # noqa: PLC0415
-        SchedulerTaskConfig,
-        SchedulerTaskRegistry,
-        TaskPriority,
-        TriggerMode,
+    from host_brain.scheduler.scheduling_center import (  # noqa: PLC0415
+        build_personality_scheduler_seed_task_configs,
+        register_scheduler_seed_tasks,
     )
+    from host_brain.scheduler.task_registry import SchedulerTaskRegistry  # noqa: PLC0415
 
     registry = SchedulerTaskRegistry.get_instance()
     health_reporter = SchedulerHealthReporter(registry=registry)
@@ -364,111 +343,23 @@ def _bootstrap_personality_scheduler(
         registry=registry,
         health_reporter=health_reporter,
         intent_dispatcher=_intent_dispatcher,
+        ledger=_resolve_scheduler_ledger(get_ledger=get_ledger, logger=logger),
         get_emotion_state=_build_scheduler_emotion_state,
     )
+    set_scheduler_providers(
+        registry=registry,
+        health_reporter=health_reporter,
+        scheduler=scheduler,
+    )
 
-    def _register_task(
-        *,
-        config: Any,
-        success_message: str,
-        failure_message: str,
-    ) -> None:
-        try:
-            if registry.get(config.task_id) is None:
-                registry.register(config)
-                logger.info(success_message, config.task_id)
-        except Exception as exc:
-            logger.warning(failure_message, exc)
-
-    _register_task(
-        config=SchedulerTaskConfig(
-            task_id="proactive_talk_periodic",
-            trigger_mode=TriggerMode.INTERVAL,
-            trigger_config={"seconds": 180},
-            intent_template={
-                "skill_name": "proactive_talk",
-                "args": {"idle_threshold_ms": 2700000},
-                "proposer_node_id": "scheduler",
-            },
-            priority=TaskPriority.LOW,
-            mode_allowlist=["normal", "sleep"],
-            enabled=True,
-            description="主动对话：每 3 分钟检查一次，空闲 45 分钟后尝试发起问候",
-        ),
-        success_message="主动对话任务已注册: task_id=%s, interval=180s",
-        failure_message="主动对话任务注册失败（降级）: %s",
-    )
-    _register_task(
-        config=SchedulerTaskConfig(
-            task_id="evolution_cycle_daily",
-            trigger_mode=TriggerMode.CRON,
-            trigger_config={"hour": 3, "minute": 0},
-            intent_template={
-                "skill_name": "evolution_cycle",
-                "args": _scheduler_persona_args(),
-                "proposer_node_id": "scheduler",
-            },
-            priority=TaskPriority.MEDIUM,
-            mode_allowlist=["normal", "sleep"],
-            enabled=True,
-            description="daily evolution cycle task",
-        ),
-        success_message="进化周期任务已注册: task_id=%s, cron=03:00",
-        failure_message="进化周期任务注册失败（降级）: %s",
-    )
-    for _core_tick_config in _build_core_organ_tick_task_configs():
-        _register_task(
-            config=_core_tick_config,
-            success_message="核心器官 tick 已注册: task_id=%s",
-            failure_message="核心器官 tick 注册失败（降级）: %s",
-        )
-    _register_task(
-        config=SchedulerTaskConfig(
-            task_id="gaming_companion_tick",
-            trigger_mode=TriggerMode.INTERVAL,
-            trigger_config={"seconds": 300},
-            intent_template={
-                "skill_name": "gaming_companion_tick",
-                "args": _scheduler_persona_args(monitor=1),
-                "proposer_node_id": "scheduler",
-            },
-            priority=TaskPriority.LOW,
-            mode_allowlist=["gaming"],
-            enabled=True,
-            description="gaming 陪玩识图 tick：每 5 分钟截图分析并尝试陪玩反馈",
-        ),
-        success_message="gaming 陪玩识图 tick 任务已注册: task_id=%s, interval=300s",
-        failure_message="gaming 陪玩识图 tick 任务注册失败（降级）: %s",
-    )
-    _register_task(
-        config=SchedulerTaskConfig(
-            task_id="emergent_growth_weekly",
-            trigger_mode=TriggerMode.CRON,
-            trigger_config={"day_of_week": 6, "hour": 3, "minute": 0},
-            intent_template={
-                "skill_name": "emergent_growth_weekly",
-                "args": _scheduler_persona_args(lookback_days=7),
-                "proposer_node_id": "scheduler",
-            },
-            priority=TaskPriority.LOW,
-            mode_allowlist=["normal", "sleep"],
-            enabled=True,
-            description="涌现式成长：每周日 03:00 分析近期对话并沉淀人格微调",
-        ),
-        success_message="涌现式成长任务已注册: task_id=%s, cron=周日03:00",
-        failure_message="涌现式成长任务注册失败（降级）: %s",
+    seed_task_configs = build_personality_scheduler_seed_task_configs()
+    tracked_task_ids = register_scheduler_seed_tasks(
+        registry=registry,
+        logger=logger,
+        task_configs=seed_task_configs,
     )
 
     scheduler.start()
-
-    tracked_task_ids = [
-        "proactive_talk_periodic",
-        "inner_world_numeric_tick",
-        "inner_world_monologue_tick",
-        "silence_tick",
-        "body_sense_tick",
-        "emotion_decay_tick",
-    ]
     proactive_push_ready = proactive_push_state.get("client") is not None
     proactive_push_status = (
         "OK"
@@ -480,7 +371,7 @@ def _bootstrap_personality_scheduler(
         "proactive_talk_scheduler": (
             "OK "
             f"(started; proactive_push={'ready' if proactive_push_ready else 'skip'}; "
-            f"background_ticks=4)"
+            f"background_ticks={len(tracked_task_ids)})"
         ),
         "proactive_push_client": proactive_push_status,
         "personality_tick_registry": _build_personality_tick_status(
@@ -538,6 +429,8 @@ def runtime_lifespan(
     async def _lifespan() -> AsyncGenerator[None, None]:
         logger.info("Natsume AI Host Brain starting up ...")
         ledger = get_ledger()
+        _activity_monitor = None
+        _resource_manager = None
         try:
             # 预初始化新模块，确保启动时即可感知降级状态
             # Phase XIV v4：移除 main_chain 和 routing_matrix（已被 cortex_orchestrator 架构取代）
@@ -625,6 +518,7 @@ def runtime_lifespan(
                     )
             try:
                 from host_brain.app.startup import (  # noqa: PLC0415
+                    warmup_codex_exec_intent_pool,
                     warmup_chat_llm_runtime_profiles,
                     warmup_chat_runtime_basics,
                     warmup_retrieval_runtime_basics,
@@ -634,10 +528,12 @@ def runtime_lifespan(
                     eager_persona=True,
                 )
                 new_module_statuses["chat_llm_runtime_warmup"] = warmup_chat_llm_runtime_profiles()
+                new_module_statuses["codex_exec_intent_warmup"] = warmup_codex_exec_intent_pool()
                 new_module_statuses["retrieval_runtime_warmup"] = warmup_retrieval_runtime_basics()
             except Exception as _chat_warmup_exc:
                 new_module_statuses["chat_runtime_warmup"] = f"DEGRADED: {_chat_warmup_exc}"
                 new_module_statuses["chat_llm_runtime_warmup"] = f"DEGRADED: {_chat_warmup_exc}"
+                new_module_statuses["codex_exec_intent_warmup"] = f"DEGRADED: {_chat_warmup_exc}"
                 new_module_statuses["retrieval_runtime_warmup"] = f"DEGRADED: {_chat_warmup_exc}"
                 logger.warning(
                     "Chat runtime 预热失败（降级）: %s",
@@ -880,10 +776,10 @@ def runtime_lifespan(
             try:
                 if not _background_tasks_enabled:
                     raise RuntimeError("HOST_BACKGROUND_TASKS_ENABLED=false")
-                from host_brain.audit.retention import RetentionPolicy  # noqa: PLC0415
+                from host_brain.audit.retention import build_retention_policy_from_env  # noqa: PLC0415
                 from host_brain.scheduler.task_registry import SchedulerTaskRegistry  # noqa: PLC0415
 
-                _retention_policy = RetentionPolicy()
+                _retention_policy = build_retention_policy_from_env()
                 _retention_registry = SchedulerTaskRegistry.get_instance()
                 _retention_task = _build_audit_retention_task_config()
                 if _retention_registry.get(_retention_task.task_id) is None:
@@ -907,31 +803,14 @@ def runtime_lifespan(
             try:
                 if not _background_tasks_enabled:
                     raise RuntimeError("HOST_BACKGROUND_TASKS_ENABLED=false")
-                from host_brain.scheduler.task_registry import (  # noqa: PLC0415
-                    SchedulerTaskRegistry, SchedulerTaskConfig, TriggerMode, TaskPriority,
+                from host_brain.scheduler.scheduling_center import (  # noqa: PLC0415
+                    build_personality_scheduler_seed_task_configs,
+                    register_scheduler_seed_tasks,
                 )
+                from host_brain.scheduler.task_registry import SchedulerTaskRegistry  # noqa: PLC0415
                 from host_brain.scheduler.scheduler import NatsumeScheduler  # noqa: PLC0415
 
                 _proactive_registry = SchedulerTaskRegistry.get_instance()
-
-                # 注册 proactive_talk 任务（每 3 分钟检查一次，空闲 45 分钟触发）
-                _proactive_task = SchedulerTaskConfig(
-                    task_id="proactive_talk_periodic",
-                    trigger_mode=TriggerMode.INTERVAL,
-                    trigger_config={"seconds": 180},  # 3 分钟
-                    intent_template={
-                        "skill_name": "proactive_talk",
-                        "args": {"idle_threshold_ms": 2700000},  # 45 分钟空闲阈值
-                        "proposer_node_id": "scheduler",
-                    },
-                    priority=TaskPriority.LOW,
-                    mode_allowlist=["normal", "sleep"],
-                    enabled=True,
-                    description="主动对话：每 3 分钟检查一次，空闲 45 分钟后触发问候",
-                )
-                # 避免重复注册（重启时可能已存在）
-                if _proactive_registry.get("proactive_talk_periodic") is None:
-                    _proactive_registry.register(_proactive_task)
 
                 # 构建 ui_pusher 回调（同步推送到 Edge）；失败时仅降级 proactive push，不阻断 core ticks
                 _proactive_push_detail = ""
@@ -991,195 +870,24 @@ def runtime_lifespan(
                     registry=_proactive_registry,
                     health_reporter=_health_reporter,
                     intent_dispatcher=_proactive_intent_dispatcher,
+                    ledger=_resolve_scheduler_ledger(get_ledger=get_ledger, logger=logger),
                     get_emotion_state=_build_scheduler_emotion_state,
                 )
+                set_scheduler_providers(
+                    registry=_proactive_registry,
+                    health_reporter=_health_reporter,
+                    scheduler=_natsume_scheduler,
+                )
 
-                # ── 注册进化周期任务（Phase XVI）：每日凌晨 3:00 触发 ──────
-                try:
-                    _evolution_task = SchedulerTaskConfig(
-                        task_id="evolution_cycle_daily",
-                        trigger_mode=TriggerMode.CRON,
-                        trigger_config={"hour": 3, "minute": 0},
-                        intent_template={
-                            "skill_name": "evolution_cycle",
-                            "args": _scheduler_persona_args(),
-                            "proposer_node_id": "scheduler",
-                        },
-                        priority=TaskPriority.MEDIUM,
-                        mode_allowlist=["normal", "sleep"],
-                        enabled=True,
-                        description="daily evolution cycle task",
-                    )
-                    if _proactive_registry.get("evolution_cycle_daily") is None:
-                        _proactive_registry.register(_evolution_task)
-                        logger.info("进化周期任务已注册: task_id=evolution_cycle_daily, cron=03:00")
-                except Exception as _evo_task_exc:
-                    logger.warning("进化周期任务注册失败（降级）: %s", _evo_task_exc)
-
-                # [Phase XVI] 注册 inner_world_numeric_tick / inner_world_monologue_tick
-                try:
-                    _inner_world_task = SchedulerTaskConfig(
-                        task_id="inner_world_numeric_tick",
-                        trigger_mode=TriggerMode.INTERVAL,
-                        trigger_config={"seconds": int(os.environ.get("HOST_INNER_WORLD_NUMERIC_TICK_INTERVAL_SECONDS") or 60)},
-                        intent_template={
-                            "skill_name": "inner_world_numeric_tick",
-                            "args": _scheduler_persona_args(),
-                            "proposer_node_id": "scheduler",
-                        },
-                        priority=TaskPriority.LOW,
-                        mode_allowlist=["normal", "focus", "gaming", "sleep"],  # 所有非锁定模式均运行
-                        enabled=True,
-                        description="Phase XVI 离线内心世界数值 tick：推进孤独感/期待值/情绪漂移积累",
-                    )
-                    if _proactive_registry.get("inner_world_numeric_tick") is None:
-                        _proactive_registry.register(_inner_world_task)
-                        logger.info("离线内心世界数值任务已注册: task_id=inner_world_numeric_tick, interval=60s")
-                except Exception as _inner_world_exc:
-                    logger.warning("离线内心世界数值任务注册失败（降级）: %s", _inner_world_exc)
-
-                try:
-                    _inner_world_monologue_task = SchedulerTaskConfig(
-                        task_id="inner_world_monologue_tick",
-                        trigger_mode=TriggerMode.INTERVAL,
-                        trigger_config={"seconds": int(os.environ.get("HOST_INNER_WORLD_MONOLOGUE_TICK_INTERVAL_SECONDS") or 300)},
-                        intent_template={
-                            "skill_name": "inner_world_monologue_tick",
-                            "args": _scheduler_persona_args(),
-                            "proposer_node_id": "scheduler",
-                        },
-                        priority=TaskPriority.LOW,
-                        mode_allowlist=["normal", "focus", "gaming", "sleep"],
-                        enabled=True,
-                        description="Phase XVI 离线内心世界独白 tick：按较慢节奏写入 inner_stream",
-                    )
-                    if _proactive_registry.get("inner_world_monologue_tick") is None:
-                        _proactive_registry.register(_inner_world_monologue_task)
-                        logger.info("离线内心世界独白任务已注册: task_id=inner_world_monologue_tick, interval=300s")
-                except Exception as _inner_world_monologue_exc:
-                    logger.warning("离线内心世界独白任务注册失败（降级）: %s", _inner_world_monologue_exc)
-
-                # [Phase XVIII] 注册 silence_tick 任务（每分钟驱动沉默引擎意愿恢复）
-                try:
-                    _silence_task = SchedulerTaskConfig(
-                        task_id="silence_tick",
-                        trigger_mode=TriggerMode.INTERVAL,
-                        trigger_config={"seconds": 60},  # 每分钟 tick 一次
-                        intent_template={
-                            "skill_name": "silence_tick",
-                            "args": _scheduler_persona_args(),
-                            "proposer_node_id": "scheduler",
-                        },
-                        priority=TaskPriority.LOW,
-                        mode_allowlist=["normal", "focus", "gaming", "sleep"],  # 所有非锁定模式均运行
-                        enabled=True,
-                        description="Phase XVIII 沉默引擎 tick：每分钟驱动回复意愿自然恢复和话题抗拒衰减",
-                    )
-                    if _proactive_registry.get("silence_tick") is None:
-                        _proactive_registry.register(_silence_task)
-                        logger.info("沉默引擎 tick 任务已注册: task_id=silence_tick, interval=60s")
-                except Exception as _silence_exc:
-                    logger.warning("沉默引擎 tick 任务注册失败（降级）: %s", _silence_exc)
-
-                # [v1.12] 注册 body_sense_tick 任务（每分钟驱动身体感知：困倦感时段更新 + 疲劳自然恢复）
-                try:
-                    _body_sense_task = SchedulerTaskConfig(
-                        task_id="body_sense_tick",
-                        trigger_mode=TriggerMode.INTERVAL,
-                        trigger_config={"seconds": 60},  # 每分钟 tick 一次
-                        intent_template={
-                            "skill_name": "body_sense_tick",
-                            "args": _scheduler_persona_args(),
-                            "proposer_node_id": "scheduler",
-                        },
-                        priority=TaskPriority.LOW,
-                        mode_allowlist=["normal", "focus", "gaming", "sleep"],  # 所有非锁定模式均运行
-                        enabled=True,
-                        description="v1.12 身体感知 tick：每分钟更新困倦感（基于时段）和疲劳自然恢复",
-                    )
-                    if _proactive_registry.get("body_sense_tick") is None:
-                        _proactive_registry.register(_body_sense_task)
-                        logger.info("身体感知 tick 任务已注册: task_id=body_sense_tick, interval=60s")
-                except Exception as _body_sense_exc:
-                    logger.warning("身体感知 tick 任务注册失败（降级）: %s", _body_sense_exc)
-
-                # [GAP_ANALYSIS 14.2] 注册 gaming_companion_tick 任务（gaming 模式下每 5 分钟陪玩识图）
-                try:
-                    _gaming_task = SchedulerTaskConfig(
-                        task_id="gaming_companion_tick",
-                        trigger_mode=TriggerMode.INTERVAL,
-                        trigger_config={"seconds": 300},  # 每 5 分钟截图分析一次
-                        intent_template={
-                            "skill_name": "gaming_companion_tick",
-                            "args": _scheduler_persona_args(monitor=1),
-                            "proposer_node_id": "scheduler",
-                        },
-                        priority=TaskPriority.LOW,
-                        mode_allowlist=["gaming"],  # 仅在 gaming 模式下运行
-                        enabled=True,
-                        description="gaming 陪玩识图 tick：每 5 分钟截图 → 多模态 LLM 分析 → 推送陪玩评论",
-                    )
-                    if _proactive_registry.get("gaming_companion_tick") is None:
-                        _proactive_registry.register(_gaming_task)
-                        logger.info("gaming 陪玩识图 tick 任务已注册: task_id=gaming_companion_tick, interval=300s, mode=gaming")
-                except Exception as _gaming_exc:
-                    logger.warning("gaming 陪玩识图 tick 任务注册失败（降级）: %s", _gaming_exc)
-
-                # [Phase XIX] 注册 emergent_growth_weekly 任务（每周日 03:00 涌现式人格成长）
-                try:
-                    _emergent_growth_task = SchedulerTaskConfig(
-                        task_id="emergent_growth_weekly",
-                        trigger_mode=TriggerMode.CRON,
-                        trigger_config={"day_of_week": 6, "hour": 3, "minute": 0},  # 周日 03:00
-                        intent_template={
-                            "skill_name": "emergent_growth_weekly",
-                            "args": _scheduler_persona_args(lookback_days=7),
-                            "proposer_node_id": "scheduler",
-                        },
-                        priority=TaskPriority.LOW,
-                        mode_allowlist=["normal", "sleep"],
-                        enabled=True,
-                        description="Phase XIX 涌现式成长：每周日 03:00 分析近期对话模式，自然浮现人格微调",
-                    )
-                    if _proactive_registry.get("emergent_growth_weekly") is None:
-                        _proactive_registry.register(_emergent_growth_task)
-                        logger.info("涌现式成长任务已注册: task_id=emergent_growth_weekly, cron=周日03:00")
-                except Exception as _emergent_exc:
-                    logger.warning("涌现式成长任务注册失败（降级）: %s", _emergent_exc)
-
-                # [D9] 注册 emotion_decay_tick 任务（每 30s 驱动情绪衰减连续动态系统）
-                try:
-                    _emotion_decay_task = SchedulerTaskConfig(
-                        task_id="emotion_decay_tick",
-                        trigger_mode=TriggerMode.INTERVAL,
-                        trigger_config={"seconds": 30},  # 每 30s tick 一次
-                        intent_template={
-                            "skill_name": "emotion_decay_tick",
-                            "args": {},
-                            "proposer_node_id": "scheduler",
-                        },
-                        priority=TaskPriority.LOW,
-                        mode_allowlist=["normal", "focus", "gaming", "sleep"],
-                        enabled=True,
-                        description="D4/D6/D7/D8: 情绪衰减连续动态系统 tick——每 30s 驱动 LimbicAgent 情绪衰减、CircadianAgent 基线调制、InteroceptionAgent 身体预算、GlymphaticAgent 恢复窗口",
-                    )
-                    if _proactive_registry.get("emotion_decay_tick") is None:
-                        _proactive_registry.register(_emotion_decay_task)
-                        logger.info("情绪衰减 tick 任务已注册: task_id=emotion_decay_tick, interval=30s")
-                except Exception as _decay_exc:
-                    logger.warning("情绪衰减 tick 任务注册失败（降级）: %s", _decay_exc)
+                _core_personality_task_ids = register_scheduler_seed_tasks(
+                    registry=_proactive_registry,
+                    logger=logger,
+                    task_configs=build_personality_scheduler_seed_task_configs(),
+                )
 
                 # 关键约束：必须在全部 seed tasks 注册完成后再 start，
                 # 否则后续仅写入 registry 的任务不会被运行中的 scheduler 真正调度。
                 _natsume_scheduler.start()
-                _core_personality_task_ids = [
-                    "proactive_talk_periodic",
-                    "inner_world_numeric_tick",
-                    "inner_world_monologue_tick",
-                    "silence_tick",
-                    "body_sense_tick",
-                    "emotion_decay_tick",
-                ]
                 new_module_statuses["proactive_talk_scheduler"] = (
                     "OK "
                     f"(started; core_ticks={len(_core_personality_task_ids)}; "
@@ -1232,6 +940,10 @@ def runtime_lifespan(
                     ("file_read",      "READ", "NONE", ["file"],   "读取文件内容（只读）"),
                     ("memory_search",  "READ", "NONE", ["memory"], "语义检索记忆库"),
                     ("system_info",    "READ", "NONE", ["system"], "查询系统信息"),
+                    ("system_resource_snapshot", "READ", "NONE", ["system"], "查询整机资源快照"),
+                    ("process_resource_top", "READ", "NONE", ["system"], "查询资源热点进程"),
+                    ("resource_pressure_analysis", "READ", "NONE", ["system"], "分析整机资源压力根因"),
+                    ("resource_manager_status", "READ", "NONE", ["system"], "查询自动资源管家状态"),
                     ("network_status", "READ", "NONE", ["system"], "查询网络状态"),
                     ("web_search",     "READ", "NONE", ["web"],    "执行网络搜索"),
                 ]
@@ -1328,7 +1040,7 @@ def runtime_lifespan(
                 new_module_statuses["personality_tools_catalog"] = f"DEGRADED: {_pt_exc}"
                 logger.warning("Personality 工具注册失败（降级）: %s", _pt_exc)
 
-            # [long_term_distillation_catalog] 注册长期记忆蒸馏工具到 ToolCatalog
+            # [memory_maintenance_catalog] 注册长期记忆蒸馏/睡眠回放工具到 ToolCatalog
             try:
                 from host_brain.app.dependencies import get_tool_catalog, get_tool_broker, get_ledger as _get_ledger  # noqa: PLC0415
                 from host_brain.tools.catalog import ToolMeta  # noqa: PLC0415
@@ -1360,11 +1072,28 @@ def runtime_lifespan(
                 )
 
                 _brk2.register_handler("long_term_memory_distillation", _long_term_distillation_handler)
-                new_module_statuses["long_term_distillation_catalog"] = "OK (1 tool registered)"
-                logger.info("长期蒸馏工具已注册到 ToolCatalog")
+                _tmeta_sleep = ToolMeta(
+                    id="life_memory_sleep_replay",
+                    name="life_memory_sleep_replay",
+                    desc="生命记忆睡眠回放：执行 HOT/WARM/COLD/GONE 遗忘分层并强化高显著经历",
+                    schema_hash=_shash_lt,
+                    side_effect_level="WRITE", auth_level="LOW",
+                    domain_tags=("memory",), version="1.0",
+                )
+                try:
+                    _cat2.register(_tmeta_sleep)
+                except Exception:
+                    pass
+
+                _brk2.register_handler(
+                    "life_memory_sleep_replay",
+                    lambda args, ctx: run_life_memory_sleep_replay_handler(args, ctx),
+                )
+                new_module_statuses["long_term_distillation_catalog"] = "OK (2 tools registered)"
+                logger.info("长期蒸馏/睡眠回放工具已注册到 ToolCatalog")
             except Exception as _lt_exc:
                 new_module_statuses["long_term_distillation_catalog"] = f"DEGRADED: {_lt_exc}"
-                logger.warning("长期蒸馏工具注册失败（降级）: %s", _lt_exc)
+                logger.warning("记忆维护工具注册失败（降级）: %s", _lt_exc)
 
             try:
                 from host_brain.app.automation.task_scheduler import (  # noqa: PLC0415
@@ -1485,7 +1214,6 @@ def runtime_lifespan(
                 logger.warning("ANSAgent 主事件循环注册失败（降级）: %s", _ans_loop_exc)
 
             # [ModeTransition] ActivityMonitor 启动：游戏进程检测 + 空闲检测 + 早间唤醒
-            _activity_monitor = None
             try:
                 from host_brain.core.activity_monitor import ActivityMonitor  # noqa: PLC0415
                 from host_brain.app.dependencies import get_hard_state, set_sys_mode  # noqa: PLC0415
@@ -1526,6 +1254,36 @@ def runtime_lifespan(
             except Exception as _am_exc:
                 new_module_statuses["activity_monitor"] = f"DEGRADED: {_am_exc}"
                 logger.warning("ActivityMonitor 启动失败（降级）: %s", _am_exc)
+
+            # 整机资源管家：自动采样 CPU/GPU/内存/显存，压力触发 LLM 分析。
+            try:
+                if not _background_tasks_enabled:
+                    new_module_statuses["system_resource_manager"] = "SKIPPED: HOST_BACKGROUND_TASKS_ENABLED=false"
+                elif not _parse_bool_env("HOST_RESOURCE_MANAGER_ENABLED", default=False):
+                    new_module_statuses["system_resource_manager"] = "SKIPPED: HOST_RESOURCE_MANAGER_ENABLED=false"
+                else:
+                    from host_brain.app.dependencies import set_resource_manager  # noqa: PLC0415
+                    from host_brain.core.resource_manager import SystemResourceManager  # noqa: PLC0415
+
+                    _resource_manager = SystemResourceManager()
+                    _resource_manager.start(
+                        run_immediately=_parse_bool_env(
+                            "HOST_RESOURCE_MANAGER_RUN_ON_STARTUP",
+                            default=True,
+                        )
+                    )
+                    set_resource_manager(_resource_manager)
+                    _rm_status = _resource_manager.get_status()
+                    new_module_statuses["system_resource_manager"] = (
+                        f"OK (interval={_rm_status.get('interval_s')}s, "
+                        f"llm={_rm_status.get('llm_enabled')}, "
+                        f"auto_gc={_rm_status.get('auto_gc_enabled')}, "
+                        f"auto_trim={_rm_status.get('auto_trim_enabled')})"
+                    )
+                    logger.info("SystemResourceManager 已启动: %s", new_module_statuses["system_resource_manager"])
+            except Exception as _rm_exc:
+                new_module_statuses["system_resource_manager"] = f"DEGRADED: {_rm_exc}"
+                logger.warning("SystemResourceManager 启动失败（降级）: %s", _rm_exc)
 
             # 服务健康心跳：定时探测 Edge/Host，避免总览一直显示「未知」
             try:
@@ -1674,6 +1432,12 @@ def runtime_lifespan(
                 logger.info("ActivityMonitor 已停止")
         except Exception as _am_stop_exc:
             logger.warning("ActivityMonitor 停止失败: %s", _am_stop_exc)
+        try:
+            if _resource_manager is not None:
+                _resource_manager.stop()
+                logger.info("SystemResourceManager 已停止")
+        except Exception as _rm_stop_exc:
+            logger.warning("SystemResourceManager 停止失败: %s", _rm_stop_exc)
         # 优雅关闭 BondUpdateQueue（drain 等待队列排空 + shutdown 停止 worker）
         try:
             from host_brain.tribe.cortex_agent import get_cortex_agent  # noqa: PLC0415

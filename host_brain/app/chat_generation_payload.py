@@ -376,7 +376,7 @@ def build_chat_generation_prompt_payload(
             "reason_code": retrieval_summary.get("reason_code"),
             "route_count": retrieval_summary.get("route_count"),
             "candidate_count": retrieval_summary.get("candidate_count"),
-            "rerank_topk": retrieval_summary.get("rerank_topk"),
+            "topk_count": retrieval_summary.get("topk_count"),
             "degraded": retrieval_summary.get("degraded"),
             "evidence_items": retrieval_evidence_items,
         },

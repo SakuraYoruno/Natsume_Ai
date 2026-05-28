@@ -3,10 +3,11 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from host_brain.audit.retention import MS_DAY, RetentionPolicy, run_retention_policy
+from host_brain.audit.retention import MS_DAY, RetentionPolicy, build_retention_policy_from_env, run_retention_policy
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.governor.tokens import TokenService
 from host_brain.lsp.vault import ArtifactVault
+from host_brain.memory.life_memory import LifeMemoryStore
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -120,6 +121,72 @@ class TestAuditRetentionContract(unittest.TestCase):
         self.assertEqual("COMPLETE", trace["status"])
         ledger.close()
 
+    def test_protected_chain_can_be_pruned_when_explicitly_configured(self) -> None:
+        ledger = SQLiteLedger(db_path=":memory:")
+        request_id = "req_ret_protected_001"
+        intent_id = "intent_ret_protected_001"
+
+        ledger.log_intent(
+            {
+                "request_id": request_id,
+                "thread_id": "thread_ret",
+                "turn_id": "turn_ret",
+                "intent_id": intent_id,
+                "session_id": "session_ret",
+                "seq": 1,
+                "ts_ms": 1000,
+                "nonce": "nonce_ret_protected_001",
+                "parse_stage": "LENIENT_OK",
+                "normalized_json": {"id": intent_id},
+                "proposed_intent_draft_json": {"id": intent_id},
+                "lint_result": {"schema": [], "args": []},
+            }
+        )
+        ledger.log_governor(
+            {
+                "request_id": request_id,
+                "thread_id": "thread_ret",
+                "turn_id": "turn_ret",
+                "intent_id": intent_id,
+                "decision": "APPROVE",
+                "stage": "S_INTENT_OK",
+                "ts_ms": 1001,
+            }
+        )
+        ledger.log_skill_exec(
+            {
+                "request_id": request_id,
+                "thread_id": "thread_ret",
+                "turn_id": "turn_ret",
+                "intent_id": intent_id,
+                "skill_name": "old_skill",
+                "result_status": "SUCCESS",
+                "result_code": "OK",
+                "result_digest": "ok",
+                "evidence_ref": "evidence::old",
+                "ts_ms": 1002,
+            }
+        )
+
+        result = run_retention_policy(
+            ledger=ledger,
+            policy=RetentionPolicy(
+                policy_profile_id="audit_ret_protected_delete",
+                keep_ms_by_table={},
+                protected_chain_keep_ms=100,
+            ),
+            request_id="req_retention_exec_protected",
+            now_ts_ms=1_000_000,
+        )
+
+        self.assertEqual(1, result.protected_deleted_counts.get("intent_log"))
+        self.assertEqual(1, result.protected_deleted_counts.get("governor_log"))
+        self.assertEqual(1, result.protected_deleted_counts.get("skill_exec_log"))
+        self.assertEqual([], ledger.intent_log)
+        self.assertEqual([], ledger.governor_log)
+        self.assertEqual([], ledger.skill_exec_log)
+        ledger.close()
+
     def test_default_policy_prunes_high_volume_llm_call_logs(self) -> None:
         ledger = SQLiteLedger(db_path=":memory:")
         now_ts_ms = 20 * MS_DAY
@@ -185,6 +252,154 @@ class TestAuditRetentionContract(unittest.TestCase):
         self.assertEqual(["req_llm_recent"], [row["request_id"] for row in node_rows])
         self.assertEqual(["req_pool_recent"], [row["request_id"] for row in pool_rows])
         ledger.close()
+
+    def test_retention_prunes_high_volume_logs_by_max_rows_even_when_recent(self) -> None:
+        ledger = SQLiteLedger(db_path=":memory:")
+        for idx in range(5):
+            ledger.log_llm_node_call(
+                {
+                    "request_id": f"req_recent_node_{idx}",
+                    "node_id": "planner",
+                    "provider": "test",
+                    "model_id": "recent-node",
+                    "status": "OK",
+                    "ts_ms": 10_000 + idx,
+                }
+            )
+
+        result = run_retention_policy(
+            ledger=ledger,
+            policy=RetentionPolicy(
+                policy_profile_id="audit_ret_max_rows",
+                keep_ms_by_table={},
+                max_rows_by_table={"llm_node_call_log": 2},
+                life_memory_keep_ms=None,
+            ),
+            request_id="req_retention_max_rows",
+            now_ts_ms=20_000,
+        )
+
+        self.assertEqual(3, result.max_row_candidate_counts.get("llm_node_call_log"))
+        self.assertEqual(3, result.max_row_deleted_counts.get("llm_node_call_log"))
+        rows = ledger.fetch_by_time_range("llm_node_call_log", limit=10)
+        self.assertEqual(["req_recent_node_3", "req_recent_node_4"], [row["request_id"] for row in rows])
+        ledger.close()
+
+    def test_retention_prunes_unimportant_old_life_memory_without_touching_chat_or_linked_episodes(self) -> None:
+        ledger = SQLiteLedger(db_path=":memory:")
+        store = LifeMemoryStore(ledger=ledger)
+
+        low_old = store.upsert_episode(
+            episode_kind="background_episode",
+            evidence_refs=["scheduler://event/low-old"],
+            primary_ref="scheduler://event/low-old",
+            summary="low old background detail",
+            salience=0.10,
+            truth_state="VERIFIED",
+            ts_ms=1000,
+        )["episode_id"]
+        store.attach_evidence(
+            episode_id=low_old,
+            evidence_kind="scheduler_event",
+            source_ref="scheduler://event/low-old",
+            content="detail that should be deleted",
+            trust_level="VERIFIED",
+            ts_ms=1000,
+        )
+        high_old = store.upsert_episode(
+            episode_kind="background_episode",
+            evidence_refs=["scheduler://event/high-old"],
+            primary_ref="scheduler://event/high-old",
+            summary="important old background detail",
+            salience=0.90,
+            truth_state="VERIFIED",
+            ts_ms=1000,
+        )["episode_id"]
+        chat_old = store.upsert_episode(
+            episode_kind="chat_episode",
+            evidence_refs=["chat://request/chat-old"],
+            primary_ref="chat://request/chat-old",
+            summary="ordinary old chat",
+            salience=0.10,
+            truth_state="VERIFIED",
+            ts_ms=1000,
+        )["episode_id"]
+        linked_old = store.upsert_episode(
+            episode_kind="inner_episode",
+            evidence_refs=["inner_world://event/linked-old"],
+            primary_ref="inner_world://event/linked-old",
+            summary="linked old inner detail",
+            salience=0.10,
+            truth_state="VERIFIED",
+            ts_ms=1000,
+        )["episode_id"]
+        store.link_episode(
+            source_episode_id=linked_old,
+            target_episode_id=high_old,
+            link_kind="reflection",
+            ts_ms=1000,
+        )
+        recent_low = store.upsert_episode(
+            episode_kind="inner_episode",
+            evidence_refs=["inner_world://event/recent-low"],
+            primary_ref="inner_world://event/recent-low",
+            summary="recent low inner detail",
+            salience=0.10,
+            truth_state="VERIFIED",
+            ts_ms=9950,
+        )["episode_id"]
+
+        result = run_retention_policy(
+            ledger=ledger,
+            policy=RetentionPolicy(
+                policy_profile_id="life_memory_ret_test",
+                keep_ms_by_table={},
+                life_memory_keep_ms=100,
+                life_memory_min_salience=0.40,
+                life_memory_episode_kinds=("background_episode", "inner_episode"),
+            ),
+            request_id="req_retention_life_memory",
+            now_ts_ms=10_000,
+        )
+
+        self.assertEqual(1, result.life_memory_candidate_count)
+        self.assertEqual(1, result.life_memory_deleted_count)
+        remaining_ids = {row["episode_id"] for row in ledger.life_episode}
+        self.assertNotIn(low_old, remaining_ids)
+        self.assertIn(high_old, remaining_ids)
+        self.assertIn(chat_old, remaining_ids)
+        self.assertIn(linked_old, remaining_ids)
+        self.assertIn(recent_low, remaining_ids)
+        self.assertFalse(any(row["episode_id"] == low_old for row in ledger.life_evidence))
+        ledger.close()
+
+    def test_env_policy_supports_dates_and_chat_memory_opt_in(self) -> None:
+        policy = build_retention_policy_from_env(
+            {
+                "HOST_AUDIT_RETENTION_KEEP_DAYS": "3",
+                "HOST_AUDIT_RETENTION_MAX_ROWS_LLM_NODE_CALL_LOG": "123",
+                "HOST_AUDIT_RETENTION_CUTOFF_DATE": "2026-01-02",
+                "HOST_AUDIT_RETENTION_PROTECTED_CHAIN_KEEP_DAYS": "30",
+                "HOST_MEMORY_RETENTION_KEEP_DAYS": "45",
+                "HOST_MEMORY_RETENTION_CUTOFF_DATE": "2026-01-03",
+                "HOST_MEMORY_RETENTION_INCLUDE_CHAT": "true",
+                "HOST_MEMORY_RETENTION_MIN_SALIENCE": "0.25",
+                "HOST_RETENTION_DRY_RUN": "true",
+                "HOST_RETENTION_VACUUM": "true",
+            },
+            now_ts_ms=1000,
+        )
+
+        self.assertEqual(3 * MS_DAY, policy.keep_ms_by_table["error_log"])
+        self.assertEqual(123, policy.max_rows_by_table["llm_node_call_log"])
+        self.assertIsNotNone(policy.audit_cutoff_ts_ms)
+        self.assertEqual(30 * MS_DAY, policy.protected_chain_keep_ms)
+        self.assertEqual(45 * MS_DAY, policy.life_memory_keep_ms)
+        self.assertIsNotNone(policy.life_memory_cutoff_ts_ms)
+        self.assertIn("chat_episode", policy.life_memory_episode_kinds)
+        self.assertEqual(0.25, policy.life_memory_min_salience)
+        self.assertTrue(policy.dry_run)
+        self.assertTrue(policy.vacuum)
 
     def test_t_audit_ret_01_vault_gc_respects_active_undo_window(self) -> None:
         fixture = _load_json(VAULT_FIX)

@@ -21,6 +21,7 @@ from host_brain.core.errors import LLM_POOL_EXHAUSTED
 from host_brain.core.ids import now_ms, new_request_id
 from host_brain.integrations.llm_helpers import complete_llm_with_pool_sync
 from host_brain.memory.episodic import EpisodicStore
+from host_brain.memory.life_memory import LifeMemoryConsolidator, LifeMemoryStore
 
 
 @runtime_checkable
@@ -200,16 +201,20 @@ class DistillResult:
 
 
 class MemoryDistillationEngine:
-    """Distills semantic memory from episodic recall results."""
+    """Distills semantic memory from trusted life episodes, with legacy episodic fallback."""
 
     def __init__(
         self,
         *,
         episodic_store: EpisodicStore,
         ledger: SQLiteLedger,
+        life_memory_store: LifeMemoryStore | None = None,
+        prefer_life_episode: bool = True,
     ) -> None:
         self.episodic = episodic_store
         self.ledger = ledger
+        self.life_memory_store = life_memory_store
+        self.prefer_life_episode = bool(prefer_life_episode)
         # F-41: protect idempotency check + write critical section.
         self._distill_lock = threading.Lock()
 
@@ -228,17 +233,17 @@ class MemoryDistillationEngine:
         top_k = min(max(1, top_k), 20)
 
         recall_k = min(max(top_k * 3, top_k), 20)
-        recalled = [
-            row
-            for row in self.episodic.recall(query_text=query_text, top_k=recall_k)
-            if not _is_semantic_memory_projection(row)
-        ][:top_k]
+        recalled, source_layer = self._select_distillation_sources(
+            query_text=query_text,
+            recall_k=recall_k,
+            top_k=top_k,
+        )
         if not recalled:
             return DistillResult(
                 success=False,
                 semantic_id=None,
                 source_count=0,
-                detail="no episodic memories found for query",
+                detail="no trusted life episodes or episodic memories found for query",
                 ts_ms=distill_ts,
             )
 
@@ -264,11 +269,13 @@ class MemoryDistillationEngine:
                     query_text=query_text,
                     max_tokens=200,
                 )
-                distill_strategy = "llm_summary"
+                distill_strategy = "life_episode_llm_summary" if source_layer == "life_episode" else "llm_summary"
             except Exception:
                 summary = _merge_texts(texts, query_text=query_text)
         else:
             summary = _merge_texts(texts, query_text=query_text)
+        if source_layer == "life_episode" and distill_strategy == "merge_top_k":
+            distill_strategy = "life_episode_merge_top_k"
 
         semantic_id = f"sem_{uuid.uuid4().hex}"
         record = SemanticMemoryRecord(
@@ -278,7 +285,7 @@ class MemoryDistillationEngine:
             source_hash=source_hash,
             distill_strategy=distill_strategy,
             confidence=_compute_confidence(recalled),
-            tags=list(tags or []),
+            tags=_merge_tags(list(tags or []), [f"source:{source_layer}"]),
             ts_ms=distill_ts,
             operator_node_id=operator_node_id,
         )
@@ -337,9 +344,79 @@ class MemoryDistillationEngine:
             success=True,
             semantic_id=semantic_id,
             source_count=len(source_ids),
-            detail=f"distilled {len(source_ids)} episodic memories into semantic_id={semantic_id}",
+            detail=f"distilled {len(source_ids)} {source_layer} memories into semantic_id={semantic_id}",
             ts_ms=distill_ts,
         )
+
+    def _select_distillation_sources(
+        self,
+        *,
+        query_text: str,
+        recall_k: int,
+        top_k: int,
+    ) -> tuple[list[dict[str, Any]], str]:
+        if self.prefer_life_episode and self.life_memory_store is not None:
+            life_rows = self._recall_life_episode_sources(query_text=query_text, top_k=top_k, recall_k=recall_k)
+            if life_rows:
+                return life_rows, "life_episode"
+        legacy_rows = [
+            row
+            for row in self.episodic.recall(query_text=query_text, top_k=recall_k)
+            if not _is_semantic_memory_projection(row)
+        ][:top_k]
+        return legacy_rows, "episodic"
+
+    def _recall_life_episode_sources(
+        self,
+        *,
+        query_text: str,
+        top_k: int,
+        recall_k: int,
+    ) -> list[dict[str, Any]]:
+        if self.life_memory_store is None:
+            return []
+        packet = self.life_memory_store.recall_episode_packet(
+            query=query_text,
+            top_k=recall_k,
+        )
+        candidates = list(packet.candidates or [])
+        if not candidates and not str(query_text or "").strip():
+            candidates = [
+                {
+                    "memory_id": item.get("episode_id"),
+                    "text": item.get("summary"),
+                    "score": item.get("memory_strength") or item.get("salience") or 0.0,
+                    "metadata": {
+                        "episode_id": item.get("episode_id"),
+                        "source_ref": item.get("source_ref"),
+                        "truth_state": item.get("truth_state"),
+                        "retention_state": item.get("retention_state"),
+                        "memory_strength": item.get("memory_strength"),
+                    },
+                }
+                for item in LifeMemoryConsolidator(store=self.life_memory_store).build_semantic_candidates(limit=recall_k)
+            ]
+        rows: list[dict[str, Any]] = []
+        for item in candidates:
+            meta = dict(item.get("metadata") or {}) if isinstance(item.get("metadata"), Mapping) else {}
+            episode_id = str(meta.get("episode_id") or item.get("memory_id") or "").strip()
+            text = str(item.get("text") or "").strip()
+            if not episode_id or not text:
+                continue
+            rows.append(
+                {
+                    "memory_id": f"life_episode::{episode_id}",
+                    "text": text,
+                    "score": float(item.get("score") or meta.get("memory_strength") or meta.get("salience") or 0.0),
+                    "metadata": {
+                        **meta,
+                        "source_table": "life_episode",
+                        "memory_layer": "life_episode",
+                        "episode_id": episode_id,
+                    },
+                }
+            )
+        return rows[:top_k]
 
     def list_semantic_memories(
         self,
@@ -354,6 +431,18 @@ def _compute_source_hash(source_ids: list[str]) -> str:
     sorted_ids = sorted(source_ids)
     payload = json.dumps(sorted_ids, ensure_ascii=False, sort_keys=True)
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _merge_tags(existing: list[str], additions: list[str]) -> list[str]:
+    merged: list[str] = []
+    seen: set[str] = set()
+    for item in [*existing, *additions]:
+        tag = str(item or "").strip()
+        if not tag or tag in seen:
+            continue
+        seen.add(tag)
+        merged.append(tag)
+    return merged
 
 
 def _is_semantic_memory_projection(row: Mapping[str, Any]) -> bool:

@@ -4,7 +4,7 @@ param(
   [string]$LogDir = "",
   [string]$BindHost = "",
   [int]$Port = 0,
-  [ValidateSet("docker")]
+  [ValidateSet("docker", "none")]
   [string]$ExternalServicesBackend = "docker",
   [string]$DockerComposeFile = "",
   [string]$DockerProjectName = "natsume-ext",
@@ -548,23 +548,31 @@ $env:HOST_MAIN_MONITOR_REDIRECT_ENABLED = if ($monitorProxyEnabled) { "true" } e
 
 $localServices = $null
 $localOllama = Ensure-LocalOllamaRuntime -RepoRoot $repoRoot -EnvValues $envValues
-$startDockerScript = Join-Path $PSScriptRoot "start_docker_services.ps1"
-if (-not (Test-Path -Path $startDockerScript)) {
-  throw "start_docker_services.ps1 not found: $startDockerScript"
-}
-$dockerRaw = & $startDockerScript `
-  -EnvFile $EnvFile `
-  -ComposeFile $DockerComposeFile `
-  -ProjectName $DockerProjectName `
-  -Neo4jWaitSeconds $Neo4jWaitSeconds `
-  -ChromaWaitSeconds $ChromaWaitSeconds
-$dockerJson = ($dockerRaw | Out-String).Trim()
-if ($dockerJson) {
-  try {
-    $localServices = $dockerJson | ConvertFrom-Json
-  } catch {
-    $localServices = [ordered]@{
-      raw = $dockerJson
+if ($ExternalServicesBackend -eq "none") {
+  $localServices = [ordered]@{
+    status = "skipped"
+    backend = "none"
+    detail = "external service startup skipped by request"
+  }
+} else {
+  $startDockerScript = Join-Path $PSScriptRoot "start_docker_services.ps1"
+  if (-not (Test-Path -Path $startDockerScript)) {
+    throw "start_docker_services.ps1 not found: $startDockerScript"
+  }
+  $dockerRaw = & $startDockerScript `
+    -EnvFile $EnvFile `
+    -ComposeFile $DockerComposeFile `
+    -ProjectName $DockerProjectName `
+    -Neo4jWaitSeconds $Neo4jWaitSeconds `
+    -ChromaWaitSeconds $ChromaWaitSeconds
+  $dockerJson = ($dockerRaw | Out-String).Trim()
+  if ($dockerJson) {
+    try {
+      $localServices = $dockerJson | ConvertFrom-Json
+    } catch {
+      $localServices = [ordered]@{
+        raw = $dockerJson
+      }
     }
   }
 }

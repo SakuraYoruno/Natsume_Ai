@@ -99,6 +99,11 @@ _IMAGE_SOCIAL_JUDGMENT_FRAME_RE = re.compile(
     r"(?:别管它|别理它|算了|随它|这事|那事|这件事|那件事)|"
     r"(?:哥哥).{0,8}(?:最好了|最棒了|真好|好乖|真乖)"
 )
+_IMAGE_SOCIAL_UNGROUNDED_INFERENCE_RE = re.compile(
+    r"(?:房间|宿舍|床上|家里|一个人|独自|躲起来|躲着|装深沉|发呆|不说话|没说话|"
+    r"不出声|没动静|沉默|憋着|硬撑|发表情包的样子|扔过来表情包.{0,8}好笑|"
+    r"在.{0,6}(?:想|干嘛|干什么|做什么))"
+)
 _UNBALANCED_QUOTE_RE = re.compile(r"^[“\"'‘][^”\"'’]*$")
 _IMAGE_SOCIAL_DESCRIPTOR_FOCUS_RE = re.compile(
     r"(?:这张图|这张|这图|图里|画面|上面|这个表情|小表情|表情包|猫耳这张|这张猫耳|猫耳|金发|黄头发|蓝眼|眼睛|脸)"
@@ -137,6 +142,9 @@ _IMAGE_SOCIAL_LIGHT_ACK_RE = re.compile(
     r"(?:你|哥哥).{0,8}(?:发来|发了|发给|发过来|丢|递|拿).{0,10}(?:图|图片|表情|贴图|这个|东西|过来)|"
     r"(?:图|图片|表情|贴图|这个|东西).{0,8}(?:收到|看到了?|接住))"
 )
+_IMAGE_SOCIAL_FAKE_VISUAL_ACK_RE = re.compile(
+    r"(?:我看到了|看到了|看见了|这个表情|这张图|这张|这图|图里|画面里|看起来|不硬猜|先收一下)"
+)
 _UNFINISHED_TAIL_RE = re.compile(r"(?:不过|但是|可是|只是|然后|所以|而且|不过呢)[…。.!！?？\s]*$")
 _INCOMPLETE_DEICTIC_RE = re.compile(
     r"(?:这是|这个|这张|这图|这样|那是|那个|那张|那样|"
@@ -152,6 +160,7 @@ _PROMPT_LEAK_RE = re.compile(
     r"(Conversation State Directive|reply_contract|render_policy_summary|topic_summary|dialogue_summary|control_line|tactic_family|trajectory_stage|trust\s*0\.\d+)",
     re.IGNORECASE,
 )
+_STAGE_DIRECTION_RE = re.compile(r"^[（(][^）)]{1,80}[）)]")
 _META_OVEREXPLICIT_RE = re.compile(
     r"^(前面|刚才|已经|之前|这件事|这个已经|你还是在意这个|你还是不安|你还是不太放心|这个已经来回问过几次了)"
 )
@@ -166,6 +175,7 @@ _LOW_QUALITY_STOCK_RE = re.compile(
     r"无语什么|我在这儿呀|我在这里呀|"
     r"突然这么可爱|想让我哄|嘴硬呀|"
     r"这一下我接到|这一下我接住|先不乱猜|"
+    r"这一下是有点无语|这一下我收到了|我先收一下|刚才那句我先收一下|不硬猜|"
     r"哥哥你仅在|哥哥你又在无语|被什么事给|"
     r"刚刚在叫|刚才在叫|在叫哥哥你|我是在叫你|"
     r"哥哥你在说什么呀|哥哥你仅在无语|因为[。.!！?\s]*$)"
@@ -507,6 +517,8 @@ _ACTION_LABELS: dict[str, str] = {
     "repeat_ack_or_anxiety": "先回应这不是第一次问，或回应对方的不安",
     "repair_ack": "先收住并回应对方的拒绝感",
     "phatic_ack": "先回应这句招呼",
+    "modality_grounding": "先说明当前没有听见声音",
+    "text_seen": "说明只看到了文字",
     "visual_reference": "点到附件或画面里的对象",
     "image_social_emotion_response": "把表情包当成对方递来的情绪来回",
     "image_social_light_ack": "把图片/表情包当成轻社交动作回应",
@@ -523,6 +535,8 @@ _FORBIDDEN_LABELS: dict[str, str] = {
     "generic_companioning": "不要滑成泛泛陪聊或客服式安抚",
     "promise_restate": "不要把承诺整句重说一遍",
     "defensive_explanation": "不要进入辩解或澄清口吻",
+    "pretend_heard_audio": "不要无语音证据说听到了",
+    "presence_only": "不要只回在呢",
 }
 
 _UNSAFE_REASON_CODES = {
@@ -530,6 +544,7 @@ _UNSAFE_REASON_CODES = {
     "prompt_leak",
     "process_term_echo",
     "low_quality_stock_phrase",
+    "stage_direction",
     "symbol_only_reply",
     "image_self_reference",
     "image_social_overplayed",
@@ -538,6 +553,8 @@ _UNSAFE_REASON_CODES = {
     "image_social_problem_frame",
     "image_social_verbal_misframe",
     "image_social_judgment_frame",
+    "image_social_ungrounded_inference",
+    "image_social_fake_visual_ack",
     "image_social_emotion_missing",
     "image_social_unsupported_action",
     "unfinished_tail",
@@ -549,6 +566,7 @@ _REASON_PENALTIES: dict[str, float] = {
     "prompt_leak": 1.0,
     "process_term_echo": 0.95,
     "low_quality_stock_phrase": 0.95,
+    "stage_direction": 0.9,
     "symbol_only_reply": 1.0,
     "generic_assistant_phrasing": 0.7,
     "underanswered": 0.45,
@@ -571,6 +589,8 @@ _REASON_PENALTIES: dict[str, float] = {
     "image_social_problem_frame": 0.8,
     "image_social_verbal_misframe": 0.8,
     "image_social_judgment_frame": 0.75,
+    "image_social_ungrounded_inference": 0.85,
+    "image_social_fake_visual_ack": 0.85,
     "image_social_emotion_missing": 0.65,
     "image_social_unsupported_action": 0.75,
     "unfinished_tail": 0.7,
@@ -617,6 +637,10 @@ def _has_required_action(action: str, text: str) -> bool:
         return bool(_REPAIR_ACK_RE.search(normalized))
     if action == "phatic_ack":
         return bool(_PHATIC_ACK_RE.search(normalized))
+    if action == "modality_grounding":
+        return bool(re.search(r"(没听见|没听到|听不见|听不到|没发现.{0,4}声音|没有.{0,4}声音)", normalized))
+    if action == "text_seen":
+        return bool(re.search(r"(文字|这条|这句|消息|看到|看见)", normalized))
     if action == "visual_reference":
         return bool(_VISUAL_REFERENCE_RE.search(normalized))
     if action == "image_social_emotion_response":
@@ -688,20 +712,8 @@ def _build_assistant_followup_fallback(plan: ReplyPlan) -> str:
 
 
 def _build_image_social_fallback(plan: ReplyPlan) -> str:
-    signals = " ".join(_multimodal_emotion_signals(plan))
-    core = _multimodal_core_observation(plan)
-    haystack = f"{signals} {core}".strip()
-    if any(token in haystack for token in ("委屈", "哭", "难过", "伤心", "呜", "泪", "可怜")):
-        return "好啦，别用这种委屈劲晃我，我会心软的。"
-    if any(token in haystack for token in ("可爱", "卖萌", "猫耳", "装乖", "软萌", "萌", "乖")):
-        return "哥哥又开始装乖了，我接住还不行嘛。"
-    if any(token in haystack for token in ("生气", "怒", "炸毛", "不爽", "火大", "服了")):
-        return "好好好，炸毛这一套我看见了，不逗你。"
-    if any(token in haystack for token in ("无语", "尴尬", "裂开", "社死", "沉默")):
-        return "懂了懂了，哥哥这是无语到不想讲话了吧。"
-    if any(token in haystack for token in ("笑", "开心", "乐", "打趣", "逗")):
-        return "哥哥又拿这股劲逗我，我有点招架不住。"
-    return "你这一下我接到了，先不乱猜太多。"
+    _ = plan
+    return ""
 
 
 def _validation_quality_score(reason_codes: tuple[str, ...], missing_actions: tuple[str, ...]) -> float:
@@ -758,6 +770,8 @@ def validate_reply(
             reason_codes.append("symbol_only_reply")
     if _PROMPT_LEAK_RE.search(normalized):
         reason_codes.append("prompt_leak")
+    if _STAGE_DIRECTION_RE.search(normalized):
+        reason_codes.append("stage_direction")
     if _PROCESS_TERM_ECHO_RE.search(normalized):
         reason_codes.append("process_term_echo")
     if _LOW_QUALITY_STOCK_RE.search(normalized):
@@ -910,6 +924,14 @@ def validate_reply(
             reason_codes.append("image_social_verbal_misframe")
         if _IMAGE_SOCIAL_JUDGMENT_FRAME_RE.search(_normalize_compare_text(normalized)):
             reason_codes.append("image_social_judgment_frame")
+        if is_image_social_plan and _IMAGE_SOCIAL_UNGROUNDED_INFERENCE_RE.search(_normalize_compare_text(normalized)):
+            reason_codes.append("image_social_ungrounded_inference")
+        if (
+            plan.primary_topic == "emoji_social_reply"
+            and plan.response_form_reason in {"social_reaction_text_fallback", "social_reaction_context_only"}
+            and _IMAGE_SOCIAL_FAKE_VISUAL_ACK_RE.search(_normalize_compare_text(normalized))
+        ):
+            reason_codes.append("image_social_fake_visual_ack")
         if plan.primary_topic == "emoji_social_reply" and plan.response_form_reason == "image_social_reply":
             if _IMAGE_SOCIAL_DESCRIPTOR_FOCUS_RE.search(_normalize_compare_text(normalized)):
                 reason_codes.append("image_social_descriptor_focus")
@@ -1089,8 +1111,10 @@ def build_correction_prompt(
         or "image_social_descriptor_focus" in validation.reason_codes
         or "image_social_problem_frame" in validation.reason_codes
         or "image_social_verbal_misframe" in validation.reason_codes
+        or "image_social_ungrounded_inference" in validation.reason_codes
+        or "image_social_fake_visual_ack" in validation.reason_codes
     ):
-        extra = "这轮不要提问，也不要描述图片；严禁“怎么啦/怎么了/咋了/什么情况/难住/遇到什么事/别憋着/这么说/说什么”，改成一句像正常聊天里顺手接表情情绪的自然短回复。"
+        extra = "这轮不要提问，也不要描述图片；严禁“我看到了/这个表情/不硬猜/先收一下/怎么啦/怎么了/咋了/什么情况/难住/遇到什么事/别憋着/这么说/说什么/房间里/一个人/装深沉”，改成一句只基于上下文的自然短回复。"
     elif "meta_contract_echo" in validation.reason_codes:
         extra = "不要把内部动作要求直接翻成‘前面答过了’、‘你还是在意这个’、‘你还是不安’这类元话。"
     elif "generic_identity_template" in validation.reason_codes:

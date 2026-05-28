@@ -13,6 +13,11 @@ from host_brain.persona.surface_runtime import (
 SOUL = "你是数字生命夏目蓝。说话短一点，有轻微二次元 galgame 私聊感。"
 
 
+@pytest.fixture(autouse=True)
+def _enable_surface_hard_gate_retry(monkeypatch) -> None:  # noqa: ANN001
+    monkeypatch.setenv("HOST_SURFACE_MAIN_CHAIN_HARD_GATE_RETRY_ENABLED", "true")
+
+
 def _payload(**overrides):
     payload = {
         "case_id": "surface_runtime_probe",
@@ -71,6 +76,243 @@ def test_surface_runtime_uses_first_reply_without_code_scoring() -> None:
     assert "不要靠“妹妹我、人家、本小姐”等自称撑风格" in "\n".join(message["content"] for message in calls[0])
     assert "不要写“我接/接住了/接得住/知道你忙/以为要出大事/居然/稀奇/喊一声人就在这儿/就回个继续/就一声继续/你好好听着”" in "\n".join(message["content"] for message in calls[0])
     assert "raw_history" not in "\n".join(message["content"] for message in calls[0])
+
+
+def test_surface_runtime_retries_memory_followup_when_reply_ignores_recalled_object() -> None:
+    calls: list[list[dict[str, str]]] = []
+
+    def generate(messages):
+        calls.append(messages)
+        if len(calls) == 1:
+            return _candidate_payload(["哈？"])
+        return _candidate_payload(["那三本里我会选第二本，与神在河岸，名字看着更有余味。"])
+
+    result = asyncio.run(
+        SurfaceRuntime(generate).run(
+            _payload(
+                user_message="我问你喜欢哪本",
+                reply_control_packet={
+                    "response_move": "memory_followup",
+                    "task_mode": "memory_followup",
+                    "emotional_tone": "light",
+                    "relationship_distance": "familiar",
+                    "information_budget": "short",
+                    "question_budget": 0,
+                    "facts": [
+                        "记忆线索：我刚才推荐了 3 本轻小说：1. A；2. 与神在河岸；3. C。",
+                    ],
+                    "style_anchor": ["指代选择追问：必须承接记忆线索里的最近对象回答，不要当成新话题。"],
+                },
+            )
+        )
+    )
+
+    assert len(calls) == 2
+    assert result.selected_text == "那三本里我会选第二本，与神在河岸，名字看着更有余味。"
+    assert "MEMORY_FOLLOWUP_MISSING_GROUNDING" not in result.observation_codes
+    assert "对象、编号或标题" in calls[1][-1]["content"]
+
+
+def test_surface_runtime_retries_memory_followup_when_reply_breaks_continuity() -> None:
+    calls: list[list[dict[str, str]]] = []
+
+    def generate(messages):
+        calls.append(messages)
+        if len(calls) == 1:
+            return _candidate_payload(["哈？老哥你突然问这个……硬要说的话，与神在河岸吧。"])
+        return _candidate_payload(["那三本里我会选第二本，与神在河岸，名字看着更有余味。"])
+
+    result = asyncio.run(
+        SurfaceRuntime(generate).run(
+            _payload(
+                user_message="我问你喜欢哪本",
+                reply_control_packet={
+                    "response_move": "memory_followup",
+                    "task_mode": "memory_followup",
+                    "emotional_tone": "light",
+                    "relationship_distance": "familiar",
+                    "information_budget": "short",
+                    "question_budget": 0,
+                    "facts": [
+                        "记忆线索：我刚才推荐了 3 本轻小说：1. A；2. 与神在河岸；3. C。",
+                    ],
+                },
+            )
+        )
+    )
+
+    assert len(calls) == 2
+    assert result.selected_text == "那三本里我会选第二本，与神在河岸，名字看着更有余味。"
+    assert "MEMORY_FOLLOWUP_DISCONTINUITY" in calls[1][-1]["content"]
+    assert result.observation_codes == ()
+
+
+def test_surface_runtime_retries_memory_followup_when_reply_overreads_surprise() -> None:
+    calls: list[list[dict[str, str]]] = []
+
+    def generate(messages):
+        calls.append(messages)
+        if len(calls) == 1:
+            return _candidate_payload(["哈？老哥你居然会主动问我喜欢哪本……第二本《与神在河岸》吧，光名字就挺对胃口的。"])
+        return _candidate_payload(["第二本《与神在河岸》吧，名字看着更有余味。"])
+
+    result = asyncio.run(
+        SurfaceRuntime(generate).run(
+            _payload(
+                user_message="我问你喜欢哪本",
+                reply_control_packet={
+                    "response_move": "memory_followup",
+                    "task_mode": "memory_followup",
+                    "emotional_tone": "light",
+                    "relationship_distance": "familiar",
+                    "information_budget": "short",
+                    "question_budget": 0,
+                    "facts": [
+                        "记忆线索：我刚才推荐了 3 本轻小说：1. A；2. 与神在河岸；3. C。",
+                    ],
+                },
+            )
+        )
+    )
+
+    assert len(calls) == 2
+    assert result.selected_text == "第二本《与神在河岸》吧，名字看着更有余味。"
+    assert "MEMORY_FOLLOWUP_DISCONTINUITY" in calls[1][-1]["content"]
+
+
+def test_surface_runtime_retries_memory_followup_when_reply_only_echoes_title() -> None:
+    calls: list[list[dict[str, str]]] = []
+
+    def generate(messages):
+        calls.append(messages)
+        if len(calls) == 1:
+            return _candidate_payload(["那三本里我会选第二本，与神在河岸。"])
+        return _candidate_payload(["那三本里我会选第二本，与神在河岸，名字看着更有余味。"])
+
+    result = asyncio.run(
+        SurfaceRuntime(generate).run(
+            _payload(
+                user_message="我问你喜欢哪本",
+                reply_control_packet={
+                    "response_move": "memory_followup",
+                    "task_mode": "memory_followup",
+                    "emotional_tone": "light",
+                    "relationship_distance": "familiar",
+                    "information_budget": "short",
+                    "question_budget": 0,
+                    "facts": [
+                        "记忆线索：我刚才推荐了 3 本轻小说：1. A；2. 与神在河岸；3. C。",
+                    ],
+                },
+            )
+        )
+    )
+
+    assert len(calls) == 2
+    assert result.selected_text == "那三本里我会选第二本，与神在河岸，名字看着更有余味。"
+    assert "MEMORY_FOLLOWUP_BARE_ECHO" in calls[1][-1]["content"]
+
+
+def test_surface_runtime_repairs_memory_followup_if_retry_still_ignores_recalled_object() -> None:
+    def generate(_messages):
+        return _candidate_payload(["哈？"])
+
+    result = asyncio.run(
+        SurfaceRuntime(generate).run(
+            _payload(
+                user_message="我问你喜欢哪本",
+                reply_control_packet={
+                    "response_move": "memory_followup",
+                    "task_mode": "memory_followup",
+                    "emotional_tone": "light",
+                    "relationship_distance": "familiar",
+                    "information_budget": "short",
+                    "question_budget": 0,
+                    "facts": [
+                        "记忆线索：我刚才推荐了 3 本轻小说：1. A；2. 与神在河岸；3. C。",
+                    ],
+                },
+            )
+        )
+    )
+
+    assert result.selected_text == "那三本里我会选第二本，与神在河岸。名字看着更有余味。"
+    assert result.observation_codes == ()
+
+
+def test_surface_runtime_retries_auditory_check_without_text_grounding() -> None:
+    calls: list[list[dict[str, str]]] = []
+
+    def generate(messages):
+        calls.append(messages)
+        if len(calls) == 1:
+            return _candidate_payload(["哈？"])
+        return _candidate_payload(["哈？我这里只收到这条文字。"])
+
+    result = asyncio.run(
+        SurfaceRuntime(generate).run(
+            _payload(
+                user_message="听得到吗",
+                reply_control_packet={
+                    "response_move": "auditory_probe",
+                    "task_mode": "auditory_check",
+                    "emotional_tone": "neutral",
+                    "relationship_distance": "familiar",
+                    "information_budget": "short",
+                    "question_budget": 0,
+                    "facts": ["当前输入渠道：中文文字私聊。"],
+                    "style_anchor": ["短句", "熟人私聊"],
+                },
+            )
+        )
+    )
+
+    assert len(calls) == 2
+    assert "AUDITORY_CHECK_MISSING_TEXT_GROUNDING" in calls[1][-1]["content"]
+    assert result.selected_text == "哈？我这里只收到这条文字。"
+    assert "AUDITORY_CHECK_MISSING_TEXT_GROUNDING" not in result.observation_codes
+
+
+def test_surface_runtime_can_skip_hard_gate_llm_retry(monkeypatch) -> None:
+    calls: list[list[dict[str, str]]] = []
+
+    def generate(messages):
+        calls.append(messages)
+        return _candidate_payload(["候选字段看起来没问题，所以我在。"])
+
+    monkeypatch.setenv("HOST_SURFACE_MAIN_CHAIN_HARD_GATE_RETRY_ENABLED", "false")
+
+    result = asyncio.run(SurfaceRuntime(generate).run(_payload()))
+
+    assert len(calls) == 1
+    assert result.selected_text == "候选字段看起来没问题，所以我在。"
+    assert result.observation_codes
+
+
+def test_surface_runtime_repairs_auditory_check_if_model_still_fails() -> None:
+    def generate(_messages):
+        return _candidate_payload(["听到了。"])
+
+    result = asyncio.run(
+        SurfaceRuntime(generate).run(
+            _payload(
+                user_message="听得到吗",
+                reply_control_packet={
+                    "response_move": "auditory_probe",
+                    "task_mode": "auditory_check",
+                    "emotional_tone": "neutral",
+                    "relationship_distance": "familiar",
+                    "information_budget": "short",
+                    "question_budget": 0,
+                    "facts": ["当前输入渠道：中文文字私聊。"],
+                    "style_anchor": ["短句", "熟人私聊"],
+                },
+            )
+        )
+    )
+
+    assert result.selected_text == "哈？我这里只收到这条文字。"
+    assert not result.observation_codes
 
 
 def test_surface_runtime_parses_structured_reply_and_emotion_tags() -> None:

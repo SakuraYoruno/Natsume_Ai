@@ -135,7 +135,7 @@ class GatewayStatsResponse(BaseModel):
     total_inbound: int = 0
     total_outbound: int = 0
     total_errors: int = 0
-    humanize_enabled: bool = True
+    humanize_enabled: bool = False
     humanize_typing_speed_cps: int = 12
     window_minutes: int = 60
     timestamp: int = 0
@@ -452,7 +452,7 @@ async def get_gateway_stats(
             logger.warning("get_gateway_stats: platform %s error: %s", plat, exc)
             platform_stats.append(GatewayPlatformStats(platform=plat, status=f"ERROR: {exc}"))
 
-    humanize_enabled = os.environ.get("EDGE_HUMANIZE_ENABLED", "true").lower() == "true"
+    humanize_enabled = os.environ.get("EDGE_HUMANIZE_ENABLED", "false").lower() == "true"
     humanize_cps = int(os.environ.get("EDGE_HUMANIZE_TYPING_SPEED_CPS", "12"))
 
     return GatewayStatsResponse(

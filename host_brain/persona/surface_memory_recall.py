@@ -18,11 +18,19 @@ SURFACE_MEMORY_RECALL_SKIPPED = "SURFACE_MEMORY_RECALL_SKIPPED"
 SURFACE_MEMORY_WRITE_FAILED = "SURFACE_MEMORY_WRITE_FAILED"
 SURFACE_MEMORY_EVIDENCE_REQUIRED = "SURFACE_MEMORY_EVIDENCE_REQUIRED"
 SURFACE_MEMORY_EMPTY_TURN = "SURFACE_MEMORY_EMPTY_TURN"
+RECALL_POLICY_MUST = "MUST_RECALL"
+RECALL_POLICY_MAY = "MAY_RECALL"
+RECALL_POLICY_NO = "NO_RECALL"
 
 _URI_RE = re.compile(r"\b(?:chat|memory|ledger|evd|doc|memo)://[^\s，。；;、]+")
 _SPACE_RE = re.compile(r"\s+")
 _JSON_MARK_RE = re.compile(r"[{}\[\]\"]+")
 _FIELD_LABEL_RE = re.compile(r"\b(?:text|content|detail|memory_text)\s*[:：]\s*", re.IGNORECASE)
+_ANAPHORIC_SELECTION_RE = re.compile(
+    r"(?:哪(?:本|部|个|一(?:本|部|个))|哪个|哪部|哪本|"
+    r"(?:我问你|刚问你|问你).{0,12}哪|"
+    r"(?:喜欢|想看|先看|推荐|选|挑).{0,8}哪)",
+)
 _RECALL_HINTS = (
     "还记得",
     "记得吗",
@@ -33,6 +41,11 @@ _RECALL_HINTS = (
     "那天",
     "刚才",
     "刚刚",
+    "跑完",
+    "完成了吗",
+    "失败原因",
+    "今日推荐",
+    "推荐结果",
     "说好",
     "约定",
     "继续刚才",
@@ -71,7 +84,7 @@ _TECH_TASKS = frozenset({
 })
 _EMOTION_TASKS = frozenset({"apology", "bad_mood", "give_up", "headache", "quiet", "sleepy", "tired"})
 _IDENTITY_TASKS = frozenset({"identity"})
-SURFACE_USER_FACT_STORES = frozenset({"episodic_vector", "episodic", "sqlite_ledger", "semantic_memory"})
+SURFACE_USER_FACT_STORES = frozenset({"life_episode", "episodic_vector", "episodic", "sqlite_ledger", "semantic_memory"})
 SURFACE_BOND_STORES = frozenset({"neo4j_bond", "bond_graph"})
 SURFACE_MAIN_CHAIN_RECALL_STORES = SURFACE_USER_FACT_STORES | SURFACE_BOND_STORES
 
@@ -173,6 +186,7 @@ class SurfaceMemoryRecallPlan:
     should_recall: bool
     query: str
     task_mode: str
+    recall_policy: str = RECALL_POLICY_NO
     target_store_ids: tuple[str, ...] = ()
     max_facts: int = 0
     max_chars_per_fact: int = 96
@@ -184,6 +198,7 @@ class SurfaceMemoryRecallPlan:
             "should_recall": bool(self.should_recall),
             "query": self.query,
             "task_mode": self.task_mode,
+            "recall_policy": self.recall_policy,
             "target_store_ids": list(self.target_store_ids),
             "max_facts": int(self.max_facts),
             "max_chars_per_fact": int(self.max_chars_per_fact),
@@ -217,13 +232,15 @@ def plan_surface_memory_recall(
     task_mode = _clean_text(context.task_mode_hint).lower() or "daily_chat"
     user_message = _clean_text(context.current_user_message)
     query = build_surface_memory_recall_query(context, max_chars=max_query_chars)
-    has_recall_hint = _has_recall_hint(user_message)
+    anaphoric_selection = _looks_like_anaphoric_selection_query(user_message)
+    has_recall_hint = _has_recall_hint(user_message) or anaphoric_selection
 
     if not user_message:
         return SurfaceMemoryRecallPlan(
             should_recall=False,
             query=query,
             task_mode=task_mode,
+            recall_policy=RECALL_POLICY_NO,
             reason="empty_user_message",
         )
     if _should_skip_low_signal_recall(user_message=user_message, task_mode=task_mode, has_recall_hint=has_recall_hint):
@@ -231,6 +248,7 @@ def plan_surface_memory_recall(
             should_recall=False,
             query=query,
             task_mode=task_mode,
+            recall_policy=RECALL_POLICY_NO,
             reason="low_signal_surface_turn",
         )
     if task_mode in _MEMORY_WRITE_TASKS or _looks_like_memory_write(user_message):
@@ -238,7 +256,21 @@ def plan_surface_memory_recall(
             should_recall=False,
             query=query,
             task_mode=task_mode,
+            recall_policy=RECALL_POLICY_NO,
             reason="memory_write_current_turn_only",
+        )
+
+    if anaphoric_selection:
+        return SurfaceMemoryRecallPlan(
+            should_recall=True,
+            query=query,
+            task_mode=task_mode,
+            recall_policy=RECALL_POLICY_MUST,
+            target_store_ids=("life_episode", "episodic_vector", "sqlite_ledger", "semantic_memory"),
+            max_facts=4,
+            max_chars_per_fact=320,
+            time_lookback_days=1,
+            reason="anaphoric_selection_recall",
         )
 
     if task_mode in _RECALL_TASKS or has_recall_hint:
@@ -246,7 +278,8 @@ def plan_surface_memory_recall(
             should_recall=True,
             query=query,
             task_mode=task_mode,
-            target_store_ids=("semantic_memory", "episodic_vector", "sqlite_ledger", "neo4j_bond"),
+            recall_policy=RECALL_POLICY_MUST,
+            target_store_ids=("life_episode", "semantic_memory", "episodic_vector", "sqlite_ledger", "neo4j_bond"),
             max_facts=4,
             max_chars_per_fact=96,
             time_lookback_days=_infer_lookback_days(user_message),
@@ -257,7 +290,8 @@ def plan_surface_memory_recall(
             should_recall=True,
             query=query,
             task_mode=task_mode,
-            target_store_ids=("semantic_memory", "episodic_vector", "sqlite_ledger"),
+            recall_policy=RECALL_POLICY_MAY,
+            target_store_ids=("life_episode", "semantic_memory", "episodic_vector", "sqlite_ledger"),
             max_facts=3,
             max_chars_per_fact=96,
             time_lookback_days=_infer_lookback_days(user_message),
@@ -268,7 +302,8 @@ def plan_surface_memory_recall(
             should_recall=True,
             query=query,
             task_mode=task_mode,
-            target_store_ids=("neo4j_bond", "semantic_memory", "episodic_vector"),
+            recall_policy=RECALL_POLICY_MAY,
+            target_store_ids=("life_episode", "neo4j_bond", "semantic_memory", "episodic_vector"),
             max_facts=3,
             max_chars_per_fact=96,
             time_lookback_days=_infer_lookback_days(user_message),
@@ -279,7 +314,8 @@ def plan_surface_memory_recall(
             should_recall=True,
             query=query,
             task_mode=task_mode,
-            target_store_ids=("neo4j_bond", "semantic_memory", "episodic_vector"),
+            recall_policy=RECALL_POLICY_MAY,
+            target_store_ids=("life_episode", "neo4j_bond", "semantic_memory", "episodic_vector"),
             max_facts=2,
             max_chars_per_fact=88,
             time_lookback_days=None,
@@ -289,6 +325,7 @@ def plan_surface_memory_recall(
         should_recall=False,
         query=query,
         task_mode=task_mode,
+        recall_policy=RECALL_POLICY_NO,
         reason="no_memory_recall_needed",
     )
 
@@ -427,8 +464,15 @@ def build_surface_memory_recall_packet(
     memory_rows = tuple(row for row in rows if _is_user_fact_store(row.store_id))
     relationship_rows = tuple(row for row in rows if _is_relationship_store(row.store_id))
     relationship_clues = tuple(row.fact for row in relationship_rows)
-    must_not_do = tuple(_build_packet_must_not_do(candidates=candidates, rows=rows, degraded=bool(output.get("degraded", False))))
-    style_anchor = tuple(_build_packet_style_anchor(rows))
+    must_not_do = tuple(
+        _build_packet_must_not_do(
+            candidates=candidates,
+            rows=rows,
+            degraded=bool(output.get("degraded", False)),
+            query=query,
+        )
+    )
+    style_anchor = tuple(_build_packet_style_anchor(rows, query=query))
     store_counts: dict[str, int] = {}
     for row in rows:
         store_counts[row.store_id] = store_counts.get(row.store_id, 0) + 1
@@ -649,6 +693,8 @@ def _select_fact_rows(
     rows = [_build_fact_row(item, max_chars_per_fact=max_chars_per_fact) for item in candidates]
     rows = [row for row in rows if row is not None]
     rows = _filter_rows_for_explicit_memory_query(rows, query=query)
+    rows = _filter_rows_for_anaphoric_selection(rows, query=query)
+    rows = sorted(rows, key=_surface_fact_row_rank, reverse=True)
     selected: list[SurfaceMemoryFactRow] = []
     seen_stores: set[str] = set()
     for row in rows:
@@ -667,6 +713,25 @@ def _select_fact_rows(
     return selected
 
 
+def _surface_fact_row_rank(row: SurfaceMemoryFactRow) -> tuple[float, float, int]:
+    store_id = _clean_text(row.store_id).lower()
+    fact_text = _clean_text(row.fact).upper()
+    terminal_background_priority = 1 if (
+        ("CODEX_PRODUCTION" in fact_text or "LIGHTNOVEL_" in fact_text)
+        and any(marker in fact_text for marker in ("FAILED", "COMPLETED", "LIGHTNOVEL_NATIVE_NO_RECOMMENDATIONS"))
+    ) else 0
+    store_priority = {
+        "life_episode": 4,
+        "semantic_memory": 3,
+        "episodic_vector": 2,
+        "episodic": 2,
+        "sqlite_ledger": 2,
+        "neo4j_bond": 1,
+        "bond_graph": 1,
+    }.get(store_id, 0)
+    return (float(terminal_background_priority), _coerce_float(row.score), store_priority)
+
+
 def _filter_rows_for_explicit_memory_query(
     rows: Sequence[SurfaceMemoryFactRow],
     *,
@@ -683,6 +748,60 @@ def _filter_rows_for_explicit_memory_query(
     return list(rows)
 
 
+def _filter_rows_for_anaphoric_selection(
+    rows: Sequence[SurfaceMemoryFactRow],
+    *,
+    query: str | None,
+) -> list[SurfaceMemoryFactRow]:
+    if not rows:
+        return []
+    query_text = _clean_text(query)
+    if not _looks_like_anaphoric_selection_query(query_text):
+        return list(rows)
+    scrubbed: list[SurfaceMemoryFactRow] = []
+    for row in rows:
+        store_id = _clean_text(row.store_id).lower()
+        fact = _clean_text(row.fact)
+        if (
+            "当前回合摘要" in fact
+            or ("用户提到：" in fact and "回复：" in fact)
+            or (query_text and query_text in fact and ("回复" in fact or "Assistant:" in fact))
+            or _looks_like_anaphoric_scheduler_noise(fact)
+        ):
+            continue
+        scrubbed.append(row)
+    if not scrubbed:
+        return list(rows)
+    life_rows = [row for row in scrubbed if _clean_text(row.store_id).lower() == "life_episode"]
+    if life_rows:
+        return [
+            *life_rows,
+            *(row for row in scrubbed if _clean_text(row.store_id).lower() in {"neo4j_bond", "bond_graph"}),
+        ]
+    return scrubbed
+
+
+def _looks_like_anaphoric_scheduler_noise(text: str) -> bool:
+    value = _clean_text(text).lower()
+    if not value:
+        return False
+    if any(anchor in value for anchor in ("推荐", "lightnovel", "小说", "书", "qq", "wechat", "微信", "推送", "发送")):
+        return False
+    if "后台任务记忆" in value and "scheduler " in value:
+        return True
+    return any(
+        token in value
+        for token in (
+            "emotion_decay_tick",
+            "inner_world_numeric_tick",
+            "silence_tick",
+            "heartbeat",
+            "health_check",
+            "resource_guard",
+        )
+    )
+
+
 def _build_fact_row(
     candidate: Mapping[str, Any],
     *,
@@ -697,10 +816,7 @@ def _build_fact_row(
     ).lower()
     if store_id not in SURFACE_MAIN_CHAIN_RECALL_STORES:
         return None
-    text = _surface_safe_text(
-        candidate.get("snippet") or candidate.get("text"),
-        limit=max_chars_per_fact,
-    )
+    text = _surface_fact_text(candidate, metadata=metadata, store_id=store_id, limit=max_chars_per_fact)
     if not text:
         return None
     fact = f"{_fact_prefix(store_id)}：{text}"
@@ -718,11 +834,60 @@ def _build_fact_row(
     )
 
 
+def _surface_fact_text(
+    candidate: Mapping[str, Any],
+    *,
+    metadata: Mapping[str, Any],
+    store_id: str,
+    limit: int,
+) -> str:
+    raw = _clean_text(candidate.get("snippet") or candidate.get("text"))
+    if not raw:
+        return ""
+    if _clean_text(store_id).lower() == "life_episode":
+        raw = _humanize_life_episode_recall_text(raw, metadata=metadata)
+    return _surface_safe_text(raw, limit=limit)
+
+
+def _humanize_life_episode_recall_text(text: str, *, metadata: Mapping[str, Any]) -> str:
+    value = _clean_text(text)
+    if not value:
+        return ""
+    actionish = _clean_text(metadata.get("episode_kind")).lower() in {
+        "action_episode",
+        "background_episode",
+        "perception_episode",
+    }
+    if actionish and "；" in value:
+        segments = [_clean_text(part) for part in value.split("；") if _clean_text(part)]
+        meaningful = [part for part in segments if not part.upper().startswith(("CODEX_PRODUCTION ", "ACTION ", "BACKGROUND "))]
+        numbered_count = sum(1 for part in meaningful if re.search(r"(?<!\d)\d{1,2}[.、]\s*", part))
+        value = "；".join(meaningful) if numbered_count >= 2 else (meaningful[-1] if meaningful else segments[-1])
+    return _compress_numbered_recall_text(value)
+
+
+def _compress_numbered_recall_text(text: str, *, item_limit: int = 42, max_items: int = 6) -> str:
+    value = _clean_text(text)
+    matches = list(re.finditer(r"(?<!\d)(\d{1,2})[.、]\s*([^；\n]+)", value))
+    if len(matches) < 2:
+        return value
+    prefix = _truncate_text(value[: matches[0].start()], limit=90)
+    items: list[str] = []
+    for match in matches[: max(1, int(max_items))]:
+        index = match.group(1)
+        item_text = _truncate_text(match.group(2), limit=max(12, int(item_limit)))
+        if item_text:
+            items.append(f"{index}. {item_text}")
+    if not items:
+        return value
+    return _clean_text(f"{prefix}{'：' if prefix and not prefix.endswith(('：', ':')) else ''}{'；'.join(items)}")
+
+
 def _fact_prefix(store_id: str) -> str:
     normalized = _clean_text(store_id).lower()
     if normalized == "semantic_memory":
         return "长期记忆"
-    if normalized in {"episodic_vector", "episodic", "sqlite_ledger"}:
+    if normalized in {"life_episode", "episodic_vector", "episodic", "sqlite_ledger"}:
         return "记忆线索"
     if normalized in {"neo4j_bond", "bond_graph"}:
         return "关系线索"
@@ -737,11 +902,14 @@ def _is_relationship_store(store_id: str) -> bool:
     return _clean_text(store_id).lower() in {"neo4j_bond", "bond_graph"}
 
 
-def _build_packet_style_anchor(rows: Sequence[SurfaceMemoryFactRow]) -> list[str]:
+def _build_packet_style_anchor(rows: Sequence[SurfaceMemoryFactRow], *, query: str | None = None) -> list[str]:
     if not rows:
         return []
     anchors = ["记忆只作为压缩事实承接，不展示召回过程"]
     store_ids = {_clean_text(row.store_id).lower() for row in rows}
+    if _looks_like_anaphoric_selection_query(_clean_text(query)) and store_ids & SURFACE_USER_FACT_STORES:
+        anchors.append("指代选择追问：把记忆线索当作刚才对话的当前上下文，自然接话，不要像查表或任务回执。")
+        anchors.append("选择类追问：可以给一点主观口味，但不要只复述编号和标题，也不要编剧情。")
     if store_ids & SURFACE_USER_FACT_STORES:
         anchors.append("用户事实记忆只补当前承接，不扩写成未确认细节")
     if "semantic_memory" in store_ids:
@@ -756,6 +924,7 @@ def _build_packet_must_not_do(
     candidates: Sequence[Mapping[str, Any]],
     rows: Sequence[SurfaceMemoryFactRow],
     degraded: bool,
+    query: str | None = None,
 ) -> list[str]:
     rules: list[str] = []
     for candidate in candidates:
@@ -768,6 +937,9 @@ def _build_packet_must_not_do(
         rules.append("不要根据记忆升级亲密关系")
     if degraded:
         rules.append("不要声称记得未召回的细节")
+    if _looks_like_anaphoric_selection_query(_clean_text(query)) and rows:
+        rules.append("不要把指代选择追问当成无关新话题；不要说“突然问这个”“硬要说的话”“最近在看另一本”。")
+        rules.append("不要只输出“第几本 + 标题”；需要像聊天一样给一句很短的偏好理由，理由只能来自标题或已召回简介。")
     return _clean_list(rules)
 
 
@@ -822,6 +994,13 @@ def _build_evidence_refs(
 def _has_recall_hint(text: str) -> bool:
     lowered = _clean_text(text).lower()
     return any(hint.lower() in lowered for hint in _RECALL_HINTS)
+
+
+def _looks_like_anaphoric_selection_query(text: str) -> bool:
+    normalized = _clean_text(text)
+    if not normalized:
+        return False
+    return bool(_ANAPHORIC_SELECTION_RE.search(normalized))
 
 
 def _looks_like_memory_write(text: str) -> bool:
@@ -961,6 +1140,9 @@ def _clamp01(value: float) -> float:
 
 __all__ = [
     "MemoryRecallPacket",
+    "RECALL_POLICY_MAY",
+    "RECALL_POLICY_MUST",
+    "RECALL_POLICY_NO",
     "SURFACE_MEMORY_EMPTY_TURN",
     "SURFACE_MEMORY_EVIDENCE_REQUIRED",
     "SURFACE_MEMORY_RECALL_FAILED",

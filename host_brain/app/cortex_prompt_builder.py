@@ -22,6 +22,7 @@ _COMPACT_LANE_TOPICS = {
     "rejection",
     "greeting",
     "presence_ping",
+    "auditory_check",
     "light_ack",
     "playful_ping",
     "assistant_reply_followup",
@@ -245,6 +246,13 @@ def _build_interaction_state_summary(context_plane: Any) -> str:
             "这轮是在接“你还会不会理我/帮我”的回访。先回应不安，再把会回应的态度放稳，不要重新许很重的承诺。"
         )
 
+    if current_topic == "auditory_check":
+        return (
+            "【当前对话线程】\n"
+            "这轮是在确认听觉输入。若当前没有语音输入证据，只能说没听见声音、只看到文字；"
+            "不要只回在呢，也不要假装听到了声音。"
+        )
+
     if ongoing_thread == "phatic":
         return (
             "【当前对话线程】\n"
@@ -444,6 +452,7 @@ def build_cortex_prompt(
     _phatic_like_prompt = _topic_for_prompt in {
         "greeting",
         "presence_ping",
+        "auditory_check",
         "light_ack",
         "playful_ping",
     } or _thread_for_prompt == "phatic"
@@ -482,7 +491,9 @@ def build_cortex_prompt(
                     "【表情包输入】\n"
                     f"这张图/表情传来的意思：{_multimodal_summary}\n"
                     "最后一条用户消息代表对方正在表达这种情绪，不是让你猜图里是谁。"
+                    "如果上一轮是你自己的回复，这张表情很可能是在回应你上一句；负向情绪要优先收回、修正或接住上一句，不要只给表情贴标签。"
                     "像聊天里顺手回这股情绪，不要描述图片、外貌或表情包本身。"
+                    "不要编造对方此刻的位置、动作或心理，比如“房间里/一个人/装深沉/发呆/不说话”。"
                     "回复 8-24 个中文字符，不要只回“嗯/唔/哼/哦/好啦”。"
                     "严禁用“怎么啦/怎么了/咋了/什么情况/怎么不说话/别憋着/跟我说说”这类问句或劝说承接。"
                 )

@@ -43,6 +43,33 @@ def test_default_mode_agent_tick_and_export(monkeypatch) -> None:
     assert exported["continuity_score"] == 0.73
 
 
+def test_default_mode_agent_export_is_read_only_when_empty(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "host_brain.persona.motive_runtime.build_offline_state_from_inner_state",
+        lambda inner_state, now_ms: {  # noqa: ARG005
+            "absence_band": "recent",
+            "offline_hours": 0.0,
+            "loneliness_level": 0.1,
+            "anticipation_level": 0.2,
+            "continuity_score": 0.55,
+        },
+    )
+    called = {"count": 0}
+
+    def _forbidden_tick(self, **kwargs):  # noqa: ANN003, ARG001
+        called["count"] += 1
+        return {}
+
+    monkeypatch.setattr(DefaultModeAgent, "tick_idle_cycle", _forbidden_tick)
+
+    agent = DefaultModeAgent(state_registry=TribeStateRegistry())
+    exported = agent.export_runtime_state()
+
+    assert called["count"] == 0
+    assert exported["tick_count"] == 0
+    assert exported["continuity_score"] == 0.55
+
+
 def test_default_mode_agent_suppresses_inner_activity_during_recent_foreground_chat(monkeypatch) -> None:
     monkeypatch.setenv("HOST_BACKGROUND_TASKS_ENABLED", "true")
     monkeypatch.setenv("HOST_DEFAULT_MODE_FOREGROUND_CHAT_COOLDOWN_MS", "15000")

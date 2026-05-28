@@ -179,7 +179,7 @@ class TestProactiveTalkConditions:
         )
         assert result["status"] == STATUS_DEGRADED
 
-    def test_empty_greeting_rejected(self) -> None:
+    def test_empty_greeting_falls_back_to_template(self) -> None:
         ts = now_ms()
         def empty_llm(_):
             return {"greeting": "  "}
@@ -193,8 +193,9 @@ class TestProactiveTalkConditions:
                 "time_period": "afternoon",
             },
         )
-        assert result["status"] == STATUS_REJECTED
-        assert result["reason_code"] == SCHED_NO_CONTENT
+        assert result["status"] == STATUS_EXECUTED
+        assert result["template_fallback_used"] is True
+        assert result["template_fallback_reason"] == "LLM_EMPTY_OUTPUT"
 
     def test_runtime_fallback_marker_uses_template(self) -> None:
         ts = now_ms()

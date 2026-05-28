@@ -26,6 +26,7 @@ from host_brain.memory.chroma_client import (
 )
 
 _logger = logging.getLogger("Natsume.episodic")
+MEMORY_DUPLICATE_EVENT = "MEMORY_DUPLICATE_EVENT"
 
 
 @dataclass
@@ -38,6 +39,7 @@ class EpisodicRecord:
     evidence_refs: list[str]
     visibility: str
     embedding_model_id: str
+    episode_key: str | None = None
     merged_into: str | None = None
     deleted_at: int | None = None
     # M27-D：情感标注字段（OPT-25）
@@ -62,6 +64,7 @@ class EpisodicRecord:
             "evidence_refs": list(self.evidence_refs),
             "visibility": self.visibility,
             "embedding_model_id": self.embedding_model_id,
+            "episode_key": self.episode_key,
             "merged_into": self.merged_into,
             "deleted_at": self.deleted_at,
             "emotion_tag": self.emotion_tag,
@@ -169,6 +172,46 @@ class EpisodicStore:
             )
             return MemoryOpResult(False, MEMORY_MERGE_INVALID, "memory text cannot be empty")
 
+        episode_key = _derive_episode_identity_key(refs)
+        stable_memory_id = _memory_id_from_episode_key(episode_key) if episode_key else None
+        if stable_memory_id:
+            existing_record = self._records.get(stable_memory_id)
+            if existing_record is not None and existing_record.deleted_at is None:
+                self._merge_record_evidence_refs(existing_record, refs)
+                self._log_duplicate_event_write(
+                    request_id=request_id,
+                    intent_id=intent_id,
+                    memory_id=stable_memory_id,
+                    evidence_refs=refs,
+                    decay_profile_id=decay_profile_id,
+                    visibility=visibility,
+                    ts_ms=ts_value,
+                    episode_key=episode_key,
+                )
+                return MemoryOpResult(
+                    True,
+                    MEMORY_DUPLICATE_EVENT,
+                    "memory already exists for episode identity",
+                    memory_id=stable_memory_id,
+                )
+            if self._ledger_has_successful_write(stable_memory_id):
+                self._log_duplicate_event_write(
+                    request_id=request_id,
+                    intent_id=intent_id,
+                    memory_id=stable_memory_id,
+                    evidence_refs=refs,
+                    decay_profile_id=decay_profile_id,
+                    visibility=visibility,
+                    ts_ms=ts_value,
+                    episode_key=episode_key,
+                )
+                return MemoryOpResult(
+                    True,
+                    MEMORY_DUPLICATE_EVENT,
+                    "memory already exists for episode identity",
+                    memory_id=stable_memory_id,
+                )
+
         record = self._create_record(
             text=text,
             evidence_refs=refs,
@@ -178,6 +221,8 @@ class EpisodicStore:
             emotion_tag=emotion_tag,
             emotion_valence=emotion_valence,
             emotion_arousal=emotion_arousal,
+            memory_id=stable_memory_id,
+            episode_key=episode_key,
         )
         self._log_memory_op(
             request_id=request_id,
@@ -663,8 +708,10 @@ class EpisodicStore:
         emotion_tag: str = "NEUTRAL",
         emotion_valence: float = 0.0,
         emotion_arousal: float = 0.3,
+        memory_id: str | None = None,
+        episode_key: str | None = None,
     ) -> EpisodicRecord:
-        memory_id = f"mem_{uuid.uuid4().hex}"
+        resolved_memory_id = str(memory_id or "").strip() or f"mem_{uuid.uuid4().hex}"
         normalized_text = str(text).strip()
         text_hash = hashlib.sha256(normalized_text.encode("utf-8")).hexdigest()
         embedding, model_id = self._embed_text(normalized_text)
@@ -674,7 +721,7 @@ class EpisodicStore:
         # Phase XVII：计算初始失真度（写入时为 0，随时间由 tick 更新）
         # 初始 emotion_color_tag 与 emotion_tag 相同（回忆时可被当前情绪重新着色）
         record = EpisodicRecord(
-            memory_id=memory_id,
+            memory_id=resolved_memory_id,
             text=normalized_text,
             ts_ms=ts_ms,
             text_hash=text_hash,
@@ -682,6 +729,7 @@ class EpisodicStore:
             evidence_refs=list(evidence_refs),
             visibility=str(visibility).strip() or "internal",
             embedding_model_id=model_id,
+            episode_key=str(episode_key or "").strip() or None,
             emotion_tag=str(emotion_tag).strip().upper() or "NEUTRAL",
             emotion_valence=valence,
             emotion_arousal=arousal,
@@ -689,15 +737,15 @@ class EpisodicStore:
             suppression_flag=False,
             distortion_level=0.0,
         )
-        self._records[memory_id] = record
-        self._records.move_to_end(memory_id)
+        self._records[resolved_memory_id] = record
+        self._records.move_to_end(resolved_memory_id)
         # LRU 淘汰：超过上限时移除最旧的记录（仅从内存中移除，Chroma 和 Ledger 保留）
         while len(self._records) > self._MAX_RECORDS:
             oldest_id, _ = self._records.popitem(last=False)
             _logger.debug("EpisodicStore LRU 淘汰内存记录: %s", oldest_id)
         self._upsert_record_with_fallback(
             record=record,
-            memory_id=memory_id,
+            memory_id=resolved_memory_id,
             text=normalized_text,
             embedding=embedding,
             metadata={
@@ -705,6 +753,7 @@ class EpisodicStore:
                 "text_hash": text_hash,
                 "visibility": record.visibility,
                 "evidence_refs": list(evidence_refs),
+                "episode_key": record.episode_key,
                 **_metadata_from_evidence_refs(evidence_refs),
                 "embedding_model_id": model_id,
                 "emotion_tag": record.emotion_tag,
@@ -717,6 +766,81 @@ class EpisodicStore:
             },
         )
         return record
+
+    def _merge_record_evidence_refs(self, record: EpisodicRecord, refs: list[str]) -> None:
+        merged = _normalize_evidence_refs([*record.evidence_refs, *refs])
+        if merged == record.evidence_refs:
+            return
+        record.evidence_refs = merged
+        try:
+            embedding, model_id = self._embed_text(record.text)
+            record.embedding_model_id = model_id
+            self._upsert_record_with_fallback(
+                record=record,
+                memory_id=record.memory_id,
+                text=record.text,
+                embedding=embedding,
+                metadata={
+                    "ts_ms": record.ts_ms,
+                    "text_hash": record.text_hash,
+                    "visibility": record.visibility,
+                    "evidence_refs": list(record.evidence_refs),
+                    "episode_key": record.episode_key,
+                    **_metadata_from_evidence_refs(record.evidence_refs),
+                    "embedding_model_id": model_id,
+                    "emotion_tag": record.emotion_tag,
+                    "emotion_valence": record.emotion_valence,
+                    "emotion_arousal": record.emotion_arousal,
+                    "emotion_color_tag": record.emotion_color_tag,
+                    "suppression_flag": record.suppression_flag,
+                    "distortion_level": record.distortion_level,
+                },
+            )
+        except Exception as exc:
+            _logger.debug("EpisodicStore duplicate evidence merge degraded: %s", exc)
+
+    def _ledger_has_successful_write(self, memory_id: str) -> bool:
+        try:
+            rows = list(self.ledger.memory_ops_log)
+        except Exception:
+            return False
+        target = str(memory_id or "").strip()
+        for row in reversed(rows):
+            if not isinstance(row, dict):
+                continue
+            if str(row.get("memory_id") or "").strip() != target:
+                continue
+            if str(row.get("op_kind") or "").strip().upper() == "WRITE" and str(row.get("status") or "").strip().upper() == "SUCCESS":
+                return True
+        return False
+
+    def _log_duplicate_event_write(
+        self,
+        *,
+        request_id: str | None,
+        intent_id: str | None,
+        memory_id: str,
+        evidence_refs: list[str],
+        decay_profile_id: str,
+        visibility: str,
+        ts_ms: int,
+        episode_key: str,
+    ) -> None:
+        self._log_memory_op(
+            request_id=request_id,
+            intent_id=intent_id,
+            op_kind="WRITE",
+            memory_id=memory_id,
+            target_memory_id=memory_id,
+            source_memory_ids=None,
+            evidence_refs=evidence_refs,
+            status="SKIPPED",
+            reason_code=MEMORY_DUPLICATE_EVENT,
+            detail=f"memory already exists for episode identity: {episode_key}",
+            decay_profile_id=decay_profile_id,
+            visibility=visibility,
+            ts_ms=ts_ms,
+        )
 
     def _upsert_record_with_fallback(
         self,
@@ -799,6 +923,36 @@ def _normalize_evidence_refs(evidence_refs: list[str] | None) -> list[str]:
         if item and item not in normalized:
             normalized.append(item)
     return normalized
+
+
+def _derive_episode_identity_key(evidence_refs: list[str] | None) -> str | None:
+    refs = _normalize_evidence_refs(evidence_refs)
+    priority_prefixes = (
+        "gateway://message/",
+        "qq://message/",
+        "wechat://message/",
+        "chat://turn/",
+        "chat://request/",
+        "surface://reply/",
+        "scheduler://event/",
+        "inner_world://event/",
+        "inner_activity://event/",
+        "voice://event/",
+    )
+    for prefix in priority_prefixes:
+        for ref in refs:
+            value = str(ref or "").strip()
+            if value.startswith(prefix) and len(value) > len(prefix):
+                return value
+    return None
+
+
+def _memory_id_from_episode_key(episode_key: str | None) -> str | None:
+    normalized = str(episode_key or "").strip()
+    if not normalized:
+        return None
+    digest = hashlib.sha256(f"episodic:v1:{normalized}".encode("utf-8")).hexdigest()
+    return f"mem_{digest[:32]}"
 
 
 def _metadata_from_evidence_refs(evidence_refs: list[str] | None) -> dict[str, Any]:

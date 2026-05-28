@@ -83,7 +83,7 @@ class ChatRequest(BaseModel):
     )
     render_profile: Optional[str] = Field(
         None,
-        description="Optional output render profile, e.g. zh_text for text or ja_voice for Japanese voice.",
+        description="Optional output render profile, e.g. zh_text for text or zh_voice for Chinese voice.",
     )
     response_form: Optional[str] = Field(
         None,

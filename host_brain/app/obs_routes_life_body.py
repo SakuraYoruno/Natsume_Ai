@@ -55,17 +55,17 @@ _LIFE_BODY_WARM_WINDOW_MINUTES = _env_int(
 )
 _LIFE_BODY_WARM_INTERVAL_MS = _env_int(
     "HOST_OBS_LIFE_BODY_WARM_INTERVAL_MS",
-    7500,
+    30000,
     minimum=1500,
 )
 _LIFE_BODY_WARM_STALE_MS = _env_int(
     "HOST_OBS_LIFE_BODY_WARM_STALE_MS",
-    max(_LIFE_BODY_WARM_INTERVAL_MS * 3, 20000),
+    max(_LIFE_BODY_WARM_INTERVAL_MS * 3, 90000),
     minimum=5000,
 )
 _LIFE_BODY_STALE_FALLBACK_MS = _env_int(
     "HOST_OBS_LIFE_BODY_STALE_FALLBACK_MS",
-    max(_LIFE_BODY_WARM_STALE_MS * 3, 60000),
+    max(_LIFE_BODY_WARM_STALE_MS * 3, 270000),
     minimum=_LIFE_BODY_WARM_STALE_MS,
 )
 _LIFE_BODY_RECENT_SESSIONS_LIMIT = _env_int(
@@ -2027,6 +2027,29 @@ def _refresh_life_body_warm_once() -> dict[str, Any] | None:
     if not _LIFE_BODY_WARM_ENABLED:
         return None
     started_at = _now_ms()
+    release_slot = None
+    try:
+        from host_brain.app.obs_resource_guard import (
+            release_obs_warm_slot,
+            should_defer_obs_warm_refresh,
+            try_acquire_obs_warm_slot,
+        )
+
+        deferred, reason = should_defer_obs_warm_refresh(task_name="life_body")
+        if deferred:
+            with _life_body_warm_lock:
+                _life_body_warm_state["last_duration_ms"] = 0
+                _life_body_warm_state["last_error"] = f"deferred:{reason}"
+            return None
+        acquired, reason = try_acquire_obs_warm_slot(task_name="life_body")
+        if not acquired:
+            with _life_body_warm_lock:
+                _life_body_warm_state["last_duration_ms"] = 0
+                _life_body_warm_state["last_error"] = f"deferred:{reason}"
+            return None
+        release_slot = release_obs_warm_slot
+    except Exception:
+        release_slot = None
     try:
         payload = _build_life_body_payload(_LIFE_BODY_WARM_WINDOW_MINUTES)
     except Exception as exc:
@@ -2035,6 +2058,9 @@ def _refresh_life_body_warm_once() -> dict[str, Any] | None:
             _life_body_warm_state["last_error"] = str(exc)
         logger.warning("life-body warm refresh degraded: %s", exc)
         return None
+    finally:
+        if release_slot is not None:
+            release_slot()
     with _life_body_warm_lock:
         _life_body_warm_state["value"] = _clone_payload(payload)
         _life_body_warm_state["updated_ts_ms"] = _now_ms()

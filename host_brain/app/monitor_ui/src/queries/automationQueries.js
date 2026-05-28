@@ -2,6 +2,7 @@ import { useCallback } from 'react'
 import {
   fetchImmuneGateReplay,
   fetchImmuneGateStats,
+  fetchResourceManagerStatus,
   fetchSchedulerHealth,
   fetchSchedulerHistory,
   fetchSchedulerTasks,
@@ -17,9 +18,10 @@ export function useAutomationOverviewQuery({
   pollingInterval = 30,
 } = {}) {
   const queryFn = useCallback(async () => {
-    const [tasksRes, healthRes] = await Promise.allSettled([
+    const [tasksRes, healthRes, resourceManagerRes] = await Promise.allSettled([
       fetchSchedulerTasks(),
       fetchSchedulerHealth(),
+      fetchResourceManagerStatus(),
     ])
 
     const errors = []
@@ -29,10 +31,14 @@ export function useAutomationOverviewQuery({
     if (healthRes.status === 'rejected') {
       errors.push(healthRes.reason?.message || '调度健康态加载失败')
     }
+    if (resourceManagerRes.status === 'rejected') {
+      errors.push(resourceManagerRes.reason?.message || '资源管家状态加载失败')
+    }
 
     return {
       tasks: tasksRes.status === 'fulfilled' && Array.isArray(tasksRes.value) ? tasksRes.value : [],
       health: healthRes.status === 'fulfilled' ? healthRes.value : null,
+      resourceManager: resourceManagerRes.status === 'fulfilled' ? resourceManagerRes.value : null,
       overviewError: errors[0] || null,
     }
   }, [])
@@ -51,6 +57,7 @@ export function useAutomationOverviewQuery({
     ...query,
     tasks: query.data?.tasks ?? [],
     health: query.data?.health ?? null,
+    resourceManager: query.data?.resourceManager ?? null,
     overviewError: query.data?.overviewError ?? null,
   }
 }

@@ -21,6 +21,7 @@ _COMPACT_LANE_TOPICS = {
     "rejection",
     "greeting",
     "presence_ping",
+    "auditory_check",
     "light_ack",
     "playful_ping",
     "assistant_reply_followup",

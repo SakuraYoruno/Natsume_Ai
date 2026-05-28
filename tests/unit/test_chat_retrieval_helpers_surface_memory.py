@@ -60,9 +60,10 @@ async def test_run_retrieval_returns_compressed_surface_memory_packet(monkeypatc
     assert evidence_items == []
     assert summary["status"] == "OK"
     assert summary["query_plan"]["intent"] == "surface_memory_recall"
+    assert summary["query_plan"]["recall_policy"] == "MAY_RECALL"
     assert summary["query_plan"]["reason"] == "technical_user_memory_context"
-    assert summary["target_stores"] == ["semantic_memory", "episodic_vector", "sqlite_ledger"]
-    assert captured["target_store_ids"] == ["semantic_memory", "episodic_vector", "sqlite_ledger"]
+    assert summary["target_stores"] == ["life_episode", "semantic_memory", "episodic_vector", "sqlite_ledger"]
+    assert captured["target_store_ids"] == ["life_episode", "semantic_memory", "episodic_vector", "sqlite_ledger"]
     assert captured["intent_id"] == "intent-1"
     assert "输入输出边界" in packet["facts"][0]
     assert "memory://raw/should-not-pass" not in str(packet["facts"])
@@ -93,6 +94,7 @@ async def test_run_retrieval_skips_low_signal_short_turn_without_embedding(monke
     assert evidence_items == []
     assert summary["status"] == "SKIPPED"
     assert summary["reason_code"] == "SURFACE_MEMORY_RECALL_SKIPPED"
+    assert summary["query_plan"]["recall_policy"] == "NO_RECALL"
     assert summary["surface_memory_recall_packet"]["trace"]["plan"]["reason"] == "low_signal_surface_turn"
 
 
@@ -120,6 +122,7 @@ async def test_run_retrieval_skips_generic_plain_answer_without_memory_hint(monk
 
     assert evidence_items == []
     assert summary["status"] == "SKIPPED"
+    assert summary["query_plan"]["recall_policy"] == "NO_RECALL"
     assert summary["surface_memory_recall_packet"]["trace"]["plan"]["reason"] == "no_memory_recall_needed"
 
 

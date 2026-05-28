@@ -1,5 +1,6 @@
 import inspect
 import json
+import os
 import re
 import time
 from collections.abc import Awaitable, Mapping, Sequence
@@ -168,6 +169,15 @@ _TEXT_INPUT_SENSORY_PATTERNS = (
     re.compile(r"(?:我|本小姐).{0,6}(?:看到|看见|瞧见).{0,8}(?:你|老哥|尼尼|屏幕|画面)"),
     re.compile(r"(?:你|老哥|尼尼).{0,8}(?:脸色|表情|屏幕|画面|镜头)"),
 )
+_AUDITORY_CHECK_USER_RE = re.compile(r"(听得?到|听得?见|听到吗|听见吗|能听见|能听到)")
+_AUDITORY_TEXT_GROUNDING_RE = re.compile(
+    r"(?:只|仅|光)?(?:看见|看到|收到).{0,12}(?:文字|文本|消息|这条|你发来|发来的)|"
+    r"(?:文字|文本|消息|这条|你发来|发来的).{0,12}(?:看见|看到|收到)|"
+    r"(?:没|没有|不).{0,4}(?:听见|听到|听着|听出|听出来)|"
+    r"(?:没|没有).{0,8}(?:声音|语音|音频)"
+)
+_AUDITORY_HEARD_CLAIM_RE = re.compile(r"(听到了|听见了|听得到|听得见|收到声音|收到语音|有声音)")
+_AUDITORY_NEGATED_HEARD_RE = re.compile(r"(没|没有|不).{0,4}(听到|听见|听得见|听得到|声音|语音|音频)")
 _INTERNAL_LEAK_PATTERNS = (
     re.compile(r"cortex_orchestrator|ReplyControlPacket|score_trace|candidate_count", re.IGNORECASE),
     re.compile(r"候选|评分|控制包|内部字段|EmotionTag", re.IGNORECASE),
@@ -205,6 +215,14 @@ _BOUNDARY_SOUR_WITHDRAWAL_RE = re.compile(
 )
 _RELATIONSHIP_DOUBT_DISMISSIVE_RE = re.compile(r"不信拉倒|爱信不信|信不信由你|懒得解释|反正我还会继续这样")
 _LOVER_CLICHE_RE = re.compile(r"多多益善|越多越好|这种话多说|这种话可以多说")
+_MEMORY_FOLLOWUP_DISCONTINUITY_RE = re.compile(
+    r"突然问这个|怎么突然|你突然|突然问|突然提这个|突然说这个|硬要说(?:的话)?|另说|换个话题|最近在看|"
+    r"居然.{0,8}问|主动问我|会主动问|有点意外|挺意外|真意外"
+)
+_MEMORY_FOLLOWUP_SELECTION_USER_RE = re.compile(r"喜欢哪|哪本|哪部|哪个|好看|先看|选哪|挑哪|推荐哪")
+_MEMORY_FOLLOWUP_REASON_MARKER_RE = re.compile(
+    r"因为|理由|看着|读着|感觉|味道|余味|舒服|有意思|新鲜|设定|标题|名字|简介|更|比较|挺|有点|戳|想看"
+)
 
 def _direct_surface_guard_lines(request: IsolatedSurfaceInput) -> tuple[str, ...]:
     no_question_line = (
@@ -222,6 +240,9 @@ def _direct_surface_guard_lines(request: IsolatedSurfaceInput) -> tuple[str, ...
         "早安、回来、在吗这类低信息场景，只接当前消息本身，不评价对方来得早晚、是否主动、是否老实、是否刚睡醒。",
         "称呼和自称是调味，不是回复主体；低信息短接续里不要靠“妹妹我、人家、本小姐”等自称撑风格，也不要评价用户偷懒或没诚意。",
         "低信息场景不要写“我接/接住了/接得住/知道你忙/以为要出大事/居然/稀奇/喊一声人就在这儿/就回个继续/就一声继续/你好好听着”；“在吗”只能表达我在，不要写成“老哥在呢”。",
+        "用户用文字问“听得到吗/能听到吗”时，必须说明这里只看到文字或没收到声音；不要只回“哈？”“在呢”，也不要无证据说听到了。",
+        "记忆指代追问里，facts 就是当前上下文；像接着刚才聊天一样自然回答，不要写“突然问这个”“硬要说的话”“最近在看另一本”，也不要复述自己在回忆。",
+        "选择类记忆追问不要只报编号和标题；可以给一句非常短的主观理由，但理由只能来自标题或 facts 里的简介，不要编剧情。",
         "“继续/接着”这类极短续话不要用波浪号收尾，直接说接着来或继续。",
         "低能量/难受场景不要编喝水、坐下、躺下、睡觉、明天再说这类现实安排；可以说先缓一下、别硬撑，但要短、克制、像聊天。",
         "被用户推开时先收住距离，允许嘴硬一句，但不要反压成“偏不管/不管就不管/爱理不理/我不吵你/谁管你答不答应”；收住后留一句可回来的入口。",
@@ -473,6 +494,11 @@ def _surface_hard_gate_violations(request: IsolatedSurfaceInput, text: str) -> t
     codes: list[str] = []
     if _text_input_boundary_active(request) and any(pattern.search(value) for pattern in _TEXT_INPUT_SENSORY_PATTERNS):
         codes.append("SENSORY_SOURCE_HALLUCINATION")
+    if _auditory_check_active(request) and _text_input_boundary_active(request):
+        if _auditory_pretend_heard_hits(value):
+            codes.append("AUDITORY_CHECK_PRETEND_HEARD")
+        if not _auditory_text_grounding_hits(value):
+            codes.append("AUDITORY_CHECK_MISSING_TEXT_GROUNDING")
     if _low_info_scene_state_guess_hits(request, value):
         codes.append("LOW_INFO_SCENE_STATE_GUESS")
     if _short_continue_wave_style_hits(request, value):
@@ -495,11 +521,129 @@ def _surface_hard_gate_violations(request: IsolatedSurfaceInput, text: str) -> t
         codes.append("LOVER_CLICHE")
     if _LEGACY_SELF_TITLE_RE.search(value):
         codes.append("LEGACY_SELF_TITLE")
+    if _memory_followup_discontinuity_hits(request, value):
+        codes.append("MEMORY_FOLLOWUP_DISCONTINUITY")
+    if _memory_followup_missing_grounding(request, value):
+        codes.append("MEMORY_FOLLOWUP_MISSING_GROUNDING")
+    if _memory_followup_bare_echo_hits(request, value):
+        codes.append("MEMORY_FOLLOWUP_BARE_ECHO")
     return tuple(dict.fromkeys(codes))
+
+
+def _memory_followup_discontinuity_hits(request: IsolatedSurfaceInput, text: str) -> bool:
+    if not _memory_followup_grounding_active(request):
+        return False
+    return bool(_MEMORY_FOLLOWUP_DISCONTINUITY_RE.search(str(text or "")))
+
+
+def _memory_followup_missing_grounding(request: IsolatedSurfaceInput, text: str) -> bool:
+    if not _memory_followup_grounding_active(request):
+        return False
+    value = str(text or "").strip()
+    if not value:
+        return False
+    terms = _memory_followup_grounding_terms(request)
+    if not terms:
+        return False
+    normalized = re.sub(r"\s+", "", value)
+    return not any(term and term in normalized for term in terms)
+
+
+def _memory_followup_bare_echo_hits(request: IsolatedSurfaceInput, text: str) -> bool:
+    if not _memory_followup_grounding_active(request):
+        return False
+    user_text = str(getattr(request, "user_message", "") or "")
+    if not _MEMORY_FOLLOWUP_SELECTION_USER_RE.search(user_text):
+        return False
+    value = re.sub(r"\s+", "", str(text or "").strip())
+    if not value:
+        return False
+    if _MEMORY_FOLLOWUP_REASON_MARKER_RE.search(value):
+        return False
+    if len(value) <= 34 and re.search(r"第[一二三四五六七八九十\d]+[本部个]", value):
+        return True
+    return bool(re.fullmatch(r".{0,10}选第[一二三四五六七八九十\d]+[本部个][，,:：].{2,28}[。.!！?？]?", value))
+
+
+def _memory_followup_grounding_active(request: IsolatedSurfaceInput) -> bool:
+    task_mode = str(getattr(request.control, "task_mode", "") or "").strip().lower()
+    response_move = str(getattr(request.control, "response_move", "") or "").strip().lower()
+    if task_mode == "memory_followup" or response_move == "memory_followup":
+        return True
+    joined = "\n".join(
+        [
+            *[str(item or "") for item in list(getattr(request.control, "facts", []) or [])],
+            *[str(item or "") for item in list(getattr(request, "facts", []) or [])],
+            *[str(item or "") for item in list(getattr(request.control, "style_anchor", []) or [])],
+            *[str(item or "") for item in list(getattr(request.control, "must_not_do", []) or [])],
+        ]
+    )
+    return "指代选择追问" in joined
+
+
+def _memory_followup_grounding_terms(request: IsolatedSurfaceInput) -> tuple[str, ...]:
+    facts = [
+        str(item or "")
+        for item in [
+            *list(getattr(request.control, "facts", []) or []),
+            *list(getattr(request, "facts", []) or []),
+        ]
+    ]
+    joined = re.sub(r"\s+", "", "\n".join(facts))
+    if not joined:
+        return ()
+    terms: list[str] = []
+
+    def add(term: str) -> None:
+        cleaned = re.sub(r"[\s「」“”\"'《》\[\]（）()]+", "", str(term or ""))
+        if len(cleaned) < 2 or cleaned in terms:
+            return
+        terms.append(cleaned)
+
+    numbered = list(re.finditer(r"(?<!\d)(\d{1,2})[.、]\s*([^；。！？!?\n]+)", "\n".join(facts)))
+    if numbered:
+        for index, match in enumerate(numbered[:6], start=1):
+            add(f"第{index}本")
+            add(f"第{index}个")
+            if index == 1:
+                add("第一本")
+            elif index == 2:
+                add("第二本")
+            elif index == 3:
+                add("第三本")
+            item = match.group(2)
+            add(item[:24])
+            for sequence in re.findall(r"[\u4e00-\u9fffA-Za-z0-9_]{2,20}", item):
+                if sequence in {"推荐", "轻小说", "刚才", "通过", "回复", "用户提到"}:
+                    continue
+                add(sequence)
+    if "推荐了3本" in joined or "推荐了三本" in joined:
+        add("三本")
+        add("推荐")
+    return tuple(terms[:32])
 
 
 def _normalized_short_user_text(value: str) -> str:
     return re.sub(r"[\s，,。.!！?？、]+", "", str(value or "").strip())
+
+
+def _auditory_check_active(request: IsolatedSurfaceInput) -> bool:
+    task_mode = str(getattr(request.control, "task_mode", "") or "").strip().lower()
+    response_move = str(getattr(request.control, "response_move", "") or "").strip().lower()
+    if task_mode == "auditory_check" or response_move == "auditory_probe":
+        return True
+    return bool(_AUDITORY_CHECK_USER_RE.search(str(getattr(request, "user_message", "") or "")))
+
+
+def _auditory_text_grounding_hits(text: str) -> bool:
+    return bool(_AUDITORY_TEXT_GROUNDING_RE.search(str(text or "")))
+
+
+def _auditory_pretend_heard_hits(text: str) -> bool:
+    value = str(text or "")
+    if not _AUDITORY_HEARD_CLAIM_RE.search(value):
+        return False
+    return not bool(_AUDITORY_NEGATED_HEARD_RE.search(value))
 
 
 def _low_info_scene_state_guess_hits(request: IsolatedSurfaceInput, text: str) -> tuple[str, ...]:
@@ -659,6 +803,8 @@ def _hard_gate_fallback(request: IsolatedSurfaceInput, violations: Sequence[str]
     low_info = _low_info_scene_fallback(request)
     if low_info and codes:
         return low_info
+    if "AUDITORY_CHECK_PRETEND_HEARD" in codes or "AUDITORY_CHECK_MISSING_TEXT_GROUNDING" in codes:
+        return "哈？我这里只收到这条文字。"
     if "BOUNDARY_SOUR_WITHDRAWAL" in codes:
         return "行，那你自己待会儿。难受了就叫我，听见没。"
     if "RELATIONSHIP_DOUBT_DISMISSIVE" in codes or "SURFACE_META_IDENTITY_LEAK" in codes:
@@ -669,6 +815,36 @@ def _hard_gate_fallback(request: IsolatedSurfaceInput, violations: Sequence[str]
         return "嗯，接着来。"
     if "LEGACY_SELF_TITLE" in codes:
         return _low_info_scene_fallback(request) or ""
+    if (
+        "MEMORY_FOLLOWUP_DISCONTINUITY" in codes
+        or "MEMORY_FOLLOWUP_MISSING_GROUNDING" in codes
+        or "MEMORY_FOLLOWUP_BARE_ECHO" in codes
+    ):
+        return _memory_followup_fallback(request)
+    return ""
+
+
+def _memory_followup_fallback(request: IsolatedSurfaceInput) -> str:
+    facts = [
+        str(item or "")
+        for item in [
+            *list(getattr(request.control, "facts", []) or []),
+            *list(getattr(request, "facts", []) or []),
+        ]
+    ]
+    matches = list(re.finditer(r"(?<!\d)(\d{1,2})[.、]\s*([^；。！？!?\n]+)", "\n".join(facts)))
+    if matches:
+        pick_index = 1 if len(matches) > 1 else 0
+        picked = re.sub(r"[\s「」“”\"'《》\[\]（）()]+", "", matches[pick_index].group(2)).strip()
+        picked = re.sub(r"^\d{2,5}[.、]\s*", "", picked)
+        picked = picked[:42].rstrip("，,、；;。")
+        label = "第二" if pick_index == 1 else "第一"
+        if picked:
+            return f"那三本里我会选{label}本，{picked}。名字看着更有余味。"
+    for fact in facts:
+        cleaned = re.sub(r"^(记忆线索|长期记忆|召回线索)[:：]", "", str(fact or "").strip()).strip()
+        if cleaned:
+            return cleaned[:80].rstrip("，,、；;") + "。"
     return ""
 
 
@@ -705,7 +881,14 @@ class SurfaceRuntime:
         hard_gate_observations: tuple[str, ...] = ()
         if candidate_texts:
             hard_gate_observations = _surface_hard_gate_violations(request, candidate_texts[0])
-        if hard_gate_observations:
+        hard_gate_retry_enabled = _surface_hard_gate_retry_enabled()
+        if hard_gate_observations and not hard_gate_retry_enabled:
+            repaired = _minimal_hard_gate_repair(request, candidate_texts[0])
+            if repaired and not _surface_hard_gate_violations(request, repaired):
+                structured = {**structured, "reply_text": repaired}
+                candidate_texts = [repaired]
+                hard_gate_observations = ()
+        if hard_gate_observations and hard_gate_retry_enabled:
             retry_messages = [
                 *messages,
                 {
@@ -716,12 +899,25 @@ class SurfaceRuntime:
                         + "。重新生成一条；保留当前关系口吻，但不要编造音频/视觉/现实感知，不要猜早晚、主动、忙闲、作息或进度，不要泄露内部状态。"
                         + "没有明确事实时，也不要说上次、以前、每次、不是第一次、老是这样这类共同过去或频率判断。"
                         + "如果用户质疑身份或设定，不要复用“设定、系统、模型、提示词、角色卡”这些元词，直接按当前关系回应。"
+                        + "如果是记忆或指代选择追问，把 facts 当作刚才对话现场，自然接住；点出对象、编号或标题，但不要说“突然问这个”“硬要说的话”“最近在看”。"
+                        + "如果是在问喜欢哪本/哪部/哪个，不要只复述编号和标题，要补一句很短的主观理由，且不要编 facts 之外的剧情。"
                     ),
                 },
             ]
             raw_output = await _maybe_await_text(self._generate(retry_messages))
             structured = parse_surface_generation_output(raw_output)
             candidate_texts = [structured["reply_text"]] if structured["reply_text"] else []
+            if candidate_texts:
+                hard_gate_observations = _surface_hard_gate_violations(request, candidate_texts[0])
+                if hard_gate_observations:
+                    repaired = _minimal_hard_gate_repair(request, candidate_texts[0])
+                    if repaired and not _surface_hard_gate_violations(request, repaired):
+                        structured = {**structured, "reply_text": repaired}
+                        candidate_texts = [repaired]
+                        hard_gate_observations = ()
+                    else:
+                        structured = {**structured, "reply_text": ""}
+                        candidate_texts = []
             hard_gate_observations = (
                 _surface_hard_gate_violations(request, candidate_texts[0])
                 if candidate_texts
@@ -778,6 +974,13 @@ class SurfaceRuntime:
             emotion_confidence=float(structured.get("emotion_confidence") or 0.0),
             latency_ms=int((time.perf_counter() - started) * 1000),
         )
+
+
+def _surface_hard_gate_retry_enabled() -> bool:
+    value = str(os.environ.get("HOST_SURFACE_MAIN_CHAIN_HARD_GATE_RETRY_ENABLED") or "").strip().lower()
+    if not value:
+        return True
+    return value in {"1", "true", "yes", "on"}
 
 
 __all__ = [

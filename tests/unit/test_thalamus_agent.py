@@ -1,12 +1,14 @@
 ﻿from __future__ import annotations
 
 import asyncio
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from host_brain.tribe.thalamus_agent import (
     ThalamusAgent,
     _resolve_intent_classification_prompt_templates,
     classify_task_intent,
+    classify_task_intent_by_llm,
     classify_task_intent_fastpath,
     classify_task_intent_by_rules,
 )
@@ -260,6 +262,55 @@ def test_classify_and_compile_intent_draft_routes_open_app_from_polite_phrase() 
     assert compiled["args"]["query"] == "可以帮我打开本地的酷狗音乐吗"
 
 
+def test_thalamus_routes_conversational_opinion_about_main_chain_to_chat() -> None:
+    cases = [
+        "你觉得把后台任务迁到本机 Codex 以后，最需要继续观察的风险是什么？用两句说。",
+        "别讲测试指标，直接说你现在对这个主链体感的判断，像正常聊天那样。",
+        "如果我要继续压整条聊天链路的耗时，你会先怀疑哪一段？不要列清单。",
+    ]
+
+    for text in cases:
+        rules = classify_task_intent_by_rules(text)
+        fastpath = classify_task_intent_fastpath(text)
+        assert rules is not None
+        assert rules["route"] == "chat"
+        assert rules["target_id"] == ""
+        assert rules["reason_code"] == "THALAMUS_RULE_CONVERSATIONAL_OPINION_CHAT"
+        assert fastpath is not None
+        assert fastpath["route"] == "chat"
+        assert fastpath["reason_code"] == "THALAMUS_RULE_CONVERSATIONAL_OPINION_CHAT"
+
+
+def test_thalamus_keeps_actionable_workspace_requests_on_codex_skill() -> None:
+    inspect_decision = classify_task_intent_by_rules("检查主链代码")
+    write_decision = classify_task_intent_by_rules("修复主链路由")
+
+    assert inspect_decision is not None
+    assert inspect_decision["route"] == "skill"
+    assert inspect_decision["target_id"] == "codex_inspect"
+    assert write_decision is not None
+    assert write_decision["route"] == "skill"
+    assert write_decision["target_id"] == "codex_worker"
+
+
+def test_thalamus_routes_strict_recent_assistant_query_to_recent_turn() -> None:
+    decision = classify_task_intent_by_rules("你刚刚说了什么")
+
+    assert decision is not None
+    assert decision["route"] == "recent_turn"
+    assert decision["target_id"] == ""
+    assert decision["reason_code"] == "RULE_RECENT_TURN"
+
+
+def test_thalamus_routes_plugin_build_request_to_codex_worker() -> None:
+    decision = classify_task_intent_by_rules("做个统计 token 消耗的插件")
+
+    assert decision is not None
+    assert decision["route"] == "skill"
+    assert decision["target_id"] == "codex_worker"
+    assert decision["reason_code"] == "RULE_FORCE_codex_worker"
+
+
 def test_classify_and_compile_intent_draft_routes_system_info_tool() -> None:
     agent = ThalamusAgent()
 
@@ -278,6 +329,99 @@ def test_classify_and_compile_intent_draft_routes_system_info_tool() -> None:
     assert compiled["route_reason"] == "THALAMUS_RULE_SYSTEM_INFO"
     assert compiled["args"]["include_memory"] is True
     assert compiled["route_source"] == "thalamus.rule"
+
+
+def test_classify_and_compile_intent_draft_routes_system_resource_snapshot_tool() -> None:
+    agent = ThalamusAgent()
+
+    compiled = _run(
+        agent.classify_and_compile_intent_draft(
+            request_id="req-thalamus-resource-snapshot",
+            session_id="session-thalamus-resource-snapshot",
+            user_message="系统现在有点卡，查下CPU内存和显存占用",
+            source="chat_handler",
+            ts_ms=1776349003113,
+        )
+    )
+
+    assert compiled["route"] == "skill"
+    assert compiled["target_id"] == "system_resource_snapshot"
+    assert compiled["route_reason"] == "THALAMUS_RULE_SYSTEM_RESOURCE_SNAPSHOT"
+    assert compiled["args"]["include_gpu"] is True
+
+
+def test_classify_and_compile_intent_draft_routes_resource_manager_status_tool() -> None:
+    agent = ThalamusAgent()
+
+    compiled = _run(
+        agent.classify_and_compile_intent_draft(
+            request_id="req-thalamus-resource-manager",
+            session_id="session-thalamus-resource-manager",
+            user_message="查看自动资源管家状态",
+            source="chat_handler",
+            ts_ms=1776349003114,
+        )
+    )
+
+    assert compiled["route"] == "skill"
+    assert compiled["target_id"] == "resource_manager_status"
+    assert compiled["route_reason"] == "THALAMUS_RULE_RESOURCE_MANAGER_STATUS"
+
+
+def test_classify_and_compile_intent_draft_routes_resource_pressure_analysis_tool() -> None:
+    agent = ThalamusAgent()
+
+    compiled = _run(
+        agent.classify_and_compile_intent_draft(
+            request_id="req-thalamus-resource-pressure-analysis",
+            session_id="session-thalamus-resource-pressure-analysis",
+            user_message="分析一下为什么有时候显存和内存会双双拉爆",
+            source="chat_handler",
+            ts_ms=17763490031145,
+        )
+    )
+
+    assert compiled["route"] == "skill"
+    assert compiled["target_id"] == "resource_pressure_analysis"
+    assert compiled["route_reason"] == "THALAMUS_RULE_RESOURCE_PRESSURE_ANALYSIS"
+    assert compiled["args"]["persist"] is True
+
+
+def test_classify_and_compile_intent_draft_routes_process_resource_top_tool() -> None:
+    agent = ThalamusAgent()
+
+    compiled = _run(
+        agent.classify_and_compile_intent_draft(
+            request_id="req-thalamus-process-resource-top",
+            session_id="session-thalamus-process-resource-top",
+            user_message="哪些进程占显存和内存最多",
+            source="chat_handler",
+            ts_ms=1776349003115,
+        )
+    )
+
+    assert compiled["route"] == "skill"
+    assert compiled["target_id"] == "process_resource_top"
+    assert compiled["route_reason"] == "THALAMUS_RULE_PROCESS_RESOURCE_TOP"
+
+
+def test_classify_and_compile_intent_draft_routes_resource_release_dry_run_tool() -> None:
+    agent = ThalamusAgent()
+
+    compiled = _run(
+        agent.classify_and_compile_intent_draft(
+            request_id="req-thalamus-resource-release",
+            session_id="session-thalamus-resource-release",
+            user_message="帮我释放一下资源",
+            source="chat_handler",
+            ts_ms=1776349003116,
+        )
+    )
+
+    assert compiled["route"] == "skill"
+    assert compiled["target_id"] == "resource_release"
+    assert compiled["route_reason"] == "THALAMUS_RULE_RESOURCE_RELEASE_DRY_RUN"
+    assert compiled["args"]["dry_run"] is True
 
 
 def test_classify_and_compile_intent_draft_routes_process_list_tool() -> None:
@@ -359,6 +503,46 @@ def test_classify_and_compile_intent_draft_routes_url_scrape_to_browser_plan() -
     ]
     assert compiled["planned_steps"][0]["args"]["url"] == "https://example.com"
     assert compiled["planned_steps"][1]["args"]["selector"] == "body"
+
+
+def test_classify_and_compile_intent_draft_prefers_lightnovel_recommender_over_generic_scrape() -> None:
+    agent = ThalamusAgent()
+
+    compiled = _run(
+        agent.classify_and_compile_intent_draft(
+            request_id="req-thalamus-lightnovel-url-recommender",
+            session_id="session-thalamus-lightnovel-url-recommender",
+            user_message="从每日榜单或者最新资源里面抓取封面和简介给我推荐轻小说 https://www.lightnovel.fun/",
+            source="chat_handler",
+            ts_ms=1776349003115,
+        )
+    )
+
+    assert compiled["route"] == "skill"
+    assert compiled["target_id"] == "codex_lightnovel_recommender"
+    assert compiled["route_reason"] == "THALAMUS_RULE_CODEX_PRODUCTION"
+    assert compiled["args"]["site_adapter"] == "lightnovel.fun"
+
+
+def test_classify_and_compile_intent_draft_does_not_treat_detail_url_as_eta_progress() -> None:
+    agent = ThalamusAgent()
+
+    compiled = _run(
+        agent.classify_and_compile_intent_draft(
+            request_id="req-thalamus-lightnovel-epub-purchase-url",
+            session_id="session-thalamus-lightnovel-epub-purchase-url",
+            user_message="登录我的账号并使用积分购买这本轻小说后封装成 epub，最多花 30 点 https://www.lightnovel.fun/cn/detail/1144366",
+            source="chat_handler",
+            ts_ms=1776349003116,
+        )
+    )
+
+    assert compiled["route"] == "skill"
+    assert compiled["target_id"] == "codex_epub_builder"
+    assert compiled["route_reason"] == "THALAMUS_RULE_CODEX_PRODUCTION"
+    assert compiled["args"]["run_mode"] == "worker"
+    assert compiled["args"]["workspace_strategy"] == "temp_workspace"
+    assert compiled["args"]["site_adapter"] == "lightnovel.fun"
 
 
 def test_classify_and_compile_intent_draft_prefers_multimodal_chat_when_attachments_exist() -> None:
@@ -625,6 +809,55 @@ def test_intent_classification_prompt_templates_resolve_canonical_defaults() -> 
     assert "user_prompt_template" in merged
 
 
+def test_classify_task_intent_by_llm_uses_pool_scene_and_drops_codex_runtime(monkeypatch) -> None:
+    captured: dict = {}
+
+    async def _fake_pool_complete(**kwargs):  # noqa: ANN001
+        captured.update(kwargs)
+        return SimpleNamespace(
+            pool_exhausted=False,
+            content='{"route":"chat","target_id":"","task":"normal chat","reason_code":"LLM_CHAT","confidence":0.91}',
+        )
+
+    monkeypatch.setenv("HOST_CORTEX_INTENT_LLM_ENABLED", "true")
+    monkeypatch.setenv("HOST_THALAMUS_INTENT_LLM_SCENE", "THALAMUS_INTENT")
+    monkeypatch.setenv("HOST_THALAMUS_INTENT_LLM_TIMEOUT_MS", "1200")
+
+    with (
+        patch(
+            "host_brain.app.graph_config_builder.resolve_host_llm_runtime_async",
+            new=AsyncMock(return_value={"available": True}),
+        ),
+        patch(
+            "host_brain.app.graph_config_builder.resolve_executive_router_llm_runtime",
+            return_value={
+                "available": True,
+                "provider_name": "codex",
+                "model_id": "gpt-5.4-mini",
+                "llm_api_key": "",
+                "base_url_override": None,
+                "agent_gen_params": {"temperature": 0.1, "top_p": 0.8},
+            },
+        ),
+        patch("host_brain.integrations.llm_helpers.acomplete_llm_with_pool", new=_fake_pool_complete),
+    ):
+        decision = _run(
+            classify_task_intent_by_llm(
+                request_id="req-thalamus-pool-not-codex",
+                session_id="session-thalamus-pool-not-codex",
+                text="普通聊天，不要走 Codex",
+            )
+        )
+
+    assert decision is not None
+    assert decision["route"] == "chat"
+    assert captured["scene_type"] == "THALAMUS_INTENT"
+    assert captured["timeout_ms"] == 1200
+    assert captured["provider_name"] is None
+    assert captured["model_id"] is None
+    assert captured["api_key"] is None
+
+
 def test_classify_and_compile_intent_draft_falls_back_to_cortex_classifier_when_rules_miss() -> None:
     agent = ThalamusAgent()
 
@@ -843,13 +1076,62 @@ def test_classify_task_intent_by_rules_routes_workspace_work_to_codex_worker() -
     assert decision["args"]["run_mode"] == "worker"
 
 
-def test_classify_task_intent_by_rules_routes_frontend_browser_verification_to_codex_worker() -> None:
+def test_classify_task_intent_by_rules_routes_frontend_browser_verification_to_codex_acceptance() -> None:
     decision = classify_task_intent_by_rules("使用无头浏览器验证前端效果")
 
     assert decision is not None
     assert decision["route"] == "skill"
-    assert decision["target_id"] == "codex_worker"
-    assert decision["reason_code"] == "THALAMUS_RULE_CODEX_WORKSPACE_WORKER"
+    assert decision["target_id"] == "codex_frontend_acceptance"
+    assert decision["reason_code"] == "THALAMUS_RULE_CODEX_PRODUCTION"
+    assert decision["args"]["start_background"] is True
+
+
+def test_classify_task_intent_by_rules_routes_browser_research_to_production_skill() -> None:
+    decision = classify_task_intent_by_rules("用浏览器做网购商品比价调研")
+
+    assert decision is not None
+    assert decision["route"] == "skill"
+    assert decision["target_id"] == "codex_browser_research"
+    assert decision["reason_code"] == "THALAMUS_RULE_CODEX_PRODUCTION"
+
+
+def test_classify_task_intent_by_rules_routes_web_corpus_collection_to_production_skill() -> None:
+    decision = classify_task_intent_by_rules("收集公开授权网页训练语料并清洗成数据集")
+
+    assert decision is not None
+    assert decision["route"] == "skill"
+    assert decision["target_id"] == "codex_web_corpus_collector"
+    assert decision["reason_code"] == "THALAMUS_RULE_CODEX_PRODUCTION"
+
+
+def test_classify_task_intent_by_rules_routes_epub_packaging_to_production_skill() -> None:
+    decision = classify_task_intent_by_rules("从网页上获取我有授权的轻小说内容和图片然后封装成 epub")
+
+    assert decision is not None
+    assert decision["route"] == "skill"
+    assert decision["target_id"] == "codex_epub_builder"
+    assert decision["reason_code"] == "THALAMUS_RULE_CODEX_PRODUCTION"
+
+
+def test_classify_task_intent_by_rules_routes_lightnovel_recommendation_to_production_skill() -> None:
+    decision = classify_task_intent_by_rules("从每日榜单或者最新资源里抓封面和简介推荐轻小说")
+
+    assert decision is not None
+    assert decision["route"] == "skill"
+    assert decision["target_id"] == "codex_lightnovel_recommender"
+    assert decision["reason_code"] == "THALAMUS_RULE_CODEX_PRODUCTION"
+
+
+def test_classify_task_intent_by_rules_routes_lightnovel_recommendation_selection_to_epub_builder() -> None:
+    decision = classify_task_intent_by_rules("推荐的第一本")
+
+    assert decision is not None
+    assert decision["route"] == "skill"
+    assert decision["target_id"] == "codex_epub_builder"
+    assert decision["reason_code"] == "THALAMUS_RULE_CODEX_PRODUCTION"
+    assert decision["args"]["recommendation_index"] == 1
+    assert decision["args"]["site_adapter"] == "lightnovel.fun"
+    assert decision["args"]["start_background"] is True
 
 
 def test_classify_task_intent_by_rules_routes_repo_commit_phrase_to_codex_worker() -> None:
@@ -877,6 +1159,89 @@ def test_classify_task_intent_by_rules_keeps_ui_preference_as_memory_store() -> 
     assert decision["route"] == "skill"
     assert decision["target_id"] == "memory_store"
     assert decision["reason_code"] == "RULE_FORCE_MEMORY_STORE"
+
+
+def test_classify_task_intent_by_rules_routes_memory_followup_to_chat() -> None:
+    decision = classify_task_intent_by_rules("我刚才让你记住的临时口令是什么？请只回答口令本身。")
+
+    assert decision is not None
+    assert decision["route"] == "chat"
+    assert decision["target_id"] == ""
+    assert decision["reason_code"] == "RULE_CONTEXTUAL_CHAT_FOLLOWUP"
+
+
+def test_classify_task_intent_by_rules_routes_anchor_followup_to_chat() -> None:
+    decision = classify_task_intent_by_rules("那个临时锚点还记得吗？只回答锚点。")
+
+    assert decision is not None
+    assert decision["route"] == "chat"
+    assert decision["target_id"] == ""
+    assert decision["reason_code"] == "RULE_CONTEXTUAL_CHAT_FOLLOWUP"
+
+
+def test_classify_task_intent_by_rules_routes_continuity_probe_to_chat() -> None:
+    decision = classify_task_intent_by_rules("连续对话测试第三轮：把这个口令变成一句 12 字以内的短句，仍然要包含它。")
+
+    assert decision is not None
+    assert decision["route"] == "chat"
+    assert decision["target_id"] == ""
+    assert decision["reason_code"] == "RULE_CONTEXTUAL_CHAT_FOLLOWUP"
+
+
+def test_classify_task_intent_by_rules_routes_long_dialogue_probe_to_chat() -> None:
+    decision = classify_task_intent_by_rules(
+        "长对话连续性测试01：建立表达偏好。之后除非我改口，偏冷色、少废话、保留一点温度、别太客服腔。简短确认。"
+    )
+
+    assert decision is not None
+    assert decision["route"] == "chat"
+    assert decision["target_id"] == ""
+    assert decision["reason_code"] == "RULE_CONTEXTUAL_CHAT_FOLLOWUP"
+
+
+def test_classify_task_intent_by_rules_routes_report_preference_followup_to_chat() -> None:
+    decision = classify_task_intent_by_rules("现在我对测试报告的要求是什么？不要漏掉刚才修正。")
+
+    assert decision is not None
+    assert decision["route"] == "chat"
+    assert decision["target_id"] == ""
+    assert decision["reason_code"] == "RULE_CONTEXTUAL_CHAT_FOLLOWUP"
+
+
+def test_classify_task_intent_by_rules_routes_report_update_to_chat() -> None:
+    decision = classify_task_intent_by_rules("再修正：报告要可复现，但也要保留一点主观体验备注，不然太干。")
+
+    assert decision is not None
+    assert decision["route"] == "chat"
+    assert decision["target_id"] == ""
+    assert decision["reason_code"] == "RULE_CONTEXTUAL_CHAT_FOLLOWUP"
+
+
+def test_classify_task_intent_by_rules_routes_anchor_alias_to_chat() -> None:
+    decision = classify_task_intent_by_rules("给锚点加个别名：以后「小橙灯」也指橙灯码。")
+
+    assert decision is not None
+    assert decision["route"] == "chat"
+    assert decision["target_id"] == ""
+    assert decision["reason_code"] == "RULE_CONTEXTUAL_CHAT_FOLLOWUP"
+
+
+def test_classify_task_intent_by_rules_routes_long_dialogue_metrics_to_chat() -> None:
+    decision = classify_task_intent_by_rules("如果长对话要测连续性，你觉得最该看哪三类指标？简短说。")
+
+    assert decision is not None
+    assert decision["route"] == "chat"
+    assert decision["target_id"] == ""
+    assert decision["reason_code"] == "RULE_CONTEXTUAL_CHAT_FOLLOWUP"
+
+
+def test_classify_task_intent_by_rules_routes_style_name_to_chat() -> None:
+    decision = classify_task_intent_by_rules("给这个表达风格起一个临时名字，别超过8个字。")
+
+    assert decision is not None
+    assert decision["route"] == "chat"
+    assert decision["target_id"] == ""
+    assert decision["reason_code"] == "RULE_CONTEXTUAL_CHAT_FOLLOWUP"
 
 
 def test_classify_task_intent_by_rules_readonly_code_plan_not_codex_worker() -> None:
@@ -1099,6 +1464,87 @@ def test_classify_and_compile_intent_draft_routes_production_brief_to_codex_back
     assert compiled["args"]["run_mode"] == "research"
     assert compiled["args"]["start_background"] is True
     assert compiled["args"]["workspace_strategy"] == "temp_workspace"
+
+
+def test_classify_and_compile_intent_draft_routes_frontend_acceptance_to_runtime_repo() -> None:
+    agent = ThalamusAgent()
+
+    compiled = _run(
+        agent.classify_and_compile_intent_draft(
+            request_id="req-thalamus-frontend-acceptance",
+            session_id="session-thalamus-frontend-acceptance",
+            user_message="使用无头浏览器验证前端效果",
+            source="chat_handler",
+            ts_ms=1776349003530,
+        )
+    )
+
+    assert compiled["route"] == "skill"
+    assert compiled["target_id"] == "codex_frontend_acceptance"
+    assert compiled["route_reason"] == "THALAMUS_RULE_CODEX_PRODUCTION"
+    assert compiled["args"]["run_mode"] == "inspect"
+    assert compiled["args"]["workspace_strategy"] == "runtime_repo"
+    assert compiled["args"]["start_background"] is True
+
+
+def test_classify_and_compile_intent_draft_routes_epub_builder_to_temp_workspace_worker() -> None:
+    agent = ThalamusAgent()
+
+    compiled = _run(
+        agent.classify_and_compile_intent_draft(
+            request_id="req-thalamus-epub-builder",
+            session_id="session-thalamus-epub-builder",
+            user_message="把我有授权的轻小说内容和图片封装成 epub",
+            source="chat_handler",
+            ts_ms=1776349003540,
+        )
+    )
+
+    assert compiled["route"] == "skill"
+    assert compiled["target_id"] == "codex_epub_builder"
+    assert compiled["args"]["run_mode"] == "worker"
+    assert compiled["args"]["workspace_strategy"] == "temp_workspace"
+
+
+def test_classify_and_compile_intent_draft_routes_recommendation_selection_to_epub_builder() -> None:
+    agent = ThalamusAgent()
+
+    compiled = _run(
+        agent.classify_and_compile_intent_draft(
+            request_id="req-thalamus-epub-selection",
+            session_id="session-thalamus-epub-selection",
+            user_message="推荐的第一本",
+            source="chat_handler",
+            ts_ms=1776349003542,
+        )
+    )
+
+    assert compiled["route"] == "skill"
+    assert compiled["target_id"] == "codex_epub_builder"
+    assert compiled["args"]["run_mode"] == "worker"
+    assert compiled["args"]["workspace_strategy"] == "temp_workspace"
+    assert compiled["args"]["recommendation_index"] == 1
+    assert compiled["args"]["site_adapter"] == "lightnovel.fun"
+
+
+def test_classify_and_compile_intent_draft_routes_lightnovel_recommender_to_temp_workspace() -> None:
+    agent = ThalamusAgent()
+
+    compiled = _run(
+        agent.classify_and_compile_intent_draft(
+            request_id="req-thalamus-lightnovel-recommender",
+            session_id="session-thalamus-lightnovel-recommender",
+            user_message="从每日榜单或者最新资源里面抓取封面和简介给我推荐轻小说",
+            source="chat_handler",
+            ts_ms=1776349003545,
+        )
+    )
+
+    assert compiled["route"] == "skill"
+    assert compiled["target_id"] == "codex_lightnovel_recommender"
+    assert compiled["args"]["run_mode"] == "worker"
+    assert compiled["args"]["workspace_strategy"] == "temp_workspace"
+    assert compiled["args"]["site_adapter"] == "lightnovel.fun"
 
 
 def test_classify_and_compile_intent_draft_defaults_runtime_repo_for_codex_code_requests() -> None:

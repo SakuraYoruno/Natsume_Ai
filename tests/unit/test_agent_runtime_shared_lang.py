@@ -52,7 +52,7 @@ def test_resolve_text_render_target_lang_does_not_infer_from_user_message_for_te
     assert resolved == "zh"
 
 
-def test_resolve_text_render_target_lang_uses_voice_form_for_japanese() -> None:
+def test_resolve_text_render_target_lang_uses_voice_form_for_chinese() -> None:
     request_body = SimpleNamespace(
         input_source="GATEWAY",
         render_target_lang="zh",
@@ -64,7 +64,7 @@ def test_resolve_text_render_target_lang_uses_voice_form_for_japanese() -> None:
         sanitized_message="你好",
     )
 
-    assert resolved == "ja"
+    assert resolved == "zh"
 
 
 def test_resolve_text_render_target_lang_uses_media_form_for_media_action() -> None:

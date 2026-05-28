@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import time
 from dataclasses import dataclass, field
 from typing import Any, Mapping
@@ -423,7 +424,8 @@ class MirrorNeuronAgent:
         except Exception:
             user_id = str(payload.get("user_id") or payload.get("person_id") or "").strip() or "default"
         ts_ms = int(getattr(event, "ts_ms", 0) or now_ms())
-        self.apply_resonance(
+        await asyncio.to_thread(
+            self.apply_resonance,
             user_id=user_id,
             session_id=session_id,
             emotion_tag=emotion_tag,

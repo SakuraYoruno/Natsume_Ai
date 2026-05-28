@@ -12,6 +12,9 @@
 
 from __future__ import annotations
 
+import datetime
+import threading
+import time
 import pytest
 from typing import Any
 
@@ -24,7 +27,10 @@ from host_brain.scheduler.task_registry import (
 from host_brain.scheduler.scheduler import NatsumeScheduler
 from host_brain.scheduler.health import (
     SchedulerHealthReporter,
+    STATUS_DEFERRED,
     STATUS_OK,
+    STATUS_QUEUED,
+    STATUS_RETRYING,
     STATUS_SUSPENDED,
 )
 from host_brain.core.errors import LLM_POOL_EXHAUSTED, SYSMODE_FORBIDDEN, SCHED_TASK_SUSPENDED
@@ -86,6 +92,41 @@ def _make_scheduler(
     return sched
 
 
+class _CaptureLedger:
+    def __init__(self) -> None:
+        self.scheduler_events: list[dict[str, Any]] = []
+
+    def log_scheduler_event(self, row: dict[str, Any]) -> None:
+        self.scheduler_events.append(dict(row))
+
+
+def test_scheduler_event_log_promotes_background_memory(monkeypatch) -> None:
+    registry, health = _make_registry_and_health()
+    ledger = _CaptureLedger()
+    memory_calls: list[dict[str, Any]] = []
+    sched = _make_scheduler(registry, health, ledger=ledger)
+    monkeypatch.setattr(
+        "host_brain.app.observability_persist.persist_background_event_memory",
+        lambda **kwargs: memory_calls.append(dict(kwargs)) or {"status": "OK", "memory_id": "mem_sched_1"},
+    )
+
+    sched._log_scheduler_event(  # noqa: SLF001
+        task_id="daily_recommendation",
+        trigger_ts=1_800_000_000_000,
+        intent_id="intent_daily_reco",
+        status="ERROR",
+        reason_code="LLM_POOL_EXHAUSTED",
+        mode_at_trigger="normal",
+        error_detail="model pool unavailable",
+    )
+
+    assert ledger.scheduler_events
+    assert ledger.scheduler_events[0]["event_id"].startswith("sched_evt_")
+    assert memory_calls
+    assert memory_calls[0]["event_source"] == "scheduler"
+    assert memory_calls[0]["task_id"] == "daily_recommendation"
+
+
 # ── T-SCHED-01 ──
 
 class TestSchedTrigger:
@@ -107,6 +148,46 @@ class TestSchedTrigger:
         assert len(sched._dispatched) == 1
         intent = sched._dispatched[0]
         assert intent["skill_name"] == "diary_generate"
+
+    def test_async_manual_trigger_returns_before_dispatch_finishes(self) -> None:
+        registry, health = _make_registry_and_health()
+        task = _make_interval_task("slow_manual", priority=TaskPriority.HIGH)
+        registry.register(task)
+        started = threading.Event()
+        release = threading.Event()
+        dispatched: list[dict[str, Any]] = []
+
+        def _slow_dispatcher(intent: dict[str, Any]) -> dict[str, Any]:
+            dispatched.append(intent)
+            started.set()
+            release.wait(timeout=2.0)
+            return {"status": "OK", "reason_code": None}
+
+        sched = NatsumeScheduler(
+            registry=registry,
+            health_reporter=health,
+            intent_dispatcher=_slow_dispatcher,
+        )
+
+        begin = time.perf_counter()
+        result = sched.trigger_task_by_id_async("slow_manual")
+        elapsed = time.perf_counter() - begin
+
+        assert elapsed < 0.2
+        assert result["status"] == STATUS_QUEUED
+        assert result["task_id"] == "slow_manual"
+        assert health.get_task_state("slow_manual")["status"] == STATUS_QUEUED
+        assert started.wait(timeout=1.0)
+        assert len(dispatched) == 1
+
+        release.set()
+        deadline = time.time() + 2.0
+        while time.time() < deadline:
+            if health.get_task_state("slow_manual").get("status") == STATUS_OK:
+                break
+            time.sleep(0.02)
+
+        assert health.get_task_state("slow_manual")["status"] == STATUS_OK
 
 
 # ── T-SCHED-02 ──
@@ -180,6 +261,26 @@ class TestBackgroundLlmModeGate:
         assert result["reason_code"] == "BACKGROUND_LLM_MODE_BLOCKED"
         assert len(sched._dispatched) == 0
 
+    def test_sleep_allows_dream_generator_background_llm_task(self) -> None:
+        registry, health = _make_registry_and_health()
+        task = SchedulerTaskConfig(
+            task_id="dream_generator_sleep",
+            trigger_mode=TriggerMode.INTERVAL,
+            trigger_config={"seconds": 60},
+            intent_template={"skill_name": "dream_generator", "args": {"max_episodic_entries": 20}},
+            priority=TaskPriority.LOW,
+            mode_allowlist=["sleep"],
+            enabled=True,
+        )
+        registry.register(task)
+        sched = _make_scheduler(registry, health, sys_mode="sleep")
+
+        result = sched.trigger_task_by_id("dream_generator_sleep")
+
+        assert result["status"] == "OK"
+        assert len(sched._dispatched) == 1
+        assert sched._dispatched[0]["sys_mode"] == "sleep"
+
     def test_gaming_keeps_gaming_companion_background_llm_task(self) -> None:
         registry, health = _make_registry_and_health()
         task = _make_interval_task("gaming_companion_tick", priority=TaskPriority.HIGH)
@@ -205,6 +306,193 @@ class TestBackgroundLlmModeGate:
 
         assert result["status"] == "SKIPPED"
         assert result["reason_code"] == LLM_POOL_EXHAUSTED
+
+    def test_resource_pressure_defers_background_llm_task(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        calls: list[dict[str, Any]] = []
+
+        class FakeResourceManager:
+            def assess_background_task(self, **kwargs: Any) -> dict[str, Any]:
+                calls.append(kwargs)
+                return {
+                    "allowed": False,
+                    "reason_code": "RESOURCE_PRESSURE_ELEVATED",
+                    "pressure_status": "ELEVATED",
+                    "retry_after_s": 180,
+                }
+
+        monkeypatch.setattr(
+            "host_brain.app.dependencies.get_resource_manager",
+            lambda create_if_missing=False: FakeResourceManager(),
+        )
+
+        registry, health = _make_registry_and_health()
+        task = _make_interval_task("inner_world_monologue_tick", priority=TaskPriority.HIGH)
+        registry.register(task)
+        sched = _make_scheduler(registry, health)
+
+        result = sched.trigger_task_by_id("inner_world_monologue_tick")
+
+        assert result["status"] == STATUS_DEFERRED
+        assert result["scheduler_decision"] == "defer"
+        assert result["reason_code"] == "RESOURCE_PRESSURE_ELEVATED"
+        assert len(sched._dispatched) == 0
+        assert calls[0]["uses_llm"] is True
+        snapshot = health.build_health_snapshot()
+        task_state = next(t for t in snapshot["tasks"] if t["task_id"] == "inner_world_monologue_tick")
+        assert task_state["status"] == STATUS_DEFERRED
+        assert task_state["last_run_ts"] is None
+        assert task_state["last_gate_state"] == "resource:elevated"
+
+    def test_resource_gate_uses_explicit_resource_profile(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        calls: list[dict[str, Any]] = []
+
+        class FakeResourceManager:
+            def assess_background_task(self, **kwargs: Any) -> dict[str, Any]:
+                calls.append(kwargs)
+                return {
+                    "allowed": False,
+                    "reason_code": "RESOURCE_PRESSURE_HIGH",
+                    "pressure_status": "HIGH",
+                    "retry_after_s": 600,
+                }
+
+        monkeypatch.setattr(
+            "host_brain.app.dependencies.get_resource_manager",
+            lambda create_if_missing=False: FakeResourceManager(),
+        )
+
+        registry, health = _make_registry_and_health()
+        task = _make_interval_task("lightnovel_recommender_daily", priority=TaskPriority.LOW)
+        task.resource_profile = {
+            "resource_class": "browser_heavy",
+            "uses_llm": True,
+            "uses_gpu": False,
+        }
+        registry.register(task)
+        sched = _make_scheduler(registry, health)
+
+        result = sched.trigger_task_by_id("lightnovel_recommender_daily")
+
+        assert result["status"] == STATUS_DEFERRED
+        assert calls[0]["task_type"] == "browser_heavy"
+        assert calls[0]["uses_llm"] is True
+        assert calls[0]["uses_gpu"] is False
+
+
+class TestCronMatching:
+    def test_cron_respects_day_of_week(self) -> None:
+        registry, health = _make_registry_and_health()
+        task = SchedulerTaskConfig(
+            task_id="weekly_growth",
+            trigger_mode=TriggerMode.CRON,
+            trigger_config={"day_of_week": 6, "hour": 3, "minute": 50},
+            intent_template={"skill_name": "weekly_growth", "args": {}},
+            priority=TaskPriority.LOW,
+            enabled=True,
+        )
+        registry.register(task)
+        sched = _make_scheduler(registry, health)
+
+        assert sched._should_cron_fire(task, datetime.datetime(2026, 5, 24, 3, 50)) is True
+        assert sched._should_cron_fire(task, datetime.datetime(2026, 5, 25, 3, 50)) is False
+
+    def test_cron_does_not_repeat_within_same_minute(self) -> None:
+        registry, health = _make_registry_and_health()
+        task = SchedulerTaskConfig(
+            task_id="daily_memory",
+            trigger_mode=TriggerMode.CRON,
+            trigger_config={"hour": 3, "minute": 0},
+            intent_template={"skill_name": "daily_memory", "args": {}},
+            priority=TaskPriority.LOW,
+            enabled=True,
+        )
+        registry.register(task)
+        sched = _make_scheduler(registry, health)
+        now = datetime.datetime(2026, 5, 24, 3, 0, 30)
+        sched._last_run_ts[task.task_id] = int(now.replace(second=0, microsecond=0).timestamp() * 1000)
+
+        assert sched._should_cron_fire(task, now) is False
+
+    def test_cron_catches_up_once_within_configured_window(self) -> None:
+        registry, health = _make_registry_and_health()
+        task = SchedulerTaskConfig(
+            task_id="daily_recommendation",
+            trigger_mode=TriggerMode.CRON,
+            trigger_config={"hour": 10, "minute": 30, "catch_up_window_minutes": 180},
+            intent_template={"skill_name": "daily_recommendation", "args": {}},
+            priority=TaskPriority.LOW,
+            enabled=True,
+        )
+        registry.register(task)
+        sched = _make_scheduler(registry, health)
+        catch_up_now = datetime.datetime(2026, 5, 22, 11, 5, 0)
+        scheduled_ts = int(catch_up_now.replace(hour=10, minute=30, second=0, microsecond=0).timestamp() * 1000)
+
+        assert sched._should_cron_fire(task, catch_up_now) is True
+
+        sched._last_run_ts[task.task_id] = scheduled_ts
+        assert sched._should_cron_fire(task, catch_up_now) is False
+        assert sched._should_cron_fire(task, datetime.datetime(2026, 5, 22, 13, 31, 0)) is False
+
+    def test_cron_catches_up_recent_previous_occurrence(self) -> None:
+        registry, health = _make_registry_and_health()
+        task = SchedulerTaskConfig(
+            task_id="nightly_audit",
+            trigger_mode=TriggerMode.CRON,
+            trigger_config={"hour": 23, "minute": 50, "catch_up_window_minutes": 720},
+            intent_template={"skill_name": "nightly_audit", "args": {}},
+            priority=TaskPriority.LOW,
+            enabled=True,
+        )
+        registry.register(task)
+        sched = _make_scheduler(registry, health)
+
+        assert sched._should_cron_fire(task, datetime.datetime(2026, 5, 23, 1, 5, 0)) is True
+        assert sched._should_cron_fire(task, datetime.datetime(2026, 5, 23, 12, 1, 0)) is False
+
+    def test_weekly_cron_catches_up_across_day_boundary(self) -> None:
+        registry, health = _make_registry_and_health()
+        task = SchedulerTaskConfig(
+            task_id="weekly_growth",
+            trigger_mode=TriggerMode.CRON,
+            trigger_config={"day_of_week": 6, "hour": 3, "minute": 50, "catch_up_window_minutes": 1440},
+            intent_template={"skill_name": "weekly_growth", "args": {}},
+            priority=TaskPriority.LOW,
+            enabled=True,
+        )
+        registry.register(task)
+        sched = _make_scheduler(registry, health)
+
+        assert sched._should_cron_fire(task, datetime.datetime(2026, 5, 25, 3, 45, 0)) is True
+        assert sched._should_cron_fire(task, datetime.datetime(2026, 5, 25, 4, 0, 0)) is False
+
+    def test_cron_last_run_hydrates_from_ledger_to_avoid_restart_duplicate(self) -> None:
+        registry, health = _make_registry_and_health()
+        task = SchedulerTaskConfig(
+            task_id="daily_recommendation",
+            trigger_mode=TriggerMode.CRON,
+            trigger_config={"hour": 10, "minute": 30, "catch_up_window_minutes": 180},
+            intent_template={"skill_name": "daily_recommendation", "args": {}},
+            priority=TaskPriority.LOW,
+            enabled=True,
+        )
+        registry.register(task)
+        catch_up_now = datetime.datetime(2026, 5, 22, 11, 5, 0)
+        manual_trigger_ts = int(datetime.datetime(2026, 5, 22, 11, 0, 0).timestamp() * 1000)
+
+        class _Ledger:
+            def load_latest_scheduler_event_trigger_ts(self, task_ids):
+                assert task_ids == ["daily_recommendation"]
+                return {"daily_recommendation": manual_trigger_ts}
+
+        sched = _make_scheduler(registry, health, ledger=_Ledger())
+        sched._hydrate_last_run_ts_from_ledger()
+
+        assert sched._should_cron_fire(task, catch_up_now) is False
+        hydrated_state = health.get_task_state("daily_recommendation")
+        assert hydrated_state["status"] == STATUS_OK
+        assert hydrated_state["last_run_ts"] == manual_trigger_ts
+        assert hydrated_state["last_gate_state"] == "ledger_hydrated"
 
 
 # ── T-SCHED-04 ──
@@ -254,6 +542,88 @@ class TestSchedSuspendOnFailure:
         sched2._error_counts = sched._error_counts  # 共享错误计数
         sched2.trigger_task_by_id("recover_task")
         assert sched2.get_error_count("recover_task") == 0
+
+
+class TestSchedRetryTolerance:
+    def test_running_scheduler_retries_transient_dispatch_failure_before_counting_error(self) -> None:
+        registry, health = _make_registry_and_health()
+        task = _make_interval_task("retry_task", max_failures=2)
+        task.trigger_config["retry_policy"] = {"max_retries": 1, "initial_delay_s": 1, "max_delay_s": 1}
+        registry.register(task)
+        calls = 0
+
+        def _dispatcher(intent: dict[str, Any]) -> dict[str, Any]:
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                return {"status": "FAILED", "reason_code": "TRANSIENT_NETWORK"}
+            return {"status": "OK", "reason_code": None}
+
+        sched = NatsumeScheduler(
+            registry=registry,
+            health_reporter=health,
+            intent_dispatcher=_dispatcher,
+            get_sys_mode=lambda: "normal",
+        )
+        sched._running = True
+
+        result = sched.trigger_task_by_id("retry_task")
+
+        assert result["status"] == STATUS_RETRYING
+        assert result["retry_attempt"] == 1
+        assert sched.get_error_count("retry_task") == 0
+        assert health.get_task_state("retry_task")["status"] == STATUS_RETRYING
+
+        for _ in range(30):
+            if health.get_task_state("retry_task").get("status") == STATUS_OK:
+                break
+            time.sleep(0.1)
+
+        assert calls == 2
+        assert sched.get_error_count("retry_task") == 0
+        assert health.get_task_state("retry_task")["status"] == STATUS_OK
+
+    def test_running_scheduler_retries_resource_gate_deferral_for_interval_task(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        calls: list[dict[str, Any]] = []
+
+        class FakeResourceManager:
+            def assess_background_task(self, **kwargs: Any) -> dict[str, Any]:
+                calls.append(kwargs)
+                if len(calls) == 1:
+                    return {
+                        "allowed": False,
+                        "reason_code": "RESOURCE_PRESSURE_ELEVATED",
+                        "pressure_status": "ELEVATED",
+                        "retry_after_s": 1,
+                    }
+                return {"allowed": True, "pressure_status": "NORMAL"}
+
+        monkeypatch.setattr(
+            "host_brain.app.dependencies.get_resource_manager",
+            lambda create_if_missing=False: FakeResourceManager(),
+        )
+        registry, health = _make_registry_and_health()
+        task = _make_interval_task("retry_resource_task")
+        task.resource_profile = {"resource_class": "background_llm", "uses_llm": True}
+        task.trigger_config["retry_policy"] = {"max_retries": 1, "initial_delay_s": 1, "max_delay_s": 1}
+        registry.register(task)
+        sched = _make_scheduler(registry, health)
+        sched._running = True
+
+        result = sched.trigger_task_by_id("retry_resource_task")
+
+        assert result["status"] == STATUS_RETRYING
+        assert result["resource_gate"]["reason_code"] == "RESOURCE_PRESSURE_ELEVATED"
+        assert health.get_task_state("retry_resource_task")["status"] == STATUS_RETRYING
+
+        for _ in range(30):
+            if health.get_task_state("retry_resource_task").get("status") == STATUS_OK:
+                break
+            time.sleep(0.1)
+
+        assert len(calls) >= 2
+        assert health.get_task_state("retry_resource_task")["status"] == STATUS_OK
+        assert sched.get_error_count("retry_resource_task") == 0
 
 
 # ── T-SCHED-05 ──

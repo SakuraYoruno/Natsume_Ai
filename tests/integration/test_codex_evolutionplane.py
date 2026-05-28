@@ -8,7 +8,7 @@ from host_brain.skills.codex_runtime_registry import build_codex_runtime_skill_r
 
 
 def test_codex_evolutionplane_blocks_outside_experiment_branch(monkeypatch, tmp_path) -> None:
-    monkeypatch.setattr("host_brain.codex_runtime.executor.shutil.which", lambda _name: "codex")
+    monkeypatch.setattr("host_brain.codex_runtime.executor.codex_cli_command", lambda: "codex")
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     registry = build_codex_runtime_skill_registry()

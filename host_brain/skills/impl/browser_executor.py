@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import logging
 import os
@@ -42,6 +43,7 @@ BACKEND_DESKTOP_FALLBACK = "desktop-fallback"
 
 AGENT_BROWSER_DEFAULT_COMMAND = "agent-browser"
 AGENT_BROWSER_DEFAULT_SESSION = "natsume"
+PLAYWRIGHT_DEFAULT_PROFILE_DIR = "runtime/browser/playwright-profile"
 
 
 class AgentBrowserCommandError(RuntimeError):
@@ -109,7 +111,12 @@ def _agent_browser_command_parts() -> list[str]:
     raw = str(os.environ.get("HOST_BROWSER_AGENT_COMMAND") or AGENT_BROWSER_DEFAULT_COMMAND).strip()
     if not raw:
         raw = AGENT_BROWSER_DEFAULT_COMMAND
-    return shlex.split(raw, posix=(os.name != "nt"))
+    parts = shlex.split(raw, posix=(os.name != "nt"))
+    if parts:
+        resolved = shutil.which(parts[0])
+        if resolved:
+            parts[0] = resolved
+    return parts
 
 
 def _agent_browser_available() -> bool:
@@ -121,12 +128,92 @@ def _agent_browser_install_hint() -> str:
     return "install via `npm i -g agent-browser && agent-browser install`, or set `HOST_BROWSER_BACKEND=playwright`"
 
 
+def _env_bool(name: str, *, default: bool) -> bool:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    value = str(raw).strip().lower()
+    if not value:
+        return default
+    if value in {"1", "true", "yes", "y", "on"}:
+        return True
+    if value in {"0", "false", "no", "n", "off"}:
+        return False
+    return default
+
+
+def _first_non_empty(*values: Any) -> str | None:
+    for value in values:
+        text = str(value or "").strip()
+        if text:
+            return text
+    return None
+
+
+def _safe_browser_identity(value: Any, *, default: str = AGENT_BROWSER_DEFAULT_SESSION) -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        raw = default
+    cleaned = "".join(
+        char if (char.isascii() and (char.isalnum() or char in "._-")) else "-"
+        for char in raw
+    ).strip(".-_")
+    while "--" in cleaned:
+        cleaned = cleaned.replace("--", "-")
+    if not cleaned:
+        cleaned = default
+    if len(cleaned) > 80:
+        digest = hashlib.sha1(raw.encode("utf-8", errors="ignore")).hexdigest()[:10]
+        cleaned = f"{cleaned[:69].rstrip('.-_')}-{digest}"
+    return cleaned
+
+
 def _agent_browser_session_name(payload: dict[str, Any]) -> str:
-    session_id = str(payload.get("session_id") or "").strip()
-    if session_id:
-        return session_id
-    fallback = str(os.environ.get("HOST_BROWSER_AGENT_SESSION") or AGENT_BROWSER_DEFAULT_SESSION).strip()
-    return fallback or AGENT_BROWSER_DEFAULT_SESSION
+    explicit = _first_non_empty(
+        payload.get("browser_session"),
+        payload.get("account_session"),
+        payload.get("agent_browser_session"),
+    )
+    if explicit:
+        return _safe_browser_identity(explicit)
+
+    if _env_bool("HOST_BROWSER_AGENT_USE_PAYLOAD_SESSION", default=False):
+        session_id = str(payload.get("session_id") or "").strip()
+        if session_id:
+            return _safe_browser_identity(session_id)
+
+    fallback = _first_non_empty(
+        os.environ.get("HOST_BROWSER_AGENT_SESSION"),
+        os.environ.get("AGENT_BROWSER_SESSION"),
+        AGENT_BROWSER_DEFAULT_SESSION,
+    )
+    return _safe_browser_identity(fallback)
+
+
+def _agent_browser_state_name(payload: dict[str, Any]) -> str | None:
+    if not _env_bool("HOST_BROWSER_AGENT_PERSIST_STATE", default=True):
+        return None
+    explicit = _first_non_empty(
+        payload.get("browser_state_name"),
+        payload.get("account_state_name"),
+        payload.get("agent_browser_state_name"),
+    )
+    fallback = _first_non_empty(
+        explicit,
+        os.environ.get("HOST_BROWSER_AGENT_STATE_NAME"),
+        os.environ.get("AGENT_BROWSER_SESSION_NAME"),
+        _agent_browser_session_name(payload),
+    )
+    return _safe_browser_identity(fallback) if fallback else None
+
+
+def _agent_browser_profile(payload: dict[str, Any]) -> str | None:
+    return _first_non_empty(
+        payload.get("browser_profile"),
+        payload.get("agent_browser_profile"),
+        os.environ.get("HOST_BROWSER_AGENT_PROFILE"),
+        os.environ.get("AGENT_BROWSER_PROFILE"),
+    )
 
 
 def _agent_browser_timeout_seconds(timeout_ms: int | None) -> float:
@@ -136,12 +223,19 @@ def _agent_browser_timeout_seconds(timeout_ms: int | None) -> float:
 
 
 def _build_agent_browser_command(payload: dict[str, Any], *args: str) -> list[str]:
-    return [
+    command = [
         *_agent_browser_command_parts(),
         "--session",
         _agent_browser_session_name(payload),
-        *args,
     ]
+    state_name = _agent_browser_state_name(payload)
+    if state_name:
+        command.extend(["--session-name", state_name])
+    profile = _agent_browser_profile(payload)
+    if profile:
+        command.extend(["--profile", profile])
+    command.extend(args)
+    return command
 
 
 def _run_agent_browser(
@@ -149,18 +243,34 @@ def _run_agent_browser(
     *args: str,
     timeout_ms: int | None = None,
     stdin_text: str | None = None,
+    capture_output: bool = True,
 ) -> subprocess.CompletedProcess[str]:
     try:
-        completed = subprocess.run(
-            _build_agent_browser_command(payload, *args),
-            input=stdin_text,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=_agent_browser_timeout_seconds(timeout_ms),
-            check=False,
-        )
+        command = _build_agent_browser_command(payload, *args)
+        if capture_output:
+            completed = subprocess.run(
+                command,
+                input=stdin_text,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=_agent_browser_timeout_seconds(timeout_ms),
+                check=False,
+            )
+        else:
+            creationflags = 0
+            if os.name == "nt":
+                creationflags = getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+            completed = subprocess.run(
+                command,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=_agent_browser_timeout_seconds(timeout_ms),
+                creationflags=creationflags,
+                check=False,
+            )
     except FileNotFoundError as exc:
         raise FileNotFoundError(_agent_browser_install_hint()) from exc
     except subprocess.TimeoutExpired as exc:
@@ -395,13 +505,55 @@ class BrowserSession:
     def __init__(self) -> None:
         self._playwright = None
         self._browser = None
+        self._context = None
         self._page = None
+
+    def _playwright_profile_dir(self) -> Path:
+        raw = str(os.environ.get("HOST_BROWSER_PLAYWRIGHT_PROFILE_DIR") or "").strip()
+        root = Path(__file__).resolve().parents[3]
+        profile_dir = Path(raw) if raw else root / PLAYWRIGHT_DEFAULT_PROFILE_DIR
+        if not profile_dir.is_absolute():
+            profile_dir = root / profile_dir
+        return profile_dir
+
+    def _playwright_headless(self) -> bool:
+        return _env_bool("HOST_BROWSER_PLAYWRIGHT_HEADLESS", default=False)
+
+    def _start_persistent_context(self) -> None:
+        profile_dir = self._playwright_profile_dir()
+        profile_dir.mkdir(parents=True, exist_ok=True)
+        self._context = self._playwright.chromium.launch_persistent_context(
+            user_data_dir=str(profile_dir),
+            headless=self._playwright_headless(),
+        )
+        pages = list(getattr(self._context, "pages", []) or [])
+        self._page = pages[0] if pages else self._context.new_page()
+
+    def _ensure_persistent_started(self) -> None:
+        if self._context is None:
+            self._start_persistent_context()
+            return
+        try:
+            pages = [
+                page
+                for page in list(getattr(self._context, "pages", []) or [])
+                if not page.is_closed()
+            ]
+        except Exception:
+            self._context = None
+            self._start_persistent_context()
+            return
+        if self._page is None or self._page.is_closed():
+            self._page = pages[0] if pages else self._context.new_page()
 
     def _ensure_started(self) -> None:
         """确保 Playwright 和浏览器已启动。"""
         from playwright.sync_api import sync_playwright  # type: ignore[import-not-found]
         if self._playwright is None:
             self._playwright = sync_playwright().start()
+        if _env_bool("HOST_BROWSER_PLAYWRIGHT_PERSISTENT_PROFILE_ENABLED", default=True):
+            self._ensure_persistent_started()
+            return
         if self._browser is None or not self._browser.is_connected():
             self._browser = self._playwright.chromium.launch(headless=False)
         if self._page is None or self._page.is_closed():
@@ -414,6 +566,11 @@ class BrowserSession:
 
     def close(self) -> None:
         """关闭浏览器会话。"""
+        try:
+            if self._context:
+                self._context.close()
+        except Exception:
+            pass
         try:
             if self._page and not self._page.is_closed():
                 self._page.close()
@@ -429,6 +586,7 @@ class BrowserSession:
                 self._playwright.stop()
         except Exception:
             pass
+        self._context = None
         self._page = None
         self._browser = None
         self._playwright = None
@@ -761,9 +919,9 @@ def _agent_execute_browser_navigate(payload: dict[str, Any]) -> dict[str, Any]:
         return _reject(event_id=event_id, reason_code="BROWSER_URL_MISSING",
                        detail="url is required", ts_ms=ts, request_id=request_id)
 
-    _run_agent_browser(payload, "open", url, timeout_ms=timeout_ms)
+    _run_agent_browser(payload, "open", url, timeout_ms=timeout_ms, capture_output=False)
     if wait_until == "networkidle":
-        _run_agent_browser(payload, "wait", "--load", "networkidle", timeout_ms=timeout_ms)
+        _run_agent_browser(payload, "wait", "--load", "networkidle", timeout_ms=timeout_ms, capture_output=False)
     elif wait_until == "domcontentloaded":
         _run_agent_browser(
             payload,
@@ -771,9 +929,10 @@ def _agent_execute_browser_navigate(payload: dict[str, Any]) -> dict[str, Any]:
             "--fn",
             "document.readyState === 'interactive' || document.readyState === 'complete'",
             timeout_ms=timeout_ms,
+            capture_output=False,
         )
     else:
-        _run_agent_browser(payload, "wait", "--fn", "document.readyState === 'complete'", timeout_ms=timeout_ms)
+        _run_agent_browser(payload, "wait", "--fn", "document.readyState === 'complete'", timeout_ms=timeout_ms, capture_output=False)
 
     current_url = _clean_cli_text(_run_agent_browser(payload, "get", "url", timeout_ms=timeout_ms).stdout)
     title = _clean_cli_text(_run_agent_browser(payload, "get", "title", timeout_ms=timeout_ms).stdout)
@@ -914,7 +1073,7 @@ def _agent_execute_browser_screenshot(payload: dict[str, Any]) -> dict[str, Any]
     if full_page:
         command_args.append("--full")
     command_args.append(screenshot_path)
-    _run_agent_browser(payload, *command_args, timeout_ms=timeout_ms)
+    _run_agent_browser(payload, *command_args, timeout_ms=timeout_ms, capture_output=False)
 
     result = {
         "status": STATUS_EXECUTED,
@@ -975,17 +1134,17 @@ def _agent_execute_browser_wait_for(payload: dict[str, Any]) -> dict[str, Any]:
 
     if condition == "selector":
         if state in {"visible", "attached"}:
-            _run_agent_browser(payload, "wait", value, timeout_ms=timeout_ms)
+            _run_agent_browser(payload, "wait", value, timeout_ms=timeout_ms, capture_output=False)
         elif state == "hidden":
-            _run_agent_browser(payload, "wait", value, "--state", "hidden", timeout_ms=timeout_ms)
+            _run_agent_browser(payload, "wait", value, "--state", "hidden", timeout_ms=timeout_ms, capture_output=False)
         elif state == "detached":
-            _run_agent_browser(payload, "wait", "--fn", f"!document.querySelector({json.dumps(value)})", timeout_ms=timeout_ms)
+            _run_agent_browser(payload, "wait", "--fn", f"!document.querySelector({json.dumps(value)})", timeout_ms=timeout_ms, capture_output=False)
         else:
             raise AgentBrowserUnsupported(f"unsupported wait state: {state}")
     elif condition == "url":
-        _run_agent_browser(payload, "wait", "--url", value, timeout_ms=timeout_ms)
+        _run_agent_browser(payload, "wait", "--url", value, timeout_ms=timeout_ms, capture_output=False)
     elif condition == "function":
-        _run_agent_browser(payload, "wait", "--fn", value, timeout_ms=timeout_ms)
+        _run_agent_browser(payload, "wait", "--fn", value, timeout_ms=timeout_ms, capture_output=False)
     elif condition == "timeout":
         wait_ms = timeout_ms
         if value:
@@ -993,7 +1152,7 @@ def _agent_execute_browser_wait_for(payload: dict[str, Any]) -> dict[str, Any]:
                 wait_ms = int(value)
             except ValueError:
                 wait_ms = timeout_ms
-        _run_agent_browser(payload, "wait", str(max(1, wait_ms)), timeout_ms=wait_ms)
+        _run_agent_browser(payload, "wait", str(max(1, wait_ms)), timeout_ms=wait_ms, capture_output=False)
     else:
         raise AgentBrowserUnsupported(f"unsupported wait condition: {condition}")
 
@@ -1071,9 +1230,9 @@ def _agent_execute_browser_close(payload: dict[str, Any]) -> dict[str, Any]:
     request_id = _payload_request_id(payload)
 
     if target == "browser":
-        _run_agent_browser(payload, "close", timeout_ms=timeout_ms)
+        _run_agent_browser(payload, "close", timeout_ms=timeout_ms, capture_output=False)
     else:
-        _run_agent_browser(payload, "tab", "close", timeout_ms=timeout_ms)
+        _run_agent_browser(payload, "tab", "close", timeout_ms=timeout_ms, capture_output=False)
     return {
         "status": STATUS_EXECUTED,
         "event_id": event_id,

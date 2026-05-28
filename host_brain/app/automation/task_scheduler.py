@@ -33,6 +33,7 @@ class TaskStatus(str, Enum):
     DISABLED = "DISABLED"     # 已禁用
     CANCELLED = "CANCELLED"   # 已取消
     BLOCKED = "BLOCKED"       # 依赖未满足，阻塞中
+    DEFERRED = "DEFERRED"     # 资源压力下延后
 
 
 # ---------------------------------------------------------------------------
@@ -275,6 +276,8 @@ class HostTaskScheduler:
                 if not self._check_dependencies(task):
                     task.status = TaskStatus.BLOCKED
                     continue
+                if not self._resource_gate_allows(task, now=now):
+                    continue
                 ready_tasks.append(task)
 
             # 按优先级排序（P0 最高优先级先执行）
@@ -306,6 +309,63 @@ class HostTaskScheduler:
                 )
                 return False
         return True
+
+    def _resource_gate_allows(self, task: ScheduledTask, *, now: float) -> bool:
+        try:
+            from host_brain.app.dependencies import get_resource_manager  # noqa: PLC0415
+
+            manager = get_resource_manager(create_if_missing=False)
+        except Exception as exc:
+            _logger.debug("TaskScheduler: resource gate unavailable: %s", exc)
+            return True
+        if manager is None or not hasattr(manager, "assess_background_task"):
+            return True
+
+        priority_map = {
+            TaskPriority.P0: "P0",
+            TaskPriority.P1: "HIGH",
+            TaskPriority.P2: "MEDIUM",
+            TaskPriority.P3: "LOW",
+        }
+        task_key = str(task.task_id or "").strip().lower()
+        uses_llm = task_key in {
+            "codex_immune_auto_dispatch_tick",
+            "distillation_engine_periodic",
+        }
+        task_type = "memory_heavy" if task_key in {"distillation_engine_periodic"} else "host_scheduler"
+        if uses_llm and task_type != "memory_heavy":
+            task_type = "background_llm"
+        decision = dict(
+            manager.assess_background_task(
+                task_id=task.task_id,
+                priority=priority_map.get(task.priority, "MEDIUM"),
+                task_type=task_type,
+                uses_llm=uses_llm,
+                uses_gpu=False,
+                reason="host_task_scheduler",
+            )
+            or {}
+        )
+        if bool(decision.get("allowed", True)):
+            return True
+
+        retry_after_s = max(1.0, float(decision.get("retry_after_s") or min(task.interval_s or 60.0, 300.0)))
+        if task.interval_s > 0:
+            task.last_run_ts = now - float(task.interval_s) + retry_after_s
+        else:
+            task.last_run_ts = now + retry_after_s
+        task.status = TaskStatus.DEFERRED
+        task.last_error = (
+            f"resource gate deferred: {decision.get('reason_code') or 'RESOURCE_PRESSURE_DEFERRED'}; "
+            f"retry_after_s={int(retry_after_s)}"
+        )
+        _logger.info(
+            "TaskScheduler: 任务 %s 被资源管家延后（pressure=%s, retry_after_s=%s）",
+            task.task_id,
+            decision.get("pressure_status"),
+            int(retry_after_s),
+        )
+        return False
 
     async def _run_task(self, task: ScheduledTask) -> None:
         """执行单个任务，含重试逻辑。"""

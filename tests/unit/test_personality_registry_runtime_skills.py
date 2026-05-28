@@ -6,8 +6,10 @@ from host_brain.skills.personality_registry import build_personality_skill_regis
 def test_build_personality_skill_registry_includes_runtime_skills() -> None:
     registry = build_personality_skill_registry()
 
+    assert registry.get("inner_world_tick") is None
     for skill_name in (
-        "inner_world_tick",
+        "inner_world_numeric_tick",
+        "inner_world_monologue_tick",
         "inner_world_awaken",
         "inner_world_session_end",
         "silence_tick",

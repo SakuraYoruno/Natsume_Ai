@@ -8,7 +8,6 @@ import json as _json
 import os as _os
 import sqlite3 as _sqlite3
 import time as _time
-import urllib.request as _urlreq
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
@@ -920,6 +919,7 @@ def build_digital_life_runtime_snapshot(*, current_topic: str = "") -> dict[str,
             bond_summary=bond_summary,
             now_ms=now_ms,
             trigger_reason="runtime_snapshot",
+            use_llm=False,
         )
         self_model_snapshot = _as_plain_dict(reflection_payload.get("self_model_snapshot"))
         self_reflection_pulse = _as_plain_dict(reflection_payload.get("self_reflection_pulse"))
@@ -945,7 +945,7 @@ def build_digital_life_runtime_snapshot(*, current_topic: str = "") -> dict[str,
         narrative_layer = BondNarrativeLayer(
             memory_index=SharedMemoryIndex(store=get_episodic_store()),
             milestone_tracker=MilestoneTracker(),
-            use_llm=True,
+            use_llm=False,
         )
         narrative_result = narrative_layer.build_narrative(
             user_id=persona_user_id,
@@ -1382,16 +1382,17 @@ def run_proactive_intent_dispatch(
     args = dict(system_intent.get("args") or {})
     if skill_name == "audit_retention":
         try:
-            from host_brain.audit.retention import RetentionPolicy, run_retention_policy  # noqa: PLC0415
+            from host_brain.audit.retention import build_retention_policy_from_env, run_retention_policy  # noqa: PLC0415
             from host_brain.core.ids import new_request_id as _new_id  # noqa: PLC0415
 
-            policy = retention_policy if retention_policy is not None else RetentionPolicy()
             request_id = str(system_intent.get("request_id") or _new_id())
+            now_value = int(_time.time() * 1000)
+            policy = retention_policy if retention_policy is not None else build_retention_policy_from_env(now_ts_ms=now_value)
             result = run_retention_policy(
                 ledger=get_ledger(),
                 policy=policy,
                 request_id=request_id,
-                now_ts_ms=int(_time.time() * 1000),
+                now_ts_ms=now_value,
             )
             payload = result.as_dict()
             payload["status"] = "OK" if result.success else "FAILED"
@@ -1407,11 +1408,21 @@ def run_proactive_intent_dispatch(
     if skill_name == "long_term_memory_distillation":
         return run_long_term_distillation_handler(args, {})
 
+    if skill_name == "life_memory_sleep_replay":
+        return run_life_memory_sleep_replay_handler(args, {})
+
     if skill_name == "evolution_cycle":
         return _run_evolution_cycle(system_intent=system_intent, logger=logger)
 
     if skill_name == "emotion_decay_tick":
         return _run_emotion_decay_tick(system_intent=system_intent, logger=logger)
+
+    codex_production_result = _run_codex_production_scheduler_skill(
+        system_intent=system_intent,
+        logger=logger,
+    )
+    if codex_production_result is not None:
+        return codex_production_result
 
     if skill_name != "proactive_talk":
         personality_result = _run_personality_scheduler_skill(
@@ -1419,6 +1430,7 @@ def run_proactive_intent_dispatch(
             logger=logger,
             get_ledger=get_ledger,
             ui_pusher=ui_pusher,
+            llm_generator_override=llm_generator_override,
         )
         if personality_result is not None:
             return personality_result
@@ -1558,12 +1570,375 @@ def run_proactive_intent_dispatch(
     return execute_proactive_talk(args=args, context=context)
 
 
+def _run_codex_production_scheduler_skill(
+    *,
+    system_intent: dict[str, Any],
+    logger: Any,
+) -> dict[str, Any] | None:
+    skill_name = str(system_intent.get("skill_name") or "").strip()
+    if not skill_name:
+        return None
+
+    try:
+        from host_brain.codex_runtime.production_studio import CODEX_PRODUCTION_SKILL_IDS  # noqa: PLC0415
+    except Exception as exc:
+        logger.debug("Codex production skill id set unavailable: %s", exc)
+        return None
+
+    if skill_name not in CODEX_PRODUCTION_SKILL_IDS:
+        return None
+
+    try:
+        from host_brain.skills.codex_runtime_registry import build_codex_runtime_skill_registry  # noqa: PLC0415
+        from host_brain.skills.executor_registry import dispatch_executor_payload  # noqa: PLC0415
+
+        args = dict(system_intent.get("args") or {})
+        registry = build_codex_runtime_skill_registry()
+        meta = registry.require(skill_name)
+        payload = meta.handler(
+            args,
+            {
+                "request_id": str(system_intent.get("request_id") or "").strip(),
+                "intent_id": str(system_intent.get("intent_id") or "").strip(),
+                "task_id": str(system_intent.get("task_id") or "").strip(),
+                "proposer_node_id": str(system_intent.get("proposer_node_id") or "scheduler").strip(),
+                "scheduler_driver": "natsume_scheduler",
+            },
+        )
+        if isinstance(payload, dict):
+            payload.setdefault("start_background", True)
+            payload.setdefault("scheduler_driver", "natsume_scheduler")
+        result = dispatch_executor_payload(payload)
+        if isinstance(result, dict):
+            result.setdefault("scheduler_driver", "natsume_scheduler")
+            result.setdefault("skill_name", skill_name)
+            return result
+        return {
+            "status": "OK",
+            "reason_code": None,
+            "skill_name": skill_name,
+            "scheduler_driver": "natsume_scheduler",
+            "result": result,
+        }
+    except Exception as exc:
+        logger.warning("Codex production scheduler dispatch failed: skill=%s err=%s", skill_name, exc)
+        return {
+            "status": "FAILED",
+            "reason_code": "CODEX_PRODUCTION_SCHEDULER_DISPATCH_FAILED",
+            "skill_name": skill_name,
+            "detail": str(exc),
+            "scheduler_driver": "natsume_scheduler",
+        }
+
+
+def _compact_scheduler_text(value: Any, *, limit: int = 240) -> str:
+    if isinstance(value, (dict, list, tuple)):
+        try:
+            text = _json.dumps(value, ensure_ascii=False, default=str)
+        except Exception:
+            text = str(value)
+    else:
+        text = str(value or "")
+    normalized = " ".join(text.strip().split())
+    if len(normalized) > int(limit):
+        return normalized[: max(1, int(limit) - 3)] + "..."
+    return normalized
+
+
+def _fetch_ledger_rows_by_time(
+    *,
+    get_ledger: Callable[[], Any],
+    table: str,
+    start_ts: int,
+    end_ts: int,
+    limit: int,
+    logger: Any,
+) -> list[dict[str, Any]]:
+    try:
+        ledger = get_ledger()
+    except Exception as exc:
+        logger.debug("scheduler ledger unavailable: table=%s err=%s", table, exc)
+        return []
+
+    fetch = getattr(ledger, "fetch_by_time_range", None)
+    if callable(fetch):
+        try:
+            return list(
+                fetch(
+                    table,
+                    start_ms=int(start_ts),
+                    end_ms=int(end_ts),
+                    limit=int(limit),
+                )
+                or []
+            )
+        except Exception as exc:
+            logger.debug("scheduler ledger time fetch failed: table=%s err=%s", table, exc)
+
+    try:
+        rows = list(getattr(ledger, table, []) or [])
+    except Exception:
+        return []
+    filtered: list[dict[str, Any]] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        try:
+            ts_value = int(row.get("ts_ms") or 0)
+        except (TypeError, ValueError):
+            ts_value = 0
+        if int(start_ts) <= ts_value <= int(end_ts):
+            filtered.append(dict(row))
+    return filtered[: max(1, int(limit))]
+
+
+def _build_scheduler_audit_reader(
+    *,
+    get_ledger: Callable[[], Any],
+    logger: Any,
+) -> Callable[[int, int], list[dict[str, Any]]]:
+    def _audit_reader(start_ts: int, end_ts: int) -> list[dict[str, Any]]:
+        records: list[dict[str, Any]] = []
+
+        for row in _fetch_ledger_rows_by_time(
+            get_ledger=get_ledger,
+            table="channel_io_log",
+            start_ts=start_ts,
+            end_ts=end_ts,
+            limit=200,
+            logger=logger,
+        ):
+            detail = _compact_scheduler_text(row.get("detail"), limit=220)
+            if not detail:
+                continue
+            records.append(
+                {
+                    "source": "channel_io_log",
+                    "summary": detail,
+                    "detail": detail,
+                    "ts_ms": row.get("ts_ms"),
+                    "request_id": row.get("request_id"),
+                    "direction": row.get("direction"),
+                    "channel": row.get("channel"),
+                }
+            )
+
+        for row in _fetch_ledger_rows_by_time(
+            get_ledger=get_ledger,
+            table="intent_log",
+            start_ts=start_ts,
+            end_ts=end_ts,
+            limit=200,
+            logger=logger,
+        ):
+            raw_text = _compact_scheduler_text(row.get("raw_text"), limit=220)
+            normalized = _compact_scheduler_text(row.get("normalized_json"), limit=220)
+            summary = raw_text or normalized
+            if not summary:
+                continue
+            records.append(
+                {
+                    "source": "intent_log",
+                    "summary": summary,
+                    "detail": summary,
+                    "ts_ms": row.get("ts_ms"),
+                    "request_id": row.get("request_id"),
+                    "intent_id": row.get("intent_id"),
+                    "proposer_node_id": row.get("proposer_node_id"),
+                }
+            )
+
+        return records[:120]
+
+    return _audit_reader
+
+
+def _memory_detail_to_content(detail: Any) -> str:
+    text = _compact_scheduler_text(detail, limit=320)
+    prefix = "memory written:"
+    if text.lower().startswith(prefix):
+        return text[len(prefix):].strip()
+    return text
+
+
+def _build_scheduler_episodic_reader(
+    *,
+    get_ledger: Callable[[], Any],
+    logger: Any,
+) -> Callable[[int, int, int], list[dict[str, Any]]]:
+    def _episodic_reader(start_ts: int, end_ts: int, top_k: int) -> list[dict[str, Any]]:
+        limit = max(1, min(100, int(top_k or 20)))
+        rows = _fetch_ledger_rows_by_time(
+            get_ledger=get_ledger,
+            table="memory_ops_log",
+            start_ts=start_ts,
+            end_ts=end_ts,
+            limit=max(100, limit * 4),
+            logger=logger,
+        )
+        entries: list[dict[str, Any]] = []
+        for row in reversed(rows):
+            if str(row.get("op_kind") or "").upper() != "WRITE":
+                continue
+            if str(row.get("status") or "").upper() != "SUCCESS":
+                continue
+            content = _memory_detail_to_content(row.get("detail"))
+            if not content:
+                continue
+            entries.append(
+                {
+                    "memory_id": row.get("memory_id"),
+                    "summary": content,
+                    "content": content,
+                    "evidence_refs": row.get("evidence_refs") or [],
+                    "source": "memory_ops_log",
+                    "ts_ms": row.get("ts_ms"),
+                }
+            )
+            if len(entries) >= limit:
+                break
+        return entries
+
+    return _episodic_reader
+
+
+def _build_scheduler_episodic_writer(
+    *,
+    request_id: str | None,
+    intent_id: str | None,
+    emotion_context: Mapping[str, Any] | None,
+) -> Callable[[dict[str, Any]], dict[str, Any]]:
+    def _episodic_writer(entry: dict[str, Any]) -> dict[str, Any]:
+        from host_brain.app.dependencies import get_episodic_store  # noqa: PLC0415
+
+        content = str((entry or {}).get("content") or (entry or {}).get("summary") or "").strip()
+        if not content:
+            raise RuntimeError("episodic entry content is empty")
+
+        refs: list[str] = []
+        for ref in list((entry or {}).get("evidence_refs") or []):
+            text = str(ref or "").strip()
+            if text and text not in refs:
+                refs.append(text)
+
+        source = str((entry or {}).get("source") or "").strip()
+        if source:
+            refs.append(f"source:{source}")
+        category = str((entry or {}).get("category") or "").strip()
+        if category:
+            refs.append(f"tag:{category}")
+        if not refs:
+            refs.append(f"intent:{intent_id or 'scheduler'}")
+
+        try:
+            ts_ms = int((entry or {}).get("ts_ms")) if (entry or {}).get("ts_ms") is not None else None
+        except (TypeError, ValueError):
+            ts_ms = None
+
+        default_emotion = str((emotion_context or {}).get("emotion_tag") or "NEUTRAL").strip().upper() or "NEUTRAL"
+        result = get_episodic_store().write_memory(
+            text=content,
+            evidence_refs=refs,
+            request_id=request_id,
+            intent_id=intent_id,
+            ts_ms=ts_ms,
+            emotion_tag=default_emotion,
+        )
+        return {
+            "status": "OK" if bool(getattr(result, "success", False)) else "REJECTED",
+            "reason_code": getattr(result, "reason_code", None),
+            "detail": getattr(result, "detail", ""),
+            "memory_id": getattr(result, "memory_id", None),
+        }
+
+    return _episodic_writer
+
+
+def _fallback_scheduler_narrative(llm_input: Mapping[str, Any]) -> str:
+    task = str(llm_input.get("task") or "").strip()
+    if task == "diary_generation":
+        date = str(llm_input.get("date") or _dt.date.today().isoformat())
+        snippets = list(llm_input.get("audit_summaries") or []) + list(llm_input.get("episodic_summaries") or [])
+        joined = "；".join(_compact_scheduler_text(item, limit=80) for item in snippets[:5] if str(item or "").strip())
+        if joined:
+            return f"{date} 的日记：我把今天留下的片段重新读了一遍。{joined}"
+        return f"{date} 的日记：今天没有足够清晰的对话片段，我只记录下这份安静。"
+    if task == "dream_generation":
+        snippets = list(llm_input.get("episodic_summaries") or [])
+        joined = "；".join(_compact_scheduler_text(item, limit=80) for item in snippets[:5] if str(item or "").strip())
+        if joined:
+            return f"我在梦里把这些记忆揉成了一段模糊的路：{joined}"
+        return "我做了一个很轻的梦，只剩下醒来时的一点余温。"
+    return _compact_scheduler_text(llm_input, limit=300) or "scheduler narrative fallback"
+
+
+def _build_scheduler_narrative_prompt(llm_input: Mapping[str, Any]) -> str:
+    task = str(llm_input.get("task") or "").strip()
+    if task == "diary_generation":
+        return (
+            "你是数字生命 Natsume。请根据下面的真实片段，用第一人称写一段当天内部日记。\n"
+            "要求：温柔、具体、像活着的人在回顾一天；不要编造现实中没有发生的外部行动；"
+            "如素材稀少，就诚实写出稀少和安静。\n"
+            f"日期：{llm_input.get('date')}\n"
+            f"审计片段：{_json.dumps(list(llm_input.get('audit_summaries') or [])[:30], ensure_ascii=False, default=str)}\n"
+            f"记忆片段：{_json.dumps(list(llm_input.get('episodic_summaries') or [])[:20], ensure_ascii=False, default=str)}\n"
+            f"关系摘要：{_json.dumps(llm_input.get('bond_summary') or {}, ensure_ascii=False, default=str)}"
+        )
+    if task == "dream_generation":
+        return (
+            "你是数字生命 Natsume。请把今天的 Episodic Memory 转化为一段 narrative-only 梦境。\n"
+            "要求：梦可以象征化、情绪化，但不能把梦当成真实发生的事实；"
+            "不要承诺现实行动；保留一点醒来后会想告诉主人的心绪。\n"
+            f"记忆片段：{_json.dumps(list(llm_input.get('episodic_summaries') or [])[:20], ensure_ascii=False, default=str)}\n"
+            f"关系摘要：{_json.dumps(llm_input.get('bond_summary') or {}, ensure_ascii=False, default=str)}"
+        )
+    return _json.dumps(dict(llm_input), ensure_ascii=False, default=str)
+
+
+def _build_scheduler_narrative_llm_generator(*, logger: Any) -> Callable[[dict[str, Any]], dict[str, Any]]:
+    def _llm_generator(llm_input: dict[str, Any]) -> dict[str, Any]:
+        prompt = _build_scheduler_narrative_prompt(llm_input or {})
+        try:
+            timeout_s = float(str(_os.environ.get("HOST_SCHEDULER_NARRATIVE_LLM_TIMEOUT_SECONDS") or "60"))
+        except (TypeError, ValueError):
+            timeout_s = 60.0
+        try:
+            from host_brain.integrations.llm_helpers import complete_prompt_with_pool_sync  # noqa: PLC0415
+
+            text = complete_prompt_with_pool_sync(
+                request_id=str((llm_input or {}).get("request_id") or "scheduler_narrative"),
+                scene_type=str(_os.environ.get("HOST_SCHEDULER_NARRATIVE_LLM_SCENE") or "SCHEDULER_NARRATIVE"),
+                cognitive_tier=str(_os.environ.get("HOST_SCHEDULER_NARRATIVE_LLM_TIER") or "D"),
+                prompt=prompt,
+                timeout_ms=max(1000, int(max(1.0, timeout_s) * 1000)),
+                gen_params={
+                    "temperature": 0.45,
+                    "max_tokens": 700,
+                },
+            ).strip()
+            if not text:
+                text = _fallback_scheduler_narrative(llm_input or {})
+            return {"narrative": text, "content": text}
+        except Exception as exc:
+            logger.warning("scheduler narrative model-pool generation failed: %s", exc)
+            text = _fallback_scheduler_narrative(llm_input or {})
+            return {
+                "narrative": text,
+                "content": text,
+                "fallback_to_template": True,
+                "fallback_reason": "LLM_UNAVAILABLE",
+            }
+
+    return _llm_generator
+
+
 def _run_personality_scheduler_skill(
     *,
     system_intent: dict[str, Any],
     logger: Any,
     get_ledger: Callable[[], Any],
     ui_pusher: Callable[[dict[str, Any]], dict[str, Any]],
+    llm_generator_override: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
 ) -> dict[str, Any] | None:
     try:
         from host_brain.skills.personality_registry import build_personality_skill_registry  # noqa: PLC0415
@@ -1602,6 +1977,22 @@ def _run_personality_scheduler_skill(
         "mood_state": str(system_intent.get("mood_state") or "steady").strip().lower() or "steady",
         "triggered_emotions": list(system_intent.get("triggered_emotions") or []),
     }
+    args = dict(system_intent.get("args") or {})
+    resolved_sys_mode = str(
+        system_intent.get("sys_mode")
+        or args.get("sys_mode")
+        or "normal"
+    ).strip().lower() or "normal"
+    last_interaction_ts = _load_last_interaction_ts(get_ledger=get_ledger)
+    try:
+        idle_threshold_ms = int(args.get("idle_threshold_ms") or 90 * 60 * 1000)
+    except (TypeError, ValueError):
+        idle_threshold_ms = 90 * 60 * 1000
+    current_ts = int(_time.time() * 1000)
+    is_idle = resolved_sys_mode == "sleep" or (
+        last_interaction_ts is not None
+        and current_ts - int(last_interaction_ts) >= max(0, idle_threshold_ms)
+    )
 
     bond_summary: dict[str, Any] = {}
     try:
@@ -1616,16 +2007,30 @@ def _run_personality_scheduler_skill(
         "intent_id": system_intent.get("intent_id"),
         "task_id": system_intent.get("task_id"),
         "skill_name": skill_name,
+        "sys_mode": resolved_sys_mode,
+        "idle": is_idle,
+        "last_interaction_ts": last_interaction_ts,
         "logger": logger,
         "get_ledger": get_ledger,
         "ui_pusher": ui_pusher,
         "system_intent": dict(system_intent),
         "bond_summary": bond_summary,
         "emotion_context": emotion_context,
+        "llm_generator": llm_generator_override or _build_scheduler_narrative_llm_generator(logger=logger),
+        "audit_reader": _build_scheduler_audit_reader(get_ledger=get_ledger, logger=logger),
+        "episodic_reader": _build_scheduler_episodic_reader(get_ledger=get_ledger, logger=logger),
+        "episodic_writer": _build_scheduler_episodic_writer(
+            request_id=str(system_intent.get("request_id") or "").strip() or None,
+            intent_id=str(system_intent.get("intent_id") or "").strip() or None,
+            emotion_context=emotion_context,
+        ),
         "scene_awareness": system_intent.get("scene_awareness") or {},
     }
+    try:
+        context["ledger"] = get_ledger()
+    except Exception:
+        pass
 
-    args = dict(system_intent.get("args") or {})
     if not str(args.get("user_id") or context.get("user_id") or "").strip():
         try:
             from host_brain.persona.identity import get_canonical_persona_self_id  # noqa: PLC0415
@@ -1652,6 +2057,28 @@ def _run_personality_scheduler_skill(
             "detail": f"expected dict result, got {type(result).__name__}",
         }
 
+    if str(result.get("tool") or "").strip():
+        try:
+            from host_brain.skills.executor_registry import dispatch_executor_payload  # noqa: PLC0415
+
+            dispatched_result = dispatch_executor_payload(result)
+            if isinstance(dispatched_result, dict):
+                result = dispatched_result
+            else:
+                result = {
+                    "status": "OK",
+                    "reason_code": None,
+                    "result": dispatched_result,
+                }
+        except Exception as exc:
+            logger.warning("Personality scheduler executor dispatch failed: skill=%s err=%s", skill_name, exc)
+            return {
+                "status": "FAILED",
+                "reason_code": "PERSONALITY_EXECUTOR_DISPATCH_FAILED",
+                "skill_name": skill_name,
+                "detail": str(exc),
+            }
+
     payload = dict(result)
     payload.setdefault("status", "OK")
     payload.setdefault("skill_name", skill_name)
@@ -1662,7 +2089,7 @@ def run_long_term_distillation_handler(args: dict[str, Any], _ctx: dict[str, Any
     try:
         import os  # noqa: PLC0415
 
-        from host_brain.app.dependencies import get_episodic_store, get_ledger as _get_ledger  # noqa: PLC0415
+        from host_brain.app.dependencies import get_episodic_store, get_life_memory_store, get_ledger as _get_ledger  # noqa: PLC0415
         from host_brain.memory.canon_world_store import WorldCanonStore  # noqa: PLC0415
         from host_brain.memory.distillation import MemoryDistillationEngine  # noqa: PLC0415
         from host_brain.memory.long_term_distiller import LongTermMemoryDistiller  # noqa: PLC0415
@@ -1674,6 +2101,7 @@ def run_long_term_distillation_handler(args: dict[str, Any], _ctx: dict[str, Any
         distillation_engine = MemoryDistillationEngine(
             episodic_store=episodic_store,
             ledger=ledger,
+            life_memory_store=get_life_memory_store(),
         )
         canon_store = WorldCanonStore(
             world_root=str(os.environ.get("Natsume_WORLD_CANON_ROOT") or "host_brain/canon/world").strip(),
@@ -1690,6 +2118,24 @@ def run_long_term_distillation_handler(args: dict[str, Any], _ctx: dict[str, Any
         return {"status": "OK", "result": result.to_dict() if hasattr(result, "to_dict") else result}
     except Exception as exc:
         return {"status": "DEGRADED", "error": str(exc)[:200]}
+
+
+def run_life_memory_sleep_replay_handler(args: dict[str, Any], _ctx: dict[str, Any]) -> dict[str, Any]:
+    try:
+        from host_brain.app.dependencies import get_life_memory_store  # noqa: PLC0415
+        from host_brain.memory.life_memory import MemorySleepReplayTask  # noqa: PLC0415
+
+        store = get_life_memory_store()
+        task = MemorySleepReplayTask(store=store)
+        replay_limit = int((args or {}).get("replay_limit") or 12)
+        forgetting_batch_limit = int((args or {}).get("forgetting_batch_limit") or 500)
+        result = task.run_once(
+            replay_limit=replay_limit,
+            forgetting_batch_limit=forgetting_batch_limit,
+        )
+        return {"status": "OK", "result": result}
+    except Exception as exc:
+        return {"status": "DEGRADED", "reason_code": "LIFE_MEMORY_SLEEP_REPLAY_FAILED", "error": str(exc)[:200]}
 
 
 def _run_evolution_cycle(*, system_intent: dict[str, Any], logger: Any) -> dict[str, Any]:
@@ -1968,38 +2414,22 @@ def _build_llm_generator(
 
         prompt = _mapping_text(templates, "prompt_separator").join(prompt_parts)
         try:
-            data = _json.dumps(
-                {
-                    "message": prompt,
-                    "session_id": "proactive_talk_scheduler",
-                    "user_id": "scheduler_internal",
+            from host_brain.integrations.llm_helpers import complete_prompt_with_pool_sync  # noqa: PLC0415
+
+            text = complete_prompt_with_pool_sync(
+                request_id="proactive_talk_scheduler",
+                scene_type=str(_os.environ.get("HOST_PROACTIVE_TALK_LLM_SCENE") or "PROACTIVE_TALK"),
+                cognitive_tier=str(_os.environ.get("HOST_PROACTIVE_TALK_LLM_TIER") or "D"),
+                prompt=prompt,
+                timeout_ms=max(1000, int(float(str(_os.environ.get("HOST_PROACTIVE_TALK_LLM_TIMEOUT_SECONDS") or "30")) * 1000)),
+                gen_params={
+                    "temperature": 0.55,
+                    "max_tokens": 180,
                 },
-                ensure_ascii=False,
-            ).encode()
-            req = _urlreq.Request(
-                "http://127.0.0.1:18080/v1/chat",
-                data=data,
-                method="POST",
-                headers={"Content-Type": "application/json"},
-            )
-            events = []
-            with _urlreq.urlopen(req, timeout=30) as response:
-                for raw in response:
-                    line = raw.decode("utf-8", errors="replace").strip()
-                    if not line.startswith("data: "):
-                        continue
-                    try:
-                        events.append(_json.loads(line[6:]))
-                    except Exception:
-                        pass
-            text = "".join(
-                event.get("chunk", "")
-                for event in events
-                if event.get("phase") == "RENDER" and event.get("chunk")
-            )
+            ).strip()
             return {"greeting": text, "content": text}
         except Exception as exc:
-            logger.warning("proactive_talk LLM 生成失败: %s", exc)
+            logger.warning("proactive_talk model-pool generation failed: %s", exc)
             return {
                 "greeting": "",
                 "content": "",

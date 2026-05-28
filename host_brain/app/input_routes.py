@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import asyncio
+from concurrent.futures import Future, ThreadPoolExecutor
 import hashlib
 import logging
 import os
@@ -40,7 +41,6 @@ from host_brain.app.input_service_log import (
     build_reply_preview as _build_reply_preview,
     build_input_preview as _build_input_preview,
     log_input_event as _log_input_event,
-    log_dispatch_task_exception as _log_dispatch_task_exception,
     get_request_skill_exec_rows as _get_request_skill_exec_rows,
 )
 from host_brain.app.input_service_gateway import (
@@ -73,6 +73,8 @@ from host_brain.app.response_feedback_store import (
 _logger = logging.getLogger("Natsume.input_routes")
 
 router = APIRouter(prefix="/v1/host", tags=["input"])
+_INPUT_DISPATCH_EXECUTOR_LOCK = threading.Lock()
+_INPUT_DISPATCH_EXECUTOR: ThreadPoolExecutor | None = None
 
 # ASR 相关常量（未迁移，仅在本文件使用）
 _PLACEHOLDER_GATEWAY_CONVERSATIONS: set[str] = {
@@ -170,6 +172,68 @@ def _parse_int_env(name: str, *, default: int) -> int:
         return int(raw)
     except (TypeError, ValueError):
         return int(default)
+
+
+def _resolve_input_dispatch_thread_workers() -> int:
+    return max(1, min(8, _parse_int_env("HOST_INPUT_DISPATCH_THREAD_WORKERS", default=4)))
+
+
+def _get_input_dispatch_executor() -> ThreadPoolExecutor:
+    global _INPUT_DISPATCH_EXECUTOR
+    with _INPUT_DISPATCH_EXECUTOR_LOCK:
+        if _INPUT_DISPATCH_EXECUTOR is None:
+            _INPUT_DISPATCH_EXECUTOR = ThreadPoolExecutor(
+                max_workers=_resolve_input_dispatch_thread_workers(),
+                thread_name_prefix="input-dispatch",
+            )
+        return _INPUT_DISPATCH_EXECUTOR
+
+
+def _run_dispatch_worker_in_thread(
+    *,
+    request_id: str,
+    session_id: str,
+    source: str,
+    text: str,
+    payload: dict[str, Any],
+    ts_ms: int,
+    ledger: Any,
+    dispatch_mode: str,
+    run_in_thread: bool,
+) -> None:
+    asyncio.run(
+        _dispatch_to_graph_worker(
+            request_id=request_id,
+            session_id=session_id,
+            source=source,
+            text=text,
+            payload=payload,
+            ts_ms=ts_ms,
+            ledger=ledger,
+            dispatch_mode=dispatch_mode,
+            run_in_thread=run_in_thread,
+        )
+    )
+
+
+def _log_dispatch_thread_future_exception(future: Future[Any], *, request_id: str) -> None:
+    try:
+        exc = future.exception()
+    except Exception as callback_exc:
+        _logger.error(
+            "input_routes: threaded dispatch future inspection failed request_id=%s: %s",
+            request_id,
+            callback_exc,
+            exc_info=callback_exc,
+        )
+        return
+    if exc is not None:
+        _logger.error(
+            "input_routes: threaded dispatch task failed request_id=%s: %s",
+            request_id,
+            exc,
+            exc_info=exc,
+        )
 
 
 def _gateway_dedupe_ttl_s() -> float:
@@ -968,24 +1032,54 @@ def _coerce_bool_flag(value: Any, *, default: bool) -> bool:
     return bool(default)
 
 
-def _resolve_gateway_voice_reply_options(payload: dict[str, Any]) -> dict[str, bool]:
+def _resolve_gateway_voice_reply_options(payload: dict[str, Any]) -> dict[str, Any]:
     raw_extra = payload.get("raw_extra")
     raw_extra_map = dict(raw_extra) if isinstance(raw_extra, dict) else {}
 
-    def _pick_bool(keys: tuple[str, ...], *, env_name: str, default: bool) -> bool:
+    def _pick_payload_bool(keys: tuple[str, ...], *, default: bool) -> tuple[bool, str]:
         for key in keys:
             if key in payload:
-                return _coerce_bool_flag(payload.get(key), default=default)
+                return _coerce_bool_flag(payload.get(key), default=default), "payload"
         for key in keys:
             if key in raw_extra_map:
-                return _coerce_bool_flag(raw_extra_map.get(key), default=default)
+                return _coerce_bool_flag(raw_extra_map.get(key), default=default), "raw_extra"
+        return bool(default), "default"
+
+    def _pick_bool(keys: tuple[str, ...], *, env_name: str, default: bool) -> bool:
+        value, source = _pick_payload_bool(keys, default=default)
+        if source != "default":
+            return value
         return _parse_bool_env(env_name, default=default)
 
-    force_dual_voice_reply = _pick_bool(
+    def _pick_mode() -> str:
+        for key in ("voice_selection_mode", "gateway_voice_selection_mode"):
+            if key in payload:
+                return str(payload.get(key) or "").strip().lower()
+        for key in ("voice_selection_mode", "gateway_voice_selection_mode"):
+            if key in raw_extra_map:
+                return str(raw_extra_map.get(key) or "").strip().lower()
+        return str(os.environ.get("HOST_GATEWAY_VOICE_SELECTION_MODE") or "").strip().lower()
+
+    selection_mode = _pick_mode()
+    if selection_mode not in {"smart", "always", "off", "planned"}:
+        selection_mode = ""
+
+    force_dual_voice_reply, force_source = _pick_payload_bool(
         ("force_dual_voice_reply", "force_voice_reply"),
-        env_name="HOST_GATEWAY_FORCE_DUAL_VOICE_REPLY",
         default=False,
     )
+    if force_source == "default":
+        if selection_mode == "always":
+            force_dual_voice_reply = True
+            force_source = "selection_mode"
+        elif selection_mode in {"smart", "off", "planned"}:
+            force_dual_voice_reply = False
+            force_source = "selection_mode"
+        else:
+            force_dual_voice_reply = _parse_bool_env("HOST_GATEWAY_FORCE_DUAL_VOICE_REPLY", default=False)
+            force_source = "env" if force_dual_voice_reply else "default"
+
+    effective_selection_mode = selection_mode or ("always" if force_dual_voice_reply else "smart")
     wait_voice_reply_result = _pick_bool(
         ("wait_voice_reply_result", "gateway_voice_wait_result"),
         env_name="HOST_GATEWAY_VOICE_REPLY_WAIT_RESULT",
@@ -996,10 +1090,18 @@ def _resolve_gateway_voice_reply_options(payload: dict[str, Any]) -> dict[str, b
         env_name="HOST_GATEWAY_VOICE_REPLY_ON_PRIMARY_FAILURE",
         default=force_dual_voice_reply,
     )
+    send_gateway_voice_message = _pick_bool(
+        ("send_gateway_voice_message", "gateway_voice_message", "send_voice_record", "voice_record_reply"),
+        env_name="HOST_GATEWAY_SEND_VOICE_MESSAGE",
+        default=False,
+    )
     return {
         "force_dual_voice_reply": force_dual_voice_reply,
+        "force_dual_voice_reply_source": force_source,
+        "voice_selection_mode": effective_selection_mode,
         "wait_voice_reply_result": wait_voice_reply_result,
         "allow_voice_reply_on_primary_failure": allow_voice_reply_on_primary_failure,
+        "send_gateway_voice_message": send_gateway_voice_message,
     }
 
 
@@ -1027,6 +1129,7 @@ def _extract_gateway_voice_result(result: Any) -> dict[str, Any]:
     vts_talk_started = bool(mouth_sync_map.get("started")) or bool(talk_result_map.get("success"))
     vts_expression_success = bool(expression_result_map.get("success"))
 
+    audio_path = _extract_voice_audio_path(event_map)
     return {
         "voice_success": success,
         "voice_status": str(getattr(result, "status", "") or ""),
@@ -1036,8 +1139,34 @@ def _extract_gateway_voice_result(result: Any) -> dict[str, Any]:
         "voice_started": bool(voice_started),
         "voice_vts_started": bool(vts_talk_started),
         "voice_vts_expression_success": bool(vts_expression_success),
+        "voice_audio_path": audio_path,
+        "voice_gateway_sent": False,
+        "voice_gateway_status": None,
+        "voice_gateway_detail": None,
+        "voice_gateway_latency_ms": None,
         "voice_event": event_map,
     }
+
+
+def _extract_voice_audio_path(event_map: dict[str, Any]) -> str:
+    candidates: list[Any] = [event_map.get("audio_path")]
+    for key in ("start_event", "queue_event"):
+        nested = event_map.get(key)
+        if isinstance(nested, dict):
+            candidates.append(nested.get("audio_path"))
+    for value in candidates:
+        path = str(value or "").strip()
+        if path:
+            return path
+    return ""
+
+
+def _resolve_gateway_voice_emotion_tag(emotion_tag: str | None) -> str | None:
+    normalized = str(emotion_tag or "").strip().upper()
+    if normalized and normalized != "NEUTRAL":
+        return normalized
+    configured = str(os.environ.get("HOST_GATEWAY_DEFAULT_VOICE_EMOTION_TAG") or "").strip().upper()
+    return configured or None
 
 
 @router.post("/input", response_model=InputResponse)
@@ -2354,7 +2483,7 @@ async def _deliver_gateway_reply(
     voice_text = _build_gateway_voice_text(
         reply_text=reply_text,
         tts_text_ja=tts_text_ja,
-        render_target_lang="ja",
+        render_target_lang="zh",
     )
     preview = _build_reply_preview(reply_text, limit=120)
     voice_options = _resolve_gateway_voice_reply_options(payload)
@@ -2369,6 +2498,11 @@ async def _deliver_gateway_reply(
         "voice_started": None,
         "voice_vts_started": None,
         "voice_vts_expression_success": None,
+        "voice_audio_path": "",
+        "voice_gateway_sent": False,
+        "voice_gateway_status": None,
+        "voice_gateway_detail": None,
+        "voice_gateway_latency_ms": None,
         "voice_event": None,
     }
     if not _gateway_auto_reply_enabled():
@@ -2384,36 +2518,22 @@ async def _deliver_gateway_reply(
                         request_id=request_id,
                         emotion_tag=emotion_tag,
                         emotion_intensity=emotion_intensity,
+                        send_gateway_voice_message=bool(voice_options["send_gateway_voice_message"]),
                     )
                 )
             else:
-                import asyncio as _asyncio  # noqa: PLC0415
-
-                task = _asyncio.create_task(
-                    _send_gateway_voice_reply(
+                voice_result["voice_waited"] = True
+                voice_result.update(
+                    await _send_gateway_voice_reply(
                         platform=platform,
                         conversation_id=conversation_id,
                         tts_text=voice_text,
                         request_id=request_id,
                         emotion_tag=emotion_tag,
                         emotion_intensity=emotion_intensity,
+                        send_gateway_voice_message=bool(voice_options["send_gateway_voice_message"]),
                     )
                 )
-
-                def _on_voice_only_done(done_task: Any) -> None:
-                    try:
-                        done_result = done_task.result()
-                        _logger.info(
-                            "gateway voice-only reply completed request_id=%s success=%s started=%s vts_started=%s",
-                            request_id,
-                            done_result.get("voice_success"),
-                            done_result.get("voice_started"),
-                            done_result.get("voice_vts_started"),
-                        )
-                    except Exception as exc:  # pragma: no cover - defensive callback
-                        _logger.debug("gateway voice-only reply task failed request_id=%s err=%s", request_id, exc)
-
-                task.add_done_callback(_on_voice_only_done)
         return {
             "success": True,
             "status": "SKIPPED",
@@ -2586,28 +2706,74 @@ async def _deliver_gateway_reply(
         normalized_content = str(content or "").strip()
         return msg_type, normalized_content
 
-    normalized_response_form = normalize_response_form(str(response_form or ""))
+    normalized_response_form = envelope_response_form
     planned_primary: MsgType | None = None
     planned_secondary: MsgType | None = None
     planned_reason = str(response_form_reason or "").strip()
-    if normalized_response_form in {"sticker", "image", "gif"} and suggested_sticker:
+    requested_secondary_response_form = str(
+        envelope_raw_extra.get("secondary_response_form")
+        or envelope_raw_extra.get("secondary_form")
+        or ""
+    ).strip().lower()
+    if normalized_response_form == "voice":
+        planned_primary = MsgType.TEXT
+        planned_secondary = MsgType.VOICE
+        planned_reason = planned_reason or "planned_voice"
+    elif normalized_response_form in {"sticker", "image", "gif"} and suggested_sticker:
         planned_primary = MsgType.IMAGE
     elif normalized_response_form in {"text_plus_sticker", "text_plus_image", "text_plus_gif"} and suggested_sticker:
         planned_primary = MsgType.TEXT
         planned_secondary = MsgType.IMAGE
+    elif requested_secondary_response_form == "voice":
+        planned_primary = MsgType.TEXT
+        planned_secondary = MsgType.VOICE
+        planned_reason = planned_reason or "planned_secondary_voice"
 
     # ── Phase XV P4：ReplyFormDecider ──────────────────────────────────
     # 将用户消息类型字符串转换为 MsgType
+    normalized_user_msg_type = str(user_msg_type or payload.get("msg_type") or "text").strip().lower()
+    if normalized_user_msg_type in {"voice", "audio", "record", "sound"}:
+        user_mtype = MsgType.VOICE
+    else:
+        try:
+            user_mtype = MsgType(normalized_user_msg_type)
+        except ValueError:
+            user_mtype = MsgType.TEXT
+    payload_raw_extra = dict(payload.get("raw_extra") or {}) if isinstance(payload.get("raw_extra"), dict) else {}
+    user_text = str(
+        payload.get("content")
+        or payload.get("text")
+        or payload.get("message")
+        or payload_raw_extra.get("raw_message")
+        or payload_raw_extra.get("message")
+        or ""
+    ).strip()
+    user_id = str(
+        payload.get("person_id")
+        or payload.get("from_id")
+        or payload_raw_extra.get("user_id")
+        or conversation_id
+        or "default"
+    ).strip() or "default"
+
+    if voice_options["voice_selection_mode"] == "off" and planned_secondary == MsgType.VOICE:
+        planned_primary = MsgType.TEXT
+        planned_secondary = None
+        planned_reason = "voice_selection_off_text"
+
     try:
-        user_mtype = MsgType(str(user_msg_type or "text").strip().lower())
+        user_mtype = MsgType(str(user_mtype.value or "text").strip().lower())
     except ValueError:
         user_mtype = MsgType.TEXT
 
     decider = get_reply_form_decider()
     if voice_options["force_dual_voice_reply"]:
         form_decision = ReplyFormDecision(MsgType.TEXT, MsgType.VOICE, "force_dual_voice_reply")
+    elif voice_options["voice_selection_mode"] == "planned" and planned_primary is None:
+        form_decision = ReplyFormDecision(MsgType.TEXT, None, "planned_voice_only_text")
     else:
         form_decision = decider.decide(
+            user_id=user_id,
             user_msg_type=user_mtype,
             narrative_zh=reply_text,
             emotion_tag=emotion_tag,
@@ -2615,12 +2781,15 @@ async def _deliver_gateway_reply(
             planned_primary=planned_primary,
             planned_secondary=planned_secondary,
             planned_reason=planned_reason,
+            user_text=user_text,
+            platform=platform,
         )
     _logger.info(
-        "gateway reply form request_id=%s normalized=%s planned_reason=%s primary=%s secondary=%s suggested_sticker=%s",
+        "gateway reply form request_id=%s normalized=%s planned_reason=%s voice_mode=%s primary=%s secondary=%s suggested_sticker=%s",
         request_id,
         normalized_response_form or "-",
         planned_reason or "-",
+        voice_options["voice_selection_mode"],
         getattr(form_decision.primary, "value", str(form_decision.primary)),
         getattr(form_decision.secondary, "value", "") or "-",
         suggested_sticker or "-",
@@ -2669,47 +2838,18 @@ async def _deliver_gateway_reply(
             return dict(voice_result)
 
         voice_result["voice_sent"] = True
-        if voice_options["wait_voice_reply_result"]:
-            voice_result["voice_waited"] = True
-            voice_result.update(
-                await _send_gateway_voice_reply(
-                    platform=platform,
-                    conversation_id=conversation_id,
-                    tts_text=voice_text,
-                    request_id=request_id,
-                    emotion_tag=emotion_tag,
-                    emotion_intensity=emotion_intensity,
-                )
-            )
-            return dict(voice_result)
-
-        import asyncio as _asyncio  # noqa: PLC0415
-
-        task = _asyncio.create_task(
-            _send_gateway_voice_reply(
+        voice_result["voice_waited"] = True
+        voice_result.update(
+            await _send_gateway_voice_reply(
                 platform=platform,
                 conversation_id=conversation_id,
                 tts_text=voice_text,
                 request_id=request_id,
                 emotion_tag=emotion_tag,
                 emotion_intensity=emotion_intensity,
+                send_gateway_voice_message=bool(voice_options["send_gateway_voice_message"]),
             )
         )
-
-        def _on_voice_done(done_task: Any) -> None:
-            try:
-                done_result = done_task.result()
-                _logger.info(
-                    "gateway voice reply completed request_id=%s success=%s started=%s vts_started=%s",
-                    request_id,
-                    done_result.get("voice_success"),
-                    done_result.get("voice_started"),
-                    done_result.get("voice_vts_started"),
-                )
-            except Exception as exc:  # pragma: no cover - defensive callback
-                _logger.debug("gateway voice reply task failed request_id=%s err=%s", request_id, exc)
-
-        task.add_done_callback(_on_voice_done)
         return dict(voice_result)
 
     # ── 主回复（文字/语音）─────────────────────────────────────────────
@@ -2764,28 +2904,6 @@ async def _deliver_gateway_reply(
             **voice_result,
         }
 
-    # ── 双发模式：先文字字幕，再语音（不阻塞主回复）────────────
-    # Voice proof can be forced and optionally awaited during live gateway integration.
-    if False and form_decision.is_dual:
-        # P3/P6 完整实现：用已解析出的 TTS 文本做合成后发语音
-        # P4 当前：发送一条文字作为语音消息的占位（保留接口，等 P6 双语输出完成后启用真正的 TTS）
-        _voice_text = voice_text
-        if _voice_text and form_decision.secondary == MsgType.VOICE:
-            try:
-                # 异步发送，不等待结果，不阻塞主回复
-                import asyncio as _asyncio  # noqa: PLC0415
-                _asyncio.create_task(_send_gateway_voice_reply(
-                    platform=platform,
-                    conversation_id=conversation_id,
-                    tts_text=_voice_text,
-                    request_id=request_id,
-                    emotion_tag=emotion_tag,
-                    emotion_intensity=emotion_intensity,
-                ))
-                voice_sent = True
-            except Exception:
-                pass  # 语音发送失败不影响主回复
-
     if form_decision.is_dual and not collapse_secondary_into_primary:
         voice_result = await _trigger_secondary_reply()
 
@@ -2813,27 +2931,14 @@ async def _send_gateway_voice_reply(
     request_id: str,
     emotion_tag: str = "NEUTRAL",
     emotion_intensity: float | None = None,
-) -> None:
-    """向 Gateway 发送语音消息（异步，fire-and-forget）。
-
-    Phase XV P4 当前实现：
-      - 调用 Edge TTS 合成（post_speak），等待合成完成
-      - 当 Edge 端支持 TTS→音频文件 后，改为发送语音文件
-      - 当前 post_gateway_reply msg_type="voice" 需要 content 为音频 base64 或文件路径
-      - 临时方案：发送 msg_type="text" 的语音字幕（标记 🎵 前缀区分）
-
-    Phase XV P6/P7 完整实现：
-      - Edge TTS 合成 → 返回音频文件路径/base64
-      - post_gateway_reply(msg_type="voice", content=audio_data)
-    """
+    send_gateway_voice_message: bool = False,
+) -> dict[str, Any]:
+    """合成语音并驱动 Edge 播放/VTS；平台语音消息仅显式开关发送。"""
     import logging as _logging  # noqa: PLC0415
     _vlogger = _logging.getLogger("Natsume.gateway_voice")
     try:
-        from host_brain.channels.edge_rpc_client import post_speak  # noqa: PLC0415
+        from host_brain.channels.edge_rpc_client import post_gateway_reply, post_speak  # noqa: PLC0415
         from host_brain.channels.tts_context_router import TtsContextRouter  # noqa: PLC0415
-        # 触发 TTS 合成（本地扬声器）——Gateway 用户在外面听不到，
-        # 但这样可以验证 TTS 合成链路正常工作
-        # P6/P7 完成后：获取合成音频 → 发送 voice 消息
         _tts_text_normalized = str(tts_text or "").strip()
         if not _tts_text_normalized:
             return {
@@ -2845,6 +2950,11 @@ async def _send_gateway_voice_reply(
                 "voice_started": False,
                 "voice_vts_started": False,
                 "voice_vts_expression_success": False,
+                "voice_audio_path": "",
+                "voice_gateway_sent": False,
+                "voice_gateway_status": None,
+                "voice_gateway_detail": None,
+                "voice_gateway_latency_ms": None,
                 "voice_event": {},
             }
 
@@ -2852,21 +2962,54 @@ async def _send_gateway_voice_reply(
             text=_tts_text_normalized,
             emotion_tag=emotion_tag,
         )
+        effective_emotion_tag = _resolve_gateway_voice_emotion_tag(emotion_tag)
         result = await post_speak(
             text=_tts_text_normalized,
             request_id=request_id,
-            emotion_tag=emotion_tag,
+            emotion_tag=effective_emotion_tag,
             emotion_intensity=emotion_intensity,
             lang_hint=str(tts_params.lang_hint or "zh"),
+            export_audio=bool(send_gateway_voice_message),
         )
         voice_result = _extract_gateway_voice_result(result)
+        audio_path = str(voice_result.get("voice_audio_path") or "").strip()
+        if not send_gateway_voice_message:
+            voice_result["voice_gateway_detail"] = "Gateway voice message disabled; Edge playback/VTS only"
+        elif audio_path and platform and conversation_id:
+            gateway_timeout_ms = max(
+                1000,
+                _parse_int_env("HOST_GATEWAY_VOICE_REPLY_TIMEOUT_MS", default=30000),
+            )
+            gateway_result = await post_gateway_reply(
+                platform=platform,
+                conversation_id=conversation_id,
+                content="",
+                msg_type="voice",
+                media_path=audio_path,
+                request_id=f"{request_id}::voice_record",
+                raw_extra={
+                    "message_kind": "voice_reply",
+                    "reply_source": "edge_tts_export",
+                    "tts_request_id": request_id,
+                    "emotion_tag": str(effective_emotion_tag or "").strip().upper(),
+                },
+                wait_result=True,
+                timeout_ms=gateway_timeout_ms,
+            )
+            voice_result["voice_gateway_sent"] = bool(getattr(gateway_result, "success", False))
+            voice_result["voice_gateway_status"] = str(getattr(gateway_result, "status", "") or "")
+            voice_result["voice_gateway_detail"] = str(getattr(gateway_result, "detail", "") or "")
+            voice_result["voice_gateway_latency_ms"] = int(getattr(gateway_result, "latency_ms", 0) or 0)
+        else:
+            voice_result["voice_gateway_detail"] = "TTS audio export path missing; Gateway voice message not sent"
         _vlogger.debug(
-            "gateway_voice TTS completed platform=%s conversation=%s success=%s started=%s vts_started=%s len=%d",
+            "gateway_voice completed platform=%s conversation=%s success=%s started=%s vts_started=%s platform_voice=%s len=%d",
             platform,
             conversation_id,
             voice_result["voice_success"],
             voice_result["voice_started"],
             voice_result["voice_vts_started"],
+            voice_result.get("voice_gateway_sent"),
             len(_tts_text_normalized),
         )
         return voice_result
@@ -2881,6 +3024,11 @@ async def _send_gateway_voice_reply(
             "voice_started": False,
             "voice_vts_started": False,
             "voice_vts_expression_success": False,
+            "voice_audio_path": "",
+            "voice_gateway_sent": False,
+            "voice_gateway_status": None,
+            "voice_gateway_detail": None,
+            "voice_gateway_latency_ms": None,
             "voice_event": {},
         }
 
@@ -2949,19 +3097,24 @@ async def _dispatch_to_graph(
         )
 
     if run_in_thread:
-        asyncio.create_task(
-            _dispatch_to_graph_worker(
+        future = _get_input_dispatch_executor().submit(
+            _run_dispatch_worker_in_thread,
+            request_id=request_id,
+            session_id=session_id,
+            source=source,
+            text=text,
+            payload=payload,
+            ts_ms=ts_ms,
+            ledger=ledger,
+            dispatch_mode=dispatch_mode,
+            run_in_thread=run_in_thread,
+        )
+        future.add_done_callback(
+            lambda completed: _log_dispatch_thread_future_exception(
+                completed,
                 request_id=request_id,
-                session_id=session_id,
-                source=source,
-                text=text,
-                payload=payload,
-                ts_ms=ts_ms,
-                ledger=ledger,
-                dispatch_mode=dispatch_mode,
-                run_in_thread=run_in_thread,
             )
-        ).add_done_callback(_log_dispatch_task_exception)
+        )
         return
 
     await _dispatch_to_graph_worker(

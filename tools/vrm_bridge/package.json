@@ -1,0 +1,17 @@
+{
+  "name": "natsume-vrm-bridge",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node server.mjs",
+    "check": "node --check server.mjs && node --check src/main.js"
+  },
+  "dependencies": {
+    "@pixiv/three-vrm": "^3.4.2",
+    "vite": "^5.4.11",
+    "ws": "^8.18.0",
+    "three": "^0.170.0"
+  },
+  "devDependencies": {}
+}

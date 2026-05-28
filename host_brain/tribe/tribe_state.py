@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import threading
+import time
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -17,6 +18,18 @@ _DEFAULT_SNAPSHOT_PATH = Path(
 )
 # T-29：节流：每 N 次 set_state 才写一次磁盘
 _SNAPSHOT_THROTTLE = 10
+_SNAPSHOT_INLINE_MIN_INTERVAL_S = 30.0
+
+
+def _float_env(name: str, *, default: float, low: float, high: float) -> float:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    try:
+        value = float(str(raw).strip())
+    except (TypeError, ValueError):
+        return default
+    return max(low, min(high, value))
 
 
 class TribeStateRegistry:
@@ -30,6 +43,7 @@ class TribeStateRegistry:
         *,
         state_path: Path | None = None,
         persist_throttle: int = _SNAPSHOT_THROTTLE,
+        persist_min_interval_s: float | None = None,
     ) -> None:
         self._states: dict[str, dict[str, Any]] = {}
         self._lock = threading.RLock()
@@ -37,6 +51,19 @@ class TribeStateRegistry:
         self._state_path: Path = state_path or _DEFAULT_SNAPSHOT_PATH
         self._persist_throttle: int = max(1, int(persist_throttle))
         self._persist_counter: int = 0
+        self._persist_min_interval_s: float = (
+            max(0.0, float(persist_min_interval_s))
+            if persist_min_interval_s is not None
+            else _float_env(
+                "NATSUME_TRIBE_STATE_INLINE_SAVE_MIN_INTERVAL_S",
+                default=_SNAPSHOT_INLINE_MIN_INTERVAL_S,
+                low=0.0,
+                high=3600.0,
+            )
+        )
+        self._state_revision: int = 0
+        self._last_saved_revision: int = 0
+        self._last_save_monotonic: float = 0.0
 
     def set_state(
         self,
@@ -66,7 +93,14 @@ class TribeStateRegistry:
             }
             self._states[ns] = snapshot
             self._persist_counter += 1
-            should_persist = (self._persist_counter % self._persist_throttle == 0)
+            self._state_revision += 1
+            current_revision = self._state_revision
+            elapsed_s = time.monotonic() - self._last_save_monotonic
+            should_persist = (
+                self._persist_counter % self._persist_throttle == 0
+                and current_revision > self._last_saved_revision
+                and elapsed_s >= self._persist_min_interval_s
+            )
         # T-29：节流持久化（在锁外执行，避免阻塞）
         if should_persist:
             self.save_snapshot()
@@ -244,6 +278,7 @@ class TribeStateRegistry:
         try:
             with self._lock:
                 data = {ns: dict(snap) for ns, snap in self._states.items()}
+                saved_revision = self._state_revision
             persist_data = {
                 "version": 1,
                 "saved_at_ms": now_ms(),
@@ -257,6 +292,10 @@ class TribeStateRegistry:
                 encoding="utf-8",
             )
             tmp_path.replace(path)
+            with self._lock:
+                if self._last_saved_revision < saved_revision:
+                    self._last_saved_revision = saved_revision
+                self._last_save_monotonic = time.monotonic()
             return True
         except Exception as exc:
             import logging  # noqa: PLC0415

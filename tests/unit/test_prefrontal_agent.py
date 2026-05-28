@@ -158,6 +158,47 @@ def test_prefrontal_resolve_self_reflection_context_skips_llm_when_background_di
     assert result["reason_code"] == "SELF_REFLECTION_BACKGROUND_TASKS_DISABLED"
 
 
+def test_prefrontal_resolve_self_reflection_context_can_be_read_only(monkeypatch) -> None:
+    monkeypatch.setenv("HOST_BACKGROUND_TASKS_ENABLED", "true")
+
+    class _Snapshot:
+        def as_dict(self) -> dict:
+            return {"recent_mood_trend": "steady", "dominant_recent_emotion": "CALM"}
+
+    class _Engine:
+        def get_self_model_snapshot(self, *_args, **_kwargs):  # noqa: ANN002, ANN003
+            return _Snapshot()
+
+    monkeypatch.setattr(
+        "host_brain.persona.persona_engine.PersonaEngine.get_instance",
+        classmethod(lambda cls: _Engine()),
+    )
+    monkeypatch.setattr(
+        "host_brain.integrations.llm_helpers.build_pool_prompt_llm_fn",
+        lambda **kwargs: (_ for _ in ()).throw(AssertionError("read-only snapshot must not build llm")),
+    )
+    monkeypatch.setattr(
+        "host_brain.persona.self_reflection.build_self_reflection_pulse",
+        lambda snapshot, trigger_reason="runtime_snapshot", llm_fn=None, strict_llm=False, **kwargs: {
+            "self_awareness": f"strict={strict_llm};llm={llm_fn is not None}",
+            "trigger_reason": trigger_reason,
+        },
+    )
+
+    result = PrefrontalAgent().resolve_self_reflection_context(
+        persona_user_id="user-sr",
+        timeline_summary={"dominant_emotion": "CALM"},
+        timeline_diary={"entry_count": 3},
+        bond_state_obj=SimpleNamespace(last_event_ts_ms=123),
+        bond_summary={"stage": "FRIEND"},
+        now_ms=999,
+        trigger_reason="runtime_snapshot",
+        use_llm=False,
+    )
+
+    assert result["self_reflection_pulse"]["self_awareness"] == "strict=False;llm=False"
+
+
 def test_prefrontal_resolve_style_evolution_summary(monkeypatch) -> None:
     monkeypatch.setattr(
         "host_brain.persona.drift_detector.get_drift_detector",
@@ -272,6 +313,104 @@ def test_prefrontal_apply_stage_and_milestone_growth(monkeypatch) -> None:
 
     assert promoted == {"applied": True, "reason": "stage-ok"}
     assert milestone == {"applied": True, "reason": "milestone-ok"}
+
+
+def test_prefrontal_evolution_event_deferred_by_resource_gate(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+    monkeypatch.setenv("HOST_PREFRONTAL_EVENT_EVOLUTION_STARTUP_GRACE_S", "0")
+
+    class _FakeResourceManager:
+        def assess_background_task(self, **kwargs):  # noqa: ANN003
+            captured.update(kwargs)
+            return {
+                "allowed": False,
+                "pressure_status": "HIGH",
+                "reason_code": "RESOURCE_PRESSURE_HIGH",
+                "retry_after_s": 600,
+            }
+
+    monkeypatch.setattr(
+        "host_brain.app.dependencies.get_resource_manager",
+        lambda create_if_missing=False: _FakeResourceManager(),
+    )
+
+    event_key = PrefrontalAgent()._reserve_evolution_event(  # noqa: SLF001
+        user_id="u1",
+        reason="loneliness_signal",
+    )
+
+    assert event_key is None
+    assert captured["task_id"] == "evolution_cycle_event"
+    assert captured["task_type"] == "memory_heavy"
+    assert captured["uses_llm"] is True
+
+
+def test_prefrontal_evolution_event_cooldown_after_release(monkeypatch) -> None:
+    monkeypatch.setenv("HOST_PREFRONTAL_EVENT_EVOLUTION_STARTUP_GRACE_S", "0")
+    monkeypatch.setenv("HOST_PREFRONTAL_LONELINESS_EVOLUTION_COOLDOWN_S", "120")
+    monkeypatch.setattr(
+        "host_brain.app.dependencies.get_resource_manager",
+        lambda create_if_missing=False: None,
+    )
+    agent = PrefrontalAgent()
+
+    first_key = agent._reserve_evolution_event(user_id="u1", reason="loneliness_signal")  # noqa: SLF001
+    assert first_key == "u1:loneliness_signal"
+    agent._release_evolution_event(first_key)  # noqa: SLF001
+
+    assert agent._reserve_evolution_event(user_id="u1", reason="loneliness_signal") is None  # noqa: SLF001
+
+
+def test_prefrontal_evolution_user_cooldown_merges_different_reasons(monkeypatch) -> None:
+    clock = {"now": 1000.0}
+    monkeypatch.setenv("HOST_PREFRONTAL_EVENT_EVOLUTION_STARTUP_GRACE_S", "0")
+    monkeypatch.setenv("HOST_PREFRONTAL_EVENT_EVOLUTION_USER_COOLDOWN_S", "300")
+    monkeypatch.setenv("HOST_PREFRONTAL_INNER_WORLD_EVOLUTION_COOLDOWN_S", "60")
+    monkeypatch.setattr("host_brain.tribe.prefrontal_agent.time.monotonic", lambda: clock["now"])
+    monkeypatch.setattr(
+        "host_brain.app.dependencies.get_resource_manager",
+        lambda create_if_missing=False: None,
+    )
+    agent = PrefrontalAgent()
+
+    first_key = agent._reserve_evolution_event(user_id="u1", reason="loneliness_signal")  # noqa: SLF001
+    assert first_key == "u1:loneliness_signal"
+    assert agent._reserve_evolution_event(user_id="u1", reason="inner_world_spontaneous_activity") is None  # noqa: SLF001
+    agent._release_evolution_event(first_key)  # noqa: SLF001
+
+    assert agent._reserve_evolution_event(user_id="u1", reason="inner_world_spontaneous_activity") is None  # noqa: SLF001
+
+    clock["now"] += 301.0
+    next_key = agent._reserve_evolution_event(user_id="u1", reason="inner_world_spontaneous_activity")  # noqa: SLF001
+    assert next_key == "u1:inner_world_spontaneous_activity"
+
+
+def test_prefrontal_evolution_startup_grace_skips_background_events(monkeypatch) -> None:
+    clock = {"now": 1000.0}
+    monkeypatch.setenv("HOST_PREFRONTAL_EVENT_EVOLUTION_STARTUP_GRACE_S", "300")
+    monkeypatch.setattr("host_brain.tribe.prefrontal_agent.time.monotonic", lambda: clock["now"])
+    monkeypatch.setattr(
+        "host_brain.app.dependencies.get_resource_manager",
+        lambda create_if_missing=False: None,
+    )
+    agent = PrefrontalAgent()
+    agent._created_monotonic = clock["now"]  # noqa: SLF001
+
+    assert agent._reserve_evolution_event(user_id="u1", reason="loneliness_signal") is None  # noqa: SLF001
+
+    clock["now"] += 301.0
+    assert agent._reserve_evolution_event(user_id="u1", reason="loneliness_signal") == "u1:loneliness_signal"  # noqa: SLF001
+
+
+def test_prefrontal_loneliness_logs_and_milestones_are_debounced(monkeypatch) -> None:
+    monkeypatch.setenv("HOST_PREFRONTAL_LONELINESS_SIGNAL_LOG_COOLDOWN_S", "300")
+    monkeypatch.setenv("HOST_PREFRONTAL_LONELINESS_MILESTONE_COOLDOWN_S", "600")
+    agent = PrefrontalAgent()
+
+    assert agent._loneliness_signal_log_allowed(user_id="u1") is True  # noqa: SLF001
+    assert agent._loneliness_signal_log_allowed(user_id="u1") is False  # noqa: SLF001
+    assert agent._loneliness_milestone_allowed(user_id="u1") is True  # noqa: SLF001
+    assert agent._loneliness_milestone_allowed(user_id="u1") is False  # noqa: SLF001
 
 
 def test_prefrontal_run_emergent_growth_weekly_and_status(monkeypatch) -> None:

@@ -10,7 +10,7 @@ Inbound（接收）：
 
 Outbound（发送）：
   - 调用 OneBot v11 HTTP API（send_private_msg / send_group_msg）
-  - 支持 TEXT / IMAGE / VOICE 消息类型
+  - 支持 TEXT / IMAGE / VOICE / FILE 消息类型
   - IMAGE 支持 file:/// / http(s):// / base64:// 三种协议
 
 OneBot v11 文档：https://11.onebot.dev/
@@ -53,7 +53,7 @@ _QQ_IMAGE_EMOJI_SUMMARY_MARKERS = (
 )
 
 # 支持发送的消息类型
-_SENDABLE_MSG_TYPES = frozenset({MsgType.TEXT, MsgType.IMAGE, MsgType.VOICE, MsgType.EMOJI})
+_SENDABLE_MSG_TYPES = frozenset({MsgType.TEXT, MsgType.IMAGE, MsgType.VOICE, MsgType.FILE, MsgType.EMOJI})
 
 
 def _env_int(name: str, default: int) -> int:
@@ -238,6 +238,8 @@ class QQAdapter(AbstractPlatformAdapter):
             # TEXT 消息使用拟人化分段发送
             if reply.msg_type == MsgType.TEXT:
                 success = self._send_text_humanized(reply)
+            elif reply.msg_type == MsgType.FILE:
+                success = self._send_file_via_onebot(reply)
             else:
                 success = self._send_via_onebot(reply)
             if success:
@@ -381,6 +383,52 @@ class QQAdapter(AbstractPlatformAdapter):
             logger.error("QQAdapter: HTTP 请求失败: %s", exc)
             return False
 
+    def _send_file_via_onebot(self, reply: UnifiedReply) -> bool:
+        """通过 OneBot 扩展 API 上传并发送文件。
+
+        NapCat / go-cqhttp / Lagrange 常见实现提供 ``upload_private_file``
+        和 ``upload_group_file``。这比把文件伪装成普通消息段更稳定。
+        """
+        conversation_id = reply.conversation_id
+        file_path = self._resolve_file_path(reply)
+        if not file_path:
+            logger.warning("QQAdapter: FILE 消息缺少可发送文件路径")
+            return False
+
+        file_name = str(reply.raw_extra.get("file_name") or "").strip() or Path(file_path).name
+        if conversation_id.startswith("qq_group_"):
+            group_id = conversation_id.removeprefix("qq_group_")
+            endpoint = f"{self._api_base}/upload_group_file"
+            payload: dict[str, Any] = {
+                "group_id": int(group_id),
+                "file": file_path,
+                "name": file_name,
+            }
+        elif conversation_id.startswith("qq_dm_"):
+            user_id = conversation_id.removeprefix("qq_dm_")
+            endpoint = f"{self._api_base}/upload_private_file"
+            payload = {
+                "user_id": int(user_id),
+                "file": file_path,
+                "name": file_name,
+            }
+        else:
+            logger.warning("QQAdapter: 无法识别会话 ID 格式: %s", conversation_id)
+            return False
+
+        try:
+            resp = httpx.post(endpoint, json=payload, timeout=max(self._timeout, 30.0))
+            resp.raise_for_status()
+            result = resp.json()
+            if result.get("status") == "ok" or result.get("retcode") == 0:
+                logger.debug("QQAdapter: 文件发送成功 conversation=%s file=%s", conversation_id, file_name)
+                return True
+            logger.warning("QQAdapter: OneBot 文件 API 返回失败: %s", result)
+            return False
+        except httpx.HTTPError as exc:
+            logger.error("QQAdapter: 文件 HTTP 请求失败: %s", exc)
+            return False
+
     def _build_message_segments(self, reply: UnifiedReply) -> list[dict[str, Any]]:
         """根据 UnifiedReply 构造 OneBot v11 消息段数组。
 
@@ -399,6 +447,9 @@ class QQAdapter(AbstractPlatformAdapter):
             file_uri = self._resolve_media_uri(reply, fallback_type="image")
             if file_uri:
                 segments.append({"type": "image", "data": {"file": file_uri}})
+                caption = self._resolve_image_caption(reply, file_uri=file_uri)
+                if caption:
+                    segments.append({"type": "text", "data": {"text": caption}})
 
         # ── VOICE（OneBot v11 使用 record 消息段）──
         elif reply.msg_type == MsgType.VOICE:
@@ -417,6 +468,22 @@ class QQAdapter(AbstractPlatformAdapter):
         return segments
 
     @staticmethod
+    def _resolve_file_path(reply: UnifiedReply) -> str | None:
+        """解析 FILE 回复的本地文件路径。"""
+        raw = str(reply.media_path or reply.content or "").strip()
+        if not raw:
+            return None
+        if raw.startswith("file:///"):
+            raw = raw.removeprefix("file:///")
+        elif raw.startswith("file://"):
+            raw = raw.removeprefix("file://")
+        raw = raw.replace("/", "\\") if re.match(r"^[A-Za-z]:/", raw) else raw
+        path = Path(raw).expanduser()
+        if not path.exists() or not path.is_file():
+            return None
+        return str(path.resolve())
+
+    @staticmethod
     def _resolve_media_uri(reply: UnifiedReply, *, fallback_type: str = "image") -> str | None:
         """从 UnifiedReply 解析媒体文件 URI。
 
@@ -428,6 +495,8 @@ class QQAdapter(AbstractPlatformAdapter):
         # 本地文件
         if reply.media_path:
             path = reply.media_path.replace("\\", "/")
+            if path.startswith("http://") or path.startswith("https://"):
+                return path
             if path.startswith("file:///"):
                 return path
             return f"file:///{path}"
@@ -443,6 +512,24 @@ class QQAdapter(AbstractPlatformAdapter):
             return f"base64://{b64}"
 
         return None
+
+    @staticmethod
+    def _resolve_image_caption(reply: UnifiedReply, *, file_uri: str) -> str:
+        """解析图片同条消息里的说明文字，避免把图片 URL 当正文重复发出。"""
+        caption = str((reply.raw_extra or {}).get("caption") or reply.content or "").strip()
+        if not caption:
+            return ""
+        media_candidates = {
+            str(file_uri or "").strip(),
+            str(reply.media_path or "").strip(),
+        }
+        if str(file_uri or "").startswith("file:///"):
+            media_candidates.add(str(file_uri or "").removeprefix("file:///").strip())
+        if caption in media_candidates:
+            return ""
+        if caption.startswith("http://") or caption.startswith("https://"):
+            return ""
+        return caption
 
     def _record_inbound(
         self,

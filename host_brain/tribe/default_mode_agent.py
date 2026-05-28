@@ -383,25 +383,34 @@ class DefaultModeAgent:
 
     def export_runtime_state(self) -> dict[str, Any]:
         from host_brain.persona.inner_monologue import build_inner_monologue_digest  # noqa: PLC0415
+        from host_brain.persona.motive_runtime import build_offline_state_from_inner_state  # noqa: PLC0415
         from host_brain.persona.self_model import build_self_directive_packet, load_persistent_self_state  # noqa: PLC0415
 
         snap = self.state_registry.get_state("default_mode_agent") or {}
         state = dict(snap.get("state") or {})
         persona_self_id = get_canonical_persona_self_id()
-        if not state:
-            self.tick_idle_cycle(person_id=persona_self_id, source="export_runtime_state")
-            snap = self.state_registry.get_state("default_mode_agent") or {}
-            state = dict(snap.get("state") or {})
+        raw_inner_state: dict[str, Any] = {}
         last_tick = dict(state.get("last_tick") or {})
         offline_state = dict(last_tick.get("offline_state") or state.get("last_offline_state") or {})
-        inner_monologue = dict(state.get("inner_monologue") or {})
-        if not inner_monologue:
+        if not state:
             try:
                 from host_brain.persona.inner_world import get_inner_world  # noqa: PLC0415
 
                 raw_inner_state = dict(get_inner_world().get_state(user_id=persona_self_id) or {})
             except Exception:
                 raw_inner_state = {}
+            offline_state = dict(
+                build_offline_state_from_inner_state(raw_inner_state, now_ms=now_ms()) or {}
+            )
+        inner_monologue = dict(state.get("inner_monologue") or {})
+        if not inner_monologue:
+            if not raw_inner_state:
+                try:
+                    from host_brain.persona.inner_world import get_inner_world  # noqa: PLC0415
+
+                    raw_inner_state = dict(get_inner_world().get_state(user_id=persona_self_id) or {})
+                except Exception:
+                    raw_inner_state = {}
             inner_monologue = build_inner_monologue_digest(
                 inner_state=raw_inner_state,
                 last_note=str(state.get("last_note") or ""),

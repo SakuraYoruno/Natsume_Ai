@@ -36,12 +36,16 @@ def test_default_tool_execution_matrix_is_safe_and_value_focused() -> None:
         "frontend_route_audit",
         "frontend_component_value_audit",
         "system_info",
+        "system_resource_snapshot",
+        "process_resource_top",
+        "resource_pressure_analysis",
+        "resource_manager_status",
         "process_list",
         "network_status",
         "file_list",
         "file_read",
     }.issubset(names)
-    assert {"file_write", "file_append", "file_delete", "process_kill", "shell_run"}.isdisjoint(names)
+    assert {"file_write", "file_append", "file_delete", "process_kill", "resource_release", "shell_run"}.isdisjoint(names)
     assert all(probe.side_effect_level == "read_only" for probe in probes)
     assert all(probe.requires_confirm is False for probe in probes)
 
@@ -60,8 +64,8 @@ def test_tool_execution_matrix_runs_safe_probes_through_executive_runtime(monkey
         dependencies._skill_registry = None
 
     assert summary["status"] == "PASSED"
-    assert summary["total"] == 15
-    assert summary["passed"] == 15
+    assert summary["total"] == 19
+    assert summary["passed"] == 19
     assert summary["failed"] == 0
     assert summary["skipped"] == 0
     assert summary["critical_failed"] == 0
@@ -78,6 +82,10 @@ def test_tool_execution_matrix_runs_safe_probes_through_executive_runtime(monkey
             "frontend_route_audit",
             "frontend_component_value_audit",
             "system_info",
+            "system_resource_snapshot",
+            "process_resource_top",
+            "resource_pressure_analysis",
+            "resource_manager_status",
             "process_list",
             "network_status",
             "file_list",
@@ -91,6 +99,10 @@ def test_tool_execution_matrix_runs_safe_probes_through_executive_runtime(monkey
         "frontend_route_audit": "frontend",
         "frontend_component_value_audit": "frontend",
         "system_info": "system",
+        "system_resource_snapshot": "system",
+        "process_resource_top": "system",
+        "resource_pressure_analysis": "system",
+        "resource_manager_status": "system",
         "process_list": "system",
         "network_status": "system",
         "file_list": "file",
@@ -108,6 +120,10 @@ def test_tool_execution_matrix_runs_safe_probes_through_executive_runtime(monkey
         "frontend_route_audit",
         "frontend_component_value_audit",
         "system_info",
+        "system_resource_snapshot",
+        "process_resource_top",
+        "resource_pressure_analysis",
+        "resource_manager_status",
         "process_list",
         "network_status",
         "file_list",

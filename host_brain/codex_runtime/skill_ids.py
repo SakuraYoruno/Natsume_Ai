@@ -34,6 +34,11 @@ CODEX_RUNTIME_RUN_MODE_BY_SKILL_ID: dict[str, str] = {
     "codex_memory_curator": "inspect",
     "codex_document_digest": "research",
     "codex_frontend_review": "inspect",
+    "codex_browser_research": "research",
+    "codex_frontend_acceptance": "inspect",
+    "codex_web_corpus_collector": "worker",
+    "codex_lightnovel_recommender": "worker",
+    "codex_epub_builder": "worker",
 }
 
 

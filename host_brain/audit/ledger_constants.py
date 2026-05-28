@@ -115,6 +115,80 @@ MEMORY_OP_COLUMNS = (
     "ts_ms",
 )
 
+LIFE_EPISODE_COLUMNS = (
+    "episode_id",
+    "episode_kind",
+    "thread_id",
+    "person_id",
+    "session_id",
+    "actor_id",
+    "intent",
+    "action",
+    "result",
+    "primary_ref",
+    "summary",
+    "salience",
+    "base_salience",
+    "memory_strength",
+    "decay_profile_id",
+    "retention_state",
+    "last_recalled_ts_ms",
+    "recall_count",
+    "reinforcement_count",
+    "compressed_into_episode_id",
+    "retention_until_ts_ms",
+    "forget_reason",
+    "truth_state",
+    "status",
+    "created_ts_ms",
+    "last_touched_ts_ms",
+    "metadata",
+)
+
+LIFE_EVIDENCE_COLUMNS = (
+    "evidence_id",
+    "episode_id",
+    "evidence_kind",
+    "source_ref",
+    "request_id",
+    "content",
+    "payload",
+    "trust_level",
+    "created_ts_ms",
+)
+
+LIFE_EPISODE_LINK_COLUMNS = (
+    "link_id",
+    "source_episode_id",
+    "target_episode_id",
+    "link_kind",
+    "weight",
+    "created_ts_ms",
+    "metadata",
+)
+
+LIFE_MEMORY_CORRECTION_COLUMNS = (
+    "correction_id",
+    "episode_id",
+    "correction_episode_id",
+    "correction_kind",
+    "reason_code",
+    "detail",
+    "created_ts_ms",
+    "metadata",
+)
+
+LIFE_MEMORY_COMPACTION_COLUMNS = (
+    "compaction_id",
+    "source_episode_ids",
+    "compressed_episode_id",
+    "summary",
+    "dropped_details",
+    "kept_facts",
+    "created_ts_ms",
+    "metadata",
+)
+
 VAULT_MANIFEST_COLUMNS = (
     "request_id",
     "manifest_id",
@@ -422,6 +496,11 @@ JSON_FIELDS_BY_TABLE: dict[str, set[str]] = {
     "error_log": set(),
     "qa_violation_log": set(),
     "memory_ops_log": {"source_memory_ids", "evidence_refs"},
+    "life_episode": {"metadata"},
+    "life_evidence": {"payload"},
+    "life_episode_link": {"metadata"},
+    "life_memory_correction": {"metadata"},
+    "life_memory_compaction": {"source_episode_ids", "dropped_details", "kept_facts", "metadata"},
     "canon_proposal_log": {"proposed_tags"},
     "vault_manifest_index": {"evidence_refs"},
     "vault_gc_log": {"deleted_manifest_ids", "deleted_artifact_ids", "blocked_manifest_ids", "evidence_refs"},
@@ -442,6 +521,7 @@ JSON_FIELDS_BY_TABLE: dict[str, set[str]] = {
     "capability_forge_proposal_log": {"payload"},
     "llm_route_log": set(),
     "llm_pool_call_log": {"attempts_json"},
+    "llm_token_usage_log": {"detail_json"},
     "llm_node_call_log": set(),
     "graph_run_trace": {"nodes_json", "edges_json"},
 }
@@ -457,6 +537,11 @@ _ALLOWED_TABLES: frozenset[str] = frozenset({
     "canon_change_log",
     "world_canon_doc",
     "memory_ops_log",
+    "life_episode",
+    "life_evidence",
+    "life_episode_link",
+    "life_memory_correction",
+    "life_memory_compaction",
     "vault_manifest_index",
     "vault_gc_log",
     "airlock_log",
@@ -479,6 +564,7 @@ _ALLOWED_TABLES: frozenset[str] = frozenset({
     "session_seq_guard",
     "llm_route_log",
     "llm_pool_call_log",
+    "llm_token_usage_log",
     "llm_node_call_log",
     "graph_run_trace",
     "supervisor_decision_log",

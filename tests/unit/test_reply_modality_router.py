@@ -74,6 +74,17 @@ def test_router_does_not_auto_voice_text_greeting_by_default(monkeypatch) -> Non
     assert decision.response_form_reason == "phatic_text"
 
 
+def test_router_uses_text_for_auditory_check_without_audio() -> None:
+    decision = ReplyModalityRouter().route(
+        interpretation=ConversationInterpretation(literal_topic="auditory_check"),
+        relationship_state=RelationshipStateBlock(bond_stage="SOULMATE"),
+        multimodal={},
+    )
+
+    assert decision.response_form == "text"
+    assert decision.response_form_reason == "phatic_text"
+
+
 def test_router_routes_close_inbound_voice_to_voice() -> None:
     decision = ReplyModalityRouter().route(
         interpretation=ConversationInterpretation(literal_topic="presence_ping"),
@@ -83,7 +94,7 @@ def test_router_routes_close_inbound_voice_to_voice() -> None:
 
     assert decision.response_form == "voice"
     assert decision.response_form_reason == "voice_echo_close"
-    assert decision.render_profile == "ja_voice"
+    assert decision.render_profile == "zh_voice"
 
 
 def test_router_honors_explicit_voice_request() -> None:

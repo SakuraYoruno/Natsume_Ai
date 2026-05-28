@@ -15,6 +15,15 @@ class _Bridge:
         return {"ok": True}
 
 
+class _ExpressionDriver:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, float | None]] = []
+
+    def set_expression(self, emotion_tag: str, intensity: float | None = None):  # noqa: ANN001
+        self.calls.append((emotion_tag, intensity))
+        return type("Result", (), {"success": True})()
+
+
 def test_channel_agent_emits_message_and_gateway_events() -> None:
     bridge = _Bridge()
     agent = ChannelAgent(bridge=bridge)
@@ -41,6 +50,43 @@ def test_channel_agent_emits_message_and_gateway_events() -> None:
     event_types = [str(item.get("event_type")) for item in bridge.events]
     assert "channel_message_received" in event_types
     assert "gateway_degraded" in event_types
+
+
+def test_somatic_agent_suppresses_face_capture_feedback_by_default(monkeypatch) -> None:
+    monkeypatch.delenv("EDGE_FACE_CAPTURE_DRIVE_VTS", raising=False)
+    driver = _ExpressionDriver()
+    agent = SomaticAgent(vts_driver=driver)
+
+    result = agent.on_emotion_state_command(
+        {
+            "emotion_tag": "JOY",
+            "intensity": 0.6,
+            "session_id": "face_capture",
+            "emotion_source": "face_capture",
+        }
+    )
+
+    assert result["ok"] is True
+    assert result["reason"] == "FACE_CAPTURE_DRIVE_SUPPRESSED"
+    assert driver.calls == []
+
+
+def test_somatic_agent_can_drive_vts_from_face_capture_when_enabled(monkeypatch) -> None:
+    monkeypatch.setenv("EDGE_FACE_CAPTURE_DRIVE_VTS", "true")
+    driver = _ExpressionDriver()
+    agent = SomaticAgent(vts_driver=driver)
+
+    result = agent.on_emotion_state_command(
+        {
+            "emotion_tag": "JOY",
+            "intensity": 0.6,
+            "session_id": "face_capture",
+            "emotion_source": "face_capture",
+        }
+    )
+
+    assert result["ok"] is True
+    assert driver.calls == [("JOY", 0.6)]
 
 
 def test_somatic_agent_emits_body_and_emotion_events() -> None:

@@ -151,6 +151,21 @@ EXPRESSION_HOTKEY_BLOCKED_TOKENS: tuple[str, ...] = (
     "all hotkey",
     "all expression",
 )
+NEUTRAL_RESET_HOTKEY_ACTIONS: tuple[str, ...] = (
+    "removeallexpressions",
+    "remove_all_expressions",
+)
+NEUTRAL_RESET_HOTKEY_HINTS: tuple[str, ...] = (
+    "移除所有按键表情",
+    "remove all expressions",
+    "remove all",
+    "reset all",
+)
+BROKEN_HOTKEY_ERROR_HINTS: tuple[str, ...] = (
+    "given parameter",
+    "does not exist",
+    "not found in model",
+)
 
 
 #
@@ -438,7 +453,12 @@ class VTubeStudioDriver:
         self._reconnect_events: list[dict[str, Any]] = []
         self._shutdown_event = threading.Event()
         self._expression_hotkey_overrides: dict[str, str] = {}
+        self._bad_expression_hotkeys: dict[str, str] = {}
         self._hotkey_catalog: list[dict[str, str]] = []
+        self._last_model_move: dict[str, Any] = {
+            "success": None,
+            "reason": "not_started",
+        }
         # 方向 C：记录上一次设置的 emotion_tag，用于过渡帧计算
         self._last_emotion_tag: str | None = None
         initial_mouth = [str(item).strip() for item in self._config.mouth_param_candidates if str(item).strip()]
@@ -461,6 +481,10 @@ class VTubeStudioDriver:
             "silence": list(initial_silence),
             "available": [],
             "last_value": 0.0,
+            "last_batch_parameters": [],
+            "last_motion_parameters": [],
+            "last_motion_values": {},
+            "last_motion_batch_parameters": [],
             "model_open_inputs": [],
             "model_form_inputs": [],
             "model_smile_inputs": [],
@@ -516,6 +540,7 @@ class VTubeStudioDriver:
                     token_path=self._config.token_path,
                 )
                 self._state = VtsState.AUTHENTICATED
+                self._connection_error = None
                 self._refresh_mouth_parameter_plan()
                 self._hotkey_catalog = _list_vts_hotkeys(
                     vts=self._vts,
@@ -583,7 +608,8 @@ class VTubeStudioDriver:
 
         mouth_result = self.set_mouth_open_level(
             VTS_MOUTH_OPEN_VALUE,
-            _include_companions=False,
+            _include_companions=True,
+            _batch_companions=True,
         )
         if not mouth_result.success:
             return VtsDriverResult(
@@ -615,7 +641,8 @@ class VTubeStudioDriver:
 
         mouth_result = self.set_mouth_open_level(
             VTS_MOUTH_CLOSE_VALUE,
-            _include_companions=False,
+            _include_companions=True,
+            _batch_companions=True,
         )
         if not mouth_result.success:
             return VtsDriverResult(
@@ -646,6 +673,8 @@ class VTubeStudioDriver:
             "no close frame",
             "closing handshake",
             "cannot write to closing transport",
+            "another coroutine is already running recv",
+            "recv_streaming",
             "sent 1000",
             "received 1000",
         )
@@ -680,6 +709,8 @@ class VTubeStudioDriver:
         *,
         _retry_on_reconnect: bool = True,
         _include_companions: bool = True,
+        _batch_companions: bool = False,
+        _motion_values: dict[str, float] | None = None,
     ) -> VtsDriverResult:
         """Drive mouth-open related VTS parameters with runtime fallback."""
         try:
@@ -702,6 +733,14 @@ class VTubeStudioDriver:
         )
         mouth_params = list(preferred_mouth_params)
         plan = dict(self._mouth_parameter_plan or {})
+        if not _include_companions:
+            selected_params = [
+                str(item)
+                for item in (plan.get("selected") or [])
+                if str(item).strip()
+            ]
+            if selected_params:
+                mouth_params = selected_params
         available_params = {
             str(item or "").strip()
             for item in (plan.get("available") or [])
@@ -711,7 +750,62 @@ class VTubeStudioDriver:
             available_mouth_params = [item for item in mouth_params if item in available_params]
             if available_mouth_params:
                 mouth_params = available_mouth_params
+
+        if _include_companions and _batch_companions:
+            batch_values = self._build_mouth_parameter_batch_values(
+                level=level,
+                plan=plan,
+                available_params=available_params,
+                motion_values=_motion_values,
+            )
+            if batch_values:
+                try:
+                    _set_vts_parameters(
+                        vts=self._vts,
+                        parameter_values=batch_values,
+                        timeout_s=self._config.api_timeout_s,
+                    )
+                    selected_primary = next(iter(batch_values.keys()))
+                    plan = dict(self._mouth_parameter_plan)
+                    plan["selected"] = [selected_primary]
+                    plan["last_value"] = round(level, 4)
+                    plan["last_batch_parameters"] = list(batch_values.keys())
+                    motion_parameters = [
+                        key
+                        for key in list((_motion_values or {}).keys())
+                        if key in batch_values
+                    ]
+                    if _motion_values is not None:
+                        plan["last_motion_parameters"] = list(motion_parameters)
+                        plan["last_motion_values"] = {
+                            key: round(float(batch_values[key]), 4)
+                            for key in motion_parameters
+                        }
+                        plan["last_motion_batch_parameters"] = list(batch_values.keys())
+                    self._mouth_parameter_plan = plan
+                    return VtsDriverResult(
+                        success=True,
+                        reason_code=None,
+                        detail=(
+                            "mouth level batch set via "
+                            f"{','.join(batch_values.keys())}: {level:.3f}"
+                        ),
+                        action="set_mouth_open_level",
+                    )
+                except Exception as exc:  # pragma: no cover - depends on VTS runtime state
+                    if _retry_on_reconnect and self._is_recoverable_runtime_api_error(str(exc)):
+                        reconnect_result = self._force_runtime_reconnect(str(exc))
+                        if reconnect_result.success:
+                            return self.set_mouth_open_level(
+                                level,
+                                _retry_on_reconnect=False,
+                                _include_companions=_include_companions,
+                                _batch_companions=_batch_companions,
+                                _motion_values=_motion_values,
+                            )
+
         errors: list[str] = []
+        failed_params: set[str] = set()
         selected_primary: str | None = None
 
         for param in mouth_params:
@@ -725,6 +819,7 @@ class VTubeStudioDriver:
                 selected_primary = param
                 break
             except Exception as exc:  # pragma: no cover - depends on VTS runtime state
+                failed_params.add(param)
                 errors.append(f"{param}: {exc}")
 
         if selected_primary is None:
@@ -745,6 +840,7 @@ class VTubeStudioDriver:
                         selected_primary = param
                         break
                     except Exception as exc:  # pragma: no cover - depends on VTS runtime state
+                        failed_params.add(param)
                         errors.append(f"{param}: {exc}")
                 if selected_primary is None:
                     detail = "all mouth parameters failed after fallback"
@@ -758,6 +854,8 @@ class VTubeStudioDriver:
                             level,
                             _retry_on_reconnect=False,
                             _include_companions=_include_companions,
+                            _batch_companions=_batch_companions,
+                            _motion_values=_motion_values,
                         )
                 return VtsDriverResult(
                     success=False,
@@ -767,6 +865,13 @@ class VTubeStudioDriver:
                 )
 
         # Optional companion parameters: failures here should not fail playback.
+        #
+        # Some VTS models bind mouth opening to voice-derived inputs
+        # (for example VoiceVolume), while others react more visibly to
+        # MouthOpen/ParamMouthOpenY. Drive the primary parameter first for
+        # correctness, then also fan out to companion mouth/volume parameters
+        # so a successful API call is more likely to become perceptible on the
+        # avatar.
         if not _include_companions:
             plan = dict(self._mouth_parameter_plan)
             plan["selected"] = [selected_primary]
@@ -779,6 +884,15 @@ class VTubeStudioDriver:
                 action="set_mouth_open_level",
             )
 
+        companion_mouth_params = [
+            str(item)
+            for item in (
+                list(plan.get("mouth") or [])
+                + list(self._candidate_tuple(self._config.mouth_param_candidates))
+                + [VTS_MOUTH_PARAM, "ParamMouthOpenY"]
+            )
+            if str(item).strip()
+        ]
         volume_params = [
             str(item)
             for item in (plan.get("volume") or self._candidate_tuple(self._config.mouth_volume_param_candidates))
@@ -790,16 +904,37 @@ class VTubeStudioDriver:
             if str(item).strip()
         ]
         if available_params:
+            filtered_mouth = [item for item in companion_mouth_params if item in available_params]
             filtered_volume = [item for item in volume_params if item in available_params]
             filtered_silence = [item for item in silence_params if item in available_params]
+            if filtered_mouth:
+                companion_mouth_params = filtered_mouth
             if filtered_volume:
                 volume_params = filtered_volume
             if filtered_silence:
                 silence_params = filtered_silence
 
+        companion_mouth_params = [item for item in companion_mouth_params if item != selected_primary]
         volume_params = [item for item in volume_params if item != selected_primary]
         silence_params = [item for item in silence_params if item != selected_primary]
 
+        companion_seen: set[str] = set()
+        companion_mouth_params = [
+            item
+            for item in companion_mouth_params
+            if item not in failed_params and not (item in companion_seen or companion_seen.add(item))
+        ]
+
+        for mouth_param in companion_mouth_params:
+            try:
+                _set_vts_parameter(
+                    vts=self._vts,
+                    param_name=mouth_param,
+                    value=level,
+                    timeout_s=self._config.api_timeout_s,
+                )
+            except Exception:
+                continue
         for volume_param in volume_params:
             try:
                 _set_vts_parameter(
@@ -821,9 +956,34 @@ class VTubeStudioDriver:
             except Exception:
                 continue
 
+        motion_parameters: list[str] = []
+        motion_values: dict[str, float] = {}
+        for param_name, raw_value in dict(_motion_values or {}).items():
+            param = str(param_name or "").strip()
+            if not param:
+                continue
+            if available_params and param not in available_params:
+                continue
+            try:
+                value_to_set = float(raw_value)
+                _set_vts_parameter(
+                    vts=self._vts,
+                    param_name=param,
+                    value=value_to_set,
+                    timeout_s=self._config.api_timeout_s,
+                )
+            except Exception:
+                continue
+            motion_parameters.append(param)
+            motion_values[param] = round(value_to_set, 4)
+
         plan = dict(self._mouth_parameter_plan)
         plan["selected"] = [selected_primary]
         plan["last_value"] = round(level, 4)
+        if _motion_values is not None:
+            plan["last_motion_parameters"] = list(motion_parameters)
+            plan["last_motion_values"] = dict(motion_values)
+            plan["last_motion_batch_parameters"] = []
         self._mouth_parameter_plan = plan
 
         return VtsDriverResult(
@@ -832,6 +992,139 @@ class VTubeStudioDriver:
             detail=f"mouth level set via {selected_primary}: {level:.3f}",
             action="set_mouth_open_level",
         )
+
+    def move_model(
+        self,
+        *,
+        position_x: float = 0.0,
+        position_y: float = 0.0,
+        rotation: float = 0.0,
+        size: float = 0.0,
+        relative: bool = True,
+        move_time_s: float = 0.12,
+        _retry_on_reconnect: bool = True,
+    ) -> VtsDriverResult:
+        """Move the whole VTS model, independent of Live2D parameter bindings."""
+        if self._state != VtsState.AUTHENTICATED:
+            conn_result = self.connect()
+            if not conn_result.success:
+                result = VtsDriverResult(
+                    success=False,
+                    reason_code=VTS_CONNECTION_FAILED,
+                    detail=f"cannot move model: {conn_result.detail}",
+                    action="move_model",
+                )
+                self._last_model_move = {
+                    **result.as_dict(),
+                    "position_x": float(position_x),
+                    "position_y": float(position_y),
+                    "rotation": float(rotation),
+                    "size": float(size),
+                    "relative": bool(relative),
+                    "move_time_s": float(move_time_s),
+                }
+                return result
+        try:
+            _move_vts_model(
+                vts=self._vts,
+                position_x=float(position_x),
+                position_y=float(position_y),
+                rotation=float(rotation),
+                size=float(size),
+                relative=bool(relative),
+                move_time_s=float(move_time_s),
+                timeout_s=self._config.api_timeout_s,
+            )
+            result = VtsDriverResult(
+                success=True,
+                reason_code=None,
+                detail=(
+                    "model moved "
+                    f"x={float(position_x):.4f} y={float(position_y):.4f} "
+                    f"rot={float(rotation):.3f}"
+                ),
+                action="move_model",
+            )
+        except Exception as exc:  # pragma: no cover - depends on VTS runtime state
+            if _retry_on_reconnect and self._is_recoverable_runtime_api_error(str(exc)):
+                reconnect_result = self._force_runtime_reconnect(str(exc))
+                if reconnect_result.success:
+                    return self.move_model(
+                        position_x=position_x,
+                        position_y=position_y,
+                        rotation=rotation,
+                        size=size,
+                        relative=relative,
+                        move_time_s=move_time_s,
+                        _retry_on_reconnect=False,
+                    )
+            result = VtsDriverResult(
+                success=False,
+                reason_code=VTS_API_ERROR,
+                detail=f"move model error: {exc}",
+                action="move_model",
+            )
+        self._last_model_move = {
+            **result.as_dict(),
+            "position_x": round(float(position_x), 5),
+            "position_y": round(float(position_y), 5),
+            "rotation": round(float(rotation), 4),
+            "size": round(float(size), 5),
+            "relative": bool(relative),
+            "move_time_s": round(float(move_time_s), 4),
+        }
+        return result
+
+    def _build_mouth_parameter_batch_values(
+        self,
+        *,
+        level: float,
+        plan: dict[str, Any],
+        available_params: set[str],
+        motion_values: dict[str, float] | None = None,
+    ) -> dict[str, float]:
+        ordered_open_params = [
+            str(item)
+            for item in (
+                list(plan.get("model_open_inputs") or [])
+                + list(plan.get("selected") or [])
+                + list(plan.get("mouth") or [])
+                + list(self._candidate_tuple(self._config.mouth_param_candidates))
+                + list(plan.get("volume") or [])
+                + list(self._candidate_tuple(self._config.mouth_volume_param_candidates))
+                + [VTS_MOUTH_PARAM, "ParamMouthOpenY"]
+            )
+            if str(item).strip()
+        ]
+        silence_params = [
+            str(item)
+            for item in (
+                list(plan.get("silence") or [])
+                + list(self._candidate_tuple(self._config.voice_silence_param_candidates))
+            )
+            if str(item).strip()
+        ]
+        if available_params:
+            ordered_open_params = [item for item in ordered_open_params if item in available_params]
+            silence_params = [item for item in silence_params if item in available_params]
+
+        values: dict[str, float] = {}
+        for param in ordered_open_params:
+            values.setdefault(param, level)
+        silence_value = max(0.0, min(1.0, 1.0 - level))
+        for param in silence_params:
+            values.setdefault(param, silence_value)
+        for param_name, raw_value in dict(motion_values or {}).items():
+            param = str(param_name or "").strip()
+            if not param:
+                continue
+            if available_params and param not in available_params:
+                continue
+            try:
+                values[param] = float(raw_value)
+            except (TypeError, ValueError):
+                continue
+        return values
 
     def set_expression(
         self,
@@ -877,7 +1170,10 @@ class VTubeStudioDriver:
             )
 
         override_hotkey = str(self._expression_hotkey_overrides.get(normalized) or "").strip()
-        if override_hotkey and self._is_disallowed_expression_hotkey(override_hotkey):
+        if override_hotkey and (
+            self._is_disallowed_expression_hotkey(override_hotkey)
+            or self._is_bad_expression_hotkey(override_hotkey)
+        ):
             self._expression_hotkey_overrides.pop(normalized, None)
             override_hotkey = ""
         discovered_hotkey = self._resolve_hotkey_for_emotion(
@@ -913,6 +1209,8 @@ class VTubeStudioDriver:
                 emotion_tag=normalized,
             )
         except Exception as e:
+            if self._is_broken_hotkey_error(str(e)):
+                self._mark_expression_hotkey_failed(hotkey_id, str(e))
             if override_hotkey and hotkey_id == override_hotkey:
                 self._expression_hotkey_overrides.pop(normalized, None)
             fallback_hotkey = self._resolve_hotkey_for_emotion(
@@ -938,6 +1236,7 @@ class VTubeStudioDriver:
                     )
                     self._expression_hotkey_overrides[normalized] = fallback_hotkey
                     self._current_expression = fallback_hotkey
+                    self._last_emotion_tag = normalized
                     return VtsDriverResult(
                         success=True,
                         reason_code=None,
@@ -949,8 +1248,9 @@ class VTubeStudioDriver:
                         expression_id=fallback_hotkey,
                         emotion_tag=normalized,
                     )
-                except Exception:
-                    pass
+                except Exception as fallback_error:
+                    if self._is_broken_hotkey_error(str(fallback_error)):
+                        self._mark_expression_hotkey_failed(fallback_hotkey, str(fallback_error))
             if _retry_on_reconnect and self._is_recoverable_runtime_api_error(str(e)):
                 reconnect_result = self._force_runtime_reconnect(str(e))
                 if reconnect_result.success:
@@ -1024,12 +1324,51 @@ class VTubeStudioDriver:
     def reset_to_neutral(self) -> VtsDriverResult:
         """Reset expression to NEUTRAL (used after barge-in or end of talk)."""
         self._talking = False
-        result = self.set_expression("NEUTRAL")
+        result: VtsDriverResult | None = None
+        if self._state == VtsState.AUTHENTICATED:
+            reset_hotkey = self._resolve_neutral_reset_hotkey()
+            if not reset_hotkey:
+                reset_hotkey = self._resolve_neutral_reset_hotkey(force_refresh=True)
+            if reset_hotkey:
+                try:
+                    _trigger_vts_hotkey(
+                        vts=self._vts,
+                        hotkey_id=reset_hotkey,
+                        timeout_s=self._config.api_timeout_s,
+                    )
+                    self._current_expression = reset_hotkey
+                    self._last_emotion_tag = "NEUTRAL"
+                    result = VtsDriverResult(
+                        success=True,
+                        reason_code=None,
+                        detail=f"expression reset via neutral hotkey: {reset_hotkey}",
+                        action="set_expression",
+                        expression_id=reset_hotkey,
+                        emotion_tag="NEUTRAL",
+                    )
+                except TimeoutError as e:
+                    result = VtsDriverResult(
+                        success=False,
+                        reason_code=VTS_EXPRESSION_TIMEOUT,
+                        detail=f"expression reset timeout: {e}",
+                        action="set_expression",
+                        expression_id=reset_hotkey,
+                        emotion_tag="NEUTRAL",
+                    )
+                except Exception:
+                    result = None
+
+        if result is None:
+            result = self.set_expression("NEUTRAL")
 
         #
         if self._state == VtsState.AUTHENTICATED:
             try:
-                self.set_mouth_open_level(VTS_MOUTH_CLOSE_VALUE)
+                self.set_mouth_open_level(
+                    VTS_MOUTH_CLOSE_VALUE,
+                    _include_companions=True,
+                    _batch_companions=True,
+                )
             except Exception:
                 pass
 
@@ -1270,6 +1609,49 @@ class VTubeStudioDriver:
         lowered = f"{hotkey_id} {name}".lower()
         return any(token in lowered for token in EXPRESSION_HOTKEY_BLOCKED_TOKENS)
 
+    def _is_bad_expression_hotkey(self, hotkey_id: str) -> bool:
+        normalized = str(hotkey_id or "").strip().lower()
+        return bool(normalized and normalized in self._bad_expression_hotkeys)
+
+    @staticmethod
+    def _is_broken_hotkey_error(detail: str | None) -> bool:
+        text = str(detail or "").strip().lower()
+        if not text:
+            return False
+        return any(hint in text for hint in BROKEN_HOTKEY_ERROR_HINTS)
+
+    def _mark_expression_hotkey_failed(self, hotkey_id: str, detail: str) -> None:
+        normalized = str(hotkey_id or "").strip()
+        if not normalized:
+            return
+        self._bad_expression_hotkeys[normalized.lower()] = str(detail or "").strip()[:240]
+        for emotion_tag, override in list(self._expression_hotkey_overrides.items()):
+            if str(override or "").strip().lower() == normalized.lower():
+                self._expression_hotkey_overrides.pop(emotion_tag, None)
+
+    def _resolve_neutral_reset_hotkey(self, *, force_refresh: bool = False) -> str | None:
+        catalog = list(self._hotkey_catalog or [])
+        if force_refresh or not catalog:
+            catalog = _list_vts_hotkeys(vts=self._vts, timeout_s=self._config.api_timeout_s)
+            self._hotkey_catalog = list(catalog)
+        if not catalog:
+            return None
+
+        for row in catalog:
+            hotkey_id = str(row.get("id") or "").strip()
+            action = str(row.get("action") or "").strip().lower()
+            if hotkey_id and action in NEUTRAL_RESET_HOTKEY_ACTIONS:
+                return hotkey_id
+
+        for row in catalog:
+            hotkey_id = str(row.get("id") or "").strip()
+            name = str(row.get("name") or "").strip().lower()
+            if not hotkey_id:
+                continue
+            if any(hint in name for hint in NEUTRAL_RESET_HOTKEY_HINTS):
+                return hotkey_id
+        return None
+
     def _resolve_hotkey_for_emotion(
         self,
         *,
@@ -1285,6 +1667,7 @@ class VTubeStudioDriver:
             for item in exclude_hotkeys
             if str(item or "").strip()
         }
+        excluded.update(self._bad_expression_hotkeys.keys())
         if force_refresh or not catalog:
             catalog = _list_vts_hotkeys(vts=self._vts, timeout_s=self._config.api_timeout_s)
             self._hotkey_catalog = list(catalog)
@@ -1475,6 +1858,10 @@ class VTubeStudioDriver:
                 "silence": list(self._mouth_parameter_plan.get("silence") or []),
                 "available": list(self._mouth_parameter_plan.get("available") or []),
                 "last_value": float(self._mouth_parameter_plan.get("last_value") or 0.0),
+                "last_batch_parameters": list(self._mouth_parameter_plan.get("last_batch_parameters") or []),
+                "last_motion_parameters": list(self._mouth_parameter_plan.get("last_motion_parameters") or []),
+                "last_motion_values": dict(self._mouth_parameter_plan.get("last_motion_values") or {}),
+                "last_motion_batch_parameters": list(self._mouth_parameter_plan.get("last_motion_batch_parameters") or []),
                 "model_open_inputs": list(self._mouth_parameter_plan.get("model_open_inputs") or []),
                 "model_form_inputs": list(self._mouth_parameter_plan.get("model_form_inputs") or []),
                 "model_smile_inputs": list(self._mouth_parameter_plan.get("model_smile_inputs") or []),
@@ -1484,9 +1871,11 @@ class VTubeStudioDriver:
             },
             "config": self._config.as_dict(),
             "connection_error": self._connection_error,
+            "last_model_move": dict(self._last_model_move),
             "emotion_map_size": len(EMOTION_TO_EXPRESSION_ID),
             "hotkey_catalog_size": len(self._hotkey_catalog),
             "expression_overrides": dict(self._expression_hotkey_overrides),
+            "bad_expression_hotkeys": dict(self._bad_expression_hotkeys),
             "reconnect": {
                 "total_reconnects": self._total_reconnects,
                 "total_reconnect_failures": self._total_reconnect_failures,
@@ -1661,34 +2050,51 @@ def _set_vts_parameter(
     timeout_s: float,
 ) -> None:
     """Set a VTS input parameter value."""
+    _set_vts_parameters(
+        vts=vts,
+        parameter_values={param_name: float(value)},
+        timeout_s=timeout_s,
+    )
+
+
+def _set_vts_parameters(
+    *,
+    vts: Any,
+    parameter_values: dict[str, float],
+    timeout_s: float,
+) -> None:
+    """Set one or more VTS input parameter values in one request."""
     if vts is None:
+        return
+    values: list[dict[str, float | str]] = []
+    seen: set[str] = set()
+    for param_name, value in parameter_values.items():
+        param = str(param_name or "").strip()
+        if not param or param in seen:
+            continue
+        seen.add(param)
+        values.append(
+            {
+                "id": param,
+                "weight": 1.0,
+                "value": float(value),
+            }
+        )
+    if not values:
         return
 
     async def _set() -> None:
-        request_builder = getattr(vts, "vts_request", None)
-        if request_builder is not None and hasattr(request_builder, "requestSetParameterValue"):
-            request = request_builder.requestSetParameterValue(
-                param_name,
-                float(value),
-                weight=1.0,
-                face_found=True,
-                mode="set",
-            )
+        payload = {
+            "faceFound": True,
+            "mode": "set",
+            "parameterValues": values,
+        }
+        request_api = getattr(vts, "vts_request", None)
+        base_request = getattr(request_api, "BaseRequest", None)
+        if base_request is not None:
+            request = base_request("InjectParameterDataRequest", payload)
         else:
-            request = vts.vts_request.BaseRequest(
-                "InjectParameterDataRequest",
-                {
-                    "faceFound": True,
-                    "mode": "set",
-                    "parameterValues": [
-                        {
-                            "id": param_name,
-                            "weight": 1.0,
-                            "value": float(value),
-                        }
-                    ],
-                },
-            )
+            request = {"messageType": "InjectParameterDataRequest", "data": payload}
         response = await asyncio.wait_for(
             vts.request(request),
             timeout=timeout_s,
@@ -1698,6 +2104,55 @@ def _set_vts_parameter(
             raise RuntimeError(error)
 
     _run_in_vts_loop(_set(), timeout_s=timeout_s + 1.0)
+
+
+def _move_vts_model(
+    *,
+    vts: Any,
+    position_x: float,
+    position_y: float,
+    rotation: float,
+    size: float,
+    relative: bool,
+    move_time_s: float,
+    timeout_s: float,
+) -> None:
+    """Move the VTS model in the scene using MoveModelRequest."""
+    if vts is None:
+        return
+
+    async def _move() -> None:
+        request_api = getattr(vts, "vts_request", None)
+        request_move = getattr(request_api, "requestMoveModel", None)
+        if request_move is not None:
+            request = request_move(
+                position_x,
+                position_y,
+                rot=rotation,
+                size=size,
+                relative=relative,
+                move_time=move_time_s,
+            )
+        else:
+            base_request = getattr(request_api, "BaseRequest", None)
+            payload = {
+                "timeInSeconds": move_time_s,
+                "valuesAreRelativeToModel": relative,
+                "positionX": position_x,
+                "positionY": position_y,
+                "rotation": rotation,
+                "size": size,
+            }
+            if base_request is not None:
+                request = base_request("MoveModelRequest", payload)
+            else:
+                request = {"messageType": "MoveModelRequest", "data": payload}
+        response = await asyncio.wait_for(vts.request(request), timeout=timeout_s)
+        error = _extract_vts_api_error(response, default="")
+        if error:
+            raise RuntimeError(error)
+
+    _run_in_vts_loop(_move(), timeout_s=timeout_s + 1.0)
 
 
 def _trigger_vts_hotkey(
@@ -1798,6 +2253,7 @@ def _list_vts_hotkeys(*, vts: Any, timeout_s: float) -> list[dict[str, str]]:
                 {
                     "id": hotkey_id,
                     "name": str(row.get("name") or row.get("hotkeyName") or "").strip(),
+                    "action": str(row.get("type") or row.get("action") or row.get("Action") or "").strip(),
                 }
             )
         return out

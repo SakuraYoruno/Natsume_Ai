@@ -31,6 +31,12 @@ class GalgameTasteHit:
         }
 
 
+_STAGED_PRAISE_REACTION_GROUPS: tuple[tuple[str, ...], ...] = (
+    ("突然夸我干嘛", "夸我干嘛", "突然说这个干嘛", "干嘛突然说", "突然夸我", "突然夸"),
+    ("怪让人不好意思", "怪不好意思"),
+    ("只许说一次", "只准说一次", "老哥你这话", "就收下啦", "我就收下", "收下啦"),
+)
+
 _TASTE_PATTERNS: tuple[GalgameTastePattern, ...] = (
     GalgameTastePattern(
         category="PARENTAL_SCOLD_TONE",
@@ -132,11 +138,30 @@ _TASTE_PATTERNS: tuple[GalgameTastePattern, ...] = (
 )
 
 
+def _find_staged_praise_reaction_hit(haystack: str) -> GalgameTasteHit | None:
+    group_hits: list[str] = []
+    for group in _STAGED_PRAISE_REACTION_GROUPS:
+        hit = next((token for token in group if token and token in haystack), "")
+        if hit:
+            group_hits.append(hit)
+    if len(group_hits) < 2:
+        return None
+    return GalgameTasteHit(
+        category="STAGED_PRAISE_REACTION",
+        token=" + ".join(group_hits[:3]),
+        reason_code="TASTE_STAGED_PRAISE_REACTION",
+        penalty=18,
+    )
+
+
 def find_galgame_taste_hits(text: Any) -> tuple[GalgameTasteHit, ...]:
     haystack = str(text or "").strip()
     if not haystack:
         return ()
     hits: list[GalgameTasteHit] = []
+    staged_hit = _find_staged_praise_reaction_hit(haystack)
+    if staged_hit is not None:
+        hits.append(staged_hit)
     for pattern in _TASTE_PATTERNS:
         for token in pattern.tokens:
             if token and token in haystack:

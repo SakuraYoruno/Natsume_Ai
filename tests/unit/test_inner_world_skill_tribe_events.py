@@ -124,6 +124,38 @@ def test_inner_world_monologue_tick_updates_default_mode_when_heavy_background_d
     assert result["default_mode_tick"]["self_continuity_score"] == 0.72
 
 
+def test_inner_world_monologue_tick_persists_recent_inner_stream_memory(monkeypatch) -> None:
+    import host_brain.skills.impl.inner_world_skill as inner_world_skill
+
+    fake_limbic = _FakeLimbicAgent()
+    now_ms = int(time.time() * 1000)
+    memory_calls: list[dict[str, object]] = []
+
+    fake_limbic.tick_inner_world = lambda *, person_id: {  # type: ignore[method-assign]
+        "status": "OK",
+        "user_id": person_id,
+        "last_spontaneous_ts_ms": now_ms,
+        "last_spontaneous_note": "我先把没说完的事放在心里。",
+        "last_spontaneous_source": "llm",
+    }
+    inner_world_skill._INNER_WORLD_MEMORY_WRITTEN_EVENT_IDS.clear()
+    monkeypatch.setenv("HOST_BACKGROUND_TASKS_ENABLED", "true")
+    monkeypatch.setenv("HOST_NON_CHAT_MEMORY_ENABLED", "true")
+    monkeypatch.setattr("host_brain.tribe.limbic_agent.get_limbic_agent", lambda: fake_limbic)
+    monkeypatch.setattr(
+        "host_brain.app.observability_persist.persist_background_event_memory",
+        lambda **kwargs: memory_calls.append(dict(kwargs)) or {"status": "OK", "memory_id": "mem_inner_1"},
+    )
+
+    result = execute_inner_world_monologue_tick(args={"user_id": "u-memory"})
+
+    assert result["status"] == "OK"
+    assert memory_calls
+    assert memory_calls[0]["event_source"] == "inner_world"
+    assert memory_calls[0]["person_id"] == "u-memory"
+    assert memory_calls[0]["detail"] == "我先把没说完的事放在心里。"
+
+
 def test_inner_world_tick_skips_during_recent_foreground_chat(monkeypatch) -> None:
     fake_limbic = _FakeLimbicAgent()
     monkeypatch.setattr("host_brain.tribe.limbic_agent.get_limbic_agent", lambda: fake_limbic)

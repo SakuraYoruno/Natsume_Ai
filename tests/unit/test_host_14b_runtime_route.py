@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 import host_brain.app.graph_config_builder as graph_builder
 import host_brain.app.graph_config_llm_runtime as llm_runtime
+import host_brain.app.model_router as model_router
 from host_brain.app.graph_config_builder import (
     CHAT_DIRECT_NODE_ID,
     HOST_CHAT_ROUTE_CLOUD,
@@ -47,7 +48,7 @@ def _patch_runtime_dependencies(
     minimax_api_key: str | None = None,
     llm_provider: str = "gemini",
 ) -> None:
-    monkeypatch.setenv("HOST_GEMINI_KEY_POOL_DISABLE_RUNTIME_FILES", "true")
+    monkeypatch.setattr(model_router, "_resolve_runtime_gemini_api_key", lambda: (None, None, None))
     monkeypatch.setattr(
         llm_runtime,
         "load_host_config",

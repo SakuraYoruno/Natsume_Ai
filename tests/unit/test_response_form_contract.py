@@ -24,7 +24,7 @@ def test_response_form_classifies_text_voice_and_media() -> None:
 def test_response_form_derives_render_profile_from_single_voice_switch() -> None:
     assert derive_render_profile_for_response_form("") == "zh_text"
     assert derive_render_profile_for_response_form("text") == "zh_text"
-    assert derive_render_profile_for_response_form("voice") == "ja_voice"
+    assert derive_render_profile_for_response_form("voice") == "zh_voice"
     assert derive_render_profile_for_response_form("sticker") == "media_action"
 
 

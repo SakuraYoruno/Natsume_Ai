@@ -14,6 +14,16 @@ def test_social_act_presence_avoids_need_question() -> None:
     assert "凑过来" not in payload["zh_directive"]
 
 
+def test_social_act_auditory_text_check_stays_grounded() -> None:
+    act = resolve_social_act(user_message="听得到吗", conversation_interpretation={"literal_topic": "auditory_check"})
+
+    payload = act.as_dict()
+    assert payload["act_kind"] == "auditory_check_grounded"
+    assert "没有语音证据时说明只看到文字" in payload["should_do"]
+    assert "只回在呢" in payload["avoid"]
+    assert "假装听见声音" in payload["avoid"]
+
+
 def test_social_act_greeting_pulls_formality_back_to_chat() -> None:
     act = resolve_social_act(user_message="你好", conversation_interpretation={})
 

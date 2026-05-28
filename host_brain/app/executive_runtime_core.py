@@ -1112,6 +1112,10 @@ def _build_chat_input(
                 base_runtime=resolved_llm_runtime,
             )
 
+    chat_trace_stage_meta = dict(trace_stage_meta or {})
+    chat_trace_stage_meta.setdefault("input_source", str(getattr(request_body, "input_source", "") or "").strip())
+    chat_trace_stage_meta.setdefault("reply_channel", str(getattr(request_body, "reply_channel", "") or "").strip())
+
     return ChatAgentInput(
         request_id=request_id,
         session_id=session_id,
@@ -1131,7 +1135,7 @@ def _build_chat_input(
         suppress_edge_vts=getattr(request_body, "suppress_edge_vts", None),
         ts_ms=ts_ms,
         intent_draft=dict(intent_draft or {}),
-        trace_stage_meta=dict(trace_stage_meta or {}),
+        trace_stage_meta=chat_trace_stage_meta,
         llm_runtime=resolved_llm_runtime,
         render_policy=dict(getattr(request_body, "render_policy", {}) or {}),
         surface_task_control=dict(getattr(request_body, "surface_task_control", {}) or {}),

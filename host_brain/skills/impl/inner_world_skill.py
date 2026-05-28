@@ -3,6 +3,8 @@ from __future__ import annotations
 import time
 from typing import Any
 
+_INNER_WORLD_MEMORY_WRITTEN_EVENT_IDS: set[str] = set()
+
 
 def _resolve_background_tick_guard(*, now_ms: int | None = None) -> dict[str, Any]:
     try:
@@ -72,6 +74,50 @@ def _normalize_topics(raw_topics: Any) -> list[str]:
                 topics.append(text)
         return topics
     return []
+
+
+def _persist_inner_world_stream_memory(
+    *,
+    user_id: str,
+    skill_name: str,
+    result: dict[str, Any],
+    now_ms: int,
+) -> None:
+    note = str(result.get("last_spontaneous_note") or "").strip()
+    event_ts = int(result.get("last_spontaneous_ts_ms") or 0)
+    if not note or event_ts <= 0 or (now_ms - event_ts) > 120_000:
+        return
+    event_key = f"{user_id}:{skill_name}:{event_ts}"
+    if event_key in _INNER_WORLD_MEMORY_WRITTEN_EVENT_IDS:
+        return
+    try:
+        from host_brain.app.observability_persist import persist_background_event_memory  # noqa: PLC0415
+
+        persist_result = persist_background_event_memory(
+            event_source="inner_world",
+            event_id=event_key,
+            request_id=f"inner_world::{event_ts}",
+            intent_id=skill_name,
+            person_id=user_id,
+            task_id=skill_name,
+            status=str(result.get("status") or "OK"),
+            reason_code=None,
+            detail=note,
+            ts_ms=event_ts,
+            metadata={
+                "user_id": user_id,
+                "source": result.get("last_spontaneous_source"),
+                "absence_band": result.get("absence_band"),
+                "offline_hours": result.get("offline_hours"),
+                "emotion_tag": "NEUTRAL",
+            },
+        )
+        if str(persist_result.get("status") or "").upper() == "OK":
+            _INNER_WORLD_MEMORY_WRITTEN_EVENT_IDS.add(event_key)
+            if len(_INNER_WORLD_MEMORY_WRITTEN_EVENT_IDS) > 512:
+                _INNER_WORLD_MEMORY_WRITTEN_EVENT_IDS.clear()
+    except Exception:
+        pass
 
 
 def _execute_inner_world_tick(
@@ -169,6 +215,12 @@ def _execute_inner_world_tick(
             )
         except Exception:
             pass
+        _persist_inner_world_stream_memory(
+            user_id=user_id,
+            skill_name=skill_name,
+            result=result,
+            now_ms=now_ms,
+        )
     # Phase 1：向 TribeEventBus 发布 INNER_WORLD_TICKED 事件，供订阅方（LimbicAgent 等）消费
     try:
         from host_brain.tribe.ans_agent import get_ans_agent  # noqa: PLC0415

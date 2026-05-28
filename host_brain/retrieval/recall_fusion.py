@@ -16,6 +16,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import logging
 import os
+import re
 from typing import Any, Mapping
 
 from host_brain.audit.sqlite_ledger import SQLiteLedger
@@ -61,6 +62,7 @@ from host_brain.retrieval.recall_fusion_config import (  # noqa: F401
 )
 from host_brain.retrieval.recall_fusion_stores import (
     STORE_SQLITE_LEDGER,
+    STORE_LIFE_EPISODE,
     STORE_NEO4J_BOND,
     STORE_EPISODIC_VECTOR,
     STORE_SEMANTIC_MEMORY,
@@ -94,6 +96,44 @@ _WARM_EMOTION_TAGS = frozenset({"happy", "calm", "warm", "trust", "affection", "
 _FRAGILE_EMOTION_TAGS = frozenset({"sad", "fear", "angry", "anxious", "hurt", "pain", "guilt", "shame"})
 _CONTINUITY_HINT_KEYWORDS = ("上次", "之前", "后来", "还记得", "一起", "约定", "说好", "那天", "继续", "remember", "last time", "together", "promise")
 _WARM_HINT_KEYWORDS = ("一起", "陪你", "说好", "约定", "开心", "想你", "等你", "抱", "温柔", "高兴", "庆祝")
+_ANAPHORIC_SELECTION_RE = re.compile(
+    r"(?:哪(?:本|部|个|一(?:本|部|个))|哪个|哪部|哪本|"
+    r"(?:我问你|刚问你|问你).{0,12}哪|"
+    r"(?:喜欢|想看|先看|推荐|选|挑).{0,8}哪)",
+)
+_ANAPHORIC_EVENT_KINDS = frozenset({"action_episode", "background_episode", "perception_episode"})
+_ANAPHORIC_LOW_VALUE_ACTIONS = frozenset(
+    {
+        "qq_reply_sent",
+        "wechat_reply_sent",
+        "gateway_reply_sent",
+        "channel_message_sent",
+        "surface_reply",
+        "avatar_action",
+        "clawd_action",
+    }
+)
+_ANAPHORIC_POSITIVE_ANCHORS = (
+    "推荐",
+    "lightnovel",
+    "小说",
+    "书",
+    "qq",
+    "wechat",
+    "微信",
+    "推送",
+    "发送",
+    "delivery",
+)
+_ANAPHORIC_SCHEDULER_NOISE_TERMS = (
+    "emotion_decay_tick",
+    "inner_world_numeric_tick",
+    "silence_tick",
+    "heartbeat",
+    "health_check",
+    "resource_guard",
+)
+_ANAPHORIC_EVENT_WINDOW_MS = 2 * 60 * 1000
 _BOND_STAGE_DEPTH_MAP = {
     "familiar": 0.38,
     "friend": 0.62,
@@ -200,6 +240,10 @@ class RecallFusionServiceContract:
     def _search_sqlite_ledger(self, *, query: str, top_k: int, person_id: str | None = None, session_id: str | None = None, now_ts_ms: int | None = None) -> list[dict[str, Any]]:
         from host_brain.retrieval.recall_fusion_stores import search_sqlite_ledger
         return search_sqlite_ledger(self, query=query, top_k=top_k, person_id=person_id, session_id=session_id, now_ts_ms=now_ts_ms)
+
+    def _search_life_episode(self, *, query: str, top_k: int, person_id: str | None = None, session_id: str | None = None, now_ts_ms: int | None = None) -> list[dict[str, Any]]:
+        from host_brain.retrieval.recall_fusion_stores import search_life_episode
+        return search_life_episode(self, query=query, top_k=top_k, person_id=person_id, session_id=session_id, now_ts_ms=now_ts_ms)
 
     def _search_semantic_memory(self, *, query: str, top_k: int, now_ts_ms: int | None = None) -> list[dict[str, Any]]:
         from host_brain.retrieval.recall_fusion_stores import search_semantic_memory
@@ -403,6 +447,11 @@ class RecallFusionServiceContract:
                 for candidate in candidates
                 if _candidate_within_lookback(candidate, now_ts_ms=now_value, lookback_days=time_lookback_days)
             ]
+
+        candidates = _filter_anaphoric_selection_candidates(
+            candidates,
+            query=normalized_query,
+        )
 
         # M27-G：情感维度路由（OPT-31）
         # FIX: 原实现仅做列表拼接，两个分组内部排序丢失。
@@ -655,6 +704,150 @@ def _normalize_candidate(
         "metadata": merged_metadata,
         "evidence_refs": evidence_refs_primary,
     }
+
+
+def _filter_anaphoric_selection_candidates(
+    candidates: list[dict[str, Any]],
+    *,
+    query: str,
+) -> list[dict[str, Any]]:
+    if not candidates or not _looks_like_anaphoric_selection_query(query):
+        return candidates
+    primary = [
+        candidate
+        for candidate in candidates
+        if _is_significant_anaphoric_life_candidate(candidate)
+    ]
+    if not primary:
+        return candidates
+    primary = _select_recent_anaphoric_life_primary(primary)
+    kept: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for candidate in primary:
+        key = str(candidate.get("source_ref") or candidate.get("doc_id") or "").strip()
+        if key and key in seen:
+            continue
+        if key:
+            seen.add(key)
+        updated = dict(candidate)
+        metadata = dict(updated.get("metadata") or {})
+        metadata["anaphoric_selection_primary"] = True
+        metadata["anaphoric_selection_filter"] = "life_episode_primary"
+        updated["metadata"] = metadata
+        kept.append(updated)
+    relationship = [
+        candidate
+        for candidate in candidates
+        if _candidate_store_id(candidate) in {STORE_NEO4J_BOND, "bond_graph"}
+    ]
+    for candidate in relationship:
+        key = str(candidate.get("source_ref") or candidate.get("doc_id") or "").strip()
+        if key and key in seen:
+            continue
+        if key:
+            seen.add(key)
+        kept.append(candidate)
+    return sorted(kept, key=_candidate_sort_key)
+
+
+def _select_recent_anaphoric_life_primary(candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    if len(candidates) <= 1:
+        return candidates
+    ranked = sorted(candidates, key=_anaphoric_primary_sort_key)
+    newest = ranked[0]
+    newest_ts = _candidate_life_ts(newest)
+    newest_action = _candidate_life_action(newest)
+    newest_session = _candidate_life_session(newest)
+    if newest_ts <= 0:
+        return [newest]
+    selected: list[dict[str, Any]] = []
+    for candidate in ranked:
+        candidate_ts = _candidate_life_ts(candidate)
+        if candidate_ts <= 0:
+            continue
+        if newest_action and _candidate_life_action(candidate) != newest_action:
+            continue
+        if newest_session and _candidate_life_session(candidate) != newest_session:
+            continue
+        if newest_ts - candidate_ts > _ANAPHORIC_EVENT_WINDOW_MS:
+            continue
+        selected.append(candidate)
+    return selected or [newest]
+
+
+def _anaphoric_primary_sort_key(candidate: Mapping[str, Any]) -> tuple[int, float, str]:
+    return (
+        -_candidate_life_ts(candidate),
+        -_coerce_score(candidate.get("score")),
+        str(candidate.get("doc_id") or ""),
+    )
+
+
+def _candidate_life_action(candidate: Mapping[str, Any]) -> str:
+    metadata = _coerce_mapping(candidate.get("metadata"))
+    return str(metadata.get("action") or metadata.get("action_kind") or "").strip().lower()
+
+
+def _candidate_life_session(candidate: Mapping[str, Any]) -> str:
+    metadata = _coerce_mapping(candidate.get("metadata"))
+    return str(metadata.get("session_id") or "").strip()
+
+
+def _candidate_life_ts(candidate: Mapping[str, Any]) -> int:
+    metadata = _coerce_mapping(candidate.get("metadata"))
+    for key in ("last_touched_ts_ms", "created_ts_ms"):
+        try:
+            value = int(metadata.get(key) or 0)
+        except (TypeError, ValueError):
+            value = 0
+        if value > 0:
+            return value
+    score_boost = _coerce_mapping(metadata.get("score_boost"))
+    try:
+        return max(0, int(score_boost.get("row_ts_ms") or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _looks_like_anaphoric_selection_query(query: str) -> bool:
+    value = str(query or "").strip()
+    return bool(value and _ANAPHORIC_SELECTION_RE.search(value))
+
+
+def _is_significant_anaphoric_life_candidate(candidate: Mapping[str, Any]) -> bool:
+    if _candidate_store_id(candidate) != STORE_LIFE_EPISODE:
+        return False
+    metadata = _coerce_mapping(candidate.get("metadata"))
+    episode_kind = str(metadata.get("episode_kind") or "").strip()
+    if episode_kind not in _ANAPHORIC_EVENT_KINDS:
+        return False
+    action = str(metadata.get("action") or metadata.get("action_kind") or "").strip().lower()
+    if action in _ANAPHORIC_LOW_VALUE_ACTIONS:
+        return False
+    text = _candidate_text(candidate)
+    if not text or _looks_like_anaphoric_scheduler_noise(text):
+        return False
+    return True
+
+
+def _looks_like_anaphoric_scheduler_noise(text: str) -> bool:
+    value = str(text or "").strip().lower()
+    if not value:
+        return False
+    if any(anchor in value for anchor in _ANAPHORIC_POSITIVE_ANCHORS):
+        return False
+    if "后台任务记忆" in value and "scheduler " in value:
+        return True
+    return any(term in value for term in _ANAPHORIC_SCHEDULER_NOISE_TERMS)
+
+
+def _candidate_store_id(candidate: Mapping[str, Any]) -> str:
+    metadata = _coerce_mapping(candidate.get("metadata"))
+    return str(candidate.get("store_id") or metadata.get("store_id") or "").strip().lower()
+
+
+def _candidate_text(candidate: Mapping[str, Any]) -> str:
+    return str(candidate.get("snippet") or candidate.get("text") or "").strip()
 
 
 def _clamp_unit_float(value: Any, *, default: float = 0.0) -> float:

@@ -158,6 +158,86 @@ CREATE TABLE IF NOT EXISTS memory_ops_log (
     ts_ms INTEGER
 );
 
+CREATE TABLE IF NOT EXISTS life_episode (
+    episode_id TEXT PRIMARY KEY,
+    episode_kind TEXT NOT NULL,
+    thread_id TEXT,
+    person_id TEXT,
+    session_id TEXT,
+    actor_id TEXT,
+    intent TEXT,
+    action TEXT,
+    result TEXT,
+    primary_ref TEXT,
+    summary TEXT,
+    salience REAL NOT NULL DEFAULT 0.0,
+    base_salience REAL NOT NULL DEFAULT 0.0,
+    memory_strength REAL NOT NULL DEFAULT 0.0,
+    decay_profile_id TEXT NOT NULL DEFAULT 'NORMAL',
+    retention_state TEXT NOT NULL DEFAULT 'COLD',
+    last_recalled_ts_ms INTEGER,
+    recall_count INTEGER NOT NULL DEFAULT 0,
+    reinforcement_count INTEGER NOT NULL DEFAULT 0,
+    compressed_into_episode_id TEXT,
+    retention_until_ts_ms INTEGER,
+    forget_reason TEXT,
+    truth_state TEXT NOT NULL DEFAULT 'CANDIDATE',
+    status TEXT NOT NULL DEFAULT 'ACTIVE',
+    created_ts_ms INTEGER NOT NULL,
+    last_touched_ts_ms INTEGER NOT NULL,
+    metadata TEXT
+);
+
+CREATE TABLE IF NOT EXISTS life_evidence (
+    evidence_id TEXT PRIMARY KEY,
+    episode_id TEXT NOT NULL,
+    evidence_kind TEXT NOT NULL,
+    source_ref TEXT,
+    request_id TEXT,
+    content TEXT,
+    payload TEXT,
+    trust_level TEXT NOT NULL DEFAULT 'CANDIDATE',
+    created_ts_ms INTEGER NOT NULL,
+    FOREIGN KEY(episode_id) REFERENCES life_episode(episode_id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS life_episode_link (
+    link_id TEXT PRIMARY KEY,
+    source_episode_id TEXT NOT NULL,
+    target_episode_id TEXT NOT NULL,
+    link_kind TEXT NOT NULL,
+    weight REAL NOT NULL DEFAULT 1.0,
+    created_ts_ms INTEGER NOT NULL,
+    metadata TEXT,
+    FOREIGN KEY(source_episode_id) REFERENCES life_episode(episode_id) ON DELETE CASCADE,
+    FOREIGN KEY(target_episode_id) REFERENCES life_episode(episode_id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS life_memory_correction (
+    correction_id TEXT PRIMARY KEY,
+    episode_id TEXT NOT NULL,
+    correction_episode_id TEXT,
+    correction_kind TEXT NOT NULL,
+    reason_code TEXT,
+    detail TEXT,
+    created_ts_ms INTEGER NOT NULL,
+    metadata TEXT,
+    FOREIGN KEY(episode_id) REFERENCES life_episode(episode_id) ON DELETE CASCADE,
+    FOREIGN KEY(correction_episode_id) REFERENCES life_episode(episode_id) ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS life_memory_compaction (
+    compaction_id TEXT PRIMARY KEY,
+    source_episode_ids TEXT NOT NULL,
+    compressed_episode_id TEXT NOT NULL,
+    summary TEXT,
+    dropped_details TEXT,
+    kept_facts TEXT,
+    created_ts_ms INTEGER NOT NULL,
+    metadata TEXT,
+    FOREIGN KEY(compressed_episode_id) REFERENCES life_episode(episode_id) ON DELETE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS vault_manifest_index (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     request_id TEXT,
@@ -504,6 +584,17 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_semantic_memory_source_hash ON semantic_me
 CREATE INDEX IF NOT EXISTS idx_semantic_memory_ts ON semantic_memory(ts_ms);
 CREATE INDEX IF NOT EXISTS idx_memory_ops_memory_id ON memory_ops_log(memory_id);
 CREATE INDEX IF NOT EXISTS idx_memory_ops_request ON memory_ops_log(request_id);
+CREATE INDEX IF NOT EXISTS idx_life_episode_thread ON life_episode(thread_id, last_touched_ts_ms);
+CREATE INDEX IF NOT EXISTS idx_life_episode_person_session ON life_episode(person_id, session_id, last_touched_ts_ms);
+CREATE INDEX IF NOT EXISTS idx_life_episode_truth ON life_episode(truth_state, status, last_touched_ts_ms);
+CREATE INDEX IF NOT EXISTS idx_life_episode_primary_ref ON life_episode(primary_ref);
+CREATE INDEX IF NOT EXISTS idx_life_evidence_episode ON life_evidence(episode_id, created_ts_ms);
+CREATE INDEX IF NOT EXISTS idx_life_evidence_source_ref ON life_evidence(source_ref);
+CREATE INDEX IF NOT EXISTS idx_life_evidence_request ON life_evidence(request_id);
+CREATE INDEX IF NOT EXISTS idx_life_episode_link_source ON life_episode_link(source_episode_id, link_kind);
+CREATE INDEX IF NOT EXISTS idx_life_episode_link_target ON life_episode_link(target_episode_id, link_kind);
+CREATE INDEX IF NOT EXISTS idx_life_memory_correction_episode ON life_memory_correction(episode_id, created_ts_ms);
+CREATE INDEX IF NOT EXISTS idx_life_memory_compaction_episode ON life_memory_compaction(compressed_episode_id, created_ts_ms);
 CREATE INDEX IF NOT EXISTS idx_vault_manifest_id ON vault_manifest_index(manifest_id);
 CREATE INDEX IF NOT EXISTS idx_vault_manifest_intent ON vault_manifest_index(intent_id);
 CREATE INDEX IF NOT EXISTS idx_vault_gc_ts ON vault_gc_log(ts_ms);
@@ -564,6 +655,24 @@ CREATE INDEX IF NOT EXISTS idx_model_control_ts ON model_control_log(ts_ms);
 CREATE INDEX IF NOT EXISTS idx_error_ts ON error_log(ts_ms);
 CREATE INDEX IF NOT EXISTS idx_qa_violation_ts ON qa_violation_log(ts_ms);
 CREATE INDEX IF NOT EXISTS idx_memory_ops_ts ON memory_ops_log(ts_ms);
+
+CREATE TABLE IF NOT EXISTS scheduler_event_log (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_id        TEXT,
+    task_id         TEXT,
+    trigger_ts      INTEGER,
+    intent_id       TEXT,
+    status          TEXT,
+    reason_code     TEXT,
+    mode_at_trigger TEXT,
+    error_detail    TEXT,
+    ts_ms           INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_scheduler_event_task_id ON scheduler_event_log(task_id);
+CREATE INDEX IF NOT EXISTS idx_scheduler_event_trigger_ts ON scheduler_event_log(trigger_ts);
+CREATE INDEX IF NOT EXISTS idx_scheduler_event_ts ON scheduler_event_log(ts_ms);
+CREATE INDEX IF NOT EXISTS idx_scheduler_event_intent ON scheduler_event_log(intent_id);
+CREATE INDEX IF NOT EXISTS idx_scheduler_event_status ON scheduler_event_log(status);
 
 CREATE TABLE IF NOT EXISTS scheduler_tasks (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -666,6 +775,34 @@ CREATE TABLE IF NOT EXISTS llm_pool_call_log (
 );
 CREATE INDEX IF NOT EXISTS idx_llm_pool_call_log_request_id ON llm_pool_call_log (request_id);
 CREATE INDEX IF NOT EXISTS idx_llm_pool_call_log_ts_ms ON llm_pool_call_log (ts_ms);
+
+-- LLM token usage ledger. Provider usage is not always available, so rows
+-- can be estimated while preserving separate billable estimates for cache hits.
+CREATE TABLE IF NOT EXISTS llm_token_usage_log (
+    id                         INTEGER PRIMARY KEY AUTOINCREMENT,
+    request_id                 TEXT    NOT NULL,
+    scene_type                 TEXT    NOT NULL,
+    cognitive_tier             TEXT    NOT NULL,
+    provider                   TEXT,
+    model_id                   TEXT,
+    prompt_tokens              INTEGER NOT NULL DEFAULT 0,
+    completion_tokens          INTEGER NOT NULL DEFAULT 0,
+    total_tokens               INTEGER NOT NULL DEFAULT 0,
+    billable_prompt_tokens     INTEGER NOT NULL DEFAULT 0,
+    billable_completion_tokens INTEGER NOT NULL DEFAULT 0,
+    billable_total_tokens      INTEGER NOT NULL DEFAULT 0,
+    estimated                  INTEGER NOT NULL DEFAULT 1,
+    cached                     INTEGER NOT NULL DEFAULT 0,
+    pool_exhausted             INTEGER NOT NULL DEFAULT 0,
+    attempt_count              INTEGER NOT NULL DEFAULT 0,
+    billable_attempt_count     INTEGER NOT NULL DEFAULT 0,
+    source                     TEXT    NOT NULL DEFAULT 'estimate',
+    detail_json                TEXT    NOT NULL DEFAULT '{}',
+    ts_ms                      INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_llm_token_usage_log_request_id ON llm_token_usage_log (request_id);
+CREATE INDEX IF NOT EXISTS idx_llm_token_usage_log_ts_ms ON llm_token_usage_log (ts_ms);
+CREATE INDEX IF NOT EXISTS idx_llm_token_usage_log_scene ON llm_token_usage_log (scene_type);
 
 -- M26-C: LLM 路由配置热更新审计表
 CREATE TABLE IF NOT EXISTS llm_route_config_log (

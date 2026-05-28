@@ -496,6 +496,30 @@ class TestQQAdapterOutbound(unittest.TestCase):
         self.assertEqual(payload["message"][0]["data"]["file"], "https://example.com/image.jpg")
 
     @patch("edge_client.gateway.adapters.qq_adapter.httpx.post")
+    def test_send_image_url_with_caption_in_same_message(self, mock_post: MagicMock) -> None:
+        """图片推荐卡应把封面和说明文本放进同一条 OneBot 消息。"""
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {"retcode": 0}
+        mock_resp.raise_for_status = MagicMock()
+        mock_post.return_value = mock_resp
+
+        adapter = _adapter()
+        reply = self._make_reply(
+            msg_type=MsgType.IMAGE,
+            content="1. 桌游咖 3\n详情：https://www.lightnovel.fun/cn/detail/1143317",
+            media_path="https://example.com/image.jpg",
+        )
+        result = adapter.send_reply(reply)
+        self.assertTrue(result)
+
+        payload = mock_post.call_args[1]["json"]
+        self.assertEqual(payload["message"][0]["type"], "image")
+        self.assertEqual(payload["message"][0]["data"]["file"], "https://example.com/image.jpg")
+        self.assertEqual(payload["message"][1]["type"], "text")
+        self.assertIn("桌游咖 3", payload["message"][1]["data"]["text"])
+        self.assertNotIn("example.com/image.jpg", payload["message"][1]["data"]["text"])
+
+    @patch("edge_client.gateway.adapters.qq_adapter.httpx.post")
     def test_send_image_base64(self, mock_post: MagicMock) -> None:
         """T-QQ-OUTBOUND-05: 通过 base64 发送图片。"""
         mock_resp = MagicMock()
@@ -538,6 +562,64 @@ class TestQQAdapterOutbound(unittest.TestCase):
         payload = mock_post.call_args[1]["json"]
         self.assertEqual(payload["message"][0]["type"], "record")
         self.assertTrue(payload["message"][0]["data"]["file"].startswith("file:///"))
+
+    @patch("edge_client.gateway.adapters.qq_adapter.httpx.post")
+    def test_send_file_private_uses_upload_private_file(self, mock_post: MagicMock) -> None:
+        """T-QQ-OUTBOUND-06b: 私聊文件走 OneBot 文件上传接口。"""
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {"retcode": 0}
+        mock_resp.raise_for_status = MagicMock()
+        mock_post.return_value = mock_resp
+
+        with tempfile.NamedTemporaryFile(suffix=".epub", delete=False) as tmp:
+            tmp.write(b"fake epub")
+            file_path = tmp.name
+        try:
+            adapter = _adapter()
+            reply = self._make_reply(
+                msg_type=MsgType.FILE,
+                media_path=file_path,
+            )
+            reply.raw_extra["file_name"] = "book.epub"
+            result = adapter.send_reply(reply)
+        finally:
+            os.unlink(file_path)
+
+        self.assertTrue(result)
+        call_args = mock_post.call_args
+        self.assertIn("upload_private_file", call_args[0][0])
+        payload = call_args[1]["json"]
+        self.assertEqual(payload["user_id"], 789012)
+        self.assertEqual(payload["name"], "book.epub")
+        self.assertTrue(payload["file"].endswith(".epub"))
+
+    @patch("edge_client.gateway.adapters.qq_adapter.httpx.post")
+    def test_send_file_group_uses_upload_group_file(self, mock_post: MagicMock) -> None:
+        """T-QQ-OUTBOUND-06c: 群文件走 OneBot 群文件上传接口。"""
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {"status": "ok", "retcode": 0}
+        mock_resp.raise_for_status = MagicMock()
+        mock_post.return_value = mock_resp
+
+        with tempfile.NamedTemporaryFile(suffix=".txt", delete=False) as tmp:
+            tmp.write(b"hello")
+            file_path = tmp.name
+        try:
+            adapter = _adapter()
+            reply = self._make_reply(
+                conversation_id="qq_group_111222",
+                msg_type=MsgType.FILE,
+                media_path=file_path,
+            )
+            result = adapter.send_reply(reply)
+        finally:
+            os.unlink(file_path)
+
+        self.assertTrue(result)
+        call_args = mock_post.call_args
+        self.assertIn("upload_group_file", call_args[0][0])
+        payload = call_args[1]["json"]
+        self.assertEqual(payload["group_id"], 111222)
 
     @patch("edge_client.gateway.adapters.qq_adapter.httpx.post")
     def test_send_emoji_as_primary_reply(self, mock_post: MagicMock) -> None:
@@ -700,6 +782,17 @@ class TestQQAdapterUtils(unittest.TestCase):
         )
         uri2 = QQAdapter._resolve_media_uri(reply2)
         self.assertEqual(uri2, "https://example.com/img.jpg")
+
+        # media_path 本身是 URL 时直接走 URL，而不是 file:///https://...
+        reply2b = UnifiedReply(
+            conversation_id="qq_dm_1",
+            platform=Platform.QQ,
+            msg_type=MsgType.IMAGE,
+            content="图文说明",
+            media_path="https://example.com/path.jpg",
+        )
+        uri2b = QQAdapter._resolve_media_uri(reply2b)
+        self.assertEqual(uri2b, "https://example.com/path.jpg")
 
         # 无 media_path 无 URL 时走 base64
         reply3 = UnifiedReply(

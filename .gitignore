@@ -12,6 +12,7 @@ skills/
 # --- Editors ---
 .idea/
 .vscode/
+.vs/
 
 # --- Python cache / bytecode ---
 __pycache__/
@@ -151,6 +152,8 @@ flows/exports/
 
 # --- Repository noise / generated evidence ---
 /artifacts/
+/tools/artifacts/
 /tools/external/
 test_output.txt
 tools/_*.png
+xianyu_item.png

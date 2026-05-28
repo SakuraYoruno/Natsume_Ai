@@ -385,6 +385,7 @@ class TestSchedulerTaskConfig:
         config = make_distillation_task_config()
         assert config.trigger_config["hour"] == 3
         assert config.trigger_config["minute"] == 0
+        assert config.trigger_config["catch_up_window_minutes"] == 720
 
     def test_priority_is_low(self):
         from host_brain.scheduler.task_registry import TaskPriority

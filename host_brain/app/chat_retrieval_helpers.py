@@ -288,7 +288,7 @@ async def _run_retrieval(
                 "degraded": True,
                 "route_count": 0,
                 "candidate_count": 0,
-                "rerank_topk": 0,
+                "topk_count": 0,
                 "routes": [],
                 "query_plan": {"intent": "surface_memory_recall", "text_len": len(str(message or ""))},
                 "target_stores": [],
@@ -319,11 +319,12 @@ def _surface_memory_retrieval_summary(
         "degraded": degraded,
         "route_count": route_count,
         "candidate_count": int(getattr(packet, "candidate_count", 0) or 0),
-        "rerank_topk": 0,
+        "topk_count": 0,
         "routes": list(getattr(packet, "route_ids", ()) or []),
         "query_plan": {
             "intent": "surface_memory_recall",
             "task_mode": str(plan.get("task_mode") or ""),
+            "recall_policy": str(plan.get("recall_policy") or ""),
             "reason": str(plan.get("reason") or ""),
             "text_len": len(str(getattr(packet, "query", "") or "")),
         },
@@ -348,7 +349,7 @@ def _surface_task_mode_from_intent(*, message: str, intent_draft: Mapping[str, A
     text = str(message or "").strip()
     if any(token in text for token in ("记一下", "记住", "帮我记", "替我记", "记着", "记下来")):
         return "memory_write"
-    if any(token in text for token in ("还记得", "记得吗", "上次", "之前", "刚才")):
+    if any(token in text for token in ("还记得", "记得吗", "上次", "之前", "刚才", "跑完", "完成了吗", "失败原因", "今日推荐", "推荐结果")):
         return "recall_memory"
     if any(token in text for token in ("报错", "错误", "测试", "提交", "仓库", "代码", "怎么改", "下一步")):
         return "technical_help"
@@ -472,6 +473,14 @@ def _build_surface_memory_recall_service() -> Any:
 
     node_id = "surface_main_chain_memory_recall"
     routes = {
+        "surface_life_episode": RecallRouteConfig(
+            route_id="surface_life_episode",
+            store_id="life_episode",
+            collection="life_episode",
+            top_k=6,
+            score_weight=1.25,
+            node_selector=node_id,
+        ),
         "surface_semantic": RecallRouteConfig(
             route_id="surface_semantic",
             store_id="semantic_memory",
@@ -531,7 +540,7 @@ def _build_skipped_retrieval_summary(reason_code: str) -> Dict[str, Any]:
         "degraded": False,
         "route_count": 0,
         "candidate_count": 0,
-        "rerank_topk": 0,
+        "topk_count": 0,
         "routes": [],
     }
 
@@ -543,6 +552,6 @@ def _build_degraded_retrieval_summary(reason_code: str) -> Dict[str, Any]:
         "degraded": True,
         "route_count": 0,
         "candidate_count": 0,
-        "rerank_topk": 0,
+        "topk_count": 0,
         "routes": [],
     }

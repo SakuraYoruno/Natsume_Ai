@@ -27,6 +27,7 @@ def test_classify_user_and_assistant_topic_cover_major_regex_branches() -> None:
     assert _classify_user_topic("那你还会帮我吗") == "help_commitment"
     assert _classify_user_topic("hello") == "greeting"
     assert _classify_user_topic("在吗") == "presence_ping"
+    assert _classify_user_topic("听得到吗") == "auditory_check"
     assert _classify_user_topic("嗯嗯") == "light_ack"
     assert _classify_user_topic("戳戳") == "playful_ping"
     assert _classify_assistant_topic("哥哥，怎么委屈成这样呀？") == "image_social"
@@ -47,6 +48,21 @@ def test_connectivity_check_is_presence_ping_not_plain_hold() -> None:
 
     assert interpretation.literal_topic == "presence_ping"
     assert interpretation.ongoing_thread == "phatic"
+
+
+def test_auditory_text_check_is_not_plain_presence_ping() -> None:
+    assert classify_literal_topic("听得到吗") == "auditory_check"
+    assert classify_literal_topic("你能听见我说话吗？") == "auditory_check"
+
+    interpretation = interpret_conversation(
+        recent_turns=[],
+        user_message="听得到吗",
+        topic_ledger=TopicLedgerBlock(),
+    )
+
+    assert interpretation.literal_topic == "auditory_check"
+    assert interpretation.interaction_move == "auditory_probe"
+    assert "literal_topic:auditory_check" in interpretation.reason_tags
 
 
 def test_coerce_interaction_thread_state_and_default_empty() -> None:

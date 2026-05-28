@@ -327,9 +327,16 @@ class CircadianAgent:
             return None
 
     def export_runtime_state(self) -> dict[str, Any]:
-        self.refresh_state(source="export_runtime_state")
         snap = self.state_registry.get_state("circadian_agent") or {}
         state = dict(snap.get("state") or {})
+        # Runtime exports are read-only projections. Phase-transition side effects
+        # belong to refresh_state(), scheduler ticks, or event handlers.
+        try:
+            projected = self.evaluate_profile()
+            state.update(projected)
+            state.setdefault("source", "export_runtime_state_read_only")
+        except Exception:
+            pass
         return {
             "phase": str(state.get("phase") or "day"),
             "local_hour": int(state.get("local_hour") or 12),

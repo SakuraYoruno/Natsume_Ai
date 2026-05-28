@@ -389,6 +389,7 @@ def _qualitative_relationship_summary(
     micro_social_topic = topic in {
         "greeting",
         "presence_ping",
+        "auditory_check",
         "light_ack",
         "phatic_punct",
         "playful_ping",
@@ -475,6 +476,7 @@ def _should_require_strict_validation(
     if normalized_topic in {
         "greeting",
         "presence_ping",
+        "auditory_check",
         "light_ack",
         "phatic_punct",
         "playful_ping",
@@ -528,6 +530,7 @@ def _should_force_buffering(
     if normalized_topic in {
         "greeting",
         "presence_ping",
+        "auditory_check",
         "light_ack",
         "phatic_punct",
         "playful_ping",
@@ -673,6 +676,7 @@ def _build_reply_contract(
     if str(render_target_lang or "").strip().lower() == "ja":
         mapping = {
             "phatic_wave": "挨拶を自然に受けて、短い実質的な一言を返す。",
+            "auditory_grounding": "入力証拠に合わせる。音声入力ではない時は、音は聞こえていないことと文字だけ見えていることを短く返す。",
             "playful_wave": "軽い呼びかけを受けて、短く明るく返す。",
             "soft_emotion_ack": "画像から伝わる感情を受けて、短い実質的な一言を返す。",
             "cute_image_ack": "かわいい雰囲気を受けて、軽く柔らかく返す。",
@@ -706,6 +710,7 @@ def _build_reply_contract(
         )
     mapping = {
         "phatic_wave": "先把这句招呼自然接住，再给一句有实质内容的短回应，不要只剩符号或空壳句。",
+        "auditory_grounding": "先按输入证据回应；没有语音证据时说明没听见声音、只看到当前文字，不要只回在呢，也不要假装听到了声音。",
         "playful_wave": "先把这句轻松招呼接住，再回一句自然短接话，不要只剩感叹词。",
         "soft_emotion_ack": "把对方发图表达的情绪当成聊天信号来回，不要只剩语气词。",
         "cute_image_ack": "把对方装乖/卖萌的动作当成聊天信号来回，不要只剩语气词。",
@@ -735,6 +740,7 @@ def _build_reply_contract(
         ("phatic_wave", "greeting"): "把招呼自然接住，再回一句短短的在场回应，不要只剩感叹词或符号。",
         ("phatic_wave", "presence"): "先让对方知道你在，再短短接一句，不要只剩空壳句。",
         ("phatic_wave", "light_ack"): "先接住这句轻招呼，再给一句短回应，不要只剩单个语气词。",
+        ("auditory_grounding", "no_audio_seen_text"): "用户用文字问听得到吗时，先像真实没听见声音那样轻轻困惑，再说只看到了这条文字；若有真实语音输入证据才可以确认收到。不要回“在呢”，不要无证据说“听到了”。",
         ("playful_wave", "playful_ping"): "把这句轻松招呼接住，再自然回一句俏皮短接话，不要只剩语气词。",
         ("soft_emotion_ack", "distress_image"): "对方用表情包递来一点低落或委屈，回一句自然短接话，不要解释画面。",
         ("soft_emotion_ack", "soft_hold"): "对方用表情包递来软一点的情绪，回一句自然短接话，不要解释画面。",
@@ -1238,18 +1244,20 @@ def _build_topic_trajectory_options(
                 followup_kind,
             ))
         return options
-    if topic in {"greeting", "presence_ping", "light_ack", "phatic_punct"}:
+    if topic in {"greeting", "presence_ping", "auditory_check", "light_ack", "phatic_punct"}:
         variant = "greeting"
         if topic == "presence_ping":
             variant = "presence"
+        elif topic == "auditory_check":
+            variant = "no_audio_seen_text"
         elif topic in {"light_ack", "phatic_punct"}:
             variant = "light_ack"
         return [(
-            "phatic_wave",
+            "auditory_grounding" if topic == "auditory_check" else "phatic_wave",
             variant,
             ResponseTrajectory(
-                response_goal="phatic_reply",
-                tactic_family="phatic_wave",
+                response_goal="auditory_text_check" if topic == "auditory_check" else "phatic_reply",
+                tactic_family="auditory_grounding" if topic == "auditory_check" else "phatic_wave",
                 tactic_variant=variant,
                 trajectory_stage="first_turn",
             ),
@@ -1675,7 +1683,7 @@ def _assemble_reply_plan(
             forbidden_patterns.append("identity_name_restate")
         if trajectory.trajectory_stage != "first_turn":
             plan_confidence = 0.83
-    elif topic in {"greeting", "presence_ping", "light_ack", "phatic_punct", "playful_ping"}:
+    elif topic in {"greeting", "presence_ping", "auditory_check", "light_ack", "phatic_punct", "playful_ping"}:
         forbidden_patterns.extend(["same_as_previous_reply", "repeated_tactic"])
         plan_confidence = 0.8
     elif topic in {"emoji_social_reply", "emoji_social_followup"}:
@@ -1767,7 +1775,7 @@ def _assemble_reply_plan(
         max_chars = min(max_chars, 64)
         max_sentences = 1
         should_be_brief = True
-    elif topic in {"greeting", "presence_ping", "light_ack", "phatic_punct", "playful_ping"}:
+    elif topic in {"greeting", "presence_ping", "auditory_check", "light_ack", "phatic_punct", "playful_ping"}:
         max_chars = min(max_chars, 84)
         max_sentences = min(max_sentences, 2)
         should_be_brief = True
