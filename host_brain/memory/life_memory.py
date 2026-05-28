@@ -3159,7 +3159,7 @@ def _collection_item_summary(item: Mapping[str, Any]) -> str:
     parts: list[str] = []
     for label, keys in (
         ("看点", ("selection_reason", "rationale", "reason", "why", "look_point")),
-        ("简介", ("intro_snippet", "intro", "description", "summary", "abstract")),
+        ("简介", ("intro_snippet", "intro", "description", "content_excerpt", "body_excerpt", "summary", "abstract")),
         ("题材", ("genre", "category", "topic", "theme", "tags")),
         ("更新", ("update_time", "updated_at", "freshness")),
     ):

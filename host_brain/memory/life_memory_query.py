@@ -139,7 +139,7 @@ RECALL_INTENT_CONTRACTS: dict[str, RecallIntentContract] = {
         contract_id=CONTRACT_EVIDENCE_REVIEW,
         primary_memory_layer="life_episode",
         expected_memory_layers=("life_episode", "life_memory_collection", "life_memory_entity", "semantic_memory", "sqlite_ledger", "episodic_vector"),
-        validation_requirements=("trusted_memory_hit", "source_ref_present"),
+        validation_requirements=("trusted_memory_hit", "source_ref_present", "target_domain_match"),
         answer_obligations=("use_detail_or_body_evidence", "say_if_detail_evidence_is_missing", "do_not_invent_unread_content"),
     ),
     CONTRACT_NO_RECALL: RecallIntentContract(contract_id=CONTRACT_NO_RECALL),
@@ -157,12 +157,12 @@ _RECENT_COLLECTION_RE = re.compile(
 )
 _DATE_LOOKUP_RE = re.compile(r"(?:今天|今日|昨天|昨晚|前天|上次|之前|以前|过去|这周)")
 _BOOK_DOMAIN_RE = re.compile(r"(?:轻小说|小说|书籍|书|epub|lightnovel)", re.IGNORECASE)
-_WEB_DOMAIN_RE = re.compile(r"(?:网页|网站|链接|页面|url|https?|web|站点)", re.IGNORECASE)
+_WEB_DOMAIN_RE = re.compile(r"(?:网页|网站|链接|页面|url|https?|web|站点|浏览器|browser)", re.IGNORECASE)
 _FILE_DOMAIN_RE = re.compile(r"(?:文件|文档|报告|pdf|epub|txt|markdown|表格|附件)", re.IGNORECASE)
 _DETAIL_EVIDENCE_RE = re.compile(r"(?:正文|网页|页面|文件|文档|报告|链接|附件|epub|pdf|txt|内容|原文|详情|工具结果|执行结果|截图|图片|语音|转写)")
 _JUDGMENT_RE = re.compile(
     r"(?:靠谱|可靠|好不好|怎么样|如何|评价|判断|分析|比较|优缺点|风险|依据|结论|值得|推荐|更好|最好|"
-    r"哪个更|哪(?:个|种|篇|份|本|部).{0,8}(?:好|靠谱|可靠|值得|推荐)|深入|翻看|读了|查了|看了)"
+    r"哪个更|哪(?:个|种|篇|份|本|部).{0,8}(?:好|靠谱|可靠|值得|推荐)|深入|翻看)"
 )
 _RECOMMENDATION_RE = re.compile(r"(?:推荐|推送|发给我|发过|选书|书单)")
 _ITEM_COUNT_RE = re.compile(r"(?:这|那|昨天|前天|今天|最近|几天)?.{0,4}(?:三本|几本|十几本|这些|那些|几个|几部|三部)")
@@ -171,6 +171,7 @@ _EVENT_LOOKUP_RE = re.compile(
     r"做(?:了|过)?什么|干(?:了|过)?什么|做过哪些|"
     r"发(?:了|过)?什么|推送(?:了|过)?什么|回复(?:了|过)?什么|"
     r"执行(?:了|过)?什么|执行情况|跑(?:了|过)?什么|调用(?:了|过)?什么|处理(?:了|过)?什么|"
+    r"查(?:了|过)?什么|看(?:了|过)?什么|打开(?:了|过)?什么|浏览(?:了|过)?什么|"
     r"后台任务|调度任务|任务执行|有哪些(?:动作|任务|事情|经历)"
     r")"
 )
@@ -493,7 +494,7 @@ def _looks_like_event_lookup_query(text: str, *, temporal_scope: str) -> bool:
         return True
     if temporal_scope == TEMPORAL_UNSPECIFIED:
         return False
-    return any(token in text for token in ("做了", "做过", "发了", "发过", "推送", "执行", "任务", "跑完", "处理"))
+    return any(token in text for token in ("做了", "做过", "发了", "发过", "推送", "执行", "任务", "跑完", "处理", "查了", "查过", "看了", "看过", "打开", "浏览"))
 
 
 def _looks_like_evidence_review_query(text: str, *, temporal_scope: str) -> bool:

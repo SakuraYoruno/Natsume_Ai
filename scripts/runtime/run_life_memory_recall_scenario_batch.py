@@ -39,6 +39,7 @@ class ScenarioExpectation:
     must_receipt_min_items: int = 0
     must_receipt_scope: str = ""
     must_coverage_min: float = 0.66
+    must_detail_basis: str = ""
 
 
 class _NullChromaClient:
@@ -103,6 +104,36 @@ def run_scenario_batch() -> dict[str, Any]:
 def _seed_world(store: LifeMemoryStore) -> None:
     for day in (25, 26, 27, 28):
         _seed_recommendation(store, day=day)
+    store.write_background_episode(
+        event_source="browser",
+        event_id="web-onebot-edge-report",
+        person_id="owner",
+        session_id="qq_dm_owner",
+        task_id="web_research",
+        status="COMPLETED",
+        reason_code="WEB_REPORT_READ",
+        detail=(
+            "昨天阅读了一个网页报告；网页主题：OneBot 部署位置核对；"
+            "正文内容：OneBot 在 edge-lan 上运行，本机只负责 host；"
+            "依据：报告正文包含 edge-lan ssh、网关地址和运行位置三项互相一致的信息。"
+        ),
+        ts_ms=_ts(27, 10),
+        metadata={
+            "domain": "web",
+            "evidence_refs": [
+                "https://example.com/onebot-edge-report",
+                "doc://web/onebot-edge-report#body",
+            ],
+            "items": [
+                {
+                    "title": "OneBot 部署位置网页报告",
+                    "detail_url": "https://example.com/onebot-edge-report",
+                    "content_excerpt": "OneBot 在 edge-lan 上运行，本机只负责 host。",
+                    "body_ref": "doc://web/onebot-edge-report#body",
+                }
+            ],
+        },
+    )
     store.write_background_episode(
         event_source="codex_production",
         event_id="deepseek-failure-1",
@@ -196,6 +227,9 @@ def _run_case(*, service: RecallFusionServiceContract, case: ScenarioExpectation
         checks["receipt_item_count"] = int(receipt.get("selected_item_count") or 0) >= int(case.must_receipt_min_items)
     if case.must_receipt_scope:
         checks["receipt_scope"] = case.must_receipt_scope in list(receipt.get("selected_scope_keys") or [])
+    if case.must_detail_basis:
+        detail = dict(receipt.get("detail_evidence") or {})
+        checks["detail_basis"] = detail.get("basis") == case.must_detail_basis
     return {
         "case": asdict(case),
         "passed": all(checks.values()),
@@ -288,6 +322,26 @@ def _scenario_expectations() -> list[ScenarioExpectation]:
             must_route="surface_life_collection",
             must_contain="5月27日推荐",
             must_not_contain="5月28日推荐",
+        ),
+        ScenarioExpectation(
+            case_id="web_evidence_review",
+            message="昨天那个网页内容靠谱吗？依据是什么？",
+            expected_reason="evidence_review_recall",
+            expected_kind="evidence_review",
+            must_route="surface_life_episode",
+            must_contain="OneBot 在 edge-lan",
+            must_not_contain="DeepSeek",
+            must_coverage_min=0.95,
+            must_detail_basis="body_evidence",
+        ),
+        ScenarioExpectation(
+            case_id="browser_event_lookup",
+            message="昨天打开浏览器查了什么？",
+            expected_reason="event_memory_recall",
+            expected_kind="date_lookup",
+            must_route="surface_life_episode",
+            must_contain="OneBot 部署位置",
+            must_not_contain="DeepSeek",
         ),
         ScenarioExpectation(
             case_id="day_before_yesterday_collection",

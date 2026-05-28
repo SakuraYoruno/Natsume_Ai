@@ -551,8 +551,26 @@ def test_plan_surface_memory_recall_routes_generic_web_judgment_to_detail_eviden
     assert plan.target_store_ids[:3] == ("life_episode", "life_memory_collection", "life_memory_entity")
     assert "web" in plan.target_domains
     assert "content" in plan.target_domains
+    assert "target_domain_match" in plan.validation_requirements
     assert "use_detail_or_body_evidence" in plan.answer_obligations
     assert "say_if_detail_evidence_is_missing" in plan.answer_obligations
+
+
+def test_plan_surface_memory_recall_treats_prior_browser_activity_as_event_lookup() -> None:
+    plan = plan_surface_memory_recall(
+        ThreeLayerContinuityContext(
+            current_user_message="昨天打开浏览器查了什么？",
+            task_mode_hint="daily_chat",
+        )
+    )
+
+    assert plan.should_recall
+    assert plan.recall_policy == RECALL_POLICY_MUST
+    assert plan.reason == "event_memory_recall"
+    assert plan.query_kind == "date_lookup"
+    assert "action" in plan.target_domains
+    assert "web" in plan.target_domains
+    assert plan.primary_memory_layer == "life_episode"
 
 
 def test_plan_surface_memory_recall_skips_memory_write_current_turn() -> None:
@@ -1131,10 +1149,11 @@ def test_generic_evidence_review_requires_body_or_detail_anchor() -> None:
         max_chars_per_fact=320,
         temporal_scope="yesterday",
         query_kind="evidence_review",
+        target_domains=("web", "content"),
         recall_contract_id="evidence_review",
         primary_memory_layer="life_episode",
         expected_memory_layers=("life_episode", "life_memory_collection", "semantic_memory"),
-        validation_requirements=("trusted_memory_hit", "source_ref_present"),
+        validation_requirements=("trusted_memory_hit", "source_ref_present", "target_domain_match"),
         answer_obligations=("use_detail_or_body_evidence", "say_if_detail_evidence_is_missing"),
     )
 
@@ -1146,6 +1165,74 @@ def test_generic_evidence_review_requires_body_or_detail_anchor() -> None:
     assert "detail_evidence" in coverage["missing"]
     assert packet.facts == ()
     assert packet.reason_code == SURFACE_MEMORY_RECALL_COVERAGE_FAILED
+
+
+def test_generic_evidence_review_filters_wrong_domain_candidates() -> None:
+    packet = build_surface_memory_recall_packet(
+        SimpleNamespace(
+            output={
+                "query": "昨天那个网页内容靠谱吗？依据是什么？",
+                "status": "OK",
+                "stage": "S_RET_RECALL",
+                "degraded": False,
+                "routes": [{"route_id": "surface_life_episode", "store_id": "life_episode"}],
+                "candidate_count": 2,
+                "ts_ms": _ts(2026, 5, 29, 8),
+                "candidates": [
+                    {
+                        "doc_id": "ep-deepseek-failure",
+                        "source_ref": "action://event/deepseek-failure",
+                        "text": "昨天 DeepSeek 失败原因是 provider timeout。",
+                        "score": 0.99,
+                        "metadata": {
+                            "store_id": "life_episode",
+                            "source_ref": "action://event/deepseek-failure",
+                        },
+                    },
+                    {
+                        "doc_id": "ep-web-body",
+                        "source_ref": "https://example.com/report",
+                        "evidence_refs": ["doc://web/report#body"],
+                        "text": "昨天阅读了一个网页报告，正文里列出了样本来源和更新时间。",
+                        "score": 0.80,
+                        "metadata": {
+                            "store_id": "life_episode",
+                            "source_ref": "https://example.com/report",
+                            "evidence_refs_primary": "doc://web/report#body",
+                            "episode_metadata": {
+                                "items": [
+                                    {
+                                        "title": "网页报告",
+                                        "detail_url": "https://example.com/report",
+                                        "content_excerpt": "正文列出了样本来源和更新时间。",
+                                    }
+                                ]
+                            },
+                        },
+                    },
+                ],
+            }
+        ),
+        query="昨天那个网页内容靠谱吗？依据是什么？",
+        max_facts=4,
+        max_chars_per_fact=320,
+        temporal_scope="yesterday",
+        query_kind="evidence_review",
+        target_domains=("web", "content"),
+        recall_contract_id="evidence_review",
+        primary_memory_layer="life_episode",
+        expected_memory_layers=("life_episode", "life_memory_collection", "semantic_memory"),
+        validation_requirements=("trusted_memory_hit", "source_ref_present", "target_domain_match"),
+        answer_obligations=("use_detail_or_body_evidence", "say_if_detail_evidence_is_missing"),
+    )
+
+    joined = "\n".join(packet.facts)
+    validation = dict(dict(packet.trace or {})["validation"])
+    assert packet.reason_code is None
+    assert "网页报告" in joined or "网页" in joined
+    assert "DeepSeek" not in joined
+    assert validation["passed"] is True
+    assert any(check["name"] == "target_domain_match" and check["passed"] for check in validation["checks"])
 
 
 def test_generic_evidence_review_accepts_body_excerpt_as_deep_evidence() -> None:
@@ -1192,7 +1279,8 @@ def test_generic_evidence_review_accepts_body_excerpt_as_deep_evidence() -> None
         recall_contract_id="evidence_review",
         primary_memory_layer="life_episode",
         expected_memory_layers=("life_episode", "life_memory_collection", "semantic_memory"),
-        validation_requirements=("trusted_memory_hit", "source_ref_present"),
+        target_domains=("web", "content"),
+        validation_requirements=("trusted_memory_hit", "source_ref_present", "target_domain_match"),
         answer_obligations=("use_detail_or_body_evidence", "say_if_detail_evidence_is_missing"),
     )
 

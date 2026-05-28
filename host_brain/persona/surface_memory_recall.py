@@ -1007,6 +1007,7 @@ def _build_recall_validation_trace(
             query=query,
             temporal_scope=temporal_scope,
             min_collection_items=min_collection_items,
+            target_domains=target_domains,
         )
         checks.append({"name": requirement, "passed": passed, "detail": detail})
         if not passed:
@@ -1026,6 +1027,7 @@ def _evaluate_recall_validation_requirement(
     query: Any,
     temporal_scope: str,
     min_collection_items: int = 0,
+    target_domains: Sequence[str] | None = None,
 ) -> tuple[bool, str]:
     if requirement == "scope_match":
         expected = _expected_collection_scope_key(temporal_scope, ts_ms=_coerce_int(output.get("ts_ms")))
@@ -1087,6 +1089,13 @@ def _evaluate_recall_validation_requirement(
     if requirement == "trusted_memory_hit":
         passed = bool(rows) and not _contains_suppressed_candidate(candidates)
         return passed, f"selected rows={len(rows)}, suppressed={_contains_suppressed_candidate(candidates)}"
+    if requirement == "target_domain_match":
+        targets = _expanded_target_domains(target_domains)
+        if not targets:
+            return (bool(candidates or rows), "no target domains requested")
+        seen_domains = _domains_from_candidates_and_rows(candidates=candidates, rows=rows)
+        passed = bool(seen_domains.intersection(targets))
+        return passed, f"target={sorted(targets)}, seen={sorted(seen_domains)}"
     if requirement == "error_episode_or_semantic_hit":
         stores = set(_store_counts_from_candidates(candidates)) | {row.store_id for row in rows}
         passed = bool(stores.intersection({"life_episode", "semantic_memory", "sqlite_ledger", "episodic_vector"}))
@@ -1454,7 +1463,7 @@ def _filter_candidates_for_target_domains(
         return rows
     should_filter = (
         _clean_text(primary_memory_layer) == "life_memory_collection"
-        or _clean_text(query_kind) in {"anaphoric_selection", "collection_summary"}
+        or _clean_text(query_kind) in {"anaphoric_selection", "collection_summary", "evidence_review"}
     )
     if not should_filter:
         return rows
@@ -1498,6 +1507,8 @@ def _expanded_target_domains(target_domains: Sequence[str] | None) -> set[str]:
         domains.add("recommendation")
     if "recommendation" in domains:
         domains.add("lightnovel_recommendation")
+    if "web" in domains or "file" in domains:
+        domains.add("content")
     return domains
 
 
@@ -1515,16 +1526,53 @@ def _candidate_domains(candidate: Mapping[str, Any]) -> set[str]:
             action,
             metadata.get("collection_kind"),
             metadata.get("intent"),
+            metadata.get("source_ref"),
+            metadata.get("evidence_refs_primary"),
+            metadata.get("evidence_refs"),
+            metadata.get("primary_ref"),
             candidate.get("text"),
             candidate.get("snippet"),
+            candidate.get("source_ref"),
+            candidate.get("evidence_ref"),
         )
     )
+    domains.update(_domains_from_text_and_refs(text))
     if "lightnovel" in text or "轻小说" in text or "lightnovel.fun" in text:
         domains.update({"lightnovel_recommendation", "recommendation"})
     elif "recommendation" in text or "推荐" in text:
         domains.add("recommendation")
     if any(token in text for token in ("failure", "failed", "timeout", "失败", "异常", "报错")):
         domains.add("failure")
+    return domains
+
+
+def _domains_from_candidates_and_rows(
+    *,
+    candidates: Sequence[Mapping[str, Any]],
+    rows: Sequence[SurfaceMemoryFactRow],
+) -> set[str]:
+    domains: set[str] = set()
+    for candidate in candidates:
+        if isinstance(candidate, Mapping):
+            domains.update(_candidate_domains(candidate))
+    for row in rows:
+        domains.update(_domains_from_text_and_refs(" ".join([row.fact, row.source_ref, row.evidence_ref])))
+    return domains
+
+
+def _domains_from_text_and_refs(value: str) -> set[str]:
+    text = _clean_text(value).lower()
+    domains: set[str] = set()
+    if not text:
+        return domains
+    if re.search(r"https?://|www\.|网页|网站|页面|链接|url|web|站点|浏览器|browser", text, flags=re.IGNORECASE):
+        domains.update({"web", "content"})
+    if re.search(r"file://|doc://|document://|epub://|\.epub\b|\.pdf\b|\.txt\b|\.md\b|\.html?\b|文件|文档|报告|附件|表格", text, flags=re.IGNORECASE):
+        domains.update({"file", "content"})
+    if re.search(r"正文|内容|原文|详情|截图|图片|语音|转写|工具结果|执行结果", text):
+        domains.add("content")
+    if re.search(r"vision://|perception://|图片|截图|视觉|看见|观察", text):
+        domains.update({"perception", "content"})
     return domains
 
 
@@ -1752,7 +1800,7 @@ def _trace_collection_item_payload(
             "scope_key": scope_key,
             "index": _coerce_int(item.get("position") or item_meta.get("position"), default=0),
             "title": title,
-            "detail_url": source_ref if "lightnovel.fun" in source_ref else "",
+            "detail_url": source_ref if _looks_like_detail_anchor(source_ref) else "",
             "source_ref": source_ref,
             "evidence_ref": _first_item_text(item, ("evidence_ref",), limit=260),
             "selection_reason": _first_item_text(
@@ -1765,6 +1813,13 @@ def _trace_collection_item_payload(
                 ("intro_snippet", "intro", "description", "summary", "abstract"),
                 limit=220,
             ),
+            "content_excerpt": _first_item_text(
+                {**item_meta, **dict(item)},
+                ("content_excerpt", "body_excerpt", "content_text", "chapter_signal", "detail_observations", "body_observations"),
+                limit=320,
+            ),
+            "body_ref": _first_item_text({**item_meta, **dict(item)}, ("body_ref", "detail_evidence_ref", "document_ref", "file_ref"), limit=260),
+            "content_char_count": _coerce_int(item.get("content_char_count") or item_meta.get("content_char_count"), default=0),
             "update_time": _first_item_text({**item_meta, **dict(item)}, ("update_time", "updated_at", "freshness"), limit=80),
             "view_count": _first_item_text({**item_meta, **dict(item)}, ("view_count", "views"), limit=40),
             "comment_count": _first_item_text({**item_meta, **dict(item)}, ("comment_count", "comments"), limit=40),
@@ -1806,7 +1861,7 @@ def _trace_entity_item_payload(
             "scope_key": _clean_text(item.get("scope_key")),
             "index": _coerce_int(item.get("position"), default=0),
             "title": title,
-            "detail_url": source_ref if "lightnovel.fun" in source_ref else "",
+            "detail_url": source_ref if _looks_like_detail_anchor(source_ref) else "",
             "source_ref": source_ref,
             "evidence_ref": _first_item_text(merged, ("evidence_ref", "item_evidence_ref"), limit=260),
             "selection_reason": _first_item_text(
@@ -1819,6 +1874,13 @@ def _trace_entity_item_payload(
                 ("intro_snippet", "intro", "description", "summary", "abstract"),
                 limit=220,
             ),
+            "content_excerpt": _first_item_text(
+                merged,
+                ("content_excerpt", "body_excerpt", "content_text", "chapter_signal", "detail_observations", "body_observations"),
+                limit=320,
+            ),
+            "body_ref": _first_item_text(merged, ("body_ref", "detail_evidence_ref", "document_ref", "file_ref"), limit=260),
+            "content_char_count": _coerce_int(merged.get("content_char_count"), default=0),
             "update_time": _first_item_text(merged, ("update_time", "updated_at", "freshness"), limit=80),
             "view_count": _first_item_text(merged, ("view_count", "views"), limit=40),
             "comment_count": _first_item_text(merged, ("comment_count", "comments"), limit=40),
@@ -2328,7 +2390,7 @@ def _structured_life_episode_recall_text(text: str, *, metadata: Mapping[str, An
             continue
         parts = [f"{index}. {title}"]
         rationale = _first_item_text(item, ("selection_reason", "rationale", "reason", "why", "look_point"), limit=50 if compact_many else 80)
-        intro = _first_item_text(item, ("intro_snippet", "intro", "description", "item_summary", "summary", "abstract"), limit=58 if compact_many else 96)
+        intro = _first_item_text(item, ("intro_snippet", "intro", "description", "content_excerpt", "body_excerpt", "item_summary", "summary", "abstract"), limit=58 if compact_many else 96)
         topic = _first_item_text(item, ("genre", "category", "topic", "theme", "tags"), limit=50)
         update = _first_item_text(item, ("update_time", "updated_at", "freshness"), limit=32)
         heat = _heat_text(item)
