@@ -534,6 +534,27 @@ def test_plan_surface_memory_recall_treats_anaphoric_selection_as_recall() -> No
     assert plan.time_lookback_days == 1
 
 
+def test_plan_surface_memory_recall_routes_generic_web_judgment_to_detail_evidence_contract() -> None:
+    plan = plan_surface_memory_recall(
+        ThreeLayerContinuityContext(
+            current_user_message="昨天那个网页内容靠谱吗？依据是什么？",
+            task_mode_hint="daily_chat",
+        )
+    )
+
+    assert plan.should_recall
+    assert plan.recall_policy == RECALL_POLICY_MUST
+    assert plan.reason == "evidence_review_recall"
+    assert plan.query_kind == "evidence_review"
+    assert plan.recall_contract_id == "evidence_review"
+    assert plan.primary_memory_layer == "life_episode"
+    assert plan.target_store_ids[:3] == ("life_episode", "life_memory_collection", "life_memory_entity")
+    assert "web" in plan.target_domains
+    assert "content" in plan.target_domains
+    assert "use_detail_or_body_evidence" in plan.answer_obligations
+    assert "say_if_detail_evidence_is_missing" in plan.answer_obligations
+
+
 def test_plan_surface_memory_recall_skips_memory_write_current_turn() -> None:
     plan = plan_surface_memory_recall(
         ThreeLayerContinuityContext(
@@ -1078,6 +1099,111 @@ def test_selection_recall_accepts_detail_anchor_before_deep_review_fetch() -> No
     assert receipt["detail_evidence"]["ready_for_deep_review"] is True
     assert coverage["passed"] is True
     assert coverage["dimensions"]["detail_evidence"] == 0.75
+
+
+def test_generic_evidence_review_requires_body_or_detail_anchor() -> None:
+    packet = build_surface_memory_recall_packet(
+        SimpleNamespace(
+            output={
+                "query": "昨天那个网页内容靠谱吗？依据是什么？",
+                "status": "OK",
+                "stage": "S_RET_RECALL",
+                "degraded": False,
+                "routes": [{"route_id": "surface_life_episode", "store_id": "life_episode"}],
+                "candidate_count": 1,
+                "ts_ms": _ts(2026, 5, 29, 8),
+                "candidates": [
+                    {
+                        "doc_id": "ep-web-summary-only",
+                        "source_ref": "action://event/web-check",
+                        "text": "昨天查过一个网页，结论是看起来还行。",
+                        "score": 0.94,
+                        "metadata": {
+                            "store_id": "life_episode",
+                            "source_ref": "action://event/web-check",
+                        },
+                    }
+                ],
+            }
+        ),
+        query="昨天那个网页内容靠谱吗？依据是什么？",
+        max_facts=4,
+        max_chars_per_fact=320,
+        temporal_scope="yesterday",
+        query_kind="evidence_review",
+        recall_contract_id="evidence_review",
+        primary_memory_layer="life_episode",
+        expected_memory_layers=("life_episode", "life_memory_collection", "semantic_memory"),
+        validation_requirements=("trusted_memory_hit", "source_ref_present"),
+        answer_obligations=("use_detail_or_body_evidence", "say_if_detail_evidence_is_missing"),
+    )
+
+    receipt = dict(dict(packet.trace or {})["recall_receipt"])
+    coverage = dict(dict(packet.trace or {})["recall_coverage"])
+    assert receipt["detail_evidence"]["required"] is True
+    assert receipt["detail_evidence"]["basis"] == "missing_detail_evidence"
+    assert coverage["passed"] is False
+    assert "detail_evidence" in coverage["missing"]
+    assert packet.facts == ()
+    assert packet.reason_code == SURFACE_MEMORY_RECALL_COVERAGE_FAILED
+
+
+def test_generic_evidence_review_accepts_body_excerpt_as_deep_evidence() -> None:
+    packet = build_surface_memory_recall_packet(
+        SimpleNamespace(
+            output={
+                "query": "昨天那个网页内容靠谱吗？依据是什么？",
+                "status": "OK",
+                "stage": "S_RET_RECALL",
+                "degraded": False,
+                "routes": [{"route_id": "surface_life_episode", "store_id": "life_episode"}],
+                "candidate_count": 1,
+                "ts_ms": _ts(2026, 5, 29, 8),
+                "candidates": [
+                    {
+                        "doc_id": "ep-web-body",
+                        "source_ref": "https://example.com/report",
+                        "evidence_refs": ["doc://web/report#body"],
+                        "text": "昨天查过网页报告。",
+                        "score": 0.94,
+                        "metadata": {
+                            "store_id": "life_episode",
+                            "source_ref": "https://example.com/report",
+                            "evidence_refs_primary": "doc://web/report#body",
+                            "episode_metadata": {
+                                "items": [
+                                    {
+                                        "title": "网页报告",
+                                        "detail_url": "https://example.com/report",
+                                        "content_excerpt": "报告正文列出了样本来源、更新时间和限制条件，可据此判断可信度。",
+                                    }
+                                ]
+                            },
+                        },
+                    }
+                ],
+            }
+        ),
+        query="昨天那个网页内容靠谱吗？依据是什么？",
+        max_facts=4,
+        max_chars_per_fact=320,
+        temporal_scope="yesterday",
+        query_kind="evidence_review",
+        recall_contract_id="evidence_review",
+        primary_memory_layer="life_episode",
+        expected_memory_layers=("life_episode", "life_memory_collection", "semantic_memory"),
+        validation_requirements=("trusted_memory_hit", "source_ref_present"),
+        answer_obligations=("use_detail_or_body_evidence", "say_if_detail_evidence_is_missing"),
+    )
+
+    receipt = dict(dict(packet.trace or {})["recall_receipt"])
+    coverage = dict(dict(packet.trace or {})["recall_coverage"])
+    assert packet.reason_code is None
+    assert packet.facts
+    assert receipt["detail_evidence"]["basis"] == "body_evidence"
+    assert receipt["detail_evidence"]["body_item_count"] == 1
+    assert coverage["passed"] is True
+    assert coverage["dimensions"]["detail_evidence"] == 1.0
 
 
 def test_collection_scope_query_filters_self_echo_when_many_books_requested() -> None:

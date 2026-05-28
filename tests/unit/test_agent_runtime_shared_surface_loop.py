@@ -86,6 +86,15 @@ def test_normalize_retrieval_summary_keeps_safe_surface_memory_trace() -> None:
                         "min_collection_items": 3,
                         "evidence_ref_count": 3,
                         "source_ref_count": 1,
+                        "detail_evidence": {
+                            "required": True,
+                            "ready_for_deep_review": True,
+                            "basis": "body_evidence",
+                            "body_item_count": 1,
+                            "anchor_item_count": 3,
+                            "structured_item_count": 3,
+                            "detail_refs": ["https://www.lightnovel.fun/cn/detail/1"],
+                        },
                     },
                     "lightnovel_deep_review": {
                         "status": "OK",
@@ -112,6 +121,14 @@ def test_normalize_retrieval_summary_keeps_safe_surface_memory_trace() -> None:
     assert trace["recall_need"]["evidence_depth"] == "detail_or_body_evidence"
     assert trace["recall_coverage"]["score"] == 1.0
     assert trace["recall_coverage"]["selected_item_count"] == 3
+    assert trace["recall_coverage"]["detail_evidence"] == {
+        "required": True,
+        "ready_for_deep_review": True,
+        "basis": "body_evidence",
+        "body_item_count": 1,
+        "anchor_item_count": 3,
+        "structured_item_count": 3,
+    }
     assert trace["coverage_score"] == 1.0
     assert trace["lightnovel_deep_review"]["cached"] is True
     assert trace["lightnovel_deep_review"]["source_episode_id"] == "ep-cache"

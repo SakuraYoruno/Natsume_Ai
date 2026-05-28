@@ -405,6 +405,16 @@ def _surface_memory_trace_for_audit(summary: Mapping[str, Any] | None) -> dict[s
             "evidence_ref_count": _safe_int(coverage.get("evidence_ref_count"), default=0),
             "source_ref_count": _safe_int(coverage.get("source_ref_count"), default=0),
         }
+        detail = _coerce_trace_mapping(coverage.get("detail_evidence"))
+        if detail:
+            out["recall_coverage"]["detail_evidence"] = {
+                "required": bool(detail.get("required")),
+                "ready_for_deep_review": bool(detail.get("ready_for_deep_review")),
+                "basis": str(detail.get("basis") or ""),
+                "body_item_count": _safe_int(detail.get("body_item_count"), default=0),
+                "anchor_item_count": _safe_int(detail.get("anchor_item_count"), default=0),
+                "structured_item_count": _safe_int(detail.get("structured_item_count"), default=0),
+            }
         out["coverage_score"] = out["recall_coverage"]["score"]
 
     deep = _coerce_trace_mapping(trace.get("lightnovel_deep_review"))

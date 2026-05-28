@@ -873,6 +873,8 @@ def _recall_need_type(*, kind: str, contract: str, primary_layer: str) -> str:
         return "self_change_episode"
     if kind == "event_lookup":
         return "episode_event"
+    if kind == "evidence_review" or contract == "evidence_review":
+        return "evidence_review"
     return "memory_hit"
 
 

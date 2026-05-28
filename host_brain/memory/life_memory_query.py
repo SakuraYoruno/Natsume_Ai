@@ -26,6 +26,7 @@ QUERY_OPEN_LOOP = "open_loop"
 QUERY_FAILURE_DEBUG = "failure_debug"
 QUERY_CORRECTION = "correction"
 QUERY_SELF_CHANGE = "self_change"
+QUERY_EVIDENCE_REVIEW = "evidence_review"
 
 CONTRACT_NO_RECALL = "no_recall"
 CONTRACT_FAILURE_DEBUG = "failure_debug"
@@ -38,6 +39,7 @@ CONTRACT_CORRECTION = "correction"
 CONTRACT_EXPLICIT_MEMORY = "explicit_memory"
 CONTRACT_PREFERENCE = "preference"
 CONTRACT_SELF_CHANGE = "self_change"
+CONTRACT_EVIDENCE_REVIEW = "evidence_review"
 
 DOMAIN_RECOMMENDATION = "recommendation"
 DOMAIN_LIGHTNOVEL_RECOMMENDATION = "lightnovel_recommendation"
@@ -46,6 +48,9 @@ DOMAIN_FAILURE = "failure"
 DOMAIN_PREFERENCE = "preference"
 DOMAIN_SELF_CHANGE = "self_change"
 DOMAIN_ACTION = "action"
+DOMAIN_WEB = "web"
+DOMAIN_FILE = "file"
+DOMAIN_CONTENT = "content"
 
 
 @dataclass(frozen=True)
@@ -130,6 +135,13 @@ RECALL_INTENT_CONTRACTS: dict[str, RecallIntentContract] = {
         validation_requirements=("trusted_memory_hit", "source_ref_present"),
         answer_obligations=("state_self_change_and_current_effect", "do_not_hide_correction_history"),
     ),
+    CONTRACT_EVIDENCE_REVIEW: RecallIntentContract(
+        contract_id=CONTRACT_EVIDENCE_REVIEW,
+        primary_memory_layer="life_episode",
+        expected_memory_layers=("life_episode", "life_memory_collection", "life_memory_entity", "semantic_memory", "sqlite_ledger", "episodic_vector"),
+        validation_requirements=("trusted_memory_hit", "source_ref_present"),
+        answer_obligations=("use_detail_or_body_evidence", "say_if_detail_evidence_is_missing", "do_not_invent_unread_content"),
+    ),
     CONTRACT_NO_RECALL: RecallIntentContract(contract_id=CONTRACT_NO_RECALL),
 }
 
@@ -145,6 +157,13 @@ _RECENT_COLLECTION_RE = re.compile(
 )
 _DATE_LOOKUP_RE = re.compile(r"(?:今天|今日|昨天|昨晚|前天|上次|之前|以前|过去|这周)")
 _BOOK_DOMAIN_RE = re.compile(r"(?:轻小说|小说|书籍|书|epub|lightnovel)", re.IGNORECASE)
+_WEB_DOMAIN_RE = re.compile(r"(?:网页|网站|链接|页面|url|https?|web|站点)", re.IGNORECASE)
+_FILE_DOMAIN_RE = re.compile(r"(?:文件|文档|报告|pdf|epub|txt|markdown|表格|附件)", re.IGNORECASE)
+_DETAIL_EVIDENCE_RE = re.compile(r"(?:正文|网页|页面|文件|文档|报告|链接|附件|epub|pdf|txt|内容|原文|详情|工具结果|执行结果|截图|图片|语音|转写)")
+_JUDGMENT_RE = re.compile(
+    r"(?:靠谱|可靠|好不好|怎么样|如何|评价|判断|分析|比较|优缺点|风险|依据|结论|值得|推荐|更好|最好|"
+    r"哪个更|哪(?:个|种|篇|份|本|部).{0,8}(?:好|靠谱|可靠|值得|推荐)|深入|翻看|读了|查了|看了)"
+)
 _RECOMMENDATION_RE = re.compile(r"(?:推荐|推送|发给我|发过|选书|书单)")
 _ITEM_COUNT_RE = re.compile(r"(?:这|那|昨天|前天|今天|最近|几天)?.{0,4}(?:三本|几本|十几本|这些|那些|几个|几部|三部)")
 _EVENT_LOOKUP_RE = re.compile(
@@ -208,6 +227,7 @@ def plan_life_memory_query(text: Any, *, task_mode: str | None = None) -> LifeMe
     specific_item_followup = _looks_like_specific_item_followup(message)
     collection_like = _looks_like_collection_query(message, domains=domains, temporal_scope=temporal_scope)
     event_lookup = _looks_like_event_lookup_query(message, temporal_scope=temporal_scope)
+    evidence_review = _looks_like_evidence_review_query(message, temporal_scope=temporal_scope)
     min_collection_items = _minimum_collection_items(message)
     explicit_memory = any(token in message for token in ("还记得", "记得吗", "记不记得", "记了什么", "让你记"))
     failure_debug = any(token in message for token in ("失败原因", "为什么失败", "连不上", "异常原因", "被占用"))
@@ -251,6 +271,25 @@ def plan_life_memory_query(text: Any, *, task_mode: str | None = None) -> LifeMe
             max_facts=4,
             max_chars_per_fact=180,
             reason="explicit_memory_recall",
+            validation_requirements=contract.validation_requirements,
+            recall_contract_id=contract.contract_id,
+            primary_memory_layer=contract.primary_memory_layer,
+            expected_memory_layers=contract.expected_memory_layers,
+            answer_obligations=contract.answer_obligations,
+        )
+
+    if evidence_review and not collection_like:
+        contract = RECALL_INTENT_CONTRACTS[CONTRACT_EVIDENCE_REVIEW]
+        return LifeMemoryQueryPlan(
+            should_recall=True,
+            query_kind=QUERY_EVIDENCE_REVIEW,
+            temporal_scope=temporal_scope if temporal_scope != TEMPORAL_UNSPECIFIED else TEMPORAL_RECENT_DAYS,
+            target_domains=domains,
+            target_store_ids=("life_episode", "life_memory_collection", "life_memory_entity", "semantic_memory", "episodic_vector", "sqlite_ledger"),
+            time_lookback_days=_lookback_for_scope(temporal_scope, default=14),
+            max_facts=5,
+            max_chars_per_fact=320,
+            reason="evidence_review_recall",
             validation_requirements=contract.validation_requirements,
             recall_contract_id=contract.contract_id,
             primary_memory_layer=contract.primary_memory_layer,
@@ -457,6 +496,21 @@ def _looks_like_event_lookup_query(text: str, *, temporal_scope: str) -> bool:
     return any(token in text for token in ("做了", "做过", "发了", "发过", "推送", "执行", "任务", "跑完", "处理"))
 
 
+def _looks_like_evidence_review_query(text: str, *, temporal_scope: str) -> bool:
+    if not text:
+        return False
+    has_memory_anchor = temporal_scope != TEMPORAL_UNSPECIFIED or any(
+        token in text
+        for token in ("刚才", "刚刚", "上次", "之前", "前面", "那次", "那个", "这个", "这些", "那些")
+    )
+    if not has_memory_anchor:
+        return False
+    has_evidence_object = bool(_DETAIL_EVIDENCE_RE.search(text) or _WEB_DOMAIN_RE.search(text) or _FILE_DOMAIN_RE.search(text))
+    if not has_evidence_object:
+        return False
+    return bool(_JUDGMENT_RE.search(text))
+
+
 def _infer_temporal_scope(text: str) -> str:
     if any(token in text for token in ("刚才", "刚刚", "上一句", "前一句", "这三本", "这几本")):
         return TEMPORAL_CURRENT
@@ -507,6 +561,12 @@ def _infer_domains(text: str) -> tuple[str, ...]:
 
     if _BOOK_DOMAIN_RE.search(text):
         add(DOMAIN_LIGHTNOVEL_RECOMMENDATION)
+    if _WEB_DOMAIN_RE.search(text):
+        add(DOMAIN_WEB)
+    if _FILE_DOMAIN_RE.search(text):
+        add(DOMAIN_FILE)
+    if _DETAIL_EVIDENCE_RE.search(text):
+        add(DOMAIN_CONTENT)
     if _RECOMMENDATION_RE.search(text):
         add(DOMAIN_RECOMMENDATION)
     if any(token in text for token in ("任务", "后台", "调度", "执行", "跑完")):
@@ -602,7 +662,7 @@ def _answer_obligations_for_query(text: str, *, contract: RecallIntentContract) 
         for obligation in ("compare_recalled_items_before_answering", "read_detail_evidence_before_deep_quality_judgment"):
             if obligation not in obligations:
                 obligations.append(obligation)
-    if any(token in text for token in ("正文", "epub", "网页", "翻看", "深入")):
+    if _DETAIL_EVIDENCE_RE.search(text) or any(token in text for token in ("翻看", "深入")):
         for obligation in ("use_detail_or_body_evidence", "say_if_detail_evidence_is_missing"):
             if obligation not in obligations:
                 obligations.append(obligation)
