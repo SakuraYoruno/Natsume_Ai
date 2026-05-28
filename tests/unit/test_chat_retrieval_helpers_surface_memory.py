@@ -222,9 +222,13 @@ async def test_run_retrieval_applies_lightnovel_deep_review_before_surface(monke
                             "text": "我刚才通过 qq 推荐了 2 本轻小说：1. A；2. 与神在河岸。",
                             "store_id": "life_episode",
                             "score": 0.92,
+                            "source_ref": "action://event/lightnovel-delivery-test",
+                            "evidence_ref": "gateway://message/lightnovel-delivery-test",
                             "metadata": {
                                 "store_id": "life_episode",
                                 "episode_kind": "action_episode",
+                                "source_ref": "action://event/lightnovel-delivery-test",
+                                "evidence_refs_primary": "gateway://message/lightnovel-delivery-test",
                                 "episode_metadata": {
                                     "selected_recommendations": [
                                         {
@@ -293,6 +297,68 @@ async def test_run_retrieval_applies_lightnovel_deep_review_before_surface(monke
     assert trace["persisted_episode_id"] == "ep-review"
     assert trace["evidence_ref_count"] == 1
     assert isinstance(trace["latency_ms"], int)
+
+
+@pytest.mark.asyncio
+async def test_run_retrieval_preserves_surface_memory_validation_contract(monkeypatch) -> None:
+    class _RecallService:
+        def recall(self, **_kwargs):  # noqa: ANN003
+            return {
+                "output": {
+                    "query": "昨天三本呢？",
+                    "status": "OK",
+                    "stage": "recall_fusion",
+                    "degraded": False,
+                    "candidate_count": 1,
+                    "ts_ms": 1_800_000_000_000,
+                    "routes": [{"route_id": "surface_life_collection", "store_id": "life_memory_collection"}],
+                    "candidates": [
+                        {
+                            "doc_id": "col-today",
+                            "source_ref": "life_memory_collection://col-today",
+                            "evidence_refs": ["gateway://message/today/card/1"],
+                            "text": "2026-05-28 当天轻小说推荐集合，记录 3 个条目；可比较证据：1. Today A｜2. Today B｜3. Today C",
+                            "score": 0.96,
+                            "metadata": {
+                                "store_id": "life_memory_collection",
+                                "scope_key": "daily:2026-05-28",
+                                "domain": "lightnovel_recommendation",
+                                "item_count": 3,
+                                "evidence_refs_primary": "gateway://message/today/card/1",
+                            },
+                        }
+                    ],
+                }
+            }
+
+    monkeypatch.setattr(helpers, "_build_surface_memory_recall_service", lambda: _RecallService())
+    monkeypatch.setattr(helpers, "_embed_surface_memory_query", lambda query: ([0.2] * 16, "test-embedding"))
+
+    summary, _evidence_items = await helpers._run_retrieval(
+        request_id="req-validation-contract",
+        message="昨天三本呢？",
+        person_id="person-1",
+        session_id="sess-1",
+        ts_ms=1_800_000_000_000,
+        emotion_tag="NEUTRAL",
+        render_target_lang="zh",
+        intent_draft={"route": "chat"},
+    )
+
+    packet = summary["surface_memory_recall_packet"]
+    validation = packet["trace"]["validation"]
+    assert summary["status"] == "DEGRADED"
+    assert summary["reason_code"] == "SURFACE_MEMORY_RECALL_VALIDATION_FAILED"
+    assert summary["query_plan"]["validation_requirements"] == [
+        "scope_match",
+        "collection_items_present",
+        "evidence_refs_present",
+        "collection_item_min_count",
+        "collection_item_exact_count",
+    ]
+    assert packet["facts"] == []
+    assert validation["passed"] is False
+    assert "scope_match" in validation["missing"]
 
 
 def test_embed_surface_memory_query_uses_configured_collection_dim(monkeypatch) -> None:

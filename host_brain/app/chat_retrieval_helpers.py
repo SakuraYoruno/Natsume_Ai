@@ -263,6 +263,15 @@ async def _run_retrieval(
                 time_lookback_days=plan.time_lookback_days,
                 max_facts=plan.max_facts,
                 max_chars_per_fact=plan.max_chars_per_fact,
+                validation_requirements=plan.validation_requirements,
+                temporal_scope=plan.temporal_scope,
+                query_kind=plan.query_kind,
+                target_domains=plan.target_domains,
+                recall_contract_id=plan.recall_contract_id,
+                primary_memory_layer=plan.primary_memory_layer,
+                expected_memory_layers=plan.expected_memory_layers,
+                min_collection_items=plan.min_collection_items,
+                answer_obligations=plan.answer_obligations,
                 fail_soft=True,
             )
             packet = replace(
