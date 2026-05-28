@@ -34,6 +34,8 @@ class ScenarioExpectation:
     must_route: str
     must_contain: str
     must_not_contain: str
+    must_trace_key: str = ""
+    must_trace_title: str = ""
 
 
 class _NullChromaClient:
@@ -167,6 +169,13 @@ def _run_case(*, service: RecallFusionServiceContract, case: ScenarioExpectation
         "evidence": bool(packet.evidence_refs),
         "validation": bool(validation) and validation.get("passed") is True,
     }
+    if case.must_trace_key or case.must_trace_title:
+        trace_items = list(dict(packet.trace or {}).get(case.must_trace_key) or [])
+        checks["trace_items"] = bool(trace_items)
+        checks["trace_title"] = any(
+            isinstance(item, dict) and str(item.get("title") or "") == case.must_trace_title
+            for item in trace_items
+        )
     return {
         "case": asdict(case),
         "passed": all(checks.values()),
@@ -266,6 +275,17 @@ def _scenario_expectations() -> list[ScenarioExpectation]:
             must_route="surface_life_collection",
             must_contain="5月26日推荐",
             must_not_contain="DeepSeek",
+        ),
+        ScenarioExpectation(
+            case_id="specific_prior_book_entity",
+            message="5月27日推荐 B 这本好看吗？",
+            expected_reason="anaphoric_selection_recall",
+            expected_kind="anaphoric_selection",
+            must_route="surface_life_entity",
+            must_contain="5月27日推荐 B",
+            must_not_contain="5月28日推荐 B",
+            must_trace_key="selected_entity_items",
+            must_trace_title="5月27日推荐 B",
         ),
         ScenarioExpectation(
             case_id="failure_debug",

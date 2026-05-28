@@ -300,6 +300,96 @@ async def test_run_retrieval_applies_lightnovel_deep_review_before_surface(monke
 
 
 @pytest.mark.asyncio
+async def test_run_retrieval_applies_lightnovel_deep_review_from_entity_trace(monkeypatch) -> None:
+    class _RecallService:
+        def recall(self, **_kwargs):  # noqa: ANN003
+            return {
+                "output": {
+                    "status": "OK",
+                    "stage": "recall_fusion",
+                    "candidate_count": 1,
+                    "routes": [{"route_id": "surface_life_entity", "store_id": "life_memory_entity"}],
+                    "candidates": [
+                        {
+                            "memory_id": "ent-1",
+                            "text": (
+                                "实体记忆：与神在河岸；出现 1 次；最近证据："
+                                "2026-05-28｜delivery:ep-1｜与神在河岸｜看点：奇幻身份钩子｜来源：https://www.lightnovel.fun/cn/detail/2"
+                            ),
+                            "score": 0.96,
+                            "metadata": {
+                                "store_id": "life_memory_entity",
+                                "entity_id": "ent-1",
+                                "canonical_name": "与神在河岸",
+                                "domain": "lightnovel_recommendation",
+                                "mention_count": 1,
+                                "source_ref": "life_memory_entity://ent-1",
+                                "evidence_refs_primary": "https://www.lightnovel.fun/cn/detail/2",
+                                "mentions": [
+                                    {
+                                        "collection_id": "col-delivery",
+                                        "collection_item_id": "coli-2",
+                                        "scope_key": "delivery:ep-1",
+                                        "position": 2,
+                                        "item_title": "与神在河岸",
+                                        "item_summary": "看点：奇幻身份钩子｜简介：神明与河岸的奇幻闲聊｜详情：https://www.lightnovel.fun/cn/detail/2",
+                                        "source_ref": "https://www.lightnovel.fun/cn/detail/2",
+                                        "evidence_ref": "gateway://message/card/2",
+                                        "metadata": {
+                                            "selection_reason": "奇幻身份钩子",
+                                            "intro_snippet": "神明与河岸的奇幻闲聊。",
+                                            "detail_url": "https://www.lightnovel.fun/cn/detail/2",
+                                        },
+                                    }
+                                ],
+                            },
+                        }
+                    ],
+                }
+            }
+
+    def fake_review(**kwargs):  # noqa: ANN003
+        packet = kwargs["packet"]
+        assert packet["trace"]["selected_entity_items"][0]["title"] == "与神在河岸"
+        assert packet["trace"]["selected_entity_items"][0]["detail_url"] == "https://www.lightnovel.fun/cn/detail/2"
+        return {
+            "status": "OK",
+            "reason_code": "LIGHTNOVEL_DEEP_REVIEW_OK",
+            "fact": "网页深读结果：这本《与神在河岸》能看，原因是奇幻身份钩子清楚，正文开篇也能读出故事。",
+            "selected": {"index": 1, "title": "与神在河岸"},
+            "items": [{"index": 1}],
+            "evidence_refs": ["https://www.lightnovel.fun/cn/detail/2"],
+            "cached": False,
+            "source": "fetch",
+            "recommendation_signature": "sig-entity",
+        }
+
+    monkeypatch.setattr(helpers, "_build_surface_memory_recall_service", lambda: _RecallService())
+    monkeypatch.setattr(helpers, "_embed_surface_memory_query", lambda query: ([0.2] * 16, "test-embedding"))
+    monkeypatch.setattr(
+        "host_brain.codex_runtime.lightnovel_deep_reviewer.review_lightnovel_selection_from_memory_packet",
+        fake_review,
+    )
+
+    summary, _evidence_items = await helpers._run_retrieval(
+        request_id="req-lightnovel-entity-deep-review",
+        message="与神在河岸这本好看吗？",
+        person_id="person-1",
+        session_id="sess-1",
+        ts_ms=123,
+        emotion_tag="NEUTRAL",
+        render_target_lang="zh",
+        intent_draft={"route": "chat"},
+    )
+
+    packet = summary["surface_memory_recall_packet"]
+    assert packet["facts"][0].startswith("网页深读结果")
+    assert packet["trace"]["lightnovel_deep_review"]["status"] == "OK"
+    assert packet["trace"]["lightnovel_deep_review"]["source"] == "fetch"
+    assert packet["trace"]["selected_entity_items"][0]["detail_url"] == "https://www.lightnovel.fun/cn/detail/2"
+
+
+@pytest.mark.asyncio
 async def test_run_retrieval_preserves_surface_memory_validation_contract(monkeypatch) -> None:
     class _RecallService:
         def recall(self, **_kwargs):  # noqa: ANN003

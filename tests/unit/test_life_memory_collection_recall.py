@@ -129,6 +129,39 @@ def _entity_service(ledger: SQLiteLedger) -> RecallFusionServiceContract:
     )
 
 
+def _collection_entity_service(ledger: SQLiteLedger) -> RecallFusionServiceContract:
+    node_id = "surface_main_chain_memory_recall"
+    routes = {
+        "surface_life_collection": RecallRouteConfig(
+            route_id="surface_life_collection",
+            store_id="life_memory_collection",
+            collection="life_memory_collection",
+            top_k=5,
+            score_weight=1.0,
+            node_selector=node_id,
+        ),
+        "surface_life_entity": RecallRouteConfig(
+            route_id="surface_life_entity",
+            store_id="life_memory_entity",
+            collection="life_memory_entity",
+            top_k=5,
+            score_weight=1.0,
+            node_selector=node_id,
+        ),
+    }
+    return RecallFusionServiceContract(
+        ledger=ledger,
+        chroma_client=FakeChromaClient(),
+        runtime_config=RecallRuntimeConfig(
+            enabled=True,
+            default_route="surface_life_collection",
+            routes=routes,
+        ),
+        node_id=node_id,
+        use_hybrid=False,
+    )
+
+
 def test_recommendation_delivery_indexes_delivery_daily_and_recent_collections() -> None:
     ledger = SQLiteLedger(db_path=":memory:")
     try:
@@ -443,5 +476,73 @@ def test_recall_fusion_entity_route_returns_book_entity() -> None:
         assert top["metadata"]["store_id"] == "life_memory_entity"
         assert top["metadata"]["canonical_name"] == "EntityRoute B"
         assert "EntityRoute B" in top["snippet"]
+    finally:
+        ledger.close()
+
+
+def test_specific_book_followup_keeps_entity_trace_for_deep_review() -> None:
+    ledger = SQLiteLedger(db_path=":memory:")
+    try:
+        store = LifeMemoryStore(ledger=ledger)
+        _write_delivery(store, prefix="EntityTrace", ts_ms=_ts(2026, 5, 28))
+
+        packet = recall_surface_memory_for_context(
+            recall_service=_collection_entity_service(ledger),
+            context=ThreeLayerContinuityContext(
+                current_user_message="EntityTrace B 这本好看吗？",
+                task_mode_hint="daily_chat",
+            ),
+            request_id="req-specific-book-entity-trace",
+            query_embedding=[0.1] * 16,
+            person_id="owner",
+            session_id="qq_dm_owner",
+            ts_ms=_ts(2026, 5, 28, 18),
+        )
+
+        assert "surface_life_entity" in packet.route_ids
+        trace_items = list((packet.trace or {}).get("selected_entity_items") or [])
+        assert trace_items
+        assert trace_items[0]["title"] == "EntityTrace B"
+        assert trace_items[0]["detail_url"].endswith("entitytrace-b")
+        assert any(row.store_id == "life_memory_entity" for row in packet.rows)
+    finally:
+        ledger.close()
+
+
+def test_specific_book_followup_uses_named_entity_instead_of_latest_delivery() -> None:
+    ledger = SQLiteLedger(db_path=":memory:")
+    try:
+        store = LifeMemoryStore(ledger=ledger)
+        _write_delivery(store, prefix="5月27日推荐", ts_ms=_ts(2026, 5, 27))
+        _write_delivery(store, prefix="5月28日推荐", ts_ms=_ts(2026, 5, 28))
+
+        plan = plan_surface_memory_recall(
+            ThreeLayerContinuityContext(
+                current_user_message="5月27日推荐 B 这本好看吗？",
+                task_mode_hint="daily_chat",
+            )
+        )
+        packet = recall_surface_memory_for_context(
+            recall_service=_collection_entity_service(ledger),
+            context=ThreeLayerContinuityContext(
+                current_user_message="5月27日推荐 B 这本好看吗？",
+                task_mode_hint="daily_chat",
+            ),
+            request_id="req-specific-book-old-entity",
+            query_embedding=[0.1] * 16,
+            person_id="owner",
+            session_id="qq_dm_owner",
+            ts_ms=_ts(2026, 5, 28, 18),
+        )
+
+        joined = "\n".join(packet.facts)
+        trace_items = list((packet.trace or {}).get("selected_entity_items") or [])
+        assert plan.primary_memory_layer == "life_memory_entity"
+        assert plan.time_lookback_days is None
+        assert packet.reason_code is None
+        assert "5月27日推荐 B" in joined
+        assert "5月28日推荐 B" not in joined
+        assert trace_items and trace_items[0]["title"] == "5月27日推荐 B"
+        assert any(row.store_id == "life_memory_entity" for row in packet.rows)
     finally:
         ledger.close()

@@ -205,6 +205,7 @@ def plan_life_memory_query(text: Any, *, task_mode: str | None = None) -> LifeMe
     temporal_scope = _infer_temporal_scope(message)
     domains = _infer_domains(message)
     anaphoric_selection = bool(_ANAPHORIC_SELECTION_RE.search(message))
+    specific_item_followup = _looks_like_specific_item_followup(message)
     collection_like = _looks_like_collection_query(message, domains=domains, temporal_scope=temporal_scope)
     event_lookup = _looks_like_event_lookup_query(message, temporal_scope=temporal_scope)
     min_collection_items = _minimum_collection_items(message)
@@ -285,19 +286,38 @@ def plan_life_memory_query(text: Any, *, task_mode: str | None = None) -> LifeMe
 
     if anaphoric_selection:
         contract = RECALL_INTENT_CONTRACTS[CONTRACT_ANAPHORIC_SELECTION]
+        target_store_ids = (
+            ("life_memory_entity", "life_memory_collection", "life_episode", "episodic_vector", "sqlite_ledger", "semantic_memory")
+            if specific_item_followup
+            else ("life_memory_collection", "life_memory_entity", "life_episode", "episodic_vector", "sqlite_ledger", "semantic_memory")
+        )
+        planned_temporal_scope = (
+            TEMPORAL_RECENT_DAYS
+            if specific_item_followup and temporal_scope == TEMPORAL_UNSPECIFIED
+            else temporal_scope if temporal_scope != TEMPORAL_UNSPECIFIED else TEMPORAL_CURRENT
+        )
+        lookback_days = (
+            None
+            if specific_item_followup and temporal_scope == TEMPORAL_UNSPECIFIED
+            else _lookback_for_text_and_scope(
+                message,
+                planned_temporal_scope,
+                default=30 if specific_item_followup else 1,
+            )
+        )
         return LifeMemoryQueryPlan(
             should_recall=True,
             query_kind=QUERY_ANAPHORIC_SELECTION,
-            temporal_scope=temporal_scope if temporal_scope != TEMPORAL_UNSPECIFIED else TEMPORAL_CURRENT,
+            temporal_scope=planned_temporal_scope,
             target_domains=domains,
-            target_store_ids=("life_memory_collection", "life_memory_entity", "life_episode", "episodic_vector", "sqlite_ledger", "semantic_memory"),
-            time_lookback_days=_lookback_for_text_and_scope(message, temporal_scope, default=1),
+            target_store_ids=target_store_ids,
+            time_lookback_days=lookback_days,
             max_facts=5,
             max_chars_per_fact=760,
             reason="anaphoric_selection_recall",
             validation_requirements=_collection_validation_requirements(contract, min_collection_items),
             recall_contract_id=contract.contract_id,
-            primary_memory_layer=contract.primary_memory_layer,
+            primary_memory_layer="life_memory_entity" if specific_item_followup else contract.primary_memory_layer,
             expected_memory_layers=contract.expected_memory_layers,
             min_collection_items=min_collection_items,
             answer_obligations=_answer_obligations_for_query(message, contract=contract),
@@ -544,6 +564,24 @@ def _minimum_collection_items(text: str) -> int:
     if _ITEM_COUNT_RE.search(text):
         return 1
     return 0
+
+
+def _looks_like_specific_item_followup(text: str) -> bool:
+    if not text:
+        return False
+    if any(token in text for token in ("这三本", "这几本", "这些", "那些", "十几本")):
+        return False
+    if re.search(r"《[^》]{2,80}》", text) and any(token in text for token in ("好看", "能看", "值得看", "怎么样", "如何", "推荐", "想看")):
+        return True
+    marker = re.search(r"(.{2,80}?)(?:这本书|这部书|这本|这部|这书|它).{0,12}(?:好看|能看|值得看|怎么样|如何|推荐|想看)", text)
+    if not marker:
+        return False
+    prefix = re.sub(r"[\s，。！？?、：:；;（）()\[\]【】《》「」『』]+", "", marker.group(1))
+    prefix = re.sub(r"^(?:我问你|问你|你觉得|你说|刚才|刚刚|那个|这个|那本|这本)+", "", prefix)
+    if len(prefix) < 2:
+        return False
+    generic = {"我", "你", "他", "她", "它", "这", "那", "哪", "本", "部", "个", "书", "小说"}
+    return not all(char in generic for char in prefix)
 
 
 def _collection_validation_requirements(

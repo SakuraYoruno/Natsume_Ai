@@ -150,6 +150,30 @@ def test_lightnovel_deep_review_extracts_machine_readable_collection_items() -> 
     ]
 
 
+def test_lightnovel_deep_review_extracts_entity_trace_items() -> None:
+    packet = {
+        "facts": ["实体记忆：与神在河岸；出现 1 次；最近证据：来源：https://www.lightnovel.fun/cn/detail/2"],
+        "trace": {
+            "selected_entity_items": [
+                {
+                    "index": 1,
+                    "title": "与神在河岸",
+                    "detail_url": "https://www.lightnovel.fun/cn/detail/2",
+                    "selection_reason": "奇幻身份钩子",
+                    "intro_snippet": "神明与河岸的奇幻闲聊。",
+                }
+            ]
+        },
+    }
+
+    assert should_deep_review_lightnovel_selection(user_message="这本好看吗？", packet=packet)
+    cards = _extract_cards(packet)
+    assert len(cards) == 1
+    assert cards[0]["title"] == "与神在河岸"
+    assert cards[0]["detail_url"] == "https://www.lightnovel.fun/cn/detail/2"
+    assert cards[0]["selection_reason"] == "奇幻身份钩子"
+
+
 def test_lightnovel_deep_review_uses_cached_life_episode_without_fetch(monkeypatch) -> None:  # noqa: ANN001
     packet = {
         "facts": [

@@ -65,6 +65,7 @@ from host_brain.retrieval.recall_fusion_stores import (
     STORE_SQLITE_LEDGER,
     STORE_LIFE_EPISODE,
     STORE_LIFE_MEMORY_COLLECTION,
+    STORE_LIFE_MEMORY_ENTITY,
     STORE_NEO4J_BOND,
     STORE_EPISODIC_VECTOR,
     STORE_SEMANTIC_MEMORY,
@@ -101,7 +102,8 @@ _WARM_HINT_KEYWORDS = ("一起", "陪你", "说好", "约定", "开心", "想你
 _ANAPHORIC_SELECTION_RE = re.compile(
     r"(?:哪(?:本|部|个|一(?:本|部|个))|哪个|哪部|哪本|"
     r"(?:我问你|刚问你|问你).{0,12}哪|"
-    r"(?:喜欢|想看|先看|推荐|选|挑).{0,8}哪)",
+    r"(?:喜欢|想看|先看|推荐|选|挑|好看).{0,8}哪|"
+    r"(?:这本书|这部书|这本|这部|这书|它).{0,8}(?:好看|能看|值得看|怎么样|如何))",
 )
 _ANAPHORIC_EVENT_KINDS = frozenset({"action_episode", "background_episode", "perception_episode"})
 _ANAPHORIC_LOW_VALUE_ACTIONS = frozenset(
@@ -752,11 +754,14 @@ def _filter_anaphoric_selection_candidates(
 ) -> list[dict[str, Any]]:
     if not candidates or not _looks_like_anaphoric_selection_query(query):
         return candidates
+    if _looks_like_broad_collection_selection_query(query):
+        return candidates
     primary = [
         candidate
         for candidate in candidates
         if _is_significant_anaphoric_life_candidate(candidate)
         or _is_significant_anaphoric_collection_candidate(candidate)
+        or _is_significant_anaphoric_entity_candidate(candidate)
     ]
     if not primary:
         return candidates
@@ -794,6 +799,12 @@ def _select_recent_anaphoric_life_primary(candidates: list[dict[str, Any]], *, q
     if len(candidates) <= 1:
         return candidates
     ranked = sorted(candidates, key=lambda candidate: _anaphoric_primary_sort_key(candidate, query=query))
+    if _query_looks_like_specific_item_reference(query):
+        return [
+            candidate
+            for candidate in ranked
+            if _candidate_matches_specific_item_reference(candidate, query=query)
+        ]
     newest = ranked[0]
     newest_ts = _candidate_life_ts(newest)
     newest_action = _candidate_life_action(newest)
@@ -812,7 +823,19 @@ def _select_recent_anaphoric_life_primary(candidates: list[dict[str, Any]], *, q
         if newest_ts - candidate_ts > _ANAPHORIC_EVENT_WINDOW_MS:
             continue
         selected.append(candidate)
-    return selected or [newest]
+    selected = selected or [newest]
+    selected_keys = {str(candidate.get("source_ref") or candidate.get("doc_id") or "").strip() for candidate in selected}
+    for candidate in ranked:
+        if _candidate_store_id(candidate) != STORE_LIFE_MEMORY_ENTITY:
+            continue
+        key = str(candidate.get("source_ref") or candidate.get("doc_id") or "").strip()
+        if key and key in selected_keys:
+            continue
+        if _entity_title_matches_query(candidate, query=query) or _candidate_life_ts(candidate) >= newest_ts - _ANAPHORIC_EVENT_WINDOW_MS:
+            selected.append(candidate)
+            if key:
+                selected_keys.add(key)
+    return selected
 
 
 def _anaphoric_primary_sort_key(candidate: Mapping[str, Any], *, query: str) -> tuple[int, int, float, str]:
@@ -826,18 +849,32 @@ def _anaphoric_primary_sort_key(candidate: Mapping[str, Any], *, query: str) -> 
 
 def _candidate_anaphoric_action_priority(candidate: Mapping[str, Any], *, query: str) -> int:
     if _candidate_store_id(candidate) == STORE_LIFE_MEMORY_COLLECTION:
+        if _query_looks_like_specific_item_reference(query):
+            return 0 if _candidate_matches_specific_item_reference(candidate, query=query) else 7
         requested_item_count = _small_anaphoric_item_count(query)
+        metadata = _coerce_mapping(candidate.get("metadata"))
+        item_count = _coerce_int(metadata.get("item_count"))
+        scope_key = str(metadata.get("scope_key") or "").strip()
         if requested_item_count > 0:
-            metadata = _coerce_mapping(candidate.get("metadata"))
-            item_count = _coerce_int(metadata.get("item_count"))
-            scope_key = str(metadata.get("scope_key") or "").strip()
             if item_count == requested_item_count:
                 return 0
             if scope_key == "recent" and item_count > requested_item_count:
                 return 6
             if item_count > requested_item_count:
                 return 3
+        if scope_key.startswith("delivery:"):
+            return 0
+        if scope_key.startswith("daily:") and 0 < item_count <= 4:
+            return 1
+        if (scope_key == "recent" or scope_key.startswith("rolling:")) and item_count > 4:
+            return 6
         return 0
+    if _candidate_store_id(candidate) == STORE_LIFE_MEMORY_ENTITY:
+        if _entity_title_matches_query(candidate, query=query):
+            return 0
+        if _query_looks_like_specific_item_reference(query):
+            return 7
+        return 2
     action = _candidate_life_action(candidate)
     if action in {"lightnovel_recommendation_delivery", "recommendation_delivery"} or action.endswith("_recommendation_delivery"):
         return 0
@@ -855,6 +892,59 @@ def _small_anaphoric_item_count(query: str) -> int:
     if re.search(r"(?:两|二|2)(?:本|部|个)", value):
         return 2
     return 0
+
+
+def _query_looks_like_specific_item_reference(query: str) -> bool:
+    value = str(query or "").strip()
+    if not value:
+        return False
+    if any(token in value for token in ("这三本", "这几本", "这些", "那些", "十几本")):
+        return False
+    if re.search(r"《[^》]{2,80}》", value) and any(token in value for token in ("好看", "能看", "值得看", "怎么样", "如何", "推荐", "想看")):
+        return True
+    match = re.search(r"(.{2,80}?)(?:这本书|这部书|这本|这部|这书|它).{0,12}(?:好看|能看|值得看|怎么样|如何|推荐|想看)", value)
+    if not match:
+        return False
+    prefix = re.sub(r"[\s，。！？?、：:；;（）()\[\]【】《》「」『』]+", "", match.group(1))
+    prefix = re.sub(r"^(?:我问你|问你|你觉得|你说|刚才|刚刚|那个|这个|那本|这本)+", "", prefix)
+    if len(prefix) < 2:
+        return False
+    generic = {"我", "你", "他", "她", "它", "这", "那", "哪", "本", "部", "个", "书", "小说"}
+    return not all(char in generic for char in prefix)
+
+
+def _looks_like_broad_collection_selection_query(query: str) -> bool:
+    value = str(query or "").strip()
+    if not value:
+        return False
+    has_broad_scope = any(
+        token in value
+        for token in ("十几本", "这几本", "这些", "那些", "这几天", "最近", "过去几天", "全部", "所有")
+    )
+    has_selection = any(token in value for token in ("哪本", "哪部", "哪个", "哪些", "喜欢", "好看", "值得看", "推荐"))
+    return has_broad_scope and has_selection
+
+
+def _candidate_matches_specific_item_reference(candidate: Mapping[str, Any], *, query: str) -> bool:
+    store_id = _candidate_store_id(candidate)
+    if store_id == STORE_LIFE_MEMORY_ENTITY:
+        return _entity_title_matches_query(candidate, query=query)
+    if store_id == STORE_LIFE_MEMORY_COLLECTION:
+        metadata = _coerce_mapping(candidate.get("metadata"))
+        for item in list(metadata.get("items") or []):
+            if not isinstance(item, Mapping):
+                continue
+            item_metadata = _coerce_mapping(item.get("metadata"))
+            title = str(
+                item.get("item_title")
+                or item.get("title")
+                or item_metadata.get("title")
+                or item_metadata.get("title_display")
+                or ""
+            ).strip()
+            if _title_matches_query(title, query=query):
+                return True
+    return False
 
 
 def _coerce_int(value: Any, *, default: int = 0) -> int:
@@ -921,6 +1011,35 @@ def _is_significant_anaphoric_collection_candidate(candidate: Mapping[str, Any])
     if not text or _looks_like_anaphoric_scheduler_noise(text):
         return False
     return True
+
+
+def _is_significant_anaphoric_entity_candidate(candidate: Mapping[str, Any]) -> bool:
+    if _candidate_store_id(candidate) != STORE_LIFE_MEMORY_ENTITY:
+        return False
+    metadata = _coerce_mapping(candidate.get("metadata"))
+    if int(metadata.get("mention_count") or 0) <= 0:
+        return False
+    text = _candidate_text(candidate)
+    if not text or _looks_like_anaphoric_scheduler_noise(text):
+        return False
+    return True
+
+
+def _entity_title_matches_query(candidate: Mapping[str, Any], *, query: str) -> bool:
+    metadata = _coerce_mapping(candidate.get("metadata"))
+    title = str(metadata.get("canonical_name") or "").strip()
+    normalized = str(metadata.get("normalized_key") or "").strip()
+    return _title_matches_query(title, query=query) or _title_matches_query(normalized, query=query)
+
+
+def _title_matches_query(title: str, *, query: str) -> bool:
+    value = str(title or "").strip()
+    query_text = str(query or "").strip()
+    if value and value in query_text:
+        return True
+    compact_query = re.sub(r"\s+", "", query_text).lower()
+    compact_title = re.sub(r"\s+", "", value).lower()
+    return bool(compact_title and compact_title in compact_query)
 
 
 def _looks_like_anaphoric_scheduler_noise(text: str) -> bool:

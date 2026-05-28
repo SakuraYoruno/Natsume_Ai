@@ -40,7 +40,8 @@ _FIELD_LABEL_RE = re.compile(r"\b(?:text|content|detail|memory_text)\s*[:：]\s*
 _ANAPHORIC_SELECTION_RE = re.compile(
     r"(?:哪(?:本|部|个|一(?:本|部|个))|哪个|哪部|哪本|"
     r"(?:我问你|刚问你|问你).{0,12}哪|"
-    r"(?:喜欢|想看|先看|推荐|选|挑).{0,8}哪)",
+    r"(?:喜欢|想看|先看|推荐|选|挑|好看).{0,8}哪|"
+    r"(?:这本书|这部书|这本|这部|这书|它).{0,8}(?:好看|能看|值得看|怎么样|如何))",
 )
 _LOCAL_MEMORY_TZ = timezone(timedelta(hours=8))
 _RECALL_HINTS = (
@@ -364,7 +365,11 @@ def plan_surface_memory_recall(
             ),
             max_facts=max(4, life_query_plan.max_facts),
             max_chars_per_fact=max(700, life_query_plan.max_chars_per_fact),
-            time_lookback_days=life_query_plan.time_lookback_days or 1,
+            time_lookback_days=(
+                life_query_plan.time_lookback_days
+                if life_query_plan.time_lookback_days is not None or life_query_plan.primary_memory_layer == "life_memory_entity"
+                else 1
+            ),
             reason="anaphoric_selection_recall",
             query_kind=life_query_plan.query_kind,
             temporal_scope=life_query_plan.temporal_scope,
@@ -724,6 +729,12 @@ def build_surface_memory_recall_packet(
     )
     if selected_collection_items:
         trace["selected_collection_items"] = selected_collection_items
+    selected_entity_items = _selected_entity_items_for_trace(
+        candidates=candidates_for_selection,
+        rows=rows,
+    )
+    if selected_entity_items:
+        trace["selected_entity_items"] = selected_entity_items
     if validation_trace["required"]:
         trace["validation"] = validation_trace
     if validation_failed:
@@ -868,7 +879,7 @@ def _evaluate_recall_validation_requirement(
         return bool(refs), f"evidence refs={len(refs)}"
     if requirement == "collection_or_episode_hit":
         stores = set(_store_counts_from_candidates(candidates)) | {row.store_id for row in rows}
-        passed = bool(stores.intersection({"life_memory_collection", "life_episode"}))
+        passed = bool(stores.intersection({"life_memory_collection", "life_memory_entity", "life_episode"}))
         return passed, f"stores={sorted(stores)}"
     if requirement == "event_time_scope_match":
         expected = _expected_collection_scope_key(temporal_scope, ts_ms=_coerce_int(output.get("ts_ms")))
@@ -1198,6 +1209,38 @@ def _selected_collection_items_for_trace(
     return out
 
 
+def _selected_entity_items_for_trace(
+    *,
+    candidates: Sequence[Mapping[str, Any]],
+    rows: Sequence[SurfaceMemoryFactRow],
+) -> list[dict[str, Any]]:
+    selected_refs = {_clean_text(row.source_ref) for row in rows if _clean_text(row.source_ref)}
+    if not selected_refs:
+        return []
+    out: list[dict[str, Any]] = []
+    for candidate in candidates:
+        if _candidate_store_id(candidate) != "life_memory_entity":
+            continue
+        metadata = _candidate_metadata(candidate)
+        source_ref = _clean_text(candidate.get("source_ref") or metadata.get("source_ref"))
+        if source_ref and source_ref not in selected_refs:
+            continue
+        entity_id = _clean_text(metadata.get("entity_id"))
+        entity_title = _truncate_text(_clean_text(metadata.get("canonical_name")), limit=120)
+        for item in list(metadata.get("mentions") or [])[:12]:
+            if not isinstance(item, Mapping):
+                continue
+            card = _trace_entity_item_payload(
+                item,
+                entity_id=entity_id,
+                entity_title=entity_title,
+            )
+            if card and card not in out:
+                card["index"] = len(out) + 1
+                out.append(card)
+    return out
+
+
 def _trace_collection_item_payload(
     item: Mapping[str, Any],
     *,
@@ -1242,6 +1285,60 @@ def _trace_collection_item_payload(
             "update_time": _first_item_text({**item_meta, **dict(item)}, ("update_time", "updated_at", "freshness"), limit=80),
             "view_count": _first_item_text({**item_meta, **dict(item)}, ("view_count", "views"), limit=40),
             "comment_count": _first_item_text({**item_meta, **dict(item)}, ("comment_count", "comments"), limit=40),
+        }.items()
+        if value not in ("", 0, None, [], {})
+    }
+
+
+def _trace_entity_item_payload(
+    item: Mapping[str, Any],
+    *,
+    entity_id: str,
+    entity_title: str,
+) -> dict[str, Any]:
+    item_meta_raw = item.get("item_metadata")
+    item_meta = dict(item_meta_raw) if isinstance(item_meta_raw, Mapping) else {}
+    metadata_raw = item.get("metadata")
+    metadata = dict(metadata_raw) if isinstance(metadata_raw, Mapping) else {}
+    merged = {**item_meta, **metadata, **dict(item)}
+    title = _first_item_text(
+        {"item_title": entity_title, **merged},
+        ("title", "title_display", "item_title", "name", "label"),
+        limit=120,
+    )
+    source_ref = _first_item_text(
+        merged,
+        ("detail_url", "url", "source_url", "source_ref", "item_source_ref"),
+        limit=260,
+    )
+    if not title and not source_ref:
+        return {}
+    summary = _first_item_text(merged, ("item_summary", "summary", "description", "intro_snippet", "intro"), limit=360)
+    return {
+        key: value
+        for key, value in {
+            "entity_id": entity_id,
+            "collection_id": _clean_text(item.get("collection_id")),
+            "collection_item_id": _clean_text(item.get("collection_item_id")),
+            "scope_key": _clean_text(item.get("scope_key")),
+            "index": _coerce_int(item.get("position"), default=0),
+            "title": title,
+            "detail_url": source_ref if "lightnovel.fun" in source_ref else "",
+            "source_ref": source_ref,
+            "evidence_ref": _first_item_text(merged, ("evidence_ref", "item_evidence_ref"), limit=260),
+            "selection_reason": _first_item_text(
+                merged,
+                ("selection_reason", "rationale", "reason", "why", "look_point"),
+                limit=140,
+            ),
+            "intro_snippet": _first_item_text(
+                {**merged, "summary": summary},
+                ("intro_snippet", "intro", "description", "summary", "abstract"),
+                limit=220,
+            ),
+            "update_time": _first_item_text(merged, ("update_time", "updated_at", "freshness"), limit=80),
+            "view_count": _first_item_text(merged, ("view_count", "views"), limit=40),
+            "comment_count": _first_item_text(merged, ("comment_count", "comments"), limit=40),
         }.items()
         if value not in ("", 0, None, [], {})
     }
@@ -1552,10 +1649,29 @@ def _filter_rows_for_anaphoric_selection(
         scrubbed.append(row)
     if not scrubbed:
         return list(rows)
+    if _looks_like_specific_item_reference(query_text):
+        matched_rows = [row for row in scrubbed if _specific_item_row_matches(row, query=query_text)]
+        entity_rows = [row for row in matched_rows if _clean_text(row.store_id).lower() == "life_memory_entity"]
+        if entity_rows:
+            return [
+                *entity_rows,
+                *(row for row in scrubbed if _clean_text(row.store_id).lower() in {"neo4j_bond", "bond_graph"}),
+            ]
+        focused_collection_rows = [
+            row
+            for row in matched_rows
+            if _clean_text(row.store_id).lower() == "life_memory_collection"
+            and not _looks_like_broad_collection_fact(row.fact)
+        ]
+        if focused_collection_rows:
+            return [
+                *focused_collection_rows,
+                *(row for row in scrubbed if _clean_text(row.store_id).lower() in {"neo4j_bond", "bond_graph"}),
+            ]
     primary_rows = [
         row
         for row in scrubbed
-        if _clean_text(row.store_id).lower() in {"life_memory_collection", "life_episode"}
+        if _clean_text(row.store_id).lower() in {"life_memory_collection", "life_memory_entity", "life_episode"}
     ]
     if primary_rows:
         return [
@@ -2014,6 +2130,49 @@ def _looks_like_anaphoric_selection_query(text: str) -> bool:
     if not normalized:
         return False
     return bool(_ANAPHORIC_SELECTION_RE.search(normalized))
+
+
+def _looks_like_specific_item_reference(text: str) -> bool:
+    return bool(_specific_item_query_prefix(text))
+
+
+def _specific_item_query_prefix(text: str) -> str:
+    value = _clean_text(text)
+    if not value or any(token in value for token in ("这三本", "这几本", "这些", "那些", "十几本")):
+        return ""
+    quoted = re.search(r"《([^》]{2,80})》", value)
+    if quoted and any(token in value for token in ("好看", "能看", "值得看", "怎么样", "如何", "推荐", "想看")):
+        return _compact_text(quoted.group(1))
+    marker = re.search(r"(.{2,80}?)(?:这本书|这部书|这本|这部|这书|它).{0,12}(?:好看|能看|值得看|怎么样|如何|推荐|想看)", value)
+    if not marker:
+        return ""
+    prefix = re.sub(r"[\s，。！？?、：:；;（）()\[\]【】《》「」『』]+", "", marker.group(1))
+    prefix = re.sub(r"^(?:我问你|问你|你觉得|你说|刚才|刚刚|那个|这个|那本|这本)+", "", prefix)
+    compact = _compact_text(prefix)
+    if len(compact) < 2:
+        return ""
+    generic = {"我", "你", "他", "她", "它", "这", "那", "哪", "本", "部", "个", "书", "小说"}
+    if all(char in generic for char in compact):
+        return ""
+    return compact
+
+
+def _specific_item_row_matches(row: SurfaceMemoryFactRow, *, query: str) -> bool:
+    prefix = _specific_item_query_prefix(query)
+    if not prefix:
+        return False
+    return prefix in _compact_text(row.fact)
+
+
+def _looks_like_broad_collection_fact(text: str) -> bool:
+    value = _clean_text(text)
+    return any(token in value for token in ("最近轻小说推荐集合", "近 3 天", "近 7 天", "近 30 天")) or bool(
+        re.search(r"(?:最近|近\s*\d+\s*天).{0,30}记录\s*\d+\s*个条目", value)
+    )
+
+
+def _compact_text(text: Any) -> str:
+    return re.sub(r"\s+", "", _clean_text(text)).lower()
 
 
 def _looks_like_collection_scope_query(text: str) -> bool:

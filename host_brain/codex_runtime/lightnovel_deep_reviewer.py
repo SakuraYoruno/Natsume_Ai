@@ -15,7 +15,11 @@ from urllib.parse import urljoin, urlparse
 
 _DETAIL_URL_RE = re.compile(r"https?://[^\s｜|；。]+", re.IGNORECASE)
 _NUMBERED_ITEM_RE = re.compile(r"(?<!\d)(\d{1,2})[.、]\s*([^；\n]+)")
-_CHOICE_QUERY_RE = re.compile(r"(?:喜欢|好看|想看|先看|推荐|选|挑).{0,8}哪|哪(?:本|部|个)|哪个|哪部")
+_CHOICE_QUERY_RE = re.compile(
+    r"(?:喜欢|好看|想看|先看|推荐|选|挑).{0,8}哪|"
+    r"哪(?:本|部|个)|哪个|哪部|"
+    r"(?:这本|这部|这一个|这個|这本书|这部书|这书|它).{0,8}(?:好看|能看|值得看|怎么样|如何)"
+)
 _BODY_TEXT_MIN_CHARS = 500
 _CACHE_VERSION = "lightnovel_deep_review:v3"
 
@@ -394,12 +398,12 @@ def _extract_cards(packet: Mapping[str, Any]) -> list[dict[str, Any]]:
 
 
 def _trace_has_detail_refs(packet: Mapping[str, Any]) -> bool:
-    return any(_normalize_detail_url(str(item.get("detail_url") or "")) for item in _trace_collection_items(packet))
+    return any(_normalize_detail_url(str(item.get("detail_url") or "")) for item in _trace_review_items(packet))
 
 
 def _extract_trace_cards(packet: Mapping[str, Any]) -> list[dict[str, Any]]:
     cards: list[dict[str, Any]] = []
-    for index, item in enumerate(_trace_collection_items(packet), start=1):
+    for index, item in enumerate(_trace_review_items(packet), start=1):
         title = _clean_text(item.get("title"), limit=120)
         detail_url = _normalize_detail_url(str(item.get("detail_url") or item.get("source_ref") or ""))
         if not title and not detail_url:
@@ -420,11 +424,32 @@ def _extract_trace_cards(packet: Mapping[str, Any]) -> list[dict[str, Any]]:
     return cards
 
 
+def _trace_review_items(packet: Mapping[str, Any]) -> list[Mapping[str, Any]]:
+    items: list[Mapping[str, Any]] = []
+    for item in _trace_collection_items(packet):
+        if item not in items:
+            items.append(item)
+    for item in _trace_entity_items(packet):
+        if item not in items:
+            items.append(item)
+    return items
+
+
 def _trace_collection_items(packet: Mapping[str, Any]) -> list[Mapping[str, Any]]:
     trace = packet.get("trace")
     if not isinstance(trace, Mapping):
         return []
     raw_items = trace.get("selected_collection_items")
+    if not isinstance(raw_items, Sequence) or isinstance(raw_items, (str, bytes, bytearray)):
+        return []
+    return [dict(item) for item in raw_items if isinstance(item, Mapping)]
+
+
+def _trace_entity_items(packet: Mapping[str, Any]) -> list[Mapping[str, Any]]:
+    trace = packet.get("trace")
+    if not isinstance(trace, Mapping):
+        return []
+    raw_items = trace.get("selected_entity_items")
     if not isinstance(raw_items, Sequence) or isinstance(raw_items, (str, bytes, bytearray)):
         return []
     return [dict(item) for item in raw_items if isinstance(item, Mapping)]
