@@ -356,6 +356,35 @@ def test_action_and_perception_events_create_life_anchors_with_retention_state()
         ledger.close()
 
 
+def test_surface_memory_recall_action_creates_action_episode() -> None:
+    ledger = SQLiteLedger(db_path=":memory:")
+    try:
+        store = LifeMemoryStore(ledger=ledger)
+        written = store.write_background_episode(
+            event_source="surface_memory_recall",
+            event_id="deep-review-1",
+            request_id="req-deep-review-1",
+            person_id="owner",
+            session_id="qq_dm_owner",
+            task_id="lightnovel_recommendation_deep_review",
+            status="OK",
+            detail="我翻过这组轻小说的详情和正文。",
+            ts_ms=1_800_000_000_020,
+            metadata={"action_kind": "lightnovel_recommendation_deep_review"},
+        )
+
+        row = next(item for item in ledger.life_episode if item["episode_id"] == written["episode_id"])
+        assert row["episode_kind"] == EPISODE_ACTION
+        assert any(
+            item["episode_id"] == written["episode_id"]
+            and item["source_ref"] == "action://event/deep-review-1"
+            and item["evidence_kind"] == "tool_result"
+            for item in ledger.life_evidence
+        )
+    finally:
+        ledger.close()
+
+
 def test_recall_reinforces_episode_but_gone_is_hidden_from_default_recall() -> None:
     ledger = SQLiteLedger(db_path=":memory:")
     try:

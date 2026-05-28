@@ -259,6 +259,19 @@ def _has_gateway_evidence(row: Mapping[str, Any], metadata: Mapping[str, Any]) -
     return any(ref.startswith("gateway://message/") for ref in refs) or "gateway://message/" in source_refs
 
 
+def _requires_gateway_evidence_anchor(row: Mapping[str, Any], metadata: Mapping[str, Any]) -> bool:
+    kind = _clean(row.get("episode_kind"))
+    action = _clean(row.get("action")).lower()
+    source = _clean(metadata.get("event_source") or metadata.get("audit_anchor_source")).lower()
+    if kind == "chat_episode" and _is_gateway_context(row, metadata):
+        return True
+    if action in USER_FACING_ACTIONS:
+        return True
+    if action == "lightnovel_recommendation_delivery":
+        return True
+    return source in {"gateway", "channel"} and _is_gateway_context(row, metadata)
+
+
 def _is_synthetic(row: Mapping[str, Any], metadata: Mapping[str, Any]) -> bool:
     person_id = _clean(row.get("person_id")).lower()
     session_id = _clean(row.get("session_id")).lower()
@@ -446,7 +459,7 @@ def build_coverage_report(
             required_identity_counts["session"] += 1
             if not session_id:
                 issues.append(EpisodeIssue("missing_required_session_id", "critical", episode_id, kind, action, person_id, session_id, "user-facing episode lacks session_id"))
-        if _is_gateway_context(row, metadata) and not _has_gateway_evidence(row, metadata):
+        if _requires_gateway_evidence_anchor(row, metadata) and not _has_gateway_evidence(row, metadata):
             issues.append(EpisodeIssue("missing_gateway_evidence_anchor", "warn", episode_id, kind, action, person_id, session_id, "gateway context lacks gateway://message evidence anchor"))
         if kind == "perception_episode" and int(row.get("evidence_count") or 0) <= 0:
             issues.append(EpisodeIssue("perception_without_evidence", "critical", episode_id, kind, action, person_id, session_id, "perception episode must bind perception/audio evidence"))

@@ -1335,7 +1335,7 @@ class LifeMemoryStore:
             primary_ref = f"channel://event/{event_key}"
             episode_kind = EPISODE_ACTION
             evidence_kind = EVIDENCE_GATEWAY_MESSAGE
-        elif source in {"action", "gateway", "codex_production", "tool", "browser"}:
+        elif source in {"action", "gateway", "codex_production", "surface_memory_recall", "tool", "browser"}:
             primary_ref = f"action://event/{event_key}"
             episode_kind = EPISODE_ACTION
             evidence_kind = EVIDENCE_TOOL_RESULT
