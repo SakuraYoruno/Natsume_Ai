@@ -313,6 +313,177 @@ def test_surface_runtime_retries_memory_followup_when_reply_only_uses_one_detail
     assert "MEMORY_FOLLOWUP_SHALLOW_ANALYSIS" in calls[1][-1]["content"]
 
 
+def test_surface_runtime_retries_collection_listing_when_reply_ignores_items() -> None:
+    calls: list[list[dict[str, str]]] = []
+
+    def generate(messages):
+        calls.append(messages)
+        if len(calls) == 1:
+            return _candidate_payload(["昨天那批都还行，看你想看哪种。"])
+        return _candidate_payload(["昨天那三本是 Yesterday A、Yesterday B、Yesterday C。"])
+
+    result = asyncio.run(
+        SurfaceRuntime(generate).run(
+            _payload(
+                user_message="昨天三本呢？",
+                reply_control_packet={
+                    "response_move": "memory_followup",
+                    "task_mode": "memory_followup",
+                    "emotional_tone": "light",
+                    "relationship_distance": "familiar",
+                    "information_budget": "short",
+                    "question_budget": 0,
+                    "facts": [
+                        "集合记忆：2026-05-28 当天轻小说推荐集合，记录 3 个条目；可比较证据：1. Yesterday A｜看点：恋爱日常；2. Yesterday B｜看点：奇幻身份钩子；3. Yesterday C｜看点：设定新鲜",
+                    ],
+                    "style_anchor": ["日期/近期集合追问要保留用户指定时间范围，并点出集合里的具体条目。"],
+                },
+            )
+        )
+    )
+
+    assert len(calls) == 2
+    assert result.selected_text == "昨天那三本是 Yesterday A、Yesterday B、Yesterday C。"
+    assert "MEMORY_ANSWER_COLLECTION_ITEM_IDENTITY_COVERAGE" in calls[1][-1]["content"]
+    assert result.generation_trace["memory_answer_alignment"]["passed"] is True
+
+
+def test_surface_runtime_repairs_collection_listing_without_turning_it_into_selection(monkeypatch) -> None:  # noqa: ANN001
+    monkeypatch.setenv("HOST_SURFACE_MAIN_CHAIN_HARD_GATE_RETRY_ENABLED", "false")
+
+    def generate(_messages):
+        return _candidate_payload(["昨天那批都还行。"])
+
+    result = asyncio.run(
+        SurfaceRuntime(generate).run(
+            _payload(
+                user_message="昨天三本呢？",
+                reply_control_packet={
+                    "response_move": "memory_followup",
+                    "task_mode": "memory_followup",
+                    "emotional_tone": "light",
+                    "relationship_distance": "familiar",
+                    "information_budget": "short",
+                    "question_budget": 0,
+                    "facts": [
+                        "集合记忆：2026-05-28 当天轻小说推荐集合，记录 3 个条目；可比较证据：1. Yesterday A｜看点：恋爱日常；2. Yesterday B｜看点：奇幻身份钩子；3. Yesterday C｜看点：设定新鲜",
+                    ],
+                },
+            )
+        )
+    )
+
+    assert result.selected_text == "昨天那几本我记得是：Yesterday A、Yesterday B、Yesterday C。"
+    assert "我会选" not in result.selected_text
+    assert result.generation_trace["memory_answer_alignment"]["passed"] is True
+
+
+def test_surface_runtime_retries_recent_many_collection_when_too_few_items_are_named() -> None:
+    calls: list[list[dict[str, str]]] = []
+    items = "；".join(
+        f"{index}. Recent {index}｜看点：候选{index}"
+        for index in range(1, 11)
+    )
+
+    def generate(messages):
+        calls.append(messages)
+        if len(calls) == 1:
+            return _candidate_payload(["最近这批大概十几本，我会先挑有奇幻味的。"])
+        return _candidate_payload(["最近这批我记到 Recent 1、Recent 2、Recent 3，后面还有几本同批书。"])
+
+    result = asyncio.run(
+        SurfaceRuntime(generate).run(
+            _payload(
+                user_message="这几天十几本里有哪些？",
+                reply_control_packet={
+                    "response_move": "memory_followup",
+                    "task_mode": "memory_followup",
+                    "emotional_tone": "light",
+                    "relationship_distance": "familiar",
+                    "information_budget": "short",
+                    "question_budget": 0,
+                    "facts": [
+                        f"集合记忆：最近轻小说推荐集合，记录 10 个条目；可比较证据：{items}",
+                    ],
+                },
+            )
+        )
+    )
+
+    assert len(calls) == 2
+    assert "Recent 1" in result.selected_text
+    assert "Recent 2" in result.selected_text
+    assert "Recent 3" in result.selected_text
+    assert "MEMORY_ANSWER_COLLECTION_ITEM_IDENTITY_COVERAGE" in calls[1][-1]["content"]
+
+
+def test_surface_runtime_retries_failure_recall_when_reply_ignores_recorded_cause() -> None:
+    calls: list[list[dict[str, str]]] = []
+
+    def generate(messages):
+        calls.append(messages)
+        if len(calls) == 1:
+            return _candidate_payload(["大概还是网络问题。"])
+        return _candidate_payload(["记录里是 DeepSeek timeout，后来回退到 Gemini，所以那次任务没继续推完。"])
+
+    result = asyncio.run(
+        SurfaceRuntime(generate).run(
+            _payload(
+                user_message="为什么任务会失败？",
+                reply_control_packet={
+                    "response_move": "memory_followup",
+                    "task_mode": "memory_followup",
+                    "emotional_tone": "neutral",
+                    "relationship_distance": "familiar",
+                    "information_budget": "short",
+                    "question_budget": 0,
+                    "facts": [
+                        "记忆线索：昨日推荐任务失败。原因：DeepSeek provider timeout；结果：回退到 Gemini 前任务已经超时，QQ 后续详情没有推完。",
+                    ],
+                    "style_anchor": ["失败追问只能解释召回事实里的失败结果和证据，不要猜新的根因。"],
+                },
+            )
+        )
+    )
+
+    assert len(calls) == 2
+    assert "DeepSeek timeout" in result.selected_text
+    assert "MEMORY_ANSWER_FAILURE_FACT_ANCHOR" in calls[1][-1]["content"]
+
+
+def test_surface_runtime_retries_preference_recall_when_reply_is_generic() -> None:
+    calls: list[list[dict[str, str]]] = []
+
+    def generate(messages):
+        calls.append(messages)
+        if len(calls) == 1:
+            return _candidate_payload(["嗯，我记得，会按你说的来。"])
+        return _candidate_payload(["记得，你说过不要拟人化发送，推荐就按干净卡片分段。"])
+
+    result = asyncio.run(
+        SurfaceRuntime(generate).run(
+            _payload(
+                user_message="我不是说过不要那种拟人化发送吗？",
+                reply_control_packet={
+                    "response_move": "memory_followup",
+                    "task_mode": "memory_followup",
+                    "emotional_tone": "neutral",
+                    "relationship_distance": "familiar",
+                    "information_budget": "short",
+                    "question_budget": 0,
+                    "facts": [
+                        "长期事实：用户明确要求不要拟人化发送；推荐推送要总览一段、每本卡片一段，简介后换行。",
+                    ],
+                },
+            )
+        )
+    )
+
+    assert len(calls) == 2
+    assert "不要拟人化发送" in result.selected_text
+    assert "MEMORY_ANSWER_PREFERENCE_FACT_ANCHOR" in calls[1][-1]["content"]
+
+
 def test_surface_runtime_repairs_memory_followup_if_retry_still_ignores_recalled_object() -> None:
     def generate(_messages):
         return _candidate_payload(["哈？"])

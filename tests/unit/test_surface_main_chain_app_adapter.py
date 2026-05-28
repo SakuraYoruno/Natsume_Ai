@@ -142,6 +142,50 @@ def test_build_surface_main_chain_input_marks_anaphoric_memory_followup(monkeypa
     assert tuple(payload.memory_packet.facts) == ("记忆线索：我刚才推荐了 3 本书：1. A；2. B；3. C。",)
 
 
+def test_build_surface_main_chain_input_marks_collection_recall_as_memory_followup(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "host_brain.app.surface_main_chain_adapter.get_compiled_soul",
+        lambda: SimpleNamespace(source_text=SOUL, runtime_full_text=SOUL),
+    )
+    trace = {
+        "surface_memory_recall_packet": {
+            "facts": ["集合记忆：昨天轻小说推荐集合，记录 3 个条目；可比较证据：1. A；2. B；3. C。"],
+            "trace": {"plan": {"reason": "collection_memory_recall"}},
+        }
+    }
+
+    payload = build_surface_main_chain_input_from_chat_input(
+        _agent_input(user_message="昨天三本呢？"),
+        trace_stage_meta=trace,
+    )
+
+    assert payload.task_control["task_mode"] == "memory_followup"
+    assert payload.task_control["response_move"] == "memory_followup"
+    assert any("日期/近期集合追问" in item for item in payload.task_control["style_anchor"])
+
+
+def test_build_surface_main_chain_input_marks_failure_recall_as_memory_followup(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "host_brain.app.surface_main_chain_adapter.get_compiled_soul",
+        lambda: SimpleNamespace(source_text=SOUL, runtime_full_text=SOUL),
+    )
+    trace = {
+        "surface_memory_recall_packet": {
+            "facts": ["记忆线索：任务失败。原因：DeepSeek provider timeout。"],
+            "trace": {"plan": {"reason": "failure_debug_recall"}},
+        }
+    }
+
+    payload = build_surface_main_chain_input_from_chat_input(
+        _agent_input(user_message="为什么任务会失败？"),
+        trace_stage_meta=trace,
+    )
+
+    assert payload.task_control["task_mode"] == "memory_followup"
+    assert payload.task_control["response_move"] == "memory_followup"
+    assert any("失败追问只能解释" in item for item in payload.task_control["style_anchor"])
+
+
 def test_build_surface_main_chain_input_infers_anaphoric_followup_from_sanitized_packet(monkeypatch) -> None:
     monkeypatch.setattr(
         "host_brain.app.surface_main_chain_adapter.get_compiled_soul",

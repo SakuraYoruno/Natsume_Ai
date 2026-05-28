@@ -76,14 +76,18 @@ def build_surface_generation_trace(
     candidates: Sequence[SurfaceDirectCandidate],
     selected: SurfaceDirectCandidate | None,
     observation_codes: Sequence[str],
+    memory_answer_alignment: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
-    return {
+    trace = {
         "selected": selected.as_dict() if selected else None,
         "candidates": [candidate.as_dict() for candidate in candidates],
         "observation_codes": list(observation_codes),
         "candidate_count": len(candidates),
         "selection": "direct_first_no_score",
     }
+    if memory_answer_alignment and memory_answer_alignment.get("active"):
+        trace["memory_answer_alignment"] = dict(memory_answer_alignment)
+    return trace
 
 
 def surface_observation_codes(selected: Mapping[str, Any] | None) -> tuple[str, ...]:
@@ -220,6 +224,12 @@ _MEMORY_FOLLOWUP_DISCONTINUITY_RE = re.compile(
     r"居然.{0,12}(?:问|看|认真|主动)|认真看完|主动问我|会主动问|有点意外|挺意外|真意外"
 )
 _MEMORY_FOLLOWUP_SELECTION_USER_RE = re.compile(r"喜欢哪|哪本|哪部|哪个|好看|先看|选哪|挑哪|推荐哪")
+_MEMORY_COLLECTION_LIST_USER_RE = re.compile(r"哪些|哪几|几本|几部|十几本|这几天|最近|昨天|前天|今天|今日|那几本|这几本|这三本")
+_MEMORY_FAILURE_USER_RE = re.compile(r"失败|报错|异常|连不上|被占用|原因|为什么|没执行|执行情况")
+_MEMORY_PREFERENCE_USER_RE = re.compile(r"偏好|喜欢|不喜欢|不要|别再|必须|不是说过|我说过|以后")
+_MEMORY_RECALL_FACT_MARKER_RE = re.compile(
+    r"集合记忆|记忆线索|长期事实|召回线索|关系线索|网页深读结果|可比较证据|失败|异常|报错|偏好|不要"
+)
 _MEMORY_FOLLOWUP_REASON_MARKER_RE = re.compile(
     r"因为|理由|看着|读着|感觉|味道|余味|舒服|有意思|新鲜|设定|标题|名字|简介|看点|公开|资料|奇幻|更新|热度|评论|浏览|正文|深读|读到|体量|对白|世界观|章节|更|比较|挺|有点|戳|想看"
 )
@@ -541,6 +551,7 @@ def _surface_hard_gate_violations(request: IsolatedSurfaceInput, text: str) -> t
         codes.append("MEMORY_FOLLOWUP_SHALLOW_ANALYSIS")
     if _memory_followup_bare_echo_hits(request, value):
         codes.append("MEMORY_FOLLOWUP_BARE_ECHO")
+    codes.extend(_memory_answer_alignment_violation_codes(request, value))
     return tuple(dict.fromkeys(codes))
 
 
@@ -779,8 +790,13 @@ def _memory_followup_deep_review_reason_terms(selection: Mapping[str, Any]) -> t
 def _memory_followup_grounding_active(request: IsolatedSurfaceInput) -> bool:
     task_mode = str(getattr(request.control, "task_mode", "") or "").strip().lower()
     response_move = str(getattr(request.control, "response_move", "") or "").strip().lower()
-    if task_mode == "memory_followup" or response_move == "memory_followup":
+    if task_mode in {"memory_followup", "memory_recall", "recall_memory"} or response_move in {
+        "memory_followup",
+        "answer_from_memory",
+        "recall_memory",
+    }:
         return True
+    user_text = str(getattr(request, "user_message", "") or "")
     joined = "\n".join(
         [
             *[str(item or "") for item in list(getattr(request.control, "facts", []) or [])],
@@ -789,7 +805,413 @@ def _memory_followup_grounding_active(request: IsolatedSurfaceInput) -> bool:
             *[str(item or "") for item in list(getattr(request.control, "must_not_do", []) or [])],
         ]
     )
-    return "指代选择追问" in joined
+    if "指代选择追问" in joined:
+        return True
+    if not _MEMORY_RECALL_FACT_MARKER_RE.search(joined):
+        return False
+    if _MEMORY_FOLLOWUP_SELECTION_USER_RE.search(user_text) and re.search(r"集合记忆|推荐了|可比较证据|网页深读结果", joined):
+        return True
+    if _MEMORY_COLLECTION_LIST_USER_RE.search(user_text) and re.search(r"集合记忆|推荐了|可比较证据", joined):
+        return True
+    if _MEMORY_FAILURE_USER_RE.search(user_text) and re.search(r"失败|异常|报错|连不上|被占用|timeout|Timeout|error|Error", joined):
+        return True
+    if _MEMORY_PREFERENCE_USER_RE.search(user_text) and re.search(r"长期事实|偏好|不要|别再|必须|OneBot|主链|pro", joined):
+        return True
+    return False
+
+
+def _memory_answer_alignment_violation_codes(request: IsolatedSurfaceInput, text: str) -> tuple[str, ...]:
+    receipt = _memory_answer_alignment_receipt(request, text)
+    if not receipt.get("active") or receipt.get("passed"):
+        return ()
+    out: list[str] = []
+    for item in list(receipt.get("missing") or []):
+        code = str(item or "").strip()
+        if not code:
+            continue
+        out.append("MEMORY_ANSWER_" + code.upper())
+    return tuple(dict.fromkeys(out))
+
+
+def _memory_answer_alignment_receipt(request: IsolatedSurfaceInput, text: str) -> dict[str, Any]:
+    active = _memory_followup_grounding_active(request)
+    facts = _memory_followup_fact_texts(request)
+    user_text = str(getattr(request, "user_message", "") or "")
+    if not active:
+        return {"active": False, "passed": True, "missing": [], "checks": []}
+    value = re.sub(r"\s+", "", str(text or "").strip())
+    fact_text = "\n".join(facts)
+    checks: list[dict[str, Any]] = []
+    missing: list[str] = []
+
+    def add_check(name: str, passed: bool, detail: str = "", **extra: Any) -> None:
+        checks.append(
+            {
+                key: val
+                for key, val in {
+                    "name": name,
+                    "passed": bool(passed),
+                    "detail": detail,
+                    **extra,
+                }.items()
+                if val not in ("", None, [], {})
+            }
+        )
+        if not passed:
+            missing.append(name)
+
+    has_text = bool(value)
+    add_check("non_empty_answer", has_text)
+    if not has_text:
+        return {
+            "active": True,
+            "passed": False,
+            "missing": list(dict.fromkeys(missing)),
+            "checks": checks,
+        }
+
+    if _MEMORY_FOLLOWUP_SELECTION_USER_RE.search(user_text):
+        title_terms = _memory_followup_title_anchor_terms(request)
+        deep_selection = _memory_followup_deep_review_selection(request)
+        title_hit = (
+            bool(deep_selection and _memory_followup_deep_review_selected_hits(deep_selection, value))
+            or any(term and term in value for term in title_terms)
+        )
+        add_check(
+            "selected_item_identity",
+            title_hit,
+            expected_terms=", ".join(list(title_terms)[:6]),
+        )
+        reason_hit = bool(_MEMORY_FOLLOWUP_REASON_MARKER_RE.search(value))
+        add_check("selection_reason", reason_hit)
+        detail_groups = _memory_followup_detail_anchor_groups(request)
+        if detail_groups and not deep_selection:
+            hit_labels = _memory_followup_detail_dimension_hits(request, value)
+            required = 2 if len(detail_groups) >= 2 else 1
+            add_check(
+                "collection_detail_dimensions",
+                len(hit_labels) >= required,
+                required=required,
+                hit_labels=list(hit_labels),
+            )
+        if deep_selection:
+            selected_hit = _memory_followup_deep_review_selected_hits(deep_selection, value)
+            add_check(
+                "deep_review_selected_item",
+                selected_hit,
+                expected_index=deep_selection.get("index"),
+                expected_title=deep_selection.get("title"),
+            )
+            detail_terms = _memory_followup_deep_review_reason_terms(deep_selection)
+            if detail_terms:
+                add_check(
+                    "deep_review_reason_terms",
+                    any(term and term in value for term in detail_terms),
+                    expected_terms=", ".join(list(detail_terms)[:8]),
+                )
+    elif _memory_collection_answer_expected(user_text=user_text, fact_text=fact_text):
+        cards = _memory_followup_collection_item_cards(request)
+        required = _memory_collection_answer_required_hits(user_text=user_text, cards=cards, fact_text=fact_text)
+        hits = _memory_collection_item_hits(cards, value)
+        add_check(
+            "collection_item_identity_coverage",
+            len(hits) >= required,
+            required=required,
+            hit_indexes=[card["index"] for card in hits],
+            item_count=len(cards),
+        )
+        if _memory_collection_scope_label(user_text):
+            scope_hit = _memory_collection_scope_label(user_text) in value or any(card in value for card in ("今天", "今日", "昨天", "前天", "最近", "这几天"))
+            add_check("requested_scope_acknowledged", scope_hit, expected_scope=_memory_collection_scope_label(user_text))
+
+    if _memory_failure_answer_expected(user_text=user_text, fact_text=fact_text):
+        terms = _memory_fact_anchor_terms(facts, kind="failure")
+        hit_terms = [term for term in terms if term and term in value]
+        add_check(
+            "failure_fact_anchor",
+            bool(hit_terms),
+            expected_terms=", ".join(terms[:8]),
+            hit_terms=hit_terms[:8],
+        )
+        add_check(
+            "failure_answer_shape",
+            bool(re.search(r"因为|原因|卡在|失败|异常|连不上|被占用|timeout|Timeout|重试|没执行|没有执行", value)),
+        )
+
+    if _memory_preference_answer_expected(user_text=user_text, fact_text=fact_text):
+        terms = _memory_fact_anchor_terms(facts, kind="preference")
+        hit_terms = [term for term in terms if term and term in value]
+        add_check(
+            "preference_fact_anchor",
+            bool(hit_terms),
+            expected_terms=", ".join(terms[:8]),
+            hit_terms=hit_terms[:8],
+        )
+
+    return {
+        "active": True,
+        "passed": not missing,
+        "missing": list(dict.fromkeys(missing)),
+        "checks": checks,
+    }
+
+
+def _memory_followup_fact_texts(request: IsolatedSurfaceInput) -> list[str]:
+    return [
+        str(item or "")
+        for item in [
+            *list(getattr(request.control, "facts", []) or []),
+            *list(getattr(request, "facts", []) or []),
+        ]
+        if str(item or "").strip()
+    ]
+
+
+def _memory_collection_answer_expected(*, user_text: str, fact_text: str) -> bool:
+    if not re.search(r"集合记忆|推荐了|可比较证据", fact_text):
+        return False
+    if _MEMORY_FOLLOWUP_SELECTION_USER_RE.search(user_text):
+        return False
+    return bool(_MEMORY_COLLECTION_LIST_USER_RE.search(user_text) or re.search(r"推荐|书单|轻小说|小说|书", user_text))
+
+
+def _memory_failure_answer_expected(*, user_text: str, fact_text: str) -> bool:
+    return bool(
+        _MEMORY_FAILURE_USER_RE.search(user_text)
+        and re.search(r"失败|异常|报错|连不上|被占用|timeout|Timeout|error|Error|没执行|没有执行", fact_text)
+    )
+
+
+def _memory_preference_answer_expected(*, user_text: str, fact_text: str) -> bool:
+    return bool(
+        _MEMORY_PREFERENCE_USER_RE.search(user_text)
+        and re.search(r"长期事实|偏好|不要|别再|必须|OneBot|主链|pro|Pro", fact_text)
+    )
+
+
+def _memory_collection_answer_required_hits(
+    *,
+    user_text: str,
+    cards: Sequence[Mapping[str, Any]],
+    fact_text: str,
+) -> int:
+    if not cards:
+        return 1
+    if re.search(r"十几本|这几天|最近|过去几天|哪些|哪几", user_text):
+        return min(3, len(cards))
+    if re.search(r"三本|这三本|昨天|前天|今天|今日", user_text):
+        return min(2, len(cards))
+    declared = _memory_declared_collection_count(fact_text)
+    if declared >= 10:
+        return min(3, len(cards))
+    if declared >= 3:
+        return min(2, len(cards))
+    return 1
+
+
+def _memory_collection_scope_label(user_text: str) -> str:
+    if "昨天" in user_text or "昨晚" in user_text:
+        return "昨天"
+    if "前天" in user_text:
+        return "前天"
+    if "今天" in user_text or "今日" in user_text:
+        return "今天"
+    if any(token in user_text for token in ("最近", "这几天", "过去几天", "十几本")):
+        return "最近"
+    return ""
+
+
+def _memory_declared_collection_count(text: str) -> int:
+    match = re.search(r"(?:记录|推荐(?:了|过)?|共)\s*(\d+|三|两|二|十几)\s*(?:个条目|条|本|部|个)", str(text or ""))
+    if not match:
+        return 0
+    token = match.group(1)
+    if token == "十几":
+        return 10
+    if token == "三":
+        return 3
+    if token in {"两", "二"}:
+        return 2
+    try:
+        return int(token)
+    except ValueError:
+        return 0
+
+
+def _memory_followup_collection_item_cards(request: IsolatedSurfaceInput) -> list[dict[str, Any]]:
+    text = "\n".join(_memory_followup_fact_texts(request))
+    cards: list[dict[str, Any]] = []
+    for match in re.finditer(r"(?<!\d)(\d{1,2})[.、]\s*([^；。！？!?\n]+)", text):
+        index = _memory_followup_index_value(match.group(1))
+        raw_item = match.group(2).strip()
+        if index <= 0 or not raw_item:
+            continue
+        title = _memory_collection_item_title_from_raw(raw_item)
+        terms = _memory_collection_title_terms(title)
+        detail_terms = _memory_collection_detail_terms(raw_item)
+        if not terms and not detail_terms:
+            continue
+        card = {
+            "index": index,
+            "title": title,
+            "terms": terms,
+            "detail_terms": detail_terms,
+        }
+        if card not in cards:
+            cards.append(card)
+    return cards[:24]
+
+
+def _memory_collection_item_title_from_raw(raw_item: str) -> str:
+    value = re.sub(r"^\s*\d{2,5}[.、]\s*", "", str(raw_item or "").strip())
+    value = re.sub(r"^(?:可比较证据[:：]|集合记忆[:：])\s*", "", value)
+    title = re.split(r"｜|\||(?:看点|简介|题材|更新|热度|详情|链接)[:：]", value, maxsplit=1)[0]
+    title = re.sub(r"[「」“”\"'《》\[\]（）()]+", "", title)
+    title = re.sub(r"\s+", " ", title).strip(" ，,、；;。")
+    return title[:80]
+
+
+def _memory_collection_title_terms(title: str) -> tuple[str, ...]:
+    generic = {
+        "推荐",
+        "轻小说",
+        "小说",
+        "这本",
+        "那本",
+        "标题",
+        "简介",
+        "看点",
+        "更新",
+        "热度",
+    }
+    terms: list[str] = []
+
+    def add(term: str) -> None:
+        cleaned = re.sub(r"[\s「」“”\"'《》\[\]（）()]+", "", str(term or "")).strip("，,、；;。")
+        if len(cleaned) < 2 or cleaned in generic or cleaned in terms:
+            return
+        terms.append(cleaned)
+
+    add(title[:36])
+    for sequence in re.findall(r"[\u3040-\u30ff\u3400-\u9fffA-Za-z0-9_]{2,18}", title):
+        add(sequence)
+    if "河岸" in title:
+        add("河岸")
+    if "皇女" in title or "皇帝" in title or "異世界" in title or "异世界" in title:
+        add("皇女")
+        add("皇帝")
+        add("异世界")
+        add("異世界")
+    if "童星" in title or "培养" in title or "培養" in title:
+        add("童星")
+        add("培养")
+        add("培養")
+    return tuple(terms[:12])
+
+
+def _memory_collection_detail_terms(raw_item: str) -> tuple[str, ...]:
+    terms: list[str] = []
+
+    def add(term: str) -> None:
+        cleaned = re.sub(r"[\s「」“”\"'《》\[\]（）()]+", "", str(term or "")).strip("，,、；;。")
+        if len(cleaned) < 2 or cleaned in {"看点", "简介", "题材", "更新", "热度"} or cleaned in terms:
+            return
+        terms.append(cleaned)
+
+    for label in ("看点", "简介", "题材", "更新", "热度"):
+        match = re.search(label + r"[:：]\s*([^｜；。！？!?\n]+)", str(raw_item or ""))
+        if not match:
+            continue
+        add(label)
+        segment = match.group(1)
+        add(segment[:24])
+        for sequence in re.findall(r"[\u3040-\u30ff\u3400-\u9fffA-Za-z0-9_]{2,14}", segment):
+            add(sequence)
+    return tuple(terms[:12])
+
+
+def _memory_collection_item_hits(cards: Sequence[Mapping[str, Any]], value: str) -> list[Mapping[str, Any]]:
+    hits: list[Mapping[str, Any]] = []
+    normalized = re.sub(r"\s+", "", str(value or ""))
+    mentioned_indexes = _memory_followup_indexes_in_text(normalized)
+    term_counts: dict[str, int] = {}
+    for card in cards:
+        for term in list(card.get("terms") or []):
+            cleaned = str(term or "")
+            if cleaned:
+                term_counts[cleaned] = term_counts.get(cleaned, 0) + 1
+    for card in cards:
+        index = int(card.get("index") or 0)
+        terms = [str(term or "") for term in list(card.get("terms") or []) if term_counts.get(str(term or ""), 0) <= 1]
+        title_hit = any(str(term or "") and str(term) in normalized for term in terms)
+        if title_hit or (index > 0 and index in mentioned_indexes and terms):
+            hits.append(card)
+    return hits
+
+
+def _memory_fact_anchor_terms(facts: Sequence[str], *, kind: str) -> list[str]:
+    joined = "\n".join(str(fact or "") for fact in facts)
+    if kind == "failure":
+        seed_terms = (
+            "DeepSeek",
+            "Gemini",
+            "模型池",
+            "VPN",
+            "OneBot",
+            "edge",
+            "状态库",
+            "被占用",
+            "连不上",
+            "timeout",
+            "Timeout",
+            "超时",
+            "失败",
+            "异常",
+            "报错",
+            "没执行",
+            "没有执行",
+        )
+    else:
+        seed_terms = (
+            "不要拟人化发送",
+            "拟人化发送",
+            "主链不要用pro",
+            "不要用pro",
+            "主链",
+            "pro",
+            "OneBot",
+            "edge",
+            "每日推荐",
+            "分段卡片",
+            "轻小说",
+            "偏好",
+        )
+    terms: list[str] = []
+
+    def add(term: str) -> None:
+        cleaned = re.sub(r"[\s「」“”\"'《》\[\]（）()]+", "", str(term or "")).strip("，,、；;。")
+        if len(cleaned) < 2 or cleaned in terms:
+            return
+        terms.append(cleaned)
+
+    for term in seed_terms:
+        if term in joined:
+            add(term)
+    for marker in ("原因", "结果", "修复", "用户偏好", "长期事实", "明确要求"):
+        for match in re.finditer(marker + r"[:：]\s*([^；。！？!?\n]+)", joined):
+            segment = match.group(1)
+            for token in re.findall(r"[\u3040-\u30ff\u3400-\u9fffA-Za-z0-9_]{2,16}", segment):
+                if token in {"原因", "结果", "修复", "用户偏好", "长期事实", "明确要求"}:
+                    continue
+                add(token)
+    if not terms:
+        for token in re.findall(r"[\u3040-\u30ff\u3400-\u9fffA-Za-z0-9_]{2,16}", joined):
+            if token in {"记忆线索", "长期事实", "召回线索", "用户提到", "回复"}:
+                continue
+            add(token)
+            if len(terms) >= 8:
+                break
+    return terms[:16]
 
 
 def _memory_followup_grounding_terms(request: IsolatedSurfaceInput) -> tuple[str, ...]:
@@ -1146,12 +1568,16 @@ def _hard_gate_fallback(request: IsolatedSurfaceInput, violations: Sequence[str]
         or "MEMORY_FOLLOWUP_DEEP_REVIEW_SHALLOW" in codes
         or "MEMORY_FOLLOWUP_SHALLOW_ANALYSIS" in codes
         or "MEMORY_FOLLOWUP_BARE_ECHO" in codes
+        or any(code.startswith("MEMORY_ANSWER_") for code in codes)
     ):
         return _memory_followup_fallback(request)
     return ""
 
 
 def _memory_followup_fallback(request: IsolatedSurfaceInput) -> str:
+    collection_listing_fallback = _memory_collection_listing_fallback(request)
+    if collection_listing_fallback:
+        return collection_listing_fallback
     deep_review_fallback = _memory_followup_deep_review_fallback(request)
     if deep_review_fallback:
         return deep_review_fallback
@@ -1199,6 +1625,33 @@ def _memory_followup_fallback(request: IsolatedSurfaceInput) -> str:
         if cleaned:
             return cleaned[:80].rstrip("，,、；;") + "。"
     return ""
+
+
+def _memory_collection_listing_fallback(request: IsolatedSurfaceInput) -> str:
+    user_text = str(getattr(request, "user_message", "") or "")
+    fact_text = "\n".join(_memory_followup_fact_texts(request))
+    if not _memory_collection_answer_expected(user_text=user_text, fact_text=fact_text):
+        return ""
+    cards = _memory_followup_collection_item_cards(request)
+    if not cards:
+        return ""
+    titles = [str(card.get("title") or "").strip() for card in cards if str(card.get("title") or "").strip()]
+    if not titles:
+        return ""
+    scope = _memory_collection_scope_label(user_text)
+    if scope == "昨天":
+        head = "昨天那几本我记得是"
+    elif scope == "前天":
+        head = "前天那几本我记得是"
+    elif scope == "今天":
+        head = "今天这批我记得是"
+    elif scope == "最近":
+        head = "最近这批我记到"
+    else:
+        head = "这批我记得是"
+    if len(titles) <= 4:
+        return f"{head}：{'、'.join(titles[:4])}。"
+    return f"{head}：{'、'.join(titles[:5])}，还有后面几本我就不一口气全塞满屏了。"
 
 
 def _memory_followup_deep_review_fallback(request: IsolatedSurfaceInput) -> str:
@@ -1411,10 +1864,15 @@ class SurfaceRuntime:
         )
         selected = candidates[0] if candidates else None
         observation_codes = tuple(dict.fromkeys(hard_gate_observations))
+        memory_answer_alignment = _memory_answer_alignment_receipt(
+            request,
+            selected.text if selected else "",
+        )
         generation_trace = build_surface_generation_trace(
             candidates=candidates,
             selected=selected,
             observation_codes=observation_codes,
+            memory_answer_alignment=memory_answer_alignment,
         )
         return SurfaceRuntimeResult(
             request=request,

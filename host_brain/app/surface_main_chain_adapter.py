@@ -26,6 +26,14 @@ _MEMORY_PACKET_KEYS = (
     "memory_recall_packet",
     "memory_packet",
 )
+_MEMORY_RECALL_SURFACE_REASONS = {
+    "anaphoric_selection_recall",
+    "collection_memory_recall",
+    "event_memory_recall",
+    "failure_debug_recall",
+    "explicit_memory_recall",
+    "correction_recall",
+}
 _TRACE_RUNTIME_PAYLOAD_KEYS = (
     "conversation_history",
     "conversation_interpretation",
@@ -989,7 +997,7 @@ def _surface_task_control_from_reply_plan(
         reply_plan.get("tactic_variant"),
         task_mode,
     )
-    if memory_plan_reason == "anaphoric_selection_recall":
+    if memory_plan_reason in _MEMORY_RECALL_SURFACE_REASONS:
         task_mode = "memory_followup"
         response_move = "memory_followup"
     return {
@@ -1006,7 +1014,10 @@ def _surface_task_control_from_reply_plan(
         "style_anchor": _clean_list(
             [
                 "app_surface_main_chain",
+                "召回回答要使用已召回的经历对象、证据或长期事实，不要只按当前这句话泛聊。" if memory_plan_reason in _MEMORY_RECALL_SURFACE_REASONS else "",
                 "指代追问要承接已召回的最近经历对象。" if memory_plan_reason == "anaphoric_selection_recall" else "",
+                "日期/近期集合追问要保留用户指定时间范围，并点出集合里的具体条目。" if memory_plan_reason == "collection_memory_recall" else "",
+                "失败追问只能解释召回事实里的失败结果和证据，不要猜新的根因。" if memory_plan_reason == "failure_debug_recall" else "",
                 _first_nonempty(reply_plan.get("style_anchor"), ""),
             ]
         ),
