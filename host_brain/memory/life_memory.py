@@ -2272,6 +2272,64 @@ class MemorySleepReplayTask:
         filtered = [item for item in candidates if _should_sleep_replay_candidate(item)]
         return filtered[: max(1, int(limit))]
 
+    def select_compaction_groups(
+        self,
+        *,
+        now_ts_ms_value: int | None = None,
+        group_limit: int = 6,
+        max_group_size: int = 6,
+        min_age_ms: int = 6 * 60 * 60 * 1000,
+    ) -> list[list[dict[str, Any]]]:
+        """Select medium-strength lived episodes for sleep-time scene compaction."""
+
+        current = int(now_ts_ms_value if now_ts_ms_value is not None else now_ts_ms())
+        semantic_referenced_episode_ids = _semantic_referenced_episode_ids(self.store.ledger._conn)
+        rows = self.store.ledger._conn.execute(
+            """
+            SELECT *
+            FROM life_episode
+            WHERE status = ?
+              AND truth_state IN (?, ?)
+              AND COALESCE(retention_state, ?) IN (?, ?)
+              AND compressed_into_episode_id IS NULL
+            ORDER BY created_ts_ms ASC
+            LIMIT ?
+            """,
+            (
+                STATUS_ACTIVE,
+                TRUTH_VERIFIED,
+                TRUTH_NARRATIVE_ONLY,
+                RETENTION_WARM,
+                RETENTION_WARM,
+                RETENTION_COLD,
+                max(1, int(group_limit)) * max(2, int(max_group_size)) * 4,
+            ),
+        ).fetchall()
+        buckets: dict[tuple[str, str, str, str], list[dict[str, Any]]] = {}
+        for row in rows:
+            episode = dict(row)
+            if not _should_compact_sleep_candidate(
+                episode,
+                current_ts_ms=current,
+                semantic_referenced_episode_ids=semantic_referenced_episode_ids,
+                min_age_ms=min_age_ms,
+            ):
+                continue
+            key = _sleep_compaction_group_key(episode)
+            buckets.setdefault(key, []).append(episode)
+        groups: list[list[dict[str, Any]]] = []
+        for items in buckets.values():
+            if len(items) < 2:
+                continue
+            groups.append(items[: max(2, int(max_group_size))])
+        groups.sort(
+            key=lambda group: (
+                -len(group),
+                min(int(item.get("created_ts_ms") or 0) for item in group),
+            )
+        )
+        return groups[: max(0, int(group_limit))]
+
     def run_once(
         self,
         *,
@@ -2279,12 +2337,35 @@ class MemorySleepReplayTask:
         replay_limit: int = 12,
         forgetting_batch_limit: int = 500,
         semantic_limit: int = 12,
+        compaction_group_limit: int = 6,
+        compaction_min_age_ms: int = 6 * 60 * 60 * 1000,
     ) -> dict[str, Any]:
         current = int(now_ts_ms_value if now_ts_ms_value is not None else now_ts_ms())
         forgetting = self.store.apply_forgetting_pass(
             now_ts_ms_value=current,
             batch_limit=forgetting_batch_limit,
         )
+        compaction_groups = self.select_compaction_groups(
+            now_ts_ms_value=current,
+            group_limit=compaction_group_limit,
+            min_age_ms=compaction_min_age_ms,
+        )
+        compactions: list[dict[str, Any]] = []
+        for group in compaction_groups:
+            payload = _sleep_compaction_payload(group)
+            result = self.store.compact_episodes(
+                source_episode_ids=[str(item.get("episode_id") or "") for item in group],
+                summary=str(payload.get("summary") or ""),
+                kept_facts=list(payload.get("kept_facts") or []),
+                dropped_details=list(payload.get("dropped_details") or []),
+                ts_ms=current + len(compactions),
+                metadata={
+                    "compaction_source": "memory_sleep_replay",
+                    "group_key": payload.get("group_key"),
+                },
+            )
+            if str(result.get("status") or "") == "OK":
+                compactions.append(result)
         semantic_distillation = LifeMemoryConsolidator(store=self.store).distill_semantic_memories(
             limit=max(replay_limit * 4, semantic_limit * 3, 12),
             max_records=max(1, int(semantic_limit)),
@@ -2313,6 +2394,11 @@ class MemorySleepReplayTask:
         return {
             "status": "OK",
             "forgetting": forgetting,
+            "compaction": {
+                "group_count": len(compactions),
+                "episode_count": sum(int(item.get("source_count") or 0) for item in compactions),
+                "groups": compactions,
+            },
             "semantic_distillation": semantic_distillation,
             "replay_selected": len(replay_batch),
             "reflection_count": reflection_count,
@@ -2729,6 +2815,101 @@ def _semantic_collection_confidence(*, collection: Mapping[str, Any], item_count
     return round(_clamp_unit(0.58 + strength * 0.24 + count_bonus), 4)
 
 
+def _should_compact_sleep_candidate(
+    episode: Mapping[str, Any],
+    *,
+    current_ts_ms: int,
+    semantic_referenced_episode_ids: set[str],
+    min_age_ms: int,
+) -> bool:
+    episode_id = _clean_text(episode.get("episode_id"))
+    if not episode_id or episode_id in semantic_referenced_episode_ids:
+        return False
+    metadata = _episode_metadata_dict(episode)
+    if bool(metadata.get("e2e_probe")) or bool(metadata.get("test_probe")) or bool(metadata.get("anchor_only")):
+        return False
+    if bool(metadata.get("should_not_compact")):
+        return False
+    kind = _clean_text(episode.get("episode_kind"))
+    if kind in {EPISODE_SEMANTIC, EPISODE_REFLECTION}:
+        return False
+    truth_state = _clean_text(episode.get("truth_state")).upper()
+    if truth_state not in {TRUTH_VERIFIED, TRUTH_NARRATIVE_ONLY}:
+        return False
+    retention_state = _clean_text(episode.get("retention_state")).upper()
+    if retention_state not in {RETENTION_WARM, RETENTION_COLD}:
+        return False
+    if _clean_text(episode.get("compressed_into_episode_id")):
+        return False
+    created = int(episode.get("created_ts_ms") or episode.get("last_touched_ts_ms") or current_ts_ms)
+    if max(0, int(current_ts_ms) - created) < max(0, int(min_age_ms)):
+        return False
+    strength = _clamp_unit(episode.get("memory_strength"), default=_clamp_unit(episode.get("salience")))
+    if strength < 0.18 or strength >= 0.72:
+        return False
+    summary = _clean_text(episode.get("summary"), limit=1200)
+    action = _clean_text(episode.get("action") or metadata.get("action_kind")).lower()
+    if not summary:
+        return False
+    if _looks_like_recommendation_followup_chat_noise(summary):
+        return False
+    if _importance_keyword_boost(summary) > 0.0:
+        return False
+    if action in {
+        "lightnovel_recommendation_delivery",
+        "lightnovel_recommendation_deep_review",
+        "qq_reply_sent",
+        "wechat_reply_sent",
+        "gateway_reply_sent",
+        "channel_message_sent",
+        "memory_compaction",
+    }:
+        return False
+    return True
+
+
+def _sleep_compaction_group_key(episode: Mapping[str, Any]) -> tuple[str, str, str, str]:
+    created = int(episode.get("created_ts_ms") or episode.get("last_touched_ts_ms") or 0)
+    day_key = _collection_day_key(created) if created > 0 else "unknown-day"
+    person_id = _clean_text(episode.get("person_id")) or "global"
+    session_id = _clean_text(episode.get("session_id")) or "global"
+    kind = _clean_text(episode.get("episode_kind")) or "episode"
+    return (person_id, session_id, day_key, kind)
+
+
+def _sleep_compaction_payload(group: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    items = [dict(item) for item in list(group or []) if _clean_text(item.get("episode_id"))]
+    if not items:
+        return {"summary": "", "kept_facts": [], "dropped_details": [], "group_key": ""}
+    first = min(int(item.get("created_ts_ms") or 0) for item in items)
+    day_key = _collection_day_key(first) if first > 0 else "未知日期"
+    kind = _clean_text(items[0].get("episode_kind")).replace("_", " ") or "episode"
+    kept_facts: list[str] = []
+    dropped_details: list[str] = []
+    for index, item in enumerate(items, start=1):
+        summary = _clean_text(item.get("summary"), limit=180)
+        if not summary:
+            continue
+        kept_facts.append(f"{index}. {summary}")
+        if len(summary) > 70:
+            dropped_details.append("省略原始长文本细节")
+    source_ids = [_clean_text(item.get("episode_id")) for item in items if _clean_text(item.get("episode_id"))]
+    group_key = "|".join(str(part) for part in _sleep_compaction_group_key(items[0]))
+    summary = (
+        f"睡眠回放压缩：{day_key} 的 {len(items)} 条{kind}被整理成一个场景摘要；"
+        f"保留主线：{'；'.join(kept_facts[:4])}。"
+    )
+    if len(kept_facts) > 4:
+        summary += f" 另有 {len(kept_facts) - 4} 条低层细节只保留审计锚点。"
+    return {
+        "summary": summary,
+        "kept_facts": kept_facts,
+        "dropped_details": list(dict.fromkeys([*dropped_details, "低层重复状态与中间过程不进入主动记忆"])),
+        "source_episode_ids": source_ids,
+        "group_key": group_key,
+    }
+
+
 def _semantic_proposals_from_episode(
     episode: Mapping[str, Any],
     evidence_rows: Sequence[Mapping[str, Any]],
@@ -2970,7 +3151,21 @@ def _looks_like_recommendation_followup_chat_noise(text: str) -> bool:
             "哪本好看",
         )
     )
-    if not has_selection_question:
+    has_result_followup = any(
+        token in compact
+        for token in (
+            "刚才今日推荐的结果",
+            "刚才的推荐结果",
+            "今日推荐的结果",
+            "今日推荐跑完了吗",
+            "今日推荐还没跑完",
+            "推荐任务创建",
+            "没拿到完成结果",
+            "不能把没跑出来",
+            "只说刚才那条结果",
+        )
+    )
+    if not has_selection_question and not has_result_followup:
         return False
     durable_markers = ("用户喜欢", "用户要求", "偏好", "记住", "以后", "不要", "纠正", "失败原因", "承诺")
     return not any(marker in compact for marker in durable_markers)

@@ -459,6 +459,86 @@ def test_sleep_replay_does_not_reinforce_recommendation_followup_chat_noise() ->
         ledger.close()
 
 
+def test_sleep_replay_compacts_medium_old_scene_without_swallowing_preference() -> None:
+    ledger = SQLiteLedger(db_path=":memory:")
+    try:
+        store = LifeMemoryStore(ledger=ledger)
+        old_ts = 1_800_000_000_000
+        source_ids: list[str] = []
+        for index, summary in enumerate(
+            [
+                "后台检查轻小说网页，记录页面可访问。",
+                "后台整理推荐候选，保留标题和链接。",
+                "后台确认 QQ 推送格式，等待下一步发送。",
+            ],
+            start=1,
+        ):
+            row = store.upsert_episode(
+                episode_kind="background_episode",
+                evidence_refs=[f"scheduler://event/medium-scene-{index}"],
+                primary_ref=f"scheduler://event/medium-scene-{index}",
+                person_id="owner",
+                session_id="qq_dm_owner",
+                action="background_progress",
+                result="progress",
+                summary=summary,
+                salience=0.34,
+                memory_strength=0.44,
+                retention_state=RETENTION_WARM,
+                ts_ms=old_ts + index,
+            )
+            source_ids.append(row["episode_id"])
+        preference = store.upsert_episode(
+            episode_kind="background_episode",
+            evidence_refs=["scheduler://event/medium-scene-preference"],
+            primary_ref="scheduler://event/medium-scene-preference",
+            person_id="owner",
+            session_id="qq_dm_owner",
+            action="background_progress",
+            result="progress",
+            summary="用户偏好：不要拟人化发送，推荐卡片要干净分段。",
+            salience=0.34,
+            memory_strength=0.44,
+            retention_state=RETENTION_WARM,
+            ts_ms=old_ts + 9,
+        )
+        recommendation_noise = store.upsert_episode(
+            episode_kind="chat_episode",
+            evidence_refs=["chat://request/recommendation-followup-noise"],
+            primary_ref="chat://request/recommendation-followup-noise",
+            person_id="owner",
+            session_id="qq_dm_owner",
+            summary="User: 刚才今日推荐的结果是什么？只说刚才那条结果。\nAssistant: 刚才推的是《百年孤独》。",
+            salience=0.34,
+            memory_strength=0.44,
+            retention_state=RETENTION_WARM,
+            ts_ms=old_ts + 10,
+        )
+
+        result = MemorySleepReplayTask(store=store).run_once(
+            now_ts_ms_value=old_ts + 2 * 24 * 60 * 60 * 1000,
+            replay_limit=4,
+            forgetting_batch_limit=20,
+            semantic_limit=4,
+            compaction_group_limit=4,
+        )
+
+        assert result["compaction"]["group_count"] == 1
+        assert result["compaction"]["episode_count"] == 3
+        assert len(ledger.life_memory_compaction) == 1
+        rows = {row["episode_id"]: row for row in ledger.life_episode}
+        for episode_id in source_ids:
+            assert rows[episode_id]["compressed_into_episode_id"] == result["compaction"]["groups"][0]["compressed_episode_id"]
+            assert rows[episode_id]["retention_state"] == RETENTION_COLD
+        assert rows[preference["episode_id"]]["compressed_into_episode_id"] is None
+        assert rows[preference["episode_id"]]["retention_state"] != RETENTION_GONE
+        assert rows[recommendation_noise["episode_id"]]["compressed_into_episode_id"] is None
+        compressed = rows[result["compaction"]["groups"][0]["compressed_episode_id"]]
+        assert "睡眠回放压缩" in compressed["summary"]
+    finally:
+        ledger.close()
+
+
 def test_action_and_perception_events_create_life_anchors_with_retention_state() -> None:
     ledger = SQLiteLedger(db_path=":memory:")
     try:

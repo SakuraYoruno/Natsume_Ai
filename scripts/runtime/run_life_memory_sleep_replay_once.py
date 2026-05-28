@@ -74,6 +74,16 @@ def _compact_episode(item: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+def _compact_compaction_group(group: list[Mapping[str, Any]]) -> dict[str, Any]:
+    return {
+        "source_count": len(group),
+        "episode_ids": [item.get("episode_id") for item in group],
+        "episode_kind": group[0].get("episode_kind") if group else "",
+        "session_id": group[0].get("session_id") if group else "",
+        "items": [_compact_episode(item) for item in group[:8]],
+    }
+
+
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Preview or run LifeMemory sleep replay.")
     parser.add_argument("--db-path", default="", help="SQLite audit ledger path. Defaults to Natsume_AUDIT_DB or host_brain/data/audit.sqlite3.")
@@ -82,7 +92,8 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--semantic-limit", type=int, default=12)
     parser.add_argument("--replay-limit", type=int, default=30)
     parser.add_argument("--forgetting-limit", type=int, default=500)
-    parser.add_argument("--apply", action="store_true", help="Actually update forgetting state, semantic_memory, and reflection evidence.")
+    parser.add_argument("--compaction-limit", type=int, default=6)
+    parser.add_argument("--apply", action="store_true", help="Actually update forgetting state, compaction summaries, semantic_memory, and reflection evidence.")
     parser.add_argument("--out", default="", help="Write JSON report to this path. Defaults to runtime/host/logs/life_memory_sleep_replay_once_*.json.")
     return parser.parse_args()
 
@@ -109,10 +120,12 @@ def main() -> int:
                 replay_limit=max(1, int(args.replay_limit)),
                 forgetting_batch_limit=max(1, int(args.forgetting_limit)),
                 semantic_limit=max(1, int(args.semantic_limit)),
+                compaction_group_limit=max(0, int(args.compaction_limit)),
             )
             mode = "apply"
             proposals: list[dict[str, Any]] = []
             replay_candidates: list[dict[str, Any]] = []
+            compaction_groups: list[dict[str, Any]] = []
         else:
             run_result = {"status": "DRY_RUN", "detail": "No ledger writes were performed."}
             proposals = [
@@ -126,6 +139,13 @@ def main() -> int:
                 _compact_episode(item)
                 for item in sleep_task.select_replay_batch(limit=max(1, int(args.replay_limit)))
             ]
+            compaction_groups = [
+                _compact_compaction_group(group)
+                for group in sleep_task.select_compaction_groups(
+                    now_ts_ms_value=current,
+                    group_limit=max(0, int(args.compaction_limit)),
+                )
+            ]
             mode = "dry_run"
         report = {
             "status": "OK",
@@ -136,6 +156,8 @@ def main() -> int:
             "proposals": proposals,
             "replay_candidate_count": len(replay_candidates),
             "replay_candidates": replay_candidates,
+            "compaction_group_count": len(compaction_groups),
+            "compaction_groups": compaction_groups,
             "run_result": run_result,
         }
     finally:
@@ -144,7 +166,18 @@ def main() -> int:
     out_path = _resolve_path(str(args.out)) if args.out else ROOT / DEFAULT_OUT_DIR / f"life_memory_sleep_replay_once_{int(time.time())}.json"
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
-    print(json.dumps({"status": "OK", "mode": report["mode"], "proposal_count": report["proposal_count"], "out": str(out_path)}, ensure_ascii=False))
+    print(
+        json.dumps(
+            {
+                "status": "OK",
+                "mode": report["mode"],
+                "proposal_count": report["proposal_count"],
+                "compaction_group_count": report["compaction_group_count"],
+                "out": str(out_path),
+            },
+            ensure_ascii=False,
+        )
+    )
     return 0
 
 
