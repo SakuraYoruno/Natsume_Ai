@@ -849,6 +849,124 @@ def test_forgetting_pass_demotes_trivial_old_episode_without_erasing_preference(
         ledger.close()
 
 
+def test_life_episode_metadata_records_management_policy() -> None:
+    ledger = SQLiteLedger(db_path=":memory:")
+    try:
+        store = LifeMemoryStore(ledger=ledger)
+        preference = store.write_chat_episode(
+            request_id="req-policy-preference",
+            session_id="qq_dm_owner",
+            person_id="owner",
+            user_message="以后推荐轻小说时，每本书的简介后应该换行，别模板腔。",
+            assistant_reply="记住了，后面按这个格式发。",
+            ts_ms=1_800_000_000_000,
+        )
+        audit = store.write_background_episode(
+            event_source="skill",
+            event_id="audit-anchor-policy",
+            task_id="audit_anchor",
+            status="OK",
+            detail="审计锚点：skill 执行日志已投递为 LifeMemory anchor。",
+            ts_ms=1_800_000_000_001,
+            metadata={"anchor_only": True},
+        )
+
+        rows = {
+            row["episode_id"]: row
+            for row in ledger.life_episode
+            if row["episode_id"] in {preference["episode_id"], audit["episode_id"]}
+        }
+        preference_raw = rows[preference["episode_id"]]["metadata"]
+        audit_raw = rows[audit["episode_id"]]["metadata"]
+        preference_meta = preference_raw if isinstance(preference_raw, dict) else json.loads(preference_raw)
+        audit_meta = audit_raw if isinstance(audit_raw, dict) else json.loads(audit_raw)
+
+        assert preference_meta["memory_class"] == "preference"
+        assert preference_meta["recall_grain"] == "semantic"
+        assert preference_meta["memory_policy"]["semantic_candidate"] is True
+        assert rows[preference["episode_id"]]["decay_profile_id"] == "STABLE"
+        assert audit_meta["memory_class"] == "audit_anchor"
+        assert audit_meta["recall_grain"] == "audit_only"
+        assert audit_meta["memory_policy"]["active_recall_default"] is False
+        assert rows[audit["episode_id"]]["decay_profile_id"] == "EPHEMERAL"
+    finally:
+        ledger.close()
+
+
+def test_backfill_memory_policy_classifies_legacy_episode() -> None:
+    ledger = SQLiteLedger(db_path=":memory:")
+    try:
+        store = LifeMemoryStore(ledger=ledger)
+        written = store.write_background_episode(
+            event_source="scheduler",
+            event_id="legacy-deepseek-failure",
+            task_id="llm_pool_call",
+            status="FAILED",
+            reason_code="DEEPSEEK_TIMEOUT",
+            detail="DeepSeek 失败原因：供应商超时，后续优先检查网络和 provider 健康状态。",
+            ts_ms=1_800_000_000_000,
+        )
+        with ledger._write_lock:
+            with ledger._conn:
+                ledger._conn.execute(
+                    "UPDATE life_episode SET metadata = ?, decay_profile_id = ? WHERE episode_id = ?",
+                    ("{}", "NORMAL", written["episode_id"]),
+                )
+
+        result = store.backfill_memory_policy(batch_limit=10)
+        row = next(item for item in ledger.life_episode if item["episode_id"] == written["episode_id"])
+        raw_meta = row["metadata"]
+        metadata = raw_meta if isinstance(raw_meta, dict) else json.loads(raw_meta)
+
+        assert result["updated"] == 1
+        assert result["class_counts"]["failure_lesson"] == 1
+        assert metadata["memory_class"] == "failure_lesson"
+        assert metadata["recall_grain"] == "semantic"
+        assert row["decay_profile_id"] == "SLOW"
+    finally:
+        ledger.close()
+
+
+def test_backfill_memory_policy_scans_missing_policy_rows_not_only_oldest_batch() -> None:
+    ledger = SQLiteLedger(db_path=":memory:")
+    try:
+        store = LifeMemoryStore(ledger=ledger)
+        existing = store.write_background_episode(
+            event_source="scheduler",
+            event_id="already-classified",
+            task_id="health_check",
+            status="OK",
+            detail="健康检查 OK。",
+            ts_ms=1_800_000_000_000,
+        )
+        missing = store.write_background_episode(
+            event_source="scheduler",
+            event_id="missing-policy",
+            task_id="gateway_probe",
+            status="FAILED",
+            detail="Gateway 连不上导致对话无法投递。",
+            ts_ms=1_800_000_000_001,
+        )
+        with ledger._write_lock:
+            with ledger._conn:
+                ledger._conn.execute(
+                    "UPDATE life_episode SET metadata = ? WHERE episode_id = ?",
+                    ("{}", missing["episode_id"]),
+                )
+
+        result = store.backfill_memory_policy(batch_limit=1)
+        rows = {row["episode_id"]: row for row in ledger.life_episode}
+        raw_meta = rows[missing["episode_id"]]["metadata"]
+        metadata = raw_meta if isinstance(raw_meta, dict) else json.loads(raw_meta)
+
+        assert result["updated"] == 1
+        assert result["skipped_existing"] == 0
+        assert existing["episode_id"] in rows
+        assert metadata["memory_class"] == "failure_lesson"
+    finally:
+        ledger.close()
+
+
 def test_compaction_keeps_summary_episode_and_marks_sources_cold_or_gone() -> None:
     ledger = SQLiteLedger(db_path=":memory:")
     try:

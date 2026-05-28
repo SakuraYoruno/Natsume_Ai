@@ -570,6 +570,8 @@ def build_coverage_report(
     collection_by_kind_domain: Counter[tuple[str, str]] = Counter()
     entrypoint_counter: Counter[str] = Counter()
     evidence_kind_counter: Counter[str] = Counter()
+    memory_class_counter: Counter[str] = Counter()
+    recall_grain_counter: Counter[str] = Counter()
     required_identity_counts = {"person": 0, "session": 0}
     gateway_count = 0
     anchor_only_count = 0
@@ -583,6 +585,11 @@ def build_coverage_report(
         episode_id = _clean(row.get("episode_id"))
         person_id = _clean(row.get("person_id"))
         session_id = _clean(row.get("session_id"))
+        policy = metadata.get("memory_policy") if isinstance(metadata.get("memory_policy"), Mapping) else {}
+        memory_class = _clean(metadata.get("memory_class") or (policy or {}).get("memory_class") or "legacy_unclassified")
+        recall_grain = _clean(metadata.get("recall_grain") or (policy or {}).get("recall_grain") or "legacy_unclassified")
+        memory_class_counter[memory_class] += 1
+        recall_grain_counter[recall_grain] += 1
         by_kind_action[(kind, action)] += 1
         if _is_gateway_context(row, metadata):
             gateway_count += 1
@@ -752,6 +759,8 @@ def build_coverage_report(
             {"collection_kind": kind, "domain": domain, "count": count}
             for (kind, domain), count in sorted(collection_by_kind_domain.items(), key=lambda item: (-item[1], item[0][0], item[0][1]))
         ],
+        "memory_class_counts": [{"memory_class": key, "count": count} for key, count in memory_class_counter.most_common()],
+        "recall_grain_counts": [{"recall_grain": key, "count": count} for key, count in recall_grain_counter.most_common()],
         "evidence_kinds": [{"evidence_kind": key, "count": count} for key, count in evidence_kind_counter.most_common()],
         "issue_counts": dict(sorted(issue_counts.items())),
         "collection_issue_counts": dict(sorted(collection_issue_counts.items())),
@@ -804,6 +813,12 @@ def _render_markdown(report: Mapping[str, Any]) -> str:
     lines.extend(["", "## Observed Entrypoints", ""])
     for item in report.get("entrypoint_counts") or []:
         lines.append(f"- {item.get('entrypoint')}: {item.get('count')}")
+    lines.extend(["", "## Memory Classes", ""])
+    for item in report.get("memory_class_counts") or []:
+        lines.append(f"- {item.get('memory_class')}: {item.get('count')}")
+    lines.extend(["", "## Recall Grains", ""])
+    for item in report.get("recall_grain_counts") or []:
+        lines.append(f"- {item.get('recall_grain')}: {item.get('count')}")
     lines.extend(["", "## Issue Counts", ""])
     for key, count in dict(report.get("issue_counts") or {}).items():
         lines.append(f"- {key}: {count}")

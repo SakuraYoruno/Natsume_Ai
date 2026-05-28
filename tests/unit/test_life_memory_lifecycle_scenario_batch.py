@@ -8,7 +8,7 @@ def test_life_memory_lifecycle_scenario_batch_passes() -> None:
 
     assert report["success"] is True
     assert report["failed_count"] == 0
-    assert report["passed_count"] == report["case_count"] == 6
+    assert report["passed_count"] == report["case_count"] == 7
     case_ids = {item["case_id"] for item in report["cases"]}
     assert {
         "forgetting_demotes_low_value_without_erasing_preference",
@@ -17,4 +17,5 @@ def test_life_memory_lifecycle_scenario_batch_passes() -> None:
         "retention_prunes_expired_gone_and_refreshes_indexes",
         "gone_episode_hidden_from_default_recall",
         "sleep_replay_distills_failure_not_delivery_noise",
+        "policy_backfill_classifies_memory_management_lanes",
     }.issubset(case_ids)

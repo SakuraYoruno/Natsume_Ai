@@ -66,6 +66,26 @@ RETENTION_WARM = "WARM"
 RETENTION_COLD = "COLD"
 RETENTION_GONE = "GONE"
 
+MEMORY_CLASS_AUDIT_ANCHOR = "audit_anchor"
+MEMORY_CLASS_CHAT_EXPERIENCE = "chat_experience"
+MEMORY_CLASS_COLLECTION_EVENT = "collection_event"
+MEMORY_CLASS_COMMITMENT = "commitment"
+MEMORY_CLASS_CORRECTION = "correction"
+MEMORY_CLASS_FAILURE_LESSON = "failure_lesson"
+MEMORY_CLASS_INNER_LIFE = "inner_life"
+MEMORY_CLASS_PERCEPTION_EVIDENCE = "perception_evidence"
+MEMORY_CLASS_PREFERENCE = "preference"
+MEMORY_CLASS_SELF_CHANGE = "self_change"
+MEMORY_CLASS_STABLE_FACT = "stable_fact"
+MEMORY_CLASS_TOOL_ACTION = "tool_action"
+MEMORY_CLASS_TRANSIENT_NOISE = "transient_noise"
+
+RECALL_GRAIN_AUDIT = "audit_only"
+RECALL_GRAIN_EPISODE = "episode"
+RECALL_GRAIN_COLLECTION = "collection"
+RECALL_GRAIN_ENTITY = "entity"
+RECALL_GRAIN_SEMANTIC = "semantic"
+
 DECAY_STABLE = "STABLE"
 DECAY_SLOW = "SLOW"
 DECAY_NORMAL = "NORMAL"
@@ -345,6 +365,165 @@ def _retention_state_for_strength(
     return RETENTION_GONE
 
 
+def _classify_life_memory_policy(
+    *,
+    episode_kind: str,
+    action: str | None,
+    result: str | None,
+    summary: str | None,
+    metadata: Mapping[str, Any] | None,
+    evidence_refs: Sequence[Any] | None,
+    truth_state: str | None,
+) -> dict[str, Any]:
+    """Classify an episode for memory management, not just storage.
+
+    Episode is the SSOT for "what happened"; this policy says how that
+    experience should be managed later: active recall, semantic distillation,
+    sleep replay, and eventual forgetting.
+    """
+
+    meta = dict(metadata or {})
+    kind = _clean_text(episode_kind) or EPISODE_CHAT
+    action_text = _clean_text(action or meta.get("action_kind") or meta.get("task_id")).lower()
+    result_text = _clean_text(result or meta.get("status") or meta.get("result_status")).lower()
+    source_text = _clean_text(meta.get("event_source") or meta.get("source")).lower()
+    summary_text = _clean_text(summary or meta.get("detail") or meta.get("note"), limit=1200)
+    compact = re.sub(r"\s+", "", summary_text).lower()
+    truth = _clean_text(truth_state).upper()
+    refs = _normalize_refs(evidence_refs or meta.get("evidence_refs") or [])
+    reason_codes: list[str] = []
+
+    def has_any(*tokens: str) -> bool:
+        return any(token and token in compact for token in tokens)
+
+    memory_class = MEMORY_CLASS_CHAT_EXPERIENCE
+    recall_grain = RECALL_GRAIN_EPISODE
+    decay_profile = DECAY_NORMAL
+    active_recall_default = True
+    semantic_candidate = False
+    sleep_replay_candidate = False
+
+    if bool(meta.get("anchor_only")) or action_text == "audit_anchor" or "audit_anchor" in action_text:
+        memory_class = MEMORY_CLASS_AUDIT_ANCHOR
+        recall_grain = RECALL_GRAIN_AUDIT
+        decay_profile = DECAY_EPHEMERAL
+        active_recall_default = False
+        reason_codes.append("audit_anchor_only")
+    elif truth in {TRUTH_CORRECTED, TRUTH_SUPPRESSED} or has_any("纠正", "不对", "错了", "撤回", "记错"):
+        memory_class = MEMORY_CLASS_CORRECTION
+        recall_grain = RECALL_GRAIN_EPISODE
+        decay_profile = DECAY_SLOW
+        semantic_candidate = True
+        sleep_replay_candidate = True
+        reason_codes.append("correction_or_suppression")
+    elif _semantic_is_user_preference(compact):
+        memory_class = MEMORY_CLASS_PREFERENCE
+        recall_grain = RECALL_GRAIN_SEMANTIC
+        decay_profile = DECAY_STABLE
+        semantic_candidate = True
+        sleep_replay_candidate = True
+        reason_codes.append("user_preference")
+    elif _semantic_is_commitment(compact):
+        memory_class = MEMORY_CLASS_COMMITMENT
+        recall_grain = RECALL_GRAIN_SEMANTIC
+        decay_profile = DECAY_STABLE
+        semantic_candidate = True
+        sleep_replay_candidate = True
+        reason_codes.append("commitment_or_open_loop")
+    elif _semantic_is_self_change(compact, action=action_text):
+        memory_class = MEMORY_CLASS_SELF_CHANGE
+        recall_grain = RECALL_GRAIN_SEMANTIC
+        decay_profile = DECAY_STABLE
+        semantic_candidate = True
+        sleep_replay_candidate = True
+        reason_codes.append("self_change")
+    elif _semantic_is_failure_lesson(compact, action=action_text) or result_text in {"failed", "error", "degraded", "blocked"}:
+        memory_class = MEMORY_CLASS_FAILURE_LESSON
+        recall_grain = RECALL_GRAIN_SEMANTIC
+        decay_profile = DECAY_SLOW
+        semantic_candidate = True
+        sleep_replay_candidate = True
+        reason_codes.append("failure_lesson")
+    elif _semantic_is_stable_fact(compact):
+        memory_class = MEMORY_CLASS_STABLE_FACT
+        recall_grain = RECALL_GRAIN_SEMANTIC
+        decay_profile = DECAY_STABLE
+        semantic_candidate = True
+        sleep_replay_candidate = True
+        reason_codes.append("stable_fact")
+    elif kind == EPISODE_PERCEPTION or source_text in {"vision", "audio", "asr", "perception"}:
+        memory_class = MEMORY_CLASS_PERCEPTION_EVIDENCE
+        recall_grain = RECALL_GRAIN_EPISODE
+        decay_profile = DECAY_SLOW
+        reason_codes.append("perception_evidence")
+    elif action_text in {"lightnovel_recommendation_delivery", "recommendation_delivery"} or bool(meta.get("selected_recommendations")):
+        memory_class = MEMORY_CLASS_COLLECTION_EVENT
+        recall_grain = RECALL_GRAIN_COLLECTION
+        decay_profile = DECAY_SLOW
+        active_recall_default = True
+        reason_codes.append("collection_event")
+    elif kind == EPISODE_INNER or source_text in {"inner_world", "inner_stream", "inner_activity"}:
+        memory_class = MEMORY_CLASS_INNER_LIFE
+        recall_grain = RECALL_GRAIN_EPISODE
+        decay_profile = DECAY_FAST
+        semantic_candidate = bool(meta.get("should_distill_to_memory"))
+        sleep_replay_candidate = semantic_candidate
+        reason_codes.append("inner_life")
+    elif kind in {EPISODE_ACTION, EPISODE_BACKGROUND} or source_text in {"skill", "tool", "browser", "mcp", "sandbox", "scheduler", "codex_production"}:
+        memory_class = MEMORY_CLASS_TOOL_ACTION
+        recall_grain = RECALL_GRAIN_EPISODE
+        decay_profile = DECAY_NORMAL
+        reason_codes.append("action_or_background")
+
+    if bool(meta.get("triviality_penalty")) or has_any("任务仍在运行", "没有新变化", "健康检查", "heartbeat", "ping"):
+        if memory_class not in {
+            MEMORY_CLASS_AUDIT_ANCHOR,
+            MEMORY_CLASS_PREFERENCE,
+            MEMORY_CLASS_COMMITMENT,
+            MEMORY_CLASS_CORRECTION,
+            MEMORY_CLASS_FAILURE_LESSON,
+            MEMORY_CLASS_SELF_CHANGE,
+            MEMORY_CLASS_STABLE_FACT,
+        }:
+            memory_class = MEMORY_CLASS_TRANSIENT_NOISE
+            recall_grain = RECALL_GRAIN_AUDIT if not refs else RECALL_GRAIN_EPISODE
+            decay_profile = DECAY_EPHEMERAL
+            active_recall_default = False
+            semantic_candidate = False
+            sleep_replay_candidate = False
+            reason_codes.append("transient_low_value")
+
+    return {
+        "schema": "Natsume.life_memory_policy.v1",
+        "memory_class": memory_class,
+        "recall_grain": recall_grain,
+        "decay_profile_id": decay_profile,
+        "active_recall_default": bool(active_recall_default),
+        "semantic_candidate": bool(semantic_candidate),
+        "sleep_replay_candidate": bool(sleep_replay_candidate),
+        "reason_codes": list(dict.fromkeys(reason_codes or ["default_chat_experience"])),
+    }
+
+
+def _with_memory_policy_metadata(
+    metadata: Mapping[str, Any] | None,
+    *,
+    policy: Mapping[str, Any],
+    explicit_decay_profile_id: str | None,
+) -> dict[str, Any]:
+    payload = dict(metadata or {})
+    policy_payload = dict(policy)
+    existing_policy = payload.get("memory_policy")
+    if not isinstance(existing_policy, Mapping):
+        existing_policy = {}
+    payload["memory_policy"] = {**dict(existing_policy), **policy_payload}
+    payload.setdefault("memory_class", policy_payload.get("memory_class"))
+    payload.setdefault("recall_grain", policy_payload.get("recall_grain"))
+    if not _clean_text(explicit_decay_profile_id) and not _clean_text(payload.get("decay_profile_id")):
+        payload["decay_profile_id"] = _clean_text(policy_payload.get("decay_profile_id")) or DECAY_NORMAL
+    return payload
+
+
 def _decay_rate_per_day(decay_profile_id: str | None) -> float:
     profile = _clean_text(decay_profile_id).upper()
     if profile == DECAY_STABLE:
@@ -480,11 +659,28 @@ class LifeMemoryStore:
         if refs:
             metadata_payload.setdefault("evidence_refs", refs)
         summary_text = _clean_text(summary, limit=1200)
+        policy = _classify_life_memory_policy(
+            episode_kind=kind,
+            action=action,
+            result=result,
+            summary=summary_text,
+            metadata=metadata_payload,
+            evidence_refs=refs,
+            truth_state=truth,
+        )
+        metadata_payload = _with_memory_policy_metadata(
+            metadata_payload,
+            policy=policy,
+            explicit_decay_profile_id=decay_profile_id,
+        )
         base_salience = _clamp_unit(salience)
+        decay_metadata = dict(metadata_payload)
+        if _clean_text(decay_profile_id):
+            decay_metadata["decay_profile_id"] = _clean_text(decay_profile_id)
         decay_profile = _decay_profile_for_episode(
             episode_kind=kind,
             salience=base_salience,
-            metadata={**metadata_payload, "decay_profile_id": decay_profile_id},
+            metadata=decay_metadata,
         )
         computed_strength = _compute_memory_strength(
             salience=base_salience,
@@ -559,6 +755,28 @@ class LifeMemoryStore:
                         next_truth = truth or current_truth
                     next_summary = summary_text or current.get("summary")
                     next_metadata = _merge_metadata(current.get("metadata"), metadata_payload)
+                    next_policy = _classify_life_memory_policy(
+                        episode_kind=kind,
+                        action=_clean_text(action) or current.get("action"),
+                        result=_clean_text(result) or current.get("result"),
+                        summary=str(next_summary or ""),
+                        metadata=next_metadata,
+                        evidence_refs=refs or next_metadata.get("evidence_refs") or [],
+                        truth_state=next_truth,
+                    )
+                    next_metadata = _with_memory_policy_metadata(
+                        next_metadata,
+                        policy=next_policy,
+                        explicit_decay_profile_id=decay_profile_id,
+                    )
+                    next_decay_metadata = dict(next_metadata)
+                    if _clean_text(decay_profile_id):
+                        next_decay_metadata["decay_profile_id"] = _clean_text(decay_profile_id)
+                    next_decay_profile = _decay_profile_for_episode(
+                        episode_kind=kind,
+                        salience=max(_clamp_unit(current.get("salience")), base_salience),
+                        metadata=next_decay_metadata,
+                    )
                     next_strength = _compute_memory_strength(
                         salience=max(_clamp_unit(current.get("salience")), base_salience),
                         episode_kind=kind,
@@ -615,7 +833,7 @@ class LifeMemoryStore:
                             base_salience,
                             base_salience,
                             next_strength,
-                            decay_profile,
+                            next_decay_profile,
                             next_retention,
                             int(retention_until_ts_ms) if retention_until_ts_ms is not None else None,
                             _clean_text(forget_reason) or None,
@@ -2220,6 +2438,85 @@ class LifeMemoryStore:
             "updated": len(updates),
             "counts": counts,
             "semantic_reference_protected": semantic_reference_protected,
+        }
+
+    def backfill_memory_policy(
+        self,
+        *,
+        batch_limit: int = 5000,
+        include_existing: bool = False,
+    ) -> dict[str, Any]:
+        """Backfill management policy metadata for historical episodes."""
+
+        rows = self.ledger._conn.execute(
+            """
+            SELECT
+                ep.*,
+                GROUP_CONCAT(DISTINCT ev.source_ref) AS evidence_source_refs
+            FROM life_episode ep
+            LEFT JOIN life_evidence ev ON ev.episode_id = ep.episode_id
+            WHERE (? OR ep.metadata IS NULL OR ep.metadata NOT LIKE '%"memory_policy"%')
+            GROUP BY ep.episode_id
+            ORDER BY ep.created_ts_ms ASC
+            LIMIT ?
+            """,
+            (1 if include_existing else 0, max(1, int(batch_limit))),
+        ).fetchall()
+        updates: list[tuple[str, str, str]] = []
+        skipped_existing = 0
+        class_counts: dict[str, int] = {}
+        for row in rows:
+            episode = dict(row)
+            episode_id = _clean_text(episode.get("episode_id"))
+            if not episode_id:
+                continue
+            metadata = _json_loads(episode.get("metadata"), fallback={})
+            if not isinstance(metadata, dict):
+                metadata = {}
+            existing_policy = metadata.get("memory_policy")
+            if isinstance(existing_policy, Mapping) and existing_policy.get("schema") and not include_existing:
+                skipped_existing += 1
+                continue
+            evidence_refs = list(metadata.get("evidence_refs") or [])
+            for ref in str(episode.get("evidence_source_refs") or "").split(","):
+                cleaned = _clean_text(ref)
+                if cleaned:
+                    evidence_refs.append(cleaned)
+            policy = _classify_life_memory_policy(
+                episode_kind=_clean_text(episode.get("episode_kind")),
+                action=_clean_text(episode.get("action")),
+                result=_clean_text(episode.get("result")),
+                summary=_clean_text(episode.get("summary"), limit=1200),
+                metadata=metadata,
+                evidence_refs=list(dict.fromkeys(evidence_refs)),
+                truth_state=_clean_text(episode.get("truth_state")),
+            )
+            next_metadata = _with_memory_policy_metadata(
+                metadata,
+                policy=policy,
+                explicit_decay_profile_id=None,
+            )
+            next_decay = _clean_text(next_metadata.get("decay_profile_id")) or _clean_text(episode.get("decay_profile_id")) or DECAY_NORMAL
+            updates.append((_json_dumps(next_metadata) or "{}", next_decay, episode_id))
+            memory_class = _clean_text(policy.get("memory_class")) or "unknown"
+            class_counts[memory_class] = class_counts.get(memory_class, 0) + 1
+        if updates:
+            with self.ledger._write_lock:
+                with self.ledger._conn:
+                    self.ledger._conn.executemany(
+                        """
+                        UPDATE life_episode
+                        SET metadata = ?, decay_profile_id = ?
+                        WHERE episode_id = ?
+                        """,
+                        updates,
+                    )
+        return {
+            "status": "OK",
+            "scanned": len(rows),
+            "updated": len(updates),
+            "skipped_existing": skipped_existing,
+            "class_counts": dict(sorted(class_counts.items())),
         }
 
     def _prune_collection_items_for_scope_locked(self, *, collection_id: str) -> None:

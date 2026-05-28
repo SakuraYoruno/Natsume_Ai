@@ -2126,6 +2126,9 @@ def run_life_memory_sleep_replay_handler(args: dict[str, Any], _ctx: dict[str, A
         from host_brain.memory.life_memory import MemorySleepReplayTask  # noqa: PLC0415
 
         store = get_life_memory_store()
+        policy_backfill = store.backfill_memory_policy(
+            batch_limit=int((args or {}).get("policy_backfill_limit") or 5000),
+        )
         task = MemorySleepReplayTask(store=store)
         replay_limit = int((args or {}).get("replay_limit") or 12)
         forgetting_batch_limit = int((args or {}).get("forgetting_batch_limit") or 500)
@@ -2135,7 +2138,7 @@ def run_life_memory_sleep_replay_handler(args: dict[str, Any], _ctx: dict[str, A
             forgetting_batch_limit=forgetting_batch_limit,
             semantic_limit=semantic_limit,
         )
-        return {"status": "OK", "result": result}
+        return {"status": "OK", "policy_backfill": policy_backfill, "result": result}
     except Exception as exc:
         return {"status": "DEGRADED", "reason_code": "LIFE_MEMORY_SLEEP_REPLAY_FAILED", "error": str(exc)[:200]}
 

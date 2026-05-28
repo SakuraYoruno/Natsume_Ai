@@ -69,6 +69,7 @@ def run_lifecycle_scenario_batch() -> dict[str, Any]:
         ("retention_prunes_expired_gone_and_refreshes_indexes", _case_retention_prunes_and_refreshes_indexes),
         ("gone_episode_hidden_from_default_recall", _case_gone_episode_hidden_from_recall),
         ("sleep_replay_distills_failure_not_delivery_noise", _case_sleep_replay_distills_failure_not_delivery_noise),
+        ("policy_backfill_classifies_memory_management_lanes", _case_policy_backfill_classifies_memory_management_lanes),
     ):
         cases.append(_run_case(case_id, fn))
     return {
@@ -332,6 +333,65 @@ def _case_sleep_replay_distills_failure_not_delivery_noise(store: LifeMemoryStor
         "delivery_not_reflected": delivery["episode_id"] not in reflection_episode_ids,
     }
     return checks, {"run_result": result, "semantic_items": semantic_items, "reflection_episode_ids": sorted(reflection_episode_ids)}
+
+
+def _case_policy_backfill_classifies_memory_management_lanes(store: LifeMemoryStore, ledger: SQLiteLedger) -> tuple[dict[str, bool], dict[str, Any]]:
+    preference = store.write_chat_episode(
+        request_id="policy-backfill-pref",
+        session_id="qq_dm_owner",
+        person_id="owner",
+        user_message="以后推荐轻小说时，每本书的简介后应该换行，别模板腔。",
+        assistant_reply="记住了。",
+        ts_ms=OLD_TS,
+    )
+    failure = store.write_background_episode(
+        event_source="scheduler",
+        event_id="policy-backfill-failure",
+        task_id="llm_pool_call",
+        status="FAILED",
+        reason_code="DEEPSEEK_TIMEOUT",
+        detail="DeepSeek 失败原因：供应商超时。",
+        ts_ms=OLD_TS + 1,
+    )
+    audit = store.write_background_episode(
+        event_source="scheduler",
+        event_id="policy-backfill-audit",
+        task_id="health_check",
+        status="OK",
+        detail="健康检查 OK。",
+        ts_ms=OLD_TS + 2,
+        metadata={"anchor_only": True},
+    )
+    with ledger._write_lock:
+        with ledger._conn:
+            ledger._conn.executemany(
+                "UPDATE life_episode SET metadata = ?, decay_profile_id = ? WHERE episode_id = ?",
+                [
+                    ("{}", "NORMAL", preference["episode_id"]),
+                    ("{}", "NORMAL", failure["episode_id"]),
+                    (json.dumps({"anchor_only": True}, ensure_ascii=False), "NORMAL", audit["episode_id"]),
+                ],
+            )
+
+    result = store.backfill_memory_policy(batch_limit=10)
+    rows = _episode_rows_by_id(ledger, [preference["episode_id"], failure["episode_id"], audit["episode_id"]])
+
+    def memory_class(episode_id: str) -> str:
+        metadata = rows[episode_id]["metadata"]
+        if isinstance(metadata, str):
+            metadata = json.loads(metadata)
+        return str((metadata or {}).get("memory_class") or "")
+
+    checks = {
+        "updated_three": int(result.get("updated") or 0) == 3,
+        "preference_classified": memory_class(preference["episode_id"]) == "preference",
+        "failure_classified": memory_class(failure["episode_id"]) == "failure_lesson",
+        "audit_classified": memory_class(audit["episode_id"]) == "audit_anchor",
+        "preference_stable": rows[preference["episode_id"]]["decay_profile_id"] == "STABLE",
+        "failure_slow": rows[failure["episode_id"]]["decay_profile_id"] == "SLOW",
+        "audit_ephemeral": rows[audit["episode_id"]]["decay_profile_id"] == "EPHEMERAL",
+    }
+    return checks, {"backfill": result, "rows": rows}
 
 
 def _force_memory_state(ledger: SQLiteLedger, episode_id: str, *, salience: float, strength: float, retention: str) -> None:
