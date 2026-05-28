@@ -25,6 +25,7 @@ from host_brain.memory.life_memory_query import (
 
 SURFACE_MEMORY_RECALL_FAILED = "SURFACE_MEMORY_RECALL_FAILED"
 SURFACE_MEMORY_RECALL_VALIDATION_FAILED = "SURFACE_MEMORY_RECALL_VALIDATION_FAILED"
+SURFACE_MEMORY_RECALL_COVERAGE_FAILED = "SURFACE_MEMORY_RECALL_COVERAGE_FAILED"
 SURFACE_MEMORY_RECALL_SKIPPED = "SURFACE_MEMORY_RECALL_SKIPPED"
 SURFACE_MEMORY_WRITE_FAILED = "SURFACE_MEMORY_WRITE_FAILED"
 SURFACE_MEMORY_EVIDENCE_REQUIRED = "SURFACE_MEMORY_EVIDENCE_REQUIRED"
@@ -771,35 +772,48 @@ def build_surface_memory_recall_packet(
         validation_trace=validation_trace,
     )
     trace["coverage_score"] = trace["recall_coverage"]["score"]
-    if validation_failed:
-        trace["validation_failed"] = True
+    coverage_failed = (not validation_failed) and not bool(trace["recall_coverage"].get("passed", True))
+    if validation_failed or coverage_failed:
+        trace["validation_failed"] = bool(validation_failed)
+        if coverage_failed:
+            trace["coverage_failed"] = True
         memory_rows = ()
         relationship_clues = ()
         style_anchor = ()
         evidence_refs = ()
         source_refs = ()
+        failure_rules: list[str] = []
+        if validation_failed:
+            failure_rules.append("召回校验失败时，不要把未通过时间、对象或证据校验的候选当事实；只能说没有找到足够可靠的记忆。")
+        if coverage_failed:
+            failure_rules.append("召回覆盖度不足时，不要把局部命中的候选当成完整记忆；需要说明没有找到足够贴合这次问题的记忆。")
         must_not_do = tuple(
             _unique(
                 [
                     *must_not_do,
-                    "召回校验失败时，不要把未通过时间、对象或证据校验的候选当事实；只能说没有找到足够可靠的记忆。",
+                    *failure_rules,
                 ]
             )
         )
+    reason_code = _clean_text(output.get("reason_code")) or None
+    if validation_failed:
+        reason_code = SURFACE_MEMORY_RECALL_VALIDATION_FAILED
+    elif coverage_failed:
+        reason_code = SURFACE_MEMORY_RECALL_COVERAGE_FAILED
     return SurfaceMemoryRecallPacket(
         query=_clean_text(query if query is not None else output.get("query")),
         facts=tuple(row.fact for row in memory_rows),
         style_anchor=style_anchor,
         relationship_clues=relationship_clues,
         must_not_do=must_not_do,
-        confidence=0.0 if validation_failed else _packet_confidence(rows, output=output),
+        confidence=0.0 if (validation_failed or coverage_failed) else _packet_confidence(rows, output=output),
         rows=tuple(rows),
         evidence_refs=evidence_refs,
         source_refs=source_refs,
         route_ids=route_ids,
         candidate_count=_coerce_int(output.get("candidate_count"), default=len(candidates)),
-        degraded=bool(output.get("degraded", False)) or validation_failed,
-        reason_code=SURFACE_MEMORY_RECALL_VALIDATION_FAILED if validation_failed else (_clean_text(output.get("reason_code")) or None),
+        degraded=bool(output.get("degraded", False)) or validation_failed or coverage_failed,
+        reason_code=reason_code,
         trace=trace,
     )
 
@@ -2656,6 +2670,7 @@ __all__ = [
     "RECALL_POLICY_NO",
     "SURFACE_MEMORY_EMPTY_TURN",
     "SURFACE_MEMORY_EVIDENCE_REQUIRED",
+    "SURFACE_MEMORY_RECALL_COVERAGE_FAILED",
     "SURFACE_MEMORY_RECALL_FAILED",
     "SURFACE_MEMORY_RECALL_SKIPPED",
     "SURFACE_MEMORY_RECALL_VALIDATION_FAILED",

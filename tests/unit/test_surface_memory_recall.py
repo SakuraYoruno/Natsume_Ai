@@ -15,6 +15,7 @@ from host_brain.persona.surface_memory_recall import (
     RECALL_POLICY_MUST,
     RECALL_POLICY_NO,
     SURFACE_MEMORY_EVIDENCE_REQUIRED,
+    SURFACE_MEMORY_RECALL_COVERAGE_FAILED,
     SURFACE_MEMORY_RECALL_SKIPPED,
     SURFACE_MEMORY_RECALL_VALIDATION_FAILED,
     SurfaceMemoryRecallPacket,
@@ -910,6 +911,58 @@ def test_recall_surface_memory_validation_flags_wrong_date_collection_scope() ->
     assert coverage["passed"] is False
     assert coverage["score"] < 0.66
     assert "scope_match" in coverage["missing"]
+
+
+def test_recall_surface_memory_coverage_failure_drops_partial_collection_hit() -> None:
+    packet = build_surface_memory_recall_packet(
+        SimpleNamespace(
+            output={
+                "query": "这几天十几本里有哪些？",
+                "status": "OK",
+                "stage": "S_RET_RECALL",
+                "degraded": False,
+                "routes": [{"route_id": "surface_life_episode", "store_id": "life_episode"}],
+                "candidate_count": 1,
+                "ts_ms": _ts(2026, 5, 29, 8),
+                "candidates": [
+                    {
+                        "doc_id": "ep-partial",
+                        "source_ref": "chat://request/partial",
+                        "evidence_refs": ["chat://request/partial#assistant"],
+                        "text": "用户之前问过轻小说推荐格式，但没有推荐集合条目。",
+                        "score": 0.95,
+                        "metadata": {
+                            "store_id": "life_episode",
+                            "source_ref": "chat://request/partial",
+                            "evidence_refs_primary": "chat://request/partial#assistant",
+                        },
+                    }
+                ],
+            }
+        ),
+        query="这几天十几本里有哪些？",
+        max_facts=4,
+        max_chars_per_fact=260,
+        temporal_scope="recent_days",
+        query_kind="collection_summary",
+        recall_contract_id="collection_recent",
+        primary_memory_layer="life_memory_collection",
+        expected_memory_layers=("life_memory_collection", "life_memory_entity"),
+        min_collection_items=10,
+        validation_requirements=(),
+        answer_obligations=("summarize_cross_day_collection", "preserve_item_identity"),
+    )
+
+    coverage = dict(dict(packet.trace or {})["recall_coverage"])
+    assert coverage["passed"] is False
+    assert coverage["score"] < 0.66
+    assert dict(packet.trace or {})["coverage_failed"] is True
+    assert packet.facts == ()
+    assert packet.evidence_refs == ()
+    assert packet.confidence == 0.0
+    assert packet.degraded is True
+    assert packet.reason_code == SURFACE_MEMORY_RECALL_COVERAGE_FAILED
+    assert any("召回覆盖度不足" in item for item in packet.must_not_do)
 
 
 def test_collection_scope_query_filters_self_echo_when_many_books_requested() -> None:
