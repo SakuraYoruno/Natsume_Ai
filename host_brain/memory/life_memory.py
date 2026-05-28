@@ -1560,6 +1560,9 @@ class LifeMemoryConsolidator:
             candidates.append(
                 {
                     "episode_id": episode.get("episode_id"),
+                    "episode_kind": episode.get("episode_kind"),
+                    "action": episode.get("action"),
+                    "result": episode.get("result"),
                     "summary": summary,
                     "salience": _clamp_unit(episode.get("salience")),
                     "memory_strength": _clamp_unit(episode.get("memory_strength")),
@@ -1687,7 +1690,10 @@ class MemorySleepReplayTask:
         self.store = store
 
     def select_replay_batch(self, *, limit: int = 12) -> list[dict[str, Any]]:
-        return LifeMemoryConsolidator(store=self.store).build_semantic_candidates(limit=limit)
+        fetch_limit = max(1, int(limit)) * 6
+        candidates = LifeMemoryConsolidator(store=self.store).build_semantic_candidates(limit=fetch_limit)
+        filtered = [item for item in candidates if _should_sleep_replay_candidate(item)]
+        return filtered[: max(1, int(limit))]
 
     def run_once(
         self,
@@ -1944,8 +1950,12 @@ def _semantic_text_is_sensitive_or_noise(text: str) -> bool:
         token in compact
         for token in (
             "codexproductionjobcodex_lightnovel_recommender",
+            "lightnovel_recommendation_delivery",
+            "lightnovel_gateway_delivery",
             "轻小说推荐报告",
             "我通过qq给",
+            "我刚才通过qq给",
+            "推荐了3本轻小说",
             "发送了text消息",
             "发送了image消息",
             "发送结果=sent",
@@ -1962,6 +1972,35 @@ def _semantic_text_is_sensitive_or_noise(text: str) -> bool:
     ):
         return True
     return False
+
+
+def _should_sleep_replay_candidate(item: Mapping[str, Any]) -> bool:
+    """Keep replay for durable experiences, not transport/debug chatter."""
+
+    summary = _clean_text(item.get("summary"), limit=1200)
+    if not summary or _semantic_text_is_sensitive_or_noise(summary):
+        return False
+    action = _clean_text(item.get("action")).lower()
+    if action in {
+        "lightnovel_recommendation_delivery",
+        "lightnovel_recommendation_deep_review",
+        "qq_reply_sent",
+        "wechat_reply_sent",
+        "gateway_reply_sent",
+        "channel_message_sent",
+    }:
+        return False
+    compact = re.sub(r"\s+", "", summary).lower()
+    if _semantic_is_failure_lesson(compact, action=action):
+        return True
+    if _semantic_is_commitment(compact) or _semantic_is_self_change(compact, action=action):
+        return True
+    if _semantic_is_user_preference(compact) or _semantic_is_stable_fact(compact):
+        return True
+    kind = _clean_text(item.get("episode_kind"))
+    if kind == EPISODE_CHAT:
+        return True
+    return _clamp_unit(item.get("memory_strength"), default=_clamp_unit(item.get("salience"))) >= 0.88
 
 
 def _semantic_is_user_preference(compact: str) -> bool:

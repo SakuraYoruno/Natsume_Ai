@@ -1,0 +1,152 @@
+#!/usr/bin/env python
+"""Preview or run one LifeMemory sleep-replay pass against the runtime ledger."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+from pathlib import Path
+import sys
+import time
+from typing import Any, Mapping
+
+
+ROOT = Path(__file__).resolve().parents[2]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from host_brain.audit.sqlite_ledger import SQLiteLedger
+from host_brain.memory.life_memory import LifeMemoryConsolidator, LifeMemoryStore, MemorySleepReplayTask
+
+
+DEFAULT_DB_PATH = "host_brain/data/audit.sqlite3"
+DEFAULT_ENV_FILE = "runtime/host/host.runtime.env"
+DEFAULT_OUT_DIR = "runtime/host/logs"
+
+
+def _load_env_file(path: Path) -> None:
+    if not path.exists():
+        return
+    for raw in path.read_text(encoding="utf-8-sig", errors="ignore").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        if key and key not in os.environ:
+            os.environ[key] = value
+
+
+def _resolve_path(value: str) -> Path:
+    path = Path(value)
+    return path if path.is_absolute() else ROOT / path
+
+
+def _resolve_db_path(explicit: str) -> Path:
+    raw = str(explicit or os.environ.get("Natsume_AUDIT_DB") or DEFAULT_DB_PATH).strip() or DEFAULT_DB_PATH
+    return _resolve_path(raw)
+
+
+def _compact_proposal(item: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        "semantic_kind": item.get("semantic_kind"),
+        "summary": item.get("summary"),
+        "confidence": item.get("confidence"),
+        "source_episode_ids": list(item.get("source_episode_ids") or []),
+        "source_refs": list(item.get("source_refs") or [])[:8],
+        "tags": list(item.get("tags") or []),
+    }
+
+
+def _compact_episode(item: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        "episode_id": item.get("episode_id"),
+        "episode_kind": item.get("episode_kind"),
+        "action": item.get("action"),
+        "truth_state": item.get("truth_state"),
+        "retention_state": item.get("retention_state"),
+        "salience": item.get("salience"),
+        "memory_strength": item.get("memory_strength"),
+        "source_ref": item.get("source_ref"),
+        "summary": item.get("summary"),
+    }
+
+
+def _parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Preview or run LifeMemory sleep replay.")
+    parser.add_argument("--db-path", default="", help="SQLite audit ledger path. Defaults to Natsume_AUDIT_DB or host_brain/data/audit.sqlite3.")
+    parser.add_argument("--env-file", default=DEFAULT_ENV_FILE)
+    parser.add_argument("--proposal-limit", type=int, default=120)
+    parser.add_argument("--semantic-limit", type=int, default=12)
+    parser.add_argument("--replay-limit", type=int, default=30)
+    parser.add_argument("--forgetting-limit", type=int, default=500)
+    parser.add_argument("--apply", action="store_true", help="Actually update forgetting state, semantic_memory, and reflection evidence.")
+    parser.add_argument("--out", default="", help="Write JSON report to this path. Defaults to runtime/host/logs/life_memory_sleep_replay_once_*.json.")
+    return parser.parse_args()
+
+
+def main() -> int:
+    args = _parse_args()
+    _load_env_file(ROOT / ".env")
+    _load_env_file(_resolve_path(str(args.env_file)))
+
+    db_path = _resolve_db_path(str(args.db_path))
+    if not db_path.exists():
+        print(json.dumps({"status": "ERROR", "reason_code": "DB_NOT_FOUND", "db_path": str(db_path)}, ensure_ascii=False))
+        return 2
+
+    ledger = SQLiteLedger(db_path=db_path)
+    try:
+        store = LifeMemoryStore(ledger=ledger)
+        consolidator = LifeMemoryConsolidator(store=store)
+        sleep_task = MemorySleepReplayTask(store=store)
+        current = int(time.time() * 1000)
+        if args.apply:
+            run_result = sleep_task.run_once(
+                now_ts_ms_value=current,
+                replay_limit=max(1, int(args.replay_limit)),
+                forgetting_batch_limit=max(1, int(args.forgetting_limit)),
+                semantic_limit=max(1, int(args.semantic_limit)),
+            )
+            mode = "apply"
+            proposals: list[dict[str, Any]] = []
+            replay_candidates: list[dict[str, Any]] = []
+        else:
+            run_result = {"status": "DRY_RUN", "detail": "No ledger writes were performed."}
+            proposals = [
+                _compact_proposal(item)
+                for item in consolidator.build_semantic_proposals(
+                    limit=max(1, int(args.proposal_limit)),
+                    max_records=max(1, int(args.semantic_limit)),
+                )
+            ]
+            replay_candidates = [
+                _compact_episode(item)
+                for item in sleep_task.select_replay_batch(limit=max(1, int(args.replay_limit)))
+            ]
+            mode = "dry_run"
+        report = {
+            "status": "OK",
+            "mode": mode,
+            "db_path": str(db_path),
+            "ts_ms": current,
+            "proposal_count": len(proposals),
+            "proposals": proposals,
+            "replay_candidate_count": len(replay_candidates),
+            "replay_candidates": replay_candidates,
+            "run_result": run_result,
+        }
+    finally:
+        ledger.close()
+
+    out_path = _resolve_path(str(args.out)) if args.out else ROOT / DEFAULT_OUT_DIR / f"life_memory_sleep_replay_once_{int(time.time())}.json"
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+    print(json.dumps({"status": "OK", "mode": report["mode"], "proposal_count": report["proposal_count"], "out": str(out_path)}, ensure_ascii=False))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

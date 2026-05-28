@@ -278,6 +278,47 @@ def test_sleep_replay_distills_failure_lesson_and_skips_test_probe() -> None:
         ledger.close()
 
 
+def test_sleep_replay_does_not_reflect_low_value_delivery_logs() -> None:
+    ledger = SQLiteLedger(db_path=":memory:")
+    try:
+        store = LifeMemoryStore(ledger=ledger)
+        delivery = store.write_background_episode(
+            event_source="codex_production",
+            event_id="delivery-noise-1",
+            task_id="codex_lightnovel_recommender",
+            status="COMPLETED",
+            detail="我刚才通过 qq 给用户推荐了 3 本轻小说；发送结果=sent；详情:https://www.lightnovel.fun/cn/detail/1",
+            ts_ms=1_800_000_000_000,
+            metadata={"action_kind": "lightnovel_recommendation_delivery"},
+        )
+        failure = store.write_background_episode(
+            event_source="action",
+            event_id="failure-should-replay-1",
+            task_id="startup_probe",
+            status="FAILED",
+            detail="Gateway 连不上导致对话无法投递，后续必须先检查 edge 服务 ready。",
+            ts_ms=1_800_000_000_010,
+        )
+
+        result = MemorySleepReplayTask(store=store).run_once(
+            now_ts_ms_value=1_800_000_000_500,
+            replay_limit=10,
+            forgetting_batch_limit=20,
+            semantic_limit=6,
+        )
+
+        reflection_episode_ids = {
+            row["episode_id"]
+            for row in ledger.life_evidence
+            if row["evidence_kind"] == "reflection"
+        }
+        assert result["reflection_count"] >= 1
+        assert failure["episode_id"] in reflection_episode_ids
+        assert delivery["episode_id"] not in reflection_episode_ids
+    finally:
+        ledger.close()
+
+
 def test_action_and_perception_events_create_life_anchors_with_retention_state() -> None:
     ledger = SQLiteLedger(db_path=":memory:")
     try:
