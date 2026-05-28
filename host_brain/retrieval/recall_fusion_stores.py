@@ -508,6 +508,7 @@ def search_semantic_memory(
         raise RuntimeError(f"semantic memory ledger unavailable: {exc}") from exc
 
     current_ts = int(now_ts_ms or 0)
+    preference_query = _looks_like_preference_semantic_query(query)
     scored: list[tuple[float, dict[str, Any]]] = []
     for row in list(rows or []):
         if not isinstance(row, Mapping):
@@ -528,13 +529,19 @@ def search_semantic_memory(
         confidence = _coerce_score(row.get("confidence"))
         if confidence > 0.0:
             score = round(min(1.0, score * 0.82 + confidence * 0.18), 6)
+        preference_boost = 0.0
+        if preference_query:
+            if _looks_like_preference_semantic_row(summary=summary, tags=tags):
+                preference_boost += 0.18
+            if _looks_like_collection_semantic_row(summary=summary, tags=tags):
+                preference_boost -= 0.12
         row_ts = _coerce_non_negative_int(row.get("ts_ms"), default=0)
         recency_boost = 0.0
         if current_ts > 0 and row_ts > 0:
             age_ms = max(0, current_ts - row_ts)
             if age_ms <= 30 * 24 * 60 * 60 * 1000:
                 recency_boost = 0.04
-        final_score = round(min(1.0, score + recency_boost), 6)
+        final_score = round(max(0.0, min(1.0, score + recency_boost + preference_boost)), 6)
         scored.append(
             (
                 final_score,
@@ -553,6 +560,7 @@ def search_semantic_memory(
                         "ts_ms": row_ts,
                         "score_boost": {
                             "recency_boost": recency_boost,
+                            "preference_boost": round(preference_boost, 6),
                             "row_ts_ms": row_ts,
                             "now_ts_ms": current_ts,
                         },
@@ -566,6 +574,25 @@ def search_semantic_memory(
         item
         for _score, item in sorted(scored, key=lambda pair: (-pair[0], -int(pair[1]["metadata"].get("ts_ms") or 0), str(pair[1].get("memory_id") or "")))[: max(1, int(top_k))]
     ]
+
+
+def _looks_like_preference_semantic_query(query: str) -> bool:
+    text = str(query or "").strip()
+    if not text:
+        return False
+    return any(token in text for token in ("偏好", "喜欢", "不喜欢", "以后", "不要", "别再", "必须", "记得", "我说", "要求")) and any(
+        token in text for token in ("格式", "怎么发", "怎样发", "换行", "模板腔", "分段", "卡片", "推荐", "发送", "回复")
+    )
+
+
+def _looks_like_preference_semantic_row(*, summary: str, tags: list[str]) -> bool:
+    text = " ".join([str(summary or ""), *[str(tag or "") for tag in tags]])
+    return any(token in text for token in ("用户偏好", "user_preference", "preference", "不要", "别再", "必须", "以后"))
+
+
+def _looks_like_collection_semantic_row(*, summary: str, tags: list[str]) -> bool:
+    text = " ".join([str(summary or ""), *[str(tag or "") for tag in tags]])
+    return any(token in text for token in ("经历集合", "experience_collection", "recommendation_collection"))
 
 
 def search_neo4j_bond(self: Any, *, query: str, top_k: int) -> list[dict[str, Any]]:

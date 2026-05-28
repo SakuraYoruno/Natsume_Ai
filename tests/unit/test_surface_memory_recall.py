@@ -805,6 +805,8 @@ def test_recall_surface_memory_for_context_attaches_validation_receipt_for_colle
 
     validation = dict(dict(packet.trace or {})["validation"])
     receipt = dict(dict(packet.trace or {})["recall_receipt"])
+    need = dict(dict(packet.trace or {})["recall_need"])
+    coverage = dict(dict(packet.trace or {})["recall_coverage"])
     assert validation["passed"] is True
     assert validation["missing"] == []
     assert {item["name"] for item in validation["checks"]} == {
@@ -828,6 +830,18 @@ def test_recall_surface_memory_for_context_attaches_validation_receipt_for_colle
     assert receipt["evidence_ref_count"] == 1
     assert receipt["meets_primary_layer"] is True
     assert receipt["meets_expected_layer"] is True
+    assert need["schema"] == "Natsume.surface_recall_need.v1"
+    assert need["need_type"] == "collection"
+    assert need["recall_contract_id"] == "collection_date"
+    assert need["primary_memory_layer"] == "life_memory_collection"
+    assert need["min_collection_items"] == 3
+    assert need["evidence_depth"] == "evidence_anchor"
+    assert coverage["schema"] == "Natsume.surface_recall_coverage.v1"
+    assert coverage["passed"] is True
+    assert coverage["score"] == 1.0
+    assert coverage["dimensions"]["item_count"] == 1.0
+    assert coverage["selected_item_count"] == 3
+    assert dict(packet.trace or {})["coverage_score"] == 1.0
 
 
 def test_recall_surface_memory_validation_flags_wrong_date_collection_scope() -> None:
@@ -877,6 +891,7 @@ def test_recall_surface_memory_validation_flags_wrong_date_collection_scope() ->
 
     validation = dict(dict(packet.trace or {})["validation"])
     receipt = dict(dict(packet.trace or {})["recall_receipt"])
+    coverage = dict(dict(packet.trace or {})["recall_coverage"])
     assert validation["passed"] is False
     assert "scope_match" in validation["missing"]
     scope_check = next(item for item in validation["checks"] if item["name"] == "scope_match")
@@ -892,6 +907,9 @@ def test_recall_surface_memory_validation_flags_wrong_date_collection_scope() ->
     assert receipt["expected_scope_key"] == "daily:2026-05-27"
     assert "scope_match" in receipt["missing"]
     assert receipt["selected_item_count"] == 0
+    assert coverage["passed"] is False
+    assert coverage["score"] < 0.66
+    assert "scope_match" in coverage["missing"]
 
 
 def test_collection_scope_query_filters_self_echo_when_many_books_requested() -> None:

@@ -376,6 +376,37 @@ def _surface_memory_trace_for_audit(summary: Mapping[str, Any] | None) -> dict[s
         if key in trace:
             out[key] = bool(trace.get(key)) if key in {"skipped", "short_term_explicit_memory"} else _safe_int(trace.get(key), default=0)
 
+    need = _coerce_trace_mapping(trace.get("recall_need"))
+    if need:
+        out["recall_need"] = {
+            "schema": str(need.get("schema") or ""),
+            "query_kind": str(need.get("query_kind") or ""),
+            "temporal_scope": str(need.get("temporal_scope") or ""),
+            "recall_contract_id": str(need.get("recall_contract_id") or ""),
+            "need_type": str(need.get("need_type") or ""),
+            "primary_memory_layer": str(need.get("primary_memory_layer") or ""),
+            "expected_memory_layers": [str(item) for item in list(need.get("expected_memory_layers") or [])[:8]],
+            "target_domains": [str(item) for item in list(need.get("target_domains") or [])[:8]],
+            "min_collection_items": _safe_int(need.get("min_collection_items"), default=0),
+            "evidence_depth": str(need.get("evidence_depth") or ""),
+        }
+    coverage = _coerce_trace_mapping(trace.get("recall_coverage"))
+    if coverage:
+        dimensions = _coerce_trace_mapping(coverage.get("dimensions"))
+        out["recall_coverage"] = {
+            "score": _safe_float(coverage.get("score"), default=0.0),
+            "passed": bool(coverage.get("passed")),
+            "missing": [str(item) for item in list(coverage.get("missing") or [])[:8]],
+            "dimensions": {str(key): _safe_float(value, default=0.0) for key, value in dimensions.items()},
+            "required_count": _safe_int(coverage.get("required_count"), default=0),
+            "passed_required_count": _safe_int(coverage.get("passed_required_count"), default=0),
+            "selected_item_count": _safe_int(coverage.get("selected_item_count"), default=0),
+            "min_collection_items": _safe_int(coverage.get("min_collection_items"), default=0),
+            "evidence_ref_count": _safe_int(coverage.get("evidence_ref_count"), default=0),
+            "source_ref_count": _safe_int(coverage.get("source_ref_count"), default=0),
+        }
+        out["coverage_score"] = out["recall_coverage"]["score"]
+
     deep = _coerce_trace_mapping(trace.get("lightnovel_deep_review"))
     if deep:
         selected = _coerce_trace_mapping(deep.get("selected"))
@@ -520,6 +551,13 @@ def _safe_int(value: Any, *, default: int = 0) -> int:
         return int(value)
     except (TypeError, ValueError):
         return int(default)
+
+
+def _safe_float(value: Any, *, default: float = 0.0) -> float:
+    try:
+        return round(float(value), 6)
+    except (TypeError, ValueError):
+        return round(float(default), 6)
 
 
 # _coerce_trace_mapping / _coerce_trace_score / _coerce_trace_bool /

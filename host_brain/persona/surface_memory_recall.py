@@ -737,6 +737,18 @@ def build_surface_memory_recall_packet(
         trace["selected_entity_items"] = selected_entity_items
     if validation_trace["required"]:
         trace["validation"] = validation_trace
+    recall_need = _build_recall_need_trace(
+        query_kind=query_kind,
+        temporal_scope=temporal_scope,
+        target_domains=target_domains,
+        recall_contract_id=recall_contract_id,
+        primary_memory_layer=primary_memory_layer,
+        expected_memory_layers=expected_memory_layers,
+        min_collection_items=min_collection_items,
+        validation_requirements=validation_requirements,
+        answer_obligations=answer_obligations,
+    )
+    trace["recall_need"] = recall_need
     trace["recall_receipt"] = _build_recall_receipt_trace(
         candidates=candidates_for_selection,
         rows=rows,
@@ -753,6 +765,12 @@ def build_surface_memory_recall_packet(
         selected_entity_items=selected_entity_items,
         ts_ms=_coerce_int(output.get("ts_ms")),
     )
+    trace["recall_coverage"] = _build_recall_coverage_trace(
+        recall_need=recall_need,
+        recall_receipt=trace["recall_receipt"],
+        validation_trace=validation_trace,
+    )
+    trace["coverage_score"] = trace["recall_coverage"]["score"]
     if validation_failed:
         trace["validation_failed"] = True
         memory_rows = ()
@@ -784,6 +802,122 @@ def build_surface_memory_recall_packet(
         reason_code=SURFACE_MEMORY_RECALL_VALIDATION_FAILED if validation_failed else (_clean_text(output.get("reason_code")) or None),
         trace=trace,
     )
+
+
+def _build_recall_need_trace(
+    *,
+    query_kind: str,
+    temporal_scope: str,
+    target_domains: Sequence[str] | None,
+    recall_contract_id: str,
+    primary_memory_layer: str,
+    expected_memory_layers: Sequence[str] | None,
+    min_collection_items: int,
+    validation_requirements: Sequence[str] | None,
+    answer_obligations: Sequence[str] | None,
+) -> dict[str, Any]:
+    kind = _clean_text(query_kind)
+    contract = _clean_text(recall_contract_id)
+    obligations = list(_unique(list(answer_obligations or [])))
+    required = list(_unique(list(validation_requirements or [])))
+    expected_layers = list(_unique(list(expected_memory_layers or [])))
+    domains = list(_unique(list(target_domains or [])))
+    primary = _clean_text(primary_memory_layer)
+    evidence_depth = "memory_hit"
+    if any(item in obligations for item in ("use_detail_or_body_evidence", "read_detail_evidence_before_deep_quality_judgment")):
+        evidence_depth = "detail_or_body_evidence"
+    elif "evidence_refs_present" in required:
+        evidence_depth = "evidence_anchor"
+    return {
+        "schema": "Natsume.surface_recall_need.v1",
+        "query_kind": kind,
+        "temporal_scope": _clean_text(temporal_scope),
+        "target_domains": domains,
+        "recall_contract_id": contract,
+        "need_type": _recall_need_type(kind=kind, contract=contract, primary_layer=primary),
+        "primary_memory_layer": primary,
+        "expected_memory_layers": expected_layers,
+        "min_collection_items": max(0, _coerce_int(min_collection_items)),
+        "validation_requirements": required,
+        "answer_obligations": obligations,
+        "evidence_depth": evidence_depth,
+    }
+
+
+def _recall_need_type(*, kind: str, contract: str, primary_layer: str) -> str:
+    if contract in {"collection_date", "collection_recent"} or kind in {"date_lookup", "collection_summary"}:
+        return "collection"
+    if kind == "anaphoric_selection":
+        return "entity_or_collection_selection" if primary_layer == "life_memory_entity" else "collection_selection"
+    if kind == "failure_debug":
+        return "failure_episode"
+    if kind == "preference_lookup":
+        return "semantic_or_episode_preference"
+    if kind == "correction":
+        return "correction_chain"
+    if kind == "self_change":
+        return "self_change_episode"
+    if kind == "event_lookup":
+        return "episode_event"
+    return "memory_hit"
+
+
+def _build_recall_coverage_trace(
+    *,
+    recall_need: Mapping[str, Any],
+    recall_receipt: Mapping[str, Any],
+    validation_trace: Mapping[str, Any],
+) -> dict[str, Any]:
+    required = list(validation_trace.get("required") or [])
+    checks = [dict(item) for item in list(validation_trace.get("checks") or []) if isinstance(item, Mapping)]
+    passed_checks = [item for item in checks if bool(item.get("passed"))]
+    missing = list(validation_trace.get("missing") or [])
+    required_score = 1.0
+    if required:
+        required_score = len(passed_checks) / max(1, len(required))
+    selected_store_counts = dict(recall_receipt.get("selected_store_counts") or {})
+    candidate_store_counts = dict(recall_receipt.get("candidate_store_counts") or {})
+    expected_layers = {
+        _clean_text(item)
+        for item in list(recall_need.get("expected_memory_layers") or [])
+        if _clean_text(item)
+    }
+    primary = _clean_text(recall_need.get("primary_memory_layer"))
+    selected_layers = set(selected_store_counts) | set(candidate_store_counts)
+    item_required = max(0, _coerce_int(recall_need.get("min_collection_items")))
+    selected_item_count = max(0, _coerce_int(recall_receipt.get("selected_item_count")))
+    evidence_ref_count = max(0, _coerce_int(recall_receipt.get("evidence_ref_count")))
+    source_ref_count = max(0, _coerce_int(recall_receipt.get("source_ref_count")))
+    dimensions = {
+        "validation": round(required_score, 6),
+        "primary_layer": 1.0 if (not primary or primary in selected_layers) else 0.0,
+        "expected_layer": 1.0 if (not expected_layers or bool(expected_layers.intersection(selected_layers))) else 0.0,
+        "item_count": (
+            min(1.0, selected_item_count / item_required)
+            if item_required > 0
+            else (1.0 if selected_item_count > 0 or _clean_text(recall_need.get("need_type")) not in {"collection", "collection_selection", "entity_or_collection_selection"} else 0.0)
+        ),
+        "evidence": 1.0 if evidence_ref_count > 0 else 0.0,
+        "source": 1.0 if source_ref_count > 0 else 0.0,
+    }
+    if not required:
+        dimensions["validation"] = 1.0 if selected_layers else 0.0
+    score = round(sum(float(value) for value in dimensions.values()) / max(1, len(dimensions)), 6)
+    return {
+        "schema": "Natsume.surface_recall_coverage.v1",
+        "score": score,
+        "passed": bool(validation_trace.get("passed", True)) and score >= 0.66,
+        "missing": missing,
+        "dimensions": {key: round(float(value), 6) for key, value in dimensions.items()},
+        "required_count": len(required),
+        "passed_required_count": len(passed_checks),
+        "selected_item_count": selected_item_count,
+        "min_collection_items": item_required,
+        "evidence_ref_count": evidence_ref_count,
+        "source_ref_count": source_ref_count,
+        "selected_store_counts": dict(sorted(selected_store_counts.items())),
+        "candidate_store_counts": dict(sorted(candidate_store_counts.items())),
+    }
 
 
 def _build_recall_validation_trace(

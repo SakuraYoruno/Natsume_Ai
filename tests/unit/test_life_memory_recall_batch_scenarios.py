@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 
 from host_brain.app.observability_persist import persist_life_action_event_memory
 from host_brain.audit.sqlite_ledger import SQLiteLedger
-from host_brain.memory.life_memory import LifeMemoryStore
+from host_brain.memory.life_memory import LifeMemoryConsolidator, LifeMemoryStore
 from host_brain.persona.isolated_surface_continuity import ThreeLayerContinuityContext
 from host_brain.persona.surface_memory_recall import plan_surface_memory_recall, recall_surface_memory_for_context
 from host_brain.retrieval.recall_fusion import RecallFusionServiceContract
@@ -85,6 +85,14 @@ def _service(ledger: SQLiteLedger) -> RecallFusionServiceContract:
             score_weight=1.0,
             node_selector=node_id,
         ),
+        "surface_semantic_memory": RecallRouteConfig(
+            route_id="surface_semantic_memory",
+            store_id="semantic_memory",
+            collection="semantic_memory",
+            top_k=5,
+            score_weight=1.15,
+            node_selector=node_id,
+        ),
     }
     return RecallFusionServiceContract(
         ledger=ledger,
@@ -149,6 +157,11 @@ def test_batch_recall_scenarios_route_to_the_right_memory_layer() -> None:
             suppress=False,
             ts_ms=_ts(28, 17),
         )
+        LifeMemoryConsolidator(store=store).distill_semantic_memories(
+            limit=80,
+            max_records=24,
+            ts_ms=_ts(28, 17) + 1,
+        )
 
         cases = [
             {
@@ -187,9 +200,10 @@ def test_batch_recall_scenarios_route_to_the_right_memory_layer() -> None:
                 "message": "还记得我说推荐格式要怎样吗？",
                 "expected_reason": "explicit_memory_recall",
                 "expected_kind": "preference_lookup",
-                "must_route": "surface_life_episode",
+                "must_route": "surface_semantic_memory",
                 "must_contain": "简介后应该换行",
                 "must_not_contain": "5月28日推荐",
+                "min_coverage": 1.0,
             },
             {
                 "message": "你刚才是不是记错了封面猫那本？",
@@ -233,6 +247,12 @@ def test_batch_recall_scenarios_route_to_the_right_memory_layer() -> None:
             assert validation["required"] == list(plan.validation_requirements)
             assert validation["passed"] is True, validation
             assert validation["missing"] == []
+            need = dict(dict(packet.trace or {}).get("recall_need") or {})
+            coverage = dict(dict(packet.trace or {}).get("recall_coverage") or {})
+            assert need["recall_contract_id"] == plan.recall_contract_id
+            assert need["query_kind"] == plan.query_kind
+            assert coverage["passed"] is True
+            assert coverage["score"] >= float(case.get("min_coverage", 0.66))
 
         assert failure["collection_index"]["status"] == "SKIPPED"
         assert preference["episode_id"]

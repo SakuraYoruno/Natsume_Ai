@@ -63,6 +63,30 @@ def test_normalize_retrieval_summary_keeps_safe_surface_memory_trace() -> None:
                         "target_store_ids": ["life_episode", "semantic_memory"],
                     },
                     "route_count": 4,
+                    "recall_need": {
+                        "schema": "Natsume.surface_recall_need.v1",
+                        "query_kind": "anaphoric_selection",
+                        "temporal_scope": "current",
+                        "recall_contract_id": "anaphoric_selection",
+                        "need_type": "collection_selection",
+                        "primary_memory_layer": "life_memory_collection",
+                        "expected_memory_layers": ["life_memory_collection", "life_episode"],
+                        "target_domains": ["lightnovel_recommendation"],
+                        "min_collection_items": 3,
+                        "evidence_depth": "detail_or_body_evidence",
+                    },
+                    "recall_coverage": {
+                        "score": 1.0,
+                        "passed": True,
+                        "missing": [],
+                        "dimensions": {"validation": 1.0, "item_count": 1.0, "evidence": 1.0},
+                        "required_count": 5,
+                        "passed_required_count": 5,
+                        "selected_item_count": 3,
+                        "min_collection_items": 3,
+                        "evidence_ref_count": 3,
+                        "source_ref_count": 1,
+                    },
                     "lightnovel_deep_review": {
                         "status": "OK",
                         "reason_code": "LIGHTNOVEL_DEEP_REVIEW_CACHE_HIT",
@@ -84,6 +108,11 @@ def test_normalize_retrieval_summary_keeps_safe_surface_memory_trace() -> None:
     trace = summary["surface_memory_trace"]
     assert trace["plan"]["reason"] == "anaphoric_selection_recall"
     assert trace["route_count"] == 4
+    assert trace["recall_need"]["need_type"] == "collection_selection"
+    assert trace["recall_need"]["evidence_depth"] == "detail_or_body_evidence"
+    assert trace["recall_coverage"]["score"] == 1.0
+    assert trace["recall_coverage"]["selected_item_count"] == 3
+    assert trace["coverage_score"] == 1.0
     assert trace["lightnovel_deep_review"]["cached"] is True
     assert trace["lightnovel_deep_review"]["source_episode_id"] == "ep-cache"
     assert trace["lightnovel_deep_review"]["selected"] == {"index": 3, "title": "异世界皇女"}

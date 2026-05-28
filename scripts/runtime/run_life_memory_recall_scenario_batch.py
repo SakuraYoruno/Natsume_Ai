@@ -15,7 +15,7 @@ if str(ROOT) not in sys.path:
 
 from host_brain.app.observability_persist import persist_life_action_event_memory
 from host_brain.audit.sqlite_ledger import SQLiteLedger
-from host_brain.memory.life_memory import LifeMemoryStore
+from host_brain.memory.life_memory import LifeMemoryConsolidator, LifeMemoryStore
 from host_brain.persona.isolated_surface_continuity import ThreeLayerContinuityContext
 from host_brain.persona.surface_memory_recall import plan_surface_memory_recall, recall_surface_memory_for_context
 from host_brain.retrieval.recall_fusion import RecallFusionServiceContract
@@ -38,6 +38,7 @@ class ScenarioExpectation:
     must_trace_title: str = ""
     must_receipt_min_items: int = 0
     must_receipt_scope: str = ""
+    must_coverage_min: float = 0.66
 
 
 class _NullChromaClient:
@@ -146,6 +147,11 @@ def _seed_world(store: LifeMemoryStore) -> None:
         suppress=False,
         ts_ms=_ts(28, 17),
     )
+    LifeMemoryConsolidator(store=store).distill_semantic_memories(
+        limit=80,
+        max_records=24,
+        ts_ms=_ts(28, 17) + 1,
+    )
 
 
 def _run_case(*, service: RecallFusionServiceContract, case: ScenarioExpectation) -> dict[str, Any]:
@@ -180,6 +186,12 @@ def _run_case(*, service: RecallFusionServiceContract, case: ScenarioExpectation
         )
     receipt = dict(dict(packet.trace or {}).get("recall_receipt") or {})
     checks["receipt"] = bool(receipt) and receipt.get("validation_passed") is True
+    coverage = dict(dict(packet.trace or {}).get("recall_coverage") or {})
+    checks["coverage"] = (
+        bool(coverage)
+        and coverage.get("passed") is True
+        and float(coverage.get("score") or 0.0) >= float(case.must_coverage_min)
+    )
     if case.must_receipt_min_items:
         checks["receipt_item_count"] = int(receipt.get("selected_item_count") or 0) >= int(case.must_receipt_min_items)
     if case.must_receipt_scope:
@@ -193,6 +205,8 @@ def _run_case(*, service: RecallFusionServiceContract, case: ScenarioExpectation
         "evidence_refs": list(packet.evidence_refs),
         "validation": validation,
         "recall_receipt": receipt,
+        "recall_need": dict(dict(packet.trace or {}).get("recall_need") or {}),
+        "recall_coverage": coverage,
         "facts": list(packet.facts),
     }
 
@@ -222,6 +236,14 @@ def _service(ledger: SQLiteLedger) -> RecallFusionServiceContract:
             collection="life_episode",
             top_k=8,
             score_weight=1.0,
+            node_selector=node_id,
+        ),
+        "surface_semantic_memory": RecallRouteConfig(
+            route_id="surface_semantic_memory",
+            store_id="semantic_memory",
+            collection="semantic_memory",
+            top_k=5,
+            score_weight=1.15,
             node_selector=node_id,
         ),
     }
@@ -331,9 +353,10 @@ def _scenario_expectations() -> list[ScenarioExpectation]:
             message="还记得我说推荐格式要怎样吗？",
             expected_reason="explicit_memory_recall",
             expected_kind="preference_lookup",
-            must_route="surface_life_episode",
+            must_route="surface_semantic_memory",
             must_contain="简介后应该换行",
             must_not_contain="5月28日推荐",
+            must_coverage_min=1.0,
         ),
         ScenarioExpectation(
             case_id="correction_lookup",
