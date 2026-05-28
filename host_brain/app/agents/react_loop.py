@@ -28,6 +28,7 @@ from host_brain.app.agents.tool_registry import (
     is_tool_allowed,
 )
 from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged
+from host_brain.app.sub_agent_context import render_agent_context_envelope_for_prompt
 
 
 def _load_template_mapping(template_id: str) -> dict[str, Any]:
@@ -367,6 +368,9 @@ def run_react_loop(
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": user_input},
     ]
+    context_prompt = render_agent_context_envelope_for_prompt(ctx)
+    if context_prompt:
+        messages.append({"role": "user", "content": context_prompt})
 
     final_answer = ""
     stopped_reason = "MAX_STEPS"
