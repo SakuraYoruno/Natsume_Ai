@@ -47,6 +47,7 @@ def test_life_memory_acceptance_suite_passes_with_seeded_runtime_db(tmp_path: Pa
     assert {
         "deterministic_recall_scenarios",
         "deterministic_entrypoint_coverage",
+        "deterministic_lifecycle_scenarios",
         "production_ledger_coverage",
         "sleep_replay_dry_run",
     }.issubset(check_ids)

@@ -24,6 +24,7 @@ from scripts.runtime.run_life_memory_entrypoint_scenario_batch import (  # noqa:
     REQUIRED_ENTRYPOINTS,
     run_entrypoint_scenario_batch,
 )
+from scripts.runtime.run_life_memory_lifecycle_scenario_batch import run_lifecycle_scenario_batch  # noqa: E402
 from scripts.runtime.run_life_memory_recall_scenario_batch import run_scenario_batch  # noqa: E402
 
 
@@ -71,6 +72,19 @@ def run_acceptance_suite(
             "summary": entrypoints.get("summary"),
         },
         details=entrypoints,
+    )
+
+    lifecycle = run_lifecycle_scenario_batch()
+    _add_check(
+        checks,
+        check_id="deterministic_lifecycle_scenarios",
+        passed=bool(lifecycle.get("success")),
+        summary={
+            "passed_count": lifecycle.get("passed_count"),
+            "failed_count": lifecycle.get("failed_count"),
+            "case_count": lifecycle.get("case_count"),
+        },
+        details=lifecycle,
     )
 
     production = _run_production_ledger_checks(
