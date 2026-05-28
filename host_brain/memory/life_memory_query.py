@@ -27,6 +27,18 @@ QUERY_FAILURE_DEBUG = "failure_debug"
 QUERY_CORRECTION = "correction"
 QUERY_SELF_CHANGE = "self_change"
 
+CONTRACT_NO_RECALL = "no_recall"
+CONTRACT_FAILURE_DEBUG = "failure_debug"
+CONTRACT_OPEN_LOOP = "open_loop"
+CONTRACT_COLLECTION_DATE = "collection_date"
+CONTRACT_COLLECTION_RECENT = "collection_recent"
+CONTRACT_ANAPHORIC_SELECTION = "anaphoric_selection"
+CONTRACT_EVENT_LOOKUP = "event_lookup"
+CONTRACT_CORRECTION = "correction"
+CONTRACT_EXPLICIT_MEMORY = "explicit_memory"
+CONTRACT_PREFERENCE = "preference"
+CONTRACT_SELF_CHANGE = "self_change"
+
 DOMAIN_RECOMMENDATION = "recommendation"
 DOMAIN_LIGHTNOVEL_RECOMMENDATION = "lightnovel_recommendation"
 DOMAIN_TASK = "task"
@@ -34,6 +46,92 @@ DOMAIN_FAILURE = "failure"
 DOMAIN_PREFERENCE = "preference"
 DOMAIN_SELF_CHANGE = "self_change"
 DOMAIN_ACTION = "action"
+
+
+@dataclass(frozen=True)
+class RecallIntentContract:
+    """Memory-routing contract for one class of recall query."""
+
+    contract_id: str
+    primary_memory_layer: str = ""
+    expected_memory_layers: tuple[str, ...] = ()
+    validation_requirements: tuple[str, ...] = ()
+    answer_obligations: tuple[str, ...] = ()
+
+
+RECALL_INTENT_CONTRACTS: dict[str, RecallIntentContract] = {
+    CONTRACT_FAILURE_DEBUG: RecallIntentContract(
+        contract_id=CONTRACT_FAILURE_DEBUG,
+        primary_memory_layer="life_episode",
+        expected_memory_layers=("life_episode", "semantic_memory", "sqlite_ledger", "episodic_vector"),
+        validation_requirements=("error_episode_or_semantic_hit", "source_ref_present"),
+        answer_obligations=("explain_failure_from_recorded_result", "do_not_invent_root_cause"),
+    ),
+    CONTRACT_OPEN_LOOP: RecallIntentContract(
+        contract_id=CONTRACT_OPEN_LOOP,
+        primary_memory_layer="life_episode",
+        expected_memory_layers=("life_episode", "semantic_memory", "sqlite_ledger", "episodic_vector", "neo4j_bond"),
+        validation_requirements=("trusted_memory_hit", "source_ref_present"),
+        answer_obligations=("state_open_loop_status", "separate_done_from_pending"),
+    ),
+    CONTRACT_COLLECTION_DATE: RecallIntentContract(
+        contract_id=CONTRACT_COLLECTION_DATE,
+        primary_memory_layer="life_memory_collection",
+        expected_memory_layers=("life_memory_collection",),
+        validation_requirements=("scope_match", "collection_items_present", "evidence_refs_present"),
+        answer_obligations=("keep_requested_date_scope", "use_collection_items_not_chat_echo"),
+    ),
+    CONTRACT_COLLECTION_RECENT: RecallIntentContract(
+        contract_id=CONTRACT_COLLECTION_RECENT,
+        primary_memory_layer="life_memory_collection",
+        expected_memory_layers=("life_memory_collection",),
+        validation_requirements=("scope_match", "collection_items_present", "evidence_refs_present"),
+        answer_obligations=("summarize_cross_day_collection", "preserve_item_identity"),
+    ),
+    CONTRACT_ANAPHORIC_SELECTION: RecallIntentContract(
+        contract_id=CONTRACT_ANAPHORIC_SELECTION,
+        primary_memory_layer="life_memory_collection",
+        expected_memory_layers=("life_memory_collection", "life_episode"),
+        validation_requirements=("collection_or_episode_hit", "evidence_refs_present", "no_self_echo"),
+        answer_obligations=("ground_selection_in_recalled_items", "do_not_invent_unread_content"),
+    ),
+    CONTRACT_EVENT_LOOKUP: RecallIntentContract(
+        contract_id=CONTRACT_EVENT_LOOKUP,
+        primary_memory_layer="life_episode",
+        expected_memory_layers=("life_episode", "life_memory_collection", "semantic_memory", "sqlite_ledger", "episodic_vector"),
+        validation_requirements=("event_time_scope_match", "event_or_collection_hit", "source_ref_present"),
+        answer_obligations=("answer_with_action_result", "keep_action_and_reason_together"),
+    ),
+    CONTRACT_CORRECTION: RecallIntentContract(
+        contract_id=CONTRACT_CORRECTION,
+        primary_memory_layer="life_episode",
+        expected_memory_layers=("life_episode", "semantic_memory", "sqlite_ledger", "episodic_vector"),
+        validation_requirements=("correction_state_checked", "suppressed_not_fact"),
+        answer_obligations=("prefer_corrected_version", "do_not_repeat_suppressed_fact"),
+    ),
+    CONTRACT_EXPLICIT_MEMORY: RecallIntentContract(
+        contract_id=CONTRACT_EXPLICIT_MEMORY,
+        primary_memory_layer="life_episode",
+        expected_memory_layers=("life_episode", "semantic_memory", "sqlite_ledger", "episodic_vector", "neo4j_bond"),
+        validation_requirements=("trusted_memory_hit", "source_ref_present"),
+        answer_obligations=("answer_from_trusted_memory", "say_when_memory_is_missing"),
+    ),
+    CONTRACT_PREFERENCE: RecallIntentContract(
+        contract_id=CONTRACT_PREFERENCE,
+        primary_memory_layer="semantic_memory",
+        expected_memory_layers=("semantic_memory", "life_episode", "sqlite_ledger", "episodic_vector", "neo4j_bond"),
+        validation_requirements=("trusted_memory_hit", "source_ref_present"),
+        answer_obligations=("state_preference_as_user_rule", "keep_source_episode_traceable"),
+    ),
+    CONTRACT_SELF_CHANGE: RecallIntentContract(
+        contract_id=CONTRACT_SELF_CHANGE,
+        primary_memory_layer="life_episode",
+        expected_memory_layers=("life_episode", "semantic_memory", "sqlite_ledger", "episodic_vector", "neo4j_bond"),
+        validation_requirements=("trusted_memory_hit", "source_ref_present"),
+        answer_obligations=("state_self_change_and_current_effect", "do_not_hide_correction_history"),
+    ),
+    CONTRACT_NO_RECALL: RecallIntentContract(contract_id=CONTRACT_NO_RECALL),
+}
 
 
 _ANAPHORIC_SELECTION_RE = re.compile(
@@ -70,6 +168,11 @@ class LifeMemoryQueryPlan:
     max_chars_per_fact: int = 160
     reason: str = "no_memory_recall_needed"
     validation_requirements: tuple[str, ...] = ()
+    recall_contract_id: str = CONTRACT_NO_RECALL
+    primary_memory_layer: str = ""
+    expected_memory_layers: tuple[str, ...] = ()
+    min_collection_items: int = 0
+    answer_obligations: tuple[str, ...] = ()
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -83,6 +186,11 @@ class LifeMemoryQueryPlan:
             "max_chars_per_fact": int(self.max_chars_per_fact),
             "reason": self.reason,
             "validation_requirements": list(self.validation_requirements),
+            "recall_contract_id": self.recall_contract_id,
+            "primary_memory_layer": self.primary_memory_layer,
+            "expected_memory_layers": list(self.expected_memory_layers),
+            "min_collection_items": int(self.min_collection_items or 0),
+            "answer_obligations": list(self.answer_obligations),
         }
 
 
@@ -96,6 +204,7 @@ def plan_life_memory_query(text: Any, *, task_mode: str | None = None) -> LifeMe
     anaphoric_selection = bool(_ANAPHORIC_SELECTION_RE.search(message))
     collection_like = _looks_like_collection_query(message, domains=domains, temporal_scope=temporal_scope)
     event_lookup = _looks_like_event_lookup_query(message, temporal_scope=temporal_scope)
+    min_collection_items = _minimum_collection_items(message)
     explicit_memory = any(token in message for token in ("还记得", "记得吗", "记不记得", "记了什么", "让你记"))
     failure_debug = any(token in message for token in ("失败原因", "为什么失败", "连不上", "异常原因", "被占用"))
     if not failure_debug and any(token in message for token in ("报错", "异常")):
@@ -106,6 +215,7 @@ def plan_life_memory_query(text: Any, *, task_mode: str | None = None) -> LifeMe
     self_change = any(token in message for token in ("模型路由", "记忆系统", "能力", "策略", "开关", "改过什么"))
 
     if failure_debug:
+        contract = RECALL_INTENT_CONTRACTS[CONTRACT_FAILURE_DEBUG]
         return LifeMemoryQueryPlan(
             should_recall=True,
             query_kind=QUERY_FAILURE_DEBUG,
@@ -116,10 +226,15 @@ def plan_life_memory_query(text: Any, *, task_mode: str | None = None) -> LifeMe
             max_facts=4,
             max_chars_per_fact=220,
             reason="failure_debug_recall",
-            validation_requirements=("error_episode_or_semantic_hit", "source_ref_present"),
+            validation_requirements=contract.validation_requirements,
+            recall_contract_id=contract.contract_id,
+            primary_memory_layer=contract.primary_memory_layer,
+            expected_memory_layers=contract.expected_memory_layers,
+            answer_obligations=contract.answer_obligations,
         )
 
     if open_loop:
+        contract = RECALL_INTENT_CONTRACTS[CONTRACT_OPEN_LOOP]
         return LifeMemoryQueryPlan(
             should_recall=True,
             query_kind=QUERY_OPEN_LOOP,
@@ -130,11 +245,21 @@ def plan_life_memory_query(text: Any, *, task_mode: str | None = None) -> LifeMe
             max_facts=4,
             max_chars_per_fact=180,
             reason="explicit_memory_recall",
-            validation_requirements=("trusted_memory_hit", "source_ref_present"),
+            validation_requirements=contract.validation_requirements,
+            recall_contract_id=contract.contract_id,
+            primary_memory_layer=contract.primary_memory_layer,
+            expected_memory_layers=contract.expected_memory_layers,
+            answer_obligations=contract.answer_obligations,
         )
 
     if collection_like and temporal_scope not in {TEMPORAL_CURRENT, TEMPORAL_UNSPECIFIED}:
         scope = temporal_scope
+        contract_id = (
+            CONTRACT_COLLECTION_DATE
+            if temporal_scope in {TEMPORAL_TODAY, TEMPORAL_YESTERDAY, TEMPORAL_DAY_BEFORE_YESTERDAY}
+            else CONTRACT_COLLECTION_RECENT
+        )
+        contract = RECALL_INTENT_CONTRACTS[contract_id]
         return LifeMemoryQueryPlan(
             should_recall=True,
             query_kind=QUERY_DATE_LOOKUP if temporal_scope in {TEMPORAL_TODAY, TEMPORAL_YESTERDAY, TEMPORAL_DAY_BEFORE_YESTERDAY} else QUERY_COLLECTION_SUMMARY,
@@ -145,10 +270,16 @@ def plan_life_memory_query(text: Any, *, task_mode: str | None = None) -> LifeMe
             max_facts=6,
             max_chars_per_fact=900,
             reason="collection_memory_recall",
-            validation_requirements=("scope_match", "collection_items_present", "evidence_refs_present"),
+            validation_requirements=_collection_validation_requirements(contract, min_collection_items),
+            recall_contract_id=contract.contract_id,
+            primary_memory_layer=contract.primary_memory_layer,
+            expected_memory_layers=contract.expected_memory_layers,
+            min_collection_items=min_collection_items,
+            answer_obligations=_answer_obligations_for_query(message, contract=contract),
         )
 
     if anaphoric_selection:
+        contract = RECALL_INTENT_CONTRACTS[CONTRACT_ANAPHORIC_SELECTION]
         return LifeMemoryQueryPlan(
             should_recall=True,
             query_kind=QUERY_ANAPHORIC_SELECTION,
@@ -159,11 +290,22 @@ def plan_life_memory_query(text: Any, *, task_mode: str | None = None) -> LifeMe
             max_facts=5,
             max_chars_per_fact=760,
             reason="anaphoric_selection_recall",
-            validation_requirements=("collection_or_episode_hit", "evidence_refs_present", "no_self_echo"),
+            validation_requirements=_collection_validation_requirements(contract, min_collection_items),
+            recall_contract_id=contract.contract_id,
+            primary_memory_layer=contract.primary_memory_layer,
+            expected_memory_layers=contract.expected_memory_layers,
+            min_collection_items=min_collection_items,
+            answer_obligations=_answer_obligations_for_query(message, contract=contract),
         )
 
     if collection_like:
         scope = temporal_scope if temporal_scope != TEMPORAL_UNSPECIFIED else TEMPORAL_RECENT_DAYS
+        contract_id = (
+            CONTRACT_COLLECTION_DATE
+            if temporal_scope in {TEMPORAL_TODAY, TEMPORAL_YESTERDAY, TEMPORAL_DAY_BEFORE_YESTERDAY}
+            else CONTRACT_COLLECTION_RECENT
+        )
+        contract = RECALL_INTENT_CONTRACTS[contract_id]
         return LifeMemoryQueryPlan(
             should_recall=True,
             query_kind=QUERY_DATE_LOOKUP if temporal_scope in {TEMPORAL_TODAY, TEMPORAL_YESTERDAY, TEMPORAL_DAY_BEFORE_YESTERDAY} else QUERY_COLLECTION_SUMMARY,
@@ -174,10 +316,16 @@ def plan_life_memory_query(text: Any, *, task_mode: str | None = None) -> LifeMe
             max_facts=6,
             max_chars_per_fact=900,
             reason="collection_memory_recall",
-            validation_requirements=("scope_match", "collection_items_present", "evidence_refs_present"),
+            validation_requirements=_collection_validation_requirements(contract, min_collection_items),
+            recall_contract_id=contract.contract_id,
+            primary_memory_layer=contract.primary_memory_layer,
+            expected_memory_layers=contract.expected_memory_layers,
+            min_collection_items=min_collection_items,
+            answer_obligations=_answer_obligations_for_query(message, contract=contract),
         )
 
     if event_lookup:
+        contract = RECALL_INTENT_CONTRACTS[CONTRACT_EVENT_LOOKUP]
         return LifeMemoryQueryPlan(
             should_recall=True,
             query_kind=QUERY_DATE_LOOKUP if temporal_scope in {TEMPORAL_TODAY, TEMPORAL_YESTERDAY, TEMPORAL_DAY_BEFORE_YESTERDAY} else QUERY_EVENT_LOOKUP,
@@ -188,10 +336,15 @@ def plan_life_memory_query(text: Any, *, task_mode: str | None = None) -> LifeMe
             max_facts=6,
             max_chars_per_fact=260,
             reason="event_memory_recall",
-            validation_requirements=("event_time_scope_match", "event_or_collection_hit", "source_ref_present"),
+            validation_requirements=contract.validation_requirements,
+            recall_contract_id=contract.contract_id,
+            primary_memory_layer=contract.primary_memory_layer,
+            expected_memory_layers=contract.expected_memory_layers,
+            answer_obligations=contract.answer_obligations,
         )
 
     if correction:
+        contract = RECALL_INTENT_CONTRACTS[CONTRACT_CORRECTION]
         return LifeMemoryQueryPlan(
             should_recall=True,
             query_kind=QUERY_CORRECTION,
@@ -202,7 +355,11 @@ def plan_life_memory_query(text: Any, *, task_mode: str | None = None) -> LifeMe
             max_facts=4,
             max_chars_per_fact=220,
             reason="correction_recall",
-            validation_requirements=("correction_state_checked", "suppressed_not_fact"),
+            validation_requirements=contract.validation_requirements,
+            recall_contract_id=contract.contract_id,
+            primary_memory_layer=contract.primary_memory_layer,
+            expected_memory_layers=contract.expected_memory_layers,
+            answer_obligations=contract.answer_obligations,
         )
 
     if explicit_memory or preference or self_change:
@@ -211,6 +368,12 @@ def plan_life_memory_query(text: Any, *, task_mode: str | None = None) -> LifeMe
             QUERY_SELF_CHANGE if self_change else
             QUERY_EXPLICIT_MEMORY
         )
+        contract_id = (
+            CONTRACT_PREFERENCE if preference else
+            CONTRACT_SELF_CHANGE if self_change else
+            CONTRACT_EXPLICIT_MEMORY
+        )
+        contract = RECALL_INTENT_CONTRACTS[contract_id]
         return LifeMemoryQueryPlan(
             should_recall=True,
             query_kind=query_kind,
@@ -221,7 +384,11 @@ def plan_life_memory_query(text: Any, *, task_mode: str | None = None) -> LifeMe
             max_facts=4,
             max_chars_per_fact=180,
             reason="explicit_memory_recall",
-            validation_requirements=("trusted_memory_hit", "source_ref_present"),
+            validation_requirements=contract.validation_requirements,
+            recall_contract_id=contract.contract_id,
+            primary_memory_layer=contract.primary_memory_layer,
+            expected_memory_layers=contract.expected_memory_layers,
+            answer_obligations=contract.answer_obligations,
         )
 
     return LifeMemoryQueryPlan(
@@ -323,6 +490,45 @@ def _lookback_for_scope(scope: str, *, default: int | None) -> int | None:
     if scope == TEMPORAL_ALL_TIME:
         return None
     return default
+
+
+def _minimum_collection_items(text: str) -> int:
+    if not text:
+        return 0
+    if "十几" in text:
+        return 10
+    if re.search(r"(?:三|3)(?:本|部|个)", text):
+        return 3
+    if re.search(r"(?:两|二|2)(?:本|部|个)", text):
+        return 2
+    if _ITEM_COUNT_RE.search(text):
+        return 1
+    return 0
+
+
+def _collection_validation_requirements(
+    contract: RecallIntentContract,
+    min_collection_items: int,
+) -> tuple[str, ...]:
+    requirements = list(contract.validation_requirements)
+    if min_collection_items > 1 and "collection_item_min_count" not in requirements:
+        requirements.append("collection_item_min_count")
+    if min_collection_items in {2, 3} and "collection_item_exact_count" not in requirements:
+        requirements.append("collection_item_exact_count")
+    return tuple(requirements)
+
+
+def _answer_obligations_for_query(text: str, *, contract: RecallIntentContract) -> tuple[str, ...]:
+    obligations = list(contract.answer_obligations)
+    if any(token in text for token in ("哪本", "哪部", "哪个", "喜欢", "好看", "先看", "选", "挑")):
+        for obligation in ("compare_recalled_items_before_answering", "read_detail_evidence_before_deep_quality_judgment"):
+            if obligation not in obligations:
+                obligations.append(obligation)
+    if any(token in text for token in ("正文", "epub", "网页", "翻看", "深入")):
+        for obligation in ("use_detail_or_body_evidence", "say_if_detail_evidence_is_missing"):
+            if obligation not in obligations:
+                obligations.append(obligation)
+    return tuple(obligations)
 
 
 def _clean_text(value: Any) -> str:

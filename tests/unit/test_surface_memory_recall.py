@@ -733,7 +733,10 @@ def test_recall_surface_memory_for_context_attaches_validation_receipt_for_colle
         "scope_match",
         "collection_items_present",
         "evidence_refs_present",
+        "collection_item_min_count",
+        "collection_item_exact_count",
     }
+    assert validation["min_collection_items"] == 3
     assert validation["candidate_store_counts"] == {"life_memory_collection": 1}
 
 
@@ -867,6 +870,57 @@ def test_collection_scope_query_filters_self_echo_when_many_books_requested() ->
     assert "最近轻小说推荐集合，记录 15 个条目" in joined
     assert "记录 3 个条目" not in joined
     assert "用户提到" not in joined
+
+
+def test_many_book_collection_recall_fails_receipt_when_item_coverage_is_too_small() -> None:
+    class _RecallService:
+        def recall(self, **kwargs):  # noqa: ANN003
+            return SimpleNamespace(
+                output={
+                    "query": kwargs["query"],
+                    "status": "OK",
+                    "stage": "S_RET_RECALL",
+                    "degraded": False,
+                    "routes": [{"route_id": "surface_life_collection", "store_id": "life_memory_collection"}],
+                    "candidate_count": 1,
+                    "ts_ms": kwargs["ts_ms"],
+                    "candidates": [
+                        {
+                            "doc_id": "col-recent-small",
+                            "source_ref": "life_memory_collection://col-recent-small",
+                            "evidence_refs": ["gateway://message/recent/card/1"],
+                            "text": "最近轻小说推荐集合，记录 3 个条目；可比较证据：1. Old A｜2. Old B｜3. Old C",
+                            "score": 0.95,
+                            "metadata": {
+                                "store_id": "life_memory_collection",
+                                "scope_key": "recent",
+                                "item_count": 3,
+                                "evidence_refs_primary": "gateway://message/recent/card/1",
+                            },
+                        }
+                    ],
+                }
+            )
+
+    packet = recall_surface_memory_for_context(
+        recall_service=_RecallService(),
+        context=ThreeLayerContinuityContext(
+            current_user_message="这十几本里有哪些？",
+            task_mode_hint="daily_chat",
+        ),
+        request_id="req-many-book-small-coverage",
+        query_embedding=[0.1] * 16,
+        person_id="owner",
+        session_id="qq_dm_owner",
+        ts_ms=_ts(2026, 5, 29, 8),
+    )
+
+    validation = dict(dict(packet.trace or {})["validation"])
+    assert validation["passed"] is False
+    assert validation["min_collection_items"] == 10
+    assert "collection_item_min_count" in validation["missing"]
+    assert packet.facts == ()
+    assert packet.reason_code == SURFACE_MEMORY_RECALL_VALIDATION_FAILED
 
 
 def test_write_surface_turn_memory_writes_compact_evidence_gated_record() -> None:

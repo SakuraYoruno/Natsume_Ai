@@ -7,7 +7,7 @@ from host_brain.core.errors import CHROMA_ENDPOINT_UNAVAILABLE
 from host_brain.memory.chroma_client import embed_text
 from host_brain.memory.life_memory import EPISODE_ACTION, EPISODE_BACKGROUND, LifeMemoryStore
 from host_brain.retrieval.recall_fusion import RecallFusionServiceContract, load_recall_runtime_config
-from host_brain.retrieval.recall_fusion_stores import STORE_EPISODIC_VECTOR, STORE_LIFE_EPISODE
+from host_brain.retrieval.recall_fusion_stores import STORE_EPISODIC_VECTOR, STORE_LIFE_EPISODE, STORE_LIFE_MEMORY_COLLECTION
 from tests.fakes.chroma_client import FakeChromaClient
 
 
@@ -71,6 +71,116 @@ def test_life_episode_route_returns_episode_packet_candidate() -> None:
         assert top["metadata"]["evidence_count"] >= 2
         assert top["metadata"]["truth_state"] == "VERIFIED"
         assert top["evidence_refs"].startswith("chat://request/req-life-route-001")
+    finally:
+        ledger.close()
+
+
+def test_anaphoric_selection_prefers_latest_three_item_delivery_over_recent_collection() -> None:
+    ledger = SQLiteLedger(db_path=":memory:")
+    try:
+        store = LifeMemoryStore(ledger=ledger)
+        latest = store.upsert_episode(
+            episode_kind=EPISODE_ACTION,
+            evidence_refs=["action://event/latest-delivery"],
+            primary_ref="action://event/latest-delivery",
+            person_id="user-1",
+            session_id="qq_dm_1",
+            action="lightnovel_recommendation_delivery",
+            summary="我刚才给 qq_dm_1 推荐了 3 本轻小说：1. 新 A；2. 新 B；3. 新 C。",
+            salience=0.7,
+            retention_state="HOT",
+            truth_state="VERIFIED",
+            ts_ms=1_800_000_000_000,
+            metadata={"action_kind": "lightnovel_recommendation_delivery"},
+        )
+        old = store.upsert_episode(
+            episode_kind=EPISODE_ACTION,
+            evidence_refs=["action://event/old-delivery"],
+            primary_ref="action://event/old-delivery",
+            person_id="user-1",
+            session_id="qq_dm_1",
+            action="lightnovel_recommendation_delivery",
+            summary="较早推荐过旧书。",
+            salience=0.5,
+            retention_state="WARM",
+            truth_state="VERIFIED",
+            ts_ms=1_799_999_000_000,
+            metadata={"action_kind": "lightnovel_recommendation_delivery"},
+        )
+        recent = store.upsert_collection(
+            collection_kind="recommendation_collection",
+            domain="lightnovel_recommendation",
+            scope_key="recent",
+            title="最近轻小说推荐集合",
+            summary="最近轻小说推荐集合，记录 12 个条目。",
+            person_id="user-1",
+            session_id="qq_dm_1",
+            ts_ms=1_800_000_000_050,
+        )
+        for index in range(1, 13):
+            store.attach_collection_item(
+                collection_id=recent["collection_id"],
+                episode_id=old["episode_id"],
+                item_key=f"old-{index}",
+                item_title=f"旧书 {index}",
+                item_summary="旧集合条目",
+                source_ref=f"https://example.test/old/{index}",
+                evidence_ref=f"action://event/old-delivery#{index}",
+                position=index,
+                ts_ms=1_800_000_000_050 + index,
+            )
+
+        query = "这三本书，你喜欢哪本？"
+        query_embedding, _ = embed_text(query)
+        cfg_result = load_recall_runtime_config(
+            env={
+                "RETR_RECALL_ENABLED": "true",
+                "RETR_RECALL_DEFAULT_ROUTE": "route_life_collection",
+                "RETR_RECALL_ROUTES_JSON": json.dumps(
+                    {
+                        "route_life_collection": {
+                            "store_id": STORE_LIFE_MEMORY_COLLECTION,
+                            "top_k": 5,
+                            "score_weight": 1.2,
+                            "node_selector": "*",
+                        },
+                        "route_life_episode": {
+                            "store_id": STORE_LIFE_EPISODE,
+                            "top_k": 5,
+                            "score_weight": 1.0,
+                            "node_selector": "*",
+                        },
+                    },
+                    ensure_ascii=False,
+                ),
+            }
+        )
+        assert cfg_result.success, cfg_result.as_dict()
+        assert cfg_result.config is not None
+
+        service = RecallFusionServiceContract(
+            chroma_client=FakeChromaClient(),
+            ledger=ledger,
+            runtime_config=cfg_result.config,
+            node_id="host-01",
+            available=True,
+            use_hybrid=False,
+        )
+        result = service.recall(
+            request_id="req-life-route-current-three",
+            query=query,
+            query_embedding=query_embedding,
+            person_id="user-1",
+            session_id="qq_dm_1",
+            ts_ms=1_800_000_000_500,
+            time_lookback_days=1,
+        )
+
+        assert result.success
+        candidates = result.output["candidates"]
+        assert [item["doc_id"] for item in candidates] == [latest["episode_id"]]
+        assert "新 A" in candidates[0]["snippet"]
+        assert "旧书" not in candidates[0]["snippet"]
     finally:
         ledger.close()
 

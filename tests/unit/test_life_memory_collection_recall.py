@@ -210,6 +210,11 @@ def test_surface_plan_routes_date_and_collection_queries_to_collection_first() -
     assert plan.temporal_scope == "yesterday"
     assert plan.target_store_ids[0] == "life_memory_collection"
     assert "collection_items_present" in plan.validation_requirements
+    assert "collection_item_min_count" in plan.validation_requirements
+    assert "collection_item_exact_count" in plan.validation_requirements
+    assert plan.min_collection_items == 3
+    assert plan.recall_contract_id == "collection_date"
+    assert plan.primary_memory_layer == "life_memory_collection"
 
 
 def test_surface_plan_routes_many_book_listing_to_recent_collection() -> None:
@@ -225,6 +230,9 @@ def test_surface_plan_routes_many_book_listing_to_recent_collection() -> None:
     assert plan.query_kind == "collection_summary"
     assert plan.temporal_scope == "recent_days"
     assert plan.target_store_ids[0] == "life_memory_collection"
+    assert "collection_item_min_count" in plan.validation_requirements
+    assert plan.min_collection_items == 10
+    assert "preserve_item_identity" in plan.answer_obligations
 
 
 def test_recall_fusion_collection_route_builds_surface_packet_with_items() -> None:

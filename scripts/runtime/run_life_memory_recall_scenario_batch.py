@@ -96,7 +96,7 @@ def run_scenario_batch() -> dict[str, Any]:
 
 
 def _seed_world(store: LifeMemoryStore) -> None:
-    for day in (26, 27, 28):
+    for day in (25, 26, 27, 28):
         _seed_recommendation(store, day=day)
     store.write_background_episode(
         event_source="codex_production",

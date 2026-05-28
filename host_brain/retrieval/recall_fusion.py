@@ -760,7 +760,7 @@ def _filter_anaphoric_selection_candidates(
     ]
     if not primary:
         return candidates
-    primary = _select_recent_anaphoric_life_primary(primary)
+    primary = _select_recent_anaphoric_life_primary(primary, query=query)
     kept: list[dict[str, Any]] = []
     seen: set[str] = set()
     for candidate in primary:
@@ -790,10 +790,10 @@ def _filter_anaphoric_selection_candidates(
     return sorted(kept, key=_candidate_sort_key)
 
 
-def _select_recent_anaphoric_life_primary(candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _select_recent_anaphoric_life_primary(candidates: list[dict[str, Any]], *, query: str) -> list[dict[str, Any]]:
     if len(candidates) <= 1:
         return candidates
-    ranked = sorted(candidates, key=_anaphoric_primary_sort_key)
+    ranked = sorted(candidates, key=lambda candidate: _anaphoric_primary_sort_key(candidate, query=query))
     newest = ranked[0]
     newest_ts = _candidate_life_ts(newest)
     newest_action = _candidate_life_action(newest)
@@ -815,17 +815,28 @@ def _select_recent_anaphoric_life_primary(candidates: list[dict[str, Any]]) -> l
     return selected or [newest]
 
 
-def _anaphoric_primary_sort_key(candidate: Mapping[str, Any]) -> tuple[int, int, float, str]:
+def _anaphoric_primary_sort_key(candidate: Mapping[str, Any], *, query: str) -> tuple[int, int, float, str]:
     return (
-        _candidate_anaphoric_action_priority(candidate),
+        _candidate_anaphoric_action_priority(candidate, query=query),
         -_candidate_life_ts(candidate),
         -_coerce_score(candidate.get("score")),
         str(candidate.get("doc_id") or ""),
     )
 
 
-def _candidate_anaphoric_action_priority(candidate: Mapping[str, Any]) -> int:
+def _candidate_anaphoric_action_priority(candidate: Mapping[str, Any], *, query: str) -> int:
     if _candidate_store_id(candidate) == STORE_LIFE_MEMORY_COLLECTION:
+        requested_item_count = _small_anaphoric_item_count(query)
+        if requested_item_count > 0:
+            metadata = _coerce_mapping(candidate.get("metadata"))
+            item_count = _coerce_int(metadata.get("item_count"))
+            scope_key = str(metadata.get("scope_key") or "").strip()
+            if item_count == requested_item_count:
+                return 0
+            if scope_key == "recent" and item_count > requested_item_count:
+                return 6
+            if item_count > requested_item_count:
+                return 3
         return 0
     action = _candidate_life_action(candidate)
     if action in {"lightnovel_recommendation_delivery", "recommendation_delivery"} or action.endswith("_recommendation_delivery"):
@@ -835,6 +846,22 @@ def _candidate_anaphoric_action_priority(candidate: Mapping[str, Any]) -> int:
     if action in {"lightnovel_recommendation_deep_review", "recommendation_deep_review"} or action.endswith("_deep_review"):
         return 8
     return 4
+
+
+def _small_anaphoric_item_count(query: str) -> int:
+    value = str(query or "")
+    if re.search(r"(?:三|3)(?:本|部|个)", value):
+        return 3
+    if re.search(r"(?:两|二|2)(?:本|部|个)", value):
+        return 2
+    return 0
+
+
+def _coerce_int(value: Any, *, default: int = 0) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return int(default)
 
 
 def _candidate_life_action(candidate: Mapping[str, Any]) -> str:
@@ -1186,8 +1213,9 @@ def _filter_recall_routes(
 def _extract_candidate_ts_ms(candidate: Mapping[str, Any]) -> int | None:
     candidate_ts_keys = (
         "ts_ms",
-        "created_ts_ms",
         "updated_ts_ms",
+        "last_touched_ts_ms",
+        "created_ts_ms",
         "memory_ts_ms",
         "event_ts_ms",
     )

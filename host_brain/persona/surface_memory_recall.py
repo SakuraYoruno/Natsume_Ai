@@ -215,6 +215,11 @@ class SurfaceMemoryRecallPlan:
     temporal_scope: str = ""
     target_domains: tuple[str, ...] = ()
     validation_requirements: tuple[str, ...] = ()
+    recall_contract_id: str = ""
+    primary_memory_layer: str = ""
+    expected_memory_layers: tuple[str, ...] = ()
+    min_collection_items: int = 0
+    answer_obligations: tuple[str, ...] = ()
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -231,6 +236,11 @@ class SurfaceMemoryRecallPlan:
             "temporal_scope": self.temporal_scope,
             "target_domains": list(self.target_domains),
             "validation_requirements": list(self.validation_requirements),
+            "recall_contract_id": self.recall_contract_id,
+            "primary_memory_layer": self.primary_memory_layer,
+            "expected_memory_layers": list(self.expected_memory_layers),
+            "min_collection_items": int(self.min_collection_items or 0),
+            "answer_obligations": list(self.answer_obligations),
         }
 
 
@@ -274,6 +284,11 @@ def plan_surface_memory_recall(
             temporal_scope=life_query_plan.temporal_scope,
             target_domains=life_query_plan.target_domains,
             validation_requirements=life_query_plan.validation_requirements,
+            recall_contract_id=life_query_plan.recall_contract_id,
+            primary_memory_layer=life_query_plan.primary_memory_layer,
+            expected_memory_layers=life_query_plan.expected_memory_layers,
+            min_collection_items=life_query_plan.min_collection_items,
+            answer_obligations=life_query_plan.answer_obligations,
         )
     if _should_skip_low_signal_recall(user_message=user_message, task_mode=task_mode, has_recall_hint=has_recall_hint):
         return SurfaceMemoryRecallPlan(
@@ -286,6 +301,11 @@ def plan_surface_memory_recall(
             temporal_scope=life_query_plan.temporal_scope,
             target_domains=life_query_plan.target_domains,
             validation_requirements=life_query_plan.validation_requirements,
+            recall_contract_id=life_query_plan.recall_contract_id,
+            primary_memory_layer=life_query_plan.primary_memory_layer,
+            expected_memory_layers=life_query_plan.expected_memory_layers,
+            min_collection_items=life_query_plan.min_collection_items,
+            answer_obligations=life_query_plan.answer_obligations,
         )
     if task_mode in _MEMORY_WRITE_TASKS or _looks_like_memory_write(user_message):
         return SurfaceMemoryRecallPlan(
@@ -298,6 +318,11 @@ def plan_surface_memory_recall(
             temporal_scope=life_query_plan.temporal_scope,
             target_domains=life_query_plan.target_domains,
             validation_requirements=life_query_plan.validation_requirements,
+            recall_contract_id=life_query_plan.recall_contract_id,
+            primary_memory_layer=life_query_plan.primary_memory_layer,
+            expected_memory_layers=life_query_plan.expected_memory_layers,
+            min_collection_items=life_query_plan.min_collection_items,
+            answer_obligations=life_query_plan.answer_obligations,
         )
 
     if life_query_plan.should_recall and life_query_plan.reason == "collection_memory_recall":
@@ -315,6 +340,11 @@ def plan_surface_memory_recall(
             temporal_scope=life_query_plan.temporal_scope,
             target_domains=life_query_plan.target_domains,
             validation_requirements=life_query_plan.validation_requirements,
+            recall_contract_id=life_query_plan.recall_contract_id,
+            primary_memory_layer=life_query_plan.primary_memory_layer,
+            expected_memory_layers=life_query_plan.expected_memory_layers,
+            min_collection_items=life_query_plan.min_collection_items,
+            answer_obligations=life_query_plan.answer_obligations,
         )
 
     if anaphoric_selection:
@@ -338,6 +368,11 @@ def plan_surface_memory_recall(
             temporal_scope=life_query_plan.temporal_scope,
             target_domains=life_query_plan.target_domains,
             validation_requirements=life_query_plan.validation_requirements,
+            recall_contract_id=life_query_plan.recall_contract_id,
+            primary_memory_layer=life_query_plan.primary_memory_layer,
+            expected_memory_layers=life_query_plan.expected_memory_layers,
+            min_collection_items=life_query_plan.min_collection_items,
+            answer_obligations=life_query_plan.answer_obligations,
         )
 
     if task_mode in _RECALL_TASKS or has_recall_hint:
@@ -361,6 +396,11 @@ def plan_surface_memory_recall(
             temporal_scope=life_query_plan.temporal_scope,
             target_domains=life_query_plan.target_domains,
             validation_requirements=life_query_plan.validation_requirements,
+            recall_contract_id=life_query_plan.recall_contract_id,
+            primary_memory_layer=life_query_plan.primary_memory_layer,
+            expected_memory_layers=life_query_plan.expected_memory_layers,
+            min_collection_items=life_query_plan.min_collection_items,
+            answer_obligations=life_query_plan.answer_obligations,
         )
     if task_mode in _TECH_TASKS:
         return SurfaceMemoryRecallPlan(
@@ -377,6 +417,11 @@ def plan_surface_memory_recall(
             temporal_scope=life_query_plan.temporal_scope,
             target_domains=life_query_plan.target_domains,
             validation_requirements=life_query_plan.validation_requirements,
+            recall_contract_id=life_query_plan.recall_contract_id,
+            primary_memory_layer=life_query_plan.primary_memory_layer,
+            expected_memory_layers=life_query_plan.expected_memory_layers,
+            min_collection_items=life_query_plan.min_collection_items,
+            answer_obligations=life_query_plan.answer_obligations,
         )
     if task_mode in _EMOTION_TASKS:
         return SurfaceMemoryRecallPlan(
@@ -393,6 +438,11 @@ def plan_surface_memory_recall(
             temporal_scope=life_query_plan.temporal_scope,
             target_domains=life_query_plan.target_domains,
             validation_requirements=life_query_plan.validation_requirements,
+            recall_contract_id=life_query_plan.recall_contract_id,
+            primary_memory_layer=life_query_plan.primary_memory_layer,
+            expected_memory_layers=life_query_plan.expected_memory_layers,
+            min_collection_items=life_query_plan.min_collection_items,
+            answer_obligations=life_query_plan.answer_obligations,
         )
     if task_mode in _IDENTITY_TASKS:
         return SurfaceMemoryRecallPlan(
@@ -409,6 +459,11 @@ def plan_surface_memory_recall(
             temporal_scope=life_query_plan.temporal_scope,
             target_domains=life_query_plan.target_domains,
             validation_requirements=life_query_plan.validation_requirements,
+            recall_contract_id=life_query_plan.recall_contract_id,
+            primary_memory_layer=life_query_plan.primary_memory_layer,
+            expected_memory_layers=life_query_plan.expected_memory_layers,
+            min_collection_items=life_query_plan.min_collection_items,
+            answer_obligations=life_query_plan.answer_obligations,
         )
     return SurfaceMemoryRecallPlan(
         should_recall=False,
@@ -420,6 +475,11 @@ def plan_surface_memory_recall(
         temporal_scope=life_query_plan.temporal_scope,
         target_domains=life_query_plan.target_domains,
         validation_requirements=life_query_plan.validation_requirements,
+        recall_contract_id=life_query_plan.recall_contract_id,
+        primary_memory_layer=life_query_plan.primary_memory_layer,
+        expected_memory_layers=life_query_plan.expected_memory_layers,
+        min_collection_items=life_query_plan.min_collection_items,
+        answer_obligations=life_query_plan.answer_obligations,
     )
 
 
@@ -470,6 +530,11 @@ def recall_surface_memory_for_context(
         temporal_scope=plan.temporal_scope,
         query_kind=plan.query_kind,
         target_domains=plan.target_domains,
+        recall_contract_id=plan.recall_contract_id,
+        primary_memory_layer=plan.primary_memory_layer,
+        expected_memory_layers=plan.expected_memory_layers,
+        min_collection_items=plan.min_collection_items,
+        answer_obligations=plan.answer_obligations,
         fail_soft=fail_soft,
     )
     return replace(
@@ -505,6 +570,11 @@ def recall_surface_memory_packet(
     temporal_scope: str = "",
     query_kind: str = "",
     target_domains: Sequence[str] | None = None,
+    recall_contract_id: str = "",
+    primary_memory_layer: str = "",
+    expected_memory_layers: Sequence[str] | None = None,
+    min_collection_items: int = 0,
+    answer_obligations: Sequence[str] | None = None,
     fail_soft: bool = True,
 ) -> SurfaceMemoryRecallPacket:
     try:
@@ -545,6 +615,11 @@ def recall_surface_memory_packet(
         temporal_scope=temporal_scope,
         query_kind=query_kind,
         target_domains=target_domains,
+        recall_contract_id=recall_contract_id,
+        primary_memory_layer=primary_memory_layer,
+        expected_memory_layers=expected_memory_layers,
+        min_collection_items=min_collection_items,
+        answer_obligations=answer_obligations,
     )
 
 
@@ -558,13 +633,24 @@ def build_surface_memory_recall_packet(
     temporal_scope: str = "",
     query_kind: str = "",
     target_domains: Sequence[str] | None = None,
+    recall_contract_id: str = "",
+    primary_memory_layer: str = "",
+    expected_memory_layers: Sequence[str] | None = None,
+    min_collection_items: int = 0,
+    answer_obligations: Sequence[str] | None = None,
 ) -> SurfaceMemoryRecallPacket:
     output = _recall_output(recall_result)
     candidates = _candidate_list(output)
-    candidates_for_selection = _filter_candidates_for_temporal_scope(
+    candidates_for_temporal_scope = _filter_candidates_for_temporal_scope(
         candidates,
         temporal_scope=temporal_scope,
         ts_ms=_coerce_int(output.get("ts_ms")),
+    )
+    candidates_for_selection = _filter_candidates_for_target_domains(
+        candidates_for_temporal_scope,
+        target_domains=target_domains,
+        query_kind=query_kind,
+        primary_memory_layer=primary_memory_layer,
     )
     rows = _select_fact_rows(
         candidates_for_selection,
@@ -599,6 +685,11 @@ def build_surface_memory_recall_packet(
         temporal_scope=temporal_scope,
         query_kind=query_kind,
         target_domains=target_domains,
+        recall_contract_id=recall_contract_id,
+        primary_memory_layer=primary_memory_layer,
+        expected_memory_layers=expected_memory_layers,
+        min_collection_items=min_collection_items,
+        answer_obligations=answer_obligations,
     )
     validation_failed = bool(validation_trace.get("required")) and not bool(validation_trace.get("passed"))
     trace = {
@@ -607,11 +698,17 @@ def build_surface_memory_recall_packet(
         "route_count": len(route_ids),
         "route_error_count": len(list(output.get("route_errors") or [])),
         "candidate_count_before_temporal_filter": len(candidates),
-        "candidate_count_after_temporal_filter": len(candidates_for_selection),
+        "candidate_count_after_temporal_filter": len(candidates_for_temporal_scope),
+        "candidate_count_after_domain_filter": len(candidates_for_selection),
         "selected_fact_count": len(rows),
         "selected_user_fact_count": len(memory_rows),
         "selected_bond_count": len(relationship_rows),
         "store_counts": dict(sorted(store_counts.items())),
+        "recall_contract_id": _clean_text(recall_contract_id),
+        "primary_memory_layer": _clean_text(primary_memory_layer),
+        "expected_memory_layers": list(_unique(list(expected_memory_layers or []))),
+        "min_collection_items": max(0, _coerce_int(min_collection_items)),
+        "answer_obligations": list(_unique(list(answer_obligations or []))),
     }
     selected_collection_items = _selected_collection_items_for_trace(
         candidates=candidates_for_selection,
@@ -664,6 +761,11 @@ def _build_recall_validation_trace(
     temporal_scope: str,
     query_kind: str,
     target_domains: Sequence[str] | None,
+    recall_contract_id: str,
+    primary_memory_layer: str,
+    expected_memory_layers: Sequence[str] | None,
+    min_collection_items: int,
+    answer_obligations: Sequence[str] | None,
 ) -> dict[str, Any]:
     required = [
         _clean_text(item)
@@ -682,6 +784,11 @@ def _build_recall_validation_trace(
         "query_kind": _clean_text(query_kind),
         "temporal_scope": _clean_text(temporal_scope),
         "target_domains": list(_unique(list(target_domains or []))),
+        "recall_contract_id": _clean_text(recall_contract_id),
+        "primary_memory_layer": _clean_text(primary_memory_layer),
+        "expected_memory_layers": list(_unique(list(expected_memory_layers or []))),
+        "min_collection_items": max(0, _coerce_int(min_collection_items)),
+        "answer_obligations": list(_unique(list(answer_obligations or []))),
         "candidate_store_counts": dict(sorted(candidate_store_counts.items())),
         "selected_store_counts": dict(sorted(selected_store_counts.items())),
     }
@@ -698,6 +805,7 @@ def _build_recall_validation_trace(
             output=output,
             query=query,
             temporal_scope=temporal_scope,
+            min_collection_items=min_collection_items,
         )
         checks.append({"name": requirement, "passed": passed, "detail": detail})
         if not passed:
@@ -716,6 +824,7 @@ def _evaluate_recall_validation_requirement(
     output: Mapping[str, Any],
     query: Any,
     temporal_scope: str,
+    min_collection_items: int = 0,
 ) -> tuple[bool, str]:
     if requirement == "scope_match":
         expected = _expected_collection_scope_key(temporal_scope, ts_ms=_coerce_int(output.get("ts_ms")))
@@ -734,6 +843,16 @@ def _evaluate_recall_validation_requirement(
         ]
         passed = any(count > 0 for count in item_counts)
         return passed, f"collection item counts={item_counts}"
+    if requirement == "collection_item_min_count":
+        item_counts = _candidate_collection_item_counts(candidates)
+        required_count = max(1, _coerce_int(min_collection_items))
+        passed = any(count >= required_count for count in item_counts)
+        return passed, f"required>={required_count}, collection item counts={item_counts}"
+    if requirement == "collection_item_exact_count":
+        item_counts = _candidate_collection_item_counts(candidates)
+        required_count = max(1, _coerce_int(min_collection_items))
+        passed = any(count == required_count for count in item_counts)
+        return passed, f"required=={required_count}, collection item counts={item_counts}"
     if requirement == "evidence_refs_present":
         refs = _candidate_evidence_refs(candidates)
         if not refs:
@@ -826,6 +945,67 @@ def _filter_candidates_for_temporal_scope(
     return matched
 
 
+def _filter_candidates_for_target_domains(
+    candidates: Sequence[Mapping[str, Any]],
+    *,
+    target_domains: Sequence[str] | None,
+    query_kind: str,
+    primary_memory_layer: str,
+) -> list[dict[str, Any]]:
+    rows = [dict(candidate) for candidate in candidates if isinstance(candidate, Mapping)]
+    domains = _expanded_target_domains(target_domains)
+    if not rows or not domains:
+        return rows
+    should_filter = (
+        _clean_text(primary_memory_layer) == "life_memory_collection"
+        or _clean_text(query_kind) in {"anaphoric_selection", "collection_summary"}
+    )
+    if not should_filter:
+        return rows
+    matched: list[dict[str, Any]] = []
+    for candidate in rows:
+        candidate_domains = _candidate_domains(candidate)
+        if not candidate_domains or candidate_domains.intersection(domains):
+            matched.append(candidate)
+    return matched or rows
+
+
+def _expanded_target_domains(target_domains: Sequence[str] | None) -> set[str]:
+    domains = {_clean_text(item) for item in list(target_domains or []) if _clean_text(item)}
+    if "lightnovel_recommendation" in domains:
+        domains.add("recommendation")
+    if "recommendation" in domains:
+        domains.add("lightnovel_recommendation")
+    return domains
+
+
+def _candidate_domains(candidate: Mapping[str, Any]) -> set[str]:
+    metadata = _candidate_metadata(candidate)
+    domains: set[str] = set()
+    for key in ("domain", "recommendation_domain", "content_domain", "target_domain", "memory_domain"):
+        value = _clean_text(metadata.get(key) or candidate.get(key))
+        if value:
+            domains.add(value)
+    action = _clean_text(metadata.get("action") or metadata.get("action_kind") or candidate.get("action")).lower()
+    text = " ".join(
+        _clean_text(value).lower()
+        for value in (
+            action,
+            metadata.get("collection_kind"),
+            metadata.get("intent"),
+            candidate.get("text"),
+            candidate.get("snippet"),
+        )
+    )
+    if "lightnovel" in text or "轻小说" in text or "lightnovel.fun" in text:
+        domains.update({"lightnovel_recommendation", "recommendation"})
+    elif "recommendation" in text or "推荐" in text:
+        domains.add("recommendation")
+    if any(token in text for token in ("failure", "failed", "timeout", "失败", "异常", "报错")):
+        domains.add("failure")
+    return domains
+
+
 def _candidate_scope_keys(candidates: Sequence[Mapping[str, Any]]) -> list[str]:
     return _unique(
         [
@@ -902,6 +1082,41 @@ def _candidate_evidence_refs(candidates: Sequence[Mapping[str, Any]]) -> list[st
         ):
             refs.extend(_coerce_sequence(value))
     return _unique(refs)
+
+
+def _candidate_collection_item_counts(candidates: Sequence[Mapping[str, Any]]) -> list[int]:
+    counts: list[int] = []
+    for candidate in candidates:
+        store_id = _candidate_store_id(candidate)
+        if store_id not in {"life_memory_collection", "life_episode"}:
+            continue
+        metadata = _candidate_metadata(candidate)
+        item_count = _coerce_int(metadata.get("item_count"))
+        for key in ("items", "selected_recommendations", "recommendations", "selected_items", "delivered_items"):
+            items = metadata.get(key)
+            if isinstance(items, Sequence) and not isinstance(items, (str, bytes, bytearray)):
+                item_count = max(item_count, len(items))
+        item_count = max(item_count, _item_count_from_candidate_text(candidate))
+        if item_count > 0:
+            counts.append(item_count)
+    return counts
+
+
+def _item_count_from_candidate_text(candidate: Mapping[str, Any]) -> int:
+    text = _clean_text(candidate.get("text") or candidate.get("snippet"))
+    if not text:
+        return 0
+    match = re.search(r"(?:推荐(?:了|过)?|记录)\s*(\d+|三|两|二|十几)\s*(?:本|部|个|条目)", text)
+    if not match:
+        return 0
+    token = match.group(1)
+    if token == "十几":
+        return 10
+    if token == "三":
+        return 3
+    if token in {"两", "二"}:
+        return 2
+    return _coerce_int(token)
 
 
 def _candidate_source_refs(candidates: Sequence[Mapping[str, Any]]) -> list[str]:
