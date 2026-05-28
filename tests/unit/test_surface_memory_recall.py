@@ -864,6 +864,7 @@ def test_recall_surface_memory_for_context_attaches_validation_receipt_for_colle
     receipt = dict(dict(packet.trace or {})["recall_receipt"])
     need = dict(dict(packet.trace or {})["recall_need"])
     coverage = dict(dict(packet.trace or {})["recall_coverage"])
+    readiness = dict(dict(packet.trace or {})["recall_answer_readiness"])
     assert validation["passed"] is True
     assert validation["missing"] == []
     assert {item["name"] for item in validation["checks"]} == {
@@ -899,6 +900,13 @@ def test_recall_surface_memory_for_context_attaches_validation_receipt_for_colle
     assert coverage["dimensions"]["item_count"] == 1.0
     assert coverage["selected_item_count"] == 3
     assert dict(packet.trace or {})["coverage_score"] == 1.0
+    assert dict(packet.trace or {})["answer_ready"] is True
+    assert readiness["schema"] == "Natsume.surface_recall_answer_readiness.v1"
+    assert readiness["status"] == "READY"
+    assert readiness["ready_to_answer"] is True
+    assert readiness["response_mode"] == "answer_from_collection_memory"
+    assert readiness["selected_item_count"] == 3
+    assert readiness["min_collection_items"] == 3
 
 
 def test_recall_surface_memory_validation_flags_wrong_date_collection_scope() -> None:
@@ -949,6 +957,7 @@ def test_recall_surface_memory_validation_flags_wrong_date_collection_scope() ->
     validation = dict(dict(packet.trace or {})["validation"])
     receipt = dict(dict(packet.trace or {})["recall_receipt"])
     coverage = dict(dict(packet.trace or {})["recall_coverage"])
+    readiness = dict(dict(packet.trace or {})["recall_answer_readiness"])
     assert validation["passed"] is False
     assert "scope_match" in validation["missing"]
     scope_check = next(item for item in validation["checks"] if item["name"] == "scope_match")
@@ -967,6 +976,12 @@ def test_recall_surface_memory_validation_flags_wrong_date_collection_scope() ->
     assert coverage["passed"] is False
     assert coverage["score"] < 0.66
     assert "scope_match" in coverage["missing"]
+    assert dict(packet.trace or {})["answer_ready"] is False
+    assert readiness["status"] == "NOT_READY"
+    assert readiness["ready_to_answer"] is False
+    assert readiness["response_mode"] == "state_recall_validation_failed"
+    assert "validation_failed" in readiness["reasons"]
+    assert "scope_match" in readiness["missing"]
 
 
 def test_recall_surface_memory_coverage_failure_drops_partial_collection_hit() -> None:
@@ -1010,6 +1025,7 @@ def test_recall_surface_memory_coverage_failure_drops_partial_collection_hit() -
     )
 
     coverage = dict(dict(packet.trace or {})["recall_coverage"])
+    readiness = dict(dict(packet.trace or {})["recall_answer_readiness"])
     assert coverage["passed"] is False
     assert coverage["score"] < 0.66
     assert dict(packet.trace or {})["coverage_failed"] is True
@@ -1019,6 +1035,10 @@ def test_recall_surface_memory_coverage_failure_drops_partial_collection_hit() -
     assert packet.degraded is True
     assert packet.reason_code == SURFACE_MEMORY_RECALL_COVERAGE_FAILED
     assert any("召回覆盖度不足" in item for item in packet.must_not_do)
+    assert readiness["status"] == "NOT_READY"
+    assert readiness["response_mode"] == "state_recall_coverage_missing"
+    assert "coverage_failed" in readiness["reasons"]
+    assert "insufficient_item_count" in readiness["reasons"]
 
 
 def test_selection_recall_requires_detail_anchor_for_deep_quality_judgment() -> None:
@@ -1070,6 +1090,7 @@ def test_selection_recall_requires_detail_anchor_for_deep_quality_judgment() -> 
 
     receipt = dict(dict(packet.trace or {})["recall_receipt"])
     coverage = dict(dict(packet.trace or {})["recall_coverage"])
+    readiness = dict(dict(packet.trace or {})["recall_answer_readiness"])
     assert receipt["detail_evidence"]["required"] is True
     assert receipt["detail_evidence"]["basis"] == "missing_detail_evidence"
     assert coverage["passed"] is False
@@ -1077,6 +1098,11 @@ def test_selection_recall_requires_detail_anchor_for_deep_quality_judgment() -> 
     assert dict(packet.trace or {})["coverage_failed"] is True
     assert packet.facts == ()
     assert packet.reason_code == SURFACE_MEMORY_RECALL_COVERAGE_FAILED
+    assert readiness["status"] == "NOT_READY"
+    assert readiness["ready_to_answer"] is False
+    assert readiness["response_mode"] == "fetch_or_request_detail_evidence"
+    assert readiness["surface_action"] == "fetch_more_evidence"
+    assert "missing_detail_evidence" in readiness["reasons"]
 
 
 def test_selection_recall_accepts_detail_anchor_before_deep_review_fetch() -> None:
@@ -1127,6 +1153,7 @@ def test_selection_recall_accepts_detail_anchor_before_deep_review_fetch() -> No
 
     receipt = dict(dict(packet.trace or {})["recall_receipt"])
     coverage = dict(dict(packet.trace or {})["recall_coverage"])
+    readiness = dict(dict(packet.trace or {})["recall_answer_readiness"])
     assert packet.reason_code is None
     assert packet.facts
     assert receipt["selected_item_count"] == 2
@@ -1134,6 +1161,10 @@ def test_selection_recall_accepts_detail_anchor_before_deep_review_fetch() -> No
     assert receipt["detail_evidence"]["ready_for_deep_review"] is True
     assert coverage["passed"] is True
     assert coverage["dimensions"]["detail_evidence"] == 0.75
+    assert readiness["status"] == "READY"
+    assert readiness["ready_to_answer"] is True
+    assert readiness["response_mode"] == "answer_from_collection_memory"
+    assert readiness["detail_evidence"]["basis"] == "detail_anchor"
 
 
 def test_generic_evidence_review_requires_body_or_detail_anchor() -> None:
@@ -1176,12 +1207,16 @@ def test_generic_evidence_review_requires_body_or_detail_anchor() -> None:
 
     receipt = dict(dict(packet.trace or {})["recall_receipt"])
     coverage = dict(dict(packet.trace or {})["recall_coverage"])
+    readiness = dict(dict(packet.trace or {})["recall_answer_readiness"])
     assert receipt["detail_evidence"]["required"] is True
     assert receipt["detail_evidence"]["basis"] == "missing_detail_evidence"
     assert coverage["passed"] is False
     assert "detail_evidence" in coverage["missing"]
     assert packet.facts == ()
     assert packet.reason_code == SURFACE_MEMORY_RECALL_COVERAGE_FAILED
+    assert readiness["status"] == "NOT_READY"
+    assert readiness["response_mode"] == "fetch_or_request_detail_evidence"
+    assert "missing_detail_evidence" in readiness["reasons"]
 
 
 def test_generic_evidence_review_filters_wrong_domain_candidates() -> None:
@@ -1303,12 +1338,17 @@ def test_generic_evidence_review_accepts_body_excerpt_as_deep_evidence() -> None
 
     receipt = dict(dict(packet.trace or {})["recall_receipt"])
     coverage = dict(dict(packet.trace or {})["recall_coverage"])
+    readiness = dict(dict(packet.trace or {})["recall_answer_readiness"])
     assert packet.reason_code is None
     assert packet.facts
     assert receipt["detail_evidence"]["basis"] == "body_evidence"
     assert receipt["detail_evidence"]["body_item_count"] == 1
     assert coverage["passed"] is True
     assert coverage["dimensions"]["detail_evidence"] == 1.0
+    assert readiness["status"] == "READY"
+    assert readiness["ready_to_answer"] is True
+    assert readiness["response_mode"] == "answer_from_evidence"
+    assert readiness["detail_evidence"]["basis"] == "body_evidence"
 
 
 def test_collection_scope_query_filters_self_echo_when_many_books_requested() -> None:

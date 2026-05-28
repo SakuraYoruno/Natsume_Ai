@@ -778,6 +778,19 @@ def build_surface_memory_recall_packet(
     )
     trace["coverage_score"] = trace["recall_coverage"]["score"]
     coverage_failed = (not validation_failed) and not bool(trace["recall_coverage"].get("passed", True))
+    answer_readiness = _build_recall_answer_readiness_trace(
+        recall_need=recall_need,
+        recall_receipt=trace["recall_receipt"],
+        recall_coverage=trace["recall_coverage"],
+        validation_trace=validation_trace,
+        selected_fact_count=len(rows),
+        selected_user_fact_count=len(memory_rows),
+        selected_bond_count=len(relationship_rows),
+        validation_failed=validation_failed,
+        coverage_failed=coverage_failed,
+    )
+    trace["recall_answer_readiness"] = answer_readiness
+    trace["answer_ready"] = bool(answer_readiness.get("ready_to_answer"))
     if validation_failed or coverage_failed:
         trace["validation_failed"] = bool(validation_failed)
         if coverage_failed:
@@ -1016,6 +1029,132 @@ def _build_recall_coverage_trace(
         "detail_anchor_item_count": detail_anchor_count,
         "selected_store_counts": dict(sorted(selected_store_counts.items())),
         "candidate_store_counts": dict(sorted(candidate_store_counts.items())),
+    }
+
+
+def _build_recall_answer_readiness_trace(
+    *,
+    recall_need: Mapping[str, Any],
+    recall_receipt: Mapping[str, Any],
+    recall_coverage: Mapping[str, Any],
+    validation_trace: Mapping[str, Any],
+    selected_fact_count: int,
+    selected_user_fact_count: int,
+    selected_bond_count: int,
+    validation_failed: bool,
+    coverage_failed: bool,
+) -> dict[str, Any]:
+    """Answer whether the recalled memory is sufficient for this specific turn."""
+
+    need_type = _clean_text(recall_need.get("need_type"))
+    evidence_depth = _clean_text(recall_need.get("evidence_depth"))
+    detail_evidence = dict(recall_coverage.get("detail_evidence") or {})
+    detail_required = evidence_depth == "detail_or_body_evidence" or bool(detail_evidence.get("required"))
+    detail_ready = (not detail_required) or bool(detail_evidence.get("ready_for_deep_review"))
+    coverage_passed = bool(recall_coverage.get("passed"))
+    validation_passed = bool(validation_trace.get("passed", True))
+    selected_items = max(0, _coerce_int(recall_coverage.get("selected_item_count")))
+    required_items = max(0, _coerce_int(recall_coverage.get("min_collection_items")))
+    required_count = max(0, _coerce_int(recall_coverage.get("required_count")))
+    passed_required_count = max(0, _coerce_int(recall_coverage.get("passed_required_count")))
+    missing = list(
+        _unique(
+            [
+                *list(validation_trace.get("missing") or []),
+                *list(recall_coverage.get("missing") or []),
+            ]
+        )
+    )
+    reasons: list[str] = []
+    response_mode = "answer_from_memory"
+    status = "READY"
+    surface_action = "answer"
+    recommended_rule = "可以自然承接，但只能使用已召回且通过校验的事实回答。"
+
+    if validation_failed or not validation_passed:
+        status = "NOT_READY"
+        response_mode = "state_recall_validation_failed"
+        surface_action = "say_missing_memory"
+        reasons.append("validation_failed")
+        recommended_rule = "不要把未通过时间、对象或证据校验的候选当事实；需要说明没有找到足够可靠的记忆。"
+    elif coverage_failed or not coverage_passed:
+        status = "NOT_READY"
+        reasons.append("coverage_failed")
+        surface_action = "say_missing_memory"
+        response_mode = "state_recall_coverage_missing"
+        recommended_rule = "不要把局部命中的候选当完整记忆；需要说明召回不足。"
+        if detail_required and not detail_ready:
+            response_mode = "fetch_or_request_detail_evidence"
+            surface_action = "fetch_more_evidence"
+            reasons.append("missing_detail_evidence")
+            recommended_rule = "当前记忆只够确认发生过相关事件，不够做具体判断；需要先获取详情、正文或感知证据。"
+    elif max(0, _coerce_int(selected_user_fact_count)) > 0:
+        if need_type == "evidence_review":
+            response_mode = "answer_from_evidence"
+            recommended_rule = "可以基于召回的证据锚点回答；涉及质量判断时只引用已有详情或正文证据。"
+        elif need_type in {"collection", "collection_selection", "entity_or_collection_selection"}:
+            response_mode = "answer_from_collection_memory"
+            recommended_rule = "可以围绕召回到的集合、条目和证据锚点回答；不要补不存在的条目。"
+        elif need_type in {"episode_event", "failure_episode", "self_change_episode", "correction_chain"}:
+            response_mode = "answer_from_episode_memory"
+            recommended_rule = "可以基于召回到的 episode 事实回答；纠错链以最新可信状态为准。"
+    elif max(0, _coerce_int(selected_bond_count)) > 0:
+        status = "PARTIAL"
+        response_mode = "answer_with_relationship_context"
+        surface_action = "answer_cautiously"
+        reasons.append("relationship_only_no_factual_memory")
+        recommended_rule = "只能用关系/风格线索承接，不能声称记得具体事实。"
+    else:
+        status = "NOT_READY"
+        response_mode = "state_memory_missing"
+        surface_action = "say_missing_memory"
+        reasons.append("no_selected_memory")
+        recommended_rule = "没有可用记忆时不要假装记得；应直接说明没有找到。"
+
+    if detail_required and not detail_ready and "missing_detail_evidence" not in reasons:
+        reasons.append("missing_detail_evidence")
+    if required_items > 0 and selected_items < required_items and "insufficient_item_count" not in reasons:
+        reasons.append("insufficient_item_count")
+    if selected_fact_count <= 0 and "no_selected_memory" not in reasons:
+        reasons.append("no_selected_memory")
+
+    ready_to_answer = status == "READY"
+    return {
+        "schema": "Natsume.surface_recall_answer_readiness.v1",
+        "status": status,
+        "ready_to_answer": ready_to_answer,
+        "response_mode": response_mode,
+        "surface_action": surface_action,
+        "recommended_surface_rule": recommended_rule,
+        "reasons": list(_unique(reasons)),
+        "need_type": need_type,
+        "recall_contract_id": _clean_text(recall_need.get("recall_contract_id")),
+        "query_kind": _clean_text(recall_need.get("query_kind")),
+        "temporal_scope": _clean_text(recall_need.get("temporal_scope")),
+        "evidence_depth": evidence_depth,
+        "coverage_score": round(_coerce_float(recall_coverage.get("score")), 6),
+        "coverage_passed": coverage_passed,
+        "validation_passed": validation_passed,
+        "validation_failed": bool(validation_failed),
+        "coverage_failed": bool(coverage_failed),
+        "missing": missing[:12],
+        "selected_fact_count": max(0, _coerce_int(selected_fact_count)),
+        "selected_user_fact_count": max(0, _coerce_int(selected_user_fact_count)),
+        "selected_bond_count": max(0, _coerce_int(selected_bond_count)),
+        "selected_item_count": selected_items,
+        "min_collection_items": required_items,
+        "required_count": required_count,
+        "passed_required_count": passed_required_count,
+        "detail_evidence": {
+            "required": detail_required,
+            "ready_for_deep_review": bool(detail_evidence.get("ready_for_deep_review")),
+            "basis": _clean_text(detail_evidence.get("basis")),
+            "body_item_count": max(0, _coerce_int(detail_evidence.get("body_item_count"))),
+            "anchor_item_count": max(0, _coerce_int(detail_evidence.get("anchor_item_count"))),
+            "structured_item_count": max(0, _coerce_int(detail_evidence.get("structured_item_count"))),
+        },
+        "receipt_decision": _clean_text(recall_receipt.get("decision")),
+        "receipt_selection_basis": list(_unique(list(recall_receipt.get("selection_basis") or [])))[:12],
     }
 
 

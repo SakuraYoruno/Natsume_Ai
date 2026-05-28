@@ -444,6 +444,45 @@ def _surface_memory_trace_for_audit(summary: Mapping[str, Any] | None) -> dict[s
             }
         out["coverage_score"] = out["recall_coverage"]["score"]
 
+    readiness = _coerce_trace_mapping(trace.get("recall_answer_readiness"))
+    if readiness:
+        detail = _coerce_trace_mapping(readiness.get("detail_evidence"))
+        out["recall_answer_readiness"] = {
+            "schema": str(readiness.get("schema") or ""),
+            "status": str(readiness.get("status") or ""),
+            "ready_to_answer": bool(readiness.get("ready_to_answer")),
+            "response_mode": str(readiness.get("response_mode") or ""),
+            "surface_action": str(readiness.get("surface_action") or ""),
+            "reasons": [str(item) for item in list(readiness.get("reasons") or [])[:8]],
+            "need_type": str(readiness.get("need_type") or ""),
+            "recall_contract_id": str(readiness.get("recall_contract_id") or ""),
+            "query_kind": str(readiness.get("query_kind") or ""),
+            "temporal_scope": str(readiness.get("temporal_scope") or ""),
+            "evidence_depth": str(readiness.get("evidence_depth") or ""),
+            "coverage_score": _safe_float(readiness.get("coverage_score"), default=0.0),
+            "coverage_passed": bool(readiness.get("coverage_passed")),
+            "validation_passed": bool(readiness.get("validation_passed")),
+            "validation_failed": bool(readiness.get("validation_failed")),
+            "coverage_failed": bool(readiness.get("coverage_failed")),
+            "missing": [str(item) for item in list(readiness.get("missing") or [])[:8]],
+            "selected_fact_count": _safe_int(readiness.get("selected_fact_count"), default=0),
+            "selected_user_fact_count": _safe_int(readiness.get("selected_user_fact_count"), default=0),
+            "selected_bond_count": _safe_int(readiness.get("selected_bond_count"), default=0),
+            "selected_item_count": _safe_int(readiness.get("selected_item_count"), default=0),
+            "min_collection_items": _safe_int(readiness.get("min_collection_items"), default=0),
+            "required_count": _safe_int(readiness.get("required_count"), default=0),
+            "passed_required_count": _safe_int(readiness.get("passed_required_count"), default=0),
+        }
+        if detail:
+            out["recall_answer_readiness"]["detail_evidence"] = {
+                "required": bool(detail.get("required")),
+                "ready_for_deep_review": bool(detail.get("ready_for_deep_review")),
+                "basis": str(detail.get("basis") or ""),
+                "body_item_count": _safe_int(detail.get("body_item_count"), default=0),
+                "anchor_item_count": _safe_int(detail.get("anchor_item_count"), default=0),
+                "structured_item_count": _safe_int(detail.get("structured_item_count"), default=0),
+            }
+
     deep = _coerce_trace_mapping(trace.get("lightnovel_deep_review"))
     if deep:
         selected = _coerce_trace_mapping(deep.get("selected"))

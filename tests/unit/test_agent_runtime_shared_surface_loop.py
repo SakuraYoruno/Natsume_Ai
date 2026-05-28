@@ -119,6 +119,41 @@ def test_normalize_retrieval_summary_keeps_safe_surface_memory_trace() -> None:
                             "detail_refs": ["https://www.lightnovel.fun/cn/detail/1"],
                         },
                     },
+                    "recall_answer_readiness": {
+                        "schema": "Natsume.surface_recall_answer_readiness.v1",
+                        "status": "READY",
+                        "ready_to_answer": True,
+                        "response_mode": "answer_from_collection_memory",
+                        "surface_action": "answer",
+                        "reasons": [],
+                        "need_type": "collection_selection",
+                        "recall_contract_id": "anaphoric_selection",
+                        "query_kind": "anaphoric_selection",
+                        "temporal_scope": "current",
+                        "evidence_depth": "detail_or_body_evidence",
+                        "coverage_score": 1.0,
+                        "coverage_passed": True,
+                        "validation_passed": True,
+                        "validation_failed": False,
+                        "coverage_failed": False,
+                        "missing": [],
+                        "selected_fact_count": 3,
+                        "selected_user_fact_count": 3,
+                        "selected_bond_count": 0,
+                        "selected_item_count": 3,
+                        "min_collection_items": 3,
+                        "required_count": 5,
+                        "passed_required_count": 5,
+                        "detail_evidence": {
+                            "required": True,
+                            "ready_for_deep_review": True,
+                            "basis": "body_evidence",
+                            "body_item_count": 1,
+                            "anchor_item_count": 3,
+                            "structured_item_count": 3,
+                            "detail_refs": ["https://www.lightnovel.fun/cn/detail/1"],
+                        },
+                    },
                     "lightnovel_deep_review": {
                         "status": "OK",
                         "reason_code": "LIGHTNOVEL_DEEP_REVIEW_CACHE_HIT",
@@ -158,6 +193,19 @@ def test_normalize_retrieval_summary_keeps_safe_surface_memory_trace() -> None:
         "structured_item_count": 3,
     }
     assert trace["coverage_score"] == 1.0
+    assert trace["recall_answer_readiness"]["schema"] == "Natsume.surface_recall_answer_readiness.v1"
+    assert trace["recall_answer_readiness"]["status"] == "READY"
+    assert trace["recall_answer_readiness"]["ready_to_answer"] is True
+    assert trace["recall_answer_readiness"]["response_mode"] == "answer_from_collection_memory"
+    assert trace["recall_answer_readiness"]["selected_item_count"] == 3
+    assert trace["recall_answer_readiness"]["detail_evidence"] == {
+        "required": True,
+        "ready_for_deep_review": True,
+        "basis": "body_evidence",
+        "body_item_count": 1,
+        "anchor_item_count": 3,
+        "structured_item_count": 3,
+    }
     assert trace["lightnovel_deep_review"]["cached"] is True
     assert trace["lightnovel_deep_review"]["source_episode_id"] == "ep-cache"
     assert trace["lightnovel_deep_review"]["selected"] == {"index": 3, "title": "异世界皇女"}
