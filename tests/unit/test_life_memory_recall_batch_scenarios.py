@@ -161,10 +161,10 @@ def test_batch_recall_scenarios_route_to_the_right_memory_layer() -> None:
             {
                 "message": "还记得我说推荐格式要怎样吗？",
                 "expected_reason": "explicit_memory_recall",
-                "expected_kind": "explicit_memory",
+                "expected_kind": "preference_lookup",
                 "must_route": "surface_life_episode",
                 "must_contain": "简介后应该换行",
-                "must_not_contain": "供应商超时",
+                "must_not_contain": "5月28日推荐",
             },
         ]
 

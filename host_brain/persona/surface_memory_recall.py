@@ -1450,6 +1450,7 @@ def _select_fact_rows(
         return []
     rows = [_build_fact_row(item, max_chars_per_fact=max_chars_per_fact) for item in candidates]
     rows = [row for row in rows if row is not None]
+    rows = _filter_rows_for_preference_rule_query(rows, query=query)
     rows = _filter_rows_for_explicit_memory_query(rows, query=query)
     rows = _filter_rows_for_anaphoric_selection(rows, query=query)
     rows = _filter_rows_for_collection_scope(rows, query=query)
@@ -1503,6 +1504,22 @@ def _filter_rows_for_explicit_memory_query(
     if not _looks_like_explicit_memory_content_query(query_text):
         return list(rows)
     preferred = [row for row in rows if _looks_like_explicit_memory_fact(row.fact)]
+    if preferred:
+        return preferred
+    return list(rows)
+
+
+def _filter_rows_for_preference_rule_query(
+    rows: Sequence[SurfaceMemoryFactRow],
+    *,
+    query: str | None,
+) -> list[SurfaceMemoryFactRow]:
+    if not rows:
+        return []
+    query_text = _clean_text(query)
+    if not _looks_like_preference_rule_memory_query(query_text):
+        return list(rows)
+    preferred = [row for row in rows if _looks_like_preference_rule_memory_fact(row.fact)]
     if preferred:
         return preferred
     return list(rows)
@@ -1992,6 +2009,7 @@ def _looks_like_explicit_memory_content_query(text: str) -> bool:
     normalized = _clean_text(text)
     return bool(normalized) and (
         any(token in normalized for token in ("让你记", "叫你记", "刚才记", "刚刚记", "记了什么", "记住什么", "记一下"))
+        or ("还记得" in normalized and any(token in normalized for token in ("我说", "要求", "格式", "要怎样", "怎么发", "怎样发")))
         or ("我" in normalized and "记" in normalized and "什么" in normalized)
     )
 
@@ -2002,7 +2020,42 @@ def _looks_like_explicit_memory_fact(text: str) -> bool:
         return True
     if any(token in normalized for token in ("喜欢", "不喜欢", "偏好", "讨厌", "常喝", "常吃")):
         return True
+    if _looks_like_preference_rule_memory_fact(normalized):
+        return True
     return False
+
+
+def _looks_like_preference_rule_memory_query(text: str) -> bool:
+    normalized = _clean_text(text)
+    if not normalized:
+        return False
+    if not any(token in normalized for token in ("记得", "记不记得", "还记得", "我说", "要求", "以后", "不要", "别再", "必须", "偏好")):
+        return False
+    return any(token in normalized for token in ("格式", "怎么发", "怎样发", "要怎样", "换行", "模板腔", "分段", "卡片", "简介后", "推荐", "推送", "发送"))
+
+
+def _looks_like_preference_rule_memory_fact(text: str) -> bool:
+    normalized = _clean_text(text)
+    if not normalized:
+        return False
+    return any(
+        token in normalized
+        for token in (
+            "用户偏好",
+            "偏好",
+            "以后",
+            "不要",
+            "别再",
+            "必须",
+            "应该",
+            "格式",
+            "换行",
+            "模板腔",
+            "分段",
+            "卡片格式",
+            "简介后",
+        )
+    )
 
 
 def _should_skip_low_signal_recall(

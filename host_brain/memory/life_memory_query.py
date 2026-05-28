@@ -211,6 +211,8 @@ def plan_life_memory_query(text: Any, *, task_mode: str | None = None) -> LifeMe
         failure_debug = temporal_scope != TEMPORAL_UNSPECIFIED or any(token in message for token in ("上次", "之前", "刚才", "原因"))
     correction = any(token in message for token in ("不对", "错了", "纠正", "不是这个意思", "你记错"))
     preference = any(token in message for token in ("我喜欢", "我不喜欢", "偏好", "以后", "不要", "别再", "必须"))
+    if not preference and any(token in message for token in ("格式", "怎么发", "怎样发", "要怎样", "换行", "模板腔", "分段")):
+        preference = any(token in message for token in ("推荐", "推送", "发送", "回复", "卡片", "简介", "我说", "要求"))
     open_loop = any(token in message for token in ("待办", "承诺", "说好", "继续刚才", "还没做", "完成了吗", "跑完了吗"))
     self_change = any(token in message for token in ("模型路由", "记忆系统", "能力", "策略", "开关", "改过什么"))
 

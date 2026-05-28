@@ -636,6 +636,79 @@ def test_plan_surface_memory_recall_routes_dated_event_lookup_to_life_episode() 
     assert plan.validation_requirements == ("event_time_scope_match", "event_or_collection_hit", "source_ref_present")
 
 
+def test_preference_rule_recall_does_not_leak_same_domain_collection_rows() -> None:
+    class _RecallService:
+        def recall(self, **kwargs):  # noqa: ANN003
+            return SimpleNamespace(
+                output={
+                    "query": kwargs["query"],
+                    "status": "OK",
+                    "stage": "S_RET_RECALL",
+                    "degraded": False,
+                    "routes": [
+                        {"route_id": "surface_life_collection", "store_id": "life_memory_collection"},
+                        {"route_id": "surface_life_episode", "store_id": "life_episode"},
+                    ],
+                    "candidate_count": 2,
+                    "ts_ms": kwargs["ts_ms"],
+                    "candidates": [
+                        {
+                            "doc_id": "col-today",
+                            "source_ref": "life_memory_collection://col-today",
+                            "evidence_refs": ["gateway://message/today/card/1"],
+                            "text": "2026-05-28 当天轻小说推荐集合，记录 3 个条目；可比较证据：1. 5月28日推荐 A｜2. 5月28日推荐 B｜3. 5月28日推荐 C",
+                            "score": 0.99,
+                            "metadata": {
+                                "store_id": "life_memory_collection",
+                                "scope_key": "daily:2026-05-28",
+                                "domain": "lightnovel_recommendation",
+                                "item_count": 3,
+                                "evidence_refs_primary": "gateway://message/today/card/1",
+                            },
+                        },
+                        {
+                            "doc_id": "ep-pref-format",
+                            "source_ref": "chat://request/req-pref-format",
+                            "evidence_refs": ["chat://request/req-pref-format#user"],
+                            "text": "用户提到：以后推荐轻小说时，每本书的简介后应该换行，别模板腔。 回复：记住了，后面按更自然的卡片格式发。",
+                            "score": 0.82,
+                            "metadata": {
+                                "store_id": "life_episode",
+                                "episode_kind": "chat_episode",
+                                "truth_state": "VERIFIED",
+                                "evidence_refs_primary": "chat://request/req-pref-format#user",
+                            },
+                        },
+                    ],
+                }
+            )
+
+    context = ThreeLayerContinuityContext(
+        current_user_message="还记得我说推荐格式要怎样吗？",
+        task_mode_hint="daily_chat",
+    )
+    plan = plan_surface_memory_recall(context)
+    packet = recall_surface_memory_for_context(
+        recall_service=_RecallService(),
+        context=context,
+        request_id="req-pref-rule-recall",
+        query_embedding=[0.1] * 16,
+        person_id="owner",
+        session_id="qq_dm_owner",
+        ts_ms=_ts(2026, 5, 28, 18),
+    )
+
+    joined = "\n".join(packet.facts)
+    validation = dict(dict(packet.trace or {})["validation"])
+    assert plan.query_kind == "preference_lookup"
+    assert plan.recall_contract_id == "preference"
+    assert "state_preference_as_user_rule" in plan.answer_obligations
+    assert "简介后应该换行" in joined
+    assert "5月28日推荐" not in joined
+    assert validation["passed"] is True
+    assert validation["selected_store_counts"] == {"life_episode": 1}
+
+
 def test_recall_surface_memory_for_context_uses_plan_and_skips_without_calling_recall() -> None:
     class _RecallService:
         def recall(self, **kwargs):  # noqa: ANN003
