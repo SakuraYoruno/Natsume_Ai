@@ -64,6 +64,13 @@ def _coerce_float(value: Any) -> float | None:
         return None
 
 
+def _coerce_int(value: Any, *, default: int = 0) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return int(default)
+
+
 def _resolve_store_id(item: Mapping[str, Any]) -> str:
     metadata_raw = item.get("metadata")
     metadata = dict(metadata_raw) if isinstance(metadata_raw, Mapping) else {}
@@ -385,6 +392,39 @@ async def _maybe_apply_lightnovel_deep_review(
         "persist_status": str(review.get("persist_status") or ""),
         "evidence_ref_count": len(list(review.get("evidence_refs") or [])),
     }
+    review_ok = str(review.get("status") or "").strip().upper() == "OK"
+    old_reason_code = str(getattr(packet, "reason_code", None) or "").strip()
+    resolved_coverage_failure = review_ok and old_reason_code == "SURFACE_MEMORY_RECALL_COVERAGE_FAILED"
+    if resolved_coverage_failure:
+        previous_readiness = dict(trace.get("recall_answer_readiness") or {}) if isinstance(trace.get("recall_answer_readiness"), Mapping) else {}
+        if previous_readiness:
+            trace["recall_answer_readiness_before_deep_review"] = previous_readiness
+        detail = dict(previous_readiness.get("detail_evidence") or {}) if isinstance(previous_readiness.get("detail_evidence"), Mapping) else {}
+        detail.update(
+            {
+                "required": True,
+                "ready_for_deep_review": True,
+                "basis": "lightnovel_deep_review",
+                "body_item_count": max(1, _coerce_int(detail.get("body_item_count"))),
+                "anchor_item_count": max(
+                    _coerce_int(detail.get("anchor_item_count")),
+                    len(list(review.get("evidence_refs") or [])),
+                ),
+            }
+        )
+        trace["recall_answer_readiness"] = {
+            **previous_readiness,
+            "status": "READY",
+            "ready_to_answer": True,
+            "response_mode": "answer_from_evidence",
+            "surface_action": "answer",
+            "reasons": [],
+            "coverage_passed": True,
+            "coverage_failed": False,
+            "detail_evidence": detail,
+        }
+        trace["answer_ready"] = True
+        trace["coverage_failed_resolved_by_deep_review"] = True
     return replace(
         packet,
         facts=tuple([fact, *list(getattr(packet, "facts", ()) or [])]),
@@ -404,6 +444,9 @@ async def _maybe_apply_lightnovel_deep_review(
         evidence_refs=tuple(
             dict.fromkeys([*list(getattr(packet, "evidence_refs", ()) or []), *list(review.get("evidence_refs") or [])])
         ),
+        confidence=max(float(getattr(packet, "confidence", 0.0) or 0.0), 0.85) if resolved_coverage_failure else getattr(packet, "confidence", 0.0),
+        degraded=False if resolved_coverage_failure else getattr(packet, "degraded", False),
+        reason_code=None if resolved_coverage_failure else getattr(packet, "reason_code", None),
         trace=trace,
     )
 

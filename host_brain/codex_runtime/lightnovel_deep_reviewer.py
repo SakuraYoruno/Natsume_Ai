@@ -51,12 +51,15 @@ def should_deep_review_lightnovel_selection(*, user_message: str, packet: Mappin
     text = _clean_text(user_message)
     if not _CHOICE_QUERY_RE.search(text):
         return False
-    facts = "\n".join(str(item or "") for item in list(packet.get("facts") or []))
-    if not facts:
+    facts = "\n".join(_packet_text_sources(packet))
+    cards = _extract_cards(packet)
+    if not facts and not cards and not _packet_needs_detail_fetch(packet):
         return False
-    if not any(token in facts for token in ("轻小说", "lightnovel", "lightnovel.fun", "可比较证据")):
+    if not _packet_looks_like_lightnovel_recommendation(packet, facts=facts):
         return False
-    return bool(_DETAIL_URL_RE.search(facts)) or _trace_has_detail_refs(packet) or "推荐了" in facts
+    if _packet_needs_detail_fetch(packet):
+        return True
+    return bool(cards) or bool(_DETAIL_URL_RE.search(facts)) or _trace_has_detail_refs(packet) or "推荐了" in facts
 
 
 def review_lightnovel_selection_from_memory_packet(
@@ -382,8 +385,7 @@ def _safe_json_dict(value: Any) -> dict[str, Any]:
 
 def _extract_cards(packet: Mapping[str, Any]) -> list[dict[str, Any]]:
     cards = _extract_trace_cards(packet)
-    facts = [str(item or "") for item in list(packet.get("facts") or [])]
-    for fact in facts:
+    for fact in _packet_text_sources(packet):
         if _is_deep_review_memory_fact(fact):
             continue
         source = fact.split("可比较证据：", 1)[-1] if "可比较证据：" in fact else fact
@@ -395,6 +397,77 @@ def _extract_cards(packet: Mapping[str, Any]) -> list[dict[str, Any]]:
             if card and not any(_same_card(card, old) for old in cards):
                 cards.append(card)
     return cards
+
+
+def _packet_text_sources(packet: Mapping[str, Any]) -> list[str]:
+    values: list[str] = []
+    for fact in list(packet.get("facts") or []):
+        text = _clean_text(fact)
+        if text:
+            values.append(text)
+    rows = packet.get("rows")
+    if isinstance(rows, Sequence) and not isinstance(rows, (str, bytes, bytearray)):
+        for row in rows:
+            if not isinstance(row, Mapping):
+                continue
+            text = _clean_text(row.get("fact") or row.get("text") or row.get("content"))
+            if text:
+                values.append(text)
+    trace = packet.get("trace")
+    if isinstance(trace, Mapping):
+        for key in ("selected_collection_items", "selected_entity_items"):
+            raw_items = trace.get(key)
+            if not isinstance(raw_items, Sequence) or isinstance(raw_items, (str, bytes, bytearray)):
+                continue
+            for item in raw_items:
+                if not isinstance(item, Mapping):
+                    continue
+                text = " ".join(
+                    part
+                    for part in (
+                        _clean_text(item.get("title")),
+                        _clean_text(item.get("item_title")),
+                        _clean_text(item.get("selection_reason")),
+                        _clean_text(item.get("intro_snippet")),
+                        _clean_text(item.get("detail_url")),
+                    )
+                    if part
+                )
+                if text:
+                    values.append(text)
+    return list(dict.fromkeys(values))
+
+
+def _packet_needs_detail_fetch(packet: Mapping[str, Any]) -> bool:
+    trace = packet.get("trace")
+    if not isinstance(trace, Mapping):
+        return False
+    readiness = trace.get("recall_answer_readiness")
+    if not isinstance(readiness, Mapping):
+        return False
+    return (
+        str(readiness.get("response_mode") or "") == "fetch_or_request_detail_evidence"
+        or str(readiness.get("surface_action") or "") == "fetch_more_evidence"
+    )
+
+
+def _packet_looks_like_lightnovel_recommendation(packet: Mapping[str, Any], *, facts: str) -> bool:
+    if any(token in facts for token in ("轻小说", "lightnovel", "lightnovel.fun", "可比较证据")):
+        return True
+    trace = packet.get("trace")
+    if not isinstance(trace, Mapping):
+        return False
+    plan = trace.get("plan")
+    if isinstance(plan, Mapping):
+        domains = [str(item) for item in list(plan.get("target_domains") or [])]
+        if "lightnovel_recommendation" in domains:
+            return True
+    receipt = trace.get("recall_receipt")
+    if isinstance(receipt, Mapping):
+        domains = [str(item) for item in list(receipt.get("target_domains") or [])]
+        if "lightnovel_recommendation" in domains:
+            return True
+    return any("lightnovel.fun" in str(item.get("detail_url") or item.get("source_ref") or "") for item in _trace_review_items(packet))
 
 
 def _trace_has_detail_refs(packet: Mapping[str, Any]) -> bool:

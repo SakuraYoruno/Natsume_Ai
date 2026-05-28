@@ -372,9 +372,13 @@ def _surface_memory_trace_for_audit(summary: Mapping[str, Any] | None) -> dict[s
             "max_facts": _safe_int(plan.get("max_facts"), default=0),
             "target_store_ids": [str(item) for item in list(plan.get("target_store_ids") or [])[:8]],
         }
-    for key in ("skipped", "route_count", "short_term_explicit_memory"):
+    for key in ("skipped", "route_count", "short_term_explicit_memory", "answer_ready", "coverage_failed_resolved_by_deep_review"):
         if key in trace:
-            out[key] = bool(trace.get(key)) if key in {"skipped", "short_term_explicit_memory"} else _safe_int(trace.get(key), default=0)
+            out[key] = (
+                bool(trace.get(key))
+                if key in {"skipped", "short_term_explicit_memory", "answer_ready", "coverage_failed_resolved_by_deep_review"}
+                else _safe_int(trace.get(key), default=0)
+            )
 
     decision = _coerce_trace_mapping(trace.get("recall_decision"))
     if decision:

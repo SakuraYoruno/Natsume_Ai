@@ -102,6 +102,34 @@ def test_lightnovel_deep_review_requires_selection_query_and_recommendation_pack
     )
 
 
+def test_lightnovel_deep_review_can_trigger_from_readiness_trace_after_facts_are_dropped() -> None:
+    packet = {
+        "facts": [],
+        "rows": [
+            {
+                "fact": "本次轻小说推荐集合，记录 3 个条目；1. A｜看点：恋爱日常；2. B｜看点：奇幻身份",
+                "store_id": "life_memory_collection",
+            }
+        ],
+        "trace": {
+            "plan": {"target_domains": ["lightnovel_recommendation"]},
+            "recall_answer_readiness": {
+                "status": "NOT_READY",
+                "response_mode": "fetch_or_request_detail_evidence",
+                "surface_action": "fetch_more_evidence",
+            },
+            "selected_collection_items": [
+                {"index": 1, "title": "A", "selection_reason": "恋爱日常"},
+                {"index": 2, "title": "B", "selection_reason": "奇幻身份"},
+            ],
+        },
+    }
+
+    assert should_deep_review_lightnovel_selection(user_message="这三本哪本好看？", packet=packet)
+    cards = _extract_cards(packet)
+    assert [card["title"] for card in cards[:2]] == ["A", "B"]
+
+
 def test_lightnovel_card_extraction_ignores_previous_deep_review_fact() -> None:
     packet = {
         "facts": [

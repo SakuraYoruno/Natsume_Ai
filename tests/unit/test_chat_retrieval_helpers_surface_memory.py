@@ -300,6 +300,92 @@ async def test_run_retrieval_applies_lightnovel_deep_review_before_surface(monke
 
 
 @pytest.mark.asyncio
+async def test_run_retrieval_uses_readiness_to_recover_missing_detail_with_deep_review(monkeypatch) -> None:
+    class _RecallService:
+        def recall(self, **_kwargs):  # noqa: ANN003
+            return {
+                "output": {
+                    "status": "OK",
+                    "stage": "recall_fusion",
+                    "candidate_count": 1,
+                    "routes": [{"route_id": "surface_life_collection", "store_id": "life_memory_collection"}],
+                    "candidates": [
+                        {
+                            "doc_id": "col-current-no-detail",
+                            "source_ref": "life_memory_collection://current/no-detail",
+                            "evidence_refs": ["gateway://message/current/card/1"],
+                            "text": "本次轻小说推荐集合，记录 3 个条目；可比较证据：1. A｜2. B｜3. C",
+                            "score": 0.95,
+                            "metadata": {
+                                "store_id": "life_memory_collection",
+                                "scope_key": "delivery:ep-current",
+                                "domain": "lightnovel_recommendation",
+                                "item_count": 3,
+                                "evidence_refs_primary": "gateway://message/current/card/1",
+                                "items": [
+                                    {"item_title": "A", "item_summary": "看点：恋爱日常", "position": 1},
+                                    {"item_title": "B", "item_summary": "看点：奇幻身份", "position": 2},
+                                    {"item_title": "C", "item_summary": "看点：日常喜剧", "position": 3},
+                                ],
+                            },
+                        }
+                    ],
+                }
+            }
+
+    def fake_review(**kwargs):  # noqa: ANN003
+        packet = kwargs["packet"]
+        assert packet["facts"] == []
+        assert packet["trace"]["recall_answer_readiness"]["response_mode"] == "fetch_or_request_detail_evidence"
+        assert packet["trace"]["selected_collection_items"][0]["title"] == "A"
+        return {
+            "status": "OK",
+            "reason_code": "LIGHTNOVEL_DEEP_REVIEW_OK",
+            "fact": "网页深读结果（含正文）：当前更推荐第2本《B》。原因：开篇冲突更直接，角色关系也更有钩子。",
+            "selected": {"index": 2, "title": "B"},
+            "items": [{"index": 1}, {"index": 2}, {"index": 3}],
+            "evidence_refs": ["https://www.lightnovel.fun/cn/detail/b"],
+            "cached": False,
+            "source": "fetch",
+            "recommendation_signature": "sig-recovered",
+        }
+
+    monkeypatch.setattr(helpers, "_build_surface_memory_recall_service", lambda: _RecallService())
+    monkeypatch.setattr(helpers, "_embed_surface_memory_query", lambda query: ([0.2] * 16, "test-embedding"))
+    monkeypatch.setattr(
+        "host_brain.codex_runtime.lightnovel_deep_reviewer.review_lightnovel_selection_from_memory_packet",
+        fake_review,
+    )
+
+    summary, _evidence_items = await helpers._run_retrieval(
+        request_id="req-lightnovel-readiness-recovery",
+        message="这三本书哪本好看？",
+        person_id="person-1",
+        session_id="sess-1",
+        ts_ms=123,
+        emotion_tag="NEUTRAL",
+        render_target_lang="zh",
+        intent_draft={"route": "chat"},
+    )
+
+    packet = summary["surface_memory_recall_packet"]
+    readiness = packet["trace"]["recall_answer_readiness"]
+    assert summary["status"] == "OK"
+    assert summary["reason_code"] == "SURFACE_MEMORY_RECALL_OK"
+    assert packet["degraded"] is False
+    assert packet["reason_code"] is None
+    assert packet["confidence"] == 0.85
+    assert packet["facts"][0].startswith("网页深读结果")
+    assert packet["trace"]["coverage_failed_resolved_by_deep_review"] is True
+    assert packet["trace"]["answer_ready"] is True
+    assert packet["trace"]["recall_answer_readiness_before_deep_review"]["response_mode"] == "fetch_or_request_detail_evidence"
+    assert readiness["status"] == "READY"
+    assert readiness["ready_to_answer"] is True
+    assert readiness["response_mode"] == "answer_from_evidence"
+    assert readiness["detail_evidence"]["basis"] == "lightnovel_deep_review"
+
+
+@pytest.mark.asyncio
 async def test_run_retrieval_applies_lightnovel_deep_review_from_entity_trace(monkeypatch) -> None:
     class _RecallService:
         def recall(self, **_kwargs):  # noqa: ANN003
