@@ -24,6 +24,7 @@ from host_brain.memory.life_memory_query import (
     DOMAIN_RECOMMENDATION,
     TEMPORAL_ALL_TIME,
     TEMPORAL_CURRENT,
+    TEMPORAL_DATE_PREFIX,
     TEMPORAL_DAY_BEFORE_YESTERDAY,
     TEMPORAL_RECENT_DAYS,
     TEMPORAL_TODAY,
@@ -2418,13 +2419,26 @@ class LifeMemoryStore:
         scope_keys = _scope_keys_for_collection_plan(plan=plan, now_ts_ms_value=now_ts_ms_value)
         if scope_keys:
             placeholders = ", ".join("?" for _ in scope_keys)
-            base_clauses.append(f"COALESCE(scope_key, '') IN ({placeholders})")
-            base_params.extend(scope_keys)
+            if _plan_requires_exact_collection_count(plan) and any(key.startswith(f"{COLLECTION_SCOPE_DAILY}:") for key in scope_keys):
+                base_clauses.append(f"(COALESCE(scope_key, '') IN ({placeholders}) OR COALESCE(scope_key, '') LIKE ?)")
+                base_params.extend(scope_keys)
+                base_params.append(f"{COLLECTION_SCOPE_DELIVERY}:%")
+            else:
+                base_clauses.append(f"COALESCE(scope_key, '') IN ({placeholders})")
+                base_params.extend(scope_keys)
         identity_clauses: list[str] = []
         identity_params: list[Any] = []
         if session_id:
-            identity_clauses.append("(COALESCE(session_id, '') = ? OR COALESCE(session_id, '') = '')")
-            identity_params.append(session_id)
+            if person_id:
+                aliases = _owner_alias_person_ids(person_id)
+                placeholders = ", ".join("?" for _ in aliases)
+                identity_clauses.append(
+                    f"(COALESCE(session_id, '') = ? OR COALESCE(session_id, '') = '' OR COALESCE(person_id, '') IN ({placeholders}))"
+                )
+                identity_params.extend([session_id, *aliases])
+            else:
+                identity_clauses.append("(COALESCE(session_id, '') = ? OR COALESCE(session_id, '') = '')")
+                identity_params.append(session_id)
         elif person_id:
             identity_clauses.append("(COALESCE(person_id, '') = ? OR COALESCE(person_id, '') = '')")
             identity_params.append(person_id)
@@ -2491,8 +2505,16 @@ class LifeMemoryStore:
         scoped_session = _clean_text(session_id)
         scoped_person = _clean_text(person_id)
         if scoped_session:
-            clauses.append("(COALESCE(ep.session_id, '') = ? OR COALESCE(ep.session_id, '') = '')")
-            params.append(scoped_session)
+            if scoped_person:
+                aliases = _owner_alias_person_ids(scoped_person)
+                placeholders = ", ".join("?" for _ in aliases)
+                clauses.append(
+                    f"(COALESCE(ep.session_id, '') = ? OR COALESCE(ep.session_id, '') = '' OR COALESCE(ep.person_id, '') IN ({placeholders}))"
+                )
+                params.extend([scoped_session, *aliases])
+            else:
+                clauses.append("(COALESCE(ep.session_id, '') = ? OR COALESCE(ep.session_id, '') = '')")
+                params.append(scoped_session)
         elif scoped_person:
             aliases = _owner_alias_person_ids(scoped_person)
             placeholders = ", ".join("?" for _ in aliases)
@@ -3033,9 +3055,22 @@ def _scope_keys_for_collection_plan(*, plan: Any, now_ts_ms_value: int) -> list[
         return [f"{COLLECTION_SCOPE_DAILY}:{(today - timedelta(days=1)).isoformat()}"]
     if scope == TEMPORAL_DAY_BEFORE_YESTERDAY:
         return [f"{COLLECTION_SCOPE_DAILY}:{(today - timedelta(days=2)).isoformat()}"]
+    if scope.startswith(TEMPORAL_DATE_PREFIX):
+        day_key = scope.removeprefix(TEMPORAL_DATE_PREFIX).strip()
+        if re.fullmatch(r"\d{4}-\d{2}-\d{2}", day_key):
+            return [f"{COLLECTION_SCOPE_DAILY}:{day_key}"]
     if scope == TEMPORAL_ALL_TIME:
         return []
     return [COLLECTION_SCOPE_RECENT]
+
+
+def _plan_requires_exact_collection_count(plan: Any) -> bool:
+    requirements = {
+        _clean_text(item)
+        for item in list(getattr(plan, "validation_requirements", ()) or ())
+        if _clean_text(item)
+    }
+    return "collection_item_exact_count" in requirements and _coerce_int(getattr(plan, "min_collection_items", 0)) > 0
 
 
 def _extract_collection_items_from_metadata(metadata: Mapping[str, Any]) -> list[dict[str, Any]]:

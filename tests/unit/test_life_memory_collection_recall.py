@@ -187,7 +187,7 @@ def test_recommendation_delivery_indexes_delivery_daily_and_recent_collections()
         assert "近 7 天轻小说推荐集合" in rolling_collection["summary"]
 
         packet = store.recall_collection_packet(
-            query="昨天三本呢",
+            query="昨天推荐过哪些轻小说",
             top_k=2,
             person_id="owner",
             session_id="qq_dm_owner",
@@ -352,6 +352,24 @@ def test_surface_plan_routes_day_before_yesterday_collection_scope() -> None:
     assert "collection_item_exact_count" in plan.validation_requirements
 
 
+def test_surface_plan_routes_absolute_date_collection_scope() -> None:
+    plan = plan_surface_memory_recall(
+        ThreeLayerContinuityContext(
+            current_user_message="2026-05-27 推荐的三本呢？",
+            task_mode_hint="daily_chat",
+        )
+    )
+
+    assert plan.should_recall
+    assert plan.reason == "collection_memory_recall"
+    assert plan.query_kind == "date_lookup"
+    assert plan.temporal_scope == "date:2026-05-27"
+    assert plan.time_lookback_days is None
+    assert plan.target_store_ids[0] == "life_memory_collection"
+    assert plan.recall_contract_id == "collection_date"
+    assert plan.min_collection_items == 3
+
+
 def test_surface_plan_routes_recent_many_book_selection_to_collection_with_deep_obligation() -> None:
     plan = plan_surface_memory_recall(
         ThreeLayerContinuityContext(
@@ -395,6 +413,104 @@ def test_recall_fusion_collection_route_builds_surface_packet_with_items() -> No
         assert "Yesterday A" in joined
         assert "可比较证据" in joined
         assert packet.evidence_refs
+    finally:
+        ledger.close()
+
+
+def test_absolute_date_collection_recall_uses_daily_scope() -> None:
+    ledger = SQLiteLedger(db_path=":memory:")
+    try:
+        store = LifeMemoryStore(ledger=ledger)
+        _write_delivery(store, prefix="DateTarget", ts_ms=_ts(2026, 5, 27))
+        _write_delivery(store, prefix="OtherDate", ts_ms=_ts(2026, 5, 28))
+
+        packet = recall_surface_memory_for_context(
+            recall_service=_collection_service(ledger),
+            context=ThreeLayerContinuityContext(
+                current_user_message="2026-05-27 推荐的三本呢？",
+                task_mode_hint="daily_chat",
+            ),
+            request_id="req-absolute-date-collection",
+            query_embedding=[0.1] * 16,
+            person_id="owner",
+            session_id="qq_dm_owner",
+            ts_ms=_ts(2026, 5, 29, 8),
+        )
+
+        joined = "\n".join(packet.facts)
+        receipt = dict(dict(packet.trace or {}).get("recall_receipt") or {})
+        assert packet.reason_code is None
+        assert "DateTarget A" in joined
+        assert "OtherDate A" not in joined
+        assert receipt["expected_scope_key"] == "daily:2026-05-27"
+        assert receipt["selected_scope_keys"] == ["daily:2026-05-27"]
+        assert receipt["selected_item_count"] == 3
+    finally:
+        ledger.close()
+
+
+def test_dated_three_book_recall_can_use_delivery_scope_when_daily_has_multiple_batches() -> None:
+    ledger = SQLiteLedger(db_path=":memory:")
+    try:
+        store = LifeMemoryStore(ledger=ledger)
+        first_episode = _write_delivery(store, prefix="YesterdayFirst", ts_ms=_ts(2026, 5, 27, 9))
+        latest_episode = _write_delivery(store, prefix="YesterdayLatest", ts_ms=_ts(2026, 5, 27, 21))
+        daily = next(row for row in ledger.life_memory_collection if row["scope_key"] == "daily:2026-05-27")
+        assert daily["item_count"] == 6
+
+        packet = recall_surface_memory_for_context(
+            recall_service=_collection_service(ledger),
+            context=ThreeLayerContinuityContext(
+                current_user_message="昨天三本呢？",
+                task_mode_hint="daily_chat",
+            ),
+            request_id="req-yesterday-three-delivery-scope",
+            query_embedding=[0.1] * 16,
+            person_id="owner",
+            session_id="qq_dm_owner",
+            ts_ms=_ts(2026, 5, 28, 8),
+        )
+
+        joined = "\n".join(packet.facts)
+        receipt = dict(dict(packet.trace or {}).get("recall_receipt") or {})
+        validation = dict(dict(packet.trace or {}).get("validation") or {})
+        assert first_episode != latest_episode
+        assert packet.reason_code is None
+        assert validation["passed"] is True
+        assert receipt["expected_scope_key"] == "daily:2026-05-27"
+        assert receipt["selected_scope_keys"] == [f"delivery:{latest_episode}"]
+        assert receipt["selected_item_count"] == 3
+        assert "YesterdayLatest A" in joined
+        assert "YesterdayFirst A" not in joined
+    finally:
+        ledger.close()
+
+
+def test_collection_recall_crosses_scheduler_session_for_same_person() -> None:
+    ledger = SQLiteLedger(db_path=":memory:")
+    try:
+        store = LifeMemoryStore(ledger=ledger)
+        _write_delivery(
+            store,
+            prefix="SchedulerPush",
+            ts_ms=_ts(2026, 5, 27),
+            session_id="scheduler_daily_lightnovel",
+            person_id="owner",
+        )
+
+        packet = store.recall_collection_packet(
+            query="昨天三本呢？",
+            top_k=2,
+            person_id="owner",
+            session_id="qq_dm_owner",
+            now_ts_ms_value=_ts(2026, 5, 28, 8),
+        )
+
+        assert packet.candidates
+        top = packet.candidates[0]
+        assert top["metadata"]["scope_key"] == "daily:2026-05-27"
+        assert top["metadata"]["session_id"] == "scheduler_daily_lightnovel"
+        assert "SchedulerPush A" in top["text"]
     finally:
         ledger.close()
 

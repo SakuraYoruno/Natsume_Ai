@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 import re
 from typing import Any
 
@@ -14,6 +15,7 @@ TEMPORAL_DAY_BEFORE_YESTERDAY = "day_before_yesterday"
 TEMPORAL_RECENT_DAYS = "recent_days"
 TEMPORAL_ALL_TIME = "all_time"
 TEMPORAL_UNSPECIFIED = "unspecified"
+TEMPORAL_DATE_PREFIX = "date:"
 
 QUERY_FRESH_TOPIC = "fresh_topic"
 QUERY_ANAPHORIC_SELECTION = "anaphoric_selection"
@@ -156,6 +158,8 @@ _RECENT_COLLECTION_RE = re.compile(
     r"过去三十天|近三十天|30天|一个月|本月|十几本|几本)"
 )
 _DATE_LOOKUP_RE = re.compile(r"(?:今天|今日|昨天|昨晚|前天|上次|之前|以前|过去|这周)")
+_ISO_DATE_RE = re.compile(r"\b(20\d{2})[-/.年](\d{1,2})[-/.月](\d{1,2})日?\b")
+_MONTH_DAY_RE = re.compile(r"(?<!\d)(\d{1,2})月(\d{1,2})日")
 _BOOK_DOMAIN_RE = re.compile(r"(?:轻小说|小说|书籍|书|epub|lightnovel)", re.IGNORECASE)
 _WEB_DOMAIN_RE = re.compile(r"(?:网页|网站|链接|页面|url|https?|web|站点|浏览器|browser)", re.IGNORECASE)
 _FILE_DOMAIN_RE = re.compile(r"(?:文件|文档|报告|pdf|epub|txt|markdown|表格|附件)", re.IGNORECASE)
@@ -175,6 +179,7 @@ _EVENT_LOOKUP_RE = re.compile(
     r"后台任务|调度任务|任务执行|有哪些(?:动作|任务|事情|经历)"
     r")"
 )
+_LOCAL_MEMORY_TZ = timezone(timedelta(hours=8))
 
 
 @dataclass(frozen=True)
@@ -298,17 +303,14 @@ def plan_life_memory_query(text: Any, *, task_mode: str | None = None) -> LifeMe
             answer_obligations=contract.answer_obligations,
         )
 
-    if collection_like and temporal_scope not in {TEMPORAL_CURRENT, TEMPORAL_UNSPECIFIED}:
+    if collection_like and not specific_item_followup and temporal_scope not in {TEMPORAL_CURRENT, TEMPORAL_UNSPECIFIED}:
         scope = temporal_scope
-        contract_id = (
-            CONTRACT_COLLECTION_DATE
-            if temporal_scope in {TEMPORAL_TODAY, TEMPORAL_YESTERDAY, TEMPORAL_DAY_BEFORE_YESTERDAY}
-            else CONTRACT_COLLECTION_RECENT
-        )
+        dated_scope = temporal_scope in {TEMPORAL_TODAY, TEMPORAL_YESTERDAY, TEMPORAL_DAY_BEFORE_YESTERDAY} or temporal_scope.startswith(TEMPORAL_DATE_PREFIX)
+        contract_id = CONTRACT_COLLECTION_DATE if dated_scope else CONTRACT_COLLECTION_RECENT
         contract = RECALL_INTENT_CONTRACTS[contract_id]
         return LifeMemoryQueryPlan(
             should_recall=True,
-            query_kind=QUERY_DATE_LOOKUP if temporal_scope in {TEMPORAL_TODAY, TEMPORAL_YESTERDAY, TEMPORAL_DAY_BEFORE_YESTERDAY} else QUERY_COLLECTION_SUMMARY,
+            query_kind=QUERY_DATE_LOOKUP if dated_scope else QUERY_COLLECTION_SUMMARY,
             temporal_scope=scope,
             target_domains=domains,
             target_store_ids=("life_memory_collection", "life_memory_entity", "life_episode", "semantic_memory", "episodic_vector", "sqlite_ledger"),
@@ -363,17 +365,14 @@ def plan_life_memory_query(text: Any, *, task_mode: str | None = None) -> LifeMe
             answer_obligations=_answer_obligations_for_query(message, contract=contract),
         )
 
-    if collection_like:
+    if collection_like and not specific_item_followup:
         scope = temporal_scope if temporal_scope != TEMPORAL_UNSPECIFIED else TEMPORAL_RECENT_DAYS
-        contract_id = (
-            CONTRACT_COLLECTION_DATE
-            if temporal_scope in {TEMPORAL_TODAY, TEMPORAL_YESTERDAY, TEMPORAL_DAY_BEFORE_YESTERDAY}
-            else CONTRACT_COLLECTION_RECENT
-        )
+        dated_scope = temporal_scope in {TEMPORAL_TODAY, TEMPORAL_YESTERDAY, TEMPORAL_DAY_BEFORE_YESTERDAY} or temporal_scope.startswith(TEMPORAL_DATE_PREFIX)
+        contract_id = CONTRACT_COLLECTION_DATE if dated_scope else CONTRACT_COLLECTION_RECENT
         contract = RECALL_INTENT_CONTRACTS[contract_id]
         return LifeMemoryQueryPlan(
             should_recall=True,
-            query_kind=QUERY_DATE_LOOKUP if temporal_scope in {TEMPORAL_TODAY, TEMPORAL_YESTERDAY, TEMPORAL_DAY_BEFORE_YESTERDAY} else QUERY_COLLECTION_SUMMARY,
+            query_kind=QUERY_DATE_LOOKUP if dated_scope else QUERY_COLLECTION_SUMMARY,
             temporal_scope=scope,
             target_domains=domains,
             target_store_ids=("life_memory_collection", "life_memory_entity", "life_episode", "semantic_memory", "episodic_vector", "sqlite_ledger"),
@@ -391,9 +390,10 @@ def plan_life_memory_query(text: Any, *, task_mode: str | None = None) -> LifeMe
 
     if event_lookup:
         contract = RECALL_INTENT_CONTRACTS[CONTRACT_EVENT_LOOKUP]
+        dated_scope = temporal_scope in {TEMPORAL_TODAY, TEMPORAL_YESTERDAY, TEMPORAL_DAY_BEFORE_YESTERDAY} or temporal_scope.startswith(TEMPORAL_DATE_PREFIX)
         return LifeMemoryQueryPlan(
             should_recall=True,
-            query_kind=QUERY_DATE_LOOKUP if temporal_scope in {TEMPORAL_TODAY, TEMPORAL_YESTERDAY, TEMPORAL_DAY_BEFORE_YESTERDAY} else QUERY_EVENT_LOOKUP,
+            query_kind=QUERY_DATE_LOOKUP if dated_scope else QUERY_EVENT_LOOKUP,
             temporal_scope=temporal_scope if temporal_scope != TEMPORAL_UNSPECIFIED else TEMPORAL_RECENT_DAYS,
             target_domains=tuple(dict.fromkeys([*domains, DOMAIN_ACTION])),
             target_store_ids=("life_episode", "life_memory_collection", "semantic_memory", "sqlite_ledger", "episodic_vector"),
@@ -476,7 +476,7 @@ def _looks_like_collection_query(
         TEMPORAL_TODAY,
         TEMPORAL_YESTERDAY,
         TEMPORAL_DAY_BEFORE_YESTERDAY,
-    }
+    } or temporal_scope.startswith(TEMPORAL_DATE_PREFIX)
     has_collection_domain = bool(
         set(domains).intersection({DOMAIN_RECOMMENDATION, DOMAIN_LIGHTNOVEL_RECOMMENDATION})
     ) or bool(_RECOMMENDATION_RE.search(text))
@@ -513,6 +513,9 @@ def _looks_like_evidence_review_query(text: str, *, temporal_scope: str) -> bool
 
 
 def _infer_temporal_scope(text: str) -> str:
+    absolute = _infer_absolute_date_scope(text)
+    if absolute:
+        return absolute
     if any(token in text for token in ("刚才", "刚刚", "上一句", "前一句", "这三本", "这几本")):
         return TEMPORAL_CURRENT
     if any(token in text for token in ("今天", "今日")):
@@ -553,6 +556,28 @@ def _infer_temporal_scope(text: str) -> str:
     return TEMPORAL_UNSPECIFIED
 
 
+def _infer_absolute_date_scope(text: str) -> str:
+    value = _clean_text(text)
+    if not value:
+        return ""
+    match = _ISO_DATE_RE.search(value)
+    if match:
+        year, month, day = (int(match.group(1)), int(match.group(2)), int(match.group(3)))
+        try:
+            return f"{TEMPORAL_DATE_PREFIX}{datetime(year, month, day).date().isoformat()}"
+        except ValueError:
+            return ""
+    month_day = _MONTH_DAY_RE.search(value)
+    if not month_day:
+        return ""
+    year = datetime.now(tz=_LOCAL_MEMORY_TZ).year
+    month, day = int(month_day.group(1)), int(month_day.group(2))
+    try:
+        return f"{TEMPORAL_DATE_PREFIX}{datetime(year, month, day).date().isoformat()}"
+    except ValueError:
+        return ""
+
+
 def _infer_domains(text: str) -> tuple[str, ...]:
     domains: list[str] = []
 
@@ -584,6 +609,8 @@ def _infer_domains(text: str) -> tuple[str, ...]:
 
 
 def _lookback_for_scope(scope: str, *, default: int | None) -> int | None:
+    if str(scope or "").startswith(TEMPORAL_DATE_PREFIX):
+        return None
     if scope == TEMPORAL_CURRENT:
         return 1
     if scope == TEMPORAL_TODAY:

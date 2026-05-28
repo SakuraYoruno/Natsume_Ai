@@ -323,7 +323,7 @@ def _summarize_counter(counter: Counter[tuple[str, str]]) -> list[dict[str, Any]
 
 def _infer_entrypoints(row: Mapping[str, Any], metadata: Mapping[str, Any]) -> list[str]:
     kind = _clean(row.get("episode_kind"))
-    action = _clean(row.get("action")).lower()
+    action = _clean(row.get("action") or metadata.get("action_kind") or metadata.get("task_id")).lower()
     source = _clean(metadata.get("event_source") or metadata.get("audit_anchor_source")).lower()
     evidence_source_refs = str(row.get("evidence_source_refs") or "")
     refs = _metadata_evidence_refs(metadata)
@@ -337,7 +337,7 @@ def _infer_entrypoints(row: Mapping[str, Any], metadata: Mapping[str, Any]) -> l
         add("surface_chat")
         if _is_gateway_context(row, metadata) or any(ref.startswith("gateway://message/") for ref in refs) or "gateway://message/" in evidence_source_refs:
             add("gateway_input_chat")
-    if kind == "action_episode" and (_is_gateway_context(row, metadata) or action in USER_FACING_ACTIONS):
+    if kind in {"action_episode", "background_episode"} and (_is_gateway_context(row, metadata) or action in USER_FACING_ACTIONS):
         if any(ref.startswith("gateway://message/") for ref in refs) or "gateway://message/" in evidence_source_refs:
             add("gateway_reply_action")
     if action == "lightnovel_recommendation_delivery":
@@ -348,8 +348,8 @@ def _infer_entrypoints(row: Mapping[str, Any], metadata: Mapping[str, Any]) -> l
         add("inner_world")
     if kind == "perception_episode" or source in {"vision", "screen_ocr", "camera", "camera_recognition", "perception", "voice", "audio", "asr"}:
         add("perception_input")
-    if kind == "action_episode" and (
-        source in {"skill", "mcp", "sandbox", "tool", "browser", "surface_memory_recall"}
+    if kind in {"action_episode", "background_episode"} and (
+        source in {"skill", "mcp", "sandbox", "tool", "browser", "surface_memory_recall", "codex_production"}
         or action in {"skill", "mcp", "sandbox", "tool", "browser"}
         or any(prefix in evidence_source_refs for prefix in ("skill://exec/", "mcp://exec/", "sandbox://exec/"))
     ):

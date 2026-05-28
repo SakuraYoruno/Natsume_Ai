@@ -14,6 +14,7 @@ from host_brain.persona.isolated_surface_continuity import (
 from host_brain.persona.isolated_surface_harness import IsolatedSurfaceInput
 from host_brain.memory.life_memory_query import (
     TEMPORAL_CURRENT,
+    TEMPORAL_DATE_PREFIX,
     TEMPORAL_DAY_BEFORE_YESTERDAY,
     TEMPORAL_RECENT_DAYS,
     TEMPORAL_TODAY,
@@ -1247,7 +1248,11 @@ def _evaluate_recall_validation_requirement(
         if expected == "recent":
             passed = any(key == "recent" or key.startswith("rolling:") for key in scope_keys)
             return passed, f"expected recent/rolling collection scope, seen={scope_keys}"
-        return expected in scope_keys, f"expected {expected}, seen={scope_keys}"
+        expected_date = expected.removeprefix("daily:")
+        dates = _candidate_local_dates(candidates)
+        delivery_scope_for_date = any(key.startswith("delivery:") for key in scope_keys) and bool(dates) and all(date == expected_date for date in dates)
+        passed = expected in scope_keys or delivery_scope_for_date
+        return passed, f"expected {expected}, seen={scope_keys}, dates={dates}"
     if requirement == "collection_items_present":
         item_counts = [
             _coerce_int(_candidate_metadata(candidate).get("item_count"))
@@ -1622,6 +1627,10 @@ def _expected_collection_scope_key(temporal_scope: str, *, ts_ms: int) -> str:
     scope = _clean_text(temporal_scope)
     if scope in {TEMPORAL_CURRENT, TEMPORAL_RECENT_DAYS, TEMPORAL_UNSPECIFIED, ""}:
         return "recent"
+    if scope.startswith(TEMPORAL_DATE_PREFIX):
+        day_key = scope.removeprefix(TEMPORAL_DATE_PREFIX).strip()
+        if re.fullmatch(r"\d{4}-\d{2}-\d{2}", day_key):
+            return f"daily:{day_key}"
     if ts_ms <= 0:
         return ""
     today = datetime.fromtimestamp(int(ts_ms) / 1000.0, tz=_LOCAL_MEMORY_TZ).date()
@@ -1708,6 +1717,29 @@ def _filter_candidates_for_collection_count_contract(
         ]
         if delivery_exact:
             return delivery_exact
+    same_session_daily_exact = [
+        candidate
+        for candidate in exact
+        if _clean_text(_candidate_metadata(candidate).get("scope_key")).startswith("daily:")
+        and _candidate_session_boost(candidate) > 0.0
+    ]
+    if same_session_daily_exact:
+        return same_session_daily_exact
+    same_session_delivery_exact = [
+        candidate
+        for candidate in exact
+        if _clean_text(_candidate_metadata(candidate).get("scope_key")).startswith("delivery:")
+        and _candidate_session_boost(candidate) > 0.0
+    ]
+    if same_session_delivery_exact:
+        return same_session_delivery_exact
+    dated_daily_exact = [
+        candidate
+        for candidate in exact
+        if _clean_text(_candidate_metadata(candidate).get("scope_key")).startswith("daily:")
+    ]
+    if dated_daily_exact:
+        return dated_daily_exact
     return exact
 
 
@@ -1890,6 +1922,14 @@ def _candidate_collection_item_count(candidate: Mapping[str, Any]) -> int:
             if isinstance(items, Sequence) and not isinstance(items, (str, bytes, bytearray)):
                 item_count = max(item_count, len(items))
     return max(item_count, _item_count_from_candidate_text(candidate))
+
+
+def _candidate_session_boost(candidate: Mapping[str, Any]) -> float:
+    metadata = _candidate_metadata(candidate)
+    boost = metadata.get("score_boost")
+    if isinstance(boost, Mapping):
+        return _coerce_float(boost.get("session_boost"))
+    return 0.0
 
 
 def _item_count_from_candidate_text(candidate: Mapping[str, Any]) -> int:
