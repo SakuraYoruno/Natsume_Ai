@@ -201,6 +201,7 @@ async def _run_retrieval(
         from host_brain.persona.surface_memory_recall import (  # noqa: PLC0415
             SURFACE_MEMORY_RECALL_SKIPPED,
             SurfaceMemoryRecallPacket,
+            build_surface_memory_recall_decision_trace,
             plan_surface_memory_recall,
             recall_surface_memory_packet,
         )
@@ -232,6 +233,7 @@ async def _run_retrieval(
                 trace={
                     "skipped": False,
                     "plan": plan.as_dict(),
+                    "recall_decision": build_surface_memory_recall_decision_trace(plan, invoked=False),
                     "route_count": 1,
                     "short_term_explicit_memory": True,
                 },
@@ -241,7 +243,11 @@ async def _run_retrieval(
                 query=plan.query,
                 degraded=False,
                 reason_code=SURFACE_MEMORY_RECALL_SKIPPED,
-                trace={"skipped": True, "plan": plan.as_dict()},
+                trace={
+                    "skipped": True,
+                    "plan": plan.as_dict(),
+                    "recall_decision": build_surface_memory_recall_decision_trace(plan, invoked=False),
+                },
             )
         elif not short_term_memory_facts:
             query_embedding, embedding_model_id = _embed_surface_memory_query(plan.query)
@@ -280,6 +286,7 @@ async def _run_retrieval(
                     **dict(packet.trace or {}),
                     "skipped": False,
                     "plan": plan.as_dict(),
+                    "recall_decision": build_surface_memory_recall_decision_trace(plan, invoked=True),
                 },
             )
         packet = await _maybe_apply_lightnovel_deep_review(

@@ -514,7 +514,11 @@ def recall_surface_memory_for_context(
             query=plan.query,
             degraded=False,
             reason_code=SURFACE_MEMORY_RECALL_SKIPPED,
-            trace={"skipped": True, "plan": plan.as_dict()},
+            trace={
+                "skipped": True,
+                "plan": plan.as_dict(),
+                "recall_decision": build_surface_memory_recall_decision_trace(plan, invoked=False),
+            },
         )
     packet = recall_surface_memory_packet(
         recall_service=recall_service,
@@ -551,6 +555,7 @@ def recall_surface_memory_for_context(
             **dict(packet.trace or {}),
             "skipped": False,
             "plan": plan.as_dict(),
+            "recall_decision": build_surface_memory_recall_decision_trace(plan, invoked=True),
         },
     )
 
@@ -859,7 +864,7 @@ def _build_recall_need_trace(
 
 
 def _recall_need_type(*, kind: str, contract: str, primary_layer: str) -> str:
-    if contract in {"collection_date", "collection_recent"} or kind in {"date_lookup", "collection_summary"}:
+    if contract in {"collection_date", "collection_recent"} or kind == "collection_summary":
         return "collection"
     if kind == "anaphoric_selection":
         return "entity_or_collection_selection" if primary_layer == "life_memory_entity" else "collection_selection"
@@ -871,11 +876,73 @@ def _recall_need_type(*, kind: str, contract: str, primary_layer: str) -> str:
         return "correction_chain"
     if kind == "self_change":
         return "self_change_episode"
-    if kind == "event_lookup":
+    if kind == "event_lookup" or contract == "event_lookup":
         return "episode_event"
     if kind == "evidence_review" or contract == "evidence_review":
         return "evidence_review"
     return "memory_hit"
+
+
+def build_surface_memory_recall_decision_trace(
+    plan: SurfaceMemoryRecallPlan,
+    *,
+    invoked: bool | None = None,
+) -> dict[str, Any]:
+    """Explain why the surface chain will or will not recall memory."""
+
+    need = _build_recall_need_trace(
+        query_kind=plan.query_kind,
+        temporal_scope=plan.temporal_scope,
+        target_domains=plan.target_domains,
+        recall_contract_id=plan.recall_contract_id,
+        primary_memory_layer=plan.primary_memory_layer,
+        expected_memory_layers=plan.expected_memory_layers,
+        min_collection_items=plan.min_collection_items,
+        validation_requirements=plan.validation_requirements,
+        answer_obligations=plan.answer_obligations,
+    )
+    will_recall = bool(plan.should_recall)
+    invoked_value = will_recall if invoked is None else bool(invoked)
+    basis = _clean_list(
+        [
+            f"policy:{plan.recall_policy}" if plan.recall_policy else "",
+            f"reason:{plan.reason}" if plan.reason else "",
+            f"query_kind:{plan.query_kind}" if plan.query_kind else "",
+            f"temporal_scope:{plan.temporal_scope}" if plan.temporal_scope else "",
+            f"contract:{plan.recall_contract_id}" if plan.recall_contract_id else "",
+            f"need_type:{need.get('need_type')}" if need.get("need_type") else "",
+            f"primary_layer:{plan.primary_memory_layer}" if plan.primary_memory_layer else "",
+            f"stores:{','.join(plan.target_store_ids)}" if plan.target_store_ids else "",
+            f"domains:{','.join(plan.target_domains)}" if plan.target_domains else "",
+            f"evidence_depth:{need.get('evidence_depth')}" if need.get("evidence_depth") else "",
+            f"min_items:{int(plan.min_collection_items or 0)}" if int(plan.min_collection_items or 0) > 0 else "",
+        ]
+    )
+    return {
+        "schema": "Natsume.surface_recall_decision.v1",
+        "decision": "recall" if will_recall else "skip",
+        "invoked": invoked_value,
+        "skip_reason": "" if will_recall else _clean_text(plan.reason),
+        "recall_policy": _clean_text(plan.recall_policy),
+        "reason": _clean_text(plan.reason),
+        "task_mode": _clean_text(plan.task_mode),
+        "query_kind": _clean_text(plan.query_kind),
+        "temporal_scope": _clean_text(plan.temporal_scope),
+        "recall_contract_id": _clean_text(plan.recall_contract_id),
+        "need_type": _clean_text(need.get("need_type")),
+        "primary_memory_layer": _clean_text(plan.primary_memory_layer),
+        "expected_memory_layers": list(_unique(list(plan.expected_memory_layers or []))),
+        "target_store_ids": list(_unique(list(plan.target_store_ids or []))),
+        "target_domains": list(_unique(list(plan.target_domains or []))),
+        "validation_requirements": list(_unique(list(plan.validation_requirements or []))),
+        "answer_obligations": list(_unique(list(plan.answer_obligations or []))),
+        "evidence_depth": _clean_text(need.get("evidence_depth")),
+        "min_collection_items": max(0, _coerce_int(plan.min_collection_items)),
+        "time_lookback_days": plan.time_lookback_days,
+        "max_facts": max(0, _coerce_int(plan.max_facts)),
+        "max_chars_per_fact": max(0, _coerce_int(plan.max_chars_per_fact)),
+        "selection_basis": basis,
+    }
 
 
 def _build_recall_coverage_trace(
@@ -2923,6 +2990,7 @@ __all__ = [
     "SurfaceMemoryWriteResult",
     "apply_surface_memory_recall_packet",
     "build_surface_input_with_memory_recall",
+    "build_surface_memory_recall_decision_trace",
     "build_surface_memory_recall_query",
     "build_surface_memory_recall_packet",
     "build_surface_turn_memory_text",

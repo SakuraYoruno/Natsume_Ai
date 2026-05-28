@@ -20,6 +20,7 @@ from host_brain.persona.surface_memory_recall import (
     SURFACE_MEMORY_RECALL_VALIDATION_FAILED,
     SurfaceMemoryRecallPacket,
     build_surface_input_with_memory_recall,
+    build_surface_memory_recall_decision_trace,
     build_surface_memory_recall_packet,
     build_surface_memory_recall_query,
     build_surface_turn_memory_text,
@@ -675,6 +676,10 @@ def test_plan_surface_memory_recall_routes_dated_event_lookup_to_life_episode() 
     assert plan.target_store_ids[:2] == ("life_episode", "life_memory_collection")
     assert plan.time_lookback_days == 2
     assert plan.validation_requirements == ("event_time_scope_match", "event_or_collection_hit", "source_ref_present")
+    decision = build_surface_memory_recall_decision_trace(plan, invoked=True)
+    assert decision["need_type"] == "episode_event"
+    assert decision["primary_memory_layer"] == "life_episode"
+    assert "event_time_scope_match" in decision["validation_requirements"]
 
 
 def test_preference_rule_recall_does_not_leak_same_domain_collection_rows() -> None:
@@ -771,6 +776,12 @@ def test_recall_surface_memory_for_context_uses_plan_and_skips_without_calling_r
     assert packet.facts == ()
     assert packet.reason_code == SURFACE_MEMORY_RECALL_SKIPPED
     assert dict(packet.trace or {})["skipped"] is True
+    decision = dict(dict(packet.trace or {})["recall_decision"])
+    assert decision["schema"] == "Natsume.surface_recall_decision.v1"
+    assert decision["decision"] == "skip"
+    assert decision["invoked"] is False
+    assert decision["skip_reason"] == "low_signal_surface_turn"
+    assert decision["recall_policy"] == RECALL_POLICY_NO
 
 
 def test_recall_surface_memory_for_context_passes_current_chain_plan_to_recall() -> None:
@@ -796,6 +807,12 @@ def test_recall_surface_memory_for_context_passes_current_chain_plan_to_recall()
     assert "技术场景优先 usefulness" in str(captured["query"])
     assert len(packet.facts) <= 3
     assert dict(packet.trace or {})["plan"]["reason"] == "technical_user_memory_context"
+    decision = dict(dict(packet.trace or {})["recall_decision"])
+    assert decision["decision"] == "recall"
+    assert decision["invoked"] is True
+    assert decision["recall_policy"] == RECALL_POLICY_MAY
+    assert decision["primary_memory_layer"] == ""
+    assert "life_episode" in decision["target_store_ids"]
 
 
 def test_recall_surface_memory_for_context_attaches_validation_receipt_for_collection_scope() -> None:

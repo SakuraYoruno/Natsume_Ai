@@ -62,6 +62,29 @@ def test_normalize_retrieval_summary_keeps_safe_surface_memory_trace() -> None:
                         "max_facts": 3,
                         "target_store_ids": ["life_episode", "semantic_memory"],
                     },
+                    "recall_decision": {
+                        "schema": "Natsume.surface_recall_decision.v1",
+                        "decision": "recall",
+                        "invoked": True,
+                        "recall_policy": "MUST_RECALL",
+                        "reason": "anaphoric_selection_recall",
+                        "task_mode": "daily_chat",
+                        "query_kind": "anaphoric_selection",
+                        "temporal_scope": "current",
+                        "recall_contract_id": "anaphoric_selection",
+                        "need_type": "collection_selection",
+                        "primary_memory_layer": "life_memory_collection",
+                        "expected_memory_layers": ["life_memory_collection", "life_episode"],
+                        "target_store_ids": ["life_memory_collection", "life_episode"],
+                        "target_domains": ["lightnovel_recommendation"],
+                        "validation_requirements": ["collection_or_episode_hit", "evidence_refs_present"],
+                        "answer_obligations": ["ground_selection_in_recalled_items"],
+                        "evidence_depth": "detail_or_body_evidence",
+                        "min_collection_items": 3,
+                        "time_lookback_days": 1,
+                        "max_facts": 5,
+                        "selection_basis": ["policy:MUST_RECALL", "reason:anaphoric_selection_recall"],
+                    },
                     "route_count": 4,
                     "recall_need": {
                         "schema": "Natsume.surface_recall_need.v1",
@@ -117,6 +140,11 @@ def test_normalize_retrieval_summary_keeps_safe_surface_memory_trace() -> None:
     trace = summary["surface_memory_trace"]
     assert trace["plan"]["reason"] == "anaphoric_selection_recall"
     assert trace["route_count"] == 4
+    assert trace["recall_decision"]["schema"] == "Natsume.surface_recall_decision.v1"
+    assert trace["recall_decision"]["decision"] == "recall"
+    assert trace["recall_decision"]["need_type"] == "collection_selection"
+    assert trace["recall_decision"]["target_store_ids"] == ["life_memory_collection", "life_episode"]
+    assert "policy:MUST_RECALL" in trace["recall_decision"]["selection_basis"]
     assert trace["recall_need"]["need_type"] == "collection_selection"
     assert trace["recall_need"]["evidence_depth"] == "detail_or_body_evidence"
     assert trace["recall_coverage"]["score"] == 1.0

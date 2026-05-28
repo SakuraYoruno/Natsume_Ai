@@ -376,6 +376,33 @@ def _surface_memory_trace_for_audit(summary: Mapping[str, Any] | None) -> dict[s
         if key in trace:
             out[key] = bool(trace.get(key)) if key in {"skipped", "short_term_explicit_memory"} else _safe_int(trace.get(key), default=0)
 
+    decision = _coerce_trace_mapping(trace.get("recall_decision"))
+    if decision:
+        out["recall_decision"] = {
+            "schema": str(decision.get("schema") or ""),
+            "decision": str(decision.get("decision") or ""),
+            "invoked": bool(decision.get("invoked")),
+            "skip_reason": str(decision.get("skip_reason") or ""),
+            "recall_policy": str(decision.get("recall_policy") or ""),
+            "reason": str(decision.get("reason") or ""),
+            "task_mode": str(decision.get("task_mode") or ""),
+            "query_kind": str(decision.get("query_kind") or ""),
+            "temporal_scope": str(decision.get("temporal_scope") or ""),
+            "recall_contract_id": str(decision.get("recall_contract_id") or ""),
+            "need_type": str(decision.get("need_type") or ""),
+            "primary_memory_layer": str(decision.get("primary_memory_layer") or ""),
+            "expected_memory_layers": [str(item) for item in list(decision.get("expected_memory_layers") or [])[:8]],
+            "target_store_ids": [str(item) for item in list(decision.get("target_store_ids") or [])[:8]],
+            "target_domains": [str(item) for item in list(decision.get("target_domains") or [])[:8]],
+            "validation_requirements": [str(item) for item in list(decision.get("validation_requirements") or [])[:8]],
+            "answer_obligations": [str(item) for item in list(decision.get("answer_obligations") or [])[:8]],
+            "evidence_depth": str(decision.get("evidence_depth") or ""),
+            "min_collection_items": _safe_int(decision.get("min_collection_items"), default=0),
+            "time_lookback_days": decision.get("time_lookback_days"),
+            "max_facts": _safe_int(decision.get("max_facts"), default=0),
+            "selection_basis": [str(item) for item in list(decision.get("selection_basis") or [])[:12]],
+        }
+
     need = _coerce_trace_mapping(trace.get("recall_need"))
     if need:
         out["recall_need"] = {
