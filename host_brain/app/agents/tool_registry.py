@@ -755,6 +755,7 @@ def _tool_dispatch_sub_agent(args: dict[str, Any]) -> dict[str, Any]:
             session_id=session_id,
             task=task_text,
             user_message=user_message,
+            agent_id=agent_id,
             parent_agent_id=str(ctx.get("agent_id") or "intent_agent"),
             timeout_ms=timeout_ms,
         )

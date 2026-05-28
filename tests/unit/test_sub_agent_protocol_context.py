@@ -221,12 +221,13 @@ def test_dispatcher_builds_bounded_agent_context_envelope() -> None:
     assert "retrieval_summary" not in context
     assert context["custom"] == "VALUE"
     assert context["api_key"] == "[REDACTED]"
-    assert len(envelope["conversation_window"]["recent_turns"]) == 8
-    assert envelope["conversation_window"]["recent_turns"][0]["content"].startswith("turn-4")
-    assert len(envelope["conversation_window"]["recent_turns"][0]["content"]) <= 600
+    assert len(envelope["conversation_window"]["recent_turns"]) == 4
+    assert envelope["conversation_window"]["recent_turns"][0]["content"].startswith("turn-8")
+    assert len(envelope["conversation_window"]["recent_turns"][0]["content"]) <= 700
     assert envelope["memory_packet"]["facts"] == ["长期记忆：用户偏好推荐按卡片分段。"]
     assert envelope["semantic_facts"] == ["长期记忆：用户偏好推荐按卡片分段。"]
     assert envelope["evidence_pack"]["items"][0]["source_ref"] == "life_episode://ep-1"
-    assert result.audit_refs["agent_context"]["conversation_turns"] == 8
+    assert envelope["trace"]["context_profile"] == "translate"
+    assert result.audit_refs["agent_context"]["conversation_turns"] == 4
     assert result.audit_refs["agent_context"]["memory_fact_count"] == 1
     assert result.audit_refs["agent_context"]["evidence_item_count"] == 1

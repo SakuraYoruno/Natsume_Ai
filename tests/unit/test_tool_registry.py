@@ -559,6 +559,7 @@ class TestIntentAgentExecutionTools:
         assert ctx["surface_memory_recall_packet"]["facts"] == ["长期记忆：用户偏好翻译保留术语表。"]
         assert ctx["conversation_window"]["older_summary"] == "更早些时候在测试子 agent 上下文。"
         assert len(ctx["conversation_window"]["recent_turns"]) == 2
+        assert captured["history_kwargs"]["max_turns"] == 4
         assert captured["history_kwargs"]["exclude_request_id"] == "req_tool_sub_agent_hydrate"
 
     def test_dispatch_sub_agent_blocks_self_recursion(self):

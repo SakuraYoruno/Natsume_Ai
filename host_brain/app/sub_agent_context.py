@@ -89,6 +89,138 @@ class AgentContextEnvelope:
         }
 
 
+@dataclass(frozen=True)
+class AgentContextProfile:
+    profile_id: str
+    recent_turn_limit: int = MAX_RECENT_TURNS
+    turn_chars: int = MAX_TURN_CHARS
+    summary_chars: int = MAX_SUMMARY_CHARS
+    memory_fact_limit: int = MAX_FACTS
+    memory_fact_chars: int = MAX_FACT_CHARS
+    relationship_limit: int = 4
+    style_limit: int = 4
+    must_not_limit: int = 6
+    evidence_ref_limit: int = MAX_FACTS
+    source_ref_limit: int = MAX_FACTS
+    evidence_item_limit: int = MAX_EVIDENCE_ITEMS
+    evidence_chars: int = MAX_EVIDENCE_CHARS
+    semantic_fact_limit: int = MAX_FACTS
+    semantic_fact_chars: int = MAX_FACT_CHARS
+    scratchpad_chars: int = 700
+
+
+_DEFAULT_AGENT_CONTEXT_PROFILE = AgentContextProfile(profile_id="default")
+
+_AGENT_CONTEXT_PROFILES: dict[str, AgentContextProfile] = {
+    "translate_agent": AgentContextProfile(
+        profile_id="translate",
+        recent_turn_limit=4,
+        turn_chars=700,
+        summary_chars=500,
+        memory_fact_limit=4,
+        relationship_limit=2,
+        style_limit=4,
+        must_not_limit=6,
+        evidence_ref_limit=4,
+        source_ref_limit=4,
+        evidence_item_limit=4,
+        evidence_chars=420,
+        semantic_fact_limit=4,
+        scratchpad_chars=500,
+    ),
+    "intent_agent": AgentContextProfile(
+        profile_id="intent",
+        recent_turn_limit=4,
+        turn_chars=500,
+        summary_chars=450,
+        memory_fact_limit=4,
+        relationship_limit=0,
+        style_limit=0,
+        must_not_limit=6,
+        evidence_ref_limit=4,
+        source_ref_limit=4,
+        evidence_item_limit=6,
+        evidence_chars=480,
+        semantic_fact_limit=3,
+        scratchpad_chars=500,
+    ),
+    "repair_agent": AgentContextProfile(
+        profile_id="repair",
+        recent_turn_limit=3,
+        turn_chars=650,
+        summary_chars=300,
+        memory_fact_limit=3,
+        relationship_limit=0,
+        style_limit=0,
+        must_not_limit=4,
+        evidence_ref_limit=4,
+        source_ref_limit=4,
+        evidence_item_limit=8,
+        evidence_chars=700,
+        semantic_fact_limit=2,
+        scratchpad_chars=900,
+    ),
+    "retrieval_agent": AgentContextProfile(
+        profile_id="retrieval",
+        recent_turn_limit=3,
+        turn_chars=500,
+        summary_chars=360,
+        memory_fact_limit=4,
+        relationship_limit=0,
+        style_limit=0,
+        must_not_limit=3,
+        evidence_ref_limit=8,
+        source_ref_limit=8,
+        evidence_item_limit=8,
+        evidence_chars=520,
+        semantic_fact_limit=4,
+        scratchpad_chars=400,
+    ),
+    "vision_agent": AgentContextProfile(
+        profile_id="vision",
+        recent_turn_limit=3,
+        turn_chars=500,
+        summary_chars=360,
+        memory_fact_limit=4,
+        relationship_limit=0,
+        style_limit=0,
+        must_not_limit=6,
+        evidence_ref_limit=6,
+        source_ref_limit=6,
+        evidence_item_limit=8,
+        evidence_chars=520,
+        semantic_fact_limit=2,
+        scratchpad_chars=500,
+    ),
+    "judge_agent": AgentContextProfile(
+        profile_id="judge",
+        recent_turn_limit=2,
+        turn_chars=500,
+        summary_chars=300,
+        memory_fact_limit=3,
+        relationship_limit=0,
+        style_limit=0,
+        must_not_limit=4,
+        evidence_ref_limit=6,
+        source_ref_limit=6,
+        evidence_item_limit=8,
+        evidence_chars=560,
+        semantic_fact_limit=2,
+        scratchpad_chars=500,
+    ),
+}
+
+
+def profile_for_sub_agent(agent_id: str) -> AgentContextProfile:
+    normalized = str(agent_id or "").strip().lower()
+    return _AGENT_CONTEXT_PROFILES.get(normalized, _DEFAULT_AGENT_CONTEXT_PROFILE)
+
+
+def sub_agent_history_turn_limit(agent_id: str) -> int:
+    profile = profile_for_sub_agent(agent_id)
+    return max(1, int(profile.recent_turn_limit or MAX_RECENT_TURNS))
+
+
 def build_agent_context_envelope(
     *,
     agent_id: str,
@@ -100,15 +232,18 @@ def build_agent_context_envelope(
     timeout_ms: int | None = None,
 ) -> AgentContextEnvelope:
     raw = dict(context or {})
+    profile = profile_for_sub_agent(agent_id)
     trace: dict[str, Any] = {
+        "context_profile": profile.profile_id,
+        "profile_recent_turn_limit": profile.recent_turn_limit,
         "source_keys": sorted(str(key) for key in raw.keys()),
         "truncated_fields": [],
         "dropped_legacy_keys": sorted(key for key in raw.keys() if str(key) in _BULKY_CONTEXT_KEYS),
     }
-    conversation_window = _build_conversation_window(raw, trace=trace)
-    memory_packet = _build_memory_packet(raw, trace=trace)
-    semantic_facts = _semantic_facts(raw, memory_packet=memory_packet, trace=trace)
-    evidence_pack = _build_evidence_pack(raw, trace=trace)
+    conversation_window = _build_conversation_window(raw, profile=profile, trace=trace)
+    memory_packet = _build_memory_packet(raw, profile=profile, trace=trace)
+    semantic_facts = _semantic_facts(raw, memory_packet=memory_packet, profile=profile, trace=trace)
+    evidence_pack = _build_evidence_pack(raw, profile=profile, trace=trace)
     tool_budget = _build_tool_budget(raw, timeout_ms=timeout_ms)
     forbidden_context = _forbidden_context(raw)
     metadata = _metadata_projection(raw, trace=trace)
@@ -125,7 +260,7 @@ def build_agent_context_envelope(
         evidence_pack=evidence_pack,
         tool_budget=tool_budget,
         forbidden_context=forbidden_context,
-        scratchpad_summary=_text(raw.get("scratchpad_summary"), limit=700, trace=trace, field="scratchpad_summary"),
+        scratchpad_summary=_text(raw.get("scratchpad_summary"), limit=profile.scratchpad_chars, trace=trace, field="scratchpad_summary"),
         metadata=metadata,
         trace=trace,
     )
@@ -168,9 +303,10 @@ def hydrate_sub_agent_context(
     session_id: str,
     task: str = "",
     user_message: str = "",
+    agent_id: str = "",
     parent_agent_id: str = "",
     timeout_ms: int | None = None,
-    history_max_turns: int = MAX_RECENT_TURNS,
+    history_max_turns: int | None = None,
 ) -> dict[str, Any]:
     """Fill common sub-agent context anchors before the envelope is built.
 
@@ -179,6 +315,7 @@ def hydrate_sub_agent_context(
     """
 
     hydrated = dict(context or {})
+    profile = profile_for_sub_agent(agent_id)
     if parent_agent_id:
         hydrated.setdefault("parent_agent_id", _text(parent_agent_id, limit=80))
     hydrated.setdefault("source", "sub_agent_context_hydrator")
@@ -198,10 +335,13 @@ def hydrate_sub_agent_context(
             hydrated["surface_memory_recall_packet"] = dict(packet)
 
     if session_id and not isinstance(hydrated.get("conversation_window"), Mapping) and "recent_turns" not in hydrated:
+        effective_max_turns = history_max_turns if history_max_turns is not None else profile.recent_turn_limit
         window = _fetch_conversation_window(
             session_id=session_id,
             request_id=request_id,
-            max_turns=max(1, int(history_max_turns or MAX_RECENT_TURNS)),
+            max_turns=max(1, int(effective_max_turns or MAX_RECENT_TURNS)),
+            turn_chars=profile.turn_chars,
+            summary_chars=profile.summary_chars,
         )
         if window:
             hydrated["conversation_window"] = window
@@ -227,7 +367,14 @@ def render_agent_context_envelope_for_prompt(context: Mapping[str, Any] | None) 
     )
 
 
-def _fetch_conversation_window(*, session_id: str, request_id: str, max_turns: int) -> dict[str, Any]:
+def _fetch_conversation_window(
+    *,
+    session_id: str,
+    request_id: str,
+    max_turns: int,
+    turn_chars: int = MAX_TURN_CHARS,
+    summary_chars: int = MAX_SUMMARY_CHARS,
+) -> dict[str, Any]:
     try:
         from host_brain.app.dependencies import get_conversation_history  # noqa: PLC0415
 
@@ -242,21 +389,27 @@ def _fetch_conversation_window(*, session_id: str, request_id: str, max_turns: i
     turns = []
     for turn in list(getattr(window, "recent_turns", []) or []):
         role = _text(getattr(turn, "role", ""), limit=32)
-        content = _text(getattr(turn, "content", ""), limit=MAX_TURN_CHARS)
+        content = _text(getattr(turn, "content", ""), limit=turn_chars)
         if content:
             turns.append({"role": role or "context", "content": content})
+    selected = turns[-max_turns:]
     return _drop_empty(
         {
-            "recent_turns": turns[-MAX_RECENT_TURNS:],
-            "older_summary": _text(getattr(window, "older_summary", ""), limit=MAX_SUMMARY_CHARS),
+            "recent_turns": selected,
+            "older_summary": _text(getattr(window, "older_summary", ""), limit=summary_chars),
             "older_turn_count": int(getattr(window, "older_turn_count", 0) or 0),
-            "turns_injected": len(turns[-MAX_RECENT_TURNS:]),
+            "turns_injected": len(selected),
             "fetched_turns": int(getattr(window, "fetched_count", 0) or len(turns)),
         }
     )
 
 
-def _build_conversation_window(raw: Mapping[str, Any], *, trace: dict[str, Any]) -> dict[str, Any]:
+def _build_conversation_window(
+    raw: Mapping[str, Any],
+    *,
+    profile: AgentContextProfile,
+    trace: dict[str, Any],
+) -> dict[str, Any]:
     source = raw.get("conversation_window")
     recent: Any = None
     older_summary = raw.get("older_summary") or raw.get("mid_term_summary") or ""
@@ -270,18 +423,33 @@ def _build_conversation_window(raw: Mapping[str, Any], *, trace: dict[str, Any])
             older_turn_count = 0
     if recent is None:
         recent = raw.get("recent_turns") or raw.get("history_turns") or []
-    turns = _recent_turns(recent, trace=trace)
+    turns = _recent_turns(
+        recent,
+        limit=profile.recent_turn_limit,
+        max_chars=profile.turn_chars,
+        trace=trace,
+    )
     return _drop_empty(
         {
             "recent_turns": turns,
-            "older_summary": _text(older_summary, limit=MAX_SUMMARY_CHARS, trace=trace, field="conversation_window.older_summary"),
+            "older_summary": _text(
+                older_summary,
+                limit=profile.summary_chars,
+                trace=trace,
+                field="conversation_window.older_summary",
+            ),
             "older_turn_count": older_turn_count,
             "turns_injected": len(turns),
         }
     )
 
 
-def _build_memory_packet(raw: Mapping[str, Any], *, trace: dict[str, Any]) -> dict[str, Any]:
+def _build_memory_packet(
+    raw: Mapping[str, Any],
+    *,
+    profile: AgentContextProfile,
+    trace: dict[str, Any],
+) -> dict[str, Any]:
     packet = (
         raw.get("episode_recall_packet")
         or raw.get("surface_memory_recall_packet")
@@ -293,30 +461,43 @@ def _build_memory_packet(raw: Mapping[str, Any], *, trace: dict[str, Any]) -> di
         return {}
     return _drop_empty(
         {
-            "facts": _text_list(packet.get("facts"), limit=MAX_FACTS, max_chars=MAX_FACT_CHARS, trace=trace, field="memory_packet.facts"),
-            "relationship_clues": _text_list(packet.get("relationship_clues"), limit=4, max_chars=MAX_FACT_CHARS, trace=trace, field="memory_packet.relationship_clues"),
-            "style_anchor": _text_list(packet.get("style_anchor"), limit=4, max_chars=180, trace=trace, field="memory_packet.style_anchor"),
-            "must_not_do": _text_list(packet.get("must_not_do"), limit=6, max_chars=180, trace=trace, field="memory_packet.must_not_do"),
-            "evidence_refs": _text_list(packet.get("evidence_refs"), limit=MAX_FACTS, max_chars=180, trace=trace, field="memory_packet.evidence_refs"),
-            "source_refs": _text_list(packet.get("source_refs"), limit=MAX_FACTS, max_chars=180, trace=trace, field="memory_packet.source_refs"),
+            "facts": _text_list(packet.get("facts"), limit=profile.memory_fact_limit, max_chars=profile.memory_fact_chars, trace=trace, field="memory_packet.facts"),
+            "relationship_clues": _text_list(packet.get("relationship_clues"), limit=profile.relationship_limit, max_chars=profile.memory_fact_chars, trace=trace, field="memory_packet.relationship_clues"),
+            "style_anchor": _text_list(packet.get("style_anchor"), limit=profile.style_limit, max_chars=180, trace=trace, field="memory_packet.style_anchor"),
+            "must_not_do": _text_list(packet.get("must_not_do"), limit=profile.must_not_limit, max_chars=180, trace=trace, field="memory_packet.must_not_do"),
+            "evidence_refs": _text_list(packet.get("evidence_refs"), limit=profile.evidence_ref_limit, max_chars=180, trace=trace, field="memory_packet.evidence_refs"),
+            "source_refs": _text_list(packet.get("source_refs"), limit=profile.source_ref_limit, max_chars=180, trace=trace, field="memory_packet.source_refs"),
             "confidence": packet.get("confidence"),
             "reason_code": _text(packet.get("reason_code"), limit=120),
         }
     )
 
 
-def _semantic_facts(raw: Mapping[str, Any], *, memory_packet: Mapping[str, Any], trace: dict[str, Any]) -> list[str]:
+def _semantic_facts(
+    raw: Mapping[str, Any],
+    *,
+    memory_packet: Mapping[str, Any],
+    profile: AgentContextProfile,
+    trace: dict[str, Any],
+) -> list[str]:
+    if profile.semantic_fact_limit <= 0:
+        return []
     facts: list[str] = []
-    facts.extend(_text_list(raw.get("semantic_facts"), limit=MAX_FACTS, max_chars=MAX_FACT_CHARS, trace=trace, field="semantic_facts"))
-    facts.extend(_text_list(raw.get("long_term_facts"), limit=MAX_FACTS, max_chars=MAX_FACT_CHARS, trace=trace, field="long_term_facts"))
+    facts.extend(_text_list(raw.get("semantic_facts"), limit=profile.semantic_fact_limit, max_chars=profile.semantic_fact_chars, trace=trace, field="semantic_facts"))
+    facts.extend(_text_list(raw.get("long_term_facts"), limit=profile.semantic_fact_limit, max_chars=profile.semantic_fact_chars, trace=trace, field="long_term_facts"))
     for fact in list(memory_packet.get("facts") or []):
-        text = _text(fact, limit=MAX_FACT_CHARS)
+        text = _text(fact, limit=profile.semantic_fact_chars)
         if text.startswith(("长期记忆", "长期事实", "用户偏好", "稳定事实")):
             facts.append(text)
-    return list(dict.fromkeys(facts))[:MAX_FACTS]
+    return list(dict.fromkeys(facts))[:profile.semantic_fact_limit]
 
 
-def _build_evidence_pack(raw: Mapping[str, Any], *, trace: dict[str, Any]) -> dict[str, Any]:
+def _build_evidence_pack(
+    raw: Mapping[str, Any],
+    *,
+    profile: AgentContextProfile,
+    trace: dict[str, Any],
+) -> dict[str, Any]:
     source = raw.get("evidence_pack") or raw.get("retrieval_evidence_items") or []
     if isinstance(source, Mapping):
         raw_items = source.get("candidates") or source.get("items") or source.get("evidence_items") or []
@@ -326,10 +507,10 @@ def _build_evidence_pack(raw: Mapping[str, Any], *, trace: dict[str, Any]) -> di
         pack_id = ""
     items: list[dict[str, Any]] = []
     if isinstance(raw_items, Sequence) and not isinstance(raw_items, (str, bytes, bytearray)):
-        for index, item in enumerate(list(raw_items)[:MAX_EVIDENCE_ITEMS]):
+        for index, item in enumerate(list(raw_items)[: max(0, int(profile.evidence_item_limit))]):
             if not isinstance(item, Mapping):
                 continue
-            snippet = _text(item.get("snippet") or item.get("text") or item.get("content"), limit=MAX_EVIDENCE_CHARS, trace=trace, field=f"evidence_pack.items.{index}.snippet")
+            snippet = _text(item.get("snippet") or item.get("text") or item.get("content"), limit=profile.evidence_chars, trace=trace, field=f"evidence_pack.items.{index}.snippet")
             source_ref = _text(item.get("source_ref") or item.get("evidence_ref"), limit=180)
             if not snippet and not source_ref:
                 continue
@@ -385,19 +566,26 @@ def _metadata_projection(raw: Mapping[str, Any], *, trace: dict[str, Any]) -> di
     return _drop_empty(projected)
 
 
-def _recent_turns(raw_turns: Any, *, trace: dict[str, Any]) -> list[dict[str, str]]:
+def _recent_turns(
+    raw_turns: Any,
+    *,
+    limit: int = MAX_RECENT_TURNS,
+    max_chars: int = MAX_TURN_CHARS,
+    trace: dict[str, Any],
+) -> list[dict[str, str]]:
     if isinstance(raw_turns, (str, bytes, bytearray)) or not isinstance(raw_turns, Sequence):
         return []
     rows = list(raw_turns)
-    selected = rows[-MAX_RECENT_TURNS:]
+    normalized_limit = max(0, int(limit))
+    selected = rows[-normalized_limit:] if normalized_limit else []
     result: list[dict[str, str]] = []
     for index, raw in enumerate(selected):
         if isinstance(raw, Mapping):
             role = _text(raw.get("role") or raw.get("speaker"), limit=32)
-            content = _text(raw.get("content") or raw.get("text"), limit=MAX_TURN_CHARS, trace=trace, field=f"conversation_window.recent_turns.{index}.content")
+            content = _text(raw.get("content") or raw.get("text"), limit=max_chars, trace=trace, field=f"conversation_window.recent_turns.{index}.content")
         else:
             role = "context"
-            content = _text(raw, limit=MAX_TURN_CHARS, trace=trace, field=f"conversation_window.recent_turns.{index}.content")
+            content = _text(raw, limit=max_chars, trace=trace, field=f"conversation_window.recent_turns.{index}.content")
         if content:
             result.append({"role": role or "context", "content": content})
     if len(rows) > len(selected):
@@ -469,9 +657,12 @@ def _drop_empty(value: dict[str, Any]) -> dict[str, Any]:
 
 
 __all__ = [
+    "AgentContextProfile",
     "AgentContextEnvelope",
     "build_agent_context_envelope",
     "hydrate_sub_agent_context",
+    "profile_for_sub_agent",
     "project_legacy_context_for_sub_agent",
     "render_agent_context_envelope_for_prompt",
+    "sub_agent_history_turn_limit",
 ]
