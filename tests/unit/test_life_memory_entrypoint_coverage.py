@@ -39,6 +39,32 @@ def test_coverage_report_flags_missing_required_entrypoint() -> None:
         ledger.close()
 
 
+def test_coverage_report_classifies_surface_memory_recall_action_as_generic_tool_action() -> None:
+    ledger = SQLiteLedger(db_path=":memory:")
+    try:
+        store = LifeMemoryStore(ledger=ledger)
+        store.write_background_episode(
+            event_source="surface_memory_recall",
+            event_id="deep-review-1",
+            person_id="owner",
+            session_id="qq_dm_owner",
+            task_id="lightnovel_recommendation_deep_review",
+            status="OK",
+            reason_code="LIGHTNOVEL_DEEP_REVIEW_OK",
+            detail="翻看轻小说详情和正文后形成比较判断。",
+            ts_ms=1_800_000_000_000,
+            metadata={"action_kind": "lightnovel_recommendation_deep_review"},
+        )
+
+        report = build_coverage_report(ledger._conn, include_synthetic=True)
+        counts = {item["entrypoint"]: int(item["count"]) for item in report["entrypoint_counts"]}
+
+        assert counts.get("generic_tool_action", 0) == 1
+        assert counts.get("unclassified", 0) == 0
+    finally:
+        ledger.close()
+
+
 def test_coverage_report_audits_semantic_memory_life_sources() -> None:
     ledger = SQLiteLedger(db_path=":memory:")
     try:

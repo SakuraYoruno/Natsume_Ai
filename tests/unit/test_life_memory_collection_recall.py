@@ -288,5 +288,8 @@ def test_surface_packet_keeps_many_recent_collection_items() -> None:
         assert "Yesterday C" in joined
         assert "Today C" in joined
         assert "详情：" not in joined
+        trace_items = list((packet.trace or {}).get("selected_collection_items") or [])
+        assert len(trace_items) == 9
+        assert any(item["title"] == "DayBefore A" and item["detail_url"].endswith("daybefore-a") for item in trace_items)
     finally:
         ledger.close()

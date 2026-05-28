@@ -52,7 +52,7 @@ def should_deep_review_lightnovel_selection(*, user_message: str, packet: Mappin
         return False
     if not any(token in facts for token in ("轻小说", "lightnovel", "lightnovel.fun", "可比较证据")):
         return False
-    return bool(_DETAIL_URL_RE.search(facts)) or "推荐了" in facts
+    return bool(_DETAIL_URL_RE.search(facts)) or _trace_has_detail_refs(packet) or "推荐了" in facts
 
 
 def review_lightnovel_selection_from_memory_packet(
@@ -67,7 +67,7 @@ def review_lightnovel_selection_from_memory_packet(
 ) -> dict[str, Any]:
     cards = _extract_cards(packet)
     timeout_value = int(timeout_s or os.environ.get("HOST_LIGHTNOVEL_DEEP_REVIEW_TIMEOUT_S") or 12)
-    max_items = int(os.environ.get("HOST_LIGHTNOVEL_DEEP_REVIEW_MAX_ITEMS") or 3)
+    max_items = _review_item_limit(user_message=user_message, card_count=len(cards))
     cards = cards[: max(1, min(max_items, 6))]
     signature = _cards_signature(cards)
     if not cards:
@@ -377,8 +377,8 @@ def _safe_json_dict(value: Any) -> dict[str, Any]:
 
 
 def _extract_cards(packet: Mapping[str, Any]) -> list[dict[str, Any]]:
+    cards = _extract_trace_cards(packet)
     facts = [str(item or "") for item in list(packet.get("facts") or [])]
-    cards: list[dict[str, Any]] = []
     for fact in facts:
         if _is_deep_review_memory_fact(fact):
             continue
@@ -391,6 +391,57 @@ def _extract_cards(packet: Mapping[str, Any]) -> list[dict[str, Any]]:
             if card and not any(_same_card(card, old) for old in cards):
                 cards.append(card)
     return cards
+
+
+def _trace_has_detail_refs(packet: Mapping[str, Any]) -> bool:
+    return any(_normalize_detail_url(str(item.get("detail_url") or "")) for item in _trace_collection_items(packet))
+
+
+def _extract_trace_cards(packet: Mapping[str, Any]) -> list[dict[str, Any]]:
+    cards: list[dict[str, Any]] = []
+    for index, item in enumerate(_trace_collection_items(packet), start=1):
+        title = _clean_text(item.get("title"), limit=120)
+        detail_url = _normalize_detail_url(str(item.get("detail_url") or item.get("source_ref") or ""))
+        if not title and not detail_url:
+            continue
+        card = {
+            "index": int(item.get("index") or index),
+            "title": title,
+            "detail_url": detail_url,
+            "selection_reason": _clean_text(item.get("selection_reason"), limit=180),
+            "intro_snippet": _clean_text(item.get("intro_snippet"), limit=260),
+            "update_time": _clean_text(item.get("update_time"), limit=80),
+            "view_count": _clean_text(item.get("view_count"), limit=40),
+            "comment_count": _clean_text(item.get("comment_count"), limit=40),
+        }
+        card = {key: value for key, value in card.items() if value not in ("", 0, None, [], {})}
+        if card and not any(_same_card(card, old) for old in cards):
+            cards.append(card)
+    return cards
+
+
+def _trace_collection_items(packet: Mapping[str, Any]) -> list[Mapping[str, Any]]:
+    trace = packet.get("trace")
+    if not isinstance(trace, Mapping):
+        return []
+    raw_items = trace.get("selected_collection_items")
+    if not isinstance(raw_items, Sequence) or isinstance(raw_items, (str, bytes, bytearray)):
+        return []
+    return [dict(item) for item in raw_items if isinstance(item, Mapping)]
+
+
+def _review_item_limit(*, user_message: str, card_count: int) -> int:
+    raw = str(os.environ.get("HOST_LIGHTNOVEL_DEEP_REVIEW_MAX_ITEMS") or "").strip()
+    if raw:
+        try:
+            return max(1, int(raw))
+        except ValueError:
+            pass
+    text = _clean_text(user_message)
+    broad = any(token in text for token in ("十几本", "这几天", "最近", "全部", "所有", "哪些"))
+    if broad:
+        return min(max(3, int(card_count or 0)), 6)
+    return 3
 
 
 def _is_deep_review_memory_fact(fact: str) -> bool:

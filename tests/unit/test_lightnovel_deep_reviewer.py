@@ -120,6 +120,36 @@ def test_lightnovel_card_extraction_ignores_previous_deep_review_fact() -> None:
     ]
 
 
+def test_lightnovel_deep_review_extracts_machine_readable_collection_items() -> None:
+    packet = {
+        "facts": ["集合记忆：最近轻小说推荐集合，记录 15 个条目；可比较证据：1. A｜看点：恋爱日常；2. B｜看点：奇幻身份"],
+        "trace": {
+            "selected_collection_items": [
+                {
+                    "index": 1,
+                    "title": "A",
+                    "detail_url": "https://www.lightnovel.fun/cn/detail/1",
+                    "selection_reason": "恋爱日常",
+                },
+                {
+                    "index": 2,
+                    "title": "B",
+                    "detail_url": "https://www.lightnovel.fun/cn/detail/2",
+                    "selection_reason": "奇幻身份钩子",
+                },
+            ]
+        },
+    }
+
+    assert should_deep_review_lightnovel_selection(user_message="这十几本里哪本好看？", packet=packet)
+    cards = _extract_cards(packet)
+    assert [card["title"] for card in cards[:2]] == ["A", "B"]
+    assert [card["detail_url"] for card in cards[:2]] == [
+        "https://www.lightnovel.fun/cn/detail/1",
+        "https://www.lightnovel.fun/cn/detail/2",
+    ]
+
+
 def test_lightnovel_deep_review_uses_cached_life_episode_without_fetch(monkeypatch) -> None:  # noqa: ANN001
     packet = {
         "facts": [

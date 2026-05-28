@@ -613,6 +613,12 @@ def build_surface_memory_recall_packet(
         "selected_bond_count": len(relationship_rows),
         "store_counts": dict(sorted(store_counts.items())),
     }
+    selected_collection_items = _selected_collection_items_for_trace(
+        candidates=candidates_for_selection,
+        rows=rows,
+    )
+    if selected_collection_items:
+        trace["selected_collection_items"] = selected_collection_items
     if validation_trace["required"]:
         trace["validation"] = validation_trace
     if validation_failed:
@@ -905,6 +911,87 @@ def _candidate_source_refs(candidates: Sequence[Mapping[str, Any]]) -> list[str]
         for value in (candidate.get("source_ref"), metadata.get("source_ref"), metadata.get("primary_ref")):
             refs.extend(_coerce_sequence(value))
     return _unique(refs)
+
+
+def _selected_collection_items_for_trace(
+    *,
+    candidates: Sequence[Mapping[str, Any]],
+    rows: Sequence[SurfaceMemoryFactRow],
+) -> list[dict[str, Any]]:
+    selected_refs = {_clean_text(row.source_ref) for row in rows if _clean_text(row.source_ref)}
+    if not selected_refs:
+        return []
+    out: list[dict[str, Any]] = []
+    for candidate in candidates:
+        if _candidate_store_id(candidate) != "life_memory_collection":
+            continue
+        metadata = _candidate_metadata(candidate)
+        source_ref = _clean_text(candidate.get("source_ref") or metadata.get("source_ref"))
+        if source_ref and source_ref not in selected_refs:
+            continue
+        collection_id = _clean_text(metadata.get("collection_id"))
+        scope_key = _clean_text(metadata.get("scope_key"))
+        for item in list(metadata.get("items") or [])[:24]:
+            if not isinstance(item, Mapping):
+                continue
+            card = _trace_collection_item_payload(
+                item,
+                collection_id=collection_id,
+                scope_key=scope_key,
+            )
+            if card and card not in out:
+                card["index"] = len(out) + 1
+                out.append(card)
+    return out
+
+
+def _trace_collection_item_payload(
+    item: Mapping[str, Any],
+    *,
+    collection_id: str,
+    scope_key: str,
+) -> dict[str, Any]:
+    metadata = item.get("metadata")
+    item_meta = dict(metadata) if isinstance(metadata, Mapping) else {}
+    title = _first_item_text(
+        {**item_meta, **dict(item)},
+        ("title", "title_display", "item_title", "name", "label"),
+        limit=120,
+    )
+    source_ref = _first_item_text(
+        {**item_meta, **dict(item)},
+        ("detail_url", "url", "source_url", "source_ref"),
+        limit=260,
+    )
+    if not title and not source_ref:
+        return {}
+    summary = _first_item_text(item, ("item_summary", "summary", "description", "intro_snippet", "intro"), limit=360)
+    return {
+        key: value
+        for key, value in {
+            "collection_id": collection_id,
+            "scope_key": scope_key,
+            "index": _coerce_int(item.get("position") or item_meta.get("position"), default=0),
+            "title": title,
+            "detail_url": source_ref if "lightnovel.fun" in source_ref else "",
+            "source_ref": source_ref,
+            "evidence_ref": _first_item_text(item, ("evidence_ref",), limit=260),
+            "selection_reason": _first_item_text(
+                {**item_meta, **dict(item)},
+                ("selection_reason", "rationale", "reason", "why", "look_point"),
+                limit=140,
+            ),
+            "intro_snippet": _first_item_text(
+                {**item_meta, **dict(item), "summary": summary},
+                ("intro_snippet", "intro", "description", "summary", "abstract"),
+                limit=220,
+            ),
+            "update_time": _first_item_text({**item_meta, **dict(item)}, ("update_time", "updated_at", "freshness"), limit=80),
+            "view_count": _first_item_text({**item_meta, **dict(item)}, ("view_count", "views"), limit=40),
+            "comment_count": _first_item_text({**item_meta, **dict(item)}, ("comment_count", "comments"), limit=40),
+        }.items()
+        if value not in ("", 0, None, [], {})
+    }
 
 
 def _contains_suppressed_candidate(candidates: Sequence[Mapping[str, Any]]) -> bool:

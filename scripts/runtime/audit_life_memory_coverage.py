@@ -339,7 +339,7 @@ def _infer_entrypoints(row: Mapping[str, Any], metadata: Mapping[str, Any]) -> l
     if kind == "perception_episode" or source in {"vision", "screen_ocr", "camera", "camera_recognition", "perception", "voice", "audio", "asr"}:
         add("perception_input")
     if kind == "action_episode" and (
-        source in {"skill", "mcp", "sandbox", "tool", "browser"}
+        source in {"skill", "mcp", "sandbox", "tool", "browser", "surface_memory_recall"}
         or action in {"skill", "mcp", "sandbox", "tool", "browser"}
         or any(prefix in evidence_source_refs for prefix in ("skill://exec/", "mcp://exec/", "sandbox://exec/"))
     ):
