@@ -82,7 +82,10 @@ def test_lightnovel_deep_review_fetches_detail_pages_and_builds_fact(monkeypatch
     assert result["recommendation_signature"]
     assert "网页深读结果（含正文）" in result["fact"]
     assert "与神在河岸" in result["fact"]
-    assert "正文内容足够支撑判断" in result["fact"]
+    assert "正文内容足够支撑判断" not in result["fact"]
+    assert "我回去打开详情页" not in result["fact"]
+    assert "当前更推荐第" in result["fact"]
+    assert "原因：" in result["fact"]
     assert result["selected"]["content_char_count"] > 500
     assert result["selected"]["body_observations"]
     assert any(item.get("detail_url") == "https://www.lightnovel.fun/cn/detail/2" and item.get("content_char_count") > 500 for item in result["items"])

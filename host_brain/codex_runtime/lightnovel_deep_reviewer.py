@@ -802,39 +802,83 @@ def _score_item(item: Mapping[str, Any], *, source_index: int) -> dict[str, Any]
 def _build_review_fact(*, selected: Mapping[str, Any], items: Sequence[Mapping[str, Any]]) -> str:
     index = int(selected.get("index") or 1)
     title = _clean_text(selected.get("title"), limit=90) or "这本"
-    detail_bits: list[str] = []
     body_observations = [
         _clean_text(item, limit=86)
         for item in list(selected.get("body_observations") or [])
         if _clean_text(item)
     ]
-    for observation in body_observations[:4]:
-        detail_bits.append(observation)
+    detail_bits: list[str] = _spoken_memory_reason_bits(body_observations)
+    if not detail_bits:
+        for observation in body_observations[:4]:
+            if "正文内容足够支撑判断" in observation:
+                continue
+            detail_bits.append(_spoken_review_reason(observation))
     intro = _fact_intro(selected.get("intro_snippet"))
     if intro and len(detail_bits) < 3:
-        detail_bits.append(f"简介里能看到：{intro}")
+        detail_bits.append(f"简介也不是空的，能看出{intro}")
     if selected.get("chapter_signal"):
-        detail_bits.append(f"页面上还有章节/目录线索：{_clean_text(selected.get('chapter_signal'), limit=80)}")
+        detail_bits.append("章节线索也比较清楚")
     if selected.get("update_time"):
-        detail_bits.append(f"更新是{selected.get('update_time')}")
+        detail_bits.append(f"更新还算新，是{selected.get('update_time')}")
     if selected.get("view_count") or selected.get("comment_count"):
         heat = " / ".join(str(selected.get(key)) for key in ("view_count", "comment_count") if selected.get(key))
-        detail_bits.append(f"热度信号是{heat}")
+        detail_bits.append(f"公开热度有一点底，{heat}")
     reasons = list(selected.get("score_reasons") or [])
-    if reasons:
-        detail_bits.append("判断点：" + "、".join(str(reason) for reason in reasons[:2]))
+    spoken_reasons = [
+        _spoken_review_reason(reason)
+        for reason in reasons
+        if str(reason or "") not in {"读到了正文内容", "正文体量充足", "有正文观察"}
+    ]
+    for reason in spoken_reasons:
+        if reason and reason not in detail_bits and len(detail_bits) < 4:
+            detail_bits.append(reason)
     if not detail_bits:
-        detail_bits.append("详情页公开信息比另外几本更完整")
+        detail_bits.append("翻进去以后比另外几本更想继续看")
     other_titles = [
         _other_item_summary(item, fallback_index=i)
         for i, item in enumerate(items, start=1)
         if int(item.get("index") or i) != index and item.get("title")
     ][:2]
-    compare = f"另外我也看了{'、'.join(other_titles)}。" if other_titles else ""
-    return (
-        f"网页深读结果（含正文）：我回去打开详情页和正文比较了这些轻小说，当前更推荐第{index}本《{title}》。"
-        f"原因：{'；'.join(detail_bits[:5])}。{compare}"
+    compare = f"另外我也顺手看了：{'、'.join(other_titles)}。" if other_titles else ""
+    reason_text = "；".join(
+        dict.fromkeys(
+            _clean_reason_bit(bit)
+            for bit in detail_bits[:5]
+            if _clean_reason_bit(bit)
+        )
     )
+    return (
+        f"网页深读结果（含正文）：当前更推荐第{index}本《{title}》。"
+        f"原因：{reason_text}。{compare}"
+    )
+
+
+def _clean_reason_bit(value: Any) -> str:
+    return _clean_text(value, limit=100).rstrip("。；;，,、 ")
+
+
+def _spoken_review_reason(value: Any) -> str:
+    text = _clean_text(value, limit=90)
+    if not text:
+        return ""
+    replacements = (
+        ("正文开篇已经进入故事叙事，不只是资料卡", "开篇不是资料卡，已经能读出故事"),
+        ("正文/简介有异世界皇女、皇帝或后宫路线，世界观钩子更直给", "皇女/皇帝这条线更直接"),
+        ("读到的正文偏恋爱日常，核心在人物关系和亲密感推进", "人物互动更好接"),
+        ("正文主要靠对话和日常梗推进，轻喜剧感比较明显", "对话和日常梗更轻快"),
+        ("正文有成长/照顾线，角色关系不是只停在设定介绍", "照顾线能撑住人物关系"),
+        ("对白密度高，读感更偏轻快互动", "对白比较轻快"),
+        ("恋爱日常信号明确", "恋爱日常的味道更明确"),
+        ("奇幻身份钩子明确", "奇幻身份钩子更明确"),
+        ("设定有新鲜感", "设定更有新鲜感"),
+        ("简介可读", "简介读起来更顺"),
+        ("有章节/目录线索", "章节线索也比较清楚"),
+        ("热度有公开信号", "公开热度也有一点底"),
+    )
+    for raw, spoken in replacements:
+        if raw in text:
+            return spoken
+    return text
 
 
 def _fact_intro(value: Any) -> str:
@@ -850,13 +894,6 @@ def _fact_intro(value: Any) -> str:
 def _other_item_summary(item: Mapping[str, Any], *, fallback_index: int) -> str:
     index = int(item.get("index") or fallback_index)
     title = _clean_text(item.get("title"), limit=28)
-    observations = [
-        _clean_text(value, limit=34)
-        for value in list(item.get("body_observations") or [])
-        if _clean_text(value)
-    ]
-    if observations:
-        return f"第{index}本《{title}》({observations[min(2, len(observations) - 1)]})"
     return f"第{index}本《{title}》"
 
 

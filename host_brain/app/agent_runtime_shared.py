@@ -401,6 +401,120 @@ def _surface_memory_trace_for_audit(summary: Mapping[str, Any] | None) -> dict[s
     return out
 
 
+def _surface_memory_debug_trace_for_audit(
+    *,
+    retrieval_summary: Mapping[str, Any] | None,
+    retrieval_evidence_items: Sequence[Mapping[str, Any]] | None = None,
+    trace_stage_meta: Mapping[str, Any] | None = None,
+    delegated_agents: Sequence[Mapping[str, Any]] | None = None,
+) -> dict[str, Any]:
+    summary = dict(retrieval_summary or {})
+    packet = _coerce_trace_mapping(summary.get("surface_memory_recall_packet"))
+    trace_stage = _coerce_trace_mapping(trace_stage_meta)
+    out: dict[str, Any] = {}
+
+    history = _coerce_trace_mapping(trace_stage.get("conversation_history"))
+    if history:
+        out["history_window"] = {
+            "turns_injected": _safe_int(history.get("turns_injected"), default=0),
+            "fetched_turns": _safe_int(history.get("fetched_turns"), default=0),
+            "older_turn_count": _safe_int(history.get("older_turn_count"), default=0),
+            "summary_present": bool(history.get("summary_present")),
+            "oldest_ts_ms": history.get("oldest_ts_ms"),
+            "newest_ts_ms": history.get("newest_ts_ms"),
+        }
+
+    if packet:
+        rows = [
+            _surface_memory_debug_row(row)
+            for row in list(packet.get("rows") or [])[:8]
+            if isinstance(row, Mapping)
+        ]
+        episode_rows = [row for row in rows if row.get("store_id") == "life_episode"]
+        out["episode_recall_packet"] = {
+            "candidate_count": _safe_int(packet.get("candidate_count"), default=0),
+            "route_ids": [str(item) for item in list(packet.get("route_ids") or [])[:8]],
+            "source_refs": [str(item) for item in list(packet.get("source_refs") or [])[:8]],
+            "evidence_refs": [str(item) for item in list(packet.get("evidence_refs") or [])[:8]],
+            "fact_count": len(list(packet.get("facts") or [])),
+            "life_episode_row_count": len(episode_rows),
+            "rows": rows,
+        }
+
+    evidence_items = [
+        item
+        for item in list(retrieval_evidence_items or [])
+        if isinstance(item, Mapping)
+    ]
+    if evidence_items:
+        out["evidence_pack"] = {
+            "item_count": len(evidence_items),
+            "items": [
+                {
+                    "store_id": str(item.get("store_id") or ""),
+                    "evidence_ref": str(item.get("evidence_ref") or ""),
+                    "source_ref": str(item.get("source_ref") or ""),
+                    "score": item.get("score"),
+                    "snippet": str(item.get("snippet") or "")[:220],
+                }
+                for item in evidence_items[:8]
+            ],
+        }
+    elif packet:
+        evidence_refs = [str(item) for item in list(packet.get("evidence_refs") or [])[:8] if str(item or "").strip()]
+        source_refs = [str(item) for item in list(packet.get("source_refs") or [])[:8] if str(item or "").strip()]
+        if evidence_refs or source_refs:
+            out["evidence_pack"] = {
+                "item_count": len(evidence_refs or source_refs),
+                "items": [
+                    {"evidence_ref": ref}
+                    for ref in evidence_refs[:8]
+                ] or [
+                    {"source_ref": ref}
+                    for ref in source_refs[:8]
+                ],
+            }
+
+    sub_agent_rows: list[dict[str, Any]] = []
+    for item in list(delegated_agents or [])[:8]:
+        if not isinstance(item, Mapping):
+            continue
+        audit_refs = _coerce_trace_mapping(item.get("audit_refs"))
+        agent_context = _coerce_trace_mapping(audit_refs.get("agent_context"))
+        agent_context_trace = _coerce_trace_mapping(agent_context.get("trace"))
+        sub_agent_rows.append(
+            {
+                "agent_id": str(item.get("agent_id") or ""),
+                "success": bool(item.get("success")),
+                "latency_ms": _safe_int(item.get("latency_ms"), default=0),
+                "context_profile": str(agent_context_trace.get("context_profile") or ""),
+                "conversation_turns": _safe_int(agent_context.get("conversation_turns"), default=0),
+                "memory_fact_count": _safe_int(agent_context.get("memory_fact_count"), default=0),
+                "evidence_item_count": _safe_int(agent_context.get("evidence_item_count"), default=0),
+            }
+        )
+    if sub_agent_rows:
+        out["sub_agent_envelope"] = {
+            "agent_count": len(sub_agent_rows),
+            "agents": sub_agent_rows,
+        }
+    return {
+        key: value
+        for key, value in out.items()
+        if value not in (None, "", [], {})
+    }
+
+
+def _surface_memory_debug_row(row: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        "store_id": str(row.get("store_id") or ""),
+        "source_ref": str(row.get("source_ref") or ""),
+        "evidence_ref": str(row.get("evidence_ref") or ""),
+        "score": row.get("score"),
+        "fact": str(row.get("fact") or "")[:260],
+    }
+
+
 def _safe_int(value: Any, *, default: int = 0) -> int:
     try:
         return int(value)
@@ -756,9 +870,18 @@ async def _persist_post_process_audit(
         }
     )
 
+    _trace_stage_meta = _normalize_trace_stage_meta(trace_stage_meta)
     _normalized_retrieval_summary = _normalize_retrieval_summary_for_audit(retrieval_summary)
     _evidence_items = list(retrieval_evidence_items or [])
     _rs = _normalized_retrieval_summary
+    _surface_memory_debug_trace = _surface_memory_debug_trace_for_audit(
+        retrieval_summary=_rs,
+        retrieval_evidence_items=_evidence_items,
+        trace_stage_meta=_trace_stage_meta,
+        delegated_agents=delegated_agents,
+    )
+    if _surface_memory_debug_trace:
+        _rs["surface_memory_debug_trace"] = _surface_memory_debug_trace
     if _evidence_items or _rs.get("status") == "OK":
         _query_plan = _rs.get("query_plan") or {}
         _topk_snippets = [
@@ -792,6 +915,7 @@ async def _persist_post_process_audit(
                     "fallback_embedding_used": bool(_rs.get("fallback_embedding_used", False)),
                     "fallback_embedding_reason_code": _rs.get("fallback_embedding_reason_code"),
                     "surface_memory_trace": _rs.get("surface_memory_trace") or {},
+                    "surface_memory_debug_trace": _rs.get("surface_memory_debug_trace") or {},
                 },
                 "detail": (
                     f"candidate={_rs.get('candidate_count', 0)} "
@@ -802,7 +926,6 @@ async def _persist_post_process_audit(
             }
         )
 
-    _trace_stage_meta = _normalize_trace_stage_meta(trace_stage_meta)
     _retrieval_status = _normalized_retrieval_summary.get("status", "SKIPPED")
     _retrieval_count = _normalized_retrieval_summary.get("candidate_count", 0)
     _retrieval_reason = str(_normalized_retrieval_summary.get("reason_code") or "").strip() or None
@@ -823,6 +946,7 @@ async def _persist_post_process_audit(
         "fallback_embedding_used": bool(_normalized_retrieval_summary.get("fallback_embedding_used", False)),
         "fallback_embedding_reason_code": _normalized_retrieval_summary.get("fallback_embedding_reason_code"),
         "surface_memory_trace": _normalized_retrieval_summary.get("surface_memory_trace") or {},
+        "surface_memory_debug_trace": _normalized_retrieval_summary.get("surface_memory_debug_trace") or {},
     }
     _query_plan_output = _coerce_trace_mapping(_normalized_retrieval_summary.get("query_plan"))
     _agentic_rag_output = _coerce_trace_mapping(_normalized_retrieval_summary.get("agentic_meta"))
@@ -3766,6 +3890,7 @@ __all__ = [
     "_render_delegated_result_naturally",
     "_resolve_retrieval_timeout_seconds",
     "_normalize_retrieval_summary_for_audit",
+    "_surface_memory_debug_trace_for_audit",
     "_coerce_trace_mapping",
     "_coerce_trace_score",
     "_coerce_trace_bool",
