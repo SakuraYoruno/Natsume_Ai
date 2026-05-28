@@ -1536,18 +1536,20 @@ class LifeMemoryConsolidator:
     def __init__(self, *, store: LifeMemoryStore) -> None:
         self.store = store
 
-    def build_semantic_candidates(self, *, limit: int = 20) -> list[dict[str, Any]]:
+    def build_semantic_candidates(self, *, limit: int = 20, verified_only: bool = False) -> list[dict[str, Any]]:
+        truth_states = (TRUTH_VERIFIED,) if verified_only else (TRUTH_VERIFIED, TRUTH_NARRATIVE_ONLY)
+        placeholders = ", ".join("?" for _ in truth_states)
         rows = self.store.ledger._conn.execute(
-            """
+            f"""
             SELECT *
             FROM life_episode
-            WHERE truth_state IN (?, ?)
+            WHERE truth_state IN ({placeholders})
               AND status = ?
               AND COALESCE(retention_state, ?) != ?
-            ORDER BY salience DESC, last_touched_ts_ms DESC
+            ORDER BY memory_strength DESC, salience DESC, last_touched_ts_ms DESC
             LIMIT ?
             """,
-            (TRUTH_VERIFIED, TRUTH_NARRATIVE_ONLY, STATUS_ACTIVE, RETENTION_COLD, RETENTION_GONE, max(1, int(limit))),
+            (*truth_states, STATUS_ACTIVE, RETENTION_COLD, RETENTION_GONE, max(1, int(limit))),
         ).fetchall()
         candidates: list[dict[str, Any]] = []
         for row in rows:
@@ -1568,6 +1570,115 @@ class LifeMemoryConsolidator:
             )
         return candidates
 
+    def build_semantic_proposals(self, *, limit: int = 80, max_records: int = 24) -> list[dict[str, Any]]:
+        """Extract durable semantic facts from trusted life episodes."""
+
+        rows = self.store.ledger._conn.execute(
+            """
+            SELECT *
+            FROM life_episode
+            WHERE truth_state = ?
+              AND status = ?
+              AND COALESCE(retention_state, ?) != ?
+            ORDER BY memory_strength DESC, salience DESC, last_touched_ts_ms DESC
+            LIMIT ?
+            """,
+            (TRUTH_VERIFIED, STATUS_ACTIVE, RETENTION_COLD, RETENTION_GONE, max(1, int(limit))),
+        ).fetchall()
+        proposals_by_key: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            episode = dict(row)
+            episode_id = _clean_text(episode.get("episode_id"))
+            if not episode_id:
+                continue
+            evidence_rows = self.store._list_evidence(episode_id=episode_id)
+            for proposal in _semantic_proposals_from_episode(episode, evidence_rows):
+                key = _clean_text(proposal.get("semantic_key"))
+                if not key:
+                    continue
+                existing = proposals_by_key.get(key)
+                if existing is None:
+                    proposals_by_key[key] = proposal
+                    continue
+                existing_sources = list(existing.get("source_episode_ids") or [])
+                for source_id in list(proposal.get("source_episode_ids") or []):
+                    if source_id not in existing_sources:
+                        existing_sources.append(source_id)
+                existing["source_episode_ids"] = existing_sources
+                existing["confidence"] = max(_clamp_unit(existing.get("confidence")), _clamp_unit(proposal.get("confidence")))
+                existing["source_refs"] = list(dict.fromkeys([*list(existing.get("source_refs") or []), *list(proposal.get("source_refs") or [])]))
+                existing["tags"] = list(dict.fromkeys([*list(existing.get("tags") or []), *list(proposal.get("tags") or [])]))
+        proposals = sorted(
+            proposals_by_key.values(),
+            key=lambda item: (-_clamp_unit(item.get("confidence")), str(item.get("summary") or "")),
+        )
+        return proposals[: max(1, int(max_records))]
+
+    def distill_semantic_memories(
+        self,
+        *,
+        limit: int = 80,
+        max_records: int = 12,
+        ts_ms: int | None = None,
+        operator_node_id: str = "life_memory_consolidator",
+    ) -> dict[str, Any]:
+        created = int(ts_ms if ts_ms is not None else now_ts_ms())
+        proposals = self.build_semantic_proposals(limit=limit, max_records=max_records)
+        written: list[dict[str, Any]] = []
+        skipped: list[dict[str, Any]] = []
+        for proposal in proposals:
+            semantic_key = _clean_text(proposal.get("semantic_key"))
+            if not semantic_key:
+                continue
+            source_ids = [f"life_episode::{item}" for item in list(proposal.get("source_episode_ids") or []) if _clean_text(item)]
+            if not source_ids:
+                continue
+            source_hash = hashlib.sha256(f"life_semantic:v1:{semantic_key}".encode("utf-8", errors="ignore")).hexdigest()
+            existing = self.store.ledger.get_semantic_memory_by_source_hash(source_hash)
+            if existing is not None:
+                skipped.append(
+                    {
+                        "semantic_id": existing.get("semantic_id"),
+                        "reason_code": "SEMANTIC_MEMORY_EXISTS",
+                        "semantic_key": semantic_key,
+                    }
+                )
+                continue
+            semantic_id = f"sem_life_{_stable_hash('life_semantic_id:v1:' + semantic_key, size=24)}"
+            tags = list(dict.fromkeys([*list(proposal.get("tags") or []), "source:life_episode", "life_consolidated"]))
+            record = {
+                "semantic_id": semantic_id,
+                "summary": _clean_text(proposal.get("summary"), limit=900),
+                "source_memory_ids": source_ids,
+                "source_hash": source_hash,
+                "distill_strategy": "life_episode_rule_consolidation",
+                "confidence": _clamp_unit(proposal.get("confidence")),
+                "tags": tags,
+                "ts_ms": created,
+                "operator_node_id": _clean_text(operator_node_id) or "life_memory_consolidator",
+            }
+            self.store.ledger.log_semantic_memory(record)
+            persisted = self.store.ledger.get_semantic_memory_by_source_hash(source_hash)
+            if persisted is None:
+                skipped.append({"reason_code": "SEMANTIC_MEMORY_WRITE_FAILED", "semantic_key": semantic_key})
+                continue
+            written.append(
+                {
+                    "semantic_id": persisted.get("semantic_id"),
+                    "summary": persisted.get("summary"),
+                    "source_count": len(source_ids),
+                    "tags": persisted.get("tags"),
+                }
+            )
+        return {
+            "status": "OK",
+            "candidate_count": len(proposals),
+            "written_count": len(written),
+            "skipped_count": len(skipped),
+            "written": written,
+            "skipped": skipped,
+        }
+
 
 class MemorySleepReplayTask:
     """Offline replay selector for high-salience trusted episodes."""
@@ -1584,11 +1695,18 @@ class MemorySleepReplayTask:
         now_ts_ms_value: int | None = None,
         replay_limit: int = 12,
         forgetting_batch_limit: int = 500,
+        semantic_limit: int = 12,
     ) -> dict[str, Any]:
         current = int(now_ts_ms_value if now_ts_ms_value is not None else now_ts_ms())
         forgetting = self.store.apply_forgetting_pass(
             now_ts_ms_value=current,
             batch_limit=forgetting_batch_limit,
+        )
+        semantic_distillation = LifeMemoryConsolidator(store=self.store).distill_semantic_memories(
+            limit=max(replay_limit * 4, semantic_limit * 3, 12),
+            max_records=max(1, int(semantic_limit)),
+            ts_ms=current,
+            operator_node_id="memory_sleep_replay",
         )
         replay_batch = self.select_replay_batch(limit=replay_limit)
         reflection_count = 0
@@ -1612,6 +1730,7 @@ class MemorySleepReplayTask:
         return {
             "status": "OK",
             "forgetting": forgetting,
+            "semantic_distillation": semantic_distillation,
             "replay_selected": len(replay_batch),
             "reflection_count": reflection_count,
         }
@@ -1651,6 +1770,262 @@ def _background_salience(*, source: str, status: str | None, detail: str | None)
     if _clean_text(detail):
         score += 0.08
     return _clamp_unit(score)
+
+
+def _semantic_proposals_from_episode(
+    episode: Mapping[str, Any],
+    evidence_rows: Sequence[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    metadata = _episode_metadata_dict(episode)
+    if bool(metadata.get("e2e_probe")) or bool(metadata.get("test_probe")):
+        return []
+    action = _clean_text(episode.get("action") or metadata.get("action_kind")).lower()
+    event_source = _clean_text(metadata.get("event_source")).lower()
+    if action in {
+        "lightnovel_recommendation_delivery",
+        "lightnovel_recommendation_deep_review",
+        "qq_reply_sent",
+        "wechat_reply_sent",
+        "gateway_reply_sent",
+        "channel_message_sent",
+    }:
+        return []
+    if event_source in {"inner_world", "inner_stream", "inner_activity"} and not bool(metadata.get("should_distill_to_memory")):
+        return []
+    episode_id = _clean_text(episode.get("episode_id"))
+    if not episode_id:
+        return []
+    source_refs = [
+        _clean_text(ev.get("source_ref"))
+        for ev in list(evidence_rows or [])
+        if _clean_text(ev.get("source_ref"))
+    ]
+    texts = _semantic_source_texts(episode, evidence_rows)
+    proposals: list[dict[str, Any]] = []
+    for text in texts:
+        semantic = _semantic_summary_for_text(text, episode=episode)
+        if not semantic:
+            continue
+        kind = semantic["kind"]
+        summary = semantic["summary"]
+        person_id = _clean_text(episode.get("person_id")) or "global"
+        key_text = re.sub(r"\s+", "", summary.lower())
+        semantic_key = f"{kind}|{person_id}|{key_text[:220]}"
+        confidence = _semantic_confidence(episode=episode, base=float(semantic.get("base_confidence") or 0.0))
+        proposals.append(
+            {
+                "semantic_key": semantic_key,
+                "semantic_kind": kind,
+                "summary": summary,
+                "confidence": confidence,
+                "tags": list(semantic.get("tags") or []),
+                "source_episode_ids": [episode_id],
+                "source_refs": list(dict.fromkeys(source_refs)),
+            }
+        )
+    return proposals
+
+
+def _semantic_source_texts(
+    episode: Mapping[str, Any],
+    evidence_rows: Sequence[Mapping[str, Any]],
+) -> list[str]:
+    texts: list[str] = []
+
+    def add(value: Any) -> None:
+        text = _clean_text(value, limit=700)
+        if not text or text in texts:
+            return
+        texts.append(text)
+
+    for ev in list(evidence_rows or []):
+        kind = _clean_text(ev.get("evidence_kind")).lower()
+        content = _clean_text(ev.get("content"), limit=700)
+        if not content:
+            continue
+        if kind in {EVIDENCE_USER_TEXT, EVIDENCE_GATEWAY_MESSAGE, EVIDENCE_SCHEDULER_EVENT, EVIDENCE_TOOL_RESULT, EVIDENCE_REFLECTION}:
+            add(content)
+    if texts:
+        return texts[:8]
+    summary = _clean_text(episode.get("summary"), limit=900)
+    if summary:
+        for line in re.split(r"[\n\r]+", summary):
+            if re.match(r"^\s*Assistant\s*[:：]", line):
+                continue
+            cleaned = _clean_text(re.sub(r"^(User|Assistant|Perception)\s*[:：]\s*", "", line), limit=700)
+            add(cleaned)
+    return texts[:8]
+
+
+def _semantic_summary_for_text(text: str, *, episode: Mapping[str, Any]) -> dict[str, Any] | None:
+    statement = _normalize_semantic_statement(text)
+    if len(statement) < 4 or _semantic_text_is_sensitive_or_noise(statement):
+        return None
+    compact = re.sub(r"\s+", "", statement).lower()
+    action = _clean_text(episode.get("action")).lower()
+    tags: list[str] = []
+    kind = ""
+    prefix = ""
+    base_confidence = 0.60
+
+    if _semantic_is_user_preference(compact):
+        kind = "user_preference"
+        prefix = "用户偏好"
+        tags = ["user_preference", "preference"]
+        base_confidence = 0.82
+    elif _semantic_is_commitment(compact):
+        kind = "commitment"
+        prefix = "承诺和待办"
+        tags = ["commitment", "open_loop"]
+        base_confidence = 0.78
+    elif _semantic_is_self_change(compact, action=action):
+        kind = "self_change"
+        prefix = "自我改变"
+        tags = ["self_change", "capability_change"]
+        base_confidence = 0.76
+    elif _semantic_is_failure_lesson(compact, action=action):
+        kind = "failure_lesson"
+        prefix = "故障经验"
+        tags = ["failure_lesson", "operations"]
+        base_confidence = 0.74
+    elif _semantic_is_stable_fact(compact):
+        kind = "stable_fact"
+        prefix = "稳定事实"
+        tags = ["stable_fact"]
+        base_confidence = 0.72
+    else:
+        return None
+
+    body = _semantic_statement_body(statement)
+    if not body:
+        return None
+    return {
+        "kind": kind,
+        "summary": f"{prefix}：{body}",
+        "tags": tags,
+        "base_confidence": base_confidence,
+    }
+
+
+def _normalize_semantic_statement(text: str) -> str:
+    value = _clean_text(text, limit=700)
+    value = re.sub(r"^(User|Assistant|Perception)\s*[:：]\s*", "", value).strip()
+    value = re.sub(r"^(记忆线索|长期记忆|召回线索)\s*[:：]\s*", "", value).strip()
+    value = re.sub(r"^行动记忆：[^；;]{1,120}[；;]\s*", "", value).strip()
+    value = re.sub(r"^(记住|请记住|以后记住)[，,：:\s]*", "", value).strip()
+    return value.strip("。；; \n\t")
+
+
+def _semantic_statement_body(statement: str) -> str:
+    value = _clean_text(statement, limit=360).strip("。；; ")
+    value = re.sub(r"^(用户明确要求|用户要求|用户偏好|偏好)[：:\s]*", "", value).strip()
+    if value.startswith("我喜欢"):
+        value = "用户喜欢" + value.removeprefix("我喜欢")
+    if value.startswith("我不喜欢"):
+        value = "用户不喜欢" + value.removeprefix("我不喜欢")
+    if value.startswith("不要") or value.startswith("别"):
+        value = "用户要求" + value
+    if value.startswith("主链"):
+        value = "用户要求" + value
+    return value[:360].rstrip("。；; ")
+
+
+def _semantic_text_is_sensitive_or_noise(text: str) -> bool:
+    compact = re.sub(r"\s+", "", str(text or "")).lower()
+    if not compact:
+        return True
+    if any(token in compact for token in ("api_key", "apikey", "secret", "cookie", "token=", "authorization:", "密码", "密钥")):
+        return True
+    if any(token in compact for token in ("heartbeat", "health_check", "emotion_decay_tick", "inner_world_numeric_tick", "silence_tick")):
+        return True
+    if any(token in compact for token in ("网页深读结果", "lightnovel_recommendation_deep_review", "正文内容足够支撑判断")):
+        return True
+    if any(
+        token in compact
+        for token in (
+            "codexproductionjobcodex_lightnovel_recommender",
+            "轻小说推荐报告",
+            "我通过qq给",
+            "发送了text消息",
+            "发送了image消息",
+            "发送结果=sent",
+            "命中偏好",
+            "详情:https://www.lightnovel.fun",
+            "详情：http://www.lightnovel.fun",
+            "请根据下面的真实片段",
+            "_thalamus_meta",
+            "surface_production_result_recall",
+            "cortex_orchestrator",
+            "latency_ms",
+            "decision=approve",
+        )
+    ):
+        return True
+    return False
+
+
+def _semantic_is_user_preference(compact: str) -> bool:
+    preference_tokens = (
+        "用户喜欢",
+        "我喜欢",
+        "用户不喜欢",
+        "我不喜欢",
+        "用户要求",
+        "要求",
+        "偏好",
+        "以后",
+        "不要",
+        "别再",
+        "优先使用",
+        "主链不要",
+        "不要用pro",
+        "不用pro",
+        "分段",
+        "卡片",
+        "拟人化发送",
+    )
+    return any(token in compact for token in preference_tokens)
+
+
+def _semantic_is_commitment(compact: str) -> bool:
+    return any(token in compact for token in ("承诺", "待办", "todo", "openloop", "后续要", "下次继续", "未完成"))
+
+
+def _semantic_is_self_change(compact: str, *, action: str) -> bool:
+    if action in {"memory_compaction", "model_route_update", "capability_change"}:
+        return True
+    return any(token in compact for token in ("模型路由", "记忆系统", "能力被删除", "删除资源管理器", "策略被用户纠正", "自我改变", "主链迁移", "改成"))
+
+
+def _semantic_is_failure_lesson(compact: str, *, action: str) -> bool:
+    if "failed" in action or "failure" in action:
+        return True
+    return any(
+        token in compact
+        for token in (
+            "失败原因",
+            "失败",
+            "连不上",
+            "没起来",
+            "状态库被占用",
+            "被占用",
+            "chroma",
+            "neo4j",
+            "deepseek失败",
+            "gateway连不上",
+            "服务没起来",
+        )
+    )
+
+
+def _semantic_is_stable_fact(compact: str) -> bool:
+    return any(token in compact for token in ("onebot在edge", "onebot在", "qq会话", "conversation_id", "session_id", "在edge", "不在本机"))
+
+
+def _semantic_confidence(*, episode: Mapping[str, Any], base: float) -> float:
+    salience = _clamp_unit(episode.get("salience"), default=0.0)
+    strength = _clamp_unit(episode.get("memory_strength"), default=salience)
+    return round(_clamp_unit(max(base, 0.45 + strength * 0.35 + salience * 0.15)), 4)
 
 
 __all__ = [

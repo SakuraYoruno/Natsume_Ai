@@ -2129,9 +2129,11 @@ def run_life_memory_sleep_replay_handler(args: dict[str, Any], _ctx: dict[str, A
         task = MemorySleepReplayTask(store=store)
         replay_limit = int((args or {}).get("replay_limit") or 12)
         forgetting_batch_limit = int((args or {}).get("forgetting_batch_limit") or 500)
+        semantic_limit = int((args or {}).get("semantic_limit") or 12)
         result = task.run_once(
             replay_limit=replay_limit,
             forgetting_batch_limit=forgetting_batch_limit,
+            semantic_limit=semantic_limit,
         )
         return {"status": "OK", "result": result}
     except Exception as exc:

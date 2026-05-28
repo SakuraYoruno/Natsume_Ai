@@ -426,13 +426,13 @@ def build_system_scheduler_task_configs() -> list[SchedulerTaskConfig]:
             trigger_config={"hour": 2, "minute": 20, "catch_up_window_minutes": 720},
             intent_template={
                 "skill_name": "life_memory_sleep_replay",
-                "args": {"replay_limit": 12, "forgetting_batch_limit": 500},
+                "args": {"replay_limit": 12, "forgetting_batch_limit": 500, "semantic_limit": 12},
                 "proposer_node_id": "scheduler",
             },
             priority=TaskPriority.LOW,
             mode_allowlist=["normal", "sleep"],
             enabled=True,
-            description="生命记忆睡眠回放：每日执行遗忘分层、低价值降温和高显著经历强化",
+            description="生命记忆睡眠回放：每日执行遗忘分层、长期语义蒸馏和高显著经历强化",
             resource_profile={
                 "resource_class": "maintenance",
                 "uses_llm": False,

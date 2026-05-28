@@ -184,6 +184,100 @@ def test_consolidator_uses_only_trusted_active_episodes() -> None:
         ledger.close()
 
 
+def test_consolidator_distills_user_preference_from_trusted_episode_only() -> None:
+    ledger = SQLiteLedger(db_path=":memory:")
+    try:
+        store = LifeMemoryStore(ledger=ledger)
+        trusted = store.write_chat_episode(
+            request_id="req-life-semantic-pref",
+            session_id="sess-1",
+            person_id="user-1",
+            user_message="记住我喜欢轻小说推荐按总览一段、每本书一卡片分段",
+            assistant_reply="记住了，以后按总览和卡片来。",
+            ts_ms=1_800_000_000_000,
+        )
+        suppressed = store.write_chat_episode(
+            request_id="req-life-semantic-bad",
+            session_id="sess-1",
+            person_id="user-1",
+            user_message="错误偏好：推荐不要分段",
+            assistant_reply="已记录。",
+            ts_ms=1_800_000_000_001,
+        )
+        store.correct_episode(
+            episode_id=suppressed["episode_id"],
+            correction_kind="suppression",
+            suppress=True,
+            detail="用户后来明确纠正推荐需要分段。",
+            ts_ms=1_800_000_000_100,
+        )
+
+        result = LifeMemoryConsolidator(store=store).distill_semantic_memories(
+            limit=10,
+            max_records=5,
+            ts_ms=1_800_000_000_200,
+        )
+        second = LifeMemoryConsolidator(store=store).distill_semantic_memories(
+            limit=10,
+            max_records=5,
+            ts_ms=1_800_000_000_300,
+        )
+
+        items, total = ledger.list_semantic_memories()
+        assert result["written_count"] == 1
+        assert second["written_count"] == 0
+        assert total == 1
+        assert "用户偏好" in items[0]["summary"]
+        assert "总览" in items[0]["summary"]
+        assert "卡片" in items[0]["summary"]
+        assert items[0]["source_memory_ids"] == [f"life_episode::{trusted['episode_id']}"]
+        assert f"life_episode::{suppressed['episode_id']}" not in items[0]["source_memory_ids"]
+        assert "source:life_episode" in items[0]["tags"]
+        assert items[0]["distill_strategy"] == "life_episode_rule_consolidation"
+    finally:
+        ledger.close()
+
+
+def test_sleep_replay_distills_failure_lesson_and_skips_test_probe() -> None:
+    ledger = SQLiteLedger(db_path=":memory:")
+    try:
+        store = LifeMemoryStore(ledger=ledger)
+        failure = store.write_background_episode(
+            event_source="action",
+            event_id="service-failure-1",
+            task_id="startup_probe",
+            status="FAILED",
+            detail="Chroma 没起来会导致召回假测，业务实测前必须检查外部依赖 ready。",
+            ts_ms=1_800_000_000_000,
+        )
+        store.write_chat_episode(
+            request_id="req-life-e2e-probe",
+            session_id="sess-1",
+            person_id="user-1",
+            user_message="记住这个测试偏好不应该进入长期记忆",
+            assistant_reply="测试记录。",
+            ts_ms=1_800_000_000_001,
+            metadata={"e2e_probe": True},
+        )
+
+        result = MemorySleepReplayTask(store=store).run_once(
+            now_ts_ms_value=1_800_000_000_200,
+            replay_limit=6,
+            forgetting_batch_limit=20,
+            semantic_limit=6,
+        )
+
+        items, total = ledger.list_semantic_memories()
+        assert result["semantic_distillation"]["written_count"] == 1
+        assert total == 1
+        assert "故障经验" in items[0]["summary"]
+        assert "Chroma" in items[0]["summary"]
+        assert items[0]["source_memory_ids"] == [f"life_episode::{failure['episode_id']}"]
+        assert "测试偏好" not in items[0]["summary"]
+    finally:
+        ledger.close()
+
+
 def test_action_and_perception_events_create_life_anchors_with_retention_state() -> None:
     ledger = SQLiteLedger(db_path=":memory:")
     try:
