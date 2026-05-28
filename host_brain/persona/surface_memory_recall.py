@@ -24,6 +24,7 @@ from host_brain.memory.life_memory_query import (
 
 
 SURFACE_MEMORY_RECALL_FAILED = "SURFACE_MEMORY_RECALL_FAILED"
+SURFACE_MEMORY_RECALL_VALIDATION_FAILED = "SURFACE_MEMORY_RECALL_VALIDATION_FAILED"
 SURFACE_MEMORY_RECALL_SKIPPED = "SURFACE_MEMORY_RECALL_SKIPPED"
 SURFACE_MEMORY_WRITE_FAILED = "SURFACE_MEMORY_WRITE_FAILED"
 SURFACE_MEMORY_EVIDENCE_REQUIRED = "SURFACE_MEMORY_EVIDENCE_REQUIRED"
@@ -560,8 +561,13 @@ def build_surface_memory_recall_packet(
 ) -> SurfaceMemoryRecallPacket:
     output = _recall_output(recall_result)
     candidates = _candidate_list(output)
-    rows = _select_fact_rows(
+    candidates_for_selection = _filter_candidates_for_temporal_scope(
         candidates,
+        temporal_scope=temporal_scope,
+        ts_ms=_coerce_int(output.get("ts_ms")),
+    )
+    rows = _select_fact_rows(
+        candidates_for_selection,
         query=query,
         max_facts=max_facts,
         max_chars_per_fact=max_chars_per_fact,
@@ -585,7 +591,7 @@ def build_surface_memory_recall_packet(
     for row in rows:
         store_counts[row.store_id] = store_counts.get(row.store_id, 0) + 1
     validation_trace = _build_recall_validation_trace(
-        candidates=candidates,
+        candidates=candidates_for_selection,
         rows=rows,
         output=output,
         query=query if query is not None else output.get("query"),
@@ -594,11 +600,14 @@ def build_surface_memory_recall_packet(
         query_kind=query_kind,
         target_domains=target_domains,
     )
+    validation_failed = bool(validation_trace.get("required")) and not bool(validation_trace.get("passed"))
     trace = {
         "status": _clean_text(output.get("status")),
         "stage": _clean_text(output.get("stage")),
         "route_count": len(route_ids),
         "route_error_count": len(list(output.get("route_errors") or [])),
+        "candidate_count_before_temporal_filter": len(candidates),
+        "candidate_count_after_temporal_filter": len(candidates_for_selection),
         "selected_fact_count": len(rows),
         "selected_user_fact_count": len(memory_rows),
         "selected_bond_count": len(relationship_rows),
@@ -606,20 +615,35 @@ def build_surface_memory_recall_packet(
     }
     if validation_trace["required"]:
         trace["validation"] = validation_trace
+    if validation_failed:
+        trace["validation_failed"] = True
+        memory_rows = ()
+        relationship_clues = ()
+        style_anchor = ()
+        evidence_refs = ()
+        source_refs = ()
+        must_not_do = tuple(
+            _unique(
+                [
+                    *must_not_do,
+                    "召回校验失败时，不要把未通过时间、对象或证据校验的候选当事实；只能说没有找到足够可靠的记忆。",
+                ]
+            )
+        )
     return SurfaceMemoryRecallPacket(
         query=_clean_text(query if query is not None else output.get("query")),
         facts=tuple(row.fact for row in memory_rows),
         style_anchor=style_anchor,
         relationship_clues=relationship_clues,
         must_not_do=must_not_do,
-        confidence=_packet_confidence(rows, output=output),
+        confidence=0.0 if validation_failed else _packet_confidence(rows, output=output),
         rows=tuple(rows),
         evidence_refs=evidence_refs,
         source_refs=source_refs,
         route_ids=route_ids,
         candidate_count=_coerce_int(output.get("candidate_count"), default=len(candidates)),
-        degraded=bool(output.get("degraded", False)),
-        reason_code=_clean_text(output.get("reason_code")) or None,
+        degraded=bool(output.get("degraded", False)) or validation_failed,
+        reason_code=SURFACE_MEMORY_RECALL_VALIDATION_FAILED if validation_failed else (_clean_text(output.get("reason_code")) or None),
         trace=trace,
     )
 
@@ -713,6 +737,22 @@ def _evaluate_recall_validation_requirement(
         stores = set(_store_counts_from_candidates(candidates)) | {row.store_id for row in rows}
         passed = bool(stores.intersection({"life_memory_collection", "life_episode"}))
         return passed, f"stores={sorted(stores)}"
+    if requirement == "event_time_scope_match":
+        expected = _expected_collection_scope_key(temporal_scope, ts_ms=_coerce_int(output.get("ts_ms")))
+        if not expected or expected == "recent":
+            return (bool(candidates or rows), "recent/all-time event scope accepts non-empty filtered candidates")
+        scope_keys = _candidate_scope_keys(candidates)
+        dates = _candidate_local_dates(candidates)
+        expected_date = expected.removeprefix("daily:")
+        passed = bool(candidates or rows) and (
+            expected in scope_keys
+            or (bool(dates) and all(date == expected_date for date in dates))
+        )
+        return passed, f"expected {expected}, scope_keys={scope_keys}, dates={dates}"
+    if requirement == "event_or_collection_hit":
+        stores = set(_store_counts_from_candidates(candidates)) | {row.store_id for row in rows}
+        passed = bool(stores.intersection({"life_episode", "life_memory_collection", "semantic_memory", "sqlite_ledger", "episodic_vector"}))
+        return passed, f"stores={sorted(stores)}"
     if requirement == "source_ref_present":
         refs = _candidate_source_refs(candidates)
         if not refs:
@@ -754,6 +794,32 @@ def _expected_collection_scope_key(temporal_scope: str, *, ts_ms: int) -> str:
     return ""
 
 
+def _filter_candidates_for_temporal_scope(
+    candidates: Sequence[Mapping[str, Any]],
+    *,
+    temporal_scope: str,
+    ts_ms: int,
+) -> list[dict[str, Any]]:
+    rows = [dict(candidate) for candidate in candidates if isinstance(candidate, Mapping)]
+    expected = _expected_collection_scope_key(temporal_scope, ts_ms=ts_ms)
+    if not expected or expected == "recent":
+        return rows
+    expected_date = expected.removeprefix("daily:")
+    datable: list[dict[str, Any]] = []
+    matched: list[dict[str, Any]] = []
+    for candidate in rows:
+        metadata = _candidate_metadata(candidate)
+        scope_key = _clean_text(metadata.get("scope_key"))
+        candidate_date = _candidate_local_date(candidate)
+        if scope_key or candidate_date:
+            datable.append(candidate)
+        if scope_key == expected or candidate_date == expected_date:
+            matched.append(candidate)
+    if not datable:
+        return rows
+    return matched
+
+
 def _candidate_scope_keys(candidates: Sequence[Mapping[str, Any]]) -> list[str]:
     return _unique(
         [
@@ -762,6 +828,34 @@ def _candidate_scope_keys(candidates: Sequence[Mapping[str, Any]]) -> list[str]:
             if _candidate_store_id(candidate) == "life_memory_collection"
         ]
     )
+
+
+def _candidate_local_dates(candidates: Sequence[Mapping[str, Any]]) -> list[str]:
+    return _unique(_candidate_local_date(candidate) for candidate in candidates)
+
+
+def _candidate_local_date(candidate: Mapping[str, Any]) -> str:
+    ts_ms = _candidate_ts_ms(candidate)
+    if ts_ms <= 0:
+        return ""
+    return datetime.fromtimestamp(ts_ms / 1000.0, tz=_LOCAL_MEMORY_TZ).date().isoformat()
+
+
+def _candidate_ts_ms(candidate: Mapping[str, Any]) -> int:
+    metadata = _candidate_metadata(candidate)
+    for value in (
+        candidate.get("created_ts_ms"),
+        candidate.get("updated_ts_ms"),
+        candidate.get("ts_ms"),
+        metadata.get("created_ts_ms"),
+        metadata.get("updated_ts_ms"),
+        metadata.get("last_touched_ts_ms"),
+        metadata.get("created_at_ts_ms"),
+    ):
+        ts_ms = _coerce_int(value)
+        if ts_ms > 0:
+            return ts_ms
+    return 0
 
 
 def _store_counts_from_candidates(candidates: Sequence[Mapping[str, Any]]) -> dict[str, int]:
@@ -1630,6 +1724,7 @@ __all__ = [
     "SURFACE_MEMORY_EVIDENCE_REQUIRED",
     "SURFACE_MEMORY_RECALL_FAILED",
     "SURFACE_MEMORY_RECALL_SKIPPED",
+    "SURFACE_MEMORY_RECALL_VALIDATION_FAILED",
     "SURFACE_MEMORY_WRITE_FAILED",
     "SURFACE_BOND_STORES",
     "SURFACE_MAIN_CHAIN_RECALL_STORES",

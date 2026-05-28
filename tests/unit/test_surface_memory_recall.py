@@ -16,6 +16,7 @@ from host_brain.persona.surface_memory_recall import (
     RECALL_POLICY_NO,
     SURFACE_MEMORY_EVIDENCE_REQUIRED,
     SURFACE_MEMORY_RECALL_SKIPPED,
+    SURFACE_MEMORY_RECALL_VALIDATION_FAILED,
     SurfaceMemoryRecallPacket,
     build_surface_input_with_memory_recall,
     build_surface_memory_recall_packet,
@@ -617,6 +618,24 @@ def test_plan_surface_memory_recall_routes_task_modes_for_current_main_chain() -
     assert tired.recall_policy == RECALL_POLICY_MAY
 
 
+def test_plan_surface_memory_recall_routes_dated_event_lookup_to_life_episode() -> None:
+    plan = plan_surface_memory_recall(
+        ThreeLayerContinuityContext(
+            current_user_message="昨天你做了什么？",
+            task_mode_hint="daily_chat",
+        )
+    )
+
+    assert plan.should_recall
+    assert plan.recall_policy == RECALL_POLICY_MUST
+    assert plan.reason == "event_memory_recall"
+    assert plan.query_kind == "date_lookup"
+    assert plan.temporal_scope == "yesterday"
+    assert plan.target_store_ids[:2] == ("life_episode", "life_memory_collection")
+    assert plan.time_lookback_days == 2
+    assert plan.validation_requirements == ("event_time_scope_match", "event_or_collection_hit", "source_ref_present")
+
+
 def test_recall_surface_memory_for_context_uses_plan_and_skips_without_calling_recall() -> None:
     class _RecallService:
         def recall(self, **kwargs):  # noqa: ANN003
@@ -768,6 +787,12 @@ def test_recall_surface_memory_validation_flags_wrong_date_collection_scope() ->
     assert "scope_match" in validation["missing"]
     scope_check = next(item for item in validation["checks"] if item["name"] == "scope_match")
     assert "daily:2026-05-27" in scope_check["detail"]
+    assert packet.facts == ()
+    assert packet.evidence_refs == ()
+    assert packet.confidence == 0.0
+    assert packet.degraded is True
+    assert packet.reason_code == SURFACE_MEMORY_RECALL_VALIDATION_FAILED
+    assert any("召回校验失败" in item for item in packet.must_not_do)
 
 
 def test_write_surface_turn_memory_writes_compact_evidence_gated_record() -> None:

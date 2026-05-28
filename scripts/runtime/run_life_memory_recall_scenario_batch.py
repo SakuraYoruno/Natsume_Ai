@@ -208,6 +208,15 @@ def _scenario_expectations() -> list[ScenarioExpectation]:
             must_not_contain="5月28日推荐",
         ),
         ScenarioExpectation(
+            case_id="yesterday_event_lookup",
+            message="昨天你做了什么？",
+            expected_reason="event_memory_recall",
+            expected_kind="date_lookup",
+            must_route="surface_life_collection",
+            must_contain="5月27日推荐",
+            must_not_contain="5月28日推荐",
+        ),
+        ScenarioExpectation(
             case_id="recent_collection",
             message="这几天推荐过哪些轻小说？",
             expected_reason="collection_memory_recall",
