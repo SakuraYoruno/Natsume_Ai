@@ -29,6 +29,11 @@ FORBIDDEN_REPLY_TERMS = (
     "突然问这个",
     "硬要说",
     "硬要选",
+    "老哥～",
+    "哥哥～",
+    "尼尼～",
+    "肯定很爽",
+    "绝对好看",
     "不知道",
     "没看到",
     "没拿到",
@@ -36,9 +41,18 @@ FORBIDDEN_REPLY_TERMS = (
     "正文有8",
     "正文有 8",
     "证据更站得住",
+    "对白密度高",
     "memory://",
     "evd://",
     "chat://",
+)
+FORBIDDEN_DEEP_REVIEW_PACKET_TERMS = (
+    "我回去打开详情页",
+    "正文内容足够支撑判断",
+    "证据更站得住",
+    "正文有8",
+    "正文有 8",
+    "对白密度高",
 )
 REASON_TERMS = (
     "因为",
@@ -207,6 +221,21 @@ def _find_packet(value: Any) -> dict[str, Any]:
     return {}
 
 
+def _has_recommendation_memory_anchor(text: str, evidence_refs: Any = None) -> bool:
+    value = str(text or "")
+    if "推荐了 3 本轻小说" in value:
+        return True
+    refs_text = "\n".join(str(item) for item in (evidence_refs or []))
+    has_collection = (
+        "集合记忆" in value
+        and "轻小说推荐集合" in value
+        and "记录 3 个条目" in value
+        and "可比较证据" in value
+    )
+    has_delivery_evidence = "lightnovel_gateway_delivery" in value or "lightnovel_gateway_delivery" in refs_text
+    return has_collection and has_delivery_evidence
+
+
 def _validate_live_probe(report: dict[str, Any]) -> list[str]:
     failures: list[str] = []
     health = report.get("health") if isinstance(report.get("health"), dict) else {}
@@ -225,9 +254,15 @@ def _validate_live_probe(report: dict[str, Any]) -> list[str]:
         failures.append(f"chat_failed:{chat.get('error')}")
     if not narrative.strip():
         failures.append("narrative_empty")
+    if "？" in narrative or "?" in narrative:
+        failures.append("reply_has_question")
     forbidden = [term for term in FORBIDDEN_REPLY_TERMS if term in narrative]
     if forbidden:
         failures.append("reply_forbidden:" + ",".join(forbidden))
+    audit = commit.get("reply_envelope", {}).get("audit", {}) if isinstance(commit.get("reply_envelope"), dict) else {}
+    observation_codes = list(audit.get("observation_codes") or []) if isinstance(audit, dict) else []
+    if observation_codes:
+        failures.append("reply_observation_codes:" + ",".join(str(item) for item in observation_codes[:8]))
     if narrative and not any(term in narrative for term in REASON_TERMS):
         failures.append("reply_missing_reason_detail")
     trace = report.get("trace_snapshot") if isinstance(report.get("trace_snapshot"), dict) else {}
@@ -237,12 +272,16 @@ def _validate_live_probe(report: dict[str, Any]) -> list[str]:
     packet = trace.get("surface_memory_recall_packet") if isinstance(trace.get("surface_memory_recall_packet"), dict) else {}
     facts = [str(item) for item in list(packet.get("facts") or [])]
     joined = "\n".join(facts)
-    if "推荐了 3 本轻小说" not in joined:
-        failures.append("packet_missing_recommendation_episode")
+    evidence_refs = list(packet.get("evidence_refs") or [])
+    if not _has_recommendation_memory_anchor(joined, evidence_refs):
+        failures.append("packet_missing_recommendation_anchor")
     if "可比较证据" not in joined:
         failures.append("packet_missing_comparison_evidence")
     if "网页深读结果（含正文）" not in joined:
         failures.append("packet_missing_body_deep_review")
+    forbidden_deep_packet = [term for term in FORBIDDEN_DEEP_REVIEW_PACKET_TERMS if term in joined]
+    if forbidden_deep_packet:
+        failures.append("packet_forbidden_deep_review_tone:" + ",".join(forbidden_deep_packet))
     surface_memory_trace = trace.get("surface_memory_trace") if isinstance(trace.get("surface_memory_trace"), dict) else {}
     deep = surface_memory_trace.get("lightnovel_deep_review") if isinstance(surface_memory_trace.get("lightnovel_deep_review"), dict) else {}
     if not deep:

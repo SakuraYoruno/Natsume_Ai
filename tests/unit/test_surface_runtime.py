@@ -600,6 +600,64 @@ def test_surface_runtime_repairs_deep_review_title_only_reply(monkeypatch) -> No
     assert result.observation_codes == ()
 
 
+def test_surface_runtime_repairs_overstyled_deep_review_selection(monkeypatch) -> None:  # noqa: ANN001
+    monkeypatch.setenv("HOST_SURFACE_MAIN_CHAIN_HARD_GATE_RETRY_ENABLED", "false")
+
+    def generate(_messages):
+        return _candidate_payload(["老哥～第三本！异世界皇女加后宫路线，第一章还是攻略露易丝，这钩子太直给了吧，读起来肯定很爽。"])
+
+    result = asyncio.run(
+        SurfaceRuntime(generate).run(
+            _payload(
+                user_message="这三本书，你喜欢哪本？",
+                reply_control_packet={
+                    "response_move": "memory_followup",
+                    "task_mode": "memory_followup",
+                    "emotional_tone": "light",
+                    "relationship_distance": "familiar",
+                    "information_budget": "short",
+                    "question_budget": 0,
+                    "facts": [
+                        "网页深读结果（含正文）：当前更推荐第3本《[軽井広]轉移到異世界後，與美少女皇女結婚的我成為皇帝，享受悠閒的後宮生活 3》。原因：开篇不是资料卡，已经能读出故事；皇女/皇帝这条线更直接；对白比较轻快。另外我也顺手看了：第1本《A》、第2本《与神在河岸》。",
+                    ],
+                },
+            )
+        )
+    )
+
+    assert result.selected_text == "我会先看第三本，《轉移到異世界後，與美少女皇女結婚的我成為皇帝，享受悠閒的後宮生活3》。开篇就进正题，皇女/皇帝这套设定也够直接，比另外几本更想继续翻。"
+    assert result.observation_codes == ()
+
+
+def test_surface_runtime_repairs_questioning_deep_review_selection_with_new_reason_words(monkeypatch) -> None:  # noqa: ANN001
+    monkeypatch.setenv("HOST_SURFACE_MAIN_CHAIN_HARD_GATE_RETRY_ENABLED", "false")
+
+    def generate(_messages):
+        return _candidate_payload(["嗯…我其实更中意第三本，那个异世界皇女结婚的。开篇节奏挺舒服，人物互动也自然，读起来不累。老哥你呢？"])
+
+    result = asyncio.run(
+        SurfaceRuntime(generate).run(
+            _payload(
+                user_message="这三本书，你喜欢哪本？",
+                reply_control_packet={
+                    "response_move": "memory_followup",
+                    "task_mode": "memory_followup",
+                    "emotional_tone": "light",
+                    "relationship_distance": "familiar",
+                    "information_budget": "short",
+                    "question_budget": 0,
+                    "facts": [
+                        "网页深读结果（含正文）：当前更推荐第3本《[軽井広]轉移到異世界後，與美少女皇女結婚的我成為皇帝，享受悠閒的後宮生活 3》。原因：开篇比较抓人；设定线很直给；人物互动更好接；对白轻快；章节线索也比较清楚。另外我也顺手看了：第1本《A》、第2本《与神在河岸》。",
+                    ],
+                },
+            )
+        )
+    )
+
+    assert result.selected_text == "我会先看第三本，《轉移到異世界後，與美少女皇女結婚的我成為皇帝，享受悠閒的後宮生活3》。开篇就进正题，皇女/皇帝这套设定也够直接，比另外几本更想继续翻。"
+    assert result.observation_codes == ()
+
+
 def test_surface_runtime_retries_auditory_check_without_text_grounding() -> None:
     calls: list[list[dict[str, str]]] = []
 

@@ -43,6 +43,11 @@ FORBIDDEN_REPLY_TERMS = (
     "突然问这个",
     "硬要说",
     "硬要选",
+    "老哥～",
+    "哥哥～",
+    "尼尼～",
+    "肯定很爽",
+    "绝对好看",
     "认真看完",
     "最近在看",
     "不知道",
@@ -52,9 +57,18 @@ FORBIDDEN_REPLY_TERMS = (
     "证据更站得住",
     "正文有8",
     "正文有 8",
+    "对白密度高",
     "memory://",
     "evd://",
     "chat://",
+)
+FORBIDDEN_DEEP_REVIEW_PACKET_TERMS = (
+    "我回去打开详情页",
+    "正文内容足够支撑判断",
+    "证据更站得住",
+    "正文有8",
+    "正文有 8",
+    "对白密度高",
 )
 TITLE_TERMS = ("与神在河岸", "皇女", "培养失败", "美少女童星")
 REASON_TERMS = (
@@ -643,9 +657,15 @@ def _validate_report(report: JsonDict) -> list[str]:
         failures.append(f"decision_not_approve:{commit.get('decision')}")
     if not narrative.strip():
         failures.append("narrative_empty")
+    if "？" in narrative or "?" in narrative:
+        failures.append("reply_has_question")
     forbidden_reply = [term for term in FORBIDDEN_REPLY_TERMS if term in narrative]
     if forbidden_reply:
         failures.append("reply_forbidden:" + ",".join(forbidden_reply))
+    audit = commit.get("reply_envelope", {}).get("audit", {}) if isinstance(commit.get("reply_envelope"), dict) else {}
+    observation_codes = list(audit.get("observation_codes") or []) if isinstance(audit, dict) else []
+    if observation_codes:
+        failures.append("reply_observation_codes:" + ",".join(str(item) for item in observation_codes[:8]))
     if narrative and not any(term in narrative for term in TITLE_TERMS):
         failures.append("reply_missing_recommended_title")
     if narrative and not any(term in narrative for term in REASON_TERMS):
@@ -665,8 +685,9 @@ def _validate_report(report: JsonDict) -> list[str]:
     joined_facts = "\n".join(facts)
     if not facts:
         failures.append("packet_facts_empty")
-    if "推荐了 3 本轻小说" not in joined_facts:
-        failures.append("packet_missing_recommendation_episode")
+    evidence_refs = list(packet.get("evidence_refs") or [])
+    if not _has_recommendation_memory_anchor(joined_facts, evidence_refs):
+        failures.append("packet_missing_recommendation_anchor")
     if "与神在河岸" not in joined_facts:
         failures.append("packet_missing_title_anchor")
     if "可比较证据" not in joined_facts:
@@ -675,6 +696,9 @@ def _validate_report(report: JsonDict) -> list[str]:
         failures.append("packet_missing_structured_detail")
     if "网页深读结果（含正文）" not in joined_facts:
         failures.append("packet_missing_body_deep_review")
+    forbidden_deep_packet = [term for term in FORBIDDEN_DEEP_REVIEW_PACKET_TERMS if term in joined_facts]
+    if forbidden_deep_packet:
+        failures.append("packet_forbidden_deep_review_tone:" + ",".join(forbidden_deep_packet))
     surface_memory_trace = trace.get("surface_memory_trace") if isinstance(trace.get("surface_memory_trace"), dict) else {}
     deep_trace = (
         surface_memory_trace.get("lightnovel_deep_review")
@@ -729,9 +753,24 @@ def _validate_report(report: JsonDict) -> list[str]:
         forbidden_preview = [term for term in FORBIDDEN_PACKET_TERMS if term in preview]
         if forbidden_preview:
             failures.append("retrieval_preview_forbidden:" + ",".join(forbidden_preview))
-        if "推荐了 3 本轻小说" not in preview:
-            failures.append("retrieval_preview_missing_recommendation")
+        if not _has_recommendation_memory_anchor(preview):
+            failures.append("retrieval_preview_missing_recommendation_anchor")
     return failures
+
+
+def _has_recommendation_memory_anchor(text: str, evidence_refs: Any = None) -> bool:
+    value = str(text or "")
+    if "推荐了 3 本轻小说" in value:
+        return True
+    refs_text = "\n".join(str(item) for item in (evidence_refs or []))
+    has_collection = (
+        "集合记忆" in value
+        and "轻小说推荐集合" in value
+        and "记录 3 个条目" in value
+        and "可比较证据" in value
+    )
+    has_delivery_evidence = "lightnovel_gateway_delivery" in value or "lightnovel_gateway_delivery" in refs_text
+    return has_collection and has_delivery_evidence
 
 
 def _deep_review_selection(text: str) -> JsonDict:

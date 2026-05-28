@@ -21,7 +21,7 @@ _CHOICE_QUERY_RE = re.compile(
     r"(?:这本|这部|这一个|这個|这本书|这部书|这书|它).{0,8}(?:好看|能看|值得看|怎么样|如何)"
 )
 _BODY_TEXT_MIN_CHARS = 500
-_CACHE_VERSION = "lightnovel_deep_review:v3"
+_CACHE_VERSION = "lightnovel_deep_review:v4"
 
 
 def _clean_text(value: Any, *, limit: int = 0) -> str:

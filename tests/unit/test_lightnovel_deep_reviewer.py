@@ -222,7 +222,7 @@ def test_lightnovel_deep_review_uses_cached_life_episode_without_fetch(monkeypat
             int(time.time() * 1000),
             json.dumps(
                 {
-                    "deep_review_cache_version": "lightnovel_deep_review:v3",
+                    "deep_review_cache_version": "lightnovel_deep_review:v4",
                     "recommendation_signature": signature,
                     "fact": "网页深读结果（含正文）：我回去打开详情页和正文比较了这些轻小说，当前更推荐第2本《与神在河岸》。原因：正文主要靠对话和日常梗推进，轻喜剧感比较明显。",
                     "selected": selected,

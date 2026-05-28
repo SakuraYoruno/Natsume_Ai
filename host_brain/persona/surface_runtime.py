@@ -237,6 +237,10 @@ _MEMORY_FOLLOWUP_DEEP_REVIEW_RE = re.compile(
     r"网页深读结果(?:（含正文）)?[:：].{0,120}?当前更推荐第([一二三四五六七八九十\d]{1,3})本《([^》]{1,120})》。原因[:：]([^。\n]+(?:。[^另\n]*)?)",
     re.DOTALL,
 )
+_MEMORY_FOLLOWUP_OVERSTYLED_ADDRESS_RE = re.compile(
+    r"^\s*(?:老哥|哥哥|尼尼)[~～!！。,\s，、]*(?:第[一二三四五六七八九十\d]+本|我会|我选|那[几三两]本|这[几三两]本)"
+)
+_MEMORY_FOLLOWUP_UNGROUNDED_HYPE_RE = re.compile(r"肯定很爽|绝对好看|爆爽|神作预定")
 
 def _direct_surface_guard_lines(request: IsolatedSurfaceInput) -> tuple[str, ...]:
     no_question_line = (
@@ -547,6 +551,10 @@ def _surface_hard_gate_violations(request: IsolatedSurfaceInput, text: str) -> t
         codes.append("MEMORY_FOLLOWUP_DEEP_REVIEW_MISMATCH")
     if _memory_followup_deep_review_shallow_reason(request, value):
         codes.append("MEMORY_FOLLOWUP_DEEP_REVIEW_SHALLOW")
+    if _memory_followup_overstyled_selection_hits(request, value):
+        codes.append("MEMORY_FOLLOWUP_OVERSTYLED_SELECTION")
+    if _memory_followup_ungrounded_hype_hits(request, value):
+        codes.append("MEMORY_FOLLOWUP_UNGROUNDED_HYPE")
     if _memory_followup_shallow_analysis_hits(request, value):
         codes.append("MEMORY_FOLLOWUP_SHALLOW_ANALYSIS")
     if _memory_followup_bare_echo_hits(request, value):
@@ -669,6 +677,24 @@ def _memory_followup_shallow_analysis_hits(request: IsolatedSurfaceInput, text: 
     return not any(term and term in value for term in detail_terms)
 
 
+def _memory_followup_overstyled_selection_hits(request: IsolatedSurfaceInput, text: str) -> bool:
+    if not _memory_followup_grounding_active(request):
+        return False
+    user_text = str(getattr(request, "user_message", "") or "")
+    if not _MEMORY_FOLLOWUP_SELECTION_USER_RE.search(user_text):
+        return False
+    return bool(_MEMORY_FOLLOWUP_OVERSTYLED_ADDRESS_RE.search(str(text or "")))
+
+
+def _memory_followup_ungrounded_hype_hits(request: IsolatedSurfaceInput, text: str) -> bool:
+    if not _memory_followup_grounding_active(request):
+        return False
+    user_text = str(getattr(request, "user_message", "") or "")
+    if not _MEMORY_FOLLOWUP_SELECTION_USER_RE.search(user_text):
+        return False
+    return bool(_MEMORY_FOLLOWUP_UNGROUNDED_HYPE_RE.search(str(text or "")))
+
+
 def _memory_followup_deep_review_selection(request: IsolatedSurfaceInput) -> dict[str, Any]:
     facts = [
         str(item or "")
@@ -778,6 +804,16 @@ def _memory_followup_deep_review_reason_terms(selection: Mapping[str, Any]) -> t
         "轻喜剧",
     )
     terms = [term for term in fixed if term in reason]
+    if "开篇" in reason:
+        terms.append("开篇")
+    if "设定线" in reason or "设定" in reason:
+        terms.extend(["设定", "皇女", "皇帝"])
+    if "人物互动" in reason:
+        terms.append("人物互动")
+    if "对白轻快" in reason or "对白比较轻快" in reason:
+        terms.extend(["对白", "轻快"])
+    if "章节线索" in reason:
+        terms.append("章节")
     for sequence in re.findall(r"[\u3040-\u30ff\u3400-\u9fffA-Za-z0-9_]{2,12}", reason):
         if sequence in {"原因", "当前", "更推荐", "网页深读结果"}:
             continue
@@ -983,6 +1019,8 @@ def _memory_failure_answer_expected(*, user_text: str, fact_text: str) -> bool:
 
 
 def _memory_preference_answer_expected(*, user_text: str, fact_text: str) -> bool:
+    if _MEMORY_FOLLOWUP_SELECTION_USER_RE.search(user_text):
+        return False
     return bool(
         _MEMORY_PREFERENCE_USER_RE.search(user_text)
         and re.search(r"长期事实|偏好|不要|别再|必须|OneBot|主链|pro|Pro", fact_text)
@@ -1548,6 +1586,8 @@ def _hard_gate_fallback(request: IsolatedSurfaceInput, violations: Sequence[str]
     low_info = _low_info_scene_fallback(request)
     if low_info and codes:
         return low_info
+    if "QUESTION_BUDGET_PROMPTING_USER" in codes and _memory_followup_grounding_active(request):
+        return _memory_followup_fallback(request)
     if "AUDITORY_CHECK_PRETEND_HEARD" in codes or "AUDITORY_CHECK_MISSING_TEXT_GROUNDING" in codes:
         return "哈？我这里只收到这条文字。"
     if "BOUNDARY_SOUR_WITHDRAWAL" in codes:
@@ -1566,6 +1606,8 @@ def _hard_gate_fallback(request: IsolatedSurfaceInput, violations: Sequence[str]
         or "MEMORY_FOLLOWUP_MISSING_TITLE_ANCHOR" in codes
         or "MEMORY_FOLLOWUP_DEEP_REVIEW_MISMATCH" in codes
         or "MEMORY_FOLLOWUP_DEEP_REVIEW_SHALLOW" in codes
+        or "MEMORY_FOLLOWUP_OVERSTYLED_SELECTION" in codes
+        or "MEMORY_FOLLOWUP_UNGROUNDED_HYPE" in codes
         or "MEMORY_FOLLOWUP_SHALLOW_ANALYSIS" in codes
         or "MEMORY_FOLLOWUP_BARE_ECHO" in codes
         or any(code.startswith("MEMORY_ANSWER_") for code in codes)
@@ -1682,16 +1724,24 @@ def _memory_followup_spoken_title(title: str) -> str:
 
 def _memory_followup_deep_review_spoken_reason(reason: str, *, title: str) -> str:
     normalized = re.sub(r"\s+", "", str(reason or ""))
+    title_text = _clean_memory_title(str(title or ""))
+    combined = normalized + title_text
     bits: list[str] = []
-    if "开篇已经进入故事" in normalized or "不是资料卡" in normalized:
+    if "开篇" in normalized or "已经能读出故事" in normalized or "不是资料卡" in normalized:
         bits.append("开篇就进正题")
-    if "异世界" in normalized or "異世界" in normalized or "皇女" in normalized or "皇帝" in normalized:
+    if (
+        "异世界" in combined
+        or "異世界" in combined
+        or "皇女" in combined
+        or "皇帝" in combined
+        or "设定线" in normalized
+    ):
         bits.append("皇女/皇帝这套设定也够直接")
-    if "对白密度" in normalized:
+    if "对白密度" in normalized or "对白轻快" in normalized or "对白比较轻快" in normalized:
         bits.append("对白也轻快")
     if "章节" in normalized or "目录" in normalized:
         bits.append("后面章节钩子也清楚")
-    if "恋爱日常" in normalized or "人物关系" in normalized or "亲密感" in normalized:
+    if "恋爱日常" in normalized or "人物关系" in normalized or "亲密感" in normalized or "人物互动" in normalized:
         bits.append("人物互动更好嗑")
     if "成长" in normalized or "照顾线" in normalized:
         bits.append("照顾线也比较好接")
@@ -1714,16 +1764,18 @@ def _memory_followup_deep_review_reason_bits(reason: str) -> str:
     bits: list[str] = []
     if "正文内容" in normalized or "正文可读" in normalized:
         bits.append("翻进去不是空壳")
-    if "异世界" in normalized or "異世界" in normalized or "皇女" in normalized or "皇帝" in normalized:
-        bits.append("异世界皇女/皇帝线很直给")
-    if "恋爱日常" in normalized or "人物关系" in normalized or "亲密感" in normalized:
-        bits.append("人物关系推进更清楚")
-    if "对白密度" in normalized:
-        bits.append("对白密度高，读感比较轻快")
+    if "开篇" in normalized:
+        bits.append("开篇")
+    if "异世界" in normalized or "異世界" in normalized or "皇女" in normalized or "皇帝" in normalized or "设定线" in normalized:
+        bits.append("皇女")
+    if "恋爱日常" in normalized or "人物关系" in normalized or "亲密感" in normalized or "人物互动" in normalized:
+        bits.append("人物互动")
+    if "对白密度" in normalized or "对白轻快" in normalized or "对白比较轻快" in normalized:
+        bits.append("对白也轻快")
     if "轻喜剧" in normalized:
         bits.append("轻喜剧感明显")
     if "章节" in normalized or "目录" in normalized:
-        bits.append("章节线索也完整")
+        bits.append("章节")
     return "；".join(dict.fromkeys(bits[:3]))
 
 
