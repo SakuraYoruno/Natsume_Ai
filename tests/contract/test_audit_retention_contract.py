@@ -8,6 +8,7 @@ from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.governor.tokens import TokenService
 from host_brain.lsp.vault import ArtifactVault
 from host_brain.memory.life_memory import LifeMemoryStore
+from scripts.runtime.audit_life_memory_coverage import build_coverage_report
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -372,6 +373,99 @@ class TestAuditRetentionContract(unittest.TestCase):
         self.assertIn(recent_low, remaining_ids)
         self.assertFalse(any(row["episode_id"] == low_old for row in ledger.life_evidence))
         ledger.close()
+
+    def test_retention_refreshes_life_memory_collections_after_episode_prune(self) -> None:
+        ledger = SQLiteLedger(db_path=":memory:")
+        store = LifeMemoryStore(ledger=ledger)
+        try:
+            written = store.write_background_episode(
+                event_source="codex_production",
+                event_id="old-lightnovel-delivery",
+                request_id="req_old_lightnovel_delivery",
+                intent_id="codex_lightnovel_recommender",
+                person_id="owner",
+                session_id="qq_dm_owner",
+                task_id="lightnovel_recommendation_delivery",
+                status="COMPLETED",
+                detail="我给 qq_dm_owner 推荐了 3 本轻小说。",
+                ts_ms=1000,
+                metadata={
+                    "action_kind": "lightnovel_recommendation_delivery",
+                    "selected_recommendations": [
+                        {
+                            "title": "旧推荐 A",
+                            "selection_reason": "恋爱日常",
+                            "intro_snippet": "人物关系轻快。",
+                            "detail_url": "https://www.lightnovel.fun/cn/detail/old-a",
+                        },
+                        {
+                            "title": "旧推荐 B",
+                            "selection_reason": "奇幻身份",
+                            "intro_snippet": "设定钩子明显。",
+                            "detail_url": "https://www.lightnovel.fun/cn/detail/old-b",
+                        },
+                        {
+                            "title": "旧推荐 C",
+                            "selection_reason": "皇女皇帝线",
+                            "intro_snippet": "路线直给。",
+                            "detail_url": "https://www.lightnovel.fun/cn/detail/old-c",
+                        },
+                    ],
+                },
+            )
+            episode_id = written["episode_id"]
+            self.assertEqual("OK", written["collection_index"]["status"])
+            before = ledger._conn.execute("SELECT COUNT(1) AS c FROM life_memory_collection_item").fetchone()
+            self.assertGreater(int(before["c"]), 0)
+            with ledger._write_lock:
+                with ledger._conn:
+                    ledger._conn.execute(
+                        """
+                        UPDATE life_episode
+                        SET salience = 0.05, memory_strength = 0.05, retention_state = 'COLD'
+                        WHERE episode_id = ?
+                        """,
+                        (episode_id,),
+                    )
+
+            result = run_retention_policy(
+                ledger=ledger,
+                policy=RetentionPolicy(
+                    policy_profile_id="life_memory_collection_ret_test",
+                    keep_ms_by_table={},
+                    max_rows_by_table={},
+                    life_memory_keep_ms=100,
+                    life_memory_min_salience=0.40,
+                    life_memory_episode_kinds=("action_episode",),
+                ),
+                request_id="req_retention_life_collection",
+                now_ts_ms=10_000,
+            )
+
+            self.assertEqual(1, result.life_memory_candidate_count)
+            self.assertEqual(1, result.life_memory_deleted_count)
+            self.assertFalse(any(row["episode_id"] == episode_id for row in ledger.life_episode))
+            collections = ledger._conn.execute(
+                """
+                SELECT
+                    c.collection_id,
+                    c.item_count,
+                    c.retention_state,
+                    COUNT(i.collection_item_id) AS actual_item_count
+                FROM life_memory_collection c
+                LEFT JOIN life_memory_collection_item i ON i.collection_id = c.collection_id
+                GROUP BY c.collection_id
+                """
+            ).fetchall()
+            self.assertGreaterEqual(len(collections), 2)
+            for row in collections:
+                self.assertEqual(0, int(row["item_count"]))
+                self.assertEqual(0, int(row["actual_item_count"]))
+                self.assertEqual("GONE", row["retention_state"])
+            report = build_coverage_report(ledger._conn, include_synthetic=True)
+            self.assertEqual({}, report["collection_issue_counts"])
+        finally:
+            ledger.close()
 
     def test_env_policy_supports_dates_and_chat_memory_opt_in(self) -> None:
         policy = build_retention_policy_from_env(

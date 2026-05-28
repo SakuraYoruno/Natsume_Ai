@@ -103,6 +103,17 @@ class EpisodeIssue:
     detail: str
 
 
+@dataclass(frozen=True)
+class CollectionIssue:
+    issue_kind: str
+    severity: str
+    collection_id: str
+    collection_kind: str
+    domain: str
+    scope_key: str
+    detail: str
+
+
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Audit LifeMemory coverage.")
     parser.add_argument("--db-path", default="")
@@ -265,10 +276,53 @@ def _fetch_rows(conn: sqlite3.Connection) -> list[dict[str, Any]]:
     return [dict(row) for row in rows]
 
 
+def _fetch_collection_rows(conn: sqlite3.Connection) -> list[dict[str, Any]]:
+    if not _table_exists(conn, "life_memory_collection"):
+        return []
+    rows = conn.execute(
+        """
+        SELECT
+            c.collection_id,
+            c.collection_kind,
+            c.domain,
+            c.scope_key,
+            c.person_id,
+            c.session_id,
+            c.title,
+            c.summary,
+            c.item_count,
+            c.retention_state,
+            c.memory_strength,
+            c.created_ts_ms,
+            c.updated_ts_ms,
+            c.metadata,
+            COUNT(i.collection_item_id) AS actual_item_count,
+            SUM(CASE WHEN i.collection_item_id IS NOT NULL AND ep.episode_id IS NULL THEN 1 ELSE 0 END) AS missing_episode_item_count
+        FROM life_memory_collection c
+        LEFT JOIN life_memory_collection_item i ON i.collection_id = c.collection_id
+        LEFT JOIN life_episode ep ON ep.episode_id = i.episode_id
+        GROUP BY c.collection_id
+        ORDER BY c.updated_ts_ms DESC
+        """
+    ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def _table_exists(conn: sqlite3.Connection, table_name: str) -> bool:
+    row = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ? LIMIT 1",
+        (str(table_name),),
+    ).fetchone()
+    return row is not None
+
+
 def build_coverage_report(conn: sqlite3.Connection, *, sample_limit: int = 25, include_synthetic: bool = False) -> dict[str, Any]:
     rows = _fetch_rows(conn)
+    collection_rows = _fetch_collection_rows(conn)
     issues: list[EpisodeIssue] = []
+    collection_issues: list[CollectionIssue] = []
     by_kind_action: Counter[tuple[str, str]] = Counter()
+    collection_by_kind_domain: Counter[tuple[str, str]] = Counter()
     evidence_kind_counter: Counter[str] = Counter()
     required_identity_counts = {"person": 0, "session": 0}
     gateway_count = 0
@@ -320,8 +374,60 @@ def build_coverage_report(conn: sqlite3.Connection, *, sample_limit: int = 25, i
         if kind == "perception_episode" and int(row.get("evidence_count") or 0) <= 0:
             issues.append(EpisodeIssue("perception_without_evidence", "critical", episode_id, kind, action, person_id, session_id, "perception episode must bind perception/audio evidence"))
 
+    collection_item_total = 0
+    for row in collection_rows:
+        metadata = _json_loads(row.get("metadata"))
+        collection_id = _clean(row.get("collection_id"))
+        collection_kind = _clean(row.get("collection_kind"))
+        domain = _clean(row.get("domain"))
+        scope_key = _clean(row.get("scope_key"))
+        declared_count = int(row.get("item_count") or 0)
+        actual_count = int(row.get("actual_item_count") or 0)
+        missing_episode_count = int(row.get("missing_episode_item_count") or 0)
+        collection_item_total += actual_count
+        collection_by_kind_domain[(collection_kind, domain)] += 1
+        synthetic = bool(metadata.get("e2e_probe") or metadata.get("test_probe") or metadata.get("synthetic_probe"))
+        if synthetic and not include_synthetic:
+            continue
+        if _clean(row.get("retention_state")).upper() == "GONE":
+            continue
+        if not collection_kind:
+            collection_issues.append(CollectionIssue("missing_collection_kind", "critical", collection_id, collection_kind, domain, scope_key, "collection_kind is required"))
+        if not domain:
+            collection_issues.append(CollectionIssue("missing_collection_domain", "warn", collection_id, collection_kind, domain, scope_key, "domain helps route collection recall"))
+        if not scope_key:
+            collection_issues.append(CollectionIssue("missing_collection_scope", "critical", collection_id, collection_kind, domain, scope_key, "scope_key is required"))
+        if actual_count <= 0:
+            collection_issues.append(CollectionIssue("empty_collection", "warn", collection_id, collection_kind, domain, scope_key, "collection has no item anchors"))
+        if declared_count != actual_count:
+            collection_issues.append(
+                CollectionIssue(
+                    "collection_item_count_mismatch",
+                    "warn",
+                    collection_id,
+                    collection_kind,
+                    domain,
+                    scope_key,
+                    f"declared item_count={declared_count}, actual items={actual_count}",
+                )
+            )
+        if missing_episode_count > 0:
+            collection_issues.append(
+                CollectionIssue(
+                    "collection_item_missing_episode",
+                    "critical",
+                    collection_id,
+                    collection_kind,
+                    domain,
+                    scope_key,
+                    f"{missing_episode_count} collection items point at missing episodes",
+                )
+            )
+
     issue_counts = Counter(issue.issue_kind for issue in issues)
+    collection_issue_counts = Counter(issue.issue_kind for issue in collection_issues)
     severity_counts = Counter(issue.severity for issue in issues)
+    collection_severity_counts = Counter(issue.severity for issue in collection_issues)
     report = {
         "schema": "Natsume.life_memory_coverage.v1",
         "generated_ts_ms": int(time.time() * 1000),
@@ -337,12 +443,23 @@ def build_coverage_report(conn: sqlite3.Connection, *, sample_limit: int = 25, i
             "issue_count": len(issues),
             "critical_issue_count": severity_counts.get("critical", 0),
             "warn_issue_count": severity_counts.get("warn", 0),
+            "collection_count": len(collection_rows),
+            "collection_item_count": collection_item_total,
+            "collection_issue_count": len(collection_issues),
+            "collection_critical_issue_count": collection_severity_counts.get("critical", 0),
+            "collection_warn_issue_count": collection_severity_counts.get("warn", 0),
         },
         "entrypoint_matrix": ENTRYPOINT_MATRIX,
         "by_kind_action": _summarize_counter(by_kind_action),
+        "collection_by_kind_domain": [
+            {"collection_kind": kind, "domain": domain, "count": count}
+            for (kind, domain), count in sorted(collection_by_kind_domain.items(), key=lambda item: (-item[1], item[0][0], item[0][1]))
+        ],
         "evidence_kinds": [{"evidence_kind": key, "count": count} for key, count in evidence_kind_counter.most_common()],
         "issue_counts": dict(sorted(issue_counts.items())),
+        "collection_issue_counts": dict(sorted(collection_issue_counts.items())),
         "issues": [asdict(issue) for issue in issues[: max(1, int(sample_limit))]],
+        "collection_issues": [asdict(issue) for issue in collection_issues[: max(1, int(sample_limit))]],
     }
     return report
 
@@ -361,6 +478,8 @@ def _render_markdown(report: Mapping[str, Any]) -> str:
         f"- Required session episodes: {summary.get('required_session_episode_count', 0)}",
         f"- Issues: {summary.get('issue_count', 0)} "
         f"(critical={summary.get('critical_issue_count', 0)}, warn={summary.get('warn_issue_count', 0)})",
+        f"- Collections: {summary.get('collection_count', 0)} "
+        f"(items={summary.get('collection_item_count', 0)}, issues={summary.get('collection_issue_count', 0)})",
         "",
         "## Entrypoints",
         "",
@@ -379,11 +498,20 @@ def _render_markdown(report: Mapping[str, Any]) -> str:
     lines.extend(["", "## Issue Counts", ""])
     for key, count in dict(report.get("issue_counts") or {}).items():
         lines.append(f"- {key}: {count}")
+    lines.extend(["", "## Collection Issue Counts", ""])
+    for key, count in dict(report.get("collection_issue_counts") or {}).items():
+        lines.append(f"- {key}: {count}")
     lines.extend(["", "## Issue Samples", ""])
     for issue in report.get("issues") or []:
         lines.append(
             f"- [{issue.get('severity')}] {issue.get('issue_kind')} "
             f"{issue.get('episode_id')} {issue.get('episode_kind')}/{issue.get('action')}: {issue.get('detail')}"
+        )
+    lines.extend(["", "## Collection Issue Samples", ""])
+    for issue in report.get("collection_issues") or []:
+        lines.append(
+            f"- [{issue.get('severity')}] {issue.get('issue_kind')} "
+            f"{issue.get('collection_id')} {issue.get('collection_kind')}/{issue.get('domain')}/{issue.get('scope_key')}: {issue.get('detail')}"
         )
     return "\n".join(lines).strip() + "\n"
 
@@ -413,7 +541,9 @@ def main() -> int:
     else:
         print(output)
     critical = int((report.get("summary") or {}).get("critical_issue_count") or 0)
+    critical += int((report.get("summary") or {}).get("collection_critical_issue_count") or 0)
     total = int((report.get("summary") or {}).get("issue_count") or 0)
+    total += int((report.get("summary") or {}).get("collection_issue_count") or 0)
     if args.fail_on == "critical" and critical > 0:
         return 3
     if args.fail_on == "warn" and total > 0:

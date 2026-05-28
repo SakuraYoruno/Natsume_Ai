@@ -503,7 +503,49 @@ def _delete_life_memory_candidates(conn: Any, *, write_lock: Any, policy: Retent
                 """,
                 params,
             )
-    return int(cursor.rowcount or 0)
+            deleted = int(cursor.rowcount or 0)
+            if deleted > 0:
+                _cleanup_life_memory_collections_locked(conn, now_ts_ms=now_ts_ms)
+    return deleted
+
+
+def _cleanup_life_memory_collections_locked(conn: Any, *, now_ts_ms: int) -> None:
+    if not _has_table(conn, "life_memory_collection") or not _has_table(conn, "life_memory_collection_item"):
+        return
+    conn.execute(
+        """
+        DELETE FROM life_memory_collection_item
+        WHERE episode_id NOT IN (SELECT episode_id FROM life_episode)
+        """
+    )
+    conn.execute(
+        """
+        UPDATE life_memory_collection
+        SET
+            item_count = (
+                SELECT COUNT(1)
+                FROM life_memory_collection_item i
+                WHERE i.collection_id = life_memory_collection.collection_id
+            ),
+            updated_ts_ms = MAX(COALESCE(updated_ts_ms, 0), ?)
+        """,
+        (int(now_ts_ms),),
+    )
+    conn.execute(
+        """
+        UPDATE life_memory_collection
+        SET
+            retention_state = 'GONE',
+            updated_ts_ms = MAX(COALESCE(updated_ts_ms, 0), ?)
+        WHERE COALESCE(retention_state, 'WARM') != 'GONE'
+          AND (
+              SELECT COUNT(1)
+              FROM life_memory_collection_item i
+              WHERE i.collection_id = life_memory_collection.collection_id
+          ) = 0
+        """,
+        (int(now_ts_ms),),
+    )
 
 
 def _vacuum(conn: Any, *, write_lock: Any) -> None:
@@ -513,6 +555,17 @@ def _vacuum(conn: Any, *, write_lock: Any) -> None:
 
 def _has_ts_ms_column(conn: Any, table: str) -> bool:
     return _has_column(conn, table, "ts_ms")
+
+
+def _has_table(conn: Any, table: str) -> bool:
+    try:
+        row = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ? LIMIT 1",
+            (str(table),),
+        ).fetchone()
+    except Exception:
+        return False
+    return row is not None
 
 
 def _has_column(conn: Any, table: str, column: str) -> bool:

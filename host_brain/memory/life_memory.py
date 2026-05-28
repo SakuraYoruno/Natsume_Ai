@@ -2037,7 +2037,7 @@ class LifeMemoryConsolidator:
         return candidates
 
     def build_semantic_proposals(self, *, limit: int = 80, max_records: int = 24) -> list[dict[str, Any]]:
-        """Extract durable semantic facts from trusted life episodes."""
+        """Extract durable semantic facts from trusted episodes and collections."""
 
         rows = self.store.ledger._conn.execute(
             """
@@ -2074,11 +2074,61 @@ class LifeMemoryConsolidator:
                 existing["confidence"] = max(_clamp_unit(existing.get("confidence")), _clamp_unit(proposal.get("confidence")))
                 existing["source_refs"] = list(dict.fromkeys([*list(existing.get("source_refs") or []), *list(proposal.get("source_refs") or [])]))
                 existing["tags"] = list(dict.fromkeys([*list(existing.get("tags") or []), *list(proposal.get("tags") or [])]))
+                existing["source_collection_ids"] = list(
+                    dict.fromkeys(
+                        [
+                            *list(existing.get("source_collection_ids") or []),
+                            *list(proposal.get("source_collection_ids") or []),
+                        ]
+                    )
+                )
+        for proposal in self._build_collection_semantic_proposals(limit=limit):
+            key = _clean_text(proposal.get("semantic_key"))
+            if not key:
+                continue
+            existing = proposals_by_key.get(key)
+            if existing is None:
+                proposals_by_key[key] = proposal
+                continue
+            existing["confidence"] = max(_clamp_unit(existing.get("confidence")), _clamp_unit(proposal.get("confidence")))
+            existing["source_refs"] = list(dict.fromkeys([*list(existing.get("source_refs") or []), *list(proposal.get("source_refs") or [])]))
+            existing["tags"] = list(dict.fromkeys([*list(existing.get("tags") or []), *list(proposal.get("tags") or [])]))
+            existing["source_episode_ids"] = list(
+                dict.fromkeys([*list(existing.get("source_episode_ids") or []), *list(proposal.get("source_episode_ids") or [])])
+            )
+            existing["source_collection_ids"] = list(
+                dict.fromkeys(
+                    [
+                        *list(existing.get("source_collection_ids") or []),
+                        *list(proposal.get("source_collection_ids") or []),
+                    ]
+                )
+            )
         proposals = sorted(
             proposals_by_key.values(),
             key=lambda item: (-_clamp_unit(item.get("confidence")), str(item.get("summary") or "")),
         )
         return proposals[: max(1, int(max_records))]
+
+    def _build_collection_semantic_proposals(self, *, limit: int = 80) -> list[dict[str, Any]]:
+        rows = self.store.ledger._conn.execute(
+            """
+            SELECT *
+            FROM life_memory_collection
+            WHERE COALESCE(retention_state, ?) != ?
+              AND COALESCE(item_count, 0) > 0
+            ORDER BY memory_strength DESC, updated_ts_ms DESC
+            LIMIT ?
+            """,
+            (RETENTION_WARM, RETENTION_GONE, max(1, int(limit))),
+        ).fetchall()
+        proposals: list[dict[str, Any]] = []
+        for row in rows:
+            collection = dict(row)
+            proposal = _semantic_proposal_from_collection(self.store, collection)
+            if proposal:
+                proposals.append(proposal)
+        return proposals
 
     def distill_semantic_memories(
         self,
@@ -2096,7 +2146,7 @@ class LifeMemoryConsolidator:
             semantic_key = _clean_text(proposal.get("semantic_key"))
             if not semantic_key:
                 continue
-            source_ids = [f"life_episode::{item}" for item in list(proposal.get("source_episode_ids") or []) if _clean_text(item)]
+            source_ids = _semantic_source_memory_ids(proposal)
             if not source_ids:
                 continue
             source_hash = hashlib.sha256(f"life_semantic:v1:{semantic_key}".encode("utf-8", errors="ignore")).hexdigest()
@@ -2111,13 +2161,16 @@ class LifeMemoryConsolidator:
                 )
                 continue
             semantic_id = f"sem_life_{_stable_hash('life_semantic_id:v1:' + semantic_key, size=24)}"
-            tags = list(dict.fromkeys([*list(proposal.get("tags") or []), "source:life_episode", "life_consolidated"]))
+            source_tags = ["source:life_episode"]
+            if list(proposal.get("source_collection_ids") or []):
+                source_tags.append("source:life_memory_collection")
+            tags = list(dict.fromkeys([*list(proposal.get("tags") or []), *source_tags, "life_consolidated"]))
             record = {
                 "semantic_id": semantic_id,
                 "summary": _clean_text(proposal.get("summary"), limit=900),
                 "source_memory_ids": source_ids,
                 "source_hash": source_hash,
-                "distill_strategy": "life_episode_rule_consolidation",
+                "distill_strategy": _clean_text(proposal.get("distill_strategy")) or "life_episode_rule_consolidation",
                 "confidence": _clamp_unit(proposal.get("confidence")),
                 "tags": tags,
                 "ts_ms": created,
@@ -2402,6 +2455,106 @@ def _collection_scope_boost(collection: Mapping[str, Any], *, plan: Any, now_ts_
     if int(collection.get("item_count") or 0) > 0:
         boost += 0.08
     return min(0.38, boost)
+
+
+def _semantic_source_memory_ids(proposal: Mapping[str, Any]) -> list[str]:
+    ids: list[str] = []
+    for item in list(proposal.get("source_episode_ids") or []):
+        eid = _clean_text(item)
+        if eid:
+            ids.append(f"life_episode::{eid}")
+    for item in list(proposal.get("source_collection_ids") or []):
+        cid = _clean_text(item)
+        if cid:
+            ids.append(f"life_memory_collection::{cid}")
+    return list(dict.fromkeys(ids))
+
+
+def _semantic_proposal_from_collection(store: LifeMemoryStore, collection: Mapping[str, Any]) -> dict[str, Any] | None:
+    collection_id = _clean_text(collection.get("collection_id"))
+    if not collection_id:
+        return None
+    metadata = _json_loads(collection.get("metadata"), fallback={})
+    if not isinstance(metadata, dict):
+        metadata = {}
+    if bool(metadata.get("e2e_probe")) or bool(metadata.get("test_probe")):
+        return None
+    domain = _clean_text(collection.get("domain"))
+    collection_kind = _clean_text(collection.get("collection_kind"))
+    scope_key = _clean_text(collection.get("scope_key"))
+    item_count = int(collection.get("item_count") or 0)
+    if item_count <= 0:
+        return None
+    if collection_kind != COLLECTION_RECOMMENDATION and "recommendation" not in collection_kind:
+        return None
+    items = store._list_collection_items(collection_id=collection_id, limit=32)
+    if not items:
+        return None
+    titles = [
+        _clean_text(item.get("item_title") or _collection_item_title(item), limit=80)
+        for item in items
+        if _clean_text(item.get("item_title") or _collection_item_title(item))
+    ]
+    if not titles:
+        return None
+    source_episode_ids = [
+        _clean_text(item.get("episode_id"))
+        for item in items
+        if _clean_text(item.get("episode_id"))
+    ]
+    source_refs = [
+        _clean_text(item.get("evidence_ref") or item.get("source_ref"))
+        for item in items
+        if _clean_text(item.get("evidence_ref") or item.get("source_ref"))
+    ]
+    person_id = _clean_text(collection.get("person_id")) or "global"
+    domain_label = "轻小说推荐" if domain == DOMAIN_LIGHTNOVEL_RECOMMENDATION else (domain.replace("_", " ") or "推荐")
+    scope_label = _semantic_collection_scope_label(scope_key)
+    title_part = "、".join(titles[:10])
+    if len(titles) > 10:
+        title_part += f"等 {len(titles)} 个条目"
+    summary = f"经历集合：{scope_label}{domain_label}记录了 {item_count} 个条目：{title_part}。"
+    if source_episode_ids:
+        summary += f" 可追溯到 {len(set(source_episode_ids))} 个推荐经历。"
+    semantic_key = (
+        "experience_collection|"
+        f"{person_id}|{domain}|{scope_key}|"
+        f"{_stable_hash('|'.join(titles[:24]), size=24)}"
+    )
+    confidence = _semantic_collection_confidence(collection=collection, item_count=item_count)
+    tags = [
+        "experience_collection",
+        "recommendation_collection",
+        f"domain:{domain or 'generic'}",
+    ]
+    if domain == DOMAIN_LIGHTNOVEL_RECOMMENDATION:
+        tags.append("lightnovel_recommendation")
+    return {
+        "semantic_key": semantic_key,
+        "semantic_kind": "experience_collection",
+        "summary": summary,
+        "confidence": confidence,
+        "tags": tags,
+        "source_episode_ids": list(dict.fromkeys(source_episode_ids)),
+        "source_collection_ids": [collection_id],
+        "source_refs": list(dict.fromkeys([f"life_memory_collection://{collection_id}", *source_refs])),
+        "distill_strategy": "life_memory_collection_rule_consolidation",
+    }
+
+
+def _semantic_collection_scope_label(scope_key: str) -> str:
+    value = _clean_text(scope_key)
+    if value.startswith(f"{COLLECTION_SCOPE_DAILY}:"):
+        return value.split(":", 1)[1] + " 的"
+    if value == COLLECTION_SCOPE_RECENT:
+        return "最近的"
+    return f"{value} "
+
+
+def _semantic_collection_confidence(*, collection: Mapping[str, Any], item_count: int) -> float:
+    strength = _clamp_unit(collection.get("memory_strength"), default=_clamp_unit(collection.get("salience"), default=0.4))
+    count_bonus = min(0.12, max(0, int(item_count)) * 0.015)
+    return round(_clamp_unit(0.58 + strength * 0.24 + count_bonus), 4)
 
 
 def _semantic_proposals_from_episode(
