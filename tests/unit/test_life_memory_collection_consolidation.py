@@ -102,6 +102,11 @@ def test_life_memory_coverage_reports_collection_health() -> None:
         assert summary["collection_issue_count"] == 0
         assert any(row["collection_kind"] == "recommendation_collection" for row in report["collection_by_kind_domain"])
 
+        good_collection_id = ledger.life_memory_collection[0]["collection_id"]
+        ledger._conn.execute(
+            "UPDATE life_memory_collection SET summary = ? WHERE collection_id = ?",
+            ("2026-01-01 当天轻小说推荐集合，记录 999 个条目：坏摘要。", good_collection_id),
+        )
         ledger._conn.execute(
             """
             INSERT INTO life_memory_collection (
@@ -117,5 +122,6 @@ def test_life_memory_coverage_reports_collection_health() -> None:
         assert broken["summary"]["collection_issue_count"] >= 1
         assert "empty_collection" in broken["collection_issue_counts"]
         assert "collection_item_count_mismatch" in broken["collection_issue_counts"]
+        assert "collection_summary_count_mismatch" in broken["collection_issue_counts"]
     finally:
         ledger.close()

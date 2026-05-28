@@ -795,6 +795,80 @@ def test_recall_surface_memory_validation_flags_wrong_date_collection_scope() ->
     assert any("召回校验失败" in item for item in packet.must_not_do)
 
 
+def test_collection_scope_query_filters_self_echo_when_many_books_requested() -> None:
+    class _RecallService:
+        def recall(self, **kwargs):  # noqa: ANN003
+            return SimpleNamespace(
+                output={
+                    "query": kwargs["query"],
+                    "status": "OK",
+                    "stage": "S_RET_RECALL",
+                    "degraded": False,
+                    "routes": [
+                        {"route_id": "surface_life_collection", "store_id": "life_memory_collection"},
+                        {"route_id": "surface_life_episode", "store_id": "life_episode"},
+                    ],
+                    "candidate_count": 2,
+                    "ts_ms": kwargs["ts_ms"],
+                    "candidates": [
+                        {
+                            "doc_id": "col-recent",
+                            "source_ref": "life_memory_collection://col-recent",
+                            "evidence_refs": ["gateway://message/recent/card/1"],
+                            "text": "最近轻小说推荐集合，记录 15 个条目；可比较证据：1. Recent A｜2. Recent B",
+                            "score": 0.91,
+                            "metadata": {
+                                "store_id": "life_memory_collection",
+                                "scope_key": "recent",
+                                "item_count": 15,
+                                "evidence_refs_primary": "gateway://message/recent/card/1",
+                            },
+                        },
+                        {
+                            "doc_id": "col-recent-small",
+                            "source_ref": "life_memory_collection://col-recent-small",
+                            "evidence_refs": ["gateway://message/old/card/1"],
+                            "text": "最近轻小说推荐集合，记录 3 个条目；可比较证据：1. Old A｜2. Old B",
+                            "score": 0.93,
+                            "metadata": {
+                                "store_id": "life_memory_collection",
+                                "scope_key": "recent",
+                                "item_count": 3,
+                                "evidence_refs_primary": "gateway://message/old/card/1",
+                            },
+                        },
+                        {
+                            "doc_id": "ep-self-echo",
+                            "source_ref": "chat://request/self-echo",
+                            "evidence_refs": ["chat://request/self-echo"],
+                            "text": "用户提到：这三本书，你喜欢哪本？ 回复：那三本里我会选第二本。",
+                            "score": 0.89,
+                            "metadata": {"store_id": "life_episode"},
+                        },
+                    ],
+                }
+            )
+
+    packet = recall_surface_memory_for_context(
+        recall_service=_RecallService(),
+        context=ThreeLayerContinuityContext(
+            current_user_message="这十几本里有哪些？",
+            task_mode_hint="daily_chat",
+        ),
+        request_id="req-many-book-listing",
+        query_embedding=[0.1] * 16,
+        person_id="owner",
+        session_id="qq_dm_owner",
+        ts_ms=_ts(2026, 5, 29, 8),
+    )
+
+    joined = "\n".join(packet.facts)
+    assert packet.reason_code is None
+    assert "最近轻小说推荐集合，记录 15 个条目" in joined
+    assert "记录 3 个条目" not in joined
+    assert "用户提到" not in joined
+
+
 def test_write_surface_turn_memory_writes_compact_evidence_gated_record() -> None:
     captured: dict[str, object] = {}
 

@@ -226,6 +226,15 @@ def _scenario_expectations() -> list[ScenarioExpectation]:
             must_not_contain="DeepSeek",
         ),
         ScenarioExpectation(
+            case_id="recent_many_book_listing",
+            message="这十几本里有哪些？",
+            expected_reason="collection_memory_recall",
+            expected_kind="collection_summary",
+            must_route="surface_life_collection",
+            must_contain="5月26日推荐",
+            must_not_contain="DeepSeek",
+        ),
+        ScenarioExpectation(
             case_id="failure_debug",
             message="DeepSeek失败原因是什么？",
             expected_reason="failure_debug_recall",

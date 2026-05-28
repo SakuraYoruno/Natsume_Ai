@@ -51,6 +51,7 @@ def _write_delivery(
     prefix: str,
     ts_ms: int,
     session_id: str = "qq_dm_owner",
+    person_id: str = "owner",
 ) -> str:
     result = persist_life_action_event_memory(
         event_source="codex_production",
@@ -59,7 +60,7 @@ def _write_delivery(
         actor_id="natsume",
         request_id=f"req-{prefix}",
         intent_id="codex_lightnovel_recommender",
-        person_id="owner",
+        person_id=person_id,
         session_id=session_id,
         status="COMPLETED",
         action_summary=f"我给 {session_id} 推荐了 3 本轻小说：{prefix} A；{prefix} B；{prefix} C。",
@@ -114,6 +115,11 @@ def test_recommendation_delivery_indexes_daily_and_recent_collections() -> None:
         assert len(ledger.life_memory_collection) == 3
         assert len(ledger.life_memory_collection_item) == 12
         assert any(row["episode_id"] == yesterday_episode for row in ledger.life_memory_collection_item)
+        recent_collection = next(row for row in ledger.life_memory_collection if row["scope_key"] == "recent")
+        assert recent_collection["item_count"] == 6
+        assert "记录 6 个条目" in recent_collection["summary"]
+        assert "Yesterday A" in recent_collection["summary"]
+        assert "Today C" in recent_collection["summary"]
 
         packet = store.recall_collection_packet(
             query="昨天三本呢",
@@ -153,9 +159,39 @@ def test_recent_days_collection_recalls_items_across_multiple_delivery_episodes(
         top = packet.candidates[0]
         assert top["metadata"]["scope_key"] == "recent"
         assert top["metadata"]["item_count"] == 9
+        assert "最近轻小说推荐集合，记录 9 个条目" in top["text"]
         assert "DayBefore A" in top["text"]
         assert "Yesterday B" in top["text"]
         assert "Today C" in top["text"]
+    finally:
+        ledger.close()
+
+
+def test_collection_recall_falls_back_to_default_owner_scope_when_session_alias_misses() -> None:
+    ledger = SQLiteLedger(db_path=":memory:")
+    try:
+        store = LifeMemoryStore(ledger=ledger)
+        _write_delivery(
+            store,
+            prefix="RealQQ",
+            ts_ms=_ts(2026, 5, 28),
+            session_id="qq_dm_3414578517",
+            person_id="default",
+        )
+
+        packet = store.recall_collection_packet(
+            query="昨天三本呢",
+            top_k=2,
+            person_id="owner",
+            session_id="qq_dm_owner_alias",
+            now_ts_ms_value=_ts(2026, 5, 29, 8),
+        )
+
+        assert packet.candidates
+        top = packet.candidates[0]
+        assert top["metadata"]["scope_key"] == "daily:2026-05-28"
+        assert top["metadata"]["item_count"] == 3
+        assert "RealQQ A" in top["text"]
     finally:
         ledger.close()
 
@@ -174,6 +210,21 @@ def test_surface_plan_routes_date_and_collection_queries_to_collection_first() -
     assert plan.temporal_scope == "yesterday"
     assert plan.target_store_ids[0] == "life_memory_collection"
     assert "collection_items_present" in plan.validation_requirements
+
+
+def test_surface_plan_routes_many_book_listing_to_recent_collection() -> None:
+    plan = plan_surface_memory_recall(
+        ThreeLayerContinuityContext(
+            current_user_message="这十几本里有哪些？",
+            task_mode_hint="daily_chat",
+        )
+    )
+
+    assert plan.should_recall
+    assert plan.reason == "collection_memory_recall"
+    assert plan.query_kind == "collection_summary"
+    assert plan.temporal_scope == "recent_days"
+    assert plan.target_store_ids[0] == "life_memory_collection"
 
 
 def test_recall_fusion_collection_route_builds_surface_packet_with_items() -> None:

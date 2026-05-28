@@ -10,6 +10,7 @@ from host_brain.memory.life_memory import (
     LifeMemoryConsolidator,
     MemorySleepReplayTask,
     LifeMemoryStore,
+    RETENTION_COLD,
     RETENTION_GONE,
     RETENTION_WARM,
     TRUTH_SUPPRESSED,
@@ -238,6 +239,99 @@ def test_consolidator_distills_user_preference_from_trusted_episode_only() -> No
         ledger.close()
 
 
+def test_collection_semantic_distillation_skips_suppressed_source_episode() -> None:
+    ledger = SQLiteLedger(db_path=":memory:")
+    try:
+        store = LifeMemoryStore(ledger=ledger)
+        source = store.upsert_episode(
+            episode_kind=EPISODE_ACTION,
+            evidence_refs=["action://event/bad-recommendation"],
+            primary_ref="action://event/bad-recommendation",
+            person_id="user-1",
+            session_id="qq_dm_1",
+            action="lightnovel_recommendation_delivery",
+            result="COMPLETED",
+            summary="错误地推荐了 3 本轻小说。",
+            salience=0.52,
+            ts_ms=1_800_000_000_000,
+            metadata={
+                "selected_recommendations": [
+                    {"title": "坏推荐 A", "selection_reason": "错误候选"},
+                    {"title": "坏推荐 B", "selection_reason": "错误候选"},
+                    {"title": "坏推荐 C", "selection_reason": "错误候选"},
+                ],
+            },
+        )
+        indexed = store.index_episode_collections(
+            episode_id=source["episode_id"],
+            ts_ms=1_800_000_000_000,
+        )
+        assert indexed["status"] == "OK"
+        assert len(ledger.life_memory_collection_item) == 6
+
+        store.correct_episode(
+            episode_id=source["episode_id"],
+            correction_kind="suppression",
+            suppress=True,
+            detail="用户指出这批推荐是错误结果。",
+            ts_ms=1_800_000_000_100,
+        )
+
+        proposals = LifeMemoryConsolidator(store=store).build_semantic_proposals(limit=10, max_records=10)
+        result = LifeMemoryConsolidator(store=store).distill_semantic_memories(
+            limit=10,
+            max_records=10,
+            ts_ms=1_800_000_000_200,
+        )
+        items, total = ledger.list_semantic_memories()
+
+        assert proposals == []
+        assert result["written_count"] == 0
+        assert total == 0
+        assert items == []
+    finally:
+        ledger.close()
+
+
+def test_forgetting_pass_keeps_semantic_memory_source_anchor_traceable() -> None:
+    ledger = SQLiteLedger(db_path=":memory:")
+    try:
+        store = LifeMemoryStore(ledger=ledger)
+        old_ts = 1_800_000_000_000
+        source = store.upsert_episode(
+            episode_kind="chat_episode",
+            evidence_refs=["chat://request/semantic-anchor-pref"],
+            primary_ref="chat://request/semantic-anchor-pref",
+            person_id="user-1",
+            session_id="sess-1",
+            summary="用户喜欢蓝色主题。",
+            salience=0.05,
+            memory_strength=0.05,
+            decay_profile_id="FAST",
+            ts_ms=old_ts,
+        )
+        distilled = LifeMemoryConsolidator(store=store).distill_semantic_memories(
+            limit=10,
+            max_records=5,
+            ts_ms=old_ts + 100,
+        )
+        assert distilled["written_count"] == 1
+
+        forgetting = store.apply_forgetting_pass(
+            now_ts_ms_value=old_ts + 45 * 24 * 60 * 60 * 1000,
+            cold_after_ms=1,
+            gone_after_ms=1,
+        )
+
+        row = next(item for item in ledger.life_episode if item["episode_id"] == source["episode_id"])
+        assert forgetting["semantic_reference_protected"] == 1
+        assert row["retention_state"] == RETENTION_COLD
+        assert row["forget_reason"] == "semantic_reference_protected"
+        assert row["retention_state"] != RETENTION_GONE
+    finally:
+        ledger.close()
+
+
 def test_sleep_replay_distills_failure_lesson_and_skips_test_probe() -> None:
     ledger = SQLiteLedger(db_path=":memory:")
     try:
@@ -315,6 +409,52 @@ def test_sleep_replay_does_not_reflect_low_value_delivery_logs() -> None:
         assert result["reflection_count"] >= 1
         assert failure["episode_id"] in reflection_episode_ids
         assert delivery["episode_id"] not in reflection_episode_ids
+    finally:
+        ledger.close()
+
+
+def test_sleep_replay_does_not_reinforce_recommendation_followup_chat_noise() -> None:
+    ledger = SQLiteLedger(db_path=":memory:")
+    try:
+        store = LifeMemoryStore(ledger=ledger)
+        noisy = store.upsert_episode(
+            episode_kind="chat_episode",
+            evidence_refs=["chat://request/noisy-selection"],
+            primary_ref="chat://request/noisy-selection",
+            person_id="user-1",
+            session_id="qq_dm_1",
+            summary="User: 我问你喜欢哪本\nAssistant: 哈？最近在看一本讲宇宙和人的，挺有意思的。",
+            salience=0.36,
+            memory_strength=0.95,
+            ts_ms=1_800_000_000_000,
+        )
+        durable = store.upsert_episode(
+            episode_kind="chat_episode",
+            evidence_refs=["chat://request/durable-pref"],
+            primary_ref="chat://request/durable-pref",
+            person_id="user-1",
+            session_id="qq_dm_1",
+            summary="用户要求：不要拟人化发送，推荐要按自然卡片格式。",
+            salience=0.50,
+            memory_strength=0.90,
+            ts_ms=1_800_000_000_010,
+        )
+
+        result = MemorySleepReplayTask(store=store).run_once(
+            now_ts_ms_value=1_800_000_000_500,
+            replay_limit=10,
+            forgetting_batch_limit=20,
+            semantic_limit=6,
+        )
+
+        reflection_episode_ids = {
+            row["episode_id"]
+            for row in ledger.life_evidence
+            if row["evidence_kind"] == "reflection"
+        }
+        assert result["reflection_count"] >= 1
+        assert durable["episode_id"] in reflection_episode_ids
+        assert noisy["episode_id"] not in reflection_episode_ids
     finally:
         ledger.close()
 

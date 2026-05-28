@@ -1799,6 +1799,7 @@ class LifeMemoryStore:
         gone_after_ms: int = 30 * 24 * 60 * 60 * 1000,
     ) -> dict[str, Any]:
         current = int(now_ts_ms_value if now_ts_ms_value is not None else now_ts_ms())
+        semantic_referenced_episode_ids = _semantic_referenced_episode_ids(self.ledger._conn)
         rows = self.ledger._conn.execute(
             """
             SELECT *
@@ -1820,6 +1821,7 @@ class LifeMemoryStore:
         ).fetchall()
         updates: list[tuple[float, str, str | None, str]] = []
         counts = {RETENTION_HOT: 0, RETENTION_WARM: 0, RETENTION_COLD: 0, RETENTION_GONE: 0}
+        semantic_reference_protected = 0
         for row in rows:
             episode = dict(row)
             eid = str(episode.get("episode_id") or "").strip()
@@ -1848,6 +1850,11 @@ class LifeMemoryStore:
             else:
                 next_state = _retention_state_for_strength(decayed, truth_state=episode.get("truth_state"))
                 reason = None
+            if eid in semantic_referenced_episode_ids and next_state == RETENTION_GONE:
+                next_state = RETENTION_COLD
+                decayed = max(decayed, 0.18)
+                reason = "semantic_reference_protected"
+                semantic_reference_protected += 1
             counts[next_state] += 1
             updates.append((decayed, next_state, reason, eid))
         if updates:
@@ -1869,6 +1876,7 @@ class LifeMemoryStore:
             "scanned": len(rows),
             "updated": len(updates),
             "counts": counts,
+            "semantic_reference_protected": semantic_reference_protected,
         }
 
     def _refresh_collection_item_count_locked(self, *, collection_id: str, ts_ms: int) -> None:
@@ -1886,6 +1894,34 @@ class LifeMemoryStore:
             """,
             (collection_id, int(ts_ms), collection_id),
         )
+        collection = self.ledger._conn.execute(
+            "SELECT * FROM life_memory_collection WHERE collection_id = ?",
+            (collection_id,),
+        ).fetchone()
+        if collection is None:
+            return
+        items = self.ledger._conn.execute(
+            """
+            SELECT *
+            FROM life_memory_collection_item
+            WHERE collection_id = ?
+            ORDER BY created_ts_ms ASC, position ASC, item_title ASC
+            """,
+            (collection_id,),
+        ).fetchall()
+        summary = _collection_summary_text_for_collection(
+            collection=dict(collection),
+            items=[dict(item) for item in items],
+        )
+        if summary:
+            self.ledger._conn.execute(
+                """
+                UPDATE life_memory_collection
+                SET summary = ?, updated_ts_ms = MAX(COALESCE(updated_ts_ms, 0), ?)
+                WHERE collection_id = ?
+                """,
+                (summary, int(ts_ms), collection_id),
+            )
 
     def _fetch_collection_rows_for_plan(
         self,
@@ -1896,8 +1932,8 @@ class LifeMemoryStore:
         now_ts_ms_value: int,
         limit: int,
     ) -> list[Any]:
-        clauses = ["COALESCE(retention_state, ?) != ?"]
-        params: list[Any] = [RETENTION_WARM, RETENTION_GONE]
+        base_clauses = ["COALESCE(retention_state, ?) != ?"]
+        base_params: list[Any] = [RETENTION_WARM, RETENTION_GONE]
         domains = set(str(item or "").strip() for item in getattr(plan, "target_domains", ()) if str(item or "").strip())
         if DOMAIN_LIGHTNOVEL_RECOMMENDATION in domains:
             domains.add(DOMAIN_RECOMMENDATION)
@@ -1905,30 +1941,46 @@ class LifeMemoryStore:
             domains.add(DOMAIN_LIGHTNOVEL_RECOMMENDATION)
         if domains:
             placeholders = ", ".join("?" for _ in domains)
-            clauses.append(f"COALESCE(domain, '') IN ({placeholders})")
-            params.extend(sorted(domains))
+            base_clauses.append(f"COALESCE(domain, '') IN ({placeholders})")
+            base_params.extend(sorted(domains))
         scope_keys = _scope_keys_for_collection_plan(plan=plan, now_ts_ms_value=now_ts_ms_value)
         if scope_keys:
             placeholders = ", ".join("?" for _ in scope_keys)
-            clauses.append(f"COALESCE(scope_key, '') IN ({placeholders})")
-            params.extend(scope_keys)
+            base_clauses.append(f"COALESCE(scope_key, '') IN ({placeholders})")
+            base_params.extend(scope_keys)
+        identity_clauses: list[str] = []
+        identity_params: list[Any] = []
         if session_id:
-            clauses.append("(COALESCE(session_id, '') = ? OR COALESCE(session_id, '') = '')")
-            params.append(session_id)
+            identity_clauses.append("(COALESCE(session_id, '') = ? OR COALESCE(session_id, '') = '')")
+            identity_params.append(session_id)
         elif person_id:
-            clauses.append("(COALESCE(person_id, '') = ? OR COALESCE(person_id, '') = '')")
-            params.append(person_id)
-        return list(
-            self.ledger._conn.execute(
-                f"""
-                SELECT *
-                FROM life_memory_collection
-                WHERE {' AND '.join(clauses)}
-                ORDER BY updated_ts_ms DESC, memory_strength DESC
-                LIMIT ?
-                """,
-                [*params, max(1, int(limit))],
-            ).fetchall()
+            identity_clauses.append("(COALESCE(person_id, '') = ? OR COALESCE(person_id, '') = '')")
+            identity_params.append(person_id)
+
+        def _query(extra_clauses: Sequence[str], extra_params: Sequence[Any]) -> list[Any]:
+            clauses = [*base_clauses, *list(extra_clauses or [])]
+            params = [*base_params, *list(extra_params or [])]
+            return list(
+                self.ledger._conn.execute(
+                    f"""
+                    SELECT *
+                    FROM life_memory_collection
+                    WHERE {' AND '.join(clauses)}
+                    ORDER BY updated_ts_ms DESC, memory_strength DESC
+                    LIMIT ?
+                    """,
+                    [*params, max(1, int(limit))],
+                ).fetchall()
+            )
+
+        rows = _query(identity_clauses, identity_params)
+        if rows or not (session_id or person_id):
+            return rows
+        owner_aliases = _owner_alias_person_ids(person_id)
+        placeholders = ", ".join("?" for _ in owner_aliases)
+        return _query(
+            [f"COALESCE(person_id, '') IN ({placeholders})"],
+            owner_aliases,
         )
 
     def _list_collection_items(self, *, collection_id: str, limit: int = 24) -> list[dict[str, Any]]:
@@ -2373,6 +2425,16 @@ def _collection_domain_for_episode(*, action: str, summary: Any, metadata: Mappi
     return explicit or "generic_item"
 
 
+def _owner_alias_person_ids(person_id: str | None) -> list[str]:
+    person = _clean_text(person_id)
+    aliases = ["", "default"]
+    if person:
+        aliases.append(person)
+    if person in {"owner", "user", "main_user", "master"}:
+        aliases.extend(["owner", "user", "main_user", "master"])
+    return list(dict.fromkeys(aliases))
+
+
 def _collection_summary_text(
     *,
     day_key: str,
@@ -2385,6 +2447,36 @@ def _collection_summary_text(
     title_text = "、".join(titles)
     suffix = f"：{title_text}" if title_text else ""
     return f"{day_key} {scope_label}{label}集合，记录 {len(list(items or []))} 个条目{suffix}。"
+
+
+def _collection_summary_text_for_collection(
+    *,
+    collection: Mapping[str, Any],
+    items: Sequence[Mapping[str, Any]],
+) -> str:
+    domain = _clean_text(collection.get("domain")) or DOMAIN_RECOMMENDATION
+    scope_key = _clean_text(collection.get("scope_key")) or COLLECTION_SCOPE_RECENT
+    label = "轻小说推荐" if domain == DOMAIN_LIGHTNOVEL_RECOMMENDATION else domain.replace("_", " ")
+    if scope_key.startswith(f"{COLLECTION_SCOPE_DAILY}:"):
+        day_key = scope_key.split(":", 1)[1]
+        prefix = f"{day_key} 当天{label}集合"
+    elif scope_key == COLLECTION_SCOPE_RECENT:
+        prefix = f"最近{label}集合"
+    else:
+        prefix = f"{scope_key} {label}集合"
+    item_list = list(items or [])
+    titles: list[str] = []
+    for item in item_list[:6]:
+        title = _collection_item_title_for_summary(item)
+        if title:
+            titles.append(title)
+    title_text = "、".join(titles)
+    suffix = f"：{title_text}" if title_text else ""
+    return f"{prefix}，记录 {len(item_list)} 个条目{suffix}。"
+
+
+def _collection_item_title_for_summary(item: Mapping[str, Any]) -> str:
+    return _clean_text(item.get("item_title"), limit=160) or _collection_item_title(item)
 
 
 def _collection_item_key(*, episode_id: str, item: Mapping[str, Any], index: int) -> str:
@@ -2470,6 +2562,47 @@ def _semantic_source_memory_ids(proposal: Mapping[str, Any]) -> list[str]:
     return list(dict.fromkeys(ids))
 
 
+def _semantic_referenced_episode_ids(conn: Any) -> set[str]:
+    try:
+        rows = conn.execute(
+            "SELECT source_memory_ids FROM semantic_memory WHERE deleted_at IS NULL"
+        ).fetchall()
+    except Exception:
+        return set()
+    episode_ids: set[str] = set()
+    for row in rows:
+        raw = row["source_memory_ids"] if isinstance(row, Mapping) else row[0]
+        source_ids = _json_loads(raw, fallback=[])
+        if not isinstance(source_ids, Sequence) or isinstance(source_ids, (str, bytes, bytearray)):
+            continue
+        for source_id in source_ids:
+            value = _clean_text(source_id)
+            if value.startswith("life_episode::"):
+                episode_id = value.split("::", 1)[1]
+                if episode_id:
+                    episode_ids.add(episode_id)
+    return episode_ids
+
+
+def _trusted_active_episode_ids(store: LifeMemoryStore, episode_ids: Sequence[Any]) -> set[str]:
+    ids = list(dict.fromkeys(_clean_text(item) for item in list(episode_ids or []) if _clean_text(item)))
+    if not ids:
+        return set()
+    placeholders = ", ".join("?" for _ in ids)
+    rows = store.ledger._conn.execute(
+        f"""
+        SELECT episode_id
+        FROM life_episode
+        WHERE episode_id IN ({placeholders})
+          AND truth_state = ?
+          AND status = ?
+          AND COALESCE(retention_state, ?) != ?
+        """,
+        (*ids, TRUTH_VERIFIED, STATUS_ACTIVE, RETENTION_COLD, RETENTION_GONE),
+    ).fetchall()
+    return {_clean_text(row["episode_id"]) for row in rows if _clean_text(row["episode_id"])}
+
+
 def _semantic_proposal_from_collection(store: LifeMemoryStore, collection: Mapping[str, Any]) -> dict[str, Any] | None:
     collection_id = _clean_text(collection.get("collection_id"))
     if not collection_id:
@@ -2488,6 +2621,16 @@ def _semantic_proposal_from_collection(store: LifeMemoryStore, collection: Mappi
     if collection_kind != COLLECTION_RECOMMENDATION and "recommendation" not in collection_kind:
         return None
     items = store._list_collection_items(collection_id=collection_id, limit=32)
+    if not items:
+        return None
+    source_episode_id_order = [
+        _clean_text(item.get("episode_id"))
+        for item in items
+        if _clean_text(item.get("episode_id"))
+    ]
+    trusted_episode_ids = _trusted_active_episode_ids(store, source_episode_id_order)
+    if source_episode_id_order:
+        items = [item for item in items if _clean_text(item.get("episode_id")) in trusted_episode_ids]
     if not items:
         return None
     titles = [
@@ -2759,6 +2902,8 @@ def _should_sleep_replay_candidate(item: Mapping[str, Any]) -> bool:
     summary = _clean_text(item.get("summary"), limit=1200)
     if not summary or _semantic_text_is_sensitive_or_noise(summary):
         return False
+    if _looks_like_recommendation_followup_chat_noise(summary):
+        return False
     action = _clean_text(item.get("action")).lower()
     if action in {
         "lightnovel_recommendation_delivery",
@@ -2780,6 +2925,26 @@ def _should_sleep_replay_candidate(item: Mapping[str, Any]) -> bool:
     if kind == EPISODE_CHAT:
         return True
     return _clamp_unit(item.get("memory_strength"), default=_clamp_unit(item.get("salience"))) >= 0.88
+
+
+def _looks_like_recommendation_followup_chat_noise(text: str) -> bool:
+    compact = re.sub(r"\s+", "", str(text or "")).lower()
+    if not compact:
+        return False
+    has_selection_question = any(
+        token in compact
+        for token in (
+            "我问你喜欢哪本",
+            "这三本书，你喜欢哪本",
+            "这三本书你喜欢哪本",
+            "你喜欢哪本",
+            "哪本好看",
+        )
+    )
+    if not has_selection_question:
+        return False
+    durable_markers = ("用户喜欢", "用户要求", "偏好", "记住", "以后", "不要", "纠正", "失败原因", "承诺")
+    return not any(marker in compact for marker in durable_markers)
 
 
 def _semantic_is_user_preference(compact: str) -> bool:

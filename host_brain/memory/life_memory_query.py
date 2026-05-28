@@ -274,6 +274,8 @@ def _infer_temporal_scope(text: str) -> str:
         return TEMPORAL_YESTERDAY
     if "前天" in text:
         return TEMPORAL_DAY_BEFORE_YESTERDAY
+    if "十几本" in text:
+        return TEMPORAL_RECENT_DAYS
     if any(token in text for token in ("最近", "这几天", "这两天", "这三天", "这周", "近几天", "这段时间", "过去几天", "过去一周", "过去一晚上", "过去一晚")):
         return TEMPORAL_RECENT_DAYS
     if any(token in text for token in ("之前", "以前", "一直", "所有", "全部")):

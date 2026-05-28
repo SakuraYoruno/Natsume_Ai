@@ -1224,10 +1224,45 @@ def _filter_rows_for_collection_scope(
     ]
     if not collection_rows:
         return list(rows)
+    collection_rows = _dedupe_collection_scope_rows(collection_rows)
     return [
         *collection_rows,
         *(row for row in rows if _clean_text(row.store_id).lower() in {"neo4j_bond", "bond_graph"}),
     ]
+
+
+def _dedupe_collection_scope_rows(rows: Sequence[SurfaceMemoryFactRow]) -> list[SurfaceMemoryFactRow]:
+    best_by_scope: dict[str, SurfaceMemoryFactRow] = {}
+    for row in rows:
+        scope_key = _collection_scope_key_from_fact(row.fact) or row.source_ref or row.fact
+        current = best_by_scope.get(scope_key)
+        if current is None or _collection_row_prefer_key(row) > _collection_row_prefer_key(current):
+            best_by_scope[scope_key] = row
+    return list(best_by_scope.values())
+
+
+def _collection_row_prefer_key(row: SurfaceMemoryFactRow) -> tuple[int, float]:
+    return (_collection_item_count_from_fact(row.fact), float(row.score or 0.0))
+
+
+def _collection_item_count_from_fact(text: str) -> int:
+    match = re.search(r"记录\s*(\d+)\s*个条目", str(text or ""))
+    if not match:
+        return 0
+    try:
+        return int(match.group(1))
+    except ValueError:
+        return 0
+
+
+def _collection_scope_key_from_fact(text: str) -> str:
+    value = _clean_text(text)
+    if "最近" in value[:16] and "集合" in value[:40]:
+        return "recent"
+    match = re.search(r"(20\d{2}-\d{2}-\d{2}).{0,12}集合", value)
+    if match:
+        return f"daily:{match.group(1)}"
+    return ""
 
 
 def _looks_like_anaphoric_scheduler_noise(text: str) -> bool:
@@ -1601,7 +1636,7 @@ def _looks_like_collection_scope_query(text: str) -> bool:
     normalized = _clean_text(text)
     if not normalized:
         return False
-    if any(token in normalized for token in ("昨天", "前天", "这几天", "最近", "今日", "今天")) and any(
+    if any(token in normalized for token in ("昨天", "前天", "这几天", "最近", "今日", "今天", "十几本")) and any(
         token in normalized for token in ("推荐", "三本", "几本", "十几本", "哪些", "书", "小说")
     ):
         return True

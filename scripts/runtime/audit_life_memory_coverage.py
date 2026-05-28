@@ -8,6 +8,7 @@ from collections import Counter, defaultdict
 from dataclasses import dataclass, asdict
 import json
 import os
+import re
 import sqlite3
 import sys
 import time
@@ -129,6 +130,15 @@ class CollectionIssue:
 
 
 @dataclass(frozen=True)
+class SemanticIssue:
+    issue_kind: str
+    severity: str
+    semantic_id: str
+    source_memory_id: str
+    detail: str
+
+
+@dataclass(frozen=True)
 class EntryPointIssue:
     issue_kind: str
     severity: str
@@ -178,16 +188,29 @@ def _resolve_db_path(explicit: str) -> Path:
     return _resolve_path(raw)
 
 
-def _json_loads(value: Any) -> dict[str, Any]:
+def _json_loads_any(value: Any, *, fallback: Any) -> Any:
     if isinstance(value, Mapping):
         return dict(value)
+    if isinstance(value, list):
+        return list(value)
     if isinstance(value, str) and value.strip():
         try:
-            parsed = json.loads(value)
+            return json.loads(value)
         except json.JSONDecodeError:
-            return {}
-        return dict(parsed) if isinstance(parsed, Mapping) else {}
-    return {}
+            return fallback
+    return fallback
+
+
+def _json_loads(value: Any) -> dict[str, Any]:
+    parsed = _json_loads_any(value, fallback={})
+    return dict(parsed) if isinstance(parsed, Mapping) else {}
+
+
+def _json_list(value: Any) -> list[Any]:
+    parsed = _json_loads_any(value, fallback=[])
+    if isinstance(parsed, list):
+        return list(parsed)
+    return []
 
 
 def _clean(value: Any) -> str:
@@ -387,12 +410,136 @@ def _fetch_collection_rows(conn: sqlite3.Connection) -> list[dict[str, Any]]:
     return [dict(row) for row in rows]
 
 
+def _fetch_semantic_rows(conn: sqlite3.Connection) -> list[dict[str, Any]]:
+    if not _table_exists(conn, "semantic_memory"):
+        return []
+    rows = conn.execute(
+        """
+        SELECT
+            semantic_id,
+            summary,
+            source_memory_ids,
+            source_hash,
+            distill_strategy,
+            confidence,
+            tags,
+            ts_ms,
+            operator_node_id,
+            deleted_at
+        FROM semantic_memory
+        WHERE deleted_at IS NULL
+        ORDER BY ts_ms DESC
+        """
+    ).fetchall()
+    return [dict(row) for row in rows]
+
+
 def _table_exists(conn: sqlite3.Connection, table_name: str) -> bool:
     row = conn.execute(
         "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ? LIMIT 1",
         (str(table_name),),
     ).fetchone()
     return row is not None
+
+
+def _semantic_summary_has_noise(summary: Any) -> bool:
+    compact = str(summary or "").lower().replace(" ", "")
+    if not compact:
+        return True
+    return any(
+        token in compact
+        for token in (
+            "api_key",
+            "apikey",
+            "authorization:",
+            "cookie",
+            "token=",
+            "heartbeat",
+            "health_check",
+            "emotion_decay_tick",
+            "inner_world_numeric_tick",
+            "silence_tick",
+            "metrics test",
+            "当前回合摘要：用户提到",
+            "发送了text消息",
+            "发送了image消息",
+            "latency_ms",
+        )
+    )
+
+
+def _summary_declared_item_count(summary: Any) -> int | None:
+    match = re.search(r"记录\s*(\d+)\s*个条目", str(summary or ""))
+    if not match:
+        return None
+    try:
+        return int(match.group(1))
+    except ValueError:
+        return None
+
+
+def _semantic_source_ids(row: Mapping[str, Any]) -> list[str]:
+    return [_clean(item) for item in _json_list(row.get("source_memory_ids")) if _clean(item)]
+
+
+def _audit_semantic_rows(
+    *,
+    semantic_rows: Sequence[Mapping[str, Any]],
+    episode_rows: Sequence[Mapping[str, Any]],
+    collection_rows: Sequence[Mapping[str, Any]],
+    include_synthetic: bool,
+) -> tuple[list[SemanticIssue], Counter[str]]:
+    episode_by_id = {_clean(row.get("episode_id")): row for row in episode_rows if _clean(row.get("episode_id"))}
+    collection_by_id = {_clean(row.get("collection_id")): row for row in collection_rows if _clean(row.get("collection_id"))}
+    issues: list[SemanticIssue] = []
+    source_class_counts: Counter[str] = Counter()
+    for row in semantic_rows:
+        semantic_id = _clean(row.get("semantic_id"))
+        source_ids = _semantic_source_ids(row)
+        if not source_ids:
+            issues.append(SemanticIssue("semantic_missing_sources", "critical", semantic_id, "", "semantic memory has no source_memory_ids"))
+        if _semantic_summary_has_noise(row.get("summary")):
+            issues.append(SemanticIssue("semantic_summary_noise", "warn", semantic_id, "", "semantic summary looks like raw logs, secrets, or turn transcript noise"))
+        life_source_seen = False
+        for source_id in source_ids:
+            if source_id.startswith("life_episode::"):
+                source_class_counts["life_episode"] += 1
+                life_source_seen = True
+                episode_id = source_id.split("::", 1)[1]
+                episode = episode_by_id.get(episode_id)
+                if episode is None:
+                    issues.append(SemanticIssue("semantic_missing_life_episode_source", "critical", semantic_id, source_id, "life_episode source is missing"))
+                    continue
+                metadata = _json_loads(episode.get("metadata"))
+                if _is_synthetic(episode, metadata) and not include_synthetic:
+                    continue
+                truth_state = _clean(episode.get("truth_state")).upper()
+                status = _clean(episode.get("status")).upper()
+                retention_state = _clean(episode.get("retention_state")).upper()
+                if truth_state != "VERIFIED":
+                    issues.append(SemanticIssue("semantic_untrusted_life_episode_source", "critical", semantic_id, source_id, f"source truth_state={truth_state or '<empty>'}"))
+                if status != "ACTIVE":
+                    issues.append(SemanticIssue("semantic_inactive_life_episode_source", "critical", semantic_id, source_id, f"source status={status or '<empty>'}"))
+                if retention_state == "GONE":
+                    issues.append(SemanticIssue("semantic_gone_life_episode_source", "warn", semantic_id, source_id, "semantic source episode is no longer recallable"))
+            elif source_id.startswith("life_memory_collection::"):
+                source_class_counts["life_memory_collection"] += 1
+                life_source_seen = True
+                collection_id = source_id.split("::", 1)[1]
+                collection = collection_by_id.get(collection_id)
+                if collection is None:
+                    issues.append(SemanticIssue("semantic_missing_collection_source", "critical", semantic_id, source_id, "life_memory_collection source is missing"))
+                    continue
+                retention_state = _clean(collection.get("retention_state")).upper()
+                if retention_state == "GONE":
+                    issues.append(SemanticIssue("semantic_gone_collection_source", "warn", semantic_id, source_id, "semantic source collection is GONE"))
+                if int(collection.get("actual_item_count") or collection.get("item_count") or 0) <= 0:
+                    issues.append(SemanticIssue("semantic_empty_collection_source", "warn", semantic_id, source_id, "semantic source collection has no items"))
+            else:
+                source_class_counts["legacy_or_external"] += 1
+        if source_ids and not life_source_seen:
+            issues.append(SemanticIssue("semantic_legacy_non_life_source", "warn", semantic_id, "", "active semantic memory is not sourced from LifeMemory SSOT"))
+    return issues, source_class_counts
 
 
 def build_coverage_report(
@@ -404,8 +551,10 @@ def build_coverage_report(
 ) -> dict[str, Any]:
     rows = _fetch_rows(conn)
     collection_rows = _fetch_collection_rows(conn)
+    semantic_rows = _fetch_semantic_rows(conn)
     issues: list[EpisodeIssue] = []
     collection_issues: list[CollectionIssue] = []
+    semantic_issues: list[SemanticIssue] = []
     entrypoint_issues: list[EntryPointIssue] = []
     by_kind_action: Counter[tuple[str, str]] = Counter()
     collection_by_kind_domain: Counter[tuple[str, str]] = Counter()
@@ -501,6 +650,19 @@ def build_coverage_report(
                     f"declared item_count={declared_count}, actual items={actual_count}",
                 )
             )
+        summary_count = _summary_declared_item_count(row.get("summary"))
+        if summary_count is not None and summary_count != actual_count:
+            collection_issues.append(
+                CollectionIssue(
+                    "collection_summary_count_mismatch",
+                    "warn",
+                    collection_id,
+                    collection_kind,
+                    domain,
+                    scope_key,
+                    f"summary count={summary_count}, actual items={actual_count}",
+                )
+            )
         if missing_episode_count > 0:
             collection_issues.append(
                 CollectionIssue(
@@ -514,8 +676,15 @@ def build_coverage_report(
                 )
             )
 
+    semantic_issues, semantic_source_class_counts = _audit_semantic_rows(
+        semantic_rows=semantic_rows,
+        episode_rows=rows,
+        collection_rows=collection_rows,
+        include_synthetic=include_synthetic,
+    )
     issue_counts = Counter(issue.issue_kind for issue in issues)
     collection_issue_counts = Counter(issue.issue_kind for issue in collection_issues)
+    semantic_issue_counts = Counter(issue.issue_kind for issue in semantic_issues)
     required_entrypoint_list = list(dict.fromkeys(_clean(item) for item in list(required_entrypoints or []) if _clean(item)))
     for entrypoint in required_entrypoint_list:
         if entrypoint_counter.get(entrypoint, 0) <= 0:
@@ -530,6 +699,7 @@ def build_coverage_report(
     entrypoint_issue_counts = Counter(issue.issue_kind for issue in entrypoint_issues)
     severity_counts = Counter(issue.severity for issue in issues)
     collection_severity_counts = Counter(issue.severity for issue in collection_issues)
+    semantic_severity_counts = Counter(issue.severity for issue in semantic_issues)
     entrypoint_severity_counts = Counter(issue.severity for issue in entrypoint_issues)
     report = {
         "schema": "Natsume.life_memory_coverage.v1",
@@ -551,6 +721,10 @@ def build_coverage_report(
             "collection_issue_count": len(collection_issues),
             "collection_critical_issue_count": collection_severity_counts.get("critical", 0),
             "collection_warn_issue_count": collection_severity_counts.get("warn", 0),
+            "semantic_memory_count": len(semantic_rows),
+            "semantic_issue_count": len(semantic_issues),
+            "semantic_critical_issue_count": semantic_severity_counts.get("critical", 0),
+            "semantic_warn_issue_count": semantic_severity_counts.get("warn", 0),
             "observed_entrypoint_count": len(entrypoint_counter),
             "required_entrypoint_count": len(required_entrypoint_list),
             "entrypoint_issue_count": len(entrypoint_issues),
@@ -571,9 +745,12 @@ def build_coverage_report(
         "evidence_kinds": [{"evidence_kind": key, "count": count} for key, count in evidence_kind_counter.most_common()],
         "issue_counts": dict(sorted(issue_counts.items())),
         "collection_issue_counts": dict(sorted(collection_issue_counts.items())),
+        "semantic_source_class_counts": dict(sorted(semantic_source_class_counts.items())),
+        "semantic_issue_counts": dict(sorted(semantic_issue_counts.items())),
         "entrypoint_issue_counts": dict(sorted(entrypoint_issue_counts.items())),
         "issues": [asdict(issue) for issue in issues[: max(1, int(sample_limit))]],
         "collection_issues": [asdict(issue) for issue in collection_issues[: max(1, int(sample_limit))]],
+        "semantic_issues": [asdict(issue) for issue in semantic_issues[: max(1, int(sample_limit))]],
         "entrypoint_issues": [asdict(issue) for issue in entrypoint_issues[: max(1, int(sample_limit))]],
     }
     return report
@@ -595,6 +772,8 @@ def _render_markdown(report: Mapping[str, Any]) -> str:
         f"(critical={summary.get('critical_issue_count', 0)}, warn={summary.get('warn_issue_count', 0)})",
         f"- Collections: {summary.get('collection_count', 0)} "
         f"(items={summary.get('collection_item_count', 0)}, issues={summary.get('collection_issue_count', 0)})",
+        f"- Semantic memories: {summary.get('semantic_memory_count', 0)} "
+        f"(issues={summary.get('semantic_issue_count', 0)})",
         f"- Observed entrypoints: {summary.get('observed_entrypoint_count', 0)} "
         f"(required={summary.get('required_entrypoint_count', 0)}, issues={summary.get('entrypoint_issue_count', 0)})",
         "",
@@ -621,6 +800,9 @@ def _render_markdown(report: Mapping[str, Any]) -> str:
     lines.extend(["", "## Collection Issue Counts", ""])
     for key, count in dict(report.get("collection_issue_counts") or {}).items():
         lines.append(f"- {key}: {count}")
+    lines.extend(["", "## Semantic Issue Counts", ""])
+    for key, count in dict(report.get("semantic_issue_counts") or {}).items():
+        lines.append(f"- {key}: {count}")
     lines.extend(["", "## EntryPoint Issue Counts", ""])
     for key, count in dict(report.get("entrypoint_issue_counts") or {}).items():
         lines.append(f"- {key}: {count}")
@@ -635,6 +817,12 @@ def _render_markdown(report: Mapping[str, Any]) -> str:
         lines.append(
             f"- [{issue.get('severity')}] {issue.get('issue_kind')} "
             f"{issue.get('collection_id')} {issue.get('collection_kind')}/{issue.get('domain')}/{issue.get('scope_key')}: {issue.get('detail')}"
+        )
+    lines.extend(["", "## Semantic Issue Samples", ""])
+    for issue in report.get("semantic_issues") or []:
+        lines.append(
+            f"- [{issue.get('severity')}] {issue.get('issue_kind')} "
+            f"{issue.get('semantic_id')} {issue.get('source_memory_id')}: {issue.get('detail')}"
         )
     lines.extend(["", "## EntryPoint Issue Samples", ""])
     for issue in report.get("entrypoint_issues") or []:
@@ -672,9 +860,11 @@ def main() -> int:
         print(output)
     critical = int((report.get("summary") or {}).get("critical_issue_count") or 0)
     critical += int((report.get("summary") or {}).get("collection_critical_issue_count") or 0)
+    critical += int((report.get("summary") or {}).get("semantic_critical_issue_count") or 0)
     critical += int((report.get("summary") or {}).get("entrypoint_critical_issue_count") or 0)
     total = int((report.get("summary") or {}).get("issue_count") or 0)
     total += int((report.get("summary") or {}).get("collection_issue_count") or 0)
+    total += int((report.get("summary") or {}).get("semantic_issue_count") or 0)
     total += int((report.get("summary") or {}).get("entrypoint_issue_count") or 0)
     if args.fail_on == "critical" and critical > 0:
         return 3
