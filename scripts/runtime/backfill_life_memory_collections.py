@@ -22,7 +22,7 @@ from host_brain.memory.life_memory import LifeMemoryStore  # noqa: E402
 
 DEFAULT_DB_PATH = "host_brain/data/audit.sqlite3"
 DEFAULT_ENV_FILE = "runtime/host/host.runtime.env"
-MIGRATION_ID = "life_memory_collection_backfill_20260529"
+MIGRATION_ID = "life_memory_collection_delivery_backfill_20260529"
 COLLECTION_KEYS = (
     "selected_recommendations",
     "recommendations",
@@ -63,7 +63,7 @@ def run_collection_backfill(
         planned = [
             row
             for row in candidates
-            if not _episode_has_collection_items(ledger._conn, str(row["episode_id"]))
+            if not _episode_has_delivery_collection(ledger._conn, str(row["episode_id"]))
         ]
         backup_path = None
         indexed: list[dict[str, Any]] = []
@@ -188,10 +188,17 @@ def _has_collection_items(metadata: Mapping[str, Any]) -> bool:
     return False
 
 
-def _episode_has_collection_items(conn: sqlite3.Connection, episode_id: str) -> bool:
+def _episode_has_delivery_collection(conn: sqlite3.Connection, episode_id: str) -> bool:
     row = conn.execute(
-        "SELECT 1 FROM life_memory_collection_item WHERE episode_id = ? LIMIT 1",
-        (episode_id,),
+        """
+        SELECT 1
+        FROM life_memory_collection_item i
+        JOIN life_memory_collection c ON c.collection_id = i.collection_id
+        WHERE i.episode_id = ?
+          AND COALESCE(c.scope_key, '') = ?
+        LIMIT 1
+        """,
+        (episode_id, f"delivery:{episode_id}"),
     ).fetchone()
     return row is not None
 

@@ -74,6 +74,7 @@ DECAY_EPHEMERAL = "EPHEMERAL"
 COLLECTION_RECOMMENDATION = "recommendation_collection"
 COLLECTION_SCOPE_DAILY = "daily"
 COLLECTION_SCOPE_RECENT = "recent"
+COLLECTION_SCOPE_DELIVERY = "delivery"
 
 _LOCAL_MEMORY_TZ = timezone(timedelta(hours=8))
 
@@ -860,18 +861,24 @@ class LifeMemoryStore:
         domain = _collection_domain_for_episode(action=action, summary=episode.get("summary"), metadata=metadata)
         kind = COLLECTION_RECOMMENDATION if ("recommendation" in action or "推荐" in str(episode.get("summary") or "")) else "item_collection"
         day_key = _collection_day_key(created)
+        domain_label = "轻小说推荐" if domain == DOMAIN_LIGHTNOVEL_RECOMMENDATION else domain.replace("_", " ")
         person = _clean_text(episode.get("person_id")) or None
         session = _clean_text(episode.get("session_id")) or None
         source_ref = _clean_text(episode.get("primary_ref")) or f"life_episode://{eid}"
         collection_specs = [
             (
+                COLLECTION_SCOPE_DELIVERY,
+                f"{day_key} 本次{domain_label}集合",
+                _collection_summary_text(day_key=day_key, domain=domain, items=items, scope_label="本次"),
+            ),
+            (
                 COLLECTION_SCOPE_DAILY,
-                f"{day_key} {domain} 集合",
+                f"{day_key} 当天{domain_label}集合",
                 _collection_summary_text(day_key=day_key, domain=domain, items=items, scope_label="当天"),
             ),
             (
                 COLLECTION_SCOPE_RECENT,
-                f"最近 {domain} 集合",
+                f"最近{domain_label}集合",
                 _collection_summary_text(day_key=day_key, domain=domain, items=items, scope_label="最近"),
             ),
         ]
@@ -880,7 +887,7 @@ class LifeMemoryStore:
             collection = self.upsert_collection(
                 collection_kind=kind,
                 domain=domain,
-                scope_key=f"{scope}:{day_key}" if scope == COLLECTION_SCOPE_DAILY else scope,
+                scope_key=_collection_scope_key(scope=scope, day_key=day_key, episode_id=eid),
                 person_id=person,
                 session_id=session,
                 title=title,
@@ -897,6 +904,8 @@ class LifeMemoryStore:
                     "scope": scope,
                     "day_key": day_key,
                     "memory_layer": "life_memory_collection",
+                    "exact_episode_id": eid if scope == COLLECTION_SCOPE_DELIVERY else "",
+                    "semantic_consolidation": scope != COLLECTION_SCOPE_DELIVERY,
                 },
             )
             collection_id = str(collection.get("collection_id") or "")
@@ -2359,6 +2368,15 @@ def _collection_id(
     return f"col_{_stable_hash(seed, size=32)}"
 
 
+def _collection_scope_key(*, scope: str, day_key: str, episode_id: str) -> str:
+    normalized = _clean_text(scope)
+    if normalized == COLLECTION_SCOPE_DAILY:
+        return f"{COLLECTION_SCOPE_DAILY}:{day_key}"
+    if normalized == COLLECTION_SCOPE_DELIVERY:
+        return f"{COLLECTION_SCOPE_DELIVERY}:{_clean_text(episode_id)}"
+    return normalized or COLLECTION_SCOPE_RECENT
+
+
 def _collection_day_key(ts_ms: int) -> str:
     return datetime.fromtimestamp(int(ts_ms) / 1000.0, tz=_LOCAL_MEMORY_TZ).strftime("%Y-%m-%d")
 
@@ -2366,7 +2384,9 @@ def _collection_day_key(ts_ms: int) -> str:
 def _scope_keys_for_collection_plan(*, plan: Any, now_ts_ms_value: int) -> list[str]:
     scope = str(getattr(plan, "temporal_scope", "") or "").strip()
     today = datetime.fromtimestamp(int(now_ts_ms_value) / 1000.0, tz=_LOCAL_MEMORY_TZ).date()
-    if scope in {TEMPORAL_CURRENT, TEMPORAL_RECENT_DAYS, ""}:
+    if scope == TEMPORAL_CURRENT:
+        return []
+    if scope in {TEMPORAL_RECENT_DAYS, ""}:
         return [COLLECTION_SCOPE_RECENT]
     if scope == TEMPORAL_TODAY:
         return [f"{COLLECTION_SCOPE_DAILY}:{today.isoformat()}"]
@@ -2460,6 +2480,8 @@ def _collection_summary_text_for_collection(
     if scope_key.startswith(f"{COLLECTION_SCOPE_DAILY}:"):
         day_key = scope_key.split(":", 1)[1]
         prefix = f"{day_key} 当天{label}集合"
+    elif scope_key.startswith(f"{COLLECTION_SCOPE_DELIVERY}:"):
+        prefix = f"本次{label}集合"
     elif scope_key == COLLECTION_SCOPE_RECENT:
         prefix = f"最近{label}集合"
     else:
@@ -2538,11 +2560,14 @@ def _collection_item_recall_line(item: Mapping[str, Any], index: int) -> str:
 
 def _collection_scope_boost(collection: Mapping[str, Any], *, plan: Any, now_ts_ms_value: int) -> float:
     scope_key = _clean_text(collection.get("scope_key"))
+    temporal_scope = str(getattr(plan, "temporal_scope", ""))
     target_scope_keys = set(_scope_keys_for_collection_plan(plan=plan, now_ts_ms_value=now_ts_ms_value))
     boost = 0.0
     if target_scope_keys and scope_key in target_scope_keys:
         boost += 0.24
-    if scope_key == COLLECTION_SCOPE_RECENT and str(getattr(plan, "temporal_scope", "")) in {TEMPORAL_CURRENT, TEMPORAL_RECENT_DAYS}:
+    if scope_key.startswith(f"{COLLECTION_SCOPE_DELIVERY}:") and temporal_scope == TEMPORAL_CURRENT:
+        boost += 0.28
+    if scope_key == COLLECTION_SCOPE_RECENT and temporal_scope in {TEMPORAL_CURRENT, TEMPORAL_RECENT_DAYS}:
         boost += 0.18
     if int(collection.get("item_count") or 0) > 0:
         boost += 0.08
@@ -2616,6 +2641,8 @@ def _semantic_proposal_from_collection(store: LifeMemoryStore, collection: Mappi
     collection_kind = _clean_text(collection.get("collection_kind"))
     scope_key = _clean_text(collection.get("scope_key"))
     item_count = int(collection.get("item_count") or 0)
+    if scope_key.startswith(f"{COLLECTION_SCOPE_DELIVERY}:") or metadata.get("semantic_consolidation") is False:
+        return None
     if item_count <= 0:
         return None
     if collection_kind != COLLECTION_RECOMMENDATION and "recommendation" not in collection_kind:
@@ -2687,6 +2714,8 @@ def _semantic_proposal_from_collection(store: LifeMemoryStore, collection: Mappi
 
 def _semantic_collection_scope_label(scope_key: str) -> str:
     value = _clean_text(scope_key)
+    if value.startswith(f"{COLLECTION_SCOPE_DELIVERY}:"):
+        return "单次"
     if value.startswith(f"{COLLECTION_SCOPE_DAILY}:"):
         return value.split(":", 1)[1] + " 的"
     if value == COLLECTION_SCOPE_RECENT:
@@ -3036,4 +3065,5 @@ __all__ = [
     "COLLECTION_RECOMMENDATION",
     "COLLECTION_SCOPE_DAILY",
     "COLLECTION_SCOPE_RECENT",
+    "COLLECTION_SCOPE_DELIVERY",
 ]

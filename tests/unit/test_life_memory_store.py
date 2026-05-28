@@ -267,7 +267,7 @@ def test_collection_semantic_distillation_skips_suppressed_source_episode() -> N
             ts_ms=1_800_000_000_000,
         )
         assert indexed["status"] == "OK"
-        assert len(ledger.life_memory_collection_item) == 6
+        assert len(ledger.life_memory_collection_item) == 9
 
         store.correct_episode(
             episode_id=source["episode_id"],

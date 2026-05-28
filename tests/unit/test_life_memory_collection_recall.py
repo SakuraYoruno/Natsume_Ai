@@ -9,6 +9,7 @@ from host_brain.persona.isolated_surface_continuity import ThreeLayerContinuityC
 from host_brain.persona.surface_memory_recall import (
     build_surface_memory_recall_packet,
     plan_surface_memory_recall,
+    recall_surface_memory_for_context,
 )
 from host_brain.retrieval.recall_fusion import RecallFusionServiceContract
 from host_brain.retrieval.recall_schemas import RecallRouteConfig, RecallRuntimeConfig
@@ -105,16 +106,19 @@ def _collection_service(ledger: SQLiteLedger) -> RecallFusionServiceContract:
     )
 
 
-def test_recommendation_delivery_indexes_daily_and_recent_collections() -> None:
+def test_recommendation_delivery_indexes_delivery_daily_and_recent_collections() -> None:
     ledger = SQLiteLedger(db_path=":memory:")
     try:
         store = LifeMemoryStore(ledger=ledger)
         yesterday_episode = _write_delivery(store, prefix="Yesterday", ts_ms=_ts(2026, 5, 27))
         _write_delivery(store, prefix="Today", ts_ms=_ts(2026, 5, 28))
 
-        assert len(ledger.life_memory_collection) == 3
-        assert len(ledger.life_memory_collection_item) == 12
+        assert len(ledger.life_memory_collection) == 5
+        assert len(ledger.life_memory_collection_item) == 18
         assert any(row["episode_id"] == yesterday_episode for row in ledger.life_memory_collection_item)
+        delivery_collection = next(row for row in ledger.life_memory_collection if row["scope_key"] == f"delivery:{yesterday_episode}")
+        assert delivery_collection["item_count"] == 3
+        assert "本次轻小说推荐集合，记录 3 个条目" in delivery_collection["summary"]
         recent_collection = next(row for row in ledger.life_memory_collection if row["scope_key"] == "recent")
         assert recent_collection["item_count"] == 6
         assert "记录 6 个条目" in recent_collection["summary"]
@@ -135,6 +139,39 @@ def test_recommendation_delivery_indexes_daily_and_recent_collections() -> None:
         assert top["metadata"]["scope_key"] == "daily:2026-05-27"
         assert "Yesterday A" in top["text"]
         assert "Today A" not in top["text"]
+    finally:
+        ledger.close()
+
+
+def test_current_selection_recalls_exact_delivery_collection_before_recent_collection() -> None:
+    ledger = SQLiteLedger(db_path=":memory:")
+    try:
+        store = LifeMemoryStore(ledger=ledger)
+        _write_delivery(store, prefix="Old", ts_ms=_ts(2026, 5, 27))
+        latest_episode = _write_delivery(store, prefix="Latest", ts_ms=_ts(2026, 5, 28))
+
+        packet = recall_surface_memory_for_context(
+            recall_service=_collection_service(ledger),
+            context=ThreeLayerContinuityContext(
+                current_user_message="这三本书，你喜欢哪本？",
+                task_mode_hint="daily_chat",
+            ),
+            request_id="req-current-three-delivery",
+            query_embedding=[0.1] * 16,
+            person_id="owner",
+            session_id="qq_dm_owner",
+            ts_ms=_ts(2026, 5, 28, 18),
+        )
+
+        joined = "\n".join(packet.facts)
+        validation = dict(dict(packet.trace or {}).get("validation") or {})
+        assert validation["passed"] is True
+        assert packet.reason_code is None
+        assert "Latest A" in joined
+        assert "Old A" not in joined
+        latest_collection = next(row for row in ledger.life_memory_collection if row["scope_key"] == f"delivery:{latest_episode}")
+        assert packet.rows[0].source_ref == f"life_memory_collection://{latest_collection['collection_id']}"
+        assert list((packet.trace or {}).get("selected_collection_items") or [])[0]["title"] == "Latest A"
     finally:
         ledger.close()
 

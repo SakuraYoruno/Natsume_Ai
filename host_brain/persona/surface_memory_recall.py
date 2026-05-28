@@ -652,6 +652,12 @@ def build_surface_memory_recall_packet(
         query_kind=query_kind,
         primary_memory_layer=primary_memory_layer,
     )
+    candidates_for_selection = _filter_candidates_for_collection_count_contract(
+        candidates_for_selection,
+        temporal_scope=temporal_scope,
+        validation_requirements=validation_requirements,
+        min_collection_items=min_collection_items,
+    )
     rows = _select_fact_rows(
         candidates_for_selection,
         query=query,
@@ -970,6 +976,32 @@ def _filter_candidates_for_target_domains(
     return matched or rows
 
 
+def _filter_candidates_for_collection_count_contract(
+    candidates: Sequence[Mapping[str, Any]],
+    *,
+    temporal_scope: str,
+    validation_requirements: Sequence[str] | None,
+    min_collection_items: int,
+) -> list[dict[str, Any]]:
+    rows = [dict(candidate) for candidate in candidates if isinstance(candidate, Mapping)]
+    requirements = {_clean_text(item) for item in list(validation_requirements or []) if _clean_text(item)}
+    required_count = max(0, _coerce_int(min_collection_items))
+    if not rows or required_count <= 0 or "collection_item_exact_count" not in requirements:
+        return rows
+    exact = [candidate for candidate in rows if _candidate_collection_item_count(candidate) == required_count]
+    if not exact:
+        return rows
+    if _clean_text(temporal_scope) == TEMPORAL_CURRENT:
+        delivery_exact = [
+            candidate
+            for candidate in exact
+            if _clean_text(_candidate_metadata(candidate).get("scope_key")).startswith("delivery:")
+        ]
+        if delivery_exact:
+            return delivery_exact
+    return exact
+
+
 def _expanded_target_domains(target_domains: Sequence[str] | None) -> set[str]:
     domains = {_clean_text(item) for item in list(target_domains or []) if _clean_text(item)}
     if "lightnovel_recommendation" in domains:
@@ -1087,19 +1119,23 @@ def _candidate_evidence_refs(candidates: Sequence[Mapping[str, Any]]) -> list[st
 def _candidate_collection_item_counts(candidates: Sequence[Mapping[str, Any]]) -> list[int]:
     counts: list[int] = []
     for candidate in candidates:
-        store_id = _candidate_store_id(candidate)
-        if store_id not in {"life_memory_collection", "life_episode"}:
-            continue
-        metadata = _candidate_metadata(candidate)
-        item_count = _coerce_int(metadata.get("item_count"))
-        for key in ("items", "selected_recommendations", "recommendations", "selected_items", "delivered_items"):
-            items = metadata.get(key)
-            if isinstance(items, Sequence) and not isinstance(items, (str, bytes, bytearray)):
-                item_count = max(item_count, len(items))
-        item_count = max(item_count, _item_count_from_candidate_text(candidate))
+        item_count = _candidate_collection_item_count(candidate)
         if item_count > 0:
             counts.append(item_count)
     return counts
+
+
+def _candidate_collection_item_count(candidate: Mapping[str, Any]) -> int:
+    store_id = _candidate_store_id(candidate)
+    if store_id not in {"life_memory_collection", "life_episode"}:
+        return 0
+    metadata = _candidate_metadata(candidate)
+    item_count = _coerce_int(metadata.get("item_count"))
+    for key in ("items", "selected_recommendations", "recommendations", "selected_items", "delivered_items"):
+        items = metadata.get(key)
+        if isinstance(items, Sequence) and not isinstance(items, (str, bytes, bytearray)):
+            item_count = max(item_count, len(items))
+    return max(item_count, _item_count_from_candidate_text(candidate))
 
 
 def _item_count_from_candidate_text(candidate: Mapping[str, Any]) -> int:
@@ -1701,6 +1737,8 @@ def _collection_overview_from_metadata(metadata: Mapping[str, Any], *, item_coun
         return f"最近{domain_label}集合，记录 {count} 个条目"
     if scope_key.startswith("daily:"):
         return f"{scope_key.removeprefix('daily:')} 当天{domain_label}集合，记录 {count} 个条目"
+    if scope_key.startswith("delivery:"):
+        return f"本次{domain_label}集合，记录 {count} 个条目"
     title = _clean_text(metadata.get("title"))
     return f"{title}，记录 {count} 个条目" if title else ""
 
