@@ -965,6 +965,121 @@ def test_recall_surface_memory_coverage_failure_drops_partial_collection_hit() -
     assert any("召回覆盖度不足" in item for item in packet.must_not_do)
 
 
+def test_selection_recall_requires_detail_anchor_for_deep_quality_judgment() -> None:
+    packet = build_surface_memory_recall_packet(
+        SimpleNamespace(
+            output={
+                "query": "这三本里哪本好看？",
+                "status": "OK",
+                "stage": "S_RET_RECALL",
+                "degraded": False,
+                "routes": [{"route_id": "surface_life_collection", "store_id": "life_memory_collection"}],
+                "candidate_count": 1,
+                "ts_ms": _ts(2026, 5, 29, 8),
+                "candidates": [
+                    {
+                        "doc_id": "col-current-no-detail",
+                        "source_ref": "life_memory_collection://col-current-no-detail",
+                        "evidence_refs": ["gateway://message/current/card/1"],
+                        "text": "本次轻小说推荐集合，记录 3 个条目；可比较证据：1. A｜2. B｜3. C",
+                        "score": 0.95,
+                        "metadata": {
+                            "store_id": "life_memory_collection",
+                            "scope_key": "delivery:ep-current",
+                            "domain": "lightnovel_recommendation",
+                            "item_count": 3,
+                            "evidence_refs_primary": "gateway://message/current/card/1",
+                            "items": [
+                                {"item_title": "A", "item_summary": "看点：恋爱日常", "position": 1},
+                                {"item_title": "B", "item_summary": "看点：奇幻身份", "position": 2},
+                                {"item_title": "C", "item_summary": "看点：日常喜剧", "position": 3},
+                            ],
+                        },
+                    }
+                ],
+            }
+        ),
+        query="这三本里哪本好看？",
+        max_facts=4,
+        max_chars_per_fact=700,
+        temporal_scope="current",
+        query_kind="anaphoric_selection",
+        recall_contract_id="anaphoric_selection",
+        primary_memory_layer="life_memory_collection",
+        expected_memory_layers=("life_memory_collection", "life_memory_entity", "life_episode"),
+        min_collection_items=3,
+        validation_requirements=("collection_or_episode_hit", "evidence_refs_present", "no_self_echo", "collection_item_min_count", "collection_item_exact_count"),
+        answer_obligations=("ground_selection_in_recalled_items", "read_detail_evidence_before_deep_quality_judgment"),
+    )
+
+    receipt = dict(dict(packet.trace or {})["recall_receipt"])
+    coverage = dict(dict(packet.trace or {})["recall_coverage"])
+    assert receipt["detail_evidence"]["required"] is True
+    assert receipt["detail_evidence"]["basis"] == "missing_detail_evidence"
+    assert coverage["passed"] is False
+    assert "detail_evidence" in coverage["missing"]
+    assert dict(packet.trace or {})["coverage_failed"] is True
+    assert packet.facts == ()
+    assert packet.reason_code == SURFACE_MEMORY_RECALL_COVERAGE_FAILED
+
+
+def test_selection_recall_accepts_detail_anchor_before_deep_review_fetch() -> None:
+    packet = build_surface_memory_recall_packet(
+        SimpleNamespace(
+            output={
+                "query": "这两本里哪本好看？",
+                "status": "OK",
+                "stage": "S_RET_RECALL",
+                "degraded": False,
+                "routes": [{"route_id": "surface_life_episode", "store_id": "life_episode"}],
+                "candidate_count": 1,
+                "ts_ms": _ts(2026, 5, 29, 8),
+                "candidates": [
+                    {
+                        "doc_id": "ep-current-detail",
+                        "source_ref": "action://event/recommendation-delivery",
+                        "evidence_refs": ["gateway://message/current/card/1"],
+                        "text": "我刚才推荐了 2 本轻小说：1. A；2. B。",
+                        "score": 0.95,
+                        "metadata": {
+                            "store_id": "life_episode",
+                            "source_ref": "action://event/recommendation-delivery",
+                            "evidence_refs_primary": "gateway://message/current/card/1",
+                            "episode_metadata": {
+                                "selected_recommendations": [
+                                    {"title": "A", "detail_url": "https://www.lightnovel.fun/cn/detail/a"},
+                                    {"title": "B", "detail_url": "https://www.lightnovel.fun/cn/detail/b"},
+                                ]
+                            },
+                        },
+                    }
+                ],
+            }
+        ),
+        query="这两本里哪本好看？",
+        max_facts=4,
+        max_chars_per_fact=700,
+        temporal_scope="current",
+        query_kind="anaphoric_selection",
+        recall_contract_id="anaphoric_selection",
+        primary_memory_layer="life_memory_collection",
+        expected_memory_layers=("life_memory_collection", "life_memory_entity", "life_episode"),
+        min_collection_items=2,
+        validation_requirements=("collection_or_episode_hit", "evidence_refs_present", "no_self_echo", "collection_item_min_count", "collection_item_exact_count"),
+        answer_obligations=("ground_selection_in_recalled_items", "read_detail_evidence_before_deep_quality_judgment"),
+    )
+
+    receipt = dict(dict(packet.trace or {})["recall_receipt"])
+    coverage = dict(dict(packet.trace or {})["recall_coverage"])
+    assert packet.reason_code is None
+    assert packet.facts
+    assert receipt["selected_item_count"] == 2
+    assert receipt["detail_evidence"]["basis"] == "detail_anchor"
+    assert receipt["detail_evidence"]["ready_for_deep_review"] is True
+    assert coverage["passed"] is True
+    assert coverage["dimensions"]["detail_evidence"] == 0.75
+
+
 def test_collection_scope_query_filters_self_echo_when_many_books_requested() -> None:
     class _RecallService:
         def recall(self, **kwargs):  # noqa: ANN003

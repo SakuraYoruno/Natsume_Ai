@@ -902,6 +902,14 @@ def _build_recall_coverage_trace(
     selected_item_count = max(0, _coerce_int(recall_receipt.get("selected_item_count")))
     evidence_ref_count = max(0, _coerce_int(recall_receipt.get("evidence_ref_count")))
     source_ref_count = max(0, _coerce_int(recall_receipt.get("source_ref_count")))
+    detail_evidence = dict(recall_receipt.get("detail_evidence") or {})
+    detail_required = (
+        _clean_text(recall_need.get("evidence_depth")) == "detail_or_body_evidence"
+        or bool(detail_evidence.get("required"))
+    )
+    detail_body_count = max(0, _coerce_int(detail_evidence.get("body_item_count")))
+    detail_anchor_count = max(0, _coerce_int(detail_evidence.get("anchor_item_count")))
+    detail_ready = bool(detail_evidence.get("ready_for_deep_review"))
     dimensions = {
         "validation": round(required_score, 6),
         "primary_layer": 1.0 if (not primary or primary in selected_layers) else 0.0,
@@ -914,14 +922,19 @@ def _build_recall_coverage_trace(
         "evidence": 1.0 if evidence_ref_count > 0 else 0.0,
         "source": 1.0 if source_ref_count > 0 else 0.0,
     }
+    if detail_required:
+        dimensions["detail_evidence"] = 1.0 if detail_body_count > 0 else (0.75 if detail_ready else 0.0)
     if not required:
         dimensions["validation"] = 1.0 if selected_layers else 0.0
     score = round(sum(float(value) for value in dimensions.values()) / max(1, len(dimensions)), 6)
+    coverage_missing = list(missing)
+    if detail_required and not detail_ready and "detail_evidence" not in coverage_missing:
+        coverage_missing.append("detail_evidence")
     return {
         "schema": "Natsume.surface_recall_coverage.v1",
         "score": score,
-        "passed": bool(validation_trace.get("passed", True)) and score >= 0.66,
-        "missing": missing,
+        "passed": bool(validation_trace.get("passed", True)) and score >= 0.66 and (not detail_required or detail_ready),
+        "missing": coverage_missing,
         "dimensions": {key: round(float(value), 6) for key, value in dimensions.items()},
         "required_count": len(required),
         "passed_required_count": len(passed_checks),
@@ -929,6 +942,9 @@ def _build_recall_coverage_trace(
         "min_collection_items": item_required,
         "evidence_ref_count": evidence_ref_count,
         "source_ref_count": source_ref_count,
+        "detail_evidence": detail_evidence,
+        "detail_body_item_count": detail_body_count,
+        "detail_anchor_item_count": detail_anchor_count,
         "selected_store_counts": dict(sorted(selected_store_counts.items())),
         "candidate_store_counts": dict(sorted(candidate_store_counts.items())),
     }
@@ -1137,6 +1153,11 @@ def _build_recall_receipt_trace(
             if _clean_text(item.get("title") or item.get("item_title") or item.get("entity_title"))
         ]
     )
+    detail_evidence = _build_detail_evidence_receipt(
+        item_payloads=item_payloads,
+        candidate_basis=candidate_basis,
+        answer_obligations=answer_obligations,
+    )
     primary = _clean_text(primary_memory_layer)
     selected_store_ids = set(selected_store_counts)
     candidate_store_counts = _store_counts_from_candidates(candidate_basis)
@@ -1153,6 +1174,7 @@ def _build_recall_receipt_trace(
             f"scope:{', '.join(scope_keys)}" if scope_keys else "",
             f"items:{selected_item_count}" if selected_item_count else "",
             "evidence_refs:present" if evidence_ref_count else "",
+            f"detail_evidence:{detail_evidence.get('basis')}" if detail_evidence.get("required") else "",
         ]
     )
     return {
@@ -1175,6 +1197,7 @@ def _build_recall_receipt_trace(
         "selected_titles": titles[:24],
         "evidence_ref_count": evidence_ref_count,
         "source_ref_count": source_ref_count,
+        "detail_evidence": detail_evidence,
         "meets_primary_layer": (not primary) or primary in selected_store_ids or primary in candidate_store_counts,
         "meets_expected_layer": (
             not expected_layer_set
@@ -1190,6 +1213,152 @@ def _build_recall_receipt_trace(
         "answer_obligations": list(_unique(list(answer_obligations or []))),
         "selection_basis": selection_basis,
     }
+
+
+def _build_detail_evidence_receipt(
+    *,
+    item_payloads: Sequence[Mapping[str, Any]],
+    candidate_basis: Sequence[Mapping[str, Any]],
+    answer_obligations: Sequence[str] | None,
+) -> dict[str, Any]:
+    obligations = {_clean_text(item) for item in list(answer_obligations or []) if _clean_text(item)}
+    required = bool(
+        obligations.intersection(
+            {
+                "read_detail_evidence_before_deep_quality_judgment",
+                "use_detail_or_body_evidence",
+            }
+        )
+    )
+    structured_items = [dict(item) for item in item_payloads if isinstance(item, Mapping)]
+    if not structured_items:
+        structured_items = _detail_items_from_candidates(candidate_basis)
+    body_items = [item for item in structured_items if _item_has_body_detail_evidence(item)]
+    anchor_items = [item for item in structured_items if _item_has_detail_anchor(item)]
+    text_anchor_refs = _detail_refs_from_candidate_text(candidate_basis)
+    anchor_count = max(len(anchor_items), len(text_anchor_refs))
+    body_count = len(body_items)
+    ready = body_count > 0 or anchor_count > 0
+    basis = "not_required"
+    if required:
+        if body_count > 0:
+            basis = "body_evidence"
+        elif anchor_count > 0:
+            basis = "detail_anchor"
+        else:
+            basis = "missing_detail_evidence"
+    elif ready:
+        basis = "available"
+    return {
+        "required": required,
+        "ready_for_deep_review": ready,
+        "basis": basis,
+        "body_item_count": body_count,
+        "anchor_item_count": anchor_count,
+        "structured_item_count": len(structured_items),
+        "detail_refs": list(_unique([*_detail_refs_from_items(structured_items), *text_anchor_refs]))[:24],
+    }
+
+
+def _detail_items_from_candidates(candidates: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    for candidate in candidates:
+        if not isinstance(candidate, Mapping):
+            continue
+        metadata = _candidate_metadata(candidate)
+        containers = [metadata]
+        episode_metadata = metadata.get("episode_metadata")
+        if isinstance(episode_metadata, Mapping):
+            containers.append(dict(episode_metadata))
+        collection_metadata = metadata.get("collection_metadata")
+        if isinstance(collection_metadata, Mapping):
+            containers.append(dict(collection_metadata))
+        for container in containers:
+            for key in ("items", "selected_recommendations", "recommendations", "selected_items", "delivered_items", "cards"):
+                value = container.get(key)
+                if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
+                    out.extend(dict(item) for item in value if isinstance(item, Mapping))
+    return out
+
+
+def _item_has_body_detail_evidence(item: Mapping[str, Any]) -> bool:
+    for key in (
+        "body_observations",
+        "body_excerpt",
+        "content_excerpt",
+        "content_text",
+        "chapter_signal",
+        "detail_observations",
+        "deep_review_fact",
+    ):
+        value = item.get(key)
+        if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)) and any(_clean_text(part) for part in value):
+            return True
+        if _clean_text(value):
+            return True
+    return _coerce_int(item.get("content_char_count")) >= 240
+
+
+def _item_has_detail_anchor(item: Mapping[str, Any]) -> bool:
+    return bool(_detail_refs_from_items([item]))
+
+
+def _detail_refs_from_items(items: Sequence[Mapping[str, Any]]) -> list[str]:
+    refs: list[str] = []
+    for item in items:
+        if not isinstance(item, Mapping):
+            continue
+        for key in (
+            "detail_url",
+            "source_url",
+            "url",
+            "href",
+            "document_ref",
+            "file_ref",
+            "file_path",
+            "epub_path",
+            "body_ref",
+            "detail_evidence_ref",
+            "source_ref",
+        ):
+            value = _truncate_text(_clean_text(item.get(key)), limit=400)
+            if _looks_like_detail_anchor(value):
+                refs.append(value)
+    return list(_unique(refs))
+
+
+def _detail_refs_from_candidate_text(candidates: Sequence[Mapping[str, Any]]) -> list[str]:
+    refs: list[str] = []
+    for candidate in candidates:
+        if not isinstance(candidate, Mapping):
+            continue
+        text = "\n".join(
+            _clean_text(value)
+            for value in (
+                candidate.get("text"),
+                candidate.get("snippet"),
+                candidate.get("source_ref"),
+                _candidate_metadata(candidate).get("source_ref"),
+            )
+            if _clean_text(value)
+        )
+        for match in re.findall(r"(?:https?://|file://|epub://|doc://)[^\s，。；;、]+", text):
+            cleaned = _truncate_text(_clean_text(match.rstrip("。），,)]}")), limit=400)
+            if _looks_like_detail_anchor(cleaned):
+                refs.append(cleaned)
+    return list(_unique(refs))
+
+
+def _looks_like_detail_anchor(value: str) -> bool:
+    text = _clean_text(value)
+    if not text:
+        return False
+    lower = text.lower()
+    if lower.startswith(("http://", "https://", "file://", "epub://", "doc://", "document://")):
+        return True
+    if lower.endswith((".epub", ".pdf", ".txt", ".md", ".html", ".htm")):
+        return True
+    return bool(re.search(r"[/\\][^/\\]+\.(?:epub|pdf|txt|md|html?)$", text, flags=re.IGNORECASE))
 
 
 def _selected_candidates_for_rows(
@@ -1450,10 +1619,16 @@ def _candidate_collection_item_count(candidate: Mapping[str, Any]) -> int:
         return 0
     metadata = _candidate_metadata(candidate)
     item_count = _coerce_int(metadata.get("item_count"))
-    for key in ("items", "selected_recommendations", "recommendations", "selected_items", "delivered_items"):
-        items = metadata.get(key)
-        if isinstance(items, Sequence) and not isinstance(items, (str, bytes, bytearray)):
-            item_count = max(item_count, len(items))
+    metadata_containers = [metadata]
+    for nested_key in ("episode_metadata", "collection_metadata", "payload", "result"):
+        nested = metadata.get(nested_key)
+        if isinstance(nested, Mapping):
+            metadata_containers.append(dict(nested))
+    for container in metadata_containers:
+        for key in ("items", "selected_recommendations", "recommendations", "selected_items", "delivered_items", "cards"):
+            items = container.get(key)
+            if isinstance(items, Sequence) and not isinstance(items, (str, bytes, bytearray)):
+                item_count = max(item_count, len(items))
     return max(item_count, _item_count_from_candidate_text(candidate))
 
 

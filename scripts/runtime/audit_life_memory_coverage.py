@@ -104,6 +104,11 @@ ENTRYPOINT_MATRIX = [
         "identity": "best-effort; audit-only anchors may omit person/session",
     },
 ]
+DEFAULT_REQUIRED_ENTRYPOINTS = tuple(
+    str(item.get("entrypoint") or "").strip()
+    for item in ENTRYPOINT_MATRIX
+    if str(item.get("entrypoint") or "").strip()
+)
 
 
 @dataclass(frozen=True)
@@ -160,6 +165,11 @@ def _parse_args() -> argparse.Namespace:
         action="append",
         default=[],
         help="Require an inferred entrypoint to be present; may be passed multiple times.",
+    )
+    parser.add_argument(
+        "--no-default-entrypoints",
+        action="store_true",
+        help="Do not require the standard LifeMemory entrypoint matrix in CLI audits.",
     )
     return parser.parse_args()
 
@@ -847,7 +857,10 @@ def main() -> int:
             conn,
             sample_limit=max(1, int(args.sample_limit or 25)),
             include_synthetic=bool(args.include_synthetic),
-            required_entrypoints=list(args.require_entrypoint or []),
+            required_entrypoints=[
+                *([] if bool(args.no_default_entrypoints) else list(DEFAULT_REQUIRED_ENTRYPOINTS)),
+                *list(args.require_entrypoint or []),
+            ],
         )
     finally:
         conn.close()

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.memory.life_memory import LifeMemoryConsolidator, LifeMemoryStore
-from scripts.runtime.audit_life_memory_coverage import build_coverage_report
+from scripts.runtime.audit_life_memory_coverage import DEFAULT_REQUIRED_ENTRYPOINTS, build_coverage_report
 from scripts.runtime.run_life_memory_entrypoint_scenario_batch import (
     REQUIRED_ENTRYPOINTS,
     run_entrypoint_scenario_batch,
@@ -10,6 +10,7 @@ from scripts.runtime.run_life_memory_entrypoint_scenario_batch import (
 
 
 def test_entrypoint_scenario_batch_covers_all_required_life_memory_anchors() -> None:
+    assert DEFAULT_REQUIRED_ENTRYPOINTS == REQUIRED_ENTRYPOINTS
     report = run_entrypoint_scenario_batch()
     counts = {
         item["entrypoint"]: int(item["count"])
