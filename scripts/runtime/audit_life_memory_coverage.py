@@ -12,7 +12,7 @@ import sqlite3
 import sys
 import time
 from pathlib import Path
-from typing import Any, Iterable, Mapping
+from typing import Any, Iterable, Mapping, Sequence
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -82,6 +82,20 @@ ENTRYPOINT_MATRIX = [
         "identity": "person_id required for user-linked thought",
     },
     {
+        "entrypoint": "perception_input",
+        "code_path": "LifeMemoryStore.write_background_episode(event_source=vision/audio/asr/perception)",
+        "episode_kind": "perception_episode",
+        "required_evidence": ["vision_observation or audio_asr"],
+        "identity": "person/session optional unless tied to a user turn",
+    },
+    {
+        "entrypoint": "generic_tool_action",
+        "code_path": "LifeMemoryStore.write_background_episode(event_source=skill/mcp/sandbox/tool/browser)",
+        "episode_kind": "action_episode",
+        "required_evidence": ["tool_result"],
+        "identity": "optional unless user-scoped action",
+    },
+    {
         "entrypoint": "audit_anchor",
         "code_path": "host_brain/audit/sqlite_ledger.py -> _log_life_audit_anchor",
         "episode_kind": "background/action/perception anchor",
@@ -114,6 +128,14 @@ class CollectionIssue:
     detail: str
 
 
+@dataclass(frozen=True)
+class EntryPointIssue:
+    issue_kind: str
+    severity: str
+    entrypoint: str
+    detail: str
+
+
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Audit LifeMemory coverage.")
     parser.add_argument("--db-path", default="")
@@ -123,6 +145,12 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--fail-on", choices=("none", "critical", "warn"), default="none")
     parser.add_argument("--sample-limit", type=int, default=25)
     parser.add_argument("--include-synthetic", action="store_true", help="Include e2e/probe episodes in issue counts.")
+    parser.add_argument(
+        "--require-entrypoint",
+        action="append",
+        default=[],
+        help="Require an inferred entrypoint to be present; may be passed multiple times.",
+    )
     return parser.parse_args()
 
 
@@ -247,6 +275,44 @@ def _summarize_counter(counter: Counter[tuple[str, str]]) -> list[dict[str, Any]
     ]
 
 
+def _infer_entrypoints(row: Mapping[str, Any], metadata: Mapping[str, Any]) -> list[str]:
+    kind = _clean(row.get("episode_kind"))
+    action = _clean(row.get("action")).lower()
+    source = _clean(metadata.get("event_source") or metadata.get("audit_anchor_source")).lower()
+    evidence_source_refs = str(row.get("evidence_source_refs") or "")
+    refs = _metadata_evidence_refs(metadata)
+    entrypoints: list[str] = []
+
+    def add(entrypoint: str) -> None:
+        if entrypoint and entrypoint not in entrypoints:
+            entrypoints.append(entrypoint)
+
+    if kind == "chat_episode":
+        add("surface_chat")
+        if _is_gateway_context(row, metadata) or any(ref.startswith("gateway://message/") for ref in refs) or "gateway://message/" in evidence_source_refs:
+            add("gateway_input_chat")
+    if kind == "action_episode" and (_is_gateway_context(row, metadata) or action in USER_FACING_ACTIONS):
+        if any(ref.startswith("gateway://message/") for ref in refs) or "gateway://message/" in evidence_source_refs:
+            add("gateway_reply_action")
+    if action == "lightnovel_recommendation_delivery":
+        add("codex_lightnovel_delivery")
+    if source == "scheduler" or "scheduler_event" in str(row.get("evidence_kinds") or ""):
+        add("scheduler_background")
+    if kind == "inner_episode" or source in {"inner_world", "inner_stream", "inner_activity"}:
+        add("inner_world")
+    if kind == "perception_episode" or source in {"vision", "screen_ocr", "camera", "camera_recognition", "perception", "voice", "audio", "asr"}:
+        add("perception_input")
+    if kind == "action_episode" and (
+        source in {"skill", "mcp", "sandbox", "tool", "browser"}
+        or action in {"skill", "mcp", "sandbox", "tool", "browser"}
+        or any(prefix in evidence_source_refs for prefix in ("skill://exec/", "mcp://exec/", "sandbox://exec/"))
+    ):
+        add("generic_tool_action")
+    if bool(metadata.get("anchor_only")):
+        add("audit_anchor")
+    return entrypoints or ["unclassified"]
+
+
 def _fetch_rows(conn: sqlite3.Connection) -> list[dict[str, Any]]:
     rows = conn.execute(
         """
@@ -316,13 +382,21 @@ def _table_exists(conn: sqlite3.Connection, table_name: str) -> bool:
     return row is not None
 
 
-def build_coverage_report(conn: sqlite3.Connection, *, sample_limit: int = 25, include_synthetic: bool = False) -> dict[str, Any]:
+def build_coverage_report(
+    conn: sqlite3.Connection,
+    *,
+    sample_limit: int = 25,
+    include_synthetic: bool = False,
+    required_entrypoints: Sequence[str] | None = None,
+) -> dict[str, Any]:
     rows = _fetch_rows(conn)
     collection_rows = _fetch_collection_rows(conn)
     issues: list[EpisodeIssue] = []
     collection_issues: list[CollectionIssue] = []
+    entrypoint_issues: list[EntryPointIssue] = []
     by_kind_action: Counter[tuple[str, str]] = Counter()
     collection_by_kind_domain: Counter[tuple[str, str]] = Counter()
+    entrypoint_counter: Counter[str] = Counter()
     evidence_kind_counter: Counter[str] = Counter()
     required_identity_counts = {"person": 0, "session": 0}
     gateway_count = 0
@@ -354,6 +428,9 @@ def build_coverage_report(conn: sqlite3.Connection, *, sample_limit: int = 25, i
             production_count += 1
         if synthetic and not include_synthetic:
             continue
+
+        for entrypoint in _infer_entrypoints(row, metadata):
+            entrypoint_counter[entrypoint] += 1
 
         if not _clean(row.get("truth_state")):
             issues.append(EpisodeIssue("missing_truth_state", "critical", episode_id, kind, action, person_id, session_id, "truth_state is required"))
@@ -426,8 +503,21 @@ def build_coverage_report(conn: sqlite3.Connection, *, sample_limit: int = 25, i
 
     issue_counts = Counter(issue.issue_kind for issue in issues)
     collection_issue_counts = Counter(issue.issue_kind for issue in collection_issues)
+    required_entrypoint_list = list(dict.fromkeys(_clean(item) for item in list(required_entrypoints or []) if _clean(item)))
+    for entrypoint in required_entrypoint_list:
+        if entrypoint_counter.get(entrypoint, 0) <= 0:
+            entrypoint_issues.append(
+                EntryPointIssue(
+                    "missing_required_entrypoint",
+                    "critical",
+                    entrypoint,
+                    f"required entrypoint {entrypoint!r} has no inferred life_episode coverage",
+                )
+            )
+    entrypoint_issue_counts = Counter(issue.issue_kind for issue in entrypoint_issues)
     severity_counts = Counter(issue.severity for issue in issues)
     collection_severity_counts = Counter(issue.severity for issue in collection_issues)
+    entrypoint_severity_counts = Counter(issue.severity for issue in entrypoint_issues)
     report = {
         "schema": "Natsume.life_memory_coverage.v1",
         "generated_ts_ms": int(time.time() * 1000),
@@ -448,8 +538,18 @@ def build_coverage_report(conn: sqlite3.Connection, *, sample_limit: int = 25, i
             "collection_issue_count": len(collection_issues),
             "collection_critical_issue_count": collection_severity_counts.get("critical", 0),
             "collection_warn_issue_count": collection_severity_counts.get("warn", 0),
+            "observed_entrypoint_count": len(entrypoint_counter),
+            "required_entrypoint_count": len(required_entrypoint_list),
+            "entrypoint_issue_count": len(entrypoint_issues),
+            "entrypoint_critical_issue_count": entrypoint_severity_counts.get("critical", 0),
+            "entrypoint_warn_issue_count": entrypoint_severity_counts.get("warn", 0),
         },
         "entrypoint_matrix": ENTRYPOINT_MATRIX,
+        "entrypoint_counts": [
+            {"entrypoint": entrypoint, "count": count}
+            for entrypoint, count in sorted(entrypoint_counter.items(), key=lambda item: (-item[1], item[0]))
+        ],
+        "required_entrypoints": required_entrypoint_list,
         "by_kind_action": _summarize_counter(by_kind_action),
         "collection_by_kind_domain": [
             {"collection_kind": kind, "domain": domain, "count": count}
@@ -458,8 +558,10 @@ def build_coverage_report(conn: sqlite3.Connection, *, sample_limit: int = 25, i
         "evidence_kinds": [{"evidence_kind": key, "count": count} for key, count in evidence_kind_counter.most_common()],
         "issue_counts": dict(sorted(issue_counts.items())),
         "collection_issue_counts": dict(sorted(collection_issue_counts.items())),
+        "entrypoint_issue_counts": dict(sorted(entrypoint_issue_counts.items())),
         "issues": [asdict(issue) for issue in issues[: max(1, int(sample_limit))]],
         "collection_issues": [asdict(issue) for issue in collection_issues[: max(1, int(sample_limit))]],
+        "entrypoint_issues": [asdict(issue) for issue in entrypoint_issues[: max(1, int(sample_limit))]],
     }
     return report
 
@@ -480,6 +582,8 @@ def _render_markdown(report: Mapping[str, Any]) -> str:
         f"(critical={summary.get('critical_issue_count', 0)}, warn={summary.get('warn_issue_count', 0)})",
         f"- Collections: {summary.get('collection_count', 0)} "
         f"(items={summary.get('collection_item_count', 0)}, issues={summary.get('collection_issue_count', 0)})",
+        f"- Observed entrypoints: {summary.get('observed_entrypoint_count', 0)} "
+        f"(required={summary.get('required_entrypoint_count', 0)}, issues={summary.get('entrypoint_issue_count', 0)})",
         "",
         "## Entrypoints",
         "",
@@ -495,11 +599,17 @@ def _render_markdown(report: Mapping[str, Any]) -> str:
                 identity=item.get("identity"),
             )
         )
+    lines.extend(["", "## Observed Entrypoints", ""])
+    for item in report.get("entrypoint_counts") or []:
+        lines.append(f"- {item.get('entrypoint')}: {item.get('count')}")
     lines.extend(["", "## Issue Counts", ""])
     for key, count in dict(report.get("issue_counts") or {}).items():
         lines.append(f"- {key}: {count}")
     lines.extend(["", "## Collection Issue Counts", ""])
     for key, count in dict(report.get("collection_issue_counts") or {}).items():
+        lines.append(f"- {key}: {count}")
+    lines.extend(["", "## EntryPoint Issue Counts", ""])
+    for key, count in dict(report.get("entrypoint_issue_counts") or {}).items():
         lines.append(f"- {key}: {count}")
     lines.extend(["", "## Issue Samples", ""])
     for issue in report.get("issues") or []:
@@ -512,6 +622,12 @@ def _render_markdown(report: Mapping[str, Any]) -> str:
         lines.append(
             f"- [{issue.get('severity')}] {issue.get('issue_kind')} "
             f"{issue.get('collection_id')} {issue.get('collection_kind')}/{issue.get('domain')}/{issue.get('scope_key')}: {issue.get('detail')}"
+        )
+    lines.extend(["", "## EntryPoint Issue Samples", ""])
+    for issue in report.get("entrypoint_issues") or []:
+        lines.append(
+            f"- [{issue.get('severity')}] {issue.get('issue_kind')} "
+            f"{issue.get('entrypoint')}: {issue.get('detail')}"
         )
     return "\n".join(lines).strip() + "\n"
 
@@ -530,6 +646,7 @@ def main() -> int:
             conn,
             sample_limit=max(1, int(args.sample_limit or 25)),
             include_synthetic=bool(args.include_synthetic),
+            required_entrypoints=list(args.require_entrypoint or []),
         )
     finally:
         conn.close()
@@ -542,8 +659,10 @@ def main() -> int:
         print(output)
     critical = int((report.get("summary") or {}).get("critical_issue_count") or 0)
     critical += int((report.get("summary") or {}).get("collection_critical_issue_count") or 0)
+    critical += int((report.get("summary") or {}).get("entrypoint_critical_issue_count") or 0)
     total = int((report.get("summary") or {}).get("issue_count") or 0)
     total += int((report.get("summary") or {}).get("collection_issue_count") or 0)
+    total += int((report.get("summary") or {}).get("entrypoint_issue_count") or 0)
     if args.fail_on == "critical" and critical > 0:
         return 3
     if args.fail_on == "warn" and total > 0:
