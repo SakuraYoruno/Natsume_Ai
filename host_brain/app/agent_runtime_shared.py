@@ -1873,6 +1873,39 @@ def _maybe_build_contextual_style_answer(
     return None
 
 
+def _memory_recall_plan_should_bypass_direct_status_fastlane(user_message: str, *, task_mode: str | None = None) -> bool:
+    """Return True when a direct recent/task route would hide required memory."""
+
+    try:
+        from host_brain.memory.life_memory_query import plan_life_memory_query  # noqa: PLC0415
+    except Exception:
+        return False
+    try:
+        plan = plan_life_memory_query(user_message, task_mode=task_mode)
+    except Exception:
+        return False
+    if not bool(getattr(plan, "should_recall", False)):
+        return False
+    contract_id = str(getattr(plan, "recall_contract_id", "") or "").strip()
+    reason = str(getattr(plan, "reason", "") or "").strip()
+    query_kind = str(getattr(plan, "query_kind", "") or "").strip()
+    strong_contracts = {
+        "anaphoric_selection",
+        "collection_date",
+        "collection_recent",
+        "correction",
+        "evidence_review",
+        "failure_debug",
+        "preference",
+        "self_change",
+    }
+    return (
+        contract_id in strong_contracts
+        or reason in {"collection_memory_recall", "correction_recall", "evidence_review_recall", "failure_debug_recall"}
+        or query_kind in {"correction", "evidence_review", "failure_debug", "preference_lookup"}
+    )
+
+
 
 def _maybe_build_recent_turn_answer(
     *,
@@ -3265,6 +3298,11 @@ async def _cortex_orchestrator_sse_generator_impl(
     relational_topic = ""
     phatic_fastlane = False
     direct_status_fastlane = route_hint in {"task_progress", "recent_turn"}
+    if direct_status_fastlane and _memory_recall_plan_should_bypass_direct_status_fastlane(
+        sanitized_message,
+        task_mode=route_hint,
+    ):
+        direct_status_fastlane = False
     multimodal_fastlane = False
     if has_multimodal_input:
         _multimodal_observations = dict(getattr(request_body, "multimodal_observations", None) or {})

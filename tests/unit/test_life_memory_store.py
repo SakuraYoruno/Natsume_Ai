@@ -207,6 +207,151 @@ def test_corrected_episode_is_audit_only_not_default_fact() -> None:
         ledger.close()
 
 
+def test_failure_recall_prefers_recorded_failure_over_failure_word_in_title() -> None:
+    ledger = SQLiteLedger(db_path=":memory:")
+    try:
+        store = LifeMemoryStore(ledger=ledger)
+        store.upsert_episode(
+            episode_kind=EPISODE_ACTION,
+            evidence_refs=["action://event/lightnovel-title-noise"],
+            primary_ref="action://event/lightnovel-title-noise",
+            person_id="user-1",
+            session_id="sess-1",
+            action="lightnovel_recommendation_delivery",
+            result="COMPLETED",
+            summary="今日推荐 A：培养失败的前美少女童星；推荐已成功发送。",
+            salience=0.55,
+            ts_ms=1_800_000_000_000,
+            metadata={"selected_recommendations": [{"title": "培养失败的前美少女童星"}]},
+        )
+        store.write_background_episode(
+            event_source="codex_production",
+            event_id="deepseek-timeout-1",
+            person_id="user-1",
+            session_id="sess-1",
+            task_id="llm_pool_call",
+            status="FAILED",
+            reason_code="DEEPSEEK_TIMEOUT",
+            detail="DeepSeek 失败原因：供应商超时，后续优先检查网络和 provider 健康状态。",
+            ts_ms=1_800_000_000_100,
+        )
+
+        packet = store.recall_episode_packet(
+            query="DeepSeek失败原因是什么？",
+            top_k=3,
+            person_id="user-1",
+            session_id="sess-1",
+            now_ts_ms_value=1_800_000_000_200,
+        )
+
+        assert packet.candidates
+        assert "供应商超时" in packet.candidates[0]["text"]
+        assert "培养失败的前美少女童星" not in packet.candidates[0]["text"]
+    finally:
+        ledger.close()
+
+
+def test_correction_recall_prefers_correction_chain_over_question_echo() -> None:
+    ledger = SQLiteLedger(db_path=":memory:")
+    try:
+        store = LifeMemoryStore(ledger=ledger)
+        wrong = store.write_chat_episode(
+            request_id="req-wrong-cat",
+            session_id="sess-1",
+            person_id="user-1",
+            user_message="刚才那三本里你选哪本？",
+            assistant_reply="我选封面有猫的那本。",
+            ts_ms=1_800_000_000_000,
+        )
+        correction = store.write_chat_episode(
+            request_id="req-fix-cat",
+            session_id="sess-1",
+            person_id="user-1",
+            user_message="不对，没有封面有猫这本。",
+            assistant_reply="你说得对，我撤回这个判断。",
+            ts_ms=1_800_000_000_100,
+        )
+        store.correct_episode(
+            episode_id=wrong["episode_id"],
+            correction_kind="correction",
+            correction_episode_id=correction["episode_id"],
+            reason_code="USER_CORRECTED_FALSE_MEMORY",
+            detail="用户指出没有封面有猫这本。",
+            suppress=False,
+            ts_ms=1_800_000_000_200,
+        )
+        store.write_chat_episode(
+            request_id="req-bad-echo-cat",
+            session_id="sess-1",
+            person_id="user-1",
+            user_message="你刚才是不是记错了封面猫那本？",
+            assistant_reply="哈？那本封面确实有只猫，我特意留意过的。",
+            ts_ms=1_800_000_000_300,
+        )
+
+        packet = store.recall_episode_packet(
+            query="你刚才是不是记错了封面猫那本？",
+            top_k=3,
+            person_id="user-1",
+            session_id="sess-1",
+            now_ts_ms_value=1_800_000_000_400,
+        )
+
+        assert packet.candidates
+        assert "没有封面有猫" in packet.candidates[0]["text"]
+        assert "确实有只猫" not in packet.candidates[0]["text"]
+    finally:
+        ledger.close()
+
+
+def test_evidence_review_prefers_substantive_web_episode_over_generic_absence() -> None:
+    ledger = SQLiteLedger(db_path=":memory:")
+    try:
+        store = LifeMemoryStore(ledger=ledger)
+        store.write_background_episode(
+            event_source="skill",
+            event_id="generic-web-absence",
+            person_id="user-1",
+            session_id="sess-1",
+            task_id="sub_agent:intent_agent",
+            status="OK",
+            reason_code="SUB_AGENT_OK",
+            detail="我现在没有看到昨天那个网页的具体内容，不能直接判断它靠不靠谱。",
+            ts_ms=1_800_000_000_000,
+            metadata={"action_kind": "audit_anchor"},
+        )
+        store.write_background_episode(
+            event_source="browser",
+            event_id="onebot-web-report",
+            person_id="user-1",
+            session_id="sess-1",
+            task_id="web_research",
+            status="COMPLETED",
+            reason_code="WEB_REPORT_READ",
+            detail=(
+                "昨天阅读了一个网页报告；网页主题：OneBot 部署位置核对；"
+                "正文内容：OneBot 在 edge-lan 上运行，本机只负责 host；"
+                "依据：报告正文包含 edge-lan ssh、网关地址和运行位置三项互相一致的信息。"
+            ),
+            ts_ms=1_800_000_000_100,
+            metadata={"domain": "web", "evidence_refs": ["doc://web/onebot-edge#body"]},
+        )
+
+        packet = store.recall_episode_packet(
+            query="昨天那个网页内容靠谱吗？依据是什么？",
+            top_k=3,
+            person_id="user-1",
+            session_id="sess-1",
+            now_ts_ms_value=1_800_000_000_200,
+        )
+
+        assert packet.candidates
+        assert "OneBot 在 edge-lan" in packet.candidates[0]["text"]
+        assert "没有看到" not in packet.candidates[0]["text"]
+    finally:
+        ledger.close()
+
+
 def test_consolidator_uses_only_trusted_active_episodes() -> None:
     ledger = SQLiteLedger(db_path=":memory:")
     try:

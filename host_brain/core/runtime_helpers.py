@@ -75,9 +75,22 @@ def _airlock_sanitize_input(message: str) -> tuple[str, bool]:
     return sanitized, bool(sanitized)
 
 
+_MEMORY_DISCONTINUITY_FILLER_RE = re.compile(
+    r"^\s*(?:嗯？|哈？|欸？)?\s*(?:老哥|哥哥|尼尼)?\s*(?:突然问这个|怎么突然(?:问|提|说)?(?:这个)?|你突然(?:问|提|说)?(?:这个)?|突然(?:问|提|说)这个)[…。，,、\s]*"
+    r"|硬要(?:说|选)(?:的话)?[，,、\s]*"
+)
+
+
+def _strip_memory_discontinuity_fillers(text: str) -> str:
+    value = str(text or "")
+    cleaned = _MEMORY_DISCONTINUITY_FILLER_RE.sub("", value).strip()
+    return cleaned or value.strip()
+
+
 def _airlock_sanitize_output(text: str) -> str:
     """出口净化：null byte + 长度截断。"""
     text = text.replace("\x00", "").strip()
+    text = _strip_memory_discontinuity_fillers(text)
     max_chars = int(os.environ.get("HOST_QA_MAX_RESPONSE_CHARS") or "4000")
     if len(text) > max_chars:
         truncated = text[:max_chars]

@@ -93,11 +93,12 @@ def _normalize_surface_memory_recall_intent(
     request_id: str,
     session_id: str,
 ) -> Dict[str, Any] | None:
-    if not _surface_control_requests_memory_recall(getattr(request_body, "surface_task_control", None)):
-        return intent_draft
     draft = dict(intent_draft or {})
     target_id = str(draft.get("target_id") or draft.get("skill_id") or "").strip().lower()
     action = str(draft.get("action") or "").strip().lower()
+    control_requests_recall = _surface_control_requests_memory_recall(getattr(request_body, "surface_task_control", None))
+    if not control_requests_recall and target_id != "memory_recall" and action != "memory_recall":
+        return intent_draft
     if target_id not in {"", "memory_recall"} and action != "memory_recall":
         return intent_draft
 

@@ -1682,14 +1682,30 @@ def _filter_candidates_for_target_domains(
         return rows
     should_filter = (
         _clean_text(primary_memory_layer) == "life_memory_collection"
-        or _clean_text(query_kind) in {"anaphoric_selection", "collection_summary", "evidence_review"}
+        or _clean_text(query_kind)
+        in {
+            "anaphoric_selection",
+            "collection_summary",
+            "correction",
+            "evidence_review",
+            "failure_debug",
+            "preference_lookup",
+            "self_change",
+        }
     )
     if not should_filter:
         return rows
+    strict_domain_match = _clean_text(query_kind) in {
+        "correction",
+        "evidence_review",
+        "failure_debug",
+        "preference_lookup",
+        "self_change",
+    }
     matched: list[dict[str, Any]] = []
     for candidate in rows:
         candidate_domains = _candidate_domains(candidate)
-        if not candidate_domains or candidate_domains.intersection(domains):
+        if candidate_domains.intersection(domains) or (not candidate_domains and not strict_domain_match):
             matched.append(candidate)
     return matched or rows
 
@@ -2345,6 +2361,7 @@ def _select_fact_rows(
     rows = [_build_fact_row(item, max_chars_per_fact=max_chars_per_fact) for item in candidates]
     rows = [row for row in rows if row is not None]
     rows = _filter_rows_for_preference_rule_query(rows, query=query)
+    rows = _filter_rows_for_correction_query(rows, query=query)
     rows = _filter_rows_for_explicit_memory_query(rows, query=query)
     rows = _filter_rows_for_anaphoric_selection(rows, query=query)
     rows = _filter_rows_for_collection_scope(rows, query=query)
@@ -2415,6 +2432,22 @@ def _filter_rows_for_preference_rule_query(
     if not _looks_like_preference_rule_memory_query(query_text):
         return list(rows)
     preferred = [row for row in rows if _looks_like_preference_rule_memory_fact(row.fact)]
+    if preferred:
+        return preferred
+    return list(rows)
+
+
+def _filter_rows_for_correction_query(
+    rows: Sequence[SurfaceMemoryFactRow],
+    *,
+    query: str | None,
+) -> list[SurfaceMemoryFactRow]:
+    if not rows:
+        return []
+    query_text = _clean_text(query)
+    if not _looks_like_correction_memory_query(query_text):
+        return list(rows)
+    preferred = [row for row in rows if _looks_like_correction_memory_fact(row.fact)]
     if preferred:
         return preferred
     return list(rows)
@@ -3037,6 +3070,20 @@ def _looks_like_preference_rule_memory_fact(text: str) -> bool:
             "简介后",
         )
     )
+
+
+def _looks_like_correction_memory_query(text: str) -> bool:
+    normalized = _clean_text(text)
+    return bool(normalized) and any(token in normalized for token in ("记错", "不对", "错了", "纠正", "撤回", "没有这本", "没有封面"))
+
+
+def _looks_like_correction_memory_fact(text: str) -> bool:
+    normalized = _clean_text(text)
+    if not normalized:
+        return False
+    if any(token in normalized for token in ("我没记错", "没有记错", "明明记得", "确实有只猫", "记性比我还差")):
+        return False
+    return any(token in normalized for token in ("不对", "没有封面有猫", "没有这本", "没有这种", "你说得对", "撤回", "纠正", "修正"))
 
 
 def _should_skip_low_signal_recall(

@@ -240,6 +240,183 @@ def _looks_like_anaphoric_selection_query(query: str) -> bool:
     return bool(normalized and _ANAPHORIC_SELECTION_RE.search(normalized))
 
 
+def _episode_memory_class_from_metadata(metadata: Mapping[str, Any]) -> str:
+    policy = metadata.get("memory_policy")
+    policy_class = policy.get("memory_class") if isinstance(policy, Mapping) else ""
+    return _clean_text(metadata.get("memory_class") or policy_class).lower()
+
+
+def _episode_recall_target_memory_classes(query_kind: str) -> tuple[str, ...]:
+    normalized = _clean_text(query_kind).lower()
+    if normalized == "failure_debug":
+        return (MEMORY_CLASS_FAILURE_LESSON,)
+    if normalized == "correction":
+        return (MEMORY_CLASS_CORRECTION,)
+    if normalized == "preference_lookup":
+        return (MEMORY_CLASS_PREFERENCE,)
+    if normalized == "self_change":
+        return (MEMORY_CLASS_SELF_CHANGE,)
+    if normalized == "evidence_review":
+        return (MEMORY_CLASS_STABLE_FACT, MEMORY_CLASS_PERCEPTION_EVIDENCE, MEMORY_CLASS_TOOL_ACTION)
+    return ()
+
+
+def _metadata_domain_set(metadata: Mapping[str, Any], *, text: str = "") -> set[str]:
+    domains: set[str] = set()
+    for key in ("domain", "recommendation_domain", "content_domain", "target_domain", "memory_domain"):
+        value = _clean_text(metadata.get(key)).lower()
+        if value:
+            domains.add(value)
+    compact = " ".join(
+        _clean_text(part).lower()
+        for part in (
+            text,
+            metadata.get("action_kind"),
+            metadata.get("event_source"),
+            metadata.get("task_id"),
+            metadata.get("primary_ref"),
+            metadata.get("evidence_refs"),
+        )
+    )
+    if (
+        any(token in compact for token in ("failure", "failed", "timeout", "异常", "报错"))
+        or any(token in compact for token in ("失败原因", "任务失败", "调用失败", "执行失败", "状态=failed", "状态 failed"))
+    ):
+        domains.add("failure")
+    if any(token in compact for token in ("lightnovel", "轻小说", "lightnovel.fun")):
+        domains.update({"lightnovel_recommendation", "recommendation"})
+    elif "recommendation" in compact or "推荐" in compact:
+        domains.add("recommendation")
+    if any(token in compact for token in ("web", "网页", "网站", "浏览器", "browser", "http://", "https://")):
+        domains.update({"web", "content"})
+    if any(token in compact for token in ("file", "文件", "文档", "pdf", "epub", "附件")):
+        domains.update({"file", "content"})
+    return domains
+
+
+def _looks_like_recorded_failure_candidate(
+    *,
+    episode_kind: str,
+    action_text: str,
+    result_text: str,
+    text: str,
+) -> bool:
+    compact = _clean_text(text, limit=1600).lower()
+    return (
+        result_text in {"FAILED", "ERROR", "DEGRADED", "BLOCKED"}
+        or "timeout" in action_text
+        or "failure" in action_text
+        or "failed" in action_text
+        or any(
+            token in compact
+            for token in (
+                "timeout",
+                "deepseek_timeout",
+                "llm_pool_exhausted",
+                "失败原因",
+                "任务失败",
+                "调用失败",
+                "执行失败",
+                "连不上",
+                "被占用",
+                "异常",
+                "报错",
+            )
+        )
+        or (episode_kind in {EPISODE_ACTION, EPISODE_BACKGROUND} and "failed" in compact)
+    )
+
+
+def _looks_like_correction_fact_candidate(text: str) -> bool:
+    compact = _clean_text(text, limit=1600).lower()
+    return any(token in compact for token in ("不对", "没有", "不是", "错了", "纠正", "撤回", "修正", "你说得对"))
+
+
+def _looks_like_explicit_correction_event(text: str) -> bool:
+    compact = _clean_text(text, limit=1600).lower()
+    return any(token in compact for token in ("不对", "错了", "纠正", "撤回", "修正", "你说得对", "没有这种", "没有这本", "没有封面有猫"))
+
+
+def _looks_like_correction_question_echo(text: str) -> bool:
+    compact = _clean_text(text, limit=1600).lower()
+    if not any(token in compact for token in ("是不是记错", "记错了吗", "有没有记错", "是否记错")):
+        return False
+    return any(token in compact for token in ("assistant:", "确实", "没错", "明明记得", "封面有猫"))
+
+
+def _looks_like_preference_candidate(text: str) -> bool:
+    compact = _clean_text(text, limit=1600).lower().replace("要不要", "")
+    actor_says_user = "user:" in compact or "用户" in compact
+    if any(token in compact for token in ("用户偏好", "用户喜欢", "用户不喜欢", "用户要求")):
+        return True
+    if re.search(r"user:.{0,40}我(?:不)?喜欢", compact):
+        return True
+    if not actor_says_user:
+        return False
+    return any(
+        token in compact
+        for token in (
+            "以后",
+            "明确要求",
+            "推荐格式",
+            "推荐轻小说时",
+            "格式",
+            "换行",
+            "分段",
+            "卡片",
+            "模板腔",
+            "拟人化发送",
+            "主链不要",
+            "不要用pro",
+            "不用pro",
+            "优先使用",
+        )
+    )
+
+
+def _looks_like_substantive_evidence_candidate(*, memory_class: str, action_text: str, text: str) -> bool:
+    compact = _clean_text(text, limit=2200).lower()
+    if _looks_like_absence_or_generic_evidence_answer(compact):
+        return False
+    if action_text in {"web_research", "browser_research", "file_read", "document_read", "lightnovel_recommendation_deep_review"}:
+        return True
+    if memory_class in {MEMORY_CLASS_STABLE_FACT, MEMORY_CLASS_PERCEPTION_EVIDENCE}:
+        return True
+    return any(
+        token in compact
+        for token in (
+            "网页主题",
+            "正文内容",
+            "报告正文",
+            "content_excerpt",
+            "body_ref",
+            "doc://web",
+            "阅读了一个网页",
+            "打开详情页",
+            "工具结果",
+            "截图观察",
+            "ocr",
+        )
+    )
+
+
+def _looks_like_absence_or_generic_evidence_answer(text: str) -> bool:
+    compact = _clean_text(text, limit=1600).lower()
+    return any(
+        token in compact
+        for token in (
+            "没有看到",
+            "没有拿到",
+            "没有对应",
+            "没有具体内容",
+            "没法直接判断",
+            "不能直接判断",
+            "一般判断依据",
+            "建议再交叉验证",
+        )
+    )
+
+
 def _episode_metadata_dict(episode: Mapping[str, Any]) -> dict[str, Any]:
     metadata = _json_loads(episode.get("metadata"), fallback={})
     return dict(metadata) if isinstance(metadata, Mapping) else {}
@@ -409,7 +586,7 @@ def _classify_life_memory_policy(
         decay_profile = DECAY_EPHEMERAL
         active_recall_default = False
         reason_codes.append("audit_anchor_only")
-    elif truth in {TRUTH_CORRECTED, TRUTH_SUPPRESSED} or has_any("纠正", "不对", "错了", "撤回", "记错"):
+    elif truth in {TRUTH_CORRECTED, TRUTH_SUPPRESSED} or _looks_like_explicit_correction_event(summary_text):
         memory_class = MEMORY_CLASS_CORRECTION
         recall_grain = RECALL_GRAIN_EPISODE
         decay_profile = DECAY_SLOW
@@ -1451,6 +1628,8 @@ class LifeMemoryStore:
                 scored,
                 key=lambda pair: (
                     -round(pair[0], 2),
+                    -int(bool(scoped_session_id and _clean_text(pair[1]["metadata"].get("session_id")) == scoped_session_id)),
+                    -int(bool(scoped_person_id and _clean_text(pair[1]["metadata"].get("person_id")) == scoped_person_id)),
                     -int(pair[1]["metadata"].get("updated_ts_ms") or 0),
                     str(pair[1].get("memory_id") or ""),
                 ),
@@ -1994,6 +2173,7 @@ class LifeMemoryStore:
         )
 
         normalized_query = _clean_text(query)
+        query_plan = plan_life_memory_query(normalized_query)
         current = int(now_ts_ms_value if now_ts_ms_value is not None else now_ts_ms())
         limit = max(1, int(top_k)) * _RECALL_FETCH_LIMIT_FACTOR
         anaphoric_query = _looks_like_anaphoric_selection_query(normalized_query)
@@ -2035,6 +2215,35 @@ class LifeMemoryStore:
                 clauses.append("(COALESCE(summary, '') LIKE ? OR COALESCE(primary_ref, '') LIKE ?)")
                 like_params.extend([pattern, pattern])
             for row in fetch_rows(" OR ".join(clauses), like_params, row_limit=limit * 2):
+                rows_by_id[str(row["episode_id"])] = row
+        target_memory_classes = _episode_recall_target_memory_classes(getattr(query_plan, "query_kind", ""))
+        target_domains = {
+            _clean_text(domain).lower()
+            for domain in getattr(query_plan, "target_domains", ())
+            if _clean_text(domain)
+        }
+        if target_memory_classes:
+            placeholders = ", ".join("?" for _ in target_memory_classes)
+            class_where = (
+                f"json_extract(metadata, '$.memory_class') IN ({placeholders}) "
+                f"OR json_extract(metadata, '$.memory_policy.memory_class') IN ({placeholders})"
+            )
+            for row in fetch_rows(
+                class_where,
+                [*target_memory_classes, *target_memory_classes],
+                row_limit=max(limit * 3, 48),
+            ):
+                rows_by_id[str(row["episode_id"])] = row
+        if target_domains:
+            domain_clauses: list[str] = []
+            domain_params: list[str] = []
+            for domain in sorted(target_domains):
+                pattern = f"%{domain}%"
+                domain_clauses.append(
+                    "(COALESCE(metadata, '') LIKE ? OR COALESCE(summary, '') LIKE ? OR COALESCE(primary_ref, '') LIKE ?)"
+                )
+                domain_params.extend([pattern, pattern, pattern])
+            for row in fetch_rows(" OR ".join(domain_clauses), domain_params, row_limit=max(limit * 3, 48)):
                 rows_by_id[str(row["episode_id"])] = row
         if anaphoric_query and (scoped_session_id or scoped_person_id):
             scope_clauses: list[str] = []
@@ -2097,16 +2306,95 @@ class LifeMemoryStore:
             salience = _clamp_unit(episode.get("salience"), default=0.0)
             truth_state = str(episode.get("truth_state") or TRUTH_CANDIDATE).strip().upper()
             truth_boost = 0.08 if truth_state == TRUTH_VERIFIED else (-0.25 if truth_state in {TRUTH_CORRECTED, TRUTH_SUPPRESSED} else 0.0)
+            memory_class = _episode_memory_class_from_metadata(episode_metadata)
+            episode_domains = _metadata_domain_set(episode_metadata, text=text_for_score)
+            episode_kind = str(episode.get("episode_kind") or "").strip()
+            action_text = _clean_text(episode.get("action") or episode_metadata.get("action_kind")).lower()
+            result_text = _clean_text(episode.get("result")).upper()
+            contract_boost = 0.0
+            query_kind = _clean_text(getattr(query_plan, "query_kind", "")).lower()
+            failure_record = _looks_like_recorded_failure_candidate(
+                episode_kind=episode_kind,
+                action_text=action_text,
+                result_text=result_text,
+                text=text_for_score,
+            )
+            correction_fact = _looks_like_correction_fact_candidate(text_for_score)
+            correction_echo = _looks_like_correction_question_echo(text_for_score)
+            preference_fact = _looks_like_preference_candidate(text_for_score)
+            generic_evidence_absence = _looks_like_absence_or_generic_evidence_answer(text_for_score)
+            substantive_evidence = _looks_like_substantive_evidence_candidate(
+                memory_class=memory_class,
+                action_text=action_text,
+                text=text_for_score,
+            )
+            if target_memory_classes and memory_class in target_memory_classes:
+                if query_kind == "failure_debug":
+                    contract_boost += 0.95 if failure_record and episode_kind != EPISODE_CHAT else -0.45
+                elif query_kind == "correction":
+                    contract_boost += 0.95 if correction_fact and not correction_echo else -0.65
+                elif query_kind == "preference_lookup":
+                    contract_boost += 0.95 if preference_fact else 0.45
+                elif query_kind == "evidence_review":
+                    if generic_evidence_absence or memory_class == MEMORY_CLASS_AUDIT_ANCHOR or not substantive_evidence:
+                        contract_boost -= 0.65
+                    else:
+                        contract_boost += 0.75
+                else:
+                    contract_boost += 0.65
+            if target_domains and episode_domains.intersection(target_domains):
+                if query_kind == "preference_lookup" and memory_class != MEMORY_CLASS_PREFERENCE:
+                    contract_boost -= 0.20
+                elif query_kind == "evidence_review" and (generic_evidence_absence or memory_class == MEMORY_CLASS_AUDIT_ANCHOR or not substantive_evidence):
+                    contract_boost -= 0.20
+                else:
+                    contract_boost += 0.45
+            if query_kind == "failure_debug":
+                if not failure_record:
+                    contract_boost -= 0.60
+                if episode_kind == EPISODE_CHAT:
+                    contract_boost -= 0.45
+            elif query_kind == "correction":
+                if correction_fact and not correction_echo:
+                    contract_boost += 0.35
+                else:
+                    contract_boost -= 0.55
+                if correction_echo:
+                    contract_boost -= 0.70
+                if memory_class != MEMORY_CLASS_CORRECTION:
+                    contract_boost -= 0.20
+            elif query_kind == "preference_lookup":
+                if memory_class == MEMORY_CLASS_PREFERENCE and preference_fact:
+                    contract_boost += 0.35
+                elif memory_class == MEMORY_CLASS_PREFERENCE:
+                    contract_boost -= 0.45
+                elif memory_class in {MEMORY_CLASS_COLLECTION_EVENT, MEMORY_CLASS_TOOL_ACTION, MEMORY_CLASS_CHAT_EXPERIENCE}:
+                    contract_boost -= 0.65
+                if not preference_fact:
+                    contract_boost -= 0.35
+            elif query_kind == "evidence_review":
+                if memory_class in {MEMORY_CLASS_STABLE_FACT, MEMORY_CLASS_PERCEPTION_EVIDENCE, MEMORY_CLASS_TOOL_ACTION} and substantive_evidence:
+                    contract_boost += 0.30
+                if memory_class in {MEMORY_CLASS_AUDIT_ANCHOR, MEMORY_CLASS_CHAT_EXPERIENCE} or generic_evidence_absence or not substantive_evidence:
+                    contract_boost -= 0.80
+                if target_domains and not episode_domains.intersection(target_domains):
+                    contract_boost -= 0.35
+            if query_kind in {"failure_debug", "correction", "preference_lookup", "self_change", "evidence_review"}:
+                if memory_class == MEMORY_CLASS_CHAT_EXPERIENCE:
+                    contract_boost -= 0.35
+                if query_kind == "failure_debug" and episode_kind == EPISODE_CHAT:
+                    contract_boost -= 0.25
+                if normalized_query and normalized_query in text_for_score and "assistant:" in text_for_score.lower():
+                    contract_boost -= 0.25
             anaphoric_boost = 0.0
             if anaphoric_query:
-                episode_kind = str(episode.get("episode_kind") or "").strip()
                 if is_anaphoric_event_candidate:
                     anaphoric_boost += 0.45
                 elif episode_kind == EPISODE_CHAT:
                     anaphoric_boost -= 0.45
                 elif episode_kind in _ANAPHORIC_EVENT_KINDS:
                     anaphoric_boost += 0.05
-            final_score = round(max(0.0, min(1.0, boosted_score + salience * 0.12 + truth_boost + anaphoric_boost)), 6)
+            final_score = round(max(0.0, min(1.45, boosted_score + salience * 0.12 + truth_boost + anaphoric_boost + contract_boost)), 6)
             retention_state = str(episode.get("retention_state") or RETENTION_COLD).strip().upper()
             if retention_state == RETENTION_COLD and normalized_query and final_score < 0.18:
                 continue
@@ -2131,6 +2419,9 @@ class LifeMemoryStore:
                     "result": episode.get("result"),
                     "truth_state": truth_state,
                     "status": episode.get("status"),
+                    "memory_class": memory_class,
+                    "recall_grain": _clean_text(episode_metadata.get("recall_grain")).lower(),
+                    "domains": sorted(episode_domains),
                     "salience": salience,
                     "base_salience": _clamp_unit(episode.get("base_salience"), default=salience),
                     "memory_strength": _clamp_unit(episode.get("memory_strength"), default=salience),
@@ -2157,6 +2448,7 @@ class LifeMemoryStore:
                         "salience_boost": round(salience * 0.12, 6),
                         "truth_boost": truth_boost,
                         "anaphoric_boost": round(anaphoric_boost, 6),
+                        "contract_boost": round(contract_boost, 6),
                     },
                 },
             }
@@ -2716,13 +3008,8 @@ class LifeMemoryStore:
         scope_keys = _scope_keys_for_collection_plan(plan=plan, now_ts_ms_value=now_ts_ms_value)
         if scope_keys:
             placeholders = ", ".join("?" for _ in scope_keys)
-            if _plan_requires_exact_collection_count(plan) and any(key.startswith(f"{COLLECTION_SCOPE_DAILY}:") for key in scope_keys):
-                base_clauses.append(f"(COALESCE(scope_key, '') IN ({placeholders}) OR COALESCE(scope_key, '') LIKE ?)")
-                base_params.extend(scope_keys)
-                base_params.append(f"{COLLECTION_SCOPE_DELIVERY}:%")
-            else:
-                base_clauses.append(f"COALESCE(scope_key, '') IN ({placeholders})")
-                base_params.extend(scope_keys)
+            base_clauses.append(f"COALESCE(scope_key, '') IN ({placeholders})")
+            base_params.extend(scope_keys)
         identity_clauses: list[str] = []
         identity_params: list[Any] = []
         if session_id:
@@ -4086,17 +4373,23 @@ def _looks_like_recommendation_followup_chat_noise(text: str) -> bool:
 
 
 def _semantic_is_user_preference(compact: str) -> bool:
+    value = str(compact or "").replace("要不要", "")
+    actor_says_user = "user:" in value or "用户" in value
+    if any(token in value for token in ("用户喜欢", "用户不喜欢", "用户要求", "用户偏好")):
+        return True
+    if re.search(r"user:.{0,40}我(?:不)?喜欢", value):
+        return True
+    if "assistant:" not in value and any(token in value for token in ("我喜欢", "我不喜欢", "记住我喜欢")):
+        return True
+    if "assistant:" not in value and any(token in value for token in ("以后", "推荐格式", "推荐轻小说时", "格式", "换行", "分段", "卡片", "模板腔", "拟人化发送", "主链不要", "不要用pro", "不用pro", "优先使用")):
+        return True
+    if not actor_says_user:
+        return False
     preference_tokens = (
-        "用户喜欢",
-        "我喜欢",
-        "用户不喜欢",
-        "我不喜欢",
-        "用户要求",
-        "要求",
+        "明确要求",
         "偏好",
         "以后",
-        "不要",
-        "别再",
+        "推荐格式",
         "优先使用",
         "主链不要",
         "不要用pro",
@@ -4105,7 +4398,7 @@ def _semantic_is_user_preference(compact: str) -> bool:
         "卡片",
         "拟人化发送",
     )
-    return any(token in compact for token in preference_tokens)
+    return any(token in value for token in preference_tokens)
 
 
 def _semantic_is_commitment(compact: str) -> bool:
@@ -4125,7 +4418,11 @@ def _semantic_is_failure_lesson(compact: str, *, action: str) -> bool:
         token in compact
         for token in (
             "失败原因",
-            "失败",
+            "任务失败",
+            "调用失败",
+            "执行失败",
+            "状态=failed",
+            "状态failed",
             "连不上",
             "没起来",
             "状态库被占用",

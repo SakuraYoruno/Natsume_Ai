@@ -8,6 +8,7 @@ from host_brain.app.agent_runtime_shared import (
     _maybe_build_contextual_memory_answer,
     _maybe_build_contextual_session_answer,
     _maybe_build_contextual_style_answer,
+    _memory_recall_plan_should_bypass_direct_status_fastlane,
     _normalize_retrieval_summary_for_audit,
     _needs_selection_followup_retrieval_budget,
     _resolve_selection_followup_retrieval_timeout_seconds,
@@ -35,6 +36,13 @@ def test_recent_turn_query_role_handles_where_we_left_off() -> None:
     assert _detect_recent_turn_query_role("刚才说到哪了") == "both"
     assert _detect_recent_turn_query_role("刚刚聊到哪了") == "both"
     assert _detect_recent_turn_query_role("你刚刚说了什么") == "assistant"
+
+
+def test_memory_recall_plan_bypasses_recent_turn_fastlane_for_evidence_and_correction() -> None:
+    assert _memory_recall_plan_should_bypass_direct_status_fastlane("你刚才是不是记错了封面猫那本？", task_mode="recent_turn")
+    assert _memory_recall_plan_should_bypass_direct_status_fastlane("昨天那个网页内容靠谱吗？依据是什么？", task_mode="recent_turn")
+    assert _memory_recall_plan_should_bypass_direct_status_fastlane("这三本书，你喜欢哪本？", task_mode="recent_turn")
+    assert not _memory_recall_plan_should_bypass_direct_status_fastlane("你刚刚说了什么", task_mode="recent_turn")
 
 
 def test_selection_followup_retrieval_budget_detects_book_choice(monkeypatch) -> None:  # noqa: ANN001

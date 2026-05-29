@@ -52,6 +52,48 @@ def test_surface_turn_memory_text_uses_identity_neutral_attribution() -> None:
     assert "新海天回应" not in text
 
 
+def test_correction_query_packet_prefers_correction_fact_over_echo() -> None:
+    packet = build_surface_memory_recall_packet(
+        {
+            "query": "你刚才是不是记错了封面猫那本？",
+            "status": "OK",
+            "stage": "S_RET_RECALL",
+            "degraded": False,
+            "candidate_count": 3,
+            "candidates": [
+                {
+                    "doc_id": "echo-bad",
+                    "source_ref": "memory://episodic/echo-bad",
+                    "evidence_refs": "evd://episodic/echo-bad",
+                    "snippet": "当前回合摘要：用户提到「你刚才是不是记错了封面猫那本？」；回复「哈？那本封面确实有只猫。」",
+                    "score": 0.95,
+                    "metadata": {"store_id": "episodic_vector"},
+                },
+                {
+                    "doc_id": "fix",
+                    "source_ref": "life_episode://fix",
+                    "evidence_refs": "chat://request/fix-cat-cover#user",
+                    "snippet": "User: 不对，没有封面有猫这本。\nAssistant: 你说得对，我撤回这个判断。",
+                    "score": 0.80,
+                    "metadata": {"store_id": "life_episode"},
+                },
+            ],
+        },
+        query="你刚才是不是记错了封面猫那本？",
+        max_facts=3,
+        max_chars_per_fact=240,
+        validation_requirements=("correction_state_checked", "suppressed_not_fact"),
+        query_kind="correction",
+        recall_contract_id="correction",
+        primary_memory_layer="life_episode",
+        expected_memory_layers=("life_episode", "semantic_memory", "sqlite_ledger", "episodic_vector"),
+    )
+
+    joined = "\n".join(packet.facts)
+    assert "没有封面有猫" in joined
+    assert "确实有只猫" not in joined
+
+
 def _recall_result() -> SimpleNamespace:
     return SimpleNamespace(
         output={

@@ -31,6 +31,10 @@ _OPEN_APP_HINT_RE = re.compile(
     re.IGNORECASE,
 )
 _DELEGATE_MARKER_RE = re.compile(r"\[DELEGATE:[^\]]+\]", re.IGNORECASE)
+_MEMORY_DISCONTINUITY_FILLER_RE = re.compile(
+    r"^\s*(?:嗯？|哈？|欸？)?\s*(?:老哥|哥哥|尼尼)?\s*(?:突然问这个|怎么突然(?:问|提|说)?(?:这个)?|你突然(?:问|提|说)?(?:这个)?|突然(?:问|提|说)这个)[…。，,、\s]*"
+    r"|硬要(?:说|选)(?:的话)?[，,、\s]*"
+)
 _ACK_CLOSE_STAGES = {"COMPANION", "INTIMATE", "FAMILY"}
 _ACK_WARM_STAGES = {"ALLY", "TRUSTED", "FRIEND"}
 _ACK_LOW_ENERGY_TAGS = {"SAD", "HURT", "ANGRY", "FEAR", "EXHAUSTED", "NUMB"}
@@ -97,6 +101,8 @@ def _sse(data: dict) -> str:
 
 def _airlock_sanitize_output(text: str) -> str:
     text = text.replace("\x00", "").strip()
+    cleaned = _MEMORY_DISCONTINUITY_FILLER_RE.sub("", text).strip()
+    text = cleaned or text
     max_chars = int(os.environ.get("HOST_QA_MAX_RESPONSE_CHARS") or "4000")
     if len(text) > max_chars:
         truncated = text[:max_chars]
