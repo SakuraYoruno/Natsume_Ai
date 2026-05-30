@@ -22,6 +22,7 @@
 - 文档入口：`docs/20_prd/PRD.md`（需求）→ 本文（契约）→ `docs/30_devspec/DevTasks.md`（任务）→ `tests/`（验收）→ `docs/60_trace/requirements_trace.md`（覆盖追踪）。
 - 运行入口：`POST /v1/chat` 与 `POST /v1/host/input`，再到：
   `chat_routes.handle_v1_chat_route()`（含 immune gate / fastpath）→ `chat_handler.handle_chat()` → `thalamus_agent` → `Governor.evaluate_intent()` → `executive_runtime`。
+- normal chat 最终文本作者为 `host_brain/persona/surface_main_chain.py` (SurfaceMainChain)；旧 `prompt_builder` 链路仅作为辅助 facts/state 提供者。媒体最终作者为 `reply_modality_router`，不是 surface chain。
 - 审计事实入口：`intent_log`、`governor_log`、`skill_exec_log` 与 `sqlite_ledger`。
 - 若某条款与当前代码行为冲突，以 `docs/50_project/arch/CURRENT_CODE_ARCHITECTURE.md` 为准。
 

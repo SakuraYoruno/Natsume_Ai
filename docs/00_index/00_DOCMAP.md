@@ -1,9 +1,9 @@
 受众：MASTER
 标题：文档地图（唯一入口）
 
-版本：v3.6
-日期：2026-04-22
-维护：2026-05-30（补齐文档头与 doc_gate 目录扫描口径）
+版本：v3.7
+日期：2026-05-30
+维护：2026-05-30（Batch 1+2 架构与契约文档全量升级到 v3.0；旧架构快照归档至 `docs/_history/2026-04-22_arch_snapshot/`）
 
 本仓库所有"应该读什么、从哪里开工、哪些文档禁止当任务来源"，以本文件为准。
 
@@ -33,6 +33,7 @@
 - `docs/50_release/reports/index.md`：发布批次报告入口
 - `docs/50_release/rollback/index.md`：回滚与降级入口
 - `docs/55_testing/metrics/index.md`：指标快照入口
+- `docs/_history/`：历史架构快照归档区（包含 `_history/README.md` 与 `_history/2026-04-22_arch_snapshot/` 等按时间划分的快照）
 - `docs/55_testing/stability_weekly/index.md`：稳定性周报入口
 
 0）总览关系图（唯一口径）
@@ -47,12 +48,14 @@
 - 实现层的任务来源只能是 DevTasks（以及 AGENTS 工作规范）；不得把白皮书/PRD/Theory/Trace 当任务来源。
 - Project（文档代理）负责把讨论沉淀到 PRD/DevSpec/DevTasks，并维护 Trace 覆盖关系。
 
-当前代码优先阅读顺序（2026-04-19 起）：
+当前代码优先阅读顺序（2026-05-30 起，Batch 1+2 全量升级后）：
 - `README.md`：仓库入口与运行面总览
-- `docs/50_project/arch/CURRENT_CODE_ARCHITECTURE.md`：当前代码事实总览
-- `docs/50_project/arch/CORE_MODULES_DETAILED_REFERENCE.md`：主链核心模块与覆盖优先级
+- `docs/50_project/arch/CURRENT_CODE_ARCHITECTURE.md` (v3.0)：当前代码事实总览
+- `docs/50_project/arch/CORE_MODULES_DETAILED_REFERENCE.md` (v3.0)：主链核心模块与覆盖优先级
 - `docs/50_project/arch/DIGITAL_LIFE_BODY_FRONTEND_ARCHITECTURE_20260419.md`：前端主体化信息架构
-- `docs/50_project/arch/dataflow_report.md`：请求流与回流补充
+- `docs/50_project/arch/dataflow_report.md` (v3.0)：请求流与回流补充
+- `docs/15_theory/RETRIEVAL_LAYER_CONTRACT.md` (v3.0)：RecallFusionServiceContract 契约
+- `docs/15_theory/TOOLS_MEMORY_LAYER_CONTRACT.md` (v3.0)：LifeMemoryStore SSOT 与 tools 套套
 - `docs/60_trace/requirements_trace.md`：需求到设计/测试映射
 
 ---
@@ -259,6 +262,15 @@
   docs/50_project/phases/MULTI_AGENT_P15_SEAL_RESULT.md
   用途：P15 范围与封板结论（终点封板：Supervisor LLM 提案 + graph_executor 动态路由）。
   读者：Project（文档代理）。
+
+5.5）历史架构快照归档（架构演进存档）
+- docs/_history/README.md
+  用途：历史架构快照归档总说明，说明按时间点划分的快照包的含义、入库原因与使用方式。
+  读者：MASTER、Project（文档代理）。实现层不应把它当作任务来源。
+
+- docs/_history/2026-04-22_arch_snapshot/INDEX.md
+  用途：2026-04-22 架构快照的目录说明。存放在 Batch 1+2 重写前作为 `MASTER` 主档的三份架构文档的原始版本：`CURRENT_CODE_ARCHITECTURE_v2.2_20260422.md`、`CORE_MODULES_DETAILED_REFERENCE_v2.1_20260419.md`、`dataflow_report_old.md`。该快照不代表当前运行时事实；仅用于历史追溯与架构演进上下文。
+  读者：MASTER、Project（文档代理）。实现层不应把它当作任务来源，也不应被 `doc_gate` 当作当前口径包括。
 
 6）可追溯性（Trace）
 - docs/60_trace/requirements_trace.md
