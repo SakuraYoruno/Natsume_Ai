@@ -54,6 +54,7 @@
 - `docs/50_project/arch/CORE_MODULES_DETAILED_REFERENCE.md` (v3.0)：主链核心模块与覆盖优先级
 - `docs/50_project/arch/DIGITAL_LIFE_BODY_FRONTEND_ARCHITECTURE_20260419.md`：前端主体化信息架构
 - `docs/50_project/arch/dataflow_report.md` (v3.0)：请求流与回流补充
+- `docs/50_project/arch/diagrams/00_INDEX.md` (v1.0)：架构图册总目录（7 张图覆盖运行面拓扑 / 主链 / 召回 / Executive / Tribe / 输入输出 / Observability）
 - `docs/15_theory/RETRIEVAL_LAYER_CONTRACT.md` (v3.0)：RecallFusionServiceContract 契约
 - `docs/15_theory/TOOLS_MEMORY_LAYER_CONTRACT.md` (v3.0)：LifeMemoryStore SSOT 与 tools 套套
 - `docs/60_trace/requirements_trace.md`：需求到设计/测试映射
@@ -195,6 +196,10 @@
 
 - docs/50_project/arch/dataflow_report.md
   用途：系统数据流全景报告（请求流、回流、模块间数据交换）；与架构文档互补，负责“流向”视角。
+  读者：MASTER、Project（文档代理）、实现层（查阅对齐）。
+
+- docs/50_project/arch/diagrams/00_INDEX.md
+  用途：架构图册总目录（v1.0 / 2026-05-30）。包含 7 张 mermaid 图：01 运行面拓扑 / 02 `/v1/chat` 主链全流程 / 03 召回与记忆数据流 / 04 Executive 三层 / 05 23 family 拓扑 / 06 输入回流与出站 / 07 Observability 拓扑。与 v3.0 架构主文档同源，提供“视觉版”心智模型。
   读者：MASTER、Project（文档代理）、实现层（查阅对齐）。
 
 - docs/50_project/arch/UNIFIED_MESSAGE_GATEWAY_DESIGN.md
