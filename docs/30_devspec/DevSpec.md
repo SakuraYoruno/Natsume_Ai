@@ -15,6 +15,16 @@
 - `README.md`、`docs/50_project/arch/CURRENT_CODE_ARCHITECTURE.md`、`docs/50_project/arch/dataflow_report.md` 是当前代码事实入口。
 - 本文仍保留“从零重建 / 目标架构蓝图”属性；若局部条目与当前代码冲突，以代码事实层文档和实际代码为准。
 
+## 0.1 当前主链入口与工程口径（2026-05-30）
+
+请按以下入口链路理解本文条目：
+
+- 文档入口：`docs/20_prd/PRD.md`（需求）→ 本文（契约）→ `docs/30_devspec/DevTasks.md`（任务）→ `tests/`（验收）→ `docs/60_trace/requirements_trace.md`（覆盖追踪）。
+- 运行入口：`POST /v1/chat` 与 `POST /v1/host/input`，再到：
+  `chat_routes.handle_v1_chat_route()`（含 immune gate / fastpath）→ `chat_handler.handle_chat()` → `thalamus_agent` → `Governor.evaluate_intent()` → `executive_runtime`。
+- 审计事实入口：`intent_log`、`governor_log`、`skill_exec_log` 与 `sqlite_ledger`。
+- 若某条款与当前代码行为冲突，以 `docs/50_project/arch/CURRENT_CODE_ARCHITECTURE.md` 为准。
+
 ---
 
 ## 0. 术语与硬约束（执行口径）
@@ -331,7 +341,7 @@ active.pointer 格式（必须）：
 ## 2. 运行时进程拓扑与通信
 
 2.1 Host 进程（主权裁决与统一编排）
-- 对外提供：`POST /v1/chat`（统一 SSE 入口：输入门控 → thalamus canonical intent → Governor → cortex_orchestrator → executive runtime）
+- 对外提供：`POST /v1/chat`（统一 SSE 入口：`asgi.py` 注入路由 → `chat_routes.handle_v1_chat_route` → 输入门控与审计 → `thalamus` canonical intent → Governor → cortex_orchestrator → executive runtime）
 - 统一编排：所有 Agent 与链路编排仅在 Host 发生；Edge 端组件仅作为“远程能力提供者”被调用（draft-only，不具终审权）。
 - 必备内部服务（必须实现）：Governor/Token/Audit、SQLite Ledger、Neo4j Bond SSOT、Episodic 向量库、Embedding、Reranker、Recall/Fusion、Screen Capture、OCR/Vision、ClawdBot、Cloud Gateway + AIRLOCK、Observability。
 - 运行时不可用：任一服务不可用必须可观测降级并保持输出结构稳定（不得伪执行）。
@@ -2206,7 +2216,7 @@ GET /obs/metrics
 ### 20.3 路由注册方式
 
 - 新建 `host_brain/app/canon_routes.py`，使用 `fastapi.APIRouter(prefix="/canon", tags=["canon"])`；
-- 在 `fastapi_app.py` 中 `app.include_router(canon_router)` 注册（路由自带 `/canon` 前缀）；
+  - 在 `router_registry.py` 的 `register_host_routers` 中 `app.include_router(canon_router)` 注册（路由自带 `/canon` 前缀），由 `asgi/app_factory.py` 注入应用；
 - 路由依赖 `WorldCanonStore`（通过 `get_canon_store()` 依赖注入，延迟初始化，`world_root` 从环境变量 `Natsume_WORLD_CANON_ROOT` 读取，默认 `host_brain/canon/world`）；
 - 路由依赖 `SQLiteLedger`（复用 `get_ledger()`）。
 

@@ -1,4 +1,4 @@
-受众：MASTER
+﻿受众：MASTER
 标题：当前代码架构总览（2026-04-22）
 
 版本：v2.2
@@ -35,7 +35,10 @@
 - `host_brain/__main__.py`
 - `host_brain/obs_main.py`
 - `edge_client/__main__.py`
-- `host_brain/app/fastapi_app.py`
+- `host_brain/app/asgi.py`
+- `host_brain/app/app_factory.py`
+- `host_brain/app/router_registry.py`
+- `host_brain/app/chat_routes.py`
 - `host_brain/app/obs_fastapi_app.py`
 - `edge_client/app/fastapi_app.py`
 - `host_brain/app/chat_handler.py`
@@ -64,8 +67,8 @@
 
 补充说明：
 
-- Host Main 仍然挂载了一套 `/obs/*` 路由，主要用于兼容和本地一体化运行。
-- `host_brain/app/fastapi_app.py` 里已经有可选的重定向逻辑，可以把 `/obs/*` 和 `/monitor/*` 流量导到独立后端或代理。
+- Host Main 仍然保留 `/obs/*` 兼容入口，主要用于本地一体化运行观察与排障。
+- `host_brain/app/asgi.py` + `host_brain/app/app_factory.py` 负责统一组装应用与默认路由。
 - Observability Backend 启动时会预热 `runtime snapshot`、`trace feed`、`insights summary`、`digital-life overview`、`life-body` 五类缓存。
 
 ## 3. 代码目录主干
@@ -97,12 +100,12 @@ Natsume_Ai/
 
 ## 4. Host Main 路由面
 
-`host_brain/app/fastapi_app.py` 当前实际挂载的主要路由面如下：
+`host_brain/app/app_factory.py`（由 `host_brain/app/asgi.py` 注入路由函数）当前实际挂载的主要路由面如下：
 
 | 前缀 / 入口 | 来源文件 | 作用 |
 |---|---|---|
-| `/v1/chat` | `fastapi_app.py` -> `chat_handler.py` | HTTP 聊天入口；先做 immune gate / fastpath 判定，再进入统一 SSE 编排 |
-| `/v1/edge/events` | `fastapi_app.py` -> `system_handler.py` | HTTP 路由接收 Edge 批量事件，再委托 `receive_edge_events_response()` 处理 |
+| `/v1/chat` | `asgi.py` -> `chat_routes.handle_v1_chat_route` -> `chat_handler.py` | HTTP 聊天入口；先做 immune gate / fastpath 判定，再进入统一 SSE 编排 |
+| `/v1/edge/events` | `asgi.py` -> `edge_event_routes.py` -> `system_handler.py` | HTTP 路由接收 Edge 批量事件，再委托 `receive_edge_events_response()` 处理 |
 | `/v1/agent/*` | `agent_routes.py` | 视觉/自动化 Agent Loop |
 | `/v1/host/input` | `input_routes.py` | ASR / Gateway 归一化输入回流 |
 | `/canon/*` | `canon_routes.py` | Canon 提案、文档和审核 |
@@ -116,7 +119,7 @@ Natsume_Ai/
 | `/health` `/ready` `/startup` | `health_routes.py` | 健康、就绪、启动报告 |
 | `/obs/*` | `obs_routes*.py` | 兼容挂载的监控 API |
 | `/api/ui/*` | `web_ui.py` | 监控 UI 所需聚合/搜索辅助 API |
-| `/panel` `/monitor/*` `/static/monitor/*` | `fastapi_app.py` | 监控面板入口和静态资源 |
+| `/panel` `/monitor/*` `/static/monitor/*` | `obs_fastapi_app.py`（独立后端）或兼容入口（按部署形态） | 监控面板入口与静态资源 |
 
 ## 5. Observability 与 Monitor UI
 
@@ -182,8 +185,10 @@ Natsume_Ai/
 
 ```text
 POST /v1/chat
-  -> fastapi_app.chat()
-  -> _evaluate_immune_gate_for_chat() / _schedule_chat_immune_gate_event()
+  -> app_factory.create_host_fastapi_app()
+  -> asgi.chat_endpoint()
+  -> chat_routes.handle_v1_chat_route()
+  -> asgi.evaluate_immune_gate_for_chat() / asgi.schedule_immune_gate_audit()
   -> chat_handler.handle_chat()
   -> _unified_chat_sse_generator()
   -> thalamus_agent.classify_and_compile_intent_draft()
@@ -196,7 +201,7 @@ POST /v1/chat
 
 补充说明：
 
-- 若 immune gate 决策为 `BLOCK`，会在 `fastapi_app.chat()` 直接返回单个 `COMMIT(REJECT)` SSE
+- 若 immune gate 决策为 `BLOCK`，会在 `chat_routes.handle_v1_chat_route` / `asgi.chat_endpoint` 直接返回单个 `COMMIT(REJECT)` SSE
 - 若命中 `phatic_fastpath`，也会在 HTTP 路由层直接返回 SSE，不再进入 `chat_handler.handle_chat()`
 
 关键事实：
@@ -319,6 +324,6 @@ vestibular
 
 如果目标是追某条主链，再往下看对应代码：
 
-- 聊天主链：`fastapi_app.py` → `chat_handler.py` → `cortex_orchestrator.py` → `executive_runtime_core.py` → `chat_agent.py`
+- 聊天主链：`asgi.py` + `app_factory.py`（/v1/chat 绑定）→ `chat_routes.py` → `chat_handler.py` → `cortex_orchestrator.py` → `executive_runtime_core.py` → `chat_agent.py`
 - 观测后端：`obs_fastapi_app.py` → `obs_routes_*.py`
 - Edge/网关：`edge_client/app/fastapi_app.py` → `edge_client/runtime/bootstrap.py` → `edge_client/gateway/*`
