@@ -13,7 +13,7 @@ import shutil
 import subprocess
 import threading
 from typing import Any, Mapping
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse
 
 from host_brain.codex_runtime.artifact_store import CodexArtifactStore
 from host_brain.codex_runtime.browser_researcher import execute_browser_research_work_order
@@ -267,7 +267,7 @@ def _queued_result_text(*, order: CodexWorkOrder, blocked_until_confirmation: bo
             "不会要求你把明文账号密码发到聊天里。"
         )
     if skill_id == "codex_lightnovel_recommender":
-        return "已创建轻小说推荐任务，只采集公开榜单/最新资源的标题、封面、简介和来源，不读取付费正文。"
+        return "已创建轻小说推荐任务，只采集多个公开榜单/最新资源的标题、封面、简介和来源，不读取付费正文。"
     if skill_id == "codex_browser_research":
         return "已创建网页资料研究任务，只读取公开网页或你提供的本地材料；完成后会生成来源明确的研究简报。"
     if start_background:
@@ -544,14 +544,31 @@ def _lightnovel_item_key(item: Mapping[str, Any]) -> str:
 
 def _lightnovel_detail_identity_key(*values: Any) -> str:
     for value in values:
-        match = re.search(
-            r"https?://(?:www\.)?lightnovel\.fun/(?:cn/)?detail/(\d+)(?:[/?#].*)?$",
-            str(value or "").strip(),
-            re.IGNORECASE,
-        )
-        if match:
-            return f"detail:{match.group(1)}"
+        candidate = _supported_lightnovel_candidate_detail_id(str(value or "").strip())
+        if candidate:
+            return f"detail:{candidate}"
     return ""
+
+
+def _supported_lightnovel_candidate_detail_id(url: str) -> str:
+    value = str(url or "").strip()
+    patterns = (
+        (r"https?://(?:www\.)?lightnovel\.fun/(?:cn/)?detail/(\d+)(?:[/?#].*)?$", "lightnovel.fun"),
+        (r"https?://book\.sfacg\.com/Novel/(\d+)/?(?:[?#].*)?$", "sfacg"),
+        (r"https?://www\.17k\.com/book/(\d+)\.html(?:[?#].*)?$", "17k"),
+        (r"https?://lightnovelsearch\.com/book/([^/?#]+)/?(?:[?#].*)?$", "lightnovelsearch"),
+        (r"https?://www\.noveldot\.com/book-(\d+)/[^?#]+/?(?:[?#].*)?$", "noveldot"),
+        (r"https?://(?:www\.)?linovelib\.com/(?:novel|book)/(\d+)(?:\.html)?(?:[/?#].*)?$", "linovelib"),
+    )
+    for pattern, prefix in patterns:
+        match = re.search(pattern, value, re.IGNORECASE)
+        if match:
+            return f"{prefix}:{str(match.group(1)).lower()}"
+    return ""
+
+
+def _is_supported_lightnovel_candidate_url(url: str) -> bool:
+    return bool(_supported_lightnovel_candidate_detail_id(url))
 
 
 _LIGHTNOVEL_CHAPTER_NUMERAL_CHARS = "一二三四五六七八九十百千万萬零〇两兩\\d"
@@ -920,6 +937,7 @@ def _score_lightnovel_recommendation_item(
     ranked["recommendation_score"] = round(total, 2)
     ranked["canonical_title"] = _normalize_lightnovel_series_title(ranked.get("title") or ranked.get("title_display") or "")
     ranked["series_key"] = _lightnovel_series_key(ranked)
+    ranked["source_key"] = _lightnovel_source_key(ranked)
     ranked["score_breakdown"] = {
         "source_order": round(source_order_score, 2),
         "preference": round(positive_score, 2),
@@ -954,6 +972,33 @@ def _lightnovel_primary_candidate_key(item: Mapping[str, Any]) -> str:
     return _lightnovel_item_key(item)
 
 
+def _lightnovel_source_key(item: Mapping[str, Any]) -> str:
+    for key in ("source_url", "detail_url", "url"):
+        raw = str(item.get(key) or "").strip()
+        if not raw:
+            continue
+        try:
+            host = urlparse(raw).netloc.lower()
+        except Exception:
+            host = ""
+        if not host:
+            continue
+        if host.endswith("lightnovel.fun"):
+            return "lightnovel.fun"
+        if host == "book.sfacg.com":
+            return "sfacg.com"
+        if host == "www.17k.com":
+            return "17k.com"
+        if host == "lightnovelsearch.com":
+            return "lightnovelsearch.com"
+        if host == "www.noveldot.com":
+            return "noveldot.com"
+        if host.endswith("linovelib.com"):
+            return "linovelib.com"
+        return host.removeprefix("www.")
+    return "unknown"
+
+
 def _lightnovel_history_state_blocks_visible(item: Mapping[str, Any]) -> bool:
     state = str(item.get("dedupe_state") or "").strip().lower()
     return state in {
@@ -962,6 +1007,51 @@ def _lightnovel_history_state_blocks_visible(item: Mapping[str, Any]) -> bool:
         "cooldown_exact_repeat",
         "cooldown_series_repeat",
     }
+
+
+def _apply_lightnovel_visible_source_diversity(preferred: list[dict[str, Any]], *, max_items: int) -> list[dict[str, Any]]:
+    limit = max(1, int(max_items))
+    if limit <= 1 or len(preferred) <= 1:
+        return preferred
+    min_sources = _parse_int_env(
+        "HOST_LIGHTNOVEL_RECOMMENDER_MIN_VISIBLE_SOURCES",
+        default=2,
+        min_value=1,
+        max_value=limit,
+    )
+    visible = list(preferred[:limit])
+    rest = list(preferred[limit:])
+    available_sources = {_lightnovel_source_key(item) for item in preferred if _lightnovel_source_key(item) != "unknown"}
+    if len(available_sources) < min_sources:
+        return preferred
+    visible_sources = {_lightnovel_source_key(item) for item in visible if _lightnovel_source_key(item) != "unknown"}
+    if len(visible_sources) >= min_sources:
+        return preferred
+
+    min_score = float(
+        _parse_int_env(
+            "HOST_LIGHTNOVEL_RECOMMENDER_SOURCE_DIVERSITY_MIN_SCORE",
+            default=8,
+            min_value=-200,
+            max_value=200,
+        )
+    )
+    for index, candidate in enumerate(rest):
+        source = _lightnovel_source_key(candidate)
+        if source == "unknown" or source in visible_sources:
+            continue
+        adjusted_score = float(candidate.get("recommendation_adjusted_score") or candidate.get("recommendation_score") or 0)
+        if adjusted_score < min_score:
+            continue
+        replace_index = min(
+            range(len(visible)),
+            key=lambda idx: float(visible[idx].get("recommendation_adjusted_score") or visible[idx].get("recommendation_score") or 0),
+        )
+        replaced = visible[replace_index]
+        visible[replace_index] = candidate
+        rest[index] = replaced
+        return sorted(visible, key=lambda item: float(item.get("recommendation_adjusted_score") or item.get("recommendation_score") or 0), reverse=True) + rest
+    return preferred
 
 
 def _rank_lightnovel_recommendations(
@@ -1017,6 +1107,8 @@ def _rank_lightnovel_recommendations(
     if not preferred:
         preferred = selected[: max(1, int(max_items))]
         repeat_fallback = True
+    if not repeat_fallback:
+        preferred = _apply_lightnovel_visible_source_diversity(preferred, max_items=max_items)
     deferred = [item for item in selected if id(item) not in {id(row) for row in preferred}]
     ordered = preferred + deferred
     visible_ids = {id(row) for row in preferred[: max(1, int(max_items))]}
@@ -1217,6 +1309,8 @@ def _extract_lightnovel_update_time(*values: Any) -> str:
 def _normalize_lightnovel_candidate_title(value: Any) -> str:
     text = re.sub(r"\s+", " ", str(value or "").strip())
     text = re.sub(r"^\s*\d+\s+", "", text).strip()
+    text = re.sub(r"^Pick\s+", "", text, flags=re.IGNORECASE).strip()
+    text = re.sub(r"\s+Recommended\s*$", "", text, flags=re.IGNORECASE).strip()
     text = re.sub(r"^(?:合集|合集帖)\s+", "", text).strip()
     text = re.sub(r"\s+\d+(?:\.\d+)?\s*(?:分钟|小時|小时|天|日|个月|月|年)前\s*$", "", text).strip()
     return text
@@ -1237,7 +1331,7 @@ def _normalize_lightnovel_candidate_context(*, title: str, context: Any) -> str:
 
 
 def _is_lightnovel_detail_page_url(url: str) -> bool:
-    return bool(re.search(r"https?://(?:www\.)?lightnovel\.fun/(?:cn/)?detail/\d+(?:[/?#].*)?$", str(url or "").strip(), re.IGNORECASE))
+    return _is_supported_lightnovel_candidate_url(url)
 
 
 def _looks_like_lightnovel_chapter_only_title(title: str) -> bool:

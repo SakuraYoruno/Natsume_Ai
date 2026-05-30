@@ -501,6 +501,41 @@ def test_browser_researcher_lightnovel_skips_profiles_and_keeps_deeper_details()
     assert any(item["url"].endswith("/1145017") for item in items)
 
 
+def test_browser_researcher_sfacg_and_17k_keep_book_links_only() -> None:
+    sfacg_html = """
+    <html><body>
+      <a href="/List/">所有轻小说列表</a>
+      <a href="/Novel/651213/">魔族王女战败被俘啦？抱歉我演的</a>
+      <a href="/vip/">VIP特权</a>
+      <a href="/Novel/714059/">转生贫穷小绿茶，就要被欺负吗？</a>
+    </body></html>
+    """
+    _title, _description, _text, sfacg_items, _prices = _parse_html_document(
+        sfacg_html,
+        base_url="https://book.sfacg.com/rank/",
+    )
+
+    assert [item["title"] for item in sfacg_items] == [
+        "魔族王女战败被俘啦？抱歉我演的",
+        "转生贫穷小绿茶，就要被欺负吗？",
+    ]
+
+    seventeen_k_html = """
+    <html><body>
+      <a href="/top/">排行榜</a>
+      <a href="/book/3517901.html">系统体验员</a>
+      <a href="/all/book/2_30_185_0_0_2_0_0_1.html">宅系小说</a>
+      <a href="/book/3451799.html">转生骷髅：开局对战最强勇者</a>
+    </body></html>
+    """
+    _title, _description, _text, k17_items, _prices = _parse_html_document(
+        seventeen_k_html,
+        base_url="https://www.17k.com/man/qingbook/",
+    )
+
+    assert [item["title"] for item in k17_items] == ["系统体验员", "转生骷髅：开局对战最强勇者"]
+
+
 def test_lightnovel_candidate_context_drops_combined_rank_sections() -> None:
     recommendations = _lightnovel_recommendations_from_browser_items(
         [
@@ -520,6 +555,35 @@ def test_lightnovel_candidate_context_drops_combined_rank_sections() -> None:
     assert recommendations[0]["intro_snippet"] == ""
     assert recommendations[0]["update_time"] == ""
     assert "西条阳" not in recommendations[0]["selection_reason"]
+
+
+def test_lightnovel_recommendations_accept_public_multi_source_book_urls() -> None:
+    recommendations = _lightnovel_recommendations_from_browser_items(
+        [
+            {
+                "title": "魔族王女战败被俘啦？抱歉我演的",
+                "url": "http://book.sfacg.com/Novel/651213/",
+                "context": "SF轻小说月票榜。",
+                "source_ref": "https://book.sfacg.com/rank/",
+            },
+            {
+                "title": "转生骷髅：开局对战最强勇者",
+                "url": "https://www.17k.com/book/3451799.html",
+                "context": "17K轻小说分类。",
+                "source_ref": "https://www.17k.com/man/qingbook/",
+            },
+            {
+                "title": "VIP特权",
+                "url": "https://book.sfacg.com/vip/",
+                "context": "导航链接。",
+            },
+        ]
+    )
+
+    assert [item["title"] for item in recommendations] == [
+        "魔族王女战败被俘啦？抱歉我演的",
+        "转生骷髅：开局对战最强勇者",
+    ]
 
 
 def test_lightnovel_candidate_filter_rejects_standalone_chapter_titles() -> None:
@@ -695,6 +759,47 @@ def test_lightnovel_ranker_blocks_recent_same_series_even_with_new_detail_url(mo
     assert repeat["dedupe_state"] == "recent_series_repeat"
     assert repeat["ranking_visible_candidate"] is False
     assert repeat["score_breakdown"]["history"] <= -180
+
+
+def test_lightnovel_ranker_keeps_visible_recommendations_cross_source(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("HOST_LIGHTNOVEL_RECOMMENDER_HISTORY_PATH", str(tmp_path / "history.jsonl"))
+    ranked = _rank_lightnovel_recommendations(
+        [
+            {
+                "title": "邻桌美少女与我的恋爱日常",
+                "detail_url": "https://www.lightnovel.fun/cn/detail/1146001",
+                "source_url": "https://www.lightnovel.fun/cn/category/3/106?type=1",
+                "update_time": "1 小时前",
+                "intro_snippet": "恋爱校园日常，美少女。",
+            },
+            {
+                "title": "异世界皇女与我的慢生活",
+                "detail_url": "https://www.lightnovel.fun/cn/detail/1146002",
+                "source_url": "https://www.lightnovel.fun/",
+                "update_time": "2 小时前",
+                "intro_snippet": "異世界 皇女 皇帝 美少女。",
+            },
+            {
+                "title": "培养失败少女的撒娇日常",
+                "detail_url": "https://www.lightnovel.fun/cn/detail/1146003",
+                "source_url": "https://www.lightnovel.fun/cn/category/3/106?type=1",
+                "update_time": "3 小时前",
+                "intro_snippet": "美少女 培养 日常。",
+            },
+            {
+                "title": "魔族王女战败被俘啦？抱歉我演的",
+                "detail_url": "http://book.sfacg.com/Novel/651213/",
+                "source_url": "https://book.sfacg.com/rank/",
+                "intro_snippet": "魔族 王女 反差 轻小说排行。",
+            },
+        ],
+        max_items=3,
+        now_ts_ms=1_778_086_400_000,
+    )
+
+    visible_sources = {item["source_key"] for item in ranked if item["ranking_visible_candidate"] is True}
+    assert "lightnovel.fun" in visible_sources
+    assert "sfacg.com" in visible_sources
 
 
 def test_lightnovel_gateway_push_dispatches_to_configured_gateway(tmp_path: Path, monkeypatch) -> None:

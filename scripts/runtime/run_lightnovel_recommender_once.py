@@ -61,6 +61,8 @@ def main() -> int:
             "urls": [
                 "https://www.lightnovel.fun/cn/category/3/106?type=1",
                 "https://www.lightnovel.fun/",
+                "https://book.sfacg.com/rank/",
+                "https://www.17k.com/man/qingbook/",
             ],
             "site_adapter": "lightnovel.fun",
             "workflow_owner": "natsume",

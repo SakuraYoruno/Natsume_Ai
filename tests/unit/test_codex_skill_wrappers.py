@@ -293,6 +293,8 @@ def test_codex_lightnovel_recommender_uses_declared_defaults_without_urls() -> N
     assert order["input_pack"]["urls"] == [
         "https://www.lightnovel.fun/",
         "https://www.lightnovel.fun/cn/category/3/106?type=1",
+        "https://book.sfacg.com/rank/",
+        "https://www.17k.com/man/qingbook/",
     ]
     assert order["input_pack"]["driver_kind"] == "natsume_daily_recommendation"
     assert payload["start_background"] is False

@@ -22,6 +22,8 @@ _LIGHTNOVEL_RECOMMENDER_INVOCATION_DEFAULTS = {
     "urls": [
         "https://www.lightnovel.fun/",
         "https://www.lightnovel.fun/cn/category/3/106?type=1",
+        "https://book.sfacg.com/rank/",
+        "https://www.17k.com/man/qingbook/",
     ],
     "site_adapter": "lightnovel.fun",
     "artifacts_root": "artifacts/codex_runs/lightnovel_recommender",
@@ -475,7 +477,7 @@ class CodexRuntimeSkillProvider(DeclarativeSkillProvider):
                 "uses_llm": True,
                 "uses_gpu": False,
                 "args": {
-                    "task": "从 lightnovel.fun 每日榜单、最新资源或指定分类收集公开元数据，生成轻小说推荐。",
+                    "task": "从多个轻小说公开榜单、最新资源或指定分类收集公开元数据，生成轻小说推荐。",
                     **_LIGHTNOVEL_RECOMMENDER_INVOCATION_DEFAULTS,
                 },
                 "arg_env": {
@@ -490,7 +492,7 @@ class CodexRuntimeSkillProvider(DeclarativeSkillProvider):
                     },
                 },
                 "advisory_policy": "rule",
-                "description": "Natsume 日常推荐：每日从 lightnovel.fun 公开榜单/最新资源生成轻小说推荐。",
+                "description": "Natsume 日常推荐：每日从多个公开轻小说源生成推荐。",
             },
         ),
         DeclarativeSkillSpec(
