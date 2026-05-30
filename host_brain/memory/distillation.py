@@ -20,9 +20,13 @@ from host_brain.app.prompt_template_store import resolve_prompt_template_json_me
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.core.errors import LLM_POOL_EXHAUSTED
 from host_brain.core.ids import now_ms, new_request_id
+from host_brain.integrations.codex_cli_provider import invoke_codex_cli_text, resolve_codex_cli_model
 from host_brain.integrations.llm_helpers import complete_llm_with_pool_sync
 from host_brain.memory.episodic import EpisodicStore
 from host_brain.memory.life_memory import LifeMemoryConsolidator, LifeMemoryStore
+
+
+DEFAULT_CODEX_DISTILLATION_MODEL = "gpt-5.5"
 
 
 @runtime_checkable
@@ -148,6 +152,94 @@ class PoolSummaryClient:
         return summary
 
 
+class CodexCliSummaryClient:
+    """Local Codex CLI summary client for evidence-grounded memory distillation."""
+
+    def __init__(
+        self,
+        *,
+        model_id: str | None = None,
+        timeout_ms: int = 120_000,
+        render_target_lang: str = "zh",
+    ) -> None:
+        self._model_id = resolve_memory_distillation_codex_model(model_id)
+        self._timeout_ms = max(5_000, int(timeout_ms))
+        self._render_target_lang = "ja" if str(render_target_lang or "").strip().lower() == "ja" else "zh"
+
+    def summarize(
+        self,
+        texts: list[str],
+        *,
+        query_text: str,
+        max_tokens: int = 200,
+    ) -> str:
+        snippets = [
+            f"{index + 1}. {_truncate_text(text, limit=900)}"
+            for index, text in enumerate(list(texts or [])[:6])
+            if str(text or "").strip()
+        ]
+        if not snippets:
+            raise ValueError("no texts to summarize")
+        if self._render_target_lang == "ja":
+            system_prompt = (
+                "あなたは長期記憶の蒸留器です。証拠に基づき、後で再利用できる短い意味記憶だけを出力します。"
+                "推測を事実にしないでください。"
+            )
+        else:
+            system_prompt = (
+                "你负责做长期记忆蒸馏。只根据给定 episode/evidence，抽象出后续可复用的语义记忆。"
+                "不要把推测写成事实，不要保留低层日志细节，输出一句自然、准确的中文摘要。"
+            )
+        user_prompt = (
+            f"查询主题：{_truncate_text(query_text, limit=160)}\n"
+            f"最大长度：{max(64, min(int(max_tokens or 200), 400))} tokens 左右\n"
+            "证据片段：\n"
+            f"{chr(10).join(snippets)}\n\n"
+            "请输出 JSON：{\"summary\":\"...\"}"
+        )
+        raw = invoke_codex_cli_text(
+            model_id=self._model_id,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            timeout_ms=self._timeout_ms,
+            response_format={"type": "json_object"},
+            feature_key="memory_distillation",
+        )
+        parsed = _parse_summary_json(raw)
+        summary = _truncate_text(parsed.get("summary"), limit=320)
+        if not summary:
+            raise ValueError("empty distillation summary")
+        return summary
+
+
+def resolve_memory_distillation_codex_model(model_id: str | None = None) -> str:
+    return resolve_codex_cli_model(
+        model_id
+        or os.environ.get("HOST_MEMORY_DISTILLATION_CODEX_MODEL_ID")
+        or os.environ.get("HOST_MEMORY_DISTILLATION_CODEX_MODEL")
+        or DEFAULT_CODEX_DISTILLATION_MODEL
+    )
+
+
+def _parse_summary_json(raw: Any) -> dict[str, Any]:
+    text = str(raw or "").strip()
+    if not text:
+        return {}
+    try:
+        parsed = json.loads(text)
+    except Exception:
+        match = re.search(r"\{.*\}", text, flags=re.S)
+        if not match:
+            return {}
+        try:
+            parsed = json.loads(match.group(0))
+        except Exception:
+            return {}
+    return dict(parsed) if isinstance(parsed, Mapping) else {}
+
+
 def build_default_llm_summary_client(
     *,
     render_target_lang: str = "zh",
@@ -156,6 +248,19 @@ def build_default_llm_summary_client(
     return PoolSummaryClient(
         scene_type="MEMORY_DISTILLATION",
         cognitive_tier="D",
+        timeout_ms=timeout_ms,
+        render_target_lang=render_target_lang,
+    )
+
+
+def build_codex_cli_summary_client(
+    *,
+    model_id: str | None = None,
+    render_target_lang: str = "zh",
+    timeout_ms: int = 120_000,
+) -> LlmSummaryClient:
+    return CodexCliSummaryClient(
+        model_id=model_id,
         timeout_ms=timeout_ms,
         render_target_lang=render_target_lang,
     )
@@ -229,9 +334,22 @@ class MemoryDistillationEngine:
         operator_node_id: str = "distillation_engine",
         ts_ms: int | None = None,
         llm_client: LlmSummaryClient | None = None,
+        require_llm: bool = False,
     ) -> DistillResult:
         distill_ts = int(ts_ms if ts_ms is not None else now_ms())
         top_k = min(max(1, top_k), 20)
+
+        if self.prefer_life_episode and self.life_memory_store is not None:
+            return self._distill_life_semantics(
+                query_text=query_text,
+                top_k=top_k,
+                distill_strategy=distill_strategy,
+                tags=list(tags or []),
+                operator_node_id=operator_node_id,
+                ts_ms=distill_ts,
+                llm_client=llm_client,
+                require_llm=bool(require_llm),
+            )
 
         recall_k = min(max(top_k * 3, top_k), 20)
         recalled, source_layer = self._select_distillation_sources(
@@ -263,6 +381,14 @@ class MemoryDistillationEngine:
             )
 
         texts = [r["text"] for r in recalled]
+        if require_llm and llm_client is None:
+            return DistillResult(
+                success=False,
+                semantic_id=None,
+                source_count=len(source_ids),
+                detail="llm distillation required but llm_client is unavailable",
+                ts_ms=distill_ts,
+            )
         if llm_client is not None:
             try:
                 summary = llm_client.summarize(
@@ -271,7 +397,15 @@ class MemoryDistillationEngine:
                     max_tokens=200,
                 )
                 distill_strategy = "life_episode_llm_summary" if source_layer == "life_episode" else "llm_summary"
-            except Exception:
+            except Exception as exc:
+                if require_llm:
+                    return DistillResult(
+                        success=False,
+                        semantic_id=None,
+                        source_count=len(source_ids),
+                        detail=f"llm distillation failed: {type(exc).__name__}: {exc}",
+                        ts_ms=distill_ts,
+                    )
                 summary = _merge_texts(texts, query_text=query_text)
         else:
             summary = _merge_texts(texts, query_text=query_text)
@@ -349,6 +483,242 @@ class MemoryDistillationEngine:
             ts_ms=distill_ts,
         )
 
+    def _distill_life_semantics(
+        self,
+        *,
+        query_text: str,
+        top_k: int,
+        distill_strategy: str,
+        tags: list[str],
+        operator_node_id: str,
+        ts_ms: int,
+        llm_client: LlmSummaryClient | None,
+        require_llm: bool,
+    ) -> DistillResult:
+        if self.life_memory_store is None:
+            return DistillResult(
+                success=False,
+                semantic_id=None,
+                source_count=0,
+                detail="life memory store unavailable",
+                ts_ms=ts_ms,
+            )
+        llm_fallback_detail = ""
+        if llm_client is not None:
+            llm_result = self._distill_life_semantics_with_llm(
+                query_text=query_text,
+                top_k=top_k,
+                distill_strategy=distill_strategy,
+                tags=tags,
+                operator_node_id=operator_node_id,
+                ts_ms=ts_ms,
+                llm_client=llm_client,
+            )
+            if llm_result.success or llm_result.skipped:
+                return llm_result
+            if require_llm:
+                return llm_result
+            llm_fallback_detail = llm_result.detail
+        elif require_llm:
+            return DistillResult(
+                success=False,
+                semantic_id=None,
+                source_count=0,
+                detail="life llm distillation required but llm_client is unavailable",
+                ts_ms=ts_ms,
+            )
+        result = LifeMemoryConsolidator(store=self.life_memory_store).distill_semantic_memories(
+            limit=max(top_k * 12, 80),
+            max_records=1,
+            query_text=query_text,
+            ts_ms=ts_ms,
+            operator_node_id=operator_node_id,
+        )
+        written = [item for item in list(result.get("written") or []) if isinstance(item, Mapping)]
+        if written:
+            item = written[0]
+            semantic_id = str(item.get("semantic_id") or "").strip()
+            source_count = int(item.get("source_count") or 0)
+            return DistillResult(
+                success=bool(semantic_id),
+                semantic_id=semantic_id or None,
+                source_count=source_count,
+                detail=(
+                    f"life consolidator wrote semantic_id={semantic_id} "
+                    f"from {source_count} trusted episode/collection sources"
+                    + (f"; llm_fallback={llm_fallback_detail}" if llm_fallback_detail else "")
+                ),
+                ts_ms=ts_ms,
+                skipped=False,
+            )
+        skipped = [item for item in list(result.get("skipped") or []) if isinstance(item, Mapping)]
+        existing = next(
+            (
+                item
+                for item in skipped
+                if str(item.get("reason_code") or "").strip() == "SEMANTIC_MEMORY_EXISTS"
+                and str(item.get("semantic_id") or "").strip()
+            ),
+            None,
+        )
+        if existing is not None:
+            semantic_id = str(existing.get("semantic_id") or "").strip()
+            persisted = self.ledger.get_semantic_memory_by_id(semantic_id) if semantic_id else None
+            source_count = len(list((persisted or {}).get("source_memory_ids") or []))
+            return DistillResult(
+                success=True,
+                semantic_id=semantic_id,
+                source_count=source_count,
+                detail=f"skipped: life consolidated semantic memory already exists for query={query_text[:50]!r}",
+                ts_ms=ts_ms,
+                skipped=True,
+            )
+        return DistillResult(
+            success=False,
+            semantic_id=None,
+            source_count=0,
+            detail=(
+                "life consolidator found no durable semantic proposal for query "
+                f"{query_text[:80]!r}; legacy episodic distillation disabled while LifeMemoryStore is active"
+                + (f"; llm_fallback={llm_fallback_detail}" if llm_fallback_detail else "")
+            ),
+            ts_ms=ts_ms,
+        )
+
+    def _distill_life_semantics_with_llm(
+        self,
+        *,
+        query_text: str,
+        top_k: int,
+        distill_strategy: str,
+        tags: list[str],
+        operator_node_id: str,
+        ts_ms: int,
+        llm_client: LlmSummaryClient,
+    ) -> DistillResult:
+        recalled = self._recall_life_episode_llm_sources(
+            query_text=query_text,
+            top_k=top_k,
+            recall_k=min(max(top_k * 4, top_k), 30),
+        )
+        if not recalled:
+            return DistillResult(
+                success=False,
+                semantic_id=None,
+                source_count=0,
+                detail="life llm distillation found no trusted evidence sources",
+                ts_ms=ts_ms,
+            )
+        source_ids = [r["memory_id"] for r in recalled]
+        source_hash = _compute_source_hash(["life_llm:v1", *source_ids])
+        existing = self.ledger.get_semantic_memory_by_source_hash(source_hash)
+        if existing is not None:
+            return DistillResult(
+                success=True,
+                semantic_id=existing["semantic_id"],
+                source_count=len(source_ids),
+                detail=f"skipped: life llm semantic memory already exists for source_hash={source_hash[:12]}",
+                ts_ms=ts_ms,
+                skipped=True,
+            )
+
+        try:
+            summary = llm_client.summarize(
+                [r["text"] for r in recalled],
+                query_text=query_text,
+                max_tokens=240,
+            )
+            summary = _truncate_text(summary, limit=900)
+        except Exception as exc:
+            return DistillResult(
+                success=False,
+                semantic_id=None,
+                source_count=len(source_ids),
+                detail=f"life llm distillation failed: {type(exc).__name__}: {exc}",
+                ts_ms=ts_ms,
+            )
+        if not summary:
+            return DistillResult(
+                success=False,
+                semantic_id=None,
+                source_count=len(source_ids),
+                detail="life llm distillation returned empty summary",
+                ts_ms=ts_ms,
+            )
+
+        semantic_id = f"sem_{uuid.uuid4().hex}"
+        strategy = str(distill_strategy or "").strip()
+        if strategy in {"", "merge_top_k"}:
+            strategy = "life_episode_llm_summary"
+        record = SemanticMemoryRecord(
+            semantic_id=semantic_id,
+            summary=summary,
+            source_memory_ids=source_ids,
+            source_hash=source_hash,
+            distill_strategy=strategy,
+            confidence=_compute_confidence(recalled),
+            tags=_merge_tags(list(tags or []), ["source:life_episode", "life_consolidated", "llm_distilled"]),
+            ts_ms=ts_ms,
+            operator_node_id=operator_node_id,
+        )
+
+        with self._distill_lock:
+            existing = self.ledger.get_semantic_memory_by_source_hash(source_hash)
+            if existing is not None:
+                return DistillResult(
+                    success=True,
+                    semantic_id=existing["semantic_id"],
+                    source_count=len(source_ids),
+                    detail=f"skipped: life llm semantic memory already exists for source_hash={source_hash[:12]}",
+                    ts_ms=ts_ms,
+                    skipped=True,
+                )
+            self.ledger.log_semantic_memory(record.to_dict())
+            persisted = self.ledger.get_semantic_memory_by_source_hash(source_hash)
+            if persisted is None:
+                return DistillResult(
+                    success=False,
+                    semantic_id=None,
+                    source_count=len(source_ids),
+                    detail="life llm distillation write failed: semantic_memory missing after insert",
+                    ts_ms=ts_ms,
+                )
+            if persisted["semantic_id"] != semantic_id:
+                return DistillResult(
+                    success=True,
+                    semantic_id=persisted["semantic_id"],
+                    source_count=len(source_ids),
+                    detail=f"skipped: life llm semantic memory already exists for source_hash={source_hash[:12]}",
+                    ts_ms=ts_ms,
+                    skipped=True,
+                )
+
+        try:
+            self.ledger.log_system_event(
+                {
+                    "request_id": semantic_id,
+                    "event_type": "MEMORY_DISTILLED",
+                    "source": operator_node_id,
+                    "detail": (
+                        f"semantic_id={semantic_id} "
+                        f"source_count={len(source_ids)} "
+                        f"strategy={strategy} "
+                        f"confidence={record.confidence:.3f}"
+                    ),
+                    "ts_ms": ts_ms,
+                }
+            )
+        except Exception:
+            pass
+
+        return DistillResult(
+            success=True,
+            semantic_id=semantic_id,
+            source_count=len(source_ids),
+            detail=f"llm distilled {len(source_ids)} trusted life episodes into semantic_id={semantic_id}",
+            ts_ms=ts_ms,
+        )
+
     def _select_distillation_sources(
         self,
         *,
@@ -413,6 +783,65 @@ class MemoryDistillationEngine:
                 {
                     "memory_id": f"life_episode::{episode_id}",
                     "text": semantic_text,
+                    "score": float(item.get("score") or meta.get("memory_strength") or meta.get("salience") or 0.0),
+                    "metadata": {
+                        **meta,
+                        "source_table": "life_episode",
+                        "memory_layer": "life_episode",
+                        "episode_id": episode_id,
+                    },
+                }
+            )
+        return rows[:top_k]
+
+    def _recall_life_episode_llm_sources(
+        self,
+        *,
+        query_text: str,
+        top_k: int,
+        recall_k: int,
+    ) -> list[dict[str, Any]]:
+        if self.life_memory_store is None:
+            return []
+        packet = self.life_memory_store.recall_episode_packet(
+            query=query_text,
+            top_k=recall_k,
+        )
+        candidates = list(packet.candidates or [])
+        if not candidates and not str(query_text or "").strip():
+            candidates = [
+                {
+                    "memory_id": item.get("episode_id"),
+                    "text": item.get("summary"),
+                    "score": item.get("memory_strength") or item.get("salience") or 0.0,
+                    "metadata": {
+                        "episode_id": item.get("episode_id"),
+                        "source_ref": item.get("source_ref"),
+                        "truth_state": item.get("truth_state"),
+                        "retention_state": item.get("retention_state"),
+                        "memory_strength": item.get("memory_strength"),
+                    },
+                }
+                for item in LifeMemoryConsolidator(store=self.life_memory_store).build_semantic_candidates(limit=recall_k)
+            ]
+        rows: list[dict[str, Any]] = []
+        seen_texts: set[str] = set()
+        for item in candidates:
+            meta = dict(item.get("metadata") or {}) if isinstance(item.get("metadata"), Mapping) else {}
+            episode_id = str(meta.get("episode_id") or item.get("memory_id") or "").strip()
+            if not episode_id:
+                continue
+            source_text = _life_llm_source_text(
+                fallback_text=str(item.get("text") or ""),
+                metadata=meta,
+            )
+            if not source_text or source_text in seen_texts:
+                continue
+            seen_texts.add(source_text)
+            rows.append(
+                {
+                    "memory_id": f"life_episode::{episode_id}",
+                    "text": source_text,
                     "score": float(item.get("score") or meta.get("memory_strength") or meta.get("salience") or 0.0),
                     "metadata": {
                         **meta,
@@ -571,6 +1000,87 @@ def _sanitize_life_distillation_text(*, text: str, metadata: Mapping[str, Any]) 
     if not statements:
         return None
     return "；".join(statements[:3])
+
+
+def _life_llm_source_text(*, fallback_text: str, metadata: Mapping[str, Any]) -> str | None:
+    """Build evidence-grounded source text for LLM distillation.
+
+    This gate is intentionally wider than the deterministic semantic extractor:
+    an LLM can abstract a lived event from tool/perception/chat evidence, but it
+    still must not see noisy transport logs, suppressed memories, or secrets.
+    """
+
+    action = _compact_text(metadata.get("action"))
+    episode_meta = metadata.get("episode_metadata")
+    if isinstance(episode_meta, Mapping):
+        action = action or _compact_text(episode_meta.get("action_kind"))
+        event_source = _compact_text(episode_meta.get("event_source"))
+        should_distill = bool(episode_meta.get("should_distill_to_memory"))
+    else:
+        event_source = ""
+        should_distill = False
+    if action in _LIFE_DISTILLATION_NOISE_ACTIONS:
+        return None
+    if event_source in {"inner_world", "inner_stream", "inner_activity"} and not should_distill:
+        return None
+    truth_state = str(metadata.get("truth_state") or "").strip().upper()
+    if truth_state in {"CORRECTED", "SUPPRESSED"}:
+        return None
+    retention_state = str(metadata.get("retention_state") or "").strip().upper()
+    if retention_state == "GONE":
+        return None
+
+    evidence_rows = metadata.get("evidence")
+    evidence_lines: list[str] = []
+    if isinstance(evidence_rows, list):
+        for ev in evidence_rows:
+            if not isinstance(ev, Mapping):
+                continue
+            kind = str(ev.get("evidence_kind") or "").strip().lower()
+            content = _truncate_text(ev.get("content"), limit=700)
+            if not content:
+                continue
+            if kind in {
+                "user_text",
+                "gateway_message",
+                "vision_observation",
+                "audio_asr",
+                "scheduler_event",
+                "inner_thought",
+                "tool_result",
+                "reflection",
+                "attachment",
+            }:
+                evidence_lines.append(f"{kind}: {content}")
+            elif kind == "assistant_reply":
+                evidence_lines.append(f"assistant_reply_as_action_evidence: {content}")
+
+    if not evidence_lines:
+        text = _truncate_text(fallback_text, limit=900)
+        if text:
+            evidence_lines.append(f"episode_summary: {text}")
+    if not evidence_lines:
+        return None
+
+    source_ref = _truncate_text(metadata.get("source_ref") or metadata.get("evidence_refs_primary"), limit=160)
+    header_parts = [
+        f"episode_id={metadata.get('episode_id')}",
+        f"episode_kind={metadata.get('episode_kind')}",
+        f"action={metadata.get('action')}",
+        f"result={metadata.get('result')}",
+    ]
+    if source_ref:
+        header_parts.append(f"source_ref={source_ref}")
+    source_text = "\n".join(
+        [
+            "；".join(part for part in header_parts if part and not part.endswith("=None")),
+            *evidence_lines[:10],
+        ]
+    ).strip()
+    compact = _compact_text(source_text)
+    if _life_distillation_text_is_noise(compact):
+        return None
+    return _truncate_text(source_text, limit=1600)
 
 
 def _normalize_life_semantic_statement(value: Any) -> str:

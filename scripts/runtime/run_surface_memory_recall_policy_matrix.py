@@ -27,7 +27,9 @@ class PolicyCase:
     expected_policy: str
     expected_reason: str
     expected_kind: str = ""
+    expected_temporal_scope: str = ""
     expected_need_type: str = ""
+    expected_recall_grain: str = ""
     expected_primary_layer: str = ""
     expected_evidence_depth: str = ""
     must_store: str = ""
@@ -76,8 +78,12 @@ def _run_case(case: PolicyCase) -> dict[str, Any]:
     }
     if case.expected_kind:
         checks["kind"] = decision["query_kind"] == case.expected_kind
+    if case.expected_temporal_scope:
+        checks["temporal_scope"] = decision["temporal_scope"] == case.expected_temporal_scope
     if case.expected_need_type:
         checks["need_type"] = decision["need_type"] == case.expected_need_type
+    if case.expected_recall_grain:
+        checks["recall_grain"] = decision["recall_grain"] == case.expected_recall_grain
     if case.expected_primary_layer:
         checks["primary_layer"] = decision["primary_memory_layer"] == case.expected_primary_layer
     if case.expected_evidence_depth:
@@ -129,8 +135,29 @@ def _cases() -> list[PolicyCase]:
             expected_decision="skip",
             expected_policy="NO_RECALL",
             expected_reason="memory_write_current_turn_only",
-            expected_kind="preference_lookup",
-            expected_need_type="semantic_or_episode_preference",
+            expected_kind="fresh_topic",
+            expected_need_type="memory_hit",
+        ),
+        PolicyCase(
+            case_id="preference_update_current_turn",
+            message="不要用 pro，没有必要。",
+            task_mode="daily_chat",
+            expected_decision="skip",
+            expected_policy="NO_RECALL",
+            expected_reason="memory_write_current_turn_only",
+            expected_kind="fresh_topic",
+            expected_need_type="memory_hit",
+        ),
+        PolicyCase(
+            case_id="style_feedback_current_turn",
+            message="昨天那几本我能对上，这种说辞不像人话。",
+            task_mode="daily_chat",
+            expected_decision="skip",
+            expected_policy="NO_RECALL",
+            expected_reason="response_style_feedback_current_turn",
+            expected_kind="fresh_topic",
+            expected_temporal_scope="yesterday",
+            expected_need_type="memory_hit",
         ),
         PolicyCase(
             case_id="current_collection_selection",
@@ -141,6 +168,7 @@ def _cases() -> list[PolicyCase]:
             expected_reason="anaphoric_selection_recall",
             expected_kind="anaphoric_selection",
             expected_need_type="collection_selection",
+            expected_recall_grain="collection_selection",
             expected_primary_layer="life_memory_collection",
             expected_evidence_depth="detail_or_body_evidence",
             must_store="life_memory_collection",
@@ -157,10 +185,45 @@ def _cases() -> list[PolicyCase]:
             expected_reason="collection_memory_recall",
             expected_kind="date_lookup",
             expected_need_type="collection",
+            expected_recall_grain="collection",
             expected_primary_layer="life_memory_collection",
             expected_evidence_depth="evidence_anchor",
             must_store="life_memory_collection",
             must_validation="scope_match",
+            min_items=3,
+        ),
+        PolicyCase(
+            case_id="yesterday_collection_which_books",
+            message="昨天给我推荐了哪几本书？",
+            task_mode="daily_chat",
+            expected_decision="recall",
+            expected_policy="MUST_RECALL",
+            expected_reason="collection_memory_recall",
+            expected_kind="date_lookup",
+            expected_temporal_scope="yesterday",
+            expected_need_type="collection",
+            expected_recall_grain="collection",
+            expected_primary_layer="life_memory_collection",
+            expected_evidence_depth="evidence_anchor",
+            must_store="life_memory_collection",
+            must_validation="collection_item_exact_count",
+            min_items=3,
+        ),
+        PolicyCase(
+            case_id="last_week_collection",
+            message="上周推过哪些书？",
+            task_mode="daily_chat",
+            expected_decision="recall",
+            expected_policy="MUST_RECALL",
+            expected_reason="collection_memory_recall",
+            expected_kind="collection_summary",
+            expected_temporal_scope="recent_days",
+            expected_need_type="collection",
+            expected_recall_grain="collection",
+            expected_primary_layer="life_memory_collection",
+            expected_evidence_depth="evidence_anchor",
+            must_store="life_memory_collection",
+            must_validation="collection_item_min_count",
             min_items=3,
         ),
         PolicyCase(
@@ -169,9 +232,10 @@ def _cases() -> list[PolicyCase]:
             task_mode="daily_chat",
             expected_decision="recall",
             expected_policy="MUST_RECALL",
-            expected_reason="collection_memory_recall",
-            expected_kind="collection_summary",
-            expected_need_type="collection",
+            expected_reason="anaphoric_selection_recall",
+            expected_kind="anaphoric_selection",
+            expected_need_type="collection_selection",
+            expected_recall_grain="collection_selection",
             expected_primary_layer="life_memory_collection",
             expected_evidence_depth="detail_or_body_evidence",
             must_store="life_memory_collection",
@@ -187,6 +251,7 @@ def _cases() -> list[PolicyCase]:
             expected_reason="evidence_review_recall",
             expected_kind="evidence_review",
             expected_need_type="evidence_review",
+            expected_recall_grain="evidence",
             expected_primary_layer="life_episode",
             expected_evidence_depth="detail_or_body_evidence",
             must_store="life_episode",
@@ -202,6 +267,7 @@ def _cases() -> list[PolicyCase]:
             expected_reason="event_memory_recall",
             expected_kind="date_lookup",
             expected_need_type="episode_event",
+            expected_recall_grain="episode",
             expected_primary_layer="life_episode",
             expected_evidence_depth="memory_hit",
             must_store="life_episode",
@@ -217,6 +283,22 @@ def _cases() -> list[PolicyCase]:
             expected_reason="failure_debug_recall",
             expected_kind="failure_debug",
             expected_need_type="failure_episode",
+            expected_recall_grain="episode",
+            expected_primary_layer="life_episode",
+            must_store="life_episode",
+            must_domain="failure",
+            must_validation="error_episode_or_semantic_hit",
+        ),
+        PolicyCase(
+            case_id="stuck_followup_failure_debug",
+            message="为什么又卡住了？",
+            task_mode="daily_chat",
+            expected_decision="recall",
+            expected_policy="MUST_RECALL",
+            expected_reason="failure_debug_recall",
+            expected_kind="failure_debug",
+            expected_need_type="failure_episode",
+            expected_recall_grain="episode",
             expected_primary_layer="life_episode",
             must_store="life_episode",
             must_domain="failure",
@@ -231,9 +313,38 @@ def _cases() -> list[PolicyCase]:
             expected_reason="explicit_memory_recall",
             expected_kind="preference_lookup",
             expected_need_type="semantic_or_episode_preference",
+            expected_recall_grain="semantic_first",
             expected_primary_layer="semantic_memory",
             must_store="semantic_memory",
-            must_domain="recommendation",
+            must_domain="preference",
+            must_validation="trusted_memory_hit",
+        ),
+        PolicyCase(
+            case_id="open_loop_lookup",
+            message="记忆系统还有什么待办没完成？",
+            task_mode="daily_chat",
+            expected_decision="recall",
+            expected_policy="MUST_RECALL",
+            expected_reason="explicit_memory_recall",
+            expected_kind="open_loop",
+            expected_need_type="open_loop_memory",
+            expected_recall_grain="semantic_first",
+            expected_primary_layer="semantic_memory",
+            must_store="semantic_memory",
+            must_validation="trusted_memory_hit",
+        ),
+        PolicyCase(
+            case_id="self_change_lookup",
+            message="记忆系统改过什么？",
+            task_mode="daily_chat",
+            expected_decision="recall",
+            expected_policy="MUST_RECALL",
+            expected_reason="explicit_memory_recall",
+            expected_kind="self_change",
+            expected_need_type="self_change_memory",
+            expected_recall_grain="semantic_first",
+            expected_primary_layer="semantic_memory",
+            must_store="semantic_memory",
             must_validation="trusted_memory_hit",
         ),
         PolicyCase(
@@ -245,6 +356,7 @@ def _cases() -> list[PolicyCase]:
             expected_reason="correction_recall",
             expected_kind="correction",
             expected_need_type="correction_chain",
+            expected_recall_grain="correction_chain",
             expected_primary_layer="life_episode",
             must_store="life_episode",
             must_validation="correction_state_checked",

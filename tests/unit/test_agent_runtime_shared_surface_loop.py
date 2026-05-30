@@ -8,6 +8,7 @@ from host_brain.app.agent_runtime_shared import (
     _maybe_build_contextual_memory_answer,
     _maybe_build_contextual_session_answer,
     _maybe_build_contextual_style_answer,
+    _maybe_build_surface_memory_direct_answer,
     _memory_recall_plan_should_bypass_direct_status_fastlane,
     _normalize_retrieval_summary_for_audit,
     _needs_selection_followup_retrieval_budget,
@@ -42,7 +43,586 @@ def test_memory_recall_plan_bypasses_recent_turn_fastlane_for_evidence_and_corre
     assert _memory_recall_plan_should_bypass_direct_status_fastlane("你刚才是不是记错了封面猫那本？", task_mode="recent_turn")
     assert _memory_recall_plan_should_bypass_direct_status_fastlane("昨天那个网页内容靠谱吗？依据是什么？", task_mode="recent_turn")
     assert _memory_recall_plan_should_bypass_direct_status_fastlane("这三本书，你喜欢哪本？", task_mode="recent_turn")
+    assert _memory_recall_plan_should_bypass_direct_status_fastlane("记忆系统还有什么待办没完成？", task_mode="task_progress")
     assert not _memory_recall_plan_should_bypass_direct_status_fastlane("你刚刚说了什么", task_mode="recent_turn")
+
+
+def _surface_memory_summary(
+    *,
+    contract_id: str,
+    query_kind: str,
+    evidence_depth: str = "evidence_anchor",
+    response_mode: str = "answer_from_collection_memory",
+    detail_required: bool = False,
+    facts: list[str] | None = None,
+    items: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    return {
+        "status": "OK",
+        "surface_memory_recall_packet": {
+            "facts": list(facts or []),
+            "candidate_count": 1,
+            "degraded": False,
+            "reason_code": None,
+            "trace": {
+                "selected_collection_items": list(items or []),
+                "recall_answer_readiness": {
+                    "schema": "Natsume.surface_recall_answer_readiness.v1",
+                    "status": "READY",
+                    "ready_to_answer": True,
+                    "response_mode": response_mode,
+                    "surface_action": "answer",
+                    "reasons": [],
+                    "need_type": "collection",
+                    "recall_contract_id": contract_id,
+                    "query_kind": query_kind,
+                    "temporal_scope": "yesterday",
+                    "evidence_depth": evidence_depth,
+                    "coverage_score": 1.0,
+                    "coverage_passed": True,
+                    "validation_passed": True,
+                    "validation_failed": False,
+                    "coverage_failed": False,
+                    "selected_item_count": len(items or []),
+                    "detail_evidence": {
+                        "required": detail_required,
+                        "ready_for_deep_review": detail_required,
+                        "basis": "available",
+                        "body_item_count": 0,
+                        "anchor_item_count": len(items or []),
+                        "structured_item_count": len(items or []),
+                    },
+                },
+            },
+        },
+    }
+
+
+def test_surface_memory_direct_answer_renders_ready_date_collection() -> None:
+    answer = _maybe_build_surface_memory_direct_answer(
+        retrieval_summary=_surface_memory_summary(
+            contract_id="collection_date",
+            query_kind="date_lookup",
+            items=[
+                {"title": "昨天推荐 A：培养失败的前美少女童星"},
+                {"title": "昨天推荐 B：与神在河岸"},
+                {"title": "昨天推荐 C：异世界皇女皇帝线"},
+            ],
+        ),
+        user_message="昨天三本呢？",
+        render_target_lang="zh",
+    )
+
+    assert answer is not None
+    assert answer["reason_code"] == "SURFACE_MEMORY_DIRECT_READY"
+    assert "昨天推的是这几本" in answer["answer"]
+    assert "培养失败的前美少女童星" in answer["answer"]
+    assert "昨天推荐 A" not in answer["answer"]
+
+
+def test_surface_memory_direct_answer_skips_detail_required_selection() -> None:
+    summary = _surface_memory_summary(
+        contract_id="anaphoric_selection",
+        query_kind="anaphoric_selection",
+        evidence_depth="detail_or_body_evidence",
+        detail_required=True,
+        items=[{"title": "A"}, {"title": "B"}, {"title": "C"}],
+    )
+    summary["surface_memory_recall_packet"]["trace"]["recall_answer_strategy"] = {
+        "schema": "Natsume.surface_recall_answer_strategy.v1",
+        "action": "fetch_more_evidence",
+        "claim_scope": "memory_only_no_quality_judgment",
+        "evidence_level": "detail_anchor_only",
+    }
+
+    answer = _maybe_build_surface_memory_direct_answer(
+        retrieval_summary=summary,
+        user_message="这三本书你喜欢哪本？",
+        render_target_lang="zh",
+    )
+
+    assert answer is None
+
+
+def test_surface_memory_direct_answer_renders_deep_review_selection_naturally() -> None:
+    summary = _surface_memory_summary(
+        contract_id="anaphoric_selection",
+        query_kind="anaphoric_selection",
+        evidence_depth="detail_or_body_evidence",
+        response_mode="answer_from_evidence",
+        detail_required=True,
+        facts=[
+            "网页深读结果（含正文）：当前更推荐第3本《异世界皇女皇帝线》。原因：开篇比较抓人；设定线很直给；对白轻快。另外我也顺手看了：第1本《培养失败的前美少女童星》。"
+        ],
+        items=[
+            {"title": "培养失败的前美少女童星"},
+            {"title": "与神在河岸"},
+            {"title": "异世界皇女皇帝线"},
+        ],
+    )
+    packet = summary["surface_memory_recall_packet"]
+    packet["trace"]["recall_answer_readiness"]["detail_evidence"]["basis"] = "lightnovel_deep_review"
+    packet["trace"]["lightnovel_deep_review"] = {
+        "status": "OK",
+        "selected": {"index": 3, "title": "异世界皇女皇帝线"},
+        "source": "fetch",
+    }
+
+    answer = _maybe_build_surface_memory_direct_answer(
+        retrieval_summary=summary,
+        user_message="这三本哪本好看？",
+        render_target_lang="zh",
+    )
+
+    assert answer is not None
+    assert "我偏《异世界皇女皇帝线》" in answer["answer"]
+    assert "开篇比较抓人" in answer["answer"]
+    assert "设定线很直给" in answer["answer"]
+    assert "网页深读" not in answer["answer"]
+    assert "正文" not in answer["answer"]
+    assert "证据" not in answer["answer"]
+
+
+def test_surface_memory_direct_answer_blocks_unrenderable_deep_review_selection() -> None:
+    summary = _surface_memory_summary(
+        contract_id="anaphoric_selection",
+        query_kind="anaphoric_selection",
+        evidence_depth="detail_or_body_evidence",
+        response_mode="answer_from_evidence",
+        detail_required=True,
+        facts=[
+            "集合记忆：昨天推荐了 3 本轻小说；可比较证据：1. A；2. 与神在河岸；3. C"
+        ],
+        items=[
+            {"title": "昨天推荐 A"},
+            {"title": "昨天推荐 B：与神在河岸"},
+            {"title": "昨天推荐 C"},
+        ],
+    )
+    packet = summary["surface_memory_recall_packet"]
+    packet["trace"]["recall_answer_readiness"]["need_type"] = "entity_or_collection_selection"
+    packet["trace"]["recall_answer_readiness"]["detail_evidence"]["basis"] = "lightnovel_deep_review"
+    packet["trace"]["lightnovel_deep_review"] = {
+        "status": "OK",
+        "selected": {},
+        "source": "cache",
+    }
+
+    answer = _maybe_build_surface_memory_direct_answer(
+        retrieval_summary=summary,
+        user_message="昨天推荐 B：与神在河岸 这本好看吗？",
+        render_target_lang="zh",
+    )
+
+    assert answer is not None
+    assert answer["reason_code"] == "SURFACE_MEMORY_DIRECT_DEEP_REVIEW_UNRENDERABLE"
+    assert "还没翻到足够正文或详情" in answer["answer"]
+    assert "不能认真说它好不好看" in answer["answer"]
+    assert "与神在河岸" in answer["answer"]
+
+
+def test_surface_memory_direct_answer_limits_partial_deep_review_scope() -> None:
+    summary = _surface_memory_summary(
+        contract_id="anaphoric_selection",
+        query_kind="anaphoric_selection",
+        evidence_depth="detail_or_body_evidence",
+        response_mode="answer_from_evidence",
+        detail_required=True,
+        facts=[
+            "网页深读结果（含正文）：当前更推荐第3本《异世界皇女皇帝线》。原因：开篇比较抓人；设定线很直给。"
+        ],
+        items=[
+            {"title": f"推荐 {index}"}
+            for index in range(1, 13)
+        ],
+    )
+    packet = summary["surface_memory_recall_packet"]
+    packet["trace"]["recall_answer_readiness"]["detail_evidence"]["basis"] = "lightnovel_deep_review"
+    packet["trace"]["recall_answer_strategy"] = {
+        "schema": "Natsume.surface_recall_answer_strategy.v1",
+        "action": "direct_answer",
+        "claim_scope": "partial_detail_judgment",
+        "evidence_level": "partial_detail_or_body",
+    }
+    packet["trace"]["lightnovel_deep_review"] = {
+        "status": "OK",
+        "selected": {"index": 3, "title": "异世界皇女皇帝线"},
+        "item_count": 6,
+        "source_card_count": 12,
+        "reviewed_item_count": 6,
+        "partial_review": True,
+        "source": "fetch",
+    }
+
+    answer = _maybe_build_surface_memory_direct_answer(
+        retrieval_summary=summary,
+        user_message="这几天十几本里哪本最好看？",
+        render_target_lang="zh",
+    )
+
+    assert answer is not None
+    assert "全 12 本里绝对最好" in answer["answer"]
+    assert "先补读了其中 6 本" in answer["answer"]
+    assert "我偏《异世界皇女皇帝线》" in answer["answer"]
+    assert "我补读过的另外几本" in answer["answer"]
+
+
+def test_surface_memory_direct_answer_accepts_deep_review_strategy_when_depth_missing() -> None:
+    summary = _surface_memory_summary(
+        contract_id="anaphoric_selection",
+        query_kind="anaphoric_selection",
+        evidence_depth="",
+        response_mode="answer_from_evidence",
+        detail_required=True,
+        facts=[
+            "网页深读结果（含正文）：当前更推荐第3本《异世界皇女皇帝线》。原因：开篇比较抓人；设定线很直给。"
+        ],
+        items=[
+            {"title": "培养失败的前美少女童星"},
+            {"title": "与神在河岸"},
+            {"title": "异世界皇女皇帝线"},
+        ],
+    )
+    packet = summary["surface_memory_recall_packet"]
+    packet["trace"]["recall_answer_readiness"]["detail_evidence"]["basis"] = "lightnovel_deep_review"
+    packet["trace"]["recall_answer_strategy"] = {
+        "schema": "Natsume.surface_recall_answer_strategy.v1",
+        "action": "direct_answer",
+        "claim_scope": "detail_judgment",
+        "evidence_level": "detail_or_body",
+    }
+    packet["trace"]["lightnovel_deep_review"] = {
+        "status": "OK",
+        "selected": {"index": 3, "title": "异世界皇女皇帝线"},
+        "source": "fetch",
+    }
+
+    answer = _maybe_build_surface_memory_direct_answer(
+        retrieval_summary=summary,
+        user_message="昨天那几本好看吗？",
+        render_target_lang="zh",
+    )
+
+    assert answer is not None
+    assert "我偏《异世界皇女皇帝线》" in answer["answer"]
+    assert "网页深读" not in answer["answer"]
+
+
+def test_surface_memory_direct_answer_renders_preference_and_failure() -> None:
+    preference = _maybe_build_surface_memory_direct_answer(
+        retrieval_summary=_surface_memory_summary(
+            contract_id="preference",
+            query_kind="preference_lookup",
+            evidence_depth="memory_hit",
+            response_mode="answer_from_memory",
+            facts=[
+                "记忆线索：当前回合摘要：用户提到「还记得我说推荐格式要怎样吗？」；回复「记得。」。",
+                "记忆线索：用户提到：以后推荐轻小说时，每本书的简介后应该换行，别模板腔。 回复：记住了。",
+            ],
+        ),
+        user_message="还记得我说推荐格式要怎样吗？",
+        render_target_lang="zh",
+    )
+    failure = _maybe_build_surface_memory_direct_answer(
+        retrieval_summary=_surface_memory_summary(
+            contract_id="failure_debug",
+            query_kind="failure_debug",
+            evidence_depth="memory_hit",
+            response_mode="answer_from_episode_memory",
+            facts=["记忆线索：codex_production llm_pool_call FAILED DEEPSEEK_TIMEOUT DeepSeek 失败原因：供应商超时，后续优先检查网络和 provider 健康状态。"],
+        ),
+        user_message="DeepSeek失败原因是什么？",
+        render_target_lang="zh",
+    )
+
+    assert preference is not None
+    assert "简介后应该换行" in preference["answer"]
+    assert "回复" not in preference["answer"]
+    assert "记住了" not in preference["answer"]
+    assert "说的是" not in preference["answer"]
+    assert failure is not None
+    assert "供应商超时" in failure["answer"]
+    assert "记到的是" not in failure["answer"]
+
+
+def test_surface_memory_direct_answer_renders_semantic_preference_without_labels() -> None:
+    answer = _maybe_build_surface_memory_direct_answer(
+        retrieval_summary=_surface_memory_summary(
+            contract_id="preference",
+            query_kind="preference_lookup",
+            evidence_depth="memory_hit",
+            response_mode="answer_from_memory",
+            facts=["长期事实：以后推荐轻小说时，每本书的简介后应该换行，别模板腔。"],
+        ),
+        user_message="还记得我说推荐格式要怎样吗？",
+        render_target_lang="zh",
+    )
+
+    assert answer is not None
+    assert answer["answer"] == "记得。以后推荐轻小说时，每本书的简介后应该换行，别模板腔。"
+    assert "长期事实" not in answer["answer"]
+    assert "用户偏好" not in answer["answer"]
+
+
+def test_surface_memory_direct_answer_renders_relationship_feedback_without_labels() -> None:
+    answer = _maybe_build_surface_memory_direct_answer(
+        retrieval_summary=_surface_memory_summary(
+            contract_id="preference",
+            query_kind="preference_lookup",
+            evidence_depth="memory_hit",
+            response_mode="answer_from_memory",
+            facts=["关系反馈：用户强烈反馈：回答要像正常聊天，避免模板腔、台词腔和生硬的证据条目话术。"],
+        ),
+        user_message="我之前说文本质量不像人话，是哪里的问题？",
+        render_target_lang="zh",
+    )
+
+    assert answer is not None
+    assert answer["answer"] == "记得。回答要像正常聊天，避免模板腔、台词腔和生硬的证据条目话术。"
+    assert "关系反馈" not in answer["answer"]
+
+
+def test_surface_memory_direct_answer_normalizes_raw_relationship_feedback() -> None:
+    answer = _maybe_build_surface_memory_direct_answer(
+        retrieval_summary=_surface_memory_summary(
+            contract_id="preference",
+            query_kind="preference_lookup",
+            evidence_depth="memory_hit",
+            response_mode="answer_from_memory",
+            facts=["记忆线索：用户提到：文本质量不像人话，太台词腔了。 回复：收到，我以后把证据转成更自然的聊天方式。"],
+        ),
+        user_message="我之前说文本质量不像人话，是哪里的问题？",
+        render_target_lang="zh",
+    )
+
+    assert answer is not None
+    assert "回答要像正常聊天" in answer["answer"]
+    assert "模板腔" in answer["answer"]
+    assert "台词腔" in answer["answer"]
+
+
+def test_surface_memory_direct_answer_renders_open_loop_without_labels() -> None:
+    answer = _maybe_build_surface_memory_direct_answer(
+        retrieval_summary=_surface_memory_summary(
+            contract_id="open_loop",
+            query_kind="open_loop",
+            evidence_depth="memory_hit",
+            response_mode="answer_from_episode_memory",
+            facts=["长期事实：承诺和待办：后续要把记忆系统的召回覆盖 open loop 和自我改变，记成待办。"],
+        ),
+        user_message="记忆系统还有什么待办没完成？",
+        render_target_lang="zh",
+    )
+
+    assert answer is not None
+    assert answer["answer"] == "记得。还没完成的是：后续要把记忆系统的召回覆盖 open loop 和自我改变，记成待办。"
+    assert "长期事实" not in answer["answer"]
+    assert "承诺和待办" not in answer["answer"]
+
+
+def test_surface_memory_direct_answer_renders_self_change_without_labels() -> None:
+    answer = _maybe_build_surface_memory_direct_answer(
+        retrieval_summary=_surface_memory_summary(
+            contract_id="self_change",
+            query_kind="self_change",
+            evidence_depth="memory_hit",
+            response_mode="answer_from_episode_memory",
+            facts=["长期事实：自我改变：她做过的事都要留下生命经历锚点，但不等于所有日志都进入可召回记忆。"],
+        ),
+        user_message="记忆系统改过什么？",
+        render_target_lang="zh",
+    )
+
+    assert answer is not None
+    assert answer["answer"] == "记得。核心是：她做过的事都要留下生命经历锚点，但不等于所有日志都进入可召回记忆。"
+    assert "长期事实" not in answer["answer"]
+    assert "自我改变" not in answer["answer"]
+
+
+def test_surface_memory_direct_answer_groups_recent_collection_by_day() -> None:
+    answer = _maybe_build_surface_memory_direct_answer(
+        retrieval_summary=_surface_memory_summary(
+            contract_id="collection_recent",
+            query_kind="collection_summary",
+            items=[
+                {"title": "三天前推荐 A：培养失败的前美少女童星"},
+                {"title": "三天前推荐 B：与神在河岸"},
+                {"title": "昨天推荐 A：培养失败的前美少女童星"},
+                {"title": "昨天推荐 B：与神在河岸"},
+            ],
+        ),
+        user_message="这几天十几本里有哪些？",
+        render_target_lang="zh",
+    )
+
+    assert answer is not None
+    assert "这几天我一共发过 4 条推荐" in answer["answer"]
+    assert "去掉重复标题主要是 2 本" in answer["answer"]
+    assert "三天前：培养失败的前美少女童星、与神在河岸" in answer["answer"]
+    assert "昨天：培养失败的前美少女童星、与神在河岸" in answer["answer"]
+    assert "昨天推荐 A" not in answer["answer"]
+
+
+def test_surface_memory_direct_answer_groups_recent_collection_by_source_day() -> None:
+    answer = _maybe_build_surface_memory_direct_answer(
+        retrieval_summary=_surface_memory_summary(
+            contract_id="collection_recent",
+            query_kind="collection_summary",
+            items=[
+                {"title": "培养失败的前美少女童星 第15话", "canonical_title": "培养失败的前美少女童星", "canonical_key": "failed-ssr", "source_day": "2026-05-27"},
+                {"title": "与神在河岸", "canonical_title": "与神在河岸", "canonical_key": "kami-river", "source_day": "2026-05-27"},
+                {"title": "培养失败的前美少女童星 第16话", "canonical_title": "培养失败的前美少女童星", "canonical_key": "failed-ssr", "source_day": "2026-05-28"},
+                {"title": "异世界皇女皇帝线", "canonical_title": "异世界皇女皇帝线", "canonical_key": "isekai-princess", "source_day": "2026-05-28"},
+            ],
+        ),
+        user_message="这几天推荐过哪些轻小说？",
+        render_target_lang="zh",
+    )
+
+    assert answer is not None
+    assert "这几天我一共发过 4 条推荐" in answer["answer"]
+    assert "去掉重复标题主要是 3 本" in answer["answer"]
+    assert "5月27日：培养失败的前美少女童星、与神在河岸" in answer["answer"]
+    assert "5月28日：培养失败的前美少女童星、异世界皇女皇帝线" in answer["answer"]
+    assert "2026-05-27" not in answer["answer"]
+
+
+def test_surface_memory_direct_answer_keeps_recent_unique_count_when_no_duplicates() -> None:
+    answer = _maybe_build_surface_memory_direct_answer(
+        retrieval_summary=_surface_memory_summary(
+            contract_id="collection_recent",
+            query_kind="collection_summary",
+            items=[
+                {"title": "三天前推荐 A：培养失败的前美少女童星"},
+                {"title": "三天前推荐 B：与神在河岸"},
+                {"title": "昨天推荐 C：异世界皇女皇帝线"},
+            ],
+        ),
+        user_message="这几天推荐过哪些轻小说？",
+        render_target_lang="zh",
+    )
+
+    assert answer is not None
+    assert "这几天我一共推过 3 本" in answer["answer"]
+    assert "推送记录" not in answer["answer"]
+    assert "去重后" not in answer["answer"]
+
+
+def test_surface_memory_direct_answer_dedupes_lightnovel_title_variants() -> None:
+    answer = _maybe_build_surface_memory_direct_answer(
+        retrieval_summary=_surface_memory_summary(
+            contract_id="collection_recent",
+            query_kind="collection_summary",
+            items=[
+                {"title": "昨天推荐 A：[丸焦ししゃも]给被人说“培养失败”的前美少女童星（SSR） 第15话 辽君"},
+                {"title": "今天推荐 A：[丸焦ししゃも]给被人说“培养失败”的前美少女童星（SSR） 第16话 看来晚上"},
+                {"title": "今天推荐 B：1205.与神在河岸"},
+                {"title": "昨天推荐 B：1206.与神在河岸"},
+            ],
+        ),
+        user_message="这几天十几本里有哪些？",
+        render_target_lang="zh",
+    )
+
+    assert answer is not None
+    assert "我一共发过 4 条推荐" in answer["answer"]
+    assert "去掉重复标题主要是 2 本" in answer["answer"]
+    assert "[丸焦ししゃも]给被人说“培养失败”的前美少女童星（SSR）" in answer["answer"]
+    assert "与神在河岸" in answer["answer"]
+    assert "第15话" not in answer["answer"].split("分天看：", 1)[0]
+    assert "第16话" not in answer["answer"].split("分天看：", 1)[0]
+
+
+def test_surface_memory_direct_answer_avoids_mechanical_memory_phrases() -> None:
+    preference = _maybe_build_surface_memory_direct_answer(
+        retrieval_summary=_surface_memory_summary(
+            contract_id="preference",
+            query_kind="preference_lookup",
+            evidence_depth="memory_hit",
+            response_mode="answer_from_memory",
+            facts=["用户偏好：以后推荐轻小说时，每本书的简介后应该换行，别模板腔。"],
+        ),
+        user_message="还记得推荐格式吗？",
+        render_target_lang="zh",
+    )
+    correction = _maybe_build_surface_memory_direct_answer(
+        retrieval_summary=_surface_memory_summary(
+            contract_id="correction",
+            query_kind="correction_lookup",
+            evidence_depth="memory_hit",
+            response_mode="answer_from_episode_memory",
+            facts=["纠错记忆：用户纠正 OneBot 在 edge，不在本机。"],
+        ),
+        user_message="OneBot是不是在本机？",
+        render_target_lang="zh",
+    )
+
+    assert preference is not None
+    assert correction is not None
+    for answer in (preference["answer"], correction["answer"]):
+        assert "我能对上" not in answer
+        assert "记到的是" not in answer
+        assert "说的是：" not in answer
+        assert "按纠错记了" not in answer
+    assert "OneBot 在 edge，不在本机" in correction["answer"]
+
+
+def test_surface_memory_direct_answer_renders_evidence_review_not_collection_list() -> None:
+    answer = _maybe_build_surface_memory_direct_answer(
+        retrieval_summary=_surface_memory_summary(
+            contract_id="evidence_review",
+            query_kind="evidence_review",
+            evidence_depth="detail_or_body_evidence",
+            response_mode="answer_from_evidence",
+            detail_required=True,
+            facts=[
+                "集合记忆：2026-05-28 当天web集合，记录 1 个条目；可比较证据：1. OneBot 部署位置网页报告｜简介：OneBot 在 edge-lan 上运行，本机只负责 host。｜详情：https://example.com/report",
+                "记忆线索：当时更偏向第1本《恋爱日常 A》，因为开篇比较抓人。；详情：https://www.lightnovel.fun/cn/detail/1",
+            ],
+            items=[{"title": "OneBot 部署位置网页报告"}],
+        ),
+        user_message="昨天那个网页内容靠谱吗？依据是什么？",
+        render_target_lang="zh",
+    )
+
+    assert answer is not None
+    assert "这份记录本身有依据" in answer["answer"]
+    assert "依据" in answer["answer"]
+    assert "OneBot 在 edge-lan 上运行" in answer["answer"]
+    assert "恋爱日常" not in answer["answer"]
+    assert "昨天那几本" not in answer["answer"]
+
+
+def test_surface_memory_direct_answer_blocks_not_ready_failure_hallucination() -> None:
+    summary = _surface_memory_summary(
+        contract_id="failure_debug",
+        query_kind="failure_debug",
+        evidence_depth="memory_hit",
+        response_mode="state_recall_coverage_missing",
+        facts=[],
+    )
+    packet = summary["surface_memory_recall_packet"]
+    packet["degraded"] = True
+    readiness = packet["trace"]["recall_answer_readiness"]
+    readiness.update(
+        {
+            "status": "NOT_READY",
+            "ready_to_answer": False,
+            "response_mode": "state_recall_coverage_missing",
+            "reasons": ["coverage_failed", "query_relevance"],
+            "coverage_failed": True,
+        }
+    )
+
+    answer = _maybe_build_surface_memory_direct_answer(
+        retrieval_summary=summary,
+        user_message="DeepSeek失败原因是什么？",
+        render_target_lang="zh",
+    )
+
+    assert answer is not None
+    assert answer["reason_code"] == "SURFACE_MEMORY_DIRECT_NOT_READY"
+    assert "不能硬编原因" in answer["answer"]
 
 
 def test_selection_followup_retrieval_budget_detects_book_choice(monkeypatch) -> None:  # noqa: ANN001
@@ -50,6 +630,11 @@ def test_selection_followup_retrieval_budget_detects_book_choice(monkeypatch) ->
 
     assert _needs_selection_followup_retrieval_budget("这三本书，你喜欢哪本？")
     assert _needs_selection_followup_retrieval_budget("这几本轻小说哪本好看")
+    assert _needs_selection_followup_retrieval_budget("昨天那几本好看吗")
+    assert _needs_selection_followup_retrieval_budget("前天那几本你喜欢哪本")
+    assert _needs_selection_followup_retrieval_budget("这几天十几本里哪本最好看")
+    assert _needs_selection_followup_retrieval_budget("我问你喜欢哪本")
+    assert _needs_selection_followup_retrieval_budget("这些推荐哪本值得看")
     assert not _needs_selection_followup_retrieval_budget("今天吃什么？")
     assert _resolve_selection_followup_retrieval_timeout_seconds() == 42.0
 
@@ -187,6 +772,12 @@ def test_normalize_retrieval_summary_keeps_safe_surface_memory_trace() -> None:
                         "persist_status": "OK",
                         "evidence_ref_count": 1,
                     },
+                    "collection_fastpath": {
+                        "attempted": True,
+                        "status": "HIT",
+                        "latency_ms": 3,
+                        "candidate_count": 1,
+                    },
                 },
             },
         }
@@ -240,6 +831,12 @@ def test_normalize_retrieval_summary_keeps_safe_surface_memory_trace() -> None:
         "persisted_episode_id": "ep-generic-review",
         "persist_status": "OK",
         "evidence_ref_count": 1,
+    }
+    assert trace["collection_fastpath"] == {
+        "attempted": True,
+        "status": "HIT",
+        "latency_ms": 3,
+        "candidate_count": 1,
     }
     assert "facts" not in trace
 

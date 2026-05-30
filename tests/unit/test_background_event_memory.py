@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 
 from host_brain.app.observability_persist import (
@@ -9,6 +10,8 @@ from host_brain.app.observability_persist import (
     persist_background_event_memory,
     should_persist_background_event_memory,
 )
+from host_brain.audit.sqlite_ledger import SQLiteLedger
+from host_brain.memory.life_memory import LifeMemoryConsolidator, LifeMemoryStore
 
 
 class _FakeEpisodicStore:
@@ -176,6 +179,49 @@ def test_life_action_event_memory_resolves_gateway_person_id(monkeypatch) -> Non
     assert life_write["metadata"]["resolved_person_id_source"] == "gateway_context"
     assert "chat://person/owner" in life_write["metadata"]["evidence_refs"]
     assert "chat://person/owner" in episodic_store.writes[0]["evidence_refs"]
+
+
+def test_life_action_event_memory_marks_capability_change_as_self_change(monkeypatch) -> None:
+    monkeypatch.delenv("HOST_LIFE_ACTION_EVENT_MEMORY_ENABLED", raising=False)
+    ledger = SQLiteLedger(db_path=":memory:")
+    try:
+        life_store = LifeMemoryStore(ledger=ledger)
+        episodic_store = _FakeEpisodicStore()
+
+        result = persist_life_action_event_memory(
+            event_source="action",
+            action_kind="capability_change",
+            action_id="remove-resource-manager",
+            actor_id="natsume",
+            person_id="owner",
+            session_id="qq_dm_owner",
+            status="COMPLETED",
+            action_summary="删除资源管理器能力，因为用户明确说它没有作用。",
+            evidence_refs=["action://event/remove-resource-manager"],
+            episodic_store=episodic_store,
+            life_memory_store=life_store,
+        )
+        episode = ledger.life_episode[0]
+        metadata = episode["metadata"]
+        if not isinstance(metadata, dict):
+            metadata = json.loads(metadata)
+
+        distilled = LifeMemoryConsolidator(store=life_store).distill_semantic_memories(
+            limit=10,
+            max_records=5,
+            ts_ms=1_800_000_000_100,
+        )
+        items, total = ledger.list_semantic_memories()
+
+        assert result["status"] == "OK"
+        assert metadata["memory_class"] == "self_change"
+        assert metadata["memory_policy"]["semantic_candidate"] is True
+        assert distilled["written_count"] == 1
+        assert total == 1
+        assert "自我改变" in items[0]["summary"]
+        assert "删除资源管理器能力" in items[0]["summary"]
+    finally:
+        ledger.close()
 
 
 def test_life_action_event_memory_text_requires_summary() -> None:

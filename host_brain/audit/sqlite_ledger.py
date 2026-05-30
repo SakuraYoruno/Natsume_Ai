@@ -32,6 +32,7 @@ from host_brain.audit.ledger_constants import (
     LIFE_EPISODE_LINK_COLUMNS,
     LIFE_MEMORY_CORRECTION_COLUMNS,
     LIFE_MEMORY_COMPACTION_COLUMNS,
+    LIFE_OPEN_LOOP_COLUMNS,
     LIFE_MEMORY_COLLECTION_COLUMNS,
     LIFE_MEMORY_COLLECTION_ITEM_COLUMNS,
     LIFE_MEMORY_ENTITY_COLUMNS,
@@ -253,6 +254,10 @@ class SQLiteLedger(
     @property
     def life_memory_compaction(self) -> list[dict[str, Any]]:
         return self._fetch_all("life_memory_compaction")
+
+    @property
+    def life_open_loop(self) -> list[dict[str, Any]]:
+        return self._fetch_all("life_open_loop")
 
     @property
     def life_memory_collection(self) -> list[dict[str, Any]]:
@@ -507,6 +512,10 @@ class SQLiteLedger(
     def log_life_memory_compaction(self, row: dict[str, Any]) -> None:
         payload = {key: row.get(key) for key in LIFE_MEMORY_COMPACTION_COLUMNS}
         self._insert("life_memory_compaction", payload)
+
+    def log_life_open_loop(self, row: dict[str, Any]) -> None:
+        payload = {key: row.get(key) for key in LIFE_OPEN_LOOP_COLUMNS}
+        self._insert("life_open_loop", payload)
 
     def log_life_memory_collection(self, row: dict[str, Any]) -> None:
         payload = {key: row.get(key) for key in LIFE_MEMORY_COLLECTION_COLUMNS}
@@ -1089,7 +1098,13 @@ class SQLiteLedger(
     # -------------------------------------------------------------------
 
     def log_semantic_memory(self, row: dict[str, Any]) -> None:
-        """写入语义记忆条目（INSERT OR IGNORE，幂等）。"""
+        """写入语义记忆条目。
+
+        Active rows remain idempotent, but a soft-deleted row with the same
+        semantic identity/source hash is revived. Otherwise a retired synthetic
+        semantic can keep occupying the unique source_hash slot and block the
+        production semantic distilled later.
+        """
         source_ids = row.get("source_memory_ids", [])
         tags = row.get("tags", [])
         payload = {
@@ -1109,6 +1124,54 @@ class SQLiteLedger(
         values = [payload[c] for c in cols]
         with self._write_lock:
             with self._conn:
+                existing = self._conn.execute(
+                    """
+                    SELECT id, deleted_at
+                    FROM semantic_memory
+                    WHERE source_hash = ? OR semantic_id = ?
+                    ORDER BY
+                        CASE WHEN source_hash = ? THEN 0 ELSE 1 END,
+                        id DESC
+                    LIMIT 1
+                    """,
+                    (
+                        payload["source_hash"],
+                        payload["semantic_id"],
+                        payload["source_hash"],
+                    ),
+                ).fetchone()
+                if existing is not None and existing["deleted_at"] is not None:
+                    self._conn.execute(
+                        """
+                        UPDATE semantic_memory
+                        SET semantic_id = ?,
+                            summary = ?,
+                            source_memory_ids = ?,
+                            source_hash = ?,
+                            distill_strategy = ?,
+                            confidence = ?,
+                            tags = ?,
+                            ts_ms = ?,
+                            operator_node_id = ?,
+                            deleted_at = NULL
+                        WHERE id = ?
+                        """,
+                        (
+                            payload["semantic_id"],
+                            payload["summary"],
+                            payload["source_memory_ids"],
+                            payload["source_hash"],
+                            payload["distill_strategy"],
+                            payload["confidence"],
+                            payload["tags"],
+                            payload["ts_ms"],
+                            payload["operator_node_id"],
+                            existing["id"],
+                        ),
+                    )
+                    return
+                if existing is not None:
+                    return
                 self._conn.execute(
                     f"INSERT OR IGNORE INTO semantic_memory ({col_names}) VALUES ({placeholders})",
                     values,

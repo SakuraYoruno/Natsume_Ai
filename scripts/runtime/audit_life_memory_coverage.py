@@ -37,6 +37,29 @@ SYSTEM_ACTION_PREFIXES = (
     "resource",
     "health",
 )
+SEMANTIC_PRIORITY_MEMORY_CLASSES = {
+    "preference",
+    "commitment",
+    "correction",
+    "self_change",
+    "stable_fact",
+    "failure_lesson",
+}
+SYNTHETIC_ID_MARKERS = (
+    "surface-memory-recall-e2e",
+    "life-memory-real-scene-e2e",
+    "life-memory-real-scene-",
+    "unit-tool-matrix",
+    "pytest",
+    "person-test",
+    "session-test",
+    "-test",
+    "unit-",
+    "test-",
+    "test_",
+    "synthetic",
+    "probe",
+)
 
 
 ENTRYPOINT_MATRIX = [
@@ -46,6 +69,13 @@ ENTRYPOINT_MATRIX = [
         "episode_kind": "chat_episode",
         "required_evidence": ["user_text", "assistant_reply"],
         "identity": "person_id + session_id required",
+    },
+    {
+        "entrypoint": "owner_directive",
+        "code_path": "host_brain/app/observability_persist.py -> persist_owner_directive_memory",
+        "episode_kind": "chat_episode",
+        "required_evidence": ["user_text + owner://directive anchor"],
+        "identity": "owner person_id + control-plane session_id required",
     },
     {
         "entrypoint": "gateway_input_chat",
@@ -286,6 +316,50 @@ def _metadata_evidence_refs(metadata: Mapping[str, Any]) -> list[str]:
     return []
 
 
+def _split_ref_list(value: Any) -> list[str]:
+    if isinstance(value, (list, tuple)):
+        raw_items = value
+    else:
+        raw_items = str(value or "").split(",")
+    refs: list[str] = []
+    for item in raw_items:
+        ref = _clean(item)
+        if ref and ref not in refs:
+            refs.append(ref)
+    return refs
+
+
+def _is_trusted_provenance_ref(value: Any) -> bool:
+    ref = _clean(value).lower()
+    if not ref:
+        return False
+    if ref.startswith(
+        (
+            "semantic://",
+            "ledger://semantic_memory/",
+            "life_episode::",
+            "life_memory_collection::",
+            "life_memory_entity::",
+            "life_memory_entity://",
+        )
+    ):
+        return False
+    if ref.startswith(("chat://person/", "chat://session/")):
+        return False
+    if ref.startswith("source:"):
+        return False
+    return "://" in ref
+
+
+def _trusted_provenance_refs(*values: Any) -> list[str]:
+    refs: list[str] = []
+    for value in values:
+        for ref in _split_ref_list(value):
+            if _is_trusted_provenance_ref(ref) and ref not in refs:
+                refs.append(ref)
+    return refs
+
+
 def _has_gateway_evidence(row: Mapping[str, Any], metadata: Mapping[str, Any]) -> bool:
     refs = _metadata_evidence_refs(metadata)
     source_refs = str(row.get("evidence_source_refs") or "")
@@ -310,8 +384,7 @@ def _is_synthetic(row: Mapping[str, Any], metadata: Mapping[str, Any]) -> bool:
     session_id = _clean(row.get("session_id")).lower()
     if bool(metadata.get("e2e_probe") or metadata.get("synthetic_probe") or metadata.get("test_probe")):
         return True
-    markers = ("surface-memory-recall-e2e", "pytest", "test-", "probe")
-    return any(marker in person_id or marker in session_id for marker in markers)
+    return any(marker in person_id or marker in session_id for marker in SYNTHETIC_ID_MARKERS)
 
 
 def _summarize_counter(counter: Counter[tuple[str, str]]) -> list[dict[str, Any]]:
@@ -335,6 +408,8 @@ def _infer_entrypoints(row: Mapping[str, Any], metadata: Mapping[str, Any]) -> l
 
     if kind == "chat_episode":
         add("surface_chat")
+        if bool(metadata.get("owner_directive")) or source == "owner_directive" or "owner://directive/" in evidence_source_refs:
+            add("owner_directive")
         if _is_gateway_context(row, metadata) or any(ref.startswith("gateway://message/") for ref in refs) or "gateway://message/" in evidence_source_refs:
             add("gateway_input_chat")
     if kind in {"action_episode", "background_episode"} and (_is_gateway_context(row, metadata) or action in USER_FACING_ACTIONS):
@@ -371,6 +446,11 @@ def _fetch_rows(conn: sqlite3.Connection) -> list[dict[str, Any]]:
             ep.result,
             ep.truth_state,
             ep.retention_state,
+            ep.memory_strength,
+            ep.decay_profile_id,
+            ep.retention_until_ts_ms,
+            ep.compressed_into_episode_id,
+            ep.forget_reason,
             ep.status,
             ep.created_ts_ms,
             ep.last_touched_ts_ms,
@@ -409,7 +489,9 @@ def _fetch_collection_rows(conn: sqlite3.Connection) -> list[dict[str, Any]]:
             c.updated_ts_ms,
             c.metadata,
             COUNT(i.collection_item_id) AS actual_item_count,
-            SUM(CASE WHEN i.collection_item_id IS NOT NULL AND ep.episode_id IS NULL THEN 1 ELSE 0 END) AS missing_episode_item_count
+            SUM(CASE WHEN i.collection_item_id IS NOT NULL AND ep.episode_id IS NULL THEN 1 ELSE 0 END) AS missing_episode_item_count,
+            GROUP_CONCAT(DISTINCT i.source_ref) AS collection_source_refs,
+            GROUP_CONCAT(DISTINCT i.evidence_ref) AS collection_evidence_refs
         FROM life_memory_collection c
         LEFT JOIN life_memory_collection_item i ON i.collection_id = c.collection_id
         LEFT JOIN life_episode ep ON ep.episode_id = i.episode_id
@@ -439,6 +521,74 @@ def _fetch_semantic_rows(conn: sqlite3.Connection) -> list[dict[str, Any]]:
         FROM semantic_memory
         WHERE deleted_at IS NULL
         ORDER BY ts_ms DESC
+        """
+    ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def _fetch_entity_rows(conn: sqlite3.Connection) -> list[dict[str, Any]]:
+    if not _table_exists(conn, "life_memory_entity"):
+        return []
+    rows = conn.execute(
+        """
+        SELECT
+            e.entity_id,
+            e.entity_kind,
+            e.canonical_name,
+            e.normalized_key,
+            e.domain,
+            e.retention_state,
+            e.mention_count,
+            e.memory_strength,
+            e.first_seen_ts_ms,
+            e.last_seen_ts_ms,
+            e.metadata,
+            COUNT(m.mention_id) AS actual_mention_count,
+            SUM(CASE WHEN m.episode_id IS NOT NULL AND ep.episode_id IS NULL THEN 1 ELSE 0 END) AS missing_episode_mention_count,
+            GROUP_CONCAT(DISTINCT m.source_ref) AS entity_source_refs,
+            GROUP_CONCAT(DISTINCT m.evidence_ref) AS entity_evidence_refs
+        FROM life_memory_entity e
+        LEFT JOIN life_memory_entity_mention m ON m.entity_id = e.entity_id
+        LEFT JOIN life_episode ep ON ep.episode_id = m.episode_id
+        GROUP BY e.entity_id
+        ORDER BY e.last_seen_ts_ms DESC
+        """
+    ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def _fetch_correction_rows(conn: sqlite3.Connection) -> list[dict[str, Any]]:
+    if not _table_exists(conn, "life_memory_correction"):
+        return []
+    rows = conn.execute(
+        """
+        SELECT
+            c.correction_id,
+            c.episode_id,
+            c.correction_episode_id,
+            c.correction_kind,
+            c.reason_code,
+            c.detail,
+            c.created_ts_ms,
+            c.metadata,
+            ep.evidence_count AS source_evidence_count,
+            ep.evidence_source_refs AS source_evidence_refs,
+            corr.evidence_count AS correction_evidence_count,
+            corr.evidence_source_refs AS correction_evidence_refs
+        FROM life_memory_correction c
+        LEFT JOIN (
+            SELECT ep.episode_id, COUNT(ev.evidence_id) AS evidence_count, GROUP_CONCAT(DISTINCT ev.source_ref) AS evidence_source_refs
+            FROM life_episode ep
+            LEFT JOIN life_evidence ev ON ev.episode_id = ep.episode_id
+            GROUP BY ep.episode_id
+        ) ep ON ep.episode_id = c.episode_id
+        LEFT JOIN (
+            SELECT ep.episode_id, COUNT(ev.evidence_id) AS evidence_count, GROUP_CONCAT(DISTINCT ev.source_ref) AS evidence_source_refs
+            FROM life_episode ep
+            LEFT JOIN life_evidence ev ON ev.episode_id = ep.episode_id
+            GROUP BY ep.episode_id
+        ) corr ON corr.episode_id = c.correction_episode_id
+        ORDER BY c.created_ts_ms DESC
         """
     ).fetchall()
     return [dict(row) for row in rows]
@@ -492,25 +642,154 @@ def _semantic_source_ids(row: Mapping[str, Any]) -> list[str]:
     return [_clean(item) for item in _json_list(row.get("source_memory_ids")) if _clean(item)]
 
 
+def _semantic_referenced_episode_ids(semantic_rows: Sequence[Mapping[str, Any]]) -> set[str]:
+    episode_ids: set[str] = set()
+    for row in semantic_rows:
+        for source_id in _semantic_source_ids(row):
+            if not source_id.startswith("life_episode::"):
+                continue
+            episode_id = _clean(source_id.split("::", 1)[1])
+            if episode_id:
+                episode_ids.add(episode_id)
+    return episode_ids
+
+
+def _semantic_candidate_diagnostics(
+    *,
+    rows: Sequence[Mapping[str, Any]],
+    semantic_rows: Sequence[Mapping[str, Any]],
+    include_synthetic: bool,
+) -> dict[str, Any]:
+    referenced_episode_ids = _semantic_referenced_episode_ids(semantic_rows)
+    candidate_counts: Counter[str] = Counter()
+    production_candidate_counts: Counter[str] = Counter()
+    synthetic_candidate_counts: Counter[str] = Counter()
+    referenced_counts: Counter[str] = Counter()
+    unreferenced_counts: Counter[str] = Counter()
+    production_unreferenced_counts: Counter[str] = Counter()
+    synthetic_unreferenced_counts: Counter[str] = Counter()
+    samples: list[dict[str, Any]] = []
+    for row in rows:
+        metadata = _json_loads(row.get("metadata"))
+        policy = metadata.get("memory_policy") if isinstance(metadata.get("memory_policy"), Mapping) else {}
+        memory_class = _clean(metadata.get("memory_class") or (policy or {}).get("memory_class") or "").lower()
+        semantic_candidate = bool((policy or {}).get("semantic_candidate")) or memory_class in SEMANTIC_PRIORITY_MEMORY_CLASSES
+        if not semantic_candidate or not memory_class:
+            continue
+        truth_state = _clean(row.get("truth_state")).upper()
+        status = _clean(row.get("status")).upper()
+        retention_state = _clean(row.get("retention_state")).upper()
+        if truth_state != "VERIFIED" or status != "ACTIVE" or retention_state == "GONE":
+            continue
+        synthetic = _is_synthetic(row, metadata)
+        episode_id = _clean(row.get("episode_id"))
+        if synthetic:
+            synthetic_candidate_counts[memory_class] += 1
+            if episode_id not in referenced_episode_ids:
+                synthetic_unreferenced_counts[memory_class] += 1
+            if not include_synthetic:
+                continue
+        else:
+            production_candidate_counts[memory_class] += 1
+        candidate_counts[memory_class] += 1
+        if episode_id in referenced_episode_ids:
+            referenced_counts[memory_class] += 1
+            continue
+        unreferenced_counts[memory_class] += 1
+        if synthetic:
+            synthetic_unreferenced_counts[memory_class] += 1
+        else:
+            production_unreferenced_counts[memory_class] += 1
+        if len(samples) < 10:
+            samples.append(
+                {
+                    "episode_id": episode_id,
+                    "memory_class": memory_class,
+                    "summary": _clean(row.get("summary"))[:240],
+                    "person_id": _clean(row.get("person_id")),
+                    "session_id": _clean(row.get("session_id")),
+                    "synthetic": synthetic,
+                }
+            )
+    return {
+        "semantic_candidate_counts": dict(sorted(candidate_counts.items())),
+        "production_semantic_candidate_counts": dict(sorted(production_candidate_counts.items())),
+        "synthetic_semantic_candidate_counts": dict(sorted(synthetic_candidate_counts.items())),
+        "semantic_referenced_candidate_counts": dict(sorted(referenced_counts.items())),
+        "semantic_unreferenced_candidate_counts": dict(sorted(unreferenced_counts.items())),
+        "production_semantic_unreferenced_candidate_counts": dict(sorted(production_unreferenced_counts.items())),
+        "synthetic_semantic_unreferenced_candidate_counts": dict(sorted(synthetic_unreferenced_counts.items())),
+        "semantic_candidate_unreferenced_samples": samples,
+        "semantic_referenced_episode_count": len(referenced_episode_ids),
+    }
+
+
+def _semantic_collection_identity_keys(
+    row: Mapping[str, Any],
+    *,
+    collection_by_id: Mapping[str, Mapping[str, Any]],
+    include_synthetic: bool,
+) -> list[str]:
+    if _clean(row.get("distill_strategy")) != "life_memory_collection_rule_consolidation":
+        return []
+    keys: list[str] = []
+    for source_id in _semantic_source_ids(row):
+        if not source_id.startswith("life_memory_collection::"):
+            continue
+        collection_id = source_id.split("::", 1)[1]
+        collection = collection_by_id.get(collection_id)
+        if collection is None:
+            continue
+        metadata = _json_loads(collection.get("metadata"))
+        if _is_synthetic(collection, metadata) and not include_synthetic:
+            continue
+        owner = _clean(collection.get("person_id")) or "global"
+        key = "|".join(
+            [
+                _clean(collection.get("collection_kind")),
+                _clean(collection.get("domain")),
+                _clean(collection.get("scope_key")),
+                owner,
+            ]
+        )
+        if key and key not in keys:
+            keys.append(key)
+    return keys
+
+
 def _audit_semantic_rows(
     *,
     semantic_rows: Sequence[Mapping[str, Any]],
     episode_rows: Sequence[Mapping[str, Any]],
     collection_rows: Sequence[Mapping[str, Any]],
+    entity_rows: Sequence[Mapping[str, Any]],
+    correction_rows: Sequence[Mapping[str, Any]],
     include_synthetic: bool,
-) -> tuple[list[SemanticIssue], Counter[str]]:
+) -> tuple[list[SemanticIssue], Counter[str], Counter[str]]:
     episode_by_id = {_clean(row.get("episode_id")): row for row in episode_rows if _clean(row.get("episode_id"))}
     collection_by_id = {_clean(row.get("collection_id")): row for row in collection_rows if _clean(row.get("collection_id"))}
+    entity_by_id = {_clean(row.get("entity_id")): row for row in entity_rows if _clean(row.get("entity_id"))}
+    correction_by_id = {_clean(row.get("correction_id")): row for row in correction_rows if _clean(row.get("correction_id"))}
     issues: list[SemanticIssue] = []
     source_class_counts: Counter[str] = Counter()
+    provenance_counts: Counter[str] = Counter()
+    collection_semantic_by_scope: dict[str, list[str]] = defaultdict(list)
     for row in semantic_rows:
         semantic_id = _clean(row.get("semantic_id"))
+        for identity_key in _semantic_collection_identity_keys(
+            row,
+            collection_by_id=collection_by_id,
+            include_synthetic=include_synthetic,
+        ):
+            if semantic_id and semantic_id not in collection_semantic_by_scope[identity_key]:
+                collection_semantic_by_scope[identity_key].append(semantic_id)
         source_ids = _semantic_source_ids(row)
         if not source_ids:
             issues.append(SemanticIssue("semantic_missing_sources", "critical", semantic_id, "", "semantic memory has no source_memory_ids"))
         if _semantic_summary_has_noise(row.get("summary")):
             issues.append(SemanticIssue("semantic_summary_noise", "warn", semantic_id, "", "semantic summary looks like raw logs, secrets, or turn transcript noise"))
         life_source_seen = False
+        trusted_provenance_seen = False
         for source_id in source_ids:
             if source_id.startswith("life_episode::"):
                 source_class_counts["life_episode"] += 1
@@ -523,6 +802,14 @@ def _audit_semantic_rows(
                 metadata = _json_loads(episode.get("metadata"))
                 if _is_synthetic(episode, metadata) and not include_synthetic:
                     continue
+                refs = _trusted_provenance_refs(episode.get("evidence_source_refs"), _metadata_evidence_refs(metadata))
+                evidence_count = int(episode.get("evidence_count") or 0)
+                if evidence_count > 0 and refs:
+                    trusted_provenance_seen = True
+                if evidence_count <= 0:
+                    issues.append(SemanticIssue("semantic_life_episode_source_missing_evidence", "critical", semantic_id, source_id, "life_episode source has no life_evidence rows"))
+                elif not refs:
+                    issues.append(SemanticIssue("semantic_life_episode_source_missing_evidence_ref", "critical", semantic_id, source_id, "life_episode source evidence has no traceable source_ref"))
                 truth_state = _clean(episode.get("truth_state")).upper()
                 status = _clean(episode.get("status")).upper()
                 retention_state = _clean(episode.get("retention_state")).upper()
@@ -545,11 +832,83 @@ def _audit_semantic_rows(
                     issues.append(SemanticIssue("semantic_gone_collection_source", "warn", semantic_id, source_id, "semantic source collection is GONE"))
                 if int(collection.get("actual_item_count") or collection.get("item_count") or 0) <= 0:
                     issues.append(SemanticIssue("semantic_empty_collection_source", "warn", semantic_id, source_id, "semantic source collection has no items"))
+                collection_refs = _trusted_provenance_refs(
+                    collection.get("collection_evidence_refs"),
+                    collection.get("collection_source_refs"),
+                    _metadata_evidence_refs(_json_loads(collection.get("metadata"))),
+                )
+                if collection_refs:
+                    trusted_provenance_seen = True
+                elif int(collection.get("actual_item_count") or collection.get("item_count") or 0) > 0:
+                    issues.append(SemanticIssue("semantic_collection_source_missing_evidence_ref", "critical", semantic_id, source_id, "collection source has no traceable item evidence/source refs"))
+            elif source_id.startswith("life_memory_entity::"):
+                source_class_counts["life_memory_entity"] += 1
+                life_source_seen = True
+                entity_id = source_id.split("::", 1)[1]
+                entity = entity_by_id.get(entity_id)
+                if entity is None:
+                    issues.append(SemanticIssue("semantic_missing_entity_source", "critical", semantic_id, source_id, "life_memory_entity source is missing"))
+                    continue
+                retention_state = _clean(entity.get("retention_state")).upper()
+                if retention_state == "GONE":
+                    issues.append(SemanticIssue("semantic_gone_entity_source", "warn", semantic_id, source_id, "semantic source entity is GONE"))
+                mention_count = int(entity.get("actual_mention_count") or entity.get("mention_count") or 0)
+                if mention_count <= 0:
+                    issues.append(SemanticIssue("semantic_empty_entity_source", "critical", semantic_id, source_id, "semantic source entity has no mentions"))
+                missing_mentions = int(entity.get("missing_episode_mention_count") or 0)
+                if missing_mentions > 0:
+                    issues.append(SemanticIssue("semantic_entity_source_missing_episode_mention", "warn", semantic_id, source_id, "entity has mentions whose episode source is missing"))
+                entity_refs = _trusted_provenance_refs(
+                    entity.get("entity_evidence_refs"),
+                    entity.get("entity_source_refs"),
+                    _metadata_evidence_refs(_json_loads(entity.get("metadata"))),
+                )
+                if entity_refs:
+                    trusted_provenance_seen = True
+                elif mention_count > 0:
+                    issues.append(SemanticIssue("semantic_entity_source_missing_evidence_ref", "critical", semantic_id, source_id, "entity source has no traceable mention evidence/source refs"))
+            elif source_id.startswith("life_memory_correction::"):
+                source_class_counts["life_memory_correction"] += 1
+                life_source_seen = True
+                correction_id = source_id.split("::", 1)[1]
+                correction = correction_by_id.get(correction_id)
+                if correction is None:
+                    issues.append(SemanticIssue("semantic_missing_correction_source", "critical", semantic_id, source_id, "life_memory_correction source is missing"))
+                    continue
+                if not _clean(correction.get("detail")) and not _clean(correction.get("reason_code")):
+                    issues.append(SemanticIssue("semantic_correction_source_missing_detail", "critical", semantic_id, source_id, "correction source has no detail or reason_code"))
+                correction_refs = _trusted_provenance_refs(
+                    correction.get("correction_evidence_refs"),
+                    correction.get("source_evidence_refs"),
+                )
+                if correction_refs or _clean(correction.get("detail")):
+                    trusted_provenance_seen = True
+                else:
+                    issues.append(SemanticIssue("semantic_correction_source_missing_evidence_ref", "critical", semantic_id, source_id, "correction source has no traceable evidence or correction detail"))
             else:
                 source_class_counts["legacy_or_external"] += 1
         if source_ids and not life_source_seen:
             issues.append(SemanticIssue("semantic_legacy_non_life_source", "warn", semantic_id, "", "active semantic memory is not sourced from LifeMemory SSOT"))
-    return issues, source_class_counts
+        if life_source_seen:
+            provenance_counts["resolved" if trusted_provenance_seen else "unresolved"] += 1
+        elif source_ids:
+            provenance_counts["legacy_or_external"] += 1
+        else:
+            provenance_counts["missing_sources"] += 1
+    for identity_key, semantic_ids in sorted(collection_semantic_by_scope.items()):
+        if len(semantic_ids) <= 1:
+            continue
+        for semantic_id in semantic_ids:
+            issues.append(
+                SemanticIssue(
+                    "semantic_duplicate_collection_scope",
+                    "warn",
+                    semantic_id,
+                    identity_key,
+                    f"multiple active collection semantic memories share one collection scope: {semantic_ids}",
+                )
+            )
+    return issues, source_class_counts, provenance_counts
 
 
 def build_coverage_report(
@@ -562,6 +921,8 @@ def build_coverage_report(
     rows = _fetch_rows(conn)
     collection_rows = _fetch_collection_rows(conn)
     semantic_rows = _fetch_semantic_rows(conn)
+    entity_rows = _fetch_entity_rows(conn)
+    correction_rows = _fetch_correction_rows(conn)
     issues: list[EpisodeIssue] = []
     collection_issues: list[CollectionIssue] = []
     semantic_issues: list[SemanticIssue] = []
@@ -572,11 +933,17 @@ def build_coverage_report(
     evidence_kind_counter: Counter[str] = Counter()
     memory_class_counter: Counter[str] = Counter()
     recall_grain_counter: Counter[str] = Counter()
+    retention_state_counter: Counter[str] = Counter()
+    decay_profile_counter: Counter[str] = Counter()
+    forget_reason_counter: Counter[str] = Counter()
     required_identity_counts = {"person": 0, "session": 0}
     gateway_count = 0
     anchor_only_count = 0
     synthetic_count = 0
     production_count = 0
+    compressed_episode_count = 0
+    semantic_reference_protected_episode_count = 0
+    episode_ids = {_clean(row.get("episode_id")) for row in rows if _clean(row.get("episode_id"))}
 
     for row in rows:
         metadata = _json_loads(row.get("metadata"))
@@ -588,8 +955,20 @@ def build_coverage_report(
         policy = metadata.get("memory_policy") if isinstance(metadata.get("memory_policy"), Mapping) else {}
         memory_class = _clean(metadata.get("memory_class") or (policy or {}).get("memory_class") or "legacy_unclassified")
         recall_grain = _clean(metadata.get("recall_grain") or (policy or {}).get("recall_grain") or "legacy_unclassified")
+        retention_state = _clean(row.get("retention_state")).upper() or "UNKNOWN"
+        decay_profile = _clean(row.get("decay_profile_id")).upper() or "UNKNOWN"
+        forget_reason = _clean(row.get("forget_reason"))
+        compressed_into = _clean(row.get("compressed_into_episode_id"))
         memory_class_counter[memory_class] += 1
         recall_grain_counter[recall_grain] += 1
+        retention_state_counter[retention_state] += 1
+        decay_profile_counter[decay_profile] += 1
+        if forget_reason:
+            forget_reason_counter[forget_reason] += 1
+        if compressed_into:
+            compressed_episode_count += 1
+        if forget_reason == "semantic_reference_protected":
+            semantic_reference_protected_episode_count += 1
         by_kind_action[(kind, action)] += 1
         if _is_gateway_context(row, metadata):
             gateway_count += 1
@@ -615,6 +994,32 @@ def build_coverage_report(
             issues.append(EpisodeIssue("missing_truth_state", "critical", episode_id, kind, action, person_id, session_id, "truth_state is required"))
         if not _clean(row.get("retention_state")):
             issues.append(EpisodeIssue("missing_retention_state", "critical", episode_id, kind, action, person_id, session_id, "retention_state is required"))
+        if compressed_into and compressed_into not in episode_ids:
+            issues.append(
+                EpisodeIssue(
+                    "compressed_target_missing",
+                    "critical",
+                    episode_id,
+                    kind,
+                    action,
+                    person_id,
+                    session_id,
+                    f"compressed_into_episode_id {compressed_into!r} does not exist",
+                )
+            )
+        if retention_state == "GONE" and not forget_reason and not _is_system_like(row, metadata):
+            issues.append(
+                EpisodeIssue(
+                    "gone_episode_missing_forget_reason",
+                    "warn",
+                    episode_id,
+                    kind,
+                    action,
+                    person_id,
+                    session_id,
+                    "GONE episode should record why it left active recall",
+                )
+            )
         if int(row.get("evidence_count") or 0) <= 0:
             issues.append(EpisodeIssue("missing_evidence", "critical", episode_id, kind, action, person_id, session_id, "episode has no life_evidence rows"))
         if _requires_person(row, metadata):
@@ -693,10 +1098,17 @@ def build_coverage_report(
                 )
             )
 
-    semantic_issues, semantic_source_class_counts = _audit_semantic_rows(
+    semantic_issues, semantic_source_class_counts, semantic_provenance_counts = _audit_semantic_rows(
         semantic_rows=semantic_rows,
         episode_rows=rows,
         collection_rows=collection_rows,
+        entity_rows=entity_rows,
+        correction_rows=correction_rows,
+        include_synthetic=include_synthetic,
+    )
+    semantic_candidate_diagnostics = _semantic_candidate_diagnostics(
+        rows=rows,
+        semantic_rows=semantic_rows,
         include_synthetic=include_synthetic,
     )
     issue_counts = Counter(issue.issue_kind for issue in issues)
@@ -728,6 +1140,8 @@ def build_coverage_report(
             "synthetic_included": bool(include_synthetic),
             "gateway_episode_count": gateway_count,
             "anchor_only_count": anchor_only_count,
+            "compressed_episode_count": compressed_episode_count,
+            "semantic_reference_protected_episode_count": semantic_reference_protected_episode_count,
             "required_person_episode_count": required_identity_counts["person"],
             "required_session_episode_count": required_identity_counts["session"],
             "issue_count": len(issues),
@@ -739,6 +1153,15 @@ def build_coverage_report(
             "collection_critical_issue_count": collection_severity_counts.get("critical", 0),
             "collection_warn_issue_count": collection_severity_counts.get("warn", 0),
             "semantic_memory_count": len(semantic_rows),
+            "semantic_provenance_resolved_count": semantic_provenance_counts.get("resolved", 0),
+            "semantic_provenance_unresolved_count": semantic_provenance_counts.get("unresolved", 0),
+            "semantic_referenced_episode_count": semantic_candidate_diagnostics["semantic_referenced_episode_count"],
+            "semantic_candidate_episode_count": sum(semantic_candidate_diagnostics["semantic_candidate_counts"].values()),
+            "semantic_unreferenced_candidate_episode_count": sum(semantic_candidate_diagnostics["semantic_unreferenced_candidate_counts"].values()),
+            "production_semantic_candidate_episode_count": sum(semantic_candidate_diagnostics["production_semantic_candidate_counts"].values()),
+            "production_semantic_unreferenced_candidate_episode_count": sum(
+                semantic_candidate_diagnostics["production_semantic_unreferenced_candidate_counts"].values()
+            ),
             "semantic_issue_count": len(semantic_issues),
             "semantic_critical_issue_count": semantic_severity_counts.get("critical", 0),
             "semantic_warn_issue_count": semantic_severity_counts.get("warn", 0),
@@ -759,12 +1182,17 @@ def build_coverage_report(
             {"collection_kind": kind, "domain": domain, "count": count}
             for (kind, domain), count in sorted(collection_by_kind_domain.items(), key=lambda item: (-item[1], item[0][0], item[0][1]))
         ],
+        "retention_state_counts": [{"retention_state": key, "count": count} for key, count in retention_state_counter.most_common()],
+        "decay_profile_counts": [{"decay_profile_id": key, "count": count} for key, count in decay_profile_counter.most_common()],
+        "forget_reason_counts": [{"forget_reason": key, "count": count} for key, count in forget_reason_counter.most_common()],
         "memory_class_counts": [{"memory_class": key, "count": count} for key, count in memory_class_counter.most_common()],
         "recall_grain_counts": [{"recall_grain": key, "count": count} for key, count in recall_grain_counter.most_common()],
         "evidence_kinds": [{"evidence_kind": key, "count": count} for key, count in evidence_kind_counter.most_common()],
         "issue_counts": dict(sorted(issue_counts.items())),
         "collection_issue_counts": dict(sorted(collection_issue_counts.items())),
         "semantic_source_class_counts": dict(sorted(semantic_source_class_counts.items())),
+        "semantic_provenance_counts": dict(sorted(semantic_provenance_counts.items())),
+        **semantic_candidate_diagnostics,
         "semantic_issue_counts": dict(sorted(semantic_issue_counts.items())),
         "entrypoint_issue_counts": dict(sorted(entrypoint_issue_counts.items())),
         "issues": [asdict(issue) for issue in issues[: max(1, int(sample_limit))]],
@@ -785,6 +1213,8 @@ def _render_markdown(report: Mapping[str, Any]) -> str:
         f"- Synthetic episodes: {summary.get('synthetic_episode_count', 0)} "
         f"(included={str(summary.get('synthetic_included', False)).lower()})",
         f"- Gateway episodes: {summary.get('gateway_episode_count', 0)}",
+        f"- Compressed episodes: {summary.get('compressed_episode_count', 0)}",
+        f"- Semantic-reference protected episodes: {summary.get('semantic_reference_protected_episode_count', 0)}",
         f"- Required person episodes: {summary.get('required_person_episode_count', 0)}",
         f"- Required session episodes: {summary.get('required_session_episode_count', 0)}",
         f"- Issues: {summary.get('issue_count', 0)} "
@@ -792,7 +1222,11 @@ def _render_markdown(report: Mapping[str, Any]) -> str:
         f"- Collections: {summary.get('collection_count', 0)} "
         f"(items={summary.get('collection_item_count', 0)}, issues={summary.get('collection_issue_count', 0)})",
         f"- Semantic memories: {summary.get('semantic_memory_count', 0)} "
-        f"(issues={summary.get('semantic_issue_count', 0)})",
+        f"(candidates={summary.get('semantic_candidate_episode_count', 0)}, "
+        f"unreferenced={summary.get('semantic_unreferenced_candidate_episode_count', 0)}, "
+        f"provenance={summary.get('semantic_provenance_resolved_count', 0)}/"
+        f"{summary.get('semantic_provenance_unresolved_count', 0)}, "
+        f"issues={summary.get('semantic_issue_count', 0)})",
         f"- Observed entrypoints: {summary.get('observed_entrypoint_count', 0)} "
         f"(required={summary.get('required_entrypoint_count', 0)}, issues={summary.get('entrypoint_issue_count', 0)})",
         "",
@@ -816,6 +1250,12 @@ def _render_markdown(report: Mapping[str, Any]) -> str:
     lines.extend(["", "## Memory Classes", ""])
     for item in report.get("memory_class_counts") or []:
         lines.append(f"- {item.get('memory_class')}: {item.get('count')}")
+    lines.extend(["", "## Retention States", ""])
+    for item in report.get("retention_state_counts") or []:
+        lines.append(f"- {item.get('retention_state')}: {item.get('count')}")
+    lines.extend(["", "## Forget Reasons", ""])
+    for item in report.get("forget_reason_counts") or []:
+        lines.append(f"- {item.get('forget_reason')}: {item.get('count')}")
     lines.extend(["", "## Recall Grains", ""])
     for item in report.get("recall_grain_counts") or []:
         lines.append(f"- {item.get('recall_grain')}: {item.get('count')}")
@@ -827,6 +1267,12 @@ def _render_markdown(report: Mapping[str, Any]) -> str:
         lines.append(f"- {key}: {count}")
     lines.extend(["", "## Semantic Issue Counts", ""])
     for key, count in dict(report.get("semantic_issue_counts") or {}).items():
+        lines.append(f"- {key}: {count}")
+    lines.extend(["", "## Semantic Candidate Counts", ""])
+    for key, count in dict(report.get("semantic_candidate_counts") or {}).items():
+        lines.append(f"- {key}: {count}")
+    lines.extend(["", "## Production Semantic Backlog", ""])
+    for key, count in dict(report.get("production_semantic_unreferenced_candidate_counts") or {}).items():
         lines.append(f"- {key}: {count}")
     lines.extend(["", "## EntryPoint Issue Counts", ""])
     for key, count in dict(report.get("entrypoint_issue_counts") or {}).items():

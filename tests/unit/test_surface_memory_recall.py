@@ -164,7 +164,7 @@ def test_surface_memory_recall_packet_compresses_multi_route_candidates() -> Non
     assert isinstance(packet, SurfaceMemoryRecallPacket)
     assert packet.facts == (
         "记忆线索：上次说好周末去看展",
-        "长期记忆：用户低能量时偏好少追问，先给一个小步骤。",
+        "长期事实：用户低能量时偏好少追问，先给一个小步骤。",
     )
     assert packet.route_ids == ("episodic", "semantic", "bond")
     assert packet.evidence_refs == (
@@ -176,7 +176,7 @@ def test_surface_memory_recall_packet_compresses_multi_route_candidates() -> Non
     assert packet.confidence == 0.93
     assert "不要根据记忆升级亲密关系" in packet.must_not_do
     assert "用户事实记忆只补当前承接，不扩写成未确认细节" in packet.style_anchor
-    assert "长期记忆只补稳定偏好和关系事实，不替代当前用户句子" in packet.style_anchor
+    assert "长期事实只补稳定偏好和关系事实，不替代当前用户句子" in packet.style_anchor
     assert "按关系线索控制距离，不因为记忆升格亲密" in packet.style_anchor
     assert all("世界事实" not in fact for fact in packet.facts)
     assert "chat://session" not in "\n".join(packet.facts)
@@ -239,6 +239,170 @@ def test_surface_memory_recall_prefers_high_score_life_episode_over_legacy_noise
 
     assert packet.facts[0].startswith("记忆线索：用户提到： 调用今日推荐")
     assert "已创建轻小说推荐任务" in packet.facts[0]
+
+
+def test_relationship_feedback_lookup_prefers_matching_subtopic_life_episode() -> None:
+    packet = build_surface_memory_recall_packet(
+        SimpleNamespace(
+            output={
+                "query": "我之前说文本质量不像人话，是哪里的问题？",
+                "status": "OK",
+                "stage": "S_RET_RECALL",
+                "degraded": False,
+                "routes": [
+                    {"route_id": "life", "store_id": "life_episode"},
+                    {"route_id": "semantic", "store_id": "semantic_memory"},
+                ],
+                "candidate_count": 2,
+                "candidates": [
+                    {
+                        "doc_id": "sem-recall-quality",
+                        "source_ref": "ledger://semantic_memory/sem-recall-quality",
+                        "evidence_ref": "semantic://sem-recall-quality",
+                        "snippet": "关系反馈：用户强烈反馈：记忆召回和判断必须回到证据，不能把没核实的内容说成事实或胡说八道。",
+                        "score": 0.98,
+                        "metadata": {
+                            "store_id": "semantic_memory",
+                            "tags": ["semantic_kind:relationship_feedback", "relationship_feedback"],
+                        },
+                    },
+                    {
+                        "doc_id": "ep-natural-chat",
+                        "source_ref": "life_episode://ep-natural-chat",
+                        "evidence_ref": "chat://request/feedback-natural#user",
+                        "snippet": "User: 文本质量不像人话，太台词腔了。\nAssistant: 收到，我以后把证据转成更自然的聊天方式。",
+                        "score": 0.72,
+                        "metadata": {"store_id": "life_episode"},
+                    },
+                    {
+                        "doc_id": "echo-old-lookup",
+                        "source_ref": "memory://episodic/echo-old-lookup",
+                        "evidence_ref": "evd://episodic/echo-old-lookup",
+                        "snippet": "当前回合摘要：用户提到「我之前说文本质量不像人话，是哪里的问题？」；回复「哈？你发一段我帮你看看。」。",
+                        "score": 0.90,
+                        "metadata": {"store_id": "episodic_vector"},
+                    },
+                    {
+                        "doc_id": "pref-format-template",
+                        "source_ref": "life_episode://pref-format-template",
+                        "evidence_ref": "chat://request/pref-format-template#user",
+                        "snippet": "User: 以后推荐轻小说时，每本书的简介后应该换行，别模板腔。\nAssistant: 记住了，后面按自然的卡片格式发。",
+                        "score": 0.89,
+                        "metadata": {"store_id": "life_episode"},
+                    },
+                ],
+            }
+        ),
+        query="我之前说文本质量不像人话，是哪里的问题？",
+        query_kind="preference_lookup",
+        recall_contract_id="preference",
+        primary_memory_layer="semantic_memory",
+        target_domains=("preference",),
+        expected_memory_layers=("semantic_memory", "life_episode"),
+    )
+
+    joined = "\n".join(packet.facts)
+    assert "回答要像正常聊天" in joined
+    assert "胡说八道" not in joined
+    assert "你发一段我帮你看看" not in joined
+    assert "简介后应该换行" not in joined
+
+
+def test_preference_lookup_recommendation_format_excludes_llm_routing_and_relationship_feedback() -> None:
+    packet = build_surface_memory_recall_packet(
+        SimpleNamespace(
+            output={
+                "query": "还记得我说推荐格式要怎样吗？",
+                "status": "OK",
+                "stage": "S_RET_RECALL",
+                "degraded": False,
+                "routes": [{"route_id": "semantic", "store_id": "semantic_memory"}],
+                "candidate_count": 3,
+                "candidates": [
+                    {
+                        "doc_id": "sem-format",
+                        "source_ref": "ledger://semantic_memory/sem-format",
+                        "evidence_ref": "chat://request/format#user",
+                        "snippet": "用户偏好：以后推荐轻小说时，不要拟人化发送；前面的总览完整一段，后面各个卡片各一段；每本简介后应该换行",
+                        "score": 0.80,
+                        "metadata": {"store_id": "semantic_memory", "tags": ["semantic_kind:user_preference"]},
+                    },
+                    {
+                        "doc_id": "sem-relationship",
+                        "source_ref": "ledger://semantic_memory/sem-relationship",
+                        "evidence_ref": "chat://request/relationship#user",
+                        "snippet": "关系反馈：用户强烈反馈：记忆召回和判断必须回到证据，不能把没核实的内容说成事实或胡说八道。",
+                        "score": 0.99,
+                        "metadata": {"store_id": "semantic_memory", "tags": ["semantic_kind:relationship_feedback"]},
+                    },
+                    {
+                        "doc_id": "sem-routing",
+                        "source_ref": "ledger://semantic_memory/sem-routing",
+                        "evidence_ref": "chat://request/routing#user",
+                        "snippet": "用户偏好：Thalamus LLM 用模型池，不要用 Codex；模型池当前优先使用 DeepSeek，DeepSeek 不可用再用 Gemini；不要用 Pro",
+                        "score": 0.98,
+                        "metadata": {"store_id": "semantic_memory", "tags": ["semantic_kind:user_preference"]},
+                    },
+                ],
+            }
+        ),
+        query="还记得我说推荐格式要怎样吗？",
+        max_facts=4,
+        max_chars_per_fact=240,
+        temporal_scope="unspecified",
+        query_kind="preference_lookup",
+        recall_contract_id="preference",
+        primary_memory_layer="semantic_memory",
+        target_domains=("preference",),
+        expected_memory_layers=("semantic_memory", "life_episode", "sqlite_ledger", "episodic_vector"),
+        validation_requirements=("trusted_memory_hit", "source_ref_present"),
+        answer_obligations=("state_preference_as_user_rule", "keep_source_episode_traceable"),
+    )
+
+    joined = "\n".join(packet.facts)
+    assert "简介后应该换行" in joined
+    assert "DeepSeek" not in joined
+    assert "胡说八道" not in joined
+    assert packet.evidence_refs == ("chat://request/format#user",)
+
+
+def test_action_pattern_semantic_memory_is_humanized_for_surface_packet() -> None:
+    packet = build_surface_memory_recall_packet(
+        SimpleNamespace(
+            output={
+                "query": "你之前会回去翻正文再判断哪本轻小说好看吗？",
+                "status": "OK",
+                "stage": "S_RET_RECALL",
+                "degraded": False,
+                "routes": [{"route_id": "semantic", "store_id": "semantic_memory"}],
+                "candidate_count": 1,
+                "candidates": [
+                    {
+                        "doc_id": "sem-action-pattern",
+                        "source_ref": "ledger://semantic_memory/sem-action-pattern",
+                        "evidence_ref": "action://event/deep-review-1",
+                        "snippet": "主动行动模式：在轻小说推荐追问里，她会回去打开详情页或正文再比较哪本更值得看；已记录 5 次深读/回看行动，其中5 次拿到可用详情，5 次读到正文级证据。判断时主要看：开篇是不是已经进入故事、对白和人物互动。",
+                        "score": 0.92,
+                        "metadata": {"store_id": "semantic_memory", "tags": ["semantic_kind:action_pattern", "action_pattern"]},
+                    }
+                ],
+            }
+        ),
+        query="你之前会回去翻正文再判断哪本轻小说好看吗？",
+        max_facts=2,
+        max_chars_per_fact=320,
+        query_kind="event_lookup",
+        recall_contract_id="event_lookup",
+        primary_memory_layer="semantic_memory",
+        expected_memory_layers=("semantic_memory", "life_episode"),
+    )
+
+    joined = "\n".join(packet.facts)
+    assert "我会回去打开详情页或正文" in joined
+    assert "实际回看记录" in joined
+    assert "已记录 5 次" not in joined
+    assert "正文级证据" not in joined
+    assert "她会" not in joined
 
 
 def test_surface_memory_recall_prioritizes_terminal_codex_production_result() -> None:
@@ -577,6 +741,119 @@ def test_plan_surface_memory_recall_treats_anaphoric_selection_as_recall() -> No
     assert plan.time_lookback_days == 1
 
 
+def test_recall_decision_trace_exposes_granularity_for_collection_selection() -> None:
+    plan = plan_surface_memory_recall(
+        ThreeLayerContinuityContext(
+            current_user_message="这三本书，你喜欢哪本？",
+            task_mode_hint="daily_chat",
+        )
+    )
+
+    decision = build_surface_memory_recall_decision_trace(plan, invoked=True)
+
+    assert decision["need_type"] == "collection_selection"
+    assert decision["recall_grain"] == "collection_selection"
+    assert decision["retrieval_unit"] == "life_memory_collection.items"
+    assert decision["answer_scope"] == "compare_recalled_items_with_detail_gate"
+    assert "detail_or_body_evidence_before_quality_judgment" in decision["verification_gate"]
+    assert "recall_grain:collection_selection" in decision["selection_basis"]
+
+
+def test_plan_surface_memory_recall_routes_dated_collection_quality_as_selection() -> None:
+    plan = plan_surface_memory_recall(
+        ThreeLayerContinuityContext(
+            current_user_message="昨天那几本好看吗",
+            task_mode_hint="daily_chat",
+        )
+    )
+
+    assert plan.should_recall
+    assert plan.recall_policy == RECALL_POLICY_MUST
+    assert plan.reason == "anaphoric_selection_recall"
+    assert plan.query_kind == "anaphoric_selection"
+    assert plan.recall_contract_id == "anaphoric_selection"
+    assert plan.temporal_scope == "yesterday"
+    assert plan.time_lookback_days == 2
+    assert plan.target_store_ids[0] == "life_memory_collection"
+    assert plan.min_collection_items == 3
+    assert "lightnovel_recommendation" in plan.target_domains
+    assert "collection_or_episode_hit" in plan.validation_requirements
+    assert "collection_item_exact_count" in plan.validation_requirements
+    assert "compare_recalled_items_before_answering" in plan.answer_obligations
+    assert "read_detail_evidence_before_deep_quality_judgment" in plan.answer_obligations
+
+
+def test_recall_decision_trace_exposes_entity_grain_for_specific_item_followup() -> None:
+    plan = plan_surface_memory_recall(
+        ThreeLayerContinuityContext(
+            current_user_message="5月27日推荐 B 这本好看吗？",
+            task_mode_hint="daily_chat",
+        )
+    )
+
+    decision = build_surface_memory_recall_decision_trace(plan, invoked=True)
+
+    assert plan.primary_memory_layer == "life_memory_entity"
+    assert decision["need_type"] == "entity_or_collection_selection"
+    assert decision["recall_grain"] == "entity_selection"
+    assert decision["retrieval_unit"] == "life_memory_entity.with_source_collection"
+    assert decision["answer_scope"] == "judge_named_or_referenced_item_only"
+
+
+def test_plan_surface_memory_recall_routes_collection_listing_without_choice_as_collection_summary() -> None:
+    plan = plan_surface_memory_recall(
+        ThreeLayerContinuityContext(
+            current_user_message="这几天推荐过哪些轻小说？",
+            task_mode_hint="daily_chat",
+        )
+    )
+
+    assert plan.should_recall
+    assert plan.recall_policy == RECALL_POLICY_MUST
+    assert plan.reason == "collection_memory_recall"
+    assert plan.query_kind == "collection_summary"
+    assert plan.recall_contract_id == "collection_recent"
+    assert plan.temporal_scope == "recent_days"
+    assert plan.target_store_ids[0] == "life_memory_collection"
+    assert "read_detail_evidence_before_deep_quality_judgment" not in plan.answer_obligations
+
+
+def test_plan_surface_memory_recall_routes_last_week_collection_listing() -> None:
+    plan = plan_surface_memory_recall(
+        ThreeLayerContinuityContext(
+            current_user_message="上周推过哪些书？",
+            task_mode_hint="daily_chat",
+        )
+    )
+
+    assert plan.should_recall
+    assert plan.recall_policy == RECALL_POLICY_MUST
+    assert plan.reason == "collection_memory_recall"
+    assert plan.query_kind == "collection_summary"
+    assert plan.temporal_scope == "recent_days"
+    assert plan.time_lookback_days == 14
+    assert plan.recall_contract_id == "collection_recent"
+    assert plan.min_collection_items == 3
+    assert "collection_item_min_count" in plan.validation_requirements
+
+
+def test_plan_surface_memory_recall_treats_which_books_as_three_item_collection() -> None:
+    plan = plan_surface_memory_recall(
+        ThreeLayerContinuityContext(
+            current_user_message="昨天给我推荐了哪几本书？",
+            task_mode_hint="daily_chat",
+        )
+    )
+
+    assert plan.should_recall
+    assert plan.recall_policy == RECALL_POLICY_MUST
+    assert plan.reason == "collection_memory_recall"
+    assert plan.query_kind == "date_lookup"
+    assert plan.temporal_scope == "yesterday"
+    assert plan.min_collection_items == 3
+    assert "collection_item_exact_count" in plan.validation_requirements
+
+
 def test_plan_surface_memory_recall_routes_generic_web_judgment_to_detail_evidence_contract() -> None:
     plan = plan_surface_memory_recall(
         ThreeLayerContinuityContext(
@@ -597,6 +874,10 @@ def test_plan_surface_memory_recall_routes_generic_web_judgment_to_detail_eviden
     assert "target_domain_match" in plan.validation_requirements
     assert "use_detail_or_body_evidence" in plan.answer_obligations
     assert "say_if_detail_evidence_is_missing" in plan.answer_obligations
+    decision = build_surface_memory_recall_decision_trace(plan, invoked=True)
+    assert decision["recall_grain"] == "evidence"
+    assert decision["retrieval_unit"] == "life_episode.evidence"
+    assert decision["answer_scope"] == "judge_claim_from_bound_evidence"
 
 
 def test_plan_surface_memory_recall_treats_prior_browser_activity_as_event_lookup() -> None:
@@ -627,6 +908,103 @@ def test_plan_surface_memory_recall_skips_memory_write_current_turn() -> None:
     assert not plan.should_recall
     assert plan.recall_policy == RECALL_POLICY_NO
     assert plan.reason == "memory_write_current_turn_only"
+
+
+def test_plan_surface_memory_recall_skips_current_preference_update_without_lookup() -> None:
+    plan = plan_surface_memory_recall(
+        ThreeLayerContinuityContext(
+            current_user_message="不要用 pro，没有必要。",
+            task_mode_hint="daily_chat",
+        )
+    )
+
+    assert not plan.should_recall
+    assert plan.recall_policy == RECALL_POLICY_NO
+    assert plan.reason == "memory_write_current_turn_only"
+
+
+def test_plan_surface_memory_recall_skips_response_style_feedback_not_collection_lookup() -> None:
+    plan = plan_surface_memory_recall(
+        ThreeLayerContinuityContext(
+            current_user_message="昨天那几本我能对上，这种说辞不像人话。",
+            task_mode_hint="daily_chat",
+        )
+    )
+
+    assert not plan.should_recall
+    assert plan.recall_policy == RECALL_POLICY_NO
+    assert plan.reason == "response_style_feedback_current_turn"
+    assert plan.temporal_scope == "yesterday"
+
+
+def test_plan_surface_memory_recall_routes_past_response_quality_feedback() -> None:
+    plan = plan_surface_memory_recall(
+        ThreeLayerContinuityContext(
+            current_user_message="我之前说文本质量不像人话，是哪里的问题？",
+            task_mode_hint="daily_chat",
+        )
+    )
+
+    assert plan.should_recall
+    assert plan.recall_policy == RECALL_POLICY_MUST
+    assert plan.reason == "explicit_memory_recall"
+    assert plan.query_kind == "preference_lookup"
+    assert plan.target_store_ids[0] == "semantic_memory"
+
+
+def test_plan_surface_memory_recall_routes_open_loop_to_semantic_first() -> None:
+    plan = plan_surface_memory_recall(
+        ThreeLayerContinuityContext(
+            current_user_message="记忆系统还有什么待办没完成？",
+            task_mode_hint="daily_chat",
+        )
+    )
+
+    assert plan.should_recall
+    assert plan.recall_policy == RECALL_POLICY_MUST
+    assert plan.reason == "explicit_memory_recall"
+    assert plan.query_kind == "open_loop"
+    assert plan.recall_contract_id == "open_loop"
+    assert plan.primary_memory_layer == "semantic_memory"
+    assert plan.target_store_ids[0] == "semantic_memory"
+    assert "open_loop" in plan.target_domains
+    assert "self_change" in plan.target_domains
+    decision = build_surface_memory_recall_decision_trace(plan, invoked=True)
+    assert decision["need_type"] == "open_loop_memory"
+
+
+def test_plan_surface_memory_recall_routes_self_change_to_semantic_first() -> None:
+    plan = plan_surface_memory_recall(
+        ThreeLayerContinuityContext(
+            current_user_message="记忆系统改过什么？",
+            task_mode_hint="daily_chat",
+        )
+    )
+
+    assert plan.should_recall
+    assert plan.recall_policy == RECALL_POLICY_MUST
+    assert plan.reason == "explicit_memory_recall"
+    assert plan.query_kind == "self_change"
+    assert plan.recall_contract_id == "self_change"
+    assert plan.primary_memory_layer == "semantic_memory"
+    assert plan.target_store_ids[0] == "semantic_memory"
+    decision = build_surface_memory_recall_decision_trace(plan, invoked=True)
+    assert decision["need_type"] == "self_change_memory"
+
+
+def test_plan_surface_memory_recall_routes_stuck_followup_to_failure_debug() -> None:
+    plan = plan_surface_memory_recall(
+        ThreeLayerContinuityContext(
+            current_user_message="为什么又卡住了？",
+            task_mode_hint="daily_chat",
+        )
+    )
+
+    assert plan.should_recall
+    assert plan.recall_policy == RECALL_POLICY_MUST
+    assert plan.reason == "failure_debug_recall"
+    assert plan.query_kind == "failure_debug"
+    assert "failure" in plan.target_domains
 
 
 def test_plan_surface_memory_recall_skips_generic_daily_turn_without_hint() -> None:
@@ -791,6 +1169,9 @@ def test_preference_rule_recall_does_not_leak_same_domain_collection_rows() -> N
     receipt = dict(dict(packet.trace or {})["recall_receipt"])
     assert plan.query_kind == "preference_lookup"
     assert plan.recall_contract_id == "preference"
+    assert "preference" in plan.target_domains
+    assert "recommendation" not in plan.target_domains
+    assert "lightnovel_recommendation" not in plan.target_domains
     assert "state_preference_as_user_rule" in plan.answer_obligations
     assert "简介后应该换行" in joined
     assert "5月28日推荐" not in joined
@@ -798,6 +1179,115 @@ def test_preference_rule_recall_does_not_leak_same_domain_collection_rows() -> N
     assert validation["selected_store_counts"] == {"life_episode": 1}
     assert receipt["meets_primary_layer"] is False
     assert receipt["meets_expected_layer"] is True
+
+
+def test_preference_rule_recall_prefers_semantic_profile_over_episode_echo() -> None:
+    captured: dict[str, object] = {}
+
+    class _RecallService:
+        def recall(self, **kwargs):  # noqa: ANN003
+            captured.update(kwargs)
+            return SimpleNamespace(
+                output={
+                    "query": kwargs.get("query", ""),
+                    "status": "OK",
+                    "stage": "S_RET_RECALL",
+                    "degraded": False,
+                    "candidate_count": 2,
+                    "routes": [
+                        {"route_id": "semantic", "store_id": "semantic_memory"},
+                        {"route_id": "life_episode", "store_id": "life_episode"},
+                    ],
+                    "candidates": [
+                        {
+                            "source_ref": "chat://request/req-pref-episode",
+                            "evidence_refs": ["chat://request/req-pref-episode#user"],
+                            "text": "用户提到：还记得我说推荐格式要怎样吗？ 回复：记得，简介后应该换行，别模板腔。",
+                            "score": 0.96,
+                            "metadata": {"store_id": "life_episode", "truth_state": "VERIFIED"},
+                        },
+                        {
+                            "source_ref": "ledger://semantic_memory/sem-pref-format",
+                            "evidence_refs": ["chat://request/req-pref-format#user"],
+                            "text": "用户偏好：以后推荐轻小说时，每本书的简介后应该换行，别模板腔。",
+                            "score": 0.80,
+                            "metadata": {
+                                "store_id": "semantic_memory",
+                                "tags": ["semantic_kind:user_preference", "memory_family:user_model"],
+                                "semantic_provenance_status": "resolved",
+                                "semantic_evidence_refs": ["chat://request/req-pref-format#user"],
+                            },
+                        },
+                    ],
+                }
+            )
+
+    packet = recall_surface_memory_for_context(
+        recall_service=_RecallService(),
+        context=ThreeLayerContinuityContext(
+            current_user_message="我的推荐格式偏好是什么？",
+            task_mode_hint="daily_chat",
+        ),
+        request_id="req-pref-semantic-first",
+        query_embedding=[0.1] * 16,
+        person_id="owner",
+        session_id="qq_dm_owner",
+        ts_ms=_ts(2026, 5, 28, 19),
+    )
+
+    validation = dict(dict(packet.trace or {})["validation"])
+    receipt = dict(dict(packet.trace or {})["recall_receipt"])
+    assert list(captured["target_store_ids"])[:2] == ["semantic_memory", "life_episode"]
+    assert packet.rows[0].store_id == "semantic_memory"
+    assert packet.facts[0] == "长期事实：以后推荐轻小说时，每本书的简介后应该换行，别模板腔。"
+    semantic_usage = dict(dict(packet.trace or {})["semantic_usage"])
+    assert semantic_usage["mode"] == "answer_memory_lookup"
+    assert semantic_usage["facts"] == ["以后推荐轻小说时，每本书的简介后应该换行，别模板腔。"]
+    semantic_provenance = dict(receipt["semantic_provenance"])
+    assert semantic_provenance["semantic_candidate_count"] == 1
+    assert semantic_provenance["resolved_count"] == 1
+    assert semantic_provenance["unresolved_count"] == 0
+    assert semantic_provenance["evidence_refs"] == ["chat://request/req-pref-format#user"]
+    assert "还记得我说" not in packet.facts[0]
+    assert validation["selected_store_counts"] == {"semantic_memory": 1}
+    assert receipt["meets_primary_layer"] is True
+
+
+def test_relationship_feedback_life_episode_fact_is_normalized_for_recall() -> None:
+    packet = build_surface_memory_recall_packet(
+        {
+            "query": "我之前说文本质量不像人话，是哪里的问题？",
+            "status": "OK",
+            "stage": "S_RET_RECALL",
+            "degraded": False,
+            "candidate_count": 1,
+            "routes": [{"route_id": "life_episode", "store_id": "life_episode"}],
+            "candidates": [
+                {
+                    "source_ref": "chat://request/req-relationship-feedback",
+                    "evidence_refs": ["chat://request/req-relationship-feedback#user"],
+                    "text": "用户提到：文本质量不像人话，太台词腔了。 回复：收到，我以后把证据转成更自然的聊天方式。",
+                    "score": 0.96,
+                    "metadata": {"store_id": "life_episode", "truth_state": "VERIFIED", "memory_class": "relationship_feedback"},
+                }
+            ],
+        },
+        query="我之前说文本质量不像人话，是哪里的问题？",
+        max_facts=4,
+        max_chars_per_fact=180,
+        validation_requirements=("trusted_memory_hit", "source_ref_present"),
+        temporal_scope="all_time",
+        query_kind="preference_lookup",
+        target_domains=("preference",),
+        recall_contract_id="preference",
+        primary_memory_layer="semantic_memory",
+        expected_memory_layers=("semantic_memory", "life_episode", "sqlite_ledger", "episodic_vector", "neo4j_bond"),
+        answer_obligations=("state_preference_as_user_rule", "keep_source_episode_traceable"),
+    )
+
+    joined = "\n".join(packet.facts)
+    assert "回答要像正常聊天" in joined
+    assert "台词腔" in joined
 
 
 def test_recall_surface_memory_for_context_uses_plan_and_skips_without_calling_recall() -> None:
@@ -1083,6 +1573,417 @@ def test_recall_surface_memory_coverage_failure_drops_partial_collection_hit() -
     assert "insufficient_item_count" in readiness["reasons"]
 
 
+def test_failure_debug_recall_rejects_unrelated_failure_semantic_memory() -> None:
+    packet = build_surface_memory_recall_packet(
+        SimpleNamespace(
+            output={
+                "query": "DeepSeek失败原因是什么？",
+                "status": "OK",
+                "stage": "S_RET_RECALL",
+                "degraded": False,
+                "routes": [{"route_id": "surface_semantic", "store_id": "semantic_memory"}],
+                "candidate_count": 1,
+                "ts_ms": _ts(2026, 5, 29, 8),
+                "candidates": [
+                    {
+                        "doc_id": "sem-lightnovel-failure",
+                        "source_ref": "ledger://semantic_memory/sem-lightnovel-failure",
+                        "evidence_refs": ["codex_production://event/lightnovel-failed"],
+                        "text": "故障经验：codex_lightnovel_recommender 失败；原因 LIGHTNOVEL_NATIVE_NO_RECOMMENDATIONS。",
+                        "score": 0.98,
+                        "metadata": {
+                            "store_id": "semantic_memory",
+                            "source_ref": "ledger://semantic_memory/sem-lightnovel-failure",
+                            "evidence_refs_primary": "codex_production://event/lightnovel-failed",
+                            "domain": "failure",
+                        },
+                    }
+                ],
+            }
+        ),
+        query="DeepSeek失败原因是什么？",
+        max_facts=4,
+        max_chars_per_fact=220,
+        temporal_scope="unspecified",
+        query_kind="failure_debug",
+        target_domains=("failure",),
+        recall_contract_id="failure_debug",
+        primary_memory_layer="life_episode",
+        expected_memory_layers=("life_episode", "semantic_memory", "sqlite_ledger", "episodic_vector"),
+        validation_requirements=("error_episode_or_semantic_hit", "source_ref_present"),
+        answer_obligations=("explain_failure_from_recorded_result", "do_not_invent_root_cause"),
+    )
+
+    coverage = dict(dict(packet.trace or {})["recall_coverage"])
+    readiness = dict(dict(packet.trace or {})["recall_answer_readiness"])
+    relevance = dict(coverage["query_relevance"])
+    assert relevance["required"] is True
+    assert relevance["score"] == 0.0
+    assert "deepseek" in relevance["missing"]
+    assert "query_relevance" in coverage["missing"]
+    assert packet.facts == ()
+    assert packet.reason_code == SURFACE_MEMORY_RECALL_COVERAGE_FAILED
+    assert readiness["status"] == "NOT_READY"
+    assert "query_relevance" in readiness["reasons"]
+
+
+def test_query_relevance_uses_current_turn_not_context_tail_for_failure_hit() -> None:
+    packet = build_surface_memory_recall_packet(
+        SimpleNamespace(
+            output={
+                "query": "DeepSeek失败原因是什么？；最近推荐格式要简介换行；昨天三本呢",
+                "status": "OK",
+                "stage": "S_RET_RECALL",
+                "degraded": False,
+                "routes": [{"route_id": "surface_life_episode", "store_id": "life_episode"}],
+                "candidate_count": 1,
+                "ts_ms": _ts(2026, 5, 29, 8),
+                "candidates": [
+                    {
+                        "doc_id": "ep-deepseek-timeout",
+                        "source_ref": "action://event/deepseek-timeout",
+                        "evidence_refs": ["action://event/deepseek-timeout#result"],
+                        "text": "codex_production llm_pool_call FAILED DEEPSEEK_TIMEOUT DeepSeek 失败原因：供应商超时，后续优先检查网络和 provider 健康状态。",
+                        "score": 0.98,
+                        "metadata": {
+                            "store_id": "life_episode",
+                            "source_ref": "action://event/deepseek-timeout",
+                            "evidence_refs_primary": "action://event/deepseek-timeout#result",
+                            "memory_class": "failure_lesson",
+                            "domain": "failure",
+                        },
+                    }
+                ],
+            }
+        ),
+        query="DeepSeek失败原因是什么？；最近推荐格式要简介换行；昨天三本呢",
+        max_facts=4,
+        max_chars_per_fact=220,
+        temporal_scope="unspecified",
+        query_kind="failure_debug",
+        target_domains=("failure",),
+        recall_contract_id="failure_debug",
+        primary_memory_layer="life_episode",
+        expected_memory_layers=("life_episode", "semantic_memory", "sqlite_ledger", "episodic_vector"),
+        validation_requirements=("error_episode_or_semantic_hit", "source_ref_present"),
+        answer_obligations=("explain_failure_from_recorded_result", "do_not_invent_root_cause"),
+    )
+
+    coverage = dict(dict(packet.trace or {})["recall_coverage"])
+    relevance = dict(coverage["query_relevance"])
+    assert packet.reason_code is None
+    assert "供应商超时" in "\n".join(packet.facts)
+    assert coverage["passed"] is True
+    assert relevance["score"] == 1.0
+    assert relevance["missing"] == []
+
+
+def test_preference_recall_rejects_unrelated_preference_memory_by_query_fit() -> None:
+    packet = build_surface_memory_recall_packet(
+        SimpleNamespace(
+            output={
+                "query": "还记得我说不要用 pro 吗？",
+                "status": "OK",
+                "stage": "S_RET_RECALL",
+                "degraded": False,
+                "routes": [{"route_id": "surface_semantic", "store_id": "semantic_memory"}],
+                "candidate_count": 1,
+                "ts_ms": _ts(2026, 5, 29, 8),
+                "candidates": [
+                    {
+                        "doc_id": "sem-pref-lightnovel-format",
+                        "source_ref": "ledger://semantic_memory/sem-pref-lightnovel-format",
+                        "evidence_refs": ["chat://request/req-pref-format#user"],
+                        "text": "用户偏好：以后推荐轻小说时，每本书的简介后应该换行，别模板腔。",
+                        "score": 0.98,
+                        "metadata": {
+                            "store_id": "semantic_memory",
+                            "source_ref": "ledger://semantic_memory/sem-pref-lightnovel-format",
+                            "evidence_refs_primary": "chat://request/req-pref-format#user",
+                            "domain": "preference",
+                        },
+                    }
+                ],
+            }
+        ),
+        query="还记得我说不要用 pro 吗？",
+        max_facts=4,
+        max_chars_per_fact=220,
+        temporal_scope="unspecified",
+        query_kind="preference_lookup",
+        recall_contract_id="preference",
+        primary_memory_layer="semantic_memory",
+        expected_memory_layers=("semantic_memory", "life_episode", "sqlite_ledger", "episodic_vector"),
+        validation_requirements=("trusted_memory_hit", "source_ref_present"),
+        answer_obligations=("state_preference_as_user_rule", "keep_source_episode_traceable"),
+    )
+
+    coverage = dict(dict(packet.trace or {})["recall_coverage"])
+    readiness = dict(dict(packet.trace or {})["recall_answer_readiness"])
+    relevance = dict(coverage["query_relevance"])
+    assert relevance["required"] is True
+    assert "pro" in relevance["missing"]
+    assert "query_relevance" in coverage["missing"]
+    assert packet.facts == ()
+    assert packet.reason_code == SURFACE_MEMORY_RECALL_COVERAGE_FAILED
+    assert readiness["status"] == "NOT_READY"
+    assert "query_relevance" in readiness["reasons"]
+
+
+def test_relationship_feedback_recall_matches_semantic_quality_summary_by_query_fit() -> None:
+    packet = build_surface_memory_recall_packet(
+        SimpleNamespace(
+            output={
+                "query": "我之前说文本质量不像人话，是哪里的问题？",
+                "status": "OK",
+                "stage": "S_RET_RECALL",
+                "degraded": False,
+                "routes": [{"route_id": "surface_semantic", "store_id": "semantic_memory"}],
+                "candidate_count": 1,
+                "ts_ms": _ts(2026, 5, 29, 8),
+                "candidates": [
+                    {
+                        "doc_id": "sem-relationship-feedback",
+                        "source_ref": "ledger://semantic_memory/sem-relationship-feedback",
+                        "evidence_refs": ["chat://request/req-feedback-natural-chat#user"],
+                        "text": "关系反馈：用户强烈反馈：回答要像正常聊天，避免模板腔、台词腔和生硬的证据条目话术。",
+                        "score": 0.98,
+                        "metadata": {
+                            "store_id": "semantic_memory",
+                            "source_ref": "ledger://semantic_memory/sem-relationship-feedback",
+                            "evidence_refs_primary": "chat://request/req-feedback-natural-chat#user",
+                            "tags": ["semantic_kind:relationship_feedback", "response_quality"],
+                            "domain": "relationship_feedback",
+                        },
+                    },
+                    {
+                        "doc_id": "entity-current-recommendation",
+                        "source_ref": "life_memory_entity://book-a",
+                        "evidence_refs": ["action://event/job-20260528:lightnovel_gateway_delivery"],
+                        "text": "实体记忆：5月28日推荐 A；看点：恋爱日常；详情：https://www.lightnovel.fun/cn/detail/2801",
+                        "score": 0.93,
+                        "metadata": {
+                            "store_id": "life_memory_entity",
+                            "source_ref": "life_memory_entity://book-a",
+                            "evidence_refs_primary": "action://event/job-20260528:lightnovel_gateway_delivery",
+                        },
+                    }
+                ],
+            }
+        ),
+        query="我之前说文本质量不像人话，是哪里的问题？",
+        max_facts=4,
+        max_chars_per_fact=220,
+        temporal_scope="unspecified",
+        query_kind="preference_lookup",
+        recall_contract_id="preference",
+        primary_memory_layer="semantic_memory",
+        expected_memory_layers=("semantic_memory", "life_episode", "sqlite_ledger", "episodic_vector"),
+        validation_requirements=("trusted_memory_hit", "source_ref_present"),
+        answer_obligations=("state_preference_as_user_rule", "keep_source_episode_traceable"),
+    )
+
+    coverage = dict(dict(packet.trace or {})["recall_coverage"])
+    relevance = dict(coverage["query_relevance"])
+    assert packet.reason_code is None
+    assert packet.facts
+    assert "回答要像正常聊天" in packet.facts[0]
+    assert "模板腔" in packet.facts[0]
+    assert "5月28日推荐" not in "\n".join(packet.facts)
+    assert packet.evidence_refs == ("chat://request/req-feedback-natural-chat#user",)
+    assert coverage["passed"] is True
+    assert relevance["required"] is True
+    assert relevance["score"] >= 1.0
+    assert relevance["missing"] == []
+
+
+def test_open_loop_recall_prefers_open_commitment_semantic_memory() -> None:
+    packet = build_surface_memory_recall_packet(
+        SimpleNamespace(
+            output={
+                "query": "记忆系统还有什么待办没完成？",
+                "status": "OK",
+                "stage": "S_RET_RECALL",
+                "degraded": False,
+                "routes": [{"route_id": "surface_semantic", "store_id": "semantic_memory"}],
+                "candidate_count": 3,
+                "ts_ms": _ts(2026, 5, 29, 8),
+                "candidates": [
+                    {
+                        "doc_id": "sem-closed-loop",
+                        "source_ref": "ledger://semantic_memory/sem-closed-loop",
+                        "evidence_refs": ["chat://request/req-closed-loop#user"],
+                        "text": "承诺完成：记忆系统的旧召回修复已经完成，关闭这个待办。",
+                        "score": 0.99,
+                        "metadata": {
+                            "store_id": "semantic_memory",
+                            "tags": ["semantic_kind:commitment", "commitment", "open_loop", "open_loop:closed"],
+                            "source_ref": "ledger://semantic_memory/sem-closed-loop",
+                            "evidence_refs_primary": "chat://request/req-closed-loop#user",
+                        },
+                    },
+                    {
+                        "doc_id": "sem-open-loop",
+                        "source_ref": "ledger://semantic_memory/sem-open-loop",
+                        "evidence_refs": ["chat://request/req-open-loop#user"],
+                        "text": "承诺和待办：后续要把记忆系统的召回覆盖 open loop 和自我改变，记成待办。",
+                        "score": 0.88,
+                        "metadata": {
+                            "store_id": "semantic_memory",
+                            "tags": ["semantic_kind:commitment", "commitment", "open_loop", "open_loop:open"],
+                            "source_ref": "ledger://semantic_memory/sem-open-loop",
+                            "evidence_refs_primary": "chat://request/req-open-loop#user",
+                        },
+                    },
+                    {
+                        "doc_id": "entity-current-recommendation",
+                        "source_ref": "life_memory_entity://book-a",
+                        "evidence_refs": ["action://event/job-20260528:lightnovel_gateway_delivery"],
+                        "text": "实体记忆：5月28日推荐 A；看点：恋爱日常。",
+                        "score": 0.93,
+                        "metadata": {"store_id": "life_memory_entity"},
+                    },
+                ],
+            }
+        ),
+        query="记忆系统还有什么待办没完成？",
+        max_facts=4,
+        max_chars_per_fact=240,
+        temporal_scope="all_time",
+        query_kind="open_loop",
+        recall_contract_id="open_loop",
+        primary_memory_layer="semantic_memory",
+        expected_memory_layers=("semantic_memory", "life_episode", "sqlite_ledger", "episodic_vector", "neo4j_bond"),
+        validation_requirements=("trusted_memory_hit", "source_ref_present"),
+        answer_obligations=("state_open_loop_status", "separate_done_from_pending"),
+    )
+
+    coverage = dict(dict(packet.trace or {})["recall_coverage"])
+    relevance = dict(coverage["query_relevance"])
+    joined = "\n".join(packet.facts)
+    assert packet.reason_code is None
+    assert "召回覆盖 open loop 和自我改变" in joined
+    assert "旧召回修复已经完成" not in joined
+    assert "5月28日推荐" not in joined
+    assert packet.evidence_refs == ("chat://request/req-open-loop#user",)
+    assert coverage["passed"] is True
+    assert relevance["score"] >= 1.0
+
+
+def test_self_change_recall_prefers_self_model_semantic_memory() -> None:
+    packet = build_surface_memory_recall_packet(
+        SimpleNamespace(
+            output={
+                "query": "记忆系统改过什么？",
+                "status": "OK",
+                "stage": "S_RET_RECALL",
+                "degraded": False,
+                "routes": [{"route_id": "surface_semantic", "store_id": "semantic_memory"}],
+                "candidate_count": 2,
+                "ts_ms": _ts(2026, 5, 29, 8),
+                "candidates": [
+                    {
+                        "doc_id": "sem-self-change",
+                        "source_ref": "ledger://semantic_memory/sem-self-change",
+                        "evidence_refs": ["chat://request/req-self-change#user"],
+                        "text": "自我改变：她做过的事都要留下生命经历锚点，但不等于所有日志都进入可召回记忆。",
+                        "score": 0.91,
+                        "metadata": {
+                            "store_id": "semantic_memory",
+                            "tags": ["semantic_kind:self_change", "self_change", "memory_family:self_model"],
+                            "source_ref": "ledger://semantic_memory/sem-self-change",
+                            "evidence_refs_primary": "chat://request/req-self-change#user",
+                        },
+                    },
+                    {
+                        "doc_id": "sem-open-loop",
+                        "source_ref": "ledger://semantic_memory/sem-open-loop",
+                        "evidence_refs": ["chat://request/req-open-loop#user"],
+                        "text": "承诺和待办：后续要把记忆系统的召回覆盖 open loop 和自我改变，记成待办。",
+                        "score": 0.97,
+                        "metadata": {
+                            "store_id": "semantic_memory",
+                            "tags": ["semantic_kind:commitment", "commitment", "open_loop", "open_loop:open"],
+                            "source_ref": "ledger://semantic_memory/sem-open-loop",
+                            "evidence_refs_primary": "chat://request/req-open-loop#user",
+                        },
+                    },
+                ],
+            }
+        ),
+        query="记忆系统改过什么？",
+        max_facts=4,
+        max_chars_per_fact=240,
+        temporal_scope="all_time",
+        query_kind="self_change",
+        recall_contract_id="self_change",
+        primary_memory_layer="semantic_memory",
+        expected_memory_layers=("semantic_memory", "life_episode", "sqlite_ledger", "episodic_vector", "neo4j_bond"),
+        validation_requirements=("trusted_memory_hit", "source_ref_present"),
+        answer_obligations=("state_self_change_and_current_effect", "do_not_hide_correction_history"),
+    )
+
+    coverage = dict(dict(packet.trace or {})["recall_coverage"])
+    joined = "\n".join(packet.facts)
+    assert packet.reason_code is None
+    assert "生命经历锚点" in joined
+    assert "所有日志都进入可召回记忆" in joined
+    assert "召回覆盖 open loop" not in joined
+    assert packet.evidence_refs == ("chat://request/req-self-change#user",)
+    assert coverage["passed"] is True
+
+
+def test_correction_recall_rejects_unrelated_correction_memory_by_query_fit() -> None:
+    packet = build_surface_memory_recall_packet(
+        SimpleNamespace(
+            output={
+                "query": "你刚才是不是记错了 OneBot 在哪？",
+                "status": "OK",
+                "stage": "S_RET_RECALL",
+                "degraded": False,
+                "routes": [{"route_id": "surface_life_episode", "store_id": "life_episode"}],
+                "candidate_count": 1,
+                "ts_ms": _ts(2026, 5, 29, 8),
+                "candidates": [
+                    {
+                        "doc_id": "ep-cat-cover-correction",
+                        "source_ref": "chat://request/req-corrected-fix-cat-cover",
+                        "evidence_refs": ["chat://request/req-corrected-fix-cat-cover#user"],
+                        "text": "纠错记忆：用户指出没有封面有猫这本，我已经撤回了之前那个判断。",
+                        "score": 0.97,
+                        "metadata": {
+                            "store_id": "life_episode",
+                            "source_ref": "chat://request/req-corrected-fix-cat-cover",
+                            "evidence_refs_primary": "chat://request/req-corrected-fix-cat-cover#user",
+                        },
+                    }
+                ],
+            }
+        ),
+        query="你刚才是不是记错了 OneBot 在哪？",
+        max_facts=4,
+        max_chars_per_fact=220,
+        temporal_scope="current",
+        query_kind="correction",
+        recall_contract_id="correction",
+        primary_memory_layer="life_episode",
+        expected_memory_layers=("life_episode", "semantic_memory", "sqlite_ledger", "episodic_vector"),
+        validation_requirements=("correction_state_checked", "suppressed_not_fact"),
+        answer_obligations=("prefer_corrected_version", "do_not_repeat_suppressed_fact"),
+    )
+
+    coverage = dict(dict(packet.trace or {})["recall_coverage"])
+    readiness = dict(dict(packet.trace or {})["recall_answer_readiness"])
+    relevance = dict(coverage["query_relevance"])
+    assert relevance["required"] is True
+    assert "onebot" in relevance["missing"]
+    assert "query_relevance" in coverage["missing"]
+    assert packet.facts == ()
+    assert packet.reason_code == SURFACE_MEMORY_RECALL_COVERAGE_FAILED
+    assert readiness["status"] == "NOT_READY"
+    assert "query_relevance" in readiness["reasons"]
+
+
 def test_selection_recall_requires_detail_anchor_for_deep_quality_judgment() -> None:
     packet = build_surface_memory_recall_packet(
         SimpleNamespace(
@@ -1133,6 +2034,7 @@ def test_selection_recall_requires_detail_anchor_for_deep_quality_judgment() -> 
     receipt = dict(dict(packet.trace or {})["recall_receipt"])
     coverage = dict(dict(packet.trace or {})["recall_coverage"])
     readiness = dict(dict(packet.trace or {})["recall_answer_readiness"])
+    strategy = dict(dict(packet.trace or {})["recall_answer_strategy"])
     assert receipt["detail_evidence"]["required"] is True
     assert receipt["detail_evidence"]["basis"] == "missing_detail_evidence"
     assert coverage["passed"] is False
@@ -1145,9 +2047,62 @@ def test_selection_recall_requires_detail_anchor_for_deep_quality_judgment() -> 
     assert readiness["response_mode"] == "fetch_or_request_detail_evidence"
     assert readiness["surface_action"] == "fetch_more_evidence"
     assert "missing_detail_evidence" in readiness["reasons"]
+    assert strategy["action"] == "fetch_more_evidence"
+    assert strategy["claim_scope"] == "no_fact_claim"
+    assert strategy["should_fetch_more_evidence"] is True
 
 
-def test_selection_recall_accepts_detail_anchor_before_deep_review_fetch() -> None:
+def test_selection_recall_must_not_infer_user_reading_state() -> None:
+    packet = build_surface_memory_recall_packet(
+        SimpleNamespace(
+            output={
+                "query": "昨天那几本好看吗？",
+                "status": "OK",
+                "stage": "S_RET_RECALL",
+                "degraded": False,
+                "routes": [{"route_id": "surface_life_collection", "store_id": "life_memory_collection"}],
+                "candidate_count": 1,
+                "ts_ms": _ts(2026, 5, 29, 8),
+                "candidates": [
+                    {
+                        "doc_id": "col-yesterday-books",
+                        "source_ref": "life_memory_collection://col-yesterday-books",
+                        "evidence_refs": ["gateway://message/yesterday/card/1"],
+                        "text": "2026-05-28 当天轻小说推荐集合，记录 3 个条目；可比较证据：1. A｜2. B｜3. C",
+                        "score": 0.95,
+                        "metadata": {
+                            "store_id": "life_memory_collection",
+                            "scope_key": "daily:2026-05-28",
+                            "domain": "lightnovel_recommendation",
+                            "item_count": 3,
+                            "evidence_refs_primary": "gateway://message/yesterday/card/1",
+                            "items": [
+                                {"item_title": "A", "item_summary": "看点：恋爱日常", "detail_url": "https://www.lightnovel.fun/cn/detail/a"},
+                                {"item_title": "B", "item_summary": "看点：奇幻身份", "detail_url": "https://www.lightnovel.fun/cn/detail/b"},
+                                {"item_title": "C", "item_summary": "看点：日常喜剧", "detail_url": "https://www.lightnovel.fun/cn/detail/c"},
+                            ],
+                        },
+                    }
+                ],
+            }
+        ),
+        query="昨天那几本好看吗？",
+        max_facts=4,
+        max_chars_per_fact=700,
+        temporal_scope="yesterday",
+        query_kind="anaphoric_selection",
+        recall_contract_id="anaphoric_selection",
+        primary_memory_layer="life_memory_collection",
+        expected_memory_layers=("life_memory_collection", "life_memory_entity", "life_episode"),
+        min_collection_items=3,
+        validation_requirements=("collection_or_episode_hit", "evidence_refs_present", "no_self_echo", "collection_item_min_count", "collection_item_exact_count"),
+        answer_obligations=("ground_selection_in_recalled_items", "read_detail_evidence_before_deep_quality_judgment"),
+    )
+
+    assert any("不要臆测用户昨天有没有看" in item and "终于来问" in item for item in packet.must_not_do)
+
+
+def test_selection_recall_treats_detail_anchor_as_fetch_needed_before_quality_judgment() -> None:
     packet = build_surface_memory_recall_packet(
         SimpleNamespace(
             output={
@@ -1196,17 +2151,24 @@ def test_selection_recall_accepts_detail_anchor_before_deep_review_fetch() -> No
     receipt = dict(dict(packet.trace or {})["recall_receipt"])
     coverage = dict(dict(packet.trace or {})["recall_coverage"])
     readiness = dict(dict(packet.trace or {})["recall_answer_readiness"])
-    assert packet.reason_code is None
-    assert packet.facts
+    strategy = dict(dict(packet.trace or {})["recall_answer_strategy"])
+    assert packet.reason_code == SURFACE_MEMORY_RECALL_COVERAGE_FAILED
+    assert packet.facts == ()
     assert receipt["selected_item_count"] == 2
     assert receipt["detail_evidence"]["basis"] == "detail_anchor"
     assert receipt["detail_evidence"]["ready_for_deep_review"] is True
-    assert coverage["passed"] is True
-    assert coverage["dimensions"]["detail_evidence"] == 0.75
-    assert readiness["status"] == "READY"
-    assert readiness["ready_to_answer"] is True
-    assert readiness["response_mode"] == "answer_from_collection_memory"
+    assert coverage["passed"] is False
+    assert coverage["dimensions"]["detail_evidence"] == 0.0
+    assert "detail_evidence" in coverage["missing"]
+    assert readiness["status"] == "NOT_READY"
+    assert readiness["ready_to_answer"] is False
+    assert readiness["response_mode"] == "fetch_or_request_detail_evidence"
     assert readiness["detail_evidence"]["basis"] == "detail_anchor"
+    assert strategy["action"] == "fetch_more_evidence"
+    assert strategy["claim_scope"] == "no_fact_claim"
+    assert strategy["evidence_level"] == "missing"
+    assert strategy["should_state_memory_only"] is False
+    assert "missing_detail_evidence" in strategy["reasons"]
 
 
 def test_generic_evidence_review_requires_body_or_detail_anchor() -> None:

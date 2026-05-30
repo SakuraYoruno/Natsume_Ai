@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 
 from host_brain.app import chat_retrieval_helpers as helpers
@@ -67,6 +69,309 @@ async def test_run_retrieval_returns_compressed_surface_memory_packet(monkeypatc
     assert captured["intent_id"] == "intent-1"
     assert "输入输出边界" in packet["facts"][0]
     assert "memory://raw/should-not-pass" not in str(packet["facts"])
+
+
+@pytest.mark.asyncio
+async def test_run_retrieval_uses_collection_fastpath_without_embedding(monkeypatch) -> None:
+    def _unexpected_embed(_query):  # noqa: ANN001
+        raise AssertionError("date collection recall should not build embeddings on the fast path")
+
+    def _unexpected_service():
+        raise AssertionError("date collection recall should not build the full recall fusion service")
+
+    class _LifeMemoryStore:
+        def recall_collection_packet(self, **kwargs):  # noqa: ANN003
+            assert str(kwargs["query"]).startswith("昨天三本呢？")
+            assert kwargs["person_id"] == "person-1"
+            assert kwargs["session_id"] == "sess-1"
+            return SimpleNamespace(
+                candidates=[
+                    {
+                        "memory_id": "col-yesterday",
+                        "text": (
+                            "2026-05-28 当天轻小说推荐集合，记录 3 个条目；可比较证据："
+                            "1. 昨天推荐 A：培养失败的前美少女童星｜看点：恋爱日常；"
+                            "2. 昨天推荐 B：与神在河岸｜看点：奇幻身份；"
+                            "3. 昨天推荐 C：异世界皇女皇帝线｜看点：皇女皇帝线"
+                        ),
+                        "score": 0.99,
+                        "source_ref": "life_memory_collection://col-yesterday",
+                        "evidence_ref": "gateway://message/yesterday/card/1",
+                        "metadata": {
+                            "store_id": "life_memory_collection",
+                            "memory_layer": "life_memory_collection",
+                            "scope_key": "daily:2026-05-28",
+                            "domain": "lightnovel_recommendation",
+                            "item_count": 3,
+                            "items": [
+                                {"title": "昨天推荐 A：培养失败的前美少女童星", "selection_reason": "恋爱日常"},
+                                {"title": "昨天推荐 B：与神在河岸", "selection_reason": "奇幻身份"},
+                                {"title": "昨天推荐 C：异世界皇女皇帝线", "selection_reason": "皇女皇帝线"},
+                            ],
+                        },
+                    }
+                ]
+            )
+
+    monkeypatch.setattr(helpers, "_embed_surface_memory_query", _unexpected_embed)
+    monkeypatch.setattr(helpers, "_build_surface_memory_recall_service", _unexpected_service)
+    monkeypatch.setattr("host_brain.app.dependencies.get_life_memory_store", lambda: _LifeMemoryStore())
+
+    summary, evidence_items = await helpers._run_retrieval(
+        request_id="req-collection-fastpath",
+        message="昨天三本呢？",
+        person_id="person-1",
+        session_id="sess-1",
+        ts_ms=1_780_034_148_000,
+        emotion_tag="NEUTRAL",
+        render_target_lang="zh",
+        intent_draft={"route": "chat"},
+    )
+
+    packet = summary["surface_memory_recall_packet"]
+    trace = packet["trace"]
+    assert evidence_items == []
+    assert summary["status"] == "OK"
+    assert summary["embedding_model_id"] == ""
+    assert summary["target_stores"][0] == "life_memory_collection"
+    assert trace["collection_fastpath"]["status"] == "HIT"
+    assert trace["recall_answer_readiness"]["status"] == "READY"
+    assert trace["recall_answer_readiness"]["response_mode"] == "answer_from_collection_memory"
+    assert packet["route_ids"] == ["surface_life_collection_fastpath"]
+    assert "培养失败的前美少女童星" in packet["facts"][0]
+
+
+@pytest.mark.asyncio
+async def test_run_retrieval_dated_quality_followup_bypasses_collection_fastpath(monkeypatch) -> None:
+    calls: dict[str, object] = {"embedded": False, "service": False}
+
+    class _RecallService:
+        def recall(self, **kwargs):  # noqa: ANN003
+            calls["service"] = True
+            assert kwargs["recall_contract_id"] == "anaphoric_selection"
+            assert kwargs["query_kind"] == "anaphoric_selection"
+            assert kwargs["temporal_scope"] == "yesterday"
+            assert kwargs["target_store_ids"][0] == "life_memory_collection"
+            return {
+                "output": {
+                    "status": "OK",
+                    "stage": "recall_fusion",
+                    "candidate_count": 1,
+                    "routes": [{"route_id": "surface_life_collection", "store_id": "life_memory_collection"}],
+                    "candidates": [
+                        {
+                            "text": (
+                                "2026-05-28 当天轻小说推荐集合，记录 3 个条目；可比较证据："
+                                "1. 昨天推荐 A｜看点：恋爱日常；2. 昨天推荐 B｜看点：奇幻身份；3. 昨天推荐 C｜看点：新鲜设定"
+                            ),
+                            "store_id": "life_memory_collection",
+                            "score": 0.99,
+                            "source_ref": "life_memory_collection://col-yesterday",
+                            "evidence_ref": "gateway://message/yesterday/card/1",
+                            "metadata": {
+                                "store_id": "life_memory_collection",
+                                "domain": "lightnovel_recommendation",
+                                "item_count": 3,
+                                "items": [
+                                    {"title": "昨天推荐 A", "selection_reason": "恋爱日常"},
+                                    {"title": "昨天推荐 B", "selection_reason": "奇幻身份"},
+                                    {"title": "昨天推荐 C", "selection_reason": "新鲜设定"},
+                                ],
+                            },
+                        }
+                    ],
+                }
+            }
+
+    async def _identity_review(**kwargs):  # noqa: ANN003
+        return kwargs["packet"]
+
+    def _embed(query):  # noqa: ANN001
+        calls["embedded"] = True
+        assert "昨天那几本好看吗" in query
+        return [0.2] * 16, "test-embedding"
+
+    class _UnexpectedLifeMemoryStore:
+        def recall_collection_packet(self, **_kwargs):  # noqa: ANN003
+            raise AssertionError("quality followups must not use collection fastpath")
+
+    monkeypatch.setattr(helpers, "_embed_surface_memory_query", _embed)
+    monkeypatch.setattr(helpers, "_build_surface_memory_recall_service", lambda: _RecallService())
+    monkeypatch.setattr(helpers, "_maybe_apply_lightnovel_deep_review", _identity_review)
+    monkeypatch.setattr(helpers, "_maybe_apply_generic_evidence_review", _identity_review)
+    monkeypatch.setattr("host_brain.app.dependencies.get_life_memory_store", lambda: _UnexpectedLifeMemoryStore())
+
+    summary, evidence_items = await helpers._run_retrieval(
+        request_id="req-dated-quality-selection",
+        message="昨天那几本好看吗",
+        person_id="person-1",
+        session_id="sess-1",
+        ts_ms=1_780_035_340_000,
+        emotion_tag="NEUTRAL",
+        render_target_lang="zh",
+        intent_draft={"route": "daily_chat"},
+    )
+
+    packet = summary["surface_memory_recall_packet"]
+    assert evidence_items == []
+    assert calls["embedded"] is True
+    assert calls["service"] is True
+    assert summary["embedding_model_id"] == "test-embedding"
+    assert summary["query_plan"]["reason"] == "anaphoric_selection_recall"
+    assert summary["query_plan"]["query_kind"] == "anaphoric_selection"
+    assert packet["trace"]["plan"]["recall_contract_id"] == "anaphoric_selection"
+    assert "collection_fastpath" not in packet["trace"]
+
+
+@pytest.mark.asyncio
+async def test_run_retrieval_retries_recent_collection_when_first_recall_is_undercovered(monkeypatch) -> None:
+    service_calls: list[dict[str, object]] = []
+    items = [
+        {
+            "title": f"最近推荐 {index}",
+            "selection_reason": "恋爱日常" if index % 2 else "奇幻身份钩子",
+            "detail_url": f"https://www.lightnovel.fun/cn/detail/recent-{index}",
+        }
+        for index in range(1, 13)
+    ]
+
+    class _RecallService:
+        def recall(self, **kwargs):  # noqa: ANN003
+            service_calls.append(dict(kwargs))
+            if len(service_calls) == 1:
+                return {
+                    "output": {
+                        "status": "OK",
+                        "stage": "recall_fusion",
+                        "candidate_count": 1,
+                        "routes": [{"route_id": "surface_life_episode", "store_id": "life_episode"}],
+                        "candidates": [
+                            {
+                                "text": "用户之前聊过轻小说推荐格式，但这里没有推荐集合条目。",
+                                "store_id": "life_episode",
+                                "score": 0.90,
+                                "source_ref": "chat://request/noisy",
+                                "evidence_ref": "chat://request/noisy#assistant",
+                                "metadata": {"store_id": "life_episode"},
+                            }
+                        ],
+                    }
+                }
+            assert kwargs["time_lookback_days"] >= 14
+            assert kwargs["target_store_ids"][0] == "life_memory_collection"
+            return {
+                "output": {
+                    "status": "OK",
+                    "stage": "recall_fusion",
+                    "candidate_count": 1,
+                    "routes": [{"route_id": "surface_life_collection", "store_id": "life_memory_collection"}],
+                    "candidates": [
+                        {
+                            "text": "最近轻小说推荐集合，记录 12 个条目；可比较证据：" + "；".join(
+                                f"{index}. 最近推荐 {index}｜看点：{item['selection_reason']}｜详情：{item['detail_url']}"
+                                for index, item in enumerate(items, start=1)
+                            ),
+                            "store_id": "life_memory_collection",
+                            "score": 0.99,
+                            "source_ref": "life_memory_collection://col-recent-12",
+                            "evidence_ref": "gateway://message/recent/card/1",
+                            "metadata": {
+                                "store_id": "life_memory_collection",
+                                "scope_key": "rolling:7d",
+                                "domain": "lightnovel_recommendation",
+                                "item_count": len(items),
+                                "items": items,
+                            },
+                        }
+                    ],
+                }
+            }
+
+    async def _identity_review(**kwargs):  # noqa: ANN003
+        return kwargs["packet"]
+
+    monkeypatch.setattr(helpers, "_embed_surface_memory_query", lambda query: ([0.2] * 16, "test-embedding"))
+    monkeypatch.setattr(helpers, "_build_surface_memory_recall_service", lambda: _RecallService())
+    monkeypatch.setattr(helpers, "_maybe_apply_lightnovel_deep_review", _identity_review)
+    monkeypatch.setattr(helpers, "_maybe_apply_generic_evidence_review", _identity_review)
+
+    summary, evidence_items = await helpers._run_retrieval(
+        request_id="req-retry-recent-undercovered",
+        message="最近十几本里哪本好看？",
+        person_id="person-1",
+        session_id="sess-1",
+        ts_ms=1_780_035_340_000,
+        emotion_tag="NEUTRAL",
+        render_target_lang="zh",
+        intent_draft={"route": "daily_chat"},
+    )
+
+    packet = summary["surface_memory_recall_packet"]
+    retry = packet["trace"]["recall_retry"]
+    readiness = packet["trace"]["recall_answer_readiness"]
+    assert evidence_items == []
+    assert len(service_calls) == 2
+    assert retry["status"] == "USED"
+    assert retry["from_temporal_scope"] == "recent_days"
+    assert retry["to_time_lookback_days"] >= 14
+    assert packet["reason_code"] == "SURFACE_MEMORY_RECALL_COVERAGE_FAILED"
+    assert readiness["status"] == "NOT_READY"
+    assert readiness["response_mode"] == "fetch_or_request_detail_evidence"
+    assert readiness["selected_item_count"] == 12
+    selected_titles = [item["title"] for item in packet["trace"]["selected_collection_items"]]
+    assert selected_titles[-1] == "最近推荐 12"
+
+
+@pytest.mark.asyncio
+async def test_run_retrieval_does_not_expand_explicit_yesterday_scope(monkeypatch) -> None:
+    service_calls: list[dict[str, object]] = []
+
+    class _RecallService:
+        def recall(self, **kwargs):  # noqa: ANN003
+            service_calls.append(dict(kwargs))
+            return {
+                "output": {
+                    "status": "OK",
+                    "stage": "recall_fusion",
+                    "candidate_count": 1,
+                    "routes": [{"route_id": "surface_life_episode", "store_id": "life_episode"}],
+                    "candidates": [
+                        {
+                            "text": "用户之前聊过轻小说推荐格式，但这里没有昨天推荐集合条目。",
+                            "store_id": "life_episode",
+                            "score": 0.90,
+                            "source_ref": "chat://request/no-yesterday-collection",
+                            "evidence_ref": "chat://request/no-yesterday-collection#assistant",
+                            "metadata": {"store_id": "life_episode"},
+                        }
+                    ],
+                }
+            }
+
+    async def _identity_review(**kwargs):  # noqa: ANN003
+        return kwargs["packet"]
+
+    monkeypatch.setattr(helpers, "_embed_surface_memory_query", lambda query: ([0.2] * 16, "test-embedding"))
+    monkeypatch.setattr(helpers, "_build_surface_memory_recall_service", lambda: _RecallService())
+    monkeypatch.setattr(helpers, "_maybe_apply_lightnovel_deep_review", _identity_review)
+    monkeypatch.setattr(helpers, "_maybe_apply_generic_evidence_review", _identity_review)
+
+    summary, _evidence_items = await helpers._run_retrieval(
+        request_id="req-no-expand-yesterday",
+        message="昨天那几本好看吗？",
+        person_id="person-1",
+        session_id="sess-1",
+        ts_ms=1_780_035_340_000,
+        emotion_tag="NEUTRAL",
+        render_target_lang="zh",
+        intent_draft={"route": "daily_chat"},
+    )
+
+    packet = summary["surface_memory_recall_packet"]
+    assert len(service_calls) == 1
+    assert "recall_retry" not in packet["trace"]
+    assert packet["reason_code"] == "SURFACE_MEMORY_RECALL_VALIDATION_FAILED"
+    assert packet["trace"]["plan"]["temporal_scope"] == "yesterday"
 
 
 @pytest.mark.asyncio
@@ -285,7 +590,10 @@ async def test_run_retrieval_applies_lightnovel_deep_review_before_surface(monke
 
     packet = summary["surface_memory_recall_packet"]
     assert packet["facts"][0].startswith("网页深读结果")
+    assert len(packet["facts"]) == 2
+    assert "可比较证据" in packet["facts"][1]
     assert "详情：" in packet["facts"][1]
+    assert "https://www.lightnovel.fun/cn/detail/2" in packet["evidence_refs"]
     assert "基于深读证据" in packet["must_not_do"][0]
     trace = packet["trace"]["lightnovel_deep_review"]
     assert trace["status"] == "OK"
@@ -297,6 +605,107 @@ async def test_run_retrieval_applies_lightnovel_deep_review_before_surface(monke
     assert trace["persisted_episode_id"] == "ep-review"
     assert trace["evidence_ref_count"] == 1
     assert isinstance(trace["latency_ms"], int)
+    readiness = packet["trace"]["recall_answer_readiness"]
+    assert packet["reason_code"] is None
+    assert readiness["response_mode"] == "answer_from_evidence"
+    assert readiness["evidence_depth"] == "detail_or_body_evidence"
+    assert readiness["detail_evidence"]["basis"] == "lightnovel_deep_review"
+    strategy = packet["trace"]["recall_answer_strategy"]
+    assert strategy["action"] == "direct_answer"
+    assert strategy["claim_scope"] == "detail_judgment"
+    assert strategy["evidence_level"] == "detail_or_body"
+    assert strategy["detail_evidence"]["basis"] == "lightnovel_deep_review"
+
+
+@pytest.mark.asyncio
+async def test_run_retrieval_marks_partial_lightnovel_deep_review_scope(monkeypatch) -> None:
+    recommendations = [
+        {
+            "title": f"推荐 {index}",
+            "detail_url": f"https://www.lightnovel.fun/cn/detail/{index}",
+            "selection_reason": "恋爱日常",
+        }
+        for index in range(1, 13)
+    ]
+
+    class _RecallService:
+        def recall(self, **_kwargs):  # noqa: ANN003
+            return {
+                "output": {
+                    "status": "OK",
+                    "stage": "recall_fusion",
+                    "candidate_count": 1,
+                    "routes": [{"route_id": "life_episode", "store_id": "life_episode"}],
+                    "candidates": [
+                        {
+                            "text": "这几天通过 qq 给用户推荐了 12 本轻小说。",
+                            "store_id": "life_episode",
+                            "score": 0.92,
+                            "source_ref": "action://event/lightnovel-delivery-recent",
+                            "evidence_ref": "gateway://message/lightnovel-delivery-recent",
+                            "metadata": {
+                                "store_id": "life_episode",
+                                "episode_kind": "action_episode",
+                                "source_ref": "action://event/lightnovel-delivery-recent",
+                                "evidence_refs_primary": "gateway://message/lightnovel-delivery-recent",
+                                "episode_metadata": {"selected_recommendations": recommendations},
+                            },
+                        }
+                    ],
+                }
+            }
+
+    def fake_review(**_kwargs):  # noqa: ANN003
+        return {
+            "status": "OK",
+            "reason_code": "LIGHTNOVEL_DEEP_REVIEW_OK",
+            "fact": "网页深读结果（含正文）：当前更推荐第3本《推荐 3》。原因：开篇比较抓人；设定线很直给。",
+            "selected": {"index": 3, "title": "推荐 3"},
+            "items": [{"index": index} for index in range(1, 7)],
+            "evidence_refs": [f"https://www.lightnovel.fun/cn/detail/{index}" for index in range(1, 7)],
+            "source_card_count": 12,
+            "reviewed_item_count": 6,
+            "partial_review": True,
+            "cached": False,
+            "source": "fetch",
+            "recommendation_signature": "sig-partial",
+        }
+
+    monkeypatch.setattr(helpers, "_build_surface_memory_recall_service", lambda: _RecallService())
+    monkeypatch.setattr(helpers, "_embed_surface_memory_query", lambda query: ([0.2] * 16, "test-embedding"))
+    monkeypatch.setattr(
+        "host_brain.codex_runtime.lightnovel_deep_reviewer.review_lightnovel_selection_from_memory_packet",
+        fake_review,
+    )
+
+    summary, _evidence_items = await helpers._run_retrieval(
+        request_id="req-lightnovel-partial-deep-review",
+        message="这几天十几本里哪本最好看？",
+        person_id="person-1",
+        session_id="sess-1",
+        ts_ms=123,
+        emotion_tag="NEUTRAL",
+        render_target_lang="zh",
+        intent_draft={"route": "chat"},
+    )
+
+    packet = summary["surface_memory_recall_packet"]
+    deep = packet["trace"]["lightnovel_deep_review"]
+    strategy = packet["trace"]["recall_answer_strategy"]
+    readiness = packet["trace"]["recall_answer_readiness"]
+    assert deep["source_card_count"] == 12
+    assert deep["reviewed_item_count"] == 6
+    assert deep["partial_review"] is True
+    assert readiness["review_scope"] == {
+        "partial": True,
+        "source_card_count": 12,
+        "reviewed_item_count": 6,
+    }
+    assert strategy["claim_scope"] == "partial_detail_judgment"
+    assert strategy["evidence_level"] == "partial_detail_or_body"
+    assert strategy["confidence_band"] == "medium"
+    assert strategy["detail_evidence"]["partial_review"] is True
+    assert "partial_detail_review" in strategy["reasons"]
 
 
 @pytest.mark.asyncio
@@ -383,6 +792,92 @@ async def test_run_retrieval_uses_readiness_to_recover_missing_detail_with_deep_
     assert readiness["ready_to_answer"] is True
     assert readiness["response_mode"] == "answer_from_evidence"
     assert readiness["detail_evidence"]["basis"] == "lightnovel_deep_review"
+
+
+@pytest.mark.asyncio
+async def test_run_retrieval_marks_failed_lightnovel_deep_review_not_ready(monkeypatch) -> None:
+    class _RecallService:
+        def recall(self, **_kwargs):  # noqa: ANN003
+            return {
+                "output": {
+                    "status": "OK",
+                    "stage": "recall_fusion",
+                    "candidate_count": 1,
+                    "routes": [{"route_id": "surface_life_collection", "store_id": "life_memory_collection"}],
+                    "candidates": [
+                        {
+                            "doc_id": "col-yesterday",
+                            "source_ref": "life_memory_collection://yesterday",
+                            "evidence_refs": ["gateway://message/yesterday/card/1"],
+                            "text": "昨天轻小说推荐集合，记录 3 个条目；可比较证据：1. A｜详情：https://www.lightnovel.fun/cn/detail/a；2. 与神在河岸｜详情：https://www.lightnovel.fun/cn/detail/b；3. C｜详情：https://www.lightnovel.fun/cn/detail/c",
+                            "score": 0.95,
+                            "metadata": {
+                                "store_id": "life_memory_collection",
+                                "scope_key": "daily:2026-05-29",
+                                "domain": "lightnovel_recommendation",
+                                "item_count": 3,
+                                "evidence_refs_primary": "gateway://message/yesterday/card/1",
+                                "items": [
+                                    {"item_title": "A", "item_summary": "详情：https://www.lightnovel.fun/cn/detail/a", "position": 1},
+                                    {"item_title": "与神在河岸", "item_summary": "详情：https://www.lightnovel.fun/cn/detail/b", "position": 2},
+                                    {"item_title": "C", "item_summary": "详情：https://www.lightnovel.fun/cn/detail/c", "position": 3},
+                                ],
+                            },
+                        }
+                    ],
+                }
+            }
+
+    def fake_review(**_kwargs):  # noqa: ANN003
+        return {
+            "status": "DEGRADED",
+            "reason_code": "LIGHTNOVEL_DEEP_REVIEW_FETCH_FAILED",
+            "fact": "我回去查了详情页，但这次没有拿到可读网页或 epub；这轮不能负责任地说哪本更好。",
+            "selected": {},
+            "items": [{"index": 1}, {"index": 2}, {"index": 3}],
+            "evidence_refs": [
+                "https://www.lightnovel.fun/cn/detail/a",
+                "https://www.lightnovel.fun/cn/detail/b",
+                "https://www.lightnovel.fun/cn/detail/c",
+            ],
+            "cached": False,
+            "source": "fetch",
+            "recommendation_signature": "sig-fetch-failed",
+        }
+
+    monkeypatch.setattr(helpers, "_build_surface_memory_recall_service", lambda: _RecallService())
+    monkeypatch.setattr(helpers, "_embed_surface_memory_query", lambda query: ([0.2] * 16, "test-embedding"))
+    monkeypatch.setattr(
+        "host_brain.codex_runtime.lightnovel_deep_reviewer.review_lightnovel_selection_from_memory_packet",
+        fake_review,
+    )
+
+    summary, _evidence_items = await helpers._run_retrieval(
+        request_id="req-lightnovel-fetch-failed-not-ready",
+        message="昨天推荐 B：与神在河岸 这本好看吗？",
+        person_id="person-1",
+        session_id="sess-1",
+        ts_ms=123,
+        emotion_tag="NEUTRAL",
+        render_target_lang="zh",
+        intent_draft={"route": "chat"},
+    )
+
+    packet = summary["surface_memory_recall_packet"]
+    readiness = packet["trace"]["recall_answer_readiness"]
+    strategy = packet["trace"]["recall_answer_strategy"]
+    assert packet["degraded"] is True
+    assert packet["reason_code"] == "LIGHTNOVEL_DEEP_REVIEW_FETCH_FAILED"
+    assert packet["facts"][0].startswith("我回去查了详情页")
+    assert any("与神在河岸" in fact for fact in packet["facts"])
+    assert any("可比较证据" in fact for fact in packet["facts"])
+    assert readiness["status"] == "NOT_READY"
+    assert readiness["ready_to_answer"] is False
+    assert readiness["response_mode"] == "fetch_or_request_detail_evidence"
+    assert readiness["detail_evidence"]["basis"] == "missing_detail_evidence"
+    assert "deep_review_failed" in readiness["reasons"]
+    assert strategy["action"] == "fetch_more_evidence"
+    assert strategy["ready_to_answer"] is False
 
 
 @pytest.mark.asyncio

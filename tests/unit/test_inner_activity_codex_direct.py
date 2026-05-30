@@ -37,6 +37,24 @@ def test_inner_activity_runtime_defaults_to_codex_direct(monkeypatch) -> None:
     assert runtime["route_reason_code"] == "INNER_ACTIVITY_CODEX_CLI"
 
 
+def test_inner_activity_runtime_default_codex_model_is_gpt55(monkeypatch) -> None:
+    _reset_inner_activity_state()
+    monkeypatch.setattr(codex_cli_provider.shutil, "which", lambda name: "C:/tools/codex.exe" if name == "codex" else None)
+    monkeypatch.delenv("HOST_CODEX_RUNTIME_MODEL", raising=False)
+    monkeypatch.delenv("HOST_CODEX_MODEL_ID", raising=False)
+    monkeypatch.delenv("HOST_INNER_ACTIVITY_AGENT_PROVIDER", raising=False)
+    monkeypatch.delenv("HOST_INNER_ACTIVITY_AGENT_MODEL_ID", raising=False)
+    monkeypatch.delenv("HOST_INNER_ACTIVITY_CODEX_CLI_MODEL", raising=False)
+    monkeypatch.delenv("HOST_INNER_ACTIVITY_CODEX_MODEL_ID", raising=False)
+    monkeypatch.delenv("HOST_INNER_WORLD_LLM_MODEL_ID", raising=False)
+
+    runtime = agent._resolve_inner_activity_llm_runtime(now_ms=1800000000000)
+
+    assert runtime is not None
+    assert runtime["available"] is True
+    assert runtime["model_id"] == "gpt-5.5"
+
+
 def test_run_inner_activity_llm_calls_codex_cli_and_logs_tokens(monkeypatch) -> None:
     _reset_inner_activity_state()
     monkeypatch.setenv("HOST_INNER_ACTIVITY_CODEX_MIN_INTERVAL_MS", "0")

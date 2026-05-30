@@ -195,7 +195,7 @@ def test_dispatcher_builds_bounded_agent_context_envelope() -> None:
             "retrieval_summary": {"surface_memory_recall_packet": {"facts": ["重复的大块召回不应透传。"]}},
             "recent_turns": long_turns,
             "surface_memory_recall_packet": {
-                "facts": ["长期记忆：用户偏好推荐按卡片分段。"],
+                "facts": ["长期事实：推荐按卡片分段。"],
                 "evidence_refs": ["semantic://sem-1"],
             },
             "retrieval_evidence_items": [
@@ -224,8 +224,8 @@ def test_dispatcher_builds_bounded_agent_context_envelope() -> None:
     assert len(envelope["conversation_window"]["recent_turns"]) == 4
     assert envelope["conversation_window"]["recent_turns"][0]["content"].startswith("turn-8")
     assert len(envelope["conversation_window"]["recent_turns"][0]["content"]) <= 700
-    assert envelope["memory_packet"]["facts"] == ["长期记忆：用户偏好推荐按卡片分段。"]
-    assert envelope["semantic_facts"] == ["长期记忆：用户偏好推荐按卡片分段。"]
+    assert envelope["memory_packet"]["facts"] == ["长期事实：推荐按卡片分段。"]
+    assert envelope["semantic_facts"] == ["长期事实：推荐按卡片分段。"]
     assert envelope["evidence_pack"]["items"][0]["source_ref"] == "life_episode://ep-1"
     assert envelope["trace"]["context_profile"] == "translate"
     assert result.audit_refs["agent_context"]["conversation_turns"] == 4

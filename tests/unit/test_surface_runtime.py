@@ -373,8 +373,9 @@ def test_surface_runtime_repairs_collection_listing_without_turning_it_into_sele
         )
     )
 
-    assert result.selected_text == "昨天那几本我记得是：Yesterday A、Yesterday B、Yesterday C。"
+    assert result.selected_text == "昨天推过的是：Yesterday A、Yesterday B、Yesterday C。"
     assert "我会选" not in result.selected_text
+    assert "我记得" not in result.selected_text
     assert result.generation_trace["memory_answer_alignment"]["passed"] is True
 
 
@@ -389,7 +390,7 @@ def test_surface_runtime_retries_recent_many_collection_when_too_few_items_are_n
         calls.append(messages)
         if len(calls) == 1:
             return _candidate_payload(["最近这批大概十几本，我会先挑有奇幻味的。"])
-        return _candidate_payload(["最近这批我记到 Recent 1、Recent 2、Recent 3，后面还有几本同批书。"])
+        return _candidate_payload(["最近这批是 Recent 1、Recent 2、Recent 3，后面还有几本同批书。"])
 
     result = asyncio.run(
         SurfaceRuntime(generate).run(
@@ -414,7 +415,76 @@ def test_surface_runtime_retries_recent_many_collection_when_too_few_items_are_n
     assert "Recent 1" in result.selected_text
     assert "Recent 2" in result.selected_text
     assert "Recent 3" in result.selected_text
+    assert "我记到" not in result.selected_text
     assert "MEMORY_ANSWER_COLLECTION_ITEM_IDENTITY_COVERAGE" in calls[1][-1]["content"]
+
+
+def test_surface_runtime_retries_mechanical_memory_phrase() -> None:
+    calls: list[list[dict[str, str]]] = []
+
+    def generate(messages):
+        calls.append(messages)
+        if len(calls) == 1:
+            return _candidate_payload(["昨天那几本我能对上：Yesterday A、Yesterday B、Yesterday C。"])
+        return _candidate_payload(["昨天推过的是 Yesterday A、Yesterday B、Yesterday C。"])
+
+    result = asyncio.run(
+        SurfaceRuntime(generate).run(
+            _payload(
+                user_message="昨天三本呢？",
+                reply_control_packet={
+                    "response_move": "memory_followup",
+                    "task_mode": "memory_followup",
+                    "emotional_tone": "light",
+                    "relationship_distance": "familiar",
+                    "information_budget": "short",
+                    "question_budget": 0,
+                    "facts": [
+                        "集合记忆：2026-05-28 当天轻小说推荐集合，记录 3 个条目；可比较证据：1. Yesterday A｜看点：恋爱日常；2. Yesterday B｜看点：奇幻身份钩子；3. Yesterday C｜看点：设定新鲜",
+                    ],
+                },
+            )
+        )
+    )
+
+    assert len(calls) == 2
+    assert result.selected_text == "昨天推过的是 Yesterday A、Yesterday B、Yesterday C。"
+    assert "MEMORY_FOLLOWUP_MECHANICAL_MEMORY_PHRASE" in calls[1][-1]["content"]
+    assert "我能对上" not in result.selected_text
+
+
+def test_surface_runtime_retries_memory_followup_user_state_guess() -> None:
+    calls: list[list[dict[str, str]]] = []
+
+    def generate(messages):
+        calls.append(messages)
+        if len(calls) == 1:
+            return _candidate_payload(["哈？老板你昨天不是没看吗……算了，那我选第三本。"])
+        return _candidate_payload(["昨天那三本里我会选第三本，异世界皇女皇帝线。设定更直给，简介里的皇女/皇帝线也很明确。"])
+
+    result = asyncio.run(
+        SurfaceRuntime(generate).run(
+            _payload(
+                user_message="昨天那几本好看吗？",
+                reply_control_packet={
+                    "response_move": "memory_followup",
+                    "task_mode": "memory_followup",
+                    "emotional_tone": "light",
+                    "relationship_distance": "familiar",
+                    "information_budget": "short",
+                    "question_budget": 0,
+                    "facts": [
+                        "集合记忆：2026-05-28 当天轻小说推荐集合，记录 3 个条目；可比较证据：1. Yesterday A｜看点：恋爱日常；2. Yesterday B｜看点：奇幻身份钩子；3. 异世界皇女皇帝线｜看点：设定更直给｜简介：皇女和皇帝线很明确",
+                    ],
+                },
+            )
+        )
+    )
+
+    assert len(calls) == 2
+    assert "MEMORY_FOLLOWUP_USER_STATE_GUESS" in calls[1][-1]["content"]
+    assert "不是没看" not in result.selected_text
+    assert "异世界皇女皇帝线" in result.selected_text
 
 
 def test_surface_runtime_retries_failure_recall_when_reply_ignores_recorded_cause() -> None:
@@ -566,7 +636,7 @@ def test_surface_runtime_deep_review_selection_overrides_old_comparison_summary(
         )
     )
 
-    assert result.selected_text == "我会先看第三本，《轉移到異世界後，與美少女皇女結婚的我成為皇帝，享受悠閒的後宮生活3》。皇女/皇帝这套设定也够直接，对白也轻快，比另外几本更想继续翻。"
+    assert result.selected_text == "我偏第三本，《轉移到異世界後，與美少女皇女結婚的我成為皇帝，享受悠閒的後宮生活3》。皇女/皇帝这套设定也够直接，对白也轻快，比另外几本更想继续翻。"
     assert result.observation_codes == ()
 
 
@@ -596,7 +666,7 @@ def test_surface_runtime_repairs_deep_review_title_only_reply(monkeypatch) -> No
         )
     )
 
-    assert result.selected_text == "我会先看第一本，《我的青梅竹马发育得超超超超超级大》。开篇就进正题，对白也轻快，比另外几本更想继续翻。"
+    assert result.selected_text == "我偏第一本，《我的青梅竹马发育得超超超超超级大》。开篇就进正题，对白也轻快，比另外几本更想继续翻。"
     assert result.observation_codes == ()
 
 
@@ -625,7 +695,7 @@ def test_surface_runtime_repairs_overstyled_deep_review_selection(monkeypatch) -
         )
     )
 
-    assert result.selected_text == "我会先看第三本，《轉移到異世界後，與美少女皇女結婚的我成為皇帝，享受悠閒的後宮生活3》。开篇就进正题，皇女/皇帝这套设定也够直接，比另外几本更想继续翻。"
+    assert result.selected_text == "我偏第三本，《轉移到異世界後，與美少女皇女結婚的我成為皇帝，享受悠閒的後宮生活3》。开篇就进正题，皇女/皇帝这套设定也够直接，比另外几本更想继续翻。"
     assert result.observation_codes == ()
 
 
@@ -654,7 +724,7 @@ def test_surface_runtime_repairs_questioning_deep_review_selection_with_new_reas
         )
     )
 
-    assert result.selected_text == "我会先看第三本，《轉移到異世界後，與美少女皇女結婚的我成為皇帝，享受悠閒的後宮生活3》。开篇就进正题，皇女/皇帝这套设定也够直接，比另外几本更想继续翻。"
+    assert result.selected_text == "我偏第三本，《轉移到異世界後，與美少女皇女結婚的我成為皇帝，享受悠閒的後宮生活3》。开篇就进正题，皇女/皇帝这套设定也够直接，比另外几本更想继续翻。"
     assert result.observation_codes == ()
 
 

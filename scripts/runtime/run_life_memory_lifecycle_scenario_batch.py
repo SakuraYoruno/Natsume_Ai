@@ -33,6 +33,7 @@ from host_brain.memory.life_memory import (  # noqa: E402
     RETENTION_GONE,
     RETENTION_WARM,
 )
+from scripts.runtime.audit_life_memory_coverage import build_coverage_report  # noqa: E402
 
 
 CN_TZ = timezone(timedelta(hours=8))
@@ -69,6 +70,7 @@ def run_lifecycle_scenario_batch() -> dict[str, Any]:
         ("retention_prunes_expired_gone_and_refreshes_indexes", _case_retention_prunes_and_refreshes_indexes),
         ("gone_episode_hidden_from_default_recall", _case_gone_episode_hidden_from_recall),
         ("sleep_replay_distills_failure_not_delivery_noise", _case_sleep_replay_distills_failure_not_delivery_noise),
+        ("sleep_replay_distills_relationship_feedback", _case_sleep_replay_distills_relationship_feedback),
         ("policy_backfill_classifies_memory_management_lanes", _case_policy_backfill_classifies_memory_management_lanes),
     ):
         cases.append(_run_case(case_id, fn))
@@ -193,6 +195,15 @@ def _case_sleep_replay_compacts_scene(store: LifeMemoryStore, ledger: SQLiteLedg
         semantic_limit=4,
         compaction_group_limit=4,
     )
+    audit = build_coverage_report(ledger._conn, include_synthetic=True)
+    retention_counts = {
+        item["retention_state"]: int(item["count"])
+        for item in audit.get("retention_state_counts") or []
+    }
+    forget_reasons = {
+        item["forget_reason"]: int(item["count"])
+        for item in audit.get("forget_reason_counts") or []
+    }
     groups = list(result.get("compaction", {}).get("groups") or [])
     compressed_id = str(groups[0].get("compressed_episode_id") or "") if groups else ""
     rows = _episode_rows_by_id(ledger, [*source_ids, preference["episode_id"], compressed_id])
@@ -204,8 +215,12 @@ def _case_sleep_replay_compacts_scene(store: LifeMemoryStore, ledger: SQLiteLedg
         "sources_demoted": all(rows[eid]["retention_state"] == RETENTION_COLD for eid in source_ids),
         "preference_not_compacted": rows[preference["episode_id"]]["compressed_into_episode_id"] is None,
         "summary_episode_exists": bool(compressed_id) and "睡眠回放压缩" in rows.get(compressed_id, {}).get("summary", ""),
+        "audit_issue_free": int(audit["summary"]["issue_count"]) == 0,
+        "audit_reports_compressed_sources": int(audit["summary"]["compressed_episode_count"]) == 3,
+        "audit_reports_cold_sources": int(retention_counts.get(RETENTION_COLD, 0)) >= 3,
+        "audit_reports_compaction_reason": int(forget_reasons.get("compressed_into_summary", 0)) == 3,
     }
-    return checks, {"run_result": result, "rows": rows}
+    return checks, {"run_result": result, "rows": rows, "audit_summary": audit["summary"]}
 
 
 def _case_retention_prunes_and_refreshes_indexes(store: LifeMemoryStore, ledger: SQLiteLedger) -> tuple[dict[str, bool], dict[str, Any]]:
@@ -333,6 +348,39 @@ def _case_sleep_replay_distills_failure_not_delivery_noise(store: LifeMemoryStor
         "delivery_not_reflected": delivery["episode_id"] not in reflection_episode_ids,
     }
     return checks, {"run_result": result, "semantic_items": semantic_items, "reflection_episode_ids": sorted(reflection_episode_ids)}
+
+
+def _case_sleep_replay_distills_relationship_feedback(store: LifeMemoryStore, ledger: SQLiteLedger) -> tuple[dict[str, bool], dict[str, Any]]:
+    feedback = store.write_chat_episode(
+        request_id="relationship-feedback-quality",
+        session_id="qq_dm_owner",
+        person_id="owner",
+        user_message="文本质量不像人话，太台词腔了。",
+        assistant_reply="收到，我会把证据转成更自然的聊天方式。",
+        ts_ms=OLD_TS,
+    )
+    result = MemorySleepReplayTask(store=store).run_once(
+        now_ts_ms_value=OLD_TS + 500,
+        replay_limit=10,
+        forgetting_batch_limit=20,
+        semantic_limit=6,
+    )
+    semantic_items, total = ledger.list_semantic_memories()
+    summaries = "\n".join(str(item.get("summary") or "") for item in semantic_items)
+    relationship_items = [
+        item
+        for item in semantic_items
+        if "semantic_kind:relationship_feedback" in list(item.get("tags") or [])
+    ]
+    checks = {
+        "semantic_written": total == 1,
+        "relationship_semantic_present": bool(relationship_items),
+        "quality_feedback_summary": "回答要像正常聊天" in summaries and "台词腔" in summaries,
+        "source_episode_traceable": bool(relationship_items)
+        and f"life_episode::{feedback['episode_id']}" in list(relationship_items[0].get("source_memory_ids") or []),
+        "not_preference_semantic": "用户偏好" not in summaries,
+    }
+    return checks, {"run_result": result, "semantic_items": semantic_items}
 
 
 def _case_policy_backfill_classifies_memory_management_lanes(store: LifeMemoryStore, ledger: SQLiteLedger) -> tuple[dict[str, bool], dict[str, Any]]:

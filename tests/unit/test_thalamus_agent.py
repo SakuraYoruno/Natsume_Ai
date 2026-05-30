@@ -809,7 +809,7 @@ def test_intent_classification_prompt_templates_resolve_canonical_defaults() -> 
     assert "user_prompt_template" in merged
 
 
-def test_classify_task_intent_by_llm_uses_pool_scene_and_drops_codex_runtime(monkeypatch) -> None:
+def test_classify_task_intent_by_llm_uses_thalamus_pool_scene_without_exec_runtime(monkeypatch) -> None:
     captured: dict = {}
 
     async def _fake_pool_complete(**kwargs):  # noqa: ANN001
@@ -827,7 +827,7 @@ def test_classify_task_intent_by_llm_uses_pool_scene_and_drops_codex_runtime(mon
         patch(
             "host_brain.app.graph_config_builder.resolve_host_llm_runtime_async",
             new=AsyncMock(return_value={"available": True}),
-        ),
+        ) as resolve_runtime_mock,
         patch(
             "host_brain.app.graph_config_builder.resolve_executive_router_llm_runtime",
             return_value={
@@ -838,7 +838,7 @@ def test_classify_task_intent_by_llm_uses_pool_scene_and_drops_codex_runtime(mon
                 "base_url_override": None,
                 "agent_gen_params": {"temperature": 0.1, "top_p": 0.8},
             },
-        ),
+        ) as exec_runtime_mock,
         patch("host_brain.integrations.llm_helpers.acomplete_llm_with_pool", new=_fake_pool_complete),
     ):
         decision = _run(
@@ -851,6 +851,8 @@ def test_classify_task_intent_by_llm_uses_pool_scene_and_drops_codex_runtime(mon
 
     assert decision is not None
     assert decision["route"] == "chat"
+    resolve_runtime_mock.assert_not_called()
+    exec_runtime_mock.assert_not_called()
     assert captured["scene_type"] == "THALAMUS_INTENT"
     assert captured["timeout_ms"] == 1200
     assert captured["provider_name"] is None

@@ -72,10 +72,11 @@ class VestibularAgent:
             min_value=30000,
             max_value=3600000,
         )
-        last_ts = int(self._last_high_jitter_side_effect_ts_ms or 0)
+        last_ts = int(getattr(self, "_last_high_jitter_side_effect_ts_ms", 0) or 0)
+        last_bucket = str(getattr(self, "_last_high_jitter_side_effect_bucket", "") or "")
         if (
             last_ts <= 0
-            or bucket != self._last_high_jitter_side_effect_bucket
+            or bucket != last_bucket
             or int(now_ts_ms) - last_ts >= cooldown_ms
         ):
             self._last_high_jitter_side_effect_ts_ms = int(now_ts_ms)

@@ -167,6 +167,7 @@ def test_non_chat_pool_prefers_codex_cli_migration(monkeypatch: pytest.MonkeyPat
     monkeypatch.setenv("HOST_LLM_POOL_CODEX_MIGRATION_ENABLED", "true")
     monkeypatch.setenv("HOST_LLM_POOL_TIER_B", "gemini:gemini-pro")
     monkeypatch.setenv("HOST_CODEX_MODEL_ID", "gpt-5.4-mini")
+    monkeypatch.delenv("HOST_LLM_POOL_CODEX_MODEL_ID", raising=False)
     monkeypatch.setattr(helpers, "codex_cli_lm_available", lambda: True)
 
     candidates = helpers._resolve_pool_candidates(
@@ -178,7 +179,7 @@ def test_non_chat_pool_prefers_codex_cli_migration(monkeypatch: pytest.MonkeyPat
     )
 
     assert candidates[0]["provider_name"] == "codex"
-    assert candidates[0]["model_id"] == "gpt-5.4-mini"
+    assert candidates[0]["model_id"] == "gpt-5.5"
     assert candidates[0]["api_key"] is None
 
 

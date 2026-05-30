@@ -53,6 +53,7 @@ DOMAIN_ACTION = "action"
 DOMAIN_WEB = "web"
 DOMAIN_FILE = "file"
 DOMAIN_CONTENT = "content"
+DOMAIN_OPEN_LOOP = "open_loop"
 
 
 @dataclass(frozen=True)
@@ -76,8 +77,8 @@ RECALL_INTENT_CONTRACTS: dict[str, RecallIntentContract] = {
     ),
     CONTRACT_OPEN_LOOP: RecallIntentContract(
         contract_id=CONTRACT_OPEN_LOOP,
-        primary_memory_layer="life_episode",
-        expected_memory_layers=("life_episode", "semantic_memory", "sqlite_ledger", "episodic_vector", "neo4j_bond"),
+        primary_memory_layer="semantic_memory",
+        expected_memory_layers=("semantic_memory", "life_episode", "sqlite_ledger", "episodic_vector", "neo4j_bond"),
         validation_requirements=("trusted_memory_hit", "source_ref_present"),
         answer_obligations=("state_open_loop_status", "separate_done_from_pending"),
     ),
@@ -132,8 +133,8 @@ RECALL_INTENT_CONTRACTS: dict[str, RecallIntentContract] = {
     ),
     CONTRACT_SELF_CHANGE: RecallIntentContract(
         contract_id=CONTRACT_SELF_CHANGE,
-        primary_memory_layer="life_episode",
-        expected_memory_layers=("life_episode", "semantic_memory", "sqlite_ledger", "episodic_vector", "neo4j_bond"),
+        primary_memory_layer="semantic_memory",
+        expected_memory_layers=("semantic_memory", "life_episode", "sqlite_ledger", "episodic_vector", "neo4j_bond"),
         validation_requirements=("trusted_memory_hit", "source_ref_present"),
         answer_obligations=("state_self_change_and_current_effect", "do_not_hide_correction_history"),
     ),
@@ -155,9 +156,9 @@ _ANAPHORIC_SELECTION_RE = re.compile(
 )
 _RECENT_COLLECTION_RE = re.compile(
     r"(?:最近|这几天|这两天|这三天|这周|本周|近几天|这段时间|过去几天|过去一周|"
-    r"过去三十天|近三十天|30天|一个月|本月|十几本|几本)"
+    r"上周|上星期|上个星期|上礼拜|过去三十天|近三十天|30天|一个月|本月|十几本|几本)"
 )
-_DATE_LOOKUP_RE = re.compile(r"(?:今天|今日|昨天|昨晚|前天|上次|之前|以前|过去|这周)")
+_DATE_LOOKUP_RE = re.compile(r"(?:今天|今日|昨天|昨晚|前天|上次|之前|以前|过去|这周|上周|上星期|上个星期|上礼拜)")
 _ISO_DATE_RE = re.compile(r"\b(20\d{2})[-/.年](\d{1,2})[-/.月](\d{1,2})日?\b")
 _MONTH_DAY_RE = re.compile(r"(?<!\d)(\d{1,2})月(\d{1,2})日")
 _BOOK_DOMAIN_RE = re.compile(r"(?:轻小说|小说|书籍|书|epub|lightnovel)", re.IGNORECASE)
@@ -232,19 +233,33 @@ def plan_life_memory_query(text: Any, *, task_mode: str | None = None) -> LifeMe
     anaphoric_selection = bool(_ANAPHORIC_SELECTION_RE.search(message))
     specific_item_followup = _looks_like_specific_item_followup(message)
     collection_like = _looks_like_collection_query(message, domains=domains, temporal_scope=temporal_scope)
+    collection_quality_judgment = _looks_like_collection_quality_judgment_query(message)
+    if collection_quality_judgment:
+        anaphoric_selection = True
     event_lookup = _looks_like_event_lookup_query(message, temporal_scope=temporal_scope)
     evidence_review = _looks_like_evidence_review_query(message, temporal_scope=temporal_scope)
     min_collection_items = _minimum_collection_items(message)
     explicit_memory = any(token in message for token in ("还记得", "记得吗", "记不记得", "记了什么", "让你记"))
-    failure_debug = any(token in message for token in ("失败原因", "为什么失败", "连不上", "异常原因", "被占用"))
+    preference_lookup = _looks_like_preference_lookup_query(message)
+    response_style_feedback = _looks_like_response_style_feedback(message)
+    failure_debug = any(token in message for token in ("失败原因", "为什么失败", "连不上", "异常原因", "被占用", "卡住", "卡死", "卡了"))
+    if not failure_debug and any(token in message for token in ("又卡", "还卡", "没反应", "没响应", "一直转", "为什么这么慢", "为什么很慢")):
+        failure_debug = True
     if not failure_debug and any(token in message for token in ("报错", "异常")):
         failure_debug = temporal_scope != TEMPORAL_UNSPECIFIED or any(token in message for token in ("上次", "之前", "刚才", "原因"))
     correction = any(token in message for token in ("不对", "错了", "纠正", "不是这个意思", "你记错"))
-    preference = any(token in message for token in ("我喜欢", "我不喜欢", "偏好", "以后", "不要", "别再", "必须"))
-    if not preference and any(token in message for token in ("格式", "怎么发", "怎样发", "要怎样", "换行", "模板腔", "分段")):
-        preference = any(token in message for token in ("推荐", "推送", "发送", "回复", "卡片", "简介", "我说", "要求"))
+    preference = preference_lookup
     open_loop = any(token in message for token in ("待办", "承诺", "说好", "继续刚才", "还没做", "完成了吗", "跑完了吗"))
     self_change = any(token in message for token in ("模型路由", "记忆系统", "能力", "策略", "开关", "改过什么"))
+
+    if response_style_feedback and not explicit_memory and not preference_lookup:
+        return LifeMemoryQueryPlan(
+            should_recall=False,
+            query_kind=QUERY_FRESH_TOPIC,
+            temporal_scope=temporal_scope,
+            target_domains=domains,
+            reason="response_style_feedback_current_turn",
+        )
 
     if failure_debug:
         contract = RECALL_INTENT_CONTRACTS[CONTRACT_FAILURE_DEBUG]
@@ -271,8 +286,8 @@ def plan_life_memory_query(text: Any, *, task_mode: str | None = None) -> LifeMe
             should_recall=True,
             query_kind=QUERY_OPEN_LOOP,
             temporal_scope=temporal_scope,
-            target_domains=domains,
-            target_store_ids=("life_episode", "life_memory_entity", "semantic_memory", "episodic_vector", "sqlite_ledger", "neo4j_bond"),
+            target_domains=tuple(dict.fromkeys([DOMAIN_OPEN_LOOP, *domains])),
+            target_store_ids=("semantic_memory", "life_episode", "life_memory_entity", "episodic_vector", "sqlite_ledger", "neo4j_bond"),
             time_lookback_days=_lookback_for_scope(temporal_scope, default=None),
             max_facts=4,
             max_chars_per_fact=180,
@@ -303,7 +318,12 @@ def plan_life_memory_query(text: Any, *, task_mode: str | None = None) -> LifeMe
             answer_obligations=contract.answer_obligations,
         )
 
-    if collection_like and not specific_item_followup and temporal_scope not in {TEMPORAL_CURRENT, TEMPORAL_UNSPECIFIED}:
+    if (
+        collection_like
+        and not specific_item_followup
+        and not collection_quality_judgment
+        and temporal_scope not in {TEMPORAL_CURRENT, TEMPORAL_UNSPECIFIED}
+    ):
         scope = temporal_scope
         dated_scope = temporal_scope in {TEMPORAL_TODAY, TEMPORAL_YESTERDAY, TEMPORAL_DAY_BEFORE_YESTERDAY} or temporal_scope.startswith(TEMPORAL_DATE_PREFIX)
         contract_id = CONTRACT_COLLECTION_DATE if dated_scope else CONTRACT_COLLECTION_RECENT
@@ -365,7 +385,7 @@ def plan_life_memory_query(text: Any, *, task_mode: str | None = None) -> LifeMe
             answer_obligations=_answer_obligations_for_query(message, contract=contract),
         )
 
-    if collection_like and not specific_item_followup:
+    if collection_like and not specific_item_followup and not collection_quality_judgment:
         scope = temporal_scope if temporal_scope != TEMPORAL_UNSPECIFIED else TEMPORAL_RECENT_DAYS
         dated_scope = temporal_scope in {TEMPORAL_TODAY, TEMPORAL_YESTERDAY, TEMPORAL_DAY_BEFORE_YESTERDAY} or temporal_scope.startswith(TEMPORAL_DATE_PREFIX)
         contract_id = CONTRACT_COLLECTION_DATE if dated_scope else CONTRACT_COLLECTION_RECENT
@@ -443,8 +463,15 @@ def plan_life_memory_query(text: Any, *, task_mode: str | None = None) -> LifeMe
             should_recall=True,
             query_kind=query_kind,
             temporal_scope=temporal_scope,
-            target_domains=domains,
-            target_store_ids=("life_episode", "life_memory_entity", "semantic_memory", "episodic_vector", "sqlite_ledger", "neo4j_bond"),
+            target_domains=_memory_lookup_target_domains(
+                base_domains=domains,
+                query_kind=query_kind,
+            ),
+            target_store_ids=(
+                ("semantic_memory", "life_episode", "life_memory_entity", "episodic_vector", "sqlite_ledger", "neo4j_bond")
+                if preference or self_change
+                else ("life_episode", "life_memory_entity", "semantic_memory", "episodic_vector", "sqlite_ledger", "neo4j_bond")
+            ),
             time_lookback_days=_lookback_for_scope(temporal_scope, default=None),
             max_facts=4,
             max_chars_per_fact=180,
@@ -462,6 +489,37 @@ def plan_life_memory_query(text: Any, *, task_mode: str | None = None) -> LifeMe
         target_domains=domains,
         reason="no_memory_recall_needed",
     )
+
+
+def _memory_lookup_target_domains(
+    *,
+    base_domains: tuple[str, ...],
+    query_kind: str,
+) -> tuple[str, ...]:
+    domains = list(base_domains or ())
+    if query_kind == QUERY_PREFERENCE_LOOKUP:
+        domains = [
+            domain
+            for domain in domains
+            if domain
+            not in {
+                DOMAIN_RECOMMENDATION,
+                DOMAIN_LIGHTNOVEL_RECOMMENDATION,
+            }
+        ]
+        domains.insert(0, DOMAIN_PREFERENCE)
+    elif query_kind == QUERY_SELF_CHANGE:
+        domains = [
+            domain
+            for domain in domains
+            if domain
+            not in {
+                DOMAIN_RECOMMENDATION,
+                DOMAIN_LIGHTNOVEL_RECOMMENDATION,
+            }
+        ]
+        domains.insert(0, DOMAIN_SELF_CHANGE)
+    return tuple(dict.fromkeys(domain for domain in domains if domain))
 
 
 def _looks_like_collection_query(
@@ -482,7 +540,10 @@ def _looks_like_collection_query(
     ) or bool(_RECOMMENDATION_RE.search(text))
     if has_collection_time and has_collection_domain:
         return True
-    if has_collection_time and _ITEM_COUNT_RE.search(text):
+    has_explicit_item_count = bool(
+        re.search(r"(?:三本|几本|十几本|几个|几部|三部|这些本|那些本|这几本|那几本|这三本|那三本)", text)
+    )
+    if has_collection_time and has_explicit_item_count:
         return True
     return bool(_RECOMMENDATION_RE.search(text) and _BOOK_DOMAIN_RE.search(text) and ("哪些" in text or "几" in text))
 
@@ -510,6 +571,25 @@ def _looks_like_evidence_review_query(text: str, *, temporal_scope: str) -> bool
     if not has_evidence_object:
         return False
     return bool(_JUDGMENT_RE.search(text))
+
+
+def _looks_like_collection_quality_judgment_query(text: str) -> bool:
+    if not text:
+        return False
+    has_collection_ref = bool(
+        re.search(
+            r"(?:这些|那些|这几本|那几本|这三本|那三本|这十几本|那十几本|"
+            r"(?:今天|今日|昨天|昨晚|前天|最近|这几天|近几天).{0,8}(?:几本|三本|十几本|推荐|推过|推送|书单))",
+            text,
+        )
+    )
+    if not has_collection_ref:
+        return False
+    return bool(
+        any(token in text for token in ("好看", "喜欢", "想看", "先看", "选", "挑", "值得看", "能看", "比较", "评价", "优缺点", "分析"))
+        or re.search(r"哪(?:本|部|个).{0,12}(?:好|推荐|值得|先|选|挑|喜欢|想看)", text)
+        or re.search(r"(?:推荐|选|挑).{0,8}哪(?:本|部|个)", text)
+    )
 
 
 def _infer_temporal_scope(text: str) -> str:
@@ -541,6 +621,10 @@ def _infer_temporal_scope(text: str) -> str:
             "过去一周",
             "过去一晚上",
             "过去一晚",
+            "上周",
+            "上星期",
+            "上个星期",
+            "上礼拜",
             "过去三十天",
             "近三十天",
             "30天",
@@ -595,6 +679,10 @@ def _infer_domains(text: str) -> tuple[str, ...]:
         add(DOMAIN_CONTENT)
     if _RECOMMENDATION_RE.search(text):
         add(DOMAIN_RECOMMENDATION)
+    if re.search(r"(?:这|那|昨天|前天|今天|最近|几天)?\s*(?:三本|几本|十几本|这几本|这三本)", text):
+        if not (_WEB_DOMAIN_RE.search(text) or _FILE_DOMAIN_RE.search(text)):
+            add(DOMAIN_LIGHTNOVEL_RECOMMENDATION)
+            add(DOMAIN_RECOMMENDATION)
     if any(token in text for token in ("任务", "后台", "调度", "执行", "跑完")):
         add(DOMAIN_TASK)
     if any(token in text for token in ("失败", "报错", "异常", "连不上", "被占用")):
@@ -629,6 +717,8 @@ def _lookback_for_scope(scope: str, *, default: int | None) -> int | None:
 def _lookback_for_text_and_scope(text: str, scope: str, *, default: int | None) -> int | None:
     if scope != TEMPORAL_RECENT_DAYS:
         return _lookback_for_scope(scope, default=default)
+    if any(token in text for token in ("上周", "上星期", "上个星期", "上礼拜")):
+        return 14
     if any(token in text for token in ("这两天", "两天", "2天")):
         return 2
     if any(token in text for token in ("这三天", "三天", "3天")):
@@ -645,6 +735,13 @@ def _minimum_collection_items(text: str) -> int:
         return 0
     if "十几" in text:
         return 10
+    if (
+        re.search(r"(?:哪几本|哪些(?:书|轻小说|小说)|哪几部)", text)
+        and any(token in text for token in ("推荐", "推送", "推过", "发过", "发给我"))
+    ):
+        return 3
+    if re.search(r"(?:这|那)几本", text):
+        return 3
     if re.search(r"(?:三|3)(?:本|部|个)", text):
         return 3
     if re.search(r"(?:两|二|2)(?:本|部|个)", text):
@@ -679,7 +776,11 @@ def _collection_validation_requirements(
     requirements = list(contract.validation_requirements)
     if min_collection_items > 1 and "collection_item_min_count" not in requirements:
         requirements.append("collection_item_min_count")
-    if min_collection_items in {2, 3} and "collection_item_exact_count" not in requirements:
+    if (
+        contract.contract_id != CONTRACT_COLLECTION_RECENT
+        and min_collection_items in {2, 3}
+        and "collection_item_exact_count" not in requirements
+    ):
         requirements.append("collection_item_exact_count")
     return tuple(requirements)
 
@@ -695,6 +796,71 @@ def _answer_obligations_for_query(text: str, *, contract: RecallIntentContract) 
             if obligation not in obligations:
                 obligations.append(obligation)
     return tuple(obligations)
+
+
+def _looks_like_preference_lookup_query(text: str) -> bool:
+    if not text:
+        return False
+    has_preference_signal = any(
+        token in text
+        for token in (
+            "我喜欢",
+            "我不喜欢",
+            "偏好",
+            "以后",
+            "不要",
+            "别再",
+            "必须",
+            "格式",
+            "怎么发",
+            "怎样发",
+            "要怎样",
+            "换行",
+            "模板腔",
+            "不像人话",
+            "正常聊天",
+            "台词腔",
+            "文本质量",
+            "很呆",
+            "分段",
+            "卡片",
+            "简介后",
+            "主链不要",
+            "优先使用",
+            "用什么模型",
+        )
+    )
+    if not has_preference_signal:
+        return False
+    if any(token in text for token in ("还记得", "记得吗", "记不记得", "记得我", "我之前", "之前说", "以前说", "上次说", "我说过", "我要求过")):
+        return True
+    if any(token in text for token in ("来着", "是什么", "怎么来着", "怎样来着")) and any(
+        token in text for token in ("我说", "要求", "偏好", "格式", "规则")
+    ):
+        return True
+    return False
+
+
+def _looks_like_response_style_feedback(text: str) -> bool:
+    if not text:
+        return False
+    return any(
+        token in text
+        for token in (
+            "不像人话",
+            "不像正常人",
+            "不符合正常聊天",
+            "这种说辞",
+            "说辞不",
+            "太模板",
+            "模板味",
+            "很呆",
+            "太呆",
+            "机械",
+            "台词腔",
+            "纯负优化",
+        )
+    )
 
 
 def _clean_text(value: Any) -> str:

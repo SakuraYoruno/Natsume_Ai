@@ -1283,7 +1283,7 @@ def _resolve_inner_activity_direct_runtime() -> dict[str, Any] | None:
             or (os.environ.get("HOST_CODEX_RUNTIME_MODEL") if _inner_activity_provider_uses_codex_cli(provider_name) else "")
             or (os.environ.get("HOST_CODEX_MODEL_ID") if _inner_activity_provider_uses_codex_cli(provider_name) else "")
             or os.environ.get("HOST_INNER_WORLD_LLM_MODEL_ID")
-            or ("gpt-5.4-mini" if _inner_activity_provider_uses_codex_cli(provider_name) else "")
+            or ("gpt-5.5" if _inner_activity_provider_uses_codex_cli(provider_name) else "")
         ).strip()
         timeout_ms = _env_int(
             "HOST_INNER_ACTIVITY_CODEX_CLI_TIMEOUT_MS",

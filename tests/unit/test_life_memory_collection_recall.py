@@ -23,6 +23,17 @@ def _ts(year: int, month: int, day: int, hour: int = 12) -> int:
     return int(datetime(year, month, day, hour, tzinfo=CN_TZ).timestamp() * 1000)
 
 
+def _assert_detail_anchor_not_ready(packet) -> None:  # noqa: ANN001
+    trace = dict(packet.trace or {})
+    readiness = dict(trace.get("recall_answer_readiness") or {})
+    strategy = dict(trace.get("recall_answer_strategy") or {})
+    detail = dict(readiness.get("detail_evidence") or {})
+    assert packet.reason_code == "SURFACE_MEMORY_RECALL_COVERAGE_FAILED"
+    assert readiness["status"] == "NOT_READY"
+    assert strategy["action"] == "fetch_more_evidence"
+    assert detail["basis"] == "detail_anchor"
+
+
 def _cards(prefix: str) -> list[dict[str, object]]:
     return [
         {
@@ -53,6 +64,7 @@ def _write_delivery(
     ts_ms: int,
     session_id: str = "qq_dm_owner",
     person_id: str = "owner",
+    metadata_extra: dict[str, object] | None = None,
 ) -> str:
     result = persist_life_action_event_memory(
         event_source="codex_production",
@@ -78,6 +90,7 @@ def _write_delivery(
             "platform": "qq",
             "conversation_id": session_id,
             "selected_recommendations": _cards(prefix),
+            **dict(metadata_extra or {}),
         },
     )
     return str(result["life_memory"]["episode_id"])
@@ -224,10 +237,10 @@ def test_current_selection_recalls_exact_delivery_collection_before_recent_colle
             ts_ms=_ts(2026, 5, 28, 18),
         )
 
-        joined = "\n".join(packet.facts)
+        joined = "\n".join(row.fact for row in packet.rows)
         validation = dict(dict(packet.trace or {}).get("validation") or {})
         assert validation["passed"] is True
-        assert packet.reason_code is None
+        _assert_detail_anchor_not_ready(packet)
         assert "Latest A" in joined
         assert "Old A" not in joined
         latest_collection = next(row for row in ledger.life_memory_collection if row["scope_key"] == f"delivery:{latest_episode}")
@@ -261,6 +274,38 @@ def test_recent_days_collection_recalls_items_across_multiple_delivery_episodes(
         assert "DayBefore A" in top["text"]
         assert "Yesterday B" in top["text"]
         assert "Today C" in top["text"]
+    finally:
+        ledger.close()
+
+
+def test_collection_recall_skips_synthetic_probe_collections_even_without_identity_scope() -> None:
+    ledger = SQLiteLedger(db_path=":memory:")
+    try:
+        store = LifeMemoryStore(ledger=ledger)
+        _write_delivery(
+            store,
+            prefix="今天推荐",
+            ts_ms=_ts(2026, 5, 28),
+            session_id="life-memory-real-scene-session",
+            person_id="life-memory-real-scene-e2e",
+            metadata_extra={"e2e_probe": True, "real_scene_batch": "real-scene-batch"},
+        )
+        _write_delivery(store, prefix="Real", ts_ms=_ts(2026, 5, 28, 13))
+
+        packet = store.recall_collection_packet(
+            query="这几天推荐过哪些轻小说",
+            top_k=5,
+            now_ts_ms_value=_ts(2026, 5, 28, 18),
+        )
+
+        joined = "\n".join(str(candidate.get("text") or "") for candidate in packet.candidates)
+        assert packet.candidates
+        assert "Real A" in joined
+        assert "今天推荐 A" not in joined
+        assert all(
+            candidate["metadata"].get("person_id") != "life-memory-real-scene-e2e"
+            for candidate in packet.candidates
+        )
     finally:
         ledger.close()
 
@@ -307,6 +352,8 @@ def test_surface_plan_routes_date_and_collection_queries_to_collection_first() -
     assert plan.query_kind == "date_lookup"
     assert plan.temporal_scope == "yesterday"
     assert plan.target_store_ids[0] == "life_memory_collection"
+    assert "lightnovel_recommendation" in plan.target_domains
+    assert "recommendation" in plan.target_domains
     assert "collection_items_present" in plan.validation_requirements
     assert "collection_item_min_count" in plan.validation_requirements
     assert "collection_item_exact_count" in plan.validation_requirements
@@ -328,6 +375,8 @@ def test_surface_plan_routes_many_book_listing_to_recent_collection() -> None:
     assert plan.query_kind == "collection_summary"
     assert plan.temporal_scope == "recent_days"
     assert plan.target_store_ids[0] == "life_memory_collection"
+    assert "lightnovel_recommendation" in plan.target_domains
+    assert "recommendation" in plan.target_domains
     assert "collection_item_min_count" in plan.validation_requirements
     assert plan.min_collection_items == 10
     assert "preserve_item_identity" in plan.answer_obligations
@@ -347,6 +396,8 @@ def test_surface_plan_routes_day_before_yesterday_collection_scope() -> None:
     assert plan.temporal_scope == "day_before_yesterday"
     assert plan.time_lookback_days == 3
     assert plan.target_store_ids[0] == "life_memory_collection"
+    assert "lightnovel_recommendation" in plan.target_domains
+    assert "recommendation" in plan.target_domains
     assert plan.recall_contract_id == "collection_date"
     assert plan.min_collection_items == 3
     assert "collection_item_exact_count" in plan.validation_requirements
@@ -370,7 +421,7 @@ def test_surface_plan_routes_absolute_date_collection_scope() -> None:
     assert plan.min_collection_items == 3
 
 
-def test_surface_plan_routes_recent_many_book_selection_to_collection_with_deep_obligation() -> None:
+def test_surface_plan_routes_recent_many_book_selection_to_selection_with_deep_obligation() -> None:
     plan = plan_surface_memory_recall(
         ThreeLayerContinuityContext(
             current_user_message="这几天十几本里哪本最好看？",
@@ -379,10 +430,11 @@ def test_surface_plan_routes_recent_many_book_selection_to_collection_with_deep_
     )
 
     assert plan.should_recall
-    assert plan.reason == "collection_memory_recall"
-    assert plan.query_kind == "collection_summary"
+    assert plan.reason == "anaphoric_selection_recall"
+    assert plan.query_kind == "anaphoric_selection"
     assert plan.temporal_scope == "recent_days"
     assert plan.target_store_ids[0] == "life_memory_collection"
+    assert plan.recall_contract_id == "anaphoric_selection"
     assert plan.min_collection_items == 10
     assert "collection_item_min_count" in plan.validation_requirements
     assert "compare_recalled_items_before_answering" in plan.answer_obligations
@@ -405,7 +457,7 @@ def test_recall_fusion_collection_route_builds_surface_packet_with_items() -> No
         )
 
         packet = build_surface_memory_recall_packet(result, query="昨天三本呢？", max_facts=4, max_chars_per_fact=900)
-        joined = "\n".join(packet.facts)
+        joined = "\n".join(row.fact for row in packet.rows)
 
         assert packet.route_ids == ("surface_life_collection",)
         assert packet.rows[0].store_id == "life_memory_collection"
@@ -437,7 +489,7 @@ def test_absolute_date_collection_recall_uses_daily_scope() -> None:
             ts_ms=_ts(2026, 5, 29, 8),
         )
 
-        joined = "\n".join(packet.facts)
+        joined = "\n".join(row.fact for row in packet.rows)
         receipt = dict(dict(packet.trace or {}).get("recall_receipt") or {})
         assert packet.reason_code is None
         assert "DateTarget A" in joined
@@ -471,13 +523,56 @@ def test_dated_three_book_recall_can_use_delivery_scope_when_daily_has_multiple_
             ts_ms=_ts(2026, 5, 28, 8),
         )
 
-        joined = "\n".join(packet.facts)
+        joined = "\n".join(row.fact for row in packet.rows)
         receipt = dict(dict(packet.trace or {}).get("recall_receipt") or {})
         validation = dict(dict(packet.trace or {}).get("validation") or {})
         assert first_episode != latest_episode
         assert packet.reason_code is None
         assert validation["passed"] is True
         assert receipt["expected_scope_key"] == "daily:2026-05-27"
+        assert receipt["selected_scope_keys"] == [f"delivery:{latest_episode}"]
+        assert receipt["selected_item_count"] == 3
+        assert "YesterdayLatest A" in joined
+        assert "YesterdayFirst A" not in joined
+    finally:
+        ledger.close()
+
+
+def test_dated_collection_quality_followup_uses_latest_delivery_scope() -> None:
+    ledger = SQLiteLedger(db_path=":memory:")
+    try:
+        store = LifeMemoryStore(ledger=ledger)
+        first_episode = _write_delivery(store, prefix="YesterdayFirst", ts_ms=_ts(2026, 5, 27, 9))
+        latest_episode = _write_delivery(store, prefix="YesterdayLatest", ts_ms=_ts(2026, 5, 27, 21))
+        daily = next(row for row in ledger.life_memory_collection if row["scope_key"] == "daily:2026-05-27")
+        assert daily["item_count"] == 6
+
+        plan = plan_surface_memory_recall(
+            ThreeLayerContinuityContext(
+                current_user_message="昨天那几本好看吗",
+                task_mode_hint="daily_chat",
+            )
+        )
+        packet = recall_surface_memory_for_context(
+            recall_service=_collection_service(ledger),
+            context=ThreeLayerContinuityContext(
+                current_user_message="昨天那几本好看吗",
+                task_mode_hint="daily_chat",
+            ),
+            request_id="req-yesterday-quality-delivery-scope",
+            query_embedding=[0.1] * 16,
+            person_id="owner",
+            session_id="qq_dm_owner",
+            ts_ms=_ts(2026, 5, 28, 8),
+        )
+
+        joined = "\n".join(row.fact for row in packet.rows)
+        receipt = dict(dict(packet.trace or {}).get("recall_receipt") or {})
+        assert first_episode != latest_episode
+        assert plan.reason == "anaphoric_selection_recall"
+        assert plan.min_collection_items == 3
+        assert "collection_item_exact_count" in plan.validation_requirements
+        _assert_detail_anchor_not_ready(packet)
         assert receipt["selected_scope_keys"] == [f"delivery:{latest_episode}"]
         assert receipt["selected_item_count"] == 3
         assert "YesterdayLatest A" in joined
@@ -689,14 +784,80 @@ def test_specific_book_followup_uses_named_entity_instead_of_latest_delivery() -
             ts_ms=_ts(2026, 5, 28, 18),
         )
 
-        joined = "\n".join(packet.facts)
+        joined = "\n".join(row.fact for row in packet.rows)
         trace_items = list((packet.trace or {}).get("selected_entity_items") or [])
         assert plan.primary_memory_layer == "life_memory_entity"
         assert plan.time_lookback_days is None
-        assert packet.reason_code is None
+        _assert_detail_anchor_not_ready(packet)
         assert "5月27日推荐 B" in joined
         assert "5月28日推荐 B" not in joined
         assert trace_items and trace_items[0]["title"] == "5月27日推荐 B"
         assert any(row.store_id == "life_memory_entity" for row in packet.rows)
+    finally:
+        ledger.close()
+
+
+def test_specific_book_followup_filters_repeated_entity_mentions_by_requested_day() -> None:
+    ledger = SQLiteLedger(db_path=":memory:")
+    try:
+        store = LifeMemoryStore(ledger=ledger)
+        shared_url = "https://www.lightnovel.fun/cn/detail/shared-river"
+        _write_delivery(
+            store,
+            prefix="昨天推荐",
+            ts_ms=_ts(2026, 5, 28),
+            metadata_extra={
+                "selected_recommendations": [
+                    *_cards("昨天推荐")[:1],
+                    {
+                        "title": "昨天推荐 B：与神在河岸",
+                        "selection_reason": "奇幻身份",
+                        "intro_snippet": "昨天那组里的河岸与神明。",
+                        "detail_url": shared_url,
+                    },
+                    *_cards("昨天推荐")[2:],
+                ]
+            },
+        )
+        _write_delivery(
+            store,
+            prefix="今天推荐",
+            ts_ms=_ts(2026, 5, 29),
+            metadata_extra={
+                "selected_recommendations": [
+                    *_cards("今天推荐")[:1],
+                    {
+                        "title": "今天推荐 B：与神在河岸",
+                        "selection_reason": "奇幻身份",
+                        "intro_snippet": "今天那组里的河岸与神明。",
+                        "detail_url": shared_url,
+                    },
+                    *_cards("今天推荐")[2:],
+                ]
+            },
+        )
+
+        packet = recall_surface_memory_for_context(
+            recall_service=_collection_entity_service(ledger),
+            context=ThreeLayerContinuityContext(
+                current_user_message="昨天推荐 B：与神在河岸 这本好看吗？",
+                task_mode_hint="daily_chat",
+            ),
+            request_id="req-specific-book-yesterday-shared-entity",
+            query_embedding=[0.1] * 16,
+            person_id="owner",
+            session_id="qq_dm_owner",
+            ts_ms=_ts(2026, 5, 29, 18),
+        )
+
+        trace_items = list((packet.trace or {}).get("selected_entity_items") or [])
+        joined = "\n".join(row.fact for row in packet.rows)
+        _assert_detail_anchor_not_ready(packet)
+        assert trace_items
+        assert {item.get("title") for item in trace_items} == {"昨天推荐 B：与神在河岸"}
+        assert all(str(item.get("scope_key") or "").startswith("delivery:") for item in trace_items)
+        assert all("job-昨天推荐" in str(item.get("evidence_ref") or "") for item in trace_items)
+        assert "昨天推荐 B：与神在河岸" in joined
+        assert "今天推荐 B：与神在河岸" not in joined
     finally:
         ledger.close()

@@ -267,7 +267,7 @@ def test_chat_runtime_can_experiment_on_codex_spark(monkeypatch) -> None:
     assert runtime["model_id"] == "gpt-5.3-codex-spark"
     assert runtime["llm_api_key"] is None
     assert runtime["timeout_ms"] == 45000
-    assert runtime["route_reason_code"] == "HOST_CHAT_AGENT_CODEX_SPARK_EXPERIMENT"
+    assert runtime["route_reason_code"] == "HOST_CHAT_AGENT_CODEX_EXPERIMENT"
 
 
 def test_subagent_runtime_keeps_legacy_agent_role_value(monkeypatch) -> None:

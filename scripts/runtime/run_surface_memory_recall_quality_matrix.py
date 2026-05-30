@@ -12,7 +12,10 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from host_brain.persona.surface_memory_recall import build_surface_memory_recall_packet
+from host_brain.persona.surface_memory_recall import (
+    SURFACE_MEMORY_RECALL_COVERAGE_FAILED,
+    build_surface_memory_recall_packet,
+)
 
 
 TS_2026_05_29_08 = 1780012800000
@@ -27,7 +30,13 @@ class QualityCase:
     expected_response_mode: str
     expected_ready: bool
     expected_reason: str = ""
+    expected_reason_code: str = ""
     expected_detail_basis: str = ""
+    expected_coverage_missing: str = ""
+    expected_query_relevance_required: bool | None = None
+    expected_query_relevance_min_score: float | None = None
+    expected_query_relevance_missing: str = ""
+    must_not_do_contains: str = ""
     kwargs: dict[str, Any] = field(default_factory=dict)
 
 
@@ -64,7 +73,9 @@ def _run_case(case: QualityCase) -> dict[str, Any]:
     )
     trace = dict(packet.trace or {})
     readiness = dict(trace.get("recall_answer_readiness") or {})
+    coverage = dict(trace.get("recall_coverage") or {})
     detail = dict(readiness.get("detail_evidence") or {})
+    query_relevance = dict(readiness.get("query_relevance") or {})
     checks = {
         "status": readiness.get("status") == case.expected_status,
         "response_mode": readiness.get("response_mode") == case.expected_response_mode,
@@ -72,17 +83,36 @@ def _run_case(case: QualityCase) -> dict[str, Any]:
     }
     if case.expected_reason:
         checks["reason"] = case.expected_reason in list(readiness.get("reasons") or [])
+    if case.expected_reason_code:
+        checks["reason_code"] = packet.reason_code == case.expected_reason_code
     if case.expected_detail_basis:
         checks["detail_basis"] = detail.get("basis") == case.expected_detail_basis
+    if case.expected_coverage_missing:
+        checks["coverage_missing"] = case.expected_coverage_missing in list(coverage.get("missing") or [])
+    if case.expected_query_relevance_required is not None:
+        checks["query_relevance_required"] = (
+            bool(query_relevance.get("required")) is case.expected_query_relevance_required
+        )
+    if case.expected_query_relevance_min_score is not None:
+        checks["query_relevance_score"] = (
+            float(query_relevance.get("score") or 0.0) >= case.expected_query_relevance_min_score
+        )
+    if case.expected_query_relevance_missing:
+        checks["query_relevance_missing"] = case.expected_query_relevance_missing in list(
+            query_relevance.get("missing") or []
+        )
+    if case.must_not_do_contains:
+        checks["must_not_do"] = any(case.must_not_do_contains in item for item in packet.must_not_do)
     return {
         "case": asdict(case),
         "passed": all(checks.values()),
         "checks": checks,
         "reason_code": packet.reason_code,
         "facts_count": len(packet.facts),
+        "must_not_do": list(packet.must_not_do),
         "trace": {
             "answer_ready": trace.get("answer_ready"),
-            "recall_coverage": trace.get("recall_coverage"),
+            "recall_coverage": coverage,
             "recall_answer_readiness": readiness,
         },
     }
@@ -352,6 +382,226 @@ def _cases() -> list[QualityCase]:
             },
         ),
         QualityCase(
+            case_id="selection_yesterday_must_not_infer_user_reading_state",
+            query="昨天那几本好看吗？",
+            output={
+                "query": "昨天那几本好看吗？",
+                "status": "OK",
+                "stage": "S_RET_RECALL",
+                "degraded": False,
+                "routes": [{"route_id": "surface_life_collection", "store_id": "life_memory_collection"}],
+                "candidate_count": 1,
+                "ts_ms": TS_2026_05_29_08,
+                "candidates": [
+                    {
+                        "doc_id": "col-yesterday-detail-anchor",
+                        "source_ref": "life_memory_collection://daily/2026-05-28/detail-anchor",
+                        "evidence_refs": ["gateway://message/yesterday/card/1"],
+                        "text": "2026-05-28 当天轻小说推荐集合，记录 3 个条目；可比较证据：1. A｜2. B｜3. C",
+                        "score": 0.95,
+                        "metadata": {
+                            "store_id": "life_memory_collection",
+                            "scope_key": "daily:2026-05-28",
+                            "domain": "lightnovel_recommendation",
+                            "item_count": 3,
+                            "evidence_refs_primary": "gateway://message/yesterday/card/1",
+                            "items": [
+                                {
+                                    "item_title": "A",
+                                    "item_summary": "看点：恋爱日常",
+                                    "detail_url": "https://www.lightnovel.fun/cn/detail/a",
+                                },
+                                {
+                                    "item_title": "B",
+                                    "item_summary": "看点：奇幻身份",
+                                    "detail_url": "https://www.lightnovel.fun/cn/detail/b",
+                                },
+                                {
+                                    "item_title": "C",
+                                    "item_summary": "看点：日常喜剧",
+                                    "detail_url": "https://www.lightnovel.fun/cn/detail/c",
+                                },
+                            ],
+                        },
+                    }
+                ],
+            },
+            expected_status="NOT_READY",
+            expected_response_mode="fetch_or_request_detail_evidence",
+            expected_ready=False,
+            expected_reason="missing_detail_evidence",
+            expected_reason_code=SURFACE_MEMORY_RECALL_COVERAGE_FAILED,
+            expected_detail_basis="detail_anchor",
+            expected_coverage_missing="detail_evidence",
+            expected_query_relevance_required=False,
+            must_not_do_contains="不要臆测用户昨天有没有看",
+            kwargs={
+                "max_facts": 4,
+                "max_chars_per_fact": 700,
+                "temporal_scope": "yesterday",
+                "query_kind": "anaphoric_selection",
+                "recall_contract_id": "anaphoric_selection",
+                "primary_memory_layer": "life_memory_collection",
+                "expected_memory_layers": ("life_memory_collection", "life_memory_entity", "life_episode"),
+                "min_collection_items": 3,
+                "validation_requirements": (
+                    "collection_or_episode_hit",
+                    "evidence_refs_present",
+                    "no_self_echo",
+                    "collection_item_min_count",
+                    "collection_item_exact_count",
+                ),
+                "answer_obligations": (
+                    "ground_selection_in_recalled_items",
+                    "read_detail_evidence_before_deep_quality_judgment",
+                ),
+            },
+        ),
+        QualityCase(
+            case_id="failure_debug_unrelated_semantic_not_ready",
+            query="DeepSeek失败原因是什么？",
+            output={
+                "query": "DeepSeek失败原因是什么？",
+                "status": "OK",
+                "stage": "S_RET_RECALL",
+                "degraded": False,
+                "routes": [{"route_id": "surface_semantic_memory", "store_id": "semantic_memory"}],
+                "candidate_count": 1,
+                "ts_ms": TS_2026_05_29_08,
+                "candidates": [
+                    {
+                        "doc_id": "sem-lightnovel-failure",
+                        "source_ref": "semantic://failure/lightnovel-native-no-recommendations",
+                        "evidence_refs": ["codex_production://event/lightnovel-failed"],
+                        "text": "故障经验：codex_lightnovel_recommender 失败；原因 LIGHTNOVEL_NATIVE_NO_RECOMMENDATIONS。",
+                        "score": 0.96,
+                        "metadata": {
+                            "store_id": "semantic_memory",
+                            "memory_class": "failure_lesson",
+                            "source_ref": "semantic://failure/lightnovel-native-no-recommendations",
+                            "evidence_refs_primary": "codex_production://event/lightnovel-failed",
+                            "domain": "failure",
+                        },
+                    }
+                ],
+            },
+            expected_status="NOT_READY",
+            expected_response_mode="state_recall_coverage_missing",
+            expected_ready=False,
+            expected_reason="query_relevance",
+            expected_reason_code=SURFACE_MEMORY_RECALL_COVERAGE_FAILED,
+            expected_coverage_missing="query_relevance",
+            expected_query_relevance_required=True,
+            expected_query_relevance_min_score=0.0,
+            expected_query_relevance_missing="deepseek",
+            kwargs={
+                "max_facts": 4,
+                "max_chars_per_fact": 220,
+                "temporal_scope": "unspecified",
+                "query_kind": "failure_debug",
+                "target_domains": ("failure",),
+                "recall_contract_id": "failure_debug",
+                "primary_memory_layer": "life_episode",
+                "expected_memory_layers": ("life_episode", "semantic_memory", "sqlite_ledger", "episodic_vector"),
+                "validation_requirements": ("error_episode_or_semantic_hit", "source_ref_present"),
+                "answer_obligations": ("explain_failure_from_recorded_result", "do_not_invent_root_cause"),
+            },
+        ),
+        QualityCase(
+            case_id="preference_unrelated_semantic_not_ready",
+            query="还记得我说不要用 pro 吗？",
+            output={
+                "query": "还记得我说不要用 pro 吗？",
+                "status": "OK",
+                "stage": "S_RET_RECALL",
+                "degraded": False,
+                "routes": [{"route_id": "surface_semantic_memory", "store_id": "semantic_memory"}],
+                "candidate_count": 1,
+                "ts_ms": TS_2026_05_29_08,
+                "candidates": [
+                    {
+                        "doc_id": "sem-pref-lightnovel-format",
+                        "source_ref": "ledger://semantic_memory/sem-pref-lightnovel-format",
+                        "evidence_refs": ["chat://request/req-pref-format#user"],
+                        "text": "用户偏好：以后推荐轻小说时，每本书的简介后应该换行，别模板腔。",
+                        "score": 0.96,
+                        "metadata": {
+                            "store_id": "semantic_memory",
+                            "memory_class": "preference",
+                            "source_ref": "ledger://semantic_memory/sem-pref-lightnovel-format",
+                            "evidence_refs_primary": "chat://request/req-pref-format#user",
+                            "domain": "preference",
+                        },
+                    }
+                ],
+            },
+            expected_status="NOT_READY",
+            expected_response_mode="state_recall_coverage_missing",
+            expected_ready=False,
+            expected_reason="query_relevance",
+            expected_reason_code=SURFACE_MEMORY_RECALL_COVERAGE_FAILED,
+            expected_coverage_missing="query_relevance",
+            expected_query_relevance_required=True,
+            expected_query_relevance_missing="pro",
+            kwargs={
+                "max_facts": 4,
+                "max_chars_per_fact": 220,
+                "temporal_scope": "unspecified",
+                "query_kind": "preference_lookup",
+                "recall_contract_id": "preference",
+                "primary_memory_layer": "semantic_memory",
+                "expected_memory_layers": ("semantic_memory", "life_episode", "sqlite_ledger", "episodic_vector"),
+                "validation_requirements": ("trusted_memory_hit", "source_ref_present"),
+                "answer_obligations": ("state_preference_as_user_rule", "keep_source_episode_traceable"),
+            },
+        ),
+        QualityCase(
+            case_id="correction_unrelated_episode_not_ready",
+            query="你刚才是不是记错了 OneBot 在哪？",
+            output={
+                "query": "你刚才是不是记错了 OneBot 在哪？",
+                "status": "OK",
+                "stage": "S_RET_RECALL",
+                "degraded": False,
+                "routes": [{"route_id": "surface_life_episode", "store_id": "life_episode"}],
+                "candidate_count": 1,
+                "ts_ms": TS_2026_05_29_08,
+                "candidates": [
+                    {
+                        "doc_id": "ep-cat-cover-correction",
+                        "source_ref": "chat://request/req-corrected-fix-cat-cover",
+                        "evidence_refs": ["chat://request/req-corrected-fix-cat-cover#user"],
+                        "text": "纠错记忆：用户指出没有封面有猫这本，我已经撤回了之前那个判断。",
+                        "score": 0.95,
+                        "metadata": {
+                            "store_id": "life_episode",
+                            "source_ref": "chat://request/req-corrected-fix-cat-cover",
+                            "evidence_refs_primary": "chat://request/req-corrected-fix-cat-cover#user",
+                        },
+                    }
+                ],
+            },
+            expected_status="NOT_READY",
+            expected_response_mode="state_recall_coverage_missing",
+            expected_ready=False,
+            expected_reason="query_relevance",
+            expected_reason_code=SURFACE_MEMORY_RECALL_COVERAGE_FAILED,
+            expected_coverage_missing="query_relevance",
+            expected_query_relevance_required=True,
+            expected_query_relevance_missing="onebot",
+            kwargs={
+                "max_facts": 4,
+                "max_chars_per_fact": 220,
+                "temporal_scope": "current",
+                "query_kind": "correction",
+                "recall_contract_id": "correction",
+                "primary_memory_layer": "life_episode",
+                "expected_memory_layers": ("life_episode", "semantic_memory", "sqlite_ledger", "episodic_vector"),
+                "validation_requirements": ("correction_state_checked", "suppressed_not_fact"),
+                "answer_obligations": ("prefer_corrected_version", "do_not_repeat_suppressed_fact"),
+            },
+        ),
+        QualityCase(
             case_id="web_body_evidence_ready",
             query="昨天那个网页内容靠谱吗？依据是什么？",
             output={
@@ -390,6 +640,8 @@ def _cases() -> list[QualityCase]:
             expected_response_mode="answer_from_evidence",
             expected_ready=True,
             expected_detail_basis="body_evidence",
+            expected_query_relevance_required=True,
+            expected_query_relevance_min_score=1.0,
             kwargs={
                 "max_facts": 4,
                 "max_chars_per_fact": 320,

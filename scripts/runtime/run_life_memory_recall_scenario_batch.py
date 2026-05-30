@@ -40,6 +40,10 @@ class ScenarioExpectation:
     must_receipt_scope: str = ""
     must_coverage_min: float = 0.66
     must_detail_basis: str = ""
+    expected_coverage_passed: bool = True
+    expected_readiness_status: str = ""
+    expected_strategy_action: str = ""
+    must_coverage_missing: str = ""
 
 
 class _NullChromaClient:
@@ -104,6 +108,7 @@ def run_scenario_batch() -> dict[str, Any]:
 def _seed_world(store: LifeMemoryStore) -> None:
     for day in (25, 26, 27, 28):
         _seed_recommendation(store, day=day)
+    _seed_deep_review(store)
     store.write_background_episode(
         event_source="browser",
         event_id="web-onebot-edge-report",
@@ -152,6 +157,30 @@ def _seed_world(store: LifeMemoryStore) -> None:
         user_message="以后推荐轻小说时，每本书的简介后应该换行，别模板腔。",
         assistant_reply="记住了，后面按更自然的卡片格式发。",
         ts_ms=_ts(28, 14),
+    )
+    store.write_chat_episode(
+        request_id="req-feedback-natural-chat",
+        session_id="qq_dm_owner",
+        person_id="owner",
+        user_message="文本质量不像人话，太台词腔了。",
+        assistant_reply="收到，我以后把证据转成更自然的聊天方式。",
+        ts_ms=_ts(28, 14) + 100,
+    )
+    store.write_chat_episode(
+        request_id="req-memory-system-self-change",
+        session_id="qq_dm_owner",
+        person_id="owner",
+        user_message="她做过的事都要留下生命经历锚点，但不等于所有日志都进入可召回记忆。",
+        assistant_reply="明白，经历要可追溯，主动记忆要筛选。",
+        ts_ms=_ts(28, 14) + 200,
+    )
+    store.write_chat_episode(
+        request_id="req-memory-open-loop",
+        session_id="qq_dm_owner",
+        person_id="owner",
+        user_message="后续要把记忆系统的召回覆盖 open loop 和自我改变，记成待办。",
+        assistant_reply="记下了，这个作为记忆系统待办继续推进。",
+        ts_ms=_ts(28, 14) + 300,
     )
     wrong = store.write_chat_episode(
         request_id="req-corrected-wrong-cat-cover",
@@ -203,9 +232,8 @@ def _run_case(*, service: RecallFusionServiceContract, case: ScenarioExpectation
         "plan_reason": plan.reason == case.expected_reason,
         "plan_kind": plan.query_kind == case.expected_kind,
         "route": case.must_route in packet.route_ids,
-        "contains": case.must_contain in joined,
+        "contains": True if not case.must_contain else case.must_contain in joined,
         "excludes": case.must_not_contain not in joined,
-        "evidence": bool(packet.evidence_refs),
         "validation": bool(validation) and validation.get("passed") is True,
     }
     if case.must_trace_key or case.must_trace_title:
@@ -216,13 +244,23 @@ def _run_case(*, service: RecallFusionServiceContract, case: ScenarioExpectation
             for item in trace_items
         )
     receipt = dict(dict(packet.trace or {}).get("recall_receipt") or {})
+    receipt_evidence_count = int(receipt.get("evidence_ref_count") or 0)
+    checks["evidence"] = bool(packet.evidence_refs) if case.expected_coverage_passed else receipt_evidence_count > 0
     checks["receipt"] = bool(receipt) and receipt.get("validation_passed") is True
     coverage = dict(dict(packet.trace or {}).get("recall_coverage") or {})
     checks["coverage"] = (
         bool(coverage)
-        and coverage.get("passed") is True
-        and float(coverage.get("score") or 0.0) >= float(case.must_coverage_min)
+        and coverage.get("passed") is case.expected_coverage_passed
+        and (not case.expected_coverage_passed or float(coverage.get("score") or 0.0) >= float(case.must_coverage_min))
     )
+    if case.must_coverage_missing:
+        checks["coverage_missing"] = case.must_coverage_missing in list(coverage.get("missing") or [])
+    readiness = dict(dict(packet.trace or {}).get("recall_answer_readiness") or {})
+    strategy = dict(dict(packet.trace or {}).get("recall_answer_strategy") or {})
+    if case.expected_readiness_status:
+        checks["readiness_status"] = readiness.get("status") == case.expected_readiness_status
+    if case.expected_strategy_action:
+        checks["strategy_action"] = strategy.get("action") == case.expected_strategy_action
     if case.must_receipt_min_items:
         checks["receipt_item_count"] = int(receipt.get("selected_item_count") or 0) >= int(case.must_receipt_min_items)
     if case.must_receipt_scope:
@@ -241,6 +279,8 @@ def _run_case(*, service: RecallFusionServiceContract, case: ScenarioExpectation
         "recall_receipt": receipt,
         "recall_need": dict(dict(packet.trace or {}).get("recall_need") or {}),
         "recall_coverage": coverage,
+        "recall_answer_readiness": readiness,
+        "recall_answer_strategy": strategy,
         "facts": list(packet.facts),
     }
 
@@ -302,8 +342,25 @@ def _scenario_expectations() -> list[ScenarioExpectation]:
             expected_reason="anaphoric_selection_recall",
             expected_kind="anaphoric_selection",
             must_route="surface_life_collection",
-            must_contain="5月28日推荐",
+            must_contain="",
             must_not_contain="DeepSeek",
+            must_receipt_min_items=3,
+            must_detail_basis="detail_anchor",
+            expected_coverage_passed=False,
+            expected_readiness_status="NOT_READY",
+            expected_strategy_action="fetch_more_evidence",
+            must_coverage_missing="detail_evidence",
+        ),
+        ScenarioExpectation(
+            case_id="current_deep_review_followup",
+            message="你刚才翻看正文后更推荐哪本？为什么？",
+            expected_reason="anaphoric_selection_recall",
+            expected_kind="evidence_review",
+            must_route="surface_life_episode",
+            must_contain="网页深读结果",
+            must_not_contain="DeepSeek",
+            must_coverage_min=0.95,
+            must_detail_basis="body_evidence",
         ),
         ScenarioExpectation(
             case_id="yesterday_collection",
@@ -315,12 +372,23 @@ def _scenario_expectations() -> list[ScenarioExpectation]:
             must_not_contain="5月28日推荐",
         ),
         ScenarioExpectation(
+            case_id="yesterday_which_books_collection",
+            message="昨天给我推荐了哪几本书？",
+            expected_reason="collection_memory_recall",
+            expected_kind="date_lookup",
+            must_route="surface_life_collection",
+            must_contain="5月27日推荐",
+            must_not_contain="5月28日推荐",
+            must_receipt_min_items=3,
+            must_receipt_scope="daily:2026-05-27",
+        ),
+        ScenarioExpectation(
             case_id="yesterday_event_lookup",
             message="昨天你做了什么？",
             expected_reason="event_memory_recall",
             expected_kind="date_lookup",
-            must_route="surface_life_collection",
-            must_contain="5月27日推荐",
+            must_route="surface_life_episode",
+            must_contain="OneBot 在 edge-lan",
             must_not_contain="5月28日推荐",
         ),
         ScenarioExpectation(
@@ -366,12 +434,17 @@ def _scenario_expectations() -> list[ScenarioExpectation]:
         ScenarioExpectation(
             case_id="recent_many_book_selection",
             message="这几天十几本里哪本最好看？",
-            expected_reason="collection_memory_recall",
-            expected_kind="collection_summary",
+            expected_reason="anaphoric_selection_recall",
+            expected_kind="anaphoric_selection",
             must_route="surface_life_collection",
-            must_contain="记录 12 个条目",
+            must_contain="",
             must_not_contain="DeepSeek",
             must_receipt_min_items=10,
+            must_detail_basis="detail_anchor",
+            expected_coverage_passed=False,
+            expected_readiness_status="NOT_READY",
+            expected_strategy_action="fetch_more_evidence",
+            must_coverage_missing="detail_evidence",
         ),
         ScenarioExpectation(
             case_id="recent_many_book_listing",
@@ -388,10 +461,16 @@ def _scenario_expectations() -> list[ScenarioExpectation]:
             expected_reason="anaphoric_selection_recall",
             expected_kind="anaphoric_selection",
             must_route="surface_life_entity",
-            must_contain="5月27日推荐 B",
+            must_contain="",
             must_not_contain="5月28日推荐 B",
             must_trace_key="selected_entity_items",
             must_trace_title="5月27日推荐 B",
+            must_receipt_min_items=1,
+            must_detail_basis="detail_anchor",
+            expected_coverage_passed=False,
+            expected_readiness_status="NOT_READY",
+            expected_strategy_action="fetch_more_evidence",
+            must_coverage_missing="detail_evidence",
         ),
         ScenarioExpectation(
             case_id="failure_debug",
@@ -409,6 +488,36 @@ def _scenario_expectations() -> list[ScenarioExpectation]:
             expected_kind="preference_lookup",
             must_route="surface_semantic_memory",
             must_contain="简介后应该换行",
+            must_not_contain="5月28日推荐",
+            must_coverage_min=1.0,
+        ),
+        ScenarioExpectation(
+            case_id="relationship_feedback_lookup",
+            message="我之前说文本质量不像人话，是哪里的问题？",
+            expected_reason="explicit_memory_recall",
+            expected_kind="preference_lookup",
+            must_route="surface_semantic_memory",
+            must_contain="回答要像正常聊天",
+            must_not_contain="5月28日推荐",
+            must_coverage_min=1.0,
+        ),
+        ScenarioExpectation(
+            case_id="self_change_lookup",
+            message="记忆系统改过什么？",
+            expected_reason="explicit_memory_recall",
+            expected_kind="self_change",
+            must_route="surface_semantic_memory",
+            must_contain="生命经历锚点",
+            must_not_contain="5月28日推荐",
+            must_coverage_min=1.0,
+        ),
+        ScenarioExpectation(
+            case_id="open_loop_lookup",
+            message="记忆系统还有什么待办没完成？",
+            expected_reason="explicit_memory_recall",
+            expected_kind="open_loop",
+            must_route="surface_semantic_memory",
+            must_contain="召回覆盖 open loop 和自我改变",
             must_not_contain="5月28日推荐",
             must_coverage_min=1.0,
         ),
@@ -445,6 +554,63 @@ def _seed_recommendation(store: LifeMemoryStore, *, day: int) -> None:
             "conversation_id": "qq_dm_owner",
             "selected_recommendations": _cards(day),
         },
+    )
+
+
+def _seed_deep_review(store: LifeMemoryStore) -> None:
+    review = store.write_background_episode(
+        event_source="surface_memory_recall",
+        event_id="deep-review-20260528",
+        request_id="req-deep-review-28",
+        intent_id="surface_memory_followup",
+        person_id="owner",
+        session_id="qq_dm_owner",
+        task_id="lightnovel_recommendation_deep_review",
+        status="OK",
+        reason_code="LIGHTNOVEL_DEEP_REVIEW_OK",
+        detail=(
+            "网页深读结果（含正文）：我回去打开详情页和正文比较了 5月28日推荐的三本轻小说，"
+            "当前更推荐第3本《5月28日推荐 C》。原因：正文里的皇女皇帝线更直给，"
+            "人物目标和冲突更快立起来。"
+        ),
+        ts_ms=_ts(28, 17) + 2,
+        metadata={
+            "action_kind": "lightnovel_recommendation_deep_review",
+            "domain_event_kind": "lightnovel_recommendation_deep_review",
+            "deep_review_cache_version": "lightnovel_deep_review:v4",
+            "recommendation_signature": "scenario:2026-05-28",
+            "evidence_refs": [
+                "action://event/job-20260528:lightnovel_gateway_delivery",
+                "https://www.lightnovel.fun/cn/detail/2803",
+                "doc://lightnovel/20260528-c#body",
+            ],
+            "selected": {
+                "index": 3,
+                "title": "5月28日推荐 C",
+                "detail_url": "https://www.lightnovel.fun/cn/detail/2803",
+                "score_reasons": ["皇女皇帝线更直给", "人物目标和冲突更快立起来"],
+            },
+            "items": [
+                {
+                    "index": 3,
+                    "title": "5月28日推荐 C",
+                    "detail_url": "https://www.lightnovel.fun/cn/detail/2803",
+                    "content_char_count": 1600,
+                    "body_observations": ["正文里的皇女皇帝线更直给，人物目标和冲突更快立起来。"],
+                    "body_ref": "doc://lightnovel/20260528-c#body",
+                }
+            ],
+            "source_anchor_refs": ["action://event/job-20260528:lightnovel_gateway_delivery"],
+        },
+    )
+    store.attach_evidence(
+        episode_id=review["episode_id"],
+        evidence_kind="tool_result",
+        source_ref="doc://lightnovel/20260528-c#body",
+        request_id="req-deep-review-28",
+        content="正文里的皇女皇帝线更直给，人物目标和冲突更快立起来。",
+        trust_level="VERIFIED",
+        ts_ms=_ts(28, 17) + 3,
     )
 
 

@@ -172,7 +172,7 @@ def test_invoke_llm_text_uses_direct_openai_compat_http(monkeypatch) -> None:
         "stream": False,
         "temperature": 0.4,
         "top_p": 0.9,
-        "max_tokens": 32,
+        "max_tokens": 128,
     }
 
 

@@ -372,6 +372,113 @@ def test_anaphoric_selection_fusion_keeps_latest_delivery_not_old_recommendation
         ledger.close()
 
 
+def test_deep_review_followup_prefers_review_episode_over_delivery() -> None:
+    ledger = SQLiteLedger(db_path=":memory:")
+    try:
+        store = LifeMemoryStore(ledger=ledger)
+        delivery = store.upsert_episode(
+            episode_kind=EPISODE_ACTION,
+            evidence_refs=["action://event/job-1:lightnovel_gateway_delivery"],
+            primary_ref="action://event/job-1:lightnovel_gateway_delivery",
+            person_id="user-1",
+            session_id="qq_dm_1",
+            action="lightnovel_recommendation_delivery",
+            summary="我刚才通过 qq 给 qq_dm_1 推荐了 3 本轻小说：1. A；2. B；3. C。",
+            salience=0.65,
+            retention_state="HOT",
+            truth_state="VERIFIED",
+            ts_ms=1_800_000_000_000,
+            metadata={"action_kind": "lightnovel_recommendation_delivery"},
+        )
+        review = store.upsert_episode(
+            episode_kind=EPISODE_ACTION,
+            evidence_refs=["action://event/deep-review-1", "https://www.lightnovel.fun/cn/detail/2"],
+            primary_ref="action://event/deep-review-1",
+            person_id="user-1",
+            session_id="qq_dm_1",
+            action="lightnovel_recommendation_deep_review",
+            summary=(
+                "网页深读结果（含正文）：我回去打开详情页和正文比较了这些轻小说，"
+                "当前更推荐第2本《B》。原因：正文对白更轻快，人物互动更好接。"
+            ),
+            salience=0.9,
+            retention_state="HOT",
+            truth_state="VERIFIED",
+            ts_ms=1_800_000_000_500,
+            metadata={
+                "action_kind": "lightnovel_recommendation_deep_review",
+                "deep_review_cache_version": "lightnovel_deep_review:v4",
+                "items": [
+                    {
+                        "index": 2,
+                        "title": "B",
+                        "detail_url": "https://www.lightnovel.fun/cn/detail/2",
+                        "content_char_count": 1200,
+                        "body_observations": ["正文对白更轻快，人物互动更好接。"],
+                    }
+                ],
+            },
+        )
+        store.attach_evidence(
+            episode_id=review["episode_id"],
+            evidence_kind="tool_result",
+            source_ref="https://www.lightnovel.fun/cn/detail/2",
+            content="正文对白更轻快，人物互动更好接。",
+            trust_level="VERIFIED",
+            ts_ms=1_800_000_000_501,
+        )
+
+        query = "你刚才翻看正文后更推荐哪本？为什么？"
+        query_embedding, _ = embed_text(query)
+        cfg_result = load_recall_runtime_config(
+            env={
+                "RETR_RECALL_ENABLED": "true",
+                "RETR_RECALL_DEFAULT_ROUTE": "route_life_episode",
+                "RETR_RECALL_ROUTES_JSON": json.dumps(
+                    {
+                        "route_life_episode": {
+                            "store_id": STORE_LIFE_EPISODE,
+                            "top_k": 8,
+                            "score_weight": 1.0,
+                            "node_selector": "*",
+                        }
+                    },
+                    ensure_ascii=False,
+                ),
+            }
+        )
+        assert cfg_result.success, cfg_result.as_dict()
+        assert cfg_result.config is not None
+
+        service = RecallFusionServiceContract(
+            chroma_client=FakeChromaClient(),
+            ledger=ledger,
+            runtime_config=cfg_result.config,
+            node_id="host-01",
+            available=True,
+            use_hybrid=False,
+        )
+        result = service.recall(
+            request_id="req-life-route-deep-review-followup",
+            query=query,
+            query_embedding=query_embedding,
+            person_id="user-1",
+            session_id="qq_dm_1",
+            ts_ms=1_800_000_001_000,
+        )
+
+        assert result.success
+        candidates = result.output["candidates"]
+        assert [item["doc_id"] for item in candidates] == [review["episode_id"]]
+        assert delivery["episode_id"] not in {item["doc_id"] for item in candidates}
+        assert "网页深读结果" in candidates[0]["snippet"]
+        assert "《B》" in candidates[0]["snippet"]
+        assert candidates[0]["metadata"]["action"] == "lightnovel_recommendation_deep_review"
+        assert "https://www.lightnovel.fun/cn/detail/2" in candidates[0]["metadata"]["evidence_refs"]
+    finally:
+        ledger.close()
+
+
 def test_anaphoric_selection_fusion_prefers_life_action_and_drops_self_echo_noise() -> None:
     ledger = SQLiteLedger(db_path=":memory:")
     try:

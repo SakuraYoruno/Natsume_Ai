@@ -223,6 +223,14 @@ _MEMORY_FOLLOWUP_DISCONTINUITY_RE = re.compile(
     r"突然问这个|怎么突然|你突然|突然问|突然提这个|突然说这个|硬要(?:说|选)(?:的话)?|另说|换个话题|最近在看|"
     r"居然.{0,12}(?:问|看|认真|主动)|认真看完|主动问我|会主动问|有点意外|挺意外|真意外"
 )
+_MEMORY_FOLLOWUP_MECHANICAL_MEMORY_PHRASE_RE = re.compile(
+    r"我(?:能)?对(?:得)?上|我记到|记到的是|记到的|召回到|检索到|查到的是|相关条目|"
+    r"通过(?:时间|条目|证据|召回|校验).{0,8}(?:校验|确认|了)?|按记忆(?:显示|来看)"
+)
+_MEMORY_FOLLOWUP_USER_STATE_GUESS_RE = re.compile(
+    r"(?:你|老哥|老板).{0,8}(?:昨天|前天|刚才|刚刚|之前|不是).{0,12}(?:没看|没读|看完|读完|看过|读过)|"
+    r"(?:昨天|前天|刚才|刚刚|之前).{0,8}(?:不是)?(?:没看|没读|看完|读完|看过|读过).{0,6}(?:吗|吧)"
+)
 _MEMORY_FOLLOWUP_SELECTION_USER_RE = re.compile(r"喜欢哪|哪本|哪部|哪个|好看|先看|选哪|挑哪|推荐哪")
 _MEMORY_COLLECTION_LIST_USER_RE = re.compile(r"哪些|哪几|几本|几部|十几本|这几天|最近|昨天|前天|今天|今日|那几本|这几本|这三本")
 _MEMORY_FAILURE_USER_RE = re.compile(r"失败|报错|异常|连不上|被占用|原因|为什么|没执行|执行情况")
@@ -260,6 +268,7 @@ def _direct_surface_guard_lines(request: IsolatedSurfaceInput) -> tuple[str, ...
         "低信息场景不要写“我接/接住了/接得住/知道你忙/以为要出大事/居然/稀奇/喊一声人就在这儿/就回个继续/就一声继续/你好好听着”；“在吗”只能表达我在，不要写成“老哥在呢”。",
         "用户用文字问“听得到吗/能听到吗”时，必须说明这里只看到文字或没收到声音；不要只回“哈？”“在呢”，也不要无证据说听到了。",
         "记忆指代追问里，facts 就是当前上下文；像接着刚才聊天一样自然回答，不要写“突然问这个”“硬要说的话”“最近在看另一本”，也不要复述自己在回忆。",
+        "记忆追问不要写成检索报告：禁用“我能对上/我记到/召回到/相关条目/通过校验”；直接说“昨天推过的是…”“那几本里我会选…”。也不要猜用户看没看、读没读。",
         "选择类记忆追问不要只报编号和标题；可以给一句非常短的主观理由，但理由只能来自标题或 facts 里的简介，不要编剧情。",
         "如果 facts 里有“网页深读结果（含正文）”并明确推荐某一本，回答选择题时必须跟这个正文深读结果一致，不能再按旧的看点/热度摘要改选。",
         "使用正文深读证据时，不要把证据条目机械念出来；禁用“我是按正文看下来的/正文有多少字/证据更站得住”这类工程腔，改成自然口味判断。",
@@ -543,6 +552,10 @@ def _surface_hard_gate_violations(request: IsolatedSurfaceInput, text: str) -> t
         codes.append("LEGACY_SELF_TITLE")
     if _memory_followup_discontinuity_hits(request, value):
         codes.append("MEMORY_FOLLOWUP_DISCONTINUITY")
+    if _memory_followup_mechanical_phrase_hits(request, value):
+        codes.append("MEMORY_FOLLOWUP_MECHANICAL_MEMORY_PHRASE")
+    if _memory_followup_user_state_guess_hits(request, value):
+        codes.append("MEMORY_FOLLOWUP_USER_STATE_GUESS")
     if _memory_followup_missing_grounding(request, value):
         codes.append("MEMORY_FOLLOWUP_MISSING_GROUNDING")
     if _memory_followup_missing_title_anchor(request, value):
@@ -567,6 +580,24 @@ def _memory_followup_discontinuity_hits(request: IsolatedSurfaceInput, text: str
     if not _memory_followup_grounding_active(request):
         return False
     return bool(_MEMORY_FOLLOWUP_DISCONTINUITY_RE.search(str(text or "")))
+
+
+def _memory_followup_mechanical_phrase_hits(request: IsolatedSurfaceInput, text: str) -> bool:
+    if not _memory_followup_grounding_active(request):
+        return False
+    return bool(_MEMORY_FOLLOWUP_MECHANICAL_MEMORY_PHRASE_RE.search(str(text or "")))
+
+
+def _memory_followup_user_state_guess_hits(request: IsolatedSurfaceInput, text: str) -> bool:
+    if not _memory_followup_grounding_active(request):
+        return False
+    user_text = str(getattr(request, "user_message", "") or "")
+    if not (
+        _MEMORY_FOLLOWUP_SELECTION_USER_RE.search(user_text)
+        or _MEMORY_COLLECTION_LIST_USER_RE.search(user_text)
+    ):
+        return False
+    return bool(_MEMORY_FOLLOWUP_USER_STATE_GUESS_RE.search(str(text or "")))
 
 
 def _memory_followup_missing_grounding(request: IsolatedSurfaceInput, text: str) -> bool:
@@ -1602,6 +1633,8 @@ def _hard_gate_fallback(request: IsolatedSurfaceInput, violations: Sequence[str]
         return _low_info_scene_fallback(request) or ""
     if (
         "MEMORY_FOLLOWUP_DISCONTINUITY" in codes
+        or "MEMORY_FOLLOWUP_MECHANICAL_MEMORY_PHRASE" in codes
+        or "MEMORY_FOLLOWUP_USER_STATE_GUESS" in codes
         or "MEMORY_FOLLOWUP_MISSING_GROUNDING" in codes
         or "MEMORY_FOLLOWUP_MISSING_TITLE_ANCHOR" in codes
         or "MEMORY_FOLLOWUP_DEEP_REVIEW_MISMATCH" in codes
@@ -1663,7 +1696,7 @@ def _memory_followup_fallback(request: IsolatedSurfaceInput) -> str:
                 return f"那三本里我会选{label}本，{picked}。{detail_bits[0]}。"
             return f"那三本里我会选{label}本，{picked}。名字看着更有余味。"
     for fact in facts:
-        cleaned = re.sub(r"^(记忆线索|长期记忆|召回线索)[:：]", "", str(fact or "").strip()).strip()
+        cleaned = re.sub(r"^(记忆线索|长期记忆|长期事实|召回线索)[:：]", "", str(fact or "").strip()).strip()
         if cleaned:
             return cleaned[:80].rstrip("，,、；;") + "。"
     return ""
@@ -1682,15 +1715,15 @@ def _memory_collection_listing_fallback(request: IsolatedSurfaceInput) -> str:
         return ""
     scope = _memory_collection_scope_label(user_text)
     if scope == "昨天":
-        head = "昨天那几本我记得是"
+        head = "昨天推过的是"
     elif scope == "前天":
-        head = "前天那几本我记得是"
+        head = "前天推过的是"
     elif scope == "今天":
-        head = "今天这批我记得是"
+        head = "今天这批是"
     elif scope == "最近":
-        head = "最近这批我记到"
+        head = "最近这批是"
     else:
-        head = "这批我记得是"
+        head = "这批是"
     if len(titles) <= 4:
         return f"{head}：{'、'.join(titles[:4])}。"
     return f"{head}：{'、'.join(titles[:5])}，还有后面几本我就不一口气全塞满屏了。"
@@ -1704,8 +1737,8 @@ def _memory_followup_deep_review_fallback(request: IsolatedSurfaceInput) -> str:
     title = _memory_followup_spoken_title(str(selection.get("title") or ""))
     reason = _memory_followup_deep_review_spoken_reason(str(selection.get("reason") or ""), title=title)
     if reason:
-        return f"我会先看{label}本，{title}。{reason}。"
-    return f"我会先看{label}本，{title}。它不像只靠标题撑场，翻进去更有东西。"
+        return f"我偏{label}本，{title}。{reason}。"
+    return f"我偏{label}本，{title}。它不像只靠标题撑场，翻进去更有东西。"
 
 
 def _memory_followup_short_title(title: str) -> str:

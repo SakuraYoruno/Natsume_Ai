@@ -11,7 +11,6 @@ from typing import Any
 from host_brain.app.context.soul_runtime import get_compiled_soul
 from host_brain.app.reply_envelope import ReplyEnvelope
 from host_brain.app.response_form_contract import normalize_response_form
-from host_brain.codex_runtime.skill_ids import is_codex_runtime_skill
 from host_brain.persona.surface_affect_control import (
     SurfaceAffectControlPacket,
     affect_control_packet_from_mapping,
@@ -31,6 +30,7 @@ _MEMORY_RECALL_SURFACE_REASONS = {
     "collection_memory_recall",
     "event_memory_recall",
     "failure_debug_recall",
+    "evidence_review_recall",
     "explicit_memory_recall",
     "correction_recall",
 }
@@ -116,6 +116,50 @@ _PERCEPTION_PRODUCTION_TASK_RE = re.compile(
     re.IGNORECASE,
 )
 _CURRENT_COVER_CLAIM_RE = re.compile(r"(这|那|哪).{0,8}封面|封面(上|里|中|有|是|看起来)", re.IGNORECASE)
+_MEMORY_ASSERTION_RE = re.compile(
+    r"(我记得|记得|我记到|我想起来|刚才|刚刚|昨天|前天|上次|之前|"
+    r"我选|我会选|更推荐|最好看|哪本好看|推的是|推荐了|那几本|这几本)",
+    re.IGNORECASE,
+)
+_QUOTED_TITLE_RE = re.compile(r"《([^》]{1,120})》")
+_MEMORY_RECALL_FAILURE_CODES = {
+    "SURFACE_MEMORY_RECALL_VALIDATION_FAILED",
+    "SURFACE_MEMORY_RECALL_COVERAGE_FAILED",
+    "SURFACE_MEMORY_RECALL_FAILED",
+}
+_MEMORY_RECALL_USER_STATE_GUESS_TERMS = (
+    "终于来问",
+    "终于想起来",
+    "终于想起",
+    "总算来问",
+    "总算想起来",
+    "才想起来",
+    "老哥终于",
+    "你终于",
+    "昨天是不是没看",
+    "你是不是没看",
+    "你是不是忘了",
+)
+_MEMORY_RECALL_USER_STATE_GUESS_RE = re.compile(
+    r"(?:^|[，,。.!！?？；;、\s])"
+    r"(?:嘿嘿|哈哈|哈|嗯|哼|欸|诶)?[，,、\s]*"
+    r"(?:老哥|哥哥|尼尼)?(?:你)?"
+    r"(?:(?:终于|总算|才).{0,14}(?:来问|问我|问这个|想起来|想起|舍得问)"
+    r"|(?:昨天|刚刚|刚才|之前|上次).{0,12}(?:没看|忘了|想起来)"
+    r"|(?:你|老哥|哥哥|尼尼).{0,8}(?:是不是|不会是).{0,8}(?:没看|忘了))"
+    r"[^，,。.!！?？；;、~～]*[，,。.!！?？；;、~～\s]*",
+    re.IGNORECASE,
+)
+_MEMORY_RECALL_SELF_READING_DRIFT_RE = re.compile(
+    r"((?:最近|现在|这阵子|这两天|刚好).{0,14}(?:在看|看了?一本|读了?一本|追|翻的是)"
+    r"|一本讲[^，,。.!！?？；;、]{1,40})",
+    re.IGNORECASE,
+)
+_MEMORY_RECALL_LOW_SIGNAL_PREFIX_RE = re.compile(
+    r"^\s*(?:哈[？?]?|哈哈|嘿嘿|嗯|欸|诶|呃|啊|老哥|哥哥|尼尼|老哥问得正好|问得正好|难得难得|(?:老哥|哥哥|尼尼)?你问这个啊)"
+    r"[^，,。.!！?？；;、~～—-]{0,12}[，,。.!！?？；;、~～—\-\s]*",
+    re.IGNORECASE,
+)
 
 
 def surface_main_chain_enabled(agent_input: Any, *, sub_agent_ctx: Any | None = None) -> bool:
@@ -139,7 +183,7 @@ def _sub_agent_result_should_bypass_surface(sub_agent_ctx: Any | None) -> bool:
     agent_id = str(getattr(sub_agent_ctx, "agent_id", "") or "").strip()
     if not agent_id:
         return False
-    if is_codex_runtime_skill(agent_id) or agent_id in {"translate_agent", "intent_agent"}:
+    if agent_id in {"translate_agent", "intent_agent"}:
         return True
     return agent_id in _DETERMINISTIC_RESULT_AGENT_IDS or agent_id.startswith("skill:hub_skill_")
 
@@ -209,6 +253,14 @@ async def run_surface_main_chain_for_chat_input(
         agent_input,
         trace_stage_meta=trace_stage_meta,
     )
+    if isinstance(trace_stage_meta, dict):
+        guard_packet = _raw_memory_packet_payload_from_agent_input(agent_input) or _surface_memory_packet_for_output_guard(
+            agent_input=agent_input,
+            trace_stage_meta=trace_stage_meta,
+        ) or _memory_packet_payload_for_guard(surface_input.memory_packet)
+        if guard_packet and not _safe_mapping(trace_stage_meta.get("surface_memory_recall_packet")):
+            trace_stage_meta["surface_memory_recall_packet"] = guard_packet
+
     async def _generate(messages: list[dict[str, str]]) -> str:
         from host_brain.integrations.llm_helpers import acomplete_llm_with_pool  # noqa: PLC0415
 
@@ -450,11 +502,18 @@ async def surface_main_chain_sse_generator(
     narrative = str(result.selected_text or "").strip()
     narrative, account_guard_applied = _sanitize_account_login_reply(narrative, agent_input=agent_input)
     narrative = _sanitize_main_chain_meta_reply(narrative, agent_input=agent_input)
+    narrative, memory_guard = _apply_surface_memory_output_guard(
+        narrative,
+        agent_input=agent_input,
+        trace_stage_meta=trace,
+    )
     if account_guard_applied:
         trace["surface_account_login_guard"] = {
             "applied": True,
             "reason_code": "ACCOUNT_CREDENTIAL_REQUEST_REWRITTEN",
         }
+    if memory_guard.get("applied"):
+        trace["surface_memory_output_guard"] = memory_guard
     total_latency_ms = max(0, int(time.time() * 1000) - started_ms)
     llm_latency_ms = int(result.runtime.latency_ms or 0)
     timings_ms = _surface_timings_ms(
@@ -574,6 +633,562 @@ def _sanitize_main_chain_meta_reply(text: str, *, agent_input: Any) -> str:
     if any(marker in message for marker in ("体感", "判断", "主链效果", "主链表现")) and len(cleaned) < 18:
         return _surface_failure_fallback_text(agent_input, exc=RuntimeError("SURFACE_META_REPLY_TOO_THIN"))
     return cleaned
+
+
+def _apply_surface_memory_output_guard(
+    text: str,
+    *,
+    agent_input: Any,
+    trace_stage_meta: Mapping[str, Any] | None = None,
+) -> tuple[str, dict[str, Any]]:
+    narrative = str(text or "").strip()
+    packet = _surface_memory_packet_for_output_guard(agent_input=agent_input, trace_stage_meta=trace_stage_meta)
+    if not narrative or not packet:
+        return narrative, {"applied": False, "reason_code": ""}
+    readiness = _surface_memory_readiness(packet)
+    reason_code = str(packet.get("reason_code") or "").strip()
+    ready = _surface_memory_packet_ready(packet, readiness=readiness)
+    if not ready:
+        if _narrative_acknowledges_memory_missing(narrative) or not _narrative_makes_memory_assertion(narrative):
+            return narrative, {"applied": False, "reason_code": "", "ready_to_answer": False}
+        replacement = _memory_not_ready_guard_text(
+            user_message=str(getattr(agent_input, "user_message", "") or ""),
+            readiness=readiness,
+            strategy=_surface_memory_strategy(packet),
+            reason_code=reason_code,
+        )
+        return replacement, {
+            "applied": True,
+            "reason_code": "SURFACE_MEMORY_OUTPUT_NOT_READY_REWRITE",
+            "original_reason_code": reason_code,
+            "readiness_status": str(readiness.get("status") or ""),
+            "response_mode": str(readiness.get("response_mode") or ""),
+            "original_digest": narrative[:160],
+        }
+    deep_review_rewrite = _deep_review_selection_guard_text_if_needed(narrative=narrative, packet=packet, readiness=readiness)
+    if deep_review_rewrite:
+        return deep_review_rewrite, {
+            "applied": True,
+            "reason_code": "SURFACE_MEMORY_OUTPUT_DEEP_REVIEW_DIRECT_REWRITE",
+            "readiness_status": str(readiness.get("status") or ""),
+            "recall_contract_id": str(readiness.get("recall_contract_id") or ""),
+            "original_digest": narrative[:160],
+        }
+    unsupported_titles = _unsupported_memory_titles(narrative=narrative, packet=packet)
+    if unsupported_titles:
+        replacement = _unsupported_memory_title_guard_text(packet)
+        return replacement, {
+            "applied": True,
+            "reason_code": "SURFACE_MEMORY_OUTPUT_UNSUPPORTED_FACT_REWRITE",
+            "readiness_status": str(readiness.get("status") or ""),
+            "unsupported_title_count": len(unsupported_titles),
+            "recall_contract_id": str(readiness.get("recall_contract_id") or ""),
+            "original_digest": narrative[:160],
+        }
+    cleaned_narrative, user_state_hits = _sanitize_memory_recall_user_state_guess(narrative)
+    if user_state_hits and cleaned_narrative:
+        return cleaned_narrative, {
+            "applied": True,
+            "reason_code": "SURFACE_MEMORY_OUTPUT_USER_STATE_GUESS_STRIPPED",
+            "readiness_status": str(readiness.get("status") or ""),
+            "hit_count": len(user_state_hits),
+            "hits": user_state_hits[:6],
+            "recall_contract_id": str(readiness.get("recall_contract_id") or ""),
+            "original_digest": narrative[:160],
+        }
+    if _selection_memory_reply_drifted_off_recalled_items(narrative=narrative, packet=packet, readiness=readiness):
+        replacement = _ungrounded_selection_guard_text(packet)
+        return replacement, {
+            "applied": True,
+            "reason_code": "SURFACE_MEMORY_OUTPUT_SELECTION_UNGROUNDED_REWRITE",
+            "readiness_status": str(readiness.get("status") or ""),
+            "recall_contract_id": str(readiness.get("recall_contract_id") or ""),
+            "original_digest": narrative[:160],
+        }
+    cleaned_prefix = _sanitize_memory_recall_low_signal_prefix(narrative=narrative, readiness=readiness)
+    if cleaned_prefix and cleaned_prefix != narrative:
+        return cleaned_prefix, {
+            "applied": True,
+            "reason_code": "SURFACE_MEMORY_OUTPUT_LOW_SIGNAL_PREFIX_STRIPPED",
+            "readiness_status": str(readiness.get("status") or ""),
+            "recall_contract_id": str(readiness.get("recall_contract_id") or ""),
+            "original_digest": narrative[:160],
+        }
+    return narrative, {"applied": False, "reason_code": "", "ready_to_answer": True}
+
+
+def _surface_memory_packet_for_output_guard(
+    *,
+    agent_input: Any,
+    trace_stage_meta: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    candidates: list[dict[str, Any]] = []
+    for container in (
+        _safe_mapping(trace_stage_meta),
+        _safe_mapping(getattr(agent_input, "trace_stage_meta", None)),
+        _safe_mapping(getattr(agent_input, "retrieval_summary", None)),
+    ):
+        raw = container.get("surface_memory_recall_packet") or container.get("memory_recall_packet")
+        if isinstance(raw, Mapping):
+            candidates.append(dict(raw))
+    if not candidates:
+        return {}
+    candidates.sort(key=_surface_memory_packet_diagnostic_score, reverse=True)
+    return candidates[0]
+
+
+def _surface_memory_packet_diagnostic_score(packet: Mapping[str, Any]) -> int:
+    trace = _safe_mapping(packet.get("trace"))
+    readiness = _safe_mapping(trace.get("recall_answer_readiness"))
+    score = 0
+    if readiness:
+        score += 8
+    if str(packet.get("reason_code") or "").strip():
+        score += 4
+    if "degraded" in packet:
+        score += 2
+    if trace:
+        score += 2
+    if list(packet.get("facts") or []):
+        score += 1
+    return score
+
+
+def _surface_memory_readiness(packet: Mapping[str, Any]) -> dict[str, Any]:
+    trace = _safe_mapping(packet.get("trace"))
+    return _safe_mapping(trace.get("recall_answer_readiness"))
+
+
+def _surface_memory_strategy(packet: Mapping[str, Any]) -> dict[str, Any]:
+    trace = _safe_mapping(packet.get("trace"))
+    return _safe_mapping(trace.get("recall_answer_strategy"))
+
+
+def _surface_memory_lightnovel_deep_review(packet: Mapping[str, Any]) -> dict[str, Any]:
+    trace = _safe_mapping(packet.get("trace"))
+    deep = _safe_mapping(trace.get("lightnovel_deep_review"))
+    if str(deep.get("status") or "").strip().upper() != "OK":
+        return {}
+    facts = "\n".join(str(item or "") for item in list(packet.get("facts") or []))
+    readiness = _surface_memory_readiness(packet)
+    contract_id = str(readiness.get("recall_contract_id") or "").strip()
+    query_kind = str(readiness.get("query_kind") or "").strip()
+    if contract_id == "anaphoric_selection" or query_kind == "anaphoric_selection" or "网页深读结果" in facts:
+        return deep
+    return {}
+
+
+def _deep_review_selection_guard_text_if_needed(
+    *,
+    narrative: str,
+    packet: Mapping[str, Any],
+    readiness: Mapping[str, Any],
+) -> str:
+    if not _surface_memory_lightnovel_deep_review(packet):
+        return ""
+    if not _packet_looks_like_selection_memory(packet):
+        return ""
+    if _deep_review_selection_reply_is_clean(narrative=narrative, packet=packet, readiness=readiness):
+        return ""
+    return _deep_review_selection_guard_text(packet)
+
+
+def _deep_review_selection_reply_is_clean(
+    *,
+    narrative: str,
+    packet: Mapping[str, Any],
+    readiness: Mapping[str, Any],
+) -> bool:
+    text = str(narrative or "").strip()
+    if not text:
+        return True
+    cleaned, user_state_hits = _sanitize_memory_recall_user_state_guess(text)
+    _ = cleaned, readiness
+    if user_state_hits:
+        return False
+    if _unsupported_memory_titles(narrative=text, packet=packet):
+        return False
+    if not _narrative_mentions_recalled_selection_item(narrative=text, packet=packet):
+        return False
+    if _deep_review_partial_review(packet) and not _partial_deep_review_reply_limits_scope(text):
+        return False
+    compact = re.sub(r"\s+", "", text)
+    return not any(
+        token in compact
+        for token in (
+            "热度高",
+            "热度也高",
+            "按正文看下来",
+            "我是按正文",
+            "正文有",
+            "字左右",
+            "证据更",
+            "证据比较",
+            "算了那几本",
+            "那本挺有意思",
+            "节奏挺舒服",
+        )
+    )
+
+
+def _deep_review_selection_guard_text(packet: Mapping[str, Any]) -> str:
+    title = _deep_review_selected_title(packet)
+    reasons = _deep_review_reason_bits(packet)
+    scope_prefix = _partial_deep_review_scope_prefix(packet)
+    if not title:
+        return "我补读到的证据已经够判断了，但刚才那句混进了不该有的推测；这轮只能按补读结果回答。"
+    if not reasons:
+        return f"{scope_prefix}我偏《{title}》。翻完详情后，这本是我最想继续往下读的。"
+    if len(reasons) == 1:
+        return f"{scope_prefix}我偏《{title}》。主要是{reasons[0]}，比另外几本更容易让我想翻下一章。"
+    return f"{scope_prefix}我偏《{title}》。{reasons[0]}，而且{reasons[1]}，比另外几本更想继续翻。"
+
+
+def _deep_review_partial_review(packet: Mapping[str, Any]) -> bool:
+    deep = _surface_memory_lightnovel_deep_review(packet)
+    if not deep:
+        return False
+    source_count = _coerce_int(deep.get("source_card_count"), default=0)
+    reviewed_count = _coerce_int(deep.get("reviewed_item_count") or deep.get("item_count"), default=0)
+    return bool(deep.get("partial_review")) or bool(source_count > reviewed_count > 0)
+
+
+def _partial_deep_review_scope_prefix(packet: Mapping[str, Any]) -> str:
+    if not _deep_review_partial_review(packet):
+        return ""
+    deep = _surface_memory_lightnovel_deep_review(packet)
+    source_count = _coerce_int(deep.get("source_card_count"), default=0)
+    reviewed_count = _coerce_int(deep.get("reviewed_item_count") or deep.get("item_count"), default=0)
+    if source_count > 0 and reviewed_count > 0:
+        return f"我还不能说全 {source_count} 本里绝对最好；先补读了其中 {reviewed_count} 本，"
+    return "我还不能说全量里绝对最好；先按已经补读到的几本看，"
+
+
+def _partial_deep_review_reply_limits_scope(narrative: str) -> bool:
+    compact = re.sub(r"\s+", "", str(narrative or ""))
+    if not compact:
+        return True
+    return any(
+        token in compact
+        for token in (
+            "不能说全",
+            "不能说全部",
+            "不敢说全",
+            "不敢说全部",
+            "已补读",
+            "补读了其中",
+            "先补读",
+            "目前看过",
+            "看过的这几本",
+            "这几本里",
+            "已读到的",
+        )
+    )
+
+
+def _deep_review_selected_title(packet: Mapping[str, Any]) -> str:
+    deep = _surface_memory_lightnovel_deep_review(packet)
+    selected = _safe_mapping(deep.get("selected"))
+    for key in ("title", "item_title", "raw_title"):
+        title = str(selected.get(key) or "").strip()
+        if title:
+            return title
+    facts = "\n".join(str(item or "") for item in list(packet.get("facts") or []))
+    match = re.search(r"当前更推荐第\d+本《([^》]{1,120})》", facts)
+    if match:
+        return match.group(1).strip()
+    titles = _packet_supported_titles(packet)
+    index = _memory_ordinal_index(str(selected.get("index") or ""))
+    if 1 <= index <= len(titles):
+        return titles[index - 1]
+    return ""
+
+
+def _deep_review_reason_bits(packet: Mapping[str, Any]) -> list[str]:
+    facts = "\n".join(str(item or "") for item in list(packet.get("facts") or []))
+    out: list[str] = []
+    for match in re.finditer(r"(?:原因|主要是)[:：]\s*([^。.!！?？]+)", facts):
+        raw = match.group(1)
+        for part in re.split(r"[；;，,、]\s*", raw):
+            reason = _deep_review_spoken_reason(part)
+            if reason and reason not in out:
+                out.append(reason)
+    return out[:3]
+
+
+def _deep_review_spoken_reason(value: Any) -> str:
+    text = str(value or "").strip()
+    text = re.sub(r"^(因为|主要是|而且|另外)\s*", "", text).strip()
+    text = re.sub(r"\s+", "", text)
+    if not text:
+        return ""
+    if any(token in text for token in ("网页深读", "证据", "正文有", "正文体量", "字左右", "score", "热度", "评论", "浏览")):
+        return ""
+    replacements = (
+        ("正文开篇已经进入故事叙事", "开篇就进正题"),
+        ("开篇不是资料卡，已经能读出故事", "开篇就进正题"),
+        ("正文/简介有异世界皇女、皇帝或后宫路线，世界观钩子更直给", "皇女/皇帝这条线更直接"),
+        ("皇女/皇帝这条线更直接", "皇女/皇帝这条线更直接"),
+        ("设定线很直给", "设定线很直给"),
+        ("对白密度高，读感更偏轻快互动", "对白比较轻快"),
+        ("对白比较轻快", "对白比较轻快"),
+        ("人物互动更好接", "人物互动更好接"),
+        ("开篇比较抓人", "开篇比较抓人"),
+    )
+    for old, new in replacements:
+        if old in text:
+            return new
+    return text[:40]
+
+
+def _surface_memory_packet_ready(packet: Mapping[str, Any], *, readiness: Mapping[str, Any]) -> bool:
+    status = str(readiness.get("status") or "").strip().upper()
+    if status and status != "READY":
+        return False
+    if readiness and not bool(readiness.get("ready_to_answer")):
+        return False
+    detail = _safe_mapping(readiness.get("detail_evidence"))
+    contract_id = str(readiness.get("recall_contract_id") or "").strip()
+    query_kind = str(readiness.get("query_kind") or "").strip()
+    response_mode = str(readiness.get("response_mode") or "").strip()
+    selection_quality_turn = (
+        contract_id == "anaphoric_selection"
+        or query_kind == "anaphoric_selection"
+        or response_mode == "answer_from_collection_memory"
+    )
+    detail_basis = str(detail.get("basis") or "").strip()
+    if (
+        bool(detail.get("required"))
+        and selection_quality_turn
+        and detail_basis not in {"body_evidence", "lightnovel_deep_review", "generic_evidence_review"}
+    ):
+        return False
+    strategy = _surface_memory_strategy(packet)
+    if bool(strategy.get("should_fetch_more_evidence")):
+        return False
+    reason_code = str(packet.get("reason_code") or "").strip()
+    if reason_code in _MEMORY_RECALL_FAILURE_CODES:
+        return False
+    if bool(packet.get("degraded")) and reason_code:
+        return False
+    return True
+
+
+def _narrative_makes_memory_assertion(text: str) -> bool:
+    narrative = str(text or "").strip()
+    if not narrative:
+        return False
+    return bool(_MEMORY_ASSERTION_RE.search(narrative) or _QUOTED_TITLE_RE.search(narrative))
+
+
+def _narrative_acknowledges_memory_missing(text: str) -> bool:
+    compact = re.sub(r"\s+", "", str(text or ""))
+    return any(token in compact for token in ("没找到足够", "没有找到足够", "证据不足", "不能装作", "不能硬说", "不够判断"))
+
+
+def _sanitize_memory_recall_user_state_guess(text: str) -> tuple[str, list[str]]:
+    narrative = str(text or "").strip()
+    if not narrative:
+        return "", []
+    compact = re.sub(r"\s+", "", narrative)
+    hits = [term for term in _MEMORY_RECALL_USER_STATE_GUESS_TERMS if term in compact]
+    if _MEMORY_RECALL_USER_STATE_GUESS_RE.search(narrative):
+        hits.append("arrival_or_attention_debt")
+    hits = _clean_list(hits)
+    if not hits:
+        return narrative, []
+    cleaned = _MEMORY_RECALL_USER_STATE_GUESS_RE.sub(" ", narrative)
+    cleaned = re.sub(r"^(?:嘿嘿|哈哈|哈|嗯|哼|欸|诶|呃|啊)[，,、\s~～]*", "", cleaned).strip()
+    cleaned = re.sub(r"^[，,。.!！?？；;、~～\s]+", "", cleaned).strip()
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    return cleaned, hits
+
+
+def _memory_not_ready_guard_text(
+    *,
+    user_message: str,
+    readiness: Mapping[str, Any],
+    strategy: Mapping[str, Any] | None = None,
+    reason_code: str,
+) -> str:
+    reasons = {str(item or "").strip() for item in list(readiness.get("reasons") or []) if str(item or "").strip()}
+    response_mode = str(readiness.get("response_mode") or "").strip()
+    strategy_map = _safe_mapping(strategy)
+    detail = _safe_mapping(readiness.get("detail_evidence"))
+    detail_basis = str(detail.get("basis") or "").strip()
+    _ = user_message, reason_code
+    if (
+        "missing_detail_evidence" in reasons
+        or response_mode == "fetch_or_request_detail_evidence"
+        or bool(strategy_map.get("should_fetch_more_evidence"))
+        or (bool(detail.get("required")) and detail_basis not in {"body_evidence", "lightnovel_deep_review", "generic_evidence_review"})
+    ):
+        return "我这边只召回到相关记录的锚点，但没有足够详情、正文或可读证据，不能直接判断哪本更好。得先把详情页或正文补读完。"
+    if "insufficient_item_count" in reasons:
+        return "我没找到足够贴合这次范围的推荐记录，不能硬说是哪几本或哪本最好。"
+    if "validation_failed" in reasons:
+        return "我没找到通过时间、对象和证据校验的记忆，不能装作记得。"
+    return "我没找到足够可靠的记忆证据，不能装作记得。"
+
+
+def _unsupported_memory_titles(*, narrative: str, packet: Mapping[str, Any]) -> list[str]:
+    contract_id = str(_surface_memory_readiness(packet).get("recall_contract_id") or "").strip()
+    if contract_id not in {"anaphoric_selection", "collection_date", "collection_recent", "evidence_review"} and not _packet_looks_like_selection_memory(packet):
+        return []
+    titles = _quoted_titles(narrative)
+    if not titles:
+        return []
+    allowed = {_normalize_memory_title(title) for title in _packet_supported_titles(packet)}
+    if not allowed:
+        return []
+    return [
+        title
+        for title in titles
+        if _normalize_memory_title(title) and _normalize_memory_title(title) not in allowed
+    ]
+
+
+def _selection_memory_reply_drifted_off_recalled_items(
+    *,
+    narrative: str,
+    packet: Mapping[str, Any],
+    readiness: Mapping[str, Any],
+) -> bool:
+    contract_id = str(readiness.get("recall_contract_id") or "").strip()
+    query_kind = str(readiness.get("query_kind") or "").strip()
+    if (
+        contract_id != "anaphoric_selection"
+        and query_kind != "anaphoric_selection"
+        and not _packet_looks_like_selection_memory(packet)
+    ):
+        return False
+    if not _MEMORY_RECALL_SELF_READING_DRIFT_RE.search(str(narrative or "")):
+        return False
+    return not _narrative_mentions_recalled_selection_item(narrative=narrative, packet=packet)
+
+
+def _packet_looks_like_selection_memory(packet: Mapping[str, Any]) -> bool:
+    facts = "\n".join(str(item or "") for item in list(packet.get("facts") or []))
+    if not facts:
+        return False
+    if "可比较证据" in facts or "推荐集合" in facts or "给你推荐" in facts or "推荐了" in facts or "当前更推荐" in facts:
+        return True
+    return len(_packet_supported_titles(packet)) >= 2
+
+
+def _sanitize_memory_recall_low_signal_prefix(*, narrative: str, readiness: Mapping[str, Any]) -> str:
+    contract_id = str(readiness.get("recall_contract_id") or "").strip()
+    query_kind = str(readiness.get("query_kind") or "").strip()
+    if (
+        contract_id != "anaphoric_selection"
+        and query_kind != "anaphoric_selection"
+        and readiness
+    ):
+        return str(narrative or "").strip()
+    cleaned = _MEMORY_RECALL_LOW_SIGNAL_PREFIX_RE.sub("", str(narrative or "").strip(), count=1).strip()
+    cleaned = re.sub(r"^[，,。.!！?？；;、~～—\-\s]+", "", cleaned).strip()
+    return cleaned or str(narrative or "").strip()
+
+
+def _narrative_mentions_recalled_selection_item(*, narrative: str, packet: Mapping[str, Any]) -> bool:
+    text = str(narrative or "")
+    compact = _normalize_memory_title(text)
+    titles = _packet_supported_titles(packet)
+    if not titles:
+        return False
+    for title in titles:
+        normalized = _normalize_memory_title(title)
+        if normalized and len(normalized) >= 2 and normalized in compact:
+            return True
+        for token in _memory_title_tokens(title):
+            if token and token in compact:
+                return True
+    count = len(titles)
+    for raw in re.findall(r"第\s*([一二三四五六七八九十\d]+)\s*本", text):
+        index = _memory_ordinal_index(raw)
+        if 1 <= index <= count:
+            return True
+    return False
+
+
+def _memory_title_tokens(value: Any) -> list[str]:
+    raw = str(value or "")
+    pieces = re.split(r"[\s\u3000《》「」『』【】\[\]（）()<>\"'`，。！？!?,.;:：；、|/\\\-~～]+", raw)
+    out: list[str] = []
+    for piece in pieces:
+        token = _normalize_memory_title(piece)
+        if len(token) >= 3 and not token.isdigit():
+            out.append(token)
+    return _clean_list(out)
+
+
+def _memory_ordinal_index(value: Any) -> int:
+    text = str(value or "").strip()
+    if text.isdigit():
+        return int(text)
+    digits = {
+        "一": 1,
+        "二": 2,
+        "两": 2,
+        "三": 3,
+        "四": 4,
+        "五": 5,
+        "六": 6,
+        "七": 7,
+        "八": 8,
+        "九": 9,
+        "十": 10,
+    }
+    return digits.get(text, 0)
+
+
+def _packet_supported_titles(packet: Mapping[str, Any]) -> list[str]:
+    titles: list[str] = []
+    fact_text = "\n".join(str(item or "") for item in list(packet.get("facts") or []))
+    titles.extend(_quoted_titles(fact_text))
+    trace = _safe_mapping(packet.get("trace"))
+    for key in ("selected_collection_items", "selected_entity_items"):
+        for item in list(trace.get(key) or []):
+            item_map = _safe_mapping(item)
+            for title_key in ("title", "raw_title", "item_title", "entity_title", "canonical_name"):
+                title = str(item_map.get(title_key) or "").strip()
+                if title:
+                    titles.append(title)
+    return _clean_list(titles)
+
+
+def _quoted_titles(text: str) -> list[str]:
+    return _clean_list(match.group(1) for match in _QUOTED_TITLE_RE.finditer(str(text or "")))
+
+
+def _normalize_memory_title(value: Any) -> str:
+    text = str(value or "").strip().lower()
+    text = re.sub(r"[\s\u3000《》「」『』【】\[\]（）()<>\"'`，。！？!?,.;:：；、|/\\-]+", "", text)
+    return text[:160]
+
+
+def _unsupported_memory_title_guard_text(packet: Mapping[str, Any]) -> str:
+    facts = "\n".join(str(item or "") for item in list(packet.get("facts") or []))
+    selected = re.search(r"当前更推荐第\d+本《([^》]{1,120})》", facts)
+    if selected:
+        return f"我这边的证据指向《{selected.group(1)}》。刚才那句混进了召回范围外的书，不能当成这轮推荐里的事实。"
+    titles = _packet_supported_titles(packet)[:6]
+    if titles:
+        quoted = "、".join(f"《{title}》" for title in titles[:6])
+        return f"我这边召回到的是{quoted}。刚才那句混进了召回范围外的书，不能当成这轮推荐里的事实。"
+    return "刚才那句混进了召回范围外的事实，我不能把它当成这轮记忆里的内容。"
+
+
+def _ungrounded_selection_guard_text(packet: Mapping[str, Any]) -> str:
+    facts = "\n".join(str(item or "") for item in list(packet.get("facts") or []))
+    selected = re.search(r"当前更推荐第\d+本《([^》]{1,120})》", facts)
+    if selected:
+        return f"我不能拿别的正在看的东西来回答这轮追问。就这组记录和补读证据看，我更偏《{selected.group(1)}》。"
+    titles = _packet_supported_titles(packet)[:6]
+    if titles:
+        quoted = "、".join(f"《{title}》" for title in titles[:6])
+        return f"我这边召回到的是{quoted}。刚才那句没有落在这组推荐上，不能算这次追问的答案。"
+    return "刚才那句没有落在这次召回到的记忆上，我不能把它当成这轮追问的答案。"
 
 
 def _surface_main_chain_fastpath_text(agent_input: Any) -> str:
@@ -1016,8 +1631,10 @@ def _surface_task_control_from_reply_plan(
                 "app_surface_main_chain",
                 "召回回答要使用已召回的经历对象、证据或长期事实，不要只按当前这句话泛聊。" if memory_plan_reason in _MEMORY_RECALL_SURFACE_REASONS else "",
                 "指代追问要承接已召回的最近经历对象。" if memory_plan_reason == "anaphoric_selection_recall" else "",
+                "选择评价追问只说基于召回和补读证据的判断，不要臆测用户是否看过、忘了、终于想起来或终于来问。" if memory_plan_reason == "anaphoric_selection_recall" else "",
                 "日期/近期集合追问要保留用户指定时间范围，并点出集合里的具体条目。" if memory_plan_reason == "collection_memory_recall" else "",
                 "失败追问只能解释召回事实里的失败结果和证据，不要猜新的根因。" if memory_plan_reason == "failure_debug_recall" else "",
+                "证据审查追问必须回答结论和依据；不要改写成日期集合列表，也不要夹带不相关的推荐条目。" if memory_plan_reason == "evidence_review_recall" else "",
                 _first_nonempty(reply_plan.get("style_anchor"), ""),
             ]
         ),
@@ -1121,6 +1738,33 @@ def _memory_packet(
             if isinstance(raw, (MemoryRecallPacket, Mapping)):
                 return memory_recall_packet_from_mapping(raw)
     return None
+
+
+def _memory_packet_payload_for_guard(raw: Any) -> dict[str, Any]:
+    if raw is None:
+        return {}
+    if isinstance(raw, MemoryRecallPacket):
+        return raw.as_dict()
+    if isinstance(raw, Mapping):
+        try:
+            return memory_recall_packet_from_mapping(raw).as_dict()
+        except Exception:
+            return dict(raw)
+    return {}
+
+
+def _raw_memory_packet_payload_from_agent_input(agent_input: Any) -> dict[str, Any]:
+    for container in (
+        _safe_mapping(getattr(agent_input, "retrieval_summary", None)),
+        _safe_mapping(getattr(agent_input, "trace_stage_meta", None)),
+    ):
+        for key in _MEMORY_PACKET_KEYS:
+            raw = container.get(key)
+            if isinstance(raw, MemoryRecallPacket):
+                return raw.as_dict()
+            if isinstance(raw, Mapping):
+                return dict(raw)
+    return {}
 
 
 def _influence_packet(

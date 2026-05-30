@@ -608,7 +608,7 @@ def _resolve_agent_llm_runtime_v2(*, base_runtime: dict[str, Any], role: str, mo
             "agent_gen_params": dict(gen_params),
             "agent_role": role,
             "agent_model_route": {"route": "codex_chat_experiment", "source": "HOST_CHAT_AGENT_CODEX_EXPERIMENT_ENABLED"},
-            "route_reason_code": "HOST_CHAT_AGENT_CODEX_SPARK_EXPERIMENT",
+            "route_reason_code": "HOST_CHAT_AGENT_CODEX_EXPERIMENT",
             "route_detail": f"agent role {role} routed to local Codex CLI chat experiment",
         }
     if _agent_codex_migration_enabled(role):

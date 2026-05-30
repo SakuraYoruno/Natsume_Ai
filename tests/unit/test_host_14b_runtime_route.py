@@ -47,8 +47,10 @@ def _patch_runtime_dependencies(
     deepseek_api_key: str | None = "sk-deepseek",
     minimax_api_key: str | None = None,
     llm_provider: str = "gemini",
+    codex_cli_available: bool = False,
 ) -> None:
     monkeypatch.setattr(model_router, "_resolve_runtime_gemini_api_key", lambda: (None, None, None))
+    monkeypatch.setattr(llm_runtime, "codex_cli_lm_available", lambda: bool(codex_cli_available))
     monkeypatch.setattr(
         llm_runtime,
         "load_host_config",

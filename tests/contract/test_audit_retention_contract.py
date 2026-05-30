@@ -374,6 +374,196 @@ class TestAuditRetentionContract(unittest.TestCase):
         self.assertFalse(any(row["episode_id"] == low_old for row in ledger.life_evidence))
         ledger.close()
 
+    def test_retention_keeps_life_episode_referenced_by_semantic_memory(self) -> None:
+        ledger = SQLiteLedger(db_path=":memory:")
+        store = LifeMemoryStore(ledger=ledger)
+        try:
+            episode_id = store.upsert_episode(
+                episode_kind="background_episode",
+                evidence_refs=["scheduler://event/semantic-source-old"],
+                primary_ref="scheduler://event/semantic-source-old",
+                summary="old source episode behind a durable semantic memory",
+                salience=0.01,
+                memory_strength=0.01,
+                retention_state="GONE",
+                truth_state="VERIFIED",
+                ts_ms=1000,
+            )["episode_id"]
+            store.attach_evidence(
+                episode_id=episode_id,
+                evidence_kind="scheduler_event",
+                source_ref="scheduler://event/semantic-source-old",
+                content="semantic source evidence that must stay traceable",
+                trust_level="VERIFIED",
+                ts_ms=1000,
+            )
+            ledger.log_semantic_memory(
+                {
+                    "semantic_id": "sem_retention_protected_source",
+                    "summary": "稳定事实：这条长期事实仍然需要原始 episode 锚点。",
+                    "source_memory_ids": [f"life_episode::{episode_id}"],
+                    "source_hash": "retention-protected-semantic-source",
+                    "distill_strategy": "life_episode_rule_consolidation",
+                    "confidence": 0.9,
+                    "tags": ["semantic_kind:stable_fact", "stable_fact"],
+                    "ts_ms": 2000,
+                    "operator_node_id": "test",
+                }
+            )
+
+            result = run_retention_policy(
+                ledger=ledger,
+                policy=RetentionPolicy(
+                    policy_profile_id="life_memory_semantic_source_ret_test",
+                    keep_ms_by_table={},
+                    max_rows_by_table={},
+                    life_memory_keep_ms=100,
+                    life_memory_min_salience=0.40,
+                    life_memory_episode_kinds=("background_episode",),
+                ),
+                request_id="req_retention_semantic_source",
+                now_ts_ms=10_000,
+            )
+
+            self.assertEqual(0, result.life_memory_candidate_count)
+            self.assertEqual(0, result.life_memory_deleted_count)
+            self.assertIn(episode_id, {row["episode_id"] for row in ledger.life_episode})
+            self.assertTrue(any(row["episode_id"] == episode_id for row in ledger.life_evidence))
+        finally:
+            ledger.close()
+
+    def test_retention_keeps_life_entity_referenced_by_semantic_memory(self) -> None:
+        ledger = SQLiteLedger(db_path=":memory:")
+        store = LifeMemoryStore(ledger=ledger)
+        try:
+            old_noise = store.upsert_episode(
+                episode_kind="background_episode",
+                evidence_refs=["scheduler://event/entity-retention-noise"],
+                primary_ref="scheduler://event/entity-retention-noise",
+                summary="old low-value noise",
+                salience=0.01,
+                memory_strength=0.01,
+                retention_state="GONE",
+                truth_state="VERIFIED",
+                ts_ms=1000,
+            )["episode_id"]
+            entity = store.upsert_entity(
+                entity_kind="book",
+                canonical_name="与神在河岸",
+                normalized_key="title:与神在河岸",
+                domain="lightnovel_recommendation",
+                salience=0.01,
+                memory_strength=0.01,
+                retention_state="WARM",
+                ts_ms=1000,
+            )
+            ledger.log_semantic_memory(
+                {
+                    "semantic_id": "sem_retention_protected_entity",
+                    "summary": "实体经历：轻小说推荐里《与神在河岸》出现过。",
+                    "source_memory_ids": [f"life_memory_entity::{entity['entity_id']}"],
+                    "source_hash": "retention-protected-semantic-entity",
+                    "distill_strategy": "life_memory_entity_rule_consolidation",
+                    "confidence": 0.9,
+                    "tags": ["semantic_kind:experience_entity", "experience_entity"],
+                    "ts_ms": 2000,
+                    "operator_node_id": "test",
+                }
+            )
+
+            result = run_retention_policy(
+                ledger=ledger,
+                policy=RetentionPolicy(
+                    policy_profile_id="life_memory_semantic_entity_ret_test",
+                    keep_ms_by_table={},
+                    max_rows_by_table={},
+                    life_memory_keep_ms=100,
+                    life_memory_min_salience=0.40,
+                    life_memory_episode_kinds=("background_episode",),
+                ),
+                request_id="req_retention_semantic_entity",
+                now_ts_ms=10_000,
+            )
+
+            entity_row = ledger._conn.execute(
+                "SELECT retention_state FROM life_memory_entity WHERE entity_id = ?",
+                (entity["entity_id"],),
+            ).fetchone()
+            self.assertEqual(1, result.life_memory_deleted_count)
+            self.assertNotIn(old_noise, {row["episode_id"] for row in ledger.life_episode})
+            self.assertIsNotNone(entity_row)
+            self.assertEqual("WARM", entity_row["retention_state"])
+        finally:
+            ledger.close()
+
+    def test_retention_keeps_open_loop_and_undistilled_durable_candidates(self) -> None:
+        ledger = SQLiteLedger(db_path=":memory:")
+        store = LifeMemoryStore(ledger=ledger)
+        try:
+            open_loop_episode = store.upsert_episode(
+                episode_kind="background_episode",
+                evidence_refs=["scheduler://event/open-loop-source-old"],
+                primary_ref="scheduler://event/open-loop-source-old",
+                summary="old open loop source",
+                salience=0.01,
+                memory_strength=0.01,
+                retention_state="GONE",
+                truth_state="VERIFIED",
+                ts_ms=1000,
+            )["episode_id"]
+            store.upsert_open_loop(
+                semantic_key="commitment|owner|retention_open_loop",
+                episode_id=open_loop_episode,
+                status="OPEN",
+                title="retention protected open loop",
+                detail="this open loop should keep its source episode",
+                ts_ms=1000,
+            )
+            durable = store.write_background_episode(
+                event_source="scheduler",
+                event_id="old-deepseek-failure-retention",
+                task_id="llm_pool_call",
+                status="FAILED",
+                reason_code="DEEPSEEK_TIMEOUT",
+                detail="DeepSeek 失败原因：供应商超时，后续优先检查 provider 健康状态。",
+                ts_ms=1000,
+            )["episode_id"]
+            with ledger._write_lock:
+                with ledger._conn:
+                    ledger._conn.execute(
+                        """
+                        UPDATE life_episode
+                        SET salience = 0.01,
+                            memory_strength = 0.01,
+                            retention_state = 'GONE',
+                            last_touched_ts_ms = 1000
+                        WHERE episode_id = ?
+                        """,
+                        (durable,),
+                    )
+
+            result = run_retention_policy(
+                ledger=ledger,
+                policy=RetentionPolicy(
+                    policy_profile_id="life_memory_open_loop_durable_ret_test",
+                    keep_ms_by_table={},
+                    max_rows_by_table={},
+                    life_memory_keep_ms=100,
+                    life_memory_min_salience=0.40,
+                    life_memory_episode_kinds=("background_episode",),
+                ),
+                request_id="req_retention_open_loop_durable",
+                now_ts_ms=10_000,
+            )
+
+            remaining_ids = {row["episode_id"] for row in ledger.life_episode}
+            self.assertEqual(0, result.life_memory_candidate_count)
+            self.assertEqual(0, result.life_memory_deleted_count)
+            self.assertIn(open_loop_episode, remaining_ids)
+            self.assertIn(durable, remaining_ids)
+        finally:
+            ledger.close()
+
     def test_retention_refreshes_life_memory_collections_after_episode_prune(self) -> None:
         ledger = SQLiteLedger(db_path=":memory:")
         store = LifeMemoryStore(ledger=ledger)

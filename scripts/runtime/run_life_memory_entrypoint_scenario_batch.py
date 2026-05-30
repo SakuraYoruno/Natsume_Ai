@@ -16,6 +16,7 @@ from host_brain.app.observability_persist import (  # noqa: E402
     persist_background_event_memory,
     persist_life_action_event_memory,
     persist_life_chat_episode,
+    persist_owner_directive_memory,
 )
 from host_brain.audit.sqlite_ledger import SQLiteLedger  # noqa: E402
 from host_brain.memory.life_memory import LifeMemoryStore  # noqa: E402
@@ -25,6 +26,7 @@ from scripts.runtime.audit_life_memory_coverage import build_coverage_report  # 
 CN_TZ = timezone(timedelta(hours=8))
 REQUIRED_ENTRYPOINTS = (
     "surface_chat",
+    "owner_directive",
     "gateway_input_chat",
     "gateway_reply_action",
     "codex_lightnovel_delivery",
@@ -96,6 +98,17 @@ def _seed_entrypoints(*, store: LifeMemoryStore) -> None:
         ts_ms=_ts(29, 9),
         life_memory_store=store,
         metadata={**common_meta, "entrypoint_probe": "surface_chat"},
+    )
+    persist_owner_directive_memory(
+        request_id="req-entry-owner-directive",
+        person_id="owner",
+        session_id="codex_operator",
+        directive_kind="memory_policy_directive",
+        directive_text="以后所有控制面 owner 指令都要进入 LifeMemory，但只有可信且显著的内容进入长期语义记忆。",
+        applied_result="owner_directive 入口已记录为 LifeMemory episode。",
+        ts_ms=_ts(29, 9, 0),
+        life_memory_store=store,
+        metadata={**common_meta, "entrypoint_probe": "owner_directive"},
     )
     persist_life_chat_episode(
         request_id="msg-entry-gateway-in",

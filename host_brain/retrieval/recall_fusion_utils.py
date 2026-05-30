@@ -195,8 +195,10 @@ def _score_boost_priority(metadata: Mapping[str, Any]) -> tuple[float, int]:
         return 0.0, 0
     session_boost = _coerce_non_negative_float(raw_boost.get("session_boost"), default=0.0)
     recency_boost = _coerce_non_negative_float(raw_boost.get("recency_boost"), default=0.0)
+    semantic_kind_boost = _coerce_non_negative_float(raw_boost.get("semantic_kind_boost"), default=0.0)
+    tag_match_boost = _coerce_non_negative_float(raw_boost.get("tag_match_boost"), default=0.0)
     row_ts_ms = _coerce_non_negative_int(raw_boost.get("row_ts_ms"), default=0)
-    return round(session_boost + recency_boost, 6), row_ts_ms
+    return round(session_boost + recency_boost + semantic_kind_boost + tag_match_boost, 6), row_ts_ms
 
 
 def _coerce_non_negative_float(raw_value: Any, *, default: float = 0.0) -> float:

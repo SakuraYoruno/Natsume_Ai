@@ -69,6 +69,25 @@ def test_intent_profile_keeps_constraints_without_style_noise() -> None:
     assert len(evidence["items"][0]["snippet"]) <= 480
 
 
+def test_sub_agent_context_normalizes_legacy_semantic_memory_labels() -> None:
+    envelope = build_agent_context_envelope(
+        agent_id="translate_agent",
+        task="翻译刚才那段",
+        context={
+            "surface_memory_recall_packet": {
+                "facts": ["长期记忆：用户偏好翻译保留术语表。"],
+            },
+            "semantic_facts": ["用户偏好：推荐按卡片分段。"],
+        },
+    ).as_dict()
+
+    assert envelope["memory_packet"]["facts"] == ["长期事实：翻译保留术语表。"]
+    assert envelope["semantic_facts"] == [
+        "长期事实：推荐按卡片分段。",
+        "长期事实：翻译保留术语表。",
+    ]
+
+
 def test_retrieval_profile_preserves_more_source_and_evidence_refs() -> None:
     envelope = build_agent_context_envelope(
         agent_id="retrieval_agent",

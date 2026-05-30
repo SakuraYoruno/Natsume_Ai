@@ -123,7 +123,7 @@ class TestReActMode:
                 "agent_context_envelope": {
                     "schema_version": "Natsume.sub_agent.context.v1",
                     "task_brief": "翻译刚才那段",
-                    "memory_packet": {"facts": ["长期记忆：用户偏好翻译保留术语表。"]},
+                    "memory_packet": {"facts": ["长期事实：翻译保留术语表。"]},
                     "forbidden_context": ["raw_history_not_available"],
                 },
                 "recent_turns": [{"role": "user", "content": "raw should not be read directly"}],
@@ -133,7 +133,7 @@ class TestReActMode:
         messages = gateway.complete.call_args[0][0]
         rendered = "\n".join(str(item.get("content") or "") for item in messages)
         assert "AgentContextEnvelope" in rendered
-        assert "用户偏好翻译保留术语表" in rendered
+        assert "翻译保留术语表" in rendered
         assert "raw_history_not_available" in rendered
         assert "raw should not be read directly" not in rendered
 

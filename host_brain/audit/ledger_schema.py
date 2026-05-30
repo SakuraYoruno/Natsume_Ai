@@ -238,6 +238,28 @@ CREATE TABLE IF NOT EXISTS life_memory_compaction (
     FOREIGN KEY(compressed_episode_id) REFERENCES life_episode(episode_id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS life_open_loop (
+    open_loop_id TEXT PRIMARY KEY,
+    semantic_key TEXT NOT NULL,
+    episode_id TEXT NOT NULL,
+    person_id TEXT,
+    session_id TEXT,
+    title TEXT,
+    detail TEXT,
+    status TEXT NOT NULL DEFAULT 'OPEN',
+    source_ref TEXT,
+    opened_ts_ms INTEGER NOT NULL,
+    updated_ts_ms INTEGER NOT NULL,
+    closed_ts_ms INTEGER,
+    close_episode_id TEXT,
+    close_reason TEXT,
+    salience REAL NOT NULL DEFAULT 0.0,
+    memory_strength REAL NOT NULL DEFAULT 0.0,
+    metadata TEXT,
+    FOREIGN KEY(episode_id) REFERENCES life_episode(episode_id) ON DELETE CASCADE,
+    FOREIGN KEY(close_episode_id) REFERENCES life_episode(episode_id) ON DELETE SET NULL
+);
+
 CREATE TABLE IF NOT EXISTS life_memory_collection (
     collection_id TEXT PRIMARY KEY,
     collection_kind TEXT NOT NULL,
@@ -661,6 +683,9 @@ CREATE INDEX IF NOT EXISTS idx_life_episode_link_source ON life_episode_link(sou
 CREATE INDEX IF NOT EXISTS idx_life_episode_link_target ON life_episode_link(target_episode_id, link_kind);
 CREATE INDEX IF NOT EXISTS idx_life_memory_correction_episode ON life_memory_correction(episode_id, created_ts_ms);
 CREATE INDEX IF NOT EXISTS idx_life_memory_compaction_episode ON life_memory_compaction(compressed_episode_id, created_ts_ms);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_life_open_loop_semantic_key ON life_open_loop(semantic_key);
+CREATE INDEX IF NOT EXISTS idx_life_open_loop_status ON life_open_loop(status, updated_ts_ms);
+CREATE INDEX IF NOT EXISTS idx_life_open_loop_person ON life_open_loop(person_id, session_id, updated_ts_ms);
 CREATE INDEX IF NOT EXISTS idx_life_memory_collection_scope ON life_memory_collection(collection_kind, domain, scope_key, updated_ts_ms);
 CREATE INDEX IF NOT EXISTS idx_life_memory_collection_person ON life_memory_collection(person_id, session_id, updated_ts_ms);
 CREATE INDEX IF NOT EXISTS idx_life_memory_collection_retention ON life_memory_collection(retention_state, memory_strength, updated_ts_ms);

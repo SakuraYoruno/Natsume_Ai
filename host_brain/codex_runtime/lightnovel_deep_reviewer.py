@@ -18,7 +18,10 @@ _NUMBERED_ITEM_RE = re.compile(r"(?<!\d)(\d{1,2})[.、]\s*([^；\n]+)")
 _CHOICE_QUERY_RE = re.compile(
     r"(?:喜欢|好看|想看|先看|推荐|选|挑).{0,8}哪|"
     r"哪(?:本|部|个)|哪个|哪部|"
-    r"(?:这本|这部|这一个|这個|这本书|这部书|这书|它).{0,8}(?:好看|能看|值得看|怎么样|如何)"
+    r"(?:这本|这部|这一个|这個|这本书|这部书|这书|它).{0,8}(?:好看|能看|值得看|怎么样|如何)|"
+    r"(?:这些|那些|这几本|那几本|这三本|那三本|这十几本|那十几本|"
+    r"(?:今天|今日|昨天|昨晚|前天|最近|这几天|近几天).{0,8}(?:几本|三本|十几本|推荐|推过|推送|书单))"
+    r".{0,12}(?:好看|能看|值得看|怎么样|如何|喜欢|想看|先看|推荐|选|挑)"
 )
 _BODY_TEXT_MIN_CHARS = 500
 _CACHE_VERSION = "lightnovel_deep_review:v4"
@@ -73,9 +76,12 @@ def review_lightnovel_selection_from_memory_packet(
     timeout_s: int | None = None,
 ) -> dict[str, Any]:
     cards = _extract_cards(packet)
+    source_card_count = len(cards)
+    review_context = _packet_review_source_context(packet)
     timeout_value = int(timeout_s or os.environ.get("HOST_LIGHTNOVEL_DEEP_REVIEW_TIMEOUT_S") or 12)
     max_items = _review_item_limit(user_message=user_message, card_count=len(cards))
     cards = cards[: max(1, min(max_items, 6))]
+    reviewed_card_count = len(cards)
     signature = _cards_signature(cards)
     if not cards:
         result = _result(
@@ -83,6 +89,12 @@ def review_lightnovel_selection_from_memory_packet(
             reason_code="LIGHTNOVEL_DEEP_REVIEW_NO_CARDS",
             fact="我没拿到刚才那几本书的详情链接或 epub，所以不能装作已经翻看过。",
             items=[],
+        )
+        _annotate_review_scope(
+            result,
+            source_card_count=source_card_count,
+            reviewed_card_count=reviewed_card_count,
+            review_item_limit=max_items,
         )
         _annotate_review_result(result, recommendation_signature=signature, cached=False)
         persist_result = _persist_review_memory(
@@ -92,6 +104,7 @@ def review_lightnovel_selection_from_memory_packet(
             session_id=session_id,
             ts_ms=ts_ms,
             recommendation_signature=signature,
+            review_context=review_context,
         )
         _attach_persist_result(result, persist_result)
         return result
@@ -104,6 +117,31 @@ def review_lightnovel_selection_from_memory_packet(
         now_ms=int(ts_ms or time.time() * 1000),
     )
     if cached:
+        _annotate_review_scope(
+            cached,
+            source_card_count=source_card_count,
+            reviewed_card_count=reviewed_card_count,
+            review_item_limit=max_items,
+        )
+        cached_episode_id = _clean_text(cached.get("source_episode_id"))
+        if cached_episode_id:
+            cached_persist_result = {
+                "life_memory": {
+                    "episode_id": cached_episode_id,
+                    "primary_ref": f"life_episode://{cached_episode_id}",
+                }
+            }
+            _link_review_to_source_episodes(
+                persist_result=cached_persist_result,
+                source_episode_ids=list(review_context.get("source_episode_ids") or []),
+                ts_ms=int(ts_ms or time.time() * 1000),
+            )
+            _attach_review_to_source_collection_items(
+                persist_result=cached_persist_result,
+                result=cached,
+                review_context=review_context,
+                ts_ms=int(ts_ms or time.time() * 1000),
+            )
         return cached
 
     reviewed = _review_cards(cards, timeout_s=timeout_value)
@@ -117,6 +155,12 @@ def review_lightnovel_selection_from_memory_packet(
             fact=fact,
             items=reviewed,
         )
+        _annotate_review_scope(
+            result,
+            source_card_count=source_card_count,
+            reviewed_card_count=reviewed_card_count,
+            review_item_limit=max_items,
+        )
         _annotate_review_result(result, recommendation_signature=signature, cached=False)
         persist_result = _persist_review_memory(
             result=result,
@@ -125,6 +169,7 @@ def review_lightnovel_selection_from_memory_packet(
             session_id=session_id,
             ts_ms=ts_ms,
             recommendation_signature=signature,
+            review_context=review_context,
         )
         _attach_persist_result(result, persist_result)
         return result
@@ -138,6 +183,12 @@ def review_lightnovel_selection_from_memory_packet(
         items=reviewed,
         selected=selected,
     )
+    _annotate_review_scope(
+        result,
+        source_card_count=source_card_count,
+        reviewed_card_count=reviewed_card_count,
+        review_item_limit=max_items,
+    )
     _annotate_review_result(result, recommendation_signature=signature, cached=False)
     persist_result = _persist_review_memory(
         result=result,
@@ -146,6 +197,7 @@ def review_lightnovel_selection_from_memory_packet(
         session_id=session_id,
         ts_ms=ts_ms,
         recommendation_signature=signature,
+        review_context=review_context,
     )
     _attach_persist_result(result, persist_result)
     return result
@@ -197,7 +249,7 @@ def _review_one_card(*, index: int, card: Mapping[str, Any], timeout_s: int) -> 
     item["index"] = int(item.get("index") or index)
     detail_url = str(item.get("detail_url") or "").strip()
     if detail_url:
-        item.update(_fetch_detail(detail_url, timeout_s=timeout_s))
+        item.update(_merge_detail_payload_into_card(item, _fetch_detail(detail_url, timeout_s=timeout_s)))
     else:
         item["review_status"] = "NO_DETAIL_URL"
     item.update(_score_item(item, source_index=index - 1))
@@ -270,10 +322,30 @@ def _attach_persist_result(result: dict[str, Any], persist_result: Mapping[str, 
         result["persisted_primary_ref"] = life.get("primary_ref")
 
 
+def _annotate_review_scope(
+    result: dict[str, Any],
+    *,
+    source_card_count: int,
+    reviewed_card_count: int,
+    review_item_limit: int,
+) -> None:
+    source_count = max(0, int(source_card_count or 0))
+    reviewed_count = max(0, int(reviewed_card_count or 0))
+    result["source_card_count"] = source_count
+    result["reviewed_item_count"] = reviewed_count
+    result["review_item_limit"] = max(0, int(review_item_limit or 0))
+    result["partial_review"] = bool(source_count > reviewed_count > 0)
+
+
 def _public_item(item: Mapping[str, Any]) -> dict[str, Any]:
     keys = (
         "index",
         "title",
+        "collection_id",
+        "collection_item_id",
+        "episode_id",
+        "source_episode_id",
+        "entity_id",
         "detail_url",
         "review_status",
         "intro_snippet",
@@ -361,6 +433,8 @@ def _load_cached_review(
         fact = str(meta.get("fact") or episode.get("summary") or "").strip()
         if not items:
             continue
+        if _cached_review_is_polluted(cards=cards, items=items, selected=selected, fact=fact):
+            continue
         return _cached_result(
             fact=fact,
             items=items,
@@ -369,6 +443,68 @@ def _load_cached_review(
             recommendation_signature=recommendation_signature,
         )
     return None
+
+
+def _cached_review_is_polluted(
+    *,
+    cards: Sequence[Mapping[str, Any]],
+    items: Sequence[Mapping[str, Any]],
+    selected: Mapping[str, Any],
+    fact: str,
+) -> bool:
+    fact_text = str(fact or "")
+    if _looks_like_failed_review_fact(fact_text):
+        return True
+    if not selected:
+        return True
+    selected_title = _clean_text(selected.get("title"), limit=160)
+    if not selected_title:
+        return True
+    if _looks_like_unusable_page_title(selected.get("title")):
+        return True
+    if "《404》" in fact_text or "第1本《404》" in fact_text:
+        return True
+    review_statuses = {
+        _clean_text(item.get("review_status"), limit=40).upper()
+        for item in items
+        if isinstance(item, Mapping)
+    }
+    if review_statuses and not review_statuses.intersection({"OK", "PARTIAL"}):
+        return True
+    card_title_by_url = {
+        _normalize_detail_url(str(card.get("detail_url") or "")): _clean_text(card.get("title"), limit=160)
+        for card in cards
+        if _normalize_detail_url(str(card.get("detail_url") or ""))
+    }
+    for item in items:
+        title = _clean_text(item.get("title"), limit=160)
+        if _looks_like_unusable_page_title(title):
+            return True
+        url = _normalize_detail_url(str(item.get("detail_url") or ""))
+        card_title = card_title_by_url.get(url)
+        if card_title and title and _looks_like_unusable_page_title(title) and title != card_title:
+            return True
+    return False
+
+
+def _looks_like_failed_review_fact(value: Any) -> bool:
+    text = _clean_text(value, limit=500)
+    if not text:
+        return True
+    failure_tokens = (
+        "没有拿到可读网页",
+        "没有拿到可读",
+        "没拿到可读",
+        "不能负责任地说哪本更好",
+        "这轮不能负责任",
+        "深读步骤失败",
+        "详情页未读到",
+        "没有足够详情",
+        "没有足够正文",
+        "无法读取详情",
+        "fetch failed",
+    )
+    return any(token in text for token in failure_tokens)
 
 
 def _safe_json_dict(value: Any) -> dict[str, Any]:
@@ -484,6 +620,11 @@ def _extract_trace_cards(packet: Mapping[str, Any]) -> list[dict[str, Any]]:
         card = {
             "index": int(item.get("index") or index),
             "title": title,
+            "collection_id": _clean_text(item.get("collection_id"), limit=180),
+            "collection_item_id": _clean_text(item.get("collection_item_id"), limit=180),
+            "episode_id": _clean_text(item.get("episode_id") or item.get("source_episode_id"), limit=180),
+            "source_episode_id": _clean_text(item.get("source_episode_id") or item.get("episode_id"), limit=180),
+            "entity_id": _clean_text(item.get("entity_id"), limit=180),
             "detail_url": detail_url,
             "selection_reason": _clean_text(item.get("selection_reason"), limit=180),
             "intro_snippet": _clean_text(item.get("intro_snippet"), limit=260),
@@ -495,6 +636,99 @@ def _extract_trace_cards(packet: Mapping[str, Any]) -> list[dict[str, Any]]:
         if card and not any(_same_card(card, old) for old in cards):
             cards.append(card)
     return cards
+
+
+def _packet_review_source_context(packet: Mapping[str, Any]) -> dict[str, Any]:
+    """Capture the original recommendation anchors behind a follow-up review."""
+
+    source_refs: list[str] = []
+    evidence_refs: list[str] = []
+    source_episode_ids: list[str] = []
+    source_collection_ids: list[str] = []
+    source_collection_item_ids: list[str] = []
+
+    def add_ref(target: list[str], value: Any) -> None:
+        cleaned = _clean_text(value, limit=500)
+        if cleaned and cleaned not in target:
+            target.append(cleaned)
+
+    for value in list(packet.get("source_refs") or []):
+        add_ref(source_refs, value)
+    for value in list(packet.get("evidence_refs") or []):
+        add_ref(evidence_refs, value)
+    rows = packet.get("rows")
+    if isinstance(rows, Sequence) and not isinstance(rows, (str, bytes, bytearray)):
+        for row in rows:
+            if not isinstance(row, Mapping):
+                continue
+            add_ref(source_refs, row.get("source_ref"))
+            add_ref(evidence_refs, row.get("evidence_ref"))
+            add_ref(evidence_refs, row.get("evidence_refs"))
+            _collect_source_id(source_episode_ids, row.get("episode_id"))
+            _collect_source_id(source_collection_ids, row.get("collection_id"))
+    trace = packet.get("trace")
+    source_items: list[dict[str, Any]] = []
+    if isinstance(trace, Mapping):
+        for key in ("selected_collection_items", "selected_entity_items"):
+            raw_items = trace.get(key)
+            if not isinstance(raw_items, Sequence) or isinstance(raw_items, (str, bytes, bytearray)):
+                continue
+            for item in raw_items:
+                if not isinstance(item, Mapping):
+                    continue
+                add_ref(source_refs, item.get("source_ref"))
+                add_ref(source_refs, item.get("detail_url"))
+                add_ref(evidence_refs, item.get("evidence_ref"))
+                _collect_source_id(source_episode_ids, item.get("episode_id") or item.get("source_episode_id"))
+                _collect_source_id(source_collection_ids, item.get("collection_id"))
+                _collect_source_id(source_collection_item_ids, item.get("collection_item_id"))
+                source_items.append(
+                    {
+                        source_key: item.get(source_key)
+                        for source_key in (
+                            "title",
+                            "detail_url",
+                            "source_ref",
+                            "collection_id",
+                            "collection_item_id",
+                            "episode_id",
+                            "source_episode_id",
+                            "entity_id",
+                        )
+                        if item.get(source_key) not in (None, "", [], {})
+                    }
+                )
+        for container_key in ("recall_receipt", "recall_answer_readiness"):
+            container = trace.get(container_key)
+            if not isinstance(container, Mapping):
+                continue
+            detail = container.get("detail_evidence")
+            if isinstance(detail, Mapping):
+                for value in list(detail.get("detail_refs") or []):
+                    add_ref(source_refs, value)
+    for ref in list(source_refs):
+        if ref.startswith("life_memory_collection://"):
+            _collect_source_id(source_collection_ids, ref.rsplit("/", 1)[-1])
+        elif ref.startswith("life_episode://"):
+            _collect_source_id(source_episode_ids, ref.rsplit("/", 1)[-1])
+        elif ref.startswith("life_episode::"):
+            _collect_source_id(source_episode_ids, ref.split("::", 1)[1])
+        elif ref.startswith("life_memory_collection::"):
+            _collect_source_id(source_collection_ids, ref.split("::", 1)[1])
+    return {
+        "source_refs": source_refs[:48],
+        "evidence_refs": evidence_refs[:48],
+        "source_episode_ids": source_episode_ids[:24],
+        "source_collection_ids": source_collection_ids[:24],
+        "source_collection_item_ids": source_collection_item_ids[:48],
+        "source_items": source_items[:48],
+    }
+
+
+def _collect_source_id(target: list[str], value: Any) -> None:
+    cleaned = _clean_text(value, limit=180)
+    if cleaned and cleaned not in target:
+        target.append(cleaned)
 
 
 def _trace_review_items(packet: Mapping[str, Any]) -> list[Mapping[str, Any]]:
@@ -611,6 +845,18 @@ def _label_key(label: str) -> str:
     }.get(value, "")
 
 
+def _merge_detail_payload_into_card(card: Mapping[str, Any], detail: Mapping[str, Any]) -> dict[str, Any]:
+    payload = dict(detail or {})
+    fetched_title = _clean_text(payload.get("title"), limit=160)
+    if not fetched_title:
+        return payload
+    payload["page_title"] = fetched_title
+    original_title = _clean_text(card.get("title"), limit=160)
+    if original_title or _looks_like_unusable_page_title(fetched_title):
+        payload.pop("title", None)
+    return payload
+
+
 def _fetch_detail(url: str, *, timeout_s: int) -> dict[str, Any]:
     parsed = urlparse(str(url or ""))
     if parsed.scheme not in {"http", "https"} or not parsed.netloc:
@@ -649,6 +895,18 @@ def _fetch_detail(url: str, *, timeout_s: int) -> dict[str, Any]:
     info = _select_text(soup, ".article-infos", limit=900) or _clean_text(soup.get_text(" "), limit=900)
     chapter_signal = _chapter_signal(soup)
     content_text = _article_content_text(soup)
+    if _looks_like_unusable_detail_page(
+        title=title,
+        description=description,
+        info=info,
+        chapter_signal=chapter_signal,
+        content_text=content_text,
+    ):
+        return {
+            "review_status": "FAILED",
+            "review_reason_code": "UNUSABLE_DETAIL_PAGE",
+            "page_title": title,
+        }
     if len(content_text) < _BODY_TEXT_MIN_CHARS:
         linked = _fetch_linked_chapter_text(soup, base_url=url, timeout_s=timeout_s)
         if len(linked) > len(content_text):
@@ -668,6 +926,26 @@ def _fetch_detail(url: str, *, timeout_s: int) -> dict[str, Any]:
         **body_review,
         **stats,
     }
+
+
+def _looks_like_unusable_page_title(title: Any) -> bool:
+    normalized = _clean_text(title, limit=80).lower()
+    normalized = re.sub(r"\s+", " ", normalized)
+    return normalized in {"404", "404 not found", "not found", "page not found", "页面不存在", "網頁不存在", "网页不存在"}
+
+
+def _looks_like_unusable_detail_page(
+    *,
+    title: Any,
+    description: Any,
+    info: Any,
+    chapter_signal: Any,
+    content_text: Any,
+) -> bool:
+    if not _looks_like_unusable_page_title(title):
+        return False
+    _ = description, info
+    return not _clean_text(chapter_signal) and len(str(content_text or "")) < _BODY_TEXT_MIN_CHARS
 
 
 def _select_text(soup: Any, selector: str, *, limit: int) -> str:
@@ -1054,20 +1332,30 @@ def _persist_review_memory(
     session_id: str | None,
     ts_ms: int | None,
     recommendation_signature: str,
+    review_context: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     try:
         from host_brain.app.observability_persist import persist_life_action_event_memory  # noqa: PLC0415
     except Exception:
         return {"status": "SKIPPED", "reason_code": "PERSIST_IMPORT_FAILED"}
     signature = str(recommendation_signature or "").strip()
+    context = dict(review_context or {})
     owner = re.sub(r"[^A-Za-z0-9_.:-]+", "_", str(person_id or session_id or "global").strip())[:80] or "global"
     action_id = f"{owner}:lightnovel_deep_review:{signature or _stable_result_signature(result)}"
     memory_anchor = _build_review_memory_anchor(result)
-    evidence_refs = list(result.get("evidence_refs") or [])
+    evidence_refs = list(
+        dict.fromkeys(
+            [
+                *[str(item or "").strip() for item in list(context.get("evidence_refs") or []) if str(item or "").strip()],
+                *[str(item or "").strip() for item in list(context.get("source_refs") or []) if str(item or "").strip()],
+                *[str(item or "").strip() for item in list(result.get("evidence_refs") or []) if str(item or "").strip()],
+            ]
+        )
+    )
     if signature:
         evidence_refs.append(f"action://event/{action_id}")
     try:
-        return persist_life_action_event_memory(
+        persist_result = persist_life_action_event_memory(
             event_source="surface_memory_recall",
             action_kind="lightnovel_recommendation_deep_review",
             action_id=action_id,
@@ -1089,10 +1377,114 @@ def _persist_review_memory(
                 "memory_anchor": memory_anchor,
                 "selected": dict(result.get("selected") or {}),
                 "items": list(result.get("items") or []),
+                "source_episode_ids": list(context.get("source_episode_ids") or []),
+                "source_collection_ids": list(context.get("source_collection_ids") or []),
+                "source_collection_item_ids": list(context.get("source_collection_item_ids") or []),
+                "source_anchor_refs": list(context.get("source_refs") or []),
             },
         )
+        _link_review_to_source_episodes(
+            persist_result=persist_result,
+            source_episode_ids=list(context.get("source_episode_ids") or []),
+            ts_ms=int(ts_ms or time.time() * 1000),
+        )
+        _attach_review_to_source_collection_items(
+            persist_result=persist_result,
+            result=result,
+            review_context=context,
+            ts_ms=int(ts_ms or time.time() * 1000),
+        )
+        return persist_result
     except Exception as exc:
         return {"status": "FAILED", "reason_code": "PERSIST_FAILED", "detail": str(exc)[:160]}
+
+
+def _link_review_to_source_episodes(
+    *,
+    persist_result: Mapping[str, Any],
+    source_episode_ids: Sequence[Any],
+    ts_ms: int,
+) -> None:
+    life = persist_result.get("life_memory") if isinstance(persist_result.get("life_memory"), Mapping) else {}
+    review_episode_id = _clean_text(life.get("episode_id"))
+    if not review_episode_id:
+        return
+    source_ids = [
+        _clean_text(item)
+        for item in list(source_episode_ids or [])
+        if _clean_text(item) and _clean_text(item) != review_episode_id
+    ]
+    if not source_ids:
+        return
+    try:
+        from host_brain.app.dependencies import get_life_memory_store  # noqa: PLC0415
+
+        store = get_life_memory_store()
+    except Exception:
+        return
+    for source_id in list(dict.fromkeys(source_ids))[:12]:
+        try:
+            store.link_episode(
+                source_episode_id=review_episode_id,
+                target_episode_id=source_id,
+                link_kind="detail_review_of",
+                weight=0.9,
+                ts_ms=int(ts_ms),
+                metadata={"reason": "lightnovel_followup_deep_review"},
+            )
+        except Exception:
+            continue
+
+
+def _attach_review_to_source_collection_items(
+    *,
+    persist_result: Mapping[str, Any],
+    result: Mapping[str, Any],
+    review_context: Mapping[str, Any],
+    ts_ms: int,
+) -> None:
+    life = persist_result.get("life_memory") if isinstance(persist_result.get("life_memory"), Mapping) else {}
+    review_episode_id = _clean_text(life.get("episode_id"))
+    if not review_episode_id:
+        return
+    review_ref = _clean_text(life.get("primary_ref")) or f"life_episode://{review_episode_id}"
+    source_items = [dict(item) for item in list(review_context.get("source_items") or []) if isinstance(item, Mapping)]
+    source_by_url = {
+        _normalize_detail_url(str(item.get("detail_url") or item.get("source_ref") or "")): item
+        for item in source_items
+        if _normalize_detail_url(str(item.get("detail_url") or item.get("source_ref") or ""))
+    }
+    reviewed_items: list[dict[str, Any]] = []
+    for raw_item in list(result.get("items") or []):
+        if not isinstance(raw_item, Mapping):
+            continue
+        item = dict(raw_item)
+        if not item.get("collection_item_id"):
+            matched = source_by_url.get(_normalize_detail_url(str(item.get("detail_url") or "")))
+            if matched:
+                item.update({key: value for key, value in matched.items() if key not in item or item.get(key) in (None, "", [], {})})
+        reviewed_items.append(item)
+    if not reviewed_items:
+        return
+    try:
+        from host_brain.app.dependencies import get_life_memory_store  # noqa: PLC0415
+
+        store = get_life_memory_store()
+    except Exception:
+        return
+    attach = getattr(store, "attach_collection_item_review_evidence", None)
+    if not callable(attach):
+        return
+    try:
+        attach(
+            review_episode_id=review_episode_id,
+            reviewed_items=reviewed_items,
+            review_ref=review_ref,
+            fact=result.get("fact"),
+            ts_ms=int(ts_ms),
+        )
+    except Exception:
+        return
 
 
 def _stable_result_signature(result: Mapping[str, Any]) -> str:

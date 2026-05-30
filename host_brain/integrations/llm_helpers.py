@@ -41,6 +41,7 @@ _POOL_DEFAULT_SPECS: dict[str, str] = {
     "C": "deepseek:deepseek-v4-flash,gemini:gemini-2.5-flash-lite",
     "D": "deepseek:deepseek-v4-flash,gemini:gemini-2.5-flash-lite",
 }
+DEFAULT_LLM_POOL_CODEX_MODEL = "gpt-5.5"
 _POOL_CODEX_MIGRATION_DEFAULT_EXCLUDED_SCENES = frozenset({"CHAT", "CHAT_SURFACE", "MULTIMODAL"})
 _MULTIMODAL_PROVIDER_ALLOWLIST = {PROVIDER_GEMINI}
 _POOL_COOLDOWN_LOCK = Lock()
@@ -230,7 +231,7 @@ def _codex_pool_migration_enabled(scene_type: str) -> bool:
 
 
 def _resolve_pool_codex_model_id() -> str:
-    return resolve_codex_cli_model(os.environ.get("HOST_LLM_POOL_CODEX_MODEL_ID") or os.environ.get("HOST_CODEX_MODEL_ID"))
+    return resolve_codex_cli_model(os.environ.get("HOST_LLM_POOL_CODEX_MODEL_ID") or DEFAULT_LLM_POOL_CODEX_MODEL)
 
 
 def _resolve_pool_scene_attempt_timeout_ms(

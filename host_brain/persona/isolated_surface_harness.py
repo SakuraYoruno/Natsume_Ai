@@ -292,6 +292,8 @@ _SURFACE_QUOTE_SCENE_ALIASES = {
 _MEMORY_FACT_PREFIXES = (
     "记忆线索：",
     "关系线索：",
+    "长期事实：",
+    "长期记忆：",
     "世界事实：",
     "制品线索：",
     "召回线索：",

@@ -193,6 +193,21 @@ def test_hard_rule_route_keeps_surface_memory_recall_on_chat() -> None:
     assert route.reason_code == "hard_rule:surface_memory_recall"
 
 
+def test_hard_rule_route_prefers_memory_open_loop_over_task_progress_hint() -> None:
+    route = _hard_rule_route(
+        intent_draft={
+            "route": "task_progress",
+            "target_id": "",
+        },
+        sanitized_message="记忆系统还有什么待办没完成？",
+        skill_registry=_StubSkillRegistry(),
+    )
+
+    assert route.route_type == "chat"
+    assert route.target_id == ""
+    assert route.reason_code == "hard_rule:surface_memory_recall"
+
+
 def test_hard_rule_route_keeps_actionable_code_request_on_skill_route() -> None:
     route = _hard_rule_route(
         intent_draft={

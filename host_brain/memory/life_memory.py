@@ -42,6 +42,12 @@ TRUTH_NARRATIVE_ONLY = "NARRATIVE_ONLY"
 STATUS_ACTIVE = "ACTIVE"
 STATUS_SUPPRESSED = "SUPPRESSED"
 
+OPEN_LOOP_OPEN = "OPEN"
+OPEN_LOOP_CLOSED = "CLOSED"
+OPEN_LOOP_CANCELLED = "CANCELLED"
+OPEN_LOOP_SUPERSEDED = "SUPERSEDED"
+OPEN_LOOP_TERMINAL_STATES: frozenset[str] = frozenset({OPEN_LOOP_CLOSED, OPEN_LOOP_CANCELLED, OPEN_LOOP_SUPERSEDED})
+
 EPISODE_CHAT = "chat_episode"
 EPISODE_PERCEPTION = "perception_episode"
 EPISODE_ACTION = "action_episode"
@@ -75,6 +81,8 @@ MEMORY_CLASS_FAILURE_LESSON = "failure_lesson"
 MEMORY_CLASS_INNER_LIFE = "inner_life"
 MEMORY_CLASS_PERCEPTION_EVIDENCE = "perception_evidence"
 MEMORY_CLASS_PREFERENCE = "preference"
+MEMORY_CLASS_RELATIONSHIP_FEEDBACK = "relationship_feedback"
+MEMORY_CLASS_REFLECTION = "reflection"
 MEMORY_CLASS_SELF_CHANGE = "self_change"
 MEMORY_CLASS_STABLE_FACT = "stable_fact"
 MEMORY_CLASS_TOOL_ACTION = "tool_action"
@@ -107,6 +115,41 @@ COLLECTION_ROLLING_WINDOWS: tuple[tuple[str, int, str], ...] = (
 )
 COLLECTION_SCOPE_RECENT_WINDOW_DAYS = 7
 MS_DAY = 24 * 60 * 60 * 1000
+
+_SYNTHETIC_METADATA_FLAGS: tuple[str, ...] = ("e2e_probe", "synthetic_probe", "test_probe")
+_SYNTHETIC_METADATA_MARKERS: tuple[str, ...] = ("real_scene_batch", "scenario_batch", "entrypoint_probe")
+_SYNTHETIC_ID_MARKERS: tuple[str, ...] = (
+    "surface-memory-recall-e2e",
+    "life-memory-real-scene-e2e",
+    "life-memory-real-scene-",
+    "unit-tool-matrix",
+    "pytest",
+    "person-test",
+    "session-test",
+    "-test",
+    "unit-",
+    "test-",
+    "test_",
+    "synthetic",
+)
+_SYNTHETIC_SOURCE_MARKERS: tuple[str, ...] = (
+    "real-scene-",
+    "surface-memory-recall-e2e",
+    "life-memory-real-scene",
+    "unit-tool-matrix",
+    "pytest",
+    "synthetic",
+)
+
+_SEMANTIC_PRIORITY_MEMORY_CLASSES: tuple[str, ...] = (
+    MEMORY_CLASS_PREFERENCE,
+    MEMORY_CLASS_COMMITMENT,
+    MEMORY_CLASS_CORRECTION,
+    MEMORY_CLASS_RELATIONSHIP_FEEDBACK,
+    MEMORY_CLASS_SELF_CHANGE,
+    MEMORY_CLASS_STABLE_FACT,
+    MEMORY_CLASS_FAILURE_LESSON,
+)
 
 ENTITY_KIND_BOOK = "book"
 ENTITY_KIND_ITEM = "item"
@@ -253,7 +296,9 @@ def _episode_recall_target_memory_classes(query_kind: str) -> tuple[str, ...]:
     if normalized == "correction":
         return (MEMORY_CLASS_CORRECTION,)
     if normalized == "preference_lookup":
-        return (MEMORY_CLASS_PREFERENCE,)
+        return (MEMORY_CLASS_PREFERENCE, MEMORY_CLASS_RELATIONSHIP_FEEDBACK)
+    if normalized == "open_loop":
+        return (MEMORY_CLASS_COMMITMENT,)
     if normalized == "self_change":
         return (MEMORY_CLASS_SELF_CHANGE,)
     if normalized == "evidence_review":
@@ -344,12 +389,36 @@ def _looks_like_correction_question_echo(text: str) -> bool:
     return any(token in compact for token in ("assistant:", "确实", "没错", "明明记得", "封面有猫"))
 
 
+def _chat_summary_user_text(summary: str) -> str:
+    text = _clean_text(summary, limit=1200)
+    match = re.search(r"(?:^|\n)\s*User\s*[:：]\s*(.*?)(?:\n\s*Assistant\s*[:：]|\Z)", text, flags=re.DOTALL | re.IGNORECASE)
+    if match:
+        return _clean_text(match.group(1), limit=500)
+    return ""
+
+
+def _looks_like_semantic_lookup_echo(summary: str) -> bool:
+    user_text = _chat_summary_user_text(summary)
+    if not user_text:
+        return False
+    compact = re.sub(r"\s+", "", user_text).lower()
+    if _looks_like_explicit_correction_event(user_text):
+        return False
+    if any(token in compact for token in ("记住", "以后", "不要", "别再", "必须", "应该", "优先", "改成")):
+        return False
+    return _semantic_statement_is_lookup_question(user_text) or _looks_like_anaphoric_selection_query(user_text)
+
+
 def _looks_like_preference_candidate(text: str) -> bool:
     compact = _clean_text(text, limit=1600).lower().replace("要不要", "")
     actor_says_user = "user:" in compact or "用户" in compact
+    if _semantic_looks_like_recommendation_report(compact):
+        return False
     if any(token in compact for token in ("用户偏好", "用户喜欢", "用户不喜欢", "用户要求")):
         return True
     if re.search(r"user:.{0,40}我(?:不)?喜欢", compact):
+        return True
+    if "assistant:" not in compact and any(token in compact for token in ("不要用", "别用", "不要再", "优先使用", "应该用", "必须用")):
         return True
     if not actor_says_user:
         return False
@@ -422,6 +491,53 @@ def _episode_metadata_dict(episode: Mapping[str, Any]) -> dict[str, Any]:
     return dict(metadata) if isinstance(metadata, Mapping) else {}
 
 
+def _has_any_marker(value: Any, markers: Sequence[str]) -> bool:
+    text = _clean_text(value, limit=1200).lower()
+    return bool(text) and any(marker in text for marker in markers)
+
+
+def _is_synthetic_life_record(record: Mapping[str, Any], metadata: Mapping[str, Any] | None = None) -> bool:
+    meta = dict(metadata) if isinstance(metadata, Mapping) else _episode_metadata_dict(record)
+    if any(bool(meta.get(flag)) for flag in _SYNTHETIC_METADATA_FLAGS):
+        return True
+    if any(meta.get(marker) not in (None, "", False) for marker in _SYNTHETIC_METADATA_MARKERS):
+        return True
+    identity_values = (
+        record.get("person_id"),
+        record.get("session_id"),
+        meta.get("person_id"),
+        meta.get("session_id"),
+        meta.get("conversation_id"),
+    )
+    if any(_has_any_marker(value, (*_SYNTHETIC_ID_MARKERS, "probe")) for value in identity_values):
+        return True
+    if _has_any_marker(record.get("thread_id"), _SYNTHETIC_ID_MARKERS):
+        return True
+    source_values = (
+        record.get("primary_ref"),
+        record.get("source_ref"),
+        record.get("evidence_ref"),
+        record.get("request_id"),
+        meta.get("source_ref"),
+        meta.get("action_id"),
+        meta.get("request_id"),
+    )
+    if any(_has_any_marker(value, _SYNTHETIC_SOURCE_MARKERS) for value in source_values):
+        return True
+    refs = meta.get("evidence_refs")
+    if isinstance(refs, Sequence) and not isinstance(refs, (str, bytes, bytearray)):
+        return any(_has_any_marker(ref, _SYNTHETIC_SOURCE_MARKERS) for ref in refs)
+    return False
+
+
+def _allow_synthetic_life_recall_for_scope(*, person_id: str | None, session_id: str | None) -> bool:
+    return any(
+        _has_any_marker(value, _SYNTHETIC_ID_MARKERS)
+        for value in (person_id, session_id)
+        if _clean_text(value)
+    )
+
+
 def _is_significant_anaphoric_episode(episode: Mapping[str, Any]) -> bool:
     kind = _clean_text(episode.get("episode_kind"))
     if kind not in _ANAPHORIC_EVENT_KINDS:
@@ -470,6 +586,8 @@ def _importance_keyword_boost(text: str) -> float:
         boost += 0.12
     if any(token in normalized for token in ("纠正", "不对", "错了", "失败", "连不上", "被占用", "修复", "原因")):
         boost += 0.10
+    if _semantic_is_relationship_feedback(normalized):
+        boost += 0.12
     if any(token in normalized for token in ("模型路由", "记忆系统", "能力", "策略", "自我改变", "self_change")):
         boost += 0.12
     return min(0.35, boost)
@@ -569,6 +687,13 @@ def _classify_life_memory_policy(
     truth = _clean_text(truth_state).upper()
     refs = _normalize_refs(evidence_refs or meta.get("evidence_refs") or [])
     reason_codes: list[str] = []
+    trace_meta = meta.get("trace_stage_meta") if isinstance(meta.get("trace_stage_meta"), Mapping) else {}
+    reply_source = _clean_text(meta.get("reply_source") or trace_meta.get("reply_source")).lower()
+    lookup_echo = (
+        kind == EPISODE_CHAT
+        and reply_source != "surface_memory_direct_answer"
+        and _looks_like_semantic_lookup_echo(summary_text)
+    )
 
     def has_any(*tokens: str) -> bool:
         return any(token and token in compact for token in tokens)
@@ -579,6 +704,7 @@ def _classify_life_memory_policy(
     active_recall_default = True
     semantic_candidate = False
     sleep_replay_candidate = False
+    failure_like = _semantic_is_failure_lesson(compact, action=action_text) or result_text in {"failed", "error", "degraded", "blocked"}
 
     if bool(meta.get("anchor_only")) or action_text == "audit_anchor" or "audit_anchor" in action_text:
         memory_class = MEMORY_CLASS_AUDIT_ANCHOR
@@ -586,42 +712,70 @@ def _classify_life_memory_policy(
         decay_profile = DECAY_EPHEMERAL
         active_recall_default = False
         reason_codes.append("audit_anchor_only")
-    elif truth in {TRUTH_CORRECTED, TRUTH_SUPPRESSED} or _looks_like_explicit_correction_event(summary_text):
+    elif truth in {TRUTH_CORRECTED, TRUTH_SUPPRESSED}:
+        memory_class = MEMORY_CLASS_CORRECTION
+        recall_grain = RECALL_GRAIN_AUDIT
+        decay_profile = DECAY_SLOW
+        active_recall_default = False
+        semantic_candidate = False
+        sleep_replay_candidate = False
+        reason_codes.append("corrected_or_suppressed_source")
+    elif _looks_like_explicit_correction_event(summary_text):
         memory_class = MEMORY_CLASS_CORRECTION
         recall_grain = RECALL_GRAIN_EPISODE
         decay_profile = DECAY_SLOW
         semantic_candidate = True
         sleep_replay_candidate = True
         reason_codes.append("correction_or_suppression")
-    elif _semantic_is_user_preference(compact):
-        memory_class = MEMORY_CLASS_PREFERENCE
+    elif not lookup_echo and _semantic_is_relationship_feedback(compact):
+        memory_class = MEMORY_CLASS_RELATIONSHIP_FEEDBACK
         recall_grain = RECALL_GRAIN_SEMANTIC
         decay_profile = DECAY_STABLE
         semantic_candidate = True
         sleep_replay_candidate = True
-        reason_codes.append("user_preference")
-    elif _semantic_is_commitment(compact):
-        memory_class = MEMORY_CLASS_COMMITMENT
-        recall_grain = RECALL_GRAIN_SEMANTIC
-        decay_profile = DECAY_STABLE
-        semantic_candidate = True
-        sleep_replay_candidate = True
-        reason_codes.append("commitment_or_open_loop")
-    elif _semantic_is_self_change(compact, action=action_text):
-        memory_class = MEMORY_CLASS_SELF_CHANGE
-        recall_grain = RECALL_GRAIN_SEMANTIC
-        decay_profile = DECAY_STABLE
-        semantic_candidate = True
-        sleep_replay_candidate = True
-        reason_codes.append("self_change")
-    elif _semantic_is_failure_lesson(compact, action=action_text) or result_text in {"failed", "error", "degraded", "blocked"}:
+        reason_codes.append("relationship_or_quality_feedback")
+    elif kind == EPISODE_INNER or source_text in {"inner_world", "inner_stream", "inner_activity"}:
+        memory_class = MEMORY_CLASS_INNER_LIFE
+        recall_grain = RECALL_GRAIN_EPISODE
+        decay_profile = DECAY_FAST
+        semantic_candidate = bool(meta.get("should_distill_to_memory"))
+        sleep_replay_candidate = semantic_candidate
+        reason_codes.append("inner_life")
+    elif kind == EPISODE_REFLECTION or action_text == "memory_compaction":
+        memory_class = MEMORY_CLASS_REFLECTION
+        recall_grain = RECALL_GRAIN_EPISODE
+        decay_profile = DECAY_SLOW
+        active_recall_default = True
+        reason_codes.append("reflection_or_compaction")
+    elif not lookup_echo and failure_like:
         memory_class = MEMORY_CLASS_FAILURE_LESSON
         recall_grain = RECALL_GRAIN_SEMANTIC
         decay_profile = DECAY_SLOW
         semantic_candidate = True
         sleep_replay_candidate = True
         reason_codes.append("failure_lesson")
-    elif _semantic_is_stable_fact(compact):
+    elif not lookup_echo and _semantic_is_commitment(compact):
+        memory_class = MEMORY_CLASS_COMMITMENT
+        recall_grain = RECALL_GRAIN_SEMANTIC
+        decay_profile = DECAY_STABLE
+        semantic_candidate = True
+        sleep_replay_candidate = True
+        reason_codes.append("commitment_or_open_loop")
+    elif not lookup_echo and _semantic_is_self_change(compact, action=action_text):
+        memory_class = MEMORY_CLASS_SELF_CHANGE
+        recall_grain = RECALL_GRAIN_SEMANTIC
+        decay_profile = DECAY_STABLE
+        semantic_candidate = True
+        sleep_replay_candidate = True
+        reason_codes.append("self_change")
+    elif not lookup_echo and _semantic_is_user_preference(compact):
+        memory_class = MEMORY_CLASS_PREFERENCE
+        recall_grain = RECALL_GRAIN_SEMANTIC
+        decay_profile = DECAY_STABLE
+        semantic_candidate = True
+        sleep_replay_candidate = True
+        reason_codes.append("user_preference")
+    elif not lookup_echo and _semantic_is_stable_fact(compact):
         memory_class = MEMORY_CLASS_STABLE_FACT
         recall_grain = RECALL_GRAIN_SEMANTIC
         decay_profile = DECAY_STABLE
@@ -639,13 +793,6 @@ def _classify_life_memory_policy(
         decay_profile = DECAY_SLOW
         active_recall_default = True
         reason_codes.append("collection_event")
-    elif kind == EPISODE_INNER or source_text in {"inner_world", "inner_stream", "inner_activity"}:
-        memory_class = MEMORY_CLASS_INNER_LIFE
-        recall_grain = RECALL_GRAIN_EPISODE
-        decay_profile = DECAY_FAST
-        semantic_candidate = bool(meta.get("should_distill_to_memory"))
-        sleep_replay_candidate = semantic_candidate
-        reason_codes.append("inner_life")
     elif kind in {EPISODE_ACTION, EPISODE_BACKGROUND} or source_text in {"skill", "tool", "browser", "mcp", "sandbox", "scheduler", "codex_production"}:
         memory_class = MEMORY_CLASS_TOOL_ACTION
         recall_grain = RECALL_GRAIN_EPISODE
@@ -694,8 +841,10 @@ def _with_memory_policy_metadata(
     if not isinstance(existing_policy, Mapping):
         existing_policy = {}
     payload["memory_policy"] = {**dict(existing_policy), **policy_payload}
-    payload.setdefault("memory_class", policy_payload.get("memory_class"))
-    payload.setdefault("recall_grain", policy_payload.get("recall_grain"))
+    if _clean_text(policy_payload.get("memory_class")):
+        payload["memory_class"] = policy_payload.get("memory_class")
+    if _clean_text(policy_payload.get("recall_grain")):
+        payload["recall_grain"] = policy_payload.get("recall_grain")
     if not _clean_text(explicit_decay_profile_id) and not _clean_text(payload.get("decay_profile_id")):
         payload["decay_profile_id"] = _clean_text(policy_payload.get("decay_profile_id")) or DECAY_NORMAL
     return payload
@@ -1095,6 +1244,173 @@ class LifeMemoryStore:
             "source_ref": source,
         }
 
+    def upsert_open_loop(
+        self,
+        *,
+        semantic_key: str,
+        episode_id: str,
+        status: str = OPEN_LOOP_OPEN,
+        title: str | None = None,
+        detail: str | None = None,
+        person_id: str | None = None,
+        session_id: str | None = None,
+        source_ref: str | None = None,
+        close_reason: str | None = None,
+        salience: float = 0.0,
+        memory_strength: float = 0.0,
+        ts_ms: int | None = None,
+        metadata: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Track the lifecycle of promises/todos derived from lived episodes."""
+
+        key = _clean_text(semantic_key, limit=300)
+        eid = _clean_text(episode_id)
+        if not key or not eid:
+            raise ValueError("semantic_key and episode_id are required")
+        state = _normalize_open_loop_status(status)
+        created = int(ts_ms if ts_ms is not None else now_ts_ms())
+        open_loop_id = f"ol_{_stable_hash('life_open_loop:v1:' + key, size=28)}"
+        metadata_payload = dict(metadata or {})
+        metadata_payload.setdefault("semantic_key", key)
+        metadata_payload.setdefault("status_source", "life_memory_consolidator")
+        terminal = state in OPEN_LOOP_TERMINAL_STATES
+        with self.ledger._write_lock:
+            with self.ledger._conn:
+                existing = self.ledger._conn.execute(
+                    "SELECT * FROM life_open_loop WHERE semantic_key = ? LIMIT 1",
+                    (key,),
+                ).fetchone()
+                if existing is None:
+                    self.ledger._conn.execute(
+                        """
+                        INSERT INTO life_open_loop (
+                            open_loop_id, semantic_key, episode_id, person_id, session_id,
+                            title, detail, status, source_ref,
+                            opened_ts_ms, updated_ts_ms, closed_ts_ms,
+                            close_episode_id, close_reason,
+                            salience, memory_strength, metadata
+                        )
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            open_loop_id,
+                            key,
+                            eid,
+                            _clean_text(person_id) or None,
+                            _clean_text(session_id) or None,
+                            _clean_text(title, limit=180) or None,
+                            _clean_text(detail, limit=900) or None,
+                            state,
+                            _clean_text(source_ref) or None,
+                            created,
+                            created,
+                            created if terminal else None,
+                            eid if terminal else None,
+                            _clean_text(close_reason, limit=300) or None,
+                            _clamp_unit(salience),
+                            _clamp_unit(memory_strength),
+                            _json_dumps(metadata_payload),
+                        ),
+                    )
+                else:
+                    current = dict(existing)
+                    current_status = _normalize_open_loop_status(current.get("status"))
+                    next_status = state
+                    closed_ts = int(current.get("closed_ts_ms") or 0) or None
+                    close_episode_id = _clean_text(current.get("close_episode_id")) or None
+                    next_close_reason = _clean_text(current.get("close_reason"), limit=300) or None
+                    if terminal:
+                        closed_ts = created
+                        close_episode_id = eid
+                        next_close_reason = _clean_text(close_reason, limit=300) or _open_loop_close_reason_for_status(state)
+                    elif current_status in OPEN_LOOP_TERMINAL_STATES and created <= int(current.get("updated_ts_ms") or 0):
+                        next_status = current_status
+                    else:
+                        closed_ts = None
+                        close_episode_id = None
+                        next_close_reason = None
+                    merged_metadata = _merge_metadata(current.get("metadata"), metadata_payload)
+                    self.ledger._conn.execute(
+                        """
+                        UPDATE life_open_loop
+                        SET
+                            episode_id = COALESCE(NULLIF(?, ''), episode_id),
+                            person_id = COALESCE(?, person_id),
+                            session_id = COALESCE(?, session_id),
+                            title = COALESCE(?, title),
+                            detail = COALESCE(?, detail),
+                            status = ?,
+                            source_ref = COALESCE(?, source_ref),
+                            updated_ts_ms = MAX(COALESCE(updated_ts_ms, 0), ?),
+                            closed_ts_ms = ?,
+                            close_episode_id = ?,
+                            close_reason = ?,
+                            salience = MAX(COALESCE(salience, 0.0), ?),
+                            memory_strength = MAX(COALESCE(memory_strength, 0.0), ?),
+                            metadata = ?
+                        WHERE semantic_key = ?
+                        """,
+                        (
+                            eid,
+                            _clean_text(person_id) or None,
+                            _clean_text(session_id) or None,
+                            _clean_text(title, limit=180) or None,
+                            _clean_text(detail, limit=900) or None,
+                            next_status,
+                            _clean_text(source_ref) or None,
+                            created,
+                            closed_ts,
+                            close_episode_id,
+                            next_close_reason,
+                            _clamp_unit(salience),
+                            _clamp_unit(memory_strength),
+                            _json_dumps(merged_metadata),
+                            key,
+                        ),
+                    )
+        return {
+            "status": "OK",
+            "open_loop_id": open_loop_id,
+            "semantic_key": key,
+            "open_loop_status": state,
+            "episode_id": eid,
+        }
+
+    def list_open_loops(
+        self,
+        *,
+        status: str | None = OPEN_LOOP_OPEN,
+        person_id: str | None = None,
+        session_id: str | None = None,
+        limit: int = 20,
+    ) -> list[dict[str, Any]]:
+        clauses: list[str] = []
+        params: list[Any] = []
+        state = _clean_text(status).upper()
+        if state:
+            clauses.append("status = ?")
+            params.append(state)
+        person = _clean_text(person_id)
+        if person:
+            clauses.append("person_id = ?")
+            params.append(person)
+        session = _clean_text(session_id)
+        if session:
+            clauses.append("session_id = ?")
+            params.append(session)
+        where = "WHERE " + " AND ".join(clauses) if clauses else ""
+        rows = self.ledger._conn.execute(
+            f"""
+            SELECT *
+            FROM life_open_loop
+            {where}
+            ORDER BY memory_strength DESC, updated_ts_ms DESC
+            LIMIT ?
+            """,
+            (*params, max(1, int(limit))),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
     def upsert_collection(
         self,
         *,
@@ -1222,6 +1538,19 @@ class LifeMemoryStore:
             return {"status": "SKIPPED", "reason_code": "EMPTY_COLLECTION_OR_EPISODE"}
         created = int(ts_ms if ts_ms is not None else now_ts_ms())
         item_id = f"coli_{_stable_hash('life_collection_item:v1:' + cid + ':' + key, size=32)}"
+        metadata_payload = dict(metadata or {})
+        canonical_title = _collection_item_resolved_canonical_title(
+            {
+                **metadata_payload,
+                "title": metadata_payload.get("title") or item_title,
+                "item_title": item_title,
+            }
+        )
+        canonical_key = _collection_item_canonical_key(canonical_title or item_title)
+        if canonical_title:
+            metadata_payload.setdefault("canonical_title", canonical_title)
+        if canonical_key:
+            metadata_payload.setdefault("canonical_key", canonical_key)
         with self.ledger._write_lock:
             with self.ledger._conn:
                 self.ledger._conn.execute(
@@ -1251,7 +1580,7 @@ class LifeMemoryStore:
                         _clean_text(evidence_ref) or None,
                         max(0, int(position or 0)),
                         created,
-                        _json_dumps(dict(metadata or {})),
+                        _json_dumps(metadata_payload),
                     ),
                 )
                 self._prune_collection_items_for_scope_locked(collection_id=cid)
@@ -1267,7 +1596,7 @@ class LifeMemoryStore:
             evidence_ref=evidence_ref,
             position=position,
             ts_ms=created,
-            metadata=metadata,
+            metadata=metadata_payload,
         )
         return {
             "status": "OK",
@@ -1421,6 +1750,245 @@ class LifeMemoryStore:
                 self._refresh_entity_mention_count_locked(entity_id=eid)
         return {"status": "OK", "entity_id": eid, "mention_id": mention_id}
 
+    def attach_collection_item_review_evidence(
+        self,
+        *,
+        review_episode_id: str,
+        reviewed_items: Sequence[Mapping[str, Any]],
+        review_ref: str | None = None,
+        fact: str | None = None,
+        ts_ms: int | None = None,
+    ) -> dict[str, Any]:
+        review_eid = _clean_text(review_episode_id)
+        if not review_eid:
+            return {"status": "SKIPPED", "reason_code": "EMPTY_REVIEW_EPISODE_ID"}
+        created = int(ts_ms if ts_ms is not None else now_ts_ms())
+        evidence_ref = _clean_text(review_ref) or f"life_episode://{review_eid}"
+        updated_count = 0
+        mention_count = 0
+        skipped_count = 0
+        for raw_item in list(reviewed_items or []):
+            if not isinstance(raw_item, Mapping):
+                skipped_count += 1
+                continue
+            item = dict(raw_item)
+            collection_item_id = _clean_text(item.get("collection_item_id"))
+            if not collection_item_id:
+                skipped_count += 1
+                continue
+            row = self.ledger._conn.execute(
+                "SELECT * FROM life_memory_collection_item WHERE collection_item_id = ?",
+                (collection_item_id,),
+            ).fetchone()
+            if row is None:
+                skipped_count += 1
+                continue
+            row_dict = dict(row)
+            review_meta = _collection_item_review_evidence_metadata(
+                item,
+                review_episode_id=review_eid,
+                review_ref=evidence_ref,
+                fact=fact,
+                ts_ms=created,
+            )
+            if not review_meta:
+                skipped_count += 1
+                continue
+            collection_id = _clean_text(row_dict.get("collection_id"))
+            position = _coerce_int(row_dict.get("position"))
+            source_ref = _clean_text(item.get("detail_url") or row_dict.get("source_ref"))
+            with self.ledger._write_lock:
+                with self.ledger._conn:
+                    merged_meta = _merge_metadata(row_dict.get("metadata"), review_meta)
+                    self.ledger._conn.execute(
+                        """
+                        UPDATE life_memory_collection_item
+                        SET
+                            evidence_ref = COALESCE(NULLIF(?, ''), evidence_ref),
+                            metadata = ?
+                        WHERE collection_item_id = ?
+                        """,
+                        (
+                            evidence_ref,
+                            _json_dumps(merged_meta),
+                            collection_item_id,
+                        ),
+                    )
+                    if collection_id:
+                        self.ledger._conn.execute(
+                            """
+                            UPDATE life_memory_collection
+                            SET
+                                memory_strength = MAX(COALESCE(memory_strength, 0.0), ?),
+                                retention_state = CASE
+                                    WHEN COALESCE(retention_state, '') = ? THEN ?
+                                    ELSE retention_state
+                                END,
+                                updated_ts_ms = MAX(COALESCE(updated_ts_ms, 0), ?)
+                            WHERE collection_id = ?
+                            """,
+                            (0.58, RETENTION_COLD, RETENTION_WARM, created, collection_id),
+                        )
+                    mention_rows = self.ledger._conn.execute(
+                        """
+                        SELECT DISTINCT entity_id
+                        FROM life_memory_entity_mention
+                        WHERE collection_item_id = ?
+                        """,
+                        (collection_item_id,),
+                    ).fetchall()
+            updated_count += 1
+            for mention_row in mention_rows:
+                entity_id = _clean_text(mention_row["entity_id"])
+                if not entity_id:
+                    continue
+                result = self.attach_entity_mention(
+                    entity_id=entity_id,
+                    episode_id=review_eid,
+                    collection_id=collection_id,
+                    collection_item_id=collection_item_id,
+                    source_ref=source_ref or evidence_ref,
+                    evidence_ref=evidence_ref,
+                    position=position,
+                    ts_ms=created,
+                    metadata={
+                        **review_meta,
+                        "memory_layer": "life_memory_entity_mention",
+                        "mention_kind": "lightnovel_deep_review",
+                    },
+                )
+                if result.get("status") == "OK":
+                    mention_count += 1
+        return {
+            "status": "OK",
+            "review_episode_id": review_eid,
+            "updated_count": updated_count,
+            "mention_count": mention_count,
+            "skipped_count": skipped_count,
+        }
+
+    def backfill_collection_item_canonical_index(
+        self,
+        *,
+        limit: int = 1000,
+        dry_run: bool = True,
+        include_non_lightnovel: bool = False,
+        ts_ms: int | None = None,
+    ) -> dict[str, Any]:
+        """Backfill canonical item metadata and canonical entity mentions for collection items."""
+
+        current = int(ts_ms if ts_ms is not None else now_ts_ms())
+        rows = self.ledger._conn.execute(
+            """
+            SELECT
+                i.*,
+                c.domain AS collection_domain,
+                c.scope_key AS collection_scope_key
+            FROM life_memory_collection_item i
+            JOIN life_memory_collection c ON c.collection_id = i.collection_id
+            WHERE COALESCE(c.retention_state, ?) != ?
+            ORDER BY i.created_ts_ms ASC, i.position ASC, i.item_title ASC
+            LIMIT ?
+            """,
+            (RETENTION_WARM, RETENTION_GONE, max(1, int(limit))),
+        ).fetchall()
+        planned: list[dict[str, Any]] = []
+        updated_metadata_count = 0
+        indexed_count = 0
+        for row in rows:
+            item = dict(row)
+            domain = _clean_text(item.get("collection_domain"))
+            if not include_non_lightnovel and domain != DOMAIN_LIGHTNOVEL_RECOMMENDATION:
+                continue
+            metadata = _json_loads(item.get("metadata"), fallback={})
+            if not isinstance(metadata, dict):
+                metadata = {}
+            item_title = _clean_text(item.get("item_title"), limit=300)
+            canonical_title = _collection_item_resolved_canonical_title(
+                {**metadata, "item_title": item_title, "title": item_title}
+            )
+            canonical_key = _collection_item_canonical_key(canonical_title) or _clean_text(metadata.get("canonical_key"))
+            if not canonical_title or not canonical_key:
+                continue
+            normalized_key = f"title:{canonical_key}" if domain == DOMAIN_LIGHTNOVEL_RECOMMENDATION else _entity_key_from_item(
+                title=canonical_title,
+                source_ref=item.get("source_ref"),
+            )
+            entity_kind = ENTITY_KIND_BOOK if domain == DOMAIN_LIGHTNOVEL_RECOMMENDATION else ENTITY_KIND_ITEM
+            entity_id = _entity_id(entity_kind=entity_kind, domain=domain, normalized_key=normalized_key)
+            metadata_changed = (
+                _clean_text(metadata.get("canonical_title"), limit=300) != canonical_title
+                or _clean_text(metadata.get("canonical_key")) != canonical_key
+            )
+            delivery_scope = _clean_text(item.get("collection_scope_key")).startswith(f"{COLLECTION_SCOPE_DELIVERY}:")
+            mention_exists = False
+            if delivery_scope:
+                mention_exists = self.ledger._conn.execute(
+                    """
+                    SELECT 1
+                    FROM life_memory_entity_mention
+                    WHERE entity_id = ?
+                      AND collection_item_id = ?
+                    LIMIT 1
+                    """,
+                    (entity_id, item.get("collection_item_id")),
+                ).fetchone() is not None
+            if not metadata_changed and (not delivery_scope or mention_exists):
+                continue
+            payload = {
+                "collection_item_id": item.get("collection_item_id"),
+                "collection_id": item.get("collection_id"),
+                "episode_id": item.get("episode_id"),
+                "item_title": item_title,
+                "canonical_title": canonical_title,
+                "canonical_key": canonical_key,
+                "entity_id": entity_id,
+                "metadata_changed": metadata_changed,
+                "entity_mention_missing": bool(delivery_scope and not mention_exists),
+                "scope_key": item.get("collection_scope_key"),
+            }
+            planned.append(payload)
+            if dry_run:
+                continue
+            merged_metadata = {**metadata, "canonical_title": canonical_title, "canonical_key": canonical_key}
+            if metadata_changed:
+                with self.ledger._write_lock:
+                    with self.ledger._conn:
+                        self.ledger._conn.execute(
+                            """
+                            UPDATE life_memory_collection_item
+                            SET metadata = ?
+                            WHERE collection_item_id = ?
+                            """,
+                            (_json_dumps(merged_metadata), item.get("collection_item_id")),
+                        )
+                updated_metadata_count += 1
+            if delivery_scope and not mention_exists:
+                result = self._index_entity_for_collection_item(
+                    collection_id=str(item.get("collection_id") or ""),
+                    collection_item_id=str(item.get("collection_item_id") or ""),
+                    episode_id=str(item.get("episode_id") or ""),
+                    item_key=str(item.get("item_key") or ""),
+                    item_title=item_title,
+                    item_summary=item.get("item_summary"),
+                    source_ref=item.get("source_ref"),
+                    evidence_ref=item.get("evidence_ref"),
+                    position=int(item.get("position") or 0),
+                    ts_ms=current,
+                    metadata=merged_metadata,
+                )
+                if result.get("status") == "OK":
+                    indexed_count += 1
+        return {
+            "status": "OK",
+            "dry_run": bool(dry_run),
+            "scanned_count": len(rows),
+            "planned_count": len(planned),
+            "updated_metadata_count": updated_metadata_count,
+            "indexed_count": indexed_count,
+            "samples": planned[:10],
+        }
+
     def index_episode_collections(self, *, episode_id: str, ts_ms: int | None = None) -> dict[str, Any]:
         eid = _clean_text(episode_id)
         if not eid:
@@ -1534,9 +2102,13 @@ class LifeMemoryStore:
         current = int(now_ts_ms_value if now_ts_ms_value is not None else now_ts_ms())
         scoped_person_id = _clean_text(person_id)
         scoped_session_id = _clean_text(session_id)
+        allow_synthetic_recall = _allow_synthetic_life_recall_for_scope(
+            person_id=scoped_person_id,
+            session_id=scoped_session_id,
+        )
         rows = self._fetch_collection_rows_for_plan(
             plan=plan,
-            person_id=scoped_person_id,
+            person_id=None if allow_synthetic_recall else scoped_person_id,
             session_id=scoped_session_id,
             now_ts_ms_value=current,
             limit=max(12, int(top_k) * 6),
@@ -1550,7 +2122,33 @@ class LifeMemoryStore:
             metadata = _json_loads(collection.get("metadata"), fallback={})
             if not isinstance(metadata, dict):
                 metadata = {}
+            if (
+                allow_synthetic_recall
+                and scoped_session_id
+                and _clean_text(collection.get("session_id")) != scoped_session_id
+            ):
+                continue
+            synthetic_record = _is_synthetic_life_record(collection, metadata)
+            if synthetic_record:
+                if not allow_synthetic_recall:
+                    continue
             items = self._list_collection_items(collection_id=collection_id, limit=24)
+            if not allow_synthetic_recall:
+                items = [item for item in items if not _collection_item_is_synthetic(item)]
+            source_episode_id_order = [
+                _clean_text(item.get("episode_id"))
+                for item in items
+                if _clean_text(item.get("episode_id"))
+            ]
+            trusted_episode_ids = _trusted_active_episode_ids(
+                self,
+                source_episode_id_order,
+                allow_synthetic=allow_synthetic_recall,
+            )
+            if source_episode_id_order:
+                items = [item for item in items if _clean_text(item.get("episode_id")) in trusted_episode_ids]
+            if not items:
+                continue
             text_for_score = "\n".join(
                 part
                 for part in (
@@ -1602,7 +2200,7 @@ class LifeMemoryStore:
                             "person_id": collection.get("person_id"),
                             "session_id": collection.get("session_id"),
                             "title": collection.get("title"),
-                            "item_count": int(collection.get("item_count") or len(items)),
+                            "item_count": len(items),
                             "items": [dict(item) for item in items],
                             "collection_metadata": metadata,
                             "created_ts_ms": int(collection.get("created_ts_ms") or 0),
@@ -1656,6 +2254,16 @@ class LifeMemoryStore:
         plan = plan_life_memory_query(normalized_query)
         current = int(now_ts_ms_value if now_ts_ms_value is not None else now_ts_ms())
         domains = set(str(item or "").strip() for item in getattr(plan, "target_domains", ()) if str(item or "").strip())
+        scoped_entity_mention_keys = {
+            _clean_text(item)
+            for item in _scope_keys_for_collection_plan(plan=plan, now_ts_ms_value=current)
+            if _clean_text(item)
+        }
+        scoped_entity_mention_days = {
+            key.split(":", 1)[1]
+            for key in scoped_entity_mention_keys
+            if key.startswith(f"{COLLECTION_SCOPE_DAILY}:") and len(key.split(":", 1)) == 2
+        }
         if DOMAIN_LIGHTNOVEL_RECOMMENDATION in domains:
             domains.add(DOMAIN_RECOMMENDATION)
         if DOMAIN_RECOMMENDATION in domains:
@@ -1692,6 +2300,14 @@ class LifeMemoryStore:
                 session_id=session_id,
                 limit=8,
             )
+            if scoped_entity_mention_days:
+                mention_rows = [
+                    item
+                    for item in mention_rows
+                    if _entity_mention_matches_daily_scope(item, target_days=scoped_entity_mention_days)
+                ]
+                if not mention_rows:
+                    continue
             text_for_score = " ".join(
                 str(part or "")
                 for part in (
@@ -1717,10 +2333,15 @@ class LifeMemoryStore:
             )
             strength = _clamp_unit(entity.get("memory_strength"), default=_clamp_unit(entity.get("salience"), default=0.35))
             mention_count = int(entity.get("mention_count") or len(mention_rows))
+            scoped_mention_count = len(mention_rows)
+            display_name = _clean_text(
+                (mention_rows[0].get("item_title") if mention_rows else "") or entity.get("canonical_name"),
+                limit=160,
+            )
             final_score = round(max(0.0, min(1.0, boosted_score + min(0.12, mention_count * 0.015) + strength * 0.08)), 6)
             mention_lines = [_entity_mention_recall_line(item) for item in mention_rows[:5]]
             text = _truncate_text_for_recall(
-                f"实体记忆：{entity.get('canonical_name')}；出现 {mention_count} 次；"
+                f"实体记忆：{display_name or entity.get('canonical_name')}；出现 {scoped_mention_count or mention_count} 次；"
                 f"最近证据：{'；'.join(line for line in mention_lines if line)}",
                 limit=900,
             )
@@ -2006,6 +2627,100 @@ class LifeMemoryStore:
                 payload={"observations": observations},
                 trust_level=TRUTH_VERIFIED if observations else TRUTH_CANDIDATE,
                 ts_ms=created + 2,
+            )
+        return {
+            "status": "OK",
+            "episode_id": episode_id,
+            "episode_kind": EPISODE_CHAT,
+            "evidence_refs": refs,
+        }
+
+    def write_owner_directive_episode(
+        self,
+        *,
+        request_id: str,
+        directive_text: str,
+        person_id: str | None = "owner",
+        session_id: str | None = "codex_operator",
+        directive_kind: str | None = None,
+        applied_result: str | None = None,
+        ts_ms: int | None = None,
+        metadata: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Persist owner control-plane directives as lived evidence.
+
+        This is for real owner instructions that arrive outside the normal chat
+        surface, such as Codex/operator control threads. It creates an episode
+        anchor first; semantic memory is still derived later through the normal
+        consolidator and evidence gates.
+        """
+
+        text = _clean_text(directive_text, limit=2000)
+        if not text:
+            raise ValueError("directive_text is required")
+        req = _clean_text(request_id) or f"owner-directive-{uuid.uuid4().hex}"
+        created = int(ts_ms if ts_ms is not None else now_ts_ms())
+        kind = _clean_text(directive_kind) or "owner_directive"
+        person = _clean_text(person_id) or "owner"
+        session = _clean_text(session_id) or "codex_operator"
+        refs = [
+            f"chat://request/{req}",
+            f"action://event/{req}",
+            f"owner://directive/{req}",
+            f"chat://session/{session}",
+            f"chat://person/{person}",
+        ]
+        meta = {
+            **dict(metadata or {}),
+            "event_source": "owner_directive",
+            "owner_directive": True,
+            "directive_kind": kind,
+            "user_importance": max(_metadata_float(metadata, "user_importance", default=0.0), 0.72),
+            "memory_layer": "life_episode",
+            "evidence_refs": refs,
+        }
+        result_text = _clean_text(applied_result, limit=800)
+        summary_parts = [f"Owner directive: {text}"]
+        if result_text:
+            summary_parts.append(f"Applied result: {result_text}")
+        episode = self.upsert_episode(
+            episode_kind=EPISODE_CHAT,
+            evidence_refs=refs,
+            thread_id=f"owner://thread/{session}",
+            person_id=person,
+            session_id=session,
+            actor_id="owner",
+            intent=kind,
+            action="owner_directive",
+            result="directive_recorded",
+            primary_ref=f"owner://directive/{req}",
+            summary="\n".join(summary_parts),
+            salience=max(_metadata_float(metadata, "salience", default=0.0), 0.82),
+            truth_state=TRUTH_VERIFIED,
+            ts_ms=created,
+            metadata=meta,
+        )
+        episode_id = str(episode["episode_id"])
+        self.attach_evidence(
+            episode_id=episode_id,
+            evidence_kind=EVIDENCE_USER_TEXT,
+            source_ref=f"chat://request/{req}#owner",
+            request_id=req,
+            content=text,
+            payload={"person_id": person, "session_id": session, "directive_kind": kind},
+            trust_level=TRUTH_VERIFIED,
+            ts_ms=created,
+        )
+        if result_text:
+            self.attach_evidence(
+                episode_id=episode_id,
+                evidence_kind=EVIDENCE_TOOL_RESULT,
+                source_ref=f"action://event/{req}#applied_result",
+                request_id=req,
+                content=result_text,
+                payload={"person_id": person, "session_id": session, "directive_kind": kind},
+                trust_level=TRUTH_VERIFIED,
+                ts_ms=created + 1,
             )
         return {
             "status": "OK",
@@ -2313,6 +3028,7 @@ class LifeMemoryStore:
             result_text = _clean_text(episode.get("result")).upper()
             contract_boost = 0.0
             query_kind = _clean_text(getattr(query_plan, "query_kind", "")).lower()
+            query_wants_relationship_feedback = _preference_query_wants_relationship_feedback(normalized_query)
             failure_record = _looks_like_recorded_failure_candidate(
                 episode_kind=episode_kind,
                 action_text=action_text,
@@ -2322,6 +3038,7 @@ class LifeMemoryStore:
             correction_fact = _looks_like_correction_fact_candidate(text_for_score)
             correction_echo = _looks_like_correction_question_echo(text_for_score)
             preference_fact = _looks_like_preference_candidate(text_for_score)
+            lookup_question_echo = _semantic_statement_is_lookup_question(text_for_score)
             generic_evidence_absence = _looks_like_absence_or_generic_evidence_answer(text_for_score)
             substantive_evidence = _looks_like_substantive_evidence_candidate(
                 memory_class=memory_class,
@@ -2334,12 +3051,26 @@ class LifeMemoryStore:
                 elif query_kind == "correction":
                     contract_boost += 0.95 if correction_fact and not correction_echo else -0.65
                 elif query_kind == "preference_lookup":
-                    contract_boost += 0.95 if preference_fact else 0.45
+                    if (
+                        memory_class == MEMORY_CLASS_RELATIONSHIP_FEEDBACK
+                        and query_wants_relationship_feedback
+                        and _semantic_is_relationship_feedback(text_for_score)
+                    ):
+                        contract_boost += 0.85
+                    else:
+                        contract_boost += 0.95 if preference_fact else 0.45
                 elif query_kind == "evidence_review":
                     if generic_evidence_absence or memory_class == MEMORY_CLASS_AUDIT_ANCHOR or not substantive_evidence:
                         contract_boost -= 0.65
                     else:
                         contract_boost += 0.75
+                elif query_kind == "open_loop":
+                    wants_closed = _query_wants_closed_open_loop(normalized_query)
+                    commitment_status = _semantic_commitment_status(re.sub(r"\s+", "", text_for_score).lower())
+                    if wants_closed:
+                        contract_boost += 0.85 if commitment_status in OPEN_LOOP_TERMINAL_STATES else -0.35
+                    else:
+                        contract_boost += 0.85 if commitment_status == OPEN_LOOP_OPEN else -0.55
                 else:
                     contract_boost += 0.65
             if target_domains and episode_domains.intersection(target_domains):
@@ -2364,13 +3095,24 @@ class LifeMemoryStore:
                 if memory_class != MEMORY_CLASS_CORRECTION:
                     contract_boost -= 0.20
             elif query_kind == "preference_lookup":
-                if memory_class == MEMORY_CLASS_PREFERENCE and preference_fact:
+                if memory_class == MEMORY_CLASS_RELATIONSHIP_FEEDBACK and _semantic_is_relationship_feedback(text_for_score):
+                    if not query_wants_relationship_feedback:
+                        contract_boost -= 0.75
+                    else:
+                        contract_boost += 0.35
+                elif memory_class == MEMORY_CLASS_PREFERENCE and preference_fact:
                     contract_boost += 0.35
                 elif memory_class == MEMORY_CLASS_PREFERENCE:
                     contract_boost -= 0.45
                 elif memory_class in {MEMORY_CLASS_COLLECTION_EVENT, MEMORY_CLASS_TOOL_ACTION, MEMORY_CLASS_CHAT_EXPERIENCE}:
                     contract_boost -= 0.65
-                if not preference_fact:
+                if lookup_question_echo:
+                    contract_boost -= 0.85
+                if not preference_fact and not (
+                    memory_class == MEMORY_CLASS_RELATIONSHIP_FEEDBACK
+                    and query_wants_relationship_feedback
+                    and _semantic_is_relationship_feedback(text_for_score)
+                ):
                     contract_boost -= 0.35
             elif query_kind == "evidence_review":
                 if memory_class in {MEMORY_CLASS_STABLE_FACT, MEMORY_CLASS_PERCEPTION_EVIDENCE, MEMORY_CLASS_TOOL_ACTION} and substantive_evidence:
@@ -2379,7 +3121,17 @@ class LifeMemoryStore:
                     contract_boost -= 0.80
                 if target_domains and not episode_domains.intersection(target_domains):
                     contract_boost -= 0.35
-            if query_kind in {"failure_debug", "correction", "preference_lookup", "self_change", "evidence_review"}:
+            elif query_kind == "open_loop":
+                if memory_class == MEMORY_CLASS_COMMITMENT:
+                    wants_closed = _query_wants_closed_open_loop(normalized_query)
+                    commitment_status = _semantic_commitment_status(re.sub(r"\s+", "", text_for_score).lower())
+                    if wants_closed:
+                        contract_boost += 0.30 if commitment_status in OPEN_LOOP_TERMINAL_STATES else -0.25
+                    else:
+                        contract_boost += 0.30 if commitment_status == OPEN_LOOP_OPEN else -0.45
+                else:
+                    contract_boost -= 0.45
+            if query_kind in {"failure_debug", "correction", "preference_lookup", "open_loop", "self_change", "evidence_review"}:
                 if memory_class == MEMORY_CLASS_CHAT_EXPERIENCE:
                     contract_boost -= 0.35
                 if query_kind == "failure_debug" and episode_kind == EPISODE_CHAT:
@@ -2675,6 +3427,7 @@ class LifeMemoryStore:
         updates: list[tuple[float, str, str | None, str]] = []
         counts = {RETENTION_HOT: 0, RETENTION_WARM: 0, RETENTION_COLD: 0, RETENTION_GONE: 0}
         semantic_reference_protected = 0
+        gone_reason_backfilled = 0
         for row in rows:
             episode = dict(row)
             eid = str(episode.get("episode_id") or "").strip()
@@ -2724,12 +3477,25 @@ class LifeMemoryStore:
                         """,
                         updates,
                     )
+        with self.ledger._write_lock:
+            with self.ledger._conn:
+                cursor = self.ledger._conn.execute(
+                    """
+                    UPDATE life_episode
+                    SET forget_reason = ?
+                    WHERE COALESCE(retention_state, '') = ?
+                      AND (forget_reason IS NULL OR TRIM(forget_reason) = '')
+                    """,
+                    ("historical_low_value_retired", RETENTION_GONE),
+                )
+                gone_reason_backfilled = int(cursor.rowcount or 0)
         return {
             "status": "OK",
             "scanned": len(rows),
             "updated": len(updates),
             "counts": counts,
             "semantic_reference_protected": semantic_reference_protected,
+            "gone_reason_backfilled": gone_reason_backfilled,
         }
 
     def backfill_memory_policy(
@@ -2737,6 +3503,8 @@ class LifeMemoryStore:
         *,
         batch_limit: int = 5000,
         include_existing: bool = False,
+        dry_run: bool = False,
+        sample_limit: int = 25,
     ) -> dict[str, Any]:
         """Backfill management policy metadata for historical episodes."""
 
@@ -2755,8 +3523,12 @@ class LifeMemoryStore:
             (1 if include_existing else 0, max(1, int(batch_limit))),
         ).fetchall()
         updates: list[tuple[str, str, str]] = []
+        changes: list[dict[str, Any]] = []
         skipped_existing = 0
         class_counts: dict[str, int] = {}
+        transition_counts: dict[str, int] = {}
+        semantic_transition_counts: dict[str, int] = {}
+        synthetic_change_count = 0
         for row in rows:
             episode = dict(row)
             episode_id = _clean_text(episode.get("episode_id"))
@@ -2769,6 +3541,14 @@ class LifeMemoryStore:
             if isinstance(existing_policy, Mapping) and existing_policy.get("schema") and not include_existing:
                 skipped_existing += 1
                 continue
+            existing_policy_map = dict(existing_policy) if isinstance(existing_policy, Mapping) else {}
+            old_memory_class = _clean_text(
+                metadata.get("memory_class") or existing_policy_map.get("memory_class") or "unknown"
+            )
+            old_recall_grain = _clean_text(
+                metadata.get("recall_grain") or existing_policy_map.get("recall_grain") or "unknown"
+            )
+            old_semantic_candidate = bool(existing_policy_map.get("semantic_candidate"))
             evidence_refs = list(metadata.get("evidence_refs") or [])
             for ref in str(episode.get("evidence_source_refs") or "").split(","):
                 cleaned = _clean_text(ref)
@@ -2789,10 +3569,40 @@ class LifeMemoryStore:
                 explicit_decay_profile_id=None,
             )
             next_decay = _clean_text(next_metadata.get("decay_profile_id")) or _clean_text(episode.get("decay_profile_id")) or DECAY_NORMAL
-            updates.append((_json_dumps(next_metadata) or "{}", next_decay, episode_id))
             memory_class = _clean_text(policy.get("memory_class")) or "unknown"
             class_counts[memory_class] = class_counts.get(memory_class, 0) + 1
-        if updates:
+            new_recall_grain = _clean_text(policy.get("recall_grain")) or "unknown"
+            new_semantic_candidate = bool(policy.get("semantic_candidate"))
+            old_decay = _clean_text(episode.get("decay_profile_id")) or DECAY_NORMAL
+            metadata_changed = (_json_dumps(next_metadata) or "{}") != (_json_dumps(metadata) or "{}")
+            decay_changed = next_decay != old_decay
+            if not metadata_changed and not decay_changed:
+                continue
+            transition_key = f"{old_memory_class or 'unknown'}->{memory_class}"
+            transition_counts[transition_key] = transition_counts.get(transition_key, 0) + 1
+            semantic_key = f"{str(old_semantic_candidate).lower()}->{str(new_semantic_candidate).lower()}"
+            semantic_transition_counts[semantic_key] = semantic_transition_counts.get(semantic_key, 0) + 1
+            if _is_synthetic_life_record(episode, metadata):
+                synthetic_change_count += 1
+            updates.append((_json_dumps(next_metadata) or "{}", next_decay, episode_id))
+            if len(changes) < max(0, int(sample_limit)):
+                changes.append(
+                    {
+                        "episode_id": episode_id,
+                        "episode_kind": _clean_text(episode.get("episode_kind")),
+                        "action": _clean_text(episode.get("action")),
+                        "old_memory_class": old_memory_class,
+                        "new_memory_class": memory_class,
+                        "old_recall_grain": old_recall_grain,
+                        "new_recall_grain": new_recall_grain,
+                        "old_semantic_candidate": old_semantic_candidate,
+                        "new_semantic_candidate": new_semantic_candidate,
+                        "old_decay_profile_id": old_decay,
+                        "new_decay_profile_id": next_decay,
+                        "summary": _clean_text(episode.get("summary"), limit=240),
+                    }
+                )
+        if updates and not dry_run:
             with self.ledger._write_lock:
                 with self.ledger._conn:
                     self.ledger._conn.executemany(
@@ -2805,10 +3615,17 @@ class LifeMemoryStore:
                     )
         return {
             "status": "OK",
+            "dry_run": bool(dry_run),
             "scanned": len(rows),
-            "updated": len(updates),
+            "updated": 0 if dry_run else len(updates),
+            "would_update": len(updates),
+            "change_count": len(updates),
             "skipped_existing": skipped_existing,
             "class_counts": dict(sorted(class_counts.items())),
+            "transition_counts": dict(sorted(transition_counts.items())),
+            "semantic_transition_counts": dict(sorted(semantic_transition_counts.items())),
+            "synthetic_change_count": synthetic_change_count,
+            "changes": changes,
         }
 
     def _prune_collection_items_for_scope_locked(self, *, collection_id: str) -> None:
@@ -2900,11 +3717,20 @@ class LifeMemoryStore:
             return {"status": "SKIPPED", "reason_code": "EMPTY_ENTITY_ITEM_TITLE"}
         domain = _clean_text(collection["domain"])
         source = _clean_text(source_ref) or _collection_item_source_ref(item_payload)
-        normalized_key = _entity_key_from_item(title=title, source_ref=source)
+        canonical_title = _collection_item_resolved_canonical_title({"title": title, "item_title": title, **item_payload})
+        canonical_key = _collection_item_canonical_key(canonical_title) or _clean_text(item_payload.get("canonical_key"))
+        if canonical_title:
+            item_payload["canonical_title"] = canonical_title
+        if canonical_key:
+            item_payload["canonical_key"] = canonical_key
+        if domain == DOMAIN_LIGHTNOVEL_RECOMMENDATION and canonical_key:
+            normalized_key = f"title:{canonical_key}"
+        else:
+            normalized_key = _entity_key_from_item(title=title, source_ref=source)
         entity_kind = ENTITY_KIND_BOOK if domain == DOMAIN_LIGHTNOVEL_RECOMMENDATION else ENTITY_KIND_ITEM
         entity = self.upsert_entity(
             entity_kind=entity_kind,
-            canonical_name=title,
+            canonical_name=canonical_title or title,
             normalized_key=normalized_key,
             domain=domain,
             salience=0.36,
@@ -2915,6 +3741,8 @@ class LifeMemoryStore:
                 "source_ref": source,
                 "first_item_key": _clean_text(item_key),
                 "domain": domain,
+                "canonical_title": canonical_title or title,
+                "canonical_key": canonical_key,
                 "source_collection_scope": scope_key,
                 "memory_layer": "life_memory_entity",
             },
@@ -3007,9 +3835,42 @@ class LifeMemoryStore:
             base_params.extend(sorted(domains))
         scope_keys = _scope_keys_for_collection_plan(plan=plan, now_ts_ms_value=now_ts_ms_value)
         if scope_keys:
-            placeholders = ", ".join("?" for _ in scope_keys)
-            base_clauses.append(f"COALESCE(scope_key, '') IN ({placeholders})")
-            base_params.extend(scope_keys)
+            exact_count = _plan_requires_exact_collection_count(plan)
+            dated_daily_keys = [
+                key
+                for key in scope_keys
+                if _clean_text(key).startswith(f"{COLLECTION_SCOPE_DAILY}:")
+            ]
+            if exact_count and dated_daily_keys:
+                daily_placeholders = ", ".join("?" for _ in dated_daily_keys)
+                day_ranges: list[tuple[int, int]] = []
+                for key in dated_daily_keys:
+                    day_key = _clean_text(key).split(":", 1)[1]
+                    try:
+                        day_dt = datetime.strptime(day_key, "%Y-%m-%d").replace(tzinfo=_LOCAL_MEMORY_TZ)
+                    except ValueError:
+                        continue
+                    start_ms = int(day_dt.timestamp() * 1000)
+                    end_ms = int((day_dt + timedelta(days=1)).timestamp() * 1000)
+                    day_ranges.append((start_ms, end_ms))
+                if day_ranges:
+                    range_clauses: list[str] = []
+                    range_params: list[Any] = []
+                    for start_ms, end_ms in day_ranges:
+                        range_clauses.append("(COALESCE(scope_key, '') LIKE ? AND COALESCE(created_ts_ms, 0) >= ? AND COALESCE(created_ts_ms, 0) < ?)")
+                        range_params.extend([f"{COLLECTION_SCOPE_DELIVERY}:%", start_ms, end_ms])
+                    base_clauses.append(
+                        f"(COALESCE(scope_key, '') IN ({daily_placeholders}) OR {' OR '.join(range_clauses)})"
+                    )
+                    base_params.extend([*dated_daily_keys, *range_params])
+                else:
+                    placeholders = ", ".join("?" for _ in scope_keys)
+                    base_clauses.append(f"COALESCE(scope_key, '') IN ({placeholders})")
+                    base_params.extend(scope_keys)
+            else:
+                placeholders = ", ".join("?" for _ in scope_keys)
+                base_clauses.append(f"COALESCE(scope_key, '') IN ({placeholders})")
+                base_params.extend(scope_keys)
         identity_clauses: list[str] = []
         identity_params: list[Any] = []
         if session_id:
@@ -3202,6 +4063,9 @@ class LifeMemoryConsolidator:
         candidates: list[dict[str, Any]] = []
         for row in rows:
             episode = dict(row)
+            metadata = _episode_metadata_dict(episode)
+            if _is_synthetic_life_record(episode, metadata):
+                continue
             summary = _clean_text(episode.get("summary"), limit=1200)
             if not summary:
                 continue
@@ -3217,6 +4081,9 @@ class LifeMemoryConsolidator:
                     "retention_state": episode.get("retention_state"),
                     "source_ref": episode.get("primary_ref"),
                     "truth_state": episode.get("truth_state"),
+                    "person_id": episode.get("person_id"),
+                    "session_id": episode.get("session_id"),
+                    "metadata": metadata,
                 }
             )
         return candidates
@@ -3224,6 +4091,10 @@ class LifeMemoryConsolidator:
     def build_semantic_proposals(self, *, limit: int = 80, max_records: int = 24) -> list[dict[str, Any]]:
         """Extract durable semantic facts from trusted episodes and collections."""
 
+        requested_limit = max(1, int(limit))
+        requested_records = max(1, int(max_records))
+        general_fetch_limit = min(max(requested_limit * 4, requested_records * 10, 120), 2000)
+        priority_fetch_limit = min(max(requested_limit * 12, requested_records * 24, 240), 5000)
         rows = self.store.ledger._conn.execute(
             """
             SELECT *
@@ -3234,10 +4105,51 @@ class LifeMemoryConsolidator:
             ORDER BY memory_strength DESC, salience DESC, last_touched_ts_ms DESC
             LIMIT ?
             """,
-            (TRUTH_VERIFIED, STATUS_ACTIVE, RETENTION_COLD, RETENTION_GONE, max(1, int(limit))),
+            (TRUTH_VERIFIED, STATUS_ACTIVE, RETENTION_COLD, RETENTION_GONE, general_fetch_limit),
+        ).fetchall()
+        memory_class_like_patterns = [
+            pattern
+            for item in _SEMANTIC_PRIORITY_MEMORY_CLASSES
+            for pattern in (f'%"memory_class": "{item}"%', f'%"memory_class":"{item}"%')
+        ]
+        priority_rows = self.store.ledger._conn.execute(
+            f"""
+            SELECT *
+            FROM life_episode
+            WHERE truth_state = ?
+              AND status = ?
+              AND COALESCE(retention_state, ?) != ?
+              AND (
+                metadata LIKE '%"semantic_candidate": true%'
+                OR metadata LIKE '%"semantic_candidate":true%'
+                OR {" OR ".join("metadata LIKE ?" for _ in memory_class_like_patterns)}
+              )
+            ORDER BY last_touched_ts_ms DESC, memory_strength DESC, salience DESC
+            LIMIT ?
+            """,
+            (
+                TRUTH_VERIFIED,
+                STATUS_ACTIVE,
+                RETENTION_COLD,
+                RETENTION_GONE,
+                *memory_class_like_patterns,
+                priority_fetch_limit,
+            ),
         ).fetchall()
         proposals_by_key: dict[str, dict[str, Any]] = {}
-        for row in rows:
+        merged_rows: list[Any] = []
+        seen_episode_ids: set[str] = set()
+        for row in [*priority_rows, *rows]:
+            episode = dict(row)
+            metadata = _episode_metadata_dict(episode)
+            if _is_synthetic_life_record(episode, metadata):
+                continue
+            episode_id = _clean_text(episode.get("episode_id"))
+            if not episode_id or episode_id in seen_episode_ids:
+                continue
+            seen_episode_ids.add(episode_id)
+            merged_rows.append(row)
+        for row in merged_rows:
             episode = dict(row)
             episode_id = _clean_text(episode.get("episode_id"))
             if not episode_id:
@@ -3251,6 +4163,10 @@ class LifeMemoryConsolidator:
                 if existing is None:
                     proposals_by_key[key] = proposal
                     continue
+                if _semantic_proposals_are_same_collection_scope(existing, proposal):
+                    _merge_collection_semantic_proposal(existing, proposal)
+                    continue
+                existing["summary"] = _merge_semantic_summaries(existing.get("summary"), proposal.get("summary"))
                 existing_sources = list(existing.get("source_episode_ids") or [])
                 for source_id in list(proposal.get("source_episode_ids") or []):
                     if source_id not in existing_sources:
@@ -3275,6 +4191,77 @@ class LifeMemoryConsolidator:
             if existing is None:
                 proposals_by_key[key] = proposal
                 continue
+            if _semantic_proposals_are_same_collection_scope(existing, proposal):
+                _merge_collection_semantic_proposal(existing, proposal)
+                continue
+            existing["summary"] = _merge_semantic_summaries(existing.get("summary"), proposal.get("summary"))
+            existing["confidence"] = max(_clamp_unit(existing.get("confidence")), _clamp_unit(proposal.get("confidence")))
+            existing["source_refs"] = list(dict.fromkeys([*list(existing.get("source_refs") or []), *list(proposal.get("source_refs") or [])]))
+            existing["tags"] = list(dict.fromkeys([*list(existing.get("tags") or []), *list(proposal.get("tags") or [])]))
+            existing["source_episode_ids"] = list(
+                dict.fromkeys([*list(existing.get("source_episode_ids") or []), *list(proposal.get("source_episode_ids") or [])])
+            )
+            existing["source_collection_ids"] = list(
+                dict.fromkeys(
+                    [
+                        *list(existing.get("source_collection_ids") or []),
+                        *list(proposal.get("source_collection_ids") or []),
+                    ]
+                )
+            )
+        for proposal in self._build_entity_semantic_proposals(limit=limit):
+            key = _clean_text(proposal.get("semantic_key"))
+            if not key:
+                continue
+            existing = proposals_by_key.get(key)
+            if existing is None:
+                proposals_by_key[key] = proposal
+                continue
+            existing["summary"] = _merge_semantic_summaries(existing.get("summary"), proposal.get("summary"))
+            existing["confidence"] = max(_clamp_unit(existing.get("confidence")), _clamp_unit(proposal.get("confidence")))
+            existing["source_refs"] = list(dict.fromkeys([*list(existing.get("source_refs") or []), *list(proposal.get("source_refs") or [])]))
+            existing["tags"] = list(dict.fromkeys([*list(existing.get("tags") or []), *list(proposal.get("tags") or [])]))
+            existing["source_episode_ids"] = list(
+                dict.fromkeys([*list(existing.get("source_episode_ids") or []), *list(proposal.get("source_episode_ids") or [])])
+            )
+            existing["source_collection_ids"] = list(
+                dict.fromkeys(
+                    [
+                        *list(existing.get("source_collection_ids") or []),
+                        *list(proposal.get("source_collection_ids") or []),
+                    ]
+                )
+            )
+            existing["source_entity_ids"] = list(
+                dict.fromkeys([*list(existing.get("source_entity_ids") or []), *list(proposal.get("source_entity_ids") or [])])
+            )
+        for proposal in self._build_correction_semantic_proposals(limit=limit):
+            key = _clean_text(proposal.get("semantic_key"))
+            if not key:
+                continue
+            existing = proposals_by_key.get(key)
+            if existing is None:
+                proposals_by_key[key] = proposal
+                continue
+            existing["summary"] = _merge_semantic_summaries(existing.get("summary"), proposal.get("summary"))
+            existing["confidence"] = max(_clamp_unit(existing.get("confidence")), _clamp_unit(proposal.get("confidence")))
+            existing["source_refs"] = list(dict.fromkeys([*list(existing.get("source_refs") or []), *list(proposal.get("source_refs") or [])]))
+            existing["tags"] = list(dict.fromkeys([*list(existing.get("tags") or []), *list(proposal.get("tags") or [])]))
+            existing["source_episode_ids"] = list(
+                dict.fromkeys([*list(existing.get("source_episode_ids") or []), *list(proposal.get("source_episode_ids") or [])])
+            )
+            existing["source_correction_ids"] = list(
+                dict.fromkeys([*list(existing.get("source_correction_ids") or []), *list(proposal.get("source_correction_ids") or [])])
+            )
+        for proposal in self._build_action_pattern_semantic_proposals(limit=limit):
+            key = _clean_text(proposal.get("semantic_key"))
+            if not key:
+                continue
+            existing = proposals_by_key.get(key)
+            if existing is None:
+                proposals_by_key[key] = proposal
+                continue
+            existing["summary"] = _merge_semantic_summaries(existing.get("summary"), proposal.get("summary"))
             existing["confidence"] = max(_clamp_unit(existing.get("confidence")), _clamp_unit(proposal.get("confidence")))
             existing["source_refs"] = list(dict.fromkeys([*list(existing.get("source_refs") or []), *list(proposal.get("source_refs") or [])]))
             existing["tags"] = list(dict.fromkeys([*list(existing.get("tags") or []), *list(proposal.get("tags") or [])]))
@@ -3291,9 +4278,277 @@ class LifeMemoryConsolidator:
             )
         proposals = sorted(
             proposals_by_key.values(),
-            key=lambda item: (-_clamp_unit(item.get("confidence")), str(item.get("summary") or "")),
+            key=lambda item: (
+                _semantic_kind_priority(_clean_text(item.get("semantic_kind"))),
+                -_clamp_unit(item.get("confidence")),
+                str(item.get("summary") or ""),
+            ),
         )
         return proposals[: max(1, int(max_records))]
+
+    def semantic_growth_diagnostics(self, *, limit: int = 500) -> dict[str, Any]:
+        """Explain why trusted episodes did or did not become semantic memories."""
+
+        rows = self.store.ledger._conn.execute(
+            """
+            SELECT *
+            FROM life_episode
+            WHERE truth_state = ?
+              AND status = ?
+            ORDER BY memory_strength DESC, salience DESC, last_touched_ts_ms DESC
+            LIMIT ?
+            """,
+            (TRUTH_VERIFIED, STATUS_ACTIVE, max(1, int(limit))),
+        ).fetchall()
+        class_counts: dict[str, int] = {}
+        synthetic_counts: dict[str, int] = {}
+        candidate_counts: dict[str, int] = {}
+        proposal_counts: dict[str, int] = {}
+        skip_counts: dict[str, int] = {}
+        samples: list[dict[str, Any]] = []
+        for row in rows:
+            episode = dict(row)
+            metadata = _episode_metadata_dict(episode)
+            memory_class = _episode_memory_class_from_metadata(metadata) or "unclassified"
+            class_counts[memory_class] = class_counts.get(memory_class, 0) + 1
+            policy = metadata.get("memory_policy") if isinstance(metadata.get("memory_policy"), Mapping) else {}
+            semantic_candidate = bool(policy.get("semantic_candidate")) or memory_class in _SEMANTIC_PRIORITY_MEMORY_CLASSES
+            if not semantic_candidate:
+                continue
+            candidate_counts[memory_class] = candidate_counts.get(memory_class, 0) + 1
+            reason = ""
+            if _is_synthetic_life_record(episode, metadata):
+                reason = "synthetic_source"
+                synthetic_counts[memory_class] = synthetic_counts.get(memory_class, 0) + 1
+                proposals: list[dict[str, Any]] = []
+                texts: list[str] = []
+            elif _clean_text(episode.get("retention_state")).upper() == RETENTION_GONE:
+                reason = "retention_gone"
+                proposals = []
+                texts = []
+            else:
+                evidence_rows = self.store._list_evidence(episode_id=_clean_text(episode.get("episode_id")))
+                texts = _semantic_source_texts(episode, evidence_rows)
+                proposals = _semantic_proposals_from_episode(episode, evidence_rows)
+                if not texts:
+                    reason = "no_source_text"
+                elif not proposals:
+                    reason = _semantic_skip_reason_for_texts(texts, episode=episode)
+            if proposals:
+                for proposal in proposals:
+                    kind = _clean_text(proposal.get("semantic_kind")) or "unknown"
+                    proposal_counts[kind] = proposal_counts.get(kind, 0) + 1
+                continue
+            reason = reason or "no_semantic_rule_match"
+            skip_counts[reason] = skip_counts.get(reason, 0) + 1
+            if len(samples) < 10:
+                samples.append(
+                    {
+                        "episode_id": _clean_text(episode.get("episode_id")),
+                        "memory_class": memory_class,
+                        "reason_code": reason,
+                        "summary": _clean_text(episode.get("summary"), limit=220),
+                        "source_text": _clean_text(texts[0], limit=220) if texts else "",
+                    }
+                )
+        for proposal in [
+            *self._build_collection_semantic_proposals(limit=limit),
+            *self._build_entity_semantic_proposals(limit=limit),
+            *self._build_correction_semantic_proposals(limit=limit),
+            *self._build_action_pattern_semantic_proposals(limit=limit),
+        ]:
+            kind = _clean_text(proposal.get("semantic_kind")) or "unknown"
+            proposal_counts[kind] = proposal_counts.get(kind, 0) + 1
+        return {
+            "status": "OK",
+            "scanned_count": len(rows),
+            "class_counts": dict(sorted(class_counts.items())),
+            "semantic_candidate_counts": dict(sorted(candidate_counts.items())),
+            "synthetic_candidate_counts": dict(sorted(synthetic_counts.items())),
+            "proposal_counts": dict(sorted(proposal_counts.items())),
+            "skip_reason_counts": dict(sorted(skip_counts.items())),
+            "skip_samples": samples,
+        }
+
+    def semantic_growth_gap_report(self, *, limit: int = 30000, sample_limit: int = 12) -> dict[str, Any]:
+        """Report durable-memory gaps without promoting test-only evidence."""
+
+        fetch_limit = max(1, int(limit))
+        max_samples = max(1, int(sample_limit))
+        rows = self.store.ledger._conn.execute(
+            """
+            SELECT *
+            FROM life_episode
+            ORDER BY last_touched_ts_ms DESC, memory_strength DESC, salience DESC
+            LIMIT ?
+            """,
+            (fetch_limit,),
+        ).fetchall()
+
+        def increment(counter: dict[str, int], key: str) -> None:
+            counter[key] = counter.get(key, 0) + 1
+
+        def increment_nested(counter: dict[str, dict[str, int]], key: str, reason: str) -> None:
+            bucket = counter.setdefault(key, {})
+            bucket[reason] = bucket.get(reason, 0) + 1
+
+        def add_sample(bucket: list[dict[str, Any]], episode: Mapping[str, Any], *, reason: str, synthetic: bool) -> None:
+            if len(bucket) >= max_samples:
+                return
+            bucket.append(
+                {
+                    "episode_id": _clean_text(episode.get("episode_id")),
+                    "memory_class": _episode_memory_class_from_metadata(_episode_metadata_dict(episode)) or "unclassified",
+                    "truth_state": _clean_text(episode.get("truth_state")).upper(),
+                    "status": _clean_text(episode.get("status")).upper(),
+                    "retention_state": _clean_text(episode.get("retention_state")).upper(),
+                    "reason_code": reason,
+                    "synthetic": bool(synthetic),
+                    "person_id": _clean_text(episode.get("person_id"), limit=80),
+                    "session_id": _clean_text(episode.get("session_id"), limit=80),
+                    "summary": _clean_text(episode.get("summary"), limit=220),
+                    "source_ref": _clean_text(episode.get("primary_ref"), limit=180),
+                }
+            )
+
+        def inactive_reason(
+            *,
+            truth_state: str,
+            status: str,
+            retention_state: str,
+            policy_candidate: bool,
+        ) -> str:
+            if truth_state in {TRUTH_CORRECTED, TRUTH_SUPPRESSED} or status == STATUS_SUPPRESSED:
+                return "corrected_or_suppressed_source"
+            if truth_state != TRUTH_VERIFIED:
+                return f"truth_state_{truth_state.lower() or 'missing'}"
+            if status != STATUS_ACTIVE:
+                return f"status_{status.lower() or 'missing'}"
+            if retention_state == RETENTION_GONE:
+                return "retention_gone"
+            if not policy_candidate:
+                return "not_semantic_candidate"
+            return "not_active_candidate"
+
+        class_counts: dict[str, int] = {}
+        production_priority_counts: dict[str, int] = {}
+        synthetic_priority_counts: dict[str, int] = {}
+        production_candidate_counts: dict[str, int] = {}
+        synthetic_candidate_counts: dict[str, int] = {}
+        production_inactive_priority_counts: dict[str, dict[str, int]] = {}
+        synthetic_inactive_priority_counts: dict[str, dict[str, int]] = {}
+        suppressed_source_counts: dict[str, int] = {}
+        samples: dict[str, list[dict[str, Any]]] = {
+            "production_candidates": [],
+            "synthetic_candidates": [],
+            "production_inactive_priority": [],
+            "synthetic_inactive_priority": [],
+        }
+
+        priority_classes = set(_SEMANTIC_PRIORITY_MEMORY_CLASSES)
+        for row in rows:
+            episode = dict(row)
+            metadata = _episode_metadata_dict(episode)
+            memory_class = _episode_memory_class_from_metadata(metadata) or "unclassified"
+            increment(class_counts, memory_class)
+            policy = metadata.get("memory_policy") if isinstance(metadata.get("memory_policy"), Mapping) else {}
+            policy_candidate = bool(policy.get("semantic_candidate"))
+            priority_like = memory_class in priority_classes or policy_candidate
+            if not priority_like:
+                continue
+
+            synthetic = _is_synthetic_life_record(episode, metadata)
+            truth_state = _clean_text(episode.get("truth_state")).upper()
+            status = _clean_text(episode.get("status")).upper()
+            retention_state = _clean_text(episode.get("retention_state")).upper()
+            active_candidate = (
+                policy_candidate
+                and truth_state == TRUTH_VERIFIED
+                and status == STATUS_ACTIVE
+                and retention_state != RETENTION_GONE
+            )
+
+            if synthetic:
+                increment(synthetic_priority_counts, memory_class)
+            else:
+                increment(production_priority_counts, memory_class)
+
+            if active_candidate:
+                if synthetic:
+                    increment(synthetic_candidate_counts, memory_class)
+                    add_sample(samples["synthetic_candidates"], episode, reason="active_candidate", synthetic=True)
+                else:
+                    increment(production_candidate_counts, memory_class)
+                    add_sample(samples["production_candidates"], episode, reason="active_candidate", synthetic=False)
+                continue
+
+            reason = inactive_reason(
+                truth_state=truth_state,
+                status=status,
+                retention_state=retention_state,
+                policy_candidate=policy_candidate,
+            )
+            if reason == "corrected_or_suppressed_source":
+                increment(suppressed_source_counts, memory_class)
+            if synthetic:
+                increment_nested(synthetic_inactive_priority_counts, memory_class, reason)
+                add_sample(samples["synthetic_inactive_priority"], episode, reason=reason, synthetic=True)
+            else:
+                increment_nested(production_inactive_priority_counts, memory_class, reason)
+                add_sample(samples["production_inactive_priority"], episode, reason=reason, synthetic=False)
+
+        correction_record_proposals = self._build_correction_semantic_proposals(limit=fetch_limit)
+        if correction_record_proposals:
+            production_candidate_counts[MEMORY_CLASS_CORRECTION] = production_candidate_counts.get(MEMORY_CLASS_CORRECTION, 0) + len(
+                correction_record_proposals
+            )
+
+        synthetic_only_candidate_classes = [
+            item
+            for item in _SEMANTIC_PRIORITY_MEMORY_CLASSES
+            if synthetic_candidate_counts.get(item, 0) > 0 and production_candidate_counts.get(item, 0) == 0
+        ]
+        missing_production_candidate_classes = [
+            item for item in _SEMANTIC_PRIORITY_MEMORY_CLASSES if production_candidate_counts.get(item, 0) == 0
+        ]
+        recommendations: list[str] = []
+        if synthetic_only_candidate_classes:
+            recommendations.append(
+                "production_source_absent: do not distill synthetic-only priority memories; capture the same owner inputs through real gateway/surface episodes first."
+            )
+        if missing_production_candidate_classes:
+            recommendations.append(
+                "semantic_growth_sparse: production durable memory is missing one or more priority classes; inspect ingestion before changing distillation prompts."
+            )
+        if production_inactive_priority_counts:
+            recommendations.append(
+                "inactive_priority_sources_present: corrected, suppressed, cold, or policy-denied priority episodes exist and should remain audit-only unless new evidence verifies them."
+            )
+
+        semantic_memory_count = self.store.ledger._conn.execute(
+            "SELECT COUNT(*) FROM semantic_memory WHERE deleted_at IS NULL"
+        ).fetchone()[0]
+        return {
+            "status": "OK",
+            "scanned_count": len(rows),
+            "semantic_memory_count": int(semantic_memory_count or 0),
+            "class_counts": dict(sorted(class_counts.items())),
+            "production_priority_counts": dict(sorted(production_priority_counts.items())),
+            "synthetic_priority_counts": dict(sorted(synthetic_priority_counts.items())),
+            "production_candidate_counts": dict(sorted(production_candidate_counts.items())),
+            "synthetic_candidate_counts": dict(sorted(synthetic_candidate_counts.items())),
+            "production_inactive_priority_counts": {
+                key: dict(sorted(value.items())) for key, value in sorted(production_inactive_priority_counts.items())
+            },
+            "synthetic_inactive_priority_counts": {
+                key: dict(sorted(value.items())) for key, value in sorted(synthetic_inactive_priority_counts.items())
+            },
+            "suppressed_source_counts": dict(sorted(suppressed_source_counts.items())),
+            "synthetic_only_candidate_classes": synthetic_only_candidate_classes,
+            "missing_production_candidate_classes": missing_production_candidate_classes,
+            "recommendations": recommendations,
+            "samples": samples,
+        }
 
     def _build_collection_semantic_proposals(self, *, limit: int = 80) -> list[dict[str, Any]]:
         rows = self.store.ledger._conn.execute(
@@ -3315,18 +4570,156 @@ class LifeMemoryConsolidator:
                 proposals.append(proposal)
         return proposals
 
+    def _build_entity_semantic_proposals(self, *, limit: int = 80) -> list[dict[str, Any]]:
+        rows = self.store.ledger._conn.execute(
+            """
+            SELECT *
+            FROM life_memory_entity
+            WHERE COALESCE(retention_state, ?) != ?
+              AND COALESCE(mention_count, 0) > 0
+            ORDER BY memory_strength DESC, last_seen_ts_ms DESC
+            LIMIT ?
+            """,
+            (RETENTION_WARM, RETENTION_GONE, max(1, int(limit))),
+        ).fetchall()
+        proposals: list[dict[str, Any]] = []
+        for row in rows:
+            entity = dict(row)
+            proposal = _semantic_proposal_from_entity(self.store, entity)
+            if proposal:
+                proposals.append(proposal)
+        return proposals
+
+    def _build_correction_semantic_proposals(self, *, limit: int = 80) -> list[dict[str, Any]]:
+        if not _sqlite_table_exists(self.store.ledger._conn, "life_memory_correction"):
+            return []
+        rows = self.store.ledger._conn.execute(
+            """
+            SELECT
+                c.correction_id,
+                c.episode_id,
+                c.correction_episode_id,
+                c.correction_kind,
+                c.reason_code,
+                c.detail,
+                c.created_ts_ms,
+                c.metadata,
+                source_ep.summary AS source_summary,
+                source_ep.primary_ref AS source_primary_ref,
+                source_ep.person_id AS source_person_id,
+                source_ep.session_id AS source_session_id,
+                source_ep.truth_state AS source_truth_state,
+                source_ep.status AS source_status,
+                source_ep.metadata AS source_metadata,
+                corr_ep.summary AS correction_summary,
+                corr_ep.primary_ref AS correction_primary_ref,
+                corr_ep.person_id AS correction_person_id,
+                corr_ep.session_id AS correction_session_id,
+                corr_ep.truth_state AS correction_truth_state,
+                corr_ep.status AS correction_status,
+                corr_ep.retention_state AS correction_retention_state,
+                corr_ep.metadata AS correction_metadata
+            FROM life_memory_correction c
+            LEFT JOIN life_episode source_ep ON source_ep.episode_id = c.episode_id
+            LEFT JOIN life_episode corr_ep ON corr_ep.episode_id = c.correction_episode_id
+            ORDER BY c.created_ts_ms DESC
+            LIMIT ?
+            """,
+            (max(1, int(limit)),),
+        ).fetchall()
+        proposals: list[dict[str, Any]] = []
+        for row in rows:
+            data = dict(row)
+            proposal = _semantic_proposal_from_correction_row(data)
+            if not proposal:
+                continue
+            key = _clean_text(proposal.get("semantic_key"))
+            if not key:
+                continue
+            proposals.append(proposal)
+        return proposals
+
+    def _build_action_pattern_semantic_proposals(self, *, limit: int = 80) -> list[dict[str, Any]]:
+        return _semantic_action_pattern_proposals(self.store, limit=limit)
+
+    def prune_synthetic_semantic_memories(
+        self,
+        *,
+        ts_ms: int | None = None,
+        limit: int = 500,
+        dry_run: bool = False,
+    ) -> dict[str, Any]:
+        """Soft-delete semantic memories that were distilled from test/e2e sources."""
+
+        current = int(ts_ms if ts_ms is not None else now_ts_ms())
+        rows = self.store.ledger._conn.execute(
+            """
+            SELECT *
+            FROM semantic_memory
+            WHERE deleted_at IS NULL
+            ORDER BY ts_ms DESC
+            LIMIT ?
+            """,
+            (max(1, int(limit)),),
+        ).fetchall()
+        memories = [self.store.ledger._row_to_semantic_memory(row) for row in rows]
+        stale_collection_semantic_ids = _stale_collection_semantic_ids(self.store, memories)
+        pruned: list[dict[str, Any]] = []
+        for memory in memories:
+            reason = _semantic_memory_prune_reason(
+                self.store,
+                memory,
+                stale_collection_semantic_ids=stale_collection_semantic_ids,
+            )
+            if not reason:
+                continue
+            pruned.append(
+                {
+                    "semantic_id": _clean_text(memory.get("semantic_id")),
+                    "reason_code": reason,
+                    "summary": _clean_text(memory.get("summary"), limit=240),
+                }
+            )
+        if pruned and not dry_run:
+            ids = [_clean_text(item.get("semantic_id")) for item in pruned if _clean_text(item.get("semantic_id"))]
+            placeholders = ", ".join("?" for _ in ids)
+            if ids:
+                with self.store.ledger._write_lock:
+                    with self.store.ledger._conn:
+                        self.store.ledger._conn.execute(
+                            f"UPDATE semantic_memory SET deleted_at = ? WHERE semantic_id IN ({placeholders})",
+                            (current, *ids),
+                        )
+        return {
+            "status": "OK",
+            "dry_run": bool(dry_run),
+            "scanned_count": len(rows),
+            "pruned_count": len(pruned),
+            "semantic_ids": [item["semantic_id"] for item in pruned if item.get("semantic_id")],
+            "reason_counts": _count_reason_codes(pruned),
+            "samples": pruned[:8],
+        }
+
     def distill_semantic_memories(
         self,
         *,
         limit: int = 80,
         max_records: int = 12,
+        query_text: str | None = None,
         ts_ms: int | None = None,
         operator_node_id: str = "life_memory_consolidator",
     ) -> dict[str, Any]:
         created = int(ts_ms if ts_ms is not None else now_ts_ms())
         proposals = self.build_semantic_proposals(limit=limit, max_records=max_records)
+        if _clean_text(query_text):
+            proposals = [
+                proposal
+                for proposal in proposals
+                if _semantic_proposal_matches_query(proposal, query_text=query_text)
+            ][: max(1, int(max_records))]
         written: list[dict[str, Any]] = []
         skipped: list[dict[str, Any]] = []
+        open_loop_updates: list[dict[str, Any]] = []
         for proposal in proposals:
             semantic_key = _clean_text(proposal.get("semantic_key"))
             if not semantic_key:
@@ -3335,21 +4728,102 @@ class LifeMemoryConsolidator:
             if not source_ids:
                 continue
             source_hash = hashlib.sha256(f"life_semantic:v1:{semantic_key}".encode("utf-8", errors="ignore")).hexdigest()
-            existing = self.store.ledger.get_semantic_memory_by_source_hash(source_hash)
-            if existing is not None:
-                skipped.append(
-                    {
-                        "semantic_id": existing.get("semantic_id"),
-                        "reason_code": "SEMANTIC_MEMORY_EXISTS",
-                        "semantic_key": semantic_key,
-                    }
-                )
-                continue
             semantic_id = f"sem_life_{_stable_hash('life_semantic_id:v1:' + semantic_key, size=24)}"
-            source_tags = ["source:life_episode"]
+            source_tags: list[str] = []
+            if list(proposal.get("source_episode_ids") or []):
+                source_tags.append("source:life_episode")
             if list(proposal.get("source_collection_ids") or []):
                 source_tags.append("source:life_memory_collection")
-            tags = list(dict.fromkeys([*list(proposal.get("tags") or []), *source_tags, "life_consolidated"]))
+            if list(proposal.get("source_entity_ids") or []):
+                source_tags.append("source:life_memory_entity")
+            if list(proposal.get("source_correction_ids") or []):
+                source_tags.append("source:life_memory_correction")
+            tags = list(
+                dict.fromkeys(
+                    [
+                        *list(proposal.get("tags") or []),
+                        *_semantic_taxonomy_tags(_clean_text(proposal.get("semantic_kind"))),
+                        *source_tags,
+                        "life_consolidated",
+                    ]
+                )
+            )
+            if _clean_text(proposal.get("semantic_kind")) == "commitment":
+                lifecycle = self._sync_open_loop_from_commitment_proposal(
+                    proposal=proposal,
+                    semantic_key=semantic_key,
+                    tags=tags,
+                    ts_ms=created,
+                )
+                if lifecycle:
+                    open_loop_updates.append(lifecycle)
+            existing = self.store.ledger.get_semantic_memory_by_source_hash(source_hash)
+            if existing is not None:
+                existing_source_ids = list(existing.get("source_memory_ids") or [])
+                existing_tags = list(existing.get("tags") or [])
+                merged_source_ids = list(dict.fromkeys([*existing_source_ids, *source_ids]))
+                merged_tags = _normalize_open_loop_status_tags(list(dict.fromkeys([*existing_tags, *tags])), incoming_tags=tags)
+                if _clean_text(proposal.get("distill_strategy")) == "life_memory_collection_rule_consolidation":
+                    merged_summary = _clean_text(proposal.get("summary"), limit=900)
+                elif _semantic_existing_summary_should_be_replaced(
+                    existing.get("summary"),
+                    proposal.get("summary"),
+                    semantic_kind=_clean_text(proposal.get("semantic_kind")),
+                ):
+                    merged_summary = _clean_text(proposal.get("summary"), limit=900)
+                else:
+                    merged_summary = _merge_semantic_summaries(existing.get("summary"), proposal.get("summary"))
+                merged_confidence = max(_clamp_unit(existing.get("confidence")), _clamp_unit(proposal.get("confidence")))
+                changed = (
+                    merged_source_ids != existing_source_ids
+                    or merged_tags != existing_tags
+                    or _clean_text(merged_summary) != _clean_text(existing.get("summary"))
+                    or merged_confidence > _clamp_unit(existing.get("confidence"))
+                )
+                if changed:
+                    with self.store.ledger._write_lock:
+                        with self.store.ledger._conn:
+                            self.store.ledger._conn.execute(
+                                """
+                                UPDATE semantic_memory
+                                SET summary = ?,
+                                    source_memory_ids = ?,
+                                    confidence = ?,
+                                    tags = ?,
+                                    ts_ms = ?,
+                                    operator_node_id = ?
+                                WHERE semantic_id = ?
+                                  AND deleted_at IS NULL
+                                """,
+                                (
+                                    _clean_text(merged_summary, limit=900),
+                                    _json_dumps(merged_source_ids) or "[]",
+                                    merged_confidence,
+                                    _json_dumps(merged_tags) or "[]",
+                                    created,
+                                    _clean_text(operator_node_id) or "life_memory_consolidator",
+                                    existing.get("semantic_id"),
+                                ),
+                            )
+                    persisted = self.store.ledger.get_semantic_memory_by_source_hash(source_hash) or existing
+                    written.append(
+                        {
+                            "semantic_id": persisted.get("semantic_id"),
+                            "summary": persisted.get("summary"),
+                            "source_count": len(merged_source_ids),
+                            "tags": persisted.get("tags"),
+                            "updated_existing": True,
+                        }
+                    )
+                else:
+                    skipped.append(
+                        {
+                            "semantic_id": existing.get("semantic_id"),
+                            "reason_code": "SEMANTIC_MEMORY_EXISTS",
+                            "semantic_key": semantic_key,
+                        }
+                    )
+                continue
             record = {
                 "semantic_id": semantic_id,
                 "summary": _clean_text(proposal.get("summary"), limit=900),
@@ -3381,6 +4855,57 @@ class LifeMemoryConsolidator:
             "skipped_count": len(skipped),
             "written": written,
             "skipped": skipped,
+            "open_loop_updates": open_loop_updates,
+        }
+
+    def _sync_open_loop_from_commitment_proposal(
+        self,
+        *,
+        proposal: Mapping[str, Any],
+        semantic_key: str,
+        tags: Sequence[str],
+        ts_ms: int,
+    ) -> dict[str, Any] | None:
+        source_episode_ids = [
+            _clean_text(item)
+            for item in list(proposal.get("source_episode_ids") or [])
+            if _clean_text(item)
+        ]
+        if not source_episode_ids:
+            return None
+        episode_id = source_episode_ids[0]
+        row = self.store.ledger._conn.execute(
+            "SELECT * FROM life_episode WHERE episode_id = ? LIMIT 1",
+            (episode_id,),
+        ).fetchone()
+        episode = dict(row) if row is not None else {}
+        status = _clean_text(proposal.get("open_loop_status")).upper() or _open_loop_status_from_tags(tags)
+        summary = _clean_text(proposal.get("summary"), limit=900)
+        result = self.store.upsert_open_loop(
+            semantic_key=semantic_key,
+            episode_id=episode_id,
+            status=status,
+            title=_open_loop_title_from_summary(summary),
+            detail=summary,
+            person_id=_clean_text(episode.get("person_id")) or None,
+            session_id=_clean_text(episode.get("session_id")) or None,
+            source_ref=(list(proposal.get("source_refs") or []) or [episode.get("primary_ref") or f"life_episode://{episode_id}"])[0],
+            close_reason=_clean_text(proposal.get("open_loop_close_reason")),
+            salience=_clamp_unit(episode.get("salience")),
+            memory_strength=_clamp_unit(episode.get("memory_strength"), default=_clamp_unit(proposal.get("confidence"))),
+            ts_ms=ts_ms,
+            metadata={
+                "source_episode_ids": source_episode_ids,
+                "source_refs": list(proposal.get("source_refs") or []),
+                "semantic_summary": summary,
+                "semantic_tags": list(tags),
+            },
+        )
+        return {
+            "semantic_key": semantic_key,
+            "open_loop_id": result.get("open_loop_id"),
+            "status": status,
+            "episode_id": episode_id,
         }
 
 
@@ -3459,12 +4984,14 @@ class MemorySleepReplayTask:
         *,
         now_ts_ms_value: int | None = None,
         replay_limit: int = 12,
+        policy_backfill_limit: int = 5000,
         forgetting_batch_limit: int = 500,
         semantic_limit: int = 12,
         compaction_group_limit: int = 6,
         compaction_min_age_ms: int = 6 * 60 * 60 * 1000,
     ) -> dict[str, Any]:
         current = int(now_ts_ms_value if now_ts_ms_value is not None else now_ts_ms())
+        policy_backfill = self.store.backfill_memory_policy(batch_limit=policy_backfill_limit)
         forgetting = self.store.apply_forgetting_pass(
             now_ts_ms_value=current,
             batch_limit=forgetting_batch_limit,
@@ -3490,12 +5017,17 @@ class MemorySleepReplayTask:
             )
             if str(result.get("status") or "") == "OK":
                 compactions.append(result)
-        semantic_distillation = LifeMemoryConsolidator(store=self.store).distill_semantic_memories(
+        consolidator = LifeMemoryConsolidator(store=self.store)
+        semantic_cleanup_before = consolidator.prune_synthetic_semantic_memories(ts_ms=current)
+        semantic_distillation = consolidator.distill_semantic_memories(
             limit=max(replay_limit * 4, semantic_limit * 3, 12),
             max_records=max(1, int(semantic_limit)),
             ts_ms=current,
             operator_node_id="memory_sleep_replay",
         )
+        semantic_cleanup_after = consolidator.prune_synthetic_semantic_memories(ts_ms=current + 1)
+        semantic_cleanup = _merge_semantic_cleanup_reports(semantic_cleanup_before, semantic_cleanup_after)
+        semantic_growth = consolidator.semantic_growth_diagnostics(limit=max(policy_backfill_limit, replay_limit * 8, semantic_limit * 8, 100))
         replay_batch = self.select_replay_batch(limit=replay_limit)
         reflection_count = 0
         for item in replay_batch:
@@ -3517,13 +5049,16 @@ class MemorySleepReplayTask:
             reflection_count += 1
         return {
             "status": "OK",
+            "policy_backfill": policy_backfill,
             "forgetting": forgetting,
             "compaction": {
                 "group_count": len(compactions),
                 "episode_count": sum(int(item.get("source_count") or 0) for item in compactions),
                 "groups": compactions,
             },
+            "semantic_cleanup": semantic_cleanup,
             "semantic_distillation": semantic_distillation,
+            "semantic_growth": semantic_growth,
             "replay_selected": len(replay_batch),
             "reflection_count": reflection_count,
         }
@@ -3774,6 +5309,45 @@ def _collection_item_title(item: Mapping[str, Any]) -> str:
     return ""
 
 
+def _collection_item_canonical_title(item: Mapping[str, Any]) -> str:
+    text = _clean_text(
+        item.get("canonical_title")
+        or item.get("series_title")
+        or item.get("work_title")
+        or item.get("book_title")
+        or item.get("item_title")
+        or _collection_item_title(item),
+        limit=220,
+    )
+    if not text:
+        return ""
+    text = re.sub(r"^\d+[.)、]\s*", "", text)
+    text = re.sub(r"^\d{3,8}[.．]\s*", "", text)
+    text = re.sub(r"^(?:今天|今日|昨天|前天|三天前|四天前|五天前|本次|这次)\s*推荐\s*[A-ZＡ-Ｚ一二三四五六七八九十0-9]*\s*[:：]\s*", "", text)
+    text = re.sub(r"^推荐\s*[A-ZＡ-Ｚ一二三四五六七八九十0-9]*\s*[:：]\s*", "", text)
+    text = re.sub(r"\s*\(\s*\d{1,2}/\d{1,2}[^)]*\)\s*$", "", text)
+    text = re.sub(r"\s*（\s*\d{1,2}/\d{1,2}[^）]*）\s*$", "", text)
+    text = re.sub(r"\s+第\s*\d+\s*[话話章].*$", "", text)
+    text = re.sub(r"\s+第\s*[一二三四五六七八九十百千]+\s*[话話章].*$", "", text)
+    return _clean_text(text, limit=160)
+
+
+def _collection_item_resolved_canonical_title(item: Mapping[str, Any]) -> str:
+    payload = dict(item or {})
+    stored = _clean_text(payload.get("canonical_title"), limit=220)
+    payload.pop("canonical_title", None)
+    payload.pop("canonical_key", None)
+    reparsed = _collection_item_canonical_title(payload)
+    return reparsed or stored
+
+
+def _collection_item_canonical_key(value: Any) -> str:
+    title = _clean_text(value, limit=220)
+    if not title:
+        return ""
+    return _entity_normalized_key(title)
+
+
 def _collection_item_summary(item: Mapping[str, Any]) -> str:
     parts: list[str] = []
     for label, keys in (
@@ -3796,6 +5370,139 @@ def _collection_item_summary(item: Mapping[str, Any]) -> str:
     return "｜".join(parts)
 
 
+def _collection_item_review_evidence_metadata(
+    item: Mapping[str, Any],
+    *,
+    review_episode_id: str,
+    review_ref: str,
+    fact: str | None,
+    ts_ms: int,
+) -> dict[str, Any]:
+    status = _clean_text(item.get("review_status"), limit=40).upper()
+    observations = _coerce_text_list(item.get("body_observations"))
+    score_reasons = _coerce_text_list(item.get("score_reasons"))
+    chapter_signal = _clean_text(item.get("chapter_signal"), limit=260)
+    content_chars = _coerce_int(item.get("content_char_count"))
+    body_excerpt = "；".join(observations[:2]) or chapter_signal
+    has_body_evidence = bool(observations or chapter_signal or content_chars >= 240)
+    deep_review = {
+        "review_episode_id": _clean_text(review_episode_id),
+        "review_ref": _clean_text(review_ref),
+        "reviewed_ts_ms": int(ts_ms),
+        "status": status,
+        "detail_url": _clean_text(item.get("detail_url"), limit=300),
+        "content_char_count": content_chars,
+        "body_quality": _clean_text(item.get("body_quality"), limit=80),
+        "body_observations": observations,
+        "score": _clamp_unit(item.get("deep_review_score"), default=0.0),
+        "score_reasons": score_reasons,
+        "chapter_signal": chapter_signal,
+    }
+    payload: dict[str, Any] = {
+        "deep_review": {key: value for key, value in deep_review.items() if value not in (None, "", [], {}, 0)},
+        "deep_review_episode_id": _clean_text(review_episode_id),
+        "detail_evidence_ref": _clean_text(review_ref),
+        "body_ref": _clean_text(review_ref) if has_body_evidence else "",
+        "detail_review_status": status,
+        "detail_reviewed_ts_ms": int(ts_ms),
+        "detail_url": _clean_text(item.get("detail_url"), limit=300),
+        "content_char_count": content_chars if content_chars > 0 else 0,
+        "body_quality": _clean_text(item.get("body_quality"), limit=80),
+        "body_observations": observations,
+        "content_excerpt": body_excerpt if has_body_evidence else "",
+        "chapter_signal": chapter_signal if has_body_evidence else "",
+        "deep_review_score": item.get("deep_review_score"),
+        "score_reasons": score_reasons,
+    }
+    if has_body_evidence and _clean_text(fact):
+        payload["deep_review_fact"] = _clean_text(fact, limit=520)
+    return {key: value for key, value in payload.items() if value not in (None, "", [], {}, 0)}
+
+
+def _collection_item_deep_review_summary(item: Mapping[str, Any]) -> str:
+    deep = item.get("deep_review")
+    if not isinstance(deep, Mapping):
+        deep = {}
+    observations = _coerce_text_list(item.get("body_observations") or deep.get("body_observations"))
+    score_reasons = _coerce_text_list(item.get("score_reasons") or deep.get("score_reasons"))
+    chapter_signal = _clean_text(item.get("chapter_signal") or deep.get("chapter_signal"), limit=180)
+    bits = [*observations[:2], *score_reasons[:2]]
+    if chapter_signal:
+        bits.append(chapter_signal)
+    return "；".join(_unique_clean_texts(bits)[:4])[:360]
+
+
+def _entity_mention_has_deep_review(item: Mapping[str, Any]) -> bool:
+    metadata = item.get("metadata") if isinstance(item.get("metadata"), Mapping) else {}
+    item_metadata = item.get("item_metadata") if isinstance(item.get("item_metadata"), Mapping) else {}
+    return bool(
+        _clean_text(metadata.get("deep_review_episode_id") or item_metadata.get("deep_review_episode_id"))
+        or _clean_text(metadata.get("detail_evidence_ref") or item_metadata.get("detail_evidence_ref"))
+        or _collection_item_deep_review_summary({**dict(item_metadata), **dict(metadata)})
+    )
+
+
+def _semantic_entity_domain_label(domain: str) -> str:
+    value = _clean_text(domain)
+    if value == DOMAIN_LIGHTNOVEL_RECOMMENDATION:
+        return "轻小说推荐"
+    if value == DOMAIN_RECOMMENDATION:
+        return "推荐"
+    return value.replace("_", " ") if value else "经历"
+
+
+def _semantic_entity_owner_id(mentions: Sequence[Mapping[str, Any]]) -> str:
+    owners = _unique_clean_texts(
+        [
+            item.get("episode_person_id")
+            for item in mentions
+            if _clean_text(item.get("episode_person_id"))
+        ]
+    )
+    return owners[0] if len(owners) == 1 else "global"
+
+
+def _build_entity_semantic_summary(
+    *,
+    title: str,
+    domain_label: str,
+    mentions: Sequence[Mapping[str, Any]],
+    deep_mentions: Sequence[Mapping[str, Any]],
+) -> str:
+    mention_count = len(list(mentions or []))
+    collection_days = _unique_clean_texts(
+        [
+            _collection_day_key(_coerce_int(item.get("episode_created_ts_ms") or item.get("created_ts_ms")))
+            for item in mentions
+            if _coerce_int(item.get("episode_created_ts_ms") or item.get("created_ts_ms")) > 0
+        ]
+    )
+    scope_count = len(_unique_clean_texts([item.get("collection_id") for item in mentions if item.get("collection_id")]))
+    summary_bits = [f"实体经历：{domain_label}里《{title}》出现过 {mention_count} 次"]
+    if collection_days:
+        summary_bits.append(f"时间线：{', '.join(collection_days[:4])}")
+    if scope_count:
+        summary_bits.append(f"关联过 {scope_count} 个集合")
+    if deep_mentions:
+        deep_summary = _clean_text(
+            _collection_item_deep_review_summary(
+                {
+                    **dict((deep_mentions[0].get("item_metadata") if isinstance(deep_mentions[0].get("item_metadata"), Mapping) else {}) or {}),
+                    **dict((deep_mentions[0].get("metadata") if isinstance(deep_mentions[0].get("metadata"), Mapping) else {}) or {}),
+                }
+            ),
+            limit=260,
+        )
+        if deep_summary:
+            summary_bits.append(f"已有深读证据：{deep_summary}")
+        else:
+            summary_bits.append("已有深读证据")
+    recent = next((item for item in mentions if _clean_text(item.get("item_summary"))), None)
+    if recent is not None:
+        summary_bits.append(f"最近线索：{_clean_text(recent.get('item_summary'), limit=220)}")
+    return "；".join(summary_bits) + "。"
+
+
 def _collection_item_source_ref(item: Mapping[str, Any]) -> str:
     for key in ("detail_url", "url", "source_url", "href"):
         value = _clean_text(item.get(key), limit=300)
@@ -3809,10 +5516,13 @@ def _collection_item_recall_line(item: Mapping[str, Any], index: int) -> str:
     if not title:
         title = f"条目{index}"
     summary = _clean_text(item.get("item_summary") or _collection_item_summary(item), limit=260)
+    deep_summary = _clean_text(_collection_item_deep_review_summary(item), limit=260)
     source = _clean_text(item.get("source_ref") or _collection_item_source_ref(item), limit=260)
     parts = [f"{index}. {title}"]
     if summary:
         parts.append(summary)
+    if deep_summary and deep_summary not in summary:
+        parts.append(f"深读：{deep_summary}")
     if source and source not in summary:
         parts.append(f"详情：{source}")
     return "｜".join(parts)
@@ -3821,6 +5531,10 @@ def _collection_item_recall_line(item: Mapping[str, Any], index: int) -> str:
 def _entity_mention_recall_line(item: Mapping[str, Any]) -> str:
     title = _clean_text(item.get("item_title") or (item.get("item_metadata") or {}).get("title"), limit=120)
     summary = _clean_text(item.get("item_summary") or (item.get("item_metadata") or {}).get("item_summary"), limit=220)
+    deep_summary = _clean_text(
+        _collection_item_deep_review_summary({**dict(item.get("item_metadata") or {}), **dict(item.get("metadata") or {})}),
+        limit=260,
+    )
     scope_key = _clean_text(item.get("scope_key"))
     source = _clean_text(item.get("source_ref") or item.get("item_source_ref"), limit=240)
     when = ""
@@ -3828,9 +5542,23 @@ def _entity_mention_recall_line(item: Mapping[str, Any]) -> str:
     if ts_ms > 0:
         when = _collection_day_key(ts_ms)
     parts = [part for part in (when, scope_key, title, summary) if part]
+    if deep_summary and deep_summary not in summary:
+        parts.append(f"深读：{deep_summary}")
     if source:
         parts.append(f"来源：{source}")
     return "｜".join(parts)
+
+
+def _entity_mention_matches_daily_scope(item: Mapping[str, Any], *, target_days: set[str]) -> bool:
+    if not target_days:
+        return True
+    scope_key = _clean_text(item.get("scope_key"))
+    if scope_key.startswith(f"{COLLECTION_SCOPE_DAILY}:"):
+        return scope_key.split(":", 1)[1] in target_days
+    ts_ms = _coerce_int(item.get("episode_created_ts_ms") or item.get("created_ts_ms"))
+    if ts_ms <= 0:
+        return False
+    return _collection_day_key(ts_ms) in target_days
 
 
 def _collection_scope_boost(collection: Mapping[str, Any], *, plan: Any, now_ts_ms_value: int) -> float:
@@ -3862,6 +5590,421 @@ def _semantic_source_memory_ids(proposal: Mapping[str, Any]) -> list[str]:
         cid = _clean_text(item)
         if cid:
             ids.append(f"life_memory_collection::{cid}")
+    for item in list(proposal.get("source_entity_ids") or []):
+        entity_id = _clean_text(item)
+        if entity_id:
+            ids.append(f"life_memory_entity::{entity_id}")
+    for item in list(proposal.get("source_correction_ids") or []):
+        correction_id = _clean_text(item)
+        if correction_id:
+            ids.append(f"life_memory_correction::{correction_id}")
+    return list(dict.fromkeys(ids))
+
+
+def _semantic_taxonomy_tags(kind: str) -> list[str]:
+    value = _clean_text(kind)
+    base = [f"semantic_kind:{value or 'unknown'}"]
+    if value == "user_preference":
+        return [*base, "memory_family:user_model", "semantic_tier:durable_profile", "recall_axis:preference"]
+    if value == "commitment":
+        return [*base, "memory_family:open_loop", "semantic_tier:active_commitment", "recall_axis:promise"]
+    if value == "self_change":
+        return [*base, "memory_family:self_model", "semantic_tier:identity_continuity", "recall_axis:self_change"]
+    if value == "failure_lesson":
+        return [*base, "memory_family:operations", "semantic_tier:durable_lesson", "recall_axis:debugging"]
+    if value == "stable_fact":
+        return [*base, "memory_family:world_or_user_fact", "semantic_tier:durable_fact", "recall_axis:fact"]
+    if value == "correction":
+        return [*base, "memory_family:error_correction", "semantic_tier:durable_guardrail", "recall_axis:correction"]
+    if value == "relationship_feedback":
+        return [*base, "memory_family:relationship_model", "semantic_tier:durable_feedback", "recall_axis:interaction_quality"]
+    if value == "experience_collection":
+        return [*base, "memory_family:experience_index", "semantic_tier:episodic_summary", "recall_axis:what_happened"]
+    if value == "experience_entity":
+        return [*base, "memory_family:experience_index", "semantic_tier:entity_summary", "recall_axis:what_object"]
+    if value == "action_pattern":
+        return [*base, "memory_family:action_model", "semantic_tier:durable_pattern", "recall_axis:what_she_does"]
+    return base
+
+
+def _semantic_kind_priority(kind: str) -> int:
+    value = _clean_text(kind)
+    priorities = {
+        "user_preference": 0,
+        "commitment": 1,
+        "correction": 2,
+        "relationship_feedback": 3,
+        "self_change": 4,
+        "stable_fact": 5,
+        "failure_lesson": 6,
+        "action_pattern": 7,
+        "experience_collection": 8,
+    }
+    return priorities.get(value, 6)
+
+
+_SEMANTIC_QUERY_STOP_TERMS = {
+    "用户",
+    "记忆",
+    "系统",
+    "偏好",
+    "推荐",
+    "昨天",
+    "今天",
+    "前天",
+    "刚才",
+    "这个",
+    "那个",
+    "什么",
+    "怎么",
+    "哪些",
+}
+
+
+def _semantic_proposal_matches_query(proposal: Mapping[str, Any], *, query_text: Any) -> bool:
+    query = _clean_text(query_text, limit=220)
+    if not query:
+        return True
+    haystack = _semantic_proposal_query_haystack(proposal)
+    compact_query = re.sub(r"\s+", "", query).lower()
+    if not compact_query:
+        return True
+    if compact_query in haystack:
+        return True
+
+    terms = _semantic_query_terms(query)
+    if terms:
+        matched = [term for term in terms if term in haystack]
+        if matched and len(terms) <= 2:
+            return True
+        if len(matched) >= 2:
+            return True
+        if any(len(term) >= 4 for term in matched):
+            return True
+
+    bigrams = _semantic_query_bigrams(compact_query)
+    if not bigrams:
+        return False
+    matched_bigrams = [item for item in bigrams if item in haystack]
+    threshold = max(2, min(4, len(bigrams) // 3))
+    return len(matched_bigrams) >= threshold
+
+
+def _semantic_proposal_query_haystack(proposal: Mapping[str, Any]) -> str:
+    values: list[str] = [
+        _clean_text(proposal.get("semantic_key"), limit=260),
+        _clean_text(proposal.get("semantic_kind"), limit=80),
+        _clean_text(proposal.get("summary"), limit=900),
+    ]
+    values.extend(_clean_text(item, limit=120) for item in list(proposal.get("tags") or []))
+    values.extend(_clean_text(item, limit=180) for item in list(proposal.get("source_refs") or []))
+    return re.sub(r"\s+", "", " ".join(value for value in values if value)).lower()
+
+
+def _semantic_query_terms(query: str) -> list[str]:
+    raw_terms = re.split(r"[\s,，。；;、|｜/\\:：?？!！()（）\[\]【】<>《》\"']+", query)
+    terms: list[str] = []
+    for raw in raw_terms:
+        term = re.sub(r"\s+", "", raw).lower()
+        if len(term) < 2 or term in _SEMANTIC_QUERY_STOP_TERMS:
+            continue
+        if term not in terms:
+            terms.append(term)
+    return terms[:12]
+
+
+def _semantic_query_bigrams(compact_query: str) -> list[str]:
+    chunks: list[str] = []
+    for index in range(0, max(0, len(compact_query) - 1)):
+        chunk = compact_query[index : index + 2]
+        if len(chunk) < 2 or chunk in _SEMANTIC_QUERY_STOP_TERMS:
+            continue
+        if chunk not in chunks:
+            chunks.append(chunk)
+    return chunks[:32]
+
+
+def _semantic_memory_source_ids(memory: Mapping[str, Any]) -> list[str]:
+    raw = memory.get("source_memory_ids")
+    if isinstance(raw, str):
+        parsed = _json_loads(raw, fallback=[])
+    else:
+        parsed = raw
+    if not isinstance(parsed, Sequence) or isinstance(parsed, (str, bytes, bytearray)):
+        return []
+    return [_clean_text(item) for item in parsed if _clean_text(item)]
+
+
+def _looks_like_synthetic_collection_text(value: Any) -> bool:
+    text = _clean_text(value, limit=2000)
+    if not text:
+        return False
+    if _has_any_marker(text, _SYNTHETIC_SOURCE_MARKERS):
+        return True
+    return bool(re.search(r"(?:今天|昨天|前天|三天前)推荐\s*[A-CＡ-Ｃ]?\s*[:：]", text))
+
+
+def _collection_item_is_synthetic(item: Mapping[str, Any]) -> bool:
+    metadata = _json_loads(item.get("metadata"), fallback={})
+    if not isinstance(metadata, Mapping):
+        metadata = {}
+    if _is_synthetic_life_record(item, metadata):
+        return True
+    values = (
+        item.get("item_title"),
+        item.get("item_summary"),
+        item.get("source_ref"),
+        item.get("evidence_ref"),
+        metadata.get("title"),
+        metadata.get("detail_url"),
+    )
+    return any(_looks_like_synthetic_collection_text(value) for value in values)
+
+
+def _collection_is_synthetic_for_semantic(store: LifeMemoryStore, collection: Mapping[str, Any]) -> bool:
+    metadata = _json_loads(collection.get("metadata"), fallback={})
+    if not isinstance(metadata, Mapping):
+        metadata = {}
+    if _is_synthetic_life_record(collection, metadata):
+        return True
+    values = (
+        collection.get("title"),
+        collection.get("summary"),
+        metadata.get("source_ref"),
+        metadata.get("source_episode_id"),
+    )
+    if any(_looks_like_synthetic_collection_text(value) for value in values):
+        return True
+    collection_id = _clean_text(collection.get("collection_id"))
+    if not collection_id:
+        return False
+    for item in store._list_collection_items(collection_id=collection_id, limit=96):
+        if _collection_item_is_synthetic(item):
+            return True
+    return False
+
+
+def _semantic_memory_should_prune_as_synthetic(store: LifeMemoryStore, memory: Mapping[str, Any]) -> bool:
+    if _looks_like_synthetic_collection_text(memory.get("summary")):
+        return True
+    if _has_any_marker(memory.get("operator_node_id"), _SYNTHETIC_SOURCE_MARKERS):
+        return True
+    for source_id in _semantic_memory_source_ids(memory):
+        if _has_any_marker(source_id, _SYNTHETIC_SOURCE_MARKERS):
+            return True
+        if source_id.startswith("life_episode::"):
+            episode_id = source_id.split("::", 1)[1]
+            row = store.ledger._conn.execute("SELECT * FROM life_episode WHERE episode_id = ? LIMIT 1", (episode_id,)).fetchone()
+            if row is not None and _is_synthetic_life_record(dict(row)):
+                return True
+        elif source_id.startswith("life_memory_collection::"):
+            collection_id = source_id.split("::", 1)[1]
+            row = store.ledger._conn.execute(
+                "SELECT * FROM life_memory_collection WHERE collection_id = ? LIMIT 1",
+                (collection_id,),
+            ).fetchone()
+            if row is not None and _collection_is_synthetic_for_semantic(store, dict(row)):
+                return True
+    return False
+
+
+def _semantic_memory_prune_reason(
+    store: LifeMemoryStore,
+    memory: Mapping[str, Any],
+    *,
+    stale_collection_semantic_ids: set[str],
+) -> str:
+    semantic_id = _clean_text(memory.get("semantic_id"))
+    if semantic_id and semantic_id in stale_collection_semantic_ids:
+        return "SEMANTIC_COLLECTION_STALE_VERSION"
+    if _semantic_memory_should_prune_as_synthetic(store, memory):
+        return "SEMANTIC_SYNTHETIC_SOURCE"
+    if _semantic_memory_should_prune_as_unscoped_action_pattern(store, memory):
+        return "SEMANTIC_ACTION_PATTERN_UNSCOPED_SOURCE"
+    collection_ids = _semantic_memory_collection_ids(memory)
+    if not collection_ids:
+        return ""
+    if _clean_text(memory.get("distill_strategy")) != "life_memory_collection_rule_consolidation":
+        return ""
+    for collection_id in collection_ids:
+        row = store.ledger._conn.execute(
+            "SELECT * FROM life_memory_collection WHERE collection_id = ? LIMIT 1",
+            (collection_id,),
+        ).fetchone()
+        if row is None:
+            continue
+        collection = dict(row)
+        scope_key = _clean_text(collection.get("scope_key"))
+        if scope_key.startswith(f"{COLLECTION_SCOPE_ROLLING_PREFIX}:"):
+            return "SEMANTIC_COLLECTION_ROLLING_WINDOW_INDEX"
+        if scope_key == COLLECTION_SCOPE_RECENT:
+            source_episode_ids = _collection_source_episode_ids(store, collection_id=collection_id)
+            if len(source_episode_ids) <= 1:
+                return "SEMANTIC_COLLECTION_SINGLE_DELIVERY_WINDOW"
+    return ""
+
+
+def _semantic_memory_should_prune_as_unscoped_action_pattern(store: LifeMemoryStore, memory: Mapping[str, Any]) -> bool:
+    if _clean_text(memory.get("distill_strategy")) != "life_action_pattern_rule_consolidation":
+        return False
+    episode_source_ids = [
+        source_id.split("::", 1)[1]
+        for source_id in _semantic_memory_source_ids(memory)
+        if source_id.startswith("life_episode::") and _clean_text(source_id.split("::", 1)[1])
+    ]
+    if not episode_source_ids:
+        return True
+    placeholders = ", ".join("?" for _ in episode_source_ids)
+    rows = store.ledger._conn.execute(
+        f"""
+        SELECT episode_id, person_id, session_id, action, metadata
+        FROM life_episode
+        WHERE episode_id IN ({placeholders})
+        """,
+        tuple(episode_source_ids),
+    ).fetchall()
+    by_id = {str(row["episode_id"]): dict(row) for row in rows}
+    for episode_id in episode_source_ids:
+        row = by_id.get(episode_id)
+        if row is None:
+            return True
+        metadata = _episode_metadata_dict(row)
+        if _is_synthetic_life_record(row, metadata):
+            return True
+        if _clean_text(row.get("action")).lower() != "lightnovel_recommendation_deep_review":
+            return True
+        if not _action_pattern_scope_key(row, metadata=metadata):
+            return True
+    return False
+
+
+def _semantic_memory_collection_ids(memory: Mapping[str, Any]) -> list[str]:
+    ids: list[str] = []
+    for source_id in _semantic_memory_source_ids(memory):
+        if source_id.startswith("life_memory_collection::"):
+            collection_id = _clean_text(source_id.split("::", 1)[1])
+            if collection_id:
+                ids.append(collection_id)
+    return list(dict.fromkeys(ids))
+
+
+def _stale_collection_semantic_ids(store: LifeMemoryStore, memories: Sequence[Mapping[str, Any]]) -> set[str]:
+    by_collection: dict[str, list[Mapping[str, Any]]] = {}
+    for memory in list(memories or []):
+        if _clean_text(memory.get("distill_strategy")) != "life_memory_collection_rule_consolidation":
+            continue
+        identity_keys = _semantic_memory_collection_identity_keys(store, memory)
+        for identity_key in identity_keys:
+            by_collection.setdefault(identity_key, []).append(memory)
+    stale: set[str] = set()
+    for items in by_collection.values():
+        unique = {
+            _clean_text(item.get("semantic_id")): item
+            for item in items
+            if _clean_text(item.get("semantic_id"))
+        }
+        if len(unique) <= 1:
+            continue
+        ordered = sorted(
+            unique.values(),
+            key=lambda item: (
+                _coerce_int(item.get("ts_ms")),
+                _clamp_unit(item.get("confidence")),
+                len(_clean_text(item.get("summary"), limit=2000)),
+            ),
+            reverse=True,
+        )
+        for item in ordered[1:]:
+            semantic_id = _clean_text(item.get("semantic_id"))
+            if semantic_id:
+                stale.add(semantic_id)
+    return stale
+
+
+def _semantic_memory_collection_identity_keys(store: LifeMemoryStore, memory: Mapping[str, Any]) -> list[str]:
+    collection_ids = _semantic_memory_collection_ids(memory)
+    if not collection_ids:
+        return []
+    placeholders = ", ".join("?" for _ in collection_ids)
+    rows = store.ledger._conn.execute(
+        f"""
+        SELECT collection_id, collection_kind, domain, scope_key, person_id, session_id
+        FROM life_memory_collection
+        WHERE collection_id IN ({placeholders})
+        """,
+        tuple(collection_ids),
+    ).fetchall()
+    by_id = {str(row["collection_id"]): dict(row) for row in rows}
+    keys: list[str] = []
+    for collection_id in collection_ids:
+        row = by_id.get(collection_id)
+        if row is None:
+            keys.append(f"collection_id:{collection_id}")
+            continue
+        owner = _clean_text(row.get("person_id")) or "global"
+        keys.append(
+            "collection_scope:"
+            f"{_clean_text(row.get('collection_kind'))}:"
+            f"{_clean_text(row.get('domain'))}:"
+            f"{_clean_text(row.get('scope_key'))}:"
+            f"{owner}"
+        )
+    return list(dict.fromkeys(keys))
+
+
+def _count_reason_codes(items: Sequence[Mapping[str, Any]]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for item in list(items or []):
+        reason = _clean_text(item.get("reason_code")) or "UNKNOWN"
+        counts[reason] = counts.get(reason, 0) + 1
+    return counts
+
+
+def _merge_semantic_cleanup_reports(*reports: Mapping[str, Any]) -> dict[str, Any]:
+    merged_ids: list[str] = []
+    merged_samples: list[dict[str, Any]] = []
+    reason_counts: dict[str, int] = {}
+    scanned_count = 0
+    dry_run = False
+    passes: list[dict[str, Any]] = []
+    for report in reports:
+        item = dict(report or {})
+        if not item:
+            continue
+        scanned_count += max(0, _coerce_int(item.get("scanned_count")))
+        dry_run = dry_run or bool(item.get("dry_run"))
+        for semantic_id in list(item.get("semantic_ids") or []):
+            cleaned = _clean_text(semantic_id)
+            if cleaned and cleaned not in merged_ids:
+                merged_ids.append(cleaned)
+        for reason, count in dict(item.get("reason_counts") or {}).items():
+            key = _clean_text(reason) or "UNKNOWN"
+            reason_counts[key] = reason_counts.get(key, 0) + max(0, _coerce_int(count))
+        for sample in list(item.get("samples") or []):
+            if isinstance(sample, Mapping):
+                merged_samples.append(dict(sample))
+        passes.append(
+            {
+                "scanned_count": max(0, _coerce_int(item.get("scanned_count"))),
+                "pruned_count": max(0, _coerce_int(item.get("pruned_count"))),
+                "reason_counts": dict(item.get("reason_counts") or {}),
+            }
+        )
+    return {
+        "status": "OK",
+        "dry_run": dry_run,
+        "scanned_count": scanned_count,
+        "pruned_count": len(merged_ids),
+        "semantic_ids": merged_ids,
+        "reason_counts": dict(sorted(reason_counts.items())),
+        "samples": merged_samples[:8],
+        "passes": passes,
+    }
+
+
+def _collection_source_episode_ids(store: LifeMemoryStore, *, collection_id: str) -> list[str]:
+    rows = store._list_collection_items(collection_id=collection_id, limit=256)
+    ids = [_clean_text(item.get("episode_id")) for item in rows if _clean_text(item.get("episode_id"))]
     return list(dict.fromkeys(ids))
 
 
@@ -3887,14 +6030,19 @@ def _semantic_referenced_episode_ids(conn: Any) -> set[str]:
     return episode_ids
 
 
-def _trusted_active_episode_ids(store: LifeMemoryStore, episode_ids: Sequence[Any]) -> set[str]:
+def _trusted_active_episode_ids(
+    store: LifeMemoryStore,
+    episode_ids: Sequence[Any],
+    *,
+    allow_synthetic: bool = False,
+) -> set[str]:
     ids = list(dict.fromkeys(_clean_text(item) for item in list(episode_ids or []) if _clean_text(item)))
     if not ids:
         return set()
     placeholders = ", ".join("?" for _ in ids)
     rows = store.ledger._conn.execute(
         f"""
-        SELECT episode_id
+        SELECT episode_id, person_id, session_id, thread_id, primary_ref, metadata
         FROM life_episode
         WHERE episode_id IN ({placeholders})
           AND truth_state = ?
@@ -3903,7 +6051,15 @@ def _trusted_active_episode_ids(store: LifeMemoryStore, episode_ids: Sequence[An
         """,
         (*ids, TRUTH_VERIFIED, STATUS_ACTIVE, RETENTION_COLD, RETENTION_GONE),
     ).fetchall()
-    return {_clean_text(row["episode_id"]) for row in rows if _clean_text(row["episode_id"])}
+    trusted: set[str] = set()
+    for row in rows:
+        record = dict(row)
+        if _is_synthetic_life_record(record) and not allow_synthetic:
+            continue
+        episode_id = _clean_text(record.get("episode_id"))
+        if episode_id:
+            trusted.add(episode_id)
+    return trusted
 
 
 def _semantic_proposal_from_collection(store: LifeMemoryStore, collection: Mapping[str, Any]) -> dict[str, Any] | None:
@@ -3913,7 +6069,7 @@ def _semantic_proposal_from_collection(store: LifeMemoryStore, collection: Mappi
     metadata = _json_loads(collection.get("metadata"), fallback={})
     if not isinstance(metadata, dict):
         metadata = {}
-    if bool(metadata.get("e2e_probe")) or bool(metadata.get("test_probe")):
+    if _is_synthetic_life_record(collection, metadata):
         return None
     domain = _clean_text(collection.get("domain"))
     collection_kind = _clean_text(collection.get("collection_kind"))
@@ -3928,6 +6084,9 @@ def _semantic_proposal_from_collection(store: LifeMemoryStore, collection: Mappi
     items = store._list_collection_items(collection_id=collection_id, limit=32)
     if not items:
         return None
+    items = [item for item in items if not _collection_item_is_synthetic(item)]
+    if not items:
+        return None
     source_episode_id_order = [
         _clean_text(item.get("episode_id"))
         for item in items
@@ -3938,18 +6097,22 @@ def _semantic_proposal_from_collection(store: LifeMemoryStore, collection: Mappi
         items = [item for item in items if _clean_text(item.get("episode_id")) in trusted_episode_ids]
     if not items:
         return None
-    titles = [
-        _clean_text(item.get("item_title") or _collection_item_title(item), limit=80)
-        for item in items
-        if _clean_text(item.get("item_title") or _collection_item_title(item))
-    ]
-    if not titles:
-        return None
+    item_count = len(items)
     source_episode_ids = [
         _clean_text(item.get("episode_id"))
         for item in items
         if _clean_text(item.get("episode_id"))
     ]
+    distinct_source_episode_ids = list(dict.fromkeys(source_episode_ids))
+    if not _collection_scope_should_distill_to_semantic(
+        scope_key=scope_key,
+        source_episode_count=len(distinct_source_episode_ids),
+    ):
+        return None
+    title_records = _semantic_collection_title_records(items)
+    titles = [item["title"] for item in title_records]
+    if not titles:
+        return None
     source_refs = [
         _clean_text(item.get("evidence_ref") or item.get("source_ref"))
         for item in items
@@ -3958,23 +6121,27 @@ def _semantic_proposal_from_collection(store: LifeMemoryStore, collection: Mappi
     person_id = _clean_text(collection.get("person_id")) or "global"
     domain_label = "轻小说推荐" if domain == DOMAIN_LIGHTNOVEL_RECOMMENDATION else (domain.replace("_", " ") or "推荐")
     scope_label = _semantic_collection_scope_label(scope_key)
-    title_part = "、".join(titles[:10])
-    if len(titles) > 10:
-        title_part += f"等 {len(titles)} 个条目"
-    summary = f"经历集合：{scope_label}{domain_label}记录了 {item_count} 个条目：{title_part}。"
-    if source_episode_ids:
-        summary += f" 可追溯到 {len(set(source_episode_ids))} 个推荐经历。"
-    semantic_key = (
-        "experience_collection|"
-        f"{person_id}|{domain}|{scope_key}|"
-        f"{_stable_hash('|'.join(titles[:24]), size=24)}"
+    facets = _semantic_collection_facets(items)
+    summary = _build_collection_semantic_summary(
+        scope_label=scope_label,
+        domain_label=domain_label,
+        titles=titles,
+        facets=facets,
+        source_episode_count=len(set(source_episode_ids)),
+        pushed_count=item_count,
     )
+    semantic_key = f"experience_collection|{person_id}|{collection_kind}|{domain}|{scope_key}"
     confidence = _semantic_collection_confidence(collection=collection, item_count=item_count)
     tags = [
         "experience_collection",
         "recommendation_collection",
         f"domain:{domain or 'generic'}",
+        f"collection_scope:{_semantic_collection_scope_kind(scope_key)}",
+        "memory_family:experience_index",
+        "semantic_tier:episodic_summary",
+        "recall_axis:what_happened",
     ]
+    tags.extend(_semantic_collection_facet_tags(facets))
     if domain == DOMAIN_LIGHTNOVEL_RECOMMENDATION:
         tags.append("lightnovel_recommendation")
     return {
@@ -3983,11 +6150,551 @@ def _semantic_proposal_from_collection(store: LifeMemoryStore, collection: Mappi
         "summary": summary,
         "confidence": confidence,
         "tags": tags,
-        "source_episode_ids": list(dict.fromkeys(source_episode_ids)),
+        "source_episode_ids": distinct_source_episode_ids,
         "source_collection_ids": [collection_id],
         "source_refs": list(dict.fromkeys([f"life_memory_collection://{collection_id}", *source_refs])),
         "distill_strategy": "life_memory_collection_rule_consolidation",
+        "collection_scope_label": scope_label,
+        "collection_domain_label": domain_label,
+        "collection_item_titles": titles,
+        "collection_pushed_count": item_count,
+        "collection_unique_count": len(titles),
+        "collection_facets": facets,
     }
+
+
+def _semantic_proposal_from_entity(store: LifeMemoryStore, entity: Mapping[str, Any]) -> dict[str, Any] | None:
+    entity_id = _clean_text(entity.get("entity_id"))
+    if not entity_id:
+        return None
+    metadata = _json_loads(entity.get("metadata"), fallback={})
+    if not isinstance(metadata, dict):
+        metadata = {}
+    if _is_synthetic_life_record(entity, metadata):
+        return None
+    mentions = store._list_entity_mentions(entity_id=entity_id, limit=32)
+    if not mentions:
+        return None
+    trusted_ids = _trusted_active_episode_ids(
+        store,
+        [_clean_text(item.get("episode_id")) for item in mentions if _clean_text(item.get("episode_id"))],
+    )
+    mentions = [
+        item
+        for item in mentions
+        if not _clean_text(item.get("episode_id")) or _clean_text(item.get("episode_id")) in trusted_ids
+    ]
+    if not mentions:
+        return None
+    deep_mentions = [item for item in mentions if _entity_mention_has_deep_review(item)]
+    if len(mentions) < 2 and not deep_mentions:
+        return None
+    title = _clean_text(entity.get("canonical_name"), limit=220)
+    if not title:
+        return None
+    domain = _clean_text(entity.get("domain"))
+    owner_id = _semantic_entity_owner_id(mentions)
+    source_episode_ids = _unique_clean_texts([item.get("episode_id") for item in mentions if item.get("episode_id")])
+    source_collection_ids = _unique_clean_texts([item.get("collection_id") for item in mentions if item.get("collection_id")])
+    source_refs = _unique_clean_texts(
+        [
+            f"life_memory_entity://{entity_id}",
+            *[
+                item.get("evidence_ref") or item.get("source_ref") or item.get("item_source_ref")
+                for item in mentions
+                if item.get("evidence_ref") or item.get("source_ref") or item.get("item_source_ref")
+            ],
+        ]
+    )
+    if not source_episode_ids and not source_collection_ids:
+        return None
+    summary = _build_entity_semantic_summary(
+        title=title,
+        domain_label=_semantic_entity_domain_label(domain),
+        mentions=mentions,
+        deep_mentions=deep_mentions,
+    )
+    if not summary:
+        return None
+    confidence = _clamp_unit(
+        0.58
+        + min(0.16, len(mentions) * 0.025)
+        + (0.10 if deep_mentions else 0.0)
+        + min(0.06, len(source_collection_ids) * 0.02)
+    )
+    tags = [
+        "experience_entity",
+        f"domain:{domain or 'generic'}",
+        "memory_family:experience_index",
+        "semantic_tier:entity_summary",
+        "recall_axis:what_object",
+    ]
+    if domain == DOMAIN_LIGHTNOVEL_RECOMMENDATION:
+        tags.extend(["lightnovel_recommendation", "entity_kind:book"])
+    if deep_mentions:
+        tags.extend(["has_deep_review", "evidence_review"])
+    return {
+        "semantic_key": f"experience_entity|{owner_id}|{domain}|{entity_id}",
+        "semantic_kind": "experience_entity",
+        "summary": summary,
+        "confidence": confidence,
+        "tags": list(dict.fromkeys(tags)),
+        "source_episode_ids": source_episode_ids,
+        "source_collection_ids": source_collection_ids,
+        "source_entity_ids": [entity_id],
+        "source_refs": source_refs,
+        "distill_strategy": "life_memory_entity_rule_consolidation",
+        "entity_id": entity_id,
+        "entity_title": title,
+        "entity_mention_count": len(mentions),
+        "entity_deep_review_count": len(deep_mentions),
+    }
+
+
+def _semantic_action_pattern_proposals(store: LifeMemoryStore, *, limit: int = 80) -> list[dict[str, Any]]:
+    rows = store.ledger._conn.execute(
+        """
+        SELECT *
+        FROM life_episode
+        WHERE truth_state = ?
+          AND status = ?
+          AND COALESCE(retention_state, ?) != ?
+          AND action = ?
+        ORDER BY last_touched_ts_ms DESC, memory_strength DESC, salience DESC
+        LIMIT ?
+        """,
+        (
+            TRUTH_VERIFIED,
+            STATUS_ACTIVE,
+            RETENTION_WARM,
+            RETENTION_GONE,
+            "lightnovel_recommendation_deep_review",
+            max(1, int(limit)),
+        ),
+    ).fetchall()
+    groups: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        episode = dict(row)
+        metadata = _episode_metadata_dict(episode)
+        if _is_synthetic_life_record(episode, metadata):
+            continue
+        result = _clean_text(episode.get("result") or metadata.get("status")).upper()
+        if result not in {"OK", "SUCCESS", "COMPLETED", "DEGRADED"}:
+            continue
+        if not _action_pattern_deep_review_is_meaningful(episode, metadata=metadata, result=result):
+            continue
+        scope_key = _action_pattern_scope_key(episode, metadata=metadata)
+        if not scope_key:
+            continue
+        group = groups.setdefault(
+            scope_key,
+            {
+                "scope_key": scope_key,
+                "count": 0,
+                "ok_count": 0,
+                "degraded_count": 0,
+                "readable_body_count": 0,
+                "source_episode_ids": [],
+                "source_collection_ids": [],
+                "source_refs": [],
+                "selected_titles": [],
+                "reason_facets": [],
+            },
+        )
+        episode_id = _clean_text(episode.get("episode_id"))
+        if not episode_id:
+            continue
+        group["count"] += 1
+        if result == "DEGRADED":
+            group["degraded_count"] += 1
+        else:
+            group["ok_count"] += 1
+        if _action_pattern_has_readable_body(metadata):
+            group["readable_body_count"] += 1
+        group["source_episode_ids"].append(episode_id)
+        for source_ref in _action_pattern_source_refs(episode, metadata=metadata):
+            if source_ref not in group["source_refs"]:
+                group["source_refs"].append(source_ref)
+        for collection_id in _coerce_text_list(metadata.get("source_collection_ids")):
+            if collection_id not in group["source_collection_ids"]:
+                group["source_collection_ids"].append(collection_id)
+        title = _action_pattern_selected_title(metadata)
+        if title and title not in group["selected_titles"]:
+            group["selected_titles"].append(title)
+        for facet in _action_pattern_reason_facets(metadata):
+            if facet not in group["reason_facets"]:
+                group["reason_facets"].append(facet)
+
+    proposals: list[dict[str, Any]] = []
+    for group in groups.values():
+        if int(group.get("count") or 0) < 2:
+            continue
+        summary = _build_action_pattern_semantic_summary(group)
+        if not summary:
+            continue
+        count = int(group.get("count") or 0)
+        ok_count = int(group.get("ok_count") or 0)
+        degraded_count = int(group.get("degraded_count") or 0)
+        readable_count = int(group.get("readable_body_count") or 0)
+        confidence = _clamp_unit(0.62 + min(0.16, count * 0.025) + (0.06 if ok_count else 0.0) + (0.04 if readable_count else 0.0) + (0.02 if degraded_count else 0.0))
+        proposals.append(
+            {
+                "semantic_key": f"action_pattern|{_clean_text(group.get('scope_key'))}|lightnovel_recommendation|deep_review",
+                "semantic_kind": "action_pattern",
+                "summary": summary,
+                "confidence": confidence,
+                "tags": [
+                    "action_pattern",
+                    "proactive_action",
+                    "deep_review",
+                    "evidence_review",
+                    "domain:lightnovel_recommendation",
+                    "lightnovel_recommendation",
+                    "recall_axis:what_she_does",
+                ],
+                "source_episode_ids": _unique_clean_texts(list(group.get("source_episode_ids") or [])),
+                "source_collection_ids": _unique_clean_texts(list(group.get("source_collection_ids") or [])),
+                "source_refs": _unique_clean_texts(list(group.get("source_refs") or [])),
+                "distill_strategy": "life_action_pattern_rule_consolidation",
+            }
+        )
+    proposals.sort(key=lambda item: (-_clamp_unit(item.get("confidence")), _clean_text(item.get("semantic_key"))))
+    return proposals
+
+
+def _action_pattern_deep_review_is_meaningful(
+    episode: Mapping[str, Any],
+    *,
+    metadata: Mapping[str, Any],
+    result: str,
+) -> bool:
+    if _clean_text(result).upper() == "DEGRADED":
+        text = re.sub(
+            r"\s+",
+            "",
+            " ".join(
+                [
+                    _clean_text(episode.get("summary"), limit=700),
+                    _clean_text(metadata.get("memory_anchor"), limit=500),
+                    _clean_text(metadata.get("fact"), limit=500),
+                    _clean_text(metadata.get("reason_code"), limit=120),
+                ]
+            ),
+        ).lower()
+        return bool(text and any(token in text for token in ("没拿到可读网页", "没拿到", "fetch_failed", "证据不足", "不能负责任", "不能装作")))
+    return bool(_action_pattern_selected_title(metadata) or _action_pattern_reason_facets(metadata) or _action_pattern_has_readable_body(metadata))
+
+
+def _action_pattern_scope_key(episode: Mapping[str, Any], *, metadata: Mapping[str, Any]) -> str:
+    session_id = _clean_text(episode.get("session_id") or metadata.get("session_id"), limit=120)
+    person_id = _clean_text(episode.get("person_id") or metadata.get("person_id"), limit=120)
+    if not session_id and not person_id:
+        return ""
+    if session_id == "qq_dm_owner":
+        return ""
+    if session_id.startswith("qq_dm_"):
+        return session_id
+    return person_id or session_id
+
+
+def _action_pattern_source_refs(episode: Mapping[str, Any], *, metadata: Mapping[str, Any]) -> list[str]:
+    refs = _unique_clean_texts(
+        [
+            episode.get("primary_ref"),
+            *_coerce_text_list(metadata.get("evidence_refs")),
+            *_coerce_text_list(metadata.get("source_anchor_refs")),
+        ],
+        limit=220,
+    )
+    return refs[:16]
+
+
+def _action_pattern_selected_title(metadata: Mapping[str, Any]) -> str:
+    selected = metadata.get("selected") if isinstance(metadata.get("selected"), Mapping) else {}
+    return _clean_text(selected.get("title") if isinstance(selected, Mapping) else None, limit=90)
+
+
+def _action_pattern_has_readable_body(metadata: Mapping[str, Any]) -> bool:
+    selected = metadata.get("selected") if isinstance(metadata.get("selected"), Mapping) else {}
+    items = list(metadata.get("items") or []) if isinstance(metadata.get("items"), Sequence) and not isinstance(metadata.get("items"), (str, bytes, bytearray)) else []
+    records = [selected, *[item for item in items if isinstance(item, Mapping)]]
+    for record in records:
+        if _clean_text(record.get("body_quality")).upper() == "READABLE_BODY":
+            return True
+        if _coerce_int(record.get("content_char_count")) >= 500:
+            return True
+        observations = " ".join(_coerce_text_list(record.get("body_observations")))
+        if "正文" in observations:
+            return True
+    return False
+
+
+def _action_pattern_reason_facets(metadata: Mapping[str, Any]) -> list[str]:
+    selected = metadata.get("selected") if isinstance(metadata.get("selected"), Mapping) else {}
+    items = list(metadata.get("items") or []) if isinstance(metadata.get("items"), Sequence) and not isinstance(metadata.get("items"), (str, bytes, bytearray)) else []
+    raw_parts: list[str] = []
+    for record in [selected, *[item for item in items[:6] if isinstance(item, Mapping)]]:
+        raw_parts.extend(_coerce_text_list(record.get("body_observations")))
+        raw_parts.extend(_coerce_text_list(record.get("score_reasons")))
+        raw_parts.append(_clean_text(record.get("selection_reason"), limit=120))
+        raw_parts.append(_clean_text(record.get("chapter_signal"), limit=120))
+    compact = re.sub(r"\s+", "", "；".join(part for part in raw_parts if part)).lower()
+    facets: list[str] = []
+
+    def add(label: str) -> None:
+        if label and label not in facets:
+            facets.append(label)
+
+    if any(token in compact for token in ("正文开篇", "进入故事", "开篇", "正文标题")):
+        add("开篇是不是已经进入故事")
+    if any(token in compact for token in ("对白", "人物互动", "互动", "关系")):
+        add("对白和人物互动")
+    if any(token in compact for token in ("恋爱日常", "亲密感", "日常梗", "成长/照顾线")):
+        add("关系推进和日常读感")
+    if any(token in compact for token in ("异世界", "皇女", "皇帝", "后宫", "身份钩子", "设定")):
+        add("设定钩子是否直给")
+    if any(token in compact for token in ("章节线索", "第一章", "第二章", "第16话", "第18话", "序章")):
+        add("章节线索是否清楚")
+    if any(token in compact for token in ("轻喜剧", "轻快", "读感")):
+        add("读起来是否轻快")
+    return facets[:6]
+
+
+def _coerce_text_list(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
+        raw = list(value)
+    else:
+        raw = [value]
+    return [_clean_text(item, limit=180) for item in raw if _clean_text(item, limit=180)]
+
+
+def _build_action_pattern_semantic_summary(group: Mapping[str, Any]) -> str:
+    count = int(group.get("count") or 0)
+    ok_count = int(group.get("ok_count") or 0)
+    degraded_count = int(group.get("degraded_count") or 0)
+    readable_count = int(group.get("readable_body_count") or 0)
+    if count <= 0:
+        return ""
+    evidence_label = "详情页或正文" if readable_count else "详情页"
+    summary = f"主动行动模式：在轻小说推荐追问里，她会回去打开{evidence_label}再比较哪本更值得看；已记录 {count} 次深读/回看行动"
+    stats: list[str] = []
+    if ok_count:
+        stats.append(f"{ok_count} 次拿到可用详情")
+    if readable_count:
+        stats.append(f"{readable_count} 次读到正文级证据")
+    if degraded_count:
+        stats.append(f"{degraded_count} 次因网页或 epub 不可读而降级")
+    if stats:
+        summary += f"，其中{'，'.join(stats)}"
+    facets = _unique_clean_texts(list(group.get("reason_facets") or []), limit=40)
+    if facets:
+        summary += f"。判断时主要看：{'、'.join(facets[:5])}"
+    titles = _unique_clean_texts(list(group.get("selected_titles") or []), limit=80)
+    if titles:
+        summary += f"。最近实际选中过：{'、'.join(titles[:4])}"
+    if degraded_count:
+        summary += "。如果网页或 epub 拿不到，她应该直接说明证据不足，不能装作已经读过"
+    return _clean_text(summary + "。", limit=900)
+
+
+def _semantic_proposals_are_same_collection_scope(first: Mapping[str, Any], second: Mapping[str, Any]) -> bool:
+    if _clean_text(first.get("distill_strategy")) != "life_memory_collection_rule_consolidation":
+        return False
+    if _clean_text(second.get("distill_strategy")) != "life_memory_collection_rule_consolidation":
+        return False
+    return _clean_text(first.get("semantic_key")) == _clean_text(second.get("semantic_key"))
+
+
+def _merge_collection_semantic_proposal(existing: dict[str, Any], incoming: Mapping[str, Any]) -> None:
+    titles = _unique_clean_texts([*list(existing.get("collection_item_titles") or []), *list(incoming.get("collection_item_titles") or [])], limit=80)
+    facets = _unique_clean_texts([*list(existing.get("collection_facets") or []), *list(incoming.get("collection_facets") or [])], limit=40)
+    source_episode_ids = _unique_clean_texts([*list(existing.get("source_episode_ids") or []), *list(incoming.get("source_episode_ids") or [])])
+    source_collection_ids = _unique_clean_texts([*list(existing.get("source_collection_ids") or []), *list(incoming.get("source_collection_ids") or [])])
+    source_refs = _unique_clean_texts([*list(existing.get("source_refs") or []), *list(incoming.get("source_refs") or [])])
+    tags = _unique_clean_texts([*list(existing.get("tags") or []), *list(incoming.get("tags") or [])])
+    scope_label = _clean_text(existing.get("collection_scope_label")) or _clean_text(incoming.get("collection_scope_label"))
+    domain_label = _clean_text(existing.get("collection_domain_label")) or _clean_text(incoming.get("collection_domain_label"))
+    existing["collection_item_titles"] = titles
+    existing["collection_facets"] = facets
+    existing["collection_pushed_count"] = max(
+        len(titles),
+        int(existing.get("collection_pushed_count") or 0) + int(incoming.get("collection_pushed_count") or 0),
+    )
+    existing["collection_unique_count"] = len(titles)
+    existing["source_episode_ids"] = source_episode_ids
+    existing["source_collection_ids"] = source_collection_ids
+    existing["source_refs"] = source_refs
+    existing["tags"] = tags
+    existing["confidence"] = max(_clamp_unit(existing.get("confidence")), _clamp_unit(incoming.get("confidence")))
+    existing["summary"] = _build_collection_semantic_summary(
+        scope_label=scope_label,
+        domain_label=domain_label,
+        titles=titles,
+        facets=facets,
+        source_episode_count=len(source_episode_ids),
+        pushed_count=int(existing.get("collection_pushed_count") or len(titles)),
+    )
+
+
+def _unique_clean_texts(values: Sequence[Any], *, limit: int | None = None) -> list[str]:
+    items: list[str] = []
+    seen: set[str] = set()
+    for value in list(values or []):
+        text = _clean_text(value, limit=limit)
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        items.append(text)
+    return items
+
+
+def _semantic_collection_title_records(items: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    records: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for item in list(items or []):
+        metadata = item.get("metadata") if isinstance(item.get("metadata"), Mapping) else {}
+        title = (
+            _collection_item_resolved_canonical_title(item)
+            or _clean_text(metadata.get("canonical_title") if isinstance(metadata, Mapping) else "", limit=120)
+            or _clean_text(item.get("item_title") or _collection_item_title(item), limit=120)
+        )
+        key = _collection_item_canonical_key(title) or _clean_text(metadata.get("canonical_key") if isinstance(metadata, Mapping) else "")
+        if not title:
+            continue
+        dedupe_key = key or re.sub(r"\s+", "", title.lower())
+        if not dedupe_key or dedupe_key in seen:
+            continue
+        seen.add(dedupe_key)
+        records.append({"title": _clean_text(title, limit=80), "canonical_key": dedupe_key})
+    return records
+
+
+def _build_collection_semantic_summary(
+    *,
+    scope_label: str,
+    domain_label: str,
+    titles: Sequence[Any],
+    facets: Sequence[Any],
+    source_episode_count: int,
+    pushed_count: int | None = None,
+) -> str:
+    cleaned_titles = _unique_clean_texts(titles, limit=80)
+    title_part = "、".join(cleaned_titles[:10])
+    if len(cleaned_titles) > 10:
+        title_part += f"等 {len(cleaned_titles)} 本"
+    unique_count = len(cleaned_titles)
+    raw_count = max(unique_count, int(pushed_count or unique_count))
+    label = f"{_clean_text(scope_label)}{_clean_text(domain_label) or '推荐'}"
+    if raw_count > unique_count:
+        summary = f"经历集合：{label}发过 {raw_count} 条推荐，去掉重复标题主要是 {unique_count} 本：{title_part}。"
+    else:
+        summary = f"经历集合：{label}记录了 {unique_count} 本：{title_part}。"
+    cleaned_facets = _unique_clean_texts(facets, limit=40)
+    if cleaned_facets:
+        summary += f" 题材线索：{'、'.join(cleaned_facets[:8])}。"
+    if source_episode_count:
+        summary += f" 可追溯到 {int(source_episode_count)} 个推荐经历。"
+    return _clean_text(summary, limit=900)
+
+
+def _semantic_collection_facets(items: Sequence[Mapping[str, Any]], *, limit: int = 10) -> list[str]:
+    facets: list[str] = []
+
+    def add(value: Any) -> None:
+        for part in _split_collection_facet_text(value):
+            if part not in facets:
+                facets.append(part)
+                if len(facets) >= max(1, int(limit)):
+                    return
+
+    for item in list(items or []):
+        metadata = item.get("metadata") if isinstance(item.get("metadata"), Mapping) else {}
+        for key in (
+            "selection_reason",
+            "rationale",
+            "reason",
+            "look_point",
+            "genre",
+            "category",
+            "topic",
+            "theme",
+            "tags",
+        ):
+            add(item.get(key))
+            add(metadata.get(key) if isinstance(metadata, Mapping) else None)
+        summary = _clean_text(item.get("item_summary") or _collection_item_summary(item), limit=500)
+        for label in ("看点", "题材"):
+            for match in re.finditer(rf"(?:^|[｜|；;]){label}\s*[:：]\s*([^｜|；;]+)", summary):
+                add(match.group(1))
+        if len(facets) >= max(1, int(limit)):
+            break
+    return facets[: max(1, int(limit))]
+
+
+def _split_collection_facet_text(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
+        raw_parts = [str(item or "") for item in value]
+    else:
+        raw_parts = [str(value or "")]
+    out: list[str] = []
+    for raw in raw_parts:
+        text = _clean_text(raw, limit=260)
+        if not text:
+            continue
+        text = re.sub(r"https?://\S+", " ", text)
+        text = re.sub(r"^(?:看点|题材|简介|原因|理由|命中偏好|公开信号较好)\s*[:：]\s*", "", text)
+        text = text.replace("｜", "、").replace("|", "、")
+        for part in re.split(r"[、，,；;/\n\r]+", text):
+            cleaned = _normalize_collection_facet(part)
+            if cleaned and cleaned not in out:
+                out.append(cleaned)
+    return out
+
+
+def _normalize_collection_facet(value: Any) -> str:
+    text = _clean_text(value, limit=80)
+    text = re.sub(r"^(?:看点|题材|简介|原因|理由|命中偏好|公开信号较好)\s*[:：]\s*", "", text)
+    text = re.sub(r"\s+", "", text)
+    text = text.strip("。.!！?？:：；;、,，（）()[]【】")
+    if not text or len(text) < 2:
+        return ""
+    if re.fullmatch(r"\d+(?:\.\d+)?[万wkWK]?(?:浏览|评论|字|章|话|小时|分钟|天|月|年|日前|小时前|分钟前)?", text):
+        return ""
+    if re.search(r"(?:小时|分钟|日前|小时前|分钟前|更新|评论|浏览|资料完整度|公开信号|详情|http|https)", text, re.IGNORECASE):
+        return ""
+    if text in _COLLECTION_FACET_STOPWORDS:
+        return ""
+    if len(text) > 18:
+        text = text[:18].rstrip("，,、。")
+    return text
+
+
+_COLLECTION_FACET_STOPWORDS: frozenset[str] = frozenset(
+    {
+        "资料完整度高",
+        "资料完整度较高",
+        "热度较高",
+        "更新较新",
+        "信息完整度比普通列表项更高",
+        "题材明确",
+        "路线直球但题材明确",
+    }
+)
+
+
+def _semantic_collection_facet_tags(facets: Sequence[str]) -> list[str]:
+    tags: list[str] = []
+    for facet in list(facets or [])[:8]:
+        normalized = re.sub(r"\s+", "_", _clean_text(facet, limit=40).lower())
+        normalized = normalized.replace("：", "_").replace(":", "_")
+        normalized = normalized.strip("_")
+        if normalized:
+            tags.append(f"theme:{normalized}")
+    return tags
 
 
 def _semantic_collection_scope_label(scope_key: str) -> str:
@@ -4001,6 +6708,30 @@ def _semantic_collection_scope_label(scope_key: str) -> str:
     if value.startswith(f"{COLLECTION_SCOPE_ROLLING_PREFIX}:"):
         return _rolling_scope_label(value) + "的"
     return f"{value} "
+
+
+def _semantic_collection_scope_kind(scope_key: str) -> str:
+    value = _clean_text(scope_key)
+    if value.startswith(f"{COLLECTION_SCOPE_DAILY}:"):
+        return "daily"
+    if value == COLLECTION_SCOPE_RECENT:
+        return "recent"
+    if value.startswith(f"{COLLECTION_SCOPE_ROLLING_PREFIX}:"):
+        return "rolling"
+    if value.startswith(f"{COLLECTION_SCOPE_DELIVERY}:"):
+        return "delivery"
+    return value or "unknown"
+
+
+def _collection_scope_should_distill_to_semantic(*, scope_key: str, source_episode_count: int) -> bool:
+    value = _clean_text(scope_key)
+    if value.startswith(f"{COLLECTION_SCOPE_DAILY}:"):
+        return True
+    if value == COLLECTION_SCOPE_RECENT:
+        return int(source_episode_count) >= 2
+    if value.startswith(f"{COLLECTION_SCOPE_ROLLING_PREFIX}:"):
+        return False
+    return False
 
 
 def _rolling_scope_label(scope_key: str) -> str:
@@ -4116,10 +6847,12 @@ def _semantic_proposals_from_episode(
     evidence_rows: Sequence[Mapping[str, Any]],
 ) -> list[dict[str, Any]]:
     metadata = _episode_metadata_dict(episode)
-    if bool(metadata.get("e2e_probe")) or bool(metadata.get("test_probe")):
+    if _is_synthetic_life_record(episode, metadata):
         return []
     action = _clean_text(episode.get("action") or metadata.get("action_kind")).lower()
     event_source = _clean_text(metadata.get("event_source")).lower()
+    if action.startswith("sub_agent:") and not bool(metadata.get("should_distill_to_memory")):
+        return []
     if action in {
         "lightnovel_recommendation_delivery",
         "lightnovel_recommendation_deep_review",
@@ -4148,7 +6881,9 @@ def _semantic_proposals_from_episode(
         kind = semantic["kind"]
         summary = semantic["summary"]
         person_id = _clean_text(episode.get("person_id")) or "global"
-        key_text = re.sub(r"\s+", "", summary.lower())
+        if kind in {"failure_lesson", "self_change"}:
+            person_id = "global"
+        key_text = _clean_text(semantic.get("key_hint")) or re.sub(r"\s+", "", summary.lower())[:220]
         semantic_key = f"{kind}|{person_id}|{key_text[:220]}"
         confidence = _semantic_confidence(episode=episode, base=float(semantic.get("base_confidence") or 0.0))
         proposals.append(
@@ -4160,9 +6895,227 @@ def _semantic_proposals_from_episode(
                 "tags": list(semantic.get("tags") or []),
                 "source_episode_ids": [episode_id],
                 "source_refs": list(dict.fromkeys(source_refs)),
+                "open_loop_status": semantic.get("open_loop_status"),
+                "open_loop_close_reason": semantic.get("open_loop_close_reason"),
             }
         )
     return proposals
+
+
+def _sqlite_table_exists(conn: Any, table_name: str) -> bool:
+    try:
+        row = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ? LIMIT 1",
+            (_clean_text(table_name),),
+        ).fetchone()
+    except Exception:
+        return False
+    return row is not None
+
+
+def _semantic_proposal_from_correction_row(row: Mapping[str, Any]) -> dict[str, Any] | None:
+    correction_id = _clean_text(row.get("correction_id"))
+    if not correction_id:
+        return None
+    reason_code = _clean_text(row.get("reason_code"))
+    detail = _clean_text(row.get("detail"), limit=700)
+    if not reason_code:
+        return None
+
+    source_episode = {
+        "episode_id": _clean_text(row.get("episode_id")),
+        "person_id": _clean_text(row.get("source_person_id")),
+        "session_id": _clean_text(row.get("source_session_id")),
+        "primary_ref": _clean_text(row.get("source_primary_ref")),
+        "summary": _clean_text(row.get("source_summary"), limit=900),
+        "metadata": row.get("source_metadata"),
+    }
+    correction_episode = {
+        "episode_id": _clean_text(row.get("correction_episode_id")),
+        "person_id": _clean_text(row.get("correction_person_id")),
+        "session_id": _clean_text(row.get("correction_session_id")),
+        "primary_ref": _clean_text(row.get("correction_primary_ref")),
+        "summary": _clean_text(row.get("correction_summary"), limit=900),
+        "truth_state": _clean_text(row.get("correction_truth_state")).upper(),
+        "status": _clean_text(row.get("correction_status")).upper(),
+        "retention_state": _clean_text(row.get("correction_retention_state")).upper(),
+        "metadata": row.get("correction_metadata"),
+    }
+    source_meta = _episode_metadata_dict(source_episode)
+    correction_meta = _episode_metadata_dict(correction_episode)
+    if _is_synthetic_life_record(source_episode, source_meta):
+        return None
+    if correction_episode["episode_id"] and _is_synthetic_life_record(correction_episode, correction_meta):
+        return None
+
+    correction_policy = correction_meta.get("memory_policy") if isinstance(correction_meta.get("memory_policy"), Mapping) else {}
+    correction_memory_class = _episode_memory_class_from_metadata(correction_meta)
+    correction_episode_is_candidate = (
+        bool(correction_episode["episode_id"])
+        and correction_episode["truth_state"] == TRUTH_VERIFIED
+        and correction_episode["status"] == STATUS_ACTIVE
+        and correction_episode["retention_state"] != RETENTION_GONE
+        and (bool(correction_policy.get("semantic_candidate")) or correction_memory_class == MEMORY_CLASS_CORRECTION)
+    )
+    if correction_episode_is_candidate:
+        return None
+
+    body, key_hint, extra_tags, person_scope = _semantic_correction_body_and_key(
+        reason_code=reason_code,
+        detail=detail,
+        source_summary=_clean_text(row.get("source_summary"), limit=900),
+    )
+    if not body:
+        return None
+    source_refs = list(
+        dict.fromkeys(
+            item
+            for item in (
+                f"life_memory_correction://{correction_id}",
+                _clean_text(row.get("correction_primary_ref")),
+                _clean_text(row.get("source_primary_ref")),
+            )
+            if item
+        )
+    )
+    source_episode_ids: list[str] = []
+    if correction_episode["episode_id"] and correction_episode["truth_state"] == TRUTH_VERIFIED and correction_episode["status"] == STATUS_ACTIVE:
+        source_episode_ids.append(correction_episode["episode_id"])
+    person_id = person_scope or _clean_text(row.get("correction_person_id")) or _clean_text(row.get("source_person_id")) or "global"
+    semantic_key = f"correction|{person_id}|{key_hint}"
+    return {
+        "semantic_key": semantic_key,
+        "semantic_kind": "correction",
+        "summary": f"纠错记忆：{body}",
+        "confidence": 0.82,
+        "tags": list(dict.fromkeys(["correction", "memory_correction", *extra_tags])),
+        "source_episode_ids": source_episode_ids,
+        "source_correction_ids": [correction_id],
+        "source_refs": source_refs,
+        "distill_strategy": "life_memory_correction_rule_consolidation",
+    }
+
+
+def _semantic_correction_body_and_key(
+    *,
+    reason_code: str,
+    detail: str,
+    source_summary: str,
+) -> tuple[str, str, list[str], str]:
+    reason = _clean_text(reason_code, limit=160).upper()
+    joined = re.sub(r"\s+", "", " ".join([reason, detail, source_summary])).lower()
+    if not joined:
+        return "", "", [], ""
+    if "bad_lightnovel_deep_review_memory" in joined or "quality_claim_without_detail_evidence" in joined:
+        return (
+            "轻小说好看或质量判断必须有网页正文、详情页正文或 epub 证据；已抑制缺少详情证据的旧判断。",
+            "lightnovel_quality_requires_detail_evidence",
+            ["evidence_gate", "lightnovel_recommendation"],
+            "global",
+        )
+    if "正文证据" in joined or "详情证据" in joined or "没有正文" in joined or "缺少详情" in joined:
+        return (
+            "用户纠正过选书判断缺少正文证据；后续评价哪本好看前，必须先核对网页正文、详情页正文或 epub 证据。",
+            "recommendation_quality_needs_body_evidence",
+            ["evidence_gate", "recommendation_quality"],
+            "global",
+        )
+    if "封面有猫" in joined or "没有这种书" in joined or "没有这本" in joined:
+        return (
+            "用户纠正过错误记忆：没有“封面有猫”这本；后续不能把这个说成事实。",
+            "false_memory_cat_cover",
+            ["false_memory", "visual_claim_gate"],
+            "",
+        )
+    cleaned_detail = _clean_text(detail or reason_code, limit=260).strip("。；; ")
+    if not cleaned_detail:
+        return "", "", [], ""
+    cleaned_detail = re.sub(r"^Suppressed stale [^:：]{1,120}[:：]\s*", "", cleaned_detail, flags=re.IGNORECASE).strip()
+    body = f"曾经发生过纠错或抑制：{cleaned_detail}。后续召回时要以纠错后的可信版本为准。"
+    key_hint = _stable_hash(re.sub(r"\s+", "", cleaned_detail).lower(), size=18)
+    return body, key_hint, ["correction_chain"], ""
+
+
+def _merge_semantic_summaries(first: Any, second: Any) -> str:
+    a = _clean_text(first, limit=900)
+    b = _clean_text(second, limit=900)
+    if not a:
+        return b
+    if not b or b == a:
+        return a
+    if b in a:
+        return a
+    if a in b:
+        return b
+    prefix_a, body_a = _split_semantic_summary(a)
+    prefix_b, body_b = _split_semantic_summary(b)
+    if prefix_a and prefix_a == prefix_b:
+        clauses = [*_semantic_summary_clauses(body_a), *_semantic_summary_clauses(body_b)]
+        merged = "；".join(list(dict.fromkeys(clause for clause in clauses if clause)))
+        return _clean_text(f"{prefix_a}：{merged}", limit=900)
+    return _clean_text(f"{a}；{b}", limit=900)
+
+
+def _semantic_existing_summary_should_be_replaced(existing: Any, incoming: Any, *, semantic_kind: str) -> bool:
+    current = _clean_text(existing, limit=900)
+    proposal = _clean_text(incoming, limit=900)
+    if not current or not proposal:
+        return False
+    if _semantic_summary_has_replay_artifacts(current) and not _semantic_summary_has_replay_artifacts(proposal):
+        return True
+    if _clean_text(semantic_kind) == "self_change" and _self_change_summary_has_cross_topic_pollution(current, clean_candidate=proposal):
+        return True
+    return False
+
+
+def _semantic_summary_has_replay_artifacts(value: Any) -> bool:
+    text = _clean_text(value, limit=900)
+    return any(marker in text for marker in ("睡眠回放强化", "Owner directive:", "Applied result:"))
+
+
+def _self_change_summary_has_cross_topic_pollution(value: Any, *, clean_candidate: Any) -> bool:
+    current = re.sub(r"\s+", "", _clean_text(value, limit=900)).lower()
+    proposal = re.sub(r"\s+", "", _clean_text(clean_candidate, limit=900)).lower()
+    if not current or not proposal:
+        return False
+    if not _semantic_is_memory_system_directive(current):
+        return False
+    if not _semantic_is_memory_system_directive(proposal):
+        return False
+    cross_topic_markers = (
+        "thalamus",
+        "模型池",
+        "deepseek",
+        "gemini",
+        "不要用pro",
+        "不用pro",
+        "推荐轻小说",
+        "拟人化发送",
+        "简介后应该换行",
+        "每本简介后",
+        "卡片各一段",
+        "总览完整一段",
+    )
+    return any(marker in current for marker in cross_topic_markers) and not any(marker in proposal for marker in cross_topic_markers)
+
+
+def _split_semantic_summary(value: Any) -> tuple[str, str]:
+    text = _clean_text(value, limit=900)
+    if "：" in text:
+        prefix, body = text.split("：", 1)
+        return _clean_text(prefix), _clean_text(body)
+    if ":" in text:
+        prefix, body = text.split(":", 1)
+        return _clean_text(prefix), _clean_text(body)
+    return "", text
+
+
+def _semantic_summary_clauses(value: Any) -> list[str]:
+    text = _clean_text(value, limit=900).strip("。；; ")
+    if not text:
+        return []
+    parts = re.split(r"[；;\n\r]+", text)
+    return [_clean_text(part.strip("。；; "), limit=220) for part in parts if _clean_text(part)]
 
 
 def _semantic_source_texts(
@@ -4170,6 +7123,17 @@ def _semantic_source_texts(
     evidence_rows: Sequence[Mapping[str, Any]],
 ) -> list[str]:
     texts: list[str] = []
+    metadata = _episode_metadata_dict(episode)
+    memory_class = _episode_memory_class_from_metadata(metadata)
+    trace_meta = metadata.get("trace_stage_meta") if isinstance(metadata.get("trace_stage_meta"), Mapping) else {}
+    reply_source = _clean_text(metadata.get("reply_source") or (trace_meta or {}).get("reply_source")).lower()
+    policy = metadata.get("memory_policy") if isinstance(metadata.get("memory_policy"), Mapping) else {}
+    semantic_candidate = bool(policy.get("semantic_candidate")) or memory_class in _SEMANTIC_PRIORITY_MEMORY_CLASSES
+    include_verified_assistant_reply = (
+        semantic_candidate
+        and reply_source == "surface_memory_direct_answer"
+        and _surface_memory_direct_reply_has_trusted_provenance(metadata)
+    )
 
     def add(value: Any) -> None:
         text = _clean_text(value, limit=700)
@@ -4182,23 +7146,71 @@ def _semantic_source_texts(
         content = _clean_text(ev.get("content"), limit=700)
         if not content:
             continue
-        if kind in {EVIDENCE_USER_TEXT, EVIDENCE_GATEWAY_MESSAGE, EVIDENCE_SCHEDULER_EVENT, EVIDENCE_TOOL_RESULT, EVIDENCE_REFLECTION}:
+        if kind in {EVIDENCE_USER_TEXT, EVIDENCE_GATEWAY_MESSAGE, EVIDENCE_SCHEDULER_EVENT, EVIDENCE_TOOL_RESULT}:
+            add(content)
+        elif kind == EVIDENCE_ASSISTANT_REPLY and include_verified_assistant_reply:
             add(content)
     if texts:
         return texts[:8]
     summary = _clean_text(episode.get("summary"), limit=900)
     if summary:
         for line in re.split(r"[\n\r]+", summary):
-            if re.match(r"^\s*Assistant\s*[:：]", line):
+            if re.match(r"^\s*Assistant\s*[:：]", line) and not include_verified_assistant_reply:
                 continue
             cleaned = _clean_text(re.sub(r"^(User|Assistant|Perception)\s*[:：]\s*", "", line), limit=700)
             add(cleaned)
     return texts[:8]
 
 
+def _surface_memory_direct_reply_has_trusted_provenance(metadata: Mapping[str, Any]) -> bool:
+    trace_meta = metadata.get("trace_stage_meta") if isinstance(metadata.get("trace_stage_meta"), Mapping) else {}
+    packet = (
+        trace_meta.get("surface_memory_recall_packet")
+        if isinstance(trace_meta.get("surface_memory_recall_packet"), Mapping)
+        else metadata.get("surface_memory_recall_packet")
+    )
+    if not isinstance(packet, Mapping) or bool(packet.get("degraded")):
+        return False
+    evidence_refs = [item for item in list(packet.get("evidence_refs") or []) if _trusted_surface_memory_provenance_ref(item)]
+    source_refs = [item for item in list(packet.get("source_refs") or []) if _trusted_surface_memory_provenance_ref(item)]
+    rows = packet.get("rows")
+    has_rows = isinstance(rows, Sequence) and not isinstance(rows, (str, bytes, bytearray)) and any(
+        isinstance(row, Mapping) and (
+            _trusted_surface_memory_provenance_ref(row.get("source_ref"))
+            or _trusted_surface_memory_provenance_ref(row.get("evidence_ref"))
+        )
+        for row in rows
+    )
+    trace = packet.get("trace") if isinstance(packet.get("trace"), Mapping) else {}
+    readiness = trace.get("recall_answer_readiness") if isinstance(trace.get("recall_answer_readiness"), Mapping) else {}
+    ready = bool(readiness.get("ready_to_answer")) if readiness else True
+    response_mode = _clean_text(readiness.get("response_mode")).lower() if readiness else ""
+    if response_mode in {"state_memory_missing", "state_recall_validation_failed", "state_recall_coverage_missing", "fetch_or_request_detail_evidence"}:
+        return False
+    return bool(ready and (evidence_refs or source_refs or has_rows))
+
+
+def _trusted_surface_memory_provenance_ref(value: Any) -> bool:
+    ref = _clean_text(value).lower()
+    if not ref:
+        return False
+    if ref.startswith("semantic://"):
+        return False
+    if ref.startswith("ledger://semantic_memory/"):
+        return False
+    return True
+
+
 def _semantic_summary_for_text(text: str, *, episode: Mapping[str, Any]) -> dict[str, Any] | None:
     statement = _normalize_semantic_statement(text)
-    if len(statement) < 4 or _semantic_text_is_sensitive_or_noise(statement):
+    if len(statement) < 4 or _semantic_text_has_secret(statement):
+        return None
+    if _semantic_statement_is_lookup_question(statement):
+        return None
+    operational_failure = _semantic_operational_failure_summary(statement, episode=episode)
+    if operational_failure:
+        return operational_failure
+    if _semantic_text_is_sensitive_or_noise(statement):
         return None
     compact = re.sub(r"\s+", "", statement).lower()
     action = _clean_text(episode.get("action")).lower()
@@ -4207,26 +7219,43 @@ def _semantic_summary_for_text(text: str, *, episode: Mapping[str, Any]) -> dict
     prefix = ""
     base_confidence = 0.60
 
-    if _semantic_is_user_preference(compact):
-        kind = "user_preference"
-        prefix = "用户偏好"
-        tags = ["user_preference", "preference"]
-        base_confidence = 0.82
-    elif _semantic_is_commitment(compact):
+    if _semantic_is_commitment(compact):
+        open_loop_status = _semantic_commitment_status(compact)
         kind = "commitment"
-        prefix = "承诺和待办"
-        tags = ["commitment", "open_loop"]
+        prefix = "承诺完成" if open_loop_status == OPEN_LOOP_CLOSED else ("承诺取消" if open_loop_status == OPEN_LOOP_CANCELLED else "承诺和待办")
+        tags = ["commitment", "open_loop", f"open_loop:{open_loop_status.lower()}"]
         base_confidence = 0.78
     elif _semantic_is_self_change(compact, action=action):
         kind = "self_change"
         prefix = "自我改变"
         tags = ["self_change", "capability_change"]
         base_confidence = 0.76
+    elif _semantic_is_relationship_feedback(compact):
+        feedback = _semantic_relationship_feedback_body(statement, episode=episode)
+        if not feedback:
+            return None
+        return {
+            "kind": "relationship_feedback",
+            "summary": f"关系反馈：{feedback}",
+            "tags": ["relationship_feedback", "response_quality"],
+            "base_confidence": 0.80,
+            "key_hint": _semantic_key_hint(kind="relationship_feedback", body=feedback),
+        }
+    elif _semantic_is_user_preference(compact):
+        kind = "user_preference"
+        prefix = "用户偏好"
+        tags = ["user_preference", "preference"]
+        base_confidence = 0.82
     elif _semantic_is_failure_lesson(compact, action=action):
         kind = "failure_lesson"
         prefix = "故障经验"
         tags = ["failure_lesson", "operations"]
         base_confidence = 0.74
+    elif _semantic_is_correction_fact(compact):
+        kind = "correction"
+        prefix = "纠错记忆"
+        tags = ["correction", "memory_correction"]
+        base_confidence = 0.76
     elif _semantic_is_stable_fact(compact):
         kind = "stable_fact"
         prefix = "稳定事实"
@@ -4243,7 +7272,43 @@ def _semantic_summary_for_text(text: str, *, episode: Mapping[str, Any]) -> dict
         "summary": f"{prefix}：{body}",
         "tags": tags,
         "base_confidence": base_confidence,
+        "key_hint": _semantic_key_hint(kind=kind, body=body),
+        "open_loop_status": open_loop_status if kind == "commitment" else "",
+        "open_loop_close_reason": _semantic_commitment_close_reason(body) if kind == "commitment" else "",
     }
+
+
+def _semantic_key_hint(*, kind: str, body: str) -> str:
+    compact = re.sub(r"\s+", "", _clean_text(body, limit=700)).lower()
+    if not compact:
+        return ""
+    if kind == "user_preference":
+        if any(token in compact for token in ("thalamus", "模型池", "deepseek", "codex", "不要用pro", "不用pro", "主链不要")):
+            return "llm_routing"
+        if any(token in compact for token in ("推荐", "推送")) and any(
+            token in compact for token in ("格式", "卡片", "分段", "换行", "模板腔", "总览", "简介", "拟人化发送")
+        ):
+            return "recommendation_format"
+    if kind == "commitment":
+        return _semantic_commitment_key_hint(body)
+    if kind == "stable_fact" and "onebot" in compact and "edge" in compact:
+        return "onebot_edge_location"
+    if kind == "self_change" and _semantic_is_memory_system_directive(compact):
+        return "memory_system_design"
+    if kind == "relationship_feedback":
+        if any(token in compact for token in ("不像人话", "正常聊天", "模板", "很呆", "文本质量", "台词腔")):
+            return "natural_conversation_quality_feedback"
+        if any(token in compact for token in ("胡说八道", "编造", "证据", "召回", "记忆")):
+            return "memory_recall_quality_feedback"
+        if any(token in compact for token in ("服务", "没起来", "白费功夫", "连不上")):
+            return "runtime_readiness_feedback"
+        return "interaction_quality_feedback"
+    if kind == "failure_lesson":
+        reason = _semantic_extract_field(body, "reason") or _semantic_extract_field(body, "原因")
+        action_match = re.search(r"([A-Za-z0-9_.:-]{3,80})\s*失败", body)
+        if reason or action_match:
+            return f"{_clean_text(action_match.group(1) if action_match else 'failure').lower()}|{_clean_text(reason).lower()}"
+    return ""
 
 
 def _normalize_semantic_statement(text: str) -> str:
@@ -4252,7 +7317,53 @@ def _normalize_semantic_statement(text: str) -> str:
     value = re.sub(r"^(记忆线索|长期记忆|召回线索)\s*[:：]\s*", "", value).strip()
     value = re.sub(r"^行动记忆：[^；;]{1,120}[；;]\s*", "", value).strip()
     value = re.sub(r"^(记住|请记住|以后记住)[，,：:\s]*", "", value).strip()
+    value = re.sub(r"^记得[，,：:\s]*", "", value).strip()
     return value.strip("。；; \n\t")
+
+
+def _semantic_statement_is_lookup_question(statement: str) -> bool:
+    value = _clean_text(statement, limit=700)
+    compact = re.sub(r"\s+", "", value).lower()
+    if not compact:
+        return True
+    assertion_markers = (
+        "用户要求",
+        "用户喜欢",
+        "用户不喜欢",
+        "用户偏好",
+        "用户明确要求",
+        "失败原因：",
+        "失败原因:",
+        "原因：",
+        "原因:",
+    )
+    if any(marker in compact for marker in assertion_markers):
+        return False
+    question_like = (
+        "?" in compact
+        or "？" in compact
+        or compact.endswith("吗")
+        or compact.endswith("呢")
+        or any(token in compact for token in ("是什么", "为什么", "为啥", "怎么", "怎样", "如何", "哪本", "哪个", "哪些"))
+    )
+    if not question_like:
+        return False
+    lookup_markers = (
+        "还记得",
+        "记得我说",
+        "记不记得",
+        "记了什么",
+        "说过什么",
+        "推荐格式",
+        "失败原因",
+        "任务会失败",
+        "你说",
+        "我说",
+        "我问",
+        "你喜欢哪本",
+        "哪本好看",
+    )
+    return any(marker in compact for marker in lookup_markers) or compact.endswith(("吗", "呢", "?", "？"))
 
 
 def _semantic_statement_body(statement: str) -> str:
@@ -4273,7 +7384,9 @@ def _semantic_text_is_sensitive_or_noise(text: str) -> bool:
     compact = re.sub(r"\s+", "", str(text or "")).lower()
     if not compact:
         return True
-    if any(token in compact for token in ("api_key", "apikey", "secret", "cookie", "token=", "authorization:", "密码", "密钥")):
+    if _semantic_looks_like_recommendation_report(compact):
+        return True
+    if _semantic_text_has_secret(text):
         return True
     if any(token in compact for token in ("heartbeat", "health_check", "emotion_decay_tick", "inner_world_numeric_tick", "silence_tick")):
         return True
@@ -4307,9 +7420,107 @@ def _semantic_text_is_sensitive_or_noise(text: str) -> bool:
     return False
 
 
+def _semantic_text_has_secret(text: str) -> bool:
+    compact = re.sub(r"\s+", "", str(text or "")).lower()
+    return any(token in compact for token in ("api_key", "apikey", "secret", "cookie", "token=", "authorization:", "密码", "密钥"))
+
+
+def _semantic_looks_like_recommendation_report(compact: str) -> bool:
+    value = str(compact or "")
+    return any(
+        token in value
+        for token in (
+            "轻小说推荐报告",
+            "推荐候选",
+            "推荐列表",
+            "命中偏好",
+            "lightnovel_recommendation_delivery",
+            "lightnovel_gateway_delivery",
+            "codex_lightnovel_recommender",
+        )
+    )
+
+
+def _semantic_operational_failure_summary(statement: str, *, episode: Mapping[str, Any]) -> dict[str, Any] | None:
+    compact = re.sub(r"\s+", "", statement).lower()
+    action = _clean_text(episode.get("action")).lower()
+    if not _semantic_is_failure_lesson(compact, action=action):
+        return None
+    status = _semantic_extract_field(statement, "status").upper()
+    reason = _semantic_extract_field(statement, "reason")
+    detail = _semantic_extract_field(statement, "summary")
+    if status and status not in {"FAILED", "ERROR", "DEGRADED", "SUSPENDED", "HEARTBEAT_ALERT", "EDGE_PROBE_ALERT"}:
+        return None
+    source = _clean_text(episode.get("action") or episode.get("primary_ref") or episode.get("episode_kind"), limit=80)
+    match = re.search(r"\b(?:job|task)\s+([A-Za-z0-9_.:-]{3,80})\s+status\s*=", statement, flags=re.IGNORECASE)
+    if match:
+        source = match.group(1)
+    parts: list[str] = []
+    if source:
+        parts.append(f"{source} 失败")
+    else:
+        parts.append("后台任务失败")
+    if reason:
+        parts.append(f"原因 {reason}")
+    if detail:
+        parts.append(_clean_text(detail, limit=160))
+    elif "result_text" not in compact and "轻小说推荐报告" not in statement:
+        natural_detail = _clean_text(_semantic_statement_body(statement), limit=180)
+        if natural_detail and natural_detail not in parts:
+            parts.append(natural_detail)
+    body = "；".join(dict.fromkeys(part for part in parts if part))
+    return {
+        "kind": "failure_lesson",
+        "summary": f"故障经验：{body}",
+        "tags": ["failure_lesson", "operations"],
+        "base_confidence": 0.78,
+    }
+
+
+def _semantic_extract_field(statement: str, field: str) -> str:
+    match = re.search(
+        rf"(?:^|[；;\n\r\s]){re.escape(field)}\s*[=:：]\s*([^；;\n\r]+)",
+        str(statement or ""),
+        flags=re.IGNORECASE,
+    )
+    if not match:
+        return ""
+    value = _clean_text(match.group(1), limit=220)
+    return re.sub(r"^(result_text|artifacts)\s*[=:：].*$", "", value, flags=re.IGNORECASE).strip()
+
+
+def _semantic_skip_reason_for_texts(texts: Sequence[str], *, episode: Mapping[str, Any]) -> str:
+    if not texts:
+        return "no_source_text"
+    saw_noise = False
+    saw_lookup = False
+    for text in texts:
+        statement = _normalize_semantic_statement(text)
+        if not statement:
+            continue
+        if _semantic_text_has_secret(statement):
+            return "sensitive_text"
+        if _semantic_operational_failure_summary(statement, episode=episode):
+            return "unexpected_failure_proposal_miss"
+        if _semantic_text_is_sensitive_or_noise(statement):
+            saw_noise = True
+            continue
+        if _semantic_statement_is_lookup_question(statement):
+            saw_lookup = True
+            continue
+    if saw_lookup:
+        return "lookup_question"
+    if saw_noise:
+        return "noise_or_report"
+    return "no_semantic_rule_match"
+
+
 def _should_sleep_replay_candidate(item: Mapping[str, Any]) -> bool:
     """Keep replay for durable experiences, not transport/debug chatter."""
 
+    metadata = _episode_metadata_dict(item)
+    if _is_synthetic_life_record(item, metadata):
+        return False
     summary = _clean_text(item.get("summary"), limit=1200)
     if not summary or _semantic_text_is_sensitive_or_noise(summary):
         return False
@@ -4329,6 +7540,8 @@ def _should_sleep_replay_candidate(item: Mapping[str, Any]) -> bool:
     if _semantic_is_failure_lesson(compact, action=action):
         return True
     if _semantic_is_commitment(compact) or _semantic_is_self_change(compact, action=action):
+        return True
+    if _semantic_is_relationship_feedback(compact):
         return True
     if _semantic_is_user_preference(compact) or _semantic_is_stable_fact(compact):
         return True
@@ -4374,14 +7587,66 @@ def _looks_like_recommendation_followup_chat_noise(text: str) -> bool:
 
 def _semantic_is_user_preference(compact: str) -> bool:
     value = str(compact or "").replace("要不要", "")
-    actor_says_user = "user:" in value or "用户" in value
+    if _semantic_looks_like_recommendation_report(value):
+        return False
+    user_value = value.split("assistant:", 1)[0] if "assistant:" in value else value
+    selection_question_markers = (
+        "我问你喜欢哪",
+        "问你喜欢哪",
+        "你喜欢哪本",
+        "你喜欢哪部",
+        "哪本好看",
+        "哪本最好看",
+        "哪本比较好",
+    )
+    durable_preference_markers = (
+        "用户喜欢",
+        "用户不喜欢",
+        "用户要求",
+        "用户偏好",
+        "明确要求",
+        "以后",
+        "不要",
+        "别",
+        "记住",
+        "偏好",
+    )
+    if any(token in user_value for token in selection_question_markers) and not any(
+        marker in user_value for marker in durable_preference_markers
+    ):
+        return False
+    actor_says_user = "user:" in user_value or "用户" in value
     if any(token in value for token in ("用户喜欢", "用户不喜欢", "用户要求", "用户偏好")):
         return True
-    if re.search(r"user:.{0,40}我(?:不)?喜欢", value):
+    if re.search(r"user:.{0,40}我(?:不)?喜欢", user_value):
         return True
     if "assistant:" not in value and any(token in value for token in ("我喜欢", "我不喜欢", "记住我喜欢")):
         return True
-    if "assistant:" not in value and any(token in value for token in ("以后", "推荐格式", "推荐轻小说时", "格式", "换行", "分段", "卡片", "模板腔", "拟人化发送", "主链不要", "不要用pro", "不用pro", "优先使用")):
+    if "assistant:" not in value and any(
+        token in value
+        for token in (
+            "以后",
+            "推荐格式",
+            "推荐轻小说时",
+            "格式",
+            "换行",
+            "分段",
+            "卡片",
+            "模板腔",
+            "拟人化发送",
+            "主链不要",
+            "不要用pro",
+            "不用pro",
+            "不要用",
+            "别用",
+            "不要再",
+            "优先使用",
+            "应该用",
+            "必须用",
+        )
+    ):
+        return True
+    if "assistant:" not in value and _semantic_is_feature_toggle_preference(value):
         return True
     if not actor_says_user:
         return False
@@ -4398,17 +7663,431 @@ def _semantic_is_user_preference(compact: str) -> bool:
         "卡片",
         "拟人化发送",
     )
-    return any(token in value for token in preference_tokens)
+    return any(token in value for token in preference_tokens) or _semantic_is_feature_toggle_preference(value)
+
+
+def _semantic_is_feature_toggle_preference(compact: str) -> bool:
+    value = str(compact or "")
+    if any(token in value for token in ("待办", "承诺", "openloop", "open_loop", "失败原因")):
+        return False
+    feature_terms = (
+        "拟人化发送",
+        "主链",
+        "模型池",
+        "thalamus",
+        "llm",
+        "codex",
+        "deepseek",
+        "gemini",
+        "pro",
+        "推荐格式",
+        "推送格式",
+        "内心流",
+        "后台任务",
+        "调度任务",
+        "onebot",
+        "qq",
+        "召回",
+        "长期记忆",
+    )
+    if not any(term in value for term in feature_terms):
+        return False
+    return any(
+        token in value
+        for token in (
+            "关掉",
+            "关闭",
+            "关了",
+            "禁用",
+            "停用",
+            "别开",
+            "不要开",
+            "打开",
+            "开启",
+            "启用",
+            "优先",
+            "不要用",
+            "别用",
+            "不用",
+        )
+    )
+
+
+def _semantic_is_correction_fact(compact: str) -> bool:
+    value = str(compact or "")
+    return any(
+        token in value
+        for token in (
+            "用户纠正",
+            "你纠正的是",
+            "我撤回",
+            "撤回这个判断",
+            "记错",
+            "不是这样",
+            "不对，没有",
+            "没有“",
+            "没有\"",
+            "这点是错的",
+        )
+    )
+
+
+def _normalize_open_loop_status(value: Any) -> str:
+    status = _clean_text(value).upper()
+    aliases = {
+        "DONE": OPEN_LOOP_CLOSED,
+        "FULFILLED": OPEN_LOOP_CLOSED,
+        "COMPLETE": OPEN_LOOP_CLOSED,
+        "COMPLETED": OPEN_LOOP_CLOSED,
+        "RESOLVED": OPEN_LOOP_CLOSED,
+        "FIXED": OPEN_LOOP_CLOSED,
+        "CANCELED": OPEN_LOOP_CANCELLED,
+        "CANCELLED": OPEN_LOOP_CANCELLED,
+        "SKIPPED": OPEN_LOOP_CANCELLED,
+        "ABANDONED": OPEN_LOOP_CANCELLED,
+        "REPLACED": OPEN_LOOP_SUPERSEDED,
+    }
+    status = aliases.get(status, status)
+    if status in {OPEN_LOOP_OPEN, OPEN_LOOP_CLOSED, OPEN_LOOP_CANCELLED, OPEN_LOOP_SUPERSEDED}:
+        return status
+    return OPEN_LOOP_OPEN
+
+
+def _open_loop_close_reason_for_status(status: str) -> str:
+    state = _normalize_open_loop_status(status)
+    if state == OPEN_LOOP_CANCELLED:
+        return "用户或系统取消了这个待办"
+    if state == OPEN_LOOP_SUPERSEDED:
+        return "后续决定替代了这个待办"
+    if state == OPEN_LOOP_CLOSED:
+        return "后续经历显示这个待办已完成"
+    return ""
+
+
+def _semantic_commitment_status(compact: str) -> str:
+    value = str(compact or "")
+    if any(token in value for token in ("取消待办", "取消这个待办", "不用做了", "不做了", "先不做", "放弃这个", "关闭且不做")):
+        return OPEN_LOOP_CANCELLED
+    if any(
+        token in value
+        for token in (
+            "已经完成",
+            "已完成",
+            "完成了",
+            "做完了",
+            "已经做完",
+            "搞定了",
+            "处理完",
+            "已处理",
+            "解决了",
+            "修复完成",
+            "修好了",
+            "关闭这个待办",
+            "关掉这个待办",
+            "闭环了",
+        )
+    ):
+        return OPEN_LOOP_CLOSED
+    return OPEN_LOOP_OPEN
+
+
+def _query_wants_closed_open_loop(query: str) -> bool:
+    value = str(query or "").lower()
+    if not value:
+        return False
+    if any(token in value for token in ("未完成", "没完成", "还没", "待做", "要继续", "继续做", "open")):
+        return False
+    return any(
+        token in value
+        for token in (
+            "已完成",
+            "完成了",
+            "做完",
+            "搞定",
+            "关闭",
+            "closed",
+            "done",
+            "resolved",
+        )
+    )
+
+
+def _preference_query_wants_relationship_feedback(query: str) -> bool:
+    compact = re.sub(r"\s+", "", _clean_text(query, limit=360)).lower()
+    if not compact:
+        return False
+    if any(token in compact for token in ("推荐格式", "简介后", "换行", "分段", "卡片格式", "怎么发", "怎样发")):
+        return False
+    return any(
+        token in compact
+        for token in (
+            "文本质量",
+            "不像人话",
+            "不像正常人",
+            "正常聊天",
+            "台词腔",
+            "模板腔",
+            "说辞",
+            "话术",
+            "很呆",
+            "太呆",
+        )
+    )
+
+
+def _semantic_commitment_close_reason(body: str) -> str:
+    compact = re.sub(r"\s+", "", _clean_text(body, limit=700)).lower()
+    status = _semantic_commitment_status(compact)
+    return _open_loop_close_reason_for_status(status)
+
+
+def _semantic_commitment_key_hint(body: str) -> str:
+    compact = re.sub(r"\s+", "", _clean_text(body, limit=700)).lower()
+    if not compact:
+        return ""
+    buckets: list[str] = []
+    if any(token in compact for token in ("记忆系统", "记忆", "召回", "episode", "evidence", "openloop", "open_loop")):
+        buckets.append("memory_system")
+    if any(token in compact for token in ("推荐", "轻小说", "网页", "epub", "正文", "书籍")):
+        buckets.append("recommendation")
+    if any(token in compact for token in ("qq", "onebot", "gateway", "edge", "微信", "推送")):
+        buckets.append("gateway")
+    if any(token in compact for token in ("模型", "路由", "thalamus", "deepseek", "gemini", "codex", "pro")):
+        buckets.append("llm_routing")
+    if any(token in compact for token in ("后台", "调度", "scheduler", "任务", "每日")):
+        buckets.append("scheduler")
+    if any(token in compact for token in ("测试", "实测", "批测", "回归")):
+        buckets.append("verification")
+    if buckets:
+        return "|".join(dict.fromkeys(buckets))
+    normalized = re.sub(
+        r"(承诺|待办|todo|openloop|open_loop|后续要|下次继续|未完成|已经完成|已完成|完成了|关闭这个待办|取消这个待办|要做|开始处理|开始做|继续)",
+        "",
+        compact,
+    )
+    normalized = re.sub(r"[^0-9a-zA-Z\u4e00-\u9fff]+", "", normalized)
+    return normalized[:80] or _stable_hash(compact, size=18)
+
+
+def _open_loop_status_from_tags(tags: Sequence[str]) -> str:
+    lowered = {str(tag or "").strip().lower() for tag in list(tags or [])}
+    if "open_loop:cancelled" in lowered or "open_loop:canceled" in lowered:
+        return OPEN_LOOP_CANCELLED
+    if "open_loop:superseded" in lowered:
+        return OPEN_LOOP_SUPERSEDED
+    if "open_loop:closed" in lowered:
+        return OPEN_LOOP_CLOSED
+    return OPEN_LOOP_OPEN
+
+
+def _normalize_open_loop_status_tags(tags: Sequence[str], *, incoming_tags: Sequence[str] | None = None) -> list[str]:
+    out = list(dict.fromkeys(_clean_text(tag) for tag in list(tags or []) if _clean_text(tag)))
+    incoming_status = _open_loop_status_from_tags(list(incoming_tags or []))
+    if incoming_status in OPEN_LOOP_TERMINAL_STATES:
+        out = [tag for tag in out if tag.lower() != "open_loop:open"]
+        terminal_tag = f"open_loop:{incoming_status.lower()}"
+        if terminal_tag not in out:
+            out.append(terminal_tag)
+    elif any(str(tag or "").lower() == "open_loop:open" for tag in list(incoming_tags or [])):
+        out = [tag for tag in out if tag.lower() not in {"open_loop:closed", "open_loop:cancelled", "open_loop:superseded"}]
+        if "open_loop:open" not in out:
+            out.append("open_loop:open")
+    return out
+
+
+def _open_loop_title_from_summary(summary: str) -> str:
+    text = _clean_text(summary, limit=260)
+    if "：" in text:
+        text = text.split("：", 1)[1]
+    elif ":" in text:
+        text = text.split(":", 1)[1]
+    text = re.sub(r"^(用户要求|后续要|下次继续|承诺|待办)[，,：:\s]*", "", text).strip()
+    return _clean_text(text, limit=120)
 
 
 def _semantic_is_commitment(compact: str) -> bool:
-    return any(token in compact for token in ("承诺", "待办", "todo", "openloop", "后续要", "下次继续", "未完成"))
+    value = str(compact or "")
+    if _semantic_is_memory_system_directive(value) and not any(
+        token in value
+        for token in ("待办", "todo", "openloop", "open_loop", "后续要", "下次继续", "未完成", "还要做", "说好", "答应")
+    ):
+        return False
+    if any(token in value for token in ("承诺", "待办", "todo", "openloop", "open_loop", "后续要", "下次继续", "未完成", "还要做", "说好", "答应")):
+        return True
+    if _semantic_commitment_status(value) in OPEN_LOOP_TERMINAL_STATES:
+        return any(
+            token in value
+            for token in (
+                "记忆",
+                "召回",
+                "推荐",
+                "轻小说",
+                "gateway",
+                "qq",
+                "onebot",
+                "模型",
+                "路由",
+                "任务",
+                "修复",
+                "实现",
+                "处理",
+            )
+        )
+    return False
 
 
 def _semantic_is_self_change(compact: str, *, action: str) -> bool:
-    if action in {"memory_compaction", "model_route_update", "capability_change"}:
+    if action in {"model_route_update", "capability_change"}:
         return True
-    return any(token in compact for token in ("模型路由", "记忆系统", "能力被删除", "删除资源管理器", "策略被用户纠正", "自我改变", "主链迁移", "改成"))
+    if any(token in compact for token in ("模型路由", "记忆系统", "能力被删除", "删除资源管理器", "策略被用户纠正", "自我改变", "主链迁移")):
+        return True
+    if "改成" in compact and any(
+        token in compact
+        for token in (
+            "模型",
+            "路由",
+            "主链",
+            "能力",
+            "资源管理器",
+            "codex",
+            "模型池",
+            "deepseek",
+            "gemini",
+        )
+    ):
+        return True
+    return _semantic_is_memory_system_directive(compact)
+
+
+def _semantic_is_memory_system_directive(compact: str) -> bool:
+    value = str(compact or "")
+    memory_terms = (
+        "记忆系统",
+        "生命经历",
+        "经历锚点",
+        "episode",
+        "evidence",
+        "主动记忆",
+        "长期记忆",
+        "语义记忆",
+        "召回记忆",
+        "可召回记忆",
+        "遗忘系统",
+        "睡眠回放",
+        "审计库",
+        "进入记忆",
+        "做过的事",
+        "真实生命",
+    )
+    if not any(term in value for term in memory_terms):
+        return False
+    directive_terms = (
+        "必须",
+        "应该",
+        "都要",
+        "都应该",
+        "不应该",
+        "不等于",
+        "不能",
+        "只能",
+        "不要",
+        "要留下",
+        "要进入",
+        "进入记忆",
+        "可追溯",
+        "唯一",
+        "改造成",
+        "设计成",
+    )
+    return any(term in value for term in directive_terms)
+
+
+def _semantic_is_relationship_feedback(compact: str) -> bool:
+    value = str(compact or "").lower()
+    if not value:
+        return False
+    preference_directive = any(
+        marker in value
+        for marker in (
+            "以后",
+            "不要",
+            "别再",
+            "别",
+            "必须",
+            "应该",
+            "优先",
+            "格式",
+            "换行",
+            "分段",
+            "卡片",
+            "简介后",
+            "改成",
+            "关了",
+            "关掉",
+            "关闭",
+            "打开",
+            "开启",
+            "启用",
+            "停用",
+        )
+    )
+    hard_feedback_markers = (
+        "胡说八道",
+        "不像人话",
+        "不符合正常聊天",
+        "不符合正常人",
+        "明显有问题",
+        "很呆",
+        "太呆",
+        "白费功夫",
+    )
+    if any(marker in value for marker in hard_feedback_markers):
+        return True
+    softer_quality_markers = (
+        "模板腔",
+        "台词腔",
+        "文本质量",
+        "纯负优化",
+    )
+    if any(marker in value for marker in softer_quality_markers) and not preference_directive:
+        return True
+    scoped_negative = any(marker in value for marker in ("不行啊", "不对啊", "根本不对", "完全不对", "体验不好"))
+    if not scoped_negative:
+        return False
+    scope_markers = (
+        "召回",
+        "记忆",
+        "回答",
+        "回复",
+        "聊天",
+        "对话",
+        "主链",
+        "模型",
+        "推荐",
+        "服务",
+        "系统",
+        "证据",
+        "格式",
+    )
+    return any(marker in value for marker in scope_markers)
+
+
+def _semantic_relationship_feedback_body(statement: str, *, episode: Mapping[str, Any]) -> str:
+    compact = re.sub(r"\s+", "", _clean_text(statement, limit=700)).lower()
+    episode_summary = re.sub(r"\s+", "", _clean_text(episode.get("summary"), limit=700)).lower()
+    joined = compact + episode_summary
+    if not joined:
+        return ""
+    if any(token in joined for token in ("不像人话", "正常聊天", "模板腔", "台词腔", "文本质量", "很呆", "太呆")):
+        return "用户强烈反馈：文本质量不能生硬得不像人话；回答要像正常聊天，避免模板腔、台词腔和生硬的证据条目话术。"
+    if any(token in joined for token in ("胡说八道", "编造", "召回", "证据", "记忆")):
+        return "用户强烈反馈：记忆召回和判断必须回到证据，不能把没核实的内容说成事实或胡说八道。"
+    if any(token in joined for token in ("白费功夫", "服务没起来", "没起来", "连不上")):
+        return "用户反馈：测试或排障前要先确认服务真的启动和连通，避免在不可用状态下继续白费功夫。"
+    if any(token in joined for token in ("明显有问题", "不行啊", "不对啊", "体验不好")):
+        return "用户反馈：当前效果明显不对时，要先回到证据链和运行状态排查，再继续给结论。"
+    body = _semantic_statement_body(statement)
+    return _clean_text(body, limit=220)
 
 
 def _semantic_is_failure_lesson(compact: str, *, action: str) -> bool:
@@ -4421,6 +8100,11 @@ def _semantic_is_failure_lesson(compact: str, *, action: str) -> bool:
             "任务失败",
             "调用失败",
             "执行失败",
+            "status=failed",
+            "status:failed",
+            "statusfailed",
+            "status=error",
+            "status:error",
             "状态=failed",
             "状态failed",
             "连不上",

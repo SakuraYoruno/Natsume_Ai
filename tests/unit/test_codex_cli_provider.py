@@ -240,6 +240,15 @@ def test_codex_cli_provider_maps_minimal_effort_for_gpt54_mini(monkeypatch) -> N
     assert codex_cli_provider.resolve_codex_cli_reasoning_effort("gpt-5.5") == "minimal"
 
 
+def test_codex_cli_provider_defaults_to_gpt55_with_minimal_reasoning(monkeypatch) -> None:
+    monkeypatch.delenv("HOST_CODEX_MODEL_ID", raising=False)
+    monkeypatch.delenv("HOST_CODEX_RUNTIME_MODEL", raising=False)
+    monkeypatch.delenv("HOST_CODEX_CLI_REASONING_EFFORT", raising=False)
+
+    assert codex_cli_provider.resolve_codex_cli_model() == "gpt-5.5"
+    assert codex_cli_provider.resolve_codex_cli_reasoning_effort("gpt-5.5") == "minimal"
+
+
 def test_codex_cli_provider_maps_spark_effort_to_low(monkeypatch) -> None:
     monkeypatch.delenv("HOST_CODEX_CLI_REASONING_EFFORT", raising=False)
 

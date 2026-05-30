@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from typing import Any, Mapping
 
 from host_brain.retrieval.recall_schemas import RecallRouteConfig
@@ -508,7 +509,7 @@ def search_semantic_memory(
         raise RuntimeError(f"semantic memory ledger unavailable: {exc}") from exc
 
     current_ts = int(now_ts_ms or 0)
-    preference_query = _looks_like_preference_semantic_query(query)
+    query_profile = _semantic_query_profile(query)
     scored: list[tuple[float, dict[str, Any]]] = []
     for row in list(rows or []):
         if not isinstance(row, Mapping):
@@ -523,25 +524,41 @@ def search_semantic_memory(
         else:
             tags = [str(tags_raw).strip()] if str(tags_raw or "").strip() else []
         text_for_score = " ".join([summary, *tags])
-        score = _text_similarity_score(query, text_for_score)
-        if score <= 0.0:
+        lexical_score = _text_similarity_score(query, text_for_score)
+        semantic_kind = _semantic_kind_from_tags(tags)
+        matched_tags = _semantic_matched_tags(query=query, tags=tags)
+        if lexical_score <= 0.0 and not matched_tags:
             continue
         confidence = _coerce_score(row.get("confidence"))
+        score = lexical_score
         if confidence > 0.0:
             score = round(min(1.0, score * 0.82 + confidence * 0.18), 6)
-        preference_boost = 0.0
-        if preference_query:
-            if _looks_like_preference_semantic_row(summary=summary, tags=tags):
-                preference_boost += 0.18
-            if _looks_like_collection_semantic_row(summary=summary, tags=tags):
-                preference_boost -= 0.12
+        profile_boost = _semantic_profile_boost(
+            query=query,
+            query_profile=query_profile,
+            semantic_kind=semantic_kind,
+            summary=summary,
+            tags=tags,
+        )
+        if profile_boost > 0.0 and semantic_kind:
+            kind_tag = f"semantic_kind:{semantic_kind}"
+            if kind_tag in tags and kind_tag not in matched_tags:
+                matched_tags.append(kind_tag)
+        tag_match_boost = min(0.15, len(matched_tags) * 0.035)
         row_ts = _coerce_non_negative_int(row.get("ts_ms"), default=0)
         recency_boost = 0.0
         if current_ts > 0 and row_ts > 0:
             age_ms = max(0, current_ts - row_ts)
             if age_ms <= 30 * 24 * 60 * 60 * 1000:
                 recency_boost = 0.04
-        final_score = round(max(0.0, min(1.0, score + recency_boost + preference_boost)), 6)
+        final_score = round(max(0.0, min(1.0, score + recency_boost + profile_boost + tag_match_boost)), 6)
+        source_memory_ids = _semantic_source_memory_ids(row.get("source_memory_ids"))
+        provenance = _semantic_memory_source_provenance(
+            self.ledger,
+            source_memory_ids=source_memory_ids,
+            semantic_id=semantic_id,
+        )
+        evidence_refs = provenance.get("evidence_refs") or [f"semantic://{semantic_id}"]
         scored.append(
             (
                 final_score,
@@ -556,16 +573,32 @@ def search_semantic_memory(
                         "distill_strategy": str(row.get("distill_strategy") or "merge_top_k"),
                         "confidence": confidence,
                         "tags": tags,
-                        "source_memory_ids": list(row.get("source_memory_ids") or []),
+                        "semantic_kind": semantic_kind,
+                        "source_memory_ids": source_memory_ids,
+                        "semantic_source_refs": provenance.get("source_refs") or [],
+                        "semantic_evidence_refs": provenance.get("evidence_refs") or [],
+                        "semantic_episode_ids": provenance.get("episode_ids") or [],
+                        "semantic_collection_ids": provenance.get("collection_ids") or [],
+                        "semantic_entity_ids": provenance.get("entity_ids") or [],
+                        "semantic_correction_ids": provenance.get("correction_ids") or [],
+                        "semantic_provenance_status": provenance.get("status") or "unresolved",
                         "ts_ms": row_ts,
                         "score_boost": {
+                            "query_profile": query_profile,
+                            "lexical_score": lexical_score,
+                            "confidence_blend_score": score,
                             "recency_boost": recency_boost,
-                            "preference_boost": round(preference_boost, 6),
+                            "semantic_kind_boost": round(profile_boost, 6),
+                            "preference_boost": round(profile_boost if query_profile == "preference" else 0.0, 6),
+                            "tag_match_boost": round(tag_match_boost, 6),
+                            "matched_tags": matched_tags,
+                            "semantic_kind": semantic_kind,
                             "row_ts_ms": row_ts,
                             "now_ts_ms": current_ts,
                         },
                         "source_ref": f"ledger://semantic_memory/{semantic_id}",
-                        "evidence_refs_primary": f"semantic://{semantic_id}",
+                        "evidence_refs": evidence_refs,
+                        "evidence_refs_primary": evidence_refs[0],
                     },
                 },
             )
@@ -576,18 +609,500 @@ def search_semantic_memory(
     ]
 
 
+def _semantic_source_memory_ids(raw_value: Any) -> list[str]:
+    if isinstance(raw_value, (list, tuple)):
+        raw_items = raw_value
+    elif isinstance(raw_value, str):
+        stripped = raw_value.strip()
+        if not stripped:
+            raw_items = []
+        else:
+            try:
+                parsed = json.loads(stripped)
+            except (TypeError, ValueError):
+                parsed = [stripped]
+            raw_items = parsed if isinstance(parsed, (list, tuple)) else [parsed]
+    else:
+        raw_items = []
+    ids: list[str] = []
+    for item in raw_items:
+        cleaned = str(item or "").strip()
+        if cleaned and cleaned not in ids:
+            ids.append(cleaned)
+    return ids
+
+
+def _semantic_memory_source_provenance(
+    ledger: Any,
+    *,
+    source_memory_ids: list[str],
+    semantic_id: str,
+) -> dict[str, Any]:
+    """Resolve distilled semantic memories back to lived evidence anchors."""
+    source_refs: list[str] = []
+    evidence_refs: list[str] = []
+    episode_ids: list[str] = []
+    collection_ids: list[str] = []
+    entity_ids: list[str] = []
+    correction_ids: list[str] = []
+
+    def add(target: list[str], value: Any) -> None:
+        cleaned = str(value or "").strip()
+        if cleaned and cleaned not in target:
+            target.append(cleaned)
+
+    conn = getattr(ledger, "_conn", None)
+    for source_id in source_memory_ids:
+        cleaned_source = str(source_id or "").strip()
+        if not cleaned_source:
+            continue
+        if cleaned_source.startswith("life_episode::"):
+            episode_id = cleaned_source.split("::", 1)[1].strip()
+            if episode_id:
+                add(episode_ids, episode_id)
+                add(source_refs, f"life_episode::{episode_id}")
+                _semantic_add_episode_provenance(
+                    conn,
+                    episode_id=episode_id,
+                    add=add,
+                    source_refs=source_refs,
+                    evidence_refs=evidence_refs,
+                )
+            continue
+        if cleaned_source.startswith("life_memory_collection::"):
+            collection_id = cleaned_source.split("::", 1)[1].strip()
+            if collection_id:
+                add(collection_ids, collection_id)
+                add(source_refs, f"life_memory_collection::{collection_id}")
+                _semantic_add_collection_provenance(
+                    conn,
+                    collection_id=collection_id,
+                    add=add,
+                    source_refs=source_refs,
+                    evidence_refs=evidence_refs,
+                    episode_ids=episode_ids,
+                )
+            continue
+        if cleaned_source.startswith("life_memory_entity::"):
+            entity_id = cleaned_source.split("::", 1)[1].strip()
+            if entity_id:
+                add(entity_ids, entity_id)
+                add(source_refs, f"life_memory_entity::{entity_id}")
+                _semantic_add_entity_provenance(
+                    conn,
+                    entity_id=entity_id,
+                    add=add,
+                    source_refs=source_refs,
+                    evidence_refs=evidence_refs,
+                    episode_ids=episode_ids,
+                    collection_ids=collection_ids,
+                )
+            continue
+        if cleaned_source.startswith("life_memory_correction::"):
+            correction_id = cleaned_source.split("::", 1)[1].strip()
+            if correction_id:
+                add(correction_ids, correction_id)
+                add(source_refs, f"life_memory_correction::{correction_id}")
+                _semantic_add_correction_provenance(
+                    conn,
+                    correction_id=correction_id,
+                    add=add,
+                    source_refs=source_refs,
+                    evidence_refs=evidence_refs,
+                    episode_ids=episode_ids,
+                )
+            continue
+        if "://" in cleaned_source:
+            add(source_refs, cleaned_source)
+            add(evidence_refs, cleaned_source)
+
+    return {
+        "status": "resolved" if evidence_refs else "unresolved",
+        "source_refs": source_refs,
+        "evidence_refs": evidence_refs,
+        "episode_ids": episode_ids,
+        "collection_ids": collection_ids,
+        "entity_ids": entity_ids,
+        "correction_ids": correction_ids,
+    }
+
+
+def _semantic_add_episode_provenance(
+    conn: Any,
+    *,
+    episode_id: str,
+    add: Any,
+    source_refs: list[str],
+    evidence_refs: list[str],
+) -> None:
+    if conn is None:
+        return
+    try:
+        episode = conn.execute(
+            "SELECT primary_ref FROM life_episode WHERE episode_id = ? LIMIT 1",
+            (episode_id,),
+        ).fetchone()
+        if episode is not None:
+            add(source_refs, dict(episode).get("primary_ref"))
+        rows = conn.execute(
+            """
+            SELECT evidence_id, source_ref
+            FROM life_evidence
+            WHERE episode_id = ?
+            ORDER BY created_ts_ms ASC
+            LIMIT 12
+            """,
+            (episode_id,),
+        ).fetchall()
+    except Exception:
+        return
+    for row in rows or []:
+        data = dict(row)
+        source_ref = str(data.get("source_ref") or "").strip()
+        add(evidence_refs, source_ref or f"life_evidence://{data.get('evidence_id')}")
+
+
+def _semantic_add_collection_provenance(
+    conn: Any,
+    *,
+    collection_id: str,
+    add: Any,
+    source_refs: list[str],
+    evidence_refs: list[str],
+    episode_ids: list[str],
+) -> None:
+    if conn is None:
+        return
+    try:
+        rows = conn.execute(
+            """
+            SELECT episode_id, source_ref, evidence_ref
+            FROM life_memory_collection_item
+            WHERE collection_id = ?
+            ORDER BY position ASC, created_ts_ms ASC
+            LIMIT 16
+            """,
+            (collection_id,),
+        ).fetchall()
+    except Exception:
+        return
+    for row in rows or []:
+        data = dict(row)
+        episode_id = str(data.get("episode_id") or "").strip()
+        if episode_id:
+            add(episode_ids, episode_id)
+            add(source_refs, f"life_episode::{episode_id}")
+        add(source_refs, data.get("source_ref"))
+        add(evidence_refs, data.get("evidence_ref") or data.get("source_ref"))
+        if episode_id and not (str(data.get("evidence_ref") or data.get("source_ref") or "").strip()):
+            _semantic_add_episode_provenance(
+                conn,
+                episode_id=episode_id,
+                add=add,
+                source_refs=source_refs,
+                evidence_refs=evidence_refs,
+            )
+
+
+def _semantic_add_entity_provenance(
+    conn: Any,
+    *,
+    entity_id: str,
+    add: Any,
+    source_refs: list[str],
+    evidence_refs: list[str],
+    episode_ids: list[str],
+    collection_ids: list[str],
+) -> None:
+    if conn is None:
+        return
+    try:
+        rows = conn.execute(
+            """
+            SELECT
+                m.episode_id,
+                m.collection_id,
+                m.collection_item_id,
+                m.source_ref,
+                m.evidence_ref,
+                i.source_ref AS item_source_ref,
+                i.evidence_ref AS item_evidence_ref
+            FROM life_memory_entity_mention m
+            LEFT JOIN life_memory_collection_item i ON i.collection_item_id = m.collection_item_id
+            WHERE m.entity_id = ?
+            ORDER BY m.created_ts_ms DESC, m.position ASC
+            LIMIT 16
+            """,
+            (entity_id,),
+        ).fetchall()
+    except Exception:
+        return
+    for row in rows or []:
+        data = dict(row)
+        episode_id = str(data.get("episode_id") or "").strip()
+        collection_id = str(data.get("collection_id") or "").strip()
+        if episode_id:
+            add(episode_ids, episode_id)
+            add(source_refs, f"life_episode::{episode_id}")
+        if collection_id:
+            add(collection_ids, collection_id)
+            add(source_refs, f"life_memory_collection::{collection_id}")
+        add(source_refs, data.get("source_ref"))
+        add(source_refs, data.get("item_source_ref"))
+        evidence_ref = (
+            data.get("evidence_ref")
+            or data.get("item_evidence_ref")
+            or data.get("source_ref")
+            or data.get("item_source_ref")
+        )
+        add(evidence_refs, evidence_ref)
+        if episode_id and not str(evidence_ref or "").strip():
+            _semantic_add_episode_provenance(
+                conn,
+                episode_id=episode_id,
+                add=add,
+                source_refs=source_refs,
+                evidence_refs=evidence_refs,
+            )
+
+
+def _semantic_add_correction_provenance(
+    conn: Any,
+    *,
+    correction_id: str,
+    add: Any,
+    source_refs: list[str],
+    evidence_refs: list[str],
+    episode_ids: list[str],
+) -> None:
+    if conn is None:
+        return
+    try:
+        row = conn.execute(
+            """
+            SELECT correction_id, episode_id, correction_episode_id
+            FROM life_memory_correction
+            WHERE correction_id = ?
+            LIMIT 1
+            """,
+            (correction_id,),
+        ).fetchone()
+    except Exception:
+        return
+    if row is None:
+        return
+    data = dict(row)
+    add(evidence_refs, f"life_memory_correction://{data.get('correction_id') or correction_id}")
+    for episode_id in (data.get("correction_episode_id"), data.get("episode_id")):
+        cleaned_episode_id = str(episode_id or "").strip()
+        if not cleaned_episode_id:
+            continue
+        add(episode_ids, cleaned_episode_id)
+        add(source_refs, f"life_episode::{cleaned_episode_id}")
+        _semantic_add_episode_provenance(
+            conn,
+            episode_id=cleaned_episode_id,
+            add=add,
+            source_refs=source_refs,
+            evidence_refs=evidence_refs,
+        )
+
+
+def _semantic_query_profile(query: str) -> str:
+    text = str(query or "").strip().lower()
+    compact = re.sub(r"\s+", "", text)
+    if not compact:
+        return "general"
+    if _looks_like_llm_routing_preference_query(compact):
+        return "llm_routing_preference"
+    if _looks_like_preference_semantic_query(query):
+        return "preference"
+    if any(token in compact for token in ("失败", "故障", "报错", "异常", "卡住", "卡死", "连不上", "没起来", "超时", "timeout", "deepseek", "gateway", "chroma", "neo4j", "状态库")):
+        return "failure_debug"
+    if any(token in compact for token in ("记忆系统", "模型路由", "主链迁移", "能力", "删除资源管理器", "自我改变", "改了什么", "改成什么", "策略")):
+        return "self_change"
+    if any(token in compact for token in ("不像人话", "正常聊天", "模板腔", "台词腔", "胡说八道", "很呆", "文本质量", "体验不好", "白费功夫")):
+        return "relationship_feedback"
+    if any(token in compact for token in ("回去翻", "翻看", "深读", "正文", "详情页", "网页", "epub", "怎么判断", "判断哪本", "哪本好看")):
+        if any(token in compact for token in ("轻小说", "推荐", "哪本", "书", "正文", "详情", "网页", "epub")):
+            return "action_pattern"
+    if "未完成" not in compact and any(token in compact for token in ("完成了什么", "做完了什么", "关闭了", "已完成", "完成的待办", "closed", "done", "resolved")):
+        return "commitment_closed"
+    if any(token in compact for token in ("承诺", "待办", "openloop", "open_loop", "未完成", "还要做", "后续要", "答应", "说好")):
+        return "commitment"
+    if any(token in compact for token in ("推荐", "轻小说", "哪几本", "哪些书", "最近", "这几天", "上周", "昨天", "前天", "题材", "恋爱日常", "奇幻", "皇女", "皇帝")):
+        return "experience_collection"
+    if any(token in compact for token in ("onebot", "edge", "qq会话", "不在本机")):
+        return "stable_fact"
+    return "general"
+
+
+def _semantic_kind_from_tags(tags: list[str]) -> str:
+    for tag in tags:
+        value = str(tag or "").strip()
+        if value.startswith("semantic_kind:"):
+            return value.split(":", 1)[1].strip()
+    lowered = " ".join(str(tag or "").lower() for tag in tags)
+    if "user_preference" in lowered or "preference" in lowered:
+        return "user_preference"
+    if "failure_lesson" in lowered:
+        return "failure_lesson"
+    if "self_change" in lowered:
+        return "self_change"
+    if "commitment" in lowered or "open_loop" in lowered:
+        return "commitment"
+    if "experience_collection" in lowered or "recommendation_collection" in lowered:
+        return "experience_collection"
+    if "action_pattern" in lowered or "proactive_action" in lowered:
+        return "action_pattern"
+    if "stable_fact" in lowered:
+        return "stable_fact"
+    if "correction" in lowered:
+        return "correction"
+    if "relationship_feedback" in lowered or "response_quality" in lowered:
+        return "relationship_feedback"
+    return ""
+
+
+def _semantic_profile_boost(*, query: str, query_profile: str, semantic_kind: str, summary: str, tags: list[str]) -> float:
+    profile = str(query_profile or "general")
+    kind = str(semantic_kind or "")
+    if profile == "preference":
+        if kind == "experience_collection" or _looks_like_collection_semantic_row(summary=summary, tags=tags):
+            return -0.45
+        if kind == "user_preference" or _looks_like_preference_semantic_row(summary=summary, tags=tags):
+            return 0.26
+    if profile == "llm_routing_preference":
+        if kind == "experience_collection" or _looks_like_collection_semantic_row(summary=summary, tags=tags):
+            return -0.45
+        if kind == "user_preference" and _looks_like_llm_routing_semantic_row(summary=summary, tags=tags):
+            return 0.34
+        if kind == "user_preference":
+            return -0.18
+    if profile == "failure_debug":
+        if kind == "failure_lesson":
+            return 0.18
+        if kind == "experience_collection":
+            return -0.08
+    if profile == "self_change":
+        if kind == "self_change":
+            return 0.20
+        if kind in {"experience_collection", "user_preference"}:
+            return -0.06
+    if profile in {"commitment", "commitment_closed"}:
+        if kind == "commitment":
+            status = _open_loop_status_from_tags(tags)
+            if profile == "commitment_closed":
+                return 0.22 if status in {"closed", "cancelled", "superseded"} else 0.06
+            if status in {"closed", "cancelled", "superseded"}:
+                return -0.28
+            return 0.28
+        if kind == "experience_collection":
+            return -0.06
+    if profile == "experience_collection":
+        if kind == "experience_collection":
+            return 0.12
+        if kind == "user_preference":
+            return -0.04
+    if profile == "action_pattern":
+        if kind == "action_pattern":
+            return 0.24
+        if kind == "experience_collection":
+            return 0.04
+        if kind in {"user_preference", "relationship_feedback"}:
+            return -0.08
+    if profile == "stable_fact":
+        if kind == "stable_fact":
+            return 0.18
+    if profile == "relationship_feedback":
+        if kind == "relationship_feedback":
+            return 0.20 + _relationship_feedback_subtopic_boost(query=query, summary=summary, tags=tags)
+        if kind == "experience_collection":
+            return -0.08
+    return 0.0
+
+
+def _relationship_feedback_subtopic_boost(*, query: str, summary: str, tags: list[str]) -> float:
+    compact_query = re.sub(r"\s+", "", str(query or "")).lower()
+    compact_row = re.sub(r"\s+", "", " ".join([str(summary or ""), *[str(tag or "") for tag in tags]])).lower()
+    if not compact_query or not compact_row:
+        return 0.0
+    natural_markers = ("不像人话", "正常聊天", "模板腔", "台词腔", "文本质量", "很呆", "太呆")
+    recall_quality_markers = ("胡说八道", "编造", "召回", "证据", "没核实", "核实", "事实")
+    runtime_markers = ("白费功夫", "服务没起来", "没起来", "连不上")
+    subtopics = (
+        (natural_markers, 0.16),
+        (recall_quality_markers, 0.12),
+        (runtime_markers, 0.12),
+    )
+    for markers, positive_boost in subtopics:
+        if any(marker in compact_query for marker in markers):
+            if any(marker in compact_row for marker in markers):
+                return positive_boost
+            return -0.10
+    return 0.0
+
+
+def _semantic_matched_tags(*, query: str, tags: list[str]) -> list[str]:
+    compact_query = re.sub(r"\s+", "", str(query or "")).lower()
+    if not compact_query:
+        return []
+    matched: list[str] = []
+    for tag in tags:
+        value = str(tag or "").strip()
+        if not value:
+            continue
+        tag_body = value.split(":", 1)[1] if ":" in value else value
+        compact_tag = re.sub(r"[\s_]+", "", tag_body).lower()
+        if len(compact_tag) >= 2 and compact_tag in compact_query:
+            matched.append(value)
+    return list(dict.fromkeys(matched))
+
+
+def _open_loop_status_from_tags(tags: list[str]) -> str:
+    lowered = {str(tag or "").strip().lower() for tag in list(tags or [])}
+    if "open_loop:cancelled" in lowered or "open_loop:canceled" in lowered:
+        return "cancelled"
+    if "open_loop:superseded" in lowered:
+        return "superseded"
+    if "open_loop:closed" in lowered:
+        return "closed"
+    if "open_loop:open" in lowered or "open_loop" in lowered or "commitment" in lowered:
+        return "open"
+    return ""
+
+
 def _looks_like_preference_semantic_query(query: str) -> bool:
     text = str(query or "").strip()
     if not text:
         return False
+    compact = re.sub(r"\s+", "", text).lower()
+    if _looks_like_llm_routing_preference_query(compact):
+        return True
     return any(token in text for token in ("偏好", "喜欢", "不喜欢", "以后", "不要", "别再", "必须", "记得", "我说", "要求")) and any(
         token in text for token in ("格式", "怎么发", "怎样发", "换行", "模板腔", "分段", "卡片", "推荐", "发送", "回复")
+    )
+
+
+def _looks_like_llm_routing_preference_query(compact_query: str) -> bool:
+    value = str(compact_query or "").lower()
+    return any(token in value for token in ("thalamus", "llm", "模型池", "主链", "deepseek", "gemini", "codex", "pro")) and any(
+        token in value for token in ("应该", "用什么", "用哪个", "不要用", "别用", "不用", "优先", "模型")
     )
 
 
 def _looks_like_preference_semantic_row(*, summary: str, tags: list[str]) -> bool:
     text = " ".join([str(summary or ""), *[str(tag or "") for tag in tags]])
     return any(token in text for token in ("用户偏好", "user_preference", "preference", "不要", "别再", "必须", "以后"))
+
+
+def _looks_like_llm_routing_semantic_row(*, summary: str, tags: list[str]) -> bool:
+    summary_text = str(summary or "").lower()
+    tag_text = " ".join(str(tag or "") for tag in tags).lower()
+    combined = f"{summary_text} {tag_text}"
+    if any(token in combined for token in ("thalamus", "llm", "模型池", "主链", "deepseek", "gemini", "codex")):
+        return True
+    return bool(re.search(r"(^|[^a-z0-9])pro([^a-z0-9]|$)", summary_text))
 
 
 def _looks_like_collection_semantic_row(*, summary: str, tags: list[str]) -> bool:

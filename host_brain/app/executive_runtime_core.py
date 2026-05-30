@@ -395,6 +395,53 @@ def _surface_control_requests_memory_recall(surface_task_control: Any, intent_dr
     return target_hint == "memory_recall" or action_hint == "memory_recall"
 
 
+def _message_requests_memory_recall(user_message: str) -> bool:
+    try:
+        from host_brain.memory.life_memory_query import (  # noqa: PLC0415
+            CONTRACT_CORRECTION,
+            CONTRACT_EVIDENCE_REVIEW,
+            CONTRACT_FAILURE_DEBUG,
+            CONTRACT_OPEN_LOOP,
+            CONTRACT_PREFERENCE,
+            CONTRACT_SELF_CHANGE,
+            plan_life_memory_query,
+        )
+
+        plan = plan_life_memory_query(user_message)
+    except Exception:
+        return False
+    if not bool(getattr(plan, "should_recall", False)):
+        return False
+    contract_id = str(getattr(plan, "recall_contract_id", "") or "")
+    if contract_id == CONTRACT_FAILURE_DEBUG:
+        message = _normalize_text(user_message)
+        message_lower = message.lower()
+        return any(
+            marker in message or marker.lower() in message_lower
+            for marker in (
+                "失败原因",
+                "为什么失败",
+                "上次",
+                "之前",
+                "刚才",
+                "那次",
+                "那个",
+                "DeepSeek",
+                "Gemini",
+                "Gateway",
+                "网关",
+                "状态库",
+            )
+        )
+    return contract_id in {
+        CONTRACT_CORRECTION,
+        CONTRACT_EVIDENCE_REVIEW,
+        CONTRACT_OPEN_LOOP,
+        CONTRACT_PREFERENCE,
+        CONTRACT_SELF_CHANGE,
+    }
+
+
 def _hard_rule_route(
     *,
     intent_draft: dict[str, Any],
@@ -410,7 +457,7 @@ def _hard_rule_route(
     """
     route_hint = _normalize_text(intent_draft.get("route"), lower=True)
     target_hint = _normalize_text(intent_draft.get("target_id"))
-    if _surface_control_requests_memory_recall(surface_task_control, intent_draft):
+    if _surface_control_requests_memory_recall(surface_task_control, intent_draft) or _message_requests_memory_recall(sanitized_message):
         return _RouteSelection("chat", "", "hard_rule:surface_memory_recall")
 
     if route_hint in {"recent_turn", "task_progress", "chat"}:

@@ -55,6 +55,8 @@ def _compact_proposal(item: Mapping[str, Any]) -> dict[str, Any]:
         "summary": item.get("summary"),
         "confidence": item.get("confidence"),
         "source_episode_ids": list(item.get("source_episode_ids") or []),
+        "source_collection_ids": list(item.get("source_collection_ids") or []),
+        "source_entity_ids": list(item.get("source_entity_ids") or []),
         "source_refs": list(item.get("source_refs") or [])[:8],
         "tags": list(item.get("tags") or []),
     }
@@ -123,11 +125,20 @@ def main() -> int:
                 compaction_group_limit=max(0, int(args.compaction_limit)),
             )
             mode = "apply"
+            semantic_cleanup = run_result.get("semantic_cleanup")
+            semantic_growth = run_result.get("semantic_growth")
+            semantic_gap_report = consolidator.semantic_growth_gap_report(
+                limit=max(30000, int(args.proposal_limit) * 20)
+            )
             proposals: list[dict[str, Any]] = []
             replay_candidates: list[dict[str, Any]] = []
             compaction_groups: list[dict[str, Any]] = []
         else:
             run_result = {"status": "DRY_RUN", "detail": "No ledger writes were performed."}
+            semantic_cleanup = consolidator.prune_synthetic_semantic_memories(
+                dry_run=True,
+                limit=max(200, int(args.proposal_limit)),
+            )
             proposals = [
                 _compact_proposal(item)
                 for item in consolidator.build_semantic_proposals(
@@ -135,6 +146,10 @@ def main() -> int:
                     max_records=max(1, int(args.semantic_limit)),
                 )
             ]
+            semantic_growth = consolidator.semantic_growth_diagnostics(limit=max(200, int(args.proposal_limit) * 3))
+            semantic_gap_report = consolidator.semantic_growth_gap_report(
+                limit=max(30000, int(args.proposal_limit) * 20)
+            )
             replay_candidates = [
                 _compact_episode(item)
                 for item in sleep_task.select_replay_batch(limit=max(1, int(args.replay_limit)))
@@ -158,6 +173,9 @@ def main() -> int:
             "replay_candidates": replay_candidates,
             "compaction_group_count": len(compaction_groups),
             "compaction_groups": compaction_groups,
+            "semantic_cleanup": semantic_cleanup,
+            "semantic_growth": semantic_growth,
+            "semantic_gap_report": semantic_gap_report,
             "run_result": run_result,
         }
     finally:

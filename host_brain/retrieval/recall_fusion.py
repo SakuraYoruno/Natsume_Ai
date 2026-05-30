@@ -876,13 +876,23 @@ def _candidate_anaphoric_action_priority(candidate: Mapping[str, Any], *, query:
             return 7
         return 2
     action = _candidate_life_action(candidate)
-    if action in {"lightnovel_recommendation_delivery", "recommendation_delivery"} or action.endswith("_recommendation_delivery"):
-        return 0
-    if action in {"lightnovel_gateway_delivery", "gateway_delivery"} or action.endswith("_gateway_delivery"):
-        return 1
+    deep_review_query = _query_asks_about_deep_review(query)
     if action in {"lightnovel_recommendation_deep_review", "recommendation_deep_review"} or action.endswith("_deep_review"):
-        return 8
+        return 0 if deep_review_query else 8
+    if action in {"lightnovel_recommendation_delivery", "recommendation_delivery"} or action.endswith("_recommendation_delivery"):
+        return 2 if deep_review_query else 0
+    if action in {"lightnovel_gateway_delivery", "gateway_delivery"} or action.endswith("_gateway_delivery"):
+        return 3 if deep_review_query else 1
     return 4
+
+
+def _query_asks_about_deep_review(query: str) -> bool:
+    value = str(query or "").strip().lower()
+    if not value:
+        return False
+    asks_selection = any(token in value for token in ("哪本", "哪部", "哪个", "好看", "喜欢", "推荐", "选", "挑", "为什么", "原因", "理由"))
+    asks_deep_evidence = any(token in value for token in ("翻看", "看完", "读完", "深读", "正文", "详情", "网页", "epub", "读下来", "看下来"))
+    return bool(asks_selection and asks_deep_evidence)
 
 
 def _small_anaphoric_item_count(query: str) -> int:
@@ -920,9 +930,13 @@ def _looks_like_broad_collection_selection_query(query: str) -> bool:
     has_broad_scope = any(
         token in value
         for token in ("十几本", "这几本", "这些", "那些", "这几天", "最近", "过去几天", "全部", "所有")
+    ) or (
+        any(token in value for token in ("今天", "昨日", "昨天", "昨晚", "前天", "上周", "5月", "月"))
+        and any(token in value for token in ("推荐", "推过", "推送", "发过", "发给我", "书单"))
     )
     has_selection = any(token in value for token in ("哪本", "哪部", "哪个", "哪些", "喜欢", "好看", "值得看", "推荐"))
-    return has_broad_scope and has_selection
+    has_listing = bool(re.search(r"(?:哪几本|哪几部|哪些(?:书|轻小说|小说)?)", value))
+    return has_broad_scope and (has_selection or has_listing)
 
 
 def _candidate_matches_specific_item_reference(candidate: Mapping[str, Any], *, query: str) -> bool:

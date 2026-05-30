@@ -189,6 +189,26 @@ LIFE_MEMORY_COMPACTION_COLUMNS = (
     "metadata",
 )
 
+LIFE_OPEN_LOOP_COLUMNS = (
+    "open_loop_id",
+    "semantic_key",
+    "episode_id",
+    "person_id",
+    "session_id",
+    "title",
+    "detail",
+    "status",
+    "source_ref",
+    "opened_ts_ms",
+    "updated_ts_ms",
+    "closed_ts_ms",
+    "close_episode_id",
+    "close_reason",
+    "salience",
+    "memory_strength",
+    "metadata",
+)
+
 LIFE_MEMORY_COLLECTION_COLUMNS = (
     "collection_id",
     "collection_kind",
@@ -561,6 +581,7 @@ JSON_FIELDS_BY_TABLE: dict[str, set[str]] = {
     "life_episode_link": {"metadata"},
     "life_memory_correction": {"metadata"},
     "life_memory_compaction": {"source_episode_ids", "dropped_details", "kept_facts", "metadata"},
+    "life_open_loop": {"metadata"},
     "life_memory_collection": {"metadata"},
     "life_memory_collection_item": {"metadata"},
     "life_memory_entity": {"metadata"},
@@ -606,6 +627,7 @@ _ALLOWED_TABLES: frozenset[str] = frozenset({
     "life_episode_link",
     "life_memory_correction",
     "life_memory_compaction",
+    "life_open_loop",
     "life_memory_collection",
     "life_memory_collection_item",
     "life_memory_entity",

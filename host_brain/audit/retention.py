@@ -455,10 +455,31 @@ def _life_memory_delete_where(active: RetentionPolicy, *, now_ts_ms: int) -> tup
         AND (retention_until_ts_ms IS NULL OR retention_until_ts_ms < ?)
         AND (
             COALESCE(retention_state, 'COLD') = 'GONE'
-            OR COALESCE(salience, 0.0) < ?
+            OR (
+                COALESCE(salience, 0.0) < ?
+                AND COALESCE(memory_strength, COALESCE(salience, 0.0)) < ?
+            )
         )
         AND episode_kind IN ({placeholders})
         AND episode_kind <> 'semantic_episode'
+        AND COALESCE(truth_state, 'CANDIDATE') NOT IN ('CORRECTED', 'SUPPRESSED')
+        AND COALESCE(status, 'ACTIVE') != 'SUPPRESSED'
+        AND COALESCE(metadata, '') NOT LIKE '%"semantic_candidate": true%'
+        AND COALESCE(metadata, '') NOT LIKE '%"semantic_candidate":true%'
+        AND COALESCE(metadata, '') NOT LIKE '%"memory_class": "preference"%'
+        AND COALESCE(metadata, '') NOT LIKE '%"memory_class":"preference"%'
+        AND COALESCE(metadata, '') NOT LIKE '%"memory_class": "commitment"%'
+        AND COALESCE(metadata, '') NOT LIKE '%"memory_class":"commitment"%'
+        AND COALESCE(metadata, '') NOT LIKE '%"memory_class": "correction"%'
+        AND COALESCE(metadata, '') NOT LIKE '%"memory_class":"correction"%'
+        AND COALESCE(metadata, '') NOT LIKE '%"memory_class": "relationship_feedback"%'
+        AND COALESCE(metadata, '') NOT LIKE '%"memory_class":"relationship_feedback"%'
+        AND COALESCE(metadata, '') NOT LIKE '%"memory_class": "self_change"%'
+        AND COALESCE(metadata, '') NOT LIKE '%"memory_class":"self_change"%'
+        AND COALESCE(metadata, '') NOT LIKE '%"memory_class": "stable_fact"%'
+        AND COALESCE(metadata, '') NOT LIKE '%"memory_class":"stable_fact"%'
+        AND COALESCE(metadata, '') NOT LIKE '%"memory_class": "failure_lesson"%'
+        AND COALESCE(metadata, '') NOT LIKE '%"memory_class":"failure_lesson"%'
         AND NOT EXISTS (
             SELECT 1 FROM life_episode_link l
             WHERE l.source_episode_id = life_episode.episode_id
@@ -469,8 +490,23 @@ def _life_memory_delete_where(active: RetentionPolicy, *, now_ts_ms: int) -> tup
             WHERE c.episode_id = life_episode.episode_id
                OR c.correction_episode_id = life_episode.episode_id
         )
+        AND NOT EXISTS (
+            SELECT 1 FROM semantic_memory s
+            WHERE COALESCE(s.deleted_at, 0) = 0
+              AND COALESCE(s.source_memory_ids, '') LIKE '%' || 'life_episode::' || life_episode.episode_id || '%'
+        )
+        AND NOT EXISTS (
+            SELECT 1 FROM life_open_loop o
+            WHERE o.episode_id = life_episode.episode_id
+               OR o.close_episode_id = life_episode.episode_id
+        )
+        AND NOT EXISTS (
+            SELECT 1 FROM life_memory_compaction cp
+            WHERE cp.compressed_episode_id = life_episode.episode_id
+        )
     """
-    return where, [int(cutoff), int(now_ts_ms), float(active.life_memory_min_salience), *kinds]
+    min_salience = float(active.life_memory_min_salience)
+    return where, [int(cutoff), int(now_ts_ms), min_salience, min_salience, *kinds]
 
 
 def _count_life_memory_delete_candidates(conn: Any, *, policy: RetentionPolicy, now_ts_ms: int) -> int:
@@ -593,6 +629,11 @@ def _cleanup_life_memory_entities_locked(conn: Any, *, now_ts_ms: int) -> None:
             last_seen_ts_ms = MAX(COALESCE(last_seen_ts_ms, 0), ?)
         WHERE COALESCE(retention_state, 'WARM') != 'GONE'
           AND COALESCE(mention_count, 0) = 0
+          AND NOT EXISTS (
+              SELECT 1 FROM semantic_memory s
+              WHERE COALESCE(s.deleted_at, 0) = 0
+                AND COALESCE(s.source_memory_ids, '') LIKE '%' || 'life_memory_entity::' || life_memory_entity.entity_id || '%'
+          )
         """,
         (int(now_ts_ms),),
     )

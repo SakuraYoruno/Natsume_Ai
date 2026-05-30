@@ -24,7 +24,7 @@ from typing import Any, Mapping, Sequence
 import urllib.request
 
 
-DEFAULT_CODEX_CLI_MODEL = "gpt-5.4-mini"
+DEFAULT_CODEX_CLI_MODEL = "gpt-5.5"
 DEFAULT_CODEX_CLI_TIMEOUT_MS = 180_000
 MAX_CODEX_CLI_TIMEOUT_MS = 600_000
 MAX_CODEX_CLI_ERROR_CHARS = 1600
@@ -152,7 +152,12 @@ def resolve_codex_cli_reasoning_effort(model_id: str | None = None, effort: str 
     raw = str(effort or os.environ.get("HOST_CODEX_CLI_REASONING_EFFORT") or "").strip().lower()
     normalized_model = str(model_id or "").strip().lower()
     if not raw or raw in {"default", "inherit"}:
-        raw = "low" if normalized_model.startswith("gpt-5.3-codex-spark") else "none"
+        if normalized_model.startswith("gpt-5.3-codex-spark"):
+            raw = "low"
+        elif normalized_model.startswith("gpt-5.5"):
+            raw = "minimal"
+        else:
+            raw = "none"
     if raw in {"none", "minimal"} and normalized_model.startswith("gpt-5.3-codex-spark"):
         return "low"
     if raw == "minimal" and normalized_model == "gpt-5.4-mini":

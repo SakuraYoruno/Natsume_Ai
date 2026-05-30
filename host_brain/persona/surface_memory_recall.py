@@ -43,7 +43,8 @@ _ANAPHORIC_SELECTION_RE = re.compile(
     r"(?:哪(?:本|部|个|一(?:本|部|个))|哪个|哪部|哪本|"
     r"(?:我问你|刚问你|问你).{0,12}哪|"
     r"(?:喜欢|想看|先看|推荐|选|挑|好看).{0,8}哪|"
-    r"(?:这本书|这部书|这本|这部|这书|它).{0,8}(?:好看|能看|值得看|怎么样|如何))",
+    r"(?:这本书|这部书|这本|这部|这书|它).{0,8}(?:好看|能看|值得看|怎么样|如何)|"
+    r"(?:这|那|昨天那|前天那|今天这)(?:几|三|两|二|十几)?(?:本|部|个).{0,8}(?:好看|能看|值得看|怎么样|如何|喜欢|想看|先看))",
 )
 _LOCAL_MEMORY_TZ = timezone(timedelta(hours=8))
 _RECALL_HINTS = (
@@ -318,6 +319,23 @@ def plan_surface_memory_recall(
             task_mode=task_mode,
             recall_policy=RECALL_POLICY_NO,
             reason="memory_write_current_turn_only",
+            query_kind=life_query_plan.query_kind,
+            temporal_scope=life_query_plan.temporal_scope,
+            target_domains=life_query_plan.target_domains,
+            validation_requirements=life_query_plan.validation_requirements,
+            recall_contract_id=life_query_plan.recall_contract_id,
+            primary_memory_layer=life_query_plan.primary_memory_layer,
+            expected_memory_layers=life_query_plan.expected_memory_layers,
+            min_collection_items=life_query_plan.min_collection_items,
+            answer_obligations=life_query_plan.answer_obligations,
+        )
+    if not life_query_plan.should_recall and life_query_plan.reason in {"response_style_feedback_current_turn"}:
+        return SurfaceMemoryRecallPlan(
+            should_recall=False,
+            query=query,
+            task_mode=task_mode,
+            recall_policy=RECALL_POLICY_NO,
+            reason=life_query_plan.reason,
             query_kind=life_query_plan.query_kind,
             temporal_scope=life_query_plan.temporal_scope,
             target_domains=life_query_plan.target_domains,
@@ -742,6 +760,9 @@ def build_surface_memory_recall_packet(
     )
     if selected_entity_items:
         trace["selected_entity_items"] = selected_entity_items
+    semantic_usage = _build_semantic_usage_trace(rows, query=query if query is not None else output.get("query"))
+    if semantic_usage:
+        trace["semantic_usage"] = semantic_usage
     if validation_trace["required"]:
         trace["validation"] = validation_trace
     recall_need = _build_recall_need_trace(
@@ -759,6 +780,7 @@ def build_surface_memory_recall_packet(
     trace["recall_receipt"] = _build_recall_receipt_trace(
         candidates=candidates_for_selection,
         rows=rows,
+        query=query if query is not None else output.get("query"),
         validation_trace=validation_trace,
         temporal_scope=temporal_scope,
         query_kind=query_kind,
@@ -791,6 +813,12 @@ def build_surface_memory_recall_packet(
         coverage_failed=coverage_failed,
     )
     trace["recall_answer_readiness"] = answer_readiness
+    trace["recall_answer_strategy"] = _build_recall_answer_strategy_trace(
+        recall_need=recall_need,
+        recall_receipt=trace["recall_receipt"],
+        recall_coverage=trace["recall_coverage"],
+        answer_readiness=answer_readiness,
+    )
     trace["answer_ready"] = bool(answer_readiness.get("ready_to_answer"))
     if validation_failed or coverage_failed:
         trace["validation_failed"] = bool(validation_failed)
@@ -861,13 +889,27 @@ def _build_recall_need_trace(
         evidence_depth = "detail_or_body_evidence"
     elif "evidence_refs_present" in required:
         evidence_depth = "evidence_anchor"
+    need_type = _recall_need_type(kind=kind, contract=contract, primary_layer=primary)
+    grain = _recall_grain_trace(
+        need_type=need_type,
+        query_kind=kind,
+        contract_id=contract,
+        primary_memory_layer=primary,
+        evidence_depth=evidence_depth,
+        temporal_scope=_clean_text(temporal_scope),
+        min_collection_items=min_collection_items,
+    )
     return {
         "schema": "Natsume.surface_recall_need.v1",
         "query_kind": kind,
         "temporal_scope": _clean_text(temporal_scope),
         "target_domains": domains,
         "recall_contract_id": contract,
-        "need_type": _recall_need_type(kind=kind, contract=contract, primary_layer=primary),
+        "need_type": need_type,
+        "recall_grain": grain["recall_grain"],
+        "retrieval_unit": grain["retrieval_unit"],
+        "answer_scope": grain["answer_scope"],
+        "verification_gate": grain["verification_gate"],
         "primary_memory_layer": primary,
         "expected_memory_layers": expected_layers,
         "min_collection_items": max(0, _coerce_int(min_collection_items)),
@@ -886,15 +928,112 @@ def _recall_need_type(*, kind: str, contract: str, primary_layer: str) -> str:
         return "failure_episode"
     if kind == "preference_lookup":
         return "semantic_or_episode_preference"
+    if kind == "open_loop" or contract == "open_loop":
+        return "open_loop_memory"
     if kind == "correction":
         return "correction_chain"
     if kind == "self_change":
-        return "self_change_episode"
+        return "self_change_memory"
     if kind == "event_lookup" or contract == "event_lookup":
         return "episode_event"
     if kind == "evidence_review" or contract == "evidence_review":
         return "evidence_review"
     return "memory_hit"
+
+
+def _recall_grain_trace(
+    *,
+    need_type: str,
+    query_kind: str,
+    contract_id: str,
+    primary_memory_layer: str,
+    evidence_depth: str,
+    temporal_scope: str,
+    min_collection_items: int,
+) -> dict[str, str]:
+    """Describe the intended recall granularity in audit-friendly terms."""
+
+    need = _clean_text(need_type)
+    kind = _clean_text(query_kind)
+    contract = _clean_text(contract_id)
+    primary = _clean_text(primary_memory_layer)
+    depth = _clean_text(evidence_depth)
+    temporal = _clean_text(temporal_scope)
+    min_items = max(0, _coerce_int(min_collection_items))
+
+    if need == "collection":
+        gate = "scope_match+collection_items_present+evidence_refs_present"
+        if min_items > 0:
+            gate += f"+min_items:{min_items}"
+        return {
+            "recall_grain": "collection",
+            "retrieval_unit": "life_memory_collection.items",
+            "answer_scope": "list_or_summarize_requested_collection",
+            "verification_gate": gate,
+        }
+    if need == "collection_selection":
+        gate = "collection_or_episode_hit+evidence_refs_present+no_self_echo"
+        if min_items > 0:
+            gate += f"+min_items:{min_items}"
+        if depth == "detail_or_body_evidence":
+            gate += "+detail_or_body_evidence_before_quality_judgment"
+        return {
+            "recall_grain": "collection_selection",
+            "retrieval_unit": "life_memory_collection.items",
+            "answer_scope": "compare_recalled_items_with_detail_gate",
+            "verification_gate": gate,
+        }
+    if need == "entity_or_collection_selection":
+        gate = "entity_or_collection_hit+evidence_refs_present+no_self_echo"
+        if depth == "detail_or_body_evidence":
+            gate += "+detail_or_body_evidence_before_quality_judgment"
+        return {
+            "recall_grain": "entity_selection",
+            "retrieval_unit": "life_memory_entity.with_source_collection",
+            "answer_scope": "judge_named_or_referenced_item_only",
+            "verification_gate": gate,
+        }
+    if need == "evidence_review":
+        return {
+            "recall_grain": "evidence",
+            "retrieval_unit": "life_episode.evidence",
+            "answer_scope": "judge_claim_from_bound_evidence",
+            "verification_gate": "trusted_memory_hit+source_ref_present+target_domain_match+detail_or_body_evidence",
+        }
+    if need in {"episode_event", "failure_episode"}:
+        return {
+            "recall_grain": "episode",
+            "retrieval_unit": "life_episode",
+            "answer_scope": "answer_action_result_or_failure_cause",
+            "verification_gate": "event_or_failure_episode_hit+source_ref_present",
+        }
+    if need == "correction_chain":
+        return {
+            "recall_grain": "correction_chain",
+            "retrieval_unit": "life_memory_correction+life_episode",
+            "answer_scope": "prefer_latest_trusted_correction",
+            "verification_gate": "correction_state_checked+suppressed_not_fact",
+        }
+    if need in {"semantic_or_episode_preference", "open_loop_memory", "self_change_memory"}:
+        return {
+            "recall_grain": "semantic_first",
+            "retrieval_unit": "semantic_memory.with_life_episode_provenance",
+            "answer_scope": "state_stable_rule_status_or_self_change",
+            "verification_gate": "trusted_memory_hit+source_ref_present",
+        }
+    if contract == "no_recall" or kind == "fresh_topic" or not primary:
+        return {
+            "recall_grain": "none",
+            "retrieval_unit": "none",
+            "answer_scope": "answer_current_turn_only",
+            "verification_gate": "no_recall_hint",
+        }
+    return {
+        "recall_grain": primary or "memory",
+        "retrieval_unit": primary or "memory",
+        "answer_scope": f"answer_from_{need or 'memory'}",
+        "verification_gate": f"temporal:{temporal or 'unspecified'}+evidence:{depth or 'memory_hit'}",
+    }
 
 
 def build_surface_memory_recall_decision_trace(
@@ -925,6 +1064,7 @@ def build_surface_memory_recall_decision_trace(
             f"temporal_scope:{plan.temporal_scope}" if plan.temporal_scope else "",
             f"contract:{plan.recall_contract_id}" if plan.recall_contract_id else "",
             f"need_type:{need.get('need_type')}" if need.get("need_type") else "",
+            f"recall_grain:{need.get('recall_grain')}" if need.get("recall_grain") else "",
             f"primary_layer:{plan.primary_memory_layer}" if plan.primary_memory_layer else "",
             f"stores:{','.join(plan.target_store_ids)}" if plan.target_store_ids else "",
             f"domains:{','.join(plan.target_domains)}" if plan.target_domains else "",
@@ -944,6 +1084,10 @@ def build_surface_memory_recall_decision_trace(
         "temporal_scope": _clean_text(plan.temporal_scope),
         "recall_contract_id": _clean_text(plan.recall_contract_id),
         "need_type": _clean_text(need.get("need_type")),
+        "recall_grain": _clean_text(need.get("recall_grain")),
+        "retrieval_unit": _clean_text(need.get("retrieval_unit")),
+        "answer_scope": _clean_text(need.get("answer_scope")),
+        "verification_gate": _clean_text(need.get("verification_gate")),
         "primary_memory_layer": _clean_text(plan.primary_memory_layer),
         "expected_memory_layers": list(_unique(list(plan.expected_memory_layers or []))),
         "target_store_ids": list(_unique(list(plan.target_store_ids or []))),
@@ -986,11 +1130,22 @@ def _build_recall_coverage_trace(
     evidence_ref_count = max(0, _coerce_int(recall_receipt.get("evidence_ref_count")))
     source_ref_count = max(0, _coerce_int(recall_receipt.get("source_ref_count")))
     detail_evidence = dict(recall_receipt.get("detail_evidence") or {})
+    query_relevance = dict(recall_receipt.get("query_relevance") or {})
+    relevance_required = bool(query_relevance.get("required"))
+    relevance_score = _coerce_float(query_relevance.get("score"))
     detail_required = (
         _clean_text(recall_need.get("evidence_depth")) == "detail_or_body_evidence"
         or bool(detail_evidence.get("required"))
     )
-    body_required = detail_required and _clean_text(recall_need.get("need_type")) == "evidence_review"
+    answer_obligations = {
+        _clean_text(item)
+        for item in list(recall_need.get("answer_obligations") or [])
+        if _clean_text(item)
+    }
+    body_required = detail_required and (
+        _clean_text(recall_need.get("need_type")) == "evidence_review"
+        or "read_detail_evidence_before_deep_quality_judgment" in answer_obligations
+    )
     detail_body_count = max(0, _coerce_int(detail_evidence.get("body_item_count")))
     detail_anchor_count = max(0, _coerce_int(detail_evidence.get("anchor_item_count")))
     detail_ready = bool(detail_evidence.get("ready_for_deep_review"))
@@ -1009,16 +1164,23 @@ def _build_recall_coverage_trace(
     }
     if detail_required:
         dimensions["detail_evidence"] = 1.0 if detail_body_count > 0 else (0.75 if detail_ready and not body_required else 0.0)
+    if relevance_required:
+        dimensions["query_relevance"] = max(0.0, min(1.0, relevance_score))
     if not required:
         dimensions["validation"] = 1.0 if selected_layers else 0.0
     score = round(sum(float(value) for value in dimensions.values()) / max(1, len(dimensions)), 6)
     coverage_missing = list(missing)
     if detail_required and not detail_ready_for_coverage and "detail_evidence" not in coverage_missing:
         coverage_missing.append("detail_evidence")
+    if relevance_required and relevance_score < 0.34 and "query_relevance" not in coverage_missing:
+        coverage_missing.append("query_relevance")
     return {
         "schema": "Natsume.surface_recall_coverage.v1",
         "score": score,
-        "passed": bool(validation_trace.get("passed", True)) and score >= 0.66 and (not detail_required or detail_ready_for_coverage),
+        "passed": bool(validation_trace.get("passed", True))
+        and score >= 0.66
+        and (not detail_required or detail_ready_for_coverage)
+        and (not relevance_required or relevance_score >= 0.34),
         "missing": coverage_missing,
         "dimensions": {key: round(float(value), 6) for key, value in dimensions.items()},
         "required_count": len(required),
@@ -1028,6 +1190,7 @@ def _build_recall_coverage_trace(
         "evidence_ref_count": evidence_ref_count,
         "source_ref_count": source_ref_count,
         "detail_evidence": detail_evidence,
+        "query_relevance": query_relevance,
         "detail_body_item_count": detail_body_count,
         "detail_anchor_item_count": detail_anchor_count,
         "selected_store_counts": dict(sorted(selected_store_counts.items())),
@@ -1052,9 +1215,18 @@ def _build_recall_answer_readiness_trace(
     need_type = _clean_text(recall_need.get("need_type"))
     evidence_depth = _clean_text(recall_need.get("evidence_depth"))
     detail_evidence = dict(recall_coverage.get("detail_evidence") or {})
+    query_relevance = dict(recall_coverage.get("query_relevance") or {})
     detail_required = evidence_depth == "detail_or_body_evidence" or bool(detail_evidence.get("required"))
     detail_body_count = max(0, _coerce_int(detail_evidence.get("body_item_count")))
-    body_required = detail_required and need_type == "evidence_review"
+    answer_obligations = {
+        _clean_text(item)
+        for item in list(recall_need.get("answer_obligations") or [])
+        if _clean_text(item)
+    }
+    body_required = detail_required and (
+        need_type == "evidence_review"
+        or "read_detail_evidence_before_deep_quality_judgment" in answer_obligations
+    )
     detail_ready = (not detail_required) or (detail_body_count > 0 if body_required else bool(detail_evidence.get("ready_for_deep_review")))
     coverage_passed = bool(recall_coverage.get("passed"))
     validation_passed = bool(validation_trace.get("passed", True))
@@ -1100,7 +1272,7 @@ def _build_recall_answer_readiness_trace(
         elif need_type in {"collection", "collection_selection", "entity_or_collection_selection"}:
             response_mode = "answer_from_collection_memory"
             recommended_rule = "可以围绕召回到的集合、条目和证据锚点回答；不要补不存在的条目。"
-        elif need_type in {"episode_event", "failure_episode", "self_change_episode", "correction_chain"}:
+        elif need_type in {"episode_event", "failure_episode", "open_loop_memory", "self_change_memory", "correction_chain"}:
             response_mode = "answer_from_episode_memory"
             recommended_rule = "可以基于召回到的 episode 事实回答；纠错链以最新可信状态为准。"
     elif max(0, _coerce_int(selected_bond_count)) > 0:
@@ -1118,6 +1290,8 @@ def _build_recall_answer_readiness_trace(
 
     if detail_required and not detail_ready and "missing_detail_evidence" not in reasons:
         reasons.append("missing_detail_evidence")
+    if bool(query_relevance.get("required")) and _coerce_float(query_relevance.get("score")) < 0.34 and "query_relevance" not in reasons:
+        reasons.append("query_relevance")
     if required_items > 0 and selected_items < required_items and "insufficient_item_count" not in reasons:
         reasons.append("insufficient_item_count")
     if selected_fact_count <= 0 and "no_selected_memory" not in reasons:
@@ -1158,8 +1332,103 @@ def _build_recall_answer_readiness_trace(
             "anchor_item_count": max(0, _coerce_int(detail_evidence.get("anchor_item_count"))),
             "structured_item_count": max(0, _coerce_int(detail_evidence.get("structured_item_count"))),
         },
+        "query_relevance": {
+            "required": bool(query_relevance.get("required")),
+            "score": round(_coerce_float(query_relevance.get("score")), 6),
+            "basis": _clean_text(query_relevance.get("basis")),
+            "matched": list(_unique(list(query_relevance.get("matched") or [])))[:12],
+            "missing": list(_unique(list(query_relevance.get("missing") or [])))[:12],
+        },
         "receipt_decision": _clean_text(recall_receipt.get("decision")),
         "receipt_selection_basis": list(_unique(list(recall_receipt.get("selection_basis") or [])))[:12],
+    }
+
+
+def _build_recall_answer_strategy_trace(
+    *,
+    recall_need: Mapping[str, Any],
+    recall_receipt: Mapping[str, Any],
+    recall_coverage: Mapping[str, Any],
+    answer_readiness: Mapping[str, Any],
+) -> dict[str, Any]:
+    need_type = _clean_text(recall_need.get("need_type"))
+    contract_id = _clean_text(recall_need.get("recall_contract_id"))
+    query_kind = _clean_text(recall_need.get("query_kind"))
+    evidence_depth = _clean_text(recall_need.get("evidence_depth"))
+    readiness_status = _clean_text(answer_readiness.get("status")).upper()
+    response_mode = _clean_text(answer_readiness.get("response_mode"))
+    detail = dict(answer_readiness.get("detail_evidence") or {})
+    detail_required = bool(detail.get("required")) or evidence_depth == "detail_or_body_evidence"
+    detail_basis = _clean_text(detail.get("basis"))
+    detail_body_count = max(0, _coerce_int(detail.get("body_item_count")))
+    detail_anchor_count = max(0, _coerce_int(detail.get("anchor_item_count")))
+    coverage_score = _coerce_float(recall_coverage.get("score"))
+    selected_items = max(0, _coerce_int(answer_readiness.get("selected_item_count")))
+    reasons = list(_unique(list(answer_readiness.get("reasons") or [])))
+    action = "direct_answer"
+    claim_scope = "memory_fact"
+    evidence_level = "memory"
+    confidence_band = "high" if coverage_score >= 0.82 else ("medium" if coverage_score >= 0.66 else "low")
+    recommended_rule = _clean_text(answer_readiness.get("recommended_surface_rule"))
+
+    if readiness_status == "NOT_READY":
+        action = "fetch_more_evidence" if response_mode == "fetch_or_request_detail_evidence" else "say_missing_memory"
+        claim_scope = "no_fact_claim"
+        evidence_level = "missing"
+    elif readiness_status == "PARTIAL":
+        action = "answer_cautiously"
+        claim_scope = "relationship_context_only"
+        evidence_level = "relationship"
+    elif detail_required and need_type in {"collection_selection", "entity_or_collection_selection", "evidence_review"}:
+        if detail_body_count > 0 or detail_basis in {"lightnovel_deep_review", "generic_evidence_review", "body_evidence"}:
+            action = "direct_answer"
+            claim_scope = "detail_judgment"
+            evidence_level = "detail_or_body"
+        elif detail_anchor_count > 0 or detail_basis == "detail_anchor":
+            action = "fetch_more_evidence"
+            claim_scope = "memory_only_no_quality_judgment"
+            evidence_level = "detail_anchor_only"
+            if "needs_detail_fetch_before_judgment" not in reasons:
+                reasons.append("needs_detail_fetch_before_judgment")
+            recommended_rule = "只能确认记得这些条目和详情入口；涉及哪本更好看时，需要先读取详情页、正文或缓存深读结果。"
+        else:
+            action = "fetch_more_evidence"
+            claim_scope = "memory_only_no_quality_judgment"
+            evidence_level = "memory_anchor_only"
+            if "missing_detail_evidence" not in reasons:
+                reasons.append("missing_detail_evidence")
+            recommended_rule = "当前只够确认发生过相关事件，不够做质量判断；需要先补详情或正文证据。"
+    elif need_type in {"collection", "collection_selection", "entity_or_collection_selection"}:
+        claim_scope = "collection_memory"
+        evidence_level = "collection_anchor"
+    elif need_type == "evidence_review":
+        claim_scope = "evidence_judgment"
+        evidence_level = "detail_or_body" if detail_body_count > 0 else "evidence_anchor"
+
+    return {
+        "schema": "Natsume.surface_recall_answer_strategy.v1",
+        "action": action,
+        "claim_scope": claim_scope,
+        "evidence_level": evidence_level,
+        "confidence_band": confidence_band,
+        "ready_to_answer": action == "direct_answer",
+        "should_fetch_more_evidence": action == "fetch_more_evidence",
+        "should_state_memory_only": claim_scope == "memory_only_no_quality_judgment",
+        "recall_contract_id": contract_id,
+        "query_kind": query_kind,
+        "need_type": need_type,
+        "response_mode": response_mode,
+        "coverage_score": round(coverage_score, 6),
+        "selected_item_count": selected_items,
+        "detail_evidence": {
+            "required": detail_required,
+            "basis": detail_basis,
+            "body_item_count": detail_body_count,
+            "anchor_item_count": detail_anchor_count,
+        },
+        "reasons": list(_unique(reasons)),
+        "recommended_surface_rule": recommended_rule,
+        "receipt_decision": _clean_text(recall_receipt.get("decision")),
     }
 
 
@@ -1332,6 +1601,7 @@ def _build_recall_receipt_trace(
     *,
     candidates: Sequence[Mapping[str, Any]],
     rows: Sequence[SurfaceMemoryFactRow],
+    query: Any,
     validation_trace: Mapping[str, Any],
     temporal_scope: str,
     query_kind: str,
@@ -1384,6 +1654,15 @@ def _build_recall_receipt_trace(
         candidate_basis=candidate_basis,
         answer_obligations=answer_obligations,
     )
+    semantic_provenance = _build_semantic_provenance_receipt(candidate_basis)
+    relevance = _build_query_relevance_receipt(
+        query=query,
+        rows=rows,
+        item_payloads=item_payloads,
+        candidate_basis=candidate_basis,
+        query_kind=query_kind,
+        recall_contract_id=recall_contract_id,
+    )
     primary = _clean_text(primary_memory_layer)
     selected_store_ids = set(selected_store_counts)
     candidate_store_counts = _store_counts_from_candidates(candidate_basis)
@@ -1400,6 +1679,7 @@ def _build_recall_receipt_trace(
             f"scope:{', '.join(scope_keys)}" if scope_keys else "",
             f"items:{selected_item_count}" if selected_item_count else "",
             "evidence_refs:present" if evidence_ref_count else "",
+            "semantic_provenance:resolved" if semantic_provenance.get("resolved_count") else "",
             f"detail_evidence:{detail_evidence.get('basis')}" if detail_evidence.get("required") else "",
         ]
     )
@@ -1424,6 +1704,8 @@ def _build_recall_receipt_trace(
         "evidence_ref_count": evidence_ref_count,
         "source_ref_count": source_ref_count,
         "detail_evidence": detail_evidence,
+        "semantic_provenance": semantic_provenance,
+        "query_relevance": relevance,
         "meets_primary_layer": (not primary) or primary in selected_store_ids or primary in candidate_store_counts,
         "meets_expected_layer": (
             not expected_layer_set
@@ -1439,6 +1721,75 @@ def _build_recall_receipt_trace(
         "answer_obligations": list(_unique(list(answer_obligations or []))),
         "selection_basis": selection_basis,
     }
+
+
+def _build_semantic_provenance_receipt(candidate_basis: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    semantic_candidates = [
+        dict(candidate)
+        for candidate in candidate_basis
+        if isinstance(candidate, Mapping) and _candidate_store_id(candidate) == "semantic_memory"
+    ]
+    resolved_ids: list[str] = []
+    unresolved_ids: list[str] = []
+    evidence_refs: list[str] = []
+    source_refs: list[str] = []
+    resolved_count = 0
+    unresolved_count = 0
+    for candidate in semantic_candidates:
+        metadata = _candidate_metadata(candidate)
+        semantic_id = _clean_text(metadata.get("semantic_id") or candidate.get("doc_id") or candidate.get("memory_id"))
+        refs = _trusted_surface_provenance_refs(
+            candidate.get("evidence_ref"),
+            candidate.get("evidence_refs"),
+            metadata.get("semantic_evidence_refs"),
+            metadata.get("evidence_refs"),
+            metadata.get("evidence_refs_primary"),
+        )
+        sources = _trusted_surface_provenance_refs(
+            candidate.get("source_ref"),
+            metadata.get("semantic_source_refs"),
+            metadata.get("source_ref"),
+        )
+        evidence_refs.extend(refs)
+        source_refs.extend(sources)
+        status = _clean_text(metadata.get("semantic_provenance_status")).lower()
+        resolved = status == "resolved" or bool(refs)
+        if resolved:
+            resolved_count += 1
+            if semantic_id:
+                resolved_ids.append(semantic_id)
+        else:
+            unresolved_count += 1
+            if semantic_id:
+                unresolved_ids.append(semantic_id)
+    return {
+        "schema": "Natsume.surface_semantic_provenance_receipt.v1",
+        "semantic_candidate_count": len(semantic_candidates),
+        "resolved_count": resolved_count,
+        "unresolved_count": unresolved_count,
+        "resolved_semantic_ids": _unique(resolved_ids)[:12],
+        "unresolved_semantic_ids": _unique(unresolved_ids)[:12],
+        "evidence_refs": _unique(evidence_refs)[:24],
+        "source_refs": _unique(source_refs)[:24],
+    }
+
+
+def _trusted_surface_provenance_refs(*values: Any) -> list[str]:
+    refs: list[str] = []
+    for value in values:
+        for ref in _coerce_sequence(value):
+            cleaned = _clean_text(ref)
+            lowered = cleaned.lower()
+            if not lowered:
+                continue
+            if lowered.startswith(("semantic://", "ledger://semantic_memory/", "life_episode::", "life_memory_collection::")):
+                continue
+            if lowered.startswith(("chat://person/", "chat://session/", "source:")):
+                continue
+            if "://" not in lowered:
+                continue
+            refs.append(cleaned)
+    return _unique(refs)
 
 
 def _build_detail_evidence_receipt(
@@ -1484,6 +1835,278 @@ def _build_detail_evidence_receipt(
         "structured_item_count": len(structured_items),
         "detail_refs": list(_unique([*_detail_refs_from_items(structured_items), *text_anchor_refs]))[:24],
     }
+
+
+def _build_query_relevance_receipt(
+    *,
+    query: Any,
+    rows: Sequence[SurfaceMemoryFactRow],
+    item_payloads: Sequence[Mapping[str, Any]],
+    candidate_basis: Sequence[Mapping[str, Any]],
+    query_kind: str,
+    recall_contract_id: str,
+) -> dict[str, Any]:
+    anchors = _query_relevance_anchors(_query_relevance_focus_text(query))
+    need_kind = _clean_text(query_kind)
+    contract = _clean_text(recall_contract_id)
+    requires = bool(anchors) and (
+        need_kind
+        in {
+            "correction",
+            "event_lookup",
+            "failure_debug",
+            "open_loop",
+            "preference_lookup",
+            "self_change",
+            "evidence_review",
+            "explicit_memory",
+            "open_loop",
+        }
+        or contract
+        in {
+            "correction",
+            "event_lookup",
+            "failure_debug",
+            "preference",
+            "self_change",
+            "evidence_review",
+            "explicit_memory",
+            "open_loop",
+        }
+    )
+    if not anchors:
+        return {
+            "required": False,
+            "score": 1.0,
+            "anchors": [],
+            "matched": [],
+            "missing": [],
+            "basis": "no_specific_query_anchors",
+        }
+    corpus_parts: list[str] = []
+    corpus_parts.extend(row.fact for row in rows)
+    corpus_parts.extend(row.source_ref for row in rows)
+    corpus_parts.extend(row.evidence_ref for row in rows)
+    for item in item_payloads:
+        corpus_parts.extend(
+            _clean_text(item.get(key))
+            for key in (
+                "title",
+                "item_title",
+                "entity_title",
+                "canonical_name",
+                "selection_reason",
+                "item_summary",
+                "intro_snippet",
+                "detail_url",
+                "source_url",
+                "body_ref",
+                "content_excerpt",
+            )
+        )
+    for candidate in candidate_basis:
+        metadata = _candidate_metadata(candidate)
+        corpus_parts.extend(
+            _clean_text(value)
+            for value in (
+                candidate.get("text"),
+                candidate.get("snippet"),
+                candidate.get("source_ref"),
+                candidate.get("evidence_ref"),
+                metadata.get("source_ref"),
+                metadata.get("primary_ref"),
+                metadata.get("scope_key"),
+                metadata.get("domain"),
+                metadata.get("memory_class"),
+            )
+        )
+    corpus = _clean_text(" ".join(part for part in corpus_parts if _clean_text(part))).lower()
+    matched = [anchor for anchor in anchors if _query_relevance_anchor_matches(anchor, corpus)]
+    missing = [anchor for anchor in anchors if anchor not in matched]
+    score = round(len(matched) / max(1, len(anchors)), 6)
+    if contract in {"collection_date", "collection_recent", "anaphoric_selection"} and item_payloads:
+        score = max(score, 0.72)
+    return {
+        "required": requires,
+        "score": score,
+        "anchors": anchors[:12],
+        "matched": matched[:12],
+        "missing": missing[:12],
+        "basis": "anchor_overlap" if matched else "anchor_miss",
+    }
+
+
+def _query_relevance_focus_text(query: Any) -> str:
+    """Use only the user's current turn for relevance gates.
+
+    Retrieval queries intentionally include current turn + compact continuity
+    facts. Relevance gates, however, must judge whether the selected memory
+    answers the user's current question; otherwise unrelated continuity text can
+    dilute a precise hit such as "DeepSeek" or "封面猫".
+    """
+
+    text = _clean_text(query)
+    if not text:
+        return ""
+    parts = [_clean_text(part) for part in re.split(r"[；;\n]+", text) if _clean_text(part)]
+    if not parts:
+        return text
+    first = parts[0]
+    first = re.sub(r"^(?:当前用户(?:消息|问题)?|用户(?:消息|问题)?|current user(?: message)?)\s*[:：]\s*", "", first, flags=re.IGNORECASE)
+    return _clean_text(first) or text
+
+
+def _query_relevance_anchors(query: Any) -> list[str]:
+    text = _clean_text(query)
+    if not text:
+        return []
+    anchors: list[str] = []
+
+    def add(value: str) -> None:
+        cleaned = _clean_text(value).strip("《》「」『』【】（）()[]，,。.!！?？；;:：、").lower()
+        cleaned = re.sub(r"(?:吗|呢|吧|啊)$", "", cleaned)
+        if len(cleaned) < 2 or cleaned in anchors or cleaned in _QUERY_RELEVANCE_STOPWORDS:
+            return
+        anchors.append(cleaned)
+
+    for title in re.findall(r"《([^》]{2,80})》", text):
+        add(title)
+    for token in re.findall(r"[A-Za-z][A-Za-z0-9_.-]{1,40}", text):
+        add(token)
+    for chunk in re.findall(r"[\u4e00-\u9fff]{2,}", text):
+        stripped = re.sub(
+            r"(?:还记得|记得我说|记不记得|我之前说|我之前|之前说|以前说|上次说|我说|你说|让我记|让你记|"
+            r"昨天|今天|今日|前天|刚才|刚刚|最近|这几天|这两天|这三天|这些|那些|这个|那个|"
+            r"这三本|那三本|这几本|那几本|这十几本|那十几本|这本|那本|这部|那部|"
+            r"哪本|哪部|哪个|哪些|哪几本|哪几个|哪里|还有|问题|什么|为什么|怎么|怎样|如何|是不是|是否|"
+            r"是什么|好看|喜欢|推荐|选择|挑|选|依据|内容|详情|原因|失败|异常|任务|结果|"
+            r"靠谱吗|可靠|值得|看吗|做了|做过|做完了|做完|未完成|没完成|已完成|完成了|完成|继续做|继续|打开|浏览器|查了|查过|记错了|记错|纠正|"
+            r"偏好|要求|规则|约定|我的|你的|用户|了吗|要|是|吗|呢|吧|啊|你|我)",
+            " ",
+            chunk,
+        )
+        for token in re.split(r"\s+", stripped):
+            if len(token) >= 2:
+                add(token)
+    return anchors[:12]
+
+
+def _query_relevance_anchor_matches(anchor: str, corpus: str) -> bool:
+    value = _clean_text(anchor).lower()
+    if not value:
+        return False
+    if value in corpus:
+        return True
+    if "正文" in value and "正文" in corpus and any(token in corpus for token in ("深读", "翻看", "打开详情", "详情页", "比较")):
+        return True
+    synonyms = {
+        "格式": ("简介", "换行", "分段", "卡片", "模板腔", "排版"),
+        "路由": ("provider", "model", "模型", "主链", "fallback"),
+        "模型": ("provider", "model", "路由", "主链", "fallback"),
+    }
+    if any(token in corpus for token in synonyms.get(value, ())):
+        return True
+    if _query_relevance_semantic_group_matches(value, corpus):
+        return True
+    compact_anchor = re.sub(r"[有的之这那本部个一条项\s]+", "", value)
+    compact_corpus = re.sub(r"[有的之这那本部个一条项\s]+", "", corpus)
+    return bool(compact_anchor) and len(compact_anchor) >= 2 and compact_anchor in compact_corpus
+
+
+def _query_relevance_semantic_group_matches(anchor: str, corpus: str) -> bool:
+    value = _clean_text(anchor).lower()
+    text = _clean_text(corpus).lower()
+    if not value or not text:
+        return False
+    for group in _QUERY_RELEVANCE_SEMANTIC_GROUPS:
+        if any(token in value for token in group) and any(token in text for token in group):
+            return True
+    return False
+
+
+_QUERY_RELEVANCE_SEMANTIC_GROUPS: tuple[tuple[str, ...], ...] = (
+    (
+        "文本质量",
+        "不像人话",
+        "正常聊天",
+        "模板腔",
+        "台词腔",
+        "证据条目",
+        "生硬",
+        "很呆",
+        "自然",
+    ),
+    (
+        "承诺",
+        "待办",
+        "open_loop",
+        "openloop",
+        "后续要",
+        "未完成",
+        "没完成",
+        "已完成",
+        "完成",
+        "关闭",
+    ),
+    (
+        "自我改变",
+        "记忆系统",
+        "生命经历",
+        "经历锚点",
+        "模型路由",
+        "策略",
+        "能力",
+        "主链迁移",
+        "资源管理器",
+    ),
+)
+
+
+_QUERY_RELEVANCE_STOPWORDS: frozenset[str] = frozenset(
+    {
+        "昨天",
+        "今天",
+        "今日",
+        "前天",
+        "刚才",
+        "刚刚",
+        "最近",
+        "这几天",
+        "这两天",
+        "这三天",
+        "这些",
+        "那些",
+        "这个",
+        "那个",
+        "这本",
+        "那本",
+        "三本",
+        "几本",
+        "十几本",
+        "哪本",
+        "哪部",
+        "哪个",
+        "什么",
+        "为什么",
+        "怎么",
+        "怎样",
+        "如何",
+        "原因",
+        "结果",
+        "内容",
+        "详情",
+        "好看",
+        "喜欢",
+        "推荐",
+        "选择",
+        "先看",
+        "任务",
+        "失败",
+        "异常",
+        "依据",
+        "靠谱",
+    }
+)
 
 
 def _detail_items_from_candidates(candidates: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
@@ -1689,6 +2312,7 @@ def _filter_candidates_for_target_domains(
             "correction",
             "evidence_review",
             "failure_debug",
+            "open_loop",
             "preference_lookup",
             "self_change",
         }
@@ -1699,6 +2323,7 @@ def _filter_candidates_for_target_domains(
         "correction",
         "evidence_review",
         "failure_debug",
+        "open_loop",
         "preference_lookup",
         "self_change",
     }
@@ -1801,6 +2426,55 @@ def _candidate_domains(candidate: Mapping[str, Any]) -> set[str]:
         domains.add("recommendation")
     if any(token in text for token in ("failure", "failed", "timeout", "失败", "异常", "报错")):
         domains.add("failure")
+    if any(
+        token in text
+        for token in (
+            "semantic_kind:user_preference",
+            "user_preference",
+            "用户偏好",
+            "稳定偏好",
+            "用户要求",
+            "规则",
+            "约束",
+            "格式",
+            "换行",
+            "模板腔",
+            "不要用",
+            "别用",
+            "主链不要",
+        )
+    ):
+        domains.add("preference")
+    if any(
+        token in text
+        for token in (
+            "semantic_kind:relationship_feedback",
+            "relationship_feedback",
+            "关系反馈",
+            "文本质量",
+            "不像人话",
+            "台词腔",
+            "正常聊天",
+        )
+    ):
+        domains.update({"preference", "relationship_feedback"})
+    if any(token in text for token in ("semantic_kind:commitment", "open_loop", "openloop", "承诺和待办", "待办", "后续要")):
+        domains.update({"open_loop", "task"})
+    if any(
+        token in text
+        for token in (
+            "semantic_kind:self_change",
+            "self_change",
+            "自我改变",
+            "生命经历",
+            "经历锚点",
+            "可召回记忆",
+            "记忆系统",
+        )
+    ):
+        domains.add("self_change")
+    if any(token in text for token in ("semantic_kind:correction", "correction", "纠错", "修正", "撤回", "记错")):
+        domains.add("correction")
     return domains
 
 
@@ -2063,9 +2737,15 @@ def _trace_collection_item_payload(
         key: value
         for key, value in {
             "collection_id": collection_id,
+            "collection_item_id": _clean_text(item.get("collection_item_id")),
+            "episode_id": _clean_text(item.get("episode_id")),
+            "item_key": _clean_text(item.get("item_key")),
             "scope_key": scope_key,
+            "source_day": _first_item_text({**item_meta, **dict(item)}, ("source_day", "day_key", "collection_day"), limit=24),
             "index": _coerce_int(item.get("position") or item_meta.get("position"), default=0),
             "title": title,
+            "canonical_title": _first_item_text({**item_meta, **dict(item)}, ("canonical_title", "series_title", "work_title", "book_title"), limit=160),
+            "canonical_key": _first_item_text({**item_meta, **dict(item)}, ("canonical_key", "normalized_key"), limit=220),
             "detail_url": source_ref if _looks_like_detail_anchor(source_ref) else "",
             "source_ref": source_ref,
             "evidence_ref": _first_item_text(item, ("evidence_ref",), limit=260),
@@ -2125,8 +2805,11 @@ def _trace_entity_item_payload(
             "collection_id": _clean_text(item.get("collection_id")),
             "collection_item_id": _clean_text(item.get("collection_item_id")),
             "scope_key": _clean_text(item.get("scope_key")),
+            "source_day": _first_item_text(merged, ("source_day", "day_key", "collection_day"), limit=24),
             "index": _coerce_int(item.get("position"), default=0),
             "title": title,
+            "canonical_title": _first_item_text(merged, ("canonical_title", "series_title", "work_title", "book_title"), limit=160),
+            "canonical_key": _first_item_text(merged, ("canonical_key", "normalized_key"), limit=220),
             "detail_url": source_ref if _looks_like_detail_anchor(source_ref) else "",
             "source_ref": source_ref,
             "evidence_ref": _first_item_text(merged, ("evidence_ref", "item_evidence_ref"), limit=260),
@@ -2360,12 +3043,15 @@ def _select_fact_rows(
         return []
     rows = [_build_fact_row(item, max_chars_per_fact=max_chars_per_fact) for item in candidates]
     rows = [row for row in rows if row is not None]
+    rows = _filter_rows_for_open_loop_query(rows, query=query)
+    rows = _filter_rows_for_self_change_query(rows, query=query)
+    rows = _filter_rows_for_relationship_feedback_query(rows, query=query)
     rows = _filter_rows_for_preference_rule_query(rows, query=query)
     rows = _filter_rows_for_correction_query(rows, query=query)
     rows = _filter_rows_for_explicit_memory_query(rows, query=query)
     rows = _filter_rows_for_anaphoric_selection(rows, query=query)
     rows = _filter_rows_for_collection_scope(rows, query=query)
-    rows = sorted(rows, key=_surface_fact_row_rank, reverse=True)
+    rows = sorted(rows, key=lambda row: _surface_fact_row_rank(row, query=query), reverse=True)
     selected: list[SurfaceMemoryFactRow] = []
     seen_stores: set[str] = set()
     for row in rows:
@@ -2384,9 +3070,67 @@ def _select_fact_rows(
     return selected
 
 
-def _surface_fact_row_rank(row: SurfaceMemoryFactRow) -> tuple[float, float, int]:
+def _filter_rows_for_open_loop_query(
+    rows: Sequence[SurfaceMemoryFactRow],
+    *,
+    query: str | None,
+) -> list[SurfaceMemoryFactRow]:
+    if not rows:
+        return []
+    query_text = _clean_text(query)
+    if not _looks_like_open_loop_memory_query(query_text):
+        return list(rows)
+    commitment_rows = [row for row in rows if _looks_like_open_loop_memory_fact(row.fact)]
+    if not commitment_rows:
+        return list(rows)
+    wants_closed = _surface_query_wants_closed_open_loop(query_text)
+    preferred = [
+        row
+        for row in commitment_rows
+        if _looks_like_closed_open_loop_memory_fact(row.fact) is wants_closed
+    ]
+    if preferred:
+        return [
+            *preferred,
+            *(row for row in rows if _clean_text(row.store_id).lower() in {"neo4j_bond", "bond_graph"}),
+        ]
+    return commitment_rows
+
+
+def _filter_rows_for_self_change_query(
+    rows: Sequence[SurfaceMemoryFactRow],
+    *,
+    query: str | None,
+) -> list[SurfaceMemoryFactRow]:
+    if not rows:
+        return []
+    query_text = _clean_text(query)
+    if _looks_like_open_loop_memory_query(query_text):
+        return list(rows)
+    if not _looks_like_self_change_memory_query(query_text):
+        return list(rows)
+    preferred = [row for row in rows if _looks_like_self_change_memory_fact(row.fact)]
+    semantic_preferred = [row for row in preferred if _clean_text(row.store_id).lower() == "semantic_memory"]
+    if semantic_preferred:
+        return [
+            *semantic_preferred,
+            *(row for row in rows if _clean_text(row.store_id).lower() in {"neo4j_bond", "bond_graph"}),
+        ]
+    if preferred:
+        return preferred
+    return list(rows)
+
+
+def _surface_fact_row_rank(row: SurfaceMemoryFactRow, *, query: str | None = None) -> tuple[float, float, float, float]:
     store_id = _clean_text(row.store_id).lower()
     fact_text = _clean_text(row.fact).upper()
+    query_text = _clean_text(query)
+    semantic_rule_priority = 0.0
+    if _looks_like_preference_rule_memory_query(query_text):
+        if store_id == "semantic_memory" and _looks_like_preference_rule_memory_fact(row.fact):
+            semantic_rule_priority = 2.0
+        elif _looks_like_preference_rule_memory_fact(row.fact):
+            semantic_rule_priority = 1.0
     terminal_background_priority = 1 if (
         ("CODEX_PRODUCTION" in fact_text or "LIGHTNOVEL_" in fact_text)
         and any(marker in fact_text for marker in ("FAILED", "COMPLETED", "LIGHTNOVEL_NATIVE_NO_RECOMMENDATIONS"))
@@ -2402,7 +3146,7 @@ def _surface_fact_row_rank(row: SurfaceMemoryFactRow) -> tuple[float, float, int
         "neo4j_bond": 1,
         "bond_graph": 1,
     }.get(store_id, 0)
-    return (float(terminal_background_priority), _coerce_float(row.score), store_priority)
+    return (semantic_rule_priority, float(terminal_background_priority), _coerce_float(row.score), float(store_priority))
 
 
 def _filter_rows_for_explicit_memory_query(
@@ -2431,10 +3175,43 @@ def _filter_rows_for_preference_rule_query(
     query_text = _clean_text(query)
     if not _looks_like_preference_rule_memory_query(query_text):
         return list(rows)
-    preferred = [row for row in rows if _looks_like_preference_rule_memory_fact(row.fact)]
+    preferred = [
+        row
+        for row in rows
+        if _looks_like_preference_rule_memory_fact(row.fact)
+        and not _looks_like_broad_collection_fact(row.fact)
+    ]
+    topic = _preference_rule_query_topic(query_text)
+    if topic:
+        topic_matched = [row for row in preferred if _preference_rule_fact_matches_topic(row.fact, topic=topic)]
+        if topic_matched:
+            preferred = topic_matched
+    semantic_preferred = [row for row in preferred if _clean_text(row.store_id).lower() == "semantic_memory"]
+    if semantic_preferred:
+        return [
+            *semantic_preferred,
+            *(row for row in rows if _clean_text(row.store_id).lower() in {"neo4j_bond", "bond_graph"}),
+        ]
     if preferred:
         return preferred
     return list(rows)
+
+
+def _filter_rows_for_relationship_feedback_query(
+    rows: Sequence[SurfaceMemoryFactRow],
+    *,
+    query: str | None,
+) -> list[SurfaceMemoryFactRow]:
+    if not rows:
+        return []
+    topic = _relationship_feedback_query_topic(query)
+    if not topic:
+        return list(rows)
+    preferred = [row for row in rows if _relationship_feedback_fact_matches_topic(row.fact, topic=topic)]
+    if not preferred:
+        return list(rows)
+    bond_rows = [row for row in rows if _clean_text(row.store_id).lower() in {"neo4j_bond", "bond_graph"}]
+    return [*preferred, *bond_rows]
 
 
 def _filter_rows_for_correction_query(
@@ -2629,14 +3406,24 @@ def _build_fact_row(
         fact=fact,
         store_id=store_id or "unknown",
         source_ref=_clean_text(candidate.get("source_ref") or metadata.get("source_ref")),
-        evidence_ref=_clean_text(
-            candidate.get("evidence_ref")
-            or candidate.get("evidence_refs")
-            or metadata.get("evidence_ref")
-            or metadata.get("evidence_refs_primary")
+        evidence_ref=_first_clean_ref(
+            candidate.get("evidence_ref"),
+            candidate.get("evidence_refs"),
+            metadata.get("evidence_ref"),
+            metadata.get("evidence_refs"),
+            metadata.get("evidence_refs_primary"),
         ),
         score=_coerce_float(candidate.get("confidence"), default=_coerce_float(candidate.get("score"))),
     )
+
+
+def _first_clean_ref(*values: Any) -> str:
+    for value in values:
+        for item in _coerce_sequence(value):
+            cleaned = _clean_text(item)
+            if cleaned:
+                return cleaned
+    return ""
 
 
 def _surface_fact_text(
@@ -2649,6 +3436,8 @@ def _surface_fact_text(
     raw = _clean_text(candidate.get("snippet") or candidate.get("text"))
     if not raw:
         return ""
+    if _clean_text(store_id).lower() == "semantic_memory":
+        return _surface_safe_text(_humanize_semantic_memory_recall_text(raw, metadata=metadata), limit=limit)
     if _clean_text(store_id).lower() in {"life_episode", "life_memory_collection"}:
         structured = _structured_life_episode_recall_text(raw, metadata=metadata, limit=limit)
         if structured:
@@ -2656,6 +3445,38 @@ def _surface_fact_text(
     if _clean_text(store_id).lower() == "life_episode":
         raw = _humanize_life_episode_recall_text(raw, metadata=metadata)
     return _surface_safe_text(raw, limit=limit)
+
+
+def _humanize_semantic_memory_recall_text(text: str, *, metadata: Mapping[str, Any]) -> str:
+    value = _clean_text(text)
+    value = re.sub(r"^(?:记忆线索|长期记忆|长期事实|召回线索)\s*[:：]\s*", "", value).strip()
+    tags = " ".join(str(item or "") for item in _coerce_sequence(metadata.get("tags"))).lower()
+    if "semantic_kind:user_preference" in tags or _looks_like_preference_rule_memory_fact(value):
+        value = re.sub(r"^(?:用户偏好|稳定偏好|偏好|用户要求|要求|规则|约束)\s*[:：]\s*", "", value).strip()
+    if "semantic_kind:relationship_feedback" in tags:
+        value = re.sub(r"^(?:关系反馈|质量反馈|互动反馈)\s*[:：]\s*", "", value).strip()
+    if "semantic_kind:commitment" in tags:
+        value = re.sub(r"^(?:承诺和待办|承诺完成|承诺取消|待办|承诺)\s*[:：]\s*", "", value).strip()
+    if "semantic_kind:self_change" in tags:
+        value = re.sub(r"^(?:自我改变|能力改变|策略改变)\s*[:：]\s*", "", value).strip()
+    if "semantic_kind:action_pattern" in tags:
+        value = _humanize_action_pattern_recall_text(value)
+    return value
+
+
+def _humanize_action_pattern_recall_text(text: str) -> str:
+    value = re.sub(r"^(?:主动行动模式|行动模式|主动行动)\s*[:：]\s*", "", _clean_text(text)).strip()
+    if not value:
+        return ""
+    value = re.sub(
+        r"；已记录\s*\d+\s*次深读/回看行动(?:，其中[^。]+)?",
+        "；这不是口头说说，之前确实有过实际回看记录",
+        value,
+    )
+    value = value.replace("她会回去", "我会回去")
+    value = value.replace("她应该直接说明", "我应该直接说明")
+    value = value.replace("正文级证据", "正文")
+    return value
 
 
 def _structured_life_episode_recall_text(text: str, *, metadata: Mapping[str, Any], limit: int) -> str:
@@ -2798,6 +3619,9 @@ def _humanize_life_episode_recall_text(text: str, *, metadata: Mapping[str, Any]
     value = _clean_text(text)
     if not value:
         return ""
+    compact = re.sub(r"\s+", "", value)
+    if any(token in compact for token in ("文本质量", "不像人话", "不像正常人", "台词腔", "很呆", "太呆")):
+        return "用户强烈反馈：回答要像正常聊天，避免模板腔、台词腔和生硬的证据条目话术。"
     actionish = _clean_text(metadata.get("episode_kind")).lower() in {
         "action_episode",
         "background_episode",
@@ -2831,7 +3655,7 @@ def _compress_numbered_recall_text(text: str, *, item_limit: int = 42, max_items
 def _fact_prefix(store_id: str) -> str:
     normalized = _clean_text(store_id).lower()
     if normalized == "semantic_memory":
-        return "长期记忆"
+        return "长期事实"
     if normalized == "life_memory_collection":
         return "集合记忆"
     if normalized == "life_memory_entity":
@@ -2841,6 +3665,37 @@ def _fact_prefix(store_id: str) -> str:
     if normalized in {"neo4j_bond", "bond_graph"}:
         return "关系线索"
     return "召回线索"
+
+
+def _build_semantic_usage_trace(rows: Sequence[SurfaceMemoryFactRow], *, query: str | None = None) -> dict[str, Any]:
+    semantic_rows = [row for row in rows if _clean_text(row.store_id).lower() == "semantic_memory"]
+    if not semantic_rows:
+        return {}
+    query_text = _clean_text(query)
+    explicit_lookup = _looks_like_preference_rule_memory_query(query_text) or _looks_like_explicit_memory_content_query(query_text)
+    normalized_facts = [_truncate_text(item, limit=160) for item in _clean_list([_semantic_fact_for_surface(row.fact) for row in semantic_rows])[:4]]
+    return {
+        "schema": "Natsume.surface_semantic_usage.v1",
+        "mode": "answer_memory_lookup" if explicit_lookup else "apply_silently",
+        "fact_count": len(semantic_rows),
+        "facts": normalized_facts,
+        "source_labels_hidden": True,
+        "rule": (
+            "用户主动问记忆或偏好时，直接说出规则内容；普通任务里只把长期事实当行为约束。"
+            if explicit_lookup
+            else "把长期事实默默用于当前回复，不主动解释来源。"
+        ),
+    }
+
+
+def _semantic_fact_for_surface(text: Any) -> str:
+    value = _clean_text(text)
+    value = re.sub(r"^(?:记忆线索|长期记忆|长期事实|召回线索)\s*[:：]\s*", "", value).strip()
+    value = re.sub(r"^(?:用户偏好|稳定偏好|偏好|用户要求|要求|规则|约束)\s*[:：]\s*", "", value).strip()
+    if re.match(r"^(?:主动行动模式|行动模式|主动行动)\s*[:：]", value):
+        return _humanize_action_pattern_recall_text(value)
+    value = re.sub(r"^(?:关系反馈|质量反馈|互动反馈|承诺和待办|承诺完成|承诺取消|待办|承诺|自我改变|能力改变|策略改变)\s*[:：]\s*", "", value).strip()
+    return value
 
 
 def _is_user_fact_store(store_id: str) -> bool:
@@ -2864,7 +3719,8 @@ def _build_packet_style_anchor(rows: Sequence[SurfaceMemoryFactRow], *, query: s
     if store_ids & SURFACE_USER_FACT_STORES:
         anchors.append("用户事实记忆只补当前承接，不扩写成未确认细节")
     if "semantic_memory" in store_ids:
-        anchors.append("长期记忆只补稳定偏好和关系事实，不替代当前用户句子")
+        anchors.append("长期事实只补稳定偏好和关系事实，不替代当前用户句子")
+        anchors.append("长期偏好默认默默影响行为；只有用户明确问记得什么或偏好是什么时，才自然说出规则内容。")
     if store_ids & {"neo4j_bond", "bond_graph"}:
         anchors.append("按关系线索控制距离，不因为记忆升格亲密")
     return _clean_list(anchors)
@@ -2884,6 +3740,8 @@ def _build_packet_must_not_do(
         rules.extend(_coerce_sequence(metadata.get("must_not_do")))
     if any(row.evidence_ref or row.source_ref for row in rows):
         rules.append("不要在回复里暴露 memory://、evd://、chat:// 或召回来源")
+    if any(_clean_text(row.store_id).lower() == "semantic_memory" for row in rows):
+        rules.append("不要把“长期事实/长期记忆/用户偏好/根据记忆”这些标签说给用户听；把它们转成自然表达或直接落实到行为。")
     if any("不升级亲密" in row.fact or "别升级亲密" in row.fact for row in rows):
         rules.append("不要根据记忆升级亲密关系")
     if degraded:
@@ -2891,6 +3749,7 @@ def _build_packet_must_not_do(
     if _looks_like_anaphoric_selection_query(_clean_text(query)) and rows:
         rules.append("不要把指代选择追问当成无关新话题；不要说“突然问这个”“硬要说的话”“最近在看另一本”。")
         rules.append("不要只输出“第几本 + 标题”；需要像聊天一样给一句很短的偏好理由，理由只能来自标题或已召回简介。")
+        rules.append("不要臆测用户昨天有没有看、看没看过、是不是忘了、终于想起来或终于来问；没有明确证据时只谈这些书本身。")
         if any(_has_comparison_detail(row.fact) for row in rows):
             rules.append("召回里有看点/简介/题材/更新/热度时，不要只按标题或名字判断。")
     return _clean_list(rules)
@@ -2989,18 +3848,33 @@ def _specific_item_row_matches(row: SurfaceMemoryFactRow, *, query: str) -> bool
     prefix = _specific_item_query_prefix(query)
     if not prefix:
         return False
-    return prefix in _compact_text(row.fact)
+    return prefix in _compact_specific_item_text(row.fact)
 
 
 def _looks_like_broad_collection_fact(text: str) -> bool:
     value = _clean_text(text)
-    return any(token in value for token in ("最近轻小说推荐集合", "近 3 天", "近 7 天", "近 30 天")) or bool(
-        re.search(r"(?:最近|近\s*\d+\s*天).{0,30}记录\s*\d+\s*个条目", value)
+    return any(
+        token in value
+        for token in (
+            "最近轻小说推荐集合",
+            "轻小说推荐集合",
+            "经历集合",
+            "近 3 天",
+            "近 7 天",
+            "近 30 天",
+        )
+    ) or bool(
+        re.search(r"(?:最近|近\s*\d+\s*天|20\d{2}-\d{2}-\d{2}).{0,30}记录\s*\d+\s*个条目", value)
     )
 
 
 def _compact_text(text: Any) -> str:
     return re.sub(r"\s+", "", _clean_text(text)).lower()
+
+
+def _compact_specific_item_text(text: Any) -> str:
+    compact = _compact_text(text)
+    return re.sub(r"[\s，。！？?、：:；;（）()\[\]【】《》「」『』｜|/\\]+", "", compact)
 
 
 def _looks_like_collection_scope_query(text: str) -> bool:
@@ -3016,7 +3890,46 @@ def _looks_like_collection_scope_query(text: str) -> bool:
 
 def _looks_like_memory_write(text: str) -> bool:
     normalized = _clean_text(text)
-    return any(token in normalized for token in ("记一下", "记住", "帮我记", "替我记", "记着", "记下来"))
+    if not normalized:
+        return False
+    if any(token in normalized for token in ("还记得", "记得吗", "记不记得", "我之前", "之前说", "以前说", "上次说", "我说过")):
+        return False
+    if any(token in normalized for token in ("记一下", "记住", "帮我记", "替我记", "记着", "记下来")):
+        return True
+    preference_update_markers = (
+        "以后",
+        "不要",
+        "别再",
+        "必须",
+        "优先使用",
+        "主链不要",
+        "不要用",
+        "别用",
+        "改成",
+        "修改下",
+        "换成",
+        "关了",
+        "关闭",
+    )
+    preference_domains = (
+        "格式",
+        "推送",
+        "推荐",
+        "发送",
+        "回复",
+        "卡片",
+        "简介",
+        "模型",
+        "pro",
+        "拟人化",
+        "模板",
+        "台词腔",
+        "分段",
+        "换行",
+    )
+    return any(marker in normalized for marker in preference_update_markers) and any(
+        domain in normalized for domain in preference_domains
+    )
 
 
 def _looks_like_explicit_memory_content_query(text: str) -> bool:
@@ -3043,31 +3956,329 @@ def _looks_like_preference_rule_memory_query(text: str) -> bool:
     normalized = _clean_text(text)
     if not normalized:
         return False
-    if not any(token in normalized for token in ("记得", "记不记得", "还记得", "我说", "要求", "以后", "不要", "别再", "必须", "偏好")):
+    if any(token in normalized for token in ("偏好", "要求", "规则", "约束", "不要", "别再", "必须", "优先使用", "主链不要", "用什么模型")):
+        return True
+    if not any(token in normalized for token in ("记得", "记不记得", "还记得", "我说", "我之前", "之前说", "以前说", "上次说", "以后")):
         return False
-    return any(token in normalized for token in ("格式", "怎么发", "怎样发", "要怎样", "换行", "模板腔", "分段", "卡片", "简介后", "推荐", "推送", "发送"))
+    return any(
+        token in normalized
+        for token in (
+            "格式",
+            "怎么发",
+            "怎样发",
+            "要怎样",
+            "换行",
+            "模板腔",
+            "不像人话",
+            "正常聊天",
+            "台词腔",
+            "文本质量",
+            "很呆",
+            "分段",
+            "卡片",
+            "简介后",
+            "推荐",
+            "推送",
+            "发送",
+        )
+    )
 
 
-def _looks_like_preference_rule_memory_fact(text: str) -> bool:
+def _relationship_feedback_query_topic(text: str | None) -> str:
+    normalized = _clean_text(text).lower()
+    if not normalized:
+        return ""
+    if any(token in normalized for token in ("不像人话", "正常聊天", "模板腔", "台词腔", "文本质量", "很呆", "太呆")):
+        return "natural_chat"
+    if any(token in normalized for token in ("胡说八道", "编造", "召回", "证据", "没核实", "核实", "事实")):
+        return "recall_quality"
+    if any(token in normalized for token in ("白费功夫", "服务没起来", "没起来", "连不上")):
+        return "runtime_readiness"
+    return ""
+
+
+def _preference_rule_query_topic(text: str | None) -> str:
+    normalized = _clean_text(text).lower()
+    if not normalized:
+        return ""
+    if any(
+        marker in normalized
+        for marker in (
+            "推荐格式",
+            "推送格式",
+            "怎么发",
+            "怎样发",
+            "要怎样",
+            "换行",
+            "卡片",
+            "分段",
+            "简介",
+            "总览",
+            "拟人化",
+            "轻小说推荐",
+        )
+    ):
+        return "recommendation_format"
+    if any(marker in normalized for marker in ("不要用pro", "不用pro", "pro", "模型池", "deepseek", "gemini", "codex", "主链", "模型路由")):
+        return "llm_routing"
+    return ""
+
+
+def _preference_rule_fact_matches_topic(text: str, *, topic: str) -> bool:
+    normalized = _clean_text(text).lower()
+    if not normalized:
+        return False
+    recommendation_markers = (
+        "推荐轻小说",
+        "轻小说",
+        "推荐格式",
+        "推送",
+        "总览",
+        "卡片",
+        "分段",
+        "换行",
+        "简介",
+        "拟人化",
+        "每本书",
+    )
+    routing_markers = ("thalamus", "模型池", "deepseek", "gemini", "codex", "不要用 pro", "不要用pro", "不用pro", "主链不要", "模型路由")
+    if topic == "recommendation_format":
+        return any(marker in normalized for marker in recommendation_markers)
+    if topic == "llm_routing":
+        return any(marker in normalized for marker in routing_markers)
+    return True
+
+
+def _relationship_feedback_fact_matches_topic(text: str, *, topic: str) -> bool:
+    normalized = _clean_text(text).lower()
+    if not normalized:
+        return False
+    natural_markers = ("回答要像正常聊天", "模板腔", "台词腔", "更自然的聊天", "生硬", "文本质量", "不像人话")
+    recall_markers = ("胡说八道", "编造", "召回", "证据", "没核实", "核实", "事实")
+    runtime_markers = ("白费功夫", "服务没起来", "没起来", "连不上")
+    if _relationship_feedback_fact_is_lookup_echo(normalized):
+        return False
+    if topic == "natural_chat":
+        if any(marker in normalized for marker in ("回答要像正常聊天", "台词腔", "更自然的聊天", "生硬", "文本质量", "不像人话")):
+            return True
+        if "模板腔" in normalized and not _relationship_feedback_fact_is_recommendation_format_preference(normalized):
+            return True
+        return any(marker in normalized for marker in ("文本质量", "不像人话")) and not any(
+            marker in normalized for marker in recall_markers
+        )
+    if topic == "recall_quality":
+        return any(marker in normalized for marker in recall_markers)
+    if topic == "runtime_readiness":
+        return any(marker in normalized for marker in runtime_markers)
+    return any(marker in normalized for marker in natural_markers)
+
+
+def _relationship_feedback_fact_is_lookup_echo(normalized: str) -> bool:
+    if "当前回合摘要" not in normalized and "用户提到「" not in normalized:
+        return False
+    if any(marker in normalized for marker in ("回答要像正常聊天", "更自然的聊天方式", "用户强烈反馈")):
+        return False
+    return any(
+        marker in normalized
+        for marker in (
+            "是哪里的问题",
+            "哪里的问题",
+            "为什么",
+            "怎么",
+            "吗",
+            "？",
+            "我之前说",
+            "之前说",
+            "还记得",
+        )
+    )
+
+
+def _relationship_feedback_fact_is_recommendation_format_preference(normalized: str) -> bool:
+    return "模板腔" in normalized and any(
+        marker in normalized
+        for marker in (
+            "推荐",
+            "推送",
+            "格式",
+            "卡片",
+            "分段",
+            "换行",
+            "简介",
+            "每本书",
+            "轻小说",
+        )
+    )
+
+
+def _looks_like_open_loop_memory_query(text: str) -> bool:
     normalized = _clean_text(text)
     if not normalized:
         return False
     return any(
         token in normalized
         for token in (
+            "待办",
+            "承诺",
+            "open loop",
+            "open_loop",
+            "openloop",
+            "说好",
+            "还没做",
+            "未完成",
+            "没完成",
+            "完成了吗",
+            "跑完了吗",
+            "做完了吗",
+        )
+    )
+
+
+def _surface_query_wants_closed_open_loop(text: str) -> bool:
+    normalized = _clean_text(text).lower()
+    if any(token in normalized for token in ("未完成", "没完成", "还没", "要继续", "继续做", "待做", "open")):
+        return False
+    return any(token in normalized for token in ("已完成", "完成了", "做完", "搞定", "关闭", "closed", "done", "resolved"))
+
+
+def _looks_like_open_loop_memory_fact(text: str) -> bool:
+    normalized = _clean_text(text).lower()
+    return any(
+        token in normalized
+        for token in (
+            "承诺和待办",
+            "承诺完成",
+            "承诺取消",
+            "待办",
+            "承诺",
+            "open_loop",
+            "openloop",
+            "后续要",
+            "下次继续",
+        )
+    )
+
+
+def _looks_like_closed_open_loop_memory_fact(text: str) -> bool:
+    normalized = _clean_text(text).lower()
+    return any(
+        token in normalized
+        for token in (
+            "承诺完成",
+            "承诺取消",
+            "已完成",
+            "完成了",
+            "已经完成",
+            "做完",
+            "搞定",
+            "关闭这个待办",
+            "关掉这个待办",
+            "open_loop:closed",
+            "open_loop:cancelled",
+            "open_loop:superseded",
+        )
+    )
+
+
+def _looks_like_self_change_memory_query(text: str) -> bool:
+    normalized = _clean_text(text)
+    if not normalized:
+        return False
+    return any(
+        token in normalized
+        for token in (
+            "自我改变",
+            "改过什么",
+            "改了什么",
+            "记忆系统",
+            "模型路由",
+            "能力",
+            "策略",
+            "主链迁移",
+            "删除资源管理器",
+        )
+    )
+
+
+def _looks_like_self_change_memory_fact(text: str) -> bool:
+    normalized = _clean_text(text)
+    if _looks_like_open_loop_memory_fact(normalized):
+        return False
+    if any(
+        token in normalized
+        for token in (
+            "自我改变",
+            "模型路由",
+            "能力被删除",
+            "删除资源管理器",
+            "策略被用户纠正",
+            "主链迁移",
+        )
+    ):
+        return True
+    if any(
+        token in normalized
+        for token in (
+            "生命经历",
+            "经历锚点",
+            "主动记忆",
+            "可召回记忆",
+            "语义记忆",
+            "遗忘系统",
+            "睡眠回放",
+            "所有做过的事",
+            "真实生命",
+        )
+    ):
+        return True
+    return "记忆系统" in normalized and any(
+        token in normalized
+        for token in (
+            "生命经历",
+            "经历锚点",
+            "主动记忆",
+            "可召回记忆",
+            "语义记忆",
+            "遗忘系统",
+            "睡眠回放",
+            "所有做过的事",
+            "真实生命",
+        )
+    )
+
+
+def _looks_like_preference_rule_memory_fact(text: str) -> bool:
+    normalized = _clean_text(text)
+    if not normalized:
+        return False
+    if any(token in normalized for token in ("命中偏好", "轻小说推荐报告", "推荐候选", "推荐列表")):
+        return False
+    return any(
+        token in normalized
+        for token in (
             "用户偏好",
+            "关系反馈",
             "偏好",
+            "用户要求",
             "以后",
             "不要",
             "别再",
             "必须",
+            "优先使用",
             "应该",
             "格式",
             "换行",
             "模板腔",
+            "不像人话",
+            "正常聊天",
+            "台词腔",
+            "文本质量",
+            "很呆",
             "分段",
             "卡片格式",
             "简介后",
+            "不要用",
+            "别用",
         )
     )
 

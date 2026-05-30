@@ -2046,7 +2046,9 @@ def resolve_scene_type_from_intent_decision(
         or "codex" in reason
     ):
         return SCENE_WORK_CODE
-    if route in {"delegate", "skill", "plan", "task_progress", "recent_turn"}:
+    if route in {"task_progress", "recent_turn"}:
+        return SCENE_CHAT
+    if route in {"delegate", "skill", "plan"}:
         return SCENE_EXEC_INTENT
     return SCENE_CHAT
 
@@ -2318,23 +2320,8 @@ async def classify_task_intent_by_llm(
 
         from collections.abc import Mapping as _Mapping  # noqa: PLC0415
 
-        from host_brain.app.graph_config_builder import (  # noqa: PLC0415
-            resolve_executive_router_llm_runtime,
-            resolve_host_llm_runtime_async,
-        )
         from host_brain.app.input_service_gateway import extract_first_json_object  # noqa: PLC0415
         from host_brain.integrations.llm_helpers import acomplete_llm_with_pool  # noqa: PLC0415
-
-        llm_runtime = await resolve_host_llm_runtime_async(rollout_key=session_id, scene_type="EXEC_INTENT")
-        router_runtime = resolve_executive_router_llm_runtime(base_runtime=llm_runtime)
-        if not bool(router_runtime.get("available")):
-            return None
-
-        provider_name = str(router_runtime.get("provider_name") or "").strip()
-        model_id = str(router_runtime.get("model_id") or "").strip()
-        api_key = str(router_runtime.get("llm_api_key") or "").strip()
-        if not provider_name or not model_id:
-            return None
 
         ctx = dict(tribe_context or {})
         vital_signs = dict(ctx.get("vital_signs") or {})
@@ -2356,23 +2343,15 @@ async def classify_task_intent_by_llm(
             or os.environ.get("HOST_CORTEX_INTENT_LLM_TIMEOUT_MS")
             or "3000"
         )
-        if provider_name == "codex":
-            _logger.info("[%s] thalamus_intent_llm_codex_runtime_ignored", request_id)
-            provider_name = ""
-            model_id = ""
-            api_key = ""
-        base_url_override = str(router_runtime.get("base_url_override") or "").strip() or None
-        if not provider_name:
-            base_url_override = None
-        agent_gen_params = dict(router_runtime.get("agent_gen_params") or {"temperature": 0.1, "top_p": 0.8})
+        agent_gen_params = {"temperature": 0.1, "top_p": 0.8}
 
         result = await acomplete_llm_with_pool(
             request_id=request_id,
             scene_type=thalamus_scene,
             cognitive_tier="C",
-            provider_name=provider_name or None,
-            model_id=model_id or None,
-            api_key=api_key or None,
+            provider_name=None,
+            model_id=None,
+            api_key=None,
             timeout_ms=timeout_ms,
             messages=[
                 {"role": "system", "content": system_prompt},
@@ -2380,7 +2359,7 @@ async def classify_task_intent_by_llm(
             ],
             gen_params=agent_gen_params,
             response_format="json_object",
-            base_url_override=base_url_override,
+            base_url_override=None,
         )
         if result.pool_exhausted:
             return None

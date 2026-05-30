@@ -25,18 +25,21 @@ def _cards(day: int) -> list[dict[str, object]]:
             "title": f"5月{day}日推荐 A",
             "selection_reason": "恋爱日常",
             "intro_snippet": "人物关系推进比较轻。",
+            "body_excerpt": "正文片段：开场围绕日常关系推进，人物互动轻，适合作为轻松向选择。",
             "detail_url": f"https://www.lightnovel.fun/cn/detail/{day}01",
         },
         {
             "title": f"5月{day}日推荐 B",
             "selection_reason": "奇幻身份钩子",
             "intro_snippet": "设定比较新鲜。",
+            "body_excerpt": "正文片段：主角身份钩子很快抛出，奇幻设定比普通日常更有新鲜感。",
             "detail_url": f"https://www.lightnovel.fun/cn/detail/{day}02",
         },
         {
             "title": f"5月{day}日推荐 C",
             "selection_reason": "皇女皇帝线",
             "intro_snippet": "路线更直给。",
+            "body_excerpt": "正文片段：皇女和皇帝线索直接进入冲突，路线清晰，推进更干脆。",
             "detail_url": f"https://www.lightnovel.fun/cn/detail/{day}03",
         },
     ]

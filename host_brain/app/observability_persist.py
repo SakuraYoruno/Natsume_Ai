@@ -10,6 +10,7 @@ import concurrent.futures
 import hashlib
 import json
 import os
+import re
 import time
 from typing import Any, Mapping, Sequence
 
@@ -758,6 +759,80 @@ def persist_life_chat_episode(
             "episode_id": None,
             "detail": str(exc)[:160],
         }
+
+
+def persist_owner_directive_memory(
+    *,
+    request_id: str,
+    directive_text: str,
+    person_id: str | None = "owner",
+    session_id: str | None = "codex_operator",
+    directive_kind: str | None = None,
+    applied_result: str | None = None,
+    ts_ms: int | None = None,
+    life_memory_store: Any | None = None,
+    metadata: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Persist a real owner/operator directive into LifeMemory."""
+
+    safe_directive = _scrub_owner_directive_text(directive_text)
+    safe_result = _scrub_owner_directive_text(applied_result)
+    if not safe_directive:
+        return {
+            "status": "SKIPPED",
+            "reason_code": "OWNER_DIRECTIVE_EMPTY_TEXT",
+            "episode_id": None,
+        }
+    store = life_memory_store
+    if store is None:
+        try:
+            from host_brain.app.dependencies import get_life_memory_store  # noqa: PLC0415
+
+            store = get_life_memory_store()
+        except Exception as exc:
+            return {
+                "status": "SKIPPED",
+                "reason_code": "LIFE_MEMORY_STORE_UNAVAILABLE",
+                "episode_id": None,
+                "detail": str(exc)[:160],
+            }
+    try:
+        return store.write_owner_directive_episode(
+            request_id=request_id,
+            directive_text=safe_directive,
+            person_id=person_id,
+            session_id=session_id,
+            directive_kind=directive_kind,
+            applied_result=safe_result,
+            ts_ms=ts_ms,
+            metadata={
+                **dict(metadata or {}),
+                "secret_redaction_applied": safe_directive != str(directive_text or "").strip()
+                or safe_result != str(applied_result or "").strip(),
+            },
+        )
+    except Exception as exc:
+        return {
+            "status": "FAILED",
+            "reason_code": "OWNER_DIRECTIVE_MEMORY_WRITE_FAILED",
+            "episode_id": None,
+            "detail": str(exc)[:160],
+        }
+
+
+def _scrub_owner_directive_text(value: Any) -> str:
+    text = _compact_memory_text(value, limit=2000)
+    if not text:
+        return ""
+    patterns = [
+        r"(?i)\b(api[_-]?key|secret|token|cookie|authorization|password)\s*[:=]\s*([^\s,;，；]+)",
+        r"(密码|密钥|令牌|验证码|cookie)\s*[:=：]\s*([^\s,;，；]+)",
+    ]
+    scrubbed = text
+    for pattern in patterns:
+        scrubbed = re.sub(pattern, lambda match: f"{match.group(1)}=[REDACTED]", scrubbed)
+    scrubbed = re.sub(r"\bsk-[A-Za-z0-9_-]{12,}\b", "sk-[REDACTED]", scrubbed)
+    return scrubbed.strip()
 
 
 def persist_chat_episodic_memory(

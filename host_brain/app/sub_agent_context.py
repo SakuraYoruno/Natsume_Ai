@@ -461,7 +461,10 @@ def _build_memory_packet(
         return {}
     return _drop_empty(
         {
-            "facts": _text_list(packet.get("facts"), limit=profile.memory_fact_limit, max_chars=profile.memory_fact_chars, trace=trace, field="memory_packet.facts"),
+            "facts": [
+                _normalize_memory_packet_fact(item)
+                for item in _text_list(packet.get("facts"), limit=profile.memory_fact_limit, max_chars=profile.memory_fact_chars, trace=trace, field="memory_packet.facts")
+            ],
             "relationship_clues": _text_list(packet.get("relationship_clues"), limit=profile.relationship_limit, max_chars=profile.memory_fact_chars, trace=trace, field="memory_packet.relationship_clues"),
             "style_anchor": _text_list(packet.get("style_anchor"), limit=profile.style_limit, max_chars=180, trace=trace, field="memory_packet.style_anchor"),
             "must_not_do": _text_list(packet.get("must_not_do"), limit=profile.must_not_limit, max_chars=180, trace=trace, field="memory_packet.must_not_do"),
@@ -471,6 +474,13 @@ def _build_memory_packet(
             "reason_code": _text(packet.get("reason_code"), limit=120),
         }
     )
+
+
+def _normalize_memory_packet_fact(text: str) -> str:
+    value = _text(text, limit=MAX_FACT_CHARS)
+    if value.startswith(("长期记忆", "长期事实", "用户偏好", "稳定事实")):
+        return _normalize_semantic_fact_label(value)
+    return value
 
 
 def _semantic_facts(
@@ -483,13 +493,28 @@ def _semantic_facts(
     if profile.semantic_fact_limit <= 0:
         return []
     facts: list[str] = []
-    facts.extend(_text_list(raw.get("semantic_facts"), limit=profile.semantic_fact_limit, max_chars=profile.semantic_fact_chars, trace=trace, field="semantic_facts"))
-    facts.extend(_text_list(raw.get("long_term_facts"), limit=profile.semantic_fact_limit, max_chars=profile.semantic_fact_chars, trace=trace, field="long_term_facts"))
+    facts.extend(
+        _normalize_semantic_fact_label(item)
+        for item in _text_list(raw.get("semantic_facts"), limit=profile.semantic_fact_limit, max_chars=profile.semantic_fact_chars, trace=trace, field="semantic_facts")
+    )
+    facts.extend(
+        _normalize_semantic_fact_label(item)
+        for item in _text_list(raw.get("long_term_facts"), limit=profile.semantic_fact_limit, max_chars=profile.semantic_fact_chars, trace=trace, field="long_term_facts")
+    )
     for fact in list(memory_packet.get("facts") or []):
         text = _text(fact, limit=profile.semantic_fact_chars)
         if text.startswith(("长期记忆", "长期事实", "用户偏好", "稳定事实")):
-            facts.append(text)
+            facts.append(_normalize_semantic_fact_label(text))
     return list(dict.fromkeys(facts))[:profile.semantic_fact_limit]
+
+
+def _normalize_semantic_fact_label(text: str) -> str:
+    value = _text(text, limit=MAX_FACT_CHARS)
+    value = re.sub(r"^(?:长期记忆|长期事实)\s*[:：]?\s*", "", value).strip()
+    value = re.sub(r"^(?:用户偏好|稳定偏好|稳定事实|偏好|用户要求|要求|规则|约束)\s*[:：]?\s*", "", value).strip()
+    if not value:
+        return ""
+    return f"长期事实：{value}"
 
 
 def _build_evidence_pack(

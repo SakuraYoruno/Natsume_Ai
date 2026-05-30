@@ -40,6 +40,17 @@ CN_TZ = timezone(timedelta(hours=8))
 FORBIDDEN_REPLY_TERMS = (
     "突然问这个",
     "硬要说",
+    "终于来问",
+    "终于想起来",
+    "终于想起",
+    "总算来问",
+    "总算想起来",
+    "才想起来",
+    "老哥终于",
+    "你终于",
+    "昨天是不是没看",
+    "你是不是没看",
+    "你是不是忘了",
     "不知道",
     "没看到",
     "memory://",
@@ -54,6 +65,8 @@ class RealSceneCase:
     message: str
     must_contain: tuple[str, ...] = ()
     must_not_contain: tuple[str, ...] = ()
+    reply_must_contain: tuple[str, ...] = ()
+    reply_must_not_contain: tuple[str, ...] = ()
     min_items: int = 0
     expected_contract: str = ""
     expected_need_type: str = ""
@@ -174,6 +187,33 @@ def _seed_real_scene_world(*, db_path: Path, session_id: str, person_id: str, ts
             user_message="以后推荐轻小说时，每本书的简介后应该换行，别模板腔。",
             assistant_reply="记住了，后面按自然的卡片格式发。",
             ts_ms=ts_ms - 500,
+            metadata={"e2e_probe": True, "real_scene_batch": run_id},
+        )
+        store.write_chat_episode(
+            request_id=f"req-{run_id}-relationship-feedback",
+            session_id=session_id,
+            person_id=person_id,
+            user_message="文本质量不像人话，太台词腔了。",
+            assistant_reply="收到，我以后把证据转成更自然的聊天方式。",
+            ts_ms=ts_ms - 480,
+            metadata={"e2e_probe": True, "real_scene_batch": run_id},
+        )
+        store.write_chat_episode(
+            request_id=f"req-{run_id}-self-change",
+            session_id=session_id,
+            person_id=person_id,
+            user_message="她做过的事都要留下生命经历锚点，但不等于所有日志都进入可召回记忆。",
+            assistant_reply="明白，经历要可追溯，主动记忆要筛选。",
+            ts_ms=ts_ms - 470,
+            metadata={"e2e_probe": True, "real_scene_batch": run_id},
+        )
+        store.write_chat_episode(
+            request_id=f"req-{run_id}-open-loop",
+            session_id=session_id,
+            person_id=person_id,
+            user_message="后续要把记忆系统的召回覆盖 open loop 和自我改变，记成待办。",
+            assistant_reply="记下了，这个作为记忆系统待办继续推进。",
+            ts_ms=ts_ms - 460,
             metadata={"e2e_probe": True, "real_scene_batch": run_id},
         )
         store.write_background_episode(
@@ -303,9 +343,12 @@ def _cases(seed: Mapping[str, Any]) -> list[RealSceneCase]:
             case_id="current_selection",
             message="这三本书，你喜欢哪本？",
             must_contain=("今天推荐",),
-            must_not_contain=("DeepSeek", "封面有猫"),
+            must_not_contain=("DeepSeek", "封面有猫", "404"),
+            reply_must_contain=("还没翻到足够正文或详情",),
+            reply_must_not_contain=("404", "冷峻", "社会观察", "文笔", "口碑不错"),
             expected_contract="anaphoric_selection",
             expected_need_type="collection_selection",
+            expected_status="NOT_READY",
         ),
         RealSceneCase(
             case_id="yesterday_three",
@@ -338,9 +381,12 @@ def _cases(seed: Mapping[str, Any]) -> list[RealSceneCase]:
             case_id="specific_prior_entity",
             message=f"{yesterday_b} 这本好看吗？",
             must_contain=(yesterday_b,),
-            must_not_contain=("今天推荐 B", "DeepSeek"),
+            must_not_contain=("今天推荐 B", "DeepSeek", "404"),
+            reply_must_contain=("还没翻到足够正文或详情",),
+            reply_must_not_contain=("404", "冷峻", "社会观察", "文笔", "口碑不错"),
             expected_contract="anaphoric_selection",
             expected_need_type="entity_or_collection_selection",
+            expected_status="NOT_READY",
         ),
         RealSceneCase(
             case_id="preference_lookup",
@@ -349,6 +395,36 @@ def _cases(seed: Mapping[str, Any]) -> list[RealSceneCase]:
             must_not_contain=("DeepSeek",),
             expected_contract="preference",
             expected_need_type="semantic_or_episode_preference",
+        ),
+        RealSceneCase(
+            case_id="relationship_feedback_lookup",
+            message="我之前说文本质量不像人话，是哪里的问题？",
+            must_contain=("回答要像正常聊天",),
+            must_not_contain=("今天推荐", "昨天推荐"),
+            reply_must_contain=("回答要像正常聊天",),
+            reply_must_not_contain=("长期事实", "关系反馈"),
+            expected_contract="preference",
+            expected_need_type="semantic_or_episode_preference",
+        ),
+        RealSceneCase(
+            case_id="self_change_lookup",
+            message="记忆系统改过什么？",
+            must_contain=("生命经历锚点", "可召回记忆"),
+            must_not_contain=("今天推荐", "承诺和待办"),
+            reply_must_contain=("生命经历锚点",),
+            reply_must_not_contain=("长期事实", "自我改变"),
+            expected_contract="self_change",
+            expected_need_type="self_change_memory",
+        ),
+        RealSceneCase(
+            case_id="open_loop_lookup",
+            message="记忆系统还有什么待办没完成？",
+            must_contain=("召回覆盖 open loop 和自我改变",),
+            must_not_contain=("今天推荐",),
+            reply_must_contain=("还没完成", "召回覆盖 open loop 和自我改变"),
+            reply_must_not_contain=("长期事实", "承诺和待办"),
+            expected_contract="open_loop",
+            expected_need_type="open_loop_memory",
         ),
         RealSceneCase(
             case_id="failure_debug",
@@ -453,6 +529,8 @@ def _validate_case(*, case: RealSceneCase, chat: Mapping[str, Any], trace: Mappi
         "packet_has_facts": bool(facts),
         "contains": all(term in joined for term in case.must_contain),
         "excludes": all(term not in joined for term in case.must_not_contain),
+        "reply_contains": all(term in reply for term in case.reply_must_contain),
+        "reply_excludes": all(term not in reply for term in case.reply_must_not_contain),
         "min_items": selected_items >= int(case.min_items or 0),
         "contract": not case.expected_contract or str(need.get("recall_contract_id") or "") == case.expected_contract,
         "need_type": not case.expected_need_type or str(need.get("need_type") or "") == case.expected_need_type,
@@ -530,6 +608,7 @@ def _compact_packet(packet: Any) -> dict[str, Any]:
         "reason_code": packet.get("reason_code"),
         "confidence": packet.get("confidence"),
         "route_ids": list(packet.get("route_ids") or []),
+        "recall_decision": trace.get("recall_decision"),
         "recall_need": trace.get("recall_need"),
         "recall_receipt": trace.get("recall_receipt"),
         "recall_coverage": trace.get("recall_coverage"),
@@ -541,6 +620,7 @@ def _compact_surface_memory_trace(trace: Any) -> dict[str, Any]:
     if not isinstance(trace, Mapping):
         return {}
     return {
+        "recall_decision": trace.get("recall_decision"),
         "recall_need": trace.get("recall_need"),
         "recall_receipt": trace.get("recall_receipt"),
         "recall_coverage": trace.get("recall_coverage"),

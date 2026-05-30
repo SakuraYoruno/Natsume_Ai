@@ -32,7 +32,7 @@ DEFAULT_DB_PATH = "host_brain/data/audit.sqlite3"
 DEFAULT_OUT_DIR = "runtime/host/logs"
 _PROTECTED_COMPACTION_RE = re.compile(
     r"失败|失败原因|异常|报错|连不上|被占用|偏好|用户要求|不要|别再|承诺|待办|纠正|不对|错了|"
-    r"模型路由|记忆系统|能力|策略|刚才今日推荐|今日推荐的结果|没拿到完成结果"
+    r"胡说八道|不像人话|模板腔|很呆|文本质量|模型路由|记忆系统|能力|策略|刚才今日推荐|今日推荐的结果|没拿到完成结果"
 )
 
 

@@ -5,6 +5,7 @@ from pathlib import Path
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.memory.life_memory import LifeMemoryStore
 from scripts.runtime.backfill_life_memory_collections import run_collection_backfill
+from scripts.runtime.backfill_life_collection_canonical_entities import run_canonical_backfill
 from scripts.runtime.audit_life_memory_coverage import build_coverage_report
 
 
@@ -82,6 +83,61 @@ def test_collection_backfill_indexes_historical_recommendation_episode(tmp_path:
         assert report["summary"]["collection_count"] == 6
         assert report["summary"]["collection_item_count"] == 18
         assert report["summary"]["collection_issue_count"] == 0
+    finally:
+        verify.close()
+
+
+def test_canonical_collection_backfill_repairs_existing_collection_items(tmp_path: Path) -> None:
+    db_path = tmp_path / "audit.sqlite3"
+    ledger = SQLiteLedger(db_path=db_path)
+    try:
+        store = LifeMemoryStore(ledger=ledger)
+        episode = store.upsert_episode(
+            episode_kind="action_episode",
+            evidence_refs=["gateway://message/history/card/1"],
+            primary_ref="action://event/history-delivery",
+            person_id="owner",
+            session_id="qq_dm_owner",
+            action="lightnovel_recommendation_delivery",
+            result="COMPLETED",
+            summary="历史推荐了 3 本轻小说。",
+            salience=0.5,
+            truth_state="VERIFIED",
+            ts_ms=1_800_000_000_000,
+            metadata={
+                "platform": "qq",
+                "conversation_id": "qq_dm_owner",
+                "selected_recommendations": _cards(),
+            },
+        )
+        store.index_episode_collections(episode_id=episode["episode_id"], ts_ms=1_800_000_000_000)
+        with ledger._write_lock:
+            with ledger._conn:
+                ledger._conn.execute("UPDATE life_memory_collection_item SET metadata = '{}'")
+                ledger._conn.execute("DELETE FROM life_memory_entity_mention")
+                ledger._conn.execute("DELETE FROM life_memory_entity")
+    finally:
+        ledger.close()
+
+    dry_run = run_canonical_backfill(db_path=db_path, apply=False, limit=100)
+    assert dry_run["preview"]["planned_count"] == 18
+    assert dry_run["applied"] is None
+
+    applied = run_canonical_backfill(db_path=db_path, apply=True, limit=100)
+    assert applied["backup_path"]
+    assert applied["applied"]["updated_metadata_count"] == 18
+    assert applied["applied"]["indexed_count"] == 3
+
+    verify = SQLiteLedger(db_path=db_path)
+    try:
+        entity_count = verify._conn.execute("SELECT COUNT(1) AS c FROM life_memory_entity").fetchone()["c"]
+        mention_count = verify._conn.execute("SELECT COUNT(1) AS c FROM life_memory_entity_mention").fetchone()["c"]
+        missing_meta = verify._conn.execute(
+            "SELECT COUNT(1) AS c FROM life_memory_collection_item WHERE metadata NOT LIKE '%canonical_key%'"
+        ).fetchone()["c"]
+        assert entity_count == 3
+        assert mention_count == 3
+        assert missing_meta == 0
     finally:
         verify.close()
 
