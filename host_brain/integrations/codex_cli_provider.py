@@ -155,10 +155,12 @@ def resolve_codex_cli_reasoning_effort(model_id: str | None = None, effort: str 
         if normalized_model.startswith("gpt-5.3-codex-spark"):
             raw = "low"
         elif normalized_model.startswith("gpt-5.5"):
-            raw = "minimal"
+            raw = "low"
         else:
             raw = "none"
     if raw in {"none", "minimal"} and normalized_model.startswith("gpt-5.3-codex-spark"):
+        return "low"
+    if raw == "minimal" and normalized_model.startswith("gpt-5.5"):
         return "low"
     if raw == "minimal" and normalized_model == "gpt-5.4-mini":
         return "none"
@@ -671,7 +673,10 @@ class _CodexAppServerWorker:
         config: dict[str, Any] = {
             "model_reasoning_effort": resolve_codex_cli_reasoning_effort(self.model_id),
             "features": features,
-            "tools": {"view_image": False},
+            "tools": {
+                "view_image": False,
+                "image_gen": False,
+            },
         }
         if _parse_bool(os.environ.get("HOST_CODEX_CLI_DISABLE_WEB_SEARCH"), default=True):
             config["web_search"] = "disabled"

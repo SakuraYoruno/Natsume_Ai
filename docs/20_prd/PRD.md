@@ -43,7 +43,20 @@
 - 用于审阅覆盖关系：白皮书/PRD → DevSpec → DevTasks → Tests → Invariants。
 - Trace 只做“指向”，不承载实现内容。
 
-### 0.2 需求成熟度与进入开发门槛（DoR/DoD）
+### 0.2 当前运行链路入口（2026-05-30）
+
+当前代码事实链路以文档中的“可回放审计链”为准：
+
+- 入口：`POST /v1/chat`（`host_brain/app/fastapi_app.py`）与 `POST /v1/host/input`。
+- 常用主链：`chat_handler.handle_chat()` → `_unified_chat_sse_generator()` → `thalamus_agent.classify_and_compile_intent_draft()` → `Governor.evaluate_intent()` → `cortex_orchestrator` / `executive_runtime`。
+- 事实闭环：`intent_log`、`governor_log`、`skill_exec_log`、`audit` 三联画缺一不可，不可将“已执行/已确认”写成事实。
+- 当前运行事实入口：
+  - `docs/50_project/arch/CURRENT_CODE_ARCHITECTURE.md`
+  - `docs/50_project/arch/dataflow_report.md`
+  - `docs/30_devspec/DevSpec.md`
+- PRD 中的需求条目需继续映射到上述事实口径；凡是无法链到审计链条的条目，默认降级为“待回放验证”。
+
+### 0.3 需求成熟度与进入开发门槛（DoR/DoD）
 
 本项目的“需求是否可开发”不是主观判断，而是看追溯链是否闭合。
 DoR（Definition of Ready：进入开发门槛）

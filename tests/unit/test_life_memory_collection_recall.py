@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone, timedelta
+import json
 
 from host_brain.app.observability_persist import persist_life_action_event_memory
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.memory.life_memory import LifeMemoryStore
+from host_brain.memory.life_memory_query import plan_life_memory_query
 from host_brain.persona.isolated_surface_continuity import ThreeLayerContinuityContext
 from host_brain.persona.surface_memory_recall import (
     build_surface_memory_recall_packet,
@@ -175,6 +177,47 @@ def _collection_entity_service(ledger: SQLiteLedger) -> RecallFusionServiceContr
     )
 
 
+def _collection_episode_service(ledger: SQLiteLedger) -> RecallFusionServiceContract:
+    node_id = "surface_main_chain_memory_recall"
+    routes = {
+        "surface_life_collection": RecallRouteConfig(
+            route_id="surface_life_collection",
+            store_id="life_memory_collection",
+            collection="life_memory_collection",
+            top_k=5,
+            score_weight=1.0,
+            node_selector=node_id,
+        ),
+        "surface_life_entity": RecallRouteConfig(
+            route_id="surface_life_entity",
+            store_id="life_memory_entity",
+            collection="life_memory_entity",
+            top_k=5,
+            score_weight=1.0,
+            node_selector=node_id,
+        ),
+        "surface_life_episode": RecallRouteConfig(
+            route_id="surface_life_episode",
+            store_id="life_episode",
+            collection="life_episode",
+            top_k=5,
+            score_weight=1.0,
+            node_selector=node_id,
+        ),
+    }
+    return RecallFusionServiceContract(
+        ledger=ledger,
+        chroma_client=FakeChromaClient(),
+        runtime_config=RecallRuntimeConfig(
+            enabled=True,
+            default_route="surface_life_collection",
+            routes=routes,
+        ),
+        node_id=node_id,
+        use_hybrid=False,
+    )
+
+
 def test_recommendation_delivery_indexes_delivery_daily_and_recent_collections() -> None:
     ledger = SQLiteLedger(db_path=":memory:")
     try:
@@ -250,6 +293,81 @@ def test_current_selection_recalls_exact_delivery_collection_before_recent_colle
         ledger.close()
 
 
+def test_current_recommendation_listing_plans_collection_recall_not_selection() -> None:
+    life_plan = plan_life_memory_query("刚才给我推荐了哪几本书？")
+    surface_plan = plan_surface_memory_recall(
+        ThreeLayerContinuityContext(
+            current_user_message="刚才给我推荐了哪几本书？",
+            task_mode_hint="daily_chat",
+        )
+    )
+
+    assert life_plan.reason == "collection_memory_recall"
+    assert life_plan.query_kind == "collection_summary"
+    assert life_plan.temporal_scope == "current"
+    assert life_plan.primary_memory_layer == "life_memory_collection"
+    assert "collection_item_exact_count" in life_plan.validation_requirements
+    assert "read_detail_evidence_before_deep_quality_judgment" not in life_plan.answer_obligations
+    assert surface_plan.reason == "collection_memory_recall"
+    assert surface_plan.query_kind == "collection_summary"
+
+
+def test_current_listing_recall_does_not_leak_synthetic_or_other_session_episode() -> None:
+    ledger = SQLiteLedger(db_path=":memory:")
+    try:
+        store = LifeMemoryStore(ledger=ledger)
+        _write_delivery(
+            store,
+            prefix="SeededE2E",
+            ts_ms=_ts(2026, 5, 28, 13),
+            session_id="surface-memory-recall-e2e-session",
+            person_id="surface-memory-recall-e2e",
+            metadata_extra={"e2e_probe": True},
+        )
+        _write_delivery(
+            store,
+            prefix="RealQQ",
+            ts_ms=_ts(2026, 5, 28, 12),
+            session_id="qq_dm_3414578517",
+            person_id="default",
+        )
+
+        direct_episode = store.recall_episode_packet(
+            query="刚才给我推荐了哪几本书？",
+            top_k=5,
+            person_id="default",
+            session_id="qq_dm_3414578517",
+            now_ts_ms_value=_ts(2026, 5, 28, 14),
+        )
+        direct_joined = "\n".join(str(candidate.get("text") or "") for candidate in direct_episode.candidates)
+        assert "SeededE2E" not in direct_joined
+
+        packet = recall_surface_memory_for_context(
+            recall_service=_collection_episode_service(ledger),
+            context=ThreeLayerContinuityContext(
+                current_user_message="刚才给我推荐了哪几本书？",
+                task_mode_hint="daily_chat",
+            ),
+            request_id="req-current-listing-cross-session",
+            query_embedding=[0.1] * 16,
+            person_id="default",
+            session_id="qq_dm_3414578517",
+            ts_ms=_ts(2026, 5, 28, 14),
+        )
+        joined = "\n".join(packet.facts)
+        trace = dict(packet.trace or {})
+        readiness = dict(trace.get("recall_answer_readiness") or {})
+
+        assert packet.reason_code is None
+        assert readiness["status"] == "READY"
+        assert "RealQQ A" in joined
+        assert "RealQQ B" in joined
+        assert "RealQQ C" in joined
+        assert "SeededE2E" not in joined
+    finally:
+        ledger.close()
+
+
 def test_recent_days_collection_recalls_items_across_multiple_delivery_episodes() -> None:
     ledger = SQLiteLedger(db_path=":memory:")
     try:
@@ -306,6 +424,64 @@ def test_collection_recall_skips_synthetic_probe_collections_even_without_identi
             candidate["metadata"].get("person_id") != "life-memory-real-scene-e2e"
             for candidate in packet.candidates
         )
+    finally:
+        ledger.close()
+
+
+def test_collection_recall_keeps_real_items_when_review_episode_anchor_is_synthetic() -> None:
+    ledger = SQLiteLedger(db_path=":memory:")
+    try:
+        store = LifeMemoryStore(ledger=ledger)
+        _write_delivery(
+            store,
+            prefix="RealYesterday",
+            ts_ms=_ts(2026, 5, 27),
+            session_id="qq_dm_3414578517",
+            person_id="default",
+        )
+        synthetic = store.write_background_episode(
+            event_source="surface_memory_recall",
+            event_id="life-memory-real-scene-e2e:deep-review",
+            person_id="life-memory-real-scene-e2e",
+            session_id="life-memory-real-scene-session",
+            task_id="lightnovel_recommendation_deep_review",
+            status="OK",
+            reason_code="LIGHTNOVEL_DEEP_REVIEW_OK",
+            detail="synthetic deep review should not erase real delivery items",
+            ts_ms=_ts(2026, 5, 27, 13),
+            metadata={"e2e_probe": True},
+        )
+        synthetic_episode_id = str(synthetic["episode_id"])
+        rows = ledger._conn.execute("SELECT * FROM life_memory_collection_item").fetchall()
+        assert rows
+        with ledger._write_lock:
+            with ledger._conn:
+                for row in rows:
+                    metadata = json.loads(row["metadata"] or "{}")
+                    metadata["source_episode_id"] = synthetic_episode_id
+                    ledger._conn.execute(
+                        """
+                        UPDATE life_memory_collection_item
+                        SET episode_id = ?, metadata = ?
+                        WHERE collection_item_id = ?
+                        """,
+                        (synthetic_episode_id, json.dumps(metadata, ensure_ascii=False), row["collection_item_id"]),
+                    )
+
+        packet = store.recall_collection_packet(
+            query="昨天给我推荐了哪几本书？",
+            top_k=2,
+            person_id="default",
+            session_id="qq_dm_3414578517",
+            now_ts_ms_value=_ts(2026, 5, 28, 8),
+        )
+
+        joined = "\n".join(str(candidate.get("text") or "") for candidate in packet.candidates)
+        assert packet.candidates
+        assert "RealYesterday A" in joined
+        assert "RealYesterday B" in joined
+        assert "RealYesterday C" in joined
+        assert "life-memory-real-scene-e2e" not in joined
     finally:
         ledger.close()
 

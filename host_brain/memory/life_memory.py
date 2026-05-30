@@ -538,6 +538,53 @@ def _allow_synthetic_life_recall_for_scope(*, person_id: str | None, session_id:
     )
 
 
+def _session_allows_cross_scope_recall(session_id: str | None) -> bool:
+    session = _clean_text(session_id).lower()
+    if not session:
+        return True
+    return any(
+        marker in session
+        for marker in (
+            "scheduler",
+            "daily",
+            "diary",
+            "background",
+            "inner",
+            "codex",
+            "task",
+        )
+    )
+
+
+def _record_matches_life_recall_scope(
+    record: Mapping[str, Any],
+    metadata: Mapping[str, Any] | None,
+    *,
+    person_id: str | None,
+    session_id: str | None,
+    allow_synthetic: bool,
+) -> bool:
+    meta = dict(metadata) if isinstance(metadata, Mapping) else {}
+    if _is_synthetic_life_record(record, meta) and not allow_synthetic:
+        return False
+    target_person = _clean_text(person_id)
+    target_session = _clean_text(session_id)
+    if not target_person and not target_session:
+        return True
+    row_person = _clean_text(record.get("person_id") or meta.get("person_id"))
+    row_session = _clean_text(record.get("session_id") or meta.get("session_id") or meta.get("conversation_id"))
+    aliases = set(_owner_alias_person_ids(target_person)) if target_person else set()
+    if target_session and row_session and row_session != target_session:
+        same_person_cross_scope = bool(target_person and row_person in aliases and _session_allows_cross_scope_recall(row_session))
+        if not same_person_cross_scope:
+            return False
+    if target_person and row_person and row_person not in aliases:
+        same_session = bool(target_session and row_session == target_session)
+        if not same_session:
+            return False
+    return True
+
+
 def _is_significant_anaphoric_episode(episode: Mapping[str, Any]) -> bool:
     kind = _clean_text(episode.get("episode_kind"))
     if kind not in _ANAPHORIC_EVENT_KINDS:
@@ -2146,7 +2193,13 @@ class LifeMemoryStore:
                 allow_synthetic=allow_synthetic_recall,
             )
             if source_episode_id_order:
-                items = [item for item in items if _clean_text(item.get("episode_id")) in trusted_episode_ids]
+                trusted_items = [item for item in items if _clean_text(item.get("episode_id")) in trusted_episode_ids]
+                items = trusted_items or [
+                    item
+                    for item in items
+                    if _collection_item_has_recallable_anchor(item)
+                    and _collection_item_episode_anchor_is_synthetic(self, item)
+                ]
             if not items:
                 continue
             text_for_score = "\n".join(
@@ -2988,6 +3041,18 @@ class LifeMemoryStore:
             episode_metadata = _json_loads(episode.get("metadata"), fallback={})
             if not isinstance(episode_metadata, dict):
                 episode_metadata = {}
+            allow_synthetic_recall = _allow_synthetic_life_recall_for_scope(
+                person_id=scoped_person_id,
+                session_id=scoped_session_id,
+            )
+            if not _record_matches_life_recall_scope(
+                episode,
+                episode_metadata,
+                person_id=scoped_person_id,
+                session_id=scoped_session_id,
+                allow_synthetic=allow_synthetic_recall,
+            ):
+                continue
             evidence_rows = self._list_evidence(episode_id=episode_id)
             correction_rows = self._list_corrections(episode_id=episode_id)
             evidence_text = "\n".join(
@@ -5761,6 +5826,36 @@ def _collection_item_is_synthetic(item: Mapping[str, Any]) -> bool:
     return any(_looks_like_synthetic_collection_text(value) for value in values)
 
 
+def _collection_item_has_recallable_anchor(item: Mapping[str, Any]) -> bool:
+    if _collection_item_is_synthetic(item):
+        return False
+    metadata = _json_loads(item.get("metadata"), fallback={})
+    if not isinstance(metadata, Mapping):
+        metadata = {}
+    refs = (
+        item.get("evidence_ref"),
+        item.get("source_ref"),
+        metadata.get("evidence_ref"),
+        metadata.get("source_ref"),
+        metadata.get("detail_url"),
+    )
+    return any(_clean_text(ref) and not _has_any_marker(ref, _SYNTHETIC_SOURCE_MARKERS) for ref in refs)
+
+
+def _collection_item_episode_anchor_is_synthetic(store: LifeMemoryStore, item: Mapping[str, Any]) -> bool:
+    metadata = _json_loads(item.get("metadata"), fallback={})
+    if not isinstance(metadata, Mapping):
+        metadata = {}
+    episode_id = _clean_text(item.get("episode_id") or metadata.get("source_episode_id"))
+    if not episode_id:
+        return False
+    row = store.ledger._conn.execute(
+        "SELECT * FROM life_episode WHERE episode_id = ? LIMIT 1",
+        (episode_id,),
+    ).fetchone()
+    return bool(row is not None and _is_synthetic_life_record(dict(row)))
+
+
 def _collection_is_synthetic_for_semantic(store: LifeMemoryStore, collection: Mapping[str, Any]) -> bool:
     metadata = _json_loads(collection.get("metadata"), fallback={})
     if not isinstance(metadata, Mapping):
@@ -6094,7 +6189,13 @@ def _semantic_proposal_from_collection(store: LifeMemoryStore, collection: Mappi
     ]
     trusted_episode_ids = _trusted_active_episode_ids(store, source_episode_id_order)
     if source_episode_id_order:
-        items = [item for item in items if _clean_text(item.get("episode_id")) in trusted_episode_ids]
+        trusted_items = [item for item in items if _clean_text(item.get("episode_id")) in trusted_episode_ids]
+        items = trusted_items or [
+            item
+            for item in items
+            if _collection_item_has_recallable_anchor(item)
+            and _collection_item_episode_anchor_is_synthetic(store, item)
+        ]
     if not items:
         return None
     item_count = len(items)

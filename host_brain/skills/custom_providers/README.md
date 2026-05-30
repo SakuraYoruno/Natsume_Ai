@@ -1,3 +1,6 @@
+受众：CODEX
+标题：Custom Skill Providers
+
 # Custom Skill Providers
 
 把新的宿主技能 provider 放到这个目录后，`host_brain/skills/provider_catalog.py`

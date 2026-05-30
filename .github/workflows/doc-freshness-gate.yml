@@ -1,0 +1,99 @@
+name: doc-freshness-gate
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      check_all:
+        description: "Run all freshness rules (ignore changed-file scoping)."
+        required: false
+        default: false
+        type: boolean
+  schedule:
+    - cron: "0 3 * * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: doc-freshness-gate-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  freshness-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Collect changed files
+        id: collect
+        shell: bash
+        run: |
+          mkdir -p .tmp
+          out_file=".tmp/changed_files.txt"
+          : > "$out_file"
+
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            base_ref="origin/${{ github.base_ref }}"
+            git fetch origin "${{ github.base_ref }}" --depth=1
+            base_sha="$(git merge-base HEAD "$base_ref")"
+            git diff --name-only "$base_sha" "$GITHUB_SHA" > "$out_file"
+          elif [[ "${{ github.event_name }}" == "push" && -n "${{ github.event.before }}" ]]; then
+            git diff --name-only "${{ github.event.before }}..${{ github.sha }}" > "$out_file"
+          elif [[ "${{ github.event_name }}" == "push" ]]; then
+            git diff --name-only HEAD~1..HEAD > "$out_file"
+          elif [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            if [[ "${{ github.event.inputs.check_all }}" == "true" ]]; then
+              : > "$out_file"
+            else
+              git diff --name-only HEAD~1..HEAD > "$out_file"
+            fi
+          fi
+
+          if [[ -s "$out_file" ]]; then
+            echo "files=$out_file" >> "$GITHUB_OUTPUT"
+          else
+            echo "files=" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Run doc freshness gate
+        id: gate
+        shell: bash
+        run: |
+          args=(
+            --root .
+            --config tools/doc_lint/doc_freshness_policy.json
+            --report-file doc_freshness_gate_report.json
+          )
+
+          if [[ "${{ github.event_name }}" == "schedule" ]] || [[ "${{ github.event.inputs.check_all }}" == "true" ]]; then
+            args+=(--check-all)
+          fi
+
+          if [[ -n "${{ steps.collect.outputs.files }}" && -f "${{ steps.collect.outputs.files }}" ]]; then
+            mapfile -t changed_files < "${{ steps.collect.outputs.files }}"
+            for p in "${changed_files[@]}"; do
+              args+=(--changed-file "$p")
+            done
+          fi
+
+          python tools/doc_lint/doc_freshness_gate.py "${args[@]}"
+
+      - name: Upload freshness report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: doc-freshness-gate-report
+          path: doc_freshness_gate_report.json

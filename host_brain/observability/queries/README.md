@@ -1,3 +1,6 @@
+受众：CODEX
+标题：Observability Named Queries（OPT-9）
+
 # Observability Named Queries（OPT-9）
 
 本目录存放 `ObsQueryBuilder` 使用的 named query 定义文件，由

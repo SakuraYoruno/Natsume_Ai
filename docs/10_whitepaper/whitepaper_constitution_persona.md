@@ -7,6 +7,23 @@
 
 定位：本文件只定义“不可变的法律（宪法）+ 可控的人格表达约束”。任何产品功能清单、体验包、实现细节与工程接口，统一移至 PRD 与开发规范。
 
+## 0. 运行时入口与真链路映射（2026-05-30）
+
+本文是不可变口径，工程与运行链路请按“事实文档”读取：
+- `docs/20_prd/PRD.md`（需求与验收）
+- `docs/30_devspec/DevSpec.md`（可执行实现契约）
+- `docs/50_project/arch/CURRENT_CODE_ARCHITECTURE.md`（当前主链入口）
+- `docs/50_project/arch/dataflow_report.md`（当前数据流）
+
+常见主路径（当前代码事实）：
+`POST /v1/chat` -> `host_brain/app/fastapi_app.py` -> `chat_handler` -> `thalamus_agent.classify_and_compile_intent_draft()` -> `Governor.evaluate_intent()` -> `executive_runtime` -> `Skills/Tools` -> `sqlite_ledger`。
+
+事实与真相声明：
+1. 任何“已执行/已确认/已保存/已改变状态”的叙述，必须由审计事实（`intent_log/governor_log/skill_exec_log`）可回放支撑。
+2. 任何离线提案、提示词草案、历史实验链条不作为主链执行依据；它们只提供背景或回放参考。
+3. 文档中出现历史方案与实验路径时，默认先以“宪法约束 + 当前代码事实文档”优先级评估，出现冲突时以主链事实为准。
+
+
 ---
 
 ## 0. 适用范围与术语约定

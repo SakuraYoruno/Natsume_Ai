@@ -1,3 +1,6 @@
+受众：PROJECT
+标题：Natsume AI — Codex Digital Life Inner Mechanisms 方案
+
 # Natsume AI — Codex Digital Life Inner Mechanisms 方案
 
 > Status: ADOPTED ROADMAP, 2026-04-25; Codex Runtime v2 + BioOps proposal-only.

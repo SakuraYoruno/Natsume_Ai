@@ -152,6 +152,38 @@ def test_life_action_event_memory_writes_general_action(monkeypatch) -> None:
     assert "行动记忆" in str(episodic_store.writes[0]["text"])
 
 
+def test_life_action_event_memory_explicit_none_skips_legacy_episodic(monkeypatch) -> None:
+    monkeypatch.delenv("HOST_LIFE_ACTION_EVENT_MEMORY_ENABLED", raising=False)
+    life_store = _FakeLifeMemoryStore()
+
+    def _unexpected_episodic_store():
+        raise AssertionError("explicit episodic_store=None should not initialize the legacy store")
+
+    monkeypatch.setattr(
+        "host_brain.app.dependencies.get_episodic_store",
+        _unexpected_episodic_store,
+    )
+
+    result = persist_life_action_event_memory(
+        event_source="gateway",
+        action_kind="qq_reply_sent",
+        action_id="reply-life-only",
+        actor_id="natsume",
+        person_id="owner",
+        session_id="qq_dm_owner",
+        status="COMPLETED",
+        action_summary="我通过 QQ 发送了一条回复。",
+        evidence_refs=["gateway://message/reply-life-only"],
+        episodic_store=None,
+        life_memory_store=life_store,
+    )
+
+    assert result["status"] == "OK"
+    assert result["reason_code"] == "EPISODIC_STORE_DISABLED"
+    assert result["life_memory"]["status"] == "OK"
+    assert life_store.background_writes
+
+
 def test_life_action_event_memory_resolves_gateway_person_id(monkeypatch) -> None:
     monkeypatch.delenv("HOST_LIFE_ACTION_EVENT_MEMORY_ENABLED", raising=False)
     monkeypatch.setenv("HOST_DEFAULT_USER_ID", "owner")

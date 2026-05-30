@@ -1,3 +1,6 @@
+受众：PROJECT
+标题：Skill-First 人体架构执行补充方案（P3-Stage3）
+
 # Skill-First 人体架构执行补充方案（P3-Stage3）
 
 日期：2026-04-12  

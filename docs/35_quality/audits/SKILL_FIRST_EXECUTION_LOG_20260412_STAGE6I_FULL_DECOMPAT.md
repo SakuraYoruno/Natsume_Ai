@@ -1,3 +1,6 @@
+受众：CODEX
+标题：Skill-First Stage 6I Full Decompat Audit
+
 # Skill-First Stage 6I Full Decompat Audit
 
 Date: 2026-04-12

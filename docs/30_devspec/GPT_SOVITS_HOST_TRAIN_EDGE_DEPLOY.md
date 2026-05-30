@@ -1,4 +1,20 @@
+受众：CODEX
+标题：GPT-SoVITS Host Train -> Edge Deploy
+
 # GPT-SoVITS Host Train -> Edge Deploy
+
+## 0. 当前链路入口映射（2026-05-30）
+
+本文档聚焦 Host 侧训练与 Edge 发布流程，不定义主控运行链。主链执行与审计链路仍以：
+- `POST /v1/chat` -> `host_brain/app/fastapi_app.py` -> `chat_handler` -> `thalamus_agent.classify_and_compile_intent_draft()` -> `Governor.evaluate_intent()` -> `executive_runtime`；
+- `intent_log` / `governor_log` / `skill_exec_log` / `sqlite_ledger`
+为准。  
+
+若发现文档与现网运行冲突，以：
+- `docs/20_prd/PRD.md`
+- `docs/30_devspec/DevSpec.md`
+- `docs/50_project/arch/CURRENT_CODE_ARCHITECTURE.md`
+中的当前事实口径为准。
 
 ## Boundary
 

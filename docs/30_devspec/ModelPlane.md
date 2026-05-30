@@ -14,6 +14,15 @@
 - 审计字段方面，除既有 `model_control_log` 外，当前代码还写 `llm_pool_call_log`，记录 `scene_type / cognitive_tier / attempts / final_provider / final_model / pool_exhausted / degraded_to_rule`。
 - 调度面当前还额外约束了后台 LLM 任务的 `sys_mode` allowlist；因此阅读本文件时，应把“9 云节点固定分工”理解为治理角色与能力分层，而不是唯一运行时调用形态。
 
+### 0.1 当前链路入口（2026-05-30）
+
+模型平面实际触达主链时序应与该结构保持一致：
+
+- 主入口：`host_brain/integrations/llm_gateway.py` 的 `complete_with_pool()`；
+- 上游输入：`host_brain/integrations/llm_helpers.py` 提供统一路由上下文；
+- 兜底策略：`llm_pool_call_log` 与 `model_control_log` 在审计口径上都要可回放；
+- 若某章节与当前代码分歧，以 `docs/50_project/arch/CURRENT_CODE_ARCHITECTURE.md` 为准，且仅在 `model_plane` 相关任务中更新回溯条目。
+
 ---
 
 ## 0. 硬约束（不可违反）

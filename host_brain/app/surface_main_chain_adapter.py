@@ -649,6 +649,21 @@ def _apply_surface_memory_output_guard(
     reason_code = str(packet.get("reason_code") or "").strip()
     ready = _surface_memory_packet_ready(packet, readiness=readiness)
     if not ready:
+        if _surface_memory_missing_detail_selection(readiness) and _missing_detail_selection_bad_inference(narrative):
+            replacement = _memory_not_ready_guard_text(
+                user_message=str(getattr(agent_input, "user_message", "") or ""),
+                readiness=readiness,
+                strategy=_surface_memory_strategy(packet),
+                reason_code=reason_code,
+            )
+            return replacement, {
+                "applied": True,
+                "reason_code": "SURFACE_MEMORY_OUTPUT_MISSING_DETAIL_INFERENCE_REWRITE",
+                "original_reason_code": reason_code,
+                "readiness_status": str(readiness.get("status") or ""),
+                "response_mode": str(readiness.get("response_mode") or ""),
+                "original_digest": narrative[:160],
+            }
         if _narrative_acknowledges_memory_missing(narrative) or not _narrative_makes_memory_assertion(narrative):
             return narrative, {"applied": False, "reason_code": "", "ready_to_answer": False}
         replacement = _memory_not_ready_guard_text(
@@ -757,6 +772,25 @@ def _surface_memory_packet_diagnostic_score(packet: Mapping[str, Any]) -> int:
 def _surface_memory_readiness(packet: Mapping[str, Any]) -> dict[str, Any]:
     trace = _safe_mapping(packet.get("trace"))
     return _safe_mapping(trace.get("recall_answer_readiness"))
+
+
+def _surface_memory_missing_detail_selection(readiness: Mapping[str, Any]) -> bool:
+    contract_id = str(readiness.get("recall_contract_id") or "").strip()
+    query_kind = str(readiness.get("query_kind") or "").strip()
+    response_mode = str(readiness.get("response_mode") or "").strip()
+    reasons = {str(item or "").strip() for item in list(readiness.get("reasons") or []) if str(item or "").strip()}
+    detail = _safe_mapping(readiness.get("detail_evidence"))
+    detail_basis = str(detail.get("basis") or "").strip()
+    is_selection = contract_id == "anaphoric_selection" or query_kind == "anaphoric_selection"
+    missing_detail = (
+        "missing_detail_evidence" in reasons
+        or response_mode == "fetch_or_request_detail_evidence"
+        or (
+            bool(detail.get("required"))
+            and detail_basis not in {"body_evidence", "lightnovel_deep_review", "generic_evidence_review"}
+        )
+    )
+    return bool(is_selection and missing_detail)
 
 
 def _surface_memory_strategy(packet: Mapping[str, Any]) -> dict[str, Any]:
@@ -983,7 +1017,69 @@ def _narrative_makes_memory_assertion(text: str) -> bool:
 
 def _narrative_acknowledges_memory_missing(text: str) -> bool:
     compact = re.sub(r"\s+", "", str(text or ""))
-    return any(token in compact for token in ("没找到足够", "没有找到足够", "证据不足", "不能装作", "不能硬说", "不够判断"))
+    return any(
+        token in compact
+        for token in (
+            "没找到足够",
+            "没有找到足够",
+            "证据不足",
+            "不能装作",
+            "不能硬说",
+            "不够判断",
+            "没读正文",
+            "没看正文",
+            "还没读正文",
+            "还没看正文",
+            "只按简介",
+            "按简介",
+            "先按卡片",
+            "第一眼",
+            "读完再",
+            "看完正文",
+            "翻过正文",
+            "翻几章",
+        )
+    )
+
+
+def _missing_detail_selection_bad_inference(text: str) -> bool:
+    compact = re.sub(r"\s+", "", str(text or ""))
+    if not compact:
+        return False
+    return any(
+        token in compact
+        for token in (
+            "单看",
+            "这个题名",
+            "按题名",
+            "预期成",
+            "偏文学",
+            "精神性",
+            "存在感",
+            "强情节",
+            "爽感",
+            "氛围",
+            "隐喻",
+            "信仰",
+            "命运",
+            "孤独",
+            "死亡",
+            "救赎",
+            "大概率会好看",
+            "值得试读",
+            "前二三十页",
+            "文笔",
+            "读感",
+            "节奏挺",
+            "热度高",
+            "钩子",
+            "资料完整",
+            "资料完整度",
+            "标题辨识度",
+            "现实感交叠",
+            "撑不撑得住",
+        )
+    )
 
 
 def _sanitize_memory_recall_user_state_guess(text: str) -> tuple[str, list[str]]:
@@ -1023,6 +1119,8 @@ def _memory_not_ready_guard_text(
         or bool(strategy_map.get("should_fetch_more_evidence"))
         or (bool(detail.get("required")) and detail_basis not in {"body_evidence", "lightnovel_deep_review", "generic_evidence_review"})
     ):
+        if _surface_memory_missing_detail_selection(readiness):
+            return "我别装读过了：这批我只看到推荐卡片，还没翻正文。现在要我选，只能先按简介挑个第一眼；等真读了我再改口。"
         return "我这边只召回到相关记录的锚点，但没有足够详情、正文或可读证据，不能直接判断哪本更好。得先把详情页或正文补读完。"
     if "insufficient_item_count" in reasons:
         return "我没找到足够贴合这次范围的推荐记录，不能硬说是哪几本或哪本最好。"
@@ -1155,6 +1253,41 @@ def _packet_supported_titles(packet: Mapping[str, Any]) -> list[str]:
                 if title:
                     titles.append(title)
     return _clean_list(titles)
+
+
+def _surface_memory_card_fact_lines(packet: Mapping[str, Any], *, limit: int = 4) -> list[str]:
+    facts = "\n".join(str(item or "") for item in list(packet.get("facts") or []))
+    lines: list[str] = []
+    for part in re.split(r"[；;]\s*(?=\d+\.)", facts):
+        match = re.search(r"(?:^|[；;]\s*)\d+\.\s*([^｜\n；;]+)", part)
+        if not match:
+            continue
+        title = re.sub(r"^(今天|今日|昨天|前天|三天前|四天前|五天前|本次|这次)\s*推荐\s*[A-ZＡ-Ｚ一二三四五六七八九十0-9]*\s*[:：]\s*", "", match.group(1).strip())
+        title = re.sub(r"^推荐\s*[A-ZＡ-Ｚ一二三四五六七八九十0-9]*\s*[:：]\s*", "", title).strip(" 《》")
+        reason_match = re.search(r"｜看点[:：]\s*([^｜；;]+)", part)
+        intro_match = re.search(r"｜简介[:：]\s*([^｜；;]+)", part)
+        bits = [title]
+        if reason_match:
+            bits.append(f"看点：{reason_match.group(1).strip()[:70]}")
+        if intro_match:
+            bits.append(f"简介：{intro_match.group(1).strip()[:90]}")
+        line = "｜".join(bit for bit in bits if bit)
+        if line:
+            lines.append(line)
+        if len(lines) >= max(1, int(limit)):
+            break
+    if lines:
+        return _clean_list(lines)
+    trace = _safe_mapping(packet.get("trace"))
+    for key in ("selected_collection_items", "selected_entity_items"):
+        for item in list(trace.get(key) or []):
+            item_map = _safe_mapping(item)
+            title = str(item_map.get("title") or item_map.get("raw_title") or item_map.get("item_title") or "").strip()
+            if title:
+                lines.append(title)
+            if len(lines) >= max(1, int(limit)):
+                return _clean_list(lines)
+    return _clean_list(lines)
 
 
 def _quoted_titles(text: str) -> list[str]:
@@ -1597,6 +1730,9 @@ def _surface_task_control_from_reply_plan(
     trace_stage_meta: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     memory_plan_reason = _surface_memory_plan_reason(trace_stage_meta)
+    memory_packet = _surface_memory_packet_for_output_guard(agent_input=agent_input, trace_stage_meta=trace_stage_meta)
+    memory_readiness = _surface_memory_readiness(memory_packet)
+    missing_detail_selection = _surface_memory_missing_detail_selection(memory_readiness)
     task_mode = _first_nonempty(
         reply_plan.get("task_mode"),
         reply_plan.get("primary_topic"),
@@ -1615,6 +1751,27 @@ def _surface_task_control_from_reply_plan(
     if memory_plan_reason in _MEMORY_RECALL_SURFACE_REASONS:
         task_mode = "memory_followup"
         response_move = "memory_followup"
+    task_facts = _task_facts(reply_plan=reply_plan, agent_input=agent_input, trace_stage_meta=trace_stage_meta)
+    task_must_not_do = _clean_list(_coerce_sequence(reply_plan.get("must_not_do")))
+    if missing_detail_selection:
+        card_lines = _surface_memory_card_fact_lines(memory_packet, limit=4)
+        task_facts = _clean_list(
+            [
+                "缺正文状态：还没读正文/详情；只能按召回卡片给临时口味，不要当读后感。",
+                f"召回卡片：{'；'.join(card_lines)}" if card_lines else "",
+                *task_facts,
+            ]
+        )
+        task_facts = [item[:260] for item in task_facts]
+        task_must_not_do = _clean_list(
+            [
+                *task_must_not_do,
+                "不要按书名自由联想题材、氛围、隐喻、文笔、节奏或读者适配；只能使用召回卡片里的看点/简介。",
+                "不要说“值得试读”“大概率好看”“前二三十页”这类像书评模板的话。",
+                "不要照搬或改写成“奇幻身份钩子、资料完整、标题辨识度高、现实感交叠、正文撑不撑得住”这类字段腔。",
+            ]
+        )
+        task_must_not_do = [item[:180] for item in task_must_not_do]
     return {
         "response_move": response_move,
         "task_mode": task_mode,
@@ -1624,14 +1781,16 @@ def _surface_task_control_from_reply_plan(
             default=0,
         ),
         "must_include": _clean_list(_coerce_sequence(reply_plan.get("must_include"))),
-        "must_not_do": _clean_list(_coerce_sequence(reply_plan.get("must_not_do"))),
-        "facts": _task_facts(reply_plan=reply_plan, agent_input=agent_input, trace_stage_meta=trace_stage_meta),
+        "must_not_do": task_must_not_do,
+        "facts": task_facts,
         "style_anchor": _clean_list(
             [
                 "app_surface_main_chain",
                 "召回回答要使用已召回的经历对象、证据或长期事实，不要只按当前这句话泛聊。" if memory_plan_reason in _MEMORY_RECALL_SURFACE_REASONS else "",
                 "指代追问要承接已召回的最近经历对象。" if memory_plan_reason == "anaphoric_selection_recall" else "",
                 "选择评价追问只说基于召回和补读证据的判断，不要臆测用户是否看过、忘了、终于想起来或终于来问。" if memory_plan_reason == "anaphoric_selection_recall" else "",
+                "缺正文/详情时交给主链自然表达：不要写系统免责声明；可以说没读正文、只按简介或卡片第一眼先挑，且读完可能改口。" if missing_detail_selection else "",
+                "缺正文/详情时不要照搬字段名，例如“奇幻身份钩子、资料完整、标题辨识度高”；要改成像人在书摊前挑书的口吻。" if missing_detail_selection else "",
                 "日期/近期集合追问要保留用户指定时间范围，并点出集合里的具体条目。" if memory_plan_reason == "collection_memory_recall" else "",
                 "失败追问只能解释召回事实里的失败结果和证据，不要猜新的根因。" if memory_plan_reason == "failure_debug_recall" else "",
                 "证据审查追问必须回答结论和依据；不要改写成日期集合列表，也不要夹带不相关的推荐条目。" if memory_plan_reason == "evidence_review_recall" else "",

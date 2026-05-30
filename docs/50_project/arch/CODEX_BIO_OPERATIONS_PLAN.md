@@ -1,3 +1,6 @@
+受众：PROJECT
+标题：Natsume AI — Codex Bio-Operations Layer 实施总方案
+
 # Natsume AI — Codex Bio-Operations Layer 实施总方案
 
 > SUPERSEDED, 2026-04-24: this is the upstream phased proposal. The implemented migration is the hard-cut variant: no legacy `codex_codegen` compatibility, no old self-heal routes/env vars/tests, and only Codex Runtime v2 WorkOrders are executable.

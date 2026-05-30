@@ -115,7 +115,7 @@ def test_surface_memory_direct_answer_renders_ready_date_collection() -> None:
 
     assert answer is not None
     assert answer["reason_code"] == "SURFACE_MEMORY_DIRECT_READY"
-    assert "昨天推的是这几本" in answer["answer"]
+    assert "昨天那批我翻到的是" in answer["answer"]
     assert "培养失败的前美少女童星" in answer["answer"]
     assert "昨天推荐 A" not in answer["answer"]
 
@@ -175,7 +175,7 @@ def test_surface_memory_direct_answer_renders_deep_review_selection_naturally() 
     )
 
     assert answer is not None
-    assert "我偏《异世界皇女皇帝线》" in answer["answer"]
+    assert "我会先看《异世界皇女皇帝线》" in answer["answer"]
     assert "开篇比较抓人" in answer["answer"]
     assert "设定线很直给" in answer["answer"]
     assert "网页深读" not in answer["answer"]
@@ -214,11 +214,42 @@ def test_surface_memory_direct_answer_blocks_unrenderable_deep_review_selection(
         render_target_lang="zh",
     )
 
-    assert answer is not None
-    assert answer["reason_code"] == "SURFACE_MEMORY_DIRECT_DEEP_REVIEW_UNRENDERABLE"
-    assert "还没翻到足够正文或详情" in answer["answer"]
-    assert "不能认真说它好不好看" in answer["answer"]
-    assert "与神在河岸" in answer["answer"]
+    assert answer is None
+
+
+def test_surface_memory_direct_answer_delegates_missing_detail_selection_to_main_chain() -> None:
+    summary = _surface_memory_summary(
+        contract_id="anaphoric_selection",
+        query_kind="anaphoric_selection",
+        evidence_depth="detail_or_body_evidence",
+        response_mode="answer_from_evidence",
+        detail_required=True,
+        facts=[
+            "集合记忆：本次轻小说推荐集合，记录 3 个条目；可比较证据：1. 今天推荐 A：培养失败的前美少女童星｜看点：恋爱日常，关系展开轻快｜简介：前童星和伸手帮忙的人重新建立关系。；2. 今天推荐 B：与神在河岸｜看点：奇幻身份钩子，资料完整｜简介：神明、河岸与现实感交叠。；3. 今天推荐 C：异世界皇女皇帝线｜看点：皇女、皇帝、异世界身份线明确｜简介：转移后与皇女结婚并成为皇帝，设定直给。"
+        ],
+        items=[
+            {"title": "今天推荐 A：培养失败的前美少女童星"},
+            {"title": "今天推荐 B：与神在河岸"},
+            {"title": "今天推荐 C：异世界皇女皇帝线"},
+        ],
+    )
+    packet = summary["surface_memory_recall_packet"]
+    packet["trace"]["recall_answer_readiness"].update(
+        {
+            "status": "NOT_READY",
+            "ready_to_answer": False,
+            "response_mode": "fetch_or_request_detail_evidence",
+            "reasons": ["missing_detail_evidence"],
+        }
+    )
+
+    answer = _maybe_build_surface_memory_direct_answer(
+        retrieval_summary=summary,
+        user_message="这三本书，你喜欢哪本？",
+        render_target_lang="zh",
+    )
+
+    assert answer is None
 
 
 def test_surface_memory_direct_answer_limits_partial_deep_review_scope() -> None:
@@ -263,7 +294,7 @@ def test_surface_memory_direct_answer_limits_partial_deep_review_scope() -> None
     assert answer is not None
     assert "全 12 本里绝对最好" in answer["answer"]
     assert "先补读了其中 6 本" in answer["answer"]
-    assert "我偏《异世界皇女皇帝线》" in answer["answer"]
+    assert "我会先看《异世界皇女皇帝线》" in answer["answer"]
     assert "我补读过的另外几本" in answer["answer"]
 
 
@@ -304,7 +335,7 @@ def test_surface_memory_direct_answer_accepts_deep_review_strategy_when_depth_mi
     )
 
     assert answer is not None
-    assert "我偏《异世界皇女皇帝线》" in answer["answer"]
+    assert "我会先看《异世界皇女皇帝线》" in answer["answer"]
     assert "网页深读" not in answer["answer"]
 
 
@@ -359,9 +390,10 @@ def test_surface_memory_direct_answer_renders_semantic_preference_without_labels
     )
 
     assert answer is not None
-    assert answer["answer"] == "记得。以后推荐轻小说时，每本书的简介后应该换行，别模板腔。"
+    assert answer["answer"] == "嗯，这条我记着：以后推荐轻小说时，每本书的简介后应该换行，别模板腔。"
     assert "长期事实" not in answer["answer"]
     assert "用户偏好" not in answer["answer"]
+    assert not answer["answer"].startswith("记得。")
 
 
 def test_surface_memory_direct_answer_renders_relationship_feedback_without_labels() -> None:
@@ -378,8 +410,33 @@ def test_surface_memory_direct_answer_renders_relationship_feedback_without_labe
     )
 
     assert answer is not None
-    assert answer["answer"] == "记得。回答要像正常聊天，避免模板腔、台词腔和生硬的证据条目话术。"
+    assert answer["answer"] == "你当时嫌的是我说话太硬：要像正常聊天，别模板腔、台词腔，也别把证据条目塞成报告。"
     assert "关系反馈" not in answer["answer"]
+    assert not answer["answer"].startswith("记得。")
+
+
+def test_surface_memory_direct_answer_reads_top_level_readiness_from_live_packet() -> None:
+    summary = _surface_memory_summary(
+        contract_id="preference",
+        query_kind="preference_lookup",
+        evidence_depth="memory_hit",
+        response_mode="answer_from_memory",
+        facts=["记忆线索：用户强烈反馈：回答要像正常聊天，避免模板腔、台词腔和生硬的证据条目话术。"],
+    )
+    packet = summary["surface_memory_recall_packet"]
+    packet["recall_answer_readiness"] = packet["trace"].pop("recall_answer_readiness")
+    packet["reason_code"] = "CHROMA_ENDPOINT_UNAVAILABLE"
+    packet["degraded"] = True
+
+    answer = _maybe_build_surface_memory_direct_answer(
+        retrieval_summary=summary,
+        user_message="我之前说文本质量不像人话，是哪里的问题？",
+        render_target_lang="zh",
+    )
+
+    assert answer is not None
+    assert "要像正常聊天" in answer["answer"]
+    assert "不能硬说记得" not in answer["answer"]
 
 
 def test_surface_memory_direct_answer_normalizes_raw_relationship_feedback() -> None:
@@ -396,7 +453,7 @@ def test_surface_memory_direct_answer_normalizes_raw_relationship_feedback() -> 
     )
 
     assert answer is not None
-    assert "回答要像正常聊天" in answer["answer"]
+    assert "要像正常聊天" in answer["answer"]
     assert "模板腔" in answer["answer"]
     assert "台词腔" in answer["answer"]
 
@@ -415,9 +472,10 @@ def test_surface_memory_direct_answer_renders_open_loop_without_labels() -> None
     )
 
     assert answer is not None
-    assert answer["answer"] == "记得。还没完成的是：后续要把记忆系统的召回覆盖 open loop 和自我改变，记成待办。"
+    assert answer["answer"] == "这块还欠着：后续要把记忆系统的召回覆盖 open loop 和自我改变，记成待办。"
     assert "长期事实" not in answer["answer"]
     assert "承诺和待办" not in answer["answer"]
+    assert not answer["answer"].startswith("记得。")
 
 
 def test_surface_memory_direct_answer_renders_self_change_without_labels() -> None:
@@ -434,9 +492,10 @@ def test_surface_memory_direct_answer_renders_self_change_without_labels() -> No
     )
 
     assert answer is not None
-    assert answer["answer"] == "记得。核心是：她做过的事都要留下生命经历锚点，但不等于所有日志都进入可召回记忆。"
+    assert answer["answer"] == "改过。现在的底线是：我做过的事都要留下生命经历锚点，但不等于所有日志都进入可召回记忆。"
     assert "长期事实" not in answer["answer"]
     assert "自我改变" not in answer["answer"]
+    assert "她做过" not in answer["answer"]
 
 
 def test_surface_memory_direct_answer_groups_recent_collection_by_day() -> None:
@@ -456,8 +515,8 @@ def test_surface_memory_direct_answer_groups_recent_collection_by_day() -> None:
     )
 
     assert answer is not None
-    assert "这几天我一共发过 4 条推荐" in answer["answer"]
-    assert "去掉重复标题主要是 2 本" in answer["answer"]
+    assert "这几天我翻到 4 条推荐记录" in answer["answer"]
+    assert "主要是 2 本" in answer["answer"]
     assert "三天前：培养失败的前美少女童星、与神在河岸" in answer["answer"]
     assert "昨天：培养失败的前美少女童星、与神在河岸" in answer["answer"]
     assert "昨天推荐 A" not in answer["answer"]
@@ -480,8 +539,8 @@ def test_surface_memory_direct_answer_groups_recent_collection_by_source_day() -
     )
 
     assert answer is not None
-    assert "这几天我一共发过 4 条推荐" in answer["answer"]
-    assert "去掉重复标题主要是 3 本" in answer["answer"]
+    assert "这几天我翻到 4 条推荐记录" in answer["answer"]
+    assert "主要是 3 本" in answer["answer"]
     assert "5月27日：培养失败的前美少女童星、与神在河岸" in answer["answer"]
     assert "5月28日：培养失败的前美少女童星、异世界皇女皇帝线" in answer["answer"]
     assert "2026-05-27" not in answer["answer"]
@@ -503,7 +562,7 @@ def test_surface_memory_direct_answer_keeps_recent_unique_count_when_no_duplicat
     )
 
     assert answer is not None
-    assert "这几天我一共推过 3 本" in answer["answer"]
+    assert "这几天我翻到 3 本" in answer["answer"]
     assert "推送记录" not in answer["answer"]
     assert "去重后" not in answer["answer"]
 
@@ -525,8 +584,8 @@ def test_surface_memory_direct_answer_dedupes_lightnovel_title_variants() -> Non
     )
 
     assert answer is not None
-    assert "我一共发过 4 条推荐" in answer["answer"]
-    assert "去掉重复标题主要是 2 本" in answer["answer"]
+    assert "我翻到 4 条推荐记录" in answer["answer"]
+    assert "主要是 2 本" in answer["answer"]
     assert "[丸焦ししゃも]给被人说“培养失败”的前美少女童星（SSR）" in answer["answer"]
     assert "与神在河岸" in answer["answer"]
     assert "第15话" not in answer["answer"].split("分天看：", 1)[0]

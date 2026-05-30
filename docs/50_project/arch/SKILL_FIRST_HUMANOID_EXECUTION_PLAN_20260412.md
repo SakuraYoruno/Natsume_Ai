@@ -1,3 +1,6 @@
+受众：PROJECT
+标题：Skill-First 类人体架构完整执行方案（2026-04-12）
+
 # Skill-First 类人体架构完整执行方案（2026-04-12）
 ## 1. 目标定义（最终态）
 - 业务主路由只面向 `Skill Family`，不直接路由裸 `subagent`。

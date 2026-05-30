@@ -1,3 +1,6 @@
+受众：PROJECT
+标题：Skill-First Humanoid Execution Plan Stage 7A (2026-04-13)
+
 # Skill-First Humanoid Execution Plan Stage 7A (2026-04-13)
 
 ## 目标

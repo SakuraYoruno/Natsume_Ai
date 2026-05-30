@@ -1,3 +1,6 @@
+受众：CODEX
+标题：Skill-First Execution Log 2026-04-13 Stage 7E
+
 # Skill-First Execution Log 2026-04-13 Stage 7E
 
 ## Scope

@@ -1,3 +1,6 @@
+受众：CODEX
+标题：Live Acceptance Validation
+
 # Live Acceptance Validation
 
 This suite is the pre-integration gate for the current digital-life main chain.

@@ -1,3 +1,6 @@
+受众：CODEX
+标题：Digital Life Phase 5 Audit (Cortex Direct Coupling Trim)
+
 # Digital Life Phase 5 Audit (Cortex Direct Coupling Trim)
 Date: 2026-04-08
 

@@ -1,3 +1,6 @@
+受众：CODEX
+标题：数字生命多智能体族 P0 执行清单（2026-04-08）
+
 # 数字生命多智能体族 P0 执行清单（2026-04-08）
 
 - 关联蓝图：`docs/50_project/arch/DIGITAL_LIFE_MULTI_AGENT_BLUEPRINT_V1_20260408.md`

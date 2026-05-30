@@ -1,3 +1,6 @@
+受众：CODEX
+标题：Isolated Surface Generation Harness
+
 # Isolated Surface Generation Harness
 
 目的：先把 `Soul.md + System Prompt` 的最终表层文本生成稳定下来，再接历史、状态、传感器或器官族输出。

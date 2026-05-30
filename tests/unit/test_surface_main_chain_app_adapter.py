@@ -627,10 +627,123 @@ async def test_surface_main_chain_rewrites_not_ready_memory_claim(monkeypatch) -
     commit = next(event for event in events if event.get("phase") == "COMMIT")
 
     assert "幻觉书" not in commit["narrative"]
-    assert "没有足够详情" in commit["narrative"]
+    assert "我别装读过了" in commit["narrative"]
+    assert "没翻正文" in commit["narrative"]
     guard = commit["audit_refs"]["trace_stage_meta"]["surface_memory_output_guard"]
     assert guard["applied"] is True
     assert guard["reason_code"] == "SURFACE_MEMORY_OUTPUT_NOT_READY_REWRITE"
+
+
+@pytest.mark.asyncio
+async def test_surface_main_chain_allows_missing_detail_selection_when_scoped_to_card(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "host_brain.app.surface_main_chain_adapter.get_compiled_soul",
+        lambda: SimpleNamespace(source_text=SOUL, runtime_full_text=SOUL),
+    )
+    calls: list[dict] = []
+
+    async def _fake_complete(**kwargs):  # noqa: ANN003
+        calls.append(kwargs)
+        return _surface_json_result("我还没读正文啊。只按简介第一眼，我会先翻《C》；皇女皇帝那条线看起来更直接，像是能先试一章的。")
+
+    monkeypatch.setattr("host_brain.integrations.llm_helpers.acomplete_llm_with_pool", _fake_complete)
+
+    events = [
+        _parse_sse(chunk)
+        async for chunk in surface_main_chain_sse_generator(
+            _agent_input(
+                user_message="这三本书，你喜欢哪本？",
+                retrieval_summary={
+                    "status": "OK",
+                    "surface_memory_recall_packet": {
+                        "facts": [
+                            "集合记忆：本次轻小说推荐集合，记录 3 个条目；可比较证据：1. 《A》｜看点：恋爱日常｜简介：人物关系轻快；2. 《B》｜看点：奇幻身份｜简介：神明和河岸；3. 《C》｜看点：皇女皇帝线｜简介：异世界皇女结婚路线。"
+                        ],
+                        "degraded": True,
+                        "reason_code": "LIGHTNOVEL_DEEP_REVIEW_FETCH_FAILED",
+                        "trace": {
+                            "plan": {"reason": "anaphoric_selection_recall"},
+                            "selected_collection_items": [{"title": "A"}, {"title": "B"}, {"title": "C"}],
+                            "recall_answer_readiness": {
+                                "status": "NOT_READY",
+                                "ready_to_answer": False,
+                                "response_mode": "fetch_or_request_detail_evidence",
+                                "reasons": ["coverage_failed", "missing_detail_evidence"],
+                                "recall_contract_id": "anaphoric_selection",
+                                "query_kind": "anaphoric_selection",
+                                "detail_evidence": {"required": True, "basis": "missing_detail_evidence"},
+                            },
+                        },
+                    },
+                },
+            )
+        )
+    ]
+    commit = next(event for event in events if event.get("phase") == "COMMIT")
+
+    assert calls
+    assert "我还没读正文啊" in commit["narrative"]
+    assert "只按简介第一眼" in commit["narrative"]
+    assert "surface_memory_output_guard" not in commit["audit_refs"]["trace_stage_meta"]
+    prompt = str(calls[0].get("prompt") or calls[0].get("messages") or "")
+    assert "不要写系统免责声明" in prompt
+    assert "字段腔" in prompt
+
+
+@pytest.mark.asyncio
+async def test_surface_main_chain_rewrites_missing_detail_field_jargon(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "host_brain.app.surface_main_chain_adapter.get_compiled_soul",
+        lambda: SimpleNamespace(source_text=SOUL, runtime_full_text=SOUL),
+    )
+
+    async def _fake_complete(**_kwargs):  # noqa: ANN003
+        return _surface_json_result(
+            "《与神在河岸》我还没读正文，只能先按卡片说第一眼：奇幻身份钩子，资料完整；简介也是神明、河岸与现实感交叠，标题辨识度高。真要说好不好看，得看正文撑不撑得住。"
+        )
+
+    monkeypatch.setattr("host_brain.integrations.llm_helpers.acomplete_llm_with_pool", _fake_complete)
+
+    events = [
+        _parse_sse(chunk)
+        async for chunk in surface_main_chain_sse_generator(
+            _agent_input(
+                user_message="与神在河岸好看吗？",
+                retrieval_summary={
+                    "status": "OK",
+                    "surface_memory_recall_packet": {
+                        "facts": [
+                            "集合记忆：本次轻小说推荐集合，记录 3 个条目；可比较证据：1. 《与神在河岸》｜看点：奇幻身份｜简介：神明和河岸；2. 《A》；3. 《B》。"
+                        ],
+                        "degraded": True,
+                        "reason_code": "LIGHTNOVEL_DEEP_REVIEW_FETCH_FAILED",
+                        "trace": {
+                            "plan": {"reason": "anaphoric_selection_recall"},
+                            "selected_collection_items": [{"title": "与神在河岸"}, {"title": "A"}, {"title": "B"}],
+                            "recall_answer_readiness": {
+                                "status": "NOT_READY",
+                                "ready_to_answer": False,
+                                "response_mode": "fetch_or_request_detail_evidence",
+                                "reasons": ["coverage_failed", "missing_detail_evidence"],
+                                "recall_contract_id": "anaphoric_selection",
+                                "query_kind": "anaphoric_selection",
+                                "detail_evidence": {"required": True, "basis": "missing_detail_evidence"},
+                            },
+                        },
+                    },
+                },
+            )
+        )
+    ]
+    commit = next(event for event in events if event.get("phase") == "COMMIT")
+
+    assert "奇幻身份钩子" not in commit["narrative"]
+    assert "标题辨识度" not in commit["narrative"]
+    assert "撑不撑得住" not in commit["narrative"]
+    assert "我别装读过了" in commit["narrative"]
+    guard = commit["audit_refs"]["trace_stage_meta"]["surface_memory_output_guard"]
+    assert guard["applied"] is True
+    assert guard["reason_code"] == "SURFACE_MEMORY_OUTPUT_MISSING_DETAIL_INFERENCE_REWRITE"
 
 
 @pytest.mark.asyncio
@@ -690,10 +803,11 @@ async def test_surface_main_chain_rewrites_detail_anchor_selection_until_deep_re
     commit = next(event for event in events if event.get("phase") == "COMMIT")
 
     assert "热度高" not in commit["narrative"]
-    assert "没有足够详情" in commit["narrative"]
+    assert "我别装读过了" in commit["narrative"]
+    assert "没翻正文" in commit["narrative"]
     guard = commit["audit_refs"]["trace_stage_meta"]["surface_memory_output_guard"]
     assert guard["applied"] is True
-    assert guard["reason_code"] == "SURFACE_MEMORY_OUTPUT_NOT_READY_REWRITE"
+    assert guard["reason_code"] == "SURFACE_MEMORY_OUTPUT_MISSING_DETAIL_INFERENCE_REWRITE"
 
 
 @pytest.mark.asyncio
@@ -748,10 +862,11 @@ async def test_surface_main_chain_treats_detail_anchor_selection_as_not_ready_wi
 
     assert "我能对上" not in commit["narrative"]
     assert "热度高" not in commit["narrative"]
-    assert "先把详情页或正文补读完" in commit["narrative"]
+    assert "我别装读过了" in commit["narrative"]
+    assert "没翻正文" in commit["narrative"]
     guard = commit["audit_refs"]["trace_stage_meta"]["surface_memory_output_guard"]
     assert guard["applied"] is True
-    assert guard["reason_code"] == "SURFACE_MEMORY_OUTPUT_NOT_READY_REWRITE"
+    assert guard["reason_code"] == "SURFACE_MEMORY_OUTPUT_MISSING_DETAIL_INFERENCE_REWRITE"
 
 
 @pytest.mark.asyncio

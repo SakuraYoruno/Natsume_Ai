@@ -1,3 +1,6 @@
+受众：CODEX
+标题：Digital Life Phase 6 Audit (Edge Tribe Agentization)
+
 # Digital Life Phase 6 Audit (Edge Tribe Agentization)
 Date: 2026-04-08
 

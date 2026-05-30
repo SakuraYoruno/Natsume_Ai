@@ -1,3 +1,6 @@
+受众：PROJECT
+标题：外部消息统一网关（Unified Message Gateway）设计方案
+
 # 外部消息统一网关（Unified Message Gateway）设计方案
 
 > 文档版本：v1.2

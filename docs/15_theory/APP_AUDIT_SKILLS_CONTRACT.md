@@ -1,8 +1,8 @@
 受众：MASTER
 标题：host_brain 核心应用层契约（当前代码实况：app / audit / skills / observability）
 
-版本：v2.2
-日期：2026-04-19
+版本：v2.3
+日期：2026-05-30
 归属：docs/15_theory/
 
 ---
@@ -81,7 +81,7 @@ POST /v1/chat
   -> host_brain.app.chat_handler.handle_chat
   -> host_brain.app.chat_handler._unified_chat_sse_generator
   -> thalamus_agent.classify_and_compile_intent_draft
-  -> IntentDecisionEngine.evaluate_intent
+  -> Governor.evaluate_intent（实际为 `engine.evaluate_intent` 封装）
   -> cortex_orchestrator_sse_generator
   -> agent_runtime_shared._cortex_orchestrator_sse_generator_impl
   -> executive_router_sse_generator
@@ -121,7 +121,7 @@ POST /v1/chat
 
 ### 1.5 App 层当前不应再使用的口径
 
-以下描述不再代表当前 app 层主入口：
+以下历史写法不再代表当前 app 层主入口，仅作历史留痕：
 
 - `SceneRouter.route_sse()` 是当前场景分流中心
 - `host_brain/app/graph/main_chain.py` 是聊天主编排入口
@@ -285,7 +285,7 @@ POST /v1/chat
 
 当前 `host_brain` 应用层的主事实是：
 
-1. `/v1/chat` 主链已经收敛到 `fastapi_app.chat -> chat_handler -> cortex_orchestrator -> agent_runtime_shared -> executive_router -> executive_runtime -> executive_runtime_core`。
+1. `/v1/chat` 主链已经收敛到 `fastapi_app.chat -> chat_handler -> thalamus_agent -> Governor -> cortex_orchestrator -> agent_runtime_shared -> executive_router -> executive_runtime -> executive_runtime_core`。
 2. Audit 以 `SQLiteLedger` 为枢纽，但表结构与写接口已持续演进，不应再复用旧表数口径。
 3. Skills 以 `SkillRegistry + SkillLoader + executor_registry` 为当前执行契约，且来源是动态扩展的。
 4. Observability 采用“主应用兼容挂载 + 独立 Obs Backend + Monitor UI”三层结构。

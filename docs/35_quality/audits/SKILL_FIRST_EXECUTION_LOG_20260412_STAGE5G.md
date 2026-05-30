@@ -1,3 +1,6 @@
+受众：CODEX
+标题：Skill-First 执行留痕（P5G-Unified Risk Bar）日期：2026-04-12
+
 # Skill-First 执行留痕（P5G-Unified Risk Bar）日期：2026-04-12
 批次：`CC#18`
 状态：`COMPLETED`

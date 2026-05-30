@@ -3,8 +3,37 @@
 
 版本：v3.6
 日期：2026-04-22
+维护：2026-05-30（补齐文档头与 doc_gate 目录扫描口径）
 
 本仓库所有"应该读什么、从哪里开工、哪些文档禁止当任务来源"，以本文件为准。
+
+## 目录级入口（优先顺序）
+- `docs/00_index/index.md`：文档总入口
+- `docs/10_whitepaper/index.md`：白皮书目录入口
+- `docs/15_theory/index.md`：理论与原理目录入口
+- `docs/20_prd/index.md`：PRD 需求入口
+- `docs/30_devspec/index.md`：DevSpec 目录入口
+- `docs/35_quality/index.md`：质量与修订入口
+- `docs/40_agents/index.md`：代理与协作入口
+- `docs/45_testing/index.md`：测试与反馈入口
+- `docs/50_project/index.md`：项目资产追溯入口（含当前事实/历史归档）
+- `docs/50_release/index.md`：发布与回滚入口
+- `docs/55_testing/index.md`：长期指标入口
+- `docs/60_trace/index.md`：Trace 与追溯入口
+- `docs/test_reports/index.md`：历史测试报告入口
+- `docs/35_quality/audits/index.md`：质量审计入口
+- `docs/35_quality/code_reviews/index.md`：评审日志入口
+- `docs/45_testing/dev_test_reports/index.md`：开发测试报告入口
+- `docs/45_testing/runtime_feedback_reports/index.md`：运行反馈入口
+- `docs/45_testing/test_reports/index.md`：专项测试报告入口
+- `docs/50_project/arch/index.md`：架构档案入口
+- `docs/50_project/guides/index.md`：项目指南入口
+- `docs/50_project/phases/index.md`：阶段任务入口
+- `docs/50_release/changelog/index.md`：发布变更日志入口
+- `docs/50_release/reports/index.md`：发布批次报告入口
+- `docs/50_release/rollback/index.md`：回滚与降级入口
+- `docs/55_testing/metrics/index.md`：指标快照入口
+- `docs/55_testing/stability_weekly/index.md`：稳定性周报入口
 
 0）总览关系图（唯一口径）
 
@@ -80,6 +109,10 @@
 - docs/50_project/guides/CUSTOM_SKILL_INSTALL.md
   用途：Natsume 自定义技能安装指南（2026-03-26）。说明如何创建 custom_providers/ 下的自定义技能 Provider，含目录约定、模板文件、注册流程与验证方式。
   读者：CODEX、实现层。
+
+- docs/50_project/guides/DOCUMENT_SYNC_WORKFLOW.md
+  用途：文档过期治理与同步工作流（PROJECT 专用）。定义事实文档同步触发源、更新时间阈值、CI 报告口径与更新闭环。
+  读者：MASTER、Project（文档代理）。
 
 - docs/50_project/arch/GATEWAY_ZH_CHAIN_NODE_ANALYSIS.md
   用途：Gateway 中文文字链路完整节点分析（当前代码实况）。覆盖 `server.py -> /v1/host/input -> cortex_orchestrator -> post_gateway_reply -> OutboundDispatcher` 的当前回流与回送链，并明确 `render_target_lang="zh"` 的注入点。

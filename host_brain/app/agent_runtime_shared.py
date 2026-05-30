@@ -786,12 +786,16 @@ def _surface_memory_direct_trace(packet: Mapping[str, Any]) -> dict[str, Any]:
 def _surface_memory_direct_readiness(packet: Mapping[str, Any]) -> dict[str, Any]:
     trace = _surface_memory_direct_trace(packet)
     readiness = _coerce_trace_mapping(trace.get("recall_answer_readiness"))
+    if not readiness:
+        readiness = _coerce_trace_mapping(packet.get("recall_answer_readiness"))
     return dict(readiness) if readiness else {}
 
 
 def _surface_memory_direct_strategy(packet: Mapping[str, Any]) -> dict[str, Any]:
     trace = _surface_memory_direct_trace(packet)
     strategy = _coerce_trace_mapping(trace.get("recall_answer_strategy"))
+    if not strategy:
+        strategy = _coerce_trace_mapping(packet.get("recall_answer_strategy"))
     return dict(strategy) if strategy else {}
 
 
@@ -811,9 +815,6 @@ def _surface_memory_direct_items(packet: Mapping[str, Any]) -> list[dict[str, An
         item["title"] = title
         if item not in items:
             items.append(item)
-    if items:
-        return items
-
     facts = [str(item or "") for item in list(packet.get("facts") or [])]
     for fact in facts:
         if "可比较证据" not in fact and not re.search(r"\d+\.", fact):
@@ -824,8 +825,22 @@ def _surface_memory_direct_items(packet: Mapping[str, Any]) -> list[dict[str, An
                 continue
             raw_title = _surface_memory_direct_raw_title(match.group(1))
             title = _surface_memory_direct_title(raw_title)
-            if title and not any(existing.get("title") == title for existing in items):
-                items.append({"title": title, "raw_title": raw_title or title})
+            if title:
+                reason_match = re.search(r"｜看点[:：]\s*([^｜；;]+)", part)
+                intro_match = re.search(r"｜简介[:：]\s*([^｜；;]+)", part)
+                parsed: dict[str, Any] = {"title": title, "raw_title": raw_title or title}
+                if reason_match:
+                    parsed["selection_reason"] = _clean_surface_memory_direct_text(reason_match.group(1), limit=120)
+                if intro_match:
+                    parsed["intro_snippet"] = _clean_surface_memory_direct_text(intro_match.group(1), limit=160)
+                existing = next((candidate for candidate in items if candidate.get("title") == title), None)
+                if existing is not None:
+                    for key in ("selection_reason", "intro_snippet"):
+                        if parsed.get(key) and not existing.get(key):
+                            existing[key] = parsed[key]
+                    continue
+                item = parsed
+                items.append(item)
     return items
 
 
@@ -990,23 +1005,23 @@ def _render_surface_memory_collection_direct_answer(
             if deduped:
                 shown_unique = [_clean_surface_memory_direct_text(title, limit=42) for title in unique_titles[: min(len(unique_titles), 6)]]
                 unique_suffix = "" if len(unique_titles) <= len(shown_unique) else f"等 {len(unique_titles)} 本"
-                return f"{label}我一共发过 {count} 条推荐，去掉重复标题主要是 {len(unique_titles)} 本：{'、'.join(shown_unique)}{unique_suffix}。分天看：{'；'.join(parts)}。"
-            return f"{label}我一共推过 {count} 本：{'；'.join(parts)}。"
+                return f"{label}我翻到 {count} 条推荐记录，里面有重复；按标题捋一下，主要是 {len(unique_titles)} 本：{'、'.join(shown_unique)}{unique_suffix}。分天看：{'；'.join(parts)}。"
+            return f"{label}我翻到 {count} 本：{'；'.join(parts)}。"
         shown = titles[: min(len(titles), 12)]
         suffix = "" if len(titles) <= len(shown) else f"，后面还有 {len(titles) - len(shown)} 本可以继续列"
         if deduped:
             shown_unique = [_clean_surface_memory_direct_text(title, limit=42) for title in unique_titles[: min(len(unique_titles), 8)]]
             unique_suffix = "" if len(unique_titles) <= len(shown_unique) else f"，后面还有 {len(unique_titles) - len(shown_unique)} 本可以继续列"
-            return f"{label}我一共发过 {count} 条推荐，去掉重复标题主要是 {len(unique_titles)} 本：{'、'.join(shown_unique)}{unique_suffix}。"
-        return f"{label}一共推过 {count} 本：{'、'.join(shown)}{suffix}。"
+            return f"{label}我翻到 {count} 条推荐记录，里面有重复；按标题捋一下，主要是 {len(unique_titles)} 本：{'、'.join(shown_unique)}{unique_suffix}。"
+        return f"{label}我翻到 {count} 本：{'、'.join(shown)}{suffix}。"
     shown = titles[: max(3, min(len(titles), selected_count or len(titles)))]
     if label == "昨天":
-        return f"昨天推的是这几本：{'、'.join(shown)}。"
+        return f"昨天那批我翻到的是：{'、'.join(shown)}。"
     if label == "前天":
-        return f"前天推的是这几本：{'、'.join(shown)}。"
+        return f"前天那批我翻到的是：{'、'.join(shown)}。"
     if label == "这次":
-        return f"刚才推的是这几本：{'、'.join(shown)}。"
-    return f"{label}推的是这几本：{'、'.join(shown)}。"
+        return f"刚才那批是：{'、'.join(shown)}。"
+    return f"{label}那批我翻到的是：{'、'.join(shown)}。"
 
 
 def _extract_surface_memory_user_statement(facts: Sequence[Any]) -> str:
@@ -1077,39 +1092,52 @@ def _extract_surface_memory_semantic_statement(text: str) -> str:
     return ""
 
 
+def _surface_memory_sora_statement(value: str, *, limit: int = 180) -> str:
+    text = _clean_surface_memory_direct_text(value, limit=limit)
+    if not text:
+        return ""
+    text = text.replace("她做过的事", "我做过的事")
+    text = text.replace("她实际做过的动作", "我实际做过的动作")
+    text = re.sub(r"^她(?=做过|实际|主动|回复|发给|看见|听见|执行|失败|想说|会|应该)", "我", text)
+    return _clean_surface_memory_direct_text(text, limit=limit)
+
+
 def _render_surface_memory_preference_direct_answer(packet: Mapping[str, Any]) -> str | None:
     statement = _extract_surface_memory_user_statement(list(packet.get("facts") or []))
     if not statement:
         return None
+    statement = _surface_memory_sora_statement(statement)
     compact_statement = re.sub(r"\s+", "", statement)
     if "回答要像正常聊天" in statement:
-        return f"记得。{statement}"
+        return "你当时嫌的是我说话太硬：要像正常聊天，别模板腔、台词腔，也别把证据条目塞成报告。"
     if any(token in compact_statement for token in ("不像人话", "不像正常人", "文本质量", "台词腔", "很呆", "太呆")):
-        return "记得。你说的问题是回答要像正常聊天，别像模板腔、台词腔，也别把证据条目硬塞成报告。"
+        return "你当时戳的不是信息量，是我说得太像模板腔：要像正常聊天，别台词腔，也别把证据条目硬塞成报告。"
     if statement.startswith(("以后", "之后", "后面", "下次", "不要", "别", "必须", "优先", "应该")):
-        return f"记得。{statement}"
-    return f"记得。{statement}"
+        return f"嗯，这条我记着：{statement}"
+    return f"嗯，这个我记着：{statement}"
 
 
 def _render_surface_memory_open_loop_direct_answer(packet: Mapping[str, Any], *, user_message: str) -> str | None:
     statement = _extract_surface_memory_user_statement(list(packet.get("facts") or []))
     if not statement:
         return None
+    statement = _surface_memory_sora_statement(statement)
     compact = re.sub(r"\s+", "", str(user_message or "")).lower()
     wants_closed = bool(
         any(token in compact for token in ("已完成", "完成了", "做完", "搞定", "关闭", "closed", "done", "resolved"))
         and not any(token in compact for token in ("未完成", "没完成", "还没", "要继续", "继续做", "待做"))
     )
     if wants_closed:
-        return f"记得。已经完成的是：{statement}"
-    return f"记得。还没完成的是：{statement}"
+        return f"这块已经收掉了：{statement}"
+    return f"这块还欠着：{statement}"
 
 
 def _render_surface_memory_self_change_direct_answer(packet: Mapping[str, Any]) -> str | None:
     statement = _extract_surface_memory_user_statement(list(packet.get("facts") or []))
     if not statement:
         return None
-    return f"记得。核心是：{statement}"
+    statement = _surface_memory_sora_statement(statement)
+    return f"改过。现在的底线是：{statement}"
 
 
 def _render_surface_memory_failure_direct_answer(packet: Mapping[str, Any]) -> str | None:
@@ -1130,9 +1158,9 @@ def _render_surface_memory_failure_direct_answer(packet: Mapping[str, Any]) -> s
         elif "网络" in fact or "provider" in fact:
             follow = "看网络和 provider 健康状态"
         if reason and follow:
-            return f"DeepSeek 那次主要是{reason}。后面先{follow}。"
+            return f"DeepSeek 那次不是理解错，卡点主要是{reason}。后面先{follow}。"
         if reason:
-            return f"DeepSeek 那次主要是{reason}。"
+            return f"DeepSeek 那次不是理解错，卡点主要是{reason}。"
     return None
 
 
@@ -1308,21 +1336,33 @@ def _render_surface_memory_lightnovel_selection_direct_answer(packet: Mapping[st
     scope_prefix = _surface_memory_lightnovel_partial_scope_prefix(packet)
     comparison_target = "我补读过的另外几本" if scope_prefix else "另外几本"
     if not reasons:
-        return f"{scope_prefix}我偏《{title}》。翻完详情后，这本是我最想继续往下读的。"
+        return f"{scope_prefix}我会先看《{title}》。翻完详情后，它是这批里最让我想继续读的。"
     if len(reasons) == 1:
-        return f"{scope_prefix}我偏《{title}》。主要是{reasons[0]}，比{comparison_target}更容易让我想翻下一章。"
-    return f"{scope_prefix}我偏《{title}》。{reasons[0]}，而且{reasons[1]}，比{comparison_target}更想继续翻。"
+        return f"{scope_prefix}我会先看《{title}》。主要是{reasons[0]}，读起来比{comparison_target}更有继续翻的劲。"
+    return f"{scope_prefix}我会先看《{title}》。{reasons[0]}，{reasons[1]}，读起来比{comparison_target}更有继续翻的劲。"
 
 
 def _render_surface_memory_correction_direct_answer(packet: Mapping[str, Any]) -> str | None:
     facts = [str(item or "") for item in list(packet.get("facts") or [])]
     joined = "\n".join(facts)
     if "封面有猫" in joined:
-        return "是，这个我记错过。你纠正的是：没有“封面有猫”这本；我已经把之前那个判断撤回。"
+        return "对，那次是我记混了。你纠正的是没有“封面有猫”这本，我这边按撤回后的版本来。"
     statement = _extract_surface_memory_user_statement(facts)
     if statement:
-        return f"嗯，这条后来改过来了，{statement}"
+        return f"对，这条按你纠正后的来：{_surface_memory_sora_statement(statement)}"
     return None
+
+
+def _surface_memory_should_delegate_missing_detail_selection(
+    *,
+    contract_id: str,
+    query_kind: str,
+    response_mode: str,
+    reasons: set[str],
+) -> bool:
+    is_selection = contract_id == "anaphoric_selection" or query_kind == "anaphoric_selection"
+    missing_detail = response_mode == "fetch_or_request_detail_evidence" or "missing_detail_evidence" in reasons
+    return bool(is_selection and missing_detail)
 
 
 def _render_surface_memory_not_ready_direct_answer(
@@ -1337,13 +1377,17 @@ def _render_surface_memory_not_ready_direct_answer(
     reasons = {str(item or "").strip() for item in list(readiness.get("reasons") or [])}
     if contract_id not in _SURFACE_MEMORY_DIRECT_CONTRACTS:
         return None
+    if _surface_memory_should_delegate_missing_detail_selection(
+        contract_id=contract_id,
+        query_kind=str(readiness.get("query_kind") or "").strip(),
+        response_mode=response_mode,
+        reasons=reasons,
+    ):
+        return None
     if response_mode == "fetch_or_request_detail_evidence" or "missing_detail_evidence" in reasons:
         if contract_id == "evidence_review":
             return "我能找到那条记录，但还没看到足够正文或详情，所以不能直接替它背书。"
-        query_title = _surface_memory_direct_query_title(user_message)
-        if query_title:
-            return f"《{query_title}》我记得是在那批推荐里，但还没翻到足够正文或详情，不能认真说它好不好看。要判断的话得先补读详情页或 epub。"
-        return "我记得这批书名和推荐卡片，但还没翻到足够正文或详情；现在不能认真说哪本最好看。要判断的话得先补读详情页或 epub。"
+        return None
     if contract_id == "failure_debug":
         return "我没找到足够贴合这次问题的失败记录，不能硬编原因。"
     if contract_id == "correction":
@@ -1396,7 +1440,8 @@ def _maybe_build_surface_memory_direct_answer(
         return None
     readiness = _surface_memory_direct_readiness(packet)
     strategy = _surface_memory_direct_strategy(packet)
-    if bool(packet.get("degraded")) or str(readiness.get("status") or "").strip().upper() != "READY" or not bool(readiness.get("ready_to_answer")):
+    readiness_ready = str(readiness.get("status") or "").strip().upper() == "READY" and bool(readiness.get("ready_to_answer"))
+    if not readiness_ready:
         not_ready_answer = _render_surface_memory_not_ready_direct_answer(
             packet=packet,
             readiness=readiness,
@@ -1454,20 +1499,7 @@ def _maybe_build_surface_memory_direct_answer(
             readiness=readiness,
             user_message=user_message,
         ):
-            query_title = _surface_memory_direct_query_title(user_message)
-            missing_answer = (
-                f"《{query_title}》我记得是在那批推荐里，但还没翻到足够正文或详情，不能认真说它好不好看。要判断的话得先补读详情页或 epub。"
-                if query_title
-                else "我记得这批书名和推荐卡片，但还没翻到足够正文或详情；现在不能认真说哪本最好看。要判断的话得先补读详情页或 epub。"
-            )
-            return {
-                "answer": missing_answer,
-                "reason_code": "SURFACE_MEMORY_DIRECT_DEEP_REVIEW_UNRENDERABLE",
-                "recall_contract_id": contract_id,
-                "query_kind": query_kind,
-                "response_mode": response_mode,
-                "selected_item_count": _safe_int(readiness.get("selected_item_count"), default=0),
-            }
+            return None
     elif contract_id in {"collection_date", "collection_recent"}:
         answer = _render_surface_memory_collection_direct_answer(
             packet=packet,

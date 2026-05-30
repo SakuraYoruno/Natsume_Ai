@@ -1,3 +1,6 @@
+受众：CODEX
+标题：Digital Life Phase 4 Audit (Prefrontal Delegation)
+
 # Digital Life Phase 4 Audit (Prefrontal Delegation)
 Date: 2026-04-08
 

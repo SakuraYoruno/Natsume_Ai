@@ -1678,6 +1678,70 @@ def test_query_relevance_uses_current_turn_not_context_tail_for_failure_hit() ->
     assert relevance["missing"] == []
 
 
+def test_failure_debug_recall_drops_unrelated_failure_noise_when_precise_hit_exists() -> None:
+    packet = build_surface_memory_recall_packet(
+        SimpleNamespace(
+            output={
+                "query": "DeepSeek失败原因是什么？",
+                "status": "OK",
+                "stage": "S_RET_RECALL",
+                "degraded": False,
+                "routes": [
+                    {"route_id": "surface_life_episode", "store_id": "life_episode"},
+                    {"route_id": "surface_sqlite", "store_id": "sqlite_ledger"},
+                ],
+                "candidate_count": 2,
+                "ts_ms": _ts(2026, 5, 29, 8),
+                "candidates": [
+                    {
+                        "doc_id": "ep-deepseek-timeout",
+                        "source_ref": "action://event/deepseek-timeout",
+                        "evidence_refs": ["action://event/deepseek-timeout#result"],
+                        "text": "codex_production llm_pool_call FAILED DEEPSEEK_TIMEOUT DeepSeek 失败原因：供应商超时，后续优先检查网络和 provider 健康状态。",
+                        "score": 0.98,
+                        "metadata": {
+                            "store_id": "life_episode",
+                            "source_ref": "action://event/deepseek-timeout",
+                            "evidence_refs_primary": "action://event/deepseek-timeout#result",
+                            "memory_class": "failure_lesson",
+                            "domain": "failure",
+                        },
+                    },
+                    {
+                        "doc_id": "noise-lightnovel-fetch-failed",
+                        "source_ref": "action://event/lightnovel-fetch-failed",
+                        "evidence_refs": ["action://event/lightnovel-fetch-failed#result"],
+                        "text": "LIGHTNOVEL_DEEP_REVIEW_FETCH_FAILED；昨天推荐 A：培养失败的前美少女童星；昨天推荐 B：与神在河岸。",
+                        "score": 0.73,
+                        "metadata": {
+                            "store_id": "sqlite_ledger",
+                            "source_ref": "action://event/lightnovel-fetch-failed",
+                            "evidence_refs_primary": "action://event/lightnovel-fetch-failed#result",
+                            "domain": "failure",
+                        },
+                    },
+                ],
+            }
+        ),
+        query="DeepSeek失败原因是什么？",
+        max_facts=4,
+        max_chars_per_fact=260,
+        temporal_scope="unspecified",
+        query_kind="failure_debug",
+        target_domains=("failure",),
+        recall_contract_id="failure_debug",
+        primary_memory_layer="life_episode",
+        expected_memory_layers=("life_episode", "semantic_memory", "sqlite_ledger", "episodic_vector"),
+        validation_requirements=("error_episode_or_semantic_hit", "source_ref_present"),
+        answer_obligations=("explain_failure_from_recorded_result", "do_not_invent_root_cause"),
+    )
+
+    joined = "\n".join(packet.facts)
+    assert "供应商超时" in joined
+    assert "昨天推荐" not in joined
+    assert dict(dict(packet.trace or {})["recall_answer_readiness"])["status"] == "READY"
+
+
 def test_preference_recall_rejects_unrelated_preference_memory_by_query_fit() -> None:
     packet = build_surface_memory_recall_packet(
         SimpleNamespace(

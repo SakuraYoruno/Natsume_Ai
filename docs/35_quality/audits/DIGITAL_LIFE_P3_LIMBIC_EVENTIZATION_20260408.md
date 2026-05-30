@@ -1,3 +1,6 @@
+受众：CODEX
+标题：Digital Life Phase 3 Audit (Limbic Eventization)
+
 # Digital Life Phase 3 Audit (Limbic Eventization)
 Date: 2026-04-08
 

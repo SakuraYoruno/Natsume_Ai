@@ -346,6 +346,29 @@ def plan_life_memory_query(text: Any, *, task_mode: str | None = None) -> LifeMe
             answer_obligations=_answer_obligations_for_query(message, contract=contract),
         )
 
+    if collection_like and not specific_item_followup and not collection_quality_judgment and temporal_scope == TEMPORAL_CURRENT:
+        contract = RECALL_INTENT_CONTRACTS[CONTRACT_COLLECTION_RECENT]
+        requirements = list(_collection_validation_requirements(contract, min_collection_items))
+        if min_collection_items in {2, 3} and "collection_item_exact_count" not in requirements:
+            requirements.append("collection_item_exact_count")
+        return LifeMemoryQueryPlan(
+            should_recall=True,
+            query_kind=QUERY_COLLECTION_SUMMARY,
+            temporal_scope=TEMPORAL_CURRENT,
+            target_domains=domains,
+            target_store_ids=("life_memory_collection", "life_memory_entity", "life_episode", "semantic_memory", "episodic_vector", "sqlite_ledger"),
+            time_lookback_days=_lookback_for_text_and_scope(message, TEMPORAL_CURRENT, default=1),
+            max_facts=6,
+            max_chars_per_fact=900,
+            reason="collection_memory_recall",
+            validation_requirements=tuple(requirements),
+            recall_contract_id=contract.contract_id,
+            primary_memory_layer=contract.primary_memory_layer,
+            expected_memory_layers=contract.expected_memory_layers,
+            min_collection_items=min_collection_items,
+            answer_obligations=_answer_obligations_for_query(message, contract=contract),
+        )
+
     if anaphoric_selection:
         contract = RECALL_INTENT_CONTRACTS[CONTRACT_ANAPHORIC_SELECTION]
         target_store_ids = (

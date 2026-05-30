@@ -1,3 +1,6 @@
+受众：CODEX
+标题：Skill-First Execution Log 2026-04-12 Stage 6K
+
 # Skill-First Execution Log 2026-04-12 Stage 6K
 
 ## Scope

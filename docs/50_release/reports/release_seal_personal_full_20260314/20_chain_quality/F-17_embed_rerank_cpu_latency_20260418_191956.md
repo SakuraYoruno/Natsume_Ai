@@ -1,3 +1,6 @@
+受众：PROJECT
+标题：F-17 嵌入/重排 CPU 实测耗时
+
 # F-17 嵌入/重排 CPU 实测耗时
 
 - **设备**: CPU（embed/rerank 未使用 GPU）

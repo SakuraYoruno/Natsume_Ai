@@ -1515,6 +1515,9 @@ def _evaluate_recall_validation_requirement(
         if not expected:
             return (bool(candidates), "all-time or unspecified scope accepts any non-empty candidate set")
         if expected == "recent":
+            if _clean_text(temporal_scope) == TEMPORAL_CURRENT:
+                passed = any(key == "recent" or key.startswith("rolling:") or key.startswith("delivery:") for key in scope_keys)
+                return passed, f"expected current delivery/recent/rolling collection scope, seen={scope_keys}"
             passed = any(key == "recent" or key.startswith("rolling:") for key in scope_keys)
             return passed, f"expected recent/rolling collection scope, seen={scope_keys}"
         expected_date = expected.removeprefix("daily:")
@@ -3048,6 +3051,7 @@ def _select_fact_rows(
     rows = _filter_rows_for_relationship_feedback_query(rows, query=query)
     rows = _filter_rows_for_preference_rule_query(rows, query=query)
     rows = _filter_rows_for_correction_query(rows, query=query)
+    rows = _filter_rows_for_failure_debug_query(rows, query=query)
     rows = _filter_rows_for_explicit_memory_query(rows, query=query)
     rows = _filter_rows_for_anaphoric_selection(rows, query=query)
     rows = _filter_rows_for_collection_scope(rows, query=query)
@@ -3095,6 +3099,43 @@ def _filter_rows_for_open_loop_query(
             *(row for row in rows if _clean_text(row.store_id).lower() in {"neo4j_bond", "bond_graph"}),
         ]
     return commitment_rows
+
+
+def _filter_rows_for_failure_debug_query(
+    rows: Sequence[SurfaceMemoryFactRow],
+    *,
+    query: str | None,
+) -> list[SurfaceMemoryFactRow]:
+    if not rows:
+        return []
+    query_text = _query_relevance_focus_text(query)
+    if not _looks_like_failure_debug_memory_query(query_text):
+        return list(rows)
+    anchors = _query_relevance_anchors(query_text)
+    if not anchors:
+        return list(rows)
+    matched = [
+        row
+        for row in rows
+        if _failure_row_matches_query_anchors(row, anchors=anchors)
+    ]
+    return matched or list(rows)
+
+
+def _looks_like_failure_debug_memory_query(text: str | None) -> bool:
+    normalized = _clean_text(text).lower()
+    if not normalized:
+        return False
+    return any(token in normalized for token in ("失败", "失败原因", "报错", "错误", "异常", "timeout", "超时", "原因"))
+
+
+def _failure_row_matches_query_anchors(row: SurfaceMemoryFactRow, *, anchors: Sequence[str]) -> bool:
+    corpus = _clean_text(" ".join([row.fact, row.source_ref, row.evidence_ref])).lower()
+    if not corpus:
+        return False
+    if not any(_query_relevance_anchor_matches(anchor, corpus) for anchor in anchors):
+        return False
+    return any(token in corpus for token in ("failed", "failure", "timeout", "error", "失败", "报错", "异常", "超时"))
 
 
 def _filter_rows_for_self_change_query(

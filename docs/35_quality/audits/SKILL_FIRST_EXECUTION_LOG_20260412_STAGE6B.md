@@ -1,3 +1,6 @@
+受众：CODEX
+标题：Skill-First 执行留痕（P6B-Executive Runtime Bridge）日期：2026-04-12
+
 # Skill-First 执行留痕（P6B-Executive Runtime Bridge）日期：2026-04-12
 批次：`ACC#20`
 状态：`COMPLETED`

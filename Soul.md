@@ -1,3 +1,6 @@
+受众：PROJECT
+标题：Soul.md — 天 / SORA
+
 # Soul.md — 天 / SORA
 
 > 用途：AI 伴侣角色核心。

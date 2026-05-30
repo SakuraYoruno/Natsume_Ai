@@ -19,6 +19,9 @@ from host_brain.app.prompt_builder import repair_utf8_latin1_mojibake, _truncate
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 
 
+_DEFAULT_EPISODIC_STORE = object()
+
+
 def build_payload_digest(value: Any) -> str | None:
     if value is None:
         return None
@@ -313,7 +316,7 @@ def persist_background_event_memory(
     reason_code: str | None = None,
     detail: str | None = None,
     ts_ms: int | None = None,
-    episodic_store: Any | None = None,
+    episodic_store: Any = _DEFAULT_EPISODIC_STORE,
     life_memory_store: Any | None = None,
     metadata: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
@@ -408,7 +411,7 @@ def persist_background_event_memory(
         }
 
     store = episodic_store
-    if store is None:
+    if store is _DEFAULT_EPISODIC_STORE:
         try:
             from host_brain.app.dependencies import get_episodic_store  # noqa: PLC0415
 
@@ -424,7 +427,7 @@ def persist_background_event_memory(
     if store is None:
         return {
             "status": "OK" if life_result.get("status") == "OK" else "SKIPPED",
-            "reason_code": "EPISODIC_STORE_UNAVAILABLE",
+            "reason_code": "EPISODIC_STORE_DISABLED",
             "memory_id": None,
             "life_memory": life_result,
         }
@@ -559,7 +562,7 @@ def persist_life_action_event_memory(
     action_summary: str | None = None,
     ts_ms: int | None = None,
     evidence_refs: Sequence[str] | None = None,
-    episodic_store: Any | None = None,
+    episodic_store: Any = _DEFAULT_EPISODIC_STORE,
     life_memory_store: Any | None = None,
     metadata: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
@@ -654,7 +657,7 @@ def persist_life_action_event_memory(
             }
 
     store = episodic_store
-    if store is None:
+    if store is _DEFAULT_EPISODIC_STORE:
         try:
             from host_brain.app.dependencies import get_episodic_store  # noqa: PLC0415
 
@@ -670,7 +673,7 @@ def persist_life_action_event_memory(
     if store is None:
         return {
             "status": "OK" if life_result.get("status") == "OK" else "SKIPPED",
-            "reason_code": "EPISODIC_STORE_UNAVAILABLE",
+            "reason_code": "EPISODIC_STORE_DISABLED",
             "memory_id": None,
             "life_memory": life_result,
         }

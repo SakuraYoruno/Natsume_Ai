@@ -1,3 +1,6 @@
+受众：CODEX
+标题：Normal Chat 文本风格长期标准：Galgame 私聊化二次元台词感
+
 # Normal Chat 文本风格长期标准：Galgame 私聊化二次元台词感
 
 > 状态：长期有效  

@@ -1,3 +1,6 @@
+受众：CODEX
+标题：Skill-First 执行留痕（P4-Guardrail）
+
 # Skill-First 执行留痕（P4-Guardrail）
 日期：2026-04-12  
 批次：`C#11`  

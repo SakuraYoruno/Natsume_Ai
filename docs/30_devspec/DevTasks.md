@@ -6,6 +6,15 @@
 
 本文件只包含"Codex 可执行任务条目"。任务条目必须来自 DevSpec 的工程契约拆解，并反向引用 PRD 的 FR 编号与测试编号 T-…；不得在本文件中讨论白皮书/PRD 的文字解释。
 
+### 当前任务与主链入口（2026-05-30）
+
+本任务卡体系默认以以下事实链为准：
+
+- `PRD`（需求）→ `DevSpec`（工程契约）→ `TASK`（交付分解）→ `Tests`（验收）；
+- `/v1/chat` 与 `/v1/host/input` 统一进入主执行层；
+- 主链执行要点：`chat_handler`、`Governor`、`executive_runtime`、`skills/loader`、`sqlite_ledger`；
+- `docs/50_project/arch/CURRENT_CODE_ARCHITECTURE.md` 与 `docs/50_project/arch/dataflow_report.md` 是任务优先参考的真实入口。
+
 ### 最近完成的重大任务（2026-03-24 ~ 2026-03-27）
 
 以下任务在 v1.8 → v1.9 期间完成，不再需要单独的任务卡追踪：

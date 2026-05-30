@@ -1,3 +1,6 @@
+受众：CODEX
+标题：Sample-Guided Text Quality
+
 # Sample-Guided Text Quality
 
 本次重构把中文 galgame 私聊质量从“继续补 forbidden pattern / rerank 挑句”迁到“直出主回复 + 评分观察”。主链不再保留候选 rerank 分支，避免把有角色反应的句子替换成安全但无味的短句。

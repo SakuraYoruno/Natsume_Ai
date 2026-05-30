@@ -1,3 +1,6 @@
+受众：CODEX
+标题：数字生命 Phase 2 留痕（HippocampusAgent 接口化）
+
 # 数字生命 Phase 2 留痕（HippocampusAgent 接口化）
 日期：2026-04-08
 

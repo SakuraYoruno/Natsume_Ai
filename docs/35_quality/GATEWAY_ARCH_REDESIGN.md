@@ -1,3 +1,6 @@
+受众：CODEX
+标题：Gateway 架构重设计方案（GATEWAY-ARCH-REDESIGN）
+
 # Gateway 架构重设计方案（GATEWAY-ARCH-REDESIGN）
 
 **文档编号**：GATEWAY-ARCH-REDESIGN-001

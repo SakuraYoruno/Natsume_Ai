@@ -1,8 +1,20 @@
+受众：PROJECT
+标题：Natsume AI 仓库总览
+
 # Natsume AI
 
 Natsume AI 是一个围绕“数字生命体”构建的运行时仓库。当前代码已经形成 5 个清晰的运行面：`Host Brain` 主应用、独立 `Observability` 后端、`Edge RPC`、`Unified Message Gateway`，以及基于 React 的 `Monitor UI`。
 
 这份 README 只保留代码事实和入口导航。更细的设计说明请直接进入文档区，不再把大量阶段性方案和历史结构塞在首页。
+
+## 文档协作与维护
+
+- 文档新增与修改需先补齐两行标准头：
+  - `受众：MASTER|CODEX|PROJECT`
+  - `标题：...`
+- 文档更新优先遵守 `docs/00_index/00_DOCMAP.md` 的入口口径，按 `受众` 归类：MASTER 为事实真源与总盘，CODEX 为实现层与设计事实，PROJECT 为项目执行与任务层。
+- 需要历史复盘/归档的文件建议放入 `docs/*/test_reports`、`docs/45_testing`，避免参与实时实现层事实判断。
+- CI 的 `doc_gate` 会检查 markdown 头；`doc_freshness` 仍只看核心事实链路变更，历史归档不会阻断 PR 合入。
 
 ## 当前代码现状
 

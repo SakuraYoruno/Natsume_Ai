@@ -3,6 +3,9 @@
 
 你现在是 Natsume AI 项目的高级系统架构审计与修复工程师。
 
+> 状态：SUPERSEDED（2026-05-30）。本文件为历史执行清单与任务台账，**不作为当前主链口径来源**。
+> 当前事实入口请以 `docs/50_project/arch/CURRENT_CODE_ARCHITECTURE.md`、`docs/15_theory/APP_AUDIT_SKILLS_CONTRACT.md`、`docs/30_devspec/DevTasks.md` 作为当前事实锚点。
+
 你的任务不是泛泛分析，而是**基于当前工作区代码的真实实现**，完成以下工作：
 
 1. 修正文档中的系统事实偏差
@@ -2483,7 +2486,6 @@ world_canon（score=1.0）> style_canon（score=0.85）> episodic_latest（score
 **改动文件**：
 - `host_brain/skills/browser_registry.py`：新建，包含 `BrowserSkillProvider`（8 个 Skills）+ `build_browser_skill_registry()`
 - `host_brain/app/dependencies.py`：导入 `BrowserSkillProvider`，在 `get_skill_registry()` 中注册浏览器 Skills
-
 
 
 

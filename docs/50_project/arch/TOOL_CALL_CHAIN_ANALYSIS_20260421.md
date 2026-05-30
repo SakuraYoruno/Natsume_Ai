@@ -1,3 +1,6 @@
+受众：PROJECT
+标题：Natsume_Ai 工具调用链路审查报告
+
 # Natsume_Ai 工具调用链路审查报告
 
 > SUPERSEDED, 2026-04-24: historical chain analysis only. Codex execution has hard-cut from legacy `codex_codegen` to Codex Runtime v2 WorkOrders and the new `codex_*` skill IDs.
