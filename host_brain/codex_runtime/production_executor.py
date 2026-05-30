@@ -542,6 +542,125 @@ def _lightnovel_item_key(item: Mapping[str, Any]) -> str:
     return title
 
 
+def _lightnovel_detail_identity_key(*values: Any) -> str:
+    for value in values:
+        match = re.search(
+            r"https?://(?:www\.)?lightnovel\.fun/(?:cn/)?detail/(\d+)(?:[/?#].*)?$",
+            str(value or "").strip(),
+            re.IGNORECASE,
+        )
+        if match:
+            return f"detail:{match.group(1)}"
+    return ""
+
+
+_LIGHTNOVEL_CHAPTER_NUMERAL_CHARS = "一二三四五六七八九十百千万萬零〇两兩\\d"
+
+
+def _lightnovel_title_value(item: Mapping[str, Any]) -> str:
+    return str(item.get("title") or item.get("title_display") or item.get("subtitle") or "").strip()
+
+
+def _normalize_lightnovel_series_title(value: Any) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    try:
+        text = _normalize_lightnovel_candidate_title(text)
+    except NameError:
+        text = re.sub(r"\s+", " ", text).strip()
+    text = re.sub(r"^(?:合集|合集帖)\s+", "", text).strip()
+    text = re.sub(r"^\s*(?:\[[^\]]{1,48}\]|【[^】]{1,48}】)\s*", "", text).strip()
+    text = re.sub(
+        r"\[[^\]]*(?:文库|文庫|日语|日語|录入|錄入|翻译|翻譯|更新|完结|完結|官方|至第|全书)[^\]]*\]",
+        "",
+        text,
+    )
+    text = re.sub(
+        r"【[^】]*(?:文库|文庫|日语|日語|录入|錄入|翻译|翻譯|更新|完结|完結|官方|至第|全书)[^】]*】",
+        "",
+        text,
+    )
+    text = re.sub(r"[（(]\s*\d{1,2}/\d{1,2}[^）)]*[）)]\s*$", "", text).strip()
+    text = re.sub(
+        rf"\s*第\s*[{_LIGHTNOVEL_CHAPTER_NUMERAL_CHARS}]+\s*(?:话|話|章|节|節)\s*.*$",
+        "",
+        text,
+    ).strip()
+    text = re.sub(
+        rf"\s*(?:更新至?|至)\s*第\s*[{_LIGHTNOVEL_CHAPTER_NUMERAL_CHARS}]+.*$",
+        "",
+        text,
+    ).strip()
+    text = re.sub(r"\s+\d{1,3}\s*$", "", text).strip()
+    text = re.sub(r"\s+", " ", text).strip(" -_—~～[]【】（）()")
+    return text
+
+
+def _lightnovel_series_key(item: Mapping[str, Any] | str) -> str:
+    title = _normalize_lightnovel_series_title(_lightnovel_title_value(item) if isinstance(item, Mapping) else item)
+    if not title:
+        return ""
+    compact = re.sub(r"[^\da-zA-Z\u3040-\u30ff\u3400-\u9fff]+", "", title).lower()
+    return compact[:160]
+
+
+def _lightnovel_history_aliases_for_record(record: Mapping[str, Any]) -> set[str]:
+    aliases: set[str] = set()
+    for raw in (record.get("key"), record.get("detail_url"), record.get("url"), record.get("source_url")):
+        value = str(raw or "").strip().lower().rstrip("/")
+        if value:
+            aliases.add(value)
+        detail_key = _lightnovel_detail_identity_key(value)
+        if detail_key:
+            aliases.add(detail_key)
+    for alias in record.get("key_aliases") or record.get("history_aliases") or []:
+        value = str(alias or "").strip().lower()
+        if value:
+            aliases.add(value)
+    series_key = str(record.get("series_key") or "").strip().lower()
+    if not series_key:
+        series_key = _lightnovel_series_key(str(record.get("canonical_title") or record.get("title") or ""))
+    if series_key:
+        aliases.add(f"series:{series_key}")
+    return aliases
+
+
+def _lightnovel_history_lookup_keys(item: Mapping[str, Any], *, include_series: bool = True) -> set[str]:
+    keys: set[str] = set()
+    item_key = _lightnovel_item_key(item)
+    if item_key:
+        keys.add(item_key)
+    detail_key = _lightnovel_detail_identity_key(item.get("detail_url"), item.get("url"), item.get("source_url"), item_key)
+    if detail_key:
+        keys.add(detail_key)
+    if include_series:
+        series_key = _lightnovel_series_key(item)
+        if series_key:
+            keys.add(f"series:{series_key}")
+    return {key.strip().lower() for key in keys if key.strip()}
+
+
+def _latest_lightnovel_history_record(
+    history: Mapping[str, Mapping[str, Any]],
+    keys: set[str],
+) -> Mapping[str, Any] | None:
+    latest: Mapping[str, Any] | None = None
+    latest_ts = -1
+    for key in keys:
+        record = history.get(key)
+        if not record:
+            continue
+        try:
+            ts_ms = int(record.get("ts_ms") or 0)
+        except (TypeError, ValueError):
+            ts_ms = 0
+        if latest is None or ts_ms > latest_ts:
+            latest = record
+            latest_ts = ts_ms
+    return latest
+
+
 def _lightnovel_history_path() -> Path:
     env_path = _parse_env_text("HOST_LIGHTNOVEL_RECOMMENDER_HISTORY_PATH")
     if env_path:
@@ -581,9 +700,11 @@ def _load_lightnovel_recommendation_history(
         ts_ms = int(record.get("ts_ms") or 0)
         if not key or ts_ms < min_ts:
             continue
-        previous = latest.get(key)
-        if previous is None or ts_ms > int(previous.get("ts_ms") or 0):
-            latest[key] = dict(record)
+        indexed_record = dict(record)
+        for alias in _lightnovel_history_aliases_for_record(indexed_record):
+            previous = latest.get(alias)
+            if previous is None or ts_ms > int(previous.get("ts_ms") or 0):
+                latest[alias] = indexed_record
     return latest
 
 
@@ -595,7 +716,7 @@ def _record_lightnovel_recommendation_history(
     recommendations_path: Path | None = None,
     now_ts_ms: int | None = None,
 ) -> Path | None:
-    selected = [item for item in items if _lightnovel_item_key(item)]
+    selected = [item for item in items if _lightnovel_item_key(item) or _lightnovel_series_key(item)]
     if not selected:
         return None
     history_path = path or _lightnovel_history_path()
@@ -603,10 +724,16 @@ def _record_lightnovel_recommendation_history(
     history_path.parent.mkdir(parents=True, exist_ok=True)
     with history_path.open("a", encoding="utf-8") as handle:
         for item in selected:
+            canonical_title = _normalize_lightnovel_series_title(item.get("title") or item.get("title_display") or "")
+            series_key = _lightnovel_series_key(item)
+            aliases = sorted(_lightnovel_history_lookup_keys(item, include_series=True))
             record = {
                 "ts_ms": ts_ms,
                 "job_id": job_id,
                 "key": _lightnovel_item_key(item),
+                "key_aliases": aliases,
+                "canonical_title": canonical_title,
+                "series_key": series_key,
                 "title": item.get("title") or item.get("title_display") or "",
                 "detail_url": item.get("detail_url") or item.get("url") or item.get("source_url") or "",
                 "score": item.get("recommendation_score"),
@@ -659,21 +786,87 @@ def _freshness_score(age_days: float | None) -> float:
     return 0.0
 
 
+def _lightnovel_book_form_score(item: Mapping[str, Any]) -> tuple[float, str]:
+    text = _lightnovel_item_text(item)
+    score = 0.0
+    labels: list[str] = []
+    if re.search(r"(文库|文庫|卷|巻|整卷|全书|全書|完结|完結|epub)", text, re.IGNORECASE):
+        score += 10.0
+        labels.append("book_like")
+    chapter_match = re.search(
+        rf"第\s*[{_LIGHTNOVEL_CHAPTER_NUMERAL_CHARS}]+\s*(?:话|話|章|节|節)",
+        _lightnovel_title_value(item),
+    )
+    update_to_chapter_match = re.search(
+        rf"(?:更新至?|至)\s*第\s*[{_LIGHTNOVEL_CHAPTER_NUMERAL_CHARS}]+\s*(?:话|話|章|节|節)",
+        _lightnovel_title_value(item),
+    )
+    if chapter_match:
+        score -= 34.0
+        labels.append("chapter_update")
+    elif update_to_chapter_match:
+        score -= 18.0
+        labels.append("serial_update")
+    return score, ",".join(labels) or "neutral"
+
+
+def _lightnovel_history_penalty_for_age(age_days: float, *, scope: str) -> tuple[float, str]:
+    exact_block_days = _parse_int_env(
+        "HOST_LIGHTNOVEL_RECOMMENDER_REPEAT_BLOCK_DAYS",
+        default=14,
+        min_value=1,
+        max_value=365,
+    )
+    series_block_days = _parse_int_env(
+        "HOST_LIGHTNOVEL_RECOMMENDER_SERIES_BLOCK_DAYS",
+        default=21,
+        min_value=1,
+        max_value=365,
+    )
+    if scope == "exact":
+        if age_days <= exact_block_days:
+            return -220.0, "recent_exact_repeat"
+        if age_days <= 45:
+            return -90.0, "cooldown_exact_repeat"
+        if age_days <= 90:
+            return -35.0, "older_exact_repeat"
+        return -12.0, "stale_exact_repeat"
+    if age_days <= series_block_days:
+        return -180.0, "recent_series_repeat"
+    if age_days <= 45:
+        return -70.0, "cooldown_series_repeat"
+    if age_days <= 90:
+        return -28.0, "older_series_repeat"
+    return -10.0, "stale_series_repeat"
+
+
 def _history_penalty(item: Mapping[str, Any], history: Mapping[str, Mapping[str, Any]], *, now_ts_ms: int) -> tuple[float, str]:
-    key = _lightnovel_item_key(item)
-    if not key:
+    exact_keys = _lightnovel_history_lookup_keys(item, include_series=False)
+    series_key = _lightnovel_series_key(item)
+    if not exact_keys and not series_key:
         return 0.0, "unknown"
-    record = history.get(key)
-    if not record:
+
+    candidates: list[tuple[float, str]] = []
+    exact_record = _latest_lightnovel_history_record(history, exact_keys)
+    if exact_record:
+        try:
+            age_days = max(0.0, (now_ts_ms - int(exact_record.get("ts_ms") or 0)) / 86_400_000)
+        except (TypeError, ValueError):
+            age_days = 0.0
+        candidates.append(_lightnovel_history_penalty_for_age(age_days, scope="exact"))
+
+    if series_key:
+        series_record = _latest_lightnovel_history_record(history, {f"series:{series_key}"})
+        if series_record:
+            try:
+                age_days = max(0.0, (now_ts_ms - int(series_record.get("ts_ms") or 0)) / 86_400_000)
+            except (TypeError, ValueError):
+                age_days = 0.0
+            candidates.append(_lightnovel_history_penalty_for_age(age_days, scope="series"))
+
+    if not candidates:
         return 0.0, "new"
-    age_days = max(0.0, (now_ts_ms - int(record.get("ts_ms") or 0)) / 86_400_000)
-    if age_days <= 7:
-        return -100.0, "recent_repeat"
-    if age_days <= 30:
-        return -45.0, "month_repeat"
-    if age_days <= 60:
-        return -20.0, "older_repeat"
-    return -8.0, "stale_repeat"
+    return min(candidates, key=lambda row: row[0])
 
 
 def _lightnovel_genre_bucket(item: Mapping[str, Any], preference_matches: list[dict[str, Any]]) -> str:
@@ -709,6 +902,7 @@ def _score_lightnovel_recommendation_item(
     comment_score = min(8.0, _parse_lightnovel_count(item.get("comment_count")) ** 0.42)
     age_days = _parse_lightnovel_update_age_days(item.get("update_time"), now_ts_ms=now_ts_ms)
     freshness = _freshness_score(age_days)
+    book_form_score, book_form_state = _lightnovel_book_form_score(item)
     metadata_score = 0.0
     if item.get("cover_url") or item.get("cover") or item.get("image_url"):
         metadata_score += 4.0
@@ -720,10 +914,12 @@ def _score_lightnovel_recommendation_item(
         metadata_score += 2.0
     source_order_score = max(0.0, 14.0 - float(source_index) * 1.25)
     history_score, dedupe_state = _history_penalty(item, history, now_ts_ms=now_ts_ms)
-    total = source_order_score + positive_score + negative_score + view_score + comment_score + freshness + metadata_score + history_score
+    total = source_order_score + positive_score + negative_score + view_score + comment_score + freshness + metadata_score + book_form_score + history_score
     ranked = dict(item)
     preference_matches = positive_matches + negative_matches
     ranked["recommendation_score"] = round(total, 2)
+    ranked["canonical_title"] = _normalize_lightnovel_series_title(ranked.get("title") or ranked.get("title_display") or "")
+    ranked["series_key"] = _lightnovel_series_key(ranked)
     ranked["score_breakdown"] = {
         "source_order": round(source_order_score, 2),
         "preference": round(positive_score, 2),
@@ -731,10 +927,12 @@ def _score_lightnovel_recommendation_item(
         "freshness": round(freshness, 2),
         "heat": round(view_score + comment_score, 2),
         "metadata": round(metadata_score, 2),
+        "book_form": round(book_form_score, 2),
         "history": round(history_score, 2),
     }
     ranked["preference_matches"] = preference_matches
     ranked["dedupe_state"] = dedupe_state
+    ranked["book_form_state"] = book_form_state
     ranked["diversity_bucket"] = _lightnovel_genre_bucket(ranked, positive_matches)
     matched_labels = [str(match.get("label") or "") for match in positive_matches if match.get("label")]
     if matched_labels:
@@ -744,6 +942,26 @@ def _score_lightnovel_recommendation_item(
     else:
         ranked["selection_reason"] = "作为候选保留：等待更多偏好信号校准"
     return ranked
+
+
+def _lightnovel_primary_candidate_key(item: Mapping[str, Any]) -> str:
+    series_key = _lightnovel_series_key(item)
+    if series_key:
+        return f"series:{series_key}"
+    detail_key = _lightnovel_detail_identity_key(item.get("detail_url"), item.get("url"), item.get("source_url"))
+    if detail_key:
+        return detail_key
+    return _lightnovel_item_key(item)
+
+
+def _lightnovel_history_state_blocks_visible(item: Mapping[str, Any]) -> bool:
+    state = str(item.get("dedupe_state") or "").strip().lower()
+    return state in {
+        "recent_exact_repeat",
+        "recent_series_repeat",
+        "cooldown_exact_repeat",
+        "cooldown_series_repeat",
+    }
 
 
 def _rank_lightnovel_recommendations(
@@ -759,23 +977,20 @@ def _rank_lightnovel_recommendations(
     now_value = now_ts_ms or now_ms()
     taste_profile = dict(profile or _load_lightnovel_taste_profile())
     history_records = dict(history or _load_lightnovel_recommendation_history(now_ts_ms=now_value))
-    seen_keys: set[str] = set()
-    scored: list[dict[str, Any]] = []
+    scored_by_key: dict[str, dict[str, Any]] = {}
     for source_index, item in enumerate(items):
-        key = _lightnovel_item_key(item)
-        if key and key in seen_keys:
-            continue
-        if key:
-            seen_keys.add(key)
-        scored.append(
-            _score_lightnovel_recommendation_item(
-                item,
-                profile=taste_profile,
-                history=history_records,
-                source_index=source_index,
-                now_ts_ms=now_value,
-            )
+        scored_item = _score_lightnovel_recommendation_item(
+            item,
+            profile=taste_profile,
+            history=history_records,
+            source_index=source_index,
+            now_ts_ms=now_value,
         )
+        primary_key = _lightnovel_primary_candidate_key(scored_item) or f"row:{source_index}"
+        previous = scored_by_key.get(primary_key)
+        if previous is None or float(scored_item.get("recommendation_score") or 0) > float(previous.get("recommendation_score") or 0):
+            scored_by_key[primary_key] = scored_item
+    scored = list(scored_by_key.values())
     selected: list[dict[str, Any]] = []
     remaining = sorted(scored, key=lambda item: float(item.get("recommendation_score") or 0), reverse=True)
     bucket_counts: dict[str, int] = {}
@@ -796,11 +1011,31 @@ def _rank_lightnovel_recommendations(
         item["recommendation_adjusted_score"] = round(float(item.get("recommendation_score") or 0) - diversity_penalty, 2)
         selected.append(item)
         bucket_counts[bucket] = bucket_counts.get(bucket, 0) + 1
-    for rank, item in enumerate(selected, start=1):
+
+    preferred = [item for item in selected if not _lightnovel_history_state_blocks_visible(item)]
+    repeat_fallback = False
+    if not preferred:
+        preferred = selected[: max(1, int(max_items))]
+        repeat_fallback = True
+    deferred = [item for item in selected if id(item) not in {id(row) for row in preferred}]
+    ordered = preferred + deferred
+    visible_ids = {id(row) for row in preferred[: max(1, int(max_items))]}
+    for rank, item in enumerate(ordered, start=1):
         item["recommendation_rank"] = rank
         item["ranking_profile_version"] = str(taste_profile.get("version") or "custom")
-        item["ranking_visible_candidate"] = rank <= max(1, int(max_items))
-    return selected
+        item["ranking_visible_candidate"] = id(item) in visible_ids
+        if repeat_fallback and item["ranking_visible_candidate"]:
+            item["repeat_fallback_visible"] = True
+            item["selection_reason"] = "新候选不足，作为近期重复备选临时保留"
+    return ordered
+
+
+def _visible_lightnovel_ranked_items(items: list[dict[str, Any]], *, max_items: int) -> list[dict[str, Any]]:
+    limit = max(1, int(max_items))
+    visible = [item for item in items if item.get("ranking_visible_candidate") is True]
+    if visible:
+        return visible[:limit]
+    return items[:limit]
 
 
 def _write_lightnovel_ranked_recommendations(
@@ -817,7 +1052,7 @@ def _write_lightnovel_ranked_recommendations(
         "generated_ts_ms": now_ts_ms or now_ms(),
         "source_recommendations_ref": str(recommendations_path),
         "ranking_profile_version": str(ranked_items[0].get("ranking_profile_version") or ""),
-        "visible_count": min(max(1, int(max_items)), len(ranked_items)),
+        "visible_count": len(_visible_lightnovel_ranked_items(ranked_items, max_items=max_items)),
         "items": ranked_items,
     }
     try:
@@ -1005,12 +1240,25 @@ def _is_lightnovel_detail_page_url(url: str) -> bool:
     return bool(re.search(r"https?://(?:www\.)?lightnovel\.fun/(?:cn/)?detail/\d+(?:[/?#].*)?$", str(url or "").strip(), re.IGNORECASE))
 
 
+def _looks_like_lightnovel_chapter_only_title(title: str) -> bool:
+    normalized = _normalize_lightnovel_candidate_title(title)
+    stripped = re.sub(r"^(?:合集|合集帖)\s+", "", normalized).strip()
+    stripped = re.sub(r"^\s*(?:\[[^\]]{1,48}\]|【[^】]{1,48}】)\s*", "", stripped).strip()
+    if re.fullmatch(rf"第[{_LIGHTNOVEL_CHAPTER_NUMERAL_CHARS}]+(?:卷|巻)", stripped):
+        return True
+    if re.fullmatch(rf"第[{_LIGHTNOVEL_CHAPTER_NUMERAL_CHARS}]+(?:话|話|章|节|節)(?:[:：].*)?", stripped):
+        return True
+    if re.fullmatch(r"\d{3,5}[.．、].{1,80}", stripped):
+        return True
+    return False
+
+
 def _is_lightnovel_recommendation_candidate(*, title: str, url: str, context: str) -> bool:
     if not _is_lightnovel_detail_page_url(url):
         return False
     if not title:
         return False
-    if re.fullmatch(r"第[一二三四五六七八九十百千\d]+卷", title):
+    if _looks_like_lightnovel_chapter_only_title(title):
         return False
     compact = f"{title} {context}"
     if title.startswith(("置顶", "置頂")):
@@ -1413,7 +1661,7 @@ def _short_text(value: Any, *, limit: int = 120) -> str:
 
 
 def _build_lightnovel_gateway_message(items: list[dict[str, Any]], *, max_items: int = 3) -> str:
-    visible_items = items[: max(1, int(max_items))]
+    visible_items = _visible_lightnovel_ranked_items(items, max_items=max_items)
     if not visible_items:
         return ""
     return f"今日轻小说推荐来了，共 {len(visible_items)} 本。下面按书分别发详情。"
@@ -1446,7 +1694,7 @@ def _build_lightnovel_gateway_card(item: Mapping[str, Any], *, index: int) -> st
 
 
 def _lightnovel_delivery_memory_detail(items: list[dict[str, Any]], *, max_items: int, platform: str, conversation_id: str) -> str:
-    visible_items = items[: max(1, int(max_items))]
+    visible_items = _visible_lightnovel_ranked_items(items, max_items=max_items)
     if not visible_items:
         return ""
     titles = []
@@ -1463,7 +1711,7 @@ def _lightnovel_delivery_memory_detail(items: list[dict[str, Any]], *, max_items
 
 def _lightnovel_memory_items(items: list[dict[str, Any]], *, max_items: int) -> list[dict[str, str]]:
     memory_items: list[dict[str, str]] = []
-    for item in items[: max(1, int(max_items))]:
+    for item in _visible_lightnovel_ranked_items(items, max_items=max_items):
         memory_items.append(
             {
                 "title": _short_text(item.get("title") or item.get("title_display") or "未命名作品", limit=180),
@@ -1555,7 +1803,7 @@ def _lightnovel_gateway_cards(
     items: list[dict[str, Any]], *, max_items: int, include_covers: bool = True
 ) -> list[dict[str, str]]:
     cards: list[dict[str, str]] = []
-    for index, item in enumerate(items[: max(1, int(max_items))], start=1):
+    for index, item in enumerate(_visible_lightnovel_ranked_items(items, max_items=max_items), start=1):
         cover_url = str(item.get("cover_url") or item.get("cover") or item.get("image_url") or "").strip()
         card_text = _build_lightnovel_gateway_card(item, index=index)
         if not card_text:
@@ -1962,6 +2210,7 @@ def _maybe_push_lightnovel_recommendations_to_gateway(
     items = _coerce_recommendation_items(payload)
     max_items = _parse_int_env("HOST_LIGHTNOVEL_RECOMMENDER_GATEWAY_MAX_ITEMS", default=3, min_value=1, max_value=8)
     ranked_items = _rank_lightnovel_recommendations(items, max_items=max_items)
+    visible_ranked_items = _visible_lightnovel_ranked_items(ranked_items, max_items=max_items)
     ranked_ref = _write_lightnovel_ranked_recommendations(
         recommendations_path=recommendations_path,
         ranked_items=ranked_items,
@@ -2067,7 +2316,7 @@ def _maybe_push_lightnovel_recommendations_to_gateway(
         history_ref: Path | None = None
         if bool(result_dict.get("success")) and _parse_bool_env("HOST_LIGHTNOVEL_RECOMMENDER_HISTORY_ENABLED", default=True):
             history_ref = _record_lightnovel_recommendation_history(
-                ranked_items[:max_items],
+                visible_ranked_items,
                 job_id=job_id,
                 recommendations_path=recommendations_path,
             )
@@ -2096,7 +2345,7 @@ def _maybe_push_lightnovel_recommendations_to_gateway(
             "wait_result": wait_result,
             "message_chars": len(message),
             "recommendation_count": len(items),
-            "selected_recommendation_count": min(max_items, len(ranked_items)),
+            "selected_recommendation_count": len(visible_ranked_items),
             "recommendations_ref": str(recommendations_path),
             "ranked_recommendations_ref": str(ranked_ref or ""),
             "history_ref": str(history_ref or ""),

@@ -484,6 +484,23 @@ def test_browser_researcher_does_not_use_whole_rank_section_as_item_context() ->
     assert compact_item["context"] == "1 单条列表作品 30 分钟前 2.7w 60"
 
 
+def test_browser_researcher_lightnovel_skips_profiles_and_keeps_deeper_details() -> None:
+    links = []
+    for index in range(1, 18):
+        links.append(f'<a href="/cn/profile/{index}">作者{index}</a>')
+        links.append(f'<a href="/cn/detail/11450{index:02d}">[{index}] 可推荐作品 {index}</a>')
+    html = "<html><body>" + "\n".join(links) + "</body></html>"
+
+    _title, _description, _text, items, _prices = _parse_html_document(
+        html,
+        base_url="https://www.lightnovel.fun/cn/category/3/106?type=1",
+    )
+
+    assert len(items) > 12
+    assert all("/profile/" not in item["url"] for item in items)
+    assert any(item["url"].endswith("/1145017") for item in items)
+
+
 def test_lightnovel_candidate_context_drops_combined_rank_sections() -> None:
     recommendations = _lightnovel_recommendations_from_browser_items(
         [
@@ -503,6 +520,30 @@ def test_lightnovel_candidate_context_drops_combined_rank_sections() -> None:
     assert recommendations[0]["intro_snippet"] == ""
     assert recommendations[0]["update_time"] == ""
     assert "西条阳" not in recommendations[0]["selection_reason"]
+
+
+def test_lightnovel_candidate_filter_rejects_standalone_chapter_titles() -> None:
+    recommendations = _lightnovel_recommendations_from_browser_items(
+        [
+            {
+                "title": "第二十九话：预兆",
+                "url": "https://www.lightnovel.fun/cn/detail/1144617",
+                "context": "章节更新 3 小时前",
+            },
+            {
+                "title": "1206.公爵级和女仆级①",
+                "url": "https://www.lightnovel.fun/cn/detail/1144616",
+                "context": "章节更新 3 小时前",
+            },
+            {
+                "title": "[水城水城]雨森润奈的湿度很高 3[马粪文库J]",
+                "url": "https://www.lightnovel.fun/cn/detail/1143992",
+                "context": "2 小时前 24168 45 评论",
+            },
+        ]
+    )
+
+    assert [item["title"] for item in recommendations] == ["[水城水城]雨森润奈的湿度很高 3[马粪文库J]"]
 
 
 def test_lightnovel_ranker_prefers_taste_match_over_raw_source_order(monkeypatch, tmp_path: Path) -> None:
@@ -609,8 +650,51 @@ def test_lightnovel_ranker_downranks_recent_history(monkeypatch, tmp_path: Path)
 
     assert ranked[0]["detail_url"] == "https://www.lightnovel.fun/detail/new"
     repeat = next(item for item in ranked if item["detail_url"].endswith("/repeat"))
-    assert repeat["dedupe_state"] == "recent_repeat"
-    assert repeat["score_breakdown"]["history"] <= -100
+    assert repeat["dedupe_state"] == "recent_exact_repeat"
+    assert repeat["ranking_visible_candidate"] is False
+    assert repeat["score_breakdown"]["history"] <= -220
+
+
+def test_lightnovel_ranker_blocks_recent_same_series_even_with_new_detail_url(monkeypatch, tmp_path: Path) -> None:
+    history_path = tmp_path / "history.jsonl"
+    history_path.write_text(
+        json.dumps(
+            {
+                "ts_ms": 1_778_000_000_000,
+                "key": "https://www.lightnovel.fun/cn/detail/1144622",
+                "title": "[丸焦ししゃも]给被人说“培养失败”的前美少女童星（SSR）搭了把手之后，她开始只对我依赖到撒娇上瘾 第18话 都怪洋葱，所以没办法",
+            },
+            ensure_ascii=False,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("HOST_LIGHTNOVEL_RECOMMENDER_HISTORY_PATH", str(history_path))
+
+    ranked = _rank_lightnovel_recommendations(
+        [
+            {
+                "title": "[丸焦ししゃも]给被人说“培养失败”的前美少女童星（SSR）搭了把手之后，她开始只对我依赖到撒娇上瘾 第19话 辽君是我的第一次哦",
+                "detail_url": "https://www.lightnovel.fun/cn/detail/1144633",
+                "update_time": "3 小时前",
+                "intro_snippet": "恋爱日常，美少女，培养。",
+            },
+            {
+                "title": "新的校园恋爱喜剧",
+                "detail_url": "https://www.lightnovel.fun/cn/detail/1145000",
+                "update_time": "2 小时前",
+                "intro_snippet": "恋爱校园日常。",
+            },
+        ],
+        max_items=2,
+        now_ts_ms=1_778_086_400_000,
+    )
+
+    assert ranked[0]["detail_url"] == "https://www.lightnovel.fun/cn/detail/1145000"
+    repeat = next(item for item in ranked if item["detail_url"].endswith("/1144633"))
+    assert repeat["dedupe_state"] == "recent_series_repeat"
+    assert repeat["ranking_visible_candidate"] is False
+    assert repeat["score_breakdown"]["history"] <= -180
 
 
 def test_lightnovel_gateway_push_dispatches_to_configured_gateway(tmp_path: Path, monkeypatch) -> None:

@@ -29,6 +29,7 @@ DEFAULT_TIMEOUT_SECONDS = 20
 DEFAULT_MAX_SOURCES = 6
 DEFAULT_MAX_SOURCE_CHARS = 4800
 DEFAULT_MAX_ITEMS = 12
+LIGHTNOVEL_MAX_ITEMS = 36
 USER_AGENT = "Natsume-Ai-BrowserResearch/1.0 (+local owner requested research)"
 GENERIC_LINK_TEXT = {
     "更多",
@@ -45,6 +46,10 @@ GENERIC_LINK_TEXT = {
 }
 PRICE_RE = re.compile(r"(?:[￥¥]\s*\d+(?:\.\d+)?|\d+(?:\.\d+)?\s*(?:元|块|rmb|cny|usd|美元))", re.IGNORECASE)
 LIST_ITEM_MARKER_RE = re.compile(r"(?:^|\s)(?:[1-9]|1[0-9]|20)\s+(?=[\[【《「『A-Za-z\u4e00-\u9fff])")
+LIGHTNOVEL_DETAIL_URL_RE = re.compile(
+    r"https?://(?:www\.)?lightnovel\.fun/(?:cn/)?detail/\d+(?:[/?#].*)?$",
+    re.IGNORECASE,
+)
 
 
 @dataclass(slots=True)
@@ -162,9 +167,43 @@ def _candidate_context_text(anchor: Any, *, title: str, limit: int = 220) -> str
     return _compact_text(title, limit=limit)
 
 
+def _is_lightnovel_source_url(base_url: str) -> bool:
+    try:
+        return urlparse(str(base_url or "")).netloc.lower().endswith("lightnovel.fun")
+    except Exception:
+        return False
+
+
+def _is_lightnovel_detail_url(url: str) -> bool:
+    return bool(LIGHTNOVEL_DETAIL_URL_RE.search(str(url or "").strip()))
+
+
+def _is_low_value_lightnovel_anchor(text: str) -> bool:
+    compact = str(text or "").strip()
+    if not compact:
+        return True
+    if compact.startswith(("置顶", "置頂")):
+        return True
+    low_value_tokens = (
+        "版规",
+        "版規",
+        "勋章",
+        "勳章",
+        "工资申请",
+        "工資申請",
+        "发轻币",
+        "發輕幣",
+        "资讯区",
+        "資訊區",
+    )
+    return any(token in compact for token in low_value_tokens)
+
+
 def _extract_candidate_items(soup: Any, *, base_url: str = "", limit: int = DEFAULT_MAX_ITEMS) -> list[dict[str, Any]]:
     items: list[dict[str, Any]] = []
     seen: set[str] = set()
+    lightnovel_source = _is_lightnovel_source_url(base_url)
+    effective_limit = max(limit, LIGHTNOVEL_MAX_ITEMS) if lightnovel_source else limit
     for anchor in soup.find_all("a"):
         text = _compact_text(anchor.get_text(" "), limit=160)
         normalized = text.lower().strip()
@@ -174,6 +213,11 @@ def _extract_candidate_items(soup: Any, *, base_url: str = "", limit: int = DEFA
         if href.startswith(("javascript:", "#")):
             continue
         url = urljoin(base_url, href) if href else ""
+        if lightnovel_source:
+            if not _is_lightnovel_detail_url(url):
+                continue
+            if _is_low_value_lightnovel_anchor(text):
+                continue
         key = f"{text}|{url}"
         if key in seen:
             continue
@@ -195,7 +239,7 @@ def _extract_candidate_items(soup: Any, *, base_url: str = "", limit: int = DEFA
         if prices:
             item["price_mentions"] = prices
         items.append(item)
-        if len(items) >= limit:
+        if len(items) >= effective_limit:
             break
     return items
 
