@@ -147,6 +147,12 @@ def review_lightnovel_selection_from_memory_packet(
     reviewed = _review_cards(cards, timeout_s=timeout_value)
 
     ok_items = [item for item in reviewed if str(item.get("review_status") or "") == "OK"]
+    readable_items = [
+        item
+        for item in ok_items
+        if str(item.get("body_quality") or "").upper() == "READABLE_BODY"
+        or int(item.get("content_char_count") or 0) >= _BODY_TEXT_MIN_CHARS
+    ]
     if not ok_items:
         fact = "我回去查了详情页，但这次没有拿到可读网页或 epub；这轮不能负责任地说哪本更好。"
         result = _result(
@@ -174,7 +180,34 @@ def review_lightnovel_selection_from_memory_packet(
         _attach_persist_result(result, persist_result)
         return result
 
-    selected = max(ok_items, key=lambda item: float(item.get("deep_review_score") or 0.0))
+    if not readable_items:
+        fact = "我回去查了详情页，但这次只拿到简介或目录，没有读到足够正文；这轮不能装作已经翻完后判断哪本更好。"
+        result = _result(
+            status="DEGRADED",
+            reason_code="LIGHTNOVEL_DEEP_REVIEW_NO_READABLE_BODY",
+            fact=fact,
+            items=reviewed,
+        )
+        _annotate_review_scope(
+            result,
+            source_card_count=source_card_count,
+            reviewed_card_count=reviewed_card_count,
+            review_item_limit=max_items,
+        )
+        _annotate_review_result(result, recommendation_signature=signature, cached=False)
+        persist_result = _persist_review_memory(
+            result=result,
+            request_id=request_id,
+            person_id=person_id,
+            session_id=session_id,
+            ts_ms=ts_ms,
+            recommendation_signature=signature,
+            review_context=review_context,
+        )
+        _attach_persist_result(result, persist_result)
+        return result
+
+    selected = max(readable_items, key=lambda item: float(item.get("deep_review_score") or 0.0))
     fact = _build_review_fact(selected=selected, items=reviewed)
     result = _result(
         status="OK",
@@ -248,7 +281,11 @@ def _review_one_card(*, index: int, card: Mapping[str, Any], timeout_s: int) -> 
     item = dict(card)
     item["index"] = int(item.get("index") or index)
     detail_url = str(item.get("detail_url") or "").strip()
-    if detail_url:
+    access_state = str(item.get("content_access_state") or "").strip().upper()
+    if access_state == "BLOCKED":
+        item["review_status"] = "FAILED"
+        item["review_reason_code"] = "CONTENT_ACCESS_BLOCKED"
+    elif detail_url:
         item.update(_merge_detail_payload_into_card(item, _fetch_detail(detail_url, timeout_s=timeout_s)))
     else:
         item["review_status"] = "NO_DETAIL_URL"
@@ -631,6 +668,9 @@ def _extract_trace_cards(packet: Mapping[str, Any]) -> list[dict[str, Any]]:
             "update_time": _clean_text(item.get("update_time"), limit=80),
             "view_count": _clean_text(item.get("view_count"), limit=40),
             "comment_count": _clean_text(item.get("comment_count"), limit=40),
+            "content_access_state": _clean_text(item.get("content_access_state"), limit=40),
+            "content_access_reason": _clean_text(item.get("content_access_reason"), limit=120),
+            "readable_chapter_url": _clean_text(item.get("readable_chapter_url"), limit=220),
         }
         card = {key: value for key, value in card.items() if value not in ("", 0, None, [], {})}
         if card and not any(_same_card(card, old) for old in cards):
@@ -1211,6 +1251,16 @@ def _score_item(item: Mapping[str, Any], *, source_index: int) -> dict[str, Any]
     if item.get("body_observations"):
         score += 5.0
         reasons.append("有正文观察")
+    access_state = str(item.get("content_access_state") or "").strip().upper()
+    if access_state == "READABLE":
+        score += 4.0
+        reasons.append("推荐时已确认可读")
+    elif access_state == "SUMMARY_ONLY":
+        score -= 8.0
+        reasons.append("推荐时只确认到简介")
+    elif access_state == "BLOCKED":
+        score -= 30.0
+        reasons.append("推荐时已发现内容受限")
     if item.get("chapter_signal"):
         score += 4.0
         reasons.append("有章节/目录线索")

@@ -14,6 +14,7 @@ from host_brain.codex_runtime.production_executor import (
     _build_lightnovel_gateway_message,
     _build_lightnovel_gateway_card,
     _coerce_recommendation_items,
+    _fetch_lightnovel_detail_metadata,
     _find_lightnovel_recommendations_file,
     _lightnovel_recommendations_from_browser_items,
     _maybe_push_browser_research_to_gateway,
@@ -800,6 +801,79 @@ def test_lightnovel_ranker_keeps_visible_recommendations_cross_source(monkeypatc
     visible_sources = {item["source_key"] for item in ranked if item["ranking_visible_candidate"] is True}
     assert "lightnovel.fun" in visible_sources
     assert "sfacg.com" in visible_sources
+
+
+def test_lightnovel_detail_probe_marks_readable_summary_and_blocked(monkeypatch) -> None:
+    class _Reply:
+        def __init__(self, text: str, *, status_code: int = 200) -> None:
+            self.text = text
+            self.status_code = status_code
+            self.encoding = "utf-8"
+            self.apparent_encoding = "utf-8"
+
+    body = "第1章 开始。角色对话和事件推进。" * 80
+    pages = {
+        "https://www.lightnovel.fun/cn/detail/readable": _Reply(
+            f"""
+            <html><head><meta name="description" content="能读正文"/></head>
+            <body><h1 class="article-title">可读正文书</h1><div class="article-content">{body}</div></body></html>
+            """
+        ),
+        "http://book.sfacg.com/Novel/651213/": _Reply(
+            """
+            <html><head><title>只有简介 - SF轻小说</title><meta name="description" content="SF轻小说简介"/></head>
+            <body><div class="introduce">这里只能看到公开简介，还没有读到正文。</div></body></html>
+            """
+        ),
+        "https://www.17k.com/book/3451799.html": _Reply(
+            "<html><script>var arg1='blocked';</script><body>请开启JavaScript进行安全验证</body></html>"
+        ),
+    }
+
+    def fake_get(url, **_kwargs):  # noqa: ANN001
+        return pages[str(url)]
+
+    monkeypatch.setattr("requests.get", fake_get)
+
+    readable = _fetch_lightnovel_detail_metadata("https://www.lightnovel.fun/cn/detail/readable", timeout_s=3)
+    summary = _fetch_lightnovel_detail_metadata("http://book.sfacg.com/Novel/651213/", timeout_s=3)
+    blocked = _fetch_lightnovel_detail_metadata("https://www.17k.com/book/3451799.html", timeout_s=3)
+
+    assert readable["content_access_state"] == "READABLE"
+    assert readable["content_char_count"] >= 500
+    assert summary["content_access_state"] == "SUMMARY_ONLY"
+    assert blocked["content_access_state"] == "BLOCKED"
+
+
+def test_lightnovel_ranker_prefers_readable_candidates_over_summary_only(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("HOST_LIGHTNOVEL_RECOMMENDER_HISTORY_PATH", str(tmp_path / "history.jsonl"))
+
+    ranked = _rank_lightnovel_recommendations(
+        [
+            {
+                "title": "只拿到简介的标题党美少女日常",
+                "detail_url": "http://book.sfacg.com/Novel/700001/",
+                "source_url": "https://book.sfacg.com/rank/",
+                "intro_snippet": "恋爱 日常 美少女 培养。",
+                "content_access_state": "SUMMARY_ONLY",
+            },
+            {
+                "title": "可深读的异世界慢生活",
+                "detail_url": "https://www.lightnovel.fun/cn/detail/700002",
+                "source_url": "https://www.lightnovel.fun/",
+                "intro_snippet": "異世界 魔法 日常。",
+                "content_access_state": "READABLE",
+                "content_char_count": 2200,
+            },
+        ],
+        max_items=2,
+        now_ts_ms=1_778_086_400_000,
+    )
+
+    assert ranked[0]["title"] == "可深读的异世界慢生活"
+    assert ranked[0]["score_breakdown"]["content_access"] > 0
+    summary = next(item for item in ranked if item["content_access_state"] == "SUMMARY_ONLY")
+    assert summary["score_breakdown"]["content_access"] < 0
 
 
 def test_lightnovel_gateway_push_dispatches_to_configured_gateway(tmp_path: Path, monkeypatch) -> None:

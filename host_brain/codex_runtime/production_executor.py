@@ -827,6 +827,17 @@ def _lightnovel_book_form_score(item: Mapping[str, Any]) -> tuple[float, str]:
     return score, ",".join(labels) or "neutral"
 
 
+def _lightnovel_content_access_score(item: Mapping[str, Any]) -> tuple[float, str]:
+    state = str(item.get("content_access_state") or "UNKNOWN").strip().upper()
+    if state == "READABLE":
+        return 32.0, "READABLE"
+    if state == "SUMMARY_ONLY":
+        return -18.0, "SUMMARY_ONLY"
+    if state == "BLOCKED":
+        return -180.0, "BLOCKED"
+    return -10.0, "UNKNOWN"
+
+
 def _lightnovel_history_penalty_for_age(age_days: float, *, scope: str) -> tuple[float, str]:
     exact_block_days = _parse_int_env(
         "HOST_LIGHTNOVEL_RECOMMENDER_REPEAT_BLOCK_DAYS",
@@ -920,6 +931,7 @@ def _score_lightnovel_recommendation_item(
     age_days = _parse_lightnovel_update_age_days(item.get("update_time"), now_ts_ms=now_ts_ms)
     freshness = _freshness_score(age_days)
     book_form_score, book_form_state = _lightnovel_book_form_score(item)
+    access_score, access_state = _lightnovel_content_access_score(item)
     metadata_score = 0.0
     if item.get("cover_url") or item.get("cover") or item.get("image_url"):
         metadata_score += 4.0
@@ -931,7 +943,18 @@ def _score_lightnovel_recommendation_item(
         metadata_score += 2.0
     source_order_score = max(0.0, 14.0 - float(source_index) * 1.25)
     history_score, dedupe_state = _history_penalty(item, history, now_ts_ms=now_ts_ms)
-    total = source_order_score + positive_score + negative_score + view_score + comment_score + freshness + metadata_score + book_form_score + history_score
+    total = (
+        source_order_score
+        + positive_score
+        + negative_score
+        + view_score
+        + comment_score
+        + freshness
+        + metadata_score
+        + book_form_score
+        + access_score
+        + history_score
+    )
     ranked = dict(item)
     preference_matches = positive_matches + negative_matches
     ranked["recommendation_score"] = round(total, 2)
@@ -946,11 +969,13 @@ def _score_lightnovel_recommendation_item(
         "heat": round(view_score + comment_score, 2),
         "metadata": round(metadata_score, 2),
         "book_form": round(book_form_score, 2),
+        "content_access": round(access_score, 2),
         "history": round(history_score, 2),
     }
     ranked["preference_matches"] = preference_matches
     ranked["dedupe_state"] = dedupe_state
     ranked["book_form_state"] = book_form_state
+    ranked["content_access_state"] = str(ranked.get("content_access_state") or access_state).strip().upper() or access_state
     ranked["diversity_bucket"] = _lightnovel_genre_bucket(ranked, positive_matches)
     matched_labels = [str(match.get("label") or "") for match in positive_matches if match.get("label")]
     if matched_labels:
@@ -1543,6 +1568,177 @@ def _parse_lightnovel_detail_stats(text: str) -> dict[str, str]:
     return out
 
 
+def _lightnovel_detail_text(soup: Any, *, limit: int = 160_000) -> str:
+    parts: list[str] = []
+    for selector in (
+        ".article-content",
+        "#ChapterBody",
+        ".chapter-content",
+        ".read-content",
+        ".reading-content",
+        ".novel-content",
+        ".content_read",
+    ):
+        node = soup.select_one(selector)
+        if node is not None:
+            text = re.sub(r"\s+", " ", node.get_text(" ", strip=True)).strip()
+            if text:
+                parts.append(text)
+    joined = "\n".join(parts)
+    return joined[:limit] if limit > 0 else joined
+
+
+def _lightnovel_detail_description(soup: Any) -> str:
+    for attrs in ({"name": re.compile("^description$", re.IGNORECASE)}, {"property": "og:description"}):
+        node = soup.find("meta", attrs=attrs)
+        if node is not None:
+            value = _short_text(node.get("content"), limit=320)
+            if value:
+                return value
+    for selector in (".introduce", ".book-intro", ".bookDesc", ".book-desc", ".summary", ".intro"):
+        node = soup.select_one(selector)
+        if node is not None:
+            value = _short_text(node.get_text(" ", strip=True), limit=320)
+            if value:
+                return value
+    return ""
+
+
+def _lightnovel_detail_title(soup: Any, *, detail_url: str) -> str:
+    for selector in (".article-title", "h1", ".book-title", ".title"):
+        node = soup.select_one(selector)
+        title = _short_text(node.get_text(" ", strip=True) if node is not None else "", limit=140)
+        if title:
+            return title
+    if soup.title is not None:
+        title = str(soup.title.string or "")
+        for marker in ("-輕之國度", "-轻之国度", "- SF轻小说", "_17K小说网"):
+            title = title.split(marker, 1)[0]
+        return _short_text(title, limit=140)
+    return _short_text(detail_url, limit=140)
+
+
+def _lightnovel_page_looks_blocked(*, text: str, title: str) -> bool:
+    compact = f"{title} {text[:1200]}".lower()
+    blocked_tokens = (
+        "access denied",
+        "cloudflare",
+        "captcha",
+        "安全验证",
+        "访问验证",
+        "请开启javascript",
+        "enable javascript",
+        "登录后",
+        "需要登录",
+        "var arg1=",
+    )
+    return any(token.lower() in compact for token in blocked_tokens)
+
+
+def _lightnovel_public_chapter_links(soup: Any, *, base_url: str, limit: int = 4) -> list[str]:
+    urls: list[str] = []
+    for anchor in soup.find_all("a"):
+        text = str(anchor.get_text(" ", strip=True) or "")
+        href = str(anchor.get("href") or "").strip()
+        if not href:
+            continue
+        if not re.search(r"(最新公众章节|最新公開章|第\s*[\d一二三四五六七八九十百〇零]+\s*[章节話话]|序章|chapter)", text, re.IGNORECASE):
+            continue
+        absolute = urljoin(base_url, href)
+        if absolute not in urls:
+            urls.append(absolute)
+        if len(urls) >= limit:
+            break
+    return urls
+
+
+def _probe_lightnovel_public_chapter_text(urls: list[str], *, timeout_s: int, referer: str) -> tuple[int, str]:
+    if not urls:
+        return 0, ""
+    try:
+        import requests  # noqa: PLC0415
+        from bs4 import BeautifulSoup  # noqa: PLC0415
+    except Exception:  # pragma: no cover - import guard
+        return 0, ""
+    best_len = 0
+    best_url = ""
+    for url in urls[:2]:
+        try:
+            response = requests.get(
+                url,
+                headers={
+                    "User-Agent": "Natsume-Ai-LightnovelRecommender/1.0",
+                    "Accept": "text/html,application/xhtml+xml,*/*;q=0.2",
+                    "Referer": referer,
+                },
+                timeout=max(3, int(timeout_s)),
+            )
+            if response.status_code >= 400:
+                continue
+            if response.encoding and response.encoding.lower() in {"iso-8859-1", "ascii"}:
+                response.encoding = response.apparent_encoding or response.encoding
+            soup = BeautifulSoup(response.text or "", "html.parser")
+            for node in soup(["script", "style", "noscript", "svg"]):
+                node.decompose()
+            text_len = len(_lightnovel_detail_text(soup, limit=120_000))
+            if text_len > best_len:
+                best_len = text_len
+                best_url = url
+        except Exception:
+            continue
+    return best_len, best_url
+
+
+def _classify_lightnovel_content_access(
+    *,
+    soup: Any,
+    title: str,
+    description: str,
+    detail_url: str,
+    timeout_s: int,
+) -> dict[str, Any]:
+    page_text = re.sub(r"\s+", " ", soup.get_text(" ", strip=True)).strip()
+    if _lightnovel_page_looks_blocked(text=page_text, title=title):
+        return {
+            "content_access_state": "BLOCKED",
+            "content_access_reason": "detail_page_requires_verification_or_login",
+            "content_char_count": 0,
+        }
+    content_text = _lightnovel_detail_text(soup)
+    content_char_count = len(content_text)
+    if content_char_count >= 500:
+        return {
+            "content_access_state": "READABLE",
+            "content_access_reason": "detail_page_contains_public_body_text",
+            "content_char_count": content_char_count,
+        }
+    chapter_links = _lightnovel_public_chapter_links(soup, base_url=detail_url)
+    linked_char_count, readable_url = _probe_lightnovel_public_chapter_text(
+        chapter_links,
+        timeout_s=timeout_s,
+        referer=detail_url,
+    )
+    if linked_char_count >= 500:
+        return {
+            "content_access_state": "READABLE",
+            "content_access_reason": "public_chapter_body_is_readable",
+            "content_char_count": linked_char_count,
+            "readable_chapter_url": readable_url,
+        }
+    if description or chapter_links:
+        return {
+            "content_access_state": "SUMMARY_ONLY",
+            "content_access_reason": "only_summary_or_chapter_index_available",
+            "content_char_count": max(content_char_count, linked_char_count),
+            "readable_chapter_url": readable_url,
+        }
+    return {
+        "content_access_state": "UNKNOWN",
+        "content_access_reason": "no_public_body_or_summary_detected",
+        "content_char_count": content_char_count,
+    }
+
+
 def _fetch_lightnovel_detail_metadata(url: str, *, timeout_s: int) -> dict[str, Any]:
     detail_url = str(url or "").strip()
     if not detail_url.startswith(("http://", "https://")):
@@ -1562,22 +1758,35 @@ def _fetch_lightnovel_detail_metadata(url: str, *, timeout_s: int) -> dict[str, 
     except Exception as exc:
         return {"detail_status": "FAILED", "detail_reason_code": "DETAIL_FETCH_FAILED", "detail_error": str(exc)}
     if response.status_code >= 400:
-        return {"detail_status": "FAILED", "detail_reason_code": f"DETAIL_HTTP_{response.status_code}"}
+        return {
+            "detail_status": "FAILED",
+            "detail_reason_code": f"DETAIL_HTTP_{response.status_code}",
+            "content_access_state": "BLOCKED" if response.status_code in {401, 403, 451} else "UNKNOWN",
+            "content_access_reason": f"http_{response.status_code}",
+        }
+    if response.encoding and response.encoding.lower() in {"iso-8859-1", "ascii"}:
+        response.encoding = response.apparent_encoding or response.encoding
 
     soup = BeautifulSoup(response.text or "", "html.parser")
-    title_node = soup.select_one(".article-title")
-    title = _short_text(title_node.get_text(" ", strip=True) if title_node is not None else "", limit=140)
-    if not title and soup.title is not None:
-        title = _short_text(str(soup.title.string or "").split("-輕之國度", 1)[0].split("-轻之国度", 1)[0], limit=140)
-    description_node = soup.find("meta", attrs={"name": re.compile("^description$", re.IGNORECASE)})
-    description = _short_text(description_node.get("content") if description_node is not None else "", limit=260)
+    for node in soup(["script", "style", "noscript", "svg"]):
+        node.decompose()
+    title = _lightnovel_detail_title(soup, detail_url=detail_url)
+    description = _lightnovel_detail_description(soup)
     info_node = soup.select_one(".article-infos")
     info_text = info_node.get_text(" ", strip=True) if info_node is not None else soup.get_text(" ", strip=True)[:800]
+    access = _classify_lightnovel_content_access(
+        soup=soup,
+        title=title,
+        description=description,
+        detail_url=detail_url,
+        timeout_s=timeout_s,
+    )
     return {
         "detail_status": "OK",
         "title": title,
         "intro_snippet": description,
         "cover_url": _select_lightnovel_cover_url(soup, base_url=detail_url),
+        **access,
         **_parse_lightnovel_detail_stats(info_text),
     }
 
@@ -1601,11 +1810,29 @@ def _enrich_lightnovel_recommendations_from_details(
                     "status": metadata.get("detail_status"),
                     "reason_code": metadata.get("detail_reason_code"),
                 }
-                for key in ("title", "cover_url", "intro_snippet", "update_time", "view_count", "comment_count"):
+                for key in (
+                    "title",
+                    "cover_url",
+                    "intro_snippet",
+                    "update_time",
+                    "view_count",
+                    "comment_count",
+                    "content_access_state",
+                    "content_access_reason",
+                    "readable_chapter_url",
+                ):
                     value = str(metadata.get(key) or "").strip()
                     if value:
-                        if key in {"view_count", "comment_count"} or not str(out.get(key) or "").strip():
+                        if key in {
+                            "view_count",
+                            "comment_count",
+                            "content_access_state",
+                            "content_access_reason",
+                            "readable_chapter_url",
+                        } or not str(out.get(key) or "").strip():
                             out[key] = value
+                if metadata.get("content_char_count") is not None:
+                    out["content_char_count"] = int(metadata.get("content_char_count") or 0)
         enriched.append(out)
     return enriched
 
@@ -1657,7 +1884,7 @@ def execute_lightnovel_recommender_work_order(order: CodexWorkOrder, *, run_dir:
     candidate_items = _collect_lightnovel_candidate_items(metadata)
     recommendations = _lightnovel_recommendations_from_browser_items(candidate_items)
     max_items = _parse_int_env("HOST_LIGHTNOVEL_RECOMMENDER_MAX_ITEMS", default=3, min_value=1, max_value=8)
-    detail_max_items = _parse_int_env("HOST_LIGHTNOVEL_RECOMMENDER_DETAIL_ENRICH_MAX", default=3, min_value=0, max_value=10)
+    detail_max_items = _parse_int_env("HOST_LIGHTNOVEL_RECOMMENDER_DETAIL_ENRICH_MAX", default=8, min_value=0, max_value=12)
     detail_timeout_s = _parse_int_env("HOST_LIGHTNOVEL_RECOMMENDER_DETAIL_TIMEOUT_S", default=8, min_value=3, max_value=30)
     pre_ranked_items = _rank_lightnovel_recommendations(recommendations, max_items=max_items)
     enriched_items = _enrich_lightnovel_recommendations_from_details(
@@ -1815,6 +2042,9 @@ def _lightnovel_memory_items(items: list[dict[str, Any]], *, max_items: int) -> 
                 "update_time": _short_text(item.get("update_time"), limit=60),
                 "view_count": _short_text(item.get("view_count"), limit=40),
                 "comment_count": _short_text(item.get("comment_count"), limit=40),
+                "content_access_state": _short_text(item.get("content_access_state"), limit=40),
+                "content_access_reason": _short_text(item.get("content_access_reason"), limit=120),
+                "readable_chapter_url": _short_text(item.get("readable_chapter_url"), limit=240),
             }
         )
     return memory_items

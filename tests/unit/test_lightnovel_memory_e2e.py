@@ -124,26 +124,32 @@ async def test_daily_lightnovel_delivery_is_recalled_deep_reviewed_and_traceable
         def fake_review_cards(review_cards, *, timeout_s):  # noqa: ANN001
             captured_cards.extend(dict(item) for item in review_cards)
             return [
+                    {
+                        **dict(review_cards[0]),
+                        "review_status": "OK",
+                        "body_quality": "READABLE_BODY",
+                        "content_char_count": 1200,
+                        "body_observations": ["读到的正文偏恋爱日常，核心在人物关系和亲密感推进"],
+                        "deep_review_score": 25.0,
+                        "score_reasons": ["恋爱日常信号明确", "读到了正文内容"],
+                    },
+                    {
+                        **dict(review_cards[1]),
+                        "review_status": "OK",
+                        "body_quality": "READABLE_BODY",
+                        "content_char_count": 1400,
+                        "body_observations": ["正文主要靠对话和日常梗推进，轻喜剧感比较明显"],
+                        "deep_review_score": 29.0,
+                        "score_reasons": ["奇幻身份钩子明确", "有正文观察"],
+                    },
                 {
-                    **dict(review_cards[0]),
-                    "review_status": "OK",
-                    "body_observations": ["读到的正文偏恋爱日常，核心在人物关系和亲密感推进"],
-                    "deep_review_score": 25.0,
-                    "score_reasons": ["恋爱日常信号明确", "读到了正文内容"],
-                },
-                {
-                    **dict(review_cards[1]),
-                    "review_status": "OK",
-                    "body_observations": ["正文主要靠对话和日常梗推进，轻喜剧感比较明显"],
-                    "deep_review_score": 29.0,
-                    "score_reasons": ["奇幻身份钩子明确", "有正文观察"],
-                },
-                {
-                    **dict(review_cards[2]),
-                    "review_status": "OK",
-                    "body_observations": [
-                        "正文/简介有异世界皇女、皇帝或后宫路线，世界观钩子更直给",
-                        "对白密度高，读感更偏轻快互动",
+                        **dict(review_cards[2]),
+                        "review_status": "OK",
+                        "body_quality": "READABLE_BODY",
+                        "content_char_count": 2200,
+                        "body_observations": [
+                            "正文/简介有异世界皇女、皇帝或后宫路线，世界观钩子更直给",
+                            "对白密度高，读感更偏轻快互动",
                     ],
                     "chapter_signal": "序章；第一章",
                     "deep_review_score": 42.0,

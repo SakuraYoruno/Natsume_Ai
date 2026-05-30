@@ -115,6 +115,39 @@ def test_lightnovel_deep_review_requires_selection_query_and_recommendation_pack
     )
 
 
+def test_lightnovel_deep_review_degrades_when_only_summary_is_available(monkeypatch) -> None:  # noqa: ANN001
+    monkeypatch.setenv("HOST_LIGHTNOVEL_DEEP_REVIEW_CACHE_ENABLED", "0")
+
+    def fake_get(url, **_kwargs):  # noqa: ANN001
+        assert str(url) == "https://www.lightnovel.fun/cn/detail/summary-only"
+        return _Response(
+            """
+            <html>
+              <head><title>只有简介</title><meta name="description" content="只有公开简介，没有正文。"/></head>
+              <body><h1 class="article-title">只有简介</h1><div class="article-content">短简介。</div></body>
+            </html>
+            """
+        )
+
+    monkeypatch.setattr("requests.get", fake_get)
+    result = review_lightnovel_selection_from_memory_packet(
+        packet={
+            "facts": [
+                "记忆线索：我刚才推荐了 1 本轻小说；可比较证据："
+                "1. 只有简介｜详情：https://www.lightnovel.fun/cn/detail/summary-only"
+            ]
+        },
+        user_message="这本好看吗？",
+        request_id="req-summary-only",
+        person_id="person-test",
+        session_id="session-test",
+    )
+
+    assert result["status"] == "DEGRADED"
+    assert result["reason_code"] == "LIGHTNOVEL_DEEP_REVIEW_NO_READABLE_BODY"
+    assert "不能装作" in result["fact"]
+
+
 def test_lightnovel_deep_review_can_trigger_from_readiness_trace_after_facts_are_dropped() -> None:
     packet = {
         "facts": [],
@@ -258,10 +291,10 @@ def test_lightnovel_deep_review_marks_partial_scope_for_recent_many_items(monkey
     monkeypatch.setenv("HOST_LIGHTNOVEL_DEEP_REVIEW_CACHE_ENABLED", "0")
     pages = {
         f"https://www.lightnovel.fun/cn/detail/{index}": _html(
-            f"推荐 {index}",
-            f"第 {index} 本简介，偏轻小说日常。",
-            chapters=_body(f"第1章 推荐 {index}。角色对话、关系推进和日常展开。", 12),
-        )
+                f"推荐 {index}",
+                f"第 {index} 本简介，偏轻小说日常。",
+                chapters=_body(f"第1章 推荐 {index}。角色对话、关系推进和日常展开。", 24),
+            )
         for index in range(1, 7)
     }
 
