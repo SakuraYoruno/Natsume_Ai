@@ -1,8 +1,8 @@
 受众：MASTER
 标题：host_brain/governor/ + scheduler/ 层接口契约（当前代码实况）
 
-版本：v2.0
-日期：2026-04-19
+版本：v3.0
+日期：2026-05-30
 归属：docs/15_theory/
 
 ---
@@ -12,19 +12,33 @@
 
 ## 0. 代码证据入口
 
-- `host_brain/governor/rules.py`
-- `host_brain/governor/decision.py`
-- `host_brain/governor/tokens.py`
+Governor 层：
+- `host_brain/governor/rules.py`（`evaluate_governor_gates` / R1-R8）
+- `host_brain/governor/decision.py`（`IntentDecisionEngine`）
+- `host_brain/governor/tokens.py`（`TokenService` / `TokenRecord` / `TokenValidationResult`）
 - `host_brain/governor/schemas.py`
 - `host_brain/governor/policy_cache.py`
 - `host_brain/governor/tier_policy.py`
+- `host_brain/governor/route_token.py`
+- `host_brain/governor/rate_limit_checker.py` / `rate_limit_store.py`
+
+Scheduler 层（声明式）：
 - `host_brain/scheduler/task_registry.py`
 - `host_brain/scheduler/scheduler.py`
-- `host_brain/scheduler/health.py`
+- `host_brain/scheduler/scheduling_center.py`
+- `host_brain/scheduler/health.py` / `scheduler_health_mixin.py` / `health_check_prompt.py`
 - `host_brain/scheduler/scheduler_routes.py`
+
+Scheduler 层（Host 常驻）：
 - `host_brain/app/automation/task_scheduler.py`
 - `host_brain/app/automation/scheduler_routes.py`
-- `host_brain/app/fastapi_app.py`
+- `host_brain/app/automation/host_desktop.py`
+
+FastAPI 装配（与 Governor / Scheduler 注册相关）：
+- `host_brain/app/asgi.py`
+- `host_brain/app/app_factory.py`
+- `host_brain/app/router_registry.py`
+  （旧的 `host_brain/app/fastapi_app.py` 已删除，由上述三件套替代）
 
 ---
 
@@ -357,7 +371,7 @@ ScheduledTask(
 
 ### 4.3 当前路由面
 
-`host_brain/app/automation/scheduler_routes.py` 被 `fastapi_app.py` 以 `prefix="/host-scheduler"` 挂载。
+`host_brain/app/automation/scheduler_routes.py` 在 `host_brain/app/router_registry.py:register_host_routers` 中以 `prefix="/host-scheduler"` 被挂载。
 
 当前端点：
 
@@ -397,10 +411,12 @@ ScheduledTask(
 - 所有调度路由都挂在同一实现上
 - scheduler 只负责 cron/interval/once，而不区分“声明式 Intent”和“Host 协程任务”
 - token 验证会在 confirm 前直接消费 approval token
+- Scheduler / Governor 路由由 `host_brain/app/fastapi_app.py` 装配（该文件已删除）
 
 当前正确口径应是：
 
 1. Governor 仍以 `evaluate_governor_gates()` 为核心，R1-R8 全量 trace 保持不变。
 2. `TokenService.validate_execution_tokens()` 采用“先校验、后统一消费”的当前实现。
 3. `host_brain/scheduler/` 与 `app/automation/task_scheduler.py` 是两套不同调度面。
+4. Scheduler / Host-scheduler / Governor token-related 路由都由 `host_brain/app/router_registry.py:register_host_routers(app)` 统一 include，入口 ASGI app 来自 `host_brain/app/asgi.py` + `host_brain/app/app_factory.py`。
 4. Host Main 同时暴露 `/scheduler/*` 与 `/host-scheduler/*` 两类调度接口。

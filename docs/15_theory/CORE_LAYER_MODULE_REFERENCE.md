@@ -1,8 +1,8 @@
 受众：MASTER
 标题：host_brain/core/ 层模块参考（当前代码实况）
 
-版本：v2.0
-日期：2026-04-19
+版本：v3.0
+日期：2026-05-30
 归属：docs/15_theory/
 
 ---
@@ -28,6 +28,9 @@
 - `host_brain/core/key_profiles.py`
 - `host_brain/core/qa.py`
 - `host_brain/core/qa_checks.py`
+- `host_brain/core/emotion_constants.py`
+- `host_brain/core/resource_manager.py`
+- `host_brain/core/soft_fail.py`
 
 ---
 
@@ -70,6 +73,9 @@
 | `key_profiles.py` | 密钥配置文件管理 |
 | `qa.py` / `qa_checks.py` | QA 契约与检查逻辑 |
 | `service_reporters.py` | 服务状态上报辅助 |
+| `emotion_constants.py` | 情绪常量（tag / mood）与常用枚举 |
+| `resource_manager.py` | 运行时资源会计（该由 ANS / endocrine 上报） |
+| `soft_fail.py` | 软限失败语义：在不推倒主链的前提下记录迍重错误 |
 
 ---
 
@@ -89,24 +95,25 @@
 
 ### 3.2 可选槽位
 
-`OPTIONAL_SLOTS` 当前不止旧文档列的 4 项，还包括：
+`OPTIONAL_SLOTS`（以 `host_brain/core/prompt_context.py` 代码为准）：
 
 - `semantic_slot`
 - `emotion_pulse`
 - `emotion_recall`
 - `bond_texture`
 - `memory_emotion_hint`
-- `memory_persona_evidence`
-- `memory_recall_summary`
-- `self_reflection_pulse`
-- `bond_narrative`
+- `self_reflection_pulse`（Phase III：自省脉冲）
+- `bond_narrative`（Phase V：关系叙事）
+
+另有 `_DYNAMIC_SLOT_REGISTRY` 允许运行时通过 `register_slot(name, builder_fn)` 注册动态槽位，并由 `build_dynamic_slots(context_data)` 统一构建（M28-G OPT-16）。
 
 这说明当前 prompt context 已经预留了：
 
 - 情绪回忆补充
-- 人格证据
+- 语义槽
 - 自省脉冲
 - 关系叙事
+- 运行时动态扩展点
 
 等更丰富的注入位。
 

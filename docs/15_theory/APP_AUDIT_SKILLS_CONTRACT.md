@@ -1,7 +1,7 @@
 受众：MASTER
 标题：host_brain 核心应用层契约（当前代码实况：app / audit / skills / observability）
 
-版本：v2.3
+版本：v3.0
 日期：2026-05-30
 归属：docs/15_theory/
 
@@ -14,8 +14,12 @@
 
 - `host_brain/__main__.py`
 - `host_brain/obs_main.py`
-- `host_brain/app/fastapi_app.py`
+- `host_brain/app/asgi.py`
+- `host_brain/app/app_factory.py`
+- `host_brain/app/router_registry.py`
 - `host_brain/app/obs_fastapi_app.py`
+- `host_brain/app/chat_routes.py`
+- `host_brain/app/chat_immune_gate.py`
 - `host_brain/app/chat_handler.py`
 - `host_brain/app/cortex_orchestrator.py`
 - `host_brain/app/agent_runtime_shared.py`
@@ -40,13 +44,13 @@
 
 | 运行面 | 代码入口 | 说明 |
 |---|---|---|
-| Host Main | `host_brain/__main__.py` + `host_brain/app/fastapi_app.py` | 主运行时，承载 `/v1/chat`、`/v1/host/input`、`/v1/agent/*` 及大部分业务路由 |
+| Host Main | `host_brain/__main__.py` + `host_brain/app/asgi.py` (`app = create_app()`) | 主运行时，承载 `/v1/chat`、`/v1/host/input`、`/v1/agent/*` 及大部分业务路由。装配由 `app_factory.create_host_fastapi_app(...)` + `router_registry.register_host_routers(app)` 完成 |
 | Observability Backend | `host_brain/obs_main.py` + `host_brain/app/obs_fastapi_app.py` | 独立观测后端，承载 `/obs/*`、`/api/ui/*` 与 Monitor UI 观测类接口 |
-| Edge RPC | `edge_client/__main__.py` + `edge_client/app/fastapi_app.py` | 身体侧 RPC 能力与回调入口 |
+| Edge RPC | `edge_client/__main__.py` | 身体侧 RPC 能力与回调入口 |
 
 ### 1.2 Host Main 当前路由面
 
-`host_brain/app/fastapi_app.py` 当前直接挂载或定义了以下主路由面：
+Host Main FastAPI 装配由三件套完成：`host_brain/app/asgi.py`（按 `app = create_app()` 暴露 ASGI app）→ `host_brain/app/app_factory.create_host_fastapi_app(...)`（装配 FastAPI 依赖与中间件）→ `host_brain/app/router_registry.register_host_routers(app)`（按顺序 include 全部业务路由）。Host Main 当前直接挂载或定义以下主路由面：
 
 - `POST /v1/chat`
 - `POST /v1/edge/events`
@@ -75,9 +79,10 @@
 
 ```text
 POST /v1/chat
-  -> host_brain.app.fastapi_app.chat
-  -> host_brain.app.fastapi_app._evaluate_immune_gate_for_chat
-  -> host_brain.app.fastapi_app._schedule_chat_immune_gate_event
+  -> host_brain.app.app_factory.chat_endpoint
+  -> host_brain.app.chat_routes.handle_v1_chat_route
+  -> host_brain.app.chat_immune_gate.evaluate_immune_gate_for_chat
+  -> host_brain.app.chat_immune_gate.schedule_chat_immune_gate_event
   -> host_brain.app.chat_handler.handle_chat
   -> host_brain.app.chat_handler._unified_chat_sse_generator
   -> thalamus_agent.classify_and_compile_intent_draft
@@ -95,7 +100,7 @@ POST /v1/chat
        -> task_progress
 ```
 
-在进入 `chat_handler.handle_chat` 之前，`fastapi_app.chat` 还会处理 `request_id`、immune gate 审查与异步审计记录；若命中 `phatic_fastpath`，会直接在 HTTP 路由层返回 SSE，不再进入后续编排链。
+在进入 `chat_handler.handle_chat` 之前，`chat_routes.handle_v1_chat_route` 会处理 `request_id`、immune gate 审查与异步审计记录；若 immune gate 返回 BLOCK，会直接在 HTTP 路由层返回 SSE，不再进入后续编排链。
 
 链路中各层职责如下：
 
@@ -239,7 +244,7 @@ POST /v1/chat
 
 | 运行方式 | 当前模块 | 说明 |
 |---|---|---|
-| 主应用兼容挂载 | `host_brain/app/fastapi_app.py` + `host_brain/app/obs_routes.py` | 让主应用也能提供观测接口 |
+| 主应用兼容挂载 | `host_brain/app/router_registry.py` + `host_brain/app/obs_routes_*.py` | 让主应用也能提供部分观测接口 |
 | 独立 Obs Backend | `host_brain/app/obs_fastapi_app.py` | 面向 Monitor UI 的独立观测进程，支持 warm cache |
 
 ### 4.2 当前路由分组
@@ -285,7 +290,7 @@ POST /v1/chat
 
 当前 `host_brain` 应用层的主事实是：
 
-1. `/v1/chat` 主链已经收敛到 `fastapi_app.chat -> chat_handler -> thalamus_agent -> Governor -> cortex_orchestrator -> agent_runtime_shared -> executive_router -> executive_runtime -> executive_runtime_core`。
+1. `/v1/chat` 主链已经收敛到 `chat_routes.handle_v1_chat_route -> chat_handler.handle_chat -> thalamus_agent -> Governor -> cortex_orchestrator -> agent_runtime_shared -> executive_router -> executive_runtime -> executive_runtime_core`；最终文本作者为 `host_brain/persona/surface_main_chain.py`。
 2. Audit 以 `SQLiteLedger` 为枢纽，但表结构与写接口已持续演进，不应再复用旧表数口径。
 3. Skills 以 `SkillRegistry + SkillLoader + executor_registry` 为当前执行契约，且来源是动态扩展的。
 4. Observability 采用“主应用兼容挂载 + 独立 Obs Backend + Monitor UI”三层结构。

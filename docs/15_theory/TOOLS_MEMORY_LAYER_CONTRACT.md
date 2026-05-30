@@ -1,36 +1,36 @@
 受众：MASTER
 标题：host_brain/tools/ + memory/ 层接口契约（当前代码实况）
 
-版本：v2.0
-日期：2026-04-19
+版本：v3.0
+日期：2026-05-30
 归属：docs/15_theory/
 
 ---
 
-定位：本文描述当前代码里的 `host_brain/tools/` 与 `host_brain/memory/` 层，而不是早期只覆盖“ToolCatalog + Canon/Distillation”骨架的简化口径。
-若与旧文档冲突，以本文和代码为准。
+定位：本文描述当前代码里的 `host_brain/tools/` 与 `host_brain/memory/` 层。**memory 层的事实主源已迁移到 `LifeMemoryStore`，旧的 `episodic` 主作者地位已被取代**；tools 层已扩展 6 个新工具实现。请以本文与代码为准。
 
 ## 0. 代码证据入口
 
-- `host_brain/tools/catalog.py`
-- `host_brain/tools/broker.py`
-- `host_brain/tools/selector.py`
-- `host_brain/tools/mcp_adapter.py`
-- `host_brain/tools/browser_automation.py`
-- `host_brain/tools/host_command_executor.py`
-- `host_brain/tools/secret_vault.py`
-- `host_brain/tools/file_forensics.py`
-- `host_brain/tools/file_organizer.py`
-- `host_brain/tools/system_monitor.py`
-- `host_brain/memory/canon_style_store.py`
-- `host_brain/memory/canon_world_store.py`
-- `host_brain/memory/canon_sync.py`
-- `host_brain/memory/episodic.py`
-- `host_brain/memory/context_compressor.py`
+Tools 层：
+- `host_brain/tools/__init__.py`
+- `host_brain/tools/catalog.py`（`ToolCatalog` / `ToolMeta` / `compute_tool_visibility_hash`）
+- `host_brain/tools/broker.py`（`ToolBroker` / `ToolExecutionResult` / 4 个 result_code 常量）
+- `host_brain/tools/selector.py`（`select_tool_meta_pack` / `_rank_tools`）
+- `host_brain/tools/mcp_adapter.py`（MCP 工具桥接）
+- `host_brain/tools/host_command_executor.py`、`browser_automation.py`、`file_forensics.py`、`file_organizer.py`、`secret_vault.py`、`system_monitor.py`（具体 tool 实现）
+
+Memory 层：
+- `host_brain/memory/life_memory.py`（`LifeMemoryStore` —— 当前 SSOT）
+- `host_brain/memory/life_memory_query.py`（`plan_life_memory_query`）
+- `host_brain/memory/long_term_distiller.py`（持久化语义蒸馏）
 - `host_brain/memory/distillation.py`
-- `host_brain/memory/memory_worth_evaluator.py`
-- `host_brain/memory/consolidation_trigger.py`
+- `host_brain/memory/episodic.py`（兼容层）
 - `host_brain/memory/episodic_memory_graph.py`
+- `host_brain/memory/canon_world_store.py` / `canon_style_store.py` / `canon_helpers.py` / `canon_schemas.py` / `canon_sync.py` / `canon_vector_projection.py` / `canon_vector_auto_sync.py`
+- `host_brain/memory/chroma_client.py`
+- `host_brain/memory/context_compressor.py`
+- `host_brain/memory/consolidation_trigger.py`
+- `host_brain/memory/memory_worth_evaluator.py`
 
 ---
 
@@ -38,35 +38,35 @@
 
 ### 1.1 Tools 层
 
-当前 `host_brain/tools/` 不是只有“元数据注册 + 执行门控”两层，还包括实际的 Host 工具实现模块。
+Tools 层是"经过 catalog 受控 + broker 单一执行入口"的**工具调用治理层**：
 
-更准确的理解是：
-
-```text
-tools/
-  = Tool metadata contract
-  + governed execution entry
-  + MCP adapter
-  + concrete host tools
 ```
+caller (chat_agent / executive / skill 实现)
+  → ToolBroker.execute(...)         # 唯一合法执行入口
+       ├── ToolCatalog.get(tool_id)  # SSOT，决定 side_effect_level / auth_level
+       ├── handler = self._handlers[tool_id]
+       ├── WRITE 门控：token_service.validate_execution_tokens(...)
+       └── handler(args, exec_context)
+  → ToolExecutionResult（result_code + status + evidence_ref + ledger 落盘）
+```
+
+**不允许**绕过 broker 直接调 handler。
 
 ### 1.2 Memory 层
 
-当前 `host_brain/memory/` 也不再只是：
+memory 层当前是**多源记忆系统**，但**事实 SSOT 唯一**：
 
-- Canon
-- Episodic
-- Distillation
-
-而是已经扩展到：
-
-- Canon SSOT 与索引同步
-- Episodic write/merge/delete/recall
-- Context compression
-- Distillation
-- 记忆写入价值评估
-- 主动整合触发
-- Episodic graph / topic chain
+| 子系统 | 角色 | 文件 |
+|---|---|---|
+| `LifeMemoryStore` | **当前事实 SSOT**，所有 user / perception / scheduler / inner item 入库为 life episode + evidence | `life_memory.py` |
+| Long-term distillation | 长期蒸馏（防递归），把 episodic → semantic | `long_term_distiller.py` / `distillation.py` |
+| `episodic` | **兼容层**，仍被部分查询路径使用，不再是主作者 | `episodic.py` |
+| Canon 三件套 | character / style / world 的显式真源 | `canon_*.py` |
+| Vector projection | Canon → Chroma 自动同步 | `canon_vector_projection.py` / `canon_vector_auto_sync.py` |
+| Context compressor | surface chain 之前的上下文压缩（不是最终作者） | `context_compressor.py` |
+| Consolidation trigger | 何时触发 sleep replay | `consolidation_trigger.py` |
+| Memory worth evaluator | 决定哪些事件值得长期保存 | `memory_worth_evaluator.py` |
+| Chroma client | 向量库封装 | `chroma_client.py` |
 
 ---
 
@@ -74,500 +74,247 @@ tools/
 
 ### 2.1 当前模块分组
 
-| 类型 | 模块 | 当前职责 |
-|---|---|---|
-| 元数据契约 | `catalog.py` | `ToolMeta`、`ToolCatalog`、`compute_tool_visibility_hash()` |
-| 统一执行入口 | `broker.py` | `ToolBroker.execute()`、WRITE token 校验、审计写入 |
-| 可见性筛选 | `selector.py` | Top-K 工具元数据选择，默认隐藏 WRITE 工具 |
-| MCP 适配 | `mcp_adapter.py` | provider 工具同步、Airlock 出站净化、经 ToolBroker 执行 |
-| 具体工具实现 | `browser_automation.py` 等 | 实际 Host 能力实现 |
+| 文件 | 当前职责 |
+|---|---|
+| `catalog.py` | `ToolCatalog` SSOT、`ToolMeta` schema、`normalize_tool_meta` 规整、`compute_tool_visibility_hash` 可见性哈希 |
+| `broker.py` | `ToolBroker` 单一合法执行入口、`ToolExecutionResult`、4 个 result_code 常量、WRITE 门控 |
+| `selector.py` | `select_tool_meta_pack(...)` 给 prompt 选 top-K 工具元信息 |
+| `mcp_adapter.py` | MCP 工具桥接（不是薄映射器，含安全策略与 schema 收敛） |
+| `host_command_executor.py` | 受控 shell 命令执行 |
+| `browser_automation.py` | 浏览器自动化工具 |
+| `file_forensics.py` | 文件证据采集 |
+| `file_organizer.py` | 文件归类整理 |
+| `secret_vault.py` | 密钥保管 |
+| `system_monitor.py` | 系统监控指标采集 |
 
-### 2.2 catalog.py：当前 SSOT
+### 2.2 `ToolMeta` 当前 schema
 
-`catalog.py` 当前仍是 canonical `ToolMeta` 定义所在：
+至少包含：
 
-```python
-ToolMeta(
-    id: str,
-    name: str,
-    desc: str,
-    schema_hash: str,
-    side_effect_level: str,
-    auth_level: str,
-    domain_tags: tuple[str, ...],
-    version: str,
-)
-```
+- `tool_id: str`
+- `display_name: str`
+- `description: str`
+- `tags: list[str]`（小写、去重、规整）
+- `side_effect_level: "READ" | "WRITE"`
+- `auth_level: "AUTO" | "APPROVE" | "CONFIRM"`
+- 可选 `output_schema` / `input_schema` / `mcp_meta`
 
-当前规则仍包括：
+`normalize_tool_meta(payload)` 把外部传入的 payload 规整为标准格式。
 
-- `schema_hash` 必须以 `sha256:` 开头
-- `side_effect_level` 只允许 `READ` / `WRITE`
-- `auth_level` 只允许 `NONE` / `APPROVAL` / `CONFIRM`
-- `LOW / MEDIUM / HIGH` 会被映射到上述 auth level
-- `domain_tags` 必须非空
-- 未知字段会直接报错
+### 2.3 `ToolCatalog`
 
-### 2.3 ToolCatalog
+- 注册：`ToolCatalog.register(meta)` / `ToolCatalog.bulk_register(metas)`
+- 查询：`ToolCatalog.get(tool_id)` / `ToolCatalog.iter_metas()`
+- 可见性：`compute_tool_visibility_hash(tool_meta_pack)` —— 用于 prompt 缓存命中
 
-当前 `ToolCatalog` 提供：
-
-- `register()`
-- `get()`
-- `list_all()`
-- `export_meta(include_write=True)`
-
-特点：
-
-- 以 `tool_id` 为键
-- 覆盖式注册
-- 导出时可按 `include_write` 过滤 WRITE 工具
-
-### 2.4 工具可见性哈希
-
-`compute_tool_visibility_hash()` 当前会：
-
-- 对 metadata 做 `normalize_tool_meta()`
-- 按 `(id, version)` 排序
-- 计算稳定 `sha256`
-
-用于当前上下文打包与观测侧追踪“这轮模型能看到哪批工具”。
-
----
-
-## 三、ToolBroker 当前契约
-
-### 3.1 当前定位
-
-`broker.py` 仍是当前受管工具执行的单一合法入口：
-
-```text
-catalog lookup
-  -> handler lookup
-  -> WRITE token validate
-  -> inject emotion context defaults
-  -> execute handler
-  -> log_skill_exec
-```
-
-### 3.2 ToolExecutionResult
-
-当前返回结构：
+### 2.4 `ToolBroker.execute(...)`
 
 ```python
-ToolExecutionResult(
-    status: str,
-    result_code: str,
-    tool_id: str,
+ToolExecutionResult = ToolBroker.execute(
+    *,
+    request_id: str | None,
     intent_id: str,
-    evidence_ref: str | None,
-    detail: dict[str, Any],
-    output: Any = None,
+    session_id: str,
+    seq: int,
+    tool_id: str,
+    args: dict[str, Any] | None = None,
+    context: dict[str, Any] | None = None,
+    approval_token_ref: str | None = None,
+    confirm_token_ref: str | None = None,
+    thread_id: str | None = None,
+    turn_id: str | None = None,
+    ts_ms: int | None = None,
 )
 ```
 
-### 3.3 当前 result_code
+执行步骤：
 
-当前代码里的主要结果码：
+1. `catalog.get(tool_id)` —— 不存在 → `RESULT_REJECTED + TOOL_NOT_FOUND`
+2. `self._handlers[tool_id]` —— 缺失 → `RESULT_REJECTED + TOOL_HANDLER_MISSING`
+3. `meta.side_effect_level == "WRITE"`：
+   - 调 `token_service.validate_execution_tokens(...)`
+   - `auth_level == "CONFIRM"` → `require_confirm=True`
+   - 校验失败 → `RESULT_REJECTED + (TOKEN_INVALID / CONFIRM_REQUIRED / ...)`
+4. `exec_context` 默认注入 `emotion_tag="NEUTRAL"` / `mood_state="steady"`（M27-J）
+5. `handler(args, exec_context)` 执行：
+   - 抛异常 → `RESULT_FAILED + TOOL_EXECUTION_ERROR`
+   - 正常返回 → `RESULT_SUCCEEDED + TOOL_EXECUTED`
+6. 所有路径都通过 `_log_and_return` 写 `ledger`（落盘 evidence + result_digest + result_code）
 
-- `TOOL_NOT_FOUND`
-- `TOOL_HANDLER_MISSING`
-- `TOKEN_INVALID`
-- `CONFIRM_REQUIRED`
-- `TOOL_EXECUTED`
-- `TOOL_EXECUTION_ERROR`
+### 2.5 当前 `result_code` 常量（broker.py 顶部）
 
-### 3.4 WRITE 门控
+| 常量 | 含义 |
+|---|---|
+| `TOOL_NOT_FOUND` | catalog 中未注册 |
+| `TOOL_HANDLER_MISSING` | catalog 有 meta 但未注册 handler |
+| `TOOL_EXECUTED` | 成功执行 |
+| `TOOL_EXECUTION_ERROR` | handler 抛异常 |
+| 其它（来自 token_service） | `TOKEN_INVALID` / `CONFIRM_REQUIRED` / ... |
 
-当前规则是：
+### 2.6 `selector.select_tool_meta_pack`
 
-- `meta.side_effect_level == "WRITE"` 时一定走 `token_service.validate_execution_tokens()`
-- `meta.auth_level == "CONFIRM"` 时要求 confirm token
-- 验证失败直接拒绝，不执行 handler
+- 输入：`query` + `available tools`
+- `_filter_candidates`：按 tag / availability 过滤
+- `_rank_tools`：按 query token 与 tool tags / description 的命中数打分
+- 输出 top-K 个 `ToolMeta`，作为 prompt context 的 `tool_meta_pack` 槽位
 
-### 3.5 情感上下文默认注入
+### 2.7 `MCPAdapter`
 
-当前 `ToolBroker.execute()` 若调用方没传，会默认注入：
-
-- `emotion_tag = "NEUTRAL"`
-- `mood_state = "steady"`
-
-所以工具 handler 当前可以稳定读取情感上下文，即使上游未显式补全。
-
-### 3.6 审计写入
-
-每次执行最终写入的是：
-
-- `ledger.log_skill_exec(...)`
-
-并不是单独的 `log_tool_exec`。
-
-写入字段包括：
-
-- `request_id`
-- `thread_id`
-- `turn_id`
-- `intent_id`
-- `skill_name`（这里写的是 `tool_id`）
-- `approval_token_ref`
-- `confirm_token_ref`
-- `result_status`
-- `result_code`
-- `result_digest`
-- `evidence_ref`
-- `undo_token_ref`
-- `ts_ms`
+- 不是薄映射器；含 schema 收敛、安全策略、超时与重试
+- 把 MCP server 暴露的 tool 注册到 `ToolCatalog`
+- 调用时仍走 `ToolBroker.execute(...)`，不绕过
 
 ---
 
-## 四、selector.py 当前契约
+## 三、Memory 层当前契约
 
-`selector.py` 当前的关键现实是：
+### 3.1 `LifeMemoryStore`（当前 SSOT）
 
-- 默认 `include_write=False`
-- Top-K 默认 `k=6`
-- 可按 `required_tags` 过滤
-- 排序使用 query token 与 `name/desc/domain_tags` 的轻量匹配
+存储后端：SQLite，`life_memory.py` 是 8000+ 行的大 module。
 
-这意味着当前模型默认更容易看到 READ 工具，而不是所有工具全量暴露。
+**记忆条目核心字段**：
+
+- `episode_id`、`session_id`、`person_id`
+- `category`：`chat / perception / action / background / inner / reflection / semantic`
+- `content`、`evidence`（多条 evidence 关联到同一 episode）
+- `truth_state`：`CANDIDATE / VERIFIED / CORRECTED / SUPPRESSED / NARRATIVE_ONLY`
+- `state`：`ACTIVE / SUPPRESSED`
+- `open_loop`：`OPEN / CLOSED / CANCELLED / SUPERSEDED`（开环状态机）
+- `memory_strength`、`decay_profile_id`、`retention_state`（衰减档位）
+- `created_ts_ms`、`updated_ts_ms`、`access_log`
+
+**核心入口**：
+
+- `LifeMemoryStore.append_episode(...)`：写入新 episode
+- `LifeMemoryStore.append_evidence(...)`：附加 evidence
+- `LifeMemoryStore.update_truth_state(...)` / `update_state(...)` / `update_open_loop(...)`
+- `LifeMemoryStore.search(...)`：通用查询
+- `LifeMemoryStore.recall_*`：各种召回 helper（被 `recall_fusion_stores.search_life_episode` 调用）
+
+**guard 与过滤**：
+
+- synthetic 过滤（防 sample / template 串入）
+- anaphoric selection（"那个 / 之前那本"指代识别）
+- 时间窗口（today / yesterday / day_before / recent_days / all_time）
+- 语料范围（current session / cross-session）
+- domain（lightnovel_recommendation / recommendation 等）
+
+### 3.2 `LifeMemoryConsolidator`（life_memory.py 内）
+
+- sleep replay 压缩：选 episode 子集合并
+- 语义蒸馏：把 episodic 内容浓缩到 semantic 层，避免无限增长
+- 衰减触发：定期把低 `memory_strength` 的 episode 移到低留存档
+
+### 3.3 `plan_life_memory_query(query, ...)`
+
+`life_memory_query.py` 提供查询规划器：
+
+- 解析时间锚：`today / yesterday / day_before / recent_days / date_prefix / unspecified / all_time`
+- 推断 domain（lightnovel_recommendation / recommendation 等）
+- 输出可执行的 query plan，被上游记忆 recall 路径使用
+
+### 3.4 长期蒸馏
+
+- `long_term_distiller.py`：持久化的语义蒸馏（防止递归）
+- `distillation.py`：把 episodic memory 蒸馏成 semantic 层
+- 触发器：`consolidation_trigger.py` 决定何时跑
+
+### 3.5 Episodic 兼容层
+
+- `episodic.py`：旧 episodic store（仍被部分查询路径使用）
+- `episodic_memory_graph.py`：episodic 关联图
+- **不再是 chat 主链记忆主作者**；新写入应走 `LifeMemoryStore`
+
+### 3.6 Canon 三件套
+
+- `canon_world_store.py`：世界 canon 存储
+- `canon_style_store.py`：风格 canon 存储
+- `canon_helpers.py` / `canon_schemas.py`：辅助与 schema
+- `canon_sync.py`：canon 同步入口
+- `canon_vector_projection.py`：把 canon 投影到向量空间（给 retrieval 层 `world_canon` 路由用）
+- `canon_vector_auto_sync.py`：canon 写入时的自动向量同步
+
+Canon 的"显式真源"性质：人物 / 世界 / 风格 设定的最终可信来源是 canon，而不是 LifeMemoryStore。
+
+### 3.7 Chroma client
+
+- `chroma_client.py`：向量库封装（`ChromaClientProtocol` 实现）
+- 被 retrieval 层与 canon 同步层共同使用
+
+### 3.8 Context compressor
+
+- `context_compressor.py`：surface chain 之前的"上下文压缩"
+- 把过长的对话历史压缩成短摘要，给 SurfacePacketCompiler 使用
+- **不是最终回复作者**
+
+### 3.9 Memory worth evaluator
+
+- `memory_worth_evaluator.py`：决定哪些事件值得长期保存
+- 输入：候选事件（user turn / inner activity / scheduler item ...）
+- 输出：`worth_score` + `recommend_truth_state`
+
+### 3.10 Consolidation trigger
+
+- `consolidation_trigger.py`：何时触发 sleep replay 与蒸馏
+- 由 ANS / circadian / glymphatic agent 间接调度
 
 ---
 
-## 五、MCPAdapter 当前契约
+## 四、Tools ↔ Memory ↔ Retrieval 三层边界
 
-### 5.1 当前不是薄映射器
-
-`mcp_adapter.py` 当前除了同步 provider metadata，还负责：
-
-- WRITE 校验前置要求
-- Airlock 出站净化
-- evidence_ref 校验
-- 经 ToolBroker 单入口执行
-
-### 5.2 当前关键接口
-
-- `sync_provider()`
-- `sync_provider_tools()`
-- `resolve_tool_id()`
-- `call_tool()`
-- `execute_mcp_tool()`
-- `get_provider_tools()`
-
-### 5.3 当前 ToolMeta 视图有两层
-
-需要注意：
-
-- `catalog.py` 里有 canonical `ToolMeta`
-- `mcp_adapter.py` 里还有一份面向 provider 视图的 `ToolMeta`
-
-它们不是同一个数据类，但目的不同：
-
-- 前者给 ToolCatalog / Selector / Broker 用
-- 后者给 MCP provider 同步结果回传与缓存用
-
-### 5.4 execute_mcp_tool() 当前流程
-
-```text
-resolve mapped tool_id
-  -> 检查 catalog 中是否存在
-  -> WRITE 工具要求 approval_token_ref
-  -> _airlock_sanitize(args)
-  -> broker.execute(...)
-  -> 若 WRITE 成功但无 evidence_ref，则报错
 ```
-
-### 5.5 当前 Airlock 约束
-
-出站净化当前会移除敏感字段，例如：
-
-- `hard_state`
-- `constitution`
-- `rule_trace`
-- `approval_token`
-- `confirm_token`
-- `undo_token`
-- `secret`
-- `password`
-- `api_key`
-
-因此现在 MCP 工具适配层本身就带有强制最小化出站约束。
-
----
-
-## 六、Concrete Tools 的当前现实
-
-旧文档只描述了 contract 模块，但当前 `tools/` 目录里真实还有这些 Host 能力模块：
-
-- `browser_automation.py`
-- `host_command_executor.py`
-- `secret_vault.py`
-- `file_forensics.py`
-- `file_organizer.py`
-- `system_monitor.py`
-
-也就是说，`tools/` 现在不只是元数据层，而是“契约 + 具体执行能力”并存。
-
----
-
-## 七、Memory 层当前契约
-
-### 7.1 当前主模块分组
-
-| 类型 | 模块 | 当前职责 |
-|---|---|---|
-| Canon SSOT | `canon_style_store.py`, `canon_world_store.py` | 风格/世界观 Canon 单一真相源 |
-| Canon 同步 | `canon_sync.py`, `canon_vector_auto_sync.py`, `canon_vector_projection.py` | 文件、索引、向量同步 |
-| Episodic | `episodic.py` | 记忆写入、合并、删除、召回 |
-| 压缩/蒸馏 | `context_compressor.py`, `distillation.py`, `long_term_distiller.py` | 多轮压缩与长期语义蒸馏 |
-| 质量/触发 | `memory_worth_evaluator.py`, `consolidation_trigger.py` | 写入价值评估与主动蒸馏触发 |
-| 图谱增强 | `episodic_memory_graph.py` | 主题链与 graph walk |
-
----
-
-## 八、Canon 当前契约
-
-### 8.1 StyleCanonStore
-
-`canon_style_store.py` 当前口径已经不是多散文件随意拼装，而是：
-
-- 以单个 v5 canonical profile file 为主
-- 当前核心文件名：`style_profile_v5.json`
-- `STYLE_CANON_KEY_MAP` 当前包含中日双通道 key
-
-它仍提供：
-
-- `get(canon_id)`
-- `list_entries()`
-- `upsert(...)`
-
-并且会触发：
-
-- `trigger_canon_vector_auto_sync(...)`
-
-### 8.2 WorldCanonStore
-
-`canon_world_store.py` 当前是：
-
-- versioned
-- auditable
-- single-writer
-
-关键现实：
-
-- `upsert_document(...)` 要求 `proposal_id`
-- `body` 不能断言执行事实
-- 支持跨进程 file lock（可选依赖）
-- 写入后同样会触发 Canon vector auto sync
-
-### 8.3 Canon 同步
-
-`canon_sync.py` 当前两个关键函数仍是真实主入口：
-
-- `sync_world_canon_index(...)`
-- `detect_world_version_drift(...)`
-
-当前 drift code：
-
-- `WORLD_CANON_VERSION_DRIFT`
-- `WORLD_CANON_NOT_INDEXED`
-- `WORLD_CANON_FILE_MISSING`
-- `WORLD_CANON_INVALID_DOC`
-
-同步时还会写：
-
-- `upsert_world_canon_doc`
-- `log_canon_proposal`
-- `log_canon_change`
-
----
-
-## 九、EpisodicStore 当前契约
-
-### 9.1 当前定位
-
-`episodic.py` 现在不是一个简单 KV 记忆表，而是带：
-
-- evidence gate
-- Chroma 向量存储
-- lifecycle audit
-- 情感标注
-- suppression / distortion
-
-的记忆存储器。
-
-### 9.2 EpisodicRecord 当前字段
-
-当前重要字段包括：
-
-- `memory_id`
-- `text`
-- `ts_ms`
-- `text_hash`
-- `decay_profile_id`
-- `evidence_refs`
-- `visibility`
-- `embedding_model_id`
-- `merged_into`
-- `deleted_at`
-- `emotion_tag`
-- `emotion_valence`
-- `emotion_arousal`
-- `emotion_color_tag`
-- `suppression_flag`
-- `distortion_level`
-
-### 9.3 写入门禁
-
-`write_memory()` / `merge_memories()` 当前都要求：
-
-- `evidence_refs` 非空
-
-否则返回：
-
-- `MEMORY_EVIDENCE_REQUIRED`
-
-### 9.4 recall() 当前行为
-
-`recall()` 现在不仅做相似度检索，还支持：
-
-- `emotion_context`
-- `emotion_boost_factor`
-- `apply_decay`
-- `apply_suppression`
-- `apply_distortion`
-
-当前现实包括：
-
-- `suppression_flag` 会把高冲突/痛苦记忆降权
-- `distortion_level` 会让细节模糊记忆轻微降权
-- `emotion_context` 匹配时会做情感 boost
-
-因此 episodic recall 已经带有当前“人性化记忆”逻辑，而不再是纯向量 top-k。
-
----
-
-## 十、Context Compressor 与 Distillation
-
-### 10.1 ContextCompressor
-
-`context_compressor.py` 当前支持三种策略：
-
-- `sliding_window`
-- `summary`
-- `hybrid`
-
-主要结构：
-
-- `CompressedContext`
-- `EvidenceCandidate`
-- `EvidencePack`
-
-而且：
-
-- `summary / hybrid` 会触发压缩前静默保存
-- EvidencePack 可叠加 episodic hits
-
-### 10.2 MemoryDistillationEngine
-
-`distillation.py` 当前主要实现：
-
-- `MemoryDistillationEngine.distill_top_k(...)`
-
-它会：
-
-- 从 `EpisodicStore.recall()` 召回 top-k
-- 优先走外部 LLM summary client
-- 不可用时回退到 deterministic merge
-- 根据 `source_hash` 做幂等保护
-- 最终写入 semantic memory ledger
-
----
-
-## 十一、Worth / Consolidation / Episodic Graph
-
-### 11.1 MemoryWorthEvaluator
-
-`memory_worth_evaluator.py` 当前是纯规则、低延迟的写入价值评估器。
-
-决策值：
-
-- `write`
-- `skip`
-- `write_light`
-
-评估因素包括：
-
-- 寒暄/简单应答过滤
-- 用户/回复长度
-- 情感关键词
-- 新信息信号
-- 深度对话信号
-- 多轮加分
-
-### 11.2 ConsolidationTrigger
-
-`consolidation_trigger.py` 当前提供主动蒸馏触发，不只依赖定时任务。
-
-触发类型：
-
-- `volume`
-- `topic`
-- `scheduled`
-
-它维护：
-
-- 24h 写入量计数
-- 话题频次计数
-- cooldown
-
-### 11.3 EpisodicMemoryGraph
-
-`episodic_memory_graph.py` 当前实现轻量主题链：
-
-- 新记忆写入时自动聚类
-- 支持 graph walk 召回上下文
-- 基于关键词 overlap + 时间窗口
-
-所以 memory 层现在已经显式包含“主题线记忆图”，不只是扁平 episodic list。
-
----
-
-## 十二、当前依赖关系应如何理解
-
-当前更准确的理解是：
-
-```text
-tools/
-  = metadata + broker + selector + mcp adapter + concrete host tools
-
-memory/
-  = canon + episodic + compression + distillation + worth + consolidation + graph
-```
-
-而不是：
-
-```text
-tools/
-  = 只有 ToolCatalog/ToolBroker
-
-memory/
-  = 只有 Canon/Episodic/Distillation
+┌─────────────────────────────────────────────────────────┐
+│ surface_main_chain（最终作者）                          │
+└────────┬────────────────────────────────────────────────┘
+         │ 注入 fact list（已压缩）
+         │
+┌────────▼────────────────────────────────────────────────┐
+│ persona/surface_memory_recall（决定 RECALL_POLICY）     │
+└────────┬────────────────────────────────────────────────┘
+         │ 调 recall(...)
+         │
+┌────────▼────────────────────────────────────────────────┐
+│ retrieval/recall_fusion（多路召回 + 混合融合 + 过滤）   │
+└────────┬────────────────────────────────────────────────┘
+         │ 委托各路 store
+         │
+┌────────▼────────────────────────────────────────────────┐
+│ memory/life_memory（life episode SSOT）                 │
+│ memory/canon_world_store / canon_style_store            │
+│ memory/episodic（兼容层）                               │
+│ memory/chroma_client（向量库）                           │
+└─────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────┐
+│ skill / tool 调用：                                     │
+│ 任何 caller → ToolBroker.execute(...)                   │
+│              ├── ToolCatalog SSOT                       │
+│              └── handler 实现（tools/*.py）              │
+└─────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## 十三、当前不再适用的旧口径
+## 五、不变量
 
-以下说法不再准确：
+1. 任何 tool 调用必须经过 `ToolBroker.execute(...)`，不允许绕过 broker 直接调 handler。
+2. `ToolCatalog` 是 tool meta SSOT；任何注册必须经过 `ToolCatalog.register` 或 `bulk_register`。
+3. WRITE 类工具必须通过 `token_service.validate_execution_tokens` 校验。
+4. `LifeMemoryStore` 是当前**记忆事实 SSOT**；新写入应走 LifeMemory，不应直接写 episodic。
+5. Canon 三件套是"显式真源"，与 life memory 不冲突时 canon 优先。
+6. 向量库（Chroma）只是衍生层；canon / life_memory 是源，向量是投影。
+7. `context_compressor` 不写最终回复，只产出压缩摘要。
+8. `episodic` 是兼容层，新代码不应将其作为主入口。
 
-- `tools/` 只有四个抽象 contract 模块
-- MCP 适配层只做 metadata 映射，不做治理
-- Episodic recall 只是简单 top-k 向量召回
-- Memory 层没有写入价值评估、主动整合触发和主题图谱
+---
 
-当前正确口径应是：
+## 六、不再代表当前事实的旧口径
 
-1. `ToolBroker` 仍是受管执行单入口，但 `tools/` 目录里已经有大量具体 Host 工具实现。
-2. `MCPAdapter` 当前带有 Airlock 出站净化、WRITE 授权和 evidence_ref 校验。
-3. `EpisodicStore` 已经带 evidence gate、emotion boost、suppression、distortion 等逻辑。
-4. `memory/` 当前已包含 `MemoryWorthEvaluator`、`ConsolidationTrigger`、`EpisodicMemoryGraph` 等落地模块。
+| 旧描述 | 当前事实 |
+|---|---|
+| Memory 层主作者是 `episodic` | 已迁移到 `LifeMemoryStore`；`episodic` 是兼容层 |
+| Tools 层只有 catalog + broker 骨架 | 已扩展为 catalog + broker + selector + mcp_adapter + 6 个具体 tool 实现 |
+| `MCPAdapter` 是薄映射器 | 已含 schema 收敛、安全策略、超时与重试 |
+| Tool 调用可以绕过 broker（用于性能） | 不允许；任何 tool 调用必走 broker |
+| Memory 层只有 distillation 与 canon | 已扩展为 life_memory + life_memory_query + long_term_distiller + canon 三件套 + chroma + context_compressor + consolidation_trigger + memory_worth_evaluator |
+| 向量库是事实 SSOT | 不是；向量是投影层，源是 life_memory + canon |

@@ -6,10 +6,11 @@
 适用：本地优先部署（Host_Brain + Edge + 可选 Cloud/ClawdBot）
 定位：解释“为什么这样设计、理论上要保证什么、怎样判定系统没有跑偏”，用于指导实现与评审。
 
-当前代码校准说明（2026-04-19）：
+当前代码校准说明（2026-05-30）：
 - 本文件属于理论/原则解释，不是当前运行时事实文档，也不作为实现任务清单。
 - 现行代码入口请优先阅读 `README.md`、`docs/50_project/arch/CURRENT_CODE_ARCHITECTURE.md`、`docs/50_project/arch/dataflow_report.md`、`docs/15_theory/APP_AUDIT_SKILLS_CONTRACT.md`、`docs/50_project/arch/AGENT_ORCHESTRATION_DETAIL.md`。
-- 当前聊天主链应从 `host_brain/app/fastapi_app.py` 的 `/v1/chat` HTTP 入口开始阅读，再进入 `host_brain/app/chat_handler.py -> host_brain/app/cortex_orchestrator.py -> host_brain/app/agent_runtime_shared.py -> executive_router / executive_runtime*`；外部输入回流以 `host_brain/app/input_routes.py` 为准。
+- 当前聊天主链应从 `host_brain/app/asgi.py` (`app = create_app()`) + `host_brain/app/app_factory.py` 注入的 `chat_endpoint` 入口开始阅读，进入 `host_brain/app/chat_routes.py -> chat_handler.py -> cortex_orchestrator.py -> agent_runtime_shared.py -> executive_router / executive_runtime*`；外部输入回流以 `host_brain/app/input_routes.py` 为准。旧的 `host_brain/app/fastapi_app.py` 已删除，Host Main FastAPI 装配现为 `asgi.py + app_factory.py + router_registry.py` 三件套。
+- normal chat 最终文本作者现为 `host_brain/persona/surface_main_chain.py` (SurfaceMainChain)；旧 `prompt_builder` 链路仅作为辅助 facts/state 提供者。
 - 若本文件中的抽象术语与当前代码事实冲突，以代码事实文档和实际代码为准。
 
 ---

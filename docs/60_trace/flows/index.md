@@ -1,8 +1,8 @@
 受众：MASTER
 标题：Flow 生效索引（active.pointer 对照，当前代码校准）
 
-版本：v2.0
-日期：2026-04-19
+版本：v3.0
+日期：2026-05-30
 
 定位：维护 `flows/active.pointer` 的当前指针值，并说明它与现行代码运行面的关系。
 
@@ -36,12 +36,13 @@
 
 | 层 | 当前模块 | 说明 |
 |---|---|---|
-| HTTP 入口 | `host_brain/app/fastapi_app.py` | 定义 `POST /v1/chat` |
-| 聊天入口 | `host_brain/app/chat_handler.py` | 统一 SSE 入口 |
+| HTTP 入口 | `host_brain/app/asgi.py` (`app = create_app()`) + `host_brain/app/app_factory.py` + `host_brain/app/router_registry.py` | 定义 `POST /v1/chat`，旧 `host_brain/app/fastapi_app.py` 已删除 |
+| 聊天入口 | `host_brain/app/chat_routes.py` + `host_brain/app/chat_handler.py` | immune gate + 统一 SSE 入口 |
 | Cortex 编排 | `host_brain/app/cortex_orchestrator.py` | 转交共享运行时 |
 | 共享运行时 | `host_brain/app/agent_runtime_shared.py` | 召回、trace、后处理 |
 | Executive 路由 | `host_brain/app/executive_router.py` | 路由薄门面 |
 | Executive 执行 | `host_brain/app/executive_runtime.py` + `host_brain/app/executive_runtime_core.py` | chat / skill / delegate / plan 主执行 |
+| 主链作者 | `host_brain/app/chat_agent.py` -> `host_brain/persona/surface_main_chain.py` | normal chat 文本最终作者为 SurfaceMainChain |
 
 因此，当前正确口径是：
 
