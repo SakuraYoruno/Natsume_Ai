@@ -250,6 +250,50 @@ def _session_key(
     return f"{feature}|model={model_id}|sandbox={sandbox}|cwd={workdir_text}"
 
 
+def _app_server_key(
+    *,
+    command: str,
+    model_id: str,
+    sandbox: str,
+    workdir: Path,
+) -> str:
+    """Return the process-level cache key for one Codex app-server.
+
+    Feature identity intentionally does not participate in this key. Feature
+    isolation is handled by per-feature thread ids inside the shared server
+    process, which prevents background pools from spawning one app-server per
+    feature.
+    """
+    try:
+        workdir_text = str(workdir.resolve())
+    except Exception:
+        workdir_text = str(workdir)
+    codex_home = resolve_codex_cli_home()
+    codex_home_text = ""
+    if codex_home is not None:
+        try:
+            codex_home_text = str(codex_home.expanduser().resolve())
+        except Exception:
+            codex_home_text = str(codex_home.expanduser())
+    disabled_features = ",".join(
+        f"{feature_name}={int(_parse_bool(os.environ.get(env_name), default=default))}"
+        for env_name, feature_name, default in _APP_SERVER_DISABLED_FEATURES
+    )
+    return "|".join(
+        (
+            f"command={command}",
+            f"home={codex_home_text}",
+            f"model={model_id}",
+            f"sandbox={sandbox}",
+            f"cwd={workdir_text}",
+            f"reasoning={resolve_codex_cli_reasoning_effort(model_id)}",
+            f"disabled={disabled_features}",
+            f"fast={int(_parse_bool(os.environ.get('HOST_CODEX_CLI_FAST_MODE'), default=True))}",
+            f"web_disabled={int(_parse_bool(os.environ.get('HOST_CODEX_CLI_DISABLE_WEB_SEARCH'), default=True))}",
+        )
+    )
+
+
 def _get_session_id(path: Path, key: str) -> str | None:
     with _SESSION_LOCK:
         return _read_session_state(path).get(key)
@@ -538,7 +582,7 @@ class _CodexAppServerWorker:
         sandbox: str,
         workdir: Path,
         run_root: Path,
-        session_key: str,
+        server_key: str,
         feature_key: str | None,
     ) -> None:
         self.command = command
@@ -546,11 +590,11 @@ class _CodexAppServerWorker:
         self.sandbox = sandbox
         self.workdir = workdir
         self.run_root = run_root
-        self.session_key = session_key
+        self.server_key = server_key
         self.feature_key = feature_key
-        self.run_dir = run_root / _worker_dir_name(session_key)
+        self.run_dir = run_root / _worker_dir_name(server_key)
         self.thread_reuse = codex_app_server_thread_reuse_enabled()
-        self.thread_id: str | None = None
+        self.thread_ids: dict[str, str] = {}
         self.proc: subprocess.Popen[str] | None = None
         self._stdout_queue: Queue[str] = Queue()
         self._stderr_tail: deque[str] = deque(maxlen=80)
@@ -560,11 +604,11 @@ class _CodexAppServerWorker:
     def terminate(self) -> None:
         proc = self.proc
         self.proc = None
-        self.thread_id = None
+        self.thread_ids.clear()
         if proc and proc.poll() is None:
             _terminate_codex_cli_processes(proc, marker=str(self.run_dir.resolve()))
 
-    def generate(self, *, prompt: str, timeout_ms: int, response_format: Any = None) -> str:
+    def generate(self, *, prompt: str, timeout_ms: int, thread_key: str, response_format: Any = None) -> str:
         timeout_s = max(1.0, resolve_codex_cli_timeout_ms(timeout_ms) / 1000.0)
         deadline = time.monotonic() + timeout_s
         with self._lock:
@@ -573,7 +617,7 @@ class _CodexAppServerWorker:
             else:
                 with _APP_SERVER_START_LOCK:
                     self._ensure_started_locked(deadline=deadline)
-            thread_id = self._ensure_thread_locked(deadline=deadline)
+            thread_id = self._ensure_thread_locked(thread_key=thread_key, deadline=deadline)
             result = self._run_turn_locked(
                 thread_id=thread_id,
                 prompt=prompt,
@@ -614,9 +658,10 @@ class _CodexAppServerWorker:
                     "feature_key": self.feature_key,
                     "model_id": self.model_id,
                     "pid": self.proc.pid,
-                    "session_key": self.session_key,
+                    "server_key": self.server_key,
                     "codex_home": env.get("CODEX_HOME"),
                     "thread_reuse": self.thread_reuse,
+                    "thread_isolation": "per-feature-thread-key",
                     "transport": "app-server",
                 },
                 ensure_ascii=False,
@@ -635,9 +680,12 @@ class _CodexAppServerWorker:
             deadline=deadline,
         )
 
-    def _ensure_thread_locked(self, *, deadline: float) -> str:
-        if self.thread_reuse and self.thread_id:
-            return self.thread_id
+    def _ensure_thread_locked(self, *, thread_key: str, deadline: float) -> str:
+        resolved_thread_key = str(thread_key or "default").strip() or "default"
+        if self.thread_reuse:
+            existing_thread_id = self.thread_ids.get(resolved_thread_key)
+            if existing_thread_id:
+                return existing_thread_id
         response = self._request_locked(
             "thread/start",
             {
@@ -663,7 +711,7 @@ class _CodexAppServerWorker:
         if not thread_id:
             raise RuntimeError(f"Codex app-server thread/start returned no thread id: {response}")
         if self.thread_reuse:
-            self.thread_id = thread_id
+            self.thread_ids[resolved_thread_key] = thread_id
         return thread_id
 
     def _thread_config(self) -> dict[str, Any]:
@@ -845,11 +893,11 @@ def _get_codex_app_server_worker(
     sandbox: str,
     workdir: Path,
     run_root: Path,
-    session_key: str,
+    server_key: str,
     feature_key: str | None,
 ) -> _CodexAppServerWorker:
     with _APP_SERVER_LOCK:
-        worker = _APP_SERVER_WORKERS.get(session_key)
+        worker = _APP_SERVER_WORKERS.get(server_key)
         if worker is None:
             worker = _CodexAppServerWorker(
                 command=command,
@@ -857,17 +905,17 @@ def _get_codex_app_server_worker(
                 sandbox=sandbox,
                 workdir=workdir,
                 run_root=run_root,
-                session_key=session_key,
+                server_key=server_key,
                 feature_key=feature_key,
             )
-            _APP_SERVER_WORKERS[session_key] = worker
+            _APP_SERVER_WORKERS[server_key] = worker
         return worker
 
 
-def _drop_codex_app_server_worker(session_key: str, worker: _CodexAppServerWorker) -> None:
+def _drop_codex_app_server_worker(server_key: str, worker: _CodexAppServerWorker) -> None:
     with _APP_SERVER_LOCK:
-        if _APP_SERVER_WORKERS.get(session_key) is worker:
-            _APP_SERVER_WORKERS.pop(session_key, None)
+        if _APP_SERVER_WORKERS.get(server_key) is worker:
+            _APP_SERVER_WORKERS.pop(server_key, None)
     worker.terminate()
 
 
@@ -953,23 +1001,30 @@ def invoke_codex_cli_text(
         response_format=response_format,
     )
     if codex_app_server_lm_enabled() and not _parse_bool(os.environ.get("HOST_CODEX_CLI_FORCE_EXEC"), default=False):
+        server_key = _app_server_key(
+            command=command,
+            model_id=resolved_model,
+            sandbox=sandbox,
+            workdir=workdir,
+        )
         worker = _get_codex_app_server_worker(
             command=command,
             model_id=resolved_model,
             sandbox=sandbox,
             workdir=workdir,
             run_root=run_root,
-            session_key=session_key,
+            server_key=server_key,
             feature_key=feature_key,
         )
         try:
             return worker.generate(
                 prompt=prompt,
                 timeout_ms=timeout_ms,
+                thread_key=session_key,
                 response_format=response_format,
             )
         except Exception:
-            _drop_codex_app_server_worker(session_key, worker)
+            _drop_codex_app_server_worker(server_key, worker)
             if not codex_exec_fallback_enabled():
                 raise
 
