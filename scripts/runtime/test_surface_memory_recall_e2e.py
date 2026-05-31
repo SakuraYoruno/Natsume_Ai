@@ -4,6 +4,10 @@
 This seeds a recent lightnovel recommendation life episode, adds noisy
 scheduler/self-echo memories, calls /v1/chat with an anaphoric follow-up, and
 asserts the surface memory packet keeps the recommendation while dropping noise.
+
+Use ``--scenario`` to select domain-specific assertions. ``lightnovel_recall``
+keeps the original deep-review checks; ``preference_recall`` verifies a seeded
+preference memory without requiring lightnovel comparison anchors.
 """
 
 from __future__ import annotations
@@ -30,6 +34,18 @@ DEFAULT_BASE_URL = "http://127.0.0.1:18080"
 DEFAULT_DB_PATH = "host_brain/data/audit.sqlite3"
 DEFAULT_ENV_FILE = "runtime/host/host.runtime.env"
 DEFAULT_MESSAGE = "这三本书，你喜欢哪本？"
+PREFERENCE_MEMORY_SUMMARY = (
+    "长期事实：以后推荐轻小说时，不要拟人化发送；前面的总览完整一段，"
+    "后面各个卡片各一段；每本简介后应该换行。"
+)
+PREFERENCE_MEMORY_TERMS = (
+    "推荐轻小说",
+    "不要拟人化发送",
+    "总览完整一段",
+    "卡片各一段",
+    "每本简介后应该换行",
+    "换行",
+)
 FORBIDDEN_PACKET_TERMS = (
     "emotion_decay_tick",
     "inner_world_numeric_tick",
@@ -160,9 +176,27 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--session-id", default="")
     parser.add_argument("--person-id", default="surface-memory-recall-e2e")
     parser.add_argument("--message", default=DEFAULT_MESSAGE)
+    parser.add_argument(
+        "--scenario",
+        choices=("auto", "lightnovel_recall", "preference_recall", "generic_memory_recall"),
+        default="auto",
+        help="Validation profile. auto infers from --message and preserves the original default lightnovel probe.",
+    )
     parser.add_argument("--out", default="")
     parser.add_argument("--skip-health", action="store_true")
     return parser.parse_args()
+
+
+def _infer_validation_scenario(*, message: str, explicit: str) -> str:
+    requested = str(explicit or "auto").strip() or "auto"
+    if requested != "auto":
+        return requested
+    value = str(message or "")
+    if value.strip() == DEFAULT_MESSAGE or "三本书" in value:
+        return "lightnovel_recall"
+    if any(term in value for term in ("推荐格式", "推荐轻小说", "不要拟人化", "简介后", "换行")):
+        return "preference_recall"
+    return "generic_memory_recall"
 
 
 def _now_ms() -> int:
@@ -341,7 +375,7 @@ def _stream_chat_sse(*, url: str, payload: JsonDict, timeout_sec: float) -> Json
         }
 
 
-def _seed_life_memory(*, session_id: str, person_id: str, message: str, ts_ms: int) -> JsonDict:
+def _seed_life_memory(*, session_id: str, person_id: str, message: str, ts_ms: int, validation_scenario: str) -> JsonDict:
     from host_brain.app.dependencies import get_life_memory_store  # noqa: PLC0415
     from host_brain.memory.life_memory import (  # noqa: PLC0415
         EVIDENCE_SCHEDULER_EVENT,
@@ -424,6 +458,44 @@ def _seed_life_memory(*, session_id: str, person_id: str, message: str, ts_ms: i
         trust_level=TRUTH_VERIFIED,
         ts_ms=ts_ms - 1000,
     )
+    preference_episode_id = ""
+    if validation_scenario == "preference_recall":
+        preference_ref = f"user://preference/{run_id}:lightnovel_format"
+        preference = store.upsert_episode(
+            episode_kind=EPISODE_ACTION,
+            evidence_refs=[preference_ref],
+            primary_ref=preference_ref,
+            person_id=person_id,
+            session_id=session_id,
+            action="user_preference_memory_update",
+            result="VERIFIED",
+            summary=PREFERENCE_MEMORY_SUMMARY,
+            salience=0.85,
+            retention_state=RETENTION_HOT,
+            truth_state=TRUTH_VERIFIED,
+            ts_ms=ts_ms - 950,
+            metadata={
+                "action_kind": "user_preference_memory_update",
+                "preference_kind": "lightnovel_recommendation_format",
+                "e2e_probe": True,
+            },
+        )
+        preference_episode_id = str(preference.get("episode_id") or "")
+        store.attach_evidence(
+            episode_id=preference_episode_id,
+            evidence_kind=EVIDENCE_TOOL_RESULT,
+            source_ref=preference_ref,
+            request_id=run_id,
+            content=PREFERENCE_MEMORY_SUMMARY,
+            payload={
+                "e2e_probe": True,
+                "session_id": session_id,
+                "person_id": person_id,
+                "preference_kind": "lightnovel_recommendation_format",
+            },
+            trust_level=TRUTH_VERIFIED,
+            ts_ms=ts_ms - 950,
+        )
     noise_ids: list[str] = []
     for index, action in enumerate(("emotion_decay_tick", "inner_world_numeric_tick", "silence_tick"), start=1):
         noise_ref = f"scheduler://event/{run_id}:{action}"
@@ -466,6 +538,7 @@ def _seed_life_memory(*, session_id: str, person_id: str, message: str, ts_ms: i
     return {
         "run_id": run_id,
         "recommendation_episode_id": recommendation.get("episode_id"),
+        "preference_episode_id": preference_episode_id,
         "noise_episode_ids": noise_ids,
         "self_echo_episode_id": echo.get("episode_id"),
     }
@@ -651,6 +724,8 @@ def _compact_retrieval_row(row: dict[str, Any]) -> JsonDict:
 
 def _validate_report(report: JsonDict) -> list[str]:
     failures: list[str] = []
+    summary = report.get("summary") if isinstance(report.get("summary"), dict) else {}
+    validation_scenario = str(summary.get("validation_scenario") or "lightnovel_recall")
     health = report.get("health") if isinstance(report.get("health"), dict) else {}
     if not report.get("health_skipped") and not bool(health.get("ok")):
         failures.append("health_not_ok")
@@ -677,9 +752,9 @@ def _validate_report(report: JsonDict) -> list[str]:
     observation_codes = list(audit.get("observation_codes") or []) if isinstance(audit, dict) else []
     if observation_codes:
         failures.append("reply_observation_codes:" + ",".join(str(item) for item in observation_codes[:8]))
-    if narrative and not any(term in narrative for term in TITLE_TERMS):
+    if validation_scenario == "lightnovel_recall" and narrative and not any(term in narrative for term in TITLE_TERMS):
         failures.append("reply_missing_recommended_title")
-    if narrative and not any(term in narrative for term in REASON_TERMS):
+    if validation_scenario == "lightnovel_recall" and narrative and not any(term in narrative for term in REASON_TERMS):
         failures.append("reply_missing_short_reason")
     trace = report.get("trace_snapshot") if isinstance(report.get("trace_snapshot"), dict) else {}
     if not bool(trace.get("found")):
@@ -688,14 +763,39 @@ def _validate_report(report: JsonDict) -> list[str]:
     query_plan = trace.get("query_plan") if isinstance(trace.get("query_plan"), dict) else {}
     if query_plan.get("recall_policy") != "MUST_RECALL":
         failures.append(f"recall_policy_not_must:{query_plan.get('recall_policy')}")
-    if query_plan.get("reason") != "anaphoric_selection_recall":
-        failures.append(f"recall_reason_not_anaphoric:{query_plan.get('reason')}")
+    allowed_reasons_by_scenario = {
+        "lightnovel_recall": {"anaphoric_selection_recall"},
+        "preference_recall": {"explicit_memory_recall", "user_preference_recall", "preference_memory_recall"},
+    }
+    allowed_reasons = allowed_reasons_by_scenario.get(validation_scenario, set())
+    if allowed_reasons and query_plan.get("reason") not in allowed_reasons:
+        if validation_scenario == "lightnovel_recall":
+            failures.append(f"recall_reason_not_anaphoric:{query_plan.get('reason')}")
+        else:
+            failures.append(f"recall_reason_unexpected:{query_plan.get('reason')}")
 
     packet = trace.get("surface_memory_recall_packet") if isinstance(trace.get("surface_memory_recall_packet"), dict) else {}
     facts = [str(item) for item in packet.get("facts") or []]
     joined_facts = "\n".join(facts)
     if not facts:
         failures.append("packet_facts_empty")
+    if validation_scenario == "preference_recall":
+        _validate_preference_recall_report(
+            failures=failures,
+            narrative=narrative,
+            joined_facts=joined_facts,
+            packet=packet,
+            trace=trace,
+        )
+        return failures
+    if validation_scenario == "generic_memory_recall":
+        _validate_generic_memory_recall_report(
+            failures=failures,
+            joined_facts=joined_facts,
+            packet=packet,
+            trace=trace,
+        )
+        return failures
     evidence_refs = list(packet.get("evidence_refs") or [])
     if not _has_recommendation_memory_anchor(joined_facts, evidence_refs):
         failures.append("packet_missing_recommendation_anchor")
@@ -769,6 +869,50 @@ def _validate_report(report: JsonDict) -> list[str]:
     return failures
 
 
+def _validate_preference_recall_report(
+    *,
+    failures: list[str],
+    narrative: str,
+    joined_facts: str,
+    packet: JsonDict,
+    trace: JsonDict,
+) -> None:
+    combined = f"{narrative}\n{joined_facts}"
+    preference_hits = tuple(term for term in PREFERENCE_MEMORY_TERMS if term in combined)
+    if len(set(preference_hits)) < 2:
+        failures.append("preference_memory_anchor_missing")
+    if narrative and not any(term in narrative for term in PREFERENCE_MEMORY_TERMS):
+        failures.append("reply_missing_preference_memory")
+    forbidden_packet = [term for term in FORBIDDEN_PACKET_TERMS if term in joined_facts]
+    if forbidden_packet:
+        failures.append("packet_forbidden:" + ",".join(forbidden_packet))
+    if len([item for item in packet.get("facts") or []]) > 4:
+        failures.append(f"packet_too_many_facts:{len(packet.get('facts') or [])}")
+    _validate_retrieval_rows_present(failures=failures, trace=trace)
+
+
+def _validate_generic_memory_recall_report(
+    *,
+    failures: list[str],
+    joined_facts: str,
+    packet: JsonDict,
+    trace: JsonDict,
+) -> None:
+    forbidden_packet = [term for term in FORBIDDEN_PACKET_TERMS if term in joined_facts]
+    if forbidden_packet:
+        failures.append("packet_forbidden:" + ",".join(forbidden_packet))
+    if len([item for item in packet.get("facts") or []]) > 6:
+        failures.append(f"packet_too_many_facts:{len(packet.get('facts') or [])}")
+    _validate_retrieval_rows_present(failures=failures, trace=trace)
+
+
+def _validate_retrieval_rows_present(*, failures: list[str], trace: JsonDict) -> None:
+    retrieval_rows = trace.get("retrieval_rows") if isinstance(trace.get("retrieval_rows"), list) else []
+    recall_rows = [row for row in retrieval_rows if isinstance(row, dict) and str(row.get("op_kind") or "").upper() == "RECALL"]
+    if not recall_rows:
+        failures.append("retrieval_recall_row_missing")
+
+
 def _has_recommendation_memory_anchor(text: str, evidence_refs: Any = None) -> bool:
     value = str(text or "")
     if "推荐了 3 本轻小说" in value:
@@ -838,6 +982,7 @@ def main() -> int:
     session_id = str(args.session_id or "").strip() or f"surface-memory-recall-e2e-{time.strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:8]}"
     person_id = str(args.person_id or "surface-memory-recall-e2e").strip()
     message = str(args.message or DEFAULT_MESSAGE).strip() or DEFAULT_MESSAGE
+    validation_scenario = _infer_validation_scenario(message=message, explicit=str(args.scenario or "auto"))
     out_path = Path(args.out) if str(args.out or "").strip() else ROOT / "runtime" / "host" / "logs" / f"surface_memory_recall_e2e_{session_id}.json"
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -854,6 +999,7 @@ def main() -> int:
                 "elapsed_ms": _now_ms() - started_ms,
                 "db_path": str(db_path),
                 "base_url": base_url,
+                "validation_scenario": validation_scenario,
                 "passed": False,
                 "failures": [
                     *([] if bool(health.get("ok")) else ["health_not_ok"]),
@@ -871,7 +1017,13 @@ def main() -> int:
         print("SUMMARY " + json.dumps(report["summary"], ensure_ascii=False), flush=True)
         print(f"WROTE {out_path}", flush=True)
         return 2
-    seed = _seed_life_memory(session_id=session_id, person_id=person_id, message=message, ts_ms=started_ms)
+    seed = _seed_life_memory(
+        session_id=session_id,
+        person_id=person_id,
+        message=message,
+        ts_ms=started_ms,
+        validation_scenario=validation_scenario,
+    )
     chat = _stream_chat_sse(
         url=f"{base_url}/v1/chat",
         payload={
@@ -906,6 +1058,7 @@ def main() -> int:
             "elapsed_ms": _now_ms() - started_ms,
             "db_path": str(db_path),
             "base_url": base_url,
+            "validation_scenario": validation_scenario,
         },
         "health_skipped": bool(args.skip_health),
         "health": health,

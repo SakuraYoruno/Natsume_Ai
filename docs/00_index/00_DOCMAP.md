@@ -331,6 +331,10 @@
   用途：灵魂系统完整性审计报告（2026-03-26）。对 Phase I-VIII 全部 8 阶段的代码实体、测试覆盖、设计文档对齐、里程碑追溯、模块导出 6 个维度进行交叉验证。
   读者：MASTER、实现层、Project（文档代理）。
 
+- docs/35_quality/audits/MEMORY_SYSTEM_INTEGRITY_TEST_20260531.md
+  用途：记忆系统完整性实测报告（2026-05-31）。记录 Host/Chroma/Redis/Neo4j/SQLite 运行面、LifeMemory 单测矩阵、MemoryHub 集成测试、acceptance suite、entrypoint/lifecycle/recall 场景批量脚本，以及 `/v1/chat` surface memory recall E2E 的通过标准和已知误报点。
+  读者：MASTER、实现层、运行节点、Project（文档代理）。
+
 - docs/45_testing/dev_test_reports/DEV_TEST_REPORT_wxautox4_bridge_20260327.md
 - docs/45_testing/dev_test_reports/DEV_TEST_REPORT_wxautox4_phase1_20260327.md
   用途：wxautox4 Bridge Phase 1 开发实测报告（2026-03-27）。记录 Phase 1 新增 9 个 actions（IsOnline/GetMyInfo/好友群列表/历史消息/媒体下载/监听管理/ChatWith）的实现，含 10 条待真机验证测试用例（T-P1-01~T-P1-10）。

@@ -4,7 +4,7 @@
 # 质量审计子目录
 
 版本：v1.0
-维护日期：2026-05-30
+维护日期：2026-05-31
 标签：历史归档
 
 本目录存放定期审计记录，建议按审核周期查询。
@@ -15,5 +15,6 @@
 3. 回到对应 `PRD` 或 `DevSpec` 条目确认落地情况。
 
 ## 关键文件
+- `MEMORY_SYSTEM_INTEGRITY_TEST_20260531.md`
 - `audit_report_20260311.md`
 - `DIGITAL_LIFE_GAP_CHECKLIST_V2_20260403.md`
