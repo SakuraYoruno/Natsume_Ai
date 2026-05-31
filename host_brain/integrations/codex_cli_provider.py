@@ -919,6 +919,86 @@ def _drop_codex_app_server_worker(server_key: str, worker: _CodexAppServerWorker
     worker.terminate()
 
 
+def prewarm_codex_app_server(
+    *,
+    model_id: str | None = None,
+    feature_keys: Sequence[str] | None = None,
+    timeout_ms: int | None = None,
+    sandbox: str | None = None,
+) -> dict[str, Any]:
+    """Start the shared Codex app-server and pre-create per-feature threads.
+
+    This is intentionally cheaper than running a model turn. It pays the
+    process startup and thread/start costs during Host boot so the first real
+    background task does not also pay app-server cold start latency.
+    """
+    command = codex_cli_command()
+    if not command:
+        return {"status": "SKIPPED", "reason": "codex_cli_unavailable"}
+    if not codex_app_server_lm_enabled():
+        return {"status": "SKIPPED", "reason": "codex_app_server_disabled"}
+
+    started_at = time.perf_counter()
+    run_root = _resolve_run_root()
+    run_root.mkdir(parents=True, exist_ok=True)
+    workdir = _resolve_workdir(run_root)
+    workdir.mkdir(parents=True, exist_ok=True)
+    resolved_model = resolve_codex_cli_model(model_id)
+    resolved_sandbox = str(sandbox or os.environ.get("HOST_CODEX_CLI_SANDBOX") or "read-only").strip() or "read-only"
+    timeout_s = max(1.0, resolve_codex_cli_timeout_ms(timeout_ms) / 1000.0)
+    deadline = time.monotonic() + timeout_s
+    raw_feature_keys = [str(item or "").strip() for item in (feature_keys or [])]
+    resolved_feature_keys = [item for item in raw_feature_keys if item] or ["pool:EXEC_INTENT:C"]
+    server_key = _app_server_key(
+        command=command,
+        model_id=resolved_model,
+        sandbox=resolved_sandbox,
+        workdir=workdir,
+    )
+    worker = _get_codex_app_server_worker(
+        command=command,
+        model_id=resolved_model,
+        sandbox=resolved_sandbox,
+        workdir=workdir,
+        run_root=run_root,
+        server_key=server_key,
+        feature_key="startup_prewarm",
+    )
+    try:
+        with worker._lock:
+            if worker.proc and worker.proc.poll() is None:
+                worker._ensure_started_locked(deadline=deadline)
+            else:
+                with _APP_SERVER_START_LOCK:
+                    worker._ensure_started_locked(deadline=deadline)
+            thread_keys: list[str] = []
+            for feature_key in resolved_feature_keys:
+                response_format = {"type": "json_object"} if "EXEC_INTENT" in feature_key else None
+                thread_key = _session_key(
+                    feature_key=feature_key,
+                    model_id=resolved_model,
+                    sandbox=resolved_sandbox,
+                    workdir=workdir,
+                    response_format=response_format,
+                )
+                worker._ensure_thread_locked(thread_key=thread_key, deadline=deadline)
+                thread_keys.append(thread_key)
+        return {
+            "status": "OK",
+            "model_id": resolved_model,
+            "pid": worker.proc.pid if worker.proc else None,
+            "feature_count": len(resolved_feature_keys),
+            "thread_count": len(worker.thread_ids),
+            "worker_count": len(_APP_SERVER_WORKERS),
+            "feature_keys": resolved_feature_keys,
+            "thread_keys": thread_keys,
+            "latency_ms": int(round((time.perf_counter() - started_at) * 1000)),
+        }
+    except Exception:
+        _drop_codex_app_server_worker(server_key, worker)
+        raise
+
+
 def _shutdown_codex_app_server_workers() -> None:
     with _APP_SERVER_LOCK:
         workers = list(_APP_SERVER_WORKERS.values())
@@ -1143,6 +1223,7 @@ __all__ = [
     "codex_cli_session_reuse_enabled",
     "codex_app_server_lm_enabled",
     "invoke_codex_cli_text",
+    "prewarm_codex_app_server",
     "resolve_codex_cli_home",
     "resolve_codex_cli_model",
     "resolve_codex_cli_reasoning_effort",

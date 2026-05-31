@@ -250,6 +250,56 @@ provider 级验证：
   - `codex.exe app-server ... --listen stdio://`
 - 旧的 `pool:INNER_WORLD:B`、`inner_activity`、`subagent_gateway`、`pool:EVOLUTION_DESIRE:B` 多组 app-server 进程未复现。
 
+### 启动预热方案
+
+2026-05-31 继续补齐 Host 启动预热：
+
+- `host_brain/integrations/codex_cli_provider.py` 新增 `prewarm_codex_app_server()`。
+- `host_brain/app/startup.py` 的 `warmup_codex_exec_intent_pool()` 会在 Host startup 时先预建共享 app-server 和常用 feature thread，再执行原有 EXEC_INTENT 真实模型 warmup。
+
+默认预热 feature：
+
+- `pool:EXEC_INTENT:C`
+- `inner_activity`
+- `subagent_gateway`
+- `pool:INNER_WORLD:B`
+- `pool:EVOLUTION_DESIRE:B`
+- `memory_distillation`
+- `pool:SCHEDULER_NARRATIVE:D`
+
+新增配置：
+
+```text
+HOST_STARTUP_CODEX_APP_SERVER_PREWARM_ENABLED=true
+HOST_CODEX_APP_SERVER_PREWARM_FEATURE_KEYS=pool:EXEC_INTENT:C,inner_activity,subagent_gateway,pool:INNER_WORLD:B,pool:EVOLUTION_DESIRE:B,memory_distillation,pool:SCHEDULER_NARRATIVE:D
+HOST_CODEX_APP_SERVER_PREWARM_TIMEOUT_MS=30000
+```
+
+注意：
+
+- `HOST_STARTUP_CODEX_APP_SERVER_PREWARM_ENABLED` 控制低成本 app-server/thread 预热。
+- `HOST_STARTUP_CODEX_EXEC_INTENT_WARMUP_ENABLED` 只控制 EXEC_INTENT 真实模型 warmup。
+- 即使 `HOST_STARTUP_CODEX_EXEC_INTENT_WARMUP_ENABLED=false`，Host 仍会执行 app-server/thread 预热，避免把通用热连接误关掉。
+
+预期效果：
+
+- 用户首轮不再承担 app-server 进程启动成本。
+- 常用后台 feature 首轮不再承担 `thread/start` 成本。
+- EXEC_INTENT 仍保留一次真实模型 warmup，继续预热模型调用链路。
+
+启动后实测：
+
+- Host restart elapsed：约 `13662ms`
+- Host PID：`45800`
+- `prewarm_status=OK`
+- `prewarm_latency_ms=665`
+- `prewarm_features=7`
+- `prewarm_threads=7`
+- `prewarm_workers=1`
+- `prewarm_pid=46760`
+- Host 子进程中仅有一组 app-server：`cmd.exe -> node.exe -> codex.exe`
+- `/ready` 返回 `READY`
+
 ### 后续架构建议
 
 WorkOrder runtime 另需单独处理：

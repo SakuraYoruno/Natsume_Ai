@@ -583,17 +583,23 @@ def warmup_chat_llm_runtime_profiles() -> str:
 
 def warmup_codex_exec_intent_pool() -> str:
     """预热 EXEC_INTENT 的 Codex app-server worker，避免首条聊天替后台分类付冷启动成本。"""
-    if not _parse_bool_env("HOST_STARTUP_CODEX_EXEC_INTENT_WARMUP_ENABLED", default=True):
+    app_server_prewarm_enabled = _parse_bool_env(
+        "HOST_STARTUP_CODEX_APP_SERVER_PREWARM_ENABLED",
+        default=True,
+    )
+    exec_intent_model_warmup_enabled = _parse_bool_env(
+        "HOST_STARTUP_CODEX_EXEC_INTENT_WARMUP_ENABLED",
+        default=True,
+    )
+    if not app_server_prewarm_enabled and not exec_intent_model_warmup_enabled:
         return "SKIPPED (disabled)"
     try:
         from host_brain.integrations.codex_cli_provider import (  # noqa: PLC0415
             invoke_codex_cli_text,
+            prewarm_codex_app_server,
             resolve_codex_cli_model,
         )
         from host_brain.integrations.llm_helpers import _codex_pool_migration_enabled  # noqa: PLC0415
-
-        if not _codex_pool_migration_enabled("EXEC_INTENT"):
-            return "SKIPPED (codex migration disabled or unavailable)"
 
         model_id = resolve_codex_cli_model(
             os.environ.get("HOST_LLM_POOL_CODEX_MODEL_ID") or os.environ.get("HOST_CODEX_MODEL_ID")
@@ -604,6 +610,48 @@ def warmup_codex_exec_intent_pool() -> str:
             minimum=1_000,
             maximum=10 * 60 * 1000,
         )
+        prewarm_detail = "prewarm=skipped"
+        if app_server_prewarm_enabled:
+            raw_feature_keys = str(
+                os.environ.get("HOST_CODEX_APP_SERVER_PREWARM_FEATURE_KEYS")
+                or (
+                    "pool:EXEC_INTENT:C,"
+                    "inner_activity,"
+                    "subagent_gateway,"
+                    "pool:INNER_WORLD:B,"
+                    "pool:EVOLUTION_DESIRE:B,"
+                    "memory_distillation,"
+                    "pool:SCHEDULER_NARRATIVE:D"
+                )
+            )
+            feature_keys = [item.strip() for item in raw_feature_keys.split(",") if item.strip()]
+            prewarm_timeout_ms = _parse_int_env(
+                "HOST_CODEX_APP_SERVER_PREWARM_TIMEOUT_MS",
+                default=min(timeout_ms, 30_000),
+                minimum=1_000,
+                maximum=10 * 60 * 1000,
+            )
+            prewarm_result = prewarm_codex_app_server(
+                model_id=model_id,
+                feature_keys=feature_keys,
+                timeout_ms=prewarm_timeout_ms,
+            )
+            prewarm_detail = (
+                f"prewarm_status={prewarm_result.get('status')}, "
+                f"prewarm_latency_ms={prewarm_result.get('latency_ms')}, "
+                f"prewarm_features={prewarm_result.get('feature_count')}, "
+                f"prewarm_threads={prewarm_result.get('thread_count')}, "
+                f"prewarm_workers={prewarm_result.get('worker_count')}, "
+                f"prewarm_pid={prewarm_result.get('pid')}"
+            )
+        if not exec_intent_model_warmup_enabled:
+            detail = f"model={model_id}, exec_intent_model_warmup=disabled, {prewarm_detail}"
+            _logger.info("Codex app-server 启动预热完成: %s", detail)
+            return f"OK ({detail})"
+        if not _codex_pool_migration_enabled("EXEC_INTENT"):
+            detail = f"model={model_id}, exec_intent_model_warmup=skipped_migration_disabled, {prewarm_detail}"
+            _logger.info("Codex app-server 启动预热完成: %s", detail)
+            return f"OK ({detail})"
         started_at = time.perf_counter()
         raw_text = invoke_codex_cli_text(
             model_id=model_id,
@@ -622,7 +670,7 @@ def warmup_codex_exec_intent_pool() -> str:
         if not isinstance(parsed, Mapping):
             raise RuntimeError("Codex EXEC_INTENT warmup returned non-object JSON")
         latency_ms = int(round((time.perf_counter() - started_at) * 1000))
-        detail = f"model={model_id}, latency_ms={latency_ms}, route={parsed.get('route') or 'unknown'}"
+        detail = f"model={model_id}, latency_ms={latency_ms}, route={parsed.get('route') or 'unknown'}, {prewarm_detail}"
         _logger.info("Codex EXEC_INTENT 预热完成: %s", detail)
         return f"OK ({detail})"
     except Exception as exc:
