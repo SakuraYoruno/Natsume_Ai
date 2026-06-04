@@ -135,7 +135,15 @@ def _tool_search_knowledge(args: dict[str, Any]) -> dict[str, Any]:
             content = str(getattr(hit, "content", "") or "")
             score = float(getattr(hit, "score", 0.0))
             doc_id = str(getattr(hit, "doc_id", "") or "")
-            items.append({"doc_id": doc_id, "content": content, "score": score})
+            source = str(getattr(hit, "source", "") or "")
+            metadata = dict(getattr(hit, "metadata", {}) or {})
+            items.append({
+                "doc_id": doc_id,
+                "content": content,
+                "score": score,
+                "source": source,
+                "metadata": metadata,
+            })
             lines.append(f"[{i}] (相关度={score:.2f}) {content}")
 
         result_text = "\n".join(lines)
@@ -194,7 +202,15 @@ def _tool_search_by_keyword(args: dict[str, Any]) -> dict[str, Any]:
             content = str(getattr(hit, "content", "") or "")
             score = float(getattr(hit, "score", 0.0))
             doc_id = str(getattr(hit, "doc_id", "") or "")
-            items.append({"doc_id": doc_id, "content": content, "score": score})
+            source = str(getattr(hit, "source", "") or "")
+            metadata = dict(getattr(hit, "metadata", {}) or {})
+            items.append({
+                "doc_id": doc_id,
+                "content": content,
+                "score": score,
+                "source": source,
+                "metadata": metadata,
+            })
             lines.append(f"[{i}] {content}")
 
         return {
@@ -252,7 +268,15 @@ def _tool_search_by_vector(args: dict[str, Any]) -> dict[str, Any]:
             content = str(getattr(hit, "content", "") or "")
             score = float(getattr(hit, "score", 0.0))
             doc_id = str(getattr(hit, "doc_id", "") or "")
-            items.append({"doc_id": doc_id, "content": content, "score": score})
+            source = str(getattr(hit, "source", "") or "")
+            metadata = dict(getattr(hit, "metadata", {}) or {})
+            items.append({
+                "doc_id": doc_id,
+                "content": content,
+                "score": score,
+                "source": source,
+                "metadata": metadata,
+            })
             lines.append(f"[{i}] (相似度={score:.2f}) {content}")
 
         return {

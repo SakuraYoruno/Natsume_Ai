@@ -85,6 +85,8 @@ data/download_model.log
 # ChromaDB 向量数据库运行时文件
 data/chroma_db/
 chroma_data/
+# Local generated knowledge bases
+data/knowledge_bases/
 # 其他数据库文件
 data/*.db
 data/*.sqlite3

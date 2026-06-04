@@ -10,11 +10,25 @@
 from __future__ import annotations
 
 import logging
+import os
 import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
 
+from host_brain.retrieval.markdown_kb_store import query_markdown_kbs
+
 logger = logging.getLogger(__name__)
+
+
+def _parse_bool_env(name: str, *, default: bool) -> bool:
+    raw = str(os.environ.get(name) or "").strip().lower()
+    if not raw:
+        return bool(default)
+    if raw in {"1", "true", "yes", "y", "on"}:
+        return True
+    if raw in {"0", "false", "no", "n", "off"}:
+        return False
+    return bool(default)
 
 
 # ---------------------------------------------------------------------------
@@ -94,6 +108,7 @@ class SemanticRecaller:
         chroma_host: str = "localhost",
         chroma_port: int = 8000,
         embed_fn: Optional[Callable[[str], List[float]]] = None,
+        markdown_kb_enabled: bool | None = None,
     ) -> None:
         """
         Args:
@@ -112,6 +127,11 @@ class SemanticRecaller:
         self._chroma_host = chroma_host
         self._chroma_port = chroma_port
         self._embed_fn = embed_fn
+        self._markdown_kb_enabled = (
+            _parse_bool_env("SEMANTIC_RECALL_MARKDOWN_KB_ENABLED", default=True)
+            if markdown_kb_enabled is None
+            else bool(markdown_kb_enabled)
+        )
 
         # Mock 后端：内存向量存储
         self._mock_store: List[Dict[str, Any]] = []
@@ -149,12 +169,71 @@ class SemanticRecaller:
         else:
             result = await self._recall_chroma(query, k, thresh, filter_metadata)
 
+        if result.filtered_count == 0:
+            markdown_result = self._recall_markdown_kb(
+                query,
+                top_k=k,
+                threshold=thresh,
+                filter_metadata=filter_metadata,
+                previous_result=result,
+            )
+            if markdown_result is not None and markdown_result.filtered_count > 0:
+                result = markdown_result
+
         result.latency_ms = int(time.time() * 1000) - t0
         logger.debug(
             "SemanticRecaller: 召回完成（query=%r, hits=%d, degraded=%s, latency=%dms）",
             query[:50], result.filtered_count, result.degraded, result.latency_ms,
         )
         return result
+
+    def _recall_markdown_kb(
+        self,
+        query: str,
+        *,
+        top_k: int,
+        threshold: float,
+        filter_metadata: Optional[Dict[str, Any]],
+        previous_result: SemanticRecallResult,
+    ) -> SemanticRecallResult | None:
+        if not self._markdown_kb_enabled:
+            return None
+        if filter_metadata:
+            return None
+        try:
+            kb_hits = query_markdown_kbs(query, top_k=top_k)
+        except Exception as exc:  # pragma: no cover - defensive runtime fallback
+            logger.debug("SemanticRecaller: Markdown KB fallback failed: %s", exc)
+            return None
+        if not kb_hits:
+            return None
+
+        hits = [
+            SemanticHit(
+                doc_id=hit.doc_id,
+                content=hit.content,
+                score=round(float(hit.score), 4),
+                metadata=dict(hit.metadata),
+                source=hit.source,
+            )
+            for hit in kb_hits
+        ][:top_k]
+        degraded_reason = None
+        if previous_result.degraded:
+            degraded_reason = (
+                f"{previous_result.degraded_reason or 'vector_recall_degraded'};"
+                "markdown_kb_fallback"
+            )
+        return SemanticRecallResult(
+            hits=hits,
+            query=query,
+            top_k=top_k,
+            threshold=threshold,
+            total_found=len(kb_hits),
+            filtered_count=len(hits),
+            degraded=bool(previous_result.degraded),
+            degraded_reason=degraded_reason,
+        )
 
     # ------------------------------------------------------------------
     # ChromaDB 后端
