@@ -12,6 +12,7 @@ import json
 import logging
 import math
 import os
+import queue
 import re
 import subprocess
 import sys
@@ -768,7 +769,7 @@ class SoVITSModelManager:
         self._config = config or TtsConfig()
         self._model: Any = None
         self._state = TtsState.UNLOADED
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
         self._actual_device: str = self._config.device
         self._backend_mode: str = "inprocess"
         self._load_error: str | None = None
@@ -806,6 +807,25 @@ class SoVITSModelManager:
 
             # 尝试加载 GPT-SoVITS 推理引擎
             try:
+                if _use_persistent_tts_worker():
+                    model = _PersistentProcessSoVITSAdapter(config=self._config)
+                    start_detail = model.start()
+                    self._model = model
+                    self._actual_device = self._config.device
+                    self._backend_mode = "persistent_worker"
+                    self._state = TtsState.READY
+                    self._load_error = None
+                    logger.info(
+                        "GPT-SoVITS persistent worker loaded: %s on %s (%s)",
+                        self._config.model_path,
+                        self._config.device,
+                        start_detail,
+                    )
+                    return TtsSynthResult(
+                        success=True,
+                        reason_code=None,
+                        detail=f"persistent worker loaded on {self._config.device}: {start_detail}",
+                    )
                 model = _load_sovits_model(
                     model_path=self._config.model_path,
                     device=self._config.device,
@@ -1194,7 +1214,7 @@ class AudioPlaybackDevice:
         self._sample_rate = sample_rate
         self._device_index = device_index
         self._playing = False
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
         self._stop_event = threading.Event()
         self._on_playback_finished: Callable[[], None] | None = None
         self._last_playback_started_ts_ms: int | None = None
@@ -1481,6 +1501,70 @@ class AudioPlaybackDevice:
 # Synthesizer callback factory (for SpeechPlaybackQueue integration)
 # ---------------------------------------------------------------------------
 
+def _resolve_tts_mouth_frame_interval_s() -> float:
+    raw = str(os.environ.get("EDGE_TTS_MOUTH_FRAME_INTERVAL_S") or "").strip()
+    if not raw:
+        return 0.08
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return 0.08
+    return max(0.02, min(0.2, value))
+
+
+def _compute_tts_mouth_energy_frames(
+    *,
+    audio_data: Any,
+    sample_rate: int,
+    frame_interval_s: float,
+) -> list[float]:
+    if audio_data is None:
+        return []
+    try:
+        import numpy as np
+    except Exception:
+        return []
+    try:
+        if hasattr(audio_data, "detach"):
+            audio_data = audio_data.detach().cpu().numpy()
+        arr = np.asarray(audio_data, dtype=np.float32)
+        if arr.size <= 0:
+            return []
+        if arr.ndim == 2:
+            if arr.shape[0] <= 8 and arr.shape[1] > arr.shape[0]:
+                arr = arr.T
+            mono = np.mean(arr, axis=1)
+        else:
+            mono = arr.reshape(-1)
+        if mono.size <= 0:
+            return []
+
+        peak = float(np.max(np.abs(mono))) if mono.size else 0.0
+        if peak > 1.5:
+            mono = mono / max(peak, 1.0)
+
+        frame_size = max(1, int(max(sample_rate, 1) * frame_interval_s))
+        values: list[float] = []
+        for start in range(0, int(mono.shape[0]), frame_size):
+            frame = mono[start : start + frame_size]
+            if frame.size <= 0:
+                continue
+            values.append(float(np.sqrt(np.mean(np.square(frame)))))
+        if not values:
+            return []
+
+        rms = np.asarray(values, dtype=np.float32)
+        floor = float(np.percentile(rms, 12))
+        ceil = float(np.percentile(rms, 96))
+        if ceil <= floor + 1e-6:
+            ceil = float(np.max(rms))
+        scale = max(ceil - floor, 1e-6)
+        normalized = np.clip((rms - floor) / scale, 0.0, 1.0)
+        return [round(float(item), 4) for item in normalized.tolist()]
+    except Exception:
+        return []
+
+
 def make_sovits_synthesizer(
     engine: SoVITSModelManager,
 ) -> Callable[[dict[str, Any]], dict[str, Any]]:
@@ -1536,6 +1620,12 @@ def make_sovits_synthesizer(
         duration_s = float(result.duration_s or 0.0)
         if audio_data is not None and hasattr(audio_data, "__len__"):
             duration_s = len(audio_data) / max(sample_rate, 1)
+        mouth_frame_interval_s = _resolve_tts_mouth_frame_interval_s()
+        mouth_frames = _compute_tts_mouth_energy_frames(
+            audio_data=audio_data,
+            sample_rate=sample_rate,
+            frame_interval_s=mouth_frame_interval_s,
+        )
         audio_path: str | None = None
         if _tts_export_requested(speak_event):
             audio_path = _export_tts_audio_wav(
@@ -1552,6 +1642,11 @@ def make_sovits_synthesizer(
             "sample_rate": sample_rate,
             "expressive_timing": expressive_timing,
         }
+        if mouth_frames:
+            synth_event["rms_frames"] = mouth_frames
+            synth_event["mouth_frames"] = mouth_frames
+            synth_event["mouth_frame_interval_s"] = round(mouth_frame_interval_s, 4)
+            synth_event["mouth_frame_count"] = len(mouth_frames)
         if audio_path:
             synth_event["audio_path"] = audio_path
             synth_event["audio_mime"] = "audio/wav"
@@ -1914,8 +2009,263 @@ class _FreshProcessSoVITSAdapter:
         return None
 
 
+class _PersistentProcessSoVITSAdapter:
+    """Persistent GPT-SoVITS worker backed by the model runtime Python."""
+
+    def __init__(self, *, config: TtsConfig) -> None:
+        self._config = config
+        self._process: subprocess.Popen[str] | None = None
+        self._stderr_handle: Any = None
+        self._stdout_queue: queue.Queue[str] = queue.Queue()
+        self._reader_thread: threading.Thread | None = None
+        self._lock = threading.RLock()
+
+    def start(self) -> str:
+        with self._lock:
+            if self._process is not None and self._process.poll() is None:
+                return "already running"
+            self._start_process_locked()
+            ready = self._read_message(
+                expected_event="ready",
+                request_id=None,
+                timeout_s=_env_float("EDGE_TTS_WORKER_START_TIMEOUT_S", 120.0, min_value=5.0, max_value=300.0),
+            )
+            if not bool(ready.get("success")):
+                raise RuntimeError(str(ready.get("detail") or "persistent worker failed to start"))
+            detail = str(ready.get("detail") or "ready")
+            load_s = ready.get("load_s")
+            if load_s is not None:
+                detail = f"{detail}; load_s={load_s}"
+            return detail
+
+    def synthesize(
+        self,
+        *,
+        text: str,
+        language: str,
+        emotion: str | None = None,
+        speed_factor: float | None = None,
+        energy_factor: float | None = None,
+    ) -> dict[str, Any]:
+        import numpy as np
+
+        with self._lock:
+            self.start()
+            fd, output_path = tempfile.mkstemp(prefix="edge_tts_worker_", suffix=".npz")
+            os.close(fd)
+            request_id = new_request_id()
+            payload = {
+                "request_id": request_id,
+                "text": text,
+                "language": language,
+                "emotion_tag": emotion,
+                "emotion_intensity": _infer_emotion_intensity_from_prosody(
+                    speed_factor=speed_factor,
+                    energy_factor=energy_factor,
+                ),
+                "speed_factor": speed_factor,
+                "output_path": output_path,
+            }
+            try:
+                process = self._require_process()
+                assert process.stdin is not None
+                process.stdin.write(json.dumps(payload, ensure_ascii=False, separators=(",", ":")) + "\n")
+                process.stdin.flush()
+                response = self._read_message(
+                    expected_event="synth_result",
+                    request_id=request_id,
+                    timeout_s=_env_float(
+                        "EDGE_TTS_WORKER_SYNTH_TIMEOUT_S",
+                        max(float(self._config.synth_timeout_s) + 15.0, 45.0),
+                        min_value=5.0,
+                        max_value=300.0,
+                    ),
+                )
+                if not bool(response.get("success")):
+                    raise RuntimeError(str(response.get("detail") or "persistent worker synth failed"))
+                with np.load(output_path) as data:
+                    audio = np.asarray(data["audio"], dtype=np.float32)
+                    sample_rate = int(data["sample_rate"])
+                return {
+                    "audio": audio,
+                    "sample_rate": sample_rate,
+                }
+            finally:
+                try:
+                    os.remove(output_path)
+                except OSError:
+                    pass
+
+    def close(self) -> None:
+        with self._lock:
+            process = self._process
+            self._process = None
+            if process is not None and process.poll() is None:
+                try:
+                    assert process.stdin is not None
+                    process.stdin.write(json.dumps({"command": "shutdown"}, separators=(",", ":")) + "\n")
+                    process.stdin.flush()
+                    process.wait(timeout=3)
+                except Exception:
+                    try:
+                        process.terminate()
+                        process.wait(timeout=3)
+                    except Exception:
+                        try:
+                            process.kill()
+                        except Exception:
+                            pass
+            if self._stderr_handle is not None:
+                try:
+                    self._stderr_handle.close()
+                except Exception:
+                    pass
+                self._stderr_handle = None
+
+    def _start_process_locked(self) -> None:
+        repo_root = _resolve_tts_repo_root()
+        logs_dir = os.path.join(repo_root, "runtime", "edge", "logs")
+        os.makedirs(logs_dir, exist_ok=True)
+        self._stderr_handle = open(
+            os.path.join(logs_dir, "tts_worker.stderr.log"),
+            "a",
+            encoding="utf-8",
+            errors="ignore",
+        )
+        env = dict(os.environ)
+        env["EDGE_TTS_PERSISTENT_WORKER_CHILD"] = "1"
+        env["PYTHONIOENCODING"] = "utf-8"
+        env["PYTHONPATH"] = repo_root + (os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else "")
+        cmd = [
+            _resolve_tts_worker_python(self._config),
+            "-u",
+            os.path.join(repo_root, "edge_client", "actuators", "tts_persistent_worker.py"),
+            "--model-path",
+            str(self._config.model_path),
+            "--device",
+            str(self._config.device),
+            "--sample-rate",
+            str(self._config.sample_rate),
+            "--language",
+            str(self._config.language),
+        ]
+        if self._config.ref_audio_path:
+            cmd.extend(["--ref-audio-path", str(self._config.ref_audio_path)])
+        if self._config.ref_text:
+            cmd.extend(["--ref-text", str(self._config.ref_text)])
+        if self._config.voice_bank_path:
+            cmd.extend(["--voice-bank-path", str(self._config.voice_bank_path)])
+        self._process = subprocess.Popen(
+            cmd,
+            cwd=repo_root,
+            env=env,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=self._stderr_handle,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            bufsize=1,
+        )
+        self._stdout_queue = queue.Queue()
+        self._reader_thread = threading.Thread(
+            target=self._read_stdout_loop,
+            name="edge-tts-worker-stdout",
+            daemon=True,
+        )
+        self._reader_thread.start()
+
+    def _read_stdout_loop(self) -> None:
+        process = self._process
+        if process is None or process.stdout is None:
+            return
+        for line in process.stdout:
+            self._stdout_queue.put(line)
+
+    def _require_process(self) -> subprocess.Popen[str]:
+        process = self._process
+        if process is None or process.poll() is not None:
+            self._start_process_locked()
+        process = self._process
+        if process is None or process.poll() is not None:
+            raise RuntimeError("persistent worker process is not running")
+        return process
+
+    def _read_message(
+        self,
+        *,
+        expected_event: str,
+        request_id: str | None,
+        timeout_s: float,
+    ) -> dict[str, Any]:
+        deadline = time.monotonic() + float(timeout_s)
+        while True:
+            process = self._process
+            if process is not None and process.poll() is not None and self._stdout_queue.empty():
+                raise RuntimeError(f"persistent worker exited with code {process.returncode}")
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError(f"persistent worker timed out waiting for {expected_event}")
+            try:
+                raw = self._stdout_queue.get(timeout=min(remaining, 0.25))
+            except queue.Empty:
+                continue
+            try:
+                payload = json.loads(str(raw or "").strip())
+            except Exception:
+                logger.debug("ignoring non-json TTS worker stdout: %s", str(raw or "").strip()[:200])
+                continue
+            if str(payload.get("event") or "") != expected_event:
+                continue
+            if request_id is not None and str(payload.get("request_id") or "") != str(request_id):
+                continue
+            return dict(payload)
+
+
+def _sys_path_key(path: str) -> str:
+    try:
+        return os.path.normcase(os.path.abspath(path))
+    except Exception:
+        return os.path.normcase(str(path or ""))
+
+
+def _preload_preferred_torch(runtime_site_packages: str) -> None:
+    if not runtime_site_packages or not os.path.isdir(runtime_site_packages):
+        return
+
+    runtime_key = _sys_path_key(runtime_site_packages)
+    original_path = list(sys.path)
+    filtered_path = [path for path in original_path if _sys_path_key(path) != runtime_key]
+
+    existing_torch = sys.modules.get("torch")
+    existing_file = str(getattr(existing_torch, "__file__", "") or "") if existing_torch is not None else ""
+    if existing_torch is not None and getattr(existing_torch, "nn", None) is not None:
+        return
+    if existing_torch is not None and existing_file and _sys_path_key(existing_file).startswith(runtime_key):
+        for name in list(sys.modules):
+            if name == "torch" or name.startswith("torch."):
+                sys.modules.pop(name, None)
+
+    try:
+        import importlib
+
+        sys.path[:] = filtered_path
+        torch = importlib.import_module("torch")
+        if getattr(torch, "nn", None) is None:
+            raise ImportError("preferred torch import has no nn module")
+    except Exception as exc:
+        logger.debug("preferred torch preload failed before GPT-SoVITS runtime path append: %s", exc)
+    finally:
+        sys.path[:] = original_path
+
+
 def _ensure_modern_sdk_paths(model_root: str) -> None:
     runtime_site_packages = os.path.join(model_root, "runtime", "Lib", "site-packages")
+    runtime_key = _sys_path_key(runtime_site_packages)
+    if runtime_site_packages and os.path.isdir(runtime_site_packages):
+        sys.path[:] = [path for path in sys.path if _sys_path_key(path) != runtime_key]
+        _preload_preferred_torch(runtime_site_packages)
+
     paths = [
         model_root,
         os.path.join(model_root, "GPT_SoVITS"),
@@ -2069,6 +2419,28 @@ def _resolve_tts_repo_root() -> str:
 def _allow_tts_subprocess_fallback() -> bool:
     raw = str(os.environ.get("EDGE_TTS_SUBPROCESS_HELPER") or "").strip().lower()
     return raw not in {"1", "true", "yes", "on"}
+
+
+def _use_persistent_tts_worker() -> bool:
+    if str(os.environ.get("EDGE_TTS_PERSISTENT_WORKER_CHILD") or "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }:
+        return False
+    raw = str(os.environ.get("EDGE_TTS_PERSISTENT_WORKER_ENABLED") or "").strip().lower()
+    return raw in {"1", "true", "yes", "on"}
+
+
+def _resolve_tts_worker_python(config: TtsConfig) -> str:
+    override = str(os.environ.get("EDGE_TTS_WORKER_PYTHON") or "").strip()
+    if override:
+        return override
+    model_runtime_python = os.path.join(str(config.model_path), "runtime", "python.exe")
+    if os.path.isfile(model_runtime_python):
+        return model_runtime_python
+    return sys.executable
 
 
 def _infer_emotion_intensity_from_prosody(

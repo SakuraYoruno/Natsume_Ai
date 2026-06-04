@@ -355,16 +355,19 @@ def is_dual_lang_enabled() -> bool:
 
 
 def infer_render_target_lang(*, user_message: str, core_narrative: str = "") -> str:
-    """ModelPlane §0.4: 二次式输出强制日文渲染。"""
+    """Resolve render language; production voice/text output is Chinese-only by default."""
     override = str(os.environ.get("HOST_RENDER_TARGET_LANG") or "").strip().lower()
-    if override in {"zh", "ja"}:
+    allow_japanese = str(os.environ.get("HOST_ALLOW_JAPANESE_OUTPUT") or "").strip().lower() in {"1", "true", "yes", "on"}
+    if override == "zh":
+        return "zh"
+    if override == "ja" and allow_japanese:
         return override
     combined = f"{str(user_message or '')}\n{str(core_narrative or '')}".strip().lower()
     if any(token in combined for token in ("中文", "汉语", "简体", "chinese", "mandarin")):
         return "zh"
-    if any(token in combined for token in ("日文", "日语", "日本語", "japanese")):
+    if allow_japanese and any(token in combined for token in ("日文", "日语", "日本語", "japanese")):
         return "ja"
-    if _contains_kana(combined):
+    if allow_japanese and _contains_kana(combined):
         return "ja"
     if _contains_cjk_ideograph(combined):
         return "zh"
@@ -636,7 +639,7 @@ def render_host_generation_prompt(prompt_payload: dict[str, Any]) -> str:
         "for text display and TTS voice synthesis) AND text_ja (legacy compatibility mirror, may be empty). "
         "Schema: {\"narrative\":{\"text_zh\":\"...\",\"text_ja\":\"...\"}, ...}. "
         "text_zh: concise spoken Simplified Chinese, TTS-friendly, 1-3 sentences. "
-        "text_ja: only fill this when the user explicitly asks for Japanese."
+        "text_ja: keep empty. Japanese output is disabled unless HOST_ALLOW_JAPANESE_OUTPUT is explicitly enabled."
     )
 
     host_rules = _mapping_list(host_prompt_templates, "rules")

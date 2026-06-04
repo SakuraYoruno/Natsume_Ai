@@ -2487,6 +2487,27 @@ async def chat_agent_sse_generator(
         candidate = _strip_internal_delegate_markers(candidate)
         candidate = _airlock_sanitize_output(candidate)
         candidate, _pii_stats = scrub_pii_egress(candidate)
+        user_message_for_quality = str(getattr(agent_input, "user_message", "") or "")
+        try:
+            from host_brain.persona.text_quality_gate import get_text_quality_gate  # noqa: PLC0415
+
+            quality = get_text_quality_gate().validate(
+                text=candidate,
+                render_profile="ja_voice" if str(render_target_lang or "").lower().startswith("ja") else "zh_text",
+                response_form="text",
+                user_message=user_message_for_quality,
+                semantic_forbidden=True,
+            )
+            _ri_meta["text_quality_gate"] = quality.as_dict()
+            if quality.hard_fail:
+                candidate = ""
+        except Exception as quality_exc:
+            _ri_meta["text_quality_gate"] = {
+                "accepted": True,
+                "status": "DEGRADED",
+                "reason_code": "TEXT_QUALITY_GATE_FAILED",
+                "detail": str(quality_exc)[:160],
+            }
         return candidate, _ri_meta, _pii_stats
 
     def _is_validation_acceptable(validation_candidate: Any) -> bool:

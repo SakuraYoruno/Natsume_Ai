@@ -551,6 +551,138 @@ function Ensure-LocalOllamaRuntime {
   }
 }
 
+function Is-MateEngineBridgeProcess {
+  param([int]$ProcessId)
+  $procInfo = Get-CimInstance -ClassName Win32_Process -Filter "ProcessId = $ProcessId" -ErrorAction SilentlyContinue
+  if ($null -eq $procInfo) {
+    return $false
+  }
+  $cmd = [string]$procInfo.CommandLine
+  return [bool]($cmd -and $cmd -like "*mateengine_bridge_server.py*")
+}
+
+function Get-MateEngineBridgeProcessIds {
+  $result = @()
+  $processes = Get-CimInstance -ClassName Win32_Process -ErrorAction SilentlyContinue
+  foreach ($procInfo in @($processes)) {
+    $procId = [int]$procInfo.ProcessId
+    if ($procId -le 0) {
+      continue
+    }
+    $cmd = [string]$procInfo.CommandLine
+    if ($cmd -and $cmd -like "*mateengine_bridge_server.py*") {
+      $result += $procId
+    }
+  }
+  return @($result | Sort-Object -Unique)
+}
+
+function Start-MateEngineBridgeRuntime {
+  param(
+    [string]$RepoRoot,
+    [hashtable]$EnvValues,
+    [string]$PythonExe,
+    [string]$LogDir,
+    [bool]$ForceRestartBridge,
+    [bool]$ShowWindow,
+    [bool]$Breakaway
+  )
+
+  $enabled = Parse-BoolValue -Value $(if ($EnvValues.ContainsKey("HOST_MATEENGINE_BRIDGE_ENABLED")) { $EnvValues["HOST_MATEENGINE_BRIDGE_ENABLED"] } else { $env:HOST_MATEENGINE_BRIDGE_ENABLED }) -Default $true
+  $hostValue = Get-EnvSetting -Values $EnvValues -Name "HOST_MATEENGINE_BRIDGE_HTTP_HOST" -DefaultValue "127.0.0.1"
+  $portValue = [int](Get-EnvSetting -Values $EnvValues -Name "HOST_MATEENGINE_BRIDGE_HTTP_PORT" -DefaultValue "18770")
+  $probeHostValue = if ($hostValue -eq "0.0.0.0" -or $hostValue -eq "::") { "127.0.0.1" } else { $hostValue }
+  $healthUrlValue = "http://$probeHostValue`:$portValue/health"
+  $scriptPath = Join-Path $RepoRoot "tools\mateengine_bridge_server.py"
+  $bridgeStdoutLog = Join-Path $LogDir "mateengine_bridge.stdout.log"
+  $bridgeStderrLog = Join-Path $LogDir "mateengine_bridge.stderr.log"
+
+  if (-not $enabled) {
+    return [ordered]@{
+      side = "mateengine_bridge"
+      status = "disabled_by_config"
+      host = $hostValue
+      port = $portValue
+      health_url = $healthUrlValue
+    }
+  }
+  if (-not (Test-Path -Path $scriptPath)) {
+    return [ordered]@{
+      side = "mateengine_bridge"
+      status = "degraded"
+      reason = "script_not_found"
+      script = $scriptPath
+      health_url = $healthUrlValue
+    }
+  }
+
+  if ($ForceRestartBridge) {
+    foreach ($candidatePid in @(Get-MateEngineBridgeProcessIds)) {
+      Stop-ProcessTree -ProcessId ([int]$candidatePid) | Out-Null
+    }
+  }
+
+  $listeningBridgePid = Get-ListeningPid -ProbePort $portValue
+  if ($null -ne $listeningBridgePid) {
+    if ((Is-MateEngineBridgeProcess -ProcessId ([int]$listeningBridgePid)) -or (Test-HttpQuick -Url $healthUrlValue -TimeoutSec 3)) {
+      return [ordered]@{
+        side = "mateengine_bridge"
+        status = "already_running"
+        pid = [int]$listeningBridgePid
+        host = $hostValue
+        port = $portValue
+        health_url = $healthUrlValue
+      }
+    }
+    return [ordered]@{
+      side = "mateengine_bridge"
+      status = "degraded"
+      reason = "port_in_use_by_other_process"
+      pid = [int]$listeningBridgePid
+      host = $hostValue
+      port = $portValue
+      health_url = $healthUrlValue
+    }
+  }
+
+  $env:MATEENGINE_BRIDGE_HTTP_HOST = $hostValue
+  $env:MATEENGINE_BRIDGE_HTTP_PORT = [string]$portValue
+  if (-not $env:MATEENGINE_SIGNAL_HOST) {
+    $env:MATEENGINE_SIGNAL_HOST = Get-EnvSetting -Values $EnvValues -Name "HOST_MATEENGINE_SIGNAL_HOST" -DefaultValue "127.0.0.1"
+  }
+  if (-not $env:MATEENGINE_SIGNAL_PORT) {
+    $env:MATEENGINE_SIGNAL_PORT = Get-EnvSetting -Values $EnvValues -Name "HOST_MATEENGINE_SIGNAL_PORT" -DefaultValue "32145"
+  }
+
+  $bridgeCommandLine = @(
+    (ConvertTo-CmdArgument -Value $PythonExe),
+    (ConvertTo-CmdArgument -Value $scriptPath),
+    "1>>",
+    (ConvertTo-CmdArgument -Value $bridgeStdoutLog),
+    "2>>",
+    (ConvertTo-CmdArgument -Value $bridgeStderrLog)
+  ) -join " "
+
+  $proc = Start-HostCommand `
+    -CommandLine $bridgeCommandLine `
+    -WorkingDirectory $RepoRoot `
+    -ShowWindow:$ShowWindow `
+    -Breakaway:$Breakaway
+
+  $healthOk = Wait-Http -Url $healthUrlValue -TimeoutSeconds 10
+  return [ordered]@{
+    side = "mateengine_bridge"
+    status = if ($healthOk) { "started" } else { "degraded" }
+    pid = [int]$proc.Id
+    host = $hostValue
+    port = $portValue
+    health_url = $healthUrlValue
+    stdout_log = $bridgeStdoutLog
+    stderr_log = $bridgeStderrLog
+    detail = if ($healthOk) { "local MateEngine bridge is ready" } else { "local MateEngine bridge did not pass health check" }
+  }
+}
+
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
 if (-not $EnvFile) {
   $defaultEnv = Join-Path $repoRoot ".env"
@@ -847,6 +979,15 @@ if ((Test-Path $venvPython) -and (Test-PythonRuntime -PythonPath $venvPython)) {
   }
   $pythonExe = $pythonCmd.Source
 }
+
+$mateengineBridgeResult = Start-MateEngineBridgeRuntime `
+  -RepoRoot $repoRoot `
+  -EnvValues $envValues `
+  -PythonExe $pythonExe `
+  -LogDir $LogDir `
+  -ForceRestartBridge:$ForceRestart.IsPresent `
+  -ShowWindow:$ShowConsoleWindow.IsPresent `
+  -Breakaway:$BreakawayFromConsole
 
 $hostArgs = @("-m", "host_brain", "--host", $BindHost, "--port", ([string]$Port), "--log-level", "INFO")
 if ($StartupCheck.IsPresent) {
@@ -1147,6 +1288,7 @@ $result = [ordered]@{
   canon_sync_status = $canonSyncStatus
   monitor_proxy_enabled = $monitorProxyEnabled
   obs_enabled = $obsEnabled
+  mateengine_bridge = $mateengineBridgeResult
   obs_process = $obsProcessResult
   monitor_proxy_status = [string]$(if ($monitorProxyResult.PSObject.Properties.Name -contains "status") { $monitorProxyResult.status } else { "" })
   monitor_proxy = $monitorProxyResult

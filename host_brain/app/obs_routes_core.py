@@ -790,7 +790,7 @@ def _extract_recall_summary_from_trace_nodes_raw(nodes_raw: List[Dict[str, Any]]
     if candidate_count is None and route_count is None and route_error_count is None and not output_dict:
         return None
 
-    return {
+    summary = {
         "candidate_count": candidate_count,
         "route_count": route_count,
         "route_error_count": route_error_count,
@@ -812,6 +812,23 @@ def _extract_recall_summary_from_trace_nodes_raw(nodes_raw: List[Dict[str, Any]]
             }
         ],
     }
+    for key in (
+        "items",
+        "topk",
+        "evidence_topk",
+        "selected_refs",
+        "evidence_refs",
+        "evidence_refs_count",
+        "pack_id",
+        "fallback_embedding_used",
+    ):
+        if key in source and source.get(key) is not None:
+            summary[key] = source.get(key)
+    if "topk" not in summary and output_dict.get("topk") is not None:
+        summary["topk"] = output_dict.get("topk")
+    if summary.get("topk") or summary.get("items") or summary.get("evidence_topk"):
+        summary["content_available"] = True
+    return summary
 
 
 def _fetch_request_rows(ledger: SQLiteLedger, table: str, request_id: str) -> List[Dict[str, Any]]:
@@ -979,6 +996,12 @@ def _summarize_recall(retrieval_rows: List[Dict[str, Any]]) -> Optional[Dict[str
             summary["route_error_count"] = payload_dict.get("route_error_count")
             if payload_dict.get("items"):
                 summary["items"] = payload_dict.get("items")
+        elif op_kind == "RERANK":
+            summary["topk_count"] = payload_dict.get("topk_count")
+            summary["rerank_provider"] = payload_dict.get("provider")
+            if payload_dict.get("topk"):
+                summary["topk"] = payload_dict.get("topk")
+                summary["content_available"] = True
         elif op_kind == "EVIDENCE_PACK":
             summary["evidence_refs_count"] = payload_dict.get("evidence_refs_count")
             summary["pack_id"] = payload_dict.get("pack_id")

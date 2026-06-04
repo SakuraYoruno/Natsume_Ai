@@ -27,7 +27,7 @@ def test_inner_world_llm_note_suppressed_during_recent_foreground_chat(monkeypat
         _forbidden_generate,
     )
 
-    note, focus, reason = _generate_inner_stream_note_from_llm(
+    note, focus, reason, meta = _generate_inner_stream_note_from_llm(
         state=InnerWorldState(user_id="user_1"),
         absence_band="recent",
         offline_hours=0.2,
@@ -37,6 +37,7 @@ def test_inner_world_llm_note_suppressed_during_recent_foreground_chat(monkeypat
     assert note == ""
     assert focus == ""
     assert reason == "INNER_WORLD_FOREGROUND_CHAT_COOLDOWN"
+    assert meta == {}
     assert called["count"] == 0
 
 
@@ -57,7 +58,7 @@ def test_inner_world_monologue_ignores_heavy_background_disable_when_core_ticks_
         lambda **_kwargs: (_ for _ in ()).throw(AssertionError("runtime should not resolve")),
     )
 
-    note, focus, reason = _generate_inner_stream_note_from_llm(
+    note, focus, reason, meta = _generate_inner_stream_note_from_llm(
         state=InnerWorldState(user_id="user_1"),
         absence_band="recent",
         offline_hours=0.2,
@@ -67,6 +68,7 @@ def test_inner_world_monologue_ignores_heavy_background_disable_when_core_ticks_
     assert note == "我先把没说完的事放在心里。"
     assert focus == "topic"
     assert reason == ""
+    assert meta == {}
 
 
 def test_inner_world_monologue_opens_circuit_when_model_unavailable(monkeypatch) -> None:
@@ -91,7 +93,7 @@ def test_inner_world_monologue_opens_circuit_when_model_unavailable(monkeypatch)
         lambda **_kwargs: {"available": False, "route_reason_code": "NO_MODEL"},
     )
 
-    note, focus, reason = _generate_inner_stream_note_from_llm(
+    note, focus, reason, meta = _generate_inner_stream_note_from_llm(
         state=InnerWorldState(user_id="user_1"),
         absence_band="recent",
         offline_hours=0.2,
@@ -101,10 +103,11 @@ def test_inner_world_monologue_opens_circuit_when_model_unavailable(monkeypatch)
     assert note == ""
     assert focus == ""
     assert reason.startswith("INNER_WORLD_LLM_CIRCUIT_OPEN:")
+    assert meta == {}
     assert _inner_world_llm_circuit_snapshot(now_ms=123456)["open"] is True
     assert calls["count"] == 1
 
-    note2, _focus2, reason2 = _generate_inner_stream_note_from_llm(
+    note2, _focus2, reason2, meta2 = _generate_inner_stream_note_from_llm(
         state=InnerWorldState(user_id="user_1"),
         absence_band="recent",
         offline_hours=0.2,
@@ -113,6 +116,7 @@ def test_inner_world_monologue_opens_circuit_when_model_unavailable(monkeypatch)
 
     assert note2 == ""
     assert reason2 == "INNER_WORLD_LLM_CIRCUIT_OPEN"
+    assert meta2 == {}
     assert calls["count"] == 1
 
 
@@ -151,7 +155,7 @@ def test_inner_world_monologue_retries_after_circuit_cooldown(monkeypatch) -> No
     opened_until = _inner_world_llm_circuit_snapshot(now_ms=10_000)["opened_until_ms"]
     calls["available"] = True
 
-    note, focus, reason = _generate_inner_stream_note_from_llm(
+    note, focus, reason, meta = _generate_inner_stream_note_from_llm(
         state=InnerWorldState(user_id="user_1"),
         absence_band="recent",
         offline_hours=0.2,
@@ -161,6 +165,7 @@ def test_inner_world_monologue_retries_after_circuit_cooldown(monkeypatch) -> No
     assert note == "我在按自己的修正方向重新整理。"
     assert focus == "plan"
     assert reason == ""
+    assert meta == {}
     assert _inner_world_llm_circuit_snapshot(now_ms=int(opened_until) + 1)["open"] is False
     assert calls["count"] == 2
 

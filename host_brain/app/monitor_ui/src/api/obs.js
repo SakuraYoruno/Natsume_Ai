@@ -17,6 +17,7 @@ const HOT_GET_PREFIXES = [
   '/obs/insights/summary-snapshot',
   '/obs/digital-life/overview-snapshot',
   '/obs/digital-life/wall-clock-soak',
+  '/obs/avatar/state',
   '/obs/codex-bio-ops',
   '/obs/life-body',
   '/obs/life-timeline',
@@ -256,6 +257,20 @@ export function fetchDigitalLifeWallClockSoak(params = {}) {
     Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))
   ).toString()
   return request(`/obs/digital-life/wall-clock-soak${qs ? '?' + qs : ''}`)
+}
+
+export function fetchAvatarState(params = {}) {
+  const qs = new URLSearchParams(
+    Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))
+  ).toString()
+  return request(`/obs/avatar/state${qs ? '?' + qs : ''}`)
+}
+
+export function postAvatarBehavior(body = {}) {
+  return request('/obs/avatar/behavior', {
+    method: 'POST',
+    body: JSON.stringify(body || {}),
+  })
 }
 
 export function fetchCodexBioOpsObservability(params = {}) {

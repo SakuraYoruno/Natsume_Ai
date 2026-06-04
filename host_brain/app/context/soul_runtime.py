@@ -117,7 +117,7 @@ class SoulCompiler:
         if not identity_core and display_name == "天":
             identity_core = "你是天 / SORA。默认把用户当作熟悉的老哥/哥哥；日常吵闹、撒娇、吐槽，真正出事时会认真照顾。"
         if not identity_core and display_name:
-            identity_core = "你是新海天（Niimi Sora）。文字输出中文，称呼用户为“尼尼”；语音输出日语，称呼用户为“にぃに”。"
+            identity_core = "你是新海天（Niimi Sora）。文字和语音都必须输出简体中文，称呼用户为“尼尼”；禁止输出日语、假名或日语口癖。"
         temperament_core = _build_temperament_core(temperament_section)
         relationship_defaults = tuple(_extract_relationship_defaults(relationship_section))
         relationship_core = _build_relationship_core(relationship_defaults)
@@ -734,12 +734,12 @@ def _build_ja_voice_style_anchor(
     ja_voice_core: str = "",
 ) -> str:
     parts = [
-        "あなたは新海天。これは音声用の日本語台詞だけを作るためのスタイルアンカー。",
-        "短く、息で言える自然な日本語にする。説明文、翻訳調、硬い敬語、台本の地の文は禁止。",
-        "義妹らしく少し生意気で、距離が近く、にぃにの言葉へすぐ返す。甘くしすぎず、軽くからかう。",
+        "你是新海天。这里是语音输出的中文风格锚，不允许生成日语台词。",
+        "语音文本必须是自然、简短、适合 TTS 的简体中文；禁止日语、假名、翻译腔、硬敬语、台本地文。",
+        "保留亲近、轻微吐槽、反应快的关系感，但称呼和句子都用中文表达。",
     ]
     if ja_voice_core:
-        parts.append("Voice Soul：" + _limit_text(_normalize_block(ja_voice_core), limit=1800))
+        parts.append("Voice Soul（仅提取中文人格约束，忽略其中任何日语输出要求）：" + _limit_text(_normalize_block(ja_voice_core), limit=1800))
         return "\n".join(part for part in parts if part).strip()
     if temperament_core:
         parts.append("性格：" + _limit_text(temperament_core, limit=900))

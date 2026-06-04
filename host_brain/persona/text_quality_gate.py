@@ -17,6 +17,9 @@ _KANA_RE = re.compile(r"[\u3040-\u30ff]")
 _ROLE_PREFIX_RE = re.compile(r"^(新海天|天|assistant|ai|系统)\s*[：:]\s*", re.IGNORECASE)
 _JSONISH_RE = re.compile(r"^\s*[\[{].*[\]}]\s*$", re.DOTALL)
 _BROKEN_REPEAT_RE = re.compile(r"(.{1,8})\1{3,}")
+_NONE_RUN_RE = re.compile(r"(?:None){4,}", re.IGNORECASE)
+_RUNTIME_STATUS_LEAK_RE = re.compile(r"^\s*当前任务\s+\S+\s+状态为\s+\S+", re.IGNORECASE)
+_CHANNEL_CONTEXT_LEAK_RE = re.compile(r"^\s*当前输入渠道\s*[：:]", re.IGNORECASE)
 _ASCII_ELLIPSIS_RE = re.compile(r"\.\.\.")
 _TRAILING_INCOMPLETE_QUESTION_RE = re.compile(r"(卡在哪|在哪|哪里|怎么|什么|为啥|为什么)\s*$")
 _THIN_ACK_ONLY_RE = re.compile(
@@ -1008,6 +1011,12 @@ class TextQualityGate:
             reasons.append("JSON_OR_STRUCTURED_OUTPUT")
         if _BROKEN_REPEAT_RE.search(normalized):
             reasons.append("BROKEN_REPETITION")
+        if _NONE_RUN_RE.search(normalized):
+            reasons.append("NONE_RUN_OUTPUT")
+        if _RUNTIME_STATUS_LEAK_RE.search(normalized):
+            reasons.append("RUNTIME_STATUS_LEAK")
+        if _CHANNEL_CONTEXT_LEAK_RE.search(normalized):
+            reasons.append("CHANNEL_CONTEXT_LEAK")
         if _ASCII_ELLIPSIS_RE.search(normalized):
             reasons.append("ASCII_ELLIPSIS_OUTPUT")
         if _TRAILING_INCOMPLETE_QUESTION_RE.search(normalized):
@@ -1064,6 +1073,9 @@ class TextQualityGate:
             "MOJIBAKE",
             "JSON_OR_STRUCTURED_OUTPUT",
             "BROKEN_REPETITION",
+            "NONE_RUN_OUTPUT",
+            "RUNTIME_STATUS_LEAK",
+            "CHANNEL_CONTEXT_LEAK",
             "STAGE_DIRECTION_OUTPUT",
             "EXPECTED_JAPANESE_VOICE_TEXT",
             "EXPECTED_ZH_TEXT",

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import time
 from typing import Any
 
@@ -87,12 +88,13 @@ def _persist_inner_world_stream_memory(
     event_ts = int(result.get("last_spontaneous_ts_ms") or 0)
     if not note or event_ts <= 0 or (now_ms - event_ts) > 120_000:
         return
-    event_key = f"{user_id}:{skill_name}:{event_ts}"
+    event_key = _inner_world_memory_event_key(user_id=user_id, event_ts=event_ts, note=note)
     if event_key in _INNER_WORLD_MEMORY_WRITTEN_EVENT_IDS:
         return
     try:
         from host_brain.app.observability_persist import persist_background_event_memory  # noqa: PLC0415
 
+        event_meta = dict(result.get("last_spontaneous_event") or {})
         persist_result = persist_background_event_memory(
             event_source="inner_world",
             event_id=event_key,
@@ -109,15 +111,35 @@ def _persist_inner_world_stream_memory(
                 "source": result.get("last_spontaneous_source"),
                 "absence_band": result.get("absence_band"),
                 "offline_hours": result.get("offline_hours"),
-                "emotion_tag": "NEUTRAL",
+                "focus": event_meta.get("focus") or result.get("last_spontaneous_focus"),
+                "emotion_tag": event_meta.get("emotion_tag") or "NEUTRAL",
+                "salience": event_meta.get("salience"),
+                "core_need": event_meta.get("core_need"),
+                "tension": event_meta.get("tension"),
+                "next_tendency": event_meta.get("next_tendency"),
+                "thought_form": event_meta.get("thought_form"),
+                "novelty_score": event_meta.get("novelty_score"),
+                "liveliness_score": event_meta.get("liveliness_score"),
+                "quality_flags": list(event_meta.get("quality_flags") or []),
+                "continuity_refs": list(event_meta.get("continuity_refs") or []),
+                "surface_hint": event_meta.get("surface_hint"),
+                "thought_id": event_meta.get("thought_id"),
+                "should_distill_to_memory": bool(event_meta.get("should_distill_to_memory", True)),
             },
         )
-        if str(persist_result.get("status") or "").upper() == "OK":
+        if str(persist_result.get("status") or "").upper() in {"OK", "SUCCESS"}:
             _INNER_WORLD_MEMORY_WRITTEN_EVENT_IDS.add(event_key)
             if len(_INNER_WORLD_MEMORY_WRITTEN_EVENT_IDS) > 512:
                 _INNER_WORLD_MEMORY_WRITTEN_EVENT_IDS.clear()
     except Exception:
         pass
+
+
+def _inner_world_memory_event_key(*, user_id: str, event_ts: int, note: str) -> str:
+    digest = hashlib.sha1(
+        f"{user_id}|{int(event_ts)}|{str(note or '').strip()}".encode("utf-8", errors="ignore")
+    ).hexdigest()[:12]
+    return f"{user_id}:inner_world:{int(event_ts)}:{digest}"
 
 
 def _execute_inner_world_tick(

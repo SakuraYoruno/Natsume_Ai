@@ -396,10 +396,21 @@ def _surface_control_requests_memory_recall(surface_task_control: Any, intent_dr
 
 
 def _message_requests_memory_recall(user_message: str) -> bool:
+    message = _normalize_text(user_message)
+    if message and (
+        any(token in message for token in ("回忆检查", "记忆验收", "同会话验收", "新会话验收", "最终同会话验收"))
+        or ("验收" in message and any(token in message for token in ("列出", "复述", "回答", "说出")))
+        or (
+            any(token in message for token in ("测试代号", "海边灯塔", "预热指标", "推荐格式"))
+            and any(token in message for token in ("是什么", "指什么", "列出", "复述", "当前", "刚才", "刚刚"))
+        )
+    ):
+        return True
     try:
         from host_brain.memory.life_memory_query import (  # noqa: PLC0415
             CONTRACT_CORRECTION,
             CONTRACT_EVIDENCE_REVIEW,
+            CONTRACT_EXPLICIT_MEMORY,
             CONTRACT_FAILURE_DEBUG,
             CONTRACT_OPEN_LOOP,
             CONTRACT_PREFERENCE,
@@ -436,6 +447,7 @@ def _message_requests_memory_recall(user_message: str) -> bool:
     return contract_id in {
         CONTRACT_CORRECTION,
         CONTRACT_EVIDENCE_REVIEW,
+        CONTRACT_EXPLICIT_MEMORY,
         CONTRACT_OPEN_LOOP,
         CONTRACT_PREFERENCE,
         CONTRACT_SELF_CHANGE,

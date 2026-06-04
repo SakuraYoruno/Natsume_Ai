@@ -1,11 +1,16 @@
 受众：MASTER
 标题：需求可追溯性矩阵（Requirements Trace）
 
-版本：v1.6
+版本：v1.7
 
 定位：以“条目式矩阵”维护 PRD（FR）→ DevSpec（章节/契约点）→ DevTasks（TASK）→ Tests（T-xx）的覆盖关系；requirements_trace.csv 可继续承载表格视图（若未维护或滞后，以本 md 为准）。
 
 ---
+## 维护记录（2026-06-03）
+- 本次同步范围：CI / delivery gate / doc freshness gate 的追踪口径校准；不新增 PRD 需求编号。
+- 代码与测试事实：`.github/workflows/doc-freshness-gate.yml` 需与 Node24 actions runtime 约束一致；`tests/unit/test_ci_workflow_runtime.py` 覆盖 workflow runtime env；`tests/unit/test_codex_cli_provider.py` 覆盖 Codex app-server worker session/thread 兼容；`tests/unit/test_startup_chat_runtime_warmup.py` 覆盖启动 warmup disabled 语义；`tests/unit/test_chroma_client_embed_text.py` 覆盖 repo-local embedding model ref；`tests/integration/test_obs_routes_integration.py` 覆盖 fallback trace recall 摘要形状；`tests/contract/test_quality_contract.py` 与 `tests/contract/test_bond_static_scan_contract.py` 继续作为质量与 Bond SSOT 静态门禁。
+- 追踪结论：上述变更属于既有 R-06（Bond SSOT）、R-13（观测/Trace）、R-20（CI 质量门禁）与后续 M21+ 运行时质量条目的维护更新；覆盖状态保持 DONE，后续若新增功能需求再分配新的 R 编号。
+
 ## R-01
 - 系统级需求：单向链执行：LLM（语义内核草案）→Governor→Skills→Audit
 - PRD 需求编号（FR）：FR-CORE-001, FR-AUDIT-001, FR-SKILL-001

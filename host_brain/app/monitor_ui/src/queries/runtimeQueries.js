@@ -1,5 +1,6 @@
 import { useCallback } from 'react'
 import {
+  fetchAvatarState,
   fetchDigitalLifeRuntimeSnapshot,
   fetchPromptBuilderStats,
   fetchVtsStats,
@@ -71,6 +72,29 @@ export function useRuntimeSignalsQuery({
     promptStats: query.data?.promptStats ?? null,
     error: query.data?.runtimeError ?? query.error ?? null,
     promptError: query.data?.promptError ?? null,
+    reload: query.refetch,
+  }
+}
+
+export function useAvatarStateQuery({
+  pollingEnabled = false,
+  pollingTick = 0,
+  pollingInterval = 15,
+} = {}) {
+  const queryFn = useCallback(async () => fetchAvatarState(), [])
+  const query = useObservabilityQuery({
+    queryKey: OBS_QUERY_KEYS.avatarState(),
+    queryFn,
+    pollingEnabled,
+    pollingTick,
+    pollingIntervalMs: Math.max(15, Number(pollingInterval || 15)) * 1000,
+    minPollingIntervalMs: 15_000,
+    staleTimeMs: OBS_STALE_TIMES.runtime,
+  })
+
+  return {
+    ...query,
+    avatarState: query.data ?? null,
     reload: query.refetch,
   }
 }

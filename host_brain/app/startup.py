@@ -591,7 +591,7 @@ def warmup_codex_exec_intent_pool() -> str:
         "HOST_STARTUP_CODEX_EXEC_INTENT_WARMUP_ENABLED",
         default=True,
     )
-    if not app_server_prewarm_enabled and not exec_intent_model_warmup_enabled:
+    if not exec_intent_model_warmup_enabled:
         return "SKIPPED (disabled)"
     try:
         from host_brain.integrations.codex_cli_provider import (  # noqa: PLC0415

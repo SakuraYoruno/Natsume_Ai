@@ -325,7 +325,13 @@ _TASK_TRANSLATE_RE = re.compile(
     re.IGNORECASE,
 )
 _TASK_MEMORY_RE = re.compile(
-    r"(记住|记一下|记下来|写入记忆|保存.*记忆|记到记忆|remember this|save this memory|偏好是|我的偏好)",
+    r"(记住|记一下|记下来|写入记忆|保存.*记忆|记到记忆|remember this|save this memory|偏好是|我的偏好"
+    r"|项目事实|测试事实|记忆事实|补(?:一个|充)?[^。！？\n]{0,24}事实|记录[^。！？\n]{0,24}事实)",
+    re.IGNORECASE,
+)
+_TASK_MEMORY_FACT_RE = re.compile(
+    r"(项目事实|测试事实|记忆事实|事实[:：]|补(?:一个|充)?[^。！？\n]{0,24}事实|记录[^。！？\n]{0,24}事实"
+    r"|测试代号|海边灯塔|app-server预热|app server预热|预热指标)",
     re.IGNORECASE,
 )
 _TASK_CODE_RE = re.compile(
@@ -982,7 +988,30 @@ def _looks_like_open_app_request(text: str) -> bool:
     normalized = _normalize_text(text)
     if not normalized:
         return False
+    if _TASK_MEMORY_RE.search(normalized) or _TASK_MEMORY_FACT_RE.search(normalized):
+        return False
     return bool(_TASK_OPEN_APP_VERB_RE.search(normalized) and _TASK_OPEN_APP_HINT_RE.search(normalized))
+
+
+def _build_memory_fact_route_seed(text: str) -> dict[str, Any] | None:
+    normalized = _normalize_text(text)
+    if not normalized or not _TASK_MEMORY_FACT_RE.search(normalized):
+        return None
+    return {
+        "route": "skill",
+        "target_id": "memory_store",
+        "task": normalized,
+        "reason_code": "THALAMUS_RULE_MEMORY_FACT_STORE",
+        "confidence": 0.96,
+        "route_source": "thalamus.rule",
+        "args": {
+            "content": normalized,
+            "query": normalized,
+            "text": normalized,
+            "source": "thalamus",
+            "user_message": normalized,
+        },
+    }
 
 
 def _build_codex_workspace_route_seed(text: str) -> dict[str, Any] | None:
@@ -1837,9 +1866,30 @@ def classify_task_intent_by_rules(text: str) -> dict[str, Any] | None:
             "route_source": "rule",
         }
 
+    if _TASK_MEMORY_RE.search(normalized):
+        return {
+            "route": "skill",
+            "target_id": "memory_store",
+            "task": normalized,
+            "reason_code": "RULE_FORCE_MEMORY_STORE",
+            "confidence": 0.96,
+            "route_source": "rule",
+            "args": {
+                "content": normalized,
+                "query": normalized,
+                "text": normalized,
+                "source": "thalamus",
+                "user_message": normalized,
+            },
+        }
+
     direct_seed = _build_direct_route_seed(normalized)
     if isinstance(direct_seed, dict):
         return direct_seed
+
+    memory_fact_seed = _build_memory_fact_route_seed(normalized)
+    if isinstance(memory_fact_seed, dict):
+        return memory_fact_seed
 
     compact = re.sub(r"\s+", "", normalized).lower()
 

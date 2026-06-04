@@ -30,6 +30,11 @@ _OPEN_APP_HINT_RE = re.compile(
     r"(本地|应用|软件|程序|app|酷狗|kugou|qq音乐|网易云|spotify|浏览器|微信|qq|音乐)",
     re.IGNORECASE,
 )
+_OPEN_APP_MEMORY_FACT_BLOCKER_RE = re.compile(
+    r"(记住|记一下|记下来|项目事实|测试事实|记忆事实|事实[:：]|补(?:一个|充)?[^。！？\n]{0,24}事实"
+    r"|测试代号|海边灯塔|app-server预热|app server预热|预热指标)",
+    re.IGNORECASE,
+)
 _DELEGATE_MARKER_RE = re.compile(r"\[DELEGATE:[^\]]+\]", re.IGNORECASE)
 _MEMORY_DISCONTINUITY_FILLER_RE = re.compile(
     r"^\s*(?:嗯？|哈？|欸？)?\s*(?:老哥|哥哥|尼尼)?\s*(?:突然问这个|怎么突然(?:问|提|说)?(?:这个)?|你突然(?:问|提|说)?(?:这个)?|突然(?:问|提|说)这个)[…。，,、\s]*"
@@ -308,6 +313,8 @@ def _runtime_text(key: str, *, render_target_lang: str | None = None, **kwargs: 
 def _looks_like_open_app_request(user_message: str) -> bool:
     normalized = re.sub(r"\s+", "", str(user_message or "")).strip()
     if not normalized:
+        return False
+    if _OPEN_APP_MEMORY_FACT_BLOCKER_RE.search(normalized):
         return False
     return bool(_OPEN_APP_VERB_RE.search(normalized) and _OPEN_APP_HINT_RE.search(normalized))
 

@@ -1,8 +1,8 @@
 受众：MASTER
 标题：数字生命主体化前端架构方案（2026-04-19）
 
-版本：v1.1
-日期：2026-04-19
+版本：v1.2
+日期：2026-06-03
 
 # 数字生命主体化前端架构方案（2026-04-19）
 
@@ -12,6 +12,8 @@
 > - 当前实际主导航仍是 4 组：`数字生命体 / 运营 / 器官级观测 / 外周执行`。
 > - `host_brain/app/monitor_ui/src/components/DigitalLifeNav.jsx` 当前仍保留为数字生命体快捷导航组件，但没有接入主导航壳。
 > - 下文第 3 节保留的是本轮重构立项时的问题基线；当前实际落地状态请结合第 12.4 节与第 14 节各阶段完成情况一起阅读。
+> - 2026-06-03 代码校准：`host_brain/app/monitor_ui/src/api/obs.js`、`src/api/runtime.js`、`src/queries/runtimeQueries.js`、`src/queries/queryKeys.js` 继续承载观测与运行态数据接线；`DigitalLifeOverview.jsx` 是数字生命体首页聚合面，`BackgroundRuntimeCard.jsx` 和 `AvatarStateCard.jsx` 分别承载后台生命节律与桌面身体状态；`DigitalLifeNav.jsx` 仍作为数字生命体局部导航/快捷入口，而非全站主导航唯一事实源。
+> - 2026-06-03 导航边界：Automation、Gateway、Tools、SkillsHub 等页面仍归入“运营 / 外周执行”视角；主体化首页只汇聚高信号状态，不把所有控制面板重新铺平到驾驶舱。
 >
 > 本文档不是“把监控页换个皮肤”，而是要把当前前端从“监控页面集合”推进为“数字生命主体驾驶舱”。核心目标是让用户看到的不是分散的图表，而是一个有主体、有器官系统、有生命体征、有病灶、有因果链和有行为后果的数字生命体。
 

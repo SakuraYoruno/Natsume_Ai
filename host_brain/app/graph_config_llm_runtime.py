@@ -53,6 +53,7 @@ _HOST_CHAT_14B_DEFAULT_BASE_URL = "http://127.0.0.1:11434/v1"
 _HOST_CHAT_CLOUD_DEFAULT_PROVIDER = PROVIDER_GEMINI
 _PROVIDERS_REQUIRING_API_KEY = frozenset({PROVIDER_OPENAI, PROVIDER_CODEX, PROVIDER_GEMINI, PROVIDER_DEEPSEEK, PROVIDER_MINIMAX})
 _AGENT_CODEX_MIGRATION_DEFAULT_EXCLUDED_ROLES = frozenset({"chat_agent"})
+_VISION_SCENE_NAMES = frozenset({SCENE_VISION_UI.upper(), "SCENE_VISION_UI", "VISION_UI"})
 
 
 def _parse_bool(value: Any, default: bool = False) -> bool:
@@ -72,6 +73,11 @@ def _parse_int(value: Any, *, default: int, min_value: int, max_value: int) -> i
     except (TypeError, ValueError):
         parsed = int(default)
     return max(int(min_value), min(int(max_value), parsed))
+
+
+def _is_vision_scene(scene_type: str | None) -> bool:
+    normalized = str(scene_type or "").strip().upper()
+    return normalized in _VISION_SCENE_NAMES
 
 
 def _parse_csv_tokens(value: Any) -> set[str]:
@@ -342,6 +348,15 @@ async def _resolve_host_llm_runtime_core(*, rollout_key: str | None = None, scen
         codex_api_key = _resolve_provider_api_key(provider_name=PROVIDER_CODEX)
         deepseek_api_key = _resolve_provider_api_key(provider_name=PROVIDER_DEEPSEEK)
         minimax_api_key = _resolve_provider_api_key(provider_name=PROVIDER_MINIMAX)
+
+    if _is_vision_scene(scene_type):
+        vision_timeout_ms = _parse_int(
+            os.environ.get("HOST_VISION_LLM_TIMEOUT_MS"),
+            default=20_000,
+            min_value=8_000,
+            max_value=120_000,
+        )
+        cloud_timeout_ms = max(int(cloud_timeout_ms), int(vision_timeout_ms))
 
     gemini_cloud_route = resolve_gemini_model_route(role="cloud_primary", preferred_api_key=gemini_api_key, route_key=(str(rollout_key or "").strip() or str(scene_type or "").strip() or None))
     gemini_cloud_model_id = str(gemini_cloud_route.get("model_id") or _resolve_cloud_provider_model_id(chain_name="gemini")).strip() or _resolve_cloud_provider_model_id(chain_name="gemini")

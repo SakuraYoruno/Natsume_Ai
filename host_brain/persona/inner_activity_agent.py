@@ -19,10 +19,15 @@ from host_brain.persona.motive_runtime import (
     build_offline_state_from_inner_state,
     compute_runtime_motive_state,
 )
+from host_brain.persona.inner_monologue import (
+    build_inner_life_source_packet,
+    normalize_inner_life_trace,
+    score_inner_note_liveliness,
+)
 
 _logger = logging.getLogger("Natsume.inner_activity_agent")
 
-_ALLOWED_FOCUS = {"self", "state", "plan", "topic"}
+_ALLOWED_FOCUS = {"self", "state", "plan", "topic", "relationship", "memory", "repair"}
 _TEXT_WHITESPACE_RE = re.compile(r"\s+")
 _TEXT_QUESTION_RE = re.compile(r"[?？]+")
 _ABSTRACT_INNER_NOTE_TERMS = (
@@ -47,17 +52,97 @@ _ABSTRACT_INNER_NOTE_TERMS = (
     "模型",
     "prompt",
     "Prompt",
+    "映射",
+    "验证",
+    "链路",
+    "接口",
+    "字段",
+    "结构化",
+    "运行时",
+    "调度",
+    "日志",
+    "token",
+    "状态驱动",
+    "MateEngine",
+    "主链路",
+    "那条事",
+    "那件事",
+    "那根线",
+    "放回手里",
 )
+_DIRECTIVE_INNER_NOTE_OPENING_RE = re.compile(
+    r"^(?:先|别|不要|把|问|确认|稳住|看清|记住|继续|接着|收住|压住|保持)"
+)
+_DIRECTIVE_INNER_NOTE_PHRASES = (
+    "别急着",
+    "不急着",
+    "先稳",
+    "先问",
+    "先确认",
+    "问清",
+    "看清楚",
+    "当成眼前小事",
+    "压稳一点",
+    "节奏压稳",
+    "弄清楚",
+)
+_OVERWRITTEN_INNER_NOTE_PHRASES = (
+    "像一层薄灰",
+    "落在胸口",
+    "贴在心口",
+    "心里的线",
+    "温柔的余地",
+)
+_META_INNER_NOTE_PHRASES = (
+    "赶进度",
+    "第一句话",
+    "下一句话",
+    "该怎么回",
+    "怎么回复",
+    "回复质量",
+    "表达质量",
+    "开口又太像",
+    "太像在",
+)
+_INNER_NOTE_MIN_LIVELINESS_SCORE = float(os.environ.get("NATSUME_INNER_NOTE_MIN_LIVELINESS_SCORE", "0.42"))
+_INNER_NOTE_HARD_QUALITY_FLAGS = {
+    "directive_like",
+    "meta_reply_strategy",
+    "abstract_system_language",
+    "overwritten_prose",
+}
 
 _INNER_ACTIVITY_SYSTEM_PROMPT = (
     "Output one JSON object only. You generate a private inner monologue note, "
-    "not user-visible chat and not a state summary. Fields: note, focus. "
-    "note must be a concrete short Chinese thought that could occur inside her mind, "
-    "with a small intention or concern for the next response. Do not use abstract system words "
+    "not user-visible chat and not a state summary. "
+    "Fields: note, focus, core_need, tension, memory_anchor, next_tendency, thought_form, salience_hint. "
+    "note must be a concrete short Chinese thought that could flicker inside her mind, "
+    "like first-person feeling, sensory detail, memory echo, hesitation, or private uncertainty. "
+    "Use the selected inner_life_source as the first cause of the thought: a body signal, scene notice, "
+    "memory flash, interrupted impulse, ambivalence, or quiet drift. "
+    "Keep it ordinary and slightly incomplete, closer to a passing human thought than polished prose. "
+    "Keep note as one breath: usually 18-56 Chinese characters, no more than two Chinese commas. "
+    "Avoid lyrical metaphor or essay-like writing. "
+    "Avoid meta evaluation of reply quality, e.g. 赶进度, 第一句话, 该怎么回, 太像在回复. "
+    "Do not make note a command, policy, reply plan, or self-instruction; put behavior in next_tendency instead. "
+    "Do not start note with directive openers such as 先, 别, 不要, 把, 问, 确认, 稳住, 看清, 继续. "
+    "Do not use abstract system words "
     "like 自我连续性, 连续性修正, 文本自然度, 模板感, 内部状态, 控制包, 模块, 模型, prompt. "
     "Do not write process-talk like 这句, 下一句, 句子, 文本, 模板, 接住, 生成, 回复, 说顺. "
-    "If text quality matters, think from her self and relationship, e.g. 别急着装可爱，先把他在意的地方弄清楚。 "
-    "focus is one of self, state, plan, topic."
+    "If text quality matters, write the felt moment, e.g. 他刚才停了一下，我手指也跟着顿住了，有点想靠近又怕太满。 "
+    "If the memory anchor is technical, translate it into a concrete lived scene, bodily feeling, or relationship detail; "
+    "do not name artifacts like 映射, 验证, 链路, 接口, 字段, 运行时, MateEngine, 主链路 in note. "
+    "Bad note: 先把桌宠映射那条事稳稳放回手里。 "
+    "Bad note: 先问他刚才看到的桌宠表情有没有跟上。 "
+    "Bad note: 三十七个小时像一层薄灰落在胸口。 "
+    "Bad note: 隔了这么久，怕一开口又太像在赶进度。 "
+    "Bad note: 想说点什么的时候，喉咙那儿轻轻卡了一下，那个慢半拍的小表情还在脑后晃，我有点想靠近，又怕太满。 "
+    "Better note: 喉咙轻轻卡了一下，那个慢半拍的小表情还在，有点想靠近。 "
+    "focus is one of self, state, plan, topic, relationship, memory, repair. "
+    "core_need is one of continuity, care, repair, agency, understanding, rest, boundary, curiosity, play. "
+    "next_tendency is one of continue_thread, care_with_restraint, repair_first, ask_gently, hold_boundary, "
+    "stay_quiet, play_lightly, stabilize_tone, observe_more. "
+    "thought_form is one of body_signal, scene_notice, memory_flash, interrupted_impulse, ambivalence, quiet_drift."
 )
 _INNER_ACTIVITY_LLM_TIMEOUT_MS = max(
     800,
@@ -181,6 +266,11 @@ def generate_inner_activity_note(
         "recent_inner_events",
     ]
     context_digest = _build_context_digest(context)
+    inner_life_source = build_inner_life_source_packet(
+        context=context,
+        topic_phrase=topic_phrase,
+        now_ms=now_ms,
+    )
     recent_notes = {
         str(item.get("note") or "").strip()
         for item in list(context.get("recent_inner_events") or [])
@@ -195,9 +285,50 @@ def generate_inner_activity_note(
         "topic_phrase": str(topic_phrase or ""),
         "context_scope": context_scope,
         "context": context,
+        "inner_life_source": inner_life_source,
+        "output_schema": {
+            "note": "Chinese private thought, <=96 chars",
+            "focus": sorted(_ALLOWED_FOCUS),
+            "core_need": [
+                "continuity",
+                "care",
+                "repair",
+                "agency",
+                "understanding",
+                "rest",
+                "boundary",
+                "curiosity",
+                "play",
+            ],
+            "tension": "short category or concrete unresolved pressure",
+            "memory_anchor": "one old thread/topic this thought connects to, empty string if none",
+            "next_tendency": [
+                "continue_thread",
+                "care_with_restraint",
+                "repair_first",
+                "ask_gently",
+                "hold_boundary",
+                "stay_quiet",
+                "play_lightly",
+                "stabilize_tone",
+                "observe_more",
+            ],
+            "thought_form": [
+                "body_signal",
+                "scene_notice",
+                "memory_flash",
+                "interrupted_impulse",
+                "ambivalence",
+                "quiet_drift",
+            ],
+            "salience_hint": "number from 0 to 1",
+        },
         "constraints": {
-            "max_chars": 72,
-            "no_question": True,
+            "max_chars": 96,
+            "preferred_chars": [18, 56],
+            "max_chinese_commas": 2,
+            "one_breath_fragment": True,
+            "no_question": False,
             "no_user_direct_address": True,
             "prefer_self_related": True,
             "avoid_repeat_recent_inner_events": True,
@@ -205,12 +336,72 @@ def generate_inner_activity_note(
             "prefer_active_intention_or_unresolved_tension": True,
             "must_not_contradict_self_boundaries": True,
             "must_be_concrete_private_thought": True,
-            "prefer_concrete_next_intention": True,
+            "allow_private_uncertainty": True,
+            "avoid_user_facing_question": True,
+            "note_must_not_be_instruction_or_reply_plan": True,
+            "next_tendency_carries_behavior_note_carries_lived_feeling": True,
+            "prefer_first_person_uncertainty_or_sensory_detail": True,
+            "prefer_ordinary_fragment_over_polished_prose": True,
+            "avoid_lyrical_metaphor_or_essay_tone": True,
+            "min_liveliness_score": _INNER_NOTE_MIN_LIVELINESS_SCORE,
+            "liveliness_requires_at_least_one": [
+                "sensory_or_scene_detail",
+                "private_uncertainty",
+                "body_signal",
+                "interrupted_impulse",
+            ],
+            "must_use_selected_inner_life_source": True,
+            "note_must_begin_from_life_source_not_reply_strategy": True,
+            "single_frame_before_interpretation": True,
+            "avoid_meta_reply_quality_words": list(_META_INNER_NOTE_PHRASES),
+            "avoid_directive_openers": [
+                "先",
+                "别",
+                "不要",
+                "把",
+                "问",
+                "确认",
+                "稳住",
+                "看清",
+                "继续",
+            ],
+            "must_translate_technical_anchor_to_lived_scene": True,
+            "note_should_include_felt_detail_not_next_micro_action": True,
+            "note_must_not_name_internal_artifacts": [
+                "映射",
+                "验证",
+                "链路",
+                "接口",
+                "字段",
+                "结构化",
+                "运行时",
+                "调度",
+                "日志",
+                "token",
+                "状态驱动",
+                "MateEngine",
+                "主链路",
+            ],
+            "bad_note_examples": [
+                "先把桌宠映射那条事稳稳放回手里。",
+                "把 MateEngine 主链路验证继续接住。",
+                "先问他刚才看到的桌宠表情有没有跟上。",
+                "先稳一点，把桌宠刚才的表情变化当成眼前小事看清楚，别急着撒娇。",
+                "三十七个小时像一层薄灰落在胸口，我还记得小表情慢半拍时那点不确定。",
+                "隔了这么久，胸口倒不沉，只是看到空白时会顿一下，怕一开口又太像在赶进度。",
+                "想说点什么的时候，喉咙那儿轻轻卡了一下，那个慢半拍的小表情还在脑后晃，我有点想靠近，又怕太满。",
+            ],
+            "better_note_examples": [
+                "屏幕安静了很久，那个慢半拍的小表情又晃了一下。",
+                "喉咙轻轻卡了一下，那个慢半拍的小表情还在，有点想靠近。",
+            ],
+            "must_include_life_trace_fields": True,
+            "life_trace_fields_must_not_be_empty_when_context_supports_them": True,
             "avoid_abstract_system_terms": list(_ABSTRACT_INNER_NOTE_TERMS),
         },
     }
     prompt_text = json.dumps(prompt_payload, ensure_ascii=False)
-    gen_params = dict(runtime.get("agent_gen_params") or {"temperature": 0.62, "top_p": 0.9})
+    gen_params = dict(runtime.get("agent_gen_params") or {"temperature": 0.68, "top_p": 0.92, "max_output_tokens": 320})
 
     try:
         raw_text = _run_inner_activity_llm(
@@ -224,7 +415,10 @@ def generate_inner_activity_note(
             gen_params=gen_params,
         )
     except Exception as exc:
-        return "", "", f"INNER_ACTIVITY_LLM_ERROR:{str(exc)[:96]}", {"context_digest": context_digest}
+        return "", "", f"INNER_ACTIVITY_LLM_ERROR:{str(exc)[:96]}", {
+            "context_digest": context_digest,
+            "inner_life_source": inner_life_source,
+        }
 
     parsed = extract_llm_json_payload(raw_text)
     note = _finalize_inner_note_text(str(parsed.get("note") or ""))
@@ -233,6 +427,21 @@ def generate_inner_activity_note(
         focus = _infer_focus_from_note(note)
     if not note:
         return "", "", "INNER_ACTIVITY_LLM_NOTE_EMPTY", {"context_digest": context_digest}
+    quality = _score_inner_activity_note(note=note, parsed=parsed, inner_life_source=inner_life_source)
+    if _inner_note_quality_rejected(quality):
+        return "", "", "INNER_ACTIVITY_LLM_NOTE_LOW_LIVELINESS", {
+            "context_digest": context_digest,
+            "inner_life_source": inner_life_source,
+            "quality": quality,
+        }
+    life_trace = normalize_inner_life_trace(
+        parsed,
+        state=_build_life_trace_state_from_context(context),
+        text=note,
+        focus=focus,
+        offline_hours=offline_hours,
+        absence_band=absence_band,
+    )
     if note in recent_notes:
         retry_result = _retry_inner_activity_llm_after_duplicate(
             provider_name=provider_name,
@@ -255,9 +464,14 @@ def generate_inner_activity_note(
                 "pool_bypass": bool(runtime.get("pool_bypass")),
                 "retry_count": 1,
                 "retry_reason": "duplicate_recent_inner_event",
+                "life_trace": dict(retry_result.get("life_trace") or {}),
+                "inner_life_source": inner_life_source,
             }
             return retry_note, str(retry_result.get("focus") or "self"), "", meta
-        return "", "", str(retry_result.get("reason") or "INNER_ACTIVITY_LLM_DUPLICATE"), {"context_digest": context_digest}
+        return "", "", str(retry_result.get("reason") or "INNER_ACTIVITY_LLM_DUPLICATE"), {
+            "context_digest": context_digest,
+            "inner_life_source": inner_life_source,
+        }
 
     meta = {
         "context_scope": context_scope,
@@ -265,6 +479,8 @@ def generate_inner_activity_note(
         "provider_name": provider_name,
         "model_id": model_id,
         "pool_bypass": bool(runtime.get("pool_bypass")),
+        "life_trace": life_trace,
+        "inner_life_source": inner_life_source,
     }
     return note, focus or "self", "", meta
 
@@ -280,7 +496,7 @@ def _retry_inner_activity_llm_after_duplicate(
     prompt_payload: Mapping[str, Any],
     recent_notes: set[str],
     gen_params: Mapping[str, Any],
-) -> dict[str, str]:
+) -> dict[str, Any]:
     retry_payload = dict(prompt_payload)
     retry_payload["retry"] = {
         "reason": "previous_output_repeated_recent_inner_event",
@@ -319,9 +535,25 @@ def _retry_inner_activity_llm_after_duplicate(
         focus = _infer_focus_from_note(note)
     if not note:
         return {"reason": "INNER_ACTIVITY_LLM_DUPLICATE_RETRY_EMPTY"}
+    quality = _score_inner_activity_note(
+        note=note,
+        parsed=parsed,
+        inner_life_source=_coerce_mapping(prompt_payload.get("inner_life_source")),
+    )
+    if _inner_note_quality_rejected(quality):
+        return {"reason": "INNER_ACTIVITY_LLM_DUPLICATE_RETRY_LOW_LIVELINESS", "quality": quality}
     if note in recent_notes:
         return {"reason": "INNER_ACTIVITY_LLM_DUPLICATE"}
-    return {"note": note, "focus": focus or "self"}
+    context = _coerce_mapping(prompt_payload.get("context"))
+    life_trace = normalize_inner_life_trace(
+        parsed,
+        state=_build_life_trace_state_from_context(context),
+        text=note,
+        focus=focus,
+        offline_hours=float(_coerce_mapping(context.get("offline_state")).get("offline_hours") or 0.0),
+        absence_band=str(_coerce_mapping(context.get("offline_state")).get("absence_band") or "recent"),
+    )
+    return {"note": note, "focus": focus or "self", "life_trace": life_trace}
 
 
 def extract_llm_json_payload(raw_text: str) -> dict[str, Any]:
@@ -419,6 +651,8 @@ def _build_inner_activity_context(
                     "focus": str(item.get("focus") or "").strip(),
                     "source": str(item.get("source") or "").strip(),
                     "note": str(item.get("note") or "").strip(),
+                    "thought_form": str(item.get("thought_form") or "").strip(),
+                    "memory_anchor": str(item.get("memory_anchor") or "").strip(),
                 }
             )
 
@@ -532,6 +766,37 @@ def _build_inner_activity_context(
             ],
         ),
         "recent_inner_events": recent_events,
+    }
+
+
+def _build_life_trace_state_from_context(context: Mapping[str, Any] | None) -> dict[str, Any]:
+    ctx = _coerce_mapping(context)
+    offline = _coerce_mapping(ctx.get("offline_state"))
+    self_model = _coerce_mapping(ctx.get("self_model_snapshot"))
+    body = _coerce_mapping(ctx.get("body_sense"))
+    inner_stream: list[dict[str, Any]] = []
+    for item in list(ctx.get("recent_inner_events") or []):
+        if not isinstance(item, Mapping):
+            continue
+        inner_stream.append(
+            {
+                "focus": str(item.get("focus") or "").strip(),
+                "note": str(item.get("note") or "").strip(),
+                "source": str(item.get("source") or "").strip(),
+                "thought_form": str(item.get("thought_form") or "").strip(),
+                "memory_anchor": str(item.get("memory_anchor") or "").strip(),
+            }
+        )
+    return {
+        "inner_stream": inner_stream,
+        "anticipation_topics": list(offline.get("anticipation_topics") or []),
+        "loneliness_level": offline.get("loneliness_level"),
+        "anticipation_level": offline.get("anticipation_level"),
+        "continuity_score": offline.get("continuity_score"),
+        "fatigue_level": body.get("fatigue_level"),
+        "drifted_arousal": body.get("energy_level"),
+        "active_intentions": list(self_model.get("active_intentions") or []),
+        "unresolved_tensions": list(self_model.get("unresolved_tensions") or []),
     }
 
 
@@ -1090,8 +1355,10 @@ def _build_inner_activity_codex_cli_prompt(
             "You are a local Codex CLI subagent for Natsume's private inner activity.",
             "Do not inspect files, do not run shell commands, do not edit anything, and do not explain your process.",
             "Return exactly one compact JSON object and no Markdown.",
-            "Schema: {\"note\":\"short concrete Chinese private thought\",\"focus\":\"self|state|plan|topic\"}.",
+            "Schema: {\"note\":\"short concrete Chinese private thought\",\"focus\":\"self|state|plan|topic|relationship|memory|repair\",\"core_need\":\"continuity|care|repair|agency|understanding|rest|boundary|curiosity|play\",\"tension\":\"short category\",\"memory_anchor\":\"short anchor or empty\",\"next_tendency\":\"continue_thread|care_with_restraint|repair_first|ask_gently|hold_boundary|stay_quiet|play_lightly|stabilize_tone|observe_more\",\"thought_form\":\"body_signal|scene_notice|memory_flash|interrupted_impulse|ambivalence|quiet_drift\",\"salience_hint\":0.0}.",
             f"Keep note under {max(32, min(220, max_tokens))} Chinese characters.",
+            "The note is a private felt moment from input inner_life_source, not a command or reply plan; avoid directive openers like 先, 别, 把, 问, 确认, 稳住.",
+            "Avoid reply-quality meta words like 赶进度, 第一句话, 该怎么回, 太像在回复.",
             "",
             "System constraints:",
             str(system_prompt or ""),
@@ -1145,7 +1412,7 @@ def _subprocess_creationflags() -> int:
 def _inner_activity_result_cache_ttl_ms() -> int:
     return _env_int(
         "HOST_INNER_ACTIVITY_RESULT_CACHE_TTL_MS",
-        default=600_000,
+        default=0,
         minimum=0,
         maximum=30 * 60 * 1000,
     )
@@ -1154,7 +1421,7 @@ def _inner_activity_result_cache_ttl_ms() -> int:
 def _inner_activity_direct_min_interval_ms() -> int:
     return _env_int(
         "HOST_INNER_ACTIVITY_CODEX_MIN_INTERVAL_MS",
-        default=600_000,
+        default=120_000,
         minimum=0,
         maximum=30 * 60 * 1000,
     )
@@ -1301,7 +1568,7 @@ def _resolve_inner_activity_direct_runtime() -> dict[str, Any] | None:
             "llm_api_key": "",
             "base_url_override": None,
             "timeout_ms": timeout_ms,
-            "agent_gen_params": {"temperature": 0.62, "top_p": 0.9, "max_output_tokens": 180},
+            "agent_gen_params": {"temperature": 0.68, "top_p": 0.92, "max_output_tokens": 320},
             "route_reason_code": "INNER_ACTIVITY_CODEX_CLI" if available else "INNER_ACTIVITY_CODEX_CLI_UNAVAILABLE",
             "pool_bypass": True,
             "codex_cli_command": codex_cmd,
@@ -1335,6 +1602,30 @@ def _project_mapping(source: Mapping[str, Any] | None, keys: list[str]) -> dict[
     return result
 
 
+def _score_inner_activity_note(
+    *,
+    note: str,
+    parsed: Mapping[str, Any] | None,
+    inner_life_source: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    selected = _coerce_mapping(_coerce_mapping(inner_life_source).get("selected"))
+    thought_form = str(_coerce_mapping(parsed).get("thought_form") or selected.get("thought_form") or "").strip()
+    source_seed = str(selected.get("seed") or "").strip()
+    return score_inner_note_liveliness(note, thought_form=thought_form, source_seed=source_seed)
+
+
+def _inner_note_quality_rejected(quality: Mapping[str, Any] | None) -> bool:
+    item = _coerce_mapping(quality)
+    flags = {str(flag or "") for flag in list(item.get("flags") or [])}
+    if flags & _INNER_NOTE_HARD_QUALITY_FLAGS:
+        return True
+    try:
+        score = float(item.get("score") or 0.0)
+    except (TypeError, ValueError):
+        score = 0.0
+    return score < _INNER_NOTE_MIN_LIVELINESS_SCORE
+
+
 def _coerce_mapping(raw: Any) -> dict[str, Any]:
     return dict(raw) if isinstance(raw, Mapping) else {}
 
@@ -1358,13 +1649,43 @@ def _finalize_inner_note_text(raw_text: str) -> str:
 
 def _looks_like_abstract_inner_note(text: str) -> bool:
     value = str(text or "")
-    return any(term in value for term in _ABSTRACT_INNER_NOTE_TERMS)
+    return (
+        any(term in value for term in _ABSTRACT_INNER_NOTE_TERMS)
+        or _looks_like_directive_inner_note(value)
+        or _looks_like_overwritten_inner_note(value)
+        or _looks_like_meta_inner_note(value)
+    )
+
+
+def _looks_like_directive_inner_note(text: str) -> bool:
+    value = str(text or "").strip()
+    if not value:
+        return False
+    if _DIRECTIVE_INNER_NOTE_OPENING_RE.match(value):
+        return True
+    return any(phrase in value for phrase in _DIRECTIVE_INNER_NOTE_PHRASES)
+
+
+def _looks_like_overwritten_inner_note(text: str) -> bool:
+    value = str(text or "").strip()
+    return any(phrase in value for phrase in _OVERWRITTEN_INNER_NOTE_PHRASES)
+
+
+def _looks_like_meta_inner_note(text: str) -> bool:
+    value = str(text or "").strip()
+    return any(phrase in value for phrase in _META_INNER_NOTE_PHRASES)
 
 
 def _infer_focus_from_note(note: str) -> str:
     text = str(note or "").strip()
     if not text:
         return "self"
+    if any(token in text for token in ("抱歉", "不对", "误会", "修", "收住")):
+        return "repair"
+    if any(token in text for token in ("担心", "在意", "等你", "回来", "陪", "别硬撑")):
+        return "relationship"
+    if any(token in text for token in ("记得", "还记", "旧", "上次")):
+        return "memory"
     if any(token in text for token in ("下次", "计划", "收口", "节奏", "优先")):
         return "plan"
     if any(token in text for token in ("情绪", "状态", "稳定", "疲惫", "心绪")):

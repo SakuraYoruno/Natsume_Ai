@@ -162,6 +162,50 @@ def test_build_surface_main_chain_input_from_chat_input_compresses_app_context(m
     assert "memory://episodic/1" not in json.dumps(payload.as_dict(), ensure_ascii=False)
 
 
+def test_surface_main_chain_does_not_inject_dream_context_for_ordinary_chat(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "host_brain.app.surface_main_chain_adapter.get_compiled_soul",
+        lambda: SimpleNamespace(source_text=SOUL, runtime_full_text=SOUL),
+    )
+    monkeypatch.setattr(
+        "host_brain.app.surface_main_chain_adapter._load_recent_surface_dream_text",
+        lambda **_kwargs: "我梦见夜车、海风和旧名字。",
+    )
+
+    payload = build_surface_main_chain_input_from_chat_input(
+        _agent_input(user_message="我刚处理完一段绕的代码，帮我压稳节奏。")
+    )
+    facts = "\n".join(payload.task_control.get("facts") or [])
+    must_not = "\n".join(payload.must_not_do or [])
+
+    assert "最近梦境可用片段" not in facts
+    assert "用户正在主动问最近的梦" not in facts
+    assert "dream_source_profile" not in must_not
+
+
+def test_surface_main_chain_injects_recent_dream_only_when_user_asks(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "host_brain.app.surface_main_chain_adapter.get_compiled_soul",
+        lambda: SimpleNamespace(source_text=SOUL, runtime_full_text=SOUL),
+    )
+    monkeypatch.setattr(
+        "host_brain.app.surface_main_chain_adapter._load_recent_surface_dream_text",
+        lambda **_kwargs: "我梦见自己在一列很慢的夜车上，窗外是黑蓝色的海风，有人叫了一个旧名字。",
+    )
+
+    payload = build_surface_main_chain_input_from_chat_input(
+        _agent_input(user_message="你最近有没有留下什么梦？自然说一点。")
+    )
+    facts = "\n".join(payload.task_control.get("facts") or [])
+    must_not = "\n".join(payload.task_control.get("must_not_do") or [])
+
+    assert "用户正在主动问最近的梦" in facts
+    assert "最近梦境可用片段：我梦见自己在一列很慢的夜车上" in facts
+    assert "梦境只作为 narrative-only 内在叙事" in facts
+    assert "不要在有最近梦境片段时临场乱编完全无关的新梦" in must_not
+    assert "dream_quality" in must_not
+
+
 def test_build_surface_main_chain_input_marks_anaphoric_memory_followup(monkeypatch) -> None:
     monkeypatch.setattr(
         "host_brain.app.surface_main_chain_adapter.get_compiled_soul",

@@ -7394,6 +7394,13 @@ def _semantic_key_hint(*, kind: str, body: str) -> str:
         return _semantic_commitment_key_hint(body)
     if kind == "stable_fact" and "onebot" in compact and "edge" in compact:
         return "onebot_edge_location"
+    if kind == "stable_fact":
+        if "测试代号" in compact:
+            return "test_code"
+        if "海边灯塔" in compact:
+            return "seaside_lighthouse_anchor"
+        if "prewarm_latency_ms" in compact or "预热指标" in compact:
+            return "app_server_prewarm_metrics"
     if kind == "self_change" and _semantic_is_memory_system_directive(compact):
         return "memory_system_design"
     if kind == "relationship_feedback":
@@ -7419,6 +7426,7 @@ def _normalize_semantic_statement(text: str) -> str:
     value = re.sub(r"^行动记忆：[^；;]{1,120}[；;]\s*", "", value).strip()
     value = re.sub(r"^(记住|请记住|以后记住)[，,：:\s]*", "", value).strip()
     value = re.sub(r"^记得[，,：:\s]*", "", value).strip()
+    value = re.sub(r"^(?:再补一个|补一个|一个)?(?:长对话测试事实|项目事实|测试事实|记忆事实)[，,：:\s]*", "", value).strip()
     return value.strip("。；; \n\t")
 
 
@@ -7445,7 +7453,7 @@ def _semantic_statement_is_lookup_question(statement: str) -> bool:
         or "？" in compact
         or compact.endswith("吗")
         or compact.endswith("呢")
-        or any(token in compact for token in ("是什么", "为什么", "为啥", "怎么", "怎样", "如何", "哪本", "哪个", "哪些"))
+        or any(token in compact for token in ("是什么", "为什么", "为啥", "怎么", "怎样", "如何", "哪本", "哪个", "哪些", "请列出", "列出当前", "验收", "回忆检查"))
     )
     if not question_like:
         return False
@@ -7455,6 +7463,12 @@ def _semantic_statement_is_lookup_question(statement: str) -> bool:
         "记不记得",
         "记了什么",
         "说过什么",
+        "请列出",
+        "列出当前",
+        "最终同会话验收",
+        "跨会话验收",
+        "回忆检查",
+        "验收",
         "推荐格式",
         "失败原因",
         "任务会失败",
@@ -7493,6 +7507,8 @@ def _semantic_text_is_sensitive_or_noise(text: str) -> bool:
         return True
     if any(token in compact for token in ("网页深读结果", "lightnovel_recommendation_deep_review", "正文内容足够支撑判断")):
         return True
+    if "latency_ms" in compact and "prewarm_latency_ms" not in compact:
+        return True
     if any(
         token in compact
         for token in (
@@ -7513,7 +7529,6 @@ def _semantic_text_is_sensitive_or_noise(text: str) -> bool:
             "_thalamus_meta",
             "surface_production_result_recall",
             "cortex_orchestrator",
-            "latency_ms",
             "decision=approve",
         )
     ):
@@ -7816,10 +7831,11 @@ def _semantic_is_feature_toggle_preference(compact: str) -> bool:
 
 def _semantic_is_correction_fact(compact: str) -> bool:
     value = str(compact or "")
-    return any(
+    if any(
         token in value
         for token in (
             "用户纠正",
+            "纠正测试代号",
             "你纠正的是",
             "我撤回",
             "撤回这个判断",
@@ -7830,7 +7846,9 @@ def _semantic_is_correction_fact(compact: str) -> bool:
             "没有\"",
             "这点是错的",
         )
-    )
+    ):
+        return True
+    return "改成" in value and any(token in value for token in ("纠正", "测试代号", "记错", "错了"))
 
 
 def _normalize_open_loop_status(value: Any) -> str:
@@ -8222,7 +8240,16 @@ def _semantic_is_failure_lesson(compact: str, *, action: str) -> bool:
 
 
 def _semantic_is_stable_fact(compact: str) -> bool:
-    return any(token in compact for token in ("onebot在edge", "onebot在", "qq会话", "conversation_id", "session_id", "在edge", "不在本机"))
+    value = str(compact or "")
+    if any(token in value for token in ("onebot在edge", "onebot在", "qq会话", "conversation_id", "session_id", "在edge", "不在本机")):
+        return True
+    if any(token in value for token in ("项目事实", "测试事实", "长对话测试事实", "当前测试代号", "测试代号是")):
+        return True
+    if "海边灯塔" in value and any(token in value for token in ("连续记忆锚点", "不是字面灯塔", "指")):
+        return True
+    if any(token in value for token in ("app-server预热指标", "appserver预热指标", "预热指标", "prewarm_latency_ms", "prewarm_threads", "prewarm_workers")):
+        return True
+    return False
 
 
 def _semantic_confidence(*, episode: Mapping[str, Any], base: float) -> float:

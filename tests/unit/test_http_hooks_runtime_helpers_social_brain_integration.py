@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import logging
+import sqlite3
 from types import SimpleNamespace
 
 from host_brain.app.http_hooks_runtime_helpers import (
     _build_llm_generator,
     _build_scheduler_narrative_llm_generator,
+    _load_recent_dream_snippet,
     build_digital_life_runtime_snapshot,
     run_proactive_intent_dispatch,
 )
@@ -266,6 +268,58 @@ def test_proactive_scheduler_generator_uses_model_pool(monkeypatch) -> None:
     assert result["greeting"] == "晚上好，想起你之前说的事。"
     assert captured["scene_type"] == "PROACTIVE_TALK"
     assert captured["cognitive_tier"] == "D"
+
+
+def test_recent_dream_snippet_uses_main_dream_not_usage_hint(tmp_path) -> None:
+    db_path = tmp_path / "audit.sqlite3"
+    conn = sqlite3.connect(str(db_path))
+    conn.execute(
+        """
+        CREATE TABLE memory_ops_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            op_kind TEXT,
+            status TEXT,
+            evidence_refs TEXT,
+            detail TEXT,
+            ts_ms INTEGER
+        )
+        """
+    )
+    conn.execute(
+        """
+        INSERT INTO memory_ops_log (op_kind, status, evidence_refs, detail, ts_ms)
+        VALUES (?, ?, ?, ?, ?)
+        """,
+        (
+            "WRITE",
+            "SUCCESS",
+            '["intent-dream", "source:dream_generator", "tag:dream"]',
+            "memory written: 我梦见自己在一列很慢的夜车上，窗外是黑蓝色的海。",
+            1000,
+        ),
+    )
+    conn.execute(
+        """
+        INSERT INTO memory_ops_log (op_kind, status, evidence_refs, detail, ts_ms)
+        VALUES (?, ?, ?, ?, ?)
+        """,
+        (
+            "WRITE",
+            "SUCCESS",
+            '["source:dream_generator_usage_hint", "tag:dream_usage_hint", "dream_usage:ambient_low_weight"]',
+            "[梦境余味] 这段梦只适合作为低权重的情绪和意象底色：不要固定直说。",
+            2000,
+        ),
+    )
+    conn.commit()
+    conn.close()
+
+    snippet = _load_recent_dream_snippet(get_ledger=lambda: SimpleNamespace(_db_path=str(db_path)))
+
+    assert "梦境余味仅作为低权重语气底色" in snippet
+    assert "我梦见自己在一列很慢的夜车上" in snippet
+    assert "[梦境余味] 这段梦只适合作为低权重" not in snippet
+    assert "昨晚做了一个梦" not in snippet
 
 
 def test_runtime_snapshot_uses_social_brain_bond_snapshot(monkeypatch) -> None:

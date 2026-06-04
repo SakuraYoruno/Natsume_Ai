@@ -288,6 +288,13 @@ async def _resolve_edge_clock_offset_ms(
 ) -> int:
     import time
 
+    fixed_offset = str(os.environ.get("HOST_EDGE_CLOCK_OFFSET_MS") or "").strip()
+    if fixed_offset:
+        try:
+            return int(float(fixed_offset))
+        except ValueError:
+            pass
+
     now_value = int(time.time() * 1000)
     with _EDGE_CLOCK_OFFSET_LOCK:
         if (
@@ -527,6 +534,8 @@ async def _post_to_edge(
     request_id: str | None = None,
     request_timeout_ms: int | None = None,
     block_loopback: bool = False,
+    base_url_override: str | None = None,
+    shared_key_override: str | None = None,
 ) -> EdgeRpcCallResult:
     """Build envelope and asynchronously POST to Edge endpoint."""
     import time
@@ -544,7 +553,11 @@ async def _post_to_edge(
         )
 
     req_id = request_id or new_request_id()
-    base_urls = _resolve_edge_base_urls()
+    if base_url_override:
+        override_url = _normalize_base_url(base_url_override)
+        base_urls = [override_url] if override_url else []
+    else:
+        base_urls = _resolve_edge_base_urls()
     if block_loopback:
         filtered_urls = [item for item in base_urls if not _is_loopback_base_url(item)]
         if not filtered_urls:
@@ -561,7 +574,7 @@ async def _post_to_edge(
                 latency_ms=0,
             )
         base_urls = filtered_urls
-    shared_key = _resolve_hmac_key()
+    shared_key = shared_key_override if shared_key_override is not None else _resolve_hmac_key()
     allow_insecure = _resolve_allow_insecure()
     timeout_ms = (
         max(1000, int(request_timeout_ms))
@@ -806,6 +819,247 @@ async def post_vts(
     return result
 
 
+async def post_avatar_behavior(
+    *,
+    behavior_id: str,
+    emotion_tag: str | None = None,
+    body_action_id: str | None = None,
+    emotion_intensity: float | None = None,
+    duration_s: float | None = None,
+    talk_state: str | None = None,
+    source: str | None = None,
+    request_id: str | None = None,
+) -> EdgeRpcCallResult:
+    """Drive a high-level desktop companion behavior on Edge.
+
+    behavior_id examples: idle | listening | thinking | greet | happy | shy |
+    interrupted | speaking.  The Edge behavior layer maps this to expression,
+    talk state, and optional body action.
+    """
+    payload: dict[str, Any] = {
+        "action": "behavior",
+        "behavior_id": str(behavior_id or "").strip().lower(),
+    }
+    if emotion_tag:
+        payload["emotion_tag"] = str(emotion_tag).strip().upper()
+    if body_action_id:
+        payload["body_action_id"] = str(body_action_id).strip().lower()
+    if emotion_intensity is not None:
+        payload["emotion_intensity"] = float(emotion_intensity)
+    if duration_s is not None:
+        payload["duration_s"] = float(duration_s)
+    if talk_state:
+        payload["talk_state"] = str(talk_state).strip().lower()
+    if source:
+        payload["source"] = str(source).strip()
+    result = await _post_to_edge(
+        path="/v1/edge/vts",
+        payload=payload,
+        request_id=request_id,
+    )
+    _logger.debug(
+        "post_avatar_behavior behavior_id=%s -> %s latency=%dms",
+        behavior_id, result.status, result.latency_ms,
+    )
+    return result
+
+
+async def post_asr_control(
+    *,
+    action: str = "status",
+    session_id: str | None = None,
+    audio_path: str | None = None,
+    label: str | None = None,
+    request_id: str | None = None,
+) -> EdgeRpcCallResult:
+    """Control Edge ASR listening state.
+
+    action: status | start | stop | restart
+    session_id: optional ASR session id for start/restart.
+    """
+    payload: dict[str, Any] = {"action": str(action or "status").strip().lower()}
+    if session_id:
+        payload["session_id"] = str(session_id).strip()
+    if audio_path:
+        payload["audio_path"] = str(audio_path).strip()
+    if label:
+        payload["label"] = str(label).strip()
+    result = await _post_to_edge(
+        path="/v1/edge/asr",
+        payload=payload,
+        request_id=request_id,
+        request_timeout_ms=max(_resolve_timeout_ms(), 120_000),
+    )
+    _logger.debug(
+        "post_asr_control action=%s -> %s latency=%dms",
+        action, result.status, result.latency_ms,
+    )
+    return result
+
+
+async def post_barge_in(
+    *,
+    session_id: str,
+    source: str = "user_voice",
+    text: str | None = None,
+    seq: int | None = None,
+    request_id: str | None = None,
+) -> EdgeRpcCallResult:
+    """Interrupt current Edge TTS playback.
+
+    session_id: active voice session id.
+    source: interruption source, e.g. user_voice/asr/manual.
+    text: optional user utterance that caused the interruption.
+    """
+    payload: dict[str, Any] = {
+        "session_id": str(session_id or "").strip(),
+        "source": str(source or "user_voice").strip(),
+    }
+    if text:
+        payload["text"] = str(text).strip()
+    if seq is not None:
+        payload["seq"] = int(seq)
+    result = await _post_to_edge(
+        path="/v1/edge/barge_in",
+        payload=payload,
+        request_id=request_id,
+        request_timeout_ms=max(_resolve_timeout_ms(), 30_000),
+    )
+    _logger.debug(
+        "post_barge_in session=%s source=%s -> %s latency=%dms",
+        session_id, source, result.status, result.latency_ms,
+    )
+    return result
+
+
+async def post_desktop_pet(
+    *,
+    action: str,
+    touch_type: str | None = None,
+    expression: str | None = None,
+    emotion_tag: str | None = None,
+    text: str | None = None,
+    motion: str | None = None,
+    name: str | None = None,
+    enabled: bool | None = None,
+    x: int | None = None,
+    y: int | None = None,
+    width: int | None = None,
+    height: int | None = None,
+    margin: int | None = None,
+    keep_topmost: bool | None = None,
+    title_keywords: list[str] | None = None,
+    request_id: str | None = None,
+) -> EdgeRpcCallResult:
+    """Drive the real desktop-pet runtime through Edge.
+
+    action: status | show | hide | touch | emote | speak | preset | click_through
+    touch_type: head | hair | body | poke | idle
+    """
+    payload: dict[str, Any] = {"action": str(action).strip().lower()}
+    if touch_type:
+        payload["touch_type"] = str(touch_type).strip().lower()
+    if expression:
+        payload["expression"] = str(expression).strip().upper()
+    if emotion_tag:
+        payload["emotion_tag"] = str(emotion_tag).strip().upper()
+    if text:
+        payload["text"] = str(text)
+    if motion:
+        payload["motion"] = str(motion).strip()
+    if name:
+        payload["name"] = str(name).strip().lower().replace("-", "_")
+    if enabled is not None:
+        payload["enabled"] = bool(enabled)
+    if x is not None:
+        payload["x"] = int(x)
+    if y is not None:
+        payload["y"] = int(y)
+    if width is not None:
+        payload["width"] = int(width)
+    if height is not None:
+        payload["height"] = int(height)
+    if margin is not None:
+        payload["margin"] = int(margin)
+    if keep_topmost is not None:
+        payload["keep_topmost"] = bool(keep_topmost)
+    if title_keywords:
+        payload["title_keywords"] = [str(item).strip() for item in title_keywords if str(item).strip()]
+
+    if _env_bool("HOST_DESKTOP_PET_DIRECT_ENABLED", default=True):
+        result = await _post_to_desktop_pet_runtime(
+            payload=payload,
+            request_id=request_id,
+        )
+    else:
+        result = await _post_to_edge(
+            path="/v1/edge/desktop_pet",
+            payload=payload,
+            request_id=request_id,
+        )
+    _logger.debug(
+        "post_desktop_pet action=%s touch_type=%s preset=%s -> %s latency=%dms",
+        action, touch_type, name, result.status, result.latency_ms,
+    )
+    return result
+
+
+async def _post_to_desktop_pet_runtime(
+    *,
+    payload: dict[str, Any],
+    request_id: str | None = None,
+) -> EdgeRpcCallResult:
+    import os
+    import time
+
+    try:
+        import httpx
+    except ImportError:
+        return EdgeRpcCallResult(
+            success=False,
+            status="DEGRADED",
+            reason_code="HTTPX_NOT_INSTALLED",
+            detail="httpx not installed",
+            event={},
+            latency_ms=0,
+        )
+
+    req_id = request_id or new_request_id()
+    base_url = _normalize_base_url(os.getenv("HOST_DESKTOP_PET_BASE_URL") or "http://127.0.0.1:18788")
+    action = str(payload.get("action") or "status").strip().lower()
+    t0 = int(time.time() * 1000)
+    try:
+        async with httpx.AsyncClient(timeout=2.5, trust_env=False) as client:
+            if action == "status":
+                resp = await client.get(f"{base_url}/health")
+            else:
+                resp = await client.post(f"{base_url}/action", json=payload)
+        latency_ms = max(0, int(time.time() * 1000) - t0)
+        try:
+            body = resp.json()
+        except Exception:
+            body = {"raw": resp.text}
+        success = resp.status_code == 200 and bool(body.get("success", False))
+        return EdgeRpcCallResult(
+            success=success,
+            status=("ACCEPTED" if success else "REJECTED"),
+            reason_code=None if success else str(body.get("reason_code") or f"HTTP_{resp.status_code}"),
+            detail=str(body.get("detail") or ("desktop pet runtime accepted" if success else "desktop pet runtime rejected")),
+            event={"request_id": req_id, "runtime": body},
+            latency_ms=latency_ms,
+        )
+    except Exception as exc:
+        latency_ms = max(0, int(time.time() * 1000) - t0)
+        return EdgeRpcCallResult(
+            success=False,
+            status="DEGRADED",
+            reason_code="DESKTOP_PET_RUNTIME_UNAVAILABLE",
+            detail=str(exc),
+            event={"request_id": req_id, "base_url": base_url},
+            latency_ms=latency_ms,
+        )
+
+
 async def post_speak(
     *,
     text: str,
@@ -820,6 +1074,7 @@ async def post_speak(
     style_note: str | None = None,
     lang_hint: str | None = None,
     export_audio: bool = False,
+    wait_playback_start: bool | None = None,
 ) -> EdgeRpcCallResult:
     """驱动 Edge TTS 语音合成。
 
@@ -840,6 +1095,21 @@ async def post_speak(
         .replace("\u200b", "")
         .strip()
     )
+    mateengine_tts_sync_started = False
+    mateengine_tts_sync = str(os.environ.get("HOST_MATEENGINE_TTS_SYNC_ENABLED") or "true").strip().lower()
+    if normalized_text and mateengine_tts_sync in {"1", "true", "yes", "on"}:
+        try:
+            from host_brain.channels.mateengine import signal_mateengine_speech_playback  # noqa: PLC0415
+
+            signal_mateengine_speech_playback(
+                event="start",
+                text=normalized_text,
+                request_id=req_id,
+                utterance_id=resolved_utterance_id,
+            )
+            mateengine_tts_sync_started = True
+        except Exception as exc:
+            _logger.debug("MateEngine TTS mouth sync start failed: %s", exc)
 
     payload: dict[str, Any] = {
         "session_id": resolved_session_id,
@@ -861,6 +1131,8 @@ async def post_speak(
         payload["lang_hint"] = str(lang_hint).strip().lower()
     if export_audio:
         payload["export_audio"] = True
+    if wait_playback_start is not None:
+        payload["wait_playback_start"] = bool(wait_playback_start)
     rpc_timeout_ms = max(_resolve_timeout_ms(), 60_000)
     result = await _post_to_edge(
         path="/v1/edge/speak",
@@ -872,6 +1144,51 @@ async def post_speak(
         "post_speak text_len=%d → %s latency=%dms",
         len(normalized_text), result.status, result.latency_ms,
     )
+    if mateengine_tts_sync_started and bool(result.success):
+        event = dict(result.event or {})
+        duration_s = (
+            event.get("duration_s")
+            or event.get("audio_duration_s")
+            or event.get("playback_duration_s")
+        )
+        energy_frames = (
+            event.get("energy_frames")
+            or event.get("rms_frames")
+            or event.get("mouth_frames")
+            or event.get("mouth_sync_frames")
+        )
+        if energy_frames is None and isinstance(event.get("vts_mouth_sync"), dict):
+            energy_frames = (
+                event["vts_mouth_sync"].get("energy_frames")
+                or event["vts_mouth_sync"].get("rms_frames")
+                or event["vts_mouth_sync"].get("mouth_frames")
+            )
+        if duration_s is not None or energy_frames is not None:
+            try:
+                from host_brain.channels.mateengine import signal_mateengine_speech_playback  # noqa: PLC0415
+
+                signal_mateengine_speech_playback(
+                    event="start",
+                    text=normalized_text,
+                    request_id=req_id,
+                    utterance_id=resolved_utterance_id,
+                    duration_s=duration_s,
+                    energy_frames=energy_frames,
+                )
+            except Exception as exc:
+                _logger.debug("MateEngine TTS RMS mouth sync failed: %s", exc)
+    if mateengine_tts_sync_started and not bool(result.success):
+        try:
+            from host_brain.channels.mateengine import signal_mateengine_speech_playback  # noqa: PLC0415
+
+            signal_mateengine_speech_playback(
+                event="failed",
+                text=normalized_text,
+                request_id=req_id,
+                utterance_id=resolved_utterance_id,
+            )
+        except Exception as exc:
+            _logger.debug("MateEngine TTS mouth sync stop failed: %s", exc)
     return result
 
 

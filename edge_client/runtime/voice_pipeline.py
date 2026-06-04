@@ -38,6 +38,26 @@ def _parse_bool_env(name: str, *, default: bool) -> bool:
     return str(raw).strip().lower() in {"1", "true", "yes", "y", "on"}
 
 
+def _vts_reset_to_neutral_enabled() -> bool:
+    """Whether automatic VTS hotkey reset is allowed.
+
+    Keep this disabled by default because reset_to_neutral can trigger the
+    user's VTS hotkey state, and in the desktop setup Ctrl+0 toggles watermark.
+    """
+    return _parse_bool_env("EDGE_VTS_RESET_TO_NEUTRAL_ENABLED", default=False)
+
+
+def _vts_reset_to_neutral_skipped_result() -> VtsDriverResult:
+    return VtsDriverResult(
+        success=True,
+        reason_code=None,
+        detail="VTS reset_to_neutral disabled; hotkey reset skipped",
+        action="reset_to_neutral",
+        expression_id="NEUTRAL",
+        emotion_tag="NEUTRAL",
+    )
+
+
 def _parse_float_env(name: str, *, default: float, minimum: float, maximum: float) -> float:
     raw = os.environ.get(name)
     try:
@@ -103,7 +123,17 @@ def _mouth_envelope_config() -> dict[str, float]:
 
 def _speech_motion_config(payload: dict[str, Any] | None = None) -> dict[str, Any]:
     face_capture_priority = _parse_bool_env("EDGE_VTS_FACE_CAPTURE_PRIORITY", default=False)
-    enabled = _parse_bool_env("EDGE_VTS_SPEECH_MOTION_ENABLED", default=True) and not face_capture_priority
+    motion_requested = _parse_bool_env("EDGE_VTS_SPEECH_MOTION_ENABLED", default=True)
+    body_only_when_face_priority = _parse_bool_env(
+        "EDGE_VTS_SPEECH_FACE_PRIORITY_BODY_ONLY_ENABLED",
+        default=True,
+    )
+    enabled = motion_requested and (not face_capture_priority or body_only_when_face_priority)
+    face_motion_enabled = _parse_bool_env(
+        "EDGE_VTS_SPEECH_FACE_MOTION_ENABLED",
+        default=True,
+    ) and not face_capture_priority
+    body_only = bool(face_capture_priority and body_only_when_face_priority)
     gain = _parse_float_env("EDGE_VTS_SPEECH_MOTION_GAIN", default=1.4, minimum=0.0, maximum=3.0)
     nod_degrees = _parse_float_env("EDGE_VTS_SPEECH_MOTION_NOD_DEGREES", default=2.4, minimum=0.0, maximum=8.0)
     sway_degrees = _parse_float_env("EDGE_VTS_SPEECH_MOTION_SWAY_DEGREES", default=3.2, minimum=0.0, maximum=10.0)
@@ -153,6 +183,9 @@ def _speech_motion_config(payload: dict[str, Any] | None = None) -> dict[str, An
     return {
         "enabled": enabled,
         "face_capture_priority": face_capture_priority,
+        "body_only": body_only,
+        "face_motion_enabled": face_motion_enabled,
+        "body_only_when_face_priority": body_only_when_face_priority,
         "gain": gain,
         "energy": min(1.65, energy),
         "tempo": min(1.45, tempo),
@@ -291,6 +324,7 @@ class EdgePlaybackResult:
     expression_result: VtsDriverResult | None
     talk_result: VtsDriverResult | None
     mouth_sync_debug: dict[str, Any] | None
+    background_start_scheduled: bool = False
 
 
 @dataclass(frozen=True)
@@ -353,6 +387,8 @@ class EdgeVoicePipeline:
             "talk_result": None,
             "mouth_sync": dict(self._mouth_sync_debug),
         }
+        self._speech_background_lock = threading.Lock()
+        self._speech_background_thread: threading.Thread | None = None
         # 将 VTS 驱动注册为播放前钩子，确保表情/口型在音频播放前就绪
         self.speech_queue._before_playback_hook = self._vts_before_playback_hook
 
@@ -726,6 +762,7 @@ class EdgeVoicePipeline:
         payload: dict[str, Any],
         ts_ms: int | None = None,
         auto_start: bool = True,
+        background_start: bool = False,
     ) -> EdgePlaybackResult:
         event_ts = int(ts_ms if ts_ms is not None else now_ms())
         queue_result = self.speech_queue.enqueue_speak(
@@ -736,13 +773,17 @@ class EdgeVoicePipeline:
             # so we do not trigger start_next() twice on the same utterance.
             auto_start=False,
         )
-        self._report_voice_queue_result(request_id=request_id, result=queue_result)
+        self._report_voice_queue_result_background(request_id=request_id, result=queue_result)
         start_result: SpeechQueueResult | None = None
         expression_result: VtsDriverResult | None = None
         talk_result: VtsDriverResult | None = None
         mouth_sync_debug: dict[str, Any] | None = None
 
-        if queue_result.success and auto_start:
+        background_start_scheduled = False
+        if queue_result.success and auto_start and background_start:
+            background_start_scheduled = self._schedule_background_speech_start(request_id=request_id)
+
+        if queue_result.success and auto_start and not background_start:
             # 重置 VTS 钩子的结果缓存，准备接收本次播放的 VTS 结果
             self._pending_vts_result: dict[str, Any] = {}
             start_result = self.speech_queue.start_next(ts_ms=event_ts)
@@ -760,24 +801,30 @@ class EdgeVoicePipeline:
                         "ts_ms": event_ts,
                     },
                 )
-            self._report_voice_queue_result(request_id=request_id, result=start_result)
-            if (
-                start_result is not None
-                and start_result.success
-                and start_result.event.get("event_type") == EVENT_TTS_PLAYBACK_STARTED
-            ):
-                # VTS 已在 before_playback_hook 中提前驱动，从缓存中取结果
+            self._report_voice_queue_result_background(request_id=request_id, result=start_result)
+        if (
+            start_result is not None
+            and start_result.success
+            and start_result.event.get("event_type") == EVENT_TTS_PLAYBACK_STARTED
+        ):
+            avatar_behavior_deferred = self._schedule_quiet_avatar_behavior(
+                behavior_id="speaking",
+                payload=dict(start_result.event or payload),
+                source="playback_started",
+            )
+            start_result.event["avatar_behavior_deferred"] = bool(avatar_behavior_deferred)
+            # VTS 已在 before_playback_hook 中提前驱动，从缓存中取结果
+            vts_cached = getattr(self, "_pending_vts_result", {})
+            if not vts_cached:
+                # hook 未触发（如 speech_queue 被 mock），手动兜底驱动 VTS
+                self._vts_before_playback_hook(
+                    speak_event=payload,
+                    synth_event={},
+                )
                 vts_cached = getattr(self, "_pending_vts_result", {})
-                if not vts_cached:
-                    # hook 未触发（如 speech_queue 被 mock），手动兜底驱动 VTS
-                    self._vts_before_playback_hook(
-                        speak_event=payload,
-                        synth_event={},
-                    )
-                    vts_cached = getattr(self, "_pending_vts_result", {})
-                expression_result = vts_cached.get("expression_result")
-                talk_result = vts_cached.get("talk_result")
-                mouth_sync_debug = vts_cached.get("mouth_sync_debug")
+            expression_result = vts_cached.get("expression_result")
+            talk_result = vts_cached.get("talk_result")
+            mouth_sync_debug = vts_cached.get("mouth_sync_debug")
 
         success = bool(
             queue_result.success
@@ -793,7 +840,54 @@ class EdgeVoicePipeline:
             expression_result=expression_result,
             talk_result=talk_result,
             mouth_sync_debug=mouth_sync_debug,
+            background_start_scheduled=background_start_scheduled,
         )
+
+    def _schedule_background_speech_start(self, *, request_id: str) -> bool:
+        with self._speech_background_lock:
+            thread = self._speech_background_thread
+            if thread is not None and thread.is_alive():
+                return True
+            delay_s = (
+                _parse_float_env(
+                    "EDGE_TTS_BACKGROUND_START_DELAY_MS",
+                    default=180.0,
+                    minimum=0.0,
+                    maximum=2000.0,
+                )
+                / 1000.0
+            )
+            self._speech_background_thread = threading.Timer(
+                delay_s,
+                self._run_background_speech_start,
+                kwargs={"request_id": request_id},
+            )
+            self._speech_background_thread.name = "edge-tts-background-start"
+            self._speech_background_thread.daemon = True
+            self._speech_background_thread.start()
+            return True
+
+    def _report_voice_queue_result_background(
+        self,
+        *,
+        request_id: str,
+        result: SpeechQueueResult | None,
+    ) -> None:
+        threading.Thread(
+            target=self._report_voice_queue_result,
+            kwargs={"request_id": request_id, "result": result},
+            name="edge-voice-queue-report",
+            daemon=True,
+        ).start()
+
+    def _run_background_speech_start(self, *, request_id: str) -> None:
+        event_ts = int(now_ms())
+        try:
+            self._pending_vts_result = {}
+            start_result = self.speech_queue.start_next(ts_ms=event_ts)
+            self._report_voice_queue_result(request_id=request_id, result=start_result)
+        except Exception as exc:  # pragma: no cover - background safety net
+            LOGGER.warning("background TTS start failed request_id=%s: %s", request_id, exc)
 
     @staticmethod
     def _is_waiting_for_active_playback(result: SpeechQueueResult | None) -> bool:
@@ -810,27 +904,54 @@ class EdgeVoicePipeline:
             request_id=str(result.event.get("request_id") or "") if result is not None else "",
             result=result,
         )
+        if result is not None and self.speech_queue.queue_depth > 0:
+            self._schedule_background_speech_start(
+                request_id=str(result.event.get("request_id") or "queued"),
+            )
         if (
             result is not None
             and result.success
             and result.event.get("event_type") == EVENT_TTS_PLAYBACK_FINISHED
             and self.vts_driver is not None
         ):
-            self._stop_mouth_sync()
             playback_event = dict(result.event or {})
-            talk_end_result = self.vts_driver.talk_end()
-            self._log_vts_monitor(
-                action="TALK_END",
-                result=talk_end_result,
+            avatar_backend = str(getattr(self.vts_driver, "backend", "") or "").strip().lower()
+            mouth_sync_state = str((self._mouth_sync_debug or {}).get("state") or "").strip().lower()
+            defer_avatar_reset = avatar_backend == "vrm" and mouth_sync_state == "running"
+            if defer_avatar_reset:
+                self._mouth_sync_debug = {
+                    **self._mouth_sync_debug,
+                    "playback_finished_deferred_reset": True,
+                    "playback_finished_ts_ms": event_ts,
+                }
+                self._schedule_deferred_avatar_reset(
+                    playback_event=playback_event,
+                    ts_ms=event_ts,
+                )
+            else:
+                self._stop_mouth_sync()
+                talk_end_result = self.vts_driver.talk_end()
+                self._log_vts_monitor(
+                    action="TALK_END",
+                    result=talk_end_result,
+                    payload=playback_event,
+                    ts_ms=int(playback_event.get("ts_ms") or event_ts),
+                )
+                reset_result = (
+                    self.vts_driver.reset_to_neutral()
+                    if _vts_reset_to_neutral_enabled()
+                    else _vts_reset_to_neutral_skipped_result()
+                )
+                self._log_vts_monitor(
+                    action="RESET_TO_NEUTRAL",
+                    result=reset_result,
+                    payload=playback_event,
+                    ts_ms=int(playback_event.get("ts_ms") or event_ts),
+                )
+            self._apply_quiet_avatar_behavior(
+                behavior_id="idle",
                 payload=playback_event,
-                ts_ms=int(playback_event.get("ts_ms") or event_ts),
-            )
-            reset_result = self.vts_driver.reset_to_neutral()
-            self._log_vts_monitor(
-                action="RESET_TO_NEUTRAL",
-                result=reset_result,
-                payload=playback_event,
-                ts_ms=int(playback_event.get("ts_ms") or event_ts),
+                source="playback_finished",
             )
         if result is not None and result.success:
             # before_playback_hook 会在 start_next 内部自动驱动 VTS，无需额外调用
@@ -873,19 +994,64 @@ class EdgeVoicePipeline:
             and barge_result.reason_code == VOICE_INTERRUPTED
             and self.vts_driver is not None
         ):
-            self._stop_mouth_sync()
-            vts_result = self.vts_driver.reset_to_neutral()
-            self._log_vts_monitor(
-                action="RESET_ON_BARGE_IN",
-                result=vts_result,
-                payload=barge_event if isinstance(barge_event, dict) else payload,
+            self._schedule_barge_in_avatar_reset(
+                barge_event=barge_event if isinstance(barge_event, dict) else payload,
                 ts_ms=int(barge_event.get("ts_ms") or event_ts),
+            )
+            self._apply_quiet_avatar_behavior(
+                behavior_id="interrupted",
+                payload=barge_event if isinstance(barge_event, dict) else payload,
+                source="barge_in",
+            )
+            vts_result = VtsDriverResult(
+                success=True,
+                reason_code=None,
+                detail="barge-in avatar reset scheduled",
+                action="reset_to_neutral",
             )
         return EdgeBargeInResult(
             success=barge_result.success,
             barge_result=barge_result,
             vts_result=vts_result,
         )
+
+    def _schedule_barge_in_avatar_reset(
+        self,
+        *,
+        barge_event: dict[str, Any],
+        ts_ms: int,
+    ) -> None:
+        """Reset avatar state after barge-in without delaying interruption RPC."""
+        def _runner() -> None:
+            try:
+                self._stop_mouth_sync()
+                if self.vts_driver is None:
+                    return
+                reset_result = (
+                    self.vts_driver.reset_to_neutral()
+                    if _vts_reset_to_neutral_enabled()
+                    else _vts_reset_to_neutral_skipped_result()
+                )
+                self._log_vts_monitor(
+                    action="RESET_ON_BARGE_IN",
+                    result=reset_result,
+                    payload=barge_event,
+                    ts_ms=ts_ms,
+                    extra={"source": "barge_in_background_reset"},
+                )
+                self._apply_quiet_avatar_behavior(
+                    behavior_id="interrupted",
+                    payload=barge_event,
+                    source="barge_in_background_reset",
+                )
+            except Exception as exc:  # pragma: no cover - background avatar cleanup
+                LOGGER.warning("barge-in avatar reset failed: %s", exc)
+
+        threading.Thread(
+            target=_runner,
+            name="edge-barge-in-avatar-reset",
+            daemon=True,
+        ).start()
 
     def _report_asr_rpc_result(
         self,
@@ -993,7 +1159,106 @@ class EdgeVoicePipeline:
                     else None
                 ),
             )
+        self._maybe_apply_asr_avatar_behavior(
+            request_id=request_id,
+            event=payload,
+            report_result=report_result,
+        )
         return report_result
+
+    def _maybe_apply_asr_avatar_behavior(
+        self,
+        *,
+        request_id: str,
+        event: dict[str, Any],
+        report_result: BatchReportResult | None,
+    ) -> dict[str, Any] | None:
+        if not _parse_bool_env("EDGE_AVATAR_BEHAVIOR_ASR_AUTO_STATE_ENABLED", default=True):
+            return None
+        report_failed = bool(report_result is not None and not report_result.success)
+        text = str(event.get("text") or event.get("transcript") or "").strip()
+        if not text:
+            return None
+        if bool(event.get("low_confidence")) and not _parse_bool_env(
+            "EDGE_AVATAR_BEHAVIOR_ASR_LOW_CONFIDENCE_STATE_ENABLED",
+            default=False,
+        ):
+            return {
+                "success": True,
+                "state": "skipped",
+                "reason": "asr_low_confidence",
+                "detail": "ASR avatar state skipped for low-confidence transcript",
+            }
+        if self._avatar_auto_state_speech_active() and not _parse_bool_env(
+            "EDGE_AVATAR_BEHAVIOR_ASR_DURING_SPEECH_ENABLED",
+            default=False,
+        ):
+            return {
+                "success": True,
+                "state": "skipped",
+                "reason": "speech_active",
+                "detail": "ASR avatar state skipped while AI speech is active",
+            }
+
+        final = bool(event.get("final") or event.get("is_final"))
+        if final:
+            if not _parse_bool_env("EDGE_AVATAR_BEHAVIOR_ASR_FINAL_THINKING_ENABLED", default=True):
+                return None
+            behavior_id = "thinking"
+            source = "asr_final"
+            min_interval_ms = int(_parse_float_env(
+                "EDGE_AVATAR_BEHAVIOR_ASR_FINAL_MIN_INTERVAL_MS",
+                default=250.0,
+                minimum=0.0,
+                maximum=10000.0,
+            ))
+        else:
+            if not _parse_bool_env("EDGE_AVATAR_BEHAVIOR_ASR_PARTIAL_LISTENING_ENABLED", default=True):
+                return None
+            behavior_id = "listening"
+            source = "asr_partial"
+            min_interval_ms = int(_parse_float_env(
+                "EDGE_AVATAR_BEHAVIOR_ASR_LISTENING_MIN_INTERVAL_MS",
+                default=900.0,
+                minimum=0.0,
+                maximum=10000.0,
+            ))
+
+        event_ts = int(event.get("ts_ms") or now_ms())
+        session_id = str(event.get("session_id") or "").strip() or "default"
+        throttle_key = f"{behavior_id}:{session_id}"
+        last_map = getattr(self, "_avatar_auto_state_last_ts", None)
+        if not isinstance(last_map, dict):
+            last_map = {}
+            self._avatar_auto_state_last_ts = last_map
+        last_ts = int(last_map.get(throttle_key) or 0)
+        if min_interval_ms > 0 and event_ts - last_ts < min_interval_ms:
+            return {
+                "success": True,
+                "state": "skipped",
+                "reason": "avatar_state_throttled",
+                "detail": f"ASR avatar state throttled for {behavior_id}",
+                "behavior_id": behavior_id,
+                "source": source,
+            }
+        last_map[throttle_key] = event_ts
+
+        behavior_payload = {
+            **dict(event),
+            "request_id": str(request_id or event.get("request_id") or ""),
+            "source": source,
+        }
+        if report_failed:
+            behavior_payload["edge_event_report_failed"] = True
+            behavior_payload["edge_event_report_reason_code"] = str(getattr(report_result, "reason_code", "") or "")
+            behavior_payload["edge_event_report_detail"] = str(getattr(report_result, "detail", "") or "")
+        if not final:
+            behavior_payload["body_hint_enabled"] = False
+        return self._apply_quiet_avatar_behavior(
+            behavior_id=behavior_id,
+            payload=behavior_payload,
+            source=source,
+        )
 
     def _report_voice_queue_result(
         self,
@@ -1119,6 +1384,46 @@ class EdgeVoicePipeline:
             "mouth_sync": dict(mouth_sync_debug or {}),
         }
 
+    def _schedule_vts_background_command(
+        self,
+        *,
+        action: str,
+        callback: Any,
+        payload: dict[str, Any],
+        extra: dict[str, Any] | None = None,
+    ) -> None:
+        def _runner() -> None:
+            try:
+                result = callback()
+                self._log_vts_monitor(
+                    action=action,
+                    result=result,
+                    payload=payload,
+                    extra={
+                        **dict(extra or {}),
+                        "source": "vrm_pre_playback_fast_path",
+                        "background": True,
+                    },
+                )
+            except Exception as exc:  # pragma: no cover - defensive background bridge guard
+                self._log_vts_monitor(
+                    action=action,
+                    payload=payload,
+                    detail=f"background VTS command failed: {exc}",
+                    extra={
+                        **dict(extra or {}),
+                        "source": "vrm_pre_playback_fast_path",
+                        "background": True,
+                        "error": str(exc),
+                    },
+                )
+
+        threading.Thread(
+            target=_runner,
+            name=f"edge-vts-bg-{action.lower()}",
+            daemon=True,
+        ).start()
+
     def _start_vts_for_payload(
         self,
         payload: dict[str, Any],
@@ -1138,6 +1443,11 @@ class EdgeVoicePipeline:
                 extra={"mouth_sync_state": "skipped"},
             )
             return None, None, dict(self._mouth_sync_debug)
+        avatar_backend = str(getattr(self.vts_driver, "backend", "") or "").strip().lower()
+        vrm_fast_preplayback = avatar_backend == "vrm" and _parse_bool_env(
+            "EDGE_VRM_PRE_PLAYBACK_FAST_PATH_ENABLED",
+            default=True,
+        )
         if not self._stop_mouth_sync():
             mouth_sync_debug = {
                 "state": "blocked",
@@ -1154,20 +1464,28 @@ class EdgeVoicePipeline:
             )
             return None, None, dict(mouth_sync_debug)
         if self.vts_driver.state != VtsState.AUTHENTICATED:
-            conn_result = self.vts_driver.connect()
-            self._log_vts_monitor(
-                action="CONNECT",
-                result=conn_result,
-                payload=payload,
-            )
-            if not conn_result.success:
-                self._mouth_sync_debug = {
-                    "state": "blocked",
-                    "started": False,
-                    "reason": "vts_connect_failed",
-                    "detail": conn_result.detail,
-                }
-                return conn_result, None, dict(self._mouth_sync_debug)
+            if vrm_fast_preplayback:
+                self._schedule_vts_background_command(
+                    action="CONNECT",
+                    callback=self.vts_driver.connect,
+                    payload=payload,
+                    extra={"deferred_reason": "avoid_pre_playback_http_connect"},
+                )
+            else:
+                conn_result = self.vts_driver.connect()
+                self._log_vts_monitor(
+                    action="CONNECT",
+                    result=conn_result,
+                    payload=payload,
+                )
+                if not conn_result.success:
+                    self._mouth_sync_debug = {
+                        "state": "blocked",
+                        "started": False,
+                        "reason": "vts_connect_failed",
+                        "detail": conn_result.detail,
+                    }
+                    return conn_result, None, dict(self._mouth_sync_debug)
         emotion_tag = str(payload.get("emotion_tag") or "NEUTRAL").strip().upper() or "NEUTRAL"
         self._life_motion_emotion_tag = emotion_tag
         raw_intensity = payload.get("emotion_intensity")
@@ -1187,8 +1505,49 @@ class EdgeVoicePipeline:
                 expression_id=None,
                 emotion_tag=emotion_tag,
             )
+        elif vrm_fast_preplayback:
+            transition_frames = payload.get("transition_frames")
+            if emotion_tag == "NEUTRAL":
+                expression_callback = (
+                    self.vts_driver.reset_to_neutral
+                    if _vts_reset_to_neutral_enabled()
+                    else _vts_reset_to_neutral_skipped_result
+                )
+            elif transition_frames and isinstance(transition_frames, list) and len(transition_frames) > 1:
+                expression_callback = lambda: self.vts_driver.transition_expression(
+                    emotion_tag,
+                    transition_frames=transition_frames,
+                )
+            else:
+                expression_callback = lambda: self.vts_driver.set_expression(
+                    emotion_tag,
+                    intensity=intensity,
+                )
+            self._schedule_vts_background_command(
+                action="SET_EXPRESSION",
+                callback=expression_callback,
+                payload=payload,
+                extra={
+                    "emotion_tag": emotion_tag,
+                    "intensity": round(float(intensity), 4),
+                    "voice_expression_enabled": bool(voice_expression_enabled),
+                    "deferred_reason": "avoid_pre_playback_http_expression",
+                },
+            )
+            expression_result = VtsDriverResult(
+                success=True,
+                reason_code=None,
+                detail="vrm fast pre-playback: expression scheduled in background",
+                action="set_expression",
+                expression_id=emotion_tag,
+                emotion_tag=emotion_tag,
+            )
         elif emotion_tag == "NEUTRAL":
-            expression_result = self.vts_driver.reset_to_neutral()
+            expression_result = (
+                self.vts_driver.reset_to_neutral()
+                if _vts_reset_to_neutral_enabled()
+                else _vts_reset_to_neutral_skipped_result()
+            )
         else:
             # 方向 C：优先使用过渡帧（payload 中含 transition_frames 时）
             transition_frames = payload.get("transition_frames")
@@ -1215,20 +1574,84 @@ class EdgeVoicePipeline:
 
             hotkey_id = sub_emotion_to_hotkey(sub_emotion)
             if hotkey_id:
-                hotkey_result = self.vts_driver.trigger_hotkey(hotkey_id)
-                self._log_vts_monitor(
-                    action="TRIGGER_HOTKEY",
-                    result=hotkey_result,
+                if vrm_fast_preplayback:
+                    self._schedule_vts_background_command(
+                        action="TRIGGER_HOTKEY",
+                        callback=lambda: self.vts_driver.trigger_hotkey(hotkey_id),
+                        payload=payload,
+                        extra={
+                            "hotkey_id": str(hotkey_id),
+                            "deferred_reason": "avoid_pre_playback_http_hotkey",
+                        },
+                    )
+                else:
+                    hotkey_result = self.vts_driver.trigger_hotkey(hotkey_id)
+                    self._log_vts_monitor(
+                        action="TRIGGER_HOTKEY",
+                        result=hotkey_result,
+                        payload=payload,
+                        extra={"hotkey_id": str(hotkey_id)},
+                    )
+        speech_text = str(payload.get("text") or payload.get("message") or "").strip()
+        display_text_result: VtsDriverResult | None = None
+        display_text = getattr(self.vts_driver, "display_text", None)
+        display_text_debug = {
+            "attempted": False,
+            "success": None,
+            "detail": None,
+        }
+        if speech_text and callable(display_text):
+            if vrm_fast_preplayback:
+                self._schedule_vts_background_command(
+                    action="DISPLAY_TEXT",
+                    callback=lambda: display_text(speech_text),
                     payload=payload,
-                    extra={"hotkey_id": str(hotkey_id)},
+                    extra={
+                        "text_chars": len(speech_text),
+                        "deferred_reason": "avoid_pre_playback_http_display_text",
+                    },
                 )
-        talk_result = self.vts_driver.talk_start()
-        self._log_vts_monitor(
-            action="TALK_START",
-            result=talk_result,
-            payload=payload,
-        )
-        vts_health = self.vts_driver.health()
+                display_text_debug = {
+                    "attempted": True,
+                    "success": None,
+                    "detail": "scheduled in background",
+                }
+            else:
+                display_text_result = display_text(speech_text)
+                display_text_debug = {
+                    "attempted": True,
+                    "success": bool(display_text_result.success),
+                    "detail": str(display_text_result.detail or ""),
+                }
+                self._log_vts_monitor(
+                    action="DISPLAY_TEXT",
+                    result=display_text_result,
+                    payload=payload,
+                    extra={"text_chars": len(speech_text)},
+                )
+        payload["_display_text_debug"] = dict(display_text_debug)
+        if vrm_fast_preplayback:
+            self._schedule_vts_background_command(
+                action="TALK_START",
+                callback=self.vts_driver.talk_start,
+                payload=payload,
+                extra={"deferred_reason": "avoid_pre_playback_http_talk_start"},
+            )
+            talk_result = VtsDriverResult(
+                success=True,
+                reason_code=None,
+                detail="vrm fast pre-playback: talk_start scheduled in background",
+                action="talk_start",
+            )
+            vts_health = {"mouth_parameters": {}}
+        else:
+            talk_result = self.vts_driver.talk_start()
+            self._log_vts_monitor(
+                action="TALK_START",
+                result=talk_result,
+                payload=payload,
+            )
+            vts_health = self.vts_driver.health()
         mouth_sync_debug = {
             "state": "talk_started" if talk_result.success else "talk_failed",
             "started": False,
@@ -1236,12 +1659,16 @@ class EdgeVoicePipeline:
             "intensity": round(float(intensity), 4),
             "talk_gate_success": bool(talk_result.success),
             "talk_gate_detail": str(talk_result.detail or ""),
+            "display_text": display_text_debug,
             "vts_parameters": dict(vts_health.get("mouth_parameters") or {}),
+            "vrm_pre_playback_fast_path": bool(vrm_fast_preplayback),
         }
         has_audio = self._synth_event_has_audio(synth_event)
         if has_audio:
             mouth_sync_debug = self._start_mouth_sync(synth_event, payload=payload)
             mouth_sync_debug["talk_gate_success"] = bool(talk_result.success)
+            mouth_sync_debug["display_text"] = display_text_debug
+            mouth_sync_debug["vrm_pre_playback_fast_path"] = bool(vrm_fast_preplayback)
             if not talk_result.success:
                 mouth_sync_debug["talk_gate_detail"] = str(talk_result.detail or "")
             expressive_timing = (
@@ -1327,6 +1754,172 @@ class EdgeVoicePipeline:
                 "state": "stopped",
             }
         return True
+
+    def _schedule_deferred_avatar_reset(
+        self,
+        *,
+        playback_event: dict[str, Any],
+        ts_ms: int,
+    ) -> None:
+        """Close VRM/MateEngine talk state after the mouth envelope has ended."""
+        avatar_backend = str(getattr(self.vts_driver, "backend", "") or "").strip().lower()
+        if avatar_backend != "vrm" or self.vts_driver is None:
+            return
+        watched_thread = self._mouth_sync_thread
+        watched_request_id = str(playback_event.get("request_id") or "").strip()
+        timeout_s = _parse_float_env(
+            "EDGE_VTS_MOUTH_SYNC_STOP_TIMEOUT_S",
+            default=8.0,
+            minimum=0.2,
+            maximum=30.0,
+        )
+
+        def _runner() -> None:
+            if watched_thread is not None and watched_thread.is_alive():
+                watched_thread.join(timeout=timeout_s)
+            if watched_thread is not None and watched_thread.is_alive():
+                self._mouth_sync_debug = {
+                    **self._mouth_sync_debug,
+                    "deferred_avatar_reset": "timed_out",
+                    "deferred_avatar_reset_timeout_s": round(float(timeout_s), 4),
+                }
+                return
+
+            current_request_id = str((self._mouth_sync_debug or {}).get("request_id") or "").strip()
+            if watched_request_id and current_request_id and current_request_id != watched_request_id:
+                self._mouth_sync_debug = {
+                    **self._mouth_sync_debug,
+                    "deferred_avatar_reset": "skipped_new_playback",
+                    "deferred_avatar_reset_request_id": watched_request_id,
+                    "current_request_id": current_request_id,
+                }
+                return
+
+            try:
+                talk_end_result = self.vts_driver.talk_end()
+                self._log_vts_monitor(
+                    action="TALK_END",
+                    result=talk_end_result,
+                    payload=playback_event,
+                    ts_ms=int(playback_event.get("ts_ms") or ts_ms),
+                    extra={"source": "deferred_avatar_reset"},
+                )
+                reset_result = (
+                    self.vts_driver.reset_to_neutral()
+                    if _vts_reset_to_neutral_enabled()
+                    else _vts_reset_to_neutral_skipped_result()
+                )
+                self._log_vts_monitor(
+                    action="RESET_TO_NEUTRAL",
+                    result=reset_result,
+                    payload=playback_event,
+                    ts_ms=int(playback_event.get("ts_ms") or ts_ms),
+                    extra={"source": "deferred_avatar_reset"},
+                )
+                self._mouth_sync_debug = {
+                    **self._mouth_sync_debug,
+                    "deferred_avatar_reset": "completed",
+                    "deferred_talk_end_success": bool(talk_end_result.success),
+                    "deferred_reset_success": bool(reset_result.success),
+                }
+                self._apply_quiet_avatar_behavior(
+                    behavior_id="idle",
+                    payload=playback_event,
+                    source="deferred_avatar_reset",
+                )
+            except Exception as exc:  # pragma: no cover - defensive background cleanup
+                self._mouth_sync_debug = {
+                    **self._mouth_sync_debug,
+                    "deferred_avatar_reset": "error",
+                    "deferred_avatar_reset_error": str(exc),
+                }
+
+        threading.Thread(
+            target=_runner,
+            name="edge-vrm-deferred-avatar-reset",
+            daemon=True,
+        ).start()
+
+    def _schedule_quiet_avatar_behavior(
+        self,
+        *,
+        behavior_id: str,
+        payload: dict[str, Any] | None = None,
+        source: str,
+    ) -> bool:
+        if not _parse_bool_env("EDGE_AVATAR_BEHAVIOR_AUTO_STATE_ENABLED", default=True):
+            return False
+        if not _parse_bool_env("EDGE_AVATAR_BEHAVIOR_PLAYBACK_STARTED_ASYNC_ENABLED", default=True):
+            return False
+        if self.vts_driver is None:
+            return False
+
+        behavior_payload = dict(payload or {})
+
+        def _runner() -> None:
+            self._apply_quiet_avatar_behavior(
+                behavior_id=behavior_id,
+                payload=behavior_payload,
+                source=source,
+            )
+
+        threading.Thread(
+            target=_runner,
+            name=f"edge-avatar-behavior-{behavior_id}-{source}",
+            daemon=True,
+        ).start()
+        return True
+
+    def _apply_quiet_avatar_behavior(
+        self,
+        *,
+        behavior_id: str,
+        payload: dict[str, Any] | None = None,
+        source: str,
+    ) -> dict[str, Any] | None:
+        if not _parse_bool_env("EDGE_AVATAR_BEHAVIOR_AUTO_STATE_ENABLED", default=True):
+            return None
+        if self.vts_driver is None:
+            return None
+        try:
+            from edge_client.runtime.avatar_behavior import execute_avatar_behavior
+
+            behavior_payload = {
+                **dict(payload or {}),
+                "behavior_id": behavior_id,
+                "source": source,
+            }
+            result = execute_avatar_behavior(self, behavior_payload)
+            self._last_vts_result = {
+                **dict(self._last_vts_result or {}),
+                "avatar_behavior": {
+                    **dict(result),
+                    "source": source,
+                },
+            }
+            LOGGER.info(
+                "avatar behavior applied: behavior=%s source=%s success=%s state=%s",
+                behavior_id,
+                source,
+                bool(result.get("success")),
+                str(result.get("state") or ""),
+            )
+            return result
+        except Exception as exc:  # pragma: no cover - behavior should never break voice
+            LOGGER.warning(
+                "avatar behavior failed: behavior=%s source=%s error=%s",
+                behavior_id,
+                source,
+                exc,
+            )
+            return {
+                "success": False,
+                "state": "error",
+                "reason": "avatar_behavior_error",
+                "detail": str(exc),
+                "behavior_id": behavior_id,
+                "source": source,
+            }
 
     def _life_motion_loop(self, config: dict[str, Any], stop_event: threading.Event) -> None:
         fps = max(1.0, float(config.get("fps") or 4.0))
@@ -1490,6 +2083,8 @@ class EdgeVoicePipeline:
         debug = {
             "state": "prepared",
             "started": False,
+            "request_id": str(payload.get("request_id") or ""),
+            "session_id": str(payload.get("session_id") or ""),
             "audio_type": type(audio_data).__name__,
             "sample_rate": sample_rate,
             "envelope_points": len(envelope),
@@ -1514,34 +2109,56 @@ class EdgeVoicePipeline:
         }
         payload = dict(payload or {})
         motion_config = _speech_motion_config(payload)
+        avatar_backend = str(getattr(self.vts_driver, "backend", "") or "").strip().lower()
+        vrm_lightweight_mouth = avatar_backend == "vrm" and _parse_bool_env(
+            "EDGE_VRM_MOUTH_SYNC_LIGHTWEIGHT",
+            default=True,
+        )
+        vrm_lightweight_allows_motion = _parse_bool_env(
+            "EDGE_VRM_MOUTH_SYNC_LIGHTWEIGHT_ALLOW_SPEECH_MOTION",
+            default=True,
+        )
+        if vrm_lightweight_mouth and not vrm_lightweight_allows_motion:
+            motion_config["enabled"] = False
+        motion_config["vrm_lightweight_motion_allowed"] = bool(vrm_lightweight_allows_motion)
         motion_config["frame_count"] = max(1, len(envelope))
         debug["motion_config"] = {
             key: (bool(value) if isinstance(value, bool) else round(float(value), 4))
             for key, value in motion_config.items()
         }
+        debug["avatar_backend"] = avatar_backend or "unknown"
+        debug["vrm_lightweight_mouth"] = bool(vrm_lightweight_mouth)
+        if isinstance(payload.get("_display_text_debug"), dict):
+            debug["display_text"] = dict(payload.get("_display_text_debug") or {})
         debug["motion_emotion_tag"] = str(payload.get("emotion_tag") or "NEUTRAL").strip().upper() or "NEUTRAL"
         probe_value = max(0.18, min(0.92, float(envelope[0])))
         debug["probe_value"] = round(probe_value, 4)
-        probe_result = self.vts_driver.set_mouth_open_level(
-            probe_value,
-            _include_companions=True,
-            _batch_companions=True,
+        skip_probe = avatar_backend == "vrm" and _parse_bool_env(
+            "EDGE_VRM_MOUTH_SYNC_SKIP_PROBE",
+            default=True,
         )
-        if not probe_result.success:
-            debug["state"] = "blocked"
-            debug["reason"] = "mouth_param_unwritable"
-            debug["detail"] = probe_result.detail
-            self._mouth_sync_debug = dict(debug)
-            LOGGER.warning(
-                "VTS mouth sync blocked: %s",
-                probe_result.detail,
+        debug["probe_skipped"] = bool(skip_probe)
+        if not skip_probe:
+            probe_result = self.vts_driver.set_mouth_open_level(
+                probe_value,
+                _include_companions=True,
+                _batch_companions=True,
             )
-            return debug
-        self.vts_driver.set_mouth_open_level(
-            0.0,
-            _include_companions=True,
-            _batch_companions=True,
-        )
+            if not probe_result.success:
+                debug["state"] = "blocked"
+                debug["reason"] = "mouth_param_unwritable"
+                debug["detail"] = probe_result.detail
+                self._mouth_sync_debug = dict(debug)
+                LOGGER.warning(
+                    "VTS mouth sync blocked: %s",
+                    probe_result.detail,
+                )
+                return debug
+            self.vts_driver.set_mouth_open_level(
+                0.0,
+                _include_companions=True,
+                _batch_companions=True,
+            )
 
         stop_event = self._mouth_sync_stop
         frame_interval_s = max(0.016, min(0.1, 1.0 / max(1.0, float(envelope_config["fps"]))))
@@ -1550,8 +2167,8 @@ class EdgeVoicePipeline:
         debug["started"] = True
         debug["frames_sent"] = 0
         debug["error_count"] = 0
-        debug["per_frame_companions"] = True
-        debug["per_frame_batch"] = True
+        debug["per_frame_companions"] = not vrm_lightweight_mouth
+        debug["per_frame_batch"] = not vrm_lightweight_mouth or bool(motion_config["enabled"])
         debug["motion_enabled"] = bool(motion_config["enabled"])
         motion_every_n_frames = max(1, int(float(motion_config.get("motion_every_n_frames") or 1)))
         debug["motion_every_n_frames"] = motion_every_n_frames
@@ -1592,8 +2209,8 @@ class EdgeVoicePipeline:
                 )
                 result = self.vts_driver.set_mouth_open_level(
                     value,
-                    _include_companions=True,
-                    _batch_companions=True,
+                    _include_companions=not vrm_lightweight_mouth,
+                    _batch_companions=not vrm_lightweight_mouth or should_send_motion,
                     _motion_values=(
                         self._speech_motion_values(
                             frame_index=frame_index,
@@ -1630,8 +2247,8 @@ class EdgeVoicePipeline:
             if not stop_event.is_set():
                 self.vts_driver.set_mouth_open_level(
                     0.0,
-                    _include_companions=True,
-                    _batch_companions=True,
+                    _include_companions=not vrm_lightweight_mouth,
+                    _batch_companions=not vrm_lightweight_mouth or bool(motion_config["enabled"]),
                     _motion_values=(
                         self._speech_motion_values(
                             frame_index=len(envelope),
@@ -2100,15 +2717,20 @@ class EdgeVoicePipeline:
         fps: float,
         config: dict[str, Any],
     ) -> dict[str, float]:
+        face_motion_enabled = bool(config.get("face_motion_enabled", True)) and not bool(config.get("body_only"))
         if not bool(config.get("enabled")):
-            reset_values = {
-                "FaceAngleX": 0.0,
-                "FaceAngleY": 0.0,
-                "FaceAngleZ": 0.0,
-                "FacePositionX": 0.0,
-                "FacePositionY": 0.0,
-                "FacePositionZ": 0.0,
-            }
+            reset_values: dict[str, float] = {}
+            if face_motion_enabled:
+                reset_values.update(
+                    {
+                        "FaceAngleX": 0.0,
+                        "FaceAngleY": 0.0,
+                        "FaceAngleZ": 0.0,
+                        "FacePositionX": 0.0,
+                        "FacePositionY": 0.0,
+                        "FacePositionZ": 0.0,
+                    }
+                )
             if bool(config.get("full_body_enabled")):
                 reset_values.update(
                     {
@@ -2186,14 +2808,18 @@ class EdgeVoicePipeline:
         pos_x = float(config.get("position_x") or 0.0) * gain * energy
         pos_y = float(config.get("position_y") or 0.0) * gain * energy
         pos_z = float(config.get("position_z") or 0.0) * gain * energy
-        values = {
-            "FaceAngleX": round((math.sin(t * 4.4 * tempo) * 0.3 + (mouth - 0.35) * 0.55 + beat * 0.25 + emphasis * 0.32 - closing * 0.15) * nod, 4),
-            "FaceAngleY": round((phrase * 0.7 + counter * 0.2 + beat * 0.1 + (turn_right - turn_left) * 0.58) * sway, 4),
-            "FaceAngleZ": round((math.sin(t * 1.55 * tempo + 1.1) * 0.65 - phrase * 0.2 + (turn_left - turn_right) * 0.3) * tilt, 4),
-            "FacePositionX": round((math.sin(t * 1.8 * tempo + 1.7) * 0.7 + phrase * 0.25 + (turn_right - turn_left) * 0.35) * pos_x, 4),
-            "FacePositionY": round(math.sin(t * 2.4 * tempo) * pos_y * 0.65 + mouth * pos_y * 0.45 + beat * pos_y * 0.35 + (opening + emphasis * 0.65 - closing * 0.25) * pos_y, 4),
-            "FacePositionZ": round(math.sin(t * 1.2 * tempo + 0.3) * pos_z * 0.7 + mouth * pos_z * 0.35 + (opening + emphasis) * pos_z * 0.45, 4),
-        }
+        values: dict[str, float] = {}
+        if face_motion_enabled:
+            values.update(
+                {
+                    "FaceAngleX": round((math.sin(t * 4.4 * tempo) * 0.3 + (mouth - 0.35) * 0.55 + beat * 0.25 + emphasis * 0.32 - closing * 0.15) * nod, 4),
+                    "FaceAngleY": round((phrase * 0.7 + counter * 0.2 + beat * 0.1 + (turn_right - turn_left) * 0.58) * sway, 4),
+                    "FaceAngleZ": round((math.sin(t * 1.55 * tempo + 1.1) * 0.65 - phrase * 0.2 + (turn_left - turn_right) * 0.3) * tilt, 4),
+                    "FacePositionX": round((math.sin(t * 1.8 * tempo + 1.7) * 0.7 + phrase * 0.25 + (turn_right - turn_left) * 0.35) * pos_x, 4),
+                    "FacePositionY": round(math.sin(t * 2.4 * tempo) * pos_y * 0.65 + mouth * pos_y * 0.45 + beat * pos_y * 0.35 + (opening + emphasis * 0.65 - closing * 0.25) * pos_y, 4),
+                    "FacePositionZ": round(math.sin(t * 1.2 * tempo + 0.3) * pos_z * 0.7 + mouth * pos_z * 0.35 + (opening + emphasis) * pos_z * 0.45, 4),
+                }
+            )
         if bool(config.get("full_body_enabled")) and bool(config.get("mocopi_enabled")):
             body_degrees = float(config.get("body_degrees") or 0.0) * gain * energy
             body_position = float(config.get("body_position") or 0.0) * gain * energy

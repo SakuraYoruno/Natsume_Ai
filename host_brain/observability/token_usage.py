@@ -7,6 +7,7 @@ import json
 import math
 import os
 import sqlite3
+import sys
 import time
 from collections import Counter
 from collections.abc import Iterable, Mapping, Sequence
@@ -472,7 +473,7 @@ def main(argv: list[str] | None = None) -> int:
         window_hours=args.hours,
         top_n=args.top,
     )
-    print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True))
+    sys.stdout.write(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True) + "\n")
     return 0
 
 

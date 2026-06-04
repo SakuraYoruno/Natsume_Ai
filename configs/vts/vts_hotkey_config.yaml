@@ -51,9 +51,11 @@ hotkey_groups:
     hotkeys:
       - name: "去水印"
         hotkey_id: "hotkey_remove_watermark"
+        enabled: false
+        blocked: true
         shortcut: "Numpad0"
         emotion_tag: null
-        description: "去除模型水印"
+        description: "禁用：避免误触水印热键"
 
       - name: "飞头"
         hotkey_id: "hotkey_fly_head"
@@ -354,7 +356,9 @@ hotkey_groups:
 
       - name: "移除所有按键表情"
         hotkey_id: "hotkey_reset_all"
+        enabled: false
+        blocked: true
         shortcut: "Alt+N0"
         emotion_tag: "NEUTRAL"
-        description: "移除所有按键触发的表情，恢复默认状态"
+        description: "禁用：避免 reset all 触发水印/热键状态切换"
         priority: 10

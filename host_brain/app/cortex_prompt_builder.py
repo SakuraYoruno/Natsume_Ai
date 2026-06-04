@@ -71,9 +71,9 @@ def _build_final_output_contract(*, render_target_lang: str) -> str:
     if str(render_target_lang or "").strip().lower() == "ja":
         return (
             "【最终输出格式】\n"
-            "只输出一条日语语音台词本体，适合直接送入 TTS。"
-            "不要中文、不要角色名前缀、不要引号、不要括号动作、不要旁白、不要 Markdown、不要 emoji。"
-            "如果不是语音场景，系统会切回中文文字；你不要自行混用两种语言。"
+            "只输出一条中文语音台词本体，适合直接送入 TTS。"
+            "禁止日语、假名、日语口癖；不要角色名前缀、不要引号、不要括号动作、不要旁白、不要 Markdown、不要 emoji。"
+            "即使上游误传 render_target_lang=ja，也必须输出中文。"
         )
     return (
         "【最终输出格式】\n"

@@ -3,7 +3,7 @@ import react from '@vitejs/plugin-react'
 import path from 'path'
 
 const devApiTarget = process.env.VITE_DEV_API_TARGET || 'http://127.0.0.1:18080'
-const devObsApiTarget = process.env.VITE_DEV_OBS_API_TARGET || devApiTarget
+const devObsApiTarget = process.env.VITE_DEV_OBS_API_TARGET || 'http://127.0.0.1:18082'
 const devHostApiTarget = process.env.VITE_DEV_HOST_API_TARGET || devApiTarget
 
 export default defineConfig({

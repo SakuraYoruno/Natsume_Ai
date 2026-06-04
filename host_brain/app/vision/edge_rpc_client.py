@@ -15,12 +15,7 @@
 
 from __future__ import annotations
 
-import hashlib
-import hmac as _hmac
-import json
 import logging
-import time
-import uuid
 from typing import Any
 
 from host_brain.app.vision.agent_loop import ClawdbotClient, _build_scene_awareness_signal
@@ -29,6 +24,7 @@ from host_brain.app.vision.clawdbot_protocol import (
     ActionReport,
     ActionStatus,
 )
+from host_brain.channels.edge_rpc_client import _post_to_edge
 from host_brain.core.ids import new_request_id
 
 _logger = logging.getLogger("Natsume.edge_rpc_client")
@@ -61,25 +57,21 @@ class EdgeRpcClient(ClawdbotClient):
     async def capture_screenshot(self, session_id: str) -> dict[str, Any]:
         """通过 Edge RPC 截图，返回 {image_b64, image_mime, width, height}。"""
         try:
-            import httpx
-            envelope = self._build_envelope(
-                request_id=new_request_id(),
+            result = await _post_to_edge(
+                path="/v1/edge/screenshot",
                 payload={"monitor_index": self._monitor_index, "session_id": session_id},
+                request_id=new_request_id(),
+                request_timeout_ms=int(max(1000, float(self.timeout_sec) * 1000)),
+                base_url_override=self._edge_base_url,
+                shared_key_override=self._hmac_key,
             )
-            async with httpx.AsyncClient(timeout=self.timeout_sec) as client:
-                resp = await client.post(
-                    f"{self._edge_base_url}/v1/edge/screenshot",
-                    json=envelope,
-                )
-                resp.raise_for_status()
-                data = resp.json()
 
-            if not data.get("success"):
-                error = data.get("detail") or data.get("reason_code") or "截图失败"
+            if not result.success:
+                error = result.detail or result.reason_code or "截图失败"
                 _logger.warning("EdgeRpcClient: 截图失败: %s", error)
-                return {"error": error, "image_b64": "", "image_mime": "image/png"}
+                return {"error": error, "image_base64": "", "image_mime": "image/png"}
 
-            event = data.get("event") or {}
+            event = result.event or {}
             # 兼容 Edge 端返回 image_b64 或 image_base64 两种字段名
             image_base64 = event.get("image_base64") or event.get("image_b64", "")
             return {
@@ -110,27 +102,23 @@ class EdgeRpcClient(ClawdbotClient):
     async def execute_plan(self, plan: ActionPlan) -> ActionReport:
         """将 ActionPlan 转换为 Edge 自动化操作并执行。"""
         try:
-            import httpx
             # 将 ActionPlan 的 actions 转换为 DesktopAction 格式
             desktop_actions = _convert_plan_to_desktop_actions(plan)
-            envelope = self._build_envelope(
-                request_id=plan.request_id,
+            result = await _post_to_edge(
+                path="/v1/edge/automate",
                 payload={
                     "session_id": plan.session_id,
                     "actions": desktop_actions,
                     "stop_on_error": plan.stop_on_error,
                 },
+                request_id=plan.request_id,
+                request_timeout_ms=int(max(1000, float(self.timeout_sec) * 1000)),
+                base_url_override=self._edge_base_url,
+                shared_key_override=self._hmac_key,
             )
-            async with httpx.AsyncClient(timeout=self.timeout_sec) as client:
-                resp = await client.post(
-                    f"{self._edge_base_url}/v1/edge/automate",
-                    json=envelope,
-                )
-                resp.raise_for_status()
-                data = resp.json()
 
-            event = data.get("event") or {}
-            success = bool(data.get("success"))
+            event = result.event or {}
+            success = bool(result.success)
 
             from host_brain.app.vision.clawdbot_protocol import ActionResult
             results = []
@@ -153,7 +141,7 @@ class EdgeRpcClient(ClawdbotClient):
                 success_count=event.get("success_count", 0),
                 failed_count=event.get("failed_count", 0),
                 total_latency_ms=event.get("total_latency_ms", 0),
-                error=None if success else (data.get("detail") or "执行失败"),
+                error=None if success else (result.detail or result.reason_code or "执行失败"),
             )
         except Exception as exc:
             _logger.warning("EdgeRpcClient: 执行操作异常: %s", exc)
@@ -166,31 +154,6 @@ class EdgeRpcClient(ClawdbotClient):
                 failed_count=len(plan.actions),
                 error=str(exc),
             )
-
-    def _build_envelope(self, *, request_id: str, payload: dict[str, Any]) -> dict[str, Any]:
-        """构建 Edge RPC 信封（与 edge_client.rpc.auth 协议保持一致）。"""
-        import os as _os
-        _clock_offset = int(_os.environ.get("HOST_EDGE_CLOCK_OFFSET_MS", "0") or "0")
-        ts_ms = int(time.time() * 1000) + _clock_offset
-        nonce = str(uuid.uuid4())
-        signature = "insecure"
-        if self._hmac_key:
-            canonical = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-            message = f"{request_id}\n{ts_ms}\n{nonce}\n{canonical}"
-            signature = _hmac.new(
-                self._hmac_key.encode("utf-8"),
-                message.encode("utf-8"),
-                hashlib.sha256,
-            ).hexdigest()
-        envelope: dict[str, Any] = {
-            "request_id": request_id,
-            "ts_ms": ts_ms,
-            "nonce": nonce,
-            "signature": signature,
-            "payload": payload,
-        }
-        return envelope
-
 
 # ---------------------------------------------------------------------------
 # ActionPlan → DesktopAction 转换

@@ -161,11 +161,46 @@ NEUTRAL_RESET_HOTKEY_HINTS: tuple[str, ...] = (
     "remove all",
     "reset all",
 )
+BLOCKED_AVATAR_HOTKEY_TOKENS: tuple[str, ...] = (
+    "hotkey_remove_watermark",
+    "remove_watermark",
+    "remove watermark",
+    "watermark",
+    "去水印",
+    "水印",
+    "hotkey_reset_all",
+    "reset_all",
+    "reset all",
+    "remove all expressions",
+    "移除所有按键表情",
+)
 BROKEN_HOTKEY_ERROR_HINTS: tuple[str, ...] = (
     "given parameter",
     "does not exist",
     "not found in model",
 )
+
+
+def _env_bool(name: str, default: bool) -> bool:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return str(raw).strip().lower() not in {"0", "false", "no", "off", ""}
+
+
+def _vts_reset_to_neutral_enabled() -> bool:
+    return _env_bool("EDGE_VTS_RESET_TO_NEUTRAL_ENABLED", False)
+
+
+def is_blocked_avatar_hotkey_id(hotkey_id: Any, *, name: Any = "", action: Any = "") -> bool:
+    if not _env_bool("EDGE_VTS_BLOCK_WATERMARK_HOTKEY_ENABLED", True):
+        return False
+    text = " ".join(
+        str(part or "").strip().lower()
+        for part in (hotkey_id, name, action)
+        if str(part or "").strip()
+    )
+    return bool(text and any(token in text for token in BLOCKED_AVATAR_HOTKEY_TOKENS))
 
 
 #
@@ -420,6 +455,29 @@ class VtsDriverResult:
             "expression_id": self.expression_id,
             "emotion_tag": self.emotion_tag,
         }
+
+
+def _blocked_hotkey_result(hotkey_id: Any, *, action: str = "trigger_hotkey") -> VtsDriverResult:
+    normalized = str(hotkey_id or "").strip()
+    return VtsDriverResult(
+        success=False,
+        reason_code=AVATAR_FREE_ACTION_BLOCKED,
+        detail=f"blocked avatar hotkey: {normalized}",
+        action=action,
+        expression_id=normalized or None,
+        emotion_tag=None,
+    )
+
+
+def _reset_to_neutral_skipped_result() -> VtsDriverResult:
+    return VtsDriverResult(
+        success=True,
+        reason_code=None,
+        detail="VTS reset_to_neutral disabled; hotkey reset skipped",
+        action="reset_to_neutral",
+        expression_id="NEUTRAL",
+        emotion_tag="NEUTRAL",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -751,12 +809,49 @@ class VTubeStudioDriver:
             if available_mouth_params:
                 mouth_params = available_mouth_params
 
+        if not _include_companions and _batch_companions and _motion_values:
+            motion_batch_values = self._build_mouth_parameter_batch_values(
+                level=level,
+                plan=plan,
+                available_params=available_params,
+                motion_values=_motion_values,
+                include_mouth=False,
+            )
+            if motion_batch_values:
+                try:
+                    _set_vts_parameters(
+                        vts=self._vts,
+                        parameter_values=motion_batch_values,
+                        timeout_s=self._config.api_timeout_s,
+                    )
+                    motion_parameters = [
+                        key
+                        for key in list((_motion_values or {}).keys())
+                        if key in motion_batch_values
+                    ]
+                    plan = dict(self._mouth_parameter_plan)
+                    plan["last_motion_parameters"] = list(motion_parameters)
+                    plan["last_motion_values"] = {
+                        key: round(float(motion_batch_values[key]), 4)
+                        for key in motion_parameters
+                    }
+                    plan["last_motion_batch_parameters"] = list(motion_batch_values.keys())
+                    self._mouth_parameter_plan = plan
+                except Exception:
+                    pass
+
         if _include_companions and _batch_companions:
+            hold_talking_mouth = bool(
+                self._talking
+                and level <= 0.001
+                and _motion_values is not None
+            )
             batch_values = self._build_mouth_parameter_batch_values(
                 level=level,
                 plan=plan,
                 available_params=available_params,
                 motion_values=_motion_values,
+                include_mouth=not hold_talking_mouth,
             )
             if batch_values:
                 try:
@@ -767,8 +862,11 @@ class VTubeStudioDriver:
                     )
                     selected_primary = next(iter(batch_values.keys()))
                     plan = dict(self._mouth_parameter_plan)
-                    plan["selected"] = [selected_primary]
-                    plan["last_value"] = round(level, 4)
+                    if hold_talking_mouth:
+                        plan["last_value"] = round(float(plan.get("last_value") or 0.0), 4)
+                    else:
+                        plan["selected"] = [selected_primary]
+                        plan["last_value"] = round(level, 4)
                     plan["last_batch_parameters"] = list(batch_values.keys())
                     motion_parameters = [
                         key
@@ -783,13 +881,15 @@ class VTubeStudioDriver:
                         }
                         plan["last_motion_batch_parameters"] = list(batch_values.keys())
                     self._mouth_parameter_plan = plan
+                    detail_prefix = (
+                        "motion batch set while holding talking mouth via "
+                        if hold_talking_mouth
+                        else "mouth level batch set via "
+                    )
                     return VtsDriverResult(
                         success=True,
                         reason_code=None,
-                        detail=(
-                            "mouth level batch set via "
-                            f"{','.join(batch_values.keys())}: {level:.3f}"
-                        ),
+                        detail=f"{detail_prefix}{','.join(batch_values.keys())}: {level:.3f}",
                         action="set_mouth_open_level",
                     )
                 except Exception as exc:  # pragma: no cover - depends on VTS runtime state
@@ -1082,6 +1182,7 @@ class VTubeStudioDriver:
         plan: dict[str, Any],
         available_params: set[str],
         motion_values: dict[str, float] | None = None,
+        include_mouth: bool = True,
     ) -> dict[str, float]:
         ordered_open_params = [
             str(item)
@@ -1109,11 +1210,12 @@ class VTubeStudioDriver:
             silence_params = [item for item in silence_params if item in available_params]
 
         values: dict[str, float] = {}
-        for param in ordered_open_params:
-            values.setdefault(param, level)
-        silence_value = max(0.0, min(1.0, 1.0 - level))
-        for param in silence_params:
-            values.setdefault(param, silence_value)
+        if include_mouth:
+            for param in ordered_open_params:
+                values.setdefault(param, level)
+            silence_value = max(0.0, min(1.0, 1.0 - level))
+            for param in silence_params:
+                values.setdefault(param, silence_value)
         for param_name, raw_value in dict(motion_values or {}).items():
             param = str(param_name or "").strip()
             if not param:
@@ -1324,6 +1426,19 @@ class VTubeStudioDriver:
     def reset_to_neutral(self) -> VtsDriverResult:
         """Reset expression to NEUTRAL (used after barge-in or end of talk)."""
         self._talking = False
+        if not _vts_reset_to_neutral_enabled():
+            result = _reset_to_neutral_skipped_result()
+            if self._state == VtsState.AUTHENTICATED:
+                try:
+                    self.set_mouth_open_level(
+                        VTS_MOUTH_CLOSE_VALUE,
+                        _include_companions=True,
+                        _batch_companions=True,
+                    )
+                except Exception:
+                    pass
+            return result
+
         result: VtsDriverResult | None = None
         if self._state == VtsState.AUTHENTICATED:
             reset_hotkey = self._resolve_neutral_reset_hotkey()
@@ -1390,6 +1505,8 @@ class VTubeStudioDriver:
             )
 
         normalized_id = str(hotkey_id).strip()
+        if is_blocked_avatar_hotkey_id(normalized_id):
+            return _blocked_hotkey_result(normalized_id)
 
         if self._state != VtsState.AUTHENTICATED:
             logger.debug("VTS trigger_hotkey degraded (not connected): %s", normalized_id)
@@ -1640,6 +1757,9 @@ class VTubeStudioDriver:
         for row in catalog:
             hotkey_id = str(row.get("id") or "").strip()
             action = str(row.get("action") or "").strip().lower()
+            name = str(row.get("name") or "").strip()
+            if is_blocked_avatar_hotkey_id(hotkey_id, name=name, action=action):
+                continue
             if hotkey_id and action in NEUTRAL_RESET_HOTKEY_ACTIONS:
                 return hotkey_id
 
@@ -1647,6 +1767,8 @@ class VTubeStudioDriver:
             hotkey_id = str(row.get("id") or "").strip()
             name = str(row.get("name") or "").strip().lower()
             if not hotkey_id:
+                continue
+            if is_blocked_avatar_hotkey_id(hotkey_id, name=name):
                 continue
             if any(hint in name for hint in NEUTRAL_RESET_HOTKEY_HINTS):
                 return hotkey_id

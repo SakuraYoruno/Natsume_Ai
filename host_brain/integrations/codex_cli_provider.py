@@ -582,17 +582,20 @@ class _CodexAppServerWorker:
         sandbox: str,
         workdir: Path,
         run_root: Path,
-        server_key: str,
-        feature_key: str | None,
+        server_key: str | None = None,
+        feature_key: str | None = None,
+        session_key: str | None = None,
     ) -> None:
+        resolved_server_key = str(server_key or session_key or "codex").strip() or "codex"
         self.command = command
         self.model_id = model_id
         self.sandbox = sandbox
         self.workdir = workdir
         self.run_root = run_root
-        self.server_key = server_key
+        self.server_key = resolved_server_key
+        self.session_key = str(session_key or resolved_server_key).strip() or resolved_server_key
         self.feature_key = feature_key
-        self.run_dir = run_root / _worker_dir_name(server_key)
+        self.run_dir = run_root / _worker_dir_name(resolved_server_key)
         self.thread_reuse = codex_app_server_thread_reuse_enabled()
         self.thread_ids: dict[str, str] = {}
         self.proc: subprocess.Popen[str] | None = None
@@ -608,16 +611,24 @@ class _CodexAppServerWorker:
         if proc and proc.poll() is None:
             _terminate_codex_cli_processes(proc, marker=str(self.run_dir.resolve()))
 
-    def generate(self, *, prompt: str, timeout_ms: int, thread_key: str, response_format: Any = None) -> str:
+    def generate(
+        self,
+        *,
+        prompt: str,
+        timeout_ms: int,
+        thread_key: str | None = None,
+        response_format: Any = None,
+    ) -> str:
         timeout_s = max(1.0, resolve_codex_cli_timeout_ms(timeout_ms) / 1000.0)
         deadline = time.monotonic() + timeout_s
+        resolved_thread_key = str(thread_key or self.session_key or self.server_key).strip() or self.server_key
         with self._lock:
             if self.proc and self.proc.poll() is None:
                 self._ensure_started_locked(deadline=deadline)
             else:
                 with _APP_SERVER_START_LOCK:
                     self._ensure_started_locked(deadline=deadline)
-            thread_id = self._ensure_thread_locked(thread_key=thread_key, deadline=deadline)
+            thread_id = self._ensure_thread_locked(thread_key=resolved_thread_key, deadline=deadline)
             result = self._run_turn_locked(
                 thread_id=thread_id,
                 prompt=prompt,
@@ -894,7 +905,8 @@ def _get_codex_app_server_worker(
     workdir: Path,
     run_root: Path,
     server_key: str,
-    feature_key: str | None,
+    session_key: str | None = None,
+    feature_key: str | None = None,
 ) -> _CodexAppServerWorker:
     with _APP_SERVER_LOCK:
         worker = _APP_SERVER_WORKERS.get(server_key)
@@ -906,6 +918,7 @@ def _get_codex_app_server_worker(
                 workdir=workdir,
                 run_root=run_root,
                 server_key=server_key,
+                session_key=session_key,
                 feature_key=feature_key,
             )
             _APP_SERVER_WORKERS[server_key] = worker
@@ -962,6 +975,7 @@ def prewarm_codex_app_server(
         workdir=workdir,
         run_root=run_root,
         server_key=server_key,
+        session_key=server_key,
         feature_key="startup_prewarm",
     )
     try:
@@ -1094,6 +1108,7 @@ def invoke_codex_cli_text(
             workdir=workdir,
             run_root=run_root,
             server_key=server_key,
+            session_key=session_key,
             feature_key=feature_key,
         )
         try:

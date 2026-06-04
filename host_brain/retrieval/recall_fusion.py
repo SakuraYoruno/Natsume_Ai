@@ -286,9 +286,9 @@ class RecallFusionServiceContract:
         from host_brain.retrieval.recall_fusion_stores import search_life_episode
         return search_life_episode(self, query=query, top_k=top_k, person_id=person_id, session_id=session_id, now_ts_ms=now_ts_ms)
 
-    def _search_semantic_memory(self, *, query: str, top_k: int, now_ts_ms: int | None = None) -> list[dict[str, Any]]:
+    def _search_semantic_memory(self, *, query: str, top_k: int, person_id: str | None = None, session_id: str | None = None, now_ts_ms: int | None = None) -> list[dict[str, Any]]:
         from host_brain.retrieval.recall_fusion_stores import search_semantic_memory
-        return search_semantic_memory(self, query=query, top_k=top_k, now_ts_ms=now_ts_ms)
+        return search_semantic_memory(self, query=query, top_k=top_k, person_id=person_id, session_id=session_id, now_ts_ms=now_ts_ms)
 
     def _search_neo4j_bond(self, *, query: str, top_k: int) -> list[dict[str, Any]]:
         from host_brain.retrieval.recall_fusion_stores import search_neo4j_bond

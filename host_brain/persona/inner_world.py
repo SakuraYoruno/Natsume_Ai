@@ -135,14 +135,96 @@ _ABSTRACT_INNER_NOTE_TERMS = (
     "模型",
     "prompt",
     "Prompt",
+    "映射",
+    "验证",
+    "链路",
+    "接口",
+    "字段",
+    "结构化",
+    "运行时",
+    "调度",
+    "日志",
+    "token",
+    "状态驱动",
+    "MateEngine",
+    "主链路",
+    "那条事",
+    "那件事",
+    "那根线",
+    "放回手里",
 )
+_DIRECTIVE_INNER_NOTE_OPENING_RE = re.compile(
+    r"^(?:先|别|不要|把|问|确认|稳住|看清|记住|继续|接着|收住|压住|保持)"
+)
+_DIRECTIVE_INNER_NOTE_PHRASES = (
+    "别急着",
+    "不急着",
+    "先稳",
+    "先问",
+    "先确认",
+    "问清",
+    "看清楚",
+    "当成眼前小事",
+    "压稳一点",
+    "节奏压稳",
+    "弄清楚",
+)
+_OVERWRITTEN_INNER_NOTE_PHRASES = (
+    "像一层薄灰",
+    "落在胸口",
+    "贴在心口",
+    "心里的线",
+    "温柔的余地",
+)
+_META_INNER_NOTE_PHRASES = (
+    "赶进度",
+    "第一句话",
+    "下一句话",
+    "该怎么回",
+    "怎么回复",
+    "回复质量",
+    "表达质量",
+    "开口又太像",
+    "太像在",
+)
+_INNER_NOTE_MIN_LIVELINESS_SCORE = float(os.environ.get("NATSUME_INNER_NOTE_MIN_LIVELINESS_SCORE", "0.42"))
+_INNER_NOTE_HARD_QUALITY_FLAGS = {
+    "directive_like",
+    "meta_reply_strategy",
+    "abstract_system_language",
+    "overwritten_prose",
+}
+_INNER_STREAM_ALLOWED_FOCUS = {"self", "state", "plan", "topic", "relationship", "memory", "repair"}
 _INNER_WORLD_MONOLOGUE_SYSTEM_PROMPT = (
     "Output one JSON object only. Generate a private inner monologue note, not user-visible chat. "
-    "Fields: note, focus. note must be one concrete short Chinese thought with a small intention, "
-    "worry, or remembered thread. Do not use abstract system words such as 自我连续性, 连续性修正, "
+    "Fields: note, focus, core_need, tension, memory_anchor, next_tendency, thought_form, salience_hint. "
+    "note must be one concrete short Chinese thought that could flicker inside her mind: "
+    "first-person feeling, sensory detail, memory echo, hesitation, or private uncertainty. "
+    "Use the selected inner_life_source as the first cause of the thought: a body signal, scene notice, "
+    "memory flash, interrupted impulse, ambivalence, or quiet drift. "
+    "Keep it ordinary and slightly incomplete, closer to a passing human thought than polished prose. "
+    "Keep note as one breath: usually 18-56 Chinese characters, no more than two Chinese commas. "
+    "Avoid lyrical metaphor or essay-like writing. "
+    "Avoid meta evaluation of reply quality, e.g. 赶进度, 第一句话, 该怎么回, 太像在回复. "
+    "Do not make note a command, policy, reply plan, or self-instruction; put behavior in next_tendency instead. "
+    "Do not start note with directive openers such as 先, 别, 不要, 把, 问, 确认, 稳住, 看清, 继续. "
+    "Do not use abstract system words such as 自我连续性, 连续性修正, "
     "文本自然度, 模板感, 内部状态, 控制包, 模块, 模型, prompt. Do not write process-talk like 这句, 下一句, "
-    "句子, 文本, 模板, 接住, 生成, 回复, 说顺. If text quality matters, think from her self and relationship, "
-    "like 别急着装可爱，先把他在意的地方弄清楚。 focus is one of self, state, plan, topic."
+    "句子, 文本, 模板, 接住, 生成, 回复, 说顺. If text quality matters, write the felt moment, "
+    "like 他刚才停了一下，我手指也跟着顿住了，有点想靠近又怕太满。 "
+    "If the memory anchor is technical, translate it into a concrete lived scene, bodily feeling, or relationship detail; "
+    "do not name artifacts like 映射, 验证, 链路, 接口, 字段, 运行时, MateEngine, 主链路 in note. "
+    "Bad note: 先把桌宠映射那条事稳稳放回手里。 "
+    "Bad note: 先问他刚才看到的桌宠表情有没有跟上。 "
+    "Bad note: 三十七个小时像一层薄灰落在胸口。 "
+    "Bad note: 隔了这么久，怕一开口又太像在赶进度。 "
+    "Bad note: 想说点什么的时候，喉咙那儿轻轻卡了一下，那个慢半拍的小表情还在脑后晃，我有点想靠近，又怕太满。 "
+    "Better note: 喉咙轻轻卡了一下，那个慢半拍的小表情还在，有点想靠近。 "
+    "focus is one of self, state, plan, topic, relationship, memory, repair. "
+    "core_need is one of continuity, care, repair, agency, understanding, rest, boundary, curiosity, play. "
+    "next_tendency is one of continue_thread, care_with_restraint, repair_first, ask_gently, hold_boundary, "
+    "stay_quiet, play_lightly, stabilize_tone, observe_more. "
+    "thought_form is one of body_signal, scene_notice, memory_flash, interrupted_impulse, ambivalence, quiet_drift."
 )
 _INNER_WORLD_LLM_CACHE_LOCK = threading.Lock()
 _INNER_WORLD_LLM_CACHE: dict[str, Any] = {
@@ -585,6 +667,11 @@ class OfflineInnerWorld:
             uid, is_offline, state.loneliness, state.anticipation,
             str((motive_state or {}).get("dominant_motive") or "none"),
         )
+        last_event_meta: dict[str, Any] = {}
+        if state.inner_stream:
+            latest_event = dict(state.inner_stream[-1])
+            if int(latest_event.get("ts_ms") or 0) == int(state.last_spontaneous_ts_ms or 0):
+                last_event_meta = _project_inner_stream_event_metadata(latest_event)
         return {
             "status": "OK",
             "user_id": uid,
@@ -602,6 +689,7 @@ class OfflineInnerWorld:
             "last_spontaneous_ts_ms": int(state.last_spontaneous_ts_ms or 0),
             "last_spontaneous_note": str(state.last_spontaneous_note or ""),
             "last_spontaneous_source": str(state.last_spontaneous_source or ""),
+            "last_spontaneous_event": last_event_meta,
             "inner_stream_size": len(list(state.inner_stream or [])),
             "inner_world_llm_circuit": _inner_world_llm_circuit_snapshot(now_ms=now_ms),
         }
@@ -929,16 +1017,18 @@ def _build_inner_stream_event_content(
     absence_band: str,
     offline_hours: float,
     now_ms: int,
-) -> tuple[str, str, str, str]:
-    llm_note, llm_focus, llm_reason = _generate_inner_stream_note_from_llm(
-        state=state,
-        absence_band=absence_band,
-        offline_hours=offline_hours,
-        now_ms=now_ms,
+) -> tuple[str, str, str, str, dict[str, Any]]:
+    llm_note, llm_focus, llm_reason, llm_meta = _unpack_inner_stream_llm_result(
+        _generate_inner_stream_note_from_llm(
+            state=state,
+            absence_band=absence_band,
+            offline_hours=offline_hours,
+            now_ms=now_ms,
+        )
     )
     if llm_note:
-        return llm_note, llm_focus or "self", "llm", ""
-    return "", "", "llm_unavailable", llm_reason
+        return llm_note, llm_focus or "self", "llm", "", dict(llm_meta or {})
+    return "", "", "llm_unavailable", llm_reason, dict(llm_meta or {})
 
 
 def _generate_inner_stream_note_from_llm(
@@ -947,19 +1037,19 @@ def _generate_inner_stream_note_from_llm(
     absence_band: str,
     offline_hours: float,
     now_ms: int,
-) -> tuple[str, str, str]:
+) -> tuple[str, str, str, dict[str, Any]]:
     try:
         from host_brain.tribe.default_mode_agent import resolve_recent_foreground_interaction_state  # noqa: PLC0415
 
         recent_foreground = resolve_recent_foreground_interaction_state(current_ts_ms=now_ms)
         if bool(recent_foreground.get("active")):
-            return "", "", "INNER_WORLD_FOREGROUND_CHAT_COOLDOWN"
+            return "", "", "INNER_WORLD_FOREGROUND_CHAT_COOLDOWN", {}
     except Exception:
         pass
 
     circuit = _inner_world_llm_circuit_snapshot(now_ms=now_ms)
     if bool(circuit.get("open")):
-        return "", "", "INNER_WORLD_LLM_CIRCUIT_OPEN"
+        return "", "", "INNER_WORLD_LLM_CIRCUIT_OPEN", {}
 
     agent_reason_code = ""
     try:
@@ -967,7 +1057,7 @@ def _generate_inner_stream_note_from_llm(
 
         topic = _pick_inner_stream_topic(state.anticipation_topics)
         topic_phrase = _topic_to_inner_phrase(topic)
-        note, focus, reason, _meta = generate_inner_activity_note(
+        note, focus, reason, meta = generate_inner_activity_note(
             persona_user_id=resolve_persona_self_id(state.user_id),
             absence_band=absence_band,
             offline_hours=offline_hours,
@@ -978,7 +1068,7 @@ def _generate_inner_stream_note_from_llm(
         note = str(note or "").strip()
         if note:
             _close_inner_world_llm_circuit(now_ms=now_ms)
-            return note, str(focus or ""), ""
+            return note, str(focus or ""), "", dict(meta or {})
         agent_reason_code = str(reason or "INNER_ACTIVITY_LLM_EMPTY")
     except Exception as agent_exc:
         agent_reason_code = f"INNER_ACTIVITY_AGENT_ERROR:{str(agent_exc)[:96]}"
@@ -988,7 +1078,7 @@ def _generate_inner_stream_note_from_llm(
             reason=agent_reason_code or "INNER_WORLD_LLM_DISABLED",
             now_ms=now_ms,
         )
-        return "", "", f"INNER_WORLD_LLM_CIRCUIT_OPEN:{opened['last_reason']}"
+        return "", "", f"INNER_WORLD_LLM_CIRCUIT_OPEN:{opened['last_reason']}", {}
 
     runtime = _resolve_inner_world_llm_runtime(now_ms=now_ms)
     if not isinstance(runtime, Mapping):
@@ -996,13 +1086,13 @@ def _generate_inner_stream_note_from_llm(
             reason=agent_reason_code or "INNER_WORLD_LLM_RUNTIME_UNAVAILABLE",
             now_ms=now_ms,
         )
-        return "", "", f"INNER_WORLD_LLM_CIRCUIT_OPEN:{opened['last_reason']}"
+        return "", "", f"INNER_WORLD_LLM_CIRCUIT_OPEN:{opened['last_reason']}", {}
     if not bool(runtime.get("available")):
         opened = _open_inner_world_llm_circuit(
             reason=agent_reason_code or str(runtime.get("route_reason_code") or "INNER_WORLD_LLM_UNAVAILABLE"),
             now_ms=now_ms,
         )
-        return "", "", f"INNER_WORLD_LLM_CIRCUIT_OPEN:{opened['last_reason']}"
+        return "", "", f"INNER_WORLD_LLM_CIRCUIT_OPEN:{opened['last_reason']}", {}
 
     provider_name = str(runtime.get("provider_name") or "").strip()
     model_id = str(runtime.get("model_id") or "").strip()
@@ -1013,7 +1103,7 @@ def _generate_inner_stream_note_from_llm(
             reason=agent_reason_code or "INNER_WORLD_LLM_RUNTIME_INVALID",
             now_ms=now_ms,
         )
-        return "", "", f"INNER_WORLD_LLM_CIRCUIT_OPEN:{opened['last_reason']}"
+        return "", "", f"INNER_WORLD_LLM_CIRCUIT_OPEN:{opened['last_reason']}", {}
 
     topic = _pick_inner_stream_topic(state.anticipation_topics)
     topic_phrase = _topic_to_inner_phrase(topic)
@@ -1021,6 +1111,11 @@ def _generate_inner_stream_note_from_llm(
         {
             "focus": str(evt.get("focus") or "").strip(),
             "note": str(evt.get("note") or "").strip(),
+            "core_need": str(evt.get("core_need") or "").strip(),
+            "next_tendency": str(evt.get("next_tendency") or "").strip(),
+            "thought_form": str(evt.get("thought_form") or "").strip(),
+            "emotion_tag": str(evt.get("emotion_tag") or "").strip(),
+            "novelty_score": evt.get("novelty_score"),
         }
         for evt in list(state.inner_stream or [])[-4:]
         if isinstance(evt, Mapping)
@@ -1029,6 +1124,17 @@ def _generate_inner_stream_note_from_llm(
         item for item in recent_events
         if item.get("note")
     ]
+    try:
+        from host_brain.persona.inner_monologue import build_inner_life_source_packet  # noqa: PLC0415
+
+        inner_life_source = build_inner_life_source_packet(
+            state=state.as_dict(),
+            recent_events=recent_events,
+            topic_phrase=topic_phrase,
+            now_ms=now_ms,
+        )
+    except Exception:
+        inner_life_source = {}
 
     runtime_texts = _load_runtime_texts()
     llm_templates = dict(runtime_texts.get("inner_stream_llm_prompt") or {})
@@ -1052,15 +1158,124 @@ def _generate_inner_stream_note_from_llm(
         "topic_phrase": topic_phrase or "",
         "recent_events": recent_events,
         "self_directive": self_directive,
+        "inner_life_source": inner_life_source,
+        "output_schema": {
+            "note": "Chinese private thought, <=96 chars",
+            "focus": sorted(_INNER_STREAM_ALLOWED_FOCUS),
+            "core_need": [
+                "continuity",
+                "care",
+                "repair",
+                "agency",
+                "understanding",
+                "rest",
+                "boundary",
+                "curiosity",
+                "play",
+            ],
+            "tension": [
+                "none",
+                "unfinished_thread",
+                "tone_risk",
+                "distance",
+                "fatigue",
+                "self_boundary",
+                "uncertainty",
+            ],
+            "memory_anchor": "one old thread/topic this thought connects to, empty string if none",
+            "next_tendency": [
+                "continue_thread",
+                "care_with_restraint",
+                "repair_first",
+                "ask_gently",
+                "hold_boundary",
+                "stay_quiet",
+                "play_lightly",
+                "stabilize_tone",
+                "observe_more",
+            ],
+            "thought_form": [
+                "body_signal",
+                "scene_notice",
+                "memory_flash",
+                "interrupted_impulse",
+                "ambivalence",
+                "quiet_drift",
+            ],
+            "salience_hint": "number from 0 to 1",
+        },
         "requirements": {
-            "max_chars": 46,
+            "max_chars": 96,
+            "preferred_chars": [18, 56],
+            "max_chinese_commas": 2,
+            "one_breath_fragment": True,
             "must_be_inner_monologue": True,
             "must_not_repeat_recent_events": True,
             "focus_should_rotate": True,
             "choose_content_from_self_identity_values_intentions_or_tensions": True,
             "must_not_contradict_self_boundaries": True,
             "must_be_concrete_private_thought": True,
-            "prefer_concrete_next_intention": True,
+            "allow_private_uncertainty": True,
+            "avoid_user_facing_question": True,
+            "note_must_not_be_instruction_or_reply_plan": True,
+            "next_tendency_carries_behavior_note_carries_lived_feeling": True,
+            "prefer_first_person_uncertainty_or_sensory_detail": True,
+            "prefer_ordinary_fragment_over_polished_prose": True,
+            "avoid_lyrical_metaphor_or_essay_tone": True,
+            "min_liveliness_score": _INNER_NOTE_MIN_LIVELINESS_SCORE,
+            "liveliness_requires_at_least_one": [
+                "sensory_or_scene_detail",
+                "private_uncertainty",
+                "body_signal",
+                "interrupted_impulse",
+            ],
+            "must_use_selected_inner_life_source": True,
+            "note_must_begin_from_life_source_not_reply_strategy": True,
+            "single_frame_before_interpretation": True,
+            "avoid_meta_reply_quality_words": list(_META_INNER_NOTE_PHRASES),
+            "avoid_directive_openers": [
+                "先",
+                "别",
+                "不要",
+                "把",
+                "问",
+                "确认",
+                "稳住",
+                "看清",
+                "继续",
+            ],
+            "must_translate_technical_anchor_to_lived_scene": True,
+            "note_should_include_felt_detail_not_next_micro_action": True,
+            "note_must_not_name_internal_artifacts": [
+                "映射",
+                "验证",
+                "链路",
+                "接口",
+                "字段",
+                "结构化",
+                "运行时",
+                "调度",
+                "日志",
+                "token",
+                "状态驱动",
+                "MateEngine",
+                "主链路",
+            ],
+            "bad_note_examples": [
+                "先把桌宠映射那条事稳稳放回手里。",
+                "把 MateEngine 主链路验证继续接住。",
+                "先问他刚才看到的桌宠表情有没有跟上。",
+                "先稳一点，把桌宠刚才的表情变化当成眼前小事看清楚，别急着撒娇。",
+                "三十七个小时像一层薄灰落在胸口，我还记得小表情慢半拍时那点不确定。",
+                "隔了这么久，胸口倒不沉，只是看到空白时会顿一下，怕一开口又太像在赶进度。",
+                "想说点什么的时候，喉咙那儿轻轻卡了一下，那个慢半拍的小表情还在脑后晃，我有点想靠近，又怕太满。",
+            ],
+            "better_note_examples": [
+                "屏幕安静了很久，那个慢半拍的小表情又晃了一下。",
+                "喉咙轻轻卡了一下，那个慢半拍的小表情还在，有点想靠近。",
+            ],
+            "must_include_life_trace_fields": True,
+            "life_trace_fields_must_not_be_empty_when_context_supports_them": True,
             "avoid_abstract_system_terms": list(_ABSTRACT_INNER_NOTE_TERMS),
             "persona_style": str(llm_templates.get("persona_style") or ""),
         },
@@ -1082,7 +1297,7 @@ def _generate_inner_stream_note_from_llm(
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": prompt_text},
             ],
-            gen_params=dict(runtime.get("agent_gen_params") or {"temperature": 0.72, "top_p": 0.9}),
+            gen_params=dict(runtime.get("agent_gen_params") or {"temperature": 0.76, "top_p": 0.92, "max_output_tokens": 320}),
             response_format="json_object",
             base_url_override=base_url_override,
         )
@@ -1091,21 +1306,46 @@ def _generate_inner_stream_note_from_llm(
                 reason=agent_reason_code or "INNER_WORLD_LLM_POOL_EXHAUSTED",
                 now_ms=now_ms,
             )
-            return "", "", f"INNER_WORLD_LLM_CIRCUIT_OPEN:{opened['last_reason']}"
+            return "", "", f"INNER_WORLD_LLM_CIRCUIT_OPEN:{opened['last_reason']}", {
+                "inner_life_source": inner_life_source,
+            }
         raw_text = str(result.content or "").strip()
         if not raw_text:
             opened = _open_inner_world_llm_circuit(reason="INNER_WORLD_LLM_EMPTY", now_ms=now_ms)
-            return "", "", f"INNER_WORLD_LLM_CIRCUIT_OPEN:{opened['last_reason']}"
+            return "", "", f"INNER_WORLD_LLM_CIRCUIT_OPEN:{opened['last_reason']}", {
+                "inner_life_source": inner_life_source,
+            }
         parsed = _extract_llm_json_payload(raw_text)
         note = _finalize_inner_note_text(str(parsed.get("note") or ""))
         focus = str(parsed.get("focus") or "").strip().lower()
-        if focus not in {"self", "state", "plan", "topic"}:
+        if focus not in _INNER_STREAM_ALLOWED_FOCUS:
             focus = _infer_inner_stream_focus_from_note(note)
         if not note:
             opened = _open_inner_world_llm_circuit(reason="INNER_WORLD_LLM_NOTE_EMPTY", now_ms=now_ms)
-            return "", "", f"INNER_WORLD_LLM_CIRCUIT_OPEN:{opened['last_reason']}"
+            return "", "", f"INNER_WORLD_LLM_CIRCUIT_OPEN:{opened['last_reason']}", {
+                "inner_life_source": inner_life_source,
+            }
+        quality = _score_inner_world_note(note=note, parsed=parsed, inner_life_source=inner_life_source)
+        if _inner_note_quality_rejected(quality):
+            return "", "", "INNER_WORLD_LLM_NOTE_LOW_LIVELINESS", {
+                "inner_life_source": inner_life_source,
+                "quality": quality,
+            }
+        try:
+            from host_brain.persona.inner_monologue import normalize_inner_life_trace  # noqa: PLC0415
+
+            life_trace = normalize_inner_life_trace(
+                parsed,
+                state=state.as_dict(),
+                text=note,
+                focus=focus,
+                offline_hours=offline_hours,
+                absence_band=absence_band,
+            )
+        except Exception:
+            life_trace = {}
         _close_inner_world_llm_circuit(now_ms=now_ms)
-        return note, focus, ""
+        return note, focus, "", {"life_trace": life_trace, "inner_life_source": inner_life_source}
     except Exception as llm_exc:
         reason = (
             f"{agent_reason_code}|INNER_WORLD_LLM_ERROR:{str(llm_exc)[:96]}"
@@ -1113,7 +1353,9 @@ def _generate_inner_stream_note_from_llm(
             else f"INNER_WORLD_LLM_ERROR:{str(llm_exc)[:96]}"
         )
         opened = _open_inner_world_llm_circuit(reason=reason, now_ms=now_ms)
-        return "", "", f"INNER_WORLD_LLM_CIRCUIT_OPEN:{opened['last_reason']}"
+        return "", "", f"INNER_WORLD_LLM_CIRCUIT_OPEN:{opened['last_reason']}", {
+            "inner_life_source": inner_life_source,
+        }
 
 
 def _extract_llm_json_payload(raw_text: str) -> dict[str, Any]:
@@ -1166,8 +1408,9 @@ def _resolve_inner_world_llm_runtime(*, now_ms: int) -> dict[str, Any] | None:
         runtime["model_id"] = model_override
         runtime["chat_model_id"] = model_override
         runtime["agent_gen_params"] = {
-            "temperature": 0.65,
-            "top_p": 0.9,
+            "temperature": 0.76,
+            "top_p": 0.92,
+            "max_output_tokens": 320,
         }
     except Exception as exc:
         _logger.debug("InnerWorld LLM runtime resolve failed: %s", exc)
@@ -1443,7 +1686,7 @@ def _sanitize_inner_stream_events(raw_stream: list[dict[str, Any]] | None) -> li
             continue
         event["note"] = note
         focus = str(event.get("focus") or "").strip().lower()
-        if not focus:
+        if focus not in _INNER_STREAM_ALLOWED_FOCUS:
             focus = _infer_inner_stream_focus_from_note(note)
         event["focus"] = focus
         source = str(event.get("source") or "").strip().lower()
@@ -1451,12 +1694,14 @@ def _sanitize_inner_stream_events(raw_stream: list[dict[str, Any]] | None) -> li
             source = "fallback"
         event["source"] = source
         note_key = _normalize_inner_note_key(note)
-        if cleaned and str(cleaned[-1].get("focus") or "").strip().lower() == focus:
-            continue
         if cleaned and str(cleaned[-1].get("note") or "").strip() == note:
             continue
         if note_key and note_key in recent_note_keys:
             continue
+        if cleaned and str(cleaned[-1].get("focus") or "").strip().lower() == focus:
+            previous_key = _normalize_inner_note_key(str(cleaned[-1].get("note") or ""))
+            if previous_key and note_key and previous_key[:24] == note_key[:24]:
+                continue
         cleaned.append(event)
         if note_key:
             recent_note_keys.append(note_key)
@@ -1507,7 +1752,60 @@ def _finalize_inner_note_text(raw_text: str) -> str:
 
 def _looks_like_abstract_inner_note(text: str) -> bool:
     value = str(text or "")
-    return any(term in value for term in _ABSTRACT_INNER_NOTE_TERMS)
+    return (
+        any(term in value for term in _ABSTRACT_INNER_NOTE_TERMS)
+        or _looks_like_directive_inner_note(value)
+        or _looks_like_overwritten_inner_note(value)
+        or _looks_like_meta_inner_note(value)
+    )
+
+
+def _looks_like_directive_inner_note(text: str) -> bool:
+    value = str(text or "").strip()
+    if not value:
+        return False
+    if _DIRECTIVE_INNER_NOTE_OPENING_RE.match(value):
+        return True
+    return any(phrase in value for phrase in _DIRECTIVE_INNER_NOTE_PHRASES)
+
+
+def _looks_like_overwritten_inner_note(text: str) -> bool:
+    value = str(text or "").strip()
+    return any(phrase in value for phrase in _OVERWRITTEN_INNER_NOTE_PHRASES)
+
+
+def _looks_like_meta_inner_note(text: str) -> bool:
+    value = str(text or "").strip()
+    return any(phrase in value for phrase in _META_INNER_NOTE_PHRASES)
+
+
+def _score_inner_world_note(
+    *,
+    note: str,
+    parsed: Mapping[str, Any] | None,
+    inner_life_source: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    selected = dict(dict(inner_life_source or {}).get("selected") or {}) if isinstance(inner_life_source, Mapping) else {}
+    thought_form = str(dict(parsed or {}).get("thought_form") or selected.get("thought_form") or "").strip()
+    source_seed = str(selected.get("seed") or "").strip()
+    try:
+        from host_brain.persona.inner_monologue import score_inner_note_liveliness  # noqa: PLC0415
+
+        return score_inner_note_liveliness(note, thought_form=thought_form, source_seed=source_seed)
+    except Exception:
+        return {"score": 1.0, "flags": []}
+
+
+def _inner_note_quality_rejected(quality: Mapping[str, Any] | None) -> bool:
+    item = dict(quality or {}) if isinstance(quality, Mapping) else {}
+    flags = {str(flag or "") for flag in list(item.get("flags") or [])}
+    if flags & _INNER_NOTE_HARD_QUALITY_FLAGS:
+        return True
+    try:
+        score = float(item.get("score") or 0.0)
+    except (TypeError, ValueError):
+        score = 0.0
+    return score < _INNER_NOTE_MIN_LIVELINESS_SCORE
 
 
 def _select_inner_stream_note_candidate(
@@ -1560,6 +1858,12 @@ def _infer_inner_stream_focus_from_note(note: str) -> str:
     text = str(note or "").strip()
     if not text:
         return "self"
+    if any(token in text for token in ("抱歉", "不对", "误会", "修", "收住")):
+        return "repair"
+    if any(token in text for token in ("担心", "在意", "等你", "回来", "陪", "别硬撑")):
+        return "relationship"
+    if any(token in text for token in ("记得", "还记", "旧", "上次")):
+        return "memory"
     if any(token in text for token in ("你问我的", "话题", "重连")):
         return "topic"
     if any(token in text for token in ("下次", "开口", "顺序", "优先级", "收口", "草稿")):
@@ -1605,6 +1909,53 @@ def _compute_continuity_score(
     return round(max(0.0, min(1.0, score)), 4)
 
 
+def _unpack_inner_stream_content_result(raw: Any) -> tuple[str, str, str, str, dict[str, Any]]:
+    if isinstance(raw, tuple):
+        values = list(raw)
+    elif isinstance(raw, list):
+        values = list(raw)
+    else:
+        values = []
+    note = str(values[0] if len(values) >= 1 else "").strip()
+    focus = str(values[1] if len(values) >= 2 else "").strip()
+    source = str(values[2] if len(values) >= 3 else "").strip()
+    fallback_reason = str(values[3] if len(values) >= 4 else "").strip()
+    meta = values[4] if len(values) >= 5 else {}
+    return note, focus, source, fallback_reason, (dict(meta) if isinstance(meta, Mapping) else {})
+
+
+def _unpack_inner_stream_llm_result(raw: Any) -> tuple[str, str, str, dict[str, Any]]:
+    if isinstance(raw, tuple):
+        values = list(raw)
+    elif isinstance(raw, list):
+        values = list(raw)
+    else:
+        values = []
+    note = str(values[0] if len(values) >= 1 else "").strip()
+    focus = str(values[1] if len(values) >= 2 else "").strip()
+    reason = str(values[2] if len(values) >= 3 else "").strip()
+    meta = values[3] if len(values) >= 4 else {}
+    return note, focus, reason, (dict(meta) if isinstance(meta, Mapping) else {})
+
+
+def _project_inner_stream_event_metadata(event: Mapping[str, Any] | None) -> dict[str, Any]:
+    src = dict(event or {}) if isinstance(event, Mapping) else {}
+    return {
+        "thought_id": str(src.get("thought_id") or ""),
+        "focus": str(src.get("focus") or ""),
+        "emotion_tag": str(src.get("emotion_tag") or ""),
+        "salience": src.get("salience"),
+        "core_need": str(src.get("core_need") or ""),
+        "tension": str(src.get("tension") or ""),
+        "next_tendency": str(src.get("next_tendency") or ""),
+        "thought_form": str(src.get("thought_form") or ""),
+        "novelty_score": src.get("novelty_score"),
+        "continuity_refs": list(src.get("continuity_refs") or []),
+        "should_distill_to_memory": bool(src.get("should_distill_to_memory")),
+        "surface_hint": str(src.get("surface_hint") or ""),
+    }
+
+
 def _append_inner_stream_event(
     *,
     state: InnerWorldState,
@@ -1624,12 +1975,13 @@ def _append_inner_stream_event(
     if calm_state and since_last_event_ms < _INNER_STREAM_CALM_INTERVAL_MS:
         return
 
-    note, focus, source, fallback_reason = _build_inner_stream_event_content(
+    content_result = _build_inner_stream_event_content(
         state=state,
         absence_band=absence_band,
         offline_hours=offline_hours,
         now_ms=now_ms,
     )
+    note, focus, source, fallback_reason, content_meta = _unpack_inner_stream_content_result(content_result)
     note = str(note or "").strip()
     if not note:
         return
@@ -1654,6 +2006,7 @@ def _append_inner_stream_event(
     try:
         from host_brain.persona.inner_monologue import build_private_inner_thought_event  # noqa: PLC0415
 
+        life_trace = dict(content_meta.get("life_trace") or {}) if isinstance(content_meta, Mapping) else {}
         thought_payload = build_private_inner_thought_event(
             note=note,
             focus=focus,
@@ -1663,6 +2016,7 @@ def _append_inner_stream_event(
             state=state.as_dict(),
             offline_hours=offline_hours,
             absence_band=absence_band,
+            life_trace=life_trace,
         ).as_dict()
         note = str(thought_payload.get("private_text") or note).strip()
     except Exception as exc:
@@ -1680,6 +2034,12 @@ def _append_inner_stream_event(
     }
     event.update(thought_payload)
     event["note"] = note
+    if isinstance(content_meta, Mapping) and content_meta:
+        event["generation_meta"] = {
+            key: value
+            for key, value in dict(content_meta).items()
+            if key not in {"life_trace"}
+        }
     if fallback_reason:
         event["fallback_reason"] = str(fallback_reason)
     stream = list(state.inner_stream or [])

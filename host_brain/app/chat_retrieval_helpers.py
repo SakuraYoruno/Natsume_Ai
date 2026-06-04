@@ -1241,7 +1241,7 @@ def _build_surface_memory_recall_service() -> Any:
             route_id="surface_semantic",
             store_id="semantic_memory",
             collection="semantic_memory",
-            top_k=4,
+            top_k=8,
             score_weight=1.05,
             node_selector=node_id,
         ),

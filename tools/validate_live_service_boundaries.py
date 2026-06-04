@@ -327,10 +327,10 @@ def _probe_neo4j(*, run_id: str) -> dict[str, Any]:
     client: Any = None
     try:
         from host_brain.bond.neo4j_client import (  # noqa: PLC0415
-            BOND_WRITER_ID,
             build_neo4j_bond_client,
             load_neo4j_runtime_config,
         )
+        from host_brain.bond.bond_dynamics import BondDynamicsWriter  # noqa: PLC0415
 
         cfg_result = load_neo4j_runtime_config()
         if not cfg_result.success or cfg_result.config is None:
@@ -357,8 +357,10 @@ def _probe_neo4j(*, run_id: str) -> dict[str, Any]:
         if client is None:
             raise RuntimeError("neo4j client disabled")
         event_id = f"codex_live_boundary_neo4j_{uuid.uuid4().hex[:10]}"
-        row = client.write_bond_event(
-            writer_id=BOND_WRITER_ID,
+        result = BondDynamicsWriter(neo4j_client=client).apply_update(
+            request_id=f"live-boundary-neo4j-{run_id}",
+            intent_id=f"live-boundary-intent-{run_id}",
+            seq=1,
             event_id=event_id,
             user_id=f"live-boundary-user-{run_id}",
             session_id=f"live-boundary-session-{run_id}",
@@ -366,9 +368,11 @@ def _probe_neo4j(*, run_id: str) -> dict[str, Any]:
             capability_hint="service boundary write/read probe",
             evidence_refs=[f"evd://live-service-boundary/{run_id}/neo4j"],
             payload={"validation": "live_service_boundaries", "run_id": run_id},
+            update_kind="LIVE_SERVICE_BOUNDARY_PROBE",
             ts_ms=_now_ms(),
         )
         fetched = client.get_event(event_id)
+        row = result.event.get("neo4j_event") if result.success else None
         ok = bool(row) and fetched is not None
         return _component(
             "neo4j",

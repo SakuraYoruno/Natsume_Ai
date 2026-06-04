@@ -3,6 +3,7 @@ export const OBS_QUERY_KEYS = Object.freeze({
   lifeTimeline: (params) => ['life-timeline', params],
   pathologies: (params) => ['pathologies', params],
   runtimeSignals: (windowMinutes) => ['runtime-signals', windowMinutes],
+  avatarState: () => ['avatar-state'],
   digitalLifeOverview: (windowMinutes) => ['digital-life-overview', windowMinutes],
   digitalLifeWallClockSoak: () => ['digital-life-wall-clock-soak'],
   codexBioOpsObservability: (runId) => ['codex-bio-ops-observability', runId || 'latest'],

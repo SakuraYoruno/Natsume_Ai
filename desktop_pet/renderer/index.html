@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Natsume Desktop Pet</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div id="drag-handle" title="Drag Natsume"></div>
+    <div id="presence">
+      <div id="halo"></div>
+      <div id="nameplate">Natsume</div>
+      <div id="bubble">我在这里</div>
+    </div>
+    <canvas id="stage"></canvas>
+    <div id="loading">Natsume is waking up...</div>
+    <script src="../assets/vendor/live2dcubismcore.min.js"></script>
+    <script src="../node_modules/pixi.js/dist/browser/pixi.min.js"></script>
+    <script src="../node_modules/pixi-live2d-display/dist/cubism4.min.js"></script>
+    <script src="./pet.js"></script>
+  </body>
+</html>

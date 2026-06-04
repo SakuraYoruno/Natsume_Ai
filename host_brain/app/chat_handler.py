@@ -67,6 +67,302 @@ _GOVERNOR_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
 )
 
 
+def _mateengine_chat_bubble_enabled() -> bool:
+    raw = os.getenv("HOST_MATEENGINE_CHAT_BUBBLE_ENABLED", "1").strip().lower()
+    return raw not in {"0", "false", "no", "off"}
+
+
+def _mateengine_bubble_text_limit() -> int:
+    raw = os.getenv("HOST_MATEENGINE_CHAT_BUBBLE_MAX_CHARS", "220").strip()
+    try:
+        return max(24, int(raw))
+    except ValueError:
+        return 220
+
+
+def _clip_mateengine_bubble_text(text: str) -> str:
+    cleaned = " ".join(str(text or "").split())
+    limit = _mateengine_bubble_text_limit()
+    if len(cleaned) <= limit:
+        return cleaned
+    return cleaned[: max(0, limit - 1)].rstrip() + "..."
+
+
+def _extract_text_from_commit_payload(payload: Any) -> str:
+    if not isinstance(payload, dict):
+        return ""
+
+    for key in ("narrative", "text", "content", "message", "reply"):
+        value = payload.get(key)
+        if isinstance(value, str) and value.strip():
+            return _clip_mateengine_bubble_text(value)
+
+    nested_payload = payload.get("payload")
+    if isinstance(nested_payload, dict):
+        nested_text = _extract_text_from_commit_payload(nested_payload)
+        if nested_text:
+            return nested_text
+
+    return ""
+
+
+def _extract_mateengine_commit_text(event_payload: Any) -> str:
+    if not isinstance(event_payload, dict):
+        return ""
+    if event_payload.get("phase") != "COMMIT" or not event_payload.get("done"):
+        return ""
+    if str(event_payload.get("decision") or "").upper() == "REJECT":
+        return ""
+
+    direct_text = _extract_text_from_commit_payload(event_payload)
+    if direct_text:
+        return direct_text
+
+    envelope = event_payload.get("reply_envelope")
+    if isinstance(envelope, dict):
+        envelope_kind = str(envelope.get("kind") or "").lower()
+        if envelope_kind and envelope_kind not in {"final_reply", "assistant_reply", "chat_reply"}:
+            return ""
+        return _extract_text_from_commit_payload(envelope)
+
+    return ""
+
+
+def _extract_mateengine_commit_performance(event_payload: Any) -> Dict[str, Any]:
+    if not isinstance(event_payload, dict):
+        return {}
+    envelope = event_payload.get("reply_envelope")
+    audit_refs = event_payload.get("audit_refs")
+    candidates: list[Dict[str, Any]] = []
+    if isinstance(envelope, dict):
+        performance = envelope.get("performance")
+        audit = envelope.get("audit")
+        if isinstance(performance, dict):
+            candidates.append(performance)
+        if isinstance(audit, dict):
+            candidates.append(audit)
+    if isinstance(audit_refs, dict):
+        refs_envelope = audit_refs.get("reply_envelope")
+        if isinstance(refs_envelope, dict):
+            performance = refs_envelope.get("performance")
+            audit = refs_envelope.get("audit")
+            if isinstance(performance, dict):
+                candidates.append(performance)
+            if isinstance(audit, dict):
+                candidates.append(audit)
+        surface = audit_refs.get("surface_main_chain")
+        if isinstance(surface, dict):
+            candidates.append(surface)
+
+    def _candidate_intensity(candidate: Dict[str, Any]) -> float | None:
+        raw_intensity = (
+            candidate.get("emotion_intensity")
+            or candidate.get("expression_intensity")
+            or candidate.get("emotion_confidence")
+        )
+        try:
+            return max(0.0, min(1.0, float(raw_intensity)))
+        except (TypeError, ValueError):
+            return None
+
+    emotion_tag = ""
+    emotion_intensity: float | None = None
+    fallback_tag = ""
+    fallback_intensity: float | None = None
+    for candidate in candidates:
+        intensity = _candidate_intensity(candidate)
+        for key in ("natsume_emotion_tag", "assistant_emotion_tag"):
+            candidate_tag = str(candidate.get(key) or "").strip().upper()
+            if candidate_tag and candidate_tag != "NEUTRAL":
+                emotion_tag = candidate_tag
+                emotion_intensity = intensity
+                break
+        if emotion_tag:
+            break
+        candidate_tag = str(candidate.get("emotion_tag") or "").strip().upper()
+        if candidate_tag and not fallback_tag:
+            fallback_tag = candidate_tag
+            fallback_intensity = intensity
+        if candidate_tag and candidate_tag != "NEUTRAL":
+            emotion_tag = candidate_tag
+            emotion_intensity = intensity
+            break
+    if not emotion_tag:
+        emotion_tag = fallback_tag
+        emotion_intensity = fallback_intensity
+    return {
+        "emotion_tag": emotion_tag,
+        "emotion_intensity": emotion_intensity,
+    }
+
+
+def _send_mateengine_chat_bubble(
+    text: str,
+    request_id: str,
+    *,
+    emotion_tag: str | None = None,
+    emotion_intensity: float | None = None,
+) -> None:
+    if not text or not _mateengine_chat_bubble_enabled():
+        return
+    try:
+        from host_brain.channels.mateengine import send_mateengine_action, send_mateengine_say  # noqa: PLC0415
+
+        result = send_mateengine_action(
+            action="speak",
+            state="speaking",
+            text=text,
+            request_id=request_id,
+            emotion_tag=emotion_tag,
+            intensity=emotion_intensity,
+        )
+        if not result.ok:
+            send_mateengine_say(text=text)
+    except Exception as exc:
+        _logger.debug(
+            "[%s] MateEngine chat bubble send failed: %s",
+            request_id,
+            exc,
+        )
+
+
+def _mateengine_state_cues_enabled() -> bool:
+    raw = os.getenv("HOST_MATEENGINE_STATE_CUES_ENABLED", "1").strip().lower()
+    return raw not in {"0", "false", "no", "off"}
+
+
+def _mateengine_thinking_cue_delay_s() -> float:
+    raw = os.getenv("HOST_MATEENGINE_THINKING_CUE_DELAY_MS", "900").strip()
+    try:
+        return max(0.0, int(raw) / 1000.0)
+    except ValueError:
+        return 0.9
+
+
+def _mateengine_thinking_cue_text() -> str:
+    return str(os.getenv("HOST_MATEENGINE_THINKING_CUE_TEXT") or "...").strip()
+
+
+_MATEENGINE_STATE_CUE_DEFAULTS = {
+    "thinking": "...",
+    "approved": "",
+    "memory_recall": "翻一下记忆...",
+    "tool_running": "处理中...",
+    "error": "这里卡住了。",
+}
+
+_MATEENGINE_VISIBLE_STATE_CUES = {
+    "thinking",
+    "memory_recall",
+    "tool_running",
+    "processing",
+    "speaking",
+    "interrupted",
+    "error",
+}
+
+
+def _mateengine_state_cue_text(state: str) -> str:
+    key = str(state or "").strip().lower()
+    if not key:
+        return ""
+    env_key = f"HOST_MATEENGINE_{key.upper()}_CUE_TEXT"
+    if env_key in os.environ:
+        return str(os.getenv(env_key) or "").strip()
+    if key == "thinking":
+        return _mateengine_thinking_cue_text()
+    return str(_MATEENGINE_STATE_CUE_DEFAULTS.get(key) or "").strip()
+
+
+def _send_mateengine_state_cue(
+    state: str,
+    *,
+    request_id: str,
+    lifecycle: Dict[str, Any],
+    force: bool = False,
+) -> bool:
+    if not _mateengine_state_cues_enabled():
+        return False
+    if lifecycle.get("done") and not force:
+        return False
+    clean_state = str(state or "").strip().lower()
+    if not clean_state:
+        return False
+    cue_text = _mateengine_state_cue_text(state)
+    if not cue_text and clean_state not in _MATEENGINE_VISIBLE_STATE_CUES:
+        return False
+    if lifecycle.get("last_state") == clean_state and not force:
+        return False
+    lifecycle["state_cued"] = True
+    lifecycle["last_state"] = clean_state
+    try:
+        from host_brain.channels.mateengine import send_mateengine_action  # noqa: PLC0415
+
+        send_mateengine_action(
+            action="state",
+            state=clean_state,
+            text=cue_text,
+            request_id=request_id,
+        )
+    except Exception as exc:
+        _logger.debug(
+            "[%s] MateEngine state action send failed: %s",
+            request_id,
+            exc,
+        )
+        if cue_text:
+            _send_mateengine_chat_bubble(cue_text, request_id=request_id)
+    return True
+
+
+def _infer_mateengine_state_from_intent(intent_draft: Dict[str, Any] | None) -> str:
+    if not isinstance(intent_draft, dict):
+        return ""
+    values = " ".join(
+        str(intent_draft.get(key) or "")
+        for key in ("route", "target_id", "action", "route_reason", "reason_code", "task")
+    ).lower()
+    if "memory" in values or "recall" in values:
+        return "memory_recall"
+    if any(token in values for token in ("tool", "agent", "workflow", "dispatch", "executive")):
+        return "tool_running"
+    return ""
+
+
+def _infer_mateengine_state_from_event(event_payload: Any) -> str:
+    if not isinstance(event_payload, dict):
+        return ""
+    phase = str(event_payload.get("phase") or "").strip().upper()
+    event = str(event_payload.get("event") or "").strip().upper()
+    reason = str(event_payload.get("reason_code") or event_payload.get("route_reason") or "").strip().upper()
+    joined = f"{phase} {event} {reason}"
+
+    if phase == "COMMIT" and event_payload.get("done"):
+        if str(event_payload.get("decision") or "").upper() == "REJECT":
+            if any(token in reason for token in ("ERROR", "EXCEPTION", "INTERNAL", "TIMEOUT")):
+                return "error"
+        return ""
+    if any(token in joined for token in ("MEMORY", "RECALL")):
+        return "memory_recall"
+    if any(token in joined for token in ("TOOL", "EXEC", "ACTION", "WORKFLOW", "RUNNING", "DISPATCH")):
+        return "tool_running"
+    return ""
+
+
+async def _send_delayed_mateengine_thinking_cue(
+    request_id: str,
+    lifecycle: Dict[str, Any],
+) -> None:
+    if not _mateengine_state_cues_enabled():
+        return
+    delay_s = _mateengine_thinking_cue_delay_s()
+    if delay_s > 0:
+        await asyncio.sleep(delay_s)
+    if lifecycle.get("done") or lifecycle.get("state_cued"):
+        return
+    _send_mateengine_state_cue("thinking", request_id=request_id, lifecycle=lifecycle)
+
+
 def _should_use_inline_governor(intent_draft: Dict[str, Any] | None) -> bool:
     return False
 
@@ -295,6 +591,16 @@ async def _unified_chat_sse_generator(
     yield _sse({"phase": "PRESENCE", "event": "THINKING", "request_id": request_id}) + ": keepalive\n\n"
     await asyncio.sleep(0)
 
+    mateengine_lifecycle = {"done": False, "state_cued": False, "last_state": ""}
+    mateengine_thinking_task = None
+    if _mateengine_state_cues_enabled():
+        mateengine_thinking_task = asyncio.create_task(
+            _send_delayed_mateengine_thinking_cue(
+                request_id,
+                mateengine_lifecycle,
+            )
+        )
+
     try:
         if intent_draft is None:
             classify_started_ms = int(time.time() * 1000)
@@ -326,6 +632,13 @@ async def _unified_chat_sse_generator(
             request_id=request_id,
             session_id=session_id,
         )
+        inferred_state = _infer_mateengine_state_from_intent(intent_draft)
+        if inferred_state:
+            _send_mateengine_state_cue(
+                inferred_state,
+                request_id=request_id,
+                lifecycle=mateengine_lifecycle,
+            )
 
         emotion_context = resolve_chat_emotion_context(request_body=request_body)
         governance_snapshot = build_chat_governance_snapshot(
@@ -391,6 +704,11 @@ async def _unified_chat_sse_generator(
             return
 
         yield _sse({"phase": "PRESENCE", "event": "GOV_APPROVED", "request_id": request_id})
+        _send_mateengine_state_cue(
+            "approved",
+            request_id=request_id,
+            lifecycle=mateengine_lifecycle,
+        )
         await asyncio.sleep(0)
 
         # ── 鉴权后记录场景标签 ────────────────────────────────────────────
@@ -437,6 +755,7 @@ async def _unified_chat_sse_generator(
         # 执行路径：Cortex Orchestrator 调度 Executive Router / 子 Agent
         from host_brain.app.cortex_orchestrator import cortex_orchestrator_sse_generator  # noqa: PLC0415
         _chat_committed = False
+        _mateengine_bubbled = False
         async for event in cortex_orchestrator_sse_generator(
             request_body=request_body,
             request_id=request_id,
@@ -453,8 +772,33 @@ async def _unified_chat_sse_generator(
             # T-94：检测 COMMIT done=True，对话完成后发布 TASK_SUCCESS 事件
             try:
                 _ev = json.loads(event[len("data: "):].strip()) if event.startswith("data: ") else {}
+                event_state = _infer_mateengine_state_from_event(_ev)
+                if event_state:
+                    _send_mateengine_state_cue(
+                        event_state,
+                        request_id=request_id,
+                        lifecycle=mateengine_lifecycle,
+                        force=event_state == "error",
+                    )
                 if _ev.get("phase") == "COMMIT" and _ev.get("done") and not _chat_committed:
                     _chat_committed = True
+                    mateengine_lifecycle["done"] = True
+                    mate_text = _extract_mateengine_commit_text(_ev)
+                    if mate_text and not _mateengine_bubbled:
+                        _mateengine_bubbled = True
+                        mate_performance = _extract_mateengine_commit_performance(_ev)
+                        _send_mateengine_state_cue(
+                            "speaking",
+                            request_id=request_id,
+                            lifecycle=mateengine_lifecycle,
+                            force=True,
+                        )
+                        _send_mateengine_chat_bubble(
+                            mate_text,
+                            request_id=request_id,
+                            emotion_tag=mate_performance.get("emotion_tag"),
+                            emotion_intensity=mate_performance.get("emotion_intensity"),
+                        )
                     try:
                         from host_brain.tribe.ans_agent import get_ans_agent  # noqa: PLC0415
                         get_ans_agent().emit_task_success(
@@ -482,3 +826,13 @@ async def _unified_chat_sse_generator(
             "reason_code": "INTERNAL_SERVER_ERROR",
             "request_id": request_id,
         })
+        _send_mateengine_state_cue(
+            "error",
+            request_id=request_id,
+            lifecycle=mateengine_lifecycle,
+            force=True,
+        )
+    finally:
+        mateengine_lifecycle["done"] = True
+        if mateengine_thinking_task is not None and not mateengine_thinking_task.done():
+            mateengine_thinking_task.cancel()

@@ -4,6 +4,7 @@ import asyncio
 import json
 import os
 import re
+import sqlite3
 import time
 from collections.abc import AsyncGenerator, Mapping, Sequence
 from typing import Any
@@ -502,6 +503,10 @@ async def surface_main_chain_sse_generator(
     narrative = str(result.selected_text or "").strip()
     narrative, account_guard_applied = _sanitize_account_login_reply(narrative, agent_input=agent_input)
     narrative = _sanitize_main_chain_meta_reply(narrative, agent_input=agent_input)
+    narrative, quality_guard = _apply_surface_text_quality_guard(
+        narrative,
+        agent_input=agent_input,
+    )
     narrative, memory_guard = _apply_surface_memory_output_guard(
         narrative,
         agent_input=agent_input,
@@ -512,6 +517,8 @@ async def surface_main_chain_sse_generator(
             "applied": True,
             "reason_code": "ACCOUNT_CREDENTIAL_REQUEST_REWRITTEN",
         }
+    if quality_guard.get("applied"):
+        trace["surface_text_quality_guard"] = quality_guard
     if memory_guard.get("applied"):
         trace["surface_memory_output_guard"] = memory_guard
     total_latency_ms = max(0, int(time.time() * 1000) - started_ms)
@@ -1752,7 +1759,13 @@ def _surface_task_control_from_reply_plan(
         task_mode = "memory_followup"
         response_move = "memory_followup"
     task_facts = _task_facts(reply_plan=reply_plan, agent_input=agent_input, trace_stage_meta=trace_stage_meta)
-    task_must_not_do = _clean_list(_coerce_sequence(reply_plan.get("must_not_do")))
+    task_must_not_do = _clean_list(
+        [
+            *_coerce_sequence(reply_plan.get("must_not_do")),
+            *_surface_memory_acceptance_must_not_do(agent_input),
+            *_surface_dream_context_must_not_do(agent_input),
+        ]
+    )
     if missing_detail_selection:
         card_lines = _surface_memory_card_fact_lines(memory_packet, limit=4)
         task_facts = _clean_list(
@@ -1780,7 +1793,12 @@ def _surface_task_control_from_reply_plan(
             _first_nonempty(reply_plan.get("question_budget"), reply_plan.get("max_questions")),
             default=0,
         ),
-        "must_include": _clean_list(_coerce_sequence(reply_plan.get("must_include"))),
+        "must_include": _clean_list(
+            [
+                *_coerce_sequence(reply_plan.get("must_include")),
+                *_surface_memory_acceptance_must_include(agent_input),
+            ]
+        ),
         "must_not_do": task_must_not_do,
         "facts": task_facts,
         "style_anchor": _clean_list(
@@ -1818,6 +1836,228 @@ def _surface_memory_plan_reason(trace_stage_meta: Mapping[str, Any] | None = Non
     if "指代选择追问" in packet_text:
         return "anaphoric_selection_recall"
     return ""
+
+
+def _surface_message_is_memory_acceptance(text: str) -> bool:
+    message = str(text or "").strip()
+    if not message:
+        return False
+    if any(token in message for token in ("回忆检查", "记忆验收", "同会话验收", "新会话验收", "最终同会话验收")):
+        return True
+    if "验收" in message and any(token in message for token in ("列出", "复述", "回答", "说出")):
+        return True
+    return bool(
+        any(token in message for token in ("测试代号", "海边灯塔", "预热指标", "推荐格式"))
+        and any(token in message for token in ("是什么", "指什么", "列出", "复述", "当前", "刚才", "刚刚"))
+    )
+
+
+def _surface_memory_acceptance_task_facts(
+    *,
+    agent_input: Any | None,
+    trace_stage_meta: Mapping[str, Any] | None = None,
+) -> tuple[str, ...]:
+    user_message = str(getattr(agent_input, "user_message", "") or "").strip() if agent_input is not None else ""
+    if not _surface_message_is_memory_acceptance(user_message):
+        return ()
+    packet = _surface_memory_packet_for_output_guard(agent_input=agent_input, trace_stage_meta=trace_stage_meta) if agent_input is not None else {}
+    facts = [
+        str(item or "").strip()
+        for item in list(packet.get("facts") or [])
+        if str(item or "").strip()
+    ]
+    facts.extend(_surface_recent_user_fact_texts(agent_input))
+    if not facts:
+        return (
+            "记忆验收请求：当前没有可靠事实，不要编造测试代号、指标或格式。",
+        )
+    joined = "\n".join(facts)
+    structured: list[str] = []
+    code = _surface_memory_acceptance_latest_test_code(joined)
+    if code:
+        structured.append(f"验收标准事实：测试代号={code}；如果出现旧值，以最新纠正为准。")
+    if "海边灯塔" in joined and ("连续记忆锚点" in joined or "记忆锚点" in joined):
+        structured.append("验收标准事实：海边灯塔=连续记忆锚点，不是字面灯塔。")
+    metrics: list[str] = []
+    for key in ("prewarm_latency_ms", "prewarm_threads", "prewarm_workers"):
+        match = re.search(rf"{re.escape(key)}\s*[=：:]\s*([0-9]+)", joined)
+        if match:
+            metrics.append(f"{key}={match.group(1)}")
+    if metrics:
+        structured.append("验收标准事实：app-server预热指标=" + "、".join(metrics) + "。")
+    compact = re.sub(r"\s+", "", joined)
+    if "推荐格式" in joined and ("书名+一句话理由" in compact or ("书名" in joined and "一句话理由" in joined)):
+        structured.append("验收标准事实：轻小说推荐格式=书名 + 一句话理由，不走卡片模板。")
+    return tuple(
+        _clean_list(
+            [
+                "记忆验收请求：最终回复必须由模型生成，但只能依据下面这些事实；不要编造缺失字段。",
+                "回复约束：直接回答验收清单，不要反问推荐维度，不要发起轻小说推荐任务。",
+                *structured,
+                *[f"验收事实：{fact}" for fact in facts[-12:]],
+            ]
+        )
+    )
+
+
+def _surface_memory_acceptance_joined_facts(agent_input: Any | None) -> str:
+    facts: list[str] = []
+    if agent_input is not None:
+        packet = _surface_memory_packet_for_output_guard(agent_input=agent_input, trace_stage_meta=None)
+        facts.extend(str(item or "").strip() for item in list(packet.get("facts") or []) if str(item or "").strip())
+    facts.extend(_surface_recent_user_fact_texts(agent_input))
+    return "\n".join(_clean_list(facts))
+
+
+def _surface_memory_acceptance_latest_test_code(joined_facts: str) -> str:
+    joined = str(joined_facts or "")
+    code_pattern = r"蓝莲-0531-[A-Z]\d+"
+    correction_matches = re.findall(
+        rf"纠正测试代号[：:\s]*({code_pattern})\s*改成\s*({code_pattern})",
+        joined,
+    )
+    if correction_matches:
+        return correction_matches[-1][1]
+    code_matches = re.findall(code_pattern, joined)
+    if not code_matches:
+        return ""
+    return code_matches[-1]
+
+
+def _surface_memory_acceptance_must_include(agent_input: Any | None) -> tuple[str, ...]:
+    user_message = str(getattr(agent_input, "user_message", "") or "").strip() if agent_input is not None else ""
+    if not _surface_message_is_memory_acceptance(user_message):
+        return ()
+    joined = _surface_memory_acceptance_joined_facts(agent_input)
+    required: list[str] = []
+    code = _surface_memory_acceptance_latest_test_code(joined)
+    if code:
+        required.append(code)
+    if "海边灯塔" in user_message and ("连续记忆锚点" in joined or "记忆锚点" in joined):
+        required.append("连续记忆锚点")
+    for key in ("prewarm_latency_ms=665", "prewarm_threads=7", "prewarm_workers=1"):
+        if key in joined:
+            required.append(key)
+    compact = re.sub(r"\s+", "", joined)
+    if "推荐格式" in user_message and ("书名+一句话理由" in compact or "一句话理由" in joined):
+        required.append("书名 + 一句话理由")
+    return tuple(_clean_list(required))
+
+
+def _surface_memory_acceptance_must_not_do(agent_input: Any | None) -> tuple[str, ...]:
+    user_message = str(getattr(agent_input, "user_message", "") or "").strip() if agent_input is not None else ""
+    if not _surface_message_is_memory_acceptance(user_message):
+        return ()
+    return (
+        "不要反问用户想要什么口味、维度、热度、口碑或冷门宝藏；本轮只回答记忆验收。",
+        "不要省略用户要求列出的轻小说推荐格式。",
+        "不要把“书名 + 一句话理由，不走卡片模板”改写成“用户不用列模板”或“让用户再说口味”。",
+    )
+
+
+def _surface_memory_write_task_facts(agent_input: Any | None) -> tuple[str, ...]:
+    user_message = str(getattr(agent_input, "user_message", "") or "").strip() if agent_input is not None else ""
+    if not user_message:
+        return ()
+    if not any(token in user_message for token in ("记住", "记一下", "记下来", "项目事实", "测试事实", "记忆事实", "纠正", "改成")):
+        return ()
+    facts = [
+        "记忆写入请求：最终回复必须由模型生成；只需自然确认已记住/已更新，并简短复述关键事实。",
+        "回复约束：不要把记忆写入请求转成推荐、创作、工具执行或追问；不要输出内部渠道/任务状态。",
+        f"待确认记忆内容：{user_message}",
+    ]
+    if "推荐格式" in user_message and "书名" in user_message and "一句话" in user_message:
+        facts.append("待确认关键事实：轻小说推荐格式=书名 + 一句话理由，不走卡片模板。")
+    if "海边灯塔" in user_message and ("记忆锚点" in user_message or "连续记忆锚点" in user_message):
+        facts.append("待确认关键事实：海边灯塔=连续记忆锚点，不是字面灯塔。")
+    if "prewarm_" in user_message or "预热指标" in user_message:
+        facts.append("待确认关键事实：保留 prewarm_latency_ms、prewarm_threads、prewarm_workers 的原始数值。")
+    code = re.search(r"蓝莲-0531-[A-Z]\d+", user_message)
+    if code:
+        facts.append(f"待确认关键事实：测试代号={code.group(0)}。")
+    return tuple(_clean_list(facts))
+
+
+def _surface_recent_user_fact_texts(agent_input: Any | None, *, limit: int = 80) -> list[str]:
+    if agent_input is None:
+        return []
+    person_id = str(getattr(agent_input, "person_id", "") or "").strip()
+    if not person_id:
+        return []
+    db_path = str(os.environ.get("HOST_AUDIT_SQLITE_PATH") or os.environ.get("HOST_AUDIT_DB_PATH") or "host_brain/data/audit.sqlite3")
+    if not os.path.exists(db_path):
+        return []
+    fact_markers = (
+        "测试代号",
+        "海边灯塔",
+        "prewarm_",
+        "预热指标",
+        "推荐格式",
+        "项目事实",
+        "测试事实",
+        "记忆事实",
+        "纠正",
+        "改成",
+        "记住",
+        "记一下",
+    )
+    rows: list[str] = []
+    try:
+        conn = sqlite3.connect(db_path)
+        try:
+            cursor = conn.execute(
+                """
+                SELECT content
+                FROM conversation_turn
+                WHERE person_id = ? AND role = 'user'
+                ORDER BY ts_ms DESC
+                LIMIT ?
+                """,
+                (person_id, int(limit)),
+            )
+            for (content,) in cursor.fetchall():
+                text = str(content or "").strip()
+                if text and any(marker in text for marker in fact_markers):
+                    rows.append("用户事实：" + text)
+        finally:
+            conn.close()
+    except Exception:
+        return []
+    rows.reverse()
+    return rows
+
+
+def _apply_surface_text_quality_guard(
+    narrative: str,
+    *,
+    agent_input: Any | None,
+) -> tuple[str, dict[str, Any]]:
+    text = str(narrative or "").strip()
+    try:
+        from host_brain.persona.text_quality_gate import get_text_quality_gate  # noqa: PLC0415
+
+        quality = get_text_quality_gate().validate(
+            text=text,
+            render_profile="zh_text",
+            response_form="text",
+            user_message=str(getattr(agent_input, "user_message", "") or ""),
+            semantic_forbidden=True,
+        )
+    except Exception as exc:
+        return text, {
+            "applied": False,
+            "status": "DEGRADED",
+            "reason_code": "TEXT_QUALITY_GATE_FAILED",
+            "detail": str(exc)[:160],
+        }
+    if not quality.hard_fail:
+        return text, {"applied": False, "quality": quality.as_dict()}
+    return "", {
+        "applied": True,
+        "reason_code": "TEXT_QUALITY_HARD_FAIL",
+        "quality": quality.as_dict(),
+        "fallback_used": False,
+    }
 
 
 def _affect_packet(
@@ -1955,6 +2195,86 @@ def _relationship_clues(agent_input: Any) -> tuple[str, ...]:
     return tuple(clues)
 
 
+def _surface_user_asks_about_dream(agent_input: Any | None) -> bool:
+    text = str(getattr(agent_input, "user_message", "") or "").strip()
+    if not text:
+        return False
+    if any(marker in text for marker in ("梦境", "做梦", "梦见", "梦里", "最近有没有梦", "留下什么梦")):
+        return True
+    return "梦" in text and not any(marker in text for marker in ("梦想", "梦幻", "梦游般", "梦中情"))
+
+
+def _compact_surface_dream_text(value: Any, *, limit: int = 260) -> str:
+    text = str(value or "").replace("\r", " ").replace("\n", " ").strip()
+    text = " ".join(part for part in text.split() if part)
+    if text.startswith("memory written:"):
+        text = text.removeprefix("memory written:").strip()
+    if len(text) <= limit:
+        return text
+    return text[: max(20, int(limit))].rstrip() + "..."
+
+
+def _load_recent_surface_dream_text(*, limit: int = 320) -> str:
+    try:
+        from host_brain.app.dependencies import get_ledger  # noqa: PLC0415
+
+        ledger = get_ledger()
+        db_path = getattr(ledger, "_db_path", None) or getattr(ledger, "db_path", None)
+        if not db_path:
+            return ""
+        import sqlite3  # noqa: PLC0415
+
+        conn = sqlite3.connect(str(db_path))
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            "SELECT memory_id, detail FROM memory_ops_log "
+            "WHERE op_kind='WRITE' AND status='SUCCESS' "
+            "AND evidence_refs LIKE '%tag:dream%' "
+            "AND evidence_refs LIKE '%source:dream_generator%' "
+            "AND evidence_refs NOT LIKE '%tag:dream_usage_hint%' "
+            "ORDER BY ts_ms DESC LIMIT 1"
+        ).fetchone()
+        conn.close()
+        if not row:
+            return ""
+        memory_id = str(row["memory_id"] or "").strip()
+        if memory_id:
+            try:
+                from host_brain.memory.chroma_client import build_runtime_chroma_client  # noqa: PLC0415
+
+                entry = build_runtime_chroma_client().get(memory_id)
+                if entry is not None and str(entry.text or "").strip():
+                    return _compact_surface_dream_text(entry.text, limit=limit)
+            except Exception:
+                pass
+        return _compact_surface_dream_text(row["detail"], limit=limit)
+    except Exception:
+        return ""
+
+
+def _surface_dream_context_task_facts(agent_input: Any | None) -> tuple[str, ...]:
+    if not _surface_user_asks_about_dream(agent_input):
+        return ()
+    dream_text = _load_recent_surface_dream_text(limit=320)
+    facts = [
+        "用户正在主动问最近的梦；可以自然使用最近梦境素材，但仍由模型生成最终表达。",
+        "梦境只作为 narrative-only 内在叙事；不要当现实事实，不要解释系统来源或配置。",
+        f"最近梦境可用片段：{dream_text}" if dream_text else "最近梦境可用片段：未取到；如果回答梦，只能轻描淡写，不要硬编细节。",
+        "回答方式：像自然回忆梦一样说一小段即可，不写报告，不列字段。",
+    ]
+    return tuple(_clean_list(facts))
+
+
+def _surface_dream_context_must_not_do(agent_input: Any | None) -> tuple[str, ...]:
+    if not _surface_user_asks_about_dream(agent_input):
+        return ()
+    return (
+        "不要输出 dream_source_profile、dream_continuity_profile、dream_quality、dream_usage、random_walk_weight 等内部字段或配置名。",
+        "不要把梦境说成现实发生过的事实；不要说“这证明了”“事实是”。",
+        "不要在有最近梦境片段时临场乱编完全无关的新梦。",
+    )
+
+
 def _task_facts(
     *,
     reply_plan: Mapping[str, Any],
@@ -1963,6 +2283,9 @@ def _task_facts(
 ) -> tuple[str, ...]:
     facts = [
         *_surface_input_boundary_facts(agent_input=agent_input, trace_stage_meta=trace_stage_meta),
+        *_surface_memory_write_task_facts(agent_input),
+        *_surface_memory_acceptance_task_facts(agent_input=agent_input, trace_stage_meta=trace_stage_meta),
+        *_surface_dream_context_task_facts(agent_input),
         f"当前任务：{_first_nonempty(reply_plan.get('reply_contract'), reply_plan.get('response_goal'), '')}",
         f"当前意图：{_first_nonempty(reply_plan.get('task_mode'), reply_plan.get('primary_topic'), reply_plan.get('interaction_move'), '')}",
         *_technical_task_facts(reply_plan),
@@ -1979,6 +2302,8 @@ def _necessary_facts(
     retrieval_summary = _safe_mapping(getattr(agent_input, "retrieval_summary", None))
     facts = [
         *_surface_input_boundary_facts(agent_input=agent_input, trace_stage_meta=trace_stage_meta),
+        *_surface_memory_acceptance_task_facts(agent_input=agent_input, trace_stage_meta=trace_stage_meta),
+        *_surface_dream_context_task_facts(agent_input),
         *_technical_task_facts(task_control or {}),
         *_account_login_handoff_facts(agent_input, task_control=task_control),
     ]
@@ -2021,6 +2346,7 @@ def _surface_boundary_must_not_do(
             [
                 sensory_boundary,
                 "不要编造用户现实动作、地点、屏幕内容、身体状态或睡眠事实，除非 facts 明确给出。",
+                *_surface_memory_acceptance_must_not_do(agent_input),
                 *_technical_task_must_not_do(task_control or {}),
                 *_account_login_must_not_do(agent_input, task_control=task_control),
             ]

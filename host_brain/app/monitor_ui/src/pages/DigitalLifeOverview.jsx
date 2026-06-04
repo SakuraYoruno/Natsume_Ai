@@ -11,6 +11,7 @@ import {
   Waves,
 } from 'lucide-react'
 import BackgroundRuntimeCard from '../components/BackgroundRuntimeCard.jsx'
+import AvatarStateCard from '../components/AvatarStateCard.jsx'
 import { LifeSection } from '../components/digitalLife/digitalLifeSectionShared.jsx'
 import SampleMeta from '../components/obs/SampleMeta.jsx'
 import ViewportLazySection from '../components/obs/ViewportLazySection.jsx'
@@ -31,6 +32,8 @@ import VitalLoopSummaryPanel from '../components/VitalLoopSummaryPanel.jsx'
 import useLifeBodyPageData from '../hooks/useLifeBodyPageData.js'
 import { buildMainChainReshapeModel } from '../models/mainChainReshapeModel.js'
 import { useDigitalLifeWallClockSoakQuery } from '../queries/digitalLifeQueries.js'
+import { useAvatarStateQuery } from '../queries/runtimeQueries.js'
+import { postAvatarBehavior } from '../api/runtime.js'
 import {
   compactText,
   formatTrend,
@@ -49,6 +52,8 @@ const WINDOW_OPTIONS = [
 
 export default function DigitalLifeOverview() {
   const [windowMinutes, setWindowMinutes] = useState(360)
+  const [avatarCommandBusy, setAvatarCommandBusy] = useState(false)
+  const [avatarCommandError, setAvatarCommandError] = useState(null)
   const {
     vtsData,
     memoryData,
@@ -116,6 +121,11 @@ export default function DigitalLifeOverview() {
     pollingTick,
     pollingInterval: Math.max(60, Number(pollingInterval || 60)),
   })
+  const avatarStateQuery = useAvatarStateQuery({
+    pollingEnabled,
+    pollingTick,
+    pollingInterval: Math.max(15, Number(pollingInterval || 15)),
+  })
   const mainChainReshapeModel = useMemo(
     () => buildMainChainReshapeModel({
       runtimeSnapshot,
@@ -157,6 +167,19 @@ export default function DigitalLifeOverview() {
   const refreshDashboard = () => {
     void refreshAll()
     void wallClockSoakQuery.refetch()
+    void avatarStateQuery.refetch()
+  }
+  const applyAvatarBehavior = async (behaviorId) => {
+    setAvatarCommandBusy(true)
+    setAvatarCommandError(null)
+    try {
+      await postAvatarBehavior({ behavior_id: behaviorId, source: 'monitor_digital_life' })
+      await avatarStateQuery.refetch()
+    } catch (err) {
+      setAvatarCommandError(err instanceof Error ? err : new Error(String(err)))
+    } finally {
+      setAvatarCommandBusy(false)
+    }
   }
   const forgeQualitySummary = capabilityGapData?.forge_runtime_quality?.summary || {}
   const forgeQualityItems = capabilityGapData?.forge_runtime_quality?.items || []
@@ -364,7 +387,7 @@ export default function DigitalLifeOverview() {
             <RefreshCw
               size={14}
               className={
-                loading || refreshing || runtimeLoading || wallClockSoakQuery.loading || wallClockSoakQuery.refreshing
+                loading || refreshing || runtimeLoading || wallClockSoakQuery.loading || wallClockSoakQuery.refreshing || avatarStateQuery.refreshing
                   ? 'animate-spin'
                   : ''
               }
@@ -410,6 +433,23 @@ export default function DigitalLifeOverview() {
       <MainChainReshapePanel model={mainChainReshapeModel} />
       <LifeBodyVitalsStrip vitals={lifeBodyModel.vitalSigns} />
       <LifeBodyFocusPanel guidance={lifeBodyModel.diagnosticGuidance} />
+
+      <LifeSection
+        title="桌宠表现链路"
+        hint="把 Host 对话、Edge 行为状态、MateEngine/VRM 驱动和危险热键拦截放在一张只读卡片里。"
+      >
+        <AvatarStateCard
+          data={avatarStateQuery.avatarState}
+          loading={avatarStateQuery.loading}
+          refreshing={avatarStateQuery.refreshing}
+          error={avatarStateQuery.error}
+          commandError={avatarCommandError}
+          behaviorBusy={avatarCommandBusy}
+          updatedAt={avatarStateQuery.lastUpdatedAt}
+          onRefresh={() => avatarStateQuery.refetch()}
+          onBehavior={applyAvatarBehavior}
+        />
+      </LifeSection>
 
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1.8fr)_minmax(320px,0.95fr)]">
         <LifeBodyTopology

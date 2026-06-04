@@ -136,7 +136,14 @@ def search_route(
             now_ts_ms=now_ts_ms,
         )
     if store_id == STORE_SEMANTIC_MEMORY:
-        return search_semantic_memory(self, query=query, top_k=int(route.top_k), now_ts_ms=now_ts_ms)
+        return search_semantic_memory(
+            self,
+            query=query,
+            top_k=int(route.top_k),
+            person_id=person_id,
+            session_id=session_id,
+            now_ts_ms=now_ts_ms,
+        )
     if store_id == STORE_NEO4J_BOND:
         return search_neo4j_bond(self, query=query, top_k=int(route.top_k))
     if store_id == STORE_WORLD_CANON:
@@ -491,6 +498,8 @@ def search_semantic_memory(
     *,
     query: str,
     top_k: int,
+    person_id: str | None = None,
+    session_id: str | None = None,
     now_ts_ms: int | None = None,
 ) -> list[dict[str, Any]]:
     """Route 3：SQLite semantic_memory 长期语义记忆检索。"""
@@ -509,6 +518,8 @@ def search_semantic_memory(
         raise RuntimeError(f"semantic memory ledger unavailable: {exc}") from exc
 
     current_ts = int(now_ts_ms or 0)
+    target_person = str(person_id or "").strip()
+    target_session = str(session_id or "").strip()
     query_profile = _semantic_query_profile(query)
     scored: list[tuple[float, dict[str, Any]]] = []
     for row in list(rows or []):
@@ -558,6 +569,17 @@ def search_semantic_memory(
             source_memory_ids=source_memory_ids,
             semantic_id=semantic_id,
         )
+        provenance_person_ids = [str(item or "").strip() for item in list(provenance.get("person_ids") or []) if str(item or "").strip()]
+        provenance_session_ids = [str(item or "").strip() for item in list(provenance.get("session_ids") or []) if str(item or "").strip()]
+        identity_boost = 0.0
+        identity_penalty = 0.0
+        if target_session and target_session in provenance_session_ids:
+            identity_boost += 0.18
+        if target_person and target_person in provenance_person_ids:
+            identity_boost += 0.36
+        elif target_person and provenance_person_ids:
+            identity_penalty += 0.22
+        final_score = round(max(0.0, min(1.0, final_score + identity_boost - identity_penalty)), 6)
         evidence_refs = provenance.get("evidence_refs") or [f"semantic://{semantic_id}"]
         scored.append(
             (
@@ -578,6 +600,8 @@ def search_semantic_memory(
                         "semantic_source_refs": provenance.get("source_refs") or [],
                         "semantic_evidence_refs": provenance.get("evidence_refs") or [],
                         "semantic_episode_ids": provenance.get("episode_ids") or [],
+                        "semantic_person_ids": provenance_person_ids,
+                        "semantic_session_ids": provenance_session_ids,
                         "semantic_collection_ids": provenance.get("collection_ids") or [],
                         "semantic_entity_ids": provenance.get("entity_ids") or [],
                         "semantic_correction_ids": provenance.get("correction_ids") or [],
@@ -588,6 +612,8 @@ def search_semantic_memory(
                             "lexical_score": lexical_score,
                             "confidence_blend_score": score,
                             "recency_boost": recency_boost,
+                            "identity_boost": round(identity_boost, 6),
+                            "identity_penalty": round(identity_penalty, 6),
                             "semantic_kind_boost": round(profile_boost, 6),
                             "preference_boost": round(profile_boost if query_profile == "preference" else 0.0, 6),
                             "tag_match_boost": round(tag_match_boost, 6),
@@ -642,6 +668,8 @@ def _semantic_memory_source_provenance(
     source_refs: list[str] = []
     evidence_refs: list[str] = []
     episode_ids: list[str] = []
+    person_ids: list[str] = []
+    session_ids: list[str] = []
     collection_ids: list[str] = []
     entity_ids: list[str] = []
     correction_ids: list[str] = []
@@ -716,15 +744,52 @@ def _semantic_memory_source_provenance(
             add(source_refs, cleaned_source)
             add(evidence_refs, cleaned_source)
 
+    _semantic_add_episode_identities(
+        conn,
+        episode_ids=episode_ids,
+        add=add,
+        person_ids=person_ids,
+        session_ids=session_ids,
+    )
     return {
         "status": "resolved" if evidence_refs else "unresolved",
         "source_refs": source_refs,
         "evidence_refs": evidence_refs,
         "episode_ids": episode_ids,
+        "person_ids": person_ids,
+        "session_ids": session_ids,
         "collection_ids": collection_ids,
         "entity_ids": entity_ids,
         "correction_ids": correction_ids,
     }
+
+
+def _semantic_add_episode_identities(
+    conn: Any,
+    *,
+    episode_ids: list[str],
+    add: Any,
+    person_ids: list[str],
+    session_ids: list[str],
+) -> None:
+    if conn is None or not episode_ids:
+        return
+    placeholders = ", ".join("?" for _ in episode_ids)
+    try:
+        rows = conn.execute(
+            f"""
+            SELECT person_id, session_id
+            FROM life_episode
+            WHERE episode_id IN ({placeholders})
+            """,
+            episode_ids,
+        ).fetchall()
+    except Exception:
+        return
+    for row in rows or []:
+        data = dict(row)
+        add(person_ids, data.get("person_id"))
+        add(session_ids, data.get("session_id"))
 
 
 def _semantic_add_episode_provenance(
@@ -926,6 +991,8 @@ def _semantic_query_profile(query: str) -> str:
     if any(token in compact for token in ("回去翻", "翻看", "深读", "正文", "详情页", "网页", "epub", "怎么判断", "判断哪本", "哪本好看")):
         if any(token in compact for token in ("轻小说", "推荐", "哪本", "书", "正文", "详情", "网页", "epub")):
             return "action_pattern"
+    if any(token in compact for token in ("测试代号", "海边灯塔", "prewarm", "预热指标", "app-server", "appserver")):
+        return "stable_fact"
     if "未完成" not in compact and any(token in compact for token in ("完成了什么", "做完了什么", "关闭了", "已完成", "完成的待办", "closed", "done", "resolved")):
         return "commitment_closed"
     if any(token in compact for token in ("承诺", "待办", "openloop", "open_loop", "未完成", "还要做", "后续要", "答应", "说好")):
@@ -1013,7 +1080,13 @@ def _semantic_profile_boost(*, query: str, query_profile: str, semantic_kind: st
             return -0.08
     if profile == "stable_fact":
         if kind == "stable_fact":
-            return 0.18
+            return 0.24
+        if kind == "correction":
+            return 0.28
+        if kind == "user_preference" and _looks_like_preference_semantic_row(summary=summary, tags=tags):
+            return 0.08
+        if kind == "experience_collection":
+            return -0.18
     if profile == "relationship_feedback":
         if kind == "relationship_feedback":
             return 0.20 + _relationship_feedback_subtopic_boost(query=query, summary=summary, tags=tags)

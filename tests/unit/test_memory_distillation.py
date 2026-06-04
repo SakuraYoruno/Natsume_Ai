@@ -15,7 +15,7 @@ import pytest
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.memory.distillation import MemoryDistillationEngine, resolve_memory_distillation_codex_model
 from host_brain.memory.episodic import EpisodicStore
-from host_brain.memory.life_memory import LifeMemoryStore
+from host_brain.memory.life_memory import LifeMemoryConsolidator, LifeMemoryStore
 from host_brain.core.prompt_context import (
     validate_prompt_context,
     build_semantic_slot,
@@ -414,6 +414,69 @@ def test_distill_top_k_filters_noisy_life_episode_sources(episodic, ledger):
     assert "emotion_decay_tick" not in summary
     assert "latency_ms" not in summary
     assert "一口空话" not in summary
+
+
+def test_life_memory_consolidator_distills_explicit_project_facts_without_acceptance_query(ledger):
+    """长期蒸馏要固化明确项目事实/测试事实，不能把验收查询句当成用户偏好。"""
+    life_store = LifeMemoryStore(ledger=ledger)
+    turns = [
+        (
+            "req-distill-test-code-r1",
+            "记住一个长对话测试事实：当前测试代号是蓝莲-0531-R1。",
+            "记住了。",
+        ),
+        (
+            "req-distill-lighthouse",
+            "再补一个项目事实：海边灯塔指连续记忆锚点，不是字面灯塔。",
+            "记住了。",
+        ),
+        (
+            "req-distill-prewarm",
+            "再补一个项目事实：app-server预热指标是prewarm_latency_ms=665、prewarm_threads=7、prewarm_workers=1。",
+            "记住了。",
+        ),
+        (
+            "req-distill-format",
+            "记住轻小说推荐格式：书名 + 一句话理由，不要卡片模板。",
+            "记住了。",
+        ),
+        (
+            "req-distill-code-r2",
+            "纠正测试代号：蓝莲-0531-R1 改成蓝莲-0531-R2。",
+            "记住了。",
+        ),
+        (
+            "req-distill-acceptance-query",
+            "最终同会话验收：请列出当前测试代号、海边灯塔到底指什么、app-server预热指标、轻小说推荐格式。",
+            "测试代号蓝莲-0531-R2，海边灯塔是连续记忆锚点。",
+        ),
+    ]
+    for index, (request_id, user_message, assistant_reply) in enumerate(turns):
+        life_store.write_chat_episode(
+            request_id=request_id,
+            session_id="sess-distill-project-facts",
+            person_id="user-distill-project-facts",
+            user_message=user_message,
+            assistant_reply=assistant_reply,
+            ts_ms=1_800_000_300_000 + index,
+        )
+
+    result = LifeMemoryConsolidator(store=life_store).distill_semantic_memories(
+        limit=40,
+        max_records=20,
+        ts_ms=1_800_000_300_100,
+    )
+    items, total = ledger.list_semantic_memories(limit=40)
+    summaries = "\n".join(item["summary"] for item in items)
+
+    assert result["written_count"] >= 5
+    assert total >= 5
+    assert "稳定事实：当前测试代号是蓝莲-0531-R1" in summaries
+    assert "稳定事实：海边灯塔指连续记忆锚点，不是字面灯塔" in summaries
+    assert "稳定事实：app-server预热指标是prewarm_latency_ms=665、prewarm_threads=7、prewarm_workers=1" in summaries
+    assert "用户偏好：轻小说推荐格式：书名 + 一句话理由，不要卡片模板" in summaries
+    assert "纠错记忆：纠正测试代号：蓝莲-0531-R1 改成蓝莲-0531-R2" in summaries
+    assert "最终同会话验收" not in summaries
 
 
 def test_distill_top_k_with_life_store_rejects_lightnovel_quality_guess(episodic, ledger):

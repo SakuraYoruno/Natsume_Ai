@@ -8,19 +8,50 @@ emotion, speech, and body-action contracts.
 from __future__ import annotations
 
 import json
+import os
+import socket
 import threading
 import time
 import urllib.error
 import urllib.request
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
-from edge_client.actuators.vts_driver import VtsDriverResult, VtsState, normalize_expression_emotion_tag
+from edge_client.actuators.vts_driver import (
+    AVATAR_FREE_ACTION_BLOCKED,
+    VtsDriverResult,
+    VtsState,
+    is_blocked_avatar_hotkey_id,
+    normalize_expression_emotion_tag,
+)
 
 
 DEFAULT_VRM_BRIDGE_HOST = "127.0.0.1"
 DEFAULT_VRM_BRIDGE_PORT = 18770
 DEFAULT_VRM_BRIDGE_TIMEOUT_S = 1.5
+DEFAULT_VRM_BRIDGE_MOUTH_UDP_PORT = 18771
+
+
+def _env_bool(name: str, default: bool) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() not in {"0", "false", "no", "off", ""}
+
+
+def _default_mouth_udp_port() -> int | None:
+    raw = os.getenv("EDGE_VRM_BRIDGE_MOUTH_UDP_PORT")
+    if raw is None or not raw.strip():
+        return None
+    try:
+        port = int(raw.strip())
+    except ValueError:
+        return None
+    return port if port > 0 else None
+
+
+def _default_mouth_udp_enabled() -> bool:
+    return _env_bool("EDGE_VRM_BRIDGE_MOUTH_UDP_ENABLED", _default_mouth_udp_port() is not None)
 
 
 @dataclass
@@ -31,6 +62,8 @@ class VrmBridgeConfig:
     port: int = DEFAULT_VRM_BRIDGE_PORT
     api_timeout_s: float = DEFAULT_VRM_BRIDGE_TIMEOUT_S
     model_path: str | None = None
+    mouth_udp_port: int | None = field(default_factory=_default_mouth_udp_port)
+    mouth_udp_enabled: bool = field(default_factory=_default_mouth_udp_enabled)
 
     @property
     def base_url(self) -> str:
@@ -43,6 +76,8 @@ class VrmBridgeConfig:
             "api_timeout_s": float(self.api_timeout_s),
             "model_path": self.model_path,
             "base_url": self.base_url,
+            "mouth_udp_port": self.mouth_udp_port,
+            "mouth_udp_enabled": bool(self.mouth_udp_enabled and self.mouth_udp_port),
         }
 
 
@@ -63,6 +98,7 @@ class VrmBridgeDriver:
         self._last_model_move: dict[str, Any] = {"success": None, "reason": "not_started"}
         self._commands_sent = 0
         self._command_errors = 0
+        self._mouth_udp_socket: socket.socket | None = None
 
     @property
     def state(self) -> VtsState:
@@ -108,6 +144,9 @@ class VrmBridgeDriver:
     def disconnect(self) -> VtsDriverResult:
         self._state = VtsState.DISCONNECTED
         self._talking = False
+        if self._mouth_udp_socket is not None:
+            self._mouth_udp_socket.close()
+            self._mouth_udp_socket = None
         return VtsDriverResult(
             success=True,
             reason_code=None,
@@ -135,16 +174,36 @@ class VrmBridgeDriver:
             },
         )
 
+    def display_text(self, text: str) -> VtsDriverResult:
+        message = str(text or "").strip()
+        if not message:
+            return VtsDriverResult(
+                success=False,
+                reason_code="VRM_BRIDGE_TEXT_EMPTY",
+                detail="vrm bridge display_text requires non-empty text",
+                action="display_text",
+            )
+        return self._send_command(
+            "display_text",
+            {
+                "type": "say",
+                "text": message,
+            },
+        )
+
     def set_expression(self, emotion_tag: str | None, *, intensity: float | None = None) -> VtsDriverResult:
         normalized = normalize_expression_emotion_tag(emotion_tag) or "NEUTRAL"
         safe_intensity = 0.65 if intensity is None else max(0.0, min(1.0, float(intensity)))
         self._current_expression = normalized
+        rounded_intensity = round(safe_intensity, 4)
         return self._send_command(
             "set_expression",
             {
                 "type": "expression",
                 "emotion_tag": normalized,
-                "intensity": round(safe_intensity, 4),
+                "emotion_intensity": rounded_intensity,
+                "intensity": rounded_intensity,
+                "value": rounded_intensity,
             },
             emotion_tag=normalized,
             expression_id=normalized,
@@ -158,12 +217,17 @@ class VrmBridgeDriver:
     ) -> VtsDriverResult:
         normalized = normalize_expression_emotion_tag(emotion_tag) or "NEUTRAL"
         self._current_expression = normalized
+        frames = list(transition_frames or [])
+        final_intensity = _transition_final_intensity(frames)
         return self._send_command(
             "transition_expression",
             {
                 "type": "expression_transition",
                 "emotion_tag": normalized,
-                "transition_frames": list(transition_frames or []),
+                "emotion_intensity": final_intensity,
+                "intensity": final_intensity,
+                "value": final_intensity,
+                "transition_frames": frames,
             },
             emotion_tag=normalized,
             expression_id=normalized,
@@ -202,6 +266,8 @@ class VrmBridgeDriver:
                 for key, val in dict(_motion_values).items()
                 if _is_number(val)
             }
+        if self._config.mouth_udp_enabled and self._config.mouth_udp_port:
+            return self._send_mouth_udp("set_mouth_open_level", payload)
         return self._send_command("set_mouth_open_level", payload)
 
     def move_model(
@@ -233,6 +299,14 @@ class VrmBridgeDriver:
 
     def trigger_hotkey(self, hotkey_id: str | None) -> VtsDriverResult:
         hotkey = str(hotkey_id or "").strip()
+        if is_blocked_avatar_hotkey_id(hotkey):
+            return VtsDriverResult(
+                success=False,
+                reason_code=AVATAR_FREE_ACTION_BLOCKED,
+                detail=f"blocked avatar hotkey: {hotkey}",
+                action="trigger_hotkey",
+                expression_id=hotkey or None,
+            )
         return self._send_command(
             "trigger_hotkey",
             {
@@ -278,6 +352,60 @@ class VrmBridgeDriver:
                 ),
             },
         }
+
+    def _send_mouth_udp(self, action: str, payload: dict[str, Any]) -> VtsDriverResult:
+        if self._state != VtsState.AUTHENTICATED:
+            if _env_bool("EDGE_VRM_MOUTH_UDP_TRUST_BRIDGE", True):
+                self._state = VtsState.AUTHENTICATED
+                self._connection_error = None
+            else:
+                connect_result = self.connect()
+                if not connect_result.success:
+                    return VtsDriverResult(
+                        success=False,
+                        reason_code=connect_result.reason_code,
+                        detail=connect_result.detail,
+                        action=action,
+                    )
+        command = {
+            **dict(payload),
+            "action": action,
+            "sent_at": time.time(),
+            "transport": "udp",
+        }
+        data = json.dumps(command, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        try:
+            sent = self._get_mouth_udp_socket().sendto(
+                data,
+                (self._config.host, int(self._config.mouth_udp_port or DEFAULT_VRM_BRIDGE_MOUTH_UDP_PORT)),
+            )
+        except OSError as exc:
+            self._last_command = dict(command)
+            self._command_errors += 1
+            self._state = VtsState.ERROR
+            self._connection_error = str(exc)
+            return VtsDriverResult(
+                success=False,
+                reason_code="VRM_BRIDGE_MOUTH_UDP_FAILED",
+                detail=f"VRM bridge mouth UDP failed: {exc}",
+                action=action,
+            )
+        self._last_command = dict(command)
+        self._last_command["bytes_sent"] = sent
+        self._commands_sent += 1
+        self._state = VtsState.AUTHENTICATED
+        self._connection_error = None
+        return VtsDriverResult(
+            success=True,
+            reason_code=None,
+            detail=f"vrm bridge mouth frame sent over udp: {sent} bytes",
+            action=action,
+        )
+
+    def _get_mouth_udp_socket(self) -> socket.socket:
+        if self._mouth_udp_socket is None:
+            self._mouth_udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        return self._mouth_udp_socket
 
     def _send_command(
         self,
@@ -362,3 +490,14 @@ def _is_number(value: Any) -> bool:
     except (TypeError, ValueError):
         return False
     return True
+
+
+def _transition_final_intensity(frames: list[dict[str, Any]]) -> float:
+    for frame in reversed(frames):
+        if not isinstance(frame, dict):
+            continue
+        for key in ("value", "intensity", "emotion_intensity", "distance"):
+            if not _is_number(frame.get(key)):
+                continue
+            return round(max(0.0, min(1.0, float(frame[key]))), 4)
+    return 0.65

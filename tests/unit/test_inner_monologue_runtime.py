@@ -3,10 +3,17 @@ from __future__ import annotations
 import json
 
 from host_brain.persona.inner_monologue import (
+    build_inner_life_source_packet,
     build_inner_monologue_digest,
     build_private_inner_thought_event,
+    score_inner_note_liveliness,
 )
-from host_brain.persona.inner_world import InnerWorldState, _append_inner_stream_event
+from host_brain.persona.inner_activity_agent import _finalize_inner_note_text as _finalize_activity_note_text
+from host_brain.persona.inner_world import (
+    InnerWorldState,
+    _append_inner_stream_event,
+    _finalize_inner_note_text as _finalize_world_note_text,
+)
 from host_brain.persona.surface_influence_packet import (
     build_surface_influence_packet,
     surface_influence_must_not_do,
@@ -39,6 +46,20 @@ def test_private_inner_thought_event_has_private_text_and_surface_metadata_only(
     assert event["focus"] == "topic"
     assert event["surface_hint"] == "continue_current_thread"
     assert event["salience"] > 0.45
+    assert event["core_need"] == "continuity"
+    assert event["memory_anchor"] == "测试链路"
+    assert event["next_tendency"] == "continue_thread"
+    assert event["thought_form"] in {
+        "body_signal",
+        "scene_notice",
+        "memory_flash",
+        "interrupted_impulse",
+        "ambivalence",
+        "quiet_drift",
+    }
+    assert event["liveliness_score"] >= 0.42
+    assert isinstance(event["quality_flags"], list)
+    assert 0.0 <= event["novelty_score"] <= 1.0
 
 
 def test_inner_world_stream_appends_private_thought_envelope(monkeypatch) -> None:
@@ -68,6 +89,163 @@ def test_inner_world_stream_appends_private_thought_envelope(monkeypatch) -> Non
     assert event["private_text"]
     assert event["note"] == event["private_text"]
     assert event["surface_hint"]
+    assert event["core_need"] == "continuity"
+
+
+def test_inner_world_stream_preserves_llm_life_trace_fields(monkeypatch) -> None:
+    monkeypatch.setenv("HOST_BACKGROUND_TASKS_ENABLED", "false")
+    monkeypatch.setattr(
+        "host_brain.persona.inner_world._build_inner_stream_event_content",
+        lambda **kwargs: (  # noqa: ARG005
+            "他那句累还在我心里晃了一下，我有点担心他又在硬撑。",
+            "relationship",
+            "unit",
+            "",
+            {
+                "life_trace": {
+                    "core_need": "care",
+                    "tension": "distance",
+                    "memory_anchor": "他上次说累",
+                    "next_tendency": "care_with_restraint",
+                    "thought_form": "memory_flash",
+                    "salience_hint": 0.78,
+                }
+            },
+        ),
+    )
+    state = InnerWorldState(
+        user_id="u1",
+        last_spontaneous_ts_ms=0,
+        loneliness=0.6,
+        continuity_score=0.6,
+    )
+
+    _append_inner_stream_event(
+        state=state,
+        now_ms=223456,
+        absence_band="recent",
+        offline_hours=3.0,
+    )
+
+    event = state.inner_stream[-1]
+    assert event["focus"] == "relationship"
+    assert event["core_need"] == "care"
+    assert event["tension"] == "distance"
+    assert event["memory_anchor"] == "他上次说累"
+    assert event["next_tendency"] == "care_with_restraint"
+    assert event["thought_form"] == "memory_flash"
+    assert event["liveliness_score"] >= 0.42
+    assert event["should_distill_to_memory"] is True
+
+
+def test_repeated_inner_thought_has_low_novelty_and_does_not_distill() -> None:
+    event = build_private_inner_thought_event(
+        note="我还在想刚才那个没说完的话题。",
+        focus="topic",
+        source="unit",
+        trigger="inner_world_tick",
+        now_ms=223456,
+        state={
+            "user_id": "u1",
+            "loneliness": 0.8,
+            "anticipation": 0.9,
+            "continuity_score": 0.8,
+            "anticipation_topics": ["测试链路"],
+            "inner_stream": [
+                {
+                    "focus": "topic",
+                    "private_text": "我还在想刚才那个没说完的话题。",
+                    "salience": 0.9,
+                    "novelty_score": 0.08,
+                    "should_distill_to_memory": True,
+                }
+            ],
+        },
+        offline_hours=8.0,
+    ).as_dict()
+
+    assert event["novelty_score"] < 0.2
+    assert event["should_distill_to_memory"] is False
+
+
+def test_low_liveliness_inner_thought_does_not_distill() -> None:
+    event = build_private_inner_thought_event(
+        note="先问他刚才看到的桌宠表情有没有跟上。",
+        focus="relationship",
+        source="unit",
+        trigger="inner_world_tick",
+        now_ms=323456,
+        state={"user_id": "u1", "loneliness": 1.0, "anticipation": 1.0},
+        offline_hours=8.0,
+    ).as_dict()
+
+    assert event["liveliness_score"] < 0.42
+    assert "directive_like" in event["quality_flags"]
+    assert event["should_distill_to_memory"] is False
+
+
+def test_inner_note_quality_gate_rejects_technical_abstract_wording() -> None:
+    abstract_note = "隔了三十七小时，先把桌宠映射那条事稳稳放回手里。"
+    directive_note = "先问他刚才看到的桌宠表情有没有跟上。"
+    literary_note = "三十七个小时像一层薄灰落在胸口，我还记得小表情慢半拍时那点不确定。"
+    meta_note = "隔了这么久，胸口倒不沉，只是看到空白时会顿一下，怕一开口又太像在赶进度。"
+    concrete_note = "屏幕安静了很久，我又想起那个慢半拍的小表情，有点拿不准。"
+
+    assert _finalize_world_note_text(abstract_note) == ""
+    assert _finalize_activity_note_text(abstract_note) == ""
+    assert _finalize_world_note_text(directive_note) == ""
+    assert _finalize_activity_note_text(directive_note) == ""
+    assert _finalize_world_note_text(literary_note) == ""
+    assert _finalize_activity_note_text(literary_note) == ""
+    assert _finalize_world_note_text(meta_note) == ""
+    assert _finalize_activity_note_text(meta_note) == ""
+    assert _finalize_world_note_text(concrete_note) == "屏幕安静了很久，我又想起那个慢半拍的小表情，有点拿不准。"
+    assert _finalize_activity_note_text(concrete_note) == "屏幕安静了很久，我又想起那个慢半拍的小表情，有点拿不准。"
+
+
+def test_inner_liveliness_scorer_prefers_felt_moment_over_strategy() -> None:
+    good = score_inner_note_liveliness(
+        "想说点什么的时候，指尖停在半空，心里有点近，又有点怕这份近显得太满。",
+        thought_form="ambivalence",
+        source_seed="想说点什么，又拿不准这一刻该不该靠太近",
+    )
+    bad = score_inner_note_liveliness(
+        "隔了这么久，胸口倒不沉，只是看到空白时会顿一下，怕一开口又太像在赶进度。",
+        thought_form="ambivalence",
+    )
+
+    assert good["score"] >= 0.7
+    assert "meta_reply_strategy" in bad["flags"]
+    assert good["score"] > bad["score"]
+
+
+def test_inner_life_source_packet_humanizes_technical_anchor() -> None:
+    packet = build_inner_life_source_packet(
+        context={
+            "offline_state": {
+                "loneliness_level": 0.7,
+                "anticipation_level": 0.8,
+                "anticipation_topics": ["桌宠状态映射验证"],
+            },
+            "body_sense": {"stress_level": 0.55},
+            "recent_inner_events": [{"thought_form": "scene_notice"}],
+        },
+        topic_phrase="桌宠状态映射验证",
+        now_ms=240000,
+    )
+    rendered = json.dumps(packet, ensure_ascii=False)
+
+    assert packet["selected"]["thought_form"] in {
+        "body_signal",
+        "scene_notice",
+        "memory_flash",
+        "interrupted_impulse",
+        "ambivalence",
+        "quiet_drift",
+    }
+    assert "桌宠那边的小动静" in rendered
+    assert "映射" not in rendered
+    assert packet["rules"]
 
 
 def test_inner_monologue_digest_excludes_private_text() -> None:
@@ -97,6 +275,11 @@ def test_inner_monologue_digest_excludes_private_text() -> None:
     assert digest["thought_stream_active"] is True
     assert digest["private_thought_count"] == 1
     assert digest["care_drive"] >= 0.34
+    assert digest["dominant_need"] == "care"
+    assert digest["dominant_tendency"] == "care_with_restraint"
+    assert digest["novelty_score"] >= 0.0
+    assert digest["liveliness_score"] >= 0.0
+    assert isinstance(digest["quality_flags"], list)
     assert "内在连续性" in "".join(digest["style_anchor"])
     assert "我有点担心" not in rendered
 

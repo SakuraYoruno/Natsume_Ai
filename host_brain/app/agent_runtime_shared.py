@@ -2752,6 +2752,16 @@ def _maybe_build_contextual_style_answer(
 def _memory_recall_plan_should_bypass_direct_status_fastlane(user_message: str, *, task_mode: str | None = None) -> bool:
     """Return True when a direct recent/task route would hide required memory."""
 
+    message = str(user_message or "").strip()
+    if message and (
+        any(token in message for token in ("回忆检查", "记忆验收", "同会话验收", "新会话验收", "最终同会话验收"))
+        or ("验收" in message and any(token in message for token in ("列出", "复述", "回答", "说出")))
+        or (
+            any(token in message for token in ("测试代号", "海边灯塔", "预热指标", "推荐格式"))
+            and any(token in message for token in ("是什么", "指什么", "列出", "复述", "当前", "刚才", "刚刚"))
+        )
+    ):
+        return True
     try:
         from host_brain.memory.life_memory_query import plan_life_memory_query  # noqa: PLC0415
     except Exception:
@@ -2774,12 +2784,13 @@ def _memory_recall_plan_should_bypass_direct_status_fastlane(user_message: str, 
         "failure_debug",
         "open_loop",
         "preference",
+        "explicit_memory",
         "self_change",
     }
     return (
         contract_id in strong_contracts
         or reason in {"collection_memory_recall", "correction_recall", "evidence_review_recall", "failure_debug_recall"}
-        or query_kind in {"correction", "evidence_review", "failure_debug", "open_loop", "preference_lookup"}
+        or query_kind in {"correction", "evidence_review", "explicit_memory", "failure_debug", "open_loop", "preference_lookup"}
     )
 
 

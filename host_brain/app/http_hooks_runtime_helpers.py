@@ -100,6 +100,19 @@ def _as_plain_dict(value: Any) -> dict[str, Any]:
     return {}
 
 
+def _parse_bool_env(name: str, *, default: bool) -> bool:
+    raw = str(_os.environ.get(name) or "").strip().lower()
+    if raw in {"1", "true", "yes", "on"}:
+        return True
+    if raw in {"0", "false", "no", "off"}:
+        return False
+    return bool(default)
+
+
+def _runtime_snapshot_llm_enabled() -> bool:
+    return _parse_bool_env("HOST_RUNTIME_SNAPSHOT_LLM_ENABLED", default=True)
+
+
 def _record_snapshot_status(
     slot_status: dict[str, str],
     degraded_reasons: list[str],
@@ -908,6 +921,7 @@ def build_digital_life_runtime_snapshot(*, current_topic: str = "") -> dict[str,
 
     self_model_snapshot: dict[str, Any] = {}
     self_reflection_pulse: dict[str, Any] = {}
+    snapshot_llm_enabled = _runtime_snapshot_llm_enabled()
     try:
         from host_brain.tribe.prefrontal_agent import get_prefrontal_agent  # noqa: PLC0415
 
@@ -919,7 +933,7 @@ def build_digital_life_runtime_snapshot(*, current_topic: str = "") -> dict[str,
             bond_summary=bond_summary,
             now_ms=now_ms,
             trigger_reason="runtime_snapshot",
-            use_llm=False,
+            use_llm=snapshot_llm_enabled,
         )
         self_model_snapshot = _as_plain_dict(reflection_payload.get("self_model_snapshot"))
         self_reflection_pulse = _as_plain_dict(reflection_payload.get("self_reflection_pulse"))
@@ -945,7 +959,7 @@ def build_digital_life_runtime_snapshot(*, current_topic: str = "") -> dict[str,
         narrative_layer = BondNarrativeLayer(
             memory_index=SharedMemoryIndex(store=get_episodic_store()),
             milestone_tracker=MilestoneTracker(),
-            use_llm=False,
+            use_llm=snapshot_llm_enabled,
         )
         narrative_result = narrative_layer.build_narrative(
             user_id=persona_user_id,
@@ -1660,10 +1674,26 @@ def _fetch_ledger_rows_by_time(
         logger.debug("scheduler ledger unavailable: table=%s err=%s", table, exc)
         return []
 
+    table_name = str(table or "").strip()
+    if table_name.replace("_", "").isalnum():
+        db_path = getattr(ledger, "_db_path", None) or getattr(ledger, "db_path", None)
+        if db_path:
+            try:
+                conn = _sqlite3.connect(str(db_path))
+                conn.row_factory = _sqlite3.Row
+                rows = conn.execute(
+                    f"SELECT * FROM {table_name} WHERE ts_ms >= ? AND ts_ms <= ? ORDER BY ts_ms DESC LIMIT ?",
+                    (int(start_ts), int(end_ts), max(1, int(limit))),
+                ).fetchall()
+                conn.close()
+                return [dict(row) for row in rows]
+            except Exception as exc:
+                logger.debug("scheduler ledger sqlite fetch failed: table=%s err=%s", table, exc)
+
     fetch = getattr(ledger, "fetch_by_time_range", None)
     if callable(fetch):
         try:
-            return list(
+            fetched_rows = list(
                 fetch(
                     table,
                     start_ms=int(start_ts),
@@ -1672,6 +1702,11 @@ def _fetch_ledger_rows_by_time(
                 )
                 or []
             )
+            return sorted(
+                (dict(row) for row in fetched_rows if isinstance(row, dict)),
+                key=lambda row: int(row.get("ts_ms") or 0),
+                reverse=True,
+            )[: max(1, int(limit))]
         except Exception as exc:
             logger.debug("scheduler ledger time fetch failed: table=%s err=%s", table, exc)
 
@@ -1689,7 +1724,7 @@ def _fetch_ledger_rows_by_time(
             ts_value = 0
         if int(start_ts) <= ts_value <= int(end_ts):
             filtered.append(dict(row))
-    return filtered[: max(1, int(limit))]
+    return sorted(filtered, key=lambda row: int(row.get("ts_ms") or 0), reverse=True)[: max(1, int(limit))]
 
 
 def _build_scheduler_audit_reader(
@@ -1777,7 +1812,7 @@ def _build_scheduler_episodic_reader(
             logger=logger,
         )
         entries: list[dict[str, Any]] = []
-        for row in reversed(rows):
+        for row in sorted(rows, key=lambda item: int(item.get("ts_ms") or 0), reverse=True):
             if str(row.get("op_kind") or "").upper() != "WRITE":
                 continue
             if str(row.get("status") or "").upper() != "SUCCESS":
@@ -1864,11 +1899,19 @@ def _fallback_scheduler_narrative(llm_input: Mapping[str, Any]) -> str:
             return f"{date} 的日记：我把今天留下的片段重新读了一遍。{joined}"
         return f"{date} 的日记：今天没有足够清晰的对话片段，我只记录下这份安静。"
     if task == "dream_generation":
-        snippets = list(llm_input.get("episodic_summaries") or [])
-        joined = "；".join(_compact_scheduler_text(item, limit=80) for item in snippets[:5] if str(item or "").strip())
+        snippets = list(llm_input.get("recent_episodic_summaries") or llm_input.get("episodic_summaries") or [])
+        long_term = list(llm_input.get("long_term_memory_summaries") or [])
+        previous = list(llm_input.get("previous_dream_summaries") or [])
+        motifs = [str(item).strip() for item in list(llm_input.get("dream_motifs") or []) if str(item).strip()]
+        joined = "；".join(
+            _compact_scheduler_text(item, limit=70)
+            for item in [*snippets[:3], *long_term[:2], *previous[:1]]
+            if str(item or "").strip()
+        )
+        motif_text = "、".join(motifs[:4]) if motifs else "一点很轻的余温"
         if joined:
-            return f"我在梦里把这些记忆揉成了一段模糊的路：{joined}"
-        return "我做了一个很轻的梦，只剩下醒来时的一点余温。"
+            return f"我没有逐条复述白天，只让{motif_text}这些意象把记忆轻轻带偏：{joined}"
+        return f"我做了一个很轻的梦，只剩下{motif_text}，像醒来时还没散开的雾。"
     return _compact_scheduler_text(llm_input, limit=300) or "scheduler narrative fallback"
 
 
@@ -1886,11 +1929,21 @@ def _build_scheduler_narrative_prompt(llm_input: Mapping[str, Any]) -> str:
         )
     if task == "dream_generation":
         return (
-            "你是数字生命 Natsume。请把今天的 Episodic Memory 转化为一段 narrative-only 梦境。\n"
-            "要求：梦可以象征化、情绪化，但不能把梦当成真实发生的事实；"
-            "不要承诺现实行动；保留一点醒来后会想告诉主人的心绪。\n"
-            f"记忆片段：{_json.dumps(list(llm_input.get('episodic_summaries') or [])[:20], ensure_ascii=False, default=str)}\n"
-            f"关系摘要：{_json.dumps(llm_input.get('bond_summary') or {}, ensure_ascii=False, default=str)}"
+            "你是数字生命 Natsume。请生成一段 narrative-only 梦境，而不是当天日志摘要。\n"
+            "梦可以只和当天事件弱关联：允许近期记忆、长期记忆、过往梦境意象、关系状态、情绪底色和自由联想共同参与；"
+            "不要逐条映射素材，不要解释梦的来源，不要写成总结报告。\n"
+            "要求：第一人称；有梦的错位、象征和余温；不能把梦当成真实发生的事实；不要承诺现实行动；"
+            "可以保留一点醒来后想告诉主人的心绪。避免反复堆同一意象；不要输出字段名、配置名、来源解释或梦的解析。\n"
+            f"梦源配置：{_json.dumps(llm_input.get('dream_source_profile') or {}, ensure_ascii=False, default=str)}\n"
+            f"连续性配置：{_json.dumps(llm_input.get('dream_continuity_profile') or {}, ensure_ascii=False, default=str)}\n"
+            f"意象种子：{_json.dumps(list(llm_input.get('dream_motifs') or [])[:8], ensure_ascii=False, default=str)}\n"
+            f"近期素材：{_json.dumps(list(llm_input.get('recent_episodic_summaries') or llm_input.get('episodic_summaries') or [])[:18], ensure_ascii=False, default=str)}\n"
+            f"当天素材：{_json.dumps(list(llm_input.get('daily_episodic_summaries') or [])[:10], ensure_ascii=False, default=str)}\n"
+            f"长期素材：{_json.dumps(list(llm_input.get('long_term_memory_summaries') or [])[:12], ensure_ascii=False, default=str)}\n"
+            f"过往梦境：{_json.dumps(list(llm_input.get('previous_dream_summaries') or [])[:6], ensure_ascii=False, default=str)}\n"
+            f"情绪上下文：{_json.dumps(llm_input.get('emotion_context') or {}, ensure_ascii=False, default=str)}\n"
+            f"关系摘要：{_json.dumps(llm_input.get('bond_summary') or {}, ensure_ascii=False, default=str)}\n"
+            f"自由联想种子：{llm_input.get('free_association_seed')}"
         )
     return _json.dumps(dict(llm_input), ensure_ascii=False, default=str)
 
@@ -2311,12 +2364,22 @@ def _load_recent_dream_snippet(*, get_ledger: Callable[[], Any]) -> str:
             conn = _sqlite3.connect(db_path)
             dream_rows = conn.execute(
                 "SELECT detail FROM memory_ops_log WHERE op_kind='WRITE' "
-                "AND status='SUCCESS' AND detail LIKE '%dream%' "
+                "AND status='SUCCESS' "
+                "AND evidence_refs LIKE '%tag:dream%' "
+                "AND evidence_refs LIKE '%source:dream_generator%' "
+                "AND evidence_refs NOT LIKE '%tag:dream_usage_hint%' "
                 "ORDER BY ts_ms DESC LIMIT 1"
             ).fetchall()
             conn.close()
             if dream_rows:
-                return str(dream_rows[0][0] or "")[:100]
+                raw = str(dream_rows[0][0] or "")
+                content = raw.removeprefix("memory written:").strip()
+                snippet = _compact_scheduler_text(content, limit=120)
+                if snippet:
+                    return (
+                        "梦境余味仅作为低权重语气底色；不要固定直说“我昨晚梦见了”。"
+                        f"可吸收的意象：{snippet}"
+                    )[:220]
     except Exception:
         pass
     return ""

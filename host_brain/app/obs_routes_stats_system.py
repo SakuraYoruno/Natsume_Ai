@@ -47,6 +47,85 @@ from .obs_routes_core import (
 # ---------------------------------------------------------------------------
 # Ref #30: GET /obs/vts/stats  — VTS 通道统计
 # ---------------------------------------------------------------------------
+@router.get("/avatar/state", response_model=Dict[str, Any])
+async def get_avatar_state():
+    """Read-only Edge avatar behavior state for monitor pages."""
+    now = _now_ms()
+    try:
+        from host_brain.channels.edge_rpc_client import post_vts  # noqa: PLC0415
+
+        result = await post_vts(action="status", request_id=f"obs_avatar_state_{now}")
+        return {
+            "status": "OK" if bool(result.success) else "DEGRADED",
+            "success": bool(result.success),
+            "reason_code": result.reason_code,
+            "detail": result.detail,
+            "latency_ms": int(result.latency_ms or 0),
+            "event": dict(result.event or {}),
+            "timestamp": now,
+        }
+    except Exception as exc:
+        logger.warning("get_avatar_state failed: %s", exc)
+        return {
+            "status": "DEGRADED",
+            "success": False,
+            "reason_code": "EDGE_AVATAR_STATE_UNAVAILABLE",
+            "detail": str(exc)[:300],
+            "latency_ms": None,
+            "event": {},
+            "timestamp": now,
+        }
+
+
+class AvatarBehaviorRequest(BaseModel):
+    behavior_id: str = Field(..., description="idle/listening/thinking/interrupted")
+    emotion_tag: Optional[str] = None
+    body_action_id: Optional[str] = None
+    emotion_intensity: Optional[float] = None
+    duration_s: Optional[float] = None
+    talk_state: Optional[str] = None
+    source: Optional[str] = "monitor"
+
+
+@router.post("/avatar/behavior", response_model=Dict[str, Any])
+async def post_avatar_behavior_control(body: AvatarBehaviorRequest):
+    """Apply a safe high-level avatar behavior from monitor controls."""
+    now = _now_ms()
+    try:
+        from host_brain.channels.edge_rpc_client import post_avatar_behavior  # noqa: PLC0415
+
+        result = await post_avatar_behavior(
+            behavior_id=body.behavior_id,
+            emotion_tag=body.emotion_tag,
+            body_action_id=body.body_action_id,
+            emotion_intensity=body.emotion_intensity,
+            duration_s=body.duration_s,
+            talk_state=body.talk_state,
+            source=body.source,
+            request_id=f"obs_avatar_behavior_{now}",
+        )
+        return {
+            "status": "OK" if bool(result.success) else "DEGRADED",
+            "success": bool(result.success),
+            "reason_code": result.reason_code,
+            "detail": result.detail,
+            "latency_ms": int(result.latency_ms or 0),
+            "event": dict(result.event or {}),
+            "timestamp": now,
+        }
+    except Exception as exc:
+        logger.warning("post_avatar_behavior_control failed: %s", exc)
+        return {
+            "status": "DEGRADED",
+            "success": False,
+            "reason_code": "EDGE_AVATAR_BEHAVIOR_UNAVAILABLE",
+            "detail": str(exc)[:300],
+            "latency_ms": None,
+            "event": {},
+            "timestamp": now,
+        }
+
+
 class VtsEmotionItem(BaseModel):
     emotion_tag: str
     count: int

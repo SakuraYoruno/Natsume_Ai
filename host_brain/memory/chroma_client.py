@@ -456,9 +456,15 @@ def _resolve_sentence_transformer_model_ref(model_id: str) -> tuple[str, bool]:
     raw = str(model_id or "").strip()
     if not raw:
         return raw, False
-    candidates = [Path(raw)]
-    if not Path(raw).is_absolute():
-        candidates.append(Path(__file__).resolve().parents[2] / raw)
+    raw_path = Path(raw)
+    repo_candidate: Path | None = None
+    if not raw_path.is_absolute():
+        repo_candidate = Path(__file__).resolve().parents[2] / raw
+        if raw_path.parts and raw_path.parts[0] == "models":
+            return str(repo_candidate.resolve()), True
+    candidates = [raw_path]
+    if repo_candidate is not None:
+        candidates.append(repo_candidate)
     for candidate in candidates:
         if candidate.exists():
             return str(candidate.resolve()), True
