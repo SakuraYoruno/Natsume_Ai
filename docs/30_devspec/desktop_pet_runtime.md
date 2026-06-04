@@ -1,3 +1,6 @@
+受众：CODEX
+标题：Desktop Pet Runtime
+
 # Desktop Pet Runtime
 
 The desktop pet is a dedicated local runtime, not a VTube Studio window and not a Monitor page.

@@ -1,11 +1,11 @@
 受众：MASTER
-标题：当前数据流报告（2026-05-30）
+标题：当前数据流报告（2026-06-04）
 
-版本：v3.0
-日期：2026-05-30
-定位：基于当前仓库代码，描述 `/v1/chat` / `/v1/host/input` / `/v1/edge/events` / Unified Message Gateway / Observability 五条主流量路径的真实走向。若历史方案文档与本文冲突，以本文与代码为准。
+版本：v3.1
+日期：2026-06-04
+定位：基于当前仓库代码，描述 `/v1/chat` / `/v1/host/input` / `/v1/edge/events` / Unified Message Gateway / Observability / Desktop Pet / MateEngine Bridge 等主流量路径的真实走向。若历史方案文档与本文冲突，以本文与代码为准。
 
-# 当前数据流报告（2026-05-30）
+# 当前数据流报告（2026-06-04）
 
 ## 0. 代码证据入口
 
@@ -16,6 +16,7 @@
 - `host_brain/obs_main.py`
 - `edge_client/__main__.py`
 - `edge_client/gateway/bootstrap.py`
+- `desktop_pet/main.cjs`
 
 Host Main FastAPI 装配：
 - `host_brain/app/asgi.py`
@@ -36,12 +37,23 @@ Chat 主链：
 Input 与 Edge：
 - `host_brain/app/input_routes.py`
 - `host_brain/app/edge_event_routes.py`
+- `host_brain/channels/edge_rpc_client.py`
 - `edge_client/gateway/server.py` / `router.py` / `normalizer.py`
 - `edge_client/gateway/adapters/`
+- `edge_client/app/fastapi_app.py`
+- `edge_client/runtime/voice_pipeline.py`
+- `edge_client/runtime/avatar_behavior.py`
+
+Desktop Pet / MateEngine：
+- `desktop_pet/main.cjs`
+- `host_brain/app/mateengine_routes.py`
+- `host_brain/channels/mateengine.py`
 
 观测：
 - `host_brain/app/obs_fastapi_app.py`
 - `host_brain/app/obs_routes_*.py`
+- `host_brain/app/obs_routes_stats_system.py`
+- `host_brain/app/monitor_ui/src/components/AvatarStateCard.jsx`
 
 ## 1. 当前运行面与流量入口
 
@@ -51,6 +63,8 @@ Input 与 Edge：
 | 平台消息入站 | Gateway adapter（19000）→ `POST /v1/host/input`（Host Main） | `input_routes → cortex_orchestrator` | SSE 或 ack |
 | Edge 事件回流 | `POST /v1/edge/events`（Host Main） | `edge_event_routes` | ack |
 | Edge 能力调用 | Host → Edge RPC（17800） | Host 主动出站 | 同步响应 |
+| Desktop Pet 控制 | Host → Desktop Pet 直连（18788）或 Host → Edge → Desktop Pet | `edge_rpc_client.post_desktop_pet` / `POST /v1/edge/desktop_pet` | 本地桌宠窗口动作 |
+| MateEngine 表现层 | Host `/v1/mateengine/*` 或 chat lifecycle cue | `mateengine_routes` / `host_brain.channels.mateengine` | UDP signal 32145 或 bridge HTTP 18770 |
 | 观测数据查询 | Monitor UI → Obs Backend（18082） | `obs_routes_*` | JSON |
 
 ## 2. `/v1/chat` 主链
@@ -151,6 +165,11 @@ cortex_orchestrator_sse_generator(...)
      - bond stage 更新
      - observability trace 落盘
      - PII egress scrub
+6. MateEngine lifecycle cue（不写事实源）：
+   - `_send_delayed_mateengine_thinking_cue` 在长思考时发送 thinking cue
+   - `_send_mateengine_state_cue` 按 intent / event 推断 listening、thinking、speaking、home 等状态
+   - COMMIT 后 `_send_mateengine_chat_bubble` 提取回复文本与 `reply_envelope.performance` / `audit.natsume_emotion_tag`，发送本地桌宠说话状态与气泡
+   - 该链路只驱动本地表现层，不改变 memory / policy / audit 的事实判定
 ```
 
 ### 3.2 直接路由 fastpath（不经 LLM）
@@ -318,9 +337,12 @@ ack response（含 input_id / decision / queue_state）
 主要能力：
 
 - `/v1/edge/health`
+- `/v1/edge/avatar_state`
 - `/v1/edge/speak`（TTS）
 - `/v1/edge/barge_in`（打断）
-- `/v1/edge/vts/*`（虚拟形象）
+- `/v1/edge/asr`（ASR 控制）
+- `/v1/edge/vts`（虚拟形象 / avatar behavior）
+- `/v1/edge/desktop_pet`（Electron 桌宠转发）
 - `/v1/edge/fallback/*`
 - `/v1/edge/screenshot`
 - `/v1/edge/automate`（桌面自动化）
@@ -341,6 +363,46 @@ ack response（含 input_id / decision / queue_state）
 - 写 ledger（audit）
 - 必要时 emit tribe_event（唤起 ANS / inner_world / language_system）
 - 返回 EdgeEventsResponse（ack 状态 + 处理摘要）
+
+### 7.4 Desktop Pet / MateEngine 外显流
+
+Desktop Pet 直连路径：
+
+```
+Host 表现层副作用
+  ↓
+host_brain/channels/edge_rpc_client.post_desktop_pet(...)
+  ↓ HOST_DESKTOP_PET_DIRECT_ENABLED=true（默认）
+desktop_pet/main.cjs
+  - GET /health
+  - POST /action
+  ↓
+Electron 透明窗口 / Live2D renderer
+```
+
+Desktop Pet Edge 转发路径：
+
+```
+Host
+  ↓ HOST_DESKTOP_PET_DIRECT_ENABLED=false
+Edge RPC POST /v1/edge/desktop_pet
+  ↓ EDGE_DESKTOP_PET_BASE_URL（默认 http://127.0.0.1:18788）
+desktop_pet/main.cjs /action
+```
+
+MateEngine 路径：
+
+```
+/v1/chat lifecycle cue 或 /v1/mateengine/* Host API
+  ↓
+host_brain/channels/mateengine.py
+  ├─ UDP signal: 127.0.0.1:32145
+  └─ HTTP bridge: http://127.0.0.1:18770
+  ↓
+MateEngine 本地桌面表现层
+```
+
+这两条链路都属于外显执行面；它们可以展示状态、口型、气泡、动作和姿态，但不成为 memory / policy / audit 的事实来源。
 
 ## 8. Unified Message Gateway 闭环
 
@@ -423,6 +485,22 @@ Obs Backend /api/ui/* + /obs/*
 - 器官级观测：`Overview / Sessions / Trace / CodexBioOpsObservability / Metrics / Insights / ChatDebug / Alerts / LogStream`
 - 外周执行：`Gateway / SkillsHub / Tools / Automation / AgentLoop`
 
+Avatar 状态观测：
+
+```
+DigitalLifeOverview
+  ↓ useAvatarStateQuery / AvatarStateCard
+obs.js fetchAvatarState()
+  ↓
+GET /obs/avatar/state
+  ↓ host_brain.channels.edge_rpc_client.post_vts(action="status")
+POST /v1/edge/vts
+  ↓
+edge_client.runtime.avatar_behavior.build_avatar_behavior_state
+```
+
+Monitor UI 的 avatar 行为按钮走 `POST /obs/avatar/behavior` → `edge_rpc_client.post_avatar_behavior()` → `POST /v1/edge/vts`，属于安全的高层行为控制，不直接写 VTS 热键或 MateEngine 事实状态。
+
 ## 10. 当前已废弃的旧口径（不要再按这些读）
 
 | 旧描述 | 当前事实 |
@@ -448,4 +526,5 @@ Obs Backend /api/ui/* + /obs/*
 5. immune gate（`chat_immune_gate`）必须在 chat handler 之前执行。
 6. life memory 是当前记忆 SSOT；vector / semantic 是衍生层。
 7. Host Main 与 Observability 是两个独立 ASGI app。
+8. Desktop Pet / MateEngine / VTS / VRM 只承载外显执行与状态观测，不提供记忆、人格策略或审计事实。
 8. 23 个 tribe family 没有灰度开关，全部直接生效。

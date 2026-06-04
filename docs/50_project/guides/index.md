@@ -1,4 +1,4 @@
-﻿受众：PROJECT / CODEX
+﻿受众：PROJECT
 标题：项目指南目录
 
 # 项目指南目录

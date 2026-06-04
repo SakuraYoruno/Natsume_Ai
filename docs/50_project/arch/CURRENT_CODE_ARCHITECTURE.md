@@ -1,11 +1,11 @@
 受众：MASTER
-标题：当前代码架构总览（2026-05-30）
+标题：当前代码架构总览（2026-06-04）
 
-版本：v3.0
-日期：2026-05-30
+版本：v3.1
+日期：2026-06-04
 定位：以当前仓库代码为唯一真源，描述运行面、入口、主链、目录与监控前端结构。若历史方案文档与本文冲突，以本文与代码为准。
 
-# 当前代码架构总览（2026-05-30）
+# 当前代码架构总览（2026-06-04）
 
 ## 0. 快速导航
 
@@ -13,6 +13,8 @@
 - 核心模块详解：`docs/50_project/arch/CORE_MODULES_DETAILED_REFERENCE.md`
 - 数据流补充：`docs/50_project/arch/dataflow_report.md`
 - 前端主体化方案：`docs/50_project/arch/DIGITAL_LIFE_BODY_FRONTEND_ARCHITECTURE_20260419.md`
+- Desktop Pet 契约：`docs/30_devspec/desktop_pet_runtime.md`
+- MateEngine Bridge 契约：`docs/30_devspec/mateengine_bridge.md`
 - 历史架构快照：`docs/_history/2026-04-22_arch_snapshot/`
 
 ## 0.1 Normal Chat 主链记忆（高优先级，2026-05-30 续期）
@@ -37,11 +39,14 @@
 - `host_brain/obs_main.py` — Observability 后端进程入口
 - `edge_client/__main__.py` — Edge RPC 进程入口
 - `edge_client/gateway/bootstrap.py` — Unified Message Gateway 进程入口
+- `desktop_pet/main.cjs` — Electron + Live2D 本地桌宠进程入口
 
 Host Main FastAPI 装配：
 - `host_brain/app/asgi.py` — ASGI 入口与 `app = create_app()`
 - `host_brain/app/app_factory.py` — `create_host_fastapi_app()`
 - `host_brain/app/router_registry.py` — 注册全部 Host Main 路由
+- `host_brain/app/mateengine_routes.py` — `/v1/mateengine/*` Host 路由
+- `host_brain/channels/mateengine.py` — MateEngine UDP signal / HTTP bridge 通道
 
 Chat 主链与编排：
 - `host_brain/app/chat_routes.py` — `/v1/chat` 鉴权 / immune gate 入口
@@ -70,6 +75,7 @@ Monitor UI：
 - `host_brain/app/monitor_ui/src/App.jsx`
 - `host_brain/app/monitor_ui/src/components/Layout.jsx`
 - `host_brain/app/monitor_ui/src/routes/routeLoaders.js`
+- `host_brain/app/monitor_ui/src/components/AvatarStateCard.jsx`
 
 ## 2. 当前运行面
 
@@ -77,16 +83,19 @@ Monitor UI：
 |---|---|---:|---|
 | Host Main | `host_brain/__main__.py`（→ `host_brain.app.asgi:app`） | 8000 | 主聊天入口、Tribe / 调度 / Tool / Bond / Canon / Prompt / Internal / Health / Input 等业务路由，兼容 `/obs/*` |
 | Observability Backend | `host_brain/obs_main.py`（→ `host_brain.app.obs_fastapi_app:app`） | 18082 | 独立观测后端，承接重型监控查询、Monitor UI Web 资源、`/api/ui/*` 与 `/obs/*` |
-| Edge RPC | `edge_client/__main__.py` | 17800 | TTS、VTS、barge-in、截图、自动化、视觉定位、主动推送、fallback、微信查询等能力入口 |
+| Edge RPC | `edge_client/__main__.py` | 17800 | TTS、ASR、VTS/VRM、avatar state、desktop pet 转发、barge-in、截图、自动化、视觉定位、主动推送、fallback、微信查询等能力入口 |
 | Unified Message Gateway | `edge_client/gateway/bootstrap.py` | 19000 | 外部平台消息接入与回推 |
 | Monitor UI Source | `host_brain/app/monitor_ui/` | - | React 监控前端源码 |
 | Monitor UI Static | `host_brain/app/static/monitor/` | - | 构建产物，由 Observability Backend 静态托管（也支持 Host Main fallback） |
+| Desktop Pet | `desktop_pet/main.cjs` | 18788 | Electron 透明本地桌宠窗口，直接渲染 Live2D 并暴露 `/health`、`/action` |
+| MateEngine Bridge | `host_brain/channels/mateengine.py` + `host_brain/app/mateengine_routes.py` | 32145 / 18770 | Host 到 MateEngine 的本地表现层桥，支持 signal、say、state、pose、mouth、gesture/action sequence |
 
 补充说明：
 
 - Host Main 仍保留 `/obs/*` 兼容入口（位于 `obs_routes_*.py` 的内嵌路由），主要用于本地一体化运行排障。
 - `host_brain/app/asgi.py + app_factory.py + router_registry.py` 三件套替代了旧的 `fastapi_app.py`（Host 端旧文件已删除；obs 端 `obs_fastapi_app.py` 仍保留，因为 obs 后端是独立进程）。
 - Observability Backend 启动时会预热 `runtime snapshot`、`trace feed`、`insights summary`、`digital-life overview`、`life-body` 五类缓存。
+- Desktop Pet 与 MateEngine 都是本地外显面，不是记忆、人格策略或审计事实来源；Host 仍是决策与事实主权域。
 
 ## 3. 代码目录主干
 
@@ -106,6 +115,7 @@ Natsume_Ai/
 │  │  │   agent_runtime_shared.py（编排实现主体）
 │  │  ├─ obs_*.py             # 内嵌 /obs/* 路由（Host 兼容 + Obs 后端共用）
 │  │  ├─ obs_fastapi_app.py   # Observability 后端 FastAPI app
+│  │  ├─ mateengine_routes.py # /v1/mateengine/* 本地桌宠表现层路由
 │  │  ├─ monitor_ui/          # React 前端源码（4 大导航 + 30+ 页面）
 │  │  └─ static/monitor/      # 构建产物
 │  ├─ tribe/                  # 23 个器官族 agent + 事件总线 + 注册表 + handoff
@@ -149,11 +159,15 @@ Natsume_Ai/
 │  ├─ governor/ scheduler/    # 治理与调度
 │  ├─ observability/          # 观测聚合与查询
 │  ├─ conversation/ core/ audit/ release/ tools/ skills/ mcp/ vision/
-│  ├─ integrations/ channels/ reasoning/ runtime/ lsp/ evolution_lab/
+│  ├─ channels/
+│  │  └─ mateengine.py       # MateEngine UDP signal / HTTP bridge 通道
+│  ├─ integrations/ reasoning/ runtime/ lsp/ evolution_lab/
 │  ├─ immune_memory/ organ_ops/ airlock/
 │  └─ agents/ handlers/       # 兼容性壳层与共享 helper
 ├─ edge_client/                # Edge RPC、语音执行、网关、平台适配器
 │  ├─ __main__.py / app/ runtime/ senses/ actuators/ rpc/
+│  ├─ runtime/avatar_behavior.py / voice_pipeline.py  # avatar 状态与语音/口型行为链
+│  ├─ actuators/fanout_avatar_driver.py / vts_driver.py / vrm_bridge_driver.py
 │  ├─ gateway/                # Unified Message Gateway
 │  │  ├─ bootstrap.py / server.py / router.py / normalizer.py /
 │  │  │   humanize_sender.py / models.py
@@ -162,6 +176,8 @@ Natsume_Ai/
 │  ├─ channels/               # 通道基类与 input reporter
 │  ├─ tribe/                  # 边缘侧 peripheral / somatic agent
 │  └─ security_probe/         # 边缘侧安全采集
+├─ desktop_pet/                # Electron + PixiJS + Live2D 透明本地桌宠
+├─ integrations/mateengine/    # MateEngine patcher / bridge plugin 集成资产
 ├─ configs/                   # 模型 / 部署 / 发布 / 密钥模板
 ├─ data/                      # 风格库 / 样本库（surface_scene_quality_pack 等）
 ├─ docs/                      # 白皮书 / PRD / DevSpec / Project / Trace
@@ -193,7 +209,7 @@ host_brain/app/router_registry.py
        tool_router, tool_kits_alias_router, prompt_config_router,
        bond_router, agent_router, input_router,
        internal_tribe_router, internal_codex_router,
-       internal_security_immune_router, health_router
+       internal_security_immune_router, mateengine_router, health_router
 ```
 
 ## 5. 主链 SSE 路径（normal chat）
@@ -238,6 +254,7 @@ graph TD
 | `/v1/edge/events` | `app_factory` 直接注册 | POST Edge 事件回流 |
 | `/v1/host/input` | `input_routes` | POST Gateway/ASR 归一化输入 |
 | `/v1/agent/*` | `agent_routes` | Agent loop 操作 |
+| `/v1/mateengine/*` | `mateengine_routes` | MateEngine capabilities / health / signal / say / action |
 | `/canon/*` | `canon_routes` | Canon 提案、文档、记录 |
 | `/bond/*` | `bond_routes` | Bond stage、interaction 状态 |
 | `/scheduler/*` | `scheduler.scheduler_routes` | 持久化调度器 |
@@ -251,6 +268,23 @@ graph TD
 | `/metrics` `/` `/docs` `/redoc` | `app_factory` 直接注册 | Prometheus / 根重定向 |
 
 注：`/obs/*` 在 Host Main 上以兼容方式存在（部分路由），完整 `/obs/*` 与 `/api/ui/*` 主战场在 Observability Backend。
+
+Edge RPC 主要能力入口（`edge_client/app/fastapi_app.py`）：
+
+- `GET /v1/edge/health`
+- `GET /v1/edge/avatar_state`
+- `POST /v1/edge/speak`
+- `POST /v1/edge/barge_in`
+- `POST /v1/edge/asr`
+- `POST /v1/edge/vts`
+- `POST /v1/edge/desktop_pet`
+- `POST /v1/edge/fallback/*`
+- `POST /v1/edge/screenshot`
+- `POST /v1/edge/automate`
+- `POST /v1/edge/visual_locate`
+- `POST /v1/edge/proactive_push`
+- `GET /v1/edge/proactive_messages`
+- `POST /v1/edge/wx/*`
 
 ## 7. Observability Backend 路由表
 
@@ -294,6 +328,8 @@ Monitor UI 拆成 **4 大导航**（`Layout.jsx`）+ **30+ 个 lazy 页面**（`
 
 **外周执行（5 项）：** 感官网关 / 行为技能 / 执行工具 / 节律调度 / 反射回路
 
+数字生命体总览页当前还挂载 `AvatarStateCard.jsx`，用于只读展示 Edge / MateEngine / VRM 的 avatar 驱动、语音口型、安全开关与行为状态；行为按钮通过 `postAvatarBehavior` 走 Edge avatar behavior 接口。
+
 新增专题页（vs. 2026-04-22 快照）：
 
 - `/codex-bio-ops` — `CodexBioOpsObservability.jsx`：BioOps & Codex Runtime 统一观测
@@ -301,15 +337,17 @@ Monitor UI 拆成 **4 大导航**（`Layout.jsx`）+ **30+ 个 lazy 页面**（`
 - `/pathologies` + `/pathology-detail` — 病灶中心 / 病灶详情
 - 多个旧高密度页面（Trace / Insights / Automation 等）拆分为多个 `components/<topic>/` 子组件
 
-## 10. 推荐阅读顺序（2026-05-30）
+## 10. 推荐阅读顺序（2026-06-04）
 
 1. `README.md`
 2. `docs/50_project/arch/CURRENT_CODE_ARCHITECTURE.md`（本文件）
 3. `docs/50_project/arch/CORE_MODULES_DETAILED_REFERENCE.md`
 4. `docs/50_project/arch/dataflow_report.md`
 5. `docs/50_project/arch/DIGITAL_LIFE_BODY_FRONTEND_ARCHITECTURE_20260419.md`
-6. `docs/15_theory/architecture_overview.md`
-7. `docs/60_trace/requirements_trace.md`
+6. `docs/30_devspec/desktop_pet_runtime.md`
+7. `docs/30_devspec/mateengine_bridge.md`
+8. `docs/15_theory/architecture_overview.md`
+9. `docs/60_trace/requirements_trace.md`
 
 ## 11. 不再代表当前事实的文档
 
@@ -330,3 +368,4 @@ Monitor UI 拆成 **4 大导航**（`Layout.jsx`）+ **30+ 个 lazy 页面**（`
 4. 文本质量回归（A/B 不通过）的旧链能力不允许进入 normal chat live path。
 5. Observability Backend 的预热失败不阻断 Host Main 启动；反之亦然。
 6. Host Main 与 Obs Backend 是两个独立 ASGI app，不能彼此 import 路由实现细节。
+7. Desktop Pet / MateEngine / VTS / VRM 都是外显执行面，不是记忆、人格策略或审计事实来源。

@@ -1,19 +1,20 @@
 受众：CODEX
 标题：DevTasks（任务清单：唯一可执行任务来源）
 
-版本：v1.9
-日期：2026-03-27
+版本：v2.0
+日期：2026-06-04
 
 本文件只包含"Codex 可执行任务条目"。任务条目必须来自 DevSpec 的工程契约拆解，并反向引用 PRD 的 FR 编号与测试编号 T-…；不得在本文件中讨论白皮书/PRD 的文字解释。
 
-### 当前任务与主链入口（2026-05-30）
+### 当前任务与主链入口（2026-06-04）
 
 本任务卡体系默认以以下事实链为准：
 
 - `PRD`（需求）→ `DevSpec`（工程契约）→ `TASK`（交付分解）→ `Tests`（验收）；
 - `/v1/chat` 与 `/v1/host/input` 统一进入主执行层；
-- 主链执行要点：`chat_handler`、`Governor`、`executive_runtime`、`skills/loader`、`sqlite_ledger`；
+- 主链执行要点：`asgi.py`、`app_factory.py`、`router_registry.py`、`chat_routes.py`、`chat_handler.py`、`thalamus_agent`、`Governor`、`agent_runtime_shared`、`executive_runtime_core`、`chat_agent`、`surface_main_chain_adapter`、`ReplyEnvelope`、`sqlite_ledger`；
 - `docs/50_project/arch/CURRENT_CODE_ARCHITECTURE.md` 与 `docs/50_project/arch/dataflow_report.md` 是任务优先参考的真实入口。
+- 2026-06-04 前的任务卡若出现旧输入打包脚本、双段渲染字段、固定关系图后端、旧 UI 执行器等口径，只能作为历史回放背景；新任务拆分必须按当前 DevSpec v1.9 与 ModelPlane v1.5。
 
 ### 最近完成的重大任务（2026-03-24 ~ 2026-03-27）
 
@@ -99,20 +100,20 @@ TASK-XXXX 标题
 - 涉及文件路径：flows/exports/；flows/active.pointer；docs/60_trace/flows/index.md；tests/contract/；tests/fixtures/。
 - 关联需求/测试：FR-FLOW-001；T-Flow-01~02。
 
-#### TASK-0003 LLM 输出契约：Strict JSON + 输出字段约束 + lint + fixtures
-- 任务描述：固化"LLM→Host"的 Strict JSON 输出契约，并提供 lint 与 good/bad fixtures，作为 QA 与回归的共同输入源。
+#### TASK-0003 LLM 输出契约：结构化输出 + 输出字段约束 + lint + fixtures
+- 任务描述：固化"LLM→Host"的结构化输出契约，并提供 lint 与 good/bad fixtures，作为 QA 与回归的共同输入源。
 - 输入：DevSpec 0.4、DevSpec 9（QA）、PRD FR-CORE-002~003。
-- 输出：核心输出契约（narrative、intent_draft、meta）；lint 规则（单 JSON、字段存在性、禁止前后缀）；fixtures（good/bad：多段 JSON/夹杂文本/缺字段/伪执行句）。
+- 输出：核心输出契约（candidate_text、intent_draft、meta、ReplyEnvelope 字段）；lint 规则（单个可解析对象、字段存在性、禁止前后缀）；fixtures（good/bad：多段 JSON/夹杂文本/缺字段/伪执行句）。
 - 验收标准：T-LLM-01（输出可解析性与 lint 规则）通过；bad fixtures 均被判定为不合规并产生可统计 violation。
 - 涉及文件路径：prompts/llm_contract/core_output_contract.json；host_brain/core/qa.py；tests/contract/；tests/fixtures/。
 - 关联需求/测试：FR-CORE-002~003；T-LLM-01；I13。
 
-#### TASK-0004 ContextPack 契约：分槽隔离 + world/style/episodic 口径 + tool_meta_pack 预留
-- 任务描述：固化 Host→LLM 的 context_pack 分槽结构，确保事实/权威内容/风格/线索严格隔离，并预留 tool_meta_pack（仅元数据）。
+#### TASK-0004 Prompt / Surface Context 契约：分槽隔离 + world/style/episodic 口径 + tool_meta_pack 预留
+- 任务描述：固化 Host→Model 的 prompt/surface context 分槽结构，确保事实/权威内容/风格/线索严格隔离，并预留 tool_meta_pack（仅元数据）。
 - 输入：DevSpec 7；PRD FR-CANON-001、FR-WCANON-001~003、FR-BOND-003。
-- 输出：context_pack 字段结构口径（hard_snapshot/bond_summary/authoritative/retrieval/style_pack/constraints/tool_meta_pack）；混槽判定规则；fixtures（混槽/越权引用/Canon-as-fact）。
+- 输出：prompt/surface context 字段结构口径（hard_snapshot/bond_summary/authoritative/retrieval/style_pack/constraints/tool_meta_pack）；混槽判定规则；fixtures（混槽/越权引用/Canon-as-fact）。
 - 验收标准：T-CP-01（分槽隔离）通过；混槽输入触发 QA/contract 拦截；Bond Summary 不含数值。
-- 涉及文件路径：host_brain/core/context_pack.py；tests/contract/；tests/fixtures/。
+- 涉及文件路径：host_brain/core/prompt_context.py；host_brain/app/chat_payload_builder.py；host_brain/app/surface_context_packet.py；tests/contract/；tests/fixtures/。
 - 关联需求/测试：FR-CANON-001；FR-WCANON-001~003；FR-BOND-003；T-CP-01。
 
 #### TASK-0005 Intent 契约：宽松解析 + 严格校验（含重放/顺序/过期）
@@ -171,12 +172,12 @@ TASK-XXXX 标题
 - 涉及文件路径：host_brain/audit/sqlite_ledger.py；host_brain/core/ids.py；host_brain/governor/decision.py；tests/e2e/；tests/fixtures/。
 - 关联需求/测试：FR-AUDIT-001；T-Audit-01；T-14、T-15。
 
-#### TASK-0012 QA 合规模块：Strict JSON + 伪执行宣告 + Canon-as-fact + 格式漂移（一次重写/降级）
+#### TASK-0012 QA 合规模块：结构化输出 + 伪执行宣告 + Canon-as-fact + 格式漂移（一次重写/降级）
 - 任务描述：定义 Host 侧 QA 的合规检查与"一次重写/降级"契约，确保对外输出始终可解析且不伪造执行事实。
 - 输入：DevSpec 9/7；PRD FR-CORE-002~003、FR-AUDIT-003、FR-CANON-001、FR-WCANON-001~003。
 - 输出：违规类型枚举与记录口径（FALSE_EXECUTION_CLAIM、CANON_AS_FACT_VIOLATION、LLM_FORMAT_DRIFT 等）；最小模板降级触发条件与输出结构口径；fixtures（good/bad）。
 - 验收标准：T-67~T-71、T-Canon-01~02、T-WCanon-01~03 通过；故障/超时/漂移下仍为单个合法 JSON；完成性表述无证据必拦截。
-- 涉及文件路径：host_brain/core/qa.py；host_brain/core/context_pack.py；host_brain/audit/sqlite_ledger.py；prompts/llm_contract/refusal_templates.md；tests/contract/；tests/fixtures/。
+- 涉及文件路径：host_brain/core/qa.py；host_brain/core/prompt_context.py；host_brain/app/surface_context_packet.py；host_brain/audit/sqlite_ledger.py；prompts/llm_contract/refusal_templates.md；tests/contract/；tests/fixtures/。
 - 关联需求/测试：FR-CORE-002~003；FR-AUDIT-003；FR-CANON-001；FR-WCANON-001~003；T-67~T-71；I13。
 
 #### TASK-0013 Style Canon / World Canon：版本化、变更留痕、注入口径与回归集
@@ -216,7 +217,7 @@ TASK-XXXX 标题
 - 输入：DevSpec 8.9（Tools：Tool Catalog/Selector/Broker）；PRD FR-TOOL-001~002。
 - 输出：ToolMeta 字段最小集（id/name/desc/schema_hash/side_effect_level/auth_level/domain_tags/version）；Top-K 输出结构；tool_visibility_hash 计算口径；fixtures（包含 READ/WRITE 混合工具）。
 - 验收标准：T-Tool-01（仅元数据/字段完整性）、T-Tool-02（Top-K 子集/WRITE 默认不可见）通过；全量工具不暴露给 LLM。
-- 涉及文件路径：host_brain/tools/catalog.py；host_brain/tools/selector.py；host_brain/core/context_pack.py；tests/contract/；tests/fixtures/。
+- 涉及文件路径：host_brain/tools/catalog.py；host_brain/tools/selector.py；host_brain/core/prompt_context.py；host_brain/app/surface_context_packet.py；tests/contract/；tests/fixtures/。
 - 关联需求/测试：FR-TOOL-001~002；T-Tool-01~02；I14。
 
 #### TASK-0018 ToolBroker：单入口执行 + WRITE token gating + evidence_ref 串联
@@ -251,12 +252,12 @@ TASK-XXXX 标题
 - 涉及文件路径：host_brain/channels/vts.py；host_brain/audit/sqlite_ledger.py；tests/contract/；tests/fixtures/。
 - 关联需求/测试：FR-AVATAR-001；T-Avatar-01。
 
-#### TASK-0022 ClawdBot UI Skill：before/after 证据 + 置信度门槛 + 红线熔断
-- 任务描述：固化 UI 自动化的证据链与红线熔断口径，确保低置信度不点击、红线场景不越权。
-- 输入：DevSpec 6.3（ClawdBot 作为 Skill）；PRD FR-VISION-001~002、FR-AUDIT-002。
-- 输出：clawd_action_log 字段最小集（before/after artifact/confidence/target_desc）；UI_ELEMENT_NOT_FOUND 与 VISUAL_REDLINE 的触发口径；fixtures（低置信度/红线页面）。
-- 验收标准：T-41~T-43 通过；confidence<0.80 时不发生动作且写日志；红线场景门禁不足必拒绝并可审计。
-- 涉及文件路径：host_brain/skills/impl/clawd_ui_action.py；host_brain/audit/sqlite_ledger.py；host_brain/lsp/vault.py；tests/e2e/；tests/fixtures/。
+#### TASK-0022 屏幕/图像观测兼容边界：证据快照 + 置信度门槛 + 红线熔断
+- 任务描述：固化屏幕/图像观测与旧兼容执行入口的证据链与红线熔断口径，确保低置信度不触发本地动作、红线场景不越权。
+- 输入：DevSpec 2/7/8.6；PRD FR-VISION-001~002、FR-AUDIT-002。
+- 输出：vision_event / local_action_event 字段最小集（artifact_refs/confidence/target_desc/evidence_refs）；UI_ELEMENT_NOT_FOUND 与 VISUAL_REDLINE 的触发口径；fixtures（低置信度/红线页面）。
+- 验收标准：T-41~T-43 通过；confidence<0.80 时不发生本地动作且写日志；红线场景门禁不足必拒绝并可审计。
+- 涉及文件路径：host_brain/app/vision/；host_brain/audit/sqlite_ledger.py；host_brain/lsp/vault.py；tests/e2e/；tests/fixtures/。
 - 关联需求/测试：FR-VISION-001~002；FR-AUDIT-002；T-41~T-43。
 
 ### TASK-0023 服务项清单落地：服务注册表 + health 口径 + 降级可观测
@@ -355,31 +356,31 @@ TASK-XXXX 标题
 - 涉及文件路径：host_brain/vision/；host_brain/lsp/；host_brain/audit/；tests/e2e/；tests/fixtures/。
 - 关联需求/测试：FR-VISION-004；（新增）T-Vision-02。
 
-### TASK-0035 Host Bond SSOT（Neo4j）：单写者写入边界 + bond_update_log + 约束/索引
-- 任务描述：补齐 Neo4j Bond SSOT 的"单写者"写入边界与最小图模型落点（含约束/索引），并把写入事实以 bond_update_log（或等价）方式串联到审计链，确保可回放与可静态扫描验证。
-- 输入：DevSpec 8.2（Bond SSOT）、DevSpec 8.8（单写者静态扫描断言）；PRD FR-BOND-001~003。
+### TASK-0035 Host Bond Store：单写者写入边界 + bond_update_log + 约束/索引
+- 任务描述：补齐 Bond Store 的"单写者"写入边界与最小关系模型落点（含约束/索引），并把写入事实以 bond_update_log（或等价）方式串联到审计链，确保可回放与可静态扫描验证。
+- 输入：DevSpec 8.2（Bond Store）、DevSpec 8.8（单写者静态扫描断言）；PRD FR-BOND-001~003。
 - 输出：
   - Bond 写入唯一入口与字段口径（event_id/evidence_refs 最小集）；
-  - Neo4j 约束/索引的声明性资产（migrations 或等价目录）；
+  - Bond 后端约束/索引的声明性资产（migrations 或等价目录）；
   - bond_update_log（或等价日志）与 SQLite Ledger 串联键口径；
   - fixtures：包含"非单写者尝试写入"的反例样本。
 - 验收标准：
-  - T-50~T-54 通过（Bond SSOT 写入边界、事件化、可回放口径）；
-  - T-SSOT-01 覆盖到"非 bond_dynamics 写入 Neo4j 必被阻断/被扫描命中"。
+  - T-50~T-54 通过（Bond 写入边界、事件化、可回放口径）；
+  - T-SSOT-01 覆盖到"非 Bond 单写者写入 Bond 后端必被阻断/被扫描命中"。
 - 涉及文件路径：host_brain/bond/neo4j_client.py；host_brain/bond/bond_dynamics.py；host_brain/bond/migrations/；host_brain/audit/sqlite_ledger.py；tests/contract/；tests/fixtures/。
 - 关联需求/测试：FR-BOND-001~003；T-50~T-54；T-SSOT-01。
 
-### TASK-0036 Host Bond Summary：派生摘要（不含敏感数值）+ context_pack 注入
+### TASK-0036 Host Bond Summary：派生摘要（不含敏感数值）+ prompt/surface context 注入
 - 任务描述：补齐 Bond Summary 的派生逻辑与注入口径，确保 summary 仅派生、不写回 SSOT；且不得包含敏感数值（例如 trust 原值），只允许 stage/trend/capability_hint 等桶化信息。
-- 输入：DevSpec 8.2（summarizer 不得写回）、DevSpec 7（context_pack 分槽隔离）；PRD FR-BOND-003。
+- 输入：DevSpec 8.2（summarizer 不得写回）、DevSpec 7（prompt/surface context 分槽隔离）；PRD FR-BOND-003。
 - 输出：
-  - bond_summary 最小字段集与注入分槽（进入 context_pack.bond_summary）；
+  - bond_summary 最小字段集与注入分槽（进入 prompt/surface context 的 bond_summary）；
   - 禁止敏感数值的断言口径与 fixtures（含反例）；
   - 回放引用口径：summary 可指回 event_id/evidence_refs（只做引用，不宣告执行事实）。
 - 验收标准：
   - T-74~T-75 通过（summary 不含敏感数值、仅派生、分槽隔离）；
   - T-CP-01 不回归（Bond Summary 不进入错误槽位）。
-- 涉及文件路径：host_brain/bond/summarizer.py；host_brain/core/context_pack.py；tests/contract/；tests/fixtures/。
+- 涉及文件路径：host_brain/bond/summarizer.py；host_brain/core/prompt_context.py；host_brain/app/surface_context_packet.py；tests/contract/；tests/fixtures/。
 - 关联需求/测试：FR-BOND-003；T-74~T-75；T-CP-01。
 
 ### TASK-0037 配置分层收口：Host/Edge config 从占位改为可复现配置入口
@@ -615,8 +616,8 @@ TASK-XXXX 标题
 - 涉及文件路径：host_brain/integrations/；host_brain/tools/；host_brain/audit/；tests/contract/；tests/e2e/；tests/fixtures/。
 - 关联需求/测试：FR-CORE-001；FR-CORE-004；FR-AUDIT-001；（新增）T-Orch-01；T-Audit-01。
 
-### TASK-0052 图数据库收口：Neo4j 外部部署配置与启动探针
-- 任务描述：补齐 Neo4j 外部化连接配置、连通探针与失败映射，确保 Bond SSOT 在生产依赖下可观测可降级。
+### TASK-0052 Bond 后端收口：Neo4j 外部部署配置与启动探针
+- 任务描述：补齐 Neo4j 作为 Bond 后端时的外部化连接配置、连通探针与失败映射，确保生产依赖下可观测可降级。
 - 输入：DevSpec 8.2/10/13；PRD FR-BOND-001~003、FR-OBS-001。
 - 输出：
   - Neo4j 配置结构（uri/database/auth_ref/pool/tls/enabled）；
@@ -1337,18 +1338,18 @@ TASK-XXXX 标题
   - `host_brain/skills/impl/dream_generator.py`（新增）：梦境 Skill handler + SkillMeta 声明；
   - Scheduler 任务注册：trigger=Sleep/idle，priority=MEDIUM；
   - 当日 Episodic 读取逻辑（ts_ms 当日范围过滤，TopK=20）；
-  - context_pack 打包（bond_summary + 当日 episodic 摘要）→ LLM 梦境叙事；
+  - prompt/surface context 打包（bond_summary + 当日 episodic 摘要）→ LLM 梦境叙事候选；
   - Episodic 写入：category=dream, evidence_level=NARRATIVE_ONLY, evidence_refs=[intent_id]；
   - manifest：memory_before_count/memory_after_count/dream_id/hash；
   - QA 校验：不得伪执行/Canon-as-fact；
-  - 召回口径扩展：episodic 中 evidence_level=NARRATIVE_ONLY 标注在 context_pack 透传；
+  - 召回口径扩展：episodic 中 evidence_level=NARRATIVE_ONLY 标注在 prompt/surface context 透传；
   - fixtures：Sleep 模式触发成功/Normal 非空闲拒绝/Episodic 不可用降级/梦境召回非事实约束。
 - 验收标准：
   - 梦境写入 Episodic 带 dream 标签 + NARRATIVE_ONLY；
   - Normal 非空闲时拒绝（SCHED_CONDITION_UNMET）；
   - 召回梦境时 QA 确认 evidence_level 标注存在；
   - T-Dream-01、T-Dream-02 全部通过。
-- 涉及文件路径：host_brain/skills/impl/dream_generator.py（新增）；host_brain/skills/registry.py；host_brain/memory/episodic.py；host_brain/core/context_pack.py；host_brain/core/qa.py；tests/contract/test_dream_contract.py（新增）；tests/fixtures/dream/。
+- 涉及文件路径：host_brain/skills/impl/dream_generator.py（新增）；host_brain/skills/registry.py；host_brain/memory/episodic.py；host_brain/core/prompt_context.py；host_brain/app/surface_context_packet.py；host_brain/core/qa.py；tests/contract/test_dream_contract.py（新增）；tests/fixtures/dream/。
 - 关联需求/测试：FR-DREAM-001~002；FR-MEM-001；FR-SCHED-001；T-Dream-01~02。
 
 ### TASK-0094 Diary Skill 日记生成（M4 P1）
@@ -1359,7 +1360,7 @@ TASK-XXXX 标题
   - Scheduler 任务注册：trigger=cron(23:00)，priority=HIGH；
   - 当日对话汇总逻辑：读取 intent_log + governor_log 当日记录 + Episodic 当日条目；
   - 无实质对话检测 → 跳过 + SCHED_NO_CONTENT（不伪造日记）；
-  - 有对话 → context_pack → LLM 日记叙事 → 双写：
+  - 有对话 → prompt/surface context → LLM 日记叙事候选 → 双写：
     - 本地文件：`{base_dir}/diary/{YYYY-MM-DD}.md`，产出 file manifest；
     - Episodic Memory：category=diary, evidence_refs=[intent_id, file_path]；
   - QA 校验：不得含伪执行句；
@@ -1381,7 +1382,7 @@ TASK-XXXX 标题
   - Scheduler 任务注册：trigger=interval(15min check)，priority=LOW；
   - 触发条件组合实现：idle_duration + bond.stage + sys_mode + active_hours（AND 逻辑）；
   - 频率限制集成：Rate Limit R4 Gate（3/hour）；
-  - context_pack 打包（bond_summary + 最近 episodic + 时间段信息）→ LLM 草案；
+  - prompt/surface context 打包（bond_summary + 最近 episodic + 时间段信息）→ LLM 草案；
   - QA 校验：内容仅限问候/关心/回忆引用/提醒口径；含执行 intent → 拦截；
   - 推送路径选择：Edge RPC speak > 微信 outbound > 静默降级（不重试）；
   - 审计：复用 skill_exec_log 记录触发条件快照、推送结果、reason_code；
@@ -1401,10 +1402,10 @@ TASK-XXXX 标题
   - `host_brain/core/metabolism.py` 扩展：新增 sub_mode=FOCUS 状态枚举与切换逻辑；
   - 进入条件：用户指令 / 定时策略 / 日历事件（需 evidence）；
   - 退出条件：用户指令 / 定时策略到期 / 超时自动退出（可配置默认时长）；
-  - Governor rules.py 扩展：Focus 子模式下 proactive/dream 等 LOW/MEDIUM 优先级任务 → SYSMODE_FORBIDDEN_FOCUS；
+  - Governor rules.py 扩展：Focus 子模式下 proactive/dream 等 LOW/MEDIUM 优先级任务 → SYSMODE_FORBIDDEN；
   - Scheduler 联动：Focus 进入时暂停非紧急任务，退出时恢复；
-  - hard_state_log 审计：进入/退出事件（原因、证据摘要、持续时长）；
-  - scheduler_event_log：被拦截任务写 reason_code=SYSMODE_FORBIDDEN_FOCUS；
+  - 模式转换历史或等价 system_event 审计：进入/退出事件（原因、证据摘要、持续时长）；
+  - scheduler_event_log：被拦截任务写 reason_code=SYSMODE_FORBIDDEN；
   - fixtures：进入 Focus/主动对话拦截/用户提问正常/退出恢复/超时自动退出。
 - 验收标准：
   - Focus 进入后主动对话被拦截；用户主动提问正常响应；
@@ -1502,7 +1503,7 @@ TASK-XXXX 标题
   - `tests/fixtures/mcp/`（新增）：tool_meta_read.json / tool_meta_write.json / sync_log.json。
 - 验收标准：
   - ToolMeta 注册后可按 provider_id/tool_id 查询；
-  - 更新 ToolMeta 时 `mcp_sync_log` 写入变更记录（含 before/after diff）；
+  - 更新 ToolMeta 时 `mcp_sync_log` 写入变更记录（含 old/new diff）；
   - `access_level`/`risk_level`/`reversible` 字段完整且类型正确；
   - 注册表测试全部通过。
 - 涉及文件路径：host_brain/mcp/__init__.py（新增）；host_brain/mcp/tool_registry.py（新增，内部 `_ensure_schema()` 自管 `mcp_tool_registry` / `mcp_sync_log`）；tests/contract/test_mcp_registry_contract.py（新增）；tests/fixtures/mcp/。
@@ -1711,20 +1712,20 @@ TASK-XXXX 标题
 - 涉及文件路径：host_brain/audit/migrations/0009_world_canon_doc.sql（新增）；host_brain/audit/migrations/0010_canon_proposal_log.sql（新增）；host_brain/memory/canon_sync.py；host_brain/core/errors.py；tests/contract/test_world_canon_sync_contract.py（新增）；tests/fixtures/canon/world/。
 - 关联需求/测试：FR-WCANON-002；T-WCanon-04。
 
-### TASK-0113 World Canon 注入分槽：context_pack 独立槽位 + QA 拦截 Canon-as-fact（M9 P0）
-- 任务描述：扩展 `context_pack.py` 实现 World Canon 独立槽位注入（Top-K，evidence_level=CANON_REFERENCE_ONLY），并扩展 `qa.py` 拦截"World Canon 内容 + 完成性表述"组合，记录 CANON_AS_FACT_VIOLATION。
-- 输入：DevSpec §19.1.3；host_brain/core/context_pack.py（现有）；host_brain/core/qa.py（现有）；TASK-0112 输出的 world_canon_doc 索引。
+### TASK-0113 World Canon 注入分槽：prompt/surface context 独立槽位 + QA 拦截 Canon-as-fact（M9 P0）
+- 任务描述：扩展 `prompt_context.py` / `surface_context_packet.py` 实现 World Canon 独立槽位注入（Top-K，evidence_level=CANON_REFERENCE_ONLY），并扩展 `qa.py` 拦截"World Canon 内容 + 完成性表述"组合，记录 CANON_AS_FACT_VIOLATION。
+- 输入：DevSpec §19.1.3；host_brain/core/prompt_context.py；host_brain/app/surface_context_packet.py；host_brain/core/qa.py（现有）；TASK-0112 输出的 world_canon_doc 索引。
 - 输出：
-  - `host_brain/core/context_pack.py` 扩展：`build_world_canon_slot()` 方法，从 world_canon_doc 查询 Top-K active 条目，注入 authoritative.world_canon 槽位；
+  - `host_brain/core/prompt_context.py` / `host_brain/app/surface_context_packet.py` 扩展：`build_world_canon_slot()` 方法，从 world_canon_doc 查询 Top-K active 条目，注入 authoritative.world_canon 槽位；
   - `host_brain/core/qa.py` 扩展：`check_canon_as_fact()` 方法，检测叙事中"Canon 内容 + 完成性表述"组合；
   - `tests/contract/test_world_canon_slot_contract.py`（新增）：T-WCanon-05（分槽隔离）+ T-WCanon-06（QA 拦截）验收测试；
-  - `tests/fixtures/canon/world/` 扩展：context_pack_with_world_canon.json / qa_canon_as_fact_bad.json。
+  - `tests/fixtures/canon/world/` 扩展：surface_context_with_world_canon.json / qa_canon_as_fact_bad.json。
 - 验收标准：
   - World Canon 条目只出现在 authoritative.world_canon 槽位，不混入其他槽位；
   - 叙事含"Canon 内容 + 完成性表述"时 QA 拦截并记录 CANON_AS_FACT_VIOLATION；
   - 重写后仍失败则降级为 Host 最小模板；
   - T-WCanon-05/T-WCanon-06 全部通过。
-- 涉及文件路径：host_brain/core/context_pack.py；host_brain/core/qa.py；tests/contract/test_world_canon_slot_contract.py（新增）；tests/fixtures/canon/world/。
+- 涉及文件路径：host_brain/core/prompt_context.py；host_brain/app/surface_context_packet.py；host_brain/core/qa.py；tests/contract/test_world_canon_slot_contract.py（新增）；tests/fixtures/canon/world/。
 - 关联需求/测试：FR-WCANON-001；FR-WCANON-003；FR-CANON-001；T-WCanon-05；T-WCanon-06。
 
 ### TASK-0114 World Canon Evolution 提案：canon_proposal_log 写入 + 审核流程（M9 P1）
@@ -1965,19 +1966,19 @@ TASK-XXXX 标题
 - 涉及文件路径：host_brain/audit/sqlite_ledger.py。
 - 关联需求/测试：T-Distill-04。
 
-### TASK-0128 context_pack.py：semantic_slot 可选分槽
+### TASK-0128 prompt/surface context：semantic_slot 可选分槽
 - 状态：DONE（2026-03-03）
-- 任务描述：在 `context_pack.py` 中新增可选 `semantic_slot` 分槽支持，包含验证函数和构建辅助函数。
-- 输入：DevSpec §20（M10-C）；host_brain/core/context_pack.py。
+- 任务描述：在 prompt/surface context 中新增可选 `semantic_slot` 分槽支持，包含验证函数和构建辅助函数。
+- 输入：DevSpec §20（M10-C）；host_brain/core/prompt_context.py；host_brain/app/surface_context_packet.py。
 - 输出：
-  - `host_brain/core/context_pack.py` 扩展：新增 `OPTIONAL_SLOTS` 字典（含 `semantic_slot: list`）；`validate_context_pack` 扩展：未知槽位检查同时排除 OPTIONAL_SLOTS，存在 semantic_slot 时调用 `_validate_semantic_slot()`；新增 `_validate_semantic_slot()` 函数（校验 semantic_id / summary 必填字段）；新增 `build_semantic_slot()` 辅助函数（从 ledger 构建 semantic_slot 列表）。
+  - prompt/surface context 扩展：新增可选槽位注册（含 `semantic_slot: list`）；验证逻辑允许已注册槽位，存在 semantic_slot 时调用 `_validate_semantic_slot()`；新增 `_validate_semantic_slot()` 函数（校验 semantic_id / summary 必填字段）；新增 `build_semantic_slot()` 辅助函数（从 ledger 构建 semantic_slot 列表）。
 - 验收标准：
   - 合法 semantic_slot 通过验证（T-Distill-05）；
   - 缺少 semantic_id/summary 时报 CONTEXT_PACK_TYPE_INVALID（T-Distill-05）；
-  - 不含 semantic_slot 的 context_pack 仍通过验证（T-Distill-05）；
+  - 不含 semantic_slot 的 prompt/surface context 仍通过验证（T-Distill-05）；
   - build_semantic_slot 返回格式正确的列表（T-Distill-06）；
   - 全量测试 1062 passed，0 failed（无回归）。
-- 涉及文件路径：host_brain/core/context_pack.py。
+- 涉及文件路径：host_brain/core/prompt_context.py；host_brain/app/surface_context_packet.py。
 - 关联需求/测试：T-Distill-05~06。
 
 ### TASK-0129 M10-C 测试 + 发布清单
@@ -1987,11 +1988,11 @@ TASK-XXXX 标题
 - 输出：
   - `tests/unit/test_memory_distillation.py`（新增）：T-Distill-01~06（8 个测试）；
   - `release/manifests/m10c_release.json`（新增）：M10-C 发布清单，test_passed_count=1062；
-  - `host_brain/release/release_manifest.py` 扩展：`generate_m10c_manifest()` 方法（锁定 distillation.py / context_pack.py / sqlite_ledger.py hash）；
+  - `host_brain/release/release_manifest.py` 扩展：`generate_m10c_manifest()` 方法（锁定 distillation.py / prompt_context.py / surface_context_packet.py / sqlite_ledger.py hash）；
   - `docs/60_trace/requirements_trace.md` 扩展：R-95~R-97（M10-C 语义记忆蒸馏相关需求追踪）。
 - 验收标准：
   - T-Distill-01~06 全部通过；
-  - m10c_release.json 包含：milestone=M10-C / distillation_hash / context_pack_hash / sqlite_ledger_hash / test_passed_count=1062；
+  - m10c_release.json 包含：milestone=M10-C / distillation_hash / prompt_context_hash / surface_context_packet_hash / sqlite_ledger_hash / test_passed_count=1062；
   - 全量测试 1062 passed，0 failed。
 - 涉及文件路径：tests/unit/test_memory_distillation.py（新增）；release/manifests/m10c_release.json（新增）；host_brain/release/release_manifest.py；docs/60_trace/requirements_trace.md。
 - 关联需求/测试：T-Distill-01~06。
@@ -4219,17 +4220,17 @@ TASK-XXXX 标题
 ### TASK-0250 M28-G：OPTIONAL_SLOTS 扩展（OPT-16）
 
 - 状态：DONE
-- 任务描述：`context_pack.py` 的 `OPTIONAL_SLOTS` 从单一槽位扩展为多槽位架构，支持 `emotion_pulse`/`bond_texture`/`memory_emotion_hint` 等情感槽位动态注入。
-- 输入：`host_brain/core/context_pack.py`。
+- 任务描述：prompt/surface context 的可选槽位从单一槽位扩展为多槽位架构，支持 `emotion_pulse`/`bond_texture`/`memory_emotion_hint` 等情感槽位动态注入。
+- 输入：`host_brain/core/prompt_context.py`；`host_brain/app/surface_context_packet.py`。
 - 输出：
-  - `host_brain/core/context_pack.py`：`OPTIONAL_SLOTS` 改为 dict 结构，支持多槽位注册；新增 `register_slot(name, builder_fn)` 方法；`build_context_pack()` 遍历所有已注册槽位；
+  - prompt/surface context：可选槽位注册表改为 dict 结构，支持多槽位注册；新增 `register_slot(name, builder_fn)` 方法；构建函数遍历所有已注册槽位；
   - `tests/unit/test_optional_slots_m28.py`（新增）：T-OPT-SLOTS-01~04。
 - 验收标准：
-  - T-OPT-SLOTS-01：`register_slot("emotion_pulse", fn)` 后，`build_context_pack()` 输出含 `emotion_pulse` 字段；
+  - T-OPT-SLOTS-01：`register_slot("emotion_pulse", fn)` 后，prompt/surface context 输出含 `emotion_pulse` 字段；
   - T-OPT-SLOTS-02：槽位 builder 抛出异常时，该槽位被跳过，不影响其他槽位；
   - T-OPT-SLOTS-03：未注册槽位不出现在输出中；
-  - T-OPT-SLOTS-04：旧代码调用 `build_context_pack()` 不报错（向后兼容）。
-- 涉及文件路径：`host_brain/core/context_pack.py`；`tests/unit/test_optional_slots_m28.py`。
+  - T-OPT-SLOTS-04：旧代码调用兼容构建入口不报错（向后兼容）。
+- 涉及文件路径：`host_brain/core/prompt_context.py`；`host_brain/app/surface_context_packet.py`；`tests/unit/test_optional_slots_m28.py`。
 - 关联需求/测试：FR-CONTEXT-SLOTS-001；T-OPT-SLOTS-01~04。
 
 ### TASK-0251 M28-H：BondScoreState.to_summary 中文化（OPT-21）
@@ -4467,16 +4468,16 @@ TASK-XXXX 标题
 ### TASK-0266 M29-C：emotion_pulse 动态槽位注入（OPT-4）
 
 - 状态：DONE
-- 任务描述：利用 TASK-0250 的 `OPTIONAL_SLOTS` 架构，注册 `emotion_pulse` 槽位，将当前情感状态的自然语言描述动态注入 `context_pack`，使 LLM 感知"此刻感受"。
-- 输入：`host_brain/core/context_pack.py`；TASK-0250（`OPTIONAL_SLOTS` 扩展）；TASK-0244（`EmotionVector`）。
+- 任务描述：利用 TASK-0250 的可选槽位架构，注册 `emotion_pulse` 槽位，将当前情感状态的自然语言描述动态注入 prompt/surface context，使 LLM 感知"此刻感受"。
+- 输入：`host_brain/core/prompt_context.py`；`host_brain/app/surface_context_packet.py`；TASK-0250（可选槽位扩展）；TASK-0244（`EmotionVector`）。
 - 输出：
-  - `host_brain/core/context_pack.py`：注册 `emotion_pulse` 槽位，builder 从 `EmotionVector` 生成自然语言描述（如 `"此刻感到有些开心，精力充沛"`）；
+  - prompt/surface context：注册 `emotion_pulse` 槽位，builder 从 `EmotionVector` 生成自然语言描述（如 `"此刻感到有些开心，精力充沛"`）；
   - `tests/unit/test_emotion_pulse_m29.py`（新增）：T-EMO-PULSE-01~03。
 - 验收标准：
-  - T-EMO-PULSE-01：`context_pack` 含 `emotion_pulse` 字段；
+  - T-EMO-PULSE-01：prompt/surface context 含 `emotion_pulse` 字段；
   - T-EMO-PULSE-02：`emotion_pulse` 为中文自然语言描述，不含原始数值；
   - T-EMO-PULSE-03：`EmotionVector` 不可用时，`emotion_pulse` 使用默认描述，不报错。
-- 涉及文件路径：`host_brain/core/context_pack.py`；`tests/unit/test_emotion_pulse_m29.py`。
+- 涉及文件路径：`host_brain/core/prompt_context.py`；`host_brain/app/surface_context_packet.py`；`tests/unit/test_emotion_pulse_m29.py`。
 - 关联需求/测试：FR-EMOTION-PULSE-001；T-EMO-PULSE-01~03。
 
 ### TASK-0267 M29-D：主动情感触发器（OPT-5）
@@ -4602,19 +4603,19 @@ TASK-XXXX 标题
 - 涉及文件路径：`host_brain/core/metabolism.py`；`host_brain/governor/decision.py`；`tests/unit/test_hard_state_timestamp_m29.py`。
 - 关联需求/测试：FR-HARD-STATE-TS-001；T-HARD-TS-01~02。
 
-### TASK-0275 M29-L：validate_context_pack bond_summary 语义校验（OPT-23）
+### TASK-0275 M29-L：prompt/surface context bond_summary 语义校验（OPT-23）
 
 - 状态：DONE
-- 任务描述：`validate_context_pack()` 对 `bond_summary` 的 `stage`/`trend` 字段增加语义校验，拒绝非法枚举值（如 `"S_BOND_UPDATE"`）。
-- 输入：`host_brain/core/context_pack.py`；TASK-0237（`derive_bond_summary` 修复）。
+- 任务描述：prompt/surface context 验证逻辑对 `bond_summary` 的 `stage`/`trend` 字段增加语义校验，拒绝非法枚举值（如 `"S_BOND_UPDATE"`）。
+- 输入：`host_brain/core/prompt_context.py`；`host_brain/app/surface_context_packet.py`；TASK-0237（`derive_bond_summary` 修复）。
 - 输出：
-  - `host_brain/core/context_pack.py`：`validate_context_pack()` 校验 `bond_summary.stage` 为合法 Bond 阶段枚举；`bond_summary.trend` 为合法中文趋势描述；非法值记录警告并使用默认值；
-  - `tests/unit/test_context_pack_bond_validate_m29.py`（新增）：T-CP-BOND-VAL-01~03。
+  - prompt/surface context：校验 `bond_summary.stage` 为合法 Bond 阶段枚举；`bond_summary.trend` 为合法中文趋势描述；非法值记录警告并使用默认值；
+  - `tests/unit/test_surface_context_bond_validate_m29.py`（新增）：T-CP-BOND-VAL-01~03。
 - 验收标准：
   - T-CP-BOND-VAL-01：`bond_summary.stage="S_BOND_UPDATE"` 时，校验失败，使用默认值 `"STRANGER"`；
   - T-CP-BOND-VAL-02：`bond_summary.stage="FRIEND"` 时，校验通过；
   - T-CP-BOND-VAL-03：校验失败时记录 WARNING 日志，不抛出异常。
-- 涉及文件路径：`host_brain/core/context_pack.py`；`tests/unit/test_context_pack_bond_validate_m29.py`。
+- 涉及文件路径：`host_brain/core/prompt_context.py`；`host_brain/app/surface_context_packet.py`；`tests/unit/test_surface_context_bond_validate_m29.py`。
 - 关联需求/测试：FR-CONTEXT-BOND-VALIDATE-001；T-CP-BOND-VAL-01~03。
 
 ### TASK-0276 M29-M：build_fallback_output 情感感知降级（OPT-24）
@@ -4717,12 +4718,12 @@ TASK-XXXX 标题
 - 状态：DONE
 - 任务描述：修复 5 个 contract 测试的 fixture 中 `bond_summary.stage` 使用了非法值（`'warm'`/`'stable'`/`'ESTABLISHED'`/`'up'`），更新为合法枚举值。
 - 涉及文件路径：
-  - `tests/fixtures/context_pack/good/minimal_valid.json`：`stage: "warm"→"STRANGER"`, `trend: "up"→"稳定"`
-  - `tests/fixtures/canon/world/context_pack_with_world_canon.json`：`stage: "ESTABLISHED"→"STRANGER"`
+  - `tests/fixtures/surface_context/good/minimal_valid.json`：`stage: "warm"→"STRANGER"`, `trend: "up"→"稳定"`
+  - `tests/fixtures/canon/world/surface_context_with_world_canon.json`：`stage: "ESTABLISHED"→"STRANGER"`
   - `tests/fixtures/llm_gateway/good/prompt_payload.json`：`stage: "warm"→"STRANGER"`, `trend: "up"→"稳定"`
   - `tests/fixtures/bond/good/bond_event_for_summary.json`：`stage: "warm"→"STRANGER"`, `trend: "up"→"稳定"`
   - `tests/contract/test_bond_summary_contract.py`：更新 `test_t_74` 期望值
-- 关联失败：5 个 contract 测试（bond_summary_contract/context_pack_contract/tool_catalog_contract/canon_store_contract/world_canon_slot_contract）
+- 关联失败：5 个 contract 测试（bond_summary_contract/surface_context_contract/tool_catalog_contract/canon_store_contract/world_canon_slot_contract）
 
 ### TASK-0284 M30-B：修复 Bond 集成测试中英文枚举不兼容
 
@@ -4873,10 +4874,10 @@ TASK-XXXX 标题
 - 关联需求：DevSpec 8.6（manifest 最小字段：`artifact_id`、`kind`、`hash`、`created_ts`、`evidence_refs`）。
 - 前置任务：TASK-0289。
 
-### TASK-0293 M31-E：补充 summarizer 写回 Neo4j 静态扫描断言（P1）
+### TASK-0293 M31-E：补充 summarizer 写回 Bond 后端静态扫描断言（P1）
 
 - 状态：DONE
-- 任务描述：DevSpec 8.2 要求 `summarizer.py` 只能派生 summary，不得写回 SSOT（Neo4j Bond）。当前缺少对应的静态扫描断言测试（T-SSOT-01），无法在 CI 中自动拦截违规写回。
+- 任务描述：DevSpec 8.2 要求 `summarizer.py` 只能派生 summary，不得写回 Bond 后端。当前缺少对应的静态扫描断言测试（T-SSOT-01），无法在 CI 中自动拦截违规写回。
 - 输入：`host_brain/bond/summarizer.py`；`host_brain/bond/bond_dynamics.py`。
 - 输出：
   - `tests/unit/test_summarizer_ssot_m31.py`（新增）：T-SSOT-SUMM-01~02；
@@ -5046,14 +5047,14 @@ TASK-XXXX 标题
 
 - 状态：DONE
 - 任务描述：为 M29-C（emotion_pulse 动态槽位注入）补充专项测试，验证 `build_emotion_pulse_slot()` 的槽位构建逻辑正确生效。
-- 输入：`host_brain/core/context_pack.py`（已实现 `build_emotion_pulse_slot`）。
+- 输入：`host_brain/core/prompt_context.py` / `host_brain/app/surface_context_packet.py`（已实现 `build_emotion_pulse_slot` 或等价槽位构建）。
 - 输出：
   - `tests/unit/test_emotion_pulse_m29.py`（新增）：T-EMO-PULSE-01~03。
 - 验收标准：
   - T-EMO-PULSE-01：`build_emotion_pulse_slot()` 返回含 `emotion_tag`/`mood_state`/`style_hint` 的字典；
   - T-EMO-PULSE-02：`style_hint` 为非空中文字符串；
   - T-EMO-PULSE-03：`emotion_vector=None` 时，使用默认值，不报错。
-- 涉及文件路径：`host_brain/core/context_pack.py`；`tests/unit/test_emotion_pulse_m29.py`。
+- 涉及文件路径：`host_brain/core/prompt_context.py`；`host_brain/app/surface_context_packet.py`；`tests/unit/test_emotion_pulse_m29.py`。
 - 关联需求/测试：FR-EMOTION-PULSE-001；T-EMO-PULSE-01~03。
 
 ### TASK-0305 M32-J：M32 代码审查报告
@@ -5075,9 +5076,9 @@ TASK-XXXX 标题
 ## M33 节点编排场景路由修复（Scene-Aware Node Routing）（TASK-0306~0313）
 
 > **目标：** 修复当前"无条件全跑9节点"的编排问题，按 ModelPlane.md §4 的场景路由规格实现条件路由：CHAT 场景只跑 2 个必要节点，`core_reasoner_secondary` 改为 primary 失败时的 fallback-only，`planner_constraints`/`tool_planner` 只在 EXEC_INTENT 场景触发，`workbench_*` 只在对应 WORK_* 场景触发，`safety_verifier`/`consistency_verifier` 按需触发。
-> **依据：** ModelPlane.md §4.1（场景枚举）、§4.2（两段式链路）；Trace 日志分析（HOST_CHAT_CHAIN_REAL_REPORT_2026-03-06.md）
+> **依据：** ModelPlane.md §4.1（场景枚举）、§4.2（候选链路与 Surface 收口）；Trace 日志分析（HOST_CHAT_CHAIN_REAL_REPORT_2026-03-06.md）
 > **前置：** M32 全部 DONE
-> **完成标准：** 全量测试 0 failed；CHAT 场景节点数 = 2（primary + renderer）；secondary 仅在 primary 失败时出现在 trace 中
+> **完成标准：** 全量测试 0 failed；CHAT 场景经模型候选、Surface Main Chain 与 ReplyEnvelope 收口；secondary 仅在 primary 失败时出现在 trace 中
 
 ### TASK-0306 M33-A：场景节点序列解析函数
 
@@ -5086,10 +5087,10 @@ TASK-XXXX 标题
 - 输入：`scene_type: str`（CHAT / EXEC_INTENT / WORK_TRANSLATE / WORK_CODE）。
 - 输出：`list[str]`（节点 ID 序列）。
 - 验收标准：
-  - CHAT → `["core_reasoner_primary", "renderer_ja_c_style"]`；
-  - EXEC_INTENT → `["core_reasoner_primary", "planner_constraints", "tool_planner", "safety_verifier", "renderer_ja_c_style"]`；
-  - WORK_TRANSLATE → `["core_reasoner_primary", "workbench_translate", "renderer_ja_c_style"]`；
-  - WORK_CODE → `["core_reasoner_primary", "workbench_code_assist", "renderer_ja_c_style"]`；
+  - CHAT → 模型候选 → Surface Main Chain → ReplyEnvelope；
+  - EXEC_INTENT → 模型候选 → planner_constraints → tool_planner → Governor/校验 → Surface Main Chain → ReplyEnvelope；
+  - WORK_TRANSLATE → 模型候选 → workbench_translate → Surface Main Chain → ReplyEnvelope；
+  - WORK_CODE → 模型候选 → workbench_code_assist → Surface Main Chain → ReplyEnvelope；
   - 未知场景 → 退化为 CHAT 序列。
 - 涉及文件路径：`host_brain/app/fastapi_app.py`。
 - 关联需求：ModelPlane.md §4.1；T-SCENE-ROUTE-01~04。
@@ -5101,7 +5102,7 @@ TASK-XXXX 标题
 - 输入：`scene_type: str`（默认 "CHAT"）。
 - 输出：`graph_config` 中 `node_bindings`/`edges`/`entry_node` 按场景动态生成。
 - 验收标准：
-  - CHAT 场景：`node_bindings` 只含 2 个节点（primary + renderer）；
+  - CHAT 场景：候选生成节点与 Surface/ReplyEnvelope 收口边界清晰；
   - `core_reasoner_secondary` 不在 `node_bindings` 中，只在 `fallback_edges` 中；
   - `graph_meta.scene_type` 字段记录当前场景；
   - 向后兼容：不传 `scene_type` 时默认 CHAT。
@@ -5128,7 +5129,7 @@ TASK-XXXX 标题
 - 输入：`_resolve_scene_node_sequence` 函数。
 - 输出：`tests/unit/test_scene_node_routing_m33.py`（新增）：T-SCENE-ROUTE-01~08。
 - 验收标准：
-  - T-SCENE-ROUTE-01：CHAT 场景节点序列 = ["core_reasoner_primary", "renderer_ja_c_style"]；
+  - T-SCENE-ROUTE-01：CHAT 场景经模型候选、Surface Main Chain 与 ReplyEnvelope 收口；
   - T-SCENE-ROUTE-02：EXEC_INTENT 场景含 planner_constraints 和 tool_planner；
   - T-SCENE-ROUTE-03：WORK_TRANSLATE 场景含 workbench_translate，不含 workbench_code_assist；
   - T-SCENE-ROUTE-04：WORK_CODE 场景含 workbench_code_assist，不含 workbench_translate；

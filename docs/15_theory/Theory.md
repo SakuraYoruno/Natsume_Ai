@@ -2,16 +2,10 @@
 标题：理论文档（Theory：架构原理与理论框架）
 
 # Natsume Ai 理论文档（Theory Paper）
-版本：v1.2.0
-适用：本地优先部署（Host_Brain + Edge + 可选 Cloud/ClawdBot）
+版本：v1.3.0
+维护日期：2026-06-04
+适用：本地优先部署（Host_Brain + Edge Client + Desktop Pet / MateEngine / VTS / VRM + Avatar Behavior/State + 可选云端/多代理扩展能力）
 定位：解释“为什么这样设计、理论上要保证什么、怎样判定系统没有跑偏”，用于指导实现与评审。
-
-当前代码校准说明（2026-05-30）：
-- 本文件属于理论/原则解释，不是当前运行时事实文档，也不作为实现任务清单。
-- 现行代码入口请优先阅读 `README.md`、`docs/50_project/arch/CURRENT_CODE_ARCHITECTURE.md`、`docs/50_project/arch/dataflow_report.md`、`docs/15_theory/APP_AUDIT_SKILLS_CONTRACT.md`、`docs/50_project/arch/AGENT_ORCHESTRATION_DETAIL.md`。
-- 当前聊天主链应从 `host_brain/app/asgi.py` (`app = create_app()`) + `host_brain/app/app_factory.py` 注入的 `chat_endpoint` 入口开始阅读，进入 `host_brain/app/chat_routes.py -> chat_handler.py -> cortex_orchestrator.py -> agent_runtime_shared.py -> executive_router / executive_runtime*`；外部输入回流以 `host_brain/app/input_routes.py` 为准。旧的 `host_brain/app/fastapi_app.py` 已删除，Host Main FastAPI 装配现为 `asgi.py + app_factory.py + router_registry.py` 三件套。
-- normal chat 最终文本作者现为 `host_brain/persona/surface_main_chain.py` (SurfaceMainChain)；旧 `prompt_builder` 链路仅作为辅助 facts/state 提供者。
-- 若本文件中的抽象术语与当前代码事实冲突，以代码事实文档和实际代码为准。
 
 ---
 
@@ -42,9 +36,10 @@
 
 ### 2.1 角色分层的理论意义
 
-1）语义内核（EgoCore/Planner）= 解释器/叙事器：负责把输入变成“可读回应 + 意图草案”。  
-2）Host（Instinct）= 仲裁者：负责判断“合法/不合法、可执行/不可执行”，并运行 Orchestrator/Governor 与审计链。  
-3）Skills/Actuators = 能力载体：只做执行，不做裁决。  
+1）模型/Agent 候选层（intent_draft / planning draft / Surface Main Chain）= 解释与表达候选生成者：负责把输入变成可治理草案与候选表达。
+2）Host = 仲裁者与最终收口者：负责判断“合法/不合法、可执行/不可执行”，并运行 Orchestrator/Governor、ReplyEnvelope 与审计链。
+3）Skills / Tools / MCP / Edge 能力 = 能力载体：只做受控执行或观测，不做裁决。
+4）Desktop Pet / MateEngine / VTS / VRM / Avatar Behavior/State = 外显或观测面：只呈现或回传 Host 已允许的展示信号，不反向定义事实。
 
 这一结构把系统风险从“语言可信”转为“规则可信”。  
 语言层可以被欺骗，但规则层不理解语言，只执行可验证的结构化对象与门禁。
@@ -52,8 +47,8 @@
 ### 2.2 单向链的安全性质（直觉证明）
 
 若系统满足：
-- 语义内核不具备执行入口（无工具执行权，仅产出草案）；  
-- Skills 只接受 Host 票据（approval_token/confirm_token/undo_token）；  
+- 模型/Agent 候选层不具备直接执行入口，仅产出草案、候选表达或可治理计划；
+- Skills / Tools 只接受 Host 门禁与当前代码契约要求的票据（approval_token/confirm_token/undo_token 等）；
 - Host 的 Governor 只接受结构化 Intent，且有严格校验与重放保护；  
 
 则任意语言攻击都只能改变“意图草案”，无法直接改变“执行事实”。  
@@ -66,6 +61,7 @@
 ### 3.1 Hard State（硬状态）
 定义：不能被语言直接修改，只能由 Host 的规则、观测与演化改变的状态。  
 它承担“现实约束”的角色：资源、模式、授权快照、执行证据引用等。  
+当前代码中的典型硬状态包括 `energy_level / mood_state / sys_mode / safety_flag / last_event_id / ts_ms`，治理侧可由此派生信任、限流、作用域与 airlock 等快照。
 
 理论意义：  
 - 对抗注入：语言无法把“假设”写进硬状态；  
@@ -91,14 +87,14 @@
 
 - 有 Intent（请求对象）  
 - 有 Governor 决策（APPROVE/REJECT + reason_code + rule_trace）  
-- 若执行：有 Skill 执行记录（skill_exec_log + 结果摘要 + 票据引用）  
-- 若涉及视觉/外脑：有对应的 clawd_action_log / airlock_log 引用  
+- 若执行：有 Skill / Tool / 通道执行记录（skill_exec_log / channel_io_log / avatar_action_log 或当前等价审计记录 + 结果摘要 + 必要票据引用）
+- 若涉及隔离、外发或可逆资产：有 airlock_log / manifest_ref / undo_token 或当前等价引用
 
 因此“是否执行/是否保存/是否确认”只能由审计链回答。
 
 ### 4.2 审计链的工程等价物
 审计链本质上是一条可连接的因果链：  
-user_input → intent_log → governor_log → token_ref → skill_exec_log → artifact_refs  
+user_input → intent_log → governor_log → token_ref（如需）→ skill_exec_log / channel_io_log → artifact_refs
 
 系统对外的一切“完成性表述”必须可追溯到该链。  
 这是避免“语言先行、事实补写”的唯一可靠手段。
@@ -111,7 +107,7 @@ user_input → intent_log → governor_log → token_ref → skill_exec_log → 
 
 ### 5.1 Truth Hierarchy（真相层级）
 用途：决定“什么可作为裁决依据、什么可当作现实陈述”。  
-典型排序：宪法/规则 > 审计链事实 > 可观测硬状态 > Bond SSOT > Episodic 召回线索。  
+典型排序：宪法/规则 > 审计链事实 > 可观测硬状态 > Host 单写 Bond 关系状态 > Episodic 召回线索。
 
 理论依据：  
 - 需要一个可比较的“证据强度”序；  
@@ -249,26 +245,26 @@ LLM 自发漂移不可控且不可审计。
 
 ---
 
-## 11. 六库选型的理论解释（SQLite / Neo4j / Episodic 向量库 / Style Canon / World Canon / Vault）
+## 11. 分域存储选型的理论解释（Ledger / Bond / Episodic / Style Canon / World Canon / Vault）
 
 ### 11.1 SQLite：硬账本与审计索引枢纽（Ledger SSOT）
 优势：本地优先、事务、结构化、易回放、依赖最小。  
 
 承担：  
 - 审计三联画：intent_log / governor_log / skill_exec_log  
-- hard_state_log / system_event_log 等“发生过什么”的索引枢纽  
+- system_event_log、scheduler_event_log、mode transition 历史或当前等价审计记录等“发生过什么”的索引枢纽
 - 跨库引用键的唯一登记处（event_id / intent_id / evidence_refs 汇聚）  
 
 原则：SQLite 是“是否发生过”的入口真相层；其它库即使存在，也必须能指回 Ledger 证据。
 
-### 11.2 Neo4j：Bond 关系域 SSOT
-优势：关系解释需要“因果路径”，图模型天然适配。  
+### 11.2 Bond：关系域单写存储
+优势：关系解释需要“因果路径”，图/事件模型天然适配。
 
 承担：事件—主题—影响—能力提示的结构化因果链。  
 
-限制：图只在“关系结构域”内为 SSOT；执行事实仍以审计链为准。  
+限制：Bond 只在“关系结构域”内为 SSOT；执行事实仍以审计链为准。
 
-要求：图更新必须携带 evidence_refs，并在 Ledger 留痕（便于回放与重建）。
+要求：Bond 更新必须由 Host 单写入口维护，携带 evidence_refs，并在 Ledger 或当前等价审计面留痕（便于回放与重建）。
 
 ### 11.3 Episodic 向量库：经历召回线索
 用途：相似性检索而非真相裁决。  
@@ -290,11 +286,11 @@ LLM 自发漂移不可控且不可审计。
 - 与 Style Canon 分离：Style 是表达，World 是内容
 
 ### 11.6 Artifact Vault：证据与可逆材料仓
-用途：保存截图/关键帧/脱敏报告/回滚材料等资产，支撑 LSP、可撤销与 UI 行为可回放。  
+用途：保存脱敏报告、必要截图资产、回滚材料等证据资产，支撑 LSP、可撤销与审计回放。
 
 要求：manifest 可追溯、GC 可审计且不破坏 undo 窗口。
 
-结论：六库不是“技术炫技”，而是把“事实/关系/线索/表达/权威内容/证据材料”六类东西拆开治理，避免任一库越权成为“万能真相”。
+结论：分域存储不是“技术炫技”，而是把“事实/关系/线索/表达/权威内容/证据材料”拆开治理，避免任一库越权成为“万能真相”。
 
 ---
 
@@ -302,7 +298,7 @@ LLM 自发漂移不可控且不可审计。
 
 建议建立三类指标与测试：  
 
-1）安全不变量测试（必须全绿）：无票据执行失败、重放拒绝、红线熔断、拒绝必须带 reason_code 等。  
+1）安全不变量测试（必须全绿）：无票据执行失败、重放拒绝、高风险动作拦截、拒绝必须带 reason_code 等。
 2）一致性测试：同一输入+同一规则版本下 reason_code 稳定；同一 intent_id 幂等。  
 3）表现质量指标（可回归）：  
 - 伪执行宣告率（必须趋近 0）  
@@ -319,6 +315,7 @@ LLM 自发漂移不可控且不可审计。
 4）用对话确认代替 confirm_token（口头授权漏洞）。  
 5）多处写 Bond 或 snapshot（双写破坏 SSOT）。  
 6）故障时“编造完成”（破坏审计链的事实定义）。  
+7）把外显面回执当成执行事实（展示成功不等于动作、记忆或治理事实已经发生）。
 
 ---
 
@@ -336,9 +333,11 @@ LLM 自发漂移不可控且不可审计。
 - 意识主权：终审权属于 Host 规则与审计链。  
 - Intent：语言→代码的唯一结构化边界对象。  
 - Governor：裁决器，输出 APPROVE/REJECT + reason_code + rule_trace。  
+- Surface Main Chain：Host 内部最终表达生成链，产出候选表达但不越过 Governor 或事实门禁。
+- ReplyEnvelope：用户可见输出的收口契约，只有 final_reply 可发送、持久化或进入对应缓存。
 - approval/confirm/undo token：执行许可、不可逆确认、可逆回滚票据。  
 - Truth Hierarchy：事实证据强度序。  
 - Style Hierarchy：风格约束序。  
-- Bond：关系向量（Neo4j SSOT）。  
+- Bond：Host 单写的关系向量/关系事件域。
 - Episodic：经历索引（向量召回，带证据）。  
 - Style Canon：表达范式库（tone-only，不产事实）。

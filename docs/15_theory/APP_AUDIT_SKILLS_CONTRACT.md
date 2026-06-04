@@ -1,8 +1,8 @@
 受众：MASTER
 标题：host_brain 核心应用层契约（当前代码实况：app / audit / skills / observability）
 
-版本：v3.0
-日期：2026-05-30
+版本：v3.1
+日期：2026-06-04
 归属：docs/15_theory/
 
 ---
@@ -113,14 +113,14 @@ POST /v1/chat
 | Executive 路由 | `host_brain/app/executive_router.py` | 路由层薄门面 |
 | Executive 执行 | `host_brain/app/executive_runtime.py` + `host_brain/app/executive_runtime_core.py` | skill-first 路由、计划执行、恢复策略、chat 回落 |
 
-### 1.4 当前外部输入与自动化入口
+### 1.4 当前外部输入与独立 Agent Loop 入口
 
 除了 `/v1/chat`，当前 app 层还有两条高频入口：
 
 | 入口 | 当前模块 | 说明 |
 |---|---|---|
 | `POST /v1/host/input` | `host_brain/app/input_routes.py` | 接收 ASR / Gateway 回流；做输入质检、免疫门控、ACK、异步回流到 Host 主链 |
-| `POST /v1/agent/run` | `host_brain/app/agent_routes.py` | 单独的 Agent Loop 自动化入口，走视觉/自动化执行链，不属于 `/v1/chat` 主链 |
+| `POST /v1/agent/run` | `host_brain/app/agent_routes.py` | 独立 Agent Loop 兼容入口，可选择 Mock / Edge RPC / legacy external client，不属于 `/v1/chat` 主链，也不代表当前聊天主链具备屏幕自动执行主权 |
 
 补充：`POST /v1/host/input` 当前只接受 `ASR` / `GATEWAY` 两类归一化输入；其他 Edge 运行时事件走 `POST /v1/edge/events`。
 
@@ -130,7 +130,7 @@ POST /v1/chat
 
 - `SceneRouter.route_sse()` 是当前场景分流中心
 - `host_brain/app/graph/main_chain.py` 是聊天主编排入口
-- `top_agent.py` 是 SSE 主渲染器
+- 旧 SSE 输出中心口径
 - `dispatch_agent.py` 是主调度层
 - `chat_handler_complex.py` 承担复杂场景主执行
 

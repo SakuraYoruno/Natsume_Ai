@@ -1,8 +1,8 @@
 受众：MASTER
 标题：核心模块详细参考（当前代码实况）
 
-版本：v3.0
-日期：2026-05-30
+版本：v3.1
+日期：2026-06-04
 定位：基于当前仓库真实代码结构，整理处在主链上的模块、入口关系与职责边界。供故障定位、新成员入门和文档对齐使用。若历史方案文档与本文冲突，以本文与代码为准。
 
 # 核心模块详细参考（当前代码实况）
@@ -58,8 +58,9 @@ graph TD
 |---|---|---|---|
 | Host 主进程入口 | `host_brain/__main__.py` | 加载 `.env` / `runtime/host/host.runtime.env`、startup-check、启动 uvicorn 加载 `host_brain.app.asgi:app` | 所有主脑流量从这里启动 |
 | Observability 入口 | `host_brain/obs_main.py` | 启动独立观测后端，加载 `host_brain.app.obs_fastapi_app:app` | 独立监控后端进程 |
-| Edge 入口 | `edge_client/__main__.py` | 装配并启动 Edge RPC | 语音、桌面自动化、VTS 的总入口 |
+| Edge 入口 | `edge_client/__main__.py` | 装配并启动 Edge RPC | 语音、桌面自动化、ASR、VTS/VRM、Desktop Pet 转发的总入口 |
 | Gateway 入口 | `edge_client/gateway/bootstrap.py` | 启动 Unified Message Gateway | 平台消息闭环与外部回复总入口 |
+| Desktop Pet 入口 | `desktop_pet/main.cjs` | 启动 Electron + Live2D 透明桌宠窗口，并暴露本地 `/health`、`/action` | 本地桌宠运行面入口 |
 
 ## 3. Host Main FastAPI 装配三件套
 
@@ -92,7 +93,7 @@ graph TD
 
 当前职责：
 
-- `register_host_routers(app)`：按固定顺序 `include_router`：`canon_router`、`scheduler_router`、`host_scheduler_router(prefix="/host-scheduler")`、`tool_router`、`tool_kits_alias_router`、`prompt_config_router`、`bond_router`、`agent_router`、`input_router`、`internal_tribe_router`、`internal_codex_router`、`internal_security_immune_router`、`health_router`
+- `register_host_routers(app)`：按固定顺序 `include_router`：`canon_router`、`scheduler_router`、`host_scheduler_router(prefix="/host-scheduler")`、`tool_router`、`tool_kits_alias_router`、`prompt_config_router`、`bond_router`、`agent_router`、`input_router`、`internal_tribe_router`、`internal_codex_router`、`internal_security_immune_router`、`mateengine_router`、`health_router`
 - `wire_route_providers(...)`：装配各路由的回调 provider（在 `app_factory` 之前调用）
 
 为什么核心：**Host Main 全部业务路由的唯一注册点**，避免分散注册导致的顺序歧义。
@@ -133,6 +134,9 @@ graph TD
   - 调用 `_evaluate_governor_with_timing` 在 `_GOVERNOR_EXECUTOR`（线程池）做 governor 鉴权
   - 发出 `PRESENCE(GOV_APPROVED)`
   - 委托 `cortex_orchestrator_sse_generator(...)` 接管后续 SSE
+- MateEngine lifecycle cue：
+  - `_send_delayed_mateengine_thinking_cue`、`_send_mateengine_state_cue`、`_send_mateengine_chat_bubble` 负责把 thinking / speaking / home 等对话生命周期投到本地桌宠表现层
+  - 该链路只做外显表现，不改变 memory / policy / audit 事实
 
 为什么核心：**所有 chat 请求的统一 SSE 生成器**；handler 之上是路由层，之下是编排层。
 
@@ -463,7 +467,7 @@ interoception / motor_cortex / cerebellum / glymphatic / vestibular
 
 升级状态：23 个 family 全部完成 P0~P4 批次的"A 级升级"，灰度开关全数删除。详见 `docs/35_quality/ORGAN_TRIBE_UPGRADE_PLAN.md`。
 
-## 8. 输入与 Gateway
+## 8. 输入、Gateway 与外显入口
 
 ### 8.1 `host_brain/app/input_routes.py`（2107 行）
 
@@ -500,6 +504,34 @@ interoception / motor_cortex / cerebellum / glymphatic / vestibular
 ### 8.5 `edge_client/gateway/humanize_sender.py`
 
 当前职责：humanize 出站节奏：把长文本 / 多句拆分成"人类节奏"的多条消息。
+
+### 8.6 `host_brain/channels/edge_rpc_client.py`
+
+当前职责：Host → Edge / Gateway / Desktop Pet 的出站 RPC helper：
+
+- `post_speak` / `post_barge_in` / `post_asr_control`：语音链路控制
+- `post_vts` / `post_avatar_behavior`：VTS/VRM avatar 状态与高层行为
+- `post_desktop_pet`：默认直连 `desktop_pet`，也可经 Edge `/v1/edge/desktop_pet` 转发
+- `post_screenshot` / `post_automate` / `post_visual_locate`：桌面感知与自动化能力
+- `post_gateway_reply`：Gateway 出站回复
+
+### 8.7 `desktop_pet/main.cjs`
+
+当前职责：Electron + Live2D 本地桌宠运行时：
+
+- 创建透明、置顶、无边框窗口
+- 暴露 `GET /health` 与 `POST /action`
+- 处理 show / hide / preset / touch / emote / speak / click_through / status 等高层动作
+- 只作为本地外显运行面，不承担记忆、人格策略或审计事实
+
+### 8.8 `host_brain/app/mateengine_routes.py` + `host_brain/channels/mateengine.py`
+
+当前职责：MateEngine 本地桌宠桥：
+
+- `mateengine_routes.py`：提供 `/v1/mateengine/capabilities`、`/health`、`/signal`、`/say`、`/action`
+- `mateengine.py`：把 Host 高层动作转成 MateEngine UDP signal 或 HTTP bridge 命令
+- 支持 state / pose / mouth / freeze / gesture / action_sequence 等本地表现动作
+- 从 chat lifecycle cue 接收 thinking / speaking / home 等状态，但不成为事实源
 
 ## 9. Bio-Ops（host_brain/bio_ops/）
 
@@ -566,6 +598,7 @@ interoception / motor_cortex / cerebellum / glymphatic / vestibular
 - `obs_routes_security_immune.py`：security immune 观测
 - `obs_routes_sysmode.py`：sys_mode 切换
 - `obs_routes_stats_*.py`：统计聚合（agent / capability / governor / input / system / capability_agent / capability_skill / input_dispatch / input_humanoid）
+- `obs_routes_stats_system.py`：补充 `/obs/avatar/state` 与 `/obs/avatar/behavior`，供 Monitor UI 读取 avatar 状态与发送安全高层行为
 
 预热缓存：在 lifespan 启动时同步预热 `runtime_snapshot`、`trace_feed`、`insights_summary`、`digital_life_overview`、`life_body`，启动后周期刷新。
 
@@ -638,3 +671,4 @@ interoception / motor_cortex / cerebellum / glymphatic / vestibular
 5. Observability Backend 与 Host Main 是两个独立 ASGI app。
 6. 23 个 tribe family 没有灰度开关，全部直接生效。
 7. life memory（`LifeMemoryStore`）是当前记忆 SSOT；vector / semantic 是衍生层。
+8. Desktop Pet / MateEngine / VTS / VRM 只属于外显执行与状态观测面，不提供记忆、人格策略或审计事实。

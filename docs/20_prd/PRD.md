@@ -2,9 +2,9 @@
 标题：产品需求文档（PRD）
 
 # Natsume Ai 产品需求文档（PRD）
-版本：v1.5（可验收基线）
-基线白皮书：v1.5（意识主权宪法与人格设定）
-适用架构：Host_Brain（主脑终审与治理） + Edge Client（本地感知与执行） + 可选云端能力/多代理扩展能力（受 Host 主权约束）
+版本：v1.6（可验收基线）
+基线白皮书：v1.6（意识主权宪法与人格设定）
+适用架构：Host_Brain（主脑终审与治理） + Edge Client（本地感知与执行） + Desktop Pet / MateEngine / VTS / VRM / Avatar Behavior/State（外显与观测面） + 可选云端能力/多代理扩展能力（受 Host 主权约束）
 
 ---
 
@@ -43,12 +43,12 @@
 - 用于审阅覆盖关系：白皮书/PRD → DevSpec → DevTasks → Tests → Invariants。
 - Trace 只做“指向”，不承载实现内容。
 
-### 0.2 当前运行链路入口（2026-05-30）
+### 0.2 当前运行链路入口（2026-06-04）
 
 当前代码事实链路以文档中的“可回放审计链”为准：
 
-- 入口：`POST /v1/chat`（`host_brain/app/fastapi_app.py`）与 `POST /v1/host/input`。
-- 常用主链：`chat_handler.handle_chat()` → `_unified_chat_sse_generator()` → `thalamus_agent.classify_and_compile_intent_draft()` → `Governor.evaluate_intent()` → `cortex_orchestrator` / `executive_runtime`。
+- 入口：`POST /v1/chat`（`host_brain/app/asgi.py` → `app_factory.py` → `router_registry.py` → `chat_routes.py`）与 `POST /v1/host/input`。
+- 常用主链：`chat_handler.handle_chat()` → `_unified_chat_sse_generator()` → `thalamus_agent.classify_and_compile_intent_draft()` → `Governor.evaluate_intent()` → `cortex_orchestrator` → `agent_runtime_shared` → `executive_router` / `executive_runtime` / `executive_runtime_core` → `chat_agent` → `Surface Main Chain` → `ReplyEnvelope`。
 - 事实闭环：`intent_log`、`governor_log`、`skill_exec_log`、`audit` 三联画缺一不可，不可将“已执行/已确认”写成事实。
 - 当前运行事实入口：
   - `docs/50_project/arch/CURRENT_CODE_ARCHITECTURE.md`
@@ -74,14 +74,14 @@ DoD（Definition of Done：完成门槛）
 ## 1. 产品定义
 
 ### 1.1 一句话定义
-Natsume Ai 是一个“意识主权”的本地智能体：语义内核（LLM）负责叙事与意图草案，Host 负责裁决与执行，所有动作必须票据化并可审计回放。
+Natsume Ai 是一个“意识主权”的本地智能体：模型/Agent 候选层负责解释、表达候选与意图草案，Host 负责裁决、最终表达收口与执行治理，所有执行事实必须可审计回放。
 
 ### 1.2 用户与使用场景
-- 主用户：Master（本地开发者），在 Host 机器上调试与运行；Edge 负责“身体”侧能力（语音/视觉/微信接收/头像驱动）。
+- 主用户：本地开发者，在 Host 机器上调试与运行；Edge 负责“身体”侧能力（语音、平台消息、头像/外显驱动与本地桥接）。
 - 场景 S1：日常对话与陪伴（不触发执行）
 - 场景 S2：开发协作（读取日志、生成修复建议、产出工单/文档；默认不直接改代码）
 - 场景 S3：低风险可逆干预（桌面留言、生成本地文件产物）
-- 场景 S4：需要 UI 自动化的任务（ClawdBot）：必须视觉审计 + 红线熔断
+- 场景 S4：需要本地屏幕/图像观测或桌面/浏览器执行的任务：必须走 Host 治理、授权、审计与能力可用性检查；当前聊天主链不默认提供屏幕自动执行主权
 - 场景 S5：依赖不可用/故障时：系统仍需稳定降级与可观测
 
 ### 1.3 成功标准（可度量）
@@ -96,19 +96,19 @@ Natsume Ai 是一个“意识主权”的本地智能体：语义内核（LLM）
 ## 2. 范围与非目标
 
 ### 2.1 v1.0 范围（MVP→可运行闭环）
-- 语言→意图：语义内核生成叙事 + Intent 草案；Host 负责解析与严格校验。
+- 语言→意图：模型/Agent 候选层生成表达候选 + Intent 草案；Host 负责解析与严格校验。
 - 裁决→执行：Governor gate + tokenized execution；Skills 统一入口；可观测审计链。
-- 成长闭环：Bond SSOT（Neo4j）+ clearance/trust snapshot（SQLite 派生缓存）+ Episodic（向量）+ Style Canon（Host 主权）+ World Canon（Host 主权最小权威内容集合，用于一致性引用；非执行事实）。
+- 成长闭环：Host 单写 Bond 关系事件/阶段状态 + governance snapshot（信任/能量/模式/作用域等派生视图）+ Episodic（向量）+ Style Canon（Host 主权）+ World Canon（Host 主权最小权威内容集合，用于一致性引用；非执行事实）。
 - 降级与故障：阶段化状态机 + 统一故障码 + 面向用户的克制提示。
 - LSP：Artifact Vault + Undo Token + manifest + GC（可审计）。
-- 视觉红线：视觉熔断与 UI 定位置信度门槛。
+- 屏幕/图像观测边界：观测结果必须有证据引用、置信度与模式门控；不得由外显或观测面反写事实。
 - Flow 配置资产：LangGraph Flow（图/配置）版本化与环境指针（dev/staging/prod）可追溯。
 
 ### 2.2 明确非目标（v1.0 不做）
 - 不做跨用户多租户与云端账号体系。
 - 不做高风险自动化（系统配置大规模修改/支付/账号绑定）；仅允许拒绝或引导。
 - 不做把“剧情/叙事”当执行事实的世界观大库；仅维护最小 World Canon（系统术语/设定/关键不变量），用于一致性引用与冲突裁决，但永远不具备执行事实效力；Style Canon 仍仅用于风格范式（tone_only）。
-- 不把任何 LLM 组件作为主权存储；语义内核只能消费 Host context_pack 并产出 intent_draft（草案）。
+- 不把任何 LLM 组件作为主权存储；模型/Agent 候选层只能消费 Host 上下文并产出 intent_draft、计划草案或候选表达。
 
 ### 2.3 系统服务清单（必须实现，缺一不可）
 说明：以下为本项目必须实现的“服务项清单”。允许存在“运行时暂不可用/未配置/降级”的情况，但必须满足：
@@ -122,15 +122,13 @@ Host 端（主权与中枢）
 - Token Service（approval/confirm/undo 票据签发与校验）
 - Audit / Ledger Writer（审计写入器）
 - SQLite Ledger（最小事实账本）
-- Neo4j Bond SSOT（关系域 SSOT）
+- Bond Engine / 关系事件存储（Host 单写关系域）
 - Episodic Vector Store（向量库）
 - 文本嵌入模型服务（Embedding）
 - 重排模型服务（Reranker）
 - 召回与融合服务（Recall/Fusion：TopK evidence pack）
-- 屏幕采集与屏幕监控服务（Screen Capture/Monitor）
-- OCR/识图服务（按需推理）
-- 摄像头采集与识别服务（Camera Capture + Vision Inference）
-- ClawdBot（视觉 UI 代理：计划草案 + 红线熔断）
+- 屏幕/图像观测服务（按需截图、OCR/识图、摄像头事件；如启用必须有证据引用与模式门控）
+- 桌面/浏览器执行能力（如启用必须走 Skill/Tool 单入口、Governor 与审计；不得由观测结果直接触发）
 - Cloud LLM Gateway + AIRLOCK（外部模型出入口与脱敏隔离）
 - Observability（日志/指标/追踪与面板）
 
@@ -150,16 +148,16 @@ Edge 端（身体侧能力）
 ### 3.1 普通对话（不执行）
 1) 用户输入
 2) Host 读取 Hard Snapshot + Bond Summary +（可选）Episodic/Canon 召回
-3) Host 打包 context_pack → 语义内核（LLM）
-4) 语义内核输出 narrative + intent_draft（可为空）
-5) Host QA（伪执行/语言/Canon-as-fact/格式漂移）
+3) Host 汇总 prompt_context / surface_context_packet → 模型/Agent 候选层
+4) 候选层输出候选表达 + intent_draft（可为空）
+5) Host QA（伪执行/语言/Canon-as-fact/格式漂移）并经 Surface Main Chain / ReplyEnvelope 收口
 6) Host 写入审计与历史（失败也需可观测记录）
-7) 输出给用户：稳定结构 + narrative +（可选）intent 草案/裁决结果摘要
+7) 输出给用户：稳定结构 + final_reply +（可选）intent 草案/裁决结果摘要
 
 用户体验目标：回复稳定、像她、但不会“假装已经做了”。
 
 ### 3.2 执行请求（需要 Skill）
-1) 语义内核提出 intent_draft
+1) 模型/Agent 候选层提出 intent_draft
 2) Host：lenient parse → strict validate → governor adjudicate
 3) 若 APPROVE：下发 approval_token，执行 Skill，记录 skill_exec_log
 4) 若 REJECT：返回 reason_code + user_facing_hint，并记录 system_event
@@ -205,7 +203,7 @@ Edge 端（身体侧能力）
 ### 4.1 核心链路与输出稳定（CORE）
 
 FR-CORE-001 单向链强制
-- 描述：执行路径必须严格为 语义内核(intent草案) → Host(governor) → Skill(exec) → Audit。
+- 描述：执行路径必须严格为 候选层(intent草案) → Host(governor) → Skill/Tool(exec) → Audit。
 - 关键约束：任何技能执行必须经由 Skills Loader；不得旁路。
 - 验收：旁路尝试被拒绝并记录；无法绕过 token 校验触发实际执行。
 
@@ -303,7 +301,7 @@ FR-SKILL-003 幂等与重试边界
 #### 4.6.2 工具平面（TOOL）
 
 FR-TOOL-001 工具元数据 Top-K 暴露（渐进式加载）
-- 描述：每轮仅向语义内核暴露 tool_meta_pack（候选工具的最小元数据 Top-K 子集）；不得暴露全量工具列表与实现细节；WRITE 默认不进入可见集。
+- 描述：每轮仅向模型/Agent 候选层暴露 tool_meta_pack（候选工具的最小元数据 Top-K 子集）；不得暴露全量工具列表与实现细节；WRITE 默认不进入可见集。
 - 验收：同一轮上下文中工具元数据数量有硬上限；在未满足条件时 WRITE 工具不出现在 tool_meta_pack；违规触发可统计 reason_code（如 TOOL_VISIBILITY_POLICY_VIOLATION）。
 
 FR-TOOL-002 tool_visibility_hash 追责
@@ -320,9 +318,9 @@ FR-AUDIT-001 三联画日志（Triptych）
 - 描述：intent_log / governor_log / skill_exec_log 必须完整，并可串联。
 - 验收：任意 request_id 可追溯三段日志并字段对齐（intent_id、token_ref）。
 
-FR-AUDIT-002 视觉与气闸日志对齐
-- 描述：clawd_action_log / airlock_log 必须引用 intent_id/request_id，并可回放证据（截图 hash/报告 digest）。
-- 验收：UI 自动化每步都有 before/after 截图引用；外发每次都有净化报告与 digest。
+FR-AUDIT-002 外发、通道与外显日志对齐
+- 描述：airlock_log / channel_io_log / avatar_action_log / vault manifest 或当前等价审计记录必须引用 request_id，并在适用时引用 intent_id；可回放证据摘要（报告 digest、manifest_ref、evidence_ref）。
+- 验收：外发每次都有净化报告与 digest；通道/外显动作每次都有 Host 输出来源与审计引用；不得把外显回执当作 Skill 执行事实。
 
 FR-AUDIT-003 QA 违规记录
 - 描述：伪执行宣告、Canon-as-fact、语言政策违规等必须进入 qa_violation_log。
@@ -338,40 +336,40 @@ FR-AIRLOCK-002 入站隔离与分类
 - 描述：外部返回内容必须分类（FACT/DRAFT_CODE/DRAFT_INSTRUCTION/UNKNOWN），不得直通执行。
 - 验收：外部内容触发执行前必须被重构为 Intent 并通过 Governor；否则阻断（EXTERNAL_DATA_GATE）。
 
-### 4.9 视觉熔断与 ClawdBot（VISION）
+### 4.9 屏幕/图像观测与本地执行边界（VISION）
 
-FR-VISION-001 视觉红线熔断
-- 描述：支付/系统设置/删除/账号等红线场景，门禁不足必须拒绝（VISUAL_REDLINE）。
-- 验收：红线场景除非满足更高门禁 + 二次确认，否则无法继续点击/输入。
+FR-VISION-001 屏幕/图像观测证据门禁
+- 描述：截图、OCR、摄像头识别等观测能力必须受 sys_mode、授权与证据引用约束；不得输出“我看到了屏幕内容”等无证据宣告。
+- 验收：无授权、无证据或模式不允许时必须拒绝/降级并给出稳定 reason_code；成功观测必须返回 evidence_ref、source_ref 或当前等价证据指针。
 
-FR-VISION-002 定位置信度门槛
-- 描述：UI 元素定位 confidence < 0.80 必须停止并返回 UI_ELEMENT_NOT_FOUND。
-- 验收：模拟低置信度定位，不发生任何点击；clawd_action_log 记录完整。
+FR-VISION-002 低置信度观测降级
+- 描述：OCR/识图/摄像头事件低置信度时必须显式标注或降级；低置信度观测不得升级为执行依据。
+- 验收：模拟低置信度观测时不产生桌面/浏览器动作；输出包含 confidence 与降级 reason_code。
 
-FR-VISION-003 屏幕监控与 OCR 触发门控（Gaming 不触发）
-- 描述：屏幕监控与 OCR/识图仅在允许的 sys_mode 下触发；Gaming 模式必须禁止触发（含定时轮询与被动触发），不得对用户输出“我看到了屏幕内容”的无证据宣告。
-- 验收：Gaming 模式下任意屏幕监控/OCR 请求均被拒绝或降级（带稳定 reason_code）；非 Gaming 模式触发时输出结构化结果（text_blocks/bbox/conf/source_ref）并可回放。
+FR-VISION-003 屏幕观测触发门控（Gaming 不主动触发）
+- 描述：主动屏幕轮询、OCR/识图仅在允许的 sys_mode 与授权条件下触发；Gaming 模式不得主动触发屏幕观测，不得对用户输出无证据屏幕结论。
+- 验收：Gaming 模式下主动屏幕观测请求被拒绝或降级（带稳定 reason_code）；允许模式触发时输出结构化结果（text_blocks/bbox/conf/source_ref）并可回放。
 
 FR-VISION-004 摄像头识别事件化与证据引用
 - 描述：摄像头识别必须以事件化结果输出（objects/events + confidence + evidence_ref），不得以自然语言替代证据引用；低置信度必须显式标注。
 - 验收：任一摄像头识别事件可追溯到 evidence_ref；证据缺失时必须降级/拒绝并给出 reason_code。
 
-FR-VISION-005 ClawdBot 必须依赖结构化视觉输入
-- 描述：ClawdBot 的 UI 行为规划必须消费结构化视觉输入（OCR/检测结果与截图证据指针），不得直接凭空给出点击步骤；置信度不足必须熔断。
-- 验收：缺结构化视觉输入时不得进入可执行 UI 行为路径；熔断可审计。
+FR-VISION-005 观测不得直接触发本地执行
+- 描述：屏幕/图像观测结果只能作为 evidence 或候选材料；任何桌面、浏览器、文件、平台回复等本地执行必须重新进入 Skill/Tool 单入口、Governor、必要 token 与审计链。
+- 验收：仅有截图/OCR/识图结果时不得产生真实点击、输入、文件写入或平台外发；执行能力缺失或未授权时稳定拒绝/降级并可审计。
 
 ### 4.10 关系系统（BOND）
 
-FR-BOND-001 Neo4j 作为 SSOT
-- 描述：Bond 六维在 Neo4j，任何组件不得双写；SQLite 仅存 snapshot 派生缓存。
-- 验收：除 bond_dynamics 外写 Neo4j 必失败；snapshot 写入可追溯 bond_update_log。
+FR-BOND-001 Host 单写 Bond 关系域
+- 描述：Bond 关系事件、阶段状态与关系摘要必须由 Host 单写入口维护；其他组件不得双写关系事实，任何派生 snapshot 只能作为缓存/视图。
+- 验收：除 Bond Engine / bond_dynamics 当前等价写入口外的关系事实写入必须失败或被忽略；任意关系变更可追溯到 bond_update_log 或当前等价审计记录。
 
 FR-BOND-002 Event 驱动更新
 - 描述：Bond 变化只能由事件驱动，事件必须含 etype、intensity、evidence_refs。
 - 验收：缺 evidence_refs 的 bond 更新被拒绝并记录 BOND_UPDATE_INVALID。
 
-FR-BOND-003 给语义内核的 Bond Summary 降采样
-- 描述：语义内核不得获得数值；只拿 stage/trend/capability_hint。
+FR-BOND-003 给模型/Agent 候选层的 Bond Summary 降采样
+- 描述：模型/Agent 候选层不得获得数值；只拿 stage/trend/capability_hint。
 - 验收：输出出现“信任值=xx”等数值宣称，QA 必拦截。
 
 ### 4.11 记忆系统（MEMORY）
@@ -414,22 +412,22 @@ FR-WCANON-002 World Canon 版本化与更新可审计
 - 验收：任意 World Canon 变更都能在 canon_change_log/canon_proposal_log（或语义等价日志）中定位到来源与证据引用。
 
 FR-WCANON-003 注入分槽隔离（authoritative.world_canon）
-- 描述：World Canon 必须以独立槽位注入 context_pack（与 style_pack/episodic/facts 分离），并携带 evidence_level=CANON_REFERENCE_ONLY。
+- 描述：World Canon 必须以独立槽位注入 Host 上下文包（与 style_pack/episodic/facts 分离），并携带 evidence_level=CANON_REFERENCE_ONLY。
 - 验收：混槽注入视为缺陷；回归集中出现“Canon 当事实/当执行事实”时必须被拦截并记录违规事件。
 
 ### 4.13 sys_mode 与路由（MODE）
 
 FR-MODE-001 六模式行为差异
 - 描述：normal/focus/gaming/maintenance/locked/sleep 共同决定能力矩阵、输出节奏与资源预算。
-- 验收：gaming 禁止 clawd_ui_action；maintenance/locked 阻断执行类路径；sleep 禁止 CONTROL 类执行；拒绝码 SYSMODE_FORBIDDEN（或子类）稳定可统计。
+- 验收：gaming 禁止主动屏幕观测与高打扰执行；maintenance/locked 阻断执行类路径；sleep 禁止 CONTROL 类执行；拒绝码 SYSMODE_BLOCKED / SYSMODE_FORBIDDEN（或当前等价码）稳定可统计。
 
 FR-MODE-002 来源可审计
 - 描述：sys_mode 切换必须有来源证据（观测/用户授权/定时策略）。
-- 验收：每次切换写 hard_state_log（原因、证据摘要），可回放。
+- 验收：每次切换写 mode transition history、system_event_log 或当前等价审计记录（原因、证据摘要），可回放。
 
-FR-MODE-003 Gaming 模式视觉链路门控
-- 描述：Gaming 模式下禁止屏幕监控/OCR；同时禁止任何依赖屏幕帧的 ClawdBot UI 自动化链路；仅允许低风险对话与语音外显。
-- 验收：进入 Gaming 后，屏幕监控/OCR/Clawd UI 动作均被稳定拒绝或降级；退出 Gaming 后按规则恢复且审计可回放。
+FR-MODE-003 Gaming 模式屏幕观测门控
+- 描述：Gaming 模式下禁止主动屏幕监控/OCR；仅允许低风险对话、语音与外显提示，不得因屏幕观测产生本地执行。
+- 验收：进入 Gaming 后，主动屏幕观测与由观测引发的本地执行均被稳定拒绝或降级；退出 Gaming 后按规则恢复且审计可回放。
 
 ### 4.14 LSP（本地沙盒剖面）（LSP）
 
@@ -438,7 +436,7 @@ FR-LSP-001 Artifact Vault 可寻址可 GC
 - 验收：GC 后仍可证明未删有效回滚材料；vault_gc_log 完整。
 
 FR-LSP-002 manifest 作为回滚清单
-- 描述：可逆变更产出 manifest（before/after/path/hash/refs/rollback_steps/digest）。
+- 描述：可逆变更产出 manifest（pre_hash/post_hash/path/refs/rollback_steps/digest）。
 - 验收：manifest digest 不匹配时，Undo 必拒绝。
 
 ### 4.15 交互与故障处理（UX）
@@ -474,7 +472,7 @@ FR-OBS-003 监控面板 v3 前端架构（多页面 SPA + Dify 简约风格）
   - 在 1280×800 和 1920×1080 分辨率下布局正常。
 
 FR-OBS-004 全服务健康总览页（Overview）
-- 描述：展示双端（Host + Edge）所有服务的实时健康状态，包括：ASR、TTS、VTS/Live2D、LLM Gateway、Neo4j、SQLite Ledger、Chroma/向量库、Scheduler、Bond Engine、Memory Distiller、MCP Provider 等；每个服务以卡片形式展示状态（UP/DOWN/DEGRADED）、响应延迟、版本号、最后检查时间。
+- 描述：展示双端（Host + Edge）所有服务的实时健康状态，包括：ASR、TTS、VTS/Live2D、LLM Gateway、Bond Engine / 关系存储、SQLite Ledger、Chroma/向量库、Scheduler、Memory Distiller、MCP Provider 等；每个服务以卡片形式展示状态（UP/DOWN/DEGRADED）、响应延迟、版本号、最后检查时间。
 - 关键约束：
   - 30 秒自动轮询，支持手动刷新；
   - 服务状态变化时卡片颜色/图标即时更新；
@@ -628,26 +626,26 @@ FR-SCHED-002 调度任务健康状态与降级
 ### 4.21 桌面留言（DESKTOP）
 
 FR-DESKTOP-001 桌面留言文件创建与撤销
-- 描述：Natsume 可在 Master 桌面（或指定安全目录）创建/更新文本留言文件；操作默认可逆（reversible=true），必须产出 manifest + undo_token。
+- 描述：Natsume 可在主用户桌面（或指定安全目录）创建/更新文本留言文件；操作默认可逆（reversible=true），必须产出 manifest + undo_token。
 - 关键约束：
   - 写入路径限制在安全基目录（base_dir allowlist），禁止路径穿越（`..`/符号链接）；
   - risk_level=2，clearance_level=L1，scope=filesystem；
   - 不需要 confirm_token（低风险），但必须走 Governor 审批；
   - 删除默认 move-to-quarantine（不真删），真删需 confirm_token。
 - 验收：
-  - 正向：留言文件创建成功，manifest 包含 before(空)/after/path/hash；
+- 正向：留言文件创建成功，manifest 包含 pre_hash/post_hash/path；
   - 撤销：undo_token 调用后文件恢复原状态；
   - 拒绝：路径越界 → SCOPE_VIOLATION；Gaming 模式 → SYSMODE_FORBIDDEN；
   - 降级：文件系统不可写 → SKILL_EXEC_FAILED + reason_code 可解释。
 
 FR-DESKTOP-002 桌面留言内容约束
-- 描述：留言内容由语义内核生成草案，Host QA 检查后写入；内容不得包含执行事实宣告（仅允许提醒/情感/备忘口径）。
+- 描述：留言内容由模型/Agent 候选层生成草案，Host QA 检查后写入；内容不得包含执行事实宣告（仅允许提醒/情感/备忘口径）。
 - 验收：内容含伪执行句时 QA 拦截并重写；写入审计可追溯原始草案与最终内容。
 
 ### 4.22 梦境（DREAM）
 
 FR-DREAM-001 梦境生成（定时触发 + Episodic 回顾）
-- 描述：Natsume 在 Sleep 模式或空闲时段，由调度器触发"梦境生成"：读取当日 Episodic Memory → 语义内核生成创造性梦境叙事 → 写入 Episodic（带 dream 标签）。
+- 描述：Natsume 在 Sleep 模式或空闲时段，由调度器触发"梦境生成"：读取当日 Episodic Memory → 模型/Agent 候选层生成创造性梦境叙事 → 写入 Episodic（带 dream 标签）。
 - 关键约束：
   - 触发条件：sys_mode=SLEEP 或 idle_duration ≥ 阈值（可配置）；
   - risk_level=1，clearance_level=L0，scope=memory，reversible=true；
@@ -671,7 +669,7 @@ FR-DIARY-001 日记生成（每日定时汇总）
   - risk_level=1，clearance_level=L0，scope=memory+filesystem，reversible=true；
   - 日记写入路径限制在安全基目录（与桌面留言共享 base_dir allowlist）；
   - 日记内容标记为 category=diary；
-  - 日记产出 manifest（文件 before/after）+ memory evidence_refs。
+  - 日记产出 manifest（文件 pre_hash/post_hash）+ memory evidence_refs。
 - 验收：
   - 正向：日记文件创建成功，Episodic 条目写入成功，审计链完整；
   - 门禁：无当日对话时输出"无内容"而非伪造日记；
@@ -696,7 +694,7 @@ FR-PROACTIVE-001 主动对话触发策略
   - 降级：Edge 不可达时仅记录 intent 不推送（DEPENDENCY_UNAVAILABLE）。
 
 FR-PROACTIVE-002 主动对话内容约束与推送通道
-- 描述：主动对话内容由语义内核生成草案，Host QA 检查后通过 Edge RPC（语音/文本）或微信通道推送；内容不得包含执行请求或事实宣告。
+- 描述：主动对话内容由模型/Agent 候选层生成草案，Host QA 检查后通过 Edge RPC（语音/文本）或微信通道推送；内容不得包含执行请求或事实宣告。
 - 验收：
   - 内容仅限问候/关心/回忆引用/提醒口径；含执行 intent 时 QA 拦截；
   - 推送通道失败时静默降级且不重试推送（防骚扰）。
@@ -811,7 +809,7 @@ FR-WECHAT-003 微信通道健康状态与降级策略
   - 对应测试编号：T-WECHAT-13~16。
 - 描述：Focus Mode 为 sys_mode 的子状态扩展（Normal 的子模式），进入后限制中断型能力（主动对话/通知推送静默），保留被动响应能力（用户主动提问仍可回复）。
 - 关键约束：
-  - 进入/退出必须有来源证据（用户指令/定时策略/日历事件），并写 hard_state_log；
+  - 进入/退出必须有来源证据（用户指令/定时策略/日历事件），并写 mode transition history、system_event_log 或当前等价审计记录；
   - Focus Mode 下 Scheduler 的 proactive/dream 等非紧急任务暂停；
   - 对话能力不受影响（用户输入仍正常处理）。
 - 验收：
@@ -829,7 +827,7 @@ NFR-SEC-001 本地优先与最小暴露
 
 NFR-REL-001 降级可用性
 - 要求：依赖故障不崩溃；输出结构稳定；关键链路可观测。
-- 验收：故障注入矩阵全通过（DB/Neo4j/Chroma/Cloud Exocortex/Edge 超时或不可用）。
+- 验收：故障注入矩阵全通过（DB/Bond store/Chroma/Cloud Exocortex/Edge 超时或不可用）。
 
 NFR-PERF-001 响应时延预算（本地目标）
 - 要求：普通对话可接受；执行链路可解释；超时可控并可降级。
@@ -862,14 +860,14 @@ M1 主权闭环（最小可运行）：FR-CORE/FLOW/INTENT/GOV/TOKEN/SKILL/AUDIT
 M2 成长闭环（关系+记忆+风格）：FR-BOND/MEM/CANON — **DONE**（2026-03-01）
 M3 LSP（可撤销默认）：FR-LSP + 可逆能力接入 — **DONE**（2026-03-02）
 M4 体验包（低风险）：FR-SCHED（调度器前置）+ FR-DESKTOP（桌面留言）/ FR-DREAM（梦境）/ FR-DIARY（日记）/ FR-PROACTIVE（主动对话）/ FR-FOCUS（Focus Mode）（均需 SkillMeta + 审计）— **DONE**（2026-03-03）
-M5 视觉自动化（高门槛）：FR-VISION 全量验收 — **DONE**（2026-03-02）
+M5 屏幕/图像观测边界：FR-VISION 全量重新验收 — **REBASE_REQUIRED**（2026-06-04：旧屏幕自动执行口径已废止）
 M6 Edge 深化：语音/头像/微信红线治理（作为受治理 Skills）— **DONE**（2026-03-02）
 M7 可观测 + MCP + 语音深化：FR-OBS-001/002（指标面板与模式差异）+ FR-MCP-001（MCP provider 治理）+ FR-VOICE-001~005（ASR/TTS/Barge-in/兜底模型/资源闸门）— **DONE**（2026-03-03：914 passed，OBS/MCP/VOICE 全量实现）
 M8 运行时集成闭环：NFR-PERF-001（性能基线采集）+ NFR-REL-001（故障注入矩阵全通过）+ FR-CORE-004（冷启动端到端可验收）+ 运行时脚本集成（OBS/MCP 新模块接入 start_host_side.ps1）— **DONE**（2026-03-03：980 passed，性能基线/故障注入/冷启动/脚本集成全量实现）
 M9 World Canon 闭环 + 日记 Evolution 关联：FR-WCANON-001~003（World Canon 文件 SSOT + 索引同步 + 注入分槽 + Evolution 提案流程）+ FR-DIARY-002（日记→canon_proposal 关联）— **DONE**（2026-03-03：1032 passed，World Canon SSOT/同步/分槽/Evolution/日记关联全量实现；R-85~R-89 追踪完成；m9_release.json 已生成）
 M10-A Canon 治理 API：FR-WCANON-002 扩展（Canon 提案审核 REST API：/canon/proposals CRUD + approve/reject 端点 + 审计串联）— **DONE**（2026-03-03：1041 passed，canon_routes.py 7 个端点全量实现；T-Canon-API-01~08 全部通过；R-90~R-91 追踪完成）
 M10-B ASR 热词注入：FR-ASR-001（WorldCanonStore.extract_hotwords + GET /canon/hotwords + inject_canon_hotwords）— **DONE**（2026-03-03：1054 passed；R-92~R-94 追踪完成）
-M10-C 记忆蒸馏系统：FR-MEM-001~003（MemoryDistillationEngine.distill_top_k + semantic_memory 表 + context_pack.semantic_slot）— **DONE**（2026-03-03：1062 passed；R-95~R-97 追踪完成）
+M10-C 记忆蒸馏系统：FR-MEM-001~003（MemoryDistillationEngine.distill_top_k + semantic_memory 表 + prompt_context / surface context 语义槽位）— **DONE**（2026-03-03：1062 passed；R-95~R-97 追踪完成）
 M10-D P1/P2 收口：F-41/F-06/F-35/F-36/F-37/F-39/F-12/F-05/F-01/F-02/F-11 全部修复 + Edge 端优化（TTS/VTS/ASR 全链路贯通）— **DONE**（2026-03-04：1090 passed；R-98~R-108 追踪完成；m10d_release.json 已生成）
 M10-E _CANON_HOTWORDS_CACHE TTL 自动失效：FR-ASR-001 + NFR-PERF-001（_HotwordsCache 类 TTL=300s + T-HW-TTL-01~05）— **DONE**（2026-03-04：1090 passed；R-109 追踪完成；m10e_release.json 已生成）
 M10-P2 P2 代码质量收口：F-16 _fetch_by_request 白名单校验补全 + F-13/F-14/F-15/F-25/F-38 已修复核查 + F-04/F-07/F-08 设备验证包标记 BLOCKED_ENV — **DONE**（2026-03-04：1090 passed；R-110~R-112 追踪完成）
@@ -935,7 +933,7 @@ M16-D M16 发布清单 — **DONE**
 
 M17 监控面板 v3 — 全服务监控 + Dify 风格链路可视化（前端重建）：
 M17-A 前端架构重建：FR-OBS-003（多页面 SPA 架构 + 左侧导航 + Dify 简约风格设计系统）— **DONE**（2026-03-04）
-M17-B 全服务健康总览页：FR-OBS-004（双端所有服务状态卡片：ASR/TTS/VTS/LLM/Neo4j/SQLite/Chroma/Scheduler 等 + 实时健康轮询）— **DONE**（2026-03-04）
+M17-B 全服务健康总览页：FR-OBS-004（双端所有服务状态卡片：ASR/TTS/VTS/LLM/Bond store/SQLite/Chroma/Scheduler 等 + 实时健康轮询）— **DONE**（2026-03-04）
 M17-C 会话列表页：FR-OBS-005（会话列表 + 搜索过滤 + 分页 + 状态徽章）— **DONE**（2026-03-04）
 M17-D Dify 风格链路可视化页：FR-OBS-006（节点流图展示：每个节点卡片含状态/耗时/入参/出参展开面板 + 连线动画）— **DONE**（2026-03-04）
 M17-E 指标大盘页：FR-OBS-007（请求趋势图 + 拒绝率趋势 + reason_code 分布 + 服务延迟分布）— **DONE**（2026-03-04）

@@ -5,9 +5,9 @@
 
 - **文档编号**：LANGGRAPH_CONSTRAINT_CONFLICT_ANALYSIS
 - **生成日期**：2026-03-06
-- **规格依据**：`docs/30_devspec/ModelPlane.md`
+- **规格依据**：Host 治理约束、`ReplyEnvelope` 收口契约与当前集成层代码
 - **分析对象**：`host_brain/integrations/graph_executor.py` / `graph_runtime.py`
-- **结论摘要**：LangGraph 的 5 项高级编排能力与 ModelPlane.md 的硬约束存在结构性冲突，当前架构为有意降级使用，属于治理优先于框架能力的主动取舍。
+- **结论摘要**：LangGraph 的 5 项高级编排能力与 Host 治理约束存在结构性冲突，当前架构为有意降级使用，属于治理优先于框架能力的主动取舍。
 
 ---
 
@@ -140,7 +140,7 @@ t2: 仍失败 → host_fallback_policy
 
 ---
 
-### 冲突 5：流式输出（stream_mode）vs §4.2 二段式输出边界锁定
+### 冲突 5：流式输出（stream_mode）vs Surface Main Chain / ReplyEnvelope 输出收口
 
 **LangGraph 流式写法**：
 
@@ -149,20 +149,21 @@ for chunk in graph.stream(input, stream_mode="values"):
     yield chunk  # 逐 token 推送
 ```
 
-**冲突条款**：§4.2 强制二段式输出：
+**冲突约束**：用户可见文本必须先完成 Host 侧表达收口：
 
 ```
-S1: core_reasoner_primary → safety_verifier → Host QA/Governor
-S2: renderer_ja_c_style → Host RenderGuard
-规则：intent_draft 只能来自 S1；S2 不得新增/修改 intent_draft
+candidate expression / tool result / fallback
+  → Surface Main Chain / QA / postprocess
+  → ReplyEnvelope(kind=final_reply)
+  → send / persist / cache
 ```
 
 **具体风险**：
-- 流式输出意味着 S1 的 `narrative_zh` 还未完成时，S2 的渲染器可能已开始工作
-- `RenderGuard` 无法校验"S2 是否加料"（S1 输出不完整时无法建立基准）
-- `intent_draft` 边界无法锁定（S1 流式输出中途 S2 可能读到不完整的 `intent_draft`）
+- 原生逐 token 输出可能绕过 Surface Main Chain 与 QA，将未收口文本提前暴露给用户
+- 尚未形成 `ReplyEnvelope(kind=final_reply)` 时，系统无法判断该内容是否允许发送、持久化或缓存
+- 含有“已执行/已保存/已确认”的片段如果先于审计链完成而被推送，会形成伪执行宣告
 
-**当前替代方案**：严格串行，S1 完整输出后才进入 S2，`edge_map` 保证顺序，`RenderGuard` 在 S1 完成后对 `intent_draft` 加锁。
+**当前替代方案**：图运行可以流式输出进度、trace 或安全状态片段；用户可见最终文本必须等待 Host 侧生成 `ReplyEnvelope(final_reply)` 后再发送。非 final_reply 的 ACK、任务状态、降级失败或内部候选不得进入人格记忆。
 
 ---
 
@@ -174,7 +175,7 @@ S2: renderer_ja_c_style → Host RenderGuard
 | 并行分支（fan-out） | §0.2 AIRLOCK 串行审计 | 并发安全冲突 | `while` 循环强制串行 |
 | 子图（SubGraph） | §6 审计链完整性/可回放性 | 可观测性冲突 | 扁平化 `trace` 列表 |
 | 断点续跑（Checkpointer） | §4.3 时间驱动降级链路 | 触发机制冲突 | 同步 `handle_timeout()` |
-| 流式输出（stream_mode） | §4.2 二段式输出边界锁定 | 输出边界冲突 | 严格串行 S1→S2 |
+| 流式输出（stream_mode） | Surface Main Chain / ReplyEnvelope 收口 | 输出边界冲突 | 只流式安全状态；最终文本等待 `final_reply` |
 
 ---
 
@@ -191,12 +192,12 @@ LangGraph 在当前系统中被**主动降级使用**：
 
 **否**。这是治理优先于框架能力的有意取舍：
 
-> LangGraph 的每一项高级能力都与 ModelPlane.md 的某条硬约束存在结构性冲突。
+> LangGraph 的每一项高级能力都与 Host 治理约束的某条边界存在结构性冲突。
 > 在 AI 治理合规要求下，框架能力必须服从约束体系，而非反过来。
 
 ### 5.3 未来扩展路径
 
-若未来需要引入 LangGraph 高级能力，需先在 ModelPlane.md 中为对应约束条款增加豁免条件，并通过完整的安全评审，方可解锁对应能力。
+若未来需要引入 LangGraph 高级能力，需先在 Host 治理契约中为对应约束增加明确协议，并通过完整的安全评审，方可解锁对应能力。
 
 ---
 

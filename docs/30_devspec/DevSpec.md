@@ -4,25 +4,26 @@
 本文只写“怎么做”与“如何验证”，不写产品愿景。
 
 # Natsume Ai 产品开发文档（Dev Spec）
-版本：v1.8
-日期：2026-04-19
-适用架构：Host_Brain（主脑终审与治理） + Edge Client（本地感知与执行） + 可选云端能力/多代理扩展能力（受 Host 主权约束）
+版本：v1.9
+日期：2026-06-04
+适用架构：Host_Brain（主脑终审与治理） + Edge Client（本地感知与执行） + Desktop Pet / MateEngine / VTS / VRM / Avatar State（外显执行面） + 可选云端能力/多代理扩展能力（受 Host 主权约束）
 
 本文件用于把白皮书与 PRD 的原则/需求落成可实现的工程规格：模块边界、接口、Schema、日志、测试与里程碑。
 目标：即使仓库为空，也能按本文档给出的“目录骨架 + 契约 + 里程碑交付物”，从零重新开发到最小可运行闭环。
 
-当前代码对齐说明（2026-04-19）：
+当前代码对齐说明（2026-06-04）：
 - `README.md`、`docs/50_project/arch/CURRENT_CODE_ARCHITECTURE.md`、`docs/50_project/arch/dataflow_report.md` 是当前代码事实入口。
 - 本文仍保留“从零重建 / 目标架构蓝图”属性；若局部条目与当前代码冲突，以代码事实层文档和实际代码为准。
+- 旧输入打包脚本、双段渲染字段、固定关系图后端、旧 UI 执行器等历史口径不得作为当前主链实现依据；当前主链以 `prompt_context.py`、`chat_payload_builder.py`、`surface_context_packet.py`、Surface Main Chain 与 ReplyEnvelope 收口为准。
 
-## 0.1 当前主链入口与工程口径（2026-05-30）
+## 0.1 当前主链入口与工程口径（2026-06-04）
 
 请按以下入口链路理解本文条目：
 
 - 文档入口：`docs/20_prd/PRD.md`（需求）→ 本文（契约）→ `docs/30_devspec/DevTasks.md`（任务）→ `tests/`（验收）→ `docs/60_trace/requirements_trace.md`（覆盖追踪）。
 - 运行入口：`POST /v1/chat` 与 `POST /v1/host/input`，再到：
-  `chat_routes.handle_v1_chat_route()`（含 immune gate / fastpath）→ `chat_handler.handle_chat()` → `thalamus_agent` → `Governor.evaluate_intent()` → `executive_runtime`。
-- normal chat 最终文本作者为 `host_brain/persona/surface_main_chain.py` (SurfaceMainChain)；旧 `prompt_builder` 链路仅作为辅助 facts/state 提供者。媒体最终作者为 `reply_modality_router`，不是 surface chain。
+  `asgi.py` → `app_factory.py` → `router_registry.py` → `chat_routes.handle_v1_chat_route()`（含 immune gate / fastpath）→ `chat_handler.handle_chat()` → `thalamus_agent` → `Governor.evaluate_intent()` → `cortex_orchestrator / agent_runtime_shared` → `executive_router / executive_runtime / executive_runtime_core` → `chat_agent` → `surface_main_chain_adapter`。
+- normal chat 最终文本作者为 `host_brain/persona/surface_main_chain.py` (SurfaceMainChain)，最终发送/持久化/缓存由 `reply_envelope.py` 收口；旧 `prompt_builder` 链路仅作为辅助 facts/state 提供者。媒体最终作者为 `reply_modality_router`，不是 surface chain。
 - 审计事实入口：`intent_log`、`governor_log`、`skill_exec_log` 与 `sqlite_ledger`。
 - 若某条款与当前代码行为冲突，以 `docs/50_project/arch/CURRENT_CODE_ARCHITECTURE.md` 为准。
 
@@ -30,7 +31,7 @@
 
 ## 0. 术语与硬约束（执行口径）
 
-0.1 单向链：语义内核（LLM 草案） → Host Governor → Skills/Actuators → Audit
+0.1 单向链：模型/Agent 草案 → Host Governor → Skills/Actuators → Audit
 0.2 事实：仅以审计链（intent/governor/skill_exec）与硬状态/SSOT 为准。
 0.3 任何执行必须携带 approval_token；高风险必须 confirm_token；可逆变更默认要求 undo_token+manifest。
 0.4 任一 LLM 节点永远不执行、不裁决、不宣称已执行；所有“已完成/已保存/已确认”只能引用 Host 审计摘要字段。
@@ -82,7 +83,7 @@ DevSpec 写作规则（工程契约级）：
 │  ├─ CODEX_PROMPT.md # Codex 入口提示词（输出格式/行为约束）
 │  ├─ PROJECT_PROMPT.md # Project 入口提示词（只写文档、不改代码）
 │  └─ llm_contract/
-│     ├─ core_output_contract.json # LLM→Host Strict JSON 输出契约示例（结构示例，不是实现）
+│     ├─ core_output_contract.json # LLM→Host 结构化输出契约示例（结构示例，不是实现）
 │     └─ refusal_templates.md # 统一拒绝叙事范式（非事实）
 ├─ docs/
 │  ├─ 00_index/
@@ -123,10 +124,10 @@ DevSpec 写作规则（工程契约级）：
 │  │  ├─ recall/ # RecallPack 组装器（token 预算截断 + 冲突检测）
 │  │  ├─ schemas/ # 核心数据结构与枚举（ProposalType / TaskType / ContextPack 等）
 │  │  ├─ skills/ # Skill/MCP 权限模型（PermissionGuard + HotLoader）
-│  │  └─ vision/ # UI 自动化断言协议（前置+后置断言 + 敏感界面检测）
+│  │  └─ vision/ # 屏幕/图像观测与旧兼容执行协议（非当前主链默认本地界面执行）
 │  ├─ core/
-│  │  ├─ context_pack.py # Host→LLM 输入打包（分槽隔离）
-│  │  ├─ qa.py # 输出合规：Strict JSON/伪执行/Canon-as-fact
+│  │  ├─ prompt_context.py # Host→模型输入上下文（分槽隔离）
+│  │  ├─ qa.py # 输出合规：结构化输出/伪执行/Canon-as-fact
 │  │  ├─ metabolism.py # energy/mood/sys_mode 演化（硬状态）
 │  │  ├─ ids.py # intent_id/event_id/request_id 生成规则
 │  │  └─ errors.py # reason_code 与错误对象（稳定枚举）
@@ -150,9 +151,9 @@ DevSpec 写作规则（工程契约级）：
 │  │  └─ retention.py # 保留/归档/GC 策略（动作必须可审计）
 │  ├─ bond/
 │  │  ├─ neo4j_client.py
-│  │  ├─ bond_dynamics.py # 唯一写 Neo4j（Bond SSOT 单写者）
+│  │  ├─ bond_dynamics.py # Bond 事件/关系单写者（后端可为 SQLite/内存/Neo4j）
 │  │  ├─ summarizer.py # Bond Summary 派生（不得写回 SSOT）
-│  │  └─ migrations/ # Neo4j 约束/索引描述
+│  │  └─ migrations/ # Bond 关系约束/索引描述
 │  ├─ memory/
 │  │  ├─ episodic.py # 向量库写入/召回（必须 evidence_refs）
 │  │  ├─ chroma_client.py # 向量库客户端封装（写入仅 episodic.py）
@@ -227,7 +228,7 @@ DevSpec 写作规则（工程契约级）：
 │  ├─ senses/ # ears/eyes：采集与摘要（不裁决）
 │  ├─ actuators/ # mouth/speaker/avatar：执行器（不裁决）
 │  ├─ rpc/ # Host↔Edge RPC（只接受带票据的执行请求）
-│  ├─ proofs/ # before/after 证据采集（写入 Vault 的原始材料来源）
+│  ├─ proofs/ # 证据快照采集（写入 Vault manifest 的原始材料来源）
 │  └─ config.py
 ├─ tests/
 │  ├─ contract/ # Schema/validator/gates/静态扫描（快速、无外部依赖优先）
@@ -252,7 +253,7 @@ M0：骨架可解析（不接外部依赖也能闭环）
 - LLM stub（或固定样例输入输出）可驱动 Host 完整链路
 
 验证点：
-- 任意输入最终输出保持 Strict JSON 可解析；
+- 任意输入最终输出保持结构化契约可解析；
 - 拒绝必带 reason_code；
 - skill_exec 只在 APPROVE 且 token 合法时出现。
 
@@ -267,7 +268,7 @@ M1：Governor 可治理（门禁可回归）
 
 M2：六库分工落地（写入边界可静态验证）
 交付物：
-- bond_dynamics（Neo4j 单写者）+ bond_update_log 留痕
+- bond_dynamics（Bond 事件/关系单写者）+ bond_update_log 留痕（后端可为 SQLite/内存/Neo4j）
 - episodic（向量库单写者）+ memory_ops_log 生命周期留痕
 - canon_style_store / canon_world_store（版本化、变更留痕）
 - vault（manifest/undo/GC 约束与审计）
@@ -279,7 +280,7 @@ M2：六库分工落地（写入边界可静态验证）
 M3：Edge 联调（证据材料可回放）
 交付物：
 - Host↔Edge RPC 契约：只接受带票据的执行请求
-- proofs→Vault：before/after 证据能形成 manifest 串联到 intent_id
+- proofs→Vault：证据快照能形成 manifest 串联到 intent_id
 
 验证点：
 - UI/视觉相关能力在证据缺失时必须降级/拒绝；
@@ -297,7 +298,7 @@ A）交付边界（项目范围口径）
 
 B）冷启动最低形态（从零可重建）
 - SQLite Ledger：必须可写入最小三联画；缺失则无法称为可回放系统。
-- Neo4j Bond SSOT / Episodic 向量库：必须存在对应的连接层与健康状态；不可用时对外只输出降级口径（空/默认），并记录 stage/reason_code。
+- Bond Store / Episodic 向量库：必须存在对应的连接层与健康状态；Bond 后端可为 SQLite、内存或 Neo4j；不可用时对外只输出降级口径（空/默认），并记录 stage/reason_code。
 - Style/World Canon / Vault：必须以版本化资产形态存在；可为空但不得导致系统伪造设定或伪造事实。
 - Cloud Exocortex：必须存在 gateway + airlock；无 key 时必须进入“外脑不可用”降级路径，且不影响结构稳定。
 - Edge（语音/外显）：必须存在 RPC 与能力端点；不可用时 Host 进入“无身体模式”降级路径，仍保持结构稳定与审计可回放。
@@ -305,7 +306,7 @@ B）冷启动最低形态（从零可重建）
 C）可观测（必须）
 - 任一服务不可用不得导致崩溃；必须输出可解析结构，并在 quality.stage 标注失败发生的阶段。
 - 同类缺失在同版本下 reason_code 稳定可统计。
-- 任何 LLM（含 Edge 兜底模型）输出仍必须满足 Strict JSON 契约，并受 QA（伪执行、Canon-as-fact、格式漂移）约束。
+- 任何 LLM（含 Edge 兜底模型）输出仍必须满足结构化输出契约，并受 QA（伪执行、Canon-as-fact、格式漂移）约束。
 
 ### 1.3 必须不进仓库的内容（从零重建的可复现前提）
 - 任何 secret（API key、token、个人账号凭据）：只能以“模板文件 + 本地覆盖”的方式存在。
@@ -344,7 +345,7 @@ active.pointer 格式（必须）：
 2.1 Host 进程（主权裁决与统一编排）
 - 对外提供：`POST /v1/chat`（统一 SSE 入口：`asgi.py` 注入路由 → `chat_routes.handle_v1_chat_route` → 输入门控与审计 → `thalamus` canonical intent → Governor → cortex_orchestrator → executive runtime）
 - 统一编排：所有 Agent 与链路编排仅在 Host 发生；Edge 端组件仅作为“远程能力提供者”被调用（draft-only，不具终审权）。
-- 必备内部服务（必须实现）：Governor/Token/Audit、SQLite Ledger、Neo4j Bond SSOT、Episodic 向量库、Embedding、Reranker、Recall/Fusion、Screen Capture、OCR/Vision、ClawdBot、Cloud Gateway + AIRLOCK、Observability。
+- 必备内部服务（必须实现）：Governor/Token/Audit、SQLite Ledger、Bond Store、Episodic 向量库、Embedding、Reranker、Recall/Fusion、屏幕/图像观测接口（如启用）、Cloud Gateway + AIRLOCK、Observability。
 - 运行时不可用：任一服务不可用必须可观测降级并保持输出结构稳定（不得伪执行）。
 
 2.2 Edge 进程（身体能力：语音链与外显）
@@ -358,7 +359,7 @@ active.pointer 格式（必须）：
 
 2.3 Cloud Exocortex
 - Host 调用外部模型：统一经 `integrations/llm_gateway.py` 出站（经 AIRLOCK 脱敏）
-- 外部输出：严格 JSON（narrative + intent_draft 或渲染文本），一律降权为草案，不得直通执行
+- 外部输出：结构化候选（candidate_text / intent_draft / verifier_result 等），一律降权为草案，不得直通执行；最终用户可见输出仍由 Surface Main Chain 与 ReplyEnvelope 收口。
 
 2.4 通信安全（最小实现）
 - Host→Edge：每次请求带 `request_id` + `HMAC(signature)`（共享密钥）+ `ts_ms` + `nonce`
@@ -501,7 +502,7 @@ GovernorOutput 必须为单个 JSON 对象，字段语义固定：
 - reversible=true 的执行默认必须产出 undo_token_ref 与 manifest_ref
 manifest 最小字段（语义固定）：
 - manifest_id / intent_id / integrity_digest（sha256）
-- items[]：before/after/path/hash/artifact_refs（可按能力裁剪）
+- items[]：artifact_id/kind/path/hash/pre_digest/post_digest/artifact_refs（可按能力裁剪）
 - policy_profile_id / ts_ms
 
 拒绝口径：
@@ -562,8 +563,8 @@ manifest 最小字段（语义固定）：
 
 ---
 
-## 7. Context Pack：Host→LLM 的输入契约
-Host 打包 context_pack（JSON）给 LLM。核心目标：把“事实证据、权威内容、风格资产、召回线索”分槽隔离，防止混用导致越权叙事。
+## 7. Prompt / Surface Context：Host→Model 的输入契约
+Host 通过 `prompt_context.py`、`chat_payload_builder.py` 与 `surface_context_packet.py` 组装模型与 Surface 所需上下文。核心目标：把“事实证据、权威内容、风格资产、召回线索”分槽隔离，防止混用导致越权叙事。
 
 字段建议（分槽强隔离）：
 - hard_snapshot：energy_bucket/mood_bucket/sys_mode/safety_bucket（不含敏感原值）
@@ -577,7 +578,7 @@ Host 打包 context_pack（JSON）给 LLM。核心目标：把“事实证据、
   - style_canon：[{canon_id,version,kind,triggers,template,constraints}]（tone_only=true, unsafe_as_fact=true）
 - recent_events：[{kind,reason_code,ts,summary,evidence_refs}]
 - constraints：
-  - strict_json_output=true
+  - structured_output_contract=true
   - no_false_execution_claim=true
   - no_canon_as_fact=true
   - tone_policy（短句/……/称呼）
@@ -590,7 +591,7 @@ Host 打包 context_pack（JSON）给 LLM。核心目标：把“事实证据、
 
 ---
 
-## 8. Data Stores：SQLite Ledger / Neo4j Bond SSOT / Episodic 向量库 / Style Canon / World Canon / Artifact Vault（具体实现契约）
+## 8. Data Stores：SQLite Ledger / Bond Store / Episodic 向量库 / Style Canon / World Canon / Artifact Vault（具体实现契约）
 
 定位：本章把“六库分工”写成可验证的工程契约：谁写谁读、SSOT 边界、Schema 口径、跨库引用与合规断言。任何偏离必须能被静态扫描或回归测试发现。
 
@@ -608,9 +609,9 @@ Host 打包 context_pack（JSON）给 LLM。核心目标：把“事实证据、
 - 允许读取者：Host 全域（只读查询与回放）
 - 最小跨库引用键：request_id、intent_id、event_id、evidence_refs
 
-2）Neo4j（Bond 关系域 SSOT）
-- 事实效力：关系结构域 SSOT（非执行事实）
-- SSOT 单写者：host_brain/bond/bond_dynamics.py
+2）Bond Store（关系域；后端可为 SQLite/内存/Neo4j）
+- 事实效力：关系结构域（非执行事实）
+- 单写者：host_brain/bond/bond_dynamics.py 或当前等价 Bond 写入入口
 - 允许读取者：Host（图查询/summary 派生；summarizer 不得写回）
 - 最小跨库引用键：event_id + evidence_refs
 
@@ -670,10 +671,10 @@ C）skill_exec_log
 运行时断言（必须）：
 - decision=REJECT → reason_code 非空且来自稳定枚举；缺失视为 GOVERNOR_OUTPUT_INVALID（不得对外透出）。
 - 任意 skill_exec_log 行必须能关联 governor_log（同 intent_id）且 approval_token_ref 可核验。
-- 任意写入类事件（Bond/Memory/Canon/Vault/Airlock/Clawd）都必须具备 evidence_refs（至少 1 个 intent_id 或 event_id 引用）。
+- 任意写入类事件（Bond/Memory/Canon/Vault/Airlock/外显动作记录）都必须具备 evidence_refs（至少 1 个 intent_id 或 event_id 引用）。
 
-### 8.2 Neo4j Bond SSOT（关系域唯一真相）
-定位：Neo4j 只承载“关系结构与因果路径”，不得承载执行事实；执行事实仍以 Ledger 为准。
+### 8.2 Bond Store（关系域）
+定位：Bond Store 只承载“关系结构与因果路径”，不得承载执行事实；执行事实仍以 Ledger 为准。当前后端可为 SQLite、内存或 Neo4j，文档不得把 Neo4j 写死为唯一 SSOT。
 
 写入边界：
 - 唯一写入者：bond/bond_dynamics.py
@@ -685,7 +686,7 @@ C）skill_exec_log
 - Event 必须携带 event_id 与 evidence_refs（或可等价追溯到 SQLite 的 bond_update_log）
 
 回归口径：
-- 非 bond_dynamics 尝试写 Neo4j 必须被静态扫描/运行时断言拦截（T-SSOT-01）。
+- 非 Bond 单写者尝试写 Bond 后端必须被静态扫描/运行时断言拦截（T-SSOT-01）。
 - Bond Summary 不得包含敏感数值（例如 trust=xx），只能 stage/trend/capability_hint（T-Bond-01）。
 
 ### 8.3 Episodic 向量库（经历召回线索，不具备裁决权）
@@ -737,7 +738,7 @@ C）skill_exec_log
 - content（模板/范式）、tags、updated_by（proposal_id）、ts_ms
 
 注入隔离：
-- 只能进入 context_pack.style_pack；不得与 facts/world_canon/episodic 混槽（T-CP-01）。
+- 只能进入 prompt/surface context 的 style_pack；不得与 facts/world_canon/episodic 混槽（T-CP-01）。
 
 ### 8.5 World Canon Store（最小权威内容集合：可引用、非执行事实）
 定位：稳定“内容一致性”，用于设定/术语/不变量引用与冲突裁决；不构成执行事实。
@@ -758,7 +759,7 @@ C）skill_exec_log
 - 任何完成性表述必须引用审计链摘要字段，否则 QA 拦截（与 9 章联动）
 
 ### 8.6 Artifact Vault（证据与可逆材料仓）
-定位：保存截图/关键帧/脱敏报告/回滚材料等资产，支撑撤销与 UI 行为可回放。
+定位：保存截图/关键帧/脱敏报告/回滚材料等资产，支撑撤销与本地动作可回放。
 
 写入边界：
 - 唯一写入者：lsp/vault.py（经 Skill 执行产出）
@@ -786,7 +787,7 @@ GC 约束：
 ### 8.8 静态扫描断言（单写者/旁路禁止，必须可回归）
 必须覆盖的禁止项（口径级）：
 - 非 skills/loader 不得直接调用 skills/impl
-- 非 bond/bond_dynamics 不得持有/调用 Neo4j 写入能力
+- 非 Bond 单写者不得持有/调用 Bond 后端写入能力
 - 非 memory/episodic 不得持有/调用向量库写入能力
 - 非 memory/canon_style_store 不得持有/调用 Style Canon 写入能力
 - 非 memory/canon_world_store 不得持有/调用 World Canon 写入能力
@@ -1020,12 +1021,12 @@ Dev Spec 必须提供可执行的测试清单文件（见 `tests/e2e/`），建�
 ### 13.4 外部依赖隔离要求（test 环境强制）
 - test 环境不得连接真实 Neo4j、真实向量库、真实云端模型服务；必须使用 stub/fixtures 或替身实现。
 - 出网相关模块必须支持“airlock stub”：仍产生 airlock_log 结构化记录，但不会真实发送。
-- ClawdBot/UI 类能力在 test 环境必须默认禁用或模拟（只验证日志/契约与红线熔断口径）。
+- 屏幕/图像观测与旧兼容执行能力在 test 环境必须默认禁用或模拟（只验证日志/契约与红线熔断口径）。
 
 ### 13.5 Gaming 模式资源策略（显存被游戏占用）
 - Host 不得依赖本地 GPU 模型；只允许规则引擎/模板/CPU tiny model（如存在）。
 - 云端调用允许继续，但必须受超时退化策略约束，避免沉默（T-Perf-01、T-Gaming-01）。
-- 渲染优先走云端 renderer；云不可用时退化为 Host 最小日文模板（不得加料）。
+- 表达候选可走云端；云不可用时退化为 Host 最小模板（不得加料、不得宣称已执行）。
 
 ---
 
@@ -1121,7 +1122,7 @@ Dev Spec 必须提供可执行的测试清单文件（见 `tests/e2e/`），建�
 - Schema/Enum：Intent、GovernorOutput、Token、Manifest、reason_code 枚举稳定
 - 指针一致性：Flow active.pointer 与 Trace 索引一致性（T-Flow-01/02）
 - 单写者与旁路禁止：静态扫描断言（T-SSOT-01）
-- LLM 输出契约 lint：Strict JSON（T-LLM-01）
+- LLM 输出契约 lint：结构化输出（T-LLM-01）
 
 2）e2e tests（最小闭环）
 最小链路口径：
@@ -1145,9 +1146,9 @@ Dev Spec 必须提供可执行的测试清单文件（见 `tests/e2e/`），建�
 - T-81（VOICE-TTS）：Host 下发文本→Edge 合成播报；失败返回 reason_code/stage；播报事件可与 request_id 串联。
 - T-82（VOICE-BARGEIN）：播报中用户开口触发打断；播放停止/降级；ASR 继续上送；审计记录打断事件。
 - T-83（EDGE-FALLBACK-LLM）：兜底 LLM 输出为 draft-only JSON；不得出现执行事实宣告；不可用时快速失败并触发 Host 兜底口径。
-- T-84（VISION-SCREEN-GATE）：Gaming 模式禁止屏幕监控/OCR/Clawd UI；非 Gaming 模式按需触发并事件化审计。
+- T-84（VISION-SCREEN-GATE）：Gaming 模式禁止主动屏幕监控/OCR/本地界面执行；非 Gaming 模式按需触发观测并事件化审计。
 - T-85（RETRIEVAL-PIPE）：embedding+rerrank+recall/fusion 输出 TopK evidence pack 字段稳定；缺任一服务时降级口径与 reason_code 稳定。
-- T-86（BOND-NEO4J）：Neo4j 单写者边界生效；bond_summary 派生不含执行事实；不可用时降级口径稳定。
+- T-86（BOND-STORE）：Bond 单写者边界生效；bond_summary 派生不含执行事实；后端不可用时降级口径稳定。
 - T-87（OBS-RESOURCE）：Edge 语音链与 GPU 显存指标可观测；异常峰值可定位 stage 与组件。
 
 ### 14.8 新增验收测试编号（M4 体验包：SCHEDULER/DESKTOP/DREAM/DIARY/PROACTIVE/FOCUS）
@@ -1157,7 +1158,7 @@ Dev Spec 必须提供可执行的测试清单文件（见 `tests/e2e/`），建�
 - T-Sched-01（SCHEDULER 注册与触发）：调度器注册/注销/触发可回放；system_initiated_intent 带 proposer_node_id=scheduler；触发频率符合配置。
 - T-Sched-02（SCHEDULER 模式门控）：Gaming / Focus 模式仅允许 HIGH；Sleep 模式允许 HIGH / MEDIUM；显式 `mode_allowlist` 可覆盖默认矩阵。
 - T-Sched-03（SCHEDULER 健康与降级）：连续失败达到 `max_consecutive_failures` 自动暂停（SCHED_TASK_SUSPENDED）；健康快照可读取。
-- T-Desktop-01（桌面留言创建与撤销）：文件创建成功 + manifest 完整（before/after/path/hash）；undo 恢复原状态；路径穿越拒绝（SCOPE_VIOLATION）。
+- T-Desktop-01（桌面留言创建与撤销）：文件创建成功 + manifest 完整（path/hash/pre_digest/post_digest）；undo 恢复原状态；路径穿越拒绝（SCOPE_VIOLATION）。
 - T-Desktop-02（桌面留言 QA）：内容含伪执行句时 QA 拦截并重写；写入审计链完整。
 - T-Dream-01（梦境生成与标签）：Sleep/空闲触发成功；写入 Episodic 带 dream 标签 + NARRATIVE_ONLY；Normal 非空闲拒绝。
 - T-Dream-02（梦境非事实约束）：召回梦境时 evidence_level=NARRATIVE_ONLY 存在；QA 不升级为事实。
@@ -1251,13 +1252,13 @@ energy_cost: medium
 15.3.2 执行契约
 - 触发条件由 Scheduler 判定（sys_mode=SLEEP 或 idle_duration ≥ 阈值）。
 - 读取当日 Episodic Memory（按 ts_ms 过滤当日条目，TopK=20）。
-- 打包 context_pack（含 bond_summary + 当日 episodic 摘要）→ LLM 生成梦境叙事。
+- 打包 prompt/surface context（含 bond_summary + 当日 episodic 摘要）→ LLM 生成梦境叙事候选。
 - 写入 Episodic：category=dream, evidence_level=NARRATIVE_ONLY, evidence_refs=[intent_id]。
 - manifest：memory_before_count/memory_after_count/dream_id/hash。
 
 15.3.3 内容标签与口径
 - 写入时必须标注 `evidence_level=NARRATIVE_ONLY`。
-- 召回时 context_pack 的 retrieval.episodic 槽位需保留此标注，QA 据此判断"不可升级为事实"。
+- 召回时 prompt/surface context 的 retrieval.episodic 槽位需保留此标注，QA 据此判断"不可升级为事实"。
 
 ### 15.4 Diary Skill（日记生成）
 
@@ -1281,7 +1282,7 @@ energy_cost: medium
 - 每日定时触发（如 23:00），由 Scheduler 发起。
 - 汇总当日对话：读取 intent_log + governor_log（当日 ts_ms 范围）+ Episodic 当日条目。
 - 检查是否有实质对话内容（非空判定）：无对话 → 跳过并记录 SCHED_NO_CONTENT（不伪造日记）。
-- 有对话 → 打包 context_pack → LLM 生成日记叙事 → 双写：
+- 有对话 → 打包 prompt/surface context → LLM 生成日记叙事候选 → 双写：
   - 本地文件：`{base_dir}/diary/{YYYY-MM-DD}.md`，产出 file manifest。
   - Episodic Memory：category=diary, evidence_refs=[intent_id, file_path]。
 - QA 校验：日记内容不得含伪执行句。
@@ -1318,7 +1319,7 @@ energy_cost: low
 - 频率限制：每小时最多 3 次（ Rate Limit R4 Gate 生效）。
 
 15.5.3 执行契约
-- 打包 context_pack（含 bond_summary + 最近 episodic + 当前时间段信息）→ LLM 生成主动对话草案。
+- 打包 prompt/surface context（含 bond_summary + 最近 episodic + 当前时间段信息）→ LLM 生成主动对话草案。
 - QA 校验：内容仅限问候/关心/回忆引用/提醒口径；含执行 intent → 拦截重写。
 - 推送路径：
   - Edge 可达 → RPC speak（语音）或 text push；
@@ -1343,8 +1344,8 @@ energy_cost: low
 - 通知推送：❌ 静默
 
 15.6.3 审计
-- 进入/退出写 hard_state_log（原因、证据摘要、持续时长）。
-- 被拦截的调度任务写 scheduler_event_log（reason_code=SYSMODE_FORBIDDEN_FOCUS）。
+- 进入/退出写模式转换历史或等价 system_event（原因、证据摘要、持续时长）。
+- 被拦截的调度任务写 scheduler_event_log（reason_code=SYSMODE_FORBIDDEN）。
 
 ---
 
@@ -1838,10 +1839,10 @@ GET /obs/metrics
 - 同步必须幂等（相同 hash 不重复写 change_log）；
 - 同步失败不得导致系统崩溃，必须降级并记录 CANON_SYNC_FAILED。
 
-#### 19.1.3 注入分槽隔离（context_pack.authoritative.world_canon）
+#### 19.1.3 注入分槽隔离（prompt/surface context authoritative.world_canon）
 
-**注入口径**（context_pack.py）：
-- World Canon 条目只能进入 context_pack.authoritative.world_canon；
+**注入口径**（prompt_context.py / surface_context_packet.py）：
+- World Canon 条目只能进入 prompt/surface context 的 authoritative.world_canon；
 - 不得与 style_pack、retrieval.episodic、recent_events 混槽；
 - 每个注入条目必须携带 evidence_level=CANON_REFERENCE_ONLY；
 - 注入数量上限：Top-K（默认 5，可配置）。
@@ -1986,10 +1987,10 @@ GET /obs/metrics
 - 同步必须幂等（相同 hash 不重复写 change_log）；
 - 同步失败不得导致系统崩溃，必须降级并记录 CANON_SYNC_FAILED。
 
-#### 19.1.3 注入分槽隔离（context_pack.authoritative.world_canon）
+#### 19.1.3 注入分槽隔离（prompt/surface context authoritative.world_canon）
 
-**注入口径**（context_pack.py）：
-- World Canon 条目只能进入 context_pack.authoritative.world_canon；
+**注入口径**（prompt_context.py / surface_context_packet.py）：
+- World Canon 条目只能进入 prompt/surface context 的 authoritative.world_canon；
 - 不得与 style_pack、retrieval.episodic、recent_events 混槽；
 - 每个注入条目必须携带 evidence_level=CANON_REFERENCE_ONLY；
 - 注入数量上限：Top-K（默认 5，可配置）。
@@ -2726,7 +2727,7 @@ class SysModeEnum(str, Enum):
 #### 切换审计
 
 ```python
-# hard_state_log 字段
+# mode_transition/system_event 等价字段
 {
     "event_type": "SYS_MODE_CHANGE",
     "from_mode": "NORMAL",
@@ -2745,7 +2746,7 @@ class SysModeEnum(str, Enum):
 | T-FOCUS-01 | FR-FOCUS-001 | 进入 Focus 后主动对话被拦截（SYSMODE_FORBIDDEN） |
 | T-FOCUS-02 | FR-FOCUS-001 | 用户主动提问正常响应 |
 | T-FOCUS-03 | FR-FOCUS-001 | 退出 Focus 后调度器恢复 |
-| T-FOCUS-04 | FR-FOCUS-001 | 切换事件写入 hard_state_log，字段完整 |
+| T-FOCUS-04 | FR-FOCUS-001 | 切换事件写入模式转换历史或等价 system_event，字段完整 |
 
 ### 23.5 §21~§23 新增错误码汇总
 
@@ -3007,7 +3008,7 @@ host_brain/app/
 @dataclass(frozen=True)
 class BondScoreState:
     stage: str                          # "stranger" | "acquaintance" | "friend" | "close_friend" | "soulmate"
-    score: float                        # 内部积分（不暴露给语义内核）
+    score: float                        # 内部积分（不暴露给模型/Agent 草案层）
     trend: Literal["rising", "stable", "falling"]
     last_event_ts: int
     audit_ref: str                      # 最近一次审计链引用
@@ -3033,7 +3034,7 @@ class BondStageEngine:
         self,
         state: BondScoreState,
     ) -> dict:
-        """返回给语义内核的 Bond Summary（仅 stage/trend/capability_hint，不含数值）。"""
+        """返回给模型/Agent 草案层的 Bond Summary（仅 stage/trend/capability_hint，不含数值）。"""
 
     def get_trend(self, history: list[BondScoreState]) -> str:
         """计算趋势（rising/stable/falling）。"""
@@ -3044,7 +3045,7 @@ class BondStageEngine:
 | 端点 | 方法 | 描述 |
 |------|------|------|
 | `/bond/stage` | GET | 返回当前 Bond 阶段状态（不含数值） |
-| `/bond/summary` | GET | 返回给语义内核的 Bond Summary |
+| `/bond/summary` | GET | 返回给模型/Agent 草案层的 Bond Summary |
 | `/bond/event` | POST | 提交 Bond 事件（需 evidence_refs） |
 | `/bond/users` | GET | 列出所有用户的 Bond 状态 |
 | `/bond/health` | GET | 健康检查 |
@@ -3188,7 +3189,7 @@ class BondDynamicsWriter:
     ) -> dict:
         """
         应用 Bond 更新：
-        1. 写 Neo4j SSOT（原有逻辑）
+        1. 写 Bond Store（后端可为 SQLite/内存/Neo4j）
         2. 若 stage_engine 已注入，调用 apply_event 并将 stage_transition 写入 event 结果
         3. stage_engine 异常时非致命（降级，记录 warn，不中断主流程）
         """
@@ -4154,7 +4155,7 @@ host_brain/app/static/monitor/          ← npm run build 产出（提交到仓�
 **功能**：并发探测双端所有已注册服务健康状态；单服务超时（≤200ms）不阻塞其他服务；支持 `?side=host|edge` 过滤。
 
 **已注册服务（最小集）**：
-- Host 侧（8 个）：LLM Gateway、Neo4j、SQLite、Chroma、Scheduler、Bond Engine、Memory Distiller、MCP Provider
+- Host 侧（8 个）：LLM Gateway、Bond 后端（可为 Neo4j/SQLite/内存）、SQLite、Chroma、Scheduler、Bond Engine、Memory Distiller、MCP Provider
 - Edge 侧（5 个）：ASR、TTS、VTS、Audio Playback、Edge RPC
 
 **响应结构（最小字段，语义固定）**：
@@ -4168,7 +4169,7 @@ host_brain/app/static/monitor/          ← npm run build 产出（提交到仓�
   "services": [
     {
       "service_id": "neo4j",
-      "service_name": "Neo4j Bond SSOT",
+      "service_name": "Bond Backend",
       "side": "host",
       "status": "UP",
       "latency_ms": 12,

@@ -2,55 +2,40 @@
 标题：白皮书（Natsume Ai 意识主权宪法与人格设定）
 
 # Natsume Ai 意识主权宪法与人格设定
-版本：v1.5
-日期：2026-03-18
+版本：v1.6
+日期：2026-06-04
 
 定位：本文件只定义“不可变的法律（宪法）+ 可控的人格表达约束”。任何产品功能清单、体验包、实现细节与工程接口，统一移至 PRD 与开发规范。
-
-## 0. 运行时入口与真链路映射（2026-05-30）
-
-本文是不可变口径，工程与运行链路请按“事实文档”读取：
-- `docs/20_prd/PRD.md`（需求与验收）
-- `docs/30_devspec/DevSpec.md`（可执行实现契约）
-- `docs/50_project/arch/CURRENT_CODE_ARCHITECTURE.md`（当前主链入口）
-- `docs/50_project/arch/dataflow_report.md`（当前数据流）
-
-常见主路径（当前代码事实）：
-`POST /v1/chat` -> `host_brain/app/fastapi_app.py` -> `chat_handler` -> `thalamus_agent.classify_and_compile_intent_draft()` -> `Governor.evaluate_intent()` -> `executive_runtime` -> `Skills/Tools` -> `sqlite_ledger`。
-
-事实与真相声明：
-1. 任何“已执行/已确认/已保存/已改变状态”的叙述，必须由审计事实（`intent_log/governor_log/skill_exec_log`）可回放支撑。
-2. 任何离线提案、提示词草案、历史实验链条不作为主链执行依据；它们只提供背景或回放参考。
-3. 文档中出现历史方案与实验路径时，默认先以“宪法约束 + 当前代码事实文档”优先级评估，出现冲突时以主链事实为准。
-
 
 ---
 
 ## 0. 适用范围与术语约定
 
-适用架构：Host_Brain（主脑终审与治理） + Edge Client（本地感知与执行） + 可选云端能力/多代理扩展能力（受 Host 主权约束）。
+适用架构：Host_Brain（主脑终审与治理） + Edge Client（本地感知与执行） + Desktop Pet / MateEngine / VTS / VRM（外显执行面） + Avatar Behavior/State（外显状态与观测面） + 可选云端能力/多代理扩展能力（受 Host 主权约束）。
 
 本宪法的目标不是“更像人”，而是“在法律之内稳定成长”。因此：
 
-1）语言模型只负责解释与表达；
+1）模型/Agent 只产出候选解释、意图草案、规划草案与表达候选；
 2）最终权力与事实判据必须落在 Host 的代码与审计链上；
-3）任何影响现实的动作必须走单向链与票据化执行；
+3）写入与高风险动作必须受 Host 治理、审计与必要票据约束；外显副作用不得反写事实；
 4）人格风格只能影响“怎么说”，不得覆盖“什么是真的、能不能做”。
 5）系统默认“主链路优先”；多 Agent 仅可作为受治理约束的受控分支，不得替代 Host 终审。
 
 0.2 术语与口径（宪法级）
 - Host：终审裁决者；Hard State 与 Governor 的唯一权威来源。
-- 语义内核（EgoCore/Planner）：解释器；只产出叙事与 Intent 草案（intent_draft），不得裁决、不得触发执行、不得宣称执行事实。
-- 渲染器（Renderer）：风格渲染层；仅把语义内核的叙事草案渲染为目标语言/风格，不得新增事实、不得升级承诺强度、不得升级证据强度。
-- 输出封装（Strict JSON）：任一 LLM 节点之间的输出必须是“单个合法 JSON 对象”，不得夹带任何额外文本/Markdown/代码块。
+- 意图草案（intent_draft）：可治理意图候选；不得裁决、不得触发执行、不得宣称执行事实。
+- Surface Main Chain：Host 内部的最终表达生成链；接收事实、状态、记忆、情感与风格材料，产出候选表达，但不得绕过 Governor 或自行声明执行事实。
+- ReplyEnvelope：用户可见输出的收口契约；只有满足发送、持久化或缓存条件的最终回复可以进入对应下游，ACK、任务状态与降级失败不得写入人格记忆。
+- 结构化输出契约：任一进入治理、执行或最终表达的模型/Agent 输出，必须能被当前代码契约解析与归一化；不得夹带伪执行宣告或绕过审计字段。
 - 审计链事实（Audit Facts）：intent_log / governor_log / skill_exec_log 等可回放证据；是“是否发生过”的唯一判据来源。
 - Style Canon：风格骨架/表达范式库；只能调制口吻与节奏，不得生成事实断言或越权承诺。
 - World Canon（世界正典）：由 Host 主权维护的“最小权威内容集合”（系统术语、架构设定、关键不变量、必要世界观条目）；用于跨会话一致性引用与冲突裁决，但不构成执行事实，不得替代审计链。
 - 合规审查层（Constitutional QA）：对输出进行宪法禁令检查（伪执行宣告、越权承诺、Canon 当事实引用、格式漂移等）的规则层。
-- Intent 草案（intent_draft）：由语义内核（EgoCore/Planner）提出的“可治理意图候选”，不具备批准效力。
-- intent_log（提议日志）：记录“语义内核提出了什么 intent_draft”及其元信息（提议节点、模型快照、工具可见性子集哈希、lint 结果）。intent_log 不是批准，也不是执行事实。
+- intent_log（提议日志）：记录上游意图编译节点提出的 intent_draft 及其元信息（提议节点、模型快照、工具可见性子集哈希、lint 结果）。intent_log 不是批准，也不是执行事实。
 - 单编排者原则（Single Orchestrator）：所有 Agent 编排与终审输出只能发生在 Host；Edge 端任何模型/组件一律视为“远程能力提供者”，仅能产出草案，不得以任何形式替代 Host 终审。
 - Edge 端兜底草案模型（Edge Fallback LLM）：运行在 Edge 的小参数量语言模型（例如 3B 量化）；默认卸载、低频触发；仅允许产出“在场回应/输入清洗/摘要压缩/检索提示/草案答复（可选）”，永远不裁决、不触发执行，不得宣称任何执行事实或写入事实。
+- 外显执行面（Display/Actuator Surface）：Desktop Pet、MateEngine、VTS/VRM 等本地展示与动作执行层；只能呈现 Host 已批准或已生成的状态、动作、气泡与语音提示，不具备事实源、记忆源、政策源或审计源资格。
+- 外显状态与观测面（Avatar Behavior/State）：只读呈现或汇总 Avatar/Edge/MateEngine/VRM 的当前状态，不触发表情、动作或热键，不构成执行事实。
 
 ---
 
@@ -70,7 +55,7 @@
 2.1 Hard State（硬状态）
 - 只能由 Host 规则、物理观测、技能执行结果、时间演化改变；
 - 不允许被对话或任何解释器输出直接写入或宣称改变；
-- 典型字段：energy/mood/sys_mode/clearance_trust_snapshot/safety 等。
+- 典型字段：energy_level / mood_state / sys_mode / safety_flag / last_event_id / ts_ms 等；治理快照可派生 trust_level、rate_limit、scope、airlock 等门控输入。
 
 2.2 Soft State（叙事状态）
 - 仅用于表达层的叙事信号；
@@ -94,11 +79,11 @@
 
 3）可观测硬状态：Host 观测与代谢演化结果（写入硬账本）
 
-4）Bond SSOT：Neo4j 中关系向量与事件因果链（用于授权快照派生与叙事调制约束）
+4）Bond SSOT：由 Host 单写入口维护的关系事件、阶段状态与因果线索（用于授权快照派生与叙事调制约束）
 
 5）World Canon：主权维护的最小权威内容集合（用于一致性引用与冲突裁决；不具备执行事实效力）
 
-6）NARRATIVE_ONLY 内容（梦境/故事拉/遗产叙事等）：由系统生成的非事实叙事，必须标记 evidence_level=NARRATIVE_ONLY；不得升级为执行事实或记忆事实；召回时必须以“梦境/想象/设定”口径呈现
+6）NARRATIVE_ONLY 内容（梦境/故事拉取/遗产叙事等）：由系统生成的非事实叙事，必须标记 evidence_level=NARRATIVE_ONLY；不得升级为执行事实或记忆事实；召回时必须以“梦境/想象/设定”口径呈现
 
 7）Episodic 召回：相似性线索，仅作叙事素材/追问线索，不具备裁决权
 
@@ -123,18 +108,15 @@
 - 运行 Governor 规则，维护不变量与审计链；
 - 主权：Host 不“理解语言”，只执行规则，因此对注入天然免疫。
 
-4.2 语义内核（自我/解释器）
+4.2 意图编译与表达生成节点（解释器）
 允许做且只允许做两件事：
-- 生成叙事草案（narrative_zh）：中文语义草案；风格受 Style Canon 约束，事实受 Host 提供材料约束；
 - 生成 Intent 草案（intent_draft）：结构化、可校验、可被 Host 拒绝。
+- 生成用户可见表达候选：风格受 Style Canon 约束，事实受 Host 提供材料与审计链约束。
 
-宪法级输出封装（Strict JSON）
-- 语义内核→Host 的输出必须是“单个合法 JSON 对象”，不得输出任何 JSON 之外的额外文本、Markdown、代码块或多段内容。
-- 输出对象至少包含：narrative_zh（中文语义草案）与 intent_draft（Intent 草案或 null）。可选字段只能作为元信息，不得承载“执行已发生”的事实断言。
-- 若输出封装不可解析或含混（多段 JSON、夹带自然语言前后缀等），一律视为合规失败：不得进入执行路径，只允许拒绝/降级叙事，并在审计中标记为输出合规错误。
-
-渲染器（表达层）
-- 渲染器只负责把 narrative_zh 渲染为 rendered_ja（日文 C 风格叙事），不得新增事实、不得升级承诺强度、不得升级证据强度、不得引入新 intent；其输出同样必须是“单个合法 JSON 对象”。
+宪法级输出契约
+- 进入治理、执行或最终表达的输出必须符合当前代码约定的结构化契约；历史字段名不得作为宪法级必填项。
+- 输出中的可选字段只能作为元信息，不得承载“执行已发生”的事实断言。
+- 若输出不可解析、含混或夹带伪执行事实，一律视为合规失败：不得进入执行路径，只允许拒绝/降级叙事，并在审计中标记为输出合规错误。
 
 禁止事项：
 - 自行决定检索（RAG 主权在 Host）；
@@ -146,9 +128,9 @@
 - 时间延迟的漂移立法：日记→提案→Host 审核→有界执行；
 - 禁止修改宪法级门槛（risk/scope/token/门禁阈值等）。
 
-4.4 Edge / ClawdBot / Cloud Exocortex
-- Edge 只负责“身体侧能力与执行”，永远不裁决；Edge 可承载语音链路与外显能力（ASR/TTS/VTS）以及兜底草案模型，但其输出一律降权为草案，必须回到 Host 才能形成最终口径。
-- ClawdBot 只负责“怎么做（UI 步骤）”，永远不负责“做不做（合法性）”；任何 UI 动作必须受 Host Governor 与审计证据链约束。
+4.4 Edge / 外显执行面 / Cloud Exocortex
+- Edge 只负责“身体侧能力、感知、转发与本地执行”，永远不裁决；Edge 可承载语音链路、VTS/VRM、Avatar Behavior/State、Desktop Pet relay 以及兜底草案模型，但其输出一律降权为草案或观测，必须回到 Host 才能形成最终口径。
+- Desktop Pet 与 MateEngine 只负责“怎么显现（动作、表情、气泡、舞台提示）”，不负责“什么是真的、能不能做、是否已发生”；任何外显状态不得反写为 Hard State、Memory、World Canon 或 Audit Facts。
 - Cloud Exocortex 仅工具性与短暂性：不得携带人格、不得上行宪法/硬状态明文；云端输出一律降权为草案，不得直通执行。
 
 ---
@@ -156,47 +138,42 @@
 ## 5. 单向链（唯一合法执行路径）
 
 唯一合法执行链：
-输入 → 语义内核（叙事 + Intent 草案） → Host（Governor 裁决） → Skills/Actuators（执行） → Audit（回放日志）
+输入 → 意图草案/表达候选 → Host（Governor 裁决） → Skills/Actuators（执行） → Audit（回放日志） → ReplyEnvelope / 外显执行面
 
 事实声明规则：
-- 只有 Host 产生的 governor_log + approval_token + skill_exec_log 才构成“执行事实”；
+- 执行事实必须能由 Host 审计链回放；产生现实副作用或需要授权的执行，必须能同时指回 governor_log / token / skill_exec_log；
+- 只读观测类执行以当前工具契约与 skill_exec_log 结果为准，不得伪装成写入、确认或状态变更。
 - 任何“已执行/已保存/已确认/已完成”的对外表述必须引用审计链字段，或由 Host 基于审计事实重写。
 
 链路治理补充（宪法口径）：
 - 默认执行路径应优先选择可审计、低漂移的主链路；
 - 多 Agent 分支只能在 Host 治理通过后进入，且最终事实声明必须回收至同一审计链。
+- 外显执行面只能位于 Host 主链输出之后；桌宠、MateEngine、VTS/VRM 的展示成功，以及 Avatar Behavior/State 的状态快照，不等价于技能执行成功，也不得补写执行事实。
 
 ---
 
 ## 6. Governor（授权与安全治理）
 
-6.1 SkillMeta（宪法级强制字段）
-每个 Skill 必须声明并可静态扫描：
-- name
-- clearance_level（L0–L4）
-- risk_level（0–4）
-- reversible（true/false）
-- scopes（process/filesystem/network/ui/camera/mic/account/payment…）
-- requires_visual_audit（是否需要视觉落地）
-- requires_confirm_token（是否需要 confirm）
-- data_classification（NONE/INTERNAL/EXTERNAL_KNOWLEDGE）
-以及可选但强烈建议的：rate_limit、allowlist、denylist。
+6.1 可执行能力元数据（宪法级强制口径）
+每个进入执行面的能力必须能被 Host 归一化为当前代码契约中的元数据：
+- SkillMeta：skill_name、clearance、risk_level、scope、reversible、require_confirm、family/capability_tags 等。
+- ToolMeta：id、name、desc、schema_hash、side_effect_level（READ/WRITE）、auth_level（NONE/APPROVAL/CONFIRM）、domain_tags、version。
+- 调度画像、速率、白名单/黑名单等可作为附加治理材料，但不得替代上述基础契约。
 
-6.2 Clearance Levels（权威口径）
-- L0：叙事与拒绝
-- L1：低敏感只读感知/查询
-- L2：轻干涉/草案输出（可逆优先）
-- L3：复杂操作（要求落地审计）
-- L4：关键不可逆（confirm_token 强制；Safety 门槛）
+6.2 权限与风险口径
+- READ / NONE：只读观测，仍需审计结果，但不默认要求 approval_token。
+- WRITE / APPROVAL：产生副作用或状态写入，必须经 Host 批准并校验 approval_token。
+- CONFIRM 或 require_confirm=true：高风险、不可逆或需二次确认的路径，必须同时校验 confirm_token。
+- reversible=true：执行成功后必须能产生 manifest_ref，并由 Host 签发 undo_token；否则按 UNDO_REQUIRED 拒绝。
 
 6.3 Governor 规则（不可被覆盖）
-R1 Trust Gate（min_trust vs clearance_trust_snapshot）
-R2 Energy Gate（energy_cost 与代谢门槛）
+R1 Trust Gate（trust_level 与门槛）
+R2 Energy Gate（energy_level 与代谢门槛）
 R3 SysMode Gate（normal/focus/gaming/maintenance/locked/sleep 能力矩阵）
 R4 Rate Limit（按 skill 与 scope 限频）
 R5 Scope Policy（按 scope allow/deny）
 R6 Safety Gate（综合安全分门槛）
-R7 External Data Gate（外部数据进入/执行隔离）
+R7 Airlock Gate（外部数据进入/执行隔离）
 R8 Emotion Gate（情感临界态门控：在高风险情感组合下阻断执行类动作）
 
 ---
@@ -220,7 +197,7 @@ reason_code 是 Host 裁决层对外输出的稳定接口，不是提示工程�
 - INPUT/FORMAT：输入或意图格式不合法
 - AUTHZ/GATE：门禁不满足（trust/energy/sys_mode/rate_limit）
 - SCOPE/POLICY：作用域或策略禁止
-- SAFETY/VISUAL：安全评估/视觉红线触发
+- SAFETY/IMMUNE：安全评估、免疫拦截或风险状态触发
 - REPLAY/CONSISTENCY：重放/乱序/过期
 - DEPENDENCY/STATE：依赖不可用/系统状态不允许
 - AIRLOCK/EXTERNAL：气闸与外部数据门禁
@@ -238,46 +215,47 @@ B）重放与一致性保护
 - EXPIRED_INTENT
 
 C）门禁与授权
-- TRUST_GATE
-- ENERGY_GATE
-- SYSMODE_FORBIDDEN
+- TRUST_LOW
+- ENERGY_LOW
+- SYSMODE_BLOCKED
 - RATE_LIMITED
 
 D）作用域与策略
 - SCOPE_DENY
-- POLICY_DENY
 
-E）安全与视觉
-- SAFETY_TOO_LOW
-- VISUAL_REDLINE
-- UI_ELEMENT_NOT_FOUND
+E）安全与免疫
+- SAFETY_BLOCKED
+- EMOTION_GATE_BLOCKED
 
 F）依赖与系统状态
-- DEPENDENCY_UNAVAILABLE
-- SYSTEM_STATE_DENY
+- ORCH_DEPENDENCY_UNAVAILABLE
+- SERVICE_UNAVAILABLE_DEPENDENCY
 
 G）气闸与外部数据
+- AIRLOCK_BLOCKED
 - AIRLOCK_BLOCKED_EGRESS
 - AIRLOCK_BLOCKED_INGRESS
-- EXTERNAL_DATA_GATE
 
 H）票据与执行
-- SKILL_NOT_FOUND
+- TOOL_NOT_FOUND
+- TOOL_TOKEN_MISSING
+- SKILL_TOKEN_MISSING
 - TOKEN_INVALID
 - CONFIRM_REQUIRED
 - UNDO_REQUIRED
 
 I）性能与超时
-- PERF_TIMEOUT（通用时延超限）
-- PERF_LLM_TIMEOUT（LLM 调用超时）
-- PERF_RETRIEVAL_TIMEOUT（检索链路超时）
-- PERF_SKILL_TIMEOUT（Skill 执行超时）
+- ORCH_TIMEOUT（编排超时）
+- RETR_EMBED_TIMEOUT（嵌入阶段超时）
+- RETR_RERANK_TIMEOUT（重排阶段超时）
+- SANDBOX_TIMEOUT（隔离执行超时）
 
 J）调度与体验
 - SCHED_TASK_SUSPENDED（调度任务连续失败自动暂停）
 - SCHED_CONDITION_UNMET（触发条件不满足）
 - SCHED_NO_CONTENT（无实质内容可生成）
-- SYSMODE_FORBIDDEN_FOCUS（Focus 子模式禁止）
+- SYSMODE_FORBIDDEN（当前模式禁止）
+- BACKGROUND_LLM_MODE_BLOCKED（后台 LLM 任务在当前模式下被跳过）
 - RATE_LIMIT_EXCEEDED（频率超限）
 
 7.5 与叙事回注入绑定（必须）
@@ -291,9 +269,10 @@ J）调度与体验
 ## 8. Intent（语言→代码的唯一边界对象）
 
 8.1 Intent 的定位
-Intent 是对 Host 的行为请求，必须能被纯规则判断合法性；叙事属于语义内核（narrative 草案）。
+Intent 是对 Host 的行为请求，必须能被纯规则判断合法性；用户可见叙事属于表达候选，不具备批准或执行效力。
 
-8.2 Intent 最小字段（固定 JSON 对象）
+8.2 Intent 最小收口字段（固定 JSON 对象）
+当前 canonical intent 必须包含以下字段；下游可携带扩展字段，但扩展字段不得替代这些收口字段，也不得承载执行事实。
 - schema_version
 - id（全局唯一）
 - ts_ms
@@ -329,7 +308,8 @@ Intent 是对 Host 的行为请求，必须能被纯规则判断合法性；叙�
 - undo_token：可逆动作回滚票据（必须绑定 manifest 与 Vault 资产引用）
 
 9.2 Skills 强制验证（宪法口径）
-- 任何进入执行路径的动作都必须具备与 Intent 绑定一致的票据链；
+- WRITE、CONFIRM、require_confirm 或其他需票据路径，必须具备与 Intent 绑定一致的票据链；
+- READ 观测路径可不要求 approval_token，但仍必须经单入口执行并写入审计结果；
 - 需要 confirm_token/undo_token 的动作，缺失时必须拒绝并返回对应 reason_code；
 - 票据不合法或绑定不一致时，必须拒绝并返回 reason_code=TOKEN_INVALID（或更精确子类）。
 
@@ -338,7 +318,7 @@ Intent 是对 Host 的行为请求，必须能被纯规则判断合法性；叙�
 ## 10. 审计即事实（Triptych 三联画责任）
 
 必须可回放的三段责任：
-- Proposal responsibility：语义内核提出了什么（intent_log：intent_draft 原文 + 提议元信息）
+- Proposal responsibility：意图编译节点提出了什么（intent_log：intent_draft 原文 + 提议元信息）
 - Adjudication responsibility：Host 依据哪些规则批准/拒绝（governor_log）
 - Execution responsibility：技能实际做了什么、结果如何（skill_exec_log）
 
@@ -350,17 +330,17 @@ Intent 是对 Host 的行为请求，必须能被纯规则判断合法性；叙�
 
 sys_mode 是 Hard State，用于决定资源策略、交互策略、技能可用矩阵。
 - normal：默认完整模式（在门禁允许范围内运行）
-- focus：专注模式，暂停中断型能力（主动对话/通知推送/非紧急调度任务），保留被动响应；进入/退出必须有来源证据并写 hard_state_log
-- gaming：不打扰优先，强限频与禁止视觉/UI 自动化（默认）
+- focus：专注模式，暂停中断型能力（主动对话/通知推送/非紧急调度任务），保留被动响应；进入/退出必须有来源证据，并进入模式切换历史或等价审计记录
+- gaming：不打扰优先，强限频；禁止主动打扰型能力（默认）
 - maintenance：维护模式，执行类路径默认阻断
 - locked：锁定模式，执行类路径默认阻断
 - sleep：低干预；禁止执行类技能；允许记录与延后；允许梦境/日记等低风险叙事生成（标记为 NARRATIVE_ONLY）
 
-强制规则：当 sys_mode 禁用某能力时，拒绝必须 reason_code=SYSMODE_FORBIDDEN（或子类 SYSMODE_FORBIDDEN_FOCUS），并回注入系统事件。
+强制规则：当 sys_mode 禁用某能力时，拒绝必须使用当前代码稳定枚举（如 SYSMODE_FORBIDDEN / SYSMODE_BLOCKED），并回注入系统事件。
 
 ### 11.2 系统发起 Intent（Scheduler）宪法约束
 - Host 定时调度器可注册周期性/定时触发的"系统发起 Intent"（proposer_node_id=scheduler）。
-- 系统发起的 Intent 必须与用户发起的请求享有完全相同的治理约束：Governor→Token→Skill→Audit 单向链。
+- 系统发起的执行型任务必须受 sys_mode、资源、风险与审计约束；进入 skill 执行面时必须回到 Host 的 Governor→Token→Skill→Audit 单向链。
 - 调度器只负责"何时触发"与"触发何种 intent_draft"，不负责裁决或执行。
 - 调度器配置必须版本化、可审计。
 - 连续失败必须自动降级（暂停 + 告警）而非无限重试。
@@ -368,15 +348,16 @@ sys_mode 是 Hard State，用于决定资源策略、交互策略、技能可用
 ### 11.3 NARRATIVE_ONLY 内容的宪法定位
 - 由调度器或系统能力生成的非事实叙事（如梦境、日记反思、故事拉引用）必须标记 evidence_level=NARRATIVE_ONLY。
 - NARRATIVE_ONLY 内容在真相层级中位于第 6 级（低于 World Canon），不得升级为执行事实或记忆事实。
-- 召回时必须以"梦境/想象/反思"口径呈现；任何将其升级为事实的尝试必须被 QA 拦截（NARRATIVE_ONLY_AS_FACT_VIOLATION）。
+- 召回时必须以"梦境/想象/反思"口径呈现；任何将其升级为事实或 Canon/Bond 写入的尝试必须被 MemoryGuard / Distillation / QA 等当前等价守卫拒绝。
 
 ---
 
 ## 12. 人格表达设定（Persona 约束）
 
-12.1 语言与称呼（可配置但需稳定）
-- 默认称呼为「マスター / master」：允许在“明确配置”下二选一，但对话内不得漂移；
-- 文本风格：短句、适度停顿（……）、克制承诺；
+12.1 语言、身份与称呼（由 Soul/Persona 配置收口）
+- 身份、称呼与语言风格由当前 Soul/Persona 配置提供，经 Host 编译后成为稳定表达锚；白皮书不写死具体称呼。
+- 称呼可随当前 Soul 关系设定自然变化，但同一会话内不得无依据漂移，也不得用称呼替代实质回应。
+- 文本风格：短句、适度停顿（……）、克制承诺；具体口吻以当前 Soul/Style Canon 为准。
 - 禁止句型：任何“已执行/已保存/已确认/已记忆”在无审计引用或无 Host 事实材料时出现；
 - 当事实不确定或来源仅为回忆/相似性线索时，必须显式标注“不确定/需要核验”，并优先回到可审计依据。
 
@@ -394,32 +375,34 @@ sys_mode 是 Hard State，用于决定资源策略、交互策略、技能可用
 
 ## 13. 宪法不变量（可验证断言）
 
-I1 任何 skill_exec 必须有对应 APPROVE + approval_token
+I1 任何 WRITE / 需确认 / 产生现实副作用的 skill_exec 必须有对应 APPROVE 与有效 token；READ 观测类执行必须经单入口并留下 skill_exec_log
 I2 任何 Hard State 变化必须可由代谢/evolution/审计解释
 I3 外部输出不得直接触发 skill_exec_log
-I4 任何 ClawdBot 步骤必须有 before/after 证据（clawd_action_log）
-I5 记忆写入必须有 MEMORY Intent（或内部等价事件）
-I6 任何 L4 操作必须有 confirm_token
+I4 用户可见输出必须经 ReplyEnvelope 收口；非 final_reply 或不可发送输出不得写入人格记忆
+I5 记忆与人格状态写入必须走 memory skill、授权写域或内部等价事件；表达层不得直接写入
+I6 任何 CONFIRM / require_confirm / 当前代码定义的高风险确认路径必须有 confirm_token
 I7 session 内 seq 单调；重放/乱序必须拒绝
-I8 禁止旁路：禁止 direct impl/driver；必须 loader+token
-I9 Neo4j 为 Bond SSOT；snapshot 仅 bond_dynamics 写入
+I8 禁止旁路：可执行能力必须经注册表、SkillLoader/ToolBroker/MCPToolBroker 等单入口，并受当前 token 与审计契约约束
+I9 Bond SSOT 只能由 Host 单写入口更新；关系快照不得由表达层或外显面反写
 I10 云端出站必须有 airlock 脱敏报告
-I11 可逆环境变更必须产生 undo_token + manifest
+I11 代码契约标记为 reversible 的执行或资产变更，成功时必须产生 manifest_ref，并由 Host 签发 undo_token
 I12 Artifact Vault 必须可寻址、可审计、可 GC（GC 也可审计）
-I13 语义内核/渲染器→Host 输出封装必须可解析为单个 JSON 对象（至少包含 narrative_zh 或 rendered_ja 等约定字段）；任何不可解析/夹带多余文本的输出都不得进入执行路径，只允许拒绝或降级叙事，并留下可审计标记
+I13 进入治理、执行或最终表达的结构化输出必须按当前契约解析与归一化；任何不可解析、夹带伪执行事实或试图依赖历史必填字段的输出都不得进入执行路径，只允许拒绝或降级叙事，并留下可审计标记
 I14 工具可见性必须可追溯：当任一 LLM 节点暴露 tool_meta_pack 时，intent_log 必须记录 tool_visibility_hash；WRITE 类工具默认不可见；任何工具执行必须经单入口并受 Governor/Token 约束
 I15 NARRATIVE_ONLY 内容不得升级为执行事实或记忆事实；召回时必须以"梦境/想象/反思"口径呈现
-I16 系统发起 Intent（proposer_node_id=scheduler）必须与用户发起 Intent 享有相同治理约束（Governor→Token→Skill→Audit）
+I16 系统发起的执行型任务必须受 sys_mode、资源、风险与审计约束；需要进入 skill 执行面时，必须回到 Host 的 Governor/Token/Skill/Audit 链
 I17 情感临界态门控必须可审计：当 Emotion Gate 命中阻断条件时，执行类动作必须拒绝并留下可回放 reason_code 与规则轨迹
+I18 外显执行面与外显状态面不得成为事实源：Desktop Pet、MateEngine、VTS/VRM 的动作、气泡、姿态或展示回执，以及 Avatar Behavior/State 的状态快照，不得反向定义 Hard State、Memory、World Canon、Governor 裁决或 Audit Facts
 ---
 
-## 14. 威胁模型（T1–T5）与控制概览
+## 14. 威胁模型（T1–T6）与控制概览
 
-T1 注入 → 单向链 + Governor 门禁 + 票据化
+T1 注入 → 单向链 + Governor 门禁 + 必要票据
 T2 工具滥用 → 强类型 args + scope policy + safety gate
-T3 状态篡改 → Hard State 主权 + SSOT + drift locks
+T3 状态篡改 → Hard State 主权 + 授权写域 + 单写入口
 T4 重放/混淆 → id/seq/ts/nonce + 签名 + 重放窗口
-T5 格式漂移 → 输出封装（Strict JSON）+ 解析边界 + 合规审查（Constitutional QA）
+T5 格式漂移 → 结构化输出契约 + ReplyEnvelope 收口 + 解析边界 + 合规审查（Constitutional QA）
+T6 外显面越权/回灌 → 外显执行面降权 + Host-only 审计事实 + 禁止展示回执写入事实层
 
 ---
 
@@ -427,9 +410,10 @@ T5 格式漂移 → 输出封装（Strict JSON）+ 解析边界 + 合规审查�
 
 本节只定义“必须有覆盖的口径”，用例清单与工程落地细节在《开发规范》。
 - 每个 reason_code 至少有最小回归覆盖其触发路径；同一路径在同版本下 reason_code 稳定；
-- 无票据进入执行路径必须失败；L4 无 confirm_token 必须拒绝；
-- ClawdBot 红线熔断与置信度门槛必须生效；
+- 需票据路径无票据必须失败；CONFIRM / require_confirm 路径无 confirm_token 必须拒绝；
+- ReplyEnvelope 收口必须生效；非 final_reply 或不可发送输出不得进入人格记忆；
 - 外脑出站必须脱敏、入站必须隔离，不得直通执行；
+- Desktop Pet / MateEngine / VTS / VRM 的动作与展示回执，以及 Avatar Behavior/State 的状态快照，不得被测试或实现视为执行事实、记忆事实或 Governor 裁决；
 - 任意阶段异常不得导致 Host 输出崩溃，必须返回可解析的最终结构。
 
 注意：

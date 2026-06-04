@@ -1,9 +1,9 @@
 受众：MASTER
 标题：文档地图（唯一入口）
 
-版本：v3.7
-日期：2026-05-30
-维护：2026-05-30（Batch 1+2 架构与契约文档全量升级到 v3.0；旧架构快照归档至 `docs/_history/2026-04-22_arch_snapshot/`）
+版本：v3.8
+日期：2026-06-04
+维护：2026-06-04（补齐 Desktop Pet / MateEngine Bridge 外显运行面入口；保留 Batch 1+2 架构与契约文档 v3.0 口径；旧架构快照归档至 `docs/_history/2026-04-22_arch_snapshot/`）
 
 本仓库所有"应该读什么、从哪里开工、哪些文档禁止当任务来源"，以本文件为准。
 
@@ -48,13 +48,15 @@
 - 实现层的任务来源只能是 DevTasks（以及 AGENTS 工作规范）；不得把白皮书/PRD/Theory/Trace 当任务来源。
 - Project（文档代理）负责把讨论沉淀到 PRD/DevSpec/DevTasks，并维护 Trace 覆盖关系。
 
-当前代码优先阅读顺序（2026-05-30 起，Batch 1+2 全量升级后）：
+当前代码优先阅读顺序（2026-06-04 起，Desktop Pet / MateEngine Bridge 入口补齐后）：
 - `README.md`：仓库入口与运行面总览
 - `docs/50_project/arch/CURRENT_CODE_ARCHITECTURE.md` (v3.0)：当前代码事实总览
 - `docs/50_project/arch/CORE_MODULES_DETAILED_REFERENCE.md` (v3.0)：主链核心模块与覆盖优先级
 - `docs/50_project/arch/DIGITAL_LIFE_BODY_FRONTEND_ARCHITECTURE_20260419.md`：前端主体化信息架构
 - `docs/50_project/arch/dataflow_report.md` (v3.0)：请求流与回流补充
 - `docs/50_project/arch/diagrams/00_INDEX.md` (v1.0)：架构图册总目录（7 张图覆盖运行面拓扑 / 主链 / 召回 / Executive / Tribe / 输入输出 / Observability）
+- `docs/30_devspec/desktop_pet_runtime.md`：Electron + Live2D 本地桌宠运行时、Host/Edge 控制路径与交互限制
+- `docs/30_devspec/mateengine_bridge.md`：MateEngine 本地桌宠桥、Host 路由、UDP/HTTP bridge、生命周期/表情/动作编排口径
 - `docs/15_theory/RETRIEVAL_LAYER_CONTRACT.md` (v3.0)：RecallFusionServiceContract 契约
 - `docs/15_theory/TOOLS_MEMORY_LAYER_CONTRACT.md` (v3.0)：LifeMemoryStore SSOT 与 tools 套套
 - `docs/60_trace/requirements_trace.md`：需求到设计/测试映射
@@ -82,6 +84,14 @@
 
 - docs/30_devspec/ModelPlane.md
   用途：模型平面规格（多模型节点分工、路由、降级、出网最小化、审计字段、回归口径）；用于"可回放、可追责"的模型配置治理。
+  读者：MASTER、实现层（按契约实现与验证）。
+
+- docs/30_devspec/desktop_pet_runtime.md
+  用途：Desktop Pet 本地运行面契约。记录 Electron + Live2D 透明桌宠窗口、`127.0.0.1:18788` HTTP 控制入口、Host 直连/Edge 转发路径、VTS 与桌宠的边界。
+  读者：MASTER、实现层（按契约实现与验证）。
+
+- docs/30_devspec/mateengine_bridge.md
+  用途：MateEngine Bridge 本地表现层契约。记录 `host_brain/channels/mateengine.py`、`/v1/mateengine/*` Host 路由、UDP signal、HTTP bridge、free-text patch、生命周期状态、口型能量与动作编排。
   读者：MASTER、实现层（按契约实现与验证）。
 
 4）代理行为规范（实现层）
