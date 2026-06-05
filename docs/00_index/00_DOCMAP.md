@@ -1,9 +1,9 @@
 受众：MASTER
 标题：文档地图（唯一入口）
 
-版本：v3.8
-日期：2026-06-04
-维护：2026-06-04（补齐 Desktop Pet / MateEngine Bridge 外显运行面入口；保留 Batch 1+2 架构与契约文档 v3.0 口径；旧架构快照归档至 `docs/_history/2026-04-22_arch_snapshot/`）
+版本：v4.1
+日期：2026-06-05
+维护：2026-06-05（PRD v2.0 / DevSpec v2.0 重写为当前代码参考；契约文档补全遗漏模块；ModelPlane 更新路由校准；架构全景 Edge RPC 端口说明修正）
 
 本仓库所有"应该读什么、从哪里开工、哪些文档禁止当任务来源"，以本文件为准。
 
@@ -50,10 +50,10 @@
 
 当前代码优先阅读顺序（2026-06-04 起，Desktop Pet / MateEngine Bridge 入口补齐后）：
 - `README.md`：仓库入口与运行面总览
-- `docs/50_project/arch/CURRENT_CODE_ARCHITECTURE.md` (v3.0)：当前代码事实总览
-- `docs/50_project/arch/CORE_MODULES_DETAILED_REFERENCE.md` (v3.0)：主链核心模块与覆盖优先级
+- `docs/50_project/arch/CURRENT_CODE_ARCHITECTURE.md` (v3.2)：当前代码事实总览
+- `docs/50_project/arch/CORE_MODULES_DETAILED_REFERENCE.md` (v3.2)：主链核心模块与覆盖优先级
 - `docs/50_project/arch/DIGITAL_LIFE_BODY_FRONTEND_ARCHITECTURE_20260419.md`：前端主体化信息架构
-- `docs/50_project/arch/dataflow_report.md` (v3.0)：请求流与回流补充
+- `docs/50_project/arch/dataflow_report.md` (v3.2)：请求流与回流补充
 - `docs/50_project/arch/diagrams/00_INDEX.md` (v1.0)：架构图册总目录（7 张图覆盖运行面拓扑 / 主链 / 召回 / Executive / Tribe / 输入输出 / Observability）
 - `docs/30_devspec/desktop_pet_runtime.md`：Electron + Live2D 本地桌宠运行时、Host/Edge 控制路径与交互限制
 - `docs/30_devspec/mateengine_bridge.md`：MateEngine 本地桌宠桥、Host 路由、UDP/HTTP bridge、生命周期/表情/动作编排口径
@@ -69,20 +69,20 @@
   读者：MASTER、Project（文档代理）。实现层不应把它当任务来源。
 
 2）需求文档（PRD）
-- docs/20_prd/PRD.md
-  用途：定义要做什么（范围、用户故事、验收、非功能指标），不描述实现步骤。
-  读者：MASTER、Project（文档代理）。实现层不应把它当任务来源（除非 MASTER 任务卡点名引用）。
+- docs/20_prd/PRD.md (v2.0)
+  用途：基于当前代码事实的系统能力描述。覆盖 5 运行面、Chat 主链、Surface 人格渲染、Gateway 多平台、情感/记忆/Canon/Tribe/Obs/Avatar/Voice/Mode/Codex/Security/Scheduler 功能域。
+  读者：MASTER、Project（文档代理）。
 
 3）开发文档（DevSpec + 任务 + 模型平面）
-- docs/30_devspec/DevSpec.md
-  用途：把 PRD 落到模块、接口、协议、Schema、日志、错误码、状态机；属于工程契约与蓝图层。若与当前代码事实文档冲突，以 `README.md`、`CURRENT_CODE_ARCHITECTURE.md` 和实际代码为准。
+- docs/30_devspec/DevSpec.md (v2.0)
+  用途：当前代码的工程契约参考手册。覆盖架构总览、Host Main 主链、Surface 主链、记忆与召回、Tribe、Gateway、外显执行面、可观测性、安全与免疫、路由表、数据格式契约。每条契约可追溯到具体 .py 文件。
   读者：实现层（主要）、MASTER。
 
 - docs/30_devspec/DevTasks.md
   用途：实现层可逐条执行的任务清单（每条都有输入/输出/验收）。
   读者：实现层（唯一任务入口）。
 
-- docs/30_devspec/ModelPlane.md
+- docs/30_devspec/ModelPlane.md (v1.6)
   用途：模型平面规格（多模型节点分工、路由、降级、出网最小化、审计字段、回归口径）；用于"可回放、可追责"的模型配置治理。
   读者：MASTER、实现层（按契约实现与验证）。
 

@@ -1,8 +1,8 @@
 受众：MASTER
 标题：当前数据流报告（2026-06-04）
 
-版本：v3.1
-日期：2026-06-04
+版本：v3.2
+日期：2026-06-05
 定位：基于当前仓库代码，描述 `/v1/chat` / `/v1/host/input` / `/v1/edge/events` / Unified Message Gateway / Observability / Desktop Pet / MateEngine Bridge 等主流量路径的真实走向。若历史方案文档与本文冲突，以本文与代码为准。
 
 # 当前数据流报告（2026-06-04）

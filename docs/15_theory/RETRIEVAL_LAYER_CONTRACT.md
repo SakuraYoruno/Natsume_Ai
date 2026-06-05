@@ -20,6 +20,7 @@
 - `host_brain/retrieval/hybrid_fusion.py`（`HybridFusionStrategy` 向量 + FTS 融合）
 - `host_brain/retrieval/recall_schemas.py`（数据 schema）
 - `host_brain/retrieval/audit_preview.py`（审计预览）
+- `host_brain/retrieval/markdown_kb_store.py`（Markdown 知识库召回）
 - `host_brain/persona/surface_memory_recall.py`（消费者：surface 主链记忆召回）
 
 ---
@@ -66,6 +67,7 @@ retrieval 层**不**再做：
 | `hybrid_fusion.py` | `HybridFusionStrategy`（vector + FTS 加权融合） |
 | `recall_schemas.py` | `RecallFusionResult` / `RecallRouteConfig` / `RecallRuntimeConfig` 等 schema |
 | `audit_preview.py` | 召回结果的审计预览 |
+| `markdown_kb_store.py` | Markdown 知识库召回存储 |
 
 ---
 

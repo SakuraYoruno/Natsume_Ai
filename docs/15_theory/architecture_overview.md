@@ -21,7 +21,7 @@
 graph TB
     USER["用户 / 外部平台 / 前端"] --> HOST["Host Main<br/>host_brain/__main__.py<br/>(host_brain.app.asgi:app)<br/>:8000"]
     USER --> OBS["Observability Backend<br/>host_brain/obs_main.py<br/>(host_brain.app.obs_fastapi_app:app)<br/>:18082"]
-    HOST --> EDGE["Edge RPC<br/>edge_client/__main__.py<br/>:17800"]
+    HOST --> EDGE["Edge RPC<br/>edge_client/__main__.py<br/>(端口由 EDGE_RPC_PORT 配置，默认 17800)"]
     USER --> GATEWAY["Unified Message Gateway<br/>edge_client/gateway/server.py<br/>:19000"]
     GATEWAY --> HOST
     OBS --> MON["Monitor UI<br/>host_brain/app/monitor_ui/"]

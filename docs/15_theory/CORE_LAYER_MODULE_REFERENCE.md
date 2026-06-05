@@ -31,6 +31,7 @@
 - `host_brain/core/emotion_constants.py`
 - `host_brain/core/resource_manager.py`
 - `host_brain/core/soft_fail.py`
+- `host_brain/core/service_reporters.py`
 
 ---
 

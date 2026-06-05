@@ -1,8 +1,8 @@
 受众：MASTER
 标题：host_brain 外围层接口契约（airlock / bond / channels / vision / lsp / mcp）
 
-版本：v2.0
-日期：2026-05-30
+版本：v2.1
+日期：2026-06-05
 归属：docs/15_theory/
 
 ---
@@ -34,6 +34,7 @@
 | `image_filter.py` | 图像内容过滤 |
 | `sanitizer.py` | 输入净化器 |
 | `sandbox_config.py` | 沙箱运行时配置 |
+| `pii_filter.py` | PII（个人身份信息）过滤 |
 
 ### 1.2 quarantine_ingress（入站隔离）
 
@@ -128,6 +129,10 @@ result = executor.execute(
 | `summarizer.py` | Bond 摘要生成器 |
 | `async_queue.py` | 异步写入队列 |
 | `migration_runner.py` | Bond 数据库迁移执行器 |
+| `bond_narrative.py` | Bond 关系叙事生成 |
+| `milestone_tracker.py` | 关系里程碑追踪 |
+| `shared_memory_index.py` | 共享记忆索引 |
+| `user_identity.py` | 用户身份画像 |
 
 ### 2.2 BondDynamicsWriter（唯一写入路径）
 
@@ -226,6 +231,7 @@ class StageTransitionResult:
 | `multimodal_processor.py` | 多模态信号加工 |
 | `wechat.py` | WeChat 审计化通道 I/O |
 | `wechat_health.py` | WeChat 健康检查 |
+| `mateengine.py` | MateEngine UDP 桥接（姿态/表情/动作控制） |
 
 ### 3.2 VTS 通道（VTube Studio）
 

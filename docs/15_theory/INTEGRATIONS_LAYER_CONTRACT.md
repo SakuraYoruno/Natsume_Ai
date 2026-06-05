@@ -30,6 +30,11 @@
 - `host_brain/integrations/llm_gateway.py`
 - `host_brain/integrations/llm_gateway_schemas.py`
 - `host_brain/integrations/llm_helpers.py`
+- `host_brain/integrations/codex_cli_provider.py`
+- `host_brain/integrations/evidence_priority.py`
+- `host_brain/integrations/governor_rules_cache.py`
+- `host_brain/integrations/graph_evidence.py`
+- `host_brain/integrations/graph_model_resolve.py`
 
 ---
 
@@ -77,6 +82,11 @@ Governed Runtime Integration Layer
 | `evidence_circuit_breaker.py` | 写入熔断保护 |
 | `llm_gateway.py` | 模型调用网关、探测、路由、QA/Airlock |
 | `llm_gateway_schemas.py` | `GatewayResult` / `LLMHealthProbeResult` / `LLMRouteResult` |
+| `codex_cli_provider.py` | Codex CLI 作为 LLM provider 的适配 |
+| `evidence_priority.py` | Evidence 写入优先级管理 |
+| `governor_rules_cache.py` | Governor 规则缓存 |
+| `graph_evidence.py` | Graph 执行 evidence 写入（Evidence Plane SQLite） |
+| `graph_model_resolve.py` | 图节点模型解析 |
 
 ---
 
