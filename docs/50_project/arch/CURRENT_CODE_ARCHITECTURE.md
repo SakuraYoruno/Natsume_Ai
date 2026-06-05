@@ -127,6 +127,8 @@ Natsume_Ai/
 │  │  │   surface_scene_quality_pack.py / surface_low_info_guidance.py
 │  │  ├─ isolated_surface_harness.py / isolated_surface_continuity.py
 │  │  ├─ inner_world.py / inner_activity_agent.py / offline_continuity.py
+│  │  ├─ inner_monologue.py / motive_engine.py
+│  │  ├─ text_quality_gate.py / galgame_taste_guard.py
 │  │  ├─ emotional_silence.py / emotional_proactive.py /
 │  │  │   evolution_orchestrator.py / interaction_pattern_analyzer.py
 │  │  └─ galgame_text_contract.py / galgame_text_scorer.py / sample_guided_text_scorer.py
@@ -158,12 +160,23 @@ Natsume_Ai/
 │  ├─ canon/                  # 人物 / 世界 / 风格 canon
 │  ├─ governor/ scheduler/    # 治理与调度
 │  ├─ observability/          # 观测聚合与查询
-│  ├─ conversation/ core/ audit/ release/ tools/ skills/ mcp/ vision/
+│  ├─ conversation/ core/ audit/ release/ tools/ skills/ mcp/
 │  ├─ channels/
 │  │  └─ mateengine.py       # MateEngine UDP signal / HTTP bridge 通道
 │  ├─ integrations/ reasoning/ runtime/ lsp/ evolution_lab/
 │  ├─ immune_memory/ organ_ops/ airlock/
-│  └─ agents/ handlers/       # 兼容性壳层与共享 helper
+│  └─ app/
+│     ├─ handlers/            # 9 个 Agent handler（chat/emotion/intent/judge/repair/retrieval/supervisor/translate）
+│     ├─ context/             # 21 个上下文模块（interaction/dialogue/drive/affect/soul/topic/persona_expression 等）
+│     ├─ agents/              # 4 个 Agent 基础设施（contract/registry/react_loop/tool_registry）
+│     ├─ memory/              # 5 个 App 层记忆模块（state_arbiter/memory_guard/distillation_engine/episodic_store）
+│     ├─ automation/          # 3 个自动化模块（task_scheduler/scheduler_routes/host_desktop）
+│     ├─ vision/              # 5 个视觉模块（action_planner/agent_loop/clawdbot_protocol/ui_assertion/edge_rpc_client）
+│     ├─ llm/                 # 模型路由矩阵（routing_matrix）
+│     ├─ schemas/             # 核心数据结构（agent_envelope/memory_types/routing_types）
+│     ├─ settings/            # 7 个 Settings 模块（base/core/llm/observability/tribe/capability_forge）
+│     ├─ recall/              # 语义召回（semantic_recall）
+│     └─ graph/               # 图类型定义（chain_types）
 ├─ edge_client/                # Edge RPC、语音执行、网关、平台适配器
 │  ├─ __main__.py / app/ runtime/ senses/ actuators/ rpc/
 │  ├─ runtime/avatar_behavior.py / voice_pipeline.py  # avatar 状态与语音/口型行为链

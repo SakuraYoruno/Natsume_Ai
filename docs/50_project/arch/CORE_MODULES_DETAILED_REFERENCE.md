@@ -268,17 +268,79 @@ graph TD
 - `reply_performance.py`：commit 性能记录
 - `reply_plan.py`：旧链 reply plan 的兼容外壳（不再是最终作者）
 
-## 5. Surface 主链核心模块（host_brain/persona/）
+## 5. Agent Handler 层（host_brain/app/handlers/）
 
-### 5.1 `surface_main_chain.py`
+9 个 handler，负责各 Agent 类型的受控执行：
+
+| 文件 | 职责 |
+|---|---|
+| `chat_agent_handler.py` | ChatAgent 的 handler — 渲染路由与 surface 调用 |
+| `intent_agent_handler.py` / `intent_agent_entry_handler.py` | Intent agent 的 handler 与入口 handler |
+| `emotion_agent_handler.py` | 情绪 agent handler |
+| `judge_agent_handler.py` | Judge agent handler（收口裁判汇总） |
+| `supervisor_dispatch_handler.py` | Supervisor 分派 handler（agent 间 dispatch） |
+| `retrieval_agent_handler.py` | 检索 agent handler |
+| `repair_agent_handler.py` | Repair agent handler（修复/重写） |
+| `translate_agent_handler.py` | 翻译 agent handler |
+
+## 6. Context 层（host_brain/app/context/）
+
+21 个模块，构成 chat 请求的上下文表示层：
+
+| 文件 | 职责 |
+|---|---|
+| `interaction_state.py` / `interaction_thread.py` / `interaction_facts_plane.py` | 交互状态、线程、事实面 |
+| `dialogue_state.py` / `conversation_interpretation.py` | 对话状态与会话解释 |
+| `drive_state.py` / `affect_state.py` | 驱动状态与情感状态 |
+| `soul_runtime.py` | 灵魂运行时（人格状态） |
+| `persona_expression.py` | 人格表达 |
+| `relationship_state.py` | 关系状态 |
+| `topic_state.py` / `topic_ledger.py` | 话题状态与账本 |
+| `tactic_ledger.py` / `text_budget.py` | 策略账本与文本预算 |
+| `prompt_context_plane.py` | Prompt 上下文面 |
+| `perception_packet.py` | 感知包 |
+| `retrieval_context.py` | 召回上下文 |
+| `emotional_act.py` / `social_act.py` / `multimodal_act.py` | 行为表示（情绪/社交/多模态） |
+
+## 7. Agent 基础设施（host_brain/app/agents/）
+
+| 文件 | 职责 |
+|---|---|
+| `agent_contract.py` | Agent 契约 Schema |
+| `agent_registry.py` | Agent 注册表（AGENT_ALLOWLIST） |
+| `react_loop.py` | ReAct loop 实现 |
+| `tool_registry.py` | Agent 工具注册 |
+
+## 8. App 层记忆模块（host_brain/app/memory/）
+
+与 `host_brain/memory/`（SSOT 层）不同，这层负责运行时的仲裁与守卫：
+
+| 文件 | 职责 |
+|---|---|
+| `state_arbiter.py` / `state_write_arbiter.py` | 状态源仲裁器 — 决定用哪个记忆源 |
+| `memory_guard.py` | 记忆写入守卫 — 防止非法写入 |
+| `distillation_engine.py` | 蒸馏引擎（app 层视角） |
+| `episodic_store.py` | Episodic 存储的 app 层访问封装 |
+
+## 9. Automation & 调度（host_brain/app/automation/）
+
+| 文件 | 职责 |
+|---|---|
+| `task_scheduler.py` | HostTaskScheduler — Host 常驻任务调度器 |
+| `scheduler_routes.py` | Automation 调度 REST 路由 |
+| `host_desktop.py` | Host 桌面能力封装 |
+
+## 10. Surface 主链核心模块（host_brain/persona/）
+
+### 10.1 `surface_main_chain.py`
 
 当前职责：Surface 主链的 facade。提供 `SurfaceMainChainInput` / `SurfaceMainChainResult`。
 
-### 5.2 `surface_packet_compiler.py`
+### 10.2 `surface_packet_compiler.py`
 
 当前职责：把高层输入（`SurfaceMainChainInput` / `CompiledSurfaceInput`）编译成 surface runtime 可消费的 packet（`SurfaceTaskControl`、必要事实、style anchor、must_not_do）。
 
-### 5.3 `surface_runtime.py`（1995 行）
+### 10.3 `surface_runtime.py`（1995 行）
 
 当前职责：Surface 主链的运行时。`SurfaceRuntime.run(...)` 返回 `SurfaceRuntimeResult`：
 
@@ -288,7 +350,7 @@ graph TD
 - penalize 元语言 / 自指 / 句柄类输出
 - 输出 `selected_text` + `observation_codes` + `natsume_emotion_tag`
 
-### 5.4 `surface_memory_recall.py`（4484 行）
+### 10.4 `surface_memory_recall.py`（4484 行）
 
 当前职责：Surface 主链的**记忆召回包**：
 
@@ -299,11 +361,11 @@ graph TD
 
 为什么核心：normal chat 的记忆事实**只通过这里**注入主链；旧的 retrieval bridge 已被替换。
 
-### 5.5 `surface_affect_control.py` / `surface_influence_packet.py` / `surface_organ_influence.py`
+### 10.5 `surface_affect_control.py` / `surface_influence_packet.py` / `surface_organ_influence.py`
 
 当前职责：将情绪 / 器官信号 / 关系状态压缩成 `SurfaceAffectControlPacket` / `SurfaceInfluencePacket`，作为 surface runtime 的"克制度"控制输入。
 
-### 5.6 `surface_scene_quality_pack.py` / `surface_original_quote_bank.py` / `surface_low_info_guidance.py`
+### 10.6 `surface_scene_quality_pack.py` / `surface_original_quote_bank.py` / `surface_low_info_guidance.py`
 
 当前职责：
 
@@ -311,7 +373,7 @@ graph TD
 - `surface_original_quote_bank`：原作引语库（Sora 风格 anchor）
 - `surface_low_info_guidance`：低信息回合的指导
 
-### 5.7 `isolated_surface_harness.py` / `isolated_surface_continuity.py`
+### 10.7 `isolated_surface_harness.py` / `isolated_surface_continuity.py`
 
 当前职责：Surface 主链的**离线评估 harness**：
 
@@ -320,11 +382,11 @@ graph TD
 - A/B 比较与 weak-pass 重试
 - 仅在测试与离线 quality eval 中使用，不进 chat 主链
 
-### 5.8 `galgame_text_contract.py` / `galgame_text_scorer.py` / `galgame_taste_guard.py` / `sample_guided_text_scorer.py`
+### 10.8 `galgame_text_contract.py` / `galgame_text_scorer.py` / `galgame_taste_guard.py` / `sample_guided_text_scorer.py`
 
 当前职责：galgame 风格守卫与文本质量评分，作为 `surface_runtime` reranker 的一部分。
 
-### 5.9 `inner_world.py` / `inner_activity_agent.py` / `offline_continuity.py` / `inner_monologue.py`
+### 10.9 `inner_world.py` / `inner_activity_agent.py` / `offline_continuity.py` / `inner_monologue.py`
 
 当前职责：Phase XVI 离线内心世界 + 内在活动驱动：
 
@@ -333,28 +395,28 @@ graph TD
 - `offline_continuity.py`：唤醒时的状态注入
 - `inner_monologue.py`：内独白生成
 
-### 5.10 `emotional_silence.py` / `emotional_proactive.py`
+### 10.10 `emotional_silence.py` / `emotional_proactive.py`
 
 当前职责：
 
 - Phase XVIII 沉默能力：5 级回复意愿（NORMAL → MUTE）
 - 主动情绪发声（aftereffects、proactive episodes）
 
-### 5.11 `evolution_orchestrator.py` / `evolution_desire_engine.py` / `interaction_pattern_analyzer.py` / `emergent_growth_engine.py`
+### 10.11 `evolution_orchestrator.py` / `evolution_desire_engine.py` / `interaction_pattern_analyzer.py` / `emergent_growth_engine.py`
 
 当前职责：Phase XIX 涌现成长：分析对话模式、产生成长笔记、注入 `self_reflection_pulse`。
 
-### 5.12 `motive_engine.py` / `motive_runtime.py` / `drift_detector.py` / `trait_drift_guard.py` / `self_reflection.py` / `self_model.py`
+### 10.12 `motive_engine.py` / `motive_runtime.py` / `drift_detector.py` / `trait_drift_guard.py` / `self_reflection.py` / `self_model.py`
 
 当前职责：动机 / 漂移守卫 / 自我反思。
 
-### 5.13 `assistant_followup_surface.py` / `image_social_surface.py` / `soul_reply_surface.py`
+### 10.13 `assistant_followup_surface.py` / `image_social_surface.py` / `soul_reply_surface.py`
 
 当前职责：辅助 surface（assistant followup / 图片社交 / 灵魂回复风格）。
 
-## 6. 记忆与召回（host_brain/memory + host_brain/retrieval）
+## 11. 记忆与召回（host_brain/memory + host_brain/retrieval）
 
-### 6.1 `memory/life_memory.py`（8260 行）
+### 11.1 `memory/life_memory.py`（8260 行）
 
 当前职责：**Life Memory SSOT**（生活记忆唯一真源）：
 
@@ -369,7 +431,7 @@ graph TD
 
 为什么核心：**当前 normal chat 的记忆主源**；vector / semantic 层是它的衍生层，不是首要作者。
 
-### 6.2 `memory/life_memory_query.py`
+### 11.2 `memory/life_memory_query.py`
 
 当前职责：查询计划器：
 
@@ -377,29 +439,29 @@ graph TD
 - domain 推断（lightnovel_recommendation / recommendation 等）
 - 输出可执行的 query plan
 
-### 6.3 `memory/long_term_distiller.py` / `memory/distillation.py`
+### 11.3 `memory/long_term_distiller.py` / `memory/distillation.py`
 
 当前职责：长期蒸馏：
 
 - 持久化的语义蒸馏（防止递归）
 - 把 episodic memory 蒸馏成 semantic 层
 
-### 6.4 `memory/episodic.py` / `episodic_memory_graph.py`
+### 11.4 `memory/episodic.py` / `episodic_memory_graph.py`
 
 当前职责：episodic 兼容层（部分查询路径仍走这里）+ 内存图（关联结构）。
 
-### 6.5 `memory/canon_world_store.py` / `canon_style_store.py` / `canon_helpers.py` / `canon_schemas.py` / `canon_sync.py` / `canon_vector_*`
+### 11.5 `memory/canon_world_store.py` / `canon_style_store.py` / `canon_helpers.py` / `canon_schemas.py` / `canon_sync.py` / `canon_vector_*`
 
 当前职责：Canon 三件套（world / style / character）：
 
 - 显式真源（人物设定 / 世界观 / 风格 anchor）
 - vector projection 与 auto-sync 把 canon 投影到向量空间
 
-### 6.6 `memory/chroma_client.py`
+### 11.6 `memory/chroma_client.py`
 
 当前职责：Chroma 向量库客户端封装。
 
-### 6.7 `memory/context_compressor.py` / `memory/consolidation_trigger.py` / `memory_worth_evaluator.py`
+### 11.7 `memory/context_compressor.py` / `memory/consolidation_trigger.py` / `memory_worth_evaluator.py`
 
 当前职责：
 
@@ -407,7 +469,7 @@ graph TD
 - `consolidation_trigger`：何时触发 sleep replay
 - `memory_worth_evaluator`：决定哪些事件值得长期保存
 
-### 6.8 `retrieval/recall_fusion.py`（1396 行）
+### 11.8 `retrieval/recall_fusion.py`（1396 行）
 
 当前职责：召回融合服务契约 `RecallFusionServiceContract`：
 
@@ -416,15 +478,15 @@ graph TD
 - 候选过滤、anaphoric 选择处理、deep review 路由
 - 仅向 surface chain 暴露压缩后的 fact list
 
-### 6.9 `retrieval/recall_fusion_stores.py` / `recall_fusion_config.py` / `recall_fusion_utils.py`
+### 11.9 `retrieval/recall_fusion_stores.py` / `recall_fusion_config.py` / `recall_fusion_utils.py`
 
 当前职责：路由 store 实现 + 运行时配置 + 工具函数。
 
-### 6.10 `retrieval/full_text_searcher.py`
+### 11.10 `retrieval/full_text_searcher.py`
 
 当前职责：FTS5 全文检索器（hybrid fusion 的 lexical 部分）。
 
-### 6.11 `retrieval/__init__.py` 重要说明
+### 11.11 `retrieval/__init__.py` 重要说明
 
 旧的 Agentic RAG pipeline / orchestrator stack **已从此包移除**。当前文本生成只走：
 
@@ -434,7 +496,7 @@ RecallFusionServiceContract
   → 仅向 ReplyControlPacket 注入压缩后的 facts
 ```
 
-## 7. Tribe 23 个器官族（host_brain/tribe/）
+## 12. Tribe 23 个器官族（host_brain/tribe/）
 
 事实清单（`registry.py:_DEFAULT_FAMILY_SPECS`）：
 
@@ -467,9 +529,9 @@ interoception / motor_cortex / cerebellum / glymphatic / vestibular
 
 升级状态：23 个 family 全部完成 P0~P4 批次的"A 级升级"，灰度开关全数删除。详见 `docs/35_quality/ORGAN_TRIBE_UPGRADE_PLAN.md`。
 
-## 8. 输入、Gateway 与外显入口
+## 13. 输入、Gateway 与外显入口
 
-### 8.1 `host_brain/app/input_routes.py`（2107 行）
+### 13.1 `host_brain/app/input_routes.py`（2107 行）
 
 当前职责：`/v1/host/input` 入口：
 
@@ -478,14 +540,14 @@ interoception / motor_cortex / cerebellum / glymphatic / vestibular
 - 触发 chat handler 或 thread resolver
 - input dispatch 使用专用线程池
 
-### 8.2 `host_brain/app/edge_event_routes.py`
+### 13.2 `host_brain/app/edge_event_routes.py`
 
 当前职责：`/v1/edge/events` 入口：
 
 - 接收 Edge 端事件回流（VTS、状态、本地能力变化）
 - 写入 ledger，必要时触发 tribe event
 
-### 8.3 `edge_client/gateway/server.py` / `router.py` / `normalizer.py`
+### 13.3 `edge_client/gateway/server.py` / `router.py` / `normalizer.py`
 
 当前职责：
 
@@ -493,7 +555,7 @@ interoception / motor_cortex / cerebellum / glymphatic / vestibular
 - `router.py`：把 inbound 消息分发到对应平台 adapter
 - `normalizer.py`：把多平台消息归一化为统一 input contract
 
-### 8.4 `edge_client/gateway/adapters/`
+### 13.4 `edge_client/gateway/adapters/`
 
 当前职责：6 个平台 adapter（wechat / qq / feishu / wecom / telegram / line），每个 adapter 负责：
 
@@ -501,11 +563,11 @@ interoception / motor_cortex / cerebellum / glymphatic / vestibular
 - 媒体下载（图片 / 文件 / 语音 / 视频）
 - 出站消息发送（含 humanize 节奏控制）
 
-### 8.5 `edge_client/gateway/humanize_sender.py`
+### 13.5 `edge_client/gateway/humanize_sender.py`
 
 当前职责：humanize 出站节奏：把长文本 / 多句拆分成"人类节奏"的多条消息。
 
-### 8.6 `host_brain/channels/edge_rpc_client.py`
+### 13.6 `host_brain/channels/edge_rpc_client.py`
 
 当前职责：Host → Edge / Gateway / Desktop Pet 的出站 RPC helper：
 
@@ -515,7 +577,7 @@ interoception / motor_cortex / cerebellum / glymphatic / vestibular
 - `post_screenshot` / `post_automate` / `post_visual_locate`：桌面感知与自动化能力
 - `post_gateway_reply`：Gateway 出站回复
 
-### 8.7 `desktop_pet/main.cjs`
+### 13.7 `desktop_pet/main.cjs`
 
 当前职责：Electron + Live2D 本地桌宠运行时：
 
@@ -524,7 +586,7 @@ interoception / motor_cortex / cerebellum / glymphatic / vestibular
 - 处理 show / hide / preset / touch / emote / speak / click_through / status 等高层动作
 - 只作为本地外显运行面，不承担记忆、人格策略或审计事实
 
-### 8.8 `host_brain/app/mateengine_routes.py` + `host_brain/channels/mateengine.py`
+### 13.8 `host_brain/app/mateengine_routes.py` + `host_brain/channels/mateengine.py`
 
 当前职责：MateEngine 本地桌宠桥：
 
@@ -533,7 +595,7 @@ interoception / motor_cortex / cerebellum / glymphatic / vestibular
 - 支持 state / pose / mouth / freeze / gesture / action_sequence 等本地表现动作
 - 从 chat lifecycle cue 接收 thinking / speaking / home 等状态，但不成为事实源
 
-## 9. Bio-Ops（host_brain/bio_ops/）
+## 14. Bio-Ops（host_brain/bio_ops/）
 
 新增子系统，为 advanced Codex 模式提供 **proposal-only** 的辅助：
 
@@ -547,7 +609,7 @@ interoception / motor_cortex / cerebellum / glymphatic / vestibular
 
 陪伴整合：BioOps trace 在 `chat_routes.handle_v1_chat_route` 中被构建并写入 `request.state.bio_ops_runtime_trace`，commit 阶段写回 SSE。
 
-## 10. Codex Runtime（host_brain/codex_runtime/）
+## 15. Codex Runtime（host_brain/codex_runtime/）
 
 新增 **WorkOrder-first** 执行面：
 
@@ -568,7 +630,7 @@ interoception / motor_cortex / cerebellum / glymphatic / vestibular
 
 入口路由：`/internal/codex/work-orders/preview|execute`、`/internal/codex/owner-directives`、`/internal/codex/jobs/{job_id}`、`/internal/codex/immune/proposal|dispatch|auto-state`。
 
-## 11. Security Immune（host_brain/security_immune/）
+## 16. Security Immune（host_brain/security_immune/）
 
 新增**授权网络防御免疫层**（MVP 默认 observe-only）：
 
@@ -582,7 +644,7 @@ interoception / motor_cortex / cerebellum / glymphatic / vestibular
 
 与 chat 主链关系：`chat_immune_gate.py` 是 chat 入口的免疫闸门；`security_immune` 是更广的"授权网络防御"，两者协同但互不替代。
 
-## 12. Observability Backend（host_brain/app/obs_*.py）
+## 17. Observability Backend（host_brain/app/obs_*.py）
 
 独立进程（`obs_main.py`），FastAPI app 来自 `obs_fastapi_app.py`。
 
@@ -602,14 +664,14 @@ interoception / motor_cortex / cerebellum / glymphatic / vestibular
 
 预热缓存：在 lifespan 启动时同步预热 `runtime_snapshot`、`trace_feed`、`insights_summary`、`digital_life_overview`、`life_body`，启动后周期刷新。
 
-## 13. Bond / Canon / Scheduler / Tools
+## 18. Bond / Canon / Scheduler / Tools
 
-### 13.1 Bond（`host_brain/bond/`）
+### 18.1 Bond（`host_brain/bond/`）
 
 - `user_identity.py`：`resolve_person_id` 等用户身份解析
 - Bond stage / interaction state 持久化（带 SQLite migrations）
 
-### 13.2 Canon（`host_brain/canon/`）
+### 18.2 Canon（`host_brain/canon/`）
 
 三大 canon 子系统：
 
@@ -619,14 +681,14 @@ interoception / motor_cortex / cerebellum / glymphatic / vestibular
 
 与 `memory/canon_*` 协同：memory 端做 vector projection 与 auto-sync，canon 端做"显式真源"管理。
 
-### 13.3 Scheduler（`host_brain/scheduler/`）
+### 18.3 Scheduler（`host_brain/scheduler/`）
 
 - `scheduler_routes.py`：`/scheduler/*`
 - `task_registry.py`：`SchedulerTaskRegistry` 单例
 - `health.py`：`SchedulerHealthReporter`
 - 与 `host_brain/app/automation/scheduler_routes.py` 协同（后者在 `/host-scheduler/*` 提供 automation 内嵌调度）
 
-### 13.4 Tools（`host_brain/tools/` + `host_brain/skills/`）
+### 18.4 Tools（`host_brain/tools/` + `host_brain/skills/`）
 
 - `tool_routes.py`：`/tools/*` + 别名 `/tool_kits/*`
 - `skills/hub/`：external skill hub
@@ -634,14 +696,14 @@ interoception / motor_cortex / cerebellum / glymphatic / vestibular
 - `skills/custom_providers/`：自定义 provider
 - `mcp/`：MCP 工具桥接
 
-## 14. Audit / Conversation / Core
+## 19. Audit / Conversation / Core
 
 - `audit/sqlite_ledger.py`：`SQLiteLedger` 统一审计落盘（带 migrations）
 - `conversation/writer.py`：`record_user_turn` 统一会话落库
 - `core/ids.py`：`new_request_id` / `now_ms` 等通用 id / 时间工具
 - `core/`：其它共享 helper
 
-## 15. 不再代表当前事实的模块
+## 20. 不再代表当前事实的模块
 
 下列旧模块要么已删除、要么已被新链路取代，**不要**作为当前任务来源：
 
@@ -662,7 +724,7 @@ interoception / motor_cortex / cerebellum / glymphatic / vestibular
 | `code_agent_handler.py` | 已删除（chat 路径已不再依赖） |
 | 旧的 `entry_routing.py` | 已被 `executive_router` + `router_registry` 取代 |
 
-## 16. 关键不变量（与 CURRENT_CODE_ARCHITECTURE 一致）
+## 21. 关键不变量（与 CURRENT_CODE_ARCHITECTURE 一致）
 
 1. normal chat 文本最终作者只能是 `SurfaceMainChain`。
 2. 旧链能力只能注入 facts/state/memory/perception，不能写最终回复。
