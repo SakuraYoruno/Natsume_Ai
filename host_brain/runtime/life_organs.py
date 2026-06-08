@@ -257,6 +257,10 @@ def _base_event_deltas(event_kind: str, evidence: Mapping[str, Any], content: st
             add("prefrontal", activation=0.08, pressure=0.08 if day_phase not in {"dawn", "morning"} else 0.03, dominant_drive="time_consistency_guard")
         if meal_phase and meal_phase != "none":
             add("interoception", activation=0.12, pressure=0.08, dominant_drive="routine_body_window", memory_trace={"meal_phase": meal_phase})
+        add("endocrine", activation=0.08 + absence * 0.10, pressure=absence * 0.14, valence=-absence * 0.04, dominant_drive="slow_pressure", memory_trace={"idle_minutes": idle_minutes})
+        add("vestibular", activation=0.06 + absence * 0.06, pressure=absence * 0.08, dominant_drive="body_stability", memory_trace={"idle_minutes": idle_minutes})
+        add("ans", activation=0.06 + absence * 0.12, pressure=absence * 0.10 + fatigue * 0.05, fatigue=fatigue * 0.06, dominant_drive="tension_relaxation", memory_trace={"idle_minutes": idle_minutes, "fatigue": fatigue})
+        add("peripheral", activation=0.04 + absence * 0.06, pressure=absence * 0.06, dominant_drive="channel_presence", memory_trace={"idle_minutes": idle_minutes})
     elif kind == "user_message":
         annoyance = any(t in text for t in ("烦", "别发", "别一直", "莫名其妙", "鬼扯", "很呆", "烂", "不对", "没效果", "牛头不对马嘴"))
         positive = any(t in text for t in ("可以了", "不错", "挺好", "喜欢", "好了", "对了", "继续", "开始"))
@@ -274,6 +278,9 @@ def _base_event_deltas(event_kind: str, evidence: Mapping[str, Any], content: st
             add("prefrontal", activation=0.28, pressure=0.32, dominant_drive="inhibit_proactive")
             add("initiative_governor", activation=0.24, pressure=0.38, dominant_drive="cooldown_proactive", cooldowns={"proactive_until_ms": now_ms + 3_600_000})
             add("limbic", pressure=0.12, valence=-0.14, dominant_drive="hurt_but_attentive")
+        add("endocrine", activation=0.14, pressure=-0.18 if positive else 0.04, valence=0.10 if positive else -0.06, dominant_drive="hormone_rebalance")
+        add("ans", activation=-0.10, pressure=-0.22, dominant_drive="idle_reset")
+        add("peripheral", activation=0.12, pressure=-0.08, dominant_drive="expression_update")
     elif kind == "assistant_reply":
         add("language_system", activation=0.12, confidence=0.05, dominant_drive="expression_trace", memory_trace={"last_reply": _text(text, 180)})
         add("cortex", activation=0.08, confidence=0.05, dominant_drive="scene_integration")
@@ -315,11 +322,13 @@ def _base_event_deltas(event_kind: str, evidence: Mapping[str, Any], content: st
         add("language_system", activation=0.1, dominant_drive="inner_dialogue_bias", memory_trace={"dialogue_bias": tendency})
         add("initiative_governor", activation=0.08, pressure=0.05, dominant_drive="inner_proactive_threshold")
         add("thalamus", activation=0.12, dominant_drive="attention_drift")
+        add("endocrine", activation=0.08, pressure=0.06, dominant_drive=tendency or "emotional_drift", memory_trace={"felt_tendency": tendency})
     elif kind == "embodiment_dispatch":
         add("somatic", activation=0.28, pressure=0.08, dominant_drive="embodied_presence", memory_trace={"last_body": _map(evidence.get("target"))})
         add("proprioception", activation=0.24, pressure=0.05, dominant_drive="posture_memory", memory_trace={"last_body": _map(evidence.get("target"))})
         add("motor_cortex", activation=0.2, pressure=0.08, dominant_drive="body_action")
         add("cerebellum", activation=0.18, pressure=-0.06, dominant_drive="motion_smoothing")
+        add("vestibular", activation=0.16, pressure=0.06, dominant_drive="body_stability", memory_trace={"last_body": _map(evidence.get("target"))})
     elif kind == "system_fault":
         add("immune", activation=0.38, pressure=0.42, valence=-0.12, dominant_drive="system_fault_guard")
         add("prefrontal", activation=0.24, pressure=0.18, dominant_drive="careful_response")
@@ -358,6 +367,15 @@ def _couple_organs(conn: Any, person_id: str, states: dict[str, dict[str, Any]],
         planned.append((["default_mode", "hippocampus"], "language_system", {"activation": 0.08, "dominant_drive": "dream_tinted_expression"}))
     if strength("motor_cortex") > 0.3:
         planned.append((["motor_cortex", "cerebellum"], "proprioception", {"activation": 0.08, "pressure": -0.04, "dominant_drive": "stable_body_state"}))
+    endocrine_val = strength("endocrine")
+    if endocrine_val > 0.35:
+        planned.append((["endocrine"], "limbic", {"activation": 0.06, "valence": 0.04 if endocrine_val > 0.55 else -0.02, "dominant_drive": "hormone_tinted_emotion"}))
+    if strength("vestibular") > 0.30:
+        planned.append((["vestibular", "cerebellum"], "interoception", {"activation": 0.06, "pressure": 0.08, "fatigue": 0.05, "dominant_drive": "jitter_tax_on_body_budget"}))
+    if strength("ans") > 0.30:
+        planned.append((["ans", "glymphatic"], "circadian", {"fatigue": 0.06, "pressure": 0.04, "dominant_drive": "recovery_tinted_rhythm"}))
+    if strength("mirror_neuron") > 0.30:
+        planned.append((["mirror_neuron", "social_brain"], "limbic", {"activation": 0.08, "valence": 0.06, "dominant_drive": "resonance_warmed_emotion"}))
 
     for sources, target, delta in planned:
         before = copy.deepcopy(states.get(target) or _default_organ_state(target, now_ms))
@@ -594,9 +612,9 @@ def synthesize_life_state_from_organs(
     work_pressure = _clamp(max(strength("prefrontal"), strength("immune"), strength("cortex"), _float(base_pressure.get("work")) * 0.82))
     absence = _clamp(max(strength("social_brain") * 0.65 + strength("limbic") * 0.35, _float(base_pressure.get("absence")) * 0.92))
     dream = _clamp(max(strength("default_mode") * 0.65 + strength("glymphatic") * 0.2 + strength("hippocampus") * 0.15, _float(base_pressure.get("dream")) * 0.82))
-    fatigue = _clamp(max(strength("circadian") * 0.72 + strength("glymphatic") * 0.28 + _float(circadian.get("fatigue")) * 0.35, _float(base_pressure.get("fatigue")) * 0.86))
+    fatigue = _clamp(max(strength("circadian") * 0.55 + strength("glymphatic") * 0.18 + strength("interoception") * 0.27 + _float(circadian.get("fatigue")) * 0.35, _float(base_pressure.get("fatigue")) * 0.86))
     pain_reward = _map(organs.get("pain_reward"))
-    relationship = _clamp(_float(social.get("valence"), 0.5) * 0.55 + _float(limbic.get("valence"), 0.5) * 0.35 + _float(pain_reward.get("valence"), 0.5) * 0.1)
+    relationship = _clamp(_float(social.get("valence"), 0.5) * 0.50 + _float(limbic.get("valence"), 0.5) * 0.30 + _float(pain_reward.get("valence"), 0.5) * 0.08 + strength("mirror_neuron") * 0.12)
 
     pressure = _map(after.get("life_pressure"))
     pressure.update({"absence": absence, "dream": dream, "work": work_pressure, "fatigue": fatigue, "relationship": relationship})
@@ -606,11 +624,13 @@ def synthesize_life_state_from_organs(
     affect.update(
         {
             "loneliness": _clamp(absence * 0.86),
-            "attachment_warmth": _clamp(relationship),
+            "attachment_warmth": _clamp(relationship * 0.88 + strength("mirror_neuron") * 0.12),
             "fatigue": fatigue,
-            "tension": _clamp(work_pressure * 0.55 + strength("ans") * 0.25 + strength("immune") * 0.2),
-            "energy": _clamp(1.0 - fatigue * 0.72 + strength("pain_reward") * 0.08),
+            "tension": _clamp(work_pressure * 0.55 + strength("ans") * 0.25 + strength("immune") * 0.10 + strength("interoception") * 0.10),
+            "energy": _clamp(1.0 - fatigue * 0.72 + strength("pain_reward") * 0.08 + strength("somatic") * 0.12),
             "irritation": _clamp(strength("pain_reward") * 0.55 + strength("immune") * 0.1),
+            "arousal": _clamp(0.24 + strength("thalamus") * 0.52 + strength("prefrontal") * 0.12),
+            "valence": _clamp(0.18 + strength("mirror_neuron") * 0.38 + strength("limbic") * 0.12),
         }
     )
     if work_pressure >= 0.45:
