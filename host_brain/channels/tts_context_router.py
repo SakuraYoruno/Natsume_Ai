@@ -14,6 +14,47 @@ from typing import Any
 _logger = logging.getLogger("Natsume.tts.context_router")
 
 # ---------------------------------------------------------------------------
+# VTS emotion_tag → TTS 风格 key 映射
+# LLM 输出的 emotion_tag 使用 VTS 命名（HAPPY/SAD/ANGRY 等），
+# TTS 风格表使用描述性 key（happiness/sadness/serious 等），需要做一次转换。
+# ---------------------------------------------------------------------------
+_VTS_TO_TTS_STYLE: dict[str, str] = {
+    "happy": "happiness",
+    "happiness": "happiness",
+    "joy": "happiness",
+    "grateful": "happiness",
+    "proud": "happiness",
+    "surprised": "happiness",
+    "excited": "excitement",
+    "excitement": "excitement",
+    "playful": "playful",
+    "sad": "sadness",
+    "sadness": "sadness",
+    "anxious": "sadness",
+    "bored": "sadness",
+    "calm": "comfort",
+    "comfort": "comfort",
+    "thinking": "serious",
+    "confused": "serious",
+    "angry": "serious",
+    "anger": "serious",
+    "frustrated": "serious",
+    "serious": "serious",
+    "loving": "coquettish",
+    "embarrassed": "coquettish",
+    "affection": "coquettish",
+    "coquettish": "coquettish",
+    "neutral": "neutral",
+}
+
+
+def _normalize_emotion_tag_for_tts(emotion_tag: str) -> str:
+    """将 LLM 输出的 emotion_tag 归一化到 TTS 风格表 key。"""
+    key = str(emotion_tag or "").strip().lower()
+    return _VTS_TO_TTS_STYLE.get(key, key)
+
+
+# ---------------------------------------------------------------------------
 # TTS 情感风格预设
 # ---------------------------------------------------------------------------
 @dataclass
@@ -142,7 +183,7 @@ class TtsContextRouter:
         优先级：显式 emotion_tag > 文本分析 > VAD 推断 > 默认
         """
         text = str(text or "").strip()
-        etag = str(emotion_tag or "").strip().lower()
+        etag = _normalize_emotion_tag_for_tts(emotion_tag)
 
         # 1. 语言检测
         lang = "ja" if _KANA_PATTERN.search(text) else "zh"
