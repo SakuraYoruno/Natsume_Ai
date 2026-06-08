@@ -1,11 +1,11 @@
-{
-  "request_id": "req_voice_012",
-  "payload": {
-    "session_id": "sess_voice_001",
-    "seq": 12,
-    "utterance_id": "utt_voice_fail",
-    "text": "this one should fail synthesis",
-    "interruptible": true,
-    "voice_profile": "Natsume_default"
-  }
+﻿{
+    "request_id":  "req_voice_012",
+    "payload":  {
+                    "session_id":  "sess_voice_001",
+                    "seq":  12,
+                    "utterance_id":  "utt_voice_fail",
+                    "text":  "this one should fail synthesis",
+                    "interruptible":  true,
+                    "voice_profile":  "Natsume_default"
+                }
 }

@@ -276,7 +276,7 @@ def test_direct_text_routes_are_disabled_by_default(monkeypatch) -> None:
 def test_stream_chat_route_records_handoff_and_streams_events() -> None:
     handoffs: list[dict] = []
 
-    async def _fake_chat_agent(_chat_input):  # noqa: ANN001
+    async def _fake_surface_reply(_chat_input):  # noqa: ANN001
         yield 'data: {"phase":"CHAT","route":"chat"}\n\n'
 
     async def _collect():
@@ -288,7 +288,7 @@ def test_stream_chat_route_records_handoff_and_streams_events() -> None:
             skill_family="social",
             runtime_capability_handoff_extra={"runtime_capability_id": "rc-001"},
             record_dispatch_handoff_fn=lambda **kwargs: handoffs.append(dict(kwargs)),
-            chat_agent_sse_generator_fn=_fake_chat_agent,
+            surface_reply_sse_generator_fn=_fake_surface_reply,
             chat_input=SimpleNamespace(),
         ):
             events.append(event)

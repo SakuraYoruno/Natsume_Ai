@@ -1,12 +1,12 @@
-{
-  "session_id": "s_demo",
-  "seq": 1,
-  "nonce": "n_demo_001",
-  "ts_ms": 1767225600000,
-  "intent": {
-    "skill_name": "read_only_status",
-    "args": {
-      "scope": "system"
-    }
-  }
+﻿{
+    "session_id":  "s_demo",
+    "seq":  1,
+    "nonce":  "n_demo_001",
+    "ts_ms":  1767225600000,
+    "intent":  {
+                   "skill_name":  "read_only_status",
+                   "args":  {
+                                "scope":  "system"
+                            }
+               }
 }

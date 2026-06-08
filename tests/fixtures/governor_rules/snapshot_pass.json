@@ -1,14 +1,14 @@
-{
-  "trust_level": 60,
-  "energy_level": 70,
-  "sys_mode": "normal",
-  "rate_limit_hit": false,
-  "scope": "host",
-  "scope_allowlist": [
-    "host",
-    "memory",
-    "system"
-  ],
-  "safety_flag": false,
-  "airlock_blocked": false
+﻿{
+    "trust_level":  60,
+    "energy_level":  70,
+    "sys_mode":  "normal",
+    "rate_limit_hit":  false,
+    "scope":  "host",
+    "scope_allowlist":  [
+                            "host",
+                            "memory",
+                            "system"
+                        ],
+    "safety_flag":  false,
+    "airlock_blocked":  false
 }

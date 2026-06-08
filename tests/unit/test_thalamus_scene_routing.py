@@ -161,8 +161,8 @@ def test_build_chat_graph_config_auto_meta_preserved() -> None:
 
 
 def test_chat_graph_can_route_direct_node_to_codex_spark(monkeypatch) -> None:
-    monkeypatch.setenv("HOST_CHAT_AGENT_CODEX_EXPERIMENT_ENABLED", "true")
-    monkeypatch.setenv("HOST_CHAT_AGENT_CODEX_MODEL_ID", "gpt-5.3-codex-spark")
+    monkeypatch.setenv("HOST_SURFACE_REPLY_CODEX_EXPERIMENT_ENABLED", "true")
+    monkeypatch.setenv("HOST_SURFACE_REPLY_CODEX_MODEL_ID", "gpt-5.3-codex-spark")
     monkeypatch.setattr(
         "host_brain.app.graph_config_builder.codex_cli_lm_available",
         lambda: True,

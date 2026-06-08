@@ -1,28 +1,30 @@
-{
-  "request_id": "req_orch_002",
-  "graph": {
-    "graph_id": "graph.missing_handler.v1",
-    "version": "v1",
-    "entry_node": "plan",
-    "node_bindings": [
-      {
-        "node_id": "plan",
-        "handler_id": "handler.plan",
-        "required": true
-      },
-      {
-        "node_id": "retrieve",
-        "handler_id": "handler.missing",
-        "required": true
-      }
-    ],
-    "edges": [
-      {
-        "from": "plan",
-        "to": "retrieve"
-      }
-    ],
-    "fallback_edges": []
-  },
-  "expected_reason_code": "ORCH_NODE_MISSING"
+﻿{
+    "request_id":  "req_orch_002",
+    "graph":  {
+                  "graph_id":  "graph.missing_handler.v1",
+                  "version":  "v1",
+                  "entry_node":  "plan",
+                  "node_bindings":  [
+                                        {
+                                            "node_id":  "plan",
+                                            "handler_id":  "handler.plan",
+                                            "required":  true
+                                        },
+                                        {
+                                            "node_id":  "retrieve",
+                                            "handler_id":  "handler.missing",
+                                            "required":  true
+                                        }
+                                    ],
+                  "edges":  [
+                                {
+                                    "from":  "plan",
+                                    "to":  "retrieve"
+                                }
+                            ],
+                  "fallback_edges":  [
+
+                                     ]
+              },
+    "expected_reason_code":  "ORCH_NODE_MISSING"
 }

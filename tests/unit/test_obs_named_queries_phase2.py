@@ -190,13 +190,13 @@ class TestErrorSummaryQuery(unittest.TestCase):
             """
         )
         rows = [
-            ("chat_agent.pre_commit", "LLM_UNAVAILABLE", 1000),
-            ("chat_agent.pre_commit", "LLM_UNAVAILABLE", 1100),
-            ("chat_agent.pre_commit", "EMPTY_NARRATIVE", 1200),
+            ("surface_reply.pre_commit", "LLM_UNAVAILABLE", 1000),
+            ("surface_reply.pre_commit", "LLM_UNAVAILABLE", 1100),
+            ("surface_reply.pre_commit", "EMPTY_NARRATIVE", 1200),
             ("hippocampus.recall", "RETR_EMBED_TIMEOUT", 1300),
             ("hippocampus.recall", "RETR_EMBED_TIMEOUT", 1400),
             ("hippocampus.recall", "RETR_EMBED_TIMEOUT", 1500),
-            ("chat_agent.pre_commit", "LLM_UNAVAILABLE", 99999),  # out of window
+            ("surface_reply.pre_commit", "LLM_UNAVAILABLE", 99999),  # out of window
         ]
         conn.executemany(
             "INSERT INTO error_log (stage, reason_code, ts_ms) VALUES (?, ?, ?)",
@@ -225,10 +225,10 @@ class TestErrorSummaryQuery(unittest.TestCase):
                 key_to_count.get(("hippocampus.recall", "RETR_EMBED_TIMEOUT")), 3
             )
             self.assertEqual(
-                key_to_count.get(("chat_agent.pre_commit", "LLM_UNAVAILABLE")), 2
+                key_to_count.get(("surface_reply.pre_commit", "LLM_UNAVAILABLE")), 2
             )
             self.assertEqual(
-                key_to_count.get(("chat_agent.pre_commit", "EMPTY_NARRATIVE")), 1
+                key_to_count.get(("surface_reply.pre_commit", "EMPTY_NARRATIVE")), 1
             )
             # 排序：error_count DESC
             first = result[0]

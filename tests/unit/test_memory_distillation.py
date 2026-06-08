@@ -579,7 +579,6 @@ def _make_valid_prompt_context(**overrides) -> dict:
         "bond_summary": {},
         "authoritative": [],
         "retrieval": [],
-        "style_pack": {},
         "constraints": {},
         "tool_meta_pack": [],
     }
@@ -679,3 +678,4 @@ def test_distill_top_k_concurrent_idempotent(tmp_path):
         assert all(sid == persisted_id for sid in results)
     finally:
         ledger.close()
+

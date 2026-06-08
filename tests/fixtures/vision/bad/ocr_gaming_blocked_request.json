@@ -1,11 +1,11 @@
-{
-  "request_id": "req_vision_ocr_002",
-  "intent_id": "intent_vision_ocr_002",
-  "payload": {
-    "sys_mode": "gaming",
-    "trigger": "scheduled_poll",
-    "source_ref": "evd://screen/frame_002",
-    "frame_text": "HUD Text",
-    "timeout_ms": 500
-  }
+﻿{
+    "request_id":  "req_vision_ocr_002",
+    "intent_id":  "intent_vision_ocr_002",
+    "payload":  {
+                    "sys_mode":  "gaming",
+                    "trigger":  "scheduled_poll",
+                    "source_ref":  "evd://screen/frame_002",
+                    "frame_text":  "HUD Text",
+                    "timeout_ms":  500
+                }
 }

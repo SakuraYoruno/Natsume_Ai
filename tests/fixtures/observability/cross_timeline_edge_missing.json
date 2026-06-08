@@ -1,81 +1,95 @@
-{
-  "scenario": "cross_timeline_edge_missing",
-  "description": "Edge 事件缺失场景：Host 审计完整但无 Edge 上报，时间线仍完整且标注缺失来源",
-  "request_id": "req_cross_003",
-  "session_id": "sess_cross_003",
-  "host_events": {
-    "intent_log": {
-      "request_id": "req_cross_003",
-      "thread_id": "thread_cross_003",
-      "turn_id": "turn_cross_003",
-      "intent_id": "intent_cross_003",
-      "session_id": "sess_cross_003",
-      "seq": 1,
-      "ts_ms": 1800050010000,
-      "nonce": "nonce_cross_003",
-      "parse_stage": "S_INTENT_PARSE",
-      "raw_text": "tell a joke",
-      "normalized_json": {"id": "intent_cross_003"},
-      "proposer_node_id": "core_reasoner_primary",
-      "model_snapshot": "test-model",
-      "prompt_profile_id": "default",
-      "tool_visibility_hash": "",
-      "proposed_intent_draft_json": {"id": "intent_cross_003"},
-      "lint_result": {"ok": true}
-    },
-    "governor_log": {
-      "request_id": "req_cross_003",
-      "thread_id": "thread_cross_003",
-      "turn_id": "turn_cross_003",
-      "intent_id": "intent_cross_003",
-      "decision": "APPROVE",
-      "reason_code": null,
-      "rule_trace": [],
-      "tokens": {"approval_token_ref": "approval::cross_003"},
-      "snapshot_refs": {},
-      "stage": "S_GOVERNOR",
-      "ts_ms": 1800050010100
-    },
-    "skill_exec_log": {
-      "request_id": "req_cross_003",
-      "thread_id": "thread_cross_003",
-      "turn_id": "turn_cross_003",
-      "intent_id": "intent_cross_003",
-      "event_id": "event_cross_003",
-      "skill_name": "read_only_status",
-      "approval_token_ref": "approval::cross_003",
-      "confirm_token_ref": null,
-      "undo_token_ref": null,
-      "result_status": "SUCCESS",
-      "result_code": "TOOL_EXECUTED",
-      "result_digest": "ok",
-      "evidence_ref": "evidence::cross_003",
-      "manifest_ref": null,
-      "ts_ms": 1800050010200
-    },
-    "channel_io_log": {
-      "request_id": "req_cross_003",
-      "channel": "wechat",
-      "direction": "EGRESS",
-      "thread_key": "wechat::u::bot",
-      "message_id": "msg_cross_003",
-      "user_id": "u",
-      "status": "SENT",
-      "reason_code": null,
-      "stage": "S_CHANNEL_EGRESS",
-      "detail": "message sent",
-      "payload_digest": "sha256:cross003",
-      "ts_ms": 1800050010300
-    }
-  },
-  "edge_events": [],
-  "expected": {
-    "status": "HOST_ONLY",
-    "host_event_count": 4,
-    "edge_event_count": 0,
-    "edge_missing": true,
-    "clock_drift_detected": false,
-    "timeline_total": 4,
-    "warnings_contain": "TIMELINE_EDGE_EVENTS_MISSING"
-  }
+﻿{
+    "scenario":  "cross_timeline_edge_missing",
+    "description":  "Edge 事件缺失场景：Host 审计完整但无 Edge 上报，时间线仍完整且标注缺失来源",
+    "request_id":  "req_cross_003",
+    "session_id":  "sess_cross_003",
+    "host_events":  {
+                        "intent_log":  {
+                                           "request_id":  "req_cross_003",
+                                           "thread_id":  "thread_cross_003",
+                                           "turn_id":  "turn_cross_003",
+                                           "intent_id":  "intent_cross_003",
+                                           "session_id":  "sess_cross_003",
+                                           "seq":  1,
+                                           "ts_ms":  1800050010000,
+                                           "nonce":  "nonce_cross_003",
+                                           "parse_stage":  "S_INTENT_PARSE",
+                                           "raw_text":  "tell a joke",
+                                           "normalized_json":  {
+                                                                   "id":  "intent_cross_003"
+                                                               },
+                                           "proposer_node_id":  "core_reasoner_primary",
+                                           "model_snapshot":  "test-model",
+                                           "prompt_profile_id":  "default",
+                                           "tool_visibility_hash":  "",
+                                           "proposed_intent_draft_json":  {
+                                                                              "id":  "intent_cross_003"
+                                                                          },
+                                           "lint_result":  {
+                                                               "ok":  true
+                                                           }
+                                       },
+                        "governor_log":  {
+                                             "request_id":  "req_cross_003",
+                                             "thread_id":  "thread_cross_003",
+                                             "turn_id":  "turn_cross_003",
+                                             "intent_id":  "intent_cross_003",
+                                             "decision":  "APPROVE",
+                                             "reason_code":  null,
+                                             "rule_trace":  [
+
+                                                            ],
+                                             "tokens":  {
+                                                            "approval_token_ref":  "approval::cross_003"
+                                                        },
+                                             "snapshot_refs":  {
+
+                                                               },
+                                             "stage":  "S_GOVERNOR",
+                                             "ts_ms":  1800050010100
+                                         },
+                        "skill_exec_log":  {
+                                               "request_id":  "req_cross_003",
+                                               "thread_id":  "thread_cross_003",
+                                               "turn_id":  "turn_cross_003",
+                                               "intent_id":  "intent_cross_003",
+                                               "event_id":  "event_cross_003",
+                                               "skill_name":  "read_only_status",
+                                               "approval_token_ref":  "approval::cross_003",
+                                               "confirm_token_ref":  null,
+                                               "undo_token_ref":  null,
+                                               "result_status":  "SUCCESS",
+                                               "result_code":  "TOOL_EXECUTED",
+                                               "result_digest":  "ok",
+                                               "evidence_ref":  "evidence::cross_003",
+                                               "manifest_ref":  null,
+                                               "ts_ms":  1800050010200
+                                           },
+                        "channel_io_log":  {
+                                               "request_id":  "req_cross_003",
+                                               "channel":  "wechat",
+                                               "direction":  "EGRESS",
+                                               "thread_key":  "wechat::u::bot",
+                                               "message_id":  "msg_cross_003",
+                                               "user_id":  "u",
+                                               "status":  "SENT",
+                                               "reason_code":  null,
+                                               "stage":  "S_CHANNEL_EGRESS",
+                                               "detail":  "message sent",
+                                               "payload_digest":  "sha256:cross003",
+                                               "ts_ms":  1800050010300
+                                           }
+                    },
+    "edge_events":  [
+
+                    ],
+    "expected":  {
+                     "status":  "HOST_ONLY",
+                     "host_event_count":  4,
+                     "edge_event_count":  0,
+                     "edge_missing":  true,
+                     "clock_drift_detected":  false,
+                     "timeline_total":  4,
+                     "warnings_contain":  "TIMELINE_EDGE_EVENTS_MISSING"
+                 }
 }

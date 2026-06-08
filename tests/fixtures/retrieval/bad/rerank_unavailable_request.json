@@ -1,26 +1,26 @@
-{
-  "request_id": "req_rerank_002",
-  "payload": {
-    "query": "reranker unavailable fallback order",
-    "top_k": 2,
-    "timeout_ms": 500,
-    "candidates": [
-      {
-        "doc_id": "doc_a",
-        "source_ref": "memo://a",
-        "snippet": "fallback to recall order when reranker unavailable",
-        "metadata": {
-          "bucket": "episodic"
-        }
-      },
-      {
-        "doc_id": "doc_b",
-        "source_ref": "memo://b",
-        "snippet": "another candidate used to verify topk shape",
-        "metadata": {
-          "bucket": "episodic"
-        }
-      }
-    ]
-  }
+﻿{
+    "request_id":  "req_rerank_002",
+    "payload":  {
+                    "query":  "reranker unavailable fallback order",
+                    "top_k":  2,
+                    "timeout_ms":  500,
+                    "candidates":  [
+                                       {
+                                           "doc_id":  "doc_a",
+                                           "source_ref":  "memo://a",
+                                           "snippet":  "fallback to recall order when reranker unavailable",
+                                           "metadata":  {
+                                                            "bucket":  "episodic"
+                                                        }
+                                       },
+                                       {
+                                           "doc_id":  "doc_b",
+                                           "source_ref":  "memo://b",
+                                           "snippet":  "another candidate used to verify topk shape",
+                                           "metadata":  {
+                                                            "bucket":  "episodic"
+                                                        }
+                                       }
+                                   ]
+                }
 }

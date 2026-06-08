@@ -1,19 +1,26 @@
-{
-  "scenario": "normal_trigger_success",
-  "description": "Normal 模式下 MEDIUM 优先级任务触发成功",
-  "task_config": {
-    "task_id": "test_dream_gen",
-    "trigger_mode": "interval",
-    "trigger_config": {"seconds": 900},
-    "intent_template": {"skill_name": "dream_generator", "args": {}},
-    "priority": "MEDIUM",
-    "enabled": true,
-    "max_consecutive_failures": 3
-  },
-  "sys_mode": "normal",
-  "expected": {
-    "status": "OK",
-    "reason_code": null,
-    "proposer_node_id": "scheduler"
-  }
+﻿{
+    "scenario":  "normal_trigger_success",
+    "description":  "Normal 模式下 MEDIUM 优先级任务触发成功",
+    "task_config":  {
+                        "task_id":  "test_dream_gen",
+                        "trigger_mode":  "interval",
+                        "trigger_config":  {
+                                               "seconds":  900
+                                           },
+                        "intent_template":  {
+                                                "skill_name":  "dream_generator",
+                                                "args":  {
+
+                                                         }
+                                            },
+                        "priority":  "MEDIUM",
+                        "enabled":  true,
+                        "max_consecutive_failures":  3
+                    },
+    "sys_mode":  "normal",
+    "expected":  {
+                     "status":  "OK",
+                     "reason_code":  null,
+                     "proposer_node_id":  "scheduler"
+                 }
 }

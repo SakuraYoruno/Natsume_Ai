@@ -1,6 +1,6 @@
-{
-  "message_id": "wx_msg_001",
-  "from_user_id": "wx_user_1001",
-  "to_user_id": "Natsume_bot",
-  "content": "重复消息"
+﻿{
+    "message_id":  "wx_msg_001",
+    "from_user_id":  "wx_user_1001",
+    "to_user_id":  "Natsume_bot",
+    "content":  "重复消息"
 }

@@ -1,4 +1,4 @@
-"""
+﻿"""
 test_state_arbiter.py —— StateArbiter 单元测试
 """
 from __future__ import annotations
@@ -17,13 +17,12 @@ class TestStateArbiterPriority:
     """状态源优先级测试。"""
 
     def test_priority_order_is_correct(self):
-        """验证优先级顺序：WorldCanon > StyleCanon > EpisodicStore > Bond > ChromaDB > EdgeRuntime。"""
+        """验证优先级顺序：WorldCanon > EpisodicStore > Bond > ChromaDB > EdgeRuntime。"""
         assert SOURCE_PRIORITY[0] == StateSource.WORLD_CANON
-        assert SOURCE_PRIORITY[1] == StateSource.STYLE_CANON
-        assert SOURCE_PRIORITY[2] == StateSource.EPISODIC_STORE
-        assert SOURCE_PRIORITY[3] == StateSource.BOND_GRAPH
-        assert SOURCE_PRIORITY[4] == StateSource.CHROMA_DB
-        assert SOURCE_PRIORITY[5] == StateSource.EDGE_RUNTIME
+        assert SOURCE_PRIORITY[1] == StateSource.EPISODIC_STORE
+        assert SOURCE_PRIORITY[2] == StateSource.BOND_GRAPH
+        assert SOURCE_PRIORITY[3] == StateSource.CHROMA_DB
+        assert SOURCE_PRIORITY[4] == StateSource.EDGE_RUNTIME
 
     @pytest.mark.asyncio
     async def test_world_canon_wins_over_episodic(self):
@@ -51,12 +50,12 @@ class TestStateArbiterPriority:
             raise ConnectionError("WorldCanon 不可达")
 
         arbiter.register_source(StateSource.WORLD_CANON, failing_getter)
-        arbiter.register_source(StateSource.STYLE_CANON, lambda k: "style_value")
+        arbiter.register_source(StateSource.EPISODIC_STORE, lambda k: "episodic_value")
 
-        result = await arbiter.resolve("user.style")
+        result = await arbiter.resolve("user.episodic")
         assert result is not None
-        assert result.value == "style_value"
-        assert result.source == StateSource.STYLE_CANON
+        assert result.value == "episodic_value"
+        assert result.source == StateSource.EPISODIC_STORE
         assert result.is_fallback is True
         assert "STATE_SOURCE_FALLBACK" in audit_events
 

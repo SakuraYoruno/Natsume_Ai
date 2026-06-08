@@ -71,7 +71,7 @@ def test_model_router_single_key_prefers_explicit(monkeypatch) -> None:
     monkeypatch.setattr(model_router, "_resolve_runtime_gemini_api_key", lambda: (None, None, None))
     monkeypatch.setenv("GEMINI_API_KEY", "k-env")
 
-    route = model_router.resolve_gemini_model_route(role="chat_agent", preferred_api_key="k0")
+    route = model_router.resolve_gemini_model_route(role="surface_reply", preferred_api_key="k0")
 
     assert route["api_key"] == "k0"
     assert route["key_configured"] is True
@@ -81,11 +81,11 @@ def test_model_router_single_key_prefers_explicit(monkeypatch) -> None:
 def test_model_router_single_env_key_does_not_rotate(monkeypatch) -> None:
     monkeypatch.setattr(model_router, "_resolve_runtime_gemini_api_key", lambda: (None, None, None))
     monkeypatch.setenv("GEMINI_API_KEY", "k1")
-    monkeypatch.setenv("HOST_CHAT_AGENT_MODEL_ID", "gemini-3.1-pro-preview")
+    monkeypatch.setenv("HOST_SURFACE_REPLY_MODEL_ID", "gemini-3.1-pro-preview")
 
-    r1 = model_router.resolve_gemini_model_route(role="chat_agent")
-    r2 = model_router.resolve_gemini_model_route(role="chat_agent")
-    r3 = model_router.resolve_gemini_model_route(role="chat_agent")
+    r1 = model_router.resolve_gemini_model_route(role="surface_reply")
+    r2 = model_router.resolve_gemini_model_route(role="surface_reply")
+    r3 = model_router.resolve_gemini_model_route(role="surface_reply")
 
     assert r1["api_key"] == "k1"
     assert r2["api_key"] == "k1"
@@ -93,7 +93,7 @@ def test_model_router_single_env_key_does_not_rotate(monkeypatch) -> None:
     assert not any(name.endswith("_slot") for name in r1)
     assert not any(name.endswith("_pool_size") for name in r1)
     assert r1["model_id"] == "gemini-3.1-pro-preview"
-    assert r1["capability_profile"]["role"] == "chat_agent"
+    assert r1["capability_profile"]["role"] == "surface_reply"
     assert r1["capability_profile"]["reasoning_tier"] in {"high", "medium", "low"}
 
 
@@ -206,16 +206,16 @@ def test_executive_router_runtime_exposes_executive_role_metadata(monkeypatch) -
 def test_chat_runtime_uses_single_gemini_key_and_role_model(monkeypatch) -> None:
     monkeypatch.setattr(model_router, "_resolve_runtime_gemini_api_key", lambda: (None, None, None))
     monkeypatch.setenv("GEMINI_API_KEY", "k1")
-    monkeypatch.setenv("HOST_CHAT_AGENT_MODEL_ID", "gemini-3.1-pro-preview")
+    monkeypatch.setenv("HOST_SURFACE_REPLY_MODEL_ID", "gemini-3.1-pro-preview")
 
-    runtime1 = graph_builder.resolve_chat_agent_llm_runtime(
+    runtime1 = graph_builder.resolve_surface_reply_llm_runtime(
         base_runtime={
             "provider_name": "gemini",
             "model_id": "gemini-2.5-flash",
             "llm_api_key": None,
         }
     )
-    runtime2 = graph_builder.resolve_chat_agent_llm_runtime(
+    runtime2 = graph_builder.resolve_surface_reply_llm_runtime(
         base_runtime={
             "provider_name": "gemini",
             "model_id": "gemini-2.5-flash",
@@ -226,15 +226,15 @@ def test_chat_runtime_uses_single_gemini_key_and_role_model(monkeypatch) -> None
     assert runtime1["model_id"] == "gemini-3.1-pro-preview"
     assert runtime1["llm_api_key"] == "k1"
     assert runtime2["llm_api_key"] == "k1"
-    assert runtime1["agent_model_route"]["role"] == "chat_agent"
+    assert runtime1["agent_model_route"]["role"] == "surface_reply"
 
 
 def test_chat_runtime_default_profile_sets_output_cap(monkeypatch) -> None:
     monkeypatch.setattr(model_router, "_resolve_runtime_gemini_api_key", lambda: (None, None, None))
     monkeypatch.setenv("GEMINI_API_KEY", "k1")
-    monkeypatch.setenv("HOST_CHAT_AGENT_MODEL_ID", "gemini-2.5-pro")
+    monkeypatch.setenv("HOST_SURFACE_REPLY_MODEL_ID", "gemini-2.5-pro")
 
-    runtime = graph_builder.resolve_chat_agent_llm_runtime(
+    runtime = graph_builder.resolve_surface_reply_llm_runtime(
         base_runtime={
             "provider_name": "gemini",
             "model_id": "gemini-2.5-pro",
@@ -242,19 +242,19 @@ def test_chat_runtime_default_profile_sets_output_cap(monkeypatch) -> None:
         }
     )
 
-    assert runtime["agent_role"] == "chat_agent"
+    assert runtime["agent_role"] == "surface_reply"
     assert runtime["agent_gen_params"]["max_tokens"] == 220
 
 
 def test_chat_runtime_can_experiment_on_codex_spark(monkeypatch) -> None:
-    monkeypatch.setenv("HOST_CHAT_AGENT_CODEX_EXPERIMENT_ENABLED", "true")
-    monkeypatch.setenv("HOST_CHAT_AGENT_CODEX_MODEL_ID", "gpt-5.3-codex-spark")
+    monkeypatch.setenv("HOST_SURFACE_REPLY_CODEX_EXPERIMENT_ENABLED", "true")
+    monkeypatch.setenv("HOST_SURFACE_REPLY_CODEX_MODEL_ID", "gpt-5.3-codex-spark")
     monkeypatch.setattr(
         "host_brain.app.graph_config_llm_runtime.codex_cli_lm_available",
         lambda: True,
     )
 
-    runtime = graph_builder.resolve_chat_agent_llm_runtime(
+    runtime = graph_builder.resolve_surface_reply_llm_runtime(
         base_runtime={
             "provider_name": "gemini",
             "model_id": "gemini-2.5-flash",
@@ -267,7 +267,7 @@ def test_chat_runtime_can_experiment_on_codex_spark(monkeypatch) -> None:
     assert runtime["model_id"] == "gpt-5.3-codex-spark"
     assert runtime["llm_api_key"] is None
     assert runtime["timeout_ms"] == 45000
-    assert runtime["route_reason_code"] == "HOST_CHAT_AGENT_CODEX_EXPERIMENT"
+    assert runtime["route_reason_code"] == "HOST_SURFACE_REPLY_CODEX_EXPERIMENT"
 
 
 def test_subagent_runtime_keeps_legacy_agent_role_value(monkeypatch) -> None:
@@ -288,7 +288,7 @@ def test_subagent_runtime_keeps_legacy_agent_role_value(monkeypatch) -> None:
     assert runtime["model_id"] == "gemini-2.5-pro"
 
 
-def test_non_chat_agent_runtime_migrates_to_codex_cli(monkeypatch) -> None:
+def test_non_surface_reply_runtime_migrates_to_codex_cli(monkeypatch) -> None:
     monkeypatch.setenv("HOST_AGENT_CODEX_MIGRATION_ENABLED", "true")
     monkeypatch.setenv("HOST_CODEX_MODEL_ID", "gpt-5.4-mini")
     monkeypatch.setattr(

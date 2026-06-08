@@ -3,7 +3,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from host_brain.app.agent_runtime_shared import _resolve_text_render_target_lang
-from host_brain.app.chat_agent import ChatAgentInput
+from host_brain.app.surface_reply_preprocessor import SurfaceReplyInput
 from host_brain.app.surface_main_chain_adapter import surface_main_chain_required
 
 
@@ -82,13 +82,12 @@ def test_resolve_text_render_target_lang_uses_media_form_for_media_action() -> N
     assert resolved == "media"
 
 
-def test_surface_main_chain_text_form_is_not_inferred_from_render_profile() -> None:
-    agent_input = ChatAgentInput(
+def test_surface_main_chain_defaults_empty_response_form_to_text() -> None:
+    agent_input = SurfaceReplyInput(
         request_id="req-form",
         session_id="sess-form",
         user_message="你好",
         person_id="person-form",
-        render_profile="ja_voice",
         response_form="",
     )
 
@@ -96,12 +95,11 @@ def test_surface_main_chain_text_form_is_not_inferred_from_render_profile() -> N
 
 
 def test_surface_main_chain_skips_explicit_voice_form() -> None:
-    agent_input = ChatAgentInput(
+    agent_input = SurfaceReplyInput(
         request_id="req-form",
         session_id="sess-form",
         user_message="你好",
         person_id="person-form",
-        render_profile="zh_text",
         response_form="voice",
     )
 

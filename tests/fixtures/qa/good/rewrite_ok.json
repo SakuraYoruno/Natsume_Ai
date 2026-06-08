@@ -1,16 +1,16 @@
-{
-  "narrative": {
-    "text": "收到请求，当前处于草案阶段。"
-  },
-  "intent_draft": {
-    "route": "chat",
-    "target_id": "",
-    "action": "narrative_only",
-    "args": {
-      "text": "draft"
-    }
-  },
-  "meta": {
-    "draft_only": true
-  }
+﻿{
+    "narrative":  {
+                      "text":  "收到请求，当前处于草案阶段。"
+                  },
+    "intent_draft":  {
+                         "route":  "chat",
+                         "target_id":  "",
+                         "action":  "narrative_only",
+                         "args":  {
+                                      "text":  "draft"
+                                  }
+                     },
+    "meta":  {
+                 "draft_only":  true
+             }
 }

@@ -50,7 +50,7 @@ def test_evaluate_case_passes_when_target_and_output_match() -> None:
         ],
         graph_row={
             "request_id": "req_translate_ok",
-            "node_ids": ["sub_agent:translate_agent", "chat_agent"],
+            "node_ids": ["sub_agent:translate_agent", "surface_reply"],
         },
         log_lines=["input_routes: dispatch completed request_id=req_translate_ok"],
     )
@@ -82,7 +82,7 @@ def test_evaluate_case_warns_when_planning_case_has_no_steps() -> None:
         ],
         graph_row={
             "request_id": "req_plan_warn",
-            "node_ids": ["sub_agent:intent_agent", "chat_agent"],
+            "node_ids": ["sub_agent:intent_agent", "surface_reply"],
         },
         log_lines=["input_routes: dispatch completed request_id=req_plan_warn"],
     )

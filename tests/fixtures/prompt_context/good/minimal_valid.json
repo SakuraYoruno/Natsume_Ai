@@ -1,52 +1,48 @@
-{
-  "hard_snapshot": {
-    "session_id": "s_demo",
-    "sys_mode": "normal"
-  },
-  "bond_summary": {
-    "stage": "FRIEND",
-    "trend": "稳定",
-    "capability_hint": "safe_read_only"
-  },
-  "authoritative": [
-    {
-      "slot": "authoritative",
-      "kind": "policy",
-      "source": "world_canon/rules",
-      "content": "仅可提案，不可宣称已执行。"
-    }
-  ],
-  "retrieval": [
-    {
-      "slot": "retrieval",
-      "source": "episodic",
-      "content": "上次会话偏好是简洁回复。"
-    }
-  ],
-  "style_pack": {
-    "tone": "calm",
-    "language": "zh-CN"
-  },
-  "constraints": {
-    "must": [
-      "single_json_output"
-    ],
-    "must_not": [
-      "false_execution_claim"
-    ]
-  },
-  "tool_meta_pack": [
-    {
-      "id": "read_only_status",
-      "name": "ReadOnlyStatus",
-      "desc": "Read status only",
-      "schema_hash": "sha256:demo",
-      "side_effect_level": "READ",
-      "auth_level": "NONE",
-      "domain_tags": [
-        "system"
-      ],
-      "version": "0.0.1"
-    }
-  ]
+﻿{
+    "hard_snapshot":  {
+                          "session_id":  "s_demo",
+                          "sys_mode":  "normal"
+                      },
+    "bond_summary":  {
+                         "stage":  "FRIEND",
+                         "trend":  "稳定",
+                         "capability_hint":  "safe_read_only"
+                     },
+    "authoritative":  [
+                          {
+                              "slot":  "authoritative",
+                              "kind":  "policy",
+                              "source":  "world_canon/rules",
+                              "content":  "仅可提案，不可宣称已执行。"
+                          }
+                      ],
+    "retrieval":  [
+                      {
+                          "slot":  "retrieval",
+                          "source":  "episodic",
+                          "content":  "上次会话偏好是简洁回复。"
+                      }
+                  ],
+    "constraints":  {
+                        "must":  [
+                                     "single_json_output"
+                                 ],
+                        "must_not":  [
+                                         "false_execution_claim"
+                                     ]
+                    },
+    "tool_meta_pack":  [
+                           {
+                               "id":  "read_only_status",
+                               "name":  "ReadOnlyStatus",
+                               "desc":  "Read status only",
+                               "schema_hash":  "sha256:demo",
+                               "side_effect_level":  "READ",
+                               "auth_level":  "NONE",
+                               "domain_tags":  [
+                                                   "system"
+                                               ],
+                               "version":  "0.0.1"
+                           }
+                       ]
 }

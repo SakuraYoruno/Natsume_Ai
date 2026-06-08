@@ -1,11 +1,13 @@
-{
-  "narrative": {
-    "text": "收到请求。"
-  },
-  "intent_draft": {
-    "route": "skill",
-    "target_id": "read_only_status",
-    "action": "read_only_status",
-    "args": {}
-  }
+﻿{
+    "narrative":  {
+                      "text":  "收到请求。"
+                  },
+    "intent_draft":  {
+                         "route":  "skill",
+                         "target_id":  "read_only_status",
+                         "action":  "read_only_status",
+                         "args":  {
+
+                                  }
+                     }
 }

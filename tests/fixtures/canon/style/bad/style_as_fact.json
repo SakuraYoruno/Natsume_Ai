@@ -1,5 +1,7 @@
-{
-  "canon_id": "assistant_tone_bad",
-  "content": "This has been executed and saved successfully.",
-  "tags": ["invalid"]
+﻿{
+    "canon_id":  "assistant_tone_bad",
+    "content":  "This has been executed and saved successfully.",
+    "tags":  [
+                 "invalid"
+             ]
 }

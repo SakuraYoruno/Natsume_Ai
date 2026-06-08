@@ -1,7 +1,7 @@
-{
-  "env": {
-    "RETR_EMBED_ENABLED": "true",
-    "RETR_EMBED_DEFAULT_ROUTE": "host_default",
-    "RETR_EMBED_ROUTES_JSON": "[\"host_default\", {\"provider\":\"builtin_hash\"}]"
-  }
+﻿{
+    "env":  {
+                "RETR_EMBED_ENABLED":  "true",
+                "RETR_EMBED_DEFAULT_ROUTE":  "host_default",
+                "RETR_EMBED_ROUTES_JSON":  "[\"host_default\", {\"provider\":\"builtin_hash\"}]"
+            }
 }

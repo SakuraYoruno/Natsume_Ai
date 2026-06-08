@@ -1,18 +1,18 @@
-{
-  "event_id": "bond_evt_summary_001",
-  "user_id": "user_bond_001",
-  "session_id": "session_bond_001",
-  "topic_id": "topic_trust_support",
-  "capability_hint": "SUPPORTIVE",
-  "stage": "FRIEND",
-  "trend": "稳定",
-  "evidence_refs": [
-    "evidence::bond::summary::001"
-  ],
-  "payload": {
-    "trust_value": 78,
-    "delta": 2.4,
-    "etype": "HELP"
-  },
-  "trust_value": 78
+﻿{
+    "event_id":  "bond_evt_summary_001",
+    "user_id":  "user_bond_001",
+    "session_id":  "session_bond_001",
+    "topic_id":  "topic_trust_support",
+    "capability_hint":  "SUPPORTIVE",
+    "stage":  "FRIEND",
+    "trend":  "稳定",
+    "evidence_refs":  [
+                          "evidence::bond::summary::001"
+                      ],
+    "payload":  {
+                    "trust_value":  78,
+                    "delta":  2.4,
+                    "etype":  "HELP"
+                },
+    "trust_value":  78
 }

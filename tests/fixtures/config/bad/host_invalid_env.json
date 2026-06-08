@@ -1,6 +1,6 @@
-{
-  "env": {
-    "Natsume_ENV": "qa",
-    "HOST_LLM_PROVIDER": "openai"
-  }
+﻿{
+    "env":  {
+                "Natsume_ENV":  "qa",
+                "HOST_LLM_PROVIDER":  "openai"
+            }
 }

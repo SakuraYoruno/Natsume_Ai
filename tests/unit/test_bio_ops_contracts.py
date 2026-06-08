@@ -13,7 +13,7 @@ def test_bio_ops_task_contract_roundtrip() -> None:
             "mode": "audit",
             "owner_organ": "prefrontal_agent",
             "inputs": {"text": "我已经保存了", "evidence_refs": ["evt-1"]},
-            "scope": {"target_paths": ["host_brain/app/chat_agent.py"]},
+            "scope": {"target_paths": ["host_brain/app/surface_reply_runtime.py"]},
             "work_order_ref": "wo-1",
         }
     )
@@ -21,7 +21,7 @@ def test_bio_ops_task_contract_roundtrip() -> None:
     task.validate()
 
     assert task.to_dict()["capability"] == "truthfulness_cortex"
-    assert task.target_paths == ["host_brain/app/chat_agent.py"]
+    assert task.target_paths == ["host_brain/app/surface_reply_runtime.py"]
     assert task.is_write_candidate is False
 
 

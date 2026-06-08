@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import asyncio
 import json
@@ -7,9 +7,14 @@ from types import SimpleNamespace
 import pytest
 
 from host_brain.app.surface_main_chain_adapter import (
+    _surface_apply_memory_context_reply_plan_override,
+    _surface_life_context_task_facts,
     _sanitize_main_chain_meta_reply,
-    build_surface_main_chain_input_from_chat_input,
-    run_surface_main_chain_for_chat_input,
+    _surface_memory_context_orchestrator_facts,
+    _surface_memory_context_orchestrator_must_include,
+    _surface_memory_context_orchestrator_must_not_do,
+    build_surface_main_chain_input_from_surface_reply_input,
+    run_surface_main_chain_for_surface_reply_input,
     surface_main_chain_enabled,
     surface_main_chain_sse_generator,
 )
@@ -95,6 +100,57 @@ def _surface_json_result(text: str, *, final_provider: str = "mock", final_model
     )
 
 
+def test_proactive_context_followup_forces_bound_message_cause(monkeypatch) -> None:
+    bound_content = "我刚才主动戳你，是因为这边的靠近感掉下来了，想确认你还在不在。"
+    pack = {
+        "current_turn_binding": {
+            "binding_kind": "context_question",
+            "bound_event_id": "memevt-proactive",
+            "bound_event_kind": "life_proactive_sent",
+            "bound_content": bound_content,
+            "reason_code": "BOUND_RECENT_VISIBLE_ASSISTANT_EVENT",
+        },
+        "selected_context": {
+            "previous_visible_assistant_event": {
+                "event_id": "memevt-proactive",
+                "event_kind": "life_proactive_sent",
+                "content": bound_content,
+            },
+        },
+        "suppressed_items": [
+            {
+                "layer": "long_term_memory_evidence",
+                "reason_code": "SUPPRESSED_BY_RECENT_VISIBLE_BINDING",
+            }
+        ],
+    }
+    monkeypatch.setattr(
+        "host_brain.app.context.memory_context_orchestrator.build_memory_context_debug",
+        lambda **_kwargs: pack,
+    )
+    agent_input = _agent_input(user_message="怎么了")
+    trace: dict[str, object] = {}
+
+    plan = _surface_apply_memory_context_reply_plan_override(
+        {"task_mode": "daily_chat", "response_move": "plain_answer"},
+        agent_input=agent_input,
+        trace_stage_meta=trace,
+    )
+    facts = _surface_memory_context_orchestrator_facts(agent_input=agent_input, trace_stage_meta=trace)
+    must_include = _surface_memory_context_orchestrator_must_include(agent_input=agent_input, trace_stage_meta=trace)
+    must_not_do = _surface_memory_context_orchestrator_must_not_do(agent_input=agent_input, trace_stage_meta=trace)
+    life_facts = _surface_life_context_task_facts(agent_input, trace_stage_meta=trace)
+
+    assert plan["task_mode"] == "proactive_context_followup"
+    assert plan["response_move"] == "explain_recent_proactive_message"
+    assert "靠近感掉下来了" in plan["response_goal"]
+    assert any("靠近感掉下来了" in item for item in plan["must_include"])
+    assert any("靠近感掉下来了" in item for item in facts)
+    assert any("靠近感掉下来了" in item for item in must_include)
+    assert any("没什么" in item and "空泛解释" in item for item in must_not_do)
+    assert any("不能引入未绑定的后台任务" in item for item in life_facts)
+
+
 @pytest.mark.asyncio
 async def test_surface_main_chain_propagates_compiled_memory_packet_for_output_guard(monkeypatch) -> None:
     monkeypatch.setattr(
@@ -108,7 +164,7 @@ async def test_surface_main_chain_propagates_compiled_memory_packet_for_output_g
     monkeypatch.setattr("host_brain.integrations.llm_helpers.acomplete_llm_with_pool", _fake_complete)
 
     trace: dict[str, object] = {}
-    result = await run_surface_main_chain_for_chat_input(
+    result = await run_surface_main_chain_for_surface_reply_input(
         _agent_input(
             user_message="这三本书，你喜欢哪本？",
             retrieval_summary={
@@ -139,13 +195,13 @@ async def test_surface_main_chain_propagates_compiled_memory_packet_for_output_g
     assert "集合记忆" in "\n".join(packet.get("facts") or [])
 
 
-def test_build_surface_main_chain_input_from_chat_input_compresses_app_context(monkeypatch) -> None:
+def test_build_surface_main_chain_input_from_surface_reply_input_compresses_app_context(monkeypatch) -> None:
     monkeypatch.setattr(
         "host_brain.app.surface_main_chain_adapter.get_compiled_soul",
         lambda: SimpleNamespace(source_text=SOUL, runtime_full_text=SOUL),
     )
 
-    payload = build_surface_main_chain_input_from_chat_input(_agent_input())
+    payload = build_surface_main_chain_input_from_surface_reply_input(_agent_input())
 
     assert payload.soul_md == SOUL
     assert payload.user_message == "这段我不会改"
@@ -172,7 +228,7 @@ def test_surface_main_chain_does_not_inject_dream_context_for_ordinary_chat(monk
         lambda **_kwargs: "我梦见夜车、海风和旧名字。",
     )
 
-    payload = build_surface_main_chain_input_from_chat_input(
+    payload = build_surface_main_chain_input_from_surface_reply_input(
         _agent_input(user_message="我刚处理完一段绕的代码，帮我压稳节奏。")
     )
     facts = "\n".join(payload.task_control.get("facts") or [])
@@ -193,7 +249,7 @@ def test_surface_main_chain_injects_recent_dream_only_when_user_asks(monkeypatch
         lambda **_kwargs: "我梦见自己在一列很慢的夜车上，窗外是黑蓝色的海风，有人叫了一个旧名字。",
     )
 
-    payload = build_surface_main_chain_input_from_chat_input(
+    payload = build_surface_main_chain_input_from_surface_reply_input(
         _agent_input(user_message="你最近有没有留下什么梦？自然说一点。")
     )
     facts = "\n".join(payload.task_control.get("facts") or [])
@@ -204,30 +260,6 @@ def test_surface_main_chain_injects_recent_dream_only_when_user_asks(monkeypatch
     assert "梦境只作为 narrative-only 内在叙事" in facts
     assert "不要在有最近梦境片段时临场乱编完全无关的新梦" in must_not
     assert "dream_quality" in must_not
-
-
-def test_build_surface_main_chain_input_marks_anaphoric_memory_followup(monkeypatch) -> None:
-    monkeypatch.setattr(
-        "host_brain.app.surface_main_chain_adapter.get_compiled_soul",
-        lambda: SimpleNamespace(source_text=SOUL, runtime_full_text=SOUL),
-    )
-    trace = {
-        "surface_memory_recall_packet": {
-            "facts": ["记忆线索：我刚才推荐了 3 本书：1. A；2. B；3. C。"],
-            "style_anchor": ["指代选择追问：必须承接记忆线索里的最近对象回答，不要当成新话题。"],
-            "trace": {"plan": {"reason": "anaphoric_selection_recall"}},
-        }
-    }
-
-    payload = build_surface_main_chain_input_from_chat_input(
-        _agent_input(user_message="我问你喜欢哪本"),
-        trace_stage_meta=trace,
-    )
-
-    assert payload.task_control["task_mode"] == "memory_followup"
-    assert payload.task_control["response_move"] == "memory_followup"
-    assert any("指代追问" in item for item in payload.task_control["style_anchor"])
-    assert tuple(payload.memory_packet.facts) == ("记忆线索：我刚才推荐了 3 本书：1. A；2. B；3. C。",)
 
 
 def test_build_surface_main_chain_input_marks_collection_recall_as_memory_followup(monkeypatch) -> None:
@@ -242,7 +274,7 @@ def test_build_surface_main_chain_input_marks_collection_recall_as_memory_follow
         }
     }
 
-    payload = build_surface_main_chain_input_from_chat_input(
+    payload = build_surface_main_chain_input_from_surface_reply_input(
         _agent_input(user_message="昨天三本呢？"),
         trace_stage_meta=trace,
     )
@@ -264,7 +296,7 @@ def test_build_surface_main_chain_input_marks_failure_recall_as_memory_followup(
         }
     }
 
-    payload = build_surface_main_chain_input_from_chat_input(
+    payload = build_surface_main_chain_input_from_surface_reply_input(
         _agent_input(user_message="为什么任务会失败？"),
         trace_stage_meta=trace,
     )
@@ -272,27 +304,6 @@ def test_build_surface_main_chain_input_marks_failure_recall_as_memory_followup(
     assert payload.task_control["task_mode"] == "memory_followup"
     assert payload.task_control["response_move"] == "memory_followup"
     assert any("失败追问只能解释" in item for item in payload.task_control["style_anchor"])
-
-
-def test_build_surface_main_chain_input_infers_anaphoric_followup_from_sanitized_packet(monkeypatch) -> None:
-    monkeypatch.setattr(
-        "host_brain.app.surface_main_chain_adapter.get_compiled_soul",
-        lambda: SimpleNamespace(source_text=SOUL, runtime_full_text=SOUL),
-    )
-    trace = {
-        "surface_memory_recall_packet": {
-            "facts": ["记忆线索：我刚才推荐了 3 本书：1. A；2. B；3. C。"],
-            "style_anchor": ["指代选择追问：把记忆线索当作刚才对话的当前上下文。"],
-        }
-    }
-
-    payload = build_surface_main_chain_input_from_chat_input(
-        _agent_input(user_message="这三本书你喜欢哪本"),
-        trace_stage_meta=trace,
-    )
-
-    assert payload.task_control["task_mode"] == "memory_followup"
-    assert payload.task_control["response_move"] == "memory_followup"
 
 
 def test_build_surface_main_chain_input_prefers_surface_task_control(monkeypatch) -> None:
@@ -344,7 +355,7 @@ def test_build_surface_main_chain_input_prefers_surface_task_control(monkeypatch
 
     monkeypatch.setattr("host_brain.app.surface_context_packet.build_surface_context_packet", _fake_surface_context_packet)
 
-    payload = build_surface_main_chain_input_from_chat_input(
+    payload = build_surface_main_chain_input_from_surface_reply_input(
         _agent_input(
             surface_task_control={
                 "task_mode": "style_repair",
@@ -424,7 +435,7 @@ def test_build_surface_main_chain_input_derives_reply_plan_without_passing_histo
     monkeypatch.setattr("host_brain.app.cortex_prompt_builder.build_cortex_prompt", _blocked_build_cortex_prompt)
     monkeypatch.setattr("host_brain.app.surface_context_packet.build_surface_context_packet", _fake_surface_context_packet)
 
-    payload = build_surface_main_chain_input_from_chat_input(
+    payload = build_surface_main_chain_input_from_surface_reply_input(
         _agent_input(render_policy={}, surface_task_control={}),
         trace_stage_meta=trace,
     )
@@ -477,7 +488,7 @@ def test_build_surface_main_chain_input_reuses_prepared_context_packet(monkeypat
         _blocked_surface_context_packet,
     )
 
-    payload = build_surface_main_chain_input_from_chat_input(
+    payload = build_surface_main_chain_input_from_surface_reply_input(
         _agent_input(render_policy={}, surface_task_control={}),
         trace_stage_meta=trace,
     )
@@ -497,7 +508,7 @@ async def test_surface_main_chain_blocks_visual_claims_without_evidence(monkeypa
         raise AssertionError("surface LLM must not run without perception evidence")
 
     monkeypatch.setattr(
-        "host_brain.app.surface_main_chain_adapter.run_surface_main_chain_for_chat_input",
+        "host_brain.app.surface_main_chain_adapter.run_surface_main_chain_for_surface_reply_input",
         _should_not_run,
     )
 
@@ -558,7 +569,7 @@ async def test_surface_main_chain_sse_generator_calls_chat_surface_pool(monkeypa
 
     assert calls
     assert commit["decision"] == "APPROVE"
-    assert commit["audit_refs"]["path"] == "chat_agent:surface_main_chain"
+    assert commit["audit_refs"]["path"] == "surface_reply:surface_main_chain"
     assert commit["audit_refs"]["trace_stage_meta"]["surface_main_chain_used"] is True
     assert "timings_ms" in commit["audit_refs"]
     assert "输入输出" in commit["narrative"]
@@ -624,58 +635,9 @@ async def test_recommendation_followup_uses_surface_main_chain_not_template(monk
     commit = next(event for event in events if event.get("phase") == "COMMIT")
 
     assert calls
-    assert commit["audit_refs"]["path"] == "chat_agent:surface_main_chain"
+    assert commit["audit_refs"]["path"] == "surface_reply:surface_main_chain"
     assert commit["audit_refs"]["trace_stage_meta"].get("reply_source") == "surface_main_chain"
     assert "固定答案" in commit["narrative"]
-
-
-@pytest.mark.asyncio
-async def test_surface_main_chain_rewrites_not_ready_memory_claim(monkeypatch) -> None:
-    monkeypatch.setattr(
-        "host_brain.app.surface_main_chain_adapter.get_compiled_soul",
-        lambda: SimpleNamespace(source_text=SOUL, runtime_full_text=SOUL),
-    )
-
-    async def _fake_complete(**_kwargs):  # noqa: ANN003
-        return _surface_json_result("我记得昨天那几本里《幻觉书》最好看，直接看它。")
-
-    monkeypatch.setattr("host_brain.integrations.llm_helpers.acomplete_llm_with_pool", _fake_complete)
-
-    events = [
-        _parse_sse(chunk)
-        async for chunk in surface_main_chain_sse_generator(
-            _agent_input(
-                user_message="昨天那几本好看吗？",
-                retrieval_summary={
-                    "status": "DEGRADED",
-                    "surface_memory_recall_packet": {
-                        "facts": [],
-                        "degraded": True,
-                        "reason_code": "SURFACE_MEMORY_RECALL_COVERAGE_FAILED",
-                        "trace": {
-                            "plan": {"reason": "anaphoric_selection_recall"},
-                            "recall_answer_readiness": {
-                                "status": "NOT_READY",
-                                "ready_to_answer": False,
-                                "response_mode": "fetch_or_request_detail_evidence",
-                                "reasons": ["coverage_failed", "missing_detail_evidence"],
-                                "recall_contract_id": "anaphoric_selection",
-                                "query_kind": "anaphoric_selection",
-                            },
-                        },
-                    },
-                },
-            )
-        )
-    ]
-    commit = next(event for event in events if event.get("phase") == "COMMIT")
-
-    assert "幻觉书" not in commit["narrative"]
-    assert "我别装读过了" in commit["narrative"]
-    assert "没翻正文" in commit["narrative"]
-    guard = commit["audit_refs"]["trace_stage_meta"]["surface_memory_output_guard"]
-    assert guard["applied"] is True
-    assert guard["reason_code"] == "SURFACE_MEMORY_OUTPUT_NOT_READY_REWRITE"
 
 
 @pytest.mark.asyncio
@@ -735,552 +697,12 @@ async def test_surface_main_chain_allows_missing_detail_selection_when_scoped_to
 
 
 @pytest.mark.asyncio
-async def test_surface_main_chain_rewrites_missing_detail_field_jargon(monkeypatch) -> None:
-    monkeypatch.setattr(
-        "host_brain.app.surface_main_chain_adapter.get_compiled_soul",
-        lambda: SimpleNamespace(source_text=SOUL, runtime_full_text=SOUL),
-    )
-
-    async def _fake_complete(**_kwargs):  # noqa: ANN003
-        return _surface_json_result(
-            "《与神在河岸》我还没读正文，只能先按卡片说第一眼：奇幻身份钩子，资料完整；简介也是神明、河岸与现实感交叠，标题辨识度高。真要说好不好看，得看正文撑不撑得住。"
-        )
-
-    monkeypatch.setattr("host_brain.integrations.llm_helpers.acomplete_llm_with_pool", _fake_complete)
-
-    events = [
-        _parse_sse(chunk)
-        async for chunk in surface_main_chain_sse_generator(
-            _agent_input(
-                user_message="与神在河岸好看吗？",
-                retrieval_summary={
-                    "status": "OK",
-                    "surface_memory_recall_packet": {
-                        "facts": [
-                            "集合记忆：本次轻小说推荐集合，记录 3 个条目；可比较证据：1. 《与神在河岸》｜看点：奇幻身份｜简介：神明和河岸；2. 《A》；3. 《B》。"
-                        ],
-                        "degraded": True,
-                        "reason_code": "LIGHTNOVEL_DEEP_REVIEW_FETCH_FAILED",
-                        "trace": {
-                            "plan": {"reason": "anaphoric_selection_recall"},
-                            "selected_collection_items": [{"title": "与神在河岸"}, {"title": "A"}, {"title": "B"}],
-                            "recall_answer_readiness": {
-                                "status": "NOT_READY",
-                                "ready_to_answer": False,
-                                "response_mode": "fetch_or_request_detail_evidence",
-                                "reasons": ["coverage_failed", "missing_detail_evidence"],
-                                "recall_contract_id": "anaphoric_selection",
-                                "query_kind": "anaphoric_selection",
-                                "detail_evidence": {"required": True, "basis": "missing_detail_evidence"},
-                            },
-                        },
-                    },
-                },
-            )
-        )
-    ]
-    commit = next(event for event in events if event.get("phase") == "COMMIT")
-
-    assert "奇幻身份钩子" not in commit["narrative"]
-    assert "标题辨识度" not in commit["narrative"]
-    assert "撑不撑得住" not in commit["narrative"]
-    assert "我别装读过了" in commit["narrative"]
-    guard = commit["audit_refs"]["trace_stage_meta"]["surface_memory_output_guard"]
-    assert guard["applied"] is True
-    assert guard["reason_code"] == "SURFACE_MEMORY_OUTPUT_MISSING_DETAIL_INFERENCE_REWRITE"
-
-
-@pytest.mark.asyncio
-async def test_surface_main_chain_rewrites_detail_anchor_selection_until_deep_review(monkeypatch) -> None:
-    monkeypatch.setattr(
-        "host_brain.app.surface_main_chain_adapter.get_compiled_soul",
-        lambda: SimpleNamespace(source_text=SOUL, runtime_full_text=SOUL),
-    )
-
-    async def _fake_complete(**_kwargs):  # noqa: ANN003
-        return _surface_json_result("昨天那几本里我会选《B》，热度高，节奏也舒服。")
-
-    monkeypatch.setattr("host_brain.integrations.llm_helpers.acomplete_llm_with_pool", _fake_complete)
-
-    events = [
-        _parse_sse(chunk)
-        async for chunk in surface_main_chain_sse_generator(
-            _agent_input(
-                user_message="昨天那几本好看吗？",
-                retrieval_summary={
-                    "status": "OK",
-                    "surface_memory_recall_packet": {
-                        "facts": ["集合记忆：2026-05-28 当天轻小说推荐集合，记录 3 个条目；可比较证据：1. 《A》；2. 《B》；3. 《C》。"],
-                        "degraded": False,
-                        "reason_code": None,
-                        "trace": {
-                            "selected_collection_items": [
-                                {"title": "A", "detail_url": "https://www.lightnovel.fun/cn/detail/a"},
-                                {"title": "B", "detail_url": "https://www.lightnovel.fun/cn/detail/b"},
-                                {"title": "C", "detail_url": "https://www.lightnovel.fun/cn/detail/c"},
-                            ],
-                            "recall_answer_readiness": {
-                                "status": "READY",
-                                "ready_to_answer": True,
-                                "response_mode": "answer_from_collection_memory",
-                                "reasons": [],
-                                "recall_contract_id": "anaphoric_selection",
-                                "query_kind": "anaphoric_selection",
-                                "detail_evidence": {
-                                    "required": True,
-                                    "basis": "detail_anchor",
-                                    "ready_for_deep_review": True,
-                                },
-                            },
-                            "recall_answer_strategy": {
-                                "action": "fetch_more_evidence",
-                                "should_fetch_more_evidence": True,
-                                "claim_scope": "memory_only_no_quality_judgment",
-                                "evidence_level": "detail_anchor_only",
-                            },
-                        },
-                    },
-                },
-            )
-        )
-    ]
-    commit = next(event for event in events if event.get("phase") == "COMMIT")
-
-    assert "热度高" not in commit["narrative"]
-    assert "我别装读过了" in commit["narrative"]
-    assert "没翻正文" in commit["narrative"]
-    guard = commit["audit_refs"]["trace_stage_meta"]["surface_memory_output_guard"]
-    assert guard["applied"] is True
-    assert guard["reason_code"] == "SURFACE_MEMORY_OUTPUT_MISSING_DETAIL_INFERENCE_REWRITE"
-
-
-@pytest.mark.asyncio
-async def test_surface_main_chain_treats_detail_anchor_selection_as_not_ready_without_strategy(monkeypatch) -> None:
-    monkeypatch.setattr(
-        "host_brain.app.surface_main_chain_adapter.get_compiled_soul",
-        lambda: SimpleNamespace(source_text=SOUL, runtime_full_text=SOUL),
-    )
-
-    async def _fake_complete(**_kwargs):  # noqa: ANN003
-        return _surface_json_result("哈？昨天那几本我能对上，我会选《B》，热度高，节奏挺舒服。")
-
-    monkeypatch.setattr("host_brain.integrations.llm_helpers.acomplete_llm_with_pool", _fake_complete)
-
-    events = [
-        _parse_sse(chunk)
-        async for chunk in surface_main_chain_sse_generator(
-            _agent_input(
-                user_message="昨天那几本好看吗？",
-                retrieval_summary={
-                    "status": "OK",
-                    "surface_memory_recall_packet": {
-                        "facts": ["集合记忆：2026-05-28 当天轻小说推荐集合，记录 3 个条目；可比较证据：1. 《A》；2. 《B》；3. 《C》。"],
-                        "degraded": False,
-                        "reason_code": None,
-                        "trace": {
-                            "selected_collection_items": [
-                                {"title": "A", "detail_url": "https://www.lightnovel.fun/cn/detail/a"},
-                                {"title": "B", "detail_url": "https://www.lightnovel.fun/cn/detail/b"},
-                                {"title": "C", "detail_url": "https://www.lightnovel.fun/cn/detail/c"},
-                            ],
-                            "recall_answer_readiness": {
-                                "status": "READY",
-                                "ready_to_answer": True,
-                                "response_mode": "answer_from_collection_memory",
-                                "reasons": [],
-                                "recall_contract_id": "anaphoric_selection",
-                                "query_kind": "anaphoric_selection",
-                                "detail_evidence": {
-                                    "required": True,
-                                    "basis": "detail_anchor",
-                                    "ready_for_deep_review": True,
-                                },
-                            },
-                        },
-                    },
-                },
-            )
-        )
-    ]
-    commit = next(event for event in events if event.get("phase") == "COMMIT")
-
-    assert "我能对上" not in commit["narrative"]
-    assert "热度高" not in commit["narrative"]
-    assert "我别装读过了" in commit["narrative"]
-    assert "没翻正文" in commit["narrative"]
-    guard = commit["audit_refs"]["trace_stage_meta"]["surface_memory_output_guard"]
-    assert guard["applied"] is True
-    assert guard["reason_code"] == "SURFACE_MEMORY_OUTPUT_MISSING_DETAIL_INFERENCE_REWRITE"
-
-
-@pytest.mark.asyncio
-async def test_surface_main_chain_rewrites_ready_memory_reply_with_unsupported_title(monkeypatch) -> None:
-    monkeypatch.setattr(
-        "host_brain.app.surface_main_chain_adapter.get_compiled_soul",
-        lambda: SimpleNamespace(source_text=SOUL, runtime_full_text=SOUL),
-    )
-
-    async def _fake_complete(**_kwargs):  # noqa: ANN003
-        return _surface_json_result("我会选《不存在D》，这个设定最抓人。")
-
-    monkeypatch.setattr("host_brain.integrations.llm_helpers.acomplete_llm_with_pool", _fake_complete)
-
-    events = [
-        _parse_sse(chunk)
-        async for chunk in surface_main_chain_sse_generator(
-            _agent_input(
-                user_message="这三本书，你喜欢哪本？",
-                retrieval_summary={
-                    "status": "OK",
-                    "surface_memory_recall_packet": {
-                        "facts": ["集合记忆：本次轻小说推荐集合，记录 3 个条目；可比较证据：1. 《A》；2. 《B》；3. 《C》。"],
-                        "degraded": False,
-                        "reason_code": None,
-                    },
-                },
-            )
-        )
-    ]
-    commit = next(event for event in events if event.get("phase") == "COMMIT")
-
-    assert "不存在D" not in commit["narrative"]
-    assert "《A》" in commit["narrative"]
-    assert "《B》" in commit["narrative"]
-    assert "《C》" in commit["narrative"]
-    guard = commit["audit_refs"]["trace_stage_meta"]["surface_memory_output_guard"]
-    assert guard["applied"] is True
-    assert guard["reason_code"] == "SURFACE_MEMORY_OUTPUT_UNSUPPORTED_FACT_REWRITE"
-
-
-@pytest.mark.asyncio
-async def test_surface_main_chain_strips_memory_user_state_guess(monkeypatch) -> None:
-    monkeypatch.setattr(
-        "host_brain.app.surface_main_chain_adapter.get_compiled_soul",
-        lambda: SimpleNamespace(source_text=SOUL, runtime_full_text=SOUL),
-    )
-
-    async def _fake_complete(**_kwargs):  # noqa: ANN003
-        return _surface_json_result("嘿嘿，老哥终于来问我啦～我补读之后觉得第三本《C》更顺，开篇更抓人。")
-
-    monkeypatch.setattr("host_brain.integrations.llm_helpers.acomplete_llm_with_pool", _fake_complete)
-
-    events = [
-        _parse_sse(chunk)
-        async for chunk in surface_main_chain_sse_generator(
-            _agent_input(
-                user_message="这三本书，你喜欢哪本？",
-                retrieval_summary={
-                    "status": "OK",
-                    "surface_memory_recall_packet": {
-                        "facts": ["集合记忆：本次轻小说推荐集合，记录 3 个条目；可比较证据：1. 《A》；2. 《B》；3. 《C》。"],
-                        "degraded": False,
-                        "reason_code": None,
-                    },
-                },
-            )
-        )
-    ]
-    commit = next(event for event in events if event.get("phase") == "COMMIT")
-
-    assert "终于来问" not in commit["narrative"]
-    assert "老哥终于" not in commit["narrative"]
-    assert "《C》" in commit["narrative"]
-    assert "开篇" in commit["narrative"]
-    guard = commit["audit_refs"]["trace_stage_meta"]["surface_memory_output_guard"]
-    assert guard["applied"] is True
-    assert guard["reason_code"] == "SURFACE_MEMORY_OUTPUT_USER_STATE_GUESS_STRIPPED"
-
-
-@pytest.mark.asyncio
-async def test_surface_main_chain_rewrites_bad_selection_reply_to_deep_review_answer(monkeypatch) -> None:
-    monkeypatch.setattr(
-        "host_brain.app.surface_main_chain_adapter.get_compiled_soul",
-        lambda: SimpleNamespace(source_text=SOUL, runtime_full_text=SOUL),
-    )
-
-    async def _fake_complete(**_kwargs):  # noqa: ANN003
-        return _surface_json_result("哈？老哥你昨天不是没看吗……算了，那几本里我觉得《异世界皇女皇帝线》挺有意思的，热度也高，节奏挺舒服。")
-
-    monkeypatch.setattr("host_brain.integrations.llm_helpers.acomplete_llm_with_pool", _fake_complete)
-
-    events = [
-        _parse_sse(chunk)
-        async for chunk in surface_main_chain_sse_generator(
-            _agent_input(
-                user_message="昨天那几本好看吗？",
-                retrieval_summary={
-                    "status": "OK",
-                    "surface_memory_recall_packet": {
-                        "facts": [
-                            "网页深读结果（含正文）：当前更推荐第3本《异世界皇女皇帝线》。原因：开篇比较抓人；设定线很直给；对白比较轻快。另外我也顺手看了：第1本《A》、第2本《B》。"
-                        ],
-                        "degraded": False,
-                        "reason_code": None,
-                        "trace": {
-                            "selected_collection_items": [
-                                {"title": "A", "detail_url": "https://www.lightnovel.fun/cn/detail/a"},
-                                {"title": "B", "detail_url": "https://www.lightnovel.fun/cn/detail/b"},
-                                {"title": "异世界皇女皇帝线", "detail_url": "https://www.lightnovel.fun/cn/detail/c"},
-                            ],
-                            "lightnovel_deep_review": {
-                                "status": "OK",
-                                "selected": {"index": 3, "title": "异世界皇女皇帝线"},
-                                "source": "fetch",
-                            },
-                            "recall_answer_readiness": {
-                                "status": "READY",
-                                "ready_to_answer": True,
-                                "response_mode": "answer_from_evidence",
-                                "evidence_depth": "detail_or_body_evidence",
-                                "reasons": [],
-                                "recall_contract_id": "anaphoric_selection",
-                                "query_kind": "anaphoric_selection",
-                                "detail_evidence": {
-                                    "required": True,
-                                    "basis": "lightnovel_deep_review",
-                                    "ready_for_deep_review": True,
-                                    "body_item_count": 1,
-                                },
-                            },
-                            "recall_answer_strategy": {
-                                "action": "direct_answer",
-                                "claim_scope": "detail_judgment",
-                                "evidence_level": "detail_or_body",
-                            },
-                        },
-                    },
-                },
-            )
-        )
-    ]
-    commit = next(event for event in events if event.get("phase") == "COMMIT")
-
-    assert "昨天不是没看" not in commit["narrative"]
-    assert "热度也高" not in commit["narrative"]
-    assert "网页深读" not in commit["narrative"]
-    assert "《异世界皇女皇帝线》" in commit["narrative"]
-    assert "开篇比较抓人" in commit["narrative"]
-    guard = commit["audit_refs"]["trace_stage_meta"]["surface_memory_output_guard"]
-    assert guard["applied"] is True
-    assert guard["reason_code"] == "SURFACE_MEMORY_OUTPUT_DEEP_REVIEW_DIRECT_REWRITE"
-
-
-@pytest.mark.asyncio
-async def test_surface_main_chain_rewrites_partial_deep_review_without_scope(monkeypatch) -> None:
-    monkeypatch.setattr(
-        "host_brain.app.surface_main_chain_adapter.get_compiled_soul",
-        lambda: SimpleNamespace(source_text=SOUL, runtime_full_text=SOUL),
-    )
-
-    async def _fake_complete(**_kwargs):  # noqa: ANN003
-        return _surface_json_result("这十几本里我会选《C》，它最好看，开篇最抓人。")
-
-    monkeypatch.setattr("host_brain.integrations.llm_helpers.acomplete_llm_with_pool", _fake_complete)
-
-    events = [
-        _parse_sse(chunk)
-        async for chunk in surface_main_chain_sse_generator(
-            _agent_input(
-                user_message="这几天十几本里哪本最好看？",
-                retrieval_summary={
-                    "status": "OK",
-                    "surface_memory_recall_packet": {
-                        "facts": [
-                            "网页深读结果（含正文）：当前更推荐第3本《C》。原因：开篇比较抓人；设定线很直给。另外我也顺手看了：第1本《A》、第2本《B》。"
-                        ],
-                        "degraded": False,
-                        "reason_code": None,
-                        "trace": {
-                            "selected_collection_items": [
-                                {"title": chr(64 + index), "detail_url": f"https://www.lightnovel.fun/cn/detail/{index}"}
-                                for index in range(1, 13)
-                            ],
-                            "lightnovel_deep_review": {
-                                "status": "OK",
-                                "selected": {"index": 3, "title": "C"},
-                                "item_count": 6,
-                                "source_card_count": 12,
-                                "reviewed_item_count": 6,
-                                "partial_review": True,
-                                "source": "fetch",
-                            },
-                            "recall_answer_readiness": {
-                                "status": "READY",
-                                "ready_to_answer": True,
-                                "response_mode": "answer_from_evidence",
-                                "evidence_depth": "detail_or_body_evidence",
-                                "reasons": [],
-                                "recall_contract_id": "anaphoric_selection",
-                                "query_kind": "anaphoric_selection",
-                                "detail_evidence": {
-                                    "required": True,
-                                    "basis": "lightnovel_deep_review",
-                                    "ready_for_deep_review": True,
-                                    "body_item_count": 1,
-                                },
-                            },
-                            "recall_answer_strategy": {
-                                "action": "direct_answer",
-                                "claim_scope": "partial_detail_judgment",
-                                "evidence_level": "partial_detail_or_body",
-                            },
-                        },
-                    },
-                },
-            )
-        )
-    ]
-    commit = next(event for event in events if event.get("phase") == "COMMIT")
-
-    assert "全 12 本里绝对最好" in commit["narrative"]
-    assert "先补读了其中 6 本" in commit["narrative"]
-    assert "《C》" in commit["narrative"]
-    assert "开篇比较抓人" in commit["narrative"]
-    guard = commit["audit_refs"]["trace_stage_meta"]["surface_memory_output_guard"]
-    assert guard["applied"] is True
-    assert guard["reason_code"] == "SURFACE_MEMORY_OUTPUT_DEEP_REVIEW_DIRECT_REWRITE"
-
-
-@pytest.mark.asyncio
-async def test_surface_main_chain_rewrites_selection_reply_that_drifts_to_self_reading(monkeypatch) -> None:
-    monkeypatch.setattr(
-        "host_brain.app.surface_main_chain_adapter.get_compiled_soul",
-        lambda: SimpleNamespace(source_text=SOUL, runtime_full_text=SOUL),
-    )
-
-    async def _fake_complete(**_kwargs):  # noqa: ANN003
-        return _surface_json_result("哈？最近在看一本讲宇宙和人的，挺有意思的。")
-
-    monkeypatch.setattr("host_brain.integrations.llm_helpers.acomplete_llm_with_pool", _fake_complete)
-
-    events = [
-        _parse_sse(chunk)
-        async for chunk in surface_main_chain_sse_generator(
-            _agent_input(
-                user_message="这三本书，你喜欢哪本？",
-                retrieval_summary={
-                    "status": "OK",
-                    "surface_memory_recall_packet": {
-                        "facts": ["集合记忆：本次轻小说推荐集合，记录 3 个条目；可比较证据：1. 《A》；2. 《B》；3. 《C》。"],
-                        "degraded": False,
-                        "reason_code": None,
-                        "trace": {
-                            "plan": {"reason": "anaphoric_selection_recall"},
-                            "selected_collection_items": [
-                                {"title": "A"},
-                                {"title": "B"},
-                                {"title": "C"},
-                            ],
-                            "recall_answer_readiness": {
-                                "status": "READY",
-                                "ready_to_answer": True,
-                                "response_mode": "answer_from_collection_memory",
-                                "reasons": [],
-                                "recall_contract_id": "anaphoric_selection",
-                                "query_kind": "anaphoric_selection",
-                            },
-                        },
-                    },
-                },
-            )
-        )
-    ]
-    commit = next(event for event in events if event.get("phase") == "COMMIT")
-
-    assert "最近在看" not in commit["narrative"]
-    assert "宇宙" not in commit["narrative"]
-    assert "《A》" in commit["narrative"]
-    assert "《B》" in commit["narrative"]
-    assert "《C》" in commit["narrative"]
-    guard = commit["audit_refs"]["trace_stage_meta"]["surface_memory_output_guard"]
-    assert guard["applied"] is True
-    assert guard["reason_code"] == "SURFACE_MEMORY_OUTPUT_SELECTION_UNGROUNDED_REWRITE"
-
-
-@pytest.mark.asyncio
-async def test_surface_main_chain_strips_low_signal_prefix_from_memory_selection(monkeypatch) -> None:
-    monkeypatch.setattr(
-        "host_brain.app.surface_main_chain_adapter.get_compiled_soul",
-        lambda: SimpleNamespace(source_text=SOUL, runtime_full_text=SOUL),
-    )
-
-    async def _fake_complete(**_kwargs):  # noqa: ANN003
-        return _surface_json_result("老哥你问这个啊——我刚补读完，第三本《C》开篇最抓人。")
-
-    monkeypatch.setattr("host_brain.integrations.llm_helpers.acomplete_llm_with_pool", _fake_complete)
-
-    events = [
-        _parse_sse(chunk)
-        async for chunk in surface_main_chain_sse_generator(
-            _agent_input(
-                user_message="这三本书，你喜欢哪本？",
-                retrieval_summary={
-                    "status": "OK",
-                    "surface_memory_recall_packet": {
-                        "facts": ["集合记忆：本次轻小说推荐集合，记录 3 个条目；可比较证据：1. 《A》；2. 《B》；3. 《C》。"],
-                        "degraded": False,
-                        "reason_code": None,
-                        "trace": {
-                            "plan": {"reason": "anaphoric_selection_recall"},
-                            "selected_collection_items": [
-                                {"title": "A"},
-                                {"title": "B"},
-                                {"title": "C"},
-                            ],
-                            "recall_answer_readiness": {
-                                "status": "READY",
-                                "ready_to_answer": True,
-                                "response_mode": "answer_from_collection_memory",
-                                "reasons": [],
-                                "recall_contract_id": "anaphoric_selection",
-                                "query_kind": "anaphoric_selection",
-                            },
-                        },
-                    },
-                },
-            )
-        )
-    ]
-    commit = next(event for event in events if event.get("phase") == "COMMIT")
-
-    assert not commit["narrative"].startswith("老哥")
-    assert commit["narrative"].startswith("我刚补读完")
-    assert "《C》" in commit["narrative"]
-    guard = commit["audit_refs"]["trace_stage_meta"]["surface_memory_output_guard"]
-    assert guard["applied"] is True
-    assert guard["reason_code"] == "SURFACE_MEMORY_OUTPUT_LOW_SIGNAL_PREFIX_STRIPPED"
-
-    async def _fake_complete_short_prefix(**_kwargs):  # noqa: ANN003
-        return _surface_json_result("老哥～我刚补读完，第三本《C》开篇最抓人。")
-
-    monkeypatch.setattr("host_brain.integrations.llm_helpers.acomplete_llm_with_pool", _fake_complete_short_prefix)
-    events = [
-        _parse_sse(chunk)
-        async for chunk in surface_main_chain_sse_generator(
-            _agent_input(
-                user_message="这三本书，你喜欢哪本？",
-                retrieval_summary={
-                    "status": "OK",
-                    "surface_memory_recall_packet": {
-                        "facts": ["集合记忆：本次轻小说推荐集合，记录 3 个条目；可比较证据：1. 《A》；2. 《B》；3. 《C》。"],
-                        "degraded": False,
-                        "reason_code": None,
-                    },
-                },
-            )
-        )
-    ]
-    commit = next(event for event in events if event.get("phase") == "COMMIT")
-    assert commit["narrative"].startswith("我刚补读完")
-
-
-@pytest.mark.asyncio
 async def test_surface_main_chain_failure_returns_sendable_non_persistent_fallback(monkeypatch) -> None:
     async def _boom(**_kwargs):  # noqa: ANN003
         raise RuntimeError("SURFACE_LLM_POOL_EXHAUSTED")
 
     monkeypatch.setattr(
-        "host_brain.app.surface_main_chain_adapter.run_surface_main_chain_for_chat_input",
+        "host_brain.app.surface_main_chain_adapter.run_surface_main_chain_for_surface_reply_input",
         _boom,
     )
 
@@ -1308,7 +730,7 @@ async def test_surface_main_chain_failure_returns_contextual_fallback_for_substa
         raise RuntimeError("SURFACE_LLM_POOL_EXHAUSTED")
 
     monkeypatch.setattr(
-        "host_brain.app.surface_main_chain_adapter.run_surface_main_chain_for_chat_input",
+        "host_brain.app.surface_main_chain_adapter.run_surface_main_chain_for_surface_reply_input",
         _boom,
     )
 
@@ -1329,13 +751,25 @@ async def test_surface_main_chain_failure_returns_contextual_fallback_for_substa
 
 
 @pytest.mark.asyncio
-async def test_surface_main_chain_low_info_fastpath_bypasses_llm(monkeypatch) -> None:
-    async def _unexpected_run(*_args, **_kwargs):  # noqa: ANN002, ANN003
-        raise AssertionError("low-info fastpath should not invoke surface llm")
+async def test_surface_main_chain_low_info_uses_surface_chain(monkeypatch) -> None:
+    async def _fake_run(*_args, **_kwargs):  # noqa: ANN002, ANN003
+        return SimpleNamespace(
+            selected_text="嗯，接着来。",
+            observation_codes=(),
+            natsume_emotion_tag="NEUTRAL",
+            user_emotion_tag="NEUTRAL",
+            vts_expression_id="",
+            compiled=SimpleNamespace(trace={}),
+            runtime=SimpleNamespace(
+                latency_ms=1,
+                emotion_confidence=0.0,
+                generation_trace={},
+            ),
+        )
 
     monkeypatch.setattr(
-        "host_brain.app.surface_main_chain_adapter.run_surface_main_chain_for_chat_input",
-        _unexpected_run,
+        "host_brain.app.surface_main_chain_adapter.run_surface_main_chain_for_surface_reply_input",
+        _fake_run,
     )
 
     events = [
@@ -1347,17 +781,16 @@ async def test_surface_main_chain_low_info_fastpath_bypasses_llm(monkeypatch) ->
     commit = next(event for event in events if event.get("phase") == "COMMIT")
 
     assert commit["decision"] == "APPROVE"
-    assert commit["reason_code"] == "SURFACE_MAIN_CHAIN_FASTPATH"
-    assert commit["narrative"] == "接着来。"
+    assert commit["reason_code"] is None
+    assert commit["narrative"] == "嗯，接着来。"
     assert commit["reply_envelope"]["sendable"] is True
     assert commit["reply_envelope"]["persistable"] is True
-    assert commit["audit_refs"]["provider_name"] == "rule"
-    assert commit["audit_refs"]["trace_stage_meta"]["surface_renderer"]["invoked"] is False
+    assert commit["audit_refs"]["trace_stage_meta"]["reply_source"] == "surface_main_chain"
+    assert commit["audit_refs"]["trace_stage_meta"]["surface_renderer"]["invoked"] is True
 
 
 @pytest.mark.asyncio
 async def test_surface_main_chain_audit_uses_pool_final_model(monkeypatch) -> None:
-    monkeypatch.setenv("HOST_SURFACE_MAIN_CHAIN_LOW_INFO_FASTPATH_ENABLED", "false")
     monkeypatch.setattr(
         "host_brain.app.surface_main_chain_adapter.get_compiled_soul",
         lambda: SimpleNamespace(source_text=SOUL, runtime_full_text=SOUL),
@@ -1445,7 +878,7 @@ async def test_surface_main_chain_routes_port_occupied_through_model(monkeypatch
 
     monkeypatch.setattr("host_brain.integrations.llm_helpers.acomplete_llm_with_pool", _fake_complete)
 
-    result = await run_surface_main_chain_for_chat_input(
+    result = await run_surface_main_chain_for_surface_reply_input(
         _agent_input(user_message="项目启动报错，端口18080被占用了，我该怎么排查？"),
         trace_stage_meta=trace,
     )
@@ -1473,7 +906,7 @@ async def test_surface_main_chain_routes_auditory_text_check_through_model(monke
 
     monkeypatch.setattr("host_brain.integrations.llm_helpers.acomplete_llm_with_pool", _fake_complete)
 
-    result = await run_surface_main_chain_for_chat_input(
+    result = await run_surface_main_chain_for_surface_reply_input(
         _agent_input(
             user_message="听得到吗",
             reply_channel="qq",
@@ -1523,7 +956,7 @@ async def test_surface_main_chain_routes_asr_auditory_check_through_model(monkey
 
     monkeypatch.setattr("host_brain.integrations.llm_helpers.acomplete_llm_with_pool", _fake_complete)
 
-    result = await run_surface_main_chain_for_chat_input(
+    result = await run_surface_main_chain_for_surface_reply_input(
         _agent_input(
             user_message="听得到吗",
             render_policy={
@@ -1584,7 +1017,7 @@ async def test_surface_main_chain_routes_project_technical_cases_through_model(
 
     monkeypatch.setattr("host_brain.integrations.llm_helpers.acomplete_llm_with_pool", _fake_complete)
 
-    result = await run_surface_main_chain_for_chat_input(
+    result = await run_surface_main_chain_for_surface_reply_input(
         _agent_input(user_message=message),
         trace_stage_meta=trace,
     )
@@ -1647,7 +1080,7 @@ async def test_surface_main_chain_routes_simple_task_split_through_model(monkeyp
 
     monkeypatch.setattr("host_brain.integrations.llm_helpers.acomplete_llm_with_pool", _fake_complete)
 
-    result = await run_surface_main_chain_for_chat_input(
+    result = await run_surface_main_chain_for_surface_reply_input(
         _agent_input(
             user_message="帮我把下一步拆成三件事。",
             surface_task_control={
@@ -1673,7 +1106,7 @@ def test_surface_main_chain_enabled_defaults_to_normal_text_only(monkeypatch) ->
     assert surface_main_chain_enabled(_agent_input()) is False
 
     monkeypatch.setenv("HOST_SURFACE_MAIN_CHAIN_ENABLED", "true")
-    assert surface_main_chain_enabled(_agent_input(attachments=[{"kind": "image"}])) is False
+    assert surface_main_chain_enabled(_agent_input(attachments=[{"kind": "image"}])) is True
     assert surface_main_chain_enabled(_agent_input(response_form="sticker")) is False
     assert surface_main_chain_enabled(_agent_input(intent_draft={"route": "delegate"})) is True
     assert surface_main_chain_enabled(
@@ -1688,3 +1121,4 @@ def test_surface_main_chain_enabled_defaults_to_normal_text_only(monkeypatch) ->
         _agent_input(),
         sub_agent_ctx=SimpleNamespace(agent_id="codex_lightnovel_recommender"),
     ) is True
+

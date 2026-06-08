@@ -970,7 +970,7 @@ def test_trace_fallback_contains_summary_and_recall(client):
     assert "recall_fusion" in node_ids
     assert "cortex_orchestrator" in node_ids
     assert "Cortex Orchestrator" in node_display_names
-    assert "chat_agent" in node_ids
+    assert "surface_reply" in node_ids
     assert "llm_gateway" in node_ids
 
 

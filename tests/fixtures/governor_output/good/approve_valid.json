@@ -1,14 +1,16 @@
-{
-  "decision": "APPROVE",
-  "reason_code": null,
-  "rule_trace": [
-    {
-      "gate_id": "INTENT_VALIDATION",
-      "hit": true
-    }
-  ],
-  "tokens": {
-    "approval_token_ref": "approval::intent_demo"
-  },
-  "snapshot_refs": {}
+﻿{
+    "decision":  "APPROVE",
+    "reason_code":  null,
+    "rule_trace":  [
+                       {
+                           "gate_id":  "INTENT_VALIDATION",
+                           "hit":  true
+                       }
+                   ],
+    "tokens":  {
+                   "approval_token_ref":  "approval::intent_demo"
+               },
+    "snapshot_refs":  {
+
+                      }
 }

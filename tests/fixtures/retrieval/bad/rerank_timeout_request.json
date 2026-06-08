@@ -1,26 +1,26 @@
-{
-  "request_id": "req_rerank_003",
-  "payload": {
-    "query": "reranker timeout should degrade",
-    "top_k": 2,
-    "timeout_ms": 100,
-    "candidates": [
-      {
-        "doc_id": "doc_c",
-        "source_ref": "memo://c",
-        "snippet": "timeout path should still output stable topk",
-        "metadata": {
-          "bucket": "ops"
-        }
-      },
-      {
-        "doc_id": "doc_d",
-        "source_ref": "memo://d",
-        "snippet": "second candidate for stable structure",
-        "metadata": {
-          "bucket": "ops"
-        }
-      }
-    ]
-  }
+﻿{
+    "request_id":  "req_rerank_003",
+    "payload":  {
+                    "query":  "reranker timeout should degrade",
+                    "top_k":  2,
+                    "timeout_ms":  100,
+                    "candidates":  [
+                                       {
+                                           "doc_id":  "doc_c",
+                                           "source_ref":  "memo://c",
+                                           "snippet":  "timeout path should still output stable topk",
+                                           "metadata":  {
+                                                            "bucket":  "ops"
+                                                        }
+                                       },
+                                       {
+                                           "doc_id":  "doc_d",
+                                           "source_ref":  "memo://d",
+                                           "snippet":  "second candidate for stable structure",
+                                           "metadata":  {
+                                                            "bucket":  "ops"
+                                                        }
+                                       }
+                                   ]
+                }
 }

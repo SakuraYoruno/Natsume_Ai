@@ -44,7 +44,7 @@ def test_channel_soul_keeps_channel_style_without_persona_write(tmp_path) -> Non
             "task_id": "channel-soul",
             "capability": "channel_soul",
             "mode": "audit",
-            "owner_organ": "chat_agent",
+            "owner_organ": "surface_reply",
             "inputs": {"channel": "wechat", "reply": "WorkOrder ResultContract BioOps " * 20},
         }
     )
@@ -135,7 +135,7 @@ def test_social_mask_selects_platform_mask(tmp_path) -> None:
             "task_id": "social-mask",
             "capability": "social_mask_system",
             "mode": "audit",
-            "owner_organ": "chat_agent",
+            "owner_organ": "surface_reply",
             "inputs": {"channel": "wechat", "reply": "尊敬的用户，我已经为您完成处理。"},
         }
     )
@@ -164,7 +164,7 @@ def test_ritual_system_and_gentle_degradation_are_report_only(tmp_path) -> None:
             "task_id": "gentle-degradation",
             "capability": "gentle_degradation",
             "mode": "audit",
-            "owner_organ": "chat_agent",
+            "owner_organ": "surface_reply",
             "inputs": {"degrade_case": "tts_unavailable", "technical_reason": "Edge TTS timeout"},
         }
     )
@@ -186,7 +186,7 @@ def test_presence_channel_degrades_without_evidence(tmp_path, capability: str) -
             "task_id": f"missing-{capability}",
             "capability": capability,
             "mode": "audit",
-            "owner_organ": "chat_agent",
+            "owner_organ": "surface_reply",
             "inputs": {},
         }
     )
@@ -204,7 +204,7 @@ def test_presence_channel_blocks_sensitive_targets_and_ownerless_write_candidate
             "task_id": f"sensitive-{capability}",
             "capability": capability,
             "mode": "audit",
-            "owner_organ": "chat_agent",
+            "owner_organ": "surface_reply",
             "inputs": {"target_paths": ["host_brain/canon/core.yaml"], "evidence_refs": ["evt-1"]},
         }
     )

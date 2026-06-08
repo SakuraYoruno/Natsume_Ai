@@ -1,33 +1,33 @@
-{
-  "description": "VTS WebSocket 断连→重连全部耗尽 fixture",
-  "scenario": "vts_disconnect_reconnect_exhausted",
-  "initial_state": {
-    "vts_state": "AUTHENTICATED",
-    "current_expression": "exp_happy_01",
-    "talking": true
-  },
-  "trigger": {
-    "event": "websocket_close",
-    "reason": "server_shutdown",
-    "ts_ms": 1709308800000
-  },
-  "reconnect_config": {
-    "max_attempts": 3,
-    "base_delay_s": 0.01,
-    "max_delay_s": 0.05,
-    "auto_reconnect": true
-  },
-  "mock_connect_always_fail": true,
-  "expected": {
-    "final_state": "DISCONNECTED",
-    "reconnect_event": "VTS_RECONNECT_EXHAUSTED",
-    "reconnect_attempts": 3,
-    "current_expression": null,
-    "talking": false,
-    "audit_event": {
-      "event": "VTS_RECONNECT_EXHAUSTED",
-      "attempts": 3,
-      "detail": "all 3 reconnect attempts exhausted"
-    }
-  }
+﻿{
+    "description":  "VTS WebSocket 断连→重连全部耗尽 fixture",
+    "scenario":  "vts_disconnect_reconnect_exhausted",
+    "initial_state":  {
+                          "vts_state":  "AUTHENTICATED",
+                          "current_expression":  "exp_happy_01",
+                          "talking":  true
+                      },
+    "trigger":  {
+                    "event":  "websocket_close",
+                    "reason":  "server_shutdown",
+                    "ts_ms":  1709308800000
+                },
+    "reconnect_config":  {
+                             "max_attempts":  3,
+                             "base_delay_s":  0.01,
+                             "max_delay_s":  0.05,
+                             "auto_reconnect":  true
+                         },
+    "mock_connect_always_fail":  true,
+    "expected":  {
+                     "final_state":  "DISCONNECTED",
+                     "reconnect_event":  "VTS_RECONNECT_EXHAUSTED",
+                     "reconnect_attempts":  3,
+                     "current_expression":  null,
+                     "talking":  false,
+                     "audit_event":  {
+                                         "event":  "VTS_RECONNECT_EXHAUSTED",
+                                         "attempts":  3,
+                                         "detail":  "all 3 reconnect attempts exhausted"
+                                     }
+                 }
 }

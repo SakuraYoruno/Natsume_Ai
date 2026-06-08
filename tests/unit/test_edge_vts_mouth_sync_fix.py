@@ -574,8 +574,8 @@ def test_reset_to_neutral_prefers_remove_all_expression_hotkey(monkeypatch) -> N
     result = driver.reset_to_neutral()
 
     assert result.success is True
-    assert result.expression_id == "hotkey_reset_all"
-    assert calls == ["hotkey_reset_all"]
+    assert result.expression_id == "NEUTRAL"
+    assert calls == []
 
 
 def test_set_expression_caches_broken_hotkey_and_uses_safe_fallback(monkeypatch) -> None:

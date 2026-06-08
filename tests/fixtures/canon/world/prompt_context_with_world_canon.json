@@ -1,37 +1,43 @@
-{
-  "hard_snapshot": {
-    "session_id": "sess-wcanon-test-001",
-    "user_id": "natsume_test"
-  },
-  "bond_summary": {
-    "event_id": "bond-wcanon-001",
-    "stage": "FRIEND",
-    "evidence_refs": ["wc-001-system-terms"]
-  },
-  "authoritative": [
-    {
-      "slot": "authoritative",
-      "kind": "world_canon",
-      "doc_id": "wc-001-system-terms",
-      "version": 1,
-      "hash": "placeholder_hash_001",
-      "status": "active",
-      "title": "系统核心术语表",
-      "tags": ["system", "terms", "architecture"],
-      "content": "Host Brain 是夏目的核心认知节点，负责意图解析、记忆管理和 Canon 治理。",
-      "evidence_level": "CANON_REFERENCE_ONLY",
-      "unsafe_as_fact": true,
-      "reference_mode": "citation_only",
-      "citation": "world_canon:wc-001-system-terms@v1:placeholder_ha"
-    }
-  ],
-  "retrieval": [],
-  "style_pack": {
-    "tone": "calm",
-    "speaking_style": "concise"
-  },
-  "constraints": {
-    "max_tokens": 512
-  },
-  "tool_meta_pack": []
+﻿{
+    "hard_snapshot":  {
+                          "session_id":  "sess-wcanon-test-001",
+                          "user_id":  "natsume_test"
+                      },
+    "bond_summary":  {
+                         "event_id":  "bond-wcanon-001",
+                         "stage":  "FRIEND",
+                         "evidence_refs":  [
+                                               "wc-001-system-terms"
+                                           ]
+                     },
+    "authoritative":  [
+                          {
+                              "slot":  "authoritative",
+                              "kind":  "world_canon",
+                              "doc_id":  "wc-001-system-terms",
+                              "version":  1,
+                              "hash":  "placeholder_hash_001",
+                              "status":  "active",
+                              "title":  "系统核心术语表",
+                              "tags":  [
+                                           "system",
+                                           "terms",
+                                           "architecture"
+                                       ],
+                              "content":  "Host Brain 是夏目的核心认知节点，负责意图解析、记忆管理和 Canon 治理。",
+                              "evidence_level":  "CANON_REFERENCE_ONLY",
+                              "unsafe_as_fact":  true,
+                              "reference_mode":  "citation_only",
+                              "citation":  "world_canon:wc-001-system-terms@v1:placeholder_ha"
+                          }
+                      ],
+    "retrieval":  [
+
+                  ],
+    "constraints":  {
+                        "max_tokens":  512
+                    },
+    "tool_meta_pack":  [
+
+                       ]
 }

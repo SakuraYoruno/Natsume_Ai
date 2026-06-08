@@ -2,7 +2,7 @@
 
 T-WCanon-05：分槽隔离
   - build_world_canon_slot() 返回的条目 slot="authoritative"、kind="world_canon"；
-  - World Canon 条目不混入 retrieval / style_pack / bond_summary 槽位；
+  - World Canon 条目不混入 retrieval /  bond_summary 槽位；
   - evidence_level="CANON_REFERENCE_ONLY"，unsafe_as_fact=True；
   - prompt_context_with_world_canon.json fixture 通过 validate_prompt_context()；
   - Top-K 限制生效（top_k=2 时最多返回 2 条）。
@@ -59,8 +59,8 @@ class TestWorldCanonSlotIsolation(unittest.TestCase):
                 msg=f"unsafe_as_fact 应为 True: {entry}",
             )
 
-    def test_t_wcanon_05c_entries_not_in_retrieval_or_style_pack(self) -> None:
-        """World Canon 条目不混入 retrieval / style_pack / bond_summary 槽位。"""
+    def test_t_wcanon_05c_entries_not_in_retrieval_or_bond_summary(self) -> None:
+        """World Canon 条目不混入 retrieval /  bond_summary 槽位。"""
         from host_brain.core.prompt_context import build_world_canon_slot
 
         entries = build_world_canon_slot(world_root=SSOT_WORLD)
@@ -99,7 +99,6 @@ class TestWorldCanonSlotIsolation(unittest.TestCase):
             "bond_summary": {},
             "authoritative": entries,
             "retrieval": [],
-            "style_pack": {},
             "constraints": {},
             "tool_meta_pack": [],
         }
@@ -257,3 +256,4 @@ class TestWorldCanonQAInterception(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+

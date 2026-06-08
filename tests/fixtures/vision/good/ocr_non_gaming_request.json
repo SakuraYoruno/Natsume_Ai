@@ -1,11 +1,11 @@
-{
-  "request_id": "req_vision_ocr_001",
-  "intent_id": "intent_vision_ocr_001",
-  "payload": {
-    "sys_mode": "normal",
-    "trigger": "on_demand",
-    "source_ref": "evd://screen/frame_001",
-    "frame_text": "Quest Log\\nCollect 3 herbs\\nReturn to village",
-    "timeout_ms": 500
-  }
+﻿{
+    "request_id":  "req_vision_ocr_001",
+    "intent_id":  "intent_vision_ocr_001",
+    "payload":  {
+                    "sys_mode":  "normal",
+                    "trigger":  "on_demand",
+                    "source_ref":  "evd://screen/frame_001",
+                    "frame_text":  "Quest Log\\nCollect 3 herbs\\nReturn to village",
+                    "timeout_ms":  500
+                }
 }

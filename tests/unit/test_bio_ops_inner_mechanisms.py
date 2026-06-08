@@ -126,7 +126,7 @@ def test_shadow_persona_test_reports_regression_tone(tmp_path) -> None:
             "task_id": "shadow-persona",
             "capability": "shadow_persona_test",
             "mode": "audit",
-            "owner_organ": "chat_agent",
+            "owner_organ": "surface_reply",
             "inputs": {
                 "reply": "尊敬的用户，很抱歉给您带来不便。",
                 "evidence_refs": ["chat://shadow/case-1"],

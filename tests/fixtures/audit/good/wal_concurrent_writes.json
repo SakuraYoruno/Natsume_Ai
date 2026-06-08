@@ -1,12 +1,12 @@
-{
-  "scenario": "wal_concurrent_writes",
-  "description": "High concurrent write fixture: multiple threads writing audit records simultaneously under WAL mode",
-  "thread_count": 4,
-  "ops_per_thread": 50,
-  "expected": {
-    "wal_status": "ACTIVE",
-    "journal_mode": "WAL",
-    "all_records_persisted": true,
-    "no_database_locked_errors": true
-  }
+﻿{
+    "scenario":  "wal_concurrent_writes",
+    "description":  "High concurrent write fixture: multiple threads writing audit records simultaneously under WAL mode",
+    "thread_count":  4,
+    "ops_per_thread":  50,
+    "expected":  {
+                     "wal_status":  "ACTIVE",
+                     "journal_mode":  "WAL",
+                     "all_records_persisted":  true,
+                     "no_database_locked_errors":  true
+                 }
 }

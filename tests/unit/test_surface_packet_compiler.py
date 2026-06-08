@@ -206,7 +206,7 @@ def test_compile_surface_input_adds_low_info_scene_guidance(
     assert fact_fragment in "\n".join(compiled.packet.facts)
     assert must_not_fragment in "\n".join(compiled.packet.must_not_do)
     assert anchor_fragment in "\n".join(compiled.packet.style_anchor)
-    assert "不要用天爷、天大人、本小姐" in "\n".join(compiled.packet.must_not_do)
+    assert "不要靠固定旧称呼、自称或模板口癖撑短句" in "\n".join(compiled.packet.must_not_do)
 
     rendered = "\n".join(message["content"] for message in build_isolated_surface_messages(compiled.request))
     assert fact_fragment in rendered

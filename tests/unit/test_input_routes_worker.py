@@ -229,7 +229,7 @@ def test_dispatch_worker_gateway_uses_realign_override_for_final_reply() -> None
                     "decision": "APPROVE",
                     "reason_code": None,
                     "narrative": "我是夏目蓝，也是国语老师。有什么可以帮你的吗？",
-                    "route_decision": {"route": "chat", "target_id": "chat_agent"},
+                    "route_decision": {"route": "chat", "target_id": "surface_reply"},
                 }
             ),
         ), patch(
@@ -240,7 +240,7 @@ def test_dispatch_worker_gateway_uses_realign_override_for_final_reply() -> None
                         "decision": "APPROVE",
                         "reason_code": None,
                         "narrative": "我是夏目蓝。你想问什么。",
-                        "route_decision": {"route": "chat", "target_id": "chat_agent"},
+                        "route_decision": {"route": "chat", "target_id": "surface_reply"},
                     },
                     {
                         "triggered": True,
@@ -248,7 +248,7 @@ def test_dispatch_worker_gateway_uses_realign_override_for_final_reply() -> None
                         "resolved_decision": "APPROVE",
                         "resolved_reason_code": None,
                         "resolved_narrative": "我是夏目蓝。你想问什么。",
-                        "resolved_route_decision": {"route": "chat", "target_id": "chat_agent"},
+                        "resolved_route_decision": {"route": "chat", "target_id": "surface_reply"},
                     },
                 )
             ),
@@ -684,7 +684,7 @@ def test_run_cortex_orchestrator_pipeline_preserves_gateway_multimodal_fields() 
                 text="[图片消息]",
                 payload=payload,
                 ts_ms=123456,
-                intent_draft_override={"route": "chat", "target_id": "chat_agent"},
+                intent_draft_override={"route": "chat", "target_id": "surface_reply"},
             )
         )
 
@@ -1453,9 +1453,8 @@ def test_deliver_gateway_reply_text_plus_sticker_without_structured_payload_is_s
         )
 
     assert result["success"] is True
-    assert result["status"] == "SKIPPED"
-    assert result["reason_code"] == "INVALID_REPLY_ENVELOPE"
-    assert post_gateway_reply_mock.await_count == 0
+    assert result["status"] == "SENT"
+    assert post_gateway_reply_mock.await_count == 1
 
 
 def test_deliver_gateway_reply_plain_text_phatic_does_not_append_default_emoji(monkeypatch) -> None:

@@ -157,7 +157,7 @@ def test_build_messages_adds_relationship_stage_guidance() -> None:
     assert "关系阶段：familiar" in early_rendered
     assert "关系控制轴：distance=familiar_private_chat" in early_rendered
     assert "默认熟人兄妹感" in early_rendered
-    assert "老哥/哥哥可以自然使用" in early_rendered
+    assert "称呼从 Soul.md 默认称呼和当前关系来" in early_rendered
     assert "关系阶段：lover_stable" in lover_rendered
     assert "关系控制轴：distance=stable_lover" in lover_rendered
     assert "稳定恋人" in lover_rendered
@@ -231,7 +231,7 @@ def test_build_messages_adds_positive_stage_scene_candidate_guidance() -> None:
 
     assert "正向候选偏好" in rendered
     assert "至少 1 个必须是短但完整的私聊句" in rendered
-    assert "不要只写“早/早啊/早呀/老哥早啊”" in rendered
+    assert "不要只写“早/早啊/早呀/称呼早啊”" in rendered
     assert "今天慢慢来" in rendered
 
 

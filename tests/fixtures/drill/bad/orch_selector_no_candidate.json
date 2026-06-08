@@ -1,30 +1,36 @@
-{
-  "scenario_id": "drill.orch.selector_no_candidate",
-  "scenario_kind": "selector_no_candidate",
-  "request_id": "req_drill_orch_002",
-  "graph": {
-    "graph_id": "graph.drill.selector_none.v1",
-    "version": "v1",
-    "entry_node": "respond",
-    "env": "prod",
-    "node_allowlist": ["not-exist-node"],
-    "model_profile_id": "chat_ja_24x7_v1",
-    "node_bindings": [
-      {
-        "node_id": "respond",
-        "task": "CHAT",
-        "required": true
-      }
-    ],
-    "edges": [],
-    "fallback_edges": []
-  },
-  "payload": {
-    "input": "hello"
-  },
-  "expected": {
-    "status": "FAILED",
-    "stage": "S_ORCH_VALIDATE",
-    "reason_code": "ORCH_NODE_MISSING"
-  }
+﻿{
+    "scenario_id":  "drill.orch.selector_no_candidate",
+    "scenario_kind":  "selector_no_candidate",
+    "request_id":  "req_drill_orch_002",
+    "graph":  {
+                  "graph_id":  "graph.drill.selector_none.v1",
+                  "version":  "v1",
+                  "entry_node":  "respond",
+                  "env":  "prod",
+                  "node_allowlist":  [
+                                         "not-exist-node"
+                                     ],
+                  "model_profile_id":  "chat_ja_24x7_v1",
+                  "node_bindings":  [
+                                        {
+                                            "node_id":  "respond",
+                                            "task":  "CHAT",
+                                            "required":  true
+                                        }
+                                    ],
+                  "edges":  [
+
+                            ],
+                  "fallback_edges":  [
+
+                                     ]
+              },
+    "payload":  {
+                    "input":  "hello"
+                },
+    "expected":  {
+                     "status":  "FAILED",
+                     "stage":  "S_ORCH_VALIDATE",
+                     "reason_code":  "ORCH_NODE_MISSING"
+                 }
 }

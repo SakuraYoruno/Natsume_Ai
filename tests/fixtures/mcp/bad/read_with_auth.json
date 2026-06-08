@@ -1,22 +1,26 @@
-{
-  "provider_id": "github",
-  "tools": [
-    {
-      "tool_id": "search_issues",
-      "name": "SearchIssues",
-      "desc": "Search repository issues.",
-      "mode": "READ",
-      "auth_level": "APPROVAL",
-      "domain_tags": ["mcp", "github", "issues"],
-      "input_schema": {
-        "type": "object",
-        "properties": {
-          "query": {
-            "type": "string"
-          }
-        }
-      },
-      "version": "1.0.0"
-    }
-  ]
+﻿{
+    "provider_id":  "github",
+    "tools":  [
+                  {
+                      "tool_id":  "search_issues",
+                      "name":  "SearchIssues",
+                      "desc":  "Search repository issues.",
+                      "mode":  "READ",
+                      "auth_level":  "APPROVAL",
+                      "domain_tags":  [
+                                          "mcp",
+                                          "github",
+                                          "issues"
+                                      ],
+                      "input_schema":  {
+                                           "type":  "object",
+                                           "properties":  {
+                                                              "query":  {
+                                                                            "type":  "string"
+                                                                        }
+                                                          }
+                                       },
+                      "version":  "1.0.0"
+                  }
+              ]
 }

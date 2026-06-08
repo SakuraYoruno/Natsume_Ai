@@ -1,16 +1,16 @@
-{
-  "request_id": "req_bargein_hw_001",
-  "scenario": "barge_in_recovery",
-  "description": "Barge-in during playback: TTS stops, VTS resets to NEUTRAL, mouth closes",
-  "payload": {
-    "session_id": "sess_bargein_001",
-    "source": "ASR",
-    "active_utterance_id": "utt_active_001"
-  },
-  "expected": {
-    "tts_interrupted": true,
-    "vts_reset_to_neutral": true,
-    "mouth_closed": true,
-    "asr_not_blocked": true
-  }
+﻿{
+    "request_id":  "req_bargein_hw_001",
+    "scenario":  "barge_in_recovery",
+    "description":  "Barge-in during playback: TTS stops, VTS resets to NEUTRAL, mouth closes",
+    "payload":  {
+                    "session_id":  "sess_bargein_001",
+                    "source":  "ASR",
+                    "active_utterance_id":  "utt_active_001"
+                },
+    "expected":  {
+                     "tts_interrupted":  true,
+                     "vts_reset_to_neutral":  true,
+                     "mouth_closed":  true,
+                     "asr_not_blocked":  true
+                 }
 }

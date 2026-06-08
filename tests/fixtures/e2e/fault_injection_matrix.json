@@ -1,34 +1,42 @@
-{
-  "fault_scenarios": [
-    {
-      "id": "neo4j_unavailable",
-      "description": "Neo4j 不可用时输出结构稳定",
-      "inject": {"neo4j": false},
-      "expected_reason_code": "DEPENDENCY_UNAVAILABLE",
-      "expected_output_stable": true
-    },
-    {
-      "id": "chroma_unavailable",
-      "description": "Chroma 不可用时 evidence pack 降级但字段存在",
-      "inject": {"chroma": false},
-      "expected_reason_code": "DEPENDENCY_UNAVAILABLE",
-      "expected_output_stable": true,
-      "expected_evidence_pack_degraded": true
-    },
-    {
-      "id": "llm_timeout",
-      "description": "Cloud LLM 超时时输出最小模板，不产生执行 intent",
-      "inject": {"llm_timeout": true},
-      "expected_no_exec_intent": true,
-      "expected_output_stable": true
-    },
-    {
-      "id": "edge_rpc_unavailable",
-      "description": "Edge RPC 不可达时语音链路降级，ASR_UNAVAILABLE 可统计",
-      "inject": {"edge_rpc": false},
-      "expected_reason_code": "ASR_UNAVAILABLE",
-      "expected_output_stable": true
-    }
-  ],
-  "_comment": "故障注入矩阵：4 种故障场景，输出结构均稳定"
+﻿{
+    "fault_scenarios":  [
+                            {
+                                "id":  "neo4j_unavailable",
+                                "description":  "Neo4j 不可用时输出结构稳定",
+                                "inject":  {
+                                               "neo4j":  false
+                                           },
+                                "expected_reason_code":  "DEPENDENCY_UNAVAILABLE",
+                                "expected_output_stable":  true
+                            },
+                            {
+                                "id":  "chroma_unavailable",
+                                "description":  "Chroma 不可用时 evidence pack 降级但字段存在",
+                                "inject":  {
+                                               "chroma":  false
+                                           },
+                                "expected_reason_code":  "DEPENDENCY_UNAVAILABLE",
+                                "expected_output_stable":  true,
+                                "expected_evidence_pack_degraded":  true
+                            },
+                            {
+                                "id":  "llm_timeout",
+                                "description":  "Cloud LLM 超时时输出最小模板，不产生执行 intent",
+                                "inject":  {
+                                               "llm_timeout":  true
+                                           },
+                                "expected_no_exec_intent":  true,
+                                "expected_output_stable":  true
+                            },
+                            {
+                                "id":  "edge_rpc_unavailable",
+                                "description":  "Edge RPC 不可达时语音链路降级，ASR_UNAVAILABLE 可统计",
+                                "inject":  {
+                                               "edge_rpc":  false
+                                           },
+                                "expected_reason_code":  "ASR_UNAVAILABLE",
+                                "expected_output_stable":  true
+                            }
+                        ],
+    "_comment":  "故障注入矩阵：4 种故障场景，输出结构均稳定"
 }

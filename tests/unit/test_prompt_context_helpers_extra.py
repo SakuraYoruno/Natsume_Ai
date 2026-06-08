@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -27,7 +27,6 @@ def _valid_context() -> dict[str, object]:
         "bond_summary": {},
         "authoritative": [{"slot": "authoritative", "kind": "world_canon", "content": "soft note"}],
         "retrieval": [{"slot": "retrieval", "kind": "episodic", "content": "memory"}],
-        "style_pack": {"style_canon": [], "node_bindings": {}},
         "constraints": {},
         "tool_meta_pack": [_valid_tool_meta()],
     }
@@ -65,7 +64,6 @@ def test_validate_prompt_context_catches_slot_mixing_tool_meta_and_semantic_erro
     payload = _valid_context()
     payload["authoritative"] = [{"slot": "retrieval", "kind": "world_canon", "content": "soft", "style_instruction": "oops"}]
     payload["retrieval"] = [{"slot": "authoritative", "kind": "episodic", "content": "memory", "tone": "warm"}]
-    payload["style_pack"] = {"snapshot": {"id": "x"}}
     payload["tool_meta_pack"] = [
         {**_valid_tool_meta(), "command": "rm -rf /"},
         {**_valid_tool_meta(), "extra": "bad"},
@@ -75,7 +73,7 @@ def test_validate_prompt_context_catches_slot_mixing_tool_meta_and_semantic_erro
     result = pc.validate_prompt_context(payload)
     codes = [item.code for item in result.violations]
 
-    assert codes.count(pc.CP_SLOT_MIXED) >= 3
+    assert codes.count(pc.CP_SLOT_MIXED) >= 2
     assert pc.CP_TOOL_META_FORBIDDEN_FIELD in codes
     assert pc.CP_TOOL_META_INVALID in codes
     assert pc.PC_SLOT_TYPE_INVALID in codes
@@ -155,3 +153,4 @@ def test_inject_bond_summary_and_build_world_canon_slot() -> None:
     assert derived["bond_summary"] == {"stage": "亲近兄妹"}
     normalize_mock.assert_called_once()
     derive_mock.assert_called_once()
+

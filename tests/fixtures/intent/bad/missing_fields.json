@@ -1,6 +1,6 @@
-{
-  "session_id": "s_demo",
-  "intent": {
-    "skill_name": "read_only_status"
-  }
+﻿{
+    "session_id":  "s_demo",
+    "intent":  {
+                   "skill_name":  "read_only_status"
+               }
 }

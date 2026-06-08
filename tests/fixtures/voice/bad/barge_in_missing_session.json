@@ -1,7 +1,7 @@
-{
-  "request_id": "req_voice_021",
-  "payload": {
-    "source": "user_voice",
-    "active_utterance_id": "utt_001"
-  }
+﻿{
+    "request_id":  "req_voice_021",
+    "payload":  {
+                    "source":  "user_voice",
+                    "active_utterance_id":  "utt_001"
+                }
 }

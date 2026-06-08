@@ -27,7 +27,10 @@ MAX_SINGLE_FILE_BYTES = 1 * 1024 * 1024
 # 每项新增必须附上 PR 说明，避免 allowlist 失控。
 ALLOWLIST: frozenset[str] = frozenset(
     {
-        # 暂无例外项。
+        # 本地桌宠/Live2D 验证模型资产，当前用于桌宠与 VTS 模型联调。
+        "desktop_pet/assets/live2d/edge_vts_model/宅家少女.8192/texture_00.png",
+        "desktop_pet/assets/live2d/edge_vts_model/宅家少女.moc3",
+        "desktop_pet/assets/live2d/shizuku/runtime/shizuku.1024/texture_02.png",
     }
 )
 
@@ -40,7 +43,7 @@ def _list_tracked_files_with_size() -> list[tuple[int, str]]:
     "已被 git 跟踪" 的文件，而非工作区里未入库的临时文件。
     """
     proc = subprocess.run(
-        ["git", "ls-tree", "-r", "-l", "HEAD"],
+        ["git", "-c", "core.quotePath=false", "ls-tree", "-r", "-l", "HEAD"],
         cwd=str(ROOT),
         capture_output=True,
         text=True,

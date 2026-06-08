@@ -1,10 +1,10 @@
-{
-  "request_id": "req_edge_voice_099",
-  "payload": {
-    "session_id": "sess_edge_voice_bad",
-    "seq": 1,
-    "confidence": 0.95,
-    "final": false
-  },
-  "ts_ms": 1800102000300
+﻿{
+    "request_id":  "req_edge_voice_099",
+    "payload":  {
+                    "session_id":  "sess_edge_voice_bad",
+                    "seq":  1,
+                    "confidence":  0.95,
+                    "final":  false
+                },
+    "ts_ms":  1800102000300
 }

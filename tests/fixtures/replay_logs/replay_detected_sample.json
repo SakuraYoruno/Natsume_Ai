@@ -1,11 +1,11 @@
-{
-  "request_id": "req_replay_001",
-  "session_id": "s_demo",
-  "seq": 3,
-  "nonce": "n_demo_001",
-  "decision": "REJECT",
-  "reason_code": "REPLAY_DETECTED",
-  "quality": {
-    "stage": "governor_reject"
-  }
+﻿{
+    "request_id":  "req_replay_001",
+    "session_id":  "s_demo",
+    "seq":  3,
+    "nonce":  "n_demo_001",
+    "decision":  "REJECT",
+    "reason_code":  "REPLAY_DETECTED",
+    "quality":  {
+                    "stage":  "governor_reject"
+                }
 }

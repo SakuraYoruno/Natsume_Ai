@@ -89,7 +89,7 @@ def test_social_recovery_and_narrative_debugger_find_experience_bugs(tmp_path) -
             "task_id": "narrative-debugger",
             "capability": "narrative_debugger",
             "mode": "audit",
-            "owner_organ": "chat_agent",
+            "owner_organ": "surface_reply",
             "inputs": {"reply": "尊敬的用户，很抱歉给您带来不便。", "feedback": "太正式"},
         }
     )

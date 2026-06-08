@@ -1,4 +1,4 @@
-"""Contract tests for Dream Generator Skill (TASK-0093).
+﻿"""Contract tests for Dream Generator Skill (TASK-0093).
 
 覆盖 T-Dream-01（Sleep/Idle 触发+叙事写入）、T-Dream-02（条件不满足/无素材跳过）。
 """
@@ -56,7 +56,7 @@ class TestDreamGeneratorTrigger:
         assert result["manifest"]["category"] == DREAM_CATEGORY
         assert result["manifest"]["evidence_level"] == EVIDENCE_LEVEL
         assert result["dream_entry"]["content"]
-        assert "和主人" in result["dream_entry"]["content"]
+        assert "只是梦" in result["dream_entry"]["content"]
 
     def test_execute_in_idle_state(self) -> None:
         result = execute_dream_generator(
@@ -199,7 +199,7 @@ class TestDreamGeneratorConditions:
             },
         )
         assert result["status"] == STATUS_EXECUTED
-        assert "占位" in result["dream_entry"]["content"]
+        assert "只是梦" in result["dream_entry"]["content"]
 
     def test_episodic_writer_failure_degraded(self) -> None:
         def failing_writer(_):
@@ -216,3 +216,5 @@ class TestDreamGeneratorConditions:
         )
         assert result["status"] == STATUS_DEGRADED
         assert result["reason_code"] == "DREAM_EPISODIC_WRITE_FAILED"
+
+

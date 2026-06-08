@@ -1,23 +1,23 @@
-{
-  "scenario_id": "drill.rollback.conflict",
-  "scenario_kind": "rollback_conflict",
-  "request_id": "req_drill_003",
-  "milestone": "M3",
-  "release_specs_ref": "tests/fixtures/release/good/release_specs.json",
-  "rollback_mapping_ref": "tests/fixtures/release/bad/rollback_target_missing.json",
-  "config_snapshot_refs": [
-    "cfg_snap::sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-    "cfg_snap::sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
-  ],
-  "known_release_ids": [
-    "rel-m0-2026-03-01",
-    "rel-m1-2026-03-01",
-    "rel-m2-2026-03-01",
-    "rel-m3-2026-03-01"
-  ],
-  "expected": {
-    "status": "FAILED",
-    "stage": "S_RELEASE_CHECKLIST",
-    "reason_code": "RELEASE_ROLLBACK_TARGET_MISSING"
-  }
+﻿{
+    "scenario_id":  "drill.rollback.conflict",
+    "scenario_kind":  "rollback_conflict",
+    "request_id":  "req_drill_003",
+    "milestone":  "M3",
+    "release_specs_ref":  "tests/fixtures/release/good/release_specs.json",
+    "rollback_mapping_ref":  "tests/fixtures/release/bad/rollback_target_missing.json",
+    "config_snapshot_refs":  [
+                                 "cfg_snap::sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                                 "cfg_snap::sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+                             ],
+    "known_release_ids":  [
+                              "rel-m0-2026-03-01",
+                              "rel-m1-2026-03-01",
+                              "rel-m2-2026-03-01",
+                              "rel-m3-2026-03-01"
+                          ],
+    "expected":  {
+                     "status":  "FAILED",
+                     "stage":  "S_RELEASE_CHECKLIST",
+                     "reason_code":  "RELEASE_ROLLBACK_TARGET_MISSING"
+                 }
 }

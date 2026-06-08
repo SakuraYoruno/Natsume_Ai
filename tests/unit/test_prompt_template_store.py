@@ -14,10 +14,10 @@ def test_prompt_template_store_is_retired_and_does_not_read_yaml_or_overrides() 
     store = PromptTemplateStore(ledger=SQLiteLedger(":memory:", check_same_thread=False), cache_ttl_ms=0)
 
     assert store.list_templates() == []
-    assert store.resolve_text("chat_agent.minimal_fallback.default") == ""
-    assert store.resolve_json("chat_agent.minimal_fallback.default") is None
+    assert store.resolve_text("surface_reply.minimal_fallback.default") == ""
+    assert store.resolve_json("surface_reply.minimal_fallback.default") is None
 
-    item = store.get_template("chat_agent.minimal_fallback.default")
+    item = store.get_template("surface_reply.minimal_fallback.default")
     assert item["source"] == "retired"
     assert item["resolved_content"] == ""
 

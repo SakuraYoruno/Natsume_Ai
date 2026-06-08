@@ -73,7 +73,7 @@ def test_warmup_chat_llm_runtime_profiles_reports_ready(monkeypatch) -> None:
         }),
     )
     monkeypatch.setattr(
-        "host_brain.app.graph_config_llm_runtime.resolve_chat_agent_llm_runtime",
+        "host_brain.app.graph_config_llm_runtime.resolve_surface_reply_llm_runtime",
         lambda *, base_runtime: {
             **base_runtime,
             "model_id": "chat::default",

@@ -1,20 +1,40 @@
-{
-  "scenario": "rate_limit_window_sliding",
-  "description": "窗口滑动：在窗口期内连续请求，最后一个请求触发限流",
-  "config": {
-    "backend": "memory",
-    "window_ms": 10000,
-    "max_requests": 3
-  },
-  "events": [
-    {"key": "user_001", "ts_ms": 100000, "expected_count": 1, "expected_hit": false},
-    {"key": "user_001", "ts_ms": 102000, "expected_count": 2, "expected_hit": false},
-    {"key": "user_001", "ts_ms": 104000, "expected_count": 3, "expected_hit": false},
-    {"key": "user_001", "ts_ms": 105000, "expected_count": 4, "expected_hit": true}
-  ],
-  "expected": {
-    "final_count": 4,
-    "final_hit": true,
-    "backend": "memory"
-  }
+﻿{
+    "scenario":  "rate_limit_window_sliding",
+    "description":  "窗口滑动：在窗口期内连续请求，最后一个请求触发限流",
+    "config":  {
+                   "backend":  "memory",
+                   "window_ms":  10000,
+                   "max_requests":  3
+               },
+    "events":  [
+                   {
+                       "key":  "user_001",
+                       "ts_ms":  100000,
+                       "expected_count":  1,
+                       "expected_hit":  false
+                   },
+                   {
+                       "key":  "user_001",
+                       "ts_ms":  102000,
+                       "expected_count":  2,
+                       "expected_hit":  false
+                   },
+                   {
+                       "key":  "user_001",
+                       "ts_ms":  104000,
+                       "expected_count":  3,
+                       "expected_hit":  false
+                   },
+                   {
+                       "key":  "user_001",
+                       "ts_ms":  105000,
+                       "expected_count":  4,
+                       "expected_hit":  true
+                   }
+               ],
+    "expected":  {
+                     "final_count":  4,
+                     "final_hit":  true,
+                     "backend":  "memory"
+                 }
 }

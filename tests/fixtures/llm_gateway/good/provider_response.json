@@ -1,15 +1,17 @@
-{
-  "narrative": {
-    "text": "这是外部模型返回的草案。"
-  },
-  "intent_draft": {
-    "route": "chat",
-    "target_id": "",
-    "action": "narrative_only",
-    "args": {}
-  },
-  "meta": {
-    "draft_only": true,
-    "provider": "mock"
-  }
+﻿{
+    "narrative":  {
+                      "text":  "这是外部模型返回的草案。"
+                  },
+    "intent_draft":  {
+                         "route":  "chat",
+                         "target_id":  "",
+                         "action":  "narrative_only",
+                         "args":  {
+
+                                  }
+                     },
+    "meta":  {
+                 "draft_only":  true,
+                 "provider":  "mock"
+             }
 }
