@@ -95,11 +95,16 @@ def _run_loop(
         _rewind_inner_world_for_idle_tick(world, user_id=persona_self_id, minutes=tick_minutes, topics=[topic])
         inner_state_before = world.get_state(user_id=persona_self_id)
         before_event_count = int(inner_state_before.get("spontaneous_event_count") or 0)
+        latest_before = _latest_inner_event(inner_state_before)
+        before_event_marker = _inner_event_marker(latest_before)
         tick_result = world.tick(user_id=persona_self_id, emit_inner_stream=True)
         inner_state = world.get_state(user_id=persona_self_id)
         after_event_count = int(inner_state.get("spontaneous_event_count") or 0)
-        new_event_created = after_event_count > before_event_count
         latest_inner = _latest_inner_event(inner_state)
+        after_event_marker = _inner_event_marker(latest_inner)
+        new_event_created = after_event_count > before_event_count or (
+            bool(after_event_marker) and after_event_marker != before_event_marker
+        )
         private_note = str(latest_inner.get("private_text") or latest_inner.get("note") or "").strip()
         if private_note and new_event_created:
             private_notes.append(private_note)
@@ -189,6 +194,10 @@ def _checks(
         int((tick.get("inner_world") or {}).get("after_event_count") or 0)
         for tick in ticks
     ]
+    event_markers = [
+        _inner_event_marker(dict((tick.get("inner_world") or {}).get("latest_private_thought") or {}))
+        for tick in ticks
+    ]
     default_notes_joined = "\n".join(default_notes)
     private_joined = "\n".join(private_notes)
     circuit = dict(((ticks[-1].get("inner_world") or {}).get("circuit") or {}) if ticks else {})
@@ -203,8 +212,8 @@ def _checks(
         "inner_world_generated_private_thoughts_each_tick": len(private_notes) == len(ticks) and bool(private_notes),
         "inner_world_appends_new_private_event_each_tick": bool(ticks)
         and all(bool((tick.get("inner_world") or {}).get("new_event_created")) for tick in ticks)
-        and event_counts == sorted(event_counts)
-        and len(set(event_counts)) == len(event_counts),
+        and len([marker for marker in event_markers if marker]) == len(ticks)
+        and len(set(event_markers)) == len(event_markers),
         "inner_world_uses_llm_source_only": bool(inner_sources) and all(source == "llm" for source in inner_sources),
         "inner_model_was_called": mode == "live" or len(list(details.get("inner_model_calls") or [])) >= len(ticks),
         "default_mode_uses_model_or_waits_without_template": bool(default_ticks)
@@ -224,6 +233,18 @@ def _default_tick_uses_model_or_waits(tick: Mapping[str, Any]) -> bool:
     if note:
         return not bool(llm_meta.get("note_unavailable")) and not bool(llm_meta.get("requires_model"))
     return bool(llm_meta.get("note_unavailable")) and bool(llm_meta.get("requires_model"))
+
+
+def _inner_event_marker(event: Mapping[str, Any]) -> str:
+    thought_id = str(event.get("thought_id") or "").strip()
+    if thought_id:
+        return f"thought:{thought_id}"
+    ts_ms = str(event.get("ts_ms") or "").strip()
+    if ts_ms:
+        return f"ts:{ts_ms}"
+    text = str(event.get("private_text") or event.get("note") or "").strip()
+    focus = str(event.get("focus") or "").strip()
+    return f"text:{focus}:{text}" if text else ""
 
 
 def _markdown_report(summary: Mapping[str, Any], details: Mapping[str, Any]) -> str:

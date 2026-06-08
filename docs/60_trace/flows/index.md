@@ -42,7 +42,7 @@
 | 共享运行时 | `host_brain/app/agent_runtime_shared.py` | 召回、trace、后处理 |
 | Executive 路由 | `host_brain/app/executive_router.py` | 路由薄门面 |
 | Executive 执行 | `host_brain/app/executive_runtime.py` + `host_brain/app/executive_runtime_core.py` | chat / skill / delegate / plan 主执行 |
-| 主链作者 | `host_brain/app/chat_agent.py` -> `host_brain/persona/surface_main_chain.py` | normal chat 文本最终作者为 SurfaceMainChain |
+| 主链作者 | `host_brain/app/surface_reply_runtime.py` -> `host_brain/persona/surface_main_chain.py` | normal chat 文本最终作者为 SurfaceMainChain |
 
 因此，当前正确口径是：
 

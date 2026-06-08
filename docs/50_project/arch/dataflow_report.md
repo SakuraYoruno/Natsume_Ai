@@ -30,7 +30,7 @@ Chat 主链：
 - `host_brain/app/cortex_orchestrator.py`
 - `host_brain/app/agent_runtime_shared.py`
 - `host_brain/app/executive_router.py` / `executive_runtime.py` / `executive_runtime_core.py`
-- `host_brain/app/chat_agent.py` / `chat_agent_preprocessor.py` / `chat_agent_postprocessor.py` / `chat_payload_builder.py`
+- `host_brain/app/surface_reply_runtime.py` / `surface_reply_preprocessor.py` / `surface_reply_postprocessor.py` / `surface_main_chain.py`
 - `host_brain/app/surface_main_chain_adapter.py`
 - `host_brain/persona/surface_main_chain.py` / `surface_packet_compiler.py` / `surface_runtime.py`
 
@@ -59,7 +59,7 @@ Desktop Pet / MateEngine：
 
 | 流量类型 | 入口 | 处理面 | 出口 |
 |---|---|---|---|
-| 用户聊天 | `POST /v1/chat`（Host Main 8000） | `chat_routes → chat_immune_gate → chat_handler → cortex → executive → chat_agent → surface chain` | SSE token 流 |
+| 用户聊天 | `POST /v1/chat`（Host Main 8000） | `chat_routes → chat_immune_gate → chat_handler → cortex → executive → surface_reply → SurfaceMainChain` | SSE token 流 |
 | 平台消息入站 | Gateway adapter（19000）→ `POST /v1/host/input`（Host Main） | `input_routes → cortex_orchestrator` | SSE 或 ack |
 | Edge 事件回流 | `POST /v1/edge/events`（Host Main） | `edge_event_routes` | ack |
 | Edge 能力调用 | Host → Edge RPC（17800） | Host 主动出站 | 同步响应 |
@@ -157,7 +157,7 @@ cortex_orchestrator_sse_generator(...)
    executive_router_sse_generator(...)
      → executive_runtime_sse_generator(...)
        → _executive_runtime_core_sse_generator_impl(...)
-         → 决策 route 类型 → chat_agent_sse_generator(...)
+         → 决策 route 类型 → surface_reply_sse_generator(...)
 5. commit 之后：
    _async_post_process(...) 调度副作用（不阻塞 SSE 流）：
      - TTS 落地（trigger_tts_after_commit + broca_to_tts_params）
@@ -214,8 +214,8 @@ host_brain/persona/surface_runtime.py
 
 | Route | 含义 | 终点 |
 |---|---|---|
-| `chat` | 普通聊天 | `chat_agent_sse_generator` → SurfaceMainChain |
-| `delegate` | 委派给指定 agent | `chat_agent_sse_generator`（带 sub_agent_context） |
+| `chat` | 普通聊天 | `surface_reply_sse_generator` → SurfaceMainChain |
+| `delegate` | 委派给指定 agent | `surface_reply_sse_generator`（带 sub_agent_context） |
 | `skill` | 调用某个 skill | tool/skill broker |
 | `plan` | 多步任务规划 | `_maybe_build_multi_step_plan` → 多回合执行 |
 
@@ -248,12 +248,12 @@ _should_force_complex_plan(...)
 
 ```
 route=chat
-  → executive_runtime_core 直接 stream_chat_route → chat_agent_sse_generator
-  → ChatAgent 检查 surface chain，启用时走 surface_main_chain_sse_generator
+  → executive_runtime_core 直接 stream_chat_route → surface_reply_sse_generator
+  → SurfaceReplyRuntime 检查 surface chain，启用时走 surface_main_chain_sse_generator
 
 route=delegate
   → 把任务交给 sub-agent（如 prefrontal / specific tribe agent）
-  → 返回时 chat_agent 决定是否保留 sub-agent 结果给用户
+  → 返回时 surface_reply runtime 决定是否保留 sub-agent 结果给用户
 
 route=skill
   → 调 tool_broker.execute_skill（host_brain/tools / skills/）
@@ -263,10 +263,10 @@ route=plan
   → 生成多步计划 → 分别执行 → 汇总 commit
 ```
 
-## 5. `chat_agent` 输出流
+## 5. `surface_reply` 输出流
 
 ```
-chat_agent_sse_generator(agent_input: ChatAgentInput)
+surface_reply_sse_generator(agent_input: SurfaceReplyInput)
   ↓
 检查 surface_main_chain_required(agent_input, sub_agent_ctx)
 检查 surface_main_chain_enabled(agent_input, sub_agent_ctx)
@@ -283,15 +283,13 @@ chat_agent_sse_generator(agent_input: ChatAgentInput)
         ↓
         通过 reply_envelope 包装成 COMMIT SSE
         ↓
-        chat_agent_postprocessor.schedule_async_post_process
+        surface_reply_postprocessor.schedule_async_post_process
           - log_input_completed（input ack 写入）
           - scrub_pii_egress（出站 PII 净化）
           - trigger_tts_after_commit（按 broca 参数）
           - _write_surface_main_chain_memory_sync（life memory 回写）
 
 未启用（fallback / sub-agent bypass）
-  → 走 chat_agent.py 原有兼容路径（旧链 prompt_builder + chat_payload_builder）
-  → 同样走 chat_agent_postprocessor 收尾
 ```
 
 SSE 三阶段：
@@ -510,7 +508,7 @@ Monitor UI 的 avatar 行为按钮走 `POST /obs/avatar/behavior` → `edge_rpc_
 | `prompt_builder` 是 normal chat 主作者 | normal chat 主作者是 `SurfaceMainChain`；prompt_builder 仅供旧链路或非 chat 任务 |
 | Agentic RAG pipeline 提供 chat 召回 | Agentic RAG stack 已从 `retrieval/__init__.py` 移除；当前走 `RecallFusionServiceContract` + `surface_memory_recall` |
 | Tribe family 通过灰度开关启用 | 灰度开关已全部删除；23 个 family 全部直接生效 |
-| `chat_context_builder.py` 提供 chat 上下文 | 该文件已删除；上下文构建拆到 `chat_payload_builder.py` + `chat_agent_preprocessor.py` + `host_brain/app/context/` |
+| `chat_context_builder.py` 提供 chat 上下文 | 该文件已删除；上下文构建拆到 `surface_main_chain.py` + `surface_reply_preprocessor.py` + `host_brain/app/context/` |
 | `code_agent_handler.py` 是 chat 路径之一 | 已删除；不再被 chat 路径依赖 |
 | `executive_runtime` 是单文件 1 万行巨石 | 已拆为 `executive_router.py`（薄壳） + `executive_runtime.py`（路由薄层） + `executive_runtime_core.py`（核心决策） |
 | Surface 主链是实验链 | Surface 主链已是 normal chat 默认作者（`Make surface main chain default for text chat`） |

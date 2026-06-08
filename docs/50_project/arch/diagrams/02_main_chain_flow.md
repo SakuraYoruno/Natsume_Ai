@@ -11,7 +11,7 @@
 
 主链分 3 大阶段：
 1. **HTTP 装配 + 入站门控**（chat_routes / chat_immune_gate）
-2. **编排核心**（cortex_orchestrator → executive 三层 → chat_agent → SurfaceMainChain）
+2. **编排核心**（cortex_orchestrator → executive 三层 → surface_reply → SurfaceMainChain）
 3. **后处理与媒体作者**（async_post_process + reply_modality_router）
 
 SSE 流也分 3 帧族：`open` → `stream` → `final/end`。
@@ -48,7 +48,7 @@ flowchart TD
     SSE --> TH
 
     ERC --> SEL{"分流"}
-    SEL -->|chat 主路径| CA["chat_agent<br/>preprocessor / payload_builder / postprocessor"]
+    SEL -->|chat 主路径| CA["surface_reply<br/>preprocessor / payload_builder / postprocessor"]
     SEL -->|skill| SK["skill 调用"]
     SEL -->|delegate| DG["delegate"]
     SEL -->|plan| PL["plan"]
@@ -103,10 +103,10 @@ sequenceDiagram
 | 9 | `host_brain/app/executive_router.py` | `executive_router_sse_generator(...)` | 11 |
 | 10 | `host_brain/app/executive_runtime.py` | 路由薄层 | — |
 | 11 | `host_brain/app/executive_runtime_core.py` | 决策核心 | — |
-| 12 | `host_brain/app/chat_agent.py` (3361 行) | 入口 | — |
-| 13 | `host_brain/app/chat_agent_preprocessor.py` (1623 行) | 预处理 | — |
-| 14 | `host_brain/app/chat_payload_builder.py` (1363 行) | payload 构建 | — |
-| 15 | `host_brain/app/chat_agent_postprocessor.py` | 后处理 | — |
+| 12 | `host_brain/app/surface_reply_runtime.py` (3361 行) | 入口 | — |
+| 13 | `host_brain/app/surface_reply_preprocessor.py` (1623 行) | 预处理 | — |
+| 14 | `host_brain/app/surface_main_chain.py` (1363 行) | payload 构建 | — |
+| 15 | `host_brain/app/surface_reply_postprocessor.py` | 后处理 | — |
 | 16 | `host_brain/app/surface_main_chain_adapter.py` | adapter | — |
 | 17 | `host_brain/persona/surface_main_chain.py` | **SurfaceMainChain（normal chat 最终作者）** | — |
 | 18 | `host_brain/persona/surface_packet_compiler.py` | packet 编译 | — |
@@ -121,7 +121,7 @@ sequenceDiagram
 4. SSE 三阶段帧族不变：`open` → `stream` → `final/end`。
 5. immune gate 在 `chat_immune_gate.py` 中**先评估再排程事件**，不再混在 chat_handler 里。
 6. Executive 严格三层：`router`（薄壳）→ `runtime`（路由薄层）→ `runtime_core`（决策核心）。
-7. chat_agent 已拆为 `preprocessor / payload_builder / postprocessor` 三件套 + adapter。
+7. surface_reply 已拆为 `preprocessor / payload_builder / postprocessor` 三件套 + adapter。
 
 ## 已废弃路径
 

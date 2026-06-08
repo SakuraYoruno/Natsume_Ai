@@ -445,7 +445,7 @@ def main() -> int:
     passed_count = sum(1 for item in results if item["score"]["passed"])
     no_reply_count = sum(1 for item in results if item.get("decision") == "NO_REPLY")
     transport_error_count = sum(1 for item in results if item.get("error"))
-    model_path_count = sum(1 for item in results if item.get("path") == "chat_agent:surface_main_chain")
+    model_path_count = sum(1 for item in results if item.get("path") == "surface_reply:surface_main_chain")
     direct_path_count = sum(
         1
         for item in results

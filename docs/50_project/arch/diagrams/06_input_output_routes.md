@@ -45,7 +45,7 @@ flowchart TD
     DISP --> THA["thalamus_agent"]
     THA --> COR["cortex_orchestrator"]
     COR --> ERT["executive_runtime_core"]
-    ERT --> CA["chat_agent"]
+    ERT --> CA["surface_reply"]
     CA --> SC["surface_main_chain"]
     SC --> POST["async_post_process"]
 ```

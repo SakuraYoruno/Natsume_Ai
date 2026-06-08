@@ -150,7 +150,7 @@ Gateway 消息进入 Host 的真实入口是：
 
 ### 4.4 ChatAgent 侧口径
 
-`host_brain/app/chat_agent.py` 当前输入结构 `ChatAgentInput` 里也明确写着：
+`host_brain/app/chat_agent.py` 当前输入结构 `SurfaceReplyInput` 里也明确写着：
 
 - `render_target_lang: str = "zh"`
 - 文字通道永远 `zh`

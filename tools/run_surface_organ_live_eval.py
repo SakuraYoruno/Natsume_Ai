@@ -14,9 +14,9 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from host_brain.app.chat_agent import ChatAgentInput  # noqa: E402
+from host_brain.app.surface_reply_preprocessor import SurfaceReplyInput  # noqa: E402
 from host_brain.app.graph_config_builder import resolve_host_llm_runtime_async  # noqa: E402
-from host_brain.app.surface_main_chain_adapter import run_surface_main_chain_for_chat_input  # noqa: E402
+from host_brain.app.surface_main_chain_adapter import run_surface_main_chain_for_surface_reply_input  # noqa: E402
 from tools.live_env import load_dotenv, load_secret_store_provider_key  # noqa: E402
 
 
@@ -274,7 +274,7 @@ async def _run_case(
     case_id = _clean_text(case.get("case_id")) or f"case_{index:03d}"
     trace: dict[str, Any] = {}
     started = time.perf_counter()
-    agent_input = ChatAgentInput(
+    agent_input = SurfaceReplyInput(
         request_id=f"surface-organ-live-{case_id}",
         session_id=f"surface-organ-live-{case_id}",
         person_id=_clean_text(case.get("person_id")) or "surface-organ-live-user",
@@ -288,7 +288,7 @@ async def _run_case(
         llm_runtime=dict(llm_runtime),
     )
     try:
-        result = await run_surface_main_chain_for_chat_input(agent_input, trace_stage_meta=trace)
+        result = await run_surface_main_chain_for_surface_reply_input(agent_input, trace_stage_meta=trace)
         latency_ms = int((time.perf_counter() - started) * 1000)
         packet = result.compiled.packet
         selected_text = _clean_text(result.selected_text)

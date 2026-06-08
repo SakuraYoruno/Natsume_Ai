@@ -65,7 +65,7 @@ flowchart TD
     RC_DEC -.- RC_PROBE
 
     RC_OUT --> SEL{"分流"}
-    SEL -->|chat| CA["chat_agent"]
+    SEL -->|chat| CA["surface_reply"]
     SEL -->|skill| SK["skill"]
     SEL -->|delegate| DG["delegate"]
     SEL -->|plan| PL["plan"]
@@ -79,7 +79,7 @@ sequenceDiagram
     participant ER as executive_router
     participant RT as executive_runtime
     participant RC as executive_runtime_core
-    participant CA as chat_agent
+    participant CA as surface_reply
 
     U->>ER: 用户消息
     ER->>RT: executive_router_sse_generator
@@ -94,7 +94,7 @@ sequenceDiagram
         else
             RT->>RC: _executive_runtime_core_sse_generator_impl
             RC->>RC: 路由选择 + 能力调用
-            RC->>CA: chat_agent / skill / delegate / plan
+            RC->>CA: surface_reply / skill / delegate / plan
             CA-->>U: SSE 流
         end
     end
@@ -119,7 +119,7 @@ sequenceDiagram
 ## 不变量
 
 1. Executive 严格分**三层**：router 是薄壳、runtime 是路由薄层、runtime_core 是决策核心；三层不能合并。
-2. **direct route**（recent_turn / task_progress）属于性能优化路径，可短路 runtime_core 直达 chat_agent。
+2. **direct route**（recent_turn / task_progress）属于性能优化路径，可短路 runtime_core 直达 surface_reply。
 3. runtime_core 永远是兜底：未命中 direct route 时全部走 runtime_core 的路由决策。
 4. handoff 记录由 `record_executive_handoff` 统一负责，不在 runtime_core 内部散写。
 5. Capability 执行结果由 `record_runtime_capability_execution` 统一审计。

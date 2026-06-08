@@ -327,7 +327,7 @@ def stream_llm_chunks(
 - 内部将 `messages` 列表直接映射为 LangChain 的 `SystemMessage/HumanMessage/AIMessage`
 - 异步版本 `astream_llm_chunks` 同步升级
 
-### 5.2 `chat_agent_sse_generator` 改造
+### 5.2 `surface_reply_sse_generator` 改造
 
 **位置**：`host_brain/app/chat_agent.py`
 
@@ -742,7 +742,7 @@ messages.append({"role": "assistant", "content": turn.content})
 下游实现完成后必须增加以下测试，保证情感层未被破坏：
 
 1. `test_emotion_binding_preserved_in_messages.py`  
-   构造一个带完整 emotion_context 的 ChatAgentInput，断言生成的 messages 数组第一条 system 里包含 `EMOTION_BINDING:` / `BOND_AWARE_STYLE:` / `PERSONA_EXPRESSION_HINT:` 三个关键字
+   构造一个带完整 emotion_context 的 SurfaceReplyInput，断言生成的 messages 数组第一条 system 里包含 `EMOTION_BINDING:` / `BOND_AWARE_STYLE:` / `PERSONA_EXPRESSION_HINT:` 三个关键字
 
 2. `test_historical_turn_has_no_emotion_metadata.py`  
    构造 3 轮带 emotion_tag 的历史 turn，断言 `build_chat_messages` 输出中，历史 `{role, content}` 字典**只含这两个 key**，无其他字段

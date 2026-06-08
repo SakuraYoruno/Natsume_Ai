@@ -22,12 +22,12 @@ _SCOPE_GROUP: dict[str, str] = {}
 _AGENT_SCOPES = {
     "intent_agent_handler", "intent_agent_entry_handler",
     "translate_agent_handler", "repair_agent_handler", "emotion_agent_handler",
-    "chat_agent_handler", "retrieval_agent_handler", "judge_agent_handler",
+    "surface_reply_handler", "retrieval_agent_handler", "judge_agent_handler",
     "supervisor_dispatch_handler", "sub_agent_protocol", "react_loop",
     "vision.action_planner", "chat_handler_vision",
 }
 _CHAT_SCOPES = {
-    "chat_agent", "chat_handler", "chat_context_builder", "prompt_builder",
+    "surface_reply", "chat_handler", "chat_context_builder", "prompt_builder",
     "cortex_prompt_builder", "prompt_context", "reflection_chain",
     "expression_adapter", "interaction_pattern_analyzer", "bond_aware_style",
     "proactive_voice", "intelligent_runtime",

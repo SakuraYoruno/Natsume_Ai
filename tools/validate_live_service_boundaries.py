@@ -412,7 +412,7 @@ async def _probe_llm(*, run_id: str, llm_timeout_ms: int) -> dict[str, Any]:
     started = time.perf_counter()
     try:
         from host_brain.app.graph_config_builder import (  # noqa: PLC0415
-            resolve_chat_agent_llm_runtime,
+            resolve_surface_reply_llm_runtime,
             resolve_host_llm_runtime_async,
         )
         from host_brain.integrations.llm_helpers import acomplete_llm_with_pool  # noqa: PLC0415
@@ -421,7 +421,7 @@ async def _probe_llm(*, run_id: str, llm_timeout_ms: int) -> dict[str, Any]:
             rollout_key=f"live-service-boundary::{run_id}",
             scene_type="CHAT",
         )
-        runtime = resolve_chat_agent_llm_runtime(base_runtime=dict(base_runtime or {}))
+        runtime = resolve_surface_reply_llm_runtime(base_runtime=dict(base_runtime or {}))
         provider = str(runtime.get("provider_name") or "").strip().lower()
         model_id = str(runtime.get("model_id") or "").strip()
         available = bool(runtime.get("available"))

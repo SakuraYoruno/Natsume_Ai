@@ -33,13 +33,13 @@ graph TD
     ARS --> EROUT["host_brain/app/executive_router.py"]
     EROUT --> EXEC["host_brain/app/executive_runtime.py"]
     EXEC --> EXECCORE["host_brain/app/executive_runtime_core.py"]
-    EXECCORE --> CAG["host_brain/app/chat_agent.py（chat_agent_sse_generator）"]
+    EXECCORE --> CAG["host_brain/app/surface_reply_runtime.py（surface_reply_sse_generator）"]
     CAG --> SMC["host_brain/app/surface_main_chain_adapter.py"]
     SMC --> PSMC["host_brain/persona/surface_main_chain.py"]
     PSMC --> PCOMP["host_brain/persona/surface_packet_compiler.py"]
     PCOMP --> PRUN["host_brain/persona/surface_runtime.py"]
     PRUN --> ENV["host_brain/app/reply_envelope.py"]
-    ENV --> POST["host_brain/app/chat_agent_postprocessor.py"]
+    ENV --> POST["host_brain/app/surface_reply_postprocessor.py"]
 
     U --> INPUT["host_brain/app/input_routes.py（/v1/host/input）"]
     INPUT --> CO
@@ -183,29 +183,29 @@ graph TD
 
 为什么核心：**executive 层的"硬规则"决策点**——大量来自 prefrontal / cortex_route_decider 的决策落地在这里。
 
-### 4.9 `host_brain/app/chat_agent.py`（3361 行）
+### 4.9 `host_brain/app/surface_reply_runtime.py`（3361 行）
 
 当前职责：
 
-- `chat_agent_sse_generator(agent_input: ChatAgentInput) -> AsyncGenerator[str, None]`：ChatAgent 的 SSE 入口
+- `surface_reply_sse_generator(agent_input: SurfaceReplyInput) -> AsyncGenerator[str, None]`：SurfaceReplyRuntime 的 SSE 入口
 - 启动时调用 `surface_main_chain_required` / `surface_main_chain_enabled`，决定是否走 Surface 主链
 - Surface 启用时 → 委托 `surface_main_chain_sse_generator`
 - 否则走兼容 fallback 路径（旧风格）
-- 提供 `SubAgentContext` / `ChatAgentInput` / `_resolve_minimal_fallback_text` 等数据契约
+- 提供 `SurfaceSubAgentContext` / `SurfaceReplyInput` / `_resolve_minimal_fallback_text` 等数据契约
 - 直接处理 sub-agent 场景（保留某些 sub-agent 结果给用户、否则抑制）
 
 为什么核心：**Surface 主链与旧链的开关枢纽**；任何 chat reply 必须经过这里。
 
-### 4.10 `host_brain/app/chat_agent_preprocessor.py`（1623 行）
+### 4.10 `host_brain/app/surface_reply_preprocessor.py`（1623 行）
 
-当前职责：从 `chat_agent.py` 拆分出来的"输入预处理与配置渲染"部分：
+当前职责：从 `surface_reply_runtime.py` 拆分出来的"输入预处理与配置渲染"部分：
 
 - 模板加载、本地化（`_resolve_template_text_localized`、`_load_template_mapping`）
 - airlock 输入净化（`_airlock_sanitize_input`，部分函数）
 - 文本切句、长度截断（`_split_text_into_sentences`、`_truncate_text_to_*`）
 - render_policy 解析（`_extract_render_policy_limits`、`_coerce_render_policy_score`）
 
-### 4.11 `host_brain/app/chat_agent_postprocessor.py`
+### 4.11 `host_brain/app/surface_reply_postprocessor.py`
 
 当前职责：commit 之后的轻量后处理：
 
@@ -215,9 +215,9 @@ graph TD
 - `_post_speak_sentence`：单句语音落地
 - `log_input_completed`：input ack 写入
 
-### 4.12 `host_brain/app/chat_payload_builder.py`（1363 行）
+### 4.12 `host_brain/app/surface_main_chain.py`（1363 行）
 
-当前职责：从 `prompt_builder` 抽出来的 payload 构造器，专门负责把 `ChatAgentInput` 编译成 LLM provider 需要的 payload：
+当前职责：从 `prompt_builder` 抽出来的 payload 构造器，专门负责把 `SurfaceReplyInput` 编译成 LLM provider 需要的 payload：
 
 - system / user / assistant 消息片段拼接
 - soul.md / 风格 anchor / 必要事实注入
@@ -710,13 +710,13 @@ interoception / motor_cortex / cerebellum / glymphatic / vestibular
 | 旧模块 / 设计 | 当前事实 |
 |---|---|
 | `host_brain/app/fastapi_app.py`（Host 端） | 已删除；由 `asgi.py + app_factory.py + router_registry.py` 替代 |
-| 旧 `prompt_builder.py` 单文件 | 已拆为 `prompt_builder.py` + `prompt_builder_utils.py` + `node_generation_prompt.py` + `chat_payload_builder.py`，且已不是 normal chat 最终作者 |
+| 旧 `prompt_builder.py` 单文件 | 已拆为 `prompt_builder.py` + `prompt_builder_utils.py` + `node_generation_prompt.py` + `surface_main_chain.py`，且已不是 normal chat 最终作者 |
 | 旧 `graph_config_builder.py` 单文件 | 已拆为 `graph_config_builder.py` + `graph_config_llm_runtime.py` |
 | Agentic RAG pipeline / orchestrator stack | 已从 `retrieval/__init__.py` 移除；当前走 `RecallFusionServiceContract` + `surface_memory_recall` |
 | 旧的 `obs_routes_stats_capability.py` 大文件 | 已拆为 `obs_routes_stats_capability.py` + `obs_routes_stats_capability_agent.py` + `obs_routes_stats_capability_skill.py` |
 | 旧的 `obs_routes_stats_input.py` 大文件 | 已拆为 `obs_routes_stats_input.py` + `obs_routes_stats_input_dispatch.py` + `obs_routes_stats_input_humanoid.py` |
 | 旧的 `obs_routes_core.py` 巨型文件 | 已拆为 `obs_routes_core.py` + `obs_routes_health.py` + `obs_routes_sessions.py` + `obs_routes_trace.py` + `obs_routes_metrics.py` 等 |
-| 旧的 `chat_context_builder.py` | 已删除；上下文构建拆分到 `chat_payload_builder.py` + `chat_agent_preprocessor.py` + `host_brain/app/context/` 子包 |
+| 旧的 `chat_context_builder.py` | 已删除；上下文构建拆分到 `surface_main_chain.py` + `surface_reply_preprocessor.py` + `host_brain/app/context/` 子包 |
 | Tribe family 灰度开关 | 已全部删除（P0~P4 批次） |
 | `style_canon` / `persona_utterance` 召回路由 | 已删除（`refactor(retrieval): 彻底删除废弃的 ...`） |
 | 旧 `surface_renderer` 路径 | 已退役（`remove retired surface renderer path`） |

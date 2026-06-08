@@ -28,7 +28,7 @@
 - 旧链能力（reply_plan、validator、fallback、fastpath、transport ack、thread resolver、cache、memory）只能向 SurfaceMainChain 提供 `facts / state / memory / perception / performance / media action`，不能写最终人格回复。
 - normal chat 最终文本作者**只能**是 `SurfaceMainChain`；媒体场景（图片、贴纸、表情包）的最终作者只能是结构化 reaction/media selector（`reply_modality_router.py`）。
 - 任何模块若导致文本质量下降，只能保留在实验链或非聊天任务链，不进入 normal chat 主线。
-- 子代理（sub-agent）回复必要时绕过 surface chain，但仍受 `chat_agent_postprocessor` 的 airlock 净化与 envelope 包装。
+- 子代理（sub-agent）回复必要时绕过 surface chain，但仍受 `surface_reply_postprocessor` 的 airlock 净化与 envelope 包装。
 
 ## 1. 代码证据入口
 
@@ -54,7 +54,7 @@ Chat 主链与编排：
 - `host_brain/app/cortex_orchestrator.py` — Cortex 编排入口（薄壳）
 - `host_brain/app/agent_runtime_shared.py` — 编排与回流主体（巨型实现层）
 - `host_brain/app/executive_router.py` / `executive_runtime.py` / `executive_runtime_core.py`
-- `host_brain/app/chat_agent.py`、`chat_agent_preprocessor.py`、`chat_agent_postprocessor.py`、`chat_payload_builder.py`
+- `host_brain/app/surface_reply_runtime.py`、`surface_reply_preprocessor.py`、`surface_reply_postprocessor.py`、`surface_main_chain.py`
 - `host_brain/app/surface_main_chain_adapter.py` — Surface 主链 SSE 适配器
 - `host_brain/persona/surface_main_chain.py` — Surface 主链 facade
 - `host_brain/persona/surface_runtime.py`、`surface_packet_compiler.py`、`isolated_surface_harness.py`
@@ -107,8 +107,8 @@ Natsume_Ai/
 │  ├─ app/                     # FastAPI、聊天运行时、obs 路由、监控前端源码
 │  │  ├─ asgi.py / app_factory.py / router_registry.py   # Host Main FastAPI 装配
 │  │  ├─ chat_routes.py / chat_handler.py                # /v1/chat 入口
-│  │  ├─ chat_agent.py / chat_agent_preprocessor.py /
-│  │  │   chat_agent_postprocessor.py / chat_payload_builder.py
+│  │  ├─ surface_reply_runtime.py / surface_reply_preprocessor.py /
+│  │  │   surface_reply_postprocessor.py / surface_main_chain.py
 │  │  ├─ surface_main_chain_adapter.py / surface_context_packet.py /
 │  │  │   surface_emotion_bond_flow.py
 │  │  ├─ cortex_orchestrator.py / executive_*.py /
@@ -238,12 +238,12 @@ graph TD
     SSEU --> CO["cortex_orchestrator_sse_generator"]
     CO --> ARS["agent_runtime_shared._cortex_orchestrator_sse_generator_impl"]
     ARS --> ER["executive_router → executive_runtime → executive_runtime_core"]
-    ER --> CAG["chat_agent.chat_agent_sse_generator"]
+    ER --> CAG["surface_reply_runtime.surface_reply_sse_generator"]
     CAG --> SMC["surface_main_chain_adapter.surface_main_chain_sse_generator"]
     SMC --> COMP["persona.surface_packet_compiler.compile_surface_input"]
     COMP --> RUN["persona.surface_runtime.SurfaceRuntime"]
     RUN --> ENV["app.reply_envelope（COMMIT 包装）"]
-    ENV --> POST["chat_agent_postprocessor（airlock + 异步副作用）"]
+    ENV --> POST["surface_reply_postprocessor（airlock + 异步副作用）"]
     POST --> OUT["SSE token 流回客户端"]
 
     SSEU -. record_user_turn .-> CONV["conversation/writer"]

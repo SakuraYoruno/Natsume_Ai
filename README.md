@@ -60,7 +60,7 @@ Natsume_Ai/
   - `host_brain/app/executive_router.py`
   - `host_brain/app/executive_runtime.py`
   - `host_brain/app/executive_runtime_core.py`
-  - `host_brain/app/chat_agent.py`
+  - `host_brain/app/surface_reply_runtime.py`
 - Edge 事件回流：`POST /v1/edge/events`
 - 外部输入回流：`POST /v1/host/input`（当前接收 ASR / Gateway 归一化输入；其他 Edge 运行时事件走 `POST /v1/edge/events`）
 - Edge 能力入口：`/v1/edge/health`、`/v1/edge/avatar_state`、`/v1/edge/speak`、`/v1/edge/barge_in`、`/v1/edge/asr`、`/v1/edge/vts`、`/v1/edge/desktop_pet`、`/v1/edge/fallback/*`、`/v1/edge/screenshot`、`/v1/edge/automate`、`/v1/edge/visual_locate`、`/v1/edge/proactive_push`、`/v1/edge/proactive_messages`、`/v1/edge/wx/*`

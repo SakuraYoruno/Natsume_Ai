@@ -10,7 +10,7 @@
 ## 2. 关键实现
 - `executive_runtime` 新增：
   - `stream_chat_route`
-  - 职责：记录 handoff，并透传 `chat_agent_sse_generator` 流式事件。
+  - 职责：记录 handoff，并透传 `surface_reply_sse_generator` 流式事件。
 - `dispatch_legacy_core` 改造：
   - 删除 chat 分支内联实现，改为调用 runtime 的 `stream_chat_route`。
 
