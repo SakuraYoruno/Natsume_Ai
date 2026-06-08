@@ -1,9 +1,9 @@
 受众：MASTER
 标题：文档地图（唯一入口）
 
-版本：v5.0
-日期：2026-06-05
-维护：2026-06-05（全量 [LIVING]/[ARCHIVE] 双类标记；PRD/DevSpec v2.0；架构 v3.2；契约补全）
+版本：v5.1
+日期：2026-06-08
+维护：2026-06-08（surface_reply 重构同步：PRD v2.1 / DevSpec v2.1 / ModelPlane v1.7 / theory 契约版本跟进）
 
 本仓库所有"应该读什么、从哪里开工、哪些文档禁止当任务来源"，以本文件为准。
 
@@ -69,7 +69,7 @@
 - `[LIVING]` `docs/30_devspec/desktop_pet_runtime.md`：Desktop Pet 运行面契约
 - `[LIVING]` `docs/30_devspec/mateengine_bridge.md`：MateEngine Bridge 契约
 - `[LIVING]` `docs/15_theory/RETRIEVAL_LAYER_CONTRACT.md` (v3.0)：RecallFusionServiceContract
-- `[LIVING]` `docs/15_theory/TOOLS_MEMORY_LAYER_CONTRACT.md` (v3.0)：LifeMemoryStore SSOT + tools
+- `[LIVING]` `docs/15_theory/TOOLS_MEMORY_LAYER_CONTRACT.md` (v3.1)：LifeMemoryStore SSOT + tools
 - `[LIVING]` `docs/60_trace/requirements_trace.md`：需求到设计/测试映射
 
 ---
@@ -82,13 +82,13 @@
 
 ## 2）需求文档（PRD）
 
-- `[LIVING]` docs/20_prd/PRD.md (v2.0)
+- `[LIVING]` docs/20_prd/PRD.md (v2.1)
   用途：基于当前代码事实的系统能力描述。覆盖 5 运行面、Chat/Surface/Gateway/Emotion/Memory/Canon/Tribe/Obs/Avatar/Voice/Mode/Codex/Security/Scheduler 功能域。
   读者：MASTER、Project（文档代理）。
 
 ## 3）开发文档（DevSpec + 任务 + 模型平面）
 
-- `[LIVING]` docs/30_devspec/DevSpec.md (v2.0)
+- `[LIVING]` docs/30_devspec/DevSpec.md (v2.1)
   用途：当前代码的工程契约参考手册。每条契约可追溯到具体 .py 文件。
   读者：实现层（主要）、MASTER。
 
@@ -96,7 +96,7 @@
   用途：实现层可逐条执行的任务清单（历史追踪；任务编号与代码现状可能不同步，属于正常现象）。
   读者：实现层（历史参考）。
 
-- `[LIVING]` docs/30_devspec/ModelPlane.md (v1.6)
+- `[LIVING]` docs/30_devspec/ModelPlane.md (v1.7)
   用途：模型平面规格（模型节点分工、路由、降级、出网最小化、审计字段）。
   读者：MASTER、实现层。
 
@@ -327,13 +327,13 @@
 - `[LIVING]` docs/15_theory/INTEGRATIONS_LAYER_CONTRACT.md (v3.0) — integrations 层接口契约
 - `[LIVING]` docs/15_theory/RETRIEVAL_LAYER_CONTRACT.md (v3.0) — retrieval 层接口契约
 - `[LIVING]` docs/15_theory/GOVERNOR_SCHEDULER_CONTRACT.md (v3.0) — governor + scheduler 契约
-- `[LIVING]` docs/15_theory/TOOLS_MEMORY_LAYER_CONTRACT.md (v3.0) — tools + memory 契约
-- `[LIVING]` docs/15_theory/PERIPHERAL_LAYERS_CONTRACT.md (v2.1) — 外围层契约（airlock/bond/channels/vision/lsp/mcp）
+- `[LIVING]` docs/15_theory/TOOLS_MEMORY_LAYER_CONTRACT.md (v3.1) — tools + memory 契约
+- `[LIVING]` docs/15_theory/PERIPHERAL_LAYERS_CONTRACT.md (v2.2) — 外围层契约（airlock/bond/channels/vision/lsp/mcp）
 - `[LIVING]` docs/15_theory/APP_AUDIT_SKILLS_CONTRACT.md (v3.1) — 应用/审计/技能层契约
 
 ### 8.2 架构全景
 
-- `[LIVING]` docs/15_theory/architecture_overview.md (v3.0) — 整体架构全景文档（Mermaid 图 + 运行面说明）
+- `[LIVING]` docs/15_theory/architecture_overview.md (v3.1) — 整体架构全景文档（Mermaid 图 + 运行面说明）
   读者：MASTER、Project、实现层（查阅对齐）。
 
 ### 8.3 理论基础

@@ -2,15 +2,15 @@
 标题：模型平面（Model Plane）规格说明（共享池、模型节点资产、Surface 收口、审计与降级）
 
 # 模型平面（Model Plane）规格说明
-版本：v1.6
-日期：2026-06-05
+版本：v1.7
+日期：2026-06-08
 
 定位：本文件属于 DevSpec 子规格，只写"怎么做 + 如何验证（测试点/日志点/契约点）"。
 目标：把"共享模型池 + 模型节点资产 + Host 本地兜底 + Surface 收口"怎么分工、怎么路由、怎么降级、怎么最小化出网、怎么审计回放写成稳定契约，允许以后换模型但不换治理。
 
 当前代码校准说明（2026-06-05）：
 - 当前运行时已经不是”每个场景显式点一个固定云节点”的早期骨架，而是以 `host_brain/integrations/llm_helpers.py` 的共享池和 `llm_gateway.py::complete_with_pool()` 为统一入口。
-- **运行时路由实际是 role-based（chat_agent / executive_router / subagent 等角色）而非 tier A/B/C/D 四档。** 实际路由代码在 `host_brain/app/model_router.py`，当前仅使用 Gemini 系列模型；`model_capability_registry.py` 的 `_KNOWN_PROFILES` 中仅有 Gemini profile，MiniMax 仅作为静态配置存在于 `configs/model_plane/node_registry.yaml`，不在 capability registry 中，因此多 provider fallback 路径为配置层面预留而非运行时已激活。
+- **运行时路由实际是 role-based（surface_reply / executive_router / subagent 等角色）而非 tier A/B/C/D 四档。** 实际路由代码在 `host_brain/app/model_router.py`，当前仅使用 Gemini 系列模型；`model_capability_registry.py` 的 `_KNOWN_PROFILES` 中仅有 Gemini profile，MiniMax 仅作为静态配置存在于 `configs/model_plane/node_registry.yaml`，不在 capability registry 中，因此多 provider fallback 路径为配置层面预留而非运行时已激活。
 - 审计字段方面，除既有 `model_control_log` 外，当前代码还写 `llm_pool_call_log`，记录 `scene_type / cognitive_tier / attempts / final_provider / final_model / pool_exhausted / degraded_to_rule`。
 - 调度面当前还额外约束了后台 LLM 任务的 `sys_mode` allowlist；因此阅读本文件时，应把“9 云节点固定分工”理解为治理角色与能力分层，而不是唯一运行时调用形态。
 - 旧的双段字段名不再作为当前最终输出契约；当前用户可见回复以 Surface Main Chain 的 `selected_text` 候选和 `ReplyEnvelope` 的 `final_reply` 收口为准。
@@ -21,7 +21,7 @@
 模型平面实际触达主链时序应与该结构保持一致：
 
 - 模型调用入口：`host_brain/integrations/llm_gateway.py` 的 `complete_with_pool()`；
-- 上游输入：`host_brain/integrations/llm_helpers.py`、`prompt_context.py`、`chat_payload_builder.py`、`surface_context_packet.py` 提供统一路由与表达上下文；
+- 上游输入：`host_brain/integrations/llm_helpers.py`、`prompt_context.py`、`surface_reply_preprocessor.py`、`surface_context_packet.py` 提供统一路由与表达上下文；
 - 最终表达：`surface_main_chain_adapter.py` 调用 Surface Main Chain，并由 `reply_envelope.py` 决定是否可发送、持久化或缓存；
 - 兜底策略：`llm_pool_call_log` 与 `model_control_log` 在审计口径上都要可回放；
 - 若某章节与当前代码分歧，以 `docs/50_project/arch/CURRENT_CODE_ARCHITECTURE.md` 为准，且仅在 `model_plane` 相关任务中更新回溯条目。
@@ -467,7 +467,7 @@ agent 内部路由状态维护在：
 
 | agent_id | 对应节点 | 风险级别 | 可并行 |
 |----------|---------|---------|--------|
-| `chat_agent` | `chat_direct_ja` | low | 否 |
+| `surface_reply` | `chat_direct_ja` | low | 否 |
 | `code_agent` | `workbench_code_assist` | medium | 否 |
 | `translate_agent` | `workbench_translate` | low | 是（只读） |
 | `intent_agent` | `core_reasoner_primary`（链入口） | high | 否 |

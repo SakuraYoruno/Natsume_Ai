@@ -2,8 +2,8 @@
 标题：产品需求文档（PRD）
 
 # Natsume Ai 产品需求文档（PRD）
-版本：v2.0
-日期：2026-06-05
+版本：v2.1
+日期：2026-06-08
 定位：基于当前代码事实的系统能力描述。不再写"目标蓝图"，而是记录"系统实际做什么"。
 
 ---
@@ -30,7 +30,7 @@ Natsume Ai 是一个本地优先的 AI 陪伴系统，由 5 个协同运行面�
 
 - 入口：`POST /v1/chat`，SSE 流式响应
 - 三阶段协议：PRESENCE（在场流，非权威）→ COMMIT（提交流，Governor 后产生）→ POST（渲染流，读 Commit 快照）
-- 主链：`asgi → app_factory → router_registry → chat_routes → chat_immune_gate → chat_handler → thalamus → governor → cortex_orchestrator → agent_runtime_shared → executive_router/runtime/core → chat_agent → surface_main_chain_adapter → persona/surface_* → reply_envelope → chat_agent_postprocessor`
+- 主链：`asgi → app_factory → router_registry → chat_routes → chat_immune_gate → chat_handler → thalamus → governor → cortex_orchestrator → agent_runtime_shared → executive_router/runtime/core → surface_reply_runtime → surface_main_chain_adapter → persona/surface_* → reply_envelope → surface_reply_postprocessor`
 - SurfaceMainChain（`host_brain/persona/surface_main_chain.py`）是 normal chat 文本的**唯一作者**，旧 prompt_builder 链路已降级为辅助 facts/state 提供者
 - Immune gate 在 HTTP 层做 fastpath/BLOCK 拦截，再进入主编排
 

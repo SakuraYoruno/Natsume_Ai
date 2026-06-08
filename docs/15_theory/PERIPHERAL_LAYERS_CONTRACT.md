@@ -1,8 +1,8 @@
 受众：MASTER
 标题：host_brain 外围层接口契约（airlock / bond / channels / vision / lsp / mcp）
 
-版本：v2.1
-日期：2026-06-05
+版本：v2.2
+日期：2026-06-08
 归属：docs/15_theory/
 
 ---
@@ -516,8 +516,8 @@ Airlock → app/chat_handler.py
 Bond → integrations/graph_contract.py
   BondDynamicsWriter.apply_update() 由 graph 节点调用，evidence_ref 来自 EvidencePlane
 
-Channels/VTS/Gateway → app/chat_agent.py + app/input_routes.py + channels/edge_rpc_client.py
-  ChatAgent 决定文字/语音输出策略；Gateway/ASR 回流由 input_routes 注入 `reply_channel / reply_target`；真正的外部平台回复与 VTS/TTS 推送通过 `edge_rpc_client.py` 发往 Edge / Gateway。
+Channels/VTS/Gateway → app/surface_reply_runtime.py + app/input_routes.py + channels/edge_rpc_client.py
+  SurfaceReplyRuntime 决定文字/语音输出策略；Gateway/ASR 回流由 input_routes 注入 `reply_channel / reply_target`；真正的外部平台回复与 VTS/TTS 推送通过 `edge_rpc_client.py` 发往 Edge / Gateway。
 
 Vision → app/chat_handler_vision.py
   摄像头帧数据经 MultiDetectorAggregator 处理后注入 GraphState
