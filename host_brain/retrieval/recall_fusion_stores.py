@@ -9,8 +9,7 @@
   - Route 6: artifact_vault（制品库 SSOT 接口）
 
 Phase XIII 已废弃的路由（已彻底删除，不再保留向后兼容代码）：
-  - style_canon → StyleCanon v5 常驻注入，不走路由
-  - persona_utterance → 已从当前主链移除；表层质感只保留场景样本和少量原台词 quote 参考
+  - persona_utterance → 已从当前主链移除；表层质感只保留 Soul.md 和少量原台词 quote 参考
 """
 
 from __future__ import annotations

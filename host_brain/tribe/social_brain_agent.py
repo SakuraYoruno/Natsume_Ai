@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Any, Mapping
@@ -767,73 +767,6 @@ class SocialBrainAgent:
         except Exception:
             pass
 
-    # ── T-140：canon_style_store 族化入口 ────────────────────────────────────
-
-    def resolve_style_canon(
-        self,
-        *,
-        canon_id: str = "natsume_ai_cn",
-        style_root: str | None = None,
-    ) -> dict[str, Any]:
-        """T-140：获取风格 Canon 条目，将 StyleCanonStore 族化到 SocialBrainAgent。
-
-        SocialBrainAgent 作为风格 Canon 的唯一访问入口，确保风格数据
-        不在上下文装配等模块中直接调用 StyleCanonStore。
-
-        Args:
-            canon_id: Canon ID，默认 "natsume_ai_cn"。
-            style_root: 风格文件根目录（可选，None 使用默认路径）。
-
-        Returns:
-            StyleCanonEntry.to_dict() 或空字典（降级）。
-        """
-        try:
-            from host_brain.memory.canon_style_store import StyleCanonStore  # noqa: PLC0415
-
-            kwargs: dict[str, Any] = {}
-            if style_root is not None:
-                kwargs["style_root"] = style_root
-            store = StyleCanonStore(**kwargs)
-            entry = store.get(str(canon_id or "natsume_ai_cn").strip() or "natsume_ai_cn")
-            if entry is None:
-                return {"status": "NOT_FOUND", "canon_id": str(canon_id or "")}
-            result = entry.to_dict() if hasattr(entry, "to_dict") else {}
-            result["status"] = "OK"
-            self._touch_state(
-                key="last_style_canon",
-                value={
-                    "canon_id": str(canon_id or ""),
-                    "version": result.get("version"),
-                    "hash": str(result.get("hash") or "")[:16],
-                    "tone_only": result.get("tone_only"),
-                },
-            )
-            import logging  # noqa: PLC0415
-            logging.getLogger("Natsume.tribe.social_brain_agent").debug(
-                "SocialBrainAgent.resolve_style_canon: canon_id=%s version=%s",
-                canon_id, result.get("version"),
-            )
-            return result
-        except Exception as exc:
-            import logging  # noqa: PLC0415
-            logging.getLogger("Natsume.tribe.social_brain_agent").warning(
-                "SocialBrainAgent.resolve_style_canon 失败（降级）: %s", exc
-            )
-            return {"status": "ERROR", "canon_id": str(canon_id or ""), "error": str(exc)}
-
-    def resolve_style_canon_content(
-        self,
-        *,
-        canon_id: str = "natsume_ai_cn",
-    ) -> str:
-        """T-140：获取风格 Canon 的纯文本内容（供 prompt 注入使用）。
-
-        Returns:
-            Canon 内容字符串，或空字符串（降级）。
-        """
-        result = self.resolve_style_canon(canon_id=canon_id)
-        return str(result.get("content") or "").strip()
-
     def resolve_style_distillation(
         self,
         *,
@@ -845,8 +778,7 @@ class SocialBrainAgent:
         """Legacy StyleDistiller compatibility shim.
 
         Current surface style anchoring is sample-guided and uses the style
-        reference bank directly. The old StyleDistiller/StyleCanon v5 path is
-        retired so it cannot reintroduce template-like style instructions.
+        reference bank directly. The old style distiller path is`r`n        retired so it cannot reintroduce template-like style instructions.
         """
         resolved_lang = str(lang or "cn").strip().lower() or "cn"
         return {
@@ -1181,3 +1113,4 @@ from host_brain.tribe.default_mode_agent import get_default_mode_agent  # noqa: 
 from host_brain.tribe.events import emit_tribe_event  # noqa: E402, F401
 from host_brain.tribe.interoception_agent import get_interoception_agent  # noqa: E402, F401
 from host_brain.app.dependencies import get_milestone_tracker  # noqa: E402, F401
+

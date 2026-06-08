@@ -1720,15 +1720,16 @@ class AsrService:
             peak < self._config.precheck_min_peak
             and rms < self._config.precheck_min_rms
         )
+        if fixed_silent:
+            if self._config.adaptive_vad_enabled and allow_noise_update:
+                self._update_adaptive_vad_noise_floor(peak=peak, rms=rms)
+            return True
         if not self._config.adaptive_vad_enabled:
             return fixed_silent
 
         bootstrap_chunks = max(1, int(self._config.adaptive_vad_bootstrap_chunks))
-        if allow_noise_update and (
-            fixed_silent
-            or self._adaptive_vad_noise_samples < bootstrap_chunks
-        ):
-            self._update_adaptive_vad_noise_floor(peak=peak, rms=rms)
+        if self._adaptive_vad_noise_samples < bootstrap_chunks:
+            return False
 
         thresholds = self._adaptive_vad_thresholds()
         active = (

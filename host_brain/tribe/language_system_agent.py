@@ -290,7 +290,7 @@ class LanguageSystemAgent:
         # broca_generate_plan 产出后，将 tone/warmth_weight 映射为 TTS 参数，
         # 通过 MotorCortexAgent.dispatch_speak() 统一发声（不阻塞主流程）
         try:
-            from host_brain.app.chat_agent_postprocessor import broca_to_tts_params  # noqa: PLC0415
+            from host_brain.app.surface_reply_postprocessor import broca_to_tts_params  # noqa: PLC0415
             import asyncio as _asyncio  # noqa: PLC0415
 
             _tts_params = broca_to_tts_params(

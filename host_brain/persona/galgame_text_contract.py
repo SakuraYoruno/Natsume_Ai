@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Any, Mapping
@@ -188,8 +188,8 @@ def build_galgame_text_contract(
             target_min_chars=8,
             notes=("只接早安，不推断作息。",),
         )
-    if scene in {"daily_greeting_en", "daily_greeting_cn"} or lowered in {"hello", "hi", "hey"} or text == "你好":
-        greeting_scene = "daily_greeting_en" if scene == "daily_greeting_en" or lowered in {"hello", "hi", "hey"} else "daily_greeting_cn"
+    if scene in {"casual_hello_en", "casual_hello_cn"} or lowered in {"hello", "hi", "hey"} or text == "你好":
+        greeting_scene = "casual_hello_en" if scene == "casual_hello_en" or lowered in {"hello", "hi", "hey"} else "casual_hello_cn"
         return _contract(
             scene_id=greeting_scene,
             response_move="warm_greeting",
@@ -202,9 +202,9 @@ def build_galgame_text_contract(
             max_questions=0,
             notes=("短招呼只做熟人化回应；招呼方式本身可作为轻微语气，不做硬禁。",),
         )
-    if scene == "presence" or text in {"在吗", "在不在", "喂"}:
+    if scene == "availability_check" or text in {"在吗", "在不在", "喂"}:
         return _contract(
-            scene_id="presence",
+            scene_id="availability_check",
             response_move="confirm_presence",
             required_any=(("在",),),
             forbidden_surface=(
@@ -263,7 +263,7 @@ def build_galgame_text_contract(
                 "烦你一下怎么了",
                 "没少烦过我",
                 "赶不走我",
-                "尼尼才烦",
+                "对方才烦",
                 "算什么",
                 "还没开始烦",
                 "心情正好",
@@ -781,7 +781,7 @@ def build_galgame_text_contract(
         return _contract(
             scene_id="identity",
             response_move="name_first",
-            required_any=(("SORA", "天 / SORA", "我是天"),),
+            required_any=(),
             forbidden_surface=(
                 "你真正想问",
                 "老问这个",
@@ -804,12 +804,12 @@ def build_galgame_text_contract(
                 "故意的吧",
                 "我在呢",
                 "这个号",
-                "尼尼也行",
-                "叫我尼尼",
-                "叫尼尼",
+                "对方也行",
+                "叫我对方",
+                "叫对方",
             ),
             max_questions=1,
-            notes=("名字先落地，候选必须直接说天 / SORA；可以轻吐槽，但不要只说我在呢或你故意的吧。",),
+            notes=("名字先落地，候选必须直接说 Soul.md 里的当前名字；可以轻吐槽，但不要只说我在呢或你故意的吧。",),
         )
     if scene in {"style_repair", "ack_style_issue"} or any(token in text for token in ("客服", "人机", "不像人话", "不自然")):
         return _contract(
@@ -893,7 +893,7 @@ def build_galgame_text_contract(
                 "烦你一下怎么了",
                 "没少烦过我",
                 "赶不走我",
-                "尼尼才烦",
+                "对方才烦",
                 "算什么",
                 "还没开始烦",
                 "心情正好",
@@ -968,7 +968,7 @@ def build_galgame_text_contract(
                 "什么时候才会来找我",
                 "这不，你就来了",
                 "我刚才可是在",
-                "等尼尼开口",
+                "等对方开口",
                 "正忙着",
                 "计划周末",
                 "周末",
@@ -1191,7 +1191,7 @@ def build_galgame_text_contract(
                 "帮忙吧",
                 "该不会",
                 "怪让人不好意思",
-                "既然尼尼",
+                "既然对方",
                 "勉为其难",
                 "接受一下",
                 "这么说了",
@@ -1388,7 +1388,7 @@ def build_galgame_text_contract(
                 "刚好叫",
                 "不然你以为",
                 "谁会管你",
-                "叫你一声尼尼",
+                "叫你一声对方",
                 "给你面子",
                 "好不好",
                 "住在",

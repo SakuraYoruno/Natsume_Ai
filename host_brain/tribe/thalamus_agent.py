@@ -304,7 +304,7 @@ _HUB_SKILL_LIST_MARKERS = (
     "available skills",
 )
 _STEP_LEAD_IN_RE = re.compile(
-    r"^\s*(?:请|请你|帮我|麻烦|蓝蓝|夏目蓝|natsume(?: blue)?|先|首先|first)\s*",
+    r"^\s*(?:请|请你|帮我|麻烦|旧角色|旧角色|natsume(?: blue)?|先|首先|first)\s*",
     re.IGNORECASE,
 )
 _HUB_SEARCH_PATTERNS = (
@@ -385,6 +385,40 @@ _TASK_CONTEXTUAL_CHAT_FOLLOWUP_RE = re.compile(
     r"|(?:上一轮|上轮).{0,32}场子"
     r"|稳定地在旁边"
     r"|今天先收工",
+    re.IGNORECASE,
+)
+_RECOMMENDATION_FOLLOWUP_QUERY_RE = re.compile(
+    r"("
+    r"(?:第\s*(?:[一二三四五六七八九十]|\d{1,2})\s*(?:本|个|项|部|步)?|这本|这部|那本|哪本|刚才推荐|刚刚推荐|上面那本|小说|轻小说|书)"
+    r".{0,24}(?:好看|怎么样|如何|值得|推荐|能看|先看|要看|适合|对味)"
+    r"|(?=.*(?:本|部|书|小说|轻小说|刚才推荐|刚刚推荐))(?:好看|不错|可以|有意思|值得|推荐|能看).{0,8}(?:吗|嘛|么|不|呢|\?|？)"
+    r"|(?:先看哪本|哪本更|哪本好|哪本值得|哪本适合)"
+    r")",
+    re.IGNORECASE,
+)
+_USER_PREFERENCE_QUERY_RE = re.compile(
+    r"("
+    r"(?:你知道|知道)?我(?:到底|现在)?(?:喜欢|偏好|爱看|爱玩|爱听).{0,24}(?:什么|哪种|哪类|哪一类|啥|吗|嘛|么)"
+    r"|我的.{0,12}(?:偏好|口味|喜好).{0,16}(?:是什么|什么|哪种|哪类|吗|嘛|么)"
+    r"|我(?:喜欢|偏好|爱看|爱玩|爱听)的是.{0,16}(?:什么|哪种|哪类|吗|嘛|么)"
+    r")",
+    re.IGNORECASE,
+)
+_PREFERENCE_FEEDBACK_SIGNAL_RE = re.compile(
+    r"("
+    r"(?:我|个人)?(?:很|挺|还|比较|超)?(?:喜欢|不喜欢|讨厌|爱看|不爱看|想看|不想看|接受不了)"
+    r"|(?:第\s*(?:[一二三四五六七八九十]|\d{1,2})\s*(?:本|个|项|部|步)?|这本|这部|那本)"
+    r".{0,12}(?:喜欢|不喜欢|不错|不行|可以|对味|没意思|别推)"
+    r"|别(?:再)?推.{0,12}(?:这种|这个|这类)"
+    r")",
+    re.IGNORECASE,
+)
+_CONVERSATION_REPAIR_RE = re.compile(
+    r"(没接上|接不上|承接不上|上下文断了|跑偏|误解|理解错|不是这个|不是这个意思|我说的是|我问的是|牛头不对马嘴|还是不对|还不对|又错了|还是错|不对吧|不太对)",
+    re.IGNORECASE,
+)
+_QUALITY_META_FEEDBACK_RE = re.compile(
+    r"(不像人话|不像人类|人类的思考|思考方式|不够聪明|不聪明|太笨|助手味|机械|呆|僵硬|模板|硬规则|废话|空话|尬|看不懂|没意义|负优化|质量|文本质量|意图识别)",
     re.IGNORECASE,
 )
 _TASK_CONTEXTUAL_CHAT_BLOCKER_RE = re.compile(
@@ -933,6 +967,382 @@ def _build_contextual_chat_followup_seed(text: str, *, route_source: str) -> dic
             "text": normalized,
         },
     }
+
+
+def _semantic_domain_from_text(text: str, *, default: str = "general") -> str:
+    normalized = _normalize_text(text)
+    if re.search(r"(轻小说|小说|书|第\s*(?:[一二三四五六七八九十]|\d{1,2})\s*(?:本|部|步)|推荐)", normalized, re.IGNORECASE):
+        return "lightnovel_recommendation"
+    if re.search(r"(意图识别|主链|路由|对话|回复|文本质量|上下文|承接)", normalized, re.IGNORECASE):
+        return "conversation_runtime"
+    if re.search(r"(代码|仓库|项目|host|edge|gateway|服务|后台|codex)", normalized, re.IGNORECASE):
+        return "workspace_runtime"
+    return default
+
+
+def _build_pragmatic_frame(
+    *,
+    text: str,
+    semantic_intent: Mapping[str, Any] | None,
+    route: str,
+    target_id: str,
+    route_reason: str,
+) -> dict[str, Any]:
+    normalized = _normalize_text(text)
+    semantic = _coerce_semantic_intent(semantic_intent)
+    semantic_type = _normalize_text(semantic.get("type"))
+    domain = _normalize_text(semantic.get("domain")) or _semantic_domain_from_text(normalized)
+    frame: dict[str, Any] = {
+        "user_move": "open_chat",
+        "implied_need": "natural_response",
+        "conversation_anchor": _normalize_text(semantic.get("context_binding")) or "none",
+        "likely_emotion": "neutral",
+        "expected_response": "respond_to_the_user_message_directly",
+        "answer_focus": "current_user_utterance",
+        "do_not": [],
+        "repair_mode": False,
+        "confidence": _normalize_confidence(semantic.get("confidence")) or 0.62,
+    }
+
+    if semantic_type == "recommendation_followup_query":
+        frame.update(
+            {
+                "user_move": "specific_followup_question",
+                "implied_need": "wants_a_direct_judgement_about_the_referenced_recommendation",
+                "conversation_anchor": "recent_recommendation",
+                "likely_emotion": "curious_but_expects_continuity",
+                "expected_response": "name_or_anchor_the_referenced_item_then_answer_whether_it_is_worth_reading",
+                "answer_focus": "referenced_recommendation_item",
+                "do_not": ["do_not_answer_as_generic_preference_query", "do_not_switch_medium", "do_not_ignore_rank_reference"],
+                "confidence": 0.97,
+            }
+        )
+    elif semantic_type == "user_preference_query":
+        frame.update(
+            {
+                "user_move": "self_knowledge_question",
+                "implied_need": "wants_natsume_to_show_memory_based_understanding_of_the_user",
+                "conversation_anchor": "user_preference_profile",
+                "likely_emotion": "checking_if_she_remembers",
+                "expected_response": "answer_from_evidence_with_uncertainty_not_generic_disclaimer",
+                "answer_focus": "known_preferences_and_evidence",
+                "do_not": ["do_not_say_no_records_if_recent_evidence_exists", "do_not_use_mechanical_disclaimer"],
+                "confidence": 0.96,
+            }
+        )
+    elif semantic_type == "preference_feedback_signal":
+        frame.update(
+            {
+                "user_move": "preference_feedback",
+                "implied_need": "expects_the_feedback_to_be_understood_and_used_later",
+                "conversation_anchor": "recent_recommendation_or_profile",
+                "likely_emotion": "evaluative",
+                "expected_response": "acknowledge_the_specific_preference_signal_without_overclaiming",
+                "answer_focus": "new_feedback_signal",
+                "do_not": ["do_not_turn_feedback_into_a_question", "do_not_overgeneralize_single_feedback"],
+                "confidence": 0.93,
+            }
+        )
+    elif semantic_type == "conversation_repair":
+        frame.update(
+            {
+                "user_move": "repair_or_correction",
+                "implied_need": "wants_the_assistant_to_notice_the_mismatch_and_rebind_context",
+                "conversation_anchor": "recent_conversation",
+                "likely_emotion": "frustrated_or_dissatisfied",
+                "expected_response": "briefly_admit_the_mismatch_then_correct_the_understanding_concretely",
+                "answer_focus": "where_context_was_lost_and_how_to_continue",
+                "do_not": ["do_not_treat_as_casual_chat", "do_not_reply_with_empty_apology", "do_not_hide_behind_process_words"],
+                "repair_mode": True,
+                "confidence": 0.94,
+            }
+        )
+    elif semantic_type == "meta_quality_feedback":
+        frame.update(
+            {
+                "user_move": "quality_critique",
+                "implied_need": "wants_a_diagnosis_and_a_smarter_next_fix_not_a_label",
+                "conversation_anchor": "recent_conversation",
+                "likely_emotion": "dissatisfied_but_still_collaborating",
+                "expected_response": "explain_the_thinking_gap_and_propose_or_apply_a_concrete_improvement",
+                "answer_focus": "why_the_system_feels_unhuman_and_what_changes",
+                "do_not": ["do_not_defend_the_system", "do_not_only_add_categories", "do_not_sound_like_a_support_ticket"],
+                "repair_mode": True,
+                "confidence": 0.92,
+            }
+        )
+    elif semantic_type == "tool_or_work_request" or _normalize_text(route, lower=True) == "skill":
+        frame.update(
+            {
+                "user_move": "action_request",
+                "implied_need": "wants_work_to_start_or_continue",
+                "conversation_anchor": "work_backend",
+                "likely_emotion": "directive",
+                "expected_response": "frontstage_acknowledges_and_tracks_backend_work_without_becoming_a_tool_persona",
+                "answer_focus": "work_handoff_and_progress",
+                "do_not": ["do_not_claim_frontstage_personally_operates_terminal", "do_not_reply_as_cold_task_bot"],
+                "confidence": 0.86,
+            }
+        )
+    elif semantic_type == "continue_active_context":
+        frame.update(
+            {
+                "user_move": "continue_or_next_step",
+                "implied_need": "wants_the_current_active_task_or_topic_to_continue",
+                "conversation_anchor": "active_task_or_topic",
+                "likely_emotion": "directive_or_waiting",
+                "expected_response": "continue_the_active_task_or_topic_without_resetting_context",
+                "answer_focus": "next_step_of_current_context",
+                "do_not": ["do_not_treat_as_presence_ping", "do_not_restart_topic", "do_not_ask_open_ended_what_to_do"],
+                "confidence": 0.84,
+            }
+        )
+    elif semantic_type == "phatic_or_presence_check":
+        frame.update(
+            {
+                "user_move": "presence_ping",
+                "implied_need": "wants_light_contact_or_reassurance",
+                "conversation_anchor": "relationship_presence",
+                "likely_emotion": "checking_presence",
+                "expected_response": "short_warm_present_reply",
+                "answer_focus": "presence",
+                "do_not": ["do_not_overexplain_system_status"],
+                "confidence": 0.88,
+            }
+        )
+
+    frame["domain"] = domain
+    if target_id:
+        frame["target_id"] = _normalize_text(target_id)
+    if route_reason:
+        frame["route_reason"] = _normalize_text(route_reason)
+    return frame
+
+
+def _build_semantic_chat_seed(
+    text: str,
+    *,
+    route_source: str,
+    reason_code: str,
+    semantic_type: str,
+    dialogue_act: str,
+    context_binding: str,
+    answer_strategy: str,
+    confidence: float,
+    domain: str | None = None,
+) -> dict[str, Any]:
+    normalized = _normalize_text(text)
+    semantic_intent = {
+        "type": semantic_type,
+        "dialogue_act": dialogue_act,
+        "domain": domain or _semantic_domain_from_text(normalized),
+        "requires_context": bool(context_binding and context_binding != "none"),
+        "context_binding": context_binding,
+        "answer_strategy": answer_strategy,
+        "confidence": round(float(confidence), 4),
+    }
+    pragmatic_frame = _build_pragmatic_frame(
+        text=normalized,
+        semantic_intent=semantic_intent,
+        route="chat",
+        target_id="",
+        route_reason=reason_code,
+    )
+    return {
+        "route": "chat",
+        "target_id": "",
+        "task": normalized,
+        "reason_code": reason_code,
+        "confidence": confidence,
+        "route_source": route_source,
+        "semantic_intent": semantic_intent,
+        "pragmatic_frame": pragmatic_frame,
+        "args": {
+            "text": normalized,
+            "semantic_intent": semantic_intent,
+            "pragmatic_frame": pragmatic_frame,
+        },
+    }
+
+
+def _build_structured_chat_semantic_seed(text: str, *, route_source: str) -> dict[str, Any] | None:
+    normalized = _normalize_text(text)
+    if not normalized:
+        return None
+    if _RECOMMENDATION_FOLLOWUP_QUERY_RE.search(normalized):
+        return _build_semantic_chat_seed(
+            normalized,
+            route_source=route_source,
+            reason_code="THALAMUS_RULE_RECOMMENDATION_FOLLOWUP_QUERY",
+            semantic_type="recommendation_followup_query",
+            dialogue_act="ask_opinion_about_recent_recommendation",
+            context_binding="recent_recommendation",
+            answer_strategy="bind_recent_recommendation_item_then_answer",
+            confidence=0.97,
+            domain="lightnovel_recommendation",
+        )
+    if _USER_PREFERENCE_QUERY_RE.search(normalized):
+        return _build_semantic_chat_seed(
+            normalized,
+            route_source=route_source,
+            reason_code="THALAMUS_RULE_USER_PREFERENCE_QUERY",
+            semantic_type="user_preference_query",
+            dialogue_act="ask_user_preference_profile",
+            context_binding="user_preference_profile",
+            answer_strategy="use_preference_profile_evidence_pack",
+            confidence=0.96,
+            domain=_semantic_domain_from_text(normalized, default="user_preference"),
+        )
+    preference_feedback_match = _PREFERENCE_FEEDBACK_SIGNAL_RE.search(normalized)
+    preference_feedback_has_anchor = bool(
+        re.search(
+            r"(第\s*(?:[一二三四五六七八九十]|\d{1,2})\s*(?:本|个|项|部|步)?|这本|这部|那本|刚才推荐|刚刚推荐|推荐|小说|轻小说)",
+            normalized,
+            re.IGNORECASE,
+        )
+    )
+    if preference_feedback_match and (len(normalized) <= 80 or preference_feedback_has_anchor):
+        return _build_semantic_chat_seed(
+            normalized,
+            route_source=route_source,
+            reason_code="THALAMUS_RULE_PREFERENCE_FEEDBACK_SIGNAL",
+            semantic_type="preference_feedback_signal",
+            dialogue_act="express_preference_or_recommendation_feedback",
+            context_binding="recent_recommendation_or_profile",
+            answer_strategy="acknowledge_feedback_and_let_preference_store_extract",
+            confidence=0.93,
+            domain=_semantic_domain_from_text(normalized, default="user_preference"),
+        )
+    if _CONVERSATION_REPAIR_RE.search(normalized):
+        return _build_semantic_chat_seed(
+            normalized,
+            route_source=route_source,
+            reason_code="THALAMUS_RULE_CONVERSATION_REPAIR",
+            semantic_type="conversation_repair",
+            dialogue_act="correct_or_repair_previous_understanding",
+            context_binding="recent_conversation",
+            answer_strategy="admit_mismatch_and_rebind_to_user_target",
+            confidence=0.94,
+            domain=_semantic_domain_from_text(normalized),
+        )
+    if _QUALITY_META_FEEDBACK_RE.search(normalized):
+        return _build_semantic_chat_seed(
+            normalized,
+            route_source=route_source,
+            reason_code="THALAMUS_RULE_META_QUALITY_FEEDBACK",
+            semantic_type="meta_quality_feedback",
+            dialogue_act="critique_system_or_reply_quality",
+            context_binding="recent_conversation",
+            answer_strategy="diagnose_quality_issue_without_generic_assistant_tone",
+            confidence=0.92,
+            domain=_semantic_domain_from_text(normalized),
+        )
+    return None
+
+
+def _coerce_semantic_intent(value: Any) -> dict[str, Any]:
+    if not isinstance(value, Mapping):
+        return {}
+    semantic_type = _normalize_text(value.get("type"))
+    dialogue_act = _normalize_text(value.get("dialogue_act"))
+    if not semantic_type and not dialogue_act:
+        return {}
+    semantic = {
+        "type": semantic_type or dialogue_act,
+        "dialogue_act": dialogue_act or semantic_type,
+        "domain": _normalize_text(value.get("domain")) or "general",
+        "requires_context": bool(value.get("requires_context")),
+        "context_binding": _normalize_text(value.get("context_binding")) or "none",
+        "answer_strategy": _normalize_text(value.get("answer_strategy")) or "model_generate_natural_reply",
+        "confidence": _normalize_confidence(value.get("confidence")) or 0.7,
+    }
+    semantic["requires_context"] = bool(semantic["requires_context"] or semantic["context_binding"] != "none")
+    return semantic
+
+
+def _coerce_pragmatic_frame(value: Any) -> dict[str, Any]:
+    if not isinstance(value, Mapping):
+        return {}
+    user_move = _normalize_text(value.get("user_move"))
+    implied_need = _normalize_text(value.get("implied_need"))
+    expected_response = _normalize_text(value.get("expected_response"))
+    if not user_move and not implied_need and not expected_response:
+        return {}
+    do_not = [
+        _normalize_text(item)
+        for item in list(value.get("do_not") or [])
+        if _normalize_text(item)
+    ]
+    return {
+        "user_move": user_move or "open_chat",
+        "implied_need": implied_need or "natural_response",
+        "conversation_anchor": _normalize_text(value.get("conversation_anchor")) or "none",
+        "likely_emotion": _normalize_text(value.get("likely_emotion")) or "neutral",
+        "expected_response": expected_response or "respond_to_the_user_message_directly",
+        "answer_focus": _normalize_text(value.get("answer_focus")) or "current_user_utterance",
+        "domain": _normalize_text(value.get("domain")) or "general",
+        "do_not": do_not,
+        "repair_mode": bool(value.get("repair_mode")),
+        "confidence": _normalize_confidence(value.get("confidence")) or 0.62,
+    }
+
+
+def _infer_semantic_intent_from_text(
+    *,
+    text: str,
+    route: str,
+    target_id: str,
+    route_reason: str,
+) -> dict[str, Any]:
+    structured_seed = _build_structured_chat_semantic_seed(text, route_source="thalamus.semantic")
+    if structured_seed is not None:
+        return _coerce_semantic_intent(structured_seed.get("semantic_intent"))
+    normalized_route = _normalize_text(route, lower=True)
+    normalized_target = _normalize_text(target_id, lower=True)
+    normalized_reason = _normalize_text(route_reason)
+    if normalized_route == "skill":
+        domain = _semantic_domain_from_text(text, default="workspace_runtime")
+        return {
+            "type": "tool_or_work_request",
+            "dialogue_act": "request_action",
+            "domain": domain,
+            "requires_context": False,
+            "context_binding": "none",
+            "answer_strategy": "handoff_to_skill_or_codex_backend",
+            "confidence": 0.86,
+            "target_id": normalized_target,
+        }
+    if normalized_reason.startswith("THALAMUS_RULE_PHATIC") or normalized_reason == "THALAMUS_RULE_CONNECTIVITY_CHECK":
+        if normalized_reason == "THALAMUS_RULE_PHATIC_CONTINUATION":
+            return {
+                "type": "continue_active_context",
+                "dialogue_act": "continue_or_ask_next_step",
+                "domain": _semantic_domain_from_text(text),
+                "requires_context": True,
+                "context_binding": "active_task_or_topic",
+                "answer_strategy": "continue_current_task_or_topic",
+                "confidence": 0.84,
+            }
+        return {
+            "type": "phatic_or_presence_check",
+            "dialogue_act": "light_social_contact",
+            "domain": "companion_chat",
+            "requires_context": False,
+            "context_binding": "none",
+            "answer_strategy": "short_warm_reply",
+            "confidence": 0.88,
+        }
+    if normalized_route == "chat":
+        return {
+            "type": "open_chat",
+            "dialogue_act": "chat",
+            "domain": _semantic_domain_from_text(text),
+            "requires_context": False,
+            "context_binding": "none",
+            "answer_strategy": "model_generate_natural_reply",
+            "confidence": 0.62,
+        }
+    return {}
 
 
 def _strip_step_lead_in(text: str) -> str:
@@ -1688,6 +2098,14 @@ def _build_direct_route_seed(text: str) -> dict[str, Any] | None:
     if _looks_like_contextual_chat_followup(cleaned):
         return _build_contextual_chat_followup_seed(cleaned, route_source="thalamus.rule")
 
+    workspace_seed = _build_codex_workspace_route_seed(cleaned)
+    if workspace_seed is not None:
+        return workspace_seed
+
+    semantic_chat_seed = _build_structured_chat_semantic_seed(cleaned, route_source="thalamus.rule")
+    if semantic_chat_seed is not None:
+        return semantic_chat_seed
+
     if _looks_like_conversational_opinion_chat(cleaned):
         return _build_conversational_opinion_chat_seed(cleaned, route_source="thalamus.rule")
 
@@ -1741,10 +2159,6 @@ def _build_direct_route_seed(text: str) -> dict[str, Any] | None:
             "confidence": 0.86,
             "route_source": "rule",
         }
-
-    workspace_seed = _build_codex_workspace_route_seed(cleaned)
-    if workspace_seed is not None:
-        return workspace_seed
 
     step_segments = _split_explicit_step_segments(cleaned)
     if len(step_segments) > 1:
@@ -1866,6 +2280,9 @@ def classify_task_intent_by_rules(text: str) -> dict[str, Any] | None:
             "route_source": "rule",
         }
 
+    if _looks_like_contextual_chat_followup(normalized):
+        return _build_contextual_chat_followup_seed(normalized, route_source="rule")
+
     if _TASK_MEMORY_RE.search(normalized):
         return {
             "route": "skill",
@@ -1912,6 +2329,10 @@ def classify_task_intent_by_rules(text: str) -> dict[str, Any] | None:
             "confidence": 0.98,
             "route_source": "rule",
         }
+
+    semantic_chat_seed = _build_structured_chat_semantic_seed(normalized, route_source="rule")
+    if semantic_chat_seed is not None:
+        return semantic_chat_seed
 
     if _looks_like_contextual_chat_followup(normalized):
         return _build_contextual_chat_followup_seed(normalized, route_source="rule")
@@ -2159,6 +2580,39 @@ def classify_task_intent_fastpath(text: str) -> dict[str, Any] | None:
     if _looks_like_simple_technical_advice(normalized):
         return _build_simple_technical_chat_seed(normalized, route_source="rule.fastpath")
 
+    if _TASK_RECENT_TURN_STRICT_RE.search(normalized):
+        return {
+            "route": "recent_turn",
+            "target_id": "",
+            "task": normalized,
+            "reason_code": "RULE_RECENT_TURN",
+            "confidence": 0.97,
+            "route_source": "rule.fastpath",
+        }
+
+    if _looks_like_contextual_chat_followup(normalized):
+        return _build_contextual_chat_followup_seed(normalized, route_source="rule.fastpath")
+
+    memory_steward_seed = _build_memory_steward_route_seed(normalized)
+    if memory_steward_seed is not None:
+        return memory_steward_seed
+
+    codex_production_seed = _build_codex_production_route_seed(normalized)
+    if codex_production_seed is not None:
+        return codex_production_seed
+
+    frontend_audit_seed = _build_frontend_audit_route_seed(normalized)
+    if frontend_audit_seed is not None:
+        return frontend_audit_seed
+
+    workspace_seed = _build_codex_workspace_route_seed(normalized)
+    if workspace_seed is not None:
+        return workspace_seed
+
+    semantic_chat_seed = _build_structured_chat_semantic_seed(normalized, route_source="rule.fastpath")
+    if semantic_chat_seed is not None:
+        return semantic_chat_seed
+
     compact = re.sub(r"\s+", "", normalized).lower()
     if _TASK_CHAT_CONTINUATION_RE.match(normalized):
         return {
@@ -2207,8 +2661,9 @@ def classify_task_intent_fastpath(text: str) -> dict[str, Any] | None:
             "route_source": "rule.fastpath",
         }
 
-    if _looks_like_contextual_chat_followup(normalized):
-        return _build_contextual_chat_followup_seed(normalized, route_source="rule.fastpath")
+    semantic_chat_seed = _build_structured_chat_semantic_seed(normalized, route_source="rule.fastpath")
+    if semantic_chat_seed is not None:
+        return semantic_chat_seed
     if _looks_like_conversational_opinion_chat(normalized):
         return _build_conversational_opinion_chat_seed(normalized, route_source="rule.fastpath")
     return None
@@ -2897,6 +3352,91 @@ class ThalamusAgent:
             text=task or user_message,
             args_payload=args_payload,
         )
+        semantic_intent = _coerce_semantic_intent(draft.get("semantic_intent")) or _coerce_semantic_intent(
+            args_payload.get("semantic_intent")
+        )
+        if not semantic_intent:
+            semantic_intent = _infer_semantic_intent_from_text(
+                text=task or user_message,
+                route=route,
+                target_id=target_id,
+                route_reason=route_reason,
+            )
+        if semantic_intent:
+            args_payload["semantic_intent"] = semantic_intent
+        pragmatic_frame = _coerce_pragmatic_frame(draft.get("pragmatic_frame")) or _coerce_pragmatic_frame(
+            args_payload.get("pragmatic_frame")
+        )
+        if not pragmatic_frame:
+            pragmatic_frame = _build_pragmatic_frame(
+                text=task or user_message,
+                semantic_intent=semantic_intent,
+                route=route,
+                target_id=target_id,
+                route_reason=route_reason,
+            )
+        if pragmatic_frame:
+            args_payload["pragmatic_frame"] = pragmatic_frame
+        conversation_understanding = {}
+        try:
+            from host_brain.app.context.conversation_belief_tracker import (  # noqa: PLC0415
+                build_conversation_understanding_pack,
+            )
+            from host_brain.app.context.conversation_experience_store import (  # noqa: PLC0415
+                get_conversation_experience_store,
+            )
+
+            experience_store = get_conversation_experience_store()
+            outcome_feedback = experience_store.record_outcome_feedback(
+                session_id=_normalize_text(session_id),
+                person_id=_normalize_text(person_id) or None,
+                raw_text=user_message,
+                request_id=request_id,
+            )
+            previous_belief = experience_store.get_belief(
+                session_id=_normalize_text(session_id),
+                person_id=_normalize_text(person_id) or None,
+            )
+            try:
+                from host_brain.app.user_preference_store import build_user_preference_pack  # noqa: PLC0415
+
+                preference_pack = build_user_preference_pack(
+                    person_id=_normalize_text(person_id) or None,
+                    query_text=task or user_message,
+                    session_id=_normalize_text(session_id) or None,
+                    conversation_id=_normalize_text(session_id) or None,
+                    ledger=experience_store.ledger,
+                )
+            except Exception:
+                preference_pack = {}
+            experience_lessons = experience_store.recall_lessons(
+                person_id=_normalize_text(person_id) or None,
+                domain=_normalize_text(semantic_intent.get("domain")) if semantic_intent else None,
+                query_text=task or user_message,
+                limit=5,
+            )
+            conversation_understanding = build_conversation_understanding_pack(
+                text=task or user_message,
+                semantic_intent=semantic_intent,
+                pragmatic_frame=pragmatic_frame,
+                recent_recommendation_context=dict(preference_pack or {}).get("recent_recommendation_context"),
+                previous_belief=previous_belief,
+                experience_lessons=experience_lessons,
+            )
+            if dict(outcome_feedback or {}).get("ok"):
+                conversation_understanding["outcome_feedback"] = dict(outcome_feedback)
+            experience_store.record_inference(
+                request_id=request_id,
+                session_id=session_id,
+                person_id=person_id,
+                user_text=user_message,
+                understanding=conversation_understanding,
+                belief_before=previous_belief,
+            )
+        except Exception:
+            conversation_understanding = {}
+        if conversation_understanding:
+            args_payload["conversation_understanding"] = conversation_understanding
         compiled = dict(draft)
         compiled.update(
             {
@@ -2923,6 +3463,12 @@ class ThalamusAgent:
                 "source": _normalize_text(draft.get("source")) or _normalize_text(source) or "thalamus_agent",
             }
         )
+        if semantic_intent:
+            compiled["semantic_intent"] = semantic_intent
+        if pragmatic_frame:
+            compiled["pragmatic_frame"] = pragmatic_frame
+        if conversation_understanding:
+            compiled["conversation_understanding"] = conversation_understanding
 
         if input_source is not None:
             compiled["input_source"] = _normalize_text(draft.get("input_source")) or _normalize_text(input_source) or None
@@ -2975,6 +3521,13 @@ class ThalamusAgent:
             "family": "thalamus",
             "language_intent_type": _normalize_text(language_understanding.get("intent_type")) or None,
             "language_confidence": _normalize_confidence(language_understanding.get("confidence")),
+            "semantic_intent_type": _normalize_text(semantic_intent.get("type")) if semantic_intent else None,
+            "semantic_domain": _normalize_text(semantic_intent.get("domain")) if semantic_intent else None,
+            "semantic_context_binding": _normalize_text(semantic_intent.get("context_binding")) if semantic_intent else None,
+            "pragmatic_user_move": _normalize_text(pragmatic_frame.get("user_move")) if pragmatic_frame else None,
+            "pragmatic_expected_response": _normalize_text(pragmatic_frame.get("expected_response")) if pragmatic_frame else None,
+            "understanding_selected_intent": _normalize_text(conversation_understanding.get("selected_intent")) if conversation_understanding else None,
+            "understanding_confidence": _normalize_confidence(conversation_understanding.get("confidence")) if conversation_understanding else None,
             "extension_keys": extension_keys,
             "route_seed_source": _normalize_text(route_seed.get("route_source")) or None,
             "ts_ms": int(now_ms()),
@@ -3040,3 +3593,4 @@ __all__ = [
     "resolve_scene_type_from_intent_decision",
     "set_thalamus_agent",
 ]
+

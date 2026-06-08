@@ -457,7 +457,7 @@ class PrefrontalAgent:
 
         这是 LLM 从"总控制器"降级为"语言生成器"的关键一步。
         PrefrontalAgent 基于器官族完整状态产出意图计划，
-        chat_agent 退化为纯粹的语言生成器，只负责把 task 转成流畅自然语言。
+        surface_reply 退化为纯粹的语言生成器，只负责把 task 转成流畅自然语言。
 
         Args:
             user_message: 用户消息原文
@@ -478,7 +478,7 @@ class PrefrontalAgent:
             dict: {
                 "action": "speak" | "skill" | "delegate" | "wait",
                 "target": str,          # skill/agent 名称，speak 时为空
-                "task": str,            # 任务描述，注入 chat_agent 作为语言化目标
+                "task": str,            # 任务描述，注入 surface_reply 作为语言化目标
                 "tone_hint": str,       # 语气提示（warm/direct/gentle/playful）
                 "urgency": float,       # 紧迫度 0~1
                 "source": str,          # "prefrontal_llm" | "prefrontal_rule"

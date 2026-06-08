@@ -7703,6 +7703,8 @@ def _looks_like_recommendation_followup_chat_noise(text: str) -> bool:
 
 def _semantic_is_user_preference(compact: str) -> bool:
     value = str(compact or "").replace("要不要", "")
+    if _semantic_preference_has_unresolved_pronoun(value):
+        return False
     if _semantic_looks_like_recommendation_report(value):
         return False
     user_value = value.split("assistant:", 1)[0] if "assistant:" in value else value
@@ -7780,6 +7782,15 @@ def _semantic_is_user_preference(compact: str) -> bool:
         "拟人化发送",
     )
     return any(token in value for token in preference_tokens) or _semantic_is_feature_toggle_preference(value)
+
+
+def _semantic_preference_has_unresolved_pronoun(compact: str) -> bool:
+    value = str(compact or "")
+    if not any(token in value for token in ("这本", "那本", "这部", "那部", "这个", "那个", "它")):
+        return False
+    if not any(token in value for token in ("喜欢", "不喜欢", "不错", "好看", "对味", "讨厌")):
+        return False
+    return not any(token in value for token in ("《", "》", "http", "标题", "书名", "作品", "第1", "第2", "第3", "第一", "第二", "第三"))
 
 
 def _semantic_is_feature_toggle_preference(compact: str) -> bool:

@@ -1391,7 +1391,7 @@ def _resolve_inner_world_llm_runtime(*, now_ms: int) -> dict[str, Any] | None:
     runtime: dict[str, Any] | None = None
     try:
         from host_brain.app.graph_config_builder import (  # noqa: PLC0415
-            resolve_chat_agent_llm_runtime,
+            resolve_surface_reply_llm_runtime,
             resolve_host_llm_runtime,
         )
 
@@ -1399,7 +1399,7 @@ def _resolve_inner_world_llm_runtime(*, now_ms: int) -> dict[str, Any] | None:
             rollout_key="inner_world_monologue_tick",
             scene_type="CHAT",
         )
-        runtime = resolve_chat_agent_llm_runtime(base_runtime=base_runtime)
+        runtime = resolve_surface_reply_llm_runtime(base_runtime=base_runtime)
         model_override = str(
             os.environ.get("HOST_INNER_WORLD_LLM_MODEL_ID")
             or os.environ.get("HOST_DISPATCH_AGENT_MODEL_ID")
@@ -2051,6 +2051,34 @@ def _append_inner_stream_event(
     state.last_spontaneous_note = note
     state.last_spontaneous_source = str(source or "fallback")
     state.spontaneous_event_count = int(state.spontaneous_event_count or 0) + 1
+    try:
+        from host_brain.app.dependencies import get_ledger  # noqa: PLC0415
+        from host_brain.runtime.life_continuity import record_life_experience  # noqa: PLC0415
+
+        metadata = _project_inner_stream_event_metadata(event)
+        record_life_experience(
+            ledger=get_ledger(),
+            person_id="default",
+            session_id="inner_world",
+            source_kind="inner_world",
+            event_kind="inner_stream_tick",
+            content_summary=note,
+            evidence={
+                **metadata,
+                "focus": str(event.get("focus") or ""),
+                "attention_target": str(event.get("focus") or ""),
+                "felt_tendency": str(event.get("next_tendency") or event.get("core_need") or ""),
+                "inhibition": 0.08 if str(event.get("next_tendency") or "") in {"hold_boundary", "stay_quiet", "care_with_restraint"} else 0.02,
+                "offline_hours": round(max(0.0, offline_hours), 3),
+                "absence_band": absence_band,
+            },
+            salience=float(event.get("salience") or event.get("salience_hint") or 0.24),
+            valence=float(event.get("valence") or 0.0) if isinstance(event.get("valence"), (int, float)) else 0.0,
+            uncertainty=0.08,
+            consume=True,
+        )
+    except Exception as exc:
+        _logger.debug("InnerWorld: life experience projection degraded: %s", exc)
 
 
 def _build_awakening_hint(

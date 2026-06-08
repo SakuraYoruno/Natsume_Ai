@@ -307,7 +307,6 @@ WECHAT_RATE_LIMIT_EXCEEDED = "WECHAT_RATE_LIMIT_EXCEEDED"            # 微信推
 # ── M31-B: 六库专属 reason_code（DevSpec 8.1 审计可追溯性） ──
 RETR_LEDGER_UNAVAILABLE = "RETR_LEDGER_UNAVAILABLE"                  # sqlite_ledger 不可用
 RETR_BOND_UNAVAILABLE = "RETR_BOND_UNAVAILABLE"                      # neo4j_bond 不可用
-RETR_STYLE_UNAVAILABLE = "RETR_STYLE_UNAVAILABLE"                    # style_canon 不可用
 RETR_WORLD_UNAVAILABLE = "RETR_WORLD_UNAVAILABLE"                    # world_canon 不可用
 RETR_VAULT_UNAVAILABLE = "RETR_VAULT_UNAVAILABLE"                    # artifact_vault 不可用
 RETR_PERSONA_UTTERANCE_UNAVAILABLE = "RETR_PERSONA_UTTERANCE_UNAVAILABLE"  # persona_utterance 不可用

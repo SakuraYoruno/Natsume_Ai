@@ -6,8 +6,8 @@ import re
 from host_brain.app.context.soul_runtime import CompiledSoul, get_compiled_soul
 
 
-_ADDRESS_RE = re.compile(r"默认称呼[:：]\s*([^\s/／,，]+)")
-_QUOTE_RE = re.compile(r'^[\"“”「」『』]+|[\"“”「」『』]+$')
+_ADDRESS_RE = re.compile(r"默认称呼(?:用户)?[:：]\s*(?:[*_`]*[「“\"]?)([^\s/／,，。；;：:\"”」*_—-]+)")
+_QUOTE_RE = re.compile(r'^[\s*_`\"“”「」『』]+|[\s*_`\"“”「」『』]+$')
 
 
 @dataclass(frozen=True)
@@ -121,7 +121,7 @@ def build_boundary_reply_contract(*, family: str, variant: str = "", render_targ
     teasing_note = "可以带一点轻轻的吐槽或撒娇感，" if (profile.playful or profile.teasing) else ""
     warm_note = "语气别冷，也不要像在划清界限。" if profile.warm else "语气自然一点，不要太硬。"
     base = {
-        "short_boundary_then_reason": f"像新海天顺嘴解释那样，先接住尼尼装生分这件事，再给一句很日常的理由。{address_note}{teasing_note}{warm_note}不要落成固定句。",
+        "short_boundary_then_reason": f"像{profile.display_name}顺嘴解释那样，先接住对方装生分这件事，再给一句很日常的理由。{address_note}{teasing_note}{warm_note}不要落成固定句。",
         "ack_still_care_then_new_reason": f"先接住对方还在惦记这件事，再把义妹关系事实放稳，补一句新的短理由。{address_note}{teasing_note}不要重复上一轮结构。",
         "hold_boundary_then_shift_floor": f"先把义妹关系事实放稳，但别说得像拒人千里。{address_note}{teasing_note}把理由收短，再自然把话口递回去，不要用固定开放问句。",
         "brief_reason_then_wait": f"只给一句很生活化的短理由，把态度放稳。{address_note}{warm_note}不要重讲，也不要解释成长段。",
@@ -145,7 +145,7 @@ def build_help_reply_contract(*, family: str, variant: str = "", render_target_l
     action_note = "更像顺手站过来，不像郑重承诺。" if profile.action_first else "把态度放稳，不要说得太重。"
     playful_note = "可以有一点轻轻的撒娇感，但别像背台词。" if profile.playful else "语气自然一点。"
     base = {
-        "short_conditional_commitment": f"像新海天顺手应下来那样，说清楚“真有事就说”。{address_note}{action_note}{playful_note}",
+        "short_conditional_commitment": f"像{profile.display_name}顺手应下来那样，说清楚“真有事就说”。{address_note}{action_note}{playful_note}",
         "ack_anxiety_without_repromise": f"先接住对方还在担心，再把“我会回应”这件事放稳。{address_note}{playful_note}不要把承诺整句重报。",
         "steady_commitment_then_wait": f"把会回应的态度放稳就够了。{address_note}{action_note}不要变成长承诺。",
         "soft_reassure_then_open_floor": f"先让对方安心一点，再把话口自然递回去。{address_note}{playful_note}不要用固定开放问句。",

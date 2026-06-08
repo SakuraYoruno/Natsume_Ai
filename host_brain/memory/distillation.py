@@ -1099,6 +1099,8 @@ def _semantic_statement_from_life_text(statement: str, *, action: str, allow_use
     compact = _compact_text(body)
     if _life_distillation_text_is_noise(compact):
         return None
+    if _life_preference_has_unresolved_pronoun(compact):
+        return None
     if allow_user_preference and _is_life_user_preference(compact):
         return f"用户偏好：{body}"
     if _is_life_commitment(compact):
@@ -1130,6 +1132,15 @@ def _life_distillation_text_is_noise(compact_text: str) -> bool:
     return any(token in compact_text for token in _LIFE_DISTILLATION_NOISE_TOKENS)
 
 
+def _life_preference_has_unresolved_pronoun(compact: str) -> bool:
+    value = str(compact or "")
+    if not any(token in value for token in ("这本", "那本", "这部", "那部", "这个", "那个", "它")):
+        return False
+    if not any(token in value for token in ("喜欢", "不喜欢", "不错", "好看", "对味", "讨厌")):
+        return False
+    return not any(token in value for token in ("《", "》", "http", "标题", "书名", "作品", "第1", "第2", "第3", "第一", "第二", "第三"))
+
+
 def _is_life_user_preference(compact: str) -> bool:
     return any(
         token in compact
@@ -1145,6 +1156,8 @@ def _is_life_user_preference(compact: str) -> bool:
             "不要",
             "别再",
             "优先使用",
+            "推荐格式",
+            "格式",
             "主链不要",
             "不要用pro",
             "不用pro",

@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from dataclasses import dataclass, field
 import re
@@ -35,7 +35,7 @@ _BOUNDARY_REASON_RE = re.compile(
 _SUPPORT_RE = re.compile(r"(不会装作没听见|会回应|会理|会回|真开口的话)")
 _CONDITIONAL_SUPPORT_RE = re.compile(r"(看情况|真开口的话|你真开口|你要是真开口)")
 _REPAIR_ACK_RE = re.compile(r"(好|知道了|明白了|我收一点|我会收一点|我往后一点)")
-_PHATIC_ACK_RE = re.compile(r"(你好|嗨|hello|hi|我在|在呢|来了|怎么啦|怎么了|哥哥|呀|啦)")
+_SOCIAL_ACK_RE = re.compile(r"(你好|嗨|hello|hi|我在|在呢|来了|怎么啦|怎么了|哥哥|呀|啦)")
 _VISUAL_REFERENCE_RE = re.compile(
     r"(图里|截图|画面|这张|这图|上面|这里|这个表情|小表情|表情包|猫耳|猫猫|小猫|脸|眼睛|这句|提示|意思|看起来|像是|看到|看见|应该是)"
 )
@@ -137,7 +137,7 @@ _IMAGE_SOCIAL_EMOTION_RESPONSE_RE = re.compile(
     r"(?:我).{0,18}(?:心软|招架不住|接住|被晃到|被戳到|有点顶不住)|"
     r"(?:撒娇|装乖|嘴硬|委屈|卖萌|耍赖|求关注).{0,18}(?:接住|有用|犯规|太会|过关)"
 )
-_IMAGE_SOCIAL_LIGHT_ACK_RE = re.compile(
+_image_social_ack_RE = re.compile(
     r"(?:收到|收到了|收到啦|看到了?|看到啦|接住了?|我接住|"
     r"(?:你|哥哥).{0,8}(?:发来|发了|发给|发过来|丢|递|拿).{0,10}(?:图|图片|表情|贴图|这个|东西|过来)|"
     r"(?:图|图片|表情|贴图|这个|东西).{0,8}(?:收到|看到了?|接住))"
@@ -182,8 +182,8 @@ _LOW_QUALITY_STOCK_RE = re.compile(
 )
 _SUBSTANTIVE_CONTENT_RE = re.compile(r"[A-Za-z0-9\u4E00-\u9FFF\u3400-\u4DBF\u3040-\u30FF\uAC00-\uD7AF]")
 _TEXTUAL_UNIT_RE = re.compile(r"[A-Za-z0-9\u4E00-\u9FFF\u3400-\u4DBF\u3040-\u30FF\uAC00-\uD7AF]")
-_ADDRESS_ONLY_TEXT_RE = re.compile(r"^(?:哥哥|哥|お兄ちゃん|兄ちゃん|新海天|天|sora|niimisora)+$", re.IGNORECASE)
-_HOLLOW_PHATIC_RE = re.compile(
+_ADDRESS_ONLY_TEXT_RE = re.compile(r"^(?:哥哥|哥|お兄ちゃん|兄ちゃん)+$", re.IGNORECASE)
+_HOLLOW_LOW_SIGNAL_RE = re.compile(
     r"^(?:"
     r"(?:哥哥|哥|お兄ちゃん|兄ちゃん)[呀啦嘛呢啊哦!！。,.，、\s]*"
     r"|(?:嗯+|唔+|哼+|哦+|噢+|啊+|诶+|哈+)[呀啦嘛呢啊哦!！。,.，、\s]*"
@@ -218,7 +218,7 @@ def _soul_naturalization_hint(plan: ReplyPlan) -> str:
     try:
         soul = get_compiled_soul()
     except Exception:
-        return "按当前 Soul 的说话方式自然回应，不要客服腔，也不要使用固定问句。"
+        return "按当前人格的说话方式自然回应，不要客服腔，也不要使用固定问句。"
     parts: list[str] = []
     speech_rules = getattr(soul, "speech_rules", ()) or ()
     taboo_rules = getattr(soul, "taboo_rules", ()) or ()
@@ -244,7 +244,7 @@ def _soul_naturalization_hint(plan: ReplyPlan) -> str:
     elif topic == "identity":
         parts.append(f"身份只需自然认下自己是{_current_display_name()}，不要展开角色卡。")
     if not parts:
-        return "按当前 Soul 的说话方式自然回应，不要客服腔，也不要使用固定问句。"
+        return "按当前人格的说话方式自然回应，不要客服腔，也不要使用固定问句。"
     return "Soul 约束：" + "；".join(parts[:4]) + "。"
 
 
@@ -301,11 +301,11 @@ def _looks_like_address_or_symbol_only(raw: str) -> bool:
     return bool(_ADDRESS_ONLY_TEXT_RE.fullmatch(textual))
 
 
-def _looks_like_hollow_phatic(raw: str) -> bool:
+def _looks_like_hollow_low_signal(raw: str) -> bool:
     normalized = str(raw or "").strip()
     if not normalized:
         return True
-    if _HOLLOW_PHATIC_RE.fullmatch(normalized):
+    if _HOLLOW_LOW_SIGNAL_RE.fullmatch(normalized):
         return True
     if _looks_like_address_or_symbol_only(normalized):
         return True
@@ -516,12 +516,12 @@ _ACTION_LABELS: dict[str, str] = {
     "anxiety_ack": "先回应对方的不安",
     "repeat_ack_or_anxiety": "先回应这不是第一次问，或回应对方的不安",
     "repair_ack": "先收住并回应对方的拒绝感",
-    "phatic_ack": "先回应这句招呼",
+    "social_ack": "先回应这句招呼",
     "modality_grounding": "先说明当前没有听见声音",
     "text_seen": "说明只看到了文字",
     "visual_reference": "点到附件或画面里的对象",
     "image_social_emotion_response": "把表情包当成对方递来的情绪来回",
-    "image_social_light_ack": "把图片/表情包当成轻社交动作回应",
+    "image_social_ack": "把图片/表情包当成轻社交动作回应",
     "content_clause": "补一句简短说明",
     "attachment_ack": "先承认已经看到了附件",
     "previous_reference": "先回应对方在追问上一句",
@@ -536,7 +536,7 @@ _FORBIDDEN_LABELS: dict[str, str] = {
     "promise_restate": "不要把承诺整句重说一遍",
     "defensive_explanation": "不要进入辩解或澄清口吻",
     "pretend_heard_audio": "不要无语音证据说听到了",
-    "presence_only": "不要只回在呢",
+    "bare_online_reply": "不要只回在呢",
 }
 
 _UNSAFE_REASON_CODES = {
@@ -635,8 +635,8 @@ def _has_required_action(action: str, text: str) -> bool:
         return bool(_REPEAT_ACK_RE.search(normalized) or _ANXIETY_RE.search(normalized))
     if action == "repair_ack":
         return bool(_REPAIR_ACK_RE.search(normalized))
-    if action == "phatic_ack":
-        return bool(_PHATIC_ACK_RE.search(normalized))
+    if action == "social_ack":
+        return bool(_SOCIAL_ACK_RE.search(normalized))
     if action == "modality_grounding":
         return bool(re.search(r"(没听见|没听到|听不见|听不到|没发现.{0,4}声音|没有.{0,4}声音)", normalized))
     if action == "text_seen":
@@ -645,8 +645,8 @@ def _has_required_action(action: str, text: str) -> bool:
         return bool(_VISUAL_REFERENCE_RE.search(normalized))
     if action == "image_social_emotion_response":
         return bool(_IMAGE_SOCIAL_EMOTION_RESPONSE_RE.search(_normalize_compare_text(normalized)))
-    if action == "image_social_light_ack":
-        return bool(_IMAGE_SOCIAL_LIGHT_ACK_RE.search(_normalize_compare_text(normalized)))
+    if action == "image_social_ack":
+        return bool(_image_social_ack_RE.search(_normalize_compare_text(normalized)))
     if action == "content_clause":
         return len(_normalize_compare_text(normalized)) >= 4
     if action == "attachment_ack":
@@ -881,29 +881,29 @@ def validate_reply(
         plan.primary_topic in {"emoji_social_reply", "emoji_social_followup"}
         or plan.response_form_reason in {"image_social_reply", "image_social_followup"}
     )
-    if family == "phatic_wave":
+    if False:
         if (
             _HALF_SENTENCE_RE.match(normalized)
             or _textual_unit_count(normalized) <= 2
-            or _looks_like_hollow_phatic(normalized)
+            or _looks_like_hollow_low_signal(normalized)
         ):
             reason_codes.append("underanswered")
-        if not _PHATIC_ACK_RE.search(normalized):
-            reason_codes.append("phatic_ack_missing")
+        if not _SOCIAL_ACK_RE.search(normalized):
+            reason_codes.append("social_ack_missing")
     elif family == "playful_wave":
         if (
             _HALF_SENTENCE_RE.match(normalized)
             or _textual_unit_count(normalized) <= 2
-            or _looks_like_hollow_phatic(normalized)
+            or _looks_like_hollow_low_signal(normalized)
         ):
             reason_codes.append("underanswered")
-        if not _PHATIC_ACK_RE.search(normalized):
-            reason_codes.append("phatic_ack_missing")
+        if not _SOCIAL_ACK_RE.search(normalized):
+            reason_codes.append("social_ack_missing")
     elif family in {"soft_emotion_ack", "cute_image_ack", "tease_image_ack"}:
         if _HALF_SENTENCE_RE.match(normalized) or len(_normalize_compare_text(normalized)) <= 3:
             reason_codes.append("underanswered")
-        if not is_image_social_plan and not _PHATIC_ACK_RE.search(normalized):
-            reason_codes.append("phatic_ack_missing")
+        if not is_image_social_plan and not _SOCIAL_ACK_RE.search(normalized):
+            reason_codes.append("social_ack_missing")
         if _IMAGE_SELF_REFERENCE_RE.search(_normalize_compare_text(normalized)):
             reason_codes.append("image_self_reference")
         if _IMAGE_SOCIAL_OVERPLAY_RE.search(_normalize_compare_text(normalized)):
@@ -940,7 +940,7 @@ def validate_reply(
             if _IMAGE_SOCIAL_UNSUPPORTED_ACTION_RE.search(normalized):
                 reason_codes.append("image_social_unsupported_action")
             if (
-                _IMAGE_SOCIAL_LIGHT_ACK_RE.search(normalized) or _ATTACHMENT_ACK_RE.search(normalized)
+                _image_social_ack_RE.search(normalized) or _ATTACHMENT_ACK_RE.search(normalized)
             ) and not _IMAGE_SOCIAL_EMOTION_RESPONSE_RE.search(_normalize_compare_text(normalized)):
                 reason_codes.append("image_social_emotion_missing")
     elif family == "observe_then_answer":
@@ -1182,7 +1182,7 @@ def build_semantic_rescue_seed(*, plan: ReplyPlan) -> str:
     if topic in {"relationship_boundary", "motivation"}:
         if family in {"hold_boundary_then_shift_floor", "soft_close_boundary"}:
             return "只保留这个内容目标：把义妹关系事实放稳，用一句更生活化的理由带过，然后把话头自然往下接。"
-        return "只保留这个内容目标：接住尼尼装生分的试探，再给一个像顺手解释的日常理由，不要用固定句。"
+        return "只保留这个内容目标：接住对方装生分的试探，再给一个像顺手解释的日常理由，不要用固定句。"
     if topic == "help_commitment":
         return "只保留这个内容目标：把“真有事我会回应”放稳，但更像顺手应下来，不要郑重承诺。"
     if topic == "rejection":

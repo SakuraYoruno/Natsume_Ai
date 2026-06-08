@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Any
@@ -388,15 +388,12 @@ def _qualitative_relationship_summary(
     thread_kind = str(interaction_thread.thread_kind or "").strip().lower()
     micro_social_topic = topic in {
         "greeting",
-        "presence_ping",
         "auditory_check",
-        "light_ack",
-        "phatic_punct",
         "playful_ping",
         "emoji_social_reply",
         "emoji_social_followup",
     }
-    micro_social_thread = thread_kind in {"image_social", "phatic"}
+    micro_social_thread = thread_kind == "image_social"
     if str(render_target_lang or "").strip().lower() == "ja":
         if conflict_rift >= 0.45 or substage == "repairing_rift":
             return "少しすれ違いがある。刺しすぎず、でも義兄妹の距離まで戻りすぎない。"
@@ -420,7 +417,7 @@ def _qualitative_relationship_summary(
     if stage in _LOVER_STAGES or substage in {"confessed_lovers", "stable_lovers"}:
         return "关系进入亲密恋人阶段：可以更贴近，但别把亲密写成廉价甜话。"
     if stage in _SOULMATE_STAGES or substage == "soulbound":
-        return "关系接近灵魂伴侣：可以坦率柔软，但仍保持天/SORA的轻快和分寸。"
+        return "关系接近灵魂伴侣：可以坦率柔软，但仍保持当前人格的轻快和分寸。"
     if micro_social_topic or micro_social_thread:
         return "关系是熟起来的义兄妹：不用刻意拉开，轻轻回应眼前情绪。"
     if substage == "protective_sibling":
@@ -475,10 +472,7 @@ def _should_require_strict_validation(
         return True
     if normalized_topic in {
         "greeting",
-        "presence_ping",
         "auditory_check",
-        "light_ack",
-        "phatic_punct",
         "playful_ping",
     }:
         return True
@@ -529,10 +523,7 @@ def _should_force_buffering(
         return True
     if normalized_topic in {
         "greeting",
-        "presence_ping",
         "auditory_check",
-        "light_ack",
-        "phatic_punct",
         "playful_ping",
         "emoji_social_reply",
     }:
@@ -675,7 +666,6 @@ def _build_reply_contract(
         )
     if str(render_target_lang or "").strip().lower() == "ja":
         mapping = {
-            "phatic_wave": "挨拶を自然に受けて、短い実質的な一言を返す。",
             "auditory_grounding": "入力証拠に合わせる。音声入力ではない時は、音は聞こえていないことと文字だけ見えていることを短く返す。",
             "playful_wave": "軽い呼びかけを受けて、短く明るく返す。",
             "soft_emotion_ack": "画像から伝わる感情を受けて、短い実質的な一言を返す。",
@@ -709,7 +699,6 @@ def _build_reply_contract(
             realization_steps=steps,
         )
     mapping = {
-        "phatic_wave": "先把这句招呼自然接住，再给一句有实质内容的短回应，不要只剩符号或空壳句。",
         "auditory_grounding": "先按输入证据回应；没有语音证据时说明没听见声音、只看到当前文字，不要只回在呢，也不要假装听到了声音。",
         "playful_wave": "先把这句轻松招呼接住，再回一句自然短接话，不要只剩感叹词。",
         "soft_emotion_ack": "把对方发图表达的情绪当成聊天信号来回，不要只剩语气词。",
@@ -724,7 +713,7 @@ def _build_reply_contract(
         "hold_name_then_open_floor": "把名字放成已知事实，再把话口让回去，不要复用上一轮动作。",
         "name_only_then_pause": "只在对方已经连问很多次时，用极短确认收住，不补解释，也不要和上一轮同一种动作。",
         "soft_close_then_open_floor": "把这件事轻轻收稳，再把话口让回去，不要再报名字。",
-        "short_boundary_then_reason": "先接住尼尼装生分的试探，再给一句短理由，不要滑成泛化陪聊句。",
+        "short_boundary_then_reason": "先接住对方装生分的试探，再给一句短理由，不要滑成泛化陪聊句。",
         "ack_still_care_then_new_reason": "把义妹关系事实放稳，再补一句新的短理由，不要重复上一轮结构。",
         "hold_boundary_then_shift_floor": "这轮不是第一次问原因：把义妹关系事实放稳，再把话口轻轻让回去，不要整段重讲理由。",
         "brief_reason_then_wait": "这轮不是第一次问原因：只换一条新的短理由，然后停住，不要复用上一轮承接动作。",
@@ -737,9 +726,6 @@ def _build_reply_contract(
         "hold_repair_space": "先收住，轻轻接住对方的不喜欢，不解释。",
     }
     variant_overrides = {
-        ("phatic_wave", "greeting"): "把招呼自然接住，再回一句短短的在场回应，不要只剩感叹词或符号。",
-        ("phatic_wave", "presence"): "先让对方知道你在，再短短接一句，不要只剩空壳句。",
-        ("phatic_wave", "light_ack"): "先接住这句轻招呼，再给一句短回应，不要只剩单个语气词。",
         ("auditory_grounding", "no_audio_seen_text"): "用户用文字问听得到吗时，先像真实没听见声音那样轻轻困惑，再说只看到了这条文字；若有真实语音输入证据才可以确认收到。不要回“在呢”，不要无证据说“听到了”。",
         ("playful_wave", "playful_ping"): "把这句轻松招呼接住，再自然回一句俏皮短接话，不要只剩语气词。",
         ("soft_emotion_ack", "distress_image"): "对方用表情包递来一点低落或委屈，回一句自然短接话，不要解释画面。",
@@ -868,7 +854,7 @@ def _refine_multimodal_contract(
         retained_actions = tuple(
             action
             for action in contract.required_actions
-            if action not in {"phatic_ack", "image_social_emotion_response", "image_social_light_ack"}
+            if action not in {"image_social_emotion_response", "image_social_ack"}
         )
         return ReplyContract(
             text=" ".join(
@@ -1244,22 +1230,34 @@ def _build_topic_trajectory_options(
                 followup_kind,
             ))
         return options
-    if topic in {"greeting", "presence_ping", "auditory_check", "light_ack", "phatic_punct"}:
-        variant = "greeting"
-        if topic == "presence_ping":
-            variant = "presence"
-        elif topic == "auditory_check":
-            variant = "no_audio_seen_text"
-        elif topic in {"light_ack", "phatic_punct"}:
-            variant = "light_ack"
+    if topic == "auditory_check":
         return [(
-            "auditory_grounding" if topic == "auditory_check" else "phatic_wave",
+            "auditory_grounding",
+            "no_audio_seen_text",
+            ResponseTrajectory(
+                response_goal="auditory_text_check",
+                tactic_family="auditory_grounding",
+                tactic_variant="no_audio_seen_text",
+                trajectory_stage="first_turn",
+            ),
+            "none",
+            "none",
+        )]
+    if topic == "greeting":
+        stage = _trajectory_stage(
+            freshness=interpretation.freshness,
+            repeat_question_count=interpretation.repeat_question_count,
+        )
+        variant = "repeat" if int(interpretation.repeat_question_count or 0) > 0 else "neutral"
+        response_goal = "ack_repeated_input" if variant == "repeat" else "contextual_reply"
+        return [(
+            "plain_hold",
             variant,
             ResponseTrajectory(
-                response_goal="auditory_text_check" if topic == "auditory_check" else "phatic_reply",
-                tactic_family="auditory_grounding" if topic == "auditory_check" else "phatic_wave",
+                response_goal=response_goal,
+                tactic_family="plain_hold",
                 tactic_variant=variant,
-                trajectory_stage="first_turn",
+                trajectory_stage=stage,
             ),
             "none",
             "none",
@@ -1610,18 +1608,6 @@ def _build_thread_fallback_plan_components(
             "soft_reassure",
         )
 
-    if thread_kind == "phatic":
-        return (
-            str(interaction_thread.source_topic or interpretation.literal_topic or "greeting").strip() or "greeting",
-            ResponseTrajectory(
-                response_goal="phatic_response",
-                tactic_family="phatic_wave",
-                tactic_variant="light_return",
-                trajectory_stage=stage or "thread_followup",
-            ),
-            "none",
-            "none",
-        )
     if thread_kind == "assistant_reply_followup":
         reaction = str(interaction_thread.last_user_reaction or "").strip().lower()
         variant = "clarify_object" if reaction == "ask_object" else "clarify_meaning"
@@ -1683,7 +1669,10 @@ def _assemble_reply_plan(
             forbidden_patterns.append("identity_name_restate")
         if trajectory.trajectory_stage != "first_turn":
             plan_confidence = 0.83
-    elif topic in {"greeting", "presence_ping", "auditory_check", "light_ack", "phatic_punct", "playful_ping"}:
+    elif topic == "greeting":
+        forbidden_patterns.extend(["same_as_previous_reply"])
+        plan_confidence = 0.78
+    elif topic in {"auditory_check", "playful_ping"}:
         forbidden_patterns.extend(["same_as_previous_reply", "repeated_tactic"])
         plan_confidence = 0.8
     elif topic in {"emoji_social_reply", "emoji_social_followup"}:
@@ -1775,7 +1764,7 @@ def _assemble_reply_plan(
         max_chars = min(max_chars, 64)
         max_sentences = 1
         should_be_brief = True
-    elif topic in {"greeting", "presence_ping", "auditory_check", "light_ack", "phatic_punct", "playful_ping"}:
+    elif topic in {"auditory_check", "playful_ping"}:
         max_chars = min(max_chars, 84)
         max_sentences = min(max_sentences, 2)
         should_be_brief = True

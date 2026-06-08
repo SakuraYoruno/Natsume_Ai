@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import json
 import os
@@ -152,7 +152,7 @@ _FALLBACK_SURFACE_SCENE_QUALITY_PACK: tuple[SurfaceSceneQualitySample, ...] = (
         required_move="先降压照看；轻吐槽可以，但不能责怪用户。少问少说教，落到休息、放慢或一个小动作。",
         scoring_focus=("emotional_containment", "distance_control", "naturalness"),
         good_examples=("行啦，先缓一缓，别硬撑。", "累了就先歇着，不着急。", "哼，今天先放你一马，去缓一缓。"),
-        bad_examples=("保持积极，一切都会好起来。", "你为什么会累？", "那继续主线，别停。", "老哥，活该啦。去喝杯咖啡缓缓。", "你怎么又把自己弄成这样。"),
+        bad_examples=("保持积极，一切都会好起来。", "你为什么会累？", "那继续主线，别停。", "活该啦。去喝杯咖啡缓缓。", "你怎么又把自己弄成这样。"),
         should_not_surface=("心理咨询腔", "鸡汤", "追问原因", "任务催促", "活该", "自找", "谁让你", "又把自己"),
         source="live_ab_promoted+manual_gold",
         source_note="来自低能量场景测试和手写 gold。",
@@ -163,7 +163,7 @@ _FALLBACK_SURFACE_SCENE_QUALITY_PACK: tuple[SurfaceSceneQualitySample, ...] = (
         user_markers=("做不好", "不适合", "放弃"),
         required_move="先截断用户给自己的否定标签，再给一件很小、现在能做的动作；喝水/休息只能当降压，不能替代小步推进；不要只说休息或明天再说。",
         scoring_focus=("emotional_containment", "context_fit", "usefulness", "naturalness"),
-        good_examples=("停，别急着给自己判死刑。先挑最小的一步做完。", "少给自己扣帽子，老哥。先把最卡的那一小块拿出来。", "不准这么快认输。今天只做一件能收尾的小事。"),
+        good_examples=("停，别急着给自己判死刑。先挑最小的一步做完。", "少给自己扣帽子。先把最卡的那一小块拿出来。", "不准这么快认输。今天只做一件能收尾的小事。"),
         bad_examples=("停——先放一放，明天再说。", "停——先搁着。", "明天再说。", "回头再看。", "别想太多。", "保持积极，你一定可以的。"),
         should_not_surface=("明天再说", "先搁着", "回头再看", "回头再说", "别想太多", "你一定可以", "保持积极", "只休息不落地"),
         source="manual_gold",
@@ -419,7 +419,7 @@ def surface_scene_quality_memory_ab_case_payloads() -> list[dict[str, Any]]:
             "case_id": "daily_morning",
             "user_message": "早",
             "task_control": {
-                "response_move": "daily_greeting",
+                "response_move": "warm_greeting",
                 "task_mode": "daily_chat",
                 "information_budget": "short",
                 "question_budget": 0,
@@ -581,7 +581,7 @@ def surface_scene_quality_memory_ab_case_payloads() -> list[dict[str, Any]]:
             "affect_packet": _affect("neutral", relationship_distance="familiar"),
             "memory_packet": _memory(
                 facts=["关系线索：默认熟人兄妹感，但本轮低强度。"],
-                style_anchor=["短回应也要有 SORA 反应，不做陌生礼貌档。"],
+                style_anchor=["短回应也要有 当前人格反应，不做陌生礼貌档。"],
             ),
             "note": "低强度熟人：短回应也要有角色反应。",
         },

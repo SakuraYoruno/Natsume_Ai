@@ -710,7 +710,7 @@ class CortexAgent:
             # 从 Broca 获取 emotion_intensity（如果可用）
             emotion_intensity: float = 0.5
             try:
-                from host_brain.app.chat_agent_postprocessor import broca_to_tts_params  # noqa: PLC0415
+                from host_brain.app.surface_reply_postprocessor import broca_to_tts_params  # noqa: PLC0415
                 _lang_agent = get_language_system_agent()
                 _last_broca = dict(
                     (_lang_agent.state_registry.get_state("language_system_agent") or {})

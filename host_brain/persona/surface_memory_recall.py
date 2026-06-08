@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from datetime import datetime, timedelta, timezone
@@ -75,11 +75,8 @@ _LOW_SIGNAL_TASKS = frozenset({
     "chat",
     "daily_chat",
     "daily_good_morning",
-    "daily_greeting_cn",
-    "daily_greeting_en",
     "first_ask",
     "greeting",
-    "phatic",
     "plain_answer",
     "plain_hold",
     "presence",
@@ -3172,7 +3169,8 @@ def _surface_fact_row_source_priority(row: SurfaceMemoryFactRow, *, query: str |
         priority -= 4.0
     if any(token in fact for token in ("；回复", "回复「", "回复：", "Assistant:", "Assistant：")):
         priority -= 3.0
-    if any(token in fact for token in ("FAILED", "APP_LAUNCH_FAILED", "open_app FAILED", "打开应用失败")):
+    terminal_codex_fact = any(token in fact.upper() for token in ("CODEX_PRODUCTION", "LIGHTNOVEL_"))
+    if any(token in fact for token in ("FAILED", "APP_LAUNCH_FAILED", "open_app FAILED", "打开应用失败")) and not terminal_codex_fact:
         priority -= 8.0
     if any(token in fact for token in ("项目事实", "测试事实", "记忆事实", "用户纠正", "用户更正", "修正为", "纠正为", "更正为")):
         priority += 6.0
@@ -4424,7 +4422,7 @@ def _surface_safe_text(value: Any, *, limit: int) -> str:
     text = _URI_RE.sub("", text)
     text = text.replace("memory written:", "")
     text = text.replace("User:", "用户提到：").replace("Assistant:", "回复：")
-    text = text.replace("新海天回应", "回复").replace("夏目蓝回应", "回复")
+    text = text.replace("当前人格回应", "回复").replace("旧角色回应", "回复")
     text = _JSON_MARK_RE.sub("", text)
     text = _FIELD_LABEL_RE.sub("", text)
     text = _SPACE_RE.sub(" ", text).strip(" ,，;；、")

@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 
 def tactic_key(family: str, variant: str = "") -> str:
@@ -161,12 +161,11 @@ def describe_tactic_signature(signature: str, *, render_target_lang: str = "zh")
 
 def contract_action_sets(*, family: str) -> tuple[tuple[str, ...], tuple[str, ...]]:
     required_map: dict[str, tuple[str, ...]] = {
-        "phatic_wave": ("phatic_ack",),
         "auditory_grounding": ("modality_grounding", "text_seen"),
-        "playful_wave": ("phatic_ack",),
-        "soft_emotion_ack": ("phatic_ack",),
-        "cute_image_ack": ("phatic_ack",),
-        "tease_image_ack": ("phatic_ack",),
+        "playful_wave": ("social_ack",),
+        "soft_emotion_ack": ("social_ack",),
+        "cute_image_ack": ("social_ack",),
+        "tease_image_ack": ("social_ack",),
         "observe_then_answer": ("visual_reference", "content_clause"),
         "attachment_ack_then_wait": ("attachment_ack",),
         "brief_name_only": ("name_only",),
@@ -189,8 +188,7 @@ def contract_action_sets(*, family: str) -> tuple[tuple[str, ...], tuple[str, ..
         "explain_previous_reply": ("previous_reference", "content_clause"),
     }
     forbidden_map: dict[str, tuple[str, ...]] = {
-        "phatic_wave": ("generic_companioning",),
-        "auditory_grounding": ("pretend_heard_audio", "presence_only"),
+        "auditory_grounding": ("pretend_heard_audio", "bare_online_reply"),
         "playful_wave": ("generic_companioning",),
         "soft_emotion_ack": ("generic_companioning",),
         "cute_image_ack": ("generic_companioning",),
@@ -223,7 +221,6 @@ def realization_steps(*, family: str, variant: str = "", render_target_lang: str
     lang = str(render_target_lang or "").strip().lower()
     if lang == "ja":
         mapping = {
-            "phatic_wave": ("短く挨拶を返す", "空疎な一言で終わらせない"),
             "auditory_grounding": ("音は聞こえていないと置く", "文字だけ見えていると短く返す"),
             "playful_wave": ("軽く明るく受ける", "一言の殻だけにしない"),
             "soft_emotion_ack": ("見えている感情を受ける", "短く中身のある一言で返す"),
@@ -252,7 +249,6 @@ def realization_steps(*, family: str, variant: str = "", render_target_lang: str
         }
         return mapping.get(family, ("先接住相手的动作", "再短短回应",))
     mapping = {
-        "phatic_wave": ("先把招呼接住", "给一句有实质内容的短回应"),
         "auditory_grounding": ("先说明没听见声音", "再说明只看到文字"),
         "playful_wave": ("先把轻松的招呼接住", "回一句自然的短接话"),
         "soft_emotion_ack": ("先把图里的情绪接住", "顺着这个情绪回一句"),

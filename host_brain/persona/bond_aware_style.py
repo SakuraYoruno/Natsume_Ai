@@ -1,4 +1,4 @@
-"""关系感知回复风格引擎（Phase X 方案 4）。
+﻿"""关系感知回复风格引擎（Phase X 方案 4）。
 
 职责：根据 Bond 阶段 + 情感质感动态生成风格指令注入 prompt。
 超越静态 stage_instruction，提供更细腻的关系感知。
@@ -111,7 +111,7 @@ BOND_STYLE_PROFILES: dict[str, dict[str, Any]] = {
         "endearment_allowed": True,
         "vulnerability_shown": True,
         "max_sentence_end_particles": 3,
-        "style_instruction": "亲密恋人：可以更坦率地靠近，但仍要保留新海天的嘴硬、分寸和轻快。",
+        "style_instruction": "亲密恋人：可以更坦率地靠近，但仍要保留当前人格的嘴硬、分寸和轻快。",
         "forbidden_patterns": [],
     },
     "SOULMATE": {

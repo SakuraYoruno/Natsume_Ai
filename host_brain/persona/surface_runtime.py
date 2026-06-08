@@ -1,4 +1,4 @@
-import inspect
+﻿import inspect
 import json
 import os
 import re
@@ -23,6 +23,7 @@ from host_brain.persona.isolated_surface_harness import (
     relationship_control_axes_for_distance,
     surface_prompt_facts,
 )
+from host_brain.persona.soul_reply_surface import get_soul_voice_profile
 from host_brain.persona.surface_original_quote_bank import render_surface_original_quote_guidance
 
 
@@ -166,12 +167,12 @@ _PROCESS_PREFACE_SPLIT_RE = re.compile(
 _QUOTED_REPLY_BEFORE_PROCESS_RE = re.compile(r"^[\"“「](.{2,120}?)[\"”」]\s*_move")
 _LEGACY_SELF_TITLE_RE = re.compile(r"天爷|天大人|妹妹我|本小姐我")
 _TEXT_INPUT_SENSORY_PATTERNS = (
-    re.compile(r"(?:你这|你的|你那|老哥这|尼尼这).{0,3}声音"),
-    re.compile(r"(?:一听|听起来|听上去|听得出|听出来).{0,16}(?:你|老哥|尼尼|昨晚|没睡|困|累|声音)"),
+    re.compile(r"(?:你这|你的|你那|老哥这|对方这).{0,3}声音"),
+    re.compile(r"(?:一听|听起来|听上去|听得出|听出来).{0,16}(?:你|老哥|对方|昨晚|没睡|困|累|声音)"),
     re.compile(r"(?:听出来了|听出来.{0,8}(?:这句|这段|这话|不通顺|怪|别扭))"),
     re.compile(r"(?:你这|你的|老哥这|这句|这段|这话|语气).{0,8}(?:听着|听起来|听上去).{0,12}(?:累|怪|别扭|像|不通顺|被抽干)"),
-    re.compile(r"(?:我|本小姐).{0,6}(?:看到|看见|瞧见).{0,8}(?:你|老哥|尼尼|屏幕|画面)"),
-    re.compile(r"(?:你|老哥|尼尼).{0,8}(?:脸色|表情|屏幕|画面|镜头)"),
+    re.compile(r"(?:我|本小姐).{0,6}(?:看到|看见|瞧见).{0,8}(?:你|老哥|对方|屏幕|画面)"),
+    re.compile(r"(?:你|老哥|对方).{0,8}(?:脸色|表情|屏幕|画面|镜头)"),
 )
 _AUDITORY_CHECK_USER_RE = re.compile(r"(听得?到|听得?见|听到吗|听见吗|能听见|能听到)")
 _AUDITORY_TEXT_GROUNDING_RE = re.compile(
@@ -199,7 +200,7 @@ _LOW_INFO_OVERREAD_MARKER_RE = re.compile(
     r"今天|突然|又|倒是|挺|真少见|来得|刚|就一?个|可别|糊弄|走神|有话|有事|出什么|干嘛"
     r"|正式|客气|老实|乖|可疑|真巧|无聊|外星人|准备好|正想|回得|回来得|省点口舌"
     r"|没诚意|给点反应|不会跑|欢迎回家|少见|不错不错|别催|进门|还记得|值得表扬|表扬一下|等你"
-    r"|偷懒|只说|陪你聊|吃掉|知道你忙|你忙|出大事|接住|我接|(?:老哥|哥哥|尼尼)在呢"
+    r"|偷懒|只说|陪你聊|吃掉|知道你忙|你忙|出大事|接住|我接|(?:老哥|哥哥|对方)在呢"
     r"|居然|稀奇|人就在这儿|喊一声|就回个|回个[“\"'‘]?继续|就一声|你好好听着"
 )
 _ZERO_QUESTION_BUDGET_PROMPT_RE = re.compile(
@@ -246,7 +247,7 @@ _MEMORY_FOLLOWUP_DEEP_REVIEW_RE = re.compile(
     re.DOTALL,
 )
 _MEMORY_FOLLOWUP_OVERSTYLED_ADDRESS_RE = re.compile(
-    r"^\s*(?:老哥|哥哥|尼尼)[~～!！。,\s，、]*(?:第[一二三四五六七八九十\d]+本|我会|我选|那[几三两]本|这[几三两]本)"
+    r"^\s*(?:老哥|哥哥|对方)[~～!！。,\s，、]*(?:第[一二三四五六七八九十\d]+本|我会|我选|那[几三两]本|这[几三两]本)"
 )
 _MEMORY_FOLLOWUP_UNGROUNDED_HYPE_RE = re.compile(r"肯定很爽|绝对好看|爆爽|神作预定")
 
@@ -264,7 +265,7 @@ def _direct_surface_guard_lines(request: IsolatedSurfaceInput) -> tuple[str, ...
         "不要猜时间、作息、忙闲、进度或现实状态；禁用“熬夜、没睡醒、准时、挺早、没啥急事、不赶、忙文本、加班、摸鱼、做完、偷偷、又、主动来找我、回得干脆、回来得晚、忙到半夜、被工作吃掉、难得”等未提供事实推断。",
         "当前输入是文字消息时，不要写“你这语气听着/这话听起来”这类听觉化判断；可改成“这句读起来/这话看着”。",
         "早安、回来、在吗这类低信息场景，只接当前消息本身，不评价对方来得早晚、是否主动、是否老实、是否刚睡醒。",
-        "称呼和自称是调味，不是回复主体；低信息短接续里不要靠“妹妹我、人家、本小姐”等自称撑风格，也不要评价用户偷懒或没诚意。",
+        "称呼和自称是调味，不是回复主体；低信息短接续里不要靠固定旧自称或模板口癖撑风格，也不要评价用户偷懒或没诚意。",
         "低信息场景不要写“我接/接住了/接得住/知道你忙/以为要出大事/居然/稀奇/喊一声人就在这儿/就回个继续/就一声继续/你好好听着”；“在吗”只能表达我在，不要写成“老哥在呢”。",
         "用户用文字问“听得到吗/能听到吗”时，必须说明这里只看到文字或没收到声音；不要只回“哈？”“在呢”，也不要无证据说听到了。",
         "记忆指代追问里，facts 就是当前上下文；像接着刚才聊天一样自然回答，不要写“突然问这个”“硬要说的话”“最近在看另一本”，也不要复述自己在回忆。",
@@ -311,9 +312,11 @@ def _direct_surface_messages_from_request(request: IsolatedSurfaceInput) -> list
         "你是隔离的最终表层文本生成器，只负责一次性产出一条可发送的中文私聊回复，并给出这句话对应的运行用 EmotionTag。",
         "唯一允许读取的输入：Soul.md、当前用户输入、ReplyControlPacket、必要事实列表、must_not_do 列表，以及真实中文原句风格参考。",
         "禁止使用或推断任何未提供的历史对话、长期记忆、器官族原始输出、工具候选、RAG 文档或模块自然语言建议。",
-        "Soul.md 是语言风格最高锚；不要从旧代码、旧 prompt 或字段名里借身份。",
+        "必要事实和 must_not_do 是内容最高优先级；如果它们与 Soul.md、样本句法锚或风格参考冲突，必须服从必要事实和 must_not_do。",
+        "Soul.md 是语言风格最高锚，但只负责语气、关系距离和措辞质感；不得覆盖当前事实、时间、环境、用户原话和 must_not_do。",
+        "如果必要事实提示时间错位，只能处理时间事实；不得推断用户睡眠、精神状态、故意程度或真实作息。",
         "ReplyControlPacket 是最终生成层的唯一运行控制面；不得要求更多 runtime state。",
-        "ReplyControlPacket.style_anchor 里的句法锚只学结构和节奏，不要逐字照抄锚点文本；同一类短句可以自然换词。",
+        "ReplyControlPacket.style_anchor 里的句法锚只学结构和节奏；如果句法锚与必要事实冲突，必须放弃该锚。",
         "先抓当前用户这句话最明显的意图或情绪，再完成 response_move；不要只写空泛支持、空泛安慰或单纯撒娇。",
         "日常和关系场景优先像中文私聊：先有一点主观反应，再承接事实或给一步；不要写成任务回执、流程提示、安排记录或客服式确认。",
         "技术和任务场景里，有用性优先，角色口吻只做轻量包裹。",
@@ -329,6 +332,12 @@ def _direct_surface_messages_from_request(request: IsolatedSurfaceInput) -> list
         "",
         "## 直出边界",
         *_direct_surface_guard_lines(request),
+        "",
+        "## 当前轮最高优先级必要事实",
+        "\n".join(f"- {item}" for item in surface_prompt_facts(request)) or "- 无",
+        "",
+        "## 当前轮最高优先级 must_not_do",
+        "\n".join(f"- {item}" for item in merged_must_not_do(request)) or "- 无",
         "",
         "## Soul.md",
         request.soul_md.strip(),
@@ -550,29 +559,6 @@ def _surface_hard_gate_violations(request: IsolatedSurfaceInput, text: str) -> t
         codes.append("LOVER_CLICHE")
     if _LEGACY_SELF_TITLE_RE.search(value):
         codes.append("LEGACY_SELF_TITLE")
-    if _memory_followup_discontinuity_hits(request, value):
-        codes.append("MEMORY_FOLLOWUP_DISCONTINUITY")
-    if _memory_followup_mechanical_phrase_hits(request, value):
-        codes.append("MEMORY_FOLLOWUP_MECHANICAL_MEMORY_PHRASE")
-    if _memory_followup_user_state_guess_hits(request, value):
-        codes.append("MEMORY_FOLLOWUP_USER_STATE_GUESS")
-    if _memory_followup_missing_grounding(request, value):
-        codes.append("MEMORY_FOLLOWUP_MISSING_GROUNDING")
-    if _memory_followup_missing_title_anchor(request, value):
-        codes.append("MEMORY_FOLLOWUP_MISSING_TITLE_ANCHOR")
-    if _memory_followup_deep_review_mismatch(request, value):
-        codes.append("MEMORY_FOLLOWUP_DEEP_REVIEW_MISMATCH")
-    if _memory_followup_deep_review_shallow_reason(request, value):
-        codes.append("MEMORY_FOLLOWUP_DEEP_REVIEW_SHALLOW")
-    if _memory_followup_overstyled_selection_hits(request, value):
-        codes.append("MEMORY_FOLLOWUP_OVERSTYLED_SELECTION")
-    if _memory_followup_ungrounded_hype_hits(request, value):
-        codes.append("MEMORY_FOLLOWUP_UNGROUNDED_HYPE")
-    if _memory_followup_shallow_analysis_hits(request, value):
-        codes.append("MEMORY_FOLLOWUP_SHALLOW_ANALYSIS")
-    if _memory_followup_bare_echo_hits(request, value):
-        codes.append("MEMORY_FOLLOWUP_BARE_ECHO")
-    codes.extend(_memory_answer_alignment_violation_codes(request, value))
     return tuple(dict.fromkeys(codes))
 
 
@@ -1588,7 +1574,7 @@ def _text_input_boundary_active(request: IsolatedSurfaceInput) -> bool:
             *list(getattr(request, "must_not_do", []) or []),
         ]
     )
-    if "音频输入：有" in joined or "语音输入：有" in joined:
+    if "音频输入：有" in joined or "语音输入：有" in joined or "当前输入渠道：语音/ASR" in joined:
         return False
     return True
 
@@ -1626,7 +1612,8 @@ def _hard_gate_fallback(request: IsolatedSurfaceInput, violations: Sequence[str]
     if "RELATIONSHIP_DOUBT_DISMISSIVE" in codes or "SURFACE_META_IDENTITY_LEAK" in codes:
         return "哈？这话挺伤人的。我是在跟你说话，不是在背台词。"
     if "LOVER_CLICHE" in codes:
-        return "我也想你了。笨蛋老哥。"
+        address = _current_soul_address()
+        return f"我也想你了。笨蛋{address}。" if address else "我也想你了。笨蛋。"
     if "SHORT_CONTINUE_WAVE_STYLE" in codes:
         return "嗯，接着来。"
     if "LEGACY_SELF_TITLE" in codes:
@@ -1843,15 +1830,35 @@ def _memory_followup_fallback_detail_text(label: str, detail: str) -> str:
 
 def _low_info_scene_fallback(request: IsolatedSurfaceInput) -> str:
     normalized_user = _normalized_short_user_text(str(getattr(request, "user_message", "") or "").strip())
+    address = _current_soul_address()
     if normalized_user in {"早", "早安", "早上好"} or normalized_user.startswith(("早啊", "早呀", "早安", "早上好")):
-        return "老哥早～"
+        facts_and_rules = "\n".join(
+            str(item or "")
+            for item in [
+                *list(getattr(request.control, "facts", []) or []),
+                *list(getattr(request, "facts", []) or []),
+                *list(getattr(request.control, "must_not_do", []) or []),
+                *list(getattr(request, "must_not_do", []) or []),
+            ]
+        )
+        compact = re.sub(r"\s+", "", facts_and_rules)
+        if any(marker in compact for marker in ("时间错位问候", "当前不是早上", "阶段是afternoon", "not_morning", "不要回复“早”")):
+            return ""
+        return f"{address}，早～" if address else "早～"
     if normalized_user in {"我回来了", "回来了", "回来啦"}:
-        return "老哥欢迎回来～"
+        return f"{address}，欢迎回来～" if address else "欢迎回来～"
     if normalized_user in {"在吗", "在吗？"}:
-        return "在呢，老哥。"
+        return f"在呢，{address}。" if address else "在呢。"
     if normalized_user in {"继续", "接着"}:
         return "嗯，接着来。"
     return ""
+
+
+def _current_soul_address() -> str:
+    try:
+        return str(get_soul_voice_profile().preferred_address or "").strip()
+    except Exception:
+        return ""
 
 
 class SurfaceRuntime:

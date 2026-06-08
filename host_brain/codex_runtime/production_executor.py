@@ -453,6 +453,20 @@ def _load_lightnovel_taste_profile() -> dict[str, Any]:
     return profile
 
 
+def _lightnovel_taste_profile_for_order(order: CodexWorkOrder) -> dict[str, Any]:
+    base_profile = _load_lightnovel_taste_profile()
+    try:
+        from host_brain.app.user_preference_store import build_lightnovel_dynamic_taste_profile
+
+        context = _resolve_order_chat_context(order)
+        return build_lightnovel_dynamic_taste_profile(
+            base_profile,
+            person_id=str(context.get("person_id") or "").strip(),
+        )
+    except Exception:
+        return base_profile
+
+
 def _parse_lightnovel_count(value: Any) -> float:
     if isinstance(value, (int, float)):
         return max(0.0, float(value))
@@ -983,7 +997,7 @@ def _score_lightnovel_recommendation_item(
     elif freshness > 0 or view_score + comment_score > 0:
         ranked["selection_reason"] = "公开信号较好：更新、热度或资料完整度较高"
     else:
-        ranked["selection_reason"] = "作为候选保留：等待更多偏好信号校准"
+        ranked["selection_reason"] = "作为候选保留：等待更多口味反馈校准"
     return ranked
 
 
@@ -1251,6 +1265,114 @@ def _find_lightnovel_recommendations_file(*, result: Mapping[str, Any], run_dir:
     return None
 
 
+def _materialize_lightnovel_recommendations_from_result(
+    *,
+    order: CodexWorkOrder,
+    result: Mapping[str, Any],
+    run_dir: Path,
+) -> Path | None:
+    skill_id = str(order.metadata.get("skill_id") or "").strip()
+    if skill_id != "codex_lightnovel_recommender":
+        return None
+
+    existing = _find_lightnovel_recommendations_file(result=result, run_dir=run_dir)
+    if existing is not None:
+        return existing
+
+    metadata = dict(result.get("metadata") or {}) if isinstance(result.get("metadata"), Mapping) else {}
+    candidate_items = _collect_lightnovel_candidate_items(metadata)
+    if not candidate_items:
+        return None
+
+    recommendations = _lightnovel_recommendations_from_browser_items(candidate_items)
+    if not recommendations:
+        return None
+
+    max_items = _parse_int_env("HOST_LIGHTNOVEL_RECOMMENDER_MAX_ITEMS", default=3, min_value=1, max_value=8)
+    detail_max_items = _parse_int_env("HOST_LIGHTNOVEL_RECOMMENDER_DETAIL_ENRICH_MAX", default=8, min_value=0, max_value=12)
+    detail_timeout_s = _parse_int_env("HOST_LIGHTNOVEL_RECOMMENDER_DETAIL_TIMEOUT_S", default=8, min_value=3, max_value=30)
+    taste_profile = _lightnovel_taste_profile_for_order(order)
+    pre_ranked_items = _rank_lightnovel_recommendations(
+        recommendations,
+        max_items=max_items,
+        profile=taste_profile,
+    )
+    enriched_items = _enrich_lightnovel_recommendations_from_details(
+        pre_ranked_items,
+        max_items=max(max_items, detail_max_items),
+        timeout_s=detail_timeout_s,
+    )
+    ranked_items = _rank_lightnovel_recommendations(
+        enriched_items,
+        max_items=max_items,
+        profile=taste_profile,
+    )
+    if not ranked_items:
+        return None
+
+    run_dir.mkdir(parents=True, exist_ok=True)
+    recommendations_path = run_dir / "recommendations.json"
+    cover_manifest_path = run_dir / "cover_manifest.json"
+    report_path = run_dir / "recommendation_report.md"
+    result_contract_path = run_dir / "result_contract.json"
+    recommendations_path.write_text(
+        json.dumps(
+            {
+                "schema_version": "Natsume.lightnovel_recommendations.v1",
+                "generated_ts_ms": now_ms(),
+                "source": "recovered_browser_research_candidates",
+                "recommendations": ranked_items,
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    cover_manifest_path.write_text(
+        json.dumps(
+            {
+                "schema_version": "Natsume.lightnovel_cover_manifest.v1",
+                "covers": [
+                    {
+                        "title": item.get("title") or item.get("title_display") or "",
+                        "detail_url": item.get("detail_url") or item.get("url") or "",
+                        "cover_url": item.get("cover_url") or "",
+                    }
+                    for item in ranked_items
+                    if str(item.get("cover_url") or "").strip()
+                ],
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    _write_native_lightnovel_report(
+        report_path=report_path,
+        ranked_items=ranked_items,
+        source_count=int(metadata.get("source_count") or 0),
+        readable_source_count=int(metadata.get("readable_source_count") or 0),
+    )
+    result_contract_path.write_text(
+        json.dumps(
+            {
+                "workorder_id": order.work_order_id,
+                "status": "complete",
+                "recommendation_count": len(ranked_items),
+                "recommendations_ref": str(recommendations_path),
+                "sources_ref": str(run_dir / "sources.jsonl"),
+                "report_ref": str(report_path),
+                "reason_code": None,
+                "recovered_from_interrupted_browser_research": True,
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    return recommendations_path
+
+
 def _recover_lightnovel_recommender_result(
     *,
     order: CodexWorkOrder,
@@ -1262,6 +1384,34 @@ def _recover_lightnovel_recommender_result(
     if skill_id != "codex_lightnovel_recommender":
         return recovered
     if str(recovered.get("status") or "").upper() == "EXECUTED":
+        if _find_lightnovel_recommendations_file(result=recovered, run_dir=run_dir) is not None:
+            return recovered
+        materialized_path = _materialize_lightnovel_recommendations_from_result(
+            order=order,
+            result=recovered,
+            run_dir=run_dir,
+        )
+        if materialized_path is not None:
+            metadata = dict(recovered.get("metadata") or {}) if isinstance(recovered.get("metadata"), Mapping) else {}
+            metadata.update(
+                {
+                    "workspace": str(run_dir),
+                    "recommendations_ref": str(materialized_path),
+                    "result_contract_ref": str(run_dir / "result_contract.json"),
+                    "report_path": str(run_dir / "recommendation_report.md"),
+                    "recovered_from_interrupted_browser_research": True,
+                    "recovery_reason_code": "LIGHTNOVEL_BROWSER_CANDIDATES_MATERIALIZED",
+                }
+            )
+            recovered.update(
+                {
+                    "summary": "Recovered lightnovel recommendations from interrupted browser research candidates.",
+                    "detail": "Host restarted after browser research and before recommendation delivery; recommendations were materialized from saved candidates.",
+                    "reason_code": None,
+                    "metadata": metadata,
+                }
+            )
+            return recovered
         return recovered
 
     for workspace in _candidate_lightnovel_workspace_paths(order=order, result=recovered, run_dir=run_dir):
@@ -1313,6 +1463,42 @@ def _recover_lightnovel_recommender_result(
                 or "Lightnovel recommendations completed and recovered from workspace artifacts.",
                 "reason_code": None,
                 "detail": "Codex wrapper failed after artifacts were written; completed recommendation artifacts were recovered.",
+                "risk_flags": risk_flags,
+                "metadata": metadata,
+            }
+        )
+        return recovered
+
+    materialized_path = _materialize_lightnovel_recommendations_from_result(
+        order=order,
+        result=recovered,
+        run_dir=run_dir,
+    )
+    if materialized_path is not None:
+        metadata = dict(recovered.get("metadata") or {}) if isinstance(recovered.get("metadata"), Mapping) else {}
+        metadata.update(
+            {
+                "workspace": str(run_dir),
+                "recommendations_ref": str(materialized_path),
+                "result_contract_ref": str(run_dir / "result_contract.json"),
+                "report_path": str(run_dir / "recommendation_report.md"),
+                "recovered_from_interrupted_browser_research": True,
+                "recovery_reason_code": "LIGHTNOVEL_BROWSER_CANDIDATES_MATERIALIZED",
+            }
+        )
+        risk_flags = [
+            str(flag)
+            for flag in recovered.get("risk_flags", [])
+            if str(flag).strip() and str(flag).strip() != "codex_exec_failed"
+        ]
+        risk_flags.append("lightnovel_interrupted_job_recovered")
+        recovered.update(
+            {
+                "status": "EXECUTED",
+                "summary": "Recovered lightnovel recommendations from interrupted browser research candidates.",
+                "result_text": recovered.get("result_text") or "Lightnovel recommendations recovered from saved browser candidates.",
+                "reason_code": None,
+                "detail": "Host restarted after browser research and before recommendation delivery; recommendations were materialized from saved candidates.",
                 "risk_flags": risk_flags,
                 "metadata": metadata,
             }
@@ -1886,13 +2072,22 @@ def execute_lightnovel_recommender_work_order(order: CodexWorkOrder, *, run_dir:
     max_items = _parse_int_env("HOST_LIGHTNOVEL_RECOMMENDER_MAX_ITEMS", default=3, min_value=1, max_value=8)
     detail_max_items = _parse_int_env("HOST_LIGHTNOVEL_RECOMMENDER_DETAIL_ENRICH_MAX", default=8, min_value=0, max_value=12)
     detail_timeout_s = _parse_int_env("HOST_LIGHTNOVEL_RECOMMENDER_DETAIL_TIMEOUT_S", default=8, min_value=3, max_value=30)
-    pre_ranked_items = _rank_lightnovel_recommendations(recommendations, max_items=max_items)
+    taste_profile = _lightnovel_taste_profile_for_order(order)
+    pre_ranked_items = _rank_lightnovel_recommendations(
+        recommendations,
+        max_items=max_items,
+        profile=taste_profile,
+    )
     enriched_items = _enrich_lightnovel_recommendations_from_details(
         pre_ranked_items,
         max_items=max(max_items, detail_max_items),
         timeout_s=detail_timeout_s,
     )
-    ranked_items = _rank_lightnovel_recommendations(enriched_items, max_items=max_items)
+    ranked_items = _rank_lightnovel_recommendations(
+        enriched_items,
+        max_items=max_items,
+        profile=taste_profile,
+    )
 
     recommendations_path = run_dir / "recommendations.json"
     cover_manifest_path = run_dir / "cover_manifest.json"
@@ -2499,6 +2694,61 @@ def _maybe_push_browser_research_to_gateway(
         }
 
 
+def _extract_gateway_message_ids(payload: Any) -> list[str]:
+    found: list[str] = []
+    seen: set[str] = set()
+    id_keys = {
+        "msg_id",
+        "message_id",
+        "gateway_message_id",
+        "target_msg_id",
+        "target_message_id",
+        "id",
+    }
+
+    def _add(value: Any) -> None:
+        text = str(value or "").strip()
+        if text and text not in seen:
+            seen.add(text)
+            found.append(text)
+
+    def _walk(value: Any, *, depth: int = 0) -> None:
+        if depth > 3:
+            return
+        if isinstance(value, Mapping):
+            for key, item in value.items():
+                clean_key = str(key or "").strip().lower()
+                if clean_key in id_keys:
+                    _add(item)
+                elif clean_key in {"result", "data", "payload", "message", "raw", "response"}:
+                    _walk(item, depth=depth + 1)
+        elif isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
+            for item in list(value)[:8]:
+                _walk(item, depth=depth + 1)
+
+    _walk(payload)
+    return found
+
+
+def _attach_lightnovel_card_message_ids(
+    items: Sequence[Mapping[str, Any]],
+    *,
+    card_results: Sequence[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    enriched: list[dict[str, Any]] = []
+    for index, item in enumerate(list(items or [])):
+        row = dict(item)
+        message_ids = [str(value or "").strip() for value in list(row.get("message_ids") or []) if str(value or "").strip()]
+        if index < len(card_results):
+            for message_id in _extract_gateway_message_ids(card_results[index]):
+                if message_id not in message_ids:
+                    message_ids.append(message_id)
+        if message_ids:
+            row["message_ids"] = message_ids
+        enriched.append(row)
+    return enriched
+
+
 def _maybe_push_lightnovel_recommendations_to_gateway(
     *,
     job_id: str,
@@ -2514,6 +2764,12 @@ def _maybe_push_lightnovel_recommendations_to_gateway(
 
     enabled, platform, conversation_id, route_detail = _resolve_lightnovel_gateway_route()
     recommendations_path = _find_lightnovel_recommendations_file(result=result, run_dir=run_dir)
+    if recommendations_path is None:
+        recommendations_path = _materialize_lightnovel_recommendations_from_result(
+            order=order,
+            result=result,
+            run_dir=run_dir,
+        )
     if recommendations_path is None:
         return {
             "status": "SKIPPED",
@@ -2533,7 +2789,12 @@ def _maybe_push_lightnovel_recommendations_to_gateway(
     payload = _read_json_file(recommendations_path)
     items = _coerce_recommendation_items(payload)
     max_items = _parse_int_env("HOST_LIGHTNOVEL_RECOMMENDER_GATEWAY_MAX_ITEMS", default=3, min_value=1, max_value=8)
-    ranked_items = _rank_lightnovel_recommendations(items, max_items=max_items)
+    taste_profile = _lightnovel_taste_profile_for_order(order)
+    ranked_items = _rank_lightnovel_recommendations(
+        items,
+        max_items=max_items,
+        profile=taste_profile,
+    )
     visible_ranked_items = _visible_lightnovel_ranked_items(ranked_items, max_items=max_items)
     ranked_ref = _write_lightnovel_ranked_recommendations(
         recommendations_path=recommendations_path,
@@ -2644,6 +2905,42 @@ def _maybe_push_lightnovel_recommendations_to_gateway(
                 job_id=job_id,
                 recommendations_path=recommendations_path,
             )
+        delivery_items = _attach_lightnovel_card_message_ids(
+            visible_ranked_items,
+            card_results=card_results,
+        )
+        delivery_log_result: dict[str, Any] | None = None
+        if bool(result_dict.get("success")):
+            try:
+                from host_brain.app.user_preference_store import (
+                    LIGHTNOVEL_DOMAIN,
+                    record_recommendation_delivery,
+                )
+
+                context = _resolve_order_chat_context(order)
+                delivery_log_result = record_recommendation_delivery(
+                    person_id=str(context.get("person_id") or "").strip() or None,
+                    session_id=str(context.get("session_id") or "").strip() or conversation_id,
+                    domain=LIGHTNOVEL_DOMAIN,
+                    platform=platform,
+                    conversation_id=conversation_id,
+                    request_id=str(context.get("request_id") or order.metadata.get("request_id") or "").strip(),
+                    job_id=job_id,
+                    recommendations_ref=str(recommendations_path),
+                    ranked_recommendations_ref=str(ranked_ref or ""),
+                    items=delivery_items,
+                    message_payload={
+                        "gateway_result": result_dict,
+                        "card_results": card_results,
+                        "overview_message": message,
+                    },
+                )
+            except Exception as pref_exc:
+                delivery_log_result = {
+                    "status": "FAILED",
+                    "reason_code": "RECOMMENDATION_DELIVERY_LOG_FAILED",
+                    "detail": str(pref_exc)[:160],
+                }
         delivery_for_memory = {
             "success": bool(result_dict.get("success")),
             "status": "SENT" if bool(result_dict.get("success")) else "FAILED",
@@ -2677,6 +2974,7 @@ def _maybe_push_lightnovel_recommendations_to_gateway(
             "gateway_result": result_dict,
             "card_results": card_results,
             "cover_results": card_results,
+            "delivery_log_result": delivery_log_result,
             "memory_result": memory_result,
         }
     except Exception as exc:  # pragma: no cover - external Gateway guard
@@ -2843,6 +3141,8 @@ def _run_background_job(
     try:
         result = _execute_worker(order, store=store, run_dir=run_dir)
         store.write_json(run_dir / "result.json", result)
+        result = _recover_lightnovel_recommender_result(order=order, result=result, run_dir=run_dir)
+        store.write_json(run_dir / "result.json", result)
         final_status = STATUS_COMPLETED if str(result.get("status") or "").upper() == "EXECUTED" else STATUS_FAILED
         detail = str(result.get("summary") or "Codex production worker finished.")
         completed = _set_job(
@@ -2852,47 +3152,65 @@ def _run_background_job(
             result=dict(result),
             error=None if final_status == STATUS_COMPLETED else str(result.get("detail") or result.get("reason_code") or ""),
         )
-        if completed is not None:
-            _persist_job(store, run_dir, completed)
-            store.write_json(
-                run_dir / "result_contract.json",
-                _result_contract(
-                    status="EXECUTED" if final_status == STATUS_COMPLETED else "DEGRADED",
-                    order=order,
-                    run_dir=run_dir,
-                    detail=detail,
-                    error=completed.error,
-                    result=result,
-                ).to_dict(),
+        if completed is None:
+            completed = CodexProductionJob(
+                job_id=job_id,
+                work_order_id=order.work_order_id,
+                skill_id=str(order.metadata.get("skill_id") or "").strip(),
+                status=final_status,
+                artifacts_dir=str(run_dir),
+                result_contract_ref=str(run_dir / "result_contract.json"),
+                request_id=str(order.metadata.get("request_id") or "").strip() or None,
+                detail=detail,
+                result=dict(result),
+                error=None if final_status == STATUS_COMPLETED else str(result.get("detail") or result.get("reason_code") or ""),
+                finished_ts_ms=now_ms(),
             )
-            _persist_production_job_memory(job=completed, order=order, result=result)
-            gateway_delivery = _maybe_push_browser_research_to_gateway(
+            with _JOBS_LOCK:
+                _JOBS[job_id] = completed
+        _persist_job(store, run_dir, completed)
+        store.write_json(
+            run_dir / "result_contract.json",
+            _result_contract(
+                status="EXECUTED" if final_status == STATUS_COMPLETED else "DEGRADED",
+                order=order,
+                run_dir=run_dir,
+                detail=detail,
+                error=completed.error,
+                result=result,
+            ).to_dict(),
+        )
+        _persist_production_job_memory(job=completed, order=order, result=result)
+        gateway_delivery = _maybe_push_browser_research_to_gateway(
+            job_id=job_id,
+            order=order,
+            result=result,
+            run_dir=run_dir,
+        )
+        if gateway_delivery is None:
+            gateway_delivery = _maybe_push_lightnovel_recommendations_to_gateway(
                 job_id=job_id,
                 order=order,
                 result=result,
                 run_dir=run_dir,
             )
-            if gateway_delivery is None:
-                gateway_delivery = _maybe_push_lightnovel_recommendations_to_gateway(
-                    job_id=job_id,
-                    order=order,
-                    result=result,
-                    run_dir=run_dir,
-                )
-            if gateway_delivery is None:
-                gateway_delivery = _maybe_push_lightnovel_epub_to_gateway(
-                    job_id=job_id,
-                    order=order,
-                    result=result,
-                    run_dir=run_dir,
-                )
-            if gateway_delivery is not None:
-                updated_result = dict(result)
-                updated_result["gateway_delivery"] = gateway_delivery
-                delivered = _set_job(job_id, result=updated_result)
-                if delivered is not None:
-                    _persist_job(store, run_dir, delivered)
-                    store.write_json(run_dir / "result.json", updated_result)
+        if gateway_delivery is None:
+            gateway_delivery = _maybe_push_lightnovel_epub_to_gateway(
+                job_id=job_id,
+                order=order,
+                result=result,
+                run_dir=run_dir,
+            )
+        if gateway_delivery is not None:
+            updated_result = dict(result)
+            updated_result["gateway_delivery"] = gateway_delivery
+            delivered = _set_job(job_id, result=updated_result)
+            if delivered is None:
+                completed.result = updated_result
+                completed.updated_ts_ms = now_ms()
+                delivered = completed
+            _persist_job(store, run_dir, delivered)
+            store.write_json(run_dir / "result.json", updated_result)
     except Exception as exc:  # pragma: no cover - defensive background guard
         failed = _set_job(
             job_id,
@@ -2907,6 +3225,145 @@ def _run_background_job(
                 _result_contract(status="FAILED", order=order, run_dir=run_dir, detail=failed.detail, error=str(exc)).to_dict(),
             )
             _persist_production_job_memory(job=failed, order=order, error=str(exc))
+
+
+def recover_interrupted_lightnovel_recommendation_jobs(
+    *,
+    artifacts_root: str | Path | None = None,
+    limit: int = 3,
+    max_age_hours: int = 72,
+    push_gateway: bool = True,
+) -> dict[str, Any]:
+    root_value = str(
+        artifacts_root
+        or os.environ.get("HOST_LIGHTNOVEL_RECOMMENDER_ARTIFACTS_ROOT")
+        or "artifacts/codex_runs/lightnovel_recommender"
+    ).strip()
+    if not root_value:
+        return {"status": "SKIPPED", "reason_code": "LIGHTNOVEL_RECOVERY_ROOT_MISSING", "recovered": 0}
+    root = Path(root_value).expanduser()
+    if not root.is_absolute():
+        root = Path.cwd() / root
+    if not root.exists() or not root.is_dir():
+        return {"status": "SKIPPED", "reason_code": "LIGHTNOVEL_RECOVERY_ROOT_NOT_FOUND", "root": str(root), "recovered": 0}
+
+    now_value = now_ms()
+    max_age_ms = max(1, int(max_age_hours)) * 60 * 60 * 1000
+    job_paths = sorted(
+        root.glob("*/production_job.json"),
+        key=lambda path: path.stat().st_mtime if path.exists() else 0,
+        reverse=True,
+    )
+    recovered_count = 0
+    scanned_count = 0
+    results: list[dict[str, Any]] = []
+    for job_path in job_paths:
+        if recovered_count >= max(1, int(limit)):
+            break
+        run_dir = job_path.parent
+        job_payload = _read_json_file(job_path)
+        if not isinstance(job_payload, Mapping):
+            continue
+        skill_id = str(job_payload.get("skill_id") or "").strip()
+        if skill_id != "codex_lightnovel_recommender":
+            continue
+        status = str(job_payload.get("status") or "").strip().upper()
+        if status not in {STATUS_QUEUED, STATUS_RUNNING, "RECOVERING"}:
+            continue
+        updated_ts = int(job_payload.get("updated_ts_ms") or job_payload.get("created_ts_ms") or 0)
+        if updated_ts and now_value - updated_ts > max_age_ms:
+            continue
+        result_payload = _read_json_file(run_dir / "result.json")
+        work_order_payload = _read_json_file(run_dir / "work_order.json")
+        if not isinstance(result_payload, Mapping) or not isinstance(work_order_payload, Mapping):
+            continue
+        if isinstance(result_payload.get("gateway_delivery"), Mapping) and bool(result_payload["gateway_delivery"].get("success")):
+            continue
+
+        scanned_count += 1
+        try:
+            order = CodexWorkOrder.from_mapping(dict(work_order_payload))
+            recovered_result = _recover_lightnovel_recommender_result(
+                order=order,
+                result=result_payload,
+                run_dir=run_dir,
+            )
+            final_status = STATUS_COMPLETED if str(recovered_result.get("status") or "").upper() == "EXECUTED" else STATUS_FAILED
+            detail = str(recovered_result.get("summary") or "Recovered interrupted lightnovel recommendation job.")
+            job_id = str(job_payload.get("job_id") or f"codex_job_recovered_{new_event_id()}").strip()
+            gateway_delivery = None
+            if push_gateway and final_status == STATUS_COMPLETED:
+                gateway_delivery = _maybe_push_lightnovel_recommendations_to_gateway(
+                    job_id=job_id,
+                    order=order,
+                    result=recovered_result,
+                    run_dir=run_dir,
+                )
+                if gateway_delivery is not None:
+                    recovered_result = dict(recovered_result)
+                    recovered_result["gateway_delivery"] = gateway_delivery
+            recovered_job = CodexProductionJob(
+                job_id=job_id,
+                work_order_id=str(job_payload.get("work_order_id") or order.work_order_id),
+                skill_id=skill_id,
+                status=final_status,
+                artifacts_dir=str(run_dir),
+                result_contract_ref=str(run_dir / "result_contract.json"),
+                request_id=str(job_payload.get("request_id") or order.metadata.get("request_id") or "").strip() or None,
+                detail=detail,
+                result=dict(recovered_result),
+                error=None if final_status == STATUS_COMPLETED else str(recovered_result.get("detail") or recovered_result.get("reason_code") or ""),
+                created_ts_ms=int(job_payload.get("created_ts_ms") or now_value),
+                updated_ts_ms=now_ms(),
+                finished_ts_ms=now_ms(),
+            )
+            with _JOBS_LOCK:
+                _JOBS[job_id] = recovered_job
+            job_path.write_text(json.dumps(recovered_job.to_dict(), ensure_ascii=False, indent=2), encoding="utf-8")
+            (run_dir / "result.json").write_text(json.dumps(recovered_result, ensure_ascii=False, indent=2), encoding="utf-8")
+            (run_dir / "result_contract.json").write_text(
+                json.dumps(
+                    _result_contract(
+                        status="EXECUTED" if final_status == STATUS_COMPLETED else "DEGRADED",
+                        order=order,
+                        run_dir=run_dir,
+                        detail=detail,
+                        error=recovered_job.error,
+                        result=recovered_result,
+                    ).to_dict(),
+                    ensure_ascii=False,
+                    indent=2,
+                ),
+                encoding="utf-8",
+            )
+            _persist_production_job_memory(job=recovered_job, order=order, result=recovered_result)
+            recovered_count += 1
+            results.append(
+                {
+                    "job_id": job_id,
+                    "work_order_id": order.work_order_id,
+                    "status": final_status,
+                    "gateway_delivery": gateway_delivery,
+                    "artifacts_dir": str(run_dir),
+                }
+            )
+        except Exception as exc:
+            results.append(
+                {
+                    "job_id": str(job_payload.get("job_id") or ""),
+                    "status": "FAILED",
+                    "reason_code": "LIGHTNOVEL_INTERRUPTED_JOB_RECOVERY_FAILED",
+                    "detail": str(exc)[:240],
+                    "artifacts_dir": str(run_dir),
+                }
+            )
+    return {
+        "status": "OK",
+        "root": str(root),
+        "scanned": scanned_count,
+        "recovered": recovered_count,
+        "results": results,
+    }
 
 
 def execute_codex_production_payload(payload: dict[str, Any]) -> dict[str, Any]:
@@ -3027,4 +3484,5 @@ __all__ = [
     "execute_codex_production_payload",
     "get_codex_production_job",
     "list_codex_production_jobs",
+    "recover_interrupted_lightnovel_recommendation_jobs",
 ]

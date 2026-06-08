@@ -26,7 +26,7 @@ from host_brain.persona.surface_influence_packet import (
     surface_influence_style_anchor,
     surface_influence_trace,
 )
-from host_brain.persona.surface_low_info_guidance import low_info_guidance_for_user_message
+from host_brain.persona.surface_low_info_guidance import SurfaceLowInfoGuidance, low_info_guidance_for_user_message
 
 
 _FORBIDDEN_RAW_CONTEXT_KEYS = frozenset(
@@ -159,6 +159,26 @@ def compile_reply_control_packet(
         task_mode=task.task_mode,
         response_move=task.response_move,
     )
+    if _has_temporal_greeting_mismatch(
+        user_message=user_message,
+        task_facts=task.facts,
+        necessary_facts=necessary_facts,
+        task_must_not_do=task.must_not_do,
+        explicit_must_not_do=must_not_do,
+    ):
+        low_info_guidance = SurfaceLowInfoGuidance(
+            scene_kind="temporal_mismatch_greeting",
+            facts=(
+                "当前用户用了早安类问候，但必要事实显示现在不是早上；本轮只按时间错位问候处理，不要推断用户睡眠、精神状态或故意程度。",
+            ),
+            style_anchor=(
+                "时间错位问候：先接住关系，再自然点出现在已经不是早上；保持 Soul.md 的说话质感，但不要评价用户状态或动机。",
+            ),
+            must_not_do=(
+                "不要把早安类用户输入直接顺成“早/早啊/早安/早上好”回复。",
+                "不要使用早安句法锚；不要编造刚醒、早餐、作息、精神状态、睡迷糊、故意逗你或装傻。",
+            ),
+        )
 
     emotional_tone = affect.emotional_tone or "neutral"
     relationship_distance = affect.relationship_distance or "familiar"
@@ -170,9 +190,9 @@ def compile_reply_control_packet(
     fact_max_chars = _memory_fact_max_chars(memory)
     facts = _clean_list(
         [
-            *low_info_guidance.facts,
             *task.facts,
             *_coerce_sequence(necessary_facts),
+            *low_info_guidance.facts,
             *(_ensure_memory_fact_prefix(fact) for fact in memory.facts),
             *surface_influence_facts(influence),
         ],
@@ -181,9 +201,9 @@ def compile_reply_control_packet(
     )
     packet_style_anchor = _clean_list(
         [
-            *low_info_guidance.style_anchor,
             *task.style_anchor,
             *_coerce_sequence(style_anchor),
+            *low_info_guidance.style_anchor,
             *_memory_recall_style_anchor(task=task, memory=memory),
             *memory.style_anchor,
             *affect.style_anchor,
@@ -194,9 +214,9 @@ def compile_reply_control_packet(
     )
     packet_must_not_do = _clean_list(
         [
-            *low_info_guidance.must_not_do,
             *task.must_not_do,
             *_coerce_sequence(must_not_do),
+            *low_info_guidance.must_not_do,
             *memory.must_not_do,
             *affect.must_not_do,
             *surface_influence_must_not_do(influence),
@@ -236,6 +256,37 @@ def compile_reply_control_packet(
         "surface_boundary": "ReplyControlPacket",
     }
     return SurfacePacketCompileResult(packet=packet, trace=trace)
+
+
+def _has_temporal_greeting_mismatch(
+    *,
+    user_message: Any,
+    task_facts: Sequence[Any] | None,
+    necessary_facts: Sequence[Any] | None,
+    task_must_not_do: Sequence[Any] | None,
+    explicit_must_not_do: Sequence[Any] | None,
+) -> bool:
+    compact_user = re.sub(r"\s+", "", str(user_message or "").strip())
+    if not re.search(r"^(早|早安|早上好)", compact_user):
+        return False
+    context = "\n".join(
+        str(item or "")
+        for seq in (task_facts, necessary_facts, task_must_not_do, explicit_must_not_do)
+        for item in _coerce_sequence(seq)
+    )
+    compact_context = re.sub(r"\s+", "", context)
+    return any(
+        marker in compact_context
+        for marker in (
+            "时间错位问候",
+            "当前不是早上",
+            "当前阶段是afternoon",
+            "阶段是afternoon",
+            "not_morning",
+            "不要回复“早”",
+            "不要直接按早晨回复",
+        )
+    )
 
 
 def compile_surface_input(

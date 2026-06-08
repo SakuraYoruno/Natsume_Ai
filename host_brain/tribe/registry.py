@@ -51,7 +51,7 @@ class HostTribeRegistry:
         default_agents: tuple[TribeAgentDescriptor, ...] = (
             TribeAgentDescriptor("cortex_orchestrator", "cortex", capabilities=("route", "governor", "handoff")),
             TribeAgentDescriptor("executive_router", "cortex", capabilities=("route", "delegate", "skill")),
-            TribeAgentDescriptor("chat_agent", "cortex", capabilities=("reply", "style", "render")),
+            TribeAgentDescriptor("surface_reply", "cortex", capabilities=("reply", "style", "render")),
             TribeAgentDescriptor("thalamus_agent", "thalamus", capabilities=("intent_compile", "schema_normalize", "handoff_pack")),
             TribeAgentDescriptor("ans_agent", "ans", capabilities=("scheduler", "mode_transition", "proactive_tick")),
             TribeAgentDescriptor("hippocampus_agent", "hippocampus", capabilities=("episodic_store", "recall_fusion")),

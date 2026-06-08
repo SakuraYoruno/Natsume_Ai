@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from dataclasses import dataclass, field
 import os
@@ -14,7 +14,7 @@ _INTERNAL_FIELD_RE = re.compile(
 _MOJIBAKE_RE = re.compile(r"(Ã.|â.|å.|ä.|�)")
 _CJK_RE = re.compile(r"[\u4e00-\u9fff]")
 _KANA_RE = re.compile(r"[\u3040-\u30ff]")
-_ROLE_PREFIX_RE = re.compile(r"^(新海天|天|assistant|ai|系统)\s*[：:]\s*", re.IGNORECASE)
+_ROLE_PREFIX_RE = re.compile(r"^(assistant|ai|系统)\s*[：:]\s*", re.IGNORECASE)
 _JSONISH_RE = re.compile(r"^\s*[\[{].*[\]}]\s*$", re.DOTALL)
 _BROKEN_REPEAT_RE = re.compile(r"(.{1,8})\1{3,}")
 _NONE_RUN_RE = re.compile(r"(?:None){4,}", re.IGNORECASE)
@@ -38,14 +38,14 @@ _SPEECH_QUOTE_RE = re.compile(r"[“\"'「『]([^“”\"'「」『』\r\n]{1,36
 
 _FORBIDDEN_TEXT_PATTERNS: tuple[str, ...] = (
     "哥哥! 👋",
-    "尼尼! 👋",
+    "对方! 👋",
     "哥哥！👋",
-    "尼尼！👋",
+    "对方！👋",
     "我哥",
     "您老",
     "因为。",
     "我刚刚在叫哥哥你呀",
-    "我刚刚在叫尼尼你呀",
+    "我刚刚在叫对方你呀",
     "我先看到的内容大概是",
     "我先看到的内容是",
     "内容大概是",
@@ -62,8 +62,8 @@ _FORBIDDEN_TEXT_PATTERNS: tuple[str, ...] = (
     "为你死都无所谓",
     "我们都住在一起了",
     "住在一起了，你还问熟不熟",
-    "谁让你是尼尼",
-    "尼尼的妹妹",
+    "谁让你是对方",
+    "对方的妹妹",
     "你妹",
     "身份证明",
     "身份证号",
@@ -119,7 +119,7 @@ _FORBIDDEN_TEXT_PATTERNS: tuple[str, ...] = (
     "什么为什么",
     "爱说不说",
     "等这么久",
-    "等尼尼好久",
+    "等对方好久",
     "太久我就",
     "不等了",
     "不等你",
@@ -164,8 +164,8 @@ _FORBIDDEN_TEXT_PATTERNS: tuple[str, ...] = (
     "说来听听",
     "讲来听听",
     "谁又惹",
-    "我们家尼尼",
-    "我家尼尼",
+    "我们家对方",
+    "我家对方",
     "饭吃了没",
     "反斜杠",
     "改成正的",
@@ -231,7 +231,7 @@ _FORBIDDEN_TEXT_PATTERNS: tuple[str, ...] = (
     "可怜兮兮",
     "勉强帮你",
     "顺手帮个忙",
-    "谁让你是我尼尼",
+    "谁让你是我对方",
     "我过来陪你",
     "过来陪你",
     "过来陪我",
@@ -322,7 +322,7 @@ _FORBIDDEN_TEXT_PATTERNS: tuple[str, ...] = (
     "有事说事",
     "别试探",
     "正好想到",
-    "想到尼尼",
+    "想到对方",
     "无聊想找人",
     "想找人拌嘴",
     "才找我",
@@ -576,7 +576,7 @@ _FORBIDDEN_TEXT_PATTERNS: tuple[str, ...] = (
     "听见了",
     "听到了",
     "头一回听",
-    "听尼尼",
+    "听对方",
     "刚好接到",
     "刚把游戏",
     "游戏也打开",
@@ -693,7 +693,7 @@ _FORBIDDEN_TEXT_PATTERNS: tuple[str, ...] = (
     "倒是打开我看看",
     "一眼就看出来",
     "先缓缓再说",
-    "你尼尼",
+    "你对方",
     "接招",
     "准备好接招",
     "我可盯着",
@@ -709,13 +709,13 @@ _FORBIDDEN_TEXT_PATTERNS: tuple[str, ...] = (
 
 _CRITICAL_FORBIDDEN_TEXT_PATTERNS: tuple[str, ...] = (
     "哥哥! 👋",
-    "尼尼! 👋",
+    "对方! 👋",
     "哥哥！👋",
-    "尼尼！👋",
+    "对方！👋",
     "我哥",
     "因为。",
     "我刚刚在叫哥哥你呀",
-    "我刚刚在叫尼尼你呀",
+    "我刚刚在叫对方你呀",
     "我先看到的内容大概是",
     "我先看到的内容是",
     "内容大概是",
@@ -752,7 +752,7 @@ _FORBIDDEN_TEXT_REGEXES: tuple[tuple[str, re.Pattern[str]], ...] = (
     ),
     (
         "fabricated_attention_debt",
-        re.compile(r"(总算|终于|还知道|居然).{0,12}(想起|记得|找|叫|回).{0,12}(我|尼尼|还有个我)")
+        re.compile(r"(总算|终于|还知道|居然).{0,12}(想起|记得|找|叫|回).{0,12}(我|对方|还有个我)")
     ),
     (
         "fabricated_script_snatch",
@@ -872,8 +872,8 @@ def _contextual_forbidden_hits(*, normalized: str, user_message: Any = "", scene
     hits: list[str] = []
     if user in {"早", "早安", "早上好", "hello", "你好", "hi", "hey"} or scene in {
         "daily_good_morning",
-        "daily_greeting_en",
-        "daily_greeting_cn",
+        "casual_hello_en",
+        "casual_hello_cn",
     }:
         if any(token in normalized for token in ("主动", "报到", "难得", "总算", "终于", "有空", "查岗")):
             hits.append("contextual_light_greeting_misread")
@@ -881,7 +881,7 @@ def _contextual_forbidden_hits(*, normalized: str, user_message: Any = "", scene
             hits.append("contextual_greeting_repeats_english_input")
         if any(token in normalized for token in ("国际路线", "走国际路线", "坐直", "转性", "不认识你", "从哪学", "哪学来的", "附身", "被谁附身", "商务邮件", "发错人")):
             hits.append("contextual_greeting_overplayed_bit")
-    if user in {"在吗", "在不在", "喂"} or scene == "presence":
+    if user in {"在吗", "在不在", "喂"} or scene == "availability_check":
         if any(token in normalized for token in ("催", "查岗", "审问", "盘问", "突然找", "突然叫", "别喊第二遍")):
             hits.append("contextual_presence_pressure_misread")
         if any(token in normalized for token in ("有事吗", "有什么事", "找我有事", "找我什么事")):
@@ -1061,7 +1061,7 @@ class TextQualityGate:
         if profile == "ja_voice":
             if not has_kana:
                 reasons.append("EXPECTED_JAPANESE_VOICE_TEXT")
-            if any(token in normalized for token in ("尼尼", "哥哥", "跑通了", "不用你管", "帮我")):
+            if any(token in normalized for token in ("对方", "哥哥", "跑通了", "不用你管", "帮我")):
                 reasons.append("EXPECTED_JAPANESE_VOICE_TEXT")
         else:
             if has_kana or (not has_cjk and normalized):

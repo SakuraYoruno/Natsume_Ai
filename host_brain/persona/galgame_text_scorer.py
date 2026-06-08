@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from dataclasses import dataclass
 import re
@@ -206,7 +206,7 @@ _ALLOWED_INFERENCE_MARKERS = (
     (
         "RELATION_STANCE_ALLOWED",
         (
-            "尼尼",
+            "对方",
             "见外",
             "想帮你",
             "我想帮",

@@ -1,4 +1,4 @@
-"""Edge voice pipeline orchestration (ASR upstream + playback linkage)."""
+﻿"""Edge voice pipeline orchestration (ASR upstream + playback linkage)."""
 
 from __future__ import annotations
 
@@ -128,7 +128,7 @@ def _speech_motion_config(payload: dict[str, Any] | None = None) -> dict[str, An
         "EDGE_VTS_SPEECH_FACE_PRIORITY_BODY_ONLY_ENABLED",
         default=True,
     )
-    enabled = motion_requested and (not face_capture_priority or body_only_when_face_priority)
+    enabled = motion_requested and not face_capture_priority
     face_motion_enabled = _parse_bool_env(
         "EDGE_VTS_SPEECH_FACE_MOTION_ENABLED",
         default=True,
@@ -1166,6 +1166,28 @@ class EdgeVoicePipeline:
         )
         return report_result
 
+    def _avatar_auto_state_speech_active(self) -> bool:
+        """Return whether avatar speech/mouth-sync state is currently active.
+
+        ASR-driven avatar reactions should not fight with an ongoing TTS/mouth-sync
+        session unless explicitly allowed by configuration. Keep this defensive so
+        contract tests and degraded runtimes do not crash when optional state
+        fields are absent.
+        """
+        debug = getattr(self, "_mouth_sync_debug", None)
+        if isinstance(debug, dict):
+            state = str(debug.get("state") or "").strip().lower()
+            if state in {"running", "talk_started", "queued", "starting"}:
+                return True
+            if bool(debug.get("started")):
+                return True
+        thread = getattr(self, "_mouth_sync_thread", None)
+        try:
+            if thread is not None and thread.is_alive():
+                return True
+        except Exception:
+            return False
+        return False
     def _maybe_apply_asr_avatar_behavior(
         self,
         *,
@@ -2065,6 +2087,7 @@ class EdgeVoicePipeline:
         }
 
     def _start_mouth_sync(self, synth_event: dict[str, Any], *, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        payload = dict(payload or {})
         if self.vts_driver is None:
             debug = {
                 "state": "skipped",
@@ -3091,3 +3114,4 @@ class EdgeVoicePipeline:
             confidence=event.get("confidence") if isinstance(event.get("confidence"), (int, float)) else None,
             final=bool(event.get("final", False)),
         )
+

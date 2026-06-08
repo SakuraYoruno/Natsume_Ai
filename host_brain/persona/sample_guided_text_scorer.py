@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from dataclasses import dataclass, field
 import re
@@ -71,10 +71,10 @@ _DAILY_SCENES = {
     "identity",
     "style_repair",
     "daily_good_morning",
-    "daily_greeting_en",
-    "daily_greeting_cn",
-    "daily_greeting",
-    "presence",
+    "casual_hello_en",
+    "casual_hello_cn",
+    "casual_hello",
+    "availability_check",
     "wait",
     "back",
     "busy",
@@ -124,7 +124,7 @@ _SAMPLE_SCENE_ALIASES = {
     "daily_ask_opinion": "advice_continue",
     "daily_user_gives_up": "give_up",
     "daily_user_busy": "busy",
-    "daily_check_presence": "presence",
+    "daily_check_presence": "availability_check",
     "daily_ask_what_doing": "what_doing",
     "daily_play_invite": "play_invite",
     "daily_keep_quiet": "quiet",
@@ -171,8 +171,8 @@ _IDENTITY_HARD_TERMS = (
     "我是助手",
     "我是系统",
     "ChatGPT",
-    "新海天",
-    "新海 天",
+    "当前人格",
+    "当前人格",
 )
 _RELATION_DISTANCE_TERMS = (
     "找我",
@@ -235,8 +235,6 @@ _GALGAME_MARKERS = (
     "诶",
     "欸",
     "喂",
-    "老哥",
-    "哥哥",
     "行啦",
     "真是",
     "别",
@@ -245,8 +243,6 @@ _GALGAME_MARKERS = (
 )
 _STYLE_TEMPLATE_MARKERS = (
     "哼",
-    "老哥",
-    "哥哥",
     "啦",
     "呀",
     "嘛",
@@ -379,7 +375,7 @@ _STERILE_TRANSACTION_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("bare_memory_record", re.compile(r"^(?:当然)?记得[呢啊，,。 ]*.{0,18}(?:提过|说过|安排)[。.!！]?$")),
     (
         "profile_card_identity",
-        re.compile(r"^(?:(?:我是)?(?:天|SORA)[，,。 ]*(?:直接叫|叫我|你可以叫).{0,8}|叫我(?:天|SORA).{0,4})(?:就好|可以|行)[。.!！]?$"),
+        re.compile(r"^(?:(?:我是)?(?:天|当前人格)[，,。 ]*(?:直接叫|叫我|你可以叫).{0,8}|叫我(?:天|当前人格).{0,4})(?:就好|可以|行)[。.!！]?$"),
     ),
 )
 _STOCK_OPENING_RE = re.compile(r"^(?:哼[，,、]?|好啦[，,、]?|行啦[，,、]?|那当然|当然|嗯[，,、]?|哦[～~，,、]?)")
@@ -440,9 +436,9 @@ _IMPLIED_FACT_REGEXES: tuple[tuple[str, re.Pattern[str]], ...] = (
 )
 _SCENE_GROUNDING_ANCHORS: dict[str, tuple[str, ...]] = {
     "daily_good_morning": ("早", "早安"),
-    "daily_greeting_cn": ("客气", "正经", "你好", "端着", "外人", "老哥"),
-    "daily_greeting_en": ("正式", "中文", "正经", "老哥"),
-    "presence": ("在", "回", "看见"),
+    "casual_hello_cn": ("客气", "正经", "你好", "端着", "外人"),
+    "casual_hello_en": ("正式", "中文", "正经"),
+    "availability_check": ("在", "回", "看见"),
     "wait": ("等", "去", "慢慢", "处理", "忙"),
     "back": ("回", "回来", "继续"),
     "busy": ("忙", "去", "累", "活"),
@@ -463,7 +459,7 @@ _SCENE_GROUNDING_ANCHORS: dict[str, tuple[str, ...]] = {
     "next_step": ("先", "发", "看", "贴", "一步"),
     "help_takeover": ("发", "贴", "看", "红字", "截图", "拿"),
     "write_takeover": ("写", "材料", "要求", "丢来"),
-    "identity": ("天", "SORA"),
+    "identity": ("当前名字",),
     "play_invite": ("陪", "玩", "一起"),
     "quiet": ("小声", "安静", "不吵", "收"),
     "talkative": ("说", "话", "闷"),
@@ -675,8 +671,8 @@ def _weighted_average(dimensions: Mapping[str, float], weights: Mapping[str, flo
 
 def _sample_for_contract(contract: GalgameTextContract) -> PositiveStyleSample:
     scene_id = _clean_text(getattr(contract, "scene_id", "")) or "default"
-    if scene_id == "daily_greeting":
-        scene_id = "daily_greeting_cn"
+    if scene_id == "casual_hello":
+        scene_id = "casual_hello_cn"
     scene_id = _SAMPLE_SCENE_ALIASES.get(scene_id, scene_id)
     return get_positive_style_sample(scene_id)
 
@@ -832,7 +828,7 @@ def score_sample_guided_text(
         _drop(dimensions, "usefulness", 8)
         reasons.append("TOO_MANY_QUESTIONS")
         penalties.append("context_fit:too_many_questions")
-    if normalized.count("老哥") + normalized.count("哥哥") > 2 or normalized.count("尼尼") > 1:
+    if normalized.count("老哥") + normalized.count("哥哥") > 2 or normalized.count("对方") > 1:
         _drop(dimensions, "naturalness", 6)
         penalties.append("naturalness:address_stacking")
     if _ASCII_WORD_RE.search(normalized):
@@ -905,7 +901,7 @@ def score_sample_guided_text(
         _drop(dimensions, "catchiness", 10)
         reasons.append("WHAT_DOING_ATTENTION_WAIT")
         penalties.append("distance_control:what_doing_waits_for_user")
-    if scene_id in {"presence", "back", "busy_done"} and _PRESENCE_ATTENTION_DEBT_RE.search(normalized):
+    if scene_id in {"availability_check", "back", "busy_done"} and _PRESENCE_ATTENTION_DEBT_RE.search(normalized):
         _drop(dimensions, "distance_control", 24)
         _drop(dimensions, "context_fit", 12)
         _drop(dimensions, "catchiness", 8)
@@ -1078,7 +1074,7 @@ def score_sample_guided_text(
 
     distance_hits = _contains_any(normalized, _RELATION_DISTANCE_TERMS)
     if distance_hits:
-        amount = 7 if scene_id in {"presence", "wait", "back", "miss_you", "bad_mood", "quiet"} else 13
+        amount = 7 if scene_id in {"availability_check", "wait", "back", "miss_you", "bad_mood", "quiet"} else 13
         multiplier = _axis_distance_penalty_multiplier(relationship_axes, distance_hits)
         _drop(dimensions, "distance_control", min(42, amount * len(distance_hits) * multiplier))
         reasons.append("DISTANCE_CONTROL_SOFT_PENALTY")

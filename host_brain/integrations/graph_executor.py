@@ -69,7 +69,7 @@ _TRUSTED_HANDLER_ALLOWLIST: frozenset[str] = frozenset({
 # ---------------------------------------------------------------------------
 
 _AGENT_HANDLER_MAP: dict[str, str] = {
-    "chat_agent":      "chat_agent",
+    "surface_reply":      "surface_reply",
     "translate_agent": "translate_agent",
     "intent_agent":    "intent_agent",
     "judge_agent":     "judge_agent",
@@ -159,7 +159,7 @@ class GraphExecutor:
             payload = dict(output or state.get("payload") or {})
             payload.pop("__next_node__", None)
 
-            # P16：need_judge 快路径（chat_agent 等不需要 judge 时直接跳 chat_render_node）
+            # P16：need_judge 快路径（surface_reply 等不需要 judge 时直接跳 chat_render_node）
             supervisor_info = dict(payload.get("supervisor_dispatch") or {})
             need_judge = bool(supervisor_info.get("need_judge", True))
             if need_judge:

@@ -1,98 +1,151 @@
 {
-  "doc_id": "wc-004-persona-growth-rules",
-  "title": "人格成长规则配置",
-  "body": "定义 AI 伴侣人格成长的触发规则和变化量。Master 可通过 Canon API 修改规则，无需改代码。所有规则变更自动走版本化审计链。stage_promotion_rules 定义 Bond 阶段晋级时的特质微调；milestone_rules 定义里程碑事件的特质微调；interaction_trait_map 定义交互驱动成长的特质权重映射。",
-  "stage_promotion_rules": {
-    "FRIEND→CLOSE_FRIEND": {
-      "delta": {"playfulness": 0.05, "warmth": 0.03, "sensitivity": 0.02},
-      "description": "关系更亲近：俏皮度 +0.05，温柔度 +0.03，敏感度 +0.02",
-      "one_time": true
-    },
-    "CLOSE_FRIEND→CONFIDANT": {
-      "delta": {"humor": 0.05, "assertiveness": 0.03},
-      "description": "成为挚友：幽默感 +0.05，自信度 +0.03",
-      "one_time": true
-    },
-    "CONFIDANT→SOULMATE": {
-      "delta": {"resilience": 0.05, "curiosity": 0.03},
-      "description": "成为灵魂伴侣：韧性 +0.05，好奇心 +0.03",
-      "one_time": true
-    }
-  },
-  "milestone_rules": {
-    "first_deep_talk": {
-      "delta": {"sensitivity": 0.02, "curiosity": 0.02},
-      "description": "初次深度对话：敏感度 +0.02，好奇心 +0.02",
-      "one_time": true
-    },
-    "first_emotional_support": {
-      "delta": {"warmth": 0.03, "resilience": 0.02},
-      "description": "首次情感支持：温柔度 +0.03，韧性 +0.02",
-      "one_time": true
-    },
-    "first_conflict_resolved": {
-      "delta": {"resilience": 0.04, "assertiveness": 0.02},
-      "description": "首次冲突修复：韧性 +0.04，自信度 +0.02",
-      "one_time": true
-    },
-    "late_night_companion": {
-      "delta": {"warmth": 0.02, "sensitivity": 0.01},
-      "description": "深夜陪伴：温柔度 +0.02，敏感度 +0.01",
-      "one_time": true
-    },
-    "stage_promoted": {
-      "delta": {"resilience": 0.01, "curiosity": 0.01},
-      "description": "每次阶段晋级：韧性 +0.01，好奇心 +0.01",
-      "one_time": false
-    },
-    "deep_talk_50": {
-      "delta": {"curiosity": 0.03},
-      "description": "深度对话累计超过 50 次：好奇心 +0.03",
-      "one_time": true
-    },
-    "emotional_support_20": {
-      "delta": {"resilience": 0.05},
-      "description": "情感支持累计超过 20 次：韧性 +0.05",
-      "one_time": true
-    }
-  },
-  "interaction_trait_map": {
-    "INTERACTION_DEEP": {
-      "curiosity": 0.40, "sensitivity": 0.30, "warmth": 0.20, "resilience": 0.10
-    },
-    "DEEP_TALK": {
-      "curiosity": 0.40, "sensitivity": 0.30, "warmth": 0.20, "resilience": 0.10
-    },
-    "INTERACTION_ENGAGED": {
-      "curiosity": 0.30, "playfulness": 0.25, "warmth": 0.25, "humor": 0.20
-    },
-    "EMOTIONAL_SUPPORT": {
-      "warmth": 0.40, "sensitivity": 0.30, "resilience": 0.30
-    },
-    "CONFLICT_RESOLVED": {
-      "resilience": 0.40, "assertiveness": 0.30, "warmth": 0.30
-    },
-    "INTERACTION_MINIMAL": {
-      "playfulness": 0.40, "humor": 0.30, "warmth": 0.30
-    },
-    "MILESTONE": {
-      "warmth": 0.20, "curiosity": 0.20, "resilience": 0.20, "sensitivity": 0.15, "playfulness": 0.15, "humor": 0.10
-    }
-  },
-  "growth_params": {
-    "base_delta": 0.01,
-    "min_interaction_ratio": 0.15,
-    "diminishing_threshold": 0.85,
-    "min_interactions_per_cycle": 5,
-    "feedback_explicit_weight": 1.0,
-    "feedback_implicit_weight": 0.3,
-    "feedback_min_signals": 3,
-    "feedback_signal_threshold": 0.2
-  },
-  "hash": "",
-  "status": "active",
-  "tags": ["persona", "growth", "configurable"],
-  "ts_ms": 1743091200000,
-  "updated_by": "seed_init",
-  "version": 1
+    "doc_id":  "wc-004-persona-growth-rules",
+    "title":  "人格成长规则配置",
+    "body":  "定义 AI 伴侣人格成长的触发规则和变化量。Master 可通过 Canon API 修改规则，无需改代码。所有规则变更自动走版本化审计链。stage_promotion_rules 定义 Bond 阶段晋级时的特质微调；milestone_rules 定义里程碑事件的特质微调；interaction_trait_map 定义交互驱动成长的特质权重映射。",
+    "stage_promotion_rules":  {
+                                  "FRIEND→CLOSE_FRIEND":  {
+                                                              "delta":  {
+                                                                            "playfulness":  0.05,
+                                                                            "warmth":  0.03,
+                                                                            "sensitivity":  0.02
+                                                                        },
+                                                              "description":  "关系更亲近：俏皮度 +0.05，温柔度 +0.03，敏感度 +0.02",
+                                                              "one_time":  true
+                                                          },
+                                  "CLOSE_FRIEND→CONFIDANT":  {
+                                                                 "delta":  {
+                                                                               "humor":  0.05,
+                                                                               "assertiveness":  0.03
+                                                                           },
+                                                                 "description":  "成为挚友：幽默感 +0.05，自信度 +0.03",
+                                                                 "one_time":  true
+                                                             },
+                                  "CONFIDANT→SOULMATE":  {
+                                                             "delta":  {
+                                                                           "resilience":  0.05,
+                                                                           "curiosity":  0.03
+                                                                       },
+                                                             "description":  "成为灵魂伴侣：韧性 +0.05，好奇心 +0.03",
+                                                             "one_time":  true
+                                                         }
+                              },
+    "milestone_rules":  {
+                            "first_deep_talk":  {
+                                                    "delta":  {
+                                                                  "sensitivity":  0.02,
+                                                                  "curiosity":  0.02
+                                                              },
+                                                    "description":  "初次深度对话：敏感度 +0.02，好奇心 +0.02",
+                                                    "one_time":  true
+                                                },
+                            "first_emotional_support":  {
+                                                            "delta":  {
+                                                                          "warmth":  0.03,
+                                                                          "resilience":  0.02
+                                                                      },
+                                                            "description":  "首次情感支持：温柔度 +0.03，韧性 +0.02",
+                                                            "one_time":  true
+                                                        },
+                            "first_conflict_resolved":  {
+                                                            "delta":  {
+                                                                          "resilience":  0.04,
+                                                                          "assertiveness":  0.02
+                                                                      },
+                                                            "description":  "首次冲突修复：韧性 +0.04，自信度 +0.02",
+                                                            "one_time":  true
+                                                        },
+                            "late_night_companion":  {
+                                                         "delta":  {
+                                                                       "warmth":  0.02,
+                                                                       "sensitivity":  0.01
+                                                                   },
+                                                         "description":  "深夜陪伴：温柔度 +0.02，敏感度 +0.01",
+                                                         "one_time":  true
+                                                     },
+                            "stage_promoted":  {
+                                                   "delta":  {
+                                                                 "resilience":  0.01,
+                                                                 "curiosity":  0.01
+                                                             },
+                                                   "description":  "每次阶段晋级：韧性 +0.01，好奇心 +0.01",
+                                                   "one_time":  false
+                                               },
+                            "deep_talk_50":  {
+                                                 "delta":  {
+                                                               "curiosity":  0.03
+                                                           },
+                                                 "description":  "深度对话累计超过 50 次：好奇心 +0.03",
+                                                 "one_time":  true
+                                             },
+                            "emotional_support_20":  {
+                                                         "delta":  {
+                                                                       "resilience":  0.05
+                                                                   },
+                                                         "description":  "情感支持累计超过 20 次：韧性 +0.05",
+                                                         "one_time":  true
+                                                     }
+                        },
+    "interaction_trait_map":  {
+                                  "INTERACTION_DEEP":  {
+                                                           "curiosity":  0.40,
+                                                           "sensitivity":  0.30,
+                                                           "warmth":  0.20,
+                                                           "resilience":  0.10
+                                                       },
+                                  "DEEP_TALK":  {
+                                                    "curiosity":  0.40,
+                                                    "sensitivity":  0.30,
+                                                    "warmth":  0.20,
+                                                    "resilience":  0.10
+                                                },
+                                  "INTERACTION_ENGAGED":  {
+                                                              "curiosity":  0.30,
+                                                              "playfulness":  0.25,
+                                                              "warmth":  0.25,
+                                                              "humor":  0.20
+                                                          },
+                                  "EMOTIONAL_SUPPORT":  {
+                                                            "warmth":  0.40,
+                                                            "sensitivity":  0.30,
+                                                            "resilience":  0.30
+                                                        },
+                                  "CONFLICT_RESOLVED":  {
+                                                            "resilience":  0.40,
+                                                            "assertiveness":  0.30,
+                                                            "warmth":  0.30
+                                                        },
+                                  "INTERACTION_MINIMAL":  {
+                                                              "playfulness":  0.40,
+                                                              "humor":  0.30,
+                                                              "warmth":  0.30
+                                                          },
+                                  "MILESTONE":  {
+                                                    "warmth":  0.20,
+                                                    "curiosity":  0.20,
+                                                    "resilience":  0.20,
+                                                    "sensitivity":  0.15,
+                                                    "playfulness":  0.15,
+                                                    "humor":  0.10
+                                                }
+                              },
+    "growth_params":  {
+                          "base_delta":  0.01,
+                          "min_interaction_ratio":  0.15,
+                          "diminishing_threshold":  0.85,
+                          "min_interactions_per_cycle":  5,
+                          "feedback_explicit_weight":  1.0,
+                          "feedback_implicit_weight":  0.3,
+                          "feedback_min_signals":  3,
+                          "feedback_signal_threshold":  0.2
+                      },
+    "hash":  "",
+    "status":  "active",
+    "tags":  [
+                 "persona",
+                 "growth",
+                 "configurable"
+             ],
+    "ts_ms":  1743091200000,
+    "updated_by":  "seed_init",
+    "version":  1
 }

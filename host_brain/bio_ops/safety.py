@@ -23,7 +23,7 @@ BIO_OPS_OWNER_ORGANS: tuple[str, ...] = (
     "prefrontal_agent",
     "default_mode_agent",
     "thalamus_agent",
-    "chat_agent",
+    "surface_reply",
     "limbic_agent",
     "somatic_agent",
 )

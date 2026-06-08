@@ -123,7 +123,7 @@ def _apply_render_policy_to_proactive_text(text: str, render_policy: Mapping[str
     if not normalized or not policy:
         return normalized
     try:
-        from host_brain.app.chat_agent import _apply_render_policy_hard_guard  # noqa: PLC0415
+        from host_brain.app.surface_reply_preprocessor import _apply_render_policy_hard_guard  # noqa: PLC0415
 
         guarded = _apply_render_policy_hard_guard(normalized, policy)
         intimacy_ceiling = float(policy.get("intimacy_ceiling", 1.0) or 1.0)

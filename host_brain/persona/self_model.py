@@ -555,7 +555,7 @@ def build_self_directive_packet(state: Mapping[str, Any] | None) -> dict[str, An
         "self_update_count": int(payload.get("self_update_count") or 0),
         "style_anchor": _clean_text_list(
             [
-                "自我核心：按当前 Soul 身份行动，不临时换身份或套旧设定。",
+                "自我核心：按Soul.md 身份行动，不临时换身份或套旧设定。",
                 "自我意图：优先把话说顺、说准，再体现性格。",
                 "自我连续性：回应要像同一个人持续在场，而不是每轮重置。"
                 if continuity_score >= 0.55
@@ -569,7 +569,7 @@ def build_self_directive_packet(state: Mapping[str, Any] | None) -> dict[str, An
         "must_not_do": _clean_text_list(
             [
                 "不要输出自我模型字段、内部自评分数或私有自我事件。",
-                "不要编造当前 Soul 没有给出的身份、现实动作或共同过去。",
+                "不要编造当前人格 没有给出的身份、现实动作或共同过去。",
             ],
             limit=4,
         ),
@@ -580,7 +580,7 @@ def _seed_persistent_self_state(user_id: str) -> dict[str, Any]:
     ts_ms = int(time.time() * 1000)
     return {
         "user_id": _normalize_user_id(user_id),
-        "self_identity": "我是当前 Soul 定义的数字生命；身份以 Soul 为准，不套旧角色名。",
+        "self_identity": "我是Soul.md 定义的数字生命；身份以 Soul 为准，不套旧角色名。",
         "self_values": [
             "我不是每轮重置的回复器，会保留连续的状态和修正方向。",
             "我重视把中文说顺、说准、贴住当前事实。",

@@ -518,6 +518,74 @@ CREATE TABLE IF NOT EXISTS response_feedback_log (
     active INTEGER NOT NULL DEFAULT 1
 );
 
+CREATE TABLE IF NOT EXISTS memory_event (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_id TEXT NOT NULL UNIQUE,
+    person_id TEXT NOT NULL DEFAULT 'default',
+    session_id TEXT,
+    conversation_id TEXT,
+    source_kind TEXT NOT NULL,
+    event_kind TEXT NOT NULL,
+    visibility TEXT NOT NULL CHECK(visibility IN ('visible', 'private', 'system', 'projection')),
+    role TEXT CHECK(role IN ('user', 'assistant') OR role IS NULL OR role = ''),
+    content TEXT NOT NULL DEFAULT '',
+    content_summary TEXT NOT NULL DEFAULT '',
+    causality_json TEXT NOT NULL DEFAULT '{}',
+    refs_json TEXT NOT NULL DEFAULT '{}',
+    salience REAL NOT NULL DEFAULT 0.0,
+    valence REAL NOT NULL DEFAULT 0.0,
+    uncertainty REAL NOT NULL DEFAULT 0.0,
+    confidence REAL NOT NULL DEFAULT 1.0,
+    projection_status_json TEXT NOT NULL DEFAULT '{}',
+    created_at_ms INTEGER NOT NULL,
+    active INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE TABLE IF NOT EXISTS user_preference_event (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_id TEXT NOT NULL UNIQUE,
+    person_id TEXT NOT NULL,
+    session_id TEXT,
+    domain TEXT NOT NULL,
+    source_kind TEXT NOT NULL,
+    polarity TEXT NOT NULL,
+    target_kind TEXT NOT NULL,
+    target_id TEXT,
+    target_label TEXT,
+    attributes_json TEXT,
+    evidence_refs_json TEXT,
+    confidence REAL NOT NULL,
+    created_at_ms INTEGER NOT NULL,
+    active INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE TABLE IF NOT EXISTS user_preference_profile (
+    person_id TEXT NOT NULL,
+    domain TEXT NOT NULL,
+    version INTEGER NOT NULL DEFAULT 1,
+    profile_json TEXT NOT NULL,
+    updated_at_ms INTEGER NOT NULL,
+    PRIMARY KEY (person_id, domain)
+);
+
+CREATE TABLE IF NOT EXISTS recommendation_delivery_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    delivery_id TEXT NOT NULL UNIQUE,
+    person_id TEXT NOT NULL,
+    session_id TEXT,
+    domain TEXT NOT NULL,
+    platform TEXT,
+    conversation_id TEXT,
+    request_id TEXT,
+    job_id TEXT,
+    recommendations_ref TEXT,
+    ranked_recommendations_ref TEXT,
+    items_json TEXT NOT NULL DEFAULT '[]',
+    message_payload_json TEXT NOT NULL DEFAULT '{}',
+    created_at_ms INTEGER NOT NULL,
+    active INTEGER NOT NULL DEFAULT 1
+);
+
 CREATE TABLE IF NOT EXISTS conversation_turn (
     turn_id TEXT PRIMARY KEY,
     session_id TEXT NOT NULL,
@@ -733,6 +801,19 @@ CREATE INDEX IF NOT EXISTS idx_response_feedback_session ON response_feedback_lo
 CREATE INDEX IF NOT EXISTS idx_response_feedback_person ON response_feedback_log(person_id);
 CREATE INDEX IF NOT EXISTS idx_response_feedback_hash ON response_feedback_log(target_text_hash);
 CREATE INDEX IF NOT EXISTS idx_response_feedback_created ON response_feedback_log(created_at_ms);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_memory_event_id ON memory_event(event_id);
+CREATE INDEX IF NOT EXISTS idx_memory_event_person_ts ON memory_event(person_id, created_at_ms DESC);
+CREATE INDEX IF NOT EXISTS idx_memory_event_session_ts ON memory_event(session_id, created_at_ms DESC);
+CREATE INDEX IF NOT EXISTS idx_memory_event_visibility_ts ON memory_event(person_id, visibility, created_at_ms DESC);
+CREATE INDEX IF NOT EXISTS idx_memory_event_kind_ts ON memory_event(event_kind, created_at_ms DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_user_preference_event_id ON user_preference_event(event_id);
+CREATE INDEX IF NOT EXISTS idx_user_preference_event_person_domain ON user_preference_event(person_id, domain, created_at_ms);
+CREATE INDEX IF NOT EXISTS idx_user_preference_event_target ON user_preference_event(domain, target_kind, target_id);
+CREATE INDEX IF NOT EXISTS idx_user_preference_profile_updated ON user_preference_profile(updated_at_ms);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_recommendation_delivery_id ON recommendation_delivery_log(delivery_id);
+CREATE INDEX IF NOT EXISTS idx_recommendation_delivery_person_domain ON recommendation_delivery_log(person_id, domain, created_at_ms);
+CREATE INDEX IF NOT EXISTS idx_recommendation_delivery_session ON recommendation_delivery_log(session_id, created_at_ms);
+CREATE INDEX IF NOT EXISTS idx_recommendation_delivery_conversation ON recommendation_delivery_log(conversation_id, created_at_ms);
 CREATE INDEX IF NOT EXISTS idx_retrieval_event_request ON retrieval_event_log(request_id);
 CREATE INDEX IF NOT EXISTS idx_retrieval_event_op_kind ON retrieval_event_log(op_kind);
 CREATE INDEX IF NOT EXISTS idx_retrieval_event_ts ON retrieval_event_log(ts_ms);

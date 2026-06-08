@@ -1,7 +1,7 @@
 {
-  "body": "单写者原则：每个 Canon 文档只能通过 WorldCanonStore.upsert_document 写入，禁止直接修改文件。审计不可篡改：所有 canon_change_log 条目写入后不得删除或修改，仅允许追加。分槽隔离：World Canon 条目只能注入 prompt_context.authoritative.world_canon 槽位，不得与 style_pack、retrieval.episodic 或 recent_events 混槽。幂等同步：canon_sync 对相同 hash 的条目重复扫描不产生重复 change_log 条目。",
+  "body": "单写者原则：每个 Canon 文档只能通过 WorldCanonStore.upsert_document 写入，禁止直接修改文件。审计不可篡改：所有 canon_change_log 条目写入后不得删除或修改，仅允许追加。分槽隔离：World Canon 条目只能注入 prompt_context.authoritative.world_canon 槽位，不得与 retrieval.episodic 或 recent_events 混槽。幂等同步：canon_sync 对相同 hash 的条目重复扫描不产生重复 change_log 条目。",
   "doc_id": "wc-002-architecture-invariants",
-  "hash": "ad9d1e37718ae2350cc15ad535c67bd2b3888f2aea8b18b251927f696c901c27",
+  "hash": "6c281ba4589042e52939ca6a0d0a126573c1a5850a7851fc74d2f71c9c6c3960",
   "status": "active",
   "tags": [
     "architecture",

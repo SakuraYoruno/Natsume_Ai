@@ -1,16 +1,21 @@
 from __future__ import annotations
 
+import csv
 import difflib
 import json
 import os
 import re
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 from urllib.parse import urlparse
 
 
 DEFAULT_SURFACE_ORIGINAL_QUOTE_COLLECTION = "surface_original_quotes"
 DEFAULT_SURFACE_ORIGINAL_QUOTE_VECTOR_DIM = 1024
+DEFAULT_RIDDLE_JOKER_DIALOGUE_COLLECTION = "riddle_joker_dialogue_zh"
+DEFAULT_RIDDLE_JOKER_DIALOGUE_TSV = r"D:\HF_Datasets\Limour\riddle_joker_dialogue\RIDDLE_JOKER_zh_dialogue.tsv"
+DEFAULT_RIDDLE_JOKER_DIALOGUE_MIN_SCORE = 0.42
 
 _CJK_RE = re.compile(r"[\u4e00-\u9fff]")
 _KANA_RE = re.compile(r"[\u3040-\u30ff]")
@@ -128,6 +133,7 @@ _RUNTIME_UNSAFE_MARKERS = (
     "满足我",
     "爱上哥哥",
     "求抱抱",
+    "碧池",
     "哈啊",
     "舒服吗",
     "我的里面",
@@ -144,6 +150,7 @@ _RUNTIME_OVERBOUND_RELATION_MARKERS = (
 _SCENE_LEXICAL_HINTS: dict[str, tuple[str, ...]] = {
     "short_continue": ("继续", "接下来", "怎么办", "那就", "行吧", "好吧", "等一下", "重来", "再给"),
     "negative_feedback": ("哈？", "谁稀罕", "才不是", "什么嘛", "好烦", "烦死", "笨蛋", "重来"),
+    "temporal_mismatch_greeting": ("早上好", "早啊", "早安", "下午", "现在", "不是", "已经", "时间", "重来", "随便", "稀罕"),
     "pushed_away_boundary": ("谁稀罕", "管你", "别管", "听见没", "随便你"),
     "return_chat": ("回来", "欢迎回来", "我回来了", "看见"),
     "lover_presence": ("想你", "想见", "喜欢", "抱"),
@@ -158,6 +165,7 @@ _SCENE_REQUIRES_LEXICAL_HIT = frozenset(
     {
         "short_continue",
         "negative_feedback",
+        "temporal_mismatch_greeting",
         "pushed_away_boundary",
         "return_chat",
         "technical_next_step",
@@ -174,11 +182,24 @@ _SCENE_REQUIRES_LEXICAL_HIT = frozenset(
 _STRONG_SCENE_DEFAULT_LIMITS = {
     "short_continue": 3,
     "negative_feedback": 4,
+    "temporal_mismatch_greeting": 6,
     "pushed_away_boundary": 2,
     "lover_presence": 3,
     "ambiguous_affection": 1,
 }
 _SCENE_BLOCKED_MARKERS: dict[str, tuple[str, ...]] = {
+    "temporal_mismatch_greeting": (
+        "我现在还在上课",
+        "上课呢",
+        "有课的",
+        "晚安",
+        "回房去休息",
+        "睡觉啦",
+        "深夜",
+        "午休",
+        "早饭了",
+        "睡回笼觉",
+    ),
     "return_chat": ("每周回来", "周末回家", "回家住"),
     "lover_presence": (
         "一心一意",
@@ -325,6 +346,7 @@ def clear_surface_original_quote_bank_cache() -> None:
 
     _VECTOR_CLIENT_CACHE.clear()
     _VECTOR_ROW_CACHE.clear()
+    _RIDDLE_JOKER_ROW_CACHE.clear()
 
 
 def surface_original_quotes_enabled() -> bool:
@@ -342,13 +364,29 @@ def select_surface_original_quotes(query: SurfaceOriginalQuoteQuery, *, limit: i
     effective_limit = max(1, min(int(limit or query.limit or 12), int(query.limit or 12), int(policy.max_quotes or 1)))
     candidate_top_k = max(policy.candidate_top_k, effective_limit * 4)
     try:
-        rows = _query_surface_original_quote_collection(query, top_k=candidate_top_k)
+        rows = _query_riddle_joker_dialogue_vector_collection(query, top_k=candidate_top_k)
     except Exception as exc:
-        return SurfaceOriginalQuoteSelection(
-            query=query,
-            degraded=True,
-            reason=f"SURFACE_ORIGINAL_QUOTES_VECTOR_UNAVAILABLE:{type(exc).__name__}",
-        )
+        rows = []
+        vector_error = f"RIDDLE_JOKER_DIALOGUE_VECTOR_UNAVAILABLE:{type(exc).__name__}"
+    else:
+        vector_error = ""
+    try:
+        fallback_rows = [] if rows else _query_surface_original_quote_collection(query, top_k=candidate_top_k)
+    except Exception as exc:
+        fallback_rows = []
+        if not vector_error:
+            vector_error = f"SURFACE_ORIGINAL_QUOTES_VECTOR_UNAVAILABLE:{type(exc).__name__}"
+    else:
+        if not vector_error:
+            vector_error = ""
+    if fallback_rows:
+        rows = _dedupe_vector_rows([*rows, *fallback_rows])
+    if not rows and _riddle_joker_lexical_fallback_enabled():
+        local_rows = _query_riddle_joker_dialogue_tsv(query, top_k=candidate_top_k)
+        if local_rows:
+            rows = _dedupe_vector_rows(local_rows)
+    if not rows and vector_error:
+        return SurfaceOriginalQuoteSelection(query=query, degraded=True, reason=vector_error)
     quotes = [SurfaceOriginalQuote.from_vector_row(row) for row in rows]
     ranked = _rank_quotes(quotes, query=query)
     selected = tuple(ranked[:effective_limit])
@@ -417,6 +455,7 @@ _STRONG_QUOTE_SCENES = frozenset(
         "short_ack",
         "annoying_tease",
         "style_repair",
+        "temporal_mismatch_greeting",
     }
 )
 _CAREFUL_QUOTE_SCENES = frozenset(
@@ -532,6 +571,7 @@ def surface_original_quote_similarity_hits(
 
 _VECTOR_CLIENT_CACHE: dict[tuple[str, int], Any] = {}
 _VECTOR_ROW_CACHE: dict[tuple[str, str, int], list[dict[str, Any]]] = {}
+_RIDDLE_JOKER_ROW_CACHE: dict[str, list[dict[str, Any]]] = {}
 
 
 def _query_surface_original_quote_collection(
@@ -611,6 +651,168 @@ def _query_surface_original_quote_collection(
         metadata["query_embedding_model_id"] = model_id
         row["metadata"] = metadata
     return rows
+
+
+def _query_riddle_joker_dialogue_vector_collection(
+    query: SurfaceOriginalQuoteQuery,
+    *,
+    top_k: int,
+) -> list[dict[str, Any]]:
+    from host_brain.memory.chroma_client import (
+        PersistentChromaClient,
+        embed_text,
+        load_chroma_runtime_config,
+    )
+
+    collection = _riddle_joker_dialogue_collection_name()
+    dim = _riddle_joker_dialogue_vector_dim()
+    cfg_result = load_chroma_runtime_config()
+    if not cfg_result.success or cfg_result.config is None or not cfg_result.config.enabled:
+        raise RuntimeError(f"chroma config invalid: {cfg_result.reason_code}")
+    cfg = cfg_result.config
+    cache_key = (collection, dim)
+    client = _VECTOR_CLIENT_CACHE.get(cache_key)
+    if client is None:
+        profiles = dict(cfg.collection_profiles)
+        profiles[collection] = dim
+        client = PersistentChromaClient(
+            endpoint=cfg.endpoint,
+            tenant=cfg.tenant,
+            database=cfg.database,
+            collection_profiles=profiles,
+            default_collection=cfg.default_collection,
+        )
+        _VECTOR_CLIENT_CACHE[cache_key] = client
+    query_text = _vector_query_text(query)
+    embedding, model_id = embed_text(query_text, dim=dim)
+    rows = client.search(
+        query_embedding=list(embedding or []),
+        top_k=max(1, int(top_k or 1)),
+        collection=collection,
+    )
+    min_score = _riddle_joker_dialogue_min_score()
+    filtered: list[dict[str, Any]] = []
+    for row in rows:
+        score = _coerce_float(row.get("score"), default=0.0)
+        if score < min_score:
+            continue
+        metadata = dict(row.get("metadata") or {}) if isinstance(row.get("metadata"), Mapping) else {}
+        metadata["query_embedding_model_id"] = model_id
+        metadata["min_score"] = min_score
+        metadata["score_passed"] = True
+        row["metadata"] = metadata
+        filtered.append(dict(row))
+    return filtered
+
+
+def _query_riddle_joker_dialogue_tsv(query: SurfaceOriginalQuoteQuery, *, top_k: int) -> list[dict[str, Any]]:
+    rows = _fetch_riddle_joker_dialogue_tsv_rows()
+    if not rows:
+        return []
+    scored: list[tuple[float, dict[str, Any]]] = []
+    for row in rows:
+        quote = SurfaceOriginalQuote.from_vector_row(row)
+        score = _lexical_quote_row_score(quote, query=query)
+        if score <= -100.0:
+            continue
+        metadata = dict(row.get("metadata") or {}) if isinstance(row.get("metadata"), Mapping) else {}
+        metadata["query_embedding_model_id"] = "riddle-joker-tsv-lexical"
+        scored.append((score, {**row, "score": round(score / 100.0, 6), "metadata": metadata}))
+    scored.sort(
+        key=lambda item: (
+            item[0],
+            float((item[1].get("metadata") or {}).get("character_confidence") or 0.0),
+            float((item[1].get("metadata") or {}).get("confidence") or 0.0),
+            str(item[1].get("memory_id") or ""),
+        ),
+        reverse=True,
+    )
+    return [row for _, row in scored[: max(1, int(top_k or 1))]]
+
+
+def _fetch_riddle_joker_dialogue_tsv_rows() -> list[dict[str, Any]]:
+    path = Path(
+        str(os.environ.get("HOST_RIDDLE_JOKER_DIALOGUE_TSV") or "").strip()
+        or DEFAULT_RIDDLE_JOKER_DIALOGUE_TSV
+    )
+    cache_key = str(path)
+    cached = _RIDDLE_JOKER_ROW_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
+    if not path.exists():
+        _RIDDLE_JOKER_ROW_CACHE[cache_key] = []
+        return []
+    rows: list[dict[str, Any]] = []
+    try:
+        with path.open("r", encoding="utf-8-sig", newline="") as handle:
+            reader = csv.DictReader(handle, delimiter="\t")
+            for raw in reader:
+                line_no = str(raw.get("line_no") or "").strip()
+                speaker = str(raw.get("speaker") or "").strip()
+                text = str(raw.get("text") or "").strip()
+                if not line_no or not text or speaker in {"旁白", "地文"}:
+                    continue
+                text = re.sub(r"\s+", "", text)
+                if not text or _unsafe_runtime_quote_text(text):
+                    continue
+                rows.append(_riddle_joker_tsv_quote_row(line_no=line_no, speaker=speaker, text=text, path=path))
+    except Exception:
+        rows = []
+    _RIDDLE_JOKER_ROW_CACHE[cache_key] = rows
+    return rows
+
+
+def _riddle_joker_tsv_quote_row(*, line_no: str, speaker: str, text: str, path: Path) -> dict[str, Any]:
+    quote_id = f"riddle_joker_tsv::{line_no}"
+    tags = ["daily"]
+    moves = ["quick_reaction"]
+    if any(marker in text for marker in ("不是", "才不是", "哈？", "什么嘛", "笨蛋", "随便", "稀罕")):
+        tags.append("annoyed")
+        moves.extend(["quick_rebuttal", "familiar_pushback"])
+    if any(marker in text for marker in ("早上好", "早啊", "迟到", "早饭", "睡", "等一下", "重来", "再给")):
+        moves.append("question_chain")
+    metadata = {
+        "quote_id": quote_id,
+        "source_ref": f"{path.name}:{line_no}:{speaker}",
+        "source_digest": quote_id,
+        "prompt_text": text,
+        "source_score": 1.0,
+        "confidence": 0.82,
+        "character_confidence": 1.0 if speaker == "七海" else 0.62,
+        "risk_tier": "safe_full_line",
+        "intent_tags": "|".join(dict.fromkeys(tags)),
+        "style_moves": "|".join(dict.fromkeys(moves)),
+        "relationship_stages": "familiar|trusted_friend|close_friend|close_but_not_romantic",
+        "lexical_cues": "|".join(_quote_lexical_cues(text)),
+    }
+    return {
+        "memory_id": quote_id,
+        "text": text,
+        "score": 0.0,
+        "metadata": metadata,
+        "collection": "riddle_joker_dialogue_tsv",
+    }
+
+
+def _quote_lexical_cues(text: str) -> tuple[str, ...]:
+    cues = []
+    for marker in (
+        "早上好",
+        "早啊",
+        "不是",
+        "才不是",
+        "现在",
+        "已经",
+        "等一下",
+        "重来",
+        "随便",
+        "稀罕",
+        "迟到",
+        "早饭",
+    ):
+        if marker in text:
+            cues.append(marker)
+    return tuple(cues)
 
 
 def _query_surface_original_quote_collection_lexical_fallback(
@@ -819,6 +1021,18 @@ def _lexical_keywords_for_query(query: SurfaceOriginalQuoteQuery) -> tuple[str, 
 
 def _required_lexical_keywords_for_query(query: SurfaceOriginalQuoteQuery) -> tuple[str, ...]:
     scene = _clean_policy_scene(query.scene_id)
+    if scene == "temporal_mismatch_greeting":
+        return (
+            "早上好",
+            "早啊",
+            "早安",
+            "下午",
+            "现在",
+            "已经",
+            "迟到",
+            "早饭",
+            "睡回笼觉",
+        )
     keywords: list[str] = list(_SCENE_LEXICAL_HINTS.get(scene, ()))
     raw_user = str(query.user_message or "").strip()
     if len(raw_user) >= 2:
@@ -895,6 +1109,30 @@ def _quote_embedding_mode() -> str:
     return "auto" if mode == "auto" else "hash"
 
 
+def _riddle_joker_dialogue_collection_name() -> str:
+    return (
+        str(os.environ.get("HOST_RIDDLE_JOKER_DIALOGUE_COLLECTION") or "").strip()
+        or DEFAULT_RIDDLE_JOKER_DIALOGUE_COLLECTION
+    )
+
+
+def _riddle_joker_dialogue_vector_dim() -> int:
+    return _quote_limit_env("HOST_RIDDLE_JOKER_DIALOGUE_VECTOR_DIM", DEFAULT_SURFACE_ORIGINAL_QUOTE_VECTOR_DIM)
+
+
+def _riddle_joker_dialogue_min_score() -> float:
+    try:
+        value = float(str(os.environ.get("HOST_RIDDLE_JOKER_DIALOGUE_MIN_SCORE") or "").strip() or DEFAULT_RIDDLE_JOKER_DIALOGUE_MIN_SCORE)
+    except (TypeError, ValueError):
+        value = DEFAULT_RIDDLE_JOKER_DIALOGUE_MIN_SCORE
+    return max(0.0, min(float(value), 1.0))
+
+
+def _riddle_joker_lexical_fallback_enabled() -> bool:
+    raw = str(os.environ.get("HOST_RIDDLE_JOKER_DIALOGUE_LEXICAL_FALLBACK", "0")).strip().lower()
+    return raw in {"1", "true", "yes", "on"}
+
+
 def _quote_limit_env(name: str, default: int) -> int:
     try:
         return max(1, int(str(os.environ.get(name) or "").strip() or default))
@@ -960,6 +1198,8 @@ def _scene_prompt_compatible(text: str, *, scene_id: str = "") -> bool:
     clean = str(text or "")
     normalized = _copy_normalized(clean)
     if any(marker in clean for marker in _SCENE_BLOCKED_MARKERS.get(scene, ())):
+        return False
+    if scene == "temporal_mismatch_greeting" and normalized in {"早上好", "早安", "早啊", "嗯早上好"}:
         return False
     if scene == "ambiguous_affection" and ("喜欢哥哥" in normalized or ("喜欢" in normalized and "哥哥" in normalized)):
         return False
