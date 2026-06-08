@@ -1,8 +1,8 @@
 受众：MASTER
 标题：Natsume AI 整体架构全景文档
 
-版本：v3.0
-日期：2026-05-30
+版本：v3.1
+日期：2026-06-08
 定位：以当前代码为锚点，对系统的运行面、主链、Edge/Gateway/Observability 关系做高层总览。本文偏“整体理解”，细节以 `docs/50_project/arch/` 下的代码事实文档为准。
 
 # Natsume AI 整体架构全景文档
@@ -79,7 +79,7 @@ flowchart LR
     G --> H["executive_router"]
     H --> I["executive_runtime"]
     I --> J["executive_runtime_core"]
-    J --> L["chat_agent / skill / delegate / plan"]
+    J --> L["surface_reply / skill / delegate / plan"]
     L --> SC["surface_main_chain (normal chat 最终作者)"]
     SC --> M["async_post_process"]
 ```
@@ -89,7 +89,7 @@ flowchart LR
 - `/v1/chat` 的 HTTP 首跳由 `host_brain/app/asgi.py` + `host_brain/app/app_factory.py` 退示的 `chat_endpoint` 接住，再委托给 `chat_routes.handle_v1_chat_route` 与 `chat_handler.handle_chat`；`chat_handler.py` 是进入主编排前的薄层
 - `cortex_orchestrator` 是聊天编排中段收口点
 - `executive_runtime_core.py` 是当前真正的执行与路由核心
-- `chat_agent.py` 是人格渲染路由者；**normal chat 的最终文本作者是 `host_brain/persona/surface_main_chain.py` (SurfaceMainChain)**，旧 `prompt_builder` 链路仅作为辅助 facts / state 提供者
+- `surface_reply_runtime.py` 是人格渲染路由者；**normal chat 的最终文本作者是 `host_brain/persona/surface_main_chain.py` (SurfaceMainChain)**，旧 `prompt_builder` 链路仅作为辅助 facts / state 提供者
 
 ## 四、外部输入与平台消息链
 
@@ -102,7 +102,7 @@ flowchart TD
     C --> D["thalamus_agent"]
     D --> E["cortex_orchestrator"]
     E --> F["executive_runtime_core"]
-    F --> G["chat_agent / skill / delegate / plan"]
+    F --> G["surface_reply / skill / delegate / plan"]
     G --> H["Gateway 回复 / 后处理"]
 ```
 

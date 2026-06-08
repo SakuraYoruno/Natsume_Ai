@@ -1,8 +1,8 @@
 受众：MASTER
 标题：host_brain/tools/ + memory/ 层接口契约（当前代码实况）
 
-版本：v3.0
-日期：2026-05-30
+版本：v3.1
+日期：2026-06-08
 归属：docs/15_theory/
 
 ---
@@ -41,7 +41,7 @@ Memory 层：
 Tools 层是"经过 catalog 受控 + broker 单一执行入口"的**工具调用治理层**：
 
 ```
-caller (chat_agent / executive / skill 实现)
+caller (surface_reply / executive / skill 实现)
   → ToolBroker.execute(...)         # 唯一合法执行入口
        ├── ToolCatalog.get(tool_id)  # SSOT，决定 side_effect_level / auth_level
        ├── handler = self._handlers[tool_id]

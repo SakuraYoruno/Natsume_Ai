@@ -2,8 +2,8 @@
 标题：开发规格 DevSpec（当前代码工程契约参考）
 
 # Natsume Ai 开发规格（DevSpec）
-版本：v2.0
-日期：2026-06-05
+版本：v2.1
+日期：2026-06-08
 定位：当前代码的工程契约参考手册。每条契约可追溯到具体 .py 文件。不再承担"从零可重建蓝图"职责。
 
 ---
@@ -44,11 +44,11 @@ asgi.py
       → cortex_orchestrator_sse_generator()
       → agent_runtime_shared
       → executive_router / executive_runtime / executive_runtime_core
-        → chat_agent (人格渲染路由)
+        → surface_reply_runtime (人格渲染路由)
           → surface_main_chain_adapter
             → SurfaceMainChain (最终文本作者)
           → reply_envelope (发送/持久化/缓存收口)
-      → chat_agent_postprocessor (异步后处理)
+      → surface_reply_postprocessor (异步后处理)
 ```
 
 关键文件：
@@ -62,7 +62,7 @@ asgi.py
 - `host_brain/app/executive_router.py` — 执行路由
 - `host_brain/app/executive_runtime.py` — 执行运行时
 - `host_brain/app/executive_runtime_core.py` — 执行核心
-- `host_brain/app/chat_agent.py` — 人格渲染路由者
+- `host_brain/app/surface_reply_runtime.py` — 人格渲染路由者
 - `host_brain/persona/surface_main_chain.py` — SurfaceMainChain (normal chat 最终文本作者)
 - `host_brain/persona/reply_envelope.py` — 最终输出收口
 
@@ -93,10 +93,10 @@ Edge 运行时事件（播放状态、资源门控、inline waiters）走此端�
 | 文件 | 职责 |
 |------|------|
 | `surface_main_chain.py` | SurfaceMainChain — normal chat 文本唯一作者 |
-| `surface_main_chain_adapter.py` | 主链适配器，连接 chat_agent 与 SurfaceMainChain |
+| `surface_main_chain_adapter.py` | 主链适配器，连接 surface_reply_runtime 与 SurfaceMainChain |
 | `surface_memory_recall.py` | 记忆召回注入（决策 RECALL_POLICY_MUST/MAY/NO） |
 | `surface_context_packet.py` | 上下文包组装 |
-| `chat_payload_builder.py` | 模型输入 payload 构建 |
+| `surface_reply_preprocessor.py` | 输入预处理与 payload 构建 |
 | `reply_envelope.py` | 最终输出收口（sendable/persitable/cacheable） |
 | `reply_modality_router.py` | 媒体输出路由 |
 | `inner_monologue.py` | 内心独白 |
