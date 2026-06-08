@@ -11,10 +11,10 @@ from host_brain.core.key_profiles import resolve_secret_from_profiles
 from host_brain.integrations.llm_gateway import PROVIDER_GEMINI
 
 _GEMINI_CLOUD_DEFAULT_MODEL_ID = "gemini-2.5-flash-lite"
-_GEMINI_CHAT_AGENT_DEFAULT_MODEL_ID = "gemini-2.5-pro"
+_GEMINI_SURFACE_REPLY_DEFAULT_MODEL_ID = "gemini-2.5-pro"
 _GEMINI_DISPATCH_AGENT_DEFAULT_MODEL_ID = "gemini-2.5-flash-lite"
 _GEMINI_EXECUTIVE_ROUTER_DEFAULT_MODEL_ID = _GEMINI_DISPATCH_AGENT_DEFAULT_MODEL_ID
-_GEMINI_CORTEX_ORCHESTRATOR_DEFAULT_MODEL_ID = _GEMINI_CHAT_AGENT_DEFAULT_MODEL_ID
+_GEMINI_CORTEX_ORCHESTRATOR_DEFAULT_MODEL_ID = _GEMINI_SURFACE_REPLY_DEFAULT_MODEL_ID
 _GEMINI_SUBAGENT_DEFAULT_MODEL_ID = "gemini-2.5-pro"
 
 
@@ -91,11 +91,11 @@ def inspect_gemini_key_status(*, preferred_api_key: str | None = None) -> dict[s
 
 def _resolve_gemini_model_id_for_role(role: str) -> str:
     normalized_role = str(role or "").strip().lower()
-    if normalized_role in {"chat_agent", "cortex_orchestrator"}:
+    if normalized_role in {"surface_reply", "cortex_orchestrator"}:
         env_keys = (
-            ("HOST_CORTEX_ORCHESTRATOR_MODEL_ID", "HOST_TOP_AGENT_MODEL_ID", "HOST_CHAT_AGENT_MODEL_ID")
+            ("HOST_CORTEX_ORCHESTRATOR_MODEL_ID", "HOST_TOP_AGENT_MODEL_ID", "HOST_SURFACE_REPLY_MODEL_ID", "HOST_CHAT_AGENT_MODEL_ID")
             if normalized_role == "cortex_orchestrator"
-            else ("HOST_CHAT_AGENT_MODEL_ID",)
+            else ("HOST_SURFACE_REPLY_MODEL_ID", "HOST_CHAT_AGENT_MODEL_ID")
         )
         for env_key in env_keys:
             value = str(os.environ.get(env_key) or "").strip()
@@ -104,7 +104,7 @@ def _resolve_gemini_model_id_for_role(role: str) -> str:
         return (
             _GEMINI_CORTEX_ORCHESTRATOR_DEFAULT_MODEL_ID
             if normalized_role == "cortex_orchestrator"
-            else _GEMINI_CHAT_AGENT_DEFAULT_MODEL_ID
+            else _GEMINI_SURFACE_REPLY_DEFAULT_MODEL_ID
         )
     if normalized_role == "executive_router":
         env_keys = (

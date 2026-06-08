@@ -2,7 +2,7 @@
 
 拆分自 graph_config_builder.py（P2-11）：
   - resolve_host_llm_runtime / resolve_host_llm_runtime_async
-  - resolve_chat_agent_llm_runtime
+  - resolve_surface_reply_llm_runtime
   - resolve_executive_router_llm_runtime
   - resolve_subagent_llm_runtime
   - 健康探测、灰度发布、RoutingMatrix 相关逻辑
@@ -52,7 +52,7 @@ _HOST_CHAT_14B_FALLBACK_API_KEY = "host-local-placeholder-key"
 _HOST_CHAT_14B_DEFAULT_BASE_URL = "http://127.0.0.1:11434/v1"
 _HOST_CHAT_CLOUD_DEFAULT_PROVIDER = PROVIDER_GEMINI
 _PROVIDERS_REQUIRING_API_KEY = frozenset({PROVIDER_OPENAI, PROVIDER_CODEX, PROVIDER_GEMINI, PROVIDER_DEEPSEEK, PROVIDER_MINIMAX})
-_AGENT_CODEX_MIGRATION_DEFAULT_EXCLUDED_ROLES = frozenset({"chat_agent"})
+_AGENT_CODEX_MIGRATION_DEFAULT_EXCLUDED_ROLES = frozenset({"surface_reply"})
 _VISION_SCENE_NAMES = frozenset({SCENE_VISION_UI.upper(), "SCENE_VISION_UI", "VISION_UI"})
 
 
@@ -120,17 +120,18 @@ def _resolve_agent_codex_model_id() -> str:
     return resolve_codex_cli_model(os.environ.get("HOST_AGENT_CODEX_MODEL_ID") or os.environ.get("HOST_CODEX_MODEL_ID"))
 
 
-def _chat_agent_codex_experiment_enabled(role: str) -> bool:
-    if str(role or "").strip().lower() != "chat_agent":
+def _surface_reply_codex_experiment_enabled(role: str) -> bool:
+    if str(role or "").strip().lower() != "surface_reply":
         return False
-    if not _parse_bool(os.environ.get("HOST_CHAT_AGENT_CODEX_EXPERIMENT_ENABLED"), default=False):
+    if not _parse_bool(os.environ.get("HOST_SURFACE_REPLY_CODEX_EXPERIMENT_ENABLED") or os.environ.get("HOST_CHAT_AGENT_CODEX_EXPERIMENT_ENABLED"), default=False):
         return False
     return codex_cli_lm_available()
 
 
-def _resolve_chat_agent_codex_model_id() -> str:
+def _resolve_surface_reply_codex_model_id() -> str:
     return resolve_codex_cli_model(
-        os.environ.get("HOST_CHAT_AGENT_CODEX_MODEL_ID")
+        os.environ.get("HOST_SURFACE_REPLY_CODEX_MODEL_ID")
+        or os.environ.get("HOST_CHAT_AGENT_CODEX_MODEL_ID")
         or os.environ.get("HOST_CHAT_AGENT_SPARK_MODEL_ID")
         or os.environ.get("HOST_CODEX_CHAT_MODEL_ID")
         or os.environ.get("HOST_CODEX_MODEL_ID")
@@ -596,12 +597,12 @@ def _resolve_agent_llm_runtime_v2(*, base_runtime: dict[str, Any], role: str, mo
     selected_api_key = str(base_runtime.get("llm_api_key") or base_runtime.get("chat_llm_api_key") or "").strip() or None
     explicit_model_override = _first_non_empty_env(model_env_name, *fallback_model_env_names)
     model_route: dict[str, Any] = {}
-    if _chat_agent_codex_experiment_enabled(role):
-        model_id = _resolve_chat_agent_codex_model_id()
+    if _surface_reply_codex_experiment_enabled(role):
+        model_id = _resolve_surface_reply_codex_model_id()
         codex_timeout_ms = max(
             timeout_ms,
             _parse_int(
-                os.environ.get("HOST_CHAT_AGENT_CODEX_MIN_TIMEOUT_MS"),
+                os.environ.get("HOST_SURFACE_REPLY_CODEX_MIN_TIMEOUT_MS") or os.environ.get("HOST_CHAT_AGENT_CODEX_MIN_TIMEOUT_MS"),
                 default=45_000,
                 min_value=800,
                 max_value=10 * 60 * 1000,
@@ -622,8 +623,8 @@ def _resolve_agent_llm_runtime_v2(*, base_runtime: dict[str, Any], role: str, mo
             "chat_available": True,
             "agent_gen_params": dict(gen_params),
             "agent_role": role,
-            "agent_model_route": {"route": "codex_chat_experiment", "source": "HOST_CHAT_AGENT_CODEX_EXPERIMENT_ENABLED"},
-            "route_reason_code": "HOST_CHAT_AGENT_CODEX_EXPERIMENT",
+            "agent_model_route": {"route": "codex_surface_reply_experiment", "source": "HOST_SURFACE_REPLY_CODEX_EXPERIMENT_ENABLED"},
+            "route_reason_code": "HOST_SURFACE_REPLY_CODEX_EXPERIMENT",
             "route_detail": f"agent role {role} routed to local Codex CLI chat experiment",
         }
     if _agent_codex_migration_enabled(role):
@@ -659,9 +660,9 @@ def _resolve_agent_llm_runtime_v2(*, base_runtime: dict[str, Any], role: str, mo
     return {**base_runtime, "model_id": model_id, "chat_model_id": model_id, "timeout_ms": timeout_ms, "chat_timeout_ms": timeout_ms, "llm_api_key": selected_api_key, "chat_llm_api_key": selected_api_key, "agent_gen_params": dict(gen_params), "agent_role": role, "agent_model_route": (model_route or None)}
 
 
-def resolve_chat_agent_llm_runtime(*, base_runtime: dict) -> dict:
-    """ChatAgent（夏目蓝本人）的 LLM 运行时配置。"""
-    return _resolve_agent_llm_runtime_v2(base_runtime=base_runtime, role="chat_agent", model_env_name="HOST_CHAT_AGENT_MODEL_ID", timeout_env_name="HOST_CHAT_AGENT_TIMEOUT_MS", timeout_default_ms=30_000, timeout_max_ms=120_000, gen_params={"temperature": 0.78, "top_p": 0.9, "max_tokens": 220})
+def resolve_surface_reply_llm_runtime(*, base_runtime: dict) -> dict:
+    """Surface reply 主链的 LLM 运行时配置。"""
+    return _resolve_agent_llm_runtime_v2(base_runtime=base_runtime, role="surface_reply", model_env_name="HOST_SURFACE_REPLY_MODEL_ID", timeout_env_name="HOST_SURFACE_REPLY_TIMEOUT_MS", fallback_model_env_names=("HOST_CHAT_AGENT_MODEL_ID",), fallback_timeout_env_names=("HOST_CHAT_AGENT_TIMEOUT_MS",), timeout_default_ms=30_000, timeout_max_ms=120_000, gen_params={"temperature": 0.78, "top_p": 0.9, "max_tokens": 220})
 
 
 def resolve_executive_router_llm_runtime(*, base_runtime: dict) -> dict:

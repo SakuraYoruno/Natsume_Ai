@@ -1,4 +1,4 @@
-"""Graph 配置构建模块。
+﻿"""Graph 配置构建模块。
 
 负责 Chat 图的配置构建。意图识别与场景判定统一由 Thalamus 承接。
 """
@@ -68,8 +68,8 @@ SUPERVISOR_DISPATCH_NODE_ID = "supervisor_dispatch"
 SUPERVISOR_DISPATCH_HANDLER_ID = "supervisor_dispatch"
 
 # M-MA5：各 Agent Handler 节点常量
-CHAT_AGENT_NODE_ID = "chat_agent_node"
-CHAT_AGENT_HANDLER_ID = "chat_agent"
+SURFACE_REPLY_NODE_ID = "surface_reply_node"
+SURFACE_REPLY_HANDLER_ID = "surface_reply"
 TRANSLATE_AGENT_NODE_ID = "translate_agent_node"
 TRANSLATE_AGENT_HANDLER_ID = "translate_agent"
 INTENT_AGENT_NODE_ID = "intent_agent_node"
@@ -216,19 +216,20 @@ def _graph_codex_migration_enabled(*, scene_type: str, execution_profile: str) -
     return codex_cli_lm_available()
 
 
-def _chat_agent_codex_experiment_enabled(*, scene_type: str, execution_profile: str) -> bool:
+def _surface_reply_codex_experiment_enabled(*, scene_type: str, execution_profile: str) -> bool:
     if str(scene_type or "").strip().upper() != SCENE_CHAT:
         return False
     if str(execution_profile or "").strip() != PROFILE_CHAT_FAST:
         return False
-    if not _parse_bool(os.environ.get("HOST_CHAT_AGENT_CODEX_EXPERIMENT_ENABLED"), default=False):
+    if not _parse_bool(os.environ.get("HOST_SURFACE_REPLY_CODEX_EXPERIMENT_ENABLED") or os.environ.get("HOST_CHAT_AGENT_CODEX_EXPERIMENT_ENABLED"), default=False):
         return False
     return codex_cli_lm_available()
 
 
-def _resolve_chat_agent_codex_model_id() -> str:
+def _resolve_surface_reply_codex_model_id() -> str:
     return resolve_codex_cli_model(
-        os.environ.get("HOST_CHAT_AGENT_CODEX_MODEL_ID")
+        os.environ.get("HOST_SURFACE_REPLY_CODEX_MODEL_ID")
+        or os.environ.get("HOST_CHAT_AGENT_CODEX_MODEL_ID")
         or os.environ.get("HOST_CHAT_AGENT_SPARK_MODEL_ID")
         or os.environ.get("HOST_CODEX_CHAT_MODEL_ID")
         or os.environ.get("HOST_CODEX_MODEL_ID")
@@ -514,7 +515,7 @@ def build_chat_graph(
     cloud_base_url_override: str | None = None,
     execution_profile: str = PROFILE_CHAT_FAST,
 ) -> dict[str, Any]:
-    """Chat 图：START → chat_agent → renderer，无 Supervisor/agent_dispatch。"""
+    """Chat 图：START → chat_direct_ja → renderer，无 Supervisor/agent_dispatch。"""
     return _build_graph_config_by_profile(
         execution_profile=execution_profile,
         provider_name=provider_name,
@@ -698,17 +699,17 @@ def _build_graph_config_by_profile(
     resolved_chat_provider = str(provider_name or _HOST_CHAT_14B_DEFAULT_PROVIDER).strip().lower() or _HOST_CHAT_14B_DEFAULT_PROVIDER
     resolved_chat_model_id = str(model_id or "").strip() or _HOST_CHAT_14B_DEFAULT_MODEL_ID
     resolved_chat_timeout_ms = max(800, int(timeout_ms))
-    chat_codex_experiment = _chat_agent_codex_experiment_enabled(
+    chat_codex_experiment = _surface_reply_codex_experiment_enabled(
         scene_type=resolved_scene_type,
         execution_profile=execution_profile,
     )
     if chat_codex_experiment:
         resolved_chat_provider = PROVIDER_CODEX
-        resolved_chat_model_id = _resolve_chat_agent_codex_model_id()
+        resolved_chat_model_id = _resolve_surface_reply_codex_model_id()
         resolved_chat_timeout_ms = max(
             resolved_chat_timeout_ms,
             _parse_int(
-                os.environ.get("HOST_CHAT_AGENT_CODEX_MIN_TIMEOUT_MS"),
+                os.environ.get("HOST_SURFACE_REPLY_CODEX_MIN_TIMEOUT_MS") or os.environ.get("HOST_CHAT_AGENT_CODEX_MIN_TIMEOUT_MS"),
                 default=45_000,
                 min_value=800,
                 max_value=10 * 60 * 1000,
@@ -928,7 +929,7 @@ def _build_graph_config_by_profile(
         # P3.5：allowlist 由图配置提供；workbench_* 为 handler 可调用的 model 节点，不入边序列
         # P16：allowlist 对齐 _AGENT_HANDLER_MAP（graph_executor 内的全量 agent）
         _dispatch_allowlist = [
-            CHAT_AGENT_HANDLER_ID,
+            SURFACE_REPLY_HANDLER_ID,
             TRANSLATE_AGENT_HANDLER_ID,
             INTENT_AGENT_HANDLER_ID,
             JUDGE_AGENT_HANDLER_ID,
@@ -1094,23 +1095,23 @@ def _build_graph_config_by_profile(
 # Phase XV: 三套 Agent 专用 LLM 运行时解析
 # ---------------------------------------------------------------------------
 
-def _legacy_resolve_chat_agent_llm_runtime(*, base_runtime: dict) -> dict:
-    """ChatAgent（夏目蓝本人）的 LLM 运行时配置。
+def _legacy_resolve_surface_reply_llm_runtime(*, base_runtime: dict) -> dict:
+    """SurfaceReply（旧角色本人）的 LLM 运行时配置。
 
     追求「好」：高质量模型 + 高温度 + 流式输出 + 双语生成能力。
-    默认使用 gemini-2.5-pro，可通过 HOST_CHAT_AGENT_MODEL_ID 覆盖。
+    默认使用 gemini-2.5-pro，可通过 HOST_SURFACE_REPLY_MODEL_ID 覆盖；旧 HOST_CHAT_AGENT_MODEL_ID 仅兼容读取。
 
     Args:
         base_runtime: 来自 resolve_host_llm_runtime_async() 的基础运行时
 
     Returns:
-        ChatAgent 专用 LLM 运行时 dict，可直接传给 astream_llm_chunks()
+        SurfaceReply 专用 LLM 运行时 dict，可直接传给 astream_llm_chunks()
     """
     model_id = str(
-        os.environ.get("HOST_CHAT_AGENT_MODEL_ID") or "gemini-2.5-pro"
+        os.environ.get("HOST_SURFACE_REPLY_MODEL_ID") or os.environ.get("HOST_CHAT_AGENT_MODEL_ID") or "gemini-2.5-pro"
     ).strip() or "gemini-2.5-pro"
     timeout_ms = max(800, _parse_int(
-        os.environ.get("HOST_CHAT_AGENT_TIMEOUT_MS"),
+        os.environ.get("HOST_SURFACE_REPLY_TIMEOUT_MS") or os.environ.get("HOST_CHAT_AGENT_TIMEOUT_MS"),
         default=30_000,
         min_value=800,
         max_value=120_000,
@@ -1121,12 +1122,12 @@ def _legacy_resolve_chat_agent_llm_runtime(*, base_runtime: dict) -> dict:
         "chat_model_id": model_id,
         "timeout_ms": timeout_ms,
         "chat_timeout_ms": timeout_ms,
-        # ChatAgent 专属 gen_params：高温度让回复更自然有变化
+        # SurfaceReply 专属 gen_params：高温度让回复更自然有变化
         "agent_gen_params": {
             "temperature": 0.8,
             "top_p": 0.92,
         },
-        "agent_role": "chat_agent",
+        "agent_role": "surface_reply",
     }
 
 
@@ -1297,15 +1298,17 @@ def _resolve_agent_llm_runtime_v2(
     }
 
 
-def resolve_chat_agent_llm_runtime(*, base_runtime: dict) -> dict:
+def resolve_surface_reply_llm_runtime(*, base_runtime: dict) -> dict:
     return _resolve_agent_llm_runtime_v2(
         base_runtime=base_runtime,
-        role="chat_agent",
-        model_env_name="HOST_CHAT_AGENT_MODEL_ID",
-        timeout_env_name="HOST_CHAT_AGENT_TIMEOUT_MS",
+        role="surface_reply",
+        model_env_name="HOST_SURFACE_REPLY_MODEL_ID",
+        timeout_env_name="HOST_SURFACE_REPLY_TIMEOUT_MS",
         timeout_default_ms=30_000,
         timeout_max_ms=120_000,
         gen_params={"temperature": 0.8, "top_p": 0.92},
+        fallback_model_env_names=("HOST_CHAT_AGENT_MODEL_ID",),
+        fallback_timeout_env_names=("HOST_CHAT_AGENT_TIMEOUT_MS",),
     )
 
 
@@ -1341,7 +1344,7 @@ def resolve_subagent_llm_runtime(*, base_runtime: dict) -> dict:
 from host_brain.app.graph_config_llm_runtime import (  # noqa: F401, E402
     resolve_host_llm_runtime,
     resolve_host_llm_runtime_async,
-    resolve_chat_agent_llm_runtime,
+    resolve_surface_reply_llm_runtime,
     resolve_executive_router_llm_runtime,
     resolve_subagent_llm_runtime,
     _HOST_CHAT_14B_DEFAULT_PROVIDER,

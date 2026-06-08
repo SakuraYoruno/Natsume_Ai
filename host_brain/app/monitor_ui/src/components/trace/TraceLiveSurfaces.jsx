@@ -93,7 +93,7 @@ const LIVE_TRACE_KEY_NODE_IDS = [
   'sub_agent_translate',
   'sub_agent_intent',
   'sub_agent_vision',
-  'chat_agent',
+  'surface_reply',
   'prompt_builder',
   'llm_stream',
   'airlock_egress',
@@ -104,7 +104,7 @@ function getLiveTraceKeyNodeSortKey(node) {
   const normalizedId = normalizeTraceGroupNodeId(node?.node_id, node?.node_type)
   if (LIVE_TRACE_KEY_NODE_INDEX[normalizedId] != null) return LIVE_TRACE_KEY_NODE_INDEX[normalizedId]
   if (String(node?.node_id || '').startsWith('sub_agent:')) {
-    return (LIVE_TRACE_KEY_NODE_INDEX.chat_agent ?? 999) - 0.5
+    return (LIVE_TRACE_KEY_NODE_INDEX.surface_reply ?? 999) - 0.5
   }
   return 999
 }

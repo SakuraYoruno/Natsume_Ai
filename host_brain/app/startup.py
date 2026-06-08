@@ -551,7 +551,7 @@ def warmup_chat_llm_runtime_profiles() -> str:
     try:
         from host_brain.app.graph_config_builder import SCENE_CHAT  # noqa: PLC0415
         from host_brain.app.graph_config_llm_runtime import (  # noqa: PLC0415
-            resolve_chat_agent_llm_runtime,
+            resolve_surface_reply_llm_runtime,
             resolve_executive_router_llm_runtime,
             resolve_host_llm_runtime_async,
             resolve_subagent_llm_runtime,
@@ -564,7 +564,7 @@ def warmup_chat_llm_runtime_profiles() -> str:
             )
         )
 
-        default_runtime = resolve_chat_agent_llm_runtime(base_runtime=base_runtime)
+        default_runtime = resolve_surface_reply_llm_runtime(base_runtime=base_runtime)
         router_runtime = resolve_executive_router_llm_runtime(base_runtime=base_runtime)
         subagent_runtime = resolve_subagent_llm_runtime(base_runtime=base_runtime)
 
@@ -681,40 +681,41 @@ def warmup_codex_exec_intent_pool() -> str:
 def warmup_retrieval_runtime_basics() -> str:
     """预热 retrieval / embedding / Chroma 关键冷启动路径，降低首轮完整 chat 抖动。"""
     try:
-        try:
-            from host_brain.core.resource_manager import assess_background_task_pressure  # noqa: PLC0415
-            from host_brain.skills.impl.system_executor import execute_system_skill  # noqa: PLC0415
+        if _parse_bool_env("HOST_STARTUP_RETRIEVAL_WARMUP_RESOURCE_GATE_ENABLED", default=False):
+            try:
+                from host_brain.core.resource_manager import assess_background_task_pressure  # noqa: PLC0415
+                from host_brain.skills.impl.system_executor import execute_system_skill  # noqa: PLC0415
 
-            snapshot_result = execute_system_skill(
-                {
-                    "action": "resource_snapshot",
-                    "manifest_ref": "startup_retrieval_warmup::resource_gate",
-                    "include_gpu": True,
-                    "include_processes": False,
-                    "include_network": False,
-                    "sample_seconds": 0,
-                }
-            )
-            snapshot_detail = dict(snapshot_result.get("detail") or {})
-            gate_decision = assess_background_task_pressure(
-                task_id="startup_retrieval_warmup",
-                pressure=dict(snapshot_detail.get("pressure") or {}),
-                priority="LOW",
-                task_type="retrieval_warmup",
-                uses_llm=False,
-                uses_gpu=True,
-                reason="startup",
-            )
-            if not bool(gate_decision.get("allowed", True)):
-                detail = (
-                    f"{gate_decision.get('reason_code') or 'RESOURCE_PRESSURE_DEFERRED'} "
-                    f"pressure={gate_decision.get('pressure_status')} "
-                    f"retry_after_s={gate_decision.get('retry_after_s')}"
+                snapshot_result = execute_system_skill(
+                    {
+                        "action": "resource_snapshot",
+                        "manifest_ref": "startup_retrieval_warmup::resource_gate",
+                        "include_gpu": True,
+                        "include_processes": False,
+                        "include_network": False,
+                        "sample_seconds": 0,
+                    }
                 )
-                _logger.info("Retrieval runtime 预热被资源管家延后: %s", detail)
-                return f"SKIPPED_RESOURCE_GATE: {detail}"
-        except Exception as gate_exc:
-            _logger.debug("Retrieval warmup resource gate skipped: %s", gate_exc)
+                snapshot_detail = dict(snapshot_result.get("detail") or {})
+                gate_decision = assess_background_task_pressure(
+                    task_id="startup_retrieval_warmup",
+                    pressure=dict(snapshot_detail.get("pressure") or {}),
+                    priority="LOW",
+                    task_type="retrieval_warmup",
+                    uses_llm=False,
+                    uses_gpu=True,
+                    reason="startup",
+                )
+                if not bool(gate_decision.get("allowed", True)):
+                    detail = (
+                        f"{gate_decision.get('reason_code') or 'RESOURCE_PRESSURE_DEFERRED'} "
+                        f"pressure={gate_decision.get('pressure_status')} "
+                        f"retry_after_s={gate_decision.get('retry_after_s')}"
+                    )
+                    _logger.info("Retrieval runtime 预热被资源管家延后: %s", detail)
+                    return f"SKIPPED_RESOURCE_GATE: {detail}"
+            except Exception as gate_exc:
+                _logger.debug("Retrieval warmup resource gate skipped: %s", gate_exc)
 
         from host_brain.app.dependencies import get_episodic_store  # noqa: PLC0415
         from host_brain.memory.chroma_client import hash_embed_text  # noqa: PLC0415

@@ -12,7 +12,7 @@ from typing import Any
 # Agent ID 常量
 # ---------------------------------------------------------------------------
 
-AGENT_ID_CHAT = "chat_agent"
+AGENT_ID_CHAT = "surface_reply"
 AGENT_ID_TRANSLATE = "translate_agent"
 AGENT_ID_INTENT = "intent_agent"
 AGENT_ID_SAFETY = "safety_agent"
@@ -46,7 +46,7 @@ AGENT_ALLOWLIST: frozenset[str] = frozenset({
 _AGENT_META: dict[str, dict[str, Any]] = {
     AGENT_ID_CHAT: {
         "agent_id": AGENT_ID_CHAT,
-        "display_name": "ChatAgent",
+        "display_name": "SurfaceReply",
         "node_id": "chat_direct_ja",          # 复用现有节点
         "fast_path": True,                     # 快路径，不经过 Supervisor
         "allow_parallel": False,

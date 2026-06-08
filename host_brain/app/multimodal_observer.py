@@ -93,7 +93,7 @@ class MultimodalObserver:
                 or "gemini-2.5-flash-lite"
             ),
             async_model_id=(
-                str(os.environ.get("HOST_MULTIMODAL_MODEL_ID_ASYNC") or os.environ.get("HOST_CHAT_AGENT_MODEL_ID") or os.environ.get("HOST_GEMINI_MODEL_ID") or "gemini-2.5-pro").strip()
+                str(os.environ.get("HOST_MULTIMODAL_MODEL_ID_ASYNC") or os.environ.get("HOST_SURFACE_REPLY_MODEL_ID") or os.environ.get("HOST_GEMINI_MODEL_ID") or "gemini-2.5-pro").strip()
                 or "gemini-2.5-pro"
             ),
             timeout_ms=_parse_int_env("HOST_MULTIMODAL_TIMEOUT_MS", default=15000, minimum=3000),

@@ -1160,14 +1160,14 @@ def _build_chat_input(
     trace_stage_meta: dict[str, Any],
     sub_agent_context,
 ):
-    from host_brain.app.chat_agent import ChatAgentInput  # noqa: PLC0415
-    from host_brain.app.graph_config_builder import resolve_chat_agent_llm_runtime  # noqa: PLC0415
+    from host_brain.app.surface_reply_preprocessor import SurfaceReplyInput  # noqa: PLC0415
+    from host_brain.app.graph_config_builder import resolve_surface_reply_llm_runtime  # noqa: PLC0415
 
     resolved_llm_runtime = dict(llm_runtime or {}) if isinstance(llm_runtime, dict) else llm_runtime
     if isinstance(resolved_llm_runtime, dict) and resolved_llm_runtime:
         agent_role = _normalize_text(resolved_llm_runtime.get("agent_role"), lower=True)
-        if agent_role != "chat_agent":
-            resolved_llm_runtime = resolve_chat_agent_llm_runtime(
+        if agent_role != "surface_reply":
+            resolved_llm_runtime = resolve_surface_reply_llm_runtime(
                 base_runtime=resolved_llm_runtime,
             )
 
@@ -1175,7 +1175,7 @@ def _build_chat_input(
     chat_trace_stage_meta.setdefault("input_source", str(getattr(request_body, "input_source", "") or "").strip())
     chat_trace_stage_meta.setdefault("reply_channel", str(getattr(request_body, "reply_channel", "") or "").strip())
 
-    return ChatAgentInput(
+    return SurfaceReplyInput(
         request_id=request_id,
         session_id=session_id,
         user_message=sanitized_message,
@@ -1187,9 +1187,9 @@ def _build_chat_input(
         retrieval_summary=dict(retrieval_summary or {}),
         sub_agent_context=sub_agent_context,
         render_target_lang=render_target_lang,
-        render_profile=str(getattr(request_body, "render_profile", "") or "").strip(),
         response_form=str(getattr(request_body, "response_form", "") or "").strip(),
         reply_channel=getattr(request_body, "reply_channel", None),
+        reply_target=getattr(request_body, "reply_target", None),
         suppress_edge_tts=getattr(request_body, "suppress_edge_tts", None),
         suppress_edge_vts=getattr(request_body, "suppress_edge_vts", None),
         ts_ms=ts_ms,
@@ -1210,9 +1210,9 @@ def _build_sub_agent_context(
     task_text: str,
     outcome: _ExecutionOutcome,
 ):
-    from host_brain.app.chat_agent import SubAgentContext  # noqa: PLC0415
+    from host_brain.app.surface_reply_preprocessor import SurfaceSubAgentContext  # noqa: PLC0415
 
-    return SubAgentContext(
+    return SurfaceSubAgentContext(
         agent_id=agent_id,
         task=task_text,
         result_text=outcome.result_text,
@@ -1667,7 +1667,7 @@ async def _stream_chat_with_context(
     sub_agent_context,
     runtime_capability_payload: dict[str, Any] | None,
 ) -> AsyncGenerator[str, None]:
-    from host_brain.app.chat_agent import chat_agent_sse_generator  # noqa: PLC0415
+    from host_brain.app.surface_reply_runtime import surface_reply_sse_generator  # noqa: PLC0415
     from host_brain.app.executive_runtime import (  # noqa: PLC0415
         build_runtime_capability_handoff_extra,
         record_executive_handoff,
@@ -1703,7 +1703,7 @@ async def _stream_chat_with_context(
             session_id=session_id,
             **kwargs,
         ),
-        chat_agent_sse_generator_fn=chat_agent_sse_generator,
+        surface_reply_sse_generator_fn=surface_reply_sse_generator,
         chat_input=chat_input,
     ):
         yield event
@@ -1730,7 +1730,7 @@ async def _executive_runtime_core_impl(
     llm_runtime: dict[str, Any] | None,
     pii_ingress_stats: dict[str, Any] | None = None,
 ) -> AsyncGenerator[str, None]:
-    from host_brain.app.chat_agent import _sse  # noqa: PLC0415
+    from host_brain.app.surface_reply_runtime import _sse  # noqa: PLC0415
     from host_brain.app.dependencies import get_runtime_task_registry, get_skill_registry  # noqa: PLC0415
     from host_brain.app.executive_runtime import (  # noqa: PLC0415
         record_executive_handoff,
@@ -1854,7 +1854,7 @@ async def _executive_runtime_core_impl(
         )
 
     # ── Phase D：PrefrontalAgent 意图规划（小模型，<500ms）────────────────
-    # 基于器官族完整状态产出"我要做什么"的决策，结果注入 intent_draft 供 chat_agent 使用
+    # 基于器官族完整状态产出"我要做什么"的决策，结果注入 intent_draft 供 surface_reply 使用
     # 仅在 PREFRONTAL_PLAN_ENABLED=true 时启用（默认关，逐步灰度）
     _prefrontal_plan: dict[str, Any] = {}
     # OPT-4 第三批：env 读取统一走 CoreSettings
@@ -1902,7 +1902,7 @@ async def _executive_runtime_core_impl(
                         "[%s] prefrontal_plan override: action=%s target=%s",
                         request_id, _plan_action, _plan_target,
                     )
-            # 将 prefrontal_task 注入 intent_draft，供 chat_agent 作为语言化目标
+            # 将 prefrontal_task 注入 intent_draft，供 surface_reply 作为语言化目标
             if isinstance(intent_draft, dict):
                 intent_draft = dict(intent_draft)
             else:

@@ -333,15 +333,6 @@ def _truncate_memory_preview(value: Any, limit: int = 96) -> str:
     return f"{text[:limit].rstrip()}…"
 
 
-def _resolve_style_source_path(style_root: str, canon_id: str | None) -> str:
-    normalized = str(canon_id or "").strip()
-    if not normalized:
-        return os.path.join(style_root, "style_profile_v5.json")
-    if normalized.endswith("_v5") or normalized in {"natsume_ai_cn", "natsume_ai_ja"}:
-        return os.path.join(style_root, "style_profile_v5.json")
-    return os.path.join(style_root, f"{normalized}.json")
-
-
 class ResidentCanonFileItem(BaseModel):
     kind: str
     doc_id: str
@@ -354,22 +345,9 @@ class ResidentCanonFileItem(BaseModel):
     preview: Optional[str] = None
 
 
-class ResidentStyleBindingItem(BaseModel):
-    node_id: str
-    canon_id: Optional[str] = None
-    version: Optional[int] = None
-    citation: Optional[str] = None
-    source_path: Optional[str] = None
-    tone_only: bool = True
-    unsafe_as_fact: bool = True
-    preview: Optional[str] = None
-
-
 class ResidentMemoryContextResponse(BaseModel):
     world_canon_documents: List[ResidentCanonFileItem]
     persona_resident_documents: List[ResidentCanonFileItem]
-    style_canon_documents: List[ResidentCanonFileItem]
-    active_style_bindings: List[ResidentStyleBindingItem]
     timestamp: int
 
 
@@ -379,7 +357,6 @@ def get_memory_resident_context():
     now = _now_ms()
     ledger = _get_ledger()
     world_root = str(os.environ.get("Natsume_WORLD_CANON_ROOT") or "host_brain/canon/world").strip()
-    style_root = str(os.environ.get("Natsume_STYLE_CANON_ROOT") or "host_brain/canon/style").strip()
     character_profile_path = str(
         os.environ.get("NATSUME_CHARACTER_PROFILE_PATH")
         or os.path.join("host_brain", "canon", "character", "character_profile.json")
@@ -427,62 +404,8 @@ def get_memory_resident_context():
     except Exception as exc:
         logger.debug("resident persona context degraded: %s", exc)
 
-    style_docs: List[ResidentCanonFileItem] = []
-    try:
-        from host_brain.memory.canon_style_store import StyleCanonStore  # noqa: PLC0415
-
-        style_store = StyleCanonStore(style_root=style_root, ledger=ledger)
-        for entry in style_store.list_entries():
-            style_docs.append(
-                ResidentCanonFileItem(
-                    kind="style",
-                    doc_id=str(getattr(entry, "canon_id", "") or ""),
-                    title=str(getattr(entry, "canon_id", "") or "").strip() or None,
-                    source_path=_resolve_style_source_path(style_root, getattr(entry, "canon_id", None)),
-                    version=int(getattr(entry, "version", 0) or 0) or None,
-                    status="ACTIVE",
-                    updated_by=str(getattr(entry, "updated_by", "") or "").strip() or None,
-                    ts_ms=int(getattr(entry, "ts_ms", 0) or 0) or None,
-                    preview=_truncate_memory_preview(getattr(entry, "content", ""), limit=120) or None,
-                )
-            )
-    except Exception as exc:
-        logger.debug("resident style canon context degraded: %s", exc)
-
-    active_style_bindings_raw: Mapping[str, Any] | None = None
-    render_target_lang = "zh"
-    try:
-        from host_brain.app.chat_context_style import build_node_style_bindings  # noqa: PLC0415
-        active_style_bindings_raw = build_node_style_bindings(render_target_lang=render_target_lang)
-    except Exception as exc:
-        logger.debug("resident style bindings unavailable: %s", exc)
-        active_style_bindings_raw = {}
-
-    active_style_bindings: List[ResidentStyleBindingItem] = []
-    for node_id, row in dict(active_style_bindings_raw or {}).items():
-        if not isinstance(row, Mapping):
-            continue
-        canon_id = str(row.get("canon_id") or "").strip() or None
-        active_style_bindings.append(
-            ResidentStyleBindingItem(
-                node_id=str(node_id),
-                canon_id=canon_id,
-                version=(int(row.get("version")) if row.get("version") not in (None, "") else None),
-                citation=str(row.get("citation") or "").strip() or None,
-                source_path=_resolve_style_source_path(style_root, canon_id),
-                tone_only=bool(row.get("tone_only", True)),
-                unsafe_as_fact=bool(row.get("unsafe_as_fact", True)),
-                preview=_truncate_memory_preview(
-                    row.get("style_instruction") or row.get("instruction"),
-                    limit=88,
-                ) or None,
-            )
-        )
-
     return ResidentMemoryContextResponse(
         world_canon_documents=world_docs,
         persona_resident_documents=persona_docs,
-        style_canon_documents=style_docs,
-        active_style_bindings=active_style_bindings,
         timestamp=now,
     )

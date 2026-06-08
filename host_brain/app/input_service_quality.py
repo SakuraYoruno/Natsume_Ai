@@ -311,7 +311,7 @@ async def maybe_send_gateway_realign_notice(
     if not platform or not conversation_id:
         return {"sent": False, "reason_code": "DEVIATION_NOTICE_TARGET_MISSING"}
 
-    from host_brain.app.chat_agent import render_quick_gateway_realign_text  # noqa: PLC0415
+    from host_brain.app.surface_reply_preprocessor import render_quick_gateway_realign_text  # noqa: PLC0415
     from host_brain.channels.edge_rpc_client import post_gateway_reply  # noqa: PLC0415
 
     content = render_quick_gateway_realign_text(

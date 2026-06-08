@@ -1,4 +1,4 @@
-"""cortex_prompt_builder.py — Cortex Orchestrator messages 构建。"""
+﻿"""cortex_prompt_builder.py — Cortex Orchestrator messages 构建。"""
 
 from __future__ import annotations
 
@@ -21,9 +21,7 @@ _COMPACT_LANE_TOPICS = {
     "help_commitment",
     "rejection",
     "greeting",
-    "presence_ping",
     "auditory_check",
-    "light_ack",
     "playful_ping",
     "assistant_reply_followup",
 }
@@ -31,7 +29,6 @@ _COMPACT_LANE_THREADS = {
     "identity_loop",
     "boundary_probe",
     "help_reassurance",
-    "phatic",
     "assistant_reply_followup",
 }
 
@@ -111,6 +108,12 @@ def _build_structured_reply_state_prompt(*, reply_plan: Mapping[str, Any], conte
         or interaction_state_payload.get("interaction_move")
     )
     stance = _clean_state_label(interaction_state_payload.get("user_stance"))
+    freshness = _clean_state_label(interaction_state_payload.get("freshness"))
+    repeat_count = _clean_state_label(interaction_state_payload.get("repeat_question_count"))
+    repeat_group = _clean_state_label(
+        interaction_state_payload.get("repeat_surface_group")
+        or interaction_state_payload.get("repeat_group")
+    )
     response_form = _clean_state_label(reply_plan.get("response_form") or "text")
     required = _clean_state_list(contract_payload.get("required_actions"))
     forbidden = _clean_state_list(contract_payload.get("forbidden_actions"))
@@ -121,6 +124,12 @@ def _build_structured_reply_state_prompt(*, reply_plan: Mapping[str, Any], conte
         f"stance={stance or 'none'}",
         f"form={response_form or 'text'}",
     ]
+    if freshness:
+        tags.append(f"freshness={freshness}")
+    if repeat_count and repeat_count != "0":
+        tags.append(f"repeat_count={repeat_count}")
+    if repeat_group:
+        tags.append(f"repeat_group={repeat_group}")
     if required:
         tags.append("required=" + ",".join(required))
     if forbidden:
@@ -183,9 +192,34 @@ def _build_interaction_state_summary(context_plane: Any) -> str:
     perception_summary = str(
         getattr(interaction_state, "perception_summary", "") or interaction_state_payload.get("perception_summary") or ""
     ).strip()
+    repeat_question_count = 0
+    try:
+        repeat_question_count = int(
+            getattr(interaction_state, "repeat_question_count", None)
+            if getattr(interaction_state, "repeat_question_count", None) is not None
+            else interaction_state_payload.get("repeat_question_count")
+            or 0
+        )
+    except (TypeError, ValueError):
+        repeat_question_count = 0
+    repeat_surface_group = str(
+        getattr(interaction_state, "repeat_surface_group", "")
+        or interaction_state_payload.get("repeat_surface_group")
+        or interaction_state_payload.get("repeat_group")
+        or ""
+    ).strip()
     emotion_anchor = str(
         getattr(interaction_thread, "emotion_anchor", "") or interaction_thread_payload.get("emotion_anchor") or ""
     ).strip()
+
+    if repeat_question_count > 0:
+        group_text = f"同类输入是“{repeat_surface_group}”。" if repeat_surface_group else ""
+        return (
+            "【当前对话线程】\n"
+            f"用户这轮是在重复刚才同类输入，已重复 {repeat_question_count} 次。{group_text}"
+            "先承接“又说了一遍”的事实，再处理当前文字本身；不要把它当第一次，"
+            "也不要猜用户睡迷糊、故意逗你或状态异常。"
+        )
 
     if ongoing_thread == "image_social":
         if current_topic == "emoji_social_reply":
@@ -253,14 +287,7 @@ def _build_interaction_state_summary(context_plane: Any) -> str:
             "不要只回在呢，也不要假装听到了声音。"
         )
 
-    if ongoing_thread == "phatic":
-        return (
-            "【当前对话线程】\n"
-            "这轮是轻社交招呼，只要自然回应，不要上来解释或把话说重；"
-            "但也不要只喊称呼、只发表情，至少给一句有内容的熟人式回应。"
-        )
-
-    if current_topic in {"greeting", "presence_ping", "light_ack", "playful_ping"}:
+    if current_topic == "playful_ping":
         return (
             "【当前对话线程】\n"
             "这轮是轻社交招呼，只要自然回应，不要上来解释或把话说重；"
@@ -436,6 +463,7 @@ def build_cortex_prompt(
             allow_older_summary=False,
         )
     compiled_soul = get_compiled_soul()
+    _soul_display_name = str(getattr(compiled_soul, "display_name", "") or "当前人格").strip()
     _reply_plan = dict(getattr(getattr(context_plane, "reply_plan", None), "state", {}) or {})
     _soul_text = str(
         compiled_soul.runtime_compact_text if use_compact_chat_lane else compiled_soul.runtime_full_text
@@ -447,31 +475,17 @@ def build_cortex_prompt(
             _build_soul_section_title(render_target_lang=render_target_lang) + _soul_text
         )
     _parts.append(_build_final_output_contract(render_target_lang=render_target_lang))
-    _topic_for_prompt = str(_reply_plan.get("primary_topic") or "").strip()
-    _thread_for_prompt = _extract_context_thread(context_plane).strip()
-    _phatic_like_prompt = _topic_for_prompt in {
-        "greeting",
-        "presence_ping",
-        "auditory_check",
-        "light_ack",
-        "playful_ping",
-    } or _thread_for_prompt == "phatic"
     _parts.append(
         "【人格优先级】\n"
         "Soul 是说话风格、关系姿态和称呼习惯的最高优先级。情绪、关系状态和本轮目标只调节热度，"
-        "不能把新海天压成客服式、冷淡式、扫描式或只有称呼/表情的空壳短句。"
+        f"不能把{_soul_display_name}压成客服式、冷淡式、扫描式或只有称呼/表情的空壳短句。"
     )
     _affect_summary = str(_reply_plan.get("affect_summary") or "").strip()
     if _affect_summary:
         _parts.append(_affect_summary)
     _relationship_summary = str(_reply_plan.get("relationship_summary") or "").strip()
     if _relationship_summary:
-        if _phatic_like_prompt:
-            _parts.append(
-                "按 Soul 的义妹语气轻轻回应，不要刻意拉开距离；可以叫尼尼，但不能只剩称呼。"
-            )
-        else:
-            _parts.append(_relationship_summary)
+        _parts.append(_relationship_summary)
     _image_social_prompt_signal = ""
     _is_image_social_prompt = False
     _multimodal_state = getattr(getattr(context_plane, "multimodal", None), "state", None)

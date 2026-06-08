@@ -60,9 +60,9 @@ const TRACE_STAGE_GROUPS = [
   {
     id: 'agent',
     label: '代理调度',
-    description: 'Executive Router、各类 Sub Agent 与 Chat Agent 的实际执行。',
+    description: 'Executive Router、各类 Sub Agent 与 Surface Reply 的实际执行。',
     icon: Layers3,
-    nodeIds: ['executive_router', 'sub_agent_code', 'sub_agent_translate', 'sub_agent_intent', 'sub_agent_vision', 'chat_agent'],
+    nodeIds: ['executive_router', 'sub_agent_code', 'sub_agent_translate', 'sub_agent_intent', 'sub_agent_vision', 'surface_reply'],
   },
   {
     id: 'llm',
@@ -417,7 +417,7 @@ function resolveTribeEventStageId(event) {
   if (merged.includes('query_planner') || merged.includes('agentic_rag') || merged.includes('retrieval') || merged.includes('recall')) return 'retrieval'
   if (merged.includes('emotion') || merged.includes('body_sense') || merged.includes('motive') || merged.includes('persona') || merged.includes('limbic')) return 'persona'
   if (merged.includes('render_policy') || merged.includes('cortex_orchestrator') || merged.includes('cortex_agent')) return 'orchestration'
-  if (merged.includes('executive_router') || merged.includes('sub_agent') || merged.includes('chat_agent') || merged.includes('ans_agent')) return 'agent'
+  if (merged.includes('executive_router') || merged.includes('sub_agent') || merged.includes('surface_reply') || merged.includes('ans_agent')) return 'agent'
   if (merged.includes('prompt') || merged.includes('llm')) return 'llm'
   if (merged.includes('egress') || merged.includes('pii') || merged.includes('episodic') || merged.includes('bond') || merged.includes('tts') || merged.includes('vts')) return 'postprocess'
   return 'other'

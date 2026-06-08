@@ -15,7 +15,6 @@ from host_brain.app.main import build_startup_report, emit_runtime_bootstrap_log
 from host_brain.app.schemas import ErrorResponse
 from host_brain.app.http_hooks_runtime_helpers import (
     read_episodic_latest_fact,
-    read_style_canon_fact,
     read_world_canon_fact,
     run_life_memory_sleep_replay_handler,
     run_long_term_distillation_handler,
@@ -431,6 +430,7 @@ def runtime_lifespan(
         ledger = get_ledger()
         _activity_monitor = None
         _resource_manager = None
+        _life_continuity_started = False
         try:
             # 预初始化新模块，确保启动时即可感知降级状态
             # Phase XIV v4：移除 main_chain 和 routing_matrix（已被 cortex_orchestrator 架构取代）
@@ -540,7 +540,7 @@ def runtime_lifespan(
                     _chat_warmup_exc,
                 )
 
-            # [选项二] 接入 StateArbiter：注册状态源（WorldCanon、StyleCanon、EpisodicStore）
+            # [选项二] 接入 StateArbiter：注册状态源（WorldCanon、EpisodicStore）
             try:
                 from host_brain.app.dependencies import get_state_arbiter  # noqa: PLC0415
                 from host_brain.app.memory.state_arbiter import StateSource  # noqa: PLC0415
@@ -561,22 +561,6 @@ def runtime_lifespan(
                     logger.info("StateArbiter: WorldCanonStore 已注册")
                 except Exception as _exc:
                     logger.warning("StateArbiter: WorldCanonStore 注册失败（降级）: %s", _exc)
-
-                # 注册 StyleCanonStore
-                try:
-                    from host_brain.memory.canon_style_store import StyleCanonStore  # noqa: PLC0415
-
-                    _style_store = StyleCanonStore()
-
-                    _style_get_fact = lambda fact_key, _store=_style_store: read_style_canon_fact(
-                        _store,
-                        fact_key,
-                    )
-
-                    _arbiter.register_source(StateSource.STYLE_CANON, _style_get_fact)
-                    logger.info("StateArbiter: StyleCanonStore 已注册")
-                except Exception as _exc:
-                    logger.warning("StateArbiter: StyleCanonStore 注册失败（降级）: %s", _exc)
 
                 # 注册 EpisodicStore（取最新记录）
                 try:
@@ -1175,6 +1159,45 @@ def runtime_lifespan(
                     "HostTaskScheduler startup degraded: %s",
                     _host_task_scheduler_exc,
                 )
+            try:
+                from host_brain.codex_runtime.production_executor import (  # noqa: PLC0415
+                    recover_interrupted_lightnovel_recommendation_jobs,
+                )
+
+                asyncio.create_task(
+                    asyncio.to_thread(
+                        recover_interrupted_lightnovel_recommendation_jobs,
+                        limit=3,
+                        max_age_hours=72,
+                        push_gateway=True,
+                    )
+                )
+                new_module_statuses["lightnovel_recommender_recovery"] = "OK (scheduled)"
+            except Exception as _lightnovel_recovery_exc:
+                new_module_statuses["lightnovel_recommender_recovery"] = (
+                    f"DEGRADED: {_lightnovel_recovery_exc}"
+                )
+                logger.warning(
+                    "Lightnovel recommender interrupted job recovery startup degraded: %s",
+                    _lightnovel_recovery_exc,
+                )
+            try:
+                if not _background_tasks_enabled:
+                    new_module_statuses["life_continuity_loop"] = "SKIPPED: HOST_BACKGROUND_TASKS_ENABLED=false"
+                else:
+                    from host_brain.runtime.life_continuity import start_life_continuity_loop  # noqa: PLC0415
+
+                    _life_status = start_life_continuity_loop(ledger=ledger, logger=logger)
+                    _life_continuity_started = bool(_life_status.get("running"))
+                    new_module_statuses["life_continuity_loop"] = (
+                        f"{_life_status.get('status', 'UNKNOWN')} "
+                        f"(running={_life_status.get('running', False)}, "
+                        f"interval={_life_status.get('interval_s', '-')})"
+                    )
+                    logger.info("LifeContinuity loop startup: %s", _life_status)
+            except Exception as _life_loop_exc:
+                new_module_statuses["life_continuity_loop"] = f"DEGRADED: {_life_loop_exc}"
+                logger.warning("LifeContinuity loop startup degraded: %s", _life_loop_exc)
             report = build_startup_report(
                 runtime_statuses=new_module_statuses,
                 dependency_probes=build_edge_dependency_probe_statuses(dependency_probes),
@@ -1476,6 +1499,14 @@ def runtime_lifespan(
             await get_scheduler().stop()
         except Exception as _host_task_scheduler_stop_exc:
             logger.debug("HostTaskScheduler stop degraded: %s", _host_task_scheduler_stop_exc)
+        try:
+            if _life_continuity_started:
+                from host_brain.runtime.life_continuity import stop_life_continuity_loop  # noqa: PLC0415
+
+                await stop_life_continuity_loop()
+                logger.info("LifeContinuity loop stopped")
+        except Exception as _life_loop_stop_exc:
+            logger.debug("LifeContinuity loop stop degraded: %s", _life_loop_stop_exc)
         try:
             from host_brain.app.internal_codex_routes import stop_immune_auto_dispatch_monitor  # noqa: PLC0415
 

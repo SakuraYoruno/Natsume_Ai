@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import asyncio
 import json
@@ -90,13 +90,8 @@ _ACCOUNT_CREDENTIAL_REQUEST_RE = re.compile(
     r"(账号信息|账户信息|账号密码|账户密码|密码|验证码|cookie|cookies|credentials?|password))",
     re.IGNORECASE,
 )
-_SURFACE_FASTPATH_CONTINUE_RE = re.compile(r"^(继续|接着|往下|继续说|接着说)[。.!！?？]*$", re.IGNORECASE)
-_SURFACE_FASTPATH_PRESENCE_RE = re.compile(
-    r"^(在吗|在嘛|在不在|你在吗|还在吗|喂|哈喽|hello|hi|嗯|嗯嗯|哦|好)[。.!！?？]*$",
-    re.IGNORECASE,
-)
-_SURFACE_FASTPATH_AUDIO_CHECK_RE = re.compile(
-    r"^(听得到吗|听得到不|能听到吗|能听见吗|听见吗|听得到嘛)[。.!！?？]*$",
+_SURFACE_GREETING_RE = re.compile(
+    r"^(你好|你好啊|你好呀|您好|嗨|哈喽|哈啰|hello|hi|hey)[。.!！?？~～]*$",
     re.IGNORECASE,
 )
 _MAIN_CHAIN_META_CHAT_RE = re.compile(
@@ -144,10 +139,10 @@ _MEMORY_RECALL_USER_STATE_GUESS_TERMS = (
 _MEMORY_RECALL_USER_STATE_GUESS_RE = re.compile(
     r"(?:^|[，,。.!！?？；;、\s])"
     r"(?:嘿嘿|哈哈|哈|嗯|哼|欸|诶)?[，,、\s]*"
-    r"(?:老哥|哥哥|尼尼)?(?:你)?"
+    r"(?:老哥|哥哥|对方)?(?:你)?"
     r"(?:(?:终于|总算|才).{0,14}(?:来问|问我|问这个|想起来|想起|舍得问)"
     r"|(?:昨天|刚刚|刚才|之前|上次).{0,12}(?:没看|忘了|想起来)"
-    r"|(?:你|老哥|哥哥|尼尼).{0,8}(?:是不是|不会是).{0,8}(?:没看|忘了))"
+    r"|(?:你|老哥|哥哥|对方).{0,8}(?:是不是|不会是).{0,8}(?:没看|忘了))"
     r"[^，,。.!！?？；;、~～]*[，,。.!！?？；;、~～\s]*",
     re.IGNORECASE,
 )
@@ -157,8 +152,13 @@ _MEMORY_RECALL_SELF_READING_DRIFT_RE = re.compile(
     re.IGNORECASE,
 )
 _MEMORY_RECALL_LOW_SIGNAL_PREFIX_RE = re.compile(
-    r"^\s*(?:哈[？?]?|哈哈|嘿嘿|嗯|欸|诶|呃|啊|老哥|哥哥|尼尼|老哥问得正好|问得正好|难得难得|(?:老哥|哥哥|尼尼)?你问这个啊)"
+    r"^\s*(?:哈[？?]?|哈哈|嘿嘿|嗯|欸|诶|呃|啊|老哥|哥哥|对方|老哥问得正好|问得正好|难得难得|(?:老哥|哥哥|对方)?你问这个啊)"
     r"[^，,。.!！?？；;、~～—-]{0,12}[，,。.!！?？；;、~～—\-\s]*",
+    re.IGNORECASE,
+)
+_MEMORY_GUARD_EMPTY_REWRITE_QUERY_RE = re.compile(
+    r"(记得|记不记得|还记得|记忆|我之前|之前说|以前说|上次说|我说过|"
+    r"偏好|喜好|喜欢什么|不喜欢什么|我的.{0,20}(有哪些|是什么|是啥))",
     re.IGNORECASE,
 )
 
@@ -172,9 +172,9 @@ def surface_main_chain_enabled(agent_input: Any, *, sub_agent_ctx: Any | None = 
 def surface_main_chain_required(agent_input: Any, *, sub_agent_ctx: Any | None = None) -> bool:
     if _sub_agent_result_should_bypass_surface(sub_agent_ctx):
         return False
-    if _has_multimodal_payload(agent_input):
-        return False
     response_form = _response_form(agent_input)
+    if _has_multimodal_payload(agent_input) and not _multimodal_surface_main_chain_supported(agent_input):
+        return response_form in _TEXT_RESPONSE_FORMS and _surface_user_visible_reply_context(agent_input)
     return response_form in _TEXT_RESPONSE_FORMS
 
 
@@ -189,7 +189,7 @@ def _sub_agent_result_should_bypass_surface(sub_agent_ctx: Any | None) -> bool:
     return agent_id in _DETERMINISTIC_RESULT_AGENT_IDS or agent_id.startswith("skill:hub_skill_")
 
 
-def build_surface_main_chain_input_from_chat_input(
+def build_surface_main_chain_input_from_surface_reply_input(
     agent_input: Any,
     *,
     trace_stage_meta: dict[str, Any] | None = None,
@@ -204,6 +204,11 @@ def build_surface_main_chain_input_from_chat_input(
         runtime_payload=runtime_payload,
     )
     _merge_surface_trace(trace_stage_meta, runtime_payload)
+    reply_plan = _surface_apply_memory_context_reply_plan_override(
+        reply_plan,
+        agent_input=agent_input,
+        trace_stage_meta=trace_stage_meta,
+    )
     if isinstance(trace_stage_meta, dict) and reply_plan:
         trace_stage_meta["surface_selected_reply_plan"] = dict(reply_plan)
     task_control = _surface_task_control_from_reply_plan(
@@ -217,12 +222,13 @@ def build_surface_main_chain_input_from_chat_input(
         trace_stage_meta=trace_stage_meta,
         runtime_payload=runtime_payload,
     )
+    preference_query_owned = _surface_user_preference_query_owned(agent_input)
     return SurfaceMainChainInput(
         soul_md=str(getattr(soul, "source_text", "") or getattr(soul, "runtime_full_text", "")).strip(),
         user_message=str(getattr(agent_input, "user_message", "") or "").strip(),
         case_id=str(getattr(agent_input, "request_id", "") or "").strip(),
         task_control=task_control,
-        memory_packet=_memory_packet(
+        memory_packet=None if preference_query_owned else _memory_packet(
             agent_input,
             trace_stage_meta=trace_stage_meta,
             runtime_payload=runtime_payload,
@@ -240,17 +246,19 @@ def build_surface_main_chain_input_from_chat_input(
             trace_stage_meta=trace_stage_meta,
         ),
         style_anchor=("app 层只传压缩控制包，不传原始历史。",),
+        max_facts=12 if preference_query_owned else 8,
+        max_must_not_do=24,
     )
 
 
-async def run_surface_main_chain_for_chat_input(
+async def run_surface_main_chain_for_surface_reply_input(
     agent_input: Any,
     *,
     trace_stage_meta: dict[str, Any] | None = None,
 ) -> SurfaceMainChainResult:
     llm_runtime = _safe_mapping(getattr(agent_input, "llm_runtime", None))
     request_id = str(getattr(agent_input, "request_id", "") or "").strip()
-    surface_input = build_surface_main_chain_input_from_chat_input(
+    surface_input = build_surface_main_chain_input_from_surface_reply_input(
         agent_input,
         trace_stage_meta=trace_stage_meta,
     )
@@ -329,7 +337,7 @@ async def surface_main_chain_sse_generator(
                 "reply_envelope": envelope.as_dict(),
                 "audit_refs": {
                     "request_id": request_id,
-                    "path": "chat_agent:surface_main_chain",
+                    "path": "surface_reply:surface_main_chain",
                     "latency_ms": total_latency_ms,
                     "first_token_ms": 0,
                     "llm_latency_ms": 0,
@@ -355,65 +363,8 @@ async def surface_main_chain_sse_generator(
             }
         )
         return
-    fastpath_text = _surface_main_chain_fastpath_text(agent_input)
-    if fastpath_text:
-        total_latency_ms = max(0, int(time.time() * 1000) - started_ms)
-        envelope = ReplyEnvelope(
-            kind="final_reply",
-            text=fastpath_text,
-            response_form="text",
-            source="surface_main_chain_fastpath",
-            sendable=True,
-            persistable=True,
-            cacheable=True,
-            degraded=False,
-            reason_code="SURFACE_MAIN_CHAIN_FASTPATH",
-            audit={"request_id": request_id},
-            raw_extra={"fastpath": True, "reason_code": "LOW_INFO_RULE"},
-        )
-        yield _sse({"phase": "RENDER", "chunk": fastpath_text})
-        yield _sse({"phase": "SENTENCE", "sentence": fastpath_text, "sentence_index": 0})
-        yield _sse(
-            {
-                "phase": "COMMIT",
-                "done": True,
-                "decision": "APPROVE",
-                "reason_code": envelope.reason_code,
-                "narrative": fastpath_text,
-                "request_id": request_id,
-                "reply_envelope": envelope.as_dict(),
-                "audit_refs": {
-                    "request_id": request_id,
-                    "path": "chat_agent:surface_main_chain",
-                    "latency_ms": total_latency_ms,
-                    "first_token_ms": 0,
-                    "llm_latency_ms": 0,
-                    "model_id": "",
-                    "provider_name": "rule",
-                    "response_form": "text",
-                    "timings_ms": _surface_timings_ms(
-                        total_latency_ms=total_latency_ms,
-                        llm_latency_ms=0,
-                    ),
-                    "reply_envelope": envelope.as_dict(),
-                    "trace_stage_meta": {
-                        **trace,
-                        "surface_main_chain_used": True,
-                        "reply_source": "surface_main_chain_fastpath",
-                        "surface_renderer": {
-                            "status": "OK",
-                            "invoked": False,
-                            "affected_output": True,
-                            "source": "surface_main_chain_fastpath",
-                            "reason_code": "LOW_INFO_RULE",
-                        },
-                    },
-                },
-            }
-        )
-        return
     try:
-        result = await run_surface_main_chain_for_chat_input(agent_input, trace_stage_meta=trace)
+        result = await run_surface_main_chain_for_surface_reply_input(agent_input, trace_stage_meta=trace)
     except Exception as exc:
         total_latency_ms = max(0, int(time.time() * 1000) - started_ms)
         fallback_text = _surface_failure_fallback_text(agent_input, exc=exc)
@@ -448,7 +399,7 @@ async def surface_main_chain_sse_generator(
                     "reply_envelope": envelope.as_dict(),
                     "audit_refs": {
                         "request_id": request_id,
-                        "path": "chat_agent:surface_main_chain",
+                        "path": "surface_reply:surface_main_chain",
                         "latency_ms": total_latency_ms,
                         "reason_code": "SURFACE_MAIN_CHAIN_FAILED",
                         "timings_ms": _surface_timings_ms(
@@ -487,7 +438,7 @@ async def surface_main_chain_sse_generator(
                 "reply_envelope": envelope.as_dict(),
                 "audit_refs": {
                     "request_id": request_id,
-                    "path": "chat_agent:surface_main_chain",
+                    "path": "surface_reply:surface_main_chain",
                     "latency_ms": total_latency_ms,
                     "reason_code": envelope.reason_code,
                     "timings_ms": _surface_timings_ms(
@@ -500,17 +451,13 @@ async def surface_main_chain_sse_generator(
         )
         return
 
-    narrative = str(result.selected_text or "").strip()
+    raw_narrative = str(result.selected_text or "").strip()
+    narrative = raw_narrative
     narrative, account_guard_applied = _sanitize_account_login_reply(narrative, agent_input=agent_input)
     narrative = _sanitize_main_chain_meta_reply(narrative, agent_input=agent_input)
     narrative, quality_guard = _apply_surface_text_quality_guard(
         narrative,
         agent_input=agent_input,
-    )
-    narrative, memory_guard = _apply_surface_memory_output_guard(
-        narrative,
-        agent_input=agent_input,
-        trace_stage_meta=trace,
     )
     if account_guard_applied:
         trace["surface_account_login_guard"] = {
@@ -519,8 +466,6 @@ async def surface_main_chain_sse_generator(
         }
     if quality_guard.get("applied"):
         trace["surface_text_quality_guard"] = quality_guard
-    if memory_guard.get("applied"):
-        trace["surface_memory_output_guard"] = memory_guard
     total_latency_ms = max(0, int(time.time() * 1000) - started_ms)
     llm_latency_ms = int(result.runtime.latency_ms or 0)
     timings_ms = _surface_timings_ms(
@@ -528,6 +473,30 @@ async def surface_main_chain_sse_generator(
         llm_latency_ms=llm_latency_ms,
     )
     model_audit = _surface_model_audit_fields(agent_input=agent_input, trace_stage_meta=trace)
+    life_causality: dict[str, Any] = {}
+    try:
+        from host_brain.runtime.life_continuity import record_dialogue_aftereffect  # noqa: PLC0415
+
+        life_director = _safe_mapping(trace.get("life_director"))
+        life_causality = await record_dialogue_aftereffect(
+            ledger=_surface_life_ledger(),
+            person_id=str(getattr(agent_input, "person_id", "") or "").strip() or "default",
+            session_id=str(getattr(agent_input, "session_id", "") or "").strip(),
+            request_id=request_id,
+            user_message=str(getattr(agent_input, "user_message", "") or ""),
+            reply_text=narrative,
+            life_director=life_director,
+            platform=str(getattr(agent_input, "reply_channel", "") or getattr(agent_input, "platform", "") or "").strip(),
+            conversation_id=str(getattr(agent_input, "reply_target", "") or getattr(agent_input, "conversation_id", "") or "").strip(),
+        )
+        if life_causality:
+            trace["life_causality"] = dict(life_causality)
+    except Exception as life_exc:
+        trace["life_causality"] = {
+            "status": "DEGRADED",
+            "reason_code": type(life_exc).__name__,
+            "detail": str(life_exc)[:160],
+        }
     envelope = ReplyEnvelope.final_reply(
         text=narrative,
         response_form="text",
@@ -555,7 +524,7 @@ async def surface_main_chain_sse_generator(
             "reply_envelope": envelope.as_dict(),
             "audit_refs": {
                 "request_id": request_id,
-                "path": "chat_agent:surface_main_chain",
+                "path": "surface_reply:surface_main_chain",
                 "latency_ms": total_latency_ms,
                 "first_token_ms": llm_latency_ms if narrative else None,
                 "llm_latency_ms": llm_latency_ms,
@@ -640,103 +609,6 @@ def _sanitize_main_chain_meta_reply(text: str, *, agent_input: Any) -> str:
     if any(marker in message for marker in ("体感", "判断", "主链效果", "主链表现")) and len(cleaned) < 18:
         return _surface_failure_fallback_text(agent_input, exc=RuntimeError("SURFACE_META_REPLY_TOO_THIN"))
     return cleaned
-
-
-def _apply_surface_memory_output_guard(
-    text: str,
-    *,
-    agent_input: Any,
-    trace_stage_meta: Mapping[str, Any] | None = None,
-) -> tuple[str, dict[str, Any]]:
-    narrative = str(text or "").strip()
-    packet = _surface_memory_packet_for_output_guard(agent_input=agent_input, trace_stage_meta=trace_stage_meta)
-    if not narrative or not packet:
-        return narrative, {"applied": False, "reason_code": ""}
-    readiness = _surface_memory_readiness(packet)
-    reason_code = str(packet.get("reason_code") or "").strip()
-    ready = _surface_memory_packet_ready(packet, readiness=readiness)
-    if not ready:
-        if _surface_memory_missing_detail_selection(readiness) and _missing_detail_selection_bad_inference(narrative):
-            replacement = _memory_not_ready_guard_text(
-                user_message=str(getattr(agent_input, "user_message", "") or ""),
-                readiness=readiness,
-                strategy=_surface_memory_strategy(packet),
-                reason_code=reason_code,
-            )
-            return replacement, {
-                "applied": True,
-                "reason_code": "SURFACE_MEMORY_OUTPUT_MISSING_DETAIL_INFERENCE_REWRITE",
-                "original_reason_code": reason_code,
-                "readiness_status": str(readiness.get("status") or ""),
-                "response_mode": str(readiness.get("response_mode") or ""),
-                "original_digest": narrative[:160],
-            }
-        if _narrative_acknowledges_memory_missing(narrative) or not _narrative_makes_memory_assertion(narrative):
-            return narrative, {"applied": False, "reason_code": "", "ready_to_answer": False}
-        replacement = _memory_not_ready_guard_text(
-            user_message=str(getattr(agent_input, "user_message", "") or ""),
-            readiness=readiness,
-            strategy=_surface_memory_strategy(packet),
-            reason_code=reason_code,
-        )
-        return replacement, {
-            "applied": True,
-            "reason_code": "SURFACE_MEMORY_OUTPUT_NOT_READY_REWRITE",
-            "original_reason_code": reason_code,
-            "readiness_status": str(readiness.get("status") or ""),
-            "response_mode": str(readiness.get("response_mode") or ""),
-            "original_digest": narrative[:160],
-        }
-    deep_review_rewrite = _deep_review_selection_guard_text_if_needed(narrative=narrative, packet=packet, readiness=readiness)
-    if deep_review_rewrite:
-        return deep_review_rewrite, {
-            "applied": True,
-            "reason_code": "SURFACE_MEMORY_OUTPUT_DEEP_REVIEW_DIRECT_REWRITE",
-            "readiness_status": str(readiness.get("status") or ""),
-            "recall_contract_id": str(readiness.get("recall_contract_id") or ""),
-            "original_digest": narrative[:160],
-        }
-    unsupported_titles = _unsupported_memory_titles(narrative=narrative, packet=packet)
-    if unsupported_titles:
-        replacement = _unsupported_memory_title_guard_text(packet)
-        return replacement, {
-            "applied": True,
-            "reason_code": "SURFACE_MEMORY_OUTPUT_UNSUPPORTED_FACT_REWRITE",
-            "readiness_status": str(readiness.get("status") or ""),
-            "unsupported_title_count": len(unsupported_titles),
-            "recall_contract_id": str(readiness.get("recall_contract_id") or ""),
-            "original_digest": narrative[:160],
-        }
-    cleaned_narrative, user_state_hits = _sanitize_memory_recall_user_state_guess(narrative)
-    if user_state_hits and cleaned_narrative:
-        return cleaned_narrative, {
-            "applied": True,
-            "reason_code": "SURFACE_MEMORY_OUTPUT_USER_STATE_GUESS_STRIPPED",
-            "readiness_status": str(readiness.get("status") or ""),
-            "hit_count": len(user_state_hits),
-            "hits": user_state_hits[:6],
-            "recall_contract_id": str(readiness.get("recall_contract_id") or ""),
-            "original_digest": narrative[:160],
-        }
-    if _selection_memory_reply_drifted_off_recalled_items(narrative=narrative, packet=packet, readiness=readiness):
-        replacement = _ungrounded_selection_guard_text(packet)
-        return replacement, {
-            "applied": True,
-            "reason_code": "SURFACE_MEMORY_OUTPUT_SELECTION_UNGROUNDED_REWRITE",
-            "readiness_status": str(readiness.get("status") or ""),
-            "recall_contract_id": str(readiness.get("recall_contract_id") or ""),
-            "original_digest": narrative[:160],
-        }
-    cleaned_prefix = _sanitize_memory_recall_low_signal_prefix(narrative=narrative, readiness=readiness)
-    if cleaned_prefix and cleaned_prefix != narrative:
-        return cleaned_prefix, {
-            "applied": True,
-            "reason_code": "SURFACE_MEMORY_OUTPUT_LOW_SIGNAL_PREFIX_STRIPPED",
-            "readiness_status": str(readiness.get("status") or ""),
-            "recall_contract_id": str(readiness.get("recall_contract_id") or ""),
-            "original_digest": narrative[:160],
-        }
-    return narrative, {"applied": False, "reason_code": "", "ready_to_answer": True}
 
 
 def _surface_memory_packet_for_output_guard(
@@ -1130,10 +1002,222 @@ def _memory_not_ready_guard_text(
             return "我别装读过了：这批我只看到推荐卡片，还没翻正文。现在要我选，只能先按简介挑个第一眼；等真读了我再改口。"
         return "我这边只召回到相关记录的锚点，但没有足够详情、正文或可读证据，不能直接判断哪本更好。得先把详情页或正文补读完。"
     if "insufficient_item_count" in reasons:
-        return "我没找到足够贴合这次范围的推荐记录，不能硬说是哪几本或哪本最好。"
+        return "这次我想不太准，不能乱点几本当答案；你给我个线索，我再帮你捋。"
+    if re.search(r"(轻小说|輕小說|小说|小說|书|書).{0,12}偏好|偏好.{0,12}(轻小说|輕小說|小说|小說|书|書)", user_message):
+        return "刚才那句是我说过头了。那个“奇幻/身份钩子”只是挑书时抓的点，不等于我已经摸准你的长期口味。"
     if "validation_failed" in reasons:
-        return "我没找到通过时间、对象和证据校验的记忆，不能装作记得。"
-    return "我没找到足够可靠的记忆证据，不能装作记得。"
+        return "这块我现在想不太准，不想乱猜；你给我一个线索，我再帮你捋。"
+    return "这块我现在想不太准，不想乱猜；你给我一个线索，我再帮你捋。"
+
+
+async def _generate_memory_guard_empty_repair_reply(
+    *,
+    agent_input: Any,
+    raw_narrative: str,
+    packet: Mapping[str, Any] | None,
+    readiness: Mapping[str, Any],
+    trace_stage_meta: dict[str, Any] | None = None,
+) -> str:
+    llm_runtime = _safe_mapping(getattr(agent_input, "llm_runtime", None))
+    if not bool(llm_runtime.get("available")):
+        return ""
+    user_message = str(getattr(agent_input, "user_message", "") or "").strip()
+    if not user_message:
+        return ""
+    try:
+        from host_brain.integrations.llm_helpers import acomplete_llm_with_pool  # noqa: PLC0415
+
+        compiled_soul = get_compiled_soul()
+        soul_name = str(getattr(compiled_soul, "display_name", "") or "当前人格").strip()
+        prompt_payload = {
+            "user_message": user_message,
+            "blocked_draft": str(raw_narrative or "").strip()[:260],
+            "domain_hint": (
+                "lightnovel_preference_lookup"
+                if re.search(r"(轻小说|輕小說|小说|小說|书|書).{0,12}偏好|偏好.{0,12}(轻小说|輕小說|小说|小說|书|書)", user_message)
+                else ""
+            ),
+            "memory_status": {
+                "status": str(readiness.get("status") or ""),
+                "response_mode": str(readiness.get("response_mode") or ""),
+                "recall_contract_id": str(readiness.get("recall_contract_id") or ""),
+                "query_kind": str(readiness.get("query_kind") or ""),
+                "reasons": [str(item or "").strip() for item in list(readiness.get("reasons") or []) if str(item or "").strip()][:6],
+            },
+            "memory_packet_summary": {
+                "reason_code": str((_safe_mapping(packet)).get("reason_code") or ""),
+                "fact_count": len(list((_safe_mapping(packet)).get("facts") or [])),
+                "relationship_clue_count": len(list((_safe_mapping(packet)).get("relationship_clues") or [])),
+            },
+        }
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    f"你是Soul.md 定义的{soul_name}，正在和熟悉的人中文聊天。用户在问记忆或偏好，但当前可用记忆不足，"
+                    "上一版草稿被拦截是因为它像在硬说自己记得。请重新生成一句自然回复。"
+                    "要求：必须像真人聊天；不要提系统、模型、守卫、证据校验、召回、内部规则；"
+                    "不要声称记得具体偏好、书名或事实；禁止使用“我记得”“我印象里”“你好像提过”"
+                    "“你之前说过”“你喜欢……”这类把未知说成已知的表达；"
+                    "也不要说“记录”“证据”“召回”“翻记忆”“没翻到”这种系统味词；"
+                    "不要用“怕误导你”这种泛泛道歉；可以自然说自己这会儿想不太准、不想乱猜，"
+                    "如果上下文里刚把推荐理由说成了偏好，要直接承认那句话不严谨。"
+                    "当 domain_hint=lightnovel_preference_lookup 时，必须说清：奇幻/身份钩子这类东西"
+                    "只能算推荐理由或挑书线索，不等于、不代表用户长期偏好；不要只说不确定、别放心上。"
+                    "这类回复要像正常聊天，可以说“刚才那句我说过头了”，不要写成说明书；"
+                    "最多两句，不要追加“给我线索/下次聊作品/再多说说”之类的追问。"
+                    "不要说“瞎猜”“别放心上”“哪敢乱说”，不要把推荐线索说成随机乱猜。"
+                    f"语气必须贴近{soul_name}：短、直接，可以带一点当前人格里的嘴硬、别扭或轻吐槽；"
+                    "轻小说偏好澄清必须使用 Soul.md 中的称呼和发话动作，不要套旧角色口癖；不要客服腔。"
+                    "输出 JSON：{\"narrative\":\"...\"}。"
+                ),
+            },
+            {
+                "role": "user",
+                "content": json.dumps(prompt_payload, ensure_ascii=False),
+            },
+        ]
+        result = await acomplete_llm_with_pool(
+            request_id=str(getattr(agent_input, "request_id", "") or "").strip(),
+            scene_type="CHAT_SURFACE",
+            cognitive_tier="A",
+            provider_name=str(llm_runtime.get("provider_name") or "").strip(),
+            model_id=str(llm_runtime.get("model_id") or "").strip(),
+            api_key=str(llm_runtime.get("llm_api_key") or "").strip(),
+            timeout_ms=min(int(llm_runtime.get("timeout_ms") or 30_000), 12_000),
+            messages=messages,
+            gen_params={"temperature": 0.65, "max_tokens": 120},
+            response_format={"type": "json_object"},
+            base_url_override=str(llm_runtime.get("base_url_override") or "").strip() or None,
+        )
+        if isinstance(trace_stage_meta, dict):
+            trace_stage_meta["surface_memory_guard_repair_llm_pool"] = _llm_pool_result_trace(result)
+        if bool(getattr(result, "pool_exhausted", False)):
+            return ""
+        content = str(getattr(result, "content", "") or "").strip()
+        if not content:
+            return ""
+        try:
+            payload = json.loads(content)
+            candidate = str(payload.get("narrative") or "").strip() if isinstance(payload, Mapping) else ""
+        except Exception:
+            candidate = content.strip()
+        candidate = _sanitize_main_chain_meta_reply(candidate, agent_input=agent_input).strip()
+        candidate = re.sub(r"\s+", " ", candidate).strip()
+        if not candidate:
+            return ""
+        if _memory_repair_reply_claims_unsupported_memory(candidate):
+            return ""
+        if _memory_repair_reply_misses_lightnovel_preference_distinction(
+            candidate=candidate,
+            user_message=user_message,
+        ):
+            return ""
+        if _memory_repair_reply_is_too_chatty_for_lightnovel_preference(
+            candidate=candidate,
+            user_message=user_message,
+        ):
+            return ""
+        if _memory_repair_reply_misses_soul_tone_for_lightnovel_preference(
+            candidate=candidate,
+            user_message=user_message,
+        ):
+            return ""
+        return candidate[:220].strip()
+    except Exception:
+        return ""
+
+
+def _memory_repair_reply_claims_unsupported_memory(text: str) -> bool:
+    compact = re.sub(r"\s+", "", str(text or ""))
+    if not compact:
+        return False
+    if any(token in compact for token in ("记录", "证据", "召回", "校验", "翻记忆", "没翻到", "翻了翻记忆", "误导")):
+        return True
+    return bool(
+        re.search(
+            r"(我(?:还|确实|大概|好像)?记得|我想起来|我记到|我印象里|"
+            r"你(?:好像|之前|以前|上次)?(?:提过|说过)|"
+            r"你(?:就是|比较|很|一直)喜欢|你的偏好是|偏好大概是|偏好应该是)",
+            compact,
+            re.IGNORECASE,
+        )
+    )
+
+
+def _memory_repair_reply_misses_lightnovel_preference_distinction(*, candidate: str, user_message: str) -> bool:
+    user_compact = re.sub(r"\s+", "", str(user_message or ""))
+    if not re.search(r"(轻小说|輕小說|小说|小說|书|書).{0,12}偏好|偏好.{0,12}(轻小说|輕小說|小说|小說|书|書)", user_compact):
+        return False
+    compact = re.sub(r"\s+", "", str(candidate or ""))
+    if not compact:
+        return True
+    has_recommendation_hint = any(token in compact for token in ("推荐", "推荐理由", "挑书", "口味线索", "线索", "钩子", "身份钩子"))
+    has_preference_boundary = any(
+        token in compact
+        for token in (
+            "长期偏好",
+            "偏好清单",
+            "不等于",
+            "不代表",
+            "不能代表",
+            "不是你的偏好",
+            "不能算",
+            "不该直接说成",
+            "不能确认",
+        )
+    )
+    return not (has_recommendation_hint and has_preference_boundary)
+
+
+def _lightnovel_preference_boundary_answer(text: str, *, user_message: str) -> bool:
+    user_compact = re.sub(r"\s+", "", str(user_message or ""))
+    if not re.search(r"(轻小说|輕小說|小说|小說|书|書).{0,12}偏好|偏好.{0,12}(轻小说|輕小說|小说|小說|书|書)", user_compact):
+        return False
+    compact = re.sub(r"\s+", "", str(text or ""))
+    if not compact:
+        return False
+    has_recommendation_hint = any(token in compact for token in ("推荐", "推荐理由", "挑书", "口味线索", "线索", "钩子", "身份钩子"))
+    has_preference_boundary = any(
+        token in compact
+        for token in (
+            "长期偏好",
+            "偏好清单",
+            "不等于",
+            "不代表",
+            "不能代表",
+            "不是你的偏好",
+            "不能算",
+            "不该直接说成",
+            "不能确认",
+        )
+    )
+    return bool(has_recommendation_hint and has_preference_boundary)
+
+
+def _memory_repair_reply_is_too_chatty_for_lightnovel_preference(*, candidate: str, user_message: str) -> bool:
+    user_compact = re.sub(r"\s+", "", str(user_message or ""))
+    if not re.search(r"(轻小说|輕小說|小说|小說|书|書).{0,12}偏好|偏好.{0,12}(轻小说|輕小說|小说|小說|书|書)", user_compact):
+        return False
+    compact = re.sub(r"\s+", "", str(candidate or ""))
+    if len(compact) > 78:
+        return True
+    return any(token in compact for token in ("给我线索", "下次聊", "再多说说", "随便提一本", "顺着聊", "瞎猜", "别放心上", "哪敢乱说"))
+
+
+def _memory_repair_reply_misses_soul_tone_for_lightnovel_preference(*, candidate: str, user_message: str) -> bool:
+    user_compact = re.sub(r"\s+", "", str(user_message or ""))
+    if not re.search(r"(轻小说|輕小說|小说|小說|书|書).{0,12}偏好|偏好.{0,12}(轻小说|輕小說|小说|小說|书|書)", user_compact):
+        return False
+    _ = candidate
+    return False
+
+
+def _memory_guard_empty_rewrite_query(user_message: str) -> bool:
+    compact = re.sub(r"\s+", "", str(user_message or ""))
+    if not compact:
+        return False
+    return bool(_MEMORY_GUARD_EMPTY_REWRITE_QUERY_RE.search(compact))
 
 
 def _unsupported_memory_titles(*, narrative: str, packet: Mapping[str, Any]) -> list[str]:
@@ -1329,27 +1413,6 @@ def _ungrounded_selection_guard_text(packet: Mapping[str, Any]) -> str:
         quoted = "、".join(f"《{title}》" for title in titles[:6])
         return f"我这边召回到的是{quoted}。刚才那句没有落在这组推荐上，不能算这次追问的答案。"
     return "刚才那句没有落在这次召回到的记忆上，我不能把它当成这轮追问的答案。"
-
-
-def _surface_main_chain_fastpath_text(agent_input: Any) -> str:
-    if str(os.environ.get("HOST_SURFACE_MAIN_CHAIN_LOW_INFO_FASTPATH_ENABLED") or "true").strip().lower() in {
-        "0",
-        "false",
-        "no",
-        "off",
-    }:
-        return ""
-    message = str(getattr(agent_input, "user_message", "") or "").strip()
-    if not message or len(message) > 16:
-        return ""
-    compact = re.sub(r"\s+", "", message)
-    if _SURFACE_FASTPATH_CONTINUE_RE.fullmatch(compact):
-        return "接着来。"
-    if _SURFACE_FASTPATH_AUDIO_CHECK_RE.fullmatch(compact):
-        return "我这里只看到文字。"
-    if _SURFACE_FASTPATH_PRESENCE_RE.fullmatch(compact):
-        return "在。"
-    return ""
 
 
 def _surface_perception_evidence_gate_text(agent_input: Any) -> str:
@@ -1736,6 +1799,12 @@ def _surface_task_control_from_reply_plan(
     reply_plan: Mapping[str, Any],
     trace_stage_meta: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
+    reply_plan = _surface_apply_memory_context_reply_plan_override(
+        reply_plan,
+        agent_input=agent_input,
+        trace_stage_meta=trace_stage_meta,
+    )
+    preference_query_owned = _surface_user_preference_query_owned(agent_input)
     memory_plan_reason = _surface_memory_plan_reason(trace_stage_meta)
     memory_packet = _surface_memory_packet_for_output_guard(agent_input=agent_input, trace_stage_meta=trace_stage_meta)
     memory_readiness = _surface_memory_readiness(memory_packet)
@@ -1755,14 +1824,95 @@ def _surface_task_control_from_reply_plan(
         reply_plan.get("tactic_variant"),
         task_mode,
     )
-    if memory_plan_reason in _MEMORY_RECALL_SURFACE_REASONS:
+    repeat_count = _surface_reply_plan_repeat_count(reply_plan)
+    repeat_group = _surface_reply_plan_repeat_group(reply_plan)
+    user_message = str(getattr(agent_input, "user_message", "") or "").strip()
+    compact_user_message = re.sub(r"\s+", "", user_message)
+    morning_greeting_mismatch = False
+    if re.search(r"^(早|早安|早上好)", compact_user_message):
+        try:
+            from host_brain.runtime.environment_state import build_environment_snapshot  # noqa: PLC0415
+
+            environment = _safe_mapping(build_environment_snapshot())
+            day_phase = str(environment.get("day_phase") or "").strip()
+            morning_greeting_mismatch = bool(day_phase and day_phase not in {"dawn", "morning"})
+        except Exception:
+            morning_greeting_mismatch = False
+    if morning_greeting_mismatch:
+        task_mode = "temporal_mismatch_greeting"
+        response_move = "temporal_mismatch_greeting"
+        reply_plan = dict(reply_plan)
+        reply_plan["task_mode"] = task_mode
+        reply_plan["response_move"] = response_move
+        reply_plan["response_goal"] = "correct_temporal_greeting_mismatch"
+        if repeat_count > 0:
+            group_text = f"；重复类别={repeat_group}" if repeat_group else ""
+            reply_plan["reply_contract"] = (
+                f"用户重复发送早安类问候，之前已有 {repeat_count} 次同类输入{group_text}；"
+                "当前也不是早上。必须同时承接“又说了一遍”和“时间错位”两个事实，"
+                "不要按普通早安回复，也不要猜用户动机或状态。"
+            )
+        else:
+            reply_plan["reply_contract"] = "用户说早安类问候但当前不是早上；自然指出时间错位，不要按普通早安回复。"
+    elif task_mode == "greeting":
+        task_mode = "daily_chat"
+        response_move = "reply_current_turn"
+        reply_plan = dict(reply_plan)
+        reply_plan["task_mode"] = task_mode
+        reply_plan["response_move"] = response_move
+        reply_plan["response_goal"] = "contextual_chat_reply"
+        reply_plan["reply_contract"] = "低信息输入也走统一 surface 主链；结合当前上下文、环境、生命状态、Soul 和最近对话自然回应。"
+    if preference_query_owned:
+        task_mode = "user_preference_lookup"
+        response_move = "answer_user_preference"
+    elif memory_plan_reason in _MEMORY_RECALL_SURFACE_REASONS:
         task_mode = "memory_followup"
         response_move = "memory_followup"
+    pragmatic_guidance_action = _surface_pragmatic_guidance_action(agent_input)
+    if pragmatic_guidance_action == "clarify_reference":
+        task_mode = "reference_clarification"
+        response_move = "clarify_reference"
+    life_director_pack = _surface_life_director_pack(
+        agent_input,
+        trace_stage_meta=trace_stage_meta,
+        task_mode=task_mode,
+        response_move=response_move,
+    )
+    if isinstance(trace_stage_meta, dict) and life_director_pack:
+        trace_stage_meta["life_director"] = dict(life_director_pack)
     task_facts = _task_facts(reply_plan=reply_plan, agent_input=agent_input, trace_stage_meta=trace_stage_meta)
+    life_fact_lines = _surface_life_context_task_facts(agent_input, trace_stage_meta=trace_stage_meta)
+    if life_fact_lines:
+        task_facts = _clean_list(
+            [
+                *life_fact_lines,
+                *task_facts,
+            ]
+        )
+    pragmatic_fact_lines = _surface_pragmatic_intent_fact_lines(agent_input)
+    if pragmatic_fact_lines:
+        task_facts = _clean_list(
+            [
+                *pragmatic_fact_lines,
+                *task_facts,
+            ]
+        )
+    preference_fact_lines = _surface_user_preference_fact_lines(agent_input)
+    if preference_fact_lines:
+        task_facts = _clean_list(
+            [
+                *preference_fact_lines,
+                *task_facts,
+            ]
+        )
     task_must_not_do = _clean_list(
         [
             *_coerce_sequence(reply_plan.get("must_not_do")),
-            *_surface_memory_acceptance_must_not_do(agent_input),
+            *_surface_dialogue_repeat_must_not_do(reply_plan),
+            *_surface_life_context_must_not_do(agent_input, trace_stage_meta=trace_stage_meta),
+            *_surface_user_preference_must_not_do(agent_input),
+            *_surface_pragmatic_guidance_must_not_do(agent_input),
+            *(() if preference_query_owned else _surface_memory_acceptance_must_not_do(agent_input)),
             *_surface_dream_context_must_not_do(agent_input),
         ]
     )
@@ -1789,14 +1939,19 @@ def _surface_task_control_from_reply_plan(
         "response_move": response_move,
         "task_mode": task_mode,
         "information_budget": _first_nonempty(reply_plan.get("information_budget"), "short"),
-        "question_budget": _coerce_int(
-            _first_nonempty(reply_plan.get("question_budget"), reply_plan.get("max_questions")),
-            default=0,
+        "question_budget": max(
+            1 if pragmatic_guidance_action == "clarify_reference" else 0,
+            _coerce_int(
+                _first_nonempty(reply_plan.get("question_budget"), reply_plan.get("max_questions")),
+                default=0,
+            ),
         ),
         "must_include": _clean_list(
             [
                 *_coerce_sequence(reply_plan.get("must_include")),
-                *_surface_memory_acceptance_must_include(agent_input),
+                *_surface_memory_context_orchestrator_must_include(agent_input=agent_input, trace_stage_meta=trace_stage_meta),
+                *_surface_pragmatic_guidance_must_include(agent_input),
+                *(() if preference_query_owned else _surface_memory_acceptance_must_include(agent_input)),
             ]
         ),
         "must_not_do": task_must_not_do,
@@ -1809,6 +1964,7 @@ def _surface_task_control_from_reply_plan(
                 "选择评价追问只说基于召回和补读证据的判断，不要臆测用户是否看过、忘了、终于想起来或终于来问。" if memory_plan_reason == "anaphoric_selection_recall" else "",
                 "缺正文/详情时交给主链自然表达：不要写系统免责声明；可以说没读正文、只按简介或卡片第一眼先挑，且读完可能改口。" if missing_detail_selection else "",
                 "缺正文/详情时不要照搬字段名，例如“奇幻身份钩子、资料完整、标题辨识度高”；要改成像人在书摊前挑书的口吻。" if missing_detail_selection else "",
+                "用户偏好画像只提供证据，不负责最终话术；偏好问答必须由模型自然生成，明确区分确定偏好和低置信推断。" if preference_fact_lines else "",
                 "日期/近期集合追问要保留用户指定时间范围，并点出集合里的具体条目。" if memory_plan_reason == "collection_memory_recall" else "",
                 "失败追问只能解释召回事实里的失败结果和证据，不要猜新的根因。" if memory_plan_reason == "failure_debug_recall" else "",
                 "证据审查追问必须回答结论和依据；不要改写成日期集合列表，也不要夹带不相关的推荐条目。" if memory_plan_reason == "evidence_review_recall" else "",
@@ -1816,6 +1972,665 @@ def _surface_task_control_from_reply_plan(
             ]
         ),
     }
+
+
+def _surface_pragmatic_intent_fact_lines(agent_input: Any) -> tuple[str, ...]:
+    intent = _safe_mapping(getattr(agent_input, "intent_draft", None))
+    if not intent:
+        return ()
+    args = _safe_mapping(intent.get("args"))
+    semantic = _safe_mapping(intent.get("semantic_intent")) or _safe_mapping(args.get("semantic_intent"))
+    pragmatic = _safe_mapping(intent.get("pragmatic_frame")) or _safe_mapping(args.get("pragmatic_frame"))
+    understanding = _safe_mapping(intent.get("conversation_understanding")) or _safe_mapping(
+        args.get("conversation_understanding")
+    )
+    if not understanding:
+        try:
+            from host_brain.app.context.conversation_belief_tracker import (  # noqa: PLC0415
+                build_conversation_understanding_pack,
+            )
+            from host_brain.app.context.conversation_experience_store import (  # noqa: PLC0415
+                get_conversation_experience_store,
+            )
+            from host_brain.app.dependencies import get_conversation_history  # noqa: PLC0415
+
+            preference_pack = _surface_user_preference_pack(agent_input)
+            experience_store = get_conversation_experience_store()
+            session_id = str(getattr(agent_input, "session_id", "") or "").strip() or None
+            previous_belief = experience_store.get_belief(
+                session_id=session_id,
+                person_id=str(getattr(agent_input, "person_id", "") or "").strip() or None,
+            )
+            recent_turns: list[dict[str, Any]] = []
+            if session_id:
+                try:
+                    for turn in get_conversation_history().fetch_for_messages(
+                        session_id=session_id,
+                        max_turns=8,
+                        exclude_request_id=str(getattr(agent_input, "request_id", "") or "").strip() or None,
+                    ):
+                        recent_turns.append(
+                            {
+                                "turn_id": str(getattr(turn, "turn_id", "") or ""),
+                                "request_id": str(getattr(turn, "request_id", "") or ""),
+                                "role": str(getattr(turn, "role", "") or ""),
+                                "content": str(getattr(turn, "content", "") or ""),
+                                "turn_index": int(getattr(turn, "turn_index", 0) or 0),
+                                "metadata": dict(getattr(turn, "metadata", None) or {}),
+                            }
+                        )
+                except Exception:
+                    recent_turns = []
+            experience_lessons = experience_store.recall_lessons(
+                person_id=str(getattr(agent_input, "person_id", "") or "").strip() or None,
+                domain=str((semantic or {}).get("domain") or (pragmatic or {}).get("domain") or "").strip() or None,
+                query_text=str(getattr(agent_input, "user_message", "") or ""),
+                limit=5,
+            )
+            understanding = _safe_mapping(
+                build_conversation_understanding_pack(
+                    text=str(getattr(agent_input, "user_message", "") or ""),
+                    semantic_intent=semantic,
+                    pragmatic_frame=pragmatic,
+                    recent_recommendation_context=_safe_mapping(
+                        _safe_mapping(preference_pack).get("recent_recommendation_context")
+                    ),
+                    recent_turns=recent_turns,
+                    previous_belief=previous_belief,
+                    experience_lessons=experience_lessons,
+                )
+            )
+        except Exception:
+            understanding = {}
+    if not semantic and not pragmatic and not understanding:
+        return ()
+
+    semantic_type = str(semantic.get("type") or "").strip()
+    dialogue_act = str(semantic.get("dialogue_act") or "").strip()
+    domain = str((semantic.get("domain") if semantic else None) or pragmatic.get("domain") or "").strip()
+    context_binding = str(
+        (semantic.get("context_binding") if semantic else None)
+        or pragmatic.get("conversation_anchor")
+        or ""
+    ).strip()
+    user_move = str(pragmatic.get("user_move") or "").strip()
+    implied_need = str(pragmatic.get("implied_need") or "").strip()
+    likely_emotion = str(pragmatic.get("likely_emotion") or "").strip()
+    expected_response = str(pragmatic.get("expected_response") or "").strip()
+    answer_focus = str(pragmatic.get("answer_focus") or "").strip()
+    do_not = [
+        str(item or "").strip()
+        for item in list(pragmatic.get("do_not") or [])[:5]
+        if str(item or "").strip()
+    ]
+
+    parts = []
+    if semantic_type:
+        parts.append(f"semantic={semantic_type}")
+    if dialogue_act:
+        parts.append(f"act={dialogue_act}")
+    if domain:
+        parts.append(f"domain={domain}")
+    if context_binding:
+        parts.append(f"context={context_binding}")
+
+    lines: list[str] = []
+    if parts:
+        lines.append("语义意图：" + "；".join(parts) + "。")
+    if user_move or implied_need or likely_emotion:
+        move_parts = []
+        if user_move:
+            move_parts.append(f"用户话语动作={user_move}")
+        if implied_need:
+            move_parts.append(f"真实期待={implied_need}")
+        if likely_emotion:
+            move_parts.append(f"可能情绪={likely_emotion}")
+        lines.append("语用判断：" + "；".join(move_parts) + "。")
+    if expected_response or answer_focus:
+        response_parts = []
+        if expected_response:
+            response_parts.append(f"应答方式={expected_response}")
+        if answer_focus:
+            response_parts.append(f"回答焦点={answer_focus}")
+        lines.append("语用应答策略：" + "；".join(response_parts) + "。")
+    if do_not:
+        lines.append("语用边界：不要" + "；不要".join(do_not) + "。")
+    if bool(pragmatic.get("repair_mode")):
+        lines.append("语用修复：用户正在指出不满意或承接失败，先抓住真实问题并修正，不要把它当普通闲聊。")
+    if understanding:
+        belief = _safe_mapping(understanding.get("belief_state"))
+        hypotheses = [
+            _safe_mapping(item)
+            for item in list(understanding.get("intent_hypotheses") or [])[:3]
+            if isinstance(item, Mapping)
+        ]
+        refs = [
+            _safe_mapping(item)
+            for item in list(understanding.get("resolved_references") or [])[:3]
+            if isinstance(item, Mapping)
+        ]
+        if hypotheses:
+            hypothesis_parts = []
+            for item in hypotheses:
+                name = str(item.get("intent") or "").strip()
+                goal = str(item.get("user_goal") or "").strip()
+                conf = item.get("confidence")
+                if name:
+                    hypothesis_parts.append(f"{name}@{conf}: {goal[:80]}" if goal else f"{name}@{conf}")
+            if hypothesis_parts:
+                lines.append("意图候选：" + "；".join(hypothesis_parts) + "。")
+        if refs:
+            ref_parts = []
+            for item in refs:
+                ref_text = str(item.get("reference_text") or "").strip()
+                target = str(item.get("target_label") or "").strip()
+                conf = item.get("confidence")
+                if ref_text or target:
+                    ref_parts.append(f"{ref_text or '引用'} -> {target[:90]}@{conf}")
+            if ref_parts:
+                lines.append("引用解析：" + "；".join(ref_parts) + "。")
+        if belief:
+            belief_parts = []
+            for label, key in (
+                ("当前话题", "active_topic"),
+                ("用户目标", "user_goal"),
+                ("用户情绪", "user_emotion"),
+                ("选中意图", "selected_intent"),
+            ):
+                value = str(belief.get(key) or "").strip()
+                if value:
+                    belief_parts.append(f"{label}={value[:100]}")
+            confidence = belief.get("confidence")
+            if confidence is not None:
+                belief_parts.append(f"置信度={confidence}")
+            if belief_parts:
+                lines.append("信念状态：" + "；".join(belief_parts) + "。")
+            open_questions = [
+                str(item or "").strip()
+                for item in list(belief.get("open_questions") or [])[:3]
+                if str(item or "").strip()
+            ]
+            if open_questions:
+                ambiguity = _safe_mapping(understanding.get("ambiguity"))
+                recommended_action = str(ambiguity.get("recommended_action") or "").strip()
+                lines.append(
+                    "主动修正策略：存在未决问题："
+                    + "；".join(open_questions)
+                    + f"。recommended_action={recommended_action or 'answer_with_uncertainty'}。"
+                    + "如果引用对象不唯一或置信度低，优先用一句自然澄清，不要装懂硬答。"
+                )
+        lessons = [
+            _safe_mapping(item)
+            for item in list(understanding.get("experience_lessons") or [])[:3]
+            if isinstance(item, Mapping)
+        ]
+        if lessons:
+            lesson_parts = []
+            for item in lessons:
+                pattern = str(item.get("pattern") or "").strip()
+                lesson = str(item.get("lesson") or "").strip()
+                relevance = item.get("relevance")
+                if lesson:
+                    lesson_parts.append(f"{pattern or '经验'}@{relevance}: {lesson[:120]}")
+            if lesson_parts:
+                lines.append("经验召回：" + "；".join(lesson_parts) + "。这些是相似场景的推理经验，不是硬模板。")
+        guidance = _safe_mapping(understanding.get("experience_guidance"))
+        if guidance and guidance.get("applied"):
+            action = str(guidance.get("action") or "").strip()
+            reason = str(guidance.get("reason") or "").strip()
+            confidence = guidance.get("confidence")
+            if action:
+                line = f"经验指引：action={action}"
+                if reason:
+                    line += f"；reason={reason}"
+                if confidence is not None:
+                    line += f"；confidence={confidence}"
+                lines.append(line + "。这是经验影响推断的策略，不是可直接输出的文案。")
+            do_not = [
+                str(item).strip()
+                for item in list(guidance.get("do_not") or [])[:4]
+                if str(item).strip()
+            ]
+            if do_not:
+                lines.append("经验指引边界：" + "；".join(do_not) + "。")
+        outcome_feedback = _safe_mapping(understanding.get("outcome_feedback"))
+        if outcome_feedback:
+            signal = str(outcome_feedback.get("signal") or "").strip()
+            event_id = str(outcome_feedback.get("event_id") or "").strip()
+            lesson_updates = [
+                _safe_mapping(item)
+                for item in list(outcome_feedback.get("lesson_updates") or [])[:3]
+                if isinstance(item, Mapping)
+            ]
+            if signal:
+                lines.append(f"经验反馈：用户本轮像是在评价上一轮结果，outcome={signal}，关联经验事件={event_id or 'latest'}。")
+            if lesson_updates:
+                update_parts = []
+                for item in lesson_updates:
+                    update_parts.append(
+                        f"{str(item.get('lesson_id') or '')[:80]} success={item.get('success_count')} failure={item.get('failure_count')} confidence={item.get('confidence')}"
+                    )
+                lines.append("经验权重更新：" + "；".join(update_parts) + "。")
+    return tuple(lines)
+
+
+def _surface_pragmatic_guidance_action(agent_input: Any) -> str:
+    intent = _safe_mapping(getattr(agent_input, "intent_draft", None))
+    args = _safe_mapping(intent.get("args"))
+    understanding = _safe_mapping(intent.get("conversation_understanding")) or _safe_mapping(
+        args.get("conversation_understanding")
+    )
+    if not understanding:
+        semantic = _safe_mapping(intent.get("semantic_intent")) or _safe_mapping(args.get("semantic_intent"))
+        pragmatic = _safe_mapping(intent.get("pragmatic_frame")) or _safe_mapping(args.get("pragmatic_frame"))
+        if semantic or pragmatic:
+            try:
+                from host_brain.app.context.conversation_belief_tracker import (  # noqa: PLC0415
+                    build_conversation_understanding_pack,
+                )
+                from host_brain.app.context.conversation_experience_store import (  # noqa: PLC0415
+                    get_conversation_experience_store,
+                )
+                from host_brain.app.dependencies import get_conversation_history  # noqa: PLC0415
+
+                preference_pack = _surface_user_preference_pack(agent_input)
+                experience_store = get_conversation_experience_store()
+                person_id = str(getattr(agent_input, "person_id", "") or "").strip() or None
+                session_id = str(getattr(agent_input, "session_id", "") or "").strip() or None
+                previous_belief = experience_store.get_belief(session_id=session_id, person_id=person_id)
+                recent_turns: list[dict[str, Any]] = []
+                if session_id:
+                    try:
+                        for turn in get_conversation_history().fetch_for_messages(
+                            session_id=session_id,
+                            max_turns=8,
+                            exclude_request_id=str(getattr(agent_input, "request_id", "") or "").strip() or None,
+                        ):
+                            recent_turns.append(
+                                {
+                                    "turn_id": str(getattr(turn, "turn_id", "") or ""),
+                                    "request_id": str(getattr(turn, "request_id", "") or ""),
+                                    "role": str(getattr(turn, "role", "") or ""),
+                                    "content": str(getattr(turn, "content", "") or ""),
+                                    "turn_index": int(getattr(turn, "turn_index", 0) or 0),
+                                    "metadata": dict(getattr(turn, "metadata", None) or {}),
+                                }
+                            )
+                    except Exception:
+                        recent_turns = []
+                lessons = experience_store.recall_lessons(
+                    person_id=person_id,
+                    domain=str((semantic or {}).get("domain") or (pragmatic or {}).get("domain") or "").strip()
+                    or None,
+                    query_text=str(getattr(agent_input, "user_message", "") or ""),
+                    limit=5,
+                )
+                understanding = _safe_mapping(
+                    build_conversation_understanding_pack(
+                        text=str(getattr(agent_input, "user_message", "") or ""),
+                        semantic_intent=semantic,
+                        pragmatic_frame=pragmatic,
+                        recent_recommendation_context=_safe_mapping(
+                            _safe_mapping(preference_pack).get("recent_recommendation_context")
+                        ),
+                        recent_turns=recent_turns,
+                        previous_belief=previous_belief,
+                        experience_lessons=lessons,
+                    )
+                )
+            except Exception:
+                understanding = {}
+    if not understanding:
+        return ""
+    guidance = _safe_mapping(understanding.get("experience_guidance"))
+    action = str(guidance.get("action") or "").strip()
+    if action:
+        return action
+    action = str(understanding.get("recommended_action") or "").strip()
+    if action:
+        return action
+    ambiguity = _safe_mapping(understanding.get("ambiguity"))
+    return str(ambiguity.get("recommended_action") or "").strip()
+
+
+def _surface_pragmatic_guidance_must_include(agent_input: Any) -> tuple[str, ...]:
+    action = _surface_pragmatic_guidance_action(agent_input)
+    if action != "clarify_reference":
+        return ()
+    return (
+        "引用对象不唯一时，本轮只用一句自然话澄清用户指的是哪一本/哪一项，不评价任何具体作品。",
+    )
+
+
+def _surface_pragmatic_guidance_must_not_do(agent_input: Any) -> tuple[str, ...]:
+    action = _surface_pragmatic_guidance_action(agent_input)
+    if action != "clarify_reference":
+        return ()
+    return (
+        "不要直接评价未唯一绑定的“这本/那本/那个”；不要把低置信推荐集合当成具体作品。",
+        "不要在引用对象不明确时泛化成用户长期偏好或切到其他媒介。",
+        "不要写“如果你问某本的话我觉得……”这类带条件的变相评价；先等用户确认对象。",
+    )
+
+
+def _surface_user_preference_pack(agent_input: Any) -> dict[str, Any]:
+    retrieval_summary = _safe_mapping(getattr(agent_input, "retrieval_summary", None))
+    pack = _safe_mapping(retrieval_summary.get("user_preference_pack"))
+    if pack:
+        return pack
+    user_message = str(getattr(agent_input, "user_message", "") or "")
+    if not _surface_user_preference_message(user_message):
+        return {}
+    try:
+        from host_brain.app.dependencies import get_ledger  # noqa: PLC0415
+        from host_brain.app.user_preference_store import build_user_preference_pack  # noqa: PLC0415
+
+        return _safe_mapping(
+            build_user_preference_pack(
+                person_id=str(getattr(agent_input, "person_id", "") or "").strip() or None,
+                query_text=user_message,
+                session_id=str(getattr(agent_input, "session_id", "") or "").strip() or None,
+                conversation_id=str(getattr(agent_input, "session_id", "") or "").strip() or None,
+                ledger=get_ledger(),
+            )
+        )
+    except Exception:
+        return {}
+
+
+def _surface_life_ledger() -> Any:
+    from host_brain.app.dependencies import get_ledger  # noqa: PLC0415
+
+    return get_ledger()
+
+
+def _surface_life_director_pack(
+    agent_input: Any,
+    *,
+    trace_stage_meta: Mapping[str, Any] | None = None,
+    task_mode: str = "",
+    response_move: str = "",
+) -> dict[str, Any]:
+    trace = _safe_mapping(trace_stage_meta)
+    pack = _safe_mapping(trace.get("life_director"))
+    if pack:
+        return pack
+    retrieval_summary = _safe_mapping(getattr(agent_input, "retrieval_summary", None))
+    pack = _safe_mapping(retrieval_summary.get("life_director") or retrieval_summary.get("life_continuity_pack"))
+    if pack:
+        return pack
+    try:
+        from host_brain.runtime.life_continuity import advance_life_to_now, build_life_director_pack  # noqa: PLC0415
+
+        advance_life_to_now(
+            ledger=_surface_life_ledger(),
+            person_id=str(getattr(agent_input, "person_id", "") or "").strip() or "default",
+            reason="foreground_user_message",
+            incoming_event={
+                "session_id": str(getattr(agent_input, "session_id", "") or "").strip(),
+                "user_message": str(getattr(agent_input, "user_message", "") or "")[:240],
+            },
+            force=False,
+        )
+
+        return _safe_mapping(
+            build_life_director_pack(
+                ledger=_surface_life_ledger(),
+                person_id=str(getattr(agent_input, "person_id", "") or "").strip() or "default",
+                session_id=str(getattr(agent_input, "session_id", "") or "").strip(),
+                user_message=str(getattr(agent_input, "user_message", "") or ""),
+                task_mode=task_mode,
+                response_move=response_move,
+                reason="surface_main_chain",
+                trace_stage_meta=trace,
+            )
+        )
+    except Exception:
+        return {}
+
+
+def _surface_life_context_task_facts(
+    agent_input: Any,
+    *,
+    trace_stage_meta: Mapping[str, Any] | None = None,
+) -> tuple[str, ...]:
+    try:
+        from host_brain.runtime.environment_state import build_environment_snapshot  # noqa: PLC0415
+        fallback_environment = _safe_mapping(build_environment_snapshot())
+    except Exception:
+        fallback_environment = {}
+    user_text = str(getattr(agent_input, "user_message", "") or "").strip()
+    compact_user = re.sub(r"\s+", "", user_text)
+    fallback_day_phase = str(fallback_environment.get("day_phase") or "").strip()
+    fallback_morning_mismatch = bool(re.search(r"^(早|早安|早上好)", compact_user)) and fallback_day_phase not in {"dawn", "morning"}
+    fallback_env_facts = _clean_list(
+        [
+            f"当前环境：{'；'.join(str(x) for x in list(fallback_environment.get('surface_facts') or [])[:3])}" if fallback_environment else "",
+            f"时间错位问候：用户说的是早安类问候，但当前阶段是 {fallback_day_phase or '未知'}；只处理时间错位本身，不要直接按早晨回复，也不要推断用户睡迷糊、故意逗你或状态异常。" if fallback_morning_mismatch else "",
+        ]
+    )
+    memory_pack = _surface_memory_context_orchestrator_pack(agent_input=agent_input, trace_stage_meta=trace_stage_meta)
+    binding_info = _surface_memory_context_binding_info(memory_pack)
+    if binding_info.get("is_followup") and binding_info.get("is_life_proactive"):
+        return tuple(
+            _clean_list([
+            "生命状态边界：本轮已绑定上一条主动消息；数字生命状态只能影响语气和身体倾向，不能引入未绑定的后台任务、旧 work scene、旧推荐或旧话题。",
+            *fallback_env_facts,
+            ])
+        )
+    pack = _surface_life_director_pack(agent_input, trace_stage_meta=trace_stage_meta)
+    if not pack:
+        return tuple(item[:260] for item in fallback_env_facts)
+    scene = str(pack.get("scene") or "").strip()
+    motive = str(pack.get("dominant_motive") or "").strip()
+    influence = str(pack.get("dialogue_influence") or "").strip()
+    backend = str(pack.get("codex_backend_status") or "").strip()
+    style_goal = str(pack.get("style_goal") or "").strip()
+    environment = _safe_mapping(pack.get("environment"))
+    private_mind = _safe_mapping(pack.get("private_mind_summary"))
+    day_phase = str(environment.get("day_phase") or "").strip()
+    morning_mismatch = bool(re.search(r"^(早|早安|早上好)", compact_user)) and day_phase not in {"dawn", "morning"}
+    visible = [str(item) for item in list(pack.get("visible_obligation") or []) if str(item).strip()]
+    pressure = _safe_mapping(pack.get("life_pressure"))
+    pressure_text = "、".join(
+        f"{key}={float(value):.2f}"
+        for key, value in pressure.items()
+        if isinstance(value, (int, float)) and float(value) >= 0.18
+    )
+    organ = _safe_mapping(pack.get("organ_life_influence"))
+    votes = []
+    for item in list(organ.get("top_influences") or [])[:4]:
+        item_map = _safe_mapping(item)
+        organ_name = str(item_map.get("organ") or "").strip()
+        vote = str(item_map.get("vote") or "").strip()
+        strength = item_map.get("strength")
+        if organ_name and vote:
+            votes.append(f"{organ_name}:{vote}@{strength}")
+    facts = [
+        "前台身份：Natsume 是前台数字生命体；Codex 是后台工作执行层。任务只是她正在感受到的环境刺激，不要把她写成工具助手。",
+        f"生命导演：scene={scene}，motive={motive}，dialogue_influence={influence}。必须让这轮表达能感觉到生命状态。",
+        f"后台状态：{backend}" if backend else "",
+        f"生命压力：{pressure_text}" if pressure_text else "",
+        f"器官投票：{'; '.join(votes)}" if votes else "",
+        f"当前环境：{'；'.join(str(x) for x in list(environment.get('surface_facts') or [])[:3])}" if environment else "",
+        f"时间错位问候：用户说的是早安类问候，但当前阶段是 {day_phase or '未知'}；只处理时间错位本身，不要直接按早晨回复，也不要推断用户睡迷糊、故意逗你或状态异常。" if morning_mismatch else "",
+        f"私有心智摘要：attention={private_mind.get('attention_target') or ''}，tendency={private_mind.get('felt_tendency') or ''}，bias={private_mind.get('dialogue_bias') or ''}；只能作为语气/注意力偏置，不要泄露原始内心流。" if private_mind else "",
+        f"外显义务：{', '.join(visible)}；如果包含 dialogue，要让文本明显带状态。" if visible else "",
+        f"表达目标：{style_goal}" if style_goal else "",
+    ]
+    return tuple(item[:260] for item in _clean_list(facts))
+
+
+def _surface_life_context_must_not_do(
+    agent_input: Any,
+    *,
+    trace_stage_meta: Mapping[str, Any] | None = None,
+) -> tuple[str, ...]:
+    memory_pack = _surface_memory_context_orchestrator_pack(agent_input=agent_input, trace_stage_meta=trace_stage_meta)
+    binding_info = _surface_memory_context_binding_info(memory_pack)
+    pack = _surface_life_director_pack(agent_input, trace_stage_meta=trace_stage_meta)
+    env_rules: list[str] = []
+    try:
+        from host_brain.runtime.environment_state import build_environment_snapshot  # noqa: PLC0415
+        environment_fallback = _safe_mapping(build_environment_snapshot())
+    except Exception:
+        environment_fallback = {}
+    compact_user = re.sub(r"\s+", "", str(getattr(agent_input, "user_message", "") or ""))
+    fallback_day_phase = str(environment_fallback.get("day_phase") or "").strip()
+    if re.search(r"^(早|早安|早上好)", compact_user) and fallback_day_phase not in {"dawn", "morning"}:
+        env_rules.append("用户说早安类问候但当前不是早上时，不要回复“早”“早啊”“早上好”；要自然指出现在的时间阶段。")
+        env_rules.append("时间错位问候不得评价用户状态或动机；不要说睡迷糊、故意逗、逗我、迷糊、糊涂、装傻、脑子不清醒。")
+    if not pack:
+        if binding_info.get("is_followup") and binding_info.get("is_life_proactive"):
+            return tuple(_clean_list([
+                "本轮不要提后台任务、测试、盯进度或 work scene，除非被绑定的上一条主动消息明确提到。",
+                *env_rules,
+            ]))
+        return tuple(_clean_list(env_rules))
+    rules = [
+        "不要在用户可见文本里说 life_state、tick、pressure、organ vote、trace、schema、visible_obligation。",
+        "不要说“作为 AI 助手”；Natsume 是前台数字生命体，后台 Codex 才是工作执行层。",
+        "任务场景不要写成机械汇报；可以表现她在盯后台、等待、焦躁、松口气或小得意。",
+        "不要说她亲手操作终端或代码，除非输入事实明确说明前台正在操作；默认是后台 Codex 在执行。",
+        "梦境、日记、内心流只能作为状态余温，不要当现实事实说出来。",
+        "不要把普通 hello/你好 自动解释成早安、刚醒、吃饭或早餐；只有环境事实和用户原话都支持时才能提。",
+    ]
+    environment = _safe_mapping(pack.get("environment")) or environment_fallback
+    day_phase = str(environment.get("day_phase") or "").strip()
+    if re.search(r"^(早|早安|早上好)", compact_user) and day_phase not in {"dawn", "morning"}:
+        rules.append("用户说早安类问候但当前不是早上时，不要回复“早”“早啊”“早上好”；要自然指出现在的时间阶段。")
+        rules.append("时间错位问候不得评价用户状态或动机；不要说睡迷糊、故意逗、逗我、迷糊、糊涂、装傻、脑子不清醒。")
+    if binding_info.get("is_followup") and binding_info.get("is_life_proactive"):
+        rules.insert(0, "本轮不要提后台任务、测试、盯进度或 work scene，除非被绑定的上一条主动消息明确提到。")
+    for item in list(pack.get("must_not_do") or []):
+        item_text = str(item or "").strip()
+        if item_text:
+            rules.append(item_text)
+    return tuple(_clean_list(rules)[:10])
+
+
+def _surface_user_preference_message(user_message: str) -> bool:
+    text = str(user_message or "").strip()
+    if not text:
+        return False
+    return bool(
+        re.search(r"(轻小说|輕小說|小说|小說|书|書).{0,24}(偏好|口味|喜好|喜欢|喜歡|哪种|哪類|哪类|什么类型)", text)
+        or re.search(r"(偏好|口味|喜好|喜欢|喜歡).{0,24}(轻小说|輕小說|小说|小說|书|書)", text)
+        or re.search(r"你知道我喜欢.{0,16}(轻小说|輕小說|小说|小說|书|書)", text)
+        or re.search(r"(第\s*(?:[一二三四五六七八九十]|\d{1,2})\s*(?:本|个|項|项|部|步)?|这本|这部|那本|哪本|刚才推荐|刚刚推荐).{0,18}(好看|怎么样|如何|值得|推荐|能看|先看)", text)
+        or re.search(r"(好看吗|好不好看|值不值得|推不推荐|先看哪本|哪本)", text)
+    )
+
+
+def _surface_user_preference_query_owned(agent_input: Any) -> bool:
+    pack = _surface_user_preference_pack(agent_input)
+    if pack and bool(pack.get("query_relevant") or pack.get("has_profile")):
+        return True
+    return _surface_user_preference_message(str(getattr(agent_input, "user_message", "") or ""))
+
+
+def _surface_user_preference_fact_lines(agent_input: Any) -> tuple[str, ...]:
+    pack = _surface_user_preference_pack(agent_input)
+    if not pack:
+        return ()
+    profile = _safe_mapping(pack.get("profile"))
+    query_relevant = bool(pack.get("query_relevant"))
+    has_profile = bool(pack.get("has_profile"))
+    if not query_relevant and not has_profile:
+        return ()
+
+    domain = str(pack.get("domain") or "").strip() or "general"
+    recent_recommendation_context = _safe_mapping(pack.get("recent_recommendation_context"))
+    liked_items = _preference_labels(profile.get("liked_items"), limit=3)
+    disliked_items = _preference_labels(profile.get("disliked_items"), limit=2)
+    likes = _preference_labels(profile.get("likes") or profile.get("inferred_traits"), limit=4)
+    dislikes = _preference_labels(profile.get("dislikes"), limit=3)
+    evidence_count = len(list(profile.get("evidence_summary") or []))
+    lines: list[str] = []
+    recommendation_followup = False
+    if recent_recommendation_context:
+        recent_items = [
+            _safe_mapping(item)
+            for item in list(recent_recommendation_context.get("items") or [])[:5]
+            if isinstance(item, Mapping)
+        ]
+        item_parts = []
+        for item in recent_items:
+            rank = str(item.get("rank") or "").strip()
+            title = str(item.get("title") or "").strip()
+            if rank and title:
+                item_parts.append(f"{rank}. {title[:64]}")
+        if item_parts:
+            lines.append(f"最近推荐上下文({domain})：刚给用户发过这些作品：{'；'.join(item_parts)}。")
+        referenced_item = _safe_mapping(recent_recommendation_context.get("referenced_item"))
+        if referenced_item:
+            recommendation_followup = True
+            rank = str(referenced_item.get("rank") or "").strip()
+            title = str(referenced_item.get("title") or "").strip()
+            reason = str(referenced_item.get("selection_reason") or "").strip()
+            intro = str(referenced_item.get("intro_snippet") or "").strip()
+            facts = [f"用户当前追问的是第 {rank} 本：{title}" if rank else f"用户当前追问的是：{title}"]
+            if reason:
+                facts.append(f"推荐理由：{reason}")
+            if intro:
+                facts.append(f"简介线索：{intro[:90]}")
+            lines.append("最近推荐追问：" + "；".join(part for part in facts if part) + "。")
+            lines.append(
+                "最近推荐追问回答要求：本轮必须先锚定被追问作品，回答正文里要自然出现书名或可识别短标题；"
+                "不要只说“那本”“第三本”，也不要把它误解成游戏、动画或其他媒介。"
+            )
+        lines.append("最近推荐回答边界：这是对刚才推荐作品的追问，不是用户已经表达喜欢；不要把追问写进偏好。")
+        lines.append("最近推荐回答风格：直接接上刚才推荐来评价，不要说成 galgame，不要说没上下文，不要输出内部字段。")
+        if recommendation_followup:
+            return tuple(lines)
+    if liked_items:
+        lines.append(f"用户偏好线索({domain})：用户刚对这些作品表达过好感：{'、'.join(liked_items)}。")
+    if likes:
+        lines.append(f"用户偏好线索({domain})：可能相关的口味线索：{'、'.join(likes)}。")
+    if disliked_items:
+        lines.append(f"用户偏好线索({domain})：用户明确说过不太喜欢的作品：{'、'.join(disliked_items)}。")
+    if dislikes:
+        lines.append(f"用户偏好线索({domain})：可能避开的口味线索：{'、'.join(dislikes)}。")
+    if lines:
+        lines.append(
+            f"偏好回答边界：线索约 {evidence_count} 条；只能说用户表达过喜欢/好看，不能说用户看过、读完、追到最新卷。"
+        )
+        lines.append("偏好回答风格：像熟人顺口接话，不要像助手汇报；不要主动宣布“我记住了”。")
+        lines.append(
+            "偏好回答内容：可以说这本看起来有点对用户胃口；题材线索只能轻轻带过，不要总结成口味报告。"
+        )
+    elif query_relevant:
+        lines.append("偏好回答边界：当前还没有明确偏好证据；自然说明还没攒够，不要编造用户喜欢什么。")
+    return tuple(line[:220] for line in lines if line)
+
+
+def _surface_user_preference_must_not_do(agent_input: Any) -> tuple[str, ...]:
+    if not _surface_user_preference_query_owned(agent_input):
+        return ()
+    return (
+        "偏好问答不要提系统、画像、证据、召回、记录、检索；把这些内部事实换成自然聊天。",
+        "偏好查询必须用陈述句，不要使用问号；不要写“吗”“对吧”“是不是”。",
+        "不要说“之前不是说过”“我记得”“我记住了”“瞎猜”“正反馈”“初步看”“固定口味”。",
+        "不要说“怕误导你”；不要把推荐理由或榜单策略冒充用户长期偏好。",
+        "不要说用户看过、读完、追到最新卷或之前推过；只能说用户刚刚/明确表示这本好看或喜欢。",
+        "不要像助手做总结；用 Sora 的熟人语气，短一点，带一点轻微吐槽或试探，但别追问。",
+        "不要用“对吧？”“是不是？”这类反问收尾；直接给当前判断和不确定边界。",
+    )
+
+
+def _preference_labels(value: Any, *, limit: int) -> list[str]:
+    labels: list[str] = []
+    for item in list(value or []):
+        if isinstance(item, Mapping):
+            label = str(item.get("label") or item.get("title") or item.get("name") or "").strip()
+        else:
+            label = str(item or "").strip()
+        if not label or label in labels:
+            continue
+        labels.append(label[:80])
+        if len(labels) >= int(limit):
+            break
+    return labels
 
 
 def _surface_memory_plan_reason(trace_stage_meta: Mapping[str, Any] | None = None) -> str:
@@ -2052,12 +2867,53 @@ def _apply_surface_text_quality_guard(
         }
     if not quality.hard_fail:
         return text, {"applied": False, "quality": quality.as_dict()}
+    quality_payload = quality.as_dict()
+    reason_codes = {str(item or "").strip() for item in list(quality_payload.get("reason_codes") or [])}
+    repaired = _repair_japanese_surface_leak(text)
+    if repaired and repaired != text and "EXPECTED_ZH_TEXT" in reason_codes:
+        try:
+            repaired_quality = get_text_quality_gate().validate(
+                text=repaired,
+                render_profile="zh_text",
+                response_form="text",
+                user_message=str(getattr(agent_input, "user_message", "") or ""),
+                semantic_forbidden=True,
+            )
+            if not repaired_quality.hard_fail:
+                return repaired, {
+                    "applied": True,
+                    "reason_code": "TEXT_QUALITY_JA_LEAK_REPAIRED",
+                    "quality": quality_payload,
+                    "repaired_quality": repaired_quality.as_dict(),
+                    "fallback_used": True,
+                }
+        except Exception:
+            pass
     return "", {
         "applied": True,
         "reason_code": "TEXT_QUALITY_HARD_FAIL",
-        "quality": quality.as_dict(),
+        "quality": quality_payload,
         "fallback_used": False,
     }
+
+
+def _repair_japanese_surface_leak(text: str) -> str:
+    value = str(text or "").strip()
+    if not value:
+        return ""
+    replacements = {
+        "あたし": "我",
+        "アタシ": "我",
+        "わたし": "我",
+        "私": "我",
+    }
+    for source, target in replacements.items():
+        value = value.replace(source, target)
+    value = re.sub(r"[\u3040-\u30ff]+", "", value)
+    value = re.sub(r"\s+", " ", value).strip()
+    value = re.sub(r"([，。！？!?]){2,}", r"\1", value)
+    value = value.replace("我我", "我")
+    return value.strip()
 
 
 def _affect_packet(
@@ -2275,6 +3131,321 @@ def _surface_dream_context_must_not_do(agent_input: Any | None) -> tuple[str, ..
     )
 
 
+def _surface_recent_conversation_window_facts(agent_input: Any | None, *, limit: int = 5) -> tuple[str, ...]:
+    if agent_input is None:
+        return ()
+    session_id = str(getattr(agent_input, "session_id", "") or "").strip()
+    if not session_id:
+        return ()
+    try:
+        from host_brain.app.dependencies import get_ledger  # noqa: PLC0415
+
+        conn = getattr(get_ledger(), "_conn", None)
+        if conn is None:
+            return ()
+        rows = conn.execute(
+            """
+SELECT role, content, ts_ms, metadata
+FROM conversation_turn
+WHERE session_id=?
+ORDER BY ts_ms DESC
+LIMIT ?
+""",
+            (session_id, max(2, min(int(limit or 5), 8))),
+        ).fetchall()
+    except Exception:
+        return ()
+    turns: list[str] = []
+    for row in reversed(rows):
+        try:
+            role = str(row["role"] or "").strip()
+            content = re.sub(r"\s+", " ", str(row["content"] or "").strip())
+            metadata_raw = row["metadata"]
+        except Exception:
+            continue
+        if not role or not content:
+            continue
+        source_kind = ""
+        try:
+            metadata = json.loads(str(metadata_raw or "{}"))
+            if isinstance(metadata, Mapping):
+                source_kind = str(metadata.get("source_kind") or "").strip()
+        except Exception:
+            source_kind = ""
+        label = "Natsume" if role == "assistant" else "用户" if role == "user" else role
+        source_note = "主动消息" if source_kind == "life_proactive" else ""
+        prefix = f"{label}{'(' + source_note + ')' if source_note else ''}"
+        turns.append(f"{prefix}: {content[:90]}")
+    if len(turns) < 2:
+        return ()
+    joined = " / ".join(turns[-5:])
+    return (
+        "真实最近对话窗口优先级最高：必须先承接这里的相邻轮次；长期记忆、偏好、数字生命状态不能覆盖它。",
+        f"真实最近对话窗口：{joined}",
+    )
+
+
+def _surface_memory_context_orchestrator_pack(
+    *,
+    agent_input: Any | None,
+    trace_stage_meta: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    if agent_input is None:
+        return {}
+    if isinstance(trace_stage_meta, dict):
+        existing = _safe_mapping(trace_stage_meta.get("memory_context_orchestrator"))
+        if existing:
+            return dict(existing)
+    try:
+        from host_brain.app.context.memory_context_orchestrator import build_memory_context_debug  # noqa: PLC0415
+        from host_brain.app.dependencies import get_ledger  # noqa: PLC0415
+
+        session_id = str(getattr(agent_input, "session_id", "") or "").strip()
+        person_id = str(getattr(agent_input, "person_id", "") or "").strip() or "default"
+        user_message = str(getattr(agent_input, "user_message", "") or "").strip()
+        if not session_id and not user_message:
+            return {}
+        pack = build_memory_context_debug(
+            ledger=get_ledger(),
+            session_id=session_id,
+            person_id=person_id,
+            current_user_message=user_message,
+        )
+        if isinstance(trace_stage_meta, dict):
+            trace_stage_meta["memory_context_orchestrator"] = pack
+        return dict(_safe_mapping(pack))
+    except Exception:
+        return {}
+
+
+def _surface_memory_context_binding_info(pack: Mapping[str, Any] | None) -> dict[str, Any]:
+    pack_map = _safe_mapping(pack)
+    binding = _safe_mapping(pack_map.get("current_turn_binding"))
+    if not binding:
+        binding = _safe_mapping(pack_map.get("binding_decision"))
+    selected = _safe_mapping(pack_map.get("selected_context"))
+    bound_event = _safe_mapping(
+        binding.get("bound_event")
+        or binding.get("event")
+        or selected.get("bound_event")
+        or selected.get("previous_life_proactive_turn")
+        or selected.get("previous_visible_assistant_event")
+    )
+    refs = _safe_mapping(bound_event.get("refs_json"))
+    causality = _safe_mapping(bound_event.get("causality_json"))
+    content = _first_nonempty(
+        binding.get("bound_content"),
+        binding.get("content"),
+        bound_event.get("content"),
+        bound_event.get("content_summary"),
+        causality.get("content_summary"),
+    )
+    if content:
+        content = str(content).strip().replace("\r", " ").replace("\n", " ")
+        if len(content) > 180:
+            content = f"{content[:177]}..."
+    event_kind = _first_nonempty(
+        binding.get("bound_event_kind"),
+        binding.get("event_kind"),
+        bound_event.get("event_kind"),
+        refs.get("event_kind"),
+    )
+    binding_kind = _first_nonempty(
+        binding.get("binding_kind"),
+        binding.get("kind"),
+        binding.get("intent_kind"),
+        binding.get("query_kind"),
+    )
+    reason_code = _first_nonempty(
+        binding.get("reason_code"),
+        binding.get("reason"),
+        _safe_mapping(pack_map.get("binding_decision")).get("reason_code"),
+    )
+    event_id = _first_nonempty(
+        binding.get("bound_event_id"),
+        binding.get("event_id"),
+        bound_event.get("event_id"),
+    )
+    motive = _first_nonempty(
+        binding.get("motive"),
+        bound_event.get("motive"),
+        causality.get("motive"),
+        causality.get("source"),
+    )
+    reference_anchor = _first_nonempty(
+        binding.get("reference_anchor"),
+        binding.get("anchor"),
+        binding.get("target_label"),
+    )
+    previous_user_content = _first_nonempty(
+        binding.get("bound_previous_user_content"),
+        binding.get("previous_user_content"),
+    )
+    is_followup = bool(
+        event_kind
+        and (
+            str(binding_kind)
+            in {"context_question", "continue", "recent_visible_followup", "proactive_followup", "specific_reference_followup"}
+            or str(reason_code)
+            in {"BOUND_RECENT_VISIBLE_ASSISTANT_EVENT", "BOUND_RECENT_VISIBLE_EVENT", "BOUND_RECENT_VISIBLE_ASSISTANT_REFERENCE"}
+        )
+    )
+    return {
+        "binding": binding,
+        "bound_event": bound_event,
+        "binding_kind": str(binding_kind or ""),
+        "reason_code": str(reason_code or ""),
+        "event_kind": str(event_kind or ""),
+        "event_id": str(event_id or ""),
+        "content": str(content or ""),
+        "motive": str(motive or ""),
+        "reference_anchor": str(reference_anchor or ""),
+        "previous_user_content": str(previous_user_content or ""),
+        "is_followup": is_followup,
+        "is_life_proactive": str(event_kind or "") == "life_proactive_sent",
+    }
+
+
+def _surface_memory_context_orchestrator_facts(
+    *,
+    agent_input: Any | None,
+    trace_stage_meta: Mapping[str, Any] | None = None,
+) -> tuple[str, ...]:
+    pack = _surface_memory_context_orchestrator_pack(agent_input=agent_input, trace_stage_meta=trace_stage_meta)
+    if not pack:
+        return ()
+    try:
+        binding_info = _surface_memory_context_binding_info(pack)
+        facts: list[str] = [
+            "记忆编排：当前用户消息和当前会话最近轮次优先；长期记忆、lesson、数字生命状态只能作为证据或语气影响，不能覆盖当前话题。",
+        ]
+        if binding_info.get("is_followup"):
+            event_kind = str(binding_info.get("event_kind") or "")
+            binding_kind = str(binding_info.get("binding_kind") or "")
+            reason_code = str(binding_info.get("reason_code") or "")
+            content = str(binding_info.get("content") or "")
+            motive = str(binding_info.get("motive") or "")
+            reference_anchor = str(binding_info.get("reference_anchor") or "")
+            previous_user_content = str(binding_info.get("previous_user_content") or "")
+            facts.append(
+                f"当前承接绑定：用户这句话是在追问最近一条可见 assistant 消息，event_kind={event_kind}，binding_kind={binding_kind}，reason={reason_code}。"
+            )
+            if content:
+                facts.append(f"被追问的上一条可见消息：{content}")
+            if previous_user_content:
+                facts.append(f"上一条可见消息前的用户话：{previous_user_content}")
+            if reference_anchor:
+                facts.append(f"用户追问的具体对象词：{reference_anchor}")
+                facts.append(
+                    f"如果上一条并没有给出“{reference_anchor}”的具体名称或对象，本轮必须自然承认刚才只是顺着上一句接话，不要假装有一个明确对象。"
+                )
+                if previous_user_content:
+                    facts.append(
+                        f"本轮承接核心：上一条里的“{reference_anchor}”来自用户前一句“{previous_user_content}”的顺口延展；不是一个已经指定好的具体对象。"
+                    )
+            if motive:
+                facts.append(f"上一条消息的生命/行为动机线索：{motive}")
+            if binding_info.get("is_life_proactive"):
+                facts.append(
+                    "本轮回复目标：先解释上一条主动消息为什么会发出，以及它和当时生命状态/闭环动作的关系；不要把“怎么了”当成新的闲聊入口、试探或旧话题追问。"
+                )
+        suppressed = list(pack.get("suppressed_items") or [])
+        if suppressed:
+            reasons = ", ".join(
+                reason
+                for reason in (str(_safe_mapping(item).get("reason") or "").strip() for item in suppressed[:4])
+                if reason
+            )
+            if reasons:
+                facts.append(f"记忆抑制：本轮有低优先级上下文被压制，原因={reasons}。")
+        return tuple(_clean_list(facts))
+    except Exception:
+        return ()
+
+
+def _surface_memory_context_orchestrator_must_not_do(
+    *,
+    agent_input: Any | None,
+    trace_stage_meta: Mapping[str, Any] | None = None,
+) -> tuple[str, ...]:
+    pack = _surface_memory_context_orchestrator_pack(agent_input=agent_input, trace_stage_meta=trace_stage_meta)
+    binding_info = _surface_memory_context_binding_info(pack)
+    if not binding_info.get("is_followup"):
+        return ()
+    rules = [
+        "不要忽略 current_turn_binding；用户短句追问必须先承接被绑定的最近可见消息。",
+        "不要跳到旧推荐、旧任务、旧 ASR、长期语义记忆或未绑定主题。",
+        "不要只评价用户这句“怎么了/继续/然后呢”本身，也不要改写成“你在试探我”这类跑题回应。",
+    ]
+    if binding_info.get("is_life_proactive"):
+        rules.append("不要只说“没什么”“突然想喊你”这类空泛解释；必须点明上一条主动消息里的具体触发原因。")
+        rules.append("不要把主动消息解释成现实观察；只能按绑定事件、生命状态和可见证据解释为什么发出。")
+    if str(binding_info.get("reference_anchor") or ""):
+        rules.append("不要把未指定对象说成用户心里已经有明确对象，也不要编成“你心里想的那个”。")
+    return tuple(_clean_list(rules))
+
+
+def _surface_memory_context_orchestrator_must_include(
+    *,
+    agent_input: Any | None,
+    trace_stage_meta: Mapping[str, Any] | None = None,
+) -> tuple[str, ...]:
+    pack = _surface_memory_context_orchestrator_pack(agent_input=agent_input, trace_stage_meta=trace_stage_meta)
+    binding_info = _surface_memory_context_binding_info(pack)
+    if not binding_info.get("is_followup"):
+        return ()
+    content = str(binding_info.get("content") or "")
+    reference_anchor = str(binding_info.get("reference_anchor") or "")
+    if binding_info.get("is_life_proactive"):
+        return _clean_list(
+            [
+            "承接并解释上一条主动消息的触发原因/状态来源。",
+            f"点明上一条主动消息里的具体原因：{content}" if content else "",
+            "说明现在已经接到用户回应，而不是继续疑问用户在不在。",
+            ]
+        )
+    rows = ["承接并解释被绑定的上一条可见 assistant 消息。"]
+    if reference_anchor:
+        rows.append(f"回复里必须明确出现“{reference_anchor}”，并说明它没有具体指哪一个，只是顺着上一句泛指/接话。")
+    return tuple(_clean_list(rows))
+
+
+def _surface_apply_memory_context_reply_plan_override(
+    reply_plan: Mapping[str, Any],
+    *,
+    agent_input: Any | None,
+    trace_stage_meta: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    plan = dict(reply_plan or {})
+    pack = _surface_memory_context_orchestrator_pack(agent_input=agent_input, trace_stage_meta=trace_stage_meta)
+    binding_info = _surface_memory_context_binding_info(pack)
+    if binding_info.get("is_followup"):
+        content = str(binding_info.get("content") or "")
+        if binding_info.get("is_life_proactive"):
+            plan["task_mode"] = "proactive_context_followup"
+            plan["response_move"] = "explain_recent_proactive_message"
+            plan["interaction_move"] = "explain_recent_proactive_message"
+            plan["response_goal"] = (
+                f"解释上一条主动消息的具体来源：{content}；自然承接用户追问。"
+                if content
+                else "解释上一条主动消息的来源，并自然承接用户追问。"
+            )
+            plan["reply_contract"] = "承接上一条主动消息，必须点明具体触发原因，不跑到旧话题。"
+        else:
+            plan["task_mode"] = "recent_visible_followup"
+            plan["response_move"] = "explain_recent_visible_message"
+            plan["interaction_move"] = "explain_recent_visible_message"
+            plan["response_goal"] = "解释被绑定的上一条可见消息。"
+        must_include = list(_coerce_sequence(plan.get("must_include")))
+        if content:
+            must_include.append(f"点明上一条可见消息里的具体原因：{content}")
+        reference_anchor = str(binding_info.get("reference_anchor") or "")
+        if reference_anchor:
+            must_include.append(f"明确说出“{reference_anchor}”没有具体指哪一个；不要硬编具体对象。")
+        plan["must_include"] = _clean_list(must_include)
+    return plan
+
+
 def _task_facts(
     *,
     reply_plan: Mapping[str, Any],
@@ -2283,6 +3454,9 @@ def _task_facts(
 ) -> tuple[str, ...]:
     facts = [
         *_surface_input_boundary_facts(agent_input=agent_input, trace_stage_meta=trace_stage_meta),
+        *_surface_recent_conversation_window_facts(agent_input),
+        *_surface_dialogue_repeat_task_facts(reply_plan),
+        *_surface_memory_context_orchestrator_facts(agent_input=agent_input, trace_stage_meta=trace_stage_meta),
         *_surface_memory_write_task_facts(agent_input),
         *_surface_memory_acceptance_task_facts(agent_input=agent_input, trace_stage_meta=trace_stage_meta),
         *_surface_dream_context_task_facts(agent_input),
@@ -2291,6 +3465,58 @@ def _task_facts(
         *_technical_task_facts(reply_plan),
     ]
     return tuple(_clean_list(facts))
+
+
+def _surface_reply_plan_repeat_count(reply_plan: Mapping[str, Any] | None) -> int:
+    plan = _safe_mapping(reply_plan)
+    raw = plan.get("repeat_question_count")
+    try:
+        value = int(raw or 0)
+    except (TypeError, ValueError):
+        value = 0
+    if value > 0:
+        return value
+    for item in list(plan.get("reason_tags") or []):
+        text = str(item or "").strip()
+        match = re.match(r"repeat_count:(\d+)$", text)
+        if match:
+            try:
+                return max(0, int(match.group(1)))
+            except ValueError:
+                return 0
+    return 0
+
+
+def _surface_reply_plan_repeat_group(reply_plan: Mapping[str, Any] | None) -> str:
+    plan = _safe_mapping(reply_plan)
+    value = str(plan.get("repeat_surface_group") or plan.get("repeat_group") or "").strip()
+    if value:
+        return value
+    for item in list(plan.get("reason_tags") or []):
+        text = str(item or "").strip()
+        if text.startswith("repeat_surface:"):
+            return text.split(":", 1)[1].strip()
+    return ""
+
+
+def _surface_dialogue_repeat_task_facts(reply_plan: Mapping[str, Any] | None) -> tuple[str, ...]:
+    repeat_count = _surface_reply_plan_repeat_count(reply_plan)
+    if repeat_count <= 0:
+        return ()
+    repeat_group = _surface_reply_plan_repeat_group(reply_plan)
+    group_text = f"；同类输入={repeat_group}" if repeat_group else ""
+    return (
+        f"重复输入：用户这轮是在重复刚才同类输入，之前已有 {repeat_count} 次{group_text}；本轮必须体现已经注意到重复，不要当第一次处理。",
+    )
+
+
+def _surface_dialogue_repeat_must_not_do(reply_plan: Mapping[str, Any] | None) -> tuple[str, ...]:
+    if _surface_reply_plan_repeat_count(reply_plan) <= 0:
+        return ()
+    return (
+        "重复输入时不要假装第一次看到；必须避免只换一种说法重复上一轮。",
+        "重复时间错位问候时，不要猜用户睡迷糊、故意逗你、状态异常或现实行为。",
+    )
 
 
 def _necessary_facts(
@@ -2302,6 +3528,8 @@ def _necessary_facts(
     retrieval_summary = _safe_mapping(getattr(agent_input, "retrieval_summary", None))
     facts = [
         *_surface_input_boundary_facts(agent_input=agent_input, trace_stage_meta=trace_stage_meta),
+        *_surface_recent_conversation_window_facts(agent_input),
+        *_surface_memory_context_orchestrator_facts(agent_input=agent_input, trace_stage_meta=trace_stage_meta),
         *_surface_memory_acceptance_task_facts(agent_input=agent_input, trace_stage_meta=trace_stage_meta),
         *_surface_dream_context_task_facts(agent_input),
         *_technical_task_facts(task_control or {}),
@@ -2346,6 +3574,7 @@ def _surface_boundary_must_not_do(
             [
                 sensory_boundary,
                 "不要编造用户现实动作、地点、屏幕内容、身体状态或睡眠事实，除非 facts 明确给出。",
+                *_surface_memory_context_orchestrator_must_not_do(agent_input=agent_input, trace_stage_meta=trace_stage_meta),
                 *_surface_memory_acceptance_must_not_do(agent_input),
                 *_technical_task_must_not_do(task_control or {}),
                 *_account_login_must_not_do(agent_input, task_control=task_control),
@@ -2509,6 +3738,32 @@ def _has_multimodal_payload(agent_input: Any) -> bool:
     return bool(observations)
 
 
+def _multimodal_surface_main_chain_supported(agent_input: Any) -> bool:
+    observations = _safe_mapping(getattr(agent_input, "multimodal_observations", None))
+    attachment_summary = str(getattr(agent_input, "attachment_summary", "") or "").strip()
+    if attachment_summary or str(observations.get("core_observation") or "").strip():
+        return True
+    if list(observations.get("items") or []):
+        return True
+    attachments = list(getattr(agent_input, "attachments", None) or [])
+    types = {str(_safe_mapping(item).get("type") or "").strip().lower() for item in attachments if item}
+    if types & {"image", "emoji", "sticker"}:
+        return True
+    text = str(getattr(agent_input, "user_message", "") or "").strip()
+    return text in {"[图片消息]", "[表情消息]", "[贴纸消息]", "[动画表情]"}
+
+
+def _surface_user_visible_reply_context(agent_input: Any) -> bool:
+    if str(getattr(agent_input, "user_message", "") or "").strip():
+        return True
+    if getattr(agent_input, "attachments", None):
+        return True
+    if str(getattr(agent_input, "attachment_summary", "") or "").strip():
+        return True
+    observations = _safe_mapping(getattr(agent_input, "multimodal_observations", None))
+    return bool(observations)
+
+
 def _surface_main_chain_default_enabled() -> bool:
     raw = str(os.environ.get("HOST_SURFACE_MAIN_CHAIN_ENABLED") or "").strip().lower()
     if raw in {"0", "false", "no", "off", "legacy"}:
@@ -2569,8 +3824,8 @@ def _coerce_int(value: Any, *, default: int) -> int:
 
 __all__ = [
     "build_surface_context_payload_from_adapter",
-    "build_surface_main_chain_input_from_chat_input",
-    "run_surface_main_chain_for_chat_input",
+    "build_surface_main_chain_input_from_surface_reply_input",
+    "run_surface_main_chain_for_surface_reply_input",
     "surface_main_chain_enabled",
     "surface_main_chain_required",
     "surface_main_chain_sse_generator",

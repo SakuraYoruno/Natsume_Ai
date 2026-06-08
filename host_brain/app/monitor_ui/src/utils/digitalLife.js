@@ -306,7 +306,7 @@ const TOKEN_LABELS = {
   ws: 'WebSocket',
   cortex_orchestrator: 'Cortex Orchestrator',
   executive_router: 'Executive Router',
-  chat_agent: 'Chat Agent',
+  surface_reply: 'Surface Reply',
   sub_agent: 'Sub Agent',
   query_planner: 'Query Planner',
   agentic_rag: 'Agentic RAG',

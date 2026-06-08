@@ -1,4 +1,4 @@
-"""chat_retrieval_helpers.py — 检索辅助函数（从 chat_stream_handler.py 迁移）。
+﻿"""chat_retrieval_helpers.py — 检索辅助函数（从 chat_stream_handler.py 迁移）。
 
 提供：
   - _run_retrieval: 并行执行检索
@@ -54,7 +54,7 @@ _EXPLICIT_MEMORY_QUERY_ANCHORS: tuple[str, ...] = (
 )
 _EXPLICIT_MEMORY_QUERY_WORDS: tuple[str, ...] = ("什么", "啥", "哪", "哪些", "内容")
 _GENERIC_SURFACE_TASK_MODES: frozenset[str] = frozenset(
-    {"chat", "daily_chat", "first_ask", "neutral", "phatic", "plain_answer", "plain_hold"}
+    {"chat", "daily_chat", "first_ask", "neutral", "plain_answer", "plain_hold"}
 )
 _COLLECTION_FASTPATH_CONTRACTS: frozenset[str] = frozenset({"collection_date", "collection_recent"})
 _SURFACE_MEMORY_RECALL_COVERAGE_FAILED = "SURFACE_MEMORY_RECALL_COVERAGE_FAILED"
@@ -128,7 +128,7 @@ def _should_trim_low_signal_short_chat(
     query_plan_raw = summary.get("query_plan")
     query_plan = dict(query_plan_raw) if isinstance(query_plan_raw, Mapping) else {}
     intent = str(query_plan.get("intent") or "").strip().lower()
-    if intent not in {"chat", "phatic"}:
+    if intent != "chat":
         return False
 
     agentic_meta_raw = summary.get("agentic_meta")

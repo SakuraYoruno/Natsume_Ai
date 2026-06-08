@@ -16,7 +16,6 @@ from host_brain.app.chat_runtime_input import (
     get_chat_runtime_prompt_context_validation,
     get_chat_runtime_emotion_snapshot,
     get_chat_runtime_emotion_state,
-    resolve_prompt_context_style_row,
     get_chat_runtime_render_target_lang,
     get_chat_runtime_retrieval,
     get_chat_runtime_skill_manifest,

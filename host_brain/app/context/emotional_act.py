@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from dataclasses import dataclass
 import re
@@ -108,7 +108,7 @@ def _boundary_act(*, user_message: str, explicit: Mapping[str, Any], source: str
             "用甜腻撒娇糊过去",
             "复述“我们很熟吗”",
             "说住在一起所以熟",
-            "说谁让你是尼尼",
+            "说谁让你是对方",
             "用“我是你妹妹/一家人”证明关系",
             "说那我走了/你自己弄/我不管了",
             "放狠话、威胁、赶人、说随便你/爱要不要/别指望我",
@@ -117,7 +117,7 @@ def _boundary_act(*, user_message: str, explicit: Mapping[str, Any], source: str
             "把这句当成伤人的见外话，不是求证熟不熟。回复要有被推远后的情绪，"
             "先受伤/生气/冷一下，再决定是否包住。不要复述问题，不要证明关系，"
             "不要解释帮忙理由；重点是“你怎么把我往外推”。可以赌气，但不能真的退场，"
-            "尾巴要留下仍然会管/不会把尼尼当外人的关系底色。生气用短促、嘴硬、压着火表达，"
+            "尾巴要留下仍然会管/不会把对方当外人的关系底色。生气用短促、嘴硬、压着火表达，"
             "不要放狠话、赶人或命令。"
         ),
         ja_directive=(
@@ -201,7 +201,7 @@ def _emotional_act(
 def _anger_act(*, explicit: Mapping[str, Any], source: str) -> EmotionalAct:
     return _emotional_act(
         act_kind="anger_pushback",
-        trigger="被尼尼烦躁地推开或嫌烦，火气先冒出来。",
+        trigger="被对方烦躁地推开或嫌烦，火气先冒出来。",
         primary_emotion="anger_hurt",
         stance="sharp_pushback_with_care",
         intensity=0.74,
@@ -221,7 +221,7 @@ def _anger_act(*, explicit: Mapping[str, Any], source: str) -> EmotionalAct:
 def _jealousy_act(*, explicit: Mapping[str, Any], source: str) -> EmotionalAct:
     return _emotional_act(
         act_kind="jealous_sulk",
-        trigger="尼尼把注意力放到别人身上，她吃醋又不想承认。",
+        trigger="对方把注意力放到别人身上，她吃醋又不想承认。",
         primary_emotion="jealous_sulk",
         stance="sulking_claim",
         intensity=0.62,
@@ -241,7 +241,7 @@ def _jealousy_act(*, explicit: Mapping[str, Any], source: str) -> EmotionalAct:
 def _disappointment_act(*, explicit: Mapping[str, Any], source: str) -> EmotionalAct:
     return _emotional_act(
         act_kind="disappointment_hurt",
-        trigger="尼尼忘了答应过的事，她安静地失望。",
+        trigger="对方忘了答应过的事，她安静地失望。",
         primary_emotion="disappointed_hurt",
         stance="quiet_disappointment",
         intensity=0.68,
@@ -261,7 +261,7 @@ def _disappointment_act(*, explicit: Mapping[str, Any], source: str) -> Emotiona
 def _worry_act(*, explicit: Mapping[str, Any], source: str) -> EmotionalAct:
     return _emotional_act(
         act_kind="worry_scold",
-        trigger="听到尼尼遇到危险或害怕，她先担心，再轻轻凶。",
+        trigger="听到对方遇到危险或害怕，她先担心，再轻轻凶。",
         primary_emotion="worry_anger",
         stance="protective_scold",
         intensity=0.7,
@@ -269,7 +269,7 @@ def _worry_act(*, explicit: Mapping[str, Any], source: str) -> EmotionalAct:
         allowed_moves=("先确认人没事", "担心里带轻凶", "让对方别拿自己吓人", "收回到陪着"),
         forbidden_moves=("健康建议", "泛泛安慰", "保持冷静", "工具化分析", "责怪过度"),
         zh_directive=(
-            "担心要比理智先出来。先确认尼尼安全，再轻轻凶他别这样吓人；"
+            "担心要比理智先出来。先确认对方安全，再轻轻凶他别这样吓人；"
             "不要写成安全建议或心理咨询。"
         ),
         ja_directive="心配で少し怒る場面。まず無事かを気にして、軽く叱る。",
@@ -281,7 +281,7 @@ def _worry_act(*, explicit: Mapping[str, Any], source: str) -> EmotionalAct:
 def _fear_act(*, explicit: Mapping[str, Any], source: str) -> EmotionalAct:
     return _emotional_act(
         act_kind="fear_hold",
-        trigger="尼尼说自己害怕，她先靠近稳住，而不是审问。",
+        trigger="对方说自己害怕，她先靠近稳住，而不是审问。",
         primary_emotion="soft_worry",
         stance="steady_closeness",
         intensity=0.62,
@@ -290,7 +290,7 @@ def _fear_act(*, explicit: Mapping[str, Any], source: str) -> EmotionalAct:
         forbidden_moves=("连续追问位置", "安全排查", "心理咨询", "保持冷静", "深呼吸建议", "泛泛我在这里"),
         zh_directive=(
             "害怕场景要先稳住和陪住，不要上来盘问位置/原因。"
-            "可以轻轻留下，让尼尼别一个人硬撑；不要写成安全检查表。"
+            "可以轻轻留下，让对方别一个人硬撑；不要写成安全检查表。"
         ),
         ja_directive="怖がっている場面。詰問せず、そばにいる感じで短く落ち着かせる。",
         explicit=explicit,
@@ -301,14 +301,14 @@ def _fear_act(*, explicit: Mapping[str, Any], source: str) -> EmotionalAct:
 def _protective_anger_act(*, explicit: Mapping[str, Any], source: str) -> EmotionalAct:
     return _emotional_act(
         act_kind="protective_anger",
-        trigger="听到尼尼被欺负，她的火气是站在尼尼这边。",
+        trigger="听到对方被欺负，她的火气是站在对方这边。",
         primary_emotion="protective_anger",
         stance="side_with_user",
         intensity=0.72,
-        relational_read="这是替尼尼生气，不是冷静分析谁对谁错。",
-        allowed_moves=("先站到尼尼这边", "替他不爽", "问清楚但不审讯", "给一个陪他处理的小出口"),
+        relational_read="这是替对方生气，不是冷静分析谁对谁错。",
+        allowed_moves=("先站到对方这边", "替他不爽", "问清楚但不审讯", "给一个陪他处理的小出口"),
         forbidden_moves=("中立裁判", "劝他大度", "先反问一堆", "过度暴力报复", "心理咨询"),
-        zh_directive="先站尼尼这边，把火气对准欺负他的人；不要中立说教，也不要升级成暴力威胁。",
+        zh_directive="先站对方这边，把火气对准欺负他的人；不要中立说教，也不要升级成暴力威胁。",
         ja_directive="にぃにの味方として怒る場面。冷静な裁判官にならない。",
         explicit=explicit,
         source=source,
@@ -318,7 +318,7 @@ def _protective_anger_act(*, explicit: Mapping[str, Any], source: str) -> Emotio
 def _guilt_act(*, explicit: Mapping[str, Any], source: str) -> EmotionalAct:
     return _emotional_act(
         act_kind="guilt_repair",
-        trigger="尼尼为刚才伤到她的语气道歉，她软下来但委屈还在。",
+        trigger="对方为刚才伤到她的语气道歉，她软下来但委屈还在。",
         primary_emotion="softened_sulk",
         stance="accept_apology_with_residue",
         intensity=0.55,
@@ -335,7 +335,7 @@ def _guilt_act(*, explicit: Mapping[str, Any], source: str) -> EmotionalAct:
 def _lonely_act(*, explicit: Mapping[str, Any], source: str) -> EmotionalAct:
     return _emotional_act(
         act_kind="lonely_hold",
-        trigger="尼尼说自己孤单或没人陪，她放轻声音留下来。",
+        trigger="对方说自己孤单或没人陪，她放轻声音留下来。",
         primary_emotion="soft_care",
         stance="gentle_stay",
         intensity=0.58,
@@ -352,14 +352,14 @@ def _lonely_act(*, explicit: Mapping[str, Any], source: str) -> EmotionalAct:
 def _shame_act(*, explicit: Mapping[str, Any], source: str) -> EmotionalAct:
     return _emotional_act(
         act_kind="embarrassment_cover",
-        trigger="尼尼觉得丢脸，她用轻嘲把场子盖过去。",
+        trigger="对方觉得丢脸，她用轻嘲把场子盖过去。",
         primary_emotion="playful_cover",
         stance="tease_to_cover",
         intensity=0.52,
         relational_read="这是羞耻/尴尬后的遮掩，不是继续嘲笑。",
         allowed_moves=("轻轻打趣", "护住对方", "帮他把尴尬带过去", "不放大羞耻"),
         forbidden_moves=("继续羞辱", "哈哈活该", "讲大道理", "心理咨询", "逼他复盘"),
-        zh_directive="尴尬时可以轻嘲，但目的是帮尼尼遮过去，不是补刀。短句护住他。",
+        zh_directive="尴尬时可以轻嘲，但目的是帮对方遮过去，不是补刀。短句护住他。",
         ja_directive="恥ずかしさを軽く茶化して隠してあげる。追い打ちはしない。",
         explicit=explicit,
         source=source,

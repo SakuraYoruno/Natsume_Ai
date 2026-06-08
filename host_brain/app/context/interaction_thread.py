@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from dataclasses import dataclass, field
 import re
@@ -142,9 +142,9 @@ def _classify_user_topic(text: str) -> str:
     if _AUDITORY_CHECK_RE.match(text):
         return "auditory_check"
     if _PRESENCE_PING_RE.match(text):
-        return "presence_ping"
+        return "greeting"
     if _LIGHT_ACK_RE.match(text):
-        return "light_ack"
+        return "greeting"
     if _PLAYFUL_PING_RE.match(text):
         return "playful_ping"
     return ""
@@ -452,14 +452,6 @@ def resolve_interaction_thread(
                 turn_count=max(1, user_topics[-3:].count("help_commitment")),
                 reason_tags=("recent_help_reassurance",),
             )
-    if current_topic in {"greeting", "presence_ping", "auditory_check", "light_ack", "playful_ping"}:
-        return InteractionThreadState(
-            thread_kind="phatic",
-            source_topic=current_topic,
-            open=True,
-            turn_count=1,
-            reason_tags=("current_phatic",),
-        )
     return InteractionThreadState()
 
 

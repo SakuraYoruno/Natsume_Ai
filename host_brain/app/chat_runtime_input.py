@@ -301,43 +301,6 @@ def get_chat_runtime_prompt_context(runtime_payload: Mapping[str, Any]) -> dict[
     return {}
 
 
-def resolve_prompt_context_style_row(
-    prompt_context: Mapping[str, Any],
-    *,
-    node_id: str,
-) -> dict[str, Any]:
-    style_pack_raw = prompt_context.get("style_pack")
-    style_pack = dict(style_pack_raw) if isinstance(style_pack_raw, Mapping) else {}
-    style_rows = (
-        list(style_pack.get("style_canon") or [])
-        if isinstance(style_pack.get("style_canon"), list)
-        else []
-    )
-
-    normalized_node_id = str(node_id or "").strip()
-    for row in style_rows:
-        if not isinstance(row, Mapping):
-            continue
-        if str(row.get("node_id") or "").strip() == normalized_node_id:
-            return dict(row)
-
-    for row in style_rows:
-        if isinstance(row, Mapping):
-            return dict(row)
-    return {}
-
-
-def get_chat_runtime_prompt_context_style_row(
-    runtime_payload: Mapping[str, Any],
-    *,
-    node_id: str,
-) -> dict[str, Any]:
-    return resolve_prompt_context_style_row(
-        get_chat_runtime_prompt_context(runtime_payload),
-        node_id=node_id,
-    )
-
-
 def get_chat_runtime_prompt_context_validation(runtime_payload: Mapping[str, Any]) -> dict[str, Any]:
     prompt_context_section = get_chat_runtime_prompt_context_section(runtime_payload)
     validation_raw = prompt_context_section.get("validation")

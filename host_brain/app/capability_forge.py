@@ -29,7 +29,7 @@ _DEFAULT_EXECUTOR_BY_FAMILY = {
     "vision": "vision_agent",
     "system": "repair_agent",
     "reasoning": "intent_agent",
-    "social": "chat_agent",
+    "social": "surface_reply",
 }
 
 

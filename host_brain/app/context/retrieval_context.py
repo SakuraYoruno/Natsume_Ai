@@ -1,4 +1,4 @@
-"""retrieval_context.py — 检索行构建与上下文可观测性辅助。
+﻿"""retrieval_context.py — 检索行构建与上下文可观测性辅助。
 
 负责检索行过滤、路径分类和上下文可观测性构建。
 """
@@ -19,7 +19,7 @@ from host_brain.app.context.persona_expression import (
 
 logger = logging.getLogger(__name__)
 
-_LOW_SIGNAL_PERSONA_INTENTS: frozenset[str] = frozenset({"phatic", "affection"})
+_LOW_SIGNAL_PERSONA_INTENTS: frozenset[str] = frozenset({"affection"})
 _SHORT_CHAT_PERSONA_SCORE_FLOOR = 0.12
 
 CONTEXT_DEGRADE_ORDER: tuple[str, ...] = (
@@ -201,7 +201,6 @@ def _select_context_degrade_tier(
     retrieval_items = _coerce_non_negative_int(slot_item_counts.get("retrieval", 0))
     non_retrieval_items = (
         _coerce_non_negative_int(slot_item_counts.get("authoritative", 0))
-        + _coerce_non_negative_int(slot_item_counts.get("style_canon", 0))
         + _coerce_non_negative_int(slot_item_counts.get("tool_meta_pack", 0))
     )
     total_items = sum(_coerce_non_negative_int(value) for value in slot_item_counts.values())
@@ -234,18 +233,11 @@ def build_prompt_context_observability(
     retrieval_rows = list(prompt_context.get("retrieval") or []) if isinstance(prompt_context.get("retrieval"), list) else []
     tool_meta_rows = list(prompt_context.get("tool_meta_pack") or []) if isinstance(prompt_context.get("tool_meta_pack"), list) else []
 
-    style_pack_raw = prompt_context.get("style_pack")
-    style_pack = dict(style_pack_raw) if isinstance(style_pack_raw, Mapping) else {}
-    style_rows = list(style_pack.get("style_canon") or []) if isinstance(style_pack.get("style_canon"), list) else []
-    node_bindings_raw = style_pack.get("node_bindings")
-    node_bindings = dict(node_bindings_raw) if isinstance(node_bindings_raw, Mapping) else {}
     emotion_recall_text = str(prompt_context.get("emotion_recall") or "").strip()
 
     slot_item_counts = {
         "authoritative": len(authoritative_rows),
         "retrieval": len(retrieval_rows),
-        "style_canon": len(style_rows),
-        "style_node_bindings": len(node_bindings),
         "tool_meta_pack": len(tool_meta_rows),
         "emotion_recall": (1 if emotion_recall_text else 0),
     }
@@ -264,7 +256,6 @@ def build_prompt_context_observability(
         {
             "authoritative": authoritative_rows,
             "retrieval": retrieval_rows,
-            "style_pack": style_pack,
             "constraints": dict(prompt_context.get("constraints") or {}),
             "emotion_pulse": dict(prompt_context.get("emotion_pulse") or {}),
             "emotion_recall": emotion_recall_text,
@@ -286,7 +277,6 @@ def build_prompt_context_observability(
         "kind_breakdown": {
             "authoritative": _count_kind(authoritative_rows),
             "retrieval": _count_kind(retrieval_rows),
-            "style_canon": _count_kind(style_rows),
         },
         "retrieval_metrics": {
             "status": str(retrieval_summary.get("status") or "UNKNOWN"),
@@ -307,8 +297,6 @@ def build_prompt_context_observability(
             "retrieval_item_cap": 10,
             "retrieval_trimmed_items": max(0, retrieval_input_count - retrieval_used_count),
             "world_authoritative_items": len(authoritative_rows),
-            "style_prompt_rows": len(style_rows),
-            "style_binding_nodes": len(node_bindings),
             "emotion_recall_present": bool(emotion_recall_text),
         },
         "context_size_chars": context_chars,

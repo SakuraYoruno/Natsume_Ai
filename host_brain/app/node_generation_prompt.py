@@ -42,7 +42,7 @@ def render_node_generation_prompt(
     node_id: str,
     runtime_payload: Mapping[str, Any],
     include_character_profile: bool = True,
-    include_style_block: bool = True,
+    include_soul_style_block: bool = True,
     include_persona_examples: bool = True,
     include_node_role: bool = True,
     include_user_message: bool = True,
@@ -160,7 +160,7 @@ def render_node_generation_prompt(
     soul_text = _truncate_for_prompt(compiled_soul.runtime_full_text, limit=2600)
     soul_block = (
         f"【人格核心】\n{soul_text}\n\n"
-        if soul_text and (include_character_profile or include_style_block)
+        if soul_text and (include_character_profile or include_soul_style_block)
         else ""
     )
 
@@ -788,3 +788,4 @@ def render_node_generation_prompt(
             f"{str(_render_contract_section_titles.get('intent_draft') or '【意图草稿】')}\n{core_intent_json}\n",
         ]
     )
+

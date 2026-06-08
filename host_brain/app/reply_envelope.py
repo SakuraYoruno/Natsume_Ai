@@ -205,11 +205,23 @@ def envelope_from_commit(
     normalized_decision = str(decision or "").strip().upper()
     text = str(narrative or "").strip()
     raw_extra_payload = dict(raw_extra or {})
+    effective_response_form = normalize_response_form(str(response_form or "text"))
+    has_media_payload = has_structured_media_payload(
+        response_form=effective_response_form,
+        media_ref=str(media_ref or "").strip(),
+        reaction_id=str(reaction_id or "").strip(),
+        raw_extra=raw_extra_payload,
+    )
     raw_media_ref = str(raw_extra_payload.get("media_ref") or raw_extra_payload.get("media_path") or "").strip()
+    if text and not has_media_payload and (
+        is_pure_media_response_form(effective_response_form) or is_mixed_media_response_form(effective_response_form)
+    ):
+        raw_extra_payload.setdefault("response_form_repaired_from", effective_response_form)
+        effective_response_form = "text"
     if normalized_decision == "APPROVE" and (text or str(media_ref or "").strip() or raw_media_ref) and not bool(degraded):
         return ReplyEnvelope.final_reply(
             text=text,
-            response_form=response_form,
+            response_form=effective_response_form,
             source=source or "full_model",
             cacheable=cacheable,
             audit=audit,
@@ -221,7 +233,7 @@ def envelope_from_commit(
     return ReplyEnvelope.no_reply(
         reason_code=str(reason_code or normalized_decision or "NO_REPLY").strip() or "NO_REPLY",
         source=source or "no_reply",
-        response_form=response_form,
+        response_form=effective_response_form,
         audit=audit,
     )
 

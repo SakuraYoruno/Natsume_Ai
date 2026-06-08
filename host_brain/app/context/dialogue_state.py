@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from dataclasses import dataclass, field
 import re
@@ -12,7 +12,7 @@ _HELP_CONTINUITY_RE = re.compile(r"(还会帮我吗|还会理我吗|还会管我
 _REJECTION_RE = re.compile(r"(我不喜欢这样|我不喜欢你这样|别这么说|别这样说|别这么热心|别这样)")
 _CHALLENGING_MARKER_RE = re.compile(r"(吧|吗|？|\?|就|还|又|不是|没)")
 
-_SELF_IDENTIFY_RE = re.compile(r"(我是新海天|我叫新海天|我的名字是新海天|我是夏目蓝|我叫夏目蓝|我的名字是夏目蓝|我？我的名字是夏目蓝)")
+_SELF_IDENTIFY_RE = re.compile(r"(我是当前人格|我叫当前人格|我的名字是当前人格|我是旧角色|我叫旧角色|我的名字是旧角色|我？我的名字是旧角色)")
 _BOUNDARY_DISTANCE_ANSWER_RE = re.compile(r"(我们并?不熟|我们不熟|不熟|不算熟|没熟到那种地步|慢慢熟|非要多熟|搭把手|顺路嘛|正好路过)")
 _STEPSISTER_BOUNDARY_ANSWER_RE = re.compile(
     r"(义妹|妹妹|一家人|家里人|外人|见外|别装(?:生分|陌生|不熟)|装(?:生分|陌生|不熟)|划清界限|往外推|不当外人)"
@@ -22,6 +22,9 @@ _MOTIVATION_ANSWER_RE = re.compile(
 )
 _HELP_COMMITMENT_ANSWER_RE = re.compile(r"(会帮|会理|会回|会答|不会不理|多半不会不理)")
 _GENERIC_ASSISTIVE_RE = re.compile(r"(有什么事吗|有什么事|需要什么帮助|需要我|我可以帮)")
+_GREETING_RE = re.compile(r"^(?:你好|您好|嗨|哈喽|hello|hi|hey|早|早安|早上好|中午好|晚上好|晚安)[!！。…~\s]*$", re.IGNORECASE)
+_PRESENCE_RE = re.compile(r"^(?:在吗|在不在|在嘛|还在吗|还在不在|喂|喂喂)[?？!！。…~\s]*$", re.IGNORECASE)
+_PUNCT_ONLY_RE = re.compile(r"^[?？!！。…~、,.，]{1,4}$")
 
 
 @dataclass(frozen=True)
@@ -112,6 +115,21 @@ def classify_assistant_act(message: str) -> str:
 
 def normalize_repeat_surface_group(message: str, current_user_act: str) -> str:
     text = _normalize_text(message)
+    compact = re.sub(r"[\s!！?？。…~、,.，]+", "", text).lower()
+    if text and _PUNCT_ONLY_RE.match(text):
+        return "low_signal_punct"
+    if _PRESENCE_RE.match(text):
+        return "availability_check"
+    if _GREETING_RE.match(text):
+        if compact in {"早", "早安", "早上好"}:
+            return "morning_greeting"
+        if compact == "中午好":
+            return "noon_greeting"
+        if compact in {"晚上好", "晚安"}:
+            return "night_greeting"
+        if compact in {"hello", "hi", "hey"}:
+            return "english_hello"
+        return "casual_greeting"
     if current_user_act == "identity_probe" and _IDENTITY_SHORT_RE.match(text):
         return "identity_short"
     if current_user_act in {"boundary_probe", "motivation_probe"}:

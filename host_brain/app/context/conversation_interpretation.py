@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from dataclasses import dataclass, field
 import re
@@ -42,7 +42,7 @@ _CONNECTIVITY_CHECK_RE = re.compile(
 )
 _LIGHT_ACK_RE = re.compile(r"^(?:嗯|嗯嗯|哦|哦哦|好的?|行|行吧|收到|ok|okay|好哦|好呀)[!！。…~\s]*$", re.IGNORECASE)
 _PLAYFUL_PING_RE = re.compile(r"^(?:戳戳|喂喂|嘿嘿|冒泡|路过|ping|戳一戳)[!！。…~\s]*$", re.IGNORECASE)
-_PHATIC_PUNCT_RE = re.compile(r"^[?？!！。…~、,.，]{1,4}$")
+_LOW_SIGNAL_PUNCT_RE = re.compile(r"^[?？!！。…~、,.，]{1,4}$")
 _LIGHT_TEASE_RE = re.compile(r"(记不住|想听我多说|还想听|逗我|考我|又来问)")
 _CHALLENGING_RE = re.compile(r"(吧|吗|？|\?|就|还|又|不是|没|到底)")
 _CAPABILITY_CHECK_RE = re.compile(r"(能|可以|可不可以|是否).{0,8}(看到|看见|看清|看懂|识别)|你.{0,4}(看到|看见|看懂)|看得到", re.IGNORECASE)
@@ -212,11 +212,11 @@ def classify_literal_topic(message: str, multimodal_payload: Mapping[str, Any] |
     if _AUDITORY_CHECK_RE.match(text):
         return "auditory_check"
     if _PRESENCE_PING_RE.match(text):
-        return "presence_ping"
+        return "greeting"
     if _CONNECTIVITY_CHECK_RE.match(text):
-        return "presence_ping"
+        return "greeting"
     if _LIGHT_ACK_RE.match(text):
-        return "light_ack"
+        return "greeting"
     if _PLAYFUL_PING_RE.match(text):
         return "playful_ping"
     if _REJECTION_RE.search(text):
@@ -234,6 +234,27 @@ def classify_literal_topic(message: str, multimodal_payload: Mapping[str, Any] |
 
 def normalize_surface_group(message: str, literal_topic: str) -> str:
     text = _normalize_text(message)
+    compact = re.sub(r"[\s!！?？。…~、,.，]+", "", text).lower()
+    if not literal_topic and text and _LOW_SIGNAL_PUNCT_RE.match(text):
+        return "low_signal_punct"
+    if literal_topic == "greeting":
+        if _PRESENCE_PING_RE.match(text) or _CONNECTIVITY_CHECK_RE.match(text):
+            return "availability_check"
+        if _LIGHT_ACK_RE.match(text):
+            return "short_ack"
+        if compact in {"早", "早安", "早上好"}:
+            return "morning_greeting"
+        if compact == "中午好":
+            return "noon_greeting"
+        if compact in {"晚上好", "晚安"}:
+            return "night_greeting"
+        if compact in {"hello", "hi", "hey"}:
+            return "english_hello"
+        return "casual_greeting"
+    if literal_topic == "playful_ping":
+        return "playful_ping"
+    if literal_topic == "auditory_check":
+        return "auditory_check"
     if literal_topic == "identity" and _IDENTITY_SHORT_RE.match(text):
         return "identity_short"
     if literal_topic in {"relationship_boundary", "motivation"}:
@@ -426,8 +447,8 @@ def interpret_conversation(
         )
         if assistant_followup_kind:
             literal_topic = "assistant_reply_followup"
-    if not literal_topic and text and _PHATIC_PUNCT_RE.match(text):
-        literal_topic = "phatic_punct"
+    if not literal_topic and text and _LOW_SIGNAL_PUNCT_RE.match(text):
+        reason_tags.append("low_signal_punct")
 
     ledger = topic_ledger or TopicLedgerBlock()
     current_topic_entry = ledger.get(literal_topic) if literal_topic else None
@@ -483,12 +504,16 @@ def interpret_conversation(
             interaction_move = "reconfirm"
     elif literal_topic == "auditory_check":
         interaction_move = "auditory_probe"
-    elif literal_topic in {"greeting", "presence_ping", "light_ack", "phatic_punct"}:
-        interaction_move = "light_ack"
+    elif literal_topic == "greeting" and repeat_question_count >= 3:
+        interaction_move = "long_repeat"
+    elif literal_topic == "greeting" and repeat_question_count > 0:
+        interaction_move = "reconfirm"
+    elif literal_topic == "greeting":
+        interaction_move = "first_ask"
     elif literal_topic in {"playful_ping", "emoji_social_reply"}:
         interaction_move = "playful_ping"
     elif literal_topic in {"attachment_only_no_question"}:
-        interaction_move = "light_ack"
+        interaction_move = "attachment_ack"
     elif literal_topic in {"meme_meaning", "literal_description", "screenshot_analysis", "capability_check"}:
         interaction_move = "probe"
     elif freshness == "new":

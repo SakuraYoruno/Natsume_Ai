@@ -19,10 +19,7 @@ _COMPACT_LANE_TOPICS = {
     "motivation",
     "help_commitment",
     "rejection",
-    "greeting",
-    "presence_ping",
     "auditory_check",
-    "light_ack",
     "playful_ping",
     "assistant_reply_followup",
 }
@@ -30,7 +27,6 @@ _COMPACT_LANE_THREADS = {
     "identity_loop",
     "boundary_probe",
     "help_reassurance",
-    "phatic",
     "assistant_reply_followup",
 }
 _MEMORY_PACKET_KEYS = (

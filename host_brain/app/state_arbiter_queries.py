@@ -2,7 +2,6 @@
 
 提供：
   - _resolve_state_arbiter_world_fact: 世界观查询
-  - _resolve_state_arbiter_style_fact: 风格规范查询
   - _resolve_state_arbiter_bond_fact: Bond 关系查询
   - _resolve_state_arbiter_episodic_fact: 情节记忆查询
   - _normalize_state_arbiter_value / _build_state_arbiter_world_evidence_item: 辅助函数
@@ -131,65 +130,6 @@ async def _resolve_state_arbiter_world_fact(
         )
         summary["status"] = "DEGRADED"
         summary["reason_code"] = "STATE_ARBITER_FAILED"
-        summary["detail"] = str(exc)
-        return summary, None
-
-
-async def _resolve_state_arbiter_style_fact(
-    *,
-    session_id: str,
-    request_id: str,
-) -> tuple[dict[str, Any], dict[str, Any] | None]:
-    """查询 StyleCanon 风格规范，注入 prompt 作为风格约束。"""
-    summary: dict[str, Any] = {
-        "status": "SKIPPED",
-        "reason_code": "NOT_AVAILABLE",
-        "fact_key": "style_canon_facts",
-    }
-    try:
-        from host_brain.app.dependencies import get_state_arbiter  # noqa: PLC0415
-
-        arbiter = get_state_arbiter()
-        result = await arbiter.resolve("style_canon_facts", session_id=session_id)
-        if result is None:
-            summary["reason_code"] = "NO_MATCH"
-            return summary, None
-
-        fact_text = _normalize_state_arbiter_value(result.value)
-        summary.update(
-            {
-                "source": str(getattr(result.source, "value", result.source) or "unknown"),
-                "is_fallback": bool(getattr(result, "is_fallback", False)),
-                "conflict_detected": bool(getattr(result, "conflict_detected", False)),
-            }
-        )
-        if not fact_text:
-            summary["reason_code"] = "EMPTY_VALUE"
-            return summary, None
-
-        evidence_item = {
-            "slot_name": "style_canon",
-            "doc_id": f"style_canon::{session_id}",
-            "snippet": fact_text[:600],
-            "score": 0.85,
-            "source": "state_arbiter_style",
-            "metadata": {
-                "fact_key": "style_canon_facts",
-                "source": str(getattr(result.source, "value", result.source) or "unknown"),
-            },
-        }
-        summary["status"] = "APPLIED"
-        summary["reason_code"] = None
-        summary["value_chars"] = len(fact_text)
-        return summary, evidence_item
-    except Exception as exc:
-        _logger.debug(
-            "StateArbiter style_canon 调用失败（降级）: %s",
-            exc,
-            extra={"request_id": request_id},
-        )
-        summary["status"] = "DEGRADED"
-        summary["reason_code"] = "STATE_ARBITER_STYLE_FAILED"
         summary["detail"] = str(exc)
         return summary, None
 

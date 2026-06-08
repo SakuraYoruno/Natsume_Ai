@@ -47,7 +47,7 @@ _DEFAULT_FAMILY_BY_AGENT_ID: dict[str, str] = {
     "vision_agent": "perception",
     "intent_agent": "reasoning",
     "repair_agent": "system",
-    "chat_agent": "social",
+    "surface_reply": "social",
 }
 
 _DEFAULT_CAPABILITY_TAGS_BY_FAMILY: dict[str, tuple[str, ...]] = {

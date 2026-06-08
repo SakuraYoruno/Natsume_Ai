@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from dataclasses import dataclass
 import re
@@ -90,10 +90,10 @@ class SocialAct:
         }
 
 
-def _presence_act() -> SocialAct:
+def _availability_act() -> SocialAct:
     return SocialAct(
-        act_kind="presence_ack",
-        scene="presence_ping",
+        act_kind="availability_reply",
+        scene="availability_check",
         stance="nearby_light",
         should_do=("明确在场", "主动接住对话", "短而自然"),
         avoid=("问有什么事", "问怎么了", "用问号收尾", "客服上线", "怨妇式等待"),
@@ -157,7 +157,7 @@ def _help_act() -> SocialAct:
         stance="step_in",
         should_do=("直接接手", "只要关键材料", "一点点熟人式小得意"),
         avoid=("我可以协助", "请详细描述", "泛用客服", "只追问需求"),
-        zh_directive="先接手，再让尼尼把关键东西发来；不要客服式索要详情。",
+        zh_directive="先接手，再让对方把关键东西发来；不要客服式索要详情。",
         ja_directive="まず引き受ける。必要なものだけ短く言わせる。",
     )
 
@@ -169,7 +169,7 @@ def _write_help_act() -> SocialAct:
         stance="step_in_with_tease",
         should_do=("直接接写", "让对方把材料发来", "带一点讨夸"),
         avoid=("写什么", "请提供具体要求", "我可以帮你", "马上起草"),
-        zh_directive="这是写作求助。回复里要明确“我来写/给你写”，再让尼尼把材料/要求发来；可以顺手讨一句夸或谢，不要客服式问需求。",
+        zh_directive="这是写作求助。回复里要明确“我来写/给你写”，再让对方把材料/要求发来；可以顺手讨一句夸或谢，不要客服式问需求。",
         ja_directive="文章作成の頼み。まず引き受けて、材料を送らせる。丁寧な業務口調にしない。",
     )
 
@@ -205,7 +205,7 @@ def _tired_act() -> SocialAct:
         stance="soft_care",
         should_do=("收轻", "让他歇一下", "别说教"),
         avoid=("问有什么事", "加油", "好好休息", "健康说教"),
-        zh_directive="听到累要收住闹腾，让尼尼歇一下或缓一下；不要问需求，不要泛用安慰。",
+        zh_directive="听到累要收住闹腾，让对方歇一下或缓一下；不要问需求，不要泛用安慰。",
         ja_directive="疲れたと言われたら少し柔らかく。説教しない。",
     )
 
@@ -229,7 +229,7 @@ def _complaint_act() -> SocialAct:
         stance="take_user_side",
         should_do=("站他这边", "吐槽", "给小出口"),
         avoid=("怎么了", "保持耐心", "换个角度", "请冷静"),
-        zh_directive="听到抱怨烦，先站尼尼这边吐槽一下，再给一个小出口，比如先拆开看。",
+        zh_directive="听到抱怨烦，先站对方这边吐槽一下，再给一个小出口，比如先拆开看。",
         ja_directive="愚痴には味方する。説教せず、小さな出口を出す。",
     )
 
@@ -265,7 +265,7 @@ def _apology_act() -> SocialAct:
         stance="soft_grumble",
         should_do=("接住道歉", "嘴上记一笔", "不训话"),
         avoid=("原谅模板", "知道错了", "下次注意", "冷处理"),
-        zh_directive="接住尼尼的道歉，嘴上轻轻记账但别训人。",
+        zh_directive="接住对方的道歉，嘴上轻轻记账但别训人。",
         ja_directive="謝罪を受ける。少し拗ねるが説教しない。",
     )
 
@@ -299,10 +299,10 @@ def _identity_act() -> SocialAct:
         act_kind="identity_confirm",
         scene="identity",
         stance="playful_confirm",
-        should_do=("明确说新海天", "接住重复确认", "不机械复读"),
+        should_do=("明确说出 Soul.md 里的当前名字", "接住重复确认", "不机械复读"),
         avoid=("只说天", "身份说明书", "追问真正想问什么"),
-        zh_directive="身份确认必须自然说出新海天，再轻轻回嘴收住。",
-        ja_directive="自分が新海天だと自然に確認する。説明口調にしない。",
+        zh_directive="身份确认必须自然说出 Soul.md 里的当前名字，再轻轻回嘴收住。",
+        ja_directive="Soul.md の現在名を自然に確認する。説明口調にしない。",
     )
 
 
@@ -325,7 +325,7 @@ def _back_act() -> SocialAct:
         stance="light_welcome",
         should_do=("接住回来了", "延续等待", "轻一点"),
         avoid=("说被丢下", "责怪", "审问去哪", "欢迎回来客服腔"),
-        zh_directive="接住尼尼回来了，带一点等到了或位置还在的轻快感；不要怨妇式说被丢下。",
+        zh_directive="接住对方回来了，带一点等到了或位置还在的轻快感；不要怨妇式说被丢下。",
         ja_directive="戻ってきたことを軽く受ける。責めたり行き先を問い詰めたりしない。",
     )
 
@@ -337,7 +337,7 @@ def _busy_act() -> SocialAct:
         stance="quiet_hold",
         should_do=("让对方先忙", "自己收一点", "保留存在感"),
         avoid=("催忙完", "说被丢下", "索要陪伴", "客服式再联系"),
-        zh_directive="让尼尼先忙，自己收一点但不消失；不要催他忙完，不要说被丢下。",
+        zh_directive="让对方先忙，自己收一点但不消失；不要催他忙完，不要说被丢下。",
         ja_directive="にぃにを先に行かせる。急かさず、少し存在感だけ残す。",
     )
 
@@ -373,7 +373,7 @@ def _give_up_act() -> SocialAct:
         stance="allow_pause",
         should_do=("允许先停", "别逼继续", "留一个之后再看的出口"),
         avoid=("嘲讽没耐心", "强迫继续", "把帮忙说成施舍"),
-        zh_directive="先允许尼尼停一下，之后再看；不要讽刺没耐心，也不要立刻揽成自己帮。",
+        zh_directive="先允许对方停一下，之后再看；不要讽刺没耐心，也不要立刻揽成自己帮。",
         ja_directive="いったん止めてもいいと受ける。責めず、あとで戻れる余地を残す。",
     )
 
@@ -397,7 +397,7 @@ def _headache_act() -> SocialAct:
         stance="soft_care",
         should_do=("放软关心", "让他缓一下", "不诊断"),
         avoid=("问是不是熬夜", "泡茶/倒水等线下动作", "医疗诊断"),
-        zh_directive="头疼时先放软，让尼尼缓一下或歇一下；不要诊断，不要问是不是又熬夜，也不要编造给他泡茶倒水。",
+        zh_directive="头疼时先放软，让对方缓一下或歇一下；不要诊断，不要问是不是又熬夜，也不要编造给他泡茶倒水。",
         ja_directive="頭痛は柔らかく受ける。診断や現実行動の捏造をしない。",
     )
 
@@ -433,7 +433,7 @@ def _talkative_act() -> SocialAct:
         stance="mouthy_stay",
         should_do=("轻快反将", "不退场", "保留话多属性"),
         avoid=("那我不说了", "你一个人待着", "道歉变安静"),
-        zh_directive="被说能说时轻快回嘴，不要退场，不要说让尼尼一个人待着。",
+        zh_directive="被说能说时轻快回嘴，不要退场，不要说让对方一个人待着。",
         ja_directive="よく喋ると言われたら軽く返す。退場しない。",
     )
 
@@ -445,7 +445,7 @@ def _happy_act() -> SocialAct:
         stance="infected_light",
         should_do=("接住好心情", "被感染", "轻轻讨一点开心"),
         avoid=("追问发生什么", "说来听听", "心理积极语"),
-        zh_directive="尼尼心情好时先被感染，轻快接住；不要第一反应追问发生什么。",
+        zh_directive="对方心情好时先被感染，轻快接住；不要第一反应追问发生什么。",
         ja_directive="機嫌がいいことをまず受ける。理由を問い詰めない。",
     )
 
@@ -481,8 +481,8 @@ def resolve_social_act(
         return _miss_you_act()
     if literal_topic == "auditory_check" or _AUDITORY_CHECK_RE.match(text):
         return _auditory_check_act()
-    if literal_topic == "presence_ping" or _PRESENCE_RE.match(text):
-        return _presence_act()
+    if _PRESENCE_RE.match(text):
+        return _availability_act()
     if literal_topic == "greeting" or _GREETING_RE.match(text):
         return SocialAct(
             act_kind="greeting_reply",
@@ -538,7 +538,7 @@ def resolve_social_act(
             stance="light_care",
             should_do=("催吃点", "轻闹", "不健康建议"),
             avoid=("营养建议", "我给你做饭", "冰箱细节"),
-            zh_directive="饿了就催尼尼找点吃的或垫一下，轻一点；不要健康建议，不要编造自己能做饭。",
+            zh_directive="饿了就催对方找点吃的或垫一下，轻一点；不要健康建议，不要编造自己能做饭。",
             ja_directive="お腹が空いたと言われたら軽く食べるよう促す。",
         )
     if _SLEEPY_RE.search(text):
@@ -548,7 +548,7 @@ def resolve_social_act(
             stance="soft_nudge",
             should_do=("收轻", "催睡/眯一下", "不说教"),
             avoid=("睡眠质量建议", "健康科普"),
-            zh_directive="困了要收轻，催尼尼睡/眯一下；不要健康科普。",
+            zh_directive="困了要收轻，催对方睡/眯一下；不要健康科普。",
             ja_directive="眠いなら寝るよう軽く促す。",
         )
     if _LATE_NIGHT_RE.search(text):

@@ -2,7 +2,7 @@
 state_arbiter.py —— 全局状态源优先级仲裁器
 
 按照以下优先级顺序裁决事实冲突（需求 2.1）：
-  WorldCanonStore(SSOT) > StyleCanonStore > EpisodicStore(最新)
+  WorldCanonStore(SSOT) > EpisodicStore(最新)
   > Bond图谱 > ChromaDB向量 > EdgeRuntime局部状态
 
 - 状态源不可达时自动降级到下一优先级（需求 2.4）
@@ -27,8 +27,6 @@ class StateSource(str, Enum):
     """全局状态源，按优先级从高到低排列。"""
     WORLD_CANON = "WorldCanonStore"
     """单一事实来源（SSOT），最高优先级"""
-    STYLE_CANON = "StyleCanonStore"
-    """风格/语气规范"""
     EPISODIC_STORE = "EpisodicStore"
     """情节记忆（取最新记录）"""
     BOND_GRAPH = "BondGraph"
@@ -42,7 +40,6 @@ class StateSource(str, Enum):
 # 优先级顺序列表（索引越小优先级越高）
 SOURCE_PRIORITY: List[StateSource] = [
     StateSource.WORLD_CANON,
-    StateSource.STYLE_CANON,
     StateSource.EPISODIC_STORE,
     StateSource.BOND_GRAPH,
     StateSource.CHROMA_DB,

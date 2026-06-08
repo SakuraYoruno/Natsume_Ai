@@ -201,7 +201,7 @@ async def try_handle_recent_turn_direct_route(
             pii_egress_stats={},
             trace_stage_meta={
                 "executive_router_used": True,
-                "chat_agent_used": False,
+                "surface_reply_used": False,
                 "executive_runtime_mode": "recent_turn_direct",
             },
         )
@@ -294,7 +294,7 @@ async def try_handle_task_progress_direct_route(
             pii_egress_stats={},
             trace_stage_meta={
                 "executive_router_used": True,
-                "chat_agent_used": False,
+                "surface_reply_used": False,
                 "executive_runtime_mode": "task_progress_direct",
             },
         )
@@ -326,7 +326,7 @@ async def stream_chat_route(
     skill_family: str,
     runtime_capability_handoff_extra: dict[str, Any],
     record_dispatch_handoff_fn,
-    chat_agent_sse_generator_fn,
+    surface_reply_sse_generator_fn,
     chat_input,
 ):
     if str(route or "").strip().lower() != "chat":
@@ -342,7 +342,7 @@ async def stream_chat_route(
     )
     first_event_logged = False
     first_render_logged = False
-    async for event in chat_agent_sse_generator_fn(chat_input):
+    async for event in surface_reply_sse_generator_fn(chat_input):
         if not first_event_logged:
             first_event_logged = True
             _logger.info(

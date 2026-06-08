@@ -52,22 +52,6 @@ def read_world_canon_fact(world_store: Any, fact_key: str) -> str | None:
     return merged or None
 
 
-def read_style_canon_fact(style_store: Any, fact_key: str) -> str | None:
-    if str(fact_key or "").strip() != "style_canon_facts":
-        return None
-    try:
-        entries = style_store.list_entries()
-    except Exception:
-        return None
-    chunks: list[str] = []
-    for entry in entries[:3]:
-        content = str(getattr(entry, "content", "") or "").strip()
-        if content:
-            chunks.append(content)
-    merged = "\n".join(chunks).strip()
-    return merged or None
-
-
 def read_episodic_latest_fact(episodic_store: Any, fact_key: str) -> str | None:
     if str(fact_key or "").strip() != "episodic_latest":
         return None

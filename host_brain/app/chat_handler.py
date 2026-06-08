@@ -1,4 +1,4 @@
-"""Chat 核心业务逻辑模块。
+﻿"""Chat 核心业务逻辑模块。
 
 拆分后的主入口，仅保留：
   - handle_chat：POST /v1/chat 统一入口
@@ -750,7 +750,7 @@ async def _unified_chat_sse_generator(
         )
 
         # ── Phase XV：Cortex Orchestrator 统一入口（唯一路径）──────────────
-        # 夏目蓝本人，统一处理所有场景。
+        # 旧角色本人，统一处理所有场景。
         # 闲聊路径：Airlock → LLM → 反思链 → Airlock → 异步后处理
         # 执行路径：Cortex Orchestrator 调度 Executive Router / 子 Agent
         from host_brain.app.cortex_orchestrator import cortex_orchestrator_sse_generator  # noqa: PLC0415

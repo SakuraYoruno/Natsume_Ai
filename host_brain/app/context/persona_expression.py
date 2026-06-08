@@ -1,4 +1,4 @@
-"""persona_expression.py — 人格表达上下文辅助。
+﻿"""persona_expression.py — 人格表达上下文辅助。
 
 负责运行时 guidance 模板解析与 persona_expression_hint 的状态化修饰。
 """
@@ -12,7 +12,7 @@ from host_brain.app.prompt_builder import _truncate_for_prompt
 
 logger = logging.getLogger(__name__)
 
-_LOW_SIGNAL_PERSONA_INTENTS: frozenset[str] = frozenset({"phatic", "affection"})
+_LOW_SIGNAL_PERSONA_INTENTS: frozenset[str] = frozenset({"affection"})
 _SHORT_CHAT_PERSONA_SCORE_FLOOR = 0.12
 
 

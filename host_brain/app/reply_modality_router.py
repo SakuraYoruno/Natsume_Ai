@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import os
 from dataclasses import dataclass
@@ -21,18 +21,8 @@ _VISUAL_ANSWER_TOPICS = {
     "screenshot_analysis",
     "capability_check",
 }
-_PHATIC_TEXT_TOPICS = {
-    "greeting",
-    "presence_ping",
-    "auditory_check",
-    "light_ack",
-    "phatic_punct",
-    "playful_ping",
-}
 _AFFECTIVE_VOICE_TOPICS = {
     "greeting",
-    "presence_ping",
-    "light_ack",
     "assistant_reply_followup",
     "mood_reflection",
     "rejection",
@@ -219,9 +209,6 @@ class ReplyModalityRouter:
             and "recent_repeat" not in reason_tags
         ):
             return _decision("voice", reason="close_affective_voice")
-
-        if topic in _PHATIC_TEXT_TOPICS:
-            return _decision("text", reason="phatic_text")
 
         if input_kind in _MEDIA_INPUT_KINDS and social_reaction_act:
             return _decision(

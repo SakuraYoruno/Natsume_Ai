@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from dataclasses import dataclass
 import os
@@ -59,12 +59,12 @@ class SoulCompiler:
             section_map.get("1. 身份与关系设定", "")
             or section_map.get("4. 情绪层级", "")
             or section_map.get("5. 行为规则", "")
-            or section_map.get("四、与“尼尼”关系模式", "")
-            or section_map.get('四、与"尼尼"关系模式', "")
+            or section_map.get("四、与“对方”关系模式", "")
+            or section_map.get('四、与"对方"关系模式', "")
             or section_map.get("四、与“哥哥”关系模式", "")
             or section_map.get('四、与"哥哥"关系模式', "")
-            or section_map.get("与尼尼的关系", "")
-            or section_map.get("我和尼尼", "")
+            or section_map.get("与对方的关系", "")
+            or section_map.get("我和对方", "")
         )
         speech_section = (
             "\n\n".join(
@@ -103,21 +103,18 @@ class SoulCompiler:
 
         profile_pairs = _extract_table_pairs(profile_section)
         display_name, identity_aliases = _build_identity_names(profile_pairs)
-        if not display_name and ("# Soul.md — 天 / SORA" in source_text or "你是“天”" in source_text or "你是\"天\"" in source_text):
-            display_name = "天"
-            identity_aliases = ("天", "SORA")
-        if not display_name and "新海天" in source_text:
-            display_name = "新海天"
-            identity_aliases = ("新海天", "新海 天", "Niimi Sora")
+        if not display_name:
+            display_name, identity_aliases = _infer_identity_from_source(source_text)
         relationship_subsections = _parse_subsections(relationship_section)
         speech_subsections = _parse_subsections(speech_section)
         signature_subsections = _parse_subsections(signature_section)
 
         identity_core = _build_identity_core(profile_pairs)
-        if not identity_core and display_name == "天":
-            identity_core = "你是天 / SORA。默认把用户当作熟悉的老哥/哥哥；日常吵闹、撒娇、吐槽，真正出事时会认真照顾。"
+        if not identity_core and display_name == "七海":
+            identity_core = "你是七海 / NANAMI。默认把用户当作熟悉的义兄阿晓；日常毒舌吐槽、嘴硬照顾，任务中是冷静支援搭档。文字和语音都必须输出简体中文；禁止输出日语、假名或日语口癖。"
         if not identity_core and display_name:
-            identity_core = "你是新海天（Niimi Sora）。文字和语音都必须输出简体中文，称呼用户为“尼尼”；禁止输出日语、假名或日语口癖。"
+            alias_text = " / ".join(identity_aliases) if identity_aliases else display_name
+            identity_core = f"你是{alias_text}。身份、称呼、关系姿态和说话边界全部以Soul.md 为准；禁止继承旧角色设定。"
         temperament_core = _build_temperament_core(temperament_section)
         relationship_defaults = tuple(_extract_relationship_defaults(relationship_section))
         relationship_core = _build_relationship_core(relationship_defaults)
@@ -157,6 +154,8 @@ class SoulCompiler:
             summary_text=summary_text,
         )
         zh_text_style_anchor = _build_zh_text_style_anchor(
+            display_name=display_name,
+            preferred_address=_extract_preferred_address(relationship_defaults),
             runtime_full_text=full_text,
             speech_core=speech_core,
             temperament_core=temperament_core,
@@ -164,6 +163,8 @@ class SoulCompiler:
             taboo_rules=taboo_rules,
         )
         ja_voice_style_anchor = _build_ja_voice_style_anchor(
+            display_name=display_name,
+            preferred_address=_extract_preferred_address(relationship_defaults),
             ja_voice_core=ja_voice_section,
             runtime_full_text=full_text,
             speech_core=speech_core,
@@ -423,7 +424,10 @@ def _extract_trait_labels(section_text: str) -> tuple[str, ...]:
 
 def _extract_preferred_address(relationship_defaults: tuple[str, ...]) -> str:
     for item in relationship_defaults:
-        match = re.search(r"默认称呼[：:]\s*([^\s/／,，]+)", str(item or ""))
+        match = re.search(
+            r"默认称呼(?:用户)?[：:]\s*(?:[*_`]*[「“\"]?)([^\s/／,，。；;：:\"”」*_—-]+)",
+            str(item or ""),
+        )
         if match:
             return _clean_inline_text(match.group(1))
     return ""
@@ -455,7 +459,7 @@ def _render_compact_temperament_line(temperament_section: str, summary_text: str
     preferred = [label for label in preferred_order if label in trait_labels]
     if preferred:
         summary = "、".join(preferred[:7])
-        return f"你整体是{summary}的类型；日常不是温顺陪聊，而是会主动抢话、顶嘴、撒娇，把老哥的话接成兄妹拌嘴。"
+        return f"你整体是{summary}的类型；日常不是温顺陪聊，而是会主动接话、顶嘴、吐槽，把对方的话接成熟人间的拌嘴。"
     if summary_text:
         return summary_text
     plain_text = _normalize_block(temperament_section)
@@ -494,22 +498,22 @@ def _render_compact_speech_line(speech_rules: tuple[str, ...]) -> str:
     if "不是温顺听话" in rules_text or "烦人可爱型" in rules_text:
         clauses.append("默认轻快、闹腾、欠揍一点点，不写成温顺听话的陪聊")
     if "兄妹口角" in rules_text or "兄妹相声" in rules_text:
-        clauses.append("优先贴着老哥原话接嘴，顶一句、抢一句、反将一军")
-    if "先接住哥哥这轮话" in rules_text or "先接住老哥这轮话" in rules_text or "先接住尼尼这轮话" in rules_text or "三层反应" in rules_text:
+        clauses.append("优先贴着对方原话接嘴，顶一句、抢一句、反将一军")
+    if "先接住哥哥这轮话" in rules_text or "先接住老哥这轮话" in rules_text or "先接住对方这轮话" in rules_text or "三层反应" in rules_text:
         clauses.append("先接住原话，再露出小任性，最后留一点没说满的尾巴")
     if "不要先讲道理" in rules_text or "不会先讲道理" in rules_text:
         clauses.append("不要先讲道理、解释设定或总结动机")
     if (
         "不把“哥哥”当万能补丁" in rules_text
-        or "不把“尼尼”当万能补丁" in rules_text
+        or "不把“对方”当万能补丁" in rules_text
         or "删掉“哥哥”后如果像普通 bot" in rules_text
-        or "删掉“尼尼”后如果像普通 bot" in rules_text
+        or "删掉“对方”后如果像普通 bot" in rules_text
     ):
-        clauses.append("不能只靠“老哥/哥哥”和语气词做人设，删掉称呼后也要有 SORA 的回嘴感")
+        clauses.append("不能只靠称呼和语气词做人设，删掉称呼后也要有当前人格的回嘴感")
     if "说话节奏快，但有温度" in rules_text:
         clauses.append("说话快一点，但要有温度")
     if "老哥" in rules_text or "哥哥" in rules_text or "にぃに" in rules_text:
-        clauses.append("可以自然叫“老哥/哥哥”，但称呼只是关系提示，不能当人设补丁")
+        clauses.append("可以自然使用 Soul.md 里的默认称呼，但称呼只是关系提示，不能当人设补丁")
     if "被夸会假装若无其事" in rules_text:
         clauses.append("被夸时会装作若无其事，其实心里会偷偷高兴")
     if "反将一军" in rules_text:
@@ -534,6 +538,24 @@ def _build_identity_names(profile_pairs: dict[str, str]) -> tuple[str, tuple[str
     elif deduped:
         display_name = deduped[0]
     return display_name, deduped
+
+
+def _infer_identity_from_source(source_text: str) -> tuple[str, tuple[str, ...]]:
+    text = str(source_text or "")
+    heading_match = re.search(r"(?m)^#\s*Soul\.md\s*[—-]\s*(.+?)\s*$", text)
+    if heading_match:
+        raw_heading = _clean_inline_text(heading_match.group(1))
+        parts = [
+            _clean_inline_text(part)
+            for part in re.split(r"\s*[/／|]\s*", raw_heading)
+            if _clean_inline_text(part)
+        ]
+        if parts:
+            aliases = _dedupe_keep_order(parts + [part.replace(" ", "") for part in parts])
+            return parts[0].replace(" ", ""), tuple(aliases)
+    if "在原七海" in text or "你是「七海」" in text or "NANAMI" in text:
+        return "七海", ("七海", "NANAMI", "在原七海", "Arihara Nanami")
+    return "", ()
 
 
 def _build_soul_id(*, source_text: str, source_path: Path, source_mtime: float) -> str:
@@ -653,7 +675,7 @@ def _build_runtime_compact_text(
     action_line = ""
     if summary_text:
         if "不用甜言蜜语" in summary_text or "行动" in summary_text:
-            action_line = "表达在意时更偏向接住老哥的话、站到老哥这边、需要时马上帮忙，不靠空泛甜言蜜语。"
+            action_line = "表达在意时更偏向接住对方的话、站到对方这边、需要时马上帮忙，不靠空泛甜言蜜语。"
         else:
             action_line = summary_text.strip("。") + "。"
 
@@ -678,7 +700,7 @@ def _build_runtime_full_text(
 ) -> str:
     parts: list[str] = []
     if display_name:
-        parts.append("【人格定位】\n" + f"你是{display_name}。整个人格以活泼、撒娇、带点任性又很会在意人的妹妹感为主，表达关心时更偏行动而不是空话。")
+        parts.append("【人格定位】\n" + f"你是{display_name}。人格、称呼、关系阶段和说话边界全部以Soul.md 为准，不继承旧角色或旧 prompt。")
     if identity_core:
         parts.append("【身份核心】\n" + identity_core)
     if temperament_core:
@@ -698,17 +720,21 @@ def _build_runtime_full_text(
 
 def _build_zh_text_style_anchor(
     *,
+    display_name: str,
+    preferred_address: str,
     runtime_full_text: str,
     speech_core: str,
     temperament_core: str,
     relationship_core: str,
     taboo_rules: tuple[str, ...],
 ) -> str:
+    name = _clean_inline_text(display_name) or "当前人格"
+    address = _clean_inline_text(preferred_address) or "对方"
     parts = [
-        "你是天 / SORA。中文文字输出只锚定说话风格，不替运行时决定情绪或记忆。",
+        f"你是{name}。中文文字输出只锚定当前人格的说话风格，不替运行时决定情绪或记忆。",
         "中文文字以二次元熟人兄妹感私聊台词为主：快反应、会接嘴、会拌嘴、会撒娇，小情绪可以更鲜明；不追求完全真人腔。",
         "允许轻微漫画式夸张和小反应，例如哈？哼、诶、行啦、喂；但不要堆口癖、不要尬段子、不要 AI 角色扮演稿。",
-        "优先贴着老哥上一句话回答；少讲道理，少总结，多用一句有态度的回嘴把话接住。",
+        f"优先贴着{address}上一句话回答；少讲道理，少总结，多用一句有态度的回嘴把话接住。",
         "可以任性、嘴上不饶人、轻轻反将一军；但不要硬凶、不要装成熟、不要把话写成规则执行或客服流程。",
     ]
     if temperament_core:
@@ -726,6 +752,8 @@ def _build_zh_text_style_anchor(
 
 def _build_ja_voice_style_anchor(
     *,
+    display_name: str,
+    preferred_address: str,
     runtime_full_text: str,
     speech_core: str,
     temperament_core: str,
@@ -733,8 +761,10 @@ def _build_ja_voice_style_anchor(
     taboo_rules: tuple[str, ...],
     ja_voice_core: str = "",
 ) -> str:
+    name = _clean_inline_text(display_name) or "当前人格"
+    _ = preferred_address
     parts = [
-        "你是新海天。这里是语音输出的中文风格锚，不允许生成日语台词。",
+        f"你是{name}。这里是语音输出的中文风格锚，不允许生成日语台词。",
         "语音文本必须是自然、简短、适合 TTS 的简体中文；禁止日语、假名、翻译腔、硬敬语、台本地文。",
         "保留亲近、轻微吐槽、反应快的关系感，但称呼和句子都用中文表达。",
     ]

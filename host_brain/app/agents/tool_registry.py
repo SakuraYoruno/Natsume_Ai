@@ -1135,7 +1135,7 @@ _TOOL_REGISTRY: dict[str, ToolSpec] = {
 
 # 各 agent 可用的工具集合（只读工具）
 _AGENT_TOOLS: dict[str, list[str]] = {
-    "chat_agent":      ["search_knowledge", "get_context"],
+    "surface_reply":      ["search_knowledge", "get_context"],
     "translate_agent": ["translate_text", "search_knowledge"],
     "retrieval_agent": ["search_knowledge", "search_by_keyword", "search_by_vector", "get_context"],
     "intent_agent":    [

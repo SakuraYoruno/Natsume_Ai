@@ -1,7 +1,7 @@
 ﻿"""agent_runtime_shared.py — app 外壳之间的中性共享运行时 helper。
 
 这一层先承接旧统一入口中已经被多个入口直接复用的兼容能力，
-把旧调度入口 / `chat_agent.py` 对历史统一入口的硬耦合先切断，
+把旧调度入口 / `surface_reply_runtime.py` 对历史统一入口的硬耦合先切断，
 后续再继续把真实实现逐步下沉到 tribe / observability / airlock 等稳定归属。
 """
 
@@ -266,27 +266,6 @@ _LOCAL_MEDIA_CONTEXT_HINT_RE = re.compile(
     r"(酷狗|kugou|qq音乐|网易云|spotify|收藏|列表|歌|歌曲|音乐|お気に入り|リスト|音楽|再生)",
     re.IGNORECASE,
 )
-_PHATIC_FASTPATH_BLOCKING_TOKENS = (
-    "翻译",
-    "代码",
-    "搜索",
-    "总结",
-    "记住",
-    "技能",
-    "计划",
-    "步骤",
-    "文件",
-    "脚本",
-    "函数",
-    "报错",
-    "bug",
-    "执行",
-    "处理",
-    "列出",
-    "分析",
-    "修复",
-)
-_PHATIC_FASTPATH_MAX_CHARS = 24
 _TASK_PROGRESS_QUERY_RE = re.compile(
     r"(进度|做到哪|到哪了|还在.*(执行|跑|做)|上个任务.*(怎么样|进度)|刚才.*任务.*(怎么样|进度)|修好了吗|处理到哪"
     r"|(?:这次|当前|聊天)?主链.{0,16}(效果|表现|耗时|延迟|怎么样|如何))"
@@ -677,866 +656,6 @@ def _safe_float(value: Any, *, default: float = 0.0) -> float:
         return round(float(default), 6)
 
 
-_SURFACE_MEMORY_DIRECT_CONTRACTS = frozenset(
-    {
-        "anaphoric_selection",
-        "collection_date",
-        "collection_recent",
-        "evidence_review",
-        "preference",
-        "open_loop",
-        "self_change",
-        "failure_debug",
-        "correction",
-    }
-)
-_SURFACE_MEMORY_DIRECT_RESPONSE_MODES = frozenset(
-    {
-        "answer_from_collection_memory",
-        "answer_from_evidence",
-        "answer_from_memory",
-        "answer_from_episode_memory",
-    }
-)
-_SURFACE_MEMORY_DIRECT_BLOCKED_QUERY_KINDS = frozenset(
-    {
-        "entity_or_collection_selection",
-    }
-)
-
-
-def _clean_surface_memory_direct_text(value: Any, *, limit: int = 180) -> str:
-    text = re.sub(r"\s+", " ", str(value or "")).strip()
-    text = text.strip(" \t\r\n。；;，,")
-    if len(text) > limit:
-        return text[: max(0, limit - 1)].rstrip() + "…"
-    return text
-
-
-_SURFACE_MEMORY_DIRECT_FORBIDDEN_STYLE_PHRASES = (
-    "我能对上",
-    "能对上",
-    "我记到",
-    "记到的是",
-    "记到的原因",
-    "召回到",
-    "检索到",
-    "相关条目",
-    "说的是：",
-    "按纠错记了",
-    "通过时间和条目校验",
-    "通过条目和证据校验",
-)
-
-
-def _strip_surface_memory_statement_prefixes(value: str) -> str:
-    text = _clean_surface_memory_direct_text(value, limit=220)
-    for _ in range(4):
-        previous = text
-        text = re.sub(
-            r"^(?:记忆线索|召回线索|长期记忆|长期事实|语义记忆|自我改变|故障经验|纠错记忆|关系反馈|质量反馈|互动反馈|承诺和待办|承诺完成|承诺取消|待办|承诺)\s*[:：]\s*",
-            "",
-            text,
-        ).strip()
-        text = re.sub(
-            r"^(?:用户偏好|稳定偏好|偏好|用户要求|要求|规则|约束)\s*[:：]\s*",
-            "",
-            text,
-        ).strip()
-        text = re.sub(
-            r"^(?:用户(?:明确|强烈)?(?:提到|说|要求|纠正|指出|反馈)|你(?:之前)?(?:说|要求|纠正|指出))\s*[:：]\s*",
-            "",
-            text,
-        ).strip()
-        text = re.sub(
-            r"^(?:用户(?:明确|强烈)?(?:要求|纠正|指出|反馈)|你(?:之前)?(?:要求|纠正|指出))\s+",
-            "",
-            text,
-        ).strip()
-        if text == previous:
-            break
-    text = re.split(r"\s*(?:回复|Assistant)\s*[:：]", text, maxsplit=1, flags=re.IGNORECASE)[0].strip()
-    return _clean_surface_memory_direct_text(text, limit=180)
-
-
-def _surface_memory_direct_title(value: Any) -> str:
-    text = _clean_surface_memory_direct_text(value, limit=160)
-    text = re.sub(r"^\d+[.)、]\s*", "", text)
-    text = re.sub(r"^(今天|今日|昨天|前天|三天前|四天前|五天前|本次|这次)\s*推荐\s*[A-ZＡ-Ｚ一二三四五六七八九十0-9]*\s*[:：]\s*", "", text)
-    text = re.sub(r"^推荐\s*[A-ZＡ-Ｚ一二三四五六七八九十0-9]*\s*[:：]\s*", "", text)
-    return _clean_surface_memory_direct_text(text, limit=120)
-
-
-def _surface_memory_direct_raw_title(value: Any) -> str:
-    text = _clean_surface_memory_direct_text(value, limit=160)
-    text = re.sub(r"^\d+[.)、]\s*", "", text)
-    return _clean_surface_memory_direct_text(text, limit=140)
-
-
-def _surface_memory_direct_packet(retrieval_summary: Mapping[str, Any] | None) -> dict[str, Any]:
-    summary = dict(retrieval_summary or {})
-    packet = _coerce_trace_mapping(summary.get("surface_memory_recall_packet"))
-    return dict(packet) if packet else {}
-
-
-def _surface_memory_direct_trace(packet: Mapping[str, Any]) -> dict[str, Any]:
-    return dict(_coerce_trace_mapping(packet.get("trace")))
-
-
-def _surface_memory_direct_readiness(packet: Mapping[str, Any]) -> dict[str, Any]:
-    trace = _surface_memory_direct_trace(packet)
-    readiness = _coerce_trace_mapping(trace.get("recall_answer_readiness"))
-    if not readiness:
-        readiness = _coerce_trace_mapping(packet.get("recall_answer_readiness"))
-    return dict(readiness) if readiness else {}
-
-
-def _surface_memory_direct_strategy(packet: Mapping[str, Any]) -> dict[str, Any]:
-    trace = _surface_memory_direct_trace(packet)
-    strategy = _coerce_trace_mapping(trace.get("recall_answer_strategy"))
-    if not strategy:
-        strategy = _coerce_trace_mapping(packet.get("recall_answer_strategy"))
-    return dict(strategy) if strategy else {}
-
-
-def _surface_memory_direct_items(packet: Mapping[str, Any]) -> list[dict[str, Any]]:
-    trace = _surface_memory_direct_trace(packet)
-    raw_items = list(trace.get("selected_collection_items") or [])
-    items: list[dict[str, Any]] = []
-    for raw in raw_items:
-        if not isinstance(raw, Mapping):
-            continue
-        raw_title = _surface_memory_direct_raw_title(raw.get("title") or raw.get("name") or raw.get("label"))
-        title = _surface_memory_direct_title(raw_title)
-        if not title:
-            continue
-        item = dict(raw)
-        item["raw_title"] = raw_title or title
-        item["title"] = title
-        if item not in items:
-            items.append(item)
-    facts = [str(item or "") for item in list(packet.get("facts") or [])]
-    for fact in facts:
-        if "可比较证据" not in fact and not re.search(r"\d+\.", fact):
-            continue
-        for part in re.split(r"[；;]\s*(?=\d+\.)", fact):
-            match = re.search(r"(?:^|[；;]\s*)\d+\.\s*([^｜\n；;]+)", part)
-            if not match:
-                continue
-            raw_title = _surface_memory_direct_raw_title(match.group(1))
-            title = _surface_memory_direct_title(raw_title)
-            if title:
-                reason_match = re.search(r"｜看点[:：]\s*([^｜；;]+)", part)
-                intro_match = re.search(r"｜简介[:：]\s*([^｜；;]+)", part)
-                parsed: dict[str, Any] = {"title": title, "raw_title": raw_title or title}
-                if reason_match:
-                    parsed["selection_reason"] = _clean_surface_memory_direct_text(reason_match.group(1), limit=120)
-                if intro_match:
-                    parsed["intro_snippet"] = _clean_surface_memory_direct_text(intro_match.group(1), limit=160)
-                existing = next((candidate for candidate in items if candidate.get("title") == title), None)
-                if existing is not None:
-                    for key in ("selection_reason", "intro_snippet"):
-                        if parsed.get(key) and not existing.get(key):
-                            existing[key] = parsed[key]
-                    continue
-                item = parsed
-                items.append(item)
-    return items
-
-
-def _surface_memory_direct_temporal_label(readiness: Mapping[str, Any], user_message: str) -> str:
-    scope = str(readiness.get("temporal_scope") or "").strip()
-    if scope == "recent_days" or any(token in user_message for token in ("这几天", "最近", "十几本")):
-        return "这几天"
-    if scope == "yesterday" or "昨天" in user_message:
-        return "昨天"
-    if scope == "day_before_yesterday" or "前天" in user_message:
-        return "前天"
-    if scope in {"today", "current"} or any(token in user_message for token in ("今天", "今日", "刚才", "这次")):
-        return "这次"
-    return "当时"
-
-
-def _surface_memory_direct_group_recent_items(items: Sequence[Mapping[str, Any]]) -> list[tuple[str, list[str]]]:
-    grouped: dict[str, list[str]] = {}
-    order: list[str] = []
-    for item in items:
-        raw_title = _clean_surface_memory_direct_text(item.get("raw_title") or item.get("title"), limit=160)
-        title = _clean_surface_memory_direct_text(item.get("canonical_title") or item.get("title"), limit=120)
-        if not title:
-            continue
-        label = ""
-        match = re.match(r"^(今天|今日|昨天|前天|三天前|四天前|五天前|本次|这次)\s*推荐", raw_title)
-        if match:
-            label = "今天" if match.group(1) in {"今天", "今日"} else match.group(1)
-        if not label:
-            label = _clean_surface_memory_direct_text(item.get("scope_label") or "", limit=24)
-        if not label:
-            label = _surface_memory_direct_source_day_label(item)
-        if not label:
-            label = "另外"
-        if label not in grouped:
-            grouped[label] = []
-            order.append(label)
-        if title not in grouped[label]:
-            grouped[label].append(title)
-    preferred = ["三天前", "前天", "昨天", "今天", "这次", "本次", "另外"]
-    sorted_labels = [label for label in preferred if label in grouped]
-    sorted_labels.extend(label for label in order if label not in sorted_labels)
-    return [(label, grouped[label]) for label in sorted_labels if grouped.get(label)]
-
-
-def _surface_memory_direct_group_parts(
-    grouped: Sequence[tuple[str, Sequence[str]]],
-    *,
-    per_day_limit: int = 3,
-    day_limit: int = 5,
-) -> list[str]:
-    parts: list[str] = []
-    day_cap = max(1, int(day_limit))
-    item_cap = max(1, int(per_day_limit))
-    for day, day_titles in list(grouped)[:day_cap]:
-        titles = [
-            _clean_surface_memory_direct_text(title, limit=38)
-            for title in list(day_titles or [])
-            if _clean_surface_memory_direct_text(title, limit=38)
-        ]
-        shown = titles[:item_cap]
-        if not shown:
-            continue
-        suffix = "" if len(titles) <= len(shown) else f"等 {len(titles)} 本"
-        parts.append(f"{day}：{'、'.join(shown)}{suffix}")
-    extra_days = max(0, len(list(grouped)) - day_cap)
-    if extra_days > 0:
-        parts.append(f"还有 {extra_days} 天")
-    return parts
-
-
-def _surface_memory_direct_query_title(user_message: str) -> str:
-    text = _clean_surface_memory_direct_text(user_message, limit=180)
-    if not text:
-        return ""
-    quoted = re.search(r"《([^》]{1,90})》", text)
-    if quoted:
-        return _surface_memory_direct_title(quoted.group(1))
-    patterns = (
-        r"推荐\s*[A-ZＡ-Ｚ一二三四五六七八九十0-9]*\s*[:：]\s*([^，,。！？!?；;\s]{2,80})\s*(?:这本|那本|好看|怎么样|如何|值得|吗)",
-        r"\b[A-ZＡ-Ｚ]\s*[:：]\s*([^，,。！？!?；;\s]{2,80})\s*(?:这本|那本|好看|怎么样|如何|值得|吗)",
-        r"([^，,。！？!?；;\s]{2,80})\s*(?:这本|那本)\s*(?:好看|怎么样|如何|值得|吗)",
-    )
-    for pattern in patterns:
-        match = re.search(pattern, text)
-        if not match:
-            continue
-        title = _surface_memory_direct_title(match.group(1))
-        if title:
-            return title
-    return ""
-
-
-def _surface_memory_direct_source_day_label(item: Mapping[str, Any]) -> str:
-    source_day = _clean_surface_memory_direct_text(item.get("source_day") or item.get("day_key"), limit=24)
-    if not source_day:
-        scope_key = _clean_surface_memory_direct_text(item.get("scope_key"), limit=48)
-        if scope_key.startswith("daily:"):
-            source_day = scope_key.split(":", 1)[1]
-    match = re.fullmatch(r"20\d{2}-(\d{1,2})-(\d{1,2})", source_day)
-    if match:
-        return f"{int(match.group(1))}月{int(match.group(2))}日"
-    return source_day
-
-
-def _surface_memory_direct_unique_titles(items_or_titles: Sequence[Any]) -> list[str]:
-    unique: list[str] = []
-    seen: set[str] = set()
-    for raw in items_or_titles:
-        if isinstance(raw, Mapping):
-            title = _clean_surface_memory_direct_text(
-                raw.get("canonical_title") or _surface_memory_direct_canonical_title(raw.get("title")),
-                limit=120,
-            )
-            key = _clean_surface_memory_direct_text(raw.get("canonical_key"), limit=180)
-        else:
-            title = _surface_memory_direct_canonical_title(raw)
-            key = ""
-        key = key or re.sub(r"\s+", "", title).lower()
-        if not title or key in seen:
-            continue
-        seen.add(key)
-        unique.append(title)
-    return unique
-
-
-def _surface_memory_direct_canonical_title(value: Any) -> str:
-    text = _clean_surface_memory_direct_text(value, limit=180)
-    if not text:
-        return ""
-    text = re.sub(r"^\d+[.)、]\s*", "", text)
-    text = re.sub(r"^\d{3,8}[.．]\s*", "", text)
-    text = re.sub(r"^(?:今天|今日|昨天|前天|三天前|四天前|五天前|本次|这次)\s*推荐\s*[A-ZＡ-Ｚ一二三四五六七八九十0-9]*\s*[:：]\s*", "", text)
-    text = re.sub(r"^推荐\s*[A-ZＡ-Ｚ一二三四五六七八九十0-9]*\s*[:：]\s*", "", text)
-    text = re.sub(r"\s+第\s*\d+\s*[话話章].*$", "", text)
-    text = re.sub(r"\s+第\s*[一二三四五六七八九十百千]+\s*[话話章].*$", "", text)
-    text = re.sub(r"\s*\(\s*\d{1,2}/\d{1,2}[^)]*\)\s*$", "", text)
-    text = re.sub(r"\s*（\s*\d{1,2}/\d{1,2}[^）]*）\s*$", "", text)
-    return _clean_surface_memory_direct_text(text, limit=120)
-
-
-def _render_surface_memory_collection_direct_answer(
-    *,
-    packet: Mapping[str, Any],
-    readiness: Mapping[str, Any],
-    user_message: str,
-) -> str | None:
-    items = _surface_memory_direct_items(packet)
-    selected_count = _safe_int(readiness.get("selected_item_count"), default=0)
-    if not items:
-        return None
-    label = _surface_memory_direct_temporal_label(readiness, user_message)
-    contract_id = str(readiness.get("recall_contract_id") or "").strip()
-    titles = [item["title"] for item in items if item.get("title")]
-    if contract_id == "collection_recent":
-        count = max(selected_count, len(titles))
-        unique_titles = _surface_memory_direct_unique_titles(items)
-        deduped = bool(unique_titles and len(unique_titles) < count)
-        grouped = _surface_memory_direct_group_recent_items(items)
-        if grouped:
-            parts = _surface_memory_direct_group_parts(grouped)
-            if deduped:
-                shown_unique = [_clean_surface_memory_direct_text(title, limit=42) for title in unique_titles[: min(len(unique_titles), 6)]]
-                unique_suffix = "" if len(unique_titles) <= len(shown_unique) else f"等 {len(unique_titles)} 本"
-                return f"{label}我翻到 {count} 条推荐记录，里面有重复；按标题捋一下，主要是 {len(unique_titles)} 本：{'、'.join(shown_unique)}{unique_suffix}。分天看：{'；'.join(parts)}。"
-            return f"{label}我翻到 {count} 本：{'；'.join(parts)}。"
-        shown = titles[: min(len(titles), 12)]
-        suffix = "" if len(titles) <= len(shown) else f"，后面还有 {len(titles) - len(shown)} 本可以继续列"
-        if deduped:
-            shown_unique = [_clean_surface_memory_direct_text(title, limit=42) for title in unique_titles[: min(len(unique_titles), 8)]]
-            unique_suffix = "" if len(unique_titles) <= len(shown_unique) else f"，后面还有 {len(unique_titles) - len(shown_unique)} 本可以继续列"
-            return f"{label}我翻到 {count} 条推荐记录，里面有重复；按标题捋一下，主要是 {len(unique_titles)} 本：{'、'.join(shown_unique)}{unique_suffix}。"
-        return f"{label}我翻到 {count} 本：{'、'.join(shown)}{suffix}。"
-    shown = titles[: max(3, min(len(titles), selected_count or len(titles)))]
-    if label == "昨天":
-        return f"昨天那批我翻到的是：{'、'.join(shown)}。"
-    if label == "前天":
-        return f"前天那批我翻到的是：{'、'.join(shown)}。"
-    if label == "这次":
-        return f"刚才那批是：{'、'.join(shown)}。"
-    return f"{label}那批我翻到的是：{'、'.join(shown)}。"
-
-
-def _extract_surface_memory_user_statement(facts: Sequence[Any]) -> str:
-    for fact in facts:
-        text = str(fact or "")
-        if "当前回合摘要" in text:
-            continue
-        semantic_statement = _extract_surface_memory_semantic_statement(text)
-        if semantic_statement:
-            return semantic_statement
-        match = re.search(r"用户提到[:：]\s*(.+?)(?:\s*回复[:：]|$)", text)
-        if match:
-            statement = _clean_surface_memory_direct_text(match.group(1), limit=180)
-            if statement and not any(token in statement for token in ("还记得", "记得我说", "是什么", "怎样吗", "？", "?")):
-                return statement
-    return ""
-
-
-def _extract_surface_memory_semantic_statement(text: str) -> str:
-    value = _strip_surface_memory_statement_prefixes(text)
-    if not value:
-        return ""
-    if any(token in value for token in ("还记得", "记得我说", "是什么", "怎样吗", "？", "?")):
-        return ""
-    if any(
-        token in value
-        for token in (
-            "以后",
-            "不要",
-            "别再",
-            "必须",
-            "优先",
-            "应该",
-            "格式",
-            "换行",
-            "模板腔",
-            "不像人话",
-            "正常聊天",
-            "台词腔",
-            "文本质量",
-            "很呆",
-            "胡说八道",
-            "承诺",
-            "待办",
-            "后续要",
-            "未完成",
-            "没完成",
-            "已完成",
-            "完成了",
-            "生命经历",
-            "经历锚点",
-            "主动记忆",
-            "可召回记忆",
-            "语义记忆",
-            "遗忘系统",
-            "睡眠回放",
-            "分段",
-            "卡片",
-            "简介后",
-            "纠正",
-            "记错",
-            "撤回",
-            "不在本机",
-            "edge",
-        )
-    ):
-        return _clean_surface_memory_direct_text(value, limit=180)
-    return ""
-
-
-def _surface_memory_sora_statement(value: str, *, limit: int = 180) -> str:
-    text = _clean_surface_memory_direct_text(value, limit=limit)
-    if not text:
-        return ""
-    text = text.replace("她做过的事", "我做过的事")
-    text = text.replace("她实际做过的动作", "我实际做过的动作")
-    text = re.sub(r"^她(?=做过|实际|主动|回复|发给|看见|听见|执行|失败|想说|会|应该)", "我", text)
-    return _clean_surface_memory_direct_text(text, limit=limit)
-
-
-def _render_surface_memory_preference_direct_answer(packet: Mapping[str, Any]) -> str | None:
-    statement = _extract_surface_memory_user_statement(list(packet.get("facts") or []))
-    if not statement:
-        return None
-    statement = _surface_memory_sora_statement(statement)
-    compact_statement = re.sub(r"\s+", "", statement)
-    if "回答要像正常聊天" in statement:
-        return "你当时嫌的是我说话太硬：要像正常聊天，别模板腔、台词腔，也别把证据条目塞成报告。"
-    if any(token in compact_statement for token in ("不像人话", "不像正常人", "文本质量", "台词腔", "很呆", "太呆")):
-        return "你当时戳的不是信息量，是我说得太像模板腔：要像正常聊天，别台词腔，也别把证据条目硬塞成报告。"
-    if statement.startswith(("以后", "之后", "后面", "下次", "不要", "别", "必须", "优先", "应该")):
-        return f"嗯，这条我记着：{statement}"
-    return f"嗯，这个我记着：{statement}"
-
-
-def _render_surface_memory_open_loop_direct_answer(packet: Mapping[str, Any], *, user_message: str) -> str | None:
-    statement = _extract_surface_memory_user_statement(list(packet.get("facts") or []))
-    if not statement:
-        return None
-    statement = _surface_memory_sora_statement(statement)
-    compact = re.sub(r"\s+", "", str(user_message or "")).lower()
-    wants_closed = bool(
-        any(token in compact for token in ("已完成", "完成了", "做完", "搞定", "关闭", "closed", "done", "resolved"))
-        and not any(token in compact for token in ("未完成", "没完成", "还没", "要继续", "继续做", "待做"))
-    )
-    if wants_closed:
-        return f"这块已经收掉了：{statement}"
-    return f"这块还欠着：{statement}"
-
-
-def _render_surface_memory_self_change_direct_answer(packet: Mapping[str, Any]) -> str | None:
-    statement = _extract_surface_memory_user_statement(list(packet.get("facts") or []))
-    if not statement:
-        return None
-    statement = _surface_memory_sora_statement(statement)
-    return f"改过。现在的底线是：{statement}"
-
-
-def _render_surface_memory_failure_direct_answer(packet: Mapping[str, Any]) -> str | None:
-    facts = [str(item or "") for item in list(packet.get("facts") or [])]
-    for fact in facts:
-        if "DeepSeek" not in fact and "失败原因" not in fact:
-            continue
-        match = re.search(r"DeepSeek\s*失败原因[:：]\s*([^。；;]+)", fact)
-        reason = _clean_surface_memory_direct_text(match.group(1), limit=120) if match else ""
-        reason = _clean_surface_memory_direct_text(re.split(r"[，,]\s*后续", reason, maxsplit=1)[0], limit=120)
-        if "供应商超时" in fact:
-            reason = reason or "供应商超时"
-        follow = ""
-        follow_match = re.search(r"后续(?:优先|先)?\s*([^。；;]+)", fact)
-        if follow_match:
-            follow = _clean_surface_memory_direct_text(follow_match.group(1), limit=100)
-            follow = re.sub(r"^(?:优先|先)\s*", "", follow).strip()
-        elif "网络" in fact or "provider" in fact:
-            follow = "看网络和 provider 健康状态"
-        if reason and follow:
-            return f"DeepSeek 那次不是理解错，卡点主要是{reason}。后面先{follow}。"
-        if reason:
-            return f"DeepSeek 那次不是理解错，卡点主要是{reason}。"
-    return None
-
-
-def _surface_memory_evidence_facts(packet: Mapping[str, Any]) -> list[str]:
-    facts = [str(item or "") for item in list(packet.get("facts") or []) if str(item or "").strip()]
-    rows = packet.get("rows")
-    if isinstance(rows, Sequence) and not isinstance(rows, (str, bytes, bytearray)):
-        for row in rows:
-            if not isinstance(row, Mapping):
-                continue
-            fact = str(row.get("fact") or row.get("text") or row.get("content") or "").strip()
-            if fact:
-                facts.append(fact)
-    web_markers = ("证据补读结果", "网页深读结果", "网页", "报告", "正文", "来源", "http://", "https://", "OneBot", "edge-lan")
-    noisy_markers = ("lightnovel.fun", "轻小说", "恋爱日常", "与神在河岸", "培养失败", "美少女童星")
-    selected = [
-        fact
-        for fact in facts
-        if any(marker in fact for marker in web_markers)
-        and not any(marker in fact for marker in noisy_markers)
-    ]
-    if not selected:
-        selected = [fact for fact in facts if any(marker in fact for marker in web_markers)]
-    return list(dict.fromkeys(selected))
-
-
-def _extract_surface_memory_evidence_basis(facts: Sequence[str]) -> list[str]:
-    bases: list[str] = []
-    for fact in facts:
-        for pattern in (
-            r"可用依据[:：]\s*([^。；;]+)",
-            r"依据[:：]\s*([^。；;]+)",
-            r"正文内容[:：]\s*([^。；;]+)",
-            r"简介[:：]\s*([^｜；;]+)",
-        ):
-            for match in re.finditer(pattern, fact):
-                basis = _clean_surface_memory_direct_text(match.group(1), limit=180)
-                if basis and basis not in bases:
-                    bases.append(basis)
-        if "OneBot 在 edge-lan 上运行" in fact:
-            basis = "报告里写的是 OneBot 在 edge-lan 上运行，本机只负责 host"
-            if basis not in bases and not any("OneBot 在 edge-lan 上运行" in existing for existing in bases):
-                bases.append(basis)
-        if "edge-lan ssh" in fact and "网关地址" in fact and "运行位置" in fact:
-            basis = "报告正文里的 edge-lan ssh、网关地址和运行位置三项互相一致"
-            if basis not in bases:
-                bases.append(basis)
-    return bases[:3]
-
-
-def _extract_surface_memory_evidence_title(facts: Sequence[str]) -> str:
-    for fact in facts:
-        match = re.search(r"\d+\.\s*([^｜；;\n]+)", fact)
-        if match:
-            title = _clean_surface_memory_direct_text(match.group(1), limit=80)
-            if title:
-                return title
-        match = re.search(r"（([^）]{2,80})）", fact)
-        if match:
-            title = _clean_surface_memory_direct_text(match.group(1), limit=80)
-            if title:
-                return title
-    return "那个网页"
-
-
-def _render_surface_memory_evidence_review_direct_answer(packet: Mapping[str, Any], *, user_message: str) -> str | None:
-    facts = _surface_memory_evidence_facts(packet)
-    if not facts:
-        return None
-    bases = _extract_surface_memory_evidence_basis(facts)
-    if not bases:
-        return None
-    title = _extract_surface_memory_evidence_title(facts)
-    asks_reliability = any(token in user_message for token in ("靠谱", "可信", "可靠", "靠谱吗", "可信吗"))
-    if asks_reliability:
-        conclusion = f"{title}，这份记录本身有依据，不过我只能确认记录内部说得通，还没做多源外部核验。"
-    else:
-        conclusion = f"我看到的依据主要来自{title}。"
-    if len(bases) == 1:
-        return f"{conclusion}依据是：{bases[0]}。"
-    return f"{conclusion}依据有两点：{bases[0]}；{bases[1]}。"
-
-
-def _surface_memory_selection_deep_review_ready(
-    *,
-    contract_id: str,
-    query_kind: str,
-    response_mode: str,
-    evidence_depth: str,
-    detail: Mapping[str, Any],
-    packet: Mapping[str, Any],
-) -> bool:
-    if contract_id != "anaphoric_selection" and query_kind != "anaphoric_selection":
-        return False
-    trace = _surface_memory_direct_trace(packet)
-    strategy = _coerce_trace_mapping(trace.get("recall_answer_strategy"))
-    strategy_evidence = str(strategy.get("evidence_level") or "").strip()
-    depth_ready = evidence_depth == "detail_or_body_evidence" or strategy_evidence in {"detail_or_body", "partial_detail_or_body"}
-    if response_mode != "answer_from_evidence" or not depth_ready:
-        return False
-    if str(detail.get("basis") or "").strip() != "lightnovel_deep_review":
-        return False
-    deep = _coerce_trace_mapping(trace.get("lightnovel_deep_review"))
-    return str(deep.get("status") or "").strip().upper() == "OK"
-
-
-def _extract_surface_memory_lightnovel_review_reason(facts: Sequence[Any]) -> list[str]:
-    reasons: list[str] = []
-    for fact in facts:
-        text = str(fact or "")
-        if "网页深读结果" not in text and "当时更偏向第" not in text and "当前更推荐第" not in text:
-            continue
-        for pattern in (
-            r"原因[:：]\s*([^。]+)",
-            r"因为([^。]+)",
-        ):
-            match = re.search(pattern, text)
-            if not match:
-                continue
-            raw = _clean_surface_memory_direct_text(match.group(1), limit=260)
-            for part in re.split(r"[；;，,]\s*", raw):
-                reason = _clean_surface_memory_direct_text(part, limit=70)
-                if not reason:
-                    continue
-                if any(noisy in reason for noisy in ("网页深读", "证据", "正文有", "正文体量", "字左右", "score", "热度")):
-                    continue
-                if reason not in reasons:
-                    reasons.append(reason)
-            if reasons:
-                return reasons[:3]
-    return reasons[:3]
-
-
-def _extract_surface_memory_lightnovel_review_title(packet: Mapping[str, Any]) -> str:
-    trace = _surface_memory_direct_trace(packet)
-    deep = _coerce_trace_mapping(trace.get("lightnovel_deep_review"))
-    selected = _coerce_trace_mapping(deep.get("selected"))
-    title = _surface_memory_direct_title(selected.get("title"))
-    if title:
-        return title
-    for fact in list(packet.get("facts") or []):
-        match = re.search(r"《([^》]{1,90})》", str(fact or ""))
-        if match:
-            title = _surface_memory_direct_title(match.group(1))
-            if title:
-                return title
-    return ""
-
-
-def _surface_memory_lightnovel_partial_review_scope(packet: Mapping[str, Any]) -> tuple[bool, int, int]:
-    trace = _surface_memory_direct_trace(packet)
-    deep = _coerce_trace_mapping(trace.get("lightnovel_deep_review"))
-    source_count = _safe_int(deep.get("source_card_count"), default=0)
-    reviewed_count = _safe_int(deep.get("reviewed_item_count") or deep.get("item_count"), default=0)
-    partial = bool(deep.get("partial_review")) or bool(source_count > reviewed_count > 0)
-    return partial, source_count, reviewed_count
-
-
-def _surface_memory_lightnovel_partial_scope_prefix(packet: Mapping[str, Any]) -> str:
-    partial, source_count, reviewed_count = _surface_memory_lightnovel_partial_review_scope(packet)
-    if not partial:
-        return ""
-    if source_count > 0 and reviewed_count > 0:
-        return f"我还不能说全 {source_count} 本里绝对最好；先补读了其中 {reviewed_count} 本，"
-    return "我还不能说全量里绝对最好；先按已经补读到的几本看，"
-
-
-def _render_surface_memory_lightnovel_selection_direct_answer(packet: Mapping[str, Any]) -> str | None:
-    title = _extract_surface_memory_lightnovel_review_title(packet)
-    if not title:
-        return None
-    reasons = _extract_surface_memory_lightnovel_review_reason(list(packet.get("facts") or []))
-    scope_prefix = _surface_memory_lightnovel_partial_scope_prefix(packet)
-    comparison_target = "我补读过的另外几本" if scope_prefix else "另外几本"
-    if not reasons:
-        return f"{scope_prefix}我会先看《{title}》。翻完详情后，它是这批里最让我想继续读的。"
-    if len(reasons) == 1:
-        return f"{scope_prefix}我会先看《{title}》。主要是{reasons[0]}，读起来比{comparison_target}更有继续翻的劲。"
-    return f"{scope_prefix}我会先看《{title}》。{reasons[0]}，{reasons[1]}，读起来比{comparison_target}更有继续翻的劲。"
-
-
-def _render_surface_memory_correction_direct_answer(packet: Mapping[str, Any]) -> str | None:
-    facts = [str(item or "") for item in list(packet.get("facts") or [])]
-    joined = "\n".join(facts)
-    if "封面有猫" in joined:
-        return "对，那次是我记混了。你纠正的是没有“封面有猫”这本，我这边按撤回后的版本来。"
-    statement = _extract_surface_memory_user_statement(facts)
-    if statement:
-        return f"对，这条按你纠正后的来：{_surface_memory_sora_statement(statement)}"
-    return None
-
-
-def _surface_memory_should_delegate_missing_detail_selection(
-    *,
-    contract_id: str,
-    query_kind: str,
-    response_mode: str,
-    reasons: set[str],
-) -> bool:
-    is_selection = contract_id == "anaphoric_selection" or query_kind == "anaphoric_selection"
-    missing_detail = response_mode == "fetch_or_request_detail_evidence" or "missing_detail_evidence" in reasons
-    return bool(is_selection and missing_detail)
-
-
-def _render_surface_memory_not_ready_direct_answer(
-    *,
-    packet: Mapping[str, Any] | None = None,
-    readiness: Mapping[str, Any],
-    user_message: str,
-) -> str | None:
-    contract_id = str(readiness.get("recall_contract_id") or "").strip()
-    need_type = str(readiness.get("need_type") or "").strip()
-    response_mode = str(readiness.get("response_mode") or "").strip()
-    reasons = {str(item or "").strip() for item in list(readiness.get("reasons") or [])}
-    if contract_id not in _SURFACE_MEMORY_DIRECT_CONTRACTS:
-        return None
-    if _surface_memory_should_delegate_missing_detail_selection(
-        contract_id=contract_id,
-        query_kind=str(readiness.get("query_kind") or "").strip(),
-        response_mode=response_mode,
-        reasons=reasons,
-    ):
-        return None
-    if response_mode == "fetch_or_request_detail_evidence" or "missing_detail_evidence" in reasons:
-        if contract_id == "evidence_review":
-            return "我能找到那条记录，但还没看到足够正文或详情，所以不能直接替它背书。"
-        return None
-    if contract_id == "failure_debug":
-        return "我没找到足够贴合这次问题的失败记录，不能硬编原因。"
-    if contract_id == "correction":
-        return "我没找到足够贴合这次问题的纠错记录，不能硬说自己记得。"
-    if contract_id == "open_loop":
-        return "我没找到足够贴合这句的待办记忆，不能把当前运行状态当成你的长期待办。"
-    if contract_id == "self_change":
-        return "我没找到足够贴合这句的自我改变记录，不能硬说改过什么。"
-    if contract_id == "preference":
-        return "我没找到足够贴合这句的偏好记忆，不能硬说记得。"
-    if need_type in {"collection", "collection_selection", "entity_or_collection_selection"}:
-        if "昨天" in user_message:
-            return "我没找到能确认是昨天那批推荐的记录，不能假装记得。"
-        if "前天" in user_message:
-            return "我没找到能确认是前天那批推荐的记录，不能假装记得。"
-        return "我没找到能确认是那批推荐的记录，不能假装记得。"
-    return None
-
-
-def _is_surface_memory_lightnovel_quality_followup(
-    *,
-    contract_id: str,
-    query_kind: str,
-    readiness: Mapping[str, Any],
-    user_message: str,
-) -> bool:
-    need_type = str(readiness.get("need_type") or "").strip()
-    if contract_id != "anaphoric_selection" and query_kind != "anaphoric_selection":
-        return False
-    if need_type not in {"collection_selection", "entity_or_collection_selection", "collection"}:
-        return False
-    text = str(user_message or "")
-    return bool(re.search(r"(哪本|哪部|哪个|喜欢哪|喜歡哪|好看|更好|最好|先看|选哪|選哪|挑哪|推荐哪|推薦哪)", text))
-
-
-def _maybe_build_surface_memory_direct_answer(
-    *,
-    retrieval_summary: Mapping[str, Any] | None,
-    user_message: str,
-    render_target_lang: str = "zh",
-) -> dict[str, Any] | None:
-    """Render safe memory answers after recall, before paying the main-chain LLM cost."""
-
-    if not _parse_bool_env("HOST_SURFACE_MEMORY_DIRECT_ANSWER_ENABLED", default=True):
-        return None
-    if str(render_target_lang or "zh").strip().lower() not in {"", "zh", "cn"}:
-        return None
-    packet = _surface_memory_direct_packet(retrieval_summary)
-    if not packet:
-        return None
-    readiness = _surface_memory_direct_readiness(packet)
-    strategy = _surface_memory_direct_strategy(packet)
-    readiness_ready = str(readiness.get("status") or "").strip().upper() == "READY" and bool(readiness.get("ready_to_answer"))
-    if not readiness_ready:
-        not_ready_answer = _render_surface_memory_not_ready_direct_answer(
-            packet=packet,
-            readiness=readiness,
-            user_message=user_message,
-        )
-        if not_ready_answer:
-            return {
-                "answer": not_ready_answer,
-                "reason_code": "SURFACE_MEMORY_DIRECT_NOT_READY",
-                "recall_contract_id": str(readiness.get("recall_contract_id") or "").strip(),
-                "query_kind": str(readiness.get("query_kind") or "").strip(),
-                "response_mode": str(readiness.get("response_mode") or "").strip(),
-                "selected_item_count": _safe_int(readiness.get("selected_item_count"), default=0),
-            }
-        return None
-    contract_id = str(readiness.get("recall_contract_id") or "").strip()
-    query_kind = str(readiness.get("query_kind") or "").strip()
-    response_mode = str(readiness.get("response_mode") or "").strip()
-    evidence_depth = str(readiness.get("evidence_depth") or "").strip()
-    detail = _coerce_trace_mapping(readiness.get("detail_evidence"))
-    selection_deep_ready = _surface_memory_selection_deep_review_ready(
-        contract_id=contract_id,
-        query_kind=query_kind,
-        response_mode=response_mode,
-        evidence_depth=evidence_depth,
-        detail=detail,
-        packet=packet,
-    )
-    strategy_action = str(strategy.get("action") or "").strip()
-    if strategy_action in {"fetch_more_evidence", "say_missing_memory", "answer_cautiously"} and not selection_deep_ready:
-        return None
-    if bool(detail.get("required")) and not (
-        contract_id == "evidence_review"
-        and response_mode == "answer_from_evidence"
-        and bool(detail.get("ready_for_deep_review"))
-    ) and not selection_deep_ready:
-        return None
-    if contract_id not in _SURFACE_MEMORY_DIRECT_CONTRACTS:
-        return None
-    if query_kind in _SURFACE_MEMORY_DIRECT_BLOCKED_QUERY_KINDS and not selection_deep_ready:
-        return None
-    if response_mode not in _SURFACE_MEMORY_DIRECT_RESPONSE_MODES:
-        return None
-    if evidence_depth not in {"memory_hit", "evidence_anchor", ""} and not (
-        contract_id == "evidence_review" and evidence_depth == "detail_or_body_evidence"
-    ) and not selection_deep_ready:
-        return None
-
-    answer: str | None = None
-    if selection_deep_ready:
-        answer = _render_surface_memory_lightnovel_selection_direct_answer(packet)
-        if not answer and _is_surface_memory_lightnovel_quality_followup(
-            contract_id=contract_id,
-            query_kind=query_kind,
-            readiness=readiness,
-            user_message=user_message,
-        ):
-            return None
-    elif contract_id in {"collection_date", "collection_recent"}:
-        answer = _render_surface_memory_collection_direct_answer(
-            packet=packet,
-            readiness=readiness,
-            user_message=user_message,
-        )
-    elif contract_id == "evidence_review":
-        answer = _render_surface_memory_evidence_review_direct_answer(packet, user_message=user_message)
-    elif contract_id == "preference":
-        answer = _render_surface_memory_preference_direct_answer(packet)
-    elif contract_id == "open_loop":
-        answer = _render_surface_memory_open_loop_direct_answer(packet, user_message=user_message)
-    elif contract_id == "self_change":
-        answer = _render_surface_memory_self_change_direct_answer(packet)
-    elif contract_id == "failure_debug":
-        answer = _render_surface_memory_failure_direct_answer(packet)
-    elif contract_id == "correction":
-        answer = _render_surface_memory_correction_direct_answer(packet)
-    answer = re.sub(r"\s+", " ", str(answer or "")).strip()
-    if len(answer) > 420:
-        answer = answer[:419].rstrip() + "…"
-    if answer and answer[-1] not in "。！？!?":
-        answer += "。"
-    if any(phrase in answer for phrase in _SURFACE_MEMORY_DIRECT_FORBIDDEN_STYLE_PHRASES):
-        return None
-    if not answer:
-        return None
-    return {
-        "answer": answer,
-        "reason_code": "SURFACE_MEMORY_DIRECT_READY",
-        "recall_contract_id": contract_id,
-        "query_kind": query_kind,
-        "response_mode": response_mode,
-        "selected_item_count": _safe_int(readiness.get("selected_item_count"), default=0),
-    }
-
-
 # _coerce_trace_mapping / _coerce_trace_score / _coerce_trace_bool /
 # _summarize_motive_state_for_trace / _summarize_reply_plan_for_trace /
 # _summarize_emotion_context_for_trace / _summarize_persona_resident_memory_for_trace /
@@ -1768,12 +887,11 @@ def _trace_node_sort_key(node: Mapping[str, Any]) -> tuple[int, int, str]:
         "agentic_rag": 31,
         "recall_fusion": 32,
         "executive_router": 40,
-        "chat_agent": 50,
+        "surface_reply": 50,
         "assistant_followup_surface_render": 51,
         "image_social_surface_render": 51,
         "image_social_surface_repair_render": 51,
         "identity_surface_render": 51,
-        "phatic_surface_render": 51,
         "surface_render": 51,
         "surface_renderer": 51,
         "prompt_builder": 60,
@@ -2012,7 +1130,7 @@ async def _persist_post_process_audit(
     )
 
     _dispatch_used = bool(_trace_stage_meta.get("executive_router_used"))
-    _chat_used = bool(_trace_stage_meta.get("chat_agent_used"))
+    _chat_used = bool(_trace_stage_meta.get("surface_reply_used"))
     _orchestrator_used = bool(_trace_stage_meta.get("cortex_orchestrator_used"))
     _path = str(
         _trace_stage_meta.get("dispatch_route")
@@ -2221,9 +1339,9 @@ async def _persist_post_process_audit(
     if _chat_used:
         _trace_nodes_v2.append(
             _build_trace_stage_node(
-                node_id="chat_agent",
+                node_id="surface_reply",
                 node_type="agent",
-                display_name="Chat Agent",
+                display_name="Surface Reply",
                 ts_ms=ts_ms,
                 status="OK" if narrative.strip() else "DEGRADED",
                 output_data=_chat_output,
@@ -2234,7 +1352,6 @@ async def _persist_post_process_audit(
         ("image_social_surface_render", "Image Social Surface"),
         ("image_social_surface_repair_render", "Image Social Surface Repair"),
         ("identity_surface_render", "Identity Surface"),
-        ("phatic_surface_render", "Phatic Surface"),
         ("surface_render", "Surface Renderer"),
         ("surface_renderer", "Surface Renderer"),
     ):
@@ -3290,11 +2407,9 @@ def _is_low_risk_short_chat_route_reason(route_reason: str) -> bool:
         return False
     return bool(
         reason.startswith("RELATIONAL_CHAT:")
-        or reason.startswith("THALAMUS_RULE_PHATIC")
         or reason
         in {
             "THALAMUS_RULE_ASSISTANT_REPLY_FOLLOWUP",
-            "THALAMUS_RULE_CONNECTIVITY_CHECK",
         }
     )
 
@@ -3891,7 +3006,7 @@ async def _cortex_orchestrator_sse_generator_impl(
                 trace_stage_meta={
                     "cortex_orchestrator_used": True,
                     "executive_router_used": False,
-                    "chat_agent_used": False,
+                    "surface_reply_used": False,
                     "cortex_orchestrator_mode": "task_progress_direct",
                 },
             )
@@ -3952,7 +3067,7 @@ async def _cortex_orchestrator_sse_generator_impl(
                 trace_stage_meta={
                     "cortex_orchestrator_used": True,
                     "executive_router_used": False,
-                    "chat_agent_used": False,
+                    "surface_reply_used": False,
                     "cortex_orchestrator_mode": "recent_turn_direct",
                 },
             )
@@ -4009,7 +3124,7 @@ async def _cortex_orchestrator_sse_generator_impl(
                 trace_stage_meta={
                     "cortex_orchestrator_used": True,
                     "executive_router_used": False,
-                    "chat_agent_used": False,
+                    "surface_reply_used": False,
                     "cortex_orchestrator_mode": "contextual_session_direct",
                     "reply_source": "contextual_session_direct",
                 },
@@ -4067,67 +3182,9 @@ async def _cortex_orchestrator_sse_generator_impl(
                 trace_stage_meta={
                     "cortex_orchestrator_used": True,
                     "executive_router_used": False,
-                    "chat_agent_used": False,
+                    "surface_reply_used": False,
                     "cortex_orchestrator_mode": "contextual_style_direct",
                     "reply_source": "contextual_style_direct",
-                },
-            )
-        )
-        return
-
-    contextual_memory_answer = _contextual_memory_answer(
-        request_id=request_id,
-        session_id=session_id,
-        person_id=person_id,
-        user_message=sanitized_message,
-        render_target_lang=render_target_lang,
-    )
-    if contextual_memory_answer:
-        narrative = _sanitize_output(str(contextual_memory_answer).strip())
-        total_latency_ms = int(time.time() * 1000) - ts_ms
-        yield _emit_sse(
-            {
-                "phase": "COMMIT",
-                "done": True,
-                "decision": "APPROVE",
-                "narrative": narrative,
-                "request_id": request_id,
-                "audit_refs": {
-                    "request_id": request_id,
-                    "path": "cortex_orchestrator:contextual_memory_direct",
-                    "latency_ms": total_latency_ms,
-                    "emotion_tag": str(emotion_context.get("emotion_tag") or "NEUTRAL"),
-                },
-            }
-        )
-        asyncio.create_task(
-            _post_process(
-                request_id=request_id,
-                person_id=person_id,
-                session_id=session_id,
-                user_message=sanitized_message,
-                narrative=narrative,
-                emotion_context=emotion_context,
-                bond_summary={},
-                ts_ms=ts_ms,
-                render_target_lang=render_target_lang,
-                total_latency_ms=total_latency_ms,
-                llm_latency_ms=0,
-                first_token_ms=None,
-                provider_name="",
-                model_id="",
-                buffer_stream=False,
-                delegated_agents=[],
-                retrieval_summary={"status": "SKIPPED", "reason_code": "CONTEXTUAL_MEMORY_DIRECT"},
-                gov_decision=governor_result,
-                pii_ingress_stats=_pii_ingress_stats,
-                pii_egress_stats={},
-                trace_stage_meta={
-                    "cortex_orchestrator_used": True,
-                    "executive_router_used": False,
-                    "chat_agent_used": False,
-                    "cortex_orchestrator_mode": "contextual_memory_direct",
-                    "reply_source": "contextual_memory_direct",
                 },
             )
         )
@@ -4187,7 +3244,7 @@ async def _cortex_orchestrator_sse_generator_impl(
                 trace_stage_meta={
                     "cortex_orchestrator_used": True,
                     "executive_router_used": False,
-                    "chat_agent_used": False,
+                    "surface_reply_used": False,
                     "cortex_orchestrator_mode": "clarification_direct",
                 },
             )
@@ -4206,7 +3263,6 @@ async def _cortex_orchestrator_sse_generator_impl(
     route_hint = str((intent_draft or {}).get("route") or "").strip().lower()
     relational_fastlane = False
     relational_topic = ""
-    phatic_fastlane = False
     direct_status_fastlane = route_hint in {"task_progress", "recent_turn"}
     if direct_status_fastlane and _memory_recall_plan_should_bypass_direct_status_fastlane(
         sanitized_message,
@@ -4233,10 +3289,6 @@ async def _cortex_orchestrator_sse_generator_impl(
             _is_low_risk_short_chat_route_reason(route_reason)
             or relational_topic
             or assistant_followup_fastlane
-        )
-        phatic_fastlane = bool(
-            route_reason.startswith("THALAMUS_RULE_PHATIC")
-            or route_reason == "THALAMUS_RULE_CONNECTIVITY_CHECK"
         )
 
     try:
@@ -4333,11 +3385,6 @@ async def _cortex_orchestrator_sse_generator_impl(
                 "status": "SKIPPED",
                 "reason_code": "ASSISTANT_REPLY_FOLLOWUP_RETRIEVAL_SKIPPED",
             }
-        elif phatic_fastlane:
-            retrieval_summary = {
-                "status": "SKIPPED",
-                "reason_code": "PHATIC_RETRIEVAL_SKIPPED",
-            }
         elif multimodal_fastlane:
             retrieval_summary = {
                 "status": "SKIPPED",
@@ -4419,78 +3466,21 @@ async def _cortex_orchestrator_sse_generator_impl(
     except Exception as prompt_filter_exc:
         _logger.debug("[%s] cortex_orchestrator prompt retrieval filter failed: %s", request_id, prompt_filter_exc)
 
-    surface_memory_direct = _maybe_build_surface_memory_direct_answer(
-        retrieval_summary=retrieval_summary,
-        user_message=sanitized_message,
-        render_target_lang=render_target_lang,
-    )
-    if surface_memory_direct:
-        narrative = _sanitize_output(str(surface_memory_direct.get("answer") or "").strip())
-        total_latency_ms = int(time.time() * 1000) - ts_ms
-        direct_retrieval_summary = dict(retrieval_summary or {})
-        direct_retrieval_summary["surface_memory_direct_answer"] = {
-            key: value
-            for key, value in dict(surface_memory_direct).items()
-            if key != "answer"
-        }
-        yield _emit_sse(
-            {
-                "phase": "COMMIT",
-                "done": True,
-                "decision": "APPROVE",
-                "narrative": narrative,
-                "request_id": request_id,
-                "audit_refs": {
-                    "request_id": request_id,
-                    "path": "cortex_orchestrator:surface_memory_direct",
-                    "latency_ms": total_latency_ms,
-                    "emotion_tag": str(emotion_context.get("emotion_tag") or "NEUTRAL"),
-                    "recall_contract_id": str(surface_memory_direct.get("recall_contract_id") or ""),
-                },
-            }
+    try:
+        from host_brain.app.user_preference_store import build_user_preference_pack  # noqa: PLC0415
+
+        user_preference_pack = build_user_preference_pack(
+            person_id=person_id,
+            query_text=sanitized_message,
+            session_id=session_id,
+            conversation_id=session_id,
+            ledger=_get_ledger_safe(),
         )
-        asyncio.create_task(
-            _post_process(
-                request_id=request_id,
-                person_id=person_id,
-                session_id=session_id,
-                user_message=sanitized_message,
-                narrative=narrative,
-                emotion_context=emotion_context,
-                bond_summary=bond_summary,
-                ts_ms=ts_ms,
-                render_target_lang=render_target_lang,
-                total_latency_ms=total_latency_ms,
-                llm_latency_ms=0,
-                first_token_ms=None,
-                provider_name="surface_memory_direct",
-                model_id="surface-memory-direct-renderer",
-                buffer_stream=False,
-                delegated_agents=[],
-                retrieval_summary=direct_retrieval_summary,
-                gov_decision=governor_result,
-                pii_ingress_stats=_pii_ingress_stats,
-                pii_egress_stats={},
-                retrieval_evidence_items=list(retrieval_evidence_items or []),
-                motive_state=retrieval_motive_state,
-                trace_stage_meta={
-                    "cortex_orchestrator_used": True,
-                    "executive_router_used": False,
-                    "chat_agent_used": False,
-                    "cortex_orchestrator_mode": "surface_memory_direct",
-                    "reply_source": "surface_memory_direct_answer",
-                    "surface_memory_recall_packet": dict(
-                        direct_retrieval_summary.get("surface_memory_recall_packet") or {}
-                    ),
-                },
-                attachments=list(getattr(request_body, "attachments", None) or []),
-                multimodal_observations=dict(getattr(request_body, "multimodal_observations", None) or {}),
-                attachment_summary=str(getattr(request_body, "attachment_summary", None) or ""),
-                reply_channel=getattr(request_body, "reply_channel", None),
-                reply_target=getattr(request_body, "reply_target", None),
-            )
-        )
-        return
+        if user_preference_pack:
+            retrieval_summary = dict(retrieval_summary or {})
+            retrieval_summary["user_preference_pack"] = dict(user_preference_pack)
+    except Exception as preference_pack_exc:
+        _logger.debug("[%s] user preference pack build skipped: %s", request_id, preference_pack_exc)
 
     # 人格聊天链不再使用 slot 投影。
     # 运行时只保留五路召回原始结果，由 prompt 直接消费检索证据；
@@ -4538,7 +3528,7 @@ async def _cortex_orchestrator_sse_generator_impl(
                     trace_stage_meta={
                         "cortex_orchestrator_used": True,
                         "executive_router_used": False,
-                        "chat_agent_used": False,
+                        "surface_reply_used": False,
                         "cortex_orchestrator_mode": "llm_unavailable",
                     },
                 )
@@ -4734,6 +3724,20 @@ async def _async_post_process(
                     "reply_envelope": dict(normalized_trace_stage_meta.get("reply_envelope") or {}),
                 },
             )
+            try:
+                from host_brain.app.context.conversation_experience_store import (  # noqa: PLC0415
+                    get_conversation_experience_store,
+                )
+
+                get_conversation_experience_store().update_assistant_reply(
+                    request_id=request_id,
+                    session_id=session_id,
+                    person_id=person_id,
+                    assistant_reply=narrative,
+                    outcome_signal="replied",
+                )
+            except Exception as exp_exc:
+                _logger.debug("[%s] cortex_orchestrator conversation experience reply update failed: %s", request_id, exp_exc)
     except Exception as exc:
         _logger.debug("[%s] cortex_orchestrator post_process conversation_turn failed: %s", request_id, exc)
 
@@ -5071,7 +4075,6 @@ __all__ = [
     "_maybe_build_contextual_memory_answer",
     "_maybe_build_contextual_session_answer",
     "_maybe_build_contextual_style_answer",
-    "_maybe_build_surface_memory_direct_answer",
     "_maybe_build_recent_turn_answer",
     "_maybe_build_previous_meaning_answer",
     "_should_buffer_stream_output",

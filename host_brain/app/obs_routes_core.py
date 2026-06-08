@@ -328,7 +328,7 @@ def _infer_trace_group_id(
     if normalized_id in _CORTEX_ORCHESTRATOR_NODE_IDS or normalized_id == "render_policy":
         return "orchestration"
 
-    if normalized_id in _EXECUTIVE_ROUTER_NODE_IDS or normalized_id in {"chat_agent"} or normalized_id.startswith("sub_agent"):
+    if normalized_id in _EXECUTIVE_ROUTER_NODE_IDS or normalized_id in {"surface_reply"} or normalized_id.startswith("sub_agent"):
         return "agent"
 
     if normalized_id in {"prompt_builder", "llm_stream", "llm_gateway", "cortex_orchestrator_llm_stream"} or normalized_type == "llm" or normalized_id.startswith("llm_"):
@@ -1445,13 +1445,13 @@ def _build_orchestration_trace_nodes(
     if summary.get("output_text") or failure_event:
         nodes.append(
             TraceNode(
-                node_id="chat_agent",
+                node_id="surface_reply",
                 node_type="agent",
-                display_name="Chat Agent",
+                display_name="Surface Reply",
                 side="host",
                 status="FAIL" if failure_event else "OK",
                 reason_code=failure_event,
-                latency_ms=node_timings_ms.get("chat_agent"),
+                latency_ms=node_timings_ms.get("surface_reply"),
                 output_data={
                     "final_response": summary.get("output_text"),
                     "final_response_chars": summary.get("final_response_chars"),
@@ -1704,7 +1704,7 @@ def _trace_node_order_rank(node: TraceNode) -> int:
         return 39
     if node_id == "executive_router":
         return 41
-    if node_id == "chat_agent":
+    if node_id == "surface_reply":
         return 43
     # Prompt + LLM
     if node_id == "prompt_builder":

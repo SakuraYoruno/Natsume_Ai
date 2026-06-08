@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any, Mapping
@@ -363,7 +363,7 @@ def build_relationship_summary(*, relationship: RelationshipStateBlock, render_t
     if substage in {"confessed_lovers", "stable_lovers"}:
         return "关系进入亲密恋人阶段：可以更贴近，但不要写成廉价甜话。"
     if substage == "soulbound":
-        return "关系接近灵魂伴侣：可以更坦率柔软，但仍保留新海天的轻快和分寸。"
+        return "关系接近灵魂伴侣：可以更坦率柔软，但仍保留当前人格的轻快和分寸。"
     return "义兄妹关系稳定，保持分寸，顺着对方自然回应。"
 
 

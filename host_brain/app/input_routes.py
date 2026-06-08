@@ -91,6 +91,15 @@ _GATEWAY_DEDUPE_CACHE: dict[str, float] = {}
 _GATEWAY_DEDUPE_LOCK = threading.Lock()
 _GATEWAY_RECENT_MULTIMODAL_CACHE: dict[str, dict[str, Any]] = {}
 _GATEWAY_RECENT_MULTIMODAL_LOCK = threading.Lock()
+_GATEWAY_SOURCE_PLATFORM_ALIASES: dict[str, str] = {
+    "QQ": "qq",
+    "WECHAT": "wechat",
+    "WX": "wechat",
+    "FEISHU": "feishu",
+    "WECOM": "wecom",
+    "TELEGRAM": "telegram",
+    "TG": "telegram",
+}
 _GATEWAY_MULTIMODAL_FOLLOWUP_RE = re.compile(
     r"(这(张)?图|图片|这不是|表情包|贴图|梗图|截图|那个图|刚才那张|什么意思|啥意思|看得到|看得见|看懂|能看到|能看见|画的什么|内容)",
     re.IGNORECASE,
@@ -174,6 +183,14 @@ def _parse_int_env(name: str, *, default: int) -> int:
         return int(default)
 
 
+def _normalize_input_source(raw_source: str) -> tuple[str, str | None]:
+    source = str(raw_source or "").upper().strip()
+    alias_platform = _GATEWAY_SOURCE_PLATFORM_ALIASES.get(source)
+    if alias_platform:
+        return "GATEWAY", alias_platform
+    return source, None
+
+
 def _resolve_input_dispatch_thread_workers() -> int:
     return max(1, min(8, _parse_int_env("HOST_INPUT_DISPATCH_THREAD_WORKERS", default=4)))
 
@@ -201,6 +218,7 @@ def _run_dispatch_worker_in_thread(
     dispatch_mode: str,
     run_in_thread: bool,
 ) -> None:
+    worker_ledger = _get_ledger_safe()
     asyncio.run(
         _dispatch_to_graph_worker(
             request_id=request_id,
@@ -209,7 +227,7 @@ def _run_dispatch_worker_in_thread(
             text=text,
             payload=payload,
             ts_ms=ts_ms,
-            ledger=ledger,
+            ledger=worker_ledger,
             dispatch_mode=dispatch_mode,
             run_in_thread=run_in_thread,
         )
@@ -1174,11 +1192,12 @@ async def receive_input(body: InputPayload, request: Request) -> InputResponse:
     _ = request
     request_id = new_request_id()
     ts_ms = int(time.time() * 1000)
-    source = str(body.source or "").upper().strip()
+    raw_source = str(body.source or "").upper().strip()
+    source, source_alias_platform = _normalize_input_source(raw_source)
     gateway_dedupe_key: str | None = None
     gateway_dedupe_expiry: float | None = None
 
-    _logger.info("input_routes: received edge input source=%s request_id=%s", source, request_id)
+    _logger.info("input_routes: received edge input source=%s request_id=%s", raw_source or source, request_id)
 
     if source == "ASR":
         if not body.text or not body.session_id:
@@ -1205,7 +1224,8 @@ async def receive_input(body: InputPayload, request: Request) -> InputResponse:
         initial_payload = body.model_dump(exclude_none=True)
         gateway_attachments = _normalize_gateway_attachments(initial_payload)
         has_gateway_content = bool(str(body.content or "").strip())
-        if ((not has_gateway_content and not gateway_attachments) or not body.conversation_id or not body.platform):
+        gateway_platform = str(body.platform or source_alias_platform or "").strip()
+        if ((not has_gateway_content and not gateway_attachments) or not body.conversation_id or not gateway_platform):
             return InputResponse(
                 success=False,
                 request_id=request_id,
@@ -1237,6 +1257,9 @@ async def receive_input(body: InputPayload, request: Request) -> InputResponse:
 
     payload = body.model_dump(exclude_none=True)
     if source == "GATEWAY":
+        payload["source"] = "GATEWAY"
+        if source_alias_platform and not str(payload.get("platform") or "").strip():
+            payload["platform"] = source_alias_platform
         gateway_attachments = _normalize_gateway_attachments(payload)
         if gateway_attachments:
             payload["attachments"] = gateway_attachments
@@ -1754,27 +1777,8 @@ def _should_start_gateway_progress_push(
     payload: dict[str, Any],
     intent_draft: dict[str, Any] | None = None,
 ) -> tuple[bool, str]:
+    """Proactive progress push is retired; progress queries use the explicit fastpath."""
     return False, "PROGRESS_PUSH_RETIRED_REPLY_ENVELOPE_ONLY"
-    if not _gateway_auto_reply_enabled():
-        return False, "PROGRESS_PUSH_AUTO_REPLY_DISABLED"
-    if not _parse_bool_env("HOST_GATEWAY_PROGRESS_PUSH_ENABLED", default=True):
-        return False, "PROGRESS_PUSH_DISABLED"
-    if str(source or "").strip().upper() != "GATEWAY":
-        return False, "PROGRESS_PUSH_SOURCE_NOT_GATEWAY"
-    if _looks_like_progress_query_for_ack_skip(text):
-        return False, "PROGRESS_PUSH_PROGRESS_QUERY"
-    if not _looks_like_execution_intent_for_ack(text):
-        return False, "PROGRESS_PUSH_NON_ACTION_INTENT"
-    route_type = str((dict(intent_draft or {})).get("route") or "").strip().lower()
-    if not route_type:
-        return False, "PROGRESS_PUSH_ROUTE_UNRESOLVED"
-    if route_type not in {"skill", "delegate", "plan", "task_progress"}:
-        return False, "PROGRESS_PUSH_NON_EXECUTION_ROUTE"
-    platform = str(payload.get("platform") or "").strip().lower()
-    conversation_id = str(payload.get("conversation_id") or "").strip()
-    if not platform or not conversation_id:
-        return False, "PROGRESS_PUSH_TARGET_MISSING"
-    return True, "PROGRESS_PUSH_ENABLED"
 
 
 async def _run_gateway_proactive_progress_push(
@@ -1906,23 +1910,24 @@ def _maybe_schedule_gateway_route_started_voice_ack(
     )
     now_ms = int(time.time() * 1000)
     if not should_send:
-        _log_input_event(
-            ledger=ledger,
-            request_id=request_id,
-            session_id=session_id,
-            source=source,
-            input_payload={
-                **dict(payload or {}),
-                "route_ack_reason": reason,
-                "route_type": route_type,
-                "route_target": target_id,
-            },
-            phase="ROUTE_ACK_SKIPPED",
-            status="IGNORED",
-            reason_code=reason,
-            detail=f"gateway route-started voice ack skipped: {reason}",
-            ts_ms=now_ms,
-        )
+        if reason not in {"ROUTE_ACK_FAST_ROUTE", "ROUTE_ACK_NON_EXECUTION_ROUTE"}:
+            _log_input_event(
+                ledger=ledger,
+                request_id=request_id,
+                session_id=session_id,
+                source=source,
+                input_payload={
+                    **dict(payload or {}),
+                    "route_ack_reason": reason,
+                    "route_type": route_type,
+                    "route_target": target_id,
+                },
+                phase="ROUTE_ACK_SKIPPED",
+                status="IGNORED",
+                reason_code=reason,
+                detail=f"gateway route-started voice ack skipped: {reason}",
+                ts_ms=now_ms,
+            )
         return
 
     ack_text = _build_gateway_route_started_voice_ack_text(
@@ -2034,18 +2039,25 @@ def _maybe_schedule_gateway_immediate_ack(
     )
     now_ms = int(time.time() * 1000)
     if not should_send:
-        _log_input_event(
-            ledger=ledger,
-            request_id=request_id,
-            session_id=session_id,
-            source=source,
-            input_payload={**dict(payload or {}), "immediate_ack_reason": reason},
-            phase="ACK_SKIPPED",
-            status="IGNORED",
-            reason_code=reason,
-            detail=f"gateway immediate ack skipped: {reason}",
-            ts_ms=now_ms,
-        )
+        if reason not in {
+            "ACK_RETIRED_REPLY_ENVELOPE_ONLY",
+            "ACK_ROUTE_UNRESOLVED",
+            "ACK_NON_EXECUTION_ROUTE",
+            "ACK_PROGRESS_QUERY",
+            "ACK_DIRECT_OPEN_APP",
+        }:
+            _log_input_event(
+                ledger=ledger,
+                request_id=request_id,
+                session_id=session_id,
+                source=source,
+                input_payload={**dict(payload or {}), "immediate_ack_reason": reason},
+                phase="ACK_SKIPPED",
+                status="IGNORED",
+                reason_code=reason,
+                detail=f"gateway immediate ack skipped: {reason}",
+                ts_ms=now_ms,
+            )
         return
 
     _log_input_event(
@@ -2157,7 +2169,7 @@ async def _run_cortex_orchestrator_pipeline(
         input_source=source,
         reply_channel=reply_channel,
         reply_target=reply_target,
-        # Gateway 入口的语音/口型由 _deliver_gateway_reply 统一下发，避免 ChatAgent 在 COMMIT 后重复补播。
+        # Gateway 入口的语音/口型由 _deliver_gateway_reply 统一下发，避免 SurfaceReply 在 COMMIT 后重复补播。
         suppress_edge_tts=(source == "GATEWAY"),
         suppress_edge_vts=False,
         # 语言只由 response_form/render_profile 决定；Gateway/QQ/Web/API 只是传输来源。
@@ -2421,6 +2433,28 @@ async def _deliver_gateway_reply(
             cacheable=False,
         )
     )
+    if not can_send(reply_envelope) and normalized_decision == "APPROVE" and str(narrative or "").strip():
+        repaired_envelope = envelope_from_commit(
+            decision="APPROVE",
+            narrative=narrative,
+            reason_code=None,
+            response_form="text",
+            source="gateway_primary_reply_repaired",
+            degraded=False,
+            cacheable=False,
+            raw_extra={
+                "gate_repair": "invalid_reply_envelope_text_repair",
+                "original_reply_envelope": reply_envelope.as_dict(),
+                "original_response_form": str(response_form or "text").strip() or "text",
+                "original_reason_code": str(reply_envelope.reason_code or normalized_reason or "").strip(),
+            },
+        )
+        if can_send(repaired_envelope):
+            reply_envelope = repaired_envelope
+            response_form = "text"
+            response_form_reason = (
+                f"{str(response_form_reason or '').strip() or 'unknown'}|repaired_invalid_reply_envelope"
+            )
     if not can_send(reply_envelope):
         return {
             "success": True,
@@ -3219,18 +3253,19 @@ async def _dispatch_to_graph_worker(
             )
             progress_push_task.add_done_callback(_log_progress_push_task_exception)
         else:
-            _log_input_event(
-                ledger=ledger,
-                request_id=request_id,
-                session_id=session_id,
-                source=source,
-                input_payload={**dict(payload or {}), "progress_push_reason": push_reason},
-                phase="PROGRESS_PUSH_SKIPPED",
-                status="IGNORED",
-                reason_code=push_reason,
-                detail=f"gateway proactive progress push skipped: {push_reason}",
-                ts_ms=dispatch_ts,
-            )
+            if push_reason != "PROGRESS_PUSH_RETIRED_REPLY_ENVELOPE_ONLY":
+                _log_input_event(
+                    ledger=ledger,
+                    request_id=request_id,
+                    session_id=session_id,
+                    source=source,
+                    input_payload={**dict(payload or {}), "progress_push_reason": push_reason},
+                    phase="PROGRESS_PUSH_SKIPPED",
+                    status="IGNORED",
+                    reason_code=push_reason,
+                    detail=f"gateway proactive progress push skipped: {push_reason}",
+                    ts_ms=dispatch_ts,
+                )
     if not await _ensure_gateway_multimodal_observed_for_dispatch(
         request_id=request_id,
         session_id=session_id,
