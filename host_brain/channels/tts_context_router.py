@@ -11,51 +11,16 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
+from host_brain.channels.vts_runtime_mapping import normalize_runtime_emotion_tag
+
 _logger = logging.getLogger("Natsume.tts.context_router")
 
 # ---------------------------------------------------------------------------
-# VTS emotion_tag → TTS 风格 key 映射
-# LLM 输出的 emotion_tag 使用 VTS 命名（HAPPY/SAD/ANGRY 等），
-# TTS 风格表使用描述性 key（happiness/sadness/serious 等），需要做一次转换。
-# ---------------------------------------------------------------------------
-_VTS_TO_TTS_STYLE: dict[str, str] = {
-    "happy": "happiness",
-    "happiness": "happiness",
-    "joy": "happiness",
-    "grateful": "happiness",
-    "proud": "happiness",
-    "surprised": "happiness",
-    "excited": "excitement",
-    "excitement": "excitement",
-    "playful": "playful",
-    "sad": "sadness",
-    "sadness": "sadness",
-    "anxious": "sadness",
-    "bored": "sadness",
-    "calm": "comfort",
-    "comfort": "comfort",
-    "thinking": "serious",
-    "confused": "serious",
-    "angry": "serious",
-    "anger": "serious",
-    "frustrated": "serious",
-    "serious": "serious",
-    "loving": "coquettish",
-    "embarrassed": "coquettish",
-    "affection": "coquettish",
-    "coquettish": "coquettish",
-    "neutral": "neutral",
-}
-
-
-def _normalize_emotion_tag_for_tts(emotion_tag: str) -> str:
-    """将 LLM 输出的 emotion_tag 归一化到 TTS 风格表 key。"""
-    key = str(emotion_tag or "").strip().lower()
-    return _VTS_TO_TTS_STYLE.get(key, key)
-
-
-# ---------------------------------------------------------------------------
 # TTS 情感风格预设
+# key 使用 canonical VTS emotion_tag 的小写形式，所有输入经
+# vts_runtime_mapping.normalize_runtime_emotion_tag() 归一化后直接查找。
+# VTS 别名链（VTS_EMOTION_TAG_ALIASES）会自动将 COQUETTISH→LOVING、
+# SERIOUS→THINKING 等转换到 canonical tag，无需本文件额外维护映射。
 # ---------------------------------------------------------------------------
 @dataclass
 class TtsStyleParams:
@@ -63,7 +28,7 @@ class TtsStyleParams:
     speed_scale: float = 1.0       # 语速倍率 [0.7, 1.3]
     pitch_shift: float = 0.0       # 音调偏移 [-2.0, 2.0] semitones
     energy_scale: float = 1.0      # 能量/音量 [0.7, 1.3]
-    emotion_tag: str = "neutral"   # 情感标签
+    emotion_tag: str = "neutral"   # 情感标签（canonical VTS tag 小写）
     style_note: str = ""           # 给 TTS 引擎的风格提示
     lang_hint: str = "zh"          # 语言提示 zh/ja
 
@@ -78,44 +43,28 @@ class TtsStyleParams:
         }
 
 
-# ---------------------------------------------------------------------------
-# 情感风格映射表
-# ---------------------------------------------------------------------------
 EMOTION_STYLE_MAP: dict[str, TtsStyleParams] = {
-    # 安慰类
-    "comfort": TtsStyleParams(
-        speed_scale=0.85, pitch_shift=-0.5, energy_scale=0.9,
-        emotion_tag="comfort", style_note="温柔、缓慢、轻声",
-    ),
-    "sadness": TtsStyleParams(
-        speed_scale=0.85, pitch_shift=-0.5, energy_scale=0.85,
-        emotion_tag="sadness", style_note="低沉、柔和",
-    ),
-    # 开心类
-    "happiness": TtsStyleParams(
-        speed_scale=1.1, pitch_shift=0.5, energy_scale=1.1,
-        emotion_tag="happiness", style_note="活泼、明亮",
-    ),
-    "excitement": TtsStyleParams(
-        speed_scale=1.15, pitch_shift=1.0, energy_scale=1.2,
-        emotion_tag="excitement", style_note="兴奋、高能量",
-    ),
-    # 俏皮类
-    "playful": TtsStyleParams(
-        speed_scale=1.05, pitch_shift=0.3, energy_scale=1.05,
-        emotion_tag="playful", style_note="俏皮、可爱",
-    ),
-    # 严肃类
-    "serious": TtsStyleParams(
-        speed_scale=0.95, pitch_shift=-0.3, energy_scale=1.0,
-        emotion_tag="serious", style_note="认真、沉稳",
-    ),
-    # 撒娇类
-    "coquettish": TtsStyleParams(
-        speed_scale=0.95, pitch_shift=0.8, energy_scale=0.95,
-        emotion_tag="coquettish", style_note="撒娇、软萌",
-    ),
-    # 默认
+    # positive / warm
+    "happy": TtsStyleParams(speed_scale=1.10, pitch_shift=0.5, energy_scale=1.10, emotion_tag="happy", style_note="活泼、明亮"),
+    "excited": TtsStyleParams(speed_scale=1.15, pitch_shift=1.0, energy_scale=1.20, emotion_tag="excited", style_note="兴奋、高能量"),
+    "grateful": TtsStyleParams(speed_scale=0.92, pitch_shift=0.2, energy_scale=1.00, emotion_tag="grateful", style_note="感激、温暖"),
+    "proud": TtsStyleParams(speed_scale=0.95, pitch_shift=0.3, energy_scale=1.05, emotion_tag="proud", style_note="自信、得意"),
+    # gentle / soft
+    "calm": TtsStyleParams(speed_scale=0.85, pitch_shift=-0.5, energy_scale=0.90, emotion_tag="calm", style_note="温柔、缓慢、轻声"),
+    "loving": TtsStyleParams(speed_scale=0.92, pitch_shift=0.5, energy_scale=0.95, emotion_tag="loving", style_note="撒娇、软萌"),
+    "embarrassed": TtsStyleParams(speed_scale=0.90, pitch_shift=0.3, energy_scale=0.90, emotion_tag="embarrassed", style_note="羞涩、小声"),
+    # low energy
+    "sad": TtsStyleParams(speed_scale=0.85, pitch_shift=-0.5, energy_scale=0.85, emotion_tag="sad", style_note="低沉、柔和"),
+    "anxious": TtsStyleParams(speed_scale=1.00, pitch_shift=-0.2, energy_scale=0.90, emotion_tag="anxious", style_note="不安、犹豫"),
+    "bored": TtsStyleParams(speed_scale=0.95, pitch_shift=-0.3, energy_scale=0.88, emotion_tag="bored", style_note="平淡、无精打采"),
+    # high activation
+    "angry": TtsStyleParams(speed_scale=1.05, pitch_shift=-0.5, energy_scale=1.10, emotion_tag="angry", style_note="严厉、低沉有力"),
+    "frustrated": TtsStyleParams(speed_scale=1.00, pitch_shift=-0.3, energy_scale=1.05, emotion_tag="frustrated", style_note="烦躁、短促"),
+    "surprised": TtsStyleParams(speed_scale=1.10, pitch_shift=0.8, energy_scale=1.15, emotion_tag="surprised", style_note="惊讶、上扬"),
+    # neutral / cognitive
+    "thinking": TtsStyleParams(speed_scale=0.92, pitch_shift=-0.1, energy_scale=0.95, emotion_tag="thinking", style_note="沉思、谨慎"),
+    "confused": TtsStyleParams(speed_scale=0.90, pitch_shift=0.1, energy_scale=0.95, emotion_tag="confused", style_note="困惑、迟疑"),
+    # default
     "neutral": TtsStyleParams(),
 }
 
@@ -156,7 +105,7 @@ class TtsContextRouter:
         router = TtsContextRouter()
         params = router.route(
             text="没关系的，我一直在这里陪你。",
-            emotion_tag="COMFORT",
+            emotion_tag="CALM",
             bond_stage="CLOSE_FRIEND",
         )
         # params.speed_scale = 0.85, params.pitch_shift = -0.5, ...
@@ -183,7 +132,7 @@ class TtsContextRouter:
         优先级：显式 emotion_tag > 文本分析 > VAD 推断 > 默认
         """
         text = str(text or "").strip()
-        etag = _normalize_emotion_tag_for_tts(emotion_tag)
+        etag = normalize_runtime_emotion_tag(emotion_tag).lower()
 
         # 1. 语言检测
         lang = "ja" if _KANA_PATTERN.search(text) else "zh"
@@ -235,35 +184,35 @@ class TtsContextRouter:
 
     @staticmethod
     def _detect_emotion_from_text(text: str) -> str | None:
-        """从文本关键词检测情感风格。"""
+        """从文本关键词检测情感（返回 canonical VTS tag 小写）。"""
         if _COMFORT_PATTERNS.search(text):
-            return "comfort"
+            return "calm"
         if _COQUETTISH_PATTERNS.search(text):
-            return "coquettish"
+            return "loving"
         if _PLAYFUL_PATTERNS.search(text):
-            return "playful"
+            return "happy"
         if _HAPPY_PATTERNS.search(text):
-            return "happiness"
+            return "happy"
         if _SAD_PATTERNS.search(text):
-            return "sadness"
+            return "sad"
         if _SERIOUS_PATTERNS.search(text):
-            return "serious"
+            return "thinking"
         return None
 
     @staticmethod
     def _infer_from_vad(valence: float, arousal: float) -> str | None:
-        """从 VAD 值推断情感风格。"""
+        """从 VAD 值推断情感（返回 canonical VTS tag 小写）。"""
         v, a = float(valence), float(arousal)
         if v > 0.6 and a > 0.6:
-            return "excitement"
+            return "excited"
         if v > 0.4 and a > 0.3:
-            return "happiness"
+            return "happy"
         if v > 0.3 and a < 0.3:
-            return "comfort"
+            return "calm"
         if v < 0.3 and a < 0.4:
-            return "sadness"
+            return "sad"
         if v < 0.4 and a > 0.5:
-            return "serious"
+            return "frustrated"
         return None
 
     @staticmethod

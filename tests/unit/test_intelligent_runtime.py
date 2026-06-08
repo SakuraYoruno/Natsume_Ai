@@ -305,7 +305,7 @@ def test_resolve_tts_route_maps_canonical_sad_to_semantic_style(monkeypatch) -> 
         bond_summary={"stage": "FRIEND"},
     )
 
-    assert route.get("emotion_tag") == "sadness"
+    assert route.get("emotion_tag") == "sad"
 
 
 def test_resolve_tts_route_maps_canonical_calm_to_comfort_style(monkeypatch) -> None:
@@ -317,7 +317,7 @@ def test_resolve_tts_route_maps_canonical_calm_to_comfort_style(monkeypatch) -> 
         bond_summary={"stage": "FRIEND"},
     )
 
-    assert route.get("emotion_tag") == "comfort"
+    assert route.get("emotion_tag") == "calm"
 
 
 def test_reflection_chain_revise_does_not_author_empty_reply() -> None:
