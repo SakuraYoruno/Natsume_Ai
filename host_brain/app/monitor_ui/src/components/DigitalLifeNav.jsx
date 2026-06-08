@@ -22,7 +22,7 @@ const ITEMS = [
   { to: '/memory', label: '记忆', icon: Database },
   { to: '/runtime-mode', label: '存在态', icon: Orbit },
   { to: '/inner-world', label: '内在世界', icon: MoonStar },
-  { to: '/render-policy', label: '回复策略', icon: Sparkles },
+  { to: '/response-policy', label: '回复策略', icon: Sparkles },
   { to: '/self-model', label: '自我模型', icon: Brain },
   { to: '/persona-config', label: '人格文案', icon: Wand2 },
 ]
@@ -54,4 +54,3 @@ export default function DigitalLifeNav() {
     </div>
   )
 }
-

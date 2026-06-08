@@ -1,0 +1,11 @@
+{
+  "dependencies": {
+    "com.unity.animation.rigging": "1.2.1",
+    "com.unity.nuget.newtonsoft-json": "3.2.1",
+    "com.unity.textmeshpro": "3.0.6",
+    "com.unity.timeline": "1.7.6",
+    "com.unity.ugui": "1.0.0",
+    "com.vrmc.gltf": "https://github.com/vrm-c/UniVRM.git?path=/Packages/UniGLTF#v0.131.0",
+    "com.vrmc.vrm": "https://github.com/vrm-c/UniVRM.git?path=/Packages/VRM10#v0.131.0"
+  }
+}

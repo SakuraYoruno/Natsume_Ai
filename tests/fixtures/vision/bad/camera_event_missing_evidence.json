@@ -1,9 +1,9 @@
-{
-  "request_id": "req_vision_cam_002",
-  "intent_id": "intent_vision_cam_002",
-  "payload": {
-    "evidence_ref": "   ",
-    "frame_text": "person:0.85",
-    "timeout_ms": 500
-  }
+﻿{
+    "request_id":  "req_vision_cam_002",
+    "intent_id":  "intent_vision_cam_002",
+    "payload":  {
+                    "evidence_ref":  "   ",
+                    "frame_text":  "person:0.85",
+                    "timeout_ms":  500
+                }
 }

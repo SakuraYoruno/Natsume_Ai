@@ -115,11 +115,11 @@ _INSIGHTS_SUMMARY_WARM_ENABLED = bool(
     .obs_insights_summary_warm_enabled
 )
 _INSIGHTS_SUMMARY_WARM_INTERVAL_MS = max(
-    int(_env_float("HOST_OBS_INSIGHTS_SUMMARY_WARM_INTERVAL_MS", 5000.0, minimum=1000.0)),
+    int(_env_float("HOST_OBS_INSIGHTS_SUMMARY_WARM_INTERVAL_MS", 30000.0, minimum=1000.0)),
     1000,
 )
 _INSIGHTS_SUMMARY_WARM_STALE_MS = max(
-    int(_env_float("HOST_OBS_INSIGHTS_SUMMARY_WARM_STALE_MS", 15000.0, minimum=1000.0)),
+    int(_env_float("HOST_OBS_INSIGHTS_SUMMARY_WARM_STALE_MS", 90000.0, minimum=1000.0)),
     1000,
 )
 _INSIGHTS_SUMMARY_WARM_WINDOW_MINUTES = max(
@@ -134,11 +134,11 @@ _DIGITAL_LIFE_OVERVIEW_WARM_ENABLED = bool(
     .obs_digital_life_overview_warm_enabled
 )
 _DIGITAL_LIFE_OVERVIEW_WARM_INTERVAL_MS = max(
-    int(_env_float("HOST_OBS_DIGITAL_LIFE_OVERVIEW_WARM_INTERVAL_MS", 5000.0, minimum=1000.0)),
+    int(_env_float("HOST_OBS_DIGITAL_LIFE_OVERVIEW_WARM_INTERVAL_MS", 60000.0, minimum=1000.0)),
     1000,
 )
 _DIGITAL_LIFE_OVERVIEW_WARM_STALE_MS = max(
-    int(_env_float("HOST_OBS_DIGITAL_LIFE_OVERVIEW_WARM_STALE_MS", 15000.0, minimum=1000.0)),
+    int(_env_float("HOST_OBS_DIGITAL_LIFE_OVERVIEW_WARM_STALE_MS", 180000.0, minimum=1000.0)),
     1000,
 )
 _DIGITAL_LIFE_OVERVIEW_WARM_WINDOW_MINUTES = max(
@@ -268,6 +268,29 @@ def _refresh_insights_summary_warm_once() -> dict[str, Any] | None:
     if not _INSIGHTS_SUMMARY_WARM_ENABLED:
         return None
     started = _now_ms()
+    release_slot = None
+    try:
+        from host_brain.app.obs_resource_guard import (
+            release_obs_warm_slot,
+            should_defer_obs_warm_refresh,
+            try_acquire_obs_warm_slot,
+        )
+
+        deferred, reason = should_defer_obs_warm_refresh(task_name="insights_summary")
+        if deferred:
+            with _insights_summary_warm_lock:
+                _insights_summary_warm_state["last_duration_ms"] = 0
+                _insights_summary_warm_state["last_error"] = f"deferred:{reason}"
+            return None
+        acquired, reason = try_acquire_obs_warm_slot(task_name="insights_summary")
+        if not acquired:
+            with _insights_summary_warm_lock:
+                _insights_summary_warm_state["last_duration_ms"] = 0
+                _insights_summary_warm_state["last_error"] = f"deferred:{reason}"
+            return None
+        release_slot = release_obs_warm_slot
+    except Exception:
+        release_slot = None
     try:
         payload = _build_insights_summary_snapshot_sync(_INSIGHTS_SUMMARY_WARM_WINDOW_MINUTES)
         with _insights_summary_warm_lock:
@@ -282,12 +305,38 @@ def _refresh_insights_summary_warm_once() -> dict[str, Any] | None:
             _insights_summary_warm_state["last_duration_ms"] = max(0, _now_ms() - started)
             _insights_summary_warm_state["last_error"] = str(exc)
         return None
+    finally:
+        if release_slot is not None:
+            release_slot()
 
 
 def _refresh_digital_life_overview_warm_once() -> dict[str, Any] | None:
     if not _DIGITAL_LIFE_OVERVIEW_WARM_ENABLED:
         return None
     started = _now_ms()
+    release_slot = None
+    try:
+        from host_brain.app.obs_resource_guard import (
+            release_obs_warm_slot,
+            should_defer_obs_warm_refresh,
+            try_acquire_obs_warm_slot,
+        )
+
+        deferred, reason = should_defer_obs_warm_refresh(task_name="digital_life_overview")
+        if deferred:
+            with _digital_life_overview_warm_lock:
+                _digital_life_overview_warm_state["last_duration_ms"] = 0
+                _digital_life_overview_warm_state["last_error"] = f"deferred:{reason}"
+            return None
+        acquired, reason = try_acquire_obs_warm_slot(task_name="digital_life_overview")
+        if not acquired:
+            with _digital_life_overview_warm_lock:
+                _digital_life_overview_warm_state["last_duration_ms"] = 0
+                _digital_life_overview_warm_state["last_error"] = f"deferred:{reason}"
+            return None
+        release_slot = release_obs_warm_slot
+    except Exception:
+        release_slot = None
     try:
         payload = asyncio.run(_build_digital_life_overview_snapshot_async(_DIGITAL_LIFE_OVERVIEW_WARM_WINDOW_MINUTES))
         with _digital_life_overview_warm_lock:
@@ -302,6 +351,9 @@ def _refresh_digital_life_overview_warm_once() -> dict[str, Any] | None:
             _digital_life_overview_warm_state["last_duration_ms"] = max(0, _now_ms() - started)
             _digital_life_overview_warm_state["last_error"] = str(exc)
         return None
+    finally:
+        if release_slot is not None:
+            release_slot()
 
 
 def _insights_summary_warm_loop() -> None:

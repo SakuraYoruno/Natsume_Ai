@@ -295,7 +295,7 @@ class TestVV2_MilestoneTracker:
             user_id="user1",
             event_type="STAGE_PROMOTED",
             ts_ms=_now_ms(),
-            metadata={"from_stage": "ACQUAINTANCE", "to_stage": "FRIEND"},
+            metadata={"from_stage": "FRIEND", "to_stage": "CLOSE_FRIEND"},
         )
         types = [m.milestone_type for m in milestones]
         assert any("STAGE_PROMOTED" in t for t in types)
@@ -440,14 +440,14 @@ class TestVV3_BondNarrativeLayer:
     def test_narrative_style_varies_by_stage(self):
         """叙事风格随 Bond 阶段变化。"""
         layer = BondNarrativeLayer()
-        r1 = layer.build_narrative(user_id="user1", bond_stage="STRANGER")
+        r1 = layer.build_narrative(user_id="user1", bond_stage="FRIEND")
         r2 = layer.build_narrative(user_id="user1", bond_stage="SOULMATE")
         assert r1.narrative_style != r2.narrative_style
 
     def test_empty_narrative_for_no_data(self):
         """无数据时叙事为空。"""
         layer = BondNarrativeLayer()
-        result = layer.build_narrative(user_id="user1", bond_stage="STRANGER")
+        result = layer.build_narrative(user_id="user1", bond_stage="FRIEND")
         assert len(result.items) == 0
 
     def test_to_prompt_slot_format(self):
@@ -475,7 +475,7 @@ class TestVV3_BondNarrativeLayer:
     def test_to_prompt_slot_empty_for_no_data(self):
         """无数据时 to_prompt_slot 返回空字典。"""
         layer = BondNarrativeLayer()
-        result = layer.build_narrative(user_id="user1", bond_stage="STRANGER")
+        result = layer.build_narrative(user_id="user1", bond_stage="FRIEND")
         slot = result.to_prompt_slot()
         assert slot == {}
 

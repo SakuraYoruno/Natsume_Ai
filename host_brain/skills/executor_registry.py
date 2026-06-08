@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable
 
 from host_brain.skills.impl.browser_executor import execute_browser_skill
-from host_brain.codex_runtime import execute_codex_runtime_payload
+from host_brain.codex_runtime import execute_codex_production_payload, execute_codex_runtime_payload
 from host_brain.skills.impl.desktop_executor import execute_desktop_skill
 from host_brain.skills.impl.desktop_note import execute_desktop_note
 from host_brain.skills.impl.diary_writer import execute_diary_writer
@@ -14,10 +14,12 @@ from host_brain.skills.impl.dream_generator import execute_dream_generator
 from host_brain.skills.impl.emotion_executor import execute_emotion_skill
 from host_brain.skills.impl.file_executor import execute_file_skill
 from host_brain.skills.impl.focus_mode import execute_focus_mode
+from host_brain.skills.impl.frontend_executor import execute_frontend_skill
 from host_brain.skills.impl.ide_executor import execute_ide_skill
 from host_brain.skills.impl.memory_executor import execute_memory_skill
 from host_brain.skills.impl.notification_executor import execute_notification_skill
 from host_brain.skills.impl.proactive_talk import execute_proactive_talk
+from host_brain.skills.impl.repo_executor import execute_repo_skill
 from host_brain.skills.impl.scheduler_executor import execute_scheduler_skill
 from host_brain.skills.impl.shell_executor import execute_shell_skill
 from host_brain.skills.impl.system_executor import execute_system_skill
@@ -91,6 +93,7 @@ def build_builtin_tool_executor_registry() -> ToolExecutorRegistry:
         ToolExecutorSpec("cursor", execute_ide_skill),
         ToolExecutorSpec("pycharm", execute_ide_skill),
         ToolExecutorSpec("codex_runtime", execute_codex_runtime_payload),
+        ToolExecutorSpec("codex_production", execute_codex_production_payload),
         ToolExecutorSpec("open_file_in_editor", execute_ide_skill),
         ToolExecutorSpec("diary_writer", _with_context(execute_diary_writer)),
         ToolExecutorSpec("dream_generator", _with_context(execute_dream_generator)),
@@ -100,6 +103,8 @@ def build_builtin_tool_executor_registry() -> ToolExecutorRegistry:
         ToolExecutorSpec("desktop", _with_context(execute_desktop_skill)),
         ToolExecutorSpec("memory", _with_context(execute_memory_skill)),
         ToolExecutorSpec("emotion", _with_context(execute_emotion_skill)),
+        ToolExecutorSpec("repo", _with_context(execute_repo_skill)),
+        ToolExecutorSpec("frontend", _with_context(execute_frontend_skill)),
         ToolExecutorSpec("scheduler", _with_context(execute_scheduler_skill)),
         ToolExecutorSpec("system", _with_context(execute_system_skill)),
         ToolExecutorSpec("web", _with_context(execute_web_skill)),

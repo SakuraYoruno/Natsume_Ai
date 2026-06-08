@@ -1,0 +1,16 @@
+{
+  "name": "natsume-desktop-pet",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Transparent Live2D desktop pet runtime for Natsume Ai.",
+  "main": "main.cjs",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron ."
+  },
+  "dependencies": {
+    "electron": "^31.7.7",
+    "pixi-live2d-display": "^0.4.0",
+    "pixi.js": "^6.5.10"
+  }
+}

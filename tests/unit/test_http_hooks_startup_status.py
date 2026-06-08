@@ -2,17 +2,17 @@ from __future__ import annotations
 
 import json
 import logging
-import datetime
 
 from host_brain.app.automation.task_scheduler import TaskPriority as AutomationTaskPriority
 from host_brain.app.http_hooks import _build_codex_immune_scheduler_task
 from host_brain.app.http_hooks import _build_audit_retention_task_config
-from host_brain.app.http_hooks import _build_reply_surface_cache_prewarm_task_config
+from host_brain.app.http_hooks import _build_diary_writer_task_config
+from host_brain.app.http_hooks import _build_dream_generator_task_config
+from host_brain.app.http_hooks import _build_lightnovel_recommender_task_config
 from host_brain.app.http_hooks import _init_edge_command_pusher_status
 from host_brain.app.http_hooks import _build_personality_tick_status
 from host_brain.app.http_hooks import _sync_world_canon_index_on_startup
 from host_brain.app.http_hooks import _startup_status_is_degraded
-from host_brain.app.http_hooks import _seconds_until_daily_time
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.memory.canon_world_store import compute_world_canon_hash
 from host_brain.scheduler.task_registry import TaskPriority, TriggerMode
@@ -31,37 +31,11 @@ def test_build_audit_retention_task_config_uses_current_scheduler_contract() -> 
 
     assert task.task_id == "audit_retention_daily"
     assert task.trigger_mode is TriggerMode.CRON
-    assert task.trigger_config == {"hour": 2, "minute": 0}
+    assert task.trigger_config == {"hour": 2, "minute": 0, "catch_up_window_minutes": 1440}
     assert task.intent_template["skill_name"] == "audit_retention"
     assert task.intent_template["proposer_node_id"] == "scheduler"
     assert task.priority is TaskPriority.LOW
     assert task.enabled is True
-
-
-def test_build_reply_surface_cache_prewarm_task_config_uses_daily_cron(monkeypatch) -> None:
-    monkeypatch.setenv("HOST_REPLY_SURFACE_MEMORY_DAILY_PREWARM_HOUR", "4")
-    monkeypatch.setenv("HOST_REPLY_SURFACE_MEMORY_DAILY_PREWARM_MINUTE", "25")
-    monkeypatch.setenv("HOST_REPLY_SURFACE_MEMORY_DAILY_PREWARM_LIMIT", "4096")
-
-    task = _build_reply_surface_cache_prewarm_task_config()
-
-    assert task.task_id == "reply_surface_cache_prewarm_daily"
-    assert task.trigger_mode is TriggerMode.CRON
-    assert task.trigger_config == {"hour": 4, "minute": 25}
-    assert task.intent_template["skill_name"] == "reply_surface_cache_prewarm"
-    assert task.intent_template["args"] == {"limit": 4096, "force": True}
-    assert task.priority is TaskPriority.LOW
-    assert task.enabled is True
-
-
-def test_seconds_until_daily_time_rolls_to_next_day() -> None:
-    # 2026-04-24 03:09:30 local time.
-    before_target = datetime.datetime(2026, 4, 24, 3, 9, 30).timestamp()
-    assert _seconds_until_daily_time(hour=3, minute=10, now_ts=before_target) == 30.0
-
-    # 2026-04-24 03:10:00 local time should schedule tomorrow's run.
-    at_target = datetime.datetime(2026, 4, 24, 3, 10, 0).timestamp()
-    assert _seconds_until_daily_time(hour=3, minute=10, now_ts=at_target) == 24 * 60 * 60
 
 
 def test_build_codex_immune_scheduler_task_uses_current_scheduler_contract() -> None:
@@ -74,6 +48,72 @@ def test_build_codex_immune_scheduler_task_uses_current_scheduler_contract() -> 
     assert task.retry_delay_s == 15.0
     assert task.enabled is True
     assert task.priority is AutomationTaskPriority.P1
+
+
+def test_build_lightnovel_recommender_task_config_uses_natsume_scheduler_contract(monkeypatch) -> None:
+    monkeypatch.delenv("HOST_LIGHTNOVEL_RECOMMENDER_HOUR", raising=False)
+    monkeypatch.delenv("HOST_LIGHTNOVEL_RECOMMENDER_MINUTE", raising=False)
+    monkeypatch.delenv("HOST_LIGHTNOVEL_RECOMMENDER_URLS", raising=False)
+    monkeypatch.delenv("HOST_LIGHTNOVEL_RECOMMENDER_ARTIFACTS_ROOT", raising=False)
+
+    task = _build_lightnovel_recommender_task_config()
+    args = task.intent_template["args"]
+
+    assert task.task_id == "lightnovel_recommender_daily"
+    assert task.trigger_mode is TriggerMode.CRON
+    assert task.trigger_config == {"hour": 10, "minute": 30, "catch_up_window_minutes": 180}
+    assert task.intent_template["skill_name"] == "codex_lightnovel_recommender"
+    assert task.intent_template["proposer_node_id"] == "scheduler"
+    assert args["workflow_owner"] == "natsume"
+    assert args["driver_kind"] == "natsume_daily_recommendation"
+    assert args["site_adapter"] == "lightnovel.fun"
+    assert args["start_background"] is True
+    assert args["artifacts_root"] == "artifacts/codex_runs/lightnovel_recommender"
+    assert "https://www.lightnovel.fun/" in args["urls"]
+    assert "https://www.lightnovel.fun/cn/category/3/106?type=1" in args["urls"]
+    assert "https://book.sfacg.com/rank/" in args["urls"]
+    assert "https://www.17k.com/man/qingbook/" in args["urls"]
+    assert task.priority is TaskPriority.LOW
+    assert task.mode_allowlist == ["normal", "sleep"]
+    assert task.enabled is True
+
+
+def test_build_diary_writer_task_config_uses_natsume_scheduler_contract(monkeypatch) -> None:
+    monkeypatch.delenv("HOST_DIARY_WRITER_HOUR", raising=False)
+    monkeypatch.delenv("HOST_DIARY_WRITER_MINUTE", raising=False)
+    monkeypatch.delenv("HOST_DIARY_WRITER_BASE_DIR", raising=False)
+
+    task = _build_diary_writer_task_config()
+
+    assert task.task_id == "diary_writer_daily"
+    assert task.trigger_mode is TriggerMode.CRON
+    assert task.trigger_config == {"hour": 23, "minute": 50}
+    assert task.intent_template["skill_name"] == "diary_writer"
+    assert task.intent_template["args"]["base_dir"] == "runtime/diary"
+    assert task.intent_template["proposer_node_id"] == "scheduler"
+    assert task.priority is TaskPriority.LOW
+    assert task.mode_allowlist == ["normal", "sleep"]
+    assert task.enabled is True
+
+
+def test_build_dream_generator_task_config_uses_natsume_scheduler_contract(monkeypatch) -> None:
+    monkeypatch.delenv("HOST_DREAM_GENERATOR_HOUR", raising=False)
+    monkeypatch.delenv("HOST_DREAM_GENERATOR_MINUTE", raising=False)
+    monkeypatch.delenv("HOST_DREAM_GENERATOR_IDLE_THRESHOLD_MINUTES", raising=False)
+    monkeypatch.delenv("HOST_DREAM_GENERATOR_MAX_EPISODIC_ENTRIES", raising=False)
+
+    task = _build_dream_generator_task_config()
+
+    assert task.task_id == "dream_generator_sleep"
+    assert task.trigger_mode is TriggerMode.CRON
+    assert task.trigger_config == {"hour": 4, "minute": 20, "catch_up_window_minutes": 720}
+    assert task.intent_template["skill_name"] == "dream_generator"
+    assert task.intent_template["args"]["max_episodic_entries"] == 20
+    assert task.intent_template["args"]["idle_threshold_ms"] == 90 * 60 * 1000
+    assert task.intent_template["proposer_node_id"] == "scheduler"
+    assert task.priority is TaskPriority.LOW
+    assert task.mode_allowlist == ["normal", "sleep"]
+    assert task.enabled is True
 
 
 def test_build_personality_tick_status_reports_registered_enabled_tasks() -> None:

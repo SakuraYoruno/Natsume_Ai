@@ -15,6 +15,15 @@ class _Bridge:
         return {"ok": True}
 
 
+class _ExpressionDriver:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, float | None]] = []
+
+    def set_expression(self, emotion_tag: str, intensity: float | None = None):  # noqa: ANN001
+        self.calls.append((emotion_tag, intensity))
+        return type("Result", (), {"success": True})()
+
+
 def test_channel_agent_emits_message_and_gateway_events() -> None:
     bridge = _Bridge()
     agent = ChannelAgent(bridge=bridge)
@@ -43,6 +52,43 @@ def test_channel_agent_emits_message_and_gateway_events() -> None:
     assert "gateway_degraded" in event_types
 
 
+def test_somatic_agent_suppresses_face_capture_feedback_by_default(monkeypatch) -> None:
+    monkeypatch.delenv("EDGE_FACE_CAPTURE_DRIVE_VTS", raising=False)
+    driver = _ExpressionDriver()
+    agent = SomaticAgent(vts_driver=driver)
+
+    result = agent.on_emotion_state_command(
+        {
+            "emotion_tag": "JOY",
+            "intensity": 0.6,
+            "session_id": "face_capture",
+            "emotion_source": "face_capture",
+        }
+    )
+
+    assert result["ok"] is True
+    assert result["reason"] == "FACE_CAPTURE_DRIVE_SUPPRESSED"
+    assert driver.calls == []
+
+
+def test_somatic_agent_can_drive_vts_from_face_capture_when_enabled(monkeypatch) -> None:
+    monkeypatch.setenv("EDGE_FACE_CAPTURE_DRIVE_VTS", "true")
+    driver = _ExpressionDriver()
+    agent = SomaticAgent(vts_driver=driver)
+
+    result = agent.on_emotion_state_command(
+        {
+            "emotion_tag": "JOY",
+            "intensity": 0.6,
+            "session_id": "face_capture",
+            "emotion_source": "face_capture",
+        }
+    )
+
+    assert result["ok"] is True
+    assert driver.calls == [("JOY", 0.6)]
+
+
 def test_somatic_agent_emits_body_and_emotion_events() -> None:
     bridge = _Bridge()
     agent = SomaticAgent(bridge=bridge)
@@ -65,11 +111,21 @@ def test_somatic_agent_emits_body_and_emotion_events() -> None:
         mood_state="calm",
         emotion_source="edge_explicit",
         emotion_terms=["开心"],
+        emotion_modality="explicit",
+        emotion_confidence=1.0,
+        emotion_inference_degraded=False,
+        acoustic_emotion_available=False,
     )
 
     event_types = [str(item.get("event_type")) for item in bridge.events]
     assert "body_sense_updated" in event_types
     assert "emotion_inference_updated" in event_types
+    emotion_event = next(item for item in bridge.events if str(item.get("event_type")) == "emotion_inference_updated")
+    payload = dict(emotion_event.get("payload") or {})
+    assert payload["emotion_modality"] == "explicit"
+    assert payload["emotion_confidence"] == 1.0
+    assert payload["emotion_inference_degraded"] is False
+    assert payload["acoustic_emotion_available"] is False
 
 
 def test_voice_agent_emits_pipeline_events() -> None:

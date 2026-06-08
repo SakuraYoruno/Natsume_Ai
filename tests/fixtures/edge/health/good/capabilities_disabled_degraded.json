@@ -1,14 +1,14 @@
-{
-  "env": {
-    "Natsume_ENV": "test",
-    "EDGE_RPC_GATEWAY_ENABLED": "true",
-    "EDGE_ASR_ENABLED": "false",
-    "EDGE_TTS_ENABLED": "false",
-    "EDGE_BARGE_IN_ENABLED": "false",
-    "EDGE_FALLBACK_LLM_ENABLED": "false",
-    "EDGE_RESOURCE_GATE_ENABLED": "false",
-    "EDGE_MAX_VRAM_MB": "2048",
-    "EDGE_MAX_QUEUE_LENGTH": "4",
-    "EDGE_ALLOW_INSECURE_AUTH": "true"
-  }
+﻿{
+    "env":  {
+                "Natsume_ENV":  "test",
+                "EDGE_RPC_GATEWAY_ENABLED":  "true",
+                "EDGE_ASR_ENABLED":  "false",
+                "EDGE_TTS_ENABLED":  "false",
+                "EDGE_BARGE_IN_ENABLED":  "false",
+                "EDGE_FALLBACK_LLM_ENABLED":  "false",
+                "EDGE_RESOURCE_GATE_ENABLED":  "false",
+                "EDGE_MAX_VRAM_MB":  "2048",
+                "EDGE_MAX_QUEUE_LENGTH":  "4",
+                "EDGE_ALLOW_INSECURE_AUTH":  "true"
+            }
 }

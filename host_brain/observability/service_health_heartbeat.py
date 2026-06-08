@@ -43,8 +43,7 @@ _HEALTH_SID_TO_HEARTBEAT_SID: Dict[str, str] = {
     "host.governor.decision":         "llm_gateway",       # governor 依赖 LLM，映射到 llm_gateway
     "host.skills.loader":             "scheduler",          # skills loader 映射到 scheduler
     "host.integrations.llm_gateway":  "llm_gateway",
-    "host.retrieval.embedding":       "embedding",
-    "host.retrieval.reranker":        "reranker",
+    "host.retrieval.recall_fusion":   "recall_fusion",
     # Edge 侧映射
     "edge.rpc.gateway":               "edge_rpc",
     "edge.rpc.asr":                   "asr",
@@ -652,6 +651,33 @@ async def prime_core_service_cache_once() -> None:
     _write_core_service_cache(now_ts=now_ts, edge_result=edge_result, host_result=host_result)
 
 
+def _resource_gate_llm_probe_decision() -> Dict[str, Any]:
+    try:
+        from host_brain.app.dependencies import get_resource_manager  # noqa: PLC0415
+
+        manager = get_resource_manager(create_if_missing=False)
+    except Exception as exc:
+        logger.debug("Heartbeat resource gate unavailable: %s", exc)
+        return {"allowed": True}
+    if manager is None or not hasattr(manager, "assess_background_task"):
+        return {"allowed": True}
+    try:
+        return dict(
+            manager.assess_background_task(
+                task_id="service_health_heartbeat_llm_probe",
+                priority="LOW",
+                task_type="heartbeat_llm",
+                uses_llm=True,
+                uses_gpu=False,
+                reason="service_health_heartbeat",
+            )
+            or {"allowed": True}
+        )
+    except Exception as exc:
+        logger.debug("Heartbeat resource gate check failed: %s", exc)
+        return {"allowed": True}
+
+
 async def run_once() -> None:
     """执行一轮心跳探测并更新缓存。
 
@@ -672,12 +698,23 @@ async def run_once() -> None:
         logger.debug("Heartbeat Host probe failed (will cache DOWN): %s", exc)
         host_result = {"overall_status": "DOWN", "latency_ms": None, "sub_services": {}}
 
-    # LLM 节点独立探活
-    try:
-        llm_results = await _probe_llm_nodes()
-    except Exception as exc:
-        logger.debug("Heartbeat LLM probe failed (will cache DOWN): %s", exc)
-        llm_results = {}
+    # LLM 节点独立探活：资源高压时由资源管家延后，避免心跳探活与主链/后台 LLM 抢窗口。
+    llm_gate = _resource_gate_llm_probe_decision()
+    if bool(llm_gate.get("allowed", True)):
+        try:
+            llm_results = await _probe_llm_nodes()
+        except Exception as exc:
+            logger.debug("Heartbeat LLM probe failed (will cache DOWN): %s", exc)
+            llm_results = {}
+    else:
+        detail = (
+            "resource gate deferred heartbeat llm probe: "
+            f"{llm_gate.get('reason_code') or 'RESOURCE_PRESSURE_DEFERRED'}"
+        )
+        llm_results = {
+            sid: {"status": "DEFERRED", "latency_ms": None, "detail": detail}
+            for sid in LLM_NODE_IDS
+        }
 
     _write_core_service_cache(now_ts=now_ts, edge_result=edge_result, host_result=host_result)
     host_overall = host_result.get("overall_status", "DOWN")

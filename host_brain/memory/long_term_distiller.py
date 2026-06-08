@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import uuid
 from dataclasses import dataclass, field
 from typing import Any
@@ -51,7 +52,7 @@ DEFAULT_DISTILL_TOPICS: list[str] = [
 EMOTION_RELATIONSHIP_PROMPT_TEMPLATE = """
 请根据以下对话记忆片段，蒸馏出用户与 AI 之间的情感关系演变摘要。
 重点关注：
-1. 情感关系的发展阶段（陌生→相识→朋友→挚友）
+1. 情感关系的发展阶段（关系好的兄妹→亲近兄妹→亲密恋人→灵魂伴侣）
 2. 关键情感转折点（第一次深度对话、情感支持事件等）
 3. 用户对 AI 的情感态度变化
 4. AI 对用户情感需求的响应模式
@@ -339,6 +340,64 @@ class LongTermMemoryDistiller:
             _logger.warning("get_pending_proposals failed: %s", exc)
             return []
 
+    def backfill_pending_proposal_content(self, *, limit: int = 100) -> dict[str, Any]:
+        """补齐旧版蒸馏提案缺失的 title/tags/body，确保前端可审核。"""
+        if self._ledger is None or not hasattr(self._ledger, "list_proposals"):
+            return {"updated": 0, "skipped": 0, "errors": ["ledger unavailable"]}
+        if not hasattr(self._ledger, "update_proposal_content"):
+            return {"updated": 0, "skipped": 0, "errors": ["ledger update_proposal_content unavailable"]}
+
+        try:
+            proposals, _ = self._ledger.list_proposals(
+                status="pending",
+                limit=max(1, min(int(limit), 100)),
+                offset=0,
+            )
+        except Exception as exc:
+            return {"updated": 0, "skipped": 0, "errors": [str(exc)]}
+
+        updated = 0
+        skipped = 0
+        errors: list[str] = []
+        for proposal in proposals:
+            if str(proposal.get("proposer_node_id") or "") != "long_term_distiller":
+                skipped += 1
+                continue
+            if str(proposal.get("proposed_body") or "").strip():
+                skipped += 1
+                continue
+            parsed = _parse_distillation_proposal_summary(str(proposal.get("summary") or ""))
+            if parsed is None:
+                skipped += 1
+                continue
+            topic = parsed["topic"]
+            semantic_id = parsed["semantic_id"]
+            summary_text = self._get_semantic_summary(semantic_id)
+            if not summary_text:
+                skipped += 1
+                continue
+            source_count = int(parsed.get("source_count") or self._infer_source_count(semantic_id))
+            body = self._build_proposal_body(
+                topic=topic,
+                summary=summary_text,
+                semantic_id=semantic_id,
+                source_count=source_count,
+            )
+            try:
+                ok = self._ledger.update_proposal_content(
+                    str(proposal.get("proposal_id") or ""),
+                    proposed_title=f"长期记忆蒸馏：{topic[:30]}",
+                    proposed_tags=["long_term_distill", "auto_generated", topic[:20]],
+                    proposed_body=body,
+                )
+                if ok:
+                    updated += 1
+                else:
+                    skipped += 1
+            except Exception as exc:
+                errors.append(f"{proposal.get('proposal_id')}: {exc}")
+        return {"updated": updated, "skipped": skipped, "errors": errors}
+
     # ── 内部方法 ──────────────────────────────────────────────────────────────
 
     def _submit_canon_proposal(
@@ -477,6 +536,18 @@ class LongTermMemoryDistiller:
         except Exception:
             return False
 
+    def _infer_source_count(self, semantic_id: str) -> int:
+        if self._ledger is None or not hasattr(self._ledger, "get_semantic_memory_by_id"):
+            return 0
+        try:
+            mem = self._ledger.get_semantic_memory_by_id(semantic_id)
+        except Exception:
+            return 0
+        if not isinstance(mem, dict):
+            return 0
+        source_ids = mem.get("source_memory_ids")
+        return len(source_ids) if isinstance(source_ids, list) else 0
+
     def _build_proposal_body(
         self,
         *,
@@ -537,6 +608,21 @@ class LongTermMemoryDistiller:
             )
 
 
+def _parse_distillation_proposal_summary(summary: str) -> dict[str, Any] | None:
+    text = str(summary or "").strip()
+    semantic_match = re.search(r"semantic_id=([A-Za-z0-9_:-]+)", text)
+    if semantic_match is None:
+        return None
+    topic_match = re.search(r"蒸馏主题=(['\"])(.*?)\1", text)
+    source_match = re.search(r"source_count=(\d+)", text)
+    topic = topic_match.group(2) if topic_match is not None else "长期记忆蒸馏"
+    return {
+        "topic": topic,
+        "semantic_id": semantic_match.group(1),
+        "source_count": int(source_match.group(1)) if source_match is not None else 0,
+    }
+
+
 # ---------------------------------------------------------------------------
 # 调度器任务工厂
 # ---------------------------------------------------------------------------
@@ -555,7 +641,7 @@ def make_distillation_task_config() -> "SchedulerTaskConfig":
     return SchedulerTaskConfig(
         task_id="long_term_memory_distillation",
         trigger_mode=TriggerMode.CRON,
-        trigger_config={"hour": 3, "minute": 0},
+        trigger_config={"hour": 3, "minute": 0, "catch_up_window_minutes": 720},
         intent_template={
             "skill_name": "long_term_memory_distillation",
             "args": {"top_k": 5, "max_proposals": MAX_PROPOSALS_PER_CYCLE},
@@ -565,6 +651,12 @@ def make_distillation_task_config() -> "SchedulerTaskConfig":
         enabled=True,
         max_consecutive_failures=3,
         description="每日 03:00 执行长期记忆蒸馏，将 EpisodicMemory 蒸馏为 Canon 提案（M13-B）",
+        resource_profile={
+            "resource_class": "memory_heavy",
+            "uses_llm": True,
+            "uses_gpu": False,
+            "advisory_policy": "rule",
+        },
     )
 
 

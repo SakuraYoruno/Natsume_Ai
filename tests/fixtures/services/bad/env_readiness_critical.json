@@ -1,55 +1,55 @@
-{
-  "request_id": "req_env_ready_002",
-  "env": "prod",
-  "node_inventory_ref": "tests/fixtures/services/good/node_inventory_9.json",
-  "host_env": {
-    "Natsume_ENV": "prod",
-    "HOST_LLM_PROVIDER": "openai",
-    "HOST_COLD_START_ALLOWED": "false",
-    "HOST_ENABLE_RETRIEVAL": "true",
-    "HOST_ENABLE_VISION": "true"
-  },
-  "edge_env": {
-    "Natsume_ENV": "prod",
-    "EDGE_RPC_GATEWAY_ENABLED": "true",
-    "EDGE_FALLBACK_LLM_ENABLED": "true",
-    "EDGE_ASR_ENABLED": "true",
-    "EDGE_TTS_ENABLED": "true",
-    "EDGE_BARGE_IN_ENABLED": "true",
-    "EDGE_RESOURCE_GATE_ENABLED": "true"
-  },
-  "dependency_probes": {
-    "host.integrations.llm_gateway": {
-      "available": false,
-      "unavailable_kind": "dependency",
-      "detail": "llm gateway hard down"
-    }
-  },
-  "key_profiles": [
-    {
-      "provider": "openai",
-      "node_id": "natsu-node-01",
-      "scope": "host.llm.gateway",
-      "secret_ref": "sec://openai/node01",
-      "rotation_epoch": 20270301,
-      "status": "active"
-    }
-  ],
-  "graph_runtime": {
-    "status": "FAILED",
-    "reason_code": "ORCH_NODE_MISSING",
-    "detail": "graph node binding missing in prod"
-  },
-  "drill_summaries": [
-    {
-      "scenario_id": "drill.rollback.conflict",
-      "status": "FAILED",
-      "reason_code_chain": [
-        "RELEASE_ROLLBACK_TARGET_MISSING"
-      ],
-      "replay_ref": "request::req_drill_002",
-      "stage": "S_RELEASE_CHECKLIST",
-      "model_profile_id": null
-    }
-  ]
+﻿{
+    "request_id":  "req_env_ready_002",
+    "env":  "prod",
+    "node_inventory_ref":  "tests/fixtures/services/good/node_inventory_9.json",
+    "host_env":  {
+                     "Natsume_ENV":  "prod",
+                     "HOST_LLM_PROVIDER":  "openai",
+                     "HOST_COLD_START_ALLOWED":  "false",
+                     "HOST_ENABLE_RETRIEVAL":  "true",
+                     "HOST_ENABLE_VISION":  "true"
+                 },
+    "edge_env":  {
+                     "Natsume_ENV":  "prod",
+                     "EDGE_RPC_GATEWAY_ENABLED":  "true",
+                     "EDGE_FALLBACK_LLM_ENABLED":  "true",
+                     "EDGE_ASR_ENABLED":  "true",
+                     "EDGE_TTS_ENABLED":  "true",
+                     "EDGE_BARGE_IN_ENABLED":  "true",
+                     "EDGE_RESOURCE_GATE_ENABLED":  "true"
+                 },
+    "dependency_probes":  {
+                              "host.integrations.llm_gateway":  {
+                                                                    "available":  false,
+                                                                    "unavailable_kind":  "dependency",
+                                                                    "detail":  "llm gateway hard down"
+                                                                }
+                          },
+    "key_profiles":  [
+                         {
+                             "provider":  "openai",
+                             "node_id":  "natsu-node-01",
+                             "scope":  "host.llm.gateway",
+                             "secret_ref":  "sec://openai/node01",
+                             "rotation_epoch":  20270301,
+                             "status":  "active"
+                         }
+                     ],
+    "graph_runtime":  {
+                          "status":  "FAILED",
+                          "reason_code":  "ORCH_NODE_MISSING",
+                          "detail":  "graph node binding missing in prod"
+                      },
+    "drill_summaries":  [
+                            {
+                                "scenario_id":  "drill.rollback.conflict",
+                                "status":  "FAILED",
+                                "reason_code_chain":  [
+                                                          "RELEASE_ROLLBACK_TARGET_MISSING"
+                                                      ],
+                                "replay_ref":  "request::req_drill_002",
+                                "stage":  "S_RELEASE_CHECKLIST",
+                                "model_profile_id":  null
+                            }
+                        ]
 }

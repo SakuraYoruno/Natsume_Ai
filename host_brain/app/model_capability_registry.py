@@ -75,7 +75,7 @@ def resolve_model_capability_profile(*, provider_name: str, model_id: str, role:
         "provider_name": normalized_provider or "unknown",
         "model_id": model_id,
         "modality": "text",
-        "reasoning_tier": "medium" if normalized_role in {"chat_agent", "cortex_orchestrator"} else "low",
+        "reasoning_tier": "medium" if normalized_role in {"surface_reply", "cortex_orchestrator"} else "low",
         "context_tier": "unknown",
         "cost_tier": "unknown",
         "stability_tier": "unknown",

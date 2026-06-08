@@ -2,8 +2,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from host_brain.app import multimodal_observer_backends as mm_backends
 from host_brain.app.multimodal_observer import MultimodalObserver
-from host_brain.app.multimodal_observer_backends import MultimodalObserverInput
+from host_brain.app.multimodal_observer_backends import (
+    MultimodalObserverInput,
+    OpenAICompatMultimodalBackend,
+    _derive_meme_intent,
+    _coerce_safety_flags,
+)
 
 
 class _StaticBackend:
@@ -281,7 +287,7 @@ def test_multimodal_observer_emoji_only_without_question_prefers_social_reply() 
             {
                 "attachment_id": "att_emoji_only",
                 "type": "emoji",
-                "local_path": str(Path(__file__)),
+                "remote_url": "https://example.com/sticker.png",
                 "ocr_text": "hello",
                 "caption": "动漫女孩在挥手",
             }
@@ -291,6 +297,35 @@ def test_multimodal_observer_emoji_only_without_question_prefers_social_reply() 
 
     assert result["observations"]["primary_modality"] == "emoji"
     assert "轻松打趣" in str(result["summary_for_chat"])
+    assert result["observations"]["social_signal"] == "轻松打趣"
+    assert result["observations"]["items"][0]["backend"] == "multimodal_model"
+    assert len(model_backend.calls) == 1
+
+
+def test_multimodal_observer_emoji_placeholder_without_media_uses_rule_fallback() -> None:
+    model_backend = _StaticBackend(supported_types={"emoji"}, result_factory=_model_result)
+    fallback_backend = _StaticBackend(supported_types={"image", "file", "voice", "video", "emoji"}, result_factory=_fallback_result)
+    observer = MultimodalObserver(model_backend=model_backend, fallback_backend=fallback_backend)
+
+    result = observer.observe(
+        request_id="req_mm_emoji_no_media",
+        platform="qq",
+        conversation_id="qq_dm_mm_emoji_no_media",
+        user_text="[表情消息]",
+        attachments=[
+            {
+                "attachment_id": "att_emoji_no_media",
+                "type": "emoji",
+                "caption": "[表情消息]",
+            }
+        ],
+        render_target_lang="zh",
+    )
+
+    assert result["observations"]["primary_modality"] == "emoji"
+    assert str(result["summary_for_chat"]) == "表情包社交输入"
+    assert result["observations"]["items"][0]["backend"] == "rule_fallback"
+    assert len(model_backend.calls) == 0
 
 
 def test_multimodal_observer_emotive_image_without_question_prefers_social_reply() -> None:
@@ -533,3 +568,99 @@ def test_multimodal_observer_background_video_over_limit_uses_metadata_fallback(
     assert result["observations"]["items"][0]["backend"] == "rule_fallback"
     assert "VIDEO_DURATION_EXCEEDS_MODEL_LIMIT" in result["observations"]["items"][0]["safety_flags"]
     assert len(model_backend.calls) == 0
+
+
+def test_multimodal_remote_image_url_is_embedded_as_data_url(monkeypatch) -> None:  # noqa: ANN001
+    class _Response:
+        headers = {"content-type": "image/png"}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self, _limit: int) -> bytes:
+            return b"\x89PNG\r\n\x1a\nfake"
+
+    captured: dict[str, object] = {}
+
+    def _fake_urlopen(request, *, timeout):  # noqa: ANN001
+        captured["url"] = request.full_url
+        captured["timeout"] = timeout
+        return _Response()
+
+    monkeypatch.setattr(mm_backends.urllib.request, "urlopen", _fake_urlopen)
+    backend = OpenAICompatMultimodalBackend(
+        provider_name="gemini",
+        sync_model_id="gemini-2.5-flash-lite",
+        async_model_id="gemini-2.5-pro",
+    )
+
+    parts = backend._build_image_content_parts({"remote_url": "http://127.0.0.1:3000/tmp/qq-image.png"})
+
+    assert captured["url"] == "http://127.0.0.1:3000/tmp/qq-image.png"
+    assert parts[0]["image_url"]["url"].startswith("data:image/png;base64,")
+
+
+def test_multimodal_remote_image_fetch_failure_does_not_forward_expiring_url(monkeypatch) -> None:  # noqa: ANN001
+    def _fake_urlopen(_request, *, timeout):  # noqa: ANN001, ARG001
+        raise mm_backends.urllib.error.HTTPError(
+            url="https://multimedia.nt.qq.com.cn/download",
+            code=400,
+            msg="Bad Request",
+            hdrs=None,
+            fp=None,
+        )
+
+    monkeypatch.delenv("HOST_MULTIMODAL_ALLOW_REMOTE_URL_FALLBACK", raising=False)
+    monkeypatch.setattr(mm_backends.urllib.request, "urlopen", _fake_urlopen)
+    backend = OpenAICompatMultimodalBackend(
+        provider_name="gemini",
+        sync_model_id="gemini-2.5-flash-lite",
+        async_model_id="gemini-2.5-pro",
+    )
+
+    parts = backend._build_image_content_parts({"remote_url": "https://multimedia.nt.qq.com.cn/download?fileid=expired"})
+
+    assert parts == []
+
+
+def test_multimodal_backend_uses_dedicated_multimodal_tier(monkeypatch) -> None:  # noqa: ANN001
+    captured: dict[str, object] = {}
+
+    class _Result:
+        pool_exhausted = False
+        content = '{"visual_summary":"一张测试图","confidence":0.8}'
+
+    def _fake_complete(**kwargs):  # noqa: ANN003
+        captured.update(kwargs)
+        return _Result()
+
+    monkeypatch.setattr("host_brain.integrations.llm_helpers.complete_llm_with_pool_sync", _fake_complete)
+    backend = OpenAICompatMultimodalBackend(
+        provider_name="gemini",
+        sync_model_id="gemini-2.5-flash-lite",
+        async_model_id="gemini-2.5-pro",
+    )
+
+    raw = backend._invoke_model(messages=[{"role": "user", "content": "hello"}], model_id="gemini-2.5-flash-lite")
+
+    assert raw
+    assert captured["scene_type"] == "MULTIMODAL"
+    assert captured["cognitive_tier"] == "MULTIMODAL"
+    assert captured["provider_name"] == "gemini"
+
+
+def test_meme_intent_does_not_treat_white_as_hi() -> None:
+    assert (
+        _derive_meme_intent(
+            visual_summary='The image contains the text "NATSUME 42" in black font on a white background.',
+            visible_text="NATSUME 42",
+        )
+        == ""
+    )
+
+
+def test_multimodal_safety_flags_accepts_boolean_mapping() -> None:
+    assert _coerce_safety_flags({"is_nsfw": False, "is_violent": "false", "needs_review": True}) == ["needs_review"]

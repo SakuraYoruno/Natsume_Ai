@@ -166,7 +166,7 @@ class TestProactiveTalkIdleThreshold:
 class TestProactiveTalkQABlock:
     """T-PROACT-04：内容含执行 intent → LLM 生成空内容模拟 QA 拦截。"""
 
-    def test_empty_greeting_rejected(self) -> None:
+    def test_empty_greeting_falls_back_to_template(self) -> None:
         pusher, _ = _make_ui_pusher()
         result = execute_proactive_talk(
             args={"idle_threshold_ms": 1000},
@@ -176,9 +176,9 @@ class TestProactiveTalkQABlock:
                 ui_pusher=pusher,
             ),
         )
-        from host_brain.core.errors import SCHED_NO_CONTENT
-        assert result["status"] == STATUS_REJECTED
-        assert result["reason_code"] == SCHED_NO_CONTENT
+        assert result["status"] == STATUS_EXECUTED
+        assert result["template_fallback_used"] is True
+        assert result["template_fallback_reason"] == "LLM_EMPTY_OUTPUT"
 
     def test_llm_unavailable_uses_template(self) -> None:
         """无 LLM 时使用降级模板，仍可发送。"""
@@ -393,6 +393,27 @@ class TestProactiveTalkRenderPolicy:
         assert "render_policy blocked proactive_talk" in result["detail"]
         assert result["render_policy"]["allow_proactive_after_reply"] is False
         assert pushed == []
+
+    def test_withdrawn_render_policy_softens_without_blocking_allowed_proactive(self) -> None:
+        pusher, pushed = _make_ui_pusher()
+
+        result = execute_proactive_talk(
+            args={"idle_threshold_ms": 1000},
+            context=_ctx(
+                last_interaction_ts=0,
+                llm_generator=_make_llm_generator("我在，过来轻轻看你一眼。"),
+                ui_pusher=pusher,
+                render_policy={
+                    "allow_proactive_after_reply": True,
+                    "should_be_withdrawn": True,
+                    "warmth_ceiling": 0.45,
+                },
+            ),
+        )
+
+        assert result["status"] == STATUS_EXECUTED
+        assert result["render_policy"]["should_be_withdrawn"] is True
+        assert pushed[0]["type"] == "proactive_talk"
 
     def test_render_policy_hard_guard_softens_proactive_message(self) -> None:
         pusher, pushed = _make_ui_pusher()

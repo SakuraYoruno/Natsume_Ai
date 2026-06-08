@@ -25,7 +25,7 @@ param(
   [string]$EdgeSshUser = "",
   [int]$EdgeSshPort = 22,
   [string]$EdgeRepoPath = "",
-  [string]$EdgeRemoteShell = "pwsh",
+  [string]$EdgeRemoteShell = "powershell",
 
   [string]$EdgeHealthUrl = "",
   [int]$EdgeHealthWaitSeconds = 20,
@@ -51,12 +51,12 @@ function Invoke-JsonScript {
     throw "script not found: $ScriptPath"
   }
 
-  $invokeArgs = @()
+  $invokeArgs = @{}
   foreach ($key in $ArgsMap.Keys) {
     $value = $ArgsMap[$key]
     if ($value -is [bool]) {
       if ($value) {
-        $invokeArgs += "-$key"
+        $invokeArgs[$key] = $true
       }
       continue
     }
@@ -69,8 +69,7 @@ function Invoke-JsonScript {
     if ($value -is [int] -and $value -le 0) {
       continue
     }
-    $invokeArgs += "-$key"
-    $invokeArgs += $value
+    $invokeArgs[$key] = $value
   }
 
   $raw = & $ScriptPath @invokeArgs

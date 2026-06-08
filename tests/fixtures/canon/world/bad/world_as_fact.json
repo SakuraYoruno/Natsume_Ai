@@ -1,7 +1,9 @@
-{
-  "doc_id": "world_bad_fact",
-  "title": "Invalid World Canon",
-  "tags": ["invalid"],
-  "body": "The operation has been executed and confirmed.",
-  "status": "active"
+﻿{
+    "doc_id":  "world_bad_fact",
+    "title":  "Invalid World Canon",
+    "tags":  [
+                 "invalid"
+             ],
+    "body":  "The operation has been executed and confirmed.",
+    "status":  "active"
 }

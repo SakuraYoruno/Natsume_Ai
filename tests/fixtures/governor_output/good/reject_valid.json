@@ -1,13 +1,17 @@
-{
-  "decision": "REJECT",
-  "reason_code": "INTENT_SCHEMA_INVALID",
-  "rule_trace": [
-    {
-      "gate_id": "INTENT_VALIDATION",
-      "hit": true,
-      "reason_hint": "INTENT_SCHEMA_INVALID"
-    }
-  ],
-  "tokens": {},
-  "snapshot_refs": {}
+﻿{
+    "decision":  "REJECT",
+    "reason_code":  "INTENT_SCHEMA_INVALID",
+    "rule_trace":  [
+                       {
+                           "gate_id":  "INTENT_VALIDATION",
+                           "hit":  true,
+                           "reason_hint":  "INTENT_SCHEMA_INVALID"
+                       }
+                   ],
+    "tokens":  {
+
+               },
+    "snapshot_refs":  {
+
+                      }
 }

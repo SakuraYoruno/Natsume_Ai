@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react'
 import { BookOpen, Lock, Search } from 'lucide-react'
 import EmptyStateCard from '../EmptyStateCard.jsx'
+import LoadingNotice from '../LoadingNotice.jsx'
 
 const MANIFEST_STATUS_LABELS = {
   ACTIVE: '生效中',
@@ -92,9 +93,7 @@ export default function CanonDocumentsSection({
       </div>
 
       {loading || refreshing ? (
-        <div className="rounded-lg border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-700">
-          文档加载中…
-        </div>
+        <LoadingNotice>正在同步主设定文档…</LoadingNotice>
       ) : filteredDocuments.length === 0 ? (
         <EmptyStateCard title="暂无主设定文档" hint="当前没有匹配的文档结果。" className="p-8" />
       ) : (

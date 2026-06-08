@@ -1,412 +1,253 @@
 受众：MASTER
 标题：host_brain/retrieval/ 层接口契约（当前代码实况）
 
-版本：v2.0
-日期：2026-04-19
+版本：v3.0
+日期：2026-05-30
 归属：docs/15_theory/
 
 ---
 
-定位：本文描述当前代码里的 `host_brain/retrieval/` 层契约，而不是早期“`Embed -> RecallFusion -> Rerank -> EvidencePack` 四段直连”简化口径。
-若与旧文档冲突，以本文、`docs/50_project/arch/AGENTIC_RAG_ARCHITECTURE.md` 和实际代码为准。
+定位：本文描述当前 `host_brain/retrieval/` 层的真实契约。**v2.0 描述的 Agentic RAG pipeline / orchestrator stack（QueryPlanner / RetrievalPipelineContract / EvidenceEvaluator / AgenticRetrievalLoop / RetrievalOrchestrator）已从代码中整体移除**，请以本文与代码为准。
 
 ## 0. 代码证据入口
 
-- `host_brain/retrieval/query_planner.py`
-- `host_brain/retrieval/agentic_retrieval_loop.py`
-- `host_brain/retrieval/evidence_evaluator.py`
-- `host_brain/retrieval/pipeline.py`
-- `host_brain/retrieval/orchestrator.py`
-- `host_brain/retrieval/recall_fusion.py`
-- `host_brain/retrieval/recall_fusion_config.py`
-- `host_brain/retrieval/reranker.py`
-- `host_brain/retrieval/evidence_pack.py`
-- `host_brain/app/chat_retrieval_helpers.py`
-- `host_brain/tribe/hippocampus_agent.py`
+- `host_brain/retrieval/__init__.py`
+- `host_brain/retrieval/recall_fusion.py`（`RecallFusionServiceContract`）
+- `host_brain/retrieval/recall_fusion_stores.py`（多路 store 搜索实现）
+- `host_brain/retrieval/recall_fusion_config.py`（`RecallRuntimeConfig` / `RecallRouteConfig` 装载）
+- `host_brain/retrieval/recall_fusion_utils.py`（候选排序、过滤、规整工具）
+- `host_brain/retrieval/full_text_searcher.py`（FTS5 全文检索）
+- `host_brain/retrieval/hybrid_fusion.py`（`HybridFusionStrategy` 向量 + FTS 融合）
+- `host_brain/retrieval/recall_schemas.py`（数据 schema）
+- `host_brain/retrieval/audit_preview.py`（审计预览）
+- `host_brain/retrieval/markdown_kb_store.py`（Markdown 知识库召回）
+- `host_brain/persona/surface_memory_recall.py`（消费者：surface 主链记忆召回）
 
 ---
 
 ## 一、当前层定位
 
-`host_brain/retrieval/` 现在不是一个“被动四段式工具箱”，而是当前 Agentic RAG 主体：
+retrieval 层只剩一件事：**多路召回 + 混合融合 + 候选过滤**，结果上交给 `surface_memory_recall` 决定是否注入主链。
 
-```text
-/v1/chat 或 /v1/host/input
-  -> agent_runtime_shared / chat_retrieval_helpers
-  -> HippocampusAgent.recall
-  -> RetrievalOrchestrator.arun
-  -> RetrievalPipelineContract.run
+```
+RecallFusionServiceContract.recall(query, embedding, intent_id, ...)
+  ├── 多路 store 搜索（vector / FTS / canon / artifact / life_episode / semantic / bond）
+  ├── 混合融合（HybridFusionStrategy：vector_weight + fts_weight）
+  ├── 候选过滤（anaphoric selection / specific item reference / broad collection / deep review）
+  └── 输出 RecallFusionResult（候选列表 + meta）
+↓
+host_brain/persona/surface_memory_recall.py
+  ├── 决定 RECALL_POLICY_MUST / MAY / NO
+  ├── 应用 surface_memory_recall_decision_matrix
+  └── 输出 MemoryRecallPacket（必要事实 + 时间锚 + 引语，已压缩）
+↓
+SurfaceRuntime（接收 fact list，不接收原始 candidate）
 ```
 
-这意味着：
+retrieval 层**不**再做：
 
-- 当前检索入口已经不在 `main_chain.py`
-- `retrieval/` 层负责 QueryPlanner、可多轮 recall、证据评估、去重、重排、EvidencePack 和缓存包装
-- prompt 注入前还会由主链继续做 `prompt_filter` 与 `RecallPackBuilder`
+- ❌ 多步 agent loop 检索（旧 `AgenticRetrievalLoop`）
+- ❌ 复杂的 evidence evaluator + 建议机制
+- ❌ orchestrator 路径分类
+- ❌ rerank-as-a-service
+- ❌ 给 main chain 直接喂候选
 
 ---
 
 ## 二、模块清单（当前主模块）
 
-| 模块文件 | 当前职责 |
+| 文件 | 当前职责 |
 |---|---|
-| `query_planner.py` | 纯规则规划：意图识别、store 路由、改写 query、决定 `skip_retrieval / max_rounds / time_lookback_days` |
-| `agentic_retrieval_loop.py` | 多轮检索循环：执行 recall、读取评估结果、必要时改写 query 或扩 store |
-| `evidence_evaluator.py` | 检查当前证据是否足够，给出 `proceed / retry_with_rewrite / expand_stores` |
-| `pipeline.py` | 检索总管线：Embedding → Agentic loop → SemanticDedup → Rerank → EvidencePack |
-| `orchestrator.py` | 统一请求/结果契约、线程池包装、路径分类、缓存、`retrieval_bundle` 汇总 |
-| `recall_fusion.py` | 多 store recall 执行 |
-| `recall_fusion_config.py` | recall 路由配置加载与 node/language 过滤 |
-| `reranker.py` | 候选重排 |
-| `evidence_pack.py` | 证据包构造 |
-| `embedding.py` | embedding provider 路由与 fallback |
+| `__init__.py` | 仅导出 `RecallFusionServiceContract` 及配置类型，移除旧 Agentic stack 导出 |
+| `recall_fusion.py` | `RecallFusionServiceContract` 主类（recall 入口、路由分发、混合融合、anaphoric 过滤） |
+| `recall_fusion_stores.py` | 各路 store 搜索的具体实现（sqlite_ledger / life_episode / semantic_memory / neo4j_bond / world_canon / artifact_vault） |
+| `recall_fusion_config.py` | `load_recall_runtime_config(...)` + `resolve_recall_routes(...)`：从配置文件加载多路召回路由 |
+| `recall_fusion_utils.py` | 候选排序、规整、文本相似度等纯函数 |
+| `full_text_searcher.py` | `FullTextSearcher`（FTS5 全文检索器） |
+| `hybrid_fusion.py` | `HybridFusionStrategy`（vector + FTS 加权融合） |
+| `recall_schemas.py` | `RecallFusionResult` / `RecallRouteConfig` / `RecallRuntimeConfig` 等 schema |
+| `audit_preview.py` | 召回结果的审计预览 |
+| `markdown_kb_store.py` | Markdown 知识库召回存储 |
 
 ---
 
-## 三、QueryPlanner 当前契约
+## 三、`RecallFusionServiceContract` 当前契约
 
-### 3.1 当前 store map
-
-`query_planner.py` 当前 `ALL_STORE_IDS` 为 5 路：
-
-- `episodic_vector`
-- `sqlite_ledger`
-- `neo4j_bond`
-- `world_canon`
-- `artifact_vault`
-
-文件内已明确：
-
-- `style_canon` 不再走这里的检索路由，而是常驻注入
-- `persona_utterance` 不在当前主 store map 内，而走独立通道
-
-### 3.2 意图到 store 的当前路由
-
-| intent | target_stores |
-|---|---|
-| `greeting` | 空，跳过检索 |
-| `phatic` | `episodic_vector` |
-| `chat` | `episodic_vector` |
-| `recall_memory` | `episodic_vector`, `sqlite_ledger` |
-| `emotion` | `neo4j_bond`, `episodic_vector` |
-| `affection` | `neo4j_bond`, `episodic_vector` |
-| `knowledge` | `world_canon` |
-| `tool` | `artifact_vault` |
-| `complex` | 全量 5 路 |
-
-### 3.3 最大轮次
-
-| intent | max_rounds |
-|---|---|
-| `greeting` | `0` |
-| `phatic` | `1` |
-| `chat` | `1` |
-| `recall_memory` | `2` |
-| `emotion` | `2` |
-| `affection` | `1` |
-| `knowledge` | `1` |
-| `tool` | `1` |
-| `complex` | `3` |
-
-### 3.4 规划结果数据类
-
-当前 `QueryPlan` 的关键字段：
+### 3.1 构造参数
 
 ```python
-QueryPlan(
-    original_query: str,
-    rewritten_queries: list[str],
-    intent: str,
-    target_stores: list[str],
-    skip_retrieval: bool,
-    max_rounds: int,
-    time_lookback_days: int | None,
+RecallFusionServiceContract(
+    *,
+    ledger: SQLiteLedger | None = None,          # 审计 ledger（用于 sqlite_ledger / life_episode 路由）
+    chroma_client: ChromaClientProtocol | None = None,  # Chroma 向量库
+    neo4j_client: Any | None = None,              # Bond 图（可选）
+    world_store: Any | None = None,                # World canon 存储
+    artifact_vault: Any | None = None,             # Artifact 库
+    runtime_config: RecallRuntimeConfig | None = None,  # 多路路由配置
+    node_id: str | None = None,                    # 节点选择器（按节点过滤路由）
+    available: bool = True,
+    use_hybrid: bool = True,                       # 是否启用 vector + FTS 混合
+    vector_weight: float = DEFAULT_VECTOR_WEIGHT,
+    fts_weight: float = DEFAULT_FTS_WEIGHT,
+    fts_db_path: str | None = None,
 )
 ```
 
----
+### 3.2 当前 store 路由
 
-## 四、RetrievalPipelineContract 当前契约
+由 `RecallRouteConfig` 配置启用，store 名空间：
 
-### 4.1 真实执行顺序
+| Store name | 实现 | 来源 |
+|---|---|---|
+| `sqlite_ledger` | `_search_sqlite_ledger` | `audit/sqlite_ledger`（Recall ops 审计落盘） |
+| `life_episode` | `_search_life_episode` | `memory/life_memory` 的 SQLite life episode 表 |
+| `semantic_memory` | `_search_semantic_memory` | 长期蒸馏出的语义记忆 |
+| `neo4j_bond` | `_search_neo4j_bond` | Bond 关系图（可选） |
+| `world_canon` | `_search_world_canon` | World canon vector 存储 |
+| `artifact_vault` | `_search_artifact_vault` | Artifact 库（生成产物） |
 
-当前 `RetrievalPipelineContract.run()` 不再是旧文档里的四步直连，而是：
+每条路由由 `RecallRouteConfig` 描述：
 
-```text
-QueryPlan 归一化
-  -> EmbeddingService.embed
-  -> AgenticRetrievalLoop.retrieve
-       -> RecallFusionService.recall
-       -> EvidenceEvaluator.evaluate
-  -> SemanticDedup.dedup
-  -> RerankerService.rerank
-  -> EvidencePackService.build_pack
-  -> output 汇总
-```
+- `name`（store 名）
+- `top_k`（每路返回数）
+- `node_selector`（按 `node_id` 过滤生效节点）
+- `render_target_lang_selector`（按渲染目标语言过滤）
+- 其它 store 专属参数（如 `collection` for world_canon）
 
-其中：
-
-- `AgenticRetrievalLoop` 会根据评估结果决定是否追加一轮
-- `phatic / affection` 这类低风险路径可能走 fast-path rerank
-- `SemanticDedup` 已经是当前主管线的一环
-
-### 4.2 `run()` 关键输入
-
-当前 `run()` 会接收的不只是 query，还包括：
-
-- `request_id`
-- `query`
-- `intent_id`
-- `person_id`
-- `session_id`
-- `top_k`
-- `emotion_context`
-- `mood_state`
-- `bond_summary`
-- `motive_state`
-- `render_target_lang`
-- `turn_index`
-- `query_plan`
-- `route_target`
-
-因此当前 retrieval 层已显式感知：
-
-- 对话身份与会话
-- 情感/Bond 相关上下文
-- 目标语言
-- 上游已生成的 query_plan
-
-### 4.3 `RetrievalPipelineResult`
+### 3.3 `recall(...)` 入口
 
 ```python
-RetrievalPipelineResult(
-    success: bool,
-    status: str,
-    reason_code: str | None,
-    stage: str,
-    detail: str,
-    output: dict[str, Any],
-)
-```
-
-当前 `output` 中的核心块包括：
-
-- `embedding`
-- `recall`
-- `rerank`
-- `evidence_pack`
-- `query_plan`
-- `agentic_meta`
-- `adaptive_budget`
-- `reason_chain`
-
----
-
-## 五、EvidenceEvaluator 与 Agentic loop
-
-### 5.1 当前评估阈值
-
-`evidence_evaluator.py` 当前默认阈值：
-
-| 维度 | 默认值 |
-|---|---|
-| 最少证据数 | `2` |
-| top_score 下限 | `0.25` |
-| coverage 下限 | `0.4` |
-
-### 5.2 当前建议类型
-
-- `proceed`
-- `retry_with_rewrite`
-- `expand_stores`
-
-### 5.3 AgenticRetrievalLoop 当前输出
-
-`agentic_retrieval_loop.py` 会产出：
-
-- `queries_used`
-- `rounds`
-- `final_evaluation`
-- `recall_summary`
-- `routes / route_rows / route_errors`
-
-这说明当前 retrieval 层已经真实具备“先检索、再评估、必要时二次检索”的 agentic 行为。
-
----
-
-## 六、RetrievalOrchestrator 当前契约
-
-### 6.1 请求对象
-
-当前 `RetrievalOrchestratorRequest` 关键字段：
-
-```python
-RetrievalOrchestratorRequest(
-    trace_id: str,
-    query: str,
-    session_state: dict[str, Any],
+def recall(
+    self,
+    *,
     request_id: str,
+    query: str,
+    query_embedding: list[float] | tuple[float, ...] | Any,
+    intent_id: str | None = None,
+    intent_kind: str | None = None,
     person_id: str | None = None,
     session_id: str | None = None,
-    intent_id: str | None = None,
-    top_k: int = 8,
-    ts_ms: int | None = None,
-    emotion_context: str | None = None,
-    mood_state: str | None = None,
-    bond_summary: Mapping[str, Any] | None = None,
-    motive_state: Mapping[str, Any] | None = None,
     render_target_lang: str | None = None,
-    turn_index: int = 0,
-    query_plan: QueryPlan | Mapping[str, Any] | None = None,
-    route_target: str = "",
-)
+    now_ts_ms: int | None = None,
+    extra_meta: dict[str, Any] | None = None,
+) -> RecallFusionResult: ...
 ```
 
-### 6.2 结果对象
+执行步骤：
+
+1. 加载 runtime config → 解析当前节点 / 语言下生效的路由列表
+2. 对每条路由调用对应 `_search_*`，得到该路 candidate
+3. 若 `use_hybrid=True`，对 vector candidate 调用 `_apply_hybrid_fusion` 与 FTS 融合
+4. 走过滤链：
+   - `_filter_anaphoric_selection_candidates`：处理"那个 / 这个 / 之前那本"等指代性 query
+   - `_select_recent_anaphoric_life_primary`：从 life episode 中选择最相关的一条
+   - `_query_looks_like_specific_item_reference`：是否像在指特定条目
+   - `_looks_like_broad_collection_selection_query`：是否在选某类集合
+   - `_query_asks_about_deep_review`：是否在问深度评审 / 二次审稿
+5. 输出 `RecallFusionResult`
+
+### 3.4 `RecallFusionResult` 主要字段
+
+- `candidates: list[dict[str, Any]]`：融合后的候选列表
+- `meta: dict[str, Any]`：路由命中、过滤命中、性能 timing
+- `query_features: dict[str, Any]`：query 解析特征（anaphoric / deep_review / specific_item / broad_collection）
+- `policy_hint: str | None`：给 surface_memory_recall 的提示（不强制）
+
+---
+
+## 四、混合融合（HybridFusionStrategy）
+
+`hybrid_fusion.HybridFusionStrategy.fuse(vector_candidates, fts_candidates)`：
+
+- 默认权重：`vector_weight + fts_weight = 1.0`，由 `DEFAULT_VECTOR_WEIGHT` / `DEFAULT_FTS_WEIGHT` 给定
+- 同 ID 候选取最大融合分（vector_score * vector_weight + fts_score * fts_weight）
+- 不同 ID 候选保留两侧 union
+- 输出按融合分降序
+
+`use_hybrid=False` 或 `_fts_searcher is None` 时，直接返回 vector candidates，不做融合。
+
+---
+
+## 五、候选过滤（query feature 决策）
+
+retrieval 层只在"必要时"按 query 特征做候选筛选；**不做语义重排**。
+
+| Query 特征 | 检测函数 | 行为 |
+|---|---|---|
+| Anaphoric selection（"那个/这个 X"） | `_looks_like_anaphoric_selection_query` | 调 `_filter_anaphoric_selection_candidates` 限制候选范围 |
+| Recent anaphoric life | `_select_recent_anaphoric_life_primary` | 优先返回最近一条 life episode |
+| Specific item reference（特定标题） | `_query_looks_like_specific_item_reference` | `_candidate_matches_specific_item_reference` 强制命中 |
+| Broad collection selection | `_looks_like_broad_collection_selection_query` | 保留集合类候选 |
+| Deep review query | `_query_asks_about_deep_review` | 倾向 deep review artifact 路由 |
+| Anaphoric scheduler noise | `_looks_like_anaphoric_scheduler_noise` | 抑制 scheduler 噪声候选 |
+
+具体打分见 `_anaphoric_primary_sort_key` 与 `_candidate_anaphoric_action_priority`。
+
+---
+
+## 六、配置加载（recall_fusion_config）
 
 ```python
-RetrievalOrchestratorResult(
-    success: bool,
-    status: str,
-    reason_code: str | None,
-    path: str,
-    detail: str,
-    trace_id: str,
-    query: str,
-    session_state: dict[str, Any],
-    retrieval_summary: dict[str, Any],
-    retrieval_evidence_items: list[dict[str, Any]],
-    retrieval_bundle: dict[str, Any],
-)
+load_recall_runtime_config(
+    config_path: str | Path | None = None,
+    *,
+    overrides: Mapping[str, Any] | None = None,
+) -> RecallConfigLoadResult
 ```
 
-### 6.3 路径分类
+返回：
 
-当前路径分类仍是：
+- `config: RecallRuntimeConfig`
+- `issues: list[RecallConfigIssue]`：装载告警（不抛异常）
+- `source: dict[str, Any]`：来源信息（用于审计）
 
-- `success`
-- `partial_failure`
-- `all_failure`
+```python
+resolve_recall_routes(
+    config: RecallRuntimeConfig,
+    *,
+    node_id: str | None,
+    render_target_lang: str | None,
+) -> list[RecallRouteConfig]
+```
 
-但其依据已经是当前 summary 字段：
-
-- `status == "OK"` 且 `degraded == False` -> `success`
-- 有 route/candidate/rerank/evidence 任一残留 -> `partial_failure`
-- 否则 -> `all_failure`
-
-### 6.4 summary 统一字段
-
-`build_summary_from_pipeline_result()` 当前会产出并汇总：
-
-- `route_count / routes / route_rows / route_errors`
-- `candidate_count`
-- `rerank_topk`
-- `evidence_refs / evidence_topk`
-- `query_plan`
-- `agentic_meta`
-- `adaptive_budget`
-- `embedding_model_id / embedding_provider / fallback_embedding_*`
-- `rerank_model_id / rerank_provider / fallback_reranker_*`
+按 `node_selector` 与 `render_target_lang_selector` 过滤后返回当前节点 / 语言下生效的路由。
 
 ---
 
-## 七、跳过、降级与缓存
+## 七、与 `surface_memory_recall` 的边界
 
-### 7.1 跳过/降级摘要
+| 职责 | 由谁完成 |
+|---|---|
+| 多路召回 + 混合融合 + 过滤 | `RecallFusionServiceContract`（retrieval 层） |
+| 决定 RECALL_POLICY（MUST / MAY / NO） | `surface_memory_recall`（persona 层） |
+| 应用 `surface_memory_recall_decision_matrix` | persona 层 |
+| 候选 → MemoryRecallPacket（事实压缩） | persona 层 |
+| 注入 ReplyControlPacket / SurfaceRuntime | persona 层 |
+| 写最终回复 | `SurfaceMainChain`（persona 层） |
 
-当前 `orchestrator.py` 提供：
-
-- `build_skipped_retrieval_summary(reason_code)`
-- `build_degraded_retrieval_summary(reason_code)`
-
-其中：
-
-- 跳过态 `status = "SKIPPED"`
-- 降级态 `status = "DEGRADED"`
-
-### 7.2 缓存
-
-`RetrievalOrchestrator` 当前内置 LRU 风格缓存，关键配置：
-
-- `cache_enabled`
-- `cache_ttl_ms`
-- `cache_max_entries`
-
-缓存 key scope 当前显式覆盖：
-
-- `person_id`
-- `session_id`
-- `query`
-- `top_k`
-- `intent_id`
-- `emotion_context`
-- `mood_state`
-- `bond_summary`
-- `motive_state`
-- `render_target_lang`
-- `turn_index`
-- `query_plan`
-
-缓存元数据会回写到：
-
-- `retrieval_summary`
-- `retrieval_bundle.cache`
+retrieval 层**不**判断"该不该召回"，**不**写最终回复，**不**做事实压缩；它只负责"召回有什么候选可以用"。
 
 ---
 
-## 八、环境构建入口
+## 八、不变量
 
-`build_retrieval_pipeline_from_env()` 仍是当前标准工厂函数。它当前会装配：
-
-- embedding runtime config
-- recall runtime config
-- reranker runtime config
-- Chroma runtime config
-- `ChromaHttpSearchClient`
-- Neo4j bond client（启用时）
-- `StyleCanonStore`
-- `WorldCanonStore`
-- `ArtifactVault`
-- `QueryPlanner`
-- `AdaptivePromptBudget`
-- `SemanticDedup`
-
-需要注意：
-
-- recall 适配层支持的 store id 以 `recall_fusion_config.py` 为准
-- 但当前主 `QueryPlanner` 默认只规划上文列出的 5 路 store
+1. retrieval 层不直接写 chat 主链 reply；只产出 candidates。
+2. 旧 Agentic RAG stack（QueryPlanner / RetrievalPipelineContract / EvidenceEvaluator / AgenticRetrievalLoop / RetrievalOrchestrator）已**全部移除**，相关 import 必须报错。
+3. retrieval 层不知道 ReplyControlPacket / SurfaceRuntime 存在，只与 `surface_memory_recall` 通过 `RecallFusionResult` 通信。
+4. 混合融合在 store 层之上、过滤之前；不允许跨层。
+5. 路由配置由 `RecallRuntimeConfig` 集中管理，不允许在调用方临时拼路由。
+6. `SQLiteLedger` 是 ledger 路由的唯一来源，retrieval 层不应直接去 SQL 拼表。
 
 ---
 
-## 九、与主链的当前关系
+## 九、不再代表当前事实的旧口径
 
-当前 retrieval 层不会直接把所有证据原样塞进 prompt。
-
-在 `chat_retrieval_helpers.py` / `agent_runtime_shared.py` 里，retrieval 结果还会经过：
-
-1. `filter_retrieval_evidence_items_for_prompt()`
-2. `RecallPackBuilder.build(...)`
-
-所以当前正确理解是：
-
-- `retrieval/` 负责“检索与证据组织”
-- prompt 注入仍由 app 主链继续收口
-
----
-
-## 十、当前不再适用的旧口径
-
-以下说法不再代表当前代码事实：
-
-- retrieval 仍是固定 `Embed -> RecallFusion -> Rerank -> EvidencePack` 四步直连
-- 当前主入口仍是 `main_chain.py`
-- 当前仍是固定“七路全量召回”
-- `style_canon` / `persona_utterance` 仍在当前主 store map 内
-- retrieval 结果会不经筛选直接进入最终 prompt
-
-当前正确口径应是：
-
-1. 当前主入口是 `chat_retrieval_helpers -> HippocampusAgent -> RetrievalOrchestrator`。
-2. `QueryPlanner + AgenticRetrievalLoop + EvidenceEvaluator` 已是当前主检索结构。
-3. 当前主 store map 是 5 路。
-4. retrieval 之后主链还会继续做 `prompt_filter` 和 `RecallPackBuilder`。
+| 旧描述 | 当前事实 |
+|---|---|
+| `QueryPlanner` 解析意图到 store map | 已删除；当前由 `recall_fusion_config.resolve_recall_routes` + `intent_id` 上下文决定 |
+| `RetrievalPipelineContract.run()` 四阶段 | 已删除；统一为 `RecallFusionServiceContract.recall(...)` 一次调用 |
+| `EvidenceEvaluator` 阈值与建议 | 已删除；过滤改由 query feature 函数完成 |
+| `AgenticRetrievalLoop` 多步 agent 检索 | 已删除；不再有 agent loop |
+| `RetrievalOrchestrator` 路径分类 | 已删除；当前不存在 orchestrator |
+| 旧 `style_canon` / `persona_utterance` 召回路由 | 已删除（commit 显式 retire） |
+| retrieval 层会 rerank | 不会；rerank 在 surface chain 内部按 affect / continuity / quality 完成 |

@@ -1,6 +1,6 @@
-"""Graph 配置构建模块。
+﻿"""Graph 配置构建模块。
 
-负责 Chat 图的配置构建和场景路由。
+负责 Chat 图的配置构建。意图识别与场景判定统一由 Thalamus 承接。
 """
 
 from __future__ import annotations
@@ -32,7 +32,6 @@ from host_brain.app.prompt_builder import (
     CHAT_RENDER_NODE_ID,
     SCENE_CHAT,
     SCENE_EXEC_INTENT,
-    SCENE_GATEWAY,
     SCENE_VISION_UI,
     SCENE_WORK_CODE,
     SCENE_WORK_TRANSLATE,
@@ -46,6 +45,7 @@ from host_brain.app.provider_factory import (
     resolve_host_llm_model_id,
 )
 from host_brain.app.model_router import resolve_gemini_model_route
+from host_brain.integrations.codex_cli_provider import codex_cli_lm_available, resolve_codex_cli_model
 
 CHAT_GRAPH_NODE_ORDER: list[str] = [
     CHAT_DIRECT_NODE_ID,
@@ -60,19 +60,16 @@ CHAT_GRAPH_NODE_ORDER: list[str] = [
     "workbench_code_assist",
 ]
 CHAT_INTENT_SOURCE_NODE_ID = "core_reasoner_primary"
-SCENE_ROUTER_ENTRY_NODE_ID = "scene_router_entry"
-SCENE_ROUTER_POST_CORE_NODE_ID = "scene_router_post_core"
-SCENE_ROUTER_ENTRY_HANDLER_ID = "scene_router_entry"
-SCENE_ROUTER_POST_CORE_HANDLER_ID = "scene_router_post_core"
 SCENE_TYPE_AUTO = "AUTO"
+_GRAPH_CODEX_MIGRATION_DEFAULT_EXCLUDED_SCENES = frozenset({SCENE_CHAT, SCENE_VISION_UI})
 
 # M-MA1：Supervisor 分派节点常量
 SUPERVISOR_DISPATCH_NODE_ID = "supervisor_dispatch"
 SUPERVISOR_DISPATCH_HANDLER_ID = "supervisor_dispatch"
 
 # M-MA5：各 Agent Handler 节点常量
-CHAT_AGENT_NODE_ID = "chat_agent_node"
-CHAT_AGENT_HANDLER_ID = "chat_agent"
+SURFACE_REPLY_NODE_ID = "surface_reply_node"
+SURFACE_REPLY_HANDLER_ID = "surface_reply"
 TRANSLATE_AGENT_NODE_ID = "translate_agent_node"
 TRANSLATE_AGENT_HANDLER_ID = "translate_agent"
 INTENT_AGENT_NODE_ID = "intent_agent_node"
@@ -94,7 +91,7 @@ AGENT_DISPATCH_HANDLER_ID = "agent_dispatch"  # 保留常量供其他模块引�
 # 供 chat_handler.py 校验客户端传入的 scene_type，统一维护避免两处同步
 # [选项一] SCENE_VISION_UI 已有完整实现（chat_handler_vision.py），加入白名单
 # 注意：VISION_UI 场景需要客户端传入 image_upload_consent=true 才允许上传图片
-# AUTO：显式走多 agent 编排（scene_router_entry → supervisor_dispatch）；默认已统一图+动态路由，可不传
+# AUTO：显式走多 agent 编排（supervisor_dispatch）；默认已统一图+动态路由，可不传
 ALLOWED_EXPLICIT_SCENE_TYPES: frozenset[str] = frozenset({
     SCENE_CHAT,
     SCENE_WORK_CODE,
@@ -121,37 +118,6 @@ _HOST_CHAT_14B_DEFAULT_BASE_URL = "http://127.0.0.1:11434/v1"
 _HOST_CHAT_CLOUD_DEFAULT_PROVIDER = PROVIDER_GEMINI
 _PROVIDERS_REQUIRING_API_KEY = frozenset({PROVIDER_OPENAI, PROVIDER_CODEX, PROVIDER_GEMINI, PROVIDER_DEEPSEEK})
 
-_PIC_VISION_UI_KEYWORDS = frozenset([
-    "screenshot", "screen", "ui", "window", "interface", "capture",
-    "screen shot", "desktop", "look at the screen",
-    "截图", "屏幕", "界面", "画面", "看一下屏幕", "看看这个界面",
-])
-_PIC_WORK_CODE_KEYWORDS = frozenset([
-    "code", "coding", "programming", "function", "script", "program",
-    "python", "javascript", "typescript", "java", "golang", "rust", "c++",
-    "debug", "bug", "class", "algorithm", "implement", "develop",
-    "代码", "编程", "写代码", "写个函数", "函数", "脚本", "调试", "类", "实现", "开发",
-])
-# 文化娱乐关键词白名单：命中时强制返回 SCENE_CHAT，避免被 WORK_CODE 误判
-_PIC_ENTERTAINMENT_KEYWORDS = frozenset([
-    "动漫", "漫画", "番剧", "动画", "アニメ", "マンガ", "漫",
-    "电影", "电视剧", "剧集", "综艺", "映画", "ドラマ",
-    "音乐", "歌曲", "歌手", "专辑", "音楽", "歌",
-    "小说", "书", "读书", "本", "読書",
-    "游戏", "ゲーム", "玩",
-    "爱好", "兴趣", "趣味",
-])
-_PIC_WORK_TRANSLATE_KEYWORDS = frozenset([
-    "translate", "translation", "translate to", "translate into",
-    "翻译", "翻成", "译成", "译为", "翻訳", "訳して",
-])
-_PIC_EXEC_INTENT_KEYWORDS = frozenset([
-    "execute", "run", "setup", "configure", "start", "stop", "install",
-    "执行", "运行", "设置", "配置", "启动", "关闭", "打开",
-    "帮我做", "部署", "创建", "新建", "修改", "更新", "安装",
-    "deploy", "build", "submit", "save",
-])
-
 
 def _parse_bool(value: Any, default: bool = False) -> bool:
     if value is None:
@@ -162,6 +128,46 @@ def _parse_bool(value: Any, default: bool = False) -> bool:
     if text in {"0", "false", "no", "off"}:
         return False
     return bool(default)
+
+
+def resolve_scene_node_sequence(scene_type: str) -> list[str]:
+    """Return the model-node sequence for explicit legacy graph profiles."""
+    scene = str(scene_type or SCENE_CHAT).strip().upper()
+    if scene == SCENE_EXEC_INTENT:
+        return [
+            "core_reasoner_primary",
+            "planner_constraints",
+            "tool_planner",
+            "safety_verifier",
+            "consistency_verifier",
+            "renderer_ja_c_style",
+        ]
+    if scene == SCENE_WORK_TRANSLATE:
+        return [
+            "core_reasoner_primary",
+            "workbench_translate",
+            "consistency_verifier",
+            "renderer_ja_c_style",
+        ]
+    if scene == SCENE_WORK_CODE:
+        return [
+            "core_reasoner_primary",
+            "workbench_code_assist",
+            "consistency_verifier",
+            "renderer_ja_c_style",
+        ]
+    return [CHAT_DIRECT_NODE_ID]
+
+
+def resolve_chat_retrieval_gate(*, scene_type: str) -> tuple[bool, str | None]:
+    if not _parse_bool(os.environ.get("HOST_ENABLE_RETRIEVAL"), default=True):
+        return False, "HOST_RETRIEVAL_DISABLED"
+    if (
+        str(scene_type or "").strip().upper() == SCENE_CHAT
+        and _parse_bool(os.environ.get("HOST_CHAT_DISABLE_RETRIEVAL"), default=False)
+    ):
+        return False, "HOST_CHAT_RETRIEVAL_DISABLED"
+    return True, None
 
 
 def _parse_int(value: Any, *, default: int, min_value: int, max_value: int) -> int:
@@ -182,6 +188,52 @@ def _parse_csv_tokens(value: Any) -> set[str]:
         if token:
             tokens.add(token)
     return tokens
+
+
+def _graph_codex_migration_enabled(*, scene_type: str, execution_profile: str) -> bool:
+    if not _parse_bool(os.environ.get("HOST_GRAPH_CODEX_MIGRATION_ENABLED"), default=False):
+        return False
+    if str(execution_profile or "").strip() == PROFILE_CHAT_FAST:
+        return False
+    normalized_scene = str(scene_type or "").strip().upper()
+    excluded = {
+        str(item or "").strip().upper()
+        for item in _parse_csv_tokens(
+            os.environ.get("HOST_GRAPH_CODEX_MIGRATION_EXCLUDED_SCENES")
+            or ",".join(sorted(_GRAPH_CODEX_MIGRATION_DEFAULT_EXCLUDED_SCENES))
+        )
+        if str(item or "").strip()
+    }
+    if normalized_scene in excluded:
+        return False
+    included = {
+        str(item or "").strip().upper()
+        for item in _parse_csv_tokens(os.environ.get("HOST_GRAPH_CODEX_MIGRATION_INCLUDED_SCENES"))
+        if str(item or "").strip()
+    }
+    if included and normalized_scene not in included:
+        return False
+    return codex_cli_lm_available()
+
+
+def _surface_reply_codex_experiment_enabled(*, scene_type: str, execution_profile: str) -> bool:
+    if str(scene_type or "").strip().upper() != SCENE_CHAT:
+        return False
+    if str(execution_profile or "").strip() != PROFILE_CHAT_FAST:
+        return False
+    if not _parse_bool(os.environ.get("HOST_SURFACE_REPLY_CODEX_EXPERIMENT_ENABLED") or os.environ.get("HOST_CHAT_AGENT_CODEX_EXPERIMENT_ENABLED"), default=False):
+        return False
+    return codex_cli_lm_available()
+
+
+def _resolve_surface_reply_codex_model_id() -> str:
+    return resolve_codex_cli_model(
+        os.environ.get("HOST_SURFACE_REPLY_CODEX_MODEL_ID")
+        or os.environ.get("HOST_CHAT_AGENT_CODEX_MODEL_ID")
+        or os.environ.get("HOST_CHAT_AGENT_SPARK_MODEL_ID")
+        or os.environ.get("HOST_CODEX_CHAT_MODEL_ID")
+        or os.environ.get("HOST_CODEX_MODEL_ID")
+    )
 
 
 def _stable_bucket_0_99(value: str) -> int:
@@ -294,6 +346,8 @@ def _is_provider_available(*, provider_name: str, api_key: str | None, configure
         return False
     if provider == PROVIDER_DISABLED:
         return False
+    if provider == PROVIDER_CODEX and not str(api_key or "").strip() and codex_cli_lm_available():
+        return True
     if _provider_requires_api_key(provider) and not str(api_key or "").strip():
         return False
     return True
@@ -313,12 +367,9 @@ def _resolve_cloud_provider_model_id(*, chain_name: str) -> str:
     if normalized_chain == "gemini":
         return str(os.environ.get("HOST_GEMINI_MODEL_ID") or "gemini-2.5-flash-lite").strip() or "gemini-2.5-flash-lite"
     if normalized_chain == "codex":
-        return (
-            str(os.environ.get("HOST_CODEX_MODEL_ID") or "gpt-4o-mini").strip()
-            or "gpt-4o-mini"
-        )
+        return resolve_codex_cli_model(os.environ.get("HOST_CODEX_MODEL_ID"))
     if normalized_chain == "deepseek":
-        return str(os.environ.get("HOST_DEEPSEEK_MODEL_ID") or "deepseek-chat").strip() or "deepseek-chat"
+        return str(os.environ.get("HOST_DEEPSEEK_MODEL_ID") or "deepseek-v4-flash").strip() or "deepseek-v4-flash"
     return "mock-default"
 
 
@@ -464,7 +515,7 @@ def build_chat_graph(
     cloud_base_url_override: str | None = None,
     execution_profile: str = PROFILE_CHAT_FAST,
 ) -> dict[str, Any]:
-    """Chat 图：START → chat_agent → renderer，无 Supervisor/agent_dispatch。"""
+    """Chat 图：START → chat_direct_ja → renderer，无 Supervisor/agent_dispatch。"""
     return _build_graph_config_by_profile(
         execution_profile=execution_profile,
         provider_name=provider_name,
@@ -648,6 +699,22 @@ def _build_graph_config_by_profile(
     resolved_chat_provider = str(provider_name or _HOST_CHAT_14B_DEFAULT_PROVIDER).strip().lower() or _HOST_CHAT_14B_DEFAULT_PROVIDER
     resolved_chat_model_id = str(model_id or "").strip() or _HOST_CHAT_14B_DEFAULT_MODEL_ID
     resolved_chat_timeout_ms = max(800, int(timeout_ms))
+    chat_codex_experiment = _surface_reply_codex_experiment_enabled(
+        scene_type=resolved_scene_type,
+        execution_profile=execution_profile,
+    )
+    if chat_codex_experiment:
+        resolved_chat_provider = PROVIDER_CODEX
+        resolved_chat_model_id = _resolve_surface_reply_codex_model_id()
+        resolved_chat_timeout_ms = max(
+            resolved_chat_timeout_ms,
+            _parse_int(
+                os.environ.get("HOST_SURFACE_REPLY_CODEX_MIN_TIMEOUT_MS") or os.environ.get("HOST_CHAT_AGENT_CODEX_MIN_TIMEOUT_MS"),
+                default=45_000,
+                min_value=800,
+                max_value=10 * 60 * 1000,
+            ),
+        )
     resolved_chat_base_url_override = (
         _normalize_openai_compat_base_url(chat_base_url_override)
         if resolved_chat_provider == PROVIDER_OPENAI
@@ -659,8 +726,10 @@ def _build_graph_config_by_profile(
         provider_name=resolved_chat_provider,
         preferred_api_key=str(api_key or "").strip() or None,
     )
+    if chat_codex_experiment:
+        resolved_chat_api_key = None
     if _provider_requires_api_key(resolved_chat_provider) and not resolved_chat_api_key:
-        if _parse_bool(os.environ.get("HOST_CHAT_HOST_14B_ALLOW_EMPTY_KEY"), default=True):
+        if resolved_chat_provider == PROVIDER_OPENAI and _parse_bool(os.environ.get("HOST_CHAT_HOST_14B_ALLOW_EMPTY_KEY"), default=True):
             resolved_chat_api_key = _HOST_CHAT_14B_FALLBACK_API_KEY
     resolved_chat_available = _is_provider_available(
         provider_name=resolved_chat_provider,
@@ -683,23 +752,40 @@ def _build_graph_config_by_profile(
         PROVIDER_DISABLED,
     }:
         resolved_cloud_provider = _HOST_CHAT_CLOUD_DEFAULT_PROVIDER
+    graph_codex_migrated = _graph_codex_migration_enabled(
+        scene_type=resolved_scene_type,
+        execution_profile=execution_profile,
+    )
+    if graph_codex_migrated:
+        resolved_cloud_provider = PROVIDER_CODEX
     resolved_cloud_timeout_ms = max(800, int(cloud_timeout_ms or resolved_chat_timeout_ms))
+    if graph_codex_migrated:
+        resolved_cloud_timeout_ms = max(
+            resolved_cloud_timeout_ms,
+            _parse_int(os.environ.get("HOST_GRAPH_CODEX_MIN_TIMEOUT_MS"), default=30_000, min_value=800, max_value=10 * 60 * 1000),
+        )
     resolved_cloud_model_id = (
-        str(cloud_model_id or "").strip() or resolve_host_llm_model_id(resolved_cloud_provider)
+        resolve_codex_cli_model(os.environ.get("HOST_GRAPH_CODEX_MODEL_ID") or os.environ.get("HOST_CODEX_MODEL_ID"))
+        if graph_codex_migrated
+        else (str(cloud_model_id or "").strip() or resolve_host_llm_model_id(resolved_cloud_provider))
     )
     resolved_cloud_base_url_override = (
         _normalize_openai_compat_base_url(cloud_base_url_override)
-        if resolved_cloud_provider in {PROVIDER_OPENAI, PROVIDER_CODEX}
+        if (not graph_codex_migrated and resolved_cloud_provider in {PROVIDER_OPENAI, PROVIDER_CODEX})
         else None
     )
-    resolved_cloud_api_key = _resolve_provider_api_key(
+    resolved_cloud_api_key = None if graph_codex_migrated else _resolve_provider_api_key(
         provider_name=resolved_cloud_provider,
         preferred_api_key=str(cloud_api_key or "").strip() or None,
     )
     resolved_cloud_available_flag = (
+        True
+        if graph_codex_migrated
+        else (
         bool(cloud_available)
         if cloud_available is not None
         else bool(resolved_cloud_provider != PROVIDER_DISABLED)
+        )
     )
     resolved_cloud_available = _is_provider_available(
         provider_name=resolved_cloud_provider,
@@ -833,7 +919,7 @@ def _build_graph_config_by_profile(
         )
         primary_budget_node_id = INTENT_AGENT_ENTRY_NODE_ID
     elif use_supervised:
-        # Supervised 图：supervisor_dispatch → agent_dispatch → judge_agent → renderer（无 scene_router_entry）
+        # Supervised 图：supervisor_dispatch → agent_dispatch → judge_agent → renderer
         scene_node_sequence = [
             SUPERVISOR_DISPATCH_NODE_ID,
             AGENT_DISPATCH_NODE_ID,
@@ -843,7 +929,7 @@ def _build_graph_config_by_profile(
         # P3.5：allowlist 由图配置提供；workbench_* 为 handler 可调用的 model 节点，不入边序列
         # P16：allowlist 对齐 _AGENT_HANDLER_MAP（graph_executor 内的全量 agent）
         _dispatch_allowlist = [
-            CHAT_AGENT_HANDLER_ID,
+            SURFACE_REPLY_HANDLER_ID,
             TRANSLATE_AGENT_HANDLER_ID,
             INTENT_AGENT_HANDLER_ID,
             JUDGE_AGENT_HANDLER_ID,
@@ -1009,23 +1095,23 @@ def _build_graph_config_by_profile(
 # Phase XV: 三套 Agent 专用 LLM 运行时解析
 # ---------------------------------------------------------------------------
 
-def _legacy_resolve_chat_agent_llm_runtime(*, base_runtime: dict) -> dict:
-    """ChatAgent（夏目蓝本人）的 LLM 运行时配置。
+def _legacy_resolve_surface_reply_llm_runtime(*, base_runtime: dict) -> dict:
+    """SurfaceReply（旧角色本人）的 LLM 运行时配置。
 
     追求「好」：高质量模型 + 高温度 + 流式输出 + 双语生成能力。
-    默认使用 gemini-2.5-pro，可通过 HOST_CHAT_AGENT_MODEL_ID 覆盖。
+    默认使用 gemini-2.5-pro，可通过 HOST_SURFACE_REPLY_MODEL_ID 覆盖；旧 HOST_CHAT_AGENT_MODEL_ID 仅兼容读取。
 
     Args:
         base_runtime: 来自 resolve_host_llm_runtime_async() 的基础运行时
 
     Returns:
-        ChatAgent 专用 LLM 运行时 dict，可直接传给 astream_llm_chunks()
+        SurfaceReply 专用 LLM 运行时 dict，可直接传给 astream_llm_chunks()
     """
     model_id = str(
-        os.environ.get("HOST_CHAT_AGENT_MODEL_ID") or "gemini-2.5-pro"
+        os.environ.get("HOST_SURFACE_REPLY_MODEL_ID") or os.environ.get("HOST_CHAT_AGENT_MODEL_ID") or "gemini-2.5-pro"
     ).strip() or "gemini-2.5-pro"
     timeout_ms = max(800, _parse_int(
-        os.environ.get("HOST_CHAT_AGENT_TIMEOUT_MS"),
+        os.environ.get("HOST_SURFACE_REPLY_TIMEOUT_MS") or os.environ.get("HOST_CHAT_AGENT_TIMEOUT_MS"),
         default=30_000,
         min_value=800,
         max_value=120_000,
@@ -1036,12 +1122,12 @@ def _legacy_resolve_chat_agent_llm_runtime(*, base_runtime: dict) -> dict:
         "chat_model_id": model_id,
         "timeout_ms": timeout_ms,
         "chat_timeout_ms": timeout_ms,
-        # ChatAgent 专属 gen_params：高温度让回复更自然有变化
+        # SurfaceReply 专属 gen_params：高温度让回复更自然有变化
         "agent_gen_params": {
             "temperature": 0.8,
             "top_p": 0.92,
         },
-        "agent_role": "chat_agent",
+        "agent_role": "surface_reply",
     }
 
 
@@ -1212,15 +1298,17 @@ def _resolve_agent_llm_runtime_v2(
     }
 
 
-def resolve_chat_agent_llm_runtime(*, base_runtime: dict) -> dict:
+def resolve_surface_reply_llm_runtime(*, base_runtime: dict) -> dict:
     return _resolve_agent_llm_runtime_v2(
         base_runtime=base_runtime,
-        role="chat_agent",
-        model_env_name="HOST_CHAT_AGENT_MODEL_ID",
-        timeout_env_name="HOST_CHAT_AGENT_TIMEOUT_MS",
+        role="surface_reply",
+        model_env_name="HOST_SURFACE_REPLY_MODEL_ID",
+        timeout_env_name="HOST_SURFACE_REPLY_TIMEOUT_MS",
         timeout_default_ms=30_000,
         timeout_max_ms=120_000,
         gen_params={"temperature": 0.8, "top_p": 0.92},
+        fallback_model_env_names=("HOST_CHAT_AGENT_MODEL_ID",),
+        fallback_timeout_env_names=("HOST_CHAT_AGENT_TIMEOUT_MS",),
     )
 
 
@@ -1252,42 +1340,11 @@ def resolve_subagent_llm_runtime(*, base_runtime: dict) -> dict:
     return runtime
 
 
-# ---------------------------------------------------------------------------
-# 聚合导入（P2-11 拆分后向后兼容）
-# ---------------------------------------------------------------------------
-# 场景路由函数已移至 graph_config_router.py
-from host_brain.app.graph_config_router import (  # noqa: F401, E402
-    pre_intent_classifier,
-    resolve_scene_node_sequence,
-    build_unified_route_decision,
-    resolve_graph_entry_scene_type,
-    graph_scene_router_entry_handler,
-    graph_scene_router_post_core_handler,
-    resolve_chat_scene_type,
-    resolve_chat_retrieval_gate,
-    SCENE_ROUTER_ENTRY_NODE_ID,
-    SCENE_ROUTER_POST_CORE_NODE_ID,
-    SCENE_ROUTER_ENTRY_HANDLER_ID,
-    SCENE_ROUTER_POST_CORE_HANDLER_ID,
-    SCENE_TYPE_AUTO,
-    SCENE_TYPE_SOURCE_TRIBE_DECIDER,
-    SCENE_TYPE_SOURCE_TRIBE_DECIDER_DEFAULT,
-    ALLOWED_EXPLICIT_SCENE_TYPES,
-    HOST_CHAT_ROUTE_HOST_14B,
-    HOST_CHAT_ROUTE_CLOUD,
-    HOST_CHAT_ROUTE_SKILLS,
-    ROUTE_DECISION_VERSION,
-    ROUTE_TARGET_HOST,
-    ROUTE_TARGET_EDGE,
-    ROUTE_TARGET_CLOUD,
-    ROUTE_TARGET_SKILLS,
-)
-
 # LLM 运行时解析函数已移至 graph_config_llm_runtime.py
 from host_brain.app.graph_config_llm_runtime import (  # noqa: F401, E402
     resolve_host_llm_runtime,
     resolve_host_llm_runtime_async,
-    resolve_chat_agent_llm_runtime,
+    resolve_surface_reply_llm_runtime,
     resolve_executive_router_llm_runtime,
     resolve_subagent_llm_runtime,
     _HOST_CHAT_14B_DEFAULT_PROVIDER,

@@ -1,14 +1,14 @@
-[
-  {
-    "proposer_node_id": "core_reasoner_primary",
-    "model_snapshot": "openai:gpt-5.3-codex",
-    "prompt_profile_id": "profile_a",
-    "tool_visibility_hash": "toolhash_a"
-  },
-  {
-    "proposer_node_id": "tool_planner_secondary",
-    "model_snapshot": "openai:gpt-5.3-codex",
-    "prompt_profile_id": "profile_b",
-    "tool_visibility_hash": "toolhash_b"
-  }
+﻿[
+    {
+        "proposer_node_id":  "core_reasoner_primary",
+        "model_snapshot":  "openai:gpt-5.3-codex",
+        "prompt_profile_id":  "profile_a",
+        "tool_visibility_hash":  "toolhash_a"
+    },
+    {
+        "proposer_node_id":  "tool_planner_secondary",
+        "model_snapshot":  "openai:gpt-5.3-codex",
+        "prompt_profile_id":  "profile_b",
+        "tool_visibility_hash":  "toolhash_b"
+    }
 ]

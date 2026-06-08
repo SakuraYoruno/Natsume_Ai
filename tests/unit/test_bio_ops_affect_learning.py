@@ -106,7 +106,7 @@ def test_regret_signal_targets_policy_repair(tmp_path) -> None:
     regret = build_regret_signal({"regret_event": "Codex worker 越权"})
 
     assert result["status"] == "PROPOSED"
-    assert result["findings"][0]["regret_signal"]["target_policy"] == "ChatAgent.render_style"
+    assert result["findings"][0]["regret_signal"]["target_policy"] == "SurfaceReply.render_style"
     assert regret["regret_signal"]["target_policy"] == "CodexRuntime.work_order_gate"
 
 

@@ -1,8 +1,8 @@
-{
-  "request_id": "req_voice_042",
-  "payload": {
-    "query": "devtask fallback strategy",
-    "top_k": 3,
-    "seq": 42
-  }
+﻿{
+    "request_id":  "req_voice_042",
+    "payload":  {
+                    "query":  "devtask fallback strategy",
+                    "top_k":  3,
+                    "seq":  42
+                }
 }

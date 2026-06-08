@@ -253,7 +253,7 @@ class GlymphaticAgent:
         *,
         episode_summary: str = "",
         emotion_trajectory: str = "",
-        bond_stage: str = "stranger",
+        bond_stage: str = "friend",
         recovery_quality: float = 0.5,
     ) -> str | None:
         """恢复窗口期调用 LLM 对当天情节记忆做语义压缩，模拟睡眠期记忆巩固。
@@ -282,7 +282,7 @@ class GlymphaticAgent:
             _user_prompt = _user_tpl.format(
                 episode_summary=str(episode_summary or "")[:400],
                 emotion_trajectory=str(emotion_trajectory or "")[:100],
-                bond_stage=str(bond_stage or "stranger"),
+                bond_stage=str(bond_stage or "friend"),
                 recovery_quality=round(float(recovery_quality), 3),
             )
             _provider = build_llm_provider(

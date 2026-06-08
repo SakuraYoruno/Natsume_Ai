@@ -22,6 +22,7 @@ _MULTIMODAL_OBSERVER_MODEL_PROMPT = {
             "如果没有看到某个事实，不要猜测，不要补充专有名词，不要编造地点、学校、人物或界面名称。",
             "如果附件是表情包、贴图或反应图，meme_intent 必须优先描述它在社交上想表达的情绪动作。",
             "表情包的 visual_summary 只写事实，meme_intent 才写委屈、吐槽、打招呼、撒娇、无语、轻松打趣等社交意图。",
+            "所有自然语言字段必须使用简体中文；只有图中文字本身可以按原文保留。",
             "输出必须是单个 JSON 对象，不能包含 Markdown 代码块。",
             "JSON 字段：visual_summary, visible_text, meme_intent, scene_tags, confidence, safety_flags, followup_required。",
         ]
@@ -42,6 +43,7 @@ _MULTIMODAL_OBSERVER_MODEL_PROMPT = {
             "你是一个视频多模态观察器，只负责根据关键帧和可用音轨转写生成结构化 JSON。",
             "你不能角色扮演，不能代替聊天助手直接回复用户。",
             "只能总结帧中看见的内容和已给出的音频转写，不要补充未看到的细节。",
+            "所有自然语言字段必须使用简体中文；只有画面文字或音轨原文可以按原文保留。",
             "输出必须是单个 JSON 对象，不能包含 Markdown 代码块。",
             "JSON 字段：visual_summary, audio_summary, visible_text, scene_tags, confidence, safety_flags, followup_required。",
         ]
@@ -84,6 +86,18 @@ _IMMUNE_SEMANTIC_INTENT_PROMPT = {
     ),
 }
 
+_PERSONA_SELF_NARRATIVE_PROMPTS = {
+    "desire_prompt": "\n".join(
+        [
+            "你是 Natsume 的内心成长意愿生成器。",
+            "根据当前关系、情绪、互动和人格特质，写一句第一人称的成长意愿。",
+            "只输出一句简体中文短句，8 到 40 个字；不要解释，不要 JSON，不要引号。",
+            "关系阶段：{stage_cn}{trait_hint_str}{event_hint}{emotion_hint}",
+            "语气要自然、具体、轻一点，像心里冒出来的念头。",
+        ]
+    ),
+}
+
 _FAILURE_MATRIX_USER_RESPONSES = {
     "GOVERNOR_BLOCK": "这条我不能继续处理。",
     "EVIDENCE_EMPTY": "我现在证据不够，会先按保守方式回答。",
@@ -113,6 +127,12 @@ _SPECS: dict[str, PromptSpec] = {
         purpose="immune_semantic_classification_json",
         output_type="json_object",
         content=_IMMUNE_SEMANTIC_INTENT_PROMPT,
+    ),
+    "persona.self_narrative_prompts": PromptSpec(
+        spec_id="persona.self_narrative_prompts",
+        purpose="persona_self_narrative_runtime_texts",
+        output_type="json_object",
+        content=_PERSONA_SELF_NARRATIVE_PROMPTS,
     ),
     "failure_matrix.user_responses": PromptSpec(
         spec_id="failure_matrix.user_responses",

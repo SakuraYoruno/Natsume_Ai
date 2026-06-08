@@ -31,6 +31,10 @@ from edge_client.actuators.vts_driver import (
     VtsState,
     VTubeStudioDriver,
 )
+from edge_client.actuators.vrm_bridge_driver import (
+    VrmBridgeConfig,
+    VrmBridgeDriver,
+)
 
 __all__ = [
     "EVENT_TTS_QUEUED",
@@ -58,4 +62,6 @@ __all__ = [
     "VtsDriverResult",
     "VtsState",
     "VTubeStudioDriver",
+    "VrmBridgeConfig",
+    "VrmBridgeDriver",
 ]

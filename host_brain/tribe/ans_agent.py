@@ -19,6 +19,24 @@ def _default_state_registry() -> Any:
         return None
 
 
+def _resolve_ans_persona_id(value: Any = None) -> str:
+    try:
+        from host_brain.persona.identity import resolve_persona_self_id  # noqa: PLC0415
+
+        return resolve_persona_self_id(value)
+    except Exception:
+        return str(value or "").strip() or "natsume_ai"
+
+
+def _resolve_ans_bond_user_id(value: Any = None, *, session_id: str = "default") -> str:
+    try:
+        from host_brain.bond.user_identity import resolve_bond_user_id  # noqa: PLC0415
+
+        return resolve_bond_user_id(str(value or "").strip() or None, session_id=session_id)
+    except Exception:
+        return str(value or "").strip() or "default"
+
+
 @dataclass(slots=True)
 class ANSAgent:
     """自主神经系统族 Agent。
@@ -38,7 +56,7 @@ class ANSAgent:
     )
     state_registry: Any = field(default=None)
     _loop: asyncio.AbstractEventLoop | None = field(default=None, init=False, repr=False)
-    _bond_stage: str = field(default="stranger", init=False, repr=False)  # T-37：记录当前关系阶段
+    _bond_stage: str = field(default="friend", init=False, repr=False)  # T-37：记录当前关系阶段
     _recovery_mode: bool = field(default=False, init=False, repr=False)  # T-203：Glymphatic 恢复窗口标志
     _recovery_mode_ts_ms: int = field(default=0, init=False, repr=False)  # T-203：恢复窗口开始时间戳
     _last_glymphatic_log_signature: tuple[bool, int] | None = field(default=None, init=False, repr=False)
@@ -97,7 +115,7 @@ class ANSAgent:
         可从任意线程调用（Timer 线程或 asyncio 线程均可）。
 
         T-43：自动将 _bond_stage 注入 payload，供 NatsumeScheduler 根据
-        关系亲密度动态调整 tick 间隔（stranger < acquaintance < friend < intimate）。
+        关系亲密度动态调整 tick 间隔（friend < close_friend < intimate）。
 
         T-148：在 tick 完成后，根据 tick_result 中的 proactive_voice_eligible 标志
         判断是否触发主动发声评估，打通 INNER_WORLD_TICKED → proactive_voice 联动链路。
@@ -114,38 +132,43 @@ class ANSAgent:
 
         # T-148：INNER_WORLD_TICKED 后判断是否触发主动发声
         # 触发条件：tick_result 中 proactive_voice_eligible=True，
-        # 或者 loneliness > 0.5 且 bond_stage 不是 stranger
+        # 或者 loneliness > 0.5 且关系阶段已存在
         try:
             _eligible = bool(payload.get("proactive_voice_eligible", False))
             _loneliness = float(payload.get("loneliness") or 0.0)
-            _bond = str(self._bond_stage or "stranger").lower()
+            _bond = str(self._bond_stage or "friend").lower()
             _voice_active = bool(getattr(self, "_voice_active", False))
             _should_trigger = (
                 not _voice_active  # 语音管线空闲时才触发
                 and (
                     _eligible
-                    or (_loneliness > 0.5 and _bond not in ("stranger",))
+                    or _loneliness > 0.5
                 )
             )
             if _should_trigger:
+                _voice_session_id = str(payload.get("session_id") or "default")
+                _voice_user_id = _resolve_ans_bond_user_id(
+                    payload.get("bond_user_id") or payload.get("target_user_id"),
+                    session_id=_voice_session_id,
+                )
 
                 decision = get_initiative_governor_agent().evaluate_initiative(
                     action="proactive_voice",
                     motive=_loneliness,
-                    session_id=str(payload.get("session_id") or "default"),
-                    user_id=str(payload.get("user_id") or "user_1"),
+                    session_id=_voice_session_id,
+                    user_id=_voice_user_id,
                     context={
                         "bond_stage": _bond,
                         "loneliness": _loneliness,
                         "trigger_source": "inner_world_ticked",
                         "pending_followup_count": int(payload.get("pending_followup_count") or 0),
-                        "session_id": str(payload.get("session_id") or "default"),
+                        "session_id": _voice_session_id,
                         "active_topic_id": str(payload.get("topic_id") or "").strip() or None,
                     },
                 )
                 if str(decision.get("decision") or "").upper() == "ALLOW":
                     self.trigger_proactive_voice(
-                        user_id=str(payload.get("user_id") or "user_1"),
+                        user_id=_voice_user_id,
                         context={
                             "bond_stage": _bond,
                             "loneliness": _loneliness,
@@ -169,7 +192,7 @@ class ANSAgent:
         self,
         *,
         loneliness: float,
-        user_id: str = "user_1",
+        user_id: str = "",
         source: str = "inner_world_skill",
         metadata: dict[str, Any] | None = None,
     ) -> None:
@@ -180,14 +203,14 @@ class ANSAgent:
 
         Args:
             loneliness: 孤独感强度，0.0 ~ 1.0。
-            user_id: 用户 ID，默认 "user_1"。
+            user_id: 用户 ID；空值使用 canonical persona self id。
             source: 信号来源，默认 "inner_world_skill"。
             metadata: 附加元数据（可选）。
         """
         clamped = max(0.0, min(1.0, float(loneliness)))
         payload: dict[str, Any] = {
             "loneliness": round(clamped, 4),
-            "user_id": str(user_id or "user_1").strip() or "user_1",
+            "user_id": _resolve_ans_persona_id(user_id),
             "source": str(source or "inner_world_skill").strip() or "inner_world_skill",
             "bond_stage": self._bond_stage,
         }
@@ -204,7 +227,7 @@ class ANSAgent:
         *,
         task_type: str = "general",
         intensity: float = 0.35,
-        user_id: str = "user_1",
+        user_id: str = "",
         session_id: str = "default",
         metadata: dict[str, Any] | None = None,
     ) -> None:
@@ -218,7 +241,7 @@ class ANSAgent:
         Args:
             task_type: 任务类型，如 "general"/"creative"/"helpful"/"humor" 等。
             intensity: 任务成功强度，0.0 ~ 1.0，默认 0.35。
-            user_id: 用户 ID，默认 "user_1"。
+            user_id: 用户 ID；空值使用 canonical bond user id。
             session_id: 会话 ID，默认 "default"。
             metadata: 附加元数据（可选）。
         """
@@ -226,7 +249,7 @@ class ANSAgent:
         payload: dict[str, Any] = {
             "task_type": str(task_type or "general").strip() or "general",
             "intensity": round(clamped, 4),
-            "user_id": str(user_id or "user_1").strip() or "user_1",
+            "user_id": _resolve_ans_bond_user_id(user_id, session_id=session_id),
             "session_id": str(session_id or "default").strip() or "default",
             "bond_stage": self._bond_stage,
         }
@@ -243,7 +266,7 @@ class ANSAgent:
         *,
         humor_type: str = "general",
         intensity: float = 0.3,
-        user_id: str = "user_1",
+        user_id: str = "",
         session_id: str = "default",
         metadata: dict[str, Any] | None = None,
     ) -> None:
@@ -257,7 +280,7 @@ class ANSAgent:
         Args:
             humor_type: 幽默类型，如 "general"/"wordplay"/"self_deprecating"/"absurd" 等。
             intensity: 幽默成功强度，0.0 ~ 1.0，默认 0.3。
-            user_id: 用户 ID，默认 "user_1"。
+            user_id: 用户 ID；空值使用 canonical bond user id。
             session_id: 会话 ID，默认 "default"。
             metadata: 附加元数据（可选）。
         """
@@ -265,7 +288,7 @@ class ANSAgent:
         payload: dict[str, Any] = {
             "humor_type": str(humor_type or "general").strip() or "general",
             "intensity": round(clamped, 4),
-            "user_id": str(user_id or "user_1").strip() or "user_1",
+            "user_id": _resolve_ans_bond_user_id(user_id, session_id=session_id),
             "session_id": str(session_id or "default").strip() or "default",
             "bond_stage": self._bond_stage,
         }
@@ -282,7 +305,7 @@ class ANSAgent:
         *,
         delta: float = 0.05,
         reason: str = "general",
-        user_id: str = "user_1",
+        user_id: str = "",
         session_id: str = "default",
         metadata: dict[str, Any] | None = None,
     ) -> None:
@@ -297,7 +320,7 @@ class ANSAgent:
         Args:
             delta: 关系进展幅度，0.0 ~ 1.0，默认 0.05。
             reason: 进展原因，如 "task_success"/"humor_landed"/"deep_talk" 等。
-            user_id: 用户 ID，默认 "user_1"。
+            user_id: 用户 ID；空值使用 canonical bond user id。
             session_id: 会话 ID，默认 "default"。
             metadata: 附加元数据（可选）。
         """
@@ -305,7 +328,7 @@ class ANSAgent:
         payload: dict[str, Any] = {
             "delta": round(clamped, 4),
             "reason": str(reason or "general").strip() or "general",
-            "user_id": str(user_id or "user_1").strip() or "user_1",
+            "user_id": _resolve_ans_bond_user_id(user_id, session_id=session_id),
             "session_id": str(session_id or "default").strip() or "default",
             "bond_stage": self._bond_stage,
         }
@@ -322,7 +345,7 @@ class ANSAgent:
         *,
         delta: float = 0.05,
         reason: str = "general",
-        user_id: str = "user_1",
+        user_id: str = "",
         session_id: str = "default",
         metadata: dict[str, Any] | None = None,
     ) -> None:
@@ -336,7 +359,7 @@ class ANSAgent:
         Args:
             delta: 关系退步幅度，0.0 ~ 1.0，默认 0.05。
             reason: 退步原因，如 "conflict"/"long_silence"/"immune_block" 等。
-            user_id: 用户 ID，默认 "user_1"。
+            user_id: 用户 ID；空值使用 canonical bond user id。
             session_id: 会话 ID，默认 "default"。
             metadata: 附加元数据（可选）。
         """
@@ -344,7 +367,7 @@ class ANSAgent:
         payload: dict[str, Any] = {
             "delta": round(clamped, 4),
             "reason": str(reason or "general").strip() or "general",
-            "user_id": str(user_id or "user_1").strip() or "user_1",
+            "user_id": _resolve_ans_bond_user_id(user_id, session_id=session_id),
             "session_id": str(session_id or "default").strip() or "default",
             "bond_stage": self._bond_stage,
         }
@@ -361,7 +384,7 @@ class ANSAgent:
     def trigger_proactive_voice(
         self,
         *,
-        user_id: str = "user_1",
+        user_id: str = "",
         traits: Any = None,
         context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
@@ -372,7 +395,7 @@ class ANSAgent:
         PROACTIVE_VOICE_TRIGGERED 事件供 CortexAgent 感知。
 
         Args:
-            user_id: 用户 ID，默认 "user_1"。
+            user_id: 用户 ID；空值使用 canonical bond user id。
             traits: PersonalityTraits 实例（可选）。
             context: 场景上下文（可选），含 bond_stage / pending_followup_topics 等。
 
@@ -385,8 +408,8 @@ class ANSAgent:
             decision = get_initiative_governor_agent().evaluate_initiative(
                 action="proactive_voice",
                 motive=context.get("motive") if isinstance(context, dict) else None,
-                user_id=str(user_id or "user_1").strip() or "user_1",
                 session_id=str((context or {}).get("session_id") or "default"),
+                user_id=_resolve_ans_bond_user_id(user_id, session_id=str((context or {}).get("session_id") or "default")),
                 context=dict(context or {}),
             )
             if str(decision.get("decision") or "").upper() != "ALLOW":
@@ -401,10 +424,11 @@ class ANSAgent:
 
             voice = PersonaProactiveVoice()
             ctx = dict(context or {})
+            voice_user_id = _resolve_ans_bond_user_id(user_id, session_id=str(ctx.get("session_id") or "default"))
             # 注入当前 bond_stage（从 ANSAgent 内部状态）
             ctx.setdefault("bond_stage", self._bond_stage.upper())
             expression = voice.evaluate_scene(
-                user_id=str(user_id or "user_1").strip() or "user_1",
+                user_id=voice_user_id,
                 traits=traits,
                 context=ctx,
             )
@@ -418,7 +442,7 @@ class ANSAgent:
             self.emit_from_thread(
                 "PROACTIVE_VOICE_TRIGGERED",
                 {
-                    "user_id": str(user_id or "user_1"),
+                    "user_id": voice_user_id,
                     "scene_type": scene_type,
                     "emotion_tag": str(getattr(expression, "emotion_tag", "") or "NEUTRAL"),
                     "content_preview": str(getattr(expression, "content", "") or "")[:80],
@@ -751,17 +775,15 @@ class ANSAgent:
         from host_brain.core.ids import now_ms as _now_ms  # noqa: PLC0415
         # 根据 bond_stage 推算 proactive_multiplier
         _stage_multiplier = {
-            "stranger": 0.55,
-            "acquaintance": 0.70,
             "friend": 0.85,
             "close_friend": 0.95,
             "intimate": 1.00,
         }
-        proactive_multiplier = _stage_multiplier.get(str(self._bond_stage or "stranger"), 0.70)
+        proactive_multiplier = _stage_multiplier.get(str(self._bond_stage or "friend"), 0.85)
         if self._recovery_mode:
             proactive_multiplier = round(proactive_multiplier * 0.35, 4)
         snapshot = {
-            "bond_stage": str(self._bond_stage or "stranger"),
+            "bond_stage": str(self._bond_stage or "friend"),
             "recovery_mode": bool(self._recovery_mode),
             "recovery_mode_ts_ms": int(self._recovery_mode_ts_ms or 0),
             "proactive_multiplier": round(proactive_multiplier, 4),

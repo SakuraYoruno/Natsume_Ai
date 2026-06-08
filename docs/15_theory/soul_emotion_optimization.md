@@ -5,16 +5,26 @@
 
 **文档编号：** SOUL-OPT-2026-03-05
 **创建日期：** 2026-03-05
-**状态：** 已实施
+**状态：** 历史优化记录 / 多轮实施留痕（2026-06-04 已标注旧路径口径）
 **作者：** Claude-4.6 Sonnet
 **关联文件：**
 - `host_brain/core/metabolism.py`
 - `host_brain/bond/bond_stage_engine.py`
 - `host_brain/bond/bond_dynamics.py`
-- `host_brain/memory/episodic.py`
-- `host_brain/core/context_pack.py`
+- `host_brain/memory/episodic.py` / `host_brain/app/memory/episodic_store.py`
+- `host_brain/core/prompt_context.py`
+- `host_brain/app/chat_payload_builder.py`
+- `host_brain/app/surface_context_packet.py`
 - `host_brain/core/qa.py`
 - `host_brain/governor/decision.py`
+- `host_brain/persona/surface_main_chain.py`
+- `host_brain/app/reply_envelope.py`
+
+**阅读口径（2026-06-04 优先）：**
+- 本文是 2026-03-05 起多轮情感架构优化记录，正文中的“已实施”“目标文件”“预期效果”按当时阶段记录理解，不等同于当前代码仍逐项满足。
+- 正文大量 `context_pack.py` 口径应映射到当前 `prompt_context.py`、`chat_payload_builder.py`、`surface_context_packet.py` 与 Surface Main Chain 上下文面。
+- 正文中旧观测与工具注册路径（如 `observability/cross_timeline.py`、`obs/metrics.py`、`mcp/tool_registry.py`）应按当前 `obs_routes*`、`webui_aggregation.py`、`tools/catalog.py`、`tools/broker.py` 与 `app/agents/tool_registry.py` 复核。
+- 用户可见最终表达以 Surface Main Chain 与 `ReplyEnvelope(final_reply)` 为收口；本文不得作为“情绪已驱动最终回复/外显动作已发生”的审计证明。
 
 ---
 

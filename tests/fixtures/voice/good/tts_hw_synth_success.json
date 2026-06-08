@@ -1,18 +1,18 @@
-{
-  "request_id": "req_tts_hw_001",
-  "scenario": "synth_success",
-  "description": "Normal TTS synthesis: short text to audio, GPU resident",
-  "payload": {
-    "session_id": "sess_tts_hw_001",
-    "utterance_id": "utt_001",
-    "text": "おはようございます、マスター。",
-    "voice_profile": "default",
-    "emotion_tag": "HAPPY",
-    "seq": 1
-  },
-  "expected": {
-    "success": true,
-    "reason_code": null,
-    "has_audio_ref": true
-  }
+﻿{
+    "request_id":  "req_tts_hw_001",
+    "scenario":  "synth_success",
+    "description":  "Normal TTS synthesis: short text to audio, GPU resident",
+    "payload":  {
+                    "session_id":  "sess_tts_hw_001",
+                    "utterance_id":  "utt_001",
+                    "text":  "おはようございます、マスター。",
+                    "voice_profile":  "default",
+                    "emotion_tag":  "HAPPY",
+                    "seq":  1
+                },
+    "expected":  {
+                     "success":  true,
+                     "reason_code":  null,
+                     "has_audio_ref":  true
+                 }
 }

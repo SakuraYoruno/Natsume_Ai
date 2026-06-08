@@ -14,6 +14,7 @@ DevSpec §20：Canon 提案审核 REST API。
 from __future__ import annotations
 
 import logging
+import json
 import os
 import threading
 import time
@@ -86,9 +87,9 @@ class CanonProposalSubmitRequest(BaseModel):
 
 
 class CanonProposalApproveRequest(BaseModel):
-    proposed_title: str = Field(..., description="提案标题（与提交时一致）")
-    proposed_tags: List[str] = Field(default_factory=list, description="提案标签")
-    proposed_body: str = Field(..., description="提案正文（与提交时一致）")
+    proposed_title: Optional[str] = Field(None, description="提案标题（省略时使用提案记录中保存的内容）")
+    proposed_tags: Optional[List[str]] = Field(None, description="提案标签（省略时使用提案记录中保存的内容）")
+    proposed_body: Optional[str] = Field(None, description="提案正文（省略时使用提案记录中保存的内容）")
     approver_node_id: Optional[str] = Field(None, description="审核节点 ID（可选）")
 
 
@@ -120,6 +121,9 @@ class CanonProposalResponse(BaseModel):
     proposer_node_id: Optional[str]
     summary: Optional[str]
     proposed_hash: Optional[str]
+    proposed_title: Optional[str] = None
+    proposed_tags: List[str] = Field(default_factory=list)
+    proposed_body: Optional[str] = None
     base_version: Optional[int]
     proposed_version: Optional[int]
     ts_ms: Optional[int]
@@ -171,6 +175,9 @@ def _proposal_row_to_response(row: Dict[str, Any], request_id: str) -> CanonProp
         proposer_node_id=row.get("proposer_node_id"),
         summary=row.get("summary"),
         proposed_hash=row.get("proposed_hash"),
+        proposed_title=row.get("proposed_title"),
+        proposed_tags=_coerce_proposed_tags(row.get("proposed_tags")),
+        proposed_body=row.get("proposed_body"),
         base_version=row.get("base_version"),
         proposed_version=row.get("proposed_version"),
         ts_ms=row.get("ts_ms"),
@@ -178,6 +185,38 @@ def _proposal_row_to_response(row: Dict[str, Any], request_id: str) -> CanonProp
         reason_code=None,
         timestamp=int(time.time() * 1000),
     )
+
+
+def _coerce_proposed_tags(raw: Any) -> list[str]:
+    if isinstance(raw, list):
+        return [str(tag).strip() for tag in raw if str(tag).strip()]
+    if isinstance(raw, tuple):
+        return [str(tag).strip() for tag in raw if str(tag).strip()]
+    if isinstance(raw, str) and raw.strip():
+        try:
+            parsed = json.loads(raw)
+        except json.JSONDecodeError:
+            return [raw.strip()]
+        if isinstance(parsed, list):
+            return [str(tag).strip() for tag in parsed if str(tag).strip()]
+    return []
+
+
+def _resolve_approval_content(
+    *,
+    proposal: Dict[str, Any],
+    body: CanonProposalApproveRequest,
+) -> tuple[str, list[str], str]:
+    proposed_title = str(body.proposed_title or proposal.get("proposed_title") or "").strip()
+    proposed_tags = (
+        list(body.proposed_tags)
+        if body.proposed_tags is not None
+        else _coerce_proposed_tags(proposal.get("proposed_tags"))
+    )
+    proposed_body = str(body.proposed_body or proposal.get("proposed_body") or "").strip()
+    if not proposed_title or not proposed_body:
+        raise ValueError("proposal content missing: proposed_title/proposed_body required")
+    return proposed_title, proposed_tags, proposed_body
 
 
 def _get_ledger_from_app() -> SQLiteLedger:
@@ -347,13 +386,17 @@ async def approve_proposal(proposal_id: str, body: CanonProposalApproveRequest) 
             )
 
         approver_node_id = body.approver_node_id or f"api.canon_proposals.approve::{request_id}"
+        proposed_title, proposed_tags, proposed_body = _resolve_approval_content(
+            proposal=existing,
+            body=body,
+        )
         # approve_proposal_with_content handles its own write ordering internally;
         # wrapping in ledger.transaction() causes nested lock/transaction conflicts.
         doc = store.approve_proposal_with_content(
             proposal_id=proposal_id,
-            proposed_title=body.proposed_title,
-            proposed_tags=body.proposed_tags,
-            proposed_body=body.proposed_body,
+            proposed_title=proposed_title,
+            proposed_tags=proposed_tags,
+            proposed_body=proposed_body,
             approver_node_id=approver_node_id,
             ts_ms=ts_ms,
         )

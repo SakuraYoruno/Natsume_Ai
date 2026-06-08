@@ -126,6 +126,7 @@ def _run(coro):
 def test_try_handle_recent_turn_direct_route_returns_commit_event(monkeypatch) -> None:
     created_tasks = []
     handoffs: list[dict] = []
+    monkeypatch.setenv("HOST_LEGACY_DIRECT_TEXT_ROUTES_ENABLED", "true")
 
     async def _fake_post_process(**_kwargs):  # noqa: ANN001
         return None
@@ -178,6 +179,7 @@ def test_try_handle_recent_turn_direct_route_returns_commit_event(monkeypatch) -
 def test_try_handle_task_progress_direct_route_returns_commit_event(monkeypatch) -> None:
     created_tasks = []
     handoffs: list[dict] = []
+    monkeypatch.setenv("HOST_LEGACY_DIRECT_TEXT_ROUTES_ENABLED", "true")
 
     async def _fake_post_process(**_kwargs):  # noqa: ANN001
         return None
@@ -225,10 +227,56 @@ def test_try_handle_task_progress_direct_route_returns_commit_event(monkeypatch)
     assert len(created_tasks) == 1
 
 
+def test_direct_text_routes_are_disabled_by_default(monkeypatch) -> None:
+    monkeypatch.delenv("HOST_LEGACY_DIRECT_TEXT_ROUTES_ENABLED", raising=False)
+
+    recent = _run(
+        try_handle_recent_turn_direct_route(
+            route="recent_turn",
+            request_id="req-recent-disabled",
+            session_id="sess-recent-disabled",
+            person_id="person-recent-disabled",
+            sanitized_message="刚才说到哪了",
+            render_target_lang="zh",
+            route_reason="recent_turn_query",
+            ts_ms=1,
+            emotion_context={"emotion_tag": "NEUTRAL"},
+            bond_summary={},
+            governor_result={},
+            pii_ingress_stats={},
+            sse_fn=lambda payload: payload,
+            record_dispatch_handoff_fn=lambda **_kwargs: None,
+        )
+    )
+    progress = _run(
+        try_handle_task_progress_direct_route(
+            route="task_progress",
+            request_id="req-progress-disabled",
+            session_id="sess-progress-disabled",
+            person_id="person-progress-disabled",
+            sanitized_message="进度呢",
+            route_reason="task_progress_query",
+            ts_ms=1,
+            emotion_context={"emotion_tag": "NEUTRAL"},
+            bond_summary={},
+            governor_result={},
+            pii_ingress_stats={},
+            render_target_lang="zh",
+            fallback_no_summary_text="no-progress",
+            build_task_progress_sub_context_fn=lambda **_kwargs: SimpleNamespace(result_text="running"),
+            sse_fn=lambda payload: payload,
+            record_dispatch_handoff_fn=lambda **_kwargs: None,
+        )
+    )
+
+    assert recent is None
+    assert progress is None
+
+
 def test_stream_chat_route_records_handoff_and_streams_events() -> None:
     handoffs: list[dict] = []
 
-    async def _fake_chat_agent(_chat_input):  # noqa: ANN001
+    async def _fake_surface_reply(_chat_input):  # noqa: ANN001
         yield 'data: {"phase":"CHAT","route":"chat"}\n\n'
 
     async def _collect():
@@ -240,7 +288,7 @@ def test_stream_chat_route_records_handoff_and_streams_events() -> None:
             skill_family="social",
             runtime_capability_handoff_extra={"runtime_capability_id": "rc-001"},
             record_dispatch_handoff_fn=lambda **kwargs: handoffs.append(dict(kwargs)),
-            chat_agent_sse_generator_fn=_fake_chat_agent,
+            surface_reply_sse_generator_fn=_fake_surface_reply,
             chat_input=SimpleNamespace(),
         ):
             events.append(event)

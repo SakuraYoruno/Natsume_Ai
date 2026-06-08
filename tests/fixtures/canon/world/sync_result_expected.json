@@ -1,27 +1,27 @@
-{
-  "sync_ts_ms": 1741000001000,
-  "records": [
-    {
-      "doc_id": "wc-001-system-terms",
-      "version": 1,
-      "hash": "577b9700475d6c1a565a3e59c41e353caff54c15fe6f26bb9a3f9b4c9faa6ade",
-      "source_path": "D:\\nastume\\Natsume_Ai\\host_brain\\canon\\world\\wc-001-system-terms.json",
-      "changed": true
-    },
-    {
-      "doc_id": "wc-002-architecture-invariants",
-      "version": 1,
-      "hash": "5c67a32960090b597d12a950f0890d9f857a51c8aff95643d7aca7f422747297",
-      "source_path": "D:\\nastume\\Natsume_Ai\\host_brain\\canon\\world\\wc-002-architecture-invariants.json",
-      "changed": true
-    },
-    {
-      "doc_id": "wc-003-persona-core",
-      "version": 1,
-      "hash": "ed650c39e366c11990c4ada4c80f946e6d4a0721b65a70859b36dfb548cb0290",
-      "source_path": "D:\\nastume\\Natsume_Ai\\host_brain\\canon\\world\\wc-003-persona-core.json",
-      "changed": true
-    }
-  ],
-  "total": 3
+﻿{
+    "sync_ts_ms":  1741000001000,
+    "records":  [
+                    {
+                        "doc_id":  "wc-001-system-terms",
+                        "version":  1,
+                        "hash":  "577b9700475d6c1a565a3e59c41e353caff54c15fe6f26bb9a3f9b4c9faa6ade",
+                        "source_path":  "D:\\nastume\\Natsume_Ai\\host_brain\\canon\\world\\wc-001-system-terms.json",
+                        "changed":  true
+                    },
+                    {
+                        "doc_id":  "wc-002-architecture-invariants",
+                        "version":  1,
+                        "hash":  "5c67a32960090b597d12a950f0890d9f857a51c8aff95643d7aca7f422747297",
+                        "source_path":  "D:\\nastume\\Natsume_Ai\\host_brain\\canon\\world\\wc-002-architecture-invariants.json",
+                        "changed":  true
+                    },
+                    {
+                        "doc_id":  "wc-003-persona-core",
+                        "version":  1,
+                        "hash":  "ed650c39e366c11990c4ada4c80f946e6d4a0721b65a70859b36dfb548cb0290",
+                        "source_path":  "D:\\nastume\\Natsume_Ai\\host_brain\\canon\\world\\wc-003-persona-core.json",
+                        "changed":  true
+                    }
+                ],
+    "total":  3
 }

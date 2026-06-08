@@ -135,7 +135,15 @@ def _tool_search_knowledge(args: dict[str, Any]) -> dict[str, Any]:
             content = str(getattr(hit, "content", "") or "")
             score = float(getattr(hit, "score", 0.0))
             doc_id = str(getattr(hit, "doc_id", "") or "")
-            items.append({"doc_id": doc_id, "content": content, "score": score})
+            source = str(getattr(hit, "source", "") or "")
+            metadata = dict(getattr(hit, "metadata", {}) or {})
+            items.append({
+                "doc_id": doc_id,
+                "content": content,
+                "score": score,
+                "source": source,
+                "metadata": metadata,
+            })
             lines.append(f"[{i}] (相关度={score:.2f}) {content}")
 
         result_text = "\n".join(lines)
@@ -194,7 +202,15 @@ def _tool_search_by_keyword(args: dict[str, Any]) -> dict[str, Any]:
             content = str(getattr(hit, "content", "") or "")
             score = float(getattr(hit, "score", 0.0))
             doc_id = str(getattr(hit, "doc_id", "") or "")
-            items.append({"doc_id": doc_id, "content": content, "score": score})
+            source = str(getattr(hit, "source", "") or "")
+            metadata = dict(getattr(hit, "metadata", {}) or {})
+            items.append({
+                "doc_id": doc_id,
+                "content": content,
+                "score": score,
+                "source": source,
+                "metadata": metadata,
+            })
             lines.append(f"[{i}] {content}")
 
         return {
@@ -252,7 +268,15 @@ def _tool_search_by_vector(args: dict[str, Any]) -> dict[str, Any]:
             content = str(getattr(hit, "content", "") or "")
             score = float(getattr(hit, "score", 0.0))
             doc_id = str(getattr(hit, "doc_id", "") or "")
-            items.append({"doc_id": doc_id, "content": content, "score": score})
+            source = str(getattr(hit, "source", "") or "")
+            metadata = dict(getattr(hit, "metadata", {}) or {})
+            items.append({
+                "doc_id": doc_id,
+                "content": content,
+                "score": score,
+                "source": source,
+                "metadata": metadata,
+            })
             lines.append(f"[{i}] (相似度={score:.2f}) {content}")
 
         return {
@@ -746,6 +770,21 @@ def _tool_dispatch_sub_agent(args: dict[str, Any]) -> dict[str, Any]:
     if isinstance(payload.get("context"), dict):
         sub_ctx.update(dict(payload.get("context") or {}))
     sub_ctx.setdefault("source", "intent_agent_tool_dispatch")
+    try:
+        from host_brain.app.sub_agent_context import hydrate_sub_agent_context  # noqa: PLC0415
+
+        sub_ctx = hydrate_sub_agent_context(
+            sub_ctx,
+            request_id=request_id,
+            session_id=session_id,
+            task=task_text,
+            user_message=user_message,
+            agent_id=agent_id,
+            parent_agent_id=str(ctx.get("agent_id") or "intent_agent"),
+            timeout_ms=timeout_ms,
+        )
+    except Exception:
+        pass
 
     try:
         from host_brain.app.sub_agent_protocol import (  # noqa: PLC0415
@@ -1096,7 +1135,7 @@ _TOOL_REGISTRY: dict[str, ToolSpec] = {
 
 # 各 agent 可用的工具集合（只读工具）
 _AGENT_TOOLS: dict[str, list[str]] = {
-    "chat_agent":      ["search_knowledge", "get_context"],
+    "surface_reply":      ["search_knowledge", "get_context"],
     "translate_agent": ["translate_text", "search_knowledge"],
     "retrieval_agent": ["search_knowledge", "search_by_keyword", "search_by_vector", "get_context"],
     "intent_agent":    [

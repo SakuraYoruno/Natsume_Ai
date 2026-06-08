@@ -5,20 +5,24 @@
 
 **文档编号：** SOUL-UPGRADE-2026-03-23
 **创建日期：** 2026-03-23
-**状态：** 历史升级路径 / 蓝图留痕（2026-04-19 校准）
+**状态：** 历史升级路径 / 蓝图留痕（2026-06-04 校准）
 **作者：** Claude-4.6 Opus
 **前置文档：**
 - `docs/15_theory/soul_emotion_optimization.md`（五大优化方向，已实施）
 - 方向 A-G 全部实施完毕（LLM 情感推理、情感 Agent、情感记忆闭环等）
 
-**当前代码校准说明（2026-04-19 优先）：**
-- 本文形成于 2026-03-23 的灵魂系统升级规划阶段，正文仍包含 `main_chain.py` 等旧主链入口写法，不应视为当前运行时事实。
-- 当前聊天与后处理收口应以 `chat_handler -> cortex_orchestrator -> agent_runtime_shared` 为准；灵魂/人格相关能力的现行落点需结合 `docs/15_theory/architecture_overview.md`、`docs/15_theory/APP_AUDIT_SKILLS_CONTRACT.md` 与实际代码核对。
-- 本文可继续作为能力蓝图与拆解参考，但不再作为“全部实施完成”的现状证明，也不作为实现层任务来源。
+**阅读口径（2026-06-04 优先）：**
+- 本文形成于 2026-03-23 的灵魂系统升级规划阶段，可作为能力蓝图与拆解参考，不作为当前运行时事实、完成证明或实现层任务来源。
+- 当前聊天、人格材料汇总与最终表达收口应以 `chat_handler -> cortex_orchestrator -> agent_runtime_shared -> chat_payload_builder / surface_context_packet -> Surface Main Chain -> ReplyEnvelope` 为准。
+- 文中的阶段验收与文件清单按历史规划理解；若与当前代码事实文档冲突，以当前代码事实文档和实际代码为准。
 
 **关联代码模块：**
 - `host_brain/core/metabolism.py` — 情绪连续体、情感回声
-- `host_brain/core/prompt_context.py` — prompt 槽位系统
+- `host_brain/core/prompt_context.py` — prompt/context 槽位系统
+- `host_brain/app/chat_payload_builder.py` — 人格、情感、Bond 上下文汇总
+- `host_brain/app/surface_context_packet.py` — Surface Main Chain 上下文包
+- `host_brain/persona/surface_main_chain.py` — 当前最终表达生成链
+- `host_brain/app/reply_envelope.py` — 最终回复发送 / 持久化 / 缓存收口
 - `host_brain/bond/bond_stage_engine.py` — Bond 6 阶段关系系统
 - `host_brain/bond/bond_dynamics.py` — Bond 动态写入器
 - `host_brain/memory/episodic.py` — 情节记忆
@@ -205,7 +209,7 @@ class PersonaEngine:
 |------|------|
 | `metabolism.py` | `compute_emotion_echo()` 接收 `PersonalityTraits` 参数 |
 | `prompt_context.py` | `build_emotion_pulse_slot()` 接收 `ExpressionHint` 参数 |
-| `prompt_builder.py` | 注入 `persona_expression_hint` 到 LLM prompt |
+| `chat_payload_builder.py` / `node_generation_prompt.py` | 汇总并呈现 `persona_expression_hint` 给表达链 |
 
 #### 验收标准
 
@@ -214,13 +218,13 @@ class PersonaEngine:
 | V-II-1 | `EmotionReactivityProfile` 可根据特质向量 + 情感场景输出调制系数 | 单测：高敏感度 + SAD → echo_weight ≥ 0.5 |
 | V-II-2 | `PersonaExpressionAdapter` 根据 (traits, emotion, bond_stage) 输出 `ExpressionHint` | 单测 |
 | V-II-3 | `compute_emotion_echo()` 实际接收并使用 `PersonalityTraits` 参数 | 集成测试：对比有/无人格调制的回声差异 |
-| V-II-4 | `prompt_builder` 输出的 system prompt 中包含 `persona_expression_hint` 段落 | prompt 快照断言 |
+| V-II-4 | 表达上下文中包含 `persona_expression_hint` 段落 | prompt / surface context 快照断言 |
 
 ---
 
 ### 2.3 Phase III：自我意识模型（SelfModel）
 
-**目标**：Natsume 能"反思"自己的状态变化——感知到"最近我和 master 的关系变亲近了"、"今天我的情绪比平时低落"、"感觉自己变得更愿意表达了"。
+**目标**：Natsume 能"反思"自己的状态变化——感知到"最近我和主用户的关系变亲近了"、"今天我的情绪比平时低落"、"感觉自己变得更愿意表达了"。
 
 #### 新增文件
 
@@ -242,13 +246,13 @@ class SelfModelSnapshot:
     dominant_recent_emotion: str    # 近期主导情感
 
     # 关系层面
-    bond_growth_perception: str     # "和 master 的关系在变亲近/稳定/有些疏远"
+    bond_growth_perception: str     # "和主用户的关系在变亲近/稳定/有些疏远"
     shared_memory_count: int        # 共同记忆数量
     last_deep_talk_days_ago: int    # 上次深度对话距今天数
 
     # 成长层面
     personality_changes: list[str]  # ["变得更开朗了", "笑得比以前多了"]
-    growth_milestones: list[str]    # ["第一次被 master 安慰", "认识 100 天"]
+    growth_milestones: list[str]    # ["第一次被主用户安慰", "认识 100 天"]
 ```
 
 #### 新 prompt 槽位 `self_reflection_pulse`
@@ -258,7 +262,7 @@ class SelfModelSnapshot:
 OPTIONAL_SLOTS["self_reflection_pulse"] = dict
 # 内容示例：
 {
-    "self_awareness": "最近和 master 聊得很开心，感觉关系在慢慢变好",
+    "self_awareness": "最近和主用户聊得很开心，感觉关系在慢慢变好",
     "mood_awareness": "今天心情不错，比昨天活泼了一些",
     "growth_note": "感觉自己变得更愿意表达真实想法了"
 }
@@ -269,7 +273,7 @@ OPTIONAL_SLOTS["self_reflection_pulse"] = dict
 | 文件 | 改动 |
 |------|------|
 | `prompt_context.py` | 新增 `self_reflection_pulse` 可选槽位 |
-| `prompt_builder.py` | 注入 `self_reflection_pulse` 到 LLM system prompt |
+| `chat_payload_builder.py` / `node_generation_prompt.py` | 汇总并呈现 `self_reflection_pulse` 给表达链 |
 | `scheduler/` | 新增定期自省任务（每 N 轮对话触发一次） |
 
 #### 验收标准
@@ -367,7 +371,7 @@ OPTIONAL_SLOTS["self_reflection_pulse"] = dict
 | 文件 | 改动 |
 |------|------|
 | `bond_stage_engine.py` | `BondScoreState.to_summary()` 新增 `milestone_hint`、`shared_memory_count` |
-| `prompt_builder.py` / `chat_context_builder.py` | 注入 `bond_narrative` 叙事层 |
+| `chat_payload_builder.py` / `node_generation_prompt.py` / `surface_context_packet.py` | 汇总并呈现 `bond_narrative` 叙事层 |
 
 #### 验收标准
 
@@ -416,7 +420,7 @@ class DriftCheckResult:
 
 | 文件 | 改动 |
 |------|------|
-| `main_chain.py` | 每 N 轮触发漂移检测 |
+| `agent_runtime_shared.py` | 每 N 轮或后处理阶段触发漂移检测 |
 | `qa.py` | SEVERE 漂移时注入校正提示 |
 
 #### 验收标准
@@ -478,7 +482,7 @@ class PersistedEmotionState:
 | 文件 | 改动 |
 |------|------|
 | `emotion_context.py` | 会话开始时调用 `restore_with_decay()` |
-| `main_chain.py` | 会话结束/超时时调用 `persist_emotion_state()` |
+| `chat_payload_builder.py` / `persona/inner_world.py` | 汇总跨会话情感状态，并在内在世界 / 情感持久化路径中维护衰减与恢复 |
 
 #### 验收标准
 
@@ -538,13 +542,13 @@ class PersistedEmotionState:
 | 阶段 | 新增文件 | 改动文件 |
 |------|---------|---------|
 | **Phase I** | `persona/persona_engine.py`, `persona/personality_traits.py`, `persona/__init__.py` | `wc-003-persona-core.json` |
-| **Phase II** | `persona/emotion_reactivity.py`, `persona/expression_adapter.py` | `metabolism.py`, `prompt_context.py`, `prompt_builder.py` |
-| **Phase III** | `persona/self_model.py`, `persona/self_reflection.py` | `prompt_context.py`, `prompt_builder.py`, `scheduler/` |
+| **Phase II** | `persona/emotion_reactivity.py`, `persona/expression_adapter.py` | `metabolism.py`, `prompt_context.py`, `chat_payload_builder.py`, `node_generation_prompt.py` |
+| **Phase III** | `persona/self_model.py`, `persona/self_reflection.py` | `prompt_context.py`, `chat_payload_builder.py`, `node_generation_prompt.py`, `scheduler/` |
 | **Phase IV** | `persona/persona_growth.py`, `persona/trait_drift_guard.py` | `bond_stage_engine.py`, `canon_routes.py` |
-| **Phase V** | `bond/shared_memory_index.py`, `bond/milestone_tracker.py`, `bond/bond_narrative.py` | `bond_stage_engine.py`, `chat_context_builder.py` |
-| **Phase VI** | `persona/drift_detector.py`, `audit/migrations/029_persona_drift_log.py` | `main_chain.py`, `qa.py` |
-| **Phase VII** | `persona/emotion_persistence.py`, `audit/migrations/030_emotion_state_snapshot.py` | `emotion_context.py`, `main_chain.py` |
-| **Phase VIII** | `persona/proactive_voice.py` | `metabolism.py`, `http_hooks.py`, `proactive_talk.py` |
+| **Phase V** | `bond/shared_memory_index.py`, `bond/milestone_tracker.py`, `bond/bond_narrative.py` | `bond_stage_engine.py`, `chat_payload_builder.py`, `node_generation_prompt.py` |
+| **Phase VI** | `persona/drift_detector.py`, `audit/migrations/029_persona_drift_log.py` | `agent_runtime_shared.py`, `qa.py` |
+| **Phase VII** | `persona/emotion_persistence.py`, `audit/migrations/030_emotion_state_snapshot.py` | `emotion_context.py`, `chat_payload_builder.py`, `persona/inner_world.py` |
+| **Phase VIII** | `persona/proactive_voice.py` | `metabolism.py`, `http_hooks_runtime_helpers.py`, `proactive_talk.py` |
 
 **合计**：14 个新文件 + 13 个改动文件
 
@@ -557,15 +561,16 @@ class PersistedEmotionState:
 ```mermaid
 sequenceDiagram
     participant U as 用户消息
-    participant MC as main_chain
+    participant MC as Host主链
     participant EP as EmotionPersistence
     participant PE as PersonaEngine
     participant ELI as EmotionLLMInference
     participant ER as EmotionReactivity
     participant EA as ExpressionAdapter
     participant SM as SelfModel
-    participant PB as prompt_builder
-    participant LLM as LLM 生成
+    participant SC as Surface上下文
+    participant LLM as Surface Main Chain
+    participant RE as ReplyEnvelope
     participant DD as DriftDetector
 
     U->>MC: 用户输入
@@ -581,11 +586,12 @@ sequenceDiagram
     EA-->>MC: ExpressionHint (style_hint, tone)
     MC->>SM: 6. 获取自省快照（概率触发）
     SM-->>MC: SelfModelSnapshot / None
-    MC->>PB: 7. 注入所有槽位到 prompt
-    Note over PB: emotion_pulse<br/>persona_expression_hint<br/>self_reflection_pulse<br/>bond_narrative
-    PB->>LLM: 8. 完整 system prompt + 用户消息
-    LLM-->>MC: 9. 生成回复
-    MC->>DD: 10. 漂移检测（每N轮）
+    MC->>SC: 7. 汇总人格/情感/Bond上下文
+    Note over SC: emotion_pulse<br/>persona_expression_hint<br/>self_reflection_pulse<br/>bond_narrative
+    SC->>LLM: 8. Surface 上下文包 + 用户消息
+    LLM-->>RE: 9. 候选表达收口
+    RE-->>MC: final_reply / no_reply
+    MC->>DD: 10. 漂移检测（每N轮或后处理）
     DD-->>MC: DriftCheckResult
     MC->>EP: 11. 持久化当前情感状态
 ```
@@ -649,10 +655,10 @@ sequenceDiagram
 └──────────────────────────────────────────────────────────────────────────┘
         ↕                       ↕                       ↕
 ┌──────────────────────────────────────────────────────────────────────────┐
-│                         🎤 表达输出层                                     │
+│                         🎤 表达收口与外显层                               │
 │  ┌─────────────────┐ ┌──────────────────┐ ┌──────────────────────┐      │
-│  │ prompt_builder  │ │ LLM 生成         │ │ VTS 表情驱动         │      │
-│  │ 注入所有槽位    │ │ 情感化回复       │ │ 16 种情感表情        │      │
+│  │ Surface Context │ │ ReplyEnvelope    │ │ 外显执行面           │      │
+│  │ 汇总上下文槽位  │ │ final_reply收口  │ │ 表情/语音/动作提示   │      │
 │  └─────────────────┘ └──────────────────┘ └─────────────────────┘      │
 └──────────────────────────────────────────────────────────────────────────┘
 ```
@@ -661,7 +667,7 @@ sequenceDiagram
 
 ## 六、实施路线图
 
-| 阶段 | 核心交付 | 状态 | 验收测试 |
+| 阶段 | 核心交付 | 历史状态 | 历史验收记录 |
 |------|---------|------|----------|
 | **Phase I** | PersonaEngine + 7 维特质向量 | ✅ 已实施 | 23 passed |
 | **Phase II** | 情感-人格耦合 + 表达策略 | ✅ 已实施 | 32 passed |
@@ -672,7 +678,7 @@ sequenceDiagram
 | **Phase VII** | 情感持久化 + 衰减恢复 | ✅ 已实施 | 17 passed |
 | **Phase VIII** | 场景化主动表达 | ✅ 已实施 | 19 passed |
 
-**总计：8 阶段全部完成，210 项验收测试全部通过 (0.86s)**
+**历史记录：** 原规划记录为 8 阶段完成、210 项验收测试通过；当前是否仍满足，应以现行代码、现行测试与审计事实重新验证。
 
 ---
 
@@ -705,7 +711,7 @@ sequenceDiagram
 ### 8.2 与 Multi-Agent 体系的关系
 
 本文档新增的所有模块**不改变 Agent 体系架构**，仅通过以下接口与之交互：
-- `prompt_context.py` 槽位注入（emotion_pulse / self_reflection_pulse / persona_expression_hint）
+- `prompt_context.py` / `chat_payload_builder.py` / `surface_context_packet.py` 上下文汇总（emotion_pulse / self_reflection_pulse / persona_expression_hint）
 - `bond_stage_engine.py` 事件触发（阶段晋级 → PersonaGrowth）
 - `metabolism.py` 情感回声调制（PersonalityTraits → echo_weight）
 - `emotion_context.py` 持久化恢复（EmotionPersistence → 初始情感向量）
@@ -723,10 +729,10 @@ sequenceDiagram
 | 阶段 | 实施日期 | 新增文件 | 改动文件 |
 |------|---------|---------|----------|
 | Phase I | 2026-03-23 | `persona/persona_engine.py`, `persona/personality_traits.py`, `persona/__init__.py` | `wc-003-persona-core.json` |
-| Phase II | 2026-03-23 | `persona/emotion_reactivity.py`, `persona/expression_adapter.py` | `metabolism.py`, `prompt_context.py`, `prompt_builder.py` |
-| Phase III | 2026-03-23 | `persona/self_model.py`, `persona/self_reflection.py` | `prompt_context.py`, `prompt_builder.py` |
+| Phase II | 2026-03-23 | `persona/emotion_reactivity.py`, `persona/expression_adapter.py` | `metabolism.py`, `prompt_context.py`, `chat_payload_builder.py`, `node_generation_prompt.py` |
+| Phase III | 2026-03-23 | `persona/self_model.py`, `persona/self_reflection.py` | `prompt_context.py`, `chat_payload_builder.py`, `node_generation_prompt.py` |
 | Phase IV | 2026-03-23 | `persona/persona_growth.py`, `persona/trait_drift_guard.py` | `bond_stage_engine.py` |
-| Phase V | 2026-03-23 | `bond/shared_memory_index.py`, `bond/milestone_tracker.py`, `bond/bond_narrative.py` | `bond_stage_engine.py`, `prompt_builder.py`, `prompt_context.py` |
+| Phase V | 2026-03-23 | `bond/shared_memory_index.py`, `bond/milestone_tracker.py`, `bond/bond_narrative.py` | `bond_stage_engine.py`, `chat_payload_builder.py`, `prompt_context.py`, `node_generation_prompt.py` |
 | Phase VI | 2026-03-23 | `persona/drift_detector.py` | `persona/__init__.py` |
 | Phase VII | 2026-03-23 | `persona/emotion_persistence.py` | `persona/__init__.py` |
 | Phase VIII | 2026-03-23 | `persona/proactive_voice.py` | `persona/__init__.py` |

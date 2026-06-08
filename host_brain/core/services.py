@@ -303,8 +303,7 @@ def build_default_service_registry() -> ServiceRegistry:
         ServiceSpec(service_id="host.governor.decision", owner=OWNER_HOST, required=True),
         ServiceSpec(service_id="host.skills.loader", owner=OWNER_HOST, required=True),
         ServiceSpec(service_id="host.integrations.llm_gateway", owner=OWNER_HOST, required=True),
-        ServiceSpec(service_id="host.retrieval.embedding", owner=OWNER_HOST, required=True),
-        ServiceSpec(service_id="host.retrieval.reranker", owner=OWNER_HOST, required=True),
+        ServiceSpec(service_id="host.retrieval.recall_fusion", owner=OWNER_HOST, required=True),
         ServiceSpec(service_id="host.vision.screen_ocr", owner=OWNER_HOST, required=True),
         ServiceSpec(service_id="host.vision.camera_recognizer", owner=OWNER_HOST, required=True),
     )

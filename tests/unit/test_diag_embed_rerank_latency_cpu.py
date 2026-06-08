@@ -22,7 +22,7 @@ def test_extract_commit_audit_metrics_prefers_direct_audit_refs() -> None:
         "audit_refs": {
             "latency_ms": 8123,
             "first_token_ms": 2666,
-            "path": "chat_agent:direct",
+            "path": "surface_reply:direct",
             "model_id": "gemini-2.5-flash-lite",
             "stream_buffered": False,
             "timings_ms": {
@@ -44,7 +44,7 @@ def test_extract_commit_audit_metrics_prefers_direct_audit_refs() -> None:
     assert metrics["server_latency_ms"] == 8123
     assert metrics["first_token_latency_ms"] == 2666
     assert metrics["retrieval_latency_ms"] == 444
-    assert metrics["path"] == "chat_agent:direct"
+    assert metrics["path"] == "surface_reply:direct"
     assert metrics["model_id"] == "gemini-2.5-flash-lite"
     assert metrics["stream_buffered"] is False
     assert metrics["prompt_build_ms"] == 11

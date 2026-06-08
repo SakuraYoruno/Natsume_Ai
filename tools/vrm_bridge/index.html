@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Natsume VRM Bridge</title>
+  </head>
+  <body>
+    <div id="app">
+      <canvas id="avatar-canvas"></canvas>
+      <aside class="hud">
+        <div class="row">
+          <span>VRM</span>
+          <strong id="model-status">loading</strong>
+        </div>
+        <div class="row">
+          <span>Bridge</span>
+          <strong id="bridge-status">offline</strong>
+        </div>
+        <div class="row">
+          <span>Emotion</span>
+          <strong id="emotion-status">NEUTRAL</strong>
+        </div>
+        <div class="row">
+          <span>Motion</span>
+          <strong id="motion-status">idle</strong>
+        </div>
+        <div class="controls">
+          <button data-action="expression" data-emotion="HAPPY">Happy</button>
+          <button data-action="expression" data-emotion="SURPRISED">Surprised</button>
+          <button data-action="expression" data-emotion="ANGRY">Angry</button>
+          <button data-action="body" data-body="wave">Wave</button>
+          <button data-action="body" data-body="happy_bounce">Bounce</button>
+          <button data-action="reset">Reset</button>
+        </div>
+      </aside>
+    </div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 import host_brain.app.graph_config_builder as graph_builder
 import host_brain.app.graph_config_llm_runtime as llm_runtime
+import host_brain.app.model_router as model_router
 from host_brain.app.graph_config_builder import (
     CHAT_DIRECT_NODE_ID,
     HOST_CHAT_ROUTE_CLOUD,
@@ -46,8 +47,10 @@ def _patch_runtime_dependencies(
     deepseek_api_key: str | None = "sk-deepseek",
     minimax_api_key: str | None = None,
     llm_provider: str = "gemini",
+    codex_cli_available: bool = False,
 ) -> None:
-    monkeypatch.setenv("HOST_GEMINI_KEY_POOL_DISABLE_RUNTIME_FILES", "true")
+    monkeypatch.setattr(model_router, "_resolve_runtime_gemini_api_key", lambda: (None, None, None))
+    monkeypatch.setattr(llm_runtime, "codex_cli_lm_available", lambda: bool(codex_cli_available))
     monkeypatch.setattr(
         llm_runtime,
         "load_host_config",
@@ -85,7 +88,7 @@ def test_resolve_host_llm_runtime_prefers_gemini_primary(monkeypatch) -> None:
     _patch_runtime_dependencies(monkeypatch)
     monkeypatch.setenv("HOST_GEMINI_MODEL_ID", "gemini-2.5-flash")
     monkeypatch.setenv("HOST_CODEX_MODEL_ID", "gpt-4o-mini")
-    monkeypatch.setenv("HOST_DEEPSEEK_MODEL_ID", "deepseek-chat")
+    monkeypatch.setenv("HOST_DEEPSEEK_MODEL_ID", "deepseek-v4-flash")
 
     runtime = graph_builder.resolve_host_llm_runtime()
 
@@ -118,14 +121,14 @@ def test_resolve_host_llm_runtime_falls_back_to_codex(monkeypatch) -> None:
 
 def test_resolve_host_llm_runtime_falls_back_to_deepseek(monkeypatch) -> None:
     _patch_runtime_dependencies(monkeypatch, gemini_api_key=None, codex_api_key=None, deepseek_api_key="sk-deepseek")
-    monkeypatch.setenv("HOST_DEEPSEEK_MODEL_ID", "deepseek-chat")
+    monkeypatch.setenv("HOST_DEEPSEEK_MODEL_ID", "deepseek-v4-flash")
 
     runtime = graph_builder.resolve_host_llm_runtime()
 
     assert runtime["route_target"] == HOST_CHAT_ROUTE_CLOUD
     assert runtime["route_reason_code"] == "HOST_CLOUD_CHAIN_FALLBACK_DEEPSEEK"
     assert runtime["provider_name"] == "deepseek"
-    assert runtime["model_id"] == "deepseek-chat"
+    assert runtime["model_id"] == "deepseek-v4-flash"
     assert runtime["remote_chain_status"][0]["available"] is False
     assert runtime["remote_chain_status"][1]["available"] is False
     assert runtime["remote_chain_status"][2]["available"] is True

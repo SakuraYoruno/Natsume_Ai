@@ -104,23 +104,23 @@ class TestTtsModelManagerLifecycle:
         assert not result.success
         assert result.reason_code == VOICE_SYNTH_FAILED
 
-    def test_synthesize_rejects_non_japanese_language(self):
+    def test_synthesize_rejects_unsupported_language(self):
         mgr = SoVITSModelManager(TtsConfig(device="cpu"))
         mgr._state = TtsState.READY
         mgr._model = MagicMock()
-        result = mgr.synthesize("\u3053\u3093\u306b\u3061\u306f", language="en")
+        result = mgr.synthesize("你好", language="fr")
         assert not result.success
         assert result.reason_code == VOICE_SCHEMA_INVALID
         mgr._model.synthesize.assert_not_called()
 
-    def test_synthesize_rejects_latin_text_before_backend_call(self):
+    def test_synthesize_accepts_chinese_text_before_backend_call(self):
         mgr = SoVITSModelManager(TtsConfig(device="cpu"))
         mgr._state = TtsState.READY
         mgr._model = MagicMock()
-        result = mgr.synthesize("hello")
-        assert not result.success
-        assert result.reason_code == VOICE_SCHEMA_INVALID
-        mgr._model.synthesize.assert_not_called()
+        mgr._model.synthesize.return_value = {"audio": [0.0, 0.1], "sample_rate": 32000}
+        result = mgr.synthesize("你好", language="zh")
+        assert result.success
+        mgr._model.synthesize.assert_called()
 
     def test_synthesize_when_model_not_ready_triggers_load(self):
         """When model is not ready, synthesize() attempts load first."""
@@ -183,7 +183,7 @@ class TestTtsConfig:
         cfg = TtsConfig()
         assert cfg.device == "cuda"
         assert cfg.sample_rate == 32000
-        assert cfg.language == "ja"
+        assert cfg.language == "zh"
 
     def test_as_dict_completeness(self):
         cfg = TtsConfig()
@@ -287,6 +287,52 @@ class TestSynthesizerCallbackFactory:
                 "lang_hint": "ja-jp",
             })
         assert synthesize_mock.call_args.kwargs["language"] == "ja-jp"
+
+    def test_factory_callback_passes_speed_to_engine(self):
+        mgr = SoVITSModelManager(TtsConfig(device="cpu"))
+        with patch.object(mgr, "synthesize", return_value=TtsSynthResult(
+            success=True,
+            reason_code=None,
+            detail="ok",
+            audio_ref="memory://test",
+            audio_data=[0.0],
+            duration_s=0.1,
+            processing_time_s=0.01,
+            sample_rate=32000,
+        )) as synthesize_mock:
+            synth = make_sovits_synthesizer(mgr)
+            synth({
+                "text": "\u3053\u3093\u306b\u3061\u306f",
+                "speed": 0.72,
+            })
+        assert synthesize_mock.call_args.kwargs["speed_factor"] == 0.72
+
+    def test_factory_callback_adds_expressive_timing_metadata(self, monkeypatch):
+        mgr = SoVITSModelManager(TtsConfig(device="cpu"))
+        import numpy as np
+
+        monkeypatch.setenv("EDGE_TTS_EXPRESSIVE_TIMING", "true")
+        mock_audio = np.ones(32000, dtype=np.float32)
+        with patch.object(mgr, "synthesize", return_value=TtsSynthResult(
+            success=True,
+            reason_code=None,
+            detail="ok",
+            audio_ref="memory://test",
+            audio_data=mock_audio,
+            duration_s=1.0,
+            processing_time_s=0.01,
+            sample_rate=32000,
+        )):
+            synth = make_sovits_synthesizer(mgr)
+            result = synth({
+                "text": "没关系，我在这里。慢慢来，好吗？",
+                "emotion_tag": "COMFORT",
+                "emotion_intensity": 0.8,
+                "lang_hint": "zh",
+            })
+        assert len(result["audio_data"]) > len(mock_audio)
+        assert result["expressive_timing"]["inserted_pause_s"] > 0
+        assert result["expressive_timing"]["breath_count"] >= 1
 
 
 # ---------------------------------------------------------------------------

@@ -7,13 +7,11 @@ import pytest
 from host_brain.bond.bond_stage_engine import (
     DEFAULT_SCORE_MAP,
     DEFAULT_STAGE_THRESHOLDS,
-    STAGE_ACQUAINTANCE,
     STAGE_CLOSE_FRIEND,
     STAGE_CONFIDANT,
     STAGE_FRIEND,
     STAGE_ORDER,
     STAGE_SOULMATE,
-    STAGE_STRANGER,
     TRANSITION_STATUS_DEMOTED,
     TRANSITION_STATUS_PROMOTED,
     TRANSITION_STATUS_STABLE,
@@ -53,14 +51,14 @@ def engine_with_update_ledger():
     return BondStageEngine(ledger=ledger), ledger
 
 
-# ── T-BOND-STAGE-01: 初始状态为 STRANGER ─────────────────────────────────────
+# ── T-BOND-STAGE-01: 初始状态为 FRIEND ─────────────────────────────────────
 
 class TestInitialState:
-    """T-BOND-STAGE-01: 新用户初始状态为 STRANGER，积分为 0。"""
+    """T-BOND-STAGE-01: 新用户初始状态为关系好的兄妹，积分为 0。"""
 
-    def test_initial_stage_is_stranger(self, engine):
+    def test_initial_stage_is_friend(self, engine):
         state = engine.get_state("user_001")
-        assert state.current_stage == STAGE_STRANGER
+        assert state.current_stage == STAGE_FRIEND
 
     def test_initial_score_is_zero(self, engine):
         state = engine.get_state("user_001")
@@ -83,7 +81,7 @@ class TestInitialState:
         assert row["user_id"] == "user_init"
         assert row["update_kind"] == UPDATE_KIND_INIT
         assert row["payload"]["total_score"] == 0
-        assert row["payload"]["current_stage"] == STAGE_STRANGER
+        assert row["payload"]["current_stage"] == STAGE_FRIEND
 
     def test_initial_state_persisted_only_once_per_user(self, engine_with_update_ledger):
         engine, ledger = engine_with_update_ledger
@@ -125,10 +123,10 @@ class TestScoreAccumulation:
         assert state.total_score == 5 * DEFAULT_SCORE_MAP["INTERACTION"]
         assert state.event_count == 5
 
-    def test_promotion_to_acquaintance(self, engine):
-        """积分达到 10 时晋级到 ACQUAINTANCE。"""
-        threshold = DEFAULT_STAGE_THRESHOLDS[STAGE_ACQUAINTANCE]
-        # 用 DEEP_TALK(5) × 2 = 10 分
+    def test_promotion_to_close_friend(self, engine):
+        """积分达到亲近兄妹阈值时晋级到 CLOSE_FRIEND。"""
+        threshold = DEFAULT_STAGE_THRESHOLDS[STAGE_CLOSE_FRIEND]
+        # 用 DEEP_TALK 累积到亲近兄妹阈值
         for i in range(threshold // DEFAULT_SCORE_MAP["DEEP_TALK"]):
             result = engine.apply_event(
                 user_id="user_005",
@@ -136,11 +134,11 @@ class TestScoreAccumulation:
                 evidence_refs=[f"evt::{i}"],
             )
         state = engine.get_state("user_005")
-        assert state.current_stage == STAGE_ACQUAINTANCE
+        assert state.current_stage == STAGE_CLOSE_FRIEND
 
     def test_promotion_result_status(self, engine):
         """晋级时 transition_status 为 PROMOTED。"""
-        threshold = DEFAULT_STAGE_THRESHOLDS[STAGE_ACQUAINTANCE]
+        threshold = DEFAULT_STAGE_THRESHOLDS[STAGE_CLOSE_FRIEND]
         last_result = None
         for i in range(threshold // DEFAULT_SCORE_MAP["DEEP_TALK"]):
             last_result = engine.apply_event(
@@ -150,7 +148,7 @@ class TestScoreAccumulation:
             )
         # 最后一次触发晋级
         assert last_result is not None
-        assert last_result.to_stage == STAGE_ACQUAINTANCE
+        assert last_result.to_stage == STAGE_CLOSE_FRIEND
         assert last_result.transition_status == TRANSITION_STATUS_PROMOTED
 
 
@@ -166,7 +164,7 @@ class TestStableTransition:
             evidence_refs=["evt::001"],
         )
         assert result.transition_status == TRANSITION_STATUS_STABLE
-        assert result.from_stage == result.to_stage == STAGE_STRANGER
+        assert result.from_stage == result.to_stage == STAGE_FRIEND
 
     def test_stable_result_fields(self, engine):
         result = engine.apply_event(
@@ -210,23 +208,21 @@ class TestScoreDecay:
 
     def test_demotion_when_score_drops(self, engine):
         """积分下降到阶段阈值以下时触发降级。"""
-        # 先晋级到 ACQUAINTANCE（需要 10 分）
-        for i in range(2):
+        # 先晋级到 CLOSE_FRIEND
+        for i in range(DEFAULT_STAGE_THRESHOLDS[STAGE_CLOSE_FRIEND] // DEFAULT_SCORE_MAP["DEEP_TALK"]):
             engine.apply_event(
                 user_id="user_011",
                 update_kind="DEEP_TALK",
                 evidence_refs=[f"evt::{i}"],
             )
         state = engine.get_state("user_011")
-        assert state.current_stage == STAGE_ACQUAINTANCE
+        assert state.current_stage == STAGE_CLOSE_FRIEND
 
         # 自定义低阈值引擎测试降级
         custom_engine = BondStageEngine(
             stage_thresholds={
-                STAGE_STRANGER: 0,
-                STAGE_ACQUAINTANCE: 5,
-                STAGE_FRIEND: 20,
-                STAGE_CLOSE_FRIEND: 50,
+                STAGE_FRIEND: 0,
+                STAGE_CLOSE_FRIEND: 5,
                 STAGE_CONFIDANT: 100,
                 STAGE_SOULMATE: 200,
             },
@@ -242,16 +238,16 @@ class TestScoreDecay:
             evidence_refs=["evt::001"],
         )
         state = custom_engine.get_state("user_011b")
-        assert state.current_stage == STAGE_ACQUAINTANCE
+        assert state.current_stage == STAGE_CLOSE_FRIEND
 
-        # 衰减到 0，降级回 STRANGER
+        # 衰减到 0，降级回 FRIEND
         result = custom_engine.apply_event(
             user_id="user_011b",
             update_kind="IDLE_DECAY",
             evidence_refs=["evt::002"],
         )
         assert result.transition_status == TRANSITION_STATUS_DEMOTED
-        assert result.to_stage == STAGE_STRANGER
+        assert result.to_stage == STAGE_FRIEND
 
 
 # ── T-BOND-STAGE-05: 趋势判断 ────────────────────────────────────────────────
@@ -317,7 +313,7 @@ class TestBondSummary:
     def test_summary_stage_is_valid(self, engine):
         summary = engine.get_summary("user_016")
         # M28-H：to_summary() 已中文化，stage 可能是中文或英文枚举
-        CHINESE_STAGES = ["陌生人", "相识", "朋友", "好友", "挚友", "灵魂伴侣"]
+        CHINESE_STAGES = ["关系好的兄妹", "亲近兄妹", "亲密恋人", "灵魂伴侣"]
         assert summary["stage"] in STAGE_ORDER or summary["stage"] in CHINESE_STAGES
 
     def test_summary_trend_is_valid(self, engine):
@@ -412,7 +408,7 @@ class TestMultiUserIsolation:
         engine.reset_state("user_c")
         state = engine.get_state("user_c")
         assert state.total_score == 0
-        assert state.current_stage == STAGE_STRANGER
+        assert state.current_stage == STAGE_FRIEND
 
 
 # ── T-BOND-STAGE-09: 阶段顺序完整性 ─────────────────────────────────────────
@@ -420,8 +416,8 @@ class TestMultiUserIsolation:
 class TestStageOrder:
     """T-BOND-STAGE-09: 阶段顺序完整且阈值单调递增。"""
 
-    def test_stage_order_has_six_stages(self):
-        assert len(STAGE_ORDER) == 6
+    def test_stage_order_has_four_stages(self):
+        assert len(STAGE_ORDER) == 4
 
     def test_stage_thresholds_monotonically_increasing(self):
         prev = -1
@@ -430,8 +426,8 @@ class TestStageOrder:
             assert threshold > prev, f"{stage} threshold {threshold} not > {prev}"
             prev = threshold
 
-    def test_stranger_threshold_is_zero(self):
-        assert DEFAULT_STAGE_THRESHOLDS[STAGE_STRANGER] == 0
+    def test_friend_threshold_is_zero(self):
+        assert DEFAULT_STAGE_THRESHOLDS[STAGE_FRIEND] == 0
 
     def test_soulmate_is_highest_stage(self):
         assert STAGE_ORDER[-1] == STAGE_SOULMATE

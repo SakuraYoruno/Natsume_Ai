@@ -1,3 +1,6 @@
+受众：CODEX
+标题：`agent_runtime_shared.py` 拆分提案（OPT-10）
+
 # `agent_runtime_shared.py` 拆分提案（OPT-10）
 
 **状态**：草案 ｜ **日期**：2026-04-20 ｜ **目标 PR**：OPT-10-A/B/C 系列 ｜ **源文件行数**：约 2744 行

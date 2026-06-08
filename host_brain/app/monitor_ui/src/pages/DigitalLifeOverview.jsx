@@ -11,21 +11,29 @@ import {
   Waves,
 } from 'lucide-react'
 import BackgroundRuntimeCard from '../components/BackgroundRuntimeCard.jsx'
+import AvatarStateCard from '../components/AvatarStateCard.jsx'
 import { LifeSection } from '../components/digitalLife/digitalLifeSectionShared.jsx'
 import SampleMeta from '../components/obs/SampleMeta.jsx'
 import ViewportLazySection from '../components/obs/ViewportLazySection.jsx'
 import DigitalLifeRuntimeCard from '../components/DigitalLifeRuntimeCard.jsx'
+import DigitalLifeWallClockSoakCard from '../components/DigitalLifeWallClockSoakCard.jsx'
+import MainChainReshapePanel from '../components/digitalLife/MainChainReshapePanel.jsx'
 import EmptyStateCard from '../components/EmptyStateCard.jsx'
 import LifeBodyPathologyPanel from '../components/lifeBody/LifeBodyPathologyPanel.jsx'
 import LifeBodyFocusPanel from '../components/lifeBody/LifeBodyFocusPanel.jsx'
 import LifeBodyTimeline from '../components/lifeBody/LifeBodyTimeline.jsx'
 import LifeBodyTopology from '../components/lifeBody/LifeBodyTopology.jsx'
 import LifeBodyVitalsStrip from '../components/lifeBody/LifeBodyVitalsStrip.jsx'
+import { LazyLoadingNotice, LoadingNotice } from '../components/LoadingNotice.jsx'
 import NoticeBanner from '../components/NoticeBanner.jsx'
 import PageHero from '../components/PageHero.jsx'
 import TimeWindowSelect from '../components/TimeWindowSelect.jsx'
 import VitalLoopSummaryPanel from '../components/VitalLoopSummaryPanel.jsx'
 import useLifeBodyPageData from '../hooks/useLifeBodyPageData.js'
+import { buildMainChainReshapeModel } from '../models/mainChainReshapeModel.js'
+import { useDigitalLifeWallClockSoakQuery } from '../queries/digitalLifeQueries.js'
+import { useAvatarStateQuery } from '../queries/runtimeQueries.js'
+import { postAvatarBehavior } from '../api/runtime.js'
 import {
   compactText,
   formatTrend,
@@ -44,6 +52,8 @@ const WINDOW_OPTIONS = [
 
 export default function DigitalLifeOverview() {
   const [windowMinutes, setWindowMinutes] = useState(360)
+  const [avatarCommandBusy, setAvatarCommandBusy] = useState(false)
+  const [avatarCommandError, setAvatarCommandError] = useState(null)
   const {
     vtsData,
     memoryData,
@@ -74,6 +84,7 @@ export default function DigitalLifeOverview() {
     sampledMemorySubsystemCount,
     configuredMemorySubsystemCount,
     activeSubsystemCount,
+    topEmotion,
     currentBondStage,
     currentEmotion,
     dominantMotive,
@@ -99,8 +110,77 @@ export default function DigitalLifeOverview() {
     runtimeVitalsLoadState,
     gatewayLoopLoadState,
     memoryOverviewLoadState,
+    lifeBodyDerived,
     lifeBodyModel,
+    pollingEnabled,
+    pollingInterval,
+    pollingTick,
   } = useLifeBodyPageData({ windowMinutes })
+  const wallClockSoakQuery = useDigitalLifeWallClockSoakQuery({
+    pollingEnabled,
+    pollingTick,
+    pollingInterval: Math.max(60, Number(pollingInterval || 60)),
+  })
+  const avatarStateQuery = useAvatarStateQuery({
+    pollingEnabled,
+    pollingTick,
+    pollingInterval: Math.max(15, Number(pollingInterval || 15)),
+  })
+  const mainChainReshapeModel = useMemo(
+    () => buildMainChainReshapeModel({
+      runtimeSnapshot,
+      lifeBodyModel,
+      lifeBodyDerived,
+      wallClockSoakData: wallClockSoakQuery.data,
+      hasRuntimeSnapshot,
+      hasMemoryData,
+      hasMemorySamples,
+      growthSignals,
+      humanoidLoopData,
+      runtimeAlerts,
+      nonLiveSlots,
+      currentEmotion,
+      currentBondStage,
+      dominantMotive,
+      replyPosture,
+      riskLevel,
+    }),
+    [
+      currentBondStage,
+      currentEmotion,
+      dominantMotive,
+      growthSignals,
+      hasMemoryData,
+      hasMemorySamples,
+      hasRuntimeSnapshot,
+      humanoidLoopData,
+      lifeBodyDerived,
+      lifeBodyModel,
+      nonLiveSlots,
+      replyPosture,
+      riskLevel,
+      runtimeAlerts,
+      runtimeSnapshot,
+      wallClockSoakQuery.data,
+    ]
+  )
+  const refreshDashboard = () => {
+    void refreshAll()
+    void wallClockSoakQuery.refetch()
+    void avatarStateQuery.refetch()
+  }
+  const applyAvatarBehavior = async (behaviorId) => {
+    setAvatarCommandBusy(true)
+    setAvatarCommandError(null)
+    try {
+      await postAvatarBehavior({ behavior_id: behaviorId, source: 'monitor_digital_life' })
+      await avatarStateQuery.refetch()
+    } catch (err) {
+      setAvatarCommandError(err instanceof Error ? err : new Error(String(err)))
+    } finally {
+      setAvatarCommandBusy(false)
+    }
+  }
   const forgeQualitySummary = capabilityGapData?.forge_runtime_quality?.summary || {}
   const forgeQualityItems = capabilityGapData?.forge_runtime_quality?.items || []
   const forgeRiskItems = [...forgeQualityItems]
@@ -169,7 +249,7 @@ export default function DigitalLifeOverview() {
           ? `意愿 ${silenceState.willingness_level} · 姿态 ${replyPosture}`
           : '策略系统已接入，但当前窗口缺少稳定快照。',
         status: !hasRuntimeSnapshot ? 'pending' : silenceState.willingness_level ? 'wired' : 'degraded',
-        actionTo: '/render-policy',
+        actionTo: '/response-policy',
         actionLabel: '查看策略',
       },
       {
@@ -299,8 +379,19 @@ export default function DigitalLifeOverview() {
         </div>
         <div className="flex items-center gap-2">
           <TimeWindowSelect value={windowMinutes} onChange={setWindowMinutes} options={WINDOW_OPTIONS} />
-          <button className="btn-secondary" onClick={refreshAll} disabled={loading || refreshing || runtimeLoading}>
-            <RefreshCw size={14} className={loading || refreshing || runtimeLoading ? 'animate-spin' : ''} />
+          <button
+            className="btn-secondary"
+            onClick={refreshDashboard}
+            disabled={loading || refreshing || runtimeLoading || wallClockSoakQuery.loading || wallClockSoakQuery.refreshing}
+          >
+            <RefreshCw
+              size={14}
+              className={
+                loading || refreshing || runtimeLoading || wallClockSoakQuery.loading || wallClockSoakQuery.refreshing || avatarStateQuery.refreshing
+                  ? 'animate-spin'
+                  : ''
+              }
+            />
             刷新
           </button>
         </div>
@@ -316,6 +407,7 @@ export default function DigitalLifeOverview() {
           160
         )}
         gradientClass="from-primary-50 via-white to-pink-50"
+        showPulseRail={false}
         metaItems={[
           `存在态：${modeMeta.label}`,
           `最紧张器官：${lifeBodyModel.primaryOrgan?.name || '待判定'}`,
@@ -325,6 +417,7 @@ export default function DigitalLifeOverview() {
         aside={(
           <SampleMeta
             className="max-w-md"
+            compact
             loadState={overviewLoadState}
             loadStateDetail={error || refreshWarning}
             windowMinutes={windowMinutes}
@@ -337,8 +430,26 @@ export default function DigitalLifeOverview() {
         )}
       />
 
+      <MainChainReshapePanel model={mainChainReshapeModel} />
       <LifeBodyVitalsStrip vitals={lifeBodyModel.vitalSigns} />
       <LifeBodyFocusPanel guidance={lifeBodyModel.diagnosticGuidance} />
+
+      <LifeSection
+        title="桌宠表现链路"
+        hint="把 Host 对话、Edge 行为状态、MateEngine/VRM 驱动和危险热键拦截放在一张只读卡片里。"
+      >
+        <AvatarStateCard
+          data={avatarStateQuery.avatarState}
+          loading={avatarStateQuery.loading}
+          refreshing={avatarStateQuery.refreshing}
+          error={avatarStateQuery.error}
+          commandError={avatarCommandError}
+          behaviorBusy={avatarCommandBusy}
+          updatedAt={avatarStateQuery.lastUpdatedAt}
+          onRefresh={() => avatarStateQuery.refetch()}
+          onBehavior={applyAvatarBehavior}
+        />
+      </LifeSection>
 
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1.8fr)_minmax(320px,0.95fr)]">
         <LifeBodyTopology
@@ -370,6 +481,19 @@ export default function DigitalLifeOverview() {
         </NoticeBanner>
       ) : null}
 
+      <LifeSection
+        title="真实墙钟闭环验证"
+        hint="只读读取当前 24h wall-clock soak 记录，用来确认主链、器官映射与后台 tick 是否持续推进。"
+      >
+        <DigitalLifeWallClockSoakCard
+          data={wallClockSoakQuery.data}
+          loading={wallClockSoakQuery.loading}
+          refreshing={wallClockSoakQuery.refreshing}
+          error={wallClockSoakQuery.error}
+          onRefresh={wallClockSoakQuery.refetch}
+        />
+      </LifeSection>
+
       {runtimeSnapshot ? (
         <LifeSection
           title="生命体细部解剖"
@@ -394,16 +518,17 @@ export default function DigitalLifeOverview() {
 
       <ViewportLazySection
         rootMargin="180px 0px"
-        placeholder={(
+        eagerAfterMs={1200}
+        fallback={(
           <LifeSection
             title="Capability Gap & Forge Loop"
             hint="Expose gap pressure and forge runtime quality directly in the life-body overview."
             actionTo="/insights/global"
             actionLabel="Open Global Insights"
           >
-            <NoticeBanner variant="info" title="按需加载中">
+            <LazyLoadingNotice>
               正在准备 gap pressure 与 forge runtime 视图…
-            </NoticeBanner>
+            </LazyLoadingNotice>
           </LifeSection>
         )}
       >
@@ -414,10 +539,10 @@ export default function DigitalLifeOverview() {
               hint="Expose gap pressure and forge runtime quality directly in the life-body overview."
               actionTo="/insights/global"
               actionLabel="Open Global Insights"
-            >
-              <NoticeBanner variant="info" title="加载中">
+          >
+              <LoadingNotice>
                 正在载入 gap pressure 与 forge runtime 视图…
-              </NoticeBanner>
+              </LoadingNotice>
             </LifeSection>
           )}
         >
@@ -427,16 +552,17 @@ export default function DigitalLifeOverview() {
 
       <ViewportLazySection
         rootMargin="240px 0px"
-        placeholder={(
+        eagerAfterMs={1200}
+        fallback={(
           <LifeSection
             title="人体闭环健康（Gateway）"
             hint="展示请求从即时确认、进度触达到偏航修复与终态收束的健康度。"
             actionTo="/gateway"
             actionLabel="查看通道详情"
           >
-            <NoticeBanner variant="info" title="按需加载中">
+            <LazyLoadingNotice>
               正在准备闭环趋势、病灶热区和自愈建议视图…
-            </NoticeBanner>
+            </LazyLoadingNotice>
           </LifeSection>
         )}
       >
@@ -447,10 +573,10 @@ export default function DigitalLifeOverview() {
               hint="展示请求从即时确认、进度触达到偏航修复与终态收束的健康度。"
               actionTo="/gateway"
               actionLabel="查看通道详情"
-            >
-              <NoticeBanner variant="info" title="加载中">
+          >
+              <LoadingNotice>
                 正在载入闭环趋势、病灶热区和自愈建议视图…
-              </NoticeBanner>
+              </LoadingNotice>
             </LifeSection>
           )}
         >
@@ -460,20 +586,21 @@ export default function DigitalLifeOverview() {
 
       <ViewportLazySection
         rootMargin="200px 0px"
-        placeholder={(
+        eagerAfterMs={1200}
+        fallback={(
           <LifeSection title="生命体次级分区" hint="体征、成长、器官联通态与体内快照会在进入视口后加载。">
-            <NoticeBanner variant="info" title="按需加载中">
+            <LazyLoadingNotice>
               正在准备次级生命体分区…
-            </NoticeBanner>
+            </LazyLoadingNotice>
           </LifeSection>
         )}
       >
         <React.Suspense
           fallback={(
             <LifeSection title="生命体次级分区" hint="体征、成长、器官联通态与体内快照会在进入视口后加载。">
-              <NoticeBanner variant="info" title="加载中">
+              <LoadingNotice>
                 正在载入次级生命体分区…
-              </NoticeBanner>
+              </LoadingNotice>
             </LifeSection>
           )}
         >
@@ -483,4 +610,3 @@ export default function DigitalLifeOverview() {
     </div>
   )
 }
-

@@ -18,6 +18,7 @@ from host_brain.observability.service_registry import (
     LLM_NODE_REGISTRY as _LLM_NODE_REGISTRY,
     EDGE_SERVICE_EVENT_PREFIXES as _EDGE_SERVICE_EVENT_PREFIXES,
 )
+from host_brain.app.obs_host_proxy import fetch_host_json
 
 logger = logging.getLogger("Natsume.obs")
 
@@ -99,6 +100,39 @@ def _compute_node_health(rows: List[Dict], window: int = 20) -> Dict[str, Any]:
         "last_call_ts": last_call_ts,
         "call_count": total,
     }
+
+
+def _find_scheduler_task(snapshot: dict[str, Any] | None, task_id: str) -> dict[str, Any] | None:
+    target = str(task_id or "").strip()
+    if not target or not isinstance(snapshot, dict):
+        return None
+    for item in list(snapshot.get("tasks") or []):
+        if not isinstance(item, dict):
+            continue
+        if str(item.get("task_id") or "").strip() == target:
+            return dict(item)
+    return None
+
+
+def _resolve_scheduler_task_for_obs(task_id: str) -> dict[str, Any] | None:
+    host_snapshot = fetch_host_json("/scheduler/health", timeout_s=1.5)
+    task = _find_scheduler_task(host_snapshot, task_id)
+    if task is not None:
+        return task
+    try:
+        from host_brain.scheduler.task_registry import SchedulerTaskRegistry  # noqa: PLC0415
+
+        registry = SchedulerTaskRegistry.get_instance()
+        local_task = registry.get(task_id)
+        if local_task is None:
+            return None
+        return {
+            "task_id": task_id,
+            "enabled": bool(getattr(local_task, "enabled", False)),
+            "status": "LOCAL",
+        }
+    except Exception:
+        return None
 
 
 def _build_probe_registry(ledger, since_ms: int):
@@ -446,18 +480,13 @@ def get_organ_tribe_status():
             last_updated_ts_ms=last_ts if last_ts else None,
         ))
 
-    # 检查连续动态系统是否激活（emotion_decay_tick 是否注册）
+    # 检查连续动态系统是否激活（优先读 Host 进程的 scheduler；OBS sidecar 本地 registry 不代表真实主链）
     continuous_active = False
     decay_tick_enabled = False
-    try:
-        from host_brain.scheduler.task_registry import SchedulerTaskRegistry
-        registry = SchedulerTaskRegistry.get_instance()
-        decay_task = registry.get("emotion_decay_tick")
-        if decay_task is not None:
-            decay_tick_enabled = True
-            continuous_active = bool(getattr(decay_task, "enabled", False))
-    except Exception:
-        pass
+    decay_task = _resolve_scheduler_task_for_obs("emotion_decay_tick")
+    if decay_task is not None:
+        decay_tick_enabled = True
+        continuous_active = bool(decay_task.get("enabled", False))
 
     return OrganTribeStatusResponse(
         total_agents=len(agents),

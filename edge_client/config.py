@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import json
 import os
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 from host_brain.core.config_snapshot import (
@@ -28,6 +30,12 @@ ALLOWED_ENVS = {ENV_DEV, ENV_TEST, ENV_PROD}
 
 S_EDGE_CONFIG = "S_EDGE_CONFIG"
 EDGE_SNAPSHOT_COMPONENT = "edge"
+DEFAULT_KEY_PROFILES = Path("configs/secrets/key_profiles.runtime.json")
+DEFAULT_KEY_PROFILES_FALLBACK = Path("configs/secrets/key_profiles.example.json")
+DEFAULT_SECRET_STORE = Path("configs/secrets/secret_store.runtime.local.json")
+DEFAULT_SECRET_STORE_FALLBACK = Path("configs/secrets/secret_store.runtime.example.json")
+DEFAULT_EDGE_NODE_ID = "natsu-node-06"
+DEFAULT_EDGE_NODE_ID_SENTINEL = "edge.default"
 
 EDGE_FIELD_TO_ENV_KEY = {
     "env": "NASTUME_ENV",
@@ -46,6 +54,11 @@ EDGE_FIELD_TO_ENV_KEY = {
     "barge_in_enabled": "EDGE_BARGE_IN_ENABLED",
     "fallback_llm_enabled": "EDGE_FALLBACK_LLM_ENABLED",
     "resource_gate_enabled": "EDGE_RESOURCE_GATE_ENABLED",
+    "avatar_backend": "EDGE_AVATAR_BACKEND",
+    "vrm_bridge_host": "EDGE_VRM_BRIDGE_HOST",
+    "vrm_bridge_port": "EDGE_VRM_BRIDGE_PORT",
+    "vrm_bridge_timeout_s": "EDGE_VRM_BRIDGE_TIMEOUT_S",
+    "vrm_model_path": "EDGE_VRM_MODEL_PATH",
     # Unified Message Gateway
     "gateway_enabled": "EDGE_GATEWAY_ENABLED",
     "gateway_port": "EDGE_GATEWAY_PORT",
@@ -112,6 +125,11 @@ class EdgeConfig:
     resource_gate_enabled: bool
     max_vram_mb: int
     max_queue_length: int
+    avatar_backend: str = "vts"
+    vrm_bridge_host: str = "127.0.0.1"
+    vrm_bridge_port: int = 18770
+    vrm_bridge_timeout_s: float = 1.5
+    vrm_model_path: str | None = None
     # Unified Message Gateway
     gateway_enabled: bool = True
     gateway_port: int = 19000
@@ -168,6 +186,11 @@ class EdgeConfig:
             "resource_gate_enabled": self.resource_gate_enabled,
             "max_vram_mb": self.max_vram_mb,
             "max_queue_length": self.max_queue_length,
+            "avatar_backend": self.avatar_backend,
+            "vrm_bridge_host": self.vrm_bridge_host,
+            "vrm_bridge_port": self.vrm_bridge_port,
+            "vrm_bridge_timeout_s": self.vrm_bridge_timeout_s,
+            "vrm_model_path": self.vrm_model_path,
             # Unified Message Gateway
             "gateway_enabled": self.gateway_enabled,
             "gateway_port": self.gateway_port,
@@ -270,6 +293,13 @@ def load_edge_config(
     if local_overrides:
         merged.update(dict(local_overrides))
     env_lookup = _normalize_env_lookup(merged)
+    resolved_key_profiles, resolved_secret_store, resolved_epoch, resolved_node_id = _resolve_runtime_key_materials(
+        env=merged,
+        key_profiles=key_profiles,
+        secret_store=secret_store,
+        node_id=node_id,
+        current_epoch=current_epoch,
+    )
 
     issues: list[ConfigIssue] = []
     runtime_env = _as_text(_env_get(env_lookup, "Natsume_ENV"), ENV_DEV).lower()
@@ -344,11 +374,11 @@ def load_edge_config(
     if not hmac_shared_key and hmac_shared_key_ref:
         resolved = resolve_secret_from_profiles(
             provider="edge_hmac",
-            node_id=str(node_id),
+            node_id=str(resolved_node_id),
             scope="edge.rpc.auth",
-            key_profiles=key_profiles,
-            secret_store=secret_store,
-            current_epoch=int(current_epoch if current_epoch is not None else 0),
+            key_profiles=resolved_key_profiles,
+            secret_store=resolved_secret_store,
+            current_epoch=int(resolved_epoch),
         )
         if resolved.success:
             hmac_shared_key = resolved.secret_value
@@ -380,6 +410,39 @@ def load_edge_config(
     barge_in_enabled = _parse_bool(_env_get(env_lookup, "EDGE_BARGE_IN_ENABLED"), default=True)
     fallback_llm_enabled = _parse_bool(_env_get(env_lookup, "EDGE_FALLBACK_LLM_ENABLED"), default=False)
     resource_gate_enabled = _parse_bool(_env_get(env_lookup, "EDGE_RESOURCE_GATE_ENABLED"), default=True)
+    avatar_backend = _as_text(_env_get(env_lookup, "EDGE_AVATAR_BACKEND"), "vts").lower()
+    if avatar_backend not in {"vts", "vrm"}:
+        issues.append(
+            ConfigIssue(
+                reason_code=CONFIG_VALUE_INVALID,
+                detail="EDGE_AVATAR_BACKEND must be one of ['vts', 'vrm']",
+                field="EDGE_AVATAR_BACKEND",
+            )
+        )
+    vrm_bridge_host = _as_text(_env_get(env_lookup, "EDGE_VRM_BRIDGE_HOST"), "127.0.0.1")
+    vrm_bridge_port = _parse_int(
+        _env_get(env_lookup, "EDGE_VRM_BRIDGE_PORT"),
+        default=18770,
+        field_name="EDGE_VRM_BRIDGE_PORT",
+        min_value=1,
+        max_value=65535,
+        issues=issues,
+    )
+    vrm_bridge_timeout_s_raw = _env_get(env_lookup, "EDGE_VRM_BRIDGE_TIMEOUT_S")
+    try:
+        vrm_bridge_timeout_s = float(vrm_bridge_timeout_s_raw) if vrm_bridge_timeout_s_raw else 1.5
+    except (TypeError, ValueError):
+        vrm_bridge_timeout_s = 1.5
+    if vrm_bridge_timeout_s <= 0:
+        issues.append(
+            ConfigIssue(
+                reason_code=CONFIG_VALUE_INVALID,
+                detail="EDGE_VRM_BRIDGE_TIMEOUT_S must be positive",
+                field="EDGE_VRM_BRIDGE_TIMEOUT_S",
+            )
+        )
+        vrm_bridge_timeout_s = 1.5
+    vrm_model_path = _as_optional_text(_env_get(env_lookup, "EDGE_VRM_MODEL_PATH"))
 
     # Unified Message Gateway
     gateway_enabled = _parse_bool(_env_get(env_lookup, "EDGE_GATEWAY_ENABLED"), default=True)
@@ -491,6 +554,11 @@ def load_edge_config(
         resource_gate_enabled=bool(resource_gate_enabled),
         max_vram_mb=max_vram_mb,
         max_queue_length=max_queue_length,
+        avatar_backend=str(avatar_backend),
+        vrm_bridge_host=vrm_bridge_host,
+        vrm_bridge_port=int(vrm_bridge_port),
+        vrm_bridge_timeout_s=float(vrm_bridge_timeout_s),
+        vrm_model_path=vrm_model_path,
         # Unified Message Gateway
         gateway_enabled=bool(gateway_enabled),
         gateway_port=int(gateway_port),
@@ -644,6 +712,10 @@ def build_edge_runtime_statuses(config: EdgeConfig) -> dict[str, dict[str, Any]]
         detail="edge resource gate enabled",
         disabled_detail="edge resource gate disabled by config",
     )
+    statuses["edge.rpc.avatar"] = {
+        "available": True,
+        "detail": f"edge avatar backend: {config.avatar_backend}",
+    }
     return statuses
 
 
@@ -666,6 +738,103 @@ def _service_status(*, enabled: bool, detail: str, disabled_detail: str) -> dict
         "unavailable_kind": "dependency",
         "detail": disabled_detail,
     }
+
+
+def _repo_root() -> Path:
+    return Path(__file__).resolve().parents[1]
+
+
+def _resolve_path(path: Path) -> Path:
+    candidate = Path(path)
+    if candidate.is_absolute():
+        return candidate
+    return _repo_root() / candidate
+
+
+def _pick_existing_path(primary: Path, fallback: Path) -> Path:
+    primary_abs = _resolve_path(primary)
+    fallback_abs = _resolve_path(fallback)
+    if primary_abs.exists() and primary_abs.is_file():
+        return primary_abs
+    return fallback_abs
+
+
+def _load_json_file(path: Path) -> dict[str, Any]:
+    resolved = _resolve_path(path)
+    if not resolved.exists() or not resolved.is_file():
+        return {}
+    for encoding in ("utf-8", "utf-8-sig"):
+        try:
+            payload = json.loads(resolved.read_text(encoding=encoding))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            continue
+        if isinstance(payload, dict):
+            return payload
+    return {}
+
+
+def _coerce_non_negative_int(value: Any, *, default: int) -> int:
+    try:
+        parsed = int(str(value).strip())
+    except (TypeError, ValueError):
+        return int(default)
+    return max(0, parsed)
+
+
+def _is_default_edge_node_id(value: str | None) -> bool:
+    text = str(value or "").strip().lower()
+    return not text or text == DEFAULT_EDGE_NODE_ID_SENTINEL
+
+
+def _resolve_edge_node_id(*, env: Mapping[str, Any], node_id: str | None, key_profiles_payload: Mapping[str, Any]) -> str:
+    explicit = str(node_id or "").strip()
+    if explicit and not _is_default_edge_node_id(explicit):
+        return explicit
+    env_lookup = _normalize_env_lookup(env)
+    from_env = str(
+        _env_get(env_lookup, "EDGE_NODE_ID")
+        or _env_get(env_lookup, "Natsume_EDGE_NODE_ID")
+        or _env_get(env_lookup, "EDGE_RPC_NODE_ID")
+        or "",
+    ).strip()
+    if from_env:
+        return from_env
+    from_profiles = str(key_profiles_payload.get("edge_node_id") or "").strip()
+    if from_profiles:
+        return from_profiles
+    return DEFAULT_EDGE_NODE_ID
+
+
+def _resolve_runtime_key_materials(
+    *,
+    env: Mapping[str, Any],
+    key_profiles: Sequence[Mapping[str, Any]] | None,
+    secret_store: Mapping[str, Any] | None,
+    node_id: str | None,
+    current_epoch: int | None,
+) -> tuple[list[Mapping[str, Any]], dict[str, Any], int, str]:
+    resolved_profiles: list[Mapping[str, Any]] = list(key_profiles or [])
+    resolved_store: dict[str, Any] = dict(secret_store or {})
+    resolved_epoch = _coerce_non_negative_int(current_epoch, default=0)
+    key_profiles_payload: dict[str, Any] = {}
+
+    if not resolved_profiles or resolved_epoch <= 0 or _is_default_edge_node_id(node_id):
+        key_profiles_payload = _load_json_file(_pick_existing_path(DEFAULT_KEY_PROFILES, DEFAULT_KEY_PROFILES_FALLBACK))
+        if not resolved_profiles:
+            raw_profiles = key_profiles_payload.get("profiles")
+            if isinstance(raw_profiles, list):
+                resolved_profiles = [row for row in raw_profiles if isinstance(row, Mapping)]
+        if resolved_epoch <= 0:
+            resolved_epoch = _coerce_non_negative_int(key_profiles_payload.get("current_epoch"), default=0)
+
+    resolved_node_id = _resolve_edge_node_id(
+        env=env,
+        node_id=node_id,
+        key_profiles_payload=key_profiles_payload,
+    )
+    if not resolved_store:
+        resolved_store = _load_json_file(_pick_existing_path(DEFAULT_SECRET_STORE, DEFAULT_SECRET_STORE_FALLBACK))
+    return resolved_profiles, resolved_store, resolved_epoch, resolved_node_id
 
 
 def _as_text(value: Any, default: str) -> str:

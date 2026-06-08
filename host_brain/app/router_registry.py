@@ -13,7 +13,12 @@ from host_brain.app.canon_routes import router as canon_router, set_ledger_provi
 from host_brain.app.health_routes import router as health_router
 from host_brain.app.input_routes import router as input_router
 from host_brain.app.internal_codex_routes import router as internal_codex_router
+from host_brain.app.internal_security_immune_routes import router as internal_security_immune_router
 from host_brain.app.internal_tribe_routes import router as internal_tribe_router
+from host_brain.app.digital_life_routes import router as digital_life_router
+from host_brain.app.memory_routes import router as memory_router
+from host_brain.app.mateengine_routes import router as mateengine_router
+from host_brain.app.prompt_config_routes import router as prompt_config_router
 from host_brain.app.tool_routes import router as tool_router, tool_kits_alias_router, set_tool_providers as _set_tool_providers
 from host_brain.scheduler.scheduler_routes import router as scheduler_router, set_scheduler_providers as _set_scheduler_providers
 
@@ -53,11 +58,16 @@ def register_host_routers(app: FastAPI) -> None:
     app.include_router(host_scheduler_router, prefix="/host-scheduler")
     app.include_router(tool_router)
     app.include_router(tool_kits_alias_router)
+    app.include_router(prompt_config_router)
     app.include_router(bond_router)
     app.include_router(agent_router)
     app.include_router(input_router)
     app.include_router(internal_tribe_router)
     app.include_router(internal_codex_router)
+    app.include_router(internal_security_immune_router)
+    app.include_router(digital_life_router)
+    app.include_router(memory_router)
+    app.include_router(mateengine_router)
     app.include_router(health_router)
 
 

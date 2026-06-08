@@ -1,11 +1,15 @@
-{
-  "decision": "REJECT",
-  "rule_trace": [
-    {
-      "gate_id": "INTENT_VALIDATION",
-      "hit": true
-    }
-  ],
-  "tokens": {},
-  "snapshot_refs": {}
+﻿{
+    "decision":  "REJECT",
+    "rule_trace":  [
+                       {
+                           "gate_id":  "INTENT_VALIDATION",
+                           "hit":  true
+                       }
+                   ],
+    "tokens":  {
+
+               },
+    "snapshot_refs":  {
+
+                      }
 }

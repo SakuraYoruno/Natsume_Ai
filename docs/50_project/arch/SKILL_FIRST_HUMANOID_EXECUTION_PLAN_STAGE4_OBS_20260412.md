@@ -1,3 +1,6 @@
+受众：PROJECT
+标题：Skill-First 人体架构执行补充方案（P4-Obs）
+
 # Skill-First 人体架构执行补充方案（P4-Obs）
 
 日期：2026-04-12  

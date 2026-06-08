@@ -101,14 +101,33 @@ class EvolutionProposal:
 
 # 趋势锁触发时的角色内自省感知文本模板
 # 格式：{trait_name: {direction: [感知文本, ...]}}
-_TREND_LOCK_AWARENESS: dict[str, dict[str, list[str]]] = {}
+_TREND_LOCK_AWARENESS: dict[str, dict[str, list[str]]] = {
+    "warmth": {"UP": ["我好像越来越容易先替对方着想了。"], "DOWN": ["我最近好像收得太多了。"]},
+    "curiosity": {"UP": ["我最近会更想多问一句。"], "DOWN": ["我最近好像没那么想追下去了。"]},
+    "humor": {"UP": ["我最近更容易用玩笑把话接住。"], "DOWN": ["我最近玩笑少了一点。"]},
+    "sensitivity": {"UP": ["我对对方的小变化更敏感了。"], "DOWN": ["我最近有点迟钝。"]},
+    "assertiveness": {"UP": ["我最近更敢把话说清楚。"], "DOWN": ["我最近退得有点多。"]},
+    "playfulness": {"UP": ["我最近更容易轻轻闹一下。"], "DOWN": ["我最近没那么爱闹了。"]},
+    "resilience": {"UP": ["我好像更能稳住一点了。"], "DOWN": ["我最近恢复得慢了一点。"]},
+}
 
-_TREND_LOCK_TRAIT_CN: dict[str, str] = {}
+_TREND_LOCK_TRAIT_CN: dict[str, str] = {
+    "warmth": "温柔度",
+    "curiosity": "好奇心",
+    "humor": "幽默感",
+    "sensitivity": "敏感度",
+    "assertiveness": "主动性",
+    "playfulness": "俏皮度",
+    "resilience": "韧性",
+}
 
-_TREND_LOCK_DIRECTION_CN: dict[str, str] = {}
+_TREND_LOCK_DIRECTION_CN: dict[str, str] = {
+    "UP": "上升",
+    "DOWN": "下降",
+}
 
-_TREND_LOCK_REASON_TEMPLATE = ""
-_TREND_LOCK_ACTION_TEMPLATE = ""
+_TREND_LOCK_REASON_TEMPLATE = "{trait_cn}连续 {count} 次{direction_cn}，累计变化 {cumulative:.3f}"
+_TREND_LOCK_ACTION_TEMPLATE = "建议审查{trait_cn}变化，并整理成 Canon Evolution 提案，而不是继续无约束漂移"
 
 
 def _default_trend_lock_template_data() -> dict[str, Any]:

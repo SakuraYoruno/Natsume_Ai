@@ -21,6 +21,7 @@ from host_brain.core.errors import (
     CONFIG_VALUE_INVALID,
 )
 from host_brain.core.key_profiles import resolve_secret_from_profiles
+from host_brain.integrations.codex_cli_provider import codex_cli_lm_available
 
 
 ENV_DEV = "dev"
@@ -321,50 +322,47 @@ def load_host_config(
         PROVIDER_DEEPSEEK: (deepseek_api_key, deepseek_api_key_ref, "DEEPSEEK_API_KEY", "DEEPSEEK_API_KEY_REF"),
         PROVIDER_MINIMAX: (minimax_api_key, minimax_api_key_ref, "MINIMAX_API_KEY", "MINIMAX_API_KEY_REF"),
     }
-    if llm_provider in provider_to_runtime_keys:
-        llm_api_key, llm_api_key_ref, llm_key_env_name, llm_ref_env_name = provider_to_runtime_keys[llm_provider]
-    else:
-        llm_api_key, llm_api_key_ref, llm_key_env_name, llm_ref_env_name = (None, None, "", "")
-
-    if llm_provider in {PROVIDER_OPENAI, PROVIDER_CODEX, PROVIDER_GEMINI, PROVIDER_DEEPSEEK, PROVIDER_MINIMAX} and not llm_api_key and llm_api_key_ref:
-        resolved = resolve_secret_from_profiles(
-            provider=llm_provider,
-            node_id=resolved_node_id,
-            scope="host.llm",
-            key_profiles=resolved_key_profiles,
-            secret_store=resolved_secret_store,
-            current_epoch=resolved_epoch,
-        )
-        if resolved.success:
-            llm_api_key = resolved.secret_value
-            llm_api_key_ref = resolved.secret_ref or llm_api_key_ref
-            key_profile_status = "resolved"
-        else:
-            key_profile_status = "degraded"
-            if not cold_start_allowed:
-                issues.append(
-                    ConfigIssue(
-                        reason_code=str(resolved.reason_code or CONFIG_REQUIRED_MISSING),
-                        detail=str(resolved.detail),
-                        field=llm_ref_env_name,
+    resolved_provider_keys: dict[str, tuple[str | None, str | None]] = {}
+    for provider, (raw_key, raw_ref, _key_env_name, ref_env_name) in provider_to_runtime_keys.items():
+        provider_key = raw_key
+        provider_ref = raw_ref
+        if not provider_key and provider_ref:
+            resolved = resolve_secret_from_profiles(
+                provider=provider,
+                node_id=resolved_node_id,
+                scope="host.llm",
+                key_profiles=resolved_key_profiles,
+                secret_store=resolved_secret_store,
+                current_epoch=resolved_epoch,
+            )
+            if resolved.success:
+                provider_key = resolved.secret_value
+                provider_ref = resolved.secret_ref or provider_ref
+                if provider == llm_provider:
+                    key_profile_status = "resolved"
+            elif provider == llm_provider:
+                key_profile_status = "degraded"
+                if not cold_start_allowed:
+                    issues.append(
+                        ConfigIssue(
+                            reason_code=str(resolved.reason_code or CONFIG_REQUIRED_MISSING),
+                            detail=str(resolved.detail),
+                            field=ref_env_name,
+                        )
                     )
-                )
+        resolved_provider_keys[provider] = (provider_key, provider_ref)
 
-    if llm_provider == PROVIDER_OPENAI:
-        openai_api_key = llm_api_key
-        openai_api_key_ref = llm_api_key_ref
-    elif llm_provider == PROVIDER_CODEX:
-        codex_api_key = llm_api_key
-        codex_api_key_ref = llm_api_key_ref
-    elif llm_provider == PROVIDER_GEMINI:
-        gemini_api_key = llm_api_key
-        gemini_api_key_ref = llm_api_key_ref
-    elif llm_provider == PROVIDER_DEEPSEEK:
-        deepseek_api_key = llm_api_key
-        deepseek_api_key_ref = llm_api_key_ref
-    elif llm_provider == PROVIDER_MINIMAX:
-        minimax_api_key = llm_api_key
-        minimax_api_key_ref = llm_api_key_ref
+    if llm_provider in provider_to_runtime_keys:
+        llm_api_key, llm_api_key_ref = resolved_provider_keys.get(llm_provider, (None, None))
+        llm_key_env_name = provider_to_runtime_keys[llm_provider][2]
+    else:
+        llm_api_key, llm_api_key_ref, llm_key_env_name = (None, None, "")
+
+    openai_api_key, openai_api_key_ref = resolved_provider_keys.get(PROVIDER_OPENAI, (openai_api_key, openai_api_key_ref))
+    codex_api_key, codex_api_key_ref = resolved_provider_keys.get(PROVIDER_CODEX, (codex_api_key, codex_api_key_ref))
+    gemini_api_key, gemini_api_key_ref = resolved_provider_keys.get(PROVIDER_GEMINI, (gemini_api_key, gemini_api_key_ref))
+    deepseek_api_key, deepseek_api_key_ref = resolved_provider_keys.get(PROVIDER_DEEPSEEK, (deepseek_api_key, deepseek_api_key_ref))
+    minimax_api_key, minimax_api_key_ref = resolved_provider_keys.get(PROVIDER_MINIMAX, (minimax_api_key, minimax_api_key_ref))
 
     if llm_provider in {PROVIDER_OPENAI, PROVIDER_CODEX, PROVIDER_GEMINI, PROVIDER_DEEPSEEK, PROVIDER_MINIMAX} and not llm_api_key and not cold_start_allowed:
         missing_detail = f"{llm_key_env_name} is required when HOST_COLD_START_ALLOWED=false"
@@ -550,7 +548,12 @@ def build_host_runtime_statuses(config: HostConfig) -> dict[str, dict[str, Any]]
         PROVIDER_DEEPSEEK: "DEEPSEEK_API_KEY",
         PROVIDER_MINIMAX: "MINIMAX_API_KEY",
     }
-    if config.llm_provider in provider_to_env_key and not config.llm_api_key:
+    if config.llm_provider == PROVIDER_CODEX and not config.llm_api_key and codex_cli_lm_available():
+        statuses["host.integrations.llm_gateway"] = {
+            "available": True,
+            "detail": "llm gateway enabled via Codex CLI",
+        }
+    elif config.llm_provider in provider_to_env_key and not config.llm_api_key:
         missing_key_name = provider_to_env_key[config.llm_provider]
         statuses["host.integrations.llm_gateway"] = {
             "available": False,
@@ -569,23 +572,18 @@ def build_host_runtime_statuses(config: HostConfig) -> dict[str, dict[str, Any]]
             "detail": "llm gateway enabled",
         }
 
-    # --- host.retrieval.embedding / host.retrieval.reranker ---
+    # --- host.retrieval.recall_fusion ---
     if not config.enable_retrieval:
         retrieval_down = {
             "available": False,
             "unavailable_kind": "dependency",
             "detail": "retrieval disabled by config",
         }
-        statuses["host.retrieval.embedding"] = dict(retrieval_down)
-        statuses["host.retrieval.reranker"] = dict(retrieval_down)
+        statuses["host.retrieval.recall_fusion"] = dict(retrieval_down)
     else:
-        statuses["host.retrieval.embedding"] = {
+        statuses["host.retrieval.recall_fusion"] = {
             "available": True,
-            "detail": "retrieval embedding enabled",
-        }
-        statuses["host.retrieval.reranker"] = {
-            "available": True,
-            "detail": "retrieval reranker enabled",
+            "detail": "surface recall fusion enabled",
         }
 
     # --- host.vision.screen_ocr / host.vision.camera_recognizer ---

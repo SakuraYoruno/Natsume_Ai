@@ -1,0 +1,80 @@
+{
+  "version": 1,
+  "name": "Natsume_Ai 文档过期门禁（代码事实对齐）",
+  "default_max_age_days": 14,
+  "rules": [
+    {
+      "id": "arch-current",
+      "doc": "docs/50_project/arch/CURRENT_CODE_ARCHITECTURE.md",
+      "note": "主入口与核心链路文件变化后，应在本文件同步路径级架构事实。",
+      "max_age_days": 7,
+      "sources": [
+        "host_brain/**/*.py",
+        "edge_client/**/*.py",
+        "configs/**/*.json",
+        "scripts/runtime/**/*.ps1",
+        "docs/50_project/arch/AGENT_ORCHESTRATION_DETAIL.md",
+        "docs/50_project/arch/UNIFIED_MESSAGE_GATEWAY_DESIGN.md",
+        "docs/15_theory/CORE_LAYER_MODULE_REFERENCE.md"
+      ]
+    },
+    {
+      "id": "arch-core-modules",
+      "doc": "docs/50_project/arch/CORE_MODULES_DETAILED_REFERENCE.md",
+      "note": "主模块职责、接线、边界变化需回写到核心模块索引。",
+      "max_age_days": 7,
+      "sources": [
+        "host_brain/**/*.py",
+        "tests/unit/**/*.py",
+        "tests/contract/**/*.py"
+      ]
+    },
+    {
+      "id": "arch-dataflow",
+      "doc": "docs/50_project/arch/dataflow_report.md",
+      "note": "数据流和回流链路变化后，需同步架构数据流报告。",
+      "max_age_days": 10,
+      "sources": [
+        "host_brain/app/**/*.py",
+        "host_brain/observability/**/*.py",
+        "edge_client/**/*.py",
+        "host_brain/app/monitor_ui/src/**/*"
+      ]
+    },
+    {
+      "id": "arch-body-frontend",
+      "doc": "docs/50_project/arch/DIGITAL_LIFE_BODY_FRONTEND_ARCHITECTURE_20260419.md",
+      "note": "前端页面结构、导航与布局变更后，应同步前端体量与结构说明。",
+      "max_age_days": 10,
+      "sources": [
+        "host_brain/app/monitor_ui/src/**/*"
+      ]
+    },
+    {
+      "id": "trace-requirements",
+      "doc": "docs/60_trace/requirements_trace.md",
+      "note": "需求-任务-测试回溯表需与最新测试口径和任务链路保持一致。",
+      "max_age_days": 14,
+      "sources": [
+        "tests/**/*.py",
+        "docs/30_devspec/**/*.md",
+        "docs/40_agents/**/*.md",
+        "docs/20_prd/**/*.md"
+      ]
+    },
+    {
+      "id": "index-docmap",
+      "doc": "docs/00_index/00_DOCMAP.md",
+      "note": "入口地图应与核心架构/Trace/任务文档变更保持一致。",
+      "max_age_days": 14,
+      "sources": [
+        "docs/50_project/arch/CURRENT_CODE_ARCHITECTURE.md",
+        "docs/50_project/arch/CORE_MODULES_DETAILED_REFERENCE.md",
+        "docs/60_trace/requirements_trace.md",
+        "docs/50_project/guides/DOCUMENT_SYNC_WORKFLOW.md",
+        "docs/50_project/PROJECT_TASKS.md",
+        "README.md"
+      ]
+    }
+  ]
+}

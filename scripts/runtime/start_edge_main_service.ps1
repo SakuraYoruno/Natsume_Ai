@@ -7,6 +7,7 @@ param(
   [int]$Port = 17800,
   [int]$WaitSeconds = 120,
   [switch]$ForceRestart,
+  [switch]$CleanQQOneBot,
   [string]$PythonPath = ""
 )
 
@@ -219,6 +220,18 @@ function Invoke-SchtasksBreakaway {
     [string]$TaskName,
     [string]$TaskCommand
   )
+  $sshSessionDetected = (-not [string]::IsNullOrWhiteSpace([string]$env:SSH_CONNECTION)) -or (-not [string]::IsNullOrWhiteSpace([string]$env:SSH_CLIENT))
+  if ($sshSessionDetected) {
+    try {
+      $commandLine = "cmd.exe /c start `"`" /min $TaskCommand"
+      $createResult = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = $commandLine } -ErrorAction Stop
+      if ($null -ne $createResult -and [int]$createResult.ReturnValue -eq 0) {
+        return
+      }
+    } catch {
+      # Fall back to schtasks below; older Windows images may restrict WMI create.
+    }
+  }
 
   $schtasksCmd = Get-Command schtasks.exe -ErrorAction SilentlyContinue
   if ($null -eq $schtasksCmd) {
@@ -268,11 +281,16 @@ $envValues = Read-EnvFile -Path $EnvFile
 $cleanNapCatLauncher = Join-Path $RepoRoot 'scripts\runtime\launch_napcat_clean.ps1'
 $envValues['QQ_ONEBOT_API_BASE'] = 'http://127.0.0.1:3000'
 $envValues['EDGE_QQ_ONEBOT_AUTOSTART'] = 'true'
-$envValues['EDGE_QQ_ONEBOT_LAUNCHER_PATH'] = $cleanNapCatLauncher
-$envValues['EDGE_QQ_ONEBOT_LAUNCHER_ARGS'] = '{QQ_SELF_ID}'
+if ([string]::IsNullOrWhiteSpace([string]$envValues['EDGE_QQ_ONEBOT_LAUNCHER_PATH'])) {
+  $envValues['EDGE_QQ_ONEBOT_LAUNCHER_PATH'] = $cleanNapCatLauncher
+}
+if ([string]::IsNullOrWhiteSpace([string]$envValues['EDGE_QQ_ONEBOT_LAUNCHER_ARGS'])) {
+  $envValues['EDGE_QQ_ONEBOT_LAUNCHER_ARGS'] = '{QQ_SELF_ID}'
+}
 $envValues['EDGE_QQ_ONEBOT_HEALTH_URL'] = 'http://127.0.0.1:3000/get_status'
-$envValues['EDGE_QQ_ONEBOT_KILL_QQ_BEFORE_START'] = 'true'
-$envValues['EDGE_QQ_ONEBOT_FORCE_CLEAN_START'] = 'true'
+$qqCleanStartValue = if ($CleanQQOneBot.IsPresent) { 'true' } else { 'false' }
+$envValues['EDGE_QQ_ONEBOT_KILL_QQ_BEFORE_START'] = $qqCleanStartValue
+$envValues['EDGE_QQ_ONEBOT_FORCE_CLEAN_START'] = $qqCleanStartValue
 $effectiveEnvFile = Join-Path $runtimeRoot 'edge.runtime.env'
 Write-EnvFile -Path $effectiveEnvFile -Values $envValues
 if ($Port -le 0) {
@@ -305,6 +323,92 @@ $healthUrl = "http://127.0.0.1:$Port/v1/edge/health"
 $qqOneBotStateFile = Join-Path $runtimeRoot 'qq_onebot.state.json'
 $qqOneBotApiBase = [string]$envValues['QQ_ONEBOT_API_BASE']
 $qqOneBotHealthUrl = Get-QQOneBotHealthUrl -ApiBase $qqOneBotApiBase -Override ([string]$envValues['EDGE_QQ_ONEBOT_HEALTH_URL'])
+
+$runnerContent = @'
+[CmdletBinding()]
+param(
+  [string]$RepoRoot = "",
+  [string]$EnvFile = "",
+  [string]$PythonPath = "",
+  [string]$BindHost = "0.0.0.0",
+  [int]$Port = 17800
+)
+
+$ErrorActionPreference = 'Stop'
+
+function Resolve-DefaultRepoRoot {
+  return (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
+}
+
+function Resolve-PythonInterpreter {
+  param(
+    [string]$RepoRootPath,
+    [string]$PreferredPath
+  )
+
+  if (-not [string]::IsNullOrWhiteSpace($PreferredPath)) {
+    return $PreferredPath
+  }
+
+  $venvPython = Join-Path $RepoRootPath '.venv\Scripts\python.exe'
+  if (Test-Path $venvPython) {
+    return $venvPython
+  }
+
+  $pythonCmd = Get-Command python -ErrorAction SilentlyContinue
+  if ($null -ne $pythonCmd) {
+    return $pythonCmd.Source
+  }
+
+  throw 'python executable not found; set -PythonPath explicitly'
+}
+
+function Import-EnvFile {
+  param([string]$Path)
+
+  if (-not (Test-Path $Path)) {
+    return
+  }
+
+  Get-Content $Path | ForEach-Object {
+    if ([string]::IsNullOrWhiteSpace($_)) { return }
+    $line = $_.Trim()
+    if ($line.StartsWith('#')) { return }
+    $ix = $line.IndexOf('=')
+    if ($ix -lt 1) { return }
+    $k = $line.Substring(0, $ix).Trim()
+    $v = $line.Substring($ix + 1).Trim()
+    [Environment]::SetEnvironmentVariable($k, $v, 'Process')
+  }
+}
+
+if ([string]::IsNullOrWhiteSpace($RepoRoot)) {
+  $RepoRoot = Resolve-DefaultRepoRoot
+}
+if ([string]::IsNullOrWhiteSpace($EnvFile)) {
+  $EnvFile = Join-Path $RepoRoot '.env'
+}
+$PythonPath = Resolve-PythonInterpreter -RepoRootPath $RepoRoot -PreferredPath $PythonPath
+
+Import-EnvFile -Path $EnvFile
+
+if (-not [string]::IsNullOrWhiteSpace($BindHost)) {
+  $env:EDGE_RPC_HOST = $BindHost
+}
+if ($Port -gt 0) {
+  $env:EDGE_RPC_PORT = [string]$Port
+}
+
+Set-Location $RepoRoot
+
+# Python logging writes warnings to stderr during normal startup. In Windows
+# PowerShell 5.1, native stderr can be surfaced as NativeCommandError and obey
+# ErrorActionPreference, so keep setup strict but treat edge_client stderr as log.
+$ErrorActionPreference = 'Continue'
+& $PythonPath -m edge_client
+exit $LASTEXITCODE
+'@
+Set-Content -Path $runnerScript -Value $runnerContent -Encoding ascii
 
 if (-not (Test-Path -Path $runnerScript)) {
   throw "run_edge_task.ps1 not found: $runnerScript"
@@ -359,14 +463,18 @@ $ensureOneBotEscaped = ([string]$ensureOneBotScript).Replace('"', '""')
 $launcherLines = @(
   '@echo off',
   "cd /d `"$repoEscaped`"",
-  "powershell -NoProfile -ExecutionPolicy Bypass -File `"$ensureOneBotEscaped`" -RepoRoot `"$repoEscaped`" -EnvFile `"$envEscaped`" 1>> `"$stdoutEscaped`" 2>> `"$stderrEscaped`"",
-  "if errorlevel 1 echo [warn] ensure_qq_onebot failed; continuing edge startup anyway 1>> `"$stdoutEscaped`" 2>> `"$stderrEscaped`"",
+  "start `"`" powershell -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$ensureOneBotEscaped`" -RepoRoot `"$repoEscaped`" -EnvFile `"$envEscaped`" 1>> `"$stdoutEscaped`" 2>> `"$stderrEscaped`"",
   "powershell -NoProfile -ExecutionPolicy Bypass -File `"$runnerEscaped`" -RepoRoot `"$repoEscaped`" -EnvFile `"$envEscaped`" -PythonPath `"$pythonEscaped`" -BindHost `"$bindEscaped`" -Port $Port 1>> `"$stdoutEscaped`" 2>> `"$stderrEscaped`""
 )
 Set-Content -Path $launcherScript -Value $launcherLines -Encoding ascii
 
 $taskName = "NatsumeEdgeMainOnly_$([Guid]::NewGuid().ToString('N').Substring(0, 10))"
-$taskCommand = "`"$launcherScript`""
+$sshSessionDetected = (-not [string]::IsNullOrWhiteSpace([string]$env:SSH_CONNECTION)) -or (-not [string]::IsNullOrWhiteSpace([string]$env:SSH_CLIENT))
+$taskCommand = if ($sshSessionDetected) {
+  "powershell -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$runnerEscaped`" -RepoRoot `"$repoEscaped`" -EnvFile `"$envEscaped`" -PythonPath `"$pythonEscaped`" -BindHost `"$bindEscaped`" -Port $Port 1>> `"$stdoutEscaped`" 2>> `"$stderrEscaped`""
+} else {
+  "`"$launcherScript`""
+}
 Invoke-SchtasksBreakaway -TaskName $taskName -TaskCommand $taskCommand
 
 $ready = Wait-Http -Url $healthUrl -TimeoutSeconds $WaitSeconds

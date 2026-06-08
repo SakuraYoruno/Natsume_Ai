@@ -15,19 +15,17 @@ from host_brain.core.errors import (
     CHROMA_VECTOR_DIM_MISMATCH,
     RETR_BOND_UNAVAILABLE,
     RETR_LEDGER_UNAVAILABLE,
-    RETR_PERSONA_UTTERANCE_UNAVAILABLE,
-    RETR_STYLE_UNAVAILABLE,
     RETR_VAULT_UNAVAILABLE,
     RETR_WORLD_UNAVAILABLE,
 )
 
 STORE_SQLITE_LEDGER = "sqlite_ledger"
+STORE_LIFE_EPISODE = "life_episode"
 STORE_NEO4J_BOND = "neo4j_bond"
 STORE_EPISODIC_VECTOR = "episodic_vector"
+STORE_SEMANTIC_MEMORY = "semantic_memory"
 STORE_WORLD_CANON = "world_canon"
 STORE_ARTIFACT_VAULT = "artifact_vault"
-STORE_STYLE_CANON = "style_canon"
-STORE_PERSONA_UTTERANCE = "persona_utterance"
 
 SQLITE_SESSION_BOOST = 0.25
 SQLITE_PERSON_BOOST = 0.35
@@ -197,8 +195,10 @@ def _score_boost_priority(metadata: Mapping[str, Any]) -> tuple[float, int]:
         return 0.0, 0
     session_boost = _coerce_non_negative_float(raw_boost.get("session_boost"), default=0.0)
     recency_boost = _coerce_non_negative_float(raw_boost.get("recency_boost"), default=0.0)
+    semantic_kind_boost = _coerce_non_negative_float(raw_boost.get("semantic_kind_boost"), default=0.0)
+    tag_match_boost = _coerce_non_negative_float(raw_boost.get("tag_match_boost"), default=0.0)
     row_ts_ms = _coerce_non_negative_int(raw_boost.get("row_ts_ms"), default=0)
-    return round(session_boost + recency_boost, 6), row_ts_ms
+    return round(session_boost + recency_boost + semantic_kind_boost + tag_match_boost, 6), row_ts_ms
 
 
 def _coerce_non_negative_float(raw_value: Any, *, default: float = 0.0) -> float:
@@ -229,7 +229,9 @@ def _extract_canon_entity_id(memory_id: str, prefix: str) -> str | None:
 def _map_route_exception(exc: Exception, *, store_id: str | None = None) -> str:
     """按 store_id 返回专属 reason_code（M31-B，DevSpec 8.1 审计可追溯性）。"""
     normalized_store = str(store_id or STORE_EPISODIC_VECTOR).strip().lower()
-    if normalized_store == STORE_SQLITE_LEDGER:
+    if normalized_store in {STORE_SQLITE_LEDGER, STORE_LIFE_EPISODE}:
+        return RETR_LEDGER_UNAVAILABLE
+    if normalized_store == STORE_SEMANTIC_MEMORY:
         return RETR_LEDGER_UNAVAILABLE
     if normalized_store == STORE_NEO4J_BOND:
         return RETR_BOND_UNAVAILABLE
@@ -237,10 +239,6 @@ def _map_route_exception(exc: Exception, *, store_id: str | None = None) -> str:
         return RETR_WORLD_UNAVAILABLE
     if normalized_store == STORE_ARTIFACT_VAULT:
         return RETR_VAULT_UNAVAILABLE
-    if normalized_store == STORE_STYLE_CANON:
-        return RETR_STYLE_UNAVAILABLE
-    if normalized_store == STORE_PERSONA_UTTERANCE:
-        return RETR_PERSONA_UTTERANCE_UNAVAILABLE
     # episodic_vector：保持原有 Chroma 错误码分发（向后兼容）
     text = str(exc)
     if CHROMA_COLLECTION_MISSING in text:

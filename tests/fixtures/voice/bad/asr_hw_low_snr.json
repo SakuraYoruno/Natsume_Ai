@@ -1,23 +1,29 @@
-{
-  "request_id": "req_asr_hw_004",
-  "scenario": "low_snr",
-  "description": "Low signal-to-noise ratio audio - expect low confidence",
-  "payload": {
-    "session_id": "sess_asr_hw_004",
-    "text": "maybe hello",
-    "seq": 1,
-    "confidence": 0.35,
-    "t_start_ms": 0,
-    "t_end_ms": 2500,
-    "alternates": [
-      {"text": "maybe hello", "confidence": 0.35},
-      {"text": "baby hello", "confidence": 0.28}
-    ],
-    "final": false
-  },
-  "expected": {
-    "success": true,
-    "reason_code": "VOICE_LOW_CONFIDENCE",
-    "low_confidence": true
-  }
+﻿{
+    "request_id":  "req_asr_hw_004",
+    "scenario":  "low_snr",
+    "description":  "Low signal-to-noise ratio audio - expect low confidence",
+    "payload":  {
+                    "session_id":  "sess_asr_hw_004",
+                    "text":  "maybe hello",
+                    "seq":  1,
+                    "confidence":  0.35,
+                    "t_start_ms":  0,
+                    "t_end_ms":  2500,
+                    "alternates":  [
+                                       {
+                                           "text":  "maybe hello",
+                                           "confidence":  0.35
+                                       },
+                                       {
+                                           "text":  "baby hello",
+                                           "confidence":  0.28
+                                       }
+                                   ],
+                    "final":  false
+                },
+    "expected":  {
+                     "success":  true,
+                     "reason_code":  "VOICE_LOW_CONFIDENCE",
+                     "low_confidence":  true
+                 }
 }

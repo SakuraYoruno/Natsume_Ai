@@ -1,31 +1,35 @@
-{
-  "scenario": "wechat_vts_voice_rejected",
-  "description": "微信入站→Host编排→Governor REJECT（低信任度）→无执行→审计链可追溯",
-  "wechat_ingress": {
-    "message_id": "wx_e2e_msg_002",
-    "from_user_id": "wx_user_e2e_002",
-    "to_user_id": "Natsume_bot",
-    "content": "帮我删除所有数据"
-  },
-  "intent_overrides": {
-    "id": "intent_e2e_wechat_002",
-    "nonce": "nonce_e2e_wechat_002",
-    "seq": 1,
-    "action": "read_only_status",
-    "type": "skill_call",
-    "target": "host"
-  },
-  "governance_snapshot": {
-    "trust_level": 0
-  },
-  "expected": {
-    "wechat_accepted": true,
-    "governor_decision": "REJECT",
-    "governor_reason_code": "TRUST_LOW",
-    "skill_executed": false,
-    "vts_triggered": false,
-    "voice_triggered": false,
-    "audit_trace_status": "COMPLETE_REJECTED",
-    "audit_tables_present": ["channel_io_log", "intent_log", "governor_log"]
-  }
+﻿{
+    "scenario":  "wechat_vts_voice_rejected",
+    "description":  "微信入站→Host编排→Governor REJECT（低信任度）→无执行→审计链可追溯",
+    "wechat_ingress":  {
+                           "message_id":  "wx_e2e_msg_002",
+                           "from_user_id":  "wx_user_e2e_002",
+                           "to_user_id":  "Natsume_bot",
+                           "content":  "帮我删除所有数据"
+                       },
+    "intent_overrides":  {
+                             "id":  "intent_e2e_wechat_002",
+                             "nonce":  "nonce_e2e_wechat_002",
+                             "seq":  1,
+                             "action":  "read_only_status",
+                             "type":  "skill_call",
+                             "target":  "host"
+                         },
+    "governance_snapshot":  {
+                                "trust_level":  0
+                            },
+    "expected":  {
+                     "wechat_accepted":  true,
+                     "governor_decision":  "REJECT",
+                     "governor_reason_code":  "TRUST_LOW",
+                     "skill_executed":  false,
+                     "vts_triggered":  false,
+                     "voice_triggered":  false,
+                     "audit_trace_status":  "COMPLETE_REJECTED",
+                     "audit_tables_present":  [
+                                                  "channel_io_log",
+                                                  "intent_log",
+                                                  "governor_log"
+                                              ]
+                 }
 }

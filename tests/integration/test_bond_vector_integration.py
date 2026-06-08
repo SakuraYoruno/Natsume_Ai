@@ -36,7 +36,7 @@ def test_social_brain_bond_vector_enters_vital_signs() -> None:
     ctx = agent.get_bond_context(session_id="sess_1", user_id="u_1")
     vital_signs = registry.aggregate_vital_signs()
 
-    assert ctx["bond_stage"] in {"friend", "stranger", "acquaintance", "close_friend", "intimate", "soulmate"}
+    assert ctx["bond_stage"] in {"friend", "familiar", "close_friend", "close_friend", "intimate", "soulmate"}
     assert "bond_vector" in ctx
     assert float(ctx["bond_vector"]["trust"]) >= 0.0
     assert isinstance(vital_signs.get("bond_vector"), dict)

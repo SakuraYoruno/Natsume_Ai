@@ -265,11 +265,13 @@ class InitiativeGovernorAgent:
             # T-368：APPROVE 时联动 DefaultModeAgent.tick_idle_cycle()
             # 主动发声被批准是"我有能力主动表达"的自我叙事，应强化连续性
             try:
+                from host_brain.persona.identity import get_canonical_persona_self_id  # noqa: PLC0415
+
                 _dma = get_default_mode_agent()
                 if hasattr(_dma, "tick_idle_cycle"):
                     _dma.tick_idle_cycle(
                         source=f"initiative_approved:{action}",
-                        person_id="user_1",
+                        person_id=get_canonical_persona_self_id(),
                     )
             except Exception:
                 pass
@@ -284,7 +286,7 @@ class InitiativeGovernorAgent:
         loneliness_level: float = 0.0,
         anticipation_level: float = 0.0,
         emotion_tag: str = "NEUTRAL",
-        bond_stage: str = "stranger",
+        bond_stage: str = "friend",
         recent_topics: str = "",
     ) -> str | None:
         """Governor 决策 ALLOW 时调用 LLM 生成主动发声的话题建议。
@@ -315,7 +317,7 @@ class InitiativeGovernorAgent:
                 loneliness_level=round(float(loneliness_level), 3),
                 anticipation_level=round(float(anticipation_level), 3),
                 emotion_tag=str(emotion_tag or "NEUTRAL").upper(),
-                bond_stage=str(bond_stage or "stranger"),
+                bond_stage=str(bond_stage or "friend"),
                 recent_topics=str(recent_topics or "")[:100],
             )
             _pool_result = complete_llm_with_pool_sync(

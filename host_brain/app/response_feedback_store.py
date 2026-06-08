@@ -14,7 +14,7 @@ from host_brain.codex_runtime.skill_ids import CODEX_RUNTIME_SKILL_IDS
 _NEGATIVE_TOKEN_RULES: tuple[tuple[re.Pattern[str], tuple[str, ...]], ...] = (
     (re.compile(r"AI\s*味|ai\s*味|太ai|像ai", re.IGNORECASE), ("ai_tone",)),
     (re.compile(r"模板|模板化|太模板"), ("template_like",)),
-    (re.compile(r"不像|不符人设|不像她|不像夏目蓝"), ("out_of_persona",)),
+    (re.compile(r"不像|不符人设|不像她|不像旧角色"), ("out_of_persona",)),
     (re.compile(r"逻辑不对|逻辑怪|不是这个意思|莫名其妙"), ("logic_break",)),
     (re.compile(r"别这么说|我不喜欢这样|别这样说"), ("too_helpful", "out_of_persona")),
 )
@@ -22,7 +22,7 @@ _POSITIVE_TOKEN_RULES: tuple[tuple[re.Pattern[str], tuple[str, ...]], ...] = (
     (re.compile(r"这次对了|这样就对|这句像|这个可以"), ("in_persona",)),
 )
 _SPACE_RE = re.compile(r"\s+")
-_CHAT_REPLY_STAGE_PREFIX = "chat_agent"
+_CHAT_REPLY_STAGE_PREFIX = "surface_reply"
 _NON_PERSONA_SUB_AGENTS: frozenset[str] = frozenset(
     {
         "open_app",

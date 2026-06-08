@@ -1,18 +1,18 @@
-{
-  "request_id": "req_bond_001",
-  "intent_id": "intent_bond_001",
-  "session_id": "session_bond_001",
-  "seq": 1,
-  "user_id": "user_bond_001",
-  "topic_id": "topic_trust_support",
-  "capability_hint": "SUPPORTIVE",
-  "update_kind": "INTERACTION",
-  "evidence_refs": [
-    "evidence::bond::001"
-  ],
-  "payload": {
-    "etype": "HELP",
-    "intensity": "LOW",
-    "notes": "user accepted guidance"
-  }
+﻿{
+    "request_id":  "req_bond_001",
+    "intent_id":  "intent_bond_001",
+    "session_id":  "session_bond_001",
+    "seq":  1,
+    "user_id":  "user_bond_001",
+    "topic_id":  "topic_trust_support",
+    "capability_hint":  "SUPPORTIVE",
+    "update_kind":  "INTERACTION",
+    "evidence_refs":  [
+                          "evidence::bond::001"
+                      ],
+    "payload":  {
+                    "etype":  "HELP",
+                    "intensity":  "LOW",
+                    "notes":  "user accepted guidance"
+                }
 }

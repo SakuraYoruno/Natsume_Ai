@@ -20,4 +20,4 @@ def test_prompt_specs_only_expose_structural_json_prompts() -> None:
     assert "intent_class" in immune["system_prompt"]
 
     with pytest.raises(KeyError):
-        resolve_prompt_spec_json("chat_agent.minimal_fallback.default")
+        resolve_prompt_spec_json("surface_reply.minimal_fallback.default")

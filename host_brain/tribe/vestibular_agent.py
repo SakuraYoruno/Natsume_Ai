@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -12,6 +13,14 @@ from host_brain.tribe.tribe_state import TribeStateRegistry, get_global_registry
 
 def _clamp(value: float, low: float = 0.0, high: float = 1.0) -> float:
     return max(low, min(high, float(value)))
+
+
+def _bounded_int_env(name: str, *, default: int, min_value: int, max_value: int) -> int:
+    try:
+        value = int(str(os.getenv(name) or "").strip() or default)
+    except (TypeError, ValueError):
+        value = int(default)
+    return max(int(min_value), min(int(max_value), int(value)))
 
 
 @dataclass(slots=True)
@@ -29,6 +38,8 @@ class VestibularAgent:
     _mode_transition_ts: list[int] = field(default_factory=list, init=False, repr=False)
     _platform_flap_ts: list[int] = field(default_factory=list, init=False, repr=False)
     _initiative_defer_ts: list[int] = field(default_factory=list, init=False, repr=False)
+    _last_high_jitter_side_effect_ts_ms: int = field(default=0, init=False, repr=False)
+    _last_high_jitter_side_effect_bucket: str = field(default="", init=False, repr=False)
 
     def describe(self) -> dict[str, Any]:
         return self.descriptor.to_dict()
@@ -50,6 +61,28 @@ class VestibularAgent:
         self._mode_transition_ts = [item for item in self._mode_transition_ts if int(item) >= threshold]
         self._platform_flap_ts = [item for item in self._platform_flap_ts if int(item) >= threshold]
         self._initiative_defer_ts = [item for item in self._initiative_defer_ts if int(item) >= threshold]
+
+    def _high_jitter_side_effect_allowed(self, *, jitter: float, now_ts_ms: int) -> bool:
+        if float(jitter) < 0.35:
+            return False
+        bucket = "critical" if float(jitter) >= 0.72 else "unstable"
+        cooldown_ms = _bounded_int_env(
+            "HOST_VESTIBULAR_HIGH_JITTER_EFFECT_COOLDOWN_MS",
+            default=300000,
+            min_value=30000,
+            max_value=3600000,
+        )
+        last_ts = int(getattr(self, "_last_high_jitter_side_effect_ts_ms", 0) or 0)
+        last_bucket = str(getattr(self, "_last_high_jitter_side_effect_bucket", "") or "")
+        if (
+            last_ts <= 0
+            or bucket != last_bucket
+            or int(now_ts_ms) - last_ts >= cooldown_ms
+        ):
+            self._last_high_jitter_side_effect_ts_ms = int(now_ts_ms)
+            self._last_high_jitter_side_effect_bucket = bucket
+            return True
+        return False
 
     def evaluate_stability(self, *, source: str = "runtime", ts_ms: int | None = None) -> dict[str, Any]:
         resolved_ts = int(ts_ms or now_ms())
@@ -101,8 +134,13 @@ class VestibularAgent:
             },
         )
 
+        high_jitter_side_effect_allowed = self._high_jitter_side_effect_allowed(
+            jitter=jitter,
+            now_ts_ms=resolved_ts,
+        )
+
         # T-251：高抖动时联动 LimbicAgent 触发警觉性情绪偏移
-        if jitter >= 0.35:
+        if high_jitter_side_effect_allowed:
             try:
                 _limbic = get_limbic_agent()
                 if hasattr(_limbic, "drive_emotion_metabolism"):
@@ -119,7 +157,7 @@ class VestibularAgent:
                 pass
 
         # T-252：高抖动时联动 ANSAgent 降低主动发声节律
-        if jitter >= 0.35:
+        if high_jitter_side_effect_allowed:
             try:
                 _ans = get_ans_agent()
                 if hasattr(_ans, "adjust_rhythm_for_high_interrupt"):
@@ -144,7 +182,7 @@ class VestibularAgent:
 
         # T-354：严重失衡（jitter>=0.72，critical 级别）时联动 PainRewardAgent 记录躯体痛苦
         # 系统严重抖动是行动受阻的深层痛苦（无法稳定执行是一种持续性痛苦）
-        if jitter >= 0.72:
+        if high_jitter_side_effect_allowed and jitter >= 0.72:
             try:
                 _pr = get_pain_reward_agent()
                 if hasattr(_pr, "record_pain"):

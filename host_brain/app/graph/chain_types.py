@@ -57,7 +57,7 @@ class ChainContext:
     proposer_class: ProposerClass = ProposerClass.USER
     """发起方类别"""
     task_type: TaskType = TaskType.CHAT
-    """任务类型（Governor 放行后由 SceneRouter 确定）"""
+    """任务类型（Governor 放行后由 Thalamus 意图决策确定）"""
 
     # 各节点填充的中间结果
     quarantine_passed: bool = False
@@ -203,4 +203,3 @@ class ChainNode:
             ctx.failure_detail = f"节点 {self.name} 超时（{self.timeout}s）"
             logger.warning("节点 %s 超时，已触发 MODULE_TIMEOUT", self.name)
             return False
-

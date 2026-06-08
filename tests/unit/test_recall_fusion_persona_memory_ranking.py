@@ -167,7 +167,7 @@ def test_deep_bond_boosts_continuity_memory_more_than_shallow_bond() -> None:
         query="你会不会想起我们之前说过的事",
         query_embedding=_QUERY_EMBEDDING,
         mood_state="steady",
-        bond_summary={"stage": "ACQUAINTANCE"},
+        bond_summary={"stage": "CLOSE_FRIEND"},
         motive_state={"drives": {"continuity_drive": 0.35}},
     )
     deep = service.recall(

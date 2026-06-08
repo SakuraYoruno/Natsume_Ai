@@ -1,33 +1,33 @@
-{
-  "speak": {
-    "request_id": "req_edge_voice_010",
-    "payload": {
-      "session_id": "sess_edge_voice_010",
-      "seq": 10,
-      "utterance_id": "utt_edge_voice_010",
-      "text": "start playback",
-      "interruptible": true,
-      "voice_profile": "Natsume_default"
-    }
-  },
-  "barge_in": {
-    "request_id": "req_edge_voice_011",
-    "payload": {
-      "session_id": "sess_edge_voice_010",
-      "seq": 11,
-      "source": "user_voice",
-      "active_utterance_id": "utt_edge_voice_010"
-    }
-  },
-  "speak_second": {
-    "request_id": "req_edge_voice_012",
-    "payload": {
-      "session_id": "sess_edge_voice_010",
-      "seq": 12,
-      "utterance_id": "utt_edge_voice_011",
-      "text": "finish playback",
-      "interruptible": true,
-      "voice_profile": "Natsume_default"
-    }
-  }
+﻿{
+    "speak":  {
+                  "request_id":  "req_edge_voice_010",
+                  "payload":  {
+                                  "session_id":  "sess_edge_voice_010",
+                                  "seq":  10,
+                                  "utterance_id":  "utt_edge_voice_010",
+                                  "text":  "start playback",
+                                  "interruptible":  true,
+                                  "voice_profile":  "Natsume_default"
+                              }
+              },
+    "barge_in":  {
+                     "request_id":  "req_edge_voice_011",
+                     "payload":  {
+                                     "session_id":  "sess_edge_voice_010",
+                                     "seq":  11,
+                                     "source":  "user_voice",
+                                     "active_utterance_id":  "utt_edge_voice_010"
+                                 }
+                 },
+    "speak_second":  {
+                         "request_id":  "req_edge_voice_012",
+                         "payload":  {
+                                         "session_id":  "sess_edge_voice_010",
+                                         "seq":  12,
+                                         "utterance_id":  "utt_edge_voice_011",
+                                         "text":  "finish playback",
+                                         "interruptible":  true,
+                                         "voice_profile":  "Natsume_default"
+                                     }
+                     }
 }

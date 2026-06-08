@@ -79,7 +79,23 @@ class ChatRequest(BaseModel):
     reply_target: Optional[str] = Field(None, description="Optional reply target id for channel delivery")
     render_target_lang: Optional[str] = Field(
         None,
-        description="Optional text render language override, e.g. zh/ja",
+        description="Legacy language hint, e.g. zh/ja. Output modality should prefer render_profile.",
+    )
+    render_profile: Optional[str] = Field(
+        None,
+        description="Optional output render profile, e.g. zh_text for text or zh_voice for Chinese voice.",
+    )
+    response_form: Optional[str] = Field(
+        None,
+        description="Optional desired response form, e.g. text or voice.",
+    )
+    render_policy: Optional[Dict[str, Any]] = Field(
+        None,
+        description="Optional compressed reply policy for the text surface layer.",
+    )
+    surface_task_control: Optional[Dict[str, Any]] = Field(
+        None,
+        description="Optional compressed surface task controls used before final ReplyControlPacket compile.",
     )
     attachments: Optional[List[Dict[str, Any]]] = Field(None, description="Optional structured inbound attachments")
     multimodal_observations: Optional[Dict[str, Any]] = Field(
@@ -116,7 +132,7 @@ class ChatRequest(BaseModel):
 
     # 图片上传隐私授权标志
     # 屏幕截图属高敏隐私内容，默认禁止上传至云端 API。
-    # 当 SceneRouter 策略为 REQUIRE_CONSENT 时，必须显式传入 true 才允许上传图片。
+    # 需要上传原图时，必须显式传入 true 才允许发送图片。
     # 若为 false（默认），即使 vision_context 中包含 image_base64/image_url，
     # 也只会使用文字描述模式（screen_description / message）进行分析。
     image_upload_consent: bool = Field(

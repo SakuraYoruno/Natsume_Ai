@@ -1,22 +1,43 @@
-{
-  "scenario": "rate_limit_window_expired",
-  "description": "窗口过期：早期请求过期后计数重置，新请求不再触发限流",
-  "config": {
-    "backend": "memory",
-    "window_ms": 5000,
-    "max_requests": 2
-  },
-  "events_phase1": [
-    {"key": "user_002", "ts_ms": 200000, "expected_count": 1, "expected_hit": false},
-    {"key": "user_002", "ts_ms": 201000, "expected_count": 2, "expected_hit": false},
-    {"key": "user_002", "ts_ms": 202000, "expected_count": 3, "expected_hit": true}
-  ],
-  "events_phase2_after_expiry": [
-    {"key": "user_002", "ts_ms": 210000, "expected_count": 1, "expected_hit": false, "note": "窗口已过期，前三条记录均已清除"}
-  ],
-  "expected": {
-    "phase1_final_hit": true,
-    "phase2_final_hit": false,
-    "backend": "memory"
-  }
+﻿{
+    "scenario":  "rate_limit_window_expired",
+    "description":  "窗口过期：早期请求过期后计数重置，新请求不再触发限流",
+    "config":  {
+                   "backend":  "memory",
+                   "window_ms":  5000,
+                   "max_requests":  2
+               },
+    "events_phase1":  [
+                          {
+                              "key":  "user_002",
+                              "ts_ms":  200000,
+                              "expected_count":  1,
+                              "expected_hit":  false
+                          },
+                          {
+                              "key":  "user_002",
+                              "ts_ms":  201000,
+                              "expected_count":  2,
+                              "expected_hit":  false
+                          },
+                          {
+                              "key":  "user_002",
+                              "ts_ms":  202000,
+                              "expected_count":  3,
+                              "expected_hit":  true
+                          }
+                      ],
+    "events_phase2_after_expiry":  [
+                                       {
+                                           "key":  "user_002",
+                                           "ts_ms":  210000,
+                                           "expected_count":  1,
+                                           "expected_hit":  false,
+                                           "note":  "窗口已过期，前三条记录均已清除"
+                                       }
+                                   ],
+    "expected":  {
+                     "phase1_final_hit":  true,
+                     "phase2_final_hit":  false,
+                     "backend":  "memory"
+                 }
 }

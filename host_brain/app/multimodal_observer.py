@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from typing import Any, Sequence
 
 from host_brain.app.multimodal_observer_backends import (
@@ -18,6 +19,12 @@ from host_brain.app.multimodal_observer_backends import (
 
 
 _logger = logging.getLogger("Natsume.app.multimodal_observer")
+
+_SOCIAL_EMOJI_PLACEHOLDERS = {"", "[表情消息]", "[贴纸消息]", "[动画表情]"}
+_EMOJI_LITERAL_QUERY_RE = re.compile(
+    r"(?:这是什么|是什么|什么意思|啥意思|什么表情|表情包什么意思|"
+    r"图里|图片里|上面写|写了什么|识别|认得|认识|哪个角色|像谁|看一下|看看这个)"
+)
 
 
 def _parse_int_env(name: str, *, default: int, minimum: int) -> int:
@@ -86,7 +93,7 @@ class MultimodalObserver:
                 or "gemini-2.5-flash-lite"
             ),
             async_model_id=(
-                str(os.environ.get("HOST_MULTIMODAL_MODEL_ID_ASYNC") or os.environ.get("HOST_CHAT_AGENT_MODEL_ID") or os.environ.get("HOST_GEMINI_MODEL_ID") or "gemini-2.5-pro").strip()
+                str(os.environ.get("HOST_MULTIMODAL_MODEL_ID_ASYNC") or os.environ.get("HOST_SURFACE_REPLY_MODEL_ID") or os.environ.get("HOST_GEMINI_MODEL_ID") or "gemini-2.5-pro").strip()
                 or "gemini-2.5-pro"
             ),
             timeout_ms=_parse_int_env("HOST_MULTIMODAL_TIMEOUT_MS", default=15000, minimum=3000),
@@ -434,6 +441,9 @@ class MultimodalObserver:
                     )
             return base_file
 
+        if self._should_keep_emoji_observation_rule_only(item=item, user_text=user_text):
+            return self._fallback_backend.observe_attachment(payload)
+
         if self._model_backend.supports(payload):
             try:
                 return self._model_backend.observe_attachment(payload)
@@ -446,6 +456,19 @@ class MultimodalObserver:
                     exc,
                 )
         return self._fallback_backend.observe_attachment(payload)
+
+    @staticmethod
+    def _should_keep_emoji_observation_rule_only(*, item: dict[str, Any], user_text: str) -> bool:
+        if str(item.get("type") or "").strip().lower() != "emoji":
+            return False
+        if str(item.get("local_path") or "").strip() or str(item.get("remote_url") or "").strip():
+            return False
+        text = str(user_text or "").strip()
+        if text in _SOCIAL_EMOJI_PLACEHOLDERS:
+            return True
+        if not text:
+            return True
+        return not bool(_EMOJI_LITERAL_QUERY_RE.search(text))
 
     def _build_pending_summary(
         self,

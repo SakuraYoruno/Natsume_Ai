@@ -1,3 +1,6 @@
+受众：PROJECT
+标题：CHANGELOG — RepairAgent 自愈机制 LLM 升级
+
 # CHANGELOG — RepairAgent 自愈机制 LLM 升级
 
 > **日期**：2026-04-03

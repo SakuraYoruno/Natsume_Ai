@@ -159,11 +159,13 @@ class CerebellumAgent:
             # T-379：纠偏成功（NO_ADJUST）时联动 DefaultModeAgent.tick_idle_cycle()
             # 执行顺畅是"我能做到"的自我能力叙事，应强化连续性
             try:
+                from host_brain.persona.identity import get_canonical_persona_self_id  # noqa: PLC0415
+
                 _dma = get_default_mode_agent()
                 if hasattr(_dma, "tick_idle_cycle"):
                     _dma.tick_idle_cycle(
                         source="cerebellum_no_adjust_smooth",
-                        person_id="user_1",
+                        person_id=get_canonical_persona_self_id(),
                     )
             except Exception:
                 pass
@@ -203,7 +205,7 @@ class CerebellumAgent:
         触发条件：evaluate_correction() 返回 RETRY/DEGRADE/SAFE_FALLBACK。
         调用：Flash 小模型。
         开关：CEREBELLUM_CORRECTION_NARRATIVE_ENABLED（默认 false）。
-        输出注入：ChatAgent 的 turn_context_sections（并入单一 system_prompt）。
+        输出注入：SurfaceReply 的 turn_context_sections（并入单一 system_prompt）。
 
         Returns:
             纠偏叙事字符串，或 None（未触发/失败）。

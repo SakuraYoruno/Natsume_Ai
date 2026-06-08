@@ -1,8 +1,9 @@
-"""cortex_prompt_builder.py — Cortex Orchestrator messages 构建。"""
+﻿"""cortex_prompt_builder.py — Cortex Orchestrator messages 构建。"""
 
 from __future__ import annotations
 
 import logging
+import os
 from typing import Any, Mapping
 
 from host_brain.app.chat_runtime_input import build_chat_runtime_input
@@ -20,27 +21,127 @@ _COMPACT_LANE_TOPICS = {
     "help_commitment",
     "rejection",
     "greeting",
-    "presence_ping",
-    "light_ack",
+    "auditory_check",
     "playful_ping",
-    "emoji_social_reply",
-    "emoji_social_followup",
     "assistant_reply_followup",
 }
 _COMPACT_LANE_THREADS = {
     "identity_loop",
     "boundary_probe",
     "help_reassurance",
-    "phatic",
-    "image_social",
     "assistant_reply_followup",
 }
+
+
+def _truthy_env(name: str) -> bool:
+    return str(os.environ.get(name) or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _clean_state_label(raw: Any) -> str:
+    text = str(raw or "").strip()
+    allowed = []
+    for ch in text:
+        if ch.isalnum() or ch in {"_", "-", ".", ":"}:
+            allowed.append(ch)
+    return "".join(allowed)[:80]
+
+
+def _clean_state_list(raw: Any, *, limit: int = 4) -> list[str]:
+    values = raw if isinstance(raw, (list, tuple, set)) else []
+    cleaned: list[str] = []
+    for item in values:
+        label = _clean_state_label(item)
+        if label and label not in cleaned:
+            cleaned.append(label)
+        if len(cleaned) >= limit:
+            break
+    return cleaned
 
 
 def _build_soul_section_title(*, render_target_lang: str) -> str:
     if str(render_target_lang or "").strip().lower() == "ja":
         return "【人格核心】\n"
     return "【人格核心】\n"
+
+
+def _build_final_output_contract(*, render_target_lang: str) -> str:
+    if str(render_target_lang or "").strip().lower() == "ja":
+        return (
+            "【最终输出格式】\n"
+            "只输出一条中文语音台词本体，适合直接送入 TTS。"
+            "禁止日语、假名、日语口癖；不要角色名前缀、不要引号、不要括号动作、不要旁白、不要 Markdown、不要 emoji。"
+            "即使上游误传 render_target_lang=ja，也必须输出中文。"
+        )
+    return (
+        "【最终输出格式】\n"
+        "只输出一条中文 QQ 私聊消息本体。"
+        "不要角色名前缀，不要引号包裹，不要括号动作，不要旁白叙述，不要描写表情/肢体/空间位置，"
+        "不要 Markdown，不要 emoji。"
+        "回复要像直接发出去的一句话，而不是视觉小说台词或舞台剧。"
+        "不要把“短”理解成只回一两个字；除非用户也只发了一个语气词，否则中文文字至少要有一个完整意思，"
+        "轻社交通常 6-24 个中文字符，日常闲聊通常 10-42 个中文字符。"
+        "禁止只输出“嗯/那/哎/在/叫/好/行”这类残句。"
+        "如果你只想回一个字，先在心里补成一条完整私聊消息再输出。"
+    )
+
+
+def _build_structured_reply_state_prompt(*, reply_plan: Mapping[str, Any], context_plane: Any) -> str:
+    """Render machine-readable state tags without leaking contract prose into style."""
+    interaction_state = getattr(getattr(context_plane, "interaction_state", None), "state", None)
+    interaction_state_payload = (
+        interaction_state.as_dict()
+        if interaction_state is not None and hasattr(interaction_state, "as_dict")
+        else {}
+    )
+    contract_payload = reply_plan.get("contract") if isinstance(reply_plan.get("contract"), Mapping) else {}
+    topic = _clean_state_label(
+        reply_plan.get("primary_topic")
+        or interaction_state_payload.get("current_topic")
+        or _extract_context_topic(context_plane)
+    )
+    thread = _clean_state_label(
+        interaction_state_payload.get("ongoing_thread")
+        or _extract_context_thread(context_plane)
+    )
+    move = _clean_state_label(
+        reply_plan.get("interaction_move")
+        or interaction_state_payload.get("interaction_move")
+    )
+    stance = _clean_state_label(interaction_state_payload.get("user_stance"))
+    freshness = _clean_state_label(interaction_state_payload.get("freshness"))
+    repeat_count = _clean_state_label(interaction_state_payload.get("repeat_question_count"))
+    repeat_group = _clean_state_label(
+        interaction_state_payload.get("repeat_surface_group")
+        or interaction_state_payload.get("repeat_group")
+    )
+    response_form = _clean_state_label(reply_plan.get("response_form") or "text")
+    required = _clean_state_list(contract_payload.get("required_actions"))
+    forbidden = _clean_state_list(contract_payload.get("forbidden_actions"))
+    tags = [
+        f"topic={topic or 'chat'}",
+        f"thread={thread or 'none'}",
+        f"move={move or 'none'}",
+        f"stance={stance or 'none'}",
+        f"form={response_form or 'text'}",
+    ]
+    if freshness:
+        tags.append(f"freshness={freshness}")
+    if repeat_count and repeat_count != "0":
+        tags.append(f"repeat_count={repeat_count}")
+    if repeat_group:
+        tags.append(f"repeat_group={repeat_group}")
+    if required:
+        tags.append("required=" + ",".join(required))
+    if forbidden:
+        tags.append("forbidden=" + ",".join(forbidden))
+    max_chars = _clean_state_label(reply_plan.get("max_chars"))
+    if max_chars:
+        tags.append(f"max_chars={max_chars}")
+    return (
+        "【本轮状态标签】\n"
+        + "; ".join(tags)
+        + "\n这些是内部状态标签，不是可说出口的话；最终措辞只按 Soul 和上下文自然生成。"
+    )
 
 
 def _build_interaction_state_summary(context_plane: Any) -> str:
@@ -91,23 +192,54 @@ def _build_interaction_state_summary(context_plane: Any) -> str:
     perception_summary = str(
         getattr(interaction_state, "perception_summary", "") or interaction_state_payload.get("perception_summary") or ""
     ).strip()
+    repeat_question_count = 0
+    try:
+        repeat_question_count = int(
+            getattr(interaction_state, "repeat_question_count", None)
+            if getattr(interaction_state, "repeat_question_count", None) is not None
+            else interaction_state_payload.get("repeat_question_count")
+            or 0
+        )
+    except (TypeError, ValueError):
+        repeat_question_count = 0
+    repeat_surface_group = str(
+        getattr(interaction_state, "repeat_surface_group", "")
+        or interaction_state_payload.get("repeat_surface_group")
+        or interaction_state_payload.get("repeat_group")
+        or ""
+    ).strip()
     emotion_anchor = str(
         getattr(interaction_thread, "emotion_anchor", "") or interaction_thread_payload.get("emotion_anchor") or ""
     ).strip()
 
+    if repeat_question_count > 0:
+        group_text = f"同类输入是“{repeat_surface_group}”。" if repeat_surface_group else ""
+        return (
+            "【当前对话线程】\n"
+            f"用户这轮是在重复刚才同类输入，已重复 {repeat_question_count} 次。{group_text}"
+            "先承接“又说了一遍”的事实，再处理当前文字本身；不要把它当第一次，"
+            "也不要猜用户睡迷糊、故意逗你或状态异常。"
+        )
+
     if ongoing_thread == "image_social":
+        if current_topic == "emoji_social_reply":
+            return (
+                "【当前对话线程】\n"
+                "对方这轮发来的是社交图片/表情包，不是让你做图片鉴赏。"
+                "把它当成对方递来的一点情绪来回应；如果观察没有明确情绪，就不要硬猜成委屈、可爱或逗你。"
+            )
         if current_topic == "emoji_social_followup":
             if interaction_move == "repair_needed":
                 return (
                     "【当前对话线程】\n"
                     "这句话是在接上一张社交图片，不是新话题。对方是在嘴硬或否认刚才那层委屈/别扭，"
-                    "先顺着上一张图的情绪接住，再轻轻退一步，不要装作第一次听见。"
+                "顺着上一张图的情绪轻轻退一步，不要装作第一次听见。"
                 )
             if interaction_move == "reconfirm":
                 return (
                     "【当前对话线程】\n"
                     "这句话是在接上一张社交图片。对方是在追问你刚才为什么那样理解，"
-                    "先接住这层追问，再自然解释你的读法，不要退回空话。"
+                    "直接自然解释你的读法，不要退回空话。"
                 )
             if interaction_move == "light_tease":
                 return (
@@ -126,38 +258,40 @@ def _build_interaction_state_summary(context_plane: Any) -> str:
         return (
             "【当前对话线程】\n"
             f"这轮是在追问你上一条回复的意思或指代，不是新话题。{context}{quoted}"
-            "先承认刚才说得太省或接得不清，再补清楚你上一句具体指什么；"
+            "先承认刚才说得太省或不够清楚，再补清楚你上一句具体指什么；"
             "不要只回语气词，不要复读上一句，也不要转成固定开放问句。"
         )
 
     if ongoing_thread == "identity_loop":
         return (
             "【当前对话线程】\n"
-            "这轮是在接连续身份追问。先自然认下自己，再顺手接住“怎么又问这个”，不要完整自报，也不要用固定追问句。"
+            "这轮是在接连续身份追问。先自然认下自己，再顺着“怎么又问这个”的语气回，不要完整自报，也不要用固定追问句。"
         )
 
     if ongoing_thread == "boundary_probe":
         return (
             "【当前对话线程】\n"
-            "这轮是在接关系/动机回访。先把距离感放稳，再换一个更生活化的短理由，不要重复上一轮原句。"
+            "这轮是在接关系/动机回访。先把义妹关系事实放稳，再换一个更生活化的短理由，不要重复上一轮原句。"
         )
 
     if ongoing_thread == "help_reassurance":
         return (
             "【当前对话线程】\n"
-            "这轮是在接“你还会不会理我/帮我”的回访。先接住不安，再把会回应的态度放稳，不要重新许很重的承诺。"
+            "这轮是在接“你还会不会理我/帮我”的回访。先回应不安，再把会回应的态度放稳，不要重新许很重的承诺。"
         )
 
-    if ongoing_thread == "phatic":
+    if current_topic == "auditory_check":
         return (
             "【当前对话线程】\n"
-            "这轮是轻社交招呼，只要自然接住，不要上来解释或把话说重。"
+            "这轮是在确认听觉输入。若当前没有语音输入证据，只能说没听见声音、只看到文字；"
+            "不要只回在呢，也不要假装听到了声音。"
         )
 
-    if current_topic in {"greeting", "presence_ping", "light_ack", "playful_ping"}:
+    if current_topic == "playful_ping":
         return (
             "【当前对话线程】\n"
-            "这轮是轻社交招呼，只要自然接住，不要上来解释或把话说重。"
+            "这轮是轻社交招呼，只要自然回应，不要上来解释或把话说重；"
+            "但也不要只喊称呼、只发表情，至少给一句有内容的熟人式回应。"
         )
 
     if perception_summary and followup_target:
@@ -232,7 +366,7 @@ def _should_use_compact_chat_lane(
 def build_cortex_prompt(
     *,
     user_message: str,
-    render_target_lang: str = "ja",
+    render_target_lang: str = "zh",
     emotion_context: dict[str, Any] | None = None,
     emotion_snapshot: dict[str, Any] | None = None,
     retrieval_summary: dict[str, Any] | None = None,
@@ -245,6 +379,7 @@ def build_cortex_prompt(
     attachments: list[dict[str, Any]] | None = None,
     multimodal_observations: dict[str, Any] | None = None,
     attachment_summary: str | None = None,
+    eval_history_turns: list[dict[str, Any]] | None = None,
     turn_context_sections: list[str] | tuple[str, ...] | None = None,
     include_runtime_payload: bool = False,
 ) -> tuple[list[dict[str, str]], dict[str, Any]] | tuple[list[dict[str, str]], dict[str, Any], dict[str, Any]]:
@@ -297,6 +432,14 @@ def build_cortex_prompt(
             prompt_payload.get("request", {}).get("multimodal_observations", {}).get("primary_modality") or ""
         ).strip(),
     }
+    if eval_history_turns:
+        prompt_payload["ab_eval"] = {
+            "history_turns": [
+                dict(item or {})
+                for item in list(eval_history_turns or [])
+                if isinstance(item, Mapping)
+            ]
+        }
 
     gen_params: dict[str, Any] = {}
     context_plane = assemble_prompt_context_plane(
@@ -320,6 +463,8 @@ def build_cortex_prompt(
             allow_older_summary=False,
         )
     compiled_soul = get_compiled_soul()
+    _soul_display_name = str(getattr(compiled_soul, "display_name", "") or "当前人格").strip()
+    _reply_plan = dict(getattr(getattr(context_plane, "reply_plan", None), "state", {}) or {})
     _soul_text = str(
         compiled_soul.runtime_compact_text if use_compact_chat_lane else compiled_soul.runtime_full_text
     ).strip()
@@ -329,13 +474,20 @@ def build_cortex_prompt(
         _parts.append(
             _build_soul_section_title(render_target_lang=render_target_lang) + _soul_text
         )
-    _reply_plan = dict(getattr(getattr(context_plane, "reply_plan", None), "state", {}) or {})
+    _parts.append(_build_final_output_contract(render_target_lang=render_target_lang))
+    _parts.append(
+        "【人格优先级】\n"
+        "Soul 是说话风格、关系姿态和称呼习惯的最高优先级。情绪、关系状态和本轮目标只调节热度，"
+        f"不能把{_soul_display_name}压成客服式、冷淡式、扫描式或只有称呼/表情的空壳短句。"
+    )
     _affect_summary = str(_reply_plan.get("affect_summary") or "").strip()
     if _affect_summary:
         _parts.append(_affect_summary)
     _relationship_summary = str(_reply_plan.get("relationship_summary") or "").strip()
     if _relationship_summary:
         _parts.append(_relationship_summary)
+    _image_social_prompt_signal = ""
+    _is_image_social_prompt = False
     _multimodal_state = getattr(getattr(context_plane, "multimodal", None), "state", None)
     if hasattr(_multimodal_state, "summary_for_chat"):
         _conversation_interpretation_for_mm = getattr(getattr(context_plane, "conversation_interpretation", None), "state", None)
@@ -343,9 +495,22 @@ def build_cortex_prompt(
         _mm_topic = str(getattr(_conversation_interpretation_for_mm, "literal_topic", "") or "").strip()
         _mm_thread = str(getattr(_interaction_thread_for_mm, "thread_kind", "") or "").strip()
         if _mm_topic in {"emoji_social_reply", "emoji_social_followup"} or _mm_thread == "image_social":
+            _is_image_social_prompt = True
             _multimodal_summary = str(getattr(_multimodal_state, "social_signal", "") or "").strip()
+            if not _multimodal_summary:
+                _multimodal_summary = str(getattr(_multimodal_state, "summary_for_chat", "") or "").strip()
+            _image_social_prompt_signal = _multimodal_summary
             if _multimodal_summary:
-                _parts.append("【表情包社交信号】\n" + _multimodal_summary)
+                _parts.append(
+                    "【表情包输入】\n"
+                    f"这张图/表情传来的意思：{_multimodal_summary}\n"
+                    "最后一条用户消息代表对方正在表达这种情绪，不是让你猜图里是谁。"
+                    "如果上一轮是你自己的回复，这张表情很可能是在回应你上一句；负向情绪要优先收回、修正或接住上一句，不要只给表情贴标签。"
+                    "像聊天里顺手回这股情绪，不要描述图片、外貌或表情包本身。"
+                    "不要编造对方此刻的位置、动作或心理，比如“房间里/一个人/装深沉/发呆/不说话”。"
+                    "回复 8-24 个中文字符，不要只回“嗯/唔/哼/哦/好啦”。"
+                    "严禁用“怎么啦/怎么了/咋了/什么情况/怎么不说话/别憋着/跟我说说”这类问句或劝说承接。"
+                )
         else:
             _multimodal_summary = str(getattr(_multimodal_state, "summary_for_chat", "") or "").strip()
             if _multimodal_summary:
@@ -354,8 +519,16 @@ def build_cortex_prompt(
     if _interaction_summary:
         _parts.append(_interaction_summary)
     _reply_contract = str(_reply_plan.get("reply_contract") or "").strip()
-    if _reply_contract:
-        _parts.append("【本轮回应动作】\n" + _reply_contract)
+    _disable_reply_state_prompt = _truthy_env("HOST_CHAT_DISABLE_REPLY_CONTRACT_PROMPT")
+    _legacy_reply_contract_prompt = _truthy_env("HOST_CHAT_LEGACY_REPLY_CONTRACT_PROMPT")
+    if not _disable_reply_state_prompt and _legacy_reply_contract_prompt and _reply_contract:
+        _parts.append(
+            "【输出边界】\n"
+            "只输出角色会真的说出口的话。下面的本轮目标是内部约束，不能照抄其中的“回应、目标、线程、情绪、信号、自然短句”等说明词。\n\n"
+            "【本轮目标】\n" + _reply_contract
+        )
+    elif not _disable_reply_state_prompt:
+        _parts.append(_build_structured_reply_state_prompt(reply_plan=_reply_plan, context_plane=context_plane))
     system_prompt = "\n\n".join(_parts)
 
     conversation_history_meta = {
@@ -409,6 +582,12 @@ def build_cortex_prompt(
         conversation_history_meta["newest_ts_ms"],
     )
 
+    effective_user_message_for_prompt = str(user_message or "")
+    if _is_image_social_prompt:
+        signal = _image_social_prompt_signal or "一种表情包情绪"
+        effective_user_message_for_prompt = f"（{signal}）"
+        prompt_payload["effective_user_message_for_prompt"] = effective_user_message_for_prompt
+
     messages = build_chat_messages(
         system_prompt=system_prompt,
         history_turns=[
@@ -416,7 +595,7 @@ def build_cortex_prompt(
             for item in list(context_plane.continuity.recent_turns or [])
             if isinstance(item, Mapping)
         ],
-        user_message=user_message,
+        user_message=effective_user_message_for_prompt,
     )
 
     if include_runtime_payload:

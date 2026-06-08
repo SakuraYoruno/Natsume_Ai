@@ -101,6 +101,30 @@ def test_episodic_store_uses_chroma_collection_dim_for_embeddings(tmp_path, monk
     assert captured["dim"] == 1024
 
 
+def test_episodic_recall_reads_persistent_chroma_rows_without_process_records(tmp_path) -> None:
+    ledger = SQLiteLedger(db_path=str(tmp_path / "audit.sqlite3"), check_same_thread=False)
+    chroma = FakeChromaClient(collection_profiles={"episodic": 3}, default_collection="episodic")
+    store = EpisodicStore(
+        ledger=ledger,
+        chroma_client=chroma,
+        embedding_fn=lambda _text: ([1.0, 0.0, 0.0], "test-embed"),
+    )
+    chroma.upsert(
+        memory_id="audit::mem_persisted",
+        text="用户低能量时希望先得到一个小步骤，不要连续追问。",
+        embedding=[1.0, 0.0, 0.0],
+        metadata={"memory_layer": "long_term", "ts_ms": 1234, "emotion_tag": "CALM"},
+    )
+
+    rows = store.recall(query_text="低能量时怎么回应用户", top_k=3)
+
+    assert len(store._records) == 0
+    assert len(rows) == 1
+    assert rows[0]["memory_id"] == "audit::mem_persisted"
+    assert "一个小步骤" in rows[0]["text"]
+    assert rows[0]["metadata"]["memory_layer"] == "long_term"
+
+
 
 def test_episodic_store_defaults_to_runtime_chroma_client(monkeypatch) -> None:
     sentinel = object()

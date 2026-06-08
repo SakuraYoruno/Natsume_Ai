@@ -55,17 +55,17 @@ _LIFE_BODY_WARM_WINDOW_MINUTES = _env_int(
 )
 _LIFE_BODY_WARM_INTERVAL_MS = _env_int(
     "HOST_OBS_LIFE_BODY_WARM_INTERVAL_MS",
-    7500,
+    30000,
     minimum=1500,
 )
 _LIFE_BODY_WARM_STALE_MS = _env_int(
     "HOST_OBS_LIFE_BODY_WARM_STALE_MS",
-    max(_LIFE_BODY_WARM_INTERVAL_MS * 3, 20000),
+    max(_LIFE_BODY_WARM_INTERVAL_MS * 3, 90000),
     minimum=5000,
 )
 _LIFE_BODY_STALE_FALLBACK_MS = _env_int(
     "HOST_OBS_LIFE_BODY_STALE_FALLBACK_MS",
-    max(_LIFE_BODY_WARM_STALE_MS * 3, 60000),
+    max(_LIFE_BODY_WARM_STALE_MS * 3, 270000),
     minimum=_LIFE_BODY_WARM_STALE_MS,
 )
 _LIFE_BODY_RECENT_SESSIONS_LIMIT = _env_int(
@@ -192,14 +192,12 @@ MODE_META = {
     "locked": {"label": "锁定"},
 }
 STAGE_LABELS = {
-    "STRANGER": "陌生",
-    "ACQUAINTANCE": "初识",
-    "FRIEND": "朋友",
+    "FRIEND": "关系好的兄妹",
     "CLOSE": "亲近",
-    "CLOSE_FRIEND": "挚友",
+    "CLOSE_FRIEND": "亲近兄妹",
     "COMPANION": "陪伴",
-    "CONFIDANT": "知己",
-    "INTIMATE": "亲密",
+    "CONFIDANT": "亲密恋人",
+    "INTIMATE": "亲密恋人",
     "SOULMATE": "灵魂伴侣",
 }
 REPLY_POSTURE_LABELS = {
@@ -2029,6 +2027,29 @@ def _refresh_life_body_warm_once() -> dict[str, Any] | None:
     if not _LIFE_BODY_WARM_ENABLED:
         return None
     started_at = _now_ms()
+    release_slot = None
+    try:
+        from host_brain.app.obs_resource_guard import (
+            release_obs_warm_slot,
+            should_defer_obs_warm_refresh,
+            try_acquire_obs_warm_slot,
+        )
+
+        deferred, reason = should_defer_obs_warm_refresh(task_name="life_body")
+        if deferred:
+            with _life_body_warm_lock:
+                _life_body_warm_state["last_duration_ms"] = 0
+                _life_body_warm_state["last_error"] = f"deferred:{reason}"
+            return None
+        acquired, reason = try_acquire_obs_warm_slot(task_name="life_body")
+        if not acquired:
+            with _life_body_warm_lock:
+                _life_body_warm_state["last_duration_ms"] = 0
+                _life_body_warm_state["last_error"] = f"deferred:{reason}"
+            return None
+        release_slot = release_obs_warm_slot
+    except Exception:
+        release_slot = None
     try:
         payload = _build_life_body_payload(_LIFE_BODY_WARM_WINDOW_MINUTES)
     except Exception as exc:
@@ -2037,6 +2058,9 @@ def _refresh_life_body_warm_once() -> dict[str, Any] | None:
             _life_body_warm_state["last_error"] = str(exc)
         logger.warning("life-body warm refresh degraded: %s", exc)
         return None
+    finally:
+        if release_slot is not None:
+            release_slot()
     with _life_body_warm_lock:
         _life_body_warm_state["value"] = _clone_payload(payload)
         _life_body_warm_state["updated_ts_ms"] = _now_ms()
@@ -2221,4 +2245,3 @@ def get_pathologies(
     if focused_item:
         focused_organ = next((item for item in organ_systems if _as_text(item.get("id")) == _as_text(focused_item.get("organId"))), None)
     return PathologiesResponse(window_minutes=window_minutes, timestamp=_now_ms(), items=filtered, total=len(items), filtered_total=len(filtered), primaryPathology=_as_dict(model.get("primaryPathology")) or None, organSystems=organ_systems, focusedItem=focused_item, focusedOrgan=focused_organ, relatedEvents=related_events, filters={"organ": normalized_organ or None, "severity": normalized_severity or None, "pathology_id": normalized_pathology_id or None}, meta={"aggregateSource": "obs-sidecar-pathologies", "coverage": "derived pathology projection from runtime alerts, gateway hotspots, and forge runtime quality", "lifeBodyMeta": _as_dict(payload.get("meta"))})
-

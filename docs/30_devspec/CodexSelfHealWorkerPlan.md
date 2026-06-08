@@ -1,8 +1,24 @@
+受众：CODEX
+标题：Codex Self-Heal and Self-Evolve Plan
+
 # Codex Self-Heal and Self-Evolve Plan
 
 > SUPERSEDED, 2026-04-24: historical design only. Runtime code has hard-cut to Codex Runtime v2 (`WorkOrder -> CodexRuntimeExecutor -> Studio/Plane -> ResultContract`) with `codex_self_heal` and `/internal/codex/immune/*`; legacy `codex_codegen`, `execute_codex_codegen`, `HOST_CODEX_SELF_HEAL_*`, and `/internal/codex/self_heal/*` paths are intentionally removed.
 
 ## Overview
+
+## 0. 当前链路入口映射（2026-05-30）
+
+本文件为历史设计稿（2026-04-24 标记为 `SUPERSEDED`），其执行入口与运行语义不再代表主链真相。当前代码链路应按以下口径读取：
+
+- 统一入口：`POST /v1/chat` -> `fastapi_app.py` -> `chat_handler` -> `thalamus_agent.classify_and_compile_intent_draft()` -> `Governor.evaluate_intent()` -> `executive_runtime`。
+- 审计事实入口：`intent_log`、`governor_log`、`skill_exec_log`、`sqlite_ledger`。
+- 当前 Codex 自愈链路与运行态状态见：
+  - `docs/30_devspec/DevSpec.md`
+  - `docs/30_devspec/DevTasks.md`
+  - `docs/50_project/arch/CURRENT_CODE_ARCHITECTURE.md`
+
+本文中若有与现网冲突的实现假设，请以对应事实文档为准，不按本文件进行执行。
 
 This document defines how `codex_codegen` evolves from a read-only answer generator into a durable worker that helps Natsume recover from failures and implement controlled improvements.
 

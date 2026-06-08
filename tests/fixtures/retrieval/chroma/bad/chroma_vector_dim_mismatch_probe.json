@@ -1,14 +1,14 @@
-{
-  "probe": {
-    "reachable": true,
-    "collections": {
-      "episodic": {
-        "vector_dim": 16
-      },
-      "world": {
-        "vector_dim": 48
-      }
-    }
-  },
-  "expected_reason_code": "CHROMA_VECTOR_DIM_MISMATCH"
+﻿{
+    "probe":  {
+                  "reachable":  true,
+                  "collections":  {
+                                      "episodic":  {
+                                                       "vector_dim":  16
+                                                   },
+                                      "world":  {
+                                                    "vector_dim":  48
+                                                }
+                                  }
+              },
+    "expected_reason_code":  "CHROMA_VECTOR_DIM_MISMATCH"
 }

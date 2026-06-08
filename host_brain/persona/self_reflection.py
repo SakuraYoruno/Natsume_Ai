@@ -12,7 +12,7 @@
   - 概率注入：通过对话轮次计数器控制注入频率
   - 事件驱动：SAD/LOVING/EXCITED 等强情感标签出现时，提前触发自省
   - 触发原因：pulse 中注入 trigger_reason，让自省更有意义
-  - 一致性：Bond=ACQUAINTANCE 时不会出现"很亲近"等矛盾描述
+  - 一致性：自省内容不会和当前 Bond 阶段矛盾
 """
 
 from __future__ import annotations
@@ -483,7 +483,6 @@ class SelfReflection:
         """校验自省内容与 Bond 阶段的一致性。
 
         规则：
-        - Bond=STRANGER/ACQUAINTANCE 时，不能出现"很亲近"的描述
         - Bond=SOULMATE 时，不能出现"有些疏远"（除非 trend 确实在下降）
         """
         result = dict(snapshot)
@@ -492,11 +491,6 @@ class SelfReflection:
             stage = str(getattr(bond_state, "current_stage", "") or "").strip().upper()
 
         bond_perception = str(result.get("bond_growth_perception") or "")
-
-        # 浅层关系不应说"变亲近"
-        _SHALLOW_STAGES = {"STRANGER", "ACQUAINTANCE"}
-        if stage in _SHALLOW_STAGES and bond_perception == BOND_GROWTH_CLOSER:
-            result["bond_growth_perception"] = BOND_GROWTH_STABLE
 
         return result
 

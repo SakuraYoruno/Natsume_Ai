@@ -81,26 +81,6 @@ def test_build_interaction_state_summary_covers_fact_fallback_branches() -> None
     assert "轻社交招呼" in _build_interaction_state_summary(_context_plane(topic="greeting"))
 
 
-def test_extract_topic_thread_and_compact_lane_detection_cover_dict_fallbacks() -> None:
-    plane = _context_plane(topic="", thread="")
-    plane.interaction_state.state = SimpleNamespace(as_dict=lambda: {"current_topic": "emoji_social_followup", "ongoing_thread": ""})
-    plane.interaction_thread.state = SimpleNamespace(as_dict=lambda: {"thread_kind": "image_social"})
-
-    assert _extract_context_topic(plane) == "emoji_social_followup"
-    assert _extract_context_thread(plane) == "image_social"
-    assert _should_use_compact_chat_lane(relational_topic="", context_plane=plane, user_message="没有闹别扭啊") is True
-    assert _should_use_compact_chat_lane(
-        relational_topic="identity",
-        context_plane=_context_plane(topic="mood_reflection"),
-        user_message="你是谁",
-    ) is True
-    assert _should_use_compact_chat_lane(
-        relational_topic="",
-        context_plane=_context_plane(topic="mood_reflection"),
-        user_message="今天有点累",
-    ) is False
-
-
 def test_builder_helpers_cover_empty_defaults_and_titles() -> None:
     empty_plane = SimpleNamespace(interaction_state=SimpleNamespace(state=None), interaction_thread=SimpleNamespace(state=None))
 

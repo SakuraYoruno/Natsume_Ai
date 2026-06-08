@@ -1,0 +1,11 @@
+D:\Natsume_Ai\integrations\mateengine\NatsumeMateEngineBridge\obj\Release\NatsumeMateEngineBridge.csproj.AssemblyReference.cache
+D:\Natsume_Ai\integrations\mateengine\NatsumeMateEngineBridge\obj\Release\NatsumeMateEngineBridge.GeneratedMSBuildEditorConfig.editorconfig
+D:\Natsume_Ai\integrations\mateengine\NatsumeMateEngineBridge\obj\Release\NatsumeMateEngineBridge.AssemblyInfoInputs.cache
+D:\Natsume_Ai\integrations\mateengine\NatsumeMateEngineBridge\obj\Release\NatsumeMateEngineBridge.AssemblyInfo.cs
+D:\Natsume_Ai\integrations\mateengine\NatsumeMateEngineBridge\obj\Release\NatsumeMateEngineBridge.csproj.CoreCompileInputs.cache
+D:\Natsume_Ai\integrations\mateengine\NatsumeMateEngineBridge\obj\Release\NatsumeMateEngineBridge.sourcelink.json
+D:\Natsume_Ai\integrations\mateengine\NatsumeMateEngineBridge\bin\Release\NatsumeMateEngineBridge.deps.json
+D:\Natsume_Ai\integrations\mateengine\NatsumeMateEngineBridge\bin\Release\NatsumeMateEngineBridge.dll
+D:\Natsume_Ai\integrations\mateengine\NatsumeMateEngineBridge\bin\Release\NatsumeMateEngineBridge.pdb
+D:\Natsume_Ai\integrations\mateengine\NatsumeMateEngineBridge\obj\Release\NatsumeMateEngineBridge.dll
+D:\Natsume_Ai\integrations\mateengine\NatsumeMateEngineBridge\obj\Release\NatsumeMateEngineBridge.pdb

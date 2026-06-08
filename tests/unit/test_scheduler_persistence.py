@@ -231,6 +231,32 @@ class TestPersistTasksDisabled:
         assert scheduler._registry.count() == 0
 
 
+class TestSchedulerEventHydration:
+    def test_last_run_hydration_ignores_incomplete_and_skipped_events(self):
+        ledger = _make_in_memory_ledger()
+        base = {
+            "task_id": "daily_memory",
+            "intent_id": None,
+            "reason_code": None,
+            "mode_at_trigger": "normal",
+            "error_detail": None,
+        }
+
+        ledger.log_scheduler_event({**base, "event_id": "evt-deferred", "trigger_ts": 2000, "status": "DEFERRED"})
+        ledger.log_scheduler_event({**base, "event_id": "evt-skipped", "trigger_ts": 3000, "status": "SKIPPED"})
+        ledger.log_scheduler_event({**base, "event_id": "evt-rejected", "trigger_ts": 4000, "status": "REJECTED"})
+        ledger.log_scheduler_event({**base, "event_id": "evt-retrying", "trigger_ts": 4500, "status": "RETRYING"})
+        ledger.log_scheduler_event({**base, "event_id": "evt-error", "trigger_ts": 4600, "status": "ERROR"})
+        ledger.log_scheduler_event({**base, "event_id": "evt-failed", "trigger_ts": 4700, "status": "FAILED"})
+
+        assert ledger.load_latest_scheduler_event_trigger_ts(["daily_memory"]) == {}
+
+        ledger.log_scheduler_event({**base, "event_id": "evt-ok", "trigger_ts": 1500, "status": "OK"})
+        ledger.log_scheduler_event({**base, "event_id": "evt-later-deferred", "trigger_ts": 5000, "status": "DEFERRED"})
+
+        assert ledger.load_latest_scheduler_event_trigger_ts(["daily_memory"]) == {"daily_memory": 1500}
+
+
 # ---------------------------------------------------------------------------
 # T-SCHED-PERSIST-05  DB 加载失败时 start() 不崩溃（降级为空注册表）
 # ---------------------------------------------------------------------------

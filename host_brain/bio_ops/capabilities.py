@@ -1750,7 +1750,7 @@ def build_regret_signal(inputs: dict[str, Any]) -> dict[str, Any]:
     if not severity:
         severity = 0.62 if any(token in lower for token in ("failed", "test", "timeout")) or any(token in event for token in ("跑偏", "越权", "出戏", "失败")) else 0.35
     if any(token in event for token in ("客服", "出戏", "不像你")):
-        target_policy = "ChatAgent.render_style"
+        target_policy = "SurfaceReply.render_style"
         lesson = "avoid product-announcement or customer-service tone in intimate technical work"
     elif any(token in lower for token in ("workorder", "codex", "worker")) or "越权" in event:
         target_policy = "CodexRuntime.work_order_gate"
@@ -2558,7 +2558,7 @@ def _capability_self_awareness(task: BioOpsTask) -> BioOpsResult:
         name="CapabilitySelfAwareness",
         status="PROPOSED" if analysis["overclaims"] else "AUDITED",
         issue=str(analysis["issue"]),
-        proposal="Expose current can/cannot capability boundaries to ChatAgent and PlanningAgent before making capability claims.",
+        proposal="Expose current can/cannot capability boundaries to SurfaceReply and PlanningAgent before making capability claims.",
         owner_organ="prefrontal_agent",
         output_kind="capability_self_image",
         extra=analysis,
@@ -2574,8 +2574,8 @@ def _shadow_persona_test(task: BioOpsTask) -> BioOpsResult:
         name="ShadowPersonaTest",
         status="PROPOSED" if not analysis["pass"] else "AUDITED",
         issue=str(analysis["issue"]),
-        proposal="Run shadow persona regression cases before adopting ChatAgent, Soul, or persona prompt changes.",
-        owner_organ="chat_agent",
+        proposal="Run shadow persona regression cases before adopting SurfaceReply, Soul, or persona prompt changes.",
+        owner_organ="surface_reply",
         output_kind="persona_regression_report",
         extra=analysis,
     )
@@ -3263,7 +3263,7 @@ def _channel_soul(task: BioOpsTask) -> BioOpsResult:
         status="PROPOSED" if analysis["violations"] else "AUDITED",
         issue=str(analysis["issue"]),
         proposal="Select channel-specific expression while preserving the same persona core and truthfulness boundary.",
-        owner_organ="chat_agent",
+        owner_organ="surface_reply",
         output_kind="channel_soul_report",
         extra=analysis,
     )
@@ -3327,7 +3327,7 @@ def _social_mask_system(task: BioOpsTask) -> BioOpsResult:
         status="PROPOSED" if analysis["violations"] else "AUDITED",
         issue=str(analysis["issue"]),
         proposal="Choose a platform and scene mask while keeping the same persona core, consent boundary, and evidence discipline.",
-        owner_organ="chat_agent",
+        owner_organ="surface_reply",
         output_kind="social_mask_report",
         extra=analysis,
     )
@@ -3359,7 +3359,7 @@ def _gentle_degradation(task: BioOpsTask) -> BioOpsResult:
         status="PROPOSED",
         issue=str(analysis["issue"]),
         proposal="Turn technical faults into warm, truthful fallback behavior with explicit allowed channels and retry policy.",
-        owner_organ="chat_agent",
+        owner_organ="surface_reply",
         output_kind="gentle_degradation_report",
         extra=analysis,
     )
@@ -3519,7 +3519,7 @@ def _narrative_debugger(task: BioOpsTask) -> BioOpsResult:
         status="PROPOSED" if analysis["issue"] == "narrative_bug_detected" else "AUDITED",
         issue=str(analysis["issue"]),
         proposal="Find technically correct but experientially unnatural behavior and route it through a relationship-aware render fix.",
-        owner_organ="chat_agent",
+        owner_organ="surface_reply",
         output_kind="narrative_debug_report",
         extra=analysis,
     )
@@ -3577,7 +3577,7 @@ def _generic_handler(*, name: str, owner_organ: str, output_kind: str, issue: st
 CAPABILITY_SPECS: tuple[BioOpsCapabilitySpec, ...] = (
     BioOpsCapabilitySpec("reflex_arc_compiler", "reflex_attention", "thalamus_agent", "reflex_rule", _reflex_arc_compiler),
     BioOpsCapabilitySpec("attention_budget_governor", "reflex_attention", "prefrontal_agent", "route_simplifier", _attention_budget_governor),
-    BioOpsCapabilitySpec("response_breathing_policy", "reflex_attention", "chat_agent", "breathing_policy", _generic_handler(name="ResponseBreathingPolicy", owner_organ="chat_agent", output_kind="breathing_policy", issue="reply_density_needs_state_sensitive_policy", proposal="Adjust response density by energy, stress, intimacy, and task complexity.")),
+    BioOpsCapabilitySpec("response_breathing_policy", "reflex_attention", "surface_reply", "breathing_policy", _generic_handler(name="ResponseBreathingPolicy", owner_organ="surface_reply", output_kind="breathing_policy", issue="reply_density_needs_state_sensitive_policy", proposal="Adjust response density by energy, stress, intimacy, and task complexity.")),
     BioOpsCapabilitySpec("active_silence_system", "reflex_attention", "default_mode_agent", "silence_policy", _active_silence_system),
     BioOpsCapabilitySpec("subjective_time", "natural_interaction", "default_mode_agent", "subjective_time_policy", _subjective_time),
     BioOpsCapabilitySpec("mood_inertia", "natural_interaction", "limbic_agent", "mood_inertia_policy", _mood_inertia),
@@ -3601,13 +3601,13 @@ CAPABILITY_SPECS: tuple[BioOpsCapabilitySpec, ...] = (
     BioOpsCapabilitySpec("regret_signal", "affect_learning", "prefrontal_agent", "regret_signal_report", _regret_signal),
     BioOpsCapabilitySpec("joy_reinforcement", "affect_learning", "social_brain_agent", "joy_reinforcement_report", _joy_reinforcement),
     BioOpsCapabilitySpec("failure_quarantine", "affect_learning", "immune_agent", "failure_quarantine_report", _failure_quarantine),
-    BioOpsCapabilitySpec("channel_soul", "presence_channel", "chat_agent", "channel_soul_report", _channel_soul),
+    BioOpsCapabilitySpec("channel_soul", "presence_channel", "surface_reply", "channel_soul_report", _channel_soul),
     BioOpsCapabilitySpec("long_task_companion_mode", "presence_channel", "default_mode_agent", "long_task_companion_report", _long_task_companion_mode),
     BioOpsCapabilitySpec("attention_topography", "presence_channel", "prefrontal_agent", "attention_topography_report", _attention_topography),
     BioOpsCapabilitySpec("quiet_presence", "presence_channel", "default_mode_agent", "quiet_presence_report", _quiet_presence),
-    BioOpsCapabilitySpec("social_mask_system", "presence_channel", "chat_agent", "social_mask_report", _social_mask_system),
+    BioOpsCapabilitySpec("social_mask_system", "presence_channel", "surface_reply", "social_mask_report", _social_mask_system),
     BioOpsCapabilitySpec("ritual_system", "presence_channel", "default_mode_agent", "ritual_report", _ritual_system),
-    BioOpsCapabilitySpec("gentle_degradation", "presence_channel", "chat_agent", "gentle_degradation_report", _gentle_degradation),
+    BioOpsCapabilitySpec("gentle_degradation", "presence_channel", "surface_reply", "gentle_degradation_report", _gentle_degradation),
     BioOpsCapabilitySpec("trust_gradient", "drive_trust", "prefrontal_agent", "trust_gradient_report", _trust_gradient),
     BioOpsCapabilitySpec("trust_thermostat", "drive_trust", "prefrontal_agent", "trust_thermostat_report", _trust_thermostat),
     BioOpsCapabilitySpec("intention_metabolism", "drive_trust", "prefrontal_agent", "intention_metabolism_report", _intention_metabolism),
@@ -3617,7 +3617,7 @@ CAPABILITY_SPECS: tuple[BioOpsCapabilitySpec, ...] = (
     BioOpsCapabilitySpec("user_mirror_model", "adaptive_repair", "social_brain_agent", "user_mirror_report", _user_mirror_model),
     BioOpsCapabilitySpec("body_plasticity", "adaptive_repair", "somatic_agent", "body_plasticity_report", _body_plasticity),
     BioOpsCapabilitySpec("social_recovery", "adaptive_repair", "social_brain_agent", "social_recovery_report", _social_recovery),
-    BioOpsCapabilitySpec("narrative_debugger", "adaptive_repair", "chat_agent", "narrative_debug_report", _narrative_debugger),
+    BioOpsCapabilitySpec("narrative_debugger", "adaptive_repair", "surface_reply", "narrative_debug_report", _narrative_debugger),
     BioOpsCapabilitySpec("latent_preference_miner", "adaptive_repair", "social_brain_agent", "preference_candidate", _latent_preference_miner),
     BioOpsCapabilitySpec("self_repair_story", "adaptive_repair", "immune_agent", "repair_story_candidate", _self_repair_story),
     BioOpsCapabilitySpec("persona_drift_microscope", "safety_truth", "prefrontal_agent", "persona_drift_report", _generic_handler(name="PersonaDriftMicroscope", owner_organ="prefrontal_agent", output_kind="persona_drift_report", issue="persona_style_drift_evidence", proposal="Produce evidence-backed persona drift correction proposals.")),
@@ -3646,11 +3646,11 @@ CAPABILITY_SPECS: tuple[BioOpsCapabilitySpec, ...] = (
     BioOpsCapabilitySpec("personal_mythology", "inner_life", "hippocampus_agent", "personal_mythology_report", _personal_mythology),
     BioOpsCapabilitySpec("body_map_system", "state_body", "somatic_agent", "body_map_report", _generic_handler(name="BodyMapSystem", owner_organ="somatic_agent", output_kind="body_map_report", issue="component_to_body_part_mapping", proposal="Map Host, Edge, voice, vision, channels, and hands into body-part health.")),
     BioOpsCapabilitySpec("capability_self_awareness", "state_body", "prefrontal_agent", "capability_self_image", _capability_self_awareness),
-    BioOpsCapabilitySpec("aesthetic_consistency_auditor", "state_body", "chat_agent", "aesthetic_report", _generic_handler(name="AestheticConsistencyAuditor", owner_organ="chat_agent", output_kind="aesthetic_report", issue="style_domain_consistency", proposal="Audit UI copy, docs, voice prompts, and replies for unified Natsume tone.")),
+    BioOpsCapabilitySpec("aesthetic_consistency_auditor", "state_body", "surface_reply", "aesthetic_report", _generic_handler(name="AestheticConsistencyAuditor", owner_organ="surface_reply", output_kind="aesthetic_report", issue="style_domain_consistency", proposal="Audit UI copy, docs, voice prompts, and replies for unified Natsume tone.")),
     BioOpsCapabilitySpec("self_explanation_layer", "state_body", "prefrontal_agent", "behavior_explanation", _generic_handler(name="SelfExplanationLayer", owner_organ="prefrontal_agent", output_kind="behavior_explanation", issue="user_visible_explanation_needed", proposal="Explain behavior from trace summaries without exposing hidden reasoning.")),
     BioOpsCapabilitySpec("embodiment_director", "state_body", "somatic_agent", "embodiment_report", _generic_handler(name="EmbodimentDirector", owner_organ="somatic_agent", output_kind="embodiment_report", issue="voice_expression_alignment", proposal="Align text, TTS, VTS, and channel status through body-map compensation.")),
     BioOpsCapabilitySpec("promise_ledger", "inner_mechanisms", "prefrontal_agent", "promise_candidate", _promise_ledger),
-    BioOpsCapabilitySpec("shadow_persona_test", "inner_mechanisms", "chat_agent", "persona_regression_report", _shadow_persona_test),
+    BioOpsCapabilitySpec("shadow_persona_test", "inner_mechanisms", "surface_reply", "persona_regression_report", _shadow_persona_test),
     BioOpsCapabilitySpec("idea_fermentation_pool", "growth_closure", "default_mode_agent", "idea_pool_recommendation", _idea_fermentation_pool),
     BioOpsCapabilitySpec("inner_outer_world_boundary", "inner_mechanisms", "default_mode_agent", "inner_outer_boundary_audit", _inner_outer_world_boundary),
     BioOpsCapabilitySpec("existential_load", "growth_closure", "prefrontal_agent", "existential_load_report", _existential_load),

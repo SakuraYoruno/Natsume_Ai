@@ -8,7 +8,7 @@ const DOMAIN_STYLES = {
 }
 
 export function DomainCard({ icon: Icon, title, desc, status, actionTo, actionLabel }) {
-  const label = status === 'wired' ? '已接入' : status === 'degraded' ? '降级' : '待接入'
+  const label = status === 'wired' ? '已接入' : status === 'degraded' ? '降级' : '待连通'
 
   return (
     <div className="card card-hover p-4">

@@ -1,13 +1,15 @@
-{
-  "narrative": "今天和 Master 进行了一次关于系统架构的深入讨论，探讨了 Host Brain 与 Edge Client 的协作边界。",
-  "intent_draft": {},
-  "meta": {
-    "draft_only": false,
-    "date": "2026-03-03"
-  },
-  "drift_suggestion": {
-    "doc_id": "wc-001-system-terms",
-    "suggested_body": "Host Brain 是夏目的核心认知节点，负责意图解析、记忆管理和 Canon 治理。Edge Client 是夏目的感知与表达节点，负责 ASR/TTS/VTS 驱动及 RPC 上报。两者通过 RPC 协议协作，Host Brain 为单写者，Edge Client 为只读引用方。协作边界由 Canon 治理层统一管理。",
-    "reason": "本次对话中 Master 补充了协作边界的描述，建议纳入世界观设定。"
-  }
+﻿{
+    "narrative":  "今天和 Master 进行了一次关于系统架构的深入讨论，探讨了 Host Brain 与 Edge Client 的协作边界。",
+    "intent_draft":  {
+
+                     },
+    "meta":  {
+                 "draft_only":  false,
+                 "date":  "2026-03-03"
+             },
+    "drift_suggestion":  {
+                             "doc_id":  "wc-001-system-terms",
+                             "suggested_body":  "Host Brain 是夏目的核心认知节点，负责意图解析、记忆管理和 Canon 治理。Edge Client 是夏目的感知与表达节点，负责 ASR/TTS/VTS 驱动及 RPC 上报。两者通过 RPC 协议协作，Host Brain 为单写者，Edge Client 为只读引用方。协作边界由 Canon 治理层统一管理。",
+                             "reason":  "本次对话中 Master 补充了协作边界的描述，建议纳入世界观设定。"
+                         }
 }

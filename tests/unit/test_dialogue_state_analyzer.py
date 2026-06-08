@@ -46,7 +46,7 @@ def test_conversation_interpretation_repeated_boundary_probe_becomes_probe() -> 
     interpretation = interpret_conversation(
         recent_turns=[
             {"role": "user", "content": "你为什么要帮我，我们很熟吗"},
-            {"role": "assistant", "content": "不熟。只是看见了，也没打算装作没看见。"},
+            {"role": "assistant", "content": "别装外人啦，我会管。"},
         ],
         user_message="你为什么要帮我，我们很熟吗",
         topic_ledger=TopicLedgerBlock(),
@@ -57,6 +57,20 @@ def test_conversation_interpretation_repeated_boundary_probe_becomes_probe() -> 
     assert interpretation.user_stance == "challenging"
     assert interpretation.interaction_move == "probe"
     assert interpretation.recent_boundary_answered is True
+
+
+def test_conversation_interpretation_does_not_count_distance_boundary_as_answered() -> None:
+    interpretation = interpret_conversation(
+        recent_turns=[
+            {"role": "user", "content": "你为什么要帮我，我们很熟吗"},
+            {"role": "assistant", "content": "不熟。只是看见了，也没打算装作没看见。"},
+        ],
+        user_message="你为什么要帮我，我们很熟吗",
+        topic_ledger=TopicLedgerBlock(),
+    )
+
+    assert interpretation.last_assistant_act == "boundary_distance_answer"
+    assert interpretation.recent_boundary_answered is False
 
 
 def test_conversation_interpretation_repeated_help_probe_is_anxiety_check() -> None:
@@ -155,6 +169,39 @@ def test_conversation_interpretation_image_only_without_question_is_social_reply
     assert interpretation.literal_topic == "emoji_social_reply"
     assert interpretation.interaction_move == "playful_ping"
     assert interpretation.user_stance == "playful"
+
+
+def test_conversation_interpretation_plain_photo_without_question_is_visual_share() -> None:
+    interpretation = interpret_conversation(
+        recent_turns=[],
+        user_message="[图片消息]",
+        topic_ledger=TopicLedgerBlock(),
+        multimodal_observations={
+            "primary_modality": "image",
+            "observed_types": ["image"],
+            "core_observation": "一只白色马克杯放在桌上。",
+        },
+    )
+
+    assert interpretation.literal_topic == "attachment_only_no_question"
+    assert interpretation.interaction_move == "light_ack"
+    assert interpretation.user_stance == "probing"
+
+
+def test_conversation_interpretation_look_at_photo_without_question_uses_content_path() -> None:
+    interpretation = interpret_conversation(
+        recent_turns=[],
+        user_message="你看这张照片",
+        topic_ledger=TopicLedgerBlock(),
+        multimodal_observations={
+            "primary_modality": "image",
+            "observed_types": ["image"],
+            "core_observation": "一只白色马克杯放在桌上。",
+        },
+    )
+
+    assert interpretation.literal_topic == "literal_description"
+    assert interpretation.interaction_move == "probe"
 
 
 def test_conversation_interpretation_screenshot_only_stays_attachment_ack() -> None:

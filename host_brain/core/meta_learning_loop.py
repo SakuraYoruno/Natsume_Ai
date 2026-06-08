@@ -194,32 +194,6 @@ class MetaLearningLoop:
         adjustments: list[ParameterAdjustment] = []
 
         for m in modules:
-            # QueryPlanner: 跳过率太低→放宽 greeting 判定
-            if m.module_name == "query_planner":
-                skip_rate = m.custom_metrics.get("skip_rate", 0)
-                if m.total_invocations > 50 and skip_rate < 0.05:
-                    adjustments.append(ParameterAdjustment(
-                        module_name=m.module_name,
-                        parameter_name="greeting_pattern_strictness",
-                        current_value=1.0,
-                        suggested_value=0.8,
-                        reason=f"跳过率仅{skip_rate:.1%}，可放宽寒暄判定",
-                        confidence=0.6,
-                    ))
-
-            # SemanticDedup: 去重率过高→降低阈值
-            if m.module_name == "semantic_dedup":
-                dedup_rate = m.custom_metrics.get("dedup_rate", 0)
-                if m.total_invocations > 30 and dedup_rate > 0.5:
-                    adjustments.append(ParameterAdjustment(
-                        module_name=m.module_name,
-                        parameter_name="similarity_threshold",
-                        current_value=0.65,
-                        suggested_value=0.75,
-                        reason=f"去重率{dedup_rate:.1%}过高，可能误去了有用信息",
-                        confidence=0.7,
-                    ))
-
             # MemoryWorthEvaluator: 跳过率过高→降低阈值
             if m.module_name == "memory_worth":
                 skip_rate = m.custom_metrics.get("skip_rate", 0)

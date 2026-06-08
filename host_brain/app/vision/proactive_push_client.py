@@ -6,13 +6,38 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import os
+import threading
 from typing import Any
 
-from host_brain.app.vision.edge_rpc_client import EdgeRpcClient
 from host_brain.core.ids import new_request_id
 
 _logger = logging.getLogger("Natsume.proactive_push_client")
+
+
+def _run_edge_push_sync(call_factory: Any) -> Any:
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(call_factory())
+
+    result_box: dict[str, Any] = {}
+    error_box: dict[str, BaseException] = {}
+
+    def _runner() -> None:
+        try:
+            result_box["result"] = asyncio.run(call_factory())
+        except BaseException as exc:  # pragma: no cover - defensive thread bridge
+            error_box["error"] = exc
+
+    thread = threading.Thread(target=_runner, name="proactive-edge-rpc-push", daemon=True)
+    thread.start()
+    thread.join()
+    if "error" in error_box:
+        raise error_box["error"]
+    return result_box.get("result")
 
 
 class ProactivePushClient:
@@ -33,12 +58,6 @@ class ProactivePushClient:
         self._edge_base_url = edge_base_url.rstrip("/")
         self._hmac_key = hmac_key
         self._timeout_sec = timeout_sec
-        # 复用 EdgeRpcClient 的信封构建逻辑
-        self._rpc = EdgeRpcClient(
-            edge_base_url=edge_base_url,
-            hmac_key=hmac_key,
-            timeout_sec=timeout_sec,
-        )
 
     def push(self, message: dict[str, Any]) -> dict[str, Any]:
         """同步推送主动对话消息到 Edge。
@@ -52,23 +71,43 @@ class ProactivePushClient:
                   推送失败时返回 {"success": False, "error": str}。
         """
         try:
-            import httpx
+            from host_brain.channels.edge_rpc_client import _post_to_edge  # noqa: PLC0415
+
             request_id = new_request_id()
-            envelope = self._rpc._build_envelope(
-                request_id=request_id,
-                payload=message,
-            )
-            resp = httpx.post(
-                f"{self._edge_base_url}/v1/edge/proactive_push",
-                json=envelope,
-                timeout=self._timeout_sec,
-            )
-            resp.raise_for_status()
-            data = resp.json()
-            _logger.info(
-                "ProactivePushClient: 推送成功 event_id=%s status=%s",
+
+            async def _call() -> Any:
+                old_base = os.environ.get("HOST_EDGE_RPC_BASE_URL")
+                old_key = os.environ.get("HOST_EDGE_RPC_SHARED_KEY")
+                if self._edge_base_url and not old_base:
+                    os.environ["HOST_EDGE_RPC_BASE_URL"] = self._edge_base_url
+                if self._hmac_key and not old_key:
+                    os.environ["HOST_EDGE_RPC_SHARED_KEY"] = self._hmac_key
+                try:
+                    return await _post_to_edge(
+                        path="/v1/edge/proactive_push",
+                        payload=message,
+                        request_id=request_id,
+                        request_timeout_ms=max(1000, int(float(self._timeout_sec) * 1000)),
+                    )
+                finally:
+                    if old_base is None:
+                        os.environ.pop("HOST_EDGE_RPC_BASE_URL", None)
+                    else:
+                        os.environ["HOST_EDGE_RPC_BASE_URL"] = old_base
+                    if old_key is None:
+                        os.environ.pop("HOST_EDGE_RPC_SHARED_KEY", None)
+                    else:
+                        os.environ["HOST_EDGE_RPC_SHARED_KEY"] = old_key
+
+            result = _run_edge_push_sync(_call)
+            data = result.as_dict() if hasattr(result, "as_dict") else dict(result or {})
+            log_fn = _logger.info if bool(data.get("success")) else _logger.warning
+            log_fn(
+                "ProactivePushClient: push finished event_id=%s success=%s status=%s reason=%s",
                 message.get("event_id", ""),
+                data.get("success"),
                 data.get("status", ""),
+                data.get("reason_code"),
             )
             return dict(data)
         except Exception as exc:
@@ -78,14 +117,20 @@ class ProactivePushClient:
 
 def build_proactive_push_client() -> ProactivePushClient:
     """从环境变量构建 ProactivePushClient（供 http_hooks.py 调用）。"""
-    import os
     host = str(os.environ.get("EDGE_RPC_HOST") or "127.0.0.1").strip()
     port_raw = str(os.environ.get("EDGE_RPC_PORT") or "17800").strip()
     try:
         port = int(port_raw)
     except ValueError:
         port = 17800
-    hmac_key = str(os.environ.get("EDGE_HMAC_SHARED_KEY") or "").strip() or None
+    hmac_key = (
+        str(
+            os.environ.get("HOST_EDGE_RPC_SHARED_KEY")
+            or os.environ.get("EDGE_HMAC_SHARED_KEY")
+            or ""
+        ).strip()
+        or None
+    )
     return ProactivePushClient(
         edge_base_url=f"http://{host}:{port}",
         hmac_key=hmac_key,

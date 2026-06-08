@@ -3,14 +3,18 @@ neo4j>=6.1.0,<7
 chromadb>=1.4.0,<2
 langchain>=1.2.0,<2
 langchain-core>=1.0.0,<2
+langchain-google-genai>=4.2.0,<5
 langchain-openai>=1.1.0,<2
 langgraph>=1.0.0,<2
+transformers>=4.51.0,<5
 fastapi>=0.104.0,<1
 pydantic>=2.0.0,<3
 pydantic-settings>=2.0.0,<3
 uvicorn[standard]>=0.24.0,<1
 pyvts>=0.3.0,<1
 psutil>=5.9.0,<7
+requests>=2.31.0,<3
+beautifulsoup4>=4.12.0,<5
 
 # ── 可选依赖（Optional Dependencies） ──
 # redis：Rate Limit 存储后端（R4 Gate Backend），仅在启用 Redis 后端时需要

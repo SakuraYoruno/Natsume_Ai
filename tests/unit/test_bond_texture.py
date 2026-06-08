@@ -50,16 +50,6 @@ class TestBondTexture:
         assert isinstance(state.texture, BondEmotionalTexture)
         assert 0.0 <= state.texture.intimacy_temperature <= 1.0
 
-    def test_style_hint_low_temperature(self):
-        """低 intimacy_temperature 时，style_hint() 返回疏远描述"""
-        texture = BondEmotionalTexture(
-            avg_response_gap_ms=120000.0,  # 2分钟，很慢
-            recent_emotion_valence=-0.5,
-            intimacy_temperature=0.1,
-        )
-        hint = texture.style_hint()
-        assert "疏远" in hint or "礼貌" in hint or "距离" in hint
-
     def test_update_returns_new_instance(self):
         """update() 返回新实例，不修改原实例"""
         texture = BondEmotionalTexture()

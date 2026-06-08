@@ -85,3 +85,53 @@ def test_scheduler_health_endpoint_returns_immune_gate_state(monkeypatch) -> Non
     assert payload["scheduler_status"] == "HEALTHY"
     assert payload["immune_gate_state"]["status"] == "live"
     assert payload["immune_gate_state"]["last_decision"] == "BLOCK"
+
+
+def test_scheduler_trigger_endpoint_calls_runtime_scheduler(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "host_brain.tribe.immune_agent.get_immune_agent",
+        lambda: SimpleNamespace(export_runtime_state=lambda: {}),
+    )
+    task = SimpleNamespace(task_id="lightnovel_recommender_daily", enabled=True)
+    calls: list[str] = []
+
+    scheduler_routes.set_scheduler_providers(
+        registry=SimpleNamespace(get=lambda task_id: task if task_id == task.task_id else None),
+        health_reporter=SimpleNamespace(build_health_snapshot=lambda: {"tasks": []}),
+        scheduler=SimpleNamespace(
+            trigger_task_by_id_async=lambda task_id: calls.append(task_id)
+            or {"status": "QUEUED", "task_id": task_id, "reason_code": None}
+        ),
+    )
+    app = FastAPI()
+    app.include_router(scheduler_routes.router)
+    client = TestClient(app)
+
+    response = client.post("/scheduler/tasks/lightnovel_recommender_daily/trigger")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["triggered"] is True
+    assert payload["queued"] is True
+    assert payload["status"] == "QUEUED"
+    assert calls == ["lightnovel_recommender_daily"]
+
+
+def test_scheduler_trigger_endpoint_requires_runtime_scheduler(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "host_brain.tribe.immune_agent.get_immune_agent",
+        lambda: SimpleNamespace(export_runtime_state=lambda: {}),
+    )
+    task = SimpleNamespace(task_id="lightnovel_recommender_daily", enabled=True)
+    scheduler_routes.set_scheduler_providers(
+        registry=SimpleNamespace(get=lambda task_id: task if task_id == task.task_id else None),
+        health_reporter=SimpleNamespace(build_health_snapshot=lambda: {"tasks": []}),
+    )
+    app = FastAPI()
+    app.include_router(scheduler_routes.router)
+    client = TestClient(app)
+
+    response = client.post("/scheduler/tasks/lightnovel_recommender_daily/trigger")
+
+    assert response.status_code == 503
+    assert response.json()["detail"]["reason_code"] == "SCHEDULER_NOT_INITIALIZED"

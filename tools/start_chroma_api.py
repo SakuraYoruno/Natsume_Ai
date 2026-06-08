@@ -10,16 +10,11 @@ CHROMA_DATA = ROOT / "data" / "chroma_db"
 CHROMA_DATA.mkdir(parents=True, exist_ok=True)
 
 HOST = "127.0.0.1"
-PORT = 8000
+PORT = 18000
 ENDPOINT = f"http://{HOST}:{PORT}"
 
 COLLECTIONS = {
-    "episodic":    384,
-    "canon_style": 384,
-    "canon_world": 384,
-    "long_term":   384,
-    "distilled":   384,
-    "bond":        384,
+    "episodic": 1024,
 }
 TENANT = "default_tenant"
 DATABASE = "default_database"
@@ -81,7 +76,7 @@ def start_persistent_client() -> None:
 
 
 def init_collections_with_client(client) -> None:
-    print(f"\n[ChromaDB] 初始化六库 collections")
+    print(f"\n[ChromaDB] 初始化长期记忆 collection")
     try:
         client.get_or_create_tenant(TENANT)
     except Exception:

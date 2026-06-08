@@ -9,9 +9,6 @@ from host_brain.tribe.tribe_state import TribeStateRegistry, get_global_registry
 
 
 _BOND_STYLE_MAP: dict[str, str] = {
-    "stranger": "formal",
-    "acquaint": "neutral",
-    "acquaintance": "neutral",
     "friend": "warm",
     "close_friend": "warm",
     "close": "intimate",
@@ -38,8 +35,24 @@ _EMOTIVE_MARKERS = ("难过", "开心", "生气", "焦虑", "孤独", "害怕", 
 
 
 def _load_runtime_texts() -> dict[str, Any]:
+    defaults = {
+        "loneliness_hints": {
+            "high": "孤独感偏高，回复要有陪伴感，但不要过度承诺。",
+            "mid": "有一点孤独感，语气可以稍微靠近。",
+        }
+    }
     raw = resolve_prompt_template_json_merged("language_system_agent.runtime_texts")
-    return dict(raw) if isinstance(raw, dict) else {}
+    if not isinstance(raw, dict) or not raw:
+        return defaults
+    merged = dict(defaults)
+    for key, value in raw.items():
+        if isinstance(value, Mapping) and isinstance(merged.get(key), Mapping):
+            nested = dict(merged[key])
+            nested.update(dict(value))
+            merged[key] = nested
+        else:
+            merged[key] = value
+    return merged
 
 
 def _clamp(value: float, low: float = 0.0, high: float = 1.0) -> float:
@@ -71,12 +84,12 @@ class LanguageSystemAgent:
         *,
         user_text: str,
         emotion_tag: str = "NEUTRAL",
-        bond_stage: str = "stranger",
+        bond_stage: str = "friend",
     ) -> dict[str, Any]:
         text = str(user_text or "").strip()
         text_lower = text.lower()
         emotion = str(emotion_tag or "NEUTRAL").strip().upper() or "NEUTRAL"
-        stage = str(bond_stage or "stranger").strip().lower() or "stranger"
+        stage = str(bond_stage or "friend").strip().lower() or "friend"
 
         is_question = any(marker in text for marker in _QUESTION_MARKERS)
         is_task = any(marker in text for marker in _TASK_MARKERS)
@@ -170,7 +183,7 @@ class LanguageSystemAgent:
         self,
         *,
         user_text: str,
-        bond_stage: str = "stranger",
+        bond_stage: str = "friend",
         emotion_tag: str = "NEUTRAL",
         loneliness_level: float = 0.0,
         high_loneliness_flag: bool = False,
@@ -277,7 +290,7 @@ class LanguageSystemAgent:
         # broca_generate_plan 产出后，将 tone/warmth_weight 映射为 TTS 参数，
         # 通过 MotorCortexAgent.dispatch_speak() 统一发声（不阻塞主流程）
         try:
-            from host_brain.app.chat_agent_postprocessor import broca_to_tts_params  # noqa: PLC0415
+            from host_brain.app.surface_reply_postprocessor import broca_to_tts_params  # noqa: PLC0415
             import asyncio as _asyncio  # noqa: PLC0415
 
             _tts_params = broca_to_tts_params(
@@ -317,14 +330,14 @@ class LanguageSystemAgent:
     def get_language_style(
         self,
         *,
-        bond_stage: str = "stranger",
+        bond_stage: str = "friend",
         emotion_tag: str = "NEUTRAL",
         loneliness_level: float = 0.0,
         high_loneliness_flag: bool = False,
         user_text: str | None = None,
         response_goal: str = "chat_reply",
     ) -> dict[str, Any]:
-        stage = str(bond_stage or "stranger").strip().lower()
+        stage = str(bond_stage or "friend").strip().lower() or "friend"
         etag = str(emotion_tag or "NEUTRAL").strip().upper()
 
         style = _BOND_STYLE_MAP.get(stage, "neutral")
@@ -387,7 +400,7 @@ class LanguageSystemAgent:
         *,
         user_text: str,
         intent_type: str = "normal",
-        bond_stage: str = "stranger",
+        bond_stage: str = "friend",
         semantic_pressure: float = 0.0,
     ) -> dict[str, Any]:
         """Wernicke 深度语义解析：对复杂意图调用 LLM 做槽位抽取。
@@ -424,7 +437,7 @@ class LanguageSystemAgent:
                 raise ValueError("language_system_agent.wernicke_deep_parse 模板未配置")
 
             _user_prompt = _user_tpl.format(
-                bond_stage=str(bond_stage or "stranger"),
+                bond_stage=str(bond_stage or "friend"),
                 intent_type=str(intent_type or "normal"),
                 user_text=str(user_text or "")[:300],
             )
@@ -471,7 +484,7 @@ class LanguageSystemAgent:
         *,
         emotional_pressure: float = 0.0,
         tone: str = "balanced",
-        bond_stage: str = "stranger",
+        bond_stage: str = "friend",
         emotion_tag: str = "NEUTRAL",
     ) -> str | None:
         """Broca 开场句建议：高情绪压力时调用 LLM 生成具体开场句。
@@ -501,7 +514,7 @@ class LanguageSystemAgent:
             _user_prompt = _user_tpl.format(
                 emotional_pressure=round(float(emotional_pressure), 3),
                 tone=str(tone or "balanced"),
-                bond_stage=str(bond_stage or "stranger"),
+                bond_stage=str(bond_stage or "friend"),
                 emotion_tag=str(emotion_tag or "NEUTRAL").upper(),
             )
             _provider = build_llm_provider(
@@ -545,7 +558,7 @@ class LanguageSystemAgent:
             prev = self.state_registry.get_state("language_system_agent") or {}
             prev_state = dict(prev.get("state") or {})
             last_style = dict(prev_state.get("last_language_style") or {})
-            bond_stage = str(last_style.get("bond_stage") or "stranger").strip().lower()
+            bond_stage = str(last_style.get("bond_stage") or "friend").strip().lower()
             self.get_language_style(bond_stage=bond_stage, emotion_tag=emotion_tag)
         except Exception:
             pass
@@ -553,7 +566,7 @@ class LanguageSystemAgent:
     async def _on_bond_stage_changed(self, event: Any) -> None:
         try:
             payload = dict(getattr(event, "payload", None) or {})
-            bond_stage = str(payload.get("new_stage") or payload.get("bond_stage") or "stranger").strip().lower()
+            bond_stage = str(payload.get("new_stage") or payload.get("bond_stage") or "friend").strip().lower()
             prev = self.state_registry.get_state("language_system_agent") or {}
             prev_state = dict(prev.get("state") or {})
             last_style = dict(prev_state.get("last_language_style") or {})
@@ -566,7 +579,7 @@ class LanguageSystemAgent:
         try:
             payload = dict(getattr(event, "payload", None) or {})
             loneliness = _clamp(float(payload.get("loneliness") or 0.0))
-            bond_stage = str(payload.get("bond_stage") or "stranger").strip().lower()
+            bond_stage = str(payload.get("bond_stage") or "friend").strip().lower()
             prev = self.state_registry.get_state("language_system_agent") or {}
             prev_state = dict(prev.get("state") or {})
             last_style = dict(prev_state.get("last_language_style") or {})

@@ -1,3 +1,6 @@
+受众：PROJECT
+标题：Natsume_Ai 工具调用链路审查报告
+
 # Natsume_Ai 工具调用链路审查报告
 
 > SUPERSEDED, 2026-04-24: historical chain analysis only. Codex execution has hard-cut from legacy `codex_codegen` to Codex Runtime v2 WorkOrders and the new `codex_*` skill IDs.
@@ -173,7 +176,7 @@ Layer 4  _should_force_complex_plan + capability_gap_detector
 
 | route_type | 去哪执行 | 说明 |
 |---|---|---|
-| `chat` | `_stream_chat_with_context` → `chat_agent_sse_generator` | 闲聊，不走工具 |
+| `chat` | `_stream_chat_with_context` → `surface_reply_sse_generator` | 闲聊，不走工具 |
 | `skill` | `_execute_skill` → `skill_meta.handler` → `dispatch_executor_payload` | 单个 Skill |
 | `delegate` | `_dispatch_to_sub_agent` → `sub_agent_protocol.dispatch` | 委托子 Agent |
 | `plan` | `_execute_skill_dag` → `plan_graph.run_plan_graph` | LangGraph 父子图多步执行 |
@@ -479,7 +482,7 @@ POST /v1/chat
                         → SubAgentResponse{success=true, result="..."}
                     ├─ record_runtime_capability_execution（审计 gap → agent 执行闭环）
                     └─ _stream_chat_with_context (sub_agent_context 注入 chat_agent)
-                        → chat_agent_sse_generator
+                        → surface_reply_sse_generator
                             → cortex_prompt_builder.build_cortex_prompt
                                 （sub_agent.result 通过 extra_context_prompt 进 prompt）
                             → LLM 流式 → 反思链 → Airlock → COMMIT
@@ -628,7 +631,7 @@ Sub-Agent 审计、Skill 审计、Tool 审计都写 `skill_exec_log`，但 `voic
       ├─ _should_force_complex_plan + capability_gap_detector
       └─ runtime_capability_synthesizer（若 gap）
 9.  路由分发：
-      ├─ chat    → _stream_chat_with_context → chat_agent_sse_generator
+      ├─ chat    → _stream_chat_with_context → surface_reply_sse_generator
       ├─ skill   → _execute_skill → handler → dispatch_executor_payload → impl/*_executor
       ├─ delegate → _dispatch_to_sub_agent → SubAgentDispatcher.dispatch
       │              → handler (translate/intent/vision/repair)

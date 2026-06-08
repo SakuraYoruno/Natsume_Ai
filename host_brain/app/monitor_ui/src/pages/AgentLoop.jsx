@@ -283,7 +283,7 @@ export default function AgentLoop() {
 
             <div className="space-y-2">
               {[
-                { label: '使用 mock 模式', value: useMock, set: setUseMock },
+                { label: '使用兜底模式', value: useMock, set: setUseMock },
                 { label: '使用 edge RPC', value: useEdgeRpc, set: setUseEdgeRpc },
                 { label: '允许上传截图', value: imageConsent, set: setImageConsent },
               ].map((item) => (

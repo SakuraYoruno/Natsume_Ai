@@ -4,7 +4,7 @@ param(
   [string]$LogDir = "",
   [string]$BindHost = "",
   [int]$Port = 0,
-  [ValidateSet("docker")]
+  [ValidateSet("docker", "none")]
   [string]$ExternalServicesBackend = "docker",
   [string]$DockerComposeFile = "",
   [string]$DockerProjectName = "natsume-ext",
@@ -14,6 +14,7 @@ param(
   [switch]$ForceRestart,
   [switch]$StartupCheck,
   [switch]$ShowConsoleWindow,
+  [bool]$BreakawayFromConsole = $true,
   [switch]$EnableMonitorProxy,
   [switch]$DisableMonitorProxy,
   [string]$MonitorProxyHost = "",
@@ -163,6 +164,65 @@ function Get-HostProcessIds {
   return @($result | Sort-Object -Unique)
 }
 
+function Stop-ProcessTree {
+  param([int]$ProcessId)
+  if ($ProcessId -le 0) {
+    return $false
+  }
+  $proc = Get-Process -Id $ProcessId -ErrorAction SilentlyContinue
+  if ($null -eq $proc) {
+    return $true
+  }
+  Stop-Process -Id $ProcessId -Force -ErrorAction SilentlyContinue
+  Start-Sleep -Milliseconds 500
+  $left = Get-Process -Id $ProcessId -ErrorAction SilentlyContinue
+  if ($left) {
+    cmd /c "taskkill /PID $ProcessId /T /F" | Out-Null
+    Start-Sleep -Milliseconds 500
+    $left = Get-Process -Id $ProcessId -ErrorAction SilentlyContinue
+  }
+  return ($null -eq $left)
+}
+
+function Start-HostCommand {
+  param(
+    [string]$CommandLine,
+    [string]$WorkingDirectory,
+    [bool]$ShowWindow,
+    [bool]$Breakaway
+  )
+  $fullCommandLine = "$env:ComSpec /d /c $CommandLine"
+  if (-not $Breakaway) {
+    $args = @{
+      FilePath = $env:ComSpec
+      ArgumentList = @('/d', '/c', $CommandLine)
+      WorkingDirectory = $WorkingDirectory
+      PassThru = $true
+    }
+    if (-not $ShowWindow) {
+      $args["WindowStyle"] = "Hidden"
+    }
+    $started = Start-Process @args
+    return [pscustomobject]@{
+      Id = [int]$started.Id
+      breakaway = $false
+      command_line = $fullCommandLine
+    }
+  }
+
+  $startup = ([wmiclass]"Win32_ProcessStartup").CreateInstance()
+  $startup.ShowWindow = if ($ShowWindow) { 1 } else { 0 }
+  $createResult = ([wmiclass]"Win32_Process").Create($fullCommandLine, $WorkingDirectory, $startup)
+  if ([int]$createResult.ReturnValue -ne 0) {
+    throw "failed to launch host process via Win32_Process.Create: return=$($createResult.ReturnValue)"
+  }
+  return [pscustomobject]@{
+    Id = [int]$createResult.ProcessId
+    breakaway = $true
+    command_line = $fullCommandLine
+  }
+}
+
 function Wait-Http {
   param(
     [string]$Url,
@@ -180,6 +240,165 @@ function Wait-Http {
     Start-Sleep -Milliseconds 500
   }
   return $false
+}
+
+function Test-TcpPortQuick {
+  param(
+    [string]$HostName,
+    [int]$Port,
+    [int]$TimeoutMs = 1000
+  )
+  if ([string]::IsNullOrWhiteSpace($HostName) -or $Port -le 0) {
+    return $false
+  }
+  $client = New-Object System.Net.Sockets.TcpClient
+  try {
+    $async = $client.BeginConnect($HostName, $Port, $null, $null)
+    $ok = $async.AsyncWaitHandle.WaitOne([Math]::Max(100, $TimeoutMs), $false)
+    if (-not $ok) {
+      return $false
+    }
+    $client.EndConnect($async)
+    return $client.Connected
+  } catch {
+    return $false
+  } finally {
+    try { $client.Close() } catch {}
+  }
+}
+
+function Test-HttpQuick {
+  param(
+    [string]$Url,
+    [int]$TimeoutSec = 3
+  )
+  if ([string]::IsNullOrWhiteSpace($Url)) {
+    return $false
+  }
+  try {
+    $resp = Invoke-WebRequest -Uri $Url -UseBasicParsing -TimeoutSec $TimeoutSec
+    return ($resp.StatusCode -ge 200 -and $resp.StatusCode -lt 300)
+  } catch {
+    return $false
+  }
+}
+
+function Resolve-UriHostPort {
+  param(
+    [string]$UriText,
+    [string]$DefaultHost,
+    [int]$DefaultPort
+  )
+  $hostValue = $DefaultHost
+  $portValue = $DefaultPort
+  $raw = [string]$UriText
+  if (-not [string]::IsNullOrWhiteSpace($raw)) {
+    try {
+      $uri = [System.Uri]$raw
+      if (-not [string]::IsNullOrWhiteSpace($uri.Host)) {
+        $hostValue = $uri.Host
+      }
+      if ($uri.Port -gt 0) {
+        $portValue = [int]$uri.Port
+      }
+    } catch {
+      if ($raw -match '^(?:[^:]+://)?([^/:]+):(\d+)') {
+        $hostValue = [string]$Matches[1]
+        $portValue = [int]$Matches[2]
+      }
+    }
+  }
+  if ($hostValue -eq "0.0.0.0" -or $hostValue -eq "::") {
+    $hostValue = "127.0.0.1"
+  }
+  return [ordered]@{
+    host = $hostValue
+    port = $portValue
+  }
+}
+
+function Get-EnvSetting {
+  param(
+    [hashtable]$Values,
+    [string]$Name,
+    [string]$DefaultValue
+  )
+  if ($Values -and $Values.ContainsKey($Name)) {
+    return [string]$Values[$Name]
+  }
+  $existing = [Environment]::GetEnvironmentVariable($Name, "Process")
+  if (-not [string]::IsNullOrWhiteSpace($existing)) {
+    return [string]$existing
+  }
+  return $DefaultValue
+}
+
+function Set-ObjectProperty {
+  param(
+    [AllowNull()][object]$Target,
+    [string]$Name,
+    [AllowNull()][object]$Value
+  )
+  if ($null -eq $Target -or [string]::IsNullOrWhiteSpace($Name)) {
+    return
+  }
+  if ($Target -is [System.Collections.IDictionary]) {
+    $Target[$Name] = $Value
+    return
+  }
+  $Target | Add-Member -NotePropertyName $Name -NotePropertyValue $Value -Force
+}
+
+function Test-ExternalServicesReadiness {
+  param(
+    [hashtable]$EnvValues,
+    [string]$Backend,
+    [bool]$StartupSkipped
+  )
+  $chromaEndpoint = Get-EnvSetting -Values $EnvValues -Name "CHROMA_ENDPOINT" -DefaultValue "http://127.0.0.1:18000"
+  $neo4jUri = Get-EnvSetting -Values $EnvValues -Name "BOND_NEO4J_URI" -DefaultValue "bolt://127.0.0.1:7687"
+  $redisUrl = Get-EnvSetting -Values $EnvValues -Name "HOST_RATE_LIMIT_REDIS_URL" -DefaultValue "redis://127.0.0.1:6379/0"
+  $chromaParsed = Resolve-UriHostPort -UriText $chromaEndpoint -DefaultHost "127.0.0.1" -DefaultPort 18000
+  $neo4jParsed = Resolve-UriHostPort -UriText $neo4jUri -DefaultHost "127.0.0.1" -DefaultPort 7687
+  $redisParsed = Resolve-UriHostPort -UriText $redisUrl -DefaultHost "127.0.0.1" -DefaultPort 6379
+  $chromaHeartbeat = ("http://{0}:{1}/api/v2/heartbeat" -f $chromaParsed.host, $chromaParsed.port)
+  $services = @(
+    [ordered]@{
+      service = "chroma"
+      endpoint = $chromaEndpoint
+      probe = $chromaHeartbeat
+      ok = [bool](Test-HttpQuick -Url $chromaHeartbeat -TimeoutSec 3)
+    },
+    [ordered]@{
+      service = "neo4j"
+      uri = $neo4jUri
+      host = $neo4jParsed.host
+      port = [int]$neo4jParsed.port
+      ok = [bool](Test-TcpPortQuick -HostName $neo4jParsed.host -Port ([int]$neo4jParsed.port) -TimeoutMs 1000)
+    },
+    [ordered]@{
+      service = "redis"
+      uri = $redisUrl
+      host = $redisParsed.host
+      port = [int]$redisParsed.port
+      ok = [bool](Test-TcpPortQuick -HostName $redisParsed.host -Port ([int]$redisParsed.port) -TimeoutMs 1000)
+    }
+  )
+  $missing = @()
+  foreach ($svc in $services) {
+    if (-not [bool]$svc.ok) {
+      $missing += [string]$svc.service
+    }
+  }
+  return [ordered]@{
+    status = if ($missing.Count -eq 0) { "ready" } else { "unready" }
+    backend = $Backend
+    startup_skipped = $StartupSkipped
+    degraded_for_recall_tests = [bool]($StartupSkipped -and $missing.Count -gt 0)
+    missing = $missing
+    services = $services
+    warning = if ($StartupSkipped) { "external service startup skipped; recall/vector tests require external_services_ready.status=ready" } else { "" }
+  }
 }
 
 function Parse-BoolValue {
@@ -329,6 +548,138 @@ function Ensure-LocalOllamaRuntime {
     reason = 'local_ollama_autostart_removed'
     service_started = $false
     model_warmed = $false
+  }
+}
+
+function Is-MateEngineBridgeProcess {
+  param([int]$ProcessId)
+  $procInfo = Get-CimInstance -ClassName Win32_Process -Filter "ProcessId = $ProcessId" -ErrorAction SilentlyContinue
+  if ($null -eq $procInfo) {
+    return $false
+  }
+  $cmd = [string]$procInfo.CommandLine
+  return [bool]($cmd -and $cmd -like "*mateengine_bridge_server.py*")
+}
+
+function Get-MateEngineBridgeProcessIds {
+  $result = @()
+  $processes = Get-CimInstance -ClassName Win32_Process -ErrorAction SilentlyContinue
+  foreach ($procInfo in @($processes)) {
+    $procId = [int]$procInfo.ProcessId
+    if ($procId -le 0) {
+      continue
+    }
+    $cmd = [string]$procInfo.CommandLine
+    if ($cmd -and $cmd -like "*mateengine_bridge_server.py*") {
+      $result += $procId
+    }
+  }
+  return @($result | Sort-Object -Unique)
+}
+
+function Start-MateEngineBridgeRuntime {
+  param(
+    [string]$RepoRoot,
+    [hashtable]$EnvValues,
+    [string]$PythonExe,
+    [string]$LogDir,
+    [bool]$ForceRestartBridge,
+    [bool]$ShowWindow,
+    [bool]$Breakaway
+  )
+
+  $enabled = Parse-BoolValue -Value $(if ($EnvValues.ContainsKey("HOST_MATEENGINE_BRIDGE_ENABLED")) { $EnvValues["HOST_MATEENGINE_BRIDGE_ENABLED"] } else { $env:HOST_MATEENGINE_BRIDGE_ENABLED }) -Default $true
+  $hostValue = Get-EnvSetting -Values $EnvValues -Name "HOST_MATEENGINE_BRIDGE_HTTP_HOST" -DefaultValue "127.0.0.1"
+  $portValue = [int](Get-EnvSetting -Values $EnvValues -Name "HOST_MATEENGINE_BRIDGE_HTTP_PORT" -DefaultValue "18770")
+  $probeHostValue = if ($hostValue -eq "0.0.0.0" -or $hostValue -eq "::") { "127.0.0.1" } else { $hostValue }
+  $healthUrlValue = "http://$probeHostValue`:$portValue/health"
+  $scriptPath = Join-Path $RepoRoot "tools\mateengine_bridge_server.py"
+  $bridgeStdoutLog = Join-Path $LogDir "mateengine_bridge.stdout.log"
+  $bridgeStderrLog = Join-Path $LogDir "mateengine_bridge.stderr.log"
+
+  if (-not $enabled) {
+    return [ordered]@{
+      side = "mateengine_bridge"
+      status = "disabled_by_config"
+      host = $hostValue
+      port = $portValue
+      health_url = $healthUrlValue
+    }
+  }
+  if (-not (Test-Path -Path $scriptPath)) {
+    return [ordered]@{
+      side = "mateengine_bridge"
+      status = "degraded"
+      reason = "script_not_found"
+      script = $scriptPath
+      health_url = $healthUrlValue
+    }
+  }
+
+  if ($ForceRestartBridge) {
+    foreach ($candidatePid in @(Get-MateEngineBridgeProcessIds)) {
+      Stop-ProcessTree -ProcessId ([int]$candidatePid) | Out-Null
+    }
+  }
+
+  $listeningBridgePid = Get-ListeningPid -ProbePort $portValue
+  if ($null -ne $listeningBridgePid) {
+    if ((Is-MateEngineBridgeProcess -ProcessId ([int]$listeningBridgePid)) -or (Test-HttpQuick -Url $healthUrlValue -TimeoutSec 3)) {
+      return [ordered]@{
+        side = "mateengine_bridge"
+        status = "already_running"
+        pid = [int]$listeningBridgePid
+        host = $hostValue
+        port = $portValue
+        health_url = $healthUrlValue
+      }
+    }
+    return [ordered]@{
+      side = "mateengine_bridge"
+      status = "degraded"
+      reason = "port_in_use_by_other_process"
+      pid = [int]$listeningBridgePid
+      host = $hostValue
+      port = $portValue
+      health_url = $healthUrlValue
+    }
+  }
+
+  $env:MATEENGINE_BRIDGE_HTTP_HOST = $hostValue
+  $env:MATEENGINE_BRIDGE_HTTP_PORT = [string]$portValue
+  if (-not $env:MATEENGINE_SIGNAL_HOST) {
+    $env:MATEENGINE_SIGNAL_HOST = Get-EnvSetting -Values $EnvValues -Name "HOST_MATEENGINE_SIGNAL_HOST" -DefaultValue "127.0.0.1"
+  }
+  if (-not $env:MATEENGINE_SIGNAL_PORT) {
+    $env:MATEENGINE_SIGNAL_PORT = Get-EnvSetting -Values $EnvValues -Name "HOST_MATEENGINE_SIGNAL_PORT" -DefaultValue "32145"
+  }
+
+  $bridgeCommandLine = @(
+    (ConvertTo-CmdArgument -Value $PythonExe),
+    (ConvertTo-CmdArgument -Value $scriptPath),
+    "1>>",
+    (ConvertTo-CmdArgument -Value $bridgeStdoutLog),
+    "2>>",
+    (ConvertTo-CmdArgument -Value $bridgeStderrLog)
+  ) -join " "
+
+  $proc = Start-HostCommand `
+    -CommandLine $bridgeCommandLine `
+    -WorkingDirectory $RepoRoot `
+    -ShowWindow:$ShowWindow `
+    -Breakaway:$Breakaway
+
+  $healthOk = Wait-Http -Url $healthUrlValue -TimeoutSeconds 10
+  return [ordered]@{
+    side = "mateengine_bridge"
+    status = if ($healthOk) { "started" } else { "degraded" }
+    pid = [int]$proc.Id
+    host = $hostValue
+    port = $portValue
+    health_url = $healthUrlValue
+    stdout_log = $bridgeStdoutLog
+    stderr_log = $bridgeStderrLog
+    detail = if ($healthOk) { "local MateEngine bridge is ready" } else { "local MateEngine bridge did not pass health check" }
   }
 }
 
@@ -488,26 +839,49 @@ $env:HOST_MAIN_MONITOR_REDIRECT_ENABLED = if ($monitorProxyEnabled) { "true" } e
 
 $localServices = $null
 $localOllama = Ensure-LocalOllamaRuntime -RepoRoot $repoRoot -EnvValues $envValues
-$startDockerScript = Join-Path $PSScriptRoot "start_docker_services.ps1"
-if (-not (Test-Path -Path $startDockerScript)) {
-  throw "start_docker_services.ps1 not found: $startDockerScript"
-}
-$dockerRaw = & $startDockerScript `
-  -EnvFile $EnvFile `
-  -ComposeFile $DockerComposeFile `
-  -ProjectName $DockerProjectName `
-  -Neo4jWaitSeconds $Neo4jWaitSeconds `
-  -ChromaWaitSeconds $ChromaWaitSeconds
-$dockerJson = ($dockerRaw | Out-String).Trim()
-if ($dockerJson) {
-  try {
-    $localServices = $dockerJson | ConvertFrom-Json
-  } catch {
-    $localServices = [ordered]@{
-      raw = $dockerJson
+if ($ExternalServicesBackend -eq "none") {
+  $localServices = [ordered]@{
+    status = "skipped"
+    backend = "none"
+    detail = "external service startup skipped by request"
+    degraded_for_recall_tests = $true
+  }
+} else {
+  $startDockerScript = Join-Path $PSScriptRoot "start_docker_services.ps1"
+  if (-not (Test-Path -Path $startDockerScript)) {
+    throw "start_docker_services.ps1 not found: $startDockerScript"
+  }
+  $dockerRaw = & $startDockerScript `
+    -EnvFile $EnvFile `
+    -ComposeFile $DockerComposeFile `
+    -ProjectName $DockerProjectName `
+    -Neo4jWaitSeconds $Neo4jWaitSeconds `
+    -ChromaWaitSeconds $ChromaWaitSeconds
+  $dockerJson = ($dockerRaw | Out-String).Trim()
+  if ($dockerJson) {
+    try {
+      $localServices = $dockerJson | ConvertFrom-Json
+    } catch {
+      $localServices = [ordered]@{
+        raw = $dockerJson
+      }
     }
   }
 }
+$externalServicesReady = Test-ExternalServicesReadiness `
+  -EnvValues $envValues `
+  -Backend $ExternalServicesBackend `
+  -StartupSkipped ([bool]($ExternalServicesBackend -eq "none"))
+if ($ExternalServicesBackend -eq "none" -and [string]$externalServicesReady.status -eq "ready") {
+  Set-ObjectProperty -Target $localServices -Name "status" -Value "skipped_ready"
+  Set-ObjectProperty -Target $localServices -Name "detail" -Value "external service startup skipped by request; existing services are ready"
+  Set-ObjectProperty -Target $localServices -Name "degraded_for_recall_tests" -Value $false
+} elseif ($ExternalServicesBackend -eq "none") {
+  Set-ObjectProperty -Target $localServices -Name "status" -Value "skipped_unready"
+  Set-ObjectProperty -Target $localServices -Name "detail" -Value "external service startup skipped by request; recall/vector tests must not run until missing services are ready"
+  Set-ObjectProperty -Target $localServices -Name "degraded_for_recall_tests" -Value $true
+}
+Set-ObjectProperty -Target $localServices -Name "external_services_ready" -Value $externalServicesReady
 
 if (Test-Path -Path $pidFile) {
   $existingPidText = (Get-Content -Path $pidFile -Raw -Encoding ascii).Trim()
@@ -526,6 +900,8 @@ if (Test-Path -Path $pidFile) {
         health_url = "http://$probeHost`:$Port/health"
         env_file = $EnvFile
         local_services = $localServices
+        external_services_ready = $externalServicesReady
+        external_services_warning = [string]$externalServicesReady.warning
         local_ollama = $localOllama
         monitor_proxy_enabled = $monitorProxyEnabled
         monitor_proxy_status = "unknown"
@@ -558,6 +934,8 @@ if ($null -ne $listeningPid) {
         health_url = "http://$probeHost`:$Port/health"
         env_file = $EnvFile
         local_services = $localServices
+        external_services_ready = $externalServicesReady
+        external_services_warning = [string]$externalServicesReady.warning
         local_ollama = $localOllama
         monitor_proxy_enabled = $monitorProxyEnabled
         monitor_proxy_status = "unknown"
@@ -602,6 +980,15 @@ if ((Test-Path $venvPython) -and (Test-PythonRuntime -PythonPath $venvPython)) {
   $pythonExe = $pythonCmd.Source
 }
 
+$mateengineBridgeResult = Start-MateEngineBridgeRuntime `
+  -RepoRoot $repoRoot `
+  -EnvValues $envValues `
+  -PythonExe $pythonExe `
+  -LogDir $LogDir `
+  -ForceRestartBridge:$ForceRestart.IsPresent `
+  -ShowWindow:$ShowConsoleWindow.IsPresent `
+  -Breakaway:$BreakawayFromConsole
+
 $hostArgs = @("-m", "host_brain", "--host", $BindHost, "--port", ([string]$Port), "--log-level", "INFO")
 if ($StartupCheck.IsPresent) {
   $hostArgs += "--startup-check"
@@ -619,16 +1006,11 @@ $cmdLine = @(
   (ConvertTo-CmdArgument -Value $stderrLog)
 ) -join " "
 
-$startProcessArgs = @{
-  FilePath = $env:ComSpec
-  ArgumentList = @('/d', '/c', $cmdLine)
-  WorkingDirectory = $repoRoot
-  PassThru = $true
-}
-if (-not $ShowConsoleWindow.IsPresent) {
-  $startProcessArgs["WindowStyle"] = "Hidden"
-}
-$proc = Start-Process @startProcessArgs
+$proc = Start-HostCommand `
+  -CommandLine $cmdLine `
+  -WorkingDirectory $repoRoot `
+  -ShowWindow:$ShowConsoleWindow.IsPresent `
+  -Breakaway:$BreakawayFromConsole
 
 $healthUrl = "http://$probeHost`:$Port/health?skip_dependency_probes=1"
 $healthOk = Wait-Http -Url $healthUrl -TimeoutSeconds $WaitSeconds
@@ -647,7 +1029,7 @@ if (-not $healthOk) {
   }
 }
 if (-not $healthOk) {
-  Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+  Stop-ProcessTree -ProcessId ([int]$proc.Id) | Out-Null
   $stderrTail = ""
   if (Test-Path -Path $stderrLog) {
     $stderrTail = (Get-Content -Path $stderrLog -Tail 80 -ErrorAction SilentlyContinue) -join "`n"
@@ -732,6 +1114,13 @@ if ($obsEnabled) {
 $obsStatus = "ok"
 $mcpRegistryStatus = "ok"
 $startupWarnings = @()
+if ([string]$externalServicesReady.status -ne "ready") {
+  if ($ExternalServicesBackend -eq "none") {
+    $startupWarnings += "STARTUP_EXTERNAL_SERVICES_SKIPPED_UNREADY"
+  } else {
+    $startupWarnings += "STARTUP_EXTERNAL_SERVICES_UNREADY"
+  }
+}
 
 # 探测 /obs/metrics（优先命中 obs-sidecar，避免主进程再承担观测探针）
 $obsProbeHost = if ($obsProcessResult.PSObject.Properties.Name -contains "host") { [string]$obsProcessResult.host } else { $obsBindHost }
@@ -891,15 +1280,20 @@ $result = [ordered]@{
   stdout_log = $stdoutLog
   stderr_log = $stderrLog
   local_services = $localServices
+  external_services_ready = $externalServicesReady
+  external_services_warning = [string]$externalServicesReady.warning
   local_ollama = $localOllama
   obs_status = $obsStatus
   mcp_registry_status = $mcpRegistryStatus
   canon_sync_status = $canonSyncStatus
   monitor_proxy_enabled = $monitorProxyEnabled
   obs_enabled = $obsEnabled
+  mateengine_bridge = $mateengineBridgeResult
   obs_process = $obsProcessResult
   monitor_proxy_status = [string]$(if ($monitorProxyResult.PSObject.Properties.Name -contains "status") { $monitorProxyResult.status } else { "" })
   monitor_proxy = $monitorProxyResult
+  breakaway_from_console = $BreakawayFromConsole
+  launcher_pid = [int]$proc.Id
   startup_warnings = $startupWarnings
 }
 $result | ConvertTo-Json -Depth 10

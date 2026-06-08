@@ -191,3 +191,75 @@ def test_execute_skill_memory_store_injects_runtime_memory_dependencies(monkeypa
     assert "request:req_exec_skill_memory_001" in writes[0]["evidence_refs"]
     assert "session:sess_exec_skill_memory_001" in writes[0]["evidence_refs"]
     assert "source:user_request" in writes[0]["evidence_refs"]
+
+
+def test_execute_skill_long_term_memory_search_filters_semantic_layer(monkeypatch) -> None:
+    registry = build_memory_skill_registry()
+    captured: dict[str, object] = {}
+
+    class _SemanticRecallStub:
+        async def recall(
+            self,
+            query: str,
+            *,
+            top_k: int = 5,
+            threshold: float | None = None,
+            filter_metadata: dict[str, object] | None = None,
+        ) -> SimpleNamespace:
+            captured["query"] = query
+            captured["top_k"] = top_k
+            captured["threshold"] = threshold
+            captured["filter_metadata"] = dict(filter_metadata or {})
+            return SimpleNamespace(
+                hits=[
+                    SimpleNamespace(
+                        doc_id="semantic::unit-long-term",
+                        content="用户偏好技术场景先给可执行步骤。",
+                        score=0.97,
+                        metadata={"memory_layer": "long_term"},
+                        source="chromadb",
+                    )
+                ]
+            )
+
+    monkeypatch.setattr("host_brain.app.dependencies.get_skill_registry", lambda: registry)
+    monkeypatch.setattr("host_brain.app.dependencies.get_episodic_store", lambda: None)
+    monkeypatch.setattr("host_brain.app.dependencies.get_semantic_recaller", lambda: _SemanticRecallStub())
+
+    outcome = _execute_skill(
+        request_body={
+            "args": {
+                "query": "技术场景怎么帮我",
+                "memory_type": "semantic",
+                "search_scope": "long_term",
+                "top_k": 3,
+                "threshold": 0.0,
+            }
+        },
+        request_id="req_exec_skill_long_term_memory_search",
+        session_id="sess_exec_skill_long_term_memory_search",
+        person_id="person_exec_skill_long_term_memory_search",
+        intent_id="intent_exec_skill_long_term_memory_search",
+        skill_id="memory_search",
+        task_text="检索长期记忆",
+        user_message="检索长期记忆",
+        governor_result={"decision": "APPROVE", "tokens": {}},
+        intent_draft={
+            "args": {
+                "query": "技术场景怎么帮我",
+                "memory_type": "semantic",
+                "search_scope": "long_term",
+                "top_k": 3,
+                "threshold": 0.0,
+            }
+        },
+        emotion_context={"mood_state": "CALM", "emotion_tag": "FOCUSED"},
+        render_target_lang="zh-CN",
+    )
+
+    detail = outcome.payload["result"]["detail"]  # type: ignore[index]
+    assert outcome.success is True
+    assert detail["source"] == "semantic_recaller"
+    assert detail["search_scope"] == "long_term"
+    assert detail["results"][0]["doc_id"] == "semantic::unit-long-term"
+    assert captured["filter_metadata"] == {"memory_layer": "long_term"}

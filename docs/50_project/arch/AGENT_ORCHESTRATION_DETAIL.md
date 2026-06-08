@@ -1,8 +1,8 @@
 受众：MASTER
 标题：Agent 编排详情（当前运行时实况）
 
-版本：v2.1
-日期：2026-04-19
+版本：v2.3
+日期：2026-05-30
 
 ---
 
@@ -11,7 +11,10 @@
 
 ## 0. 代码证据入口
 
-- `host_brain/app/fastapi_app.py`
+- `host_brain/app/asgi.py`
+- `host_brain/app/app_factory.py`
+- `host_brain/app/router_registry.py`
+- `host_brain/app/chat_routes.py`
 - `host_brain/app/chat_handler.py`
 - `host_brain/app/cortex_orchestrator.py`
 - `host_brain/app/agent_runtime_shared.py`
@@ -28,7 +31,8 @@
 
 | 入口 | 当前模块 | 说明 |
 |---|---|---|
-| `POST /v1/chat` | `host_brain/app/fastapi_app.py` -> `host_brain/app/chat_handler.py` | 主聊天入口先经过 HTTP 路由与免疫门控，再进入聊天编排并返回 SSE |
+| `POST /v1/chat` | `host_brain/app/asgi.py` -> `host_brain/app/chat_routes.py` -> `host_brain/app/chat_handler.py` | 主聊天入口先经过 HTTP 路由与免疫门控，再进入聊天编排并返回 SSE |
+| `POST /v1/edge/events` | `host_brain/app/asgi.py` -> `host_brain/app/edge_event_routes.py` | Edge 运行时事件回流入口，委托 `receive_edge_events_response()` |
 | `POST /v1/host/input` | `host_brain/app/input_routes.py` | ASR / Gateway 回流入口，会把输入重新送入 Host 主链 |
 | `POST /v1/agent/run` | `host_brain/app/agent_routes.py` | 独立 Agent Loop 自动化入口，不等于聊天主链 |
 | `/v1/edge/*` | `edge_client/app/fastapi_app.py` | 身体侧 RPC 能力面，供 Host 调用 |
@@ -41,9 +45,11 @@
 
 ```text
 POST /v1/chat
-  -> fastapi_app.chat
-  -> fastapi_app._evaluate_immune_gate_for_chat
-  -> fastapi_app._schedule_chat_immune_gate_event
+  -> app_factory.create_host_fastapi_app()
+  -> asgi.chat_endpoint
+  -> chat_routes.handle_v1_chat_route
+  -> asgi.evaluate_immune_gate_for_chat（注入）
+  -> asgi.schedule_immune_gate_audit（注入）
   -> chat_handler.handle_chat
   -> chat_handler._unified_chat_sse_generator
   -> thalamus_agent.classify_and_compile_intent_draft
@@ -55,7 +61,7 @@ POST /v1/chat
   -> executive_runtime_core
 ```
 
-在进入 `chat_handler.handle_chat` 之前，`fastapi_app.chat` 还承担三件事：
+在进入 `chat_handler.handle_chat` 之前，`chat_routes.handle_v1_chat_route` 还承担三件事：
 
 - 记录并透传 `request_id`
 - 执行 immune gate 检查，并异步写入 `IMMUNE_CHAT_GATE` 审计事件

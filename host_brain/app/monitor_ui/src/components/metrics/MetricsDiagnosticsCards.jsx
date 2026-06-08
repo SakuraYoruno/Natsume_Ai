@@ -353,8 +353,8 @@ function SemanticRecallMiniCard({ pollingEnabled = false, pollingInterval = 30 }
         {[
           { label: '召回上限', value: data?.top_k, color: 'text-gray-700' },
           { label: '相似度阈值', value: data?.similarity_threshold != null ? data.similarity_threshold.toFixed(2) : '—', color: 'text-sky-600' },
-          { label: '模拟文档', value: data?.mock_doc_count, color: data?.use_mock ? 'text-orange-500' : 'text-gray-400' },
-          { label: '模式', value: data?.use_mock ? '模拟' : 'Chroma', color: data?.use_mock ? 'text-orange-500' : 'text-green-600' },
+          { label: '兜底文档', value: data?.mock_doc_count, color: data?.use_mock ? 'text-orange-500' : 'text-gray-400' },
+          { label: '模式', value: data?.use_mock ? '兜底' : 'Chroma', color: data?.use_mock ? 'text-orange-500' : 'text-green-600' },
         ].map(({ label, value, color }) => (
           <div key={label}>
             <div className={`text-xl font-bold ${color}`}>{value ?? '—'}</div>
@@ -369,7 +369,7 @@ function SemanticRecallMiniCard({ pollingEnabled = false, pollingInterval = 30 }
       ) : null}
       {data?.use_mock ? (
         <div className="mt-2 text-xs text-orange-400">
-          ⚠ 当前使用模拟后端，生产环境请设置 <span className="font-mono">SEMANTIC_RECALL_USE_MOCK=false</span>
+          当前使用兜底后端，生产环境请设置 <span className="font-mono">SEMANTIC_RECALL_USE_MOCK=false</span>
         </div>
       ) : null}
     </div>

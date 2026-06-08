@@ -59,7 +59,7 @@ def _plane() -> SimpleNamespace:
                     "followup_target": "identity",
                     "ongoing_thread": "identity_loop",
                     "affect": {"emotion_tag": "CALM"},
-                    "relationship": {"bond_stage": "STRANGER"},
+                    "relationship": {"bond_stage": "FRIEND"},
                     "drive": {"continuity_drive": 0.42},
                     "topic_ledger": {"active_topics": ["identity"]},
                     "tactic_ledger": {"recent_topics": ["identity"]},
@@ -103,7 +103,7 @@ def _plane() -> SimpleNamespace:
         relationship=SimpleNamespace(
             state=SimpleNamespace(
                 as_dict=lambda: {
-                    "bond_stage": "STRANGER",
+                    "bond_stage": "FRIEND",
                     "trust": 0.12,
                     "openness": 0.14,
                     "boundary_softness": 0.10,
@@ -137,7 +137,7 @@ def _plane() -> SimpleNamespace:
         reply_plan=SimpleNamespace(
             state={
                 "affect_summary": "当前情绪平稳，语气自然收着。",
-                "relationship_summary": "你和对方还不熟，不要过度亲近。",
+                "relationship_summary": "义妹关系已成立，但还在初次相处阶段；语气收着，不要装陌生也不要过度亲密。",
                 "reply_contract": "这轮不是第一次问身份，用短确认回应，不要完整自报。",
                 "response_goal": "identify",
                 "tactic_family": "ack_repeat_then_light_probe",
@@ -175,12 +175,16 @@ def test_build_cortex_prompt_returns_messages() -> None:
 
     assert gen_params == {}
     assert messages[0]["role"] == "system"
-    assert "你是新海天。" in messages[0]["content"]
     assert "【人格核心】" in messages[0]["content"]
-    assert "当前情绪平稳，语气自然收着。" in messages[0]["content"]
-    assert "你和对方还不熟，不要过度亲近。" in messages[0]["content"]
+    assert "你是新海天。" in messages[0]["content"]
+    assert "【普通聊天写法】" not in messages[0]["content"]
     assert "这轮是在接连续身份追问" in messages[0]["content"]
-    assert "这轮不是第一次问身份，用短确认回应，不要完整自报。" in messages[0]["content"]
+    assert "当前情绪平稳，语气自然收着。" in messages[0]["content"]
+    assert "义妹关系已成立，但还在初次相处阶段" in messages[0]["content"]
+    assert "这轮不是第一次问身份，用短确认回应，不要完整自报。" not in messages[0]["content"]
+    assert "【本轮状态标签】" in messages[0]["content"]
+    assert "topic=identity" in messages[0]["content"]
+    assert "thread=identity_loop" in messages[0]["content"]
     assert "【更早对话摘要】" not in messages[0]["content"]
     assert "角色卡" not in messages[0]["content"]
     assert "风格手册" not in messages[0]["content"]
@@ -191,7 +195,54 @@ def test_build_cortex_prompt_returns_messages() -> None:
     assert messages[3] == {"role": "user", "content": "你是谁"}
 
 
-def test_build_cortex_prompt_uses_full_soul_for_non_relational_chat() -> None:
+def test_build_cortex_prompt_can_skip_reply_contract_prompt(monkeypatch) -> None:
+    monkeypatch.setenv("HOST_CHAT_DISABLE_REPLY_CONTRACT_PROMPT", "true")
+    with patch(
+        "host_brain.app.cortex_prompt_builder.assemble_prompt_context_plane",
+        return_value=_plane(),
+    ), patch(
+        "host_brain.app.cortex_prompt_builder.get_compiled_soul",
+        return_value=_compiled_soul(),
+    ):
+        messages, _gen_params, runtime_payload = build_cortex_prompt(
+            user_message="你是谁",
+            render_target_lang="zh",
+            person_id="p1",
+            session_id="sess",
+            request_id="req",
+            include_runtime_payload=True,
+        )
+
+    assert "【本轮目标】" not in messages[0]["content"]
+    assert "【本轮状态标签】" not in messages[0]["content"]
+    assert "这轮不是第一次问身份，用短确认回应，不要完整自报。" not in messages[0]["content"]
+    assert runtime_payload["reply_plan"]["reply_contract"] == "这轮不是第一次问身份，用短确认回应，不要完整自报。"
+
+
+def test_build_cortex_prompt_can_use_legacy_reply_contract_prompt(monkeypatch) -> None:
+    monkeypatch.setenv("HOST_CHAT_LEGACY_REPLY_CONTRACT_PROMPT", "true")
+    with patch(
+        "host_brain.app.cortex_prompt_builder.assemble_prompt_context_plane",
+        return_value=_plane(),
+    ), patch(
+        "host_brain.app.cortex_prompt_builder.get_compiled_soul",
+        return_value=_compiled_soul(),
+    ):
+        messages, _gen_params, _runtime_payload = build_cortex_prompt(
+            user_message="你是谁",
+            render_target_lang="zh",
+            person_id="p1",
+            session_id="sess",
+            request_id="req",
+            include_runtime_payload=True,
+        )
+
+    assert "【本轮目标】" in messages[0]["content"]
+    assert "这轮不是第一次问身份，用短确认回应，不要完整自报。" in messages[0]["content"]
+    assert "【本轮状态标签】" not in messages[0]["content"]
+
+
+def test_build_cortex_prompt_uses_full_soul_for_short_text_chat() -> None:
     plane = _plane()
     plane.conversation_interpretation = SimpleNamespace(
         state=SimpleNamespace(
@@ -229,7 +280,7 @@ def test_build_cortex_prompt_uses_full_soul_for_non_relational_chat() -> None:
                 "followup_target": "",
                 "ongoing_thread": "",
                 "affect": {"emotion_tag": "CALM"},
-                "relationship": {"bond_stage": "STRANGER"},
+                "relationship": {"bond_stage": "FRIEND"},
                 "drive": {"continuity_drive": 0.42},
                 "topic_ledger": {"active_topics": ["mood_reflection"]},
                 "tactic_ledger": {"recent_topics": ["mood_reflection"]},
@@ -241,7 +292,7 @@ def test_build_cortex_prompt_uses_full_soul_for_non_relational_chat() -> None:
     plane.reply_plan = SimpleNamespace(
         state={
             "affect_summary": "当前情绪平稳，语气自然收着。",
-            "relationship_summary": "你和对方还不熟，不要过度亲近。",
+            "relationship_summary": "义妹关系已成立，但还在初次相处阶段；语气收着，不要装陌生也不要过度亲密。",
             "reply_contract": "先接住对方在说自己有点累，再自然回应。",
             "response_goal": "mood_reflection",
             "tactic_family": "plain_hold",
@@ -264,8 +315,11 @@ def test_build_cortex_prompt_uses_full_soul_for_non_relational_chat() -> None:
             include_runtime_payload=True,
         )
 
+    assert "【人格核心】" in messages[0]["content"]
     assert "【身份核心】" in messages[0]["content"]
     assert "【语言风格】" in messages[0]["content"]
+    assert "先接住对方在说自己有点累" not in messages[0]["content"]
+    assert "topic=mood_reflection" in messages[0]["content"]
     assert "【更早对话摘要】" not in messages[0]["content"]
 
 
@@ -309,7 +363,7 @@ def test_build_cortex_prompt_exposes_conversation_history_meta() -> None:
     assert runtime_payload["topic_ledger"]["active_topics"] == ["identity"]
     assert "tactic_ledger" in runtime_payload
     assert runtime_payload["affect_state"]["emotion_tag"] == "CALM"
-    assert runtime_payload["relationship_state"]["bond_stage"] == "STRANGER"
+    assert runtime_payload["relationship_state"]["bond_stage"] == "FRIEND"
     assert runtime_payload["drive_state"]["continuity_drive"] == 0.42
 
 
@@ -358,7 +412,7 @@ def test_build_cortex_prompt_injects_image_social_thread_summary() -> None:
                 "followup_target": "emoji_social_reply",
                 "ongoing_thread": "image_social",
                 "affect": {"emotion_tag": "CALM"},
-                "relationship": {"bond_stage": "STRANGER"},
+                "relationship": {"bond_stage": "FRIEND"},
                 "drive": {"continuity_drive": 0.42},
                 "topic_ledger": {"active_topics": ["emoji_social_reply"]},
                 "tactic_ledger": {"recent_topics": ["emoji_social_reply"]},
@@ -370,7 +424,7 @@ def test_build_cortex_prompt_injects_image_social_thread_summary() -> None:
     plane.reply_plan = SimpleNamespace(
         state={
             "affect_summary": "当前情绪平稳，语气自然收着。",
-            "relationship_summary": "你和对方还不熟，不要过度亲近。",
+            "relationship_summary": "义妹关系已成立，但还在初次相处阶段；语气收着，不要装陌生也不要过度亲密。",
             "reply_contract": "先接住对方是在回刚才那张图，再顺着这层情绪接一句。",
             "response_goal": "gentle_followup_reply",
             "tactic_family": "soft_emotion_ack",
@@ -398,7 +452,7 @@ def test_build_cortex_prompt_injects_image_social_thread_summary() -> None:
     assert "不要装作第一次听见" in messages[0]["content"]
 
 
-def test_build_cortex_prompt_uses_compact_lane_for_image_social_followup() -> None:
+def test_build_cortex_prompt_uses_full_soul_for_image_social_followup() -> None:
     plane = _plane()
     plane.conversation_interpretation = SimpleNamespace(
         state=SimpleNamespace(
@@ -442,7 +496,7 @@ def test_build_cortex_prompt_uses_compact_lane_for_image_social_followup() -> No
                 "followup_target": "emoji_social_reply",
                 "ongoing_thread": "image_social",
                 "affect": {"emotion_tag": "CALM"},
-                "relationship": {"bond_stage": "STRANGER"},
+                "relationship": {"bond_stage": "FRIEND"},
                 "drive": {"continuity_drive": 0.42},
                 "topic_ledger": {"active_topics": ["emoji_social_reply"]},
                 "tactic_ledger": {"recent_topics": ["emoji_social_reply"]},
@@ -454,7 +508,7 @@ def test_build_cortex_prompt_uses_compact_lane_for_image_social_followup() -> No
     plane.reply_plan = SimpleNamespace(
         state={
             "affect_summary": "当前情绪平稳，语气自然收着。",
-            "relationship_summary": "保持自然分寸，但不用刻意拉开，顺着眼前这点情绪接住就好。",
+            "relationship_summary": "义妹关系已成立，只是刚开始相处；不用刻意拉开，轻轻接住眼前情绪。",
             "reply_contract": "先接住对方是在回刚才那张图，再顺着这层情绪接一句。",
             "response_goal": "gentle_followup_reply",
             "tactic_family": "soft_emotion_ack",
@@ -486,13 +540,12 @@ def test_build_cortex_prompt_uses_compact_lane_for_image_social_followup() -> No
             include_runtime_payload=True,
         )
 
-    assert len(assemble_calls) == 2
+    assert len(assemble_calls) == 1
     assert assemble_calls[0]["history_max_turns"] is None
     assert assemble_calls[0]["allow_older_summary"] is True
-    assert assemble_calls[1]["history_max_turns"] == 6
-    assert assemble_calls[1]["allow_older_summary"] is False
-    assert "你是新海天。说话活泼自然，会顺着眼前的小情绪接住人。" in messages[0]["content"]
-    assert "【身份核心】" not in messages[0]["content"]
+    assert "【身份核心】" in messages[0]["content"]
+    assert "【语言风格】" in messages[0]["content"]
+    assert "你是新海天。说话活泼自然，会顺着眼前的小情绪接住人。" not in messages[0]["content"]
 
 
 def test_build_cortex_prompt_uses_lightweight_payload_for_relational_chat() -> None:
@@ -517,17 +570,18 @@ def test_build_cortex_prompt_uses_lightweight_payload_for_relational_chat() -> N
     assert messages[-1] == {"role": "user", "content": "你是"}
     assert runtime_payload["request"]["user_message"] == "你是"
     assert "【更早对话摘要】" not in messages[0]["content"]
-    assert "你是新海天。白泉学园一年级生" in messages[0]["content"]
+    assert "你是新海天。" in messages[0]["content"]
+    assert "【普通聊天写法】" not in messages[0]["content"]
     assert kwargs["history_max_turns"] == 6
     assert kwargs["allow_older_summary"] is False
 
 
-def test_build_cortex_prompt_uses_reply_contract_once() -> None:
+def test_build_cortex_prompt_uses_structured_reply_state_by_default() -> None:
     plane = _plane()
     plane.reply_plan = SimpleNamespace(
         state={
             "affect_summary": "当前情绪平稳，语气自然收着。",
-            "relationship_summary": "你和对方还不熟，不要过度亲近。",
+            "relationship_summary": "义妹关系已成立，但还在初次相处阶段；语气收着，不要装陌生也不要过度亲密。",
             "reply_contract": "这轮不是第一次问身份，用短确认回应，不要完整自报。",
         }
     )
@@ -545,14 +599,75 @@ def test_build_cortex_prompt_uses_reply_contract_once() -> None:
             session_id="sess",
             request_id="req",
             include_runtime_payload=True,
-        )
+    )
 
     assert messages[0]["role"] == "system"
-    assert messages[0]["content"].count("这轮不是第一次问身份，用短确认回应，不要完整自报。") == 1
-    assert "【本轮回应动作】" in messages[0]["content"]
+    assert "这轮不是第一次问身份，用短确认回应，不要完整自报。" not in messages[0]["content"]
+    assert "【本轮目标】" not in messages[0]["content"]
+    assert "【本轮状态标签】" in messages[0]["content"]
+    assert "topic=identity" in messages[0]["content"]
+    assert "thread=identity_loop" in messages[0]["content"]
     assert "当前情绪平稳，语气自然收着。" in messages[0]["content"]
-    assert "你和对方还不熟，不要过度亲近。" in messages[0]["content"]
+    assert "义妹关系已成立，但还在初次相处阶段；语气收着，不要装陌生也不要过度亲密。" in messages[0]["content"]
+    assert "这轮是在接连续身份追问" in messages[0]["content"]
     assert [message["role"] for message in messages] == ["system", "user", "assistant", "user"]
+
+
+def test_build_cortex_prompt_structured_state_carries_boundary_action_tags() -> None:
+    plane = _plane()
+    plane.interaction_state = SimpleNamespace(
+        state=SimpleNamespace(
+            as_dict=lambda: {
+                "current_topic": "relationship_boundary",
+                "interaction_move": "probe_boundary",
+                "user_stance": "challenging",
+                "followup_target": "",
+                "ongoing_thread": "boundary_probe",
+                "affect": {"emotion_tag": "CALM"},
+                "relationship": {"bond_stage": "FRIEND"},
+                "drive": {"continuity_drive": 0.42},
+                "topic_ledger": {"active_topics": ["relationship_boundary"]},
+                "tactic_ledger": {"recent_topics": ["relationship_boundary"]},
+                "perception_summary": "",
+                "reason_tags": ["boundary_probe"],
+            }
+        )
+    )
+    plane.reply_plan = SimpleNamespace(
+        state={
+            "affect_summary": "",
+            "relationship_summary": "义妹关系已成立，但还在初次相处阶段；语气收着，不要装陌生也不要过度亲密。",
+            "primary_topic": "relationship_boundary",
+            "interaction_move": "probe_boundary",
+            "response_form": "text",
+            "contract": {
+                "required_actions": ["boundary_anchor", "reason_clause"],
+                "forbidden_actions": ["generic_companioning"],
+            },
+            "reply_contract": "先放稳义妹关系事实再给短理由。",
+        }
+    )
+    with patch(
+        "host_brain.app.cortex_prompt_builder.assemble_prompt_context_plane",
+        return_value=plane,
+    ), patch(
+        "host_brain.app.cortex_prompt_builder.get_compiled_soul",
+        return_value=_compiled_soul(),
+    ):
+        messages, _gen_params, _runtime_payload = build_cortex_prompt(
+            user_message="你为什么要帮我，我们很熟吗",
+            render_target_lang="zh",
+            person_id="p1",
+            session_id="sess",
+            request_id="req",
+            include_runtime_payload=True,
+        )
+
+    assert "先放稳义妹关系事实再给短理由。" not in messages[0]["content"]
+    assert "topic=relationship_boundary" in messages[0]["content"]
+    assert "thread=boundary_probe" in messages[0]["content"]
+    assert "required=boundary_anchor,reason_clause" in messages[0]["content"]
+    assert "forbidden=generic_companioning" in messages[0]["content"]
 
 
 def test_build_cortex_prompt_injects_multimodal_summary_when_present() -> None:
@@ -591,3 +706,97 @@ def test_build_cortex_prompt_injects_multimodal_summary_when_present() -> None:
     assert "【附件观察】" in messages[0]["content"]
     assert "截图里能看到一段界面提示文字。" in messages[0]["content"]
     assert runtime_payload["multimodal"]["artifact_type"] == "screenshot"
+
+
+def test_build_cortex_prompt_projects_emoji_social_user_message() -> None:
+    plane = _plane()
+    plane.conversation_interpretation = SimpleNamespace(
+        state=SimpleNamespace(
+            literal_topic="emoji_social_reply",
+            interaction_move="share_emotion",
+            freshness="new",
+            user_stance="playful",
+            repeat_question_count=0,
+            as_dict=lambda: {
+                "literal_topic": "emoji_social_reply",
+                "interaction_move": "share_emotion",
+                "freshness": "new",
+                "user_stance": "playful",
+                "repeat_question_count": 0,
+            }
+        )
+    )
+    plane.interaction_thread = SimpleNamespace(
+        state=SimpleNamespace(
+            thread_kind="image_social",
+            source_topic="emoji_social_reply",
+            source_modality="emoji",
+            emotion_anchor="委屈",
+            open=True,
+            source_turn_index=0,
+            last_assistant_move="",
+            last_user_reaction="",
+            turn_count=1,
+            reason_tags=["image_social"],
+            as_dict=lambda: {
+                "thread_kind": "image_social",
+                "source_topic": "emoji_social_reply",
+                "source_modality": "emoji",
+                "emotion_anchor": "委屈",
+                "open": True,
+                "source_turn_index": 0,
+                "last_assistant_move": "",
+                "last_user_reaction": "",
+                "turn_count": 1,
+                "reason_tags": ["image_social"],
+            }
+        )
+    )
+    plane.multimodal = SimpleNamespace(
+        state=SimpleNamespace(
+            summary_for_chat="委屈",
+            social_signal="委屈",
+            as_dict=lambda: {
+                "observed_types": ["emoji"],
+                "summary_for_chat": "委屈",
+                "social_signal": "委屈",
+                "visible_text": "",
+                "artifact_type": "",
+                "primary_modality": "emoji",
+                "emotion_signals": ["委屈"],
+                "confidence": 1.0,
+                "followup_required": False,
+            },
+        )
+    )
+    plane.reply_plan = SimpleNamespace(
+        state={
+            "affect_summary": "",
+            "relationship_summary": "",
+            "reply_contract": "这不是图片鉴赏，是表情包社交承接。",
+            "response_goal": "image_social_ack",
+            "tactic_family": "soft_emotion_ack",
+            "primary_topic": "emoji_social_reply",
+        }
+    )
+    with patch(
+        "host_brain.app.cortex_prompt_builder.assemble_prompt_context_plane",
+        return_value=plane,
+    ), patch(
+        "host_brain.app.cortex_prompt_builder.get_compiled_soul",
+        return_value=_compiled_soul(),
+    ):
+        messages, _gen_params, runtime_payload = build_cortex_prompt(
+            user_message="[表情消息]",
+            render_target_lang="zh",
+            person_id="p1",
+            session_id="sess",
+            request_id="req",
+            include_runtime_payload=True,
+        )
+
+    assert "【表情包输入】" in messages[0]["content"]
+    assert "这张图/表情传来的意思：委屈" in messages[0]["content"]
+    assert "不要描述图片" in messages[0]["content"]
+    assert messages[-1] == {"role": "user", "content": "（委屈）"}
+    assert runtime_payload["effective_user_message_for_prompt"] == "（委屈）"

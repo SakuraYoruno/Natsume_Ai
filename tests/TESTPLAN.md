@@ -46,8 +46,6 @@
 - T-Drill-01：生产演练包必须对 `cold_start_no_key/provider_down/rollback_conflict` 输出可解析单 JSON 结果，并稳定包含 `scenario_id/status/reason_code_chain/replay_ref` 与故障分类处置口径。
 
 ## T-Canon
-- T-Canon-01：Style Canon 版本化写入并记录 proposal/change（含前后 version/hash）。
-- T-Canon-02：Style Canon 仅注入 style_pack 且禁止执行事实宣告。
 
 ## T-WCanon
 - T-WCanon-01：World Canon 文件同步索引到 `world_canon_doc` 且写 `canon_change_log`。
@@ -166,3 +164,5 @@
 
 ## T-Release
 - T-Release-01: Release checklist for `M0~M3` must remain deterministic (`milestone/assets/checksums/required_services`), rollback mapping must resolve `release_id/rollback_target/impact_scope`, and flow pointer cross-check must remain consistent with `T-Flow-02`.
+
+

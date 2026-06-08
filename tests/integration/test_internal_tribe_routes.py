@@ -79,30 +79,31 @@ def test_ingest_and_list_tribe_events(monkeypatch) -> None:
     assert filtered_data["items"][0]["event_type"] == "body_sense_updated"
 
 
-def test_gemini_key_pool_status_requires_token_when_enabled(monkeypatch) -> None:
+def test_gemini_key_status_requires_token_when_enabled(monkeypatch) -> None:
     monkeypatch.setenv("HOST_INTERNAL_TRIBE_TOKEN", "secret-token")
     client = _build_client()
 
-    resp = client.get("/internal/llm/gemini_key_pool")
+    resp = client.get("/internal/llm/gemini_key")
 
     assert resp.status_code == 401
     assert resp.json()["detail"] == "UNAUTHORIZED_INTERNAL_TRIBE_EVENT"
 
 
-def test_gemini_key_pool_status_response_shape(monkeypatch) -> None:
+def test_gemini_key_status_response_shape(monkeypatch) -> None:
     monkeypatch.setenv("HOST_INTERNAL_TRIBE_TOKEN", "secret-token")
     client = _build_client()
     headers = {"X-Internal-Token": "secret-token"}
 
-    resp = client.get("/internal/llm/gemini_key_pool", headers=headers)
+    resp = client.get("/internal/llm/gemini_key", headers=headers)
 
     assert resp.status_code == 200
     body = resp.json()
     assert body["provider_name"] == "gemini"
-    assert "pool_size" in body
+    assert "key_configured" in body
     assert "source" in body
-    assert "source_breakdown" in body
-    assert "strategy" in body
+    assert "runtime_profile_available" in body
+    assert "env_key_configured" in body
     # 安全约束：不返回密钥原文或密钥列表
     assert "keys" not in body
     assert "api_key" not in body
+    assert "pool_size" not in body

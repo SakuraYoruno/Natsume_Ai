@@ -1,7 +1,7 @@
-{
-  "intent_id": "intent_tok_expired_001",
-  "skill_name": "read_only_status",
-  "session_id": "session_tok",
-  "seq": 12,
-  "issued_ts_ms": 1700000000000
+﻿{
+    "intent_id":  "intent_tok_expired_001",
+    "skill_name":  "read_only_status",
+    "session_id":  "session_tok",
+    "seq":  12,
+    "issued_ts_ms":  1700000000000
 }

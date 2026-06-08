@@ -500,6 +500,68 @@ class TestIntentAgentExecutionTools:
         assert result.get("agent_id") == "translate_agent"
         assert "handled:translate_agent" in str(result.get("result") or "")
 
+    def test_dispatch_sub_agent_hydrates_conversation_window_and_memory_packet(self):
+        captured: dict[str, object] = {}
+
+        class _FakeDispatcher:
+            async def dispatch(self, req):  # noqa: ANN001
+                captured["req"] = req
+                return SimpleNamespace(
+                    success=True,
+                    result="handled",
+                    error=None,
+                    latency_ms=23,
+                    audit_refs={"trace": "ok"},
+                )
+
+        class _FakeHistory:
+            def fetch_window_for_messages(self, **kwargs):  # noqa: ANN001
+                captured["history_kwargs"] = dict(kwargs)
+                return SimpleNamespace(
+                    recent_turns=[
+                        SimpleNamespace(role="user", content="刚才那本书是哪本", turn_index=1),
+                        SimpleNamespace(role="assistant", content="我刚才推荐了三本轻小说", turn_index=2),
+                    ],
+                    older_summary="更早些时候在测试子 agent 上下文。",
+                    older_turn_count=12,
+                    fetched_count=2,
+                )
+
+        with patch("host_brain.app.sub_agent_protocol.get_sub_agent_dispatcher", return_value=_FakeDispatcher()), patch(
+            "host_brain.app.dependencies.get_conversation_history",
+            return_value=_FakeHistory(),
+        ):
+            result = execute_tool(
+                "dispatch_sub_agent",
+                {
+                    "agent_id": "translate_agent",
+                    "task": "翻译刚才那段",
+                    "_react_context": {
+                        "agent_id": "intent_agent",
+                        "request_id": "req_tool_sub_agent_hydrate",
+                        "session_id": "sess_tool_sub_agent_hydrate",
+                        "retrieval_summary": {
+                            "surface_memory_recall_packet": {
+                                "facts": ["长期事实：翻译保留术语表。"],
+                                "evidence_refs": ["semantic://sem-translate"],
+                            }
+                        },
+                    },
+                },
+            )
+
+        assert result.get("success") is True
+        req = captured["req"]
+        ctx = dict(req.context)
+        assert ctx["parent_agent_id"] == "intent_agent"
+        assert ctx["tool_budget"]["timeout_ms"] >= 1000
+        assert "retrieval_summary" in ctx
+        assert ctx["surface_memory_recall_packet"]["facts"] == ["长期事实：翻译保留术语表。"]
+        assert ctx["conversation_window"]["older_summary"] == "更早些时候在测试子 agent 上下文。"
+        assert len(ctx["conversation_window"]["recent_turns"]) == 2
+        assert captured["history_kwargs"]["max_turns"] == 4
+        assert captured["history_kwargs"]["exclude_request_id"] == "req_tool_sub_agent_hydrate"
+
     def test_dispatch_sub_agent_blocks_self_recursion(self):
         result = execute_tool(
             "dispatch_sub_agent",

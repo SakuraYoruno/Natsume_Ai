@@ -59,18 +59,18 @@ reset_soft_failures()
 print('[OK] soft_fail contract passed')
 PY
 
-# --- OPT-5：build_chat_prompt_runtime_payload 与 chat_payload_builder 流水线都存在 ---
+# --- OPT-5：旧 payload builder 已退役，Surface 主链入口必须存在 ---
 echo ""
-echo "[OPT-5] 检查 chat_payload_builder 流水线存在..."
-if [ ! -f "$ROOT/host_brain/app/chat_payload_builder.py" ]; then
-  echo "  ✗ chat_payload_builder.py 不存在"
+echo "[OPT-5] 检查 Surface reply 主链入口存在..."
+if [ ! -f "$ROOT/host_brain/app/surface_reply_runtime.py" ]; then
+  echo "  ✗ surface_reply_runtime.py 不存在"
   exit 1
 fi
-if ! grep -q "soft_fail" "$ROOT/host_brain/app/chat_payload_builder.py"; then
-  echo "  ✗ chat_payload_builder.py 未接入 soft_fail"
+if [ ! -f "$ROOT/host_brain/persona/surface_main_chain.py" ]; then
+  echo "  ✗ surface_main_chain.py 不存在"
   exit 1
 fi
-echo "  [ok] chat_payload_builder.py exists and uses soft_fail"
+echo "  [ok] surface_reply_runtime.py and surface_main_chain.py exist"
 
 # --- OPT-6：prompt lint 脚本可运行且当前仓库通过 ---
 echo ""

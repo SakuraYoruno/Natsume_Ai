@@ -36,7 +36,7 @@ def test_allowed_write_increments_version() -> None:
     first = arbiter.write(
         scope=StateScope.SOUL_STATE,
         writer_agent_id="persona_core",
-        payload={"persona_stage": "stranger"},
+        payload={"persona_stage": "familiar"},
         request_id="req_1",
     )
     second = arbiter.write(
@@ -49,7 +49,7 @@ def test_allowed_write_increments_version() -> None:
     assert first.state_version == 1
     assert second.state_version == 2
     state = arbiter.get_state(StateScope.SOUL_STATE)
-    assert state["persona_stage"] == "stranger"
+    assert state["persona_stage"] == "familiar"
     assert state["bond_score"] == 0.42
 
 
@@ -75,4 +75,3 @@ def test_set_scope_writers_can_expand_authorization() -> None:
     arbiter.set_scope_writers(StateScope.SOUL_STATE, ["persona_core", "growth_agent"], replace=False)
     decision = arbiter.can_write(scope=StateScope.SOUL_STATE, writer_agent_id="growth_agent")
     assert decision.allowed is True
-

@@ -73,6 +73,41 @@ class LedgerSchedulerMixin:
             result.append(d)
         return result
 
+    def load_latest_scheduler_event_trigger_ts(self, task_ids: list[str] | tuple[str, ...] | None = None) -> dict[str, int]:
+        """返回每个调度任务最近一次触发时间，用于进程重启后恢复去重状态。"""
+        normalized_task_ids = [str(task_id).strip() for task_id in (task_ids or []) if str(task_id).strip()]
+        params: list[Any] = []
+        filters = ["status NOT IN ('SKIPPED', 'REJECTED', 'DEFERRED', 'RETRYING', 'ERROR', 'FAILED', 'SUSPENDED')"]
+        if normalized_task_ids:
+            placeholders = ",".join("?" for _ in normalized_task_ids)
+            filters.append(f"task_id IN ({placeholders})")
+            params.extend(normalized_task_ids)
+        where = "WHERE " + " AND ".join(filters)
+        try:
+            rows = self._conn.execute(
+                f"""
+                SELECT task_id, MAX(trigger_ts) AS trigger_ts
+                FROM scheduler_event_log
+                {where}
+                GROUP BY task_id
+                """,
+                params,
+            ).fetchall()
+        except sqlite3.OperationalError:
+            return {}
+        result: dict[str, int] = {}
+        for row in rows:
+            task_id = str(row["task_id"] or "").strip()
+            if not task_id:
+                continue
+            try:
+                trigger_ts = int(row["trigger_ts"] or 0)
+            except (TypeError, ValueError):
+                trigger_ts = 0
+            if trigger_ts > 0:
+                result[task_id] = trigger_ts
+        return result
+
     def delete_persisted_scheduler_task(self, task_id: str) -> bool:
         """从 scheduler_tasks 表删除指定任务（任务注销时调用）。"""
         with self._write_lock:

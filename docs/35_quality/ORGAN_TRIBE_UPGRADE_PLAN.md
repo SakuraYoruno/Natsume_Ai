@@ -1,14 +1,18 @@
+受众：CODEX
+标题：器官族升级方案：B/C 级 → A 级（质量盘点留痕）
+
 # 器官族升级方案：B/C 级 → A 级（质量盘点留痕）
 
 **文档编号**：ORGAN-TRIBE-UPGRADE-001
 **日期**：2026-04-16
 **版本**：v2.0
-**状态**：质量层升级盘点留痕（2026-04-19 已校准，不作为当前完成度总表）
+**状态**：质量层升级盘点留痕（2026-05-30 复核：23 个 tribe family 已全量 A 级化，本文仅作为历史阶段快照；**不作为当前完成度总表**）
 **受众**：核心开发团队
 
-> 当前代码校准说明（2026-04-19）
+> 当前代码校准说明（2026-05-30）
 > - 本文是 2026-04-16 的器官族能力分级盘点与升级计划，适合作为质量侧 backlog / 阶段快照阅读，不应当作当前 tribe family 运行时总表。
-> - 当前仓库对 tribe / organ 的现行口径应以 `CURRENT_CODE_ARCHITECTURE.md`、`CORE_MODULES_DETAILED_REFERENCE.md`、`AGENT_ORCHESTRATION_DETAIL.md` 和实际代码为准；当前代码事实中已不只是一份简单的 A/B/C 评级表。
+> - 2026-05-30 现状：`host_brain/tribe/registry.py:_DEFAULT_FAMILY_SPECS` 已为 23 个 family（原计划中的 22 个已全部 A 级化，另增 `glymphatic` family）；灰度开关已全数删除。
+> - 当前仓库对 tribe / organ 的现行口径应以 `CURRENT_CODE_ARCHITECTURE.md` (v3.0)、`CORE_MODULES_DETAILED_REFERENCE.md` (v3.0)、`AGENT_ORCHESTRATION_DETAIL.md` 和实际代码为准。
 > - 文中“已完成”“待补”等结论只代表当时盘点时点，是否仍成立应以当前模块接线、路由可达性与真实调用关系复核。
 
 ---

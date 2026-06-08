@@ -1,3 +1,6 @@
+受众：PROJECT
+标题：Codex Digital Life Production Closure Matrix, 2026-04-25
+
 # Codex Digital Life Production Closure Matrix, 2026-04-25
 
 Status: ADOPTED CLOSURE REPORT. Codex Runtime v2 + BioOps proposal-only.

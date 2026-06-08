@@ -1,18 +1,30 @@
 受众：CODEX
-标题：模型平面（Model Plane）规格说明（9 云节点配置、路由、审计与降级）
+标题：模型平面（Model Plane）规格说明（共享池、模型节点资产、Surface 收口、审计与降级）
 
 # 模型平面（Model Plane）规格说明
-版本：v1.4
-日期：2026-04-22
+版本：v1.6
+日期：2026-06-05
 
 定位：本文件属于 DevSpec 子规格，只写"怎么做 + 如何验证（测试点/日志点/契约点）"。
-目标：把"9 云节点 + Host 本地 14B 怎么分工、怎么路由、怎么降级、怎么最小化出网、怎么审计回放"写成稳定契约，允许你以后换模型但不换治理。
+目标：把"共享模型池 + 模型节点资产 + Host 本地兜底 + Surface 收口"怎么分工、怎么路由、怎么降级、怎么最小化出网、怎么审计回放写成稳定契约，允许以后换模型但不换治理。
 
-当前代码校准说明（2026-04-22）：
-- 当前运行时已经不是“每个场景显式点一个固定云节点”的早期骨架，而是以 `host_brain/integrations/llm_helpers.py` 的共享池和 `llm_gateway.py::complete_with_pool()` 为统一入口。
-- 当前池化运行面是 tier A/B/C/D 四档，Gemini 与 MiniMax 共同组成主备候选；`configs/model_plane/node_registry.yaml` 仍是模型平面资产真相源之一，但运行时选路已收敛到共享池辅助层。
+当前代码校准说明（2026-06-05）：
+- 当前运行时已经不是”每个场景显式点一个固定云节点”的早期骨架，而是以 `host_brain/integrations/llm_helpers.py` 的共享池和 `llm_gateway.py::complete_with_pool()` 为统一入口。
+- **运行时路由实际是 role-based（chat_agent / executive_router / subagent 等角色）而非 tier A/B/C/D 四档。** 实际路由代码在 `host_brain/app/model_router.py`，当前仅使用 Gemini 系列模型；`model_capability_registry.py` 的 `_KNOWN_PROFILES` 中仅有 Gemini profile，MiniMax 仅作为静态配置存在于 `configs/model_plane/node_registry.yaml`，不在 capability registry 中，因此多 provider fallback 路径为配置层面预留而非运行时已激活。
 - 审计字段方面，除既有 `model_control_log` 外，当前代码还写 `llm_pool_call_log`，记录 `scene_type / cognitive_tier / attempts / final_provider / final_model / pool_exhausted / degraded_to_rule`。
 - 调度面当前还额外约束了后台 LLM 任务的 `sys_mode` allowlist；因此阅读本文件时，应把“9 云节点固定分工”理解为治理角色与能力分层，而不是唯一运行时调用形态。
+- 旧的双段字段名不再作为当前最终输出契约；当前用户可见回复以 Surface Main Chain 的 `selected_text` 候选和 `ReplyEnvelope` 的 `final_reply` 收口为准。
+- 视觉/界面相关代码属于高门槛兼容能力或局部场景处理，不构成当前 `/v1/chat` 主链的默认本地界面执行能力。
+
+### 0.1 当前链路入口（2026-06-04）
+
+模型平面实际触达主链时序应与该结构保持一致：
+
+- 模型调用入口：`host_brain/integrations/llm_gateway.py` 的 `complete_with_pool()`；
+- 上游输入：`host_brain/integrations/llm_helpers.py`、`prompt_context.py`、`chat_payload_builder.py`、`surface_context_packet.py` 提供统一路由与表达上下文；
+- 最终表达：`surface_main_chain_adapter.py` 调用 Surface Main Chain，并由 `reply_envelope.py` 决定是否可发送、持久化或缓存；
+- 兜底策略：`llm_pool_call_log` 与 `model_control_log` 在审计口径上都要可回放；
+- 若某章节与当前代码分歧，以 `docs/50_project/arch/CURRENT_CODE_ARCHITECTURE.md` 为准，且仅在 `model_plane` 相关任务中更新回溯条目。
 
 ---
 
@@ -31,32 +43,49 @@
 - WRITE 类工具默认不可见；即使可见也必须经 Host Governor+Token 才能执行。
 - tool_visibility_hash 必须随 intent_log 一并记录，用于追责"当时模型看见了什么"。
 
-0.4 二段式输出（强制）
-- 第一段：中文语义内核（产 narrative_zh + intent_draft，边界锁死）
-- 第二段：日文化渲染（将 narrative_zh 渲染为日文 C 风格，禁止加料/升级）
+0.4 候选输出与最终表达收口
+- 模型节点只能产出候选文本、意图草案、校验结果或 Agent 工件；不得直接形成最终用户可见回复。
+- Surface Main Chain 接收事实、状态、记忆、情感与风格材料，产出 `selected_text` 一类候选表达，但不得绕过 Governor 或自行声明执行事实。
+- `ReplyEnvelope` 是最终发送、持久化与缓存的收口契约；只有满足条件的 `final_reply` 可以进入对应下游，ACK、任务状态、降级失败不得写入人格记忆。
+- 历史调试字段或历史节点名不得被当作当前最终输出字段；兼容层若仍暴露旧字段，也只能作为候选文本来源。
 
 ---
 
-## 1. 输出契约（Strict JSON）
+## 1. 输出契约（结构化输出）
 
-1.1 CoreDraft.v1（语义/规划类节点输出）
-- 单个 JSON 对象
+1.1 ModelCandidate.v1（语义/规划类节点输出）
+- 单个可解析结构化对象
 - 字段最小集：
-  - narrative_zh: string
+  - candidate_text: string|null
   - intent_draft: object|null
   - meta: object（可选；不得承载执行事实）
+- 若 `intent_draft` 进入 Governor，必须遵守 `Natsume.intent.v1` 规范：`schema_version / id / ts_ms / session_id / seq / type / action / target / args / nonce`。
+- `action` 只能落在当前 Governor allowlist 或显式扩展 allowlist 内；未知扩展字段只能被下游兼容读取，不能绕过严格校验。
 
-1.2 RenderDraft.v1（渲染器输出）
-- 单个 JSON 对象
+1.2 SurfaceMainChainResult（最终表达候选）
+- 单个可解析结构化对象
 - 字段最小集：
-  - rendered_ja: string（只做风格渲染）
-  - render_meta: object（可选）
+  - selected_text: string
+  - natsume_emotion_tag: string|null
+  - user_emotion_tag: string|null
+  - vts_expression_id: string|null
+  - observation_codes: list
+  - packet_trace / runtime: object（可选；用于审计与调试）
 
-渲染禁令：
+Surface 禁令：
 - 不得新增事实、不得升级承诺强度、不得升级证据强度、不得引入新 intent。
+- 不得把 Canon、风格材料、情绪标签或外显动作提示当成已发生事实。
 
-1.3 Verifier.v1（校验节点输出）
-- 单个 JSON 对象
+1.3 ReplyEnvelope（对外输出收口）
+- 字段最小集：
+  - kind: final_reply|no_reply|transport_ack|task_status
+  - text: string
+  - reason_code: string
+  - sendable / persistable / cacheable: bool
+- 只有 `kind=final_reply` 且具备可交付文本、未降级失败时，才允许发送、持久化或缓存。
+
+1.4 Verifier.v1（校验节点输出）
+- 单个可解析结构化对象
 - 字段最小集：
   - verdict: PASS|FAIL|UNKNOWN
   - issues: [{code, severity, span_hint, note}]
@@ -64,7 +93,7 @@
 
 ---
 
-## 2. ContextPack（Host→Cloud）分槽与出网字段
+## 2. Prompt / Surface Context（Host→Model）分槽与出网字段
 
 2.1 分槽字段（必须）
 - hard_snapshot：桶化（energy_bucket/mood_bucket/sys_mode/safety_bucket），不含原值
@@ -73,7 +102,7 @@
 - retrieval.episodic：仅摘要+evidence_refs
 - style_pack.style_canon：tone_only=true，unsafe_as_fact=true
 - tool_meta_pack：Top-K 工具元数据子集（可空）
-- constraints：strict_json_output、no_false_execution_claim、no_canon_as_fact、tone_policy、contract_versions
+- constraints：structured_output_contract、no_false_execution_claim、no_canon_as_fact、tone_policy、contract_versions
 
 2.2 AIRLOCK 出站审计字段（必须写）
 - sanitization_report_ref
@@ -88,28 +117,29 @@
 说明：
 - node_id/role 固定；provider/model_id 可替换，但必须保持契约版本兼容；若不兼容必须 bump model_profile_id。
 - 为可回放与抗漂移：优先使用"可 pin 的具体模型字符串/快照"；仅在明确允许时使用 latest 别名。
+- 本节保留的是模型节点资产与兼容配置口径；最终用户可见输出仍必须经 Surface Main Chain 与 ReplyEnvelope 收口。
 
 3.1 节点清单（v1.1 具体配置）
 1）core_reasoner_primary（role=core）
 - 用途：主语义推理（叙事+意图草案）
 - provider/model_id：gemini / gemini-2.5-pro
-- 输出：CoreDraft.v1
+- 输出：ModelCandidate.v1 / IntentDraft.v1
 - 约束：输出尽量短（避免长叙事占预算）
 
 2）core_reasoner_secondary（role=core_backup）
 - 用途：主模型超时/限流时的备选（更快更省）
 - provider/model_id：gemini / gemini-2.5-flash
-- 输出：CoreDraft.v1
+- 输出：ModelCandidate.v1 / IntentDraft.v1
 
 3）planner_constraints（role=planner）
 - 用途：复杂任务约束拆解（偏结构，不写长叙事）
 - provider/model_id：gemini / gemini-2.5-pro
-- 输出：CoreDraft.v1（narrative_zh 可空）
+- 输出：ModelCandidate.v1（candidate_text 可空）
 
 4）tool_planner（role=tool_planner）
 - 用途：在 tool_meta_pack 子集内选择工具与参数草案（不得执行）
 - provider/model_id：gemini / gemini-2.5-flash（pin）
-- 输出：CoreDraft.v1（intent_draft 必含 tool_id + args 草案）
+- 输出：ModelCandidate.v1（intent_draft 必含 tool_id + args 草案）
 
 5）safety_verifier（role=verifier_safety）
 - 用途：拦截三类风险：伪执行宣告、承诺升级、证据升级、越权倾向
@@ -121,20 +151,20 @@
 - provider/model_id：gemini / gemini-2.5-flash-lite
 - 输出：Verifier.v1
 
-7）renderer_ja_c_style（role=renderer_ja）
-- 用途：日文 C 风格渲染（短句、克制、停顿……），不得加料
+7）renderer_ja_c_style（role=style_candidate，兼容节点名）
+- 用途：风格候选生成（短句、克制、停顿……），不得加料；该节点名是历史兼容资产名，不代表最终回复字段
 - provider/model_id：gemini / gemini-2.5-flash
-- 输出：RenderDraft.v1
+- 输出：ModelCandidate.v1（style_candidate）
 
 8）workbench_translate（role=workbench_translate）
 - 用途：翻译/术语一致性辅助（流水线任务）
 - provider/model_id：gemini / gemini-2.5-pro
-- 输出：CoreDraft.v1（或后续 TranslateDraft）
+- 输出：ModelCandidate.v1（或后续 TranslateDraft）
 
 9）workbench_code_assist（role=workbench_code）
 - 用途：代码协作草案（不得宣称已构建/已通过）
 - provider/model_id：gemini / gemini-2.5-pro
-- 输出：CoreDraft.v1
+- 输出：ModelCandidate.v1
 
 3.2 Host 本地 14B 模型（最终兜底）
 - host_14b（role=chat_direct）
@@ -163,7 +193,7 @@
 **输出**：`scene_type_hint: str`（CHAT / EXEC_INTENT / WORK_TRANSLATE / WORK_CODE / VISION_UI）
 
 **优先级规则**（从高到低）：
-1. VISION_UI：截图/屏幕/界面等关键词
+1. VISION_UI（兼容枚举）：截图/屏幕/界面等关键词；当前只能作为观测/描述或受控兼容场景入口
 2. WORK_CODE：代码/编程/函数/python 等关键词
 3. WORK_TRANSLATE：翻译/translate/訳して 等关键词
 4. EXEC_INTENT：执行/运行/设置/配置等关键词
@@ -179,19 +209,19 @@
 - EXEC_INTENT：执行意图（需要 Governor）
 - WORK_TRANSLATE：翻译流水线
 - WORK_CODE：代码协作
-- VISION_UI：ClawdBot/UI（高门槛）
+- VISION_UI（兼容枚举）：屏幕/图像观测或界面描述（高门槛；当前 `/v1/chat` 主链不得默认声明本地界面执行）
 - CHANNEL_IO：统一消息网关入站消息处理（微信/QQ/Telegram/飞书/企微/LINE），模型只写草案文本
   - 子类型：text（文本）/ voice（语音 ASR 转文字）/ image（图片描述）/ voice_call（语音通话触发）
 
-4.2 两段式输出链路（强制）
-- CHAT（最小链路）：core_reasoner_primary → consistency_verifier → renderer_ja_c_style
-- EXEC_INTENT：core_reasoner_primary → planner_constraints → tool_planner → safety_verifier → consistency_verifier → renderer_ja_c_style
-- WORK_TRANSLATE：core_reasoner_primary → workbench_translate → consistency_verifier → renderer_ja_c_style
-- WORK_CODE：core_reasoner_primary → workbench_code_assist → consistency_verifier → renderer_ja_c_style
+4.2 候选链路与 Surface 收口（强制）
+- CHAT（最小链路）：model candidate → consistency_verifier → Surface Main Chain → ReplyEnvelope
+- EXEC_INTENT：model candidate → planner_constraints → tool_planner → Governor → safety_verifier/consistency_verifier → Surface Main Chain → ReplyEnvelope
+- WORK_TRANSLATE：model candidate → workbench_translate → consistency_verifier → Surface Main Chain → ReplyEnvelope
+- WORK_CODE：model candidate → workbench_code_assist → consistency_verifier → Surface Main Chain → ReplyEnvelope
 - safety_verifier 在 CHAT 中默认非必经，仅在高风险触发（执行承诺/越权倾向/高风险领域建议等）时插入到 consistency_verifier 前。
 规则：
-- intent_draft 只能来自 S1；S2 不得新增/修改 intent_draft。
-- consistency_verifier 作为对外输出前的一致性闸门，默认不得跳过（故障降级链路除外）。
+- intent_draft 只能来自模型候选/工具规划阶段；Surface 与 ReplyEnvelope 不得新增或修改 intent_draft。
+- consistency_verifier 与 Surface Main Chain 作为对外输出前的一致性闸门，默认不得跳过（故障降级链路除外）。
 
 4.3 3–5 秒开口（在场回应 + 超时退化）
 - t0：Host 立即输出"在场回应模板"（不承诺执行），并启动云调用
@@ -202,14 +232,14 @@
 4.4 Gaming 模式（显存被游戏占用）
 - Host 强制 NO_LOCAL_GPU：仅允许模板/规则引擎/CPU 兜底
 - 云端仍可用（受 AIRLOCK、预算与网络波动影响）
-- 渲染默认走云端 renderer_ja_c_style；云不可用则退化为 Host 简短日文模板（由 Style Canon 提供），不得"补剧情"。
+- 不主动进行屏幕观测或界面执行；云不可用时退化为 Host 简短模板（由 Style Canon 提供口吻约束），不得"补剧情"或宣称已执行。
 
 ---
 
 ## 5. 成本与长度治理（不写价格，只写可执行预算口径）
 
 5.1 默认限额（建议基线）
-- CHAT：Core 输出 max_output_tokens_cap（短），Renderer 输出 max_output_tokens_cap（中短）
+- CHAT：模型候选输出 max_output_tokens_cap（短），Surface 输出 max_output_tokens_cap（中短）
 - WORK_*：允许更长，但必须启用"结构化输出+分段"策略（由 Flow/编排控制）
 - EXEC_INTENT：叙事短、intent_draft 结构完整优先
 
@@ -243,11 +273,12 @@
 
 ## 7. 回归测试口径（建议编号）
 
-- T-LLM-01：CoreDraft/RenderDraft/Verifier 输出 Strict JSON（单对象、无前后缀、字段最小集）
-- T-Render-01：渲染不得加料/不得升级承诺与证据/不得引入 intent
-- T-Route-CHAT-01：CHAT 最小链路固定为 core_reasoner_primary → consistency_verifier → renderer_ja_c_style
+- T-LLM-01：ModelCandidate / Verifier / ReplyEnvelope 输出为单个可解析结构化对象（无前后缀、字段最小集）
+- T-Surface-01：Surface Main Chain 不得加料、不得升级承诺与证据、不得引入 intent
+- T-Route-CHAT-01：CHAT 主链必须经模型候选、Consistency/Safety 条件校验、Surface Main Chain 与 ReplyEnvelope 收口
 - T-Route-CHAT-02：CHAT 中 safety_verifier 默认不触发；命中高风险触发条件时必须出现在 consistency_verifier 之前
-- T-CP-01：context_pack 分槽隔离（world/style/episodic/tool_meta 不混槽）
+- T-CP-01：prompt_context / surface_context_packet 分槽隔离（world/style/episodic/tool_meta 不混槽）
+- T-Vision-01：VISION_UI 兼容枚举不得被解释为默认本地界面执行；缺少 Host 批准和证据时只能降级为观测/描述/澄清
 - T-Intent-01：intent_log 字段最小集（proposer/tool_visibility_hash 等）
 - T-Intent-02：proposal/decision/exec 分离（intent_log 不得支撑完成性表述）
 - T-Perf-01：超时退化链路（在场回应→主→备→兜底）输出结构稳定
@@ -261,7 +292,7 @@
 
 ## 8. 风险备注（与本次对话结论对齐）
 
-- 去限版/abliterated：禁止用于语义内核与裁决相关节点；如必须使用，仅允许用于 renderer_ja，并强制 RenderGuard 校验"不得加料/升级"。
+- 去限版/abliterated：禁止用于意图、裁决、工具规划、事实声明与最终回复收口；如必须用于离线风格候选实验，仍必须经过 Surface QA、Governor 边界与 ReplyEnvelope 收口，不得加料/升级。
 - 多供应商：用于抗单点故障与成本治理，但所有输出仍必须过 Host QA/Governor/审计链。
 
 ---

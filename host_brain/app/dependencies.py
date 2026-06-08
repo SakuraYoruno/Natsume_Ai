@@ -24,27 +24,19 @@ from host_brain.governor.tokens import TokenService
 from host_brain.app.graph_config_builder import (
     AGENT_DISPATCH_HANDLER_ID,
     INTENT_AGENT_ENTRY_HANDLER_ID,
-    SCENE_ROUTER_ENTRY_HANDLER_ID,
-    SCENE_ROUTER_POST_CORE_HANDLER_ID,
     SUPERVISOR_DISPATCH_HANDLER_ID,
-    CHAT_AGENT_HANDLER_ID,
+    SURFACE_REPLY_HANDLER_ID,
     TRANSLATE_AGENT_HANDLER_ID,
     INTENT_AGENT_HANDLER_ID,
     JUDGE_AGENT_HANDLER_ID,
     RETRIEVAL_AGENT_HANDLER_ID,  # P11/P16 新增
-    graph_scene_router_entry_handler,
-    graph_scene_router_post_core_handler,
 )
 from host_brain.integrations.graph_runtime import GraphRuntimeContract
 from host_brain.memory.episodic import EpisodicStore
+from host_brain.memory.life_memory import LifeMemoryStore
 from host_brain.mcp.tool_broker import MCPToolBroker
 from host_brain.mcp.tool_registry import MCPToolRegistry
 from host_brain.observability.metrics import MetricsCollector
-from host_brain.retrieval.pipeline import (
-    RetrievalPipelineContract,
-    build_retrieval_pipeline_from_env,
-)
-from host_brain.retrieval.orchestrator import RetrievalOrchestrator
 from host_brain.reasoning.reflection_chain import ReflectionChain
 from host_brain.channels.multimodal_processor import MultimodalProcessor
 from host_brain.channels.tts_context_router import TtsContextRouter
@@ -66,11 +58,6 @@ from host_brain.skills.provider_catalog import register_configured_skill_provide
 from host_brain.skills.registry import SkillRegistry
 from host_brain.tools.broker import ToolBroker
 from host_brain.tools.catalog import ToolCatalog
-from host_brain.persona.reply_surface_memory import (
-    ReplySurfaceMemoryStore,
-    create_reply_surface_memory_store,
-    prime_reply_surface_memory_from_turn_history,
-)
 
 # 新模块导入（优化计划新增模块）
 from host_brain.app.llm.routing_matrix import RoutingMatrix
@@ -112,8 +99,9 @@ _tool_broker: Optional[ToolBroker] = None
 _bond_stage_engine: Optional[BondStageEngine] = None
 _bond_update_queue: Optional[BondUpdateQueue] = None
 _episodic_store: Optional[EpisodicStore] = None
-_retrieval_pipeline: Optional[RetrievalPipelineContract] = None
-_retrieval_orchestrator: Optional[RetrievalOrchestrator] = None
+_life_memory_store: Optional[LifeMemoryStore] = None
+_retrieval_pipeline: Optional[Any] = None
+_retrieval_orchestrator: Optional[Any] = None
 _obs_metrics_collector: Optional[MetricsCollector] = None
 _graph_runtime: Optional[GraphRuntimeContract] = None
 
@@ -150,8 +138,7 @@ _conversation_turn_store: Optional[TurnStore] = None
 _conversation_history: Optional[ConversationHistory] = None
 _session_topic_ledger_store: Optional[SessionTopicLedgerStore] = None
 _session_tactic_ledger_store: Optional[SessionTacticLedgerStore] = None
-_reply_surface_memory_store: Optional[ReplySurfaceMemoryStore] = None
-_reply_surface_memory_primed: bool = False
+_security_immune_agent: Optional[Any] = None
 
 # ── 进程级 HardState 存储（ModeTransitionService 依赖） ──
 _hard_state_lock = __import__("threading").Lock()
@@ -161,11 +148,43 @@ _hard_state: Optional[Any] = None  # 实际类型: HardState
 _activity_monitor_ref: Optional[Any] = None
 _activity_monitor_lock = __import__("threading").Lock()
 
+# ── 进程级 SystemResourceManager 引用（整机资源自动监控） ──
+_resource_manager_ref: Optional[Any] = None
+_resource_manager_lock = __import__("threading").Lock()
+
 
 def set_activity_monitor(monitor) -> None:
     """注册进程级 ActivityMonitor 实例（由 http_hooks 启动时调用）。"""
     global _activity_monitor_ref
     _activity_monitor_ref = monitor
+
+
+def set_resource_manager(manager) -> None:
+    """注册进程级 SystemResourceManager 实例（由 http_hooks 启动时调用）。"""
+    global _resource_manager_ref
+    _resource_manager_ref = manager
+
+
+def get_resource_manager(*, create_if_missing: bool = False):
+    """获取进程级 SystemResourceManager，可选在缺失时懒启动。"""
+    global _resource_manager_ref
+    manager = _resource_manager_ref
+    if manager is not None or not create_if_missing:
+        return manager
+    if not _parse_bool_env("HOST_RESOURCE_MANAGER_ENABLED", default=False):
+        return None
+
+    with _resource_manager_lock:
+        manager = _resource_manager_ref
+        if manager is not None:
+            return manager
+        from host_brain.core.resource_manager import SystemResourceManager  # noqa: PLC0415
+
+        manager = SystemResourceManager()
+        manager.start()
+        _resource_manager_ref = manager
+        _logger.info("SystemResourceManager 已注册到 dependencies")
+        return manager
 
 
 def get_activity_monitor(*, create_if_missing: bool = False, ledger: Any | None = None):
@@ -250,6 +269,16 @@ def get_ledger() -> SQLiteLedger:
     return _ledger
 
 
+def get_security_immune_agent():
+    """获取内网安全免疫智能体单例。"""
+    global _security_immune_agent
+    if _security_immune_agent is None:
+        from host_brain.security_immune.agent import get_security_immune_agent as _get_agent  # noqa: PLC0415
+
+        _security_immune_agent = _get_agent(ledger_provider=get_ledger)
+    return _security_immune_agent
+
+
 def get_prompt_template_store() -> PromptTemplateStore:
     global _prompt_template_store
     ledger = get_ledger()
@@ -263,38 +292,6 @@ def get_conversation_turn_store() -> TurnStore:
     if _conversation_turn_store is None:
         _conversation_turn_store = TurnStore(get_ledger())
     return _conversation_turn_store
-
-
-def get_reply_surface_memory_store() -> ReplySurfaceMemoryStore:
-    global _reply_surface_memory_store
-    if _reply_surface_memory_store is None:
-        _reply_surface_memory_store = create_reply_surface_memory_store()
-    if not _reply_surface_memory_primed:
-        prewarm_reply_surface_memory_store(force=False)
-    return _reply_surface_memory_store
-
-
-def prewarm_reply_surface_memory_store(*, force: bool = False, limit: int = 512) -> int:
-    """Prime the reply-surface memory singleton from real assistant turn history."""
-    global _reply_surface_memory_store, _reply_surface_memory_primed
-    if _reply_surface_memory_store is None:
-        _reply_surface_memory_store = create_reply_surface_memory_store()
-    if _reply_surface_memory_primed and not force:
-        return 0
-    remembered = 0
-    try:
-        remembered = int(
-            prime_reply_surface_memory_from_turn_history(
-                memory_store=_reply_surface_memory_store,
-                turn_store=get_conversation_turn_store(),
-                limit=max(1, int(limit)),
-            )
-            or 0
-        )
-    except Exception as exc:
-        _logger.debug("reply surface memory prewarm failed: %s", exc)
-    _reply_surface_memory_primed = True
-    return remembered
 
 
 def get_conversation_history() -> ConversationHistory:
@@ -319,31 +316,12 @@ def get_session_tactic_ledger_store() -> SessionTacticLedgerStore:
 
 
 def _resolve_episodic_embedding_binding() -> tuple[Any, str, str]:
-    from host_brain.retrieval.embedding import (  # noqa: PLC0415
-        _invoke_embedding_provider,
-        build_embedding_provider_registry,
-        load_embedding_runtime_config,
-        resolve_embedding_route,
-    )
-
-    cfg_result = load_embedding_runtime_config(env=os.environ)
-    if not cfg_result.success or cfg_result.config is None:
-        raise RuntimeError(f"episodic embedding runtime config invalid: {cfg_result.as_dict()}")
-    node_id = str(
-        os.environ.get("HOST_RETR_NODE_ID")
-        or os.environ.get("Natsume_HOST_NODE_ID")
-        or "natsu-node-01"
-    ).strip() or "natsu-node-01"
-    route = resolve_embedding_route(cfg_result.config, node_id=node_id)
-    provider_registry = build_embedding_provider_registry(env=os.environ)
-    provider = provider_registry.get(route.provider)
-    if provider is None:
-        raise RuntimeError(f"episodic embedding provider unavailable: {route.provider}")
+    from host_brain.memory.chroma_client import embed_text  # noqa: PLC0415
 
     def _embed(text: str) -> tuple[list[float], str]:
-        return _invoke_embedding_provider(provider, str(text or "").strip(), route)
+        return embed_text(str(text or "").strip())
 
-    return _embed, str(route.model_id), str(route.provider)
+    return _embed, "memory.chroma_client.embed_text", "memory_chroma"
 
 
 def _build_episodic_embedding_callable() -> Any:
@@ -373,55 +351,27 @@ def get_episodic_store() -> EpisodicStore:
     return _episodic_store
 
 
-def get_retrieval_pipeline() -> RetrievalPipelineContract:
-    global _retrieval_pipeline
-    if _retrieval_pipeline is None:
-        node_id = str(
-            os.environ.get("HOST_RETR_NODE_ID")
-            or os.environ.get("Natsume_HOST_NODE_ID")
-            or "natsu-node-01"
-        ).strip() or "natsu-node-01"
-        _retrieval_pipeline = build_retrieval_pipeline_from_env(
-            env=os.environ,
-            ledger=get_ledger(),
-            node_id=node_id,
-        )
-    return _retrieval_pipeline
+def get_life_memory_store() -> LifeMemoryStore:
+    global _life_memory_store
+    ledger = get_ledger()
+    if _life_memory_store is None or getattr(_life_memory_store, "ledger", None) is not ledger:
+        _life_memory_store = LifeMemoryStore(ledger=ledger)
+    return _life_memory_store
 
 
-def get_retrieval_orchestrator() -> RetrievalOrchestrator:
-    global _retrieval_orchestrator
-    pipeline = get_retrieval_pipeline()
-    cache_enabled = _parse_bool_env("HOST_RETRIEVAL_CACHE_ENABLED", default=False)
-    cache_ttl_ms = _parse_int_env(
-        "HOST_RETRIEVAL_CACHE_TTL_MS",
-        default=3000,
-        minimum=0,
-        maximum=600000,
-    )
-    cache_max_entries = _parse_int_env(
-        "HOST_RETRIEVAL_CACHE_MAX_ENTRIES",
-        default=256,
-        minimum=1,
-        maximum=20000,
-    )
-    cache_signature = (
-        bool(cache_enabled and cache_ttl_ms > 0 and cache_max_entries > 0),
-        int(max(0, cache_ttl_ms)),
-        int(max(1, cache_max_entries)),
-    )
-    if (
-        _retrieval_orchestrator is None
-        or _retrieval_orchestrator.pipeline is not pipeline
-        or _retrieval_orchestrator.cache_config_signature != cache_signature
-    ):
-        _retrieval_orchestrator = RetrievalOrchestrator(
-            pipeline=pipeline,
-            cache_enabled=cache_enabled,
-            cache_ttl_ms=cache_ttl_ms,
-            cache_max_entries=cache_max_entries,
-        )
-    return _retrieval_orchestrator
+def get_retrieval_pipeline() -> None:
+    """Legacy Agentic RAG pipeline compatibility shim.
+
+    The current main chain uses surface_memory_recall -> RecallFusionServiceContract
+    and compresses recall into ReplyControlPacket facts. The old pipeline entry is
+    intentionally inert so legacy imports do not pull the removed stack back in.
+    """
+    return None
+
+
+def get_retrieval_orchestrator() -> None:
+    """Legacy retrieval compatibility shim."""
+    return None
 
 
 def get_graph_runtime() -> GraphRuntimeContract:
@@ -430,14 +380,6 @@ def get_graph_runtime() -> GraphRuntimeContract:
         _graph_runtime = GraphRuntimeContract(
             ledger=get_ledger(),
             default_timeout_ms=5_000,
-        )
-        _graph_runtime.register_node_handler(
-            SCENE_ROUTER_ENTRY_HANDLER_ID,
-            graph_scene_router_entry_handler,
-        )
-        _graph_runtime.register_node_handler(
-            SCENE_ROUTER_POST_CORE_HANDLER_ID,
-            graph_scene_router_post_core_handler,
         )
         # M-MA1：注册 Supervisor 分派 handler（trusted handler，可写 __next_node__）
         from host_brain.app.handlers.supervisor_dispatch_handler import supervisor_dispatch_handler  # noqa: PLC0415
@@ -450,12 +392,12 @@ def get_graph_runtime() -> GraphRuntimeContract:
         from host_brain.app.handlers.intent_agent_entry_handler import intent_agent_entry_handler  # noqa: PLC0415
         _graph_runtime.register_node_handler(INTENT_AGENT_ENTRY_HANDLER_ID, intent_agent_entry_handler)
         # M-MA5：注册各 Agent Handler（只产出工件，不写 __next_node__）
-        from host_brain.app.handlers.chat_agent_handler import chat_agent_handler  # noqa: PLC0415
+        from host_brain.app.handlers.surface_reply_handler import surface_reply_handler  # noqa: PLC0415
         from host_brain.app.handlers.translate_agent_handler import translate_agent_handler  # noqa: PLC0415
         from host_brain.app.handlers.intent_agent_handler import intent_agent_handler  # noqa: PLC0415
         from host_brain.app.handlers.judge_agent_handler import judge_agent_handler  # noqa: PLC0415
         from host_brain.app.handlers.retrieval_agent_handler import retrieval_agent_handler  # noqa: PLC0415
-        _graph_runtime.register_node_handler(CHAT_AGENT_HANDLER_ID, chat_agent_handler)
+        _graph_runtime.register_node_handler(SURFACE_REPLY_HANDLER_ID, surface_reply_handler)
         _graph_runtime.register_node_handler(TRANSLATE_AGENT_HANDLER_ID, translate_agent_handler)
         _graph_runtime.register_node_handler(INTENT_AGENT_HANDLER_ID, intent_agent_handler)
         _graph_runtime.register_node_handler(JUDGE_AGENT_HANDLER_ID, judge_agent_handler)
@@ -548,7 +490,7 @@ def get_bond_stage_engine() -> BondStageEngine:
     if _bond_stage_engine is None:
         # 修复问题F：Bond 积分阈值可配置化
         # 支持通过环境变量覆盖默认阈值，格式：JSON 字符串
-        # 示例：HOST_BOND_STAGE_THRESHOLDS='{"STRANGER":0,"ACQUAINTANCE":5,"FRIEND":20}'
+        # 示例：HOST_BOND_STAGE_THRESHOLDS='{"FRIEND":0,"CLOSE_FRIEND":70,"CONFIDANT":150,"SOULMATE":300}'
         import json as _json
         from host_brain.bond.bond_stage_engine import DEFAULT_STAGE_THRESHOLDS, DEFAULT_SCORE_MAP
 
@@ -603,17 +545,16 @@ def get_milestone_tracker() -> MilestoneTracker:
 
 
 def get_bond_neo4j_client():
-    """根据生产配置选择 Bond SSOT 客户端。
+    """根据运行配置选择 Bond SSOT 客户端。
 
     优先级：
     1. HOST_BOND_BACKEND=sqlite → SqliteBondClient
     2. HOST_BOND_BACKEND=memory → InMemoryNeo4jBondClient
     3. HOST_BOND_BACKEND=neo4j → Neo4jBondClient
-    4. 未显式指定时：prod + BOND_NEO4J_ENABLED=true → Neo4jBondClient
+    4. 未显式指定时：BOND_NEO4J_ENABLED=true → Neo4jBondClient
     5. 其它情况回退 sqlite / memory
     """
     backend_raw = str(os.environ.get("HOST_BOND_BACKEND") or "").strip().lower()
-    runtime_env = str(os.environ.get("Natsume_ENV") or "dev").strip().lower()
     sqlite_path = str(os.environ.get("HOST_BOND_SQLITE_PATH") or "").strip()
 
     if backend_raw == "sqlite" or (sqlite_path and backend_raw != "neo4j"):
@@ -623,14 +564,17 @@ def get_bond_neo4j_client():
 
     config_result = load_neo4j_runtime_config()
     if config_result.success and config_result.config is not None:
-        prefers_neo4j = backend_raw == "neo4j" or (not backend_raw and runtime_env == "prod")
+        prefers_neo4j = backend_raw == "neo4j" or (
+            not backend_raw and bool(config_result.config.enabled)
+        )
         if prefers_neo4j:
             try:
                 client = build_neo4j_bond_client(config=config_result.config)
                 if client is not None:
                     return client
             except Exception:
-                pass
+                if backend_raw == "neo4j" or bool(config_result.config.enabled):
+                    raise
 
     if sqlite_path:
         return SqliteBondClient(db_path=sqlite_path or None)
@@ -646,7 +590,15 @@ def get_bond_update_queue() -> BondUpdateQueue:
         maximum=100000,
     )
     worker_enabled = _parse_bool_env("HOST_BOND_QUEUE_ENABLED", default=True)
-    signature = (int(max_queue_size), bool(worker_enabled))
+    signature = (
+        int(max_queue_size),
+        bool(worker_enabled),
+        str(os.environ.get("HOST_BOND_BACKEND") or "").strip().lower(),
+        str(os.environ.get("BOND_NEO4J_ENABLED") or "").strip().lower(),
+        str(os.environ.get("BOND_NEO4J_URI") or "").strip(),
+        str(os.environ.get("BOND_NEO4J_DATABASE") or "").strip(),
+        str(os.environ.get("BOND_NEO4J_AUTH_REF") or "").strip(),
+    )
 
     # 修复审计问题 #10：writer_factory 使用 get_bond_neo4j_client() 而非硬编码
     # InMemoryNeo4jBondClient，确保 Bond 事件写入持久化客户端（SQLite 或内存）。
@@ -870,26 +822,69 @@ def get_semantic_recaller() -> SemanticRecaller:
     global _semantic_recaller
     if _semantic_recaller is None:
         import os as _os  # noqa: PLC0415
-        use_mock = _parse_bool_env("SEMANTIC_RECALL_USE_MOCK", default=True)
-        chroma_host = str(_os.environ.get("CHROMA_HOST") or "localhost").strip()
-        chroma_port = _parse_int_env("CHROMA_PORT", default=8000, minimum=1, maximum=65535)
+        from urllib.parse import urlparse  # noqa: PLC0415
+
+        from host_brain.memory.chroma_client import embed_text, load_chroma_runtime_config  # noqa: PLC0415
+
+        cfg_result = load_chroma_runtime_config(env=_os.environ)
+        cfg = cfg_result.config if cfg_result.success else None
+        default_use_mock = not bool(cfg is not None and cfg.enabled)
+        use_mock = _parse_bool_env("SEMANTIC_RECALL_USE_MOCK", default=default_use_mock)
+        collection_name = str(
+            _os.environ.get("SEMANTIC_RECALL_COLLECTION")
+            or _os.environ.get("SEMANTIC_RECALL_COLLECTION_NAME")
+            or (cfg.default_collection if cfg is not None else "")
+            or "episodic"
+        ).strip()
+        endpoint = str(
+            _os.environ.get("SEMANTIC_RECALL_CHROMA_ENDPOINT")
+            or (cfg.endpoint if cfg is not None else "")
+            or ""
+        ).strip()
+        parsed = urlparse(endpoint or "http://localhost:8000")
+        chroma_host = str(
+            _os.environ.get("SEMANTIC_RECALL_CHROMA_HOST")
+            or parsed.hostname
+            or _os.environ.get("CHROMA_HOST")
+            or "localhost"
+        ).strip()
+        chroma_port_default = int(parsed.port or 8000)
+        chroma_port = _parse_int_env(
+            "SEMANTIC_RECALL_CHROMA_PORT",
+            default=chroma_port_default,
+            minimum=1,
+            maximum=65535,
+        )
         top_k = _parse_int_env("SEMANTIC_RECALL_TOP_K", default=5, minimum=1, maximum=20)
         threshold_raw = str(_os.environ.get("SEMANTIC_RECALL_THRESHOLD") or "0.70").strip()
         try:
             threshold = float(threshold_raw)
         except ValueError:
             threshold = 0.70
+        profiles = dict(getattr(cfg, "collection_profiles", {}) or {})
+        vector_dim = _parse_int_env(
+            "SEMANTIC_RECALL_VECTOR_DIM",
+            default=int(profiles.get(collection_name) or profiles.get(str(getattr(cfg, "default_collection", "") or "")) or 1024),
+            minimum=1,
+            maximum=8192,
+        )
+
+        def _embed_for_runtime_collection(text: str) -> list[float]:
+            values, _model_id = embed_text(str(text or ""), dim=vector_dim)
+            return list(values or [])
+
         _semantic_recaller = SemanticRecaller(
-            collection_name="episodic_memory",
+            collection_name=collection_name,
             top_k=top_k,
             similarity_threshold=threshold,
             use_mock=use_mock,
             chroma_host=chroma_host,
             chroma_port=chroma_port,
+            embed_fn=_embed_for_runtime_collection,
         )
         _logger.info(
-            "SemanticRecaller 已初始化（use_mock=%s, chroma=%s:%d, top_k=%d, threshold=%.2f）",
-            use_mock, chroma_host, chroma_port, top_k, threshold,
+            "SemanticRecaller 已初始化（use_mock=%s, collection=%s, chroma=%s:%d, vector_dim=%d, top_k=%d, threshold=%.2f）",
+            use_mock, collection_name, chroma_host, chroma_port, vector_dim, top_k, threshold,
         )
     return _semantic_recaller
 
@@ -925,7 +920,7 @@ class _BondAwareStyleEngineProxy:
         from host_brain.tribe.prefrontal_agent import get_prefrontal_agent  # noqa: PLC0415
 
         payload = get_prefrontal_agent().resolve_bond_style_payload(
-            bond_stage=str(bond_stage or "STRANGER"),
+            bond_stage=str(bond_stage or "FRIEND"),
             intimacy_score=float(intimacy_score or 0.0),
             mood_state=str(mood_state or "neutral"),
             natsume_mood=str(natsume_mood or "NEUTRAL"),
@@ -1120,7 +1115,14 @@ def set_sys_mode(target_mode: str) -> dict:
     """
     global _hard_state
     import time as _time  # noqa: PLC0415
-    from host_brain.core.metabolism import evolve_hard_state  # noqa: PLC0415
+    from host_brain.core.metabolism import ALLOWED_SYS_MODES, evolve_hard_state  # noqa: PLC0415
+
+    normalized_target = str(target_mode or "").strip().lower()
+    if normalized_target not in ALLOWED_SYS_MODES:
+        raise ValueError(
+            "invalid sys_mode: "
+            f"{target_mode!r}; expected one of {', '.join(sorted(ALLOWED_SYS_MODES))}"
+        )
 
     with _hard_state_lock:
         current = get_hard_state()
@@ -1129,7 +1131,7 @@ def set_sys_mode(target_mode: str) -> dict:
 
         _hard_state = evolve_hard_state(
             current,
-            sys_mode=target_mode,
+            sys_mode=normalized_target,
             event_kind="mode_switch",
             ts_ms=ts,
         )

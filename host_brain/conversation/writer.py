@@ -7,17 +7,12 @@ from typing import Any
 
 from host_brain.app.dependencies import (
     get_conversation_turn_store,
-    get_reply_surface_memory_store,
     get_session_tactic_ledger_store,
     get_session_topic_ledger_store,
 )
 from host_brain.app.context.soul_runtime import get_compiled_soul
-from host_brain.persona.reply_surface_memory import (
-    build_assistant_followup_context_fingerprint,
-    build_reply_surface_memory_key,
-)
-from host_brain.persona.fallback_policy import is_surface_cacheable_reply
-from host_brain.app.reply_envelope import can_cache, can_persist
+from host_brain.app.memory_event_store import MemoryEventStore
+from host_brain.app.reply_envelope import can_persist
 from host_brain.core.soft_fail import soft_fail
 
 _logger = logging.getLogger("Natsume.conversation.writer")
@@ -32,7 +27,7 @@ def record_user_turn(
     ts_ms: int,
     lang: str,
     metadata: dict[str, Any] | None = None,
-) -> None:
+) -> dict[str, Any]:
     merged_metadata = dict(metadata or {})
     has_multimodal_metadata = bool(
         merged_metadata.get("attachments")
@@ -40,28 +35,58 @@ def record_user_turn(
         or merged_metadata.get("attachment_summary")
     )
     if not str(session_id or "").strip() or (not str(content or "").strip() and not has_multimodal_metadata):
-        return
+        return {"status": "SKIPPED", "reason_code": "EMPTY_USER_TURN"}
     normalized_content = str(content)
     with soft_fail("conversation.record_user_turn.soul_metadata", fallback=None):
         merged_metadata.setdefault("soul_id", str(getattr(get_compiled_soul(), "soul_id", "") or "").strip())
+    resolved_ts_ms = int(ts_ms or int(time.time() * 1000))
     with soft_fail("conversation.record_user_turn", fallback=None):
-        turn = get_conversation_turn_store().append_generated(
+        store = get_conversation_turn_store()
+        result = MemoryEventStore(store._ledger).append_visible_turn(
+            request_id=request_id,
             session_id=session_id,
             person_id=person_id,
-            request_id=request_id,
             role="user",
             content=normalized_content,
-            ts_ms=int(ts_ms or int(time.time() * 1000)),
+            ts_ms=resolved_ts_ms,
             lang=lang,
             metadata=merged_metadata or None,
         )
+        turn = dict(result.get("turn") or {})
         _logger.info(
-            "[%s] conversation_record role=user turn_index=%s session_id=%s content_chars=%s",
+            "[%s] memory_event_record role=user event_id=%s turn_index=%s session_id=%s content_chars=%s",
             request_id,
-            int(turn.turn_index),
+            str(result.get("memory_event_id") or ""),
+            int(turn.get("turn_index") or 0),
             str(session_id or "").strip(),
             len(normalized_content),
         )
+        with soft_fail("conversation.record_user_turn.preference_spine", fallback=None):
+            from host_brain.app.recommendation_feedback import record_user_preference_signal_if_present  # noqa: PLC0415
+
+            preference_record = record_user_preference_signal_if_present(
+                session_id=session_id,
+                person_id=person_id,
+                user_message=normalized_content,
+                payload={
+                    **merged_metadata,
+                    "request_id": request_id,
+                    "session_id": session_id,
+                    "conversation_id": merged_metadata.get("conversation_id") or merged_metadata.get("reply_target") or session_id,
+                    "platform": merged_metadata.get("platform") or merged_metadata.get("reply_channel") or "",
+                },
+                ts_ms=resolved_ts_ms,
+            )
+            if preference_record:
+                _logger.info(
+                    "[%s] preference_spine events=%s domain=%s target=%s",
+                    request_id,
+                    int(preference_record.get("event_count") or 0),
+                    str(preference_record.get("domain") or ""),
+                    str(preference_record.get("target_label") or ""),
+                )
+        return result
+    return {"status": "DEGRADED", "reason_code": "SOFT_FAIL_USER_TURN"}
 
 
 def record_assistant_turn(
@@ -74,20 +99,25 @@ def record_assistant_turn(
     lang: str,
     metadata: dict[str, Any] | None = None,
     reply_plan: Mapping[str, Any] | None = None,
-) -> None:
-    if not str(session_id or "").strip() or not str(content or "").strip():
-        return
-    normalized_content = str(content)
+) -> dict[str, Any]:
     plan_payload = dict(reply_plan or {}) if isinstance(reply_plan, Mapping) else {}
     merged_metadata = dict(metadata or {})
     envelope_payload = dict(merged_metadata.get("reply_envelope") or {}) if isinstance(merged_metadata.get("reply_envelope"), Mapping) else {}
+    content_text = str(content or "").strip()
+    if not content_text and envelope_payload and can_persist(envelope_payload):
+        response_form = str(envelope_payload.get("response_form") or plan_payload.get("response_form") or "media").strip()
+        reaction_id = str(envelope_payload.get("reaction_id") or "").strip()
+        content_text = f"[{response_form or 'media'}:{reaction_id or 'final_reply'}]"
+    if not str(session_id or "").strip() or not content_text:
+        return {"status": "SKIPPED", "reason_code": "EMPTY_ASSISTANT_TURN"}
+    normalized_content = content_text
     if envelope_payload and not can_persist(envelope_payload):
         _logger.debug("[%s] skip assistant turn: non-final reply envelope kind=%s", request_id, envelope_payload.get("kind"))
-        return
+        return {"status": "SKIPPED", "reason_code": "NON_FINAL_ENVELOPE"}
     message_kind = str(merged_metadata.get("message_kind") or "").strip().lower()
     if message_kind and message_kind != "final_reply":
         _logger.debug("[%s] skip assistant turn: message_kind=%s", request_id, message_kind)
-        return
+        return {"status": "SKIPPED", "reason_code": "NON_FINAL_MESSAGE_KIND"}
     with soft_fail("conversation.record_assistant_turn.soul_metadata", fallback=None):
         merged_metadata.setdefault("soul_id", str(getattr(get_compiled_soul(), "soul_id", "") or "").strip())
     for metadata_key in (
@@ -102,29 +132,25 @@ def record_assistant_turn(
         value = str(plan_payload.get(metadata_key) or "").strip()
         if value:
             merged_metadata.setdefault(metadata_key, value)
-    followup_context_fingerprint = ""
-    if str(plan_payload.get("primary_topic") or "").strip() == "assistant_reply_followup":
-        followup_context_fingerprint = build_assistant_followup_context_fingerprint(
-            reply_contract=str(plan_payload.get("reply_contract") or "").strip()
-            or str((plan_payload.get("contract") or {}).get("text") if isinstance(plan_payload.get("contract"), Mapping) else "").strip()
-        )
-        if followup_context_fingerprint:
-            merged_metadata.setdefault("reply_surface_context_fingerprint", followup_context_fingerprint)
+    resolved_ts_ms = int(ts_ms or int(time.time() * 1000))
     with soft_fail("conversation.record_assistant_turn", fallback=None):
-        turn = get_conversation_turn_store().append_generated(
+        store = get_conversation_turn_store()
+        result = MemoryEventStore(store._ledger).append_visible_turn(
+            request_id=request_id,
             session_id=session_id,
             person_id=person_id,
-            request_id=request_id,
             role="assistant",
             content=normalized_content,
-            ts_ms=int(ts_ms or int(time.time() * 1000)),
+            ts_ms=resolved_ts_ms,
             lang=lang,
             metadata=merged_metadata or None,
         )
+        turn = dict(result.get("turn") or {})
         _logger.info(
-            "[%s] conversation_record role=assistant turn_index=%s session_id=%s content_chars=%s",
+            "[%s] memory_event_record role=assistant event_id=%s turn_index=%s session_id=%s content_chars=%s",
             request_id,
-            int(turn.turn_index),
+            str(result.get("memory_event_id") or ""),
+            int(turn.get("turn_index") or 0),
             str(session_id or "").strip(),
             len(normalized_content),
         )
@@ -133,7 +159,7 @@ def record_assistant_turn(
                 session_id=session_id,
                 person_id=person_id,
                 request_id=request_id,
-                turn_index=int(turn.turn_index),
+                turn_index=int(turn.get("turn_index") or 0),
                 primary_topic=str(plan_payload.get("primary_topic") or "").strip(),
                 answer_style=str(plan_payload.get("response_goal") or plan_payload.get("tactic_family") or "").strip(),
                 confidence=float(plan_payload.get("plan_confidence") or 0.0),
@@ -166,58 +192,5 @@ def record_assistant_turn(
             )
         except Exception as exc:
             _logger.debug("[%s] conversation_topic_ledger record failed: %s", request_id, exc)
-        try:
-            primary_topic = str(plan_payload.get("primary_topic") or "").strip()
-            tactic_family = str(plan_payload.get("tactic_family") or "").strip()
-            tactic_variant = str(plan_payload.get("tactic_variant") or "").strip()
-            response_form = str(plan_payload.get("response_form") or "").strip()
-            response_form_reason = str(plan_payload.get("response_form_reason") or "").strip()
-            provider_name = str(merged_metadata.get("provider_name") or "").strip()
-            model_id = str(merged_metadata.get("model_id") or "").strip()
-            fallback_used = bool(merged_metadata.get("fallback"))
-            message_kind = str(merged_metadata.get("message_kind") or "").strip().lower()
-            allowed_topics = {
-                "greeting",
-                "presence_ping",
-                "light_ack",
-                "playful_ping",
-                "identity",
-                "relationship_boundary",
-                "motivation",
-                "help_commitment",
-                "rejection",
-                "emoji_social_reply",
-                "emoji_social_followup",
-                "assistant_reply_followup",
-            }
-            cacheable_response_forms = {"text", "text_plus_emoji", "text_plus_sticker"}
-            if (
-                primary_topic in allowed_topics
-                and response_form in cacheable_response_forms
-                and (primary_topic != "assistant_reply_followup" or bool(followup_context_fingerprint))
-                and not fallback_used
-                and message_kind in {"", "final_reply"}
-                and (not envelope_payload or can_cache(envelope_payload))
-                and model_id != "deterministic-plan-renderer"
-                and provider_name != "host"
-                and len(normalized_content.strip()) >= 4
-                and is_surface_cacheable_reply(text=normalized_content, metadata=merged_metadata)
-            ):
-                cache_key = build_reply_surface_memory_key(
-                    soul_id=str(merged_metadata.get("soul_id") or "").strip(),
-                    primary_topic=primary_topic,
-                    tactic_family=tactic_family,
-                    tactic_variant=tactic_variant,
-                    response_form_reason=response_form_reason,
-                    render_target_lang=lang,
-                    context_fingerprint=followup_context_fingerprint,
-                )
-                get_reply_surface_memory_store().remember(
-                    key=cache_key,
-                    text=normalized_content,
-                    ts_ms=int(ts_ms or int(time.time() * 1000)),
-                    request_id=request_id,
-                    session_id=session_id,
-                )
-        except Exception as exc:
-            _logger.debug("[%s] conversation_reply_surface_memory remember failed: %s", request_id, exc)
+        return result
+    return {"status": "DEGRADED", "reason_code": "SOFT_FAIL_ASSISTANT_TURN"}

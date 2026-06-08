@@ -8,7 +8,7 @@ from host_brain.codex_runtime.immune import build_immune_proposal_from_report
 
 
 def test_codex_immuneplane_builds_and_executes_self_heal_work_order(monkeypatch, tmp_path) -> None:
-    monkeypatch.setattr("host_brain.codex_runtime.executor.shutil.which", lambda _name: None)
+    monkeypatch.setattr("host_brain.codex_runtime.executor.codex_cli_command", lambda: None)
     proposal = build_immune_proposal_from_report(
         {
             "overall_status": "DEGRADED",

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 from dataclasses import dataclass, field
 import inspect
 from typing import Any, Callable, Iterable
@@ -23,6 +24,25 @@ def _normalize_context_value(value: Any) -> Any:
     return value
 
 
+def _is_empty_arg_value(value: Any) -> bool:
+    if value is None:
+        return True
+    if isinstance(value, str):
+        return not value.strip()
+    if isinstance(value, (list, tuple, set, dict)):
+        return not bool(value)
+    return False
+
+
+def _merge_invocation_defaults(defaults: dict[str, Any], args: dict[str, Any]) -> dict[str, Any]:
+    merged = copy.deepcopy(defaults or {})
+    for key, value in dict(args or {}).items():
+        if key in merged and _is_empty_arg_value(value):
+            continue
+        merged[key] = value
+    return merged
+
+
 @dataclass(frozen=True)
 class DeclarativeSkillSpec:
     skill_name: str
@@ -42,6 +62,8 @@ class DeclarativeSkillSpec:
     capability_tags: tuple[str, ...] = field(default_factory=tuple)
     parallelizable: bool = False
     fallback_policy: str = "chat_fallback"
+    scheduler_profile: dict[str, Any] = field(default_factory=dict)
+    invocation_defaults: dict[str, Any] = field(default_factory=dict)
 
     def _normalize_args(self, args: dict[str, Any], ctx: dict[str, Any] | None) -> dict[str, Any]:
         try:
@@ -54,13 +76,14 @@ class DeclarativeSkillSpec:
 
     def build_handler(self) -> Callable[[dict[str, Any], dict[str, Any] | None], dict[str, Any]]:
         def _handler(args: dict[str, Any], ctx: dict[str, Any] | None) -> dict[str, Any]:
+            normalized_args = _merge_invocation_defaults(self.invocation_defaults, dict(args or {}))
             payload = {
                 "status": "OK",
                 "tool": self.tool,
             }
             if self.action is not None:
                 payload["action"] = self.action
-            payload.update(self._normalize_args(dict(args or {}), ctx))
+            payload.update(self._normalize_args(normalized_args, ctx))
             for source_key, target_key in self.context_aliases:
                 payload[target_key] = _normalize_context_value((ctx or {}).get(source_key))
             payload.update(dict(self.static_payload))
@@ -84,6 +107,7 @@ class DeclarativeSkillSpec:
             capability_tags=self.capability_tags,
             parallelizable=self.parallelizable,
             fallback_policy=self.fallback_policy,
+            scheduler_profile=dict(self.scheduler_profile),
         )
 
 

@@ -184,7 +184,7 @@ export default function DigitalLifeGatewaySection({ model }) {
             ]}
           />
           <div className="mt-2 text-xs text-gray-400">
-            {`samples=${humanoidTrendRequestSeries.reduce((sum, item) => sum + Number(item || 0), 0)} | interval=${toTrendIntervalMinutes(windowMinutes)}m`}
+            {`样本=${humanoidTrendRequestSeries.reduce((sum, item) => sum + Number(item || 0), 0)} | interval=${toTrendIntervalMinutes(windowMinutes)}m`}
           </div>
           {humanoidLoopAlertsData && humanoidAlertStatus !== 'healthy' ? (
             <div className="mt-3">

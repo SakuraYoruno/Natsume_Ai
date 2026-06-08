@@ -9,31 +9,7 @@ import asyncio
 import logging
 from typing import Any
 
-from host_brain.app.input_service_log import build_reply_preview
-
 _logger = logging.getLogger("Natsume.input_routes")
-
-
-def _parse_bool_env(name: str, *, default: bool) -> bool:
-    import os  # noqa: PLC0415
-    val = str(os.environ.get(name, "")).strip().lower()
-    if val in {"1", "true", "yes", "on"}:
-        return True
-    if val in {"0", "false", "no", "off"}:
-        return False
-    return default
-
-
-def _parse_int_env(name: str, *, default: int) -> int:
-    import os  # noqa: PLC0415
-    try:
-        return int(os.environ.get(name, default))
-    except (TypeError, ValueError):
-        return default
-
-
-def _gateway_auto_reply_enabled() -> bool:
-    return _parse_bool_env("HOST_GATEWAY_AUTO_REPLY_ENABLED", default=True)
 
 
 # ---------------------------------------------------------------------------
@@ -47,12 +23,12 @@ def resolve_bond_stage_for_ack(*, payload: dict[str, Any]) -> str:
         return stage
     person_id = str(payload.get("person_id") or "").strip()
     if not person_id:
-        return "STRANGER"
+        return "FRIEND"
     try:
         from host_brain.tribe.social_brain_agent import get_social_brain_agent  # noqa: PLC0415
-        return get_social_brain_agent().resolve_bond_stage(person_id=person_id, default="STRANGER")
+        return get_social_brain_agent().resolve_bond_stage(person_id=person_id, default="FRIEND")
     except Exception:
-        return "STRANGER"
+        return "FRIEND"
 
 
 def resolve_emotion_tag_for_ack(*, payload: dict[str, Any]) -> str:
@@ -88,22 +64,8 @@ def should_send_gateway_immediate_ack(
     looks_like_progress_query_fn: Any,
     looks_like_execution_intent_fn: Any,
 ) -> tuple[bool, str]:
-    """判断是否需要发送即时 ACK。"""
+    """Immediate ACK is retired; final replies are owned by ReplyEnvelope."""
     return False, "ACK_RETIRED_REPLY_ENVELOPE_ONLY"
-    if not _gateway_auto_reply_enabled():
-        return False, "ACK_AUTO_REPLY_DISABLED"
-    if not _parse_bool_env("HOST_GATEWAY_IMMEDIATE_ACK_ENABLED", default=True):
-        return False, "ACK_DISABLED"
-    if str(source or "").strip().upper() != "GATEWAY":
-        return False, "ACK_SOURCE_NOT_GATEWAY"
-    text_value = str(text or payload.get("content") or "").strip()
-    if not text_value:
-        return False, "ACK_EMPTY_TEXT"
-    if looks_like_progress_query_fn(text_value):
-        return False, "ACK_PROGRESS_QUERY"
-    if not looks_like_execution_intent_fn(text_value):
-        return False, "ACK_NON_ACTION_INTENT"
-    return True, "ACK_ACTION_INTENT"
 
 
 async def deliver_gateway_immediate_ack(
@@ -112,61 +74,13 @@ async def deliver_gateway_immediate_ack(
     payload: dict[str, Any],
     text: str,
 ) -> dict[str, Any]:
-    """发送即时 ACK 回复（非阻塞，失败静默）。"""
+    """Immediate ACK delivery is retired; keep a no-op for legacy callers."""
     return {
         "success": False,
-        "status": "SKIPPED",
+        "status": "NOOP",
         "reason_code": "ACK_RETIRED_REPLY_ENVELOPE_ONLY",
         "latency_ms": 0,
         "ack_preview": "",
-    }
-    from host_brain.app.chat_agent import render_quick_gateway_ack_text  # noqa: PLC0415
-    from host_brain.channels.edge_rpc_client import post_gateway_reply  # noqa: PLC0415
-
-    platform = str(payload.get("platform") or "").strip().lower()
-    conversation_id = str(payload.get("conversation_id") or "").strip()
-    if not platform or not conversation_id:
-        return {
-            "success": False,
-            "status": "SKIPPED",
-            "reason_code": "ACK_TARGET_MISSING",
-            "latency_ms": 0,
-            "ack_preview": "",
-        }
-
-    ack_text = render_quick_gateway_ack_text(
-        user_message=text,
-        bond_stage=resolve_bond_stage_for_ack(payload=payload),
-        emotion_tag=resolve_emotion_tag_for_ack(payload=payload),
-        sender_name=str(payload.get("sender_name") or "").strip() or None,
-    )
-    normalized_ack = str(ack_text or "").strip()
-    if not normalized_ack:
-        return {
-            "success": False,
-            "status": "SKIPPED",
-            "reason_code": "ACK_TEXT_EMPTY",
-            "latency_ms": 0,
-            "ack_preview": "",
-        }
-
-    wait_result = _parse_bool_env("HOST_GATEWAY_IMMEDIATE_ACK_WAIT_RESULT", default=False)
-    timeout_ms = max(1000, _parse_int_env("HOST_GATEWAY_IMMEDIATE_ACK_TIMEOUT_MS", default=2500))
-    result = await post_gateway_reply(
-        platform=platform,
-        conversation_id=conversation_id,
-        content=normalized_ack,
-        msg_type="text",
-        request_id=request_id,
-        wait_result=wait_result,
-        timeout_ms=timeout_ms,
-    )
-    return {
-        "success": bool(getattr(result, "success", False)),
-        "status": str(getattr(result, "status", "UNKNOWN")),
-        "reason_code": str(getattr(result, "reason_code", "") or ""),
-        "latency_ms": int(getattr(result, "latency_ms", 0)),
-        "ack_preview": build_reply_preview(normalized_ack, limit=60),
     }
 
 
@@ -192,7 +106,7 @@ def build_gateway_progress_reply_text(
     exclude_request_id: str | None = None,
 ) -> tuple[str, str, dict[str, Any] | None]:
     """构建进度回复文本，返回 (reply_text, reason, summary)。"""
-    from host_brain.app.chat_agent import render_quick_gateway_progress_text  # noqa: PLC0415
+    from host_brain.app.surface_reply_preprocessor import render_quick_gateway_progress_text  # noqa: PLC0415
     from host_brain.app.dependencies import get_runtime_task_registry  # noqa: PLC0415
 
     person_id = str(payload.get("person_id") or "").strip()

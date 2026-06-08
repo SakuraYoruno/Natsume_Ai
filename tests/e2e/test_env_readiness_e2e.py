@@ -54,7 +54,7 @@ class TestEnvReadinessE2E(unittest.TestCase):
         self.assertEqual("ORCH_DEPENDENCY_UNAVAILABLE", report["graph_runtime"]["reason_code"])
 
         self.assertGreaterEqual(report["dependency_summary"]["unavailable"], 1)
-        self.assertIn("host.retrieval.embedding", report["dependency_summary"]["unavailable_ids"])
+        self.assertIn("host.retrieval.recall_fusion", report["dependency_summary"]["unavailable_ids"])
 
         self.assertEqual(1, len(report["drill_summary"]))
         self.assertEqual("drill.dependency.provider_down", report["drill_summary"][0]["scenario_id"])

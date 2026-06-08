@@ -198,12 +198,36 @@ class WorldCanonStore:
             }
         )
         trigger_canon_vector_auto_sync(
-            include_style=False,
             include_world=True,
             world_root=self.world_root,
             reason=f"world_upsert:{doc_id}@v{next_version}",
         )
         return self.get(doc_id)  # type: ignore[return-value]
+
+    def upsert(
+        self,
+        *,
+        doc_id: str,
+        title: str,
+        body: str,
+        tags: list[str] | None = None,
+        proposal_id: str,
+        proposer_node_id: str = "memory.canon_world_store",
+        status: str = "active",
+        ts_ms: int | None = None,
+        allow_write: bool = True,
+    ) -> WorldCanonDocument:
+        return self.upsert_document(
+            doc_id=doc_id,
+            title=title,
+            tags=tags,
+            body=body,
+            proposal_id=proposal_id,
+            proposer_node_id=proposer_node_id,
+            status=status,
+            ts_ms=ts_ms,
+            allow_write=allow_write,
+        )
 
     def build_authoritative_entry(self, doc_id: str) -> dict[str, Any]:
         doc = self.get(doc_id)
@@ -298,6 +322,9 @@ class WorldCanonStore:
             "base_version": base_version,
             "proposed_version": proposed_version,
             "proposed_hash": proposed_hash,
+            "proposed_title": str(proposed_title).strip(),
+            "proposed_tags": _normalize_tags(proposed_tags),
+            "proposed_body": proposed_body,
             "source_intent_id": source_intent_id,
             "proposer_node_id": proposer_node_id,
             "summary": summary or f"world canon proposal: {doc_id}",

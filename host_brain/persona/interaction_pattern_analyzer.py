@@ -145,9 +145,9 @@ class InteractionPatternAnalyzer:
     用法：
         analyzer = InteractionPatternAnalyzer()
         result = analyzer.analyze(
-            user_id="user_1",
+            user_id="natsume_ai",
             episodic_store=store,
-            current_traits=persona_engine.get_traits("user_1"),
+            current_traits=persona_engine.get_traits("natsume_ai"),
             lookback_days=7,
         )
         # result.trait_suggestions 即为建议的特质变化方向

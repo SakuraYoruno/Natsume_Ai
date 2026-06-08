@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Any
@@ -13,7 +13,14 @@ from host_brain.app.context.interaction_thread import (
     InteractionThreadState,
     coerce_interaction_thread_state,
 )
-from host_brain.app.context.relationship_state import RelationshipStateBlock, resolve_relationship_state
+from host_brain.app.context.relationship_state import (
+    RelationshipStateBlock,
+    _LOVER_STAGES,
+    _SOULMATE_STAGES,
+    resolve_relationship_state,
+)
+from host_brain.app.reply_modality_router import route_reply_modality
+from host_brain.app.response_form_contract import normalize_response_form
 from host_brain.app.context.tactic_ledger import TacticLedgerBlock, coerce_tactic_ledger_block
 from host_brain.app.context.topic_ledger import TopicLedgerBlock, coerce_topic_ledger_block
 from host_brain.persona.affect_policy import build_affect_policy
@@ -32,6 +39,27 @@ from host_brain.persona.soul_reply_surface import (
 
 def _join_nonempty(parts: list[str]) -> str:
     return " ".join(part for part in parts if str(part or "").strip()).strip()
+
+
+_CONTRACT_PROCESS_TERM_REPLACEMENTS: tuple[tuple[str, str], ...] = (
+    ("短接话", "短回应"),
+    ("自然口语", "自然短句"),
+    ("情绪动作", "情绪"),
+    ("社交信号", "这层意思"),
+    ("回应动作", "本轮目标"),
+    ("承接动作", "回应方式"),
+    ("过程词", "内部词"),
+    ("话口", "后面的话"),
+    ("接住", "回应"),
+)
+
+
+def _clean_reply_contract_text(raw: str) -> str:
+    """Keep prompt contracts as internal constraints, not text the model can echo."""
+    text = str(raw or "").strip()
+    for source, target in _CONTRACT_PROCESS_TERM_REPLACEMENTS:
+        text = text.replace(source, target)
+    return text
 
 
 def _multimodal_signal_haystack(multimodal: dict[str, Any] | None) -> str:
@@ -114,6 +142,14 @@ class ReplyContract:
     required_actions: tuple[str, ...] = ()
     forbidden_actions: tuple[str, ...] = ()
     realization_steps: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "text", _clean_reply_contract_text(self.text))
+        object.__setattr__(
+            self,
+            "realization_steps",
+            tuple(_clean_reply_contract_text(item) for item in self.realization_steps),
+        )
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -280,6 +316,8 @@ def coerce_reply_plan(raw: Any) -> ReplyPlan:
             or ""
         ).strip(),
     )
+    raw_secondary_form = str(payload.get("secondary_response_form") or "").strip().lower()
+    secondary_response_form = raw_secondary_form if raw_secondary_form in {"voice", "sticker", "image", "gif"} else ""
     return ReplyPlan(
         primary_topic=str(payload.get("primary_topic") or "").strip(),
         interaction_move=str(payload.get("interaction_move") or "").strip(),
@@ -294,8 +332,8 @@ def coerce_reply_plan(raw: Any) -> ReplyPlan:
         forbidden_tactic_keys=tuple(str(item).strip() for item in list(payload.get("forbidden_tactic_keys") or []) if str(item).strip()),
         forbidden_tactic_signatures=tuple(str(item).strip() for item in list(payload.get("forbidden_tactic_signatures") or []) if str(item).strip()),
         forbidden_patterns=tuple(str(item).strip() for item in list(payload.get("forbidden_patterns") or []) if str(item).strip()),
-        response_form=str(payload.get("response_form") or "text").strip() or "text",
-        secondary_response_form=str(payload.get("secondary_response_form") or "").strip(),
+        response_form=normalize_response_form(str(payload.get("response_form") or "text")),
+        secondary_response_form=secondary_response_form,
         response_form_reason=str(payload.get("response_form_reason") or "").strip(),
         allow_form_only_reply=bool(payload.get("allow_form_only_reply") or False),
         max_chars=int(payload.get("max_chars") or 320),
@@ -343,34 +381,50 @@ def _qualitative_relationship_summary(
     interaction_thread: InteractionThreadState,
     render_target_lang: str,
 ) -> str:
-    stage = str(relationship.bond_stage or "STRANGER").strip().upper() or "STRANGER"
+    stage = str(relationship.bond_stage or "FRIEND").strip().upper() or "FRIEND"
+    substage = str(getattr(relationship, "relationship_substage", "") or "").strip()
+    conflict_rift = float(getattr(relationship, "conflict_rift", 0.0) or 0.0)
     topic = str(interpretation.literal_topic or "").strip().lower()
     thread_kind = str(interaction_thread.thread_kind or "").strip().lower()
     micro_social_topic = topic in {
         "greeting",
-        "presence_ping",
-        "light_ack",
-        "phatic_punct",
+        "auditory_check",
         "playful_ping",
         "emoji_social_reply",
         "emoji_social_followup",
     }
-    micro_social_thread = thread_kind in {"image_social", "phatic"}
+    micro_social_thread = thread_kind == "image_social"
     if str(render_target_lang or "").strip().lower() == "ja":
-        if stage in {"STRANGER", "ACQUAINTANCE"} and (micro_social_topic or micro_social_thread):
-            return "距離感は保ちつつ、わざとよそよそしくしない。目の前の小さな感情を自然に受ける。"
-        if stage in {"STRANGER", "ACQUAINTANCE"}:
-            return "相手との距離はまだ遠めで、馴れ馴れしくしない。"
-        if relationship.boundary_softness >= 0.5:
-            return "関係はやや柔らかいが、言い過ぎない。"
-        return "距離は保ちつつ、自然に受ける。"
-    if stage in {"STRANGER", "ACQUAINTANCE"} and (micro_social_topic or micro_social_thread):
-        return "保持自然分寸，但不用刻意拉开，顺着眼前这点情绪接住就好。"
-    if stage in {"STRANGER", "ACQUAINTANCE"}:
-        return "你和对方还不熟，不要过度亲近。"
-    if relationship.boundary_softness >= 0.5:
-        return "关系稍微软一点，但别说得太近。"
-    return "保持分寸，顺着对方自然回应。"
+        if conflict_rift >= 0.45 or substage == "repairing_rift":
+            return "少しすれ違いがある。刺しすぎず、でも義兄妹の距離まで戻りすぎない。"
+        if substage == "ambiguous_affection":
+            return "義兄妹の冗談の中に少し熱がある。言い切らず、照れとからかいで受ける。"
+        if stage in _LOVER_STAGES or substage in {"confessed_lovers", "stable_lovers"}:
+            return "恋人に近い親密さがある。甘くしすぎず、近さと照れを両方残す。"
+        if stage in _SOULMATE_STAGES or substage == "soulbound":
+            return "魂の伴侶に近い深い関係。柔らかく率直にしつつ、空らしい軽さを残す。"
+        if micro_social_topic or micro_social_thread:
+            return "義兄妹として馴染んでいる。距離を作りすぎず、目の前の感情へ自然に返す。"
+        if substage == "protective_sibling":
+            return "身内として庇える義兄妹。軽く返していいが、味方でいることは外さない。"
+        if substage == "playful_sibling" or relationship.boundary_softness >= 0.5:
+            return "義兄妹としてかなり馴染んでいる。軽く返していいが、言い過ぎない。"
+        return "義兄妹として自然に受ける。近すぎず、よそよそしくもしない。"
+    if conflict_rift >= 0.45 or substage == "repairing_rift":
+        return "关系里有一点别扭：可以顶一句，但要把话收回来，别真的推开对方。"
+    if substage == "ambiguous_affection":
+        return "义兄妹玩笑里已经有暧昧张力：用调侃和靠近表达在意，不要直接告白。"
+    if stage in _LOVER_STAGES or substage in {"confessed_lovers", "stable_lovers"}:
+        return "关系进入亲密恋人阶段：可以更贴近，但别把亲密写成廉价甜话。"
+    if stage in _SOULMATE_STAGES or substage == "soulbound":
+        return "关系接近灵魂伴侣：可以坦率柔软，但仍保持当前人格的轻快和分寸。"
+    if micro_social_topic or micro_social_thread:
+        return "关系是熟起来的义兄妹：不用刻意拉开，轻轻回应眼前情绪。"
+    if substage == "protective_sibling":
+        return "关系是会护短的义兄妹：嘴上可以不饶人，但实际要明显站在对方这边。"
+    if substage == "playful_sibling" or relationship.boundary_softness >= 0.5:
+        return "关系是熟起来的义兄妹：可以轻轻顶嘴和撒娇，但别说得太满。"
+    return "义兄妹关系稳定，保持分寸，顺着对方自然回应。"
 
 
 def _decide_response_form(
@@ -379,24 +433,17 @@ def _decide_response_form(
     relationship_state: RelationshipStateBlock,
     multimodal: dict[str, Any] | None,
 ) -> tuple[str, str, str, bool]:
-    payload = dict(multimodal or {})
-    primary_modality = str(payload.get("primary_modality") or "").strip().lower()
-    literal_topic = str(interpretation.literal_topic or "").strip().lower()
-    bond_stage = str(relationship_state.bond_stage or "STRANGER").strip().upper()
-
-    if literal_topic == "emoji_social_followup":
-        return "text", "", "image_social_followup", False
-    if literal_topic == "emoji_social_reply":
-        if primary_modality == "image":
-            return "text", "", "image_social_reply", False
-        return "text_plus_emoji", "emoji", "emoji_social_reply", False
-    if literal_topic in {"greeting", "presence_ping"}:
-        return "text_plus_emoji", "emoji", "phatic_greeting", False
-    if literal_topic in {"light_ack", "phatic_punct", "playful_ping"}:
-        return "text_plus_emoji", "emoji", "light_social_ping", False
-    if literal_topic == "attachment_only_no_question" and primary_modality == "emoji":
-        return "text_plus_emoji", "emoji", "emoji_attachment_no_question", False
-    return "text", "", "default_text", False
+    decision = route_reply_modality(
+        interpretation=interpretation,
+        relationship_state=relationship_state,
+        multimodal=multimodal,
+    )
+    return (
+        decision.response_form,
+        decision.secondary_response_form,
+        decision.response_form_reason,
+        decision.allow_form_only_reply,
+    )
 
 
 def _should_require_strict_validation(
@@ -425,9 +472,7 @@ def _should_require_strict_validation(
         return True
     if normalized_topic in {
         "greeting",
-        "presence_ping",
-        "light_ack",
-        "phatic_punct",
+        "auditory_check",
         "playful_ping",
     }:
         return True
@@ -478,9 +523,7 @@ def _should_force_buffering(
         return True
     if normalized_topic in {
         "greeting",
-        "presence_ping",
-        "light_ack",
-        "phatic_punct",
+        "auditory_check",
         "playful_ping",
         "emoji_social_reply",
     }:
@@ -623,7 +666,7 @@ def _build_reply_contract(
         )
     if str(render_target_lang or "").strip().lower() == "ja":
         mapping = {
-            "phatic_wave": "挨拶を自然に受けて、短い実質的な一言を返す。",
+            "auditory_grounding": "入力証拠に合わせる。音声入力ではない時は、音は聞こえていないことと文字だけ見えていることを短く返す。",
             "playful_wave": "軽い呼びかけを受けて、短く明るく返す。",
             "soft_emotion_ack": "画像から伝わる感情を受けて、短い実質的な一言を返す。",
             "cute_image_ack": "かわいい雰囲気を受けて、軽く柔らかく返す。",
@@ -637,9 +680,9 @@ def _build_reply_contract(
             "hold_name_then_open_floor": "名前の事実だけ保ち、問いの口を相手に返す。",
             "name_only_then_pause": "名前だけを最短で返して止まる。",
             "soft_close_then_open_floor": "同じ確認が続いたことを静かに収め、本当に聞きたい方へ促す。",
-            "short_boundary_then_reason": "親しくないことを先に示し、そのうえで短い理由を添える。",
+            "short_boundary_then_reason": "義妹として他人扱いはしないことを示し、そのうえで短い理由を添える。",
             "ack_still_care_then_new_reason": "相手がまだ気にしていることを受けて、新しい短い理由を一つ添える。",
-            "hold_boundary_then_shift_floor": "距離感は保ちつつ、説明は短くして話の口を返す。",
+            "hold_boundary_then_shift_floor": "義妹としての距離感は保ちつつ、説明は短くして話の口を返す。",
             "brief_reason_then_wait": "理由は一文だけ補い、その場で止まる。",
             "soft_close_boundary": "同じ問いが続いていることを静かに収め、重ねて言い直さない。",
             "short_conditional_commitment": "助け方を条件つきで短く示し、空疎な相槌にしない。",
@@ -656,11 +699,11 @@ def _build_reply_contract(
             realization_steps=steps,
         )
     mapping = {
-        "phatic_wave": "先把这句招呼自然接住，再给一句有实质内容的短回应，不要只剩符号或空壳句。",
+        "auditory_grounding": "先按输入证据回应；没有语音证据时说明没听见声音、只看到当前文字，不要只回在呢，也不要假装听到了声音。",
         "playful_wave": "先把这句轻松招呼接住，再回一句自然短接话，不要只剩感叹词。",
-        "soft_emotion_ack": "先把对方发图表达的情绪接住，再顺着这个情绪回一句，不要只剩语气词。",
-        "cute_image_ack": "先把对方装乖/卖萌的动作接住，再顺着这股语气回一句，不要只剩语气词。",
-        "tease_image_ack": "先把对方小别扭/吐槽的动作接住，再轻轻回一句，不要只剩语气词。",
+        "soft_emotion_ack": "把对方发图表达的情绪当成聊天信号来回，不要只剩语气词。",
+        "cute_image_ack": "把对方装乖/卖萌的动作当成聊天信号来回，不要只剩语气词。",
+        "tease_image_ack": "把对方小别扭/吐槽的动作当成聊天信号来回，不要只剩语气词。",
         "observe_then_answer": "先点到附件/画面里的对象，再给一句简短说明，不要只回“嗯”。",
         "attachment_ack_then_wait": "先承认你已经看到了这个附件，再把话口轻轻让回去，不要只用感叹词。",
         "explain_previous_reply": "先接住对方是在追问上一句，再把上一句具体指代或意思补清楚，不要只剩语气词。",
@@ -670,11 +713,11 @@ def _build_reply_contract(
         "hold_name_then_open_floor": "把名字放成已知事实，再把话口让回去，不要复用上一轮动作。",
         "name_only_then_pause": "只在对方已经连问很多次时，用极短确认收住，不补解释，也不要和上一轮同一种动作。",
         "soft_close_then_open_floor": "把这件事轻轻收稳，再把话口让回去，不要再报名字。",
-        "short_boundary_then_reason": "先明确不熟，再给一句短理由，不要滑成泛化陪聊句。",
-        "ack_still_care_then_new_reason": "把距离先放稳，再补一句新的短理由，不要重复上一轮结构。",
-        "hold_boundary_then_shift_floor": "这轮不是第一次问原因：把距离放稳，再把话口轻轻让回去，不要整段重讲理由。",
+        "short_boundary_then_reason": "先接住对方装生分的试探，再给一句短理由，不要滑成泛化陪聊句。",
+        "ack_still_care_then_new_reason": "把义妹关系事实放稳，再补一句新的短理由，不要重复上一轮结构。",
+        "hold_boundary_then_shift_floor": "这轮不是第一次问原因：把义妹关系事实放稳，再把话口轻轻让回去，不要整段重讲理由。",
         "brief_reason_then_wait": "这轮不是第一次问原因：只换一条新的短理由，然后停住，不要复用上一轮承接动作。",
-        "soft_close_boundary": "这轮原因已经来回问过几次：轻轻收住重复追问，不要再重复不熟和理由的原句。",
+        "soft_close_boundary": "这轮原因已经来回问过几次：轻轻收住重复追问，不要再重复装生分和理由的原句。",
         "short_conditional_commitment": "用简短条件式回应会不会继续帮，不要滑成空泛安抚。",
         "ack_anxiety_without_repromise": "先把会回应的态度放稳，不要重新许诺整句。",
         "steady_commitment_then_wait": "这轮不是第一次问会不会继续帮：保持态度一致，但只短短说一次，不要重复上一轮结构。",
@@ -683,20 +726,18 @@ def _build_reply_contract(
         "hold_repair_space": "先收住，轻轻接住对方的不喜欢，不解释。",
     }
     variant_overrides = {
-        ("phatic_wave", "greeting"): "把招呼自然接住，再回一句短短的在场回应，不要只剩感叹词或符号。",
-        ("phatic_wave", "presence"): "先让对方知道你在，再短短接一句，不要只剩空壳句。",
-        ("phatic_wave", "light_ack"): "先接住这句轻招呼，再给一句短回应，不要只剩单个语气词。",
+        ("auditory_grounding", "no_audio_seen_text"): "用户用文字问听得到吗时，先像真实没听见声音那样轻轻困惑，再说只看到了这条文字；若有真实语音输入证据才可以确认收到。不要回“在呢”，不要无证据说“听到了”。",
         ("playful_wave", "playful_ping"): "把这句轻松招呼接住，再自然回一句俏皮短接话，不要只剩语气词。",
-        ("soft_emotion_ack", "distress_image"): "先接住表情包传来的委屈/难过，再顺着这个情绪回一句，不要解释画面。",
-        ("soft_emotion_ack", "soft_hold"): "先把对方软软的情绪动作接住，再轻轻回一句，不要解释画面。",
-        ("soft_emotion_ack", "steady_hold"): "先把表情包传来的情绪稳稳接住，再顺着回一句，不要解释画面。",
-        ("soft_emotion_ack", "image_social"): "先把对方发图表达的情绪动作接住，再顺着回一句，不要解说画面。",
+        ("soft_emotion_ack", "distress_image"): "对方用表情包递来一点低落或委屈，回一句自然短接话，不要解释画面。",
+        ("soft_emotion_ack", "soft_hold"): "对方用表情包递来软一点的情绪，回一句自然短接话，不要解释画面。",
+        ("soft_emotion_ack", "steady_hold"): "对方用表情包递来情绪信号，回一句自然短接话，不要解释画面。",
+        ("soft_emotion_ack", "image_social"): "对方用发图/表情包参与聊天，回一句自然短接话，不要解说画面。",
         ("soft_emotion_ack", "backoff_hold"): "先接住对方是在回前一张图，再轻轻往后收一点，不要装作没接上上下文。",
         ("soft_emotion_ack", "explain_read"): "先承认自己是顺着刚才那张图理解到的，再用一句很自然的话把这个理解说清，不要重新解说画面。",
         ("soft_emotion_ack", "let_it_pass"): "先承认自己接住了上一张图的语气，再轻轻把这件事放过去，不要重新追问。",
-        ("cute_image_ack", "cute_ping"): "先把对方装乖/卖萌的动作接住，再顺着这股语气回一句，不要解释画面。",
-        ("cute_image_ack", "soft_hold"): "先把对方软软撒娇的动作接住，再轻轻回一句，不要解释画面。",
-        ("tease_image_ack", "light_nudge"): "先把对方小别扭/小吐槽的动作接住，再轻一点顺手回一句，不要解释画面。",
+        ("cute_image_ack", "cute_ping"): "对方用表情包递来装乖/卖萌的动作，回一句自然短接话，不要解释画面。",
+        ("cute_image_ack", "soft_hold"): "对方用表情包递来软一点的撒娇动作，回一句自然短接话，不要解释画面。",
+        ("tease_image_ack", "light_nudge"): "对方用表情包递来小别扭/小吐槽，回一句自然短接话，不要解释画面。",
         ("tease_image_ack", "deny_nudge"): "先接住对方在嘴硬/否认，再顺着上一张图轻轻打趣一句，不要突然装作没上下文。",
         ("tease_image_ack", "light_explain"): "先顺着上一张图轻轻解释你为什么会那么说，再带一点熟人口吻，不要重新解说画面。",
         ("tease_image_ack", "soft_slide"): "先顺着上一张图轻轻带过去，像熟人间收一收这个小情绪，不要重新追问。",
@@ -717,9 +758,9 @@ def _build_reply_contract(
         ("soft_close_then_open_floor", "settle_real_question"): "把这件事轻轻收稳，再让对方把后续问题说出来，不要再报名字。",
         ("soft_close_then_open_floor", "settle_other_topic"): "把这件事轻轻收稳，再把别的想问的口子让回去，不要再报名字。",
         ("ack_name_then_wait", "quiet_confirm"): "这轮不是第一次问身份：只短短承认前面已经回答过，然后停住，不要再展开名字。",
-        ("ack_still_care_then_new_reason", "still_care_reason"): "把距离先放稳，再换一句新的短理由，不要重复上一轮承接方式。",
-        ("hold_boundary_then_shift_floor", "shift_real_question"): "这轮不是第一次问原因：把距离放稳，再让对方把后续问题说出来，不要整段重讲理由。",
-        ("hold_boundary_then_shift_floor", "shift_other_question"): "这轮不是第一次问原因：把距离放稳，再把别的想问的口子让回去，不要整段重讲理由。",
+        ("ack_still_care_then_new_reason", "still_care_reason"): "把义妹关系事实先放稳，再换一句新的短理由，不要重复上一轮承接方式。",
+        ("hold_boundary_then_shift_floor", "shift_real_question"): "这轮不是第一次问原因：把义妹关系事实放稳，再让对方把后续问题说出来，不要整段重讲理由。",
+        ("hold_boundary_then_shift_floor", "shift_other_question"): "这轮不是第一次问原因：把义妹关系事实放稳，再把别的想问的口子让回去，不要整段重讲理由。",
         ("soft_close_boundary", "settle_repeat"): "这轮原因已经来回问过几次：轻轻收住重复追问，不要再整句重复上一轮理由。",
         ("soft_close_boundary", "settle_hold"): "这轮原因已经来回问过几次：轻轻收住重复追问，把理由停在这，不要再整段重讲。",
         ("ack_anxiety_without_repromise", "soothe_hold"): "先把会回应的态度放稳，不要重新许诺整句。",
@@ -755,39 +796,85 @@ def _refine_multimodal_contract(
         for item in getattr(contract, "realization_steps", ()) or ()
         if str(item).strip()
     )
-    if topic == "emoji_social_reply" and primary_modality == "image":
+    if topic == "emoji_social_reply" and primary_modality in {"image", "emoji", "sticker"}:
         signal_haystack = _multimodal_signal_haystack(payload)
-        if any(token in signal_haystack for token in ("逗", "调侃", "搞怪", "捉弄", "坏笑", "挑衅")):
-            action_options_text = "必须先判断它像是在撒娇、装乖、委屈、嘴硬、逗你还是求关注，再对这个动作回一句。"
+        has_specific_signal = any(
+            token in signal_haystack
+            for token in (
+                "逗",
+                "调侃",
+                "搞怪",
+                "捉弄",
+                "坏笑",
+                "挑衅",
+                "无语",
+                "尴尬",
+                "裂开",
+                "社死",
+                "别扭",
+                "小脾气",
+                "鼓脸",
+                "气鼓鼓",
+                "不爽",
+                "服了",
+                "委屈",
+                "哭",
+                "难过",
+                "伤心",
+                "泪",
+                "可怜",
+                "呜",
+                "可爱",
+                "卖萌",
+                "猫耳",
+                "装乖",
+                "软萌",
+                "乖",
+                "萌",
+            )
+        )
+        required_image_action = ""
+        if not has_specific_signal:
+            signal_note = "观察没有明确情绪时，只把它当成对方递来一张图/表情的轻社交动作，不要硬猜成撒娇、委屈、可爱或逗你。"
+        elif any(token in signal_haystack for token in ("逗", "调侃", "搞怪", "捉弄", "坏笑", "挑衅")):
+            signal_note = "社交信号偏调侃/逗弄，轻轻顺着接一句，但不要说成对方一定在逗你。"
         elif any(token in signal_haystack for token in ("无语", "尴尬", "裂开", "社死", "别扭", "小脾气", "鼓脸", "气鼓鼓", "不爽", "服了")):
-            action_options_text = "必须先判断它像是在无语、小吐槽、尴尬、嘴硬还是别扭，再对这个情绪动作回一句。"
+            signal_note = "社交信号偏小吐槽/无语/尴尬，语气收一点，别追问原因。"
         else:
-            action_options_text = "必须先判断它像是在撒娇、装乖、委屈、嘴硬、卖萌还是求关注，再对这个动作回一句。"
+            signal_note = "社交信号偏委屈、撒娇、装乖或求关注，语气放软一点，但不要复述这些标签。"
         extra_by_variant = {
-            ("soft_emotion_ack", "distress_image"): "按表情包表达的情绪来接：像对方在委屈/蔫下来时顺手放轻一句。",
-            ("soft_emotion_ack", "soft_hold"): "按表情包表达的情绪来接：像对方在软软地撒娇或求关注，轻轻接住。",
-            ("soft_emotion_ack", "steady_hold"): "按表情包表达的情绪来接：先接住那层情绪，再稳稳回一句。",
-            ("cute_image_ack", "cute_ping"): "按表情包表达的动作来接：像对方在装乖/卖萌/晃你，直接回这个动作。",
-            ("cute_image_ack", "soft_hold"): "按表情包表达的动作来接：像对方在轻轻撒娇，顺手接住。",
-            ("tease_image_ack", "light_nudge"): "按表情包表达的动作来接：像对方在小别扭或吐槽，轻一点接住，不要硬说对方在逗你。",
+            ("soft_emotion_ack", "distress_image"): "这不是图片鉴赏，是对方用表情包递来一点低落或委屈。",
+            ("soft_emotion_ack", "soft_hold"): "这不是图片鉴赏，是对方用表情包递来软一点的情绪。",
+            ("soft_emotion_ack", "steady_hold"): "这不是图片鉴赏，是对方用表情包递来一个情绪信号。",
+            ("cute_image_ack", "cute_ping"): "这不是图片鉴赏，是对方用表情包递来装乖或卖萌的动作。",
+            ("cute_image_ack", "soft_hold"): "这不是图片鉴赏，是对方用表情包递来软一点的撒娇动作。",
+            ("tease_image_ack", "light_nudge"): "这不是图片鉴赏，是对方用表情包递来小别扭或小吐槽。",
         }
-        extra_text = extra_by_variant.get((family, variant), "按表情包表达的情绪动作来接，不要把它当成图片点评。")
+        extra_text = extra_by_variant.get((family, variant), "这不是图片鉴赏，是对方用表情包递来一个社交信号。")
+        retained_actions = tuple(
+            action
+            for action in contract.required_actions
+            if action not in {"image_social_emotion_response", "image_social_ack"}
+        )
         return ReplyContract(
             text=" ".join(
                 part for part in (
-                    base_text,
                     extra_text,
-                    "只回一句短接话，别写成小剧场。",
-                    action_options_text,
-                    "不要评价这张图/图里/猫耳/这个表情怎么样，也不要解说画面。",
-                    "不要把问题抛回给对方，不要问“是不是觉得这张图可爱”。",
-                    "不要把自己写成图片主体，不要写我的猫耳/我比猫猫可爱/变成猫这类展开。",
+                    signal_note,
+                    "最终只回一句自然口语，像正常聊天里顺手接话。",
+                    "不要描述外貌、画面、猫耳、表情包本身，也不要问对方是不是觉得图可爱。",
+                    "不要反问，严禁用“怎么啦/怎么了/咋了/什么情况/怎么不说话/别憋着/跟我说说”这类问句或劝说承接。",
+                    "不要把“接住/判断/情绪动作/社交信号”等过程词写进回复。",
+                    "不要复述观察标签，比如“委屈/无语/可爱/猫耳”。",
+                    base_text if "不要只剩语气词" in base_text else "",
                 )
                 if str(part).strip()
             ),
-            required_actions=tuple(dict.fromkeys([*contract.required_actions, "image_social_emotion_response"])),
+            required_actions=tuple(
+                dict.fromkeys(action for action in (*retained_actions, required_image_action) if str(action).strip())
+            ),
             forbidden_actions=tuple(dict.fromkeys([*contract.forbidden_actions, "multimodal_generic_followup"])),
-            realization_steps=base_steps or ("识别表情包表达的情绪动作", "对这个情绪动作回一句"),
+            realization_steps=base_steps or ("读取表情包的社交信号", "自然接一句"),
         )
     if topic == "emoji_social_followup":
         extra_by_variant = {
@@ -813,11 +900,35 @@ def _refine_multimodal_contract(
             realization_steps=base_steps or ("先接住这是上一张图后的跟话", "顺着刚才那层情绪自然接一句"),
         )
     if topic == "attachment_only_no_question" and primary_modality == "image":
+        artifact_type = str(payload.get("artifact_type") or "").strip().lower()
+        observed_core = _join_nonempty(
+            [
+                str(payload.get("core_observation") or "").strip(),
+                str(payload.get("visual_facts") or "").strip(),
+                str(payload.get("summary_for_chat") or "").strip(),
+            ]
+        )
+        generic_only = not observed_core or observed_core in {"收到一张图片。", "收到一张图片", "图片", "image"}
+        if artifact_type != "screenshot" and not generic_only:
+            return ReplyContract(
+                text=" ".join(
+                    part for part in (
+                        base_text,
+                        "这是对方主动分享的普通图片，不是表情包问答。",
+                        "必须已经利用视觉观察：自然点到画面里的一个核心对象或氛围，再顺着聊天接一句。",
+                        "不要输出扫描报告、清单式描述，也不要只说“看到了”。",
+                    )
+                    if str(part).strip()
+                ),
+                required_actions=tuple(dict.fromkeys([*contract.required_actions, "ack_visual_share"])),
+                forbidden_actions=tuple(dict.fromkeys([*contract.forbidden_actions, "multimodal_generic_followup"])),
+                realization_steps=base_steps or ("点到图片核心内容", "像接住分享一样自然回应"),
+            )
         return ReplyContract(
             text=" ".join(
                 part for part in (
                     base_text,
-                    "先承认已经看到了这张图，再轻轻接住，不要主动开始描述画面，也不要立刻追问。",
+                    "先承认已经看到了这张图，再轻轻接住；如果只是截图或观察不足，不要主动开始分析画面，也不要立刻追问。",
                 )
                 if str(part).strip()
             ),
@@ -1119,20 +1230,34 @@ def _build_topic_trajectory_options(
                 followup_kind,
             ))
         return options
-    if topic in {"greeting", "presence_ping", "light_ack", "phatic_punct"}:
-        variant = "greeting"
-        if topic == "presence_ping":
-            variant = "presence"
-        elif topic in {"light_ack", "phatic_punct"}:
-            variant = "light_ack"
+    if topic == "auditory_check":
         return [(
-            "phatic_wave",
+            "auditory_grounding",
+            "no_audio_seen_text",
+            ResponseTrajectory(
+                response_goal="auditory_text_check",
+                tactic_family="auditory_grounding",
+                tactic_variant="no_audio_seen_text",
+                trajectory_stage="first_turn",
+            ),
+            "none",
+            "none",
+        )]
+    if topic == "greeting":
+        stage = _trajectory_stage(
+            freshness=interpretation.freshness,
+            repeat_question_count=interpretation.repeat_question_count,
+        )
+        variant = "repeat" if int(interpretation.repeat_question_count or 0) > 0 else "neutral"
+        response_goal = "ack_repeated_input" if variant == "repeat" else "contextual_reply"
+        return [(
+            "plain_hold",
             variant,
             ResponseTrajectory(
-                response_goal="phatic_reply",
-                tactic_family="phatic_wave",
+                response_goal=response_goal,
+                tactic_family="plain_hold",
                 tactic_variant=variant,
-                trajectory_stage="first_turn",
+                trajectory_stage=stage,
             ),
             "none",
             "none",
@@ -1152,7 +1277,7 @@ def _build_topic_trajectory_options(
         )]
     if topic == "emoji_social_reply":
         primary_modality = str((multimodal or {}).get("primary_modality") or "").strip().lower()
-        if primary_modality == "image":
+        if primary_modality in {"image", "emoji", "sticker"}:
             ranked = _prioritize_trajectory_options(
                 topic=topic,
                 candidates=_image_social_candidates(multimodal),
@@ -1483,18 +1608,6 @@ def _build_thread_fallback_plan_components(
             "soft_reassure",
         )
 
-    if thread_kind == "phatic":
-        return (
-            str(interaction_thread.source_topic or interpretation.literal_topic or "greeting").strip() or "greeting",
-            ResponseTrajectory(
-                response_goal="phatic_response",
-                tactic_family="phatic_wave",
-                tactic_variant="light_return",
-                trajectory_stage=stage or "thread_followup",
-            ),
-            "none",
-            "none",
-        )
     if thread_kind == "assistant_reply_followup":
         reaction = str(interaction_thread.last_user_reaction or "").strip().lower()
         variant = "clarify_object" if reaction == "ask_object" else "clarify_meaning"
@@ -1556,7 +1669,10 @@ def _assemble_reply_plan(
             forbidden_patterns.append("identity_name_restate")
         if trajectory.trajectory_stage != "first_turn":
             plan_confidence = 0.83
-    elif topic in {"greeting", "presence_ping", "light_ack", "phatic_punct", "playful_ping"}:
+    elif topic == "greeting":
+        forbidden_patterns.extend(["same_as_previous_reply"])
+        plan_confidence = 0.78
+    elif topic in {"auditory_check", "playful_ping"}:
         forbidden_patterns.extend(["same_as_previous_reply", "repeated_tactic"])
         plan_confidence = 0.8
     elif topic in {"emoji_social_reply", "emoji_social_followup"}:
@@ -1648,9 +1764,9 @@ def _assemble_reply_plan(
         max_chars = min(max_chars, 64)
         max_sentences = 1
         should_be_brief = True
-    elif topic in {"greeting", "presence_ping", "light_ack", "phatic_punct", "playful_ping"}:
-        max_chars = min(max_chars, 48)
-        max_sentences = min(max_sentences, 1)
+    elif topic in {"auditory_check", "playful_ping"}:
+        max_chars = min(max_chars, 84)
+        max_sentences = min(max_sentences, 2)
         should_be_brief = True
 
     return ReplyPlan(

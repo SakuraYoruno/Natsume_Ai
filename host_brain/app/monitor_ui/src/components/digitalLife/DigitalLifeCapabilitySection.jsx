@@ -60,7 +60,7 @@ export default function DigitalLifeCapabilitySection({ model }) {
               ))}
             </div>
           ) : (
-            <EmptyStateCard title="No gap hotspots" hint="Hotspots will appear after gap events are collected." className="p-4" />
+            <EmptyStateCard title="暂无能力缺口热点" hint="缺口事件积累后会展示高压原因与失败比例。" className="p-4" />
           )}
         </div>
 
@@ -91,7 +91,7 @@ export default function DigitalLifeCapabilitySection({ model }) {
               })}
             </div>
           ) : (
-            <EmptyStateCard title="No forge runtime samples" hint="Runtime quality will appear after proposal executions." className="p-4" />
+            <EmptyStateCard title="暂无 Forge 运行质量记录" hint="提案执行后会展示健康度、失败率与调优动作。" className="p-4" />
           )}
         </div>
       </div>

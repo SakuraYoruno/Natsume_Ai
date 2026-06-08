@@ -1,21 +1,21 @@
-{
-  "description": "canon_change_log 预期结构（T-WCanon-07 验收）",
-  "required_fields": [
-    "change_id",
-    "proposal_id",
-    "canon_kind",
-    "target_id",
-    "before_version",
-    "after_version",
-    "before_hash",
-    "after_hash",
-    "source_path",
-    "ts_ms"
-  ],
-  "invariants": [
-    "after_version == before_version + 1（首次写入时 before_version 为 null）",
-    "before_hash != after_hash（hash 变更可回放）",
-    "proposal_id 与 canon_proposal_log 中的 proposal_id 一致",
-    "canon_kind == 'world'"
-  ]
+﻿{
+    "description":  "canon_change_log 预期结构（T-WCanon-07 验收）",
+    "required_fields":  [
+                            "change_id",
+                            "proposal_id",
+                            "canon_kind",
+                            "target_id",
+                            "before_version",
+                            "after_version",
+                            "before_hash",
+                            "after_hash",
+                            "source_path",
+                            "ts_ms"
+                        ],
+    "invariants":  [
+                       "after_version == before_version + 1（首次写入时 before_version 为 null）",
+                       "before_hash != after_hash（hash 变更可回放）",
+                       "proposal_id 与 canon_proposal_log 中的 proposal_id 一致",
+                       "canon_kind == \u0027world\u0027"
+                   ]
 }

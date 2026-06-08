@@ -58,14 +58,14 @@ export const MODE_META = {
 }
 
 export const STAGE_LABELS = {
-  STRANGER: '陌生',
-  ACQUAINTANCE: '初识',
-  FRIEND: '朋友',
+  STRANGER: '初见义妹',
+  ACQUAINTANCE: '相处义妹',
+  FRIEND: '关系好的兄妹',
   CLOSE: '亲近',
-  CLOSE_FRIEND: '挚友',
+  CLOSE_FRIEND: '亲近兄妹',
   COMPANION: '陪伴',
-  CONFIDANT: '知己',
-  INTIMATE: '亲密',
+  CONFIDANT: '亲密恋人',
+  INTIMATE: '亲密恋人',
   SOULMATE: '灵魂伴侣',
 }
 
@@ -152,7 +152,7 @@ export const SLOT_STATUS_LABELS = {
   live: '在线',
   degraded: '降级',
   unavailable: '不可用',
-  loading: '加载中',
+  loading: '同步中',
   error: '异常',
   unknown: '未知',
 }
@@ -306,7 +306,7 @@ const TOKEN_LABELS = {
   ws: 'WebSocket',
   cortex_orchestrator: 'Cortex Orchestrator',
   executive_router: 'Executive Router',
-  chat_agent: 'Chat Agent',
+  surface_reply: 'Surface Reply',
   sub_agent: 'Sub Agent',
   query_planner: 'Query Planner',
   agentic_rag: 'Agentic RAG',
@@ -547,4 +547,3 @@ export function formatNonLiveSlotList(nonLiveSlots) {
 
   return items.length > 0 ? items.join('、') : DASH
 }
-

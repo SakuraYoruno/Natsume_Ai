@@ -1,5 +1,5 @@
-{
-  "request_id": "req_avatar_002",
-  "trigger": "LLM",
-  "emotion_tag": "dance_mode"
+﻿{
+    "request_id":  "req_avatar_002",
+    "trigger":  "LLM",
+    "emotion_tag":  "dance_mode"
 }

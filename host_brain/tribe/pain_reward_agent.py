@@ -164,11 +164,13 @@ class PainRewardAgent:
         # 奖励强化自我连续感（"我做到了"是自我叙事的核心）
         if intensity >= 0.25:
             try:
+                from host_brain.persona.identity import get_canonical_persona_self_id  # noqa: PLC0415
+
                 _dma = get_default_mode_agent()
                 if hasattr(_dma, "tick_idle_cycle"):
                     _dma.tick_idle_cycle(
                         source=f"pain_reward_reward:{str(source or 'unknown')[:32]}",
-                        person_id="user_1",
+                        person_id=get_canonical_persona_self_id(),
                     )
             except Exception:
                 pass
@@ -696,7 +698,7 @@ class PainRewardAgent:
         delta_valence: float = 0.0,
         trigger_event: str = "",
         net_valence: float = 0.0,
-        bond_stage: str = "stranger",
+        bond_stage: str = "friend",
     ) -> str | None:
         """享乐状态显著变化时调用 LLM 生成内心感受叙事。
 
@@ -727,7 +729,7 @@ class PainRewardAgent:
                 delta_valence=float(delta_valence),
                 trigger_event=str(trigger_event or "")[:80],
                 net_valence=float(net_valence),
-                bond_stage=str(bond_stage or "stranger"),
+                bond_stage=str(bond_stage or "friend"),
             )
             _provider = build_llm_provider(
                 provider_name="gemini",

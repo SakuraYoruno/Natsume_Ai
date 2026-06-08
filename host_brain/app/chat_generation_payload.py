@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import logging
 import os
@@ -14,9 +14,9 @@ from host_brain.app.context.retrieval_context import (
     build_prompt_context_observability,
     build_retrieval_rows as _build_retrieval_rows,
 )
-from host_brain.app.chat_context_style import normalize_node_style_bindings
 from host_brain.app.chat_runtime_input import build_emotion_recall_text
 from host_brain.app.dependencies import get_ledger
+from host_brain.app.user_preference_store import build_user_preference_pack
 from host_brain.bond.user_identity import get_canonical_bond_user_id
 from host_brain.core.prompt_context import (
     build_emotion_pulse_slot,
@@ -54,7 +54,8 @@ def build_prompt_context(
     thread_id: str | None,
     retrieval_summary: Mapping[str, Any],
     retrieval_evidence_items: list[dict[str, Any]],
-    style_bindings: Mapping[str, Mapping[str, Any]] | None,
+    user_message: str = "",
+    style_bindings: Mapping[str, Any] | None = None,
     bond_summary: Mapping[str, Any] | None = None,
     emotion_context: Mapping[str, Any] | None = None,
     render_target_lang: str | None = None,
@@ -62,30 +63,12 @@ def build_prompt_context(
     from host_brain.app.emotion_context import normalize_chat_emotion_context  # noqa: PLC0415
     from host_brain.bond.summarizer import normalize_bond_summary  # noqa: PLC0415
 
-    normalized_style_bindings = normalize_node_style_bindings(style_bindings)
     normalized_emotion_context = normalize_chat_emotion_context(emotion_context)
     resolved_bond_summary = (
         normalize_bond_summary(dict(bond_summary))
         if isinstance(bond_summary, Mapping) and bond_summary
         else {}
     )
-
-    style_rows: list[dict[str, Any]] = []
-    for node_id, row in normalized_style_bindings.items():
-        style_rows.append(
-            {
-                "slot": "style_pack",
-                "kind": "style_canon",
-                "node_id": node_id,
-                "canon_id": row.get("canon_id"),
-                "version": row.get("version"),
-                "hash": row.get("hash"),
-                "tone_only": bool(row.get("tone_only", True)),
-                "unsafe_as_fact": bool(row.get("unsafe_as_fact", True)),
-                "citation": row.get("citation"),
-                "instruction": _truncate_for_prompt(row.get("style_instruction"), limit=1600),
-            }
-        )
 
     world_root = str(os.environ.get("Natsume_WORLD_CANON_ROOT") or "").strip() or None
     try:
@@ -201,6 +184,17 @@ def build_prompt_context(
     except Exception:
         pass
 
+    try:
+        user_preference_pack = build_user_preference_pack(
+            person_id=get_canonical_bond_user_id(),
+            query_text=user_message,
+            session_id=session_id,
+            conversation_id=session_id,
+            ledger=get_ledger(),
+        )
+    except Exception:
+        user_preference_pack = {}
+
     prompt_context = {
         "hard_snapshot": {
             "session_id": session_id,
@@ -213,10 +207,6 @@ def build_prompt_context(
         "bond_summary": resolved_bond_summary,
         "authoritative": authoritative_rows,
         "retrieval": retrieval_rows,
-        "style_pack": {
-            "style_canon": style_rows,
-            "node_bindings": normalized_style_bindings,
-        },
         "constraints": {
             "strict_json_output": True,
             "no_false_execution_claim": True,
@@ -236,6 +226,8 @@ def build_prompt_context(
         "memory_emotion_hint": memory_emotion_hint,
         "bond_texture": bond_texture,
     }
+    if user_preference_pack:
+        prompt_context["user_preference_pack"] = user_preference_pack
 
     validation = validate_prompt_context(prompt_context)
     violations = [{"code": item.code, "detail": item.detail, "slot": item.slot} for item in validation.violations]
@@ -269,7 +261,6 @@ def build_prompt_context(
         "bond_summary": {},
         "authoritative": [],
         "retrieval": [],
-        "style_pack": {},
         "constraints": {},
         "tool_meta_pack": [],
     }
@@ -309,7 +300,6 @@ def build_chat_generation_prompt_payload(
     user_message: str,
     retrieval_summary: dict[str, Any],
     retrieval_evidence_items: list[dict[str, Any]],
-    style_bindings: Mapping[str, Mapping[str, Any]] | None = None,
     bond_summary: Mapping[str, Any] | None = None,
     emotion_context: Mapping[str, Any] | None = None,
     emotion_snapshot: Mapping[str, Any] | None = None,
@@ -317,7 +307,6 @@ def build_chat_generation_prompt_payload(
 ) -> dict[str, Any]:
     from host_brain.app.emotion_context import build_chat_emotion_snapshot, normalize_chat_emotion_context  # noqa: PLC0415
 
-    normalized_style_bindings = normalize_node_style_bindings(style_bindings)
     normalized_emotion_context = normalize_chat_emotion_context(emotion_context)
     normalized_emotion_snapshot = (
         dict(emotion_snapshot)
@@ -334,9 +323,9 @@ def build_chat_generation_prompt_payload(
         request_id=request_id,
         session_id=session_id,
         thread_id=thread_id,
+        user_message=user_message,
         retrieval_summary=retrieval_summary,
         retrieval_evidence_items=retrieval_evidence_items,
-        style_bindings=normalized_style_bindings,
         bond_summary=bond_summary,
         emotion_context=normalized_emotion_context,
         render_target_lang=resolved_render_lang,
@@ -353,7 +342,6 @@ def build_chat_generation_prompt_payload(
         "thread_id": thread_id,
         "user_message": user_message,
         "render_target_lang": resolved_render_lang,
-        "style_bindings": normalized_style_bindings,
         "emotion_context": {
             "mood_state": normalized_emotion_context.get("mood_state"),
             "emotion_tag": normalized_emotion_context.get("emotion_tag"),
@@ -376,7 +364,7 @@ def build_chat_generation_prompt_payload(
             "reason_code": retrieval_summary.get("reason_code"),
             "route_count": retrieval_summary.get("route_count"),
             "candidate_count": retrieval_summary.get("candidate_count"),
-            "rerank_topk": retrieval_summary.get("rerank_topk"),
+            "topk_count": retrieval_summary.get("topk_count"),
             "degraded": retrieval_summary.get("degraded"),
             "evidence_items": retrieval_evidence_items,
         },

@@ -2,9 +2,10 @@ import React, { useEffect, useRef, useState } from 'react'
 
 export default function ViewportLazySection({
   children,
-  placeholder = null,
+  fallback = null,
   rootMargin = '320px 0px',
   className = '',
+  eagerAfterMs = null,
 }) {
   const anchorRef = useRef(null)
   const [visible, setVisible] = useState(false)
@@ -34,9 +35,18 @@ export default function ViewportLazySection({
     return () => observer.disconnect()
   }, [rootMargin, visible])
 
+  useEffect(() => {
+    const delay = Number(eagerAfterMs)
+    if (visible || !Number.isFinite(delay) || delay < 0) {
+      return undefined
+    }
+    const timer = setTimeout(() => setVisible(true), delay)
+    return () => clearTimeout(timer)
+  }, [eagerAfterMs, visible])
+
   return (
     <div ref={anchorRef} className={className}>
-      {visible ? children : placeholder}
+      {visible ? children : fallback}
     </div>
   )
 }

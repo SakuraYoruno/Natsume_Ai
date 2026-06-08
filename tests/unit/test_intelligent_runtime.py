@@ -1,7 +1,6 @@
 from __future__ import annotations
 from dataclasses import dataclass, field
 
-from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.agents.planning_agent import PlanningAgent
 from host_brain.app.chat_runtime_input import build_chat_runtime_input
 from host_brain.app.intelligent_runtime import (
@@ -10,10 +9,8 @@ from host_brain.app.intelligent_runtime import (
     build_prompt_intelligence,
     resolve_tts_route,
 )
-from host_brain.app.prompt_template_store import PromptTemplateStore
 from host_brain.reasoning.reflection_chain import ReflectionChain
 from host_brain.skills.builtin_registry import build_builtin_skill_registry
-from tests.text_quality_assertions import assert_natsume_style
 
 
 class _DummyMetaLearning:
@@ -194,7 +191,7 @@ def test_build_prompt_intelligence_skips_task_planning_for_plain_chat(monkeypatc
     assert planner.create_calls == 0
 
 
-def test_apply_response_intelligence_revises_high_risk_reply(monkeypatch) -> None:
+def test_apply_response_intelligence_sanitizes_without_authoring_fallback(monkeypatch) -> None:
     _patch_dependencies(monkeypatch)
 
     revised_text, meta = apply_response_intelligence(
@@ -202,27 +199,21 @@ def test_apply_response_intelligence_revises_high_risk_reply(monkeypatch) -> Non
         user_message="我今天很难过",
         narrative="您好，作为一个AI，我建议您冷静一下。",
         emotion_context={"emotion_tag": "sadness", "turn_count": 1},
-        bond_summary={"stage": "STRANGER"},
+        bond_summary={"stage": "FRIEND"},
         render_lang="zh",
         allow_rewrite=True,
     )
 
     reflection = dict(meta.get("reflection") or {})
-    before = dict(reflection.get("before") or {})
     after = dict(reflection.get("after") or {})
 
     assert "AI" not in revised_text
     assert "您好" not in revised_text
+    assert "我在" not in revised_text
+    assert revised_text == "我建议您冷静一下。"
     assert reflection.get("revised") is True
     assert reflection.get("revision_mode") == "reflection_revise"
-    assert float(after.get("overall_score") or 0.0) >= float(before.get("overall_score") or 0.0)
-    assert_natsume_style(
-        user_message="我今天很难过",
-        reply=revised_text,
-        emotion_tag="sadness",
-        bond_stage="STRANGER",
-        required_markers=("我在",),
-    )
+    assert after.get("passed") is True
 
 
 def test_apply_response_intelligence_extracts_narrative_text_from_structured_json(monkeypatch) -> None:
@@ -233,7 +224,7 @@ def test_apply_response_intelligence_extracts_narrative_text_from_structured_jso
         user_message="上一句是什么",
         narrative='{"narrative":{"text":"嗯……你是指，之前那一句吗？"},"intent_draft":{},"meta":{"draft_only":true}}',
         emotion_context={"emotion_tag": "NEUTRAL", "turn_count": 1},
-        bond_summary={"stage": "STRANGER"},
+        bond_summary={"stage": "FRIEND"},
         render_lang="zh",
         allow_rewrite=False,
     )
@@ -249,7 +240,7 @@ def test_apply_response_intelligence_extracts_narrative_text_from_fenced_json(mo
         user_message="那现在呢",
         narrative='```json\n{"narrative":{"text":"嗯，是这样啊……不过，我这边还没看到上一句。"},"intent_draft":{},"meta":{"draft_only":true}}\n```',
         emotion_context={"emotion_tag": "NEUTRAL", "turn_count": 1},
-        bond_summary={"stage": "STRANGER"},
+        bond_summary={"stage": "FRIEND"},
         render_lang="zh",
         allow_rewrite=False,
     )
@@ -257,59 +248,51 @@ def test_apply_response_intelligence_extracts_narrative_text_from_fenced_json(mo
     assert revised_text == "嗯，是这样啊……不过，我这边还没看到上一句。"
 
 
-def test_apply_response_intelligence_repairs_evasive_affection_question_reply(monkeypatch) -> None:
+def test_apply_response_intelligence_does_not_author_affection_question_reply(monkeypatch) -> None:
     _patch_dependencies(monkeypatch)
 
+    original = "嗯……我在这里，很珍惜能这样和你说话的时间。"
     revised_text, meta = apply_response_intelligence(
         request_id="req-affection-question-directness",
         user_message="你喜欢我吗",
-        narrative="嗯……我在这里，很珍惜能这样和你说话的时间。",
+        narrative=original,
         emotion_context={"emotion_tag": "NEUTRAL", "turn_count": 1},
-        bond_summary={"stage": "STRANGER"},
+        bond_summary={"stage": "FRIEND"},
         render_lang="zh",
         allow_rewrite=True,
     )
 
     reflection = dict(meta.get("reflection") or {})
 
-    assert reflection.get("revised") is True
-    assert "我在这里" not in revised_text
-    assert "喜欢" in revised_text or "在意" in revised_text
-    assert_natsume_style(
-        user_message="你喜欢我吗",
-        reply=revised_text,
-        emotion_tag="neutral",
-        bond_stage="STRANGER",
-        forbidden_markers=("宝贝", "亲爱的", "永远陪着你", "AI", "系统", "Agent"),
+    assert reflection.get("revised") is False
+    assert revised_text == original
+    assert not any(
+        op.startswith("repair_affection")
+        for op in list((reflection.get("operations") or []))
     )
 
 
-def test_apply_response_intelligence_repairs_generic_thanks_on_affection_disclosure(monkeypatch) -> None:
+def test_apply_response_intelligence_does_not_author_affection_disclosure_reply(monkeypatch) -> None:
     _patch_dependencies(monkeypatch)
 
+    original = "嗯……谢谢你。能这样和你说话，我也很高兴。"
     revised_text, meta = apply_response_intelligence(
         request_id="req-affection-disclosure-directness",
         user_message="我喜欢你",
-        narrative="嗯……谢谢你。能这样和你说话，我也很高兴。",
+        narrative=original,
         emotion_context={"emotion_tag": "NEUTRAL", "turn_count": 1},
-        bond_summary={"stage": "STRANGER"},
+        bond_summary={"stage": "FRIEND"},
         render_lang="zh",
         allow_rewrite=True,
     )
 
     reflection = dict(meta.get("reflection") or {})
-    after = dict(reflection.get("after") or {})
 
-    assert reflection.get("revised") is True
-    assert "认真记着" in revised_text or "认真对待" in revised_text or "慢一点比较好" in revised_text
-    assert revised_text != "嗯……谢谢你。能这样和你说话，我也很高兴。"
-    assert after.get("should_revise") is False
-    assert_natsume_style(
-        user_message="我喜欢你",
-        reply=revised_text,
-        emotion_tag="neutral",
-        bond_stage="STRANGER",
-        forbidden_markers=("宝贝", "亲爱的", "永远陪着你", "AI", "系统", "Agent"),
+    assert reflection.get("revised") is False
+    assert revised_text == original
+    assert not any(
+        op.startswith("repair_affection")
+        for op in list((reflection.get("operations") or []))
     )
 
 
@@ -319,7 +302,7 @@ def test_resolve_tts_route_maps_canonical_sad_to_semantic_style(monkeypatch) -> 
     route = resolve_tts_route(
         text="你今天很难过啊。是发生什么事了吗？",
         emotion_context={"emotion_tag": "SAD"},
-        bond_summary={"stage": "STRANGER"},
+        bond_summary={"stage": "FRIEND"},
     )
 
     assert route.get("emotion_tag") == "sadness"
@@ -331,68 +314,58 @@ def test_resolve_tts_route_maps_canonical_calm_to_comfort_style(monkeypatch) -> 
     route = resolve_tts_route(
         text="没关系的，我会陪着你。",
         emotion_context={"emotion_tag": "CALM"},
-        bond_summary={"stage": "STRANGER"},
+        bond_summary={"stage": "FRIEND"},
     )
 
     assert route.get("emotion_tag") == "comfort"
 
 
-def test_reflection_chain_revise_uses_minimal_fallback_for_empty_reply() -> None:
+def test_reflection_chain_revise_does_not_author_empty_reply() -> None:
     chain = ReflectionChain()
 
     result = chain.revise(
         user_message="你喜欢我吗",
         ai_response="",
         emotion_tag="",
-        bond_stage="ACQUAINTANCE",
+        bond_stage="CLOSE_FRIEND",
     )
 
-    assert result.revised_text == "嗯，我在。刚才那句我想再理一下，马上接着你说。"
+    assert result.revised_text == ""
+    assert "no_authoring_empty" in result.operations
 
 
-def test_reflection_chain_revise_replaces_too_short_reply_with_minimal_fallback() -> None:
+def test_reflection_chain_revise_drops_too_short_reply_without_fallback() -> None:
     chain = ReflectionChain()
 
     result = chain.revise(
         user_message="你喜欢我吗",
         ai_response="嗯",
         emotion_tag="",
-        bond_stage="ACQUAINTANCE",
+        bond_stage="CLOSE_FRIEND",
     )
 
-    assert result.revised_text == "嗯，我在。刚才那句我想再理一下，马上接着你说。"
+    assert result.revised_text == ""
+    assert "drop_too_short_reply" in result.operations
 
 
-def test_reflection_chain_revise_uses_japanese_localized_fallback() -> None:
+def test_reflection_chain_revise_does_not_author_japanese_fallback() -> None:
     chain = ReflectionChain()
 
     result = chain.revise(
         user_message="いる？",
         ai_response="",
         emotion_tag="",
-        bond_stage="ACQUAINTANCE",
+        bond_stage="CLOSE_FRIEND",
         render_target_lang="ja",
     )
 
-    assert result.revised_text == "ええ、います。今の返事、少しだけ言い直しますね。"
+    assert result.revised_text == ""
+    assert "no_authoring_empty" in result.operations
 
 
-def test_sanitize_narrative_uses_prompt_template_override(monkeypatch) -> None:
-    ledger = SQLiteLedger(":memory:", check_same_thread=False)
-    store = PromptTemplateStore(ledger=ledger, cache_ttl_ms=0)
-    store.upsert_template(
-        "intelligent_runtime.sanitize.empty_narrative",
-        content="我还在这里。",
-        enabled=True,
-    )
-
-    import host_brain.app.dependencies as deps
-
-    monkeypatch.setattr(deps, "_ledger", ledger, raising=False)
-    monkeypatch.setattr(deps, "_prompt_template_store", store, raising=False)
-
+def test_sanitize_narrative_returns_empty_when_cleanup_removes_everything() -> None:
     assert _sanitize_narrative(
         text="您好，感谢您的支持",
         bond_stage="FRIEND",
         render_lang="zh",
-    ) == "我还在这里。"
+    ) == ""

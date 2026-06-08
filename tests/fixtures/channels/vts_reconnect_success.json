@@ -1,35 +1,35 @@
-{
-  "description": "VTS WebSocket 断连→自动重连成功 fixture",
-  "scenario": "vts_disconnect_reconnect_success",
-  "initial_state": {
-    "vts_state": "AUTHENTICATED",
-    "current_expression": "exp_happy_01",
-    "talking": true
-  },
-  "trigger": {
-    "event": "websocket_close",
-    "reason": "network_reset",
-    "ts_ms": 1709308800000
-  },
-  "reconnect_config": {
-    "max_attempts": 10,
-    "base_delay_s": 1.0,
-    "max_delay_s": 16.0,
-    "auto_reconnect": true
-  },
-  "mock_connect_failures_before_success": 2,
-  "expected": {
-    "final_state": "AUTHENTICATED",
-    "reconnect_event": "VTS_RECONNECTED",
-    "reconnect_attempts": 3,
-    "neutral_restored": true,
-    "current_expression": "exp_neutral_01",
-    "talking": false,
-    "audit_event": {
-      "event": "VTS_RECONNECTED",
-      "attempt": 3,
-      "detail": "reconnected after 3 attempt(s)",
-      "neutral_restored": true
-    }
-  }
+﻿{
+    "description":  "VTS WebSocket 断连→自动重连成功 fixture",
+    "scenario":  "vts_disconnect_reconnect_success",
+    "initial_state":  {
+                          "vts_state":  "AUTHENTICATED",
+                          "current_expression":  "exp_happy_01",
+                          "talking":  true
+                      },
+    "trigger":  {
+                    "event":  "websocket_close",
+                    "reason":  "network_reset",
+                    "ts_ms":  1709308800000
+                },
+    "reconnect_config":  {
+                             "max_attempts":  10,
+                             "base_delay_s":  1.0,
+                             "max_delay_s":  16.0,
+                             "auto_reconnect":  true
+                         },
+    "mock_connect_failures_before_success":  2,
+    "expected":  {
+                     "final_state":  "AUTHENTICATED",
+                     "reconnect_event":  "VTS_RECONNECTED",
+                     "reconnect_attempts":  3,
+                     "neutral_restored":  true,
+                     "current_expression":  "exp_neutral_01",
+                     "talking":  false,
+                     "audit_event":  {
+                                         "event":  "VTS_RECONNECTED",
+                                         "attempt":  3,
+                                         "detail":  "reconnected after 3 attempt(s)",
+                                         "neutral_restored":  true
+                                     }
+                 }
 }

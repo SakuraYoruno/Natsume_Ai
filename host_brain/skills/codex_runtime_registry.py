@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any, Callable
 
 from host_brain.bio_ops import build_proposal_only_policy
+from host_brain.codex_runtime.production_studio import build_production_work_order, get_production_skill_profile
 from host_brain.codex_runtime.studios import (
     build_code_work_order,
     build_finance_work_order,
@@ -17,6 +18,21 @@ from host_brain.skills.declarative import DeclarativeSkillProvider, DeclarativeS
 from host_brain.skills.registry import SkillRegistry
 
 
+_LIGHTNOVEL_RECOMMENDER_INVOCATION_DEFAULTS = {
+    "urls": [
+        "https://www.lightnovel.fun/",
+        "https://www.lightnovel.fun/cn/category/3/106?type=1",
+        "https://book.sfacg.com/rank/",
+        "https://www.17k.com/man/qingbook/",
+    ],
+    "site_adapter": "lightnovel.fun",
+    "artifacts_root": "artifacts/codex_runs/lightnovel_recommender",
+    "start_background": True,
+    "driver_kind": "natsume_daily_recommendation",
+    "workflow_owner": "natsume",
+}
+
+
 def _ctx_request_id(ctx: dict[str, Any] | None) -> str | None:
     return str((ctx or {}).get("request_id") or "").strip() or None
 
@@ -24,6 +40,10 @@ def _ctx_request_id(ctx: dict[str, Any] | None) -> str | None:
 def _base_args(args: dict[str, Any], ctx: dict[str, Any] | None) -> dict[str, Any]:
     merged = dict(args or {})
     merged.setdefault("request_id", _ctx_request_id(ctx))
+    for key in ("session_id", "person_id", "thread_id", "user_message"):
+        value = str((ctx or {}).get(key) or "").strip()
+        if value and not str(merged.get(key) or "").strip():
+            merged[key] = value
     if not str(merged.get("task") or "").strip():
         for key in ("objective", "text", "user_message", "query"):
             value = str(merged.get(key) or (ctx or {}).get(key) or "").strip()
@@ -66,6 +86,25 @@ def _normalize_skill_forge(args: dict[str, Any], ctx: dict[str, Any] | None) -> 
 
 def _normalize_research(args: dict[str, Any], ctx: dict[str, Any] | None) -> dict[str, Any]:
     return _payload_from_work_order(build_research_work_order(_base_args(args, ctx)))
+
+
+def _normalize_production(skill_id: str) -> Callable[[dict[str, Any], dict[str, Any] | None], dict[str, Any]]:
+    def _normalize(args: dict[str, Any], ctx: dict[str, Any] | None) -> dict[str, Any]:
+        merged = _base_args(args, ctx)
+        work_order = build_production_work_order(merged, skill_id=skill_id)
+        payload = _payload_from_work_order(work_order)
+        approval_policy = dict(work_order.get("approval_policy") or {})
+        needs_confirmation = bool(approval_policy.get("require_confirm")) and not bool(approval_policy.get("confirmed"))
+        payload["start_background"] = bool(merged.get("start_background", True)) and not needs_confirmation
+        if needs_confirmation:
+            payload["blocked_until_confirmation"] = True
+        if "artifacts_root" in merged:
+            payload["artifacts_root"] = merged.get("artifacts_root")
+        if "runs_root" in merged:
+            payload["runs_root"] = merged.get("runs_root")
+        return payload
+
+    return _normalize
 
 
 def _normalize_bio_ops(capability: str, run_mode: str, skill_id: str) -> Callable[[dict[str, Any], dict[str, Any] | None], dict[str, Any]]:
@@ -261,6 +300,215 @@ class CodexRuntimeSkillProvider(DeclarativeSkillProvider):
             normalize_args=_normalize_bio_ops("dream_rehearsal", "inspect", "codex_dream_compile"),
             family="code",
             capability_tags=("codex", "dream"),
+            fallback_policy="strict_fail",
+        ),
+        DeclarativeSkillSpec(
+            skill_name="codex_workbench_brief",
+            method_name="codex_workbench_brief",
+            clearance="LOW",
+            risk_level=2,
+            scope="host",
+            reversible=False,
+            description=get_production_skill_profile("codex_workbench_brief").value_statement,
+            tool="codex_production",
+            action="enqueue",
+            normalize_args=_normalize_production("codex_workbench_brief"),
+            family="code",
+            capability_tags=tuple(get_production_skill_profile("codex_workbench_brief").capability_tags),
+            parallelizable=True,
+            fallback_policy="strict_fail",
+        ),
+        DeclarativeSkillSpec(
+            skill_name="codex_repo_sentinel",
+            method_name="codex_repo_sentinel",
+            clearance="LOW",
+            risk_level=2,
+            scope="host",
+            reversible=False,
+            description=get_production_skill_profile("codex_repo_sentinel").value_statement,
+            tool="codex_production",
+            action="enqueue",
+            normalize_args=_normalize_production("codex_repo_sentinel"),
+            family="code",
+            capability_tags=tuple(get_production_skill_profile("codex_repo_sentinel").capability_tags),
+            parallelizable=True,
+            fallback_policy="strict_fail",
+        ),
+        DeclarativeSkillSpec(
+            skill_name="codex_memory_curator",
+            method_name="codex_memory_curator",
+            clearance="LOW",
+            risk_level=2,
+            scope="host",
+            reversible=False,
+            description=get_production_skill_profile("codex_memory_curator").value_statement,
+            tool="codex_production",
+            action="enqueue",
+            normalize_args=_normalize_production("codex_memory_curator"),
+            family="code",
+            capability_tags=tuple(get_production_skill_profile("codex_memory_curator").capability_tags),
+            parallelizable=True,
+            fallback_policy="strict_fail",
+        ),
+        DeclarativeSkillSpec(
+            skill_name="codex_document_digest",
+            method_name="codex_document_digest",
+            clearance="LOW",
+            risk_level=2,
+            scope="host",
+            reversible=False,
+            description=get_production_skill_profile("codex_document_digest").value_statement,
+            tool="codex_production",
+            action="enqueue",
+            normalize_args=_normalize_production("codex_document_digest"),
+            family="code",
+            capability_tags=tuple(get_production_skill_profile("codex_document_digest").capability_tags),
+            parallelizable=True,
+            fallback_policy="strict_fail",
+        ),
+        DeclarativeSkillSpec(
+            skill_name="codex_frontend_review",
+            method_name="codex_frontend_review",
+            clearance="LOW",
+            risk_level=2,
+            scope="host",
+            reversible=False,
+            description=get_production_skill_profile("codex_frontend_review").value_statement,
+            tool="codex_production",
+            action="enqueue",
+            normalize_args=_normalize_production("codex_frontend_review"),
+            family="code",
+            capability_tags=tuple(get_production_skill_profile("codex_frontend_review").capability_tags),
+            parallelizable=True,
+            fallback_policy="strict_fail",
+        ),
+        DeclarativeSkillSpec(
+            skill_name="codex_browser_research",
+            method_name="codex_browser_research",
+            clearance="LOW",
+            risk_level=2,
+            scope="host",
+            reversible=False,
+            description=get_production_skill_profile("codex_browser_research").value_statement,
+            tool="codex_production",
+            action="enqueue",
+            normalize_args=_normalize_production("codex_browser_research"),
+            family="code",
+            capability_tags=tuple(get_production_skill_profile("codex_browser_research").capability_tags),
+            parallelizable=True,
+            fallback_policy="strict_fail",
+        ),
+        DeclarativeSkillSpec(
+            skill_name="codex_frontend_acceptance",
+            method_name="codex_frontend_acceptance",
+            clearance="LOW",
+            risk_level=2,
+            scope="host",
+            reversible=False,
+            description=get_production_skill_profile("codex_frontend_acceptance").value_statement,
+            tool="codex_production",
+            action="enqueue",
+            normalize_args=_normalize_production("codex_frontend_acceptance"),
+            family="code",
+            capability_tags=tuple(get_production_skill_profile("codex_frontend_acceptance").capability_tags),
+            parallelizable=True,
+            fallback_policy="strict_fail",
+        ),
+        DeclarativeSkillSpec(
+            skill_name="codex_web_corpus_collector",
+            method_name="codex_web_corpus_collector",
+            clearance="LOW",
+            risk_level=2,
+            scope="host",
+            reversible=False,
+            description=get_production_skill_profile("codex_web_corpus_collector").value_statement,
+            tool="codex_production",
+            action="enqueue",
+            normalize_args=_normalize_production("codex_web_corpus_collector"),
+            family="code",
+            capability_tags=tuple(get_production_skill_profile("codex_web_corpus_collector").capability_tags),
+            parallelizable=True,
+            fallback_policy="strict_fail",
+        ),
+        DeclarativeSkillSpec(
+            skill_name="codex_lightnovel_recommender",
+            method_name="codex_lightnovel_recommender",
+            clearance="LOW",
+            risk_level=2,
+            scope="host",
+            reversible=False,
+            description=get_production_skill_profile("codex_lightnovel_recommender").value_statement,
+            tool="codex_production",
+            action="enqueue",
+            normalize_args=_normalize_production("codex_lightnovel_recommender"),
+            family="code",
+            capability_tags=tuple(get_production_skill_profile("codex_lightnovel_recommender").capability_tags),
+            parallelizable=True,
+            fallback_policy="strict_fail",
+            invocation_defaults=_LIGHTNOVEL_RECOMMENDER_INVOCATION_DEFAULTS,
+            scheduler_profile={
+                "auto_schedule": True,
+                "task_id": "lightnovel_recommender_daily",
+                "trigger_mode": "cron",
+                "trigger_config": {"hour": 10, "minute": 30, "catch_up_window_minutes": 180},
+                "trigger_env": {
+                    "hour": {
+                        "name": "HOST_LIGHTNOVEL_RECOMMENDER_HOUR",
+                        "default": 10,
+                        "low": 0,
+                        "high": 23,
+                    },
+                    "minute": {
+                        "name": "HOST_LIGHTNOVEL_RECOMMENDER_MINUTE",
+                        "default": 30,
+                        "low": 0,
+                        "high": 59,
+                    },
+                    "catch_up_window_minutes": {
+                        "name": "HOST_LIGHTNOVEL_RECOMMENDER_CATCH_UP_WINDOW_MINUTES",
+                        "default": 180,
+                        "low": 0,
+                        "high": 720,
+                    },
+                },
+                "priority": "LOW",
+                "mode_allowlist": ["normal", "sleep"],
+                "resource_class": "browser_heavy",
+                "uses_llm": True,
+                "uses_gpu": False,
+                "args": {
+                    "task": "从多个轻小说公开榜单、最新资源或指定分类收集公开元数据，生成轻小说推荐。",
+                    **_LIGHTNOVEL_RECOMMENDER_INVOCATION_DEFAULTS,
+                },
+                "arg_env": {
+                    "urls": {
+                        "name": "HOST_LIGHTNOVEL_RECOMMENDER_URLS",
+                        "default": list(_LIGHTNOVEL_RECOMMENDER_INVOCATION_DEFAULTS["urls"]),
+                        "type": "csv",
+                    },
+                    "artifacts_root": {
+                        "name": "HOST_LIGHTNOVEL_RECOMMENDER_ARTIFACTS_ROOT",
+                        "default": _LIGHTNOVEL_RECOMMENDER_INVOCATION_DEFAULTS["artifacts_root"],
+                    },
+                },
+                "advisory_policy": "rule",
+                "description": "Natsume 日常推荐：每日从多个公开轻小说源生成推荐。",
+            },
+        ),
+        DeclarativeSkillSpec(
+            skill_name="codex_epub_builder",
+            method_name="codex_epub_builder",
+            clearance="LOW",
+            risk_level=2,
+            scope="host",
+            reversible=False,
+            description=get_production_skill_profile("codex_epub_builder").value_statement,
+            tool="codex_production",
+            action="enqueue",
+            normalize_args=_normalize_production("codex_epub_builder"),
+            family="code",
+            capability_tags=tuple(get_production_skill_profile("codex_epub_builder").capability_tags),
+            parallelizable=True,
             fallback_policy="strict_fail",
         ),
     )

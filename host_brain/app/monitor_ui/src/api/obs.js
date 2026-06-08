@@ -16,6 +16,8 @@ const HOT_GET_PREFIXES = [
   '/obs/capability-gaps/stats',
   '/obs/insights/summary-snapshot',
   '/obs/digital-life/overview-snapshot',
+  '/obs/digital-life/wall-clock-soak',
+  '/obs/avatar/state',
   '/obs/codex-bio-ops',
   '/obs/life-body',
   '/obs/life-timeline',
@@ -248,6 +250,27 @@ export function fetchDigitalLifeOverviewSnapshot(params = {}) {
     Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))
   ).toString()
   return request(`/obs/digital-life/overview-snapshot${qs ? '?' + qs : ''}`)
+}
+
+export function fetchDigitalLifeWallClockSoak(params = {}) {
+  const qs = new URLSearchParams(
+    Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))
+  ).toString()
+  return request(`/obs/digital-life/wall-clock-soak${qs ? '?' + qs : ''}`)
+}
+
+export function fetchAvatarState(params = {}) {
+  const qs = new URLSearchParams(
+    Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))
+  ).toString()
+  return request(`/obs/avatar/state${qs ? '?' + qs : ''}`)
+}
+
+export function postAvatarBehavior(body = {}) {
+  return request('/obs/avatar/behavior', {
+    method: 'POST',
+    body: JSON.stringify(body || {}),
+  })
 }
 
 export function fetchCodexBioOpsObservability(params = {}) {
@@ -808,6 +831,11 @@ export function fetchSchedulerHealth() {
   return request('/scheduler/health')
 }
 
+/** 整机资源管家状态（用于调度解释层） */
+export function fetchResourceManagerStatus() {
+  return request('/obs/resource-manager/status')
+}
+
 export function fetchImmuneGateStats(params = {}) {
   const qs = new URLSearchParams(
     Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))
@@ -843,15 +871,11 @@ export function disableSchedulerTask(taskId) {
 }
 
 /**
- * 立即触发调度任务（通过 PATCH 重置 trigger_config 中的 next_run_ts 为 0）
+ * 立即触发调度任务
  * @param {string} taskId
  */
 export function triggerSchedulerTask(taskId) {
-  // scheduler_routes 没有专用 trigger 端点，通过 PATCH 重置触发时间来实现立即触发
-  return request(`/scheduler/tasks/${encodeURIComponent(taskId)}`, {
-    method: 'PATCH',
-    body: JSON.stringify({ trigger_config: { next_run_ts: 0 } }),
-  })
+  return request(`/scheduler/tasks/${encodeURIComponent(taskId)}/trigger`, { method: 'POST' })
 }
 
 // ===== Ref #30: VTS 通道统计 =====
@@ -1489,7 +1513,7 @@ export function connectHealthWebSocket(onMessage, onError, onClose) {
 // ===== Retrieval Runtime =====
 
 /**
- * 当前 Retrieval embedding / reranker 实际运行模型与 fallback 统计。
+ * 当前 Retrieval embedding 实际运行模型与 fallback 统计。
  * @param {object} params - { request_id, limit, include_legacy }
  */
 export function fetchRetrievalRuntime(params = {}) {

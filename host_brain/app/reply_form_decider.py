@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import datetime
 import os
-import random
+import re
 import time
 from dataclasses import dataclass
 from enum import Enum
@@ -21,7 +21,6 @@ class MsgType(str, Enum):
     IMAGE = "image"
     VIDEO = "video"
     FILE = "file"
-    EMOJI = "emoji"
     STICKER = "image"
 
 
@@ -51,25 +50,57 @@ _VOICE_EMOTION_TAGS: frozenset[str] = frozenset({
 })
 
 _VOICE_PROBABILITY_BY_BOND: dict[str, float] = {
-    "STRANGER": 0.0,
-    "ACQUAINTANCE": 0.0,
     "FRIEND": 0.10,
     "CLOSE_FRIEND": 0.20,
     "CONFIDANT": 0.30,
     "SOULMATE": 0.30,
+    "INTIMATE": 0.30,
 }
 
-DEFAULT_DAILY_VOICE_LIMIT = 3
-DEFAULT_MIN_VOICE_INTERVAL_MS = 10 * 60 * 1000
+DEFAULT_DAILY_VOICE_LIMIT = 24
+DEFAULT_MIN_VOICE_INTERVAL_MS = 90 * 1000
+DEFAULT_MIN_VOICE_REPLY_CHARS = 1
+DEFAULT_MAX_VOICE_REPLY_CHARS = 96
 _LATE_NIGHT_PROB_SCALE = 0.5
+_QUIET_HOUR_START = 23
+_QUIET_HOUR_END = 7
+
+_EXPLICIT_VOICE_REQUEST_RE = re.compile(
+    r"(发语音|用语音|语音回复|读出来|念出来|说出来|讲出来|voice|voice\s*note|speak)",
+    re.IGNORECASE,
+)
+_TEXT_ONLY_REQUEST_RE = re.compile(
+    r"(只发文字|文字回复|打字就行|别发语音|不要语音|不用语音|text\s*only)",
+    re.IGNORECASE,
+)
+_SHORT_INTERJECTION_RE = re.compile(
+    r"^(哈+[?？!！。.]?|啊+[?？!！。.]?|嗯+[?？!！。.]?|哦+[?？!！。.]?|喔+[?？!！。.]?|好(?:的|呀)?[?？!！。.]?|收到[?？!！。.]?|ok[?？!！。.]?)$",
+    re.IGNORECASE,
+)
+_EMBODIED_PRESENCE_RE = re.compile(
+    r"(我在|在呢|来啦|听到了|知道啦|行了|好啦|别怕|慢慢说|陪你|抱抱|哈+[?？!！。.]?$|嗯+[?？!！。.]?$)",
+    re.IGNORECASE,
+)
+_STRUCTURED_REPLY_MARKERS: tuple[str, ...] = (
+    "```",
+    "http://",
+    "https://",
+    "\n- ",
+    "\n* ",
+    "\n1.",
+    "\n1、",
+    "|",
+)
+_VOICE_INPUT_TYPES: frozenset[str] = frozenset({"voice", "audio", "record", "sound"})
+_CLOSE_VOICE_BONDS: frozenset[str] = frozenset({"CLOSE_FRIEND", "CONFIDANT", "SOULMATE", "INTIMATE"})
 
 
 class ResponseFormDecider:
     """Canonical host-side response-form decider.
 
     Planned primary/secondary forms from the reply plan are authoritative.
-    When the plan does not specify a form, we fall back to a conservative
-    voice heuristic; emoji/sticker/image are never invented here.
+    When the plan does not specify a form, text remains the durable transcript
+    while voice carries embodied presence for short conversational turns.
     """
 
     def __init__(
@@ -79,6 +110,8 @@ class ResponseFormDecider:
         probability_scale: float | None = None,
         daily_voice_limit: int = DEFAULT_DAILY_VOICE_LIMIT,
         min_voice_interval_ms: int = DEFAULT_MIN_VOICE_INTERVAL_MS,
+        min_voice_reply_chars: int | None = None,
+        max_voice_reply_chars: int | None = None,
     ) -> None:
         if voice_enabled is None:
             raw = str(os.environ.get("HOST_GATEWAY_VOICE_REPLY_ENABLED") or "").strip().lower()
@@ -96,6 +129,18 @@ class ResponseFormDecider:
 
         self._daily_voice_limit = max(1, int(daily_voice_limit))
         self._min_voice_interval_ms = max(0, int(min_voice_interval_ms))
+        self._min_voice_reply_chars = _read_int_env(
+            "HOST_GATEWAY_VOICE_MIN_TEXT_LEN",
+            default=DEFAULT_MIN_VOICE_REPLY_CHARS if min_voice_reply_chars is None else int(min_voice_reply_chars),
+            minimum=1,
+            maximum=80,
+        )
+        self._max_voice_reply_chars = _read_int_env(
+            "HOST_GATEWAY_VOICE_MAX_TEXT_LEN",
+            default=DEFAULT_MAX_VOICE_REPLY_CHARS if max_voice_reply_chars is None else int(max_voice_reply_chars),
+            minimum=max(10, self._min_voice_reply_chars),
+            maximum=500,
+        )
         self._voice_stats: dict[str, dict] = {}
 
     def decide(
@@ -105,10 +150,12 @@ class ResponseFormDecider:
         user_msg_type: MsgType = MsgType.TEXT,
         narrative_zh: str,
         emotion_tag: str = "NEUTRAL",
-        bond_stage: str = "STRANGER",
+        bond_stage: str = "FRIEND",
         planned_primary: MsgType | None = None,
         planned_secondary: MsgType | None = None,
         planned_reason: str = "",
+        user_text: str = "",
+        platform: str = "",
     ) -> ResponseFormDecision:
         if planned_primary is not None:
             return ResponseFormDecision(
@@ -117,46 +164,88 @@ class ResponseFormDecider:
                 reason=str(planned_reason or "planned_form").strip() or "planned_form",
             )
 
-        if not self._voice_enabled:
-            return ResponseFormDecision(MsgType.TEXT, None, "voice_disabled")
-
-        text = str(narrative_zh or "").strip()
-        length = len(text)
-        etag = str(emotion_tag or "NEUTRAL").strip().upper() or "NEUTRAL"
-        stage = str(bond_stage or "STRANGER").strip().upper() or "STRANGER"
-        uid = str(user_id or "default").strip() or "default"
+        user_key = str(user_id or "default").strip() or "default"
+        reply_text_raw = str(narrative_zh or "").strip()
+        reply_text = _compact_text(narrative_zh)
+        input_text = _compact_text(user_text)
+        input_type = _normalize_msg_type(user_msg_type)
         now_ts = _now_ms()
 
-        if length > 80:
-            return ResponseFormDecision(MsgType.TEXT, None, "long_reply")
-        if stage in {"STRANGER", "ACQUAINTANCE"}:
-            return ResponseFormDecision(MsgType.TEXT, None, "low_intimacy")
+        _ = platform
+        if not self._voice_enabled:
+            return ResponseFormDecision(MsgType.TEXT, None, "voice_disabled_text")
+        if not reply_text:
+            return ResponseFormDecision(MsgType.TEXT, None, "empty_reply_text")
+        if _TEXT_ONLY_REQUEST_RE.search(input_text):
+            return ResponseFormDecision(MsgType.TEXT, None, "user_requested_text")
+        if not self._voice_candidate_text_ok(reply_text_raw):
+            return ResponseFormDecision(MsgType.TEXT, None, "voice_unsuitable_text_shape")
 
-        effective_scale = self._prob_scale
-        if self._is_late_night(now_ts):
-            effective_scale *= _LATE_NIGHT_PROB_SCALE
+        explicit_voice_request = bool(_EXPLICIT_VOICE_REQUEST_RE.search(input_text))
+        if input_type == MsgType.VOICE:
+            return self._voice_or_text_rate_limited(
+                user_key,
+                now_ts,
+                "voice_input_echo",
+                enforce_limit=False,
+            )
+        if explicit_voice_request:
+            return self._voice_or_text_rate_limited(
+                user_key,
+                now_ts,
+                "explicit_voice_request",
+                enforce_limit=False,
+            )
 
-        if any(kw in text for kw in _WARMTH_KEYWORDS):
-            if self._can_send_voice(uid, now_ts):
-                self._record_voice(uid, now_ts)
-                return ResponseFormDecision(MsgType.TEXT, MsgType.VOICE, "warmth_scenario")
-            return ResponseFormDecision(MsgType.TEXT, None, "warmth_scenario_voice_limited")
+        if self._prob_scale <= 0:
+            return ResponseFormDecision(MsgType.TEXT, None, "voice_probability_zero")
 
-        if etag in _VOICE_EMOTION_TAGS and length <= 40:
-            base_prob = _VOICE_PROBABILITY_BY_BOND.get(stage, 0.0)
-            prob = min(1.0, base_prob * effective_scale)
-            if prob > 0 and random.random() < prob and self._can_send_voice(uid, now_ts):
-                self._record_voice(uid, now_ts)
-                return ResponseFormDecision(MsgType.TEXT, MsgType.VOICE, "intimate_emotional")
+        emotion = str(emotion_tag or "").strip().upper()
+        bond = str(bond_stage or "").strip().upper() or "FRIEND"
+        has_warm_signal = any(keyword in reply_text or keyword in input_text for keyword in _WARMTH_KEYWORDS)
+        has_voice_emotion = emotion in _VOICE_EMOTION_TAGS
+        has_presence_signal = bool(_SHORT_INTERJECTION_RE.match(reply_text) or _EMBODIED_PRESENCE_RE.search(reply_text))
+        close_enough = bond in _CLOSE_VOICE_BONDS or (_VOICE_PROBABILITY_BY_BOND.get(bond, 0.0) * self._prob_scale) >= 0.20
 
-        if user_msg_type == MsgType.VOICE and length <= 30:
-            base_prob = _VOICE_PROBABILITY_BY_BOND.get(stage, 0.0)
-            echo_prob = min(1.0, 0.20 * effective_scale) if base_prob > 0 else 0.0
-            if echo_prob > 0 and random.random() < echo_prob and self._can_send_voice(uid, now_ts):
-                self._record_voice(uid, now_ts)
-                return ResponseFormDecision(MsgType.VOICE, None, "voice_echo")
+        if has_presence_signal:
+            reason = "night_embodied_presence_voice" if self._is_quiet_hours(now_ts) else "embodied_presence_voice"
+            return self._voice_or_text_rate_limited(user_key, now_ts, reason)
+        if has_warm_signal:
+            return self._voice_or_text_rate_limited(user_key, now_ts, "warmth_voice_supplement")
+        if has_voice_emotion:
+            reason = "close_affective_voice_supplement" if close_enough else "affective_voice_supplement"
+            return self._voice_or_text_rate_limited(user_key, now_ts, reason)
+        if len(reply_text) <= min(72, self._max_voice_reply_chars):
+            return self._voice_or_text_rate_limited(user_key, now_ts, "conversational_presence_voice")
 
-        return ResponseFormDecision(MsgType.TEXT, None, "default_text")
+        return ResponseFormDecision(MsgType.TEXT, None, "smart_text_only")
+
+    def _voice_candidate_text_ok(self, reply_text: str) -> bool:
+        text = str(reply_text or "").strip()
+        if len(text) < self._min_voice_reply_chars:
+            return False
+        if len(text) > self._max_voice_reply_chars:
+            return False
+        line_count = text.count("\n") + 1
+        if line_count >= 3:
+            return False
+        lowered = text.lower()
+        if any(marker in lowered for marker in _STRUCTURED_REPLY_MARKERS):
+            return False
+        return True
+
+    def _voice_or_text_rate_limited(
+        self,
+        user_id: str,
+        now_ts: int,
+        reason: str,
+        *,
+        enforce_limit: bool = True,
+    ) -> ResponseFormDecision:
+        if enforce_limit and not self._can_send_voice(user_id, now_ts):
+            return ResponseFormDecision(MsgType.TEXT, None, "voice_rate_limited_text")
+        self._record_voice(user_id, now_ts)
+        return ResponseFormDecision(MsgType.TEXT, MsgType.VOICE, reason)
 
     def _can_send_voice(self, user_id: str, now_ts: int) -> bool:
         today = _today_str(now_ts)
@@ -193,6 +282,14 @@ class ResponseFormDecider:
         except Exception:
             return False
 
+    @staticmethod
+    def _is_quiet_hours(now_ts: int) -> bool:
+        try:
+            dt = datetime.datetime.fromtimestamp(now_ts / 1000)
+            return dt.hour >= _QUIET_HOUR_START or dt.hour < _QUIET_HOUR_END
+        except Exception:
+            return False
+
     def get_voice_stats(self, user_id: str) -> dict:
         return dict(self._voice_stats.get(str(user_id).strip(), {}))
 
@@ -223,6 +320,31 @@ def _today_str(now_ts: int) -> str:
         return dt.strftime("%Y-%m-%d")
     except Exception:
         return "unknown"
+
+
+def _compact_text(value: str | None) -> str:
+    return re.sub(r"\s+", " ", str(value or "").strip())
+
+
+def _normalize_msg_type(value: MsgType | str | None) -> MsgType:
+    if isinstance(value, MsgType):
+        return value
+    raw = str(value or "").strip().lower()
+    if raw in _VOICE_INPUT_TYPES:
+        return MsgType.VOICE
+    try:
+        return MsgType(raw or "text")
+    except ValueError:
+        return MsgType.TEXT
+
+
+def _read_int_env(name: str, *, default: int, minimum: int, maximum: int) -> int:
+    raw = str(os.environ.get(name) or "").strip()
+    try:
+        value = int(raw) if raw else int(default)
+    except (TypeError, ValueError):
+        value = int(default)
+    return max(int(minimum), min(int(maximum), int(value)))
 
 
 __all__ = [

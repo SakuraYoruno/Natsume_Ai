@@ -25,6 +25,10 @@ def test_happy_text_maps_to_happy() -> None:
     )
     assert result["emotion_tag"] == "HAPPY"
     assert float(result["emotion_intensity"]) > 0.2
+    assert result["emotion_source"] == "asr_text_bootstrap"
+    assert result["emotion_modality"] == "asr_text"
+    assert result["acoustic_emotion_available"] is False
+    assert result["emotion_inference_degraded"] is False
     assert "开心" in list(result["matched_terms"])
 
 
@@ -47,4 +51,7 @@ def test_empty_text_degrades_to_neutral() -> None:
     )
     assert result["emotion_tag"] == "NEUTRAL"
     assert float(result["emotion_intensity"]) == 0.0
-    assert result["emotion_source"] == "text_heuristic"
+    assert result["emotion_source"] == "asr_text_unavailable"
+    assert result["emotion_modality"] == "asr_text"
+    assert result["acoustic_emotion_available"] is False
+    assert result["emotion_inference_degraded"] is True

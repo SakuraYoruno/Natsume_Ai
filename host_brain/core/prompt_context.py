@@ -23,7 +23,6 @@ EXPECTED_SLOTS: dict[str, type] = {
     "bond_summary": dict,
     "authoritative": list,
     "retrieval": list,
-    "style_pack": dict,
     "constraints": dict,
     "tool_meta_pack": list,
 }
@@ -38,6 +37,7 @@ OPTIONAL_SLOTS: dict[str, type] = {
     "memory_emotion_hint": dict,
     "self_reflection_pulse": dict,  # Phase III：自省脉冲
     "bond_narrative": dict,         # Phase V：关系叙事
+    "user_preference_pack": dict,
 }
 
 # M28-G：动态槽位注册表（OPT-16）
@@ -241,7 +241,6 @@ def validate_prompt_context(prompt_context: dict[str, Any]) -> PromptContextVali
 
     _validate_authoritative_slot(prompt_context["authoritative"], result)
     _validate_retrieval_slot(prompt_context["retrieval"], result)
-    _validate_style_pack_slot(prompt_context["style_pack"], result)
     _validate_bond_summary_slot(prompt_context["bond_summary"], result)
     _validate_tool_meta_pack_slot(prompt_context["tool_meta_pack"], result)
     # M10-C: semantic_slot optional validation
@@ -310,14 +309,6 @@ def _validate_retrieval_slot(retrieval: list[Any], result: PromptContextValidati
             )
 
 
-def _validate_style_pack_slot(style_pack: dict[str, Any], result: PromptContextValidationResult) -> None:
-    if any(key in style_pack for key in ("event_id", "evidence_refs", "fact", "snapshot")):
-        result.add(
-            CP_SLOT_MIXED,
-            "style_pack contains fact/audit fields from other slots",
-            slot="style_pack",
-        )
-
 
 def _validate_bond_summary_slot(
     bond_summary: dict[str, Any], result: PromptContextValidationResult
@@ -344,8 +335,13 @@ def _validate_bond_summary_slot(
         )
         return
 
-    _VALID_STAGES_CN = {"陌生人", "相识", "朋友", "好友", "挚友", "灵魂伴侣"}
-    _VALID_STAGES_EN = {"STRANGER", "ACQUAINTANCE", "FRIEND", "CLOSE_FRIEND", "CONFIDANT", "SOULMATE"}
+    _VALID_STAGES_CN = {
+        "关系好的兄妹",
+        "亲近兄妹",
+        "亲密恋人",
+        "灵魂伴侣",
+    }
+    _VALID_STAGES_EN = {"FRIEND", "CLOSE_FRIEND", "CONFIDANT", "SOULMATE"}
     _VALID_TRENDS_CN = {"上升", "稳定", "下降", "快速上升", "缓慢上升", "快速下降", "缓慢下降"}
     _VALID_TRENDS_EN = {"RISING", "STABLE", "DECLINING"}
 

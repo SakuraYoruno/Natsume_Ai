@@ -2,7 +2,7 @@
 
 拆分自 graph_config_builder.py（P2-11）：
   - resolve_host_llm_runtime / resolve_host_llm_runtime_async
-  - resolve_chat_agent_llm_runtime
+  - resolve_surface_reply_llm_runtime
   - resolve_executive_router_llm_runtime
   - resolve_subagent_llm_runtime
   - 健康探测、灰度发布、RoutingMatrix 相关逻辑
@@ -33,11 +33,18 @@ from host_brain.app.provider_factory import (
     resolve_host_llm_model_id,
 )
 from host_brain.app.model_router import resolve_gemini_model_route
-from host_brain.app.graph_config_router import (
-    HOST_CHAT_ROUTE_CLOUD,
-    HOST_CHAT_ROUTE_HOST_14B,
-    HOST_CHAT_ROUTE_SKILLS,
+from host_brain.integrations.codex_cli_provider import codex_cli_lm_available, resolve_codex_cli_model
+from host_brain.app.prompt_builder import (
+    SCENE_CHAT,
+    SCENE_EXEC_INTENT,
+    SCENE_VISION_UI,
+    SCENE_WORK_CODE,
+    SCENE_WORK_TRANSLATE,
 )
+
+HOST_CHAT_ROUTE_HOST_14B = "host_14b"
+HOST_CHAT_ROUTE_CLOUD = "cloud"
+HOST_CHAT_ROUTE_SKILLS = "skills"
 
 _HOST_CHAT_14B_DEFAULT_PROVIDER = PROVIDER_OPENAI
 _HOST_CHAT_14B_DEFAULT_MODEL_ID = "qwen3:14b"
@@ -45,6 +52,8 @@ _HOST_CHAT_14B_FALLBACK_API_KEY = "host-local-placeholder-key"
 _HOST_CHAT_14B_DEFAULT_BASE_URL = "http://127.0.0.1:11434/v1"
 _HOST_CHAT_CLOUD_DEFAULT_PROVIDER = PROVIDER_GEMINI
 _PROVIDERS_REQUIRING_API_KEY = frozenset({PROVIDER_OPENAI, PROVIDER_CODEX, PROVIDER_GEMINI, PROVIDER_DEEPSEEK, PROVIDER_MINIMAX})
+_AGENT_CODEX_MIGRATION_DEFAULT_EXCLUDED_ROLES = frozenset({"surface_reply"})
+_VISION_SCENE_NAMES = frozenset({SCENE_VISION_UI.upper(), "SCENE_VISION_UI", "VISION_UI"})
 
 
 def _parse_bool(value: Any, default: bool = False) -> bool:
@@ -66,6 +75,11 @@ def _parse_int(value: Any, *, default: int, min_value: int, max_value: int) -> i
     return max(int(min_value), min(int(max_value), parsed))
 
 
+def _is_vision_scene(scene_type: str | None) -> bool:
+    normalized = str(scene_type or "").strip().upper()
+    return normalized in _VISION_SCENE_NAMES
+
+
 def _parse_csv_tokens(value: Any) -> set[str]:
     raw = str(value or "").strip()
     if not raw:
@@ -76,6 +90,52 @@ def _parse_csv_tokens(value: Any) -> set[str]:
         if token:
             tokens.add(token)
     return tokens
+
+
+def _agent_codex_migration_enabled(role: str) -> bool:
+    if not _parse_bool(os.environ.get("HOST_AGENT_CODEX_MIGRATION_ENABLED"), default=False):
+        return False
+    normalized_role = str(role or "").strip().lower()
+    excluded = {
+        str(item or "").strip().lower()
+        for item in _parse_csv_tokens(
+            os.environ.get("HOST_AGENT_CODEX_MIGRATION_EXCLUDED_ROLES")
+            or ",".join(sorted(_AGENT_CODEX_MIGRATION_DEFAULT_EXCLUDED_ROLES))
+        )
+        if str(item or "").strip()
+    }
+    if normalized_role in excluded:
+        return False
+    included = {
+        str(item or "").strip().lower()
+        for item in _parse_csv_tokens(os.environ.get("HOST_AGENT_CODEX_MIGRATION_INCLUDED_ROLES"))
+        if str(item or "").strip()
+    }
+    if included and normalized_role not in included:
+        return False
+    return codex_cli_lm_available()
+
+
+def _resolve_agent_codex_model_id() -> str:
+    return resolve_codex_cli_model(os.environ.get("HOST_AGENT_CODEX_MODEL_ID") or os.environ.get("HOST_CODEX_MODEL_ID"))
+
+
+def _surface_reply_codex_experiment_enabled(role: str) -> bool:
+    if str(role or "").strip().lower() != "surface_reply":
+        return False
+    if not _parse_bool(os.environ.get("HOST_SURFACE_REPLY_CODEX_EXPERIMENT_ENABLED") or os.environ.get("HOST_CHAT_AGENT_CODEX_EXPERIMENT_ENABLED"), default=False):
+        return False
+    return codex_cli_lm_available()
+
+
+def _resolve_surface_reply_codex_model_id() -> str:
+    return resolve_codex_cli_model(
+        os.environ.get("HOST_SURFACE_REPLY_CODEX_MODEL_ID")
+        or os.environ.get("HOST_CHAT_AGENT_CODEX_MODEL_ID")
+        or os.environ.get("HOST_CHAT_AGENT_SPARK_MODEL_ID")
+        or os.environ.get("HOST_CODEX_CHAT_MODEL_ID")
+        or os.environ.get("HOST_CODEX_MODEL_ID")
+    )
 
 
 def _stable_bucket_0_99(value: str) -> int:
@@ -113,6 +173,8 @@ def _is_provider_available(*, provider_name: str, api_key: str | None, configure
         return False
     if provider == PROVIDER_DISABLED:
         return False
+    if provider == PROVIDER_CODEX and not str(api_key or "").strip() and codex_cli_lm_available():
+        return True
     if _provider_requires_api_key(provider) and not str(api_key or "").strip():
         return False
     return True
@@ -132,9 +194,9 @@ def _resolve_cloud_provider_model_id(*, chain_name: str) -> str:
     if normalized_chain == "gemini":
         return str(os.environ.get("HOST_GEMINI_MODEL_ID") or "gemini-2.5-flash-lite").strip() or "gemini-2.5-flash-lite"
     if normalized_chain == "codex":
-        return str(os.environ.get("HOST_CODEX_MODEL_ID") or "gpt-4o-mini").strip() or "gpt-4o-mini"
+        return resolve_codex_cli_model(os.environ.get("HOST_CODEX_MODEL_ID"))
     if normalized_chain == "deepseek":
-        return str(os.environ.get("HOST_DEEPSEEK_MODEL_ID") or "deepseek-chat").strip() or "deepseek-chat"
+        return str(os.environ.get("HOST_DEEPSEEK_MODEL_ID") or "deepseek-v4-flash").strip() or "deepseek-v4-flash"
     if normalized_chain == "minimax":
         return str(os.environ.get("HOST_MINIMAX_MODEL_ID") or "M2-her").strip() or "M2-her"
     return "mock-default"
@@ -232,12 +294,11 @@ async def _resolve_host_14b_health_status_async(*, provider_name: str, timeout_m
 
 
 def _evaluate_host_chat_gray_rollout(*, rollout_key: str | None, scene_type: str | None) -> dict[str, Any]:
-    from host_brain.app.graph_config_router import SCENE_CHAT as _SCENE_CHAT
     enabled = _parse_bool(os.environ.get("HOST_CHAT_GRAY_ENABLED"), default=False)
     percent = _parse_int(os.environ.get("HOST_CHAT_GRAY_PERCENT"), default=100, min_value=0, max_value=100)
     scope_scenes = {str(item).strip().upper() for item in _parse_csv_tokens(os.environ.get("HOST_CHAT_GRAY_SCENES") or "CHAT") if str(item).strip()}
     allowlist = _parse_csv_tokens(os.environ.get("HOST_CHAT_GRAY_USER_ALLOWLIST"))
-    normalized_scene = str(scene_type or _SCENE_CHAT).strip().upper() or _SCENE_CHAT
+    normalized_scene = str(scene_type or SCENE_CHAT).strip().upper() or SCENE_CHAT
     key_value = str(rollout_key or "").strip()
     result: dict[str, Any] = {"enabled": enabled, "percent": percent, "scene_type": normalized_scene, "scope_scenes": sorted(scope_scenes), "rollout_key": (key_value or None), "bucket": None, "allowlist_hit": False, "in_rollout": True, "reason_code": "HOST_CHAT_GRAY_DISABLED", "detail": "gray rollout disabled"}
     if not enabled:
@@ -269,7 +330,6 @@ def _evaluate_host_chat_gray_rollout(*, rollout_key: str | None, scene_type: str
 
 async def _resolve_host_llm_runtime_core(*, rollout_key: str | None = None, scene_type: str | None = None, health_probe_async: bool = True) -> dict[str, Any]:
     """LLM 运行时解析公共核心逻辑。"""
-    from host_brain.app.graph_config_router import SCENE_CHAT as _SCENE_CHAT, SCENE_EXEC_INTENT as _SCENE_EXEC_INTENT, SCENE_WORK_CODE as _SCENE_WORK_CODE, SCENE_WORK_TRANSLATE as _SCENE_WORK_TRANSLATE, SCENE_VISION_UI as _SCENE_VISION_UI
     config_result = load_host_config()
     cloud_timeout_ms = 15_000
     gemini_api_key: str | None = None
@@ -289,6 +349,15 @@ async def _resolve_host_llm_runtime_core(*, rollout_key: str | None = None, scen
         codex_api_key = _resolve_provider_api_key(provider_name=PROVIDER_CODEX)
         deepseek_api_key = _resolve_provider_api_key(provider_name=PROVIDER_DEEPSEEK)
         minimax_api_key = _resolve_provider_api_key(provider_name=PROVIDER_MINIMAX)
+
+    if _is_vision_scene(scene_type):
+        vision_timeout_ms = _parse_int(
+            os.environ.get("HOST_VISION_LLM_TIMEOUT_MS"),
+            default=20_000,
+            min_value=8_000,
+            max_value=120_000,
+        )
+        cloud_timeout_ms = max(int(cloud_timeout_ms), int(vision_timeout_ms))
 
     gemini_cloud_route = resolve_gemini_model_route(role="cloud_primary", preferred_api_key=gemini_api_key, route_key=(str(rollout_key or "").strip() or str(scene_type or "").strip() or None))
     gemini_cloud_model_id = str(gemini_cloud_route.get("model_id") or _resolve_cloud_provider_model_id(chain_name="gemini")).strip() or _resolve_cloud_provider_model_id(chain_name="gemini")
@@ -414,8 +483,14 @@ async def _resolve_host_llm_runtime_core(*, rollout_key: str | None = None, scen
     try:
         from host_brain.app.dependencies import get_routing_matrix
         from host_brain.app.schemas.routing_types import TaskType as _TaskType, LatencyBudget as _LatencyBudget
-        _scene_to_task = {_SCENE_CHAT: _TaskType.CHAT, _SCENE_EXEC_INTENT: _TaskType.REASONING, _SCENE_WORK_CODE: _TaskType.CODE, _SCENE_WORK_TRANSLATE: _TaskType.TRANSLATE, _SCENE_VISION_UI: _TaskType.CHAT}
-        _task_type = _scene_to_task.get(str(scene_type or _SCENE_CHAT).strip().upper(), _TaskType.CHAT)
+        _scene_to_task = {
+            SCENE_CHAT: _TaskType.CHAT,
+            SCENE_EXEC_INTENT: _TaskType.REASONING,
+            SCENE_WORK_CODE: _TaskType.CODE,
+            SCENE_WORK_TRANSLATE: _TaskType.TRANSLATE,
+            SCENE_VISION_UI: _TaskType.CHAT,
+        }
+        _task_type = _scene_to_task.get(str(scene_type or SCENE_CHAT).strip().upper(), _TaskType.CHAT)
         _latency = _LatencyBudget.FAST if sys_mode == "gaming" else _LatencyBudget.NORMAL
         _matrix = get_routing_matrix()
         _decision = _matrix.select_with_fallback(task_type=_task_type, latency_budget=_latency)
@@ -522,6 +597,57 @@ def _resolve_agent_llm_runtime_v2(*, base_runtime: dict[str, Any], role: str, mo
     selected_api_key = str(base_runtime.get("llm_api_key") or base_runtime.get("chat_llm_api_key") or "").strip() or None
     explicit_model_override = _first_non_empty_env(model_env_name, *fallback_model_env_names)
     model_route: dict[str, Any] = {}
+    if _surface_reply_codex_experiment_enabled(role):
+        model_id = _resolve_surface_reply_codex_model_id()
+        codex_timeout_ms = max(
+            timeout_ms,
+            _parse_int(
+                os.environ.get("HOST_SURFACE_REPLY_CODEX_MIN_TIMEOUT_MS") or os.environ.get("HOST_CHAT_AGENT_CODEX_MIN_TIMEOUT_MS"),
+                default=45_000,
+                min_value=800,
+                max_value=10 * 60 * 1000,
+            ),
+        )
+        return {
+            **base_runtime,
+            "provider_name": PROVIDER_CODEX,
+            "model_id": model_id,
+            "chat_model_id": model_id,
+            "timeout_ms": codex_timeout_ms,
+            "chat_timeout_ms": codex_timeout_ms,
+            "llm_api_key": None,
+            "chat_llm_api_key": None,
+            "base_url_override": None,
+            "chat_base_url_override": None,
+            "available": True,
+            "chat_available": True,
+            "agent_gen_params": dict(gen_params),
+            "agent_role": role,
+            "agent_model_route": {"route": "codex_surface_reply_experiment", "source": "HOST_SURFACE_REPLY_CODEX_EXPERIMENT_ENABLED"},
+            "route_reason_code": "HOST_SURFACE_REPLY_CODEX_EXPERIMENT",
+            "route_detail": f"agent role {role} routed to local Codex CLI chat experiment",
+        }
+    if _agent_codex_migration_enabled(role):
+        model_id = _resolve_agent_codex_model_id()
+        return {
+            **base_runtime,
+            "provider_name": PROVIDER_CODEX,
+            "model_id": model_id,
+            "chat_model_id": model_id,
+            "timeout_ms": max(timeout_ms, _parse_int(os.environ.get("HOST_AGENT_CODEX_MIN_TIMEOUT_MS"), default=30_000, min_value=800, max_value=10 * 60 * 1000)),
+            "chat_timeout_ms": max(timeout_ms, _parse_int(os.environ.get("HOST_AGENT_CODEX_MIN_TIMEOUT_MS"), default=30_000, min_value=800, max_value=10 * 60 * 1000)),
+            "llm_api_key": None,
+            "chat_llm_api_key": None,
+            "base_url_override": None,
+            "chat_base_url_override": None,
+            "available": True,
+            "chat_available": True,
+            "agent_gen_params": dict(gen_params),
+            "agent_role": role,
+            "agent_model_route": {"route": "codex_cli_migration", "source": "HOST_AGENT_CODEX_MIGRATION_ENABLED"},
+            "route_reason_code": "HOST_AGENT_CODEX_CLI_MIGRATION",
+            "route_detail": f"agent role {role} routed to local Codex CLI",
+        }
     if provider_name == PROVIDER_GEMINI:
         model_route = resolve_gemini_model_route(role=role, preferred_api_key=selected_api_key, route_key=(str(base_runtime.get("route_reason_code") or "").strip() or str(base_runtime.get("route_target") or "").strip() or None))
         if explicit_model_override and explicit_model_override.lower().startswith("gemini-"):
@@ -534,9 +660,9 @@ def _resolve_agent_llm_runtime_v2(*, base_runtime: dict[str, Any], role: str, mo
     return {**base_runtime, "model_id": model_id, "chat_model_id": model_id, "timeout_ms": timeout_ms, "chat_timeout_ms": timeout_ms, "llm_api_key": selected_api_key, "chat_llm_api_key": selected_api_key, "agent_gen_params": dict(gen_params), "agent_role": role, "agent_model_route": (model_route or None)}
 
 
-def resolve_chat_agent_llm_runtime(*, base_runtime: dict) -> dict:
-    """ChatAgent（夏目蓝本人）的 LLM 运行时配置。"""
-    return _resolve_agent_llm_runtime_v2(base_runtime=base_runtime, role="chat_agent", model_env_name="HOST_CHAT_AGENT_MODEL_ID", timeout_env_name="HOST_CHAT_AGENT_TIMEOUT_MS", timeout_default_ms=30_000, timeout_max_ms=120_000, gen_params={"temperature": 0.78, "top_p": 0.9, "max_tokens": 220})
+def resolve_surface_reply_llm_runtime(*, base_runtime: dict) -> dict:
+    """Surface reply 主链的 LLM 运行时配置。"""
+    return _resolve_agent_llm_runtime_v2(base_runtime=base_runtime, role="surface_reply", model_env_name="HOST_SURFACE_REPLY_MODEL_ID", timeout_env_name="HOST_SURFACE_REPLY_TIMEOUT_MS", fallback_model_env_names=("HOST_CHAT_AGENT_MODEL_ID",), fallback_timeout_env_names=("HOST_CHAT_AGENT_TIMEOUT_MS",), timeout_default_ms=30_000, timeout_max_ms=120_000, gen_params={"temperature": 0.78, "top_p": 0.9, "max_tokens": 220})
 
 
 def resolve_executive_router_llm_runtime(*, base_runtime: dict) -> dict:

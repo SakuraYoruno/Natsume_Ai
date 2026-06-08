@@ -8,7 +8,7 @@ from host_brain.skills.codex_runtime_registry import build_codex_runtime_skill_r
 
 
 def test_codex_workplane_runs_from_skill_work_order_and_writes_artifacts(monkeypatch, tmp_path) -> None:
-    monkeypatch.setattr("host_brain.codex_runtime.executor.shutil.which", lambda _name: None)
+    monkeypatch.setattr("host_brain.codex_runtime.executor.codex_cli_command", lambda: None)
     registry = build_codex_runtime_skill_registry()
     payload = registry.require("codex_inspect").handler(
         {"task": "inspect a lightweight snippet"},

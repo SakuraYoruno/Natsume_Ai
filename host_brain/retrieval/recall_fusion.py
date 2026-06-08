@@ -16,10 +16,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 import logging
 import os
+import re
 from typing import Any, Mapping
 
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.core.errors import (
+    CHROMA_ENDPOINT_UNAVAILABLE,
     RETR_RECALL_INPUT_INVALID,
     RETR_RECALL_UNAVAILABLE,
 )
@@ -61,8 +63,12 @@ from host_brain.retrieval.recall_fusion_config import (  # noqa: F401
 )
 from host_brain.retrieval.recall_fusion_stores import (
     STORE_SQLITE_LEDGER,
+    STORE_LIFE_EPISODE,
+    STORE_LIFE_MEMORY_COLLECTION,
+    STORE_LIFE_MEMORY_ENTITY,
     STORE_NEO4J_BOND,
     STORE_EPISODIC_VECTOR,
+    STORE_SEMANTIC_MEMORY,
     STORE_WORLD_CANON,
     STORE_ARTIFACT_VAULT,
     search_route as _search_route_impl,
@@ -93,9 +99,46 @@ _WARM_EMOTION_TAGS = frozenset({"happy", "calm", "warm", "trust", "affection", "
 _FRAGILE_EMOTION_TAGS = frozenset({"sad", "fear", "angry", "anxious", "hurt", "pain", "guilt", "shame"})
 _CONTINUITY_HINT_KEYWORDS = ("上次", "之前", "后来", "还记得", "一起", "约定", "说好", "那天", "继续", "remember", "last time", "together", "promise")
 _WARM_HINT_KEYWORDS = ("一起", "陪你", "说好", "约定", "开心", "想你", "等你", "抱", "温柔", "高兴", "庆祝")
+_ANAPHORIC_SELECTION_RE = re.compile(
+    r"(?:哪(?:本|部|个|一(?:本|部|个))|哪个|哪部|哪本|"
+    r"(?:我问你|刚问你|问你).{0,12}哪|"
+    r"(?:喜欢|想看|先看|推荐|选|挑|好看).{0,8}哪|"
+    r"(?:这本书|这部书|这本|这部|这书|它).{0,8}(?:好看|能看|值得看|怎么样|如何))",
+)
+_ANAPHORIC_EVENT_KINDS = frozenset({"action_episode", "background_episode", "perception_episode"})
+_ANAPHORIC_LOW_VALUE_ACTIONS = frozenset(
+    {
+        "qq_reply_sent",
+        "wechat_reply_sent",
+        "gateway_reply_sent",
+        "channel_message_sent",
+        "surface_reply",
+        "avatar_action",
+        "clawd_action",
+    }
+)
+_ANAPHORIC_POSITIVE_ANCHORS = (
+    "推荐",
+    "lightnovel",
+    "小说",
+    "书",
+    "qq",
+    "wechat",
+    "微信",
+    "推送",
+    "发送",
+    "delivery",
+)
+_ANAPHORIC_SCHEDULER_NOISE_TERMS = (
+    "emotion_decay_tick",
+    "inner_world_numeric_tick",
+    "silence_tick",
+    "heartbeat",
+    "health_check",
+    "resource_guard",
+)
+_ANAPHORIC_EVENT_WINDOW_MS = 2 * 60 * 1000
 _BOND_STAGE_DEPTH_MAP = {
-    "stranger": 0.10,
-    "acquaintance": 0.25,
     "familiar": 0.38,
     "friend": 0.62,
     "close_friend": 0.78,
@@ -135,6 +178,43 @@ _WARM_MOOD_BIAS = {
 }
 
 
+class _UnavailableChromaClient:
+    def __init__(self, *, reason: str) -> None:
+        self.reason = str(reason or CHROMA_ENDPOINT_UNAVAILABLE)
+
+    @property
+    def collection_profiles(self) -> Mapping[str, int]:
+        return {}
+
+    @property
+    def default_collection(self) -> str:
+        return "episodic"
+
+    def upsert(self, **_kwargs: Any) -> None:
+        raise RuntimeError(self.reason)
+
+    def delete(self, _memory_id: str, **_kwargs: Any) -> None:
+        raise RuntimeError(self.reason)
+
+    def get(self, _memory_id: str, **_kwargs: Any) -> None:
+        raise RuntimeError(self.reason)
+
+    def search(self, **_kwargs: Any) -> list[dict[str, Any]]:
+        raise RuntimeError(self.reason)
+
+    def validate_collection(self, _collection: str, *, vector_dim: int | None = None) -> tuple[bool, str | None]:
+        return False, self.reason
+
+
+def _build_optional_runtime_chroma_client() -> ChromaClientProtocol:
+    try:
+        return build_runtime_chroma_client()
+    except Exception as exc:
+        detail = str(exc).strip() or CHROMA_ENDPOINT_UNAVAILABLE
+        logger.warning("Chroma unavailable during recall service init; vector routes will degrade: %s", detail)
+        return _UnavailableChromaClient(reason=detail)
+
+
 class RecallFusionServiceContract:
     """Recall candidates from multiple routes and fuse into a stable list."""
 
@@ -144,7 +224,6 @@ class RecallFusionServiceContract:
         ledger: SQLiteLedger | None = None,
         chroma_client: ChromaClientProtocol | None = None,
         neo4j_client: Any | None = None,
-        style_store: Any | None = None,
         world_store: Any | None = None,
         artifact_vault: Any | None = None,
         runtime_config: RecallRuntimeConfig | None = None,
@@ -156,9 +235,8 @@ class RecallFusionServiceContract:
         fts_db_path: str | None = None,
     ) -> None:
         self.ledger = ledger
-        self.chroma = chroma_client or build_runtime_chroma_client()
+        self.chroma = chroma_client or _build_optional_runtime_chroma_client()
         self.neo4j = neo4j_client
-        self.style_store = style_store
         self.world_store = world_store
         self.artifact_vault = artifact_vault
         self.runtime_config = runtime_config or _default_runtime_config()
@@ -204,28 +282,17 @@ class RecallFusionServiceContract:
         from host_brain.retrieval.recall_fusion_stores import search_sqlite_ledger
         return search_sqlite_ledger(self, query=query, top_k=top_k, person_id=person_id, session_id=session_id, now_ts_ms=now_ts_ms)
 
+    def _search_life_episode(self, *, query: str, top_k: int, person_id: str | None = None, session_id: str | None = None, now_ts_ms: int | None = None) -> list[dict[str, Any]]:
+        from host_brain.retrieval.recall_fusion_stores import search_life_episode
+        return search_life_episode(self, query=query, top_k=top_k, person_id=person_id, session_id=session_id, now_ts_ms=now_ts_ms)
+
+    def _search_semantic_memory(self, *, query: str, top_k: int, person_id: str | None = None, session_id: str | None = None, now_ts_ms: int | None = None) -> list[dict[str, Any]]:
+        from host_brain.retrieval.recall_fusion_stores import search_semantic_memory
+        return search_semantic_memory(self, query=query, top_k=top_k, person_id=person_id, session_id=session_id, now_ts_ms=now_ts_ms)
+
     def _search_neo4j_bond(self, *, query: str, top_k: int) -> list[dict[str, Any]]:
         from host_brain.retrieval.recall_fusion_stores import search_neo4j_bond
         return search_neo4j_bond(self, query=query, top_k=top_k)
-
-    def _search_style_canon(
-        self,
-        *,
-        query: str,
-        query_embedding: list[float],
-        top_k: int,
-        collection: str | None,
-        render_target_lang: str | None = None,
-    ) -> list[dict[str, Any]]:
-        from host_brain.retrieval.recall_fusion_stores import search_style_canon
-        return search_style_canon(
-            self,
-            query=query,
-            query_embedding=query_embedding,
-            top_k=top_k,
-            collection=collection,
-            render_target_lang=render_target_lang,
-        )
 
     def _search_world_canon(self, *, query: str, query_embedding: list[float], top_k: int, collection: str | None) -> list[dict[str, Any]]:
         from host_brain.retrieval.recall_fusion_stores import search_world_canon
@@ -234,27 +301,6 @@ class RecallFusionServiceContract:
     def _search_artifact_vault(self, *, query: str, top_k: int) -> list[dict[str, Any]]:
         from host_brain.retrieval.recall_fusion_stores import search_artifact_vault
         return search_artifact_vault(self, query=query, top_k=top_k)
-
-    def _search_persona_utterance(
-        self,
-        *,
-        query_embedding: list[float],
-        top_k: int,
-        collection: str | None,
-        render_target_lang: str | None = None,
-    ) -> list[dict[str, Any]]:
-        from host_brain.retrieval.recall_fusion_stores import search_persona_utterance
-        return search_persona_utterance(
-            self,
-            query_embedding=query_embedding,
-            top_k=top_k,
-            collection=collection,
-            render_target_lang=render_target_lang,
-        )
-
-    def _search_canon_projection_vector(self, *, query_embedding: list[float], top_k: int, collection: str | None, canon_kind: str, store_id: str) -> list[dict[str, Any]]:
-        from host_brain.retrieval.recall_fusion_stores import search_canon_projection_vector
-        return search_canon_projection_vector(self, query_embedding=query_embedding, top_k=top_k, collection=collection, canon_kind=canon_kind, store_id=store_id)
 
     # ── 混合检索（委托给 hybrid_fusion）──────────────────────────────────
     def _apply_hybrid_fusion(
@@ -442,6 +488,11 @@ class RecallFusionServiceContract:
                 for candidate in candidates
                 if _candidate_within_lookback(candidate, now_ts_ms=now_value, lookback_days=time_lookback_days)
             ]
+
+        candidates = _filter_anaphoric_selection_candidates(
+            candidates,
+            query=normalized_query,
+        )
 
         # M27-G：情感维度路由（OPT-31）
         # FIX: 原实现仅做列表拼接，两个分组内部排序丢失。
@@ -696,6 +747,335 @@ def _normalize_candidate(
     }
 
 
+def _filter_anaphoric_selection_candidates(
+    candidates: list[dict[str, Any]],
+    *,
+    query: str,
+) -> list[dict[str, Any]]:
+    if not candidates or not _looks_like_anaphoric_selection_query(query):
+        return candidates
+    if _looks_like_broad_collection_selection_query(query):
+        return candidates
+    primary = [
+        candidate
+        for candidate in candidates
+        if _is_significant_anaphoric_life_candidate(candidate)
+        or _is_significant_anaphoric_collection_candidate(candidate)
+        or _is_significant_anaphoric_entity_candidate(candidate)
+    ]
+    if not primary:
+        return candidates
+    primary = _select_recent_anaphoric_life_primary(primary, query=query)
+    kept: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for candidate in primary:
+        key = str(candidate.get("source_ref") or candidate.get("doc_id") or "").strip()
+        if key and key in seen:
+            continue
+        if key:
+            seen.add(key)
+        updated = dict(candidate)
+        metadata = dict(updated.get("metadata") or {})
+        metadata["anaphoric_selection_primary"] = True
+        metadata["anaphoric_selection_filter"] = "collection_or_life_primary"
+        updated["metadata"] = metadata
+        kept.append(updated)
+    relationship = [
+        candidate
+        for candidate in candidates
+        if _candidate_store_id(candidate) in {STORE_NEO4J_BOND, "bond_graph"}
+    ]
+    for candidate in relationship:
+        key = str(candidate.get("source_ref") or candidate.get("doc_id") or "").strip()
+        if key and key in seen:
+            continue
+        if key:
+            seen.add(key)
+        kept.append(candidate)
+    return sorted(kept, key=_candidate_sort_key)
+
+
+def _select_recent_anaphoric_life_primary(candidates: list[dict[str, Any]], *, query: str) -> list[dict[str, Any]]:
+    if len(candidates) <= 1:
+        return candidates
+    ranked = sorted(candidates, key=lambda candidate: _anaphoric_primary_sort_key(candidate, query=query))
+    if _query_looks_like_specific_item_reference(query):
+        return [
+            candidate
+            for candidate in ranked
+            if _candidate_matches_specific_item_reference(candidate, query=query)
+        ]
+    newest = ranked[0]
+    newest_ts = _candidate_life_ts(newest)
+    newest_action = _candidate_life_action(newest)
+    newest_session = _candidate_life_session(newest)
+    if newest_ts <= 0:
+        return [newest]
+    selected: list[dict[str, Any]] = []
+    for candidate in ranked:
+        candidate_ts = _candidate_life_ts(candidate)
+        if candidate_ts <= 0:
+            continue
+        if newest_action and _candidate_life_action(candidate) != newest_action:
+            continue
+        if newest_session and _candidate_life_session(candidate) != newest_session:
+            continue
+        if newest_ts - candidate_ts > _ANAPHORIC_EVENT_WINDOW_MS:
+            continue
+        selected.append(candidate)
+    selected = selected or [newest]
+    selected_keys = {str(candidate.get("source_ref") or candidate.get("doc_id") or "").strip() for candidate in selected}
+    for candidate in ranked:
+        if _candidate_store_id(candidate) != STORE_LIFE_MEMORY_ENTITY:
+            continue
+        key = str(candidate.get("source_ref") or candidate.get("doc_id") or "").strip()
+        if key and key in selected_keys:
+            continue
+        if _entity_title_matches_query(candidate, query=query) or _candidate_life_ts(candidate) >= newest_ts - _ANAPHORIC_EVENT_WINDOW_MS:
+            selected.append(candidate)
+            if key:
+                selected_keys.add(key)
+    return selected
+
+
+def _anaphoric_primary_sort_key(candidate: Mapping[str, Any], *, query: str) -> tuple[int, int, float, str]:
+    return (
+        _candidate_anaphoric_action_priority(candidate, query=query),
+        -_candidate_life_ts(candidate),
+        -_coerce_score(candidate.get("score")),
+        str(candidate.get("doc_id") or ""),
+    )
+
+
+def _candidate_anaphoric_action_priority(candidate: Mapping[str, Any], *, query: str) -> int:
+    if _candidate_store_id(candidate) == STORE_LIFE_MEMORY_COLLECTION:
+        if _query_looks_like_specific_item_reference(query):
+            return 0 if _candidate_matches_specific_item_reference(candidate, query=query) else 7
+        requested_item_count = _small_anaphoric_item_count(query)
+        metadata = _coerce_mapping(candidate.get("metadata"))
+        item_count = _coerce_int(metadata.get("item_count"))
+        scope_key = str(metadata.get("scope_key") or "").strip()
+        if requested_item_count > 0:
+            if item_count == requested_item_count:
+                return 0
+            if scope_key == "recent" and item_count > requested_item_count:
+                return 6
+            if item_count > requested_item_count:
+                return 3
+        if scope_key.startswith("delivery:"):
+            return 0
+        if scope_key.startswith("daily:") and 0 < item_count <= 4:
+            return 1
+        if (scope_key == "recent" or scope_key.startswith("rolling:")) and item_count > 4:
+            return 6
+        return 0
+    if _candidate_store_id(candidate) == STORE_LIFE_MEMORY_ENTITY:
+        if _entity_title_matches_query(candidate, query=query):
+            return 0
+        if _query_looks_like_specific_item_reference(query):
+            return 7
+        return 2
+    action = _candidate_life_action(candidate)
+    deep_review_query = _query_asks_about_deep_review(query)
+    if action in {"lightnovel_recommendation_deep_review", "recommendation_deep_review"} or action.endswith("_deep_review"):
+        return 0 if deep_review_query else 8
+    if action in {"lightnovel_recommendation_delivery", "recommendation_delivery"} or action.endswith("_recommendation_delivery"):
+        return 2 if deep_review_query else 0
+    if action in {"lightnovel_gateway_delivery", "gateway_delivery"} or action.endswith("_gateway_delivery"):
+        return 3 if deep_review_query else 1
+    return 4
+
+
+def _query_asks_about_deep_review(query: str) -> bool:
+    value = str(query or "").strip().lower()
+    if not value:
+        return False
+    asks_selection = any(token in value for token in ("哪本", "哪部", "哪个", "好看", "喜欢", "推荐", "选", "挑", "为什么", "原因", "理由"))
+    asks_deep_evidence = any(token in value for token in ("翻看", "看完", "读完", "深读", "正文", "详情", "网页", "epub", "读下来", "看下来"))
+    return bool(asks_selection and asks_deep_evidence)
+
+
+def _small_anaphoric_item_count(query: str) -> int:
+    value = str(query or "")
+    if re.search(r"(?:三|3)(?:本|部|个)", value):
+        return 3
+    if re.search(r"(?:两|二|2)(?:本|部|个)", value):
+        return 2
+    return 0
+
+
+def _query_looks_like_specific_item_reference(query: str) -> bool:
+    value = str(query or "").strip()
+    if not value:
+        return False
+    if any(token in value for token in ("这三本", "这几本", "这些", "那些", "十几本")):
+        return False
+    if re.search(r"《[^》]{2,80}》", value) and any(token in value for token in ("好看", "能看", "值得看", "怎么样", "如何", "推荐", "想看")):
+        return True
+    match = re.search(r"(.{2,80}?)(?:这本书|这部书|这本|这部|这书|它).{0,12}(?:好看|能看|值得看|怎么样|如何|推荐|想看)", value)
+    if not match:
+        return False
+    prefix = re.sub(r"[\s，。！？?、：:；;（）()\[\]【】《》「」『』]+", "", match.group(1))
+    prefix = re.sub(r"^(?:我问你|问你|你觉得|你说|刚才|刚刚|那个|这个|那本|这本)+", "", prefix)
+    if len(prefix) < 2:
+        return False
+    generic = {"我", "你", "他", "她", "它", "这", "那", "哪", "本", "部", "个", "书", "小说"}
+    return not all(char in generic for char in prefix)
+
+
+def _looks_like_broad_collection_selection_query(query: str) -> bool:
+    value = str(query or "").strip()
+    if not value:
+        return False
+    has_broad_scope = any(
+        token in value
+        for token in ("十几本", "这几本", "这些", "那些", "这几天", "最近", "过去几天", "全部", "所有")
+    ) or (
+        any(token in value for token in ("今天", "昨日", "昨天", "昨晚", "前天", "上周", "5月", "月"))
+        and any(token in value for token in ("推荐", "推过", "推送", "发过", "发给我", "书单"))
+    )
+    has_selection = any(token in value for token in ("哪本", "哪部", "哪个", "哪些", "喜欢", "好看", "值得看", "推荐"))
+    has_listing = bool(re.search(r"(?:哪几本|哪几部|哪些(?:书|轻小说|小说)?)", value))
+    return has_broad_scope and (has_selection or has_listing)
+
+
+def _candidate_matches_specific_item_reference(candidate: Mapping[str, Any], *, query: str) -> bool:
+    store_id = _candidate_store_id(candidate)
+    if store_id == STORE_LIFE_MEMORY_ENTITY:
+        return _entity_title_matches_query(candidate, query=query)
+    if store_id == STORE_LIFE_MEMORY_COLLECTION:
+        metadata = _coerce_mapping(candidate.get("metadata"))
+        for item in list(metadata.get("items") or []):
+            if not isinstance(item, Mapping):
+                continue
+            item_metadata = _coerce_mapping(item.get("metadata"))
+            title = str(
+                item.get("item_title")
+                or item.get("title")
+                or item_metadata.get("title")
+                or item_metadata.get("title_display")
+                or ""
+            ).strip()
+            if _title_matches_query(title, query=query):
+                return True
+    return False
+
+
+def _coerce_int(value: Any, *, default: int = 0) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return int(default)
+
+
+def _candidate_life_action(candidate: Mapping[str, Any]) -> str:
+    metadata = _coerce_mapping(candidate.get("metadata"))
+    return str(metadata.get("action") or metadata.get("action_kind") or "").strip().lower()
+
+
+def _candidate_life_session(candidate: Mapping[str, Any]) -> str:
+    metadata = _coerce_mapping(candidate.get("metadata"))
+    return str(metadata.get("session_id") or "").strip()
+
+
+def _candidate_life_ts(candidate: Mapping[str, Any]) -> int:
+    metadata = _coerce_mapping(candidate.get("metadata"))
+    for key in ("updated_ts_ms", "last_touched_ts_ms", "created_ts_ms"):
+        try:
+            value = int(metadata.get(key) or 0)
+        except (TypeError, ValueError):
+            value = 0
+        if value > 0:
+            return value
+    score_boost = _coerce_mapping(metadata.get("score_boost"))
+    try:
+        return max(0, int(score_boost.get("row_ts_ms") or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _looks_like_anaphoric_selection_query(query: str) -> bool:
+    value = str(query or "").strip()
+    return bool(value and _ANAPHORIC_SELECTION_RE.search(value))
+
+
+def _is_significant_anaphoric_life_candidate(candidate: Mapping[str, Any]) -> bool:
+    if _candidate_store_id(candidate) != STORE_LIFE_EPISODE:
+        return False
+    metadata = _coerce_mapping(candidate.get("metadata"))
+    episode_kind = str(metadata.get("episode_kind") or "").strip()
+    if episode_kind not in _ANAPHORIC_EVENT_KINDS:
+        return False
+    action = str(metadata.get("action") or metadata.get("action_kind") or "").strip().lower()
+    if action in _ANAPHORIC_LOW_VALUE_ACTIONS:
+        return False
+    text = _candidate_text(candidate)
+    if not text or _looks_like_anaphoric_scheduler_noise(text):
+        return False
+    return True
+
+
+def _is_significant_anaphoric_collection_candidate(candidate: Mapping[str, Any]) -> bool:
+    if _candidate_store_id(candidate) != STORE_LIFE_MEMORY_COLLECTION:
+        return False
+    metadata = _coerce_mapping(candidate.get("metadata"))
+    if int(metadata.get("item_count") or 0) <= 0:
+        return False
+    text = _candidate_text(candidate)
+    if not text or _looks_like_anaphoric_scheduler_noise(text):
+        return False
+    return True
+
+
+def _is_significant_anaphoric_entity_candidate(candidate: Mapping[str, Any]) -> bool:
+    if _candidate_store_id(candidate) != STORE_LIFE_MEMORY_ENTITY:
+        return False
+    metadata = _coerce_mapping(candidate.get("metadata"))
+    if int(metadata.get("mention_count") or 0) <= 0:
+        return False
+    text = _candidate_text(candidate)
+    if not text or _looks_like_anaphoric_scheduler_noise(text):
+        return False
+    return True
+
+
+def _entity_title_matches_query(candidate: Mapping[str, Any], *, query: str) -> bool:
+    metadata = _coerce_mapping(candidate.get("metadata"))
+    title = str(metadata.get("canonical_name") or "").strip()
+    normalized = str(metadata.get("normalized_key") or "").strip()
+    return _title_matches_query(title, query=query) or _title_matches_query(normalized, query=query)
+
+
+def _title_matches_query(title: str, *, query: str) -> bool:
+    value = str(title or "").strip()
+    query_text = str(query or "").strip()
+    if value and value in query_text:
+        return True
+    compact_query = re.sub(r"\s+", "", query_text).lower()
+    compact_title = re.sub(r"\s+", "", value).lower()
+    return bool(compact_title and compact_title in compact_query)
+
+
+def _looks_like_anaphoric_scheduler_noise(text: str) -> bool:
+    value = str(text or "").strip().lower()
+    if not value:
+        return False
+    if any(anchor in value for anchor in _ANAPHORIC_POSITIVE_ANCHORS):
+        return False
+    if "后台任务记忆" in value and "scheduler " in value:
+        return True
+    return any(term in value for term in _ANAPHORIC_SCHEDULER_NOISE_TERMS)
+
+
+def _candidate_store_id(candidate: Mapping[str, Any]) -> str:
+    metadata = _coerce_mapping(candidate.get("metadata"))
+    return str(candidate.get("store_id") or metadata.get("store_id") or "").strip().lower()
+
+
+def _candidate_text(candidate: Mapping[str, Any]) -> str:
+    return str(candidate.get("snippet") or candidate.get("text") or "").strip()
+
+
 def _clamp_unit_float(value: Any, *, default: float = 0.0) -> float:
     try:
         numeric = float(value)
@@ -867,12 +1247,12 @@ def _apply_persona_recall_weight(
     reason_tags: list[str] = []
 
     if memory_flags["continuity_memory"]:
-        continuity_boost = 0.08 * continuity_bias + 0.06 * bond_depth
+        continuity_boost = 0.08 * continuity_bias + 0.03 * bond_depth
         multiplier += continuity_boost
         if continuity_boost > 0.0:
             reason_tags.append("continuity_boost")
-        if bond_depth >= 0.70:
-            multiplier += 0.04
+        if bond_depth >= 0.90 or shared_history_pull >= 0.70:
+            multiplier += 0.05 if shared_history_pull >= 0.70 else 0.04
             reason_tags.append("bond_depth_boost")
 
     if memory_flags["warm_memory"]:
@@ -966,8 +1346,9 @@ def _filter_recall_routes(
 def _extract_candidate_ts_ms(candidate: Mapping[str, Any]) -> int | None:
     candidate_ts_keys = (
         "ts_ms",
-        "created_ts_ms",
         "updated_ts_ms",
+        "last_touched_ts_ms",
+        "created_ts_ms",
         "memory_ts_ms",
         "event_ts_ms",
     )

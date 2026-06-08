@@ -1,10 +1,10 @@
-{
-  "quality": {
-    "stage": "degraded_cold_start"
-  },
-  "decision": "REJECT",
-  "reason_code": "SERVICE_UNAVAILABLE_COLD_START",
-  "narrative": {
-    "text": "当前处于冷启动降级态，无法执行外部能力。"
-  }
+﻿{
+    "quality":  {
+                    "stage":  "degraded_cold_start"
+                },
+    "decision":  "REJECT",
+    "reason_code":  "SERVICE_UNAVAILABLE_COLD_START",
+    "narrative":  {
+                      "text":  "当前处于冷启动降级态，无法执行外部能力。"
+                  }
 }

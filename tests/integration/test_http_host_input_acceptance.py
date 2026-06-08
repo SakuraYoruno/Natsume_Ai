@@ -55,6 +55,38 @@ def test_v1_host_input_gateway_http_accepts_and_dispatches(monkeypatch) -> None:
     assert kwargs["text"] == "请帮我整理一下今天的执行结果"
 
 
+def test_v1_host_input_qq_source_alias_maps_to_gateway(monkeypatch) -> None:
+    dispatch_mock = AsyncMock(return_value=None)
+    monkeypatch.setattr("host_brain.app.input_routes._dispatch_to_graph", dispatch_mock)
+
+    client = _build_client(monkeypatch)
+    try:
+        response = client.post(
+            "/v1/host/input",
+            json={
+                "source": "QQ",
+                "conversation_id": "qq_dm_http_alias",
+                "content": "怎么了",
+                "msg_type": "text",
+            },
+        )
+    finally:
+        client.close()
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["success"] is True
+    assert payload["status"] == "ACCEPTED"
+    assert payload["source"] == "GATEWAY"
+    assert dispatch_mock.await_count == 1
+    kwargs = dispatch_mock.await_args.kwargs
+    assert kwargs["source"] == "GATEWAY"
+    assert kwargs["session_id"] == "qq_dm_http_alias"
+    assert kwargs["text"] == "怎么了"
+    assert kwargs["payload"]["source"] == "GATEWAY"
+    assert kwargs["payload"]["platform"] == "qq"
+
+
 def test_v1_host_input_gateway_progress_query_short_circuits_dispatch(monkeypatch) -> None:
     dispatch_mock = AsyncMock(return_value=None)
     fastpath_mock = AsyncMock(return_value=True)

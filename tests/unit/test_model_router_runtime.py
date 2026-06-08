@@ -67,38 +67,33 @@ def _patch_runtime_dependencies(
     )
 
 
-def test_model_router_key_pool_parse_and_dedupe(monkeypatch) -> None:
-    monkeypatch.setenv("HOST_GEMINI_KEY_POOL_DISABLE_RUNTIME_FILES", "true")
-    monkeypatch.setenv("HOST_GEMINI_KEY_POOL_ALLOW_ENV_FALLBACK", "true")
-    monkeypatch.setenv("HOST_GEMINI_API_KEYS", "k2, k3")
-    monkeypatch.setenv("GEMINI_API_KEY_1", "k1")
-    monkeypatch.setenv("GEMINI_API_KEY_2", "k2")
-    monkeypatch.setenv("GEMINI_API_KEY", "k4")
+def test_model_router_single_key_prefers_explicit(monkeypatch) -> None:
+    monkeypatch.setattr(model_router, "_resolve_runtime_gemini_api_key", lambda: (None, None, None))
+    monkeypatch.setenv("GEMINI_API_KEY", "k-env")
 
-    keys = model_router.resolve_gemini_key_pool(preferred_api_key="k0")
+    route = model_router.resolve_gemini_model_route(role="surface_reply", preferred_api_key="k0")
 
-    assert keys == ["k0", "k2", "k3", "k1", "k4"]
+    assert route["api_key"] == "k0"
+    assert route["key_configured"] is True
+    assert route["key_source"] == "preferred"
 
 
-def test_model_router_round_robin_rotation(monkeypatch) -> None:
-    model_router._reset_gemini_key_pool_cursor_for_tests()
-    monkeypatch.setenv("HOST_GEMINI_KEY_POOL_DISABLE_RUNTIME_FILES", "true")
-    monkeypatch.setenv("HOST_GEMINI_KEY_POOL_STRATEGY", "round_robin")
-    monkeypatch.setenv("HOST_GEMINI_KEY_POOL_ALLOW_ENV_FALLBACK", "true")
-    monkeypatch.setenv("HOST_GEMINI_API_KEYS", "k1,k2,k3")
-    monkeypatch.setenv("HOST_CHAT_AGENT_MODEL_ID", "gemini-3.1-pro-preview")
+def test_model_router_single_env_key_does_not_rotate(monkeypatch) -> None:
+    monkeypatch.setattr(model_router, "_resolve_runtime_gemini_api_key", lambda: (None, None, None))
+    monkeypatch.setenv("GEMINI_API_KEY", "k1")
+    monkeypatch.setenv("HOST_SURFACE_REPLY_MODEL_ID", "gemini-3.1-pro-preview")
 
-    r1 = model_router.resolve_gemini_model_route(role="chat_agent")
-    r2 = model_router.resolve_gemini_model_route(role="chat_agent")
-    r3 = model_router.resolve_gemini_model_route(role="chat_agent")
-    r4 = model_router.resolve_gemini_model_route(role="chat_agent")
+    r1 = model_router.resolve_gemini_model_route(role="surface_reply")
+    r2 = model_router.resolve_gemini_model_route(role="surface_reply")
+    r3 = model_router.resolve_gemini_model_route(role="surface_reply")
 
     assert r1["api_key"] == "k1"
-    assert r2["api_key"] == "k2"
-    assert r3["api_key"] == "k3"
-    assert r4["api_key"] == "k1"
+    assert r2["api_key"] == "k1"
+    assert r3["api_key"] == "k1"
+    assert not any(name.endswith("_slot") for name in r1)
+    assert not any(name.endswith("_pool_size") for name in r1)
     assert r1["model_id"] == "gemini-3.1-pro-preview"
-    assert r1["capability_profile"]["role"] == "chat_agent"
+    assert r1["capability_profile"]["role"] == "surface_reply"
     assert r1["capability_profile"]["reasoning_tier"] in {"high", "medium", "low"}
 
 
@@ -120,34 +115,27 @@ def test_model_router_executive_router_model_falls_back_to_dispatch_env(monkeypa
     assert route["model_id"] == "gemini-2.5-pro"
 
 
-def test_model_router_hash_strategy_is_stable(monkeypatch) -> None:
-    model_router._reset_gemini_key_pool_cursor_for_tests()
-    monkeypatch.setenv("HOST_GEMINI_KEY_POOL_DISABLE_RUNTIME_FILES", "true")
-    monkeypatch.setenv("HOST_GEMINI_KEY_POOL_STRATEGY", "hash")
-    monkeypatch.setenv("HOST_GEMINI_KEY_POOL_ALLOW_ENV_FALLBACK", "true")
-    monkeypatch.setenv("HOST_GEMINI_API_KEYS", "k1,k2,k3,k4")
+def test_model_router_route_key_does_not_change_single_key(monkeypatch) -> None:
+    monkeypatch.setattr(model_router, "_resolve_runtime_gemini_api_key", lambda: (None, None, None))
+    monkeypatch.setenv("GEMINI_API_KEY", "k1")
 
     r1 = model_router.resolve_gemini_model_route(role="subagent", route_key="session-A")
     r2 = model_router.resolve_gemini_model_route(role="subagent", route_key="session-A")
     r3 = model_router.resolve_gemini_model_route(role="subagent", route_key="session-B")
 
-    assert r1["key_slot"] == r2["key_slot"]
     assert r1["api_key"] == r2["api_key"]
-    assert r3["api_key"] in {"k1", "k2", "k3", "k4"}
+    assert r3["api_key"] == "k1"
 
 
-def test_host_runtime_uses_gemini_key_pool_for_primary_chain(monkeypatch) -> None:
-    model_router._reset_gemini_key_pool_cursor_for_tests()
-    monkeypatch.setenv("HOST_GEMINI_KEY_POOL_DISABLE_RUNTIME_FILES", "true")
+def test_host_runtime_uses_single_gemini_key_for_primary_chain(monkeypatch) -> None:
+    monkeypatch.setattr(model_router, "_resolve_runtime_gemini_api_key", lambda: (None, None, None))
     _patch_runtime_dependencies(
         monkeypatch,
         gemini_api_key=None,
         codex_api_key="sk-codex",
         deepseek_api_key="sk-deepseek",
     )
-    monkeypatch.setenv("HOST_GEMINI_KEY_POOL_ALLOW_ENV_FALLBACK", "true")
-    monkeypatch.setenv("HOST_GEMINI_API_KEYS", "k1,k2")
-    monkeypatch.setenv("HOST_GEMINI_KEY_POOL_STRATEGY", "round_robin")
+    monkeypatch.setenv("GEMINI_API_KEY", "k1")
     monkeypatch.setenv("HOST_GEMINI_MODEL_ID", "gemini-2.5-flash")
 
     runtime1 = graph_builder.resolve_host_llm_runtime()
@@ -155,11 +143,13 @@ def test_host_runtime_uses_gemini_key_pool_for_primary_chain(monkeypatch) -> Non
 
     assert runtime1["provider_name"] == "gemini"
     assert runtime1["llm_api_key"] == "k1"
-    assert runtime2["llm_api_key"] == "k2"
-    assert runtime1["cloud_model_route"]["key_pool_size"] == 2
+    assert runtime2["llm_api_key"] == "k1"
+    assert runtime1["cloud_model_route"]["key_configured"] is True
+    assert not any(name.endswith("_pool_size") for name in runtime1["cloud_model_route"])
 
 
 def test_executive_router_runtime_preserves_non_gemini_base_provider_model(monkeypatch) -> None:
+    monkeypatch.setenv("HOST_AGENT_CODEX_MIGRATION_ENABLED", "false")
     monkeypatch.setenv("HOST_DISPATCH_AGENT_MODEL_ID", "gemini-2.5-flash")
 
     runtime = graph_builder.resolve_executive_router_llm_runtime(
@@ -176,6 +166,7 @@ def test_executive_router_runtime_preserves_non_gemini_base_provider_model(monke
 
 
 def test_executive_router_runtime_uses_legacy_dispatch_env_for_non_gemini(monkeypatch) -> None:
+    monkeypatch.setenv("HOST_AGENT_CODEX_MIGRATION_ENABLED", "false")
     monkeypatch.delenv("HOST_EXECUTIVE_ROUTER_MODEL_ID", raising=False)
     monkeypatch.delenv("HOST_EXECUTIVE_ROUTER_TIMEOUT_MS", raising=False)
     monkeypatch.setenv("HOST_DISPATCH_AGENT_MODEL_ID", "gpt-4.1-mini")
@@ -194,9 +185,9 @@ def test_executive_router_runtime_uses_legacy_dispatch_env_for_non_gemini(monkey
 
 
 def test_executive_router_runtime_exposes_executive_role_metadata(monkeypatch) -> None:
-    monkeypatch.setenv("HOST_GEMINI_KEY_POOL_DISABLE_RUNTIME_FILES", "true")
-    monkeypatch.setenv("HOST_GEMINI_KEY_POOL_ALLOW_ENV_FALLBACK", "true")
-    monkeypatch.setenv("HOST_GEMINI_API_KEYS", "k1")
+    monkeypatch.setenv("HOST_AGENT_CODEX_MIGRATION_ENABLED", "false")
+    monkeypatch.setattr(model_router, "_resolve_runtime_gemini_api_key", lambda: (None, None, None))
+    monkeypatch.setenv("GEMINI_API_KEY", "k1")
     monkeypatch.setenv("HOST_DISPATCH_AGENT_MODEL_ID", "gemini-2.5-flash")
 
     runtime = graph_builder.resolve_executive_router_llm_runtime(
@@ -212,22 +203,19 @@ def test_executive_router_runtime_exposes_executive_role_metadata(monkeypatch) -
     assert not list(route.get("role_aliases") or [])
 
 
-def test_chat_runtime_uses_gemini_key_pool_and_role_model(monkeypatch) -> None:
-    model_router._reset_gemini_key_pool_cursor_for_tests()
-    monkeypatch.setenv("HOST_GEMINI_KEY_POOL_DISABLE_RUNTIME_FILES", "true")
-    monkeypatch.setenv("HOST_GEMINI_KEY_POOL_ALLOW_ENV_FALLBACK", "true")
-    monkeypatch.setenv("HOST_GEMINI_API_KEYS", "k1,k2")
-    monkeypatch.setenv("HOST_GEMINI_KEY_POOL_STRATEGY", "round_robin")
-    monkeypatch.setenv("HOST_CHAT_AGENT_MODEL_ID", "gemini-3.1-pro-preview")
+def test_chat_runtime_uses_single_gemini_key_and_role_model(monkeypatch) -> None:
+    monkeypatch.setattr(model_router, "_resolve_runtime_gemini_api_key", lambda: (None, None, None))
+    monkeypatch.setenv("GEMINI_API_KEY", "k1")
+    monkeypatch.setenv("HOST_SURFACE_REPLY_MODEL_ID", "gemini-3.1-pro-preview")
 
-    runtime1 = graph_builder.resolve_chat_agent_llm_runtime(
+    runtime1 = graph_builder.resolve_surface_reply_llm_runtime(
         base_runtime={
             "provider_name": "gemini",
             "model_id": "gemini-2.5-flash",
             "llm_api_key": None,
         }
     )
-    runtime2 = graph_builder.resolve_chat_agent_llm_runtime(
+    runtime2 = graph_builder.resolve_surface_reply_llm_runtime(
         base_runtime={
             "provider_name": "gemini",
             "model_id": "gemini-2.5-flash",
@@ -237,18 +225,16 @@ def test_chat_runtime_uses_gemini_key_pool_and_role_model(monkeypatch) -> None:
 
     assert runtime1["model_id"] == "gemini-3.1-pro-preview"
     assert runtime1["llm_api_key"] == "k1"
-    assert runtime2["llm_api_key"] == "k2"
-    assert runtime1["agent_model_route"]["role"] == "chat_agent"
+    assert runtime2["llm_api_key"] == "k1"
+    assert runtime1["agent_model_route"]["role"] == "surface_reply"
 
 
 def test_chat_runtime_default_profile_sets_output_cap(monkeypatch) -> None:
-    model_router._reset_gemini_key_pool_cursor_for_tests()
-    monkeypatch.setenv("HOST_GEMINI_KEY_POOL_DISABLE_RUNTIME_FILES", "true")
-    monkeypatch.setenv("HOST_GEMINI_KEY_POOL_ALLOW_ENV_FALLBACK", "true")
-    monkeypatch.setenv("HOST_GEMINI_API_KEYS", "k1")
-    monkeypatch.setenv("HOST_CHAT_AGENT_MODEL_ID", "gemini-2.5-pro")
+    monkeypatch.setattr(model_router, "_resolve_runtime_gemini_api_key", lambda: (None, None, None))
+    monkeypatch.setenv("GEMINI_API_KEY", "k1")
+    monkeypatch.setenv("HOST_SURFACE_REPLY_MODEL_ID", "gemini-2.5-pro")
 
-    runtime = graph_builder.resolve_chat_agent_llm_runtime(
+    runtime = graph_builder.resolve_surface_reply_llm_runtime(
         base_runtime={
             "provider_name": "gemini",
             "model_id": "gemini-2.5-pro",
@@ -256,14 +242,38 @@ def test_chat_runtime_default_profile_sets_output_cap(monkeypatch) -> None:
         }
     )
 
-    assert runtime["agent_role"] == "chat_agent"
+    assert runtime["agent_role"] == "surface_reply"
     assert runtime["agent_gen_params"]["max_tokens"] == 220
 
 
+def test_chat_runtime_can_experiment_on_codex_spark(monkeypatch) -> None:
+    monkeypatch.setenv("HOST_SURFACE_REPLY_CODEX_EXPERIMENT_ENABLED", "true")
+    monkeypatch.setenv("HOST_SURFACE_REPLY_CODEX_MODEL_ID", "gpt-5.3-codex-spark")
+    monkeypatch.setattr(
+        "host_brain.app.graph_config_llm_runtime.codex_cli_lm_available",
+        lambda: True,
+    )
+
+    runtime = graph_builder.resolve_surface_reply_llm_runtime(
+        base_runtime={
+            "provider_name": "gemini",
+            "model_id": "gemini-2.5-flash",
+            "llm_api_key": "gem-key",
+            "timeout_ms": 8000,
+        }
+    )
+
+    assert runtime["provider_name"] == "codex"
+    assert runtime["model_id"] == "gpt-5.3-codex-spark"
+    assert runtime["llm_api_key"] is None
+    assert runtime["timeout_ms"] == 45000
+    assert runtime["route_reason_code"] == "HOST_SURFACE_REPLY_CODEX_EXPERIMENT"
+
+
 def test_subagent_runtime_keeps_legacy_agent_role_value(monkeypatch) -> None:
-    monkeypatch.setenv("HOST_GEMINI_KEY_POOL_DISABLE_RUNTIME_FILES", "true")
-    monkeypatch.setenv("HOST_GEMINI_KEY_POOL_ALLOW_ENV_FALLBACK", "true")
-    monkeypatch.setenv("HOST_GEMINI_API_KEYS", "k1")
+    monkeypatch.setenv("HOST_AGENT_CODEX_MIGRATION_ENABLED", "false")
+    monkeypatch.setattr(model_router, "_resolve_runtime_gemini_api_key", lambda: (None, None, None))
+    monkeypatch.setenv("GEMINI_API_KEY", "k1")
     monkeypatch.setenv("HOST_SUBAGENT_MODEL_ID", "gemini-2.5-pro")
 
     runtime = graph_builder.resolve_subagent_llm_runtime(
@@ -278,14 +288,36 @@ def test_subagent_runtime_keeps_legacy_agent_role_value(monkeypatch) -> None:
     assert runtime["model_id"] == "gemini-2.5-pro"
 
 
+def test_non_surface_reply_runtime_migrates_to_codex_cli(monkeypatch) -> None:
+    monkeypatch.setenv("HOST_AGENT_CODEX_MIGRATION_ENABLED", "true")
+    monkeypatch.setenv("HOST_CODEX_MODEL_ID", "gpt-5.4-mini")
+    monkeypatch.setattr(
+        "host_brain.app.graph_config_llm_runtime.codex_cli_lm_available",
+        lambda: True,
+    )
+
+    runtime = graph_builder.resolve_executive_router_llm_runtime(
+        base_runtime={
+            "provider_name": "gemini",
+            "model_id": "gemini-2.5-flash",
+            "llm_api_key": "gem-key",
+        }
+    )
+
+    assert runtime["provider_name"] == "codex"
+    assert runtime["model_id"] == "gpt-5.4-mini"
+    assert runtime["llm_api_key"] is None
+    assert runtime["route_reason_code"] == "HOST_AGENT_CODEX_CLI_MIGRATION"
+
+
 def test_model_router_prefers_runtime_secret_files(monkeypatch, tmp_path) -> None:
-    model_router._reset_gemini_key_pool_cursor_for_tests()
     key_profiles_path = tmp_path / "key_profiles.runtime.json"
     secret_store_path = tmp_path / "secret_store.runtime.local.json"
     key_profiles_path.write_text(
         json.dumps(
             {
                 "current_epoch": 20260411,
+                "host_node_id": "natsu-node-01",
                 "profiles": [
                     {
                         "provider": "gemini",
@@ -321,24 +353,21 @@ def test_model_router_prefers_runtime_secret_files(monkeypatch, tmp_path) -> Non
     monkeypatch.setattr(host_config, "DEFAULT_KEY_PROFILES_FALLBACK", key_profiles_path)
     monkeypatch.setattr(host_config, "DEFAULT_SECRET_STORE", secret_store_path)
     monkeypatch.setattr(host_config, "DEFAULT_SECRET_STORE_FALLBACK", secret_store_path)
-    monkeypatch.delenv("HOST_GEMINI_KEY_POOL_ALLOW_ENV_FALLBACK", raising=False)
-    monkeypatch.setenv("HOST_GEMINI_KEY_POOL_DISABLE_RUNTIME_FILES", "false")
-    monkeypatch.setenv("HOST_GEMINI_API_KEYS", "k_env_only")
+    monkeypatch.setenv("GEMINI_API_KEY", "k_env_only")
 
-    keys = model_router.resolve_gemini_key_pool()
+    key = model_router.resolve_gemini_api_key()
 
-    assert keys == ["k_file_1", "k_file_2"]
+    assert key == "k_file_1"
 
 
-def test_inspect_gemini_key_pool_is_redacted(monkeypatch) -> None:
-    model_router._reset_gemini_key_pool_cursor_for_tests()
-    monkeypatch.setenv("HOST_GEMINI_KEY_POOL_DISABLE_RUNTIME_FILES", "true")
-    monkeypatch.setenv("HOST_GEMINI_KEY_POOL_ALLOW_ENV_FALLBACK", "true")
-    monkeypatch.setenv("HOST_GEMINI_API_KEYS", "k1,k2")
+def test_inspect_gemini_key_status_is_redacted(monkeypatch) -> None:
+    monkeypatch.setattr(model_router, "_resolve_runtime_gemini_api_key", lambda: (None, None, None))
+    monkeypatch.setenv("GEMINI_API_KEY", "k1")
 
-    snapshot = model_router.inspect_gemini_key_pool()
+    snapshot = model_router.inspect_gemini_key_status()
 
-    assert snapshot["pool_size"] == 2
-    assert snapshot["source"] in {"env_fallback", "preferred+env_fallback"}
+    assert snapshot["key_configured"] is True
+    assert snapshot["source"] == "env"
     assert "keys" not in snapshot
     assert "api_key" not in snapshot
+    assert not any(name.endswith("_pool_size") for name in snapshot)

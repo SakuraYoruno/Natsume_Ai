@@ -249,7 +249,7 @@ class TestWeChat_VTS_Voice_E2E(unittest.TestCase):
             user_message=fix["wechat_ingress"]["content"],
             reply="今天天气晴朗，适合外出！",
             emotion_tag="neutral",
-            bond_stage="STRANGER",
+            bond_stage="FRIEND",
         )
 
         # Step 8: 审计链完整性验证
@@ -534,7 +534,7 @@ class TestWeChat_VTS_Voice_E2E(unittest.TestCase):
             user_message=fix["wechat_ingress"]["content"],
             reply="（语音不可用，文本回复）这是一个笑话……",
             emotion_tag="neutral",
-            bond_stage="STRANGER",
+            bond_stage="FRIEND",
         )
 
         # 验证审计链

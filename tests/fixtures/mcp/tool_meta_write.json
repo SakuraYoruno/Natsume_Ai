@@ -1,12 +1,15 @@
-{
-  "provider_id": "github",
-  "tool_id": "create_issue",
-  "name": "Create Issue",
-  "description": "Create a GitHub issue",
-  "access_level": "INTERNAL",
-  "risk_level": "MEDIUM",
-  "reversible": false,
-  "version": "1.0.0",
-  "schema_hash": "",
-  "domain_tags": ["mcp", "github"]
+﻿{
+    "provider_id":  "github",
+    "tool_id":  "create_issue",
+    "name":  "Create Issue",
+    "description":  "Create a GitHub issue",
+    "access_level":  "INTERNAL",
+    "risk_level":  "MEDIUM",
+    "reversible":  false,
+    "version":  "1.0.0",
+    "schema_hash":  "",
+    "domain_tags":  [
+                        "mcp",
+                        "github"
+                    ]
 }

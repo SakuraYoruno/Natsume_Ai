@@ -177,11 +177,13 @@ class CircadianAgent:
                 # T-377：日间/黎明相位切换时联动 DefaultModeAgent.tick_idle_cycle()
                 # 日间清醒是自我叙事的重要节点（"新的一天开始了"），应更新连续性
                 try:
+                    from host_brain.persona.identity import get_canonical_persona_self_id  # noqa: PLC0415
+
                     _dma = get_default_mode_agent()
                     if hasattr(_dma, "tick_idle_cycle"):
                         _dma.tick_idle_cycle(
                             source=f"circadian_wake:{next_phase}",
-                            person_id="user_1",
+                            person_id=get_canonical_persona_self_id(),
                         )
                 except Exception:
                     pass
@@ -325,9 +327,16 @@ class CircadianAgent:
             return None
 
     def export_runtime_state(self) -> dict[str, Any]:
-        self.refresh_state(source="export_runtime_state")
         snap = self.state_registry.get_state("circadian_agent") or {}
         state = dict(snap.get("state") or {})
+        # Runtime exports are read-only projections. Phase-transition side effects
+        # belong to refresh_state(), scheduler ticks, or event handlers.
+        try:
+            projected = self.evaluate_profile()
+            state.update(projected)
+            state.setdefault("source", "export_runtime_state_read_only")
+        except Exception:
+            pass
         return {
             "phase": str(state.get("phase") or "day"),
             "local_hour": int(state.get("local_hour") or 12),

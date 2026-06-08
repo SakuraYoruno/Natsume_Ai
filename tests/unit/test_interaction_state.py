@@ -20,7 +20,11 @@ def test_build_interaction_state_uses_thread_and_perception_summary() -> None:
             "source_context_excerpt": "[图片消息]",
         },
         affect_state={"emotion_tag": "CALM"},
-        relationship_state={"bond_stage": "FRIEND"},
+        relationship_state={
+            "bond_stage": "FRIEND",
+            "relationship_phase": "stepsibling",
+            "relationship_substage": "playful_sibling",
+        },
         drive_state={"continuity_drive": 0.35},
         topic_ledger={"active_topics": ["emoji_social_reply"]},
         tactic_ledger={"recent_topics": ["emoji_social_reply"]},
@@ -33,3 +37,4 @@ def test_build_interaction_state_uses_thread_and_perception_summary() -> None:
     assert state.followup_context_excerpt == "[图片消息]"
     assert state.ongoing_thread == "image_social"
     assert state.perception_summary == "哭哭的表情图。"
+    assert state.relationship["relationship_substage"] == "playful_sibling"

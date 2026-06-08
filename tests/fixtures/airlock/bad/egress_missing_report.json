@@ -1,17 +1,17 @@
-{
-  "request_id": "req_airlock_egress_001",
-  "payload": {
-    "user_prompt": "Summarize this context for a cloud model.",
-    "hard_state": {
-      "trust_level": 92,
-      "energy_level": 71
-    },
-    "rule_trace": [
-      {
-        "gate_id": "R1_TRUST",
-        "hit": false
-      }
-    ],
-    "api_key": "sk-live-example"
-  }
+﻿{
+    "request_id":  "req_airlock_egress_001",
+    "payload":  {
+                    "user_prompt":  "Summarize this context for a cloud model.",
+                    "hard_state":  {
+                                       "trust_level":  92,
+                                       "energy_level":  71
+                                   },
+                    "rule_trace":  [
+                                       {
+                                           "gate_id":  "R1_TRUST",
+                                           "hit":  false
+                                       }
+                                   ],
+                    "api_key":  "sk-live-example"
+                }
 }

@@ -6,6 +6,8 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 import inspect
 import json
+import os
+import threading
 from typing import Any, Callable
 import urllib.error
 import urllib.request
@@ -46,6 +48,10 @@ from host_brain.core.ids import now_ms
 
 STATUS_ACCEPTED = "ACCEPTED"
 STATUS_REJECTED = "REJECTED"
+
+_SPEAK_SEGMENT_PUNCT = set("。！？!?；;\n")
+_SPEAK_SEGMENT_SOFT_PUNCT = set("，,、 ")
+_SPEAK_SENTENCE_ENDINGS = set("。！？!?；;，,、")
 
 
 @dataclass(frozen=True)
@@ -128,6 +134,21 @@ def create_edge_fastapi_app(
             ts_ms=health["ts_ms"],
         )
 
+    @app.get("/v1/edge/avatar_state")
+    async def edge_avatar_state() -> dict[str, Any]:
+        from edge_client.runtime.avatar_behavior import build_avatar_behavior_state
+
+        snapshot_ts = int(clock())
+        state = build_avatar_behavior_state(runtime_value, ts_ms=snapshot_ts)
+        return _response(
+            success=True,
+            status=STATUS_ACCEPTED,
+            reason_code=None,
+            detail="edge avatar behavior state snapshot",
+            event=state,
+            ts_ms=snapshot_ts,
+        )
+
     @app.post("/v1/edge/speak")
     async def edge_speak(request: Request) -> JSONResponse:
         return await _handle_envelope_request(
@@ -158,6 +179,19 @@ def create_edge_fastapi_app(
             handler=_handle_barge_in,
         )
 
+    @app.post("/v1/edge/asr")
+    async def edge_asr(request: Request) -> JSONResponse:
+        return await _handle_envelope_request(
+            request=request,
+            config=runtime_config,
+            runtime=runtime_value,
+            replay=replay_value,
+            clock=clock,
+            enabled=(runtime_config.rpc_gateway_enabled and runtime_config.asr_enabled),
+            disabled_detail="edge asr disabled by config",
+            handler=_handle_asr,
+        )
+
     @app.post("/v1/edge/vts")
     async def edge_vts(request: Request) -> JSONResponse:
         return await _handle_envelope_request(
@@ -169,6 +203,19 @@ def create_edge_fastapi_app(
             enabled=runtime_config.rpc_gateway_enabled,
             disabled_detail="edge rpc gateway disabled by config",
             handler=_handle_vts,
+        )
+
+    @app.post("/v1/edge/desktop_pet")
+    async def edge_desktop_pet(request: Request) -> JSONResponse:
+        return await _handle_envelope_request(
+            request=request,
+            config=runtime_config,
+            runtime=runtime_value,
+            replay=replay_value,
+            clock=clock,
+            enabled=runtime_config.rpc_gateway_enabled,
+            disabled_detail="edge rpc gateway disabled by config",
+            handler=_handle_desktop_pet,
         )
 
     @app.post("/v1/edge/fallback/presence")
@@ -758,12 +805,43 @@ async def _load_json_body(request: Request) -> dict[str, Any] | JSONResponse:
 
 
 def _handle_speak(runtime: EdgeRuntime, envelope: EdgeRpcEnvelope) -> EdgeGatewayResult:
+    import time as _time
+
+    handler_t0 = _time.monotonic()
+    fast_ack_default = _parse_bool_like(os.environ.get("EDGE_TTS_FAST_ACK_ENABLED"), default=True)
+    wait_playback_start = _parse_bool_like(
+        envelope.payload.get("wait_playback_start"),
+        default=not fast_ack_default,
+    )
+    segments = _split_speak_payload_for_streaming(envelope.payload)
+    primary_payload = dict(envelope.payload)
+    segmented_playback = len(segments) > 1
+    if segmented_playback:
+        primary_payload = _with_speak_segment_payload(
+            envelope.payload,
+            text=segments[0],
+            segment_index=1,
+            segment_count=len(segments),
+            parent_request_id=envelope.request_id,
+        )
+    pipeline_t0 = _time.monotonic()
     pipeline_result = runtime.voice_pipeline.enqueue_speak(
         request_id=envelope.request_id,
-        payload=envelope.payload,
+        payload=primary_payload,
         ts_ms=envelope.ts_ms,
         auto_start=True,
+        background_start=not wait_playback_start,
     )
+    pipeline_elapsed_s = _time.monotonic() - pipeline_t0
+    if segmented_playback:
+        _enqueue_remaining_speak_segments(
+            runtime=runtime,
+            parent_request_id=envelope.request_id,
+            source_payload=envelope.payload,
+            segments=segments,
+            ts_ms=envelope.ts_ms,
+            primary_playback_started=wait_playback_start,
+        )
     queue_result = pipeline_result.queue_result
     start_result = pipeline_result.start_result
     expression_result = pipeline_result.expression_result
@@ -775,6 +853,26 @@ def _handle_speak(runtime: EdgeRuntime, envelope: EdgeRpcEnvelope) -> EdgeGatewa
     result = start_result if start_result is not None else queue_result
     event = dict(result.event)
     event.setdefault("queue_event", dict(queue_result.event))
+    event["fast_ack"] = not wait_playback_start
+    event["wait_playback_start"] = wait_playback_start
+    event["background_start_scheduled"] = bool(pipeline_result.background_start_scheduled)
+    event["edge_speak_pipeline_elapsed_s"] = round(pipeline_elapsed_s, 4)
+    if segmented_playback:
+        event["segmented_playback"] = True
+        event["segment_index"] = 1
+        event["segment_count"] = len(segments)
+        event["segment_chars"] = [len(segment) for segment in segments]
+        event["segment_parent_request_id"] = envelope.request_id
+        event["segment_prefetch_enabled"] = _parse_bool_like(
+            os.environ.get("EDGE_TTS_SEGMENT_PREFETCH_ENABLED"),
+            default=True,
+        )
+        event["segment_prefetch_max_ahead"] = _parse_int_clamped(
+            os.environ.get("EDGE_TTS_SEGMENT_PREFETCH_MAX_AHEAD"),
+            default=1,
+            min_value=0,
+            max_value=8,
+        )
     if start_result is not None:
         event["start_event"] = dict(start_result.event)
         event["start_status"] = start_result.status
@@ -795,6 +893,8 @@ def _handle_speak(runtime: EdgeRuntime, envelope: EdgeRpcEnvelope) -> EdgeGatewa
     elif start_result is not None and start_result.success:
         detail = f"{queue_result.detail}; {start_result.detail}"
 
+    event["edge_speak_handler_elapsed_s"] = round(_time.monotonic() - handler_t0, 4)
+
     return EdgeGatewayResult(
         success=success,
         status=result.status,
@@ -803,6 +903,234 @@ def _handle_speak(runtime: EdgeRuntime, envelope: EdgeRpcEnvelope) -> EdgeGatewa
         detail=detail,
         event=event,
     )
+
+
+def _split_speak_payload_for_streaming(payload: dict[str, Any]) -> list[str]:
+    if not _parse_bool_like(os.environ.get("EDGE_TTS_SEGMENTED_PLAYBACK_ENABLED"), default=True):
+        return []
+    if payload.get("segment_parent_request_id") or payload.get("segment_index"):
+        return []
+    text = str(payload.get("text") or payload.get("message") or "").strip()
+    if not text:
+        return []
+    min_chars = _parse_int_clamped(
+        os.environ.get("EDGE_TTS_SEGMENTED_PLAYBACK_MIN_CHARS"),
+        default=48,
+        min_value=12,
+        max_value=2000,
+    )
+    max_chars = _parse_int_clamped(
+        os.environ.get("EDGE_TTS_SEGMENTED_PLAYBACK_MAX_CHARS"),
+        default=36,
+        min_value=12,
+        max_value=500,
+    )
+    first_max_chars = _parse_int_clamped(
+        os.environ.get("EDGE_TTS_SEGMENTED_PLAYBACK_FIRST_MAX_CHARS"),
+        default=18,
+        min_value=10,
+        max_value=200,
+    )
+    max_segments = _parse_int_clamped(
+        os.environ.get("EDGE_TTS_SEGMENTED_PLAYBACK_MAX_SEGMENTS"),
+        default=8,
+        min_value=2,
+        max_value=64,
+    )
+    if len(text) < int(min_chars):
+        return []
+
+    clean_segments = _split_text_into_speak_segments(
+        text,
+        first_max_chars=int(first_max_chars),
+        max_chars=int(max_chars),
+        max_segments=int(max_segments),
+    )
+    return clean_segments if len(clean_segments) > 1 else []
+
+
+def _split_text_into_speak_segments(
+    text: str,
+    *,
+    first_max_chars: int,
+    max_chars: int,
+    max_segments: int,
+) -> list[str]:
+    segments: list[str] = []
+    cursor = 0
+    text_len = len(text)
+    while cursor < text_len and len(segments) < max_segments:
+        target_chars = int(first_max_chars) if not segments else int(max_chars)
+        remaining_slots = max(1, int(max_segments) - len(segments))
+        if remaining_slots == 1:
+            end = text_len
+        else:
+            end = _choose_speak_segment_end(text, cursor, target_chars)
+        segment = text[cursor:end].strip()
+        cursor = end
+        while cursor < text_len and text[cursor].isspace():
+            cursor += 1
+        if segment:
+            segments.append(_normalize_speak_segment_text(segment, is_last=cursor >= text_len))
+    return [segment for segment in segments if segment]
+
+
+def _choose_speak_segment_end(text: str, start: int, target_chars: int) -> int:
+    text_len = len(text)
+    hard_min = start + max(8, int(target_chars * 0.45))
+    target_end = min(text_len, start + int(target_chars))
+    if target_end >= text_len:
+        return text_len
+    for index in range(target_end, min(text_len, start + int(target_chars * 1.35))):
+        if text[index] in _SPEAK_SEGMENT_PUNCT and index + 1 >= hard_min:
+            return index + 1
+    for index in range(target_end - 1, max(start, hard_min) - 1, -1):
+        if text[index] in _SPEAK_SEGMENT_PUNCT:
+            return index + 1
+    for index in range(target_end - 1, max(start, hard_min) - 1, -1):
+        if text[index] in _SPEAK_SEGMENT_SOFT_PUNCT:
+            return index + 1
+    return target_end
+
+
+def _normalize_speak_segment_text(segment: str, *, is_last: bool) -> str:
+    clean = str(segment or "").strip()
+    if not clean:
+        return ""
+    if is_last or clean[-1] in _SPEAK_SENTENCE_ENDINGS:
+        return clean
+    return f"{clean}，"
+
+
+def _with_speak_segment_payload(
+    payload: dict[str, Any],
+    *,
+    text: str,
+    segment_index: int,
+    segment_count: int,
+    parent_request_id: str,
+) -> dict[str, Any]:
+    segment_payload = dict(payload)
+    if "message" in segment_payload:
+        segment_payload["message"] = text
+    segment_payload["text"] = text
+    segment_payload["segment_parent_request_id"] = parent_request_id
+    segment_payload["segment_index"] = int(segment_index)
+    segment_payload["segment_count"] = int(segment_count)
+    segment_payload["wait_playback_start"] = False
+    return segment_payload
+
+
+def _enqueue_remaining_speak_segments(
+    *,
+    runtime: EdgeRuntime,
+    parent_request_id: str,
+    source_payload: dict[str, Any],
+    segments: list[str],
+    ts_ms: int,
+    primary_playback_started: bool,
+) -> None:
+    def _runner() -> None:
+        queued_payloads: list[tuple[str, dict[str, Any]]] = []
+        for offset, segment in enumerate(segments[1:], start=2):
+            segment_request_id = f"{parent_request_id}::seg{offset}"
+            segment_payload = _with_speak_segment_payload(
+                source_payload,
+                text=segment,
+                segment_index=offset,
+                segment_count=len(segments),
+                parent_request_id=parent_request_id,
+            )
+            runtime.voice_pipeline.enqueue_speak(
+                request_id=segment_request_id,
+                payload=segment_payload,
+                ts_ms=ts_ms,
+                auto_start=True,
+                background_start=True,
+            )
+            queued_payloads.append((segment_request_id, segment_payload))
+        _prefetch_speak_segment_audio_lookahead(
+            runtime=runtime,
+            queued_payloads=queued_payloads,
+            primary_playback_started=primary_playback_started,
+        )
+
+    threading.Thread(
+        target=_runner,
+        name="edge-tts-segment-enqueue",
+        daemon=True,
+    ).start()
+
+
+def _prefetch_speak_segment_audio_lookahead(
+    *,
+    runtime: EdgeRuntime,
+    queued_payloads: list[tuple[str, dict[str, Any]]],
+    primary_playback_started: bool,
+) -> None:
+    if not queued_payloads:
+        return
+    if not _parse_bool_like(os.environ.get("EDGE_TTS_SEGMENT_PREFETCH_ENABLED"), default=True):
+        return
+    max_ahead = _parse_int_clamped(
+        os.environ.get("EDGE_TTS_SEGMENT_PREFETCH_MAX_AHEAD"),
+        default=1,
+        min_value=0,
+        max_value=8,
+    )
+    if max_ahead <= 0:
+        return
+    default_delay_ms = 0 if primary_playback_started else 800
+    delay_ms = _parse_int_clamped(
+        os.environ.get("EDGE_TTS_SEGMENT_PREFETCH_DELAY_MS"),
+        default=default_delay_ms,
+        min_value=0,
+        max_value=10000,
+    )
+    if delay_ms > 0:
+        threading.Event().wait(float(delay_ms) / 1000.0)
+    for request_id, payload in queued_payloads[:max_ahead]:
+        _prefetch_speak_segment_audio(
+            runtime=runtime,
+            request_id=request_id,
+            payload=payload,
+        )
+
+
+def _prefetch_speak_segment_audio(
+    *,
+    runtime: EdgeRuntime,
+    request_id: str,
+    payload: dict[str, Any],
+) -> None:
+    voice_pipeline = getattr(runtime, "voice_pipeline", None)
+    speech_queue = getattr(voice_pipeline, "speech_queue", None)
+    synthesizer = getattr(speech_queue, "_synthesizer", None)
+    synthesize = getattr(synthesizer, "synthesize", None)
+    if not callable(synthesize):
+        return
+    text = str(payload.get("text") or payload.get("message") or "").strip()
+    if not text:
+        return
+    try:
+        result = synthesize(
+            text,
+            language=str(payload.get("language") or payload.get("lang_hint") or "zh"),
+            emotion_tag=str(payload.get("emotion_tag") or "").strip() or None,
+            emotion_intensity=payload.get("emotion_intensity"),
+            speed_factor=payload.get("speed_factor"),
+        )
+        print(
+            "EDGE_TTS_SEGMENT_PREFETCH "
+            f"request_id={request_id} success={bool(getattr(result, 'success', False))} "
+            f"detail={str(getattr(result, 'detail', '') or '')}",
+            flush=True,
+        )
+    except Exception as exc:  # pragma: no cover - prefetch is best effort
+        print(
+            f"EDGE_TTS_SEGMENT_PREFETCH request_id={request_id} success=False detail={exc}",
+            flush=True,
+        )
 
 
 def _handle_barge_in(runtime: EdgeRuntime, envelope: EdgeRpcEnvelope) -> EdgeGatewayResult:
@@ -822,8 +1150,293 @@ def _handle_barge_in(runtime: EdgeRuntime, envelope: EdgeRpcEnvelope) -> EdgeGat
     )
 
 
+def _handle_asr(runtime: EdgeRuntime, envelope: EdgeRpcEnvelope) -> EdgeGatewayResult:
+    asr_service = getattr(runtime, "asr_service", None)
+    if asr_service is None:
+        return EdgeGatewayResult(
+            success=False,
+            status=STATUS_REJECTED,
+            reason_code=SERVICE_UNAVAILABLE_DEPENDENCY,
+            stage="S_EDGE_ASR_CONTROL",
+            detail="asr service unavailable",
+            event={"action": str(envelope.payload.get("action") or "status")},
+        )
+
+    action = str(envelope.payload.get("action") or "status").strip().lower()
+    if action in {"status", "health"}:
+        return EdgeGatewayResult(
+            success=True,
+            status=STATUS_ACCEPTED,
+            reason_code=None,
+            stage="S_EDGE_ASR_CONTROL",
+            detail="asr status",
+            event={
+                "action": "status",
+                "asr": asr_service.health(),
+            },
+        )
+
+    if action in {"voiceprint_status", "speaker_status"}:
+        return EdgeGatewayResult(
+            success=True,
+            status=STATUS_ACCEPTED,
+            reason_code=None,
+            stage="S_EDGE_ASR_CONTROL",
+            detail="asr voiceprint status",
+            event={
+                "action": "voiceprint_status",
+                "voiceprint": asr_service.voiceprint_status(),
+                "asr": asr_service.health(),
+            },
+        )
+
+    if action in {"voiceprint_enroll", "speaker_enroll"}:
+        audio_path = str(envelope.payload.get("audio_path") or "").strip()
+        if not audio_path:
+            return EdgeGatewayResult(
+                success=False,
+                status=STATUS_REJECTED,
+                reason_code=VOICE_SCHEMA_INVALID,
+                stage="S_EDGE_ASR_CONTROL",
+                detail="voiceprint_enroll requires audio_path",
+                event={"action": action},
+            )
+        label = str(envelope.payload.get("label") or "primary_user").strip() or "primary_user"
+        result = asr_service.enroll_voiceprint_from_wav(audio_path, label=label)
+        success = bool(result.get("success"))
+        return EdgeGatewayResult(
+            success=success,
+            status=STATUS_ACCEPTED if success else STATUS_REJECTED,
+            reason_code=result.get("reason_code"),
+            stage="S_EDGE_ASR_CONTROL",
+            detail=str(result.get("detail") or ""),
+            event={
+                "action": "voiceprint_enroll",
+                "result": dict(result),
+                "voiceprint": asr_service.voiceprint_status(),
+                "asr": asr_service.health(),
+            },
+        )
+
+    if action in {"start", "listen", "start_session"}:
+        health_before = asr_service.health()
+        if bool(health_before.get("running")):
+            return EdgeGatewayResult(
+                success=True,
+                status=STATUS_ACCEPTED,
+                reason_code=None,
+                stage="S_EDGE_ASR_CONTROL",
+            detail="asr already running",
+            event={
+                "action": "start",
+                "already_running": True,
+                "asr": health_before,
+                "avatar_behavior": _apply_asr_control_avatar_behavior(
+                    runtime=runtime,
+                    envelope=envelope,
+                    action="start",
+                    behavior_id="listening",
+                    success=True,
+                ),
+            },
+        )
+        session_id = str(envelope.payload.get("session_id") or "").strip() or None
+        result = asr_service.start_session(session_id=session_id)
+        return EdgeGatewayResult(
+            success=bool(result.success),
+            status=STATUS_ACCEPTED if result.success else STATUS_REJECTED,
+            reason_code=result.reason_code,
+            stage="S_EDGE_ASR_CONTROL",
+            detail=result.detail,
+            event={
+                "action": "start",
+                "result": result.as_dict() if hasattr(result, "as_dict") else {
+                    "success": bool(result.success),
+                    "reason_code": result.reason_code,
+                    "detail": result.detail,
+                },
+                "asr": asr_service.health(),
+                "avatar_behavior": _apply_asr_control_avatar_behavior(
+                    runtime=runtime,
+                    envelope=envelope,
+                    action="start",
+                    behavior_id="listening",
+                    success=bool(result.success),
+                ),
+            },
+        )
+
+    if action in {"stop", "mute", "stop_session"}:
+        health_before = asr_service.health()
+        if not bool(health_before.get("running")):
+            return EdgeGatewayResult(
+                success=True,
+                status=STATUS_ACCEPTED,
+                reason_code=None,
+                stage="S_EDGE_ASR_CONTROL",
+            detail="asr already stopped",
+            event={
+                "action": "stop",
+                "already_stopped": True,
+                "asr": health_before,
+                "avatar_behavior": _apply_asr_control_avatar_behavior(
+                    runtime=runtime,
+                    envelope=envelope,
+                    action="stop",
+                    behavior_id="idle",
+                    success=True,
+                ),
+            },
+        )
+        result = asr_service.stop_session()
+        return EdgeGatewayResult(
+            success=bool(result.success),
+            status=STATUS_ACCEPTED if result.success else STATUS_REJECTED,
+            reason_code=result.reason_code,
+            stage="S_EDGE_ASR_CONTROL",
+            detail=result.detail,
+            event={
+                "action": "stop",
+                "result": result.as_dict() if hasattr(result, "as_dict") else {
+                    "success": bool(result.success),
+                    "reason_code": result.reason_code,
+                    "detail": result.detail,
+                },
+                "asr": asr_service.health(),
+                "avatar_behavior": _apply_asr_control_avatar_behavior(
+                    runtime=runtime,
+                    envelope=envelope,
+                    action="stop",
+                    behavior_id="idle",
+                    success=bool(result.success),
+                ),
+            },
+        )
+
+    if action in {"restart", "reset"}:
+        health_before = asr_service.health()
+        stop_result = None
+        if bool(health_before.get("running")):
+            stop_result = asr_service.stop_session()
+        session_id = str(envelope.payload.get("session_id") or "").strip() or None
+        start_result = asr_service.start_session(session_id=session_id)
+        return EdgeGatewayResult(
+            success=bool(start_result.success),
+            status=STATUS_ACCEPTED if start_result.success else STATUS_REJECTED,
+            reason_code=start_result.reason_code,
+            stage="S_EDGE_ASR_CONTROL",
+            detail=(
+                f"asr restarted: {start_result.detail}"
+                if start_result.success
+                else f"asr restart failed: {start_result.detail}"
+            ),
+            event={
+                "action": "restart",
+                "stop_result": (
+                    None
+                    if stop_result is None
+                    else (
+                        stop_result.as_dict()
+                        if hasattr(stop_result, "as_dict")
+                        else {
+                            "success": bool(stop_result.success),
+                            "reason_code": stop_result.reason_code,
+                            "detail": stop_result.detail,
+                        }
+                    )
+                ),
+                "start_result": (
+                    start_result.as_dict()
+                    if hasattr(start_result, "as_dict")
+                    else {
+                        "success": bool(start_result.success),
+                        "reason_code": start_result.reason_code,
+                        "detail": start_result.detail,
+                    }
+                ),
+                "asr": asr_service.health(),
+                "avatar_behavior": _apply_asr_control_avatar_behavior(
+                    runtime=runtime,
+                    envelope=envelope,
+                    action="restart",
+                    behavior_id="listening",
+                    success=bool(start_result.success),
+                ),
+            },
+        )
+
+    return EdgeGatewayResult(
+        success=False,
+        status=STATUS_REJECTED,
+        reason_code=VOICE_SCHEMA_INVALID,
+        stage="S_EDGE_ASR_CONTROL",
+        detail="asr action must be one of status/start/stop/restart",
+        event={"action": action},
+    )
+
+
+def _apply_asr_control_avatar_behavior(
+    *,
+    runtime: EdgeRuntime,
+    envelope: EdgeRpcEnvelope,
+    action: str,
+    behavior_id: str,
+    success: bool,
+) -> dict[str, Any] | None:
+    if not success:
+        return None
+    if not _parse_bool_like(
+        os.environ.get("EDGE_AVATAR_BEHAVIOR_ASR_CONTROL_AUTO_STATE_ENABLED"),
+        default=True,
+    ):
+        return None
+    voice_pipeline = getattr(runtime, "voice_pipeline", None)
+    apply_behavior = getattr(voice_pipeline, "_apply_quiet_avatar_behavior", None)
+    if not callable(apply_behavior):
+        return None
+    speech_queue = getattr(voice_pipeline, "speech_queue", None)
+    speech_active = bool(getattr(speech_queue, "active_playback", None))
+    if speech_active and not _parse_bool_like(
+        os.environ.get("EDGE_AVATAR_BEHAVIOR_ASR_DURING_SPEECH_ENABLED"),
+        default=False,
+    ):
+        return {
+            "success": True,
+            "state": "skipped",
+            "reason": "speech_active",
+            "detail": "ASR control avatar state skipped while AI speech is active",
+            "behavior_id": str(behavior_id or ""),
+            "source": f"asr_control_{action}",
+        }
+    payload = {
+        **dict(envelope.payload or {}),
+        "request_id": str(envelope.request_id or ""),
+        "ts_ms": int(envelope.ts_ms),
+        "source": f"asr_control_{action}",
+        "body_hint_enabled": False,
+    }
+    return apply_behavior(
+        behavior_id=str(behavior_id or ""),
+        payload=payload,
+        source=f"asr_control_{action}",
+    )
+
+
 def _handle_vts(runtime: EdgeRuntime, envelope: EdgeRpcEnvelope) -> EdgeGatewayResult:
     action = str(envelope.payload.get("action") or "").strip().lower()
+    if action in {"status", "state", "avatar_state", "debug_state"}:
+        from edge_client.runtime.avatar_behavior import build_avatar_behavior_state
+
+        state = build_avatar_behavior_state(runtime, ts_ms=envelope.ts_ms)
+        return EdgeGatewayResult(
+            success=True,
+            status=STATUS_ACCEPTED,
+            reason_code=None,
+            stage="S_EDGE_AVATAR_STATE",
+            detail="edge avatar behavior state snapshot",
+            event=state,
+        )
+
     if runtime.vts_driver is None:
         return EdgeGatewayResult(
             success=False,
@@ -838,6 +1451,75 @@ def _handle_vts(runtime: EdgeRuntime, envelope: EdgeRpcEnvelope) -> EdgeGatewayR
         result = runtime.vts_driver.talk_start()
     elif action == "talk_end":
         result = runtime.vts_driver.talk_end()
+    elif action in {"set_mouth", "mouth", "set_mouth_open_level"}:
+        raw_level = envelope.payload.get("value", envelope.payload.get("level"))
+        try:
+            level = max(0.0, min(1.0, float(raw_level)))
+        except (TypeError, ValueError):
+            return EdgeGatewayResult(
+                success=False,
+                status=STATUS_REJECTED,
+                reason_code=VOICE_SCHEMA_INVALID,
+                stage="S_EDGE_VTS",
+                detail="set_mouth requires numeric value or level in [0,1]",
+                event={},
+            )
+        motion_values = envelope.payload.get("motion_values")
+        result = runtime.vts_driver.set_mouth_open_level(
+            level,
+            _include_companions=True,
+            _batch_companions=True,
+            _motion_values=motion_values if isinstance(motion_values, dict) else None,
+        )
+    elif action in {"body_action", "perform_action"}:
+        action_id = str(envelope.payload.get("action_id") or "").strip()
+        if not action_id:
+            return EdgeGatewayResult(
+                success=False,
+                status=STATUS_REJECTED,
+                reason_code=VOICE_SCHEMA_INVALID,
+                stage="S_EDGE_VTS",
+                detail="body_action requires action_id",
+                event={},
+            )
+        voice_pipeline = getattr(runtime, "voice_pipeline", None)
+        if voice_pipeline is None:
+            return EdgeGatewayResult(
+                success=False,
+                status=STATUS_REJECTED,
+                reason_code=SERVICE_UNAVAILABLE_DEPENDENCY,
+                stage="S_EDGE_VTS",
+                detail="voice pipeline unavailable",
+                event={},
+            )
+        summary = voice_pipeline.perform_body_action(
+            action_id=action_id,
+            emotion_tag=envelope.payload.get("emotion_tag"),
+            intensity=envelope.payload.get("emotion_intensity"),
+            duration_s=envelope.payload.get("duration_s"),
+        )
+        success = bool(summary.get("success"))
+        return EdgeGatewayResult(
+            success=success,
+            status=(STATUS_ACCEPTED if success else STATUS_REJECTED),
+            reason_code=None if success else str(summary.get("reason") or VOICE_SCHEMA_INVALID),
+            stage="S_EDGE_VTS",
+            detail=str(summary.get("detail") or "body action completed"),
+            event=dict(summary),
+        )
+    elif action in {"behavior", "avatar_behavior", "perform_behavior"}:
+        from edge_client.runtime.avatar_behavior import execute_avatar_behavior
+
+        summary = execute_avatar_behavior(runtime, envelope.payload)
+        success = bool(summary.get("success"))
+        return EdgeGatewayResult(
+            success=success,
+            status=(STATUS_ACCEPTED if success else STATUS_REJECTED),
+            reason_code=None if success else str(summary.get("reason") or VOICE_SCHEMA_INVALID),
+            stage="S_EDGE_AVATAR_BEHAVIOR",
+            detail=str(summary.get("detail") or "avatar behavior completed"),
+            event=dict(summary),
+        )
     elif action == "set_expression":
         emotion = str(envelope.payload.get("emotion_tag") or "").strip()
         if not emotion:
@@ -889,7 +1571,7 @@ def _handle_vts(runtime: EdgeRuntime, envelope: EdgeRpcEnvelope) -> EdgeGatewayR
             status=STATUS_REJECTED,
             reason_code=VOICE_SCHEMA_INVALID,
             stage="S_EDGE_VTS",
-            detail="vts action must be one of talk_start/talk_end/set_expression/reset",
+            detail="vts action must be one of status/talk_start/talk_end/set_mouth/set_expression/reset/body_action/behavior",
             event={},
         )
 
@@ -901,6 +1583,69 @@ def _handle_vts(runtime: EdgeRuntime, envelope: EdgeRpcEnvelope) -> EdgeGatewayR
         stage="S_EDGE_VTS",
         detail=result.detail,
         event=event,
+    )
+
+
+def _handle_desktop_pet(runtime: EdgeRuntime, envelope: EdgeRpcEnvelope) -> EdgeGatewayResult:
+    import json
+    import os
+    import urllib.error
+    import urllib.request
+
+    payload = dict(envelope.payload or {})
+    action = str(payload.get("action") or "status").strip().lower()
+    if not action:
+        return EdgeGatewayResult(
+            success=False,
+            status=STATUS_REJECTED,
+            reason_code=VOICE_SCHEMA_INVALID,
+            stage="S_EDGE_DESKTOP_PET_SCHEMA",
+            detail="desktop pet action is required",
+            event={},
+        )
+
+    base_url = str(os.getenv("EDGE_DESKTOP_PET_BASE_URL") or "http://127.0.0.1:18788").rstrip("/")
+    try:
+        if action == "status":
+            request = urllib.request.Request(f"{base_url}/health", method="GET")
+        else:
+            body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+            request = urllib.request.Request(
+                f"{base_url}/action",
+                data=body,
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+        with urllib.request.urlopen(request, timeout=2.5) as response:
+            raw = response.read().decode("utf-8", errors="replace")
+            data = json.loads(raw) if raw.strip() else {}
+    except urllib.error.URLError as exc:
+        return EdgeGatewayResult(
+            success=False,
+            status=STATUS_REJECTED,
+            reason_code=SERVICE_UNAVAILABLE_DEPENDENCY,
+            stage="S_EDGE_DESKTOP_PET",
+            detail=f"desktop pet runtime unavailable: {exc}",
+            event={"action": action, "base_url": base_url},
+        )
+    except Exception as exc:
+        return EdgeGatewayResult(
+            success=False,
+            status=STATUS_REJECTED,
+            reason_code=SERVICE_UNAVAILABLE_GENERIC,
+            stage="S_EDGE_DESKTOP_PET",
+            detail=f"desktop pet request failed: {exc}",
+            event={"action": action, "base_url": base_url},
+        )
+
+    success = bool(data.get("success", True))
+    return EdgeGatewayResult(
+        success=success,
+        status=STATUS_ACCEPTED if success else STATUS_REJECTED,
+        reason_code=None if success else str(data.get("reason_code") or "DESKTOP_PET_REJECTED"),
+        stage="S_EDGE_DESKTOP_PET",
+        detail=str(data.get("detail") or "desktop pet action delivered"),
+        event={"action": action, "runtime": data},
     )
 
 

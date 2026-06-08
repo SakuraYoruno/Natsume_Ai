@@ -1,3 +1,6 @@
+受众：MASTER
+标题：数字生命差距分析报告
+
 # 数字生命差距分析报告
 
 **文档编号**：DIGITAL_LIFE_GAP_ANALYSIS_20260403

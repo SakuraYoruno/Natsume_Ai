@@ -14,8 +14,6 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
-from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged
-
 _logger = logging.getLogger("Natsume.reasoning.reflection_chain")
 
 # ---------------------------------------------------------------------------
@@ -138,101 +136,14 @@ def _looks_like_affection_evasion(text: str) -> bool:
         return True
     return False
 
-def _normalize_template_lang(render_target_lang: str | None) -> str:
-    return "ja" if str(render_target_lang or "").strip().lower() == "ja" else "zh"
-
-
-def _resolve_localized_template_text(template_id: str, *, render_target_lang: str = "zh") -> str:
-    resolved = resolve_prompt_template_json_merged(template_id)
-    if isinstance(resolved, dict):
-        localized = resolved.get(_normalize_template_lang(render_target_lang))
-        if localized is not None:
-            return str(localized or "").strip()
-        for key, value in resolved.items():
-            if str(key) not in {"zh", "ja"} and isinstance(value, str) and value.strip():
-                return value.strip()
-    return str(resolved or "").strip()
-
-
-def _build_affection_question_revision(*, bond_stage: str, render_target_lang: str = "zh") -> str:
-    stage = str(bond_stage or "").strip().upper()
-    if stage in {"STRANGER", "ACQUAINTANCE"}:
-        return _resolve_localized_template_text(
-            "reflection_chain.affection_question.stranger",
-            render_target_lang=render_target_lang,
-        )
-    if stage == "FRIEND":
-        return _resolve_localized_template_text(
-            "reflection_chain.affection_question.friend",
-            render_target_lang=render_target_lang,
-        )
-    if stage in {"CLOSE", "CLOSE_FRIEND", "INTIMATE", "CONFIDANT", "SOULMATE"}:
-        return _resolve_localized_template_text(
-            "reflection_chain.affection_question.close",
-            render_target_lang=render_target_lang,
-        )
-    return _resolve_localized_template_text(
-        "reflection_chain.affection_question.default",
-        render_target_lang=render_target_lang,
-    )
-
-
-def _build_affection_disclosure_revision(*, bond_stage: str, render_target_lang: str = "zh") -> str:
-    stage = str(bond_stage or "").strip().upper()
-    if stage in {"STRANGER", "ACQUAINTANCE"}:
-        return _resolve_localized_template_text(
-            "reflection_chain.affection_disclosure.stranger",
-            render_target_lang=render_target_lang,
-        )
-    if stage == "FRIEND":
-        return _resolve_localized_template_text(
-            "reflection_chain.affection_disclosure.friend",
-            render_target_lang=render_target_lang,
-        )
-    if stage in {"CLOSE", "CLOSE_FRIEND", "INTIMATE", "CONFIDANT", "SOULMATE"}:
-        return _resolve_localized_template_text(
-            "reflection_chain.affection_disclosure.close",
-            render_target_lang=render_target_lang,
-        )
-    return _resolve_localized_template_text(
-        "reflection_chain.affection_disclosure.default",
-        render_target_lang=render_target_lang,
-    )
-
-
-def _build_contextual_revision_fallback(
-    *,
-    user_message: str,
-    bond_stage: str,
-    render_target_lang: str = "zh",
-) -> str:
-    normalized = str(user_message or "").strip()
-    if _FALLBACK_PRESENCE_RE.match(normalized):
-        return _resolve_localized_template_text(
-            "reflection_chain.contextual_fallback.presence",
-            render_target_lang=render_target_lang,
-        )
-    if _FALLBACK_GREETING_RE.match(normalized):
-        return _resolve_localized_template_text(
-            "reflection_chain.contextual_fallback.greeting",
-            render_target_lang=render_target_lang,
-        )
-    return _resolve_localized_template_text(
-        "reflection_chain.contextual_fallback.default",
-        render_target_lang=render_target_lang,
-    )
-
-
-def _build_revision_empathy_prefix(*, render_target_lang: str = "zh") -> str:
-    return _resolve_localized_template_text(
-        "reflection_chain.revision_empathy_prefix",
-        render_target_lang=render_target_lang,
-    )
-
-
 def _load_reflection_llm_templates() -> dict[str, Any]:
-    raw = resolve_prompt_template_json_merged("reflection_chain.llm_templates")
-    return dict(raw) if isinstance(raw, Mapping) else {}
+    """Legacy hook retained for tests/import stability.
+
+    Reflection is no longer an authoring path. Returning an empty mapping keeps
+    old LLM-reflection template lookups disabled unless a unit test explicitly
+    injects a fake payload into the private hook.
+    """
+    return {}
 
 
 def _coerce_score(value: Any, default: float) -> float:
@@ -475,7 +386,15 @@ class ReflectionChain:
         canon_rules: list[str] | None = None,
         render_target_lang: str = "zh",
     ) -> RevisionResult:
-        """Apply a deterministic post-process revision and re-score it."""
+        """Clean unsafe surface text without authoring a replacement reply.
+
+        The old reflection chain used to write fallback/persona text when the
+        model response was empty, too short, evasive, or cleaned down to
+        nothing. That made reflection a hidden second author. The main chat
+        path now owns generation, so this method only strips obvious runtime
+        leaks and can return an empty string to let the caller produce a
+        structured degraded/no-reply result.
+        """
         before = self.reflect(
             user_message=user_message,
             ai_response=ai_response,
@@ -484,143 +403,36 @@ class ReflectionChain:
             canon_rules=canon_rules,
         )
         original = str(ai_response or "").strip()
-        revised = original
         operations: list[str] = []
-        llm_revised = ""
+        revised = original
 
-        if before.should_revise:
-            llm_revised = self._maybe_llm_revise(
-                user_message=user_message,
-                ai_response=original,
-                emotion_tag=emotion_tag,
-                bond_stage=bond_stage,
-                reflection=before,
-                render_target_lang=render_target_lang,
-            )
-
-        if llm_revised:
-            revised = llm_revised
-            operations.append("llm_revise")
-            if _AI_SELF_REF_PATTERN.search(revised):
-                revised = _AI_SELF_REF_PATTERN.sub("", revised)
-                operations.append("llm_strip_ai_self_reference")
-            if _CUSTOMER_SERVICE_PATTERN.search(revised):
-                revised = _CUSTOMER_SERVICE_PATTERN.sub("", revised)
-                operations.append("llm_strip_customer_service_tone")
-            if _SYSTEM_STATUS_PATTERN.search(revised):
-                revised = _SYSTEM_STATUS_PATTERN.sub("", revised)
-                operations.append("llm_strip_system_status_language")
-            revised = re.sub(r"\s+", " ", revised).strip(" ，,。.!！？")
-            if not revised:
-                revised = _build_contextual_revision_fallback(
-                    user_message=user_message,
-                    bond_stage=bond_stage,
-                    render_target_lang=render_target_lang,
-                )
-                operations.append("fallback_after_llm_cleanup")
-            elif len(revised) < 6 and str(user_message or "").strip():
-                revised = _build_contextual_revision_fallback(
-                    user_message=user_message,
-                    bond_stage=bond_stage,
-                    render_target_lang=render_target_lang,
-                )
-                operations.append("replace_too_short_llm_reply")
-
-            user_len = len(str(user_message or "").strip())
-            if user_len < 16 and len(revised) > 120:
-                sentence_break = max(revised.find("。"), revised.find("！"), revised.find("？"))
-                if 0 < sentence_break < 118:
-                    revised = revised[: sentence_break + 1]
-                else:
-                    revised = revised[:117].rstrip() + "。"
-                operations.append("trim_llm_overlong_reply")
-        elif not original:
-            revised = _build_contextual_revision_fallback(
-                user_message=user_message,
-                bond_stage=bond_stage,
-                render_target_lang=render_target_lang,
-            )
-            operations.append("fallback_empty")
+        if not original:
+            operations.append("no_authoring_empty")
+            revised = ""
         else:
+            cleaned_structural_leak = False
             if _AI_SELF_REF_PATTERN.search(revised):
                 revised = _AI_SELF_REF_PATTERN.sub("", revised)
+                cleaned_structural_leak = True
                 operations.append("strip_ai_self_reference")
             if _CUSTOMER_SERVICE_PATTERN.search(revised):
                 revised = _CUSTOMER_SERVICE_PATTERN.sub("", revised)
+                cleaned_structural_leak = True
                 operations.append("strip_customer_service_tone")
             if _SYSTEM_STATUS_PATTERN.search(revised):
                 revised = _SYSTEM_STATUS_PATTERN.sub("", revised)
+                cleaned_structural_leak = True
                 operations.append("strip_system_status_language")
 
-            revised = re.sub(r"\s+", " ", revised).strip(" ，,。.!！？")
-
-            etag = str(emotion_tag or "").strip().lower()
-            if etag in {"sadness", "grief", "despair", "loneliness", "anxiety", "fear"}:
-                empathy_markers = ("我在", "陪你", "抱抱", "辛苦", "心疼", "理解", "别一个人扛")
-                if not any(marker in revised for marker in empathy_markers):
-                    prefix = _build_revision_empathy_prefix(render_target_lang=render_target_lang)
-                    revised = f"{prefix}{revised}" if revised else prefix
-                    operations.append("prepend_empathy")
-
-            stage = str(bond_stage or "").strip().upper()
-            if stage in {"STRANGER", "ACQUAINTANCE"}:
-                replacements = {
-                    "人家": "我",
-                    "亲爱的": "你",
-                    "笨蛋": "你呀",
-                    "宝贝": "你",
-                }
-                for old, new in replacements.items():
-                    if old in revised:
-                        revised = revised.replace(old, new)
-                        operations.append(f"soften_{old}")
-            elif stage in {"CONFIDANT", "SOULMATE"}:
-                for old in ("您好", "请问", "非常感谢", "期待"):
-                    if old in revised:
-                        revised = revised.replace(old, "")
-                        operations.append(f"relax_{old}")
+            revised = re.sub(r"\s+", " ", revised).strip()
+            if cleaned_structural_leak:
+                revised = revised.lstrip(" ，,、;；:：").strip()
 
             if len(revised) < 6 and str(user_message or "").strip():
-                revised = _build_contextual_revision_fallback(
-                    user_message=user_message,
-                    bond_stage=bond_stage,
-                    render_target_lang=render_target_lang,
-                )
-                operations.append("replace_too_short_reply")
-            elif _is_affection_question(user_message) and (
-                not _contains_affection_stance(revised) or _looks_like_affection_evasion(revised)
-            ):
-                revised = _build_affection_question_revision(
-                    bond_stage=bond_stage,
-                    render_target_lang=render_target_lang,
-                )
-                operations.append("repair_affection_question_directness")
-            elif _is_affection_disclosure(user_message) and (
-                not _contains_affection_stance(revised) or _looks_like_affection_evasion(revised)
-            ):
-                revised = _build_affection_disclosure_revision(
-                    bond_stage=bond_stage,
-                    render_target_lang=render_target_lang,
-                )
-                operations.append("repair_affection_disclosure_directness")
-
-            user_len = len(str(user_message or "").strip())
-            if user_len < 16 and len(revised) > 120:
-                sentence_break = max(revised.find("。"), revised.find("！"), revised.find("？"))
-                if 0 < sentence_break < 118:
-                    revised = revised[: sentence_break + 1]
-                else:
-                    revised = revised[:117].rstrip() + "。"
-                operations.append("trim_overlong_reply")
-
-            revised = re.sub(r"\s+", " ", revised).strip()
-            if not revised:
-                revised = _build_contextual_revision_fallback(
-                    user_message=user_message,
-                    bond_stage=bond_stage,
-                    render_target_lang=render_target_lang,
-                )
-                operations.append("fallback_after_cleanup")
+                revised = ""
+                operations.append("drop_too_short_reply")
+            elif before.should_revise and _looks_like_affection_evasion(revised):
+                operations.append("audit_affection_evasion")
 
         after = self.reflect(
             user_message=user_message,
@@ -662,7 +474,7 @@ class ReflectionChain:
                 user_message=user_message,
                 ai_response=ai_response,
                 emotion_tag=str(emotion_tag or "neutral"),
-                bond_stage=str(bond_stage or "STRANGER"),
+                bond_stage=str(bond_stage or "FRIEND"),
                 deterministic_result_json=json.dumps(deterministic_result.as_dict(), ensure_ascii=False),
                 dimensions_json=json.dumps(
                     {
@@ -744,58 +556,6 @@ class ReflectionChain:
             should_revise=should_revise,
         )
 
-    def _maybe_llm_revise(
-        self,
-        *,
-        user_message: str,
-        ai_response: str,
-        emotion_tag: str,
-        bond_stage: str,
-        reflection: ReflectionResult,
-        render_target_lang: str,
-    ) -> str:
-        if not self._use_llm:
-            return ""
-        try:
-            from host_brain.integrations.llm_helpers import complete_llm_with_pool_sync  # noqa: PLC0415
-
-            templates = _load_reflection_llm_templates()
-            revise_tpl = dict(templates.get("revise") or {})
-            system_prompt = str(revise_tpl.get("system_prompt") or "").strip()
-            user_tpl = str(revise_tpl.get("user_prompt_template") or "").strip()
-            if not system_prompt or not user_tpl:
-                return ""
-            prompt = user_tpl.format(
-                user_message=str(user_message or ""),
-                ai_response=str(ai_response or ""),
-                emotion_tag=str(emotion_tag or "neutral"),
-                bond_stage=str(bond_stage or "STRANGER"),
-                render_target_lang=str(render_target_lang or "zh"),
-                revision_hints_json=json.dumps(list(reflection.revision_hints or []), ensure_ascii=False),
-                issues_json=json.dumps(list(reflection.issues or []), ensure_ascii=False),
-            )
-            result = complete_llm_with_pool_sync(
-                request_id=f"reflection-revise::{int(time.time() * 1000)}",
-                scene_type="REFLECTION_REVISE",
-                cognitive_tier="B",
-                timeout_ms=self._llm_timeout_ms,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": prompt},
-                ],
-                response_format="json_object",
-                gen_params={"temperature": 0.18, "top_p": 0.92},
-            )
-            if result.pool_exhausted or not str(result.content or "").strip():
-                return ""
-            parsed = json.loads(str(result.content or "{}"))
-            if not isinstance(parsed, Mapping):
-                return ""
-            return str(parsed.get("revised_text") or "").strip()
-        except Exception as exc:
-            _logger.debug("Reflection llm revise skipped: %s", exc)
-            return ""
-
     # ── 各维度评估 ────────────────────────────────────────────────────────
 
     def _eval_emotion_fit(
@@ -867,11 +627,7 @@ class ReflectionChain:
         intimate_markers = ("笨蛋", "人家", "哼", "撒娇", "亲爱的")
         formal_markers = ("您好", "请问", "非常感谢", "期待")
 
-        if stage in ("STRANGER", "ACQUAINTANCE"):
-            if any(m in ai_resp for m in intimate_markers):
-                score -= 0.4
-                issues.append(f"在{stage}阶段使用了过于亲密的表达")
-        elif stage in ("SOULMATE", "CONFIDANT"):
+        if stage in ("SOULMATE", "CONFIDANT"):
             if any(m in ai_resp for m in formal_markers):
                 score -= 0.3
                 issues.append(f"在{stage}阶段使用了过于正式的表达")

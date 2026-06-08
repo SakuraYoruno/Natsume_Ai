@@ -10,7 +10,6 @@
   agentic_rag: 'Agentic RAG',
   recall_fusion: '召回融合',
   retrieval_embedding: '召回嵌入',
-  retrieval_rerank: '召回重排',
   retrieval_evidence_pack: '证据包',
   retrieval_pipeline: '检索流水线',
   emotion_context: '情感上下文',
@@ -19,7 +18,7 @@
   render_policy: '响应策略',
   cortex_orchestrator: 'Cortex Orchestrator',
   executive_router: 'Executive Router',
-  chat_agent: 'Chat Agent',
+  surface_reply: 'Surface Reply',
   prompt_builder: '提示构建器',
   llm_stream: '模型流式生成',
   llm_gateway: 'LLM Gateway',
@@ -46,7 +45,6 @@ const TRACE_DISPLAY_NAME_ALIASES = {
   'Agentic RAG': 'Agentic RAG',
   'Recall Fusion': '召回融合',
   'Recall Embedding': '召回嵌入',
-  'Recall Rerank': '召回重排',
   'Evidence Pack': '证据包',
   'Retrieval Pipeline': '检索流水线',
   'Emotion Context': '情感上下文',
@@ -55,7 +53,7 @@ const TRACE_DISPLAY_NAME_ALIASES = {
   'Render Policy': '响应策略',
   'Cortex Orchestrator': 'Cortex Orchestrator',
   'Executive Router': 'Executive Router',
-  'Chat Agent': 'Chat Agent',
+  'Surface Reply': 'Surface Reply',
   'Prompt Builder': '提示构建器',
   'LLM Stream': '模型流式生成',
   'LLM Gateway': 'LLM Gateway',
@@ -118,7 +116,6 @@ export function normalizeTraceNodeKey(nodeId = '') {
   if (raw.startsWith('retrieval_query_planner')) return 'query_planner'
   if (raw.startsWith('retrieval_agentic_rag')) return 'agentic_rag'
   if (raw.startsWith('retrieval_embedding')) return 'retrieval_embedding'
-  if (raw.startsWith('retrieval_rerank')) return 'retrieval_rerank'
   if (raw.startsWith('retrieval_evidence_pack')) return 'retrieval_evidence_pack'
   if (raw.startsWith('retrieval_pipeline')) return 'retrieval_pipeline'
   if (raw.startsWith('retrieval_')) return raw
@@ -171,4 +168,3 @@ export function getTraceLayerLabel(layer = '') {
   const raw = String(layer || '').trim().toLowerCase()
   return TRACE_LAYER_LABELS[raw] || layer || ''
 }
-

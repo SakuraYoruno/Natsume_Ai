@@ -1,3 +1,6 @@
+受众：CODEX
+标题：模板作用总表（2026-04-21）
+
 # 模板作用总表（2026-04-21）
 
 ## 概览
@@ -114,7 +117,6 @@
 - `reflection_chain.contextual_fallback.greeting`：反思链最小兜底：问候（中日双语）
 - `reflection_chain.contextual_fallback.presence`：反思链最小兜底：在线确认（中日双语）
 - `reflection_chain.revision_empathy_prefix`：反思链负面情绪修正前缀（中日双语）
-- `style_distiller.render_instruction.templates`：StyleDistiller 风格蒸馏渲染与描述模板（JSON）
 - `bond_aware_style.style_templates.zh`：BondAwareStyle 中文镜像模板（按 canon 校准）
 - `bond_aware_style.style_templates.ja`：BondAwareStyle 日文镜像模板（按 canon 校准）
 - `expression_adapter.style_hint.templates.zh`：ExpressionAdapter 中文镜像模板（按 canon 校准）
@@ -166,7 +168,6 @@
 - `emotion_context.inner_monologue_texts`：EmotionContext VAD 映射到内心独白的文案模板（JSON）
 - `emotion_context.user_profile_hints`：EmotionContext 用户情感画像提示模板（JSON）
 - `emotion_llm_inference.prompt_templates`：Emotion LLM 推理 prompt 模板（JSON）
-- `emotion_utterance_index.prompt_render_texts`：EmotionUtteranceIndex 风格参考渲染模板（JSON）
 - `emotional_silence.runtime_hints`：EmotionalSilence 沉默/抗拒提示模板（JSON）
 - `evolution_desire_engine.desire_templates`：EvolutionDesireEngine 成长意愿模板（JSON）
 - `evolution_orchestrator.awareness_templates`：EvolutionOrchestrator 成长感知文案模板（JSON）

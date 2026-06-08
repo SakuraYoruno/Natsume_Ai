@@ -51,7 +51,9 @@ class TestVTSWorkerThreadFix:
 
         # 审计结果应为 APPLIED
         assert result.status == STATUS_APPLIED
-        assert result.expression_id == "exp_happy_01"
+        from host_brain.channels.vts import EMOTION_TO_EXPRESSION_ID
+
+        assert result.expression_id == EMOTION_TO_EXPRESSION_ID["HAPPY"]
 
         # 等待 _fire_edge_vts 协程被调度执行（最多 2 秒）
         try:
@@ -120,4 +122,6 @@ class TestVTSWorkerThreadFix:
 
         # 即使无事件循环，审计结果仍应为 APPLIED，不应崩溃
         assert result.status == STATUS_APPLIED
-        assert result.expression_id == "exp_calm_01"
+        from host_brain.channels.vts import EMOTION_TO_EXPRESSION_ID
+
+        assert result.expression_id == EMOTION_TO_EXPRESSION_ID["CALM"]

@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 
 def tactic_key(family: str, variant: str = "") -> str:
@@ -135,10 +135,10 @@ def describe_tactic_signature(signature: str, *, render_target_lang: str = "zh")
         "identity_settle_other_topic": "轻轻收住后把别的话口让回去的承接",
         "identity_settle_real_question": "轻轻收住后把后续话口让回去的承接",
         "identity_settle_then_open": "收稳后继续往下开的承接",
-        "boundary_plain_reason": "先放稳距离再给短理由的承接",
+        "boundary_plain_reason": "先放稳义妹关系事实再给短理由的承接",
         "boundary_still_care_reason": "接住还在意这件事再换一句理由的承接",
-        "boundary_shift_real_question": "放稳距离后把后续话口让回去的承接",
-        "boundary_shift_other_question": "放稳距离后把别的话口让回去的承接",
+        "boundary_shift_real_question": "放稳义妹关系事实后把后续话口让回去的承接",
+        "boundary_shift_other_question": "放稳义妹关系事实后把别的话口让回去的承接",
         "boundary_fresh_reason": "只换一条新理由就停住的承接",
         "boundary_settle_repeat": "把理由的重复轻轻收住的承接",
         "boundary_settle_hold": "把理由停在这的承接",
@@ -161,11 +161,11 @@ def describe_tactic_signature(signature: str, *, render_target_lang: str = "zh")
 
 def contract_action_sets(*, family: str) -> tuple[tuple[str, ...], tuple[str, ...]]:
     required_map: dict[str, tuple[str, ...]] = {
-        "phatic_wave": ("phatic_ack",),
-        "playful_wave": ("phatic_ack",),
-        "soft_emotion_ack": ("phatic_ack",),
-        "cute_image_ack": ("phatic_ack",),
-        "tease_image_ack": ("phatic_ack",),
+        "auditory_grounding": ("modality_grounding", "text_seen"),
+        "playful_wave": ("social_ack",),
+        "soft_emotion_ack": ("social_ack",),
+        "cute_image_ack": ("social_ack",),
+        "tease_image_ack": ("social_ack",),
         "observe_then_answer": ("visual_reference", "content_clause"),
         "attachment_ack_then_wait": ("attachment_ack",),
         "brief_name_only": ("name_only",),
@@ -188,7 +188,7 @@ def contract_action_sets(*, family: str) -> tuple[tuple[str, ...], tuple[str, ..
         "explain_previous_reply": ("previous_reference", "content_clause"),
     }
     forbidden_map: dict[str, tuple[str, ...]] = {
-        "phatic_wave": ("generic_companioning",),
+        "auditory_grounding": ("pretend_heard_audio", "bare_online_reply"),
         "playful_wave": ("generic_companioning",),
         "soft_emotion_ack": ("generic_companioning",),
         "cute_image_ack": ("generic_companioning",),
@@ -221,7 +221,7 @@ def realization_steps(*, family: str, variant: str = "", render_target_lang: str
     lang = str(render_target_lang or "").strip().lower()
     if lang == "ja":
         mapping = {
-            "phatic_wave": ("短く挨拶を返す", "空疎な一言で終わらせない"),
+            "auditory_grounding": ("音は聞こえていないと置く", "文字だけ見えていると短く返す"),
             "playful_wave": ("軽く明るく受ける", "一言の殻だけにしない"),
             "soft_emotion_ack": ("見えている感情を受ける", "短く中身のある一言で返す"),
             "cute_image_ack": ("かわいい/甘える調子を受ける", "軽く柔らかく返す"),
@@ -249,7 +249,7 @@ def realization_steps(*, family: str, variant: str = "", render_target_lang: str
         }
         return mapping.get(family, ("先接住相手的动作", "再短短回应",))
     mapping = {
-        "phatic_wave": ("先把招呼接住", "给一句有实质内容的短回应"),
+        "auditory_grounding": ("先说明没听见声音", "再说明只看到文字"),
         "playful_wave": ("先把轻松的招呼接住", "回一句自然的短接话"),
         "soft_emotion_ack": ("先把图里的情绪接住", "顺着这个情绪回一句"),
         "cute_image_ack": ("先把图里的可爱/卖萌感接住", "顺着这股语气回一句"),
@@ -262,11 +262,11 @@ def realization_steps(*, family: str, variant: str = "", render_target_lang: str
         "hold_name_then_open_floor": ("把名字放成已知事实", "把后续问题话口让回去"),
         "name_only_then_pause": ("只做极短名字确认", "不要继续解释"),
         "soft_close_then_open_floor": ("轻轻把话题收稳", "把后续问题话口让回去"),
-        "short_boundary_then_reason": ("先放稳不熟这件事", "再补一句短理由"),
-        "ack_still_care_then_new_reason": ("先把距离放稳", "再换一句新的短理由"),
-        "hold_boundary_then_shift_floor": ("先把距离放稳", "再把后续问题话口让回去"),
+        "short_boundary_then_reason": ("先接住装生分这件事", "再补一句短理由"),
+        "ack_still_care_then_new_reason": ("先把义妹关系事实放稳", "再换一句新的短理由"),
+        "hold_boundary_then_shift_floor": ("先把义妹关系事实放稳", "再把后续问题话口让回去"),
         "brief_reason_then_wait": ("只换一条新的短理由", "然后停住"),
-        "soft_close_boundary": ("把距离和理由轻轻收稳", "不要整段重讲理由"),
+        "soft_close_boundary": ("把义妹关系事实和理由轻轻收稳", "不要整段重讲理由"),
         "short_conditional_commitment": ("用条件式说明会怎样回应", "不要滑成空泛安抚"),
         "ack_anxiety_without_repromise": ("先把会回应的态度放稳", "不要把承诺整句重说"),
         "steady_commitment_then_wait": ("只把态度放稳", "不要重复上一轮的承接结构"),

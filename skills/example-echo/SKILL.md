@@ -1,3 +1,6 @@
+受众：CODEX
+标题：example-echo Skill
+
 ---
 name: "example-echo"
 version: "1.0.0"

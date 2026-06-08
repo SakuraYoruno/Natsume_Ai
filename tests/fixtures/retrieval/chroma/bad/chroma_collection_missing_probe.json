@@ -1,11 +1,11 @@
-{
-  "probe": {
-    "reachable": true,
-    "collections": {
-      "episodic": {
-        "vector_dim": 16
-      }
-    }
-  },
-  "expected_reason_code": "CHROMA_COLLECTION_MISSING"
+﻿{
+    "probe":  {
+                  "reachable":  true,
+                  "collections":  {
+                                      "episodic":  {
+                                                       "vector_dim":  16
+                                                   }
+                                  }
+              },
+    "expected_reason_code":  "CHROMA_COLLECTION_MISSING"
 }

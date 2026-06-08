@@ -1,12 +1,12 @@
-{
-  "stage": "S_RELEASE_CHECKLIST",
-  "release_id": "rel-m3-2026-03-01",
-  "rollback_target": "rel-m2-does-not-exist",
-  "impact_scope": [
-    "host.audit.sqlite_ledger",
-    "host.integrations.llm_gateway"
-  ],
-  "milestone": "M3",
-  "ts_ms": 1800080000003,
-  "model_plane_asset_digest": "sha256:e75f0d8e5d3bb56508d281ad9ee62806783bf7ef059bc6ae99328b56400358ad"
+﻿{
+    "stage":  "S_RELEASE_CHECKLIST",
+    "release_id":  "rel-m3-2026-03-01",
+    "rollback_target":  "rel-m2-does-not-exist",
+    "impact_scope":  [
+                         "host.audit.sqlite_ledger",
+                         "host.integrations.llm_gateway"
+                     ],
+    "milestone":  "M3",
+    "ts_ms":  1800080000003,
+    "model_plane_asset_digest":  "sha256:e75f0d8e5d3bb56508d281ad9ee62806783bf7ef059bc6ae99328b56400358ad"
 }

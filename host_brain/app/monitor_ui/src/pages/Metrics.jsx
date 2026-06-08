@@ -5,6 +5,7 @@ import BarChart from '../components/charts/BarChart.jsx'
 import DigitalLifeRuntimeCard from '../components/DigitalLifeRuntimeCard.jsx'
 import EmptyStateCard from '../components/EmptyStateCard.jsx'
 import InlineQueryMeta from '../components/obs/InlineQueryMeta.jsx'
+import { LazyLoadingNotice, LoadingNotice } from '../components/LoadingNotice.jsx'
 import NoticeBanner from '../components/NoticeBanner.jsx'
 import PageHero from '../components/PageHero.jsx'
 import ViewportLazySection from '../components/obs/ViewportLazySection.jsx'
@@ -75,7 +76,7 @@ export default function Metrics() {
         <div>
           <h1 className="text-xl font-semibold text-gray-900">代谢指标大盘</h1>
           {isMock && (
-            <span className="text-xs text-orange-500 mt-0.5 block">⚠ 后端不可用，显示模拟数据</span>
+            <span className="text-xs text-orange-500 mt-0.5 block">后端不可用，显示兜底样本</span>
           )}
         </div>
         <div className="flex items-center gap-2">
@@ -113,7 +114,7 @@ export default function Metrics() {
           `总请求：${summary.total_requests ?? 0}`,
           `总拒绝：${summary.total_rejections ?? 0}`,
           `拒绝率：${summary.rejection_rate != null ? `${summary.rejection_rate.toFixed(1)}%` : '—'}`,
-          isMock ? '当前为模拟数据' : '当前为实时数据',
+          isMock ? '当前为兜底样本' : '当前为实时数据',
         ]}
       />
 
@@ -273,21 +274,21 @@ export default function Metrics() {
       )}
 
       <ViewportLazySection
-        rootMargin="240px 0px"
-        placeholder={(
+        rootMargin="1600px 0px"
+        fallback={(
           <div className="card p-4">
-            <NoticeBanner variant="info" title="按需加载中">
+            <LazyLoadingNotice>
               正在准备深层诊断指标视图…
-            </NoticeBanner>
+            </LazyLoadingNotice>
           </div>
         )}
       >
         <React.Suspense
           fallback={(
             <div className="card p-4">
-              <NoticeBanner variant="info" title="加载中">
+              <LoadingNotice>
                 正在载入深层诊断指标视图…
-              </NoticeBanner>
+              </LoadingNotice>
             </div>
           )}
         >

@@ -70,7 +70,7 @@ LLM_NODE_REGISTRY: Dict[str, Dict[str, str]] = {
     "workbench_translate":     {"role": "翻译工作台",   "provider": "gemini", "model_id": "gemini-2.5-pro", "deploy_type": "cloud"},
     "workbench_code_assist":   {"role": "代码辅助",     "provider": "gemini", "model_id": "gemini-2.5-pro", "deploy_type": "cloud"},
     # 国内云端节点（DeepSeek）
-    "cloud_cn_deepseek":       {"role": "国内云端 Gaming", "provider": "deepseek", "model_id": "deepseek-chat",       "deploy_type": "cloud"},
+    "cloud_cn_deepseek":       {"role": "国内云端 Gaming", "provider": "deepseek", "model_id": "deepseek-v4-flash",   "deploy_type": "cloud"},
     # 本地节点（Ollama）
     "host_local_14b":          {"role": "本地推理 14B", "provider": "ollama", "model_id": "qwen3:14b",             "deploy_type": "local"},
 }

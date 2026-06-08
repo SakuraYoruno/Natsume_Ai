@@ -62,6 +62,65 @@ _MULTI_STEP_MARKERS = (
 )
 
 _ACTION_SPLIT_RE = re.compile(r"(?:然后|并且|同时|接着|之后|再把|再去|再来)")
+_SIMPLE_TECH_ADVICE_TERMS = (
+    "报错",
+    "错误",
+    "异常",
+    "失败",
+    "缺包",
+    "导入",
+    "端口",
+    "日志",
+    "启动",
+    "连接不上",
+    "连不上",
+    "没响应",
+    "无响应",
+    "排查",
+    "怎么查",
+    "怎么排查",
+    "该怎么",
+    "怎么办",
+    "如何",
+    "先看",
+    "看什么",
+    "module not found",
+    "modulenotfounderror",
+    "no module named",
+    "openai_api_key",
+    "环境变量",
+    "neo4j",
+    "bolt://",
+    "chroma",
+    "chromadb",
+    "http://",
+    "https://",
+    "why",
+    "error",
+    "port",
+    "timeout",
+)
+_SIMPLE_TECH_ACTION_BLOCKERS = (
+    "开始处理",
+    "开始做",
+    "继续做",
+    "直接改",
+    "帮我改",
+    "修改",
+    "修复",
+    "实现",
+    "重构",
+    "删除",
+    "清理",
+    "整理仓库",
+    "提交",
+    "跑测试",
+    "执行",
+    "接入",
+    "迁移",
+    "写代码",
+)
+_SIMPLE_TASK_SPLIT_RE = re.compile(r"(?:下一步|接下来|后面|任务).{0,12}(?:拆成|分成|列成).{0,8}(?:三|3)件", re.IGNORECASE)
 _SKILL_EXEC_FAIL_STATUS = {"failed", "rejected", "degraded", "error"}
 _SKILL_EXEC_FAIL_CODES = {
     "SCHED_NO_CONTENT",
@@ -218,6 +277,7 @@ def _build_memory_exec_context(
         threshold: float = 0.6,
         tags: list[str] | None = None,
         session_id: str | None = None,
+        search_scope: str | None = None,
     ) -> list[dict[str, Any]]:
         _ = tags
         if semantic_recaller is None:
@@ -226,6 +286,8 @@ def _build_memory_exec_context(
         session_ref = str(session_id or "").strip()
         if session_ref:
             filter_metadata["session_id"] = session_ref
+        if str(search_scope or "").strip().lower() == "long_term":
+            filter_metadata["memory_layer"] = "long_term"
         recall_result = _run_awaitable_sync(
             semantic_recaller.recall(
                 str(query or ""),
@@ -314,11 +376,90 @@ def _extract_delegate_target(intent_draft: dict[str, Any]) -> str:
     return ""
 
 
+def _surface_control_requests_memory_recall(surface_task_control: Any, intent_draft: dict[str, Any]) -> bool:
+    if not isinstance(surface_task_control, dict) or not surface_task_control:
+        return False
+    task_mode = _normalize_text(surface_task_control.get("task_mode"), lower=True)
+    response_move = _normalize_text(surface_task_control.get("response_move"), lower=True)
+    target_hint = _normalize_text(intent_draft.get("target_id") or intent_draft.get("skill_id"), lower=True)
+    action_hint = _normalize_text(intent_draft.get("action"), lower=True)
+    recall_markers = {
+        "memory_recall",
+        "memory_followup",
+        "recall_memory",
+        "recall_preference",
+        "recall_relationship",
+    }
+    if task_mode in recall_markers or response_move in recall_markers:
+        return True
+    return target_hint == "memory_recall" or action_hint == "memory_recall"
+
+
+def _message_requests_memory_recall(user_message: str) -> bool:
+    message = _normalize_text(user_message)
+    if message and (
+        any(token in message for token in ("回忆检查", "记忆验收", "同会话验收", "新会话验收", "最终同会话验收"))
+        or ("验收" in message and any(token in message for token in ("列出", "复述", "回答", "说出")))
+        or (
+            any(token in message for token in ("测试代号", "海边灯塔", "预热指标", "推荐格式"))
+            and any(token in message for token in ("是什么", "指什么", "列出", "复述", "当前", "刚才", "刚刚"))
+        )
+    ):
+        return True
+    try:
+        from host_brain.memory.life_memory_query import (  # noqa: PLC0415
+            CONTRACT_CORRECTION,
+            CONTRACT_EVIDENCE_REVIEW,
+            CONTRACT_EXPLICIT_MEMORY,
+            CONTRACT_FAILURE_DEBUG,
+            CONTRACT_OPEN_LOOP,
+            CONTRACT_PREFERENCE,
+            CONTRACT_SELF_CHANGE,
+            plan_life_memory_query,
+        )
+
+        plan = plan_life_memory_query(user_message)
+    except Exception:
+        return False
+    if not bool(getattr(plan, "should_recall", False)):
+        return False
+    contract_id = str(getattr(plan, "recall_contract_id", "") or "")
+    if contract_id == CONTRACT_FAILURE_DEBUG:
+        message = _normalize_text(user_message)
+        message_lower = message.lower()
+        return any(
+            marker in message or marker.lower() in message_lower
+            for marker in (
+                "失败原因",
+                "为什么失败",
+                "上次",
+                "之前",
+                "刚才",
+                "那次",
+                "那个",
+                "DeepSeek",
+                "Gemini",
+                "Gateway",
+                "网关",
+                "状态库",
+            )
+        )
+    return contract_id in {
+        CONTRACT_CORRECTION,
+        CONTRACT_EVIDENCE_REVIEW,
+        CONTRACT_EXPLICIT_MEMORY,
+        CONTRACT_OPEN_LOOP,
+        CONTRACT_PREFERENCE,
+        CONTRACT_SELF_CHANGE,
+    }
+
+
 def _hard_rule_route(
     *,
     intent_draft: dict[str, Any],
     sanitized_message: str,
     skill_registry: Any,
+    surface_task_control: Any | None = None,
     allow_plan_detection: bool = True,
 ) -> _RouteSelection:
     """两层路由判断。
@@ -328,6 +469,9 @@ def _hard_rule_route(
     """
     route_hint = _normalize_text(intent_draft.get("route"), lower=True)
     target_hint = _normalize_text(intent_draft.get("target_id"))
+    if _surface_control_requests_memory_recall(surface_task_control, intent_draft) or _message_requests_memory_recall(sanitized_message):
+        return _RouteSelection("chat", "", "hard_rule:surface_memory_recall")
+
     if route_hint in {"recent_turn", "task_progress", "chat"}:
         return _RouteSelection(route_hint, target_hint, f"intent_draft:{route_hint}")
 
@@ -341,6 +485,10 @@ def _hard_rule_route(
         return _RouteSelection("skill", target_hint, "intent_draft:skill")
     if route_hint == "delegate" and target_hint:
         return _RouteSelection("delegate", target_hint, "intent_draft:delegate")
+    if _looks_like_simple_technical_advice(sanitized_message, intent_draft):
+        return _RouteSelection("chat", "", "hard_rule:surface_technical_advice")
+    if _looks_like_simple_task_split_advice(sanitized_message, intent_draft):
+        return _RouteSelection("chat", "", "hard_rule:surface_task_split")
 
     if _looks_like_task_progress_query(sanitized_message):
         return _RouteSelection("task_progress", "", "hard_rule:task_progress")
@@ -387,6 +535,36 @@ def _hard_rule_route(
         return _RouteSelection("plan", "skill_dag", "hard_rule:multi_step")
 
     return _RouteSelection("chat", "", "default:chat")
+
+
+def _looks_like_simple_technical_advice(user_message: str, intent_draft: dict[str, Any] | None = None) -> bool:
+    text = _normalize_text(user_message, lower=True)
+    if not text:
+        return False
+    if any(token in text for token in _SIMPLE_TECH_ACTION_BLOCKERS):
+        return False
+    if not any(token in text for token in _SIMPLE_TECH_ADVICE_TERMS):
+        return False
+    if not any(token in text for token in ("怎么", "如何", "怎么办", "该", "排查", "查", "先看", "看什么", "?", "？")):
+        return False
+    draft = dict(intent_draft or {}) if isinstance(intent_draft, dict) else {}
+    target_id = _normalize_text(draft.get("target_id") or draft.get("skill_id"), lower=True)
+    if target_id and target_id not in {"", "codex_worker", "intent_agent"}:
+        return False
+    return True
+
+
+def _looks_like_simple_task_split_advice(user_message: str, intent_draft: dict[str, Any] | None = None) -> bool:
+    text = _normalize_text(user_message, lower=True)
+    if not text or not _SIMPLE_TASK_SPLIT_RE.search(text):
+        return False
+    if any(token in text for token in _SIMPLE_TECH_ACTION_BLOCKERS):
+        return False
+    draft = dict(intent_draft or {}) if isinstance(intent_draft, dict) else {}
+    target_id = _normalize_text(draft.get("target_id") or draft.get("skill_id"), lower=True)
+    if target_id and target_id not in {"", "intent_agent", "codex_worker"}:
+        return False
+    return True
 
 
 def _should_force_complex_plan(
@@ -982,18 +1160,22 @@ def _build_chat_input(
     trace_stage_meta: dict[str, Any],
     sub_agent_context,
 ):
-    from host_brain.app.chat_agent import ChatAgentInput  # noqa: PLC0415
-    from host_brain.app.graph_config_builder import resolve_chat_agent_llm_runtime  # noqa: PLC0415
+    from host_brain.app.surface_reply_preprocessor import SurfaceReplyInput  # noqa: PLC0415
+    from host_brain.app.graph_config_builder import resolve_surface_reply_llm_runtime  # noqa: PLC0415
 
     resolved_llm_runtime = dict(llm_runtime or {}) if isinstance(llm_runtime, dict) else llm_runtime
     if isinstance(resolved_llm_runtime, dict) and resolved_llm_runtime:
         agent_role = _normalize_text(resolved_llm_runtime.get("agent_role"), lower=True)
-        if agent_role != "chat_agent":
-            resolved_llm_runtime = resolve_chat_agent_llm_runtime(
+        if agent_role != "surface_reply":
+            resolved_llm_runtime = resolve_surface_reply_llm_runtime(
                 base_runtime=resolved_llm_runtime,
             )
 
-    return ChatAgentInput(
+    chat_trace_stage_meta = dict(trace_stage_meta or {})
+    chat_trace_stage_meta.setdefault("input_source", str(getattr(request_body, "input_source", "") or "").strip())
+    chat_trace_stage_meta.setdefault("reply_channel", str(getattr(request_body, "reply_channel", "") or "").strip())
+
+    return SurfaceReplyInput(
         request_id=request_id,
         session_id=session_id,
         user_message=sanitized_message,
@@ -1005,13 +1187,17 @@ def _build_chat_input(
         retrieval_summary=dict(retrieval_summary or {}),
         sub_agent_context=sub_agent_context,
         render_target_lang=render_target_lang,
+        response_form=str(getattr(request_body, "response_form", "") or "").strip(),
         reply_channel=getattr(request_body, "reply_channel", None),
+        reply_target=getattr(request_body, "reply_target", None),
         suppress_edge_tts=getattr(request_body, "suppress_edge_tts", None),
         suppress_edge_vts=getattr(request_body, "suppress_edge_vts", None),
         ts_ms=ts_ms,
         intent_draft=dict(intent_draft or {}),
-        trace_stage_meta=dict(trace_stage_meta or {}),
+        trace_stage_meta=chat_trace_stage_meta,
         llm_runtime=resolved_llm_runtime,
+        render_policy=dict(getattr(request_body, "render_policy", {}) or {}),
+        surface_task_control=dict(getattr(request_body, "surface_task_control", {}) or {}),
         attachments=list(getattr(request_body, "attachments", []) or []),
         multimodal_observations=dict(getattr(request_body, "multimodal_observations", {}) or {}),
         attachment_summary=str(getattr(request_body, "attachment_summary", "") or "").strip(),
@@ -1024,9 +1210,9 @@ def _build_sub_agent_context(
     task_text: str,
     outcome: _ExecutionOutcome,
 ):
-    from host_brain.app.chat_agent import SubAgentContext  # noqa: PLC0415
+    from host_brain.app.surface_reply_preprocessor import SurfaceSubAgentContext  # noqa: PLC0415
 
-    return SubAgentContext(
+    return SurfaceSubAgentContext(
         agent_id=agent_id,
         task=task_text,
         result_text=outcome.result_text,
@@ -1481,7 +1667,7 @@ async def _stream_chat_with_context(
     sub_agent_context,
     runtime_capability_payload: dict[str, Any] | None,
 ) -> AsyncGenerator[str, None]:
-    from host_brain.app.chat_agent import chat_agent_sse_generator  # noqa: PLC0415
+    from host_brain.app.surface_reply_runtime import surface_reply_sse_generator  # noqa: PLC0415
     from host_brain.app.executive_runtime import (  # noqa: PLC0415
         build_runtime_capability_handoff_extra,
         record_executive_handoff,
@@ -1517,7 +1703,7 @@ async def _stream_chat_with_context(
             session_id=session_id,
             **kwargs,
         ),
-        chat_agent_sse_generator_fn=chat_agent_sse_generator,
+        surface_reply_sse_generator_fn=surface_reply_sse_generator,
         chat_input=chat_input,
     ):
         yield event
@@ -1544,7 +1730,7 @@ async def _executive_runtime_core_impl(
     llm_runtime: dict[str, Any] | None,
     pii_ingress_stats: dict[str, Any] | None = None,
 ) -> AsyncGenerator[str, None]:
-    from host_brain.app.chat_agent import _sse  # noqa: PLC0415
+    from host_brain.app.surface_reply_runtime import _sse  # noqa: PLC0415
     from host_brain.app.dependencies import get_runtime_task_registry, get_skill_registry  # noqa: PLC0415
     from host_brain.app.executive_runtime import (  # noqa: PLC0415
         record_executive_handoff,
@@ -1668,7 +1854,7 @@ async def _executive_runtime_core_impl(
         )
 
     # ── Phase D：PrefrontalAgent 意图规划（小模型，<500ms）────────────────
-    # 基于器官族完整状态产出"我要做什么"的决策，结果注入 intent_draft 供 chat_agent 使用
+    # 基于器官族完整状态产出"我要做什么"的决策，结果注入 intent_draft 供 surface_reply 使用
     # 仅在 PREFRONTAL_PLAN_ENABLED=true 时启用（默认关，逐步灰度）
     _prefrontal_plan: dict[str, Any] = {}
     # OPT-4 第三批：env 读取统一走 CoreSettings
@@ -1683,7 +1869,7 @@ async def _executive_runtime_core_impl(
             _valence = float((emotion_context or {}).get("valence") or 0.0)
             _arousal = float((emotion_context or {}).get("arousal") or 0.0)
             # 提取 bond 信息
-            _bond_stage = str((bond_summary or {}).get("stage") or "STRANGER")
+            _bond_stage = str((bond_summary or {}).get("stage") or "FRIEND")
             _bond_intimacy = float((bond_summary or {}).get("intimacy_score") or 0.0)
             # 提取 recall 摘要
             _recall_summary = str((retrieval_summary or {}).get("summary") or "")
@@ -1716,7 +1902,7 @@ async def _executive_runtime_core_impl(
                         "[%s] prefrontal_plan override: action=%s target=%s",
                         request_id, _plan_action, _plan_target,
                     )
-            # 将 prefrontal_task 注入 intent_draft，供 chat_agent 作为语言化目标
+            # 将 prefrontal_task 注入 intent_draft，供 surface_reply 作为语言化目标
             if isinstance(intent_draft, dict):
                 intent_draft = dict(intent_draft)
             else:
@@ -1732,6 +1918,7 @@ async def _executive_runtime_core_impl(
         intent_draft=dict(intent_draft or {}),
         sanitized_message=sanitized_message,
         skill_registry=skill_registry,
+        surface_task_control=dict(getattr(request_body, "surface_task_control", {}) or {}),
     )
 
     # 应用器官族路由覆盖（仅覆盖 skill/delegate/plan，不覆盖 recent_turn/task_progress）
@@ -1859,11 +2046,14 @@ async def _executive_runtime_core_impl(
     runtime_capability_payload = None
     relational_reason = build_relational_chat_reason_code(sanitized_message)
     if route.route_type == "chat":
+        simple_surface_technical_advice = _looks_like_simple_technical_advice(sanitized_message, intent_draft)
+        simple_surface_task_split = _looks_like_simple_task_split_advice(sanitized_message, intent_draft)
+        surface_main_chain_forced = str(route.reason_code or "").startswith("hard_rule:surface_")
         # Phase D: PREFRONTAL_PLAN_ENABLED 时，前额叶已规划，跳过 runtime_capability 合成
         _skip_capability_synthesis = (
             _prefrontal_plan_enabled
             and bool(_prefrontal_plan.get("action"))
-        )
+        ) or surface_main_chain_forced or simple_surface_technical_advice or simple_surface_task_split
         if not _skip_capability_synthesis:
             runtime_capability_payload = _maybe_synthesize_runtime_capability(
                 request_id=request_id,
@@ -1876,8 +2066,8 @@ async def _executive_runtime_core_impl(
             )
         else:
             _logger.debug(
-                "[%s] Phase D: prefrontal_plan 已存在，跳过 runtime_capability 合成 action=%s",
-                request_id, _prefrontal_plan.get("action"),
+                "[%s] skip runtime_capability synthesis prefrontal_action=%s surface_main_chain_forced=%s simple_surface_technical_advice=%s simple_surface_task_split=%s",
+                request_id, _prefrontal_plan.get("action"), surface_main_chain_forced, simple_surface_technical_advice, simple_surface_task_split,
             )
         if runtime_capability_payload is not None and not relational_reason:
             route = _RouteSelection(

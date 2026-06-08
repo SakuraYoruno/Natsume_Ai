@@ -370,7 +370,7 @@ export default function Bond() {
 
       {!overviewError && !loading && !refreshing && bondLoadState === LOAD_STATES.NO_SAMPLE ? (
         <NoticeBanner variant="info" title="关系链路待采样">
-          当前还没有可用的 Bond 用户或阶段样本，页面会保留中性占位。
+          当前还没有可用的 Bond 用户或阶段样本，页面会保留中性空态。
         </NoticeBanner>
       ) : null}
 

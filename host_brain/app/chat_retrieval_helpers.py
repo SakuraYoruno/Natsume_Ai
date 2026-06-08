@@ -1,4 +1,4 @@
-"""chat_retrieval_helpers.py — 检索辅助函数（从 chat_stream_handler.py 迁移）。
+﻿"""chat_retrieval_helpers.py — 检索辅助函数（从 chat_stream_handler.py 迁移）。
 
 提供：
   - _run_retrieval: 并行执行检索
@@ -7,13 +7,10 @@
 
 from __future__ import annotations
 
+import os
 import re
+import time
 from typing import Any, Dict, Mapping, Optional
-
-from host_brain.retrieval.orchestrator import (
-    build_degraded_retrieval_summary as _orchestrator_degraded_summary,
-    build_skipped_retrieval_summary as _orchestrator_skipped_summary,
-)
 
 _CONTEXTUAL_FOLLOWUP_RE = re.compile(
     r"^\s*(?:"
@@ -29,6 +26,55 @@ _LOW_SIGNAL_SHORT_QUERY_MAX_LEN = 12
 _LOW_SIGNAL_SCORE_FLOOR = 0.12
 _LOW_SIGNAL_CONFIDENCE_FLOOR = 0.65
 _LOW_SIGNAL_COVERAGE_FLOOR = 0.25
+_EXPLICIT_MEMORY_WRITE_MARKERS: tuple[str, ...] = (
+    "帮我记住",
+    "替我记住",
+    "给我记住",
+    "帮我记一下",
+    "替我记一下",
+    "给我记一下",
+    "帮我记",
+    "替我记",
+    "记下来",
+    "记一下",
+    "记着",
+    "记住",
+)
+_EXPLICIT_MEMORY_QUERY_ANCHORS: tuple[str, ...] = (
+    "让你记",
+    "叫你记",
+    "要你记",
+    "帮我记",
+    "替我记",
+    "给我记",
+    "你记了",
+    "你记住",
+    "你刚才记",
+    "你刚刚记",
+)
+_EXPLICIT_MEMORY_QUERY_WORDS: tuple[str, ...] = ("什么", "啥", "哪", "哪些", "内容")
+_GENERIC_SURFACE_TASK_MODES: frozenset[str] = frozenset(
+    {"chat", "daily_chat", "first_ask", "neutral", "plain_answer", "plain_hold"}
+)
+_COLLECTION_FASTPATH_CONTRACTS: frozenset[str] = frozenset({"collection_date", "collection_recent"})
+_SURFACE_MEMORY_RECALL_COVERAGE_FAILED = "SURFACE_MEMORY_RECALL_COVERAGE_FAILED"
+_SURFACE_MEMORY_RECALL_VALIDATION_FAILED = "SURFACE_MEMORY_RECALL_VALIDATION_FAILED"
+_DATED_TEMPORAL_SCOPES: frozenset[str] = frozenset({"today", "yesterday", "day_before_yesterday"})
+_EXPANDED_RECALL_STORES: tuple[str, ...] = (
+    "life_memory_collection",
+    "life_memory_entity",
+    "life_episode",
+    "semantic_memory",
+    "episodic_vector",
+    "sqlite_ledger",
+)
+
+
+def _parse_bool_env(name: str, *, default: bool = False) -> bool:
+    raw = str(os.environ.get(name) or "").strip().lower()
+    if not raw:
+        return bool(default)
+    return raw in {"1", "true", "yes", "y", "on", "enabled"}
 
 
 def _coerce_float(value: Any) -> float | None:
@@ -36,6 +82,13 @@ def _coerce_float(value: Any) -> float | None:
         return float(value)
     except (TypeError, ValueError):
         return None
+
+
+def _coerce_int(value: Any, *, default: int = 0) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return int(default)
 
 
 def _resolve_store_id(item: Mapping[str, Any]) -> str:
@@ -75,7 +128,7 @@ def _should_trim_low_signal_short_chat(
     query_plan_raw = summary.get("query_plan")
     query_plan = dict(query_plan_raw) if isinstance(query_plan_raw, Mapping) else {}
     intent = str(query_plan.get("intent") or "").strip().lower()
-    if intent not in {"chat", "phatic"}:
+    if intent != "chat":
         return False
 
     agentic_meta_raw = summary.get("agentic_meta")
@@ -160,27 +213,1101 @@ async def _run_retrieval(
     mood_state: Optional[str] = None,
     bond_summary: Mapping[str, Any] | None = None,
     motive_state: Mapping[str, Any] | None = None,
+    intent_draft: Mapping[str, Any] | None = None,
 ) -> tuple[Dict[str, Any], list[dict[str, Any]]]:
-    """并行执行检索，返回 (retrieval_summary, retrieval_evidence_items)。"""
-    from host_brain.tribe.hippocampus_agent import get_hippocampus_agent  # noqa: PLC0415
+    """Surface memory recall bridge.
 
-    return await get_hippocampus_agent().recall(
-        request_id=request_id,
-        message=message,
-        person_id=person_id,
-        session_id=session_id,
-        ts_ms=ts_ms,
-        emotion_tag=emotion_tag,
-        render_target_lang=render_target_lang,
-        mood_state=mood_state,
-        bond_summary=bond_summary,
-        motive_state=motive_state,
+    The old app path used to call the legacy retrieval stack here. The current
+    main chain only needs a compressed surface_memory_recall_packet; raw recall
+    rows and evidence packs must not be returned to the final text layer.
+    """
+    try:
+        from dataclasses import replace  # noqa: PLC0415
+
+        from host_brain.persona.isolated_surface_continuity import ThreeLayerContinuityContext  # noqa: PLC0415
+        from host_brain.persona.surface_memory_recall import (  # noqa: PLC0415
+            SURFACE_MEMORY_RECALL_COVERAGE_FAILED,
+            SURFACE_MEMORY_RECALL_SKIPPED,
+            SurfaceMemoryRecallPacket,
+            build_surface_memory_recall_packet,
+            build_surface_memory_recall_decision_trace,
+            plan_surface_memory_recall,
+            recall_surface_memory_packet,
+        )
+
+        context = ThreeLayerContinuityContext(
+            current_user_message=str(message or ""),
+            task_mode_hint=_surface_task_mode_from_intent(message=message, intent_draft=intent_draft),
+            relationship_distance=_surface_relationship_distance(bond_summary),
+            necessary_facts=_surface_memory_query_facts(
+                mood_state=mood_state,
+                bond_summary=bond_summary,
+                motive_state=motive_state,
+            ),
+        )
+        plan = plan_surface_memory_recall(context)
+        embedding_model_id = ""
+        short_term_memory_facts = _recent_explicit_memory_facts(
+            message=message,
+            session_id=session_id,
+            request_id=request_id,
+        )
+        if plan.should_recall and short_term_memory_facts:
+            packet = SurfaceMemoryRecallPacket(
+                facts=tuple(short_term_memory_facts),
+                confidence=1.0,
+                query=plan.query,
+                route_ids=("recent_turn_explicit_memory",),
+                candidate_count=len(short_term_memory_facts),
+                trace={
+                    "skipped": False,
+                    "plan": plan.as_dict(),
+                    "recall_decision": build_surface_memory_recall_decision_trace(plan, invoked=False),
+                    "route_count": 1,
+                    "short_term_explicit_memory": True,
+                },
+            )
+        if not plan.should_recall:
+            packet = SurfaceMemoryRecallPacket(
+                query=plan.query,
+                degraded=False,
+                reason_code=SURFACE_MEMORY_RECALL_SKIPPED,
+                trace={
+                    "skipped": True,
+                    "plan": plan.as_dict(),
+                    "recall_decision": build_surface_memory_recall_decision_trace(plan, invoked=False),
+                },
+            )
+        elif not short_term_memory_facts:
+            packet = _maybe_recall_collection_fastpath(
+                plan=plan,
+                request_id=request_id,
+                person_id=person_id,
+                session_id=session_id,
+                ts_ms=ts_ms,
+                build_packet_fn=build_surface_memory_recall_packet,
+            )
+            if packet is None:
+                query_embedding, embedding_model_id = _embed_surface_memory_query(plan.query)
+                recall_service = _build_surface_memory_recall_service()
+                packet = recall_surface_memory_packet(
+                    recall_service=recall_service,
+                    request_id=request_id,
+                    query=plan.query,
+                    query_embedding=query_embedding,
+                    intent_id=_surface_intent_id(intent_draft),
+                    person_id=person_id,
+                    session_id=session_id,
+                    ts_ms=ts_ms,
+                    emotion_filter=emotion_tag,
+                    mood_state=mood_state,
+                    bond_summary=bond_summary,
+                    motive_state=motive_state,
+                    render_target_lang=render_target_lang,
+                    target_store_ids=plan.target_store_ids,
+                    time_lookback_days=plan.time_lookback_days,
+                    max_facts=plan.max_facts,
+                    max_chars_per_fact=plan.max_chars_per_fact,
+                    validation_requirements=plan.validation_requirements,
+                    temporal_scope=plan.temporal_scope,
+                    query_kind=plan.query_kind,
+                    target_domains=plan.target_domains,
+                    recall_contract_id=plan.recall_contract_id,
+                    primary_memory_layer=plan.primary_memory_layer,
+                    expected_memory_layers=plan.expected_memory_layers,
+                    min_collection_items=plan.min_collection_items,
+                    answer_obligations=plan.answer_obligations,
+                    fail_soft=True,
+                )
+                packet = _maybe_retry_surface_memory_recall_with_expanded_scope(
+                    packet=packet,
+                    plan=plan,
+                    recall_service=recall_service,
+                    recall_packet_fn=recall_surface_memory_packet,
+                    request_id=request_id,
+                    query_embedding=query_embedding,
+                    intent_id=_surface_intent_id(intent_draft),
+                    person_id=person_id,
+                    session_id=session_id,
+                    ts_ms=ts_ms,
+                    emotion_tag=emotion_tag,
+                    mood_state=mood_state,
+                    bond_summary=bond_summary,
+                    motive_state=motive_state,
+                    render_target_lang=render_target_lang,
+                    coverage_failed_reason_code=SURFACE_MEMORY_RECALL_COVERAGE_FAILED,
+                )
+            packet = replace(
+                packet,
+                trace={
+                    **dict(packet.trace or {}),
+                    "skipped": False,
+                    "plan": plan.as_dict(),
+                    "recall_decision": build_surface_memory_recall_decision_trace(plan, invoked=True),
+                },
+            )
+        packet = await _maybe_apply_lightnovel_deep_review(
+            packet=packet,
+            message=message,
+            request_id=request_id,
+            person_id=person_id,
+            session_id=session_id,
+            ts_ms=ts_ms,
+        )
+        packet = await _maybe_apply_generic_evidence_review(
+            packet=packet,
+            message=message,
+            request_id=request_id,
+            person_id=person_id,
+            session_id=session_id,
+            ts_ms=ts_ms,
+        )
+        return _surface_memory_retrieval_summary(
+            request_id=request_id,
+            ts_ms=ts_ms,
+            packet=packet,
+            embedding_model_id=embedding_model_id,
+        ), []
+    except Exception as exc:
+        return (
+            {
+                "request_id": request_id,
+                "status": "DEGRADED",
+                "reason_code": "SURFACE_MEMORY_RECALL_BRIDGE_FAILED",
+                "error": type(exc).__name__,
+                "degraded": True,
+                "route_count": 0,
+                "candidate_count": 0,
+                "topk_count": 0,
+                "routes": [],
+                "query_plan": {"intent": "surface_memory_recall", "text_len": len(str(message or ""))},
+                "target_stores": [],
+                "ts_ms": int(ts_ms),
+            },
+            [],
+        )
+
+
+def _maybe_recall_collection_fastpath(
+    *,
+    plan: Any,
+    request_id: str,
+    person_id: str,
+    session_id: str,
+    ts_ms: int,
+    build_packet_fn: Any,
+) -> Any | None:
+    if not _parse_bool_env("HOST_SURFACE_COLLECTION_FAST_RECALL_ENABLED", default=True):
+        return None
+    if str(getattr(plan, "recall_contract_id", "") or "") not in _COLLECTION_FASTPATH_CONTRACTS:
+        return None
+    if str(getattr(plan, "primary_memory_layer", "") or "") != "life_memory_collection":
+        return None
+    started_ms = int(time.time() * 1000)
+    try:
+        from dataclasses import replace  # noqa: PLC0415
+        from host_brain.app.dependencies import get_life_memory_store  # noqa: PLC0415
+
+        store = get_life_memory_store()
+        raw_packet = store.recall_collection_packet(
+            query=str(getattr(plan, "query", "") or ""),
+            top_k=max(5, int(getattr(plan, "max_facts", 0) or 0)),
+            person_id=person_id,
+            session_id=session_id,
+            now_ts_ms_value=int(ts_ms),
+        )
+        candidates = list(getattr(raw_packet, "candidates", []) or [])
+        packet = build_packet_fn(
+            {
+                "output": {
+                    "request_id": request_id,
+                    "query": str(getattr(plan, "query", "") or ""),
+                    "status": "OK",
+                    "stage": "collection_fastpath",
+                    "reason_code": None,
+                    "degraded": False,
+                    "routes": [{"route_id": "surface_life_collection_fastpath", "store_id": "life_memory_collection"}],
+                    "route_rows": [
+                        {
+                            "route_id": "surface_life_collection_fastpath",
+                            "store_id": "life_memory_collection",
+                            "candidate_count": len(candidates),
+                            "status": "OK",
+                            "latency_ms": max(0, int(time.time() * 1000) - started_ms),
+                        }
+                    ],
+                    "candidate_count": len(candidates),
+                    "candidates": candidates,
+                    "ts_ms": int(ts_ms),
+                }
+            },
+            query=str(getattr(plan, "query", "") or ""),
+            max_facts=int(getattr(plan, "max_facts", 0) or 4),
+            max_chars_per_fact=int(getattr(plan, "max_chars_per_fact", 0) or 96),
+            validation_requirements=tuple(getattr(plan, "validation_requirements", ()) or ()),
+            temporal_scope=str(getattr(plan, "temporal_scope", "") or ""),
+            query_kind=str(getattr(plan, "query_kind", "") or ""),
+            target_domains=tuple(getattr(plan, "target_domains", ()) or ()),
+            recall_contract_id=str(getattr(plan, "recall_contract_id", "") or ""),
+            primary_memory_layer=str(getattr(plan, "primary_memory_layer", "") or ""),
+            expected_memory_layers=tuple(getattr(plan, "expected_memory_layers", ()) or ()),
+            min_collection_items=int(getattr(plan, "min_collection_items", 0) or 0),
+            answer_obligations=tuple(getattr(plan, "answer_obligations", ()) or ()),
+        )
+        trace = dict(getattr(packet, "trace", None) or {})
+        readiness = dict(trace.get("recall_answer_readiness") or {}) if isinstance(trace.get("recall_answer_readiness"), Mapping) else {}
+        fast_meta = {
+            "attempted": True,
+            "latency_ms": max(0, int(time.time() * 1000) - started_ms),
+            "candidate_count": len(candidates),
+            "status": "HIT" if str(readiness.get("status") or "").upper() == "READY" and not getattr(packet, "reason_code", None) else "MISS",
+        }
+        packet = replace(packet, trace={**trace, "collection_fastpath": fast_meta})
+        if fast_meta["status"] == "HIT":
+            return packet
+    except Exception:
+        return None
+    return None
+
+
+def _maybe_retry_surface_memory_recall_with_expanded_scope(
+    *,
+    packet: Any,
+    plan: Any,
+    recall_service: Any,
+    recall_packet_fn: Any,
+    request_id: str,
+    query_embedding: Any,
+    intent_id: str | None,
+    person_id: str,
+    session_id: str,
+    ts_ms: int,
+    emotion_tag: str | None,
+    mood_state: str | None,
+    bond_summary: Mapping[str, Any] | None,
+    motive_state: Mapping[str, Any] | None,
+    render_target_lang: str,
+    coverage_failed_reason_code: str = _SURFACE_MEMORY_RECALL_COVERAGE_FAILED,
+) -> Any:
+    if not _should_retry_surface_memory_recall(plan=plan, packet=packet, coverage_failed_reason_code=coverage_failed_reason_code):
+        return packet
+    try:
+        from dataclasses import replace as dataclass_replace  # noqa: PLC0415
+    except Exception:
+        return packet
+    original_temporal_scope = str(getattr(plan, "temporal_scope", "") or "").strip()
+    original_lookback = _coerce_int(getattr(plan, "time_lookback_days", None), default=0)
+    expanded_stores = tuple(
+        dict.fromkeys([*_EXPANDED_RECALL_STORES, *list(getattr(plan, "target_store_ids", ()) or ())])
+    )
+    try:
+        expanded_plan = dataclass_replace(
+            plan,
+            temporal_scope="recent_days",
+            target_store_ids=expanded_stores,
+            time_lookback_days=max(original_lookback, 14),
+            max_facts=max(_coerce_int(getattr(plan, "max_facts", 0), default=0), 8),
+            max_chars_per_fact=max(_coerce_int(getattr(plan, "max_chars_per_fact", 0), default=0), 900),
+        )
+        retry_packet = recall_packet_fn(
+            recall_service=recall_service,
+            request_id=request_id,
+            query=str(getattr(expanded_plan, "query", "") or ""),
+            query_embedding=list(query_embedding or []),
+            intent_id=intent_id,
+            person_id=person_id,
+            session_id=session_id,
+            ts_ms=ts_ms,
+            emotion_filter=emotion_tag,
+            mood_state=mood_state,
+            bond_summary=bond_summary,
+            motive_state=motive_state,
+            render_target_lang=render_target_lang,
+            target_store_ids=getattr(expanded_plan, "target_store_ids", ()) or (),
+            time_lookback_days=getattr(expanded_plan, "time_lookback_days", None),
+            max_facts=getattr(expanded_plan, "max_facts", 4),
+            max_chars_per_fact=getattr(expanded_plan, "max_chars_per_fact", 96),
+            validation_requirements=getattr(expanded_plan, "validation_requirements", ()) or (),
+            temporal_scope=getattr(expanded_plan, "temporal_scope", "") or "",
+            query_kind=getattr(expanded_plan, "query_kind", "") or "",
+            target_domains=getattr(expanded_plan, "target_domains", ()) or (),
+            recall_contract_id=getattr(expanded_plan, "recall_contract_id", "") or "",
+            primary_memory_layer=getattr(expanded_plan, "primary_memory_layer", "") or "",
+            expected_memory_layers=getattr(expanded_plan, "expected_memory_layers", ()) or (),
+            min_collection_items=getattr(expanded_plan, "min_collection_items", 0) or 0,
+            answer_obligations=getattr(expanded_plan, "answer_obligations", ()) or (),
+            fail_soft=True,
+        )
+    except Exception:
+        return packet
+    use_retry = _expanded_surface_memory_recall_is_better(original=packet, retry=retry_packet)
+    retry_meta = {
+        "attempted": True,
+        "status": "USED" if use_retry else "KEPT_ORIGINAL",
+        "reason": "coverage_failed_expand_recent_collection_scope",
+        "from_temporal_scope": original_temporal_scope,
+        "to_temporal_scope": str(getattr(expanded_plan, "temporal_scope", "") or ""),
+        "from_time_lookback_days": getattr(plan, "time_lookback_days", None),
+        "to_time_lookback_days": getattr(expanded_plan, "time_lookback_days", None),
+        "original_reason_code": str(getattr(packet, "reason_code", "") or ""),
+        "retry_reason_code": str(getattr(retry_packet, "reason_code", "") or ""),
+        "original_coverage_score": _packet_coverage_score(packet),
+        "retry_coverage_score": _packet_coverage_score(retry_packet),
+        "original_readiness": _packet_readiness_status(packet),
+        "retry_readiness": _packet_readiness_status(retry_packet),
+    }
+    selected_packet = retry_packet if use_retry else packet
+    try:
+        trace = dict(getattr(selected_packet, "trace", None) or {})
+        return dataclass_replace(selected_packet, trace={**trace, "recall_retry": retry_meta})
+    except Exception:
+        return selected_packet
+
+
+def _should_retry_surface_memory_recall(*, plan: Any, packet: Any, coverage_failed_reason_code: str) -> bool:
+    reason_code = str(getattr(packet, "reason_code", "") or "").strip()
+    if reason_code not in {coverage_failed_reason_code, _SURFACE_MEMORY_RECALL_VALIDATION_FAILED}:
+        return False
+    contract_id = str(getattr(plan, "recall_contract_id", "") or "").strip()
+    query_kind = str(getattr(plan, "query_kind", "") or "").strip()
+    if contract_id not in {"collection_recent", "anaphoric_selection"} and query_kind not in {"collection_summary", "anaphoric_selection"}:
+        return False
+    temporal_scope = str(getattr(plan, "temporal_scope", "") or "").strip()
+    if temporal_scope in _DATED_TEMPORAL_SCOPES or temporal_scope.startswith("date:"):
+        return False
+    reasons = set(_packet_readiness_reasons(packet))
+    if not reasons.intersection({"coverage_failed", "insufficient_item_count", "no_selected_memory"}):
+        return False
+    target_stores = {str(item or "").strip() for item in list(getattr(plan, "target_store_ids", ()) or ())}
+    return bool(target_stores.intersection({"life_memory_collection", "life_memory_entity", "life_episode"}))
+
+
+def _expanded_surface_memory_recall_is_better(*, original: Any, retry: Any) -> bool:
+    retry_status = _packet_readiness_status(retry).upper()
+    original_status = _packet_readiness_status(original).upper()
+    if retry_status == "READY" and original_status != "READY":
+        return True
+    retry_reason = str(getattr(retry, "reason_code", "") or "").strip()
+    original_reason = str(getattr(original, "reason_code", "") or "").strip()
+    if not retry_reason and original_reason:
+        return True
+    return _packet_coverage_score(retry) > _packet_coverage_score(original) + 0.08
+
+
+def _packet_readiness(packet: Any) -> dict[str, Any]:
+    trace_raw = getattr(packet, "trace", None)
+    trace = dict(trace_raw) if isinstance(trace_raw, Mapping) else {}
+    readiness_raw = trace.get("recall_answer_readiness")
+    return dict(readiness_raw) if isinstance(readiness_raw, Mapping) else {}
+
+
+def _packet_readiness_status(packet: Any) -> str:
+    return str(_packet_readiness(packet).get("status") or "").strip()
+
+
+def _packet_readiness_reasons(packet: Any) -> list[str]:
+    reasons = _packet_readiness(packet).get("reasons")
+    if isinstance(reasons, list):
+        return [str(item or "").strip() for item in reasons if str(item or "").strip()]
+    return []
+
+
+def _packet_coverage_score(packet: Any) -> float:
+    trace_raw = getattr(packet, "trace", None)
+    trace = dict(trace_raw) if isinstance(trace_raw, Mapping) else {}
+    coverage_raw = trace.get("recall_coverage")
+    coverage = dict(coverage_raw) if isinstance(coverage_raw, Mapping) else {}
+    value = _coerce_float(coverage.get("score"))
+    return float(value) if value is not None else 0.0
+
+
+async def _maybe_apply_lightnovel_deep_review(
+    *,
+    packet: Any,
+    message: str,
+    request_id: str,
+    person_id: str,
+    session_id: str,
+    ts_ms: int,
+) -> Any:
+    try:
+        from dataclasses import replace  # noqa: PLC0415
+
+        from host_brain.codex_runtime.lightnovel_deep_reviewer import (  # noqa: PLC0415
+            review_lightnovel_selection_from_memory_packet,
+            should_deep_review_lightnovel_selection,
+        )
+    except Exception:
+        return packet
+    packet_payload = packet.as_dict() if hasattr(packet, "as_dict") else {}
+    if not should_deep_review_lightnovel_selection(user_message=message, packet=packet_payload):
+        return packet
+    started_ms = int(time.time() * 1000)
+    try:
+        import asyncio  # noqa: PLC0415
+
+        review = await asyncio.to_thread(
+            review_lightnovel_selection_from_memory_packet,
+            packet=packet_payload,
+            user_message=message,
+            request_id=request_id,
+            person_id=person_id,
+            session_id=session_id,
+            ts_ms=ts_ms,
+        )
+    except Exception as exc:
+        review = {
+            "status": "DEGRADED",
+            "reason_code": "LIGHTNOVEL_DEEP_REVIEW_FAILED",
+            "fact": f"我尝试回去查这些书的详情页，但深读步骤失败了：{type(exc).__name__}。",
+            "evidence_refs": [],
+            "cached": False,
+            "source": "error",
+        }
+    latency_ms = max(0, int(time.time() * 1000) - started_ms)
+    fact = str(review.get("fact") or "").strip()
+    if not fact:
+        return packet
+    packet_payload = packet.as_dict() if hasattr(packet, "as_dict") else packet_payload
+    previous_facts = list(getattr(packet, "facts", ()) or [])
+    anchor_fact = _lightnovel_recommendation_anchor_fact(packet_payload)
+    if anchor_fact and (
+        not previous_facts
+        or not any(_lightnovel_anchor_fact_already_present(anchor_fact, existing) for existing in previous_facts)
+    ):
+        previous_facts.append(anchor_fact)
+    source_card_count = _coerce_int(review.get("source_card_count"))
+    reviewed_item_count = _coerce_int(review.get("reviewed_item_count") or len(list(review.get("items") or [])))
+    partial_review = bool(review.get("partial_review")) or bool(source_card_count > reviewed_item_count > 0)
+    trace = dict(getattr(packet, "trace", None) or {})
+    trace["lightnovel_deep_review"] = {
+        "status": str(review.get("status") or ""),
+        "reason_code": str(review.get("reason_code") or ""),
+        "selected": dict(review.get("selected") or {}) if isinstance(review.get("selected"), Mapping) else {},
+        "item_count": len(list(review.get("items") or [])),
+        "source_card_count": source_card_count,
+        "reviewed_item_count": reviewed_item_count,
+        "partial_review": partial_review,
+        "latency_ms": latency_ms,
+        "cached": bool(review.get("cached")),
+        "source": str(review.get("source") or ("cache" if bool(review.get("cached")) else "fetch")),
+        "recommendation_signature": str(review.get("recommendation_signature") or ""),
+        "source_episode_id": str(review.get("source_episode_id") or ""),
+        "persisted_episode_id": str(review.get("persisted_episode_id") or ""),
+        "persist_status": str(review.get("persist_status") or ""),
+        "evidence_ref_count": len(list(review.get("evidence_refs") or [])),
+    }
+    review_ok = str(review.get("status") or "").strip().upper() == "OK"
+    old_reason_code = str(getattr(packet, "reason_code", None) or "").strip()
+    resolved_coverage_failure = review_ok and old_reason_code == "SURFACE_MEMORY_RECALL_COVERAGE_FAILED"
+    deep_review_makes_answer_ready = review_ok and old_reason_code in {
+        "",
+        "SURFACE_MEMORY_RECALL_COVERAGE_FAILED",
+        "SURFACE_MEMORY_RECALL_VALIDATION_FAILED",
+    }
+    if deep_review_makes_answer_ready:
+        previous_readiness = dict(trace.get("recall_answer_readiness") or {}) if isinstance(trace.get("recall_answer_readiness"), Mapping) else {}
+        if previous_readiness:
+            trace["recall_answer_readiness_before_deep_review"] = previous_readiness
+        detail = dict(previous_readiness.get("detail_evidence") or {}) if isinstance(previous_readiness.get("detail_evidence"), Mapping) else {}
+        detail.update(
+            {
+                "required": True,
+                "ready_for_deep_review": True,
+                "basis": "lightnovel_deep_review",
+                "body_item_count": max(1, _coerce_int(detail.get("body_item_count"))),
+                "anchor_item_count": max(
+                    _coerce_int(detail.get("anchor_item_count")),
+                    len(list(review.get("evidence_refs") or [])),
+                ),
+            }
+        )
+        trace["recall_answer_readiness"] = {
+            **previous_readiness,
+            "status": "READY",
+            "ready_to_answer": True,
+            "response_mode": "answer_from_evidence",
+            "surface_action": "answer",
+            "evidence_depth": "detail_or_body_evidence",
+            "reasons": [reason for reason in list(previous_readiness.get("reasons") or []) if reason != "missing_detail_evidence"],
+            "coverage_passed": True,
+            "coverage_failed": False,
+            "detail_evidence": detail,
+            "review_scope": {
+                "partial": partial_review,
+                "source_card_count": source_card_count,
+                "reviewed_item_count": reviewed_item_count,
+            },
+        }
+        trace["recall_answer_strategy"] = {
+            "schema": "Natsume.surface_recall_answer_strategy.v1",
+            "action": "direct_answer",
+            "claim_scope": "partial_detail_judgment" if partial_review else "detail_judgment",
+            "evidence_level": "partial_detail_or_body" if partial_review else "detail_or_body",
+            "confidence_band": "medium" if partial_review else "high",
+            "ready_to_answer": True,
+            "should_fetch_more_evidence": False,
+            "should_state_memory_only": False,
+            "recall_contract_id": str(previous_readiness.get("recall_contract_id") or ""),
+            "query_kind": str(previous_readiness.get("query_kind") or ""),
+            "need_type": str(previous_readiness.get("need_type") or ""),
+            "response_mode": "answer_from_evidence",
+            "coverage_score": max(0.85, _coerce_float(previous_readiness.get("coverage_score")) or 0.0),
+            "selected_item_count": _coerce_int(previous_readiness.get("selected_item_count")),
+            "detail_evidence": {
+                "required": True,
+                "basis": "lightnovel_deep_review",
+                "body_item_count": max(1, _coerce_int(detail.get("body_item_count"))),
+                "anchor_item_count": max(
+                    _coerce_int(detail.get("anchor_item_count")),
+                    len(list(review.get("evidence_refs") or [])),
+                ),
+                "source_card_count": source_card_count,
+                "reviewed_item_count": reviewed_item_count,
+                "partial_review": partial_review,
+            },
+            "reasons": ["partial_detail_review"] if partial_review else [],
+            "recommended_surface_rule": (
+                "只能说这是已补读到的几本里的判断；不要把部分深读样本说成全部十几本里的最终最好。"
+                if partial_review
+                else "可以基于轻小说详情/正文深读结果自然回答选择题；不要把证据过程念出来。"
+            ),
+        }
+        trace["answer_ready"] = True
+        if resolved_coverage_failure:
+            trace["coverage_failed_resolved_by_deep_review"] = True
+    elif not review_ok:
+        previous_readiness = dict(trace.get("recall_answer_readiness") or {}) if isinstance(trace.get("recall_answer_readiness"), Mapping) else {}
+        if previous_readiness:
+            trace["recall_answer_readiness_before_deep_review"] = previous_readiness
+        detail = dict(previous_readiness.get("detail_evidence") or {}) if isinstance(previous_readiness.get("detail_evidence"), Mapping) else {}
+        detail.update(
+            {
+                "required": True,
+                "ready_for_deep_review": False,
+                "basis": "missing_detail_evidence",
+                "body_item_count": 0,
+                "anchor_item_count": max(
+                    _coerce_int(detail.get("anchor_item_count")),
+                    len(list(review.get("evidence_refs") or [])),
+                ),
+            }
+        )
+        reasons = [
+            reason
+            for reason in list(previous_readiness.get("reasons") or [])
+            if str(reason or "").strip()
+        ]
+        for reason in ("missing_detail_evidence", "deep_review_failed"):
+            if reason not in reasons:
+                reasons.append(reason)
+        trace["recall_answer_readiness"] = {
+            **previous_readiness,
+            "status": "NOT_READY",
+            "ready_to_answer": False,
+            "response_mode": "fetch_or_request_detail_evidence",
+            "surface_action": "fetch_more_evidence",
+            "evidence_depth": "detail_or_body_evidence",
+            "reasons": reasons,
+            "coverage_passed": False,
+            "coverage_failed": True,
+            "detail_evidence": detail,
+        }
+        trace["recall_answer_strategy"] = {
+            "schema": "Natsume.surface_recall_answer_strategy.v1",
+            "action": "fetch_more_evidence",
+            "claim_scope": "memory_only_no_quality_judgment",
+            "evidence_level": "detail_anchor_only",
+            "confidence_band": "low",
+            "ready_to_answer": False,
+            "should_fetch_more_evidence": True,
+            "should_state_memory_only": True,
+            "recall_contract_id": str(previous_readiness.get("recall_contract_id") or ""),
+            "query_kind": str(previous_readiness.get("query_kind") or ""),
+            "need_type": str(previous_readiness.get("need_type") or ""),
+            "response_mode": "fetch_or_request_detail_evidence",
+            "coverage_score": _coerce_float(previous_readiness.get("coverage_score")) or 0.0,
+            "selected_item_count": _coerce_int(previous_readiness.get("selected_item_count")),
+            "detail_evidence": {
+                "required": True,
+                "basis": "missing_detail_evidence",
+                "body_item_count": 0,
+                "anchor_item_count": _coerce_int(detail.get("anchor_item_count")),
+                "source_card_count": source_card_count,
+                "reviewed_item_count": reviewed_item_count,
+                "partial_review": partial_review,
+            },
+            "reasons": reasons,
+            "recommended_surface_rule": "只能确认记得这些条目；详情页或正文没读到时，不要判断哪本更好看。",
+        }
+        trace["answer_ready"] = False
+    return replace(
+        packet,
+        facts=tuple([fact, *previous_facts]),
+        style_anchor=tuple(
+            [
+                "轻小说选择追问：优先使用网页/正文深读结果；像正常人聊书一样给口味判断，不要念证据条目。",
+                *list(getattr(packet, "style_anchor", ()) or []),
+            ]
+        ),
+        must_not_do=tuple(
+            [
+                "不要把轻小说选择追问只按标题、热度或旧推荐摘要回答；有网页/正文深读结果时必须基于深读证据。",
+                "不要直接说“我是按正文看下来的”“正文有多少字”“证据更站得住”；把证据转成自然理由。",
+                "不要臆测用户昨天有没有看、是不是忘了、是不是终于想起来问；只说我这次补读后的判断。",
+                *list(getattr(packet, "must_not_do", ()) or []),
+            ]
+        ),
+        evidence_refs=tuple(
+            dict.fromkeys([*list(getattr(packet, "evidence_refs", ()) or []), *list(review.get("evidence_refs") or [])])
+        ),
+        confidence=max(float(getattr(packet, "confidence", 0.0) or 0.0), 0.85) if deep_review_makes_answer_ready else getattr(packet, "confidence", 0.0),
+        degraded=False if deep_review_makes_answer_ready else (True if not review_ok else getattr(packet, "degraded", False)),
+        reason_code=None if deep_review_makes_answer_ready else (str(review.get("reason_code") or "") or getattr(packet, "reason_code", None) if not review_ok else getattr(packet, "reason_code", None)),
+        trace=trace,
+    )
+
+
+def _lightnovel_recommendation_anchor_fact(packet: Mapping[str, Any]) -> str:
+    rows = packet.get("rows") if isinstance(packet, Mapping) else []
+    if isinstance(rows, list):
+        for row in rows:
+            if not isinstance(row, Mapping):
+                continue
+            fact = str(row.get("fact") or row.get("text") or "").strip()
+            if "可比较证据" in fact and ("推荐" in fact or "轻小说" in fact):
+                return fact[:1200].rstrip("，,、；;。")
+    trace = packet.get("trace") if isinstance(packet, Mapping) else {}
+    if not isinstance(trace, Mapping):
+        return ""
+    items: list[Mapping[str, Any]] = []
+    for key in ("selected_collection_items", "selected_entity_items"):
+        raw_items = trace.get(key)
+        if not isinstance(raw_items, list):
+            continue
+        for item in raw_items:
+            if isinstance(item, Mapping):
+                items.append(item)
+    if not items:
+        return ""
+    cards: list[str] = []
+    for index, item in enumerate(items[:6], start=1):
+        title = str(item.get("title") or item.get("item_title") or item.get("entity_title") or "").strip()
+        if not title:
+            continue
+        reason = str(item.get("selection_reason") or item.get("reason") or item.get("facet") or "").strip()
+        intro = str(item.get("intro_snippet") or item.get("item_summary") or item.get("summary") or "").strip()
+        detail_url = str(item.get("detail_url") or item.get("source_ref") or "").strip()
+        parts = [f"{index}. {title}"]
+        if reason:
+            parts.append(f"看点：{reason}")
+        if intro:
+            parts.append(f"简介：{intro}")
+        if detail_url.startswith(("http://", "https://")):
+            parts.append(f"详情：{detail_url}")
+        cards.append("｜".join(parts))
+    if not cards:
+        return ""
+    return f"记忆线索：我刚才推荐了 {len(items)} 本轻小说；可比较证据：" + "；".join(cards)
+
+
+def _lightnovel_anchor_fact_already_present(anchor_fact: str, existing_fact: Any) -> bool:
+    anchor = re.sub(r"\s+", "", str(anchor_fact or ""))
+    existing = re.sub(r"\s+", "", str(existing_fact or ""))
+    if not anchor or not existing:
+        return False
+    if anchor in existing or existing in anchor:
+        return True
+    anchor_titles = set(re.findall(r"\d+\.\s*([^｜；;]+)", str(anchor_fact or "")))
+    existing_titles = set(re.findall(r"\d+\.\s*([^｜；;]+)", str(existing_fact or "")))
+    return bool(anchor_titles and existing_titles and anchor_titles.issubset(existing_titles))
+
+
+async def _maybe_apply_generic_evidence_review(
+    *,
+    packet: Any,
+    message: str,
+    request_id: str,
+    person_id: str,
+    session_id: str,
+    ts_ms: int,
+) -> Any:
+    try:
+        from dataclasses import replace  # noqa: PLC0415
+
+        from host_brain.codex_runtime.generic_evidence_reviewer import (  # noqa: PLC0415
+            review_generic_evidence_from_memory_packet,
+            should_review_generic_evidence,
+        )
+    except Exception:
+        return packet
+    packet_payload = packet.as_dict() if hasattr(packet, "as_dict") else {}
+    if not should_review_generic_evidence(user_message=message, packet=packet_payload):
+        return packet
+    started_ms = int(time.time() * 1000)
+    try:
+        import asyncio  # noqa: PLC0415
+
+        review = await asyncio.to_thread(
+            review_generic_evidence_from_memory_packet,
+            packet=packet_payload,
+            user_message=message,
+            request_id=request_id,
+            person_id=person_id,
+            session_id=session_id,
+            ts_ms=ts_ms,
+        )
+    except Exception as exc:
+        review = {
+            "status": "DEGRADED",
+            "reason_code": "GENERIC_EVIDENCE_REVIEW_FAILED",
+            "fact": f"我尝试重新读取记忆里的证据来源，但补证据步骤失败了：{type(exc).__name__}。",
+            "evidence_refs": [],
+            "cached": False,
+            "source": "error",
+            "items": [],
+        }
+    latency_ms = max(0, int(time.time() * 1000) - started_ms)
+    fact = str(review.get("fact") or "").strip()
+    if not fact:
+        return packet
+    trace = dict(getattr(packet, "trace", None) or {})
+    trace["generic_evidence_review"] = {
+        "status": str(review.get("status") or ""),
+        "reason_code": str(review.get("reason_code") or ""),
+        "item_count": len(list(review.get("items") or [])),
+        "latency_ms": latency_ms,
+        "cached": bool(review.get("cached")),
+        "source": str(review.get("source") or "fetch"),
+        "persisted_episode_id": str(review.get("persisted_episode_id") or ""),
+        "persist_status": str(review.get("persist_status") or ""),
+        "evidence_ref_count": len(list(review.get("evidence_refs") or [])),
+    }
+    review_ok = str(review.get("status") or "").strip().upper() == "OK"
+    old_reason_code = str(getattr(packet, "reason_code", None) or "").strip()
+    resolved_coverage_failure = review_ok and old_reason_code == "SURFACE_MEMORY_RECALL_COVERAGE_FAILED"
+    if resolved_coverage_failure:
+        previous_readiness = dict(trace.get("recall_answer_readiness") or {}) if isinstance(trace.get("recall_answer_readiness"), Mapping) else {}
+        if previous_readiness:
+            trace["recall_answer_readiness_before_generic_evidence_review"] = previous_readiness
+        detail = dict(previous_readiness.get("detail_evidence") or {}) if isinstance(previous_readiness.get("detail_evidence"), Mapping) else {}
+        detail.update(
+            {
+                "required": True,
+                "ready_for_deep_review": True,
+                "basis": "generic_evidence_review",
+                "body_item_count": max(1, _coerce_int(detail.get("body_item_count"))),
+                "anchor_item_count": max(
+                    _coerce_int(detail.get("anchor_item_count")),
+                    len(list(review.get("evidence_refs") or [])),
+                ),
+            }
+        )
+        trace["recall_answer_readiness"] = {
+            **previous_readiness,
+            "status": "READY",
+            "ready_to_answer": True,
+            "response_mode": "answer_from_evidence",
+            "surface_action": "answer",
+            "reasons": [],
+            "coverage_passed": True,
+            "coverage_failed": False,
+            "detail_evidence": detail,
+        }
+        trace["answer_ready"] = True
+        trace["coverage_failed_resolved_by_generic_evidence_review"] = True
+    return replace(
+        packet,
+        facts=tuple([fact, *list(getattr(packet, "facts", ()) or [])]),
+        style_anchor=tuple(
+            [
+                "证据追问：优先使用刚补读到的网页/文件正文依据；回答时把证据转成自然判断，不要念调试字段。",
+                *list(getattr(packet, "style_anchor", ()) or []),
+            ]
+        ),
+        must_not_do=tuple(
+            [
+                "不要把只有旧摘要的记忆当成完整依据；有证据补读结果时必须基于补读正文回答。",
+                "不要暴露 memory://、evd://、chat:// 或内部 trace 字段。",
+                *list(getattr(packet, "must_not_do", ()) or []),
+            ]
+        ),
+        evidence_refs=tuple(
+            dict.fromkeys([*list(getattr(packet, "evidence_refs", ()) or []), *list(review.get("evidence_refs") or [])])
+        ),
+        confidence=max(float(getattr(packet, "confidence", 0.0) or 0.0), 0.82) if resolved_coverage_failure else getattr(packet, "confidence", 0.0),
+        degraded=False if resolved_coverage_failure else getattr(packet, "degraded", False),
+        reason_code=None if resolved_coverage_failure else getattr(packet, "reason_code", None),
+        trace=trace,
+    )
+
+
+def _surface_memory_retrieval_summary(
+    *,
+    request_id: str,
+    ts_ms: int,
+    packet: Any,
+    embedding_model_id: str,
+) -> Dict[str, Any]:
+    trace = dict(getattr(packet, "trace", None) or {})
+    plan = dict(trace.get("plan") or {}) if isinstance(trace.get("plan"), Mapping) else {}
+    reason_code = str(getattr(packet, "reason_code", None) or "").strip()
+    skipped = bool(trace.get("skipped")) or reason_code == "SURFACE_MEMORY_RECALL_SKIPPED"
+    degraded = bool(getattr(packet, "degraded", False))
+    status = "SKIPPED" if skipped else "DEGRADED" if degraded else "OK"
+    route_count = int(dict(trace).get("route_count") or 0)
+    return {
+        "request_id": request_id,
+        "status": status,
+        "reason_code": reason_code or ("SURFACE_MEMORY_RECALL_SKIPPED" if skipped else "SURFACE_MEMORY_RECALL_OK"),
+        "degraded": degraded,
+        "route_count": route_count,
+        "candidate_count": int(getattr(packet, "candidate_count", 0) or 0),
+        "topk_count": 0,
+        "routes": list(getattr(packet, "route_ids", ()) or []),
+        "query_plan": {
+            "intent": "surface_memory_recall",
+            "task_mode": str(plan.get("task_mode") or ""),
+            "recall_policy": str(plan.get("recall_policy") or ""),
+            "reason": str(plan.get("reason") or ""),
+            "query_kind": str(plan.get("query_kind") or ""),
+            "temporal_scope": str(plan.get("temporal_scope") or ""),
+            "target_domains": list(plan.get("target_domains") or []),
+            "validation_requirements": list(plan.get("validation_requirements") or []),
+            "text_len": len(str(getattr(packet, "query", "") or "")),
+        },
+        "target_stores": list(plan.get("target_store_ids") or []),
+        "embedding_model_id": embedding_model_id,
+        "surface_memory_recall_packet": packet.as_dict() if hasattr(packet, "as_dict") else {},
+        "ts_ms": int(ts_ms),
+    }
+
+
+def _surface_task_mode_from_intent(*, message: str, intent_draft: Mapping[str, Any] | None) -> str:
+    draft = dict(intent_draft or {}) if isinstance(intent_draft, Mapping) else {}
+    raw = str(
+        draft.get("task_mode")
+        or draft.get("route")
+        or draft.get("intent")
+        or draft.get("primary_topic")
+        or ""
+    ).strip().lower()
+    if raw and raw not in _GENERIC_SURFACE_TASK_MODES:
+        return raw
+    text = str(message or "").strip()
+    if any(token in text for token in ("记一下", "记住", "帮我记", "替我记", "记着", "记下来")):
+        return "memory_write"
+    if any(token in text for token in ("还记得", "记得吗", "上次", "之前", "刚才", "跑完", "完成了吗", "失败原因", "今日推荐", "推荐结果")):
+        return "recall_memory"
+    if any(token in text for token in ("报错", "错误", "测试", "提交", "仓库", "代码", "怎么改", "下一步")):
+        return "technical_help"
+    if any(token in text for token in ("累", "困", "难受", "头疼")):
+        return "tired"
+    return "daily_chat"
+
+
+def _surface_relationship_distance(bond_summary: Mapping[str, Any] | None) -> str:
+    bond = dict(bond_summary or {}) if isinstance(bond_summary, Mapping) else {}
+    return str(
+        bond.get("relationship_distance")
+        or bond.get("stage")
+        or bond.get("stage_label")
+        or "familiar"
+    ).strip()
+
+
+def _surface_intent_id(intent_draft: Mapping[str, Any] | None) -> str | None:
+    draft = dict(intent_draft or {}) if isinstance(intent_draft, Mapping) else {}
+    value = str(draft.get("intent_id") or draft.get("id") or "").strip()
+    return value or None
+
+
+def _surface_memory_query_facts(
+    *,
+    mood_state: Optional[str],
+    bond_summary: Mapping[str, Any] | None,
+    motive_state: Mapping[str, Any] | None,
+) -> list[str]:
+    facts: list[str] = []
+    if mood_state:
+        facts.append(f"当前语气状态：{str(mood_state).strip()}")
+    distance = _surface_relationship_distance(bond_summary)
+    if distance:
+        facts.append(f"关系距离：{distance}")
+    motive = dict(motive_state or {}) if isinstance(motive_state, Mapping) else {}
+    topic = str(motive.get("topic") or motive.get("focus") or "").strip()
+    if topic:
+        facts.append(f"当前关注：{topic}")
+    return facts[:3]
+
+
+def _recent_explicit_memory_facts(*, message: str, session_id: str, request_id: str) -> list[str]:
+    if not _looks_like_explicit_memory_content_query(message):
+        return []
+    normalized_session_id = str(session_id or "").strip()
+    if not normalized_session_id:
+        return []
+    try:
+        from host_brain.app.dependencies import get_conversation_history  # noqa: PLC0415
+
+        turns = get_conversation_history().fetch_recent_turns(
+            session_id=normalized_session_id,
+            max_turns=8,
+            exclude_request_id=str(request_id or "").strip() or None,
+        )
+    except Exception:
+        return []
+
+    for turn in reversed(list(turns or [])):
+        if getattr(turn, "role", "") != "user":
+            continue
+        payload = _extract_explicit_memory_write_payload(getattr(turn, "content", ""))
+        if payload:
+            return [f"记忆线索：用户刚才让你记住：{payload}"]
+    return []
+
+
+def _looks_like_explicit_memory_content_query(message: str) -> bool:
+    text = _normalize_memory_text(message)
+    if not text:
+        return False
+    if not any(word in text for word in _EXPLICIT_MEMORY_QUERY_WORDS):
+        return False
+    return any(anchor in text for anchor in _EXPLICIT_MEMORY_QUERY_ANCHORS)
+
+
+def _extract_explicit_memory_write_payload(text: str) -> str:
+    normalized = _normalize_memory_text(text)
+    if not normalized:
+        return ""
+    for marker in sorted(_EXPLICIT_MEMORY_WRITE_MARKERS, key=len, reverse=True):
+        index = normalized.find(marker)
+        if index < 0:
+            continue
+        payload = normalized[index + len(marker) :]
+        payload = payload.lstrip(" ，,。.!！?？:：；;、")
+        payload = payload.strip(" \t\r\n，,。.!！?？；;")
+        if len(payload) >= 2:
+            return payload[:96].rstrip("，,、 ")
+    return ""
+
+
+def _normalize_memory_text(value: str) -> str:
+    return re.sub(r"\s+", " ", str(value or "").strip())
+
+
+def _embed_surface_memory_query(query: str) -> tuple[list[float], str]:
+    from host_brain.memory.chroma_client import DEFAULT_COLLECTION, embed_text, load_chroma_runtime_config  # noqa: PLC0415
+
+    dim: int | None = None
+    try:
+        cfg_result = load_chroma_runtime_config()
+        cfg = cfg_result.config if cfg_result.success else None
+        profiles = dict(getattr(cfg, "collection_profiles", {}) or {})
+        default_collection = str(getattr(cfg, "default_collection", DEFAULT_COLLECTION) or DEFAULT_COLLECTION)
+        raw_dim = profiles.get(default_collection)
+        if raw_dim is not None:
+            dim = max(1, int(raw_dim))
+    except Exception:
+        dim = None
+    values, model_id = embed_text(str(query or "").strip(), dim=dim)
+    return list(values or []), str(model_id or "")
+
+
+def _build_surface_memory_recall_service() -> Any:
+    from host_brain.app.dependencies import get_ledger  # noqa: PLC0415
+    from host_brain.retrieval.recall_fusion import RecallFusionServiceContract  # noqa: PLC0415
+    from host_brain.retrieval.recall_schemas import RecallRouteConfig, RecallRuntimeConfig  # noqa: PLC0415
+
+    node_id = "surface_main_chain_memory_recall"
+    routes = {
+        "surface_life_collection": RecallRouteConfig(
+            route_id="surface_life_collection",
+            store_id="life_memory_collection",
+            collection="life_memory_collection",
+            top_k=5,
+            score_weight=1.32,
+            node_selector=node_id,
+        ),
+        "surface_life_episode": RecallRouteConfig(
+            route_id="surface_life_episode",
+            store_id="life_episode",
+            collection="life_episode",
+            top_k=6,
+            score_weight=1.25,
+            node_selector=node_id,
+        ),
+        "surface_semantic": RecallRouteConfig(
+            route_id="surface_semantic",
+            store_id="semantic_memory",
+            collection="semantic_memory",
+            top_k=8,
+            score_weight=1.05,
+            node_selector=node_id,
+        ),
+        "surface_episodic": RecallRouteConfig(
+            route_id="surface_episodic",
+            store_id="episodic_vector",
+            collection="episodic",
+            top_k=8,
+            score_weight=1.0,
+            node_selector=node_id,
+        ),
+        "surface_sqlite": RecallRouteConfig(
+            route_id="surface_sqlite",
+            store_id="sqlite_ledger",
+            collection="sqlite_ledger",
+            top_k=4,
+            score_weight=0.85,
+            node_selector=node_id,
+        ),
+        "surface_bond": RecallRouteConfig(
+            route_id="surface_bond",
+            store_id="neo4j_bond",
+            collection="neo4j_bond",
+            top_k=4,
+            score_weight=0.95,
+            node_selector=node_id,
+        ),
+    }
+    try:
+        from host_brain.app.dependencies import get_bond_neo4j_client  # noqa: PLC0415
+
+        neo4j_client = get_bond_neo4j_client()
+    except Exception:
+        neo4j_client = None
+    return RecallFusionServiceContract(
+        ledger=get_ledger(),
+        neo4j_client=neo4j_client,
+        runtime_config=RecallRuntimeConfig(
+            enabled=True,
+            default_route="surface_episodic",
+            routes=routes,
+        ),
+        node_id=node_id,
+        use_hybrid=False,
     )
 
 
 def _build_skipped_retrieval_summary(reason_code: str) -> Dict[str, Any]:
-    return _orchestrator_skipped_summary(reason_code)
+    return {
+        "status": "SKIPPED",
+        "reason_code": str(reason_code or "RETRIEVAL_SKIPPED"),
+        "degraded": False,
+        "route_count": 0,
+        "candidate_count": 0,
+        "topk_count": 0,
+        "routes": [],
+    }
 
 
 def _build_degraded_retrieval_summary(reason_code: str) -> Dict[str, Any]:
-    return _orchestrator_degraded_summary(reason_code)
+    return {
+        "status": "DEGRADED",
+        "reason_code": str(reason_code or "RETRIEVAL_DEGRADED"),
+        "degraded": True,
+        "route_count": 0,
+        "candidate_count": 0,
+        "topk_count": 0,
+        "routes": [],
+    }

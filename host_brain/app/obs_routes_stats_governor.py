@@ -14,7 +14,6 @@ from typing import Any, Dict, List, Mapping, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
-from host_brain.retrieval.model_suite import resolve_retrieval_model_suite
 
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 
@@ -475,5 +474,4 @@ def get_subsystems_stats(
         subsystems=subsystems,
         timestamp=now,
     )
-
 

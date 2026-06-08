@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import time
 from dataclasses import dataclass, field
 from typing import Any, Mapping
@@ -236,11 +237,13 @@ class MirrorNeuronAgent:
             # T-378：高共情时联动 DefaultModeAgent.tick_idle_cycle()
             # 共情他人的情绪是自我叙事的重要素材（"我感受到了对方的感受"）
             try:
+                from host_brain.persona.identity import get_canonical_persona_self_id  # noqa: PLC0415
+
                 _dma = get_default_mode_agent()
                 if hasattr(_dma, "tick_idle_cycle"):
                     _dma.tick_idle_cycle(
                         source=f"mirror_high_resonance:{str(result.get('emotion_tag') or 'neutral').lower()}",
-                        person_id="user_1",
+                        person_id=get_canonical_persona_self_id(),
                     )
             except Exception:
                 pass
@@ -270,7 +273,7 @@ class MirrorNeuronAgent:
         *,
         resonance_intensity: float = 0.0,
         user_emotion_tag: str = "NEUTRAL",
-        bond_stage: str = "stranger",
+        bond_stage: str = "friend",
     ) -> str | None:
         """共情回应建议：共鸣强度高时调用 LLM 生成共情回应策略。
 
@@ -300,7 +303,7 @@ class MirrorNeuronAgent:
             _user_prompt = _user_tpl.format(
                 resonance_intensity=round(float(resonance_intensity), 3),
                 user_emotion_tag=str(user_emotion_tag or "NEUTRAL").upper(),
-                bond_stage=str(bond_stage or "stranger"),
+                bond_stage=str(bond_stage or "friend"),
             )
             _pool_result = complete_llm_with_pool_sync(
                 request_id=f"mirror-empathy::{int(time.time() * 1000)}",
@@ -343,7 +346,7 @@ class MirrorNeuronAgent:
                             "empathy_hint": _hint,
                             "resonance_intensity": round(float(resonance_intensity), 3),
                             "user_emotion_tag": str(user_emotion_tag or "NEUTRAL").upper(),
-                            "bond_stage": str(bond_stage or "stranger"),
+                            "bond_stage": str(bond_stage or "friend"),
                         },
                     )
                 except Exception:
@@ -410,10 +413,19 @@ class MirrorNeuronAgent:
             or payload.get("intensity")
             or fallback_intensity
         )
-        user_id = str(payload.get("user_id") or payload.get("person_id") or "user_1").strip() or "user_1"
         session_id = str(payload.get("session_id") or payload.get("conversation_id") or "").strip()
+        try:
+            from host_brain.bond.user_identity import resolve_bond_user_id  # noqa: PLC0415
+
+            user_id = resolve_bond_user_id(
+                str(payload.get("user_id") or payload.get("person_id") or "").strip() or None,
+                session_id=session_id or None,
+            )
+        except Exception:
+            user_id = str(payload.get("user_id") or payload.get("person_id") or "").strip() or "default"
         ts_ms = int(getattr(event, "ts_ms", 0) or now_ms())
-        self.apply_resonance(
+        await asyncio.to_thread(
+            self.apply_resonance,
             user_id=user_id,
             session_id=session_id,
             emotion_tag=emotion_tag,

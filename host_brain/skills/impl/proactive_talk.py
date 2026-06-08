@@ -114,10 +114,7 @@ def _render_policy_blocks_proactive(render_policy: Mapping[str, Any] | None) -> 
     policy = _coerce_render_policy(render_policy)
     if not policy:
         return False
-    return (
-        not bool(policy.get("allow_proactive_after_reply", True))
-        or bool(policy.get("should_be_withdrawn", False))
-    )
+    return not bool(policy.get("allow_proactive_after_reply", True))
 
 
 def _apply_render_policy_to_proactive_text(text: str, render_policy: Mapping[str, Any] | None) -> str:
@@ -126,7 +123,7 @@ def _apply_render_policy_to_proactive_text(text: str, render_policy: Mapping[str
     if not normalized or not policy:
         return normalized
     try:
-        from host_brain.app.chat_agent import _apply_render_policy_hard_guard  # noqa: PLC0415
+        from host_brain.app.surface_reply_preprocessor import _apply_render_policy_hard_guard  # noqa: PLC0415
 
         guarded = _apply_render_policy_hard_guard(normalized, policy)
         intimacy_ceiling = float(policy.get("intimacy_ceiling", 1.0) or 1.0)
@@ -381,6 +378,11 @@ def execute_proactive_talk(
     emotion_context: dict[str, Any] | None = ctx.get("emotion_context")
     emotion_hint = _build_emotion_hint_for_proactive(emotion_context)
     motive_state: dict[str, Any] = dict(ctx.get("motive_state") or {})
+    proactive_episode = motive_state.get("proactive_episode")
+    if isinstance(proactive_episode, Mapping):
+        proactive_episode = dict(proactive_episode)
+    else:
+        proactive_episode = {}
     motive_hint = _build_motive_hint_for_proactive(motive_state)
     render_policy: dict[str, Any] = _coerce_render_policy(ctx.get("render_policy"))
     scene_awareness: dict[str, Any] = _coerce_scene_awareness(ctx.get("scene_awareness"))
@@ -478,6 +480,7 @@ def execute_proactive_talk(
     llm_generator: LLMGenerator | None = ctx.get("llm_generator")
     greeting: str = ""
     fallback_to_template = False
+    fallback_reason: str | None = None
 
     if llm_generator:
         try:
@@ -500,6 +503,10 @@ def execute_proactive_talk(
             llm_result = llm_generator(llm_input)
             greeting = str(llm_result.get("greeting", llm_result.get("content", "")))
             fallback_to_template = bool(llm_result.get("fallback_to_template"))
+            fallback_reason = str(llm_result.get("fallback_reason") or "").strip() or None
+            if not greeting.strip():
+                fallback_to_template = True
+                fallback_reason = fallback_reason or "LLM_EMPTY_OUTPUT"
         except Exception as exc:
             logger.warning("LLM proactive talk failed: %s", exc)
             return {
@@ -539,6 +546,7 @@ def execute_proactive_talk(
         # 方向 B：携带情感上下文供 UI 渲染（如表情切换）
         "emotion_tag": (emotion_context or {}).get("emotion_tag", "NEUTRAL"),
         "dominant_motive": motive_state.get("dominant_motive"),
+        "proactive_episode": proactive_episode,
         "scene_tags": list(scene_awareness.get("scene_tags") or []),
         "scene_activity": scene_awareness.get("current_activity"),
     }
@@ -577,4 +585,5 @@ def execute_proactive_talk(
             "forbidden_actions": [],
         },
         "template_fallback_used": fallback_to_template,
+        "template_fallback_reason": fallback_reason,
     }

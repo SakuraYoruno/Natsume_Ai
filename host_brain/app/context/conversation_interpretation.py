@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from dataclasses import dataclass, field
 import re
@@ -20,22 +20,85 @@ _HELP_CONTINUITY_RE = re.compile(r"(还会帮我吗|还会理我吗|还会管我
 _REJECTION_RE = re.compile(r"(我不喜欢这样|我不喜欢你这样|别这么说|别这样说|别这么热心|别这样)")
 _GREETING_RE = re.compile(r"^(?:你好|您好|嗨|哈喽|hello|hi|hey|早安|早上好|中午好|晚上好|晚安)[!！。…~\s]*$", re.IGNORECASE)
 _PRESENCE_PING_RE = re.compile(r"^(?:在吗|在不在|还在吗|忙吗|在嘛|有人吗)[?？!！。…~\s]*$")
+_AUDITORY_CHECK_RE = re.compile(
+    r"^(?:"
+    r"(?:你)?(?:能不能|能|可以|可不可以|有没有)?(?:听到|听见|听得到|听得见|听清|听清楚)"
+    r"(?:我|我说话|我讲话|声音)?(?:吗|么)?"
+    r"|(?:我)?(?:说话|讲话|发声|声音)(?:你)?(?:能不能|能|可以|可不可以)?"
+    r"(?:听到|听见|听得到|听得见|听清|听清楚)(?:吗|么)?"
+    r"|(?:有|有没有)(?:听到|听见)?声音(?:吗|么)?"
+    r"|(?:刚才|刚刚)?(?:我)?(?:说了|说话|讲话)(?:什么)?(?:你)?(?:听到|听见|听得到|听得见)(?:吗|么)?"
+    r")[?？!！。…~\s]*$",
+    re.IGNORECASE,
+)
+_CONNECTIVITY_CHECK_RE = re.compile(
+    r"^(?:测试(?:一下|下)?|test|ping|"
+    r"(?:测试(?:一下|下)?(?:现在)?(?:能不能|能|会不会|会|可以)?(?:回|回复|收到)(?:吗|么)?)|"
+    r"(?:你)?(?:能不能|能|会不会|会|可以)(?:回|回复)(?:我)?(?:吗|么)?|"
+    r"(?:你)?(?:能不能|能|可以)?收到(?:吗|么)?|"
+    r"有反应(?:吗|么)?|回我一下|回复一下|在线(?:吗|么)?)"
+    r"[?？!！。…~\s]*$",
+    re.IGNORECASE,
+)
 _LIGHT_ACK_RE = re.compile(r"^(?:嗯|嗯嗯|哦|哦哦|好的?|行|行吧|收到|ok|okay|好哦|好呀)[!！。…~\s]*$", re.IGNORECASE)
 _PLAYFUL_PING_RE = re.compile(r"^(?:戳戳|喂喂|嘿嘿|冒泡|路过|ping|戳一戳)[!！。…~\s]*$", re.IGNORECASE)
-_PHATIC_PUNCT_RE = re.compile(r"^[?？!！。…~、,.，]{1,4}$")
+_LOW_SIGNAL_PUNCT_RE = re.compile(r"^[?？!！。…~、,.，]{1,4}$")
 _LIGHT_TEASE_RE = re.compile(r"(记不住|想听我多说|还想听|逗我|考我|又来问)")
 _CHALLENGING_RE = re.compile(r"(吧|吗|？|\?|就|还|又|不是|没|到底)")
 _CAPABILITY_CHECK_RE = re.compile(r"(能|可以|可不可以|是否).{0,8}(看到|看见|看清|看懂|识别)|你.{0,4}(看到|看见|看懂)|看得到", re.IGNORECASE)
 _MEANING_QUERY_RE = re.compile(r"(什么意思|啥意思|什么梗|表达什么|想表达什么|在说什么|什么语气|什么感觉)", re.IGNORECASE)
 _SCREENSHOT_QUERY_RE = re.compile(r"(报错|错误|怎么|哪里|哪儿|按钮|界面|问题|啥情况|什么意思|怎么操作|点哪里)", re.IGNORECASE)
 _LITERAL_QUERY_RE = re.compile(r"(图里有什么|图片里有什么|画的什么|是什么|写了什么|看到什么|内容是什么)", re.IGNORECASE)
-_MEDIA_ONLY_PLACEHOLDER_RE = re.compile(r"^\[(图片|图片消息|表情包|贴图|截图|文件|语音|视频)消息?\]$|^\[(图片|表情包|贴图|截图)\]$", re.IGNORECASE)
+_IMAGE_LOOK_REQUEST_RE = re.compile(
+    r"(?:帮我)?(?:看一下|看下|看看|看一眼|你看)(?:这|这个|下)?(?:张)?(?:图|图片|照片|截图)?|"
+    r"(?:这|这个)(?:张)?(?:图|图片|照片|截图)(?:你)?(?:看|看看|看一下|看下)",
+    re.IGNORECASE,
+)
+_IMAGE_SOCIAL_SIGNAL_TOKENS = (
+    "表情包",
+    "表情图",
+    "贴纸",
+    "贴图",
+    "反应图",
+    "meme",
+    "委屈",
+    "哭",
+    "难过",
+    "伤心",
+    "可怜",
+    "可爱",
+    "卖萌",
+    "猫耳",
+    "装乖",
+    "乖",
+    "萌",
+    "无语",
+    "尴尬",
+    "炸毛",
+    "抱抱",
+    "撒娇",
+    "吐槽",
+    "不爽",
+    "气鼓鼓",
+    "打趣",
+    "逗",
+)
+_MEDIA_ONLY_PLACEHOLDER_RE = re.compile(
+    r"^\[(?:图片|图像|表情|表情包|贴图|贴纸|截图|文件|语音|视频)(?:消息)?\]$|"
+    r"^\[(?:image|emoji|sticker|photo|picture|screenshot|file|voice|video)(?: message)?\]$|"
+    r"^\[[?\uff1f]{2,}\]$|"
+    r"^<\s*(?:image|emoji|sticker|photo|picture)\s*>$",
+    re.IGNORECASE,
+)
 _IMAGE_SOCIAL_ASSISTANT_RE = re.compile(
     r"(委屈成这样|突然这么可爱|想让我哄你|软乎乎的表情|小表情|拿这个表情|拿这种|撒娇吗|闹别扭呀|情绪这么低呀|一下子软成这样)"
 )
-_BOUNDARY_ANSWER_RE = re.compile(r"(我们并?不熟|我们不熟|不熟|不算熟|没熟到那种地步)")
+_BOUNDARY_DISTANCE_ANSWER_RE = re.compile(r"(我们并?不熟|我们不熟|不熟|不算熟|没熟到那种地步|慢慢熟|非要多熟|搭把手|顺路嘛|正好路过)")
+_STEPSISTER_BOUNDARY_ANSWER_RE = re.compile(
+    r"(义妹|妹妹|一家人|家里人|外人|见外|别装(?:生分|陌生|不熟)|装(?:生分|陌生|不熟)|划清界限|往外推|不当外人)"
+)
 _MOTIVATION_ANSWER_RE = re.compile(
-    r"(我只是觉得|因为你问了|看见了，也没有装作没看见|看见了，也没打算装作没看见|看到了，也没打算装作没看到|装作没看见|装作没看到|既然你遇到了麻烦|虽然不算熟，但是顺路|虽然不算熟，但是路过|顺路嘛|正好路过|正好碰上了|既然都碰上了)"
+    r"(会管|我管|要管|会帮|我帮|帮你|插手|接手|放着不管|不可能不管|不能不管|不当外人|别装(?:生分|陌生|不熟)|装(?:生分|陌生|不熟)|见外)"
 )
 _HELP_COMMITMENT_ANSWER_RE = re.compile(r"(会帮|会理|会回|会答|不会不理|多半不会不理|不会装作没听见)")
 _GENERIC_ASSISTIVE_RE = re.compile(r"(有什么事吗|有什么事|需要什么帮助|需要我|我可以帮)")
@@ -89,21 +152,28 @@ def _infer_literal_topic_from_perception(message: str, multimodal_payload: Mappi
     artifact_type = str(payload.get("artifact_type") or "").strip().lower()
     core_observation = _normalize_text(payload.get("core_observation"))
     visible_text = _normalize_text(payload.get("visible_text"))
+    social_signal = _normalize_text(payload.get("social_signal"))
     emotion_signals = [
         str(item).strip()
         for item in list(payload.get("emotion_signals") or [])
         if str(item).strip()
     ]
-    haystack = " ".join([core_observation, visible_text, *emotion_signals]).lower()
+    haystack = " ".join([core_observation, visible_text, social_signal, *emotion_signals]).lower()
     has_visual_payload = bool(primary_modality or observed_types or core_observation or visible_text or emotion_signals)
     if not has_visual_payload:
         return ""
 
+    visual_modalities = {"image", "emoji", "sticker"}
     is_screenshot = artifact_type == "screenshot" or "screenshot" in observed_types
-    is_social_image = primary_modality in {"image", "emoji"} and (
-        primary_modality == "emoji"
-        or bool(emotion_signals)
-        or any(token in haystack for token in ("委屈", "哭", "难过", "伤心", "可爱", "卖萌", "猫耳", "无语", "尴尬", "炸毛", "抱抱", "撒娇"))
+    is_visual_payload = primary_modality in visual_modalities or bool(observed_types.intersection(visual_modalities))
+    is_emoji_payload = primary_modality in {"emoji", "sticker"} or bool(observed_types.intersection({"emoji", "sticker"}))
+    is_plain_image_payload = primary_modality == "image" or "image" in observed_types
+    has_specific_social_signal = bool(social_signal or emotion_signals) or any(
+        token in haystack for token in _IMAGE_SOCIAL_SIGNAL_TOKENS
+    )
+    is_social_image = is_visual_payload and not is_screenshot and (
+        is_emoji_payload
+        or (is_plain_image_payload and has_specific_social_signal)
     )
     media_only = not normalized or bool(_MEDIA_ONLY_PLACEHOLDER_RE.match(normalized))
 
@@ -115,9 +185,13 @@ def _infer_literal_topic_from_perception(message: str, multimodal_payload: Mappi
         return "screenshot_analysis"
     if text and _LITERAL_QUERY_RE.search(text):
         return "literal_description"
+    if text and _IMAGE_LOOK_REQUEST_RE.search(text):
+        return "emoji_social_reply" if is_social_image else "literal_description"
     if media_only:
-        if primary_modality in {"image", "emoji"} and not is_screenshot:
+        if is_social_image:
             return "emoji_social_reply"
+        if is_plain_image_payload or is_screenshot:
+            return "attachment_only_no_question"
         return "attachment_only_no_question"
     if is_social_image:
         return "emoji_social_reply"
@@ -135,10 +209,14 @@ def classify_literal_topic(message: str, multimodal_payload: Mapping[str, Any] |
         return ""
     if _GREETING_RE.match(text):
         return "greeting"
+    if _AUDITORY_CHECK_RE.match(text):
+        return "auditory_check"
     if _PRESENCE_PING_RE.match(text):
-        return "presence_ping"
+        return "greeting"
+    if _CONNECTIVITY_CHECK_RE.match(text):
+        return "greeting"
     if _LIGHT_ACK_RE.match(text):
-        return "light_ack"
+        return "greeting"
     if _PLAYFUL_PING_RE.match(text):
         return "playful_ping"
     if _REJECTION_RE.search(text):
@@ -156,6 +234,27 @@ def classify_literal_topic(message: str, multimodal_payload: Mapping[str, Any] |
 
 def normalize_surface_group(message: str, literal_topic: str) -> str:
     text = _normalize_text(message)
+    compact = re.sub(r"[\s!！?？。…~、,.，]+", "", text).lower()
+    if not literal_topic and text and _LOW_SIGNAL_PUNCT_RE.match(text):
+        return "low_signal_punct"
+    if literal_topic == "greeting":
+        if _PRESENCE_PING_RE.match(text) or _CONNECTIVITY_CHECK_RE.match(text):
+            return "availability_check"
+        if _LIGHT_ACK_RE.match(text):
+            return "short_ack"
+        if compact in {"早", "早安", "早上好"}:
+            return "morning_greeting"
+        if compact == "中午好":
+            return "noon_greeting"
+        if compact in {"晚上好", "晚安"}:
+            return "night_greeting"
+        if compact in {"hello", "hi", "hey"}:
+            return "english_hello"
+        return "casual_greeting"
+    if literal_topic == "playful_ping":
+        return "playful_ping"
+    if literal_topic == "auditory_check":
+        return "auditory_check"
     if literal_topic == "identity" and _IDENTITY_SHORT_RE.match(text):
         return "identity_short"
     if literal_topic in {"relationship_boundary", "motivation"}:
@@ -173,7 +272,9 @@ def classify_assistant_answer_style(message: str) -> str:
         return ""
     if _contains_identity_name(text) and re.search(r"(我是|我叫|我的名字是|^(?:我[？?]?[，,\s]*)?)", text):
         return "self_identify"
-    if _BOUNDARY_ANSWER_RE.search(text):
+    if _BOUNDARY_DISTANCE_ANSWER_RE.search(text):
+        return "boundary_distance_answer"
+    if _STEPSISTER_BOUNDARY_ANSWER_RE.search(text):
         return "boundary_answer"
     if _MOTIVATION_ANSWER_RE.search(text):
         return "motivation_answer"
@@ -191,7 +292,7 @@ def _extract_answered_topics(message: str) -> set[str]:
         return topics
     if _contains_identity_name(text):
         topics.add("identity")
-    if _BOUNDARY_ANSWER_RE.search(text):
+    if _STEPSISTER_BOUNDARY_ANSWER_RE.search(text):
         topics.add("relationship_boundary")
     if _MOTIVATION_ANSWER_RE.search(text):
         topics.add("motivation")
@@ -346,8 +447,8 @@ def interpret_conversation(
         )
         if assistant_followup_kind:
             literal_topic = "assistant_reply_followup"
-    if not literal_topic and text and _PHATIC_PUNCT_RE.match(text):
-        literal_topic = "phatic_punct"
+    if not literal_topic and text and _LOW_SIGNAL_PUNCT_RE.match(text):
+        reason_tags.append("low_signal_punct")
 
     ledger = topic_ledger or TopicLedgerBlock()
     current_topic_entry = ledger.get(literal_topic) if literal_topic else None
@@ -401,12 +502,18 @@ def interpret_conversation(
             interaction_move = "light_tease"
         else:
             interaction_move = "reconfirm"
-    elif literal_topic in {"greeting", "presence_ping", "light_ack", "phatic_punct"}:
-        interaction_move = "light_ack"
+    elif literal_topic == "auditory_check":
+        interaction_move = "auditory_probe"
+    elif literal_topic == "greeting" and repeat_question_count >= 3:
+        interaction_move = "long_repeat"
+    elif literal_topic == "greeting" and repeat_question_count > 0:
+        interaction_move = "reconfirm"
+    elif literal_topic == "greeting":
+        interaction_move = "first_ask"
     elif literal_topic in {"playful_ping", "emoji_social_reply"}:
         interaction_move = "playful_ping"
     elif literal_topic in {"attachment_only_no_question"}:
-        interaction_move = "light_ack"
+        interaction_move = "attachment_ack"
     elif literal_topic in {"meme_meaning", "literal_description", "screenshot_analysis", "capability_check"}:
         interaction_move = "probe"
     elif freshness == "new":

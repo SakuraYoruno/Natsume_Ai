@@ -1,4 +1,4 @@
-# 版本：v1.1
+﻿# 版本：v1.1
 # Model Plane Node Registry — 模型节点注册表
 # 定义 model_node_id → 节点配置，供 graph_model_resolve.py 使用
 # 约束来源：docs/30_devspec/ModelPlane.md §3.1（9 云节点）
@@ -93,18 +93,18 @@ nodes:
     node_allowlist_envs: [dev, staging, prod]
 
   # ---- Phase XV: 三套 Agent 专用节点 ----
-  # ChatAgent（夏目蓝本人）—— 高质量，支持双语输出，流式
-  chat_agent_node:
-    description: "ChatAgent 人格渲染节点（Phase XV）"
+  # SurfaceReply（当前 Soul 本人）—— 高质量，支持双语输出，流式
+  surface_reply_node:
+    description: "SurfaceReply 人格渲染节点（Phase XV）"
     provider: gemini
     model_id: gemini-2.5-pro
     temperature: 0.80
     max_output_tokens: 1500
     node_allowlist_envs: [dev, staging, prod]
-    # 环境变量覆盖：HOST_CHAT_AGENT_MODEL_ID / HOST_CHAT_AGENT_TIMEOUT_MS
+    # 环境变量覆盖：HOST_SURFACE_REPLY_MODEL_ID / HOST_SURFACE_REPLY_TIMEOUT_MS
 
-  chat_agent_node_pool_b:
-    description: "ChatAgent 共享池 B 档（MiniMax fallback）"
+  surface_reply_node_pool_b:
+    description: "SurfaceReply 共享池 B 档（MiniMax fallback）"
     provider: minimax
     model_id: MiniMax-M2-her
     temperature: 0.78
@@ -130,3 +130,4 @@ nodes:
     max_output_tokens: 4000
     node_allowlist_envs: [dev, staging, prod]
     # 环境变量覆盖：HOST_SUBAGENT_MODEL_ID / HOST_SUBAGENT_TIMEOUT_MS
+

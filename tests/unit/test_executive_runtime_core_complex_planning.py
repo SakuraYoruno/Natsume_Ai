@@ -16,7 +16,11 @@ from host_brain.app.skill_dag_planner import SkillDagNode, SkillDagPlan
 
 class _StubSkillRegistry:
     def __init__(self) -> None:
-        self._items = [SimpleNamespace(skill_name="memory_add"), SimpleNamespace(skill_name="skill_translate")]
+        self._items = [
+            SimpleNamespace(skill_name="memory_add"),
+            SimpleNamespace(skill_name="skill_translate"),
+            SimpleNamespace(skill_name="codex_worker"),
+        ]
 
     def all(self):
         return list(self._items)
@@ -144,6 +148,121 @@ def test_hard_rule_route_forces_relational_followup_back_to_chat() -> None:
     assert route.route_type == "chat"
     assert route.target_id == ""
     assert route.reason_code == "RELATIONAL_CHAT:help_commitment"
+
+
+def test_hard_rule_route_keeps_simple_technical_advice_on_surface_chat() -> None:
+    route = _hard_rule_route(
+        intent_draft={},
+        sanitized_message="项目启动报错，端口18080被占用了，我该怎么排查？",
+        skill_registry=_StubSkillRegistry(),
+    )
+
+    assert route.route_type == "chat"
+    assert route.target_id == ""
+    assert route.reason_code == "hard_rule:surface_technical_advice"
+
+
+def test_hard_rule_route_keeps_project_service_probe_advice_on_surface_chat() -> None:
+    route = _hard_rule_route(
+        intent_draft={},
+        sanitized_message="Neo4j 连接不上 bolt://127.0.0.1:17687，先看什么？",
+        skill_registry=_StubSkillRegistry(),
+    )
+
+    assert route.route_type == "chat"
+    assert route.target_id == ""
+    assert route.reason_code == "hard_rule:surface_technical_advice"
+
+
+def test_hard_rule_route_keeps_surface_memory_recall_on_chat() -> None:
+    route = _hard_rule_route(
+        intent_draft={
+            "route": "skill",
+            "target_id": "memory_recall",
+        },
+        sanitized_message="你还记得我上次说喜欢芒果吗？",
+        skill_registry=_StubSkillRegistry(),
+        surface_task_control={
+            "task_mode": "memory_recall",
+            "response_move": "recall_memory",
+        },
+    )
+
+    assert route.route_type == "chat"
+    assert route.target_id == ""
+    assert route.reason_code == "hard_rule:surface_memory_recall"
+
+
+def test_hard_rule_route_prefers_memory_open_loop_over_task_progress_hint() -> None:
+    route = _hard_rule_route(
+        intent_draft={
+            "route": "task_progress",
+            "target_id": "",
+        },
+        sanitized_message="记忆系统还有什么待办没完成？",
+        skill_registry=_StubSkillRegistry(),
+    )
+
+    assert route.route_type == "chat"
+    assert route.target_id == ""
+    assert route.reason_code == "hard_rule:surface_memory_recall"
+
+
+def test_hard_rule_route_keeps_actionable_code_request_on_skill_route() -> None:
+    route = _hard_rule_route(
+        intent_draft={
+            "route": "skill",
+            "target_id": "codex_worker",
+        },
+        sanitized_message="开始处理，直接修改代码修复端口问题并跑测试。",
+        skill_registry=_StubSkillRegistry(),
+    )
+
+    assert route.route_type == "skill"
+    assert route.target_id == "codex_worker"
+    assert route.reason_code == "intent_draft:skill"
+
+
+def test_hard_rule_route_keeps_simple_task_split_on_surface_chat() -> None:
+    route = _hard_rule_route(
+        intent_draft={},
+        sanitized_message="帮我把下一步拆成三件事。",
+        skill_registry=_StubSkillRegistry(),
+    )
+
+    assert route.route_type == "chat"
+    assert route.target_id == ""
+    assert route.reason_code == "hard_rule:surface_task_split"
+
+
+def test_hard_rule_route_respects_explicit_delegate_before_simple_task_split() -> None:
+    route = _hard_rule_route(
+        intent_draft={
+            "route": "delegate",
+            "target_id": "intent_agent",
+        },
+        sanitized_message="下一步应该怎么安排，给我三步建议。",
+        skill_registry=_StubSkillRegistry(),
+    )
+
+    assert route.route_type == "delegate"
+    assert route.target_id == "intent_agent"
+    assert route.reason_code == "intent_draft:delegate"
+
+
+def test_hard_rule_route_keeps_actionable_task_split_on_delegate() -> None:
+    route = _hard_rule_route(
+        intent_draft={
+            "route": "delegate",
+            "target_id": "intent_agent",
+        },
+        sanitized_message="开始处理，把修复任务拆成三件事然后执行。",
+        skill_registry=_StubSkillRegistry(),
+    )
+
+    assert route.route_type == "delegate"
+    assert route.target_id == "intent_agent"
+    assert route.reason_code == "intent_draft:delegate"
 
 
 def test_build_plan_chat_outcome_preserves_structured_steps() -> None:

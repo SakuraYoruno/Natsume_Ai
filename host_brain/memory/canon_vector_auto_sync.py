@@ -24,7 +24,6 @@ DEFAULT_AUTO_SYNC_EMBED_TIMEOUT_MS = 60_000
 DEFAULT_AUTO_SYNC_COLLECTION = "canon"
 DEFAULT_AUTO_SYNC_BACKEND = "http"
 DEFAULT_AUTO_SYNC_CHROMA_PATH = "runtime/chroma/data"
-DEFAULT_AUTO_SYNC_STYLE_ROOT = "host_brain/canon/style"
 DEFAULT_AUTO_SYNC_WORLD_ROOT = "host_brain/canon/world"
 
 _logger = logging.getLogger("Natsume.canon_vector_auto_sync")
@@ -34,9 +33,7 @@ _ACTIVE_JOBS: set[str] = set()
 
 def trigger_canon_vector_auto_sync(
     *,
-    include_style: bool,
     include_world: bool,
-    style_root: str | Path = DEFAULT_AUTO_SYNC_STYLE_ROOT,
     world_root: str | Path = DEFAULT_AUTO_SYNC_WORLD_ROOT,
     reason: str = "",
     env: Mapping[str, Any] | None = None,
@@ -45,7 +42,7 @@ def trigger_canon_vector_auto_sync(
 
     This is best-effort and never raises to the write path.
     """
-    if not include_style and not include_world:
+    if not include_world:
         return
 
     env_values: dict[str, Any] = dict(env or os.environ)
@@ -72,13 +69,11 @@ def trigger_canon_vector_auto_sync(
     collection_dim = _coerce_positive_int(env_values.get(AUTO_SYNC_COLLECTION_DIM_ENV), default=0)
     resolved_collection_dim = int(collection_dim) if collection_dim > 0 else None
     node_id = str(env_values.get(AUTO_SYNC_NODE_ID_ENV) or env_values.get("HOST_NODE_ID") or "").strip() or None
-    resolved_style_root = Path(style_root).resolve()
     resolved_world_root = Path(world_root).resolve()
     local_overrides = _build_local_overrides(env_values)
 
     job_key = (
-        f"{int(include_style)}:{int(include_world)}:"
-        f"{resolved_style_root}:{resolved_world_root}:{collection}:{backend}"
+        f"{int(include_world)}:{resolved_world_root}:{collection}:{backend}"
     )
     if not _mark_job_active(job_key):
         return
@@ -87,9 +82,7 @@ def trigger_canon_vector_auto_sync(
         target=_run_auto_sync_job,
         kwargs={
             "job_key": job_key,
-            "include_style": bool(include_style),
             "include_world": bool(include_world),
-            "style_root": resolved_style_root,
             "world_root": resolved_world_root,
             "collection": collection,
             "backend": backend,
@@ -106,9 +99,7 @@ def trigger_canon_vector_auto_sync(
     if mode == "sync":
         _run_auto_sync_job(
             job_key=job_key,
-            include_style=bool(include_style),
             include_world=bool(include_world),
-            style_root=resolved_style_root,
             world_root=resolved_world_root,
             collection=collection,
             backend=backend,
@@ -126,9 +117,7 @@ def trigger_canon_vector_auto_sync(
 def _run_auto_sync_job(
     *,
     job_key: str,
-    include_style: bool,
     include_world: bool,
-    style_root: Path,
     world_root: Path,
     collection: str,
     backend: str,
@@ -143,13 +132,11 @@ def _run_auto_sync_job(
         from host_brain.memory.canon_vector_projection import sync_canon_vector_index
 
         summary = sync_canon_vector_index(
-            style_root=style_root,
             world_root=world_root,
             collection=collection,
             backend=backend,
             chroma_path=chroma_path,
             collection_dim=collection_dim,
-            include_style=include_style,
             include_world=include_world,
             env=env_values,
             local_overrides=local_overrides,
@@ -159,7 +146,6 @@ def _run_auto_sync_job(
             "canon vector auto sync completed",
             extra={
                 "reason": reason,
-                "include_style": include_style,
                 "include_world": include_world,
                 "docs_synced": int(summary.get("docs_synced") or 0),
                 "issues_count": int(summary.get("issues_count") or 0),
@@ -171,9 +157,7 @@ def _run_auto_sync_job(
             exc,
             extra={
                 "reason": reason,
-                "include_style": include_style,
                 "include_world": include_world,
-                "style_root": str(style_root),
                 "world_root": str(world_root),
             },
         )

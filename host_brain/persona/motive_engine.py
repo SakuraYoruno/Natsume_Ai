@@ -53,10 +53,10 @@ _OFFLINE_REACH_OUT_TABLE: list[tuple[float, float]] = [
 _BOND_CARE_BONUS: dict[str, float] = {
     "SOULMATE": 0.30,
     "INTIMATE": 0.25,
-    "CLOSE": 0.18,
-    "FRIEND": 0.10,
-    "ACQUAINTANCE": 0.04,
-    "STRANGER": 0.0,
+    "CONFIDANT": 0.25,
+    "CLOSE": 0.20,
+    "CLOSE_FRIEND": 0.20,
+    "FRIEND": 0.16,
 }
 
 # willingness 低值对应 withdraw 增益
@@ -194,7 +194,7 @@ class MotiveEngine:
         loneliness = float(offline.get("loneliness_level") or 0.0)
         anticipation = float(offline.get("anticipation_level") or 0.0)
         anticipation_topics = list(offline.get("anticipation_topics") or [])
-        bond_stage = str(bond.get("stage") or "STRANGER").strip().upper()
+        bond_stage = str(bond.get("stage") or "FRIEND").strip().upper()
         shared_count = int(inp.shared_memory_count or bond.get("shared_memory_count") or 0)
         pending_topics = list(inp.pending_followup_topics or [])
         emotion_intensity = float(emotion.get("emotion_intensity") or 0.0)
@@ -338,10 +338,9 @@ class MotiveEngine:
             protect += 0.20
             reasons.append("protect:topic_resistance")
 
-        # 浅关系
-        if bond_stage in {"STRANGER", "ACQUAINTANCE"}:
-            protect += 0.15
-            reasons.append("protect:shallow_bond")
+        if bond_stage == "FRIEND":
+            protect += 0.06
+            reasons.append("protect:sibling_baseline_boundary")
 
         # 反思保护
         if withdraw_hint:
@@ -447,4 +446,3 @@ def compute_motive_state(inp: MotiveInput) -> MotiveState:
         ))
     """
     return get_motive_engine().compute(inp)
-

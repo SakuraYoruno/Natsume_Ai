@@ -465,6 +465,7 @@ async def run_agent_loop(
                     "round": round_num,
                     "action_count": len(plan.actions),
                     "goal_understood": plan.extra.get("goal_understood", ""),
+                    "visual_summary": plan.extra.get("visual_summary", ""),
                     "confidence": plan.extra.get("confidence", 0.0),
                     "is_fallback": is_fallback,
                     "actions_preview": [
@@ -477,6 +478,55 @@ async def run_agent_loop(
                 # 降级计划直接终止
                 if is_fallback:
                     final_status = "PLAN_FAILED"
+                    break
+
+                # 纯 DONE 计划表示模型判断无需桌面动作；不要把它发送到 Edge 自动化执行。
+                if plan.actions and all(a.type == ActionType.DONE for a in plan.actions):
+                    round_latency_ms = int(time.time() * 1000) - round_start_ms
+                    goal_achieved = True
+                    final_status = "SUCCESS"
+                    round_summaries.append({
+                        "round": round_num,
+                        "status": "done",
+                        "goal_achieved": True,
+                        "latency_ms": round_latency_ms,
+                    })
+                    _persist(ledger, {
+                        "request_id": request_id,
+                        "session_id": session_id,
+                        "goal": goal,
+                        "round": round_num,
+                        "phase": "EXECUTE_DONE",
+                        "status": "SKIPPED_DONE",
+                        "goal_achieved": True,
+                        "report_json": "",
+                        "action_count": 0,
+                        "success_count": 0,
+                        "failed_count": 0,
+                        "latency_ms": 0,
+                        "error": None,
+                        "ts_ms": int(time.time() * 1000),
+                    })
+                    yield _sse({
+                        "phase": "EXECUTE_DONE",
+                        "round": round_num,
+                        "status": "skipped",
+                        "goal_achieved": True,
+                        "total_actions": 0,
+                        "success_count": 0,
+                        "failed_count": 0,
+                        "latency_ms": 0,
+                        "error": None,
+                        "request_id": request_id,
+                    })
+                    yield _sse({
+                        "phase": "ROUND_DONE",
+                        "round": round_num,
+                        "status": "SUCCESS",
+                        "goal_achieved": True,
+                        "latency_ms": round_latency_ms,
+                        "request_id": request_id,
+                    })
                     break
 
                 # ── 步骤 3：执行 ActionPlan ───────────────────────────────

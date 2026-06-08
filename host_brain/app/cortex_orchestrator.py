@@ -35,6 +35,12 @@ async def cortex_orchestrator_sse_generator(
         metadata={
             "input_source": str(getattr(request_body, "input_source", None) or "").strip(),
             "reply_channel": str(getattr(request_body, "reply_channel", None) or "").strip(),
+            "platform": str(getattr(request_body, "reply_channel", None) or "").strip(),
+            "reply_target": str(getattr(request_body, "reply_target", None) or getattr(request_body, "conversation_id", None) or "").strip(),
+            "conversation_id": str(getattr(request_body, "reply_target", None) or getattr(request_body, "conversation_id", None) or "").strip(),
+            "from_id": str(getattr(request_body, "from_id", None) or "").strip(),
+            "msg_id": str(getattr(request_body, "msg_id", None) or "").strip(),
+            "reply_to_msg_id": str(getattr(request_body, "reply_to_msg_id", None) or "").strip(),
             "attachments": list(getattr(request_body, "attachments", []) or []),
             "multimodal_observations": dict(getattr(request_body, "multimodal_observations", {}) or {}),
             "attachment_summary": str(getattr(request_body, "attachment_summary", "") or "").strip(),

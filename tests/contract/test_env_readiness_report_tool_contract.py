@@ -54,8 +54,7 @@ class TestEnvReadinessReportToolContract(unittest.TestCase):
         dependency_probes = {
             "host.bond.neo4j": {"available": True, "detail": "neo4j dependency healthy"},
             "host.memory.chroma": {"available": True, "detail": "chroma dependency healthy"},
-            "host.retrieval.embedding": {"available": True, "detail": "embedding dependency healthy"},
-            "host.retrieval.reranker": {"available": True, "detail": "reranker dependency healthy"},
+            "host.retrieval.recall_fusion": {"available": True, "detail": "surface recall dependency healthy"},
         }
         drill_rows = [
             {

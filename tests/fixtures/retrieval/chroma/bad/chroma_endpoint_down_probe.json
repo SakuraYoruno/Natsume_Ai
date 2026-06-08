@@ -1,7 +1,7 @@
-{
-  "probe": {
-    "reachable": false,
-    "detail": "chroma endpoint timeout"
-  },
-  "expected_reason_code": "CHROMA_ENDPOINT_UNAVAILABLE"
+﻿{
+    "probe":  {
+                  "reachable":  false,
+                  "detail":  "chroma endpoint timeout"
+              },
+    "expected_reason_code":  "CHROMA_ENDPOINT_UNAVAILABLE"
 }

@@ -1,5 +1,5 @@
 """
-以 Windows 后台进程方式启动 ChromaDB，并初始化六库 collections
+以 Windows 后台进程方式启动 ChromaDB，并初始化长期记忆 collection
 用法：python tools/start_chroma_bg.py
 """
 from __future__ import annotations
@@ -29,17 +29,12 @@ def _find_chroma_exe() -> pathlib.Path:
 
 CHROMA_EXE = _find_chroma_exe()
 HOST = "127.0.0.1"
-PORT = 8000
+PORT = 18000
 ENDPOINT = f"http://{HOST}:{PORT}"
 LOG_FILE = CHROMA_DATA / "chroma.log"
 
 COLLECTIONS = {
-    "episodic":    384,
-    "canon_style": 384,
-    "canon_world": 384,
-    "long_term":   384,
-    "distilled":   384,
-    "bond":        384,
+    "episodic": 1024,
 }
 TENANT = "default_tenant"
 DATABASE = "default_database"
@@ -89,7 +84,7 @@ def init_collections() -> None:
     import chromadb
     from chromadb.config import Settings
 
-    print(f"\n[ChromaDB] 初始化六库 collections")
+    print(f"\n[ChromaDB] 初始化长期记忆 collection")
     client = chromadb.HttpClient(
         host=HOST, port=PORT,
         tenant=TENANT, database=DATABASE,

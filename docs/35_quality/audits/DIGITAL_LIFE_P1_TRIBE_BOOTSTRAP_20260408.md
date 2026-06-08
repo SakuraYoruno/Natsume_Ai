@@ -1,3 +1,6 @@
+受众：CODEX
+标题：数字生命 P1 实施记录（Tribe Bootstrap）
+
 # 数字生命 P1 实施记录（Tribe Bootstrap）
 日期：2026-04-08
 

@@ -1,3 +1,6 @@
+受众：CODEX
+标题：架构修复计划（ARCH-FIX-PLAN）
+
 # 架构修复计划（ARCH-FIX-PLAN）
 
 **文档编号**：ARCH-FIX-PLAN-001

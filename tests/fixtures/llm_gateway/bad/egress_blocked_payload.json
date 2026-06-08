@@ -1,9 +1,9 @@
-{
-  "hard_state": {
-    "energy": 12
-  },
-  "rule_trace": [
-    "internal"
-  ],
-  "api_key": "sk-should-not-leak"
+﻿{
+    "hard_state":  {
+                       "energy":  12
+                   },
+    "rule_trace":  [
+                       "internal"
+                   ],
+    "api_key":  "sk-should-not-leak"
 }

@@ -240,7 +240,7 @@ def ledger():
         "reason_code": None,
         "stage": "S_BOND_STAGE",
         "evidence_refs": ["chat://request/req-int-002"],
-        "payload": {"from_stage": "STRANGER", "to_stage": "STRANGER", "total_score": 1},
+        "payload": {"from_stage": "FRIEND", "to_stage": "FRIEND", "total_score": 1},
         "detail": "stable",
         "ts_ms": now - 160,
     })
@@ -381,7 +381,7 @@ def test_runtime_snapshot_returns_unified_state(client, monkeypatch):
             "emotion_context": {"emotion_tag": "NEUTRAL", "mood_state": "engaged"},
             "bond_state": {"current_stage": "FRIEND"},
             "bond_summary": {"stage": "FRIEND", "trend": "上升"},
-            "bond_summary_human": {"stage": "朋友", "capability_hint": "朋友，可深入交流"},
+            "bond_summary_human": {"stage": "关系好的兄妹", "capability_hint": "关系好的兄妹，可轻松拌嘴"},
             "inner_world_state": {"loneliness": 0.32},
             "offline_state": {"offline_hours": 8.0},
             "silence_state": {"response_willingness": 0.72},
@@ -453,7 +453,7 @@ def test_runtime_snapshot_returns_unified_state(client, monkeypatch):
     assert data["sys_mode"] == "focus"
     assert data["sys_mode_status"]["sys_mode"] == "focus"
     assert data["hard_state"]["mood_state"] == "engaged"
-    assert data["bond_summary_human"]["stage"] == "朋友"
+    assert data["bond_summary_human"]["stage"] == "关系好的兄妹"
     assert data["motive_state"]["dominant_motive"] == "continuity"
     assert data["runtime_summary"]["current_state"]["sys_mode"] == "focus"
     assert data["runtime_summary"]["current_state"]["offline_reconnect_style"] == "soft_resume"
@@ -970,7 +970,7 @@ def test_trace_fallback_contains_summary_and_recall(client):
     assert "recall_fusion" in node_ids
     assert "cortex_orchestrator" in node_ids
     assert "Cortex Orchestrator" in node_display_names
-    assert "chat_agent" in node_ids
+    assert "surface_reply" in node_ids
     assert "llm_gateway" in node_ids
 
 

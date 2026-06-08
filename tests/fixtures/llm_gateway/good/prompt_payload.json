@@ -1,29 +1,31 @@
 ﻿{
-  "prompt_context": {
-    "hard_snapshot": {
-      "sys_mode": "normal"
-    },
-    "bond_summary": {
-      "stage": "STRANGER",
-      "trend": "稳定",
-      "capability_hint": "SUPPORTIVE",
-      "event_id": "bond_evt_001",
-      "evidence_refs": [
-        "evidence::bond::001"
-      ]
-    },
-    "authoritative": [],
-    "retrieval": [],
-    "style_pack": {
-      "tone": "calm"
-    },
-    "constraints": {
-      "must": [
-        "single_json_output"
-      ]
-    },
-    "tool_meta_pack": []
-  },
-  "api_key": "sk-test-hidden"
-}
+    "prompt_context":  {
+                           "hard_snapshot":  {
+                                                 "sys_mode":  "normal"
+                                             },
+                           "bond_summary":  {
+                                                "stage":  "FRIEND",
+                                                "trend":  "稳定",
+                                                "capability_hint":  "SUPPORTIVE",
+                                                "event_id":  "bond_evt_001",
+                                                "evidence_refs":  [
+                                                                      "evidence::bond::001"
+                                                                  ]
+                                            },
+                           "authoritative":  [
 
+                                             ],
+                           "retrieval":  [
+
+                                         ],
+                           "constraints":  {
+                                               "must":  [
+                                                            "single_json_output"
+                                                        ]
+                                           },
+                           "tool_meta_pack":  [
+
+                                              ]
+                       },
+    "api_key":  "sk-test-hidden"
+}

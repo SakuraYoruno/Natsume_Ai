@@ -2,6 +2,8 @@
 
 import datetime as _dt
 import logging
+import os
+import time
 from dataclasses import dataclass, field
 from typing import Any, Mapping
 
@@ -11,6 +13,79 @@ from host_brain.tribe.events import emit_tribe_event
 from host_brain.tribe.tribe_state import TribeStateRegistry, get_global_registry
 
 _logger = logging.getLogger("Natsume.prefrontal_agent")
+
+
+def _env_bool(name: str, *, default: bool) -> bool:
+    raw = os.environ.get(name)
+    if raw is None:
+        return bool(default)
+    normalized = str(raw).strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    return bool(default)
+
+
+def _env_float(name: str, *, default: float, min_value: float, max_value: float) -> float:
+    try:
+        value = float(str(os.environ.get(name) or "").strip())
+    except (TypeError, ValueError):
+        value = float(default)
+    return max(float(min_value), min(float(max_value), value))
+
+
+def _background_tasks_enabled() -> bool:
+    return _env_bool("HOST_BACKGROUND_TASKS_ENABLED", default=False)
+
+
+def _evolution_event_cooldown_s(reason: str) -> float:
+    reason_key = str(reason or "").strip().lower()
+    if reason_key == "loneliness_signal":
+        return _env_float("HOST_PREFRONTAL_LONELINESS_EVOLUTION_COOLDOWN_S", default=1800.0, min_value=60.0, max_value=86400.0)
+    if reason_key == "inner_world_spontaneous_activity":
+        return _env_float("HOST_PREFRONTAL_INNER_WORLD_EVOLUTION_COOLDOWN_S", default=900.0, min_value=60.0, max_value=86400.0)
+    if reason_key.startswith("immune_block"):
+        return _env_float("HOST_PREFRONTAL_IMMUNE_EVOLUTION_COOLDOWN_S", default=300.0, min_value=30.0, max_value=86400.0)
+    return _env_float("HOST_PREFRONTAL_EVOLUTION_EVENT_COOLDOWN_S", default=900.0, min_value=60.0, max_value=86400.0)
+
+
+def _evolution_user_cooldown_s() -> float:
+    return _env_float("HOST_PREFRONTAL_EVENT_EVOLUTION_USER_COOLDOWN_S", default=900.0, min_value=60.0, max_value=86400.0)
+
+
+def _evolution_startup_grace_s() -> float:
+    return _env_float("HOST_PREFRONTAL_EVENT_EVOLUTION_STARTUP_GRACE_S", default=300.0, min_value=0.0, max_value=3600.0)
+
+
+def _loneliness_event_emit_cooldown_s() -> float:
+    return _env_float("HOST_PREFRONTAL_LONELINESS_EVENT_EMIT_COOLDOWN_S", default=900.0, min_value=60.0, max_value=86400.0)
+
+
+def _loneliness_signal_log_cooldown_s() -> float:
+    return _env_float("HOST_PREFRONTAL_LONELINESS_SIGNAL_LOG_COOLDOWN_S", default=300.0, min_value=30.0, max_value=86400.0)
+
+
+def _loneliness_milestone_cooldown_s() -> float:
+    return _env_float("HOST_PREFRONTAL_LONELINESS_MILESTONE_COOLDOWN_S", default=3600.0, min_value=300.0, max_value=86400.0)
+
+
+def _resolve_prefrontal_persona_id(value: Any = None) -> str:
+    try:
+        from host_brain.persona.identity import resolve_persona_self_id  # noqa: PLC0415
+
+        return resolve_persona_self_id(value)
+    except Exception:
+        return str(value or "").strip() or "natsume_ai"
+
+
+def _resolve_prefrontal_bond_user_id(value: Any = None, *, session_id: str = "default") -> str:
+    try:
+        from host_brain.bond.user_identity import resolve_bond_user_id  # noqa: PLC0415
+
+        return resolve_bond_user_id(str(value or "").strip() or None, session_id=session_id)
+    except Exception:
+        return str(value or "").strip() or "default"
 
 
 @dataclass(slots=True)
@@ -29,6 +104,14 @@ class PrefrontalAgent:
     _bond_style_engine: Any | None = field(default=None, init=False, repr=False)
     _self_reflection: Any | None = field(default=None, init=False, repr=False)
     _emergent_growth_engine: Any | None = field(default=None, init=False, repr=False)
+    _last_evolution_event_ts_by_key: dict[str, float] = field(default_factory=dict, init=False, repr=False)
+    _evolution_event_inflight_keys: set[str] = field(default_factory=set, init=False, repr=False)
+    _last_evolution_cycle_ts_by_user: dict[str, float] = field(default_factory=dict, init=False, repr=False)
+    _evolution_cycle_inflight_users: set[str] = field(default_factory=set, init=False, repr=False)
+    _created_monotonic: float = field(default_factory=time.monotonic, init=False, repr=False)
+    _last_loneliness_event_emit_ts_by_user: dict[str, float] = field(default_factory=dict, init=False, repr=False)
+    _last_loneliness_signal_log_ts_by_user: dict[str, float] = field(default_factory=dict, init=False, repr=False)
+    _last_loneliness_milestone_ts_by_user: dict[str, float] = field(default_factory=dict, init=False, repr=False)
     state_registry: TribeStateRegistry = field(default_factory=get_global_registry, repr=False)
 
     def describe(self) -> dict[str, Any]:
@@ -45,14 +128,16 @@ class PrefrontalAgent:
         now_ms: int,
         trigger_reason: str = "runtime_snapshot",
         render_target_lang: str = "zh",
+        use_llm: bool = True,
     ) -> dict[str, Any]:
         from host_brain.persona.persona_engine import PersonaEngine  # noqa: PLC0415
         from host_brain.persona.self_reflection import build_self_reflection_pulse  # noqa: PLC0415
         from host_brain.integrations.llm_helpers import build_pool_prompt_llm_fn  # noqa: PLC0415
 
         persona_engine = PersonaEngine.get_instance()
+        persona_user_id = _resolve_prefrontal_persona_id(persona_user_id)
         snapshot_obj = persona_engine.get_self_model_snapshot(
-            str(persona_user_id or "user_1"),
+            persona_user_id,
             timeline_summary=dict(timeline_summary or {}),
             timeline_diary=dict(timeline_diary or {}),
             bond_state=bond_state_obj,
@@ -66,15 +151,24 @@ class PrefrontalAgent:
             snapshot = dict(snapshot_obj)
         else:
             snapshot = {}
+        llm_enabled = bool(use_llm)
+        if llm_enabled and not _background_tasks_enabled():
+            return {
+                "self_model_snapshot": snapshot,
+                "self_reflection_pulse": {},
+                "reason_code": "SELF_REFLECTION_BACKGROUND_TASKS_DISABLED",
+            }
         if snapshot:
+            llm_fn = None
             try:
-                llm_fn = build_pool_prompt_llm_fn(
-                    request_id=f"self_reflection_context::{int(now_ms)}",
-                    scene_type="SELF_REFLECTION",
-                    cognitive_tier="B",
-                    timeout_ms=4000,
-                    gen_params={"temperature": 0.55, "top_p": 0.9},
-                )
+                if llm_enabled:
+                    llm_fn = build_pool_prompt_llm_fn(
+                        request_id=f"self_reflection_context::{int(now_ms)}",
+                        scene_type="SELF_REFLECTION",
+                        cognitive_tier="B",
+                        timeout_ms=4000,
+                        gen_params={"temperature": 0.55, "top_p": 0.9},
+                    )
             except Exception:
                 llm_fn = None
             try:
@@ -83,7 +177,7 @@ class PrefrontalAgent:
                         snapshot,
                         trigger_reason=str(trigger_reason or "runtime_snapshot"),
                         llm_fn=llm_fn,
-                        strict_llm=True,
+                        strict_llm=bool(llm_fn),
                         render_target_lang=str(render_target_lang or "zh"),
                     )
                     or {}
@@ -116,7 +210,7 @@ class PrefrontalAgent:
         from host_brain.persona.personality_traits import PersonalityTraits  # noqa: PLC0415
 
         try:
-            return PersonaEngine.get_instance().get_traits(str(persona_user_id or "user_1"))
+            return PersonaEngine.get_instance().get_traits(_resolve_prefrontal_persona_id(persona_user_id))
         except Exception:
             return PersonalityTraits.from_baseline()
 
@@ -148,7 +242,7 @@ class PrefrontalAgent:
             hint = adapter.adapt(
                 traits,
                 emotion_vector,
-                str(bond_stage or "STRANGER"),
+                str(bond_stage or "FRIEND"),
                 user_emotion_tag=str(user_emotion_tag or "NEUTRAL"),
                 user_message=str(user_message or ""),
                 render_target_lang=str(render_target_lang or "zh"),
@@ -157,7 +251,7 @@ class PrefrontalAgent:
             hint = adapter.adapt(
                 traits,
                 emotion_vector,
-                str(bond_stage or "STRANGER"),
+                str(bond_stage or "FRIEND"),
                 user_emotion_tag=str(user_emotion_tag or "NEUTRAL"),
                 user_message=str(user_message or ""),
             )
@@ -224,7 +318,7 @@ class PrefrontalAgent:
         if self._bond_style_engine is None:
             self._bond_style_engine = BondAwareStyleEngine()
         result = self._bond_style_engine.generate(
-            bond_stage=str(bond_stage or "STRANGER"),
+            bond_stage=str(bond_stage or "FRIEND"),
             intimacy_score=float(intimacy_score or 0.0),
             mood_state=str(mood_state or "neutral"),
             natsume_mood=str(natsume_mood or "NEUTRAL"),
@@ -255,7 +349,7 @@ class PrefrontalAgent:
                 )
                 or 0.0
             ),
-            "bond_stage": str(as_dict_payload.get("bond_stage") or bond_stage or "STRANGER"),
+            "bond_stage": str(as_dict_payload.get("bond_stage") or bond_stage or "FRIEND"),
         }
 
     def run_self_reflection_cycle(
@@ -348,7 +442,7 @@ class PrefrontalAgent:
         user_message: str,
         motive_state: Mapping[str, Any] | None = None,
         recall_summary: str = "",
-        bond_stage: str = "STRANGER",
+        bond_stage: str = "FRIEND",
         bond_intimacy: float = 0.0,
         immune_risk_level: str = "none",
         drift_alert_level: str = "NONE",
@@ -363,7 +457,7 @@ class PrefrontalAgent:
 
         这是 LLM 从"总控制器"降级为"语言生成器"的关键一步。
         PrefrontalAgent 基于器官族完整状态产出意图计划，
-        chat_agent 退化为纯粹的语言生成器，只负责把 task 转成流畅自然语言。
+        surface_reply 退化为纯粹的语言生成器，只负责把 task 转成流畅自然语言。
 
         Args:
             user_message: 用户消息原文
@@ -384,7 +478,7 @@ class PrefrontalAgent:
             dict: {
                 "action": "speak" | "skill" | "delegate" | "wait",
                 "target": str,          # skill/agent 名称，speak 时为空
-                "task": str,            # 任务描述，注入 chat_agent 作为语言化目标
+                "task": str,            # 任务描述，注入 surface_reply 作为语言化目标
                 "tone_hint": str,       # 语气提示（warm/direct/gentle/playful）
                 "urgency": float,       # 紧迫度 0~1
                 "source": str,          # "prefrontal_llm" | "prefrontal_rule"
@@ -452,7 +546,7 @@ class PrefrontalAgent:
                 emotion_tag=str(emotion_tag or "NEUTRAL"),
                 valence=round(float(valence), 3),
                 arousal=round(float(arousal), 3),
-                bond_stage=str(bond_stage or "STRANGER"),
+                bond_stage=str(bond_stage or "FRIEND"),
                 bond_intimacy=round(float(bond_intimacy), 3),
                 motive_care=_care,
                 motive_continuity=_continuity,
@@ -548,7 +642,7 @@ class PrefrontalAgent:
 
             orchestrator = EvolutionOrchestrator()
             args = dict((system_intent or {}).get("args") or {})
-            user_id = str(args.get("user_id") or "user_1")
+            user_id = _resolve_prefrontal_persona_id(args.get("user_id"))
             date = str(args.get("date") or _dt.date.today().isoformat())
 
             timeline_summary: dict[str, Any] = {}
@@ -606,7 +700,7 @@ class PrefrontalAgent:
         from host_brain.persona.persona_engine import PersonaEngine  # noqa: PLC0415
 
         entries = PersonaEngine.get_instance().get_change_log(
-            str(persona_user_id or "user_1"),
+            _resolve_prefrontal_persona_id(persona_user_id),
             limit=max(1, int(limit)),
         )
         if not isinstance(entries, list):
@@ -623,7 +717,7 @@ class PrefrontalAgent:
     def resolve_growth_summary(self, *, persona_user_id: str, now_ts_ms: int) -> dict[str, Any]:
         orchestrator = self._get_evolution_orchestrator()
         payload = orchestrator.get_growth_summary(
-            str(persona_user_id or "user_1"),
+            _resolve_prefrontal_persona_id(persona_user_id),
             now_ts_ms=int(now_ts_ms),
         )
         if isinstance(payload, Mapping):
@@ -715,7 +809,7 @@ class PrefrontalAgent:
         context: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
 
-        user_id = str(persona_user_id or "user_1").strip() or "user_1"
+        user_id = _resolve_prefrontal_persona_id(persona_user_id)
         narrative_text = str(narrative or "").strip()
         ctx = dict(context or {})
         trace_id = f"autobio_gate_{now_ms()}"
@@ -726,7 +820,7 @@ class PrefrontalAgent:
         stress_index = float(vitals.get("stress_index") or 0.0)
         bond_ctx = get_social_brain_agent().get_bond_context(
             session_id=str(ctx.get("session_id") or "default"),
-            user_id=user_id,
+            user_id=_resolve_prefrontal_bond_user_id(ctx.get("user_id"), session_id=str(ctx.get("session_id") or "default")),
         )
         bond_vector = dict(bond_ctx.get("bond_vector") or {})
         trust = float(bond_vector.get("trust") or 0.4)
@@ -800,7 +894,7 @@ class PrefrontalAgent:
         if str(gate.get("decision") or "").upper() != "ALLOW":
             return {"status": "BLOCKED", "gate": gate}
         write_result = get_hippocampus_agent().write_autobiographical_memory(
-            person_id=str(persona_user_id or "user_1"),
+            person_id=_resolve_prefrontal_persona_id(persona_user_id),
             narrative=str(narrative or ""),
             gate_result=gate,
             request_id=request_id,
@@ -820,9 +914,9 @@ class PrefrontalAgent:
             return {"applied": False, "reason": "tracker_unavailable"}
         try:
             result = tracker.on_stage_promoted(
-                user_id=str(user_id or "user_1"),
-                from_stage=str(from_stage or "STRANGER"),
-                to_stage=str(to_stage or "STRANGER"),
+                user_id=_resolve_prefrontal_persona_id(user_id),
+                from_stage=str(from_stage or "FRIEND"),
+                to_stage=str(to_stage or "FRIEND"),
                 ts_ms=int(ts_ms),
             )
             return {
@@ -844,7 +938,7 @@ class PrefrontalAgent:
             return {"applied": False, "reason": "tracker_unavailable"}
         try:
             result = tracker.on_milestone(
-                user_id=str(user_id or "user_1"),
+                user_id=_resolve_prefrontal_persona_id(user_id),
                 milestone_key=str(milestone_key or ""),
                 ts_ms=int(ts_ms),
             )
@@ -877,39 +971,41 @@ class PrefrontalAgent:
         from host_brain.persona.persona_engine import PersonaEngine  # noqa: PLC0415
 
         if llm_fn is None:
+            resolved_user_id = _resolve_prefrontal_persona_id(user_id)
             return {
                 "status": "SKIPPED",
                 "reason_code": "EMERGENT_GROWTH_LLM_REQUIRED",
-                "user_id": str(user_id or "user_1"),
+                "user_id": resolved_user_id,
                 "lookback_days": max(1, int(lookback_days or 7)),
                 "pattern_result": {},
                 "growth_result": {},
             }
 
+        resolved_user_id = _resolve_prefrontal_persona_id(user_id)
         persona_engine = PersonaEngine.get_instance()
         analyzer = InteractionPatternAnalyzer(llm_fn=llm_fn, strict_llm=True)
         pattern_result = analyzer.analyze(
-            user_id=str(user_id or "user_1"),
+            user_id=resolved_user_id,
             episodic_store=episodic_store,
-            current_traits=persona_engine.get_traits(str(user_id or "user_1")),
+            current_traits=persona_engine.get_traits(resolved_user_id),
             lookback_days=max(1, int(lookback_days or 7)),
         )
         if str(getattr(pattern_result, "analysis_method", "") or "").strip().lower() != "llm":
             return {
                 "status": "SKIPPED",
                 "reason_code": "EMERGENT_GROWTH_LLM_REQUIRED",
-                "user_id": str(user_id or "user_1"),
+                "user_id": resolved_user_id,
                 "lookback_days": max(1, int(lookback_days or 7)),
                 "pattern_result": dict(pattern_result.as_dict() if hasattr(pattern_result, "as_dict") else {}),
                 "growth_result": {},
             }
         growth_result = self._get_emergent_growth_engine().apply(
-            user_id=str(user_id or "user_1"),
+            user_id=resolved_user_id,
             pattern_result=pattern_result,
         )
         return {
             "status": "OK" if bool(getattr(growth_result, "applied", False)) else "SKIPPED",
-            "user_id": str(user_id or "user_1"),
+            "user_id": resolved_user_id,
             "lookback_days": max(1, int(lookback_days or 7)),
             "pattern_result": dict(pattern_result.as_dict() if hasattr(pattern_result, "as_dict") else {}),
             "growth_result": dict(growth_result.as_dict() if hasattr(growth_result, "as_dict") else {}),
@@ -918,11 +1014,12 @@ class PrefrontalAgent:
     def resolve_emergent_growth_status(self, *, user_id: str, recent_limit: int = 5) -> dict[str, Any]:
         engine = self._get_emergent_growth_engine()
         recent = max(1, int(recent_limit or 5))
-        growth_log = [record.as_dict() for record in engine.get_growth_log(str(user_id or "user_1"))[-recent:]]
+        resolved_user_id = _resolve_prefrontal_persona_id(user_id)
+        growth_log = [record.as_dict() for record in engine.get_growth_log(resolved_user_id)[-recent:]]
         return {
             "status": "OK",
-            "user_id": str(user_id or "user_1"),
-            "growth_summary": engine.get_growth_summary(str(user_id or "user_1")),
+            "user_id": resolved_user_id,
+            "growth_summary": engine.get_growth_summary(resolved_user_id),
             "recent_growth_log": growth_log,
         }
 
@@ -993,6 +1090,139 @@ class PrefrontalAgent:
         except Exception as exc:
             _logger.warning("PrefrontalAgent 订阅注册失败（降级）: %s", exc)
 
+    def _reserve_evolution_event(self, *, user_id: str, reason: str) -> str | None:
+        reason_key = str(reason or "event_triggered").strip() or "event_triggered"
+        user_key = _resolve_prefrontal_persona_id(user_id)
+        event_key = f"{user_key}:{reason_key}"
+        now = time.monotonic()
+        startup_grace_s = _evolution_startup_grace_s()
+        if (
+            not reason_key.startswith("immune_block")
+            and startup_grace_s > 0
+            and now - float(self._created_monotonic or 0.0) < startup_grace_s
+        ):
+            _logger.info(
+                "PrefrontalAgent evolution_cycle 启动保护窗内，跳过: user_id=%s reason=%s left_s=%d",
+                user_key, reason_key, int(startup_grace_s - (now - float(self._created_monotonic or 0.0))),
+            )
+            return None
+        if user_key in self._evolution_cycle_inflight_users:
+            _logger.info(
+                "PrefrontalAgent evolution_cycle 已在执行，合并跳过事件: user_id=%s reason=%s",
+                user_key, reason_key,
+            )
+            return None
+        if event_key in self._evolution_event_inflight_keys:
+            _logger.info(
+                "PrefrontalAgent evolution_cycle 已在执行，跳过重复事件: user_id=%s reason=%s",
+                user_key, reason_key,
+            )
+            return None
+        user_cooldown_s = _evolution_user_cooldown_s()
+        last_user_ts = float(self._last_evolution_cycle_ts_by_user.get(user_key) or 0.0)
+        if (
+            not reason_key.startswith("immune_block")
+            and last_user_ts > 0
+            and now - last_user_ts < user_cooldown_s
+        ):
+            _logger.info(
+                "PrefrontalAgent evolution_cycle 用户级冷却中，跳过: user_id=%s reason=%s left_s=%d",
+                user_key, reason_key, int(user_cooldown_s - (now - last_user_ts)),
+            )
+            return None
+        cooldown_s = _evolution_event_cooldown_s(reason_key)
+        last_ts = float(self._last_evolution_event_ts_by_key.get(event_key) or 0.0)
+        if last_ts > 0 and now - last_ts < cooldown_s:
+            _logger.info(
+                "PrefrontalAgent evolution_cycle 事件冷却中，跳过: user_id=%s reason=%s left_s=%d",
+                user_key, reason_key, int(cooldown_s - (now - last_ts)),
+            )
+            return None
+        if self._resource_gate_defers_evolution(reason=reason_key):
+            return None
+        self._last_evolution_event_ts_by_key[event_key] = now
+        self._last_evolution_cycle_ts_by_user[user_key] = now
+        self._evolution_event_inflight_keys.add(event_key)
+        self._evolution_cycle_inflight_users.add(user_key)
+        return event_key
+
+    def _release_evolution_event(self, event_key: str | None) -> None:
+        if event_key:
+            self._evolution_event_inflight_keys.discard(event_key)
+            user_key = str(event_key).split(":", 1)[0].strip()
+            if user_key:
+                self._evolution_cycle_inflight_users.discard(user_key)
+
+    def _resource_gate_defers_evolution(self, *, reason: str) -> bool:
+        try:
+            from host_brain.app.dependencies import get_resource_manager  # noqa: PLC0415
+
+            manager = get_resource_manager(create_if_missing=False)
+        except Exception as exc:
+            _logger.debug("PrefrontalAgent resource gate unavailable: %s", exc)
+            return False
+        if manager is None or not hasattr(manager, "assess_background_task"):
+            return False
+        priority = "HIGH" if str(reason or "").startswith("immune_block") else "LOW"
+        try:
+            decision = dict(
+                manager.assess_background_task(
+                    task_id="evolution_cycle_event",
+                    priority=priority,
+                    task_type="memory_heavy",
+                    uses_llm=True,
+                    uses_gpu=False,
+                    reason=f"prefrontal_event:{reason}",
+                )
+                or {}
+            )
+        except Exception as exc:
+            _logger.debug("PrefrontalAgent resource gate check failed: %s", exc)
+            return False
+        if bool(decision.get("allowed", True)):
+            return False
+        _logger.info(
+            "PrefrontalAgent evolution_cycle 被资源管家延后: reason=%s pressure=%s retry_after_s=%s",
+            reason,
+            decision.get("pressure_status"),
+            decision.get("retry_after_s"),
+        )
+        return True
+
+    def _loneliness_evolution_emit_allowed(self, *, user_id: str) -> bool:
+        user_key = _resolve_prefrontal_persona_id(user_id)
+        cooldown_s = _loneliness_event_emit_cooldown_s()
+        now = time.monotonic()
+        last_ts = float(self._last_loneliness_event_emit_ts_by_user.get(user_key) or 0.0)
+        if last_ts > 0 and now - last_ts < cooldown_s:
+            _logger.debug(
+                "PrefrontalAgent loneliness_signal 演化事件冷却中，跳过发布: user_id=%s left_s=%d",
+                user_key, int(cooldown_s - (now - last_ts)),
+            )
+            return False
+        self._last_loneliness_event_emit_ts_by_user[user_key] = now
+        return True
+
+    def _loneliness_signal_log_allowed(self, *, user_id: str) -> bool:
+        user_key = _resolve_prefrontal_persona_id(user_id)
+        cooldown_s = _loneliness_signal_log_cooldown_s()
+        now = time.monotonic()
+        last_ts = float(self._last_loneliness_signal_log_ts_by_user.get(user_key) or 0.0)
+        if last_ts > 0 and now - last_ts < cooldown_s:
+            return False
+        self._last_loneliness_signal_log_ts_by_user[user_key] = now
+        return True
+
+    def _loneliness_milestone_allowed(self, *, user_id: str) -> bool:
+        user_key = _resolve_prefrontal_persona_id(user_id)
+        cooldown_s = _loneliness_milestone_cooldown_s()
+        now = time.monotonic()
+        last_ts = float(self._last_loneliness_milestone_ts_by_user.get(user_key) or 0.0)
+        if last_ts > 0 and now - last_ts < cooldown_s:
+            return False
+        self._last_loneliness_milestone_ts_by_user[user_key] = now
+        return True
+
     async def _on_evolution_cycle_triggered(self, event: Any) -> None:
         """处理 EVOLUTION_CYCLE_TRIGGERED 事件：触发人格演化周期。
 
@@ -1001,22 +1231,25 @@ class PrefrontalAgent:
         """
         try:
             payload = dict(event.payload or {})
-            user_id = str(payload.get("user_id") or "user_1").strip() or "user_1"
+            user_id = _resolve_prefrontal_persona_id(payload.get("user_id"))
             reason = str(payload.get("reason") or "event_triggered").strip()
             _logger.info(
                 "PrefrontalAgent 收到 EVOLUTION_CYCLE_TRIGGERED: user_id=%s reason=%s",
                 user_id, reason,
             )
+            event_key = self._reserve_evolution_event(user_id=user_id, reason=reason)
+            if event_key is None:
+                return
             # 异步执行 evolution_cycle（避免阻塞 dispatch_loop）
             import asyncio  # noqa: PLC0415
             asyncio.create_task(
-                self._run_evolution_cycle_async(user_id=user_id, reason=reason),
+                self._run_evolution_cycle_async(user_id=user_id, reason=reason, event_key=event_key),
                 name=f"evolution_cycle_{user_id}",
             )
         except Exception as exc:
             _logger.warning("PrefrontalAgent._on_evolution_cycle_triggered 异常: %s", exc)
 
-    async def _run_evolution_cycle_async(self, *, user_id: str, reason: str) -> None:
+    async def _run_evolution_cycle_async(self, *, user_id: str, reason: str, event_key: str | None = None) -> None:
         """在独立 task 中异步执行 evolution_cycle，避免阻塞事件分发循环。"""
         try:
             import asyncio  # noqa: PLC0415
@@ -1037,6 +1270,8 @@ class PrefrontalAgent:
                 "PrefrontalAgent._run_evolution_cycle_async 异常: user_id=%s exc=%s",
                 user_id, exc,
             )
+        finally:
+            self._release_evolution_event(event_key)
 
     async def _on_interaction_recorded(self, event: Any) -> None:
         """处理 INTERACTION_RECORDED 事件：触发人格漂移检测。
@@ -1204,11 +1439,11 @@ class PrefrontalAgent:
             payload = dict(getattr(event, "payload", None) or {})
             from_stage = str(payload.get("from_stage") or "").strip().upper()
             to_stage = str(payload.get("to_stage") or "").strip().upper()
-            user_id = str(payload.get("user_id") or "user_1").strip() or "user_1"
+            user_id = _resolve_prefrontal_persona_id(payload.get("user_id"))
             ts_ms = int(getattr(event, "ts_ms", 0) or 0)
 
             _STAGE_ORDER = [
-                "STRANGER", "ACQUAINTANCE", "FRIEND",
+                "FRIEND",
                 "CLOSE_FRIEND", "INTIMATE", "SOULMATE",
             ]
             from_idx = _STAGE_ORDER.index(from_stage) if from_stage in _STAGE_ORDER else -1
@@ -1242,30 +1477,32 @@ class PrefrontalAgent:
         try:
             payload = dict(getattr(event, "payload", None) or {})
             loneliness = max(0.0, min(1.0, float(payload.get("loneliness") or 0.0)))
-            user_id = str(payload.get("user_id") or "user_1").strip() or "user_1"
+            user_id = _resolve_prefrontal_persona_id(payload.get("user_id"))
             ts_ms = int(getattr(event, "ts_ms", 0) or 0)
 
             if loneliness > 0.6:
-                _logger.info(
-                    "PrefrontalAgent 孤独感触发决策调整: loneliness=%.2f user_id=%s",
-                    loneliness, user_id,
-                )
-                # 孤独感 > 0.6：触发演化周期（孤独感是人格成长的催化剂）
-                try:
-                    emit_tribe_event(
-                        event_type="EVOLUTION_CYCLE_TRIGGERED",
-                        source_agent="prefrontal_agent",
-                        payload={
-                            "user_id": user_id,
-                            "reason": "loneliness_signal",
-                            "loneliness": loneliness,
-                            "ts_ms": ts_ms,
-                        },
+                if self._loneliness_signal_log_allowed(user_id=user_id):
+                    _logger.info(
+                        "PrefrontalAgent 孤独感触发决策调整: loneliness=%.2f user_id=%s",
+                        loneliness, user_id,
                     )
-                except Exception:
-                    pass
+                # 孤独感 > 0.6：触发演化周期（孤独感是人格成长的催化剂），但不能让后台成长链路风暴化。
+                if self._loneliness_evolution_emit_allowed(user_id=user_id):
+                    try:
+                        emit_tribe_event(
+                            event_type="EVOLUTION_CYCLE_TRIGGERED",
+                            source_agent="prefrontal_agent",
+                            payload={
+                                "user_id": user_id,
+                                "reason": "loneliness_signal",
+                                "loneliness": loneliness,
+                                "ts_ms": ts_ms,
+                            },
+                        )
+                    except Exception:
+                        pass
 
-            if loneliness > 0.8:
+            if loneliness > 0.8 and self._loneliness_milestone_allowed(user_id=user_id):
                 # 孤独感极高：触发 milestone 成长节点（深度孤独体验）
                 import asyncio  # noqa: PLC0415
                 asyncio.create_task(
@@ -1297,16 +1534,21 @@ class PrefrontalAgent:
             # 仅高风险拦截才触发成长周期
             if risk_level not in ("high", "critical") and score < 0.7:
                 return
-            user_id = str(payload.get("user_id") or "user_1").strip() or "user_1"
+            user_id = _resolve_prefrontal_persona_id(payload.get("user_id"))
             _logger.info(
                 "PrefrontalAgent IMMUNE_BLOCK 触发安全审查成长: risk_level=%s score=%.3f session_id=%s",
                 risk_level, score, session_id,
             )
+            reason = f"immune_block_risk_{risk_level}"
+            event_key = self._reserve_evolution_event(user_id=user_id, reason=reason)
+            if event_key is None:
+                return
             import asyncio  # noqa: PLC0415
             asyncio.create_task(
                 self._run_evolution_cycle_async(
                     user_id=user_id,
-                    reason=f"immune_block_risk_{risk_level}",
+                    reason=reason,
+                    event_key=event_key,
                 ),
                 name=f"immune_block_growth_{session_id}",
             )

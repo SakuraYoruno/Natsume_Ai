@@ -157,6 +157,10 @@ def _ensure_default_tool_catalog_seeded() -> int:
         ("file_read", "READ", "NONE", ("file",), "读取文件内容（只读）"),
         ("memory_search", "READ", "NONE", ("memory",), "语义检索记忆库"),
         ("system_info", "READ", "NONE", ("system",), "查询系统信息"),
+        ("system_resource_snapshot", "READ", "NONE", ("system",), "查询整机资源快照"),
+        ("process_resource_top", "READ", "NONE", ("system",), "查询资源热点进程"),
+        ("resource_pressure_analysis", "READ", "NONE", ("system",), "分析整机内存/显存/CPU 压力根因"),
+        ("resource_manager_status", "READ", "NONE", ("system",), "查询自动资源管家状态"),
         ("network_status", "READ", "NONE", ("system",), "查询网络状态"),
         ("web_search", "READ", "NONE", ("web",), "执行网络搜索"),
     ]

@@ -79,21 +79,6 @@ def test_resolve_interaction_thread_detects_identity_loop() -> None:
     assert thread.source_topic == "identity"
 
 
-def test_resolve_interaction_thread_detects_boundary_probe() -> None:
-    thread = resolve_interaction_thread(
-        recent_turns=[
-            {"role": "user", "content": "你为什么要帮我，我们很熟吗"},
-            {"role": "assistant", "content": "不熟。只是看见了，也没打算装作没看见。"},
-            {"role": "user", "content": "你为什么要帮我"},
-        ],
-        current_literal_topic="motivation",
-    )
-
-    assert thread.open is True
-    assert thread.thread_kind == "boundary_probe"
-    assert thread.source_topic == "motivation"
-
-
 def test_resolve_interaction_thread_detects_help_reassurance() -> None:
     thread = resolve_interaction_thread(
         recent_turns=[

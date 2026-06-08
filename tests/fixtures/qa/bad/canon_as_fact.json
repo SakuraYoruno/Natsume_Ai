@@ -1,14 +1,16 @@
-{
-  "narrative": {
-    "text": "根据World Canon设定，我已经执行并确认该操作完成。"
-  },
-  "intent_draft": {
-    "route": "skill",
-    "target_id": "read_only_status",
-    "action": "read_only_status",
-    "args": {}
-  },
-  "meta": {
-    "draft_only": true
-  }
+﻿{
+    "narrative":  {
+                      "text":  "根据World Canon设定，我已经执行并确认该操作完成。"
+                  },
+    "intent_draft":  {
+                         "route":  "skill",
+                         "target_id":  "read_only_status",
+                         "action":  "read_only_status",
+                         "args":  {
+
+                                  }
+                     },
+    "meta":  {
+                 "draft_only":  true
+             }
 }

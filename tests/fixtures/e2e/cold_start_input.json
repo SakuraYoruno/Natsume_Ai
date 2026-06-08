@@ -1,8 +1,10 @@
-{
-  "request_id": "req-cold-start-001",
-  "session_id": "sess-cold-001",
-  "user_input": "你好，今天天气怎么样？",
-  "context": {},
-  "no_external_deps": true,
-  "_comment": "冷启动最小闭环输入：无 API Key、无 Neo4j、无 Chroma"
+﻿{
+    "request_id":  "req-cold-start-001",
+    "session_id":  "sess-cold-001",
+    "user_input":  "你好，今天天气怎么样？",
+    "context":  {
+
+                },
+    "no_external_deps":  true,
+    "_comment":  "冷启动最小闭环输入：无 API Key、无 Neo4j、无 Chroma"
 }

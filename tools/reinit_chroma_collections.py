@@ -1,23 +1,18 @@
 """
-重新初始化 ChromaDB 六库 collections（dim=384）
-删除旧的 collections（如果存在），重新创建
+重新初始化 ChromaDB 长期记忆 collection（dim=1024）
+删除旧的非长期 collections，只保留 episodic。
 """
 from __future__ import annotations
 import urllib.request, sys
 
 HOST = "127.0.0.1"
-PORT = 8000
+PORT = 18000
 ENDPOINT = f"http://{HOST}:{PORT}"
 TENANT = "default_tenant"
 DATABASE = "default_database"
 
 COLLECTIONS = {
-    "episodic":    384,
-    "canon_style": 384,
-    "canon_world": 384,
-    "long_term":   384,
-    "distilled":   384,
-    "bond":        384,
+    "episodic": 1024,
 }
 
 
@@ -54,7 +49,14 @@ def reinit_collections() -> None:
     except Exception:
         pass
 
-    print(f"\n[ChromaDB] 重新初始化六库 collections (dim=384)")
+    existing_names = [c.name for c in client.list_collections()]
+    for name in sorted(existing_names):
+        if name in COLLECTIONS:
+            continue
+        print(f"  [删除] {name}: 非长期记忆 collection")
+        client.delete_collection(name=name)
+
+    print(f"\n[ChromaDB] 重新初始化长期记忆 collection (dim=1024)")
     for name, dim in COLLECTIONS.items():
         # 先尝试删除旧的（如果存在且 dim 不对）
         try:
@@ -82,7 +84,7 @@ def reinit_collections() -> None:
         except Exception as e:
             print(f"  [FAIL] {name}: {e}")
 
-    print(f"\n[ChromaDB] 六库初始化完成")
+    print(f"\n[ChromaDB] 长期记忆 collection 初始化完成")
 
 
 if __name__ == "__main__":

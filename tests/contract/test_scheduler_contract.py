@@ -20,6 +20,7 @@ from host_brain.scheduler.task_registry import (
 from host_brain.scheduler.scheduler import NatsumeScheduler, PROPOSER_NODE_ID
 from host_brain.scheduler.health import SchedulerHealthReporter, STATUS_OK, STATUS_SUSPENDED, STATUS_DISABLED, STATUS_PENDING
 from host_brain.core.errors import SCHED_TASK_SUSPENDED, SYSMODE_FORBIDDEN
+from host_brain.core.metabolism import ALLOWED_SYS_MODES
 
 FIXTURES_DIR = pathlib.Path(__file__).resolve().parent.parent / "fixtures" / "scheduler"
 
@@ -199,6 +200,9 @@ class TestSchedulerTrigger:
 class TestSysModGating:
     """T-Sched-02：sys_mode 门控矩阵全覆盖。"""
 
+    def test_priority_matrix_covers_exactly_six_modes(self) -> None:
+        assert set(SYSMODE_PRIORITY_MATRIX) == ALLOWED_SYS_MODES
+
     @pytest.mark.parametrize("sys_mode,priority,allowed", [
         # Normal: 全部允许
         ("normal", TaskPriority.HIGH, True),
@@ -282,6 +286,11 @@ class TestSysModGating:
         assert config.is_allowed_in_mode("gaming") is True
         # sleep 不在 allowlist 中
         assert config.is_allowed_in_mode("sleep") is False
+
+    def test_invalid_mode_allowlist_rejected(self) -> None:
+        config = _make_config(task_id="bad_mode", mode_allowlist=["normal", "unknown"])
+        with pytest.raises(ValueError, match="invalid sys_mode"):
+            config.validate()
 
     def test_trigger_rejected_in_gaming(self) -> None:
         """Gaming 模式下 MEDIUM 任务触发被拒绝，返回 SYSMODE_FORBIDDEN。"""

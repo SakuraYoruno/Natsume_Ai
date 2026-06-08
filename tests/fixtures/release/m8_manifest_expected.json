@@ -1,48 +1,82 @@
-{
-  "milestone": "M8",
-  "git_commit_hash": "expected_sha256_placeholder",
-  "migration_hashes": {
-    "host_brain/audit/migrations/0001_triptych.sql": "sha256:placeholder",
-    "host_brain/audit/migrations/0002_canon_schema.sql": "sha256:placeholder",
-    "host_brain/audit/migrations/0003_memory_ops.sql": "sha256:placeholder",
-    "host_brain/audit/migrations/0004_vault_schema.sql": "sha256:placeholder",
-    "host_brain/audit/migrations/0005_airlock_schema.sql": "sha256:placeholder",
-    "host_brain/audit/migrations/0006_channel_io_schema.sql": "sha256:placeholder",
-    "host_brain/audit/migrations/0007_avatar_schema.sql": "sha256:placeholder",
-    "host_brain/audit/migrations/0008_clawd_ui_schema.sql": "sha256:placeholder",
-    "host_brain/audit/migrations/0009_service_health_schema.sql": "sha256:placeholder",
-    "host_brain/audit/migrations/0010_voice_event_schema.sql": "sha256:placeholder",
-    "host_brain/audit/migrations/0011_retrieval_event_schema.sql": "sha256:placeholder",
-    "host_brain/audit/migrations/0012_vision_event_schema.sql": "sha256:placeholder",
-    "host_brain/audit/migrations/0013_bond_update_schema.sql": "sha256:placeholder",
-    "host_brain/audit/migrations/0014_scheduler_event_schema.sql": "sha256:placeholder",
-    "host_brain/bond/migrations/0001_bond_constraints.cypher": "sha256:placeholder"
-  },
-  "migration_file_count": 15,
-  "test_passed_count": 914,
-  "latency_baseline_snapshot": {
-    "retrieval_p50_ms": 180,
-    "retrieval_p95_ms": 420,
-    "governor_p50_ms": 12,
-    "governor_p95_ms": 38,
-    "skill_exec_p50_ms": 85,
-    "skill_exec_p95_ms": 210,
-    "sampled_at": "2026-03-03T12:00:00+00:00",
-    "sample_count": 100,
-    "stale": false,
-    "stale_reason_code": null
-  },
-  "service_registry_snapshot": [
-    {"service_id": "host.audit.sqlite_ledger", "owner": "host", "required": true, "status": "UP"},
-    {"service_id": "host.governor.decision", "owner": "host", "required": true, "status": "UP"},
-    {"service_id": "host.skills.loader", "owner": "host", "required": true, "status": "UP"},
-    {"service_id": "host.integrations.llm_gateway", "owner": "host", "required": true, "status": "UP"},
-    {"service_id": "host.retrieval.embedding", "owner": "host", "required": true, "status": "UP"},
-    {"service_id": "host.retrieval.reranker", "owner": "host", "required": true, "status": "UP"},
-    {"service_id": "host.vision.screen_ocr", "owner": "host", "required": true, "status": "UP"},
-    {"service_id": "host.vision.camera_recognizer", "owner": "host", "required": true, "status": "UP"}
-  ],
-  "generated_at": "2026-03-03T12:00:00+00:00",
-  "ts_ms": 1709467200000,
-  "_comment": "M8 发布清单期望结构（用于 T-REL-01 验收）"
+﻿{
+    "milestone":  "M8",
+    "git_commit_hash":  "expected_sha256_placeholder",
+    "migration_hashes":  {
+                             "host_brain/audit/migrations/0001_triptych.sql":  "sha256:placeholder",
+                             "host_brain/audit/migrations/0002_canon_schema.sql":  "sha256:placeholder",
+                             "host_brain/audit/migrations/0003_memory_ops.sql":  "sha256:placeholder",
+                             "host_brain/audit/migrations/0004_vault_schema.sql":  "sha256:placeholder",
+                             "host_brain/audit/migrations/0005_airlock_schema.sql":  "sha256:placeholder",
+                             "host_brain/audit/migrations/0006_channel_io_schema.sql":  "sha256:placeholder",
+                             "host_brain/audit/migrations/0007_avatar_schema.sql":  "sha256:placeholder",
+                             "host_brain/audit/migrations/0008_clawd_ui_schema.sql":  "sha256:placeholder",
+                             "host_brain/audit/migrations/0009_service_health_schema.sql":  "sha256:placeholder",
+                             "host_brain/audit/migrations/0010_voice_event_schema.sql":  "sha256:placeholder",
+                             "host_brain/audit/migrations/0011_retrieval_event_schema.sql":  "sha256:placeholder",
+                             "host_brain/audit/migrations/0012_vision_event_schema.sql":  "sha256:placeholder",
+                             "host_brain/audit/migrations/0013_bond_update_schema.sql":  "sha256:placeholder",
+                             "host_brain/audit/migrations/0014_scheduler_event_schema.sql":  "sha256:placeholder",
+                             "host_brain/bond/migrations/0001_bond_constraints.cypher":  "sha256:placeholder"
+                         },
+    "migration_file_count":  15,
+    "test_passed_count":  914,
+    "latency_baseline_snapshot":  {
+                                      "retrieval_p50_ms":  180,
+                                      "retrieval_p95_ms":  420,
+                                      "governor_p50_ms":  12,
+                                      "governor_p95_ms":  38,
+                                      "skill_exec_p50_ms":  85,
+                                      "skill_exec_p95_ms":  210,
+                                      "sampled_at":  "2026-03-03T12:00:00+00:00",
+                                      "sample_count":  100,
+                                      "stale":  false,
+                                      "stale_reason_code":  null
+                                  },
+    "service_registry_snapshot":  [
+                                      {
+                                          "service_id":  "host.audit.sqlite_ledger",
+                                          "owner":  "host",
+                                          "required":  true,
+                                          "status":  "UP"
+                                      },
+                                      {
+                                          "service_id":  "host.governor.decision",
+                                          "owner":  "host",
+                                          "required":  true,
+                                          "status":  "UP"
+                                      },
+                                      {
+                                          "service_id":  "host.skills.loader",
+                                          "owner":  "host",
+                                          "required":  true,
+                                          "status":  "UP"
+                                      },
+                                      {
+                                          "service_id":  "host.integrations.llm_gateway",
+                                          "owner":  "host",
+                                          "required":  true,
+                                          "status":  "UP"
+                                      },
+                                      {
+                                          "service_id":  "host.retrieval.recall_fusion",
+                                          "owner":  "host",
+                                          "required":  true,
+                                          "status":  "UP"
+                                      },
+                                      {
+                                          "service_id":  "host.vision.screen_ocr",
+                                          "owner":  "host",
+                                          "required":  true,
+                                          "status":  "UP"
+                                      },
+                                      {
+                                          "service_id":  "host.vision.camera_recognizer",
+                                          "owner":  "host",
+                                          "required":  true,
+                                          "status":  "UP"
+                                      }
+                                  ],
+    "generated_at":  "2026-03-03T12:00:00+00:00",
+    "ts_ms":  1709467200000,
+    "_comment":  "M8 发布清单期望结构（用于 T-REL-01 验收）"
 }

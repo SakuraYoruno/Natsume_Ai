@@ -1,3 +1,6 @@
+受众：CODEX
+标题：Skill-First Runtime Decompat Log
+
 # Skill-First Runtime Decompat Log
 
 Date: 2026-04-12

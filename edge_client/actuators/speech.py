@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections import deque
 from dataclasses import dataclass
 import threading
+import time
 from typing import Any
 from typing import Callable
 
@@ -205,6 +206,7 @@ class SpeechPlaybackQueue:
                     event=event,
                 )
 
+        stage_t0 = time.monotonic()
         try:
             synth = self._synthesizer(speak_event)
             synth_event = dict(synth) if isinstance(synth, dict) else {"value": synth}
@@ -238,14 +240,19 @@ class SpeechPlaybackQueue:
                 event=event,
             )
 
+        synth_elapsed_s = time.monotonic() - stage_t0
         synth_log = {
             "request_id": request_id,
             "session_id": session_id,
             "utterance_id": speak_event.get("utterance_id"),
             "event_type": EVENT_TTS_SYNTH_READY,
             "audio_ref": synth_event.get("audio_ref"),
+            "synth_elapsed_s": round(synth_elapsed_s, 4),
             "ts_ms": now_value,
         }
+        if synth_event.get("audio_path"):
+            synth_log["audio_path"] = synth_event.get("audio_path")
+            synth_log["audio_mime"] = synth_event.get("audio_mime") or "audio/wav"
         self._log_event(
             request_id=request_id,
             session_id=session_id,
@@ -310,6 +317,8 @@ class SpeechPlaybackQueue:
             "synth_event": synth_event,
         }
         # 在播放启动前触发钩子（如 VTS 表情/口型同步），确保与音频同步
+        hook_t0 = time.monotonic()
+        hook_elapsed_s = 0.0
         if self._before_playback_hook is not None:
             try:
                 self._before_playback_hook(speak_event, synth_event)
@@ -318,6 +327,9 @@ class SpeechPlaybackQueue:
                 _logging.getLogger("Natsume.edge.speech").warning(
                     "before_playback_hook raised: %s", hook_exc
                 )
+            finally:
+                hook_elapsed_s = time.monotonic() - hook_t0
+        playback_t0 = time.monotonic()
         try:
             self._playback_starter(speak_event, synth_event)
         except Exception as exc:  # pragma: no cover - defensive catch for callback
@@ -357,14 +369,33 @@ class SpeechPlaybackQueue:
                 detail=detail,
                 event=event,
             )
+        playback_elapsed_s = time.monotonic() - playback_t0
+        total_elapsed_s = time.monotonic() - stage_t0
         playback_event = {
             "request_id": request_id,
             "session_id": session_id,
             "utterance_id": speak_event.get("utterance_id"),
             "event_type": EVENT_TTS_PLAYBACK_STARTED,
             "audio_ref": synth_event.get("audio_ref"),
+            "synth_elapsed_s": round(synth_elapsed_s, 4),
+            "before_playback_hook_elapsed_s": round(hook_elapsed_s, 4),
+            "playback_start_elapsed_s": round(playback_elapsed_s, 4),
+            "start_next_elapsed_s": round(total_elapsed_s, 4),
             "ts_ms": now_value,
         }
+        if synth_event.get("audio_path"):
+            playback_event["audio_path"] = synth_event.get("audio_path")
+            playback_event["audio_mime"] = synth_event.get("audio_mime") or "audio/wav"
+        for key in (
+            "duration_s",
+            "sample_rate",
+            "rms_frames",
+            "mouth_frames",
+            "mouth_frame_interval_s",
+            "mouth_frame_count",
+        ):
+            if key in synth_event:
+                playback_event[key] = synth_event.get(key)
         self._log_event(
             request_id=request_id,
             session_id=session_id,

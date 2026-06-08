@@ -16,7 +16,9 @@ import hmac
 import json
 import os
 import sys
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 
@@ -165,6 +167,113 @@ class TestPostVts(unittest.TestCase):
         self.assertEqual(result.status, "ACCEPTED")
         self.assertGreaterEqual(result.latency_ms, 0)
 
+    def test_post_vts_body_action_payload(self):
+        import host_brain.channels.edge_rpc_client as edge_rpc
+        from host_brain.channels.edge_rpc_client import post_vts
+
+        edge_rpc._EDGE_FAILURE_COOLDOWN_CACHE.clear()
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "success": True,
+            "status": "ACCEPTED",
+            "reason_code": None,
+            "detail": "body action ok",
+            "event": {"action_id": "wave", "speech_required": False},
+            "ts_ms": 1700000000000,
+        }
+        mock_response.headers = {"content-type": "application/json"}
+
+        mock_client = AsyncMock()
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_client.post = AsyncMock(return_value=mock_response)
+
+        with patch.dict(os.environ, {"EDGE_ALLOW_INSECURE_AUTH": "true"}):
+            with patch("httpx.AsyncClient", return_value=mock_client):
+                result = self._run(post_vts(
+                    action="body_action",
+                    action_id="wave",
+                    emotion_tag="PLAYFUL",
+                    emotion_intensity=0.8,
+                    duration_s=1.2,
+                    request_id="req-vts-body-action-001",
+                ))
+
+        self.assertTrue(result.success)
+        sent_envelope = mock_client.post.await_args.kwargs["json"]
+        sent_payload = sent_envelope["payload"]
+        self.assertEqual("body_action", sent_payload["action"])
+        self.assertEqual("wave", sent_payload["action_id"])
+        self.assertEqual("PLAYFUL", sent_payload["emotion_tag"])
+        self.assertEqual(0.8, sent_payload["emotion_intensity"])
+        self.assertEqual(1.2, sent_payload["duration_s"])
+
+    def test_post_vts_uses_host_insecure_auth_override(self):
+        import host_brain.channels.edge_rpc_client as edge_rpc
+        from host_brain.channels.edge_rpc_client import post_vts
+
+        edge_rpc._EDGE_FAILURE_COOLDOWN_CACHE.clear()
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "success": True,
+            "status": "ACCEPTED",
+            "reason_code": None,
+            "detail": "vts ok",
+            "event": {},
+            "ts_ms": 1700000000000,
+        }
+        mock_response.headers = {"content-type": "application/json"}
+
+        mock_client = AsyncMock()
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_client.post = AsyncMock(return_value=mock_response)
+
+        with patch.dict(
+            os.environ,
+            {
+                "EDGE_ALLOW_INSECURE_AUTH": "true",
+                "HOST_EDGE_RPC_ALLOW_INSECURE_AUTH": "false",
+                "HOST_EDGE_RPC_SHARED_KEY": "unit-test-shared-key",
+            },
+        ):
+            with patch("httpx.AsyncClient", return_value=mock_client):
+                result = self._run(post_vts(
+                    action="set_expression",
+                    emotion_tag="HAPPY",
+                    request_id="req-vts-auth-override-001",
+                ))
+
+        self.assertTrue(result.success)
+        sent_envelope = mock_client.post.await_args.kwargs["json"]
+        self.assertNotEqual("insecure", sent_envelope["signature"])
+
+    def test_host_edge_rpc_shared_key_resolves_secret_store_ref(self):
+        from host_brain.channels import edge_rpc_client
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            store_path = root / "configs" / "secrets" / "secret_store.runtime.local.json"
+            store_path.parent.mkdir(parents=True, exist_ok=True)
+            store_path.write_text(
+                json.dumps({"sec://edge/natsu-node-06": "unit-test-ref-key"}),
+                encoding="utf-8",
+            )
+            with patch.dict(
+                os.environ,
+                {
+                    "HOST_EDGE_RPC_SHARED_KEY": "",
+                    "HOST_EDGE_RPC_SHARED_KEY_REF": "sec://edge/natsu-node-06",
+                },
+                clear=False,
+            ):
+                with patch.object(edge_rpc_client, "_repo_root", return_value=root):
+                    self.assertEqual(edge_rpc_client.resolve_host_edge_rpc_shared_key(), "unit-test-ref-key")
+
     def test_post_vts_degraded_on_connection_error(self):
         from host_brain.channels.edge_rpc_client import post_vts
 
@@ -268,6 +377,7 @@ class TestPostSpeak(unittest.TestCase):
 
         self.assertIn("payload", captured_payload)
         self.assertEqual(captured_payload["payload"]["text"], "テスト")
+        self.assertNotIn("speed", captured_payload["payload"])
 
 
 # ---------------------------------------------------------------------------
@@ -455,7 +565,7 @@ class TestPostScreenshot(unittest.TestCase):
 class TestResolveVtsExpressionFireAndForget(unittest.TestCase):
     def test_applied_result_triggers_edge_vts(self):
         """resolve_vts_expression 成功时，应 fire-and-forget 调用 post_vts。"""
-        from host_brain.channels.vts import resolve_vts_expression
+        from host_brain.channels.vts import EMOTION_TO_EXPRESSION_ID, resolve_vts_expression
 
         ledger = _make_ledger()
         fired_calls: list[dict] = []
@@ -482,7 +592,7 @@ class TestResolveVtsExpressionFireAndForget(unittest.TestCase):
 
         result = asyncio.run(_run())
         self.assertEqual(result.status, "APPLIED")
-        self.assertEqual(result.expression_id, "exp_happy_01")
+        self.assertEqual(result.expression_id, EMOTION_TO_EXPRESSION_ID["HAPPY"])
         # fire-and-forget 应已触发
         self.assertEqual(len(fired_calls), 1)
         self.assertEqual(fired_calls[0]["action"], "set_expression")

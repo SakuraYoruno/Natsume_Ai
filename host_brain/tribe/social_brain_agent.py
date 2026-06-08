@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Any, Mapping
@@ -6,6 +6,15 @@ from typing import Any, Mapping
 from host_brain.tribe.base_agent import TribeAgentDescriptor
 from host_brain.tribe.events import emit_tribe_event
 from host_brain.tribe.tribe_state import TribeStateRegistry, get_global_registry
+
+
+def _resolve_social_bond_user_id(value: Any = None, *, session_id: str = "default") -> str:
+    try:
+        from host_brain.bond.user_identity import resolve_bond_user_id  # noqa: PLC0415
+
+        return resolve_bond_user_id(str(value or "").strip() or None, session_id=session_id)
+    except Exception:
+        return str(value or "").strip() or "default"
 
 
 @dataclass(slots=True)
@@ -18,7 +27,7 @@ class SocialBrainAgent:
         )
     )
     state_registry: TribeStateRegistry = field(default_factory=get_global_registry)  # T-31：使用全局单例
-    _bond_stage: str = field(default="stranger", init=False, repr=False)
+    _bond_stage: str = field(default="friend", init=False, repr=False)
 
     def describe(self) -> dict[str, Any]:
         return self.descriptor.to_dict()
@@ -32,14 +41,14 @@ class SocialBrainAgent:
         from host_brain.app.dependencies import get_bond_stage_engine  # noqa: PLC0415
         from host_brain.bond.summarizer import normalize_bond_summary  # noqa: PLC0415
 
-        resolved_person_id = str(person_id or "").strip()
+        resolved_person_id = _resolve_social_bond_user_id(person_id)
         resolved_summary = (
             normalize_bond_summary(dict(bond_summary))
             if isinstance(bond_summary, Mapping) and bond_summary
             else {}
         )
         state_obj: Any = None
-        stage = "STRANGER"
+        stage = "FRIEND"
         trend = str(resolved_summary.get("trend") or "").strip()
         trend_intensity = ""
         capability_hint = str(resolved_summary.get("capability_hint") or "").strip()
@@ -72,8 +81,8 @@ class SocialBrainAgent:
                 getattr(state_obj, "current_stage", None)
                 or getattr(state_obj, "stage", None)
                 or resolved_summary.get("stage")
-                or "STRANGER"
-            ).strip() or "STRANGER"
+                or "FRIEND"
+            ).strip() or "FRIEND"
             trend = str(
                 (
                     state_obj.trend() if callable(getattr(state_obj, "trend", None)) else getattr(state_obj, "trend", "")
@@ -98,7 +107,7 @@ class SocialBrainAgent:
             intimacy_score = float(getattr(state_obj, "intimacy_score", 0.0) or 0.0)
             last_event_ts_ms = int(getattr(state_obj, "last_event_ts_ms", 0) or 0)
         else:
-            stage = str(resolved_summary.get("stage") or stage).strip() or "STRANGER"
+            stage = str(resolved_summary.get("stage") or stage).strip() or "FRIEND"
 
         if not resolved_summary:
             resolved_summary = {
@@ -121,11 +130,11 @@ class SocialBrainAgent:
             "rift": getattr(state_obj, "rift", None) if state_obj is not None else None,
         }
 
-    def resolve_bond_stage(self, *, person_id: str | None, default: str = "STRANGER") -> str:
+    def resolve_bond_stage(self, *, person_id: str | None, default: str = "FRIEND") -> str:
         snapshot = self.resolve_bond_snapshot(person_id=person_id)
         stage = str(snapshot.get("bond_stage") or "").strip().upper()
-        fallback = str(default or "STRANGER").strip().upper() or "STRANGER"
-        if snapshot.get("bond_state_obj") is None and stage in {"", "STRANGER", "UNKNOWN"}:
+        fallback = str(default or "FRIEND").strip().upper() or "FRIEND"
+        if snapshot.get("bond_state_obj") is None and stage in {"", "UNKNOWN"}:
             return fallback
         return stage or fallback
 
@@ -192,18 +201,16 @@ class SocialBrainAgent:
         bond_summary: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         snapshot = self.resolve_bond_snapshot(person_id=person_id, bond_summary=bond_summary)
-        stage = str(snapshot.get("bond_stage") or "STRANGER").strip().upper()
+        stage = str(snapshot.get("bond_stage") or "FRIEND").strip().upper()
         intimacy = max(0.0, min(1.0, float(snapshot.get("intimacy_score") or 0.0)))
 
         stage_baseline = {
-            "STRANGER": {"trust": 0.25, "affinity": 0.20, "safety": 0.32, "novelty": 0.72, "dependency": 0.06},
-            "ACQUAINTANCE": {"trust": 0.38, "affinity": 0.34, "safety": 0.45, "novelty": 0.62, "dependency": 0.14},
             "FRIEND": {"trust": 0.58, "affinity": 0.60, "safety": 0.64, "novelty": 0.48, "dependency": 0.32},
             "CLOSE_FRIEND": {"trust": 0.68, "affinity": 0.72, "safety": 0.74, "novelty": 0.42, "dependency": 0.44},
             "INTIMATE": {"trust": 0.82, "affinity": 0.86, "safety": 0.82, "novelty": 0.36, "dependency": 0.62},
             "SOULMATE": {"trust": 0.92, "affinity": 0.94, "safety": 0.90, "novelty": 0.28, "dependency": 0.76},
         }
-        base = dict(stage_baseline.get(stage, stage_baseline["STRANGER"]))
+        base = dict(stage_baseline.get(stage, stage_baseline["FRIEND"]))
         trend_hint = str((snapshot.get("bond_trend") or snapshot.get("bond_summary", {}).get("trend") or "")).strip().lower()
         if trend_hint in {"up", "progress"}:
             base["trust"] += 0.06
@@ -256,7 +263,7 @@ class SocialBrainAgent:
         resolved_user_id = str(user_id or "").strip() or None
         snapshot = self.resolve_bond_snapshot(person_id=resolved_user_id)
         vector = self.resolve_bond_vector(person_id=resolved_user_id, bond_summary=snapshot.get("bond_summary"))
-        self._bond_stage = str(snapshot.get("bond_stage") or "STRANGER").strip().lower() or "stranger"
+        self._bond_stage = str(snapshot.get("bond_stage") or "FRIEND").strip().lower() or "friend"
         self._touch_state(key="bond_stage", value=self._bond_stage)
         self._touch_state(key="bond_vector", value=vector)
         return {
@@ -338,7 +345,7 @@ class SocialBrainAgent:
                 snapshot = self.resolve_bond_snapshot(person_id=user_id or None)
                 bond_trend = str(snapshot.get("bond_trend") or "").strip().upper()
                 trend_intensity = float(snapshot.get("bond_trend_intensity") or 0.3)
-                bond_stage = str(snapshot.get("bond_stage") or "STRANGER").strip().upper()
+                bond_stage = str(snapshot.get("bond_stage") or "FRIEND").strip().upper()
 
                 if bond_trend == "PROGRESS":
                     emit_tribe_event(
@@ -394,7 +401,7 @@ class SocialBrainAgent:
             _log = logging.getLogger("Natsume.tribe.social_brain_agent")
             payload = dict(getattr(event, "payload", None) or {})
             user_id = str(payload.get("user_id") or "").strip()
-            bond_stage = str(payload.get("bond_stage") or "STRANGER").strip().upper() or "STRANGER"
+            bond_stage = str(payload.get("bond_stage") or "FRIEND").strip().upper() or "FRIEND"
             bond_trend = str(payload.get("bond_trend") or "PROGRESS").strip().upper()
             intensity = max(0.0, min(1.0, float(payload.get("intensity") or 0.3)))
             ts_ms = int(getattr(event, "ts_ms", 0) or 0)
@@ -439,7 +446,7 @@ class SocialBrainAgent:
                 if hasattr(_dma, "tick_idle_cycle"):
                     _dma.tick_idle_cycle(
                         source=f"social_bond_progress:{bond_stage.lower()}",
-                        person_id=str(user_id or "user_1") or "user_1",
+                        person_id=user_id or _resolve_social_bond_user_id(user_id),
                     )
             except Exception:
                 pass
@@ -452,7 +459,7 @@ class SocialBrainAgent:
     async def _on_bond_stage_changed(self, event: Any) -> None:
         try:
             payload = dict(getattr(event, "payload", None) or {})
-            to_stage = str(payload.get("to_stage") or "STRANGER").strip().lower() or "stranger"
+            to_stage = str(payload.get("to_stage") or "FRIEND").strip().lower() or "friend"
             self._bond_stage = to_stage
             self._touch_state(key="bond_stage", value=to_stage)
             self._refresh_bond_vector(user_id=payload.get("user_id"))
@@ -472,7 +479,7 @@ class SocialBrainAgent:
             _log = logging.getLogger("Natsume.tribe.social_brain_agent")
             payload = dict(getattr(event, "payload", None) or {})
             user_id = str(payload.get("user_id") or "").strip()
-            bond_stage = str(payload.get("bond_stage") or "STRANGER").strip().upper() or "STRANGER"
+            bond_stage = str(payload.get("bond_stage") or "FRIEND").strip().upper() or "FRIEND"
             bond_trend = str(payload.get("bond_trend") or "REGRESS").strip().upper()
             intensity = max(0.0, min(1.0, float(payload.get("intensity") or 0.4)))
             ts_ms = int(getattr(event, "ts_ms", 0) or 0)
@@ -760,75 +767,6 @@ class SocialBrainAgent:
         except Exception:
             pass
 
-    # ── T-140：canon_style_store 族化入口 ────────────────────────────────────
-
-    def resolve_style_canon(
-        self,
-        *,
-        canon_id: str = "natsume_ai_cn",
-        style_root: str | None = None,
-    ) -> dict[str, Any]:
-        """T-140：获取风格 Canon 条目，将 StyleCanonStore 族化到 SocialBrainAgent。
-
-        SocialBrainAgent 作为风格 Canon 的唯一访问入口，确保风格数据
-        不在上下文装配等模块中直接调用 StyleCanonStore。
-
-        Args:
-            canon_id: Canon ID，默认 "natsume_ai_cn"。
-            style_root: 风格文件根目录（可选，None 使用默认路径）。
-
-        Returns:
-            StyleCanonEntry.to_dict() 或空字典（降级）。
-        """
-        try:
-            from host_brain.memory.canon_style_store import StyleCanonStore  # noqa: PLC0415
-
-            kwargs: dict[str, Any] = {}
-            if style_root is not None:
-                kwargs["style_root"] = style_root
-            store = StyleCanonStore(**kwargs)
-            entry = store.get(str(canon_id or "natsume_ai_cn").strip() or "natsume_ai_cn")
-            if entry is None:
-                return {"status": "NOT_FOUND", "canon_id": str(canon_id or "")}
-            result = entry.to_dict() if hasattr(entry, "to_dict") else {}
-            result["status"] = "OK"
-            self._touch_state(
-                key="last_style_canon",
-                value={
-                    "canon_id": str(canon_id or ""),
-                    "version": result.get("version"),
-                    "hash": str(result.get("hash") or "")[:16],
-                    "tone_only": result.get("tone_only"),
-                },
-            )
-            import logging  # noqa: PLC0415
-            logging.getLogger("Natsume.tribe.social_brain_agent").debug(
-                "SocialBrainAgent.resolve_style_canon: canon_id=%s version=%s",
-                canon_id, result.get("version"),
-            )
-            return result
-        except Exception as exc:
-            import logging  # noqa: PLC0415
-            logging.getLogger("Natsume.tribe.social_brain_agent").warning(
-                "SocialBrainAgent.resolve_style_canon 失败（降级）: %s", exc
-            )
-            return {"status": "ERROR", "canon_id": str(canon_id or ""), "error": str(exc)}
-
-    def resolve_style_canon_content(
-        self,
-        *,
-        canon_id: str = "natsume_ai_cn",
-    ) -> str:
-        """T-140：获取风格 Canon 的纯文本内容（供 prompt 注入使用）。
-
-        Returns:
-            Canon 内容字符串，或空字符串（降级）。
-        """
-        result = self.resolve_style_canon(canon_id=canon_id)
-        return str(result.get("content") or "").strip()
-
-    # ── T-141：style_distiller 族化入口 ──────────────────────────────────────
-
     def resolve_style_distillation(
         self,
         *,
@@ -837,60 +775,17 @@ class SocialBrainAgent:
         ja_lines_path: str | None = None,
         top_n: int = 20,
     ) -> dict[str, Any]:
-        """T-141：执行风格蒸馏，将 StyleDistiller 族化到 SocialBrainAgent。
+        """Legacy StyleDistiller compatibility shim.
 
-        SocialBrainAgent 作为风格蒸馏的唯一调用入口，确保蒸馏逻辑
-        不在上下文装配等模块中直接调用 StyleDistiller。
-
-        Args:
-            lang: 语言，"cn" 或 "ja"，默认 "cn"。
-            cn_lines_path: 中文台词文件路径（可选，None 使用默认路径）。
-            ja_lines_path: 日文台词文件路径（可选，None 使用默认路径）。
-            top_n: 返回的特征词汇数量，默认 20。
-
-        Returns:
-            StyleProfile 字典或空字典（降级）。
+        Current surface style anchoring is sample-guided and uses the style
+        reference bank directly. The old style distiller path is`r`n        retired so it cannot reintroduce template-like style instructions.
         """
-        try:
-            from host_brain.retrieval.style_distiller import StyleDistiller  # noqa: PLC0415
-
-            kwargs: dict[str, Any] = {}
-            if cn_lines_path is not None:
-                kwargs["cn_lines_path"] = cn_lines_path
-            if ja_lines_path is not None:
-                kwargs["ja_lines_path"] = ja_lines_path
-            distiller = StyleDistiller(use_llm=True, **kwargs)
-
-            resolved_lang = str(lang or "cn").strip().lower()
-            if resolved_lang == "ja":
-                profile = distiller.distill_ja(top_n=int(top_n))
-            else:
-                profile = distiller.distill_cn(top_n=int(top_n))
-
-            result = profile.to_dict() if hasattr(profile, "to_dict") else {}
-            result["rendered_instruction"] = distiller.render_instruction(profile, lang=resolved_lang)
-            result["status"] = "OK"
-            result["lang"] = resolved_lang
-            self._touch_state(
-                key="last_style_distillation",
-                value={
-                    "lang": resolved_lang,
-                    "sentence_patterns_count": len(result.get("sentence_patterns") or []),
-                    "vocab_count": len(result.get("characteristic_vocab") or []),
-                },
-            )
-            import logging  # noqa: PLC0415
-            logging.getLogger("Natsume.tribe.social_brain_agent").debug(
-                "SocialBrainAgent.resolve_style_distillation: lang=%s patterns=%d",
-                resolved_lang, len(result.get("sentence_patterns") or []),
-            )
-            return result
-        except Exception as exc:
-            import logging  # noqa: PLC0415
-            logging.getLogger("Natsume.tribe.social_brain_agent").warning(
-                "SocialBrainAgent.resolve_style_distillation 失败（降级）: %s", exc
-            )
-            return {"status": "ERROR", "lang": str(lang or "cn"), "error": str(exc)}
+        resolved_lang = str(lang or "cn").strip().lower() or "cn"
+        return {
+            "status": "SKIPPED",
+            "lang": resolved_lang,
+            "reason_code": "LEGACY_STYLE_DISTILLER_REMOVED",
+        }
 
     async def _on_humor_landed_bond(self, event: Any) -> None:
         """处理 HUMOR_LANDED 事件：幽默成功时 bond_trend_hint 设为 progress。
@@ -931,7 +826,7 @@ class SocialBrainAgent:
     def resolve_bond_narrative(
         self,
         *,
-        user_id: str = "user_1",
+        user_id: str = "",
         bond_stage: str | None = None,
         now_ts_ms: int | None = None,
         first_interaction_ts_ms: int | None = None,
@@ -942,7 +837,7 @@ class SocialBrainAgent:
         `BondNarrativeLayer.build_narrative()` 调用。
 
         Args:
-            user_id: 用户 ID，默认 "user_1"。
+            user_id: 用户 ID；空值使用 canonical bond user id。
             bond_stage: Bond 阶段（如 "FRIEND"/"INTIMATE" 等），None 时从内部状态读取。
             now_ts_ms: 当前时间戳（毫秒），None 使用当前时间。
             first_interaction_ts_ms: 首次互动时间戳（毫秒），可选。
@@ -957,7 +852,8 @@ class SocialBrainAgent:
                 get_milestone_tracker,
             )
 
-            resolved_stage = str(bond_stage or self._bond_stage or "STRANGER").strip().upper() or "STRANGER"
+            resolved_stage = str(bond_stage or self._bond_stage or "FRIEND").strip().upper() or "FRIEND"
+            resolved_user_id = _resolve_social_bond_user_id(user_id)
             memory_index = get_shared_memory_index()
             milestone_tracker = get_milestone_tracker()
             layer = BondNarrativeLayer(
@@ -966,7 +862,7 @@ class SocialBrainAgent:
                 use_llm=True,
             )
             result = layer.build_narrative(
-                user_id=str(user_id or "user_1").strip() or "user_1",
+                user_id=resolved_user_id,
                 bond_stage=resolved_stage,
                 now_ts_ms=int(now_ts_ms) if now_ts_ms is not None else None,
                 first_interaction_ts_ms=int(first_interaction_ts_ms) if first_interaction_ts_ms is not None else None,
@@ -977,7 +873,7 @@ class SocialBrainAgent:
             slot_payload["bond_stage"] = resolved_stage
             payload = {
                 "status": "OK",
-                "user_id": str(user_id or "user_1").strip() or "user_1",
+                "user_id": resolved_user_id,
                 "bond_stage": resolved_stage,
                 "prompt_slot": slot_payload,
                 "narrative_count": len(slot_payload.get("narrative_items") or []),
@@ -987,7 +883,7 @@ class SocialBrainAgent:
             self._touch_state(
                 key="last_bond_narrative",
                 value={
-                    "user_id": str(user_id or "user_1"),
+                    "user_id": resolved_user_id,
                     "bond_stage": resolved_stage,
                     "narrative_count": len(slot_payload.get("narrative_items") or []),
                 },
@@ -1005,7 +901,7 @@ class SocialBrainAgent:
             )
             return {
                 "status": "ERROR",
-                "user_id": str(user_id or "user_1"),
+                "user_id": _resolve_social_bond_user_id(user_id),
                 "prompt_slot": {},
                 "error": str(exc),
             }
@@ -1071,7 +967,7 @@ class SocialBrainAgent:
     def resolve_milestone_tracker(
         self,
         *,
-        user_id: str = "user_1",
+        user_id: str = "",
         event_type: str | None = None,
         ts_ms: int | None = None,
         metadata: dict[str, Any] | None = None,
@@ -1082,7 +978,7 @@ class SocialBrainAgent:
         `MilestoneTracker.on_event()` 调用。
 
         Args:
-            user_id: 用户 ID，默认 "user_1"。
+            user_id: 用户 ID；空值使用 canonical bond user id。
             event_type: Bond 事件类型（如 "INTERACTION_DEEP"/"STAGE_PROMOTED" 等），
                         None 时仅查询已达成里程碑，不触发新检测。
             ts_ms: 时间戳（毫秒），None 使用当前时间。
@@ -1099,11 +995,12 @@ class SocialBrainAgent:
                 return {"status": "NO_TRACKER", "new_milestones": [], "achieved_count": 0}
 
             resolved_ts = int(ts_ms or _now_ms())
+            resolved_user_id = _resolve_social_bond_user_id(user_id)
             new_milestones: list[dict[str, Any]] = []
 
             if event_type is not None:
                 raw_milestones = tracker.on_event(
-                    user_id=str(user_id or "user_1"),
+                    user_id=resolved_user_id,
                     event_type=str(event_type or "").strip().upper(),
                     ts_ms=resolved_ts,
                     metadata=dict(metadata or {}),
@@ -1116,11 +1013,11 @@ class SocialBrainAgent:
             # 查询已达成里程碑总数
             achieved_count = 0
             if hasattr(tracker, "get_achieved"):
-                achieved_count = len(tracker.get_achieved(str(user_id or "user_1")) or [])
+                achieved_count = len(tracker.get_achieved(resolved_user_id) or [])
 
             result = {
                 "status": "OK",
-                "user_id": str(user_id or "user_1"),
+                "user_id": resolved_user_id,
                 "new_milestones": new_milestones,
                 "new_milestone_count": len(new_milestones),
                 "achieved_count": achieved_count,
@@ -1131,7 +1028,7 @@ class SocialBrainAgent:
                 self._touch_state(
                     key="last_milestone_achieved",
                     value={
-                        "user_id": str(user_id or "user_1"),
+                        "user_id": resolved_user_id,
                         "new_milestones": [m.get("milestone_id") for m in new_milestones],
                         "ts_ms": resolved_ts,
                     },
@@ -1145,7 +1042,7 @@ class SocialBrainAgent:
                             source=f"milestone_achieved:{len(new_milestones)}",
                             reward_level=_milestone_reward,
                             metadata={
-                                "user_id": str(user_id or "user_1"),
+                                "user_id": resolved_user_id,
                                 "milestone_ids": [m.get("milestone_id") for m in new_milestones],
                                 "achieved_count": achieved_count,
                                 "ts_ms": resolved_ts,
@@ -1179,7 +1076,7 @@ class SocialBrainAgent:
         repair_state = dict(state.get("repair_state") or {})
         last_milestone = dict(state.get("last_milestone_achieved") or {})
         return {
-            "bond_stage": str(state.get("bond_stage") or "STRANGER").strip().upper(),
+            "bond_stage": str(state.get("bond_stage") or "FRIEND").strip().upper(),
             "bond_trend": str(state.get("bond_trend") or "stable").strip().lower(),
             "bond_vector_intimacy": round(float(bond_vector.get("intimacy") or 0.0), 4),
             "bond_vector_trust": round(float(bond_vector.get("trust") or 0.0), 4),
@@ -1216,3 +1113,4 @@ from host_brain.tribe.default_mode_agent import get_default_mode_agent  # noqa: 
 from host_brain.tribe.events import emit_tribe_event  # noqa: E402, F401
 from host_brain.tribe.interoception_agent import get_interoception_agent  # noqa: E402, F401
 from host_brain.app.dependencies import get_milestone_tracker  # noqa: E402, F401
+

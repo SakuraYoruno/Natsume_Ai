@@ -2,7 +2,7 @@
 """批量 Chat + 多 Agent 实测：通过不同 query 测试动态路由与 intent 识别准确性。
 
 - 发送一批覆盖 CHAT / WORK_CODE / WORK_TRANSLATE / EXEC_INTENT / VISION_UI 的 query
-- 解析 SSE 流获取 SCENE_ROUTED、COMMIT，对比预期 scene（与 pre_intent_classifier 一致）
+- 解析 SSE 流获取 COMMIT，对比预期 scene（与 Thalamus 规则路由一致）
 - 输出：每条 query 的预期/实际 scene、decision、request_id、耗时；汇总 intent 准确率与多 agent 路由情况
 """
 from __future__ import annotations
@@ -14,7 +14,7 @@ import urllib.error
 import urllib.request
 from typing import Any
 
-# 与 graph_config_builder 中 pre_intent_classifier 预期一致
+# 与 Thalamus 场景规则预期一致
 SCENE_CHAT = "CHAT"
 SCENE_WORK_CODE = "WORK_CODE"
 SCENE_WORK_TRANSLATE = "WORK_TRANSLATE"
@@ -22,7 +22,7 @@ SCENE_EXEC_INTENT = "EXEC_INTENT"
 SCENE_VISION_UI = "VISION_UI"
 
 # 测试用例：(简短标签, 用户消息, 预期 scene_type)
-# 设计原则：覆盖预分类器关键词，并包含易混淆边界（娱乐+安装→CHAT、代码+娱乐→WORK_CODE）
+# 设计原则：覆盖 Thalamus 规则，并包含易混淆边界（娱乐+安装→CHAT、代码+娱乐→WORK_CODE）
 TEST_CASES: list[tuple[str, str, str]] = [
     # CHAT：日常对话、娱乐、无明确工作意图
     ("CHAT 问候", "你好，今天感觉怎么样？", SCENE_CHAT),
@@ -91,7 +91,7 @@ def _post_sse(path: str, body: dict[str, Any], timeout: int = DEFAULT_TIMEOUT) -
 
 
 def _observed_scene_and_commit(events: list[dict]) -> tuple[str | None, dict]:
-    """从 SSE 事件列表提取：观察到的 scene_type（来自 SCENE_ROUTED）、COMMIT 负载。"""
+    """从 SSE 事件列表提取：观察到的 scene_type、COMMIT 负载。"""
     observed_scene: str | None = None
     commit_payload: dict = {}
     for ev in events:
@@ -102,7 +102,7 @@ def _observed_scene_and_commit(events: list[dict]) -> tuple[str | None, dict]:
                 observed_scene = str(ev.get("scene_type", "")).strip().upper()
         if ev.get("phase") == "COMMIT":
             commit_payload = ev
-    # 若没有 SCENE_ROUTED，尝试从 COMMIT 的 audit_refs.llm 推断（execution_profile / graph 等）
+    # 尝试从 COMMIT 的 audit_refs.llm 推断（execution_profile / graph 等）
     if observed_scene is None and commit_payload:
         llm = (commit_payload.get("audit_refs") or {}).get("llm") or {}
         # 部分链路会在 llm 里带 scene_type 或 execution_profile
@@ -123,7 +123,7 @@ def run_one(
     expected_scene: str,
     session_id: str,
 ) -> dict[str, Any]:
-    """发单条请求，解析 SSE，返回结果摘要。使用独立 session_id 以便服务端生成 seq=1 的 draft，通过 Governor 序校验并走 pre_intent_classifier。"""
+    """发单条请求，解析 SSE，返回结果摘要。使用独立 session_id 以便服务端生成 seq=1 的 draft，通过 Governor 序校验并走 Thalamus。"""
     body: dict[str, Any] = {
         "message": message,
         "session_id": session_id,

@@ -1,5 +1,5 @@
 """
-启动 ChromaDB HTTP 服务并初始化六库 collections
+启动 ChromaDB HTTP 服务并初始化长期记忆 collection
 用法：python tools/start_chroma.py
 """
 from __future__ import annotations
@@ -11,18 +11,13 @@ CHROMA_DATA.mkdir(parents=True, exist_ok=True)
 
 CHROMA_EXE = ROOT / ".venv" / "Scripts" / "chroma.exe"
 HOST = "127.0.0.1"
-PORT = 8000
+PORT = 18000
 ENDPOINT = f"http://{HOST}:{PORT}"
 
-# 六库 collections 及向量维度（与 .env 中 CHROMA_COLLECTION_PROFILES_JSON 一致）
-# 使用 OpenAI text-embedding-3-small → dim=1536
+# 当前主链只保留长期记忆向量库；Style/Canon 不再混入 Chroma 召回。
+# 与 .env 中 CHROMA_COLLECTION_PROFILES_JSON={"episodic":1024} 保持一致。
 COLLECTIONS = {
-    "episodic":    384,
-    "canon_style": 384,
-    "canon_world": 384,
-    "long_term":   384,
-    "distilled":   384,
-    "bond":        384,
+    "episodic": 1024,
 }
 
 TENANT = "default_tenant"
@@ -82,11 +77,11 @@ def ensure_tenant_and_database(client) -> None:
 
 
 def init_collections() -> None:
-    """初始化六库 collections"""
+    """初始化长期记忆 collection。"""
     import chromadb
     from chromadb.config import Settings
 
-    print(f"\n[ChromaDB] 初始化六库 collections (tenant={TENANT}, database={DATABASE})")
+    print(f"\n[ChromaDB] 初始化长期记忆 collection (tenant={TENANT}, database={DATABASE})")
     client = chromadb.HttpClient(
         host=HOST,
         port=PORT,

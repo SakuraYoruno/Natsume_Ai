@@ -1,8 +1,8 @@
 受众：MASTER
 标题：Natsume AI 整体架构全景文档
 
-版本：v2.1
-日期：2026-04-19
+版本：v3.0
+日期：2026-05-30
 定位：以当前代码为锚点，对系统的运行面、主链、Edge/Gateway/Observability 关系做高层总览。本文偏“整体理解”，细节以 `docs/50_project/arch/` 下的代码事实文档为准。
 
 # Natsume AI 整体架构全景文档
@@ -19,9 +19,9 @@
 
 ```mermaid
 graph TB
-    USER["用户 / 外部平台 / 前端"] --> HOST["Host Main<br/>host_brain/app/fastapi_app.py<br/>:8000"]
-    USER --> OBS["Observability Backend<br/>host_brain/app/obs_fastapi_app.py<br/>:18082"]
-    HOST --> EDGE["Edge RPC<br/>edge_client/app/fastapi_app.py<br/>:17800"]
+    USER["用户 / 外部平台 / 前端"] --> HOST["Host Main<br/>host_brain/__main__.py<br/>(host_brain.app.asgi:app)<br/>:8000"]
+    USER --> OBS["Observability Backend<br/>host_brain/obs_main.py<br/>(host_brain.app.obs_fastapi_app:app)<br/>:18082"]
+    HOST --> EDGE["Edge RPC<br/>edge_client/__main__.py<br/>(端口由 EDGE_RPC_PORT 配置，默认 17800)"]
     USER --> GATEWAY["Unified Message Gateway<br/>edge_client/gateway/server.py<br/>:19000"]
     GATEWAY --> HOST
     OBS --> MON["Monitor UI<br/>host_brain/app/monitor_ui/"]
@@ -69,7 +69,7 @@ Host 仍然是：
 
 ```mermaid
 flowchart LR
-    A["/v1/chat"] --> B["fastapi_app.chat"]
+    A["/v1/chat"] --> B["app_factory.chat_endpoint"]
     B --> C{"immune gate / fastpath"}
     C -->|常规路径| D["chat_handler"]
     C -->|BLOCK/fastpath| K["HTTP 层直接返回 SSE"]
@@ -80,15 +80,16 @@ flowchart LR
     H --> I["executive_runtime"]
     I --> J["executive_runtime_core"]
     J --> L["chat_agent / skill / delegate / plan"]
-    L --> M["async_post_process"]
+    L --> SC["surface_main_chain (normal chat 最终作者)"]
+    SC --> M["async_post_process"]
 ```
 
 这个变化背后的含义是：
 
-- `/v1/chat` 的 HTTP 首跳在 `fastapi_app.py`，`chat_handler.py` 是进入主编排前的薄层
+- `/v1/chat` 的 HTTP 首跳由 `host_brain/app/asgi.py` + `host_brain/app/app_factory.py` 退示的 `chat_endpoint` 接住，再委托给 `chat_routes.handle_v1_chat_route` 与 `chat_handler.handle_chat`；`chat_handler.py` 是进入主编排前的薄层
 - `cortex_orchestrator` 是聊天编排中段收口点
 - `executive_runtime_core.py` 是当前真正的执行与路由核心
-- `chat_agent.py` 是人格渲染器，不再是总调度器
+- `chat_agent.py` 是人格渲染路由者；**normal chat 的最终文本作者是 `host_brain/persona/surface_main_chain.py` (SurfaceMainChain)**，旧 `prompt_builder` 链路仅作为辅助 facts / state 提供者
 
 ## 四、外部输入与平台消息链
 

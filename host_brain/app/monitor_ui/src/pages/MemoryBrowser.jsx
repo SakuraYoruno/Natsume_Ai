@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react'
+﻿import React, { useMemo, useState } from 'react'
 import { Archive, BookOpen, Brain, Database, RefreshCw } from 'lucide-react'
 import EmptyStateCard from '../components/EmptyStateCard.jsx'
 import OrganSystemOverview from '../components/lifeBody/OrganSystemOverview.jsx'
@@ -55,9 +55,7 @@ export default function MemoryBrowser() {
   const docs = canonDocs?.documents || canonDocs?.items || []
   const worldDocs = residentContext?.world_canon_documents || docs
   const personaDocs = residentContext?.persona_resident_documents || []
-  const styleDocs = residentContext?.style_canon_documents || []
-  const activeStyleBindings = residentContext?.active_style_bindings || []
-  const residentDocCount = worldDocs.length + personaDocs.length + styleDocs.length
+  const residentDocCount = worldDocs.length + personaDocs.length
   const hasMemoryObservabilityData = Boolean(
     memoryData || episodicData || distillData || canonDocs || compressData || residentContext
   )
@@ -73,8 +71,6 @@ export default function MemoryBrowser() {
     sampledSubsystemCount > 0
     || worldDocs.length > 0
     || personaDocs.length > 0
-    || styleDocs.length > 0
-    || activeStyleBindings.length > 0
     || (episodicData?.total_writes ?? 0) > 0
     || (distillData?.total_cycles ?? 0) > 0
     || (compressData?.total_compressions ?? 0) > 0
@@ -138,7 +134,7 @@ export default function MemoryBrowser() {
         gradientClass="from-primary-50 via-white to-cyan-50"
         metaItems={[
           `窗口：${windowMinutes} 分钟`,
-          `风格常驻：${activeStyleBindings.length}`,
+          `常驻设定：${residentDocCount} 份`,
           `情景写入：${episodicData?.total_writes ?? 0}`,
         ]}
         aside={(
@@ -159,7 +155,7 @@ export default function MemoryBrowser() {
 
       {!error && !loading && !refreshing && memoryLoadState === LOAD_STATES.UNAVAILABLE ? (
         <NoticeBanner variant="warning">
-          记忆观测接口当前未返回可用数据，页面会保留中性占位而不是把不可用误报成 0。
+          记忆观测接口当前未返回可用数据，页面会保留中性空态而不是把不可用误报成 0。
         </NoticeBanner>
       ) : null}
 
@@ -195,7 +191,7 @@ export default function MemoryBrowser() {
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <div className="card p-4">
           <SectionHeading icon={BookOpen} title="常驻设定文件" />
-          {(worldDocs.length > 0 || personaDocs.length > 0 || styleDocs.length > 0) ? (
+          {(worldDocs.length > 0 || personaDocs.length > 0) ? (
             <div className="space-y-3">
               <div>
                 <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-gray-400">World Canon</div>
@@ -237,66 +233,9 @@ export default function MemoryBrowser() {
                 )}
               </div>
 
-              <div className="border-t pt-3">
-                <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-gray-400">Style Canon</div>
-                {styleDocs.length > 0 ? (
-                  <div className="max-h-36 space-y-1 overflow-y-auto">
-                    {styleDocs.map((doc) => (
-                      <div key={doc.doc_id} className="rounded bg-gray-50 px-3 py-2 text-xs">
-                        <div className="flex items-center justify-between gap-2">
-                          <span className="truncate font-mono text-gray-700">{doc.doc_id}</span>
-                          <span className="shrink-0 text-gray-400">v{doc.version}</span>
-                        </div>
-                        {doc.preview ? <div className="mt-1 text-gray-500">{doc.preview}</div> : null}
-                        {doc.source_path ? <div className="mt-1 truncate text-[11px] text-gray-400">{doc.source_path}</div> : null}
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="text-xs text-gray-400">暂无语言风格常驻文件。</div>
-                )}
-              </div>
             </div>
           ) : (
             <EmptyStateCard title="暂无常驻设定文件" hint="等待文档同步后会自动展示。" className="p-4" />
-          )}
-        </div>
-
-        <div className="card p-4">
-          <SectionHeading icon={Brain} title="人格 / 风格常驻注入" />
-          {activeStyleBindings.length > 0 ? (
-            <div className="space-y-3">
-              <div className="grid grid-cols-1 gap-3 text-center text-xs">
-                <div>
-                  <div className="text-lg font-bold text-indigo-600">{activeStyleBindings.length}</div>
-                  <div className="text-gray-500">活跃绑定节点</div>
-                </div>
-              </div>
-
-              {activeStyleBindings.length > 0 ? (
-                <div>
-                  <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-gray-400">当前节点绑定</div>
-                  <div className="max-h-32 space-y-1 overflow-y-auto">
-                    {activeStyleBindings.map((row) => (
-                      <div key={`${row.node_id}-${row.canon_id || 'style'}`} className="rounded bg-gray-50 px-3 py-2 text-xs">
-                        <div className="flex items-center justify-between gap-2">
-                          <span className="truncate font-mono text-gray-700">{row.node_id}</span>
-                          <span className="shrink-0 text-gray-400">{row.canon_id || 'style_pack'}</span>
-                        </div>
-                        {row.preview ? <div className="mt-1 text-gray-500">{row.preview}</div> : null}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ) : null}
-
-            </div>
-          ) : (
-            <EmptyStateCard
-              title="暂无人格 / 风格注入绑定"
-              hint="当风格绑定生效后，这里会展示当前节点与 canon 的对应关系。"
-              className="p-4"
-            />
           )}
         </div>
 
@@ -373,3 +312,4 @@ export default function MemoryBrowser() {
     </div>
   )
 }
+

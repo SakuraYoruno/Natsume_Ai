@@ -10,6 +10,7 @@ import {
 } from 'lucide-react'
 import DigitalLifeRuntimeCard from '../components/DigitalLifeRuntimeCard.jsx'
 import EmptyStateCard from '../components/EmptyStateCard.jsx'
+import LoadingNotice from '../components/LoadingNotice.jsx'
 import MetricCard from '../components/MetricCard.jsx'
 import NoticeBanner from '../components/NoticeBanner.jsx'
 import SampleMeta from '../components/obs/SampleMeta.jsx'
@@ -253,9 +254,9 @@ export default function PersonaPromptOps() {
           {selected && selectedEntry ? (
             <React.Suspense
               fallback={(
-                <NoticeBanner variant="info" title="按需加载中">
+                <LoadingNotice>
                   正在装配人格模板详情只读区…
-                </NoticeBanner>
+                </LoadingNotice>
               )}
             >
               <PromptTemplateEditorPanel

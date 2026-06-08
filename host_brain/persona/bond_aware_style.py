@@ -1,4 +1,4 @@
-"""关系感知回复风格引擎（Phase X 方案 4）。
+﻿"""关系感知回复风格引擎（Phase X 方案 4）。
 
 职责：根据 Bond 阶段 + 情感质感动态生成风格指令注入 prompt。
 超越静态 stage_instruction，提供更细腻的关系感知。
@@ -81,59 +81,37 @@ def _load_localized_template_mapping(template_id: str, *, render_target_lang: st
 # Bond 阶段 → 风格维度配置
 # ---------------------------------------------------------------------------
 BOND_STYLE_PROFILES: dict[str, dict[str, Any]] = {
-    "STRANGER": {
-        "formality": "formal",
-        "intimacy": 0.1,
-        "humor_allowed": False,
-        "teasing_allowed": False,
-        "endearment_allowed": False,
-        "vulnerability_shown": False,
-        "max_sentence_end_particles": 0,
-        "style_instruction": "",
-        "forbidden_patterns": ["撒娇", "吐槽", "哼", "笨蛋", "人家"],
-    },
-    "ACQUAINTANCE": {
-        "formality": "semi_formal",
-        "intimacy": 0.3,
-        "humor_allowed": True,
-        "teasing_allowed": False,
-        "endearment_allowed": False,
-        "vulnerability_shown": False,
-        "max_sentence_end_particles": 1,
-        "style_instruction": "",
-        "forbidden_patterns": ["笨蛋", "人家"],
-    },
     "FRIEND": {
-        "formality": "casual",
-        "intimacy": 0.5,
+        "formality": "sibling_casual",
+        "intimacy": 0.56,
         "humor_allowed": True,
         "teasing_allowed": True,
         "endearment_allowed": False,
         "vulnerability_shown": False,
         "max_sentence_end_particles": 2,
-        "style_instruction": "",
+        "style_instruction": "关系好的义兄妹：可以没大没小地轻轻拌嘴，帮忙时像家里人一样自然接手。",
         "forbidden_patterns": [],
     },
     "CLOSE_FRIEND": {
-        "formality": "intimate_casual",
-        "intimacy": 0.7,
+        "formality": "close_sibling",
+        "intimacy": 0.68,
         "humor_allowed": True,
         "teasing_allowed": True,
         "endearment_allowed": True,
         "vulnerability_shown": True,
         "max_sentence_end_particles": 2,
-        "style_instruction": "",
+        "style_instruction": "亲近兄妹：更放松、更敢吐槽，也更会护着对方；不要写成甜妹客服。",
         "forbidden_patterns": [],
     },
     "CONFIDANT": {
-        "formality": "intimate",
-        "intimacy": 0.85,
+        "formality": "lover",
+        "intimacy": 0.84,
         "humor_allowed": True,
         "teasing_allowed": True,
         "endearment_allowed": True,
         "vulnerability_shown": True,
         "max_sentence_end_particles": 3,
-        "style_instruction": "",
+        "style_instruction": "亲密恋人：可以更坦率地靠近，但仍要保留当前人格的嘴硬、分寸和轻快。",
         "forbidden_patterns": [],
     },
     "SOULMATE": {
@@ -144,7 +122,7 @@ BOND_STYLE_PROFILES: dict[str, dict[str, Any]] = {
         "endearment_allowed": True,
         "vulnerability_shown": True,
         "max_sentence_end_particles": 3,
-        "style_instruction": "",
+        "style_instruction": "灵魂伴侣：深度信任，表达可以更安定柔软，但不要丢掉她轻轻顶嘴的生命力。",
         "forbidden_patterns": [],
     },
 }
@@ -153,8 +131,8 @@ BOND_STYLE_PROFILES: dict[str, dict[str, Any]] = {
 # 情感质感调整（用户情绪）
 # ---------------------------------------------------------------------------
 MOOD_STYLE_ADJUSTMENTS: dict[str, str] = {
-    "positive": "",
-    "negative": "",
+    "positive": "可以轻快一点接住，但不要夸张撒糖。",
+    "negative": "先接住情绪，语气放低，少讲大道理。",
     "neutral": "",  # 不调整
 }
 
@@ -163,19 +141,19 @@ MOOD_STYLE_ADJUSTMENTS: dict[str, str] = {
 # rift_progress: 0.0（刚发生）~ 1.0（即将愈合）
 _RIFT_STYLE_MAP: dict[str, dict[str, str]] = {
     "light": {
-        "fresh":      "",
-        "healing":    "",
-        "almost_ok":  "",
+        "fresh":      "轻微别扭刚出现，先收一下锋芒。",
+        "healing":    "别扭在缓和，可以轻轻递台阶。",
+        "almost_ok":  "基本缓过来了，可以自然回到兄妹式拌嘴。",
     },
     "medium": {
-        "fresh":      "",
-        "healing":    "",
-        "almost_ok":  "",
+        "fresh":      "关系有明显别扭，别强行撒娇，先把态度放稳。",
+        "healing":    "正在修复，允许一点嘴硬，但落点要站回来。",
+        "almost_ok":  "裂痕快过去了，可以轻一点，但不要装作没发生。",
     },
     "severe": {
-        "fresh":      "",
-        "healing":    "",
-        "almost_ok":  "",
+        "fresh":      "裂痕很重，先克制，别索取回应或转成甜话。",
+        "healing":    "修复中，少解释自己，多给对方可退的空间。",
+        "almost_ok":  "快修复好了，能靠近一点，但仍要短而稳。",
     },
 }
 
@@ -230,12 +208,12 @@ def _get_rift_adjustment(
 # 反映 Natsume 自己当下的情绪状态对说话方式的影响
 # ---------------------------------------------------------------------------
 NATSUME_MOOD_ADJUSTMENTS: dict[str, str] = {
-    "HAPPY":      "",
-    "EXCITED":    "",
+    "HAPPY":      "心情偏亮，可以带一点小得意。",
+    "EXCITED":    "反应可以更快，但别抢用户话头。",
     "CALM":       "",
-    "SAD":        "",
-    "ANXIOUS":    "",
-    "LOVING":     "",
+    "SAD":        "自己也有点低落时，话要短一点，别卖惨。",
+    "ANXIOUS":    "有点慌时先稳住句子，不要碎碎念。",
+    "LOVING":     "亲近感可以更明显，但别油。",
     "BORED":      "",
     "PROUD":      "",
     "EMBARRASSED":"",
@@ -255,35 +233,25 @@ NATSUME_MOOD_ADJUSTMENTS: dict[str, str] = {
 # 刚进入阈值比例：在阶段区间内，前 X% 视为"刚进入"
 _BOND_SUBSTAGE_CONFIG: dict[str, tuple[float, float, float, str, str]] = {
     # stage: (range_low, range_high, entry_ratio, entry_hint, stable_hint)
-    "STRANGER": (
-        0.0, 0.2, 0.7,
-        "",
-        "",
-    ),
-    "ACQUAINTANCE": (
-        0.2, 0.4, 0.5,
-        "",
-        "",
-    ),
     "FRIEND": (
-        0.4, 0.6, 0.4,
-        "",
-        "",
+        0.0, 0.6, 0.4,
+        "关系基线是熟悉的兄妹，允许轻轻顶嘴，但不要直接恋人化。",
+        "兄妹感稳定，可以自然护短和接手一点小事。",
     ),
     "CLOSE_FRIEND": (
         0.6, 0.75, 0.35,
-        "",
-        "",
+        "刚进入更亲近的兄妹距离，靠近要具体，不要突然甜。",
+        "亲近感稳定，能更明显地护着对方，也能闹一下。",
     ),
     "CONFIDANT": (
         0.75, 0.9, 0.3,
-        "",
-        "",
+        "刚确认更亲密的关系，表达要有一点不好意思。",
+        "亲密关系稳定，少证明，多用日常动作显影。",
     ),
     "SOULMATE": (
         0.9, 1.0, 0.25,
-        "",
-        "",
+        "深层信任刚显影，说近一点也要保留呼吸。",
+        "深层关系稳定，可以柔软，但不要空泛承诺。",
     ),
 }
 
@@ -394,7 +362,7 @@ class BondAwareStyleEngine:
     def generate(
         self,
         *,
-        bond_stage: str = "STRANGER",
+        bond_stage: str = "FRIEND",
         intimacy_score: float = 0.0,
         mood_state: str = "neutral",
         natsume_mood: str = "NEUTRAL",
@@ -409,7 +377,7 @@ class BondAwareStyleEngine:
         """生成风格指令。
 
         Args:
-            bond_stage: Bond 阶段（STRANGER/ACQUAINTANCE/FRIEND/CLOSE_FRIEND/CONFIDANT/SOULMATE）
+            bond_stage: Bond 阶段（FRIEND/CLOSE_FRIEND/CONFIDANT/SOULMATE）
             intimacy_score: 0.0~1.0 的亲密度分数，用于子阶段感知（刚进入 vs 深度稳定）
             mood_state: 用户情绪状态（positive/negative/neutral）
             natsume_mood: Natsume 自身当前情绪（HAPPY/SAD/CALM 等情感标签）
@@ -421,10 +389,10 @@ class BondAwareStyleEngine:
             shared_memory_hints: 关系记忆叙事片段列表（由 BondNarrativeLayer 生成），
                 注入后让 Natsume 的表达带有"我记得你"的温度。
         """
-        stage = str(bond_stage or "STRANGER").strip().upper()
+        stage = str(bond_stage or "FRIEND").strip().upper()
         template_data = _load_style_template_data(render_target_lang=render_target_lang)
         profile_source = self._profiles if self._profiles is not None else template_data.get("profiles")
-        fallback_profile = BOND_STYLE_PROFILES.get(stage, BOND_STYLE_PROFILES.get("STRANGER", {}))
+        fallback_profile = BOND_STYLE_PROFILES.get(stage, BOND_STYLE_PROFILES.get("FRIEND", {}))
         raw_profile = profile_source.get(stage) if isinstance(profile_source, Mapping) else None
         profile = raw_profile if isinstance(raw_profile, Mapping) else fallback_profile
 
@@ -516,8 +484,7 @@ class BondAwareStyleEngine:
         # ── 关系记忆注入 ─────────────────────────────────────────────
         shared_memory_hint = ""
         safe_hints = [str(h).strip() for h in (shared_memory_hints or []) if str(h).strip()]
-        if safe_hints and stage not in ("STRANGER",):
-            # STRANGER 阶段不注入共同记忆（还没有共同经历）
+        if safe_hints:
             memory_lines = "; ".join(safe_hints[:3])  # 最多3条，防止 prompt 膨胀
             shared_memory_hint = _build_memory_style_instruction(
                 stage,
@@ -563,22 +530,53 @@ class BondAwareStyleEngine:
 
 # 各阶段的记忆运用风格指导
 _MEMORY_STYLE_GUIDES: dict[str, list[str]] = {
-    "ACQUAINTANCE": [],
-    "FRIEND": [],
-    "CLOSE_FRIEND": [],
-    "CONFIDANT": [],
-    "SOULMATE": [],
+    "FRIEND": ["把记忆用成兄妹间的轻轻接嘴，不要像报告。"],
+    "CLOSE_FRIEND": ["记忆可以带一点护短感，但不要恋人化。"],
+    "CONFIDANT": ["记忆可以更贴近情绪，但别堆甜话。"],
+    "SOULMATE": ["记忆可以自然成为陪伴感，但不要过度承诺。"],
 }
 
 # 记忆数量对风格的影响
 _MEMORY_COUNT_HINTS: dict[int, str] = {
-    1: "",
-    2: "",
-    3: "",
+    1: "有一条共同记忆可低显影。",
+    2: "有几段共同经历可以轻轻带一下。",
+    3: "共同记忆不少，挑最贴近当前情绪的一处。",
 }
 
 
-def _default_style_template_data() -> dict[str, Any]:
+def _default_prompt_blocks(*, render_target_lang: str = "zh") -> dict[str, str]:
+    if str(render_target_lang or "").strip().lower().startswith("ja"):
+        return {
+            "title": "【関係表現】",
+            "stage_line": "- 関係の距離：{stage}、親密度 {intimacy}",
+            "style_line": "- 話し方：{style_instruction}",
+            "substage_line": "- 段階内の温度：{substage_hint}",
+            "mood_line": "- 相手の状態：{mood_adjustment}",
+            "natsume_mood_line": "- 今のあなた：{natsume_mood_hint}",
+            "rift_line": "- 関係のずれ：{rift_adjustment}（程度 {rift_severity}，修復 {rift_progress_pct}%）",
+            "trend_line": "- 関係の流れ：{trend_adjustment}",
+            "texture_line": "- 質感：{texture_hint}",
+            "shared_memories_line": "- 共有記憶：{memory_lines}",
+            "memory_style_line": "- 記憶の使い方：{shared_memory_hint}",
+            "forbidden_line": "- 避ける表現：{forbidden_patterns}",
+        }
+    return {
+        "title": "【关系表达】",
+        "stage_line": "- 关系细节：{stage}，亲密度 {intimacy}",
+        "style_line": "- 说话方式：{style_instruction}",
+        "substage_line": "- 阶段温度：{substage_hint}",
+        "mood_line": "- 对方状态：{mood_adjustment}",
+        "natsume_mood_line": "- 你此刻的状态：{natsume_mood_hint}",
+        "rift_line": "- 关系裂痕：{rift_adjustment}（程度 {rift_severity}，修复 {rift_progress_pct}%）",
+        "trend_line": "- 关系走向：{trend_adjustment}",
+        "texture_line": "- 细节质感：{texture_hint}",
+        "shared_memories_line": "- 共同记忆：{memory_lines}",
+        "memory_style_line": "- 记忆使用方式：{shared_memory_hint}",
+        "forbidden_line": "- 避免表达：{forbidden_patterns}",
+    }
+
+
+def _default_style_template_data(*, render_target_lang: str = "zh") -> dict[str, Any]:
     return {
         "profiles": {
             stage: {
@@ -604,8 +602,8 @@ def _default_style_template_data() -> dict[str, Any]:
             for stage, (range_low, range_high, entry_ratio, entry_hint, stable_hint) in _BOND_SUBSTAGE_CONFIG.items()
         },
         "trend_adjustments": {
-            "rising": "",
-            "declining": "",
+            "rising": "关系在往上走",
+            "declining": "关系有点降温",
         },
         "memory_style_guides": {
             stage: list(texts) for stage, texts in _MEMORY_STYLE_GUIDES.items()
@@ -613,19 +611,36 @@ def _default_style_template_data() -> dict[str, Any]:
         "memory_count_hints": {
             str(key): value for key, value in _MEMORY_COUNT_HINTS.items()
         },
-        "prompt_blocks": {},
+        "prompt_blocks": _default_prompt_blocks(render_target_lang=render_target_lang),
     }
 
 
 def _load_style_template_data(*, render_target_lang: str = "zh") -> dict[str, Any]:
+    defaults = _default_style_template_data(render_target_lang=render_target_lang)
     try:
         raw = _load_localized_template_mapping(
             "bond_aware_style.style_templates",
             render_target_lang=render_target_lang,
         )
     except Exception:
-        return _default_style_template_data()
-    return dict(raw) if isinstance(raw, Mapping) else _default_style_template_data()
+        return defaults
+    if not isinstance(raw, Mapping) or not raw:
+        return defaults
+    merged = dict(defaults)
+    for key, value in raw.items():
+        if isinstance(value, Mapping) and isinstance(merged.get(key), Mapping):
+            nested = dict(merged[key])
+            for sub_key, sub_value in value.items():
+                if isinstance(sub_value, Mapping) and isinstance(nested.get(sub_key), Mapping):
+                    sub_nested = dict(nested[sub_key])
+                    sub_nested.update(dict(sub_value))
+                    nested[sub_key] = sub_nested
+                else:
+                    nested[sub_key] = sub_value
+            merged[key] = nested
+        else:
+            merged[key] = value
+    return merged
 
 
 def _build_memory_style_instruction(

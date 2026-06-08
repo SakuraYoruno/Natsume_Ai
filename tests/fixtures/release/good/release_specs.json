@@ -1,52 +1,51 @@
-{
-  "specs": [
-    {
-      "milestone": "M0",
-      "release_id": "rel-m0-2026-03-01",
-      "assets": [
-        "tests/fixtures/release/assets/m0/manifest.txt"
-      ],
-      "required_services": [
-        "host.audit.sqlite_ledger",
-        "host.governor.decision",
-        "host.skills.loader"
-      ]
-    },
-    {
-      "milestone": "M1",
-      "release_id": "rel-m1-2026-03-01",
-      "assets": [
-        "tests/fixtures/release/assets/m1/manifest.txt"
-      ],
-      "required_services": [
-        "host.audit.sqlite_ledger",
-        "host.integrations.llm_gateway",
-        "edge.rpc.gateway"
-      ]
-    },
-    {
-      "milestone": "M2",
-      "release_id": "rel-m2-2026-03-01",
-      "assets": [
-        "tests/fixtures/release/assets/m2/manifest.txt"
-      ],
-      "required_services": [
-        "host.audit.sqlite_ledger",
-        "host.retrieval.embedding",
-        "host.retrieval.reranker"
-      ]
-    },
-    {
-      "milestone": "M3",
-      "release_id": "rel-m3-2026-03-01",
-      "assets": [
-        "tests/fixtures/release/assets/m3/manifest.txt"
-      ],
-      "required_services": [
-        "host.audit.sqlite_ledger",
-        "host.vision.screen_ocr",
-        "host.vision.camera_recognizer"
-      ]
-    }
-  ]
+﻿{
+    "specs":  [
+                  {
+                      "milestone":  "M0",
+                      "release_id":  "rel-m0-2026-03-01",
+                      "assets":  [
+                                     "tests/fixtures/release/assets/m0/manifest.txt"
+                                 ],
+                      "required_services":  [
+                                                "host.audit.sqlite_ledger",
+                                                "host.governor.decision",
+                                                "host.skills.loader"
+                                            ]
+                  },
+                  {
+                      "milestone":  "M1",
+                      "release_id":  "rel-m1-2026-03-01",
+                      "assets":  [
+                                     "tests/fixtures/release/assets/m1/manifest.txt"
+                                 ],
+                      "required_services":  [
+                                                "host.audit.sqlite_ledger",
+                                                "host.integrations.llm_gateway",
+                                                "edge.rpc.gateway"
+                                            ]
+                  },
+                  {
+                      "milestone":  "M2",
+                      "release_id":  "rel-m2-2026-03-01",
+                      "assets":  [
+                                     "tests/fixtures/release/assets/m2/manifest.txt"
+                                 ],
+                      "required_services":  [
+                                                "host.audit.sqlite_ledger",
+                                                "host.retrieval.recall_fusion"
+                                            ]
+                  },
+                  {
+                      "milestone":  "M3",
+                      "release_id":  "rel-m3-2026-03-01",
+                      "assets":  [
+                                     "tests/fixtures/release/assets/m3/manifest.txt"
+                                 ],
+                      "required_services":  [
+                                                "host.audit.sqlite_ledger",
+                                                "host.vision.screen_ocr",
+                                                "host.vision.camera_recognizer"
+                                            ]
+                  }
+              ]
 }

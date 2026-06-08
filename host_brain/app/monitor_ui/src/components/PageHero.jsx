@@ -8,12 +8,12 @@ export default function PageHero({
   gradientClass = 'from-primary-50 via-white to-indigo-50',
   metaItems = [],
   aside = null,
+  showPulseRail = true,
 }) {
   return (
-    <div className={`relative overflow-hidden rounded-3xl border border-white/70 bg-gradient-to-r ${gradientClass} p-5 shadow-card backdrop-blur-sm`}>
+    <div className={`relative overflow-hidden rounded-xl border border-white/70 bg-gradient-to-r ${gradientClass} p-5 shadow-card backdrop-blur-sm`}>
       <div className="pointer-events-none absolute inset-0">
-        <div className="absolute -right-10 -top-8 h-36 w-36 rounded-full bg-white/50 blur-2xl" />
-        <div className="absolute bottom-0 left-1/3 h-28 w-28 rounded-full bg-primary-100/40 blur-2xl" />
+        <div className="absolute inset-x-0 top-0 h-px bg-white/80" />
         <div className="absolute inset-x-0 bottom-0 h-px bg-gradient-to-r from-transparent via-primary-200/70 to-transparent" />
       </div>
       <div className="relative flex items-start justify-between gap-4 flex-wrap">
@@ -41,6 +41,7 @@ export default function PageHero({
         ) : null}
       </div>
 
+      {showPulseRail ? (
       <div className="relative mt-4 hidden h-8 items-center overflow-hidden rounded-xl border border-white/75 bg-white/70 px-3 backdrop-blur-sm sm:flex">
         <div className="lifeline-wave absolute inset-0 opacity-65" />
         <div className="relative flex w-full items-center justify-between">
@@ -51,6 +52,7 @@ export default function PageHero({
           <span className="lifeline-node" style={{ animationDelay: '1.6s' }} />
         </div>
       </div>
+      ) : null}
     </div>
   )
 }

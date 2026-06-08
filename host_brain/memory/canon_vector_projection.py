@@ -1,7 +1,7 @@
 """Project canon SSOT files into Chroma vector index.
 
 Design:
-- Style/World canon remain file-based SSOT.
+- World canon remains file-based SSOT.
 - This module builds vector-search projection documents from SSOT files.
 - Projection writes into a dedicated Chroma collection (default: ``canon``).
 """
@@ -16,17 +16,9 @@ from typing import Any, Mapping, Sequence
 from urllib.parse import urlparse
 
 from host_brain.core.key_profiles import resolve_secret_from_profiles
-from host_brain.memory.chroma_client import load_chroma_runtime_config
-from host_brain.memory.canon_style_store import STYLE_CANON_KEY_MAP, STYLE_V5_FILE_NAME, StyleCanonStore
-from host_brain.retrieval.embedding import (
-    EmbeddingServiceContract,
-    build_embedding_provider_registry,
-    load_embedding_runtime_config,
-    resolve_embedding_route,
-)
+from host_brain.memory.chroma_client import embed_text, load_chroma_runtime_config
 
 
-DEFAULT_STYLE_ROOT = "host_brain/canon/style"
 DEFAULT_WORLD_ROOT = "host_brain/canon/world"
 DEFAULT_CANON_COLLECTION = "canon"
 DEFAULT_CHROMA_BACKEND = "http"
@@ -63,18 +55,11 @@ def load_env_file(path: str | Path) -> dict[str, str]:
 
 def collect_canon_projection_documents(
     *,
-    style_root: str | Path = DEFAULT_STYLE_ROOT,
     world_root: str | Path = DEFAULT_WORLD_ROOT,
-    include_style: bool = True,
     include_world: bool = True,
 ) -> tuple[list[CanonProjectionDocument], list[dict[str, Any]]]:
     docs: list[CanonProjectionDocument] = []
     issues: list[dict[str, Any]] = []
-
-    if include_style:
-        style_docs, style_issues = _collect_style_docs(Path(style_root))
-        docs.extend(style_docs)
-        issues.extend(style_issues)
 
     if include_world:
         world_docs, world_issues = _collect_world_docs(Path(world_root))
@@ -87,13 +72,11 @@ def collect_canon_projection_documents(
 
 def sync_canon_vector_index(
     *,
-    style_root: str | Path = DEFAULT_STYLE_ROOT,
     world_root: str | Path = DEFAULT_WORLD_ROOT,
     collection: str = DEFAULT_CANON_COLLECTION,
     backend: str = DEFAULT_CHROMA_BACKEND,
     chroma_path: str | Path = DEFAULT_CHROMA_PATH,
     collection_dim: int | None = None,
-    include_style: bool = True,
     include_world: bool = True,
     env: Mapping[str, Any] | None = None,
     local_overrides: Mapping[str, Any] | None = None,
@@ -112,50 +95,15 @@ def sync_canon_vector_index(
         raise RuntimeError(f"chroma runtime config invalid: {cfg_result.as_dict()}")
     cfg = cfg_result.config
 
-    embed_cfg_result = load_embedding_runtime_config(env=merged_env)
-    if not embed_cfg_result.success or embed_cfg_result.config is None:
-        raise RuntimeError(f"embedding runtime config invalid: {embed_cfg_result.as_dict()}")
-    embed_cfg = embed_cfg_result.config
     resolved_node_id = _resolve_runtime_node_id(env=merged_env, node_id=node_id)
-    resolved_key_profiles, resolved_secret_store, resolved_epoch = _resolve_key_materials(
-        key_profiles=key_profiles,
-        secret_store=secret_store,
-        current_epoch=current_epoch,
-    )
-    resolved_openai_key = _resolve_openai_api_key(
-        env=merged_env,
-        node_id=resolved_node_id,
-        key_profiles=resolved_key_profiles,
-        secret_store=resolved_secret_store,
-        current_epoch=resolved_epoch,
-    )
-    provider_registry = build_embedding_provider_registry(
-        env=merged_env,
-        openai_api_key=resolved_openai_key,
-    )
-    embedding_service = EmbeddingServiceContract(
-        runtime_config=embed_cfg,
-        provider_registry=provider_registry,
-        node_id=resolved_node_id,
-        available=True,
-    )
-    active_route = resolve_embedding_route(embed_cfg, node_id=resolved_node_id)
 
     target_collection = str(collection or DEFAULT_CANON_COLLECTION).strip() or DEFAULT_CANON_COLLECTION
     dim = int(collection_dim) if collection_dim is not None else _resolve_collection_dim(cfg, target_collection)
     if dim <= 0:
         raise ValueError(f"collection_dim must be > 0, got {dim}")
-    if int(active_route.dim) != int(dim):
-        raise ValueError(
-            "embedding/chroma dim mismatch: "
-            f"route_dim={int(active_route.dim)} collection_dim={int(dim)} "
-            f"(route_id={active_route.route_id}, provider={active_route.provider})"
-        )
 
     documents, issues = collect_canon_projection_documents(
-        style_root=style_root,
         world_root=world_root,
-        include_style=include_style,
         include_world=include_world,
     )
 
@@ -170,23 +118,11 @@ def sync_canon_vector_index(
     rows: list[str] = []
     metadatas: list[dict[str, Any]] = []
     vectors: list[list[float]] = []
-    style_count = 0
     world_count = 0
     for row in documents:
-        result = embedding_service.embed(
-            request_id=f"canon_sync::{row.vector_id}",
-            text=row.text,
-        )
-        if not result.success:
-            raise RuntimeError(
-                "canon vector embedding failed: "
-                f"vector_id={row.vector_id} reason={result.reason_code} detail={result.detail}"
-            )
-        output = dict(result.output or {})
-        embedding = [float(v) for v in list(output.get("embedding_vector") or [])]
-        model_id = str(output.get("embedding_model_id") or active_route.model_id)
-        provider = str(output.get("provider") or active_route.provider)
-        route_id = str(output.get("route_id") or active_route.route_id)
+        embedding, model_id = embed_text(row.text, dim=dim)
+        provider = "memory_chroma"
+        route_id = "canon_vector_projection"
         ids.append(row.vector_id)
         rows.append(row.text)
         metadata = dict(row.metadata)
@@ -197,9 +133,7 @@ def sync_canon_vector_index(
         metadatas.append(metadata)
         vectors.append(embedding)
         kind = str(metadata.get("canon_kind") or "")
-        if kind == "style":
-            style_count += 1
-        elif kind == "world":
+        if kind == "world":
             world_count += 1
 
     if ids:
@@ -222,11 +156,10 @@ def sync_canon_vector_index(
         "collection": target_collection,
         "vector_dim": dim,
         "backend": str(backend),
-        "embedding_provider": active_route.provider,
-        "embedding_model_id": active_route.model_id,
-        "embedding_route_id": active_route.route_id,
+        "embedding_provider": "memory_chroma",
+        "embedding_model_id": model_id if ids else None,
+        "embedding_route_id": "canon_vector_projection",
         "embedding_node_id": resolved_node_id,
-        "style_docs_synced": style_count,
         "world_docs_synced": world_count,
         "docs_synced": len(ids),
         "issues_count": len(issues),
@@ -234,115 +167,6 @@ def sync_canon_vector_index(
         "collection_count": collection_count,
     }
 
-
-def _collect_style_docs(style_root: Path) -> tuple[list[CanonProjectionDocument], list[dict[str, Any]]]:
-    docs: list[CanonProjectionDocument] = []
-    issues: list[dict[str, Any]] = []
-    if not style_root.exists():
-        issues.append(
-            {
-                "code": "STYLE_ROOT_MISSING",
-                "source_path": str(style_root),
-                "detail": "style root path does not exist",
-            }
-        )
-        return docs, issues
-
-    entries: list[Any] = []
-    seen_ids: set[str] = set()
-    store = StyleCanonStore(style_root=style_root)
-    v5_path = style_root / STYLE_V5_FILE_NAME
-    if v5_path.exists():
-        try:
-            for canon_id in STYLE_CANON_KEY_MAP:
-                entry = store.get(canon_id)
-                if entry is not None:
-                    entries.append(entry)
-                    seen_ids.add(str(entry.canon_id))
-        except Exception as exc:
-            issues.append(
-                {
-                    "code": "STYLE_SCHEMA_INVALID",
-                    "source_path": str(v5_path),
-                    "detail": f"failed to load style canonical v5 profile: {exc}",
-                }
-            )
-            return docs, issues
-        if not seen_ids:
-            issues.append(
-                {
-                    "code": "STYLE_SCHEMA_INVALID",
-                    "source_path": str(v5_path),
-                    "detail": "style_profile_v5.json missing or invalid",
-                }
-            )
-
-    for path in sorted(style_root.glob("*.json")):
-        if path.name == STYLE_V5_FILE_NAME:
-            continue
-        payload, issue = _read_json_file(path)
-        if issue is not None:
-            issues.append(issue)
-            continue
-        canon_id = str(payload.get("canon_id") or "").strip()
-        content = str(payload.get("content") or "").strip()
-        if not canon_id or not content or canon_id in seen_ids:
-            continue
-        try:
-            entry = store.get(canon_id)
-        except Exception as exc:
-            issues.append(
-                {
-                    "code": "STYLE_SCHEMA_INVALID",
-                    "source_path": str(path),
-                    "detail": str(exc),
-                }
-            )
-            continue
-        if entry is not None:
-            entries.append(entry)
-            seen_ids.add(canon_id)
-
-    for entry in entries:
-        canon_id = str(entry.canon_id).strip()
-        content = str(entry.content).strip()
-        if not canon_id or not content:
-            continue
-
-        version = int(entry.version)
-        hash_value = str(entry.hash or "")
-        tag_list = [str(v) for v in list(entry.tags or [])]
-        tags_csv = ",".join(tag_list)
-        tone_only = bool(entry.tone_only)
-        unsafe_as_fact = bool(entry.unsafe_as_fact)
-        source_ref = f"canon://style/{canon_id}"
-        evidence_ref = f"evd://canon/style/{canon_id}@v{version}"
-        vector_id = f"canon_style::{canon_id}"
-
-        text = (
-            "[STYLE_CANON]\n"
-            f"canon_id: {canon_id}\n"
-            f"version: {version}\n"
-            f"tone_only: {str(tone_only).lower()}\n"
-            f"unsafe_as_fact: {str(unsafe_as_fact).lower()}\n"
-            "style_instruction:\n"
-            f"{content}"
-        )
-        metadata = {
-            "canon_kind": "style",
-            "canon_id": canon_id,
-            "version": version,
-            "hash": hash_value,
-            "tags": tags_csv,
-            "tags_count": len(tag_list),
-            "tone_only": tone_only,
-            "unsafe_as_fact": unsafe_as_fact,
-            "source_ref": source_ref,
-            "evidence_ref": evidence_ref,
-            "source_path": str(v5_path if canon_id in STYLE_CANON_KEY_MAP else style_root / f"{canon_id}.json"),
-        }
-        docs.append(CanonProjectionDocument(vector_id=vector_id, text=text, metadata=metadata))
-    return docs, issues
 
 def _collect_world_docs(world_root: Path) -> tuple[list[CanonProjectionDocument], list[dict[str, Any]]]:
     docs: list[CanonProjectionDocument] = []

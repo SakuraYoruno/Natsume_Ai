@@ -40,7 +40,7 @@ async def _fake_llm_runtime_async(*args, **kwargs) -> dict[str, Any]:  # noqa: A
     }
 
 
-async def _fake_chat_agent_sse_generator(chat_input):  # noqa: ANN001
+async def _fake_surface_reply_sse_generator(chat_input):  # noqa: ANN001
     sub_ctx = getattr(chat_input, "sub_agent_context", None)
     result_text = getattr(sub_ctx, "result_text", "") if sub_ctx is not None else ""
     payload = {
@@ -49,7 +49,7 @@ async def _fake_chat_agent_sse_generator(chat_input):  # noqa: ANN001
         "decision": "APPROVE",
         "request_id": chat_input.request_id,
         "narrative": f"skill-route-ok::{result_text}",
-        "audit_refs": {"path": "test:chat_agent_stub"},
+        "audit_refs": {"path": "test:surface_reply_stub"},
     }
     yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
 
@@ -108,7 +108,7 @@ def _build_client(monkeypatch, *, use_real_governor: bool = False) -> tuple[Test
         patch("host_brain.app.graph_config_builder.resolve_host_llm_runtime", lambda *args, **kwargs: {"available": True})
     )
     stack.enter_context(
-        patch("host_brain.app.chat_agent.chat_agent_sse_generator", _fake_chat_agent_sse_generator)
+        patch("host_brain.app.surface_reply_runtime.surface_reply_sse_generator", _fake_surface_reply_sse_generator)
     )
     stack.enter_context(
         patch("host_brain.app.agent_runtime_shared._async_post_process", _fake_async_post_process)

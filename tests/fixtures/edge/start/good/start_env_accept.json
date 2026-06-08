@@ -1,12 +1,12 @@
-{
-  "Natsume_ENV": "test",
-  "EDGE_RPC_HOST": "127.0.0.1",
-  "EDGE_RPC_PORT": "18888",
-  "EDGE_ALLOW_INSECURE_AUTH": "true",
-  "EDGE_RPC_GATEWAY_ENABLED": "true",
-  "EDGE_ASR_ENABLED": "false",
-  "EDGE_TTS_ENABLED": "false",
-  "EDGE_BARGE_IN_ENABLED": "false",
-  "EDGE_FALLBACK_LLM_ENABLED": "false",
-  "EDGE_RESOURCE_GATE_ENABLED": "false"
+﻿{
+    "Natsume_ENV":  "test",
+    "EDGE_RPC_HOST":  "127.0.0.1",
+    "EDGE_RPC_PORT":  "18888",
+    "EDGE_ALLOW_INSECURE_AUTH":  "true",
+    "EDGE_RPC_GATEWAY_ENABLED":  "true",
+    "EDGE_ASR_ENABLED":  "false",
+    "EDGE_TTS_ENABLED":  "false",
+    "EDGE_BARGE_IN_ENABLED":  "false",
+    "EDGE_FALLBACK_LLM_ENABLED":  "false",
+    "EDGE_RESOURCE_GATE_ENABLED":  "false"
 }

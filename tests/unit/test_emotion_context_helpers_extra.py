@@ -117,6 +117,77 @@ def test_normalize_context_and_snapshot_helpers(monkeypatch: pytest.MonkeyPatch)
     assert ec.resolve_chat_emotion_context(request_body=request_body) == {"normalized": "HAPPY"}
 
 
+def test_resolve_chat_emotion_context_bootstraps_when_start_node_is_neutral() -> None:
+    request_body = SimpleNamespace(
+        message="今天真的有点难受，不想动了。",
+        emotion_context={"emotion_tag": "NEUTRAL", "emotion_inference_confidence": 0.1},
+        mood_state=None,
+        emotion_tag=None,
+        emotion_range_hint=None,
+        emotion_intensity=None,
+    )
+
+    normalized = ec.resolve_chat_emotion_context(request_body=request_body)
+
+    assert normalized["emotion_tag"] == "SAD"
+    assert normalized["emotion_inference_source"] == "text_bootstrap_fallback"
+    assert normalized["emotion_inference_degraded"] is False
+    assert normalized["emotion_inference_confidence"] >= 0.45
+    assert normalized["emotion_bootstrap_reason_codes"]
+
+
+def test_text_bootstrap_emotion_is_not_erased_by_expression_allowed_tags() -> None:
+    request_body = SimpleNamespace(
+        message="控制台一片红，怎么办。",
+        emotion_context={"emotion_tag": "NEUTRAL", "emotion_inference_confidence": 0.1},
+        mood_state=None,
+        emotion_tag=None,
+        emotion_range_hint=None,
+        emotion_intensity=None,
+    )
+
+    normalized = ec.resolve_chat_emotion_context(request_body=request_body)
+
+    assert normalized["emotion_tag"] == "ANXIOUS"
+    assert normalized["emotion_inference_source"] == "text_bootstrap_fallback"
+    assert normalized["emotion_inference_degraded"] is False
+
+
+def test_resolve_chat_emotion_context_respects_explicit_non_neutral_tag() -> None:
+    request_body = SimpleNamespace(
+        message="气死了，真的很烦。",
+        emotion_context={},
+        mood_state=None,
+        emotion_tag="HAPPY",
+        emotion_range_hint=None,
+        emotion_intensity=0.6,
+    )
+
+    normalized = ec.resolve_chat_emotion_context(request_body=request_body)
+
+    assert normalized["emotion_tag"] == "HAPPY"
+    assert normalized["emotion_inference_source"] == "explicit"
+    assert normalized["emotion_inference_degraded"] is False
+
+
+def test_resolve_chat_emotion_context_marks_default_neutral_as_degraded() -> None:
+    request_body = SimpleNamespace(
+        message="下一步",
+        emotion_context={},
+        mood_state=None,
+        emotion_tag=None,
+        emotion_range_hint=None,
+        emotion_intensity=None,
+    )
+
+    normalized = ec.resolve_chat_emotion_context(request_body=request_body)
+
+    assert normalized["emotion_tag"] == "NEUTRAL"
+    assert normalized["emotion_inference_source"] == "default_neutral"
+    assert normalized["emotion_inference_degraded"] is True
+    assert normalized["emotion_bootstrap_reason_codes"] == ["NO_BOOTSTRAP_SIGNAL"]
+
+
 def test_inner_monologue_profile_summary_and_flush_diary(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

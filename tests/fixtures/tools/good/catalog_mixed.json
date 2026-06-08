@@ -1,42 +1,55 @@
-[
-  {
-    "id": "read_system_status",
-    "name": "ReadSystemStatus",
-    "desc": "Read host system status snapshot.",
-    "schema_hash": "sha256:tool_schema_read_system_status_v1",
-    "side_effect_level": "READ",
-    "auth_level": "NONE",
-    "domain_tags": ["system", "status"],
-    "version": "1.0.0"
-  },
-  {
-    "id": "read_memory_lookup",
-    "name": "ReadMemoryLookup",
-    "desc": "Search episodic memory without writes.",
-    "schema_hash": "sha256:tool_schema_read_memory_lookup_v1",
-    "side_effect_level": "READ",
-    "auth_level": "NONE",
-    "domain_tags": ["memory", "retrieval"],
-    "version": "1.0.0"
-  },
-  {
-    "id": "write_file_update",
-    "name": "WriteFileUpdate",
-    "desc": "Modify workspace files by writing patches.",
-    "schema_hash": "sha256:tool_schema_write_file_update_v1",
-    "side_effect_level": "WRITE",
-    "auth_level": "APPROVAL",
-    "domain_tags": ["workspace", "file"],
-    "version": "1.0.0"
-  },
-  {
-    "id": "delete_file_force",
-    "name": "DeleteFileForce",
-    "desc": "Delete files permanently.",
-    "schema_hash": "sha256:tool_schema_delete_file_force_v1",
-    "side_effect_level": "WRITE",
-    "auth_level": "CONFIRM",
-    "domain_tags": ["workspace", "file", "danger"],
-    "version": "1.0.0"
-  }
+﻿[
+    {
+        "id":  "read_system_status",
+        "name":  "ReadSystemStatus",
+        "desc":  "Read host system status snapshot.",
+        "schema_hash":  "sha256:tool_schema_read_system_status_v1",
+        "side_effect_level":  "READ",
+        "auth_level":  "NONE",
+        "domain_tags":  [
+                            "system",
+                            "status"
+                        ],
+        "version":  "1.0.0"
+    },
+    {
+        "id":  "read_memory_lookup",
+        "name":  "ReadMemoryLookup",
+        "desc":  "Search episodic memory without writes.",
+        "schema_hash":  "sha256:tool_schema_read_memory_lookup_v1",
+        "side_effect_level":  "READ",
+        "auth_level":  "NONE",
+        "domain_tags":  [
+                            "memory",
+                            "retrieval"
+                        ],
+        "version":  "1.0.0"
+    },
+    {
+        "id":  "write_file_update",
+        "name":  "WriteFileUpdate",
+        "desc":  "Modify workspace files by writing patches.",
+        "schema_hash":  "sha256:tool_schema_write_file_update_v1",
+        "side_effect_level":  "WRITE",
+        "auth_level":  "APPROVAL",
+        "domain_tags":  [
+                            "workspace",
+                            "file"
+                        ],
+        "version":  "1.0.0"
+    },
+    {
+        "id":  "delete_file_force",
+        "name":  "DeleteFileForce",
+        "desc":  "Delete files permanently.",
+        "schema_hash":  "sha256:tool_schema_delete_file_force_v1",
+        "side_effect_level":  "WRITE",
+        "auth_level":  "CONFIRM",
+        "domain_tags":  [
+                            "workspace",
+                            "file",
+                            "danger"
+                        ],
+        "version":  "1.0.0"
+    }
 ]

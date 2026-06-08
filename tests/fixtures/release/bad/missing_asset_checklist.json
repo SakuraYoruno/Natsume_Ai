@@ -1,29 +1,29 @@
-{
-  "stage": "S_RELEASE_CHECKLIST",
-  "status": "READY",
-  "reason_code": null,
-  "milestone": "M1",
-  "release_id": "rel-m1-missing-asset",
-  "assets": [
-    "tests/fixtures/release/assets/m1/manifest.txt",
-    "tests/fixtures/release/assets/m1/missing.bin"
-  ],
-  "checksums": {
-    "tests/fixtures/release/assets/m1/manifest.txt": "sha256:dfb13f2997c38a351342e7ab09b06e0d7903403cc5ddf2f0a1ae46522607ec62",
-    "tests/fixtures/release/assets/m1/missing.bin": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
-  },
-  "required_services": [
-    "host.audit.sqlite_ledger",
-    "host.governor.decision"
-  ],
-  "flow_refs": {
-    "dev": "flows/exports/2026-02-28_dev_skeleton/flow.json",
-    "staging": "flows/exports/2026-02-28_staging_skeleton/flow.json",
-    "prod": "flows/exports/2026-02-28_prod_skeleton/flow.json"
-  },
-  "config_snapshot_refs": [
-    "cfg_snap::sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-    "cfg_snap::sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
-  ],
-  "ts_ms": 1800080000001
+﻿{
+    "stage":  "S_RELEASE_CHECKLIST",
+    "status":  "READY",
+    "reason_code":  null,
+    "milestone":  "M1",
+    "release_id":  "rel-m1-missing-asset",
+    "assets":  [
+                   "tests/fixtures/release/assets/m1/manifest.txt",
+                   "tests/fixtures/release/assets/m1/missing.bin"
+               ],
+    "checksums":  {
+                      "tests/fixtures/release/assets/m1/manifest.txt":  "sha256:dfb13f2997c38a351342e7ab09b06e0d7903403cc5ddf2f0a1ae46522607ec62",
+                      "tests/fixtures/release/assets/m1/missing.bin":  "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+                  },
+    "required_services":  [
+                              "host.audit.sqlite_ledger",
+                              "host.governor.decision"
+                          ],
+    "flow_refs":  {
+                      "dev":  "flows/exports/2026-02-28_dev_skeleton/flow.json",
+                      "staging":  "flows/exports/2026-02-28_staging_skeleton/flow.json",
+                      "prod":  "flows/exports/2026-02-28_prod_skeleton/flow.json"
+                  },
+    "config_snapshot_refs":  [
+                                 "cfg_snap::sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                                 "cfg_snap::sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+                             ],
+    "ts_ms":  1800080000001
 }

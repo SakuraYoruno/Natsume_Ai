@@ -15,13 +15,15 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--model-path", required=True)
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--sample-rate", type=int, default=32000)
-    parser.add_argument("--language", default="ja")
+    parser.add_argument("--language", default="zh")
     parser.add_argument("--text", required=True)
-    parser.add_argument("--text-language", default="ja")
+    parser.add_argument("--text-language", default="zh")
     parser.add_argument("--ref-audio-path", default="")
     parser.add_argument("--ref-text", default="")
+    parser.add_argument("--voice-bank-path", default="")
     parser.add_argument("--emotion-tag", default="")
     parser.add_argument("--emotion-intensity", type=float, default=None)
+    parser.add_argument("--speed-factor", type=float, default=None)
     return parser
 
 
@@ -42,14 +44,16 @@ def main(argv: list[str] | None = None) -> int:
         sample_rate=int(args.sample_rate),
         ref_audio_path=str(args.ref_audio_path or "").strip() or None,
         ref_text=str(args.ref_text or "").strip() or None,
-        language=str(args.language or "ja"),
+        voice_bank_path=str(args.voice_bank_path or "").strip() or None,
+        language=str(args.language or "zh"),
     )
     mgr = SoVITSModelManager(cfg)
     result = mgr.synthesize(
         str(args.text),
-        language=str(args.text_language or "ja"),
+        language=str(args.text_language or "zh"),
         emotion_tag=str(args.emotion_tag or "").strip() or None,
         emotion_intensity=args.emotion_intensity,
+        speed_factor=args.speed_factor,
     )
     if not result.success or result.audio_data is None:
         print(

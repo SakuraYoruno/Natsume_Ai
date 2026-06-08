@@ -184,6 +184,18 @@ function Invoke-QQOneBotBreakawayTask {
     [string]$FailureContext = 'qq onebot breakaway launch',
     [bool]$InteractiveTask = $true
   )
+  $sshSessionDetected = (-not [string]::IsNullOrWhiteSpace([string]$env:SSH_CONNECTION)) -or (-not [string]::IsNullOrWhiteSpace([string]$env:SSH_CLIENT))
+  if ($sshSessionDetected) {
+    try {
+      $commandLine = "cmd.exe /c $TaskCommand"
+      $createResult = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = $commandLine } -ErrorAction Stop
+      if ($null -ne $createResult -and [int]$createResult.ReturnValue -eq 0) {
+        return
+      }
+    } catch {
+      # Fall back to schtasks below; older Windows images may restrict WMI create.
+    }
+  }
 
   $schtasksCmd = Get-Command schtasks.exe -ErrorAction SilentlyContinue
   if ($null -eq $schtasksCmd) {

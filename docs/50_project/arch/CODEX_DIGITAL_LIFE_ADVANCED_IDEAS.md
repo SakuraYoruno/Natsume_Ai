@@ -1,3 +1,6 @@
+受众：PROJECT
+标题：Natsume AI — Codex 数字生命体高级妙用扩展方案
+
 # Natsume AI — Codex 数字生命体高级妙用扩展方案
 
 > ADOPTED ROADMAP, 2026-04-24; Codex Runtime v2 only. 本文档所有 Codex 执行默认走 `WorkOrder -> CodexRuntimeExecutor -> BioOps proposal/report -> ResultContract`，不保留旧 self-heal 路由、旧环境变量或旧 skill 名兼容。

@@ -31,7 +31,7 @@ def _log_persona_reply(
             "direction": "HOST_INTERNAL",
             "status": "OK",
             "reason_code": None,
-            "stage": "chat_agent.default",
+            "stage": "surface_reply.default",
             "detail": "persona reply",
             "payload": {
                 "source": "GATEWAY",

@@ -92,6 +92,7 @@ class BondDynamicsWriter:
         ts_ms: int | None = None,
         emotion_tag: str = "NEUTRAL",
         emotion_intensity: float = 0.5,
+        emotion_valence: float | None = None,
     ) -> BondUpdateResult:
         now_value = int(ts_ms if ts_ms is not None else now_ms())
         refs = _normalize_evidence_refs(evidence_refs)
@@ -120,6 +121,7 @@ class BondDynamicsWriter:
             update_kind=str(update_kind),
             emotion_tag=str(emotion_tag),
             emotion_intensity=float(emotion_intensity),
+            emotion_valence=emotion_valence,
         )
         try:
             written = self.neo4j_client.write_bond_event(
@@ -164,6 +166,7 @@ class BondDynamicsWriter:
                     request_id=request_id,
                     ts_ms=now_value,
                     emotion_intensity=float(emotion_intensity),
+                    emotion_valence=_coerce_optional_float(normalized_payload.get("emotion_valence")),
                 )
                 # M29-G（OPT-11）：CONFLICT/APOLOGY/COMFORT 事件触发裂痕修复
                 self._apply_rift_event(
@@ -409,6 +412,7 @@ def _normalize_bond_payload(
     update_kind: str,
     emotion_tag: str,
     emotion_intensity: float,
+    emotion_valence: float | None = None,
 ) -> dict[str, Any]:
     """M29-J（OPT-?）：Bond payload 语义标准化。
 
@@ -422,6 +426,12 @@ def _normalize_bond_payload(
     result.setdefault("update_kind", str(update_kind).strip().upper())
     result.setdefault("emotion_tag", str(emotion_tag).strip().upper() or "NEUTRAL")
     result.setdefault("emotion_intensity", round(max(0.0, min(1.0, float(emotion_intensity))), 4))
+    normalized_valence = _coerce_optional_float(
+        emotion_valence if emotion_valence is not None else result.get("emotion_valence")
+    )
+    if normalized_valence is not None:
+        if "emotion_valence" not in result or emotion_valence is not None:
+            result["emotion_valence"] = round(max(-1.0, min(1.0, normalized_valence)), 4)
     # 语义标签推断
     kind = str(update_kind).strip().upper()
     _SEMANTIC_LABELS: dict[str, str] = {
@@ -431,11 +441,22 @@ def _normalize_bond_payload(
         "CONFLICT": "冲突事件",
         "APOLOGY": "道歉修复",
         "COMFORT": "安慰关怀",
+        "EMOTIONAL_SUPPORT": "情绪支持",
+        "CONFLICT_RESOLVED": "冲突修复",
         "REWARD": "正向奖励",
         "INTERACTION": "普通互动",
     }
     result.setdefault("semantic_label", _SEMANTIC_LABELS.get(kind, "互动事件"))
     return result
+
+
+def _coerce_optional_float(value: Any) -> float | None:
+    if value in (None, ""):
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _new_event_id() -> str:

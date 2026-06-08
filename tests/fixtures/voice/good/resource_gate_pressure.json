@@ -1,9 +1,9 @@
-{
-  "request_id": "req_voice_051",
-  "session_id": "sess_voice_001",
-  "metrics": {
-    "vram_total_mb": 8000,
-    "vram_used_mb": 7600,
-    "queue_depth": 3
-  }
+﻿{
+    "request_id":  "req_voice_051",
+    "session_id":  "sess_voice_001",
+    "metrics":  {
+                    "vram_total_mb":  8000,
+                    "vram_used_mb":  7600,
+                    "queue_depth":  3
+                }
 }

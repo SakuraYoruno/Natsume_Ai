@@ -51,8 +51,20 @@ ACTION_ARGS_RULES: dict[str, dict[str, dict[str, type]]] = {
     "narrative_only": {"required": {"text": str}, "optional": {"style": str}},
     "memory_recall": {"required": {"query": str}, "optional": {"k": int}},
     "noop": {"required": {}, "optional": {}},
-    # M45：场景路由 action — args 只要包含 text 字段即可
-    "exec_intent": {"required": {"text": str}, "optional": {}},
+    # M45：场景路由 action — args 只要包含 text 字段即可；
+    # 允许计划路由把显式步骤和路由提示作为扩展参数透传给下游执行层。
+    "exec_intent": {
+        "required": {"text": str},
+        "optional": {
+            "planned_steps": list,
+            "steps": list,
+            "route": str,
+            "target_id": str,
+            "target": str,
+            "pragmatic_frame": dict,
+            "conversation_understanding": dict,
+        },
+    },
     "work_code": {"required": {"text": str}, "optional": {}},
     "work_translate": {"required": {"text": str}, "optional": {}},
 }

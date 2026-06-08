@@ -91,8 +91,6 @@ def _load_style_hint_templates(*, render_target_lang: str | None = None) -> dict
 # ---------------------------------------------------------------------------
 
 _STAGE_OPENNESS: dict[str, float] = {
-    "STRANGER": 0.2,
-    "ACQUAINTANCE": 0.4,
     "FRIEND": 0.6,
     "CLOSE_FRIEND": 0.8,
     "CONFIDANT": 0.9,

@@ -12,6 +12,30 @@ from host_brain.skills.declarative import DeclarativeSkillProvider, DeclarativeS
 from host_brain.skills.registry import SkillRegistry
 
 
+_BROWSER_IDENTITY_ARG_KEYS = (
+    "browser_session",
+    "account_session",
+    "browser_state_name",
+    "account_state_name",
+    "browser_profile",
+    "agent_browser_session",
+    "agent_browser_state_name",
+    "agent_browser_profile",
+)
+
+
+def _browser_identity_args(args: dict[str, Any]) -> dict[str, Any]:
+    payload: dict[str, Any] = {}
+    for key in _BROWSER_IDENTITY_ARG_KEYS:
+        value = (args or {}).get(key)
+        if value is None:
+            continue
+        text = str(value).strip()
+        if text:
+            payload[key] = text
+    return payload
+
+
 def _normalize_navigate_args(args: dict[str, Any]) -> dict[str, Any]:
     url = str((args or {}).get("url") or "").strip()
     wait_until = str((args or {}).get("wait_until") or "load").strip().lower()
@@ -25,6 +49,7 @@ def _normalize_navigate_args(args: dict[str, Any]) -> dict[str, Any]:
         "url": url,
         "wait_until": wait_until,
         "timeout_ms": timeout_ms,
+        **_browser_identity_args(args),
     }
 
 
@@ -45,6 +70,7 @@ def _normalize_click_args(args: dict[str, Any]) -> dict[str, Any]:
         "selector_type": selector_type,
         "button": button,
         "timeout_ms": timeout_ms,
+        **_browser_identity_args(args),
     }
 
 
@@ -62,6 +88,7 @@ def _normalize_type_args(args: dict[str, Any]) -> dict[str, Any]:
         "text": text,
         "delay_ms": max(0, delay_ms),
         "clear_first": clear_first,
+        **_browser_identity_args(args),
     }
 
 
@@ -75,6 +102,7 @@ def _normalize_screenshot_args(args: dict[str, Any]) -> dict[str, Any]:
         "selector": selector,
         "full_page": full_page,
         "return_base64": save_path is None,
+        **_browser_identity_args(args),
     }
 
 
@@ -86,6 +114,7 @@ def _normalize_execute_script_args(args: dict[str, Any]) -> dict[str, Any]:
     return {
         "script": script,
         "script_args": script_args,
+        **_browser_identity_args(args),
     }
 
 
@@ -106,6 +135,7 @@ def _normalize_wait_for_args(args: dict[str, Any]) -> dict[str, Any]:
         "value": value,
         "timeout_ms": timeout_ms,
         "state": state,
+        **_browser_identity_args(args),
     }
 
 
@@ -124,6 +154,7 @@ def _normalize_scrape_args(args: dict[str, Any]) -> dict[str, Any]:
         "extract": extract,
         "attribute": attribute,
         "limit": limit,
+        **_browser_identity_args(args),
     }
 
 
@@ -136,6 +167,7 @@ def _normalize_close_args(args: dict[str, Any]) -> dict[str, Any]:
     return {
         "target": target,
         "force": force,
+        **_browser_identity_args(args),
     }
 
 

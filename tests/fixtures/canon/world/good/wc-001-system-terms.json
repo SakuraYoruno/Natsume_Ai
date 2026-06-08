@@ -1,11 +1,11 @@
-{
-  "doc_id": "wc-001-system-terms",
-  "title": "系统核心术语表",
-  "tags": [
-    "terminology",
-    "invariant",
-    "system"
-  ],
-  "body": "Host Brain：运行在主机侧的核心决策节点，负责意图解析、Governor 决策、技能调度与记忆管理。Edge Client：运行在边缘设备侧的感知与执行节点，负责 ASR/TTS/VTS 驱动及 RPC 上报。Canon：系统设定的权威来源，分为 World Canon（世界观/不变量）和 Style Canon（语气/风格）两类，均为只读引用，不得作为事实断言，只能以引用方式使用。Intent：用户或调度器发出的结构化请求单元，包含 intent_id、skill_name、args 等字段，是审计追踪的最小单元。",
-  "status": "active"
+﻿{
+    "doc_id":  "wc-001-system-terms",
+    "title":  "系统核心术语表",
+    "tags":  [
+                 "terminology",
+                 "invariant",
+                 "system"
+             ],
+    "body":  "Host Brain：运行在主机侧的核心决策节点，负责意图解析、Governor 决策、技能调度与记忆管理。Edge Client：运行在边缘设备侧的感知与执行节点，负责 ASR/TTS/VTS 驱动及 RPC 上报。Canon：系统设定的权威来源，分为 World Canon（世界观/不变量）和 Style Canon（语气/风格）两类，均为只读引用，不得作为事实断言，只能以引用方式使用。Intent：用户或调度器发出的结构化请求单元，包含 intent_id、skill_name、args 等字段，是审计追踪的最小单元。",
+    "status":  "active"
 }

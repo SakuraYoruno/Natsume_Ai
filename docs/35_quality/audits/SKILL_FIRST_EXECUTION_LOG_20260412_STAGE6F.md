@@ -1,3 +1,6 @@
+受众：CODEX
+标题：Skill-First 执行留痕（P6F-Direct Route Handler Migration）日期：2026-04-12
+
 # Skill-First 执行留痕（P6F-Direct Route Handler Migration）日期：2026-04-12
 批次：`ACC#24`
 状态：`COMPLETED`

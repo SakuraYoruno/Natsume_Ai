@@ -1,11 +1,11 @@
-{
-  "request_id": "req_voice_010",
-  "payload": {
-    "session_id": "sess_voice_001",
-    "seq": 20,
-    "utterance_id": "utt_001",
-    "text": "Testing speech output",
-    "interruptible": true,
-    "voice_profile": "Natsume_default"
-  }
+﻿{
+    "request_id":  "req_voice_010",
+    "payload":  {
+                    "session_id":  "sess_voice_001",
+                    "seq":  20,
+                    "utterance_id":  "utt_001",
+                    "text":  "Testing speech output",
+                    "interruptible":  true,
+                    "voice_profile":  "Natsume_default"
+                }
 }

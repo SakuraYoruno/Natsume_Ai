@@ -1,11 +1,14 @@
+受众：PROJECT
+标题：Skill-First 类人体架构完整执行方案（2026-04-12）
+
 # Skill-First 类人体架构完整执行方案（2026-04-12）
 ## 1. 目标定义（最终态）
 - 业务主路由只面向 `Skill Family`，不直接路由裸 `subagent`。
 - 自动规划与并行执行由 `Executive Cortex` 统一编排，输出可观测 `Skill DAG`。
 - 模型选择由 `Model Router` 统一负责，执行子体只声明能力需求，不自行选型。
-- 9 个 Gemini Key 纳入统一 Key Pool（加权轮询、熔断、冷却恢复、回退）。
+- Gemini 收敛为单 key；模型可多候选降级，key 不再做多路轮询。
 - 支持能力缺口闭环：`Gap Detector -> Runtime Synthesizer -> Capability Forge -> Promotion Pipeline -> Rollback Guard`。
-- 全链路审计可追踪：`request -> intent -> skill_family -> planner_node -> executor -> model -> key_slot/hash -> rc -> latency`。
+- 全链路审计可追踪：`request -> intent -> skill_family -> planner_node -> executor -> model -> key_source -> rc -> latency`。
 
 ## 2. 分层架构（目标形态）
 1. Gateway（神经通道）
@@ -24,8 +27,7 @@
 
 ## 3. 关键模块
 - `Model Capability Registry`：模型能力标签、稳定性档、成本档。
-- `Model Router`：按任务类型、风险、预算、上下文选择模型与 key slot。
-- `Key Pool Manager`：9 key 健康评分与熔断恢复。
+- `Model Router`：按任务类型、风险、预算、上下文选择模型与单 key 来源。
 - `Capability Gap Loop`：能力缺口检测、临时能力、长期能力锻造、灰度、回滚。
 
 ## 4. 稳定契约
@@ -50,7 +52,7 @@
 - `skill_family`
 - `skill_id`
 - `planner_node_id`
-- `model_route.role/model_id/key_slot`
+- `model_route.role/model_id/key_source`
 
 ## 5. 分期执行（P1-P5）
 ### P1（已完成）

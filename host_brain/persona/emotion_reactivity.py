@@ -361,7 +361,7 @@ def render_reactivity_hint_with_pool(
                     "role": "user",
                     "content": user_prompt.format(
                         user_emotion_tag=str(user_emotion_tag or "NEUTRAL").strip().upper() or "NEUTRAL",
-                        bond_stage=str(bond_stage or "").strip().upper() or "STRANGER",
+                        bond_stage=str(bond_stage or "").strip().upper() or "FRIEND",
                         echo_weight_delta=float(modifiers.echo_weight_delta),
                         empathy_boost=float(modifiers.empathy_boost),
                         humor_deflection=float(modifiers.humor_deflection),

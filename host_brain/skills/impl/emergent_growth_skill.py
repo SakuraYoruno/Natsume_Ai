@@ -5,7 +5,16 @@ from typing import Any, Callable
 
 def _resolve_user_id(args: dict[str, Any], context: dict[str, Any] | None) -> str:
     raw_user_id = str((args or {}).get("user_id") or (context or {}).get("user_id") or "").strip()
-    return raw_user_id or "user_1"
+    if raw_user_id:
+        from host_brain.persona.identity import resolve_persona_self_id  # noqa: PLC0415
+
+        return resolve_persona_self_id(raw_user_id)
+    try:
+        from host_brain.persona.identity import get_canonical_persona_self_id  # noqa: PLC0415
+
+        return get_canonical_persona_self_id()
+    except Exception:
+        return "natsume_ai"
 
 
 def _resolve_llm_fn(args: dict[str, Any], context: dict[str, Any] | None) -> Callable[[str], str] | None:

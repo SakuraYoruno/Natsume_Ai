@@ -1,7 +1,7 @@
-{
-  "request_id": "req_ret_003",
-  "payload": {
-    "text": "embedding timeout should degrade with stable reason",
-    "timeout_ms": 100
-  }
+﻿{
+    "request_id":  "req_ret_003",
+    "payload":  {
+                    "text":  "embedding timeout should degrade with stable reason",
+                    "timeout_ms":  100
+                }
 }

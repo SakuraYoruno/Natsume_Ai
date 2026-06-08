@@ -6,8 +6,8 @@ import threading
 from dataclasses import dataclass, field
 from typing import Any, Mapping
 
-from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged
 from host_brain.core.ids import now_ms
+from host_brain.persona.identity import get_canonical_persona_self_id, resolve_persona_self_id
 from host_brain.tribe.base_agent import TribeAgentDescriptor
 from host_brain.tribe.events import emit_tribe_event
 from host_brain.tribe.tribe_state import TribeStateRegistry, get_global_registry
@@ -15,6 +15,22 @@ from host_brain.tribe.tribe_state import TribeStateRegistry, get_global_registry
 
 def _clamp(value: float, low: float = 0.0, high: float = 1.0) -> float:
     return max(low, min(high, float(value)))
+
+
+def _env_bool(name: str, *, default: bool) -> bool:
+    raw = os.environ.get(name)
+    if raw is None:
+        return bool(default)
+    normalized = str(raw).strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    return bool(default)
+
+
+def _background_tasks_enabled() -> bool:
+    return _env_bool("HOST_BACKGROUND_TASKS_ENABLED", default=False)
 
 
 def _resolve_foreground_chat_cooldown_ms() -> int:
@@ -85,27 +101,6 @@ def _is_recursive_glymphatic_tick_source(source: str) -> bool:
     return normalized.startswith("glymphatic_deep_clean")
 
 
-def _load_runtime_texts() -> dict[str, Any]:
-    raw = resolve_prompt_template_json_merged("default_mode_agent.runtime_texts")
-    return dict(raw) if isinstance(raw, Mapping) else {}
-
-
-def _template_text(mapping: Mapping[str, Any] | None, *keys: str, default: str = "", **kwargs: Any) -> str:
-    current: Any = mapping
-    for key in keys:
-        if not isinstance(current, Mapping):
-            current = None
-            break
-        current = current.get(key)
-    text = str(current or default)
-    if not kwargs:
-        return text
-    try:
-        return text.format(**kwargs)
-    except Exception:
-        return text
-
-
 @dataclass(slots=True)
 class DefaultModeAgent:
     descriptor: TribeAgentDescriptor = field(
@@ -135,16 +130,18 @@ class DefaultModeAgent:
     def tick_idle_cycle(
         self,
         *,
-        person_id: str = "user_1",
+        person_id: str = "",
         topic_phrase: str = "",
         source: str = "runtime",
         now_ts_ms: int | None = None,
         inner_state: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
+        from host_brain.persona.inner_monologue import build_inner_monologue_digest  # noqa: PLC0415
         from host_brain.persona.inner_activity_agent import generate_inner_activity_note  # noqa: PLC0415
         from host_brain.persona.motive_runtime import build_offline_state_from_inner_state  # noqa: PLC0415
+        from host_brain.persona.self_model import build_self_directive_packet, observe_persistent_self_event  # noqa: PLC0415
 
-        user_id = str(person_id or "user_1").strip() or "user_1"
+        user_id = resolve_persona_self_id(person_id)
         ts_ms = int(now_ts_ms or now_ms())
         resolved_inner_state = dict(inner_state or {})
         if not resolved_inner_state:
@@ -163,12 +160,21 @@ class DefaultModeAgent:
         focus = "self"
         reason = ""
         llm_meta: dict[str, Any] = {}
+        background_enabled = _background_tasks_enabled()
         recent_foreground = _resolve_recent_foreground_interaction(current_ts_ms=ts_ms)
-        suppress_llm_note = source in {"conversation_ended", "inner_world_ticked"} and bool(recent_foreground.get("active"))
+        suppress_llm_note = (
+            not background_enabled
+            or (source in {"conversation_ended", "inner_world_ticked"} and bool(recent_foreground.get("active")))
+        )
         if suppress_llm_note:
-            reason = "DEFAULT_MODE_FOREGROUND_CHAT_COOLDOWN"
+            reason = (
+                "DEFAULT_MODE_BACKGROUND_TASKS_DISABLED"
+                if not background_enabled
+                else "DEFAULT_MODE_FOREGROUND_CHAT_COOLDOWN"
+            )
             llm_meta = {
                 "suppressed": True,
+                "background_tasks_enabled": background_enabled,
                 "foreground_cooldown_ms": int(recent_foreground.get("cooldown_ms") or 0),
             }
         else:
@@ -185,16 +191,10 @@ class DefaultModeAgent:
                 reason = f"DEFAULT_MODE_NOTE_FAILED:{str(exc)[:64]}"
 
         if not note:
-            anticipation = list(offline_state.get("anticipation_topics") or [])
-            topic = str(anticipation[0] if anticipation else topic_phrase).strip()
-            runtime_texts = _load_runtime_texts()
-            note = _template_text(
-                runtime_texts,
-                "fallback_note",
-                "with_topic" if topic else "without_topic",
-                topic=topic,
-            )
-            focus = "plan" if topic else "self"
+            focus = str(focus or "self").strip() or "self"
+            if not bool(llm_meta.get("suppressed")):
+                llm_meta["note_unavailable"] = True
+                llm_meta["requires_model"] = True
 
         loneliness = _clamp(float(offline_state.get("loneliness_level") or 0.0))
         anticipation_level = _clamp(float(offline_state.get("anticipation_level") or 0.0))
@@ -204,6 +204,33 @@ class DefaultModeAgent:
         )
         stream = list(resolved_inner_state.get("inner_stream") or [])
         stream_len = len(stream)
+        inner_monologue = build_inner_monologue_digest(
+            inner_state=resolved_inner_state,
+            last_note=note,
+            last_focus=focus,
+            offline_state={
+                "absence_band": absence_band,
+                "offline_hours": offline_hours,
+                "loneliness_level": loneliness,
+                "anticipation_level": anticipation_level,
+                "continuity_score": continuity_score,
+            },
+        ).as_surface_state()
+        self_model_state = observe_persistent_self_event(
+            user_id=user_id,
+            event_kind=str(source or "default_mode_tick"),
+            focus=str(inner_monologue.get("dominant_focus") or focus or "self"),
+            emotion_tag=str(inner_monologue.get("emotion_tag") or "calm"),
+            salience=float(inner_monologue.get("salience") or 0.0),
+            surface_hint="default_mode_inner_monologue",
+            evidence={
+                "source": source,
+                "reason_code": reason,
+                "should_distill_to_memory": inner_monologue.get("should_distill_to_memory"),
+            },
+            now_ms=ts_ms,
+        )
+        self_directive = build_self_directive_packet(self_model_state)
         result = {
             "user_id": user_id,
             "note": str(note).strip(),
@@ -217,13 +244,16 @@ class DefaultModeAgent:
                 "continuity_score": round(continuity_score, 4),
             },
             "proactive_voice_candidate": proactive_candidate,
+            "inner_monologue": inner_monologue,
+            "self_directive": self_directive,
             "inner_stream_size": stream_len,
             "reason_code": str(reason or ""),
             "llm_meta": dict(llm_meta or {}),
             "ts_ms": ts_ms,
         }
         suppress_background_side_effects = (
-            (source in {"conversation_ended", "inner_world_ticked"} and bool(recent_foreground.get("active")))
+            (not background_enabled)
+            or (source in {"conversation_ended", "inner_world_ticked"} and bool(recent_foreground.get("active")))
             or _is_recursive_glymphatic_tick_source(source)
         )
         prev = self.state_registry.get_state("default_mode_agent") or {}
@@ -233,6 +263,20 @@ class DefaultModeAgent:
         prev_state["last_focus"] = result["focus"]
         prev_state["last_offline_state"] = dict(result["offline_state"])
         prev_state["proactive_voice_candidate"] = bool(result["proactive_voice_candidate"])
+        prev_state["inner_monologue"] = dict(inner_monologue)
+        prev_state["self_directive"] = dict(self_directive)
+        prev_state["self_identity"] = str(self_directive.get("self_identity") or "")
+        prev_state["self_values"] = list(self_directive.get("self_values") or [])
+        prev_state["self_boundaries"] = list(self_directive.get("self_boundaries") or [])
+        prev_state["active_intentions"] = list(self_directive.get("active_intentions") or [])
+        prev_state["unresolved_tensions"] = list(self_directive.get("unresolved_tensions") or [])
+        prev_state["agency_score"] = float(self_directive.get("agency_score") or 0.0)
+        prev_state["self_continuity_score"] = float(self_directive.get("self_continuity_score") or 0.0)
+        prev_state["care_drive"] = float(inner_monologue.get("care_drive") or 0.0)
+        prev_state["continuity_drive"] = float(inner_monologue.get("continuity_drive") or 0.0)
+        prev_state["repair_drive"] = float(inner_monologue.get("repair_drive") or 0.0)
+        prev_state["style_anchor"] = list(inner_monologue.get("style_anchor") or [])
+        prev_state["must_not_do"] = list(inner_monologue.get("must_not_do") or [])
         prev_state["inner_stream_size"] = stream_len
         prev_state["last_tick_source"] = result["source"]
         prev_state["last_tick_ts_ms"] = ts_ms
@@ -241,6 +285,9 @@ class DefaultModeAgent:
 
         if suppress_background_side_effects:
             result["background_side_effects_suppressed"] = True
+            if not background_enabled:
+                result["reason_code"] = "DEFAULT_MODE_BACKGROUND_TASKS_DISABLED"
+                result["llm_meta"].setdefault("background_tasks_enabled", False)
             if _is_recursive_glymphatic_tick_source(source):
                 result["reason_code"] = "DEFAULT_MODE_GLYMPHATIC_RECURSION_SUPPRESSED"
                 result["llm_meta"].setdefault("recursive_glymphatic_source", True)
@@ -335,14 +382,44 @@ class DefaultModeAgent:
         return result
 
     def export_runtime_state(self) -> dict[str, Any]:
+        from host_brain.persona.inner_monologue import build_inner_monologue_digest  # noqa: PLC0415
+        from host_brain.persona.motive_runtime import build_offline_state_from_inner_state  # noqa: PLC0415
+        from host_brain.persona.self_model import build_self_directive_packet, load_persistent_self_state  # noqa: PLC0415
+
         snap = self.state_registry.get_state("default_mode_agent") or {}
         state = dict(snap.get("state") or {})
-        if not state:
-            self.tick_idle_cycle(source="export_runtime_state")
-            snap = self.state_registry.get_state("default_mode_agent") or {}
-            state = dict(snap.get("state") or {})
+        persona_self_id = get_canonical_persona_self_id()
+        raw_inner_state: dict[str, Any] = {}
         last_tick = dict(state.get("last_tick") or {})
         offline_state = dict(last_tick.get("offline_state") or state.get("last_offline_state") or {})
+        if not state:
+            try:
+                from host_brain.persona.inner_world import get_inner_world  # noqa: PLC0415
+
+                raw_inner_state = dict(get_inner_world().get_state(user_id=persona_self_id) or {})
+            except Exception:
+                raw_inner_state = {}
+            offline_state = dict(
+                build_offline_state_from_inner_state(raw_inner_state, now_ms=now_ms()) or {}
+            )
+        inner_monologue = dict(state.get("inner_monologue") or {})
+        if not inner_monologue:
+            if not raw_inner_state:
+                try:
+                    from host_brain.persona.inner_world import get_inner_world  # noqa: PLC0415
+
+                    raw_inner_state = dict(get_inner_world().get_state(user_id=persona_self_id) or {})
+                except Exception:
+                    raw_inner_state = {}
+            inner_monologue = build_inner_monologue_digest(
+                inner_state=raw_inner_state,
+                last_note=str(state.get("last_note") or ""),
+                last_focus=str(state.get("last_focus") or "self"),
+                offline_state=offline_state,
+            ).as_surface_state()
+        self_directive = dict(state.get("self_directive") or {})
+        if not self_directive:
+            self_directive = build_self_directive_packet(load_persistent_self_state(user_id=persona_self_id))
         return {
             "last_note": str(state.get("last_note") or ""),
             "last_focus": str(state.get("last_focus") or "self"),
@@ -350,17 +427,43 @@ class DefaultModeAgent:
             "continuity_score": float(offline_state.get("continuity_score") or 0.5),
             "loneliness_level": float(offline_state.get("loneliness_level") or 0.0),
             "anticipation_level": float(offline_state.get("anticipation_level") or 0.0),
+            "inner_monologue": inner_monologue,
+            "self_directive": self_directive,
+            "self_identity": str(self_directive.get("self_identity") or ""),
+            "self_values": list(self_directive.get("self_values") or []),
+            "self_boundaries": list(self_directive.get("self_boundaries") or []),
+            "active_intentions": list(self_directive.get("active_intentions") or []),
+            "unresolved_tensions": list(self_directive.get("unresolved_tensions") or []),
+            "agency_score": float(self_directive.get("agency_score") or 0.0),
+            "self_continuity_score": float(self_directive.get("self_continuity_score") or 0.0),
+            "thought_stream_active": bool(inner_monologue.get("thought_stream_active")),
+            "private_thought_count": int(inner_monologue.get("private_thought_count") or 0),
+            "dominant_focus": str(inner_monologue.get("dominant_focus") or "self"),
+            "emotion_tag": str(inner_monologue.get("emotion_tag") or "calm"),
+            "care_drive": float(inner_monologue.get("care_drive") or 0.0),
+            "continuity_drive": float(inner_monologue.get("continuity_drive") or 0.0),
+            "repair_drive": float(inner_monologue.get("repair_drive") or 0.0),
+            "style_anchor": [
+                *list(self_directive.get("style_anchor") or []),
+                *list(inner_monologue.get("style_anchor") or []),
+            ][:8],
+            "must_not_do": [
+                *list(self_directive.get("must_not_do") or []),
+                *list(inner_monologue.get("must_not_do") or []),
+            ][:8],
             "inner_stream_size": int(state.get("inner_stream_size") or 0),
             "tick_count": int(state.get("tick_count") or 0),
             "last_tick_ts_ms": int(state.get("last_tick_ts_ms") or now_ms()),
         }
 
     async def _on_inner_world_ticked(self, event: Any) -> None:
+        if not _background_tasks_enabled():
+            return
         payload = dict(getattr(event, "payload", None) or {})
         ts_ms = int(getattr(event, "ts_ms", 0) or now_ms())
         await asyncio.to_thread(
             self.tick_idle_cycle,
-            person_id=str(payload.get("user_id") or "user_1"),
+            person_id=resolve_persona_self_id(payload.get("user_id")),
             topic_phrase=str(payload.get("topic_id") or ""),
             source="inner_world_ticked",
             now_ts_ms=ts_ms,
@@ -368,12 +471,14 @@ class DefaultModeAgent:
 
     async def _on_conversation_ended(self, event: Any) -> None:
         payload = dict(getattr(event, "payload", None) or {})
+        if not _background_tasks_enabled():
+            return
         if bool(payload.get("skip_default_mode_inner_activity")):
             return
         ts_ms = int(getattr(event, "ts_ms", 0) or now_ms())
         await asyncio.to_thread(
             self.tick_idle_cycle,
-            person_id=str(payload.get("user_id") or "user_1"),
+            person_id=resolve_persona_self_id(payload.get("user_id")),
             topic_phrase="",
             source="conversation_ended",
             now_ts_ms=ts_ms,

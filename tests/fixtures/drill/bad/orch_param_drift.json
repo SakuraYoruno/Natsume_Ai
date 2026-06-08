@@ -1,40 +1,44 @@
-{
-  "scenario_id": "drill.orch.param_drift",
-  "scenario_kind": "param_drift",
-  "request_id": "req_drill_orch_003",
-  "graph": {
-    "graph_id": "graph.drill.param_drift.v1",
-    "version": "v1",
-    "entry_node": "respond",
-    "model_profile_id": "chat_ja_24x7_v1",
-    "model_nodes": {
-      "renderer_ja_c_style": {
-        "provider": "mock",
-        "model_id": "gemini-2.5-flash",
-        "temperature": 0.55,
-        "max_output_tokens": 360,
-        "timeout_ms": 1200,
-        "expected_param_hash": "mismatch-hash",
-        "provider_fn": "__fixture_provider_fn__"
-      }
-    },
-    "node_bindings": [
-      {
-        "node_id": "respond",
-        "model_node_id": "renderer_ja_c_style",
-        "task": "CHAT",
-        "required": true
-      }
-    ],
-    "edges": [],
-    "fallback_edges": []
-  },
-  "payload": {
-    "input": "hello"
-  },
-  "expected": {
-    "status": "DEGRADED",
-    "stage": "S_ORCH_RUN",
-    "reason_code": "ORCH_PARAM_DRIFT"
-  }
+﻿{
+    "scenario_id":  "drill.orch.param_drift",
+    "scenario_kind":  "param_drift",
+    "request_id":  "req_drill_orch_003",
+    "graph":  {
+                  "graph_id":  "graph.drill.param_drift.v1",
+                  "version":  "v1",
+                  "entry_node":  "respond",
+                  "model_profile_id":  "chat_ja_24x7_v1",
+                  "model_nodes":  {
+                                      "renderer_ja_c_style":  {
+                                                                  "provider":  "mock",
+                                                                  "model_id":  "gemini-2.5-flash",
+                                                                  "temperature":  0.55,
+                                                                  "max_output_tokens":  360,
+                                                                  "timeout_ms":  1200,
+                                                                  "expected_param_hash":  "mismatch-hash",
+                                                                  "provider_fn":  "__fixture_provider_fn__"
+                                                              }
+                                  },
+                  "node_bindings":  [
+                                        {
+                                            "node_id":  "respond",
+                                            "model_node_id":  "renderer_ja_c_style",
+                                            "task":  "CHAT",
+                                            "required":  true
+                                        }
+                                    ],
+                  "edges":  [
+
+                            ],
+                  "fallback_edges":  [
+
+                                     ]
+              },
+    "payload":  {
+                    "input":  "hello"
+                },
+    "expected":  {
+                     "status":  "DEGRADED",
+                     "stage":  "S_ORCH_RUN",
+                     "reason_code":  "ORCH_PARAM_DRIFT"
+                 }
 }

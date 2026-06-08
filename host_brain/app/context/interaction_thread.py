@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from dataclasses import dataclass, field
 import re
@@ -11,16 +11,35 @@ _MOTIVATION_RE = re.compile(r"(为什么要帮我|为什么帮我|为什么要�
 _HELP_CONTINUITY_RE = re.compile(r"(还会帮我吗|还会理我吗|还会管我吗)")
 _GREETING_RE = re.compile(r"^(?:你好|您好|嗨|哈喽|hello|hi|hey|早安|早上好|中午好|晚上好|晚安)[!！。…~\s]*$", re.IGNORECASE)
 _PRESENCE_PING_RE = re.compile(r"^(?:在吗|在不在|还在吗|忙吗|在嘛|有人吗)[?？!！。…~\s]*$")
+_AUDITORY_CHECK_RE = re.compile(
+    r"^(?:"
+    r"(?:你)?(?:能不能|能|可以|可不可以|有没有)?(?:听到|听见|听得到|听得见|听清|听清楚)"
+    r"(?:我|我说话|我讲话|声音)?(?:吗|么)?"
+    r"|(?:我)?(?:说话|讲话|发声|声音)(?:你)?(?:能不能|能|可以|可不可以)?"
+    r"(?:听到|听见|听得到|听得见|听清|听清楚)(?:吗|么)?"
+    r"|(?:有|有没有)(?:听到|听见)?声音(?:吗|么)?"
+    r"|(?:刚才|刚刚)?(?:我)?(?:说了|说话|讲话)(?:什么)?(?:你)?(?:听到|听见|听得到|听得见)(?:吗|么)?"
+    r")[?？!！。…~\s]*$",
+    re.IGNORECASE,
+)
 _LIGHT_ACK_RE = re.compile(r"^(?:嗯|嗯嗯|哦|哦哦|好的?|行|行吧|收到|ok|okay|好哦|好呀)[!！。…~\s]*$", re.IGNORECASE)
 _PLAYFUL_PING_RE = re.compile(r"^(?:戳戳|喂喂|嘿嘿|冒泡|路过|ping|戳一戳)[!！。…~\s]*$")
-_IMAGE_MESSAGE_RE = re.compile(r"^\[(图片|图片消息|表情包|贴图|截图)消息?\]$|^\[(图片|表情包|贴图|截图)\]$", re.IGNORECASE)
+_IMAGE_MESSAGE_RE = re.compile(
+    r"^\[(?:图片|图像|表情|表情包|贴图|贴纸|截图)(?:消息)?\]$|"
+    r"^\[(?:image|emoji|sticker|photo|picture|screenshot)(?: message)?\]$|"
+    r"^\[[?\uff1f]{2,}\]$",
+    re.IGNORECASE,
+)
 _IMAGE_SOCIAL_ASSISTANT_RE = re.compile(
     r"(委屈成这样|突然这么可爱|想让我哄你|软乎乎的表情|小表情|拿这个表情|拿这种|撒娇吗|闹别扭呀|情绪这么低呀|一下子软成这样|可爱成这样|突然这么乖|想让我抱抱你吗|丢这个给我看呀|丢这个给我看|发这个给我看呀|发这个给我看|拿来给我看一下|看错啦|当我看错啦|多想了一点|会错意)"
 )
 _SELF_IDENTIFY_RE = re.compile(r"(我是|我叫|我的名字是)")
-_BOUNDARY_ANSWER_RE = re.compile(r"(我们并?不熟|我们不熟|不熟|不算熟|没熟到那种地步)")
+_BOUNDARY_DISTANCE_ANSWER_RE = re.compile(r"(我们并?不熟|我们不熟|不熟|不算熟|没熟到那种地步|慢慢熟|非要多熟|搭把手|顺路嘛|正好路过)")
+_STEPSISTER_BOUNDARY_ANSWER_RE = re.compile(
+    r"(义妹|妹妹|一家人|家里人|外人|见外|别装(?:生分|陌生|不熟)|装(?:生分|陌生|不熟)|划清界限|往外推|不当外人)"
+)
 _MOTIVATION_ANSWER_RE = re.compile(
-    r"(我只是觉得|因为你问了|看见了，也没有装作没看见|看见了，也没打算装作没看见|看到了，也没打算装作没看到|装作没看见|装作没看到|既然你遇到了麻烦|虽然不算熟，但是顺路|虽然不算熟，但是路过|顺路嘛|正好路过|正好碰上了|既然都碰上了)"
+    r"(会管|我管|要管|会帮|我帮|帮你|插手|接手|放着不管|不可能不管|不能不管|不当外人|别装(?:生分|陌生|不熟)|装(?:生分|陌生|不熟)|见外)"
 )
 _HELP_ANSWER_RE = re.compile(r"(会帮|会理|会回|会答|不会不理|多半不会不理|不会装作没听见)")
 _IMAGE_SOCIAL_DENIAL_RE = re.compile(
@@ -120,10 +139,12 @@ def _classify_user_topic(text: str) -> str:
         return "relationship_boundary"
     if _GREETING_RE.match(text):
         return "greeting"
+    if _AUDITORY_CHECK_RE.match(text):
+        return "auditory_check"
     if _PRESENCE_PING_RE.match(text):
-        return "presence_ping"
+        return "greeting"
     if _LIGHT_ACK_RE.match(text):
-        return "light_ack"
+        return "greeting"
     if _PLAYFUL_PING_RE.match(text):
         return "playful_ping"
     return ""
@@ -136,7 +157,9 @@ def _classify_assistant_topic(text: str) -> str:
         return "image_social"
     if _SELF_IDENTIFY_RE.search(text):
         return "identity"
-    if _BOUNDARY_ANSWER_RE.search(text) or _MOTIVATION_ANSWER_RE.search(text):
+    if _BOUNDARY_DISTANCE_ANSWER_RE.search(text):
+        return ""
+    if _STEPSISTER_BOUNDARY_ANSWER_RE.search(text) or _MOTIVATION_ANSWER_RE.search(text):
         return "relationship_boundary"
     if _HELP_ANSWER_RE.search(text):
         return "help_commitment"
@@ -272,7 +295,7 @@ def resolve_interaction_thread(
 
     if multimodal:
         primary_modality = _normalize_text(multimodal.get("primary_modality")).lower()
-        if current_topic == "emoji_social_reply" and primary_modality in {"image", "emoji"}:
+        if current_topic == "emoji_social_reply" and primary_modality in {"image", "emoji", "sticker"}:
             return InteractionThreadState(
                 thread_kind="image_social",
                 source_topic="emoji_social_reply",
@@ -429,14 +452,6 @@ def resolve_interaction_thread(
                 turn_count=max(1, user_topics[-3:].count("help_commitment")),
                 reason_tags=("recent_help_reassurance",),
             )
-    if current_topic in {"greeting", "presence_ping", "light_ack", "playful_ping"}:
-        return InteractionThreadState(
-            thread_kind="phatic",
-            source_topic=current_topic,
-            open=True,
-            turn_count=1,
-            reason_tags=("current_phatic",),
-        )
     return InteractionThreadState()
 
 

@@ -1,36 +1,31 @@
-{
-  "request_id": "req_boot_001",
-  "host_env": {
-    "Natsume_ENV": "dev",
-    "HOST_LLM_PROVIDER": "openai",
-    "HOST_COLD_START_ALLOWED": "true",
-    "HOST_ENABLE_RETRIEVAL": "true",
-    "HOST_ENABLE_VISION": "true"
-  },
-  "edge_env": {
-    "Natsume_ENV": "dev",
-    "EDGE_RPC_GATEWAY_ENABLED": "true",
-    "EDGE_FALLBACK_LLM_ENABLED": "false",
-    "EDGE_ASR_ENABLED": "true",
-    "EDGE_TTS_ENABLED": "true",
-    "EDGE_BARGE_IN_ENABLED": "true",
-    "EDGE_RESOURCE_GATE_ENABLED": "true"
-  },
-  "dependency_probes": {
-    "edge.rpc.gateway": {
-      "available": false,
-      "unavailable_kind": "edge_rpc",
-      "detail": "edge rpc transport timeout at startup"
-    },
-    "host.retrieval.embedding": {
-      "available": false,
-      "unavailable_kind": "dependency",
-      "detail": "embedding endpoint timeout at startup"
-    },
-    "host.retrieval.reranker": {
-      "available": false,
-      "unavailable_kind": "dependency",
-      "detail": "reranker endpoint timeout at startup"
-    }
-  }
+﻿{
+    "request_id":  "req_boot_001",
+    "host_env":  {
+                     "Natsume_ENV":  "dev",
+                     "HOST_LLM_PROVIDER":  "openai",
+                     "HOST_COLD_START_ALLOWED":  "true",
+                     "HOST_ENABLE_RETRIEVAL":  "true",
+                     "HOST_ENABLE_VISION":  "true"
+                 },
+    "edge_env":  {
+                     "Natsume_ENV":  "dev",
+                     "EDGE_RPC_GATEWAY_ENABLED":  "true",
+                     "EDGE_FALLBACK_LLM_ENABLED":  "false",
+                     "EDGE_ASR_ENABLED":  "true",
+                     "EDGE_TTS_ENABLED":  "true",
+                     "EDGE_BARGE_IN_ENABLED":  "true",
+                     "EDGE_RESOURCE_GATE_ENABLED":  "true"
+                 },
+    "dependency_probes":  {
+                              "edge.rpc.gateway":  {
+                                                       "available":  false,
+                                                       "unavailable_kind":  "edge_rpc",
+                                                       "detail":  "edge rpc transport timeout at startup"
+                                                   },
+                              "host.retrieval.recall_fusion":  {
+                                                                   "available":  false,
+                                                                   "unavailable_kind":  "dependency",
+                                                                   "detail":  "embedding endpoint timeout at startup; reranker endpoint timeout at startup"
+                                                               }
+                          }
 }

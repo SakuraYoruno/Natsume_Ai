@@ -18,7 +18,7 @@
   - 纯逻辑层，不直接发送消息（由 proactive_talk skill 调用）
   - 人格特质影响表达风格和内容选择
   - 频率限制防止打扰
-  - bond_stage 分层：陌生人和灵魂伴侣说的话完全不同
+  - bond_stage 分层：关系好的兄妹和灵魂伴侣说的话完全不同
   - 离线时长感知：3天/1周/1个月说不同的话
   - 季节感知：冬天早安 vs 夏天早安
   - 节日专属文案：春节/圣诞/情人节各有专属内容
@@ -197,9 +197,9 @@ _HOLIDAY_DEFAULT: dict[str, list[str]] = {}
 # 表达模板（按场景 × bond_stage × 风格）
 # ---------------------------------------------------------------------------
 
-# bond_stage 分组：浅层 / 中层 / 深层
-_SHALLOW_STAGES = frozenset({"STRANGER", "ACQUAINTANCE"})
-_MID_STAGES = frozenset({"FRIEND"})
+# bond_stage 分组：当前关系从关系好的兄妹开始，不再保留初识/陌生阶段
+_SHALLOW_STAGES = frozenset({"FRIEND"})
+_MID_STAGES = frozenset({"CLOSE_FRIEND"})
 _DEEP_STAGES = frozenset({"CLOSE_FRIEND", "CONFIDANT", "SOULMATE"})
 
 
@@ -523,7 +523,7 @@ class PersonaProactiveVoice:
                     continue
                 style = self._select_style(traits)
                 style = self._apply_mode_to_style(style, ctx)
-                bond_stage = str(ctx.get("bond_stage") or "STRANGER").strip().upper()
+                bond_stage = str(ctx.get("bond_stage") or "FRIEND").strip().upper()
                 long_absent_influence = ""
                 if scene_type == SCENE_LONG_ABSENT:
                     elapsed_ms = _resolve_long_absent_elapsed_ms(ctx, now_ts)
@@ -1112,7 +1112,7 @@ class PersonaProactiveVoice:
 
         loneliness = float(ctx.get("_loneliness_value") or 0.0)
         anticipation = float(ctx.get("_anticipation_value") or 0.0)
-        bond_stage = str(ctx.get("bond_stage") or "STRANGER").strip().upper()
+        bond_stage = str(ctx.get("bond_stage") or "FRIEND").strip().upper()
         motive_state = dict(ctx.get("motive_state") or {})
 
         def _score(key: str) -> float:

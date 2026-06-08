@@ -1,8 +1,8 @@
-{
-  "provider_id": "github",
-  "tool_id": "search_issues",
-  "decision": "REJECT",
-  "reason_code": "MCP_PROVIDER_UNAVAILABLE",
-  "detail": "handler raised exception: network error",
-  "success": false
+﻿{
+    "provider_id":  "github",
+    "tool_id":  "search_issues",
+    "decision":  "REJECT",
+    "reason_code":  "MCP_PROVIDER_UNAVAILABLE",
+    "detail":  "handler raised exception: network error",
+    "success":  false
 }

@@ -234,7 +234,7 @@ export default function CanonProposalsSection({
                 <td colSpan={6} className="px-4 py-8 text-center text-sm text-gray-500">
                   <span className="inline-flex items-center gap-2">
                     <RefreshCw size={12} className="animate-spin" />
-                    加载中…
+                    同步中…
                   </span>
                 </td>
               </tr>

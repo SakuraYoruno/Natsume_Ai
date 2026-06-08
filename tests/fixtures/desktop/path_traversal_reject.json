@@ -1,12 +1,17 @@
-{
-  "scenario": "path_traversal_reject",
-  "description": "路径穿越尝试被拒绝",
-  "args": {
-    "action": "create",
-    "filename": "../../etc/passwd",
-    "content": "malicious content",
-    "base_dir": "__TEST_DIR__"
-  },
-  "context": {"sys_mode": "normal"},
-  "expected": {"status": "REJECTED", "reason_code": "SCOPE_VIOLATION"}
+﻿{
+    "scenario":  "path_traversal_reject",
+    "description":  "路径穿越尝试被拒绝",
+    "args":  {
+                 "action":  "create",
+                 "filename":  "../../etc/passwd",
+                 "content":  "malicious content",
+                 "base_dir":  "__TEST_DIR__"
+             },
+    "context":  {
+                    "sys_mode":  "normal"
+                },
+    "expected":  {
+                     "status":  "REJECTED",
+                     "reason_code":  "SCOPE_VIOLATION"
+                 }
 }

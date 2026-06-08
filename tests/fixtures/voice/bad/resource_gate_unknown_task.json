@@ -1,10 +1,10 @@
-{
-  "request_id": "req_voice_052",
-  "session_id": "sess_voice_001",
-  "task": "UNKNOWN_TASK",
-  "metrics": {
-    "vram_total_mb": 8000,
-    "vram_used_mb": 2000,
-    "queue_depth": 0
-  }
+﻿{
+    "request_id":  "req_voice_052",
+    "session_id":  "sess_voice_001",
+    "task":  "UNKNOWN_TASK",
+    "metrics":  {
+                    "vram_total_mb":  8000,
+                    "vram_used_mb":  2000,
+                    "queue_depth":  0
+                }
 }

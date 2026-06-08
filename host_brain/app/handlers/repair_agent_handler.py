@@ -219,7 +219,7 @@ def _call_repair_planner_llm(task_text: str, previous_error: str) -> dict[str, A
         provider_name = str(os.environ.get(_REPAIR_PLANNER_PROVIDER_ENV) or "gemini").strip().lower()
         model_id = str(
             os.environ.get(_REPAIR_PLANNER_MODEL_ENV)
-            or os.environ.get("HOST_CHAT_AGENT_MODEL_ID")
+            or os.environ.get("HOST_SURFACE_REPLY_MODEL_ID")
             or "gemini-2.0-flash"
         ).strip()
         api_key = _load_api_key_from_env(provider_name)

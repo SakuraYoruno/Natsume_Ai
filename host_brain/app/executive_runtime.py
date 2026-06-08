@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import re
 import time
 from typing import Any, AsyncGenerator
@@ -151,6 +152,8 @@ async def try_handle_recent_turn_direct_route(
     sse_fn,
     record_dispatch_handoff_fn,
 ) -> list[str] | None:
+    if not _legacy_direct_text_routes_enabled():
+        return None
     if str(route or "").strip().lower() != "recent_turn":
         return None
 
@@ -198,7 +201,7 @@ async def try_handle_recent_turn_direct_route(
             pii_egress_stats={},
             trace_stage_meta={
                 "executive_router_used": True,
-                "chat_agent_used": False,
+                "surface_reply_used": False,
                 "executive_runtime_mode": "recent_turn_direct",
             },
         )
@@ -241,6 +244,8 @@ async def try_handle_task_progress_direct_route(
     sse_fn,
     record_dispatch_handoff_fn,
 ) -> list[str] | None:
+    if not _legacy_direct_text_routes_enabled():
+        return None
     if str(route or "").strip().lower() != "task_progress":
         return None
 
@@ -289,7 +294,7 @@ async def try_handle_task_progress_direct_route(
             pii_egress_stats={},
             trace_stage_meta={
                 "executive_router_used": True,
-                "chat_agent_used": False,
+                "surface_reply_used": False,
                 "executive_runtime_mode": "task_progress_direct",
             },
         )
@@ -321,7 +326,7 @@ async def stream_chat_route(
     skill_family: str,
     runtime_capability_handoff_extra: dict[str, Any],
     record_dispatch_handoff_fn,
-    chat_agent_sse_generator_fn,
+    surface_reply_sse_generator_fn,
     chat_input,
 ):
     if str(route or "").strip().lower() != "chat":
@@ -337,7 +342,7 @@ async def stream_chat_route(
     )
     first_event_logged = False
     first_render_logged = False
-    async for event in chat_agent_sse_generator_fn(chat_input):
+    async for event in surface_reply_sse_generator_fn(chat_input):
         if not first_event_logged:
             first_event_logged = True
             _logger.info(
@@ -448,6 +453,11 @@ async def _executive_runtime_core_sse_generator_impl(
         pii_ingress_stats=pii_ingress_stats,
     ):
         yield event
+
+
+def _legacy_direct_text_routes_enabled() -> bool:
+    raw = str(os.environ.get("HOST_LEGACY_DIRECT_TEXT_ROUTES_ENABLED") or "").strip().lower()
+    return raw in {"1", "true", "yes", "on"}
 
 
 __all__ = [

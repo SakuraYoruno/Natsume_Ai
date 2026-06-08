@@ -31,6 +31,10 @@ def test_image_social_surface_rejects_old_template_shapes() -> None:
     assert is_image_social_surface_sample_disallowed("哥哥，我也觉得这张猫耳很可爱，轻轻戳到了。")
     assert is_image_social_surface_sample_disallowed("这个表情一脸装乖，太会了。")
     assert is_image_social_surface_sample_disallowed("嗯？这张图......好像有点熟悉，又好像在哪儿见过似的。")
+    assert is_image_social_surface_sample_disallowed("又在房间里一个人装深沉是吧。")
+    assert is_image_social_surface_sample_disallowed("老哥连发表情包的样子都好搞笑。")
+    assert is_image_social_surface_sample_disallowed("懂了，这一下是有点无语。")
+    assert is_image_social_surface_sample_disallowed("我看到了，刚才那句我先收一下。")
 
 
 def test_image_social_surface_requires_emotion_response_not_image_commentary() -> None:
@@ -44,7 +48,8 @@ def test_image_social_surface_requires_emotion_response_not_image_commentary() -
     assert "猫耳" not in anchors
     assert {"可爱", "卖萌"}.issubset(set(anchors))
     assert candidate_responds_to_image_social_emotion("好啦好啦，别拿这种眼神晃我，我会心软的。")
-    assert candidate_responds_to_image_social_emotion("哥哥又开始装乖了，我接住还不行嘛。")
+    assert not candidate_responds_to_image_social_emotion("哥哥又开始装乖了，我接住还不行嘛。")
+    assert candidate_responds_to_image_social_emotion("哥哥又开始装乖了，我接住啦。")
     assert candidate_responds_to_image_social_emotion("被你这么一晃，我有点招架不住。")
     assert candidate_responds_to_image_social_emotion("撒娇这一套我接住了。")
     assert not candidate_responds_to_image_social_emotion("猫耳这张有点犯规，哥哥故意的吧。")

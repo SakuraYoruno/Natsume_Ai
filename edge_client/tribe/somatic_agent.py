@@ -1,12 +1,20 @@
 from __future__ import annotations
 
 import logging
+import os
 from dataclasses import dataclass, field
 from typing import Any
 
 from edge_client.tribe.base_agent import EdgeTribeAgentDescriptor
 
 _log = logging.getLogger("Natsume.edge.tribe.somatic_agent")
+
+
+def _parse_bool_env(name: str, *, default: bool = False) -> bool:
+    raw = os.environ.get(name)
+    if raw is None or str(raw).strip() == "":
+        return default
+    return str(raw).strip().lower() in {"1", "true", "yes", "y", "on"}
 
 
 @dataclass(slots=True)
@@ -59,6 +67,23 @@ class SomaticAgent:
                 else None
             )
             session_id = str(payload.get("session_id") or "").strip() or None
+            emotion_source = str(payload.get("emotion_source") or payload.get("source") or "").strip().lower()
+            emotion_modality = str(payload.get("emotion_modality") or payload.get("modality") or "").strip().lower()
+            is_face_capture_feedback = (
+                session_id == "face_capture"
+                or emotion_source == "face_capture"
+                or emotion_modality == "face_capture"
+            )
+            if is_face_capture_feedback and not _parse_bool_env("EDGE_FACE_CAPTURE_DRIVE_VTS", default=False):
+                _log.debug(
+                    "SomaticAgent.on_emotion_state_command: face_capture feedback suppressed "
+                    "emotion_tag=%s session=%s", emotion_tag, session_id,
+                )
+                return {
+                    "ok": True,
+                    "reason": "FACE_CAPTURE_DRIVE_SUPPRESSED",
+                    "emotion_tag": emotion_tag,
+                }
 
             driver = self.vts_driver
             if driver is None:
@@ -120,6 +145,10 @@ class SomaticAgent:
         mood_state: str | None,
         emotion_source: str | None,
         emotion_terms: list[str],
+        emotion_modality: str | None = None,
+        emotion_confidence: float | None = None,
+        emotion_inference_degraded: bool | None = None,
+        acoustic_emotion_available: bool | None = None,
     ) -> None:
         payload: dict[str, Any] = {
             "request_id": str(request_id or ""),
@@ -134,6 +163,18 @@ class SomaticAgent:
             "mood_state": str(mood_state).strip().lower() if mood_state else None,
             "emotion_source": str(emotion_source).strip() if emotion_source else None,
             "emotion_terms": list(emotion_terms or []),
+            "emotion_modality": str(emotion_modality or "").strip() or None,
+            "emotion_confidence": (
+                max(0.0, min(1.0, float(emotion_confidence)))
+                if isinstance(emotion_confidence, (int, float))
+                else None
+            ),
+            "emotion_inference_degraded": bool(emotion_inference_degraded)
+            if emotion_inference_degraded is not None
+            else None,
+            "acoustic_emotion_available": bool(acoustic_emotion_available)
+            if acoustic_emotion_available is not None
+            else None,
         }
         self._publish_event(
             event_type="emotion_inference_updated",
@@ -375,6 +416,10 @@ class SomaticAgent:
                 mood_state=None,
                 emotion_source="face_capture",
                 emotion_terms=[expression_tag.lower()],
+                emotion_modality="face_capture",
+                emotion_confidence=confidence,
+                emotion_inference_degraded=False,
+                acoustic_emotion_available=False,
             )
 
             _log.debug(

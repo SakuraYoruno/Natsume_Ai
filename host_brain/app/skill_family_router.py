@@ -17,11 +17,22 @@ _DEFAULT_SKILL_FAMILY_BY_SKILL_ID: dict[str, str] = {
     "file_write": "system",
     "file_list": "system",
     "system_info": "system",
+    "system_resource_snapshot": "system",
+    "process_resource_top": "system",
+    "resource_pressure_analysis": "system",
+    "resource_manager_status": "system",
+    "resource_release": "system",
     "process_list": "system",
     "network_status": "system",
     "open_app": "system",
     "memory_store": "memory",
+    "memory_preference_extract": "memory",
+    "memory_consolidate": "memory",
     "memory_recall": "memory",
+    "repo_health_scan": "code",
+    "test_failure_triage": "code",
+    "frontend_route_audit": "code",
+    "frontend_component_value_audit": "code",
     "session_summary": "memory",
     "emotion_query": "emotion",
     "bond_query": "social",
@@ -36,7 +47,7 @@ _DEFAULT_FAMILY_BY_AGENT_ID: dict[str, str] = {
     "vision_agent": "perception",
     "intent_agent": "reasoning",
     "repair_agent": "system",
-    "chat_agent": "social",
+    "surface_reply": "social",
 }
 
 _DEFAULT_CAPABILITY_TAGS_BY_FAMILY: dict[str, tuple[str, ...]] = {
@@ -221,4 +232,3 @@ def build_skill_route_decision(
 
 
 __all__ = ["SkillRouteDecision", "build_skill_route_decision"]
-

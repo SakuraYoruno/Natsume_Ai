@@ -313,7 +313,7 @@ class CortexAgent:
             )
             # Stage 跃迁顺序（越靠后越亲密）
             _STAGE_ORDER = [
-                "STRANGER", "ACQUAINTANCE", "FRIEND",
+                "FRIEND",
                 "CLOSE_FRIEND", "INTIMATE", "SOULMATE",
             ]
             from_idx = _STAGE_ORDER.index(from_stage) if from_stage in _STAGE_ORDER else -1
@@ -366,7 +366,7 @@ class CortexAgent:
         try:
             import logging  # noqa: PLC0415
             payload = dict(getattr(event, "payload", None) or {})
-            bond_stage = str(payload.get("bond_stage") or "STRANGER").strip().upper() or "STRANGER"
+            bond_stage = str(payload.get("bond_stage") or "FRIEND").strip().upper() or "FRIEND"
             intensity = max(0.0, min(1.0, float(payload.get("intensity") or 0.3)))
             prev = self.state_registry.get_state("cortex_agent") or {}
             prev_state = dict(prev.get("state") or {})
@@ -394,7 +394,7 @@ class CortexAgent:
         try:
             import logging  # noqa: PLC0415
             payload = dict(getattr(event, "payload", None) or {})
-            bond_stage = str(payload.get("bond_stage") or "STRANGER").strip().upper() or "STRANGER"
+            bond_stage = str(payload.get("bond_stage") or "FRIEND").strip().upper() or "FRIEND"
             intensity = max(0.0, min(1.0, float(payload.get("intensity") or 0.4)))
             prev = self.state_registry.get_state("cortex_agent") or {}
             prev_state = dict(prev.get("state") or {})
@@ -710,7 +710,7 @@ class CortexAgent:
             # 从 Broca 获取 emotion_intensity（如果可用）
             emotion_intensity: float = 0.5
             try:
-                from host_brain.app.chat_agent_postprocessor import broca_to_tts_params  # noqa: PLC0415
+                from host_brain.app.surface_reply_postprocessor import broca_to_tts_params  # noqa: PLC0415
                 _lang_agent = get_language_system_agent()
                 _last_broca = dict(
                     (_lang_agent.state_registry.get_state("language_system_agent") or {})

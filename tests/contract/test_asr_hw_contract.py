@@ -1,4 +1,4 @@
-"""T-ASR-HW-01: Edge ASR hardware integration contract tests.
+﻿"""T-ASR-HW-01: Edge ASR hardware integration contract tests.
 
 Tests the faster-whisper SDK integration layer including:
 - Model manager lifecycle (load/unload/health/GPU fallback)
@@ -171,7 +171,7 @@ class TestAsrConfig:
         assert cfg.device == "cuda"
         assert cfg.compute_type == "float16"
         assert cfg.sample_rate == 16000
-        assert cfg.language == "ja"
+        assert cfg.language == "zh"
 
     def test_as_dict_completeness(self):
         cfg = AsrConfig()
@@ -478,3 +478,4 @@ def _mock_import_error(name, *args, **kwargs):
     if name in ("faster_whisper", "sounddevice", "numpy"):
         raise ImportError(f"No module named '{name}' (mocked)")
     return _ORIGINAL_IMPORT(name, *args, **kwargs)
+

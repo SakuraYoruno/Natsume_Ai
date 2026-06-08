@@ -1,4 +1,4 @@
-"""
+﻿"""
 重置 Chroma 向量集合：删除旧 dim=384 集合，重建 episodic + canon（dim=1024）
 """
 import urllib.request
@@ -7,7 +7,7 @@ import sys
 
 BASE = "http://localhost:8000/api/v2/tenants/default_tenant/databases/default_database"
 
-OLD_COLLECTIONS = ["canon_world", "episodic", "bond", "canon_style", "distilled", "long_term"]
+OLD_COLLECTIONS = ["canon_world", "episodic", "bond", "distilled", "long_term"]
 NEW_COLLECTIONS = [
     {"name": "episodic", "metadata": {"hnsw:space": "cosine", "vector_dim": 1024}},
     {"name": "canon",    "metadata": {"hnsw:space": "cosine", "vector_dim": 1024}},
@@ -68,3 +68,4 @@ if __name__ == "__main__":
         print(f"  {c['name']}  dim={dim}  id={c['id']}")
 
     print("\n完成！")
+

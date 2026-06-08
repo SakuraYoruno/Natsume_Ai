@@ -22,6 +22,7 @@ import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
 from enum import Enum
+from pathlib import Path
 from typing import Any
 
 from edge_client.runtime_texts import edge_runtime_text
@@ -63,6 +64,38 @@ class _PendingReport:
     retry_count: int = 0
     created_at: float = field(default_factory=time.monotonic)
 
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "payload": self.payload,
+            "source": self.source.value,
+            "retry_count": int(self.retry_count),
+            "created_at": float(self.created_at),
+        }
+
+    @classmethod
+    def from_dict(cls, raw: dict[str, Any]) -> "_PendingReport | None":
+        payload = raw.get("payload")
+        if not isinstance(payload, dict):
+            return None
+        try:
+            source = InputSourceType(str(raw.get("source") or "GATEWAY").strip().upper())
+        except Exception:
+            source = InputSourceType.GATEWAY
+        try:
+            retry_count = max(0, int(raw.get("retry_count") or 0))
+        except Exception:
+            retry_count = 0
+        try:
+            created_at = float(raw.get("created_at") or time.monotonic())
+        except Exception:
+            created_at = time.monotonic()
+        return cls(
+            payload=dict(payload),
+            source=source,
+            retry_count=retry_count,
+            created_at=created_at,
+        )
+
 
 class EdgeInputReporter:
     """Edge → Host 输入上报客户端。
@@ -87,8 +120,9 @@ class EdgeInputReporter:
         hmac_key: str | None = None,
         timeout_s: float = 3.0,
         max_cache: int = 500,
-        max_retry: int = 5,
+        max_retry: int = 8640,
         retry_interval_s: float = 10.0,
+        cache_file: str | None = None,
     ) -> None:
         self._host_url = host_url.rstrip("/")
         self._hmac_key = hmac_key
@@ -96,6 +130,7 @@ class EdgeInputReporter:
         self._max_cache = int(max_cache)
         self._max_retry = int(max_retry)
         self._retry_interval_s = float(retry_interval_s)
+        self._cache_file = Path(cache_file).expanduser() if cache_file else None
 
         self._cache: list[_PendingReport] = []
         self._lock = threading.Lock()
@@ -105,6 +140,8 @@ class EdgeInputReporter:
         self._total_failed = 0
         self._last_result: dict[str, Any] | None = None
         self._last_payload_summary: dict[str, Any] | None = None
+        self._last_persist_error: str = ""
+        self._load_cache_from_disk()
 
     # ------------------------------------------------------------------
     # 公开 API
@@ -246,7 +283,11 @@ class EdgeInputReporter:
                 "host_url": self._host_url,
                 "input_endpoint": self.INPUT_ENDPOINT,
                 "timeout_s": self._timeout_s,
+                "max_retry": self._max_retry,
+                "retry_interval_s": self._retry_interval_s,
                 "cache_size": len(self._cache),
+                "cache_file": str(self._cache_file or ""),
+                "last_persist_error": self._last_persist_error,
                 "total_sent": self._total_sent,
                 "total_failed": self._total_failed,
                 "last_result": dict(self._last_result or {}),
@@ -399,6 +440,7 @@ class EdgeInputReporter:
                     dropped.source.value,
                 )
             self._cache.append(_PendingReport(payload=payload, source=source))
+            self._persist_cache_locked()
 
     def _retry_loop(self) -> None:
         """后台重试线程：定期尝试重发缓存中的上报。"""
@@ -406,6 +448,7 @@ class EdgeInputReporter:
             with self._lock:
                 pending = list(self._cache)
                 self._cache.clear()
+                self._persist_cache_locked()
 
             if not pending:
                 continue
@@ -413,6 +456,15 @@ class EdgeInputReporter:
             still_pending: list[_PendingReport] = []
             for item in pending:
                 if item.retry_count >= self._max_retry:
+                    self._record_result(
+                        item.payload,
+                        item.source,
+                        success=False,
+                        cached=False,
+                        reason_code="INPUT_REPORT_RETRY_EXHAUSTED",
+                        detail=f"retry exhausted after {item.retry_count} attempts",
+                        elapsed_ms=0,
+                    )
                     logger.warning(
                         "EdgeInputReporter: 重试次数耗尽，丢弃 source=%s text=%.40s",
                         item.source.value,
@@ -420,7 +472,18 @@ class EdgeInputReporter:
                     )
                     continue
                 try:
+                    started = time.monotonic()
                     self._do_http_post(item.payload)
+                    elapsed_ms = int((time.monotonic() - started) * 1000)
+                    self._record_result(
+                        item.payload,
+                        item.source,
+                        success=True,
+                        cached=False,
+                        reason_code=None,
+                        detail=f"retry_success retry={item.retry_count + 1}",
+                        elapsed_ms=elapsed_ms,
+                    )
                     logger.info(
                         "EdgeInputReporter: 重试成功 source=%s retry=%d",
                         item.source.value, item.retry_count + 1,
@@ -428,15 +491,70 @@ class EdgeInputReporter:
                 except Exception as exc:
                     item.retry_count += 1
                     still_pending.append(item)
+                    self._record_result(
+                        item.payload,
+                        item.source,
+                        success=False,
+                        cached=True,
+                        reason_code="INPUT_REPORT_RETRY_FAILED",
+                        detail=str(exc),
+                        elapsed_ms=0,
+                    )
                     logger.debug(
                         "EdgeInputReporter: 重试失败 source=%s retry=%d: %s",
                         item.source.value, item.retry_count, exc,
                     )
 
-            if still_pending:
-                with self._lock:
-                    # 合并回缓存（新来的优先）
-                    self._cache = still_pending + self._cache
-                    # 超出上限时截断
-                    if len(self._cache) > self._max_cache:
-                        self._cache = self._cache[-self._max_cache:]
+            with self._lock:
+                # 合并回缓存（新来的优先）
+                self._cache = still_pending + self._cache
+                # 超出上限时截断
+                if len(self._cache) > self._max_cache:
+                    self._cache = self._cache[-self._max_cache:]
+                self._persist_cache_locked()
+
+    def _load_cache_from_disk(self) -> None:
+        if self._cache_file is None:
+            return
+        try:
+            if not self._cache_file.exists():
+                return
+            raw_text = self._cache_file.read_text(encoding="utf-8").strip()
+            if not raw_text:
+                return
+            raw_items = json.loads(raw_text)
+            if not isinstance(raw_items, list):
+                raise ValueError("persistent input queue must be a JSON array")
+            loaded: list[_PendingReport] = []
+            for raw_item in raw_items:
+                if not isinstance(raw_item, dict):
+                    continue
+                item = _PendingReport.from_dict(raw_item)
+                if item is not None:
+                    loaded.append(item)
+            if len(loaded) > self._max_cache:
+                loaded = loaded[-self._max_cache:]
+            self._cache = loaded
+            if loaded:
+                logger.warning(
+                    "EdgeInputReporter: loaded %d pending input reports from %s",
+                    len(loaded),
+                    self._cache_file,
+                )
+        except Exception as exc:
+            self._last_persist_error = str(exc)[:240]
+            logger.warning("EdgeInputReporter: failed to load persistent input queue: %s", exc)
+
+    def _persist_cache_locked(self) -> None:
+        if self._cache_file is None:
+            return
+        try:
+            self._cache_file.parent.mkdir(parents=True, exist_ok=True)
+            tmp_path = self._cache_file.with_suffix(self._cache_file.suffix + ".tmp")
+            payload = [item.as_dict() for item in self._cache]
+            tmp_path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+            tmp_path.replace(self._cache_file)
+            self._last_persist_error = ""
+        except Exception as exc:
+            self._last_persist_error = str(exc)[:240]
+            logger.warning("EdgeInputReporter: failed to persist input queue: %s", exc)

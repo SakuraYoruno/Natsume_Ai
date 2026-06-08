@@ -48,6 +48,48 @@ class SkillResult:
 
 
 @dataclass(frozen=True)
+class SkillSchedulerProfile:
+    """Declarative scheduling hint consumed by SchedulingCenter.
+
+    This profile is intentionally advisory data. The scheduler center still
+    applies risk, mode, and resource guards before it creates real tasks.
+    """
+
+    auto_schedule: bool = False
+    task_id: str | None = None
+    trigger_mode: str = "manual"
+    trigger_config: dict[str, Any] = field(default_factory=dict)
+    priority: str = "LOW"
+    mode_allowlist: tuple[str, ...] = ()
+    args: dict[str, Any] = field(default_factory=dict)
+    trigger_env: dict[str, dict[str, Any]] = field(default_factory=dict)
+    arg_env: dict[str, dict[str, Any]] = field(default_factory=dict)
+    resource_class: str = "light"
+    uses_llm: bool | None = None
+    uses_gpu: bool | None = None
+    advisory_policy: str = "rule"
+    description: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "auto_schedule": self.auto_schedule,
+            "task_id": self.task_id,
+            "trigger_mode": self.trigger_mode,
+            "trigger_config": dict(self.trigger_config),
+            "priority": self.priority,
+            "mode_allowlist": list(self.mode_allowlist),
+            "args": dict(self.args),
+            "trigger_env": {key: dict(value) for key, value in self.trigger_env.items()},
+            "arg_env": {key: dict(value) for key, value in self.arg_env.items()},
+            "resource_class": self.resource_class,
+            "uses_llm": self.uses_llm,
+            "uses_gpu": self.uses_gpu,
+            "advisory_policy": self.advisory_policy,
+            "description": self.description,
+        }
+
+
+@dataclass(frozen=True)
 class SkillMeta:
     skill_name: str
     clearance: str
@@ -66,6 +108,8 @@ class SkillMeta:
     """是否允许 SCHEDULER 来源调用"""
     access_level: AccessLevel = AccessLevel.PUBLIC
     """访问级别"""
+    scheduler_profile: dict[str, Any] | SkillSchedulerProfile | None = None
+    """调度画像：由 SchedulingCenter 扫描并转成 SchedulerTaskConfig。"""
 
     def validate(self) -> None:
         if not self.skill_name or not isinstance(self.skill_name, str):
@@ -102,6 +146,8 @@ class SkillMeta:
         fallback_policy = str(self.fallback_policy or "").strip().lower()
         if fallback_policy not in {"chat_fallback", "same_family", "strict_fail", "retry_once"}:
             raise ValueError("fallback_policy must be one of {'chat_fallback','same_family','strict_fail','retry_once'}")
+        if self.scheduler_profile is not None and not isinstance(self.scheduler_profile, (dict, SkillSchedulerProfile)):
+            raise ValueError("scheduler_profile must be dict, SkillSchedulerProfile, or None")
 
     @property
     def permission_model(self) -> SkillPermissionModel:
@@ -124,6 +170,11 @@ class SkillMeta:
             "capability_tags": list(self.capability_tags),
             "parallelizable": self.parallelizable,
             "fallback_policy": self.fallback_policy,
+            "scheduler_profile": (
+                self.scheduler_profile.to_dict()
+                if isinstance(self.scheduler_profile, SkillSchedulerProfile)
+                else dict(self.scheduler_profile or {})
+            ),
         }
 
 

@@ -106,7 +106,7 @@ class TestVTSRPCCallAndAudit:
 
     def test_t_vts_drive_06_vts_action_log_complete(self):
         """T-VTS-DRIVE-06：VTS 调用成功，vts_action_log 记录完整（expression_id/status/request_id）。"""
-        from host_brain.channels.vts import resolve_vts_expression, STATUS_APPLIED
+        from host_brain.channels.vts import EMOTION_TO_EXPRESSION_ID, resolve_vts_expression, STATUS_APPLIED
 
         mock_ledger = MagicMock()
         mock_ledger.log_avatar_action = MagicMock()
@@ -118,12 +118,12 @@ class TestVTSRPCCallAndAudit:
             edge_available=True,
         )
         assert result.status == STATUS_APPLIED
-        assert result.expression_id == "exp_happy_01"
+        assert result.expression_id == EMOTION_TO_EXPRESSION_ID["HAPPY"]
         assert result.request_id == "req_vts_06"
         # 审计日志被调用
         assert mock_ledger.log_avatar_action.called
         call_args = mock_ledger.log_avatar_action.call_args[0][0]
-        assert call_args["expression_id"] == "exp_happy_01"
+        assert call_args["expression_id"] == EMOTION_TO_EXPRESSION_ID["HAPPY"]
         assert call_args["request_id"] == "req_vts_06"
 
     def test_t_vts_drive_07_edge_unavailable_degraded_not_fake(self):

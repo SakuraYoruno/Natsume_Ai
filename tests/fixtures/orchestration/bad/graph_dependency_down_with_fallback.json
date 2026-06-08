@@ -1,48 +1,48 @@
-{
-  "request_id": "req_orch_005",
-  "graph": {
-    "graph_id": "graph.dep_down.v1",
-    "version": "v1",
-    "entry_node": "plan",
-    "node_bindings": [
-      {
-        "node_id": "plan",
-        "handler_id": "handler.plan",
-        "required": true
-      },
-      {
-        "node_id": "retrieve",
-        "handler_id": "handler.retrieve",
-        "required": true
-      },
-      {
-        "node_id": "respond",
-        "handler_id": "handler.respond",
-        "required": true
-      }
-    ],
-    "edges": [
-      {
-        "from": "plan",
-        "to": "retrieve"
-      },
-      {
-        "from": "retrieve",
-        "to": "respond"
-      }
-    ],
-    "fallback_edges": [
-      {
-        "from": "retrieve",
-        "to": "respond"
-      }
-    ]
-  },
-  "dependency_statuses": {
-    "retrieve": {
-      "available": false,
-      "detail": "retrieval backend unavailable"
-    }
-  },
-  "expected_reason_code": "ORCH_DEPENDENCY_UNAVAILABLE"
+﻿{
+    "request_id":  "req_orch_005",
+    "graph":  {
+                  "graph_id":  "graph.dep_down.v1",
+                  "version":  "v1",
+                  "entry_node":  "plan",
+                  "node_bindings":  [
+                                        {
+                                            "node_id":  "plan",
+                                            "handler_id":  "handler.plan",
+                                            "required":  true
+                                        },
+                                        {
+                                            "node_id":  "retrieve",
+                                            "handler_id":  "handler.retrieve",
+                                            "required":  true
+                                        },
+                                        {
+                                            "node_id":  "respond",
+                                            "handler_id":  "handler.respond",
+                                            "required":  true
+                                        }
+                                    ],
+                  "edges":  [
+                                {
+                                    "from":  "plan",
+                                    "to":  "retrieve"
+                                },
+                                {
+                                    "from":  "retrieve",
+                                    "to":  "respond"
+                                }
+                            ],
+                  "fallback_edges":  [
+                                         {
+                                             "from":  "retrieve",
+                                             "to":  "respond"
+                                         }
+                                     ]
+              },
+    "dependency_statuses":  {
+                                "retrieve":  {
+                                                 "available":  false,
+                                                 "detail":  "retrieval backend unavailable"
+                                             }
+                            },
+    "expected_reason_code":  "ORCH_DEPENDENCY_UNAVAILABLE"
 }

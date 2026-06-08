@@ -1,22 +1,22 @@
-{
-  "env": {
-    "Natsume_ENV": "prod",
-    "HOST_LLM_PROVIDER": "openai",
-    "HOST_COLD_START_ALLOWED": "false",
-    "OPENAI_API_KEY_REF": "sec://openai/natsu-node-01"
-  },
-  "profiles": [
-    {
-      "provider": "openai",
-      "node_id": "natsu-node-01",
-      "scope": "host.embedding",
-      "secret_ref": "sec://openai/natsu-node-01",
-      "rotation_epoch": 20270101,
-      "status": "active"
-    }
-  ],
-  "secret_store": {
-    "sec://openai/natsu-node-01": "sk-runtime-demo-value"
-  },
-  "expected_reason_code": "KEY_PROFILE_SCOPE_INVALID"
+﻿{
+    "env":  {
+                "Natsume_ENV":  "prod",
+                "HOST_LLM_PROVIDER":  "openai",
+                "HOST_COLD_START_ALLOWED":  "false",
+                "OPENAI_API_KEY_REF":  "sec://openai/natsu-node-01"
+            },
+    "profiles":  [
+                     {
+                         "provider":  "openai",
+                         "node_id":  "natsu-node-01",
+                         "scope":  "host.embedding",
+                         "secret_ref":  "sec://openai/natsu-node-01",
+                         "rotation_epoch":  20270101,
+                         "status":  "active"
+                     }
+                 ],
+    "secret_store":  {
+                         "sec://openai/natsu-node-01":  "sk-runtime-demo-value"
+                     },
+    "expected_reason_code":  "KEY_PROFILE_SCOPE_INVALID"
 }

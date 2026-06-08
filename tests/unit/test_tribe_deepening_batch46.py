@@ -418,8 +418,9 @@ def test_t356_day_phase_triggers_reward():
 
 # ── T-357：DefaultModeAgent 高连续性时联动 PainRewardAgent.record_reward() ──
 
-def test_t357_high_continuity_triggers_reward():
+def test_t357_high_continuity_triggers_reward(monkeypatch):
     """T-357：连续性分数 >= 0.70 时，DefaultModeAgent 应联动 PainRewardAgent.record_reward()。"""
+    monkeypatch.setenv("HOST_BACKGROUND_TASKS_ENABLED", "true")
     from host_brain.tribe.default_mode_agent import DefaultModeAgent
     from host_brain.tribe.tribe_state import TribeStateRegistry
 

@@ -1,11 +1,11 @@
 受众：MASTER
-标题：当前代码架构总览（2026-04-22）
+标题：当前代码架构总览（2026-06-04）
 
-版本：v2.2
-日期：2026-04-22
-定位：以当前仓库代码为准，说明运行面、入口、主链、目录和监控前端结构。若历史方案文档与本文冲突，以本文和代码为准。
+版本：v3.2
+日期：2026-06-05
+定位：以当前仓库代码为唯一真源，描述运行面、入口、主链、目录与监控前端结构。若历史方案文档与本文冲突，以本文与代码为准。
 
-# 当前代码架构总览（2026-04-22）
+# 当前代码架构总览（2026-06-04）
 
 ## 0. 快速导航
 
@@ -13,298 +13,372 @@
 - 核心模块详解：`docs/50_project/arch/CORE_MODULES_DETAILED_REFERENCE.md`
 - 数据流补充：`docs/50_project/arch/dataflow_report.md`
 - 前端主体化方案：`docs/50_project/arch/DIGITAL_LIFE_BODY_FRONTEND_ARCHITECTURE_20260419.md`
+- Desktop Pet 契约：`docs/30_devspec/desktop_pet_runtime.md`
+- MateEngine Bridge 契约：`docs/30_devspec/mateengine_bridge.md`
+- 历史架构快照：`docs/_history/2026-04-22_arch_snapshot/`
+
+## 0.1 Normal Chat 主链记忆（高优先级，2026-05-30 续期）
+
+这条记录是后续 normal chat 重构的**主线约束**。若历史方案、旧链文档或局部测试与本节冲突，以本节为准。
+
+- 旧 `prompt_builder` 主链是「完整能力库」，**不是**当前 normal chat 文本质量阶段的 live 主链。
+- 当前 live 主链是 **SurfaceMainChain**：
+  `input → SurfaceContextPacket → SurfacePacketCompiler → SurfaceRuntime → TextQualityGate/Scorer → ReplyEnvelope`。
+- 文本质量未过关前，不再继续把旧链能力模块塞回 normal chat live path。
+- 旧链能力（reply_plan、validator、fallback、fastpath、transport ack、thread resolver、cache、memory）只能向 SurfaceMainChain 提供 `facts / state / memory / perception / performance / media action`，不能写最终人格回复。
+- normal chat 最终文本作者**只能**是 `SurfaceMainChain`；媒体场景（图片、贴纸、表情包）的最终作者只能是结构化 reaction/media selector（`reply_modality_router.py`）。
+- 任何模块若导致文本质量下降，只能保留在实验链或非聊天任务链，不进入 normal chat 主线。
+- 子代理（sub-agent）回复必要时绕过 surface chain，但仍受 `surface_reply_postprocessor` 的 airlock 净化与 envelope 包装。
 
 ## 1. 代码证据入口
 
-以下文件构成当前代码架构的直接证据入口：
+以下文件构成当前代码架构的**直接证据入口**，文档表述若与这些文件不符，以代码为准：
 
-- `host_brain/__main__.py`
-- `host_brain/obs_main.py`
-- `edge_client/__main__.py`
-- `host_brain/app/fastapi_app.py`
-- `host_brain/app/obs_fastapi_app.py`
-- `edge_client/app/fastapi_app.py`
-- `host_brain/app/chat_handler.py`
-- `host_brain/app/cortex_orchestrator.py`
-- `host_brain/app/input_routes.py`
-- `host_brain/app/executive_runtime.py`
-- `host_brain/app/executive_runtime_core.py`
-- `host_brain/app/chat_agent.py`
-- `host_brain/app/web_ui.py`
-- `host_brain/tribe/registry.py`
-- `edge_client/gateway/server.py`
-- `edge_client/gateway/router.py`
+进程入口：
+- `host_brain/__main__.py` — Host Main 进程入口
+- `host_brain/obs_main.py` — Observability 后端进程入口
+- `edge_client/__main__.py` — Edge RPC 进程入口
+- `edge_client/gateway/bootstrap.py` — Unified Message Gateway 进程入口
+- `desktop_pet/main.cjs` — Electron + Live2D 本地桌宠进程入口
+
+Host Main FastAPI 装配：
+- `host_brain/app/asgi.py` — ASGI 入口与 `app = create_app()`
+- `host_brain/app/app_factory.py` — `create_host_fastapi_app()`
+- `host_brain/app/router_registry.py` — 注册全部 Host Main 路由
+- `host_brain/app/mateengine_routes.py` — `/v1/mateengine/*` Host 路由
+- `host_brain/channels/mateengine.py` — MateEngine UDP signal / HTTP bridge 通道
+
+Chat 主链与编排：
+- `host_brain/app/chat_routes.py` — `/v1/chat` 鉴权 / immune gate 入口
+- `host_brain/app/chat_handler.py` — `handle_chat` 与统一 SSE 生成器
+- `host_brain/app/cortex_orchestrator.py` — Cortex 编排入口（薄壳）
+- `host_brain/app/agent_runtime_shared.py` — 编排与回流主体（巨型实现层）
+- `host_brain/app/executive_router.py` / `executive_runtime.py` / `executive_runtime_core.py`
+- `host_brain/app/surface_reply_runtime.py`、`surface_reply_preprocessor.py`、`surface_reply_postprocessor.py`、`surface_main_chain.py`
+- `host_brain/app/surface_main_chain_adapter.py` — Surface 主链 SSE 适配器
+- `host_brain/persona/surface_main_chain.py` — Surface 主链 facade
+- `host_brain/persona/surface_runtime.py`、`surface_packet_compiler.py`、`isolated_surface_harness.py`
+
+输入入口：
+- `host_brain/app/input_routes.py` — `/v1/host/input`（Gateway / ASR 归一化输入）
+- `host_brain/app/edge_event_routes.py` — `/v1/edge/events`
+
+观测入口：
+- `host_brain/app/obs_fastapi_app.py` — 独立 Observability App
+- `host_brain/app/obs_routes_*.py` — `/obs/*` 路由族
+
+Tribe / 23 个器官族：
+- `host_brain/tribe/registry.py` — `_DEFAULT_FAMILY_SPECS` 23 项
+- `host_brain/tribe/__init__.py` — 23 个 agent 类与单例 getter
+
+Monitor UI：
 - `host_brain/app/monitor_ui/src/App.jsx`
 - `host_brain/app/monitor_ui/src/components/Layout.jsx`
+- `host_brain/app/monitor_ui/src/routes/routeLoaders.js`
+- `host_brain/app/monitor_ui/src/components/AvatarStateCard.jsx`
 
 ## 2. 当前运行面
 
 | 运行面 | 入口文件 | 默认端口 | 当前职责 |
 |---|---|---:|---|
-| Host Main | `host_brain/__main__.py` | 8000 | 主聊天入口、治理、兼容观测 API、静态面板入口 |
-| Observability Backend | `host_brain/obs_main.py` | 18082 | 独立观测后端，承接重型监控查询和预热缓存 |
-| Edge RPC | `edge_client/__main__.py` | 17800 | TTS、VTS、barge-in、截图、自动化、视觉定位、主动推送、fallback、微信查询等能力入口 |
+| Host Main | `host_brain/__main__.py`（→ `host_brain.app.asgi:app`） | 8000 | 主聊天入口、Tribe / 调度 / Tool / Bond / Canon / Prompt / Internal / Health / Input 等业务路由，兼容 `/obs/*` |
+| Observability Backend | `host_brain/obs_main.py`（→ `host_brain.app.obs_fastapi_app:app`） | 18082 | 独立观测后端，承接重型监控查询、Monitor UI Web 资源、`/api/ui/*` 与 `/obs/*` |
+| Edge RPC | `edge_client/__main__.py` | 17800 | TTS、ASR、VTS/VRM、avatar state、desktop pet 转发、barge-in、截图、自动化、视觉定位、主动推送、fallback、微信查询等能力入口 |
 | Unified Message Gateway | `edge_client/gateway/bootstrap.py` | 19000 | 外部平台消息接入与回推 |
 | Monitor UI Source | `host_brain/app/monitor_ui/` | - | React 监控前端源码 |
-| Monitor UI Static | `host_brain/app/static/monitor/` | - | 构建产物，由 Host Main 静态托管 |
+| Monitor UI Static | `host_brain/app/static/monitor/` | - | 构建产物，由 Observability Backend 静态托管（也支持 Host Main fallback） |
+| Desktop Pet | `desktop_pet/main.cjs` | 18788 | Electron 透明本地桌宠窗口，直接渲染 Live2D 并暴露 `/health`、`/action` |
+| MateEngine Bridge | `host_brain/channels/mateengine.py` + `host_brain/app/mateengine_routes.py` | 32145 / 18770 | Host 到 MateEngine 的本地表现层桥，支持 signal、say、state、pose、mouth、gesture/action sequence |
 
 补充说明：
 
-- Host Main 仍然挂载了一套 `/obs/*` 路由，主要用于兼容和本地一体化运行。
-- `host_brain/app/fastapi_app.py` 里已经有可选的重定向逻辑，可以把 `/obs/*` 和 `/monitor/*` 流量导到独立后端或代理。
+- Host Main 仍保留 `/obs/*` 兼容入口（位于 `obs_routes_*.py` 的内嵌路由），主要用于本地一体化运行排障。
+- `host_brain/app/asgi.py + app_factory.py + router_registry.py` 三件套替代了旧的 `fastapi_app.py`（Host 端旧文件已删除；obs 端 `obs_fastapi_app.py` 仍保留，因为 obs 后端是独立进程）。
 - Observability Backend 启动时会预热 `runtime snapshot`、`trace feed`、`insights summary`、`digital-life overview`、`life-body` 五类缓存。
+- Desktop Pet 与 MateEngine 都是本地外显面，不是记忆、人格策略或审计事实来源；Host 仍是决策与事实主权域。
 
 ## 3. 代码目录主干
 
 ```text
 Natsume_Ai/
-├─ host_brain/
+├─ host_brain/                 # Host 主脑
+│  ├─ __main__.py              # Host Main 进程入口
+│  ├─ obs_main.py              # Observability 后端进程入口
 │  ├─ app/                     # FastAPI、聊天运行时、obs 路由、监控前端源码
-│  ├─ tribe/                   # Tribe family、事件总线、handoff、agent 注册
-│  ├─ memory/ retrieval/ bond/ # 记忆、检索、关系系统
-│  ├─ observability/           # 可观测性聚合与指标
-│  ├─ scheduler/               # 调度器
-│  ├─ skills/ tools/           # 技能系统与工具系统
-│  ├─ channels/                # Host ↔ Edge 通道客户端
-│  └─ persona/                 # 人格、内在世界、自我模型等
-├─ edge_client/
-│  ├─ app/                     # Edge FastAPI RPC 网关
-│  ├─ runtime/                 # EdgeRuntime 装配
-│  ├─ gateway/                 # Unified Message Gateway
-│  ├─ actuators/               # TTS / VTS / playback
-│  ├─ services/                # 微信数据库与 watcher 等本地服务
-│  └─ senses/                  # ASR / fallback 感知
-├─ configs/                    # model plane、deploy、release、secret 模板
-├─ docs/                       # 文档体系
-├─ scripts/runtime/            # 启停脚本
-├─ tests/                      # unit / integration / fixtures
-└─ tools/                      # 诊断、回放、静态扫描、文档门禁
+│  │  ├─ asgi.py / app_factory.py / router_registry.py   # Host Main FastAPI 装配
+│  │  ├─ chat_routes.py / chat_handler.py                # /v1/chat 入口
+│  │  ├─ surface_reply_runtime.py / surface_reply_preprocessor.py /
+│  │  │   surface_reply_postprocessor.py / surface_main_chain.py
+│  │  ├─ surface_main_chain_adapter.py / surface_context_packet.py /
+│  │  │   surface_emotion_bond_flow.py
+│  │  ├─ cortex_orchestrator.py / executive_*.py /
+│  │  │   agent_runtime_shared.py（编排实现主体）
+│  │  ├─ obs_*.py             # 内嵌 /obs/* 路由（Host 兼容 + Obs 后端共用）
+│  │  ├─ obs_fastapi_app.py   # Observability 后端 FastAPI app
+│  │  ├─ mateengine_routes.py # /v1/mateengine/* 本地桌宠表现层路由
+│  │  ├─ monitor_ui/          # React 前端源码（4 大导航 + 30+ 页面）
+│  │  └─ static/monitor/      # 构建产物
+│  ├─ tribe/                  # 23 个器官族 agent + 事件总线 + 注册表 + handoff
+│  ├─ persona/                # Surface 主链全家桶 + 情绪/人格/沉默/孤独/成长
+│  │  ├─ surface_main_chain.py / surface_runtime.py /
+│  │  │   surface_packet_compiler.py / surface_memory_recall.py /
+│  │  │   surface_affect_control.py / surface_influence_packet.py /
+│  │  │   surface_organ_influence.py / surface_original_quote_bank.py /
+│  │  │   surface_scene_quality_pack.py / surface_low_info_guidance.py
+│  │  ├─ isolated_surface_harness.py / isolated_surface_continuity.py
+│  │  ├─ inner_world.py / inner_activity_agent.py / offline_continuity.py
+│  │  ├─ inner_monologue.py / motive_engine.py
+│  │  ├─ text_quality_gate.py / galgame_taste_guard.py
+│  │  ├─ emotional_silence.py / emotional_proactive.py /
+│  │  │   evolution_orchestrator.py / interaction_pattern_analyzer.py
+│  │  └─ galgame_text_contract.py / galgame_text_scorer.py / sample_guided_text_scorer.py
+│  ├─ memory/                 # 记忆 SSOT
+│  │  ├─ life_memory.py（LifeMemoryStore，SQLite-backed life episodes）
+│  │  ├─ life_memory_query.py / long_term_distiller.py / distillation.py
+│  │  ├─ episodic.py / episodic_memory_graph.py / chroma_client.py
+│  │  ├─ canon_*.py（人物/世界/风格 canon 三件套）
+│  │  └─ context_compressor.py / consolidation_trigger.py / memory_worth_evaluator.py
+│  ├─ retrieval/              # 召回融合层
+│  │  ├─ recall_fusion.py（RecallFusionServiceContract）
+│  │  ├─ recall_fusion_stores.py / recall_fusion_config.py
+│  │  ├─ full_text_searcher.py（FTS5 混合检索）
+│  │  └─ hybrid_fusion.py / audit_preview.py / recall_schemas.py
+│  ├─ bio_ops/                # Codex Bio-Operations Layer（proposal-only）
+│  │  ├─ adoption.py / capabilities.py / contracts.py
+│  │  ├─ daily_cycle.py / owner_inbox.py / owner_consumer.py
+│  │  ├─ runtime_trace.py / scheduler.py / workflow.py / safety.py
+│  ├─ codex_runtime/          # WorkOrder-first 执行面
+│  │  ├─ executor.py / production_executor.py / production_studio.py
+│  │  ├─ work_order.py / result_contract.py / verification_policy.py
+│  │  ├─ studios/             # code / finance / research / skill_forge
+│  │  ├─ lightnovel_deep_reviewer.py / lightnovel_epub_builder.py /
+│  │  │   browser_researcher.py / generic_evidence_reviewer.py
+│  ├─ security_immune/        # 授权网络防御免疫层
+│  │  ├─ agent.py / policy.py / actions.py / models.py
+│  │  ├─ providers/ / evidence.py / local_sensor.py / verdict.py
+│  ├─ bond/                   # Bond 关系动力（Stage / 用户身份）
+│  ├─ canon/                  # 人物 / 世界 / 风格 canon
+│  ├─ governor/ scheduler/    # 治理与调度
+│  ├─ observability/          # 观测聚合与查询
+│  ├─ conversation/ core/ audit/ release/ tools/ skills/ mcp/
+│  ├─ channels/
+│  │  └─ mateengine.py       # MateEngine UDP signal / HTTP bridge 通道
+│  ├─ integrations/ reasoning/ runtime/ lsp/ evolution_lab/
+│  ├─ immune_memory/ organ_ops/ airlock/
+│  └─ app/
+│     ├─ handlers/            # 9 个 Agent handler（chat/emotion/intent/judge/repair/retrieval/supervisor/translate）
+│     ├─ context/             # 21 个上下文模块（interaction/dialogue/drive/affect/soul/topic/persona_expression 等）
+│     ├─ agents/              # 4 个 Agent 基础设施（contract/registry/react_loop/tool_registry）
+│     ├─ memory/              # 5 个 App 层记忆模块（state_arbiter/memory_guard/distillation_engine/episodic_store）
+│     ├─ automation/          # 3 个自动化模块（task_scheduler/scheduler_routes/host_desktop）
+│     ├─ vision/              # 5 个视觉模块（action_planner/agent_loop/clawdbot_protocol/ui_assertion/edge_rpc_client）
+│     ├─ llm/                 # 模型路由矩阵（routing_matrix）
+│     ├─ schemas/             # 核心数据结构（agent_envelope/memory_types/routing_types）
+│     ├─ settings/            # 7 个 Settings 模块（base/core/llm/observability/tribe/capability_forge）
+│     ├─ recall/              # 语义召回（semantic_recall）
+│     └─ graph/               # 图类型定义（chain_types）
+├─ edge_client/                # Edge RPC、语音执行、网关、平台适配器
+│  ├─ __main__.py / app/ runtime/ senses/ actuators/ rpc/
+│  ├─ runtime/avatar_behavior.py / voice_pipeline.py  # avatar 状态与语音/口型行为链
+│  ├─ actuators/fanout_avatar_driver.py / vts_driver.py / vrm_bridge_driver.py
+│  ├─ gateway/                # Unified Message Gateway
+│  │  ├─ bootstrap.py / server.py / router.py / normalizer.py /
+│  │  │   humanize_sender.py / models.py
+│  │  ├─ adapters/            # wechat / qq / feishu / wecom / telegram / line
+│  │  └─ media/
+│  ├─ channels/               # 通道基类与 input reporter
+│  ├─ tribe/                  # 边缘侧 peripheral / somatic agent
+│  └─ security_probe/         # 边缘侧安全采集
+├─ desktop_pet/                # Electron + PixiJS + Live2D 透明本地桌宠
+├─ integrations/mateengine/    # MateEngine patcher / bridge plugin 集成资产
+├─ configs/                   # 模型 / 部署 / 发布 / 密钥模板
+├─ data/                      # 风格库 / 样本库（surface_scene_quality_pack 等）
+├─ docs/                      # 白皮书 / PRD / DevSpec / Project / Trace
+├─ scripts/runtime/           # Host 侧启动 / 停止 / 运维脚本
+├─ tests/                     # unit / integration / acceptance / fixtures
+└─ tools/                     # 诊断 / 回放 / 静态扫描 / 文档门禁
 ```
 
-## 4. Host Main 路由面
+## 4. Host Main FastAPI 装配（2026-05-30 关键变化）
 
-`host_brain/app/fastapi_app.py` 当前实际挂载的主要路由面如下：
+旧的单文件 `host_brain/app/fastapi_app.py` 已被三件套替换，进程内组装顺序：
 
-| 前缀 / 入口 | 来源文件 | 作用 |
+```
+host_brain/__main__.py
+  → 加载 .env / 启动 startup-check
+  → uvicorn.run("host_brain.app.asgi:app")
+host_brain/app/asgi.py
+  → app = create_app() → host_brain/app/app_factory.create_host_fastapi_app(...)
+host_brain/app/app_factory.py
+  → 注入 lifespan / metrics / 各 dependency provider
+  → register_host_routers(app)（来自 router_registry）
+  → configure_http_middleware(app)
+  → 全局异常 handler、request-id 中间件
+  → 显式注册 /v1/chat、/v1/edge/events、/metrics、/
+host_brain/app/router_registry.py
+  → wire_route_providers(...)（注入 ledger/tool/bond/scheduler 等）
+  → 顺序 include_router：
+       canon_router, scheduler_router, host_scheduler_router,
+       tool_router, tool_kits_alias_router, prompt_config_router,
+       bond_router, agent_router, input_router,
+       internal_tribe_router, internal_codex_router,
+       internal_security_immune_router, mateengine_router, health_router
+```
+
+## 5. 主链 SSE 路径（normal chat）
+
+```mermaid
+graph TD
+    U["用户 / Gateway / Edge"] --> CR["chat_routes.handle_v1_chat_route"]
+    CR --> IMG["chat_immune_gate.evaluate_immune_gate_for_chat"]
+    IMG --> CH["chat_handler.handle_chat"]
+    CH --> SSEU["_unified_chat_sse_generator"]
+    SSEU --> THAL["thalamus_agent.classify_and_compile_intent_draft"]
+    SSEU --> GOV["Governor 鉴权（_evaluate_governor_with_timing）"]
+    SSEU --> CO["cortex_orchestrator_sse_generator"]
+    CO --> ARS["agent_runtime_shared._cortex_orchestrator_sse_generator_impl"]
+    ARS --> ER["executive_router → executive_runtime → executive_runtime_core"]
+    ER --> CAG["surface_reply_runtime.surface_reply_sse_generator"]
+    CAG --> SMC["surface_main_chain_adapter.surface_main_chain_sse_generator"]
+    SMC --> COMP["persona.surface_packet_compiler.compile_surface_input"]
+    COMP --> RUN["persona.surface_runtime.SurfaceRuntime"]
+    RUN --> ENV["app.reply_envelope（COMMIT 包装）"]
+    ENV --> POST["surface_reply_postprocessor（airlock + 异步副作用）"]
+    POST --> OUT["SSE token 流回客户端"]
+
+    SSEU -. record_user_turn .-> CONV["conversation/writer"]
+    CAG -. retrieval .-> RF["retrieval.recall_fusion / persona.surface_memory_recall"]
+    RF --> LM["memory.life_memory.LifeMemoryStore"]
+```
+
+要点：
+
+- **SSE 三阶段**：`PRESENCE → COMMIT → POST`。前端只渲染 `PRESENCE`/`COMMIT`，后处理在 `POST` 静默落地。
+- **Surface 主链**默认对所有 normal chat 启用，由 `surface_main_chain_required()` 与 `surface_main_chain_enabled()` 二重判断；sub-agent 场景可绕过。
+- **Immune Gate** 在路由层执行（`chat_routes.py`），决定是否拒绝或仅 report。
+- **Thalamus** 统一收口 canonical intent（route=chat/delegate/skill/plan）。
+- **Governor** 鉴权使用线程池 (`HOST_GOVERNOR_EXECUTOR_WORKERS`)。
+
+## 6. 路由表（Host Main）
+
+| Prefix | Router 来源 | 主要端点 |
 |---|---|---|
-| `/v1/chat` | `fastapi_app.py` -> `chat_handler.py` | HTTP 聊天入口；先做 immune gate / fastpath 判定，再进入统一 SSE 编排 |
-| `/v1/edge/events` | `fastapi_app.py` -> `system_handler.py` | HTTP 路由接收 Edge 批量事件，再委托 `receive_edge_events_response()` 处理 |
-| `/v1/agent/*` | `agent_routes.py` | 视觉/自动化 Agent Loop |
-| `/v1/host/input` | `input_routes.py` | ASR / Gateway 归一化输入回流 |
-| `/canon/*` | `canon_routes.py` | Canon 提案、文档和审核 |
-| `/scheduler/*` | `scheduler_routes.py` | 调度器任务管理 |
-| `/host-scheduler/*` | `app/automation/scheduler_routes.py` | HostTaskScheduler 运行时管理 |
-| `/tools/*` + `/tool_kits` | `tool_routes.py` | 工具元数据、执行、技能安装/修复 |
-| `/bond/*` | `bond_routes.py` | Bond 阶段与关系接口 |
-| `/prompt-config/*` | `prompt_config_routes.py` | Prompt 模板查看、修改、重载 |
-| `/internal/*` | `internal_tribe_routes.py` | Host/Edge 内部桥接 |
-| `/internal/codex/*` | `internal_codex_routes.py` | Codex 内部管理接口 |
-| `/health` `/ready` `/startup` | `health_routes.py` | 健康、就绪、启动报告 |
-| `/obs/*` | `obs_routes*.py` | 兼容挂载的监控 API |
-| `/api/ui/*` | `web_ui.py` | 监控 UI 所需聚合/搜索辅助 API |
-| `/panel` `/monitor/*` `/static/monitor/*` | `fastapi_app.py` | 监控面板入口和静态资源 |
+| `/v1/chat` | `app_factory` 直接注册 | POST 聊天入口（SSE） |
+| `/v1/edge/events` | `app_factory` 直接注册 | POST Edge 事件回流 |
+| `/v1/host/input` | `input_routes` | POST Gateway/ASR 归一化输入 |
+| `/v1/agent/*` | `agent_routes` | Agent loop 操作 |
+| `/v1/mateengine/*` | `mateengine_routes` | MateEngine capabilities / health / signal / say / action |
+| `/canon/*` | `canon_routes` | Canon 提案、文档、记录 |
+| `/bond/*` | `bond_routes` | Bond stage、interaction 状态 |
+| `/scheduler/*` | `scheduler.scheduler_routes` | 持久化调度器 |
+| `/host-scheduler/*` | `app.automation.scheduler_routes` | Automation 内嵌调度 |
+| `/tools/*` + 别名 | `tool_routes` | Tool catalog / broker / kits |
+| `/prompt-config/*` | `prompt_config_routes` | 提示词模板治理 |
+| `/internal/tribe_*`, `/internal/llm/gemini_key`, `/internal/edge_command/*`, `/internal/immune/reset` | `internal_tribe_routes` | 内部 tribe 状态 / 事件 / immune reset |
+| `/internal/codex/*` | `internal_codex_routes` | Codex Runtime work-orders、jobs、immune dispatch |
+| `/internal/security/*` | `internal_security_immune_routes` | Security immune runtime / hunt / probe |
+| `/health` `/ready` `/startup` `/health/mcp` `/health/canon_sync` `/health/env-readiness` `/obs/metrics` | `health_routes` | 健康与诊断 |
+| `/metrics` `/` `/docs` `/redoc` | `app_factory` 直接注册 | Prometheus / 根重定向 |
 
-## 5. Observability 与 Monitor UI
+注：`/obs/*` 在 Host Main 上以兼容方式存在（部分路由），完整 `/obs/*` 与 `/api/ui/*` 主战场在 Observability Backend。
 
-### 5.1 独立观测后端
+Edge RPC 主要能力入口（`edge_client/app/fastapi_app.py`）：
 
-`host_brain/app/obs_fastapi_app.py` 当前承载：
+- `GET /v1/edge/health`
+- `GET /v1/edge/avatar_state`
+- `POST /v1/edge/speak`
+- `POST /v1/edge/barge_in`
+- `POST /v1/edge/asr`
+- `POST /v1/edge/vts`
+- `POST /v1/edge/desktop_pet`
+- `POST /v1/edge/fallback/*`
+- `POST /v1/edge/screenshot`
+- `POST /v1/edge/automate`
+- `POST /v1/edge/visual_locate`
+- `POST /v1/edge/proactive_push`
+- `GET /v1/edge/proactive_messages`
+- `POST /v1/edge/wx/*`
 
-- `/api/ui/*`
-- `/health`
-- `/obs/metrics`
-- `/obs/services/health`
-- `/obs/llm/nodes`
-- `/obs/organ-tribe/status`
-- `/obs/sessions`
-- `/obs/trace/{request_id}`
-- `/obs/trace-feed/snapshot`
-- `/obs/trace-feed/live`
-- `/obs/tribe/events`
-- `/obs/graph/schema`
-- `/obs/insights/summary-snapshot`
-- `/obs/digital-life/overview-snapshot`
-- `/obs/life-body`
-- `/obs/life-timeline`
-- `/obs/pathologies`
+## 7. Observability Backend 路由表
 
-这说明当前观测后端已经从“单一统计页 API”演进到“生命体总览 + life body / timeline / pathologies + trace feed + 洞察摘要 + UI 聚合搜索”的多视图后端。
+| Prefix | Router 来源 | 主要端点 |
+|---|---|---|
+| `/api/ui/*` | `web_ui` | Monitor UI 配置/状态/资源 |
+| `/obs/*` | `obs_routes`（含 health/sessions/trace/metrics 子路由 include） | 主观测 API |
+| `/obs/*` | `obs_routes_health` / `obs_routes_trace` / `obs_routes_summary` / `obs_routes_life_body` / `obs_routes_digital_life_soak` | health 检查、trace 落盘、digital life overview、life body、24h soak |
 
-### 5.2 Monitor UI 当前导航
+预热缓存：digital_life_overview / insights_summary / life_body 在 lifespan 启动时同步预热并周期刷新。
 
-`host_brain/app/monitor_ui/src/App.jsx` 和 `Layout.jsx` 显示，前端当前分为 4 组导航：
+## 8. Tribe 23 个器官族（registry 真源）
 
-| 导航组 | 页面 |
-|---|---|
-| 数字生命体 | 总览、生命时间轴、病灶中心、情绪、关系、记忆、存在态、内在世界、回复策略、自我模型 |
-| 运营 | 提示词、人格文案、系统底座、设定管理 |
-| 器官级观测 | 生命体征、神经会话、神经链路、代谢指标、皮层洞察、神经调试、免疫告警、生理日志 |
-| 外周执行 | 感官网关、行为技能、执行工具、节律调度、反射回路 |
+代码事实（`host_brain/tribe/registry.py:_DEFAULT_FAMILY_SPECS`）：
 
-技术栈来自 `host_brain/app/monitor_ui/package.json`：
-
-- React 18
-- React Router
-- Tailwind CSS
-- ECharts
-- XYFlow
-- Zustand
-
-### 5.3 当前 LLM 恢复落点
-
-截至 2026-04-22，当前代码已经把“全认知能力 LLM 恢复”中的共享底座落到运行面：
-
-- 共享池入口：`host_brain/integrations/llm_helpers.py` + `host_brain/integrations/llm_gateway.py::complete_with_pool()`
-- 当前 tier：A/B/C/D 四档，Gemini 与 MiniMax 组成主备候选池
-- 审计面：`llm_pool_call_log` + `LLM_POOL_EXHAUSTED` 已落库到 ledger
-- 主链接池：`chat_agent.py`、`thalamus_agent.py`、`multimodal_observer_backends.py`、`emotion_llm_inference.py`
-- 认知接池：`reflection_chain.py`、`self_reflection.py`、`evolution_desire_engine.py`、`bond_narrative.py`、`style_distiller.py`
-- 记忆层补点：`hippocampus_agent.py` recall 后联想摘要、`memory/distillation.py`、`long_term_distiller.py`
-- 调度治理：`scheduler.py` 已对后台 LLM 任务增加 `focus / gaming / sleep` 模式 allowlist 和 `LLM_POOL_EXHAUSTED -> SKIPPED` 收口
-
-## 6. 聊天主链
-
-当前 `/v1/chat` 的常规主链可以概括为：
-
-```text
-POST /v1/chat
-  -> fastapi_app.chat()
-  -> _evaluate_immune_gate_for_chat() / _schedule_chat_immune_gate_event()
-  -> chat_handler.handle_chat()
-  -> _unified_chat_sse_generator()
-  -> thalamus_agent.classify_and_compile_intent_draft()
-  -> Governor evaluate_intent()
-  -> cortex_orchestrator_sse_generator()
-  -> executive_router / executive_runtime / executive_runtime_core
-  -> chat_agent_sse_generator()（需要人格渲染时）
-  -> post process（记忆、Bond、VTS、TTS、观测）
+```
+cortex, thalamus, ans, hippocampus, limbic, prefrontal,
+social_brain, endocrine, immune, pain_reward, language,
+somatic, peripheral, circadian, proprioception,
+initiative_governor, default_mode, mirror_neuron,
+interoception, motor_cortex, cerebellum, glymphatic, vestibular
 ```
 
-补充说明：
+23 个 family。每个 family 至少绑定一个默认 agent（`HostTribeRegistry._bootstrap_default_agents`）。
 
-- 若 immune gate 决策为 `BLOCK`，会在 `fastapi_app.chat()` 直接返回单个 `COMMIT(REJECT)` SSE
-- 若命中 `phatic_fastpath`，也会在 HTTP 路由层直接返回 SSE，不再进入 `chat_handler.handle_chat()`
+family 升级状态：
 
-关键事实：
+- 全部 23 个 family 已完成 P0~P4 批次的"A 级升级"；
+- 历史的灰度开关（feat-flag）已在 P0~P4 各批次中**全部删除**；
+- 升级总览见 `docs/35_quality/ORGAN_TRIBE_UPGRADE_PLAN.md`（已标记完成）。
 
-1. `chat_handler.py` 已经不是旧式“单文件大链路”，而是主入口薄层。
-2. 意图收口由 `thalamus_agent` 负责。
-3. 主编排收口在 `cortex_orchestrator`。
-4. 真正的执行分派和 direct route/skill/delegate/chat 处理落在 `executive_runtime.py` 与 `executive_runtime_core.py`。
-5. `chat_agent.py` 当前是“人格渲染与流式说话模块”，不再承担总路由职责。
+## 9. Monitor UI 当前页面
 
-## 7. 外部输入与 Edge 回流
+Monitor UI 拆成 **4 大导航**（`Layout.jsx`）+ **30+ 个 lazy 页面**（`routeLoaders.js`）：
 
-### 7.1 外部输入回流
+**数字生命体（10 项）：** 总览 / 生命时间轴 / 病灶中心 / 情绪 / 关系 / 记忆 / 存在态 / 内在世界 / 回复策略 / 自我模型
 
-当前外部输入统一收敛到 `POST /v1/host/input`：
+**运营（4 项）：** 提示词 / 人格文案 / 系统底座 / 设定管理
 
-- ASR 文本
-- Gateway 平台消息
+**器官级观测（9 项）：** 生命体征 / 神经会话 / 神经链路 / Codex / BioOps / 代谢指标 / 皮层洞察 / 神经调试 / 免疫告警 / 生理日志
 
-其他 Edge 运行时事件（例如播放状态、资源门控、inline waiters）走 `POST /v1/edge/events`，不通过 `POST /v1/host/input`。
+**外周执行（5 项）：** 感官网关 / 行为技能 / 执行工具 / 节律调度 / 反射回路
 
-`host_brain/app/input_routes.py` 会先做输入解析和日志，再接入：
+数字生命体总览页当前还挂载 `AvatarStateCard.jsx`，用于只读展示 Edge / MateEngine / VRM 的 avatar 驱动、语音口型、安全开关与行为状态；行为按钮通过 `postAvatarBehavior` 走 Edge avatar behavior 接口。
 
-- `thalamus_agent` 意图编译
-- gateway 即时 ACK / 进度推送
-- 执行质量分析与偏航检测
-- `cortex_orchestrator` 主链
+新增专题页（vs. 2026-04-22 快照）：
 
-### 7.2 Edge RPC
+- `/codex-bio-ops` — `CodexBioOpsObservability.jsx`：BioOps & Codex Runtime 统一观测
+- `/life-timeline` — `LifeTimelinePage.jsx`：生命时间轴
+- `/pathologies` + `/pathology-detail` — 病灶中心 / 病灶详情
+- 多个旧高密度页面（Trace / Insights / Automation 等）拆分为多个 `components/<topic>/` 子组件
 
-`edge_client/app/fastapi_app.py` 当前已经不仅是 TTS 网关，还包括：
-
-- `/v1/edge/health`
-- `/v1/edge/speak`
-- `/v1/edge/barge_in`
-- `/v1/edge/vts`
-- `/v1/edge/fallback/*`
-- `/v1/edge/screenshot`
-- `/v1/edge/automate`
-- `/v1/edge/visual_locate`
-- `/v1/edge/proactive_push`
-- `/v1/edge/proactive_messages`
-- `/v1/edge/wx/*`
-- `/internal/tribe_command`
-
-补充：`/v1/edge/wechat/callback` 与 `/v1/edge/wechat/command` 在当前代码中保留兼容壳，但实现会显式返回 `legacy disabled`；平台侧入口应以 Gateway `/v1/gateway/*` 为准。
-
-这说明 Edge 侧已经同时承担：
-
-- 语音执行
-- 桌面自动化
-- 视觉定位
-- 主动消息推送
-- 微信数据查询与桥接
-
-### 7.3 Unified Message Gateway
-
-`edge_client/gateway/adapters/` 当前存在以下适配器：
-
-```text
-wechat / qq / feishu / wecom / telegram / line
-```
-
-链路为：
-
-```text
-外部平台
-  -> edge_client/gateway/server.py
-  -> GatewayRouter
-  -> Host /v1/host/input
-  -> thalamus / cortex / executive runtime
-  -> Host 回复
-  -> OutboundDispatcher
-  -> 平台适配器
-```
-
-## 8. Tribe 系统当前口径
-
-`host_brain/tribe/registry.py` 当前注册的是 `23` 个 family spec，而不是旧 README 中的 `22` 个。
-
-当前 family_id 列表如下：
-
-```text
-cortex
-thalamus
-ans
-hippocampus
-limbic
-prefrontal
-social_brain
-endocrine
-immune
-pain_reward
-language
-somatic
-peripheral
-circadian
-proprioception
-initiative_governor
-default_mode
-mirror_neuron
-interoception
-motor_cortex
-cerebellum
-glymphatic
-vestibular
-```
-
-因此，所有仍写“22 个器官族 Agent”的旧文档，都应视为历史表述。
-
-## 9. 当前阅读建议
-
-如果目标是快速理解代码，不建议从阶段性升级方案文档入手。推荐顺序是：
+## 10. 推荐阅读顺序（2026-06-04）
 
 1. `README.md`
-2. 本文
-3. `CORE_MODULES_DETAILED_REFERENCE.md`
-4. `dataflow_report.md`
-5. `DIGITAL_LIFE_BODY_FRONTEND_ARCHITECTURE_20260419.md`
+2. `docs/50_project/arch/CURRENT_CODE_ARCHITECTURE.md`（本文件）
+3. `docs/50_project/arch/CORE_MODULES_DETAILED_REFERENCE.md`
+4. `docs/50_project/arch/dataflow_report.md`
+5. `docs/50_project/arch/DIGITAL_LIFE_BODY_FRONTEND_ARCHITECTURE_20260419.md`
+6. `docs/30_devspec/desktop_pet_runtime.md`
+7. `docs/30_devspec/mateengine_bridge.md`
+8. `docs/15_theory/architecture_overview.md`
+9. `docs/60_trace/requirements_trace.md`
 
-如果目标是追某条主链，再往下看对应代码：
+## 11. 不再代表当前事实的文档
 
-- 聊天主链：`fastapi_app.py` → `chat_handler.py` → `cortex_orchestrator.py` → `executive_runtime_core.py` → `chat_agent.py`
-- 观测后端：`obs_fastapi_app.py` → `obs_routes_*.py`
-- Edge/网关：`edge_client/app/fastapi_app.py` → `edge_client/runtime/bootstrap.py` → `edge_client/gateway/*`
+下列文档已被重写或归档；如发现冲突以新版与代码为准：
+
+- 旧版 `CURRENT_CODE_ARCHITECTURE.md`（v2.2，2026-04-22）→ `docs/_history/2026-04-22_arch_snapshot/`
+- 旧版 `CORE_MODULES_DETAILED_REFERENCE.md`（v2.1，2026-04-19）→ 同上
+- 旧版 `dataflow_report.md` → 同上
+- 任何提到 `host_brain/app/fastapi_app.py` 作为 Host Main 入口的文档段落（已被 `asgi.py + app_factory.py` 替代）
+- 任何把 `prompt_builder` 作为"normal chat 主作者"的描述（已转为 SurfaceMainChain）
+- 任何把"灰度开关"作为 tribe family 状态描述的章节（开关已全数删除）
+
+## 12. 关键不变量（与 0.1 一致）
+
+1. normal chat 文本最终作者只能是 `SurfaceMainChain`。
+2. 旧链能力只能注入 facts/state/memory/perception，不能写最终回复。
+3. 媒体场景（图片/贴纸/表情）的最终作者是结构化 `reply_modality_router`。
+4. 文本质量回归（A/B 不通过）的旧链能力不允许进入 normal chat live path。
+5. Observability Backend 的预热失败不阻断 Host Main 启动；反之亦然。
+6. Host Main 与 Obs Backend 是两个独立 ASGI app，不能彼此 import 路由实现细节。
+7. Desktop Pet / MateEngine / VTS / VRM 都是外显执行面，不是记忆、人格策略或审计事实来源。

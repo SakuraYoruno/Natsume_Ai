@@ -51,8 +51,8 @@ def test_coerce_reply_plan_reads_nested_contract_and_trajectory() -> None:
                 "forbidden_actions": ["full_identity_restate"],
                 "realization_steps": ["ack_repeat", "light_probe"],
             },
-            "response_form": "text_plus_emoji",
-            "secondary_response_form": "emoji",
+            "response_form": "text_plus_sticker",
+            "secondary_response_form": "sticker",
             "interaction_thread": {"thread_kind": "identity_loop"},
             "multimodal": {"primary_modality": "emoji"},
             "reason_tags": ["recent_identity_loop"],
@@ -64,8 +64,8 @@ def test_coerce_reply_plan_reads_nested_contract_and_trajectory() -> None:
     assert plan.tactic_family == "ack_repeat_then_light_probe"
     assert plan.tactic_variant == "confirm_part"
     assert plan.trajectory_stage == "mid_repeat"
-    assert plan.response_form == "text_plus_emoji"
-    assert plan.secondary_response_form == "emoji"
+    assert plan.response_form == "text_plus_sticker"
+    assert plan.secondary_response_form == "sticker"
     assert plan.contract == ReplyContract(
         text="短短接住，不要整段重报名字。",
         required_actions=("name_only",),
@@ -74,6 +74,18 @@ def test_coerce_reply_plan_reads_nested_contract_and_trajectory() -> None:
     )
     assert plan.interaction_thread["thread_kind"] == "identity_loop"
     assert plan.multimodal["primary_modality"] == "emoji"
+
+
+def test_coerce_reply_plan_clears_removed_emoji_output_aliases() -> None:
+    plan = coerce_reply_plan(
+        {
+            "response_form": "text_plus_emoji",
+            "secondary_response_form": "emoji",
+        }
+    )
+
+    assert plan.response_form == "text"
+    assert plan.secondary_response_form == ""
 
 
 def test_qualitative_affect_summary_covers_zh_and_ja_branches() -> None:
@@ -91,35 +103,35 @@ def test_qualitative_affect_summary_covers_zh_and_ja_branches() -> None:
 def test_qualitative_relationship_summary_softens_micro_social_and_respects_stage() -> None:
     interpretation = ConversationInterpretation(literal_topic="emoji_social_followup")
     thread = InteractionThreadState(thread_kind="image_social", open=True)
-    stranger = RelationshipStateBlock(bond_stage="STRANGER", boundary_softness=0.1)
+    familiar = RelationshipStateBlock(bond_stage="FRIEND", boundary_softness=0.1)
     friend = RelationshipStateBlock(bond_stage="FRIEND", boundary_softness=0.6)
 
     assert (
         _qualitative_relationship_summary(
-            relationship=stranger,
+            relationship=familiar,
             interpretation=interpretation,
             interaction_thread=thread,
             render_target_lang="zh",
         )
-        == "保持自然分寸，但不用刻意拉开，顺着眼前这点情绪接住就好。"
+        == "关系是熟起来的义兄妹：不用刻意拉开，轻轻回应眼前情绪。"
     )
     assert (
         _qualitative_relationship_summary(
-            relationship=stranger,
+            relationship=familiar,
             interpretation=ConversationInterpretation(literal_topic="motivation"),
             interaction_thread=InteractionThreadState(),
             render_target_lang="ja",
         )
-        == "相手との距離はまだ遠めで、馴れ馴れしくしない。"
+        == "義兄妹としてかなり馴染んでいる。軽く返していいが、言い過ぎない。"
     )
     assert (
         _qualitative_relationship_summary(
-            relationship=RelationshipStateBlock(bond_stage="ACQUAINTANCE", boundary_softness=0.2),
+            relationship=RelationshipStateBlock(bond_stage="CLOSE_FRIEND", boundary_softness=0.2),
             interpretation=ConversationInterpretation(literal_topic="greeting"),
             interaction_thread=InteractionThreadState(),
             render_target_lang="ja",
         )
-        == "距離感は保ちつつ、わざとよそよそしくしない。目の前の小さな感情を自然に受ける。"
+        == "義兄妹として馴染んでいる。距離を作りすぎず、目の前の感情へ自然に返す。"
     )
     assert (
         _qualitative_relationship_summary(
@@ -128,7 +140,7 @@ def test_qualitative_relationship_summary_softens_micro_social_and_respects_stag
             interaction_thread=InteractionThreadState(),
             render_target_lang="zh",
         )
-        == "关系稍微软一点，但别说得太近。"
+        == "关系是熟起来的义兄妹：不用刻意拉开，轻轻回应眼前情绪。"
     )
     assert (
         _qualitative_relationship_summary(
@@ -137,31 +149,60 @@ def test_qualitative_relationship_summary_softens_micro_social_and_respects_stag
             interaction_thread=InteractionThreadState(),
             render_target_lang="ja",
         )
-        == "距離は保ちつつ、自然に受ける。"
+        == "義兄妹としてかなり馴染んでいる。軽く返していいが、言い過ぎない。"
+    )
+
+
+def test_qualitative_relationship_summary_uses_vector_substage_not_only_stage() -> None:
+    ambiguous = RelationshipStateBlock(
+        bond_stage="CLOSE_FRIEND",
+        familiarity=0.70,
+        trust=0.62,
+        romantic_tension=0.52,
+        attachment_depth=0.58,
+        relationship_substage="ambiguous_affection",
+    )
+    repairing = RelationshipStateBlock(
+        bond_stage="CONFIDANT",
+        conflict_rift=0.62,
+        relationship_substage="repairing_rift",
+    )
+
+    assert "暧昧张力" in _qualitative_relationship_summary(
+        relationship=ambiguous,
+        interpretation=ConversationInterpretation(literal_topic="mood_reflection"),
+        interaction_thread=InteractionThreadState(),
+        render_target_lang="zh",
+    )
+    assert "刺しすぎず" in _qualitative_relationship_summary(
+        relationship=repairing,
+        interpretation=ConversationInterpretation(literal_topic="mood_reflection"),
+        interaction_thread=InteractionThreadState(),
+        render_target_lang="ja",
     )
 
 
 def test_decide_response_form_covers_social_and_default_modes() -> None:
-    stranger = RelationshipStateBlock(bond_stage="STRANGER")
+    familiar = RelationshipStateBlock(bond_stage="FRIEND")
 
     assert _decide_response_form(
         interpretation=ConversationInterpretation(literal_topic="emoji_social_followup"),
-        relationship_state=stranger,
+        relationship_state=familiar,
         multimodal={"primary_modality": "image"},
     ) == ("text", "", "image_social_followup", False)
     assert _decide_response_form(
         interpretation=ConversationInterpretation(literal_topic="emoji_social_reply"),
-        relationship_state=stranger,
+        relationship_state=familiar,
         multimodal={"primary_modality": "emoji"},
-    ) == ("text_plus_emoji", "emoji", "emoji_social_reply", False)
+    ) == ("sticker", "", "social_reaction", True)
     assert _decide_response_form(
         interpretation=ConversationInterpretation(literal_topic="attachment_only_no_question"),
-        relationship_state=stranger,
+        relationship_state=familiar,
         multimodal={"primary_modality": "emoji"},
-    ) == ("text_plus_emoji", "emoji", "emoji_attachment_no_question", False)
+    ) == ("sticker", "", "social_reaction", True)
     assert _decide_response_form(
         interpretation=ConversationInterpretation(literal_topic="mood_reflection"),
-        relationship_state=stranger,
+        relationship_state=familiar,
         multimodal=None,
     ) == ("text", "", "default_text", False)
 
@@ -297,9 +338,9 @@ def test_refine_multimodal_contract_covers_image_reply_followup_attachment_and_j
         render_target_lang="ja",
     )
 
-    assert "不要解说画面" in image_reply.text
+    assert "不要描述外貌" in image_reply.text
     assert "为什么会那样想" in followup.text
-    assert "不要主动开始描述画面" in attachment.text
+    assert "不要主动开始分析画面" in attachment.text
     assert ja_passthrough == base
 
 
@@ -473,7 +514,7 @@ def test_build_topic_trajectory_options_cover_multimodal_boundary_and_help_varia
 def test_build_reply_plan_from_inputs_refines_multimodal_contracts_and_japanese_relationship_copy() -> None:
     image_plan = build_reply_plan_from_inputs(
         emotion_context={"emotion_tag": "CALM"},
-        bond_summary={"stage": "STRANGER", "score": 0.12},
+        bond_summary={"stage": "FRIEND", "score": 0.12},
         conversation_interpretation={
             "literal_topic": "attachment_only_no_question",
             "interaction_move": "share_attachment",
@@ -485,7 +526,7 @@ def test_build_reply_plan_from_inputs_refines_multimodal_contracts_and_japanese_
     )
     ja_plan = build_reply_plan_from_inputs(
         emotion_context={"emotion_tag": "CALM"},
-        bond_summary={"stage": "ACQUAINTANCE", "score": 0.2},
+        bond_summary={"stage": "CLOSE_FRIEND", "score": 0.2},
         conversation_interpretation={
             "literal_topic": "greeting",
             "interaction_move": "greeting",
@@ -495,9 +536,9 @@ def test_build_reply_plan_from_inputs_refines_multimodal_contracts_and_japanese_
         render_target_lang="ja",
     )
 
-    assert "不要主动开始描述画面" in image_plan.reply_contract
+    assert "不要主动开始分析画面" in image_plan.reply_contract
     assert image_plan.contract.realization_steps
-    assert "距離感は保ちつつ" in ja_plan.relationship_summary or "距離感は保ちつつ" in _qualitative_relationship_summary(
+    assert "義兄妹" in ja_plan.relationship_summary or "義兄妹" in _qualitative_relationship_summary(
         relationship=RelationshipStateBlock(bond_stage="FRIEND", boundary_softness=0.2),
         interpretation=ConversationInterpretation(literal_topic="greeting"),
         interaction_thread=InteractionThreadState(),
@@ -507,7 +548,7 @@ def test_build_reply_plan_from_inputs_refines_multimodal_contracts_and_japanese_
 
 def test_build_reply_plan_and_candidates_cover_thread_fallback_and_plain_hold_paths() -> None:
     affect = AffectStateBlock()
-    relationship = RelationshipStateBlock(bond_stage="STRANGER")
+    relationship = RelationshipStateBlock(bond_stage="FRIEND")
     drive = DriveStateBlock(continuity_drive=0.2)
     empty_topic_ledger = TopicLedgerBlock()
     empty_tactic_ledger = TacticLedgerBlock()
@@ -556,7 +597,7 @@ def test_build_reply_plan_and_candidates_cover_thread_fallback_and_plain_hold_pa
 def test_build_reply_plan_from_inputs_covers_rejection_and_japanese_identity() -> None:
     rejection_plan = build_reply_plan_from_inputs(
         emotion_context={"emotion_tag": "CALM"},
-        bond_summary={"stage": "STRANGER"},
+        bond_summary={"stage": "FRIEND"},
         conversation_interpretation={
             "literal_topic": "rejection",
             "interaction_move": "repair_needed",
@@ -567,7 +608,7 @@ def test_build_reply_plan_from_inputs_covers_rejection_and_japanese_identity() -
     )
     ja_identity = build_reply_plan_from_inputs(
         emotion_context={"emotion_tag": "CALM"},
-        bond_summary={"stage": "STRANGER"},
+        bond_summary={"stage": "FRIEND"},
         conversation_interpretation={
             "literal_topic": "identity",
             "interaction_move": "first_ask",

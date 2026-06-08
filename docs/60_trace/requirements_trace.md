@@ -1,13 +1,23 @@
 受众：MASTER
 标题：需求可追溯性矩阵（Requirements Trace）
 
-版本：v1.6
+版本：v1.8
 
 定位：以“条目式矩阵”维护 PRD（FR）→ DevSpec（章节/契约点）→ DevTasks（TASK）→ Tests（T-xx）的覆盖关系；requirements_trace.csv 可继续承载表格视图（若未维护或滞后，以本 md 为准）。
 
 ---
+## 维护记录（2026-06-04）
+- 本次同步范围：PRD v1.6、DevSpec v1.9、ModelPlane v1.5、DevTasks v2.0 的当前代码口径校准；不新增 PRD 需求编号。
+- 代码与文档事实：`/v1/chat` 主链以 `chat_routes.py`、`chat_handler.py`、`thalamus_agent`、`Governor`、`agent_runtime_shared`、`executive_runtime_core`、`chat_agent`、`surface_main_chain_adapter` 与 `ReplyEnvelope` 为当前收口；屏幕/图像相关能力只作为高门槛观测或兼容场景，不构成默认本地界面执行；Bond 后端可为 SQLite/内存/Neo4j，不把 Neo4j 写死为唯一 SSOT。
+- 追踪结论：R-01、R-05、R-06、R-66、R-67、R-87 的描述口径已改为当前术语，覆盖编号保持不变。
+
+## 维护记录（2026-06-03）
+- 本次同步范围：CI / delivery gate / doc freshness gate 的追踪口径校准；不新增 PRD 需求编号。
+- 代码与测试事实：`.github/workflows/doc-freshness-gate.yml` 需与 Node24 actions runtime 约束一致；`tests/unit/test_ci_workflow_runtime.py` 覆盖 workflow runtime env；`tests/unit/test_codex_cli_provider.py` 覆盖 Codex app-server worker session/thread 兼容；`tests/unit/test_startup_chat_runtime_warmup.py` 覆盖启动 warmup disabled 语义；`tests/unit/test_chroma_client_embed_text.py` 覆盖 repo-local embedding model ref；`tests/integration/test_obs_routes_integration.py` 覆盖 fallback trace recall 摘要形状；`tests/contract/test_quality_contract.py` 与 `tests/contract/test_bond_static_scan_contract.py` 继续作为质量与 Bond SSOT 静态门禁。
+- 追踪结论：上述变更属于既有 R-06（Bond Store）、R-13（观测/Trace）、R-20（CI 质量门禁）与后续 M21+ 运行时质量条目的维护更新；覆盖状态保持 DONE，后续若新增功能需求再分配新的 R 编号。
+
 ## R-01
-- 系统级需求：单向链执行：LLM（语义内核草案）→Governor→Skills→Audit
+- 系统级需求：单向链执行：模型/Agent 草案→Governor→Skills→Audit
 - PRD 需求编号（FR）：FR-CORE-001, FR-AUDIT-001, FR-SKILL-001
 - 来源：whitepaper 5/10/13
 - DevSpec 落点：DevSpec 0/6/8.1/9
@@ -47,7 +57,7 @@
 - 覆盖状态：DONE
 
 ## R-05
-- 系统级需求：ClawdBot 视觉熔断：红线/置信度/审计证据链
+- 系统级需求：屏幕/图像观测兼容边界：红线/置信度/审计证据链
 - PRD 需求编号（FR）：FR-VISION-001~002, FR-AUDIT-002
 - 来源：PRD 4.9/4.7
 - DevSpec 落点：DevSpec 6.3/8.1/8.6
@@ -56,13 +66,13 @@
 - 覆盖状态：DONE
 
 ## R-06
-- 系统级需求：SSOT：Neo4j Bond 单写者；summary 仅派生
+- 系统级需求：Bond Store 单写者；summary 仅派生
 - PRD 需求编号（FR）：FR-BOND-001~003
 - 来源：PRD 4.10
 - DevSpec 落点：DevSpec 8.2
 - DevTasks（TASK）：TASK-0035,TASK-0036
 - 验收测试（T-xx）：T-50~T-54,T-74~T-75,T-SSOT-01
-- 当前进展（2026-03-01）：TASK-0035/TASK-0036 已完成，Bond 单写者、summary 派生与 context_pack 注入口径已落地，并通过 T-50~T-54、T-74~T-75、T-SSOT-01 回归。
+- 当前进展（2026-06-04）：TASK-0035/TASK-0036 已完成，Bond 单写者、summary 派生与 prompt/surface context 注入口径已落地；Bond 后端可为 SQLite/内存/Neo4j，并通过 T-50~T-54、T-74~T-75、T-SSOT-01 回归。
 - 覆盖状态：DONE
 
 ## R-07
@@ -639,23 +649,23 @@
 - 覆盖状态：DONE
 
 ## R-66
-- 系统级需求：Gaming 模式视觉链路门控——Gaming 下禁止屏幕监控/OCR/ClawdBot UI 自动化链路
+- 系统级需求：Gaming 模式观测链路门控——Gaming 下禁止主动屏幕监控/OCR/本地界面执行链路
 - PRD 需求编号（FR）：FR-MODE-003
 - 来源：PRD 4.13
 - DevSpec 落点：DevSpec 8.12
 - DevTasks（TASK）：TASK-0033,TASK-0034
 - 验收测试（T-xx）：T-VisionGate-01
-- 当前进展（2026-03-03）：TASK-0033/0034 已完成：进入 Gaming 后屏幕监控/OCR/Clawd UI 动作均被稳定拒绝或降级；退出后恢复且审计可回放。T-VisionGate-01 回归通过。
+- 当前进展（2026-06-04）：TASK-0033/0034 已完成：进入 Gaming 后主动屏幕监控/OCR/本地界面执行均被稳定拒绝或降级；退出后恢复且审计可回放。T-VisionGate-01 回归通过。
 - 覆盖状态：DONE
 
 ## R-67
-- 系统级需求：ClawdBot 必须依赖结构化视觉输入——缺结构化视觉输入时不得进入 UI 行为路径；置信度不足必须熔断
+- 系统级需求：本地界面执行兼容入口必须依赖结构化观测输入——缺结构化视觉输入时不得进入本地动作路径；置信度不足必须熔断
 - PRD 需求编号（FR）：FR-VISION-005
 - 来源：PRD 4.9
 - DevSpec 落点：DevSpec 6.3/8.12
 - DevTasks（TASK）：TASK-0022
 - 验收测试（T-xx）：T-41~T-43
-- 当前进展（2026-03-03）：TASK-0022 已完成：ClawdBot 计划草案消费结构化 OCR/检测结果；缺输入时拒绝进入执行路径；置信度不足熔断可审计。T-41~T-43 回归通过。
+- 当前进展（2026-06-04）：TASK-0022 已重写为屏幕/图像观测兼容边界：候选动作必须消费结构化 OCR/检测结果；缺输入时拒绝进入本地动作路径；置信度不足熔断可审计。T-41~T-43 回归通过。
 - 覆盖状态：DONE
 
 ## R-68
@@ -866,13 +876,13 @@
 - 覆盖状态：DONE
 
 ## R-87
-- 系统级需求：context_pack 分槽 + QA 拦截 Canon-as-fact——context_pack.py 新增 authoritative.world_canon 独立槽位（Top-K，evidence_level=CANON_REFERENCE_ONLY），qa.py 拦截"World Canon 内容 + 完成性表述"组合并记录 CANON_AS_FACT_VIOLATION
+- 系统级需求：prompt/surface context 分槽 + QA 拦截 Canon-as-fact——prompt_context.py / surface_context_packet.py 维护 authoritative.world_canon 独立槽位（Top-K，evidence_level=CANON_REFERENCE_ONLY），qa.py 拦截"World Canon 内容 + 完成性表述"组合并记录 CANON_AS_FACT_VIOLATION
 - PRD 需求编号（FR）：FR-WCANON-003；FR-WCANON-001；FR-CANON-001
 - 来源：PRD §4（FR）；PRD M9
 - DevSpec 落点：DevSpec §19.1.3
 - DevTasks（TASK）：TASK-0113
 - 验收测试（T-xx）：T-WCanon-05；T-WCanon-06
-- 当前进展（2026-03-03）：context_pack.py 扩展 build_world_canon_slot()，World Canon 条目仅注入 authoritative.world_canon 槽位；qa.py 扩展 check_canon_as_fact()，叙事含"Canon 内容 + 完成性表述"时拦截并记录 CANON_AS_FACT_VIOLATION，重写失败降级为 Host 最小模板；T-WCanon-05/T-WCanon-06 全部通过。
+- 当前进展（2026-06-04）：prompt_context.py / surface_context_packet.py 维护 World Canon 注入槽位，World Canon 条目仅注入 authoritative.world_canon；qa.py 扩展 check_canon_as_fact()，叙事含"Canon 内容 + 完成性表述"时拦截并记录 CANON_AS_FACT_VIOLATION，重写失败降级为 Host 最小模板；T-WCanon-05/T-WCanon-06 全部通过。
 - 覆盖状态：DONE
 
 ## R-88
@@ -925,7 +935,7 @@
 
 | R-95 | FR-MEM-001 | MemoryDistillationEngine.distill_top_k() | host_brain/memory/distillation.py | T-Distill-01~03 | DONE | M10-C |
 | R-96 | FR-MEM-002 | semantic_memory 表 + CRUD（log/get/list） | host_brain/audit/sqlite_ledger.py | T-Distill-04 | DONE | M10-C |
-| R-97 | FR-MEM-003 | context_pack.semantic_slot 可选分槽 + build_semantic_slot() | host_brain/core/context_pack.py | T-Distill-05~06 | DONE | M10-C |
+| R-97 | FR-MEM-003 | prompt/surface context semantic_slot 可选分槽 + build_semantic_slot() | host_brain/core/prompt_context.py / host_brain/app/surface_context_packet.py | T-Distill-05~06 | DONE | M10-C |
 
 | R-98 | FR-MEM-001 | distill_top_k() 并发保护（蒸馏级别锁 + 锁内幂等复检） | host_brain/memory/distillation.py | T-Distill-07 | DONE | M10-D |
 | R-99 | NFR-PERF-001 | _table_has_column() 线程安全缓存（减少 PRAGMA） | host_brain/audit/sqlite_ledger.py | T-Quality-01(F-06) | DONE | M10-D |

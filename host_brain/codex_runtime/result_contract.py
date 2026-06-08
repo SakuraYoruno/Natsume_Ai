@@ -6,7 +6,15 @@ from dataclasses import asdict, dataclass, field
 from typing import Any
 
 
-CODEX_RESULT_STATUSES = {"EXECUTED", "FAILED", "DEGRADED", "NEEDS_INPUT", "BLOCKED"}
+CODEX_RESULT_STATUSES = {
+    "QUEUED",
+    "RUNNING",
+    "EXECUTED",
+    "FAILED",
+    "DEGRADED",
+    "NEEDS_INPUT",
+    "BLOCKED",
+}
 
 
 @dataclass(slots=True)

@@ -64,13 +64,15 @@ def _reject(
 def _send_desktop_notification_windows(title: str, body: str, duration_ms: int) -> None:
     """Windows 桌面通知（PowerShell Toast）。"""
     duration_s = max(1, duration_ms // 1000)
+    title_ps = _ps_single_quoted(title)
+    body_ps = _ps_single_quoted(body)
     script = (
         f"[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, "
         f"ContentType = WindowsRuntime] | Out-Null; "
         f"$template = [Windows.UI.Notifications.ToastNotificationManager]::GetTemplateContent("
         f"[Windows.UI.Notifications.ToastTemplateType]::ToastText02); "
-        f"$template.SelectSingleNode('//text[@id=1]').InnerText = '{title}'; "
-        f"$template.SelectSingleNode('//text[@id=2]').InnerText = '{body}'; "
+        f"$template.SelectSingleNode('//text[@id=1]').InnerText = {title_ps}; "
+        f"$template.SelectSingleNode('//text[@id=2]').InnerText = {body_ps}; "
         f"$toast = [Windows.UI.Notifications.ToastNotification]::new($template); "
         f"[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('Natsume').Show($toast)"
     )
@@ -92,8 +94,17 @@ def _send_desktop_notification_linux(title: str, body: str, duration_ms: int) ->
 
 def _send_desktop_notification_macos(title: str, body: str) -> None:
     """macOS 桌面通知（osascript）。"""
-    script = f'display notification "{body}" with title "{title}"'
+    script = f"display notification {_osascript_quoted(body)} with title {_osascript_quoted(title)}"
     subprocess.run(["osascript", "-e", script], capture_output=True, timeout=10)
+
+
+def _ps_single_quoted(value: Any) -> str:
+    return "'" + str(value or "").replace("'", "''") + "'"
+
+
+def _osascript_quoted(value: Any) -> str:
+    escaped = str(value or "").replace("\\", "\\\\").replace('"', '\\"')
+    return f'"{escaped}"'
 
 
 def execute_notify_desktop(payload: dict[str, Any]) -> dict[str, Any]:

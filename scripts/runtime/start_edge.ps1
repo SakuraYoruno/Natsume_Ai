@@ -202,6 +202,21 @@ function Invoke-SchtasksBreakaway {
     [string]$FailureContext = "breakaway launch",
     [bool]$InteractiveTask = $false
   )
+  $sshSessionDetected = (-not [string]::IsNullOrWhiteSpace([string]$env:SSH_CONNECTION)) -or (-not [string]::IsNullOrWhiteSpace([string]$env:SSH_CLIENT))
+  # GUI launchers (VTube Studio, Steam URI) need the interactive desktop session.
+  # In SSH sessions WMI creates a detached non-interactive process, so skip it.
+  if ($sshSessionDetected -and -not $InteractiveTask) {
+    try {
+      $commandLine = "cmd.exe /c $TaskCommand"
+      $createResult = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = $commandLine } -ErrorAction Stop
+      if ($null -ne $createResult -and [int]$createResult.ReturnValue -eq 0) {
+        return
+      }
+    } catch {
+      # Fall back to schtasks below; older Windows images may restrict WMI create.
+    }
+  }
+
   $schtasksCmd = Get-Command schtasks.exe -ErrorAction SilentlyContinue
   if ($null -eq $schtasksCmd) {
     throw "schtasks.exe not found; cannot launch breakaway process"
@@ -337,7 +352,10 @@ function Start-EdgeProcess {
     $pythonEscaped = ([string]$PythonPath).Replace("'", "''")
     $stdoutEscaped = ([string]$StdoutLog).Replace("'", "''")
     $stderrEscaped = ([string]$StderrLog).Replace("'", "''")
-    $pythonCmd = "start `"`" /B powershell -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command `"& '$pythonEscaped' -m edge_client 1>> '$stdoutEscaped' 2>> '$stderrEscaped'`""
+    # Do not use `start /B` here. Under SSH/scheduled-task launch it can keep the
+    # edge process attached to the launching job, so the RPC/gateway process exits
+    # as soon as the launcher task finishes.
+    $pythonCmd = "start `"`" powershell -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command `"& '$pythonEscaped' -m edge_client 1>> '$stdoutEscaped' 2>> '$stderrEscaped'`""
     $launcherLines += $pythonCmd
     $launcherLines += "endlocal"
     Set-Content -Path $LauncherScriptPath -Value $launcherLines -Encoding ascii
@@ -864,7 +882,13 @@ $wechatEnvOverrideKeys = @(
   "EDGE_WECHAT_AUTOSTART",
   "EDGE_WECHAT_AUTOSTART_WAIT_SECONDS",
   "EDGE_QQ_ONEBOT_KILL_QQ_BEFORE_START",
-  "EDGE_QQ_ONEBOT_FORCE_CLEAN_START"
+  "EDGE_QQ_ONEBOT_FORCE_CLEAN_START",
+  "EDGE_QQ_ONEBOT_AUTOSTART",
+  "EDGE_QQ_ONEBOT_LAUNCHER_PATH",
+  "EDGE_QQ_ONEBOT_LAUNCHER_ARGS",
+  "EDGE_QQ_ONEBOT_HEALTH_URL",
+  "EDGE_QQ_ONEBOT_START_WAIT_SECONDS",
+  "EDGE_QQ_ONEBOT_WORKDIR"
 )
 $processWechatOverrides = Read-ProcessEnvOverrides -Keys $wechatEnvOverrideKeys
 
@@ -889,7 +913,7 @@ if ([bool]$qqOneBotResult.enabled) {
 if ($EnforceCnAsrJaTtsMode) {
   $enforcedVoiceEnv = [ordered]@{
     EDGE_ASR_LANGUAGE = "zh"
-    EDGE_TTS_LANGUAGE = "ja"
+    EDGE_TTS_LANGUAGE = "zh"
     EDGE_BARGE_IN_ENABLED = "false"
   }
   foreach ($enforcedKey in $enforcedVoiceEnv.Keys) {
@@ -911,9 +935,9 @@ if ($EnforceCnAsrJaTtsMode) {
     $envValues["EDGE_ASR_LANGUAGE"] = "zh"
     $startupEnvDefaultsApplied += "EDGE_ASR_LANGUAGE=zh"
   }
-  if (Ensure-ProcessEnvDefault -Key "EDGE_TTS_LANGUAGE" -DefaultValue "ja") {
-    $envValues["EDGE_TTS_LANGUAGE"] = "ja"
-    $startupEnvDefaultsApplied += "EDGE_TTS_LANGUAGE=ja"
+  if (Ensure-ProcessEnvDefault -Key "EDGE_TTS_LANGUAGE" -DefaultValue "zh") {
+    $envValues["EDGE_TTS_LANGUAGE"] = "zh"
+    $startupEnvDefaultsApplied += "EDGE_TTS_LANGUAGE=zh"
   }
   if (Ensure-ProcessEnvDefault -Key "EDGE_BARGE_IN_ENABLED" -DefaultValue "false") {
     $envValues["EDGE_BARGE_IN_ENABLED"] = "false"
@@ -1197,7 +1221,7 @@ if ($envValues.ContainsKey("EDGE_VTS_STEAM_APP_ID")) {
   if ($value.Trim()) { $vtsSteamAppId = $value.Trim() }
 }
 
-$vtsAutoStartWaitSeconds = 35
+$vtsAutoStartWaitSeconds = 120
 if ($envValues.ContainsKey("EDGE_VTS_AUTOSTART_WAIT_SECONDS")) {
   $candidate = [int]$envValues["EDGE_VTS_AUTOSTART_WAIT_SECONDS"]
   if ($candidate -gt 0) { $vtsAutoStartWaitSeconds = $candidate }

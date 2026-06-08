@@ -20,6 +20,7 @@ from fastapi.responses import JSONResponse, RedirectResponse
 
 from host_brain.app.web_ui import router as web_ui_router
 from host_brain.app.obs_routes import router as obs_router, set_ledger_provider as _set_obs_ledger_provider
+from host_brain.app.obs_routes_health import router as obs_health_router
 from host_brain.app.obs_routes_trace import router as obs_trace_router
 from host_brain.app.obs_routes_summary import (
     router as obs_summary_router,
@@ -36,6 +37,7 @@ from host_brain.app.obs_routes_life_body import (
     start_life_body_warm_cache,
     stop_life_body_warm_cache,
 )
+from host_brain.app.obs_routes_digital_life_soak import router as obs_digital_life_soak_router
 from host_brain.app.obs_routes_sysmode import (
     get_runtime_snapshot_warm_status,
     start_runtime_snapshot_warm_cache,
@@ -99,9 +101,11 @@ app = FastAPI(
 
 app.include_router(web_ui_router, prefix="/api")
 app.include_router(obs_router)
+app.include_router(obs_health_router)
 app.include_router(obs_trace_router)
 app.include_router(obs_summary_router)
 app.include_router(obs_life_body_router)
+app.include_router(obs_digital_life_soak_router)
 
 _cors_origins_raw = os.environ.get(
     "Natsume_CORS_ORIGINS",

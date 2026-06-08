@@ -1,14 +1,14 @@
-{
-  "schema_version": "Natsume.intent.v1",
-  "id": "intent_fixture_bad_args_001",
-  "ts_ms": 1767225600000,
-  "session_id": "s_fixture",
-  "seq": 1,
-  "type": "skill_call",
-  "action": "read_only_status",
-  "target": "host",
-  "args": {
-    "bad_key": true
-  },
-  "nonce": "nonce_fixture_bad_002"
+﻿{
+    "schema_version":  "Natsume.intent.v1",
+    "id":  "intent_fixture_bad_args_001",
+    "ts_ms":  1767225600000,
+    "session_id":  "s_fixture",
+    "seq":  1,
+    "type":  "skill_call",
+    "action":  "read_only_status",
+    "target":  "host",
+    "args":  {
+                 "bad_key":  true
+             },
+    "nonce":  "nonce_fixture_bad_002"
 }

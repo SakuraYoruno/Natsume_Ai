@@ -1,11 +1,11 @@
-{
-  "env": {
-    "Natsume_ENV": "prod",
-    "BOND_NEO4J_ENABLED": "true",
-    "BOND_NEO4J_URI": "neo4j+s://bond-cluster.Natsume.ai:7687",
-    "BOND_NEO4J_DATABASE": "bond",
-    "BOND_NEO4J_AUTH_REF": "sec://neo4j/bond-admin",
-    "BOND_NEO4J_POOL_SIZE": "64",
-    "BOND_NEO4J_TLS_ENABLED": "true"
-  }
+﻿{
+    "env":  {
+                "Natsume_ENV":  "prod",
+                "BOND_NEO4J_ENABLED":  "true",
+                "BOND_NEO4J_URI":  "neo4j+s://bond-cluster.Natsume.ai:7687",
+                "BOND_NEO4J_DATABASE":  "bond",
+                "BOND_NEO4J_AUTH_REF":  "sec://neo4j/bond-admin",
+                "BOND_NEO4J_POOL_SIZE":  "64",
+                "BOND_NEO4J_TLS_ENABLED":  "true"
+            }
 }

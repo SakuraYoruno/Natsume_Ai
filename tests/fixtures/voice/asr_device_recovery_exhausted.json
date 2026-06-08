@@ -1,33 +1,33 @@
-{
-  "description": "ASR 麦克风设备断开→恢复全部耗尽 fixture",
-  "scenario": "asr_device_recovery_exhausted",
-  "initial_state": {
-    "asr_state": "STREAMING",
-    "device_index": 0,
-    "session_id": "asr_test_002"
-  },
-  "trigger": {
-    "event": "ASR_DEVICE_ERROR",
-    "reason": "driver_crash",
-    "ts_ms": 1709308800000
-  },
-  "recovery_config": {
-    "max_attempts": 3,
-    "base_delay_s": 0.01,
-    "max_delay_s": 0.05,
-    "auto_recover": true,
-    "try_alternate_devices": true
-  },
-  "mock_always_fail": true,
-  "expected": {
-    "final_state": "ERROR",
-    "recovery_event": "ASR_DEVICE_RECOVERY_EXHAUSTED",
-    "recovery_attempts": 3,
-    "running": false,
-    "audit_event": {
-      "event": "ASR_DEVICE_RECOVERY_EXHAUSTED",
-      "attempts": 3,
-      "detail": "all 3 device recovery attempts exhausted"
-    }
-  }
+﻿{
+    "description":  "ASR 麦克风设备断开→恢复全部耗尽 fixture",
+    "scenario":  "asr_device_recovery_exhausted",
+    "initial_state":  {
+                          "asr_state":  "STREAMING",
+                          "device_index":  0,
+                          "session_id":  "asr_test_002"
+                      },
+    "trigger":  {
+                    "event":  "ASR_DEVICE_ERROR",
+                    "reason":  "driver_crash",
+                    "ts_ms":  1709308800000
+                },
+    "recovery_config":  {
+                            "max_attempts":  3,
+                            "base_delay_s":  0.01,
+                            "max_delay_s":  0.05,
+                            "auto_recover":  true,
+                            "try_alternate_devices":  true
+                        },
+    "mock_always_fail":  true,
+    "expected":  {
+                     "final_state":  "ERROR",
+                     "recovery_event":  "ASR_DEVICE_RECOVERY_EXHAUSTED",
+                     "recovery_attempts":  3,
+                     "running":  false,
+                     "audit_event":  {
+                                         "event":  "ASR_DEVICE_RECOVERY_EXHAUSTED",
+                                         "attempts":  3,
+                                         "detail":  "all 3 device recovery attempts exhausted"
+                                     }
+                 }
 }

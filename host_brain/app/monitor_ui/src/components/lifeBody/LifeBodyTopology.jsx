@@ -55,7 +55,7 @@ function OrganSystemCard({ item, isPrimary = false }) {
           </div>
         </div>
         <span className={`rounded-full border px-2.5 py-1 text-[11px] font-medium ${badgeClass}`}>
-          {item.status === 'critical' ? '重压' : item.status === 'warning' ? '波动' : item.status === 'stable' ? '稳定' : '待接入'}
+          {item.status === 'critical' ? '重压' : item.status === 'warning' ? '波动' : item.status === 'stable' ? '稳定' : '待连通'}
         </span>
       </div>
 

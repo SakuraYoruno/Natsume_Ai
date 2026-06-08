@@ -184,9 +184,9 @@ class GrowthFeedbackCollector:
         # 每轮对话后从用户文本提取反馈信号
         signals = collector.extract_from_text("你好可爱呀", ts_ms=now())
         for sig in signals:
-            collector.add_feedback("user_1", sig)
+            collector.add_feedback("natsume_ai", sig)
         # 每周调度时计算调整 delta
-        result = collector.compute_adjustment("user_1")
+        result = collector.compute_adjustment("natsume_ai")
     """
 
     def __init__(

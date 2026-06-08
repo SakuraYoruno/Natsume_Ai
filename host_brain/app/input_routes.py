@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import asyncio
+from concurrent.futures import Future, ThreadPoolExecutor
 import hashlib
 import logging
 import os
@@ -23,7 +24,15 @@ from fastapi import APIRouter, Request
 from pydantic import BaseModel, Field
 
 from host_brain.core.ids import new_request_id
-from host_brain.app.reply_envelope import can_send, envelope_from_commit
+from host_brain.app.outbound_orchestrator import trigger_reply_performance
+from host_brain.app.reply_envelope import can_send, coerce_reply_envelope, envelope_from_commit
+from host_brain.app.reply_performance import coerce_reply_performance
+from host_brain.app.response_form_contract import (
+    derive_render_profile_for_response_form,
+    is_media_response_form,
+    is_pure_media_response_form,
+    normalize_response_form,
+)
 from host_brain.codex_runtime.skill_ids import is_codex_runtime_skill
 
 # ── service 层 import ──────────────────────────────────────────────────────
@@ -32,7 +41,6 @@ from host_brain.app.input_service_log import (
     build_reply_preview as _build_reply_preview,
     build_input_preview as _build_input_preview,
     log_input_event as _log_input_event,
-    log_dispatch_task_exception as _log_dispatch_task_exception,
     get_request_skill_exec_rows as _get_request_skill_exec_rows,
 )
 from host_brain.app.input_service_gateway import (
@@ -65,6 +73,8 @@ from host_brain.app.response_feedback_store import (
 _logger = logging.getLogger("Natsume.input_routes")
 
 router = APIRouter(prefix="/v1/host", tags=["input"])
+_INPUT_DISPATCH_EXECUTOR_LOCK = threading.Lock()
+_INPUT_DISPATCH_EXECUTOR: ThreadPoolExecutor | None = None
 
 # ASR 相关常量（未迁移，仅在本文件使用）
 _PLACEHOLDER_GATEWAY_CONVERSATIONS: set[str] = {
@@ -74,13 +84,22 @@ _PLACEHOLDER_GATEWAY_CONVERSATIONS: set[str] = {
 }
 _ASR_PLACEHOLDER_PATTERN = re.compile(r"^\[[A-Z0-9_:\-]{3,}\]$")
 _ASR_SPEECH_CHAR_PATTERN = re.compile(r"[A-Za-z0-9\u4e00-\u9fff]")
-_VOICE_JA_CHAR_PATTERN = re.compile(r"[\u3040-\u30ff]")
+_VOICE_TEXT_CHAR_PATTERN = re.compile(r"[\u3040-\u30ff\u3400-\u9fff]")
 _VOICE_LATIN_PATTERN = re.compile(r"[A-Za-z]")
 _GATEWAY_DIRECT_OPEN_APP_RE = re.compile(r"(打开|启动|运行).*(酷狗|kugou|qq音乐|网易云|spotify|应用|软件|程序|播放器)", re.IGNORECASE)
 _GATEWAY_DEDUPE_CACHE: dict[str, float] = {}
 _GATEWAY_DEDUPE_LOCK = threading.Lock()
 _GATEWAY_RECENT_MULTIMODAL_CACHE: dict[str, dict[str, Any]] = {}
 _GATEWAY_RECENT_MULTIMODAL_LOCK = threading.Lock()
+_GATEWAY_SOURCE_PLATFORM_ALIASES: dict[str, str] = {
+    "QQ": "qq",
+    "WECHAT": "wechat",
+    "WX": "wechat",
+    "FEISHU": "feishu",
+    "WECOM": "wecom",
+    "TELEGRAM": "telegram",
+    "TG": "telegram",
+}
 _GATEWAY_MULTIMODAL_FOLLOWUP_RE = re.compile(
     r"(这(张)?图|图片|这不是|表情包|贴图|梗图|截图|那个图|刚才那张|什么意思|啥意思|看得到|看得见|看懂|能看到|能看见|画的什么|内容)",
     re.IGNORECASE,
@@ -164,8 +183,79 @@ def _parse_int_env(name: str, *, default: int) -> int:
         return int(default)
 
 
+def _normalize_input_source(raw_source: str) -> tuple[str, str | None]:
+    source = str(raw_source or "").upper().strip()
+    alias_platform = _GATEWAY_SOURCE_PLATFORM_ALIASES.get(source)
+    if alias_platform:
+        return "GATEWAY", alias_platform
+    return source, None
+
+
+def _resolve_input_dispatch_thread_workers() -> int:
+    return max(1, min(8, _parse_int_env("HOST_INPUT_DISPATCH_THREAD_WORKERS", default=4)))
+
+
+def _get_input_dispatch_executor() -> ThreadPoolExecutor:
+    global _INPUT_DISPATCH_EXECUTOR
+    with _INPUT_DISPATCH_EXECUTOR_LOCK:
+        if _INPUT_DISPATCH_EXECUTOR is None:
+            _INPUT_DISPATCH_EXECUTOR = ThreadPoolExecutor(
+                max_workers=_resolve_input_dispatch_thread_workers(),
+                thread_name_prefix="input-dispatch",
+            )
+        return _INPUT_DISPATCH_EXECUTOR
+
+
+def _run_dispatch_worker_in_thread(
+    *,
+    request_id: str,
+    session_id: str,
+    source: str,
+    text: str,
+    payload: dict[str, Any],
+    ts_ms: int,
+    ledger: Any,
+    dispatch_mode: str,
+    run_in_thread: bool,
+) -> None:
+    worker_ledger = _get_ledger_safe()
+    asyncio.run(
+        _dispatch_to_graph_worker(
+            request_id=request_id,
+            session_id=session_id,
+            source=source,
+            text=text,
+            payload=payload,
+            ts_ms=ts_ms,
+            ledger=worker_ledger,
+            dispatch_mode=dispatch_mode,
+            run_in_thread=run_in_thread,
+        )
+    )
+
+
+def _log_dispatch_thread_future_exception(future: Future[Any], *, request_id: str) -> None:
+    try:
+        exc = future.exception()
+    except Exception as callback_exc:
+        _logger.error(
+            "input_routes: threaded dispatch future inspection failed request_id=%s: %s",
+            request_id,
+            callback_exc,
+            exc_info=callback_exc,
+        )
+        return
+    if exc is not None:
+        _logger.error(
+            "input_routes: threaded dispatch task failed request_id=%s: %s",
+            request_id,
+            exc,
+            exc_info=exc,
+        )
+
+
 def _gateway_dedupe_ttl_s() -> float:
-    return max(30.0, _parse_float_env("HOST_GATEWAY_DEDUPE_TTL_S", default=180.0))
+    return max(600.0, _parse_float_env("HOST_GATEWAY_DEDUPE_TTL_S", default=86400.0))
 
 
 def _gateway_recent_multimodal_ttl_s() -> float:
@@ -215,6 +305,102 @@ def _release_gateway_dedupe(key: str, *, expected_expiry: float | None = None) -
         if expected_expiry is not None and float(current) != float(expected_expiry):
             return
         _GATEWAY_DEDUPE_CACHE.pop(key, None)
+
+
+async def _ensure_gateway_multimodal_observed_for_dispatch(
+    *,
+    request_id: str,
+    session_id: str,
+    source: str,
+    text: str,
+    payload: dict[str, Any],
+    ts_ms: int,
+    ledger: Any,
+) -> bool:
+    """Populate multimodal observations inside the background dispatch worker.
+
+    Gateway HTTP reporting must ACK quickly; image/emoji observation may call a
+    cloud vision model and must not hold the edge reporter socket open.
+    """
+
+    if str(source or "").upper().strip() != "GATEWAY":
+        return True
+    attachments = list(payload.get("attachments") or [])
+    if not attachments:
+        _maybe_restore_recent_gateway_multimodal(session_id=session_id, text=text, payload=payload)
+        return True
+    if payload.get("multimodal_observations"):
+        _remember_recent_gateway_multimodal(session_id=session_id, payload=payload)
+        return True
+
+    try:
+        from host_brain.app.dependencies import get_multimodal_observer  # noqa: PLC0415
+
+        observer_result = await asyncio.to_thread(
+            get_multimodal_observer().observe,
+            request_id=request_id,
+            platform=str(payload.get("platform") or "").strip(),
+            conversation_id=session_id,
+            user_text=text,
+            attachments=attachments,
+            render_target_lang="zh",
+        )
+    except Exception as exc:
+        payload["multimodal_observations"] = {
+            "items": [],
+            "observed_types": [
+                str(item.get("type") or "").strip()
+                for item in attachments
+                if isinstance(item, dict) and str(item.get("type") or "").strip()
+            ],
+            "primary_modality": str((attachments[0] or {}).get("type") or "image").strip(),
+            "summary_for_chat": "",
+            "social_signal": "",
+            "confidence": 0.0,
+        }
+        payload["attachment_summary"] = ""
+        payload["attachment_processing_mode"] = "degraded"
+        payload["multimodal_safety_flags"] = ["OBSERVATION_DEGRADED"]
+        payload["multimodal_confidence"] = 0.0
+        payload["multimodal_followup_required"] = False
+        payload["multimodal_artifacts"] = {}
+        _log_input_event(
+            ledger=ledger,
+            request_id=request_id,
+            session_id=session_id,
+            source=source,
+            input_payload=payload,
+            phase="MULTIMODAL_OBSERVE_DEGRADED",
+            status="DEGRADED",
+            reason_code="GATEWAY_MULTIMODAL_OBSERVE_FAILED",
+            detail=f"{type(exc).__name__}: {str(exc)[:180]}",
+            ts_ms=int(time.time() * 1000),
+        )
+        _remember_recent_gateway_multimodal(session_id=session_id, payload=payload)
+        return True
+
+    payload["multimodal_observations"] = dict(observer_result.get("observations") or {})
+    payload["attachment_summary"] = str(observer_result.get("summary_for_chat") or "").strip()
+    payload["attachment_processing_mode"] = str(observer_result.get("mode") or "sync")
+    payload["multimodal_safety_flags"] = list(observer_result.get("safety_flags") or [])
+    payload["multimodal_confidence"] = float(observer_result.get("confidence") or 0.0)
+    payload["multimodal_followup_required"] = bool(observer_result.get("followup_required"))
+    payload["multimodal_artifacts"] = dict(observer_result.get("artifacts") or {})
+    _remember_recent_gateway_multimodal(session_id=session_id, payload=payload)
+
+    if str(observer_result.get("mode") or "").strip().lower() == "async":
+        job = _schedule_gateway_multimodal_async_job(
+            request_id=request_id,
+            session_id=session_id,
+            source=source,
+            text=text,
+            payload=payload,
+            ts_ms=ts_ms,
+            ledger=ledger,
+        )
+        payload["multimodal_job"] = job
+        return False
+    return True
 
 
 def _remember_recent_gateway_multimodal(*, session_id: str, payload: dict[str, Any]) -> None:
@@ -372,6 +558,51 @@ class _NoopMetrics:
         def _noop(*_args: Any, **_kwargs: Any) -> None:
             return None
         return _noop
+
+
+def _build_gateway_route_preview(text: str) -> dict[str, Any] | None:
+    """Rules-only route preview for non-authoritative Gateway acknowledgements."""
+    try:
+        from host_brain.tribe.thalamus_agent import classify_task_intent_by_rules  # noqa: PLC0415
+
+        preview = classify_task_intent_by_rules(text)
+        return dict(preview) if isinstance(preview, dict) else None
+    except Exception:
+        return None
+
+
+async def _build_input_thalamus_intent_draft(
+    *,
+    request_id: str,
+    session_id: str,
+    source: str,
+    text: str,
+    payload: dict[str, Any],
+    ts_ms: int,
+    person_id: str | None = None,
+) -> dict[str, Any]:
+    from host_brain.bond.user_identity import resolve_person_id  # noqa: PLC0415
+
+    reply_channel = str(payload.get("platform") or "").strip() or None
+    reply_target = str(payload.get("conversation_id") or "").strip() or None
+    resolved_person_id = resolve_person_id(
+        str(person_id or payload.get("person_id") or "").strip() or None,
+        session_id=session_id,
+        platform=reply_channel,
+        from_id=str(payload.get("from_id") or "").strip() or None,
+        conversation_id=reply_target,
+    )
+    return await get_thalamus_agent().classify_and_compile_intent_draft(
+        request_id=request_id,
+        session_id=session_id,
+        user_message=text,
+        person_id=resolved_person_id,
+        source="input_routes",
+        input_source=source,
+        ts_ms=ts_ms,
+        attachments=list(payload.get("attachments") or []),
+        multimodal_observations=dict(payload.get("multimodal_observations") or {}),
+    )
 
 
 def _should_send_gateway_immediate_ack(
@@ -782,13 +1013,14 @@ def _build_gateway_voice_text(
 ) -> str:
     templates = _load_gateway_fallback_texts_localized(render_target_lang=render_target_lang)
     voice_templates = dict(templates.get("voice_summary") or {})
-    candidate = str(tts_text_ja or "").strip()
-    if candidate and _VOICE_JA_CHAR_PATTERN.search(candidate) and not _VOICE_LATIN_PATTERN.search(candidate):
-        return candidate
 
     normalized_reply = str(reply_text or "").strip()
-    if normalized_reply and _VOICE_JA_CHAR_PATTERN.search(normalized_reply) and not _VOICE_LATIN_PATTERN.search(normalized_reply):
+    if normalized_reply and _VOICE_TEXT_CHAR_PATTERN.search(normalized_reply) and not _VOICE_LATIN_PATTERN.search(normalized_reply):
         return normalized_reply
+
+    candidate = str(tts_text_ja or "").strip()
+    if candidate and _VOICE_TEXT_CHAR_PATTERN.search(candidate) and not _VOICE_LATIN_PATTERN.search(candidate):
+        return candidate
 
     if "```" in normalized_reply or _VOICE_LATIN_PATTERN.search(normalized_reply):
         return str(voice_templates.get("code_or_latin") or "")
@@ -818,24 +1050,54 @@ def _coerce_bool_flag(value: Any, *, default: bool) -> bool:
     return bool(default)
 
 
-def _resolve_gateway_voice_reply_options(payload: dict[str, Any]) -> dict[str, bool]:
+def _resolve_gateway_voice_reply_options(payload: dict[str, Any]) -> dict[str, Any]:
     raw_extra = payload.get("raw_extra")
     raw_extra_map = dict(raw_extra) if isinstance(raw_extra, dict) else {}
 
-    def _pick_bool(keys: tuple[str, ...], *, env_name: str, default: bool) -> bool:
+    def _pick_payload_bool(keys: tuple[str, ...], *, default: bool) -> tuple[bool, str]:
         for key in keys:
             if key in payload:
-                return _coerce_bool_flag(payload.get(key), default=default)
+                return _coerce_bool_flag(payload.get(key), default=default), "payload"
         for key in keys:
             if key in raw_extra_map:
-                return _coerce_bool_flag(raw_extra_map.get(key), default=default)
+                return _coerce_bool_flag(raw_extra_map.get(key), default=default), "raw_extra"
+        return bool(default), "default"
+
+    def _pick_bool(keys: tuple[str, ...], *, env_name: str, default: bool) -> bool:
+        value, source = _pick_payload_bool(keys, default=default)
+        if source != "default":
+            return value
         return _parse_bool_env(env_name, default=default)
 
-    force_dual_voice_reply = _pick_bool(
+    def _pick_mode() -> str:
+        for key in ("voice_selection_mode", "gateway_voice_selection_mode"):
+            if key in payload:
+                return str(payload.get(key) or "").strip().lower()
+        for key in ("voice_selection_mode", "gateway_voice_selection_mode"):
+            if key in raw_extra_map:
+                return str(raw_extra_map.get(key) or "").strip().lower()
+        return str(os.environ.get("HOST_GATEWAY_VOICE_SELECTION_MODE") or "").strip().lower()
+
+    selection_mode = _pick_mode()
+    if selection_mode not in {"smart", "always", "off", "planned"}:
+        selection_mode = ""
+
+    force_dual_voice_reply, force_source = _pick_payload_bool(
         ("force_dual_voice_reply", "force_voice_reply"),
-        env_name="HOST_GATEWAY_FORCE_DUAL_VOICE_REPLY",
         default=False,
     )
+    if force_source == "default":
+        if selection_mode == "always":
+            force_dual_voice_reply = True
+            force_source = "selection_mode"
+        elif selection_mode in {"smart", "off", "planned"}:
+            force_dual_voice_reply = False
+            force_source = "selection_mode"
+        else:
+            force_dual_voice_reply = _parse_bool_env("HOST_GATEWAY_FORCE_DUAL_VOICE_REPLY", default=False)
+            force_source = "env" if force_dual_voice_reply else "default"
+
+    effective_selection_mode = selection_mode or ("always" if force_dual_voice_reply else "smart")
     wait_voice_reply_result = _pick_bool(
         ("wait_voice_reply_result", "gateway_voice_wait_result"),
         env_name="HOST_GATEWAY_VOICE_REPLY_WAIT_RESULT",
@@ -846,10 +1108,18 @@ def _resolve_gateway_voice_reply_options(payload: dict[str, Any]) -> dict[str, b
         env_name="HOST_GATEWAY_VOICE_REPLY_ON_PRIMARY_FAILURE",
         default=force_dual_voice_reply,
     )
+    send_gateway_voice_message = _pick_bool(
+        ("send_gateway_voice_message", "gateway_voice_message", "send_voice_record", "voice_record_reply"),
+        env_name="HOST_GATEWAY_SEND_VOICE_MESSAGE",
+        default=False,
+    )
     return {
         "force_dual_voice_reply": force_dual_voice_reply,
+        "force_dual_voice_reply_source": force_source,
+        "voice_selection_mode": effective_selection_mode,
         "wait_voice_reply_result": wait_voice_reply_result,
         "allow_voice_reply_on_primary_failure": allow_voice_reply_on_primary_failure,
+        "send_gateway_voice_message": send_gateway_voice_message,
     }
 
 
@@ -877,6 +1147,7 @@ def _extract_gateway_voice_result(result: Any) -> dict[str, Any]:
     vts_talk_started = bool(mouth_sync_map.get("started")) or bool(talk_result_map.get("success"))
     vts_expression_success = bool(expression_result_map.get("success"))
 
+    audio_path = _extract_voice_audio_path(event_map)
     return {
         "voice_success": success,
         "voice_status": str(getattr(result, "status", "") or ""),
@@ -886,8 +1157,34 @@ def _extract_gateway_voice_result(result: Any) -> dict[str, Any]:
         "voice_started": bool(voice_started),
         "voice_vts_started": bool(vts_talk_started),
         "voice_vts_expression_success": bool(vts_expression_success),
+        "voice_audio_path": audio_path,
+        "voice_gateway_sent": False,
+        "voice_gateway_status": None,
+        "voice_gateway_detail": None,
+        "voice_gateway_latency_ms": None,
         "voice_event": event_map,
     }
+
+
+def _extract_voice_audio_path(event_map: dict[str, Any]) -> str:
+    candidates: list[Any] = [event_map.get("audio_path")]
+    for key in ("start_event", "queue_event"):
+        nested = event_map.get(key)
+        if isinstance(nested, dict):
+            candidates.append(nested.get("audio_path"))
+    for value in candidates:
+        path = str(value or "").strip()
+        if path:
+            return path
+    return ""
+
+
+def _resolve_gateway_voice_emotion_tag(emotion_tag: str | None) -> str | None:
+    normalized = str(emotion_tag or "").strip().upper()
+    if normalized and normalized != "NEUTRAL":
+        return normalized
+    configured = str(os.environ.get("HOST_GATEWAY_DEFAULT_VOICE_EMOTION_TAG") or "").strip().upper()
+    return configured or None
 
 
 @router.post("/input", response_model=InputResponse)
@@ -895,11 +1192,12 @@ async def receive_input(body: InputPayload, request: Request) -> InputResponse:
     _ = request
     request_id = new_request_id()
     ts_ms = int(time.time() * 1000)
-    source = str(body.source or "").upper().strip()
+    raw_source = str(body.source or "").upper().strip()
+    source, source_alias_platform = _normalize_input_source(raw_source)
     gateway_dedupe_key: str | None = None
     gateway_dedupe_expiry: float | None = None
 
-    _logger.info("input_routes: received edge input source=%s request_id=%s", source, request_id)
+    _logger.info("input_routes: received edge input source=%s request_id=%s", raw_source or source, request_id)
 
     if source == "ASR":
         if not body.text or not body.session_id:
@@ -926,7 +1224,8 @@ async def receive_input(body: InputPayload, request: Request) -> InputResponse:
         initial_payload = body.model_dump(exclude_none=True)
         gateway_attachments = _normalize_gateway_attachments(initial_payload)
         has_gateway_content = bool(str(body.content or "").strip())
-        if ((not has_gateway_content and not gateway_attachments) or not body.conversation_id or not body.platform):
+        gateway_platform = str(body.platform or source_alias_platform or "").strip()
+        if ((not has_gateway_content and not gateway_attachments) or not body.conversation_id or not gateway_platform):
             return InputResponse(
                 success=False,
                 request_id=request_id,
@@ -958,9 +1257,21 @@ async def receive_input(body: InputPayload, request: Request) -> InputResponse:
 
     payload = body.model_dump(exclude_none=True)
     if source == "GATEWAY":
+        payload["source"] = "GATEWAY"
+        if source_alias_platform and not str(payload.get("platform") or "").strip():
+            payload["platform"] = source_alias_platform
         gateway_attachments = _normalize_gateway_attachments(payload)
         if gateway_attachments:
             payload["attachments"] = gateway_attachments
+            placeholder_text = _build_gateway_multimodal_placeholder_text(
+                content=text,
+                attachments=gateway_attachments,
+            )
+            if placeholder_text and placeholder_text != text:
+                payload["raw_content"] = str(body.content or "")
+                payload["content"] = placeholder_text
+                payload["content_is_multimodal_placeholder"] = True
+                text = placeholder_text
     if source == "GATEWAY":
         gateway_dedupe_key = _build_gateway_dedupe_key(payload=body, text=text)
         gateway_dedupe_expiry = _mark_gateway_dedupe(gateway_dedupe_key)
@@ -1103,46 +1414,7 @@ async def receive_input(body: InputPayload, request: Request) -> InputResponse:
     except Exception as feedback_exc:
         _logger.debug("input_routes: response feedback record degraded request_id=%s: %s", request_id, feedback_exc)
 
-    if source == "GATEWAY" and list(payload.get("attachments") or []):
-        from host_brain.app.dependencies import get_multimodal_observer  # noqa: PLC0415
-
-        observer_result = await asyncio.to_thread(
-            get_multimodal_observer().observe,
-            request_id=request_id,
-            platform=str(body.platform or "").strip(),
-            conversation_id=session_id,
-            user_text=text,
-            attachments=list(payload.get("attachments") or []),
-            render_target_lang="zh",
-        )
-        payload["multimodal_observations"] = dict(observer_result.get("observations") or {})
-        payload["attachment_summary"] = str(observer_result.get("summary_for_chat") or "").strip()
-        payload["attachment_processing_mode"] = str(observer_result.get("mode") or "sync")
-        payload["multimodal_safety_flags"] = list(observer_result.get("safety_flags") or [])
-        payload["multimodal_confidence"] = float(observer_result.get("confidence") or 0.0)
-        payload["multimodal_followup_required"] = bool(observer_result.get("followup_required"))
-        payload["multimodal_artifacts"] = dict(observer_result.get("artifacts") or {})
-        _remember_recent_gateway_multimodal(session_id=session_id, payload=payload)
-        if str(observer_result.get("mode") or "").strip().lower() == "async":
-            job = _schedule_gateway_multimodal_async_job(
-                request_id=request_id,
-                session_id=session_id,
-                source=source,
-                text=text,
-                payload=payload,
-                ts_ms=ts_ms,
-                ledger=_get_ledger_safe(),
-            )
-            payload["multimodal_job"] = job
-            return InputResponse(
-                success=True,
-                request_id=request_id,
-                source=source,
-                status="ACCEPTED",
-                detail="gateway multimodal accepted for async processing",
-                ts_ms=ts_ms,
-            )
-    elif source == "GATEWAY":
+    if source == "GATEWAY" and not list(payload.get("attachments") or []):
         _maybe_restore_recent_gateway_multimodal(session_id=session_id, text=text, payload=payload)
 
     if source == "GATEWAY":
@@ -1437,6 +1709,8 @@ async def _run_gateway_multimodal_async_job(
         )
         commit_event = dict(pipeline_result.get("commit_event") or {})
         audit_refs = dict(commit_event.get("audit_refs") or {})
+        _response_form = str(audit_refs.get("response_form") or "").strip() or None
+        _response_form_reason = str(audit_refs.get("response_form_reason") or "").strip() or None
         gateway_delivery = await _deliver_gateway_reply(
             request_id=request_id,
             payload=payload,
@@ -1445,8 +1719,11 @@ async def _run_gateway_multimodal_async_job(
             narrative=str(pipeline_result.get("narrative") or "").strip(),
             tts_text_ja=str(audit_refs.get("tts_text_ja") or "").strip() or None,
             emotion_tag=str(audit_refs.get("emotion_tag") or "NEUTRAL").strip().upper(),
-            bond_stage=str((payload.get("bond_summary") or {}).get("stage") or "STRANGER").strip().upper(),
+            bond_stage=str((payload.get("bond_summary") or {}).get("stage") or "FRIEND").strip().upper(),
             user_msg_type=str(payload.get("msg_type") or "text").strip().lower(),
+            response_form=_response_form,
+            response_form_reason=_response_form_reason,
+            reply_envelope_payload=dict(audit_refs.get("reply_envelope") or commit_event.get("reply_envelope") or {}),
         )
         update_multimodal_job(job_id, status="COMPLETED", result={"gateway_delivery": gateway_delivery})
         _log_input_event(
@@ -1500,27 +1777,8 @@ def _should_start_gateway_progress_push(
     payload: dict[str, Any],
     intent_draft: dict[str, Any] | None = None,
 ) -> tuple[bool, str]:
+    """Proactive progress push is retired; progress queries use the explicit fastpath."""
     return False, "PROGRESS_PUSH_RETIRED_REPLY_ENVELOPE_ONLY"
-    if not _gateway_auto_reply_enabled():
-        return False, "PROGRESS_PUSH_AUTO_REPLY_DISABLED"
-    if not _parse_bool_env("HOST_GATEWAY_PROGRESS_PUSH_ENABLED", default=True):
-        return False, "PROGRESS_PUSH_DISABLED"
-    if str(source or "").strip().upper() != "GATEWAY":
-        return False, "PROGRESS_PUSH_SOURCE_NOT_GATEWAY"
-    if _looks_like_progress_query_for_ack_skip(text):
-        return False, "PROGRESS_PUSH_PROGRESS_QUERY"
-    if not _looks_like_execution_intent_for_ack(text):
-        return False, "PROGRESS_PUSH_NON_ACTION_INTENT"
-    route_type = str((dict(intent_draft or {})).get("route") or "").strip().lower()
-    if not route_type:
-        return False, "PROGRESS_PUSH_ROUTE_UNRESOLVED"
-    if route_type not in {"skill", "delegate", "plan", "task_progress"}:
-        return False, "PROGRESS_PUSH_NON_EXECUTION_ROUTE"
-    platform = str(payload.get("platform") or "").strip().lower()
-    conversation_id = str(payload.get("conversation_id") or "").strip()
-    if not platform or not conversation_id:
-        return False, "PROGRESS_PUSH_TARGET_MISSING"
-    return True, "PROGRESS_PUSH_ENABLED"
 
 
 async def _run_gateway_proactive_progress_push(
@@ -1652,23 +1910,24 @@ def _maybe_schedule_gateway_route_started_voice_ack(
     )
     now_ms = int(time.time() * 1000)
     if not should_send:
-        _log_input_event(
-            ledger=ledger,
-            request_id=request_id,
-            session_id=session_id,
-            source=source,
-            input_payload={
-                **dict(payload or {}),
-                "route_ack_reason": reason,
-                "route_type": route_type,
-                "route_target": target_id,
-            },
-            phase="ROUTE_ACK_SKIPPED",
-            status="IGNORED",
-            reason_code=reason,
-            detail=f"gateway route-started voice ack skipped: {reason}",
-            ts_ms=now_ms,
-        )
+        if reason not in {"ROUTE_ACK_FAST_ROUTE", "ROUTE_ACK_NON_EXECUTION_ROUTE"}:
+            _log_input_event(
+                ledger=ledger,
+                request_id=request_id,
+                session_id=session_id,
+                source=source,
+                input_payload={
+                    **dict(payload or {}),
+                    "route_ack_reason": reason,
+                    "route_type": route_type,
+                    "route_target": target_id,
+                },
+                phase="ROUTE_ACK_SKIPPED",
+                status="IGNORED",
+                reason_code=reason,
+                detail=f"gateway route-started voice ack skipped: {reason}",
+                ts_ms=now_ms,
+            )
         return
 
     ack_text = _build_gateway_route_started_voice_ack_text(
@@ -1780,18 +2039,25 @@ def _maybe_schedule_gateway_immediate_ack(
     )
     now_ms = int(time.time() * 1000)
     if not should_send:
-        _log_input_event(
-            ledger=ledger,
-            request_id=request_id,
-            session_id=session_id,
-            source=source,
-            input_payload={**dict(payload or {}), "immediate_ack_reason": reason},
-            phase="ACK_SKIPPED",
-            status="IGNORED",
-            reason_code=reason,
-            detail=f"gateway immediate ack skipped: {reason}",
-            ts_ms=now_ms,
-        )
+        if reason not in {
+            "ACK_RETIRED_REPLY_ENVELOPE_ONLY",
+            "ACK_ROUTE_UNRESOLVED",
+            "ACK_NON_EXECUTION_ROUTE",
+            "ACK_PROGRESS_QUERY",
+            "ACK_DIRECT_OPEN_APP",
+        }:
+            _log_input_event(
+                ledger=ledger,
+                request_id=request_id,
+                session_id=session_id,
+                source=source,
+                input_payload={**dict(payload or {}), "immediate_ack_reason": reason},
+                phase="ACK_SKIPPED",
+                status="IGNORED",
+                reason_code=reason,
+                detail=f"gateway immediate ack skipped: {reason}",
+                ts_ms=now_ms,
+            )
         return
 
     _log_input_event(
@@ -1887,6 +2153,15 @@ async def _run_cortex_orchestrator_pipeline(
         from_id=str(payload.get("from_id") or "").strip() or None,
         conversation_id=reply_target,
     )
+    response_form = str(payload.get("response_form") or payload.get("planned_response_form") or "").strip() or None
+    resolved_render_profile = derive_render_profile_for_response_form(response_form)
+    if resolved_render_profile == "ja_voice":
+        render_target_lang = "ja"
+    elif resolved_render_profile == "media_action":
+        render_target_lang = "media"
+    else:
+        render_target_lang = "zh"
+
     request_body = ChatRequest(
         message=message_text,
         person_id=person_id,
@@ -1894,12 +2169,13 @@ async def _run_cortex_orchestrator_pipeline(
         input_source=source,
         reply_channel=reply_channel,
         reply_target=reply_target,
-        # Gateway 入口的语音/口型由 _deliver_gateway_reply 统一下发，避免 ChatAgent 在 COMMIT 后重复补播。
+        # Gateway 入口的语音/口型由 _deliver_gateway_reply 统一下发，避免 SurfaceReply 在 COMMIT 后重复补播。
         suppress_edge_tts=(source == "GATEWAY"),
-        suppress_edge_vts=(source == "GATEWAY"),
-        # Phase XV P4：Gateway 通道文字永远中文，注入 render_target_lang
-        # ASR/Web 通道保持 None，由 infer_render_target_lang() 推断（向后兼容）
-        render_target_lang=("zh" if source == "GATEWAY" else None),
+        suppress_edge_vts=False,
+        # 语言只由 response_form/render_profile 决定；Gateway/QQ/Web/API 只是传输来源。
+        render_target_lang=render_target_lang,
+        render_profile=resolved_render_profile,
+        response_form=response_form,
         attachments=list(attachments or []),
         multimodal_observations=dict(multimodal_observations or {}),
         attachment_summary=str(payload.get("attachment_summary") or "").strip(),
@@ -1912,16 +2188,14 @@ async def _run_cortex_orchestrator_pipeline(
     )
     intent_draft = dict(intent_draft_override or {})
     if not intent_draft:
-        intent_draft = await get_thalamus_agent().classify_and_compile_intent_draft(
+        intent_draft = await _build_input_thalamus_intent_draft(
             request_id=request_id,
             session_id=session_id,
-            user_message=text,
+            source=source,
+            text=text,
+            payload=payload,
             person_id=person_id,
-            source="input_routes",
-            input_source=source,
             ts_ms=ts_ms,
-            attachments=attachments,
-            multimodal_observations=multimodal_observations,
         )
     governor_result: dict[str, Any] = {"decision": "APPROVE", "source": "input_routes"}
 
@@ -1955,9 +2229,13 @@ async def _run_cortex_orchestrator_pipeline(
             "route": str(intent_draft.get("route") or "chat").strip().lower() or "chat",
             "target_id": str(intent_draft.get("target_id") or "").strip(),
             "task": str(intent_draft.get("task") or "").strip(),
-            "reason_code": str(intent_draft.get("route_reason") or "").strip() or None,
+            "reason_code": str(intent_draft.get("reason_code") or intent_draft.get("route_reason") or "").strip() or None,
             "source": str(intent_draft.get("route_source") or "").strip() or None,
-            "confidence": _normalize_route_confidence(intent_draft.get("route_confidence")),
+            "confidence": _normalize_route_confidence(
+                intent_draft.get("route_confidence")
+                if intent_draft.get("route_confidence") is not None
+                else intent_draft.get("confidence")
+            ),
             "override_reason": str(intent_draft.get("route_override_reason") or "").strip() or None,
             "llm_route_used": bool(intent_draft.get("llm_route_used")),
         },
@@ -2127,29 +2405,56 @@ async def _deliver_gateway_reply(
     narrative: str,
     # Phase XV P4：ReplyFormDecider 所需的上下文
     emotion_tag: str = "NEUTRAL",
-    bond_stage: str = "STRANGER",
+    bond_stage: str = "FRIEND",
     user_msg_type: str = "text",
     response_form: str | None = None,
     response_form_reason: str | None = None,
+    reply_envelope_payload: dict[str, Any] | None = None,
     # Gateway 双轨语言约定：
     # - 文字回复：中文
-    # - 语音回复：日语（当前 TTS 模型是日语训练）
-    # tts_text_ja 为日语 TTS 文本（若存在则优先使用）
+    # - 语音回复：默认中文，遇到显式日文内容再路由日语
+    # tts_text_ja 是旧字段名；新的语音链路优先使用中文 narrative。
     tts_text_ja: str | None = None,
 ) -> dict[str, Any]:
     platform = str(payload.get("platform") or "").strip().lower()
     conversation_id = str(payload.get("conversation_id") or "").strip()
     normalized_decision = str(decision or "").strip().upper()
     normalized_reason = str(reason_code or "").strip().upper()
-    reply_envelope = envelope_from_commit(
-        decision=decision,
-        narrative=narrative,
-        reason_code=reason_code,
-        response_form=str(response_form or "text").strip() or "text",
-        source="gateway_primary_reply",
-        degraded=(normalized_decision in {"NO_REPLY", "SKIP_REPLY"} or not str(narrative or "").strip()),
-        cacheable=False,
+    reply_envelope = (
+        coerce_reply_envelope(reply_envelope_payload)
+        if reply_envelope_payload
+        else envelope_from_commit(
+            decision=decision,
+            narrative=narrative,
+            reason_code=reason_code,
+            response_form=str(response_form or "text").strip() or "text",
+            source="gateway_primary_reply",
+            degraded=(normalized_decision in {"NO_REPLY", "SKIP_REPLY"} or not str(narrative or "").strip()),
+            cacheable=False,
+        )
     )
+    if not can_send(reply_envelope) and normalized_decision == "APPROVE" and str(narrative or "").strip():
+        repaired_envelope = envelope_from_commit(
+            decision="APPROVE",
+            narrative=narrative,
+            reason_code=None,
+            response_form="text",
+            source="gateway_primary_reply_repaired",
+            degraded=False,
+            cacheable=False,
+            raw_extra={
+                "gate_repair": "invalid_reply_envelope_text_repair",
+                "original_reply_envelope": reply_envelope.as_dict(),
+                "original_response_form": str(response_form or "text").strip() or "text",
+                "original_reason_code": str(reply_envelope.reason_code or normalized_reason or "").strip(),
+            },
+        )
+        if can_send(repaired_envelope):
+            reply_envelope = repaired_envelope
+            response_form = "text"
+            response_form_reason = (
+                f"{str(response_form_reason or '').strip() or 'unknown'}|repaired_invalid_reply_envelope"
+            )
     if not can_send(reply_envelope):
         return {
             "success": True,
@@ -2175,6 +2480,34 @@ async def _deliver_gateway_reply(
             "voice_event": None,
         }
 
+    performance = coerce_reply_performance(reply_envelope.performance)
+    emotion_tag = performance.emotion_tag or str(emotion_tag or "NEUTRAL").strip().upper() or "NEUTRAL"
+    emotion_intensity = performance.emotion_intensity
+
+    def _schedule_reply_performance() -> None:
+        task = asyncio.create_task(
+            trigger_reply_performance(
+                request_id=request_id,
+                reply_envelope=reply_envelope,
+                enable_vts=True,
+            )
+        )
+
+        def _on_performance_done(done_task: Any) -> None:
+            try:
+                perf_result = done_task.result()
+                _logger.info(
+                    "gateway reply performance completed request_id=%s invoked=%s success=%s emotion=%s",
+                    request_id,
+                    perf_result.get("invoked"),
+                    perf_result.get("success"),
+                    perf_result.get("emotion_tag"),
+                )
+            except Exception as exc:  # pragma: no cover - defensive callback
+                _logger.debug("gateway reply performance task failed request_id=%s err=%s", request_id, exc)
+
+        task.add_done_callback(_on_performance_done)
+
     reply_text = reply_envelope.text or _build_gateway_reply_text(
         decision=decision,
         narrative=narrative,
@@ -2184,7 +2517,7 @@ async def _deliver_gateway_reply(
     voice_text = _build_gateway_voice_text(
         reply_text=reply_text,
         tts_text_ja=tts_text_ja,
-        render_target_lang="ja",
+        render_target_lang="zh",
     )
     preview = _build_reply_preview(reply_text, limit=120)
     voice_options = _resolve_gateway_voice_reply_options(payload)
@@ -2199,6 +2532,11 @@ async def _deliver_gateway_reply(
         "voice_started": None,
         "voice_vts_started": None,
         "voice_vts_expression_success": None,
+        "voice_audio_path": "",
+        "voice_gateway_sent": False,
+        "voice_gateway_status": None,
+        "voice_gateway_detail": None,
+        "voice_gateway_latency_ms": None,
         "voice_event": None,
     }
     if not _gateway_auto_reply_enabled():
@@ -2213,35 +2551,23 @@ async def _deliver_gateway_reply(
                         tts_text=voice_text,
                         request_id=request_id,
                         emotion_tag=emotion_tag,
+                        emotion_intensity=emotion_intensity,
+                        send_gateway_voice_message=bool(voice_options["send_gateway_voice_message"]),
                     )
                 )
             else:
-                import asyncio as _asyncio  # noqa: PLC0415
-
-                task = _asyncio.create_task(
-                    _send_gateway_voice_reply(
+                voice_result["voice_waited"] = True
+                voice_result.update(
+                    await _send_gateway_voice_reply(
                         platform=platform,
                         conversation_id=conversation_id,
                         tts_text=voice_text,
                         request_id=request_id,
                         emotion_tag=emotion_tag,
+                        emotion_intensity=emotion_intensity,
+                        send_gateway_voice_message=bool(voice_options["send_gateway_voice_message"]),
                     )
                 )
-
-                def _on_voice_only_done(done_task: Any) -> None:
-                    try:
-                        done_result = done_task.result()
-                        _logger.info(
-                            "gateway voice-only reply completed request_id=%s success=%s started=%s vts_started=%s",
-                            request_id,
-                            done_result.get("voice_success"),
-                            done_result.get("voice_started"),
-                            done_result.get("voice_vts_started"),
-                        )
-                    except Exception as exc:  # pragma: no cover - defensive callback
-                        _logger.debug("gateway voice-only reply task failed request_id=%s err=%s", request_id, exc)
-
-                task.add_done_callback(_on_voice_only_done)
         return {
             "success": True,
             "status": "SKIPPED",
@@ -2272,6 +2598,8 @@ async def _deliver_gateway_reply(
             "voice_sent": False,
         }
 
+    _schedule_reply_performance()
+
     from host_brain.channels.edge_rpc_client import post_gateway_reply  # noqa: PLC0415
     from host_brain.app.reply_form_decider import (  # noqa: PLC0415
         ReplyFormDecision,
@@ -2280,61 +2608,206 @@ async def _deliver_gateway_reply(
     )
     from host_brain.app.dependencies import get_multimodal_processor  # noqa: PLC0415
 
+    envelope_raw_extra = (
+        dict(reply_envelope.raw_extra or {})
+        if hasattr(reply_envelope, "raw_extra")
+        else dict((reply_envelope.as_dict() if hasattr(reply_envelope, "as_dict") else {}).get("raw_extra") or {})
+    )
+    envelope_media_ref = str(
+        getattr(reply_envelope, "media_ref", "")
+        or envelope_raw_extra.get("media_ref")
+        or envelope_raw_extra.get("media_path")
+        or envelope_raw_extra.get("sticker")
+        or envelope_raw_extra.get("gif")
+        or envelope_raw_extra.get("image")
+        or ""
+    ).strip()
+    envelope_response_form = normalize_response_form(str(
+        getattr(reply_envelope, "response_form", "")
+        or response_form
+        or "text"
+    ))
+    if is_pure_media_response_form(envelope_response_form) and envelope_media_ref:
+        primary_msg_type = MsgType.IMAGE.value
+        media_is_remote = envelope_media_ref.startswith(("http://", "https://", "data:"))
+        primary_content = reply_text or (envelope_media_ref if media_is_remote else "")
+        primary_media_path = None if media_is_remote else envelope_media_ref
+        wait_result = _parse_bool_env("HOST_INPUT_GATEWAY_MEDIA_REPLY_WAIT_RESULT", default=True)
+        timeout_ms = max(1000, _parse_int_env("HOST_INPUT_GATEWAY_REPLY_TIMEOUT_MS", default=12000))
+        result = await post_gateway_reply(
+            platform=platform,
+            conversation_id=conversation_id,
+            content=primary_content,
+            msg_type=primary_msg_type,
+            request_id=request_id,
+            media_path=primary_media_path,
+            raw_extra={
+                **envelope_raw_extra,
+                "message_kind": "final_reply",
+                "reply_source": str(reply_envelope.source or "reaction_catalog").strip() or "reaction_catalog",
+                "performance": performance.as_dict(),
+                "reply_envelope": reply_envelope.as_dict(),
+            },
+            wait_result=wait_result,
+            timeout_ms=timeout_ms,
+        )
+        preview = _build_reply_preview(
+            reply_text or f"[{envelope_response_form}:{str(reply_envelope.reaction_id or '').strip() or 'media'}]",
+            limit=120,
+        )
+        if not bool(getattr(result, "success", False)):
+            return {
+                "success": False,
+                "status": str(getattr(result, "status", "FAILED")),
+                "reason_code": str(getattr(result, "reason_code", "") or "") or "GATEWAY_MEDIA_REPLY_FAILED",
+                "detail": str(getattr(result, "detail", "") or ""),
+                "latency_ms": int(getattr(result, "latency_ms", 0)),
+                "reply_text_len": len(reply_text),
+                "reply_preview": preview,
+                "reply_form": envelope_response_form,
+                "reply_form_reason": str(response_form_reason or "social_reaction").strip() or "social_reaction",
+                "reply_envelope": reply_envelope.as_dict(),
+                "message_kind": "final_reply",
+                "voice_sent": False,
+            }
+        return {
+            "success": True,
+            "status": str(getattr(result, "status", "OK")),
+            "reason_code": None,
+            "detail": str(getattr(result, "detail", "") or ""),
+            "latency_ms": int(getattr(result, "latency_ms", 0)),
+            "reply_text_len": len(reply_text),
+            "reply_preview": preview,
+            "reply_form": envelope_response_form,
+            "reply_form_reason": str(response_form_reason or "social_reaction").strip() or "social_reaction",
+            "reply_envelope": reply_envelope.as_dict(),
+            "message_kind": "final_reply",
+            "voice_sent": False,
+            "voice_waited": False,
+            "voice_success": None,
+            "voice_status": None,
+            "voice_reason_code": None,
+            "voice_detail": None,
+            "voice_latency_ms": None,
+            "voice_started": None,
+            "voice_vts_started": None,
+            "voice_vts_expression_success": None,
+            "voice_event": None,
+        }
+    if is_media_response_form(envelope_response_form) and not reply_text:
+        return {
+            "success": True,
+            "status": "SKIPPED",
+            "reason_code": "MEDIA_REPLY_PAYLOAD_MISSING",
+            "detail": "gateway media reply suppressed: structured media payload missing",
+            "latency_ms": 0,
+            "reply_text_len": 0,
+            "reply_preview": "",
+            "reply_form": envelope_response_form,
+            "reply_form_reason": str(response_form_reason or "media_payload_missing").strip() or "media_payload_missing",
+            "reply_envelope": reply_envelope.as_dict(),
+            "message_kind": "no_reply",
+            "voice_sent": False,
+            "voice_waited": False,
+            "voice_success": None,
+            "voice_status": None,
+            "voice_reason_code": None,
+            "voice_detail": None,
+            "voice_latency_ms": None,
+            "voice_started": None,
+            "voice_vts_started": None,
+            "voice_vts_expression_success": None,
+            "voice_event": None,
+        }
+
     mm_output = get_multimodal_processor().enhance_output(
         text=reply_text,
         emotion_tag=emotion_tag,
         bond_stage=bond_stage,
         render_lang="zh",
     )
-    suggested_emoji = str(getattr(mm_output, "suggested_emoji", "") or "").strip()
-    suggested_sticker = str(getattr(mm_output, "suggested_sticker", "") or "").strip()
+    explicit_sticker = str(
+        envelope_raw_extra.get("sticker")
+        or envelope_raw_extra.get("gif")
+        or envelope_raw_extra.get("image")
+        or envelope_media_ref
+        or ""
+    ).strip()
+    suggested_sticker = explicit_sticker or str(getattr(mm_output, "suggested_sticker", "") or "").strip()
     normalized_platform = str(platform or "").strip().lower()
 
     def _normalize_form_for_platform(msg_type: MsgType, content: str) -> tuple[MsgType, str]:
         normalized_content = str(content or "").strip()
-        if normalized_platform == "qq" and msg_type == MsgType.EMOJI:
-            return MsgType.TEXT, normalized_content
         return msg_type, normalized_content
 
-    normalized_response_form = str(response_form or "").strip().lower()
+    normalized_response_form = envelope_response_form
     planned_primary: MsgType | None = None
     planned_secondary: MsgType | None = None
     planned_reason = str(response_form_reason or "").strip()
-    if not suggested_emoji:
-        emoji_defaults = {
-            "phatic_greeting": "👋",
-            "light_social_ping": "😊",
-            "emoji_social_reply": "😄",
-            "emoji_attachment_no_question": "😊",
-        }
-        suggested_emoji = str(emoji_defaults.get(planned_reason) or "").strip()
-    if normalized_response_form in {"emoji", "text_plus_emoji"} and not suggested_emoji:
-        suggested_emoji = "😊"
-    if normalized_response_form == "emoji" and suggested_emoji:
-        planned_primary = MsgType.EMOJI
-    elif normalized_response_form == "text_plus_emoji":
+    requested_secondary_response_form = str(
+        envelope_raw_extra.get("secondary_response_form")
+        or envelope_raw_extra.get("secondary_form")
+        or ""
+    ).strip().lower()
+    if normalized_response_form == "voice":
         planned_primary = MsgType.TEXT
-        planned_secondary = MsgType.EMOJI
-    elif normalized_response_form == "sticker" and suggested_sticker:
+        planned_secondary = MsgType.VOICE
+        planned_reason = planned_reason or "planned_voice"
+    elif normalized_response_form in {"sticker", "image", "gif"} and suggested_sticker:
         planned_primary = MsgType.IMAGE
-    elif normalized_response_form == "text_plus_sticker" and suggested_sticker:
+    elif normalized_response_form in {"text_plus_sticker", "text_plus_image", "text_plus_gif"} and suggested_sticker:
         planned_primary = MsgType.TEXT
         planned_secondary = MsgType.IMAGE
-    elif normalized_response_form == "image" and suggested_sticker:
-        planned_primary = MsgType.IMAGE
+    elif requested_secondary_response_form == "voice":
+        planned_primary = MsgType.TEXT
+        planned_secondary = MsgType.VOICE
+        planned_reason = planned_reason or "planned_secondary_voice"
 
     # ── Phase XV P4：ReplyFormDecider ──────────────────────────────────
     # 将用户消息类型字符串转换为 MsgType
+    normalized_user_msg_type = str(user_msg_type or payload.get("msg_type") or "text").strip().lower()
+    if normalized_user_msg_type in {"voice", "audio", "record", "sound"}:
+        user_mtype = MsgType.VOICE
+    else:
+        try:
+            user_mtype = MsgType(normalized_user_msg_type)
+        except ValueError:
+            user_mtype = MsgType.TEXT
+    payload_raw_extra = dict(payload.get("raw_extra") or {}) if isinstance(payload.get("raw_extra"), dict) else {}
+    user_text = str(
+        payload.get("content")
+        or payload.get("text")
+        or payload.get("message")
+        or payload_raw_extra.get("raw_message")
+        or payload_raw_extra.get("message")
+        or ""
+    ).strip()
+    user_id = str(
+        payload.get("person_id")
+        or payload.get("from_id")
+        or payload_raw_extra.get("user_id")
+        or conversation_id
+        or "default"
+    ).strip() or "default"
+
+    if voice_options["voice_selection_mode"] == "off" and planned_secondary == MsgType.VOICE:
+        planned_primary = MsgType.TEXT
+        planned_secondary = None
+        planned_reason = "voice_selection_off_text"
+
     try:
-        user_mtype = MsgType(str(user_msg_type or "text").strip().lower())
+        user_mtype = MsgType(str(user_mtype.value or "text").strip().lower())
     except ValueError:
         user_mtype = MsgType.TEXT
 
     decider = get_reply_form_decider()
     if voice_options["force_dual_voice_reply"]:
         form_decision = ReplyFormDecision(MsgType.TEXT, MsgType.VOICE, "force_dual_voice_reply")
+    elif voice_options["voice_selection_mode"] == "planned" and planned_primary is None:
+        form_decision = ReplyFormDecision(MsgType.TEXT, None, "planned_voice_only_text")
     else:
         form_decision = decider.decide(
+            user_id=user_id,
             user_msg_type=user_mtype,
             narrative_zh=reply_text,
             emotion_tag=emotion_tag,
@@ -2342,15 +2815,17 @@ async def _deliver_gateway_reply(
             planned_primary=planned_primary,
             planned_secondary=planned_secondary,
             planned_reason=planned_reason,
+            user_text=user_text,
+            platform=platform,
         )
     _logger.info(
-        "gateway reply form request_id=%s normalized=%s planned_reason=%s primary=%s secondary=%s suggested_emoji=%s suggested_sticker=%s",
+        "gateway reply form request_id=%s normalized=%s planned_reason=%s voice_mode=%s primary=%s secondary=%s suggested_sticker=%s",
         request_id,
         normalized_response_form or "-",
         planned_reason or "-",
+        voice_options["voice_selection_mode"],
         getattr(form_decision.primary, "value", str(form_decision.primary)),
         getattr(form_decision.secondary, "value", "") or "-",
-        suggested_emoji or "-",
         suggested_sticker or "-",
     )
 
@@ -2377,6 +2852,7 @@ async def _deliver_gateway_reply(
                 raw_extra={
                     "message_kind": "final_reply",
                     "reply_source": "gateway_secondary_form",
+                    "performance": performance.as_dict(),
                     "reply_envelope": reply_envelope.as_dict(),
                 },
                 wait_result=True,
@@ -2389,9 +2865,6 @@ async def _deliver_gateway_reply(
         nonlocal voice_result
         if form_decision.secondary is None:
             return dict(voice_result)
-        if form_decision.secondary == MsgType.EMOJI:
-            await _send_secondary_form(msg_type=MsgType.EMOJI, content=suggested_emoji)
-            return dict(voice_result)
         if form_decision.secondary == MsgType.IMAGE:
             await _send_secondary_form(msg_type=MsgType.IMAGE, content=suggested_sticker)
             return dict(voice_result)
@@ -2399,65 +2872,26 @@ async def _deliver_gateway_reply(
             return dict(voice_result)
 
         voice_result["voice_sent"] = True
-        if voice_options["wait_voice_reply_result"]:
-            voice_result["voice_waited"] = True
-            voice_result.update(
-                await _send_gateway_voice_reply(
-                    platform=platform,
-                    conversation_id=conversation_id,
-                    tts_text=voice_text,
-                    request_id=request_id,
-                    emotion_tag=emotion_tag,
-                )
-            )
-            return dict(voice_result)
-
-        import asyncio as _asyncio  # noqa: PLC0415
-
-        task = _asyncio.create_task(
-            _send_gateway_voice_reply(
+        voice_result["voice_waited"] = True
+        voice_result.update(
+            await _send_gateway_voice_reply(
                 platform=platform,
                 conversation_id=conversation_id,
                 tts_text=voice_text,
                 request_id=request_id,
                 emotion_tag=emotion_tag,
+                emotion_intensity=emotion_intensity,
+                send_gateway_voice_message=bool(voice_options["send_gateway_voice_message"]),
             )
         )
-
-        def _on_voice_done(done_task: Any) -> None:
-            try:
-                done_result = done_task.result()
-                _logger.info(
-                    "gateway voice reply completed request_id=%s success=%s started=%s vts_started=%s",
-                    request_id,
-                    done_result.get("voice_success"),
-                    done_result.get("voice_started"),
-                    done_result.get("voice_vts_started"),
-                )
-            except Exception as exc:  # pragma: no cover - defensive callback
-                _logger.debug("gateway voice reply task failed request_id=%s err=%s", request_id, exc)
-
-        task.add_done_callback(_on_voice_done)
         return dict(voice_result)
 
     # ── 主回复（文字/语音）─────────────────────────────────────────────
     collapse_secondary_into_primary = False
-    if form_decision.primary == MsgType.EMOJI:
-        primary_content = suggested_emoji or reply_text
-    elif form_decision.primary == MsgType.IMAGE:
+    if form_decision.primary == MsgType.IMAGE:
         primary_content = suggested_sticker or reply_text
     else:
         primary_content = reply_text
-    if (
-        normalized_platform == "qq"
-        and form_decision.primary == MsgType.TEXT
-        and form_decision.secondary == MsgType.EMOJI
-        and suggested_emoji
-    ):
-        suffix = f" {suggested_emoji}".rstrip()
-        if suggested_emoji not in str(primary_content or ""):
-            primary_content = f"{str(primary_content or '').rstrip()}{suffix}"
-        collapse_secondary_into_primary = True
     primary_msg_type_enum, primary_content = _normalize_form_for_platform(form_decision.primary, primary_content)
     primary_msg_type = primary_msg_type_enum.value
 
@@ -2475,6 +2909,7 @@ async def _deliver_gateway_reply(
         raw_extra={
             "message_kind": "final_reply",
             "reply_source": "gateway_primary_reply",
+            "performance": performance.as_dict(),
             "reply_envelope": reply_envelope.as_dict(),
         },
         wait_result=wait_result,
@@ -2503,27 +2938,6 @@ async def _deliver_gateway_reply(
             **voice_result,
         }
 
-    # ── 双发模式：先文字字幕，再日语语音（不阻塞主回复）────────────
-    # Voice proof can be forced and optionally awaited during live gateway integration.
-    if False and form_decision.is_dual:
-        # P3/P6 完整实现：用 tts_text_ja 做 TTS 合成后发语音
-        # P4 当前：发送一条文字作为语音消息的占位（保留接口，等 P6 双语输出完成后启用真正的 TTS）
-        _voice_text = voice_text
-        if _voice_text and form_decision.secondary == MsgType.VOICE:
-            try:
-                # 异步发送，不等待结果，不阻塞主回复
-                import asyncio as _asyncio  # noqa: PLC0415
-                _asyncio.create_task(_send_gateway_voice_reply(
-                    platform=platform,
-                    conversation_id=conversation_id,
-                    tts_text=_voice_text,
-                    request_id=request_id,
-                    emotion_tag=emotion_tag,
-                ))
-                voice_sent = True
-            except Exception:
-                pass  # 语音发送失败不影响主回复
-
     if form_decision.is_dual and not collapse_secondary_into_primary:
         voice_result = await _trigger_secondary_reply()
 
@@ -2550,26 +2964,15 @@ async def _send_gateway_voice_reply(
     tts_text: str,
     request_id: str,
     emotion_tag: str = "NEUTRAL",
-) -> None:
-    """向 Gateway 发送语音消息（异步，fire-and-forget）。
-
-    Phase XV P4 当前实现：
-      - 调用 Edge TTS 合成（post_speak），等待合成完成
-      - 当 Edge 端支持 TTS→音频文件 后，改为发送语音文件
-      - 当前 post_gateway_reply msg_type="voice" 需要 content 为音频 base64 或文件路径
-      - 临时方案：发送 msg_type="text" 的语音字幕（标记 🎵 前缀区分）
-
-    Phase XV P6/P7 完整实现：
-      - Edge TTS 合成 → 返回音频文件路径/base64
-      - post_gateway_reply(msg_type="voice", content=audio_data)
-    """
+    emotion_intensity: float | None = None,
+    send_gateway_voice_message: bool = False,
+) -> dict[str, Any]:
+    """合成语音并驱动 Edge 播放/VTS；平台语音消息仅显式开关发送。"""
     import logging as _logging  # noqa: PLC0415
     _vlogger = _logging.getLogger("Natsume.gateway_voice")
     try:
-        from host_brain.channels.edge_rpc_client import post_speak  # noqa: PLC0415
-        # 触发 TTS 合成（本地扬声器）——Gateway 用户在外面听不到，
-        # 但这样可以验证 TTS 合成链路正常工作
-        # P6/P7 完成后：获取合成音频 → 发送 voice 消息
+        from host_brain.channels.edge_rpc_client import post_gateway_reply, post_speak  # noqa: PLC0415
+        from host_brain.channels.tts_context_router import TtsContextRouter  # noqa: PLC0415
         _tts_text_normalized = str(tts_text or "").strip()
         if not _tts_text_normalized:
             return {
@@ -2581,23 +2984,66 @@ async def _send_gateway_voice_reply(
                 "voice_started": False,
                 "voice_vts_started": False,
                 "voice_vts_expression_success": False,
+                "voice_audio_path": "",
+                "voice_gateway_sent": False,
+                "voice_gateway_status": None,
+                "voice_gateway_detail": None,
+                "voice_gateway_latency_ms": None,
                 "voice_event": {},
             }
 
+        tts_params = TtsContextRouter().route(
+            text=_tts_text_normalized,
+            emotion_tag=emotion_tag,
+        )
+        effective_emotion_tag = _resolve_gateway_voice_emotion_tag(emotion_tag)
         result = await post_speak(
             text=_tts_text_normalized,
             request_id=request_id,
-            lang_hint="ja",  # Gateway 语音输出固定走日语 TTS
-            emotion_tag=emotion_tag,
+            emotion_tag=effective_emotion_tag,
+            emotion_intensity=emotion_intensity,
+            lang_hint=str(tts_params.lang_hint or "zh"),
+            export_audio=bool(send_gateway_voice_message),
         )
         voice_result = _extract_gateway_voice_result(result)
+        audio_path = str(voice_result.get("voice_audio_path") or "").strip()
+        if not send_gateway_voice_message:
+            voice_result["voice_gateway_detail"] = "Gateway voice message disabled; Edge playback/VTS only"
+        elif audio_path and platform and conversation_id:
+            gateway_timeout_ms = max(
+                1000,
+                _parse_int_env("HOST_GATEWAY_VOICE_REPLY_TIMEOUT_MS", default=30000),
+            )
+            gateway_result = await post_gateway_reply(
+                platform=platform,
+                conversation_id=conversation_id,
+                content="",
+                msg_type="voice",
+                media_path=audio_path,
+                request_id=f"{request_id}::voice_record",
+                raw_extra={
+                    "message_kind": "voice_reply",
+                    "reply_source": "edge_tts_export",
+                    "tts_request_id": request_id,
+                    "emotion_tag": str(effective_emotion_tag or "").strip().upper(),
+                },
+                wait_result=True,
+                timeout_ms=gateway_timeout_ms,
+            )
+            voice_result["voice_gateway_sent"] = bool(getattr(gateway_result, "success", False))
+            voice_result["voice_gateway_status"] = str(getattr(gateway_result, "status", "") or "")
+            voice_result["voice_gateway_detail"] = str(getattr(gateway_result, "detail", "") or "")
+            voice_result["voice_gateway_latency_ms"] = int(getattr(gateway_result, "latency_ms", 0) or 0)
+        else:
+            voice_result["voice_gateway_detail"] = "TTS audio export path missing; Gateway voice message not sent"
         _vlogger.debug(
-            "gateway_voice TTS completed platform=%s conversation=%s success=%s started=%s vts_started=%s len=%d",
+            "gateway_voice completed platform=%s conversation=%s success=%s started=%s vts_started=%s platform_voice=%s len=%d",
             platform,
             conversation_id,
             voice_result["voice_success"],
             voice_result["voice_started"],
             voice_result["voice_vts_started"],
+            voice_result.get("voice_gateway_sent"),
             len(_tts_text_normalized),
         )
         return voice_result
@@ -2612,6 +3058,11 @@ async def _send_gateway_voice_reply(
             "voice_started": False,
             "voice_vts_started": False,
             "voice_vts_expression_success": False,
+            "voice_audio_path": "",
+            "voice_gateway_sent": False,
+            "voice_gateway_status": None,
+            "voice_gateway_detail": None,
+            "voice_gateway_latency_ms": None,
             "voice_event": {},
         }
 
@@ -2653,14 +3104,9 @@ async def _dispatch_to_graph(
 
     run_in_thread = _parse_bool_env("HOST_INPUT_DISPATCH_IN_THREAD", default=True)
     dispatch_mode = "fire_and_forget.threaded" if run_in_thread else "fire_and_forget.inline"
-    preclassified_intent_draft: dict[str, Any] | None = None
+    gateway_route_preview: dict[str, Any] | None = None
     if source_upper == "GATEWAY":
-        try:
-            from host_brain.tribe.thalamus_agent import classify_task_intent_by_rules  # noqa: PLC0415
-
-            preclassified_intent_draft = classify_task_intent_by_rules(text)
-        except Exception as route_preclass_exc:
-            _logger.debug("[%s] gateway preclassify before ack failed: %s", request_id, route_preclass_exc)
+        gateway_route_preview = _build_gateway_route_preview(text)
 
     _log_input_event(
         ledger=ledger,
@@ -2680,25 +3126,29 @@ async def _dispatch_to_graph(
             source=source_upper,
             text=text,
             payload=payload,
-            intent_draft=preclassified_intent_draft,
+            intent_draft=gateway_route_preview,
             ledger=ledger,
         )
 
     if run_in_thread:
-        asyncio.create_task(
-            _dispatch_to_graph_worker(
+        future = _get_input_dispatch_executor().submit(
+            _run_dispatch_worker_in_thread,
+            request_id=request_id,
+            session_id=session_id,
+            source=source,
+            text=text,
+            payload=payload,
+            ts_ms=ts_ms,
+            ledger=ledger,
+            dispatch_mode=dispatch_mode,
+            run_in_thread=run_in_thread,
+        )
+        future.add_done_callback(
+            lambda completed: _log_dispatch_thread_future_exception(
+                completed,
                 request_id=request_id,
-                session_id=session_id,
-                source=source,
-                text=text,
-                payload=payload,
-                ts_ms=ts_ms,
-                preclassified_intent_draft=preclassified_intent_draft,
-                ledger=ledger,
-                dispatch_mode=dispatch_mode,
-                run_in_thread=run_in_thread,
             )
-        ).add_done_callback(_log_dispatch_task_exception)
+        )
         return
 
     await _dispatch_to_graph_worker(
@@ -2708,7 +3158,6 @@ async def _dispatch_to_graph(
         text=text,
         payload=payload,
         ts_ms=ts_ms,
-        preclassified_intent_draft=preclassified_intent_draft,
         ledger=ledger,
         dispatch_mode=dispatch_mode,
         run_in_thread=run_in_thread,
@@ -2723,7 +3172,6 @@ async def _dispatch_to_graph_worker(
     text: str,
     payload: dict[str, Any],
     ts_ms: int,
-    preclassified_intent_draft: dict[str, Any] | None = None,
     ledger: Any,
     dispatch_mode: str,
     run_in_thread: bool,
@@ -2734,7 +3182,7 @@ async def _dispatch_to_graph_worker(
     source_upper = str(source or "").strip().upper()
     progress_push_stop_event: asyncio.Event | None = None
     progress_push_task: asyncio.Task | None = None
-    preclassified_intent_draft: dict[str, Any] | None = None
+    thalamus_intent_draft: dict[str, Any] | None = None
     _log_input_event(
         ledger=ledger,
         request_id=request_id,
@@ -2746,29 +3194,38 @@ async def _dispatch_to_graph_worker(
         detail=f"dispatch_mode={dispatch_mode} source={source}",
         ts_ms=dispatch_ts,
     )
+    try:
+        thalamus_intent_draft = await _build_input_thalamus_intent_draft(
+            request_id=request_id,
+            session_id=session_id,
+            source=source,
+            text=text,
+            payload=payload,
+            ts_ms=ts_ms,
+        )
+    except Exception as intent_exc:
+        _logger.warning("[%s] thalamus intent draft build degraded before input dispatch: %s", request_id, intent_exc)
+        thalamus_intent_draft = None
+
     if source_upper == "GATEWAY":
         try:
-            if preclassified_intent_draft is None:
-                from host_brain.tribe.thalamus_agent import classify_task_intent_by_rules  # noqa: PLC0415
-
-                preclassified_intent_draft = classify_task_intent_by_rules(text)
             _maybe_schedule_gateway_route_started_voice_ack(
                 request_id=request_id,
                 session_id=session_id,
                 source=source_upper,
                 payload=payload,
-                route_type=str((preclassified_intent_draft or {}).get("route") or "").strip().lower(),
-                target_id=str((preclassified_intent_draft or {}).get("target_id") or "").strip(),
+                route_type=str((thalamus_intent_draft or {}).get("route") or "").strip().lower(),
+                target_id=str((thalamus_intent_draft or {}).get("target_id") or "").strip(),
                 ledger=ledger,
             )
         except Exception as route_ack_exc:
-            _logger.debug("[%s] gateway route-started ack preclassify failed: %s", request_id, route_ack_exc)
+            _logger.debug("[%s] gateway route-started ack intent draft failed: %s", request_id, route_ack_exc)
     if source_upper == "GATEWAY":
         should_push, push_reason = _should_start_gateway_progress_push(
             source=source_upper,
             text=text,
             payload=payload,
-            intent_draft=preclassified_intent_draft,
+            intent_draft=thalamus_intent_draft,
         )
         if should_push:
             _log_input_event(
@@ -2796,18 +3253,45 @@ async def _dispatch_to_graph_worker(
             )
             progress_push_task.add_done_callback(_log_progress_push_task_exception)
         else:
-            _log_input_event(
-                ledger=ledger,
-                request_id=request_id,
-                session_id=session_id,
-                source=source,
-                input_payload={**dict(payload or {}), "progress_push_reason": push_reason},
-                phase="PROGRESS_PUSH_SKIPPED",
-                status="IGNORED",
-                reason_code=push_reason,
-                detail=f"gateway proactive progress push skipped: {push_reason}",
-                ts_ms=dispatch_ts,
-            )
+            if push_reason != "PROGRESS_PUSH_RETIRED_REPLY_ENVELOPE_ONLY":
+                _log_input_event(
+                    ledger=ledger,
+                    request_id=request_id,
+                    session_id=session_id,
+                    source=source,
+                    input_payload={**dict(payload or {}), "progress_push_reason": push_reason},
+                    phase="PROGRESS_PUSH_SKIPPED",
+                    status="IGNORED",
+                    reason_code=push_reason,
+                    detail=f"gateway proactive progress push skipped: {push_reason}",
+                    ts_ms=dispatch_ts,
+                )
+    if not await _ensure_gateway_multimodal_observed_for_dispatch(
+        request_id=request_id,
+        session_id=session_id,
+        source=source,
+        text=text,
+        payload=payload,
+        ts_ms=ts_ms,
+        ledger=ledger,
+    ):
+        await _stop_progress_push_task(
+            stop_event=progress_push_stop_event,
+            task=progress_push_task,
+        )
+        _log_input_event(
+            ledger=ledger,
+            request_id=request_id,
+            session_id=session_id,
+            source=source,
+            input_payload=payload,
+            phase="DISPATCH_DEFERRED",
+            status="ACCEPTED",
+            reason_code="GATEWAY_MULTIMODAL_ASYNC_DEFERRED",
+            detail="gateway multimodal dispatch deferred to async job",
+            ts_ms=int(time.time() * 1000),
+        )
+        return
     try:
         pipeline_result = await _run_cortex_orchestrator_pipeline(
             request_id=request_id,
@@ -2816,7 +3300,7 @@ async def _dispatch_to_graph_worker(
             text=text,
             payload=payload,
             ts_ms=ts_ms,
-            intent_draft_override=preclassified_intent_draft,
+            intent_draft_override=thalamus_intent_draft,
         )
         deviation_meta: dict[str, Any] | None = None
         if source_upper == "GATEWAY":
@@ -2897,8 +3381,8 @@ async def _dispatch_to_graph_worker(
             _tts_text_ja = str(audit_refs.get("tts_text_ja") or "").strip() or None
             _response_form = str(audit_refs.get("response_form") or "").strip() or None
             _response_form_reason = str(audit_refs.get("response_form_reason") or "").strip() or None
-            # bond_stage 从 payload 的 bond_summary 取（若存在），否则用 STRANGER
-            _bond_stage = str((payload.get("bond_summary") or {}).get("stage") or "STRANGER").strip().upper()
+            # bond_stage 从 payload 的 bond_summary 取（若存在），否则用 FRIEND
+            _bond_stage = str((payload.get("bond_summary") or {}).get("stage") or "FRIEND").strip().upper()
             _user_msg_type = str(payload.get("msg_type") or "text").strip().lower()
 
             try:
@@ -2914,6 +3398,7 @@ async def _dispatch_to_graph_worker(
                     user_msg_type=_user_msg_type,
                     response_form=_response_form,
                     response_form_reason=_response_form_reason,
+                    reply_envelope_payload=dict(audit_refs.get("reply_envelope") or commit_event.get("reply_envelope") or {}),
                 )
             except Exception as exc:
                 gateway_delivery = {

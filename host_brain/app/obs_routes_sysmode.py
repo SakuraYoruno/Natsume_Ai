@@ -14,6 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from host_brain.audit.sqlite_ledger import SQLiteLedger
+from host_brain.app.obs_host_proxy import fetch_host_json
 
 logger = logging.getLogger("Natsume.obs")
 
@@ -43,12 +44,12 @@ _RUNTIME_SNAPSHOT_WARM_ENABLED = bool(
 )
 _RUNTIME_SNAPSHOT_WARM_INTERVAL_MS = _env_int(
     "HOST_OBS_RUNTIME_SNAPSHOT_WARM_INTERVAL_MS",
-    4000,
+    15000,
     minimum=1000,
 )
 _RUNTIME_SNAPSHOT_WARM_STALE_MS = _env_int(
     "HOST_OBS_RUNTIME_SNAPSHOT_WARM_STALE_MS",
-    max(_RUNTIME_SNAPSHOT_WARM_INTERVAL_MS * 3, 12000),
+    max(_RUNTIME_SNAPSHOT_WARM_INTERVAL_MS * 3, 45000),
     minimum=2000,
 )
 _runtime_snapshot_warm_thread: threading.Thread | None = None
@@ -282,10 +283,25 @@ def _clone_runtime_snapshot_response(
 
 
 def _build_runtime_snapshot_response(current_topic: str) -> DigitalLifeRuntimeSnapshotResponse:
-    from host_brain.app.http_hooks_runtime_helpers import build_digital_life_runtime_snapshot  # noqa: PLC0415
+    from host_brain.app.http_hooks_runtime_helpers import (  # noqa: PLC0415
+        _build_background_runtime_snapshot,
+        build_digital_life_runtime_snapshot,
+    )
 
     service = _get_mode_transition_service()
     payload = build_digital_life_runtime_snapshot(current_topic=current_topic)
+    host_scheduler_snapshot = fetch_host_json("/scheduler/health", timeout_s=1.5)
+    if host_scheduler_snapshot is not None:
+        try:
+            payload["background_runtime"] = _build_background_runtime_snapshot(
+                now_ms=int(payload.get("timestamp") or _now_ms()),
+                persona_user_id=str(payload.get("persona_user_id") or "user_1"),
+                inner_world_state=dict(payload.get("inner_world_state") or {}),
+                scheduler_snapshot_override=host_scheduler_snapshot,
+            )
+        except Exception as exc:
+            payload.setdefault("background_runtime", {})
+            payload["background_runtime"]["host_scheduler_overlay_error"] = str(exc)[:160]
     try:
         payload["sys_mode_status"] = dict(service.get_current_status() or {})
     except Exception as exc:
@@ -306,6 +322,29 @@ def _build_runtime_snapshot_response(current_topic: str) -> DigitalLifeRuntimeSn
 
 def _refresh_runtime_snapshot_warm_once() -> None:
     started_at = _now_ms()
+    release_slot = None
+    try:
+        from host_brain.app.obs_resource_guard import (
+            release_obs_warm_slot,
+            should_defer_obs_warm_refresh,
+            try_acquire_obs_warm_slot,
+        )
+
+        deferred, reason = should_defer_obs_warm_refresh(task_name="runtime_snapshot")
+        if deferred:
+            with _runtime_snapshot_warm_lock:
+                _runtime_snapshot_warm_state["last_error"] = f"deferred:{reason}"
+                _runtime_snapshot_warm_state["last_duration_ms"] = 0
+            return
+        acquired, reason = try_acquire_obs_warm_slot(task_name="runtime_snapshot")
+        if not acquired:
+            with _runtime_snapshot_warm_lock:
+                _runtime_snapshot_warm_state["last_error"] = f"deferred:{reason}"
+                _runtime_snapshot_warm_state["last_duration_ms"] = 0
+            return
+        release_slot = release_obs_warm_slot
+    except Exception:
+        release_slot = None
     try:
         payload = _build_runtime_snapshot_response("")
     except Exception as exc:
@@ -314,6 +353,9 @@ def _refresh_runtime_snapshot_warm_once() -> None:
             _runtime_snapshot_warm_state["last_duration_ms"] = max(0, _now_ms() - started_at)
         logger.warning("runtime snapshot warm refresh degraded: %s", exc)
         return
+    finally:
+        if release_slot is not None:
+            release_slot()
 
     with _runtime_snapshot_warm_lock:
         _runtime_snapshot_warm_state["value"] = _clone_runtime_snapshot_response(payload)
@@ -509,4 +551,3 @@ def post_sys_mode_event(
         "result": result,
         "timestamp": _now_ms(),
     }
-

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from host_brain.codex_runtime.production_studio import CODEX_PRODUCTION_SKILL_IDS
+
 
 CODEX_RUNTIME_SKILL_IDS: frozenset[str] = frozenset(
     {
@@ -17,7 +19,7 @@ CODEX_RUNTIME_SKILL_IDS: frozenset[str] = frozenset(
         "codex_persona_drift_audit",
         "codex_dream_compile",
     }
-)
+) | CODEX_PRODUCTION_SKILL_IDS
 
 CODEX_RUNTIME_RUN_MODE_BY_SKILL_ID: dict[str, str] = {
     "codex_inspect": "inspect",
@@ -27,6 +29,16 @@ CODEX_RUNTIME_RUN_MODE_BY_SKILL_ID: dict[str, str] = {
     "codex_sql_audit": "audit",
     "codex_translate_project": "translate",
     "codex_research": "research",
+    "codex_workbench_brief": "research",
+    "codex_repo_sentinel": "inspect",
+    "codex_memory_curator": "inspect",
+    "codex_document_digest": "research",
+    "codex_frontend_review": "inspect",
+    "codex_browser_research": "research",
+    "codex_frontend_acceptance": "inspect",
+    "codex_web_corpus_collector": "worker",
+    "codex_lightnovel_recommender": "worker",
+    "codex_epub_builder": "worker",
 }
 
 

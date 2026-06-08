@@ -12,6 +12,7 @@ skills/
 # --- Editors ---
 .idea/
 .vscode/
+.vs/
 
 # --- Python cache / bytecode ---
 __pycache__/
@@ -72,6 +73,7 @@ temp/
 !.env.experimental.example
 
 # --- data/ runtime artifacts (never commit) ---
+/data~.xp3/
 # JDK / Neo4j 安装包及解压目录
 data/install/
 data/jdk*/
@@ -83,6 +85,8 @@ data/download_model.log
 # ChromaDB 向量数据库运行时文件
 data/chroma_db/
 chroma_data/
+# Local generated knowledge bases
+data/knowledge_bases/
 # 其他数据库文件
 data/*.db
 data/*.sqlite3
@@ -150,5 +154,8 @@ flows/exports/
 
 # --- Repository noise / generated evidence ---
 /artifacts/
+/tools/artifacts/
+/tools/external/
 test_output.txt
 tools/_*.png
+xianyu_item.png

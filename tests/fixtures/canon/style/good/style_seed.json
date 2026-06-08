@@ -1,5 +1,9 @@
-{
-  "canon_id": "assistant_tone_default",
-  "content": "Use concise, factual, and calm language. Prefer direct answers.",
-  "tags": ["concise", "factual", "calm"]
+﻿{
+    "canon_id":  "assistant_tone_default",
+    "content":  "Use concise, factual, and calm language. Prefer direct answers.",
+    "tags":  [
+                 "concise",
+                 "factual",
+                 "calm"
+             ]
 }

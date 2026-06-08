@@ -16,6 +16,10 @@ from dataclasses import dataclass, field
 from typing import Any, Mapping
 
 from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged
+from host_brain.app.sub_agent_context import (
+    build_agent_context_envelope,
+    project_legacy_context_for_sub_agent,
+)
 
 _logger = logging.getLogger("Natsume.sub_agent")
 
@@ -237,19 +241,34 @@ class SubAgentDispatcher:
 
         started_ms = int(time.time() * 1000)
 
-        # 构建 handler 入参（兼容现有 handler 的 payload/context 接口）
+        raw_context = dict(req.context or {})
+        agent_context_envelope = build_agent_context_envelope(
+            agent_id=req.agent_id,
+            task=req.task,
+            user_message=req.user_message,
+            request_id=req.request_id,
+            session_id=req.session_id,
+            context=raw_context,
+            timeout_ms=req.timeout_ms,
+        ).as_dict()
+        legacy_context = project_legacy_context_for_sub_agent(raw_context)
+
+        # 构建 handler 入参（兼容现有 handler 的 payload/context 接口）。
+        # 大块历史、召回行和证据只通过 agent_context_envelope 传递，避免
+        # 子 agent 各自把 raw context 塞进 prompt。
         payload: dict[str, Any] = {
             "user_input": req.task,
             "query": req.task,
             "request_id": req.request_id,
-            **req.context,
+            "agent_context_envelope": agent_context_envelope,
         }
         context: dict[str, Any] = {
             "request_id": req.request_id,
             "session_id": req.session_id,
             "source": "executive_router_dispatch",
+            **legacy_context,
+            "agent_context_envelope": agent_context_envelope,
         }
-        context.update(dict(req.context or {}))
         await self._ensure_runtime_gateway(req=req, payload=payload, context=context)
 
         try:
@@ -310,6 +329,15 @@ class SubAgentDispatcher:
                 "agent_id": req.agent_id,
                 "confidence": agent_artifact.get("confidence"),
                 "risk_flags": agent_artifact.get("risk_flags"),
+                "agent_context": {
+                    "schema_version": agent_context_envelope.get("schema_version"),
+                    "conversation_turns": len(
+                        list(dict(agent_context_envelope.get("conversation_window") or {}).get("recent_turns") or [])
+                    ),
+                    "memory_fact_count": len(list(dict(agent_context_envelope.get("memory_packet") or {}).get("facts") or [])),
+                    "evidence_item_count": len(list(dict(agent_context_envelope.get("evidence_pack") or {}).get("items") or [])),
+                    "trace": dict(agent_context_envelope.get("trace") or {}),
+                },
             }
             if subgraph_commit_summary:
                 audit_refs["subgraph_commit_summary"] = subgraph_commit_summary

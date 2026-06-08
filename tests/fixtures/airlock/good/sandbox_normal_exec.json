@@ -1,9 +1,9 @@
-{
-  "request_id": "req_sandbox_001",
-  "intent_id": "intent_sandbox_001",
-  "description": "正常 DRAFT_CODE 执行：简单 Python 计算脚本",
-  "payload": {
-    "code": "x = 2 + 3\nprint(f'result={x}')\n",
-    "language": "python"
-  }
+﻿{
+    "request_id":  "req_sandbox_001",
+    "intent_id":  "intent_sandbox_001",
+    "description":  "正常 DRAFT_CODE 执行：简单 Python 计算脚本",
+    "payload":  {
+                    "code":  "x = 2 + 3\nprint(f\u0027result={x}\u0027)\n",
+                    "language":  "python"
+                }
 }

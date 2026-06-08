@@ -320,49 +320,43 @@ def get_tribe_state_summary(
 
 # ── T-74：TribeStateRegistry 命名空间清除运维端点 ─────────────────────────────
 
-# —— Gemini Key 池安全诊断（仅返回状态，不返回密钥明文） ————————————————
+# —— Gemini 单 Key 安全诊断（仅返回状态，不返回密钥明文） ————————————————
 
-class GeminiKeyPoolResponse(BaseModel):
+class GeminiKeyStatusResponse(BaseModel):
     provider_name: str
     scope: str
-    strategy: str
-    pool_size: int
-    runtime_file_pool_enabled: bool
-    env_fallback_enabled: bool
+    key_configured: bool
     source: str
-    source_breakdown: dict[str, int]
-    next_slot: int | None = None
+    runtime_profile_available: bool
+    runtime_secret_ref: str | None = None
+    runtime_error: str | None = None
+    env_key_configured: bool
     ts_ms: int
 
 
-@router.get("/llm/gemini_key_pool", response_model=GeminiKeyPoolResponse)
-def get_gemini_key_pool_status(
+@router.get("/llm/gemini_key", response_model=GeminiKeyStatusResponse)
+def get_gemini_key_status(
     x_internal_token: str | None = Header(default=None, alias="X-Internal-Token", convert_underscores=False),
 ):
     _validate_internal_token(x_internal_token)
     try:
-        from host_brain.app.model_router import inspect_gemini_key_pool  # noqa: PLC0415
+        from host_brain.app.model_router import inspect_gemini_key_status  # noqa: PLC0415
         from host_brain.core.ids import now_ms  # noqa: PLC0415
 
-        snapshot = dict(inspect_gemini_key_pool() or {})
-        return GeminiKeyPoolResponse(
+        snapshot = dict(inspect_gemini_key_status() or {})
+        return GeminiKeyStatusResponse(
             provider_name=str(snapshot.get("provider_name") or "gemini"),
             scope=str(snapshot.get("scope") or "host.llm"),
-            strategy=str(snapshot.get("strategy") or "round_robin"),
-            pool_size=int(snapshot.get("pool_size") or 0),
-            runtime_file_pool_enabled=bool(snapshot.get("runtime_file_pool_enabled", True)),
-            env_fallback_enabled=bool(snapshot.get("env_fallback_enabled", False)),
+            key_configured=bool(snapshot.get("key_configured", False)),
             source=str(snapshot.get("source") or "empty"),
-            source_breakdown=dict(snapshot.get("source_breakdown") or {}),
-            next_slot=(
-                int(snapshot.get("next_slot"))
-                if snapshot.get("next_slot") is not None
-                else None
-            ),
+            runtime_profile_available=bool(snapshot.get("runtime_profile_available", False)),
+            runtime_secret_ref=(str(snapshot.get("runtime_secret_ref")) if snapshot.get("runtime_secret_ref") else None),
+            runtime_error=(str(snapshot.get("runtime_error")) if snapshot.get("runtime_error") else None),
+            env_key_configured=bool(snapshot.get("env_key_configured", False)),
             ts_ms=now_ms(),
         )
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"GEMINI_KEY_POOL_STATUS_FAILED: {exc}") from exc
+        raise HTTPException(status_code=500, detail=f"GEMINI_KEY_STATUS_FAILED: {exc}") from exc
 
 
 class TribeStateDeleteResponse(BaseModel):

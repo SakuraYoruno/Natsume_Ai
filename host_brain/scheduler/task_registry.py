@@ -8,6 +8,8 @@ import threading
 from dataclasses import dataclass, field
 from typing import Any
 
+from host_brain.core.metabolism import ALLOWED_SYS_MODES
+
 logger = logging.getLogger(__name__)
 
 
@@ -26,9 +28,9 @@ class TaskPriority(str, enum.Enum):
 
 
 # ── sys_mode 门控矩阵 ──
-# key = sys_mode, value = 允许通过的最低优先级集合
+# key = sys_mode, value = 允许通过的优先级集合
 # 规则：Gaming 仅允许 HIGH；Focus 仅允许 HIGH；Sleep 允许 HIGH+MEDIUM；Normal 允许全部
-SYSMODE_PRIORITY_MATRIX: dict[str, set[str]] = {
+SYSMODE_PRIORITY_MATRIX: dict[str, set[TaskPriority]] = {
     "normal": {TaskPriority.HIGH, TaskPriority.MEDIUM, TaskPriority.LOW},
     "sleep": {TaskPriority.HIGH, TaskPriority.MEDIUM},
     "gaming": {TaskPriority.HIGH},
@@ -36,6 +38,13 @@ SYSMODE_PRIORITY_MATRIX: dict[str, set[str]] = {
     "maintenance": set(),  # 维护模式禁止一切调度
     "locked": set(),  # 锁定模式禁止一切调度
 }
+
+_matrix_modes = set(SYSMODE_PRIORITY_MATRIX)
+if _matrix_modes != ALLOWED_SYS_MODES:
+    raise RuntimeError(
+        "SYSMODE_PRIORITY_MATRIX must cover exactly the six runtime modes: "
+        f"missing={sorted(ALLOWED_SYS_MODES - _matrix_modes)} extra={sorted(_matrix_modes - ALLOWED_SYS_MODES)}"
+    )
 
 
 @dataclass
@@ -51,6 +60,8 @@ class SchedulerTaskConfig:
     enabled: bool = True
     max_consecutive_failures: int = 3
     description: str = ""
+    resource_profile: dict[str, Any] = field(default_factory=dict)
+    """资源画像：resource_class / uses_llm / uses_gpu / scheduling_policy 等。"""
 
     def validate(self) -> None:
         """校验必填字段。"""
@@ -66,10 +77,27 @@ class SchedulerTaskConfig:
             raise ValueError(f"priority must be TaskPriority, got {type(self.priority)}")
         if not isinstance(self.max_consecutive_failures, int) or self.max_consecutive_failures < 1:
             raise ValueError("max_consecutive_failures must be int >= 1")
+        if not isinstance(self.resource_profile, dict):
+            raise ValueError("resource_profile must be dict")
+        if self.mode_allowlist is not None:
+            normalized_modes: list[str] = []
+            for raw_mode in self.mode_allowlist:
+                mode = str(raw_mode or "").strip().lower()
+                if not mode:
+                    continue
+                if mode not in ALLOWED_SYS_MODES:
+                    raise ValueError(
+                        f"mode_allowlist contains invalid sys_mode={raw_mode!r}; "
+                        f"expected one of {sorted(ALLOWED_SYS_MODES)}"
+                    )
+                normalized_modes.append(mode)
+            self.mode_allowlist = normalized_modes
 
     def is_allowed_in_mode(self, sys_mode: str) -> bool:
         """判断当前 sys_mode 是否允许此任务执行。"""
         mode = str(sys_mode).strip().lower()
+        if mode not in ALLOWED_SYS_MODES:
+            return False
         # 如果有显式 mode_allowlist，以 allowlist 为准
         if self.mode_allowlist is not None:
             return mode in [m.strip().lower() for m in self.mode_allowlist]

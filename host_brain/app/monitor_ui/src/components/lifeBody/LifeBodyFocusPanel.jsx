@@ -58,7 +58,7 @@ export default function LifeBodyFocusPanel({ guidance }) {
                     </div>
                   </div>
                   <span className={`rounded-full border px-2.5 py-1 text-[11px] font-medium ${toneClass}`}>
-                    {item.tone === 'critical' ? '重压' : item.tone === 'warning' ? '波动' : item.tone === 'stable' ? '稳定' : item.tone === 'pending' ? '待接入' : '信号'}
+                    {item.tone === 'critical' ? '重压' : item.tone === 'warning' ? '波动' : item.tone === 'stable' ? '稳定' : item.tone === 'pending' ? '待连通' : '信号'}
                   </span>
                 </div>
 

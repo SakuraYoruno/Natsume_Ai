@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import logging
 from dataclasses import dataclass
 from typing import Any
@@ -16,6 +17,10 @@ from host_brain.core.errors import (
     VTS_DEGRADED_FALLBACK,
 )
 from host_brain.core.ids import new_request_id, now_ms
+from host_brain.channels.vts_runtime_mapping import (
+    VTS_EMOTION_TAG_ALIASES,
+    load_runtime_emotion_mapping,
+)
 
 _logger = logging.getLogger("Natsume.vts")
 
@@ -50,35 +55,16 @@ TALK_END = "TALK_END"
 TRIGGER_HOST = "HOST"
 TRIGGER_LLM = "LLM"
 
-EMOTION_TO_EXPRESSION_ID: dict[str, str] = {
-    # 原有 6 种
-    "NEUTRAL": "exp_neutral_01",
-    "HAPPY": "exp_happy_01",
-    "SAD": "exp_sad_01",
-    "ANGRY": "exp_angry_01",
-    "SURPRISED": "exp_surprised_01",
-    "THINKING": "exp_thinking_01",
-    # M28-L（OPT-34）：补全 10 种缺失情感的表情映射
-    "EXCITED": "exp_excited_01",
-    "CALM": "exp_calm_01",
-    "FRUSTRATED": "exp_frustrated_01",
-    "ANXIOUS": "exp_anxious_01",
-    "LOVING": "exp_loving_01",
-    "EMBARRASSED": "exp_embarrassed_01",
-    "CONFUSED": "exp_confused_01",
-    "BORED": "exp_bored_01",
-    "PROUD": "exp_proud_01",
-    "GRATEFUL": "exp_grateful_01",
-}
+EMOTION_TO_EXPRESSION_ID: dict[str, str] = load_runtime_emotion_mapping()
 
 # M28-L（OPT-34）：未知情感 fallback 映射（按情感极性分组）
 EMOTION_FALLBACK_MAP: dict[str, str] = {
     # 正向情感 → happy
-    "POSITIVE": "exp_happy_01",
+    "POSITIVE": EMOTION_TO_EXPRESSION_ID.get("HAPPY", "HK_Happy"),
     # 负向情感 → sad
-    "NEGATIVE": "exp_sad_01",
+    "NEGATIVE": EMOTION_TO_EXPRESSION_ID.get("SAD", "哭哭"),
     # 中性/未知 → neutral
-    "UNKNOWN": "exp_neutral_01",
+    "UNKNOWN": EMOTION_TO_EXPRESSION_ID.get("NEUTRAL", "移除所有按键表情"),
 }
 
 DEGRADED_FALLBACK_EXPRESSION_TAG = "NEUTRAL"
@@ -371,12 +357,34 @@ def resolve_vts_expression(
         ts_ms=now_value,
     )
 
+    # Edge/VTS emotion resolution used to mirror into the local desktop pet.
+    # Keep that bridge opt-in now that the Host MateEngine model is driven by
+    # chat lifecycle poses; otherwise late VTS expression work can overwrite
+    # the visible "speak -> home" desktop-pet state.
+    if _mateengine_vts_emotion_mirror_enabled():
+        try:
+            from host_brain.channels.mateengine import send_mateengine_action  # noqa: PLC0415
+
+            send_mateengine_action(
+                action="emote",
+                emotion_tag=normalized_tag,
+                request_id=req_id,
+                intensity=0.7,
+            )
+        except Exception as exc:
+            _logger.debug(
+                "MateEngine local desktop pet emotion bridge failed: %s (request_id=%s)",
+                exc,
+                req_id,
+            )
+
     # ── 真正驱动 Edge VTS（fire-and-forget，不阻塞调用方）──────────────────
     # 通过 EdgeRpcClient 发送 HTTP POST /v1/edge/vts，让 Edge 端执行表情切换。
     # 本函数可能在 asyncio.to_thread 的 worker 线程中被调用，因此必须使用
     # run_coroutine_threadsafe 而非 ensure_future，以确保协程被提交到正确的
     # 事件循环（主线程循环）。若无运行中的事件循环则跳过，不影响审计结果。
     try:
+        from host_brain.channels.edge_rpc_client import post_desktop_pet as _post_desktop_pet  # noqa: PLC0415
         from host_brain.channels.edge_rpc_client import post_vts as _post_vts  # noqa: PLC0415
 
         async def _fire_edge_vts() -> None:
@@ -386,6 +394,15 @@ def resolve_vts_expression(
                     emotion_tag=normalized_tag,
                     request_id=req_id,
                 )
+                pet_touch_type = _resolve_desktop_pet_touch_type(normalized_tag)
+                if pet_touch_type and _desktop_pet_emotion_bridge_enabled():
+                    await _post_desktop_pet(
+                        action="touch",
+                        touch_type=pet_touch_type,
+                        expression=normalized_tag,
+                        emotion_tag=normalized_tag,
+                        request_id=req_id,
+                    )
             except Exception as exc:
                 _logger.debug(
                     "Edge VTS HTTP 调用失败（降级）: %s (request_id=%s)",
@@ -408,11 +425,42 @@ def resolve_vts_expression(
     return result
 
 
-def _normalize_emotion_tag(value: str | None) -> str | None:
-    normalized = str(value or "").strip().upper()
+def _desktop_pet_emotion_bridge_enabled() -> bool:
+    raw = str(os.getenv("HOST_DESKTOP_PET_EMOTION_BRIDGE_ENABLED", "true")).strip().lower()
+    return raw not in {"0", "false", "no", "off", "disabled"}
+
+
+def _mateengine_vts_emotion_mirror_enabled() -> bool:
+    raw = str(os.getenv("HOST_MATEENGINE_VTS_EMOTION_MIRROR_ENABLED", "0")).strip().lower()
+    return raw not in {"0", "false", "no", "off", "disabled"}
+
+
+def _resolve_desktop_pet_touch_type(emotion_tag: str | None) -> str | None:
+    normalized = _normalize_emotion_tag(emotion_tag)
     if not normalized:
         return None
-    return normalized
+    return {
+        "HAPPY": "head",
+        "JOY": "head",
+        "EXCITED": "head",
+        "PLAYFUL": "hair",
+        "AFFECTION": "head",
+        "COMFORT": "head",
+        "SURPRISED": "poke",
+        "SHY": "hair",
+        "CONFUSED": "body",
+        "THINKING": "body",
+        "SAD": "body",
+        "ANGRY": "poke",
+        "NEUTRAL": "idle",
+    }.get(normalized)
+
+
+def _normalize_emotion_tag(value: str | None) -> str | None:
+    normalized = str(value or "").strip().upper().replace("-", "_").replace(" ", "_")
+    if not normalized:
+        return None
+    return VTS_EMOTION_TAG_ALIASES.get(normalized, normalized)
 
 
 def _log_result(

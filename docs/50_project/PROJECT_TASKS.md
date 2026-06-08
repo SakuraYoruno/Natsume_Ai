@@ -1,7 +1,7 @@
 受众：PROJECT
 标题：Project Tasks（只产出文档，不涉及代码）
 
-版本：v2.0
+版本：v2.1
 日期：2026-03-27
 
 任务规则：
@@ -49,6 +49,15 @@ TASK-P006：文档门禁合规扫尾
 - 状态：待启动
 - 目标：将剩余 3% 不合规文档补全门禁头
 - 范围：PRD.md 补日期、CURSOR.md 补版本号和日期
+
+TASK-P007：文档过期治理工作流
+- 状态：进行中
+- 目标：把“代码/测试变化 -> 文档同步”做成自动门禁，避免事实文档长期过时
+- 产物：
+  - `tools/doc_lint/doc_freshness_policy.json`
+  - `tools/doc_lint/doc_freshness_gate.py`
+  - `.github/workflows/doc-freshness-gate.yml`
+  - `docs/50_project/guides/DOCUMENT_SYNC_WORKFLOW.md`
 
 ---
 

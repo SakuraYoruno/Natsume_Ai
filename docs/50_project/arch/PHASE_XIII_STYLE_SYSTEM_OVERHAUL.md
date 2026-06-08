@@ -3,10 +3,10 @@
 
 # Phase XIII：风格系统彻底重构
 
-当前代码校准说明（2026-04-19）：
+当前代码校准说明（2026-04-19；2026-05-12 更新）：
 - 本文是 2026-03-30 的阶段设计文档，不是当前运行时事实的唯一入口。
-- 文中核心模块目前均已真实落库：`host_brain/retrieval/style_distiller.py`、`host_brain/retrieval/emotion_utterance_index.py`、`host_brain/app/prompt_builder.py`、`host_brain/app/prompt_builder_node.py`、`host_brain/retrieval/reranker.py`、`scripts/runtime/run_style_distill_v5.py`。
-- 当前接线应以实际代码为准：`host_brain/retrieval/query_planner.py` 已把 `style_canon / persona_utterance` 排除在 5 路 store map 之外；`host_brain/app/prompt_builder_node.py` 已通过 `EmotionTaggedUtteranceIndex` 独立注入 `persona_examples_block`，并过滤 `persona_utterance` evidence；`host_brain/retrieval/reranker.py` 已明确这两类内容不再走 Reranker 竞争；`host_brain/app/chat_context_builder.py` / `chat_context_style.py` 负责当前 style canon 常驻装配。
+- 文中曾落库的 `host_brain/retrieval/emotion_utterance_index.py` 已在当前最小主链清理中删除；它只剩测试保活，不再作为运行时事实。
+- 当前接线应以实际代码为准：最终表层文本主链通过 `host_brain/persona/isolated_surface_harness.py`、场景样本、少量原台词 quote、`sample_guided_text_scorer` 和 `surface_memory_recall` 工作；`style_reference_bank / style_canon / persona_utterance` 不再进入最终 prompt。
 - 运行时资产当前以 `runtime/style_canon/*.jsonl`、`runtime/style_canon/*style_profile*.json` 等文件为主；文中示例产物名应按阶段方案理解，不保证与当前仓库文件集完全一致。
 
 > 从根本上修复"台词库/风格指导对最终生成文本无影响"的问题。
@@ -78,7 +78,7 @@
 - 词汇分析：极简 2-gram 分词 + 停用词过滤 + 频率排序
 - 节奏分析：长度分布 + 相邻台词过渡模式（S→M, M→S 等）
 
-### 2. EmotionTaggedUtteranceIndex（`host_brain/retrieval/emotion_utterance_index.py`）
+### 2. EmotionTaggedUtteranceIndex（历史方案，已删除）
 
 **替代 embedding 语义检索**的台词访问方式：
 
@@ -150,7 +150,7 @@ python scripts/runtime/run_style_distill_v5.py
 | 文件 | 类型 | 说明 |
 |------|------|------|
 | `host_brain/retrieval/style_distiller.py` | 新增 | 深度台词分析器 |
-| `host_brain/retrieval/emotion_utterance_index.py` | 新增 | 情感标签台词索引 |
+| `host_brain/retrieval/emotion_utterance_index.py` | 历史文件，已删除 | 情感标签台词索引旧方案 |
 | `host_brain/app/prompt_builder.py` | 修改 | 台词独立通道+位置上移 |
 | `host_brain/retrieval/reranker.py` | 修改 | style_canon 保底机制 |
 | `scripts/runtime/run_style_distill_v5.py` | 新增 | 蒸馏运行脚本 |

@@ -14,7 +14,6 @@ import urllib.error
 import urllib.request
 from typing import Any, Callable, Mapping
 
-from host_brain.app.model_router import resolve_gemini_key_pool
 from host_brain.app.chat_runtime_input import (
     get_chat_runtime_render_target_lang,
     get_chat_runtime_user_message,
@@ -30,6 +29,12 @@ from host_brain.integrations.llm_gateway import (
     PROVIDER_MINIMAX,
     PROVIDER_MOCK,
     PROVIDER_OPENAI,
+)
+from host_brain.integrations.codex_cli_provider import (
+    codex_cli_lm_available,
+    invoke_codex_cli_text,
+    resolve_codex_cli_model,
+    resolve_codex_cli_timeout_ms,
 )
 from host_brain.app.prompt_builder import (
     CHAT_DIRECT_NODE_ID,
@@ -100,7 +105,7 @@ def _normalize_openai_compat_base_url(value: str | None) -> str | None:
 
 def _is_minimax_standard_model(model_id: str | None) -> bool:
     normalized = str(model_id or "").strip().lower()
-    return normalized == "m2-her"
+    return normalized in {"m2-her", "minimax-m2-her"}
 
 
 def _resolve_minimax_base_url(base_url_override: str | None = None) -> str:
@@ -138,8 +143,11 @@ def _build_minimax_standard_provider_fn(
         else:
             prompt_text = render_host_generation_prompt(runtime_payload)
 
+        outbound_model_id = str(model_id or "").strip() or "M2-her"
+        if outbound_model_id.lower() == "minimax-m2-her":
+            outbound_model_id = "M2-her"
         payload = {
-            "model": str(model_id or "").strip() or "M2-her",
+            "model": outbound_model_id,
             "messages": [
                 {"role": "system", "name": "NatsumeHost", "content": system_prompt},
                 {"role": "user", "name": "User", "content": prompt_text},
@@ -266,44 +274,6 @@ _GEMINI_PRIMARY_FALLBACK_TRIGGER_MARKERS = (
     "resource_exhausted",
     * _GEMINI_PRIMARY_RETRYABLE_MARKERS,
 )
-_GEMINI_KEY_FAILOVER_BLOCKED_MARKERS = (
-    "400",
-    "bad request",
-    "invalid argument",
-    "invalid_request",
-    "malformed",
-    "safety",
-    "content policy",
-)
-_GEMINI_KEY_FAILOVER_TRIGGER_MARKERS = (
-    "429",
-    "quota",
-    "rate limit",
-    "rate_limit",
-    "resource_exhausted",
-    "too many requests",
-    * _GEMINI_PRIMARY_RETRYABLE_MARKERS,
-)
-
-
-def _parse_bool_env(name: str, *, default: bool) -> bool:
-    raw = str(os.environ.get(name) or "").strip().lower()
-    if not raw:
-        return bool(default)
-    if raw in {"1", "true", "yes", "on"}:
-        return True
-    if raw in {"0", "false", "no", "off"}:
-        return False
-    return bool(default)
-
-
-def _parse_int_env(name: str, *, default: int, minimum: int, maximum: int) -> int:
-    raw = str(os.environ.get(name) or "").strip()
-    try:
-        value = int(raw) if raw else int(default)
-    except ValueError:
-        value = int(default)
-    return max(int(minimum), min(int(maximum), value))
 
 
 def _is_async_callable(fn: Callable[..., Any]) -> bool:
@@ -316,20 +286,6 @@ async def _invoke_provider_fn(provider_fn: Callable[[dict[str, Any]], Any], prom
     return await asyncio.to_thread(provider_fn, prompt_payload)
 
 
-def _should_try_gemini_key_failover(exc: BaseException) -> bool:
-    if isinstance(exc, TimeoutError):
-        return True
-    detail = str(exc or "").strip().lower()
-    if not detail:
-        return True
-    if any(marker in detail for marker in _GEMINI_KEY_FAILOVER_BLOCKED_MARKERS):
-        return False
-    if any(marker in detail for marker in _GEMINI_KEY_FAILOVER_TRIGGER_MARKERS):
-        return True
-    # Unknown transport/provider errors are treated as failover-eligible by default.
-    return True
-
-
 def resolve_host_llm_model_id(provider_name: str) -> str:
     provider = str(provider_name or "").strip().lower()
     override_model = str(os.environ.get("HOST_LLM_MODEL_ID") or "").strip()
@@ -338,11 +294,11 @@ def resolve_host_llm_model_id(provider_name: str) -> str:
     if provider == PROVIDER_GEMINI:
         return str(os.environ.get("HOST_GEMINI_MODEL_ID") or "gemini-2.5-flash-lite").strip() or "gemini-2.5-flash-lite"
     if provider == PROVIDER_CODEX:
-        return str(os.environ.get("HOST_CODEX_MODEL_ID") or "gpt-4o-mini").strip() or "gpt-4o-mini"
+        return resolve_codex_cli_model(os.environ.get("HOST_CODEX_MODEL_ID"))
     if provider == PROVIDER_OPENAI:
         return str(os.environ.get("HOST_OPENAI_MODEL_ID") or "gpt-4o-mini").strip() or "gpt-4o-mini"
     if provider == PROVIDER_DEEPSEEK:
-        return str(os.environ.get("HOST_DEEPSEEK_MODEL_ID") or "deepseek-chat").strip() or "deepseek-chat"
+        return str(os.environ.get("HOST_DEEPSEEK_MODEL_ID") or "deepseek-v4-flash").strip() or "deepseek-v4-flash"
     if provider == PROVIDER_MINIMAX:
         return str(os.environ.get("HOST_MINIMAX_MODEL_ID") or "M2-her").strip() or "M2-her"
     return "mock-default"
@@ -481,29 +437,11 @@ def wrap_node_provider_fn_with_retry(
     return _async_provider  # type: ignore[return-value]
 
 
-def build_langchain_chat_provider_fn(
+def _resolve_openai_compat_chat_endpoint(
     *,
-    provider_name: str,
-    model_id: str,
-    api_key: str,
-    timeout_ms: int,
-    node_id: str | None = None,
-    base_url_override: str | None = None,
-) -> Callable[[dict[str, Any]], Any]:
-    from langchain_openai import ChatOpenAI  # noqa: PLC0415
-    from langchain_core.messages import HumanMessage, SystemMessage  # noqa: PLC0415
-
-    provider = str(provider_name or "").strip().lower()
-    model_name = str(model_id or "").strip() or "default"
-    if provider == PROVIDER_MINIMAX and _is_minimax_standard_model(model_name):
-        return _build_minimax_standard_provider_fn(
-            model_id=model_name,
-            api_key=api_key,
-            timeout_ms=timeout_ms,
-            node_id=node_id,
-            base_url_override=base_url_override,
-        )
-
+    provider: str,
+    base_url_override: str | None,
+) -> str:
     base_url: str | None = str(base_url_override or "").strip() or None
     if not base_url:
         if provider == PROVIDER_DEEPSEEK:
@@ -521,18 +459,77 @@ def build_langchain_chat_provider_fn(
         elif provider == PROVIDER_MINIMAX:
             base_url = _normalize_openai_compat_base_url(_resolve_minimax_base_url()) or _MINIMAX_OPENAI_COMPAT_DEFAULT_BASE_URL
         else:
-            base_url = str(os.environ.get("HOST_OPENAI_BASE_URL") or "").strip() or None
+            base_url = str(os.environ.get("HOST_OPENAI_BASE_URL") or "https://api.openai.com/v1").strip()
+    normalized = _normalize_openai_compat_base_url(base_url)
+    if not normalized:
+        raise RuntimeError(f"OpenAI-compatible base URL unavailable for provider={provider or 'unknown'}")
+    return f"{normalized.rstrip('/')}/chat/completions"
 
-    llm = ChatOpenAI(
-        model=model_name,
-        api_key=api_key,
-        base_url=base_url,
-        timeout=max(1.0, float(timeout_ms) / 1000.0),
-        max_retries=1,
-        temperature=0.4,
-    )
+
+def _normalize_openai_compat_content(value: Any) -> str:
+    if isinstance(value, str):
+        return value
+    if isinstance(value, list):
+        chunks: list[str] = []
+        for item in value:
+            if isinstance(item, Mapping):
+                text = item.get("text")
+                if text is None:
+                    text = item.get("content")
+                if text is not None:
+                    chunks.append(str(text))
+            elif item is not None:
+                chunks.append(str(item))
+        return "".join(chunks)
+    if value is None:
+        return ""
+    return str(value)
+
+
+def _extract_openai_compat_response_text(parsed: Mapping[str, Any]) -> str:
+    choices = parsed.get("choices")
+    if not isinstance(choices, list) or not choices:
+        raise RuntimeError("OpenAI-compatible API returned no choices")
+    first = choices[0]
+    if not isinstance(first, Mapping):
+        raise RuntimeError("OpenAI-compatible API returned invalid choice")
+    message = first.get("message")
+    if isinstance(message, Mapping):
+        text = _normalize_openai_compat_content(message.get("content")).strip()
+        if text:
+            return text
+    text = _normalize_openai_compat_content(first.get("text")).strip()
+    if text:
+        return text
+    raise RuntimeError("OpenAI-compatible API returned empty content")
+
+
+def build_langchain_chat_provider_fn(
+    *,
+    provider_name: str,
+    model_id: str,
+    api_key: str,
+    timeout_ms: int,
+    node_id: str | None = None,
+    base_url_override: str | None = None,
+) -> Callable[[dict[str, Any]], Any]:
+    provider = str(provider_name or "").strip().lower()
+    model_name = str(model_id or "").strip() or "default"
+    if provider == PROVIDER_MINIMAX and _is_minimax_standard_model(model_name):
+        return _build_minimax_standard_provider_fn(
+            model_id=model_name,
+            api_key=api_key,
+            timeout_ms=timeout_ms,
+            node_id=node_id,
+            base_url_override=base_url_override,
+        )
+
     resolved_node_id = str(node_id or "").strip()
     system_prompt = _build_host_openai_system_prompt(resolved_node_id)
+    endpoint = _resolve_openai_compat_chat_endpoint(
+        provider=provider,
+        base_url_override=base_url_override,
+    )
 
     def _provider(prompt_payload: dict[str, Any]) -> str:
         runtime_payload = prompt_payload.get("input") if isinstance(prompt_payload, dict) else None
@@ -554,13 +551,51 @@ def build_langchain_chat_provider_fn(
         except Exception:
             pass
 
-        response = llm.invoke(
-            [
-                SystemMessage(content=system_prompt),
-                HumanMessage(content=prompt_text),
-            ]
+        payload = {
+            "model": model_name,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": prompt_text},
+            ],
+            "stream": False,
+            "temperature": 0.4,
+            "top_p": 0.9,
+            "max_tokens": 1024,
+        }
+        request = urllib.request.Request(
+            endpoint,
+            data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+                "User-Agent": "NatsumeHost/1.0",
+            },
+            method="POST",
         )
-        response_text = extract_langchain_content_text(getattr(response, "content", ""))
+        timeout_s = max(1.0, float(timeout_ms) / 1000.0)
+        try:
+            with urllib.request.urlopen(request, timeout=timeout_s) as response:
+                raw_text = response.read().decode("utf-8", errors="replace")
+        except urllib.error.HTTPError as exc:
+            detail = ""
+            try:
+                detail = exc.read().decode("utf-8", errors="replace")
+            except Exception:
+                detail = ""
+            raise RuntimeError(
+                f"OpenAI-compatible API error provider={provider} status={exc.code}: {detail or exc.reason}"
+            ) from exc
+        except urllib.error.URLError as exc:
+            raise RuntimeError(f"OpenAI-compatible API request failed provider={provider}: {exc}") from exc
+
+        try:
+            parsed = json.loads(raw_text)
+        except Exception as exc:
+            raise RuntimeError(f"OpenAI-compatible API returned non-JSON payload: {raw_text[:400]}") from exc
+        if not isinstance(parsed, Mapping):
+            raise RuntimeError(f"OpenAI-compatible API returned invalid payload: {raw_text[:400]}")
+        response_text = _extract_openai_compat_response_text(parsed)
         return coerce_gateway_payload_json_text(response_text)
 
     return _provider
@@ -595,6 +630,34 @@ def build_host_mock_provider() -> Callable[[dict[str, Any]], Any]:
     return build_host_mock_provider_for_node(None)
 
 
+def _build_codex_cli_provider_fn(
+    *,
+    model_id: str,
+    timeout_ms: int,
+    node_id: str | None = None,
+) -> Callable[[dict[str, Any]], Any]:
+    resolved_node_id = str(node_id or "").strip()
+
+    def _provider(prompt_payload: dict[str, Any]) -> str:
+        runtime_payload = prompt_payload.get("input") if isinstance(prompt_payload, dict) else None
+        if not isinstance(runtime_payload, dict):
+            runtime_payload = dict(prompt_payload or {}) if isinstance(prompt_payload, dict) else {}
+        if resolved_node_id:
+            prompt_text = render_node_generation_prompt(node_id=resolved_node_id, runtime_payload=runtime_payload)
+        else:
+            prompt_text = render_host_generation_prompt(runtime_payload)
+        raw_text = invoke_codex_cli_text(
+            model_id=model_id,
+            messages=[{"role": "user", "content": prompt_text}],
+            timeout_ms=resolve_codex_cli_timeout_ms(timeout_ms),
+            response_format={"type": "json_object"},
+            feature_key=f"node:{resolved_node_id or 'host'}",
+        )
+        return coerce_gateway_payload_json_text(raw_text)
+
+    return _provider
+
+
 def build_host_provider_fn(
     *,
     provider_name: str,
@@ -605,6 +668,12 @@ def build_host_provider_fn(
 ) -> Callable[[dict[str, Any]], Any]:
     provider = str(provider_name or "").strip().lower()
     key_value = str(api_key or "").strip()
+    if provider == PROVIDER_CODEX and not key_value and codex_cli_lm_available():
+        return _build_codex_cli_provider_fn(
+            model_id=model_id,
+            timeout_ms=timeout_ms,
+            node_id=None,
+        )
     if provider in {PROVIDER_OPENAI, PROVIDER_CODEX, PROVIDER_DEEPSEEK, PROVIDER_GEMINI, PROVIDER_MINIMAX} and key_value:
         return build_langchain_chat_provider_fn(
             provider_name=provider,
@@ -662,65 +731,12 @@ def build_host_provider_fn_for_node(
 
     provider = str(provider_name or "").strip().lower()
     key_value = str(api_key or "").strip()
-    if provider in {PROVIDER_OPENAI, PROVIDER_CODEX, PROVIDER_DEEPSEEK, PROVIDER_GEMINI} and key_value:
-        if provider != PROVIDER_GEMINI:
-            return _build_single_key_provider(key_value)
-
-        if not _parse_bool_env("HOST_GEMINI_KEY_FAILOVER_ENABLED", default=True):
-            return _build_single_key_provider(key_value)
-
-        key_pool = resolve_gemini_key_pool(preferred_api_key=key_value)
-        if not key_pool:
-            return _build_single_key_provider(key_value)
-        max_attempts = _parse_int_env(
-            "HOST_GEMINI_KEY_FAILOVER_MAX_ATTEMPTS",
-            default=9,
-            minimum=1,
-            maximum=max(1, len(key_pool)),
+    if provider == PROVIDER_CODEX and not key_value and codex_cli_lm_available():
+        return _build_codex_cli_provider_fn(
+            model_id=model_id,
+            timeout_ms=timeout_ms,
+            node_id=node_id,
         )
-        candidate_keys = list(key_pool)[:max_attempts]
-        if len(candidate_keys) <= 1:
-            return _build_single_key_provider(candidate_keys[0])
-
-        provider_cache: dict[str, Callable[[dict[str, Any]], Any]] = {}
-
-        def _provider_for_key(secret: str) -> Callable[[dict[str, Any]], Any]:
-            cached = provider_cache.get(secret)
-            if cached is not None:
-                return cached
-            built = _build_single_key_provider(secret)
-            provider_cache[secret] = built
-            return built
-
-        async def _key_failover_provider(prompt_payload: dict[str, Any]) -> Any:
-            last_exc: BaseException | None = None
-            for idx, key_secret in enumerate(candidate_keys, start=1):
-                provider_fn = _provider_for_key(key_secret)
-                try:
-                    return await _invoke_provider_fn(provider_fn, prompt_payload)
-                except Exception as exc:
-                    last_exc = exc
-                    has_next = idx < len(candidate_keys)
-                    should_failover = has_next and _should_try_gemini_key_failover(exc)
-                    if should_failover:
-                        _logger.warning(
-                            "Gemini key failover for node=%s model=%s slot=%d/%d after failure: %s",
-                            str(node_id or "").strip() or "-",
-                            str(model_id or "").strip() or "-",
-                            idx,
-                            len(candidate_keys),
-                            exc,
-                        )
-                        continue
-                    if idx > 1:
-                        raise RuntimeError(
-                            f"gemini key failover exhausted node={str(node_id or '').strip() or '-'} "
-                            f"model={str(model_id or '').strip() or '-'} tried={idx} last_error={exc}"
-                        ) from exc
-                    raise
-            if last_exc is not None:
-                raise last_exc
-            raise RuntimeError("gemini key failover provider exhausted without execution")
-
-        return _key_failover_provider
+    if provider in {PROVIDER_OPENAI, PROVIDER_CODEX, PROVIDER_DEEPSEEK, PROVIDER_GEMINI} and key_value:
+        return _build_single_key_provider(key_value)
     return build_host_mock_provider_for_node(node_id)

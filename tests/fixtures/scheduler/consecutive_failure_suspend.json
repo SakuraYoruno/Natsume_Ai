@@ -1,23 +1,40 @@
-{
-  "scenario": "consecutive_failure_suspend",
-  "description": "连续失败 3 次后任务自动暂停",
-  "task_config": {
-    "task_id": "test_diary_writer",
-    "trigger_mode": "cron",
-    "trigger_config": {"hour": 23, "minute": 0},
-    "intent_template": {"skill_name": "diary_writer", "args": {}},
-    "priority": "HIGH",
-    "enabled": true,
-    "max_consecutive_failures": 3
-  },
-  "failure_sequence": [
-    {"status": "ERROR", "reason_code": "LLM_UNAVAILABLE"},
-    {"status": "ERROR", "reason_code": "LLM_UNAVAILABLE"},
-    {"status": "ERROR", "reason_code": "LLM_UNAVAILABLE"}
-  ],
-  "expected_after_failures": {
-    "status": "SUSPENDED",
-    "reason_code": "SCHED_TASK_SUSPENDED",
-    "error_count": 3
-  }
+﻿{
+    "scenario":  "consecutive_failure_suspend",
+    "description":  "连续失败 3 次后任务自动暂停",
+    "task_config":  {
+                        "task_id":  "test_diary_writer",
+                        "trigger_mode":  "cron",
+                        "trigger_config":  {
+                                               "hour":  23,
+                                               "minute":  0
+                                           },
+                        "intent_template":  {
+                                                "skill_name":  "diary_writer",
+                                                "args":  {
+
+                                                         }
+                                            },
+                        "priority":  "HIGH",
+                        "enabled":  true,
+                        "max_consecutive_failures":  3
+                    },
+    "failure_sequence":  [
+                             {
+                                 "status":  "ERROR",
+                                 "reason_code":  "LLM_UNAVAILABLE"
+                             },
+                             {
+                                 "status":  "ERROR",
+                                 "reason_code":  "LLM_UNAVAILABLE"
+                             },
+                             {
+                                 "status":  "ERROR",
+                                 "reason_code":  "LLM_UNAVAILABLE"
+                             }
+                         ],
+    "expected_after_failures":  {
+                                    "status":  "SUSPENDED",
+                                    "reason_code":  "SCHED_TASK_SUSPENDED",
+                                    "error_count":  3
+                                }
 }

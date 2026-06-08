@@ -17,6 +17,7 @@ from dataclasses import dataclass
 import json
 import logging
 import os
+from pathlib import Path
 import threading
 import time
 from typing import Any, Callable, Dict, List, Literal, Optional
@@ -60,6 +61,17 @@ def _env_int(name: str, default: int, *, minimum: int) -> int:
         return max(int(raw), minimum)
     except (TypeError, ValueError):
         return max(int(default), minimum)
+
+
+def _env_bool(name: str, default: bool) -> bool:
+    raw = str(os.getenv(name) or "").strip().lower()
+    if not raw:
+        return bool(default)
+    if raw in {"1", "true", "yes", "on"}:
+        return True
+    if raw in {"0", "false", "no", "off"}:
+        return False
+    return bool(default)
 
 
 _TRACE_BUILD_TIMEOUT_SEC = _env_float("OBS_TRACE_BUILD_TIMEOUT_SEC", 3.5, minimum=1.0)
@@ -316,7 +328,7 @@ def _infer_trace_group_id(
     if normalized_id in _CORTEX_ORCHESTRATOR_NODE_IDS or normalized_id == "render_policy":
         return "orchestration"
 
-    if normalized_id in _EXECUTIVE_ROUTER_NODE_IDS or normalized_id in {"chat_agent"} or normalized_id.startswith("sub_agent"):
+    if normalized_id in _EXECUTIVE_ROUTER_NODE_IDS or normalized_id in {"surface_reply"} or normalized_id.startswith("sub_agent"):
         return "agent"
 
     if normalized_id in {"prompt_builder", "llm_stream", "llm_gateway", "cortex_orchestrator_llm_stream"} or normalized_type == "llm" or normalized_id.startswith("llm_"):
@@ -778,7 +790,7 @@ def _extract_recall_summary_from_trace_nodes_raw(nodes_raw: List[Dict[str, Any]]
     if candidate_count is None and route_count is None and route_error_count is None and not output_dict:
         return None
 
-    return {
+    summary = {
         "candidate_count": candidate_count,
         "route_count": route_count,
         "route_error_count": route_error_count,
@@ -800,6 +812,23 @@ def _extract_recall_summary_from_trace_nodes_raw(nodes_raw: List[Dict[str, Any]]
             }
         ],
     }
+    for key in (
+        "items",
+        "topk",
+        "evidence_topk",
+        "selected_refs",
+        "evidence_refs",
+        "evidence_refs_count",
+        "pack_id",
+        "fallback_embedding_used",
+    ):
+        if key in source and source.get(key) is not None:
+            summary[key] = source.get(key)
+    if "topk" not in summary and output_dict.get("topk") is not None:
+        summary["topk"] = output_dict.get("topk")
+    if summary.get("topk") or summary.get("items") or summary.get("evidence_topk"):
+        summary["content_available"] = True
+    return summary
 
 
 def _fetch_request_rows(ledger: SQLiteLedger, table: str, request_id: str) -> List[Dict[str, Any]]:
@@ -969,9 +998,10 @@ def _summarize_recall(retrieval_rows: List[Dict[str, Any]]) -> Optional[Dict[str
                 summary["items"] = payload_dict.get("items")
         elif op_kind == "RERANK":
             summary["topk_count"] = payload_dict.get("topk_count")
-            summary["rerank_provider"] = payload_dict.get("provider") or payload_dict.get("effective_provider")
+            summary["rerank_provider"] = payload_dict.get("provider")
             if payload_dict.get("topk"):
                 summary["topk"] = payload_dict.get("topk")
+                summary["content_available"] = True
         elif op_kind == "EVIDENCE_PACK":
             summary["evidence_refs_count"] = payload_dict.get("evidence_refs_count")
             summary["pack_id"] = payload_dict.get("pack_id")
@@ -1170,7 +1200,6 @@ def _build_retrieval_trace_nodes(
         "AGENTIC_RAG": "Agentic RAG",
         "EMBEDDING": "Recall Embedding",
         "RECALL": "Recall Fusion",
-        "RERANK": "Recall Rerank",
         "EVIDENCE_PACK": "Evidence Pack",
         "PIPELINE": "Retrieval Pipeline",
     }
@@ -1179,7 +1208,6 @@ def _build_retrieval_trace_nodes(
         "AGENTIC_RAG": "agentic_rag",
         "EMBEDDING": "retrieval_embedding",
         "RECALL": "recall_fusion",
-        "RERANK": "retrieval_rerank",
         "EVIDENCE_PACK": "retrieval_evidence_pack",
         "PIPELINE": "retrieval_pipeline",
     }
@@ -1189,6 +1217,8 @@ def _build_retrieval_trace_nodes(
     agentic_rag_emitted = False
     for row in retrieval_rows:
         op_kind = str(row.get("op_kind") or "").strip().upper() or "UNKNOWN"
+        if op_kind == "RERANK":
+            continue
         payload = _safe_json(row.get("payload"))
         payload_dict = dict(payload) if isinstance(payload, dict) else {}
         latency_ms = payload_dict.get("latency_ms")
@@ -1415,13 +1445,13 @@ def _build_orchestration_trace_nodes(
     if summary.get("output_text") or failure_event:
         nodes.append(
             TraceNode(
-                node_id="chat_agent",
+                node_id="surface_reply",
                 node_type="agent",
-                display_name="Chat Agent",
+                display_name="Surface Reply",
                 side="host",
                 status="FAIL" if failure_event else "OK",
                 reason_code=failure_event,
-                latency_ms=node_timings_ms.get("chat_agent"),
+                latency_ms=node_timings_ms.get("surface_reply"),
                 output_data={
                     "final_response": summary.get("output_text"),
                     "final_response_chars": summary.get("final_response_chars"),
@@ -1658,8 +1688,6 @@ def _trace_node_order_rank(node: TraceNode) -> int:
         return 30
     if node_id in ("recall_fusion",) or node_id.startswith("recall_fusion"):
         return 31
-    if node_id.startswith("retrieval_rerank"):
-        return 32
     if node_id.startswith("retrieval_evidence_pack"):
         return 33
     if node_id.startswith("retrieval_pipeline"):
@@ -1676,7 +1704,7 @@ def _trace_node_order_rank(node: TraceNode) -> int:
         return 39
     if node_id == "executive_router":
         return 41
-    if node_id == "chat_agent":
+    if node_id == "surface_reply":
         return 43
     # Prompt + LLM
     if node_id == "prompt_builder":
@@ -3436,6 +3464,86 @@ def get_llm_nodes(
         ))
 
     return LlmNodesResponse(nodes=nodes, timestamp=_now_ms())
+
+
+def _load_resource_manager_status_file() -> dict[str, Any]:
+    status_path = Path(__file__).resolve().parents[1] / "data" / "runtime_resource_manager.json"
+    if not status_path.exists():
+        return {}
+    try:
+        payload = json.loads(status_path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        logger.debug("resource manager status file read failed: %s", exc)
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _compact_resource_manager_status(payload: dict[str, Any]) -> dict[str, Any]:
+    last_snapshot = payload.get("last_snapshot") if isinstance(payload.get("last_snapshot"), dict) else {}
+    last_decision = payload.get("last_decision") if isinstance(payload.get("last_decision"), dict) else {}
+    last_actions = payload.get("last_actions") if isinstance(payload.get("last_actions"), list) else []
+    last_gate_decisions = payload.get("last_gate_decisions") if isinstance(payload.get("last_gate_decisions"), list) else []
+    last_llm_attempts = payload.get("last_llm_attempts") if isinstance(payload.get("last_llm_attempts"), list) else []
+    return {
+        "running": bool(payload.get("running")),
+        "interval_s": payload.get("interval_s"),
+        "llm_enabled": bool(payload.get("llm_enabled")),
+        "auto_gc_enabled": bool(payload.get("auto_gc_enabled")),
+        "auto_trim_enabled": bool(payload.get("auto_trim_enabled")),
+        "last_tick_ts_ms": payload.get("last_tick_ts_ms"),
+        "tick_count": payload.get("tick_count") or 0,
+        "analysis_count": payload.get("analysis_count") or 0,
+        "auto_action_count": payload.get("auto_action_count") or 0,
+        "last_error": payload.get("last_error"),
+        "last_llm_error": payload.get("last_llm_error"),
+        "last_llm_attempts": last_llm_attempts[:8],
+        "last_snapshot": last_snapshot,
+        "last_decision": last_decision,
+        "last_actions": last_actions[:12],
+        "last_gate_decisions": last_gate_decisions[:20],
+        "status_path": payload.get("status_path"),
+    }
+
+
+@router.get("/resource-manager/status")
+def get_resource_manager_status():
+    """Whole-system resource manager status for scheduler explainability."""
+    if not _env_bool("HOST_RESOURCE_MANAGER_ENABLED", False):
+        return {
+            "status": "DISABLED",
+            "source": "disabled",
+            "timestamp": _now_ms(),
+            "running": False,
+            "registered": False,
+            "detail": "SystemResourceManager is disabled.",
+            "status_path": str(Path(__file__).resolve().parents[1] / "data" / "runtime_resource_manager.json"),
+        }
+
+    source = "unavailable"
+    raw_status: dict[str, Any] = {}
+    try:
+        from host_brain.app.dependencies import get_resource_manager  # noqa: PLC0415
+
+        manager = get_resource_manager(create_if_missing=False)
+        if manager is not None:
+            status = manager.get_status()
+            raw_status = status if isinstance(status, dict) else {}
+            source = "live_manager"
+    except Exception as exc:
+        logger.debug("resource manager live status unavailable: %s", exc)
+
+    if not raw_status:
+        raw_status = _load_resource_manager_status_file()
+        if raw_status:
+            source = "status_file"
+
+    status = "OK" if raw_status else "UNAVAILABLE"
+    return {
+        "status": status,
+        "source": source,
+        "timestamp": _now_ms(),
+        **_compact_resource_manager_status(raw_status),
+    }
 
 
 # ---------------------------------------------------------------------------

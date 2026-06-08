@@ -7,8 +7,8 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from host_brain.bond.bond_stage_engine import (
-    STAGE_ACQUAINTANCE,
-    STAGE_STRANGER,
+    STAGE_CLOSE_FRIEND,
+    STAGE_FRIEND,
     BondStageEngine,
 )
 from host_brain.app.bond_routes import router, set_bond_engine_provider
@@ -37,7 +37,7 @@ class TestBondHealth:
         data = resp.json()
         assert data["status"] == "OK"
         assert "stage_order" in data
-        assert len(data["stage_order"]) == 6
+        assert len(data["stage_order"]) == 4
         assert "request_id" in data
 
     def test_health_user_count_starts_zero(self, client):
@@ -49,14 +49,14 @@ class TestBondHealth:
 # ── T-BOND-API-02: GET /bond/stage/{user_id} ─────────────────────────────────
 
 class TestGetBondStage:
-    """T-BOND-API-02: GET /bond/stage/{user_id} 返回初始 STRANGER 状态。"""
+    """T-BOND-API-02: GET /bond/stage/{user_id} 返回关系好的兄妹基线。"""
 
-    def test_new_user_is_stranger(self, client):
+    def test_new_user_is_friend(self, client):
         resp = client.get("/bond/stage/alice")
         assert resp.status_code == 200
         data = resp.json()
         assert data["user_id"] == get_canonical_bond_user_id()
-        assert data["current_stage"] == STAGE_STRANGER
+        assert data["current_stage"] == STAGE_FRIEND
         assert data["total_score"] == 0
         assert data["stage_index"] == 0
 
@@ -84,7 +84,7 @@ class TestGetBondSummary:
         resp = client.get("/bond/summary/dave")
         data = resp.json()
         # M28-H：to_summary() 返回中文阶段名
-        _VALID_STAGES_CN = {"陌生人", "相识", "朋友", "挚友", "知己", "灵魂伴侣"}
+        _VALID_STAGES_CN = {"关系好的兄妹", "亲近兄妹", "亲密恋人", "灵魂伴侣"}
         assert data["stage"] in _VALID_STAGES_CN
 
     def test_summary_trend_is_valid(self, client):
@@ -125,7 +125,7 @@ class TestSubmitBondEvent:
 
     def test_submit_event_updates_stage_state(self, client):
         # 提交足够多的 DEEP_TALK 事件触发晋级
-        for i in range(2):
+        for i in range(14):
             client.post("/bond/event", json={
                 "user_id": "user_003",
                 "update_kind": "DEEP_TALK",
@@ -133,8 +133,8 @@ class TestSubmitBondEvent:
             })
         resp = client.get("/bond/stage/user_003")
         data = resp.json()
-        assert data["current_stage"] == STAGE_ACQUAINTANCE
-        assert data["total_score"] == 10
+        assert data["current_stage"] == STAGE_CLOSE_FRIEND
+        assert data["total_score"] == 70
 
 
 # ── T-BOND-API-05: POST /bond/event 无 evidence_refs → 422 ───────────────────
@@ -202,8 +202,8 @@ class TestSummaryAfterPromotion:
     """T-BOND-API-07: 晋级后 Summary 阶段字段更新。"""
 
     def test_summary_stage_updates_after_promotion(self, client):
-        # 触发晋级到 ACQUAINTANCE
-        for i in range(2):
+        # 触发晋级到 CLOSE_FRIEND
+        for i in range(14):
             client.post("/bond/event", json={
                 "user_id": "frank",
                 "update_kind": "DEEP_TALK",
@@ -211,11 +211,10 @@ class TestSummaryAfterPromotion:
             })
         resp = client.get("/bond/summary/frank")
         data = resp.json()
-        # M28-H：to_summary() 返回中文阶段名，ACQUAINTANCE 对应“相识”
-        assert data["stage"] == "相识"
+        assert data["stage"] == "亲近兄妹"
 
     def test_summary_still_no_numeric_after_promotion(self, client):
-        for i in range(2):
+        for i in range(14):
             client.post("/bond/event", json={
                 "user_id": "grace",
                 "update_kind": "DEEP_TALK",

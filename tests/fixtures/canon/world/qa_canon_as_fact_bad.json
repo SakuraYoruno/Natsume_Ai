@@ -1,35 +1,35 @@
-{
-  "description": "QA Canon-as-fact 违规示例（T-WCanon-06 fixture）：叙事含 Canon 标记 + 完成性表述",
-  "cases": [
-    {
-      "id": "bad-01",
-      "narrative": "根据世界观设定，已执行了系统初始化流程。",
-      "expect_violated": true,
-      "expect_code": "CANON_AS_FACT_VIOLATION"
-    },
-    {
-      "id": "bad-02",
-      "narrative": "Canon 规定的架构已确认部署完成。",
-      "expect_violated": true,
-      "expect_code": "CANON_AS_FACT_VIOLATION"
-    },
-    {
-      "id": "bad-03",
-      "narrative": "The world canon settings have been saved successfully.",
-      "expect_violated": true,
-      "expect_code": "CANON_AS_FACT_VIOLATION"
-    },
-    {
-      "id": "good-01",
-      "narrative": "根据世界观设定，Host Brain 负责意图解析。",
-      "expect_violated": false,
-      "expect_code": null
-    },
-    {
-      "id": "good-02",
-      "narrative": "系统正在处理请求，请稍候。",
-      "expect_violated": false,
-      "expect_code": null
-    }
-  ]
+﻿{
+    "description":  "QA Canon-as-fact 违规示例（T-WCanon-06 fixture）：叙事含 Canon 标记 + 完成性表述",
+    "cases":  [
+                  {
+                      "id":  "bad-01",
+                      "narrative":  "根据世界观设定，已执行了系统初始化流程。",
+                      "expect_violated":  true,
+                      "expect_code":  "CANON_AS_FACT_VIOLATION"
+                  },
+                  {
+                      "id":  "bad-02",
+                      "narrative":  "Canon 规定的架构已确认部署完成。",
+                      "expect_violated":  true,
+                      "expect_code":  "CANON_AS_FACT_VIOLATION"
+                  },
+                  {
+                      "id":  "bad-03",
+                      "narrative":  "The world canon settings have been saved successfully.",
+                      "expect_violated":  true,
+                      "expect_code":  "CANON_AS_FACT_VIOLATION"
+                  },
+                  {
+                      "id":  "good-01",
+                      "narrative":  "根据世界观设定，Host Brain 负责意图解析。",
+                      "expect_violated":  false,
+                      "expect_code":  null
+                  },
+                  {
+                      "id":  "good-02",
+                      "narrative":  "系统正在处理请求，请稍候。",
+                      "expect_violated":  false,
+                      "expect_code":  null
+                  }
+              ]
 }

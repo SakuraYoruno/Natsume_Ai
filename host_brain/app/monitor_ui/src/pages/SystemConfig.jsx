@@ -3,7 +3,6 @@ import {
   Cpu,
   Database,
   GitBranch,
-  Layers3,
   RefreshCw,
   SearchCheck,
   Settings,
@@ -155,14 +154,6 @@ export default function SystemConfig() {
           hint={retrievalRuntime?.latest?.effective_embedding_provider || FALLBACK_TEXT}
         />
         <MetricCard
-          label="重排模型"
-          value={retrievalRuntime?.latest?.rerank_model_id || retrievalRuntime?.reranker?.routes?.[0]?.model_id || FALLBACK_TEXT}
-          icon={Layers3}
-          variant="stacked"
-          tone={retrievalRuntime?.latest?.fallback_reranker_used ? 'text-orange-500' : 'text-purple-600'}
-          hint={retrievalRuntime?.latest?.effective_rerank_provider || retrievalRuntime?.reranker?.routes?.[0]?.provider || FALLBACK_TEXT}
-        />
-        <MetricCard
           label="读写一致性"
           value={retrievalRuntime?.read_write_model_aligned ? '对齐' : '漂移'}
           icon={Zap}
@@ -283,10 +274,6 @@ export default function SystemConfig() {
               <div className="rounded bg-gray-50 px-3 py-2">
                 <div className="text-xs text-gray-400">读取嵌入 Provider</div>
                 <div className="mt-1 font-medium text-gray-800">{retrievalRuntime.latest?.effective_embedding_provider || FALLBACK_TEXT}</div>
-              </div>
-              <div className="rounded bg-gray-50 px-3 py-2">
-                <div className="text-xs text-gray-400">重排 Provider</div>
-                <div className="mt-1 font-medium text-gray-800">{retrievalRuntime.latest?.effective_rerank_provider || FALLBACK_TEXT}</div>
               </div>
             </div>
           ) : (

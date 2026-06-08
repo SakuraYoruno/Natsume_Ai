@@ -236,8 +236,6 @@ class TtsContextRouter:
         """
         stage = str(bond_stage or "").strip().upper()
         _intimacy_bonus = {
-            "STRANGER": 0.0,
-            "ACQUAINTANCE": 0.05,
             "FRIEND": 0.1,
             "CLOSE_FRIEND": 0.15,
             "CONFIDANT": 0.2,

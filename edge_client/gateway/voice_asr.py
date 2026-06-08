@@ -65,7 +65,7 @@ class GatewayVoiceAsr:
 
     def __init__(self) -> None:
         self.enabled = _parse_bool_env("EDGE_GATEWAY_VOICE_ASR_ENABLED", default=True)
-        language_default = _parse_text_env("EDGE_ASR_LANGUAGE", default="ja")
+        language_default = _parse_text_env("EDGE_ASR_LANGUAGE", default="zh")
         self._language = _parse_text_env("EDGE_GATEWAY_VOICE_ASR_LANGUAGE", default=language_default)
         self._min_confidence = _parse_float_env(
             "EDGE_GATEWAY_VOICE_ASR_MIN_CONFIDENCE",

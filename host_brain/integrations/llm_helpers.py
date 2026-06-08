@@ -11,11 +11,17 @@ import time
 import urllib.error
 import urllib.request
 from queue import Empty, Queue
-from threading import Lock, Thread
+from threading import Lock, Thread, local
 from time import perf_counter
 from typing import TYPE_CHECKING, Any, Callable, Mapping
 
 from host_brain.core.errors import LLM_POOL_EXHAUSTED
+from host_brain.integrations.codex_cli_provider import (
+    codex_cli_lm_available,
+    invoke_codex_cli_text,
+    resolve_codex_cli_model,
+    resolve_codex_cli_timeout_ms,
+)
 from host_brain.integrations.llm_gateway_schemas import ModelAttempt, PoolCompleteResult
 
 PROVIDER_OPENAI = "openai"
@@ -30,17 +36,24 @@ ProviderFn = Callable[[dict[str, Any]], Any]
 
 _logger = logging.getLogger("Natsume.integrations.llm_helpers")
 _POOL_DEFAULT_SPECS: dict[str, str] = {
-    "A": "gemini:gemini-2.5-pro,gemini:gemini-2.5-flash-lite,minimax:MiniMax-M2.7-Pro,minimax:MiniMax-M2.7,minimax:MiniMax-M2.6",
-    "B": "minimax:M2-her,gemini:gemini-2.5-pro,gemini:gemini-2.5-flash-lite,minimax:MiniMax-M2.7-Pro,minimax:MiniMax-M2.7",
-    "C": "gemini:gemini-2.5-flash-lite,minimax:MiniMax-abab6.5s,minimax:MiniMax-M2.7,gemini:gemini-2.5-pro",
-    "D": "minimax:MiniMax-M2.7,minimax:MiniMax-abab6.5s,gemini:gemini-2.5-flash-lite,gemini:gemini-2.5-pro",
+    "A": "deepseek:deepseek-v4-flash,gemini:gemini-2.5-flash-lite",
+    "B": "deepseek:deepseek-v4-flash,gemini:gemini-2.5-flash-lite",
+    "C": "deepseek:deepseek-v4-flash,gemini:gemini-2.5-flash-lite",
+    "D": "deepseek:deepseek-v4-flash,gemini:gemini-2.5-flash-lite",
 }
+DEFAULT_LLM_POOL_CODEX_MODEL = "gpt-5.5"
+_POOL_CODEX_MIGRATION_DEFAULT_EXCLUDED_SCENES = frozenset({"CHAT", "CHAT_SURFACE", "MULTIMODAL"})
+_MULTIMODAL_PROVIDER_ALLOWLIST = {PROVIDER_GEMINI}
 _POOL_COOLDOWN_LOCK = Lock()
 _POOL_COOLDOWN_UNTIL_MS: dict[str, int] = {}
 _POOL_CACHE_LOCK = Lock()
 _POOL_COMPLETION_CACHE: dict[str, tuple[int, PoolCompleteResult]] = {}
+_PROVIDER_USAGE_LOCAL = local()
+_OPENAI_COMPAT_SESSION_LOCK = Lock()
+_OPENAI_COMPAT_SESSION: Any | None = None
 _JSON_BLOCK_RE = re.compile(r"```(?:json)?\s*(\{.*?\})\s*```", flags=re.DOTALL | re.IGNORECASE)
 _RATE_LIMIT_MARKERS = ("429", "rate limit", "rate_limit", "too many requests", "resource_exhausted", "quota")
+_BILLING_FAIL_MARKERS = ("402", "insufficient balance", "payment required", "billing")
 _UNAVAILABLE_MARKERS = (
     "timeout",
     "timed out",
@@ -48,12 +61,25 @@ _UNAVAILABLE_MARKERS = (
     "temporarily unavailable",
     "connection error",
     "network error",
+    "connection reset",
+    "eof occurred",
+    "ssl",
     "unavailable",
 )
 _KEY_FAIL_MARKERS = ("401", "403", "api key", "api_key", "authentication", "unauthorized", "permission")
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Generator
+
+
+def _set_last_provider_usage(usage: Any) -> None:
+    setattr(_PROVIDER_USAGE_LOCAL, "last_usage", dict(usage) if isinstance(usage, Mapping) else None)
+
+
+def _pop_last_provider_usage() -> dict[str, Any] | None:
+    usage = getattr(_PROVIDER_USAGE_LOCAL, "last_usage", None)
+    setattr(_PROVIDER_USAGE_LOCAL, "last_usage", None)
+    return dict(usage) if isinstance(usage, Mapping) else None
 
 
 def _invoke_provider_with_timeout(
@@ -124,6 +150,157 @@ def _parse_int_env(name: str, *, default: int, minimum: int, maximum: int) -> in
     return max(int(minimum), min(int(maximum), value))
 
 
+def _parse_csv_env(name: str, *, default: str = "") -> set[str]:
+    raw = str(os.environ.get(name) or default or "").strip()
+    if not raw:
+        return set()
+    return {item.strip().upper() for item in raw.split(",") if item.strip()}
+
+
+def _pool_env_token(value: str | None) -> str:
+    token = re.sub(r"[^A-Za-z0-9]+", "_", str(value or "").strip().upper()).strip("_")
+    return token or "DEFAULT"
+
+
+def _resolve_pool_spec(*, normalized_scene: str, normalized_tier: str) -> tuple[str, bool, str]:
+    scene_token = _pool_env_token(normalized_scene)
+    tier_token = _pool_env_token(normalized_tier)
+    scene_tier_env = f"HOST_LLM_POOL_SCENE_{scene_token}_TIER_{tier_token}"
+    scene_env = f"HOST_LLM_POOL_SCENE_{scene_token}"
+    for env_name in (scene_tier_env, scene_env):
+        raw_value = str(os.environ.get(env_name) or "").strip()
+        if raw_value:
+            return raw_value, True, env_name
+    tier_env = f"HOST_LLM_POOL_TIER_{tier_token}"
+    raw_spec = str(os.environ.get(tier_env) or _POOL_DEFAULT_SPECS.get(tier_token) or "").strip()
+    return raw_spec, False, tier_env
+
+
+def _scene_pool_include_explicit(*, normalized_scene: str, scene_specific: bool) -> bool:
+    if not scene_specific:
+        return True
+    scene_token = _pool_env_token(normalized_scene)
+    return _parse_bool_env(
+        f"HOST_LLM_POOL_SCENE_{scene_token}_INCLUDE_EXPLICIT",
+        default=False,
+    )
+
+
+def _resolve_pool_max_attempts(*, normalized_scene: str, normalized_tier: str) -> int:
+    scene_token = _pool_env_token(normalized_scene)
+    tier_token = _pool_env_token(normalized_tier)
+    for env_name in (
+        f"HOST_LLM_POOL_SCENE_{scene_token}_TIER_{tier_token}_MAX_ATTEMPTS",
+        f"HOST_LLM_POOL_SCENE_{scene_token}_MAX_ATTEMPTS",
+        f"HOST_LLM_POOL_TIER_{tier_token}_MAX_ATTEMPTS",
+        "HOST_LLM_POOL_MAX_ATTEMPTS",
+    ):
+        raw = str(os.environ.get(env_name) or "").strip()
+        if raw:
+            return _parse_int_env(env_name, default=0, minimum=0, maximum=20)
+    return 0
+
+
+def _json_text_fallback_enabled(*, normalized_scene: str) -> bool:
+    scene_token = str(normalized_scene or "").strip().upper()
+    if not scene_token:
+        return False
+    enabled_scenes = _parse_csv_env(
+        "HOST_LLM_POOL_JSON_TEXT_FALLBACK_SCENES",
+        default="CHAT_SURFACE",
+    )
+    return scene_token in enabled_scenes
+
+
+def _codex_pool_migration_enabled(scene_type: str) -> bool:
+    if not _parse_bool_env("HOST_LLM_POOL_CODEX_MIGRATION_ENABLED", default=False):
+        return False
+    normalized_scene = str(scene_type or "").strip().upper()
+    if not normalized_scene:
+        return False
+    excluded = _parse_csv_env(
+        "HOST_LLM_POOL_CODEX_EXCLUDED_SCENES",
+        default=",".join(sorted(_POOL_CODEX_MIGRATION_DEFAULT_EXCLUDED_SCENES)),
+    )
+    if normalized_scene in excluded:
+        return False
+    included = _parse_csv_env("HOST_LLM_POOL_CODEX_INCLUDED_SCENES")
+    if included and normalized_scene not in included:
+        return False
+    return codex_cli_lm_available()
+
+
+def _resolve_pool_codex_model_id() -> str:
+    return resolve_codex_cli_model(os.environ.get("HOST_LLM_POOL_CODEX_MODEL_ID") or DEFAULT_LLM_POOL_CODEX_MODEL)
+
+
+def _resolve_pool_scene_attempt_timeout_ms(
+    *,
+    scene_type: str | None,
+    cognitive_tier: str | None,
+    provider_name: str | None,
+    timeout_ms: int,
+) -> int:
+    resolved_timeout_ms = int(timeout_ms)
+    scene_token = _pool_env_token(scene_type) if str(scene_type or "").strip() else ""
+    tier_token = _pool_env_token(cognitive_tier) if str(cognitive_tier or "").strip() else ""
+    provider_token = _pool_env_token(provider_name) if str(provider_name or "").strip() else ""
+    env_names: list[str] = []
+    if scene_token and tier_token and provider_token:
+        env_names.append(f"HOST_LLM_POOL_SCENE_{scene_token}_TIER_{tier_token}_{provider_token}_ATTEMPT_TIMEOUT_MS")
+    if scene_token and provider_token:
+        env_names.append(f"HOST_LLM_POOL_SCENE_{scene_token}_{provider_token}_ATTEMPT_TIMEOUT_MS")
+    if scene_token and tier_token:
+        env_names.append(f"HOST_LLM_POOL_SCENE_{scene_token}_TIER_{tier_token}_ATTEMPT_TIMEOUT_MS")
+    if scene_token:
+        env_names.append(f"HOST_LLM_POOL_SCENE_{scene_token}_ATTEMPT_TIMEOUT_MS")
+    if tier_token and provider_token:
+        env_names.append(f"HOST_LLM_POOL_TIER_{tier_token}_{provider_token}_ATTEMPT_TIMEOUT_MS")
+    if tier_token:
+        env_names.append(f"HOST_LLM_POOL_TIER_{tier_token}_ATTEMPT_TIMEOUT_MS")
+    env_names.append("HOST_LLM_POOL_ATTEMPT_TIMEOUT_MS")
+    for env_name in env_names:
+        raw_value = str(os.environ.get(env_name) or "").strip()
+        if raw_value:
+            return _parse_int_env(
+                env_name,
+                default=resolved_timeout_ms,
+                minimum=250,
+                maximum=10 * 60 * 1000,
+            )
+    return resolved_timeout_ms
+
+
+def _resolve_pool_attempt_timeout_ms(
+    *,
+    provider_name: str,
+    api_key: str | None,
+    timeout_ms: int,
+    scene_type: str | None = None,
+    cognitive_tier: str | None = None,
+) -> int:
+    resolved_timeout_ms = _resolve_pool_scene_attempt_timeout_ms(
+        scene_type=scene_type,
+        cognitive_tier=cognitive_tier,
+        provider_name=provider_name,
+        timeout_ms=int(timeout_ms),
+    )
+    if (
+        str(provider_name or "").strip().lower() == PROVIDER_CODEX
+        and not str(api_key or "").strip()
+        and codex_cli_lm_available()
+    ):
+        resolved_timeout_ms = resolve_codex_cli_timeout_ms(resolved_timeout_ms)
+        floor_ms = _parse_int_env(
+            "HOST_LLM_POOL_CODEX_MIN_TIMEOUT_MS",
+            default=30_000,
+            minimum=1_000,
+            maximum=10 * 60 * 1000,
+        )
+        resolved_timeout_ms = max(resolved_timeout_ms, floor_ms)
+    return resolved_timeout_ms
+
+
 def _normalize_openai_compat_base_url(value: str | None) -> str | None:
     base_url = str(value or "").strip().rstrip("/")
     if not base_url:
@@ -190,7 +367,7 @@ def _normalize_response_format(response_format: Any) -> str | None:
     return None
 
 
-def _validate_pool_response(*, content: str, response_format: Any) -> str:
+def _validate_pool_response(*, content: str, response_format: Any, scene_type: str | None = None) -> str:
     text = str(content or "").strip()
     if not text:
         raise RuntimeError("empty llm response")
@@ -199,11 +376,57 @@ def _validate_pool_response(*, content: str, response_format: Any) -> str:
         return text
     parsed = _extract_first_json_object(text)
     if not isinstance(parsed, Mapping):
+        normalized_scene = str(scene_type or "").strip().upper()
+        if _json_text_fallback_enabled(normalized_scene=normalized_scene):
+            return json.dumps(
+                {
+                    "reply_text": text,
+                    "natsume_emotion_tag": "NEUTRAL",
+                    "user_emotion_tag": "NEUTRAL",
+                    "emotion_confidence": 0.0,
+                },
+                ensure_ascii=False,
+                sort_keys=True,
+            )
         raise ValueError("pool response is not a valid json object")
     return json.dumps(dict(parsed), ensure_ascii=False, sort_keys=True)
 
 
-def _classify_pool_error(exc: BaseException) -> tuple[str, int]:
+def _json_text_fallback_gen_params(gen_params: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not isinstance(gen_params, Mapping):
+        return gen_params
+    cleaned = dict(gen_params)
+    cleaned.pop("response_format", None)
+    return cleaned
+
+
+def _should_retry_json_text_fallback(*, normalized_scene: str, response_format: Any, exc: BaseException) -> bool:
+    if _normalize_response_format(response_format) != "json_object":
+        return False
+    if not _json_text_fallback_enabled(normalized_scene=normalized_scene):
+        return False
+    if "empty llm response" in str(exc or "").strip().lower():
+        return False
+    reason_code, _cooldown_ms = _classify_pool_error(exc)
+    return reason_code == "POOL_FORMAT_INVALID"
+
+
+def _resolve_format_invalid_cooldown_ms(*, scene_type: str | None = None) -> int:
+    normalized_scene = str(scene_type or "").strip().upper()
+    scene_token = _pool_env_token(normalized_scene) if normalized_scene else ""
+    if scene_token:
+        env_name = f"HOST_LLM_POOL_SCENE_{scene_token}_FORMAT_INVALID_COOLDOWN_MS"
+        if str(os.environ.get(env_name) or "").strip():
+            return _parse_int_env(env_name, default=0, minimum=0, maximum=10 * 60 * 1000)
+    return _parse_int_env(
+        "HOST_LLM_POOL_FORMAT_INVALID_COOLDOWN_MS",
+        default=0,
+        minimum=0,
+        maximum=10 * 60 * 1000,
+    )
+
+
+def _classify_pool_error(exc: BaseException, *, scene_type: str | None = None) -> tuple[str, int]:
     detail = str(exc or "").strip().lower()
     if isinstance(exc, TimeoutError):
         return "POOL_TIMEOUT", _parse_int_env(
@@ -213,9 +436,16 @@ def _classify_pool_error(exc: BaseException) -> tuple[str, int]:
             maximum=10 * 60 * 1000,
         )
     if "empty llm response" in detail or "response is not a valid json object" in detail:
-        return "POOL_FORMAT_INVALID", 0
+        return "POOL_FORMAT_INVALID", _resolve_format_invalid_cooldown_ms(scene_type=scene_type)
     if any(marker in detail for marker in _KEY_FAIL_MARKERS):
         return "POOL_AUTH_FAILED", 0
+    if any(marker in detail for marker in _BILLING_FAIL_MARKERS):
+        return "POOL_BILLING_UNAVAILABLE", _parse_int_env(
+            "HOST_LLM_POOL_BILLING_COOLDOWN_MS",
+            default=15 * 60 * 1000,
+            minimum=0,
+            maximum=60 * 60 * 1000,
+        )
     if any(marker in detail for marker in _RATE_LIMIT_MARKERS):
         return "POOL_RATE_LIMITED", _parse_int_env(
             "HOST_LLM_POOL_RATE_LIMIT_COOLDOWN_MS",
@@ -237,6 +467,9 @@ def _make_pool_cache_key(
     *,
     scene_type: str,
     cognitive_tier: str,
+    provider_name: str | None,
+    model_id: str | None,
+    base_url_override: str | None,
     messages: list[Mapping[str, Any]],
     gen_params: dict[str, Any] | None,
     response_format: Any,
@@ -244,6 +477,9 @@ def _make_pool_cache_key(
     payload = {
         "scene_type": str(scene_type or "").strip().upper(),
         "cognitive_tier": str(cognitive_tier or "").strip().upper(),
+        "provider_name": str(provider_name or "").strip().lower(),
+        "model_id": str(model_id or "").strip(),
+        "base_url_override": str(base_url_override or "").strip(),
         "messages": [dict(item) for item in list(messages or []) if isinstance(item, Mapping)],
         "gen_params": dict(gen_params or {}),
         "response_format": response_format,
@@ -362,7 +598,48 @@ def _load_api_key_from_env(provider_name: str) -> str | None:
     if not env_key:
         return None
     value = os.environ.get(env_key, "").strip()
-    return value or None
+    if value:
+        return value
+    return _load_api_key_from_runtime_profiles(provider_name)
+
+
+def _load_api_key_from_runtime_profiles(provider_name: str) -> str | None:
+    provider = str(provider_name or "").strip().lower()
+    if not provider:
+        return None
+    if provider == PROVIDER_GEMINI:
+        try:
+            from host_brain.app.model_router import resolve_gemini_api_key  # noqa: PLC0415
+
+            gemini_key = resolve_gemini_api_key()
+            if gemini_key:
+                return str(gemini_key or "").strip() or None
+        except Exception:
+            pass
+    try:
+        from host_brain.app import config as host_config  # noqa: PLC0415
+        from host_brain.core.key_profiles import resolve_secret_from_profiles  # noqa: PLC0415
+
+        profiles, secret_store, current_epoch, node_id = host_config._resolve_runtime_key_materials(  # noqa: SLF001
+            env=os.environ,
+            key_profiles=None,
+            secret_store=None,
+            node_id=None,
+            current_epoch=None,
+        )
+        resolved = resolve_secret_from_profiles(
+            provider=provider,
+            node_id=node_id,
+            scope=str(os.environ.get("HOST_LLM_KEY_PROFILE_SCOPE") or "host.llm").strip().lower() or "host.llm",
+            key_profiles=profiles,
+            secret_store=secret_store,
+            current_epoch=current_epoch,
+        )
+        if resolved.success:
+            return str(resolved.secret_value or "").strip() or None
+    except Exception:
+        return None
+    return None
 
 
 def _resolve_provider_base_url(provider_name: str, *, base_url_override: str | None = None) -> str | None:
@@ -391,7 +668,7 @@ def _resolve_provider_base_url(provider_name: str, *, base_url_override: str | N
 
 
 def _is_minimax_standard_model(model_id: str | None) -> bool:
-    return str(model_id or "").strip().lower() == "m2-her"
+    return str(model_id or "").strip().lower() in {"m2-her", "minimax-m2-her"}
 
 
 def _resolve_minimax_base_url(base_url_override: str | None = None) -> str:
@@ -461,8 +738,11 @@ def _build_minimax_standard_payload(
         if name:
             row["name"] = name
         normalized_messages.append(row)
+    outbound_model_id = str(model_id or "").strip() or "M2-her"
+    if outbound_model_id.lower() == "minimax-m2-her":
+        outbound_model_id = "M2-her"
     return {
-        "model": str(model_id or "").strip() or "M2-her",
+        "model": outbound_model_id,
         "messages": normalized_messages,
         "stream": bool(stream),
         "temperature": temperature,
@@ -593,6 +873,7 @@ def _invoke_minimax_standard_text(
     choices = parsed.get("choices")
     if not isinstance(choices, list) or not choices:
         raise RuntimeError(f"MiniMax standard API returned no choices: {raw_text[:400]}")
+    _set_last_provider_usage(parsed.get("usage"))
     first_choice = choices[0] if isinstance(choices[0], Mapping) else {}
     message = first_choice.get("message") if isinstance(first_choice, Mapping) else None
     content = _extract_minimax_text_content((message or {}).get("content") if isinstance(message, Mapping) else None)
@@ -757,7 +1038,237 @@ def _build_chat_openai_kwargs(
     return llm_kwargs
 
 
-def invoke_llm_text(
+def _resolve_openai_compat_chat_endpoint(
+    provider_name: str,
+    *,
+    base_url_override: str | None = None,
+) -> str:
+    base_url = _resolve_provider_base_url(provider_name, base_url_override=base_url_override)
+    if not base_url and str(provider_name or "").strip().lower() in {PROVIDER_OPENAI, PROVIDER_CODEX}:
+        base_url = "https://api.openai.com/v1"
+    if not base_url:
+        raise RuntimeError(f"missing OpenAI-compatible base_url for provider={provider_name}")
+    return f"{str(base_url).rstrip('/')}/chat/completions"
+
+
+def _openai_compat_keepalive_enabled() -> bool:
+    return _parse_bool_env("HOST_LLM_OPENAI_COMPAT_KEEPALIVE_ENABLED", default=True)
+
+
+def _get_openai_compat_session() -> Any:
+    global _OPENAI_COMPAT_SESSION
+    with _OPENAI_COMPAT_SESSION_LOCK:
+        if _OPENAI_COMPAT_SESSION is not None:
+            return _OPENAI_COMPAT_SESSION
+        import requests  # noqa: PLC0415
+        from requests.adapters import HTTPAdapter  # noqa: PLC0415
+
+        session = requests.Session()
+        adapter = HTTPAdapter(pool_connections=8, pool_maxsize=16, max_retries=0)
+        session.mount("http://", adapter)
+        session.mount("https://", adapter)
+        _OPENAI_COMPAT_SESSION = session
+        return session
+
+
+def _post_openai_compat_json(
+    *,
+    endpoint: str,
+    payload: dict[str, Any],
+    api_key: str,
+    timeout_s: float,
+) -> Mapping[str, Any]:
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+    if _openai_compat_keepalive_enabled():
+        try:
+            session = _get_openai_compat_session()
+            response = session.post(endpoint, json=payload, headers=headers, timeout=timeout_s)
+            response.raise_for_status()
+            data = response.json()
+            if not isinstance(data, Mapping):
+                raise RuntimeError("OpenAI-compatible chat returned non-object payload")
+            return data
+        except ImportError:
+            pass
+        except Exception as exc:
+            if exc.__class__.__name__ == "HTTPError":
+                response = getattr(exc, "response", None)
+                status_code = getattr(response, "status_code", "") if response is not None else ""
+                body = str(getattr(response, "text", "") or "").strip() if response is not None else ""
+                if body:
+                    raise RuntimeError(
+                        f"OpenAI-compatible chat failed HTTP {status_code}: {body[:1000]}"
+                    ) from exc
+                raise RuntimeError(f"OpenAI-compatible chat failed: {exc}") from exc
+            if exc.__class__.__name__ == "JSONDecodeError":
+                raise RuntimeError(f"OpenAI-compatible chat failed: {exc}") from exc
+            raise
+
+    request = urllib.request.Request(
+        endpoint,
+        data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+        headers=headers,
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=timeout_s) as response:
+            raw = response.read().decode("utf-8", errors="replace")
+    except urllib.error.HTTPError as exc:
+        body = exc.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"OpenAI-compatible chat failed HTTP {exc.code}: {body[:1000]}") from exc
+    data = json.loads(raw)
+    if not isinstance(data, Mapping):
+        raise RuntimeError("OpenAI-compatible chat returned non-object payload")
+    return data
+
+
+def _normalize_openai_compat_message_content(value: Any) -> str | list[dict[str, Any]]:
+    if isinstance(value, list):
+        content: list[dict[str, Any]] = []
+        for item in value:
+            if isinstance(item, Mapping):
+                content.append(dict(item))
+            elif item is not None:
+                content.append({"type": "text", "text": str(item)})
+        return content
+    if isinstance(value, Mapping):
+        return [dict(value)]
+    return str(value or "")
+
+
+def _build_openai_compat_messages(messages: list[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for item in list(messages or []):
+        if not isinstance(item, Mapping):
+            continue
+        role = str(item.get("role") or "").strip().lower()
+        if role not in {"system", "assistant", "user", "tool"}:
+            role = "user"
+        content = _normalize_openai_compat_message_content(item.get("content"))
+        if content == "" or content == []:
+            continue
+        row: dict[str, Any] = {"role": role, "content": content}
+        name = str(item.get("name") or "").strip()
+        if name:
+            row["name"] = name
+        tool_call_id = str(item.get("tool_call_id") or "").strip()
+        if tool_call_id:
+            row["tool_call_id"] = tool_call_id
+        rows.append(row)
+    return rows
+
+
+def _build_openai_compat_payload(
+    *,
+    model_id: str,
+    messages: list[Mapping[str, Any]],
+    gen_params: dict[str, Any] | None = None,
+    stream: bool = False,
+) -> dict[str, Any]:
+    params = dict(gen_params or {})
+    response_format = params.get("response_format")
+    minimum_max_tokens = _openai_compat_minimum_max_tokens(
+        model_id=model_id,
+        response_format=response_format,
+    )
+    payload: dict[str, Any] = {
+        "model": str(model_id or "").strip() or "default",
+        "messages": _build_openai_compat_messages(messages),
+        "stream": bool(stream),
+    }
+    if "temperature" in params:
+        payload["temperature"] = float(params.get("temperature", 0.4))
+    else:
+        payload["temperature"] = 0.4
+    if "top_p" in params:
+        payload["top_p"] = float(params.get("top_p", 0.9))
+    else:
+        payload["top_p"] = 0.9
+    for token_key in ("max_tokens", "max_output_tokens", "max_completion_tokens"):
+        raw_value = params.get(token_key)
+        try:
+            parsed = int(raw_value) if raw_value is not None else 0
+        except (TypeError, ValueError):
+            parsed = 0
+        if parsed > 0:
+            if minimum_max_tokens > 0:
+                parsed = max(parsed, minimum_max_tokens)
+            payload["max_tokens"] = parsed
+            break
+    if isinstance(response_format, Mapping):
+        payload["response_format"] = dict(response_format)
+    elif _normalize_response_format(response_format) == "json_object":
+        payload["response_format"] = {"type": "json_object"}
+    return payload
+
+
+def _openai_compat_minimum_max_tokens(*, model_id: str, response_format: Any) -> int:
+    normalized_model = str(model_id or "").strip().lower()
+    if normalized_model != "deepseek-v4-flash":
+        return 0
+    if _normalize_response_format(response_format) == "json_object":
+        return _parse_int_env(
+            "HOST_DEEPSEEK_V4_FLASH_MIN_JSON_MAX_TOKENS",
+            default=384,
+            minimum=64,
+            maximum=8192,
+        )
+    return _parse_int_env(
+        "HOST_DEEPSEEK_V4_FLASH_MIN_TEXT_MAX_TOKENS",
+        default=128,
+        minimum=32,
+        maximum=8192,
+    )
+
+
+def _extract_openai_compat_text(payload: Mapping[str, Any]) -> str:
+    choices = payload.get("choices")
+    if not isinstance(choices, list) or not choices:
+        return ""
+    first = choices[0] if isinstance(choices[0], Mapping) else {}
+    message = first.get("message") if isinstance(first, Mapping) else None
+    if isinstance(message, Mapping):
+        return _extract_text_from_response_content(message.get("content"))
+    delta = first.get("delta") if isinstance(first, Mapping) else None
+    if isinstance(delta, Mapping):
+        return _extract_text_from_response_content(delta.get("content"))
+    return ""
+
+
+def _summarize_openai_compat_empty_response(payload: Mapping[str, Any]) -> dict[str, Any]:
+    choices = payload.get("choices")
+    summary: dict[str, Any] = {
+        "choice_count": len(choices) if isinstance(choices, list) else 0,
+    }
+    if isinstance(choices, list) and choices:
+        first = choices[0] if isinstance(choices[0], Mapping) else {}
+        summary["choice_keys"] = sorted(str(key) for key in first.keys())
+        summary["finish_reason"] = first.get("finish_reason")
+        for field_name in ("message", "delta"):
+            container = first.get(field_name) if isinstance(first, Mapping) else None
+            if not isinstance(container, Mapping):
+                continue
+            content_text = _extract_text_from_response_content(container.get("content"))
+            summary[f"{field_name}_keys"] = sorted(str(key) for key in container.keys())
+            summary[f"{field_name}_content_type"] = type(container.get("content")).__name__
+            summary[f"{field_name}_content_len"] = len(content_text)
+            for extra_field in ("reasoning_content", "refusal"):
+                extra_value = container.get(extra_field)
+                if isinstance(extra_value, str):
+                    summary[f"{field_name}_{extra_field}_len"] = len(extra_value)
+            tool_calls = container.get("tool_calls")
+            if isinstance(tool_calls, list):
+                summary[f"{field_name}_tool_call_count"] = len(tool_calls)
+    usage = payload.get("usage")
+    if isinstance(usage, Mapping):
+        summary["usage_keys"] = sorted(str(key) for key in usage.keys())
+    return summary
+
+
+def _invoke_openai_compat_text(
     *,
     provider_name: str,
     model_id: str,
@@ -767,50 +1278,243 @@ def invoke_llm_text(
     gen_params: dict[str, Any] | None = None,
     base_url_override: str | None = None,
 ) -> str:
-    if str(provider_name or "").strip().lower() == PROVIDER_MOCK:
+    endpoint = _resolve_openai_compat_chat_endpoint(provider_name, base_url_override=base_url_override)
+    payload = _build_openai_compat_payload(
+        model_id=model_id,
+        messages=messages,
+        gen_params=gen_params,
+        stream=False,
+    )
+    data = _post_openai_compat_json(
+        endpoint=endpoint,
+        payload=payload,
+        api_key=api_key,
+        timeout_s=max(1.0, float(timeout_ms) / 1000.0),
+    )
+    _set_last_provider_usage(data.get("usage"))
+    text = _extract_openai_compat_text(data)
+    if not text and _parse_bool_env("HOST_LLM_OPENAI_COMPAT_EMPTY_RESPONSE_LOG_ENABLED", default=True):
+        _logger.warning(
+            "openai-compatible response empty: provider=%s model=%s summary=%s",
+            str(provider_name or "").strip().lower(),
+            str(model_id or "").strip(),
+            json.dumps(_summarize_openai_compat_empty_response(data), ensure_ascii=False, sort_keys=True),
+        )
+    return text
+
+
+def _iter_openai_compat_stream(
+    *,
+    provider_name: str,
+    model_id: str,
+    api_key: str,
+    timeout_ms: int,
+    messages: list[Mapping[str, Any]],
+    gen_params: dict[str, Any] | None = None,
+    base_url_override: str | None = None,
+) -> "Generator[str, None, None]":
+    endpoint = _resolve_openai_compat_chat_endpoint(provider_name, base_url_override=base_url_override)
+    payload = _build_openai_compat_payload(
+        model_id=model_id,
+        messages=messages,
+        gen_params=gen_params,
+        stream=True,
+    )
+    request = urllib.request.Request(
+        endpoint,
+        data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+            "Accept": "text/event-stream",
+        },
+        method="POST",
+    )
+    final_message = ""
+    try:
+        with urllib.request.urlopen(request, timeout=max(1.0, float(timeout_ms) / 1000.0)) as response:
+            while True:
+                raw_line = response.readline()
+                if not raw_line:
+                    break
+                line = raw_line.decode("utf-8", errors="replace").strip()
+                if not line or line.startswith(":"):
+                    continue
+                if not line.startswith("data:"):
+                    continue
+                data_text = line[len("data:") :].strip()
+                if data_text == "[DONE]":
+                    break
+                try:
+                    chunk = json.loads(data_text)
+                except Exception:
+                    continue
+                if not isinstance(chunk, Mapping):
+                    continue
+                text = _extract_openai_compat_text(chunk)
+                if text:
+                    yield text
+                choices = chunk.get("choices")
+                if isinstance(choices, list) and choices:
+                    first = choices[0] if isinstance(choices[0], Mapping) else {}
+                    message = first.get("message") if isinstance(first, Mapping) else None
+                    if isinstance(message, Mapping):
+                        candidate = _extract_text_from_response_content(message.get("content"))
+                        if candidate:
+                            final_message = candidate
+    except urllib.error.HTTPError as exc:
+        body = exc.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"OpenAI-compatible stream failed HTTP {exc.code}: {body[:1000]}") from exc
+    if final_message:
+        yield final_message
+
+
+def _build_chat_google_genai_kwargs(
+    *,
+    model_id: str,
+    api_key: str,
+    timeout_ms: int,
+    gen_params: dict[str, Any] | None = None,
+    streaming: bool,
+) -> dict[str, Any]:
+    params = dict(gen_params or {})
+    temperature = float(params.get("temperature", 0.4))
+    top_p = float(params.get("top_p", 0.9))
+    normalized_model_id = str(model_id or "").strip().lower()
+    max_tokens = None
+    for token_key in ("max_tokens", "max_output_tokens", "max_completion_tokens"):
+        raw_value = params.get(token_key)
+        try:
+            parsed = int(raw_value) if raw_value is not None else 0
+        except (TypeError, ValueError):
+            parsed = 0
+        if parsed > 0:
+            # Native Gemini Pro models can spend a tiny output cap before visible
+            # text appears (signed content blocks / thinking overhead), which
+            # looks like a false empty response to the pool validator.
+            minimum_cap = 1024 if "pro" in normalized_model_id else 64
+            max_tokens = max(parsed, minimum_cap)
+            break
+
+    llm_kwargs: dict[str, Any] = {
+        "model": str(model_id or "").strip() or "gemini-2.5-flash-lite",
+        "api_key": api_key,
+        "request_timeout": max(1.0, float(timeout_ms) / 1000.0),
+        "retries": 0,
+        "temperature": temperature,
+        "top_p": top_p,
+        "streaming": streaming,
+    }
+    if max_tokens is not None:
+        llm_kwargs["max_tokens"] = max_tokens
+    return llm_kwargs
+
+
+def _invoke_gemini_native_text(
+    *,
+    model_id: str,
+    api_key: str,
+    timeout_ms: int,
+    messages: list[Mapping[str, Any]],
+    gen_params: dict[str, Any] | None = None,
+) -> str:
+    from langchain_google_genai import ChatGoogleGenerativeAI
+
+    llm = ChatGoogleGenerativeAI(
+        **_build_chat_google_genai_kwargs(
+            model_id=model_id,
+            api_key=api_key,
+            timeout_ms=timeout_ms,
+            gen_params=gen_params,
+            streaming=False,
+        )
+    )
+    response = llm.invoke(_build_langchain_messages(messages))
+    usage = getattr(response, "usage_metadata", None)
+    if not isinstance(usage, Mapping):
+        metadata = getattr(response, "response_metadata", None)
+        if isinstance(metadata, Mapping):
+            usage = metadata.get("usage_metadata") or metadata.get("token_usage")
+    _set_last_provider_usage(usage)
+    return _extract_text_from_response_content(getattr(response, "content", ""))
+
+
+def invoke_llm_text(
+    *,
+    provider_name: str,
+    model_id: str,
+    api_key: str,
+    timeout_ms: int,
+    messages: list[Mapping[str, Any]],
+    gen_params: dict[str, Any] | None = None,
+    response_format: Any = None,
+    base_url_override: str | None = None,
+    feature_key: str | None = None,
+) -> str:
+    provider = str(provider_name or "").strip().lower()
+    if provider == PROVIDER_MOCK:
         return _default_mock_provider({})
-    if str(provider_name or "").strip().lower() == PROVIDER_DISABLED:
+    if provider == PROVIDER_DISABLED:
         raise RuntimeError("provider disabled")
+    if provider == PROVIDER_CODEX and not str(api_key or "").strip() and codex_cli_lm_available():
+        return invoke_codex_cli_text(
+            model_id=model_id,
+            messages=messages,
+            timeout_ms=timeout_ms,
+            response_format=response_format,
+            feature_key=feature_key,
+        )
     if not str(api_key or "").strip():
         raise RuntimeError(f"missing api key for provider={provider_name}")
-    if str(provider_name or "").strip().lower() == PROVIDER_MINIMAX and _is_minimax_standard_model(model_id):
+    if response_format is not None:
+        runtime_gen_params = dict(gen_params or {})
+        runtime_gen_params.setdefault("response_format", response_format)
+    else:
+        runtime_gen_params = gen_params
+    if provider == PROVIDER_MINIMAX and _is_minimax_standard_model(model_id):
         return _invoke_minimax_standard_text(
             model_id=model_id,
             api_key=api_key,
             timeout_ms=timeout_ms,
             messages=messages,
-            gen_params=gen_params,
+            gen_params=runtime_gen_params,
             base_url_override=base_url_override,
         )
-
-    from langchain_openai import ChatOpenAI
-
-    llm = ChatOpenAI(
-        **_build_chat_openai_kwargs(
-            provider_name=provider_name,
+    if provider == PROVIDER_GEMINI:
+        return _invoke_gemini_native_text(
             model_id=model_id,
             api_key=api_key,
             timeout_ms=timeout_ms,
-            gen_params=gen_params,
-            base_url_override=base_url_override,
-            streaming=False,
+            messages=messages,
+            gen_params=runtime_gen_params,
         )
+
+    return _invoke_openai_compat_text(
+        provider_name=provider_name,
+        model_id=model_id,
+        api_key=api_key,
+        timeout_ms=timeout_ms,
+        messages=messages,
+        gen_params=runtime_gen_params,
+        base_url_override=base_url_override,
     )
-    response = llm.invoke(_build_langchain_messages(messages))
-    return _extract_text_from_response_content(getattr(response, "content", ""))
 
 
 def _resolve_pool_candidates(
     *,
     cognitive_tier: str,
+    scene_type: str | None = None,
     provider_name: str | None = None,
     model_id: str | None = None,
     api_key: str | None = None,
     base_url_override: str | None = None,
 ) -> list[dict[str, Any]]:
     normalized_tier = str(cognitive_tier or "B").strip().upper() or "B"
-    spec_env_name = f"HOST_LLM_POOL_TIER_{normalized_tier}"
-    raw_spec = str(os.environ.get(spec_env_name) or _POOL_DEFAULT_SPECS.get(normalized_tier) or "").strip()
+    normalized_scene = str(scene_type or "").strip().upper()
+    raw_spec, scene_specific_spec, _spec_source = _resolve_pool_spec(
+        normalized_scene=normalized_scene,
+        normalized_tier=normalized_tier,
+    )
     parsed_specs: list[tuple[str, str]] = []
     for item in raw_spec.split(","):
         text = str(item or "").strip()
@@ -831,12 +1535,16 @@ def _resolve_pool_candidates(
     candidates: list[dict[str, Any]] = []
 
     def _append_candidate(provider_token: str, model_token: str, key_value: str | None, base_url_value: str | None) -> None:
+        if normalized_scene == "MULTIMODAL" and provider_token not in _MULTIMODAL_PROVIDER_ALLOWLIST:
+            return
         dedupe_key = f"{provider_token}::{model_token}"
         if dedupe_key in seen:
             return
         resolved_key = key_value or _load_api_key_from_env(provider_token)
+        cli_backed_codex = provider_token == PROVIDER_CODEX and not resolved_key and codex_cli_lm_available()
         if provider_token not in {PROVIDER_MOCK, PROVIDER_DISABLED} and not resolved_key:
-            return
+            if not cli_backed_codex:
+                return
         candidates.append(
             {
                 "provider_name": provider_token,
@@ -847,7 +1555,19 @@ def _resolve_pool_candidates(
         )
         seen.add(dedupe_key)
 
-    if explicit_provider and explicit_model:
+    include_explicit = _scene_pool_include_explicit(
+        normalized_scene=normalized_scene,
+        scene_specific=scene_specific_spec,
+    )
+
+    if (
+        _codex_pool_migration_enabled(normalized_scene)
+        and explicit_provider not in {PROVIDER_MOCK, PROVIDER_DISABLED}
+        and include_explicit
+    ):
+        _append_candidate(PROVIDER_CODEX, _resolve_pool_codex_model_id(), None, None)
+
+    if include_explicit and explicit_provider and explicit_model:
         _append_candidate(explicit_provider, explicit_model, explicit_key, explicit_base_url)
         if explicit_provider == PROVIDER_GEMINI:
             gemini_fallback_model = str(
@@ -875,12 +1595,17 @@ def _log_llm_pool_call(
     pool_exhausted: bool,
     cached: bool,
     total_latency_ms: int,
+    messages: list[Mapping[str, Any]] | None = None,
+    content: Any = "",
+    token_usage: Mapping[str, Any] | None = None,
     ts_ms: int | None = None,
 ) -> None:
     try:
         from host_brain.app.dependencies import get_ledger  # noqa: PLC0415
+        from host_brain.observability.token_usage import build_llm_token_usage_row  # noqa: PLC0415
 
         ledger = get_ledger()
+        ts_value = int(ts_ms if ts_ms is not None else _now_ms())
         attempts_payload = [
             {
                 "model": item.model,
@@ -911,8 +1636,25 @@ def _log_llm_pool_call(
                     "cached": 1 if cached else 0,
                     "degraded_to_rule": 0,
                     "total_latency_ms": int(total_latency_ms),
-                    "ts_ms": int(ts_ms if ts_ms is not None else _now_ms()),
+                    "ts_ms": ts_value,
                 }
+            )
+        if hasattr(ledger, "log_llm_token_usage"):
+            ledger.log_llm_token_usage(
+                build_llm_token_usage_row(
+                    request_id=str(request_id or "").strip(),
+                    scene_type=str(scene_type or "").strip().upper(),
+                    cognitive_tier=str(cognitive_tier or "").strip().upper(),
+                    provider=str(final_provider or "").strip().lower(),
+                    model_id=str(final_model or "").strip(),
+                    messages=messages or [],
+                    content=content,
+                    attempts=list(attempts or []),
+                    cached=bool(cached),
+                    pool_exhausted=bool(pool_exhausted),
+                    ts_ms=ts_value,
+                    provider_usage=token_usage,
+                )
             )
         if hasattr(ledger, "log_llm_node_call"):
             normalized_scene = str(scene_type or "").strip().upper() or "CHAT"
@@ -930,7 +1672,7 @@ def _log_llm_pool_call(
                     "latency_ms": int(total_latency_ms),
                     "input_digest": f"scene={normalized_scene};tier={str(cognitive_tier or '').strip().upper() or 'B'};attempts={len(attempts_payload)}",
                     "output_digest": attempts_json[:4000],
-                    "ts_ms": int(ts_ms if ts_ms is not None else _now_ms()),
+                    "ts_ms": ts_value,
                 }
             )
     except Exception as exc:
@@ -955,10 +1697,18 @@ def complete_llm_with_pool_sync(
     normalized_tier = str(cognitive_tier or "B").strip().upper() or "B"
     attempt_rows: list[ModelAttempt] = []
     started_at = perf_counter()
+    max_attempts = _resolve_pool_max_attempts(
+        normalized_scene=normalized_scene,
+        normalized_tier=normalized_tier,
+    )
+    attempted_candidates = 0
 
     cache_key = _make_pool_cache_key(
         scene_type=normalized_scene,
         cognitive_tier=normalized_tier,
+        provider_name=provider_name,
+        model_id=model_id,
+        base_url_override=base_url_override,
         messages=messages,
         gen_params=gen_params,
         response_format=response_format,
@@ -975,11 +1725,14 @@ def complete_llm_with_pool_sync(
             pool_exhausted=False,
             cached=True,
             total_latency_ms=cached_result.total_latency_ms,
+            messages=messages,
+            content=cached_result.content,
         )
         return cached_result
 
     for candidate in _resolve_pool_candidates(
         cognitive_tier=normalized_tier,
+        scene_type=normalized_scene,
         provider_name=provider_name,
         model_id=model_id,
         api_key=api_key,
@@ -1005,18 +1758,74 @@ def complete_llm_with_pool_sync(
             )
             continue
 
+        if max_attempts > 0 and attempted_candidates >= max_attempts:
+            break
+        attempted_candidates += 1
         attempt_started = perf_counter()
         try:
-            raw_text = invoke_llm_text(
+            _set_last_provider_usage(None)
+            attempt_timeout_ms = _resolve_pool_attempt_timeout_ms(
                 provider_name=provider_token,
-                model_id=model_token,
                 api_key=str(candidate.get("api_key") or "").strip(),
                 timeout_ms=int(timeout_ms),
-                messages=messages,
-                gen_params=gen_params,
-                base_url_override=str(candidate.get("base_url_override") or "").strip() or None,
+                scene_type=normalized_scene,
+                cognitive_tier=normalized_tier,
             )
-            content = _validate_pool_response(content=raw_text, response_format=response_format)
+            raw_text = _invoke_provider_with_timeout(
+                provider=lambda _payload: invoke_llm_text(
+                    provider_name=provider_token,
+                    model_id=model_token,
+                    api_key=str(candidate.get("api_key") or "").strip(),
+                    timeout_ms=attempt_timeout_ms,
+                    messages=messages,
+                    gen_params=gen_params,
+                    response_format=response_format,
+                    base_url_override=str(candidate.get("base_url_override") or "").strip() or None,
+                    feature_key=f"pool:{normalized_scene}:{normalized_tier}",
+                ),
+                payload={},
+                timeout_ms=attempt_timeout_ms,
+            )
+            provider_usage = _pop_last_provider_usage()
+            try:
+                content = _validate_pool_response(
+                    content=raw_text,
+                    response_format=response_format,
+                    scene_type=normalized_scene,
+                )
+                fallback_used = False
+            except Exception as validation_exc:
+                if not _should_retry_json_text_fallback(
+                    normalized_scene=normalized_scene,
+                    response_format=response_format,
+                    exc=validation_exc,
+                ):
+                    raise
+                _set_last_provider_usage(None)
+                fallback_raw_text = _invoke_provider_with_timeout(
+                    provider=lambda _payload: invoke_llm_text(
+                        provider_name=provider_token,
+                        model_id=model_token,
+                        api_key=str(candidate.get("api_key") or "").strip(),
+                        timeout_ms=attempt_timeout_ms,
+                        messages=messages,
+                        gen_params=_json_text_fallback_gen_params(gen_params),
+                        response_format=None,
+                        base_url_override=str(candidate.get("base_url_override") or "").strip() or None,
+                        feature_key=f"pool:{normalized_scene}:{normalized_tier}:json_text_fallback",
+                    ),
+                    payload={},
+                    timeout_ms=attempt_timeout_ms,
+                )
+                fallback_usage = _pop_last_provider_usage()
+                if fallback_usage:
+                    provider_usage = fallback_usage
+                content = _validate_pool_response(
+                    content=fallback_raw_text,
+                    response_format=response_format,
+                    scene_type=normalized_scene,
+                )
+                fallback_used = True
             latency_ms = int(round((perf_counter() - attempt_started) * 1000))
             attempt_rows.append(
                 ModelAttempt(
@@ -1024,6 +1833,7 @@ def complete_llm_with_pool_sync(
                     provider=provider_token,
                     status="OK",
                     latency_ms=latency_ms,
+                    detail="json_text_fallback" if fallback_used else None,
                 )
             )
             result = PoolCompleteResult(
@@ -1047,11 +1857,15 @@ def complete_llm_with_pool_sync(
                 pool_exhausted=False,
                 cached=False,
                 total_latency_ms=result.total_latency_ms,
+                messages=messages,
+                content=result.content,
+                token_usage=provider_usage,
             )
             return result
         except Exception as exc:
+            _pop_last_provider_usage()
             latency_ms = int(round((perf_counter() - attempt_started) * 1000))
-            reason_code, cooldown_ms = _classify_pool_error(exc)
+            reason_code, cooldown_ms = _classify_pool_error(exc, scene_type=normalized_scene)
             _set_cooldown_ms(
                 provider_name=provider_token,
                 model_id=model_token,
@@ -1090,6 +1904,8 @@ def complete_llm_with_pool_sync(
         pool_exhausted=True,
         cached=False,
         total_latency_ms=result.total_latency_ms,
+        messages=messages,
+        content="",
     )
     return result
 
@@ -1116,9 +1932,14 @@ def complete_prompt_with_pool_sync(
     base_url_override: str | None = None,
 ) -> str:
     messages = []
-    if str(system_prompt or "").strip():
-        messages.append({"role": "system", "content": str(system_prompt or "").strip()})
-    messages.append({"role": "user", "content": str(prompt or "").strip()})
+    system_text = str(system_prompt or "").strip()
+    user_text = str(prompt or "").strip()
+    if system_text:
+        messages.append({"role": "system", "content": system_text})
+    if user_text:
+        messages.append({"role": "user", "content": user_text})
+    if not messages:
+        raise RuntimeError("empty llm prompt")
     result = complete_llm_with_pool_sync(
         request_id=request_id,
         scene_type=scene_type,
@@ -1199,6 +2020,14 @@ def stream_llm_chunks(
         return
     if provider == PROVIDER_DISABLED:
         raise RuntimeError("provider disabled")
+    if provider == PROVIDER_CODEX and not str(api_key or "").strip() and codex_cli_lm_available():
+        yield invoke_codex_cli_text(
+            model_id=model_id,
+            messages=messages,
+            timeout_ms=timeout_ms,
+            feature_key="stream",
+        )
+        return
     if not str(api_key or "").strip():
         raise RuntimeError(f"missing api key for provider={provider_name}")
 
@@ -1213,24 +2042,33 @@ def stream_llm_chunks(
         )
         return
 
-    from langchain_openai import ChatOpenAI
+    if provider == PROVIDER_GEMINI:
+        from langchain_google_genai import ChatGoogleGenerativeAI
 
-    llm = ChatOpenAI(
-        **_build_chat_openai_kwargs(
-            provider_name=provider_name,
-            model_id=model_id,
-            api_key=api_key,
-            timeout_ms=timeout_ms,
-            gen_params=gen_params,
-            base_url_override=base_url_override,
-            streaming=True,
+        llm = ChatGoogleGenerativeAI(
+            **_build_chat_google_genai_kwargs(
+                model_id=model_id,
+                api_key=api_key,
+                timeout_ms=timeout_ms,
+                gen_params=gen_params,
+                streaming=True,
+            )
         )
-    )
+        for chunk in llm.stream(_build_langchain_messages(messages)):
+            text = _extract_text_from_response_content(getattr(chunk, "content", "")) or ""
+            if text:
+                yield text
+        return
 
-    for chunk in llm.stream(_build_langchain_messages(messages)):
-        text = _extract_text_from_response_content(getattr(chunk, "content", "")) or ""
-        if text:
-            yield text
+    yield from _iter_openai_compat_stream(
+        provider_name=provider_name,
+        model_id=model_id,
+        api_key=api_key,
+        timeout_ms=timeout_ms,
+        messages=messages,
+        gen_params=gen_params,
+        base_url_override=base_url_override,
+    )
 
 
 async def astream_llm_chunks(
@@ -1318,9 +2156,15 @@ async def astream_llm_chunks_with_pool(
     normalized_tier = str(cognitive_tier or "B").strip().upper() or "B"
     attempt_rows: list[ModelAttempt] = []
     started_at = perf_counter()
+    max_attempts = _resolve_pool_max_attempts(
+        normalized_scene=normalized_scene,
+        normalized_tier=normalized_tier,
+    )
+    attempted_candidates = 0
 
     for candidate in _resolve_pool_candidates(
         cognitive_tier=normalized_tier,
+        scene_type=normalized_scene,
         provider_name=provider_name,
         model_id=model_id,
         api_key=api_key,
@@ -1346,19 +2190,31 @@ async def astream_llm_chunks_with_pool(
             )
             continue
 
+        if max_attempts > 0 and attempted_candidates >= max_attempts:
+            break
+        attempted_candidates += 1
         attempt_started = perf_counter()
         yielded_any = False
+        streamed_parts: list[str] = []
         try:
+            attempt_timeout_ms = _resolve_pool_attempt_timeout_ms(
+                provider_name=provider_token,
+                api_key=str(candidate.get("api_key") or "").strip(),
+                timeout_ms=int(timeout_ms),
+                scene_type=normalized_scene,
+                cognitive_tier=normalized_tier,
+            )
             async for chunk in astream_llm_chunks(
                 provider_name=provider_token,
                 model_id=model_token,
                 api_key=str(candidate.get("api_key") or "").strip(),
-                timeout_ms=int(timeout_ms),
+                timeout_ms=attempt_timeout_ms,
                 messages=messages,
                 gen_params=gen_params,
                 base_url_override=str(candidate.get("base_url_override") or "").strip() or None,
             ):
                 yielded_any = True
+                streamed_parts.append(str(chunk))
                 yield chunk
             latency_ms = int(round((perf_counter() - attempt_started) * 1000))
             if not yielded_any:
@@ -1381,11 +2237,13 @@ async def astream_llm_chunks_with_pool(
                 pool_exhausted=False,
                 cached=False,
                 total_latency_ms=int(round((perf_counter() - started_at) * 1000)),
+                messages=messages,
+                content="".join(streamed_parts),
             )
             return
         except Exception as exc:
             latency_ms = int(round((perf_counter() - attempt_started) * 1000))
-            reason_code, cooldown_ms = _classify_pool_error(exc)
+            reason_code, cooldown_ms = _classify_pool_error(exc, scene_type=normalized_scene)
             _set_cooldown_ms(
                 provider_name=provider_token,
                 model_id=model_token,
@@ -1413,6 +2271,8 @@ async def astream_llm_chunks_with_pool(
                     pool_exhausted=False,
                     cached=False,
                     total_latency_ms=int(round((perf_counter() - started_at) * 1000)),
+                    messages=messages,
+                    content="".join(streamed_parts),
                 )
                 raise
             continue
@@ -1427,5 +2287,7 @@ async def astream_llm_chunks_with_pool(
         pool_exhausted=True,
         cached=False,
         total_latency_ms=int(round((perf_counter() - started_at) * 1000)),
+        messages=messages,
+        content="",
     )
     raise RuntimeError(LLM_POOL_EXHAUSTED)

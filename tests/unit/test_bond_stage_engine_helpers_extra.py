@@ -56,7 +56,7 @@ def _make_restore_db(tmp_path: Path) -> Path:
         "CREATE TABLE bond_stage_transition_log (payload TEXT, ts_ms INTEGER, transition_status TEXT, user_id TEXT)"
     )
     conn.execute(
-        "CREATE TABLE bond_update_log (update_kind TEXT, status TEXT, ts_ms INTEGER, user_id TEXT)"
+        "CREATE TABLE bond_update_log (update_kind TEXT, status TEXT, ts_ms INTEGER, user_id TEXT, payload TEXT)"
     )
     conn.commit()
     conn.close()
@@ -196,7 +196,7 @@ def test_get_bond_state_uses_session_id_identity() -> None:
     snapshot = engine.get_bond_state(session_id="session-bond-user")
 
     assert snapshot.user_id == "session-bond-user"
-    assert snapshot.stage == bond_mod.STAGE_STRANGER
+    assert snapshot.stage == bond_mod.STAGE_FRIEND
 
 
 def test_restore_state_prefers_stage_transition_payload_and_adds_delta(tmp_path: Path) -> None:
@@ -207,11 +207,11 @@ def test_restore_state_prefers_stage_transition_payload_and_adds_delta(tmp_path:
         (json.dumps({"total_score": 30}), 1000, "PROMOTED", "restore-user"),
     )
     conn.executemany(
-        "INSERT INTO bond_update_log VALUES (?, ?, ?, ?)",
+        "INSERT INTO bond_update_log VALUES (?, ?, ?, ?, ?)",
         [
-            ("INTERACTION_ENGAGED", "SUCCESS", 1100, "restore-user"),
-            ("DEEP_TALK", "OK", 1200, "restore-user"),
-            ("STAGE_TRANSITION", "SUCCESS", 1000, "restore-user"),
+            ("INTERACTION_ENGAGED", "SUCCESS", 1100, "restore-user", "{}"),
+            ("DEEP_TALK", "OK", 1200, "restore-user", "{}"),
+            ("STAGE_TRANSITION", "SUCCESS", 1000, "restore-user", "{}"),
         ],
     )
     conn.commit()
@@ -234,11 +234,11 @@ def test_restore_state_falls_back_to_accumulated_events_when_transition_payload_
         ("{bad json", 1000, "PROMOTED", "fallback-user"),
     )
     conn.executemany(
-        "INSERT INTO bond_update_log VALUES (?, ?, ?, ?)",
+        "INSERT INTO bond_update_log VALUES (?, ?, ?, ?, ?)",
         [
-            ("INTERACTION_ENGAGED", "SUCCESS", 1100, "fallback-user"),
-            ("DEEP_TALK", "OK", 1200, "fallback-user"),
-            ("IDLE_DECAY", "SUCCESS", 1300, "fallback-user"),
+            ("INTERACTION_ENGAGED", "SUCCESS", 1100, "fallback-user", "{}"),
+            ("DEEP_TALK", "OK", 1200, "fallback-user", "{}"),
+            ("IDLE_DECAY", "SUCCESS", 1300, "fallback-user", "{}"),
         ],
     )
     conn.commit()
@@ -248,9 +248,43 @@ def test_restore_state_falls_back_to_accumulated_events_when_transition_payload_
     state = engine.get_state("fallback-user")
 
     assert state.total_score == 7
-    assert state.current_stage == bond_mod.STAGE_STRANGER
+    assert state.current_stage == bond_mod.STAGE_FRIEND
     assert state.event_count == 2
     assert state.last_event_ts_ms == 1200
+
+
+def test_restore_state_replays_emotion_weighted_affinity_deltas(tmp_path: Path) -> None:
+    db_path = _make_restore_db(tmp_path)
+    conn = sqlite3.connect(db_path)
+    conn.executemany(
+        "INSERT INTO bond_update_log VALUES (?, ?, ?, ?, ?)",
+        [
+            (
+                "EMOTIONAL_SUPPORT",
+                "SUCCESS",
+                1100,
+                "emotion-restore-user",
+                json.dumps({"emotion_intensity": 0.9, "emotion_valence": -0.8}),
+            ),
+            (
+                "INTERACTION_ENGAGED",
+                "OK",
+                1200,
+                "emotion-restore-user",
+                json.dumps({"emotion_intensity": 0.9, "emotion_valence": 0.6}),
+            ),
+        ],
+    )
+    conn.commit()
+    conn.close()
+
+    engine = bond_mod.BondStageEngine(ledger=_LedgerPath(db_path))
+    state = engine.get_state("emotion-restore-user")
+
+    assert state.total_score == 17
+    assert state.event_count == 2
+    assert state.recent_scores == [13, 4]
+    assert state.trend() in {"上升", "快速上升"}
 
 
 def test_log_transition_falls_back_to_system_event_and_initial_state_can_noop() -> None:
@@ -258,8 +292,8 @@ def test_log_transition_falls_back_to_system_event_and_initial_state_can_noop() 
     engine = bond_mod.BondStageEngine(ledger=ledger)
     result = bond_mod.StageTransitionResult(
         user_id="sys-user",
-        from_stage=bond_mod.STAGE_STRANGER,
-        to_stage=bond_mod.STAGE_ACQUAINTANCE,
+        from_stage=bond_mod.STAGE_FRIEND,
+        to_stage=bond_mod.STAGE_CLOSE_FRIEND,
         transition_status=bond_mod.TRANSITION_STATUS_PROMOTED,
         score_delta=10,
         total_score=10,

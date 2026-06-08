@@ -1,4 +1,4 @@
-"""runtime_helpers.py — 运行时纯工具函数（无业务依赖）。
+﻿"""runtime_helpers.py — 运行时纯工具函数（无业务依赖）。
 
 从 agent_runtime_shared.py 提取的通用工具函数，可被任意层安全导入。
 不依赖 app 层、tribe 层、ledger 等业务模块。
@@ -75,9 +75,22 @@ def _airlock_sanitize_input(message: str) -> tuple[str, bool]:
     return sanitized, bool(sanitized)
 
 
+_MEMORY_DISCONTINUITY_FILLER_RE = re.compile(
+    r"^\s*(?:嗯？|哈？|欸？)?\s*(?:老哥|哥哥|对方)?\s*(?:突然问这个|怎么突然(?:问|提|说)?(?:这个)?|你突然(?:问|提|说)?(?:这个)?|突然(?:问|提|说)这个)[…。，,、\s]*"
+    r"|硬要(?:说|选)(?:的话)?[，,、\s]*"
+)
+
+
+def _strip_memory_discontinuity_fillers(text: str) -> str:
+    value = str(text or "")
+    cleaned = _MEMORY_DISCONTINUITY_FILLER_RE.sub("", value).strip()
+    return cleaned or value.strip()
+
+
 def _airlock_sanitize_output(text: str) -> str:
     """出口净化：null byte + 长度截断。"""
     text = text.replace("\x00", "").strip()
+    text = _strip_memory_discontinuity_fillers(text)
     max_chars = int(os.environ.get("HOST_QA_MAX_RESPONSE_CHARS") or "4000")
     if len(text) > max_chars:
         truncated = text[:max_chars]
@@ -387,7 +400,11 @@ def _summarize_relationship_state_for_trace(relationship_state: Mapping[str, Any
     stage = str(raw.get("bond_stage") or "").strip()
     if stage:
         summary["bond_stage"] = stage
-    for key in ("familiarity", "trust", "comfort", "openness", "dependency_tolerance", "protectiveness", "boundary_softness", "affection_signal"):
+    for key in ("stage_label", "relationship_phase", "relationship_substage"):
+        value = str(raw.get(key) or "").strip()
+        if value:
+            summary[key] = value
+    for key in ("familiarity", "trust", "comfort", "openness", "dependency_tolerance", "protectiveness", "boundary_softness", "affection_signal", "playfulness", "romantic_tension", "attachment_depth", "conflict_rift"):
         value = _coerce_trace_score(raw.get(key))
         if value is not None:
             summary[key] = value

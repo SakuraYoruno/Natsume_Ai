@@ -59,6 +59,7 @@ class InMemoryTribeEventBus:
 
         # asyncio 分发队列（在 start() 时创建，确保在正确的事件循环中）
         self._queue: asyncio.Queue[TribeEvent] | None = None
+        self._loop: asyncio.AbstractEventLoop | None = None
         self._running = False
         self._dispatch_task: asyncio.Task[None] | None = None
 
@@ -128,11 +129,23 @@ class InMemoryTribeEventBus:
         with self._lock:
             self._events.append(event)
         # 尝试投递到 asyncio 分发队列（若 dispatch_loop 未启动则静默跳过）
-        if self._queue is not None and self._running:
+        queue = self._queue
+        loop = self._loop
+        if queue is not None and self._running:
+            def _enqueue() -> None:
+                try:
+                    queue.put_nowait(event)
+                except asyncio.QueueFull:
+                    self._record_queue_full_drop(event=event, batch=False)
+
             try:
-                self._queue.put_nowait(event)
-            except asyncio.QueueFull:
-                self._record_queue_full_drop(event=event, batch=False)
+                running_loop = asyncio.get_running_loop()
+            except RuntimeError:
+                running_loop = None
+            if loop is not None and running_loop is not loop and loop.is_running():
+                loop.call_soon_threadsafe(_enqueue)
+            else:
+                _enqueue()
         return event
 
     def publish_batch(self, events: list[TribeEvent]) -> list[TribeEvent]:
@@ -155,12 +168,24 @@ class InMemoryTribeEventBus:
             for event in events:
                 self._events.append(event)
         # 逐一投递到分发队列（队列满时记录警告并跳过）
-        if self._queue is not None and self._running:
+        queue = self._queue
+        loop = self._loop
+        if queue is not None and self._running:
             for event in events:
+                def _enqueue_one(item: TribeEvent = event) -> None:
+                    try:
+                        queue.put_nowait(item)
+                    except asyncio.QueueFull:
+                        self._record_queue_full_drop(event=item, batch=True)
+
                 try:
-                    self._queue.put_nowait(event)
-                except asyncio.QueueFull:
-                    self._record_queue_full_drop(event=event, batch=True)
+                    running_loop = asyncio.get_running_loop()
+                except RuntimeError:
+                    running_loop = None
+                if loop is not None and running_loop is not loop and loop.is_running():
+                    loop.call_soon_threadsafe(_enqueue_one)
+                else:
+                    _enqueue_one()
         return events
 
     # ── 分发循环 ──────────────────────────────────────────────────────────────
@@ -170,6 +195,7 @@ class InMemoryTribeEventBus:
         if self._running:
             logger.debug("TribeEventBus 分发循环已在运行，跳过重复启动")
             return
+        self._loop = asyncio.get_running_loop()
         self._queue = asyncio.Queue(maxsize=4096)
         with self._lock:
             self._queue_full_last_warn_ms = 0
@@ -190,6 +216,7 @@ class InMemoryTribeEventBus:
             except (asyncio.CancelledError, Exception):
                 pass
             self._dispatch_task = None
+        self._loop = None
         logger.info("TribeEventBus 分发循环已停止")
 
     async def _dispatch_loop(self) -> None:

@@ -241,10 +241,27 @@ def test_receive_input_gateway_attachment_only_sync_dispatches_to_graph() -> Non
 
     assert response.status == "ACCEPTED"
     assert dispatch_mock.await_count == 1
+    assert dispatch_mock.await_args.kwargs["text"] == "[图片消息]"
     dispatched_payload = dispatch_mock.await_args.kwargs["payload"]
+    assert dispatched_payload["content"] == "[图片消息]"
+    assert dispatched_payload["content_is_multimodal_placeholder"] is True
+    assert "attachment_processing_mode" not in dispatched_payload
+    assert dispatched_payload["attachments"][0]["type"] == "image"
+    with patch("host_brain.app.dependencies.get_multimodal_observer", return_value=observer):
+        should_continue = _run(
+            input_routes_module._ensure_gateway_multimodal_observed_for_dispatch(
+                request_id="req_mm_sync_test",
+                session_id="qq_dm_mm_sync_001",
+                source="GATEWAY",
+                text="",
+                payload=dispatched_payload,
+                ts_ms=1,
+                ledger=SimpleNamespace(),
+            )
+        )
+    assert should_continue is True
     assert dispatched_payload["attachment_processing_mode"] == "sync"
     assert dispatched_payload["attachment_summary"] == "收到一张图片。图片里写着你好。"
-    assert dispatched_payload["attachments"][0]["type"] == "image"
 
 
 def test_receive_input_gateway_voice_attachment_only_accepts_empty_content() -> None:
@@ -286,10 +303,27 @@ def test_receive_input_gateway_voice_attachment_only_accepts_empty_content() -> 
         response = _run(receive_input(body, SimpleNamespace()))
 
     assert response.status == "ACCEPTED"
+    assert dispatch_mock.await_args.kwargs["text"] == "[语音消息]"
     dispatched_payload = dispatch_mock.await_args.kwargs["payload"]
+    assert dispatched_payload["content"] == "[语音消息]"
+    assert dispatched_payload["content_is_multimodal_placeholder"] is True
+    assert "attachment_processing_mode" not in dispatched_payload
+    assert dispatched_payload["attachments"][0]["type"] == "voice"
+    with patch("host_brain.app.dependencies.get_multimodal_observer", return_value=observer):
+        should_continue = _run(
+            input_routes_module._ensure_gateway_multimodal_observed_for_dispatch(
+                request_id="req_mm_voice_test",
+                session_id="qq_dm_mm_voice_001",
+                source="GATEWAY",
+                text="",
+                payload=dispatched_payload,
+                ts_ms=1,
+                ledger=SimpleNamespace(),
+            )
+        )
+    assert should_continue is True
     assert dispatched_payload["attachment_processing_mode"] == "sync"
     assert dispatched_payload["attachment_summary"].startswith("收到一段语音。")
-    assert dispatched_payload["attachments"][0]["type"] == "voice"
 
 
 def test_receive_input_gateway_attachment_async_short_circuits_dispatch() -> None:
@@ -329,11 +363,26 @@ def test_receive_input_gateway_attachment_async_short_circuits_dispatch() -> Non
     ), patch("host_brain.app.input_routes._log_input_event"):
         schedule_mock.return_value = {"job_id": "mmjob_test"}
         response = _run(receive_input(body, SimpleNamespace()))
-
-    assert response.status == "ACCEPTED"
-    assert "async processing" in response.detail
-    assert dispatch_mock.await_count == 0
-    assert schedule_mock.call_count == 1
+        assert response.status == "ACCEPTED"
+        assert response.detail == "input accepted for processing"
+        assert dispatch_mock.await_count == 1
+        assert dispatch_mock.await_args.kwargs["text"] == "[视频消息]"
+        dispatched_payload = dispatch_mock.await_args.kwargs["payload"]
+        assert dispatched_payload["content"] == "[视频消息]"
+        assert dispatched_payload["content_is_multimodal_placeholder"] is True
+        should_continue = _run(
+            input_routes_module._ensure_gateway_multimodal_observed_for_dispatch(
+                request_id="req_mm_async_test",
+                session_id="qq_dm_mm_async_001",
+                source="GATEWAY",
+                text="",
+                payload=dispatched_payload,
+                ts_ms=1,
+                ledger=SimpleNamespace(),
+            )
+        )
+        assert should_continue is False
+        assert schedule_mock.call_count == 1
 
 
 def test_receive_input_gateway_followup_restores_recent_multimodal_context() -> None:
@@ -381,6 +430,18 @@ def test_receive_input_gateway_followup_restores_recent_multimodal_context() -> 
         return_value=None,
     ), patch("host_brain.app.input_routes._log_input_event"):
         first_response = _run(receive_input(first_body, SimpleNamespace()))
+        first_payload = dispatch_mock.await_args.kwargs["payload"]
+        _run(
+            input_routes_module._ensure_gateway_multimodal_observed_for_dispatch(
+                request_id="req_mm_followup_first",
+                session_id="qq_dm_mm_followup_001",
+                source="GATEWAY",
+                text="",
+                payload=first_payload,
+                ts_ms=1,
+                ledger=SimpleNamespace(),
+            )
+        )
         second_response = _run(receive_input(second_body, SimpleNamespace()))
 
     assert first_response.status == "ACCEPTED"
@@ -393,7 +454,7 @@ def test_receive_input_gateway_followup_restores_recent_multimodal_context() -> 
     input_routes_module._GATEWAY_RECENT_MULTIMODAL_CACHE.clear()
 
 
-def test_gateway_reply_text_uses_chinese_while_voice_summary_uses_japanese() -> None:
+def test_gateway_reply_text_and_voice_summary_use_chinese() -> None:
     reply_text = _build_gateway_reply_text(
         decision="APPROVE",
         narrative="我在呢，你慢慢说。",
@@ -403,35 +464,95 @@ def test_gateway_reply_text_uses_chinese_while_voice_summary_uses_japanese() -> 
     voice_text = _build_gateway_voice_text(
         reply_text=reply_text,
         tts_text_ja=None,
-        render_target_lang="ja",
+        render_target_lang="zh",
     )
 
     assert reply_text == "我在呢，你慢慢说。"
-    assert voice_text == ""
+    assert voice_text == "我在呢，你慢慢说。"
 
 
-def test_send_gateway_voice_reply_uses_japanese_tts_lang_hint() -> None:
+def test_send_gateway_voice_reply_uses_chinese_tts_lang_hint() -> None:
     post_speak_mock = AsyncMock(
         return_value=SimpleNamespace(
             success=True,
             status="ACCEPTED",
             detail="playback started",
             latency_ms=12,
-            event={},
+            event={"audio_path": "D:\\tmp\\voice.wav"},
         )
     )
+    post_gateway_reply_mock = AsyncMock()
 
-    with patch("host_brain.channels.edge_rpc_client.post_speak", new=post_speak_mock):
+    with patch(
+        "host_brain.channels.edge_rpc_client.post_speak",
+        new=post_speak_mock,
+    ), patch(
+        "host_brain.channels.edge_rpc_client.post_gateway_reply",
+        new=post_gateway_reply_mock,
+    ):
         result = _run(
             _send_gateway_voice_reply(
                 platform="qq",
                 conversation_id="qq_dm_voice_lang_001",
-                tts_text="こんにちは。",
+                tts_text="我在呢。",
                 request_id="req_gateway_voice_lang",
             )
-    )
+        )
 
     assert post_speak_mock.await_count == 1
-    assert post_speak_mock.await_args.kwargs["lang_hint"] == "ja"
+    assert post_speak_mock.await_args.kwargs["lang_hint"] == "zh"
+    assert post_speak_mock.await_args.kwargs["export_audio"] is False
+    assert post_gateway_reply_mock.await_count == 0
     assert result["voice_status"] == "ACCEPTED"
     assert result["voice_success"] is True
+    assert result["voice_gateway_sent"] is False
+    assert "disabled" in result["voice_gateway_detail"].lower()
+
+
+def test_send_gateway_voice_reply_can_opt_in_to_platform_voice_message() -> None:
+    post_speak_mock = AsyncMock(
+        return_value=SimpleNamespace(
+            success=True,
+            status="ACCEPTED",
+            detail="playback started",
+            latency_ms=12,
+            event={
+                "event_type": "TTS_PLAYBACK_STARTED",
+                "audio_path": "D:\\tmp\\voice.wav",
+            },
+        )
+    )
+    post_gateway_reply_mock = AsyncMock(
+        return_value=SimpleNamespace(
+            success=True,
+            status="SENT",
+            detail="voice sent",
+            latency_ms=34,
+        )
+    )
+
+    with patch(
+        "host_brain.channels.edge_rpc_client.post_speak",
+        new=post_speak_mock,
+    ), patch(
+        "host_brain.channels.edge_rpc_client.post_gateway_reply",
+        new=post_gateway_reply_mock,
+    ):
+        result = _run(
+            _send_gateway_voice_reply(
+                platform="qq",
+                conversation_id="qq_dm_voice_opt_in_001",
+                tts_text="我在呢。",
+                request_id="req_gateway_voice_opt_in",
+                send_gateway_voice_message=True,
+            )
+        )
+
+    assert post_speak_mock.await_count == 1
+    assert post_speak_mock.await_args.kwargs["export_audio"] is True
+    assert post_gateway_reply_mock.await_count == 1
+    voice_call = post_gateway_reply_mock.await_args.kwargs
+    assert voice_call["msg_type"] == "voice"
+    assert voice_call["media_path"] == "D:\\tmp\\voice.wav"
+    assert result["voice_gateway_sent"] is True
+    assert result["voice_gateway_status"] == "SENT"

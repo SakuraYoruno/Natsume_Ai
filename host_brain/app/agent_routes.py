@@ -183,8 +183,9 @@ async def _agent_loop_sse_generator(
             extra={"request_id": request_id},
         )
     elif use_edge_rpc:
+        from host_brain.channels.edge_rpc_client import resolve_host_edge_rpc_shared_key
         from host_brain.app.vision.edge_rpc_client import EdgeRpcClient
-        hmac_key = str(os.environ.get("HOST_EDGE_RPC_SHARED_KEY") or "").strip() or None
+        hmac_key = resolve_host_edge_rpc_shared_key()
         clawdbot_client = EdgeRpcClient(
             edge_base_url=edge_rpc_base_url,
             hmac_key=hmac_key,

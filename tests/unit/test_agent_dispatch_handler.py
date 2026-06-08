@@ -15,7 +15,7 @@ def test_agent_handler_map_contains_core_agents() -> None:
     """_AGENT_HANDLER_MAP 包含所有核心 agent。"""
     assert AGENT_ID_TRANSLATE in _AGENT_HANDLER_MAP
     assert AGENT_ID_RETRIEVAL in _AGENT_HANDLER_MAP
-    assert "chat_agent" in _AGENT_HANDLER_MAP
+    assert "surface_reply" in _AGENT_HANDLER_MAP
     assert "intent_agent" in _AGENT_HANDLER_MAP
     assert "judge_agent" in _AGENT_HANDLER_MAP
 

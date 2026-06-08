@@ -42,7 +42,7 @@ SCENE_GATEWAY = "GATEWAY"
 # Phase XV：双轨语言常量
 # ---------------------------------------------------------------------------
 TEXT_OUTPUT_LANG: str = "zh"
-TTS_INPUT_LANG: str = "ja"
+TTS_INPUT_LANG: str = "zh"
 
 
 def is_dual_lang_enabled() -> bool:
@@ -337,16 +337,19 @@ def _resolve_localized_template_mapping(template_id: str, *, render_target_lang:
 
 
 def infer_render_target_lang(*, user_message: str, core_narrative: str = "") -> str:
-    """ModelPlane §0.4: 二次式输出强制日文渲染。"""
+    """Resolve render language; production voice/text output is Chinese-only by default."""
     override = str(os.environ.get("HOST_RENDER_TARGET_LANG") or "").strip().lower()
-    if override in {"zh", "ja"}:
+    allow_japanese = str(os.environ.get("HOST_ALLOW_JAPANESE_OUTPUT") or "").strip().lower() in {"1", "true", "yes", "on"}
+    if override == "zh":
+        return "zh"
+    if override == "ja" and allow_japanese:
         return override
     combined = f"{str(user_message or '')}\n{str(core_narrative or '')}".strip().lower()
     if any(token in combined for token in ("中文", "汉语", "简体", "chinese", "mandarin")):
         return "zh"
-    if any(token in combined for token in ("日文", "日语", "日本語", "japanese")):
+    if allow_japanese and any(token in combined for token in ("日文", "日语", "日本語", "japanese")):
         return "ja"
-    if _contains_kana(combined):
+    if allow_japanese and _contains_kana(combined):
         return "ja"
     if _contains_cjk_ideograph(combined):
         return "zh"

@@ -338,11 +338,13 @@ class ProprioceptionAgent:
         except Exception:
             pass
         try:
+            from host_brain.persona.identity import get_canonical_persona_self_id  # noqa: PLC0415
+
             _dma = get_default_mode_agent()
             if hasattr(_dma, "tick_idle_cycle"):
                 _dma.tick_idle_cycle(
                     source=f"proprioception_task_success:intensity={round(_clamp(float(intensity)), 3)}",
-                    person_id="user_1",
+                    person_id=get_canonical_persona_self_id(),
                 )
         except Exception:
             pass
@@ -392,11 +394,13 @@ class ProprioceptionAgent:
         # T-367：任务成功时联动 DefaultModeAgent.tick_idle_cycle()（任务完成强化自我连续感）
         # "我完成了一件事"是自我叙事的核心，应主动更新连续性
         try:
+            from host_brain.persona.identity import get_canonical_persona_self_id  # noqa: PLC0415
+
             _dma = get_default_mode_agent()
             if hasattr(_dma, "tick_idle_cycle"):
                 _dma.tick_idle_cycle(
                     source=f"proprioception_task_success:intensity={round(intensity, 3)}",
-                    person_id="user_1",
+                    person_id=get_canonical_persona_self_id(),
                 )
         except Exception:
             pass

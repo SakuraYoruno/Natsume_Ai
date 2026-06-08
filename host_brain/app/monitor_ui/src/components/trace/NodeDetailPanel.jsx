@@ -100,7 +100,7 @@ function buildNodeSummaryMetrics(node) {
   pushSummaryMetric(metrics, '事件', input.event_type || output.phase)
   pushSummaryMetric(metrics, '意图', output.intent || output.query_plan?.intent)
   pushSummaryMetric(metrics, '候选', output.candidate_count, output.route_count != null ? `路由 ${output.route_count}` : null)
-  pushSummaryMetric(metrics, 'TopK', output.rerank_topk ?? output.topk_count, output.rerank_provider || null)
+  pushSummaryMetric(metrics, 'TopK', output.topk_count)
   pushSummaryMetric(metrics, '证据', output.evidence_count ?? output.evidence_refs_count, output.pack_id || null)
   pushSummaryMetric(metrics, '情绪', output.emotion_tag, output.mood_state || null)
   pushSummaryMetric(metrics, '动机', output.dominant_motive)

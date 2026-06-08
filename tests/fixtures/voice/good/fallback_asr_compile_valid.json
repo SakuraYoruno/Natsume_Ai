@@ -1,8 +1,8 @@
-{
-  "request_id": "req_voice_041",
-  "payload": {
-    "session_id": "sess_voice_001",
-    "text": "need a quick draft for this transcript",
-    "seq": 41
-  }
+﻿{
+    "request_id":  "req_voice_041",
+    "payload":  {
+                    "session_id":  "sess_voice_001",
+                    "text":  "need a quick draft for this transcript",
+                    "seq":  41
+                }
 }

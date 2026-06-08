@@ -62,6 +62,16 @@ class SelfModelSnapshot:
     personality_changes: list[str] = field(default_factory=list)
     growth_milestones: list[str] = field(default_factory=list)
 
+    # 持久自我层面
+    self_identity: str = ""
+    self_values: list[str] = field(default_factory=list)
+    self_boundaries: list[str] = field(default_factory=list)
+    active_intentions: list[str] = field(default_factory=list)
+    unresolved_tensions: list[str] = field(default_factory=list)
+    agency_score: float = 0.0
+    self_continuity_score: float = 0.0
+    self_update_count: int = 0
+
     def as_dict(self) -> dict[str, Any]:
         return {
             "recent_mood_trend": self.recent_mood_trend,
@@ -72,6 +82,14 @@ class SelfModelSnapshot:
             "last_deep_talk_days_ago": self.last_deep_talk_days_ago,
             "personality_changes": list(self.personality_changes),
             "growth_milestones": list(self.growth_milestones),
+            "self_identity": self.self_identity,
+            "self_values": list(self.self_values),
+            "self_boundaries": list(self.self_boundaries),
+            "active_intentions": list(self.active_intentions),
+            "unresolved_tensions": list(self.unresolved_tensions),
+            "agency_score": round(float(self.agency_score or 0.0), 3),
+            "self_continuity_score": round(float(self.self_continuity_score or 0.0), 3),
+            "self_update_count": int(self.self_update_count or 0),
         }
 
 
@@ -230,15 +248,13 @@ class PersonaEngine:
         # ── Bond 阶段开放度系数 ───────────────────────────────────────────
         # 越亲密，特质和情感对表达的影响越大
         _BOND_OPENNESS: dict[str, float] = {
-            "STRANGER": 0.3,
-            "ACQUAINTANCE": 0.5,
             "FRIEND": 0.7,
             "CLOSE_FRIEND": 0.85,
             "CONFIDANT": 0.95,
             "SOULMATE": 1.0,
         }
-        stage = str(bond_stage or "STRANGER").strip().upper()
-        openness = _BOND_OPENNESS.get(stage, 0.5)
+        stage = str(bond_stage or "FRIEND").strip().upper()
+        openness = _BOND_OPENNESS.get(stage, _BOND_OPENNESS["FRIEND"])
 
         # ── 特质组合效应 ──────────────────────────────────────────────────
         # 组合效应优先于单特质判断，捕捉更细腻的人格表达
@@ -458,6 +474,7 @@ class PersonaEngine:
             from host_brain.persona.self_model import SelfModel  # noqa: PLC0415
             model = SelfModel()
             snapshot_dict = model.build_snapshot(
+                user_id=uid,
                 timeline_summary=timeline_summary,
                 timeline_diary=timeline_diary,
                 bond_state=bond_state,

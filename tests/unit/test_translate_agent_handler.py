@@ -110,6 +110,33 @@ class TestReActMode:
         assert isinstance(scratchpad.get("steps"), list)
         assert len(scratchpad["steps"]) >= 1
 
+    def test_react_prompt_receives_agent_context_envelope(self):
+        """ReAct prompt receives bounded AgentContextEnvelope instead of raw context."""
+        from host_brain.app.handlers.translate_agent_handler import translate_agent_handler
+
+        gateway = _make_gateway()
+        translate_agent_handler(
+            _make_payload("翻译刚才那段"),
+            context={
+                "request_id": "test-req-p10-envelope",
+                "gateway": gateway,
+                "agent_context_envelope": {
+                    "schema_version": "Natsume.sub_agent.context.v1",
+                    "task_brief": "翻译刚才那段",
+                    "memory_packet": {"facts": ["长期事实：翻译保留术语表。"]},
+                    "forbidden_context": ["raw_history_not_available"],
+                },
+                "recent_turns": [{"role": "user", "content": "raw should not be read directly"}],
+            },
+        )
+
+        messages = gateway.complete.call_args[0][0]
+        rendered = "\n".join(str(item.get("content") or "") for item in messages)
+        assert "AgentContextEnvelope" in rendered
+        assert "翻译保留术语表" in rendered
+        assert "raw_history_not_available" in rendered
+        assert "raw should not be read directly" not in rendered
+
     def test_stopped_reason_valid(self):
         """stopped_reason 为有效值之一。"""
         from host_brain.app.handlers.translate_agent_handler import translate_agent_handler

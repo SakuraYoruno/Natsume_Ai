@@ -11,6 +11,7 @@ param(
   [bool]$BreakawayFromSsh = $false,
   [bool]$AutoDegradeOnAsrCrash = $false,
   [bool]$EnforceCnAsrJaTtsMode = $true,
+  [switch]$CleanQQOneBot,
   [ValidateSet("", "wxautox4_hook", "off")]
   [string]$WeChatInboundBackend = "",
   [string]$WeChatVisionModel = "",
@@ -69,8 +70,9 @@ if ($GatewayVoiceAsrMode.IsPresent) {
 Set-OptionalProcessEnv -Key "EDGE_WECHAT_INBOUND_BACKEND" -Value $WeChatInboundBackend
 Set-OptionalProcessEnv -Key "EDGE_WECHAT_VISION_MODEL" -Value $WeChatVisionModel
 Set-OptionalProcessEnv -Key "EDGE_WECHAT_VISION_API_URL" -Value $WeChatVisionApiUrl
-Set-OptionalProcessEnv -Key "EDGE_QQ_ONEBOT_KILL_QQ_BEFORE_START" -Value "true"
-Set-OptionalProcessEnv -Key "EDGE_QQ_ONEBOT_FORCE_CLEAN_START" -Value "true"
+$qqCleanStartValue = if ($CleanQQOneBot.IsPresent) { "true" } else { "false" }
+Set-OptionalProcessEnv -Key "EDGE_QQ_ONEBOT_KILL_QQ_BEFORE_START" -Value $qqCleanStartValue
+Set-OptionalProcessEnv -Key "EDGE_QQ_ONEBOT_FORCE_CLEAN_START" -Value $qqCleanStartValue
 if ($WeChatVisionTimeoutS -gt 0) {
   Set-OptionalProcessEnv -Key "EDGE_WECHAT_VISION_TIMEOUT_S" -Value $WeChatVisionTimeoutS
 }

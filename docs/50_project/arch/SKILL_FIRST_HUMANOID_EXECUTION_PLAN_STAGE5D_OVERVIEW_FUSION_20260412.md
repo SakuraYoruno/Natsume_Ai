@@ -1,3 +1,6 @@
+受众：PROJECT
+标题：Skill-First 类人体架构执行补充方案（P5D-Overview Fusion）
+
 # Skill-First 类人体架构执行补充方案（P5D-Overview Fusion）
 日期：2026-04-12  
 状态：`COMPLETED`

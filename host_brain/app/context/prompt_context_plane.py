@@ -155,6 +155,12 @@ class ContextAssembler:
         request_id = str(request_payload.get("request_id") or "").strip()
         session_id = str(request_payload.get("session_id") or "").strip()
         person_id = str(request_payload.get("person_id") or "").strip()
+        ab_eval_payload = dict(runtime_payload.get("ab_eval") or {})
+        eval_history_turns = [
+            dict(item or {})
+            for item in list(ab_eval_payload.get("history_turns") or [])
+            if isinstance(item, Mapping)
+        ]
 
         merged_emotion_context = dict(runtime_payload.get("emotion_context") or {})
         emotion_context = dict(dict(runtime_payload.get("emotion") or {}).get("state") or {})
@@ -162,7 +168,35 @@ class ContextAssembler:
 
         continuity = ContinuityBlock()
         current_turn_index: int | None = None
-        if request_id and session_id:
+        if eval_history_turns:
+            normalized_recent_turns: list[dict[str, Any]] = []
+            for index, raw_turn in enumerate(eval_history_turns):
+                role = str(raw_turn.get("role") or "").strip().lower()
+                role = "assistant" if role == "assistant" else "user"
+                content = str(raw_turn.get("content") or raw_turn.get("text") or "").strip()
+                if not content:
+                    continue
+                normalized_recent_turns.append(
+                    {
+                        "turn_id": str(raw_turn.get("turn_id") or f"ab_eval_{index}"),
+                        "request_id": str(raw_turn.get("request_id") or ""),
+                        "role": role,
+                        "content": content,
+                        "turn_index": int(raw_turn.get("turn_index") or index),
+                        "lang": str(raw_turn.get("lang") or ("ja" if render_target_lang == "ja" else "zh")),
+                        "metadata": {
+                            **dict(raw_turn.get("metadata") or {}),
+                            "source": "ab_eval_case",
+                        },
+                    }
+                )
+            continuity = ContinuityBlock(
+                recent_turns=normalized_recent_turns,
+                turns_injected=len(normalized_recent_turns),
+                fetched_turns=len(normalized_recent_turns),
+            )
+            current_turn_index = len(normalized_recent_turns)
+        elif request_id and session_id:
             resolved_history_max_turns = max(
                 1,
                 int(history_max_turns if history_max_turns is not None else conversation_max_turns()),
@@ -233,6 +267,7 @@ class ContextAssembler:
             multimodal_observations=multimodal_observations,
             multimodal_payload=multimodal_payload,
             attachment_summary=str(request_payload.get("attachment_summary") or "").strip(),
+            user_text=intent.user_message,
         )
         multimodal = MultimodalBlock(
             state=factual_perception,

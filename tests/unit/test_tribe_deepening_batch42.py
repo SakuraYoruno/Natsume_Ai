@@ -343,8 +343,9 @@ def test_language_high_urgency_calls_endocrine_stress():
 
 # ── T-310: DefaultModeAgent 高连续性时联动 InteroceptionAgent.reduce_recovery_urgency ──
 
-def test_default_mode_high_continuity_calls_reduce_recovery_urgency():
+def test_default_mode_high_continuity_calls_reduce_recovery_urgency(monkeypatch):
     """T-310: continuity_score>=0.55 时应调用 InteroceptionAgent.reduce_recovery_urgency()。"""
+    monkeypatch.setenv("HOST_BACKGROUND_TASKS_ENABLED", "true")
     from host_brain.tribe.default_mode_agent import DefaultModeAgent
     from host_brain.tribe.tribe_state import TribeStateRegistry
 

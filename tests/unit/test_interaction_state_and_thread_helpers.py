@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from host_brain.app.context.interaction_state import coerce_interaction_state, build_interaction_state
-from host_brain.app.context.conversation_interpretation import interpret_conversation
+from host_brain.app.context.conversation_interpretation import classify_literal_topic, interpret_conversation
 from host_brain.app.context.interaction_thread import (
     InteractionThreadState,
     _classify_assistant_topic,
@@ -27,12 +27,42 @@ def test_classify_user_and_assistant_topic_cover_major_regex_branches() -> None:
     assert _classify_user_topic("那你还会帮我吗") == "help_commitment"
     assert _classify_user_topic("hello") == "greeting"
     assert _classify_user_topic("在吗") == "presence_ping"
+    assert _classify_user_topic("听得到吗") == "auditory_check"
     assert _classify_user_topic("嗯嗯") == "light_ack"
     assert _classify_user_topic("戳戳") == "playful_ping"
     assert _classify_assistant_topic("哥哥，怎么委屈成这样呀？") == "image_social"
     assert _classify_assistant_topic("我是新海天。") == "identity"
-    assert _classify_assistant_topic("虽然不算熟，但是顺路嘛。") == "relationship_boundary"
+    assert _classify_assistant_topic("虽然不算熟，但是顺路嘛。") == ""
+    assert _classify_assistant_topic("别装外人啦，我会管。") == "relationship_boundary"
     assert _classify_assistant_topic("你真开口的话，我不会装作没听见。") == "help_commitment"
+
+
+def test_connectivity_check_is_presence_ping_not_plain_hold() -> None:
+    assert classify_literal_topic("测试一下现在能回吗") == "presence_ping"
+
+    interpretation = interpret_conversation(
+        recent_turns=[],
+        user_message="测试一下现在能回吗",
+        topic_ledger=TopicLedgerBlock(),
+    )
+
+    assert interpretation.literal_topic == "presence_ping"
+    assert interpretation.ongoing_thread == "phatic"
+
+
+def test_auditory_text_check_is_not_plain_presence_ping() -> None:
+    assert classify_literal_topic("听得到吗") == "auditory_check"
+    assert classify_literal_topic("你能听见我说话吗？") == "auditory_check"
+
+    interpretation = interpret_conversation(
+        recent_turns=[],
+        user_message="听得到吗",
+        topic_ledger=TopicLedgerBlock(),
+    )
+
+    assert interpretation.literal_topic == "auditory_check"
+    assert interpretation.interaction_move == "auditory_probe"
+    assert "literal_topic:auditory_check" in interpretation.reason_tags
 
 
 def test_coerce_interaction_thread_state_and_default_empty() -> None:
@@ -110,7 +140,7 @@ def test_build_and_coerce_interaction_state_cover_thread_fallback_target_and_rea
             "source_topic": "emoji_social_reply",
         },
         affect_state={"emotion_tag": "CALM"},
-        relationship_state={"bond_stage": "STRANGER"},
+        relationship_state={"bond_stage": "FRIEND"},
         drive_state={"continuity_drive": 0.4},
         topic_ledger={"active_topics": ["emoji_social_reply"]},
         tactic_ledger={"recent_topics": ["emoji_social_reply"]},
@@ -151,6 +181,112 @@ def test_interpret_conversation_promotes_image_social_followup_from_gateway_like
     assert final.interaction_move == "repair_needed"
     assert final.ongoing_thread == "image_social"
     assert "image_social_followup:deny" in final.reason_tags
+
+
+def test_interpret_conversation_routes_generic_image_placeholders_as_visual_share() -> None:
+    generic_image_observation = {
+        "primary_modality": "image",
+        "observed_types": ["image"],
+        "summary_for_chat": "收到一张图片。",
+        "core_observation": "收到一张图片。",
+        "confidence": 0.2,
+    }
+
+    interpretation = interpret_conversation(
+        recent_turns=[],
+        user_message="[????]",
+        topic_ledger=TopicLedgerBlock(),
+        multimodal_observations=generic_image_observation,
+    )
+
+    assert interpretation.literal_topic == "attachment_only_no_question"
+    assert interpretation.interaction_move == "light_ack"
+    assert interpretation.ongoing_thread == ""
+    assert "literal_topic:attachment_only_no_question" in interpretation.reason_tags
+
+
+def test_interpret_conversation_routes_emotive_image_placeholder_as_social_image() -> None:
+    emotive_image_observation = {
+        "primary_modality": "image",
+        "observed_types": ["image"],
+        "summary_for_chat": "无语；一张动漫反应图。",
+        "core_observation": "无语；一张动漫反应图。",
+        "social_signal": "无语",
+        "emotion_signals": ["无语"],
+        "confidence": 0.72,
+    }
+
+    interpretation = interpret_conversation(
+        recent_turns=[],
+        user_message="[????]",
+        topic_ledger=TopicLedgerBlock(),
+        multimodal_observations=emotive_image_observation,
+    )
+
+    assert interpretation.literal_topic == "emoji_social_reply"
+    assert interpretation.interaction_move == "playful_ping"
+    assert interpretation.ongoing_thread == "image_social"
+    assert "literal_topic:emoji_social_reply" in interpretation.reason_tags
+
+
+def test_interpret_conversation_keeps_explicit_image_question_as_description() -> None:
+    generic_image_observation = {
+        "primary_modality": "image",
+        "observed_types": ["image"],
+        "summary_for_chat": "收到一张图片。",
+        "core_observation": "收到一张图片。",
+        "confidence": 0.2,
+    }
+
+    interpretation = interpret_conversation(
+        recent_turns=[],
+        user_message="这是什么",
+        topic_ledger=TopicLedgerBlock(),
+        multimodal_observations=generic_image_observation,
+    )
+
+    assert interpretation.literal_topic == "literal_description"
+    assert interpretation.interaction_move == "probe"
+    assert interpretation.ongoing_thread == ""
+
+
+def test_interpret_conversation_treats_look_request_as_image_content() -> None:
+    generic_image_observation = {
+        "primary_modality": "image",
+        "observed_types": ["image"],
+        "summary_for_chat": "一只放在桌上的白色马克杯",
+        "core_observation": "一只放在桌上的白色马克杯",
+        "confidence": 0.76,
+    }
+
+    interpretation = interpret_conversation(
+        recent_turns=[],
+        user_message="你看这张图",
+        topic_ledger=TopicLedgerBlock(),
+        multimodal_observations=generic_image_observation,
+    )
+
+    assert interpretation.literal_topic == "literal_description"
+    assert interpretation.interaction_move == "probe"
+
+
+def test_interpret_conversation_keeps_look_request_social_when_image_is_reaction_meme() -> None:
+    interpretation = interpret_conversation(
+        recent_turns=[],
+        user_message="你看这个",
+        topic_ledger=TopicLedgerBlock(),
+        multimodal_observations={
+            "primary_modality": "image",
+            "observed_types": ["image"],
+            "summary_for_chat": "像是在无语、尴尬，想让人顺着接一句",
+            "core_observation": "像是在无语、尴尬，想让人顺着接一句",
+            "social_signal": "无语",
+            "emotion_signals": ["无语"],
+        },
+    )
+
+    assert interpretation.literal_topic == "emoji_social_reply"
+    assert interpretation.interaction_move == "playful_ping"
 
 
 def test_interpret_conversation_promotes_assistant_reply_followup() -> None:

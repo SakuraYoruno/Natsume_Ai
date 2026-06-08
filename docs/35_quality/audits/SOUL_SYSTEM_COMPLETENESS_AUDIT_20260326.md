@@ -168,7 +168,6 @@
 | `test_bond_to_summary_cn_m28.py` | Bond 摘要中文化 | 43 |
 | `test_bond_routes_api.py` | Bond API 路由 | — |
 | `test_prompt_context_bond_summary_m29.py` | Prompt 上下文 Bond 摘要 | — |
-| `test_persona_utterance_vector_projection.py` | 人格话语向量投影 | 57 |
 
 **测试总计：** 14 个测试文件，覆盖灵魂系统全部 8 个阶段 + Bond 系统核心
 

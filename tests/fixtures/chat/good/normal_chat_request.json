@@ -1,6 +1,6 @@
-{
-  "message": "你好，最近怎么样？",
-  "session_id": "test-session-001",
-  "thread_id": "thread-wechat-001",
-  "intent_draft": null
+﻿{
+    "message":  "你好，最近怎么样？",
+    "session_id":  "test-session-001",
+    "thread_id":  "thread-wechat-001",
+    "intent_draft":  null
 }

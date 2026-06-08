@@ -39,6 +39,16 @@ class _FakeIntentEngine:
         }
 
 
+class _CapturingIntentEngine(_FakeIntentEngine):
+    def __init__(self) -> None:
+        self.raw_intents: list[dict[str, Any]] = []
+
+    def evaluate_intent(self, *args, **kwargs) -> dict[str, Any]:  # noqa: ANN002, ANN003
+        raw_intent = kwargs.get("raw_intent")
+        self.raw_intents.append(dict(raw_intent or {}) if isinstance(raw_intent, dict) else {})
+        return super().evaluate_intent(*args, **kwargs)
+
+
 class _FakeThalamusAgent:
     def __init__(self) -> None:
         self.calls = 0
@@ -166,6 +176,134 @@ async def test_handle_chat_forwards_multimodal_fields_to_thalamus(monkeypatch) -
     assert fake_thalamus.calls == 1
     assert fake_thalamus.last_kwargs["attachments"][0]["type"] == "image"
     assert fake_thalamus.last_kwargs["multimodal_observations"]["artifact_type"] == "screenshot"
+
+
+@pytest.mark.asyncio
+async def test_handle_chat_normalizes_surface_memory_recall_before_governor(monkeypatch) -> None:
+    class _MemoryRecallThalamus(_FakeThalamusAgent):
+        async def classify_and_compile_intent_draft(self, **kwargs) -> dict[str, Any]:  # noqa: ANN003
+            self.calls += 1
+            self.last_kwargs = dict(kwargs)
+            request_id = str(kwargs.get("request_id") or "req-test")
+            user_message = str(kwargs.get("user_message") or "")
+            session_id = str(kwargs.get("session_id") or f"session::{request_id}")
+            return {
+                "schema_version": "Natsume.intent.v1",
+                "id": f"intent::{request_id}",
+                "ts_ms": 1778939000000,
+                "session_id": session_id,
+                "seq": 1,
+                "person_id": "person-test",
+                "type": "query",
+                "action": "memory_recall",
+                "route": "skill",
+                "target_id": "memory_recall",
+                "target": "host",
+                "task": user_message,
+                "route_reason": "THALAMUS_RULE_MEMORY_RECALL",
+                "reason_code": "THALAMUS_RULE_MEMORY_RECALL",
+                "args": {"text": user_message},
+                "nonce": f"nonce::{request_id}",
+            }
+
+    fake_thalamus = _MemoryRecallThalamus()
+    intent_engine = _CapturingIntentEngine()
+
+    async def _fake_cortex_orchestrator_sse_generator(**kwargs):  # noqa: ANN003
+        request_id = str(kwargs.get("request_id") or "req-test")
+        yield f'data: {json.dumps({"phase": "COMMIT", "done": True, "decision": "APPROVE", "request_id": request_id}, ensure_ascii=False)}\n\n'
+
+    monkeypatch.setattr("host_brain.app.chat_handler.get_thalamus_agent", lambda: fake_thalamus)
+    monkeypatch.setattr("host_brain.app.chat_handler.get_intent_engine", lambda: intent_engine)
+    monkeypatch.setattr(
+        "host_brain.app.cortex_orchestrator.cortex_orchestrator_sse_generator",
+        _fake_cortex_orchestrator_sse_generator,
+    )
+
+    response = await handle_chat(
+        request_body=ChatRequest(
+            message="我刚才让你记了什么？",
+            surface_task_control={
+                "task_mode": "memory_recall",
+                "response_move": "recall_memory",
+            },
+        ),
+        request=_build_request(),
+        metrics=_DummyMetrics(),
+    )
+
+    body_iter = response.body_iterator
+    await body_iter.__anext__()
+    await body_iter.__anext__()
+
+    assert intent_engine.raw_intents
+    raw_intent = intent_engine.raw_intents[0]
+    assert raw_intent["route"] == "chat"
+    assert raw_intent["target_id"] == ""
+    assert raw_intent["action"] == "exec_intent"
+    assert raw_intent["args"] == {"text": "我刚才让你记了什么？"}
+    assert raw_intent["reason_code"] == "SURFACE_MAIN_CHAIN_MEMORY_RECALL"
+    assert raw_intent["_surface_route_override"]["target_id"] == "memory_recall"
+
+
+@pytest.mark.asyncio
+async def test_handle_chat_normalizes_thalamus_memory_recall_without_surface_control(monkeypatch) -> None:
+    class _MemoryRecallThalamus(_FakeThalamusAgent):
+        async def classify_and_compile_intent_draft(self, **kwargs) -> dict[str, Any]:  # noqa: ANN003
+            self.calls += 1
+            request_id = str(kwargs.get("request_id") or "req-test")
+            user_message = str(kwargs.get("user_message") or "")
+            session_id = str(kwargs.get("session_id") or f"session::{request_id}")
+            return {
+                "schema_version": "Natsume.intent.v1",
+                "id": f"intent::{request_id}",
+                "ts_ms": 1778939000000,
+                "session_id": session_id,
+                "seq": 1,
+                "person_id": "person-test",
+                "type": "query",
+                "action": "memory_recall",
+                "route": "skill",
+                "target_id": "memory_recall",
+                "target": "host",
+                "task": user_message,
+                "route_reason": "THALAMUS_RULE_MEMORY_RECALL",
+                "reason_code": "THALAMUS_RULE_MEMORY_RECALL",
+                "args": {"query": user_message, "text": user_message, "user_message": user_message},
+                "nonce": f"nonce::{request_id}",
+            }
+
+    fake_thalamus = _MemoryRecallThalamus()
+    intent_engine = _CapturingIntentEngine()
+
+    async def _fake_cortex_orchestrator_sse_generator(**kwargs):  # noqa: ANN003
+        request_id = str(kwargs.get("request_id") or "req-test")
+        yield f'data: {json.dumps({"phase": "COMMIT", "done": True, "decision": "APPROVE", "request_id": request_id}, ensure_ascii=False)}\n\n'
+
+    monkeypatch.setattr("host_brain.app.chat_handler.get_thalamus_agent", lambda: fake_thalamus)
+    monkeypatch.setattr("host_brain.app.chat_handler.get_intent_engine", lambda: intent_engine)
+    monkeypatch.setattr(
+        "host_brain.app.cortex_orchestrator.cortex_orchestrator_sse_generator",
+        _fake_cortex_orchestrator_sse_generator,
+    )
+
+    response = await handle_chat(
+        request_body=ChatRequest(message="还记得我说推荐格式要怎样吗？"),
+        request=_build_request(),
+        metrics=_DummyMetrics(),
+    )
+
+    body_iter = response.body_iterator
+    await body_iter.__anext__()
+    await body_iter.__anext__()
+
+    raw_intent = intent_engine.raw_intents[0]
+    assert raw_intent["route"] == "chat"
+    assert raw_intent["target_id"] == ""
+    assert raw_intent["action"] == "exec_intent"
+    assert raw_intent["args"] == {"text": "还记得我说推荐格式要怎样吗？"}
+    assert raw_intent["reason_code"] == "SURFACE_MAIN_CHAIN_MEMORY_RECALL"
+    assert raw_intent["_surface_route_override"]["reason_code"] == "THALAMUS_RULE_MEMORY_RECALL"
 
 
 def test_resolve_governor_executor_workers_defaults_to_four(monkeypatch) -> None:

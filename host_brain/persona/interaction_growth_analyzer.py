@@ -498,7 +498,7 @@ def _load_canon_growth_raw() -> dict[str, Any] | None:
             / "canon" / "world" / "wc-004-persona-growth-rules.json"
         )
         if canon_path.exists():
-            return _json.loads(canon_path.read_text(encoding="utf-8"))
+            return _json.loads(canon_path.read_text(encoding="utf-8-sig"))
     except Exception as exc:
         _logger.debug("Canon 规则文件读取失败: %s", exc)
     return None

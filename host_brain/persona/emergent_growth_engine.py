@@ -193,7 +193,7 @@ class EmergentGrowthEngine:
     用法：
         engine = EmergentGrowthEngine(persona_engine=persona_engine)
         result = engine.apply(
-            user_id="user_1",
+            user_id="natsume_ai",
             pattern_result=pattern_analyzer.analyze(...),
         )
         if result.applied:

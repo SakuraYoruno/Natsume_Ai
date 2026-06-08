@@ -9,6 +9,8 @@ GPU resident by default; graceful degradation when model or device is unavailabl
 from __future__ import annotations
 
 import logging
+import json
+import os
 import threading
 import time
 from dataclasses import dataclass, field
@@ -116,8 +118,25 @@ class AsrConfig:
     use_vad_filter: bool = True
     vad_retry_without_filter_on_empty: bool = True
     vad_retry_min_peak: float = 0.015
-    language: str = "ja"
+    adaptive_vad_enabled: bool = True
+    adaptive_vad_bootstrap_chunks: int = 4
+    adaptive_vad_peak_ratio: float = 1.8
+    adaptive_vad_rms_ratio: float = 1.7
+    adaptive_vad_noise_alpha: float = 0.08
+    language: str = "zh"
     initial_prompt: str | None = None
+    barge_in_on_speech_enabled: bool = True
+    barge_in_min_active_chunks: int = 2
+    barge_in_cooldown_ms: int = 1200
+    barge_in_min_peak: float = 0.035
+    barge_in_min_rms: float = 0.006
+    barge_in_voiceprint_window_chunks: int = 4
+    barge_in_require_voiceprint_during_playback: bool = True
+    playback_echo_suppression_enabled: bool = True
+    speaker_verification_enabled: bool = False
+    speaker_verification_fail_open: bool = True
+    speaker_verification_min_confidence: float = 0.68
+    speaker_profile_path: str | None = None
     recovery: DeviceRecoveryConfig = field(default_factory=DeviceRecoveryConfig)
 
     def as_dict(self) -> dict[str, Any]:
@@ -138,9 +157,207 @@ class AsrConfig:
             "use_vad_filter": self.use_vad_filter,
             "vad_retry_without_filter_on_empty": self.vad_retry_without_filter_on_empty,
             "vad_retry_min_peak": self.vad_retry_min_peak,
+            "adaptive_vad_enabled": self.adaptive_vad_enabled,
+            "adaptive_vad_bootstrap_chunks": self.adaptive_vad_bootstrap_chunks,
+            "adaptive_vad_peak_ratio": self.adaptive_vad_peak_ratio,
+            "adaptive_vad_rms_ratio": self.adaptive_vad_rms_ratio,
+            "adaptive_vad_noise_alpha": self.adaptive_vad_noise_alpha,
             "language": self.language,
+            "barge_in_on_speech_enabled": self.barge_in_on_speech_enabled,
+            "barge_in_min_active_chunks": self.barge_in_min_active_chunks,
+            "barge_in_cooldown_ms": self.barge_in_cooldown_ms,
+            "barge_in_min_peak": self.barge_in_min_peak,
+            "barge_in_min_rms": self.barge_in_min_rms,
+            "barge_in_voiceprint_window_chunks": self.barge_in_voiceprint_window_chunks,
+            "barge_in_require_voiceprint_during_playback": self.barge_in_require_voiceprint_during_playback,
+            "playback_echo_suppression_enabled": self.playback_echo_suppression_enabled,
+            "speaker_verification_enabled": self.speaker_verification_enabled,
+            "speaker_verification_fail_open": self.speaker_verification_fail_open,
+            "speaker_verification_min_confidence": self.speaker_verification_min_confidence,
+            "speaker_profile_path": self.speaker_profile_path,
             "recovery": self.recovery.as_dict(),
         }
+
+
+class SimpleVoiceprintVerifier:
+    """Lightweight local voiceprint profile based on normalized FFT buckets.
+
+    This is a deterministic gate for realtime barge-in, not a replacement for a
+    production speaker verification model. It gives the ASR pipeline a stable
+    profile/enroll/verify contract that can later be backed by a stronger model.
+    """
+
+    def __init__(
+        self,
+        *,
+        profile_path: str,
+        embedding_bins: int = 32,
+        min_confidence: float = 0.68,
+        fail_open: bool = True,
+    ) -> None:
+        self.profile_path = str(profile_path or "").strip()
+        self.embedding_bins = max(8, min(256, int(embedding_bins)))
+        self.min_confidence = max(0.0, min(1.0, float(min_confidence)))
+        self.fail_open = bool(fail_open)
+        self._profile: dict[str, Any] | None = None
+        self._load_profile()
+
+    def status(self) -> dict[str, Any]:
+        return {
+            "type": "simple_fft_voiceprint",
+            "profile_path": self.profile_path,
+            "profile_loaded": self._profile is not None,
+            "embedding_bins": int(self.embedding_bins),
+            "min_confidence": float(self.min_confidence),
+            "fail_open": bool(self.fail_open),
+            "label": (self._profile or {}).get("label"),
+            "created_at_ms": (self._profile or {}).get("created_at_ms"),
+        }
+
+    def verify(self, audio_data: Any) -> dict[str, Any]:
+        if self._profile is None:
+            return {
+                "accepted": bool(self.fail_open),
+                "confidence": None,
+                "reason": "voiceprint_profile_missing",
+                "fail_open": bool(self.fail_open),
+            }
+        reference = self._profile.get("embedding")
+        candidate = self._embedding(audio_data, bins=self.embedding_bins)
+        if not reference or not candidate:
+            return {
+                "accepted": bool(self.fail_open),
+                "confidence": None,
+                "reason": "voiceprint_embedding_unavailable",
+                "fail_open": bool(self.fail_open),
+            }
+        confidence = self._cosine_similarity(reference, candidate)
+        accepted = confidence >= self.min_confidence
+        return {
+            "accepted": bool(accepted),
+            "confidence": round(float(confidence), 4),
+            "reason": "voiceprint_match" if accepted else "voiceprint_mismatch",
+            "min_confidence": float(self.min_confidence),
+            "label": self._profile.get("label"),
+        }
+
+    def enroll(self, audio_data: Any, *, label: str | None = None, sample_rate: int | None = None) -> dict[str, Any]:
+        embedding = self._embedding(audio_data, bins=self.embedding_bins)
+        if not embedding:
+            return {
+                "success": False,
+                "reason_code": "VOICEPRINT_AUDIO_EMPTY",
+                "detail": "voiceprint enrollment audio is empty",
+            }
+        profile = {
+            "version": 1,
+            "type": "simple_fft_voiceprint",
+            "label": str(label or "primary_user").strip() or "primary_user",
+            "created_at_ms": int(now_ms()),
+            "sample_rate": int(sample_rate or 0),
+            "embedding_bins": int(self.embedding_bins),
+            "embedding": embedding,
+        }
+        os.makedirs(os.path.dirname(self.profile_path) or ".", exist_ok=True)
+        tmp_path = f"{self.profile_path}.tmp"
+        with open(tmp_path, "w", encoding="utf-8") as fh:
+            json.dump(profile, fh, ensure_ascii=False, separators=(",", ":"))
+        os.replace(tmp_path, self.profile_path)
+        self._profile = profile
+        return {
+            "success": True,
+            "reason_code": None,
+            "detail": "voiceprint profile enrolled",
+            "status": self.status(),
+        }
+
+    def enroll_from_wav(self, audio_path: str, *, label: str | None = None) -> dict[str, Any]:
+        path = str(audio_path or "").strip()
+        if not path:
+            return {
+                "success": False,
+                "reason_code": "VOICEPRINT_AUDIO_PATH_REQUIRED",
+                "detail": "voiceprint enrollment requires audio_path",
+            }
+        try:
+            import wave
+            import numpy as np
+            with wave.open(path, "rb") as wav:
+                channels = max(1, int(wav.getnchannels()))
+                sample_rate = int(wav.getframerate())
+                sample_width = int(wav.getsampwidth())
+                frames = wav.readframes(wav.getnframes())
+            if sample_width == 2:
+                audio = np.frombuffer(frames, dtype=np.int16).astype(np.float32) / 32768.0
+            elif sample_width == 4:
+                audio = np.frombuffer(frames, dtype=np.int32).astype(np.float32) / 2147483648.0
+            else:
+                audio = np.frombuffer(frames, dtype=np.uint8).astype(np.float32)
+                audio = (audio - 128.0) / 128.0
+            if channels > 1 and audio.size >= channels:
+                audio = audio.reshape(-1, channels).mean(axis=1)
+            return self.enroll(audio, label=label, sample_rate=sample_rate)
+        except Exception as exc:
+            return {
+                "success": False,
+                "reason_code": "VOICEPRINT_ENROLL_FAILED",
+                "detail": str(exc),
+            }
+
+    def _load_profile(self) -> None:
+        if not self.profile_path or not os.path.exists(self.profile_path):
+            self._profile = None
+            return
+        try:
+            with open(self.profile_path, "r", encoding="utf-8") as fh:
+                loaded = json.load(fh)
+            self._profile = dict(loaded) if isinstance(loaded, dict) else None
+        except Exception:
+            self._profile = None
+
+    @staticmethod
+    def _embedding(audio_data: Any, *, bins: int) -> list[float]:
+        try:
+            import numpy as np
+            audio = np.asarray(audio_data, dtype=np.float32).reshape(-1)
+        except Exception:
+            return []
+        if audio.size < 128:
+            return []
+        audio = audio - float(np.mean(audio))
+        peak = float(np.max(np.abs(audio))) if audio.size else 0.0
+        if peak <= 1e-7:
+            return []
+        audio = audio / peak
+        window = np.hanning(audio.size).astype(np.float32)
+        spectrum = np.abs(np.fft.rfft(audio * window))
+        if spectrum.size < bins:
+            spectrum = np.pad(spectrum, (0, bins - spectrum.size))
+        buckets = np.array_split(spectrum, bins)
+        vector = np.asarray([float(np.log1p(np.mean(bucket))) for bucket in buckets], dtype=np.float32)
+        norm = float(np.linalg.norm(vector))
+        if norm <= 1e-7:
+            return []
+        vector = vector / norm
+        return [round(float(value), 6) for value in vector.tolist()]
+
+    @staticmethod
+    def _cosine_similarity(left: Any, right: Any) -> float:
+        try:
+            import numpy as np
+            a = np.asarray(left, dtype=np.float32).reshape(-1)
+            b = np.asarray(right, dtype=np.float32).reshape(-1)
+        except Exception:
+            return 0.0
+        size = min(a.size, b.size)
+        if size <= 0:
+            return 0.0
+        a = a[:size]
+        b = b[:size]
+        denom = float(np.linalg.norm(a) * np.linalg.norm(b))
+        if denom <= 1e-7:
+            return 0.0
+        return max(0.0, min(1.0, float(np.dot(a, b) / denom)))
 
 
 @dataclass
@@ -181,9 +398,10 @@ class ASRTranscriptEvent:
     evidence_ref: str               # 审计链引用（必填）
     low_confidence: bool            # confidence < LOW_CONFIDENCE_THRESHOLD 时为 True
     reason_code: str | None         # 低置信度时填 ASR_LOW_CONFIDENCE
-    # M29-P（OPT-?）：用户情感推断字段（从语音韵律/文本推断）
-    user_emotion_hint: str | None = None        # 推断的用户情感标签（如 "SAD"/"HAPPY"）
-    user_emotion_confidence: float | None = None  # 情感推断置信度（0.0~1.0）
+    # M29-P（OPT-?）：用户情绪文本提示。当前 ASR 只提供转写文本，
+    # 不提供声学/韵律情绪；真正声学情绪必须由独立传感器或专用模型写入。
+    user_emotion_hint: str | None = None        # 文本提示的用户情绪标签（如 "SAD"/"HAPPY"）
+    user_emotion_confidence: float | None = None  # 文本提示置信度（0.0~1.0）
 
     def as_dict(self) -> dict[str, Any]:
         result = {
@@ -200,7 +418,7 @@ class ASRTranscriptEvent:
             "low_confidence": self.low_confidence,
             "reason_code": self.reason_code,
         }
-        # M29-P：仅在有情感推断时输出
+        # M29-P：仅在有情绪文本提示时输出
         if self.user_emotion_hint is not None:
             result["user_emotion_hint"] = self.user_emotion_hint
         if self.user_emotion_confidence is not None:
@@ -951,6 +1169,27 @@ class AsrService:
         self._trailing_silence_chunks: int = 0
         self._running = False
         self._rpc_event_callback = rpc_event_callback
+        self._playback_state_provider: Callable[[], dict[str, Any] | None] | None = None
+        self._barge_in_callback: Callable[[str, dict[str, Any], int], Any] | None = None
+        self._voiceprint_verifier = (
+            SimpleVoiceprintVerifier(
+                profile_path=str(self._config.speaker_profile_path or ""),
+                min_confidence=float(self._config.speaker_verification_min_confidence),
+                fail_open=bool(self._config.speaker_verification_fail_open),
+            )
+            if self._config.speaker_profile_path
+            else None
+        )
+        self._speaker_verifier: Callable[[Any], dict[str, Any] | bool] | None = (
+            self._voiceprint_verifier.verify if self._voiceprint_verifier is not None else None
+        )
+        self._speech_activity_chunks = 0
+        self._last_barge_in_ts_ms = 0
+        self._last_realtime_dialogue_debug: dict[str, Any] = {}
+        self._adaptive_vad_noise_peak = 0.0
+        self._adaptive_vad_noise_rms = 0.0
+        self._adaptive_vad_noise_samples = 0
+        self._barge_in_audio_window: list[Any] = []
         # ── 设备恢复状态 ──
         self._recovery_thread: threading.Thread | None = None
         self._recovery_attempts = 0
@@ -970,6 +1209,45 @@ class AsrService:
     ) -> None:
         self._rpc_event_callback = callback
 
+    def set_playback_state_provider(
+        self,
+        provider: Callable[[], dict[str, Any] | None] | None,
+    ) -> None:
+        self._playback_state_provider = provider
+
+    def set_barge_in_callback(
+        self,
+        callback: Callable[[str, dict[str, Any], int], Any] | None,
+    ) -> None:
+        self._barge_in_callback = callback
+
+    def set_speaker_verifier(
+        self,
+        verifier: Callable[[Any], dict[str, Any] | bool] | None,
+    ) -> None:
+        self._speaker_verifier = verifier
+
+    def voiceprint_status(self) -> dict[str, Any]:
+        if self._voiceprint_verifier is None:
+            return {
+                "available": False,
+                "detail": "voiceprint profile path is not configured",
+            }
+        return {
+            "available": True,
+            "detail": "voiceprint verifier configured",
+            **self._voiceprint_verifier.status(),
+        }
+
+    def enroll_voiceprint_from_wav(self, audio_path: str, *, label: str | None = None) -> dict[str, Any]:
+        if self._voiceprint_verifier is None:
+            return {
+                "success": False,
+                "reason_code": "VOICEPRINT_PROFILE_PATH_MISSING",
+                "detail": "EDGE_ASR_SPEAKER_PROFILE_PATH is not configured",
+            }
+        return self._voiceprint_verifier.enroll_from_wav(audio_path, label=label)
+
     def startup(self) -> None:
         """Edge 启动时由 bootstrap.startup() 通过 _invoke_lifecycle 自动调用。
 
@@ -987,6 +1265,13 @@ class AsrService:
     def start_session(self, session_id: str | None = None) -> AsrResult:
         """Initialize ASR model and start audio capture for a session."""
         with self._lock:
+            if self._running:
+                return AsrResult(
+                    success=True,
+                    reason_code=None,
+                    detail=f"ASR session already running: {self._session_id}",
+                )
+            self._shutdown_event.clear()
             self._session_id = session_id or f"asr_{new_request_id()}"
             self._seq = 0
             self._reset_audio_window_locked()
@@ -1149,6 +1434,29 @@ class AsrService:
                 "recovery_attempts": self._recovery_attempts,
                 "recovering": self._model.state == AsrState.RECOVERING,
                 "recovery_events_count": len(self._recovery_events),
+            },
+            "realtime_dialogue": {
+                "barge_in_on_speech_enabled": bool(self._config.barge_in_on_speech_enabled),
+                "playback_echo_suppression_enabled": bool(self._config.playback_echo_suppression_enabled),
+                "playback_state_provider": self._playback_state_provider is not None,
+                "barge_in_callback": self._barge_in_callback is not None,
+                "speech_activity_chunks": int(self._speech_activity_chunks),
+                "last_barge_in_ts_ms": int(self._last_barge_in_ts_ms),
+                "last_debug": dict(self._last_realtime_dialogue_debug),
+                "vad": {
+                    "adaptive_enabled": bool(self._config.adaptive_vad_enabled),
+                    "noise_peak": round(float(self._adaptive_vad_noise_peak), 5),
+                    "noise_rms": round(float(self._adaptive_vad_noise_rms), 5),
+                    "noise_samples": int(self._adaptive_vad_noise_samples),
+                    "thresholds": self._adaptive_vad_thresholds(),
+                },
+                "speaker_verification": {
+                    "enabled": bool(self._config.speaker_verification_enabled),
+                    "verifier_available": self._speaker_verifier is not None,
+                    "fail_open": bool(self._config.speaker_verification_fail_open),
+                    "min_confidence": float(self._config.speaker_verification_min_confidence),
+                    "voiceprint": self.voiceprint_status(),
+                },
             },
         }
 
@@ -1335,7 +1643,43 @@ class AsrService:
         if not self._running:
             return
 
-        is_silent_like = self._chunk_looks_silent(audio_chunk)
+        peak = WhisperModelManager._estimate_audio_peak(audio_chunk)
+        rms = WhisperModelManager._estimate_audio_rms(audio_chunk)
+        playback_snapshot = self._playback_snapshot()
+        playback_active = playback_snapshot is not None
+        is_silent_like = self._chunk_looks_silent_with_metrics(
+            peak=peak,
+            rms=rms,
+            allow_noise_update=not playback_active,
+        )
+        barge_triggered = False
+        if not is_silent_like:
+            barge_triggered = self._maybe_barge_in_on_speech_activity(
+                audio_chunk=audio_chunk,
+                ts_ms=ts_ms,
+                peak=peak,
+                rms=rms,
+                playback_snapshot=playback_snapshot,
+            )
+        else:
+            self._speech_activity_chunks = 0
+
+        if (
+            playback_active
+            and self._config.playback_echo_suppression_enabled
+            and not barge_triggered
+        ):
+            self._trim_barge_in_audio_window(reset=True)
+            self._last_realtime_dialogue_debug = {
+                "state": "suppressed_playback_echo",
+                "ts_ms": int(ts_ms),
+                "peak": round(float(peak), 5),
+                "rms": round(float(rms), 5),
+                "playback_request_id": str((playback_snapshot or {}).get("request_id") or ""),
+                "speech_activity_chunks": int(self._speech_activity_chunks),
+            }
+            return
+
         if is_silent_like:
             with self._lock:
                 if not self._audio_buffer:
@@ -1363,10 +1707,310 @@ class AsrService:
     def _chunk_looks_silent(self, audio_chunk: Any) -> bool:
         peak = WhisperModelManager._estimate_audio_peak(audio_chunk)
         rms = WhisperModelManager._estimate_audio_rms(audio_chunk)
-        return (
+        return self._chunk_looks_silent_with_metrics(peak=peak, rms=rms)
+
+    def _chunk_looks_silent_with_metrics(
+        self,
+        *,
+        peak: float,
+        rms: float,
+        allow_noise_update: bool = True,
+    ) -> bool:
+        fixed_silent = (
             peak < self._config.precheck_min_peak
             and rms < self._config.precheck_min_rms
         )
+        if fixed_silent:
+            if self._config.adaptive_vad_enabled and allow_noise_update:
+                self._update_adaptive_vad_noise_floor(peak=peak, rms=rms)
+            return True
+        if not self._config.adaptive_vad_enabled:
+            return fixed_silent
+
+        bootstrap_chunks = max(1, int(self._config.adaptive_vad_bootstrap_chunks))
+        if self._adaptive_vad_noise_samples < bootstrap_chunks:
+            return False
+
+        thresholds = self._adaptive_vad_thresholds()
+        active = (
+            peak >= float(thresholds["peak"])
+            or rms >= float(thresholds["rms"])
+        )
+        return not active
+
+    def _update_adaptive_vad_noise_floor(self, *, peak: float, rms: float) -> None:
+        peak = max(0.0, float(peak))
+        rms = max(0.0, float(rms))
+        if self._adaptive_vad_noise_samples <= 0:
+            self._adaptive_vad_noise_peak = peak
+            self._adaptive_vad_noise_rms = rms
+            self._adaptive_vad_noise_samples = 1
+            return
+        alpha = max(0.001, min(1.0, float(self._config.adaptive_vad_noise_alpha)))
+        self._adaptive_vad_noise_peak = (
+            (1.0 - alpha) * self._adaptive_vad_noise_peak
+            + alpha * peak
+        )
+        self._adaptive_vad_noise_rms = (
+            (1.0 - alpha) * self._adaptive_vad_noise_rms
+            + alpha * rms
+        )
+        self._adaptive_vad_noise_samples += 1
+
+    def _adaptive_vad_thresholds(self) -> dict[str, Any]:
+        if not self._config.adaptive_vad_enabled or self._adaptive_vad_noise_samples <= 0:
+            return {
+                "peak": round(float(self._config.precheck_min_peak), 5),
+                "rms": round(float(self._config.precheck_min_rms), 5),
+                "source": "fixed",
+            }
+        peak_threshold = max(
+            float(self._config.precheck_min_peak),
+            float(self._adaptive_vad_noise_peak)
+            * max(1.0, float(self._config.adaptive_vad_peak_ratio)),
+        )
+        rms_threshold = max(
+            float(self._config.precheck_min_rms),
+            float(self._adaptive_vad_noise_rms)
+            * max(1.0, float(self._config.adaptive_vad_rms_ratio)),
+        )
+        return {
+            "peak": round(float(peak_threshold), 5),
+            "rms": round(float(rms_threshold), 5),
+            "source": "adaptive",
+        }
+
+    def _playback_snapshot(self) -> dict[str, Any] | None:
+        provider = self._playback_state_provider
+        if provider is None:
+            return None
+        try:
+            snapshot = provider()
+        except Exception as exc:
+            self._last_realtime_dialogue_debug = {
+                "state": "playback_provider_error",
+                "error": str(exc),
+            }
+            return None
+        return dict(snapshot) if isinstance(snapshot, dict) and snapshot else None
+
+    def _maybe_barge_in_on_speech_activity(
+        self,
+        *,
+        audio_chunk: Any,
+        ts_ms: int,
+        peak: float,
+        rms: float,
+        playback_snapshot: dict[str, Any] | None,
+    ) -> bool:
+        if not self._config.barge_in_on_speech_enabled:
+            return False
+        if playback_snapshot is None or self._barge_in_callback is None:
+            return False
+        self._remember_barge_in_audio_chunk(audio_chunk)
+        vad_thresholds = self._adaptive_vad_thresholds()
+        peak_threshold = max(
+            float(self._config.barge_in_min_peak),
+            float(vad_thresholds["peak"]),
+        )
+        rms_threshold = max(
+            float(self._config.barge_in_min_rms),
+            float(vad_thresholds["rms"]),
+        )
+        if peak < peak_threshold and rms < rms_threshold:
+            self._speech_activity_chunks = 0
+            self._last_realtime_dialogue_debug = {
+                "state": "playback_audio_below_barge_threshold",
+                "ts_ms": int(ts_ms),
+                "peak": round(float(peak), 5),
+                "rms": round(float(rms), 5),
+                "thresholds": {
+                    "peak": round(float(peak_threshold), 5),
+                    "rms": round(float(rms_threshold), 5),
+                    "source": str(vad_thresholds.get("source") or ""),
+                },
+            }
+            return False
+
+        speaker_audio = self._combined_barge_in_audio_window()
+        if speaker_audio is None:
+            speaker_audio = audio_chunk
+        speaker_decision = self._verify_speaker_for_barge_in(
+            speaker_audio,
+            force=bool(self._config.barge_in_require_voiceprint_during_playback),
+        )
+        if not bool(speaker_decision.get("accepted", False)):
+            self._speech_activity_chunks = 0
+            self._last_realtime_dialogue_debug = {
+                "state": "speaker_rejected_barge_in",
+                "ts_ms": int(ts_ms),
+                "peak": round(float(peak), 5),
+                "rms": round(float(rms), 5),
+                "thresholds": {
+                    "peak": round(float(peak_threshold), 5),
+                    "rms": round(float(rms_threshold), 5),
+                    "source": str(vad_thresholds.get("source") or ""),
+                },
+                "speaker_verification": speaker_decision,
+            }
+            return False
+
+        self._speech_activity_chunks += 1
+        required_chunks = max(1, int(self._config.barge_in_min_active_chunks))
+        if self._speech_activity_chunks < required_chunks:
+            self._last_realtime_dialogue_debug = {
+                "state": "speech_activity_pending_barge_in",
+                "ts_ms": int(ts_ms),
+                "peak": round(float(peak), 5),
+                "rms": round(float(rms), 5),
+                "thresholds": {
+                    "peak": round(float(peak_threshold), 5),
+                    "rms": round(float(rms_threshold), 5),
+                    "source": str(vad_thresholds.get("source") or ""),
+                },
+                "speech_activity_chunks": int(self._speech_activity_chunks),
+                "required_chunks": int(required_chunks),
+                "speaker_verification": speaker_decision,
+            }
+            return False
+
+        cooldown_ms = max(0, int(self._config.barge_in_cooldown_ms))
+        if self._last_barge_in_ts_ms and ts_ms - self._last_barge_in_ts_ms < cooldown_ms:
+            self._last_realtime_dialogue_debug = {
+                "state": "barge_in_cooldown",
+                "ts_ms": int(ts_ms),
+                "last_barge_in_ts_ms": int(self._last_barge_in_ts_ms),
+                "cooldown_ms": int(cooldown_ms),
+            }
+            return False
+
+        session_id = str(
+            playback_snapshot.get("session_id")
+            or ((playback_snapshot.get("speak_event") or {}) if isinstance(playback_snapshot.get("speak_event"), dict) else {}).get("session_id")
+            or self._session_id
+            or f"asr_{new_request_id()}"
+        ).strip()
+        request_id = f"asr_barge_{new_request_id()}"
+        payload = {
+            "session_id": session_id,
+            "source": "asr_vad",
+            "text": "[VAD_SPEECH_ACTIVITY]",
+            "seq": self._seq + 1,
+            "vad": {
+                "peak": round(float(peak), 5),
+                "rms": round(float(rms), 5),
+                "active_chunks": int(self._speech_activity_chunks),
+                "required_chunks": int(required_chunks),
+                "thresholds": {
+                    "peak": round(float(peak_threshold), 5),
+                    "rms": round(float(rms_threshold), 5),
+                    "source": str(vad_thresholds.get("source") or ""),
+                },
+            },
+            "speaker_verification": speaker_decision,
+            "interrupted_playback_request_id": str(playback_snapshot.get("request_id") or ""),
+        }
+        try:
+            self._barge_in_callback(request_id, payload, int(ts_ms))
+            self._last_barge_in_ts_ms = int(ts_ms)
+            self._speech_activity_chunks = 0
+            self._trim_barge_in_audio_window(reset=True)
+            self._last_realtime_dialogue_debug = {
+                "state": "barge_in_triggered",
+                "ts_ms": int(ts_ms),
+                "request_id": request_id,
+                "session_id": session_id,
+                "peak": round(float(peak), 5),
+                "rms": round(float(rms), 5),
+                "thresholds": {
+                    "peak": round(float(peak_threshold), 5),
+                    "rms": round(float(rms_threshold), 5),
+                    "source": str(vad_thresholds.get("source") or ""),
+                },
+                "speaker_verification": speaker_decision,
+            }
+            return True
+        except Exception as exc:
+            self._last_realtime_dialogue_debug = {
+                "state": "barge_in_callback_error",
+                "ts_ms": int(ts_ms),
+                "error": str(exc),
+            }
+            return False
+
+    def _remember_barge_in_audio_chunk(self, audio_chunk: Any) -> None:
+        self._barge_in_audio_window.append(audio_chunk)
+        self._trim_barge_in_audio_window()
+
+    def _trim_barge_in_audio_window(self, *, reset: bool = False) -> None:
+        if reset:
+            self._barge_in_audio_window.clear()
+            return
+        max_chunks = max(1, int(self._config.barge_in_voiceprint_window_chunks))
+        overflow = len(self._barge_in_audio_window) - max_chunks
+        if overflow > 0:
+            del self._barge_in_audio_window[:overflow]
+
+    def _combined_barge_in_audio_window(self) -> Any | None:
+        if not self._barge_in_audio_window:
+            return None
+        try:
+            import numpy as np
+            chunks = [
+                np.asarray(chunk, dtype=np.float32).reshape(-1)
+                for chunk in self._barge_in_audio_window
+            ]
+            chunks = [chunk for chunk in chunks if chunk.size > 0]
+            if not chunks:
+                return None
+            return np.concatenate(chunks)
+        except Exception:
+            return self._barge_in_audio_window[-1]
+
+    def _verify_speaker_for_barge_in(self, audio_chunk: Any, *, force: bool = False) -> dict[str, Any]:
+        if not self._config.speaker_verification_enabled and not force:
+            return {
+                "enabled": False,
+                "accepted": True,
+                "reason": "speaker_verification_disabled",
+            }
+        verifier = self._speaker_verifier
+        if verifier is None:
+            return {
+                "enabled": True,
+                "accepted": bool(self._config.speaker_verification_fail_open),
+                "reason": "speaker_verifier_unavailable",
+                "fail_open": bool(self._config.speaker_verification_fail_open),
+                "forced": bool(force),
+            }
+        try:
+            raw = verifier(audio_chunk)
+        except Exception as exc:
+            return {
+                "enabled": True,
+                "accepted": bool(self._config.speaker_verification_fail_open),
+                "reason": "speaker_verifier_error",
+                "detail": str(exc),
+                "fail_open": bool(self._config.speaker_verification_fail_open),
+                "forced": bool(force),
+            }
+        if isinstance(raw, dict):
+            confidence = raw.get("confidence")
+            accepted = bool(raw.get("accepted", False))
+            if isinstance(confidence, (int, float)):
+                accepted = accepted and float(confidence) >= float(self._config.speaker_verification_min_confidence)
+            return {
+                "enabled": True,
+                **dict(raw),
+                "accepted": bool(accepted),
+                "forced": bool(force),
+            }
+        return {
+            "enabled": True,
+            "accepted": bool(raw),
+            "reason": "speaker_verifier_bool_result",
+            "forced": bool(force),
+        }
 
     def _flush_buffer(self, final: bool = False) -> None:
         """Flush accumulated audio buffer through transcription."""

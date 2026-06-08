@@ -4,7 +4,7 @@ description: |
   数据源：error_log 表（字段取自 host_brain/audit/ledger_schema.py）。
 
   用途：/obs/stats/errors 端点的基础聚合，用来：
-    - 识别高频失败 stage（如 chat_agent.pre_commit、hippocampus.recall）；
+    - 识别高频失败 stage（如 surface_reply.pre_commit、hippocampus.recall）；
     - 观察稳定 reason_code 的分布趋势；
     - 与 soft_fail_metrics 对照（OPT-3 soft_fail 属于"非致命降级"，
       而 error_log 属于显式上报的失败，两者合并分析才能定位真实问题源）。

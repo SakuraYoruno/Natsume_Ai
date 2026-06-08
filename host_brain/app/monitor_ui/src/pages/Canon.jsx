@@ -8,6 +8,7 @@ import {
   RefreshCw,
 } from 'lucide-react'
 import EmptyStateCard from '../components/EmptyStateCard.jsx'
+import LoadingNotice from '../components/LoadingNotice.jsx'
 import MetricCard from '../components/MetricCard.jsx'
 import NoticeBanner from '../components/NoticeBanner.jsx'
 import SampleMeta from '../components/obs/SampleMeta.jsx'
@@ -112,6 +113,7 @@ export default function Canon() {
 
   return (
     <div className="space-y-4">
+      <h1 className="sr-only">设定管理</h1>
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <PageHero
           icon={BookOpen}
@@ -294,9 +296,9 @@ export default function Canon() {
       {proposalsActive ? (
         <React.Suspense
           fallback={(
-            <NoticeBanner variant="info" title="按需加载中">
+            <LoadingNotice>
               正在装配提案审核分区…
-            </NoticeBanner>
+            </LoadingNotice>
           )}
         >
           <CanonProposalsSection
@@ -317,9 +319,9 @@ export default function Canon() {
       ) : (
         <React.Suspense
           fallback={(
-            <NoticeBanner variant="info" title="按需加载中">
+            <LoadingNotice>
               正在装配主设定文档分区…
-            </NoticeBanner>
+            </LoadingNotice>
           )}
         >
           <CanonDocumentsSection
