@@ -39,7 +39,7 @@ def test_consent_gradient_blocks_core_action_to_proposal_only(tmp_path) -> None:
             "mode": "audit",
             "owner_organ": "prefrontal_agent",
             "inputs": {
-                "action": "codex_self_evolve_modify_prefrontal_policy",
+                "action": "agent_self_evolve_modify_prefrontal_policy",
                 "consent_level_required": 6,
                 "current_consent_level": 3,
                 "evidence_refs": ["workorder://self-evolve/preview"],
@@ -48,7 +48,7 @@ def test_consent_gradient_blocks_core_action_to_proposal_only(tmp_path) -> None:
     )
     analysis = evaluate_consent_gradient(
         {
-            "action": "codex_self_evolve_modify_prefrontal_policy",
+            "action": "agent_self_evolve_modify_prefrontal_policy",
             "consent_level_required": 6,
             "current_consent_level": 3,
         }

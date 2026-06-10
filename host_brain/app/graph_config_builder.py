@@ -1,4 +1,4 @@
-﻿"""Graph 配置构建模块。
+"""Graph 配置构建模块。
 
 负责 Chat 图的配置构建。意图识别与场景判定统一由 Thalamus 承接。
 """
@@ -45,7 +45,7 @@ from host_brain.app.provider_factory import (
     resolve_host_llm_model_id,
 )
 from host_brain.app.model_router import resolve_gemini_model_route
-from host_brain.integrations.codex_cli_provider import codex_cli_lm_available, resolve_codex_cli_model
+from host_brain.integrations.codex_cli_provider import codex_cli_lm_allowed_for_background, codex_cli_lm_available, resolve_codex_cli_model
 
 CHAT_GRAPH_NODE_ORDER: list[str] = [
     CHAT_DIRECT_NODE_ID,
@@ -116,7 +116,7 @@ _HOST_CHAT_14B_DEFAULT_MODEL_ID = "qwen3:14b"
 _HOST_CHAT_14B_FALLBACK_API_KEY = "host-local-placeholder-key"
 _HOST_CHAT_14B_DEFAULT_BASE_URL = "http://127.0.0.1:11434/v1"
 _HOST_CHAT_CLOUD_DEFAULT_PROVIDER = PROVIDER_GEMINI
-_PROVIDERS_REQUIRING_API_KEY = frozenset({PROVIDER_OPENAI, PROVIDER_CODEX, PROVIDER_GEMINI, PROVIDER_DEEPSEEK})
+_PROVIDERS_REQUIRING_API_KEY = frozenset({PROVIDER_OPENAI, PROVIDER_GEMINI, PROVIDER_DEEPSEEK})
 
 
 def _parse_bool(value: Any, default: bool = False) -> bool:
@@ -213,7 +213,7 @@ def _graph_codex_migration_enabled(*, scene_type: str, execution_profile: str) -
     }
     if included and normalized_scene not in included:
         return False
-    return codex_cli_lm_available()
+    return codex_cli_lm_allowed_for_background()
 
 
 def _surface_reply_codex_experiment_enabled(*, scene_type: str, execution_profile: str) -> bool:
@@ -223,7 +223,7 @@ def _surface_reply_codex_experiment_enabled(*, scene_type: str, execution_profil
         return False
     if not _parse_bool(os.environ.get("HOST_SURFACE_REPLY_CODEX_EXPERIMENT_ENABLED") or os.environ.get("HOST_CHAT_AGENT_CODEX_EXPERIMENT_ENABLED"), default=False):
         return False
-    return codex_cli_lm_available()
+    return codex_cli_lm_allowed_for_background()
 
 
 def _resolve_surface_reply_codex_model_id() -> str:
@@ -322,7 +322,6 @@ def _provider_api_key_env_name(provider_name: str) -> str | None:
     provider = str(provider_name or "").strip().lower()
     mapping = {
         PROVIDER_OPENAI: "OPENAI_API_KEY",
-        PROVIDER_CODEX: "CODEX_API_KEY",
         PROVIDER_GEMINI: "GEMINI_API_KEY",
         PROVIDER_DEEPSEEK: "DEEPSEEK_API_KEY",
     }
@@ -346,8 +345,6 @@ def _is_provider_available(*, provider_name: str, api_key: str | None, configure
         return False
     if provider == PROVIDER_DISABLED:
         return False
-    if provider == PROVIDER_CODEX and not str(api_key or "").strip() and codex_cli_lm_available():
-        return True
     if _provider_requires_api_key(provider) and not str(api_key or "").strip():
         return False
     return True
@@ -745,8 +742,7 @@ def _build_graph_config_by_profile(
     )
     if resolved_cloud_provider not in {
         PROVIDER_OPENAI,
-        PROVIDER_CODEX,
-        PROVIDER_GEMINI,
+            PROVIDER_GEMINI,
         PROVIDER_DEEPSEEK,
         PROVIDER_MOCK,
         PROVIDER_DISABLED,
@@ -771,7 +767,7 @@ def _build_graph_config_by_profile(
     )
     resolved_cloud_base_url_override = (
         _normalize_openai_compat_base_url(cloud_base_url_override)
-        if (not graph_codex_migrated and resolved_cloud_provider in {PROVIDER_OPENAI, PROVIDER_CODEX})
+        if (not graph_codex_migrated and resolved_cloud_provider in {PROVIDER_OPENAI})
         else None
     )
     resolved_cloud_api_key = None if graph_codex_migrated else _resolve_provider_api_key(

@@ -633,7 +633,7 @@ async def _maybe_apply_lightnovel_deep_review(
     try:
         from dataclasses import replace  # noqa: PLC0415
 
-        from host_brain.codex_runtime.lightnovel_deep_reviewer import (  # noqa: PLC0415
+        from host_brain.agent_runtime.lightnovel_deep_reviewer import (  # noqa: PLC0415
             review_lightnovel_selection_from_memory_packet,
             should_deep_review_lightnovel_selection,
         )
@@ -935,7 +935,7 @@ async def _maybe_apply_generic_evidence_review(
     try:
         from dataclasses import replace  # noqa: PLC0415
 
-        from host_brain.codex_runtime.generic_evidence_reviewer import (  # noqa: PLC0415
+        from host_brain.agent_runtime.generic_evidence_reviewer import (  # noqa: PLC0415
             review_generic_evidence_from_memory_packet,
             should_review_generic_evidence,
         )

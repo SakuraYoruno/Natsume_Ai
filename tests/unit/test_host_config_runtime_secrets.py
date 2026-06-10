@@ -148,7 +148,6 @@ def test_load_host_config_resolves_codex_key_ref_and_redacts_snapshot(tmp_path: 
         "Natsume_ENV": "prod",
         "HOST_LLM_PROVIDER": "codex",
         "HOST_COLD_START_ALLOWED": "false",
-        "CODEX_API_KEY_REF": "sec://codex/natsu-node-99",
     }
     result = host_config.load_host_config(env=env)
     assert result.success, result.as_dict()
@@ -178,7 +177,6 @@ def test_load_host_config_resolves_codex_key_ref_and_redacts_snapshot(tmp_path: 
     assert snapshot.success, snapshot.as_dict()
     assert snapshot.snapshot is not None
     assert snapshot.snapshot["values"]["codex_api_key"] == "<redacted>"
-    assert "CODEX_API_KEY" in snapshot.snapshot["redacted_keys"]
 
 
 def test_build_host_runtime_statuses_accepts_codex_cli_without_key(monkeypatch) -> None:

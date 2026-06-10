@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from host_brain.codex_runtime.generic_evidence_reviewer import (
+from host_brain.agent_runtime.generic_evidence_reviewer import (
     review_generic_evidence_from_memory_packet,
     should_review_generic_evidence,
 )

@@ -1,8 +1,8 @@
 """Codex CLI backed text generation helpers.
 
 This is intentionally a thin adapter: it lets the host use the authenticated
-local Codex CLI session when CODEX_API_KEY is not configured, without turning
-Codex into a write-capable worker for normal chat generation.
+local Codex CLI session, without turning Codex into a write-capable worker
+for normal chat generation.
 """
 
 from __future__ import annotations
@@ -110,6 +110,18 @@ def _windows_npm_native_codex() -> str | None:
 
 def codex_cli_lm_available() -> bool:
     return bool(codex_cli_command())
+
+
+def codex_cli_lm_allowed_for_background() -> bool:
+    """Whether Codex CLI may be used for background LLM tasks.
+
+    When HOST_CODEX_BACKGROUND_DISABLE_CLI=true, returns False even if
+    the Codex CLI binary exists.  This forces background tasks to fall
+    through to the next available cloud provider (DeepSeek, Gemini …).
+    """
+    if _parse_bool(os.environ.get("HOST_CODEX_BACKGROUND_DISABLE_CLI"), default=False):
+        return False
+    return codex_cli_lm_available()
 
 
 def codex_cli_session_reuse_enabled() -> bool:
@@ -453,7 +465,6 @@ def build_codex_cli_env(run_dir: Path, *, temp_dir_name: str = ".tmp") -> dict[s
     if _parse_bool(os.environ.get("HOST_CODEX_CLI_STRIP_API_KEYS"), default=True):
         for key in (
             "OPENAI_API_KEY",
-            "CODEX_API_KEY",
             "GEMINI_API_KEY",
             "DEEPSEEK_API_KEY",
             "MINIMAX_API_KEY",
@@ -1234,6 +1245,7 @@ __all__ = [
     "build_codex_cli_env",
     "codex_cli_command",
     "codex_cli_lm_available",
+    "codex_cli_lm_allowed_for_background",
     "codex_cli_lm_enabled",
     "codex_cli_session_reuse_enabled",
     "codex_app_server_lm_enabled",

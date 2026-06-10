@@ -33,7 +33,7 @@ from host_brain.app.response_form_contract import (
     is_pure_media_response_form,
     normalize_response_form,
 )
-from host_brain.codex_runtime.skill_ids import is_codex_runtime_skill
+from host_brain.agent_runtime.skill_ids import is_agent_runtime_skill
 
 # ── service 层 import ──────────────────────────────────────────────────────
 from host_brain.app.input_service_log import (
@@ -652,7 +652,7 @@ def _should_send_gateway_route_started_voice_ack(
         return True, "ROUTE_ACK_PLAN"
     if normalized_route == "delegate" and normalized_target in {"translate_agent", "intent_agent"}:
         return True, f"ROUTE_ACK_{normalized_target.upper()}"
-    if normalized_route == "skill" and is_codex_runtime_skill(normalized_target):
+    if normalized_route == "skill" and is_agent_runtime_skill(normalized_target):
         return True, "ROUTE_ACK_codex_runtime"
     return False, "ROUTE_ACK_FAST_ROUTE"
 
@@ -818,8 +818,8 @@ def _build_gateway_route_started_voice_ack_text(
         return str(route_templates.get("translate_agent") or "")
     if normalized_route == "delegate" and normalized_target == "intent_agent":
         return str(route_templates.get("intent_agent") or "")
-    if normalized_route == "skill" and is_codex_runtime_skill(normalized_target):
-        return str(route_templates.get("codex_worker") or "")
+    if normalized_route == "skill" and is_agent_runtime_skill(normalized_target):
+        return str(route_templates.get("agent_worker") or "")
     if normalized_route == "plan":
         return str(route_templates.get("plan") or "")
     return str(route_templates.get("default") or "")
@@ -2282,12 +2282,12 @@ async def _maybe_realign_gateway_pipeline(
             "route_type": route_type,
             "route_target": route_target,
         }
-    if (route_type == "skill" and is_codex_runtime_skill(route_target)) or (
+    if (route_type == "skill" and is_agent_runtime_skill(route_target)) or (
         route_type == "delegate" and route_target == "translate_agent"
     ):
         reason_code = (
             "DEVIATION_SKIPPED_codex_runtime"
-            if is_codex_runtime_skill(route_target)
+            if is_agent_runtime_skill(route_target)
             else "DEVIATION_SKIPPED_TRANSLATE_AGENT"
         )
         return pipeline_result, {

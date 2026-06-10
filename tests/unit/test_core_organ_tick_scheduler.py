@@ -110,7 +110,7 @@ def test_bootstrap_personality_scheduler_registers_lightnovel_recommender_withou
         assert registry.get("evolution_cycle_daily") is not None
         recommender_task = registry.get("lightnovel_recommender_daily")
         assert recommender_task is not None
-        assert recommender_task.intent_template["skill_name"] == "codex_lightnovel_recommender"
+        assert recommender_task.intent_template["skill_name"] == "agent_lightnovel_recommender"
         assert recommender_task.trigger_config == {"hour": 10, "minute": 30, "catch_up_window_minutes": 180}
         assert recommender_task.intent_template["args"]["workflow_owner"] == "natsume"
         assert recommender_task.intent_template["args"]["driver_kind"] == "natsume_daily_recommendation"

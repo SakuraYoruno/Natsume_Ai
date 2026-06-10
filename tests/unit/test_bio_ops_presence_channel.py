@@ -79,7 +79,7 @@ def test_long_task_companion_uses_milestone_only_updates(tmp_path) -> None:
 
     assert result["status"] == "PROPOSED"
     assert result["findings"][0]["long_task"]["next_update"] == "milestone_update"
-    assert "codex_worker" in result["findings"][0]["forbidden_actions"]
+    assert "agent_worker" in result["findings"][0]["forbidden_actions"]
     assert companion["long_task"]["next_update"] == "failure_summary_with_artifact"
 
 

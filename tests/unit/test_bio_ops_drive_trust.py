@@ -36,7 +36,7 @@ def test_drive_trust_capability_set_is_registered() -> None:
     ]
 
 
-def test_trust_gradient_requires_review_for_mixed_codex_worker_history(tmp_path) -> None:
+def test_trust_gradient_requires_review_for_mixed_agent_worker_history(tmp_path) -> None:
     result = _runner(tmp_path).run(
         {
             "task_id": "trust-gradient",
@@ -44,13 +44,13 @@ def test_trust_gradient_requires_review_for_mixed_codex_worker_history(tmp_path)
             "mode": "audit",
             "owner_organ": "prefrontal_agent",
             "inputs": {
-                "trust_target": "codex_worker",
+                "trust_target": "agent_worker",
                 "recent_successes": 3,
                 "recent_timeouts": 1,
             },
         }
     )
-    trust = evaluate_trust_gradient({"trust_target": "codex_worker", "recent_successes": 2, "recent_failures": 3})
+    trust = evaluate_trust_gradient({"trust_target": "agent_worker", "recent_successes": 2, "recent_failures": 3})
 
     assert result["status"] == "PROPOSED"
     assert result["findings"][0]["trust"]["policy"] == "allow_inspect_require_review_for_worker"
@@ -65,7 +65,7 @@ def test_trust_thermostat_cools_overheated_autonomy(tmp_path) -> None:
             "capability": "trust_thermostat",
             "mode": "audit",
             "owner_organ": "prefrontal_agent",
-            "inputs": {"trust_target": "codex_worker", "trust_temperature": 0.88, "recent_successes": 1},
+            "inputs": {"trust_target": "agent_worker", "trust_temperature": 0.88, "recent_successes": 1},
         }
     )
     thermostat = regulate_trust_thermostat({"trust_temperature": 0.2, "recent_failures": 1})

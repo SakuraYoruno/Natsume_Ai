@@ -75,7 +75,7 @@ def test_graph_runtime_does_not_register_codegen_skill_as_handler() -> None:
 
     deps._graph_runtime = None
     runtime = deps.get_graph_runtime()
-    assert "codex_worker" not in getattr(runtime, "_handlers", {})
+    assert "agent_worker" not in getattr(runtime, "_handlers", {})
 
 
 def test_chat_graph_work_code_uses_short_sequence() -> None:

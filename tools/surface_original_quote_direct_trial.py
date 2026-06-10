@@ -623,9 +623,7 @@ def _resolve_api_key(provider: str) -> str:
         "deepseek": "DEEPSEEK_API_KEY",
         "gemini": "GEMINI_API_KEY",
         "minimax": "MINIMAX_API_KEY",
-        "openai": "OPENAI_API_KEY",
-        "codex": "CODEX_API_KEY",
-    }.get(str(provider or "").strip().lower(), "")
+        "openai": "OPENAI_API_KEY",    }.get(str(provider or "").strip().lower(), "")
     return _clean_text(os.environ.get(env_key or "")) or load_secret_store_provider_key(provider)
 
 

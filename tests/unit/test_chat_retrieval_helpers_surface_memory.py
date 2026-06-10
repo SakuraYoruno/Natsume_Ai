@@ -573,7 +573,7 @@ async def test_run_retrieval_applies_lightnovel_deep_review_before_surface(monke
     monkeypatch.setattr(helpers, "_build_surface_memory_recall_service", lambda: _RecallService())
     monkeypatch.setattr(helpers, "_embed_surface_memory_query", lambda query: ([0.2] * 16, "test-embedding"))
     monkeypatch.setattr(
-        "host_brain.codex_runtime.lightnovel_deep_reviewer.review_lightnovel_selection_from_memory_packet",
+        "host_brain.agent_runtime.lightnovel_deep_reviewer.review_lightnovel_selection_from_memory_packet",
         fake_review,
     )
 
@@ -674,7 +674,7 @@ async def test_run_retrieval_marks_partial_lightnovel_deep_review_scope(monkeypa
     monkeypatch.setattr(helpers, "_build_surface_memory_recall_service", lambda: _RecallService())
     monkeypatch.setattr(helpers, "_embed_surface_memory_query", lambda query: ([0.2] * 16, "test-embedding"))
     monkeypatch.setattr(
-        "host_brain.codex_runtime.lightnovel_deep_reviewer.review_lightnovel_selection_from_memory_packet",
+        "host_brain.agent_runtime.lightnovel_deep_reviewer.review_lightnovel_selection_from_memory_packet",
         fake_review,
     )
 
@@ -762,7 +762,7 @@ async def test_run_retrieval_uses_readiness_to_recover_missing_detail_with_deep_
     monkeypatch.setattr(helpers, "_build_surface_memory_recall_service", lambda: _RecallService())
     monkeypatch.setattr(helpers, "_embed_surface_memory_query", lambda query: ([0.2] * 16, "test-embedding"))
     monkeypatch.setattr(
-        "host_brain.codex_runtime.lightnovel_deep_reviewer.review_lightnovel_selection_from_memory_packet",
+        "host_brain.agent_runtime.lightnovel_deep_reviewer.review_lightnovel_selection_from_memory_packet",
         fake_review,
     )
 
@@ -848,7 +848,7 @@ async def test_run_retrieval_marks_failed_lightnovel_deep_review_not_ready(monke
     monkeypatch.setattr(helpers, "_build_surface_memory_recall_service", lambda: _RecallService())
     monkeypatch.setattr(helpers, "_embed_surface_memory_query", lambda query: ([0.2] * 16, "test-embedding"))
     monkeypatch.setattr(
-        "host_brain.codex_runtime.lightnovel_deep_reviewer.review_lightnovel_selection_from_memory_packet",
+        "host_brain.agent_runtime.lightnovel_deep_reviewer.review_lightnovel_selection_from_memory_packet",
         fake_review,
     )
 
@@ -948,7 +948,7 @@ async def test_run_retrieval_applies_lightnovel_deep_review_from_entity_trace(mo
     monkeypatch.setattr(helpers, "_build_surface_memory_recall_service", lambda: _RecallService())
     monkeypatch.setattr(helpers, "_embed_surface_memory_query", lambda query: ([0.2] * 16, "test-embedding"))
     monkeypatch.setattr(
-        "host_brain.codex_runtime.lightnovel_deep_reviewer.review_lightnovel_selection_from_memory_packet",
+        "host_brain.agent_runtime.lightnovel_deep_reviewer.review_lightnovel_selection_from_memory_packet",
         fake_review,
     )
 
@@ -1017,7 +1017,7 @@ async def test_run_retrieval_uses_generic_evidence_review_for_missing_web_body(m
     monkeypatch.setattr(helpers, "_build_surface_memory_recall_service", lambda: _RecallService())
     monkeypatch.setattr(helpers, "_embed_surface_memory_query", lambda query: ([0.2] * 16, "test-embedding"))
     monkeypatch.setattr(
-        "host_brain.codex_runtime.generic_evidence_reviewer.review_generic_evidence_from_memory_packet",
+        "host_brain.agent_runtime.generic_evidence_reviewer.review_generic_evidence_from_memory_packet",
         fake_review,
     )
 

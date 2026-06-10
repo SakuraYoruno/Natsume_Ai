@@ -42,27 +42,27 @@ _LLM_SKILL_TARGET_ALLOWLIST: frozenset[str] = frozenset({
     "browser_navigate",
     "browser_scrape",
     "browser_screenshot",
-    "codex_dream_compile",
-    "codex_inspect",
-    "codex_organ_scan",
-    "codex_persona_drift_audit",
-    "codex_browser_research",
-    "codex_document_digest",
-    "codex_epub_builder",
-    "codex_frontend_acceptance",
-    "codex_frontend_review",
-    "codex_lightnovel_recommender",
-    "codex_memory_curator",
-    "codex_research",
-    "codex_repo_sentinel",
-    "codex_self_evolve",
-    "codex_self_heal",
-    "codex_skill_forge",
-    "codex_sql_audit",
-    "codex_translate_project",
-    "codex_web_corpus_collector",
-    "codex_workbench_brief",
-    "codex_worker",
+    "agent_dream_compile",
+    "agent_inspect",
+    "agent_organ_scan",
+    "agent_persona_drift_audit",
+    "agent_browser_research",
+    "agent_document_digest",
+    "agent_epub_builder",
+    "agent_frontend_acceptance",
+    "agent_frontend_review",
+    "agent_lightnovel_recommender",
+    "agent_memory_curator",
+    "agent_research",
+    "agent_repo_sentinel",
+    "agent_self_evolve",
+    "agent_self_heal",
+    "agent_skill_forge",
+    "agent_sql_audit",
+    "agent_translate_project",
+    "agent_web_corpus_collector",
+    "agent_workbench_brief",
+    "agent_worker",
     "emotion_query",
     "frontend_component_value_audit",
     "frontend_route_audit",
@@ -1439,14 +1439,14 @@ def _build_codex_workspace_route_seed(text: str) -> dict[str, Any] | None:
     if not (has_write or has_inspect or has_active_verify or has_git_action):
         return None
 
-    target_id = "codex_worker" if has_write or has_active_verify or has_git_action else "codex_inspect"
-    run_mode = "worker" if target_id == "codex_worker" else "inspect"
+    target_id = "agent_worker" if has_write or has_active_verify or has_git_action else "agent_inspect"
+    run_mode = "worker" if target_id == "agent_worker" else "inspect"
     return {
         "route": "skill",
         "target_id": target_id,
         "task": normalized,
         "reason_code": f"THALAMUS_RULE_CODEX_WORKSPACE_{run_mode.upper()}",
-        "confidence": 0.94 if target_id == "codex_worker" else 0.91,
+        "confidence": 0.94 if target_id == "agent_worker" else 0.91,
         "route_source": "thalamus.rule",
         "args": {
             "task": normalized,
@@ -1478,27 +1478,27 @@ def _build_codex_production_route_seed(text: str) -> dict[str, Any] | None:
     target_id = ""
     recommendation_index = _parse_codex_recommendation_index(normalized)
     if recommendation_index:
-        target_id = "codex_epub_builder"
+        target_id = "agent_epub_builder"
     elif _CODEX_WORKBENCH_BRIEF_RE.search(normalized):
-        target_id = "codex_workbench_brief"
+        target_id = "agent_workbench_brief"
     elif _CODEX_REPO_SENTINEL_RE.search(normalized) and _CODEX_PRODUCTION_BACKGROUND_RE.search(normalized):
-        target_id = "codex_repo_sentinel"
+        target_id = "agent_repo_sentinel"
     elif _CODEX_MEMORY_CURATOR_RE.search(normalized):
-        target_id = "codex_memory_curator"
+        target_id = "agent_memory_curator"
     elif _CODEX_DOCUMENT_DIGEST_RE.search(normalized):
-        target_id = "codex_document_digest"
+        target_id = "agent_document_digest"
     elif _CODEX_EPUB_BUILDER_RE.search(normalized):
-        target_id = "codex_epub_builder"
+        target_id = "agent_epub_builder"
     elif _CODEX_WEB_CORPUS_COLLECTOR_RE.search(normalized):
-        target_id = "codex_web_corpus_collector"
+        target_id = "agent_web_corpus_collector"
     elif _CODEX_LIGHTNOVEL_RECOMMENDER_RE.search(normalized):
-        target_id = "codex_lightnovel_recommender"
+        target_id = "agent_lightnovel_recommender"
     elif _CODEX_FRONTEND_ACCEPTANCE_RE.search(normalized):
-        target_id = "codex_frontend_acceptance"
+        target_id = "agent_frontend_acceptance"
     elif _CODEX_BROWSER_RESEARCH_RE.search(normalized):
-        target_id = "codex_browser_research"
+        target_id = "agent_browser_research"
     elif _CODEX_FRONTEND_REVIEW_RE.search(normalized):
-        target_id = "codex_frontend_review"
+        target_id = "agent_frontend_review"
     if not target_id:
         return None
     url = _extract_first_url(normalized)
@@ -1513,7 +1513,7 @@ def _build_codex_production_route_seed(text: str) -> dict[str, Any] | None:
         args["urls"] = [url]
     if recommendation_index:
         args["recommendation_index"] = recommendation_index
-    if target_id in {"codex_lightnovel_recommender", "codex_epub_builder"} or "lightnovel.fun" in normalized:
+    if target_id in {"agent_lightnovel_recommender", "agent_epub_builder"} or "lightnovel.fun" in normalized:
         args["site_adapter"] = "lightnovel.fun"
     return {
         "route": "skill",
@@ -2055,7 +2055,7 @@ def _build_direct_route_seed(text: str) -> dict[str, Any] | None:
             if codex_runtime_mode == "self_evolve"
             else "THALAMUS_RULE_CODEX_SELF_HEAL"
         )
-        codex_target = "codex_self_evolve" if codex_runtime_mode == "self_evolve" else "codex_self_heal"
+        codex_target = "agent_self_evolve" if codex_runtime_mode == "self_evolve" else "agent_self_heal"
         return {
             "route": "skill",
             "target_id": codex_target,
@@ -2403,9 +2403,9 @@ def classify_task_intent_by_rules(text: str) -> dict[str, Any] | None:
     if _TASK_PLUGIN_BUILD_RE.search(normalized):
         return {
             "route": "skill",
-            "target_id": "codex_worker",
+            "target_id": "agent_worker",
             "task": normalized,
-            "reason_code": "RULE_FORCE_codex_worker",
+            "reason_code": "RULE_FORCE_agent_worker",
             "confidence": 0.93,
             "route_source": "rule",
         }
@@ -2415,7 +2415,7 @@ def classify_task_intent_by_rules(text: str) -> dict[str, Any] | None:
         and not _TASK_ENTERTAINMENT_RE.search(normalized)
         and not _TASK_CODE_NEGATION_RE.search(normalized)
     ):
-        codex_target = "codex_inspect" if _looks_like_lightweight_codex_request(normalized) else "codex_worker"
+        codex_target = "agent_inspect" if _looks_like_lightweight_codex_request(normalized) else "agent_worker"
         return {
             "route": "skill",
             "target_id": codex_target,
@@ -2455,8 +2455,8 @@ def classify_task_intent_by_rules(text: str) -> dict[str, Any] | None:
 
 
 _WORK_CODE_TARGETS: frozenset[str] = frozenset({
-    "codex_worker",
-    "codex_inspect",
+    "agent_worker",
+    "agent_inspect",
     "code_agent",
     "workbench_code_assist",
 })
@@ -2512,7 +2512,7 @@ def resolve_scene_type_from_intent_decision(
     if (
         target_id in _WORK_CODE_TARGETS
         or target_id.startswith("codex_")
-        or action in {"work_code", "codex_worker", "codex_inspect"}
+        or action in {"work_code", "agent_worker", "agent_inspect"}
         or action.startswith("codex_")
         or "codex" in reason
     ):
@@ -2560,7 +2560,7 @@ def classify_task_intent_fastpath(text: str) -> dict[str, Any] | None:
                 bio_ops_reflex = {
                     **candidate,
                     "path": "bio_ops_reflex",
-                    "forbidden_actions": ["codex_worker", "long_reasoning", "skill_execution"],
+                    "forbidden_actions": ["agent_worker", "long_reasoning", "skill_execution"],
                 }
         except Exception:
             bio_ops_reflex = None
@@ -2637,7 +2637,7 @@ def classify_task_intent_fastpath(text: str) -> dict[str, Any] | None:
                 bio_ops_reflex = {
                     **candidate,
                     "path": "bio_ops_reflex",
-                    "forbidden_actions": ["codex_worker", "long_reasoning", "skill_execution"],
+                    "forbidden_actions": ["agent_worker", "long_reasoning", "skill_execution"],
                 }
         except Exception:
             bio_ops_reflex = None
@@ -2993,7 +2993,7 @@ def _resolve_target_id(payload: Mapping[str, Any]) -> str:
         return candidate
     action = _normalize_text(payload.get("action"), lower=True)
     if action == "work_code":
-        return "codex_worker"
+        return "agent_worker"
     if action == "work_translate":
         return "translate_agent"
     if action.endswith("_agent"):
@@ -3094,27 +3094,27 @@ def _backfill_canonical_args(
         if normalized_target == "memory_store" and not _normalize_text(merged.get("content")):
             merged["content"] = fallback_text
         if normalized_target in {
-            "codex_inspect",
-            "codex_worker",
-            "codex_self_heal",
-            "codex_self_evolve",
-            "codex_sql_audit",
-            "codex_translate_project",
-            "codex_skill_forge",
-            "codex_research",
-            "codex_organ_scan",
-            "codex_persona_drift_audit",
-            "codex_dream_compile",
-            "codex_workbench_brief",
-            "codex_repo_sentinel",
-            "codex_memory_curator",
-            "codex_document_digest",
-            "codex_frontend_review",
-            "codex_browser_research",
-            "codex_frontend_acceptance",
-            "codex_web_corpus_collector",
-            "codex_lightnovel_recommender",
-            "codex_epub_builder",
+            "agent_inspect",
+            "agent_worker",
+            "agent_self_heal",
+            "agent_self_evolve",
+            "agent_sql_audit",
+            "agent_translate_project",
+            "agent_skill_forge",
+            "agent_research",
+            "agent_organ_scan",
+            "agent_persona_drift_audit",
+            "agent_dream_compile",
+            "agent_workbench_brief",
+            "agent_repo_sentinel",
+            "agent_memory_curator",
+            "agent_document_digest",
+            "agent_frontend_review",
+            "agent_browser_research",
+            "agent_frontend_acceptance",
+            "agent_web_corpus_collector",
+            "agent_lightnovel_recommender",
+            "agent_epub_builder",
         }:
             if not _normalize_text(merged.get("task")):
                 merged["task"] = _normalize_text(merged.get("problem_statement")) or fallback_text
@@ -3129,27 +3129,27 @@ def _backfill_canonical_args(
                 or merged.get("allow_temp_workspace")
             )
             if not _normalize_text(merged.get("run_mode"), lower=True):
-                if normalized_target == "codex_self_heal":
+                if normalized_target == "agent_self_heal":
                     merged["run_mode"] = "self_heal"
-                elif normalized_target == "codex_self_evolve":
+                elif normalized_target == "agent_self_evolve":
                     merged["run_mode"] = "self_evolve"
-                elif normalized_target == "codex_inspect":
+                elif normalized_target == "agent_inspect":
                     merged["run_mode"] = "inspect"
-                elif normalized_target == "codex_research":
+                elif normalized_target == "agent_research":
                     merged["run_mode"] = "research"
-                elif normalized_target == "codex_translate_project":
+                elif normalized_target == "agent_translate_project":
                     merged["run_mode"] = "translate"
-                elif normalized_target == "codex_sql_audit":
+                elif normalized_target == "agent_sql_audit":
                     merged["run_mode"] = "audit"
                 elif normalized_target in {
-                    "codex_workbench_brief",
-                    "codex_document_digest",
-                    "codex_browser_research",
+                    "agent_workbench_brief",
+                    "agent_document_digest",
+                    "agent_browser_research",
                 }:
                     merged["run_mode"] = "research"
-                elif normalized_target in {"codex_repo_sentinel", "codex_memory_curator", "codex_frontend_review", "codex_frontend_acceptance"}:
+                elif normalized_target in {"agent_repo_sentinel", "agent_memory_curator", "agent_frontend_review", "agent_frontend_acceptance"}:
                     merged["run_mode"] = "inspect"
-                elif normalized_target in {"codex_web_corpus_collector", "codex_lightnovel_recommender", "codex_epub_builder"}:
+                elif normalized_target in {"agent_web_corpus_collector", "agent_lightnovel_recommender", "agent_epub_builder"}:
                     merged["run_mode"] = "worker"
                 elif _looks_like_lightweight_codex_request(_normalize_text(merged.get("task")) or fallback_text):
                     merged["run_mode"] = "inspect"
@@ -3158,16 +3158,16 @@ def _backfill_canonical_args(
             resolved_run_mode = _normalize_text(merged.get("run_mode"), lower=True)
             if not explicit_workspace:
                 if normalized_target in {
-                    "codex_workbench_brief",
-                    "codex_memory_curator",
-                    "codex_document_digest",
-                    "codex_browser_research",
-                    "codex_web_corpus_collector",
-                    "codex_lightnovel_recommender",
-                    "codex_epub_builder",
+                    "agent_workbench_brief",
+                    "agent_memory_curator",
+                    "agent_document_digest",
+                    "agent_browser_research",
+                    "agent_web_corpus_collector",
+                    "agent_lightnovel_recommender",
+                    "agent_epub_builder",
                 }:
                     merged["workspace_strategy"] = "temp_workspace"
-                elif normalized_target in {"codex_repo_sentinel", "codex_frontend_review", "codex_frontend_acceptance"}:
+                elif normalized_target in {"agent_repo_sentinel", "agent_frontend_review", "agent_frontend_acceptance"}:
                     merged["workspace_strategy"] = "runtime_repo"
                 elif resolved_run_mode == "inspect":
                     merged["allow_temp_workspace"] = True

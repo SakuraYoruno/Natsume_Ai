@@ -3657,11 +3657,11 @@ def _account_login_sensitive(agent_input: Any | None, *, task_control: Mapping[s
         return False
     sub_agent_ctx = getattr(agent_input, "sub_agent_context", None)
     sub_agent_id = str(getattr(sub_agent_ctx, "agent_id", "") or "").strip()
-    if sub_agent_id == "codex_epub_builder":
+    if sub_agent_id == "agent_epub_builder":
         return True
     intent = _safe_mapping(getattr(agent_input, "intent_draft", None))
     target_id = str(intent.get("target_id") or intent.get("action") or "").strip()
-    if target_id == "codex_epub_builder":
+    if target_id == "agent_epub_builder":
         return True
     text = " ".join(
         str(part or "")

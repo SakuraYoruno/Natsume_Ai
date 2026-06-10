@@ -22,7 +22,7 @@ from host_brain.bio_ops.adoption import ADOPTION_DECISION_ACCEPTED
 from host_brain.bio_ops.runtime_trace import build_bio_ops_runtime_trace
 from host_brain.bio_ops.owner_consumer import BioOpsOwnerIntakeConsumer
 from host_brain.bio_ops.owner_inbox import BioOpsOwnerInbox
-from host_brain.codex_runtime.artifact_store import REPO_ROOT
+from host_brain.agent_runtime.artifact_store import REPO_ROOT
 from host_brain.core.ids import now_ms
 from host_brain.organ_ops.owner_candidate_store import OwnerCandidateStateStore
 

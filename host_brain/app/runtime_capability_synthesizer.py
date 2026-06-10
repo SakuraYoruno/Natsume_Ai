@@ -89,7 +89,7 @@ def _choose_executor(missing_capability_tags: tuple[str, ...], suggested_family:
     family = str(suggested_family or "").strip().lower()
 
     if "coding" in tags or family == "code":
-        return "skill", "codex_worker"
+        return "skill", "agent_worker"
     if "translation" in tags or family == "translation":
         return "delegate", "translate_agent"
     if "vision" in tags or family in {"vision", "perception"}:

@@ -85,7 +85,7 @@ def test_build_skill_dag_plan_preserves_step_args_payload() -> None:
         {
             "step_index": 1,
             "route": "skill",
-            "target_id": "codex_worker",
+            "target_id": "agent_worker",
             "description": "fix test",
             "task_description": "fix failing test",
             "allow_parallel": True,

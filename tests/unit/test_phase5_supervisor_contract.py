@@ -165,7 +165,7 @@ def test_supervisor_handler_consumes_llm_route_from_intent_draft(monkeypatch: py
         "request_id": "p5-test",
         "intent_draft": {
             "route": "skill",
-            "target_id": "codex_worker",
+            "target_id": "agent_worker",
             "route_source": "llm",
         },
     }
@@ -177,6 +177,6 @@ def test_supervisor_handler_consumes_llm_route_from_intent_draft(monkeypatch: py
     out = supervisor_dispatch_handler(payload, ctx)
     sd = out.get("supervisor_dispatch") or {}
     assert sd.get("supervisor_decision_source") == "intent_draft:skill:llm"
-    assert sd.get("intent_target_id") == "codex_worker"
+    assert sd.get("intent_target_id") == "agent_worker"
     assert out.get("active_agent_id") == "intent_agent"
 

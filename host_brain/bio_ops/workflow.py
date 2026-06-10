@@ -21,7 +21,7 @@ from host_brain.bio_ops.daily_cycle import (
 )
 from host_brain.bio_ops.owner_consumer import BioOpsOwnerIntakeConsumer, OWNER_QUEUE_WRITE_POLICY
 from host_brain.bio_ops.owner_inbox import BioOpsOwnerInbox
-from host_brain.codex_runtime.artifact_store import sanitize_segment
+from host_brain.agent_runtime.artifact_store import sanitize_segment
 from host_brain.core.ids import now_ms
 
 

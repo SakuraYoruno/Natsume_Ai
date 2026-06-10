@@ -351,12 +351,12 @@ def build_registry_driven_scheduling_plan(
 
 
 def build_default_scheduler_registries() -> dict[str, SkillRegistry]:
-    from host_brain.skills.codex_runtime_registry import build_codex_runtime_skill_registry  # noqa: PLC0415
+    from host_brain.skills.agent_runtime_registry import build_agent_runtime_skill_registry  # noqa: PLC0415
     from host_brain.skills.personality_registry import build_personality_skill_registry  # noqa: PLC0415
 
     return {
         "personality": build_personality_skill_registry(),
-        "codex_runtime": build_codex_runtime_skill_registry(),
+        "codex_runtime": build_agent_runtime_skill_registry(),
     }
 
 

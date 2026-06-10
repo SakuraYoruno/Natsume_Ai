@@ -474,12 +474,12 @@ def classify_attention_budget(text: object, *, planned_path: list[str] | None = 
     normalized = re.sub(r"\s+", "", str(text or "").strip().lower())
     path = list(planned_path or [])
     short_ack = bool(re.fullmatch(r"(嗯|嗯嗯|好的|收到|可以|行|ok|yes)[!！。…~]*", normalized))
-    heavy_steps = {"retrieval", "emotion_llm", "chat_llm", "memory_write", "codex_worker"}
+    heavy_steps = {"retrieval", "emotion_llm", "chat_llm", "memory_write", "agent_worker"}
     overprocessed = short_ack and bool(heavy_steps.intersection(path))
     return {
         "pattern": "short_ack_message_overprocessed" if overprocessed else "within_budget",
         "overprocessed": overprocessed,
-        "forbidden_actions": ["codex_worker", "long_reasoning", "skill_execution"] if short_ack else [],
+        "forbidden_actions": ["agent_worker", "long_reasoning", "skill_execution"] if short_ack else [],
     }
 
 
@@ -776,8 +776,8 @@ def evaluate_self_interrupt(inputs: dict[str, Any], *, evidence_refs: list[str] 
     reasons: list[str] = []
     if len(text) > 900 or "用户只要" in text.lower():
         reasons.append("over_explaining_detected")
-    if "codex_worker" in planned_path and not work_order_ref:
-        reasons.append("missing_work_order_for_codex_worker")
+    if "agent_worker" in planned_path and not work_order_ref:
+        reasons.append("missing_work_order_for_agent_worker")
     if promise["has_promise"] and not (evidence_refs or inputs.get("evidence_refs")):
         reasons.append("promise_without_evidence")
     if not persona["pass"]:
@@ -793,7 +793,7 @@ def evaluate_self_interrupt(inputs: dict[str, Any], *, evidence_refs: list[str] 
     primary = reasons[0]
     if primary == "over_explaining_detected":
         action = "stop_and_generate_artifact_link"
-    elif primary == "missing_work_order_for_codex_worker":
+    elif primary == "missing_work_order_for_agent_worker":
         action = "block_and_request_work_order"
     elif primary == "promise_without_evidence":
         action = "rewrite_as_candidate_or_remove_claim"
@@ -993,7 +993,7 @@ def plan_dream_rehearsal(inputs: dict[str, Any]) -> dict[str, Any]:
         "diagnostic_steps": [
             "Inspect current WorkOrder and ResultContract artifacts.",
             "Check immune auto-state before proposing repair.",
-            "Prefer codex_inspect before codex_worker for uncertain code paths.",
+            "Prefer agent_inspect before agent_worker for uncertain code paths.",
         ][: 2 + bool(unstable)],
         "reply_strategy": "explain the current state first, then give a short diagnostic path",
         "tomorrow_topic_seed": topics[:3],
@@ -1350,7 +1350,7 @@ def evaluate_growth_stage(inputs: dict[str, Any]) -> dict[str, Any]:
     unlocked = _list_text(inputs.get("unlocked") or inputs.get("current_capabilities"))
     locked = _list_text(inputs.get("locked"))
     if not unlocked:
-        unlocked = ["chat_response", "codex_inspect", "bio_ops_report"]
+        unlocked = ["chat_response", "agent_inspect", "bio_ops_report"]
     if stage_index < 4:
         locked.extend(["autonomous_self_heal", "full_worker_write"])
     if stage_index < 5:
@@ -1450,7 +1450,7 @@ def manage_open_loops(inputs: dict[str, Any]) -> dict[str, Any]:
 
 def shed_cognitive_load(inputs: dict[str, Any]) -> dict[str, Any]:
     active_tasks = _list_text(inputs.get("active_tasks"))
-    codex_active = bool(inputs.get("codex_worker_active")) or int(inputs.get("codex_queue_size") or 0) > 0
+    codex_active = bool(inputs.get("agent_worker_active")) or int(inputs.get("codex_queue_size") or 0) > 0
     queue_size = int(inputs.get("codex_queue_size") or len(active_tasks))
     if queue_size >= 5 or len(active_tasks) >= 6:
         level = "high"
@@ -1461,13 +1461,13 @@ def shed_cognitive_load(inputs: dict[str, Any]) -> dict[str, Any]:
     optional = ["dream_compile", "weekly_evolution_scan", "idea_expansion", "nonurgent_report"]
     paused = optional[:3] if level == "high" else optional[:2] if level == "moderate" else []
     kept = ["chat_response", "immune_monitor"]
-    if "codex_worker" in active_tasks or codex_active:
+    if "agent_worker" in active_tasks or codex_active:
         kept.append("codex_workorder_trace")
     return {
         "level": level,
         "paused": paused,
         "kept": kept,
-        "reason": "codex_worker_active" if codex_active else "task_queue_pressure" if queue_size else "normal_load",
+        "reason": "agent_worker_active" if codex_active else "task_queue_pressure" if queue_size else "normal_load",
         "direct_write_allowed": False,
         "issue": "cognitive_load_shedding_needed" if paused else "cognitive_load_normal",
     }
@@ -1894,7 +1894,7 @@ def plan_long_task_companion(inputs: dict[str, Any]) -> dict[str, Any]:
             "milestones": milestones[:5],
             "artifact_ref": artifact_ref,
         },
-        "forbidden_actions": ["codex_worker", "background_autonomy_escalation"],
+        "forbidden_actions": ["agent_worker", "background_autonomy_escalation"],
         "direct_write_allowed": False,
         "issue": issue,
     }
@@ -2063,7 +2063,7 @@ def design_gentle_degradation(inputs: dict[str, Any]) -> dict[str, Any]:
 
 
 def evaluate_trust_gradient(inputs: dict[str, Any]) -> dict[str, Any]:
-    target = str(inputs.get("trust_target") or inputs.get("target") or "codex_worker").strip().lower()
+    target = str(inputs.get("trust_target") or inputs.get("target") or "agent_worker").strip().lower()
     successes = int(inputs.get("recent_successes") or inputs.get("successes") or 0)
     failures = int(inputs.get("recent_failures") or inputs.get("failures") or 0)
     timeouts = int(inputs.get("recent_timeouts") or inputs.get("timeouts") or 0)
@@ -2073,7 +2073,7 @@ def evaluate_trust_gradient(inputs: dict[str, Any]) -> dict[str, Any]:
     else:
         score = float(raw_score)
     score = round(max(0.0, min(score, 1.0)), 2)
-    if "codex_worker" in target:
+    if "agent_worker" in target:
         if score >= 0.75 and failures == 0 and timeouts == 0:
             policy = "allow_worker_with_workorder_and_artifacts"
         elif score >= 0.5:
@@ -2097,7 +2097,7 @@ def evaluate_trust_gradient(inputs: dict[str, Any]) -> dict[str, Any]:
 
 
 def regulate_trust_thermostat(inputs: dict[str, Any]) -> dict[str, Any]:
-    target = str(inputs.get("trust_target") or inputs.get("target") or "codex_worker").strip().lower()
+    target = str(inputs.get("trust_target") or inputs.get("target") or "agent_worker").strip().lower()
     temperature = float(inputs.get("trust_temperature") if inputs.get("trust_temperature") is not None else inputs.get("trust_score") or 0.5)
     incidents = int(inputs.get("recent_failures") or inputs.get("recent_timeouts") or inputs.get("incidents") or 0)
     successes = int(inputs.get("recent_successes") or 0)
@@ -2440,7 +2440,7 @@ def _reflex_arc_compiler(task: BioOpsTask) -> BioOpsResult:
         proposal="Use only low-risk immediate response actions and keep Codex workers forbidden for reflex traffic.",
         owner_organ="thalamus_agent",
         output_kind="reflex_rule",
-        extra={"reflex": analysis, "forbidden_actions": ["codex_worker", "long_reasoning", "skill_execution"]},
+        extra={"reflex": analysis, "forbidden_actions": ["agent_worker", "long_reasoning", "skill_execution"]},
     )
 
 

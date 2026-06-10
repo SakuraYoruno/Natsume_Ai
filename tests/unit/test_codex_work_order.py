@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import pytest
 
-from host_brain.codex_runtime.work_order import CodexWorkOrder
+from host_brain.agent_runtime.work_order import AgentWorkOrder
 
 
 def test_codex_work_order_from_mapping_defaults_and_validates() -> None:
-    order = CodexWorkOrder.from_mapping(
+    order = AgentWorkOrder.from_mapping(
         {
             "domain": "code",
             "run_mode": "inspect",
@@ -22,7 +22,7 @@ def test_codex_work_order_from_mapping_defaults_and_validates() -> None:
 
 
 def test_codex_work_order_rejects_unknown_run_mode() -> None:
-    order = CodexWorkOrder.from_mapping(
+    order = AgentWorkOrder.from_mapping(
         {
             "domain": "code",
             "run_mode": "legacy",
@@ -36,7 +36,7 @@ def test_codex_work_order_rejects_unknown_run_mode() -> None:
 
 
 def test_codex_work_order_marks_write_modes_review_required() -> None:
-    order = CodexWorkOrder.from_mapping(
+    order = AgentWorkOrder.from_mapping(
         {
             "domain": "code",
             "run_mode": "worker",

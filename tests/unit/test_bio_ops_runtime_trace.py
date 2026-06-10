@@ -9,13 +9,13 @@ from tests.unit.test_owner_candidate_store import _queue_item, _write_json
 from host_brain.organ_ops.owner_candidate_store import OwnerCandidateStateStore
 
 
-def test_thalamus_short_ack_attaches_bio_ops_reflex_without_codex_worker() -> None:
+def test_thalamus_short_ack_attaches_bio_ops_reflex_without_agent_worker() -> None:
     decision = classify_task_intent_fastpath("好的")
 
     assert decision is not None
     assert decision["route"] == "chat"
     assert decision["bio_ops_reflex"]["matched"] is True
-    assert "codex_worker" in decision["bio_ops_reflex"]["forbidden_actions"]
+    assert "agent_worker" in decision["bio_ops_reflex"]["forbidden_actions"]
 
 
 def test_task_like_message_does_not_get_reflex_short_circuited() -> None:
@@ -26,13 +26,13 @@ def test_task_like_message_does_not_get_reflex_short_circuited() -> None:
 
     assert decision is not None
     assert decision["route"] == "skill"
-    assert decision["target_id"] == "codex_worker"
+    assert decision["target_id"] == "agent_worker"
 
 
 def test_connectivity_route_reason_is_low_risk_short_chat() -> None:
     assert _is_low_risk_short_chat_route_reason("THALAMUS_RULE_CONNECTIVITY_CHECK")
     assert _is_low_risk_short_chat_route_reason("THALAMUS_RULE_PHATIC_GREETING")
-    assert not _is_low_risk_short_chat_route_reason("RULE_FORCE_codex_worker")
+    assert not _is_low_risk_short_chat_route_reason("RULE_FORCE_agent_worker")
 
 
 def test_bio_ops_runtime_trace_observes_weather_breathing_and_silence() -> None:
@@ -60,7 +60,7 @@ def test_bio_ops_runtime_trace_marks_execution_routes_as_explicit_help() -> None
     trace = build_bio_ops_runtime_trace(
         message="帮我修复测试",
         route_type="skill",
-        target_id="codex_worker",
+        target_id="agent_worker",
         emotion_context={"emotion_tag": "NEUTRAL"},
         runtime_signals={"current_hour": 2, "user_stress": "high"},
     )
@@ -75,7 +75,7 @@ def test_chat_preflight_trace_records_reflex_without_execution_actions() -> None
 
     assert trace["proposal_only"] is True
     assert trace["reflex"]["matched"] is True
-    assert "codex_worker" in trace["forbidden_actions"]
+    assert "agent_worker" in trace["forbidden_actions"]
     assert trace["response_breathing"]["reply_density"] in {"normal", "soft_brief", "grounded_brief"}
 
 

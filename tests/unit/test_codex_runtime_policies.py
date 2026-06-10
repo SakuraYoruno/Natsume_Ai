@@ -2,15 +2,15 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from host_brain.codex_runtime.work_order import CodexWorkOrder
-from host_brain.codex_runtime.workspace_policy import WorkspacePolicy
+from host_brain.agent_runtime.work_order import AgentWorkOrder
+from host_brain.agent_runtime.workspace_policy import WorkspacePolicy
 from host_brain.bio_ops import build_proposal_only_policy, is_bio_ops_sensitive_path
 from host_brain.evolution_lab import validate_evolution_branch
 from host_brain.organ_ops import build_default_organ_registry
 
 
 def test_workspace_policy_creates_temp_workspace(tmp_path) -> None:
-    order = CodexWorkOrder.from_mapping(
+    order = AgentWorkOrder.from_mapping(
         {
             "work_order_id": "wo-temp",
             "domain": "code",
@@ -30,7 +30,7 @@ def test_workspace_policy_creates_temp_workspace(tmp_path) -> None:
 def test_workspace_policy_blocks_write_without_write_action(tmp_path) -> None:
     workspace = tmp_path / "repo"
     workspace.mkdir()
-    order = CodexWorkOrder.from_mapping(
+    order = AgentWorkOrder.from_mapping(
         {
             "work_order_id": "wo-block",
             "domain": "code",
@@ -53,7 +53,7 @@ def test_workspace_policy_blocks_write_without_write_action(tmp_path) -> None:
 def test_workspace_policy_accepts_confirmed_bounded_write(tmp_path) -> None:
     workspace = tmp_path / "repo"
     workspace.mkdir()
-    order = CodexWorkOrder.from_mapping(
+    order = AgentWorkOrder.from_mapping(
         {
             "work_order_id": "wo-write",
             "domain": "code",

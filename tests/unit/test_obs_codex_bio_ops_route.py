@@ -5,7 +5,7 @@ import json
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-import host_brain.app.obs_routes_codex_bio_ops as route_module
+import host_brain.app.obs_routes_agent_bio_ops as route_module
 
 
 def _write_json(path, payload) -> None:
@@ -53,7 +53,7 @@ def test_codex_bio_ops_observability_compacts_latest_run(tmp_path, monkeypatch) 
             "run_id": run_dir.name,
             "bio_ops_capability_count": 27,
             "bio_ops_status_counts": {"PROPOSED": 20, "CANDIDATE": 5, "AUDITED": 2},
-            "codex_inspect_fixed_status": "EXECUTED",
+            "agent_inspect_fixed_status": "EXECUTED",
             "codex_blocked_status": "BLOCKED",
             "hard_cut_scan_exit_code": 1,
             "pytest_exit_code": 0,
@@ -126,12 +126,12 @@ def test_codex_bio_ops_observability_compacts_latest_run(tmp_path, monkeypatch) 
                 "attention_budget": {
                     "pattern": "short_ack_message_overprocessed",
                     "overprocessed": True,
-                    "forbidden_actions": ["codex_worker"],
+                    "forbidden_actions": ["agent_worker"],
                 },
                 "internal_weather": {"internal_weather": "night_fog", "ttl_minutes": 30},
                 "active_silence": {"silence_policy": "quiet_presence", "reason_code": "LATE_NIGHT_HIGH_LOAD_NO_ASK"},
                 "response_breathing": {"reply_density": "normal", "reason_code": "DEFAULT_BREATHING"},
-                "forbidden_actions": ["codex_worker"],
+                "forbidden_actions": ["agent_worker"],
             },
             "complex_code_request": {
                 "proposal_only": True,
@@ -144,7 +144,7 @@ def test_codex_bio_ops_observability_compacts_latest_run(tmp_path, monkeypatch) 
             },
         },
     )
-    _write_json(run_dir / "codex_inspect_fixed_result.json", contract_payload)
+    _write_json(run_dir / "agent_inspect_fixed_result.json", contract_payload)
     _write_json(run_dir / "codex_blocked_write_result.json", blocked_payload)
     _write_json(run_dir / "hard_cut_scan.json", {"exit_code": 1})
     _write_json(run_dir / "pytest_result.json", {"exit_code": 0})

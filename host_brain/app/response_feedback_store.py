@@ -8,7 +8,7 @@ import time
 from dataclasses import dataclass
 from typing import Any, Mapping
 
-from host_brain.codex_runtime.skill_ids import CODEX_RUNTIME_SKILL_IDS
+from host_brain.agent_runtime.skill_ids import AGENT_RUNTIME_SKILL_IDS
 
 
 _NEGATIVE_TOKEN_RULES: tuple[tuple[re.Pattern[str], tuple[str, ...]], ...] = (
@@ -30,7 +30,7 @@ _NON_PERSONA_SUB_AGENTS: frozenset[str] = frozenset(
         "intent_agent",
         "retrieval_agent",
         "judge_agent",
-        *CODEX_RUNTIME_SKILL_IDS,
+        *AGENT_RUNTIME_SKILL_IDS,
     }
 )
 

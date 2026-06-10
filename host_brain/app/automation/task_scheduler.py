@@ -329,7 +329,7 @@ class HostTaskScheduler:
         }
         task_key = str(task.task_id or "").strip().lower()
         uses_llm = task_key in {
-            "codex_immune_auto_dispatch_tick",
+            "agent_immune_auto_dispatch_tick",
             "distillation_engine_periodic",
         }
         task_type = "memory_heavy" if task_key in {"distillation_engine_periodic"} else "host_scheduler"

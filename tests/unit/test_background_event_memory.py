@@ -49,7 +49,7 @@ def test_codex_production_terminal_event_memory_is_enabled_by_default(monkeypatc
 
     assert should_persist_background_event_memory(
         event_source="codex_production",
-        task_id="codex_lightnovel_recommender",
+        task_id="agent_lightnovel_recommender",
         status="FAILED",
         detail="reason=LIGHTNOVEL_NATIVE_NO_RECOMMENDATIONS",
     )

@@ -33,7 +33,7 @@ from host_brain.app.provider_factory import (
     resolve_host_llm_model_id,
 )
 from host_brain.app.model_router import resolve_gemini_model_route
-from host_brain.integrations.codex_cli_provider import codex_cli_lm_available, resolve_codex_cli_model
+from host_brain.integrations.codex_cli_provider import codex_cli_lm_allowed_for_background, codex_cli_lm_available, resolve_codex_cli_model
 from host_brain.app.prompt_builder import (
     SCENE_CHAT,
     SCENE_EXEC_INTENT,
@@ -51,7 +51,7 @@ _HOST_CHAT_14B_DEFAULT_MODEL_ID = "qwen3:14b"
 _HOST_CHAT_14B_FALLBACK_API_KEY = "host-local-placeholder-key"
 _HOST_CHAT_14B_DEFAULT_BASE_URL = "http://127.0.0.1:11434/v1"
 _HOST_CHAT_CLOUD_DEFAULT_PROVIDER = PROVIDER_GEMINI
-_PROVIDERS_REQUIRING_API_KEY = frozenset({PROVIDER_OPENAI, PROVIDER_CODEX, PROVIDER_GEMINI, PROVIDER_DEEPSEEK, PROVIDER_MINIMAX})
+_PROVIDERS_REQUIRING_API_KEY = frozenset({PROVIDER_OPENAI, PROVIDER_GEMINI, PROVIDER_DEEPSEEK, PROVIDER_MINIMAX})
 _AGENT_CODEX_MIGRATION_DEFAULT_EXCLUDED_ROLES = frozenset({"surface_reply"})
 _VISION_SCENE_NAMES = frozenset({SCENE_VISION_UI.upper(), "SCENE_VISION_UI", "VISION_UI"})
 
@@ -113,7 +113,7 @@ def _agent_codex_migration_enabled(role: str) -> bool:
     }
     if included and normalized_role not in included:
         return False
-    return codex_cli_lm_available()
+    return codex_cli_lm_allowed_for_background()
 
 
 def _resolve_agent_codex_model_id() -> str:
@@ -125,7 +125,7 @@ def _surface_reply_codex_experiment_enabled(role: str) -> bool:
         return False
     if not _parse_bool(os.environ.get("HOST_SURFACE_REPLY_CODEX_EXPERIMENT_ENABLED") or os.environ.get("HOST_CHAT_AGENT_CODEX_EXPERIMENT_ENABLED"), default=False):
         return False
-    return codex_cli_lm_available()
+    return codex_cli_lm_allowed_for_background()
 
 
 def _resolve_surface_reply_codex_model_id() -> str:
@@ -152,7 +152,6 @@ def _provider_requires_api_key(provider_name: str) -> bool:
 
 def _provider_api_key_env_name(provider_name: str) -> str | None:
     provider = str(provider_name or "").strip().lower()
-    mapping = {PROVIDER_OPENAI: "OPENAI_API_KEY", PROVIDER_CODEX: "CODEX_API_KEY", PROVIDER_GEMINI: "GEMINI_API_KEY", PROVIDER_DEEPSEEK: "DEEPSEEK_API_KEY", PROVIDER_MINIMAX: "MINIMAX_API_KEY"}
     return mapping.get(provider)
 
 
@@ -173,7 +172,7 @@ def _is_provider_available(*, provider_name: str, api_key: str | None, configure
         return False
     if provider == PROVIDER_DISABLED:
         return False
-    if provider == PROVIDER_CODEX and not str(api_key or "").strip() and codex_cli_lm_available():
+    if provider == PROVIDER_CODEX and not str(api_key or "").strip() and codex_cli_lm_allowed_for_background():
         return True
     if _provider_requires_api_key(provider) and not str(api_key or "").strip():
         return False
@@ -367,7 +366,7 @@ async def _resolve_host_llm_runtime_core(*, rollout_key: str | None = None, scen
     raw_minimax_base = str(os.environ.get("HOST_MINIMAX_BASE_URL") or "https://api.minimaxi.com/v1").strip() or "https://api.minimaxi.com/v1"
     candidate_map: dict[str, dict[str, Any]] = {
         "gemini": {"chain_name": "gemini", "provider_name": PROVIDER_GEMINI, "model_id": gemini_cloud_model_id, "api_key": gemini_cloud_api_key, "base_url_override": _normalize_openai_compat_base_url(str(os.environ.get("HOST_GEMINI_BASE_URL") or "https://generativelanguage.googleapis.com/v1beta/openai").strip()), "route_reason_code": "HOST_CLOUD_CHAIN_PRIMARY_GEMINI", "route_detail": "selected Gemini as primary remote provider", "route_meta": dict(gemini_cloud_route)},
-        "codex": {"chain_name": "codex", "provider_name": PROVIDER_CODEX, "model_id": _resolve_cloud_provider_model_id(chain_name="codex"), "api_key": codex_api_key, "base_url_override": _resolve_codex_base_url(), "route_reason_code": "HOST_CLOUD_CHAIN_FALLBACK_CODEX", "route_detail": "Gemini unavailable; using Codex relay as remote fallback"},
+        "codex": {"chain_name": "codex", "provider_name": "codex", "model_id": _resolve_cloud_provider_model_id(chain_name="codex"), "api_key": codex_api_key, "base_url_override": _resolve_codex_base_url(), "route_reason_code": "HOST_CLOUD_CHAIN_FALLBACK_CODEX", "route_detail": "Gemini unavailable; using Codex relay as remote fallback"},
         "deepseek": {"chain_name": "deepseek", "provider_name": PROVIDER_DEEPSEEK, "model_id": _resolve_cloud_provider_model_id(chain_name="deepseek"), "api_key": deepseek_api_key, "base_url_override": _normalize_openai_compat_base_url(str(os.environ.get("HOST_DEEPSEEK_BASE_URL") or "https://api.deepseek.com/v1").strip()), "route_reason_code": "HOST_CLOUD_CHAIN_FALLBACK_DEEPSEEK", "route_detail": "Gemini/Codex unavailable; using DeepSeek as remote fallback"},
         "minimax": {"chain_name": "minimax", "provider_name": PROVIDER_MINIMAX, "model_id": minimax_cloud_model_id, "api_key": minimax_api_key, "base_url_override": raw_minimax_base, "route_reason_code": "HOST_CLOUD_CHAIN_PRIMARY_MINIMAX", "route_detail": "selected MiniMax as primary remote provider"},
     }

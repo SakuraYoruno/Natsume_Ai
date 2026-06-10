@@ -52,7 +52,7 @@ def _seed_recommendation(store: LifeMemoryStore, *, day: int) -> None:
         action_id=f"job-202605{day}:lightnovel_gateway_delivery",
         actor_id="natsume",
         request_id=f"req-rec-{day}",
-        intent_id="codex_lightnovel_recommender",
+        intent_id="agent_lightnovel_recommender",
         person_id="owner",
         session_id="qq_dm_owner",
         status="COMPLETED",

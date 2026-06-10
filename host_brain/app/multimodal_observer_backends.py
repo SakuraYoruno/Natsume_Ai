@@ -21,7 +21,6 @@ from urllib.parse import urlparse
 from host_brain.app.prompt_builder import extract_langchain_content_text
 from host_brain.app.prompt_specs import resolve_prompt_spec_json
 from host_brain.integrations.llm_gateway import (
-    PROVIDER_CODEX,
     PROVIDER_DEEPSEEK,
     PROVIDER_GEMINI,
     PROVIDER_MINIMAX,
@@ -213,7 +212,6 @@ def _resolve_provider_api_key(provider_name: str) -> str | None:
     provider = str(provider_name or "").strip().lower()
     mapping = {
         PROVIDER_OPENAI: "OPENAI_API_KEY",
-        PROVIDER_CODEX: "CODEX_API_KEY",
         PROVIDER_GEMINI: "GEMINI_API_KEY",
         PROVIDER_DEEPSEEK: "DEEPSEEK_API_KEY",
         PROVIDER_MINIMAX: "MINIMAX_API_KEY",
@@ -233,7 +231,6 @@ def _resolve_provider_api_key(provider_name: str) -> str | None:
             return None
         provider_to_attr = {
             PROVIDER_OPENAI: "openai_api_key",
-            PROVIDER_CODEX: "codex_api_key",
             PROVIDER_GEMINI: "gemini_api_key",
             PROVIDER_DEEPSEEK: "deepseek_api_key",
             PROVIDER_MINIMAX: "minimax_api_key",
@@ -818,7 +815,7 @@ class OpenAICompatMultimodalBackend:
         result = complete_llm_with_pool_sync(
             request_id=f"multimodal::{self.backend_name}::{int(time.time() * 1000)}",
             scene_type="MULTIMODAL",
-            cognitive_tier="MULTIMODAL",
+            cognitive_tier="B",
             provider_name=self._provider_name,
             model_id=str(model_id or "").strip() or self._sync_model_id,
             api_key=self._api_key,

@@ -456,9 +456,9 @@ def test_dispatch_worker_logs_route_decided_event_with_route_payload() -> None:
                     "narrative": "已完成",
                     "route_decision": {
                         "route": "skill",
-                        "target_id": "codex_worker",
+                        "target_id": "agent_worker",
                         "task": "修复测试",
-                        "reason_code": "LLM_ROUTE_codex_worker",
+                        "reason_code": "LLM_ROUTE_agent_worker",
                         "source": "llm",
                         "confidence": 0.91,
                         "override_reason": None,
@@ -493,7 +493,7 @@ def test_dispatch_worker_logs_route_decided_event_with_route_payload() -> None:
         route_payload = dict(route_row.get("payload") or {})
         assert route_row["status"] == "OK"
         assert route_payload["route_type"] == "skill"
-        assert route_payload["route_target"] == "codex_worker"
+        assert route_payload["route_target"] == "agent_worker"
         assert route_payload["route_source"] == "llm"
         assert float(route_payload["route_confidence"]) == 0.91
         assert route_payload["llm_route_used"] is True
@@ -518,9 +518,9 @@ def test_dispatch_worker_degrades_when_delegate_route_missing_skill_exec() -> No
                     "commit_event": {"phase": "COMMIT", "decision": "APPROVE"},
                     "route_decision": {
                         "route": "skill",
-                        "target_id": "codex_worker",
+                        "target_id": "agent_worker",
                         "task": "fix code",
-                        "reason_code": "LLM_ROUTE_codex_worker",
+                        "reason_code": "LLM_ROUTE_agent_worker",
                         "source": "llm",
                         "confidence": 0.95,
                         "llm_route_used": True,
@@ -731,10 +731,10 @@ def test_run_cortex_orchestrator_pipeline_builds_canonical_thalamus_draft_for_ga
     intent_draft = captured_intent_drafts[0]
     assert intent_draft["schema_version"] == "Natsume.intent.v1"
     assert intent_draft["route"] == "skill"
-    assert intent_draft["target_id"] == "codex_inspect"
+    assert intent_draft["target_id"] == "agent_inspect"
     assert intent_draft["route_source"] == "thalamus.rule"
     assert result["route_decision"]["route"] == "skill"
-    assert result["route_decision"]["target_id"] == "codex_inspect"
+    assert result["route_decision"]["target_id"] == "agent_inspect"
 
 
 def test_run_cortex_orchestrator_pipeline_routes_gateway_samples_through_thalamus(monkeypatch) -> None:
@@ -747,7 +747,7 @@ def test_run_cortex_orchestrator_pipeline_routes_gateway_samples_through_thalamu
 
     cases = [
         ("开始吧", "delegate", "intent_agent"),
-        ("使用无头浏览器验证前端效果", "skill", "codex_frontend_acceptance"),
+        ("使用无头浏览器验证前端效果", "skill", "agent_frontend_acceptance"),
         ("帮我翻译这段话", "delegate", "translate_agent"),
         ("有没有更好的方案", "chat", ""),
         ("帮我安装一下这首歌", "chat", ""),
@@ -780,7 +780,7 @@ def test_dispatch_worker_passes_canonical_thalamus_draft_to_gateway_pipeline(mon
     canonical_intent = {
         "schema_version": "Natsume.intent.v1",
         "route": "skill",
-        "target_id": "codex_worker",
+        "target_id": "agent_worker",
         "task": "使用无头浏览器验证前端效果",
         "route_reason": "THALAMUS_RULE_CODEX_WORKSPACE_WORKER",
         "reason_code": "THALAMUS_RULE_CODEX_WORKSPACE_WORKER",
@@ -801,7 +801,7 @@ def test_dispatch_worker_passes_canonical_thalamus_draft_to_gateway_pipeline(mon
                     "narrative": "开始验证。",
                     "route_decision": {
                         "route": "skill",
-                        "target_id": "codex_worker",
+                        "target_id": "agent_worker",
                         "task": "使用无头浏览器验证前端效果",
                     },
                     "commit_event": {"phase": "COMMIT", "decision": "APPROVE"},
@@ -832,7 +832,7 @@ def test_dispatch_worker_passes_canonical_thalamus_draft_to_gateway_pipeline(mon
         assert pipeline_mock.await_args.kwargs["intent_draft_override"] == canonical_intent
         route_ack_mock.assert_called_once()
         assert route_ack_mock.call_args.kwargs["route_type"] == "skill"
-        assert route_ack_mock.call_args.kwargs["target_id"] == "codex_worker"
+        assert route_ack_mock.call_args.kwargs["target_id"] == "agent_worker"
     finally:
         ledger.close()
 
@@ -846,9 +846,9 @@ def test_classify_task_intent_prefers_llm_route_when_rules_miss() -> None:
         new=AsyncMock(
             return_value={
                 "route": "skill",
-                "target_id": "codex_worker",
+                "target_id": "agent_worker",
                 "task": "请修复这个报错",
-                "reason_code": "LLM_ROUTE_codex_worker",
+                "reason_code": "LLM_ROUTE_agent_worker",
                 "confidence": 0.93,
                 "route_source": "llm",
             }
@@ -863,7 +863,7 @@ def test_classify_task_intent_prefers_llm_route_when_rules_miss() -> None:
         )
 
     assert decision["route"] == "skill"
-    assert decision["target_id"] == "codex_worker"
+    assert decision["target_id"] == "agent_worker"
     assert decision["route_source"] == "llm"
     assert float(decision["confidence"]) == 0.93
 
@@ -984,7 +984,7 @@ def test_build_gateway_route_started_voice_ack_text_uses_prompt_template_overrid
     _ = monkeypatch
     assert _build_gateway_route_started_voice_ack_text(route_type="delegate", target_id="translate_agent") == ""
     assert _build_gateway_route_started_voice_ack_text(route_type="delegate", target_id="intent_agent") == ""
-    assert _build_gateway_route_started_voice_ack_text(route_type="skill", target_id="codex_worker") == ""
+    assert _build_gateway_route_started_voice_ack_text(route_type="skill", target_id="agent_worker") == ""
     assert _build_gateway_route_started_voice_ack_text(route_type="plan", target_id="") == ""
     assert _build_gateway_route_started_voice_ack_text(route_type="chat", target_id="") == ""
 
@@ -1859,7 +1859,7 @@ def test_should_start_gateway_progress_push_for_gateway_action() -> None:
         source="GATEWAY",
         text="请帮我跑一下今天的全量测试并汇总结果",
         payload={"platform": "qq", "conversation_id": "qq_dm_4001"},
-        intent_draft={"route": "skill", "target_id": "codex_worker"},
+        intent_draft={"route": "skill", "target_id": "agent_worker"},
     )
 
     assert should_start is False
@@ -2036,7 +2036,7 @@ def test_maybe_realign_gateway_pipeline_retries_when_deviation(monkeypatch) -> N
         ledger.close()
 
 
-def test_maybe_realign_gateway_pipeline_skips_for_codex_worker_skill(monkeypatch) -> None:
+def test_maybe_realign_gateway_pipeline_skips_for_agent_worker_skill(monkeypatch) -> None:
     ledger = SQLiteLedger(":memory:", check_same_thread=False)
     try:
         monkeypatch.setenv("HOST_GATEWAY_DEVIATION_GUARD_ENABLED", "true")
@@ -2063,14 +2063,14 @@ def test_maybe_realign_gateway_pipeline_skips_for_codex_worker_skill(monkeypatch
                         "decision": "APPROVE",
                         "reason_code": None,
                         "narrative": "from collections import Counter\n\ndef sort_by_frequency(arr):\n    return []",
-                        "route_decision": {"route": "skill", "target_id": "codex_worker"},
+                        "route_decision": {"route": "skill", "target_id": "agent_worker"},
                         "commit_event": {"phase": "COMMIT", "decision": "APPROVE"},
                     },
                     ledger=ledger,
                 )
             )
 
-        assert result["route_decision"]["target_id"] == "codex_worker"
+        assert result["route_decision"]["target_id"] == "agent_worker"
         assert meta is not None
         assert meta["triggered"] is False
         assert meta["reason_code"] == "DEVIATION_SKIPPED_codex_runtime"

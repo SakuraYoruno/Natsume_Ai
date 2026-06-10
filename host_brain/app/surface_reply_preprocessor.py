@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 from host_brain.app.relational_chat_detector import is_relational_chat_message
-from host_brain.codex_runtime.skill_ids import CODEX_RUNTIME_SKILL_IDS, is_codex_runtime_skill
+from host_brain.agent_runtime.skill_ids import AGENT_RUNTIME_SKILL_IDS, is_agent_runtime_skill
 
 _logger = logging.getLogger("Natsume.surface_reply")
 
@@ -727,8 +727,8 @@ def _build_minimal_surface_reply_fallback(*, user_message: str, sub_agent_ctx: S
     text = str(user_message or "").strip()
     if sub_agent_ctx is not None:
         agent_id = str(sub_agent_ctx.agent_id or "").strip()
-        if is_codex_runtime_skill(agent_id):
-            return _resolve_minimal_fallback_text(kind="codex_worker", render_target_lang=render_target_lang)
+        if is_agent_runtime_skill(agent_id):
+            return _resolve_minimal_fallback_text(kind="agent_worker", render_target_lang=render_target_lang)
         if agent_id == "recent_turn_direct":
             return _resolve_minimal_fallback_text(kind="recent_turn_direct", render_target_lang=render_target_lang)
     if _FALLBACK_STRENGTH_RE.search(text):
@@ -874,7 +874,7 @@ def _render_plan_step_success_cn(step: Dict[str, Any], *, render_target_lang: st
     result_text = str(step.get("result_text") or "").strip()
     description_or_target = description or target_id
     # 特殊 target_id 处理
-    special_targets = {"web_search", "memory_store", "system_info", "system_resource_snapshot", "process_resource_top", "resource_pressure_analysis", "resource_manager_status", "resource_release", "process_list", "network_status", "hub_skill_search", "hub_skill_list", "hub_skill_install", "hub_skill_remove", "file_read", "file_write", "file_list", *CODEX_RUNTIME_SKILL_IDS, "intent_agent"}
+    special_targets = {"web_search", "memory_store", "system_info", "system_resource_snapshot", "process_resource_top", "resource_pressure_analysis", "resource_manager_status", "resource_release", "process_list", "network_status", "hub_skill_search", "hub_skill_list", "hub_skill_install", "hub_skill_remove", "file_read", "file_write", "file_list", *AGENT_RUNTIME_SKILL_IDS, "intent_agent"}
     if target_id in special_targets:
         if target_id == "web_search":
             topic = description or _runtime_text("default_topic", render_target_lang=render_target_lang)
@@ -892,8 +892,8 @@ def _render_plan_step_success_cn(step: Dict[str, Any], *, render_target_lang: st
                         remembered = "你" + remembered[1:]
                     return _mapping_text(success_templates, "memory_store.remembered", render_target_lang=render_target_lang, step_index=step_index, remembered=remembered)
             return _mapping_text(success_templates, "memory_store.default", render_target_lang=render_target_lang, step_index=step_index)
-        if is_codex_runtime_skill(target_id):
-            return _mapping_text(success_templates, "codex_worker", render_target_lang=render_target_lang, step_index=step_index)
+        if is_agent_runtime_skill(target_id):
+            return _mapping_text(success_templates, "agent_worker", render_target_lang=render_target_lang, step_index=step_index)
         return _mapping_text(success_templates, target_id, render_target_lang=render_target_lang, step_index=step_index)
     if result_text:
         return _mapping_text(success_templates, "__with_result", render_target_lang=render_target_lang, step_index=step_index, description_or_target=description_or_target)
@@ -1569,7 +1569,7 @@ def _build_deterministic_sub_agent_reply(ctx: SurfaceSubAgentContext | None, *, 
         return _build_plan_execution_reply_cn(ctx, render_target_lang=render_target_lang)
     if agent_id.startswith("skill:hub_skill_"):
         return _build_hub_skill_reply_cn(ctx, render_target_lang=render_target_lang)
-    if is_codex_runtime_skill(agent_id) or agent_id in {"translate_agent", "intent_agent"}:
+    if is_agent_runtime_skill(agent_id) or agent_id in {"translate_agent", "intent_agent"}:
         return _build_sub_agent_result_preserving_fallback_reply(ctx, render_target_lang=render_target_lang, user_message=user_message)
     if agent_id in {"recent_turn_direct", "task_progress_direct"}:
         return result_text or None
@@ -1589,8 +1589,8 @@ def _build_sub_agent_context_prompt(ctx: SurfaceSubAgentContext, *, render_targe
         return _mapping_text(templates, "failure", render_target_lang=render_target_lang, agent_id=agent_id, task=task, error_text=(ctx.error or _runtime_text("unknown_error", render_target_lang=render_target_lang)), recovery_hint=recovery_hint)
     if not result_text:
         return ""
-    if is_codex_runtime_skill(agent_id):
-        return _mapping_text(templates, "codex_worker", render_target_lang=render_target_lang, agent_id=agent_id, task=task, result_text=result_text)
+    if is_agent_runtime_skill(agent_id):
+        return _mapping_text(templates, "agent_worker", render_target_lang=render_target_lang, agent_id=agent_id, task=task, result_text=result_text)
     if agent_id == "recent_turn_direct":
         return _mapping_text(templates, "recent_turn_direct", render_target_lang=render_target_lang, result_text=result_text)
     if agent_id == "task_progress_direct":

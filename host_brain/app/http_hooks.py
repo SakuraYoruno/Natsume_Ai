@@ -164,13 +164,13 @@ def _init_edge_command_pusher_status(*, logger: Any) -> str:
 
 def _build_codex_immune_scheduler_task(*, interval_s: float) -> Any:
     from host_brain.app.automation.task_scheduler import ScheduledTask, TaskPriority  # noqa: PLC0415
-    from host_brain.app.internal_codex_routes import run_scheduled_immune_auto_dispatch_cycle  # noqa: PLC0415
+    from host_brain.app.internal_agent_routes import run_scheduled_immune_auto_dispatch_cycle  # noqa: PLC0415
 
     async def _run_codex_immune_scheduler_task() -> None:
         await run_scheduled_immune_auto_dispatch_cycle()
 
     return ScheduledTask(
-        task_id="codex_immune_auto_dispatch_tick",
+        task_id="agent_immune_auto_dispatch_tick",
         name="Codex immune auto-dispatch tick",
         fn=_run_codex_immune_scheduler_task,
         interval_s=float(interval_s),
@@ -459,7 +459,7 @@ def runtime_lifespan(
                 )
                 new_module_statuses["proactive_push_client"] = "SKIPPED: HOST_BACKGROUND_TASKS_ENABLED=false"
             try:
-                from host_brain.app.internal_codex_routes import (  # noqa: PLC0415
+                from host_brain.app.internal_agent_routes import (  # noqa: PLC0415
                     start_immune_auto_dispatch_monitor,
                 )
 
@@ -1160,7 +1160,7 @@ def runtime_lifespan(
                     _host_task_scheduler_exc,
                 )
             try:
-                from host_brain.codex_runtime.production_executor import (  # noqa: PLC0415
+                from host_brain.agent_runtime.production_executor import (  # noqa: PLC0415
                     recover_interrupted_lightnovel_recommendation_jobs,
                 )
 
@@ -1508,7 +1508,7 @@ def runtime_lifespan(
         except Exception as _life_loop_stop_exc:
             logger.debug("LifeContinuity loop stop degraded: %s", _life_loop_stop_exc)
         try:
-            from host_brain.app.internal_codex_routes import stop_immune_auto_dispatch_monitor  # noqa: PLC0415
+            from host_brain.app.internal_agent_routes import stop_immune_auto_dispatch_monitor  # noqa: PLC0415
 
             stop_immune_auto_dispatch_monitor(logger=logger)
         except Exception as _codex_monitor_stop_exc:

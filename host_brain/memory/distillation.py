@@ -84,12 +84,12 @@ class PoolSummaryClient:
         self,
         *,
         scene_type: str = "MEMORY_DISTILLATION",
-        cognitive_tier: str = "D",
+        cognitive_tier: str = "B",
         timeout_ms: int = 2600,
         render_target_lang: str = "zh",
     ) -> None:
         self._scene_type = str(scene_type or "MEMORY_DISTILLATION").strip().upper() or "MEMORY_DISTILLATION"
-        self._cognitive_tier = str(cognitive_tier or "D").strip().upper() or "D"
+        self._cognitive_tier = str(cognitive_tier or "B").strip().upper() or "B"
         self._timeout_ms = max(800, int(timeout_ms))
         self._render_target_lang = "ja" if str(render_target_lang or "").strip().lower() == "ja" else "zh"
 
@@ -247,7 +247,7 @@ def build_default_llm_summary_client(
 ) -> LlmSummaryClient:
     return PoolSummaryClient(
         scene_type="MEMORY_DISTILLATION",
-        cognitive_tier="D",
+        cognitive_tier="B",
         timeout_ms=timeout_ms,
         render_target_lang=render_target_lang,
     )
@@ -941,7 +941,7 @@ _LIFE_DISTILLATION_NOISE_TOKENS = (
     "lightnovel_recommendation_delivery",
     "lightnovel_recommendation_deep_review",
     "lightnovel_gateway_delivery",
-    "codexproductionjobcodex_lightnovel_recommender",
+    "codexproductionjobagent_lightnovel_recommender",
     "轻小说推荐报告",
     "详情:https://www.lightnovel.fun",
     "详情：http://www.lightnovel.fun",

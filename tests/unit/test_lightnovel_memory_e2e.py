@@ -83,7 +83,7 @@ async def test_daily_lightnovel_delivery_is_recalled_deep_reviewed_and_traceable
             action_id="job-e2e:lightnovel_gateway_delivery",
             actor_id="natsume",
             request_id="req-lightnovel-delivery",
-            intent_id="codex_lightnovel_recommender",
+            intent_id="agent_lightnovel_recommender",
             person_id="owner",
             session_id="qq_dm_owner",
             status="COMPLETED",
@@ -165,7 +165,7 @@ async def test_daily_lightnovel_delivery_is_recalled_deep_reviewed_and_traceable
         monkeypatch.setattr(helpers, "_embed_surface_memory_query", lambda query: ([0.2] * 16, "test-embedding"))
         monkeypatch.setattr("host_brain.app.dependencies.get_life_memory_store", lambda: life_store)
         monkeypatch.setattr("host_brain.app.dependencies.get_episodic_store", lambda: episodic_store)
-        monkeypatch.setattr("host_brain.codex_runtime.lightnovel_deep_reviewer._review_cards", fake_review_cards)
+        monkeypatch.setattr("host_brain.agent_runtime.lightnovel_deep_reviewer._review_cards", fake_review_cards)
 
         retrieval_summary, evidence_items = await helpers._run_retrieval(
             request_id="req-qq-followup",

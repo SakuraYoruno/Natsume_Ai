@@ -419,7 +419,7 @@ def test_surface_memory_recall_prioritizes_terminal_codex_production_result() ->
                         "metadata": {"store_id": "life_episode"},
                     },
                     {
-                        "snippet": "codex_production codex_lightnovel_recommender FAILED LIGHTNOVEL_NATIVE_NO_RECOMMENDATIONS；推荐候选：0",
+                        "snippet": "codex_production agent_lightnovel_recommender FAILED LIGHTNOVEL_NATIVE_NO_RECOMMENDATIONS；推荐候选：0",
                         "confidence": 1.0,
                         "metadata": {"store_id": "life_episode"},
                     },
@@ -1589,7 +1589,7 @@ def test_failure_debug_recall_rejects_unrelated_failure_semantic_memory() -> Non
                         "doc_id": "sem-lightnovel-failure",
                         "source_ref": "ledger://semantic_memory/sem-lightnovel-failure",
                         "evidence_refs": ["codex_production://event/lightnovel-failed"],
-                        "text": "故障经验：codex_lightnovel_recommender 失败；原因 LIGHTNOVEL_NATIVE_NO_RECOMMENDATIONS。",
+                        "text": "故障经验：agent_lightnovel_recommender 失败；原因 LIGHTNOVEL_NATIVE_NO_RECOMMENDATIONS。",
                         "score": 0.98,
                         "metadata": {
                             "store_id": "semantic_memory",

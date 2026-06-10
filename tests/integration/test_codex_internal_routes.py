@@ -3,9 +3,9 @@ from __future__ import annotations
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from host_brain.app.internal_codex_routes import router
+from host_brain.app.internal_agent_routes import router
 from host_brain.audit.sqlite_ledger import SQLiteLedger
-from host_brain.codex_runtime.job_registry import GLOBAL_CODEX_JOB_REGISTRY
+from host_brain.agent_runtime.job_registry import GLOBAL_AGENT_JOB_REGISTRY
 from host_brain.memory.life_memory import LifeMemoryStore
 
 
@@ -38,7 +38,7 @@ def test_codex_internal_work_order_preview_route() -> None:
 
 
 def test_codex_internal_job_route_reads_registry_job() -> None:
-    job = GLOBAL_CODEX_JOB_REGISTRY.create(kind="codex_work_order", work_order=_work_order())
+    job = GLOBAL_AGENT_JOB_REGISTRY.create(kind="codex_work_order", work_order=_work_order())
 
     response = _client().get(f"/internal/codex/jobs/{job['job_id']}")
 
@@ -98,7 +98,7 @@ def test_codex_internal_work_order_execute_persists_explicit_owner_directive(mon
     try:
         store = LifeMemoryStore(ledger=ledger)
         monkeypatch.setattr("host_brain.app.dependencies.get_life_memory_store", lambda: store)
-        monkeypatch.setattr("host_brain.app.internal_codex_routes.CodexRuntimeExecutor", FakeExecutor)
+        monkeypatch.setattr("host_brain.app.internal_codex_routes.AgentRuntimeExecutor", FakeExecutor)
 
         work_order = _work_order()
         work_order["metadata"] = {
@@ -129,7 +129,7 @@ def test_codex_internal_work_order_execute_does_not_persist_unmarked_work_order(
     try:
         store = LifeMemoryStore(ledger=ledger)
         monkeypatch.setattr("host_brain.app.dependencies.get_life_memory_store", lambda: store)
-        monkeypatch.setattr("host_brain.app.internal_codex_routes.CodexRuntimeExecutor", FakeExecutor)
+        monkeypatch.setattr("host_brain.app.internal_codex_routes.AgentRuntimeExecutor", FakeExecutor)
 
         response = _client().post("/internal/codex/work-orders/execute", json={"work_order": _work_order()})
 

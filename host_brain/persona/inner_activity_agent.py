@@ -1117,6 +1117,8 @@ def _run_inner_activity_codex_cli(
     status = "FAILED"
     content = ""
     try:
+        if _env_bool("HOST_CODEX_BACKGROUND_DISABLE_CLI", default=False):
+            raise RuntimeError("INNER_ACTIVITY_CODEX_CLI_DISABLED_BY_CONFIG")
         from host_brain.integrations.codex_cli_provider import invoke_codex_cli_text  # noqa: PLC0415
 
         content = invoke_codex_cli_text(
@@ -1248,7 +1250,6 @@ def _build_inner_activity_codex_cli_env() -> dict[str, str]:
     if _env_bool("HOST_INNER_ACTIVITY_CODEX_CLI_STRIP_API_KEYS", default=True):
         for key in (
             "OPENAI_API_KEY",
-            "CODEX_API_KEY",
             "GEMINI_API_KEY",
             "DEEPSEEK_API_KEY",
             "MINIMAX_API_KEY",
@@ -1558,7 +1559,11 @@ def _resolve_inner_activity_direct_runtime() -> dict[str, Any] | None:
             minimum=5_000,
             maximum=2 * 60 * 1000,
         )
-        codex_cmd = _resolve_inner_activity_codex_cli_command() if _inner_activity_provider_uses_codex_cli(provider_name) else None
+        use_codex_cli = (
+            _inner_activity_provider_uses_codex_cli(provider_name)
+            and not _env_bool("HOST_CODEX_BACKGROUND_DISABLE_CLI", default=False)
+        )
+        codex_cmd = _resolve_inner_activity_codex_cli_command() if use_codex_cli else None
         available = bool(provider_name and model_id and codex_cmd)
         return {
             "available": available,

@@ -107,13 +107,13 @@ def test_narrative_identity_keeps_growth_delta_out_of_persona_core(tmp_path) -> 
             "owner_organ": "prefrontal_agent",
             "inputs": {
                 "identity_delta": {
-                    "new_capability": "codex_self_heal",
+                    "new_capability": "agent_self_heal",
                     "meaning": "I can inspect my own runtime state",
                 }
             },
         }
     )
-    identity = integrate_narrative_identity({"new_capability": "codex_self_heal"})
+    identity = integrate_narrative_identity({"new_capability": "agent_self_heal"})
 
     assert result["status"] == "PROPOSED"
     assert "do_not_confuse_capability_with_unbounded_action" in result["findings"][0]["risks"]

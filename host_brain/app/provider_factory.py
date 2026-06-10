@@ -31,6 +31,7 @@ from host_brain.integrations.llm_gateway import (
     PROVIDER_OPENAI,
 )
 from host_brain.integrations.codex_cli_provider import (
+    codex_cli_lm_allowed_for_background,
     codex_cli_lm_available,
     invoke_codex_cli_text,
     resolve_codex_cli_model,
@@ -668,13 +669,13 @@ def build_host_provider_fn(
 ) -> Callable[[dict[str, Any]], Any]:
     provider = str(provider_name or "").strip().lower()
     key_value = str(api_key or "").strip()
-    if provider == PROVIDER_CODEX and not key_value and codex_cli_lm_available():
+    if provider == PROVIDER_CODEX and not key_value and codex_cli_lm_allowed_for_background():
         return _build_codex_cli_provider_fn(
             model_id=model_id,
             timeout_ms=timeout_ms,
             node_id=None,
         )
-    if provider in {PROVIDER_OPENAI, PROVIDER_CODEX, PROVIDER_DEEPSEEK, PROVIDER_GEMINI, PROVIDER_MINIMAX} and key_value:
+    if provider in {PROVIDER_OPENAI, PROVIDER_DEEPSEEK, PROVIDER_GEMINI, PROVIDER_MINIMAX} and key_value:
         return build_langchain_chat_provider_fn(
             provider_name=provider,
             model_id=model_id,
@@ -731,12 +732,12 @@ def build_host_provider_fn_for_node(
 
     provider = str(provider_name or "").strip().lower()
     key_value = str(api_key or "").strip()
-    if provider == PROVIDER_CODEX and not key_value and codex_cli_lm_available():
+    if provider == PROVIDER_CODEX and not key_value and codex_cli_lm_allowed_for_background():
         return _build_codex_cli_provider_fn(
             model_id=model_id,
             timeout_ms=timeout_ms,
             node_id=node_id,
         )
-    if provider in {PROVIDER_OPENAI, PROVIDER_CODEX, PROVIDER_DEEPSEEK, PROVIDER_GEMINI} and key_value:
+    if provider in {PROVIDER_OPENAI, PROVIDER_DEEPSEEK, PROVIDER_GEMINI} and key_value:
         return _build_single_key_provider(key_value)
     return build_host_mock_provider_for_node(node_id)

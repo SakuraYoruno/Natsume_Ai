@@ -2119,10 +2119,10 @@ def test_consolidator_distills_operational_failure_without_report_noise() -> Non
             event_source="codex_production",
             event_id="codex-job-failure-1",
             person_id="owner",
-            task_id="codex_lightnovel_recommender",
+            task_id="agent_lightnovel_recommender",
             status="FAILED",
             detail=(
-                "Codex production job codex_lightnovel_recommender status=FAILED；"
+                "Codex production job agent_lightnovel_recommender status=FAILED；"
                 "summary=Native lightnovel recommender found no usable recommendation candidates.；"
                 "reason=LIGHTNOVEL_NATIVE_NO_RECOMMENDATIONS；"
                 "result_text=# 轻小说推荐报告\n\n- 来源数：2，可读来源：0\n- 推荐候选：0\n\n## 推荐列表"
@@ -2133,10 +2133,10 @@ def test_consolidator_distills_operational_failure_without_report_noise() -> Non
             event_source="codex_production",
             event_id="codex-job-failure-2",
             person_id="default",
-            task_id="codex_lightnovel_recommender",
+            task_id="agent_lightnovel_recommender",
             status="FAILED",
             detail=(
-                "Codex production job codex_lightnovel_recommender status=FAILED；"
+                "Codex production job agent_lightnovel_recommender status=FAILED；"
                 "summary=Native lightnovel recommender found no usable recommendation candidates.；"
                 "reason=LIGHTNOVEL_NATIVE_NO_RECOMMENDATIONS；"
                 "result_text=# 轻小说推荐报告\n\n- 来源数：2，可读来源：0\n- 推荐候选：0\n\n## 推荐列表"
@@ -2154,7 +2154,7 @@ def test_consolidator_distills_operational_failure_without_report_noise() -> Non
         assert result["written_count"] == 1
         assert total == 1
         assert "故障经验" in items[0]["summary"]
-        assert "codex_lightnovel_recommender 失败" in items[0]["summary"]
+        assert "agent_lightnovel_recommender 失败" in items[0]["summary"]
         assert "LIGHTNOVEL_NATIVE_NO_RECOMMENDATIONS" in items[0]["summary"]
         assert "推荐列表" not in items[0]["summary"]
         assert "result_text" not in items[0]["summary"]
@@ -2173,7 +2173,7 @@ def test_sleep_replay_does_not_reflect_low_value_delivery_logs() -> None:
         delivery = store.write_background_episode(
             event_source="codex_production",
             event_id="delivery-noise-1",
-            task_id="codex_lightnovel_recommender",
+            task_id="agent_lightnovel_recommender",
             status="COMPLETED",
             detail="我刚才通过 qq 给用户推荐了 3 本轻小说；发送结果=sent；详情:https://www.lightnovel.fun/cn/detail/1",
             ts_ms=1_800_000_000_000,
@@ -2822,7 +2822,7 @@ def test_backfill_memory_policy_overwrites_stale_top_level_class() -> None:
         written = store.write_background_episode(
             event_source="codex_production",
             event_id="legacy-recommendation-report",
-            task_id="codex_lightnovel_recommender",
+            task_id="agent_lightnovel_recommender",
             status="COMPLETED",
             detail="# 轻小说推荐报告\n推荐候选：4\n看点：命中偏好：恋爱日常。",
             ts_ms=1_800_000_000_000,

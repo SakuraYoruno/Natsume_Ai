@@ -13,8 +13,8 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from host_brain.codex_runtime.production_executor import execute_codex_production_payload
-from host_brain.codex_runtime.production_studio import build_production_work_order
+from host_brain.agent_runtime.production_executor import execute_agent_production_payload
+from host_brain.agent_runtime.production_studio import build_production_work_order
 
 
 def _load_env_file(path: Path) -> None:
@@ -70,7 +70,7 @@ def main() -> int:
         },
         skill_id="codex_lightnovel_recommender",
     )
-    queued = execute_codex_production_payload(
+    queued = execute_agent_production_payload(
         {
             "work_order": work_order,
             "artifacts_root": artifacts_root,

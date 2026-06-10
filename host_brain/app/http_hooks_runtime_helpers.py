@@ -1578,20 +1578,20 @@ def _run_codex_production_scheduler_skill(
         return None
 
     try:
-        from host_brain.codex_runtime.production_studio import CODEX_PRODUCTION_SKILL_IDS  # noqa: PLC0415
+        from host_brain.agent_runtime.production_studio import AGENT_PRODUCTION_SKILL_IDS  # noqa: PLC0415
     except Exception as exc:
         logger.debug("Codex production skill id set unavailable: %s", exc)
         return None
 
-    if skill_name not in CODEX_PRODUCTION_SKILL_IDS:
+    if skill_name not in AGENT_PRODUCTION_SKILL_IDS:
         return None
 
     try:
-        from host_brain.skills.codex_runtime_registry import build_codex_runtime_skill_registry  # noqa: PLC0415
+        from host_brain.skills.agent_runtime_registry import build_agent_runtime_skill_registry  # noqa: PLC0415
         from host_brain.skills.executor_registry import dispatch_executor_payload  # noqa: PLC0415
 
         args = dict(system_intent.get("args") or {})
-        registry = build_codex_runtime_skill_registry()
+        registry = build_agent_runtime_skill_registry()
         meta = registry.require(skill_name)
         payload = meta.handler(
             args,
@@ -1945,7 +1945,7 @@ def _build_scheduler_narrative_llm_generator(*, logger: Any) -> Callable[[dict[s
             text = complete_prompt_with_pool_sync(
                 request_id=str((llm_input or {}).get("request_id") or "scheduler_narrative"),
                 scene_type=str(_os.environ.get("HOST_SCHEDULER_NARRATIVE_LLM_SCENE") or "SCHEDULER_NARRATIVE"),
-                cognitive_tier=str(_os.environ.get("HOST_SCHEDULER_NARRATIVE_LLM_TIER") or "D"),
+                cognitive_tier=str(_os.environ.get("HOST_SCHEDULER_NARRATIVE_LLM_TIER") or "C"),
                 prompt=prompt,
                 timeout_ms=max(1000, int(max(1.0, timeout_s) * 1000)),
                 gen_params={
@@ -2471,7 +2471,7 @@ def _build_llm_generator(
             text = complete_prompt_with_pool_sync(
                 request_id="proactive_talk_scheduler",
                 scene_type=str(_os.environ.get("HOST_PROACTIVE_TALK_LLM_SCENE") or "PROACTIVE_TALK"),
-                cognitive_tier=str(_os.environ.get("HOST_PROACTIVE_TALK_LLM_TIER") or "D"),
+                cognitive_tier=str(_os.environ.get("HOST_PROACTIVE_TALK_LLM_TIER") or "C"),
                 prompt=prompt,
                 timeout_ms=max(1000, int(float(str(_os.environ.get("HOST_PROACTIVE_TALK_LLM_TIMEOUT_SECONDS") or "30")) * 1000)),
                 gen_params={

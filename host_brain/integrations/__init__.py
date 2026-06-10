@@ -1,7 +1,6 @@
 """Integrations package exports."""
 
 from host_brain.integrations.llm_gateway import (
-    PROVIDER_CODEX,
     PROVIDER_DEEPSEEK,
     PROVIDER_DISABLED,
     PROVIDER_GEMINI,

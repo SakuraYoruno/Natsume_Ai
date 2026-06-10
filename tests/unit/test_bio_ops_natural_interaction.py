@@ -133,15 +133,15 @@ def test_self_interrupt_blocks_missing_work_order_codex_path(tmp_path) -> None:
             "owner_organ": "prefrontal_agent",
             "inputs": {
                 "message": "直接改代码",
-                "planned_path": ["planner", "codex_worker"],
+                "planned_path": ["planner", "agent_worker"],
                 "evidence_refs": ["trace://planner/path"],
             },
         }
     )
-    interrupt = evaluate_self_interrupt({"message": "直接改代码", "planned_path": ["planner", "codex_worker"]})
+    interrupt = evaluate_self_interrupt({"message": "直接改代码", "planned_path": ["planner", "agent_worker"]})
 
     assert result["status"] == "PROPOSED"
-    assert result["findings"][0]["reason"] == "missing_work_order_for_codex_worker"
+    assert result["findings"][0]["reason"] == "missing_work_order_for_agent_worker"
     assert result["findings"][0]["action"] == "block_and_request_work_order"
     assert interrupt["message_policy"] == "brief"
 

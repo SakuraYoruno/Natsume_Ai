@@ -62,7 +62,7 @@ def test_build_lightnovel_recommender_task_config_uses_natsume_scheduler_contrac
     assert task.task_id == "lightnovel_recommender_daily"
     assert task.trigger_mode is TriggerMode.CRON
     assert task.trigger_config == {"hour": 10, "minute": 30, "catch_up_window_minutes": 180}
-    assert task.intent_template["skill_name"] == "codex_lightnovel_recommender"
+    assert task.intent_template["skill_name"] == "agent_lightnovel_recommender"
     assert task.intent_template["proposer_node_id"] == "scheduler"
     assert args["workflow_owner"] == "natsume"
     assert args["driver_kind"] == "natsume_daily_recommendation"

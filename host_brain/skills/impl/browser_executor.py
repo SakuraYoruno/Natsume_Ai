@@ -20,7 +20,12 @@ import shlex
 import shutil
 import subprocess
 import tempfile
+import time
+import urllib.request
+import urllib.error
 from typing import Any
+
+from host_brain.core.subprocess_utils import run as _subprocess_run
 
 from host_brain.core.ids import new_event_id, now_ms
 
@@ -222,18 +227,79 @@ def _agent_browser_timeout_seconds(timeout_ms: int | None) -> float:
     return max(5.0, (max(1, timeout_ms) / 1000.0) + 5.0)
 
 
+# Dedicated Chrome profile for auto_connect — never touches user's Default Chrome.
+_AGENT_CHROME_PROFILE = str(Path(__file__).resolve().parents[3] / "runtime" / "browser" / "agent-chrome-profile")
+
+
+def _is_chrome_debug_port_alive() -> bool:
+    try:
+        urllib.request.urlopen("http://127.0.0.1:9222/json/version", timeout=2)
+        return True
+    except Exception:
+        return False
+
+
+def _ensure_agent_chrome() -> bool:
+    """Auto-start a dedicated Chrome with debug port 9222 for Cloudflare bypass.
+    Uses its own profile — completely separate from the user's Chrome."""
+    if _is_chrome_debug_port_alive():
+        return True
+
+    chrome_exe = None
+    for candidate in [
+        r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+        r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+    ]:
+        if os.path.isfile(candidate):
+            chrome_exe = candidate
+            break
+    if not chrome_exe:
+        logger.warning("_ensure_agent_chrome: Chrome not found")
+        return False
+
+    os.makedirs(_AGENT_CHROME_PROFILE, exist_ok=True)
+    try:
+        flags = 0x00000008 if os.name == "nt" else 0  # DETACHED_PROCESS, no console
+        subprocess.Popen(
+            [chrome_exe, "--remote-debugging-port=9222",
+             "--remote-allow-origins=*",
+             f"--user-data-dir={_AGENT_CHROME_PROFILE}", "about:blank",
+             "--no-first-run", "--no-default-browser-check"],
+            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            creationflags=flags,
+        )
+    except Exception as exc:
+        logger.warning("_ensure_agent_chrome: launch failed: %s", exc)
+        return False
+
+    for _ in range(10):
+        time.sleep(1.5)
+        if _is_chrome_debug_port_alive():
+            return True
+    return False
+
+
 def _build_agent_browser_command(payload: dict[str, Any], *args: str) -> list[str]:
     command = [
         *_agent_browser_command_parts(),
         "--session",
         _agent_browser_session_name(payload),
     ]
+    # auto_connect: use real Chrome (dedicated profile) for Cloudflare bypass.
+    # Enables full interactive automation (login, purchase, etc).
+    if _env_bool("HOST_BROWSER_AUTO_CONNECT", default=False) or bool(payload.get("auto_connect")):
+        if _ensure_agent_chrome():
+            command.append("--auto-connect")
+    if "--auto-connect" not in command:
+        profile = _agent_browser_profile(payload)
+        if profile:
+            command.extend(["--profile", profile])
     state_name = _agent_browser_state_name(payload)
     if state_name:
         command.extend(["--session-name", state_name])
-    profile = _agent_browser_profile(payload)
-    if profile:
-        command.extend(["--profile", profile])
+    state_file = str(payload.get("state_file") or os.environ.get("AGENT_BROWSER_STATE", "")).strip()
+    if state_file:
+        command.extend(["--state", state_file])
     command.extend(args)
     return command
 
@@ -248,7 +314,7 @@ def _run_agent_browser(
     try:
         command = _build_agent_browser_command(payload, *args)
         if capture_output:
-            completed = subprocess.run(
+            completed = _subprocess_run(
                 command,
                 input=stdin_text,
                 capture_output=True,
@@ -259,16 +325,12 @@ def _run_agent_browser(
                 check=False,
             )
         else:
-            creationflags = 0
-            if os.name == "nt":
-                creationflags = getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
-            completed = subprocess.run(
+            completed = _subprocess_run(
                 command,
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 timeout=_agent_browser_timeout_seconds(timeout_ms),
-                creationflags=creationflags,
                 check=False,
             )
     except FileNotFoundError as exc:
@@ -351,7 +413,7 @@ def _open_url_via_system_shell(url: str) -> None:
     if hasattr(os, "startfile"):
         os.startfile(target)  # type: ignore[attr-defined]
         return
-    completed = subprocess.run(["python", "-m", "webbrowser", "-t", target], capture_output=True, text=True, check=False)
+    completed = _subprocess_run(["python", "-m", "webbrowser", "-t", target], capture_output=True, text=True, check=False)
     if completed.returncode != 0:
         detail = (completed.stderr or completed.stdout or "webbrowser open failed").strip()
         raise RuntimeError(detail)
@@ -1109,7 +1171,18 @@ def _agent_execute_browser_execute_script(payload: dict[str, Any]) -> dict[str, 
     if script_args:
         raise AgentBrowserUnsupported("agent-browser adapter does not support execute_script args yet")
 
-    raw = _run_agent_browser_eval(payload, script, timeout_ms=timeout_ms)
+    # When auto_connect is active, use CDP directly — agent-browser's eval
+    # returns empty strings in this mode (known quirk).
+    auto_connect = _env_bool("HOST_BROWSER_AUTO_CONNECT", default=False) or bool(payload.get("auto_connect"))
+    if auto_connect and _is_chrome_debug_port_alive():
+        try:
+            from host_brain.core.cdp_client import cdp_eval  # noqa: PLC0415
+            raw = cdp_eval(script, debug_port=9222, timeout=max(5, timeout_ms / 1000))
+        except Exception:
+            raw = _run_agent_browser_eval(payload, script, timeout_ms=timeout_ms)
+    else:
+        raw = _run_agent_browser_eval(payload, script, timeout_ms=timeout_ms)
+
     parsed = _parse_jsonish_output(raw)
     result_value = parsed if parsed is not None else _clean_cli_text(raw)
     return {

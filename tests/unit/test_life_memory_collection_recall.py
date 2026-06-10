@@ -74,7 +74,7 @@ def _write_delivery(
         action_id=f"job-{prefix}:lightnovel_gateway_delivery",
         actor_id="natsume",
         request_id=f"req-{prefix}",
-        intent_id="codex_lightnovel_recommender",
+        intent_id="agent_lightnovel_recommender",
         person_id=person_id,
         session_id=session_id,
         status="COMPLETED",

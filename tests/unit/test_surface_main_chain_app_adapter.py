@@ -842,9 +842,9 @@ async def test_surface_main_chain_rewrites_account_credential_request(monkeypatc
 
     agent_input = _agent_input(
         user_message="登录我的账号并使用积分购买这本轻小说后封装成 epub，最多花 30 点",
-        intent_draft={"route": "skill", "target_id": "codex_epub_builder"},
+        intent_draft={"route": "skill", "target_id": "agent_epub_builder"},
         sub_agent_context=SimpleNamespace(
-            agent_id="codex_epub_builder",
+            agent_id="agent_epub_builder",
             task="登录我的账号并使用积分购买这本轻小说后封装成 epub",
             result_text="需要登录，但不要把账号、密码、验证码或 Cookie 发到聊天里。",
             success=True,
@@ -1115,10 +1115,10 @@ def test_surface_main_chain_enabled_defaults_to_normal_text_only(monkeypatch) ->
     ) is False
     assert surface_main_chain_enabled(
         _agent_input(),
-        sub_agent_ctx=SimpleNamespace(agent_id="codex_worker"),
+        sub_agent_ctx=SimpleNamespace(agent_id="agent_worker"),
     ) is True
     assert surface_main_chain_enabled(
         _agent_input(),
-        sub_agent_ctx=SimpleNamespace(agent_id="codex_lightnovel_recommender"),
+        sub_agent_ctx=SimpleNamespace(agent_id="agent_lightnovel_recommender"),
     ) is True
 
