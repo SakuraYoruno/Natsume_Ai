@@ -1148,7 +1148,33 @@ _AGENT_TOOLS: dict[str, list[str]] = {
     ],
     "judge_agent":     ["evaluate_artifact", "compare_artifacts"],  # P14：JudgeAgent ReAct 化，使用工件评估工具
     "emotion_agent":   ["emotion_history_search", "emotion_timeline_query", "search_knowledge"],  # 方向 G Phase 2
+    "pentest_agent":   [],  # 由 _ensure_pentest_tools_registered() 动态注册
 }
+
+# ---- Pentest 工具延迟注册 ----
+
+_PENTEST_TOOLS_REGISTERED = False
+
+
+def _ensure_pentest_tools_registered() -> None:
+    """延迟注册 pentest 工具到 _TOOL_REGISTRY 和 _AGENT_TOOLS。"""
+    global _PENTEST_TOOLS_REGISTERED
+    if _PENTEST_TOOLS_REGISTERED:
+        return
+    _PENTEST_TOOLS_REGISTERED = True
+
+    try:
+        from skills.pentest.tools.tool_specs import PENTEST_TOOL_SPECS, PENTEST_TOOL_IDS  # noqa: PLC0415
+        from skills.pentest.tools.tool_executors import EXECUTOR_MAP  # noqa: PLC0415
+    except ImportError:
+        return
+
+    for tool_id, spec in PENTEST_TOOL_SPECS.items():
+        if spec.executor is None and tool_id in EXECUTOR_MAP:
+            spec.executor = EXECUTOR_MAP[tool_id]
+        _TOOL_REGISTRY[tool_id] = spec
+
+    _AGENT_TOOLS["pentest_agent"] = list(PENTEST_TOOL_IDS)
 
 
 _INTENT_AGENT_ID = "intent_agent"
@@ -1248,6 +1274,10 @@ def get_tools_for_agent(
         可用工具列表
     """
     normalized_agent_id = str(agent_id or "").strip()
+
+    # pentest_agent: 延迟注册工具
+    if normalized_agent_id == "pentest_agent":
+        _ensure_pentest_tools_registered()
 
     # catalog 路径（动态工具发现，推荐路径）
     if catalog is not None:

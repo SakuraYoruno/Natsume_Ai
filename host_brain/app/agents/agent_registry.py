@@ -21,6 +21,7 @@ AGENT_ID_RENDERER = "renderer_agent"
 AGENT_ID_RETRIEVAL = "retrieval_agent"  # P11 新增
 AGENT_ID_EMOTION = "emotion_agent"    # 方向 G Phase 2 新增
 AGENT_ID_REPAIR = "repair_agent"
+AGENT_ID_PENTEST = "pentest_agent"  # 渗透测试 Agent (PTES 六阶段)
 
 # ---------------------------------------------------------------------------
 # Agent Allowlist（Supervisor 分派时的合法目标集合）
@@ -37,6 +38,7 @@ AGENT_ALLOWLIST: frozenset[str] = frozenset({
     AGENT_ID_RETRIEVAL,  # P11 新增
     AGENT_ID_EMOTION,    # 方向 G Phase 2 新增
     AGENT_ID_REPAIR,
+    AGENT_ID_PENTEST,
 })
 
 # ---------------------------------------------------------------------------
@@ -133,6 +135,16 @@ _AGENT_META: dict[str, dict[str, Any]] = {
         "has_side_effects": False,
         "risk_level": "low",
         "description": "深度情感分析，检索情感记忆，评估 Bond 状态，产出情感工件",
+    },
+    AGENT_ID_PENTEST: {
+        "agent_id": AGENT_ID_PENTEST,
+        "display_name": "PentestAgent",
+        "node_id": "pentest_agent_node",
+        "fast_path": False,
+        "allow_parallel": False,               # 渗透测试需要严格的阶段顺序
+        "has_side_effects": True,              # Exploit/Post-Exploit 阶段有副作用
+        "risk_level": "high",
+        "description": "授权渗透测试：PTES 六阶段框架（被动侦察→主动侦察→漏洞评估→漏洞利用→后渗透→报告）",
     },
 }
 
