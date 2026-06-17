@@ -13,8 +13,12 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from host_brain.agent_runtime.production_executor import execute_agent_production_payload
+from host_brain.agent_runtime.production_executor import (
+    execute_agent_production_payload,
+    _maybe_push_lightnovel_recommendations_to_gateway,
+)
 from host_brain.agent_runtime.production_studio import build_production_work_order
+from host_brain.agent_runtime.work_order import AgentWorkOrder
 
 
 def _load_env_file(path: Path) -> None:
@@ -43,6 +47,14 @@ def main() -> int:
     parser.add_argument("--artifacts-root", default="artifacts/codex_runs/lightnovel_recommender")
     parser.add_argument("--timeout-s", type=int, default=720)
     parser.add_argument("--no-push", action="store_true")
+    parser.add_argument(
+        "--replay-run-dir",
+        default="",
+        help=(
+            "Replay an existing lightnovel recommender run through the normal Gateway delivery path. "
+            "Use this for failed deliveries instead of ad-hoc OneBot sends."
+        ),
+    )
     args = parser.parse_args()
 
     _load_env_file(Path(".env"))
@@ -53,6 +65,46 @@ def main() -> int:
     artifacts_root = str(Path(args.artifacts_root).resolve())
     request_id = f"manual_ln_push_{int(time.time())}"
     job_id = f"manual_ln_job_{int(time.time())}"
+    if args.replay_run_dir:
+        run_dir = Path(args.replay_run_dir).resolve()
+        result = _read_json(run_dir / "result.json")
+        if not result:
+            result = {"status": "EXECUTED"}
+        else:
+            result = dict(result)
+            result.setdefault("status", "EXECUTED")
+        work_order_payload = build_production_work_order(
+            {
+                "task": "重放已有轻小说推荐结果，并通过正式 Gateway 投递到 QQ。",
+                "request_id": request_id,
+                "artifacts_root": str(run_dir.parent),
+                "workflow_owner": "natsume",
+                "timeout_seconds": 180,
+            },
+            skill_id="agent_lightnovel_recommender",
+        )
+        work_order = AgentWorkOrder.from_mapping(work_order_payload)
+        delivery = _maybe_push_lightnovel_recommendations_to_gateway(
+            job_id=job_id,
+            order=work_order,
+            result=result,
+            run_dir=run_dir,
+        )
+        print(
+            "REPLAY="
+            + json.dumps(
+                {
+                    "job_id": job_id,
+                    "request_id": request_id,
+                    "run_dir": str(run_dir),
+                    "delivery": delivery,
+                },
+                ensure_ascii=False,
+            ),
+            flush=True,
+        )
+        return 0 if isinstance(delivery, dict) and delivery.get("success") else 2
+
     work_order = build_production_work_order(
         {
             "task": "调用今日推荐：从轻之国度/轻小说公开榜单或最新资源抓取封面、简介和来源，推荐轻小说，并推送到 QQ。",
@@ -62,13 +114,12 @@ def main() -> int:
                 "https://www.lightnovel.fun/cn/category/3/106?type=1",
                 "https://www.lightnovel.fun/",
                 "https://book.sfacg.com/rank/",
-                "https://www.17k.com/man/qingbook/",
             ],
             "site_adapter": "lightnovel.fun",
             "workflow_owner": "natsume",
             "timeout_seconds": 900,
         },
-        skill_id="codex_lightnovel_recommender",
+        skill_id="agent_lightnovel_recommender",
     )
     queued = execute_agent_production_payload(
         {

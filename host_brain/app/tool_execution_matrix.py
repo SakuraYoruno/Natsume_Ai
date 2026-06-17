@@ -1,4 +1,4 @@
-"""Deterministic probes for the canonical tool execution loop.
+﻿"""Deterministic probes for the canonical tool execution loop.
 
 The matrix exercises Thalamus-facing skills through the same executive
 runtime path used by chat/Gateway requests:
@@ -272,7 +272,7 @@ def build_browser_observation_matrix(url: str = "data:text/html,<h1>Natsume Brow
     """Return safe browser observation probes.
 
     These are kept out of the default matrix because real browser availability
-    depends on the local desktop/agent-browser/playwright setup.
+    depends on the local desktop/Playwright/playwright setup.
     """
 
     return [
@@ -555,3 +555,4 @@ def run_memory_tool_closed_loop(
         },
         "results": search_results,
     }
+

@@ -75,6 +75,9 @@ _logger = logging.getLogger("Natsume.input_routes")
 router = APIRouter(prefix="/v1/host", tags=["input"])
 _INPUT_DISPATCH_EXECUTOR_LOCK = threading.Lock()
 _INPUT_DISPATCH_EXECUTOR: ThreadPoolExecutor | None = None
+_SESSION_DISPATCH_LOCKS_LOCK = threading.Lock()
+_SESSION_DISPATCH_LOCKS: dict[str, threading.Lock] = {}
+_SESSION_DISPATCH_LOCK_MAX = 512
 
 # ASR 相关常量（未迁移，仅在本文件使用）
 _PLACEHOLDER_GATEWAY_CONVERSATIONS: set[str] = {
@@ -206,6 +209,22 @@ def _get_input_dispatch_executor() -> ThreadPoolExecutor:
         return _INPUT_DISPATCH_EXECUTOR
 
 
+def _get_session_dispatch_lock(session_id: str) -> threading.Lock:
+    key = str(session_id or "").strip() or "__default__"
+    with _SESSION_DISPATCH_LOCKS_LOCK:
+        lock = _SESSION_DISPATCH_LOCKS.get(key)
+        if lock is None:
+            if len(_SESSION_DISPATCH_LOCKS) >= _SESSION_DISPATCH_LOCK_MAX:
+                for stale_key, stale_lock in list(_SESSION_DISPATCH_LOCKS.items()):
+                    if not stale_lock.locked():
+                        _SESSION_DISPATCH_LOCKS.pop(stale_key, None)
+                        if len(_SESSION_DISPATCH_LOCKS) < _SESSION_DISPATCH_LOCK_MAX:
+                            break
+            lock = threading.Lock()
+            _SESSION_DISPATCH_LOCKS[key] = lock
+        return lock
+
+
 def _run_dispatch_worker_in_thread(
     *,
     request_id: str,
@@ -219,19 +238,21 @@ def _run_dispatch_worker_in_thread(
     run_in_thread: bool,
 ) -> None:
     worker_ledger = _get_ledger_safe()
-    asyncio.run(
-        _dispatch_to_graph_worker(
-            request_id=request_id,
-            session_id=session_id,
-            source=source,
-            text=text,
-            payload=payload,
-            ts_ms=ts_ms,
-            ledger=worker_ledger,
-            dispatch_mode=dispatch_mode,
-            run_in_thread=run_in_thread,
+    lock = _get_session_dispatch_lock(session_id)
+    with lock:
+        asyncio.run(
+            _dispatch_to_graph_worker(
+                request_id=request_id,
+                session_id=session_id,
+                source=source,
+                text=text,
+                payload=payload,
+                ts_ms=ts_ms,
+                ledger=worker_ledger,
+                dispatch_mode=dispatch_mode,
+                run_in_thread=run_in_thread,
+            )
         )
-    )
 
 
 def _log_dispatch_thread_future_exception(future: Future[Any], *, request_id: str) -> None:
@@ -1384,6 +1405,34 @@ async def receive_input(body: InputPayload, request: Request) -> InputResponse:
         notify_user_interaction()
     except Exception:
         pass
+
+    try:
+        from host_brain.runtime.life_continuity import advance_inner_life_to_now  # noqa: PLC0415
+
+        inner_life_result = advance_inner_life_to_now(
+            ledger=_get_ledger_safe(),
+            person_id=str(payload.get("person_id") or "").strip() or "default",
+            reason="foreground_user_message",
+            incoming_event={
+                "request_id": request_id,
+                "session_id": session_id,
+                "source": source,
+                "platform": str(payload.get("platform") or "").strip(),
+                "conversation_id": str(payload.get("conversation_id") or session_id or "").strip(),
+                "user_message": text[:240],
+            },
+            force=False,
+        )
+        snapshot = dict(inner_life_result.get("inner_life_snapshot") or {})
+        payload["inner_life_snapshot"] = {
+            "being": dict(snapshot.get("being") or {}),
+            "drive": dict(snapshot.get("drive") or {}),
+            "attention": dict(snapshot.get("attention") or {}),
+            "preoccupation": dict(snapshot.get("preoccupation") or {}),
+            "expression_bias": dict(snapshot.get("expression_bias") or {}),
+        }
+    except Exception as life_exc:
+        _logger.debug("input_routes: foreground inner life catchup degraded request_id=%s: %s", request_id, life_exc)
 
     feedback_record = None
     try:
@@ -3151,17 +3200,22 @@ async def _dispatch_to_graph(
         )
         return
 
-    await _dispatch_to_graph_worker(
-        request_id=request_id,
-        session_id=session_id,
-        source=source,
-        text=text,
-        payload=payload,
-        ts_ms=ts_ms,
-        ledger=ledger,
-        dispatch_mode=dispatch_mode,
-        run_in_thread=run_in_thread,
-    )
+    lock = _get_session_dispatch_lock(session_id)
+    await asyncio.to_thread(lock.acquire)
+    try:
+        await _dispatch_to_graph_worker(
+            request_id=request_id,
+            session_id=session_id,
+            source=source,
+            text=text,
+            payload=payload,
+            ts_ms=ts_ms,
+            ledger=ledger,
+            dispatch_mode=dispatch_mode,
+            run_in_thread=run_in_thread,
+        )
+    finally:
+        lock.release()
 
 
 async def _dispatch_to_graph_worker(

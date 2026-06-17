@@ -1,4 +1,4 @@
-"""Async enqueue executor for Agent production skills."""
+﻿"""Async enqueue executor for Agent production skills."""
 
 from __future__ import annotations
 
@@ -150,6 +150,155 @@ def _resolve_order_chat_context(order: AgentWorkOrder) -> dict[str, str]:
     return context
 
 
+def _append_production_memory_event(
+    *,
+    order: AgentWorkOrder,
+    source_kind: str,
+    event_kind: str,
+    status: str,
+    summary: str,
+    refs: Mapping[str, Any] | None = None,
+    causality: Mapping[str, Any] | None = None,
+    salience: float = 0.55,
+    valence: float = 0.0,
+    uncertainty: float = 0.08,
+    created_at_ms: int | None = None,
+) -> dict[str, Any]:
+    try:
+        from host_brain.app.dependencies import get_ledger  # noqa: PLC0415
+        from host_brain.app.memory_event_store import MemoryEventStore  # noqa: PLC0415
+
+        context = _resolve_order_chat_context(order)
+        ledger = get_ledger()
+        store = MemoryEventStore(ledger)
+        event = store.append_event(
+            person_id=str(context.get("person_id") or "default").strip() or "default",
+            session_id=str(context.get("session_id") or "").strip(),
+            conversation_id=str(context.get("session_id") or "").strip(),
+            source_kind=source_kind,
+            event_kind=event_kind,
+            visibility="system",
+            role="",
+            content_summary=_short_text(summary, limit=1000),
+            causality={
+                "status": str(status or "").strip(),
+                **dict(causality or {}),
+            },
+            refs={
+                "request_id": str(context.get("request_id") or order.metadata.get("request_id") or "").strip(),
+                "intent_id": str(context.get("intent_id") or order.metadata.get("intent_id") or "").strip(),
+                "work_order_id": order.work_order_id,
+                "skill_id": str(order.metadata.get("skill_id") or "").strip(),
+                **dict(refs or {}),
+            },
+            salience=salience,
+            valence=valence,
+            uncertainty=uncertainty,
+            confidence=1.0,
+            created_at_ms=int(created_at_ms or now_ms()),
+        )
+        life = store.project_life_experience_from_event(str(event.get("event_id") or ""), consume=True)
+        if life.get("event_id"):
+            store.merge_event_refs(str(event.get("event_id") or ""), {"life_experience_event_id": life.get("event_id")})
+        store.update_projection_status(
+            str(event.get("event_id") or ""),
+            {"life_experience": {"status": life.get("status", "OK"), "event_id": life.get("event_id")}},
+        )
+        return {"status": "OK", "memory_event_id": event.get("event_id"), "life_experience_event_id": life.get("event_id")}
+    except Exception as exc:
+        return {"status": "FAILED", "reason_code": type(exc).__name__, "detail": str(exc)[:160]}
+
+
+def _gateway_result_success(payload: Mapping[str, Any] | None) -> bool:
+    if not isinstance(payload, Mapping):
+        return False
+    status = str(payload.get("status") or "").strip().lower()
+    return bool(payload.get("success", True)) and status not in {"failed", "error"}
+
+
+def _conversation_session_id_for_gateway(*, context: Mapping[str, str], platform: str, conversation_id: str) -> str:
+    session_id = str(context.get("session_id") or "").strip()
+    if session_id:
+        return session_id
+    clean_conversation = str(conversation_id or "").strip()
+    if not clean_conversation:
+        return ""
+    if clean_conversation.startswith(("qq_", "wx_", "telegram_", "discord_", "feishu_", "wecom_")):
+        return clean_conversation
+    if str(platform or "").strip().lower() == "qq":
+        return f"qq_dm_{clean_conversation}"
+    return clean_conversation
+
+
+def _visible_gateway_content(*, content: Any, msg_type: str, media_path: str = "") -> str:
+    text_value = str(content or "").strip()
+    if text_value:
+        return text_value
+    clean_type = str(msg_type or "text").strip().lower() or "text"
+    clean_media = str(media_path or "").strip()
+    if clean_media:
+        return f"[{clean_type}:{Path(clean_media).name or clean_media}]"
+    if clean_type and clean_type != "text":
+        return f"[{clean_type}:message]"
+    return ""
+
+
+def _record_gateway_visible_turn(
+    *,
+    order: AgentWorkOrder,
+    request_id: str,
+    platform: str,
+    conversation_id: str,
+    content: Any,
+    msg_type: str = "text",
+    media_path: str = "",
+    source_kind: str,
+    gateway_result: Mapping[str, Any] | None,
+    refs: Mapping[str, Any] | None = None,
+    metadata: Mapping[str, Any] | None = None,
+    created_at_ms: int | None = None,
+) -> dict[str, Any]:
+    if not _gateway_result_success(gateway_result):
+        return {"status": "SKIPPED", "reason_code": "GATEWAY_NOT_SENT"}
+    context = _resolve_order_chat_context(order)
+    session_id = _conversation_session_id_for_gateway(context=context, platform=platform, conversation_id=conversation_id)
+    visible_content = _visible_gateway_content(content=content, msg_type=msg_type, media_path=media_path)
+    if not session_id or not visible_content:
+        return {"status": "SKIPPED", "reason_code": "VISIBLE_GATEWAY_CONTEXT_MISSING"}
+    try:
+        from host_brain.app.dependencies import get_ledger  # noqa: PLC0415
+        from host_brain.app.memory_event_store import MemoryEventStore  # noqa: PLC0415
+
+        store = MemoryEventStore(get_ledger())
+        return store.append_visible_assistant_message(
+            request_id=str(request_id or "").strip() or f"gateway_visible_{new_event_id()}",
+            session_id=session_id,
+            person_id=str(context.get("person_id") or "").strip() or "default",
+            content=visible_content,
+            ts_ms=int(created_at_ms or now_ms()),
+            source_kind=source_kind,
+            refs={
+                "gateway_message": True,
+                "platform": platform,
+                "conversation_id": conversation_id,
+                **dict(refs or {}),
+            },
+            metadata={
+                "message_kind": "final_reply",
+                "reply_source": source_kind,
+                "reply_channel": platform,
+                "reply_target": conversation_id,
+                "msg_type": str(msg_type or "text").strip().lower(),
+                "media_path": str(media_path or "").strip(),
+                "gateway_result": dict(gateway_result or {}),
+                **dict(metadata or {}),
+            },
+            lang="zh",
+        )
+    except Exception as exc:
+        return {"status": "FAILED", "reason_code": type(exc).__name__, "detail": str(exc)[:160]}
+
+
 def _persist_production_job_memory(
     *,
     job: AgentProductionJob,
@@ -160,7 +309,7 @@ def _persist_production_job_memory(
     try:
         from host_brain.app.observability_persist import persist_background_event_memory  # noqa: PLC0415
     except Exception:
-        return
+        persist_background_event_memory = None
 
     skill_id = str(order.metadata.get("skill_id") or job.skill_id or "").strip()
     result_map = dict(result or {})
@@ -175,6 +324,31 @@ def _persist_production_job_memory(
         f"artifacts={job.artifacts_dir}",
     ]
     detail = "；".join(part for part in detail_parts if part)
+    _append_production_memory_event(
+        order=order,
+        source_kind="agent_production",
+        event_kind="agent_production_job",
+        status=job.status,
+        summary=detail,
+        refs={
+            "job_id": job.job_id,
+            "work_order_id": job.work_order_id,
+            "skill_id": skill_id,
+            "artifacts_dir": job.artifacts_dir,
+            "result_contract_ref": job.result_contract_ref,
+        },
+        causality={
+            "reason_code": reason_code,
+            "result_status": str(result_map.get("status") or ""),
+            "result_summary": str(result_map.get("summary") or job.detail or "").strip(),
+        },
+        salience=0.72 if job.status in {STATUS_COMPLETED, STATUS_FAILED} else 0.48,
+        valence=-0.35 if job.status == STATUS_FAILED else 0.2 if job.status == STATUS_COMPLETED else 0.0,
+        uncertainty=0.06,
+        created_at_ms=int(job.finished_ts_ms or job.updated_ts_ms or now_ms()),
+    )
+    if persist_background_event_memory is None:
+        return
     try:
         persist_background_event_memory(
             event_source="agent_production",
@@ -271,7 +445,7 @@ def _queued_result_text(*, order: AgentWorkOrder, blocked_until_confirmation: bo
         )
     if skill_id == "agent_lightnovel_recommender":
         return "已创建轻小说推荐任务，只采集多个公开榜单/最新资源的标题、封面、简介和来源，不读取付费正文。"
-    if skill_id == "agent_browser_research":
+    if skill_id == "browser_research":
         return "已创建网页资料研究任务，只读取公开网页或你提供的本地材料；完成后会生成来源明确的研究简报。"
     if start_background:
         return "已创建后台生产技能任务，结果会通过主链重新整理后再给用户。"
@@ -347,7 +521,7 @@ def _default_lightnovel_taste_profile() -> dict[str, Any]:
                 ],
             },
             "fantasy_hook": {
-                "label": "奇幻身份钩子",
+                "label": "异世界/特殊身份设定",
                 "weight": 10,
                 "keywords": [
                     "异世界",
@@ -391,11 +565,6 @@ def _default_lightnovel_taste_profile() -> dict[str, Any]:
             },
         },
         "negative_keyword_groups": {
-            "hard_tone": {
-                "label": "重口/强刺激",
-                "weight": -18,
-                "keywords": ["NTR", "寝取", "猎奇", "獵奇", "重口", "虐杀", "虐殺", "血腥"],
-            },
             "non_novel_news": {
                 "label": "非轻小说资源资讯",
                 "weight": -36,
@@ -1164,12 +1333,38 @@ def _rank_lightnovel_recommendations(
     return ordered
 
 
+def _lightnovel_gateway_cover_url(item: Mapping[str, Any]) -> str:
+    cover_url = str(item.get("cover_url") or item.get("cover") or item.get("image_url") or "").strip()
+    if cover_url and _looks_like_content_image(cover_url):
+        return cover_url
+    return ""
+
+
 def _visible_lightnovel_ranked_items(items: list[dict[str, Any]], *, max_items: int) -> list[dict[str, Any]]:
     limit = max(1, int(max_items))
     visible = [item for item in items if item.get("ranking_visible_candidate") is True]
-    if visible:
-        return visible[:limit]
-    return items[:limit]
+    pool: list[dict[str, Any]] = []
+    seen: set[int] = set()
+    for item in [*visible, *items]:
+        marker = id(item)
+        if marker in seen:
+            continue
+        seen.add(marker)
+        pool.append(item)
+    if not pool:
+        return []
+
+    if _parse_bool_env("HOST_LIGHTNOVEL_RECOMMENDER_GATEWAY_PREFER_COVERS", default=True):
+        pool = sorted(
+            pool,
+            key=lambda item: (
+                1 if _lightnovel_gateway_cover_url(item) else 0,
+                1 if item.get("ranking_visible_candidate") is True else 0,
+                float(item.get("recommendation_adjusted_score") or item.get("recommendation_score") or 0),
+            ),
+            reverse=True,
+        )
+    return pool[:limit]
 
 
 def _write_lightnovel_ranked_recommendations(
@@ -1292,7 +1487,7 @@ def _materialize_lightnovel_recommendations_from_result(
         return None
 
     max_items = _parse_int_env("HOST_LIGHTNOVEL_RECOMMENDER_MAX_ITEMS", default=3, min_value=1, max_value=8)
-    detail_max_items = _parse_int_env("HOST_LIGHTNOVEL_RECOMMENDER_DETAIL_ENRICH_MAX", default=8, min_value=0, max_value=12)
+    detail_max_items = _parse_int_env("HOST_LIGHTNOVEL_RECOMMENDER_DETAIL_ENRICH_MAX", default=24, min_value=0, max_value=40)
     detail_timeout_s = _parse_int_env("HOST_LIGHTNOVEL_RECOMMENDER_DETAIL_TIMEOUT_S", default=8, min_value=3, max_value=30)
     taste_profile = _lightnovel_taste_profile_for_order(order)
     pre_ranked_items = _rank_lightnovel_recommendations(
@@ -1387,7 +1582,38 @@ def _recover_lightnovel_recommender_result(
     if skill_id != "agent_lightnovel_recommender":
         return recovered
     if str(recovered.get("status") or "").upper() == "EXECUTED":
-        if _find_lightnovel_recommendations_file(result=recovered, run_dir=run_dir) is not None:
+        existing_recommendations_path = _find_lightnovel_recommendations_file(result=recovered, run_dir=run_dir)
+        if existing_recommendations_path is not None:
+            existing_items = _coerce_recommendation_items(_read_json_file(existing_recommendations_path))
+            if existing_items:
+                return recovered
+            metadata = dict(recovered.get("metadata") or {}) if isinstance(recovered.get("metadata"), Mapping) else {}
+            metadata.update(
+                {
+                    "workspace": str(run_dir),
+                    "recommendations_ref": str(existing_recommendations_path),
+                    "result_contract_ref": str(run_dir / "result_contract.json"),
+                    "report_path": str(run_dir / "recommendation_report.md"),
+                    "empty_recommendations_blocked": True,
+                }
+            )
+            risk_flags = [
+                str(flag)
+                for flag in recovered.get("risk_flags", [])
+                if str(flag).strip()
+            ]
+            if "lightnovel_browser_no_recommendations" not in risk_flags:
+                risk_flags.append("lightnovel_browser_no_recommendations")
+            recovered.update(
+                {
+                    "status": "BLOCKED",
+                    "summary": "Lightnovel recommender produced no usable recommendation candidates.",
+                    "reason_code": "LIGHTNOVEL_PLAYWRIGHT_NO_RECOMMENDATIONS",
+                    "detail": "recommendations.json exists but contains no sendable items; empty recommendations must not be treated as executed.",
+                    "risk_flags": risk_flags,
+                    "metadata": metadata,
+                }
+            )
             return recovered
         materialized_path = _materialize_lightnovel_recommendations_from_result(
             order=order,
@@ -1395,6 +1621,37 @@ def _recover_lightnovel_recommender_result(
             run_dir=run_dir,
         )
         if materialized_path is not None:
+            materialized_items = _coerce_recommendation_items(_read_json_file(materialized_path))
+            if not materialized_items:
+                metadata = dict(recovered.get("metadata") or {}) if isinstance(recovered.get("metadata"), Mapping) else {}
+                metadata.update(
+                    {
+                        "workspace": str(run_dir),
+                        "recommendations_ref": str(materialized_path),
+                        "result_contract_ref": str(run_dir / "result_contract.json"),
+                        "report_path": str(run_dir / "recommendation_report.md"),
+                        "empty_recovery_blocked": True,
+                        "recovery_reason_code": "LIGHTNOVEL_BROWSER_CANDIDATES_EMPTY",
+                    }
+                )
+                risk_flags = [
+                    str(flag)
+                    for flag in recovered.get("risk_flags", [])
+                    if str(flag).strip()
+                ]
+                if "lightnovel_browser_no_recommendations" not in risk_flags:
+                    risk_flags.append("lightnovel_browser_no_recommendations")
+                recovered.update(
+                    {
+                        "status": "BLOCKED",
+                        "summary": "Lightnovel interrupted-job recovery found no usable recommendation candidates.",
+                        "reason_code": "LIGHTNOVEL_PLAYWRIGHT_NO_RECOMMENDATIONS",
+                        "detail": "Interrupted browser research recovery materialized an empty recommendations payload; empty recovery is blocked.",
+                        "risk_flags": risk_flags,
+                        "metadata": metadata,
+                    }
+                )
+                return recovered
             metadata = dict(recovered.get("metadata") or {}) if isinstance(recovered.get("metadata"), Mapping) else {}
             metadata.update(
                 {
@@ -1478,6 +1735,38 @@ def _recover_lightnovel_recommender_result(
         run_dir=run_dir,
     )
     if materialized_path is not None:
+        materialized_items = _coerce_recommendation_items(_read_json_file(materialized_path))
+        if not materialized_items:
+            metadata = dict(recovered.get("metadata") or {}) if isinstance(recovered.get("metadata"), Mapping) else {}
+            metadata.update(
+                {
+                    "workspace": str(run_dir),
+                    "recommendations_ref": str(materialized_path),
+                    "result_contract_ref": str(run_dir / "result_contract.json"),
+                    "report_path": str(run_dir / "recommendation_report.md"),
+                    "empty_recovery_blocked": True,
+                    "recovery_reason_code": "LIGHTNOVEL_BROWSER_CANDIDATES_EMPTY",
+                }
+            )
+            risk_flags = [
+                str(flag)
+                for flag in recovered.get("risk_flags", [])
+                if str(flag).strip() and str(flag).strip() != "codex_exec_failed"
+            ]
+            if "lightnovel_browser_no_recommendations" not in risk_flags:
+                risk_flags.append("lightnovel_browser_no_recommendations")
+            recovered.update(
+                {
+                    "status": "BLOCKED",
+                    "summary": "Lightnovel interrupted-job recovery found no usable recommendation candidates.",
+                    "result_text": recovered.get("result_text") or "Lightnovel recommender found no usable recommendation candidates.",
+                    "reason_code": "LIGHTNOVEL_PLAYWRIGHT_NO_RECOMMENDATIONS",
+                    "detail": "Interrupted browser research recovery materialized an empty recommendations payload; empty recovery is blocked.",
+                    "risk_flags": risk_flags,
+                    "metadata": metadata,
+                }
+            )
+            return recovered
         metadata = dict(recovered.get("metadata") or {}) if isinstance(recovered.get("metadata"), Mapping) else {}
         metadata.update(
             {
@@ -1717,9 +2006,64 @@ def _looks_like_content_image(url: str) -> bool:
     lower = str(url or "").strip().lower()
     if not lower.startswith(("http://", "https://")):
         return False
-    if "res.lightnovel.fun/images/" not in lower:
-        return False
-    return any(token in lower for token in (".jpg", ".jpeg", ".png", ".webp"))
+    if "res.lightnovel.fun/images/" in lower:
+        return any(token in lower for token in (".jpg", ".jpeg", ".png", ".webp"))
+    if "i.noire.cc/image/" in lower:
+        return True
+    return False
+
+
+def _lightnovel_detail_numeric_id(url: str) -> str:
+    match = re.search(r"/detail/(\d+)(?:[/?#].*)?$", str(url or "").strip())
+    return match.group(1) if match else ""
+
+
+def _looks_like_lightnovel_detail_cover(url: str, *, detail_url: str) -> bool:
+    return _looks_like_content_image(url)
+
+
+def _download_lightnovel_gateway_cover(cover_url: str, *, run_dir: Path, index: int) -> Path | None:
+    if not _looks_like_content_image(cover_url):
+        return None
+    try:
+        import requests  # noqa: PLC0415
+    except Exception:
+        return None
+    try:
+        response = requests.get(
+            cover_url,
+            headers={
+                "User-Agent": "Natsume-Ai-LightnovelRecommender/1.0",
+                "Accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+                "Referer": "https://www.lightnovel.fun/",
+            },
+            timeout=20,
+        )
+    except Exception:
+        return None
+    if response.status_code >= 400:
+        return None
+    content = bytes(response.content or b"")
+    if len(content) < 128 or len(content) > 15 * 1024 * 1024:
+        return None
+    content_type = str(response.headers.get("content-type") or "").lower()
+    lower_url = cover_url.lower()
+    if "png" in content_type or ".png" in lower_url:
+        suffix = ".png"
+    elif "webp" in content_type or ".webp" in lower_url:
+        suffix = ".webp"
+    elif "jpeg" in content_type or "jpg" in content_type or ".jpg" in lower_url or ".jpeg" in lower_url:
+        suffix = ".jpg"
+    else:
+        suffix = ".jpg"
+    cache_dir = run_dir / "gateway_cover_cache"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    path = cache_dir / f"lightnovel_cover_{max(1, int(index))}{suffix}"
+    try:
+        path.write_bytes(content)
+    except OSError:
+        return None
+    return path
 
 
 def _select_lightnovel_cover_url(soup: Any, *, base_url: str) -> str:
@@ -1732,20 +2076,37 @@ def _select_lightnovel_cover_url(soup: Any, *, base_url: str) -> str:
         raw = str(node.get("content") or "").strip() if node is not None else ""
         if raw:
             candidate = urljoin(base_url, raw)
-            if _looks_like_content_image(candidate):
+            if _looks_like_lightnovel_detail_cover(candidate, detail_url=base_url):
                 return candidate
 
-    image_rows: list[tuple[bool, int, str]] = []
-    containers = list(soup.select(".article-content")) or [soup]
-    for container in containers:
-        for index, image in enumerate(container.find_all("img")):
+    image_rows: list[tuple[int, int, str]] = []
+    seen: set[str] = set()
+    selectors = (
+        ".article-infos img",
+        ".article-info img",
+        ".article-header img",
+        ".book-info img",
+        ".novel-info img",
+        ".cover img",
+        ".article-content img",
+        "main img",
+        "img",
+    )
+    for selector_index, selector in enumerate(selectors):
+        for index, image in enumerate(soup.select(selector)):
             src = _candidate_img_src(image, base_url=base_url)
-            if not _looks_like_content_image(src):
+            if not _looks_like_lightnovel_detail_cover(src, detail_url=base_url):
                 continue
+            if src in seen:
+                continue
+            seen.add(src)
             width = _node_attr_int(image, "img-width") or _node_attr_int(image, "width")
             height = _node_attr_int(image, "img-height") or _node_attr_int(image, "height")
+            if width and height and width > height * 1.35:
+                continue
             portrait = bool(width and height and height >= width * 1.15)
-            image_rows.append((portrait, -index, src))
+            score = (50 if portrait else 0) + max(0, 20 - selector_index)
+            image_rows.append((score, -index, src))
     if not image_rows:
         return ""
     image_rows.sort(key=lambda row: (row[0], row[1]), reverse=True)
@@ -2098,15 +2459,15 @@ def _extract_lightnovel_intro(body_text: str) -> str:
     return after[:end if end >= 0 else 600].strip()[:500]
 
 
-def _collect_lightnovel_candidates_via_agent_browser(
+def _collect_lightnovel_candidates_via_playwright(
     *,
     list_urls: list[str] | None = None,
     max_detail_pages: int = 0,
     detail_timeout_s: int = 8,
 ) -> list[dict[str, Any]]:
-    """Use agent-browser to extract lightnovel candidates from public pages.
+    """Use Playwright to extract lightnovel candidates from public pages.
 
-    Agent-browser (headless Chrome) navigates list pages, executes JavaScript
+    Playwright (headless Chrome) navigates list pages, executes JavaScript
     to extract structured data directly from the DOM — no LLM in the loop,
     zero hallucination risk, deterministic output.
 
@@ -2116,14 +2477,13 @@ def _collect_lightnovel_candidates_via_agent_browser(
             cover images, tag extraction, and intro enrichment
         detail_timeout_s: timeout per detail page in seconds
     """
-    from host_brain.skills.impl.browser_executor import (  # noqa: PLC0415
-        _clean_cli_text,
-        _run_agent_browser,
-        _run_agent_browser_eval,
+    from host_brain.agent_runtime.browser_automation_service import (  # noqa: PLC0415
+        get_browser_automation_service,
     )
-
-    payload: dict[str, Any] = {"session_id": "natsume_lightnovel",
-                                 "auto_connect": _parse_bool_env("HOST_BROWSER_AUTO_CONNECT", default=False)}
+    browser = get_browser_automation_service(
+        session_id="natsume_lightnovel",
+        auto_connect=_parse_bool_env("HOST_BROWSER_AUTO_CONNECT", default=True),
+    )
     urls = list(list_urls or []) or ["https://lightnovel.fun/cn/"]
     candidates: list[dict[str, Any]] = []
     seen_urls: set[str] = set()
@@ -2146,10 +2506,22 @@ def _collect_lightnovel_candidates_via_agent_browser(
     # --- detail-page JS: raw body text + best cover image ---------------------
     detail_script = (
         "(()=>{"
-        "  var imgs=Array.from(document.querySelectorAll('img'))"
-        "    .map(function(i){return{s:i.src||i.getAttribute('data-src')||'',w:i.naturalWidth||0};})"
-        "    .filter(function(x){return x.s.length>10&&x.s.indexOf('svg')<0&&x.s.indexOf('_nuxt')<0&&x.w>100;});"
-        "  var cover=imgs.length?imgs.sort(function(a,b){return b.w-a.w;})[0].s:'';"
+        "  function abs(u){try{return new URL(u,location.href).href;}catch(e){return u||'';}}"
+        "  function srcOf(i){return abs(i.currentSrc||i.src||i.getAttribute('data-src')||i.getAttribute('data-original')||i.getAttribute('data-lazy-src')||'');}"
+        "  function ok(u){var s=(u||'').toLowerCase();var ln=s.indexOf('res.lightnovel.fun/images/')>=0&&/\\.(jpg|jpeg|png|webp)(?:[?#]|$)/.test(s);var noire=s.indexOf('i.noire.cc/image/')>=0;return /^https?:/.test(s)&&(ln||noire);}"
+        "  var rows=[];"
+        "  ['.article-infos img','.article-info img','.article-header img','.book-info img','.novel-info img','.cover img','.article-content img','main img','img'].forEach(function(sel,si){"
+        "    Array.from(document.querySelectorAll(sel)).forEach(function(i,idx){"
+        "      var s=srcOf(i);if(!ok(s))return;"
+        "      var w=i.naturalWidth||parseInt(i.getAttribute('width')||i.getAttribute('img-width')||0)||0;"
+        "      var h=i.naturalHeight||parseInt(i.getAttribute('height')||i.getAttribute('img-height')||0)||0;"
+        "      if(w&&h&&w>h*1.35)return;"
+        "      var portrait=(w&&h&&h>=w*1.15)?1:0;"
+        "      rows.push({s:s,score:portrait*50+(20-si),idx:idx+si*1000});"
+        "    });"
+        "  });"
+        "  rows.sort(function(a,b){return (b.score-a.score)||(a.idx-b.idx);});"
+        "  var cover=rows.length?rows[0].s:'';"
         "  return JSON.stringify({body:document.body.innerText||'',cover:cover});"
         "})()"
     )
@@ -2157,12 +2529,15 @@ def _collect_lightnovel_candidates_via_agent_browser(
     # --- list pages -----------------------------------------------------------
     for url in urls:
         try:
-            _run_agent_browser(payload, "open", url, timeout_ms=20000, capture_output=False)
-            _run_agent_browser(payload, "wait", "--fn",
-                               "document.readyState === \"complete\"",
-                               timeout_ms=15000, capture_output=False)
-            raw = _run_agent_browser_eval(payload, list_script, timeout_ms=15000)
-            items = json.loads(_clean_cli_text(raw))
+            raw = browser.open_wait_eval(
+                url,
+                list_script,
+                wait_expression="document.readyState === \"complete\"",
+                open_timeout_ms=20000,
+                wait_timeout_ms=15000,
+                eval_timeout_ms=15000,
+            )
+            items = json.loads(_clean_playwright_eval_text(raw))
 
             for item in items:
                 href = str(item.get("href") or "").strip()
@@ -2196,7 +2571,7 @@ def _collect_lightnovel_candidates_via_agent_browser(
                     "source_title": "lightnovel.fun",
                 })
         except Exception as exc:
-            logger.warning("agent-browser list extraction failed for %s: %s", url, exc)
+            logger.warning("Playwright list extraction failed for %s: %s", url, exc)
 
     # --- detail pages (cover + intro enrichment, intro parsed in Python) -----
     if max_detail_pages > 0 and candidates:
@@ -2209,16 +2584,18 @@ def _collect_lightnovel_candidates_via_agent_browser(
                 continue
             try:
                 tout_ms = max(3, int(detail_timeout_s)) * 1000
-                _run_agent_browser(payload, "open", detail_url,
-                                   timeout_ms=tout_ms, capture_output=False)
-                _run_agent_browser(payload, "wait", "--fn",
-                                   "document.readyState === \"complete\" && document.body.innerText.length > 500",
-                                   timeout_ms=min(tout_ms, 20000), capture_output=False)
-                raw = _run_agent_browser_eval(payload, detail_script,
-                                              timeout_ms=min(tout_ms, 10000))
-                detail = json.loads(_clean_cli_text(raw))
-                if detail.get("cover"):
-                    item["cover_url"] = str(detail["cover"])
+                raw = browser.open_wait_eval(
+                    detail_url,
+                    detail_script,
+                    wait_expression="document.readyState === \"complete\" && document.body.innerText.length > 500",
+                    open_timeout_ms=tout_ms,
+                    wait_timeout_ms=min(tout_ms, 20000),
+                    eval_timeout_ms=min(tout_ms, 10000),
+                )
+                detail = json.loads(_clean_playwright_eval_text(raw))
+                detail_cover = str(detail.get("cover") or "").strip()
+                if detail_cover and _looks_like_lightnovel_detail_cover(detail_cover, detail_url=detail_url):
+                    item["cover_url"] = detail_cover
                 # Extract intro in Python (JS regex unreliable due to Unicode escaping)
                 body = str(detail.get("body") or "")
                 if body:
@@ -2227,15 +2604,63 @@ def _collect_lightnovel_candidates_via_agent_browser(
                         item["intro_snippet"] = intro
                 enriched += 1
             except Exception as exc:
-                logger.debug("agent-browser detail page failed for %s: %s", detail_url, exc)
+                logger.debug("Playwright detail page failed for %s: %s", detail_url, exc)
 
     return candidates
 
 
-def execute_lightnovel_recommender_work_order(order: AgentWorkOrder, *, run_dir: Path) -> dict[str, Any]:
-    """Build lightnovel recommendations via agent-browser JS extraction.
+def _clean_playwright_eval_text(value: Any) -> str:
+    """Normalize Playwright evaluate output before JSON parsing.
 
-    Uses agent-browser (headless Chrome) to navigate list/detail pages and
+    Playwright returns native JS values. The current recommender scripts return
+    JSON strings explicitly; this helper only handles defensive string wrapping
+    from older artifacts without importing legacy CLI helpers.
+    """
+    if not isinstance(value, str):
+        return json.dumps(value, ensure_ascii=False)
+    text = value.strip()
+    if len(text) >= 2 and text[0] == text[-1] == '"':
+        try:
+            decoded = json.loads(text)
+            if isinstance(decoded, str):
+                return decoded
+        except json.JSONDecodeError:
+            return text[1:-1]
+    return text
+
+
+_DEFAULT_LIGHTNOVEL_SOURCE_URLS: tuple[str, ...] = (
+    "https://www.lightnovel.fun/",
+    "https://www.lightnovel.fun/cn/category/3/106?type=1",
+    "https://book.sfacg.com/rank/",
+)
+
+
+def _lightnovel_source_urls_for_order(order: AgentWorkOrder) -> list[str]:
+    input_pack = getattr(order, "input_pack", {}) or {}
+    if not isinstance(input_pack, Mapping):
+        input_pack = {}
+    raw_urls = input_pack.get("urls")
+    if not isinstance(raw_urls, (list, tuple)):
+        raw_urls = []
+    urls: list[str] = []
+    seen: set[str] = set()
+    for raw in [*raw_urls, *_DEFAULT_LIGHTNOVEL_SOURCE_URLS]:
+        url = str(raw or "").strip()
+        if not url or not re.match(r"^https?://", url, re.IGNORECASE):
+            continue
+        key = url.rstrip("/")
+        if key in seen:
+            continue
+        seen.add(key)
+        urls.append(url)
+    return urls or list(_DEFAULT_LIGHTNOVEL_SOURCE_URLS)
+
+
+def execute_lightnovel_recommender_work_order(order: AgentWorkOrder, *, run_dir: Path) -> dict[str, Any]:
+    """Build lightnovel recommendations via Playwright JS extraction.
+
+    Uses Playwright (headless Chrome) to navigate list/detail pages and
     extract structured data via JavaScript directly from the DOM — no LLM in
     the data extraction loop, deterministic and URL-hallucination-free.
 
@@ -2245,13 +2670,15 @@ def execute_lightnovel_recommender_work_order(order: AgentWorkOrder, *, run_dir:
 
     run_dir.mkdir(parents=True, exist_ok=True)
     max_items = _parse_int_env("HOST_LIGHTNOVEL_RECOMMENDER_MAX_ITEMS", default=3, min_value=1, max_value=8)
-    detail_max_items = _parse_int_env("HOST_LIGHTNOVEL_RECOMMENDER_DETAIL_ENRICH_MAX", default=8, min_value=0, max_value=12)
+    detail_max_items = _parse_int_env("HOST_LIGHTNOVEL_RECOMMENDER_DETAIL_ENRICH_MAX", default=24, min_value=0, max_value=40)
+    pre_rank_detail_max = _parse_int_env("HOST_LIGHTNOVEL_RECOMMENDER_PRE_RANK_DETAIL_ENRICH_MAX", default=24, min_value=0, max_value=40)
     detail_timeout_s = _parse_int_env("HOST_LIGHTNOVEL_RECOMMENDER_DETAIL_TIMEOUT_S", default=8, min_value=3, max_value=30)
 
-    # 1. agent-browser JS 提取 → 真实结构化数据（无 LLM）
-    candidate_items = _collect_lightnovel_candidates_via_agent_browser(
-        list_urls=["https://lightnovel.fun/cn/"],
-        max_detail_pages=min(detail_max_items, 8),
+    # 1. Playwright JS 提取 → 真实结构化数据（无 LLM）
+    source_urls = _lightnovel_source_urls_for_order(order)
+    candidate_items = _collect_lightnovel_candidates_via_playwright(
+        list_urls=source_urls,
+        max_detail_pages=0,
         detail_timeout_s=detail_timeout_s,
     )
     source_count = len(candidate_items)
@@ -2259,6 +2686,11 @@ def execute_lightnovel_recommender_work_order(order: AgentWorkOrder, *, run_dir:
 
     # 2. 排名引擎打分
     recommendations = _lightnovel_recommendations_from_browser_items(candidate_items)
+    recommendations = _enrich_lightnovel_recommendations_from_details(
+        recommendations,
+        max_items=min(pre_rank_detail_max, max(detail_max_items, len(recommendations))),
+        timeout_s=detail_timeout_s,
+    )
     taste_profile = _lightnovel_taste_profile_for_order(order)
     pre_ranked_items = _rank_lightnovel_recommendations(
         recommendations,
@@ -2283,7 +2715,7 @@ def execute_lightnovel_recommender_work_order(order: AgentWorkOrder, *, run_dir:
     recommendations_payload = {
         "schema_version": "Natsume.lightnovel_recommendations.v1",
         "generated_ts_ms": now_ms(),
-        "source": "agent_browser_researcher",
+        "source": "browser_researcher",
         "recommendations": ranked_items,
     }
     recommendations_path.write_text(json.dumps(recommendations_payload, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -2313,7 +2745,7 @@ def execute_lightnovel_recommender_work_order(order: AgentWorkOrder, *, run_dir:
         readable_source_count=readable_count,
     )
     status = "EXECUTED" if ranked_items else "BLOCKED"
-    reason_code = None if ranked_items else "LIGHTNOVEL_AGENT_BROWSER_NO_RECOMMENDATIONS"
+    reason_code = None if ranked_items else "LIGHTNOVEL_PLAYWRIGHT_NO_RECOMMENDATIONS"
     contract_payload = {
         "workorder_id": order.work_order_id,
         "status": "complete" if ranked_items else "blocked",
@@ -2332,15 +2764,15 @@ def execute_lightnovel_recommender_work_order(order: AgentWorkOrder, *, run_dir:
         "source_count": source_count,
         "readable_source_count": readable_count,
         "summary": (
-            f"Agent-browser lightnovel recommendations built from {source_count} candidate(s)."
+            f"Playwright lightnovel recommendations built from {source_count} candidate(s)."
             if ranked_items
-            else "Agent-browser recommender found no usable recommendation candidates."
+            else "Playwright recommender found no usable recommendation candidates."
         ),
         "result_text": report_text,
         "reason_code": reason_code,
-        "risk_flags": [] if ranked_items else ["lightnovel_agent_browser_no_recommendations"],
+        "risk_flags": [] if ranked_items else ["lightnovel_browser_no_recommendations"],
         "metadata": {
-            "agent_browser_recommender": True,
+            "browser_recommender": True,
             "workspace": str(run_dir),
             "recommendations_ref": str(recommendations_path),
             "result_contract_ref": str(result_contract_path),
@@ -2352,6 +2784,7 @@ def execute_lightnovel_recommender_work_order(order: AgentWorkOrder, *, run_dir:
             "detail_enrich_count": min(len(pre_ranked_items), max(max_items, detail_max_items)),
             "source_count": source_count,
             "readable_source_count": readable_count,
+            "source_urls": source_urls,
         },
     }
     (run_dir / "result.json").write_text(json.dumps(result_data, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -2363,6 +2796,25 @@ def _short_text(value: Any, *, limit: int = 120) -> str:
     if len(text) <= limit:
         return text
     return f"{text[: max(1, limit - 1)]}…"
+
+
+def _public_lightnovel_reason(value: Any, *, limit: int = 76) -> str:
+    text = _short_text(value, limit=limit)
+    if not text:
+        return ""
+    replacements = {
+        "命中偏好：奇幻身份钩子": "偏向异世界/特殊身份设定",
+        "命中偏好：": "偏向",
+        "公开信号较好：更新、热度或资料完整度较高": "更新/热度/资料完整度还可以",
+        "奇幻身份钩子明确": "异世界/特殊身份设定比较明确",
+        "奇幻身份钩子更明确": "异世界/特殊身份设定更明确",
+        "奇幻身份钩子": "异世界/特殊身份设定",
+        "身份钩子": "特殊身份设定",
+        "、设定新鲜感": "，设定有新鲜感",
+    }
+    for old, new in replacements.items():
+        text = text.replace(old, new)
+    return text
 
 
 def _build_lightnovel_gateway_message(items: list[dict[str, Any]], *, max_items: int = 3) -> str:
@@ -2377,7 +2829,10 @@ def _build_lightnovel_gateway_card(item: Mapping[str, Any], *, index: int) -> st
     update_time = _short_text(item.get("update_time"), limit=32)
     view_count = _short_text(item.get("view_count"), limit=24)
     comment_count = _short_text(item.get("comment_count"), limit=24)
-    rationale = _short_text(item.get("selection_reason") or item.get("rationale") or item.get("intro_snippet"), limit=76)
+    rationale = _public_lightnovel_reason(
+        item.get("selection_reason") or item.get("rationale") or item.get("intro_snippet"),
+        limit=76,
+    )
     intro = _short_text(item.get("intro_snippet") or item.get("intro") or item.get("description"), limit=90)
     detail_url = _short_text(item.get("detail_url") or item.get("url") or item.get("source_url"), limit=180)
     heat_parts = []
@@ -2512,7 +2967,7 @@ def _lightnovel_gateway_cards(
 ) -> list[dict[str, str]]:
     cards: list[dict[str, str]] = []
     for index, item in enumerate(_visible_lightnovel_ranked_items(items, max_items=max_items), start=1):
-        cover_url = str(item.get("cover_url") or item.get("cover") or item.get("image_url") or "").strip()
+        cover_url = _lightnovel_gateway_cover_url(item)
         card_text = _build_lightnovel_gateway_card(item, index=index)
         if not card_text:
             continue
@@ -2717,6 +3172,86 @@ def _copy_epub_for_gateway_if_configured(epub_path: Path) -> dict[str, Any]:
     }
 
 
+def _copy_lightnovel_cover_for_gateway_if_configured(cover_path: Path) -> dict[str, Any]:
+    target = _parse_env_text(
+        "HOST_LIGHTNOVEL_RECOMMENDER_GATEWAY_EDGE_SSH_TARGET",
+        default=_parse_env_text("HOST_LIGHTNOVEL_EPUB_GATEWAY_EDGE_SSH_TARGET"),
+    )
+    if not target:
+        return {
+            "status": "SKIPPED",
+            "success": True,
+            "reason_code": "LIGHTNOVEL_COVER_EDGE_COPY_NOT_CONFIGURED",
+            "gateway_media_path": str(cover_path.resolve()),
+        }
+    if shutil.which("ssh") is None or shutil.which("scp") is None:
+        return {
+            "status": "FAILED",
+            "success": False,
+            "reason_code": "LIGHTNOVEL_COVER_EDGE_COPY_TOOL_MISSING",
+            "detail": "ssh or scp executable not found",
+            "gateway_media_path": str(cover_path.resolve()),
+        }
+    remote_root = _parse_env_text(
+        "HOST_LIGHTNOVEL_RECOMMENDER_GATEWAY_EDGE_ROOT",
+        default=_parse_env_text("HOST_LIGHTNOVEL_EPUB_GATEWAY_EDGE_ROOT", default=str(Path.cwd())),
+    )
+    root = Path(remote_root)
+    try:
+        rel = cover_path.resolve().relative_to(Path.cwd().resolve())
+    except Exception:
+        rel = Path("artifacts") / "agent_production" / cover_path.name
+    remote_path = str(root / rel).replace("\\", "/")
+    remote_dir = str(Path(remote_path).parent).replace("\\", "/")
+    quoted_dir = remote_dir.replace("'", "''")
+    try:
+        remote_mkdir = f'powershell -NoProfile -Command "New-Item -ItemType Directory -Force -Path \'{quoted_dir}\' | Out-Null"'
+        _subprocess_run(
+            ["ssh", target, remote_mkdir],
+            check=True,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=60,
+        )
+        _subprocess_run(
+            ["scp", str(cover_path.resolve()), f"{target}:{remote_path}"],
+            check=True,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=90,
+        )
+    except subprocess.CalledProcessError as exc:
+        detail = (exc.stderr or exc.stdout or str(exc)).strip()
+        return {
+            "status": "FAILED",
+            "success": False,
+            "reason_code": "LIGHTNOVEL_COVER_EDGE_COPY_FAILED",
+            "detail": detail or str(exc),
+            "gateway_media_path": remote_path,
+            "source_path": str(cover_path.resolve()),
+        }
+    except Exception as exc:
+        return {
+            "status": "FAILED",
+            "success": False,
+            "reason_code": "LIGHTNOVEL_COVER_EDGE_COPY_FAILED",
+            "detail": str(exc),
+            "gateway_media_path": remote_path,
+            "source_path": str(cover_path.resolve()),
+        }
+    return {
+        "status": "COPIED",
+        "success": True,
+        "target": target,
+        "source_path": str(cover_path.resolve()),
+        "gateway_media_path": remote_path,
+    }
+
+
 def _build_lightnovel_epub_gateway_notice(result: Mapping[str, Any], epub_path: Path) -> str:
     metadata = result.get("metadata") if isinstance(result.get("metadata"), Mapping) else {}
     title = _short_text(metadata.get("title") or result.get("title") or epub_path.stem, limit=90)
@@ -2822,7 +3357,7 @@ def _maybe_push_browser_research_to_gateway(
     run_dir: Path,
 ) -> dict[str, Any] | None:
     skill_id = str(order.metadata.get("skill_id") or "").strip()
-    if skill_id != "agent_browser_research":
+    if skill_id != "browser_research":
         return None
     if str(result.get("status") or "").upper() != "EXECUTED":
         return {
@@ -2845,15 +3380,16 @@ def _maybe_push_browser_research_to_gateway(
     wait_result = _parse_bool_env("HOST_BROWSER_RESEARCH_GATEWAY_WAIT_RESULT", default=True)
     timeout_ms = _parse_int_env("HOST_BROWSER_RESEARCH_GATEWAY_TIMEOUT_MS", default=45000, min_value=3000, max_value=180000)
     try:
+        gateway_message = _build_browser_research_gateway_message(result)
         reply_result = _post_gateway_reply_sync(
             platform=platform,
             conversation_id=conversation_id,
-            content=_build_browser_research_gateway_message(result),
+            content=gateway_message,
             msg_type="text",
             wait_result=wait_result,
             timeout_ms=timeout_ms,
             raw_extra={
-                "reply_source": "agent_browser_research",
+                "reply_source": "browser_research",
                 "job_id": job_id,
                 "work_order_id": order.work_order_id,
                 "report_ref": str(metadata.get("report_path") or ""),
@@ -2862,7 +3398,7 @@ def _maybe_push_browser_research_to_gateway(
         )
         payload = reply_result.as_dict() if hasattr(reply_result, "as_dict") else dict(reply_result or {})
         success = bool(payload.get("success", True)) and str(payload.get("status") or "").lower() not in {"failed", "error"}
-        return {
+        delivery = {
             "status": "SENT" if success else "FAILED",
             "success": success,
             "platform": platform,
@@ -2871,8 +3407,45 @@ def _maybe_push_browser_research_to_gateway(
             "report_ref": str(metadata.get("report_path") or ""),
             "gateway_result": payload,
         }
+        visible_projection = _record_gateway_visible_turn(
+            order=order,
+            request_id=f"{job_id}::browser_research::summary",
+            platform=platform,
+            conversation_id=conversation_id,
+            content=gateway_message,
+            msg_type="text",
+            source_kind="browser_research.gateway",
+            gateway_result=payload,
+            refs={
+                "job_id": job_id,
+                "work_order_id": order.work_order_id,
+                "report_ref": str(metadata.get("report_path") or ""),
+                "sources_ref": str(metadata.get("sources_path") or ""),
+            },
+            metadata={"job_id": job_id, "work_order_id": order.work_order_id},
+        )
+        delivery["conversation_turn_projection"] = visible_projection
+        _append_production_memory_event(
+            order=order,
+            source_kind="browser_research",
+            event_kind="browser_research_gateway_delivery",
+            status=str(delivery.get("status") or ""),
+            summary=f"Browser research Gateway delivery {delivery.get('status')}; report={delivery.get('report_ref')}",
+            refs={
+                "job_id": job_id,
+                "work_order_id": order.work_order_id,
+                "report_ref": str(metadata.get("report_path") or ""),
+                "sources_ref": str(metadata.get("sources_path") or ""),
+                "platform": platform,
+                "conversation_id": conversation_id,
+            },
+            causality={"gateway_result": payload, "conversation_turn_projection": visible_projection},
+            salience=0.64,
+            valence=0.18 if success else -0.28,
+        )
+        return delivery
     except Exception as exc:  # pragma: no cover - external Gateway guard
-        return {
+        failure = {
             "status": "FAILED",
             "success": False,
             "platform": platform,
@@ -2881,6 +3454,24 @@ def _maybe_push_browser_research_to_gateway(
             "detail": str(exc),
             "report_ref": str(metadata.get("report_path") or ""),
         }
+        _append_production_memory_event(
+            order=order,
+            source_kind="browser_research",
+            event_kind="browser_research_gateway_delivery",
+            status="FAILED",
+            summary=f"Browser research Gateway delivery failed: {str(exc)[:180]}",
+            refs={
+                "job_id": job_id,
+                "work_order_id": order.work_order_id,
+                "report_ref": str(metadata.get("report_path") or ""),
+                "platform": platform,
+                "conversation_id": conversation_id,
+            },
+            causality={"reason_code": "BROWSER_RESEARCH_GATEWAY_PUSH_FAILED", "detail": str(exc)[:300]},
+            salience=0.68,
+            valence=-0.35,
+        )
+        return failure
 
 
 def _extract_gateway_message_ids(payload: Any) -> list[str]:
@@ -3045,11 +3636,20 @@ def _maybe_push_lightnovel_recommendations_to_gateway(
                 min_value=3_000,
                 max_value=90_000,
             )
-            for card in cards:
+            for card_index, card in enumerate(cards, start=1):
                 cover_url = card.get("cover_url", "")
                 caption = card["caption"]
                 msg_type = card.get("msg_type") or ("image" if cover_url else "text")
                 detail_timeout_ms = image_timeout_ms if msg_type == "image" else text_timeout_ms
+                local_cover_path: Path | None = None
+                cover_copy_result: dict[str, Any] | None = None
+                media_path = cover_url
+                if msg_type == "image" and cover_url:
+                    local_cover_path = _download_lightnovel_gateway_cover(cover_url, run_dir=run_dir, index=card_index)
+                    if local_cover_path is not None:
+                        cover_copy_result = _copy_lightnovel_cover_for_gateway_if_configured(local_cover_path)
+                        if bool(cover_copy_result.get("success")):
+                            media_path = str(cover_copy_result.get("gateway_media_path") or local_cover_path.resolve())
                 gateway_kwargs: dict[str, Any] = {
                     "platform": platform,
                     "conversation_id": conversation_id,
@@ -3066,18 +3666,109 @@ def _maybe_push_lightnovel_recommendations_to_gateway(
                         "recommendations_ref": str(recommendations_path),
                         "ranked_recommendations_ref": str(ranked_ref or ""),
                         "caption": caption,
+                        "remote_cover_url": cover_url,
+                        "local_cover_path": str(local_cover_path) if local_cover_path is not None else "",
+                        "cover_copy_result": cover_copy_result or {},
                     },
                 }
                 if msg_type == "image" and cover_url:
-                    gateway_kwargs["media_path"] = cover_url
+                    gateway_kwargs["media_path"] = media_path
                 try:
                     image_result = _post_gateway_reply_sync(**gateway_kwargs)
-                    card_results.append(
+                    image_result_dict = (
                         image_result.as_dict()
                         if hasattr(image_result, "as_dict")
                         else dict(getattr(image_result, "__dict__", {}) or {})
                     )
+                    if bool(image_result_dict.get("success")) or msg_type != "image" or not cover_url:
+                        if local_cover_path is not None:
+                            image_result_dict["local_cover_path"] = str(local_cover_path)
+                        if cover_copy_result is not None:
+                            image_result_dict["cover_copy_result"] = cover_copy_result
+                        card_results.append(image_result_dict)
+                        continue
+                    local_cover = local_cover_path or _download_lightnovel_gateway_cover(cover_url, run_dir=run_dir, index=card_index)
+                    if local_cover is not None:
+                        retry_copy_result = cover_copy_result or _copy_lightnovel_cover_for_gateway_if_configured(local_cover)
+                        retry_kwargs = dict(gateway_kwargs)
+                        retry_kwargs["media_path"] = str(
+                            retry_copy_result.get("gateway_media_path")
+                            if bool(retry_copy_result.get("success"))
+                            else local_cover.resolve()
+                        )
+                        retry_kwargs["raw_extra"] = {
+                            **dict(gateway_kwargs.get("raw_extra") or {}),
+                            "cover_retry": "local_or_edge_file",
+                            "remote_cover_url": cover_url,
+                            "cover_copy_result": retry_copy_result,
+                        }
+                        retry_result = _post_gateway_reply_sync(**retry_kwargs)
+                        retry_result_dict = (
+                            retry_result.as_dict()
+                            if hasattr(retry_result, "as_dict")
+                            else dict(getattr(retry_result, "__dict__", {}) or {})
+                        )
+                        retry_result_dict["cover_retry"] = "local_or_edge_file"
+                        retry_result_dict["remote_cover_url"] = cover_url
+                        retry_result_dict["local_cover_path"] = str(local_cover)
+                        retry_result_dict["cover_copy_result"] = retry_copy_result
+                        retry_result_dict["remote_attempt"] = image_result_dict
+                        if bool(retry_result_dict.get("success")):
+                            card_results.append(retry_result_dict)
+                            continue
+                    text_kwargs = dict(gateway_kwargs)
+                    text_kwargs.pop("media_path", None)
+                    text_kwargs["msg_type"] = "text"
+                    text_kwargs["timeout_ms"] = text_timeout_ms
+                    text_kwargs["raw_extra"] = {
+                        **dict(gateway_kwargs.get("raw_extra") or {}),
+                        "cover_fallback": "text_after_image_failed",
+                        "remote_cover_url": cover_url,
+                    }
+                    fallback_result = _post_gateway_reply_sync(**text_kwargs)
+                    fallback_result_dict = (
+                        fallback_result.as_dict()
+                        if hasattr(fallback_result, "as_dict")
+                        else dict(getattr(fallback_result, "__dict__", {}) or {})
+                    )
+                    fallback_result_dict["cover_fallback"] = "text_after_image_failed"
+                    fallback_result_dict["remote_cover_url"] = cover_url
+                    fallback_result_dict["remote_attempt"] = image_result_dict
+                    card_results.append(fallback_result_dict)
                 except Exception as exc:  # pragma: no cover - external image Gateway guard
+                    if msg_type == "image" and cover_url:
+                        local_cover = local_cover_path or _download_lightnovel_gateway_cover(cover_url, run_dir=run_dir, index=card_index)
+                        if local_cover is not None:
+                            try:
+                                retry_copy_result = cover_copy_result or _copy_lightnovel_cover_for_gateway_if_configured(local_cover)
+                                retry_kwargs = dict(gateway_kwargs)
+                                retry_kwargs["media_path"] = str(
+                                    retry_copy_result.get("gateway_media_path")
+                                    if bool(retry_copy_result.get("success"))
+                                    else local_cover.resolve()
+                                )
+                                retry_kwargs["raw_extra"] = {
+                                    **dict(gateway_kwargs.get("raw_extra") or {}),
+                                    "cover_retry": "local_or_edge_file_after_exception",
+                                    "remote_cover_url": cover_url,
+                                    "cover_copy_result": retry_copy_result,
+                                }
+                                retry_result = _post_gateway_reply_sync(**retry_kwargs)
+                                retry_result_dict = (
+                                    retry_result.as_dict()
+                                    if hasattr(retry_result, "as_dict")
+                                    else dict(getattr(retry_result, "__dict__", {}) or {})
+                                )
+                                retry_result_dict["cover_retry"] = "local_or_edge_file_after_exception"
+                                retry_result_dict["remote_cover_url"] = cover_url
+                                retry_result_dict["local_cover_path"] = str(local_cover)
+                                retry_result_dict["cover_copy_result"] = retry_copy_result
+                                retry_result_dict["remote_exception"] = str(exc)
+                                if bool(retry_result_dict.get("success")):
+                                    card_results.append(retry_result_dict)
+                                    continue
+                            except Exception as retry_exc:  # pragma: no cover - external Gateway guard
+                                exc = retry_exc
                     card_results.append(
                         {
                             "success": False,
@@ -3147,7 +3838,7 @@ def _maybe_push_lightnovel_recommendations_to_gateway(
             message=message,
             cards=cards,
         )
-        return {
+        delivery_payload = {
             "status": "SENT" if bool(result_dict.get("success")) else "FAILED",
             "success": bool(result_dict.get("success")),
             "platform": platform,
@@ -3166,8 +3857,103 @@ def _maybe_push_lightnovel_recommendations_to_gateway(
             "delivery_log_result": delivery_log_result,
             "memory_result": memory_result,
         }
+        delivery_id = ""
+        if isinstance(delivery_log_result, Mapping):
+            delivery_id = str(delivery_log_result.get("delivery_id") or delivery_log_result.get("id") or "").strip()
+        conversation_turn_projections: list[dict[str, Any]] = []
+        overview_projection = _record_gateway_visible_turn(
+            order=order,
+            request_id=f"{job_id}::lightnovel::overview",
+            platform=platform,
+            conversation_id=conversation_id,
+            content=message,
+            msg_type="text",
+            source_kind="agent_lightnovel_recommender.overview",
+            gateway_result=result_dict,
+            refs={
+                "job_id": job_id,
+                "work_order_id": order.work_order_id,
+                "delivery_id": delivery_id,
+                "recommendations_ref": str(recommendations_path),
+                "ranked_recommendations_ref": str(ranked_ref or ""),
+                "message_part": "overview",
+            },
+            metadata={
+                "job_id": job_id,
+                "work_order_id": order.work_order_id,
+                "delivery_id": delivery_id,
+                "recommendation_id": delivery_id,
+                "message_part": "overview",
+            },
+        )
+        conversation_turn_projections.append(overview_projection)
+        for card_index, card in enumerate(cards, start=1):
+            card_result = card_results[card_index - 1] if card_index - 1 < len(card_results) else {}
+            item = visible_ranked_items[card_index - 1] if card_index - 1 < len(visible_ranked_items) else {}
+            card_projection = _record_gateway_visible_turn(
+                order=order,
+                request_id=f"{job_id}::lightnovel::card::{card_index}",
+                platform=platform,
+                conversation_id=conversation_id,
+                content=str(card.get("caption") or ""),
+                msg_type=str(card.get("msg_type") or "text"),
+                media_path=str(card_result.get("media_path") or card_result.get("local_cover_path") or ""),
+                source_kind="agent_lightnovel_recommender.card",
+                gateway_result=card_result,
+                refs={
+                    "job_id": job_id,
+                    "work_order_id": order.work_order_id,
+                    "delivery_id": delivery_id,
+                    "recommendations_ref": str(recommendations_path),
+                    "ranked_recommendations_ref": str(ranked_ref or ""),
+                    "message_part": "card",
+                    "rank": card_index,
+                    "title": str(item.get("title") or item.get("title_display") or ""),
+                    "detail_url": str(item.get("detail_url") or item.get("url") or item.get("source_url") or ""),
+                },
+                metadata={
+                    "job_id": job_id,
+                    "work_order_id": order.work_order_id,
+                    "delivery_id": delivery_id,
+                    "recommendation_id": delivery_id,
+                    "message_part": "card",
+                    "rank": card_index,
+                    "cover_url": str(card.get("cover_url") or ""),
+                },
+            )
+            conversation_turn_projections.append(card_projection)
+        delivery_payload["conversation_turn_projection"] = conversation_turn_projections
+        _append_production_memory_event(
+            order=order,
+            source_kind="agent_lightnovel_recommender",
+            event_kind="lightnovel_gateway_delivery",
+            status=str(delivery_payload.get("status") or ""),
+            summary=(
+                f"Lightnovel recommendation Gateway delivery {delivery_payload.get('status')}; "
+                f"items={delivery_payload.get('selected_recommendation_count')}; ref={recommendations_path}"
+            ),
+            refs={
+                "job_id": job_id,
+                "work_order_id": order.work_order_id,
+                "delivery_id": delivery_id,
+                "recommendations_ref": str(recommendations_path),
+                "ranked_recommendations_ref": str(ranked_ref or ""),
+                "history_ref": str(history_ref or ""),
+                "platform": platform,
+                "conversation_id": conversation_id,
+            },
+            causality={
+                "gateway_result": result_dict,
+                "card_count": len(card_results),
+                "selected_recommendation_count": len(visible_ranked_items),
+                "conversation_turn_projection": conversation_turn_projections,
+            },
+            salience=0.78,
+            valence=0.24 if bool(result_dict.get("success")) else -0.25,
+        )
+        return delivery_payload
     except Exception as exc:  # pragma: no cover - external Gateway guard
-        return {
+        failure = {
             "status": "FAILED",
             "success": False,
             "platform": platform,
@@ -3176,6 +3962,24 @@ def _maybe_push_lightnovel_recommendations_to_gateway(
             "detail": str(exc),
             "recommendations_ref": str(recommendations_path),
         }
+        _append_production_memory_event(
+            order=order,
+            source_kind="agent_lightnovel_recommender",
+            event_kind="lightnovel_gateway_delivery",
+            status="FAILED",
+            summary=f"Lightnovel recommendation Gateway delivery failed: {str(exc)[:180]}",
+            refs={
+                "job_id": job_id,
+                "work_order_id": order.work_order_id,
+                "recommendations_ref": str(recommendations_path),
+                "platform": platform,
+                "conversation_id": conversation_id,
+            },
+            causality={"reason_code": "LIGHTNOVEL_GATEWAY_PUSH_FAILED", "detail": str(exc)[:300]},
+            salience=0.72,
+            valence=-0.36,
+        )
+        return failure
 
 
 def _maybe_push_lightnovel_epub_to_gateway(
@@ -3251,11 +4055,13 @@ def _maybe_push_lightnovel_epub_to_gateway(
         )
         file_result = file_reply.as_dict() if hasattr(file_reply, "as_dict") else dict(getattr(file_reply, "__dict__", {}) or {})
         notice_result: dict[str, Any] | None = None
+        notice_content = ""
         if _parse_bool_env("HOST_LIGHTNOVEL_EPUB_GATEWAY_SEND_NOTICE", default=True):
+            notice_content = _build_lightnovel_epub_gateway_notice(result, epub_path)
             notice_reply = _post_gateway_reply_sync(
                 platform=platform,
                 conversation_id=conversation_id,
-                content=_build_lightnovel_epub_gateway_notice(result, epub_path),
+                content=notice_content,
                 msg_type="text",
                 wait_result=wait_result,
                 timeout_ms=min(timeout_ms, 30_000),
@@ -3273,7 +4079,7 @@ def _maybe_push_lightnovel_epub_to_gateway(
                 if hasattr(notice_reply, "as_dict")
                 else dict(getattr(notice_reply, "__dict__", {}) or {})
             )
-        return {
+        delivery = {
             "status": "SENT" if bool(file_result.get("success")) else "FAILED",
             "success": bool(file_result.get("success")),
             "platform": platform,
@@ -3285,8 +4091,83 @@ def _maybe_push_lightnovel_epub_to_gateway(
             "gateway_result": file_result,
             "notice_result": notice_result,
         }
+        conversation_turn_projections = [
+            _record_gateway_visible_turn(
+                order=order,
+                request_id=f"{job_id}::epub::file",
+                platform=platform,
+                conversation_id=conversation_id,
+                content="",
+                msg_type="file",
+                media_path=media_path,
+                source_kind="agent_epub_builder.file",
+                gateway_result=file_result,
+                refs={
+                    "job_id": job_id,
+                    "work_order_id": order.work_order_id,
+                    "epub_ref": str(epub_path),
+                    "file_name": epub_path.name,
+                    "message_part": "file",
+                },
+                metadata={
+                    "job_id": job_id,
+                    "work_order_id": order.work_order_id,
+                    "epub_ref": str(epub_path),
+                    "file_name": epub_path.name,
+                    "message_part": "file",
+                },
+            )
+        ]
+        if notice_result:
+            conversation_turn_projections.append(
+                _record_gateway_visible_turn(
+                    order=order,
+                    request_id=f"{job_id}::epub::notice",
+                    platform=platform,
+                    conversation_id=conversation_id,
+                    content=notice_content,
+                    msg_type="text",
+                    source_kind="agent_epub_builder.notice",
+                    gateway_result=notice_result,
+                    refs={
+                        "job_id": job_id,
+                        "work_order_id": order.work_order_id,
+                        "epub_ref": str(epub_path),
+                        "file_name": epub_path.name,
+                        "message_part": "notice",
+                    },
+                    metadata={
+                        "job_id": job_id,
+                        "work_order_id": order.work_order_id,
+                        "epub_ref": str(epub_path),
+                        "file_name": epub_path.name,
+                        "message_part": "notice",
+                    },
+                )
+            )
+        delivery["conversation_turn_projection"] = conversation_turn_projections
+        _append_production_memory_event(
+            order=order,
+            source_kind="agent_epub_builder",
+            event_kind="lightnovel_epub_gateway_delivery",
+            status=str(delivery.get("status") or ""),
+            summary=f"Lightnovel EPUB Gateway delivery {delivery.get('status')}; epub={epub_path.name}",
+            refs={
+                "job_id": job_id,
+                "work_order_id": order.work_order_id,
+                "epub_ref": str(epub_path),
+                "file_name": epub_path.name,
+                "media_path": media_path,
+                "platform": platform,
+                "conversation_id": conversation_id,
+            },
+            causality={"gateway_result": file_result, "notice_result": notice_result or {}, "copy_result": copy_result, "conversation_turn_projection": conversation_turn_projections},
+            salience=0.76,
+            valence=0.28 if bool(file_result.get("success")) else -0.25,
+        )
+        return delivery
     except Exception as exc:  # pragma: no cover - external Gateway guard
-        return {
+        failure = {
             "status": "FAILED",
             "success": False,
             "platform": platform,
@@ -3296,13 +4177,40 @@ def _maybe_push_lightnovel_epub_to_gateway(
             "epub_ref": str(epub_path),
             "copy_result": copy_result,
         }
+        _append_production_memory_event(
+            order=order,
+            source_kind="agent_epub_builder",
+            event_kind="lightnovel_epub_gateway_delivery",
+            status="FAILED",
+            summary=f"Lightnovel EPUB Gateway delivery failed: {str(exc)[:180]}",
+            refs={
+                "job_id": job_id,
+                "work_order_id": order.work_order_id,
+                "epub_ref": str(epub_path),
+                "platform": platform,
+                "conversation_id": conversation_id,
+            },
+            causality={"reason_code": "LIGHTNOVEL_EPUB_GATEWAY_PUSH_FAILED", "detail": str(exc)[:300], "copy_result": copy_result},
+            salience=0.72,
+            valence=-0.36,
+        )
+        return failure
 
 def _execute_worker(order: AgentWorkOrder, *, store: AgentArtifactStore, run_dir: Path) -> dict[str, Any]:
     skill_id = str(order.metadata.get("skill_id") or "").strip()
-    if skill_id == "agent_browser_research":
+    if skill_id == "browser_research":
         return execute_browser_research_work_order(order, run_dir=run_dir)
     if skill_id == "agent_lightnovel_recommender":
-        return execute_lightnovel_recommender_work_order(order, run_dir=run_dir)
+        try:
+            return execute_lightnovel_recommender_work_order(order, run_dir=run_dir)
+        finally:
+            if _parse_bool_env("HOST_LIGHTNOVEL_RECOMMENDER_BROWSER_CLOSE_AFTER_RUN", default=False):
+                try:
+                    from host_brain.agent_runtime.browser_automation_service import get_browser_automation_service  # noqa: PLC0415
+
+                    get_browser_automation_service(session_id="natsume_lightnovel").close(target="browser")
+                except Exception as exc:
+                    logger.debug("lightnovel recommender browser close skipped: %s", exc)
     if skill_id == "agent_epub_builder":
         return execute_lightnovel_epub_work_order(order, run_dir=run_dir)
     result = AgentRuntimeExecutor(artifact_store=store).execute(order)
@@ -3671,3 +4579,4 @@ __all__ = [
     "list_agent_production_jobs",
     "recover_interrupted_lightnovel_recommendation_jobs",
 ]
+

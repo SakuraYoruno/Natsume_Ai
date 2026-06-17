@@ -1,4 +1,4 @@
-"""Agent 专用工具定义与权限矩阵。
+﻿"""Agent 专用工具定义与权限矩阵。
 
 每个工具使用 ToolSpec 格式（与 app/agents/tool_registry.py 兼容），
 工作区写操作委托给 SandboxExecutor，文件操作限制在工作区边界内。
@@ -262,7 +262,7 @@ def _tool_agent_finish(args: dict[str, Any], *, workspace: Path) -> dict[str, An
 # 浏览器自动化工具 — 委托给 execute_browser_skill()
 # ---------------------------------------------------------------------------
 
-def _tool_agent_browser_navigate(args: dict[str, Any], *, workspace: Path) -> dict[str, Any]:
+def _tool_browser_navigate(args: dict[str, Any], *, workspace: Path) -> dict[str, Any]:
     """使用无头浏览器导航到指定 URL。"""
     url = str(args.get("url") or "").strip()
     if not url:
@@ -275,7 +275,7 @@ def _tool_agent_browser_navigate(args: dict[str, Any], *, workspace: Path) -> di
     })
 
 
-def _tool_agent_browser_scrape(args: dict[str, Any], *, workspace: Path) -> dict[str, Any]:
+def _tool_browser_scrape(args: dict[str, Any], *, workspace: Path) -> dict[str, Any]:
     """从当前浏览器页面抓取内容。"""
     selector = str(args.get("selector") or "body").strip() or "body"
     extract = str(args.get("extract") or "text").strip().lower()
@@ -290,7 +290,7 @@ def _tool_agent_browser_scrape(args: dict[str, Any], *, workspace: Path) -> dict
     })
 
 
-def _tool_agent_browser_screenshot(args: dict[str, Any], *, workspace: Path) -> dict[str, Any]:
+def _tool_browser_screenshot(args: dict[str, Any], *, workspace: Path) -> dict[str, Any]:
     """对当前浏览器页面截图并返回 base64 图片。"""
     save_path = str(args.get("save_path") or "").strip() or None
     full_page = bool(args.get("full_page", False))
@@ -307,7 +307,7 @@ def _tool_agent_browser_screenshot(args: dict[str, Any], *, workspace: Path) -> 
     })
 
 
-def _tool_agent_browser_click(args: dict[str, Any], *, workspace: Path) -> dict[str, Any]:
+def _tool_browser_click(args: dict[str, Any], *, workspace: Path) -> dict[str, Any]:
     """点击浏览器页面中的元素。"""
     selector = str(args.get("selector") or "").strip()
     if not selector:
@@ -319,7 +319,7 @@ def _tool_agent_browser_click(args: dict[str, Any], *, workspace: Path) -> dict[
     })
 
 
-def _tool_agent_browser_execute_script(args: dict[str, Any], *, workspace: Path) -> dict[str, Any]:
+def _tool_browser_execute_script(args: dict[str, Any], *, workspace: Path) -> dict[str, Any]:
     """在浏览器页面中执行 JavaScript。"""
     script = str(args.get("script") or "").strip()
     if not script:
@@ -338,10 +338,10 @@ def _tool_agent_browser_execute_script(args: dict[str, Any], *, workspace: Path)
 # run_mode -> 允许的工具 ID 集合
 _AGENT_TOOL_PERMISSIONS: dict[str, set[str]] = {
     "inspect":    {"agent_read_file", "agent_list_files", "agent_finish"},
-    "research":   {"agent_read_file", "agent_list_files", "agent_web_fetch", "agent_browser_navigate", "agent_browser_scrape", "agent_browser_screenshot", "agent_browser_execute_script", "agent_finish"},
+    "research":   {"agent_read_file", "agent_list_files", "agent_web_fetch", "browser_navigate", "browser_scrape", "browser_screenshot", "browser_execute_script", "agent_finish"},
     "audit":      {"agent_read_file", "agent_list_files", "agent_run_shell", "agent_run_python", "agent_git_diff", "agent_finish"},
     "translate":  {"agent_read_file", "agent_list_files", "agent_write_file", "agent_finish"},
-    "worker":     {"agent_read_file", "agent_write_file", "agent_list_files", "agent_run_shell", "agent_run_python", "agent_git_diff", "agent_browser_navigate", "agent_browser_scrape", "agent_browser_screenshot", "agent_browser_click", "agent_browser_execute_script", "agent_finish"},
+    "worker":     {"agent_read_file", "agent_write_file", "agent_list_files", "agent_run_shell", "agent_run_python", "agent_git_diff", "browser_navigate", "browser_scrape", "browser_screenshot", "browser_click", "browser_execute_script", "agent_finish"},
     "self_heal":  {"agent_read_file", "agent_write_file", "agent_list_files", "agent_run_shell", "agent_run_python", "agent_git_diff", "agent_finish"},
     "self_evolve":{"agent_read_file", "agent_write_file", "agent_list_files", "agent_run_shell", "agent_run_python", "agent_git_diff", "agent_finish"},
 }
@@ -440,7 +440,7 @@ _AGENT_TOOL_DEFS: list[dict[str, Any]] = [
         "has_side_effects": False,
     },
     {
-        "tool_id": "agent_browser_navigate",
+        "tool_id": "browser_navigate",
         "display_name": "浏览器导航",
         "description": "使用无头浏览器打开 URL。参数：url（完整 URL）、wait_until（load/domcontentloaded/networkidle，默认 load）、timeout_ms（默认 30000）。需要 research/worker 模式。",
         "parameters": {
@@ -455,7 +455,7 @@ _AGENT_TOOL_DEFS: list[dict[str, Any]] = [
         "has_side_effects": False,
     },
     {
-        "tool_id": "agent_browser_scrape",
+        "tool_id": "browser_scrape",
         "display_name": "抓取页面内容",
         "description": "从当前浏览器页面抓取元素内容。参数：selector（CSS 选择器，默认 body）、extract（text/html/attribute，默认 text）、limit（最大元素数，默认 50）、attribute（extract=attribute 时提取的属性名）。需要先 navigate 后使用。",
         "parameters": {
@@ -472,7 +472,7 @@ _AGENT_TOOL_DEFS: list[dict[str, Any]] = [
         "has_side_effects": False,
     },
     {
-        "tool_id": "agent_browser_screenshot",
+        "tool_id": "browser_screenshot",
         "display_name": "页面截图",
         "description": "对当前浏览器页面截图，返回 base64 图片。参数：save_path（可选保存路径，相对工作区）、full_page（是否全页截图，默认 false）。需要先 navigate 后使用。",
         "parameters": {
@@ -487,7 +487,7 @@ _AGENT_TOOL_DEFS: list[dict[str, Any]] = [
         "has_side_effects": True,
     },
     {
-        "tool_id": "agent_browser_click",
+        "tool_id": "browser_click",
         "display_name": "点击元素",
         "description": "点击浏览器页面中的元素。参数：selector（CSS 选择器）、timeout_ms（默认 10000）。需要 worker 模式且先 navigate 后使用。",
         "parameters": {
@@ -501,7 +501,7 @@ _AGENT_TOOL_DEFS: list[dict[str, Any]] = [
         "has_side_effects": True,
     },
     {
-        "tool_id": "agent_browser_execute_script",
+        "tool_id": "browser_execute_script",
         "display_name": "执行浏览器脚本",
         "description": "在当前浏览器页面执行 JavaScript 代码，返回执行结果。用于探查 SPA 页面结构、提取动态内容。参数：script（JavaScript 代码）。需要 research/worker 模式且先 navigate 后使用。\n提示：SPA 页面应先用此工具探查 DOM 结构（如 innerText 前 1000 字符、所有链接列表），再决定如何提取数据。",
         "parameters": {
@@ -579,11 +579,11 @@ def execute_agent_tool(
         "agent_run_shell":    lambda: _tool_agent_run_shell(args_clean, workspace=workspace_path, sandbox_enabled=sandbox_enabled),
         "agent_run_python":   lambda: _tool_agent_run_python(args_clean, workspace=workspace_path, sandbox_enabled=sandbox_enabled),
         "agent_web_fetch":          lambda: _tool_agent_web_fetch(args_clean, workspace=workspace_path),
-        "agent_browser_navigate":   lambda: _tool_agent_browser_navigate(args_clean, workspace=workspace_path),
-        "agent_browser_scrape":     lambda: _tool_agent_browser_scrape(args_clean, workspace=workspace_path),
-        "agent_browser_screenshot": lambda: _tool_agent_browser_screenshot(args_clean, workspace=workspace_path),
-        "agent_browser_click":          lambda: _tool_agent_browser_click(args_clean, workspace=workspace_path),
-        "agent_browser_execute_script": lambda: _tool_agent_browser_execute_script(args_clean, workspace=workspace_path),
+        "browser_navigate":   lambda: _tool_browser_navigate(args_clean, workspace=workspace_path),
+        "browser_scrape":     lambda: _tool_browser_scrape(args_clean, workspace=workspace_path),
+        "browser_screenshot": lambda: _tool_browser_screenshot(args_clean, workspace=workspace_path),
+        "browser_click":          lambda: _tool_browser_click(args_clean, workspace=workspace_path),
+        "browser_execute_script": lambda: _tool_browser_execute_script(args_clean, workspace=workspace_path),
         "agent_git_diff":               lambda: _tool_agent_git_diff(args_clean, workspace=workspace_path),
         "agent_finish":             lambda: _tool_agent_finish(args_clean, workspace=workspace_path),
     }
@@ -603,3 +603,4 @@ __all__ = [
     "execute_agent_tool",
     "is_tool_allowed_for_run_mode",
 ]
+

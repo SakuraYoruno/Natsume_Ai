@@ -48,7 +48,15 @@ REQUIRED_FIELDS: dict[str, type] = {
 
 ACTION_ARGS_RULES: dict[str, dict[str, dict[str, type]]] = {
     "read_only_status": {"required": {"scope": str}, "optional": {}},
-    "narrative_only": {"required": {"text": str}, "optional": {"style": str}},
+    "narrative_only": {
+        "required": {"text": str},
+        "optional": {
+            "style": str,
+            "semantic_intent": dict,
+            "pragmatic_frame": dict,
+            "conversation_understanding": dict,
+        },
+    },
     "memory_recall": {"required": {"query": str}, "optional": {"k": int}},
     "noop": {"required": {}, "optional": {}},
     # M45：场景路由 action — args 只要包含 text 字段即可；

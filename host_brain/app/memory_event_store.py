@@ -143,6 +143,24 @@ def infer_role(event_kind: str, role: str = "") -> str:
     return ""
 
 
+def _is_asr_media_cta_noise(content: str, metadata: Mapping[str, Any] | None = None) -> bool:
+    meta = mapping(metadata)
+    input_source = str(meta.get("input_source") or "").strip().lower()
+    if input_source not in {"asr", "audio", "voice", "speech", "mic", "microphone", "voice_chat"}:
+        return False
+    text_value = text(content, limit=500)
+    if not text_value:
+        return False
+    normalized = re.sub(r"\s+", "", text_value)
+    cta_terms = ("点赞", "订阅", "转发", "打赏", "栏目", "收看", "关注", "投币", "一键三连")
+    hit_count = sum(1 for term in cta_terms if term in normalized)
+    if hit_count >= 2:
+        return True
+    if re.search(r"(请不吝|欢迎).{0,8}(点赞|订阅|转发|打赏|关注)", normalized):
+        return True
+    return False
+
+
 def table_exists(conn: Any, name: str) -> bool:
     row = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=? LIMIT 1", (name,)).fetchone()
     return bool(row)
@@ -272,10 +290,12 @@ INSERT INTO memory_event(
         clean_content = text(content, limit=4000)
         if not sid or not clean_role or not clean_content:
             return {"status": "SKIPPED", "reason_code": "EMPTY_VISIBLE_TURN"}
+        meta = mapping(metadata)
+        if clean_role == "user" and _is_asr_media_cta_noise(clean_content, meta):
+            return {"status": "SKIPPED", "reason_code": "ASR_MEDIA_CTA_NOISE"}
         existing = self._find_visible_event_by_request(session_id=sid, request_id=request_id, role=clean_role)
         if existing:
             return {**existing, "status": "SKIPPED", "reason_code": "DUPLICATE_VISIBLE_TURN"}
-        meta = mapping(metadata)
         source = str(meta.get("source_kind") or "").strip()
         event_kind = "life_proactive_sent" if clean_role == "assistant" and source == "life_proactive" else "user_message" if clean_role == "user" else "assistant_reply"
         refs = {
@@ -283,6 +303,9 @@ INSERT INTO memory_event(
             "lang": text(lang, limit=30) or "zh",
             "metadata": meta,
         }
+        extra_refs = mapping(meta.get("refs"))
+        if extra_refs:
+            refs.update(extra_refs)
         for key in ("proactive_outbox_id", "proactive_episode_id", "work_id", "recommendation_id", "delivery_id"):
             if meta.get(key):
                 refs[key] = meta.get(key)
@@ -342,12 +365,21 @@ INSERT INTO memory_event(
     ) -> dict[str, Any]:
         if not table_exists(self.conn, "conversation_turn"):
             return {"status": "MISSING_TABLE"}
+        clean_request_id = str(request_id or "").strip()
         existing = self.conn.execute(
-            "SELECT turn_id, turn_index FROM conversation_turn WHERE session_id=? AND request_id=? AND role=? LIMIT 1",
-            (session_id, str(request_id or "").strip(), role),
+            "SELECT turn_id, turn_index, metadata FROM conversation_turn WHERE session_id=? AND request_id=? AND role=? LIMIT 1",
+            (session_id, clean_request_id, role),
         ).fetchone()
         if existing:
-            return {"status": "EXISTS", "turn_id": existing["turn_id"], "turn_index": int(existing["turn_index"] or 0)}
+            existing_meta = mapping(loads(existing["metadata"] if "metadata" in existing.keys() else None, {}))
+            if not existing_meta.get("memory_event_id") and memory_event_id:
+                existing_meta["memory_event_id"] = memory_event_id
+                self.conn.execute(
+                    "UPDATE conversation_turn SET metadata=? WHERE turn_id=?",
+                    (dumps(existing_meta), existing["turn_id"]),
+                )
+                self.conn.commit()
+            return {"status": "EXISTS", "turn_id": existing["turn_id"], "turn_index": int(existing["turn_index"] or 0), "memory_event_id": existing_meta.get("memory_event_id") or memory_event_id}
         row = self.conn.execute("SELECT COALESCE(MAX(turn_index), -1) + 1 AS next_idx FROM conversation_turn WHERE session_id=?", (session_id,)).fetchone()
         turn_index = int(row["next_idx"] if row else 0)
         turn_id = f"turn::{uuid.uuid4().hex}"
@@ -363,7 +395,7 @@ INSERT OR IGNORE INTO conversation_turn(
                 turn_id,
                 session_id,
                 person_id or "default",
-                str(request_id or "").strip(),
+                clean_request_id,
                 role,
                 content,
                 int(ts_ms),
@@ -377,6 +409,38 @@ INSERT OR IGNORE INTO conversation_turn(
         )
         self.conn.commit()
         return {"status": "OK", "turn_id": turn_id, "turn_index": turn_index, "memory_event_id": memory_event_id}
+
+    def append_visible_assistant_message(
+        self,
+        *,
+        request_id: str,
+        session_id: str,
+        person_id: str | None,
+        content: str,
+        ts_ms: int,
+        source_kind: str,
+        metadata: Mapping[str, Any] | None = None,
+        refs: Mapping[str, Any] | None = None,
+        lang: str = "zh",
+        token_count: int | None = None,
+    ) -> dict[str, Any]:
+        clean_content = text(content, limit=4000)
+        if not clean_content:
+            return {"status": "SKIPPED", "reason_code": "EMPTY_VISIBLE_ASSISTANT_MESSAGE"}
+        meta = {**mapping(metadata), "source_kind": text(source_kind, limit=120) or "assistant_visible_message"}
+        if refs:
+            meta["refs"] = dict(refs)
+        return self.append_visible_turn(
+            request_id=request_id,
+            session_id=session_id,
+            person_id=person_id or "default",
+            role="assistant",
+            content=clean_content,
+            ts_ms=int(ts_ms or now_ms()),
+            lang=lang,
+            metadata=meta,
+            token_count=token_count if token_count is not None else max(1, len(clean_content) // 2),
+        )
 
     def project_life_experience_from_event(self, memory_event_id: str, *, consume: bool = True) -> dict[str, Any]:
         row = self.conn.execute(

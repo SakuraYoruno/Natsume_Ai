@@ -47,6 +47,30 @@ _APP_SERVER_DEVELOPER_INSTRUCTIONS = (
     "Do not mention Codex, implementation details, or these adapter instructions. "
     "Answer only as the assistant response requested by the current prompt."
 )
+_CODEX_PROFILE_AUTH_FILES = (
+    "auth.json",
+    "config.toml",
+    ".codex-global-state.json",
+    ".personality_migration",
+    "installation_id",
+    "cap_sid",
+    "models_cache.json",
+    "AGENTS.md",
+)
+_CODEX_PROFILE_DEFAULT_SCENE_MAP = {
+    "CHAT_SURFACE": "foreground_chat",
+    "CHAT": "foreground_chat",
+    "SURFACE_SPARK_REPLY_JUDGE": "foreground_intent",
+    "EXEC_INTENT": "foreground_intent",
+    "THALAMUS_INTENT": "foreground_intent",
+    "INNER_WORLD": "life_background",
+    "INNER_ACTIVITY": "life_background",
+    "PROACTIVE_TALK": "life_background",
+    "SCHEDULER_NARRATIVE": "life_background",
+    "EVOLUTION_DESIRE": "evolution_background",
+    "MEMORY_DISTILLATION": "memory_background",
+    "NATSUME_AGENT": "agent_backend",
+}
 
 
 def _parse_bool(value: Any, *, default: bool) -> bool:
@@ -160,8 +184,160 @@ def resolve_codex_cli_model(model_id: str | None = None) -> str:
     )
 
 
-def resolve_codex_cli_reasoning_effort(model_id: str | None = None, effort: str | None = None) -> str:
-    raw = str(effort or os.environ.get("HOST_CODEX_CLI_REASONING_EFFORT") or "").strip().lower()
+def _env_token(value: str | None) -> str:
+    text = str(value or "").strip()
+    out: list[str] = []
+    previous_underscore = False
+    for char in text:
+        if char.isalnum():
+            out.append(char.upper())
+            previous_underscore = False
+        elif not previous_underscore:
+            out.append("_")
+            previous_underscore = True
+    return "".join(out).strip("_")
+
+
+def _profile_token(value: str | None) -> str:
+    text = str(value or "").strip().lower()
+    out: list[str] = []
+    previous_underscore = False
+    for char in text:
+        if char.isalnum():
+            out.append(char.lower())
+            previous_underscore = False
+        elif not previous_underscore:
+            out.append("_")
+            previous_underscore = True
+    return "".join(out).strip("_") or "default"
+
+
+def _codex_app_profile_enabled() -> bool:
+    return _parse_bool(os.environ.get("HOST_CODEX_APP_PROFILE_ENABLED"), default=True)
+
+
+def _feature_key_scene(feature_key: str | None) -> str:
+    text = str(feature_key or "").strip()
+    if not text:
+        return ""
+    parts = [part.strip() for part in text.split(":") if part.strip()]
+    if len(parts) >= 2 and parts[0].lower() == "pool":
+        return _env_token(parts[1])
+    if text.startswith("surface_spark_reply_judge"):
+        return "SURFACE_SPARK_REPLY_JUDGE"
+    if text.startswith("node:") or text.startswith("subagent") or text.startswith("agent"):
+        return "NATSUME_AGENT"
+    token = _env_token(text)
+    if "MEMORY" in token:
+        return "MEMORY_DISTILLATION"
+    if "INNER_ACTIVITY" in token:
+        return "INNER_ACTIVITY"
+    if "INNER_WORLD" in token:
+        return "INNER_WORLD"
+    return token
+
+
+def resolve_codex_app_profile(feature_key: str | None = None) -> str:
+    if not _codex_app_profile_enabled():
+        return "default"
+    feature_token = _env_token(feature_key)
+    if feature_token:
+        raw_feature_profile = str(os.environ.get(f"HOST_CODEX_APP_PROFILE_FEATURE_{feature_token}") or "").strip()
+        if raw_feature_profile:
+            return _profile_token(raw_feature_profile)
+    scene = _feature_key_scene(feature_key)
+    if scene:
+        raw_scene_profile = str(os.environ.get(f"HOST_CODEX_APP_PROFILE_SCENE_{scene}") or "").strip()
+        if raw_scene_profile:
+            return _profile_token(raw_scene_profile)
+        mapped = _CODEX_PROFILE_DEFAULT_SCENE_MAP.get(scene)
+        if mapped:
+            return _profile_token(mapped)
+    raw_default = str(os.environ.get("HOST_CODEX_APP_PROFILE_DEFAULT") or "shared_default").strip()
+    return _profile_token(raw_default)
+
+
+def _codex_model_from_pool_spec(raw_spec: str | None) -> str:
+    for item in str(raw_spec or "").split(","):
+        text = item.strip()
+        if not text or ":" not in text:
+            continue
+        provider, model = text.split(":", 1)
+        if provider.strip().lower() == "codex" and model.strip():
+            return model.strip()
+    return ""
+
+
+def _feature_key_model_override(feature_key: str | None, default_model: str | None) -> str:
+    feature_token = _env_token(feature_key)
+    if feature_token:
+        raw_feature_model = str(os.environ.get(f"HOST_CODEX_APP_PROFILE_FEATURE_{feature_token}_MODEL") or "").strip()
+        if raw_feature_model:
+            return raw_feature_model
+    scene = _feature_key_scene(feature_key)
+    if scene:
+        raw_scene_model = str(os.environ.get(f"HOST_CODEX_APP_PROFILE_SCENE_{scene}_MODEL") or "").strip()
+        if raw_scene_model:
+            return raw_scene_model
+        parts = [part.strip() for part in str(feature_key or "").split(":") if part.strip()]
+        tier = _env_token(parts[2]) if len(parts) >= 3 and parts[0].lower() == "pool" else ""
+        if tier:
+            pooled = _codex_model_from_pool_spec(os.environ.get(f"HOST_LLM_POOL_SCENE_{scene}_TIER_{tier}"))
+            if pooled:
+                return pooled
+        pooled = _codex_model_from_pool_spec(os.environ.get(f"HOST_LLM_POOL_SCENE_{scene}"))
+        if pooled:
+            return pooled
+    return resolve_codex_cli_model(default_model)
+
+
+def _feature_key_reasoning_env_names(feature_key: str | None) -> list[str]:
+    text = str(feature_key or "").strip()
+    if not text:
+        return []
+    names: list[str] = []
+    parts = [part.strip() for part in text.split(":") if part.strip()]
+    if len(parts) >= 2 and parts[0].lower() == "pool":
+        scene = _env_token(parts[1])
+        tier = _env_token(parts[2]) if len(parts) >= 3 else ""
+        if scene and tier:
+            names.append(f"HOST_CODEX_REASONING_SCENE_{scene}_TIER_{tier}")
+        if scene:
+            names.append(f"HOST_CODEX_REASONING_SCENE_{scene}")
+    elif text.startswith("surface_spark_reply_judge"):
+        names.append("HOST_CODEX_REASONING_SCENE_SURFACE_SPARK_REPLY_JUDGE")
+    elif text.startswith("node:"):
+        token = _env_token(text.split(":", 1)[1])
+        if token:
+            names.append(f"HOST_CODEX_REASONING_NODE_{token}")
+        names.append("HOST_CODEX_REASONING_SCENE_NATSUME_AGENT")
+    token = _env_token(text)
+    if token:
+        names.append(f"HOST_CODEX_REASONING_FEATURE_{token}")
+    return names
+
+
+def _feature_key_reasoning_effort(feature_key: str | None) -> str:
+    for env_name in _feature_key_reasoning_env_names(feature_key):
+        raw = str(os.environ.get(env_name) or "").strip().lower()
+        if raw:
+            return raw
+    return ""
+
+
+def resolve_codex_cli_reasoning_effort(
+    model_id: str | None = None,
+    effort: str | None = None,
+    *,
+    feature_key: str | None = None,
+) -> str:
+    raw = str(
+        effort
+        or _feature_key_reasoning_effort(feature_key)
+        or os.environ.get("HOST_CODEX_REASONING_DEFAULT")
+        or os.environ.get("HOST_CODEX_CLI_REASONING_EFFORT")
+        or ""
+    ).strip().lower()
     normalized_model = str(model_id or "").strip().lower()
     if not raw or raw in {"default", "inherit"}:
         if normalized_model.startswith("gpt-5.3-codex-spark"):
@@ -200,11 +376,59 @@ def _resolve_run_root() -> Path:
     return Path(tempfile.gettempdir()) / "natsume_codex_cli_lm"
 
 
-def resolve_codex_cli_home() -> Path | None:
-    raw = str(os.environ.get("HOST_CODEX_CLI_HOME") or os.environ.get("HOST_CODEX_APP_SERVER_CODEX_HOME") or "").strip()
+def resolve_codex_cli_home(
+    *,
+    profile: str | None = None,
+    feature_key: str | None = None,
+) -> Path | None:
+    resolved_profile = _profile_token(profile or resolve_codex_app_profile(feature_key))
+    base_raw = str(os.environ.get("HOST_CODEX_CLI_HOME") or os.environ.get("HOST_CODEX_APP_SERVER_CODEX_HOME") or "").strip()
+    if resolved_profile and resolved_profile not in {"default", "shared_default"} and _codex_app_profile_enabled():
+        profile_env = f"HOST_CODEX_APP_PROFILE_{_env_token(resolved_profile)}_HOME"
+        raw_profile_home = str(os.environ.get(profile_env) or "").strip()
+        if raw_profile_home:
+            profile_home = Path(raw_profile_home).expanduser()
+        else:
+            base_home = Path(base_raw).expanduser() if base_raw else None
+            raw_base = str(os.environ.get("HOST_CODEX_APP_PROFILE_BASE_HOME") or "").strip()
+            if raw_base:
+                profile_root = Path(raw_base).expanduser()
+            elif base_home is not None:
+                profile_root = base_home.parent / ".codex-natsume-apps"
+            else:
+                profile_root = Path(tempfile.gettempdir()) / "natsume_codex_app_profiles"
+            profile_home = profile_root / resolved_profile
+        _prepare_codex_profile_home(profile_home=profile_home, base_home=Path(base_raw).expanduser() if base_raw else None)
+        return profile_home
+    raw = base_raw
     if not raw:
         return None
     return Path(raw).expanduser()
+
+
+def _prepare_codex_profile_home(*, profile_home: Path, base_home: Path | None) -> None:
+    profile_home.mkdir(parents=True, exist_ok=True)
+    if base_home is None:
+        return
+    try:
+        resolved_base = base_home.expanduser().resolve()
+        resolved_profile = profile_home.expanduser().resolve()
+    except Exception:
+        resolved_base = base_home.expanduser()
+        resolved_profile = profile_home.expanduser()
+    if resolved_base == resolved_profile or not resolved_base.exists():
+        return
+    for file_name in _CODEX_PROFILE_AUTH_FILES:
+        src = resolved_base / file_name
+        dst = resolved_profile / file_name
+        if not src.exists() or not src.is_file():
+            continue
+        try:
+            if dst.exists() and dst.stat().st_mtime >= src.stat().st_mtime and dst.stat().st_size == src.stat().st_size:
+                continue
+            shutil.copy2(src, dst)
+        except Exception:
+            continue
 
 
 def _resolve_workdir(run_root: Path) -> Path:
@@ -247,6 +471,7 @@ def _session_key(
     sandbox: str,
     workdir: Path,
     response_format: Any = None,
+    reasoning_effort: str | None = None,
 ) -> str:
     configured = str(os.environ.get("HOST_CODEX_CLI_SESSION_KEY") or "").strip()
     if configured:
@@ -259,7 +484,8 @@ def _session_key(
         workdir_text = str(workdir.resolve())
     except Exception:
         workdir_text = str(workdir)
-    return f"{feature}|model={model_id}|sandbox={sandbox}|cwd={workdir_text}"
+    reasoning = str(reasoning_effort or resolve_codex_cli_reasoning_effort(model_id, feature_key=feature_key)).strip()
+    return f"{feature}|model={model_id}|reasoning={reasoning}|sandbox={sandbox}|cwd={workdir_text}"
 
 
 def _app_server_key(
@@ -268,6 +494,9 @@ def _app_server_key(
     model_id: str,
     sandbox: str,
     workdir: Path,
+    reasoning_effort: str | None = None,
+    profile: str | None = None,
+    feature_key: str | None = None,
 ) -> str:
     """Return the process-level cache key for one Codex app-server.
 
@@ -280,7 +509,8 @@ def _app_server_key(
         workdir_text = str(workdir.resolve())
     except Exception:
         workdir_text = str(workdir)
-    codex_home = resolve_codex_cli_home()
+    resolved_profile = _profile_token(profile or resolve_codex_app_profile(feature_key))
+    codex_home = resolve_codex_cli_home(profile=resolved_profile, feature_key=feature_key)
     codex_home_text = ""
     if codex_home is not None:
         try:
@@ -295,12 +525,13 @@ def _app_server_key(
         (
             f"command={command}",
             f"home={codex_home_text}",
+            f"profile={resolved_profile}",
             f"model={model_id}",
             f"sandbox={sandbox}",
             f"cwd={workdir_text}",
-            f"reasoning={resolve_codex_cli_reasoning_effort(model_id)}",
+            f"reasoning={str(reasoning_effort or resolve_codex_cli_reasoning_effort(model_id)).strip()}",
             f"disabled={disabled_features}",
-            f"fast={int(_parse_bool(os.environ.get('HOST_CODEX_CLI_FAST_MODE'), default=True))}",
+            f"fast={int(_parse_bool(os.environ.get('HOST_CODEX_CLI_FAST_MODE'), default=False))}",
             f"web_disabled={int(_parse_bool(os.environ.get('HOST_CODEX_CLI_DISABLE_WEB_SEARCH'), default=True))}",
         )
     )
@@ -375,15 +606,21 @@ def _apply_lightweight_flags(cmd: list[str], *, resume: bool) -> list[str]:
         flags.extend(["--disable", "shell_snapshot"])
     if _parse_bool(os.environ.get("HOST_CODEX_CLI_DISABLE_PERSONALITY"), default=True):
         flags.extend(["--disable", "personality"])
-    if _parse_bool(os.environ.get("HOST_CODEX_CLI_FAST_MODE"), default=True):
+    if _parse_bool(os.environ.get("HOST_CODEX_CLI_FAST_MODE"), default=False):
         flags.extend(["--enable", "fast_mode"])
     if flags:
         cmd[insert_at:insert_at] = flags
     return cmd
 
 
-def _apply_reasoning_effort(cmd: list[str], *, model_id: str | None = None) -> list[str]:
-    reasoning_effort = resolve_codex_cli_reasoning_effort(model_id)
+def _apply_reasoning_effort(
+    cmd: list[str],
+    *,
+    model_id: str | None = None,
+    effort: str | None = None,
+    feature_key: str | None = None,
+) -> list[str]:
+    reasoning_effort = resolve_codex_cli_reasoning_effort(model_id, effort, feature_key=feature_key)
     if not reasoning_effort or reasoning_effort.lower() in {"inherit", "default"}:
         return cmd
     anchor = cmd.index("-m") if "-m" in cmd else len(cmd)
@@ -391,13 +628,18 @@ def _apply_reasoning_effort(cmd: list[str], *, model_id: str | None = None) -> l
     return cmd
 
 
-def _build_codex_app_server_command(command: str, *, model_id: str) -> list[str]:
-    reasoning_effort = resolve_codex_cli_reasoning_effort(model_id)
+def _build_codex_app_server_command(
+    command: str,
+    *,
+    model_id: str,
+    reasoning_effort: str | None = None,
+) -> list[str]:
+    reasoning_effort = str(reasoning_effort or resolve_codex_cli_reasoning_effort(model_id)).strip()
     cmd = [command, "app-server"]
     for env_name, feature_name, default in _APP_SERVER_DISABLED_FEATURES:
         if _parse_bool(os.environ.get(env_name), default=default):
             cmd.extend(["--disable", feature_name])
-    if _parse_bool(os.environ.get("HOST_CODEX_CLI_FAST_MODE"), default=True):
+    if _parse_bool(os.environ.get("HOST_CODEX_CLI_FAST_MODE"), default=False):
         cmd.extend(["--enable", "fast_mode"])
     cmd.extend(["-c", f'model_reasoning_effort="{reasoning_effort}"'])
     if _parse_bool(os.environ.get("HOST_CODEX_CLI_DISABLE_WEB_SEARCH"), default=True):
@@ -412,8 +654,8 @@ def _wrap_windows_command(cmd: list[str]) -> list[str]:
     return cmd
 
 
-def _build_codex_cli_env(run_dir: Path) -> dict[str, str]:
-    return build_codex_cli_env(run_dir)
+def _build_codex_cli_env(run_dir: Path, *, codex_home: Path | None = None) -> dict[str, str]:
+    return build_codex_cli_env(run_dir, codex_home=codex_home)
 
 
 def _proxy_env_present(env: Mapping[str, str]) -> bool:
@@ -455,13 +697,13 @@ def _inherit_system_proxy_env(env: dict[str, str]) -> None:
         env.setdefault("no_proxy", no_proxy)
 
 
-def build_codex_cli_env(run_dir: Path, *, temp_dir_name: str = ".tmp") -> dict[str, str]:
+def build_codex_cli_env(run_dir: Path, *, temp_dir_name: str = ".tmp", codex_home: Path | None = None) -> dict[str, str]:
     env = dict(os.environ)
     _inherit_system_proxy_env(env)
-    codex_home = resolve_codex_cli_home()
-    if codex_home is not None:
-        codex_home.mkdir(parents=True, exist_ok=True)
-        env["CODEX_HOME"] = str(codex_home.resolve())
+    resolved_codex_home = codex_home if codex_home is not None else resolve_codex_cli_home()
+    if resolved_codex_home is not None:
+        resolved_codex_home.mkdir(parents=True, exist_ok=True)
+        env["CODEX_HOME"] = str(resolved_codex_home.resolve())
     if _parse_bool(os.environ.get("HOST_CODEX_CLI_STRIP_API_KEYS"), default=True):
         for key in (
             "OPENAI_API_KEY",
@@ -596,6 +838,9 @@ class _CodexAppServerWorker:
         server_key: str | None = None,
         feature_key: str | None = None,
         session_key: str | None = None,
+        reasoning_effort: str | None = None,
+        app_profile: str | None = None,
+        codex_home: Path | None = None,
     ) -> None:
         resolved_server_key = str(server_key or session_key or "codex").strip() or "codex"
         self.command = command
@@ -606,6 +851,9 @@ class _CodexAppServerWorker:
         self.server_key = resolved_server_key
         self.session_key = str(session_key or resolved_server_key).strip() or resolved_server_key
         self.feature_key = feature_key
+        self.reasoning_effort = str(reasoning_effort or resolve_codex_cli_reasoning_effort(model_id, feature_key=feature_key)).strip()
+        self.app_profile = _profile_token(app_profile or resolve_codex_app_profile(feature_key))
+        self.codex_home = codex_home
         self.run_dir = run_root / _worker_dir_name(resolved_server_key)
         self.thread_reuse = codex_app_server_thread_reuse_enabled()
         self.thread_ids: dict[str, str] = {}
@@ -657,8 +905,12 @@ class _CodexAppServerWorker:
         self._stdout_queue = Queue()
         self._stderr_tail = deque(maxlen=80)
         self._request_id = 0
-        cmd = _build_codex_app_server_command(self.command, model_id=self.model_id)
-        env = _build_codex_cli_env(self.run_dir)
+        cmd = _build_codex_app_server_command(
+            self.command,
+            model_id=self.model_id,
+            reasoning_effort=self.reasoning_effort,
+        )
+        env = _build_codex_cli_env(self.run_dir, codex_home=self.codex_home)
         self.proc = subprocess.Popen(
             _wrap_windows_command(cmd),
             stdin=subprocess.PIPE,
@@ -678,9 +930,11 @@ class _CodexAppServerWorker:
                 {
                     "cmd": cmd,
                     "feature_key": self.feature_key,
+                    "reasoning_effort": self.reasoning_effort,
                     "model_id": self.model_id,
                     "pid": self.proc.pid,
                     "server_key": self.server_key,
+                    "app_profile": self.app_profile,
                     "codex_home": env.get("CODEX_HOME"),
                     "thread_reuse": self.thread_reuse,
                     "thread_isolation": "per-feature-thread-key",
@@ -737,11 +991,11 @@ class _CodexAppServerWorker:
         return thread_id
 
     def _thread_config(self) -> dict[str, Any]:
-        features = {"fast_mode": _parse_bool(os.environ.get("HOST_CODEX_CLI_FAST_MODE"), default=True)}
+        features = {"fast_mode": _parse_bool(os.environ.get("HOST_CODEX_CLI_FAST_MODE"), default=False)}
         for env_name, feature_name, default in _APP_SERVER_DISABLED_FEATURES:
             features[feature_name] = not _parse_bool(os.environ.get(env_name), default=default)
         config: dict[str, Any] = {
-            "model_reasoning_effort": resolve_codex_cli_reasoning_effort(self.model_id),
+            "model_reasoning_effort": self.reasoning_effort,
             "features": features,
             "tools": {
                 "view_image": False,
@@ -771,7 +1025,7 @@ class _CodexAppServerWorker:
                 "sandboxPolicy": None,
                 "model": self.model_id,
                 "serviceTier": None,
-                "effort": resolve_codex_cli_reasoning_effort(self.model_id),
+                "effort": self.reasoning_effort,
                 "summary": None,
                 "personality": "none",
                 "outputSchema": None,
@@ -918,6 +1172,9 @@ def _get_codex_app_server_worker(
     server_key: str,
     session_key: str | None = None,
     feature_key: str | None = None,
+    reasoning_effort: str | None = None,
+    app_profile: str | None = None,
+    codex_home: Path | None = None,
 ) -> _CodexAppServerWorker:
     with _APP_SERVER_LOCK:
         worker = _APP_SERVER_WORKERS.get(server_key)
@@ -931,6 +1188,9 @@ def _get_codex_app_server_worker(
                 server_key=server_key,
                 session_key=session_key,
                 feature_key=feature_key,
+                reasoning_effort=reasoning_effort,
+                app_profile=app_profile,
+                codex_home=codex_home,
             )
             _APP_SERVER_WORKERS[server_key] = worker
         return worker
@@ -949,6 +1209,7 @@ def prewarm_codex_app_server(
     feature_keys: Sequence[str] | None = None,
     timeout_ms: int | None = None,
     sandbox: str | None = None,
+    run_model_probe: bool | None = None,
 ) -> dict[str, Any]:
     """Start the shared Codex app-server and pre-create per-feature threads.
 
@@ -967,60 +1228,127 @@ def prewarm_codex_app_server(
     run_root.mkdir(parents=True, exist_ok=True)
     workdir = _resolve_workdir(run_root)
     workdir.mkdir(parents=True, exist_ok=True)
-    resolved_model = resolve_codex_cli_model(model_id)
     resolved_sandbox = str(sandbox or os.environ.get("HOST_CODEX_CLI_SANDBOX") or "read-only").strip() or "read-only"
     timeout_s = max(1.0, resolve_codex_cli_timeout_ms(timeout_ms) / 1000.0)
     deadline = time.monotonic() + timeout_s
     raw_feature_keys = [str(item or "").strip() for item in (feature_keys or [])]
     resolved_feature_keys = [item for item in raw_feature_keys if item] or ["pool:EXEC_INTENT:C"]
-    server_key = _app_server_key(
-        command=command,
-        model_id=resolved_model,
-        sandbox=resolved_sandbox,
-        workdir=workdir,
+    resolved_run_model_probe = (
+        _parse_bool(os.environ.get("HOST_CODEX_APP_SERVER_MODEL_PREWARM_ENABLED"), default=False)
+        if run_model_probe is None
+        else bool(run_model_probe)
     )
-    worker = _get_codex_app_server_worker(
-        command=command,
-        model_id=resolved_model,
-        sandbox=resolved_sandbox,
-        workdir=workdir,
-        run_root=run_root,
-        server_key=server_key,
-        session_key=server_key,
-        feature_key="startup_prewarm",
-    )
+    default_model = resolve_codex_cli_model(model_id)
+    groups: dict[str, dict[str, Any]] = {}
+    for feature_key in resolved_feature_keys:
+        feature_model = _feature_key_model_override(feature_key, default_model)
+        feature_profile = resolve_codex_app_profile(feature_key)
+        feature_home = resolve_codex_cli_home(profile=feature_profile, feature_key=feature_key)
+        feature_reasoning_effort = resolve_codex_cli_reasoning_effort(
+            feature_model,
+            feature_key=feature_key,
+        )
+        server_key = _app_server_key(
+            command=command,
+            model_id=feature_model,
+            sandbox=resolved_sandbox,
+            workdir=workdir,
+            reasoning_effort=feature_reasoning_effort,
+            profile=feature_profile,
+            feature_key=feature_key,
+        )
+        group = groups.setdefault(
+            server_key,
+            {
+                "model_id": feature_model,
+                "reasoning_effort": feature_reasoning_effort,
+                "app_profile": feature_profile,
+                "codex_home": feature_home,
+                "feature_keys": [],
+            },
+        )
+        group["feature_keys"].append(feature_key)
+    worker_pids: list[int] = []
+    warmed_profiles: list[str] = []
+    thread_keys: list[str] = []
+    model_probe_count = 0
     try:
-        with worker._lock:
-            if worker.proc and worker.proc.poll() is None:
-                worker._ensure_started_locked(deadline=deadline)
-            else:
-                with _APP_SERVER_START_LOCK:
+        for server_key, group in groups.items():
+            worker = _get_codex_app_server_worker(
+                command=command,
+                model_id=str(group["model_id"]),
+                sandbox=resolved_sandbox,
+                workdir=workdir,
+                run_root=run_root,
+                server_key=server_key,
+                session_key=server_key,
+                feature_key="startup_prewarm",
+                reasoning_effort=str(group["reasoning_effort"]),
+                app_profile=str(group["app_profile"]),
+                codex_home=group["codex_home"],
+            )
+            with worker._lock:
+                if worker.proc and worker.proc.poll() is None:
                     worker._ensure_started_locked(deadline=deadline)
-            thread_keys: list[str] = []
-            for feature_key in resolved_feature_keys:
-                response_format = {"type": "json_object"} if "EXEC_INTENT" in feature_key else None
-                thread_key = _session_key(
-                    feature_key=feature_key,
-                    model_id=resolved_model,
-                    sandbox=resolved_sandbox,
-                    workdir=workdir,
-                    response_format=response_format,
-                )
-                worker._ensure_thread_locked(thread_key=thread_key, deadline=deadline)
-                thread_keys.append(thread_key)
+                else:
+                    with _APP_SERVER_START_LOCK:
+                        worker._ensure_started_locked(deadline=deadline)
+                for feature_key in list(group["feature_keys"]):
+                    response_format = {"type": "json_object"} if "EXEC_INTENT" in feature_key else None
+                    thread_key = _session_key(
+                        feature_key=feature_key,
+                        model_id=str(group["model_id"]),
+                        sandbox=resolved_sandbox,
+                        workdir=workdir,
+                        response_format=response_format,
+                        reasoning_effort=str(group["reasoning_effort"]),
+                    )
+                    thread_id = worker._ensure_thread_locked(thread_key=thread_key, deadline=deadline)
+                    thread_keys.append(thread_key)
+                    if resolved_run_model_probe:
+                        warm_prompt = build_codex_cli_prompt(
+                            [
+                                {
+                                    "role": "system",
+                                    "content": "Return exactly: ok",
+                                },
+                                {
+                                    "role": "user",
+                                    "content": f"startup model warmup for {feature_key}",
+                                },
+                            ],
+                            response_format=None,
+                        )
+                        worker._run_turn_locked(
+                            thread_id=thread_id,
+                            prompt=warm_prompt,
+                            response_format=None,
+                            deadline=deadline,
+                        )
+                        model_probe_count += 1
+            if worker.proc:
+                worker_pids.append(int(worker.proc.pid))
+            warmed_profiles.append(str(group["app_profile"]))
         return {
             "status": "OK",
-            "model_id": resolved_model,
-            "pid": worker.proc.pid if worker.proc else None,
+            "model_id": default_model,
+            "pid": worker_pids[0] if worker_pids else None,
+            "pids": worker_pids,
+            "profiles": sorted(set(warmed_profiles)),
+            "profile_count": len(set(warmed_profiles)),
             "feature_count": len(resolved_feature_keys),
-            "thread_count": len(worker.thread_ids),
+            "thread_count": len(thread_keys),
+            "model_probe_count": model_probe_count,
             "worker_count": len(_APP_SERVER_WORKERS),
             "feature_keys": resolved_feature_keys,
             "thread_keys": thread_keys,
             "latency_ms": int(round((time.perf_counter() - started_at) * 1000)),
         }
     except Exception:
-        _drop_codex_app_server_worker(server_key, worker)
+        for server_key in list(groups):
+            worker = _APP_SERVER_WORKERS.get(server_key)
+            if worker is not None:
+                _drop_codex_app_server_worker(server_key, worker)
         raise
 
 
@@ -1096,6 +1424,9 @@ def invoke_codex_cli_text(
 
     sandbox = str(os.environ.get("HOST_CODEX_CLI_SANDBOX") or "read-only").strip() or "read-only"
     resolved_model = resolve_codex_cli_model(model_id)
+    resolved_reasoning_effort = resolve_codex_cli_reasoning_effort(resolved_model, feature_key=feature_key)
+    app_profile = resolve_codex_app_profile(feature_key)
+    codex_home = resolve_codex_cli_home(profile=app_profile, feature_key=feature_key)
     prompt = build_codex_cli_prompt(messages, response_format=response_format)
     session_state_path = _session_state_path(run_root)
     session_key = _session_key(
@@ -1104,6 +1435,7 @@ def invoke_codex_cli_text(
         sandbox=sandbox,
         workdir=workdir,
         response_format=response_format,
+        reasoning_effort=resolved_reasoning_effort,
     )
     if codex_app_server_lm_enabled() and not _parse_bool(os.environ.get("HOST_CODEX_CLI_FORCE_EXEC"), default=False):
         server_key = _app_server_key(
@@ -1111,6 +1443,9 @@ def invoke_codex_cli_text(
             model_id=resolved_model,
             sandbox=sandbox,
             workdir=workdir,
+            reasoning_effort=resolved_reasoning_effort,
+            profile=app_profile,
+            feature_key=feature_key,
         )
         worker = _get_codex_app_server_worker(
             command=command,
@@ -1121,6 +1456,9 @@ def invoke_codex_cli_text(
             server_key=server_key,
             session_key=session_key,
             feature_key=feature_key,
+            reasoning_effort=resolved_reasoning_effort,
+            app_profile=app_profile,
+            codex_home=codex_home,
         )
         try:
             return worker.generate(
@@ -1155,7 +1493,7 @@ def invoke_codex_cli_text(
             "-o",
             str(output_path),
             "-",
-        ], resume=False), model_id=resolved_model)
+        ], resume=False), model_id=resolved_model, effort=resolved_reasoning_effort, feature_key=feature_key)
 
     def _resume_command(resolved_session_id: str) -> list[str]:
         return _apply_reasoning_effort(_apply_lightweight_flags([
@@ -1171,7 +1509,7 @@ def invoke_codex_cli_text(
             str(output_path),
             resolved_session_id,
             "-",
-        ], resume=True), model_id=resolved_model)
+        ], resume=True), model_id=resolved_model, effort=resolved_reasoning_effort, feature_key=feature_key)
 
     cmd = _resume_command(session_id) if session_id else _fresh_command()
     is_resume = bool(session_id)
@@ -1180,7 +1518,7 @@ def invoke_codex_cli_text(
     if (not session_reuse) and _parse_bool(os.environ.get("HOST_CODEX_CLI_EPHEMERAL"), default=False):
         cmd.insert(-1, "--ephemeral")
 
-    env = _build_codex_cli_env(run_dir)
+    env = _build_codex_cli_env(run_dir, codex_home=codex_home)
 
     def _run(cmd_to_run: list[str]) -> subprocess.CompletedProcess[str]:
         return _run_codex_cli_process(
@@ -1206,6 +1544,7 @@ def invoke_codex_cli_text(
             {
                 "cmd": cmd,
                 "feature_key": feature_key,
+                "app_profile": app_profile,
                 "session_key": session_key,
                 "session_reuse": session_reuse,
                 "session_id_before": session_id,

@@ -1,4 +1,4 @@
-"""Canonical public skill ids for Agent runtime v2."""
+﻿"""Canonical public skill ids for Agent runtime v2."""
 
 from __future__ import annotations
 
@@ -34,7 +34,7 @@ AGENT_RUN_MODE_BY_SKILL_ID: dict[str, str] = {
     "agent_memory_curator": "inspect",
     "agent_document_digest": "research",
     "agent_frontend_review": "inspect",
-    "agent_browser_research": "research",
+    "browser_research": "research",
     "agent_frontend_acceptance": "inspect",
     "agent_web_corpus_collector": "worker",
     "agent_lightnovel_recommender": "worker",
@@ -51,3 +51,4 @@ __all__ = [
     "AGENT_RUNTIME_SKILL_IDS",
     "is_agent_runtime_skill",
 ]
+

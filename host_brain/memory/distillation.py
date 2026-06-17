@@ -963,7 +963,7 @@ def _sanitize_life_distillation_text(*, text: str, metadata: Mapping[str, Any]) 
         should_distill = False
     if action in _LIFE_DISTILLATION_NOISE_ACTIONS:
         return None
-    inner_event = event_source in {"inner_world", "inner_stream", "inner_activity"}
+    inner_event = event_source in {"inner_world", "inner_stream", "inner_activity"} or _looks_like_private_inner_event(action)
     if inner_event and not should_distill:
         return None
 
@@ -1021,7 +1021,7 @@ def _life_llm_source_text(*, fallback_text: str, metadata: Mapping[str, Any]) ->
         should_distill = False
     if action in _LIFE_DISTILLATION_NOISE_ACTIONS:
         return None
-    if event_source in {"inner_world", "inner_stream", "inner_activity"} and not should_distill:
+    if (event_source in {"inner_world", "inner_stream", "inner_activity"} or _looks_like_private_inner_event(action)) and not should_distill:
         return None
     truth_state = str(metadata.get("truth_state") or "").strip().upper()
     if truth_state in {"CORRECTED", "SUPPRESSED"}:
@@ -1097,6 +1097,8 @@ def _semantic_statement_from_life_text(statement: str, *, action: str, allow_use
     if len(body) < 4:
         return None
     compact = _compact_text(body)
+    if _looks_like_private_inner_event(compact):
+        return None
     if _life_distillation_text_is_noise(compact):
         return None
     if _life_preference_has_unresolved_pronoun(compact):
@@ -1112,6 +1114,21 @@ def _semantic_statement_from_life_text(statement: str, *, action: str, allow_use
     if _is_life_stable_fact(compact):
         return f"稳定事实：{body}"
     return None
+
+
+def _looks_like_private_inner_event(value: Any) -> bool:
+    compact = _compact_text(value)
+    return any(
+        token in compact
+        for token in (
+            "innerworld",
+            "innerstream",
+            "inneractivity",
+            "innerworldmonologuetick",
+            "innerstreamtick",
+            "innerthought",
+        )
+    )
 
 
 def _life_semantic_body(statement: str) -> str:

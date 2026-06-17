@@ -15,9 +15,7 @@ import re
 import shutil
 import subprocess
 import time
-import urllib.request
 import uuid
-import websocket
 import zipfile
 from pathlib import Path
 from typing import Any, Mapping
@@ -211,124 +209,35 @@ def _fetch_html(url: str) -> str:
     return data.decode(charset, errors="replace")
 
 
-_AGENT_CHROME_PROFILE = str(Path(__file__).resolve().parents[2] / "runtime" / "browser" / "agent-chrome-profile")
-
-
-def _cdp_port_alive() -> bool:
-    try:
-        urllib.request.urlopen("http://127.0.0.1:9222/json/version", timeout=2)
-        return True
-    except Exception:
-        return False
-
-
-def _ensure_cdp_chrome() -> None:
-    """Auto-start a dedicated Chrome with debug port 9222 for SPA page capture."""
-    if _cdp_port_alive():
-        return
-    chrome_bin = None
-    for candidate in (
-        r"C:\Program Files\Google\Chrome\Application\chrome.exe",
-        r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
-    ):
-        if os.path.isfile(candidate):
-            chrome_bin = candidate
-            break
-    if not chrome_bin:
-        logger.warning("Chrome not found; CDP capture unavailable")
-        return
-    os.makedirs(_AGENT_CHROME_PROFILE, exist_ok=True)
-    try:
-        creationflags = 0x00000008 if os.name == "nt" else 0
-        subprocess.Popen(
-            [chrome_bin, "--remote-debugging-port=9222", "--remote-allow-origins=*",
-             f"--user-data-dir={_AGENT_CHROME_PROFILE}", "about:blank",
-             "--no-first-run", "--no-default-browser-check"],
-            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-            creationflags=creationflags,
-        )
-    except Exception as exc:
-        logger.warning("Failed to start agent Chrome: %s", exc)
-        return
-    for _ in range(10):
-        time.sleep(1.5)
-        if _cdp_port_alive():
-            return
-
-
-def _fetch_html_cdp(url: str, *, timeout: float = 90) -> str:
-    """Capture SPA-rendered HTML via Chrome DevTools Protocol. Falls back to requests."""
+def _fetch_html_playwright(url: str, *, timeout: float = 90) -> str:
+    """Capture SPA-rendered HTML through the shared Playwright runtime."""
     if not _is_lightnovel_fun_url(url):
         return _fetch_html(url)
 
-    # Ensure agent Chrome is running
-    _ensure_cdp_chrome()
-
     try:
-        # Lightweight inline CDP — no dependency on full browser_executor stack
-        tabs_raw = urllib.request.urlopen("http://127.0.0.1:9222/json", timeout=5).read()
-        tabs = json.loads(tabs_raw.decode("utf-8", errors="replace"))
-        ws_url = ""
-        for t in tabs:
-            if t.get("type") == "page" and t.get("url", "").startswith("http"):
-                ws_url = t["webSocketDebuggerUrl"]
-                break
-        if not ws_url:
-            raise RuntimeError("No Chrome page tab on debug port 9222")
+        from host_brain.agent_runtime.browser_automation_service import get_browser_automation_service  # noqa: PLC0415
 
-        # Navigate
-        ws = websocket.create_connection(ws_url, timeout=15)
-        ws.send(json.dumps({"id": 1, "method": "Page.navigate", "params": {"url": url}}))
-        deadline = time.monotonic() + timeout
-        while time.monotonic() < deadline:
-            msg_raw = ws.recv()
-            msg = json.loads(msg_raw)
-            if msg.get("id") == 1:
-                break
-        ws.close()
-
-        # Wait for SPA rendering
-        ws = websocket.create_connection(ws_url, timeout=15)
-        for _ in range(30):
-            time.sleep(1.5)
-            ws.send(json.dumps({"id": 2, "method": "Runtime.evaluate",
-                "params": {"expression": "document.body && document.body.innerText && document.body.innerText.length", "returnByValue": True}}))
-            dl2 = time.monotonic() + 10
-            while time.monotonic() < dl2:
-                msg = json.loads(ws.recv())
-                if msg.get("id") == 2:
-                    body_len = int(msg.get("result", {}).get("result", {}).get("value", 0) or 0)
-                    if body_len > 1000:
-                        break
-            if body_len > 1000:
-                break
-        ws.close()
-
-        # Scroll for lazy-load images
-        ws = websocket.create_connection(ws_url, timeout=15)
-        for y in (2000, 5000, 10000, 20000, 40000, 80000):
-            ws.send(json.dumps({"id": 99, "method": "Runtime.evaluate",
-                "params": {"expression": f"window.scrollTo(0,{y})", "returnByValue": True}}))
-            time.sleep(0.3)
-        ws.close()
-
-        # Get full rendered HTML
-        ws = websocket.create_connection(ws_url, timeout=30)
-        ws.send(json.dumps({"id": 99, "method": "Runtime.evaluate",
-            "params": {"expression": "document.documentElement.outerHTML", "returnByValue": True}}))
-        html_val = None
-        dl3 = time.monotonic() + 60
-        while time.monotonic() < dl3:
-            msg = json.loads(ws.recv())
-            if msg.get("id") == 99:
-                html_val = msg.get("result", {}).get("result", {}).get("value", "")
-                break
-        ws.close()
-
+        browser = get_browser_automation_service(session_id="natsume_lightnovel")
+        html_val = browser.open_wait_eval(
+            url,
+            """async () => {
+  for (const y of [2000, 5000, 10000, 20000, 40000, 80000]) {
+    window.scrollTo(0, y);
+    await new Promise(resolve => setTimeout(resolve, 250));
+  }
+  window.scrollTo(0, 0);
+  await new Promise(resolve => setTimeout(resolve, 500));
+  return document.documentElement.outerHTML;
+}""",
+            wait_expression="document.body && document.body.innerText && document.body.innerText.length > 1000",
+            open_timeout_ms=int(timeout * 1000),
+            wait_timeout_ms=int(timeout * 1000),
+            eval_timeout_ms=int(timeout * 1000),
+        )
         if html_val and len(html_val) > 5000:
             return html_val
     except Exception as exc:
-        logger.warning("CDP fetch failed for %s: %s", url, exc)
+        logger.warning("Playwright fetch failed for %s: %s", url, exc)
     return _fetch_html(url)
 
 
@@ -340,8 +249,8 @@ def _read_source_html(*, url: str, html_path: str) -> tuple[str, str]:
         raise ValueError("No source URL or HTML path provided")
     if not _is_lightnovel_fun_url(url):
         raise ValueError(f"Unsupported EPUB source domain: {url}")
-    # Try CDP first for SPA pages (lightnovel.fun is Nuxt.js SPA)
-    html_text = _fetch_html_cdp(url)
+    # Try Playwright first for SPA pages (lightnovel.fun is Nuxt.js SPA)
+    html_text = _fetch_html_playwright(url)
     return html_text, url
 
 
@@ -509,22 +418,68 @@ def _extract_blocks(content: Tag, image_map: Mapping[str, str]) -> list[dict[str
     return blocks
 
 
+def _chapter_heading_kind(text: str) -> str | None:
+    normalized = re.sub(r"\s+", " ", str(text or "").strip())
+    if not normalized or len(normalized) > 110:
+        return None
+    if re.match(
+        r"^(序章|终章|終章|尾声|尾聲|後記|后记|あとがき|特典|プロローグ|エピローグ)(?:$|[\s　].{0,90}$)",
+        normalized,
+    ):
+        return "named"
+    if re.match(r"^第[一二三四五六七八九十百千万千\d]+[章話话節节回](?:$|[\s　].{0,90}$)", normalized):
+        return "cjk_numbered"
+    if re.match(r"^[1-9]\d?[\.．、]\s*\S.{0,80}$", normalized):
+        return "arabic_numbered"
+    return None
+
+
+def _strip_toc_heading_run(blocks: list[dict[str, str]]) -> list[dict[str, str]]:
+    """Remove page TOC entries while preserving the first chapter title.
+
+    lightnovel.fun articles often contain a plain-text TOC:
+
+        目录
+        序章 ...
+        1. ...
+        2. ...
+
+    Those entries are not body content. Keeping them creates a fake first chapter
+    that contains the whole TOC before the actual prose. We replace the TOC run
+    with a single synthetic first heading so prologue text still has a chapter
+    title even when the source does not repeat it after the TOC.
+    """
+    stripped: list[dict[str, str]] = []
+    i = 0
+    while i < len(blocks):
+        block = blocks[i]
+        text = str(block.get("text") or "").strip() if block.get("type") == "p" else ""
+        if text in {"目录", "目錄", "目次", "CONTENTS", "Contents"}:
+            j = i + 1
+            toc_titles: list[str] = []
+            while j < len(blocks):
+                candidate = blocks[j]
+                candidate_text = str(candidate.get("text") or "").strip() if candidate.get("type") == "p" else ""
+                if not candidate_text or _chapter_heading_kind(candidate_text) is None:
+                    break
+                toc_titles.append(candidate_text)
+                j += 1
+            if len(toc_titles) >= 2:
+                i = j
+                continue
+        stripped.append(block)
+        i += 1
+    return stripped
+
+
 def _split_chapters(blocks: list[dict[str, str]]) -> list[dict[str, Any]]:
+    blocks = _strip_toc_heading_run(blocks)
     chapters: list[dict[str, Any]] = []
     current: dict[str, Any] = {"id": "frontmatter", "title": "版权信息与插图", "blocks": []}
-    heading_re = re.compile(r"^(序章|第[一二三四五六七八九十百千\d]+[章話话節节回]|终章|後記|后记|あとがき|特典|プロローグ|エピローグ)\b")
     chapter_index = 1
-    # Minimum text chars before allowing a new chapter split.
-    # Prevents page-TOC headings (which appear with little surrounding text) from creating spurious chapters.
-    MIN_CHARS_BEFORE_SPLIT = 400
     for block in blocks:
-        if block.get("type") == "p" and heading_re.match(block.get("text", "")):
+        if block.get("type") == "p" and _chapter_heading_kind(block.get("text", "")) is not None:
             title = block["text"]
-            current_chars = sum(len(b.get("text", "")) for b in current["blocks"] if b.get("type") != "img")
-            if current_chars < MIN_CHARS_BEFORE_SPLIT:
-                # Looks like a page TOC heading — keep it in frontmatter, don't split
-                current["blocks"].append(block)
-                continue
             if current["blocks"]:
                 chapters.append(current)
             current = {"id": f"chapter_{chapter_index:02d}", "title": title, "blocks": [block]}
@@ -533,6 +488,12 @@ def _split_chapters(blocks: list[dict[str, str]]) -> list[dict[str, Any]]:
         current["blocks"].append(block)
     if current["blocks"]:
         chapters.append(current)
+    if len(chapters) == 1 and chapters[0].get("id") == "frontmatter":
+        blocks_only = list(chapters[0].get("blocks") or [])
+        if blocks_only:
+            text_chars = sum(len(str(b.get("text") or "")) for b in blocks_only if b.get("type") == "p")
+            if text_chars >= 1200:
+                chapters = [{"id": "chapter_01", "title": "正文", "blocks": blocks_only}]
     return chapters
 
 

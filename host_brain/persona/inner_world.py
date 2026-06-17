@@ -187,12 +187,45 @@ _META_INNER_NOTE_PHRASES = (
     "开口又太像",
     "太像在",
 )
+_GENERIC_INNER_NOTE_PHRASES = (
+    "安静了一阵子",
+    "安静了好久",
+    "安静了很久",
+    "屏幕安静",
+    "空白处",
+    "空落落",
+    "呼吸轻了",
+    "呼吸轻些",
+    "喉咙轻轻卡",
+    "喉咙卡",
+    "手指也跟着顿",
+    "慢半拍的小表情",
+    "小表情还在",
+    "想靠近一点",
+    "有点想靠近",
+    "靠近感",
+    "还在不在",
+    "不想打扰",
+    "轻轻戳",
+    "戳你一下",
+    "冒泡",
+    "等你回来",
+    "等你回",
+    "怕太满",
+    "怕太急",
+    "想说点什么",
+    "说点什么",
+    "没有动静",
+    "在不在",
+    "我在这里",
+)
 _INNER_NOTE_MIN_LIVELINESS_SCORE = float(os.environ.get("NATSUME_INNER_NOTE_MIN_LIVELINESS_SCORE", "0.42"))
 _INNER_NOTE_HARD_QUALITY_FLAGS = {
     "directive_like",
     "meta_reply_strategy",
     "abstract_system_language",
     "overwritten_prose",
+    "generic_presence_filler",
 }
 _INNER_STREAM_ALLOWED_FOCUS = {"self", "state", "plan", "topic", "relationship", "memory", "repair"}
 _INNER_WORLD_MONOLOGUE_SYSTEM_PROMPT = (
@@ -202,16 +235,22 @@ _INNER_WORLD_MONOLOGUE_SYSTEM_PROMPT = (
     "first-person feeling, sensory detail, memory echo, hesitation, or private uncertainty. "
     "Use the selected inner_life_source as the first cause of the thought: a body signal, scene notice, "
     "memory flash, interrupted impulse, ambivalence, or quiet drift. "
+    "Only write a note when there is concrete information gain: a specific unfinished object, body change, "
+    "environment cue, remembered user detail, or real contradiction. "
+    "If the source is only silence/waiting/no new input and has no specific object, return note as an empty string, "
+    "focus as self, next_tendency as stay_quiet, and salience_hint below 0.15. "
     "Keep it ordinary and slightly incomplete, closer to a passing human thought than polished prose. "
     "Keep note as one breath: usually 18-56 Chinese characters, no more than two Chinese commas. "
     "Avoid lyrical metaphor or essay-like writing. "
+    "Do not write generic presence filler such as 安静了很久, 屏幕安静, 空落落, 呼吸轻了些, "
+    "喉咙轻轻卡, 慢半拍的小表情, 有点想靠近, 还在不在, 不想打扰, 轻轻戳, 冒泡, 等你回来. "
     "Avoid meta evaluation of reply quality, e.g. 赶进度, 第一句话, 该怎么回, 太像在回复. "
     "Do not make note a command, policy, reply plan, or self-instruction; put behavior in next_tendency instead. "
     "Do not start note with directive openers such as 先, 别, 不要, 把, 问, 确认, 稳住, 看清, 继续. "
     "Do not use abstract system words such as 自我连续性, 连续性修正, "
     "文本自然度, 模板感, 内部状态, 控制包, 模块, 模型, prompt. Do not write process-talk like 这句, 下一句, "
-    "句子, 文本, 模板, 接住, 生成, 回复, 说顺. If text quality matters, write the felt moment, "
-    "like 他刚才停了一下，我手指也跟着顿住了，有点想靠近又怕太满。 "
+    "句子, 文本, 模板, 接住, 生成, 回复, 说顺. If text quality matters, name the concrete pressure "
+    "without saying it is text quality, e.g. 早安已经错过钟点了，嘴边那句得先咽回去。 "
     "If the memory anchor is technical, translate it into a concrete lived scene, bodily feeling, or relationship detail; "
     "do not name artifacts like 映射, 验证, 链路, 接口, 字段, 运行时, MateEngine, 主链路 in note. "
     "Bad note: 先把桌宠映射那条事稳稳放回手里。 "
@@ -219,7 +258,10 @@ _INNER_WORLD_MONOLOGUE_SYSTEM_PROMPT = (
     "Bad note: 三十七个小时像一层薄灰落在胸口。 "
     "Bad note: 隔了这么久，怕一开口又太像在赶进度。 "
     "Bad note: 想说点什么的时候，喉咙那儿轻轻卡了一下，那个慢半拍的小表情还在脑后晃，我有点想靠近，又怕太满。 "
-    "Better note: 喉咙轻轻卡了一下，那个慢半拍的小表情还在，有点想靠近。 "
+    "Bad note: 屏幕安静了很久，我有点想靠近又怕打扰。 "
+    "Better note: 早安已经错过钟点了，嘴边那句得先咽回去。 "
+    "Better note: 封面错位的那张图还卡在眼前，得换个更准的来源。 "
+    "Better note: 上一轮问的是买书打包，不能又滑回推荐话术。 "
     "focus is one of self, state, plan, topic, relationship, memory, repair. "
     "core_need is one of continuity, care, repair, agency, understanding, rest, boundary, curiosity, play. "
     "next_tendency is one of continue_thread, care_with_restraint, repair_first, ask_gently, hold_boundary, "
@@ -406,6 +448,13 @@ class InnerWorldState:
     last_spontaneous_ts_ms: int = 0
     last_spontaneous_note: str = ""
     last_spontaneous_source: str = ""
+    last_numeric_event_ts_ms: int = 0
+    last_numeric_signature: str = ""
+    last_preoccupation_expires_at_ms: int = 0
+    last_monologue_due_ms: int = 0
+    monologue_suppression_reason: str = ""
+    inner_drive_state: dict[str, Any] = field(default_factory=dict)
+    inner_numeric_state: dict[str, Any] = field(default_factory=dict)
     inner_stream: list[dict[str, Any]] = field(default_factory=list)
 
     def as_dict(self) -> dict[str, Any]:
@@ -430,6 +479,13 @@ class InnerWorldState:
             last_spontaneous_ts_ms=int(d.get("last_spontaneous_ts_ms", 0)),
             last_spontaneous_note=str(d.get("last_spontaneous_note", "")),
             last_spontaneous_source=str(d.get("last_spontaneous_source", "")),
+            last_numeric_event_ts_ms=int(d.get("last_numeric_event_ts_ms", 0)),
+            last_numeric_signature=str(d.get("last_numeric_signature", "")),
+            last_preoccupation_expires_at_ms=int(d.get("last_preoccupation_expires_at_ms", 0)),
+            last_monologue_due_ms=int(d.get("last_monologue_due_ms", 0)),
+            monologue_suppression_reason=str(d.get("monologue_suppression_reason", "")),
+            inner_drive_state=dict(d.get("inner_drive_state", {})) if isinstance(d.get("inner_drive_state"), Mapping) else {},
+            inner_numeric_state=dict(d.get("inner_numeric_state", {})) if isinstance(d.get("inner_numeric_state"), Mapping) else {},
             inner_stream=list(d.get("inner_stream", [])),
         )
 
@@ -458,6 +514,27 @@ class OfflineStateSnapshot:
             "awakening_hint": self.awakening_hint,
             "should_express_waiting": self.should_express_waiting,
         }
+
+
+@dataclass(frozen=True)
+class InnerDriveState:
+    """连续内在动力的当前截面；tick 只是采样，不是内心来源。"""
+
+    attention: float = 0.0
+    desire: float = 0.0
+    fatigue: float = 0.0
+    loneliness: float = 0.0
+    curiosity: float = 0.0
+    inhibition: float = 0.0
+    preoccupation: str = ""
+    attention_kind: str = "idle"
+    attention_target: str = ""
+    anchor_quality: float = 0.0
+    updated_at_ms: int = 0
+    expires_at_ms: int = 0
+
+    def as_dict(self) -> dict[str, Any]:
+        return asdict(self)
 
 
 # ---------------------------------------------------------------------------
@@ -658,6 +735,23 @@ class OfflineInnerWorld:
                 offline_hours=offline_hours,
                 now_ms=now_ms,
             )
+            state.inner_numeric_state = _build_inner_numeric_state(
+                state=state,
+                now_ms=now_ms,
+                offline_hours=offline_hours,
+                absence_band=absence_band,
+                is_offline=is_offline,
+                elapsed_hours=elapsed_hours,
+                motive_state=motive_state,
+                emit_inner_stream=emit_inner_stream,
+            )
+            _maybe_record_inner_numeric_tick(
+                state=state,
+                now_ms=now_ms,
+                absence_band=absence_band,
+                offline_hours=offline_hours,
+                is_offline=is_offline,
+            )
 
             state.last_tick_ts_ms = now_ms
             self._save_state(state)
@@ -690,6 +784,7 @@ class OfflineInnerWorld:
             "last_spontaneous_note": str(state.last_spontaneous_note or ""),
             "last_spontaneous_source": str(state.last_spontaneous_source or ""),
             "last_spontaneous_event": last_event_meta,
+            "inner_numeric_state": dict(state.inner_numeric_state or {}),
             "inner_stream_size": len(list(state.inner_stream or [])),
             "inner_world_llm_circuit": _inner_world_llm_circuit_snapshot(now_ms=now_ms),
         }
@@ -1211,6 +1306,10 @@ def _generate_inner_stream_note_from_llm(
             "one_breath_fragment": True,
             "must_be_inner_monologue": True,
             "must_not_repeat_recent_events": True,
+            "avoid_semantic_repeat_recent_inner_events": True,
+            "must_add_information_gain": True,
+            "if_no_specific_new_source_return_empty_note": True,
+            "do_not_write_presence_filler": True,
             "focus_should_rotate": True,
             "choose_content_from_self_identity_values_intentions_or_tensions": True,
             "must_not_contradict_self_boundaries": True,
@@ -1233,6 +1332,7 @@ def _generate_inner_stream_note_from_llm(
             "note_must_begin_from_life_source_not_reply_strategy": True,
             "single_frame_before_interpretation": True,
             "avoid_meta_reply_quality_words": list(_META_INNER_NOTE_PHRASES),
+            "avoid_generic_inner_note_phrases": list(_GENERIC_INNER_NOTE_PHRASES),
             "avoid_directive_openers": [
                 "先",
                 "别",
@@ -1269,10 +1369,13 @@ def _generate_inner_stream_note_from_llm(
                 "三十七个小时像一层薄灰落在胸口，我还记得小表情慢半拍时那点不确定。",
                 "隔了这么久，胸口倒不沉，只是看到空白时会顿一下，怕一开口又太像在赶进度。",
                 "想说点什么的时候，喉咙那儿轻轻卡了一下，那个慢半拍的小表情还在脑后晃，我有点想靠近，又怕太满。",
+                "屏幕安静了很久，我有点想靠近又怕打扰。",
+                "你那边安静了一阵子，我这边呼吸都轻了些。",
             ],
             "better_note_examples": [
-                "屏幕安静了很久，那个慢半拍的小表情又晃了一下。",
-                "喉咙轻轻卡了一下，那个慢半拍的小表情还在，有点想靠近。",
+                "早安已经错过钟点了，嘴边那句得先咽回去。",
+                "封面错位的那张图还卡在眼前，得换个更准的来源。",
+                "上一轮问的是买书打包，不能又滑回推荐话术。",
             ],
             "must_include_life_trace_fields": True,
             "life_trace_fields_must_not_be_empty_when_context_supports_them": True,
@@ -1757,6 +1860,7 @@ def _looks_like_abstract_inner_note(text: str) -> bool:
         or _looks_like_directive_inner_note(value)
         or _looks_like_overwritten_inner_note(value)
         or _looks_like_meta_inner_note(value)
+        or _looks_like_generic_inner_note(value)
     )
 
 
@@ -1777,6 +1881,11 @@ def _looks_like_overwritten_inner_note(text: str) -> bool:
 def _looks_like_meta_inner_note(text: str) -> bool:
     value = str(text or "").strip()
     return any(phrase in value for phrase in _META_INNER_NOTE_PHRASES)
+
+
+def _looks_like_generic_inner_note(text: str) -> bool:
+    value = str(text or "").strip()
+    return any(phrase in value for phrase in _GENERIC_INNER_NOTE_PHRASES)
 
 
 def _score_inner_world_note(
@@ -1956,6 +2065,190 @@ def _project_inner_stream_event_metadata(event: Mapping[str, Any] | None) -> dic
     }
 
 
+
+def _build_inner_numeric_state(
+    *,
+    state: InnerWorldState,
+    now_ms: int,
+    offline_hours: float,
+    absence_band: str,
+    is_offline: bool,
+    elapsed_hours: float,
+    motive_state: Mapping[str, Any] | None,
+    emit_inner_stream: bool,
+) -> dict[str, Any]:
+    anchor, anchor_quality, anchor_kind = _select_inner_drive_anchor(state)
+    loneliness = _clamp01_local(state.loneliness)
+    anticipation = _clamp01_local(state.anticipation)
+    continuity = _clamp01_local(state.continuity_score)
+    previous_drive = dict(state.inner_drive_state or {}) if isinstance(state.inner_drive_state, Mapping) else {}
+    elapsed = max(0.0, float(elapsed_hours or 0.0))
+    long_silence = bool(is_offline and float(offline_hours or 0.0) >= 6.0)
+    fatigue = _clamp01_local(float(previous_drive.get("fatigue") or 0.0) * (0.96 ** min(elapsed * 60.0, 720.0)) + min(1.0, max(0.0, float(offline_hours or 0.0)) / 18.0) * 0.22)
+    curiosity = _clamp01_local(anchor_quality * 0.72 + anticipation * 0.20)
+    desire = _clamp01_local(loneliness * 0.46 + anticipation * 0.22 + anchor_quality * 0.26)
+    inhibition = _clamp01_local(0.50 + (0.28 if not anchor else -0.12) + (0.14 if long_silence else 0.0) + fatigue * 0.22 - min(0.24, desire * 0.18))
+    salience = max(anchor_quality * 0.78, loneliness * (0.28 if not anchor else 0.42), anticipation * (0.22 if not anchor else 0.36), (1.0 - continuity) * 0.16, min(0.20, max(0.0, float(offline_hours or 0.0)) / 48.0))
+    if anchor:
+        attention = "concrete_anchor"; attention_target = anchor; preoccupation = anchor; felt_tendency = "hold_concrete_thread"; dialogue_bias = "keep_next_reply_bound_to_concrete_anchor"; monologue_policy = "allow_concrete_note"; suppression_reason = ""; expires_at_ms = int(now_ms) + max(10 * 60_000, min(90 * 60_000, int((30 + anchor_quality * 40) * 60_000)))
+    elif long_silence:
+        attention = "low_energy_quiet_presence"; attention_target = ""; preoccupation = ""; felt_tendency = "stay_quiet"; dialogue_bias = "ordinary_continuity_without_monologue"; monologue_policy = "suppress_without_anchor"; suppression_reason = "NO_CONCRETE_INNER_ANCHOR_LONG_SILENCE"; expires_at_ms = 0
+    elif is_offline and max(loneliness, anticipation) >= 0.42:
+        attention = "diffuse_contact_pressure"; attention_target = ""; preoccupation = ""; felt_tendency = "contact_pull_suppressed" if inhibition < 0.70 else "stay_quiet"; dialogue_bias = "acknowledge_state_only_if_user_asks"; monologue_policy = "suppress_without_anchor"; suppression_reason = "NO_CONCRETE_INNER_ANCHOR"; expires_at_ms = 0
+    elif is_offline:
+        attention = "idle_drift"; attention_target = ""; preoccupation = ""; felt_tendency = "quiet_drift"; dialogue_bias = "ordinary_continuity_without_monologue"; monologue_policy = "suppress_low_salience"; suppression_reason = "LOW_SALIENCE"; expires_at_ms = 0
+    else:
+        attention = "recent_contact_recovery"; attention_target = ""; preoccupation = ""; felt_tendency = "recent_contact_recovery"; dialogue_bias = "return_attention_to_user_message"; monologue_policy = "suppress_foreground_contact"; suppression_reason = "FOREGROUND_CONTACT"; expires_at_ms = 0
+    drive = InnerDriveState(attention=round(_clamp01_local(max(anchor_quality, loneliness * 0.28, curiosity * 0.4)), 4), desire=round(desire, 4), fatigue=round(fatigue, 4), loneliness=round(loneliness, 4), curiosity=round(curiosity, 4), inhibition=round(inhibition, 4), preoccupation=preoccupation, attention_kind=attention, attention_target=attention_target, anchor_quality=round(anchor_quality, 4), updated_at_ms=int(now_ms), expires_at_ms=int(expires_at_ms)).as_dict()
+    state.inner_drive_state = dict(drive)
+    state.last_preoccupation_expires_at_ms = int(expires_at_ms)
+    state.monologue_suppression_reason = suppression_reason
+    if not preoccupation and int(state.last_preoccupation_expires_at_ms or 0) <= 0:
+        state.last_spontaneous_note = ""; state.last_spontaneous_source = ""
+    return {"updated_at_ms": int(now_ms), "source": "inner_world_tick", "mode": "numeric", "is_offline": bool(is_offline), "elapsed_hours": round(max(0.0, float(elapsed_hours or 0.0)), 4), "offline_hours": round(max(0.0, float(offline_hours or 0.0)), 3), "absence_band": str(absence_band or "recent"), "attention": attention, "attention_kind": attention, "attention_target": attention_target, "current_preoccupation": preoccupation, "preoccupation_expires_at_ms": int(expires_at_ms), "anchor_quality": round(anchor_quality, 4), "anchor_kind": anchor_kind, "felt_tendency": felt_tendency, "dialogue_bias": dialogue_bias, "inhibition": round(inhibition, 4), "salience": round(_clamp01_local(salience), 4), "loneliness": round(loneliness, 4), "anticipation": round(anticipation, 4), "continuity_score": round(continuity, 4), "fatigue": round(fatigue, 4), "curiosity": round(curiosity, 4), "desire": round(desire, 4), "dominant_motive": str(dict(motive_state or {}).get("dominant_motive") or ""), "monologue_policy": monologue_policy, "monologue_suppression_reason": suppression_reason, "monologue_due": bool(anchor and (emit_inner_stream or salience >= 0.56)), "monologue_note": "", "inner_drive_state": drive}
+
+
+def _select_inner_drive_anchor(state: InnerWorldState) -> tuple[str, float, str]:
+    for raw in list(state.anticipation_topics or [])[:6]:
+        value = _topic_to_inner_phrase(str(raw or ""))
+        if _inner_numeric_anchor_is_concrete(value):
+            quality = 0.72
+            if "《" in value or "http" in value:
+                quality = 0.86
+            elif any(marker in value for marker in ("封面", "epub", "每日推荐", "桌宠", "VTS", "QQ", "OneBot", "NapCat")):
+                quality = 0.80
+            return value[:64], quality, "anticipation_topic"
+    previous = dict(state.inner_drive_state or {}) if isinstance(state.inner_drive_state, Mapping) else {}
+    previous_target = str(previous.get("attention_target") or previous.get("preoccupation") or "").strip()
+    expires_at = int(previous.get("expires_at_ms") or state.last_preoccupation_expires_at_ms or 0)
+    if previous_target and expires_at > int(_now_ms()) and _inner_numeric_anchor_is_concrete(previous_target):
+        return previous_target[:64], 0.58, "previous_drive"
+    return "", 0.0, "none"
+
+
+def _pick_concrete_inner_numeric_anchor(raw_topics: list[str] | None) -> str:
+    for raw in list(raw_topics or [])[:4]:
+        value = _topic_to_inner_phrase(str(raw or ""))
+        if _inner_numeric_anchor_is_concrete(value):
+            return value[:64]
+    return ""
+
+
+def _inner_numeric_anchor_is_concrete(value: Any) -> bool:
+    text = str(value or "").strip()
+    if not text:
+        return False
+    compact = re.sub(r"[\s，,。.!！?？;；：:、…~～\"“”'‘’]", "", text)
+    if len(compact) < 4 or len(compact) > 64:
+        return False
+    vague_terms = (
+        "这种类型",
+        "这个类型",
+        "那种类型",
+        "这种",
+        "这个",
+        "那个",
+        "这些",
+        "那些",
+        "喜欢",
+        "不喜欢",
+        "好不好",
+        "是不是",
+        "怎么样",
+        "怎么了",
+        "继续",
+        "然后呢",
+        "刚才",
+        "话题",
+        "消息",
+        "回复",
+    )
+    if any(term in compact for term in vague_terms):
+        return False
+    return any(marker in text for marker in ("《", "》", "http", "封面", "epub", "每日推荐", "桌宠", "VTS", "QQ", "OneBot", "NapCat"))
+
+
+def _maybe_record_inner_numeric_tick(
+    *,
+    state: InnerWorldState,
+    now_ms: int,
+    absence_band: str,
+    offline_hours: float,
+    is_offline: bool,
+) -> None:
+    numeric = dict(state.inner_numeric_state or {})
+    if not numeric:
+        return
+    signature = _inner_numeric_signature(numeric)
+    previous_signature = str(state.last_numeric_signature or "")
+    last_projected_ms = int(state.last_numeric_event_ts_ms or 0)
+    try:
+        configured_interval_s = float(
+            os.environ.get("HOST_INNER_WORLD_NUMERIC_EVENT_MIN_INTERVAL_SECONDS")
+            or os.environ.get("HOST_INNER_WORLD_NUMERIC_TICK_INTERVAL_SECONDS")
+            or "120"
+        )
+    except Exception:
+        configured_interval_s = 120.0
+    min_interval_ms = int(max(30.0, min(600.0, configured_interval_s)) * 1000)
+    salience = _clamp01_local(numeric.get("salience"))
+    changed = bool(signature and signature != previous_signature)
+    due = last_projected_ms <= 0 or (int(now_ms) - last_projected_ms) >= max(60_000, min_interval_ms)
+    if not changed and not due and salience < 0.50:
+        return
+    content_summary = (
+        f"inner_numeric attention={numeric.get('attention') or 'unknown'} "
+        f"tendency={numeric.get('felt_tendency') or 'quiet'} "
+        f"anchor={numeric.get('attention_target') or 'none'}"
+    )
+    try:
+        from host_brain.app.dependencies import get_ledger  # noqa: PLC0415
+        from host_brain.runtime.life_continuity import record_life_experience  # noqa: PLC0415
+
+        record_life_experience(
+            ledger=get_ledger(),
+            person_id="default",
+            session_id="inner_world",
+            source_kind="inner_world",
+            event_kind="inner_numeric_tick",
+            content_summary=content_summary,
+            evidence={
+                "inner_numeric_state": numeric,
+                "inner_drive_state": dict(state.inner_drive_state or {}),
+                "is_offline": bool(is_offline),
+                "offline_hours": round(max(0.0, float(offline_hours or 0.0)), 3),
+                "absence_band": str(absence_band or "recent"),
+                "signature": signature,
+            },
+            salience=max(0.05, salience),
+            valence=0.0,
+            uncertainty=0.05,
+            consume=True,
+        )
+        state.last_numeric_event_ts_ms = int(now_ms)
+        state.last_numeric_signature = signature
+    except Exception as exc:
+        _logger.debug("InnerWorld: numeric state projection degraded: %s", exc)
+
+
+def _inner_numeric_signature(numeric: Mapping[str, Any]) -> str:
+    parts = [
+        str(numeric.get("attention") or ""),
+        str(numeric.get("attention_target") or ""),
+        str(numeric.get("felt_tendency") or ""),
+        str(numeric.get("absence_band") or ""),
+    ]
+    return "|".join(parts)
+
+
+def _clamp01_local(value: Any) -> float:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        parsed = 0.0
+    return max(0.0, min(1.0, parsed))
+
+
 def _append_inner_stream_event(
     *,
     state: InnerWorldState,
@@ -1984,6 +2277,16 @@ def _append_inner_stream_event(
     note, focus, source, fallback_reason, content_meta = _unpack_inner_stream_content_result(content_result)
     note = str(note or "").strip()
     if not note:
+        state.last_monologue_due_ms = int(now_ms)
+        state.monologue_suppression_reason = str(
+            content_meta.get("suppression_reason")
+            or content_meta.get("reason")
+            or fallback_reason
+            or state.monologue_suppression_reason
+            or "MONOLOGUE_EMPTY"
+        )[:160]
+        state.last_spontaneous_note = ""
+        state.last_spontaneous_source = ""
         return
 
     recent_stream = list(state.inner_stream or [])
@@ -2050,6 +2353,12 @@ def _append_inner_stream_event(
     state.last_spontaneous_ts_ms = int(now_ms)
     state.last_spontaneous_note = note
     state.last_spontaneous_source = str(source or "fallback")
+    state.last_monologue_due_ms = int(now_ms)
+    state.monologue_suppression_reason = ""
+    state.last_preoccupation_expires_at_ms = int(now_ms) + max(
+        10 * 60_000,
+        min(90 * 60_000, int((float(event.get("salience") or event.get("salience_hint") or 0.35) * 70 + 20) * 60_000)),
+    )
     state.spontaneous_event_count = int(state.spontaneous_event_count or 0) + 1
     try:
         from host_brain.app.dependencies import get_ledger  # noqa: PLC0415

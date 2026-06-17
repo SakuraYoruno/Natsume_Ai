@@ -46,7 +46,7 @@ _LLM_SKILL_TARGET_ALLOWLIST: frozenset[str] = frozenset({
     "agent_inspect",
     "agent_organ_scan",
     "agent_persona_drift_audit",
-    "agent_browser_research",
+    "browser_research",
     "agent_document_digest",
     "agent_epub_builder",
     "agent_frontend_acceptance",
@@ -249,6 +249,10 @@ _CODEX_EPUB_BUILDER_RE = re.compile(
     r"((epub|电子书|轻小说|小说|文本|图片).{0,28}(封装|生成|制作|打包|构建|builder)"
     r"|(网页|网站).{0,28}(轻小说|小说|文本|图片).{0,28}(epub|电子书|封装|打包)"
     r"|epub\s+builder)",
+    re.IGNORECASE,
+)
+_CODEX_EPUB_CONTEXT_ACTION_RE = re.compile(
+    r"(epub|电子书|封装|打包|制作|生成|构建|下载|购买|买下来)",
     re.IGNORECASE,
 )
 _CODEX_EPUB_RECOMMENDATION_SELECTION_RE = re.compile(
@@ -1496,7 +1500,7 @@ def _build_codex_production_route_seed(text: str) -> dict[str, Any] | None:
     elif _CODEX_FRONTEND_ACCEPTANCE_RE.search(normalized):
         target_id = "agent_frontend_acceptance"
     elif _CODEX_BROWSER_RESEARCH_RE.search(normalized):
-        target_id = "agent_browser_research"
+        target_id = "browser_research"
     elif _CODEX_FRONTEND_REVIEW_RE.search(normalized):
         target_id = "agent_frontend_review"
     if not target_id:
@@ -1522,6 +1526,68 @@ def _build_codex_production_route_seed(text: str) -> dict[str, Any] | None:
         "reason_code": "THALAMUS_RULE_CODEX_PRODUCTION",
         "confidence": 0.93,
         "route_source": "thalamus.rule",
+        "args": args,
+    }
+
+
+def _build_codex_epub_route_from_recommendation_context(
+    text: str,
+    recommendation_context: Mapping[str, Any] | None,
+) -> dict[str, Any] | None:
+    normalized = _normalize_text(text)
+    if not normalized or not _CODEX_EPUB_CONTEXT_ACTION_RE.search(normalized):
+        return None
+    context = dict(recommendation_context or {})
+    if not context:
+        return None
+    item = dict(context.get("referenced_item") or {})
+    if not item:
+        index = context.get("reference_index")
+        try:
+            target_rank = int(index)
+        except Exception:
+            target_rank = 0
+        for candidate in list(context.get("items") or []):
+            if not isinstance(candidate, Mapping):
+                continue
+            rank = int(candidate.get("rank") or 0)
+            if target_rank and rank == target_rank:
+                item = dict(candidate)
+                break
+        if not item and len(list(context.get("items") or [])) == 1 and isinstance(list(context.get("items") or [])[0], Mapping):
+            item = dict(list(context.get("items") or [])[0])
+    detail_url = _normalize_text(item.get("detail_url") or item.get("url"))
+    title = _normalize_text(item.get("title") or item.get("name"))
+    if not detail_url and not title:
+        return None
+    task = normalized
+    if title:
+        task = f"{normalized}：{title}"
+    args = {
+        "task": task,
+        "problem_statement": task,
+        "start_background": True,
+        "text": normalized,
+        "user_message": normalized,
+        "site_adapter": "lightnovel.fun",
+        "selected_recommendation": item,
+        "recent_recommendation_context": context,
+        "recommendation_index": context.get("reference_index") or item.get("rank"),
+    }
+    if detail_url:
+        args["urls"] = [detail_url]
+    if title:
+        args["title"] = title
+        args["candidate_titles"] = [title]
+    if context.get("delivery_id"):
+        args["delivery_id"] = context.get("delivery_id")
+    return {
+        "route": "skill",
+        "target_id": "agent_epub_builder",
+        "task": task,
+        "reason_code": "THALAMUS_RULE_CODEX_EPUB_RECENT_RECOMMENDATION_CONTEXT",
+        "confidence": 0.94,
+        "route_source": "thalamus.context",
         "args": args,
     }
 
@@ -3110,7 +3176,7 @@ def _backfill_canonical_args(
             "agent_memory_curator",
             "agent_document_digest",
             "agent_frontend_review",
-            "agent_browser_research",
+            "browser_research",
             "agent_frontend_acceptance",
             "agent_web_corpus_collector",
             "agent_lightnovel_recommender",
@@ -3144,7 +3210,7 @@ def _backfill_canonical_args(
                 elif normalized_target in {
                     "agent_workbench_brief",
                     "agent_document_digest",
-                    "agent_browser_research",
+                    "browser_research",
                 }:
                     merged["run_mode"] = "research"
                 elif normalized_target in {"agent_repo_sentinel", "agent_memory_curator", "agent_frontend_review", "agent_frontend_acceptance"}:
@@ -3161,7 +3227,7 @@ def _backfill_canonical_args(
                     "agent_workbench_brief",
                     "agent_memory_curator",
                     "agent_document_digest",
-                    "agent_browser_research",
+                    "browser_research",
                     "agent_web_corpus_collector",
                     "agent_lightnovel_recommender",
                     "agent_epub_builder",
@@ -3352,6 +3418,40 @@ class ThalamusAgent:
             text=task or user_message,
             args_payload=args_payload,
         )
+        preference_pack: dict[str, Any] = {}
+        try:
+            from host_brain.app.user_preference_store import build_user_preference_pack  # noqa: PLC0415
+
+            preference_pack = dict(
+                build_user_preference_pack(
+                    person_id=_normalize_text(person_id) or None,
+                    query_text=task or user_message,
+                    session_id=_normalize_text(session_id) or None,
+                    conversation_id=_normalize_text(session_id) or None,
+                )
+                or {}
+            )
+        except Exception:
+            preference_pack = {}
+        epub_context_seed = _build_codex_epub_route_from_recommendation_context(
+            task or user_message,
+            dict(preference_pack or {}).get("recent_recommendation_context"),
+        )
+        if epub_context_seed and not (route == "skill" and target_id == "agent_epub_builder"):
+            target_id = _normalize_text(epub_context_seed.get("target_id")) or "agent_epub_builder"
+            route = _normalize_text(epub_context_seed.get("route"), lower=True) or "skill"
+            task = _normalize_text(epub_context_seed.get("task")) or task
+            route_reason = _normalize_text(epub_context_seed.get("reason_code")) or route_reason
+            route_source = _normalize_text(epub_context_seed.get("route_source")) or "thalamus.context"
+            route_confidence = _normalize_confidence(epub_context_seed.get("confidence")) or 0.94
+            action = _resolve_action(route=route, target_id=target_id, fallback=epub_context_seed.get("action"))
+            args_payload = dict(epub_context_seed.get("args") or {})
+            args_payload = _backfill_canonical_args(
+                route=route,
+                target_id=target_id,
+                text=task or user_message,
+                args_payload=args_payload,
+            )
         semantic_intent = _coerce_semantic_intent(draft.get("semantic_intent")) or _coerce_semantic_intent(
             args_payload.get("semantic_intent")
         )
@@ -3397,18 +3497,22 @@ class ThalamusAgent:
                 session_id=_normalize_text(session_id),
                 person_id=_normalize_text(person_id) or None,
             )
-            try:
-                from host_brain.app.user_preference_store import build_user_preference_pack  # noqa: PLC0415
+            if not preference_pack:
+                try:
+                    from host_brain.app.user_preference_store import build_user_preference_pack  # noqa: PLC0415
 
-                preference_pack = build_user_preference_pack(
-                    person_id=_normalize_text(person_id) or None,
-                    query_text=task or user_message,
-                    session_id=_normalize_text(session_id) or None,
-                    conversation_id=_normalize_text(session_id) or None,
-                    ledger=experience_store.ledger,
-                )
-            except Exception:
-                preference_pack = {}
+                    preference_pack = dict(
+                        build_user_preference_pack(
+                            person_id=_normalize_text(person_id) or None,
+                            query_text=task or user_message,
+                            session_id=_normalize_text(session_id) or None,
+                            conversation_id=_normalize_text(session_id) or None,
+                            ledger=experience_store.ledger,
+                        )
+                        or {}
+                    )
+                except Exception:
+                    preference_pack = {}
             experience_lessons = experience_store.recall_lessons(
                 person_id=_normalize_text(person_id) or None,
                 domain=_normalize_text(semantic_intent.get("domain")) if semantic_intent else None,
@@ -3593,4 +3697,5 @@ __all__ = [
     "resolve_scene_type_from_intent_decision",
     "set_thalamus_agent",
 ]
+
 

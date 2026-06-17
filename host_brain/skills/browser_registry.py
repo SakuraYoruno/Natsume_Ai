@@ -1,4 +1,4 @@
-﻿"""浏览器自动化 Skill 包（agent-browser / Playwright / Puppeteer 适配层）。
+﻿"""浏览器自动化 Skill 包（Playwright 适配层）。
 
 声明式 Provider：新增浏览器 action 时，只需补一个 DeclarativeSkillSpec。
 执行层仍由 browser_executor.py 负责。
@@ -18,9 +18,9 @@ _BROWSER_IDENTITY_ARG_KEYS = (
     "browser_state_name",
     "account_state_name",
     "browser_profile",
-    "agent_browser_session",
-    "agent_browser_state_name",
-    "agent_browser_profile",
+    "browser_session",
+    "browser_state_name",
+    "browser_profile",
 )
 
 
@@ -291,3 +291,4 @@ def build_browser_skill_registry(provider: BrowserSkillProvider | None = None) -
     registry = SkillRegistry()
     registry.register_decorated(provider or BrowserSkillProvider())
     return registry
+

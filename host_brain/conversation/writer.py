@@ -52,6 +52,8 @@ def record_user_turn(
             lang=lang,
             metadata=merged_metadata or None,
         )
+        if str(result.get("status") or "") != "OK":
+            return result
         turn = dict(result.get("turn") or {})
         _logger.info(
             "[%s] memory_event_record role=user event_id=%s turn_index=%s session_id=%s content_chars=%s",

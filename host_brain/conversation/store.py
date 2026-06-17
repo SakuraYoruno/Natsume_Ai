@@ -113,6 +113,7 @@ class TurnStore:
         limit: int,
         exclude_request_id: str | None = None,
         before_ts_ms: int | None = None,
+        before_turn_index: int | None = None,
     ) -> list[Turn]:
         session_id = str(session_id or "").strip()
         if not session_id:
@@ -125,6 +126,9 @@ class TurnStore:
         if before_ts_ms is not None:
             clauses.append("ts_ms < ?")
             params.append(int(before_ts_ms))
+        if before_turn_index is not None:
+            clauses.append("turn_index < ?")
+            params.append(int(before_turn_index))
         params.append(max(1, int(limit)))
         rows = self._conn.execute(
             f"""
@@ -138,6 +142,35 @@ class TurnStore:
             params,
         ).fetchall()
         return [self._row_to_turn(row) for row in reversed(rows)]
+
+    def find_by_request(
+        self,
+        *,
+        session_id: str,
+        request_id: str,
+        role: TurnRole | None = None,
+    ) -> Turn | None:
+        session_id = str(session_id or "").strip()
+        request_id = str(request_id or "").strip()
+        if not session_id or not request_id:
+            return None
+        clauses = ["session_id = ?", "request_id = ?"]
+        params: list[Any] = [session_id, request_id]
+        if role:
+            clauses.append("role = ?")
+            params.append(str(role))
+        row = self._conn.execute(
+            f"""
+            SELECT turn_id, session_id, person_id, request_id, role, content,
+                   ts_ms, turn_index, lang, token_count, corrupted, metadata
+            FROM conversation_turn
+            WHERE {" AND ".join(clauses)}
+            ORDER BY turn_index ASC
+            LIMIT 1
+            """,
+            params,
+        ).fetchone()
+        return self._row_to_turn(row) if row is not None else None
 
     def query_before_turn_index(
         self,

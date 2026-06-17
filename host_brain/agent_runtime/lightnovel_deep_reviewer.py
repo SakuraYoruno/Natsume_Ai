@@ -17,12 +17,16 @@ _DETAIL_URL_RE = re.compile(r"https?://[^\s｜|；。]+", re.IGNORECASE)
 _NUMBERED_ITEM_RE = re.compile(r"(?<!\d)(\d{1,2})[.、]\s*([^；\n]+)")
 _CHOICE_QUERY_RE = re.compile(
     r"(?:喜欢|好看|想看|先看|推荐|选|挑).{0,8}哪|"
+    r"(?:第\s*(?:[一二三四五六七八九十]|\d{1,2})\s*(?:本|部|个|项)?|这本|这部|那本|刚才推荐|刚刚推荐).{0,16}"
+    r"(?:详情|详细内容|详细|内容|简介|介绍|讲什么|说什么)|"
+    r"(?:详情|详细内容|详细|简介|介绍).{0,12}(?:第\s*(?:[一二三四五六七八九十]|\d{1,2})\s*(?:本|部|个|项)?|这本|这部|那本)|"
     r"哪(?:本|部|个)|哪个|哪部|"
     r"(?:这本|这部|这一个|这個|这本书|这部书|这书|它).{0,8}(?:好看|能看|值得看|怎么样|如何)|"
     r"(?:这些|那些|这几本|那几本|这三本|那三本|这十几本|那十几本|"
     r"(?:今天|今日|昨天|昨晚|前天|最近|这几天|近几天).{0,8}(?:几本|三本|十几本|推荐|推过|推送|书单))"
     r".{0,12}(?:好看|能看|值得看|怎么样|如何|喜欢|想看|先看|推荐|选|挑)"
 )
+_DETAIL_ONLY_QUERY_RE = re.compile(r"(详情|详细内容|详细|内容|简介|介绍|讲什么|说什么)")
 _BODY_TEXT_MIN_CHARS = 500
 _CACHE_VERSION = "lightnovel_deep_review:v4"
 
@@ -52,7 +56,9 @@ def should_deep_review_lightnovel_selection(*, user_message: str, packet: Mappin
     if not _enabled():
         return False
     text = _clean_text(user_message)
-    if not _CHOICE_QUERY_RE.search(text):
+    review_items = _trace_review_items(packet)
+    has_referenced_item = _packet_reference_index(packet) is not None or len(review_items) == 1
+    if not _CHOICE_QUERY_RE.search(text) and not (has_referenced_item and _DETAIL_ONLY_QUERY_RE.search(text)):
         return False
     facts = "\n".join(_packet_text_sources(packet))
     cards = _extract_cards(packet)
@@ -207,8 +213,13 @@ def review_lightnovel_selection_from_memory_packet(
         _attach_persist_result(result, persist_result)
         return result
 
-    selected = max(readable_items, key=lambda item: float(item.get("deep_review_score") or 0.0))
-    fact = _build_review_fact(selected=selected, items=reviewed)
+    reference_index = _packet_reference_index(packet)
+    referenced_item = _select_reviewed_item_by_index(readable_items, reference_index)
+    selected = referenced_item or max(readable_items, key=lambda item: float(item.get("deep_review_score") or 0.0))
+    if _DETAIL_ONLY_QUERY_RE.search(_clean_text(user_message)) and (referenced_item is not None or len(readable_items) == 1):
+        fact = _build_detail_fact(selected=selected)
+    else:
+        fact = _build_review_fact(selected=selected, items=reviewed)
     result = _result(
         status="OK",
         reason_code="LIGHTNOVEL_DEEP_REVIEW_OK",
@@ -572,6 +583,28 @@ def _extract_cards(packet: Mapping[str, Any]) -> list[dict[str, Any]]:
     return cards
 
 
+def _packet_reference_index(packet: Mapping[str, Any]) -> int | None:
+    context = packet.get("recent_recommendation_context")
+    if not isinstance(context, Mapping):
+        return None
+    value = _safe_positive_int(context.get("reference_index"))
+    if value is not None:
+        return value
+    referenced = context.get("referenced_item")
+    if isinstance(referenced, Mapping):
+        return _safe_positive_int(referenced.get("index") or referenced.get("rank") or referenced.get("reference_index"))
+    return None
+
+
+def _select_reviewed_item_by_index(items: Sequence[Mapping[str, Any]], index: int | None) -> Mapping[str, Any] | None:
+    if index is None:
+        return None
+    for item in items:
+        if _safe_positive_int(item.get("index") or item.get("rank") or item.get("reference_index")) == index:
+            return item
+    return None
+
+
 def _packet_text_sources(packet: Mapping[str, Any]) -> list[str]:
     values: list[str] = []
     for fact in list(packet.get("facts") or []):
@@ -626,6 +659,11 @@ def _packet_needs_detail_fetch(packet: Mapping[str, Any]) -> bool:
 
 def _packet_looks_like_lightnovel_recommendation(packet: Mapping[str, Any], *, facts: str) -> bool:
     if any(token in facts for token in ("轻小说", "lightnovel", "lightnovel.fun", "可比较证据")):
+        return True
+    if any("lightnovel.fun" in str(item.get("detail_url") or item.get("source_ref") or "") for item in _trace_review_items(packet)):
+        return True
+    context = packet.get("recent_recommendation_context")
+    if isinstance(context, Mapping) and str(context.get("domain") or "") == "lightnovel_recommendation":
         return True
     trace = packet.get("trace")
     if not isinstance(trace, Mapping):
@@ -773,13 +811,73 @@ def _collect_source_id(target: list[str], value: Any) -> None:
 
 def _trace_review_items(packet: Mapping[str, Any]) -> list[Mapping[str, Any]]:
     items: list[Mapping[str, Any]] = []
+    for item in _recent_recommendation_context_items(packet):
+        if not any(_same_card(item, old) for old in items):
+            items.append(item)
     for item in _trace_collection_items(packet):
-        if item not in items:
+        if not any(_same_card(item, old) for old in items):
             items.append(item)
     for item in _trace_entity_items(packet):
-        if item not in items:
+        if not any(_same_card(item, old) for old in items):
             items.append(item)
     return items
+
+
+def _recent_recommendation_context_items(packet: Mapping[str, Any]) -> list[Mapping[str, Any]]:
+    context = packet.get("recent_recommendation_context")
+    if not isinstance(context, Mapping):
+        return []
+
+    out: list[Mapping[str, Any]] = []
+    reference_index = _safe_positive_int(context.get("reference_index"))
+
+    referenced = context.get("referenced_item")
+    if isinstance(referenced, Mapping):
+        item = _normalize_recent_recommendation_item(referenced, fallback_index=reference_index)
+        if item:
+            out.append(item)
+
+    raw_items = context.get("items")
+    if isinstance(raw_items, Sequence) and not isinstance(raw_items, (str, bytes, bytearray)):
+        for offset, raw_item in enumerate(raw_items, start=1):
+            if not isinstance(raw_item, Mapping):
+                continue
+            item = _normalize_recent_recommendation_item(raw_item, fallback_index=offset)
+            if item and not any(_same_card(item, old) for old in out):
+                out.append(item)
+    return out
+
+
+def _normalize_recent_recommendation_item(item: Mapping[str, Any], *, fallback_index: int | None = None) -> dict[str, Any]:
+    index = _safe_positive_int(item.get("index") or item.get("rank") or item.get("reference_index") or fallback_index)
+    detail_url = _normalize_detail_url(str(item.get("detail_url") or item.get("source_ref") or ""))
+    title = _clean_text(item.get("title") or item.get("item_title"), limit=120)
+    if not title and not detail_url:
+        return {}
+    normalized = {
+        "index": index,
+        "rank": index,
+        "title": title,
+        "detail_url": detail_url,
+        "source_ref": detail_url,
+        "selection_reason": _clean_text(item.get("selection_reason"), limit=180),
+        "intro_snippet": _clean_text(item.get("intro_snippet"), limit=260),
+        "update_time": _clean_text(item.get("update_time"), limit=80),
+        "view_count": _clean_text(item.get("view_count"), limit=40),
+        "comment_count": _clean_text(item.get("comment_count"), limit=40),
+        "content_access_state": _clean_text(item.get("content_access_state"), limit=40),
+        "content_access_reason": _clean_text(item.get("content_access_reason"), limit=120),
+        "readable_chapter_url": _clean_text(item.get("readable_chapter_url"), limit=220),
+    }
+    return {key: value for key, value in normalized.items() if value not in ("", 0, None, [], {})}
+
+
+def _safe_positive_int(value: Any) -> int | None:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed > 0 else None
 
 
 def _trace_collection_items(packet: Mapping[str, Any]) -> list[Mapping[str, Any]]:
@@ -1328,6 +1426,28 @@ def _build_review_fact(*, selected: Mapping[str, Any], items: Sequence[Mapping[s
         f"网页深读结果（含正文）：当前更推荐第{index}本《{title}》。"
         f"原因：{reason_text}。{compare}"
     )
+
+
+def _build_detail_fact(*, selected: Mapping[str, Any]) -> str:
+    index = int(selected.get("index") or 1)
+    title = _clean_text(selected.get("title"), limit=90) or "这本"
+    intro = _fact_intro(selected.get("intro_snippet"))
+    chapter_signal = _clean_text(selected.get("chapter_signal"), limit=120)
+    observations = [
+        _spoken_review_reason(value)
+        for value in list(selected.get("body_observations") or [])
+        if _clean_text(value) and "正文内容足够支撑判断" not in _clean_text(value)
+    ]
+    parts: list[str] = []
+    if intro:
+        parts.append(f"简介线索：{intro}")
+    if chapter_signal:
+        parts.append(f"章节/开篇线索：{chapter_signal}")
+    if observations:
+        parts.append("正文观察：" + "；".join(dict.fromkeys(observations[:3])))
+    if not parts:
+        parts.append("详情页能打开，但这轮没读到足够可概括的正文线索")
+    return f"网页深读结果（含正文）：第{index}本《{title}》的详细内容：{'。'.join(parts)}。"
 
 
 def _clean_reason_bit(value: Any) -> str:

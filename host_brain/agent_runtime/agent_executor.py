@@ -1,4 +1,4 @@
-"""AgentExecutor — 基于 API Agent 替代本地 CLI 子进程。
+﻿"""AgentExecutor — 基于 API Agent 替代本地 CLI 子进程。
 
 使用 ReAct 循环（Think → Act → Observe）+ 沙箱工具执行，
 通过 LLM 池子（complete_llm_with_pool_sync）驱动，不再依赖本地 CLI 二进制。
@@ -362,12 +362,12 @@ class AgentExecutor:
             "Output a JSON object with: thought (your reasoning), tool_id (tool name), tool_args (parameters).\n"
             "\n"
             "BROWSER tips for SPA / JS-heavy pages:\n"
-            "  - After agent_browser_navigate, first use agent_browser_scrape with selector=\"body\" to get full page text.\n"
-            "  - If scrape returns 0 results, use agent_browser_execute_script with script:\n"
+            "  - After browser_navigate, first use browser_scrape with selector=\"body\" to get full page text.\n"
+            "  - If scrape returns 0 results, use browser_execute_script with script:\n"
             "    (() => document.body.innerText.substring(0, 2000))()\n"
             "    to inspect what's actually rendered in the DOM.\n"
             "  - Then use more specific selectors based on what you find.\n"
-            "  - agent_browser_execute_script is the most powerful tool — use it to extract structured data via JS.\n"
+            "  - browser_execute_script is the most powerful tool — use it to extract structured data via JS.\n"
             "\n"
             "CRITICAL — when you call agent_finish:\n"
             "  - ALWAYS provide a `final_answer` field with a natural-language summary of your findings.\n"
@@ -552,3 +552,4 @@ class AgentExecutor:
 
 
 __all__ = ["AgentExecutor", "agent_enabled"]
+

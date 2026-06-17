@@ -1,4 +1,4 @@
-"""Agent-backed production skill WorkOrder builder.
+﻿"""Agent-backed production skill WorkOrder builder.
 
 Production skills use Agent executor as a silent background worker. They may inspect,
 summarize, and propose, but the Host surface/main persona owns final wording,
@@ -21,7 +21,7 @@ AGENT_PRODUCTION_SKILL_IDS: frozenset[str] = frozenset(
         "agent_memory_curator",
         "agent_document_digest",
         "agent_frontend_review",
-        "agent_browser_research",
+        "browser_research",
         "agent_frontend_acceptance",
         "agent_web_corpus_collector",
         "agent_lightnovel_recommender",
@@ -202,8 +202,8 @@ _PRODUCTION_PROFILES: dict[str, ProductionSkillProfile] = {
         ),
         capability_tags=("agent", "production", "frontend", "ux"),
     ),
-    "agent_browser_research": ProductionSkillProfile(
-        skill_id="agent_browser_research",
+    "browser_research": ProductionSkillProfile(
+        skill_id="browser_research",
         domain="research",
         run_mode="research",
         default_workspace_strategy="temp_workspace",
@@ -217,7 +217,7 @@ _PRODUCTION_PROFILES: dict[str, ProductionSkillProfile] = {
             "Do not submit forms, log in, buy items, send messages, or bypass website restrictions.",
         ),
         capability_tags=("agent", "production", "browser", "research"),
-        allowed_actions=("read_files", "use_agent_browser", "read_public_web_pages", "capture_screenshots", "generate_report"),
+        allowed_actions=("read_files", "use_playwright_browser", "read_public_web_pages", "capture_screenshots", "generate_report"),
         artifact_contract=("result_contract.json", "sources.jsonl", "browser_trace.json", "screenshots/"),
         source_policy=(
             "Prefer public pages and user-provided URLs.",
@@ -240,7 +240,7 @@ _PRODUCTION_PROFILES: dict[str, ProductionSkillProfile] = {
             "Do not modify source files; propose fixes as owner-reviewed follow-up work.",
         ),
         capability_tags=("agent", "production", "browser", "frontend", "acceptance"),
-        allowed_actions=("read_files", "use_agent_browser", "capture_screenshots", "inspect_console", "generate_report"),
+        allowed_actions=("read_files", "use_playwright_browser", "capture_screenshots", "inspect_console", "generate_report"),
         artifact_contract=("result_contract.json", "screenshots/", "console.log", "network_errors.json", "frontend_acceptance.md"),
         source_policy=(
             "Use only local dev-server URLs or user-provided target URLs.",
@@ -262,7 +262,7 @@ _PRODUCTION_PROFILES: dict[str, ProductionSkillProfile] = {
             "Deduplicate and label provenance; do not bypass paywalls, DRM, login walls, or anti-scraping controls.",
         ),
         capability_tags=("agent", "production", "browser", "corpus", "dataset"),
-        allowed_actions=("read_files", "write_files", "use_agent_browser", "read_public_web_pages", "download_permitted_assets", "generate_report"),
+        allowed_actions=("read_files", "write_files", "use_playwright_browser", "read_public_web_pages", "download_permitted_assets", "generate_report"),
         forbidden_actions=(
             "git_push",
             "modify_secret_files",
@@ -303,7 +303,7 @@ _PRODUCTION_PROFILES: dict[str, ProductionSkillProfile] = {
         allowed_actions=(
             "read_files",
             "write_files",
-            "use_agent_browser",
+            "use_playwright_browser",
             "use_authenticated_browser_session",
             "inspect_account_owned_content",
             "prepare_purchase_plan",
@@ -363,7 +363,7 @@ _PRODUCTION_PROFILES: dict[str, ProductionSkillProfile] = {
             "Return a concise ranked recommendation list with source evidence and uncertainty.",
         ),
         capability_tags=("agent", "production", "browser", "lightnovel", "recommendation"),
-        allowed_actions=("read_files", "write_files", "use_agent_browser", "read_public_web_pages", "capture_screenshots", "generate_report"),
+        allowed_actions=("read_files", "write_files", "use_playwright_browser", "read_public_web_pages", "capture_screenshots", "generate_report"),
         forbidden_actions=(
             "git_push",
             "modify_secret_files",
@@ -485,6 +485,31 @@ _PURCHASE_REQUEST_MARKERS = (
     "coins",
 )
 
+_PURCHASE_NEGATION_MARKERS = (
+    "不购买",
+    "不买",
+    "不付费",
+    "不消费",
+    "不消耗",
+    "不花积分",
+    "不花轻币",
+    "不要购买",
+    "不要买",
+    "无需购买",
+    "无需付费",
+    "无需消费",
+    "不用购买",
+    "不用付费",
+    "不解锁",
+    "不要解锁",
+    "no purchase",
+    "without purchase",
+    "do not purchase",
+    "don't purchase",
+    "no points",
+    "without points",
+)
+
 _MAX_POINTS_RE = re.compile(
     r"(?:最多|至多|上限|不超过|max(?:imum)?\s*)?(?:花|用|消耗|spend\s*)?"
     r"(\d{1,7})\s*(?:点|积分|轻币|qb|points?|coins?)",
@@ -494,6 +519,8 @@ _MAX_POINTS_RE = re.compile(
 
 def _looks_like_purchase_request(task: str) -> bool:
     normalized = str(task or "").strip().lower()
+    if normalized and any(marker.lower() in normalized for marker in _PURCHASE_NEGATION_MARKERS):
+        return False
     return bool(normalized and any(marker.lower() in normalized for marker in _PURCHASE_REQUEST_MARKERS))
 
 
@@ -568,9 +595,12 @@ def build_production_work_order(args: dict[str, Any], *, skill_id: str) -> dict[
     persona_boundary = build_persona_boundary_contract()
     trigger_policy = build_production_trigger_policy(profile, merged)
     work_order_id = str(merged.get("work_order_id") or build_work_order_id(profile.skill_id))
-    purchase_requested = bool(merged.get("purchase_requested")) or (
-        profile.skill_id == "agent_epub_builder" and _looks_like_purchase_request(task)
-    )
+    if "purchase_requested" in merged:
+        purchase_requested = bool(merged.get("purchase_requested"))
+    else:
+        purchase_requested = (
+            profile.skill_id == "agent_epub_builder" and _looks_like_purchase_request(task)
+        )
     purchase_confirmed = bool(
         merged.get("purchase_confirmed")
         or merged.get("confirmed_purchase")
@@ -659,3 +689,4 @@ __all__ = [
     "get_production_skill_profile",
     "list_production_skill_profiles",
 ]
+

@@ -1,4 +1,4 @@
-"""Agent runtime v2 skill provider."""
+﻿"""Agent runtime v2 skill provider."""
 
 from __future__ import annotations
 
@@ -23,7 +23,6 @@ _LIGHTNOVEL_RECOMMENDER_INVOCATION_DEFAULTS = {
         "https://www.lightnovel.fun/",
         "https://www.lightnovel.fun/cn/category/3/106?type=1",
         "https://book.sfacg.com/rank/",
-        "https://www.17k.com/man/qingbook/",
     ],
     "site_adapter": "lightnovel.fun",
     "artifacts_root": "artifacts/codex_runs/lightnovel_recommender",
@@ -383,18 +382,18 @@ class AgentRuntimeSkillProvider(DeclarativeSkillProvider):
             fallback_policy="strict_fail",
         ),
         DeclarativeSkillSpec(
-            skill_name="agent_browser_research",
-            method_name="agent_browser_research",
+            skill_name="browser_research",
+            method_name="browser_research",
             clearance="LOW",
             risk_level=2,
             scope="host",
             reversible=False,
-            description=get_production_skill_profile("agent_browser_research").value_statement,
+            description=get_production_skill_profile("browser_research").value_statement,
             tool="codex_production",
             action="enqueue",
-            normalize_args=_normalize_production("agent_browser_research"),
+            normalize_args=_normalize_production("browser_research"),
             family="code",
-            capability_tags=tuple(get_production_skill_profile("agent_browser_research").capability_tags),
+            capability_tags=tuple(get_production_skill_profile("browser_research").capability_tags),
             parallelizable=True,
             fallback_policy="strict_fail",
         ),
@@ -521,3 +520,4 @@ def build_agent_runtime_skill_registry(provider: AgentRuntimeSkillProvider | Non
 
 
 __all__ = ["AgentRuntimeSkillProvider", "build_agent_runtime_skill_registry"]
+

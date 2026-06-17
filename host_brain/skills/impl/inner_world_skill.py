@@ -178,6 +178,7 @@ def _execute_inner_world_tick(
         "loneliness": result.get("loneliness"),
         "anticipation": result.get("anticipation"),
         "continuity_score": result.get("continuity_score"),
+        "inner_numeric_state": dict(result.get("inner_numeric_state") or {}),
     }
     try:
             limbic.handle_signal(
@@ -253,6 +254,7 @@ def _execute_inner_world_tick(
             "loneliness": result.get("loneliness"),
             "anticipation": result.get("anticipation"),
             "continuity_score": result.get("continuity_score"),
+            "inner_numeric_state": dict(result.get("inner_numeric_state") or {}),
         })
     except Exception:
         pass

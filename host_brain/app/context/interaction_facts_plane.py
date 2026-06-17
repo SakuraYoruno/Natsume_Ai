@@ -146,10 +146,24 @@ def assemble_interaction_facts_plane(
         current_turn_index = len(history_turns)
     elif request_id and session_id:
         max_turns = max(1, int(history_max_turns if history_max_turns is not None else conversation_max_turns()))
+        current_request_turn = None
+        try:
+            current_request_turn = get_conversation_turn_store().find_by_request(
+                session_id=session_id,
+                request_id=request_id,
+                role="user",
+            )
+        except Exception:
+            current_request_turn = None
         window = get_conversation_history().fetch_window_for_messages(
             session_id=session_id,
             max_turns=max_turns,
             exclude_request_id=request_id,
+            before_turn_index=(
+                int(current_request_turn.turn_index)
+                if current_request_turn is not None
+                else None
+            ),
             render_target_lang=render_target_lang,
             summary_threshold=(0 if not allow_older_summary else None),
         )
@@ -167,7 +181,10 @@ def assemble_interaction_facts_plane(
         ]
         older_summary = _clean_text(window.older_summary)
         try:
-            current_turn_index = int(get_conversation_turn_store().next_turn_index(session_id=session_id) - 1)
+            if current_request_turn is not None:
+                current_turn_index = int(current_request_turn.turn_index)
+            else:
+                current_turn_index = int(get_conversation_turn_store().next_turn_index(session_id=session_id) - 1)
         except Exception:
             current_turn_index = None
 

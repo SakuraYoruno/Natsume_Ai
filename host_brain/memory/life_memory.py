@@ -1,4 +1,4 @@
-"""Episode-first memory store for the digital-life memory SSOT.
+﻿"""Episode-first memory store for the digital-life memory SSOT.
 
 The first version keeps SQLite as the source of truth and treats every user
 turn, perception, scheduler event, and inner stream item as a life episode with
@@ -8296,3 +8296,4 @@ __all__ = [
     "COLLECTION_SCOPE_RECENT",
     "COLLECTION_SCOPE_DELIVERY",
 ]
+

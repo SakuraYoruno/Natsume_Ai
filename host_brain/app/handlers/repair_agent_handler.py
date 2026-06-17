@@ -86,10 +86,6 @@ def _run_command(command: list[str], *, timeout_s: int = 120) -> dict[str, Any]:
     }
 
 
-def _agent_browser_available() -> bool:
-    return _command_exists("agent-browser", "agent-browser.cmd") is not None
-
-
 def _playwright_module_available() -> bool:
     return importlib.util.find_spec("playwright") is not None
 
@@ -103,21 +99,14 @@ def _repair_browser_backend() -> dict[str, Any]:
     browser_templates = _mapping_section(templates, "browser_backend")
 
     actions: list[dict[str, Any]] = []
-    npm = _command_exists("npm.cmd", "npm")
     python_exe = _resolve_python_executable()
-
-    if not _agent_browser_available() and npm:
-        actions.append(_run_command([npm, "i", "-g", "agent-browser"], timeout_s=300))
-    agent_browser_cmd = _command_exists("agent-browser", "agent-browser.cmd")
-    if agent_browser_cmd:
-        actions.append(_run_command([agent_browser_cmd, "install"], timeout_s=300))
 
     if not _playwright_module_available():
         actions.append(_run_command([python_exe, "-m", "pip", "install", "playwright"], timeout_s=300))
     if _playwright_module_available() or _playwright_cli_available():
         actions.append(_run_command([python_exe, "-m", "playwright", "install", "chromium"], timeout_s=300))
 
-    browser_ready = _agent_browser_available() or _playwright_module_available()
+    browser_ready = _playwright_module_available()
     ok_actions = sum(1 for item in actions if item.get("ok"))
     if browser_ready:
         return {
@@ -346,7 +335,6 @@ def _build_repair_result(*, task_text: str, previous_error: str) -> dict[str, An
     if (
         "BROWSER_UNAVAILABLE" in normalized_error
         or "PLAYWRIGHT" in normalized_error
-        or "AGENT-BROWSER" in normalized_error
     ):
         _logger.info("[RepairAgent] 快速路径：浏览器后端修复")
         return _repair_browser_backend()

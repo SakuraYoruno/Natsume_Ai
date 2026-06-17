@@ -149,6 +149,59 @@ def _metadata_text(order: AgentWorkOrder, key: str, env_name: str) -> str:
     return value
 
 
+_CODEX_REASONING_EFFORTS = {"none", "minimal", "low", "medium", "high", "xhigh"}
+
+
+def _env_token(value: Any) -> str:
+    text = str(value or "").strip()
+    out: list[str] = []
+    previous_underscore = False
+    for char in text:
+        if char.isalnum():
+            out.append(char.upper())
+            previous_underscore = False
+        elif not previous_underscore:
+            out.append("_")
+            previous_underscore = True
+    return "".join(out).strip("_")
+
+
+def _valid_reasoning_effort(value: Any) -> str:
+    text = str(value or "").strip().lower()
+    return text if text in _CODEX_REASONING_EFFORTS else ""
+
+
+def _resolve_codex_runtime_reasoning_effort(order: AgentWorkOrder) -> str:
+    explicit = _valid_reasoning_effort(order.metadata.get("codex_reasoning_effort"))
+    if explicit:
+        return explicit
+    task_token = _env_token(
+        order.metadata.get("reasoning_task")
+        or order.metadata.get("task_type")
+        or order.metadata.get("task_kind")
+    )
+    skill_token = _env_token(order.metadata.get("skill_id"))
+    domain_token = _env_token(order.domain)
+    mode_token = _env_token(order.run_mode)
+    env_names = []
+    if skill_token:
+        env_names.append(f"HOST_CODEX_RUNTIME_REASONING_SKILL_{skill_token}")
+    if task_token:
+        env_names.append(f"HOST_CODEX_RUNTIME_REASONING_TASK_{task_token}")
+    if domain_token and mode_token:
+        env_names.append(f"HOST_CODEX_RUNTIME_REASONING_DOMAIN_{domain_token}_MODE_{mode_token}")
+    if domain_token:
+        env_names.append(f"HOST_CODEX_RUNTIME_REASONING_DOMAIN_{domain_token}")
+    if mode_token:
+        env_names.append(f"HOST_CODEX_RUNTIME_REASONING_MODE_{mode_token}")
+    env_names.append("HOST_CODEX_RUNTIME_REASONING_EFFORT")
+    for env_name in env_names:
+        resolved = _valid_reasoning_effort(os.environ.get(env_name))
+        if resolved:
+            return resolved
+    return ""
+
+
 def _build_codex_command(
     *,
     codex_cmd: str,
@@ -161,7 +214,7 @@ def _build_codex_command(
     model = _metadata_text(order, "codex_model", "HOST_CODEX_RUNTIME_MODEL")
     if model:
         command.extend(["-m", model])
-    reasoning_effort = _metadata_text(order, "codex_reasoning_effort", "HOST_CODEX_RUNTIME_REASONING_EFFORT")
+    reasoning_effort = _resolve_codex_runtime_reasoning_effort(order)
     if reasoning_effort:
         command.extend(["-c", f'model_reasoning_effort="{reasoning_effort}"'])
     command.extend(
@@ -397,12 +450,7 @@ class AgentRuntimeExecutor:
                     "prompt_profile": prompt_profile_name(order),
                     "codex_home": codex_home,
                     "codex_model": _metadata_text(order, "codex_model", "HOST_CODEX_RUNTIME_MODEL") or None,
-                    "codex_reasoning_effort": _metadata_text(
-                        order,
-                        "codex_reasoning_effort",
-                        "HOST_CODEX_RUNTIME_REASONING_EFFORT",
-                    )
-                    or None,
+                    "codex_reasoning_effort": _resolve_codex_runtime_reasoning_effort(order) or None,
                     "returncode": proc.returncode,
                     "event_id": event_id,
                     "ts_ms": ts,
@@ -449,12 +497,7 @@ class AgentRuntimeExecutor:
                     "prompt_profile": prompt_profile_name(order),
                     "codex_home": codex_home,
                     "codex_model": _metadata_text(order, "codex_model", "HOST_CODEX_RUNTIME_MODEL") or None,
-                    "codex_reasoning_effort": _metadata_text(
-                        order,
-                        "codex_reasoning_effort",
-                        "HOST_CODEX_RUNTIME_REASONING_EFFORT",
-                    )
-                    or None,
+                    "codex_reasoning_effort": _resolve_codex_runtime_reasoning_effort(order) or None,
                     "timeout_seconds": timeout_seconds,
                     "returncode": getattr(proc, "returncode", None),
                     "event_id": event_id,

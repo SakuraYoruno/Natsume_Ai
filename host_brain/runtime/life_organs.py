@@ -149,6 +149,7 @@ def _default_organ_state(organ_id: str, now_ms: int | None = None) -> dict[str, 
         "recent_traces": [],
         "cooldowns": {},
         "memory_trace": {},
+        "learning_memory": {},
         "updated_at_ms": int(now_ms or _now_ms()),
     }
 
@@ -183,20 +184,50 @@ def _save_organ_state(conn: Any, person_id: str, state: Mapping[str, Any], now_m
 def _decay_state(state: Mapping[str, Any], elapsed_min: float) -> dict[str, Any]:
     after = copy.deepcopy(dict(state))
     minutes = max(0.0, min(float(elapsed_min), 720.0))
-    pressure_decay = 0.985 ** minutes
-    activation_decay = 0.975 ** minutes
-    fatigue_decay = 0.992 ** minutes
+    pressure_decay = 0.978 ** minutes
+    activation_decay = 0.970 ** minutes
+    fatigue_decay = 0.990 ** minutes
     after["activation"] = _clamp(_float(after.get("activation")) * activation_decay)
     after["pressure"] = _clamp(_float(after.get("pressure")) * pressure_decay)
     after["fatigue"] = _clamp(_float(after.get("fatigue")) * fatigue_decay)
+    for key, target in (("activation", 0.72), ("pressure", 0.70), ("fatigue", 0.76)):
+        value = _float(after.get(key))
+        if value > 0.88 and minutes > 0.0:
+            after[key] = _clamp(value - min(0.12, (value - target) * min(1.0, minutes / 90.0)))
     return after
+
+
+def _homeostatic_add(current: float, delta: float, *, cap: float) -> float:
+    if delta <= 0.0:
+        return delta
+    if current >= cap:
+        return delta * 0.05
+    if current >= cap - 0.10:
+        return delta * 0.22
+    if current >= cap - 0.22:
+        return delta * 0.55
+    return delta
+
+
+def _state_cap_for(key: str) -> float:
+    if key == "fatigue":
+        return 0.96
+    if key == "confidence":
+        return 0.95
+    if key in {"activation", "pressure"}:
+        return 0.94
+    return 1.0
 
 
 def _apply_delta(state: Mapping[str, Any], delta: Mapping[str, Any], *, trace: Mapping[str, Any], now_ms: int) -> dict[str, Any]:
     after = copy.deepcopy(dict(state))
+    allow_saturation = bool(delta.get("allow_saturation"))
     for key in ("activation", "pressure", "fatigue", "confidence"):
         if key in delta:
-            after[key] = _clamp(_float(after.get(key)) + _float(delta.get(key)))
+            current = _float(after.get(key))
+            cap = 1.0 if allow_saturation else _state_cap_for(key)
+            adjusted = _homeostatic_add(current, _float(delta.get(key)), cap=cap)
+            after[key] = max(0.0, min(cap, current + adjusted))
     if "valence" in delta:
         after["valence"] = _clamp(_float(after.get("valence"), 0.5) + _float(delta.get("valence")))
     if delta.get("dominant_drive"):
@@ -205,15 +236,157 @@ def _apply_delta(state: Mapping[str, Any], delta: Mapping[str, Any], *, trace: M
     for key, value in _map(delta.get("memory_trace")).items():
         memory[key] = value
     after["memory_trace"] = memory
+    learning_memory = _map(after.get("learning_memory"))
+    for key, value in _map(delta.get("learning_memory")).items():
+        learning_memory[key] = value
+    after["learning_memory"] = learning_memory
     cooldowns = _map(after.get("cooldowns"))
     for key, value in _map(delta.get("cooldowns")).items():
         cooldowns[key] = value
     after["cooldowns"] = cooldowns
     traces = list(after.get("recent_traces") or [])
-    traces.insert(0, {"ts_ms": now_ms, **dict(trace or {}), "delta": {k: v for k, v in dict(delta).items() if k not in {"memory_trace", "cooldowns"}}})
+    traces.insert(0, {"ts_ms": now_ms, **dict(trace or {}), "delta": {k: v for k, v in dict(delta).items() if k not in {"memory_trace", "learning_memory", "cooldowns", "allow_saturation"}}})
     after["recent_traces"] = traces[:8]
     after["updated_at_ms"] = now_ms
     return after
+
+
+def _merge_delta(base: Mapping[str, Any] | None, extra: Mapping[str, Any] | None) -> dict[str, Any]:
+    merged = dict(base or {})
+    for key, value in dict(extra or {}).items():
+        if key in {"activation", "pressure", "fatigue", "confidence", "valence"}:
+            merged[key] = _float(merged.get(key)) + _float(value)
+        elif key in {"memory_trace", "learning_memory", "cooldowns"}:
+            current = _map(merged.get(key))
+            current.update(_map(value))
+            merged[key] = current
+        else:
+            merged[key] = value
+    return merged
+
+
+def _autonomous_organ_delta(
+    *,
+    organ_id: str,
+    state: Mapping[str, Any],
+    evidence: Mapping[str, Any],
+    elapsed_min: float,
+    now_ms: int,
+) -> dict[str, Any]:
+    minutes = max(0.0, min(float(elapsed_min), 24.0 * 60.0))
+    if minutes <= 0.0:
+        return {}
+    env = _map(evidence.get("environment"))
+    day_phase = str(env.get("day_phase") or evidence.get("day_phase") or "")
+    meal_phase = str(env.get("meal_phase") or "")
+    idle_minutes = max(0.0, _float(evidence.get("idle_minutes")))
+    fatigue = _clamp(evidence.get("fatigue"), 0.0)
+    absence = _clamp(idle_minutes / 90.0)
+    scale = min(1.0, minutes / 60.0)
+    slow_scale = min(1.0, minutes / 360.0)
+    trace = {
+        "autonomous": True,
+        "elapsed_min": round(minutes, 3),
+        "day_phase": day_phase,
+        "meal_phase": meal_phase,
+        "idle_minutes": round(idle_minutes, 2),
+    }
+    if organ_id == "limbic":
+        return {"activation": absence * 0.06 * scale, "pressure": absence * 0.07 * scale, "valence": -absence * 0.025 * scale, "dominant_drive": "autonomous_attachment_drift", "memory_trace": trace}
+    if organ_id == "social_brain":
+        return {"activation": absence * 0.08 * scale, "pressure": absence * 0.10 * scale, "dominant_drive": "autonomous_contact_pressure", "memory_trace": trace}
+    if organ_id == "hippocampus":
+        trace["continuity_decay"] = round(scale * 0.06, 4)
+        return {"activation": 0.025 * scale, "pressure": max(0.0, absence - 0.35) * 0.035 * scale, "dominant_drive": "autonomous_continuity_binding", "memory_trace": trace}
+    if organ_id == "default_mode":
+        return {"activation": 0.035 * scale + absence * 0.03 * scale, "pressure": 0.025 * scale + absence * 0.045 * scale, "dominant_drive": "autonomous_inner_drift", "memory_trace": trace}
+    if organ_id == "circadian":
+        night = 1.0 if day_phase == "late_night" else 0.65 if day_phase == "night" else 0.30 if day_phase == "morning" else 0.18
+        return {"activation": 0.04 * scale, "pressure": night * 0.08 * scale, "fatigue": max(fatigue, night) * 0.08 * scale, "dominant_drive": f"autonomous_rhythm_{day_phase or 'unknown'}", "memory_trace": trace}
+    if organ_id == "glymphatic":
+        recovery = 0.08 if day_phase in {"late_night", "night"} else -0.02
+        return {"activation": max(0.0, recovery) * scale, "pressure": max(0.0, recovery * 0.6) * scale, "fatigue": -0.03 * scale if recovery > 0 else 0.02 * scale, "dominant_drive": "autonomous_recovery_cycle", "memory_trace": trace}
+    if organ_id == "endocrine":
+        return {"activation": 0.025 * slow_scale + absence * 0.04 * slow_scale, "pressure": absence * 0.06 * slow_scale, "valence": -absence * 0.02 * slow_scale, "dominant_drive": "autonomous_slow_pressure", "memory_trace": trace}
+    if organ_id == "immune":
+        return {"activation": 0.01 * scale, "pressure": 0.012 * scale, "dominant_drive": "autonomous_low_guard", "memory_trace": trace}
+    if organ_id == "prefrontal":
+        inhibition = 0.055 * scale + (0.04 * scale if day_phase not in {"dawn", "morning"} else 0.0)
+        return {"activation": 0.035 * scale, "pressure": inhibition, "dominant_drive": "autonomous_inhibition_budget", "memory_trace": trace}
+    if organ_id == "initiative_governor":
+        return {"activation": 0.025 * scale, "pressure": max(0.0, absence * 0.05 - 0.025) * scale, "dominant_drive": "autonomous_proactive_threshold", "memory_trace": trace}
+    if organ_id == "motor_cortex":
+        return {"activation": 0.02 * scale, "pressure": -0.025 * scale if fatigue > 0.45 else 0.015 * scale, "fatigue": fatigue * 0.025 * scale, "dominant_drive": "autonomous_motion_budget", "memory_trace": trace}
+    if organ_id == "cerebellum":
+        return {"activation": 0.025 * scale, "pressure": -0.03 * scale, "dominant_drive": "autonomous_motion_smoothing", "memory_trace": trace}
+    if organ_id == "vestibular":
+        return {"activation": 0.02 * scale, "pressure": 0.025 * scale, "dominant_drive": "autonomous_body_stability", "memory_trace": trace}
+    if organ_id == "somatic":
+        return {"activation": 0.03 * scale, "pressure": 0.025 * scale + absence * 0.025 * scale, "dominant_drive": "autonomous_embodied_presence", "memory_trace": trace}
+    if organ_id == "interoception":
+        return {"activation": 0.035 * scale, "pressure": max(fatigue, absence * 0.5) * 0.06 * scale, "fatigue": fatigue * 0.03 * scale, "dominant_drive": "autonomous_internal_sense", "memory_trace": trace}
+    if organ_id == "thalamus":
+        return {"activation": 0.03 * scale, "pressure": 0.02 * scale, "dominant_drive": "autonomous_attention_route", "memory_trace": trace}
+    if organ_id == "language_system":
+        return {"activation": 0.02 * scale, "pressure": 0.025 * scale if day_phase else 0.0, "dominant_drive": "autonomous_expression_bias", "memory_trace": trace}
+    if organ_id == "mirror_neuron":
+        return {"activation": -0.02 * scale, "pressure": -0.02 * scale, "dominant_drive": "autonomous_mirror_decay", "memory_trace": trace}
+    if organ_id == "pain_reward":
+        return {"activation": -0.025 * scale, "pressure": -0.025 * scale, "dominant_drive": "autonomous_reward_decay", "memory_trace": trace}
+    if organ_id == "ans":
+        return {"activation": 0.025 * scale, "pressure": max(fatigue, absence * 0.4) * 0.05 * scale, "fatigue": fatigue * 0.02 * scale, "dominant_drive": "autonomous_tension_relaxation", "memory_trace": trace}
+    if organ_id == "peripheral":
+        return {"activation": 0.018 * scale, "pressure": 0.018 * scale, "dominant_drive": "autonomous_channel_presence", "memory_trace": trace}
+    if organ_id == "proprioception":
+        return {"activation": 0.025 * scale, "pressure": -0.018 * scale, "dominant_drive": "autonomous_posture_memory", "memory_trace": trace}
+    if organ_id == "cortex":
+        return {"activation": 0.03 * scale, "confidence": 0.025 * scale, "dominant_drive": "autonomous_scene_integration", "memory_trace": trace}
+    return {}
+
+
+def _numeric_has_concrete_anchor(numeric: Mapping[str, Any]) -> bool:
+    anchor = _text(numeric.get("attention_target") or numeric.get("current_preoccupation"), 96)
+    if not anchor:
+        return False
+    compact = re.sub(r"[\s，,。.!！?？;；：:、…~～\"“”'‘’]", "", anchor)
+    if len(compact) < 4:
+        return False
+    vague = ("这种", "这个", "那个", "喜欢", "不喜欢", "怎么了", "继续", "然后呢", "刚才", "回复")
+    if any(term in anchor for term in vague):
+        return False
+    return True
+
+
+def _attenuate_inner_numeric_without_anchor(deltas: dict[str, dict[str, Any]], numeric: Mapping[str, Any]) -> None:
+    if _numeric_has_concrete_anchor(numeric):
+        return
+    suppression = _text(numeric.get("monologue_suppression_reason") or "NO_CONCRETE_INNER_ANCHOR", 120)
+    for organ, scale in (("limbic", 0.24), ("social_brain", 0.22), ("initiative_governor", 0.18), ("language_system", 0.35)):
+        current = deltas.get(organ)
+        if not current:
+            continue
+        for key in ("activation", "pressure"):
+            if key in current:
+                current[key] = _float(current.get(key)) * scale
+        memory = _map(current.get("memory_trace"))
+        memory["monologue_suppression_reason"] = suppression
+        memory["anchor_quality"] = _float(numeric.get("anchor_quality"))
+        current["memory_trace"] = memory
+        current["dominant_drive"] = "suppressed_diffuse_inner_pressure"
+    prefrontal = deltas.setdefault("prefrontal", {})
+    prefrontal["activation"] = _float(prefrontal.get("activation")) + 0.04
+    prefrontal["pressure"] = _float(prefrontal.get("pressure")) + 0.10
+    prefrontal["dominant_drive"] = "suppress_unanchored_inner_monologue"
+    memory = _map(prefrontal.get("memory_trace"))
+    memory["monologue_suppression_reason"] = suppression
+    prefrontal["memory_trace"] = memory
+    default = deltas.setdefault("default_mode", {})
+    memory = _map(default.get("memory_trace"))
+    memory["current_preoccupation"] = ""
+    memory["attention_target"] = ""
+    memory["attention_kind"] = _text(numeric.get("attention_kind") or numeric.get("attention"), 80)
+    memory["monologue_suppression_reason"] = suppression
+    default["memory_trace"] = memory
 
 
 def _base_event_deltas(event_kind: str, evidence: Mapping[str, Any], content: str, salience: float, valence: float, now_ms: int) -> dict[str, dict[str, Any]]:
@@ -226,7 +399,7 @@ def _base_event_deltas(event_kind: str, evidence: Mapping[str, Any], content: st
         for key, value in delta.items():
             if key in {"activation", "pressure", "fatigue", "confidence", "valence"}:
                 current[key] = _float(current.get(key)) + _float(value)
-            elif key in {"memory_trace", "cooldowns"}:
+            elif key in {"memory_trace", "learning_memory", "cooldowns"}:
                 merged = _map(current.get(key))
                 merged.update(_map(value))
                 current[key] = merged
@@ -261,6 +434,133 @@ def _base_event_deltas(event_kind: str, evidence: Mapping[str, Any], content: st
         add("vestibular", activation=0.06 + absence * 0.06, pressure=absence * 0.08, dominant_drive="body_stability", memory_trace={"idle_minutes": idle_minutes})
         add("ans", activation=0.06 + absence * 0.12, pressure=absence * 0.10 + fatigue * 0.05, fatigue=fatigue * 0.06, dominant_drive="tension_relaxation", memory_trace={"idle_minutes": idle_minutes, "fatigue": fatigue})
         add("peripheral", activation=0.04 + absence * 0.06, pressure=absence * 0.06, dominant_drive="channel_presence", memory_trace={"idle_minutes": idle_minutes})
+    elif kind == "inner_numeric_tick":
+        numeric = _map(evidence.get("inner_numeric_state"))
+        attention = _text(numeric.get("attention"), 96)
+        target = _text(numeric.get("attention_target") or numeric.get("current_preoccupation"), 160)
+        tendency = _text(numeric.get("felt_tendency"), 120)
+        dialogue_bias = _text(numeric.get("dialogue_bias"), 180)
+        inhibition = _clamp(numeric.get("inhibition"), 0.0)
+        numeric_salience = _clamp(numeric.get("salience"), salience)
+        loneliness = _clamp(numeric.get("loneliness"), 0.0)
+        anticipation = _clamp(numeric.get("anticipation"), 0.0)
+        continuity = _clamp(numeric.get("continuity_score"), 0.0)
+        has_anchor = bool(target)
+        trace = {
+            "inner_numeric_state": numeric,
+            "attention": attention,
+            "attention_target": target,
+            "felt_tendency": tendency,
+            "dialogue_bias": dialogue_bias,
+            "monologue_policy": _text(numeric.get("monologue_policy"), 120),
+        }
+        add(
+            "default_mode",
+            activation=0.10 + numeric_salience * 0.24,
+            pressure=0.04 + numeric_salience * 0.18,
+            confidence=0.06,
+            dominant_drive="private_numeric_continuity",
+            memory_trace={
+                "current_preoccupation": target,
+                "attention_target": target,
+                "felt_tendency": tendency,
+                "dialogue_bias": dialogue_bias,
+                "inner_numeric_state": numeric,
+            },
+        )
+        add(
+            "hippocampus",
+            activation=0.08 + (0.18 if has_anchor else 0.06),
+            pressure=0.04 + max(0.0, 1.0 - continuity) * 0.08,
+            confidence=0.08,
+            dominant_drive="private_continuity_binding" if has_anchor else "silent_continuity_trace",
+            memory_trace={"private_continuity_trace": target or attention, "inner_numeric_state": numeric},
+        )
+        add(
+            "thalamus",
+            activation=0.10 + numeric_salience * 0.16,
+            pressure=0.04 + (0.08 if attention else 0.0),
+            dominant_drive="route_inner_attention",
+            memory_trace=trace,
+        )
+        add(
+            "prefrontal",
+            activation=0.08 + inhibition * 0.18,
+            pressure=inhibition * 0.22,
+            confidence=0.06,
+            dominant_drive="inner_inhibition_gate",
+            memory_trace={"inhibition": inhibition, "dialogue_bias": dialogue_bias},
+        )
+        add(
+            "initiative_governor",
+            activation=0.06 + numeric_salience * 0.10,
+            pressure=max(0.0, inhibition * 0.18 - (0.08 if has_anchor else 0.0)),
+            dominant_drive="numeric_proactive_threshold",
+            memory_trace={"inhibition": inhibition, "felt_tendency": tendency, "attention_target": target},
+        )
+        add(
+            "language_system",
+            activation=0.08 + (0.12 if dialogue_bias else 0.0),
+            pressure=0.04 + inhibition * 0.08,
+            dominant_drive="numeric_dialogue_bias",
+            memory_trace={"dialogue_bias": dialogue_bias, "felt_tendency": tendency, "attention_target": target},
+        )
+        add(
+            "interoception",
+            activation=0.08 + max(loneliness, anticipation) * 0.16,
+            pressure=0.04 + max(loneliness, anticipation) * 0.14,
+            dominant_drive="numeric_internal_sense",
+            memory_trace={"loneliness": loneliness, "anticipation": anticipation, "felt_tendency": tendency},
+        )
+        add(
+            "limbic",
+            activation=0.06 + loneliness * 0.14 + anticipation * 0.08,
+            pressure=loneliness * 0.10 + anticipation * 0.04,
+            valence=-loneliness * 0.04,
+            dominant_drive="quiet_attachment_pressure",
+            memory_trace={"felt_tendency": tendency, "attention_target": target},
+        )
+        add(
+            "social_brain",
+            activation=0.05 + loneliness * 0.12,
+            pressure=loneliness * 0.12,
+            dominant_drive="silent_contact_model",
+            memory_trace={"felt_tendency": tendency, "attention_target": target},
+        )
+        add(
+            "somatic",
+            activation=0.06 + numeric_salience * 0.10,
+            pressure=0.03 + max(loneliness, anticipation) * 0.08,
+            dominant_drive="quiet_body_presence",
+            memory_trace={"inner_numeric_state": numeric},
+        )
+        add(
+            "proprioception",
+            activation=0.05 + numeric_salience * 0.08,
+            pressure=0.02,
+            dominant_drive="posture_continuity",
+            memory_trace={"inner_numeric_state": numeric},
+        )
+        add(
+            "cortex",
+            activation=0.08 + numeric_salience * 0.10,
+            confidence=0.05,
+            dominant_drive="inner_state_integration",
+            memory_trace={"inner_numeric_state": numeric},
+        )
+    elif kind in {"autonomous_cycle", "learning_signal_generated", "growth_candidate_generated", "personality_growth_applied", "personality_growth_suppressed", "self_project_progress"}:
+        agenda = list(_map(evidence).get("self_agenda") or [])[:5]
+        learning_state = _map(_map(evidence).get("learning_state"))
+        signals = list(learning_state.get("learning_signals") or [])[:6]
+        signal_names = [_text(_map(item).get("signal_kind"), 80) for item in signals if _text(_map(item).get("signal_kind"), 80)]
+        failure = any("failure" in item for item in signal_names)
+        style = any("style" in item or "repetition" in item for item in signal_names)
+        add("hippocampus", activation=0.16, pressure=0.06, confidence=0.06, dominant_drive="autonomous_agenda_memory", learning_memory={"self_agenda": agenda, "learning_signals": signal_names})
+        add("default_mode", activation=0.14, pressure=0.08, dominant_drive="self_project_drift", learning_memory={"agenda_projection": agenda})
+        add("cortex", activation=0.18, confidence=0.08, dominant_drive="autonomous_self_integration", learning_memory={"self_reward": _map(learning_state.get("self_reward"))})
+        add("language_system", activation=0.12 + (0.08 if style else 0.0), pressure=0.12 if style else 0.04, dominant_drive="style_learning" if style else "expression_growth", learning_memory={"style_signals": signal_names})
+        add("prefrontal", activation=0.10, pressure=0.16 if failure else 0.06, dominant_drive="growth_safety_control", learning_memory={"growth_guard": "adaptive_layer_only"})
+        add("pain_reward", activation=0.14 if failure else 0.06, pressure=0.18 if failure else -0.04, valence=-0.12 if failure else 0.04, dominant_drive="self_supervised_reward", learning_memory={"reward_signals": signal_names})
     elif kind == "user_message":
         annoyance = any(t in text for t in ("烦", "别发", "别一直", "莫名其妙", "鬼扯", "很呆", "烂", "不对", "没效果", "牛头不对马嘴"))
         positive = any(t in text for t in ("可以了", "不错", "挺好", "喜欢", "好了", "对了", "继续", "开始"))
@@ -337,6 +637,9 @@ def _base_event_deltas(event_kind: str, evidence: Mapping[str, Any], content: st
         add("cortex", activation=salience * 0.12, confidence=0.04, dominant_drive="scene_integration")
     if valence != 0.0:
         add("limbic", valence=valence * 0.12)
+    if kind == "inner_numeric_tick":
+        numeric = _map(evidence.get("inner_numeric_state"))
+        _attenuate_inner_numeric_without_anchor(deltas, numeric)
     return deltas
 
 
@@ -489,9 +792,27 @@ def process_life_experience_event(*, ledger: Any, event_id: str) -> dict[str, An
         current = _get_organ_state(conn, person_id, organ_id, now_ms)
         elapsed_min = max(0.0, (now_ms - int(current.get("updated_at_ms") or now_ms)) / 60000.0)
         decayed = _decay_state(current, elapsed_min)
-        delta = deltas.get(organ_id, {})
+        autonomous_delta = _autonomous_organ_delta(
+            organ_id=organ_id,
+            state=decayed,
+            evidence=_map(evidence),
+            elapsed_min=elapsed_min,
+            now_ms=now_ms,
+        )
+        delta = _merge_delta(autonomous_delta, deltas.get(organ_id, {}))
         if delta:
-            after = _apply_delta(decayed, delta, trace={"experience_event_id": event_id, "event_kind": event_kind, "source_kind": str(row[3] or "")}, now_ms=now_ms)
+            after = _apply_delta(
+                decayed,
+                delta,
+                trace={
+                    "experience_event_id": event_id,
+                    "event_kind": event_kind,
+                    "source_kind": str(row[3] or ""),
+                    "autonomous_elapsed_min": round(elapsed_min, 3),
+                    "has_event_perturbation": bool(deltas.get(organ_id)),
+                },
+                now_ms=now_ms,
+            )
             conn.execute(
                 "INSERT INTO organ_runtime_event(event_id, experience_event_id, person_id, organ_id, delta_json, state_before_json, state_after_json, created_at_ms) VALUES(?, ?, ?, ?, ?, ?, ?, ?)",
                 (_event_id("orgevt"), event_id, person_id, organ_id, _dumps(delta), _dumps(decayed), _dumps(after), now_ms),
@@ -523,6 +844,7 @@ def _compact_organ(state: Mapping[str, Any]) -> dict[str, Any]:
         "fatigue": round(_float(state.get("fatigue")), 3),
         "valence": round(_float(state.get("valence"), 0.5), 3),
         "dominant_drive": str(state.get("dominant_drive") or ""),
+        "learning_memory": _map(state.get("learning_memory")),
     }
 
 
@@ -609,9 +931,14 @@ def synthesize_life_state_from_organs(
     circadian = _map(organs.get("circadian"))
     glymphatic = _map(organs.get("glymphatic"))
     base_pressure = _map(after.get("life_pressure"))
+    base_inner_for_dream = _map(after.get("inner_world"))
+    default_trace_for_dream = _map(default_mode.get("memory_trace"))
+    dream_residue_present = bool(_text(base_inner_for_dream.get("dream_residue"), 240) or _text(default_trace_for_dream.get("dream_residue"), 240))
     work_pressure = _clamp(max(strength("prefrontal"), strength("immune"), strength("cortex"), _float(base_pressure.get("work")) * 0.82))
     absence = _clamp(max(strength("social_brain") * 0.65 + strength("limbic") * 0.35, _float(base_pressure.get("absence")) * 0.92))
     dream = _clamp(max(strength("default_mode") * 0.65 + strength("glymphatic") * 0.2 + strength("hippocampus") * 0.15, _float(base_pressure.get("dream")) * 0.82))
+    if not dream_residue_present:
+        dream = min(dream, max(_float(base_pressure.get("dream")) * 0.35, strength("default_mode") * 0.22))
     fatigue = _clamp(max(strength("circadian") * 0.55 + strength("glymphatic") * 0.18 + strength("interoception") * 0.27 + _float(circadian.get("fatigue")) * 0.35, _float(base_pressure.get("fatigue")) * 0.86))
     pain_reward = _map(organs.get("pain_reward"))
     relationship = _clamp(_float(social.get("valence"), 0.5) * 0.50 + _float(limbic.get("valence"), 0.5) * 0.30 + _float(pain_reward.get("valence"), 0.5) * 0.08 + strength("mirror_neuron") * 0.12)
@@ -671,6 +998,21 @@ def synthesize_life_state_from_organs(
         inner["felt_tendency"] = _text(default_trace.get("felt_tendency"), 120)
     if default_trace.get("dialogue_bias"):
         inner["dialogue_bias"] = _text(default_trace.get("dialogue_bias"), 160)
+    if default_trace.get("inner_numeric_state"):
+        numeric = _map(default_trace.get("inner_numeric_state"))
+        inner["numeric_state"] = numeric
+        inner["attention_kind"] = _text(numeric.get("attention_kind") or numeric.get("attention"), 80)
+        inner["preoccupation_expires_at_ms"] = int(_float(numeric.get("preoccupation_expires_at_ms")))
+        inner["monologue_due"] = bool(numeric.get("monologue_due"))
+        inner["monologue_suppression_reason"] = _text(numeric.get("monologue_suppression_reason"), 160)
+        anchor = _text(numeric.get("current_preoccupation") or numeric.get("attention_target"), 180)
+        if anchor:
+            inner["current_preoccupation"] = anchor
+            inner["attention_target"] = _text(numeric.get("attention_target") or anchor, 120)
+        elif not _text(inner.get("dream_residue"), 240):
+            inner["current_preoccupation"] = ""
+            inner["attention_target"] = ""
+            inner["unresolved_loop"] = ""
     if hip_trace.get("diary_residue"):
         inner["diary_residue"] = _text(hip_trace.get("diary_residue"), 240)
     after["inner_world"] = inner

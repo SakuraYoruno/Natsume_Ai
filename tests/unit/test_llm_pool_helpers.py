@@ -222,6 +222,38 @@ def test_scene_pool_spec_overrides_runtime_provider(monkeypatch: pytest.MonkeyPa
     ]
 
 
+def test_scene_pool_openai_local_uses_host_chat_local_base_without_openai_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(
+        "HOST_LLM_POOL_SCENE_CHAT_SURFACE_TIER_A",
+        "openai:natsume-qwen3.6-35b-iq3m-local",
+    )
+    monkeypatch.setenv("HOST_LLM_POOL_SCENE_CHAT_SURFACE_INCLUDE_EXPLICIT", "false")
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("HOST_OPENAI_BASE_URL", raising=False)
+    monkeypatch.setenv("HOST_CHAT_LOCAL_LLM_BASE_URL", "http://127.0.0.1:11434/v1")
+    monkeypatch.setenv("HOST_CHAT_LOCAL_LLM_ALLOW_EMPTY_KEY", "true")
+    monkeypatch.setattr(helpers, "_load_api_key_from_runtime_profiles", lambda provider_name: None)
+
+    candidates = helpers._resolve_pool_candidates(
+        cognitive_tier="A",
+        scene_type="CHAT_SURFACE",
+        provider_name="gemini",
+        model_id="gemini-2.5-pro",
+        api_key="gem-key",
+    )
+
+    assert candidates == [
+        {
+            "provider_name": "openai",
+            "model_id": "natsume-qwen3.6-35b-iq3m-local",
+            "api_key": "host-local-placeholder-key",
+            "base_url_override": "http://127.0.0.1:11434/v1",
+        }
+    ]
+
+
 def test_exec_intent_scene_pool_can_bypass_codex_migration(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("HOST_LLM_POOL_CODEX_MIGRATION_ENABLED", "true")
     monkeypatch.setenv("HOST_LLM_POOL_SCENE_EXEC_INTENT_TIER_C", "deepseek:deepseek-v4-flash")

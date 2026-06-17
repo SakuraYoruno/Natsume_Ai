@@ -37,11 +37,27 @@ class ConversationHistory:
         session_id: str,
         max_turns: int,
         exclude_request_id: str | None = None,
+        before_ts_ms: int | None = None,
+        before_turn_index: int | None = None,
     ) -> list[Turn]:
+        effective_before_turn_index = before_turn_index
+        if effective_before_turn_index is None and exclude_request_id:
+            boundary_turn = self._store.find_by_request(
+                session_id=session_id,
+                request_id=exclude_request_id,
+                role="user",
+            ) or self._store.find_by_request(
+                session_id=session_id,
+                request_id=exclude_request_id,
+            )
+            if boundary_turn is not None:
+                effective_before_turn_index = int(boundary_turn.turn_index)
         return self._store.query_recent(
             session_id=session_id,
             limit=max(1, int(max_turns)),
             exclude_request_id=exclude_request_id,
+            before_ts_ms=before_ts_ms,
+            before_turn_index=effective_before_turn_index,
         )
 
     def fetch_for_messages(
@@ -50,11 +66,15 @@ class ConversationHistory:
         session_id: str,
         max_turns: int,
         exclude_request_id: str | None = None,
+        before_ts_ms: int | None = None,
+        before_turn_index: int | None = None,
     ) -> list[Turn]:
         return self.fetch_window_for_messages(
             session_id=session_id,
             max_turns=max_turns,
             exclude_request_id=exclude_request_id,
+            before_ts_ms=before_ts_ms,
+            before_turn_index=before_turn_index,
         ).recent_turns
 
     def fetch_window_for_messages(
@@ -63,15 +83,19 @@ class ConversationHistory:
         session_id: str,
         max_turns: int,
         exclude_request_id: str | None = None,
+        before_ts_ms: int | None = None,
+        before_turn_index: int | None = None,
         summary_threshold: int | None = None,
         render_target_lang: SummaryRenderLang = "zh",
         summary_max_chars: int | None = None,
-    ) -> ConversationWindow:
+        ) -> ConversationWindow:
         safe_limit = max(1, int(max_turns))
         raw_turns = self.fetch_recent_turns(
             session_id=session_id,
             max_turns=safe_limit,
             exclude_request_id=exclude_request_id,
+            before_ts_ms=before_ts_ms,
+            before_turn_index=before_turn_index,
         )
         filtered, skipped_corrupted, skipped_empty, deduped_same_role = self._normalize_turns_for_messages(raw_turns)
 

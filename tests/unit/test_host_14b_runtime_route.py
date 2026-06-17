@@ -9,6 +9,7 @@ from host_brain.app.graph_config_builder import (
     CHAT_DIRECT_NODE_ID,
     HOST_CHAT_ROUTE_CLOUD,
     HOST_CHAT_ROUTE_HOST_14B,
+    SCENE_CHAT,
     SCENE_EXEC_INTENT,
     SCENE_TYPE_AUTO,
     build_chat_graph_config,
@@ -157,14 +158,37 @@ def test_resolve_host_llm_runtime_can_select_minimax_as_primary(monkeypatch) -> 
     assert runtime["remote_chain_status"][0]["available"] is True
 
 
+def test_resolve_host_llm_runtime_prefers_healthy_local_chat_when_enabled(monkeypatch) -> None:
+    _patch_runtime_dependencies(monkeypatch, gemini_api_key="sk-gemini", codex_api_key="sk-codex", deepseek_api_key="sk-deepseek")
+    monkeypatch.setenv("HOST_CHAT_LOCAL_LLM_ENABLED", "true")
+    monkeypatch.setenv("HOST_CHAT_LOCAL_LLM_PROVIDER", "openai")
+    monkeypatch.setenv("HOST_CHAT_LOCAL_LLM_MODEL_ID", "qwen3:14b-q4_k_m")
+    monkeypatch.setenv("HOST_CHAT_LOCAL_LLM_BASE_URL", "http://127.0.0.1:11434")
+    monkeypatch.setenv("HOST_CHAT_LOCAL_LLM_HEALTHCHECK_ENABLED", "false")
+    monkeypatch.delenv("HOST_CHAT_LOCAL_LLM_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+    runtime = graph_builder.resolve_host_llm_runtime(scene_type=SCENE_CHAT)
+
+    assert runtime["route_target"] == HOST_CHAT_ROUTE_HOST_14B
+    assert runtime["route_reason_code"] == "HOST_CHAT_LOCAL_LLM_PRIMARY"
+    assert runtime["provider_name"] == "openai"
+    assert runtime["model_id"] == "qwen3:14b-q4_k_m"
+    assert runtime["cloud_available"] is True
+    routing_matrix_decision = dict(runtime.get("routing_matrix_decision") or {})
+    assert routing_matrix_decision.get("selected_model") == "cloud"
+    assert routing_matrix_decision.get("runtime_selected_target") == HOST_CHAT_ROUTE_HOST_14B
+    assert routing_matrix_decision.get("not_applied_reason") == "HOST_CHAT_LOCAL_LLM_PRIMARY"
+
+
 def test_resolve_host_llm_runtime_uses_local_as_final_fallback(monkeypatch) -> None:
     _patch_runtime_dependencies(monkeypatch, gemini_api_key=None, codex_api_key=None, deepseek_api_key=None)
-    monkeypatch.setenv("HOST_CHAT_HOST_14B_ENABLED", "true")
-    monkeypatch.setenv("HOST_CHAT_HOST_14B_PROVIDER", "openai")
-    monkeypatch.setenv("HOST_CHAT_HOST_14B_MODEL_ID", "qwen3:14b-q4_k_m")
-    monkeypatch.setenv("HOST_CHAT_HOST_14B_BASE_URL", "http://127.0.0.1:11434")
-    monkeypatch.setenv("HOST_CHAT_HOST_14B_HEALTHCHECK_ENABLED", "false")
-    monkeypatch.delenv("HOST_CHAT_HOST_14B_API_KEY", raising=False)
+    monkeypatch.setenv("HOST_CHAT_LOCAL_LLM_ENABLED", "true")
+    monkeypatch.setenv("HOST_CHAT_LOCAL_LLM_PROVIDER", "openai")
+    monkeypatch.setenv("HOST_CHAT_LOCAL_LLM_MODEL_ID", "qwen3:14b-q4_k_m")
+    monkeypatch.setenv("HOST_CHAT_LOCAL_LLM_BASE_URL", "http://127.0.0.1:11434")
+    monkeypatch.setenv("HOST_CHAT_LOCAL_LLM_HEALTHCHECK_ENABLED", "false")
+    monkeypatch.delenv("HOST_CHAT_LOCAL_LLM_API_KEY", raising=False)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
 
     runtime = graph_builder.resolve_host_llm_runtime()

@@ -190,6 +190,17 @@ def _parse_csv_tokens(value: Any) -> set[str]:
     return tokens
 
 
+def _env_value(name: str, legacy_name: str | None = None, default: str = "") -> str:
+    value = str(os.environ.get(name) or "").strip()
+    if value:
+        return value
+    if legacy_name:
+        legacy_value = str(os.environ.get(legacy_name) or "").strip()
+        if legacy_value:
+            return legacy_value
+    return default
+
+
 def _graph_codex_migration_enabled(*, scene_type: str, execution_profile: str) -> bool:
     if not _parse_bool(os.environ.get("HOST_GRAPH_CODEX_MIGRATION_ENABLED"), default=False):
         return False
@@ -393,11 +404,11 @@ def _resolve_host_14b_base_url(*, provider_name: str) -> str | None:
     provider = str(provider_name or "").strip().lower()
     if provider != PROVIDER_OPENAI:
         return None
-    raw = str(
-        os.environ.get("HOST_CHAT_HOST_14B_BASE_URL")
-        or os.environ.get("HOST_OPENAI_BASE_URL")
-        or _HOST_CHAT_14B_DEFAULT_BASE_URL
-    ).strip()
+    raw = _env_value(
+        "HOST_CHAT_LOCAL_LLM_BASE_URL",
+        "HOST_CHAT_HOST_14B_BASE_URL",
+        _env_value("HOST_OPENAI_BASE_URL", default=_HOST_CHAT_14B_DEFAULT_BASE_URL),
+    )
     return _normalize_openai_compat_base_url(raw)
 
 
@@ -445,14 +456,14 @@ async def _probe_http_endpoint_async(*, url: str, timeout_ms: int) -> tuple[bool
 
 
 def _resolve_host_14b_health_status(*, provider_name: str, timeout_ms: int) -> tuple[bool, str]:
-    if not _parse_bool(os.environ.get("HOST_CHAT_HOST_14B_HEALTHCHECK_ENABLED"), default=False):
-        return True, "HOST_14B_HEALTHCHECK_DISABLED"
+    if not _parse_bool(_env_value("HOST_CHAT_LOCAL_LLM_HEALTHCHECK_ENABLED", "HOST_CHAT_HOST_14B_HEALTHCHECK_ENABLED"), default=False):
+        return True, "HOST_LOCAL_LLM_HEALTHCHECK_DISABLED"
 
-    ready_value = os.environ.get("HOST_CHAT_HOST_14B_READY")
+    ready_value = _env_value("HOST_CHAT_LOCAL_LLM_READY", "HOST_CHAT_HOST_14B_READY")
     if ready_value is not None and not _parse_bool(ready_value, default=True):
-        return False, "HOST_14B_READY_FLAG_DOWN"
+        return False, "HOST_LOCAL_LLM_READY_FLAG_DOWN"
 
-    health_url = str(os.environ.get("HOST_CHAT_HOST_14B_HEALTHCHECK_URL") or "").strip()
+    health_url = _env_value("HOST_CHAT_LOCAL_LLM_HEALTHCHECK_URL", "HOST_CHAT_HOST_14B_HEALTHCHECK_URL")
     probe_urls: list[str] = []
     if health_url:
         probe_urls.append(health_url)
@@ -466,17 +477,17 @@ def _resolve_host_14b_health_status(*, provider_name: str, timeout_ms: int) -> t
 
     if not probe_urls:
         if ready_value is not None:
-            return _parse_bool(ready_value, default=True), "HOST_14B_READY_FLAG_ONLY"
-        return True, "HOST_14B_NO_PROBE_URL"
+            return _parse_bool(ready_value, default=True), "HOST_LOCAL_LLM_READY_FLAG_ONLY"
+        return True, "HOST_LOCAL_LLM_NO_PROBE_URL"
 
     first_failure = ""
     for url in probe_urls:
         ok, detail = _probe_http_endpoint(url=url, timeout_ms=timeout_ms)
         if ok:
-            return True, f"HOST_14B_PROBE_OK:{detail}"
+            return True, f"HOST_LOCAL_LLM_PROBE_OK:{detail}"
         if not first_failure:
             first_failure = detail
-    return False, f"HOST_14B_PROBE_FAILED:{first_failure or 'unknown'}"
+    return False, f"HOST_LOCAL_LLM_PROBE_FAILED:{first_failure or 'unknown'}"
 
 
 async def _resolve_host_14b_health_status_async(*, provider_name: str, timeout_ms: int) -> tuple[bool, str]:
@@ -726,7 +737,7 @@ def _build_graph_config_by_profile(
     if chat_codex_experiment:
         resolved_chat_api_key = None
     if _provider_requires_api_key(resolved_chat_provider) and not resolved_chat_api_key:
-        if resolved_chat_provider == PROVIDER_OPENAI and _parse_bool(os.environ.get("HOST_CHAT_HOST_14B_ALLOW_EMPTY_KEY"), default=True):
+        if resolved_chat_provider == PROVIDER_OPENAI and _parse_bool(_env_value("HOST_CHAT_LOCAL_LLM_ALLOW_EMPTY_KEY", "HOST_CHAT_HOST_14B_ALLOW_EMPTY_KEY"), default=True):
             resolved_chat_api_key = _HOST_CHAT_14B_FALLBACK_API_KEY
     resolved_chat_available = _is_provider_available(
         provider_name=resolved_chat_provider,
