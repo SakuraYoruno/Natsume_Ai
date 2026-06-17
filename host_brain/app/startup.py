@@ -581,6 +581,36 @@ def warmup_chat_llm_runtime_profiles() -> str:
         return f"DEGRADED: {exc}"
 
 
+def warmup_surface_quote_runtime() -> str:
+    """预热 Surface 台词库本地召回，避免首轮聊天承担 TSV 加载/排序冷启动。"""
+    if not _parse_bool_env("HOST_SURFACE_QUOTE_RUNTIME_WARMUP_ENABLED", default=True):
+        return "SKIPPED (disabled)"
+    started = time.perf_counter()
+    try:
+        from host_brain.persona.surface_original_quote_bank import (  # noqa: PLC0415
+            SurfaceOriginalQuoteQuery,
+            render_surface_original_quote_guidance,
+        )
+
+        query = SurfaceOriginalQuoteQuery(
+            intent_tags=("casual_chat", "greeting"),
+            emotion_tags=("teasing",),
+            style_moves=("temporal_correction", "light_tease"),
+            relationship_stage="familiar",
+            scene_id="daily_chat",
+            user_message="现在都什么时候了还早上好",
+            limit=8,
+        )
+        guidance = render_surface_original_quote_guidance(query, limit=4)
+        elapsed_ms = int((time.perf_counter() - started) * 1000)
+        detail = f"OK (elapsed_ms={elapsed_ms}, guidance_len={len(guidance)})"
+        _logger.info("Surface quote runtime 预热完成: %s", detail)
+        return detail
+    except Exception as exc:
+        _logger.warning("Surface quote runtime 预热失败（降级）: %s", exc)
+        return f"DEGRADED: {exc}"
+
+
 def warmup_codex_exec_intent_pool() -> str:
     """预热 EXEC_INTENT 的 Codex app-server worker，避免首条聊天替后台分类付冷启动成本。"""
     app_server_prewarm_enabled = _parse_bool_env(
@@ -615,12 +645,17 @@ def warmup_codex_exec_intent_pool() -> str:
             raw_feature_keys = str(
                 os.environ.get("HOST_CODEX_APP_SERVER_PREWARM_FEATURE_KEYS")
                 or (
+                    "pool:CHAT_SURFACE:A,"
+                    "pool:THALAMUS_INTENT:C,"
                     "pool:EXEC_INTENT:C,"
-                    "inner_activity,"
+                    "surface_spark_reply_judge,"
                     "subagent_gateway,"
+                    "pool:NATSUME_AGENT:B,"
+                    "pool:PROACTIVE_TALK:C,"
                     "pool:INNER_WORLD:B,"
                     "pool:EVOLUTION_DESIRE:B,"
                     "memory_distillation,"
+                    "pool:MEMORY_DISTILLATION:B,"
                     "pool:SCHEDULER_NARRATIVE:D"
                 )
             )
@@ -631,17 +666,24 @@ def warmup_codex_exec_intent_pool() -> str:
                 minimum=1_000,
                 maximum=10 * 60 * 1000,
             )
+            model_prewarm_enabled = _parse_bool_env(
+                "HOST_CODEX_APP_SERVER_MODEL_PREWARM_ENABLED",
+                default=True,
+            )
             prewarm_result = prewarm_codex_app_server(
                 model_id=model_id,
                 feature_keys=feature_keys,
                 timeout_ms=prewarm_timeout_ms,
+                run_model_probe=model_prewarm_enabled,
             )
             prewarm_detail = (
                 f"prewarm_status={prewarm_result.get('status')}, "
                 f"prewarm_latency_ms={prewarm_result.get('latency_ms')}, "
                 f"prewarm_features={prewarm_result.get('feature_count')}, "
                 f"prewarm_threads={prewarm_result.get('thread_count')}, "
+                f"prewarm_model_probes={prewarm_result.get('model_probe_count')}, "
                 f"prewarm_workers={prewarm_result.get('worker_count')}, "
+                f"prewarm_profiles={prewarm_result.get('profiles')}, "
                 f"prewarm_pid={prewarm_result.get('pid')}"
             )
         if not exec_intent_model_warmup_enabled:
@@ -767,6 +809,7 @@ def warmup_all(*, eager: bool = False) -> dict[str, str]:
     statuses["graph_runtime"] = warmup_graph_runtime()
     statuses["chat_runtime"] = warmup_chat_runtime_basics(eager_persona=eager)
     statuses["chat_llm_runtime"] = warmup_chat_llm_runtime_profiles()
+    statuses["surface_quote_runtime"] = warmup_surface_quote_runtime()
     statuses["codex_exec_intent"] = warmup_codex_exec_intent_pool()
     statuses["retrieval_runtime"] = warmup_retrieval_runtime_basics()
 
@@ -793,6 +836,7 @@ __all__ = [
     "warmup_graph_runtime",
     "warmup_chat_runtime_basics",
     "warmup_chat_llm_runtime_profiles",
+    "warmup_surface_quote_runtime",
     "warmup_codex_exec_intent_pool",
     "warmup_retrieval_runtime_basics",
     "warmup_all",

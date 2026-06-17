@@ -522,17 +522,20 @@ def runtime_lifespan(
                     warmup_chat_llm_runtime_profiles,
                     warmup_chat_runtime_basics,
                     warmup_retrieval_runtime_basics,
+                    warmup_surface_quote_runtime,
                 )
 
                 new_module_statuses["chat_runtime_warmup"] = warmup_chat_runtime_basics(
                     eager_persona=True,
                 )
                 new_module_statuses["chat_llm_runtime_warmup"] = warmup_chat_llm_runtime_profiles()
+                new_module_statuses["surface_quote_runtime_warmup"] = warmup_surface_quote_runtime()
                 new_module_statuses["codex_exec_intent_warmup"] = warmup_codex_exec_intent_pool()
                 new_module_statuses["retrieval_runtime_warmup"] = warmup_retrieval_runtime_basics()
             except Exception as _chat_warmup_exc:
                 new_module_statuses["chat_runtime_warmup"] = f"DEGRADED: {_chat_warmup_exc}"
                 new_module_statuses["chat_llm_runtime_warmup"] = f"DEGRADED: {_chat_warmup_exc}"
+                new_module_statuses["surface_quote_runtime_warmup"] = f"DEGRADED: {_chat_warmup_exc}"
                 new_module_statuses["codex_exec_intent_warmup"] = f"DEGRADED: {_chat_warmup_exc}"
                 new_module_statuses["retrieval_runtime_warmup"] = f"DEGRADED: {_chat_warmup_exc}"
                 logger.warning(
