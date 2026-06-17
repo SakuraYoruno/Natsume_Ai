@@ -33,6 +33,7 @@ _LLM_CHATLIKE_ROUTES: frozenset[str] = frozenset({"chat", "task_progress", "rece
 _LLM_DELEGATE_TARGET_ALLOWLIST: frozenset[str] = frozenset({
     "emotion_agent",
     "intent_agent",
+    "pentest_agent",
     "retrieval_agent",
     "translate_agent",
     "vision_agent",
@@ -181,6 +182,33 @@ _TEST_FAILURE_TRIAGE_RE = re.compile(
     r"((分析|归因|triage).{0,16}(测试|单测|pytest|unittest).{0,16}(失败|报错|日志|输出)"
     r"|(测试|单测|pytest|unittest).{0,16}(失败日志|失败输出|报错日志|报错输出|归因|triage)"
     r"|(?:triage|analy[sz]e).{0,16}(?:test|pytest).{0,12}(?:failure|error|log))",
+    re.IGNORECASE,
+)
+_PENTEST_EXEC_MARKER_RE = re.compile(
+    r"("
+    r"授权.{0,20}(渗透测试|安全扫描|漏洞扫描|漏洞评估|安全评估|端口扫描|资产侦察|子域名枚举|配置审计)"
+    r"|(渗透测试|安全扫描|漏洞扫描|漏洞评估|安全评估|端口扫描|资产侦察|子域名枚举|配置审计)"
+    r"|(?:pentest|penetration\s+test|authorized\s+(?:security\s+)?scan|security\s+scan"
+    r"|vulnerability\s+(?:scan|assessment)|recon(?:naissance)?|port\s+scan|subdomain\s+enumeration"
+    r"|config(?:uration)?\s+audit)"
+    r")",
+    re.IGNORECASE,
+)
+_PENTEST_SCOPE_HINT_RE = re.compile(
+    r"("
+    r"\b(?:target|scope|host|domain|url)\s*[:=]"
+    r"|(?:目标|范围|授权范围|授权域|靶标)\s*[:：=]"
+    r"|https?://[^\s，。；,;]+"
+    r"|\b(?:\d{1,3}\.){3}\d{1,3}(?:/\d{1,2})?\b"
+    r"|\b(?:localhost|127\.0\.0\.1)\b"
+    r"|\b[a-z0-9-]+(?:\.[a-z0-9-]+)+\b"
+    r"|(?:靶场|测试环境|本地环境|内网环境|ctf|lab|dvwa|bwapp|metasploitable)"
+    r")",
+    re.IGNORECASE,
+)
+_PENTEST_ADVICE_ONLY_RE = re.compile(
+    r"(是什么|什么是|解释|原理|概念|科普|讲讲|学习|教程|怎么做|如何做|怎么防|如何防|如何修复"
+    r"|what\s+is|explain|how\s+to|mitigat|defen[cs]e)",
     re.IGNORECASE,
 )
 _FRONTEND_ROUTE_AUDIT_RE = re.compile(
@@ -1916,6 +1944,35 @@ def _build_frontend_audit_route_seed(text: str) -> dict[str, Any] | None:
     return None
 
 
+def _build_pentest_route_seed(text: str) -> dict[str, Any] | None:
+    normalized = _normalize_text(text)
+    if not normalized:
+        return None
+    if not _PENTEST_EXEC_MARKER_RE.search(normalized):
+        return None
+    if _PENTEST_ADVICE_ONLY_RE.search(normalized):
+        return None
+
+    has_scope_hint = bool(_PENTEST_SCOPE_HINT_RE.search(normalized))
+    if not has_scope_hint:
+        return None
+
+    return {
+        "route": "delegate",
+        "target_id": "pentest_agent",
+        "task": normalized,
+        "reason_code": "THALAMUS_RULE_PENTEST_AGENT",
+        "confidence": 0.93,
+        "route_source": "thalamus.rule",
+        "args": {
+            "text": normalized,
+            "user_message": normalized,
+            "scope_hint_present": has_scope_hint,
+            "allow_exploit": False,
+        },
+    }
+
+
 def _has_explicit_route_seed(payload: Mapping[str, Any] | None) -> bool:
     data = dict(payload or {})
     route = _normalize_text(data.get("route"), lower=True)
@@ -2072,6 +2129,10 @@ def _build_direct_route_seed(text: str) -> dict[str, Any] | None:
     frontend_audit_seed = _build_frontend_audit_route_seed(cleaned)
     if frontend_audit_seed is not None:
         return frontend_audit_seed
+
+    pentest_seed = _build_pentest_route_seed(cleaned)
+    if pentest_seed is not None:
+        return pentest_seed
 
     if _looks_like_open_app_request(cleaned):
         return {
@@ -2642,6 +2703,10 @@ def classify_task_intent_fastpath(text: str) -> dict[str, Any] | None:
                 "text": normalized,
             },
         }
+
+    pentest_seed = _build_pentest_route_seed(normalized)
+    if pentest_seed is not None:
+        return pentest_seed
 
     if _looks_like_simple_technical_advice(normalized):
         return _build_simple_technical_chat_seed(normalized, route_source="rule.fastpath")

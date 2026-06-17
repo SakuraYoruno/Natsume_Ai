@@ -1286,6 +1286,42 @@ def test_classify_task_intent_routes_gateway_status_reply_check_to_chat() -> Non
     assert decision["reason_code"] == "THALAMUS_RULE_STATUS_REPLY_CHECK"
 
 
+def test_classify_task_intent_routes_authorized_pentest_to_pentest_agent() -> None:
+    decision = classify_task_intent_by_rules("帮我对 target=example.com 做授权安全扫描，只做侦察和配置审计")
+
+    assert decision is not None
+    assert decision["route"] == "delegate"
+    assert decision["target_id"] == "pentest_agent"
+    assert decision["route_source"] == "thalamus.rule"
+    assert decision["reason_code"] == "THALAMUS_RULE_PENTEST_AGENT"
+    assert decision["args"]["allow_exploit"] is False
+    assert decision["args"]["scope_hint_present"] is True
+
+
+def test_classify_task_intent_keeps_security_advice_out_of_pentest_agent() -> None:
+    decision = classify_task_intent_by_rules("SQL 注入是什么，应该怎么防？")
+
+    assert decision is None or decision.get("target_id") != "pentest_agent"
+
+
+def test_classify_and_compile_intent_draft_routes_pentest_message_only() -> None:
+    agent = ThalamusAgent()
+
+    compiled = _run(
+        agent.classify_and_compile_intent_draft(
+            request_id="req-thalamus-pentest",
+            session_id="session-thalamus-pentest",
+            user_message="对目标：https://example.com 做授权漏洞评估，只允许只读检查",
+            person_id="person-001",
+        )
+    )
+
+    assert compiled["route"] == "delegate"
+    assert compiled["target_id"] == "pentest_agent"
+    assert compiled["action"] == "exec_intent"
+    assert compiled["args"]["text"] == "对目标：https://example.com 做授权漏洞评估，只允许只读检查"
+
+
 def test_classify_task_intent_does_not_treat_codex_name_as_code_request() -> None:
     decision = classify_task_intent_by_rules("Codex 现在在线吗？")
 

@@ -121,7 +121,7 @@ export default function PromptConfig() {
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
           <h1 className="text-xl font-semibold text-gray-900">提示与兜底模板总览</h1>
-          <p className="text-sm text-gray-500">查看主链路提示词、守卫兜底与现存 override，正式模板变更统一回到 YAML。</p>
+          <p className="text-sm text-gray-500">查看主链路提示词、守卫兜底与版本化 PromptSpec，正式变更统一回到代码目录。</p>
         </div>
         <div className="flex items-center gap-2">
           <Link to="/persona-config" className="btn-secondary">
@@ -139,7 +139,7 @@ export default function PromptConfig() {
         icon={FileText}
         eyebrow="数字生命体提示模板观测台"
         title={summary.total}
-        description="这里只读展示 YAML 默认值、当前生效值与现存 runtime override，帮助判断线上到底吃了哪套模板。"
+        description="这里只读展示 code-side PromptSpec 默认值与当前生效值，帮助判断线上到底吃了哪套模板。"
         gradientClass="from-primary-50 via-white to-indigo-50"
         aside={(
           <div className="space-y-3">
@@ -150,17 +150,17 @@ export default function PromptConfig() {
               sampleLabel="模板"
               updatedAt={listUpdatedAt}
               source="prompt-config"
-              definition="提示模板页当前是只读观测台：展示 YAML 默认值、runtime override 与当前生效值；不再提供前端编辑入口。"
+              definition="提示模板页当前是只读观测台：展示版本化 PromptSpec 与当前生效值；不再提供前端编辑入口。"
             />
             <div className="max-w-xl rounded-xl border border-orange-100 bg-orange-50 px-4 py-3 text-xs leading-6 text-orange-800">
-              YAML 已经是唯一真源。这里适合做线上核对和差异排查，不再承担模板编辑职责。
+              PromptSpec 是当前真源。这里适合做线上核对和差异排查，不再承担模板编辑职责。
             </div>
           </div>
         )}
       />
 
       <NoticeBanner variant="info" title="前端已切换为只读模式">
-        默认模板来自 `prompts/templates/*.yaml`。当前页面只展示 `default / resolved / override` 三层内容，前端不再提供保存、恢复默认或启用覆盖入口。
+        默认模板来自 code-side PromptSpec。当前页面只展示 default / resolved 内容，前端不再提供保存、恢复默认或启用覆盖入口。
       </NoticeBanner>
 
       {listError ? (
