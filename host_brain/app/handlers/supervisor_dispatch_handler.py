@@ -15,6 +15,7 @@ from host_brain.app.agents.agent_registry import (
     AGENT_ID_CHAT,
     AGENT_ID_EMOTION,
     AGENT_ID_INTENT,
+    AGENT_ID_PENTEST,
     AGENT_ID_RETRIEVAL,
     AGENT_ID_TRANSLATE,
     get_agent_meta,
@@ -124,6 +125,7 @@ _DELEGATE_TARGET_TO_AGENT: dict[str, str] = {
     "vision_agent":     AGENT_ID_INTENT,   # vision_agent 暂复用 intent_agent
     "retrieval_agent":  AGENT_ID_RETRIEVAL,
     "emotion_agent":    AGENT_ID_EMOTION,
+    "pentest_agent":    AGENT_ID_PENTEST,
 }
 
 
