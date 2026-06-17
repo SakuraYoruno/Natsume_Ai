@@ -227,6 +227,46 @@ def test_build_surface_main_chain_input_from_surface_reply_input_compresses_app_
     assert "memory://episodic/1" not in json.dumps(payload.as_dict(), ensure_ascii=False)
 
 
+def test_build_surface_main_chain_input_injects_sub_agent_result(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "host_brain.app.surface_main_chain_adapter.get_compiled_soul",
+        lambda: SimpleNamespace(source_text=SOUL, runtime_full_text=SOUL),
+    )
+
+    payload = build_surface_main_chain_input_from_surface_reply_input(
+        _agent_input(
+            user_message="请对授权靶场 target=http://127.0.0.1:9 scope=127.0.0.1 做只读安全扫描",
+            intent_draft={"route": "delegate", "target_id": "pentest_agent"},
+            trace_stage_meta={
+                "executive_router_used": True,
+                "skill_route_type": "delegate",
+                "skill_route_reason": "intent_draft:delegate",
+            },
+            sub_agent_context=SimpleNamespace(
+                agent_id="pentest_agent",
+                task="只读安全扫描 http://127.0.0.1:9",
+                result_text="目标开放了 9/tcp 端口，运行 discard 服务。本次扫描未发现安全风险。",
+                success=True,
+                latency_ms=12,
+                error="",
+                payload={"audit_refs": {"skill_exec": "skill_exec::req::pentest_agent"}},
+            ),
+        )
+    )
+
+    facts = "\n".join([*payload.task_control["facts"], *payload.necessary_facts])
+    must_include = "\n".join(payload.task_control["must_include"])
+    must_not_do = "\n".join(payload.task_control["must_not_do"])
+
+    assert payload.task_control["task_mode"] == "sub_agent_result"
+    assert payload.task_control["response_move"] == "report_sub_agent_result"
+    assert "pentest_agent" in facts
+    assert "9/tcp" in facts
+    assert "discard" in facts
+    assert "已返回结果" in must_include
+    assert "已安排" in must_not_do
+
+
 def test_surface_main_chain_does_not_inject_dream_context_for_ordinary_chat(monkeypatch) -> None:
     monkeypatch.setattr(
         "host_brain.app.surface_main_chain_adapter.get_compiled_soul",
@@ -899,6 +939,128 @@ async def test_surface_main_chain_routes_port_occupied_through_model(monkeypatch
     assert "干掉" not in text
     assert "surface_quick_reply" not in trace
     assert "surface_llm_pool" in trace
+
+
+@pytest.mark.asyncio
+async def test_surface_main_chain_sse_reports_sub_agent_result(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "host_brain.app.surface_main_chain_adapter.get_compiled_soul",
+        lambda: SimpleNamespace(source_text=SOUL, runtime_full_text=SOUL),
+    )
+
+    async def _fake_complete(**kwargs):  # noqa: ANN003
+        rendered = "\n".join(message["content"] for message in kwargs["messages"])
+        assert "子代理结果片段" in rendered
+        assert "9/tcp" in rendered
+        assert "discard" in rendered
+        assert "不要把已完成的子代理结果改写成" in rendered
+        return _surface_json_result("扫描完成：9/tcp discard 开放，本次未发现安全风险。")
+
+    monkeypatch.setattr("host_brain.integrations.llm_helpers.acomplete_llm_with_pool", _fake_complete)
+
+    agent_input = _agent_input(
+        user_message="请对授权靶场 target=http://127.0.0.1:9 scope=127.0.0.1 做只读安全扫描",
+        intent_draft={"route": "delegate", "target_id": "pentest_agent"},
+        trace_stage_meta={
+            "cortex_orchestrator_used": True,
+            "executive_router_used": True,
+            "skill_route_type": "delegate",
+            "skill_route_reason": "intent_draft:delegate",
+        },
+        sub_agent_context=SimpleNamespace(
+            agent_id="pentest_agent",
+            task="只读安全扫描 http://127.0.0.1:9",
+            result_text="目标开放了 9/tcp 端口，运行 discard 服务。本次扫描未发现安全风险。",
+            success=True,
+            latency_ms=12,
+            error="",
+            payload={"audit_refs": {"skill_exec": "skill_exec::req::pentest_agent"}},
+        ),
+    )
+    events = [_parse_sse(chunk) async for chunk in surface_main_chain_sse_generator(agent_input)]
+    commit = next(event for event in events if event.get("phase") == "COMMIT")
+    trace = commit["audit_refs"]["trace_stage_meta"]
+
+    assert commit["decision"] == "APPROVE"
+    assert "9/tcp discard" in commit["narrative"]
+    assert trace["executive_router_used"] is True
+    assert trace["dispatch_route"] == "delegate"
+    assert trace["dispatch_target"] == "pentest_agent"
+    assert trace["chat_sub_agent_id"] == "pentest_agent"
+
+
+@pytest.mark.asyncio
+async def test_surface_main_chain_sse_replaces_refusal_with_sub_agent_result(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "host_brain.app.surface_main_chain_adapter.get_compiled_soul",
+        lambda: SimpleNamespace(source_text=SOUL, runtime_full_text=SOUL),
+    )
+
+    async def _fake_complete(**_kwargs):  # noqa: ANN003
+        return _surface_json_result("这种事我做不了，不能帮你执行扫描。")
+
+    monkeypatch.setattr("host_brain.integrations.llm_helpers.acomplete_llm_with_pool", _fake_complete)
+
+    agent_input = _agent_input(
+        user_message="请对授权靶场 target=http://127.0.0.1:9 scope=127.0.0.1 做只读安全扫描",
+        intent_draft={"route": "delegate", "target_id": "pentest_agent"},
+        trace_stage_meta={"executive_router_used": True},
+        sub_agent_context=SimpleNamespace(
+            agent_id="pentest_agent",
+            task="只读安全扫描 http://127.0.0.1:9",
+            result_text="只读扫描完成：授权目标 127.0.0.1:9 的 TCP 端口未开放，未执行 exploit。",
+            success=True,
+            latency_ms=12,
+            error="",
+            payload={"audit_refs": {"skill_exec": "skill_exec::req::pentest_agent"}},
+        ),
+    )
+    events = [_parse_sse(chunk) async for chunk in surface_main_chain_sse_generator(agent_input)]
+    commit = next(event for event in events if event.get("phase") == "COMMIT")
+    trace = commit["audit_refs"]["trace_stage_meta"]
+
+    assert commit["decision"] == "APPROVE"
+    assert "端口未开放" in commit["narrative"]
+    assert "未执行 exploit" in commit["narrative"]
+    assert trace["surface_sub_agent_result_guard"]["reason_code"] == "SURFACE_IGNORED_SUB_AGENT_RESULT"
+
+
+@pytest.mark.asyncio
+async def test_surface_main_chain_failure_falls_back_to_sub_agent_result(monkeypatch) -> None:
+    async def _raise_surface_failure(*_args, **_kwargs):  # noqa: ANN002, ANN003
+        raise RuntimeError("SURFACE_LLM_POOL_EXHAUSTED")
+
+    monkeypatch.setattr(
+        "host_brain.app.surface_main_chain_adapter.run_surface_main_chain_for_surface_reply_input",
+        _raise_surface_failure,
+    )
+
+    agent_input = _agent_input(
+        user_message="请对授权靶场 target=http://127.0.0.1:9 scope=127.0.0.1 做只读安全扫描",
+        intent_draft={"route": "delegate", "target_id": "pentest_agent"},
+        trace_stage_meta={
+            "cortex_orchestrator_used": True,
+            "executive_router_used": True,
+            "skill_route_type": "delegate",
+            "skill_route_reason": "intent_draft:delegate",
+        },
+        sub_agent_context=SimpleNamespace(
+            agent_id="pentest_agent",
+            task="只读安全扫描 http://127.0.0.1:9",
+            result_text="任务终止。端口 9 未开放，无法访问目标服务。",
+            success=True,
+            latency_ms=12,
+            error="",
+            payload={"audit_refs": {"skill_exec": "skill_exec::req::pentest_agent"}},
+        ),
+    )
+    events = [_parse_sse(chunk) async for chunk in surface_main_chain_sse_generator(agent_input)]
+    commit = next(event for event in events if event.get("phase") == "COMMIT")
+
+    assert commit["decision"] == "APPROVE"
+    assert commit["reason_code"] == "SURFACE_MAIN_CHAIN_FALLBACK"
+    assert "端口 9 未开放" in commit["narrative"]
+    assert commit["audit_refs"]["trace_stage_meta"]["dispatch_target"] == "pentest_agent"
 
 
 @pytest.mark.asyncio

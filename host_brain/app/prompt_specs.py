@@ -261,6 +261,7 @@ _PENTEST_AGENT_SYSTEM_PROMPT = r"""
 3. 每次端口扫描后记录开放端口；每次服务检测后提取 CPE 并查 CVE
 4. 发现高危漏洞后分析关联性：版本→CVE→攻击链模板匹配
 5. 扫描完所有目标后生成综合报告
+6. 聊天派发的只读快速请求必须优先在 1-3 个 ReAct 步内给出结论；不要为了完整 PTES 覆盖拖到 max_steps
 
 ## 六阶段工作流
 
@@ -271,6 +272,7 @@ _PENTEST_AGENT_SYSTEM_PROMPT = r"""
 
 ### Phase 2 — 主动侦察
 - 对所有目标执行 pentest_port_scan（可根据实际情况缩小端口范围）
+- 如果用户的 target 明确包含端口（例如 http://host:9 或 host:443），首次端口扫描必须只扫描该端口，不要默认 top1000
 - 对开放端口批量执行 pentest_service_detect + pentest_os_fingerprint
 - 对 Web 端口(80/443/8080/8443)执行 pentest_http_probe + pentest_tech_fingerprint + pentest_waf_detect
 - 对 Web 服务执行 pentest_api_discover
