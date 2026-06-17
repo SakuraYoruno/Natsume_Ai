@@ -28,7 +28,7 @@ def test_identity_contract_requires_full_name() -> None:
     repeated = score_galgame_candidate(text="夏目蓝啊。尼尼今天怎么问了三遍了，喂。", contract=contract)
 
     assert good.score > vague.score
-    assert "CONTRACT_MISSING_REQUIRED_MOVE" in vague.reason_codes
+    assert "WEAK_SCENE_GROUNDING" in vague.reason_codes
     assert "CONTRACT_FORBIDDEN_SURFACE" in probe.reason_codes
     assert "CONTRACT_FORBIDDEN_SURFACE" in amnesia.reason_codes
     assert "CONTRACT_FORBIDDEN_SURFACE" in memory_dig.reason_codes
@@ -208,7 +208,7 @@ def test_presence_contract_rejects_help_frame() -> None:
 
     scored = score_galgame_candidate(text="在呀。尼尼找我当然在了。", contract=contract)
 
-    assert contract.scene_id == "presence"
+    assert contract.scene_id == "availability_check"
     assert "CONTRACT_FORBIDDEN_SURFACE" in scored.reason_codes
 
 

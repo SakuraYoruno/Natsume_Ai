@@ -59,6 +59,9 @@ def _vector_row(record: dict, *, score: float = 0.91) -> dict:
 
 
 def _patch_vector_rows(monkeypatch, rows: list[dict]) -> None:  # noqa: ANN001
+    quote_mod.clear_surface_original_quote_bank_cache()
+    monkeypatch.setattr(quote_mod, "_query_riddle_joker_dialogue_tsv", lambda query, *, top_k: [])
+    monkeypatch.setattr(quote_mod, "_query_riddle_joker_dialogue_vector_collection", lambda query, *, top_k: [])
     monkeypatch.setattr(
         quote_mod,
         "_query_surface_original_quote_collection",

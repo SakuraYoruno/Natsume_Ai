@@ -17,7 +17,15 @@ SOUL = "你是数字生命夏目蓝。中文私聊，反应快，有一点嘴硬
 
 
 def _candidate_payload(candidates: list[str]) -> str:
-    return json.dumps({"candidates": candidates}, ensure_ascii=False)
+    return json.dumps(
+        {
+            "reply_text": candidates[0] if candidates else "",
+            "natsume_emotion_tag": "NEUTRAL",
+            "user_emotion_tag": "NEUTRAL",
+            "emotion_confidence": 0.2,
+        },
+        ensure_ascii=False,
+    )
 
 
 def test_surface_main_chain_runs_compiler_and_runtime() -> None:
@@ -26,7 +34,8 @@ def test_surface_main_chain_runs_compiler_and_runtime() -> None:
     def generate(messages: list[dict[str, str]]) -> str:
         calls.append(messages)
         rendered = "\n".join(message["content"] for message in messages)
-        assert "ReplyControlPacket" in rendered
+        assert "必须遵守的事实" in rendered
+        assert "输出：只写最终正文" in rendered
         assert "memory://episodic/1" not in rendered
         assert "RAW_MEMORY_ROW_SHOULD_NOT_PASS" not in rendered
         return _candidate_payload(

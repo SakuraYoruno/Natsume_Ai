@@ -101,6 +101,7 @@ def test_warmup_codex_exec_intent_pool_reports_ready(monkeypatch) -> None:
     calls: dict[str, object] = {}
 
     monkeypatch.setenv("HOST_STARTUP_CODEX_EXEC_INTENT_WARMUP_ENABLED", "true")
+    monkeypatch.setenv("HOST_STARTUP_CODEX_APP_SERVER_PREWARM_ENABLED", "false")
     monkeypatch.setenv("HOST_CODEX_MODEL_ID", "gpt-test")
     monkeypatch.setattr(
         "host_brain.integrations.llm_helpers._codex_pool_migration_enabled",

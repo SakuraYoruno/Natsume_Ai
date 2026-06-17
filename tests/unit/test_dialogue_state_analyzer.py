@@ -184,7 +184,7 @@ def test_conversation_interpretation_plain_photo_without_question_is_visual_shar
     )
 
     assert interpretation.literal_topic == "attachment_only_no_question"
-    assert interpretation.interaction_move == "light_ack"
+    assert interpretation.interaction_move == "attachment_ack"
     assert interpretation.user_stance == "probing"
 
 

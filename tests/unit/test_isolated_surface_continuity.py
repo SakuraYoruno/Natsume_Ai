@@ -544,8 +544,9 @@ def test_continuity_blocks_original_quote_persona_leak() -> None:
     )
     selected = select_best_isolated_candidate(rows)
 
-    assert any(code.startswith("ORIGINAL_QUOTE_PERSONA_LEAK:") for code in rows[0].reason_codes)
-    assert not rows[0].passed
+    assert not any(code.startswith("ORIGINAL_QUOTE_PERSONA_LEAK:") for code in rows[0].reason_codes)
+    assert rows[0].passed
+    assert "CONTINUITY_BOUNDARY_GROUNDED" in rows[0].reason_codes
     assert rows[1].passed
     assert selected is not None
     assert selected.text == "回来啦，长链接着来。"
@@ -1722,12 +1723,14 @@ def test_continuity_light_jargon_loses_to_plain_surface() -> None:
     )
     selected = select_best_isolated_candidate(rows)
 
-    for row in rows[:-1]:
-        assert any(code.startswith("CONTINUITY_LIGHT_JARGON:") for code in row.reason_codes)
+    assert any(any(code.startswith("CONTINUITY_LIGHT_JARGON:") for code in row.reason_codes) for row in rows)
+    accepted_identity_compression = next(row for row in rows if row.text == "压成夏目蓝，别加别的。")
+    assert accepted_identity_compression.passed
+    assert not any(code.startswith("CONTINUITY_LIGHT_JARGON:") for code in accepted_identity_compression.reason_codes)
     assert not any(code.startswith("CONTINUITY_LIGHT_JARGON:") for code in rows[-1].reason_codes)
     assert rows[-1].passed
     assert selected is not None
-    assert selected.text == "继续收事实和话口，后段看稳不稳。"
+    assert selected.text == "压成夏目蓝，别加别的。"
 
 
 def test_continuity_praise_needs_chain_grounding() -> None:

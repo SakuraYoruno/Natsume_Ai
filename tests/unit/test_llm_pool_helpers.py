@@ -219,6 +219,8 @@ def test_scene_pool_spec_overrides_runtime_provider(monkeypatch: pytest.MonkeyPa
     assert [(row["provider_name"], row["model_id"]) for row in candidates] == [
         ("deepseek", "deepseek-v4-flash"),
         ("gemini", "gemini-2.5-flash-lite"),
+        ("deepseek", "deepseek-v4-pro"),
+        ("gemini", "gemini-2.5-pro"),
     ]
 
 

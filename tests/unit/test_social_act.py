@@ -4,10 +4,10 @@ from host_brain.app.context.social_act import resolve_social_act
 
 
 def test_social_act_presence_avoids_need_question() -> None:
-    act = resolve_social_act(user_message="在吗", conversation_interpretation={"literal_topic": "presence_ping"})
+    act = resolve_social_act(user_message="在吗", conversation_interpretation={"literal_topic": "greeting"})
 
     payload = act.as_dict()
-    assert payload["act_kind"] == "presence_ack"
+    assert payload["act_kind"] == "availability_reply"
     assert "问有什么事" in payload["avoid"]
     assert "别问需求" in payload["zh_directive"]
     assert "主动接住对话" in payload["should_do"]

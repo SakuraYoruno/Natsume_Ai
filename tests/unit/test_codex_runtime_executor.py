@@ -15,7 +15,7 @@ def test_codex_runtime_executor_blocks_write_payload_without_work_order() -> Non
     result = execute_agent_runtime_payload({"run_mode": "worker", "task": "edit files"})
 
     assert result["status"] == "BLOCKED"
-    assert result["reason_code"] == "CODEX_WORKORDER_REQUIRED"
+    assert result["reason_code"] == "AGENT_WORKORDER_REQUIRED"
 
 
 def test_codex_runtime_executor_degrades_when_cli_missing(monkeypatch, tmp_path) -> None:

@@ -25,20 +25,14 @@ def _install_store(monkeypatch, content: dict) -> PromptTemplateStore:
 
 def test_repair_browser_backend_attempts_install_and_succeeds(monkeypatch) -> None:
     commands = []
-    state = {"agent": False, "playwright": False}
+    state = {"playwright": False}
 
     def fake_which(name):
-        if name in {"npm", "npm.cmd"}:
-            return "C:/npm.cmd"
-        if name in {"agent-browser", "agent-browser.cmd"} and state["agent"]:
-            return "C:/agent-browser.cmd"
         return None
 
     def fake_run(command, **_kwargs):
         commands.append(list(command))
         joined = " ".join(command)
-        if "agent-browser" in joined and "install" not in joined:
-            state["agent"] = True
         if "pip install playwright" in joined or ("-m" in command and "playwright" in command and "install" in command):
             state["playwright"] = True
         return type("Completed", (), {"returncode": 0, "stdout": "", "stderr": ""})()
@@ -55,7 +49,8 @@ def test_repair_browser_backend_attempts_install_and_succeeds(monkeypatch) -> No
     result = mod._repair_browser_backend()
 
     assert result["success"] is True
-    assert any("agent-browser" in " ".join(cmd) for cmd in commands)
+    assert ["python", "-m", "pip", "install", "playwright"] in commands
+    assert ["python", "-m", "playwright", "install", "chromium"] in commands
 
 
 def test_repair_agent_handler_returns_success_summary(monkeypatch) -> None:

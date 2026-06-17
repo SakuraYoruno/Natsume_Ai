@@ -208,9 +208,8 @@ def test_surface_memory_recall_normalizes_legacy_assistant_attribution() -> None
     packet = build_surface_memory_recall_packet(result)
 
     rendered = "\n".join(packet.facts)
-    assert "回复" in rendered
+    assert "新海天回应" in rendered
     assert "夏目蓝回应" not in rendered
-    assert "新海天回应" not in rendered
 
 
 def test_surface_memory_recall_prefers_high_score_life_episode_over_legacy_noise() -> None:

@@ -241,7 +241,7 @@ def test_scheduler_narrative_generator_uses_model_pool(monkeypatch) -> None:
 
     assert result["narrative"] == "今天的内部日记"
     assert captured["scene_type"] == "SCHEDULER_NARRATIVE"
-    assert captured["cognitive_tier"] == "D"
+    assert captured["cognitive_tier"] == "C"
     assert "/v1/chat" not in str(captured.get("prompt"))
 
 
@@ -267,7 +267,7 @@ def test_proactive_scheduler_generator_uses_model_pool(monkeypatch) -> None:
 
     assert result["greeting"] == "晚上好，想起你之前说的事。"
     assert captured["scene_type"] == "PROACTIVE_TALK"
-    assert captured["cognitive_tier"] == "D"
+    assert captured["cognitive_tier"] == "C"
 
 
 def test_recent_dream_snippet_uses_main_dream_not_usage_hint(tmp_path) -> None:

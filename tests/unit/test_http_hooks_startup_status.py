@@ -41,7 +41,7 @@ def test_build_audit_retention_task_config_uses_current_scheduler_contract() -> 
 def test_build_codex_immune_scheduler_task_uses_current_scheduler_contract() -> None:
     task = _build_codex_immune_scheduler_task(interval_s=123.0)
 
-    assert task.task_id == "codex_immune_auto_dispatch_tick"
+    assert task.task_id == "agent_immune_auto_dispatch_tick"
     assert task.name == "Codex immune auto-dispatch tick"
     assert task.interval_s == 123.0
     assert task.max_retries == 1
@@ -72,7 +72,7 @@ def test_build_lightnovel_recommender_task_config_uses_natsume_scheduler_contrac
     assert "https://www.lightnovel.fun/" in args["urls"]
     assert "https://www.lightnovel.fun/cn/category/3/106?type=1" in args["urls"]
     assert "https://book.sfacg.com/rank/" in args["urls"]
-    assert "https://www.17k.com/man/qingbook/" in args["urls"]
+    assert "https://www.17k.com/man/qingbook/" not in args["urls"]
     assert task.priority is TaskPriority.LOW
     assert task.mode_allowlist == ["normal", "sleep"]
     assert task.enabled is True

@@ -30,8 +30,8 @@ def test_task_like_message_does_not_get_reflex_short_circuited() -> None:
 
 
 def test_connectivity_route_reason_is_low_risk_short_chat() -> None:
-    assert _is_low_risk_short_chat_route_reason("THALAMUS_RULE_CONNECTIVITY_CHECK")
-    assert _is_low_risk_short_chat_route_reason("THALAMUS_RULE_PHATIC_GREETING")
+    assert not _is_low_risk_short_chat_route_reason("THALAMUS_RULE_CONNECTIVITY_CHECK")
+    assert not _is_low_risk_short_chat_route_reason("THALAMUS_RULE_PHATIC_GREETING")
     assert not _is_low_risk_short_chat_route_reason("RULE_FORCE_agent_worker")
 
 

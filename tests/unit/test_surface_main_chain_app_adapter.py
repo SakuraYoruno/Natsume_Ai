@@ -76,7 +76,15 @@ def _agent_input(**overrides):
 
 
 def _candidate_payload(candidates: list[str]) -> str:
-    return json.dumps({"candidates": candidates}, ensure_ascii=False)
+    return json.dumps(
+        {
+            "reply_text": candidates[0] if candidates else "",
+            "natsume_emotion_tag": "NEUTRAL",
+            "user_emotion_tag": "NEUTRAL",
+            "emotion_confidence": 0.2,
+        },
+        ensure_ascii=False,
+    )
 
 
 def _surface_json_result(text: str, *, final_provider: str = "mock", final_model: str = "mock-chat") -> SimpleNamespace:
@@ -203,7 +211,8 @@ def test_build_surface_main_chain_input_from_surface_reply_input_compresses_app_
 
     payload = build_surface_main_chain_input_from_surface_reply_input(_agent_input())
 
-    assert payload.soul_md == SOUL
+    assert payload.soul_md.startswith("【当前人格锚】")
+    assert SOUL in payload.soul_md
     assert payload.user_message == "这段我不会改"
     assert payload.task_control["task_mode"] == "technical_help"
     assert payload.task_control["response_move"] == "technical_next_step"
@@ -379,7 +388,7 @@ def test_build_surface_main_chain_input_prefers_surface_task_control(monkeypatch
     assert tuple(payload.memory_packet.facts) == ("用户刚刚要求继续迁移主链。",)
     assert trace["surface_context_packet_prepared"] is True
     assert trace["surface_selected_reply_plan"]["task_mode"] == "style_repair"
-    assert trace["reply_plan"]["primary_topic"] == "context_fallback_should_not_win"
+    assert trace["reply_plan"]["task_mode"] == "style_repair"
     assert "memory://raw/should-not-pass" not in json.dumps(payload.as_dict(), ensure_ascii=False)
 
 
@@ -392,8 +401,7 @@ def test_sanitize_main_chain_meta_reply_replaces_generic_latency_reply() -> None
     )
 
     assert "乱七八糟" not in cleaned
-    assert "入口路由" in cleaned
-    assert "surface" in cleaned
+    assert cleaned == "如果是我这边有什么让你觉得慢的话，直接说嘛，我再看看怎么改进。"
 
 
 def test_build_surface_main_chain_input_derives_reply_plan_without_passing_history(monkeypatch) -> None:
@@ -446,7 +454,8 @@ def test_build_surface_main_chain_input_derives_reply_plan_without_passing_histo
     assert payload.affect_packet.emotional_tone == "slightly_guilty"
     assert tuple(payload.memory_packet.facts) == ("用户刚刚指出上一句不通顺。",)
     assert trace["conversation_history"] == {"turns_injected": 2, "summary_present": True}
-    assert trace["reply_plan"]["primary_topic"] == "presence_ping"
+    assert trace["reply_plan"]["task_mode"] == "presence_ping"
+    assert trace["reply_plan"]["response_move"] == "answer_current_chat_presence"
     assert trace["surface_affect_packet"]["emotional_tone"] == "slightly_guilty"
     assert "RAW HISTORY PROMPT SHOULD NOT REACH SURFACE" not in rendered
     assert "memory://raw/should-not-pass" not in rendered
@@ -498,7 +507,8 @@ def test_build_surface_main_chain_input_reuses_prepared_context_packet(monkeypat
     assert payload.task_control["response_move"] == "reply_from_prepared_packet"
     assert payload.affect_packet.emotional_tone == "slightly_guilty"
     assert tuple(payload.memory_packet.facts) == ("用户正在让主链继续迁移。",)
-    assert trace["surface_selected_reply_plan"]["primary_topic"] == "prepared_presence"
+    assert trace["surface_selected_reply_plan"]["task_mode"] == "prepared_presence"
+    assert trace["surface_selected_reply_plan"]["response_move"] == "reply_from_prepared_packet"
     assert "memory://raw/should-not-pass" not in rendered
 
 
@@ -542,12 +552,13 @@ async def test_surface_main_chain_sse_generator_calls_chat_surface_pool(monkeypa
         calls.append(kwargs)
         rendered = "\n".join(message["content"] for message in kwargs["messages"])
         assert kwargs["scene_type"] == "CHAT_SURFACE"
-        assert "ReplyControlPacket" in rendered
+        assert "必须遵守的事实" in rendered
+        assert "输出：只写最终正文" in rendered
         assert "memory://episodic/1" not in rendered
         return SimpleNamespace(
             content=json.dumps(
                 {
-                    "reply_text": "上次卡在输入输出，这轮先盯那一块。",
+                    "reply_text": "先查输入输出边界：把实际输入和期望输出各留一条，我再对照差在哪。",
                     "natsume_emotion_tag": "THINKING",
                     "user_emotion_tag": "ANXIOUS",
                     "emotion_confidence": 0.68,
@@ -579,7 +590,7 @@ async def test_surface_main_chain_sse_generator_calls_chat_surface_pool(monkeypa
     await asyncio.sleep(0)
     assert post_process_calls
     assert post_process_calls[0]["trace_stage_meta"]["surface_main_chain_used"] is True
-    assert post_process_calls[0]["reply_plan"]["primary_topic"] == "technical_help"
+    assert post_process_calls[0]["reply_plan"]["task_mode"] == "technical_help"
     assert post_process_calls[0]["emotion_context"]["emotion_tag"] == "THINKING"
     assert post_process_calls[0]["emotion_context"]["surface_user_emotion_tag"] == "ANXIOUS"
     assert post_process_calls[0]["emotion_context"]["surface_vts_expression_id"]
@@ -692,13 +703,13 @@ async def test_surface_main_chain_allows_missing_detail_selection_when_scoped_to
     assert "只按简介第一眼" in commit["narrative"]
     assert "surface_memory_output_guard" not in commit["audit_refs"]["trace_stage_meta"]
     prompt = str(calls[0].get("prompt") or calls[0].get("messages") or "")
-    assert "不要写系统免责声明" in prompt
+    assert "不要写“我们被要求”" in prompt
     assert "字段腔" in prompt
 
 
 @pytest.mark.asyncio
 async def test_surface_main_chain_failure_returns_sendable_non_persistent_fallback(monkeypatch) -> None:
-    async def _boom(**_kwargs):  # noqa: ANN003
+    async def _boom(*_args, **_kwargs):  # noqa: ANN002, ANN003
         raise RuntimeError("SURFACE_LLM_POOL_EXHAUSTED")
 
     monkeypatch.setattr(
@@ -714,19 +725,19 @@ async def test_surface_main_chain_failure_returns_sendable_non_persistent_fallba
     ]
     commit = next(event for event in events if event.get("phase") == "COMMIT")
 
-    assert commit["decision"] == "APPROVE"
-    assert commit["reason_code"] == "SURFACE_MAIN_CHAIN_FALLBACK"
-    assert commit["narrative"] == "接着来。"
-    assert commit["reply_envelope"]["sendable"] is True
+    assert commit["decision"] == "NO_REPLY"
+    assert commit["reason_code"] == "SURFACE_MAIN_CHAIN_FAILED"
+    assert commit["narrative"] == ""
+    assert commit["reply_envelope"]["sendable"] is False
     assert commit["reply_envelope"]["persistable"] is False
     assert commit["reply_envelope"]["cacheable"] is False
-    assert commit["reply_envelope"]["raw_extra"]["fallback"] is True
-    assert commit["audit_refs"]["trace_stage_meta"]["surface_renderer"]["status"] == "DEGRADED"
+    assert commit["reply_envelope"]["degraded"] is True
+    assert commit["audit_refs"]["trace_stage_meta"]["surface_main_chain_used"] is True
 
 
 @pytest.mark.asyncio
 async def test_surface_main_chain_failure_returns_contextual_fallback_for_substantive_prompt(monkeypatch) -> None:
-    async def _boom(**_kwargs):  # noqa: ANN003
+    async def _boom(*_args, **_kwargs):  # noqa: ANN002, ANN003
         raise RuntimeError("SURFACE_LLM_POOL_EXHAUSTED")
 
     monkeypatch.setattr(
@@ -742,11 +753,9 @@ async def test_surface_main_chain_failure_returns_contextual_fallback_for_substa
     ]
     commit = next(event for event in events if event.get("phase") == "COMMIT")
 
-    assert commit["decision"] == "APPROVE"
-    assert commit["reason_code"] == "SURFACE_MAIN_CHAIN_FALLBACK"
-    assert "接着来" not in commit["narrative"]
-    assert "刚卡" not in commit["narrative"]
-    assert "连接稳定性" in commit["narrative"]
+    assert commit["decision"] == "NO_REPLY"
+    assert commit["reason_code"] == "SURFACE_MAIN_CHAIN_FAILED"
+    assert commit["narrative"] == ""
     assert commit["reply_envelope"]["persistable"] is False
 
 
@@ -969,7 +978,7 @@ async def test_surface_main_chain_routes_asr_auditory_check_through_model(monkey
         trace_stage_meta=trace,
     )
 
-    assert result.selected_text == "听到啦。"
+    assert result.selected_text == "哈？我这里只收到这条文字。"
     assert "surface_quick_reply" not in trace
 
 

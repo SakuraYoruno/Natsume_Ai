@@ -7,16 +7,16 @@ from host_brain.persona.positive_style_bank import render_positive_style_guidanc
 def test_positive_style_bank_selects_presence_without_need_question() -> None:
     facts = InteractionFactsPlane(
         user_message="在吗",
-        conversation_interpretation={"literal_topic": "presence_ping"},
-        social_act={"act_kind": "presence_ack"},
+        conversation_interpretation={"literal_topic": "greeting"},
+        social_act={"act_kind": "availability_reply"},
     )
 
     sample = select_positive_style_sample(user_message="在吗", facts=facts, render_profile="zh_text")
     guidance, trace = render_positive_style_guidance(user_message="在吗", facts=facts, render_profile="zh_text")
 
     assert sample is not None
-    assert sample.scene_id == "presence"
-    assert trace["scene_id"] == "presence"
+    assert sample.scene_id == "availability_check"
+    assert trace["scene_id"] == "availability_check"
     assert "明确在场/正在回他" in guidance
     assert "不要追问需求" in guidance
     assert "怎么了" in guidance
@@ -44,7 +44,7 @@ def test_positive_style_bank_selects_boundary_hurt_as_relationship_pushback() ->
 
 
 def test_positive_style_bank_keeps_ja_voice_out_of_zh_guidance() -> None:
-    facts = InteractionFactsPlane(user_message="在吗", social_act={"act_kind": "presence_ack"})
+    facts = InteractionFactsPlane(user_message="在吗", social_act={"act_kind": "availability_reply"})
 
     sample = select_positive_style_sample(user_message="在吗", facts=facts, render_profile="ja_voice")
     guidance, trace = render_positive_style_guidance(user_message="在吗", facts=facts, render_profile="ja_voice")

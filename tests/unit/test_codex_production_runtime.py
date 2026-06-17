@@ -56,8 +56,8 @@ def test_codex_production_executor_queues_without_blocking(tmp_path: Path) -> No
     job = get_agent_production_job(result["job_id"])
 
     assert result["status"] == "OK"
-    assert result["result_code"] == "CODEX_PRODUCTION_QUEUED"
-    assert result["codex_background"] is True
+    assert result["result_code"] == "AGENT_PRODUCTION_QUEUED"
+    assert result["agent_background"] is True
     assert result["surface_main_chain_required"] is True
     assert contract["status"] == "QUEUED"
     assert contract["metadata"]["persona_boundary"]["surface_owner"] == "host_main_persona"
@@ -119,7 +119,7 @@ def test_codex_production_job_memory_uses_original_chat_context(monkeypatch, tmp
         },
     )
 
-    assert captured["event_source"] == "codex_production"
+    assert captured["event_source"] == "agent_production"
     assert captured["request_id"] == "req-prod-memory"
     assert captured["intent_id"] == "intent-prod-memory"
     assert captured["session_id"] == "sess-prod-memory"
@@ -140,7 +140,7 @@ def test_codex_production_executor_rejects_missing_persona_boundary(tmp_path: Pa
     )
 
     assert result["status"] == "FAILED"
-    assert result["reason_code"] == "CODEX_PRODUCTION_CONTRACT_INVALID"
+    assert result["reason_code"] == "AGENT_PRODUCTION_CONTRACT_INVALID"
     assert "persona_boundary" in result["detail"]
 
 
@@ -211,7 +211,7 @@ def test_browser_research_native_worker_builds_report_from_local_html(tmp_path: 
                 "max_sources": 3,
                 "artifacts_root": str(tmp_path),
             },
-            skill_id="agent_browser_research",
+            skill_id="browser_research",
         )
     )
     run_dir = tmp_path / "browser-research-run"
@@ -265,7 +265,7 @@ def test_browser_research_gateway_push_dispatches_to_configured_gateway(tmp_path
     order = AgentWorkOrder.from_mapping(
         build_production_work_order(
             {"task": "网页资料研究", "request_id": "req-browser-research-gw", "artifacts_root": str(tmp_path)},
-            skill_id="agent_browser_research",
+            skill_id="browser_research",
         )
     )
     calls: list[dict] = []
@@ -309,7 +309,7 @@ def test_browser_research_gateway_push_dispatches_to_configured_gateway(tmp_path
     assert calls[0]["platform"] == "qq"
     assert calls[0]["conversation_id"] == "qq_dm_owner"
     assert "测试商品 A" in calls[0]["content"]
-    assert calls[0]["raw_extra"]["reply_source"] == "agent_browser_research"
+    assert calls[0]["raw_extra"]["reply_source"] == "browser_research"
 
 
 def test_codex_production_prompt_includes_account_purchase_gate(tmp_path: Path) -> None:
@@ -455,7 +455,7 @@ def test_lightnovel_candidate_normalization_filters_site_admin_links() -> None:
         ]
     )
 
-    assert [item["title"] for item in recommendations] == ["[水城水城]雨森润奈的湿度很高 3[马粪文库J]"]
+    assert [item["title"] for item in recommendations] == ["[水城水城]雨森润奈的湿度很高 3"]
 
 
 def test_browser_researcher_does_not_use_whole_rank_section_as_item_context() -> None:
@@ -608,7 +608,7 @@ def test_lightnovel_candidate_filter_rejects_standalone_chapter_titles() -> None
         ]
     )
 
-    assert [item["title"] for item in recommendations] == ["[水城水城]雨森润奈的湿度很高 3[马粪文库J]"]
+    assert [item["title"] for item in recommendations] == ["雨森润奈的湿度很高 3"]
 
 
 def test_lightnovel_ranker_prefers_taste_match_over_raw_source_order(monkeypatch, tmp_path: Path) -> None:
@@ -948,7 +948,7 @@ def test_lightnovel_gateway_push_dispatches_to_configured_gateway(tmp_path: Path
     assert calls[1]["msg_type"] == "image"
     assert calls[1]["media_path"] == "https://res.lightnovel.fun/images/demo.jpg"
     assert "身为路人祭司" in calls[1]["content"]
-    assert "命中偏好" in calls[1]["content"]
+    assert "看点：" in calls[1]["content"]
     assert "res.lightnovel.fun" not in calls[1]["content"]
     assert calls[1]["raw_extra"]["reply_source"] == "agent_lightnovel_recommender.card"
     assert result["card_results"][0]["success"] is True
@@ -1075,7 +1075,7 @@ def test_lightnovel_gateway_delivery_writes_life_memory(monkeypatch, tmp_path: P
     assert result["status"] == "OK"
     assert calls
     call = calls[0]
-    assert call["event_source"] == "codex_production"
+    assert call["event_source"] == "agent_production"
     assert call["action_kind"] == "lightnovel_recommendation_delivery"
     assert call["session_id"] == "qq_dm_owner"
     assert "我刚才通过 qq 给 qq_dm_owner 推荐了 2 本轻小说" in call["action_summary"]
@@ -1099,58 +1099,30 @@ def test_lightnovel_worker_uses_native_recommender(tmp_path: Path, monkeypatch) 
         )
     )
 
-    def _fake_browser_research(executed_order, *, run_dir: Path):
-        assert executed_order.work_order_id == order.work_order_id
-        run_dir.mkdir(parents=True, exist_ok=True)
-        sources_path = run_dir / "sources.jsonl"
-        sources_path.write_text(
-            json.dumps(
-                {
-                    "source_ref": "https://www.lightnovel.fun/cn/category/3/106?type=1",
-                    "title": "轻小说分类",
-                    "status": "OK",
-                    "items": [
-                        {
-                            "title": "3 分类页完整作品 30 分钟前",
-                            "url": "https://www.lightnovel.fun/cn/detail/1140003",
-                            "context": "分类页完整 sources.jsonl 条目。",
-                        }
-                    ],
-                },
-                ensure_ascii=False,
-            )
-            + "\n",
-            encoding="utf-8",
-        )
-        return {
-            "status": "EXECUTED",
-            "metadata": {
-                "source_count": 1,
-                "readable_source_count": 1,
-                "sources_path": str(sources_path),
-                "candidate_items": [
-                    {
-                        "title": "1 和青梅竹马一起经营桌游咖 2 小时前",
-                        "url": "https://www.lightnovel.fun/detail/1140001",
-                        "context": "恋爱喜剧、校园日常、桌游题材。",
-                        "source_ref": "https://www.lightnovel.fun/",
-                    }
-                ],
-                "source_summaries": [
-                    {
-                        "title": "轻小说分类",
-                        "source_ref": "https://www.lightnovel.fun/cn/category/3/106?type=1",
-                        "items": [
-                            {
-                                "title": "2 新的校园恋爱喜剧 1 小时前",
-                                "url": "https://www.lightnovel.fun/detail/1140002",
-                                "context": "校园日常。",
-                            }
-                        ],
-                    }
-                ],
+    def _fake_collect_via_playwright(*, list_urls, max_detail_pages: int, detail_timeout_s: int):
+        assert "https://www.lightnovel.fun/" in list_urls
+        assert max_detail_pages == 0
+        assert detail_timeout_s >= 3
+        return [
+            {
+                "title": "1 和青梅竹马一起经营桌游咖 2 小时前",
+                "url": "https://www.lightnovel.fun/detail/1140001",
+                "context": "恋爱喜剧、校园日常、桌游题材。",
+                "source_ref": "https://www.lightnovel.fun/",
             },
-        }
+            {
+                "title": "2 新的校园恋爱喜剧 1 小时前",
+                "url": "https://www.lightnovel.fun/detail/1140002",
+                "context": "校园日常。",
+                "source_ref": "https://www.lightnovel.fun/cn/category/3/106?type=1",
+            },
+            {
+                "title": "3 分类页完整作品 30 分钟前",
+                "url": "https://www.lightnovel.fun/cn/detail/1140003",
+                "context": "分类页完整 Playwright 条目。",
+                "source_ref": "https://www.lightnovel.fun/cn/category/3/106?type=1",
+            },
+        ]
 
     def _fake_detail(url: str, *, timeout_s: int):
         assert timeout_s >= 3
@@ -1163,8 +1135,8 @@ def test_lightnovel_worker_uses_native_recommender(tmp_path: Path, monkeypatch) 
         }
 
     monkeypatch.setattr(
-        "host_brain.agent_runtime.production_executor.execute_browser_research_work_order",
-        _fake_browser_research,
+        "host_brain.agent_runtime.production_executor._collect_lightnovel_candidates_via_playwright",
+        _fake_collect_via_playwright,
     )
     monkeypatch.setattr(
         "host_brain.agent_runtime.production_executor._fetch_lightnovel_detail_metadata",
@@ -1174,7 +1146,7 @@ def test_lightnovel_worker_uses_native_recommender(tmp_path: Path, monkeypatch) 
     result = execute_lightnovel_recommender_work_order(order, run_dir=tmp_path / "run")
 
     assert result["status"] == "EXECUTED"
-    assert result["metadata"]["native_lightnovel_recommender"] is True
+    assert result["metadata"]["browser_recommender"] is True
     recommendations_path = Path(result["metadata"]["recommendations_ref"])
     assert recommendations_path.exists()
     payload = json.loads(recommendations_path.read_text(encoding="utf-8"))
@@ -1186,75 +1158,47 @@ def test_lightnovel_worker_uses_native_recommender(tmp_path: Path, monkeypatch) 
     assert any(item["detail_url"].endswith("/1140003") for item in payload["recommendations"])
     assert Path(result["metadata"]["cover_manifest_path"]).exists()
     result_payload = json.loads((tmp_path / "run" / "result.json").read_text(encoding="utf-8"))
-    assert result_payload["summary"].startswith("Native lightnovel recommendations built")
-    assert result_payload["metadata"]["native_lightnovel_recommender"] is True
+    assert result_payload["summary"].startswith("Playwright lightnovel recommendations built")
+    assert result_payload["metadata"]["browser_recommender"] is True
     assert result_payload["metadata"]["recommendations_ref"] == str(recommendations_path)
 
 
-def test_lightnovel_worker_recovers_completed_artifacts_after_codex_wrapper_failure(tmp_path: Path, monkeypatch) -> None:
+def test_lightnovel_worker_delegates_to_playwright_recommender(tmp_path: Path, monkeypatch) -> None:
     order = AgentWorkOrder.from_mapping(
         build_production_work_order(
-            {"task": "推荐轻小说", "request_id": "req-ln-recover", "artifacts_root": str(tmp_path)},
+            {"task": "推荐轻小说", "request_id": "req-ln-worker", "artifacts_root": str(tmp_path)},
             skill_id="agent_lightnovel_recommender",
         )
     )
     run_dir = tmp_path / "lightnovel_recommender" / order.work_order_id
-    workspace = tmp_path / order.work_order_id / "workspace"
-    workspace.mkdir(parents=True)
-    recommendations_path = workspace / "recommendations.json"
-    recommendations_path.write_text(
-        json.dumps(
-            [
-                {
-                    "title": "测试轻小说",
-                    "detail_url": "https://www.lightnovel.fun/detail/recovered",
-                    "update_time": "1 小时前",
-                    "view_count": "1w",
-                }
-            ],
-            ensure_ascii=False,
-        ),
-        encoding="utf-8",
-    )
-    (workspace / "result_contract.json").write_text(
-        json.dumps(
-            {
-                "workorder_id": order.work_order_id,
-                "status": "complete",
-                "recommendation_count": 1,
-            },
-            ensure_ascii=False,
-        ),
-        encoding="utf-8",
-    )
-    (workspace / "recommendation_report.md").write_text("# report\n", encoding="utf-8")
+    expected_run_dir = run_dir
 
-    def _fake_execute(self, executed_order):
+    def _fake_execute_lightnovel(executed_order, *, run_dir: Path):
         assert executed_order.work_order_id == order.work_order_id
+        assert run_dir == expected_run_dir
         return {
-            "status": "FAILED",
-            "reason_code": "CODEX_EXEC_FAILED",
-            "detail": "Failed to write last message file",
-            "risk_flags": ["codex_exec_failed"],
-            "metadata": {},
+            "status": "EXECUTED",
+            "reason_code": None,
+            "summary": "Playwright lightnovel recommendations built from 1 candidate(s).",
+            "risk_flags": [],
+            "metadata": {
+                "browser_recommender": True,
+                "recommendations_ref": str(run_dir / "recommendations.json"),
+            },
         }
 
     monkeypatch.setattr(
-        "host_brain.agent_runtime.production_executor.AgentRuntimeExecutor.execute",
-        _fake_execute,
+        "host_brain.agent_runtime.production_executor.execute_lightnovel_recommender_work_order",
+        _fake_execute_lightnovel,
     )
-    monkeypatch.setenv("HOST_LIGHTNOVEL_RECOMMENDER_NATIVE_ENABLED", "0")
 
     result = _execute_worker(order, store=AgentArtifactStore(str(tmp_path)), run_dir=run_dir)
 
     assert result["status"] == "EXECUTED"
     assert result["reason_code"] is None
-    assert result["metadata"]["recovered_from_failed_codex"] is True
-    assert result["metadata"]["workspace"] == str(workspace)
-    assert result["metadata"]["recommendations_ref"] == str(recommendations_path)
-    assert result["metadata"]["original_worker_reason_code"] == "CODEX_EXEC_FAILED"
-    assert result["risk_flags"] == ["codex_exec_recovered"]
-    assert _find_lightnovel_recommendations_file(result=result, run_dir=run_dir) == recommendations_path
+    assert result["metadata"]["browser_recommender"] is True
+    assert result["metadata"]["recommendations_ref"] == str(run_dir / "recommendations.json")
+    assert result["risk_flags"] == []
 
 
 def test_lightnovel_epub_gateway_push_dispatches_file_to_configured_gateway(tmp_path: Path, monkeypatch) -> None:

@@ -205,7 +205,7 @@ def test_inner_world_tick_uses_motive_state_to_adjust_offline_growth(monkeypatch
     assert fast_result["anticipation"] > slow_result["anticipation"]
     assert fast_result["anticipation_rate_multiplier"] > slow_result["anticipation_rate_multiplier"]
     assert fast_result["spontaneous_event_count"] >= 1
-    assert bool(fast_result["last_spontaneous_note"])
+    assert bool(fast_result["last_spontaneous_event"]["thought_id"])
     assert len(fast_world.get_state("user_1").get("inner_stream") or []) >= 1
     assert fast_result["continuity_score"] >= slow_result["continuity_score"]
 

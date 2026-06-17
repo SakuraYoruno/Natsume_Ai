@@ -11,19 +11,19 @@ def test_codex_runtime_skill_registry_contains_new_skill_ids() -> None:
         "agent_worker",
         "agent_self_heal",
         "agent_self_evolve",
-        "codex_sql_audit",
+        "agent_sql_audit",
         "agent_translate_project",
-        "codex_skill_forge",
+        "agent_skill_forge",
         "agent_research",
-        "codex_organ_scan",
-        "codex_persona_drift_audit",
-        "codex_dream_compile",
+        "agent_organ_scan",
+        "agent_persona_drift_audit",
+        "agent_dream_compile",
         "agent_workbench_brief",
         "agent_repo_sentinel",
         "agent_memory_curator",
-        "codex_document_digest",
+        "agent_document_digest",
         "agent_frontend_review",
-        "agent_browser_research",
+        "browser_research",
         "agent_frontend_acceptance",
         "agent_web_corpus_collector",
         "agent_lightnovel_recommender",
@@ -74,8 +74,8 @@ def test_codex_production_skill_emits_async_persona_bounded_work_order() -> None
     assert payload["start_background"] is False
     assert order["domain"] == "memory"
     assert order["run_mode"] == "inspect"
-    assert metadata["codex_production"] is True
-    assert metadata["codex_background"] is True
+    assert metadata["agent_production"] is True
+    assert metadata["agent_background"] is True
     assert metadata["surface_main_chain_required"] is True
     assert boundary["surface_owner"] == "host_main_persona"
     assert "write_long_term_memory" in order["forbidden_actions"]
@@ -98,16 +98,16 @@ def test_agent_frontend_acceptance_skill_uses_browser_readonly_contract() -> Non
     assert payload["tool"] == "codex_production"
     assert order["run_mode"] == "inspect"
     assert order["workspace"]["strategy"] == "runtime_repo"
-    assert "use_agent_browser" in order["allowed_actions"]
+    assert "use_playwright_browser" in order["allowed_actions"]
     assert "capture_screenshots" in order["allowed_actions"]
     assert "write_files" not in order["allowed_actions"]
     assert "screenshots/" in order["input_pack"]["artifact_contract"]
     assert order["input_pack"]["urls"] == ["http://127.0.0.1:5178/monitor/#/digital-life"]
 
 
-def test_agent_browser_research_skill_carries_source_limits() -> None:
+def test_browser_research_skill_carries_source_limits() -> None:
     registry = build_agent_runtime_skill_registry()
-    payload = registry.require("agent_browser_research").handler(
+    payload = registry.require("browser_research").handler(
         {
             "task": "查阅这几个商品页面并整理证据",
             "urls": ["https://example.test/a", "https://example.test/b"],
@@ -123,7 +123,7 @@ def test_agent_browser_research_skill_carries_source_limits() -> None:
     assert payload["tool"] == "codex_production"
     assert order["run_mode"] == "research"
     assert order["workspace"]["strategy"] == "temp_workspace"
-    assert "use_agent_browser" in order["allowed_actions"]
+    assert "use_playwright_browser" in order["allowed_actions"]
     assert "read_public_web_pages" in order["allowed_actions"]
     assert "screenshots/" in order["input_pack"]["artifact_contract"]
     assert order["input_pack"]["urls"] == ["https://example.test/a", "https://example.test/b"]
@@ -294,7 +294,6 @@ def test_agent_lightnovel_recommender_uses_declared_defaults_without_urls() -> N
         "https://www.lightnovel.fun/",
         "https://www.lightnovel.fun/cn/category/3/106?type=1",
         "https://book.sfacg.com/rank/",
-        "https://www.17k.com/man/qingbook/",
     ]
     assert order["input_pack"]["driver_kind"] == "natsume_daily_recommendation"
     assert payload["start_background"] is False

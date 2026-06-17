@@ -376,7 +376,7 @@ def test_build_thread_fallback_plan_components_covers_all_thread_kinds() -> None
     assert identity is not None and identity[0] == "identity"
     assert boundary is not None and boundary[0] == "motivation"
     assert help_thread is not None and help_thread[0] == "help_commitment"
-    assert phatic is not None and phatic[0] == "greeting"
+    assert phatic is None
     assert nothing_reaction is not None and nothing_reaction[1].tactic_variant == "let_it_pass"
     assert _build_thread_fallback_plan_components(
         interpretation=interpretation,
@@ -588,8 +588,8 @@ def test_build_reply_plan_and_candidates_cover_thread_fallback_and_plain_hold_pa
         limit=2,
     )
 
-    assert thread_plan.primary_topic == "greeting"
-    assert thread_plan.tactic_family == "phatic_wave"
+    assert thread_plan.primary_topic == ""
+    assert thread_plan.tactic_family == "plain_hold"
     assert plain_plan.tactic_family == "plain_hold"
     assert candidates[0].primary_topic == "emoji_social_followup"
 

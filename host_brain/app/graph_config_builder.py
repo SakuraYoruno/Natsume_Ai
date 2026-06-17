@@ -83,6 +83,8 @@ RETRIEVAL_AGENT_NODE_ID = "retrieval_agent_node"  # P11 新增
 RETRIEVAL_AGENT_HANDLER_ID = "retrieval_agent"    # P11 新增
 EMOTION_AGENT_NODE_ID = "emotion_agent_node"       # 方向 G Phase 2 新增
 EMOTION_AGENT_HANDLER_ID = "emotion_agent"          # 方向 G Phase 2 新增
+REPAIR_AGENT_NODE_ID = "repair_agent_node"
+REPAIR_AGENT_HANDLER_ID = "repair_agent"
 PENTEST_AGENT_NODE_ID = "pentest_agent_node"
 PENTEST_AGENT_HANDLER_ID = "pentest_agent"
 # P16：M-MA6 动态路由虚拟节点（graph_executor 直接分派，不再经过 agent_dispatch_handler）
@@ -944,6 +946,8 @@ def _build_graph_config_by_profile(
             JUDGE_AGENT_HANDLER_ID,
             RETRIEVAL_AGENT_HANDLER_ID,
             EMOTION_AGENT_HANDLER_ID,  # 方向 G Phase 2 新增
+            REPAIR_AGENT_HANDLER_ID,
+            PENTEST_AGENT_HANDLER_ID,
         ]
         node_bindings = [
             {

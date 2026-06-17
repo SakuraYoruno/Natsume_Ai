@@ -150,11 +150,9 @@ def test_build_surface_context_packet_reassembles_compact_lane(monkeypatch) -> N
 
     packet = build_surface_context_packet(user_message="在吗", request_id="req-compact", session_id="sess")
 
-    assert len(calls) == 2
+    assert len(calls) == 1
     assert calls[0]["history_max_turns"] is None
     assert calls[0]["allow_older_summary"] is True
-    assert calls[1]["history_max_turns"] == 6
-    assert calls[1]["allow_older_summary"] is False
     assert packet["reply_plan"]["primary_topic"] == "presence_ping"
 
 

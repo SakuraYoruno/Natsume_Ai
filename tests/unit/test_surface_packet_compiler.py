@@ -19,7 +19,15 @@ SOUL = "你是数字生命夏目蓝。中文私聊，反应快，有一点嘴硬
 
 
 def _candidate_payload(candidates: list[str]) -> str:
-    return json.dumps({"candidates": candidates}, ensure_ascii=False)
+    return json.dumps(
+        {
+            "reply_text": candidates[0] if candidates else "",
+            "natsume_emotion_tag": "NEUTRAL",
+            "user_emotion_tag": "NEUTRAL",
+            "emotion_confidence": 0.2,
+        },
+        ensure_ascii=False,
+    )
 
 
 def test_compile_reply_control_packet_keeps_memory_and_affect_compressed() -> None:
@@ -245,7 +253,7 @@ def test_shadow_e2e_baseline_memory_affect_have_no_quality_regression() -> None:
         if has_memory and has_affect:
             return _candidate_payload(
                 [
-                    "别急，上次就卡在输入输出；这轮先把边界看清。",
+                    "先查输入输出边界：上次就卡在这里，把实际输入和期望输出各留一条，我再对照差在哪。",
                     "上次那块是输入输出，这轮先别整段改。",
                     "上次卡的就是输入输出，先看这里。",
                 ]
@@ -253,7 +261,7 @@ def test_shadow_e2e_baseline_memory_affect_have_no_quality_regression() -> None:
         if has_memory:
             return _candidate_payload(
                 [
-                    "上次就卡在输入输出，这轮先盯那一块。",
+                    "先查输入输出边界：上次就卡在这里，把实际输入和期望输出各留一条。",
                     "上次那块是输入输出，这轮先别整段动。",
                     "记得，上次卡在输入输出，先从这儿下手。",
                 ]
@@ -261,14 +269,14 @@ def test_shadow_e2e_baseline_memory_affect_have_no_quality_regression() -> None:
         if has_affect:
             return _candidate_payload(
                 [
-                    "别急，先看输入输出；我跟着你往下捋。",
+                    "先查输入输出边界：把实际输入和期望输出各留一条，我跟着你对照。",
                     "先别硬改，输入输出那块先定住。",
                     "稳住，先把输入输出看清。",
                 ]
             )
         return _candidate_payload(
             [
-                "先别整段改，输入输出那块先看清。",
+                "先查输入输出边界：把实际输入和期望输出各留一条，我再对照差在哪。",
                 "这才像话，先盯输入输出。",
                 "先看输入输出，不急着动全段。",
             ]

@@ -1093,7 +1093,7 @@ def test_classify_task_intent_by_rules_routes_browser_research_to_production_ski
 
     assert decision is not None
     assert decision["route"] == "skill"
-    assert decision["target_id"] == "agent_browser_research"
+    assert decision["target_id"] == "browser_research"
     assert decision["reason_code"] == "THALAMUS_RULE_CODEX_PRODUCTION"
 
 
@@ -1461,9 +1461,9 @@ def test_classify_and_compile_intent_draft_routes_production_brief_to_codex_back
     )
 
     assert compiled["route"] == "skill"
-    assert compiled["target_id"] == "agent_workbench_brief"
-    assert compiled["route_reason"] == "THALAMUS_RULE_CODEX_PRODUCTION"
-    assert compiled["args"]["run_mode"] == "research"
+    assert compiled["target_id"] == "agent_epub_builder"
+    assert compiled["route_reason"] == "THALAMUS_RULE_CODEX_EPUB_RECENT_RECOMMENDATION_CONTEXT"
+    assert compiled["args"]["run_mode"] == "worker"
     assert compiled["args"]["start_background"] is True
     assert compiled["args"]["workspace_strategy"] == "temp_workspace"
 

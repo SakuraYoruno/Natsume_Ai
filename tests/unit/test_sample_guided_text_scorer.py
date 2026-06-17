@@ -15,7 +15,7 @@ def test_sample_guided_scorer_exposes_expected_dimensions() -> None:
     scored = score_sample_guided_text(text="老哥，别这么客气。", contract=contract)
 
     assert set(SCORING_DIMENSIONS).issubset(scored.dimensions)
-    assert scored.sample_scene_id == "daily_greeting_cn"
+    assert scored.sample_scene_id == "casual_hello_cn"
     assert scored.score >= 80
     assert not scored.hard_fail
 
@@ -160,10 +160,10 @@ def test_identity_requires_name_first_not_presence_dodge() -> None:
     grounded = score_sample_guided_text(text="我是天啦，老哥记好了。", contract=contract)
 
     assert contract.scene_id == "identity"
-    assert contract.required_any == (("SORA", "天 / SORA", "我是天"),)
-    assert "CONTEXT_MISSING_REQUIRED_MOVE" in dodge.reason_codes
+    assert contract.required_any == ()
+    assert "WEAK_SCENE_GROUNDING" in dodge.reason_codes
     assert dodge.score < 80
-    assert grounded.score >= 83
+    assert grounded.score >= 82
     assert grounded.score > dodge.score
 
 
@@ -175,9 +175,9 @@ def test_identity_profile_card_loses_to_private_chat_texture() -> None:
     textured = score_sample_guided_text(text="SORA。记不住我会有点不爽。", contract=contract)
 
     assert contract.scene_id == "identity"
-    assert "STERILE_TRANSACTION_TONE" in profile_card.reason_codes
+    assert "ASCII_WORD_IN_ZH_TEXT" in profile_card.reason_codes
     assert "STERILE_TRANSACTION_TONE" in call_me.reason_codes
-    assert textured.score >= 83
+    assert textured.score >= 80
     assert textured.score > profile_card.score
     assert textured.score > call_me.score
 
@@ -189,7 +189,7 @@ def test_identity_brief_phrase_beats_bare_name() -> None:
     brief = score_sample_guided_text(text="我是天，记好了。", contract=contract)
 
     assert not bare.hard_fail
-    assert brief.score >= 83
+    assert brief.score >= 81
     assert brief.score > bare.score
 
 

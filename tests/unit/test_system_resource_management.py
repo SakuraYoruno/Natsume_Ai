@@ -523,7 +523,7 @@ def test_resource_manager_records_llm_attempts_when_pool_exhausted(monkeypatch, 
 
     assert decision == {}
     assert captured["timeout_ms"] == 30000
-    assert captured["cognitive_tier"] == "RESOURCE_MANAGER"
+    assert captured["cognitive_tier"] == "C"
     assert captured["provider_name"] == "deepseek"
     assert captured["model_id"] == "deepseek-v4-flash"
     status = manager.get_status()
