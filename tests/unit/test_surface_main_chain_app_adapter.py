@@ -1026,6 +1026,46 @@ async def test_surface_main_chain_sse_replaces_refusal_with_sub_agent_result(mon
 
 
 @pytest.mark.asyncio
+async def test_surface_main_chain_sse_replaces_generic_completion_with_sub_agent_result(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "host_brain.app.surface_main_chain_adapter.get_compiled_soul",
+        lambda: SimpleNamespace(source_text=SOUL, runtime_full_text=SOUL),
+    )
+
+    async def _fake_complete(**_kwargs):  # noqa: ANN003
+        return _surface_json_result("任务完成了，没出什么乱子。")
+
+    monkeypatch.setattr("host_brain.integrations.llm_helpers.acomplete_llm_with_pool", _fake_complete)
+
+    agent_input = _agent_input(
+        user_message="请对授权靶场 target=http://127.0.0.1:18765 scope=127.0.0.1 做只读安全扫描",
+        intent_draft={"route": "delegate", "target_id": "pentest_agent"},
+        trace_stage_meta={"executive_router_used": True},
+        sub_agent_context=SimpleNamespace(
+            agent_id="pentest_agent",
+            task="只读安全扫描 http://127.0.0.1:18765",
+            result_text=(
+                "只读扫描完成：授权目标 127.0.0.1 开放端口 18765/tcp(unknown)。"
+                "已检查 http://127.0.0.1:18765：HTTP 状态 200，数据暴露发现 1 个，"
+                "安全配置发现 11 个。未执行 exploit、写入或破坏性操作。"
+            ),
+            success=True,
+            latency_ms=12,
+            error="",
+            payload={"audit_refs": {"skill_exec": "skill_exec::req::pentest_agent"}},
+        ),
+    )
+    events = [_parse_sse(chunk) async for chunk in surface_main_chain_sse_generator(agent_input)]
+    commit = next(event for event in events if event.get("phase") == "COMMIT")
+    trace = commit["audit_refs"]["trace_stage_meta"]
+
+    assert commit["decision"] == "APPROVE"
+    assert "18765/tcp" in commit["narrative"]
+    assert "数据暴露发现 1 个" in commit["narrative"]
+    assert trace["surface_sub_agent_result_guard"]["reason_code"] == "SURFACE_OMITTED_SUB_AGENT_RESULT"
+
+
+@pytest.mark.asyncio
 async def test_surface_main_chain_failure_falls_back_to_sub_agent_result(monkeypatch) -> None:
     async def _raise_surface_failure(*_args, **_kwargs):  # noqa: ANN002, ANN003
         raise RuntimeError("SURFACE_LLM_POOL_EXHAUSTED")

@@ -752,6 +752,12 @@ def _apply_surface_sub_agent_result_guard(text: str, *, agent_input: Any) -> tup
             "agent_id": agent_id,
             "reason_code": "SURFACE_IGNORED_SUB_AGENT_RESULT",
         }
+    if _looks_like_surface_omitted_sub_agent_result(candidate, result_text=result_text, agent_id=agent_id):
+        return result_text[:4000], {
+            "applied": True,
+            "agent_id": agent_id,
+            "reason_code": "SURFACE_OMITTED_SUB_AGENT_RESULT",
+        }
 
     return candidate, {"applied": False}
 
@@ -778,6 +784,51 @@ def _looks_like_surface_ignored_sub_agent_result(text: str) -> bool:
             re.IGNORECASE,
         )
     )
+
+
+def _looks_like_surface_omitted_sub_agent_result(text: str, *, result_text: str, agent_id: str) -> bool:
+    candidate = str(text or "").strip()
+    result = str(result_text or "").strip()
+    if not candidate or not result:
+        return True
+
+    if agent_id == "pentest_agent" and re.search(r"(只读扫描|端口|HTTP|finding|数据暴露|安全配置|exploit)", result, re.IGNORECASE):
+        required_markers = (
+            "只读",
+            "扫描",
+            "端口",
+            "开放",
+            "未开放",
+            "HTTP",
+            "状态",
+            "secret",
+            "数据暴露",
+            "安全配置",
+            "finding",
+            "exploit",
+            "写入",
+            "破坏性",
+        )
+        if not any(marker.lower() in candidate.lower() for marker in required_markers):
+            return True
+
+    result_tokens = _sub_agent_result_anchor_tokens(result)
+    if not result_tokens:
+        return False
+    candidate_lower = candidate.lower()
+    matched = sum(1 for token in result_tokens if token.lower() in candidate_lower)
+    if len(result_tokens) == 1:
+        return matched == 0 and len(candidate) < 120
+    return matched == 0 and len(candidate) < 180
+
+
+def _sub_agent_result_anchor_tokens(text: str) -> tuple[str, ...]:
+    tokens = re.findall(
+        r"(?:\d{1,3}\.){3}\d{1,3}|https?://[^\s，。；]+|\b\d{1,5}/tcp\b|\b\d{2,5}\b",
+        str(text or ""),
+        re.IGNORECASE,
+    )
+    return tuple(dict.fromkeys(token.strip() for token in tokens if token.strip()))[:8]
 
 
 def _sanitize_main_chain_meta_reply(text: str, *, agent_input: Any) -> str:
