@@ -5,11 +5,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from host_brain.codex_runtime.skill_ids import CODEX_RUNTIME_SKILL_IDS
+from host_brain.agent_runtime.skill_ids import AGENT_RUNTIME_SKILL_IDS
 
 
 _DEFAULT_SKILL_FAMILY_BY_SKILL_ID: dict[str, str] = {
-    **{skill_id: "code" for skill_id in CODEX_RUNTIME_SKILL_IDS},
+    **{skill_id: "code" for skill_id in AGENT_RUNTIME_SKILL_IDS},
     "web_search": "browser",
     "browser_navigate": "browser",
     "browser_screenshot": "browser",

@@ -1,4 +1,4 @@
-﻿"""Graph 配置构建模块。
+"""Graph 配置构建模块。
 
 负责 Chat 图的配置构建。意图识别与场景判定统一由 Thalamus 承接。
 """
@@ -45,7 +45,7 @@ from host_brain.app.provider_factory import (
     resolve_host_llm_model_id,
 )
 from host_brain.app.model_router import resolve_gemini_model_route
-from host_brain.integrations.codex_cli_provider import codex_cli_lm_available, resolve_codex_cli_model
+from host_brain.integrations.codex_cli_provider import codex_cli_lm_allowed_for_background, codex_cli_lm_available, resolve_codex_cli_model
 
 CHAT_GRAPH_NODE_ORDER: list[str] = [
     CHAT_DIRECT_NODE_ID,
@@ -83,6 +83,10 @@ RETRIEVAL_AGENT_NODE_ID = "retrieval_agent_node"  # P11 新增
 RETRIEVAL_AGENT_HANDLER_ID = "retrieval_agent"    # P11 新增
 EMOTION_AGENT_NODE_ID = "emotion_agent_node"       # 方向 G Phase 2 新增
 EMOTION_AGENT_HANDLER_ID = "emotion_agent"          # 方向 G Phase 2 新增
+REPAIR_AGENT_NODE_ID = "repair_agent_node"
+REPAIR_AGENT_HANDLER_ID = "repair_agent"
+PENTEST_AGENT_NODE_ID = "pentest_agent_node"
+PENTEST_AGENT_HANDLER_ID = "pentest_agent"
 # P16：M-MA6 动态路由虚拟节点（graph_executor 直接分派，不再经过 agent_dispatch_handler）
 AGENT_DISPATCH_NODE_ID = "agent_dispatch_node"
 AGENT_DISPATCH_HANDLER_ID = "agent_dispatch"  # 保留常量供其他模块引用，不再用于 binding
@@ -116,7 +120,7 @@ _HOST_CHAT_14B_DEFAULT_MODEL_ID = "qwen3:14b"
 _HOST_CHAT_14B_FALLBACK_API_KEY = "host-local-placeholder-key"
 _HOST_CHAT_14B_DEFAULT_BASE_URL = "http://127.0.0.1:11434/v1"
 _HOST_CHAT_CLOUD_DEFAULT_PROVIDER = PROVIDER_GEMINI
-_PROVIDERS_REQUIRING_API_KEY = frozenset({PROVIDER_OPENAI, PROVIDER_CODEX, PROVIDER_GEMINI, PROVIDER_DEEPSEEK})
+_PROVIDERS_REQUIRING_API_KEY = frozenset({PROVIDER_OPENAI, PROVIDER_GEMINI, PROVIDER_DEEPSEEK})
 
 
 def _parse_bool(value: Any, default: bool = False) -> bool:
@@ -190,6 +194,17 @@ def _parse_csv_tokens(value: Any) -> set[str]:
     return tokens
 
 
+def _env_value(name: str, legacy_name: str | None = None, default: str = "") -> str:
+    value = str(os.environ.get(name) or "").strip()
+    if value:
+        return value
+    if legacy_name:
+        legacy_value = str(os.environ.get(legacy_name) or "").strip()
+        if legacy_value:
+            return legacy_value
+    return default
+
+
 def _graph_codex_migration_enabled(*, scene_type: str, execution_profile: str) -> bool:
     if not _parse_bool(os.environ.get("HOST_GRAPH_CODEX_MIGRATION_ENABLED"), default=False):
         return False
@@ -213,7 +228,7 @@ def _graph_codex_migration_enabled(*, scene_type: str, execution_profile: str) -
     }
     if included and normalized_scene not in included:
         return False
-    return codex_cli_lm_available()
+    return codex_cli_lm_allowed_for_background()
 
 
 def _surface_reply_codex_experiment_enabled(*, scene_type: str, execution_profile: str) -> bool:
@@ -223,7 +238,7 @@ def _surface_reply_codex_experiment_enabled(*, scene_type: str, execution_profil
         return False
     if not _parse_bool(os.environ.get("HOST_SURFACE_REPLY_CODEX_EXPERIMENT_ENABLED") or os.environ.get("HOST_CHAT_AGENT_CODEX_EXPERIMENT_ENABLED"), default=False):
         return False
-    return codex_cli_lm_available()
+    return codex_cli_lm_allowed_for_background()
 
 
 def _resolve_surface_reply_codex_model_id() -> str:
@@ -322,7 +337,6 @@ def _provider_api_key_env_name(provider_name: str) -> str | None:
     provider = str(provider_name or "").strip().lower()
     mapping = {
         PROVIDER_OPENAI: "OPENAI_API_KEY",
-        PROVIDER_CODEX: "CODEX_API_KEY",
         PROVIDER_GEMINI: "GEMINI_API_KEY",
         PROVIDER_DEEPSEEK: "DEEPSEEK_API_KEY",
     }
@@ -346,8 +360,6 @@ def _is_provider_available(*, provider_name: str, api_key: str | None, configure
         return False
     if provider == PROVIDER_DISABLED:
         return False
-    if provider == PROVIDER_CODEX and not str(api_key or "").strip() and codex_cli_lm_available():
-        return True
     if _provider_requires_api_key(provider) and not str(api_key or "").strip():
         return False
     return True
@@ -396,11 +408,11 @@ def _resolve_host_14b_base_url(*, provider_name: str) -> str | None:
     provider = str(provider_name or "").strip().lower()
     if provider != PROVIDER_OPENAI:
         return None
-    raw = str(
-        os.environ.get("HOST_CHAT_HOST_14B_BASE_URL")
-        or os.environ.get("HOST_OPENAI_BASE_URL")
-        or _HOST_CHAT_14B_DEFAULT_BASE_URL
-    ).strip()
+    raw = _env_value(
+        "HOST_CHAT_LOCAL_LLM_BASE_URL",
+        "HOST_CHAT_HOST_14B_BASE_URL",
+        _env_value("HOST_OPENAI_BASE_URL", default=_HOST_CHAT_14B_DEFAULT_BASE_URL),
+    )
     return _normalize_openai_compat_base_url(raw)
 
 
@@ -448,14 +460,14 @@ async def _probe_http_endpoint_async(*, url: str, timeout_ms: int) -> tuple[bool
 
 
 def _resolve_host_14b_health_status(*, provider_name: str, timeout_ms: int) -> tuple[bool, str]:
-    if not _parse_bool(os.environ.get("HOST_CHAT_HOST_14B_HEALTHCHECK_ENABLED"), default=False):
-        return True, "HOST_14B_HEALTHCHECK_DISABLED"
+    if not _parse_bool(_env_value("HOST_CHAT_LOCAL_LLM_HEALTHCHECK_ENABLED", "HOST_CHAT_HOST_14B_HEALTHCHECK_ENABLED"), default=False):
+        return True, "HOST_LOCAL_LLM_HEALTHCHECK_DISABLED"
 
-    ready_value = os.environ.get("HOST_CHAT_HOST_14B_READY")
+    ready_value = _env_value("HOST_CHAT_LOCAL_LLM_READY", "HOST_CHAT_HOST_14B_READY")
     if ready_value is not None and not _parse_bool(ready_value, default=True):
-        return False, "HOST_14B_READY_FLAG_DOWN"
+        return False, "HOST_LOCAL_LLM_READY_FLAG_DOWN"
 
-    health_url = str(os.environ.get("HOST_CHAT_HOST_14B_HEALTHCHECK_URL") or "").strip()
+    health_url = _env_value("HOST_CHAT_LOCAL_LLM_HEALTHCHECK_URL", "HOST_CHAT_HOST_14B_HEALTHCHECK_URL")
     probe_urls: list[str] = []
     if health_url:
         probe_urls.append(health_url)
@@ -469,17 +481,17 @@ def _resolve_host_14b_health_status(*, provider_name: str, timeout_ms: int) -> t
 
     if not probe_urls:
         if ready_value is not None:
-            return _parse_bool(ready_value, default=True), "HOST_14B_READY_FLAG_ONLY"
-        return True, "HOST_14B_NO_PROBE_URL"
+            return _parse_bool(ready_value, default=True), "HOST_LOCAL_LLM_READY_FLAG_ONLY"
+        return True, "HOST_LOCAL_LLM_NO_PROBE_URL"
 
     first_failure = ""
     for url in probe_urls:
         ok, detail = _probe_http_endpoint(url=url, timeout_ms=timeout_ms)
         if ok:
-            return True, f"HOST_14B_PROBE_OK:{detail}"
+            return True, f"HOST_LOCAL_LLM_PROBE_OK:{detail}"
         if not first_failure:
             first_failure = detail
-    return False, f"HOST_14B_PROBE_FAILED:{first_failure or 'unknown'}"
+    return False, f"HOST_LOCAL_LLM_PROBE_FAILED:{first_failure or 'unknown'}"
 
 
 async def _resolve_host_14b_health_status_async(*, provider_name: str, timeout_ms: int) -> tuple[bool, str]:
@@ -729,7 +741,7 @@ def _build_graph_config_by_profile(
     if chat_codex_experiment:
         resolved_chat_api_key = None
     if _provider_requires_api_key(resolved_chat_provider) and not resolved_chat_api_key:
-        if resolved_chat_provider == PROVIDER_OPENAI and _parse_bool(os.environ.get("HOST_CHAT_HOST_14B_ALLOW_EMPTY_KEY"), default=True):
+        if resolved_chat_provider == PROVIDER_OPENAI and _parse_bool(_env_value("HOST_CHAT_LOCAL_LLM_ALLOW_EMPTY_KEY", "HOST_CHAT_HOST_14B_ALLOW_EMPTY_KEY"), default=True):
             resolved_chat_api_key = _HOST_CHAT_14B_FALLBACK_API_KEY
     resolved_chat_available = _is_provider_available(
         provider_name=resolved_chat_provider,
@@ -745,8 +757,7 @@ def _build_graph_config_by_profile(
     )
     if resolved_cloud_provider not in {
         PROVIDER_OPENAI,
-        PROVIDER_CODEX,
-        PROVIDER_GEMINI,
+            PROVIDER_GEMINI,
         PROVIDER_DEEPSEEK,
         PROVIDER_MOCK,
         PROVIDER_DISABLED,
@@ -771,7 +782,7 @@ def _build_graph_config_by_profile(
     )
     resolved_cloud_base_url_override = (
         _normalize_openai_compat_base_url(cloud_base_url_override)
-        if (not graph_codex_migrated and resolved_cloud_provider in {PROVIDER_OPENAI, PROVIDER_CODEX})
+        if (not graph_codex_migrated and resolved_cloud_provider in {PROVIDER_OPENAI})
         else None
     )
     resolved_cloud_api_key = None if graph_codex_migrated else _resolve_provider_api_key(
@@ -935,6 +946,8 @@ def _build_graph_config_by_profile(
             JUDGE_AGENT_HANDLER_ID,
             RETRIEVAL_AGENT_HANDLER_ID,
             EMOTION_AGENT_HANDLER_ID,  # 方向 G Phase 2 新增
+            REPAIR_AGENT_HANDLER_ID,
+            PENTEST_AGENT_HANDLER_ID,
         ]
         node_bindings = [
             {

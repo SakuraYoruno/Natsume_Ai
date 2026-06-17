@@ -4,7 +4,7 @@ import json
 import zipfile
 from pathlib import Path
 
-from host_brain.codex_runtime.lightnovel_epub_builder import (
+from host_brain.agent_runtime.lightnovel_epub_builder import (
     build_lightnovel_epub_package,
     resolve_lightnovel_source,
 )
@@ -76,7 +76,7 @@ def test_resolve_lightnovel_source_selects_recommendation_by_index(tmp_path: Pat
 
 def test_resolve_lightnovel_source_falls_back_to_latest_recommendations_artifact(tmp_path: Path, monkeypatch) -> None:
     runs_root = tmp_path / "codex_runs"
-    workspace = runs_root / "codex_lightnovel_recommender_latest" / "workspace"
+    workspace = runs_root / "agent_lightnovel_recommender_latest" / "workspace"
     workspace.mkdir(parents=True)
     recommendations = workspace / "recommendations.json"
     recommendations.write_text(
@@ -89,7 +89,7 @@ def test_resolve_lightnovel_source_falls_back_to_latest_recommendations_artifact
         ),
         encoding="utf-8",
     )
-    monkeypatch.setattr("host_brain.codex_runtime.lightnovel_epub_builder.DEFAULT_CODEX_RUNS_ROOT", runs_root)
+    monkeypatch.setattr("host_brain.agent_runtime.lightnovel_epub_builder.DEFAULT_CODEX_RUNS_ROOT", runs_root)
 
     source = resolve_lightnovel_source({"user_request": "推荐的第二本"})
 

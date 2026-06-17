@@ -2,13 +2,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from host_brain.codex_runtime import CodexRuntimeExecutor
-from host_brain.codex_runtime.artifact_store import CodexArtifactStore
-from host_brain.codex_runtime.immune import build_immune_proposal_from_report
+from host_brain.agent_runtime import AgentRuntimeExecutor
+from host_brain.agent_runtime.artifact_store import AgentArtifactStore
+from host_brain.agent_runtime.immune import build_immune_proposal_from_report
 
 
 def test_codex_immuneplane_builds_and_executes_self_heal_work_order(monkeypatch, tmp_path) -> None:
-    monkeypatch.setattr("host_brain.codex_runtime.executor.codex_cli_command", lambda: None)
+    monkeypatch.setattr("host_brain.agent_runtime.executor.codex_cli_command", lambda: None)
     proposal = build_immune_proposal_from_report(
         {
             "overall_status": "DEGRADED",
@@ -26,7 +26,7 @@ def test_codex_immuneplane_builds_and_executes_self_heal_work_order(monkeypatch,
     approval_policy["confirmed"] = True
     work_order["approval_policy"] = approval_policy
 
-    result = CodexRuntimeExecutor(artifact_store=CodexArtifactStore(tmp_path)).execute(work_order)
+    result = AgentRuntimeExecutor(artifact_store=AgentArtifactStore(tmp_path)).execute(work_order)
 
     assert result["status"] == "DEGRADED"
     assert result["review_required"] is True

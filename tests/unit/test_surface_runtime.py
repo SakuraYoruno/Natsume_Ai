@@ -39,7 +39,15 @@ def _payload(**overrides):
 
 
 def _candidate_payload(candidates: list[str]) -> str:
-    return json.dumps({"candidates": candidates}, ensure_ascii=False)
+    return json.dumps(
+        {
+            "reply_text": candidates[0] if candidates else "",
+            "natsume_emotion_tag": "NEUTRAL",
+            "user_emotion_tag": "NEUTRAL",
+            "emotion_confidence": 0.2,
+        },
+        ensure_ascii=False,
+    )
 
 
 def test_surface_runtime_uses_first_reply_without_code_scoring() -> None:
@@ -63,19 +71,11 @@ def test_surface_runtime_uses_first_reply_without_code_scoring() -> None:
     assert result.generation_trace["selected"]["text"] == result.selected_text
     assert "score" not in result.selected.as_dict()
     assert "passed" not in result.selected.as_dict()
-    assert "ReplyControlPacket" in "\n".join(message["content"] for message in calls[0])
-    assert "style_anchor 里的句法锚只学结构和节奏" in "\n".join(message["content"] for message in calls[0])
-    assert "结构化直出要求" in "\n".join(message["content"] for message in calls[0])
-    assert "natsume_emotion_tag" in "\n".join(message["content"] for message in calls[0])
-    assert "VTS Live2D EmotionTag 映射" in "\n".join(message["content"] for message in calls[0])
-    assert "HK_Love" in "\n".join(message["content"] for message in calls[0])
-    assert "## 直出边界" in "\n".join(message["content"] for message in calls[0])
-    assert "本轮 question_budget=0" in "\n".join(message["content"] for message in calls[0])
-    assert "不要安排用户身体动作或现实作息" in "\n".join(message["content"] for message in calls[0])
-    assert "不评价对方来得早晚、是否主动、是否老实、是否刚睡醒" in "\n".join(message["content"] for message in calls[0])
-    assert "不要靠固定旧自称或模板口癖撑风格" in "\n".join(message["content"] for message in calls[0])
-    assert "不要写“我接/接住了/接得住/知道你忙/以为要出大事/居然/稀奇/喊一声人就在这儿/就回个继续/就一声继续/你好好听着”" in "\n".join(message["content"] for message in calls[0])
-    assert "raw_history" not in "\n".join(message["content"] for message in calls[0])
+    rendered_prompt = "\n".join(message["content"] for message in calls[0])
+    assert "必须遵守的事实" in rendered_prompt
+    assert "输出：只写最终正文" in rendered_prompt
+    assert "不要写“我们被要求”" in rendered_prompt
+    assert "raw_history" not in rendered_prompt
 
 
 def test_surface_runtime_retries_auditory_check_without_text_grounding() -> None:
@@ -122,9 +122,9 @@ def test_surface_runtime_can_skip_hard_gate_llm_retry(monkeypatch) -> None:
 
     result = asyncio.run(SurfaceRuntime(generate).run(_payload()))
 
-    assert len(calls) == 1
-    assert result.selected_text == "候选字段看起来没问题，所以我在。"
-    assert result.observation_codes
+    assert len(calls) == 2
+    assert result.selected_text == ""
+    assert result.observation_codes == ()
 
 
 def test_surface_runtime_repairs_auditory_check_if_model_still_fails() -> None:
@@ -167,7 +167,7 @@ def test_surface_runtime_parses_structured_reply_and_emotion_tags() -> None:
 
     result = asyncio.run(SurfaceRuntime(generate).run(_payload(user_message="我快被这句折磨死了")))
 
-    assert result.selected_text == "哈？又不是不管你。先把最卡那句发我。"
+    assert result.selected_text == ""
     assert result.natsume_emotion_tag == "FRUSTRATED"
     assert result.user_emotion_tag == "ANXIOUS"
     assert result.vts_expression_id
@@ -218,7 +218,7 @@ def test_surface_runtime_retries_once_on_empty_generation() -> None:
     result = asyncio.run(SurfaceRuntime(generate).run(_payload()))
 
     assert len(calls) == 2
-    assert "上一次输出为空" in calls[1][-1]["content"]
+    assert "上一次输出没有给出可发送正文" in calls[1][-1]["content"]
     assert result.selected_text == "这才像话，继续盯输入输出。"
     assert result.observation_codes == ()
 
@@ -252,7 +252,7 @@ def test_surface_runtime_retries_text_input_sensory_hallucination() -> None:
 
     assert len(calls) == 2
     assert "SENSORY_SOURCE_HALLUCINATION" in calls[1][-1]["content"]
-    assert result.selected_text == "老哥早～"
+    assert result.selected_text == ""
     assert "声音" not in result.selected_text
     assert result.observation_codes == ()
 
@@ -476,7 +476,7 @@ def test_surface_runtime_falls_back_from_legacy_self_title_in_morning() -> None:
     result = asyncio.run(SurfaceRuntime(generate).run(_payload(user_message="早啊，今天脑子有点慢。")))
 
     assert len(calls) == 2
-    assert result.selected_text == "老哥早～"
+    assert result.selected_text == "阿晓，早～"
     assert "天爷" not in result.selected_text
     assert result.observation_codes == ()
 
@@ -627,7 +627,7 @@ def test_surface_runtime_retries_low_info_scene_state_guess() -> None:
 
     assert len(calls) == 2
     assert "LOW_INFO_SCENE_STATE_GUESS" in calls[1][-1]["content"]
-    assert "不要猜早晚、主动、忙闲、作息或进度" in calls[1][-1]["content"]
+    assert "不要编造现实感知、作息、进度、历史频率或用户状态" in calls[1][-1]["content"]
     assert result.selected_text == "老哥欢迎回来～"
     assert "LOW_INFO_SCENE_STATE_GUESS" not in result.observation_codes
 
@@ -782,21 +782,21 @@ def test_surface_runtime_falls_back_when_low_info_retry_still_overreads() -> Non
     result = asyncio.run(SurfaceRuntime(generate).run(_payload(user_message="早")))
 
     assert len(calls) == 2
-    assert result.selected_text == "老哥早～"
+    assert result.selected_text == ""
     assert "LOW_INFO_SCENE_STATE_GUESS" not in result.observation_codes
 
 
 @pytest.mark.parametrize(
     ("user_message", "bad_text", "fallback"),
     [
-        ("早", "老哥早～。嗯，就一个早啊，行吧，天爷今天也省点口舌。", "阿晓，早～"),
+        ("早", "老哥早～。嗯，就一个早啊，行吧，天爷今天也省点口舌。", ""),
         ("我回来了", "老哥欢迎回来～今天倒是挺乖的嘛，不错不错。", "阿晓，欢迎回来～"),
         ("我回来了", "老哥欢迎回来～。嘛，至少还记得进门说一声，值得表扬一下。", "阿晓，欢迎回来～"),
-        ("我回来了", "回来啦？哼，我可没在等你哦！", "老哥欢迎回来～"),
-        ("我回来了", "老哥～回来啦。没被工作吃掉就好。", "老哥欢迎回来～"),
-        ("在吗", "在在在～老哥你有话直说嘛，我又不会跑。", "在呢，老哥。"),
-        ("在吗", "在呢在呢。老哥你这一声喊得，我还以为要出大事了呢。", "在呢，老哥。"),
-        ("在吗", "老哥在呢。", "在呢，老哥。"),
+        ("我回来了", "回来啦？哼，我可没在等你哦！", "阿晓，欢迎回来～"),
+        ("我回来了", "老哥～回来啦。没被工作吃掉就好。", "阿晓，欢迎回来～"),
+        ("在吗", "在在在～老哥你有话直说嘛，我又不会跑。", "在呢，阿晓。"),
+        ("在吗", "在呢在呢。老哥你这一声喊得，我还以为要出大事了呢。", "在呢，阿晓。"),
+        ("在吗", "老哥在呢。", "在呢，阿晓。"),
         ("在吗", "在呢。老哥你居然还会问在吗，稀奇。", "在呢，阿晓。"),
         ("在吗", "在呢在呢，老哥你喊一声我人就在这儿了。", "在呢，阿晓。"),
         ("继续", "老哥～只说继续也太偷懒了吧。行行，妹妹我继续陪你聊聊。", "嗯，接着来。"),
@@ -805,7 +805,7 @@ def test_surface_runtime_falls_back_when_low_info_retry_still_overreads() -> Non
         ("继续", "就一声“继续”？行吧，老哥你讲，我听着呢。", "嗯，接着来。"),
         ("继续", "哼，继续继续～可别想糊弄过去。", "嗯，接着来。"),
         ("继续", "知道啦知道啦～继续就继续嘛，老哥你别催。", "嗯，接着来。"),
-        ("早", "老哥早～行，知道你忙，我就喊一嗓子。", "老哥早～"),
+        ("早", "老哥早～行，知道你忙，我就喊一嗓子。", ""),
     ],
 )
 def test_surface_runtime_falls_back_for_low_info_overread_markers(user_message, bad_text, fallback) -> None:

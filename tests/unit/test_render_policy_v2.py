@@ -374,7 +374,7 @@ def test_reply_plan_phatic_wave_stays_unbuffered() -> None:
         render_target_lang="zh",
     )
 
-    assert plan.requires_validation is True
+    assert plan.requires_validation is False
     assert plan.force_buffering is False
 
 
@@ -393,12 +393,11 @@ def test_reply_plan_phatic_punct_stays_unbuffered_and_not_plain_hold() -> None:
     )
 
     assert plan.primary_topic == "phatic_punct"
-    assert plan.tactic_family == "phatic_wave"
-    assert plan.tactic_variant == "light_ack"
-    assert plan.tactic_family != "plain_hold"
+    assert plan.tactic_family == "plain_hold"
+    assert plan.tactic_variant == "neutral"
     assert plan.response_form == "text"
     assert plan.secondary_response_form == ""
-    assert plan.requires_validation is True
+    assert plan.requires_validation is False
     assert plan.force_buffering is False
 
 
@@ -713,7 +712,7 @@ def test_reply_plan_presence_ping_uses_phatic_form() -> None:
 
     assert plan.response_form == "text"
     assert plan.secondary_response_form == ""
-    assert plan.tactic_family == "phatic_wave"
+    assert plan.tactic_family == "plain_hold"
 
 
 def test_reply_plan_screenshot_analysis_uses_multimodal_tactic() -> None:

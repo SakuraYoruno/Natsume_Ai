@@ -202,14 +202,14 @@ def test_invoke_llm_text_reuses_openai_compat_session(monkeypatch) -> None:
     )
 
     first = llm_helpers.invoke_llm_text(
-        provider_name="codex",
+        provider_name="openai",
         model_id="gpt-5.4-mini",
         api_key="test-key",
         timeout_ms=5000,
         messages=[{"role": "user", "content": "在吗"}],
     )
     second = llm_helpers.invoke_llm_text(
-        provider_name="codex",
+        provider_name="openai",
         model_id="gpt-5.4-mini",
         api_key="test-key",
         timeout_ms=5000,

@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Any, Callable, Mapping
 
 from host_brain.core.errors import LLM_POOL_EXHAUSTED
 from host_brain.integrations.codex_cli_provider import (
+    codex_cli_lm_allowed_for_background,
     codex_cli_lm_available,
     invoke_codex_cli_text,
     resolve_codex_cli_model,
@@ -36,8 +37,8 @@ ProviderFn = Callable[[dict[str, Any]], Any]
 
 _logger = logging.getLogger("Natsume.integrations.llm_helpers")
 _POOL_DEFAULT_SPECS: dict[str, str] = {
-    "A": "deepseek:deepseek-v4-flash,gemini:gemini-2.5-flash-lite",
-    "B": "deepseek:deepseek-v4-flash,gemini:gemini-2.5-flash-lite",
+    "A": "deepseek:deepseek-v4-pro,gemini:gemini-2.5-pro",
+    "B": "deepseek:deepseek-v4-flash,deepseek:deepseek-v4-pro,gemini:gemini-2.5-flash-lite",
     "C": "deepseek:deepseek-v4-flash,gemini:gemini-2.5-flash-lite",
     "D": "deepseek:deepseek-v4-flash,gemini:gemini-2.5-flash-lite",
 }
@@ -67,6 +68,7 @@ _UNAVAILABLE_MARKERS = (
     "unavailable",
 )
 _KEY_FAIL_MARKERS = ("401", "403", "api key", "api_key", "authentication", "unauthorized", "permission")
+_LOCAL_OPENAI_COMPAT_PLACEHOLDER_KEY = "host-local-placeholder-key"
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Generator
@@ -227,7 +229,7 @@ def _codex_pool_migration_enabled(scene_type: str) -> bool:
     included = _parse_csv_env("HOST_LLM_POOL_CODEX_INCLUDED_SCENES")
     if included and normalized_scene not in included:
         return False
-    return codex_cli_lm_available()
+    return codex_cli_lm_allowed_for_background()
 
 
 def _resolve_pool_codex_model_id() -> str:
@@ -245,6 +247,17 @@ def _resolve_pool_scene_attempt_timeout_ms(
     scene_token = _pool_env_token(scene_type) if str(scene_type or "").strip() else ""
     tier_token = _pool_env_token(cognitive_tier) if str(cognitive_tier or "").strip() else ""
     provider_token = _pool_env_token(provider_name) if str(provider_name or "").strip() else ""
+    chat_surface_cap_ms = 0
+    if scene_token == "CHAT_SURFACE":
+        scene_default_raw = str(os.environ.get("HOST_LLM_POOL_CHAT_SURFACE_DEFAULT_ATTEMPT_TIMEOUT_MS") or "").strip()
+        default_cap_ms = 12_000 if provider_token == "GEMINI" else 6_000
+        chat_surface_cap_ms = _parse_int_env(
+            "HOST_LLM_POOL_CHAT_SURFACE_DEFAULT_ATTEMPT_TIMEOUT_MS",
+            default=default_cap_ms,
+            minimum=1_000,
+            maximum=120_000,
+        ) if scene_default_raw else default_cap_ms
+        resolved_timeout_ms = min(resolved_timeout_ms, chat_surface_cap_ms)
     env_names: list[str] = []
     if scene_token and tier_token and provider_token:
         env_names.append(f"HOST_LLM_POOL_SCENE_{scene_token}_TIER_{tier_token}_{provider_token}_ATTEMPT_TIMEOUT_MS")
@@ -262,12 +275,15 @@ def _resolve_pool_scene_attempt_timeout_ms(
     for env_name in env_names:
         raw_value = str(os.environ.get(env_name) or "").strip()
         if raw_value:
-            return _parse_int_env(
+            resolved_timeout_ms = _parse_int_env(
                 env_name,
                 default=resolved_timeout_ms,
                 minimum=250,
                 maximum=10 * 60 * 1000,
             )
+            break
+    if chat_surface_cap_ms > 0:
+        resolved_timeout_ms = min(resolved_timeout_ms, chat_surface_cap_ms)
     return resolved_timeout_ms
 
 
@@ -288,7 +304,7 @@ def _resolve_pool_attempt_timeout_ms(
     if (
         str(provider_name or "").strip().lower() == PROVIDER_CODEX
         and not str(api_key or "").strip()
-        and codex_cli_lm_available()
+        and codex_cli_lm_allowed_for_background()
     ):
         resolved_timeout_ms = resolve_codex_cli_timeout_ms(resolved_timeout_ms)
         floor_ms = _parse_int_env(
@@ -575,6 +591,30 @@ def _set_cooldown_ms(*, provider_name: str, model_id: str, cooldown_ms: int, sce
         _POOL_COOLDOWN_UNTIL_MS[key] = _now_ms() + int(cooldown_ms)
 
 
+def _openai_compat_base_url_env() -> str:
+    return str(
+        os.environ.get("HOST_OPENAI_BASE_URL")
+        or os.environ.get("HOST_CHAT_LOCAL_LLM_BASE_URL")
+        or os.environ.get("HOST_CHAT_HOST_14B_BASE_URL")
+        or ""
+    ).strip()
+
+
+def _is_local_openai_compat_base_url(value: str | None) -> bool:
+    lowered = str(value or "").strip().lower()
+    return (
+        "127.0.0.1" in lowered
+        or "localhost" in lowered
+        or "[::1]" in lowered
+    )
+
+
+def _local_openai_compat_empty_key_allowed() -> bool:
+    if str(os.environ.get("HOST_CHAT_LOCAL_LLM_ALLOW_EMPTY_KEY") or "").strip():
+        return _parse_bool_env("HOST_CHAT_LOCAL_LLM_ALLOW_EMPTY_KEY", default=True)
+    return _parse_bool_env("HOST_CHAT_HOST_14B_ALLOW_EMPTY_KEY", default=True)
+
+
 def _load_api_key_from_env(provider_name: str) -> str | None:
     """M24-A：从环境变量读取 API Key（不硬编码）。
 
@@ -587,7 +627,6 @@ def _load_api_key_from_env(provider_name: str) -> str | None:
     """
     provider_to_env: dict[str, str] = {
         PROVIDER_OPENAI: "OPENAI_API_KEY",
-        PROVIDER_CODEX: "CODEX_API_KEY",
         "gemini": "GEMINI_API_KEY",
         PROVIDER_GEMINI: "GEMINI_API_KEY",
         PROVIDER_DEEPSEEK: "DEEPSEEK_API_KEY",
@@ -600,6 +639,12 @@ def _load_api_key_from_env(provider_name: str) -> str | None:
     value = os.environ.get(env_key, "").strip()
     if value:
         return value
+    if (
+        provider_name == PROVIDER_OPENAI
+        and _local_openai_compat_empty_key_allowed()
+        and _is_local_openai_compat_base_url(_openai_compat_base_url_env())
+    ):
+        return _LOCAL_OPENAI_COMPAT_PLACEHOLDER_KEY
     return _load_api_key_from_runtime_profiles(provider_name)
 
 
@@ -663,7 +708,7 @@ def _resolve_provider_base_url(provider_name: str, *, base_url_override: str | N
             str(os.environ.get("HOST_MINIMAX_BASE_URL") or "https://api.minimaxi.com/v1").strip()
         )
     if provider == PROVIDER_OPENAI:
-        return _normalize_openai_compat_base_url(str(os.environ.get("HOST_OPENAI_BASE_URL") or "").strip())
+        return _normalize_openai_compat_base_url(_openai_compat_base_url_env())
     return None
 
 
@@ -1044,7 +1089,7 @@ def _resolve_openai_compat_chat_endpoint(
     base_url_override: str | None = None,
 ) -> str:
     base_url = _resolve_provider_base_url(provider_name, base_url_override=base_url_override)
-    if not base_url and str(provider_name or "").strip().lower() in {PROVIDER_OPENAI, PROVIDER_CODEX}:
+    if not base_url and str(provider_name or "").strip().lower() in {PROVIDER_OPENAI}:
         base_url = "https://api.openai.com/v1"
     if not base_url:
         raise RuntimeError(f"missing OpenAI-compatible base_url for provider={provider_name}")
@@ -1229,12 +1274,30 @@ def _extract_openai_compat_text(payload: Mapping[str, Any]) -> str:
     if not isinstance(choices, list) or not choices:
         return ""
     first = choices[0] if isinstance(choices[0], Mapping) else {}
+
+    def _try_extract(container: Mapping) -> str:
+        content_text = _extract_text_from_response_content(container.get("content"))
+        if content_text:
+            return content_text
+        # reasoning_content is the model's hidden/thinking channel.  Treating it
+        # as final content leaks chain-of-thought / prompt analysis into user
+        # visible replies.  Keep the legacy behavior only behind an explicit
+        # opt-in for debugging compatibility.
+        reasoning = container.get("reasoning_content")
+        if (
+            _parse_bool_env("HOST_LLM_ACCEPT_REASONING_CONTENT_AS_TEXT", default=False)
+            and isinstance(reasoning, str)
+            and reasoning.strip()
+        ):
+            return reasoning.strip()
+        return ""
+
     message = first.get("message") if isinstance(first, Mapping) else None
     if isinstance(message, Mapping):
-        return _extract_text_from_response_content(message.get("content"))
+        return _try_extract(message)
     delta = first.get("delta") if isinstance(first, Mapping) else None
     if isinstance(delta, Mapping):
-        return _extract_text_from_response_content(delta.get("content"))
+        return _try_extract(delta)
     return ""
 
 
@@ -1456,7 +1519,7 @@ def invoke_llm_text(
         return _default_mock_provider({})
     if provider == PROVIDER_DISABLED:
         raise RuntimeError("provider disabled")
-    if provider == PROVIDER_CODEX and not str(api_key or "").strip() and codex_cli_lm_available():
+    if provider == PROVIDER_CODEX and not str(api_key or "").strip() and codex_cli_lm_allowed_for_background():
         return invoke_codex_cli_text(
             model_id=model_id,
             messages=messages,
@@ -1541,7 +1604,7 @@ def _resolve_pool_candidates(
         if dedupe_key in seen:
             return
         resolved_key = key_value or _load_api_key_from_env(provider_token)
-        cli_backed_codex = provider_token == PROVIDER_CODEX and not resolved_key and codex_cli_lm_available()
+        cli_backed_codex = provider_token == PROVIDER_CODEX and not resolved_key and codex_cli_lm_allowed_for_background()
         if provider_token not in {PROVIDER_MOCK, PROVIDER_DISABLED} and not resolved_key:
             if not cli_backed_codex:
                 return
@@ -1580,6 +1643,17 @@ def _resolve_pool_candidates(
 
     for provider_token, model_token in parsed_specs:
         _append_candidate(provider_token, model_token, None, None)
+
+    if normalized_scene == "CHAT_SURFACE" and scene_specific_spec:
+        for item in str(_POOL_DEFAULT_SPECS.get(normalized_tier) or "").split(","):
+            text = str(item or "").strip()
+            if not text or ":" not in text:
+                continue
+            provider_part, model_part = text.split(":", 1)
+            provider_token = str(provider_part or "").strip().lower()
+            model_token = str(model_part or "").strip()
+            if provider_token and model_token:
+                _append_candidate(provider_token, model_token, None, None)
 
     return candidates
 
@@ -1833,7 +1907,11 @@ def complete_llm_with_pool_sync(
                     provider=provider_token,
                     status="OK",
                     latency_ms=latency_ms,
-                    detail="json_text_fallback" if fallback_used else None,
+                    detail=(
+                        f"attempt_timeout_ms={attempt_timeout_ms};json_text_fallback"
+                        if fallback_used
+                        else f"attempt_timeout_ms={attempt_timeout_ms}"
+                    ),
                 )
             )
             result = PoolCompleteResult(
@@ -1879,7 +1957,7 @@ def complete_llm_with_pool_sync(
                     status="FAILED",
                     latency_ms=latency_ms,
                     reason_code=reason_code,
-                    detail=str(exc)[:220],
+                    detail=f"attempt_timeout_ms={attempt_timeout_ms};{str(exc)[:220]}",
                 )
             )
             continue
@@ -2020,7 +2098,7 @@ def stream_llm_chunks(
         return
     if provider == PROVIDER_DISABLED:
         raise RuntimeError("provider disabled")
-    if provider == PROVIDER_CODEX and not str(api_key or "").strip() and codex_cli_lm_available():
+    if provider == PROVIDER_CODEX and not str(api_key or "").strip() and codex_cli_lm_allowed_for_background():
         yield invoke_codex_cli_text(
             model_id=model_id,
             messages=messages,

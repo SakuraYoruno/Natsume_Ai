@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from host_brain.bio_ops.contracts import BioOpsArtifact
-from host_brain.codex_runtime.artifact_store import REPO_ROOT, sanitize_segment
+from host_brain.agent_runtime.artifact_store import REPO_ROOT, sanitize_segment
 
 
 DEFAULT_BIO_OPS_ROOT = REPO_ROOT / "artifacts" / "bio_ops"

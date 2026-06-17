@@ -14,7 +14,7 @@ from typing import Any, Dict
 
 from fastapi import APIRouter, HTTPException, Query, status
 
-from host_brain.codex_runtime.immune import build_immune_proposal_from_report
+from host_brain.agent_runtime.immune import build_immune_proposal_from_report
 from host_brain.app.dependencies import collect_dependency_probes, get_ledger
 from host_brain.app.main import (
     build_env_readiness_report,

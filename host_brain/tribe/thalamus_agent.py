@@ -33,6 +33,7 @@ _LLM_CHATLIKE_ROUTES: frozenset[str] = frozenset({"chat", "task_progress", "rece
 _LLM_DELEGATE_TARGET_ALLOWLIST: frozenset[str] = frozenset({
     "emotion_agent",
     "intent_agent",
+    "pentest_agent",
     "retrieval_agent",
     "translate_agent",
     "vision_agent",
@@ -42,27 +43,27 @@ _LLM_SKILL_TARGET_ALLOWLIST: frozenset[str] = frozenset({
     "browser_navigate",
     "browser_scrape",
     "browser_screenshot",
-    "codex_dream_compile",
-    "codex_inspect",
-    "codex_organ_scan",
-    "codex_persona_drift_audit",
-    "codex_browser_research",
-    "codex_document_digest",
-    "codex_epub_builder",
-    "codex_frontend_acceptance",
-    "codex_frontend_review",
-    "codex_lightnovel_recommender",
-    "codex_memory_curator",
-    "codex_research",
-    "codex_repo_sentinel",
-    "codex_self_evolve",
-    "codex_self_heal",
-    "codex_skill_forge",
-    "codex_sql_audit",
-    "codex_translate_project",
-    "codex_web_corpus_collector",
-    "codex_workbench_brief",
-    "codex_worker",
+    "agent_dream_compile",
+    "agent_inspect",
+    "agent_organ_scan",
+    "agent_persona_drift_audit",
+    "browser_research",
+    "agent_document_digest",
+    "agent_epub_builder",
+    "agent_frontend_acceptance",
+    "agent_frontend_review",
+    "agent_lightnovel_recommender",
+    "agent_memory_curator",
+    "agent_research",
+    "agent_repo_sentinel",
+    "agent_self_evolve",
+    "agent_self_heal",
+    "agent_skill_forge",
+    "agent_sql_audit",
+    "agent_translate_project",
+    "agent_web_corpus_collector",
+    "agent_workbench_brief",
+    "agent_worker",
     "emotion_query",
     "frontend_component_value_audit",
     "frontend_route_audit",
@@ -183,6 +184,33 @@ _TEST_FAILURE_TRIAGE_RE = re.compile(
     r"|(?:triage|analy[sz]e).{0,16}(?:test|pytest).{0,12}(?:failure|error|log))",
     re.IGNORECASE,
 )
+_PENTEST_EXEC_MARKER_RE = re.compile(
+    r"("
+    r"授权.{0,20}(渗透测试|安全扫描|漏洞扫描|漏洞评估|安全评估|端口扫描|资产侦察|子域名枚举|配置审计)"
+    r"|(渗透测试|安全扫描|漏洞扫描|漏洞评估|安全评估|端口扫描|资产侦察|子域名枚举|配置审计)"
+    r"|(?:pentest|penetration\s+test|authorized\s+(?:security\s+)?scan|security\s+scan"
+    r"|vulnerability\s+(?:scan|assessment)|recon(?:naissance)?|port\s+scan|subdomain\s+enumeration"
+    r"|config(?:uration)?\s+audit)"
+    r")",
+    re.IGNORECASE,
+)
+_PENTEST_SCOPE_HINT_RE = re.compile(
+    r"("
+    r"\b(?:target|scope|host|domain|url)\s*[:=]"
+    r"|(?:目标|范围|授权范围|授权域|靶标)\s*[:：=]"
+    r"|https?://[^\s，。；,;]+"
+    r"|\b(?:\d{1,3}\.){3}\d{1,3}(?:/\d{1,2})?\b"
+    r"|\b(?:localhost|127\.0\.0\.1)\b"
+    r"|\b[a-z0-9-]+(?:\.[a-z0-9-]+)+\b"
+    r"|(?:靶场|测试环境|本地环境|内网环境|ctf|lab|dvwa|bwapp|metasploitable)"
+    r")",
+    re.IGNORECASE,
+)
+_PENTEST_ADVICE_ONLY_RE = re.compile(
+    r"(是什么|什么是|解释|原理|概念|科普|讲讲|学习|教程|怎么做|如何做|怎么防|如何防|如何修复"
+    r"|what\s+is|explain|how\s+to|mitigat|defen[cs]e)",
+    re.IGNORECASE,
+)
 _FRONTEND_ROUTE_AUDIT_RE = re.compile(
     r"((前端|页面|ui|UI|monitor).{0,18}(路由|导航|断链|覆盖|巡检|审计|检查)"
     r"|(路由|导航).{0,18}(断链|覆盖|巡检|审计|检查)"
@@ -249,6 +277,10 @@ _CODEX_EPUB_BUILDER_RE = re.compile(
     r"((epub|电子书|轻小说|小说|文本|图片).{0,28}(封装|生成|制作|打包|构建|builder)"
     r"|(网页|网站).{0,28}(轻小说|小说|文本|图片).{0,28}(epub|电子书|封装|打包)"
     r"|epub\s+builder)",
+    re.IGNORECASE,
+)
+_CODEX_EPUB_CONTEXT_ACTION_RE = re.compile(
+    r"(epub|电子书|封装|打包|制作|生成|构建|下载|购买|买下来)",
     re.IGNORECASE,
 )
 _CODEX_EPUB_RECOMMENDATION_SELECTION_RE = re.compile(
@@ -1439,14 +1471,14 @@ def _build_codex_workspace_route_seed(text: str) -> dict[str, Any] | None:
     if not (has_write or has_inspect or has_active_verify or has_git_action):
         return None
 
-    target_id = "codex_worker" if has_write or has_active_verify or has_git_action else "codex_inspect"
-    run_mode = "worker" if target_id == "codex_worker" else "inspect"
+    target_id = "agent_worker" if has_write or has_active_verify or has_git_action else "agent_inspect"
+    run_mode = "worker" if target_id == "agent_worker" else "inspect"
     return {
         "route": "skill",
         "target_id": target_id,
         "task": normalized,
         "reason_code": f"THALAMUS_RULE_CODEX_WORKSPACE_{run_mode.upper()}",
-        "confidence": 0.94 if target_id == "codex_worker" else 0.91,
+        "confidence": 0.94 if target_id == "agent_worker" else 0.91,
         "route_source": "thalamus.rule",
         "args": {
             "task": normalized,
@@ -1478,27 +1510,27 @@ def _build_codex_production_route_seed(text: str) -> dict[str, Any] | None:
     target_id = ""
     recommendation_index = _parse_codex_recommendation_index(normalized)
     if recommendation_index:
-        target_id = "codex_epub_builder"
+        target_id = "agent_epub_builder"
     elif _CODEX_WORKBENCH_BRIEF_RE.search(normalized):
-        target_id = "codex_workbench_brief"
+        target_id = "agent_workbench_brief"
     elif _CODEX_REPO_SENTINEL_RE.search(normalized) and _CODEX_PRODUCTION_BACKGROUND_RE.search(normalized):
-        target_id = "codex_repo_sentinel"
+        target_id = "agent_repo_sentinel"
     elif _CODEX_MEMORY_CURATOR_RE.search(normalized):
-        target_id = "codex_memory_curator"
+        target_id = "agent_memory_curator"
     elif _CODEX_DOCUMENT_DIGEST_RE.search(normalized):
-        target_id = "codex_document_digest"
+        target_id = "agent_document_digest"
     elif _CODEX_EPUB_BUILDER_RE.search(normalized):
-        target_id = "codex_epub_builder"
+        target_id = "agent_epub_builder"
     elif _CODEX_WEB_CORPUS_COLLECTOR_RE.search(normalized):
-        target_id = "codex_web_corpus_collector"
+        target_id = "agent_web_corpus_collector"
     elif _CODEX_LIGHTNOVEL_RECOMMENDER_RE.search(normalized):
-        target_id = "codex_lightnovel_recommender"
+        target_id = "agent_lightnovel_recommender"
     elif _CODEX_FRONTEND_ACCEPTANCE_RE.search(normalized):
-        target_id = "codex_frontend_acceptance"
+        target_id = "agent_frontend_acceptance"
     elif _CODEX_BROWSER_RESEARCH_RE.search(normalized):
-        target_id = "codex_browser_research"
+        target_id = "browser_research"
     elif _CODEX_FRONTEND_REVIEW_RE.search(normalized):
-        target_id = "codex_frontend_review"
+        target_id = "agent_frontend_review"
     if not target_id:
         return None
     url = _extract_first_url(normalized)
@@ -1513,7 +1545,7 @@ def _build_codex_production_route_seed(text: str) -> dict[str, Any] | None:
         args["urls"] = [url]
     if recommendation_index:
         args["recommendation_index"] = recommendation_index
-    if target_id in {"codex_lightnovel_recommender", "codex_epub_builder"} or "lightnovel.fun" in normalized:
+    if target_id in {"agent_lightnovel_recommender", "agent_epub_builder"} or "lightnovel.fun" in normalized:
         args["site_adapter"] = "lightnovel.fun"
     return {
         "route": "skill",
@@ -1522,6 +1554,68 @@ def _build_codex_production_route_seed(text: str) -> dict[str, Any] | None:
         "reason_code": "THALAMUS_RULE_CODEX_PRODUCTION",
         "confidence": 0.93,
         "route_source": "thalamus.rule",
+        "args": args,
+    }
+
+
+def _build_codex_epub_route_from_recommendation_context(
+    text: str,
+    recommendation_context: Mapping[str, Any] | None,
+) -> dict[str, Any] | None:
+    normalized = _normalize_text(text)
+    if not normalized or not _CODEX_EPUB_CONTEXT_ACTION_RE.search(normalized):
+        return None
+    context = dict(recommendation_context or {})
+    if not context:
+        return None
+    item = dict(context.get("referenced_item") or {})
+    if not item:
+        index = context.get("reference_index")
+        try:
+            target_rank = int(index)
+        except Exception:
+            target_rank = 0
+        for candidate in list(context.get("items") or []):
+            if not isinstance(candidate, Mapping):
+                continue
+            rank = int(candidate.get("rank") or 0)
+            if target_rank and rank == target_rank:
+                item = dict(candidate)
+                break
+        if not item and len(list(context.get("items") or [])) == 1 and isinstance(list(context.get("items") or [])[0], Mapping):
+            item = dict(list(context.get("items") or [])[0])
+    detail_url = _normalize_text(item.get("detail_url") or item.get("url"))
+    title = _normalize_text(item.get("title") or item.get("name"))
+    if not detail_url and not title:
+        return None
+    task = normalized
+    if title:
+        task = f"{normalized}：{title}"
+    args = {
+        "task": task,
+        "problem_statement": task,
+        "start_background": True,
+        "text": normalized,
+        "user_message": normalized,
+        "site_adapter": "lightnovel.fun",
+        "selected_recommendation": item,
+        "recent_recommendation_context": context,
+        "recommendation_index": context.get("reference_index") or item.get("rank"),
+    }
+    if detail_url:
+        args["urls"] = [detail_url]
+    if title:
+        args["title"] = title
+        args["candidate_titles"] = [title]
+    if context.get("delivery_id"):
+        args["delivery_id"] = context.get("delivery_id")
+    return {
+        "route": "skill",
+        "target_id": "agent_epub_builder",
+        "task": task,
+        "reason_code": "THALAMUS_RULE_CODEX_EPUB_RECENT_RECOMMENDATION_CONTEXT",
+        "confidence": 0.94,
+        "route_source": "thalamus.context",
         "args": args,
     }
 
@@ -1850,6 +1944,35 @@ def _build_frontend_audit_route_seed(text: str) -> dict[str, Any] | None:
     return None
 
 
+def _build_pentest_route_seed(text: str) -> dict[str, Any] | None:
+    normalized = _normalize_text(text)
+    if not normalized:
+        return None
+    if not _PENTEST_EXEC_MARKER_RE.search(normalized):
+        return None
+    if _PENTEST_ADVICE_ONLY_RE.search(normalized):
+        return None
+
+    has_scope_hint = bool(_PENTEST_SCOPE_HINT_RE.search(normalized))
+    if not has_scope_hint:
+        return None
+
+    return {
+        "route": "delegate",
+        "target_id": "pentest_agent",
+        "task": normalized,
+        "reason_code": "THALAMUS_RULE_PENTEST_AGENT",
+        "confidence": 0.93,
+        "route_source": "thalamus.rule",
+        "args": {
+            "text": normalized,
+            "user_message": normalized,
+            "scope_hint_present": has_scope_hint,
+            "allow_exploit": False,
+        },
+    }
+
+
 def _has_explicit_route_seed(payload: Mapping[str, Any] | None) -> bool:
     data = dict(payload or {})
     route = _normalize_text(data.get("route"), lower=True)
@@ -2007,6 +2130,10 @@ def _build_direct_route_seed(text: str) -> dict[str, Any] | None:
     if frontend_audit_seed is not None:
         return frontend_audit_seed
 
+    pentest_seed = _build_pentest_route_seed(cleaned)
+    if pentest_seed is not None:
+        return pentest_seed
+
     if _looks_like_open_app_request(cleaned):
         return {
             "route": "skill",
@@ -2055,7 +2182,7 @@ def _build_direct_route_seed(text: str) -> dict[str, Any] | None:
             if codex_runtime_mode == "self_evolve"
             else "THALAMUS_RULE_CODEX_SELF_HEAL"
         )
-        codex_target = "codex_self_evolve" if codex_runtime_mode == "self_evolve" else "codex_self_heal"
+        codex_target = "agent_self_evolve" if codex_runtime_mode == "self_evolve" else "agent_self_heal"
         return {
             "route": "skill",
             "target_id": codex_target,
@@ -2403,9 +2530,9 @@ def classify_task_intent_by_rules(text: str) -> dict[str, Any] | None:
     if _TASK_PLUGIN_BUILD_RE.search(normalized):
         return {
             "route": "skill",
-            "target_id": "codex_worker",
+            "target_id": "agent_worker",
             "task": normalized,
-            "reason_code": "RULE_FORCE_codex_worker",
+            "reason_code": "RULE_FORCE_agent_worker",
             "confidence": 0.93,
             "route_source": "rule",
         }
@@ -2415,7 +2542,7 @@ def classify_task_intent_by_rules(text: str) -> dict[str, Any] | None:
         and not _TASK_ENTERTAINMENT_RE.search(normalized)
         and not _TASK_CODE_NEGATION_RE.search(normalized)
     ):
-        codex_target = "codex_inspect" if _looks_like_lightweight_codex_request(normalized) else "codex_worker"
+        codex_target = "agent_inspect" if _looks_like_lightweight_codex_request(normalized) else "agent_worker"
         return {
             "route": "skill",
             "target_id": codex_target,
@@ -2455,8 +2582,8 @@ def classify_task_intent_by_rules(text: str) -> dict[str, Any] | None:
 
 
 _WORK_CODE_TARGETS: frozenset[str] = frozenset({
-    "codex_worker",
-    "codex_inspect",
+    "agent_worker",
+    "agent_inspect",
     "code_agent",
     "workbench_code_assist",
 })
@@ -2512,7 +2639,7 @@ def resolve_scene_type_from_intent_decision(
     if (
         target_id in _WORK_CODE_TARGETS
         or target_id.startswith("codex_")
-        or action in {"work_code", "codex_worker", "codex_inspect"}
+        or action in {"work_code", "agent_worker", "agent_inspect"}
         or action.startswith("codex_")
         or "codex" in reason
     ):
@@ -2560,7 +2687,7 @@ def classify_task_intent_fastpath(text: str) -> dict[str, Any] | None:
                 bio_ops_reflex = {
                     **candidate,
                     "path": "bio_ops_reflex",
-                    "forbidden_actions": ["codex_worker", "long_reasoning", "skill_execution"],
+                    "forbidden_actions": ["agent_worker", "long_reasoning", "skill_execution"],
                 }
         except Exception:
             bio_ops_reflex = None
@@ -2576,6 +2703,10 @@ def classify_task_intent_fastpath(text: str) -> dict[str, Any] | None:
                 "text": normalized,
             },
         }
+
+    pentest_seed = _build_pentest_route_seed(normalized)
+    if pentest_seed is not None:
+        return pentest_seed
 
     if _looks_like_simple_technical_advice(normalized):
         return _build_simple_technical_chat_seed(normalized, route_source="rule.fastpath")
@@ -2637,7 +2768,7 @@ def classify_task_intent_fastpath(text: str) -> dict[str, Any] | None:
                 bio_ops_reflex = {
                     **candidate,
                     "path": "bio_ops_reflex",
-                    "forbidden_actions": ["codex_worker", "long_reasoning", "skill_execution"],
+                    "forbidden_actions": ["agent_worker", "long_reasoning", "skill_execution"],
                 }
         except Exception:
             bio_ops_reflex = None
@@ -2993,7 +3124,7 @@ def _resolve_target_id(payload: Mapping[str, Any]) -> str:
         return candidate
     action = _normalize_text(payload.get("action"), lower=True)
     if action == "work_code":
-        return "codex_worker"
+        return "agent_worker"
     if action == "work_translate":
         return "translate_agent"
     if action.endswith("_agent"):
@@ -3094,27 +3225,27 @@ def _backfill_canonical_args(
         if normalized_target == "memory_store" and not _normalize_text(merged.get("content")):
             merged["content"] = fallback_text
         if normalized_target in {
-            "codex_inspect",
-            "codex_worker",
-            "codex_self_heal",
-            "codex_self_evolve",
-            "codex_sql_audit",
-            "codex_translate_project",
-            "codex_skill_forge",
-            "codex_research",
-            "codex_organ_scan",
-            "codex_persona_drift_audit",
-            "codex_dream_compile",
-            "codex_workbench_brief",
-            "codex_repo_sentinel",
-            "codex_memory_curator",
-            "codex_document_digest",
-            "codex_frontend_review",
-            "codex_browser_research",
-            "codex_frontend_acceptance",
-            "codex_web_corpus_collector",
-            "codex_lightnovel_recommender",
-            "codex_epub_builder",
+            "agent_inspect",
+            "agent_worker",
+            "agent_self_heal",
+            "agent_self_evolve",
+            "agent_sql_audit",
+            "agent_translate_project",
+            "agent_skill_forge",
+            "agent_research",
+            "agent_organ_scan",
+            "agent_persona_drift_audit",
+            "agent_dream_compile",
+            "agent_workbench_brief",
+            "agent_repo_sentinel",
+            "agent_memory_curator",
+            "agent_document_digest",
+            "agent_frontend_review",
+            "browser_research",
+            "agent_frontend_acceptance",
+            "agent_web_corpus_collector",
+            "agent_lightnovel_recommender",
+            "agent_epub_builder",
         }:
             if not _normalize_text(merged.get("task")):
                 merged["task"] = _normalize_text(merged.get("problem_statement")) or fallback_text
@@ -3129,27 +3260,27 @@ def _backfill_canonical_args(
                 or merged.get("allow_temp_workspace")
             )
             if not _normalize_text(merged.get("run_mode"), lower=True):
-                if normalized_target == "codex_self_heal":
+                if normalized_target == "agent_self_heal":
                     merged["run_mode"] = "self_heal"
-                elif normalized_target == "codex_self_evolve":
+                elif normalized_target == "agent_self_evolve":
                     merged["run_mode"] = "self_evolve"
-                elif normalized_target == "codex_inspect":
+                elif normalized_target == "agent_inspect":
                     merged["run_mode"] = "inspect"
-                elif normalized_target == "codex_research":
+                elif normalized_target == "agent_research":
                     merged["run_mode"] = "research"
-                elif normalized_target == "codex_translate_project":
+                elif normalized_target == "agent_translate_project":
                     merged["run_mode"] = "translate"
-                elif normalized_target == "codex_sql_audit":
+                elif normalized_target == "agent_sql_audit":
                     merged["run_mode"] = "audit"
                 elif normalized_target in {
-                    "codex_workbench_brief",
-                    "codex_document_digest",
-                    "codex_browser_research",
+                    "agent_workbench_brief",
+                    "agent_document_digest",
+                    "browser_research",
                 }:
                     merged["run_mode"] = "research"
-                elif normalized_target in {"codex_repo_sentinel", "codex_memory_curator", "codex_frontend_review", "codex_frontend_acceptance"}:
+                elif normalized_target in {"agent_repo_sentinel", "agent_memory_curator", "agent_frontend_review", "agent_frontend_acceptance"}:
                     merged["run_mode"] = "inspect"
-                elif normalized_target in {"codex_web_corpus_collector", "codex_lightnovel_recommender", "codex_epub_builder"}:
+                elif normalized_target in {"agent_web_corpus_collector", "agent_lightnovel_recommender", "agent_epub_builder"}:
                     merged["run_mode"] = "worker"
                 elif _looks_like_lightweight_codex_request(_normalize_text(merged.get("task")) or fallback_text):
                     merged["run_mode"] = "inspect"
@@ -3158,16 +3289,16 @@ def _backfill_canonical_args(
             resolved_run_mode = _normalize_text(merged.get("run_mode"), lower=True)
             if not explicit_workspace:
                 if normalized_target in {
-                    "codex_workbench_brief",
-                    "codex_memory_curator",
-                    "codex_document_digest",
-                    "codex_browser_research",
-                    "codex_web_corpus_collector",
-                    "codex_lightnovel_recommender",
-                    "codex_epub_builder",
+                    "agent_workbench_brief",
+                    "agent_memory_curator",
+                    "agent_document_digest",
+                    "browser_research",
+                    "agent_web_corpus_collector",
+                    "agent_lightnovel_recommender",
+                    "agent_epub_builder",
                 }:
                     merged["workspace_strategy"] = "temp_workspace"
-                elif normalized_target in {"codex_repo_sentinel", "codex_frontend_review", "codex_frontend_acceptance"}:
+                elif normalized_target in {"agent_repo_sentinel", "agent_frontend_review", "agent_frontend_acceptance"}:
                     merged["workspace_strategy"] = "runtime_repo"
                 elif resolved_run_mode == "inspect":
                     merged["allow_temp_workspace"] = True
@@ -3352,6 +3483,40 @@ class ThalamusAgent:
             text=task or user_message,
             args_payload=args_payload,
         )
+        preference_pack: dict[str, Any] = {}
+        try:
+            from host_brain.app.user_preference_store import build_user_preference_pack  # noqa: PLC0415
+
+            preference_pack = dict(
+                build_user_preference_pack(
+                    person_id=_normalize_text(person_id) or None,
+                    query_text=task or user_message,
+                    session_id=_normalize_text(session_id) or None,
+                    conversation_id=_normalize_text(session_id) or None,
+                )
+                or {}
+            )
+        except Exception:
+            preference_pack = {}
+        epub_context_seed = _build_codex_epub_route_from_recommendation_context(
+            task or user_message,
+            dict(preference_pack or {}).get("recent_recommendation_context"),
+        )
+        if epub_context_seed and not (route == "skill" and target_id == "agent_epub_builder"):
+            target_id = _normalize_text(epub_context_seed.get("target_id")) or "agent_epub_builder"
+            route = _normalize_text(epub_context_seed.get("route"), lower=True) or "skill"
+            task = _normalize_text(epub_context_seed.get("task")) or task
+            route_reason = _normalize_text(epub_context_seed.get("reason_code")) or route_reason
+            route_source = _normalize_text(epub_context_seed.get("route_source")) or "thalamus.context"
+            route_confidence = _normalize_confidence(epub_context_seed.get("confidence")) or 0.94
+            action = _resolve_action(route=route, target_id=target_id, fallback=epub_context_seed.get("action"))
+            args_payload = dict(epub_context_seed.get("args") or {})
+            args_payload = _backfill_canonical_args(
+                route=route,
+                target_id=target_id,
+                text=task or user_message,
+                args_payload=args_payload,
+            )
         semantic_intent = _coerce_semantic_intent(draft.get("semantic_intent")) or _coerce_semantic_intent(
             args_payload.get("semantic_intent")
         )
@@ -3397,18 +3562,22 @@ class ThalamusAgent:
                 session_id=_normalize_text(session_id),
                 person_id=_normalize_text(person_id) or None,
             )
-            try:
-                from host_brain.app.user_preference_store import build_user_preference_pack  # noqa: PLC0415
+            if not preference_pack:
+                try:
+                    from host_brain.app.user_preference_store import build_user_preference_pack  # noqa: PLC0415
 
-                preference_pack = build_user_preference_pack(
-                    person_id=_normalize_text(person_id) or None,
-                    query_text=task or user_message,
-                    session_id=_normalize_text(session_id) or None,
-                    conversation_id=_normalize_text(session_id) or None,
-                    ledger=experience_store.ledger,
-                )
-            except Exception:
-                preference_pack = {}
+                    preference_pack = dict(
+                        build_user_preference_pack(
+                            person_id=_normalize_text(person_id) or None,
+                            query_text=task or user_message,
+                            session_id=_normalize_text(session_id) or None,
+                            conversation_id=_normalize_text(session_id) or None,
+                            ledger=experience_store.ledger,
+                        )
+                        or {}
+                    )
+                except Exception:
+                    preference_pack = {}
             experience_lessons = experience_store.recall_lessons(
                 person_id=_normalize_text(person_id) or None,
                 domain=_normalize_text(semantic_intent.get("domain")) if semantic_intent else None,
@@ -3593,4 +3762,5 @@ __all__ = [
     "resolve_scene_type_from_intent_decision",
     "set_thalamus_agent",
 ]
+
 

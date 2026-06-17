@@ -201,10 +201,24 @@ class ContextAssembler:
                 1,
                 int(history_max_turns if history_max_turns is not None else conversation_max_turns()),
             )
+            current_request_turn = None
+            try:
+                current_request_turn = get_conversation_turn_store().find_by_request(
+                    session_id=session_id,
+                    request_id=request_id,
+                    role="user",
+                )
+            except Exception:
+                current_request_turn = None
             history_window = get_conversation_history().fetch_window_for_messages(
                 session_id=session_id,
                 max_turns=resolved_history_max_turns,
                 exclude_request_id=request_id,
+                before_turn_index=(
+                    int(current_request_turn.turn_index)
+                    if current_request_turn is not None
+                    else None
+                ),
                 render_target_lang="ja" if render_target_lang == "ja" else "zh",
                 summary_threshold=(0 if not allow_older_summary else None),
             )
@@ -232,7 +246,10 @@ class ContextAssembler:
                 deduped_same_role_count=int(history_window.deduped_same_role_count or 0),
             )
             try:
-                current_turn_index = int(get_conversation_turn_store().next_turn_index(session_id=session_id) - 1)
+                if current_request_turn is not None:
+                    current_turn_index = int(current_request_turn.turn_index)
+                else:
+                    current_turn_index = int(get_conversation_turn_store().next_turn_index(session_id=session_id) - 1)
             except Exception:
                 current_turn_index = None
 

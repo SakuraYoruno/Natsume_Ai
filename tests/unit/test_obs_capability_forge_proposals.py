@@ -21,14 +21,14 @@ def _build_service() -> CapabilityForgeService:
             missing_capability_tags=["coding"],
             confidence=0.9,
             executor_route="delegate",
-            executor_target="codex_worker",
+            executor_target="agent_worker",
         )
         telemetry.record_execution(
             runtime_capability_id=cap_id,
             request_id=f"req-obs-forge-{index}",
             success=False,
             executor_route="delegate",
-            executor_target="codex_worker",
+            executor_target="agent_worker",
             latency_ms=200 + index,
             error_code="FAILED",
         )

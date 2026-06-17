@@ -77,6 +77,11 @@ def _parse_bool_env(name: str, *, default: bool) -> bool:
 
 def _parse_float_env(name: str, *, default: float, min_value: float) -> float:
     raw = str(os.environ.get(name) or "").strip()
+    return _parse_float_env_value(raw, default=default, min_value=min_value)
+
+
+def _parse_float_env_value(value: Any, *, default: float, min_value: float) -> float:
+    raw = str(value or "").strip()
     if not raw:
         return max(min_value, float(default))
     try:
@@ -87,6 +92,11 @@ def _parse_float_env(name: str, *, default: float, min_value: float) -> float:
 
 def _parse_int_env(name: str, *, default: int, min_value: int) -> int:
     raw = str(os.environ.get(name) or "").strip()
+    return _parse_int_env_value(raw, default=default, min_value=min_value)
+
+
+def _parse_int_env_value(value: Any, *, default: int, min_value: int) -> int:
+    raw = str(value or "").strip()
     if not raw:
         return max(min_value, int(default))
     try:
@@ -127,9 +137,20 @@ def _get_host_health_url() -> str:
     return f"http://{host}:{port}/health?skip_dependency_probes=1"
 
 
+def _env_value(name: str, legacy_name: str | None = None, default: str = "") -> str:
+    value = str(os.environ.get(name) or "").strip()
+    if value:
+        return value
+    if legacy_name:
+        legacy_value = str(os.environ.get(legacy_name) or "").strip()
+        if legacy_value:
+            return legacy_value
+    return default
+
+
 def _get_ollama_base_url() -> str:
     """获取 Ollama 服务的 base URL（不含 /v1 后缀）。"""
-    raw = str(os.environ.get("HOST_CHAT_HOST_14B_BASE_URL") or "").strip()
+    raw = _env_value("HOST_CHAT_LOCAL_LLM_BASE_URL", "HOST_CHAT_HOST_14B_BASE_URL")
     if not raw:
         raw = OLLAMA_DEFAULT_BASE_URL
     # 去掉 /v1 后缀，因为 Ollama 原生 API 不在 /v1 路径下
@@ -144,19 +165,19 @@ def _is_loopback_host(hostname: str | None) -> bool:
 
 
 def _should_probe_local_ollama_node(node_id: str) -> tuple[bool, str]:
-    if not _parse_bool_env("HOST_CHAT_HOST_14B_ENABLED", default=False):
-        return False, "HOST_CHAT_HOST_14B_ENABLED=false"
+    if not _parse_bool_env("HOST_CHAT_LOCAL_LLM_ENABLED", default=_parse_bool_env("HOST_CHAT_HOST_14B_ENABLED", default=False)):
+        return False, "HOST_CHAT_LOCAL_LLM_ENABLED=false"
 
     route_provider = str(
-        os.environ.get("HOST_CHAT_HOST_14B_PROVIDER") or "openai"
+        _env_value("HOST_CHAT_LOCAL_LLM_PROVIDER", "HOST_CHAT_HOST_14B_PROVIDER", "openai")
     ).strip().lower() or "openai"
     if route_provider not in {"openai", "ollama"}:
-        return False, f"HOST_CHAT_HOST_14B_PROVIDER={route_provider}"
+        return False, f"HOST_CHAT_LOCAL_LLM_PROVIDER={route_provider}"
 
     base_url = _get_ollama_base_url()
     parsed = urlparse(base_url)
     if not _is_loopback_host(parsed.hostname):
-        return False, f"HOST_CHAT_HOST_14B_BASE_URL={base_url}"
+        return False, f"HOST_CHAT_LOCAL_LLM_BASE_URL={base_url}"
 
     return True, f"{node_id} probe enabled"
 
@@ -166,16 +187,19 @@ def _is_local_ollama_keepalive_enabled() -> bool:
 
 
 def _get_local_ollama_keepalive_interval_sec() -> float:
-    return _parse_float_env("HOST_LOCAL_14B_KEEPALIVE_INTERVAL_SEC", default=150.0, min_value=15.0)
+    raw = _env_value("HOST_LOCAL_LLM_KEEPALIVE_INTERVAL_SEC", "HOST_LOCAL_14B_KEEPALIVE_INTERVAL_SEC")
+    return _parse_float_env_value(raw, default=150.0, min_value=15.0)
 
 
 def _get_local_ollama_keepalive_timeout_ms() -> int:
-    return _parse_int_env("HOST_LOCAL_14B_KEEPALIVE_TIMEOUT_MS", default=45_000, min_value=1_000)
+    raw = _env_value("HOST_LOCAL_LLM_KEEPALIVE_TIMEOUT_MS", "HOST_LOCAL_14B_KEEPALIVE_TIMEOUT_MS")
+    return _parse_int_env_value(raw, default=45_000, min_value=1_000)
 
 
 def _get_local_ollama_keepalive_ttl() -> str:
     raw = str(
-        os.environ.get("HOST_LOCAL_14B_KEEPALIVE_TTL")
+        os.environ.get("HOST_LOCAL_LLM_KEEPALIVE_TTL")
+        or os.environ.get("HOST_LOCAL_14B_KEEPALIVE_TTL")
         or os.environ.get("OLLAMA_KEEP_ALIVE")
         or "720h"
     ).strip()

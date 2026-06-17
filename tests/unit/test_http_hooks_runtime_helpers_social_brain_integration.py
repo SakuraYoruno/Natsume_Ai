@@ -87,7 +87,7 @@ def test_run_proactive_dispatch_routes_lightnovel_recommender_as_natsume_schedul
 
     result = run_proactive_intent_dispatch(
         {
-            "skill_name": "codex_lightnovel_recommender",
+            "skill_name": "agent_lightnovel_recommender",
             "request_id": "req-sched-lightnovel",
             "intent_id": "intent-sched-lightnovel",
             "task_id": "lightnovel_recommender_daily",
@@ -115,7 +115,7 @@ def test_run_proactive_dispatch_routes_lightnovel_recommender_as_natsume_schedul
     assert result["scheduler_driver"] == "natsume_scheduler"
     assert payload["tool"] == "codex_production"
     assert payload["start_background"] is True
-    assert work_order["metadata"]["skill_id"] == "codex_lightnovel_recommender"
+    assert work_order["metadata"]["skill_id"] == "agent_lightnovel_recommender"
     assert work_order["metadata"]["request_id"] == "req-sched-lightnovel"
     assert work_order["input_pack"]["workflow_owner"] == "natsume"
     assert work_order["input_pack"]["driver_kind"] == "natsume_daily_recommendation"
@@ -241,7 +241,7 @@ def test_scheduler_narrative_generator_uses_model_pool(monkeypatch) -> None:
 
     assert result["narrative"] == "今天的内部日记"
     assert captured["scene_type"] == "SCHEDULER_NARRATIVE"
-    assert captured["cognitive_tier"] == "D"
+    assert captured["cognitive_tier"] == "C"
     assert "/v1/chat" not in str(captured.get("prompt"))
 
 
@@ -267,7 +267,7 @@ def test_proactive_scheduler_generator_uses_model_pool(monkeypatch) -> None:
 
     assert result["greeting"] == "晚上好，想起你之前说的事。"
     assert captured["scene_type"] == "PROACTIVE_TALK"
-    assert captured["cognitive_tier"] == "D"
+    assert captured["cognitive_tier"] == "C"
 
 
 def test_recent_dream_snippet_uses_main_dream_not_usage_hint(tmp_path) -> None:

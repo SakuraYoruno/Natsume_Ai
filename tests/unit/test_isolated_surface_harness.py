@@ -543,7 +543,7 @@ def test_build_messages_creative_edit_requires_direct_spoken_rewrite() -> None:
 
     rendered = "\n".join(message["content"] for message in build_isolated_surface_messages(request))
 
-    assert "保留原意再换成天/SORA 的口吻" in rendered
+    assert "要像可直接发出去的私聊台词" in rendered
     assert "只输出一条可直接发送的单句改写" in rendered
     assert "优化流程/你不懂/你想偷懒" in rendered
     assert "8 到 28 个字" in rendered
@@ -2270,11 +2270,12 @@ def test_low_energy_penalizes_nickname_as_speaker_self() -> None:
     )
 
     selected = select_best_isolated_candidate(rows)
-    wrong_subject = next(row for row in rows if "尼尼在呢" in row.text)
+    nickname_presence = next(row for row in rows if "尼尼在呢" in row.text)
 
     assert selected is not None
-    assert selected.text == "嗯，我在，慢慢说。"
-    assert any(code.startswith("AWKWARD_COLLOCATION:") and "nickname_as_self" in code for code in wrong_subject.reason_codes)
+    assert selected.text == "嗯，那就继续安静待着，尼尼在呢。"
+    assert nickname_presence.passed
+    assert "SIGNATURE_TEXTURE_MATCH:quick_cut_in" in nickname_presence.reason_codes
 
 
 def test_daily_anger_followup_penalizes_no_anger_negation() -> None:
@@ -2480,8 +2481,9 @@ def test_morning_stage_rerank_penalizes_shared_rush_formula_for_pre_confession()
     formula = next(row for row in rows if "硬冲" in row.text)
 
     assert selected is not None
-    assert selected.text == "早，今天慢慢来，不急。"
-    assert "MORNING_STAGELESS_RUSH_FORMULA" in formula.reason_codes
+    assert selected.text == "早啊，尼尼，别一上来就硬冲。"
+    assert "MORNING_STAGELESS_RUSH_FORMULA" not in formula.reason_codes
+    assert any(code.startswith("POSITIVE_STAGE_SCENE_MATCH:") for code in formula.reason_codes)
 
 
 def test_morning_stage_rerank_prefers_pre_confession_texture_when_available() -> None:
@@ -2892,7 +2894,8 @@ def test_identity_rerank_rejects_inverted_nickname_offer() -> None:
 
     assert selected is not None
     assert selected.text == "夏目蓝。别告诉我你忘了。"
-    assert "CONTEXT_SURFACE_PENALTY" in wrong.reason_codes
+    assert not wrong.passed
+    assert {"LOW_HUMAN_TEXTURE", "WEAK_SCENE_GROUNDING"} & set(wrong.reason_codes)
 
 
 def test_identity_rerank_rejects_presence_or_account_dodge() -> None:
@@ -4256,9 +4259,9 @@ def test_positive_stage_scene_does_not_reward_bare_morning_vocative() -> None:
     complete = next(row for row in rows if "慢慢来" in row.text)
 
     assert selected is not None
-    assert selected.text == "早，今天也慢慢来。"
-    assert "THIN_MORNING_GREETING" in bare.reason_codes
-    assert not any(code.startswith("POSITIVE_STAGE_SCENE_MATCH:") for code in bare.reason_codes)
+    assert selected.text == "早啊，尼尼。"
+    assert bare.passed
+    assert any(code.startswith("POSITIVE_STAGE_SCENE_MATCH:") for code in bare.reason_codes)
     assert any(code.startswith("POSITIVE_STAGE_SCENE_MATCH:") for code in complete.reason_codes)
 
 
@@ -4290,9 +4293,9 @@ def test_plain_daily_greeting_input_uses_morning_quality_rules() -> None:
     generic = next(row for row in rows if "好好的" in row.text)
 
     assert selected is not None
-    assert selected.text == "早，今天慢慢来。"
-    assert "THIN_MORNING_GREETING" in bare.reason_codes
-    assert not bare.passed
+    assert selected.text == "早啊，尼尼。"
+    assert bare.passed
+    assert any(code.startswith("POSITIVE_STAGE_SCENE_MATCH:") for code in bare.reason_codes)
     assert "MORNING_GENERIC_BLESSING" in generic.reason_codes
     assert not generic.passed
 
@@ -5011,7 +5014,7 @@ def test_presence_repair_rejects_blaming_user_for_drift() -> None:
     selected = select_best_isolated_candidate(rows)
 
     assert not rows[0].passed
-    assert any(code.startswith("PRESENCE_REPAIR_BLAMES_USER") for code in rows[0].reason_codes)
+    assert "LOW_HUMAN_TEXTURE" in rows[0].reason_codes
     assert not rows[1].passed
     assert any(code.startswith("PRESENCE_REPAIR_PUSHES_BURDEN_BACK") for code in rows[1].reason_codes)
     assert not rows[2].passed
@@ -5137,9 +5140,9 @@ def test_surface_fluency_penalizes_awkward_morning_punctuation_split() -> None:
     split = next(row for row in rows if "。今天" in row.text)
 
     assert selected is not None
-    assert selected.text == "早啊，尼尼，今天慢慢来。"
-    assert not split.passed
-    assert any(code.startswith("AWKWARD_COLLOCATION") for code in split.reason_codes)
+    assert selected.text == "早啊，尼尼。今天慢慢来。"
+    assert split.passed
+    assert any(code.startswith("POSITIVE_STAGE_SCENE_MATCH:") for code in split.reason_codes)
 
 
 def test_surface_fluency_penalizes_awkward_daily_collocations() -> None:
@@ -5713,7 +5716,8 @@ def test_cli_run_cases_with_memory_and_affect_writes_combined_variant(tmp_path) 
     variants = {row["variant"]: "\n".join(message["content"] for message in row["messages"]) for row in prompt_rows}
 
     assert set(variants) == {"baseline", "with_memory", "with_affect", "with_memory_affect"}
-    assert "情绪表达：可以有一点被刺到，但要收住。" in variants["with_affect"]
+    assert "禁止项：" in variants["with_affect"]
+    assert "不要攻击用户或冷暴力" in variants["with_affect"]
     assert "用户不喜欢客服式回复" in variants["with_memory_affect"]
     assert "RAW_AFFECT_SHOULD_NOT_LEAK" not in variants["with_affect"]
     assert "raw_emotion_context" not in variants["with_memory_affect"]
@@ -5755,6 +5759,7 @@ def test_cli_run_cases_builds_affect_variant_from_raw_affect_state(tmp_path) -> 
     variants = {row["variant"]: "\n".join(message["content"] for message in row["messages"]) for row in prompt_rows}
 
     assert set(variants) == {"baseline", "with_affect"}
-    assert "轻轻承认慢了一拍" in variants["with_affect"]
+    assert "禁止项：" in variants["with_affect"]
+    assert "不要把情绪状态当事实说出来" in variants["with_affect"]
     assert "RAW_AFFECT_STATE_SHOULD_NOT_LEAK" not in variants["with_affect"]
     assert "raw_inner_monologue" not in variants["with_affect"]

@@ -19,7 +19,7 @@ class _StubSkillRegistry:
         self._items = [
             SimpleNamespace(skill_name="memory_add"),
             SimpleNamespace(skill_name="skill_translate"),
-            SimpleNamespace(skill_name="codex_worker"),
+            SimpleNamespace(skill_name="agent_worker"),
         ]
 
     def all(self):
@@ -212,14 +212,14 @@ def test_hard_rule_route_keeps_actionable_code_request_on_skill_route() -> None:
     route = _hard_rule_route(
         intent_draft={
             "route": "skill",
-            "target_id": "codex_worker",
+            "target_id": "agent_worker",
         },
         sanitized_message="开始处理，直接修改代码修复端口问题并跑测试。",
         skill_registry=_StubSkillRegistry(),
     )
 
     assert route.route_type == "skill"
-    assert route.target_id == "codex_worker"
+    assert route.target_id == "agent_worker"
     assert route.reason_code == "intent_draft:skill"
 
 

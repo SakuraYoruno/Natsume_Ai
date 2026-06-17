@@ -14,7 +14,7 @@ from host_brain.bio_ops.owner_consumer import (
 )
 from host_brain.bio_ops.owner_inbox import BIO_OPS_OWNER_IMPORT_CHANNELS, resolve_owner_import_channel
 from host_brain.bio_ops.safety import is_bio_ops_sensitive_path
-from host_brain.codex_runtime.artifact_store import REPO_ROOT, sanitize_segment
+from host_brain.agent_runtime.artifact_store import REPO_ROOT, sanitize_segment
 from host_brain.core.ids import now_ms
 
 

@@ -28,14 +28,14 @@ def test_obs_capability_gaps_stats_endpoint(monkeypatch) -> None:
         missing_capability_tags=["coding"],
         confidence=0.88,
         executor_route="delegate",
-        executor_target="codex_worker",
+        executor_target="agent_worker",
     )
     telemetry.record_execution(
         runtime_capability_id="runtime_cap_gap_1",
         request_id="req-gap-1",
         success=False,
         executor_route="delegate",
-        executor_target="codex_worker",
+        executor_target="agent_worker",
         latency_ms=256,
         error_code="FAILED",
     )
@@ -78,7 +78,7 @@ def test_obs_capability_gaps_stats_endpoint(monkeypatch) -> None:
     assert payload["success_total"] == 0
     assert payload["failed_total"] == 1
     assert payload["by_reason"][0]["key"] == "ACTION_INTENT_FALLBACK_CHAT"
-    assert payload["by_executor"][0]["key"] == "codex_worker"
+    assert payload["by_executor"][0]["key"] == "agent_worker"
     assert len(payload["recent_events"]) == 2
     assert "hotspots" in payload
     assert "forge_candidates" in payload
@@ -101,14 +101,14 @@ def test_obs_capability_gap_forge_candidates_endpoint(monkeypatch) -> None:
             missing_capability_tags=["coding"],
             confidence=0.9,
             executor_route="delegate",
-            executor_target="codex_worker",
+            executor_target="agent_worker",
         )
         telemetry.record_execution(
             runtime_capability_id=cap_id,
             request_id=f"req-obs-{index}",
             success=False,
             executor_route="delegate",
-            executor_target="codex_worker",
+            executor_target="agent_worker",
             latency_ms=200 + index,
             error_code="FAILED",
         )
@@ -153,7 +153,7 @@ def test_obs_capability_gaps_stats_endpoint_uses_short_ttl_cache(monkeypatch) ->
                 "active_runtime_capabilities": 1,
                 "by_reason": [{"key": "ACTION_INTENT_FALLBACK_CHAT", "count": 1}],
                 "by_family": [{"key": "code", "count": 1}],
-                "by_executor": [{"key": "codex_worker", "count": 1}],
+                "by_executor": [{"key": "agent_worker", "count": 1}],
                 "hotspots": [],
                 "forge_candidates": [],
                 "candidate_thresholds": {

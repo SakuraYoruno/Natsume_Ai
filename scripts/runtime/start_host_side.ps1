@@ -419,7 +419,11 @@ function Parse-BoolValue {
 function Resolve-Host14BBaseUrl {
   param([hashtable]$EnvValues)
   $raw = ""
-  if ($EnvValues.ContainsKey("HOST_CHAT_HOST_14B_BASE_URL")) {
+  if ($EnvValues.ContainsKey("HOST_CHAT_LOCAL_LLM_BASE_URL")) {
+    $raw = [string]$EnvValues["HOST_CHAT_LOCAL_LLM_BASE_URL"]
+  } elseif ($env:HOST_CHAT_LOCAL_LLM_BASE_URL) {
+    $raw = [string]$env:HOST_CHAT_LOCAL_LLM_BASE_URL
+  } elseif ($EnvValues.ContainsKey("HOST_CHAT_HOST_14B_BASE_URL")) {
     $raw = [string]$EnvValues["HOST_CHAT_HOST_14B_BASE_URL"]
   } elseif ($env:HOST_CHAT_HOST_14B_BASE_URL) {
     $raw = [string]$env:HOST_CHAT_HOST_14B_BASE_URL
@@ -449,7 +453,7 @@ function Split-ApiAndRootBaseUrl {
 
 function Use-ManagedLocalOllama {
   param([hashtable]$EnvValues)
-  $host14bEnabled = Parse-BoolValue -Value ($(if ($EnvValues.ContainsKey("HOST_CHAT_HOST_14B_ENABLED")) { $EnvValues["HOST_CHAT_HOST_14B_ENABLED"] } else { $env:HOST_CHAT_HOST_14B_ENABLED })) -Default $true
+  $host14bEnabled = Parse-BoolValue -Value ($(if ($EnvValues.ContainsKey("HOST_CHAT_LOCAL_LLM_ENABLED")) { $EnvValues["HOST_CHAT_LOCAL_LLM_ENABLED"] } elseif ($env:HOST_CHAT_LOCAL_LLM_ENABLED) { $env:HOST_CHAT_LOCAL_LLM_ENABLED } elseif ($EnvValues.ContainsKey("HOST_CHAT_HOST_14B_ENABLED")) { $EnvValues["HOST_CHAT_HOST_14B_ENABLED"] } else { $env:HOST_CHAT_HOST_14B_ENABLED })) -Default $true
   if (-not $host14bEnabled) {
     return $false
   }
@@ -457,7 +461,7 @@ function Use-ManagedLocalOllama {
   if ($forceCloud) {
     return $false
   }
-  $provider = ($(if ($EnvValues.ContainsKey("HOST_CHAT_HOST_14B_PROVIDER")) { $EnvValues["HOST_CHAT_HOST_14B_PROVIDER"] } else { $env:HOST_CHAT_HOST_14B_PROVIDER }))
+  $provider = ($(if ($EnvValues.ContainsKey("HOST_CHAT_LOCAL_LLM_PROVIDER")) { $EnvValues["HOST_CHAT_LOCAL_LLM_PROVIDER"] } elseif ($env:HOST_CHAT_LOCAL_LLM_PROVIDER) { $env:HOST_CHAT_LOCAL_LLM_PROVIDER } elseif ($EnvValues.ContainsKey("HOST_CHAT_HOST_14B_PROVIDER")) { $EnvValues["HOST_CHAT_HOST_14B_PROVIDER"] } else { $env:HOST_CHAT_HOST_14B_PROVIDER }))
   $provider = ([string]$provider).Trim().ToLowerInvariant()
   if (-not $provider) {
     $provider = 'openai'
@@ -480,7 +484,7 @@ function Use-ManagedLocalOllama {
 
 function Get-Host14BModelId {
   param([hashtable]$EnvValues)
-  $value = $(if ($EnvValues.ContainsKey("HOST_CHAT_HOST_14B_MODEL_ID")) { $EnvValues["HOST_CHAT_HOST_14B_MODEL_ID"] } else { $env:HOST_CHAT_HOST_14B_MODEL_ID })
+  $value = $(if ($EnvValues.ContainsKey("HOST_CHAT_LOCAL_LLM_MODEL_ID")) { $EnvValues["HOST_CHAT_LOCAL_LLM_MODEL_ID"] } elseif ($env:HOST_CHAT_LOCAL_LLM_MODEL_ID) { $env:HOST_CHAT_LOCAL_LLM_MODEL_ID } elseif ($EnvValues.ContainsKey("HOST_CHAT_HOST_14B_MODEL_ID")) { $EnvValues["HOST_CHAT_HOST_14B_MODEL_ID"] } else { $env:HOST_CHAT_HOST_14B_MODEL_ID })
   $resolved = ([string]$value).Trim()
   if (-not $resolved) {
     $resolved = 'qwen3:14b'

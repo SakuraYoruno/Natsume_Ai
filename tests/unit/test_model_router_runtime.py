@@ -243,7 +243,7 @@ def test_chat_runtime_default_profile_sets_output_cap(monkeypatch) -> None:
     )
 
     assert runtime["agent_role"] == "surface_reply"
-    assert runtime["agent_gen_params"]["max_tokens"] == 220
+    assert runtime["agent_gen_params"]["max_tokens"] == 700
 
 
 def test_chat_runtime_can_experiment_on_codex_spark(monkeypatch) -> None:

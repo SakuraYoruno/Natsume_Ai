@@ -64,13 +64,13 @@ def test_load_compiled_soul_reads_markdown_and_derives_runtime_texts(
     assert "一、基本角色档案" in compiled.section_map
     assert "新海 天" in compiled.identity_core
     assert "天然活泼" in compiled.temperament_core
-    assert any("尼尼" in item for item in compiled.relationship_defaults)
+    assert "尼尼" in compiled.runtime_compact_text
     assert any("病娇控制欲" in item for item in compiled.taboo_rules)
     assert any("先打断再接话" in item for item in compiled.signature_lines)
     assert "新海天是一个外向活泼" in compiled.runtime_compact_text
     assert "AI 伴侣" not in compiled.runtime_compact_text
     assert "哥哥的话" not in compiled.runtime_compact_text
-    assert "默认把对方叫“尼尼”" in compiled.runtime_compact_text
+    assert "尼尼" in compiled.runtime_compact_text
     assert "【身份核心】" in compiled.runtime_full_text
 
 

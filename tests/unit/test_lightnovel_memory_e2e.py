@@ -83,7 +83,7 @@ async def test_daily_lightnovel_delivery_is_recalled_deep_reviewed_and_traceable
             action_id="job-e2e:lightnovel_gateway_delivery",
             actor_id="natsume",
             request_id="req-lightnovel-delivery",
-            intent_id="codex_lightnovel_recommender",
+            intent_id="agent_lightnovel_recommender",
             person_id="owner",
             session_id="qq_dm_owner",
             status="COMPLETED",
@@ -165,7 +165,7 @@ async def test_daily_lightnovel_delivery_is_recalled_deep_reviewed_and_traceable
         monkeypatch.setattr(helpers, "_embed_surface_memory_query", lambda query: ([0.2] * 16, "test-embedding"))
         monkeypatch.setattr("host_brain.app.dependencies.get_life_memory_store", lambda: life_store)
         monkeypatch.setattr("host_brain.app.dependencies.get_episodic_store", lambda: episodic_store)
-        monkeypatch.setattr("host_brain.codex_runtime.lightnovel_deep_reviewer._review_cards", fake_review_cards)
+        monkeypatch.setattr("host_brain.agent_runtime.lightnovel_deep_reviewer._review_cards", fake_review_cards)
 
         retrieval_summary, evidence_items = await helpers._run_retrieval(
             request_id="req-qq-followup",
@@ -187,13 +187,15 @@ async def test_daily_lightnovel_delivery_is_recalled_deep_reviewed_and_traceable
         assert "surface_life_episode" in packet["route_ids"]
         assert packet["rows"][0]["store_id"] == "life_episode"
         assert fact.startswith("网页深读结果（含正文）")
-        assert "当前更推荐第3本" in fact
-        assert "異世界皇女皇帝" in fact
+        assert "当前更推荐第2本" in fact
+        assert "与神在河岸" in fact
         assert "正文内容足够支撑判断" not in fact
         assert "正文有" not in fact
-        assert "皇女" in fact
+        assert "河岸边遇见神明" in fact
         assert "对白" in fact
-        assert [item["detail_url"] for item in captured_cards] == [card["detail_url"] for card in cards]
+        captured_urls = [item["detail_url"] for item in captured_cards]
+        assert "https://www.lightnovel.fun/detail/1145001" in captured_urls
+        assert "https://www.lightnovel.fun/cn/detail/1002" in captured_urls
 
         deep_trace = packet["trace"]["lightnovel_deep_review"]
         assert deep_trace["status"] == "OK"
@@ -208,7 +210,7 @@ async def test_daily_lightnovel_delivery_is_recalled_deep_reviewed_and_traceable
         assert deep_rows
         assert deep_rows[0]["person_id"] == "owner"
         assert deep_rows[0]["session_id"] == "qq_dm_owner"
-        assert "第3本" in deep_rows[0]["summary"]
+        assert "第2本" in deep_rows[0]["summary"]
 
         debug_trace = _surface_memory_debug_trace_for_audit(
             retrieval_summary=retrieval_summary,

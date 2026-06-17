@@ -61,7 +61,7 @@ def test_build_interaction_state_summary_covers_thread_specific_branches() -> No
     assert "连续身份追问" in identity
     assert "关系/动机回访" in boundary
     assert "会不会理我/帮我" in help_thread
-    assert "轻社交招呼" in phatic
+    assert phatic == ""
 
 
 def test_build_interaction_state_summary_covers_fact_fallback_branches() -> None:
@@ -78,7 +78,7 @@ def test_build_interaction_state_summary_covers_fact_fallback_branches() -> None
     assert "接着“emoji_social_reply”往下说" in followup
     assert "当前话题是“mood_reflection”" in topic_with_stance
     assert "偏“distress”" in anchored
-    assert "轻社交招呼" in _build_interaction_state_summary(_context_plane(topic="greeting"))
+    assert _build_interaction_state_summary(_context_plane(topic="greeting")) == ""
 
 
 def test_builder_helpers_cover_empty_defaults_and_titles() -> None:

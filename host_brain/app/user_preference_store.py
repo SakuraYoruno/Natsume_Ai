@@ -15,13 +15,15 @@ PROFILE_SCHEMA_VERSION = "Natsume.user_preference_profile.v1"
 DELIVERY_SCHEMA_VERSION = "Natsume.recommendation_delivery.v1"
 
 _SPACE_RE = re.compile(r"\s+")
-_LIGHTNOVEL_QUERY_RE = re.compile(r"(小说|轻小说|书|推荐|lightnovel|epub|奇幻|后宫|异世界|恋爱|校园)", re.IGNORECASE)
+_LIGHTNOVEL_QUERY_RE = re.compile(r"(小说|轻小说|书|推荐|详情|详细|内容|简介|介绍|lightnovel|epub|奇幻|后宫|异世界|恋爱|校园)", re.IGNORECASE)
 _PREFERENCE_QUERY_RE = re.compile(r"(我喜欢什么|我的偏好|我的喜好|我偏好|喜欢哪些|喜欢哪类|口味|taste|preference)", re.IGNORECASE)
 _RECOMMENDATION_CONTEXT_QUERY_RE = re.compile(
     r"("
     r"第\s*(?:[一二三四五六七八九十]|\d{1,2})\s*(?:本|个|项|部|步)?"
     r"|(?:这本|这部|这个|那本|那部|刚才那本|刚刚那本|刚才推荐|刚刚推荐)"
     r"|(?:哪本|先看哪|先读哪|好看吗|好不好看|怎么样|如何|值不值得|推不推荐|值得看)"
+    r"|(?:详情|详细内容|详细|内容|简介|介绍|讲什么|说什么)"
+    r"|(?:epub|电子书|封装|打包|制作|生成|下载|购买|买下来)"
     r")",
     re.IGNORECASE,
 )
@@ -307,7 +309,7 @@ class UserPreferenceStore:
             return None
         delivery = {
             "delivery_id": _delivery_id(),
-            "person_id": _clean_text(person_id, limit=120) or "unknown",
+            "person_id": _clean_text(person_id, limit=120) or "default",
             "session_id": _clean_text(session_id, limit=180),
             "domain": _normalize_domain(domain),
             "platform": _clean_text(platform, limit=40),
@@ -546,6 +548,7 @@ def build_profile_from_events(*, person_id: str, domain: str, events: Sequence[M
 def normalize_recommendation_item(item: Mapping[str, Any], *, rank: int) -> dict[str, Any]:
     title = _clean_text(item.get("title") or item.get("title_display") or item.get("canonical_title") or "未命名作品", limit=180)
     detail_url = _clean_text(item.get("detail_url") or item.get("url") or item.get("source_url"), limit=320)
+    cover_url = _clean_text(item.get("cover_url") or item.get("cover") or item.get("image_url"), limit=500)
     series_key = _clean_text(item.get("series_key"), limit=220)
     item_id = series_key or _clean_text(item.get("key"), limit=220) or _stable_id("recitem", title, detail_url)
     preference_matches = [dict(match) for match in list(item.get("preference_matches") or []) if isinstance(match, Mapping)]
@@ -572,6 +575,7 @@ def normalize_recommendation_item(item: Mapping[str, Any], *, rank: int) -> dict
         "target_id": item_id,
         "title": title,
         "detail_url": detail_url,
+        "cover_url": cover_url,
         "series_key": series_key,
         "source_key": _clean_text(item.get("source_key"), limit=120),
         "selection_reason": _clean_text(item.get("selection_reason") or item.get("rationale") or item.get("reason"), limit=220),
@@ -595,6 +599,47 @@ def _parse_recommendation_reference_index(query: str) -> int | None:
     if raw.isdigit():
         return max(1, int(raw))
     return _CN_NUMBERS.get(raw)
+
+
+def _infer_recent_recommendation_reference_index(
+    *,
+    store: UserPreferenceStore,
+    session_id: str,
+    conversation_id: str,
+    current_query: str,
+) -> int | None:
+    conn = store.conn
+    if conn is None:
+        return None
+    clean_session = _clean_text(session_id, limit=180)
+    clean_conversation = _clean_text(conversation_id, limit=180) or clean_session
+    if not clean_session and not clean_conversation:
+        return None
+    try:
+        rows = conn.execute(
+            """
+            SELECT role, content, ts_ms, turn_index
+            FROM conversation_turn
+            WHERE session_id = ? OR session_id = ?
+            ORDER BY ts_ms DESC, turn_index DESC
+            LIMIT 16
+            """,
+            (clean_session, clean_conversation),
+        ).fetchall()
+    except Exception:
+        return None
+    current = _clean_text(current_query, limit=500)
+    for row in list(rows or []):
+        try:
+            content = _clean_text(row["content"], limit=500)
+        except Exception:
+            content = _clean_text(row[1] if len(row) > 1 else "", limit=500)
+        if not content or content == current:
+            continue
+        index = _parse_recommendation_reference_index(content)
+        if index is not None:
+            return index
+    return None
 
 
 def _compact_recommendation_context_item(item: Mapping[str, Any]) -> dict[str, Any]:
@@ -645,6 +690,13 @@ def _build_recent_recommendation_context(
     if not items:
         return {}
     reference_index = _parse_recommendation_reference_index(query)
+    if reference_index is None:
+        reference_index = _infer_recent_recommendation_reference_index(
+            store=store,
+            session_id=clean_session,
+            conversation_id=clean_conversation,
+            current_query=query,
+        )
     referenced_item = None
     if reference_index is not None:
         referenced_item = next((item for item in items if int(item.get("rank") or 0) == reference_index), None)
@@ -709,7 +761,7 @@ def build_user_preference_pack(
 ) -> dict[str, Any]:
     if not _enabled("HOST_USER_PREFERENCE_ENABLED", default=True):
         return {}
-    clean_person = _clean_text(person_id, limit=120) or "unknown"
+    clean_person = _clean_text(person_id, limit=120) or "default"
     query = _clean_text(query_text, limit=500)
     store = UserPreferenceStore(ledger=ledger)
     recent_recommendation_context = _build_recent_recommendation_context(

@@ -23,6 +23,7 @@ import os
 from pathlib import Path
 import re
 import subprocess
+from host_brain.core.subprocess_utils import run as _subprocess_run
 import time
 import urllib.request
 from typing import Any, Callable, Mapping
@@ -791,7 +792,7 @@ def _run_nvidia_smi_csv(query: str, *, timeout_s: float = 5.0) -> tuple[bool, li
     if os.name == "nt":
         run_kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0)
     try:
-        completed = subprocess.run(command, **run_kwargs)
+        completed = _subprocess_run(command, **run_kwargs)
     except FileNotFoundError:
         return False, [], "nvidia-smi not found"
     except subprocess.TimeoutExpired:
@@ -913,7 +914,7 @@ def _run_nvidia_smi_plain(args: list[str], *, timeout_s: float = 5.0) -> tuple[b
     if os.name == "nt":
         run_kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0)
     try:
-        completed = subprocess.run(command, **run_kwargs)
+        completed = _subprocess_run(command, **run_kwargs)
     except FileNotFoundError:
         return False, "", "nvidia-smi not found"
     except subprocess.TimeoutExpired:

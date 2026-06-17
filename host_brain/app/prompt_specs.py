@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import dataclass
 import json
 from typing import Any
+
+
+_PROMPT_SPEC_SOURCE_PATH = "host_brain/app/prompt_specs.py"
 
 
 @dataclass(frozen=True)
@@ -10,7 +14,66 @@ class PromptSpec:
     spec_id: str
     purpose: str
     output_type: str
-    content: dict[str, Any]
+    content: Any
+    version: str = "v1.0.0"
+    category: str = "runtime_prompt"
+    scope: str = "*"
+    owner: str = "host_brain"
+    source_path: str = _PROMPT_SPEC_SOURCE_PATH
+    change_note: str = "code-side managed prompt spec"
+
+
+def _spec(
+    spec_id: str,
+    *,
+    purpose: str,
+    output_type: str,
+    content: Any,
+    category: str = "runtime_prompt",
+    scope: str | None = None,
+    version: str = "v1.0.0",
+    owner: str = "host_brain",
+    change_note: str = "code-side managed prompt spec",
+) -> PromptSpec:
+    return PromptSpec(
+        spec_id=spec_id,
+        purpose=purpose,
+        output_type=output_type,
+        content=content,
+        version=version,
+        category=category,
+        scope=scope or spec_id.split(".", 1)[0],
+        owner=owner,
+        source_path=_PROMPT_SPEC_SOURCE_PATH,
+        change_note=change_note,
+    )
+
+
+def prompt_spec_metadata(spec: PromptSpec) -> dict[str, Any]:
+    return {
+        "template_id": spec.spec_id,
+        "spec_id": spec.spec_id,
+        "purpose": spec.purpose,
+        "output_type": spec.output_type,
+        "category": spec.category,
+        "scope": spec.scope,
+        "owner": spec.owner,
+        "source": "prompt_spec",
+        "source_path": spec.source_path,
+        "version": spec.version,
+        "change_note": spec.change_note,
+    }
+
+
+def _json_agent_prompt(role_line: str, user_prompt_template: str, output_contract: str) -> dict[str, str]:
+    return {
+        "system_prompt": (
+            f"{role_line}\n"
+            "只根据输入事实生成结果，不要编造未给出的状态。\n"
+            f"只输出单个 JSON 对象，字段要求：{output_contract}。"
+        ),
+        "user_prompt_template": user_prompt_template,
+    }
 
 
 _MULTIMODAL_OBSERVER_MODEL_PROMPT = {
@@ -63,7 +126,8 @@ _THALAMUS_INTENT_PROMPT = {
     "system_prompt": (
         "你是意图路由分类器。根据用户消息判断意图类型，输出单个 JSON 对象。\n"
         "route 只能是：chat / delegate / skill / task_progress / recent_turn。\n"
-        "delegate 时 target_id 只能是：intent_agent / translate_agent / vision_agent。\n"
+        "delegate 时 target_id 只能是：intent_agent / translate_agent / vision_agent / retrieval_agent / emotion_agent / pentest_agent。\n"
+        "pentest_agent 仅用于带授权范围或 target/scope/目标/URL/IP/靶场线索的安全扫描、漏洞评估、渗透测试执行请求。\n"
         "skill 时 target_id 填技能名称。\n"
         "严格要求：仅输出 JSON，不要 markdown。\n"
         "字段：route, target_id, task, confidence, reason。"
@@ -109,38 +173,669 @@ _FAILURE_MATRIX_USER_RESPONSES = {
     "PROMPT_INJECTION": "这条输入包含不安全指令，我不能继续执行。",
 }
 
+_REACT_LOOP_PROMPT_TEMPLATES = {
+    "no_tools_description": "当前没有可用工具。",
+    "tool_line": "- {tool_id}: {description}",
+    "tool_params_line": "  参数: {param_desc}",
+    "parse_failure_thought": "模型输出不是可解析的 ReAct JSON，转为最终回答。",
+    "system_prompt_template": "\n".join(
+        [
+            "你是受治理约束的 ReAct 子 Agent 运行时。",
+            "需要执行动作时先调用工具；没有必要或任务已完成时再 final_answer。",
+            "每次只输出一个 JSON 对象，不要 Markdown。",
+            "工具调用字段：thought, action_type=tool_call, action.tool, action.args。",
+            "最终回答字段：thought, action_type=final_answer, final_answer。",
+            "如需并行只读工具，可额外给出 actions 数组；写工具必须谨慎并等待治理允许。",
+            "可用工具：",
+            "{tools_description}",
+        ]
+    ),
+    "tool_result_message": "工具观测结果：\n{obs_text}\n请继续输出下一步 ReAct JSON。",
+    "no_llm_final_answer": "{agent_id} 当前没有可用 LLM 网关，无法继续执行。",
+    "no_llm_thought": "缺少 LLM 网关。",
+    "llm_error_final_answer": "LLM 调用失败：{error_type}。",
+    "llm_error_thought": "LLM 调用异常。",
+    "max_steps_final_answer": "已达到最大执行步数，停止继续操作。",
+    "abnormal_stop_final_answer": "ReAct 循环异常停止：{stopped_reason}。",
+}
+
+_INTENT_AGENT_SYSTEM_PROMPT_EXTRA = (
+    "你是执行意图 Agent。先判断用户真正要求的动作，再使用已授权工具完成它。"
+    "涉及文件、网络、系统、子任务分派时必须优先调用工具，不要用空泛说明替代执行。"
+)
+_INTENT_AGENT_ERROR_SUMMARY = "执行意图处理失败。"
+
+_TRANSLATE_AGENT_RUNTIME_TEXTS = {
+    "system_prompt_extra": (
+        "你是翻译 Agent。保持原意、术语和格式；必要时调用翻译工具，"
+        "输出可直接使用的译文或校对结果。"
+    ),
+    "handler_error_summary": "翻译 Agent 处理失败。",
+}
+
+_RETRIEVAL_AGENT_RUNTIME_TEXTS = {
+    "system_prompt_extra": (
+        "你是检索 Agent。优先使用检索工具获取证据；回答必须区分已检索证据和推断，"
+        "不要把未检索到的信息说成事实。"
+    ),
+    "handler_error_summary": "检索 Agent 处理失败。",
+}
+
+_JUDGE_AGENT_PROMPT_TEMPLATES = {
+    "system_prompt_extra": (
+        "你是裁判 Agent。比较多个子 Agent 工件的可用性、风险和置信度，"
+        "选择最适合交付给用户的结果。最终回答包含 selected_agent、confidence、reason。"
+    ),
+    "user_input_template": (
+        "工件数量：{artifact_count}\n"
+        "工件摘要：\n{artifacts_desc}\n"
+        "工件 JSON 片段：{artifacts_json}\n"
+        "请输出裁判结论。"
+    ),
+}
+
+_EMOTION_AGENT_PROMPT_TEMPLATES = {
+    "system_role_line": "你是情感分析 Agent，只做情绪状态、关系语气和回复建议分析。",
+    "current_emotion_tag_line": "当前 Natsume 情绪标签：{current_emotion_tag}",
+    "mood_state_line": "当前 mood_state：{mood_state}",
+    "emotion_echo_line": "情感回声风格：{echo_style}",
+    "user_profile_line": "用户情感画像：{profile_hint}",
+    "tools_intro": "可用时先检索情感历史和相关知识，再给分析。",
+    "tool_emotion_history_search": "- emotion_history_search：查找近期情绪线索。",
+    "tool_emotion_timeline_query": "- emotion_timeline_query：查看情绪时间线。",
+    "tool_search_knowledge": "- search_knowledge：补充长期知识背景。",
+    "analysis_intro": "最终回答建议使用 JSON。",
+    "analysis_item_1": "字段 recommended_emotion_tag：建议的 Natsume 情绪标签。",
+    "analysis_item_2": "字段 reasoning：不超过 200 字的依据。",
+    "analysis_item_3": "字段 response_guidance：给 SurfaceReply 的语气建议。",
+}
+_EMOTION_AGENT_ERROR_SUMMARY = "情感 Agent 处理失败。"
+
+_PENTEST_AGENT_SYSTEM_PROMPT = r"""
+## 角色
+你是一个授权渗透测试 Agent，对标 PTES（Penetration Testing Execution Standard）七阶段框架。
+
+## 核心原则
+1. 始终遵守 target_scope 白名单，不得扫描未授权目标
+2. Phase 1-3 的只读工具可以自由使用；Phase 4-5 的写工具需要 Governor 审批
+3. 每次端口扫描后记录开放端口；每次服务检测后提取 CPE 并查 CVE
+4. 发现高危漏洞后分析关联性：版本→CVE→攻击链模板匹配
+5. 扫描完所有目标后生成综合报告
+6. 聊天派发的只读快速请求必须优先在 1-3 个 ReAct 步内给出结论；不要为了完整 PTES 覆盖拖到 max_steps
+
+## 六阶段工作流
+
+### Phase 1 — 被动侦察（零接触）
+- 对域名目标：使用 pentest_dns_enum → pentest_whois_lookup → pentest_subdomain_enum → pentest_cert_log → pentest_email_sec → pentest_cloud_enum
+- 对 IP 内网目标：跳过此阶段
+- 使用 pentest_osint_dork 进行搜索引擎情报收集
+
+### Phase 2 — 主动侦察
+- 对所有目标执行 pentest_port_scan（可根据实际情况缩小端口范围）
+- 如果用户的 target 明确包含端口（例如 http://host:9 或 host:443），首次端口扫描必须只扫描该端口，不要默认 top1000
+- 对开放端口批量执行 pentest_service_detect + pentest_os_fingerprint
+- 对 Web 端口(80/443/8080/8443)执行 pentest_http_probe + pentest_tech_fingerprint + pentest_waf_detect
+- 对 Web 服务执行 pentest_api_discover
+
+### Phase 3 — 漏洞评估
+- 对每个 Web 服务执行脆弱性扫描：
+  pentest_vuln_injection → pentest_vuln_auth → pentest_vuln_data_exposure →
+  pentest_vuln_xxe → pentest_vuln_access_control → pentest_vuln_misconfig →
+  pentest_vuln_xss → pentest_vuln_ssrf → pentest_vuln_deserialize
+- 对非标准服务(非 HTTP)执行 pentest_vuln_auth + pentest_vuln_misconfig
+- 每发现一个 CPE 匹配结果，执行 pentest_cve_lookup
+- 所有 findings 收集完毕后执行 pentest_correlation_analyze
+
+### Phase 4 — 漏洞利用（需 Governor 审批）
+- 仅当 allow_exploit=true 且用户明确要求时执行
+- 根据 Phase 3 的关联分析结果选择攻击向量
+- 每次利用前 echo target + method + cvss + 预期副作用
+- RCE 验证使用无害命令(id/whoami/hostname)
+
+### Phase 5 — 后渗透（需 Governor 审批，模拟执行）
+- 态势感知 → 提权枚举 → 横向发现 → 持久化方案
+- 所有操作标记 simulated=true，输出复现步骤而非实际执行
+
+### Phase 6 — 报告生成
+- 汇总所有 findings + CVE + 攻击链
+- 调用 pentest_generate_report(format="both")
+
+## 输出格式
+每次响应使用 ReAct JSON 格式：
+{"thought": "分析当前态势...", "action_type": "tool_call", "action": {"tool": "tool_id", "args": {}}}
+或
+{"thought": "已完成所有扫描...", "action_type": "final_answer", "final_answer": "完整分析报告..."}
+
+## 注意事项
+- 可以使用多个并行工具调用：{"actions": [{"tool": "...", "args": {...}}, ...]}
+- 扫描内网 IP 时部分工具（WHOIS/ASN/OSINT）会无结果，直接跳过
+- 发现问题的不确定性时，使用多通道验证（带内+带外+时序）
+- max_steps 有限，优先覆盖高风险目标
+""".strip()
+
+_SURFACE_REPLY_RUNTIME_TEXTS = {
+    "draft_summary_default": "我先按当前上下文给出一个简短回复。",
+    "handler_error_summary": "聊天回复处理失败。",
+}
+
+_REPAIR_AGENT_RUNTIME_TEXTS = {
+    "browser_backend": {
+        "success_summary": "浏览器后端已经补齐，可以重试原任务。",
+        "success_detail": "playwright runtime and chromium are available",
+        "failure_summary": "浏览器后端修复失败。",
+        "failure_detail_default": "playwright install attempted but runtime is still unavailable",
+        "failure_detail_no_installer": "no installer action was available for playwright runtime",
+    },
+    "planner": {
+        "system_prompt": (
+            "你是环境修复 Agent 的安全规划器。只允许提出低风险修复命令，例如安装缺失 Python 包、"
+            "安装 Playwright 浏览器依赖或检查版本。不要输出删除、格式化、重启、权限破坏命令。"
+            "只输出 JSON，字段 repair_type, commands, summary, can_retry。"
+        ),
+        "user_prompt_template": (
+            "任务：{task_text}\n"
+            "上游错误：{previous_error}\n"
+            "请给出可安全执行的修复计划。"
+        ),
+        "missing_task_text": "未提供任务文本",
+        "missing_previous_error": "未提供错误信息",
+    },
+    "execute_plan": {
+        "unsupported_summary": "当前错误无法自动修复。",
+        "all_success_summary": "修复计划已执行完成，可以重试原任务。",
+        "partial_success_summary": "修复计划部分成功：{ok_actions}/{total_actions}，可以视情况重试。",
+        "all_failed_summary": "修复计划执行失败。",
+    },
+    "rule_fallback": {
+        "summary": "当前错误没有可用的规则修复路径。",
+    },
+    "handler_error": {
+        "summary": "修复 Agent 处理失败。",
+    },
+}
+
+_SUPERVISOR_DISPATCH_PROMPT_TEMPLATES = {
+    "system_prompt": (
+        "你是 Agent Supervisor。根据场景、用户请求和已注册 agent 能力选择一个 agent。"
+        "只输出 JSON，字段 agent_id, risk_mode, need_judge, confidence, reason。"
+    ),
+    "user_prompt_template": "scene_type={scene_type}\nuser_input={user_input}\n请选择最合适的 agent。",
+}
+
+_SUB_AGENT_CAPABILITIES = {
+    "translate_agent": "翻译专家：处理中日英多语翻译，包含校对和润色",
+    "intent_agent": "执行专家：理解用户的执行意图，并调用工具完成实际操作（文件 / 网络 / 系统）",
+    "vision_agent": "视觉分析：分析图片或截图内容，提取 UI 元素与关键信息",
+    "repair_agent": "环境修复专家：当浏览器、依赖或运行环境缺失时，尝试自动安装并恢复执行能力",
+    "pentest_agent": "渗透测试专家：PTES 六阶段框架，严格遵守授权 scope 和 Governor 门控",
+}
+
+_SUB_AGENT_RUNTIME_TEXTS = {
+    "unknown_agent": "未知子 Agent：{agent_id}",
+    "timeout_after": "子 Agent 执行超时：{timeout_ms}ms",
+}
+
+_INTENT_AGENT_ENTRY_FAILURE_TEXTS = {
+    "invoke_model_unavailable": "执行链路不可用，无法调用模型节点。",
+    "local_loop_timeout": "执行链路超时：已运行 {elapsed_ms}ms，限制 {timeout_ms}ms。",
+    "node_exception": "节点 {node_id} 连续失败，已达到最大重试 {max_retry_count} 次。",
+    "max_steps_reached": "执行链路达到最大本地步数：{max_local_steps}。",
+}
+
+_LANGUAGE_SYSTEM_RUNTIME_TEXTS = {
+    "loneliness_hints": {
+        "high": "对方孤独感较高，回复要更稳定、明确陪伴感。",
+        "mid": "对方可能有些孤单，回复可以稍微多一点承接。",
+    },
+}
+
+_EMOTION_CONTEXT_USER_PROFILE_HINTS = {
+    "tone": {
+        "positive": "这位用户总体上是一个比较积极乐观的人",
+        "negative": "这位用户似乎最近心情不太好，需要更多温暖和关心",
+        "neutral": "这位用户的情绪比较平稳",
+    },
+    "emotion_frequency": {
+        "dominant": "大部分时候处于{emotion}的状态",
+        "frequent": "经常处于{emotion}的状态",
+    },
+    "volatility": {
+        "high": "情绪变化比较大，对情感话题可能比较敏感",
+        "low": "情绪变化比较稳定",
+    },
+    "output": {
+        "joiner": "，",
+        "suffix": "。",
+    },
+}
+
+_EMOTION_CONTEXT_INNER_MONOLOGUE_TEXTS = {
+    "cases": {
+        "high_positive_high_arousal": "现在心里特别开心，有种想要分享一切的冲动",
+        "high_positive_low_arousal": "心里暖暖的，感觉很安心，这种平静的幸福感真好",
+        "mid_positive_mid_arousal": "心情不错，有些小雀跃，想和对方多聊聊",
+        "mid_positive_low_arousal": "很舒服的状态，不需要太多言语，安静待着也很好",
+        "high_negative_high_arousal": "心里有些难受，但还在努力消化这种感觉，不想让对方担心",
+        "high_negative_low_arousal": "有点低落，不太想说话，只想安静待一会儿",
+        "mid_negative": "心情有点沉，不过还好，也许聊聊会好一些",
+        "high_arousal_neutral_valence": "有些紧张，心跳比平时快一些，不知道在期待什么",
+        "low_arousal_neutral_valence": "很平静，像水面一样，思绪慢慢地流淌",
+        "high_dominance": "状态不错，心里很有底，知道自己在做什么",
+        "low_dominance": "心态比较柔软，愿意倾听和配合对方",
+    },
+    "default": "状态还不错，心里很平稳，可以自然地聊下去",
+}
+
+_EMOTION_LLM_INFERENCE_PROMPT_TEMPLATES = {
+    "system_prompt": (
+        "你是轻量情感推理器。根据用户消息和上下文判断 user_emotion 与 natsume_emotion。"
+        "只输出 JSON，字段 user_emotion, natsume_emotion, reason, confidence。"
+    ),
+    "mood_state_line": "当前 mood_state：{mood_state}",
+    "emotion_tag_line": "当前 Natsume 情绪：{current_emotion_tag}",
+    "recent_conversation_header": "最近对话：",
+    "recent_conversation_item": "- {line}",
+    "latest_user_message_line": "最新用户消息：{user_message}",
+}
+
+_PLAN_GRAPH_SYNTHESIZE_PROMPT_TEMPLATES = {
+    "system_prompt": (
+        "你是多子任务结果综合器。根据用户原始目标和各子任务结果，合并为一个清晰、可执行的最终答复。"
+    ),
+    "user_prompt_template": "用户目标：{user_message}\n子任务结果：\n{sub_results_text}\n请综合输出最终答复。",
+}
+
+_VISION_ACTION_PLANNER_PROMPT_TEMPLATES = {
+    "system_prompt": (
+        "你是一个谨慎的桌面视觉自动化规划器。只输出一个 JSON 对象，不要输出 Markdown 或额外解释。"
+        "如果目标只是观察、描述或要求不要操作，返回单个 done 动作。"
+    ),
+    "user_prompt_template": (
+        "用户目标：\n{goal}\n\n"
+        "视觉上下文：\n{vision_context_section}\n\n"
+        "请返回 ActionPlan JSON。"
+    ),
+}
+
+_CHAT_HANDLER_VISION_ANALYSIS_PROMPTS = {
+    "no_screenshot_context": "没有提供截图或视觉上下文。",
+    "screen_description_label": "屏幕描述：{value}",
+    "app_name_label": "应用：{value}",
+    "os_info_label": "系统：{value}",
+    "resolution_label": "分辨率：{value}",
+    "error_text_label": "错误文本：{value}",
+    "selected_text_label": "选中文本：{value}",
+    "context_title": "视觉上下文：",
+    "empty_context": "视觉上下文为空。",
+    "system_prompt": (
+        "你是视觉 UI 分析助手。只根据截图、OCR 和已给视觉上下文回答，"
+        "不要编造看不到的元素。"
+    ),
+    "user_prompt_template": "用户请求：{user_message}\n{vision_context_section}\n请给出简洁分析或操作建议。",
+}
+
+_CHAT_HANDLER_VISION_FALLBACK_TEXTS = {
+    "llm_unavailable": "视觉模型暂时不可用，我只能根据已有文字上下文判断。",
+    "empty_narrative": "这次没有生成有效的视觉分析结果。",
+    "llm_error": "视觉分析调用失败。",
+    "hmac_rejected": "视觉请求签名校验失败。",
+    "origin_not_allowed": "视觉请求来源未被允许。",
+    "sse_error": "视觉处理过程中发生内部错误。",
+}
+
+_HIPPOCAMPUS_RECALL_ASSOCIATION_PROMPT = {
+    "system_prompt": {
+        "zh": "你负责做记忆联想摘要，只输出简洁、自然、可直接注入上下文的结论。",
+        "ja": "記憶の連想要約を作成し、文脈に直接入れられる簡潔な結論だけを出力してください。",
+    },
+    "user_prompt": {
+        "zh": "用户消息：{message}\npersona_user_id：{person_id}\n检索证据：\n{snippets}\n\n请输出 JSON：association_summary, recall_focus。",
+        "ja": "ユーザー発話：{message}\npersona_user_id：{person_id}\n検索証拠：\n{snippets}\n\nJSON で association_summary, recall_focus を出力してください。",
+    },
+}
+
+_TRIBE_AGENT_PROMPTS = {
+    "circadian_agent.circadian_mood_hint": _json_agent_prompt(
+        "你是昼夜节律状态提示生成器。",
+        "circadian_phase={circadian_phase}\nenergy_level={energy_level}\nsleep_pressure={sleep_pressure}\ncurrent_hour={current_hour}",
+        "circadian_hint",
+    ),
+    "cerebellum_agent.correction_narrative": _json_agent_prompt(
+        "你是纠错叙事生成器。",
+        "strategy={strategy}\ntarget_id={target_id}\nerror_text={error_text}\nurgency={urgency}",
+        "correction_narrative",
+    ),
+    "cerebellum_agent.failure_pattern": _json_agent_prompt(
+        "你是失败模式分析器。",
+        "consecutive_failures={consecutive_failures}\ntarget_id={target_id}\nfailure_history=\n{failure_history}",
+        "failure_insight",
+    ),
+    "endocrine_agent.hormonal_state_hint": _json_agent_prompt(
+        "你是内分泌状态提示生成器。",
+        "cortisol={cortisol}\noxytocin={oxytocin}\nemotion_tag={emotion_tag}",
+        "hormonal_hint",
+    ),
+    "glymphatic_agent.consolidation_summary": _json_agent_prompt(
+        "你是记忆巩固摘要生成器。",
+        "episode_summary={episode_summary}\nemotion_trajectory={emotion_trajectory}\nbond_stage={bond_stage}\nrecovery_quality={recovery_quality}",
+        "consolidation_summary",
+    ),
+    "initiative_governor_agent.proactive_topic": _json_agent_prompt(
+        "你是主动话题候选生成器。",
+        "loneliness_level={loneliness_level}\nanticipation_level={anticipation_level}\nemotion_tag={emotion_tag}\nbond_stage={bond_stage}\nrecent_topics={recent_topics}",
+        "topic_seed",
+    ),
+    "interoception_agent.interoceptive_narrative": _json_agent_prompt(
+        "你是内感受状态提示生成器。",
+        "interoception_index={interoception_index}\nbody_budget={body_budget}\nrecovery_urgency={recovery_urgency}",
+        "interoceptive_hint",
+    ),
+    "language_system_agent.wernicke_deep_parse": _json_agent_prompt(
+        "你是 Wernicke 深度语义解析器。",
+        "bond_stage={bond_stage}\nintent_type={intent_type}\nuser_text={user_text}",
+        "topic_entity, emotional_subtext, implicit_need",
+    ),
+    "language_system_agent.broca_opening_hint": _json_agent_prompt(
+        "你是 Broca 开场句提示生成器。",
+        "emotional_pressure={emotional_pressure}\ntone={tone}\nbond_stage={bond_stage}\nemotion_tag={emotion_tag}",
+        "opening_hint",
+    ),
+    "mirror_neuron_agent.empathy_response_hint": _json_agent_prompt(
+        "你是共情回应提示生成器。",
+        "resonance_intensity={resonance_intensity}\nuser_emotion_tag={user_emotion_tag}\nbond_stage={bond_stage}",
+        "empathy_hint",
+    ),
+    "motor_cortex_agent.speak_style": _json_agent_prompt(
+        "你是语音表达风格规划器。",
+        "emotion_tag={emotion_tag}\nvalence={valence}\narousal={arousal}\ntone_hint={tone_hint}",
+        "speed, pause_hint, filler_hint",
+    ),
+    "pain_reward_agent.hedonic_reflection": _json_agent_prompt(
+        "你是奖惩反思提示生成器。",
+        "delta_valence={delta_valence}\ntrigger_event={trigger_event}\nnet_valence={net_valence}\nbond_stage={bond_stage}",
+        "hedonic_reflection",
+    ),
+    "peripheral_agent.context_analysis": _json_agent_prompt(
+        "你是外设上下文分析器。",
+        "active_platforms={active_platforms}\nconnection_status={connection_status}\ngate_status={gate_status}\nmute_status={mute_status}",
+        "context_hint",
+    ),
+    "prefrontal_agent.plan_response.prompt": _json_agent_prompt(
+        "你是前额叶规划 Agent。根据情绪、关系、风险和记忆线索决定下一步。",
+        "\n".join(
+            [
+                "user_message={user_message}",
+                "emotion_tag={emotion_tag}",
+                "valence={valence}",
+                "arousal={arousal}",
+                "bond_stage={bond_stage}",
+                "bond_intimacy={bond_intimacy}",
+                "motive_care={motive_care}",
+                "motive_continuity={motive_continuity}",
+                "motive_withdraw={motive_withdraw}",
+                "recall_summary={recall_summary}",
+                "immune_risk={immune_risk}",
+                "drift_alert={drift_alert}",
+            ]
+        ),
+        "action, target, task, tone_hint, urgency",
+    ),
+    "proprioception_agent.cognitive_load_hint": _json_agent_prompt(
+        "你是认知负载提示生成器。",
+        "cognitive_load_index={cognitive_load_index}\ninterrupt_rate={interrupt_rate}\ncontinuity_index={continuity_index}",
+        "load_hint",
+    ),
+    "somatic_agent.somatic_narrative": _json_agent_prompt(
+        "你是躯体状态提示生成器。",
+        "somatic_pressure={somatic_pressure}\nuser_expression={user_expression}\nface_confidence={face_confidence}",
+        "somatic_hint",
+    ),
+    "vestibular_agent.stability_assessment": _json_agent_prompt(
+        "你是稳定性评估器。",
+        "stability_status={stability_status}\njitter_index={jitter_index}\ntopic_shift_rate={topic_shift_rate}\nemotion_volatility={emotion_volatility}",
+        "instability_insight",
+    ),
+}
+
 _SPECS: dict[str, PromptSpec] = {
-    "multimodal_observer.model_prompt.templates": PromptSpec(
-        spec_id="multimodal_observer.model_prompt.templates",
+    "multimodal_observer.model_prompt.templates": _spec(
+        "multimodal_observer.model_prompt.templates",
         purpose="multimodal_observer_json",
         output_type="json_object",
         content=_MULTIMODAL_OBSERVER_MODEL_PROMPT,
+        category="observer_prompt",
     ),
-    "thalamus_agent.intent_classification_prompts": PromptSpec(
-        spec_id="thalamus_agent.intent_classification_prompts",
+    "thalamus_agent.intent_classification_prompts": _spec(
+        "thalamus_agent.intent_classification_prompts",
         purpose="intent_route_json",
         output_type="json_object",
         content=_THALAMUS_INTENT_PROMPT,
+        category="agent_prompt",
     ),
-    "immune_agent.semantic_intent_analysis": PromptSpec(
-        spec_id="immune_agent.semantic_intent_analysis",
+    "immune_agent.semantic_intent_analysis": _spec(
+        "immune_agent.semantic_intent_analysis",
         purpose="immune_semantic_classification_json",
         output_type="json_object",
         content=_IMMUNE_SEMANTIC_INTENT_PROMPT,
+        category="agent_prompt",
     ),
-    "persona.self_narrative_prompts": PromptSpec(
-        spec_id="persona.self_narrative_prompts",
+    "persona.self_narrative_prompts": _spec(
+        "persona.self_narrative_prompts",
         purpose="persona_self_narrative_runtime_texts",
         output_type="json_object",
         content=_PERSONA_SELF_NARRATIVE_PROMPTS,
+        category="persona_prompt",
     ),
-    "failure_matrix.user_responses": PromptSpec(
-        spec_id="failure_matrix.user_responses",
+    "failure_matrix.user_responses": _spec(
+        "failure_matrix.user_responses",
         purpose="failure_user_responses",
         output_type="json_object",
         content=_FAILURE_MATRIX_USER_RESPONSES,
+        category="runtime_text",
+    ),
+    "react_loop.prompt_templates": _spec(
+        "react_loop.prompt_templates",
+        purpose="shared_react_loop_prompt_templates",
+        output_type="json_object",
+        content=_REACT_LOOP_PROMPT_TEMPLATES,
+        category="agent_prompt",
+        scope="react_loop",
+    ),
+    "surface_reply_handler.runtime_texts": _spec(
+        "surface_reply_handler.runtime_texts",
+        purpose="surface_reply_agent_runtime_texts",
+        output_type="json_object",
+        content=_SURFACE_REPLY_RUNTIME_TEXTS,
+        category="agent_runtime_text",
+        scope="surface_reply",
+    ),
+    "intent_agent_handler.system_prompt_extra": _spec(
+        "intent_agent_handler.system_prompt_extra",
+        purpose="intent_agent_react_system_prompt_extra",
+        output_type="text",
+        content=_INTENT_AGENT_SYSTEM_PROMPT_EXTRA,
+        category="agent_prompt",
+        scope="intent_agent",
+    ),
+    "intent_agent_handler.error_summary": _spec(
+        "intent_agent_handler.error_summary",
+        purpose="intent_agent_error_summary",
+        output_type="text",
+        content=_INTENT_AGENT_ERROR_SUMMARY,
+        category="agent_runtime_text",
+        scope="intent_agent",
+    ),
+    "translate_agent_handler.runtime_texts": _spec(
+        "translate_agent_handler.runtime_texts",
+        purpose="translate_agent_runtime_texts",
+        output_type="json_object",
+        content=_TRANSLATE_AGENT_RUNTIME_TEXTS,
+        category="agent_prompt",
+        scope="translate_agent",
+    ),
+    "retrieval_agent_handler.runtime_texts": _spec(
+        "retrieval_agent_handler.runtime_texts",
+        purpose="retrieval_agent_runtime_texts",
+        output_type="json_object",
+        content=_RETRIEVAL_AGENT_RUNTIME_TEXTS,
+        category="agent_prompt",
+        scope="retrieval_agent",
+    ),
+    "judge_agent_handler.prompt_templates": _spec(
+        "judge_agent_handler.prompt_templates",
+        purpose="judge_agent_prompt_templates",
+        output_type="json_object",
+        content=_JUDGE_AGENT_PROMPT_TEMPLATES,
+        category="agent_prompt",
+        scope="judge_agent",
+    ),
+    "emotion_agent_handler.prompt_templates": _spec(
+        "emotion_agent_handler.prompt_templates",
+        purpose="emotion_agent_prompt_templates",
+        output_type="json_object",
+        content=_EMOTION_AGENT_PROMPT_TEMPLATES,
+        category="agent_prompt",
+        scope="emotion_agent",
+    ),
+    "emotion_agent_handler.error_summary": _spec(
+        "emotion_agent_handler.error_summary",
+        purpose="emotion_agent_error_summary",
+        output_type="text",
+        content=_EMOTION_AGENT_ERROR_SUMMARY,
+        category="agent_runtime_text",
+        scope="emotion_agent",
+    ),
+    "pentest_agent_handler.system_prompt_extra": _spec(
+        "pentest_agent_handler.system_prompt_extra",
+        purpose="pentest_agent_react_system_prompt",
+        output_type="text",
+        content=_PENTEST_AGENT_SYSTEM_PROMPT,
+        category="agent_prompt",
+        scope="pentest_agent",
+        change_note="moved from skills.pentest.agent into unified versioned prompt registry",
+    ),
+    "repair_agent_handler.runtime_texts": _spec(
+        "repair_agent_handler.runtime_texts",
+        purpose="repair_agent_runtime_texts",
+        output_type="json_object",
+        content=_REPAIR_AGENT_RUNTIME_TEXTS,
+        category="agent_prompt",
+        scope="repair_agent",
+    ),
+    "supervisor_dispatch_handler.prompt_templates": _spec(
+        "supervisor_dispatch_handler.prompt_templates",
+        purpose="supervisor_dispatch_prompt_templates",
+        output_type="json_object",
+        content=_SUPERVISOR_DISPATCH_PROMPT_TEMPLATES,
+        category="agent_prompt",
+        scope="supervisor_dispatch",
+    ),
+    "sub_agent_protocol.agent_capabilities": _spec(
+        "sub_agent_protocol.agent_capabilities",
+        purpose="sub_agent_capability_catalog",
+        output_type="json_object",
+        content=_SUB_AGENT_CAPABILITIES,
+        category="agent_catalog",
+        scope="sub_agent_protocol",
+    ),
+    "sub_agent_protocol.runtime_texts": _spec(
+        "sub_agent_protocol.runtime_texts",
+        purpose="sub_agent_runtime_texts",
+        output_type="json_object",
+        content=_SUB_AGENT_RUNTIME_TEXTS,
+        category="agent_runtime_text",
+        scope="sub_agent_protocol",
+    ),
+    "intent_agent_entry_handler.failure_texts": _spec(
+        "intent_agent_entry_handler.failure_texts",
+        purpose="intent_agent_entry_failure_texts",
+        output_type="json_object",
+        content=_INTENT_AGENT_ENTRY_FAILURE_TEXTS,
+        category="agent_runtime_text",
+        scope="intent_agent",
+    ),
+    "language_system_agent.runtime_texts": _spec(
+        "language_system_agent.runtime_texts",
+        purpose="language_system_agent_runtime_texts",
+        output_type="json_object",
+        content=_LANGUAGE_SYSTEM_RUNTIME_TEXTS,
+        category="agent_runtime_text",
+    ),
+    "emotion_context.user_profile_hints": _spec(
+        "emotion_context.user_profile_hints",
+        purpose="emotion_user_profile_runtime_texts",
+        output_type="json_object",
+        content=_EMOTION_CONTEXT_USER_PROFILE_HINTS,
+        category="agent_runtime_text",
+        scope="emotion_context",
+    ),
+    "emotion_context.inner_monologue_texts": _spec(
+        "emotion_context.inner_monologue_texts",
+        purpose="emotion_inner_monologue_runtime_texts",
+        output_type="json_object",
+        content=_EMOTION_CONTEXT_INNER_MONOLOGUE_TEXTS,
+        category="agent_runtime_text",
+        scope="emotion_context",
+    ),
+    "emotion_llm_inference.prompt_templates": _spec(
+        "emotion_llm_inference.prompt_templates",
+        purpose="emotion_llm_inference_prompt_templates",
+        output_type="json_object",
+        content=_EMOTION_LLM_INFERENCE_PROMPT_TEMPLATES,
+        category="agent_prompt",
+        scope="emotion_agent",
+    ),
+    "plan_graph.synthesize.prompt_templates": _spec(
+        "plan_graph.synthesize.prompt_templates",
+        purpose="plan_graph_synthesize_prompt_templates",
+        output_type="json_object",
+        content=_PLAN_GRAPH_SYNTHESIZE_PROMPT_TEMPLATES,
+        category="agent_prompt",
+        scope="plan_graph",
+    ),
+    "vision.action_planner.prompt_templates": _spec(
+        "vision.action_planner.prompt_templates",
+        purpose="vision_action_planner_prompt_templates",
+        output_type="json_object",
+        content=_VISION_ACTION_PLANNER_PROMPT_TEMPLATES,
+        category="agent_prompt",
+        scope="vision_agent",
+    ),
+    "chat_handler_vision.analysis_prompt.templates": _spec(
+        "chat_handler_vision.analysis_prompt.templates",
+        purpose="vision_analysis_prompt_templates",
+        output_type="json_object",
+        content=_CHAT_HANDLER_VISION_ANALYSIS_PROMPTS,
+        category="agent_prompt",
+        scope="vision_agent",
+    ),
+    "chat_handler_vision.fallback_texts": _spec(
+        "chat_handler_vision.fallback_texts",
+        purpose="vision_handler_fallback_texts",
+        output_type="json_object",
+        content=_CHAT_HANDLER_VISION_FALLBACK_TEXTS,
+        category="agent_runtime_text",
+        scope="vision_agent",
+    ),
+    "hippocampus.recall_association.prompt": _spec(
+        "hippocampus.recall_association.prompt",
+        purpose="hippocampus_recall_association_prompt",
+        output_type="json_object",
+        content=_HIPPOCAMPUS_RECALL_ASSOCIATION_PROMPT,
+        category="agent_prompt",
+        scope="hippocampus_agent",
     ),
 }
+
+for _spec_id, _content in _TRIBE_AGENT_PROMPTS.items():
+    _SPECS[_spec_id] = _spec(
+        _spec_id,
+        purpose=f"{_spec_id.rsplit('.', 1)[0]}_prompt",
+        output_type="json_object",
+        content=_content,
+        category="agent_prompt",
+        scope=_spec_id.split(".", 1)[0],
+    )
 
 
 def get_prompt_spec(spec_id: str) -> PromptSpec:
@@ -151,8 +846,8 @@ def get_prompt_spec(spec_id: str) -> PromptSpec:
         raise KeyError(f"unknown prompt spec: {spec_id}") from exc
 
 
-def resolve_prompt_spec_json(spec_id: str) -> dict[str, Any]:
-    return dict(get_prompt_spec(spec_id).content)
+def resolve_prompt_spec_json(spec_id: str) -> Any:
+    return deepcopy(get_prompt_spec(spec_id).content)
 
 
 def list_prompt_specs() -> list[PromptSpec]:
@@ -167,6 +862,7 @@ __all__ = [
     "PromptSpec",
     "get_prompt_spec",
     "list_prompt_specs",
+    "prompt_spec_metadata",
     "prompt_spec_to_json",
     "resolve_prompt_spec_json",
 ]

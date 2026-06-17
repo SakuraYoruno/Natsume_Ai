@@ -38,6 +38,7 @@ def test_thalamus_rules_classify_core_scene_types() -> None:
     assert classify_scene_type_by_rules("看一下我的屏幕截图") == SCENE_VISION_UI
     assert classify_scene_type_by_rules("查看完整主链") == SCENE_WORK_CODE
     assert classify_scene_type_by_rules("使用无头浏览器验证前端效果") == SCENE_WORK_CODE
+    assert classify_scene_type_by_rules("帮我对 target=example.com 做授权安全扫描，只做侦察") == SCENE_EXEC_INTENT
 
 
 def test_thalamus_rules_keep_non_action_chat_in_chat_scene() -> None:
@@ -54,7 +55,7 @@ def test_thalamus_rules_keep_non_action_chat_in_chat_scene() -> None:
 
 def test_thalamus_scene_mapping_uses_canonical_intent_decision() -> None:
     assert (
-        resolve_scene_type_from_intent_decision({"route": "skill", "target_id": "codex_worker"})
+        resolve_scene_type_from_intent_decision({"route": "skill", "target_id": "agent_worker"})
         == SCENE_WORK_CODE
     )
     assert (
@@ -69,6 +70,10 @@ def test_thalamus_scene_mapping_uses_canonical_intent_decision() -> None:
         resolve_scene_type_from_intent_decision({"route": "delegate", "target_id": "intent_agent"})
         == SCENE_EXEC_INTENT
     )
+    assert (
+        resolve_scene_type_from_intent_decision({"route": "delegate", "target_id": "pentest_agent"})
+        == SCENE_EXEC_INTENT
+    )
     assert resolve_scene_type_from_intent_decision({"route": "recent_turn"}) == SCENE_CHAT
     assert resolve_scene_type_from_intent_decision({"route": "task_progress"}) == SCENE_CHAT
     assert resolve_scene_type_from_intent_decision({"route": "chat"}) == SCENE_CHAT
@@ -78,8 +83,8 @@ def test_thalamus_route_and_scene_confusion_matrix_for_recent_workspace_phrases(
     cases = [
         ("开始吧", "delegate", "intent_agent", SCENE_EXEC_INTENT),
         ("继续", "chat", "", SCENE_CHAT),
-        ("查看完整主链", "skill", "codex_inspect", SCENE_WORK_CODE),
-        ("使用无头浏览器验证前端效果", "skill", "codex_frontend_acceptance", SCENE_WORK_CODE),
+        ("查看完整主链", "skill", "agent_inspect", SCENE_WORK_CODE),
+        ("使用无头浏览器验证前端效果", "skill", "agent_frontend_acceptance", SCENE_WORK_CODE),
         ("打开设置", "skill", "open_app", SCENE_EXEC_INTENT),
         ("有没有更好的方案", None, None, SCENE_CHAT),
         ("帮我安装一下这首歌", None, None, SCENE_CHAT),
@@ -88,7 +93,8 @@ def test_thalamus_route_and_scene_confusion_matrix_for_recent_workspace_phrases(
         ("你刚刚说了什么", "recent_turn", "", SCENE_CHAT),
         ("这次主链效果怎么样，短句回答", "task_progress", "", SCENE_CHAT),
         ("你觉得主链现在最该观察的风险是什么？用两句说。", "chat", "", SCENE_CHAT),
-        ("做个统计 token 消耗的插件", "skill", "codex_worker", SCENE_WORK_CODE),
+        ("做个统计 token 消耗的插件", "skill", "agent_worker", SCENE_WORK_CODE),
+        ("帮我对 target=example.com 做授权安全扫描，只做侦察", "delegate", "pentest_agent", SCENE_EXEC_INTENT),
     ]
 
     for text, expected_route, expected_target, expected_scene in cases:

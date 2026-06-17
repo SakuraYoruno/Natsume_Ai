@@ -23,6 +23,10 @@ from host_brain.runtime.life_organs import (
     organ_votes_from_runtime,
     synthesize_life_state_from_organs,
 )
+from host_brain.runtime.autonomous_self import (
+    apply_autonomous_self_cycle,
+    build_adaptive_self_pack,
+)
 
 LOGGER = logging.getLogger("Natsume.life_continuity")
 DEFAULT_PERSON_ID = "default"
@@ -155,7 +159,7 @@ def _default_state(person_id: str, now_ms: int | None = None) -> dict[str, Any]:
         "environment": {},
         "affect": {"mood": "calm", "valence": 0.18, "arousal": 0.24, "energy": 0.62, "loneliness": 0.0, "attachment_warmth": 0.42, "irritation": 0.0, "fatigue": 0.12, "tension": 0.0, "pride": 0.0, "relief": 0.0},
         "needs": {"contact": 0.12, "rest": 0.12, "play": 0.18, "autonomy": 0.25, "memory_consolidation": 0.2},
-        "inner_world": {"current_preoccupation": "", "attention_target": "", "unresolved_loop": "", "felt_tendency": "", "dialogue_bias": "", "expires_at_ms": 0, "dream_residue": "", "diary_residue": "", "thought_seed": "", "private_note": ""},
+        "inner_world": {"current_preoccupation": "", "attention_target": "", "unresolved_loop": "", "felt_tendency": "", "dialogue_bias": "", "expires_at_ms": 0, "preoccupation_expires_at_ms": 0, "attention_kind": "idle", "monologue_due": False, "monologue_suppression_reason": "", "dream_residue": "", "diary_residue": "", "thought_seed": "", "private_note": "", "numeric_state": {}},
         "life_pressure": {"absence": 0.0, "dream": 0.0, "work": 0.0, "fatigue": 0.12, "relationship": 0.28},
         "work": {"active": False, "last_event_type": "", "work_id": "", "summary": "", "urgency": "medium", "updated_at_ms": 0},
         "motives": [],
@@ -163,6 +167,10 @@ def _default_state(person_id: str, now_ms: int | None = None) -> dict[str, Any]:
         "embodiment": {"expression": "calm_idle", "idle_animation": "quiet_breath", "motion_bias": "low_random", "voice_tone": "soft_neutral", "mateengine_state": "idle", "emotion_tag": "NEUTRAL", "last_dispatch_ms": 0, "last_dispatch_id": ""},
         "life_action": {},
         "proactive": {"last_target": {}, "last_attempt_ms": 0, "last_sent_ms": 0, "last_outbox_id": "", "last_status": "", "last_reason_code": "", "last_motive": ""},
+        "autonomy": {"alive_status": "alive", "last_autonomous_cycle_ms": now, "last_drive_tick_ms": now, "last_attention_tick_ms": now, "last_learning_cycle_ms": now, "current_attention": "body_presence", "active_agenda_count": 0, "body_loop_status": "state_driven", "user_input_required_for_progress": False},
+        "self_growth": {"active_projects": [], "adaptive_traits": {}, "recent_growth_signals": [], "current_learning_focus": "", "last_learning_cycle_ms": 0},
+        "self_projects": [],
+        "learning_state": {"last_learning_cycle_ms": 0, "recent_clusters": [], "learning_signals": [], "self_reward": {}},
     }
 
 
@@ -175,7 +183,7 @@ def _normalize_state(state: Mapping[str, Any], person_id: str) -> dict[str, Any]
             merged[key] = copy.deepcopy(value)
     merged["person_id"] = person_id or DEFAULT_PERSON_ID
     merged["version"] = int(merged.get("version") or 1)
-    return _suppress_stale_work_pressure(merged)
+    return _normalize_inner_world_continuity(_suppress_stale_work_pressure(merged))
 
 
 def _save_state(ledger: Any, state: Mapping[str, Any]) -> None:
@@ -260,6 +268,38 @@ def _suppress_stale_work_pressure(state: Mapping[str, Any]) -> dict[str, Any]:
     return after
 
 
+def _normalize_inner_world_continuity(state: Mapping[str, Any]) -> dict[str, Any]:
+    after = copy.deepcopy(dict(state or {}))
+    inner = _map(after.get("inner_world"))
+    now = _now_ms()
+    expires_at = int(_float(inner.get("preoccupation_expires_at_ms") or inner.get("expires_at_ms")))
+    numeric = _map(inner.get("numeric_state"))
+    numeric_anchor = _text(numeric.get("current_preoccupation") or numeric.get("attention_target"), 180)
+    if numeric:
+        inner["attention_kind"] = _text(numeric.get("attention_kind") or numeric.get("attention") or inner.get("attention_kind"), 80)
+        inner["monologue_due"] = bool(numeric.get("monologue_due"))
+        if numeric.get("monologue_suppression_reason"):
+            inner["monologue_suppression_reason"] = _text(numeric.get("monologue_suppression_reason"), 160)
+        if numeric.get("preoccupation_expires_at_ms"):
+            expires_at = int(_float(numeric.get("preoccupation_expires_at_ms")))
+            inner["preoccupation_expires_at_ms"] = expires_at
+    if numeric_anchor:
+        inner["current_preoccupation"] = numeric_anchor
+        inner["attention_target"] = _text(numeric.get("attention_target") or numeric_anchor, 120)
+    elif expires_at and now >= expires_at:
+        inner["current_preoccupation"] = ""
+        inner["attention_target"] = ""
+        inner["unresolved_loop"] = ""
+    if not _text(inner.get("dream_residue"), 240):
+        pressure = _map(after.get("life_pressure"))
+        pressure["dream"] = min(_clamp(pressure.get("dream")), 0.18)
+        after["life_pressure"] = pressure
+        if str(_map(after.get("life_action")).get("action_kind") or "") == "dream_afterglow":
+            after["life_action"] = {}
+    after["inner_world"] = inner
+    return after
+
+
 def _changed(before: Mapping[str, Any], after: Mapping[str, Any]) -> list[str]:
     fields: list[str] = []
     for root in ("clock", "affect", "needs", "inner_world", "life_pressure", "work", "embodiment"):
@@ -286,22 +326,23 @@ def _returns(text: str) -> bool:
 
 
 def _scene(state: Mapping[str, Any], user_message: str = "", task_mode: str = "", response_move: str = "", reason: str = "dialogue") -> tuple[str, str, str]:
-    p = _pressures(state); work = _map(state.get("work")); last = str(work.get("last_event_type") or "")
+    p = _pressures(state); work = _map(state.get("work")); inner = _map(state.get("inner_world")); last = str(work.get("last_event_type") or "")
     can_drive_work = _work_state_can_drive_life(work)
+    has_dream_residue = bool(_text(inner.get("dream_residue"), 240))
     if can_drive_work and last == "task_done" and p["work"] >= 0.25:
         return "work_done", "proud", "strong"
     if can_drive_work and last in {"task_failed", "task_blocked"} and p["work"] >= 0.25:
         return "work_blocked", "guarded", "strong"
     if (can_drive_work and (bool(work.get("active")) or p["work"] >= 0.35)) or _looks_work(user_message, task_mode):
         return "work_waiting", "curious_guarded", "strong"
-    if _asks_dream(user_message) or p["dream"] >= 0.55:
+    if _asks_dream(user_message) or (has_dream_residue and p["dream"] >= 0.55):
         return "dream_residue", "curious", "dominant" if _asks_dream(user_message) else "strong"
     if _returns(user_message) or p["absence"] >= 0.32:
         return "reconnect", "approach", "dominant"
     if p["fatigue"] >= 0.55:
         return "night_companion", "rest", "dominant"
-    if reason in {"periodic_tick", "manual_tick", "startup_tick"}:
-        return ("idle", "wait", "medium") if p["absence"] >= 0.2 else ("idle", "rest", "weak")
+    if reason in {"periodic_tick", "manual_tick", "startup_tick", "life_integrated", "body_dispatch"}:
+        return ("idle", "quiet_presence", "medium") if max(p.values() or [0.0]) >= 0.18 else ("idle", "rest", "weak")
     return "daily_chat", "tease", "dominant"
 
 
@@ -319,6 +360,8 @@ def _embodiment(scene: str, motive: str, state: Mapping[str, Any]) -> dict[str, 
         return {"expression": "soft_lonely", "idle_animation": "quiet_waiting", "motion_bias": "low_random", "voice_tone": "low_soft", "mateengine_state": "waiting", "emotion_tag": "SAD"}
     if scene == "night_companion" or mood == "tired":
         return {"expression": "sleepy", "idle_animation": "slow_breath", "motion_bias": "low_slow", "voice_tone": "soft_tired", "mateengine_state": "idle", "emotion_tag": "SAD"}
+    if motive == "quiet_presence":
+        return {"expression": "calm_idle", "idle_animation": "quiet_breath", "motion_bias": "low_slow", "voice_tone": "soft_neutral", "mateengine_state": "idle", "emotion_tag": "NEUTRAL"}
     if motive == "tease" or mood == "playful":
         return {"expression": "smug_smile", "idle_animation": "small_bounce", "motion_bias": "medium_lively", "voice_tone": "bright_teasing", "mateengine_state": "happy", "emotion_tag": "HAPPY"}
     return {"expression": "calm_idle", "idle_animation": "quiet_breath", "motion_bias": "low_random", "voice_tone": "soft_neutral", "mateengine_state": "idle", "emotion_tag": "NEUTRAL"}
@@ -395,6 +438,20 @@ def build_life_director_pack(*, ledger: Any, person_id: str = DEFAULT_PERSON_ID,
         private_mind = private_mind_summary(_map(state.get("inner_world")))
     except Exception:
         private_mind = {}
+    inner_life_snapshot = _build_inner_life_snapshot_from_state(
+        ledger=ledger,
+        person_id=person_id or DEFAULT_PERSON_ID,
+        state=state,
+    )
+    adaptive_self_pack = build_adaptive_self_pack(state)
+    private_mind.update(
+        {
+            "attention_target": _text(_map(inner_life_snapshot.get("attention")).get("target"), 120),
+            "current_preoccupation": _text(_map(inner_life_snapshot.get("preoccupation")).get("object"), 160),
+            "dialogue_bias": _text(_map(inner_life_snapshot.get("expression_bias")).get("dialogue"), 240),
+            "must_not_expose_raw_inner_text": True,
+        }
+    )
     return {
         "frontstage_role": "Natsume is the frontstage digital life; Codex is the work backend.",
         "codex_backend_status": backend,
@@ -402,6 +459,8 @@ def build_life_director_pack(*, ledger: Any, person_id: str = DEFAULT_PERSON_ID,
         "runtime": _map(state.get("runtime")),
         "environment": environment,
         "private_mind_summary": private_mind,
+        "inner_life_snapshot": inner_life_snapshot,
+        "adaptive_self_pack": adaptive_self_pack,
         "scene": scene,
         "dominant_motive": motive,
         "life_pressure": p,
@@ -419,60 +478,84 @@ def build_life_director_pack(*, ledger: Any, person_id: str = DEFAULT_PERSON_ID,
     }
 
 
-def build_life_action_plan(*, state: Mapping[str, Any], director_pack: Mapping[str, Any], source_kind: str = "") -> dict[str, Any]:
-    scene = _text(director_pack.get("scene"), 80) or "idle"
-    motive = _text(director_pack.get("dominant_motive"), 80) or "rest"
-    visible = [str(item) for item in list(director_pack.get("visible_obligation") or []) if str(item or "").strip()]
-    if "embodiment" not in visible:
-        visible.insert(0, "embodiment")
-    if "status_panel" not in visible:
-        visible.append("status_panel")
+
+def _life_action_signature(kind: str, state: Mapping[str, Any]) -> str:
+    inner = _map(state.get("inner_world"))
     work = _map(state.get("work"))
-    event_type = _text(work.get("last_event_type"), 80)
-    work_can_drive = _work_state_can_drive_life(work)
-    if work_can_drive and event_type in {"task_done", "task_failed"}:
-        action_kind = "work_done_react"
-    elif work_can_drive and scene.startswith("work"):
-        action_kind = "work_watch"
-    elif scene == "dream_residue":
-        action_kind = "dream_afterglow"
-    elif "reconnect" in scene or "reconnect" in motive:
-        action_kind = "soft_reconnect"
-    elif motive in {"care", "lonely", "guarded"}:
-        action_kind = "care_check"
-    else:
-        action_kind = "idle_shift"
-    pressure = _pressures(state)
-    cause_source = "dialogue_aftereffect"
+    return "|".join([
+        str(kind or ""),
+        _text(inner.get("attention_kind"), 40),
+        _text(inner.get("current_preoccupation") or inner.get("dream_residue"), 64),
+        _text(work.get("work_id") or work.get("last_event_type"), 64),
+    ])
+
+
+def _dream_action_eligible(state: Mapping[str, Any]) -> bool:
+    inner = _map(state.get("inner_world"))
+    if not _text(inner.get("dream_residue"), 240):
+        return False
+    expires_at = int(_float(inner.get("dream_expires_at_ms")))
+    return not expires_at or _now_ms() < expires_at
+
+
+def _work_action_eligible(state: Mapping[str, Any]) -> bool:
+    return _work_state_can_drive_life(_map(state.get("work")))
+
+
+def _inner_inhibition(state: Mapping[str, Any]) -> float:
+    inner = _map(state.get("inner_world"))
+    numeric = _map(inner.get("numeric_state"))
+    return _clamp(numeric.get("inhibition"), 0.0)
+
+
+def build_life_action_plan(*, state: Mapping[str, Any], director_pack: Mapping[str, Any], source_kind: str = "") -> dict[str, Any]:
+    normalized_state = _normalize_inner_world_continuity(state)
+    scene = str(director_pack.get("scene") or "idle")
+    motive = str(director_pack.get("dominant_motive") or "rest")
+    p = _pressures(normalized_state)
+    work = _map(normalized_state.get("work"))
+    inner = _map(normalized_state.get("inner_world"))
+    autonomy = _map(normalized_state.get("autonomy"))
+    agenda = [item for item in list(inner.get("self_agenda") or []) if isinstance(item, Mapping)]
+    work_ok = _work_action_eligible(normalized_state)
+    dream_ok = _dream_action_eligible(normalized_state)
+    inhibition = _inner_inhibition(normalized_state)
+    action_kind = "quiet_presence"
+    cause_source = "inner_drive"
     evidence: list[dict[str, Any]] = []
-    if action_kind.startswith("work"):
-        cause_source = "work_event"
-        evidence.append({"kind": "work", "event_type": event_type, "summary": _text(work.get("summary"), 160)})
-    elif action_kind == "dream_afterglow":
-        cause_source = "dream_residue"
-        evidence.append({"kind": "dream_residue", "value": _text(_map(state.get("inner_world")).get("dream_residue"), 160)})
-    elif action_kind in {"soft_reconnect", "care_check"}:
-        cause_source = "absence_pressure"
-        evidence.append({"kind": "absence", "pressure": round(float(pressure.get("absence") or 0.0), 3), "idle_minutes": int(_map(state.get("clock")).get("idle_minutes") or 0)})
-    evidence.append({"kind": "life_director", "scene": scene, "motive": motive, "source_kind": _text(source_kind, 80)})
-    organ_influence = _map(director_pack.get("organ_life_influence"))
-    organ_sources = [str(item.get("organ") or "") for item in list(organ_influence.get("top_influences") or []) if isinstance(item, Mapping) and str(item.get("organ") or "").strip()]
-    signature_event_type = event_type if work_can_drive else ""
-    signature_parts = [action_kind, scene, motive, signature_event_type, _bucket(float(max(pressure.values()) if pressure else 0.0))]
-    dedupe_signature = "|".join([part for part in signature_parts if part])
+    may_send = False
+    expected = "state_ack"
+    if work_ok and str(work.get("last_event_type") or "") == "task_done":
+        action_kind = "work_done_react"; cause_source = "work_event"; evidence.append({"kind": "work_event", "value": _text(work.get("summary"), 160), "event_type": "task_done"}); may_send = p["work"] >= 0.35; expected = "work_done_ack"
+    elif work_ok and str(work.get("last_event_type") or "") in {"task_failed", "task_blocked"}:
+        action_kind = "work_watch"; cause_source = "work_event"; evidence.append({"kind": "work_event", "value": _text(work.get("summary"), 160), "event_type": str(work.get("last_event_type") or "")}); may_send = p["work"] >= 0.55; expected = "work_progress_ack"
+    elif work_ok and (scene.startswith("work") or p["work"] >= 0.45):
+        action_kind = "work_watch"; cause_source = "work_event"; evidence.append({"kind": "work_event", "value": _text(work.get("summary"), 160), "event_type": str(work.get("last_event_type") or "")}); may_send = p["work"] >= 0.68; expected = "work_progress_ack"
+    elif dream_ok and (scene == "dream_residue" or p["dream"] >= 0.55):
+        action_kind = "dream_afterglow"; cause_source = "dream_residue"; evidence.append({"kind": "dream_residue", "value": _text(inner.get("dream_residue"), 160)}); may_send = False; expected = "dream_context_ack"
+    elif p["absence"] >= 0.45 and inhibition < 0.68:
+        action_kind = "soft_reconnect"; cause_source = "absence_pressure"; evidence.append({"kind": "absence", "value": round(p["absence"], 3), "attention_kind": _text(inner.get("attention_kind"), 80)}); may_send = p["absence"] >= 0.72 and inhibition < 0.58; expected = "reconnect_ack"
+    elif p["fatigue"] >= 0.72:
+        action_kind = "care_check"; cause_source = "fatigue_pressure"; evidence.append({"kind": "fatigue", "value": round(p["fatigue"], 3)}); may_send = False; expected = "care_ack"
+    else:
+        action_kind = "quiet_presence"; cause_source = "self_agenda"; motive = "quiet_presence"; evidence.append({"kind": "self_agenda", "attention": _text(autonomy.get("current_attention") or inner.get("attention_kind"), 80), "agenda": [{"kind": _text(_map(item).get("kind"), 60), "summary": _text(_map(item).get("summary"), 100)} for item in agenda[:3]], "suppression_reason": _text(inner.get("monologue_suppression_reason"), 120)})
+    signature = _life_action_signature(action_kind, normalized_state)
+    channels = ["embodiment", "status_panel"]
+    if action_kind != "quiet_presence":
+        channels.append("dialogue_context")
+    if may_send:
+        channels.append("proactive")
+    scene_for_body = "work_done" if action_kind == "work_done_react" else "work_waiting" if action_kind == "work_watch" else "dream_residue" if action_kind == "dream_afterglow" else "reconnect" if action_kind == "soft_reconnect" else "night_companion" if action_kind == "care_check" else "idle"
     return {
         "action_id": _event_id("lifeact"),
         "action_kind": action_kind,
-        "cause": {"source": cause_source, "organ_sources": organ_sources[:8], "evidence": evidence},
-        "channels": list(dict.fromkeys(visible)),
-        "embodiment_target": _map(director_pack.get("embodiment_target")),
-        "dialogue_bias": _text(director_pack.get("style_goal"), 240),
-        "proactive_policy": {
-            "may_send": "proactive" in visible,
-            "cooldown_kind": f"{action_kind}:{motive}",
-            "dedupe_signature": dedupe_signature,
-            "expected_user_response": "light_ack_or_context_question" if action_kind in {"soft_reconnect", "care_check", "dream_afterglow"} else "task_progress_ack",
-        },
+        "cause": {"source": cause_source, "organ_sources": list(_map(director_pack.get("organ_life_influence")).get("active_organs") or [])[:6], "evidence": evidence},
+        "channels": channels,
+        "embodiment_target": _embodiment(scene_for_body, motive, normalized_state),
+        "dialogue_bias": _text(inner.get("dialogue_bias") or director_pack.get("style_goal"), 240),
+        "proactive_policy": {"may_send": bool(may_send), "cooldown_kind": action_kind, "dedupe_signature": signature, "expected_user_response": expected},
+        "eligibility": {"work": bool(work_ok), "dream": bool(dream_ok), "inhibition": round(inhibition, 3), "source_kind": str(source_kind or "")},
+        "adaptive_self": build_adaptive_self_pack(normalized_state),
     }
 
 
@@ -555,26 +638,17 @@ def _expire_stale_work_state(state: Mapping[str, Any], *, now_ms: int) -> dict[s
     return _suppress_stale_work_pressure(after)
 
 
-def _top_proactive_motive(state: Mapping[str, Any], director_pack: Mapping[str, Any]) -> tuple[str, float]:
-    p = _pressures(state)
-    scene = str(director_pack.get("scene") or "").strip()
-    action = _map(director_pack.get("life_action"))
-    action_kind = _text(action.get("action_kind"), 80)
-    if action_kind == "soft_reconnect" or scene == "reconnect":
-        return "soft_reconnect", max(p.get("absence", 0.0), 0.45)
-    if action_kind in {"work_watch", "work_done_react"} or (scene.startswith("work") and _work_state_can_drive_life(_map(state.get("work")))):
-        return "work_progress_nudge", max(p.get("work", 0.0), 0.46)
-    if action_kind == "dream_afterglow" or scene == "dream_residue":
-        return "dream_afterglow", max(p.get("dream", 0.0), 0.35)
-    if action_kind == "care_check":
-        return "care_check", max(p.get("fatigue", 0.0), p.get("relationship", 0.0) * 0.6)
-    motives = [m for m in list(state.get("motives") or []) if isinstance(m, Mapping)]
-    motives.sort(key=lambda item: _float(item.get("pressure")), reverse=True)
-    if motives:
-        return _text(motives[0].get("motive"), 80), _clamp(motives[0].get("pressure"))
-    if scene.startswith("work") and _work_state_can_drive_life(_map(state.get("work"))):
-        return "work_progress_nudge", max(p.get("work", 0.0), 0.46)
-    return "care_check", max(p.get("fatigue", 0.0), p.get("relationship", 0.0) * 0.6)
+
+def _top_proactive_motive(state: Mapping[str, Any]) -> dict[str, Any]:
+    action = _map(state.get("life_action"))
+    policy = _map(action.get("proactive_policy"))
+    if action and bool(policy.get("may_send")):
+        pressure = max(_pressures(state).values() or [0.0])
+        return {"motive": str(action.get("action_kind") or "quiet_presence"), "pressure": round(pressure, 3), "source": "life_action", "action_id": str(action.get("action_id") or "")}
+    motives = [item for item in list(state.get("motives") or []) if isinstance(item, Mapping)]
+    motives = [item for item in motives if str(item.get("motive") or "") != "dream_afterglow" or _dream_action_eligible(state)]
+    motives = [item for item in motives if not str(item.get("motive") or "").startswith("work") or _work_action_eligible(state)]
+    return dict(motives[0]) if motives else {"motive": "quiet_presence", "pressure": 0.0, "source": "life_action"}
 
 
 def _is_periodic_work_scene(*, source_kind: str, director_pack: Mapping[str, Any], force: bool) -> bool:
@@ -929,7 +1003,9 @@ async def attempt_life_proactive_push(*, ledger: Any, person_id: str = DEFAULT_P
     advance_life_to_now(ledger=ledger, person_id=resolved, reason="proactive_send", incoming_event={"source_kind": source_kind, "platform": platform, "conversation_id": conversation_id}, force=False)
     state = get_life_state(ledger, resolved)
     director = dict(director_pack or {}) or build_life_director_pack(ledger=ledger, person_id=resolved, reason=source_kind)
-    motive, pressure = _top_proactive_motive(state, director)
+    motive_pack = _top_proactive_motive(state)
+    motive = str(motive_pack.get("motive") or "quiet_presence")
+    pressure = _float(motive_pack.get("pressure"))
     detached_periodic_life_chat = False
     if _is_periodic_work_scene(source_kind=source_kind, director_pack=director, force=force) and str(motive or "") != "work_progress_nudge":
         director = _detach_work_director_for_life_proactive(director, motive=motive)
@@ -1163,8 +1239,6 @@ def _advance_continuous_state(before: Mapping[str, Any], *, now: int, elapsed_ms
 def advance_life_to_now(*, ledger: Any, person_id: str = DEFAULT_PERSON_ID, reason: str = "catchup", incoming_event: Mapping[str, Any] | None = None, force: bool = False) -> dict[str, Any]:
     ensure_life_schema(ledger)
     resolved = str(person_id or DEFAULT_PERSON_ID)
-    if str(source_kind or "") != "life_runtime":
-        advance_life_to_now(ledger=ledger, person_id=resolved, reason=str(event_kind or "life_experience"), incoming_event={"source_kind": source_kind, "event_kind": event_kind, "content_summary": _text(content_summary, 160)}, force=False)
     before = get_life_state(ledger, resolved)
     now = _now_ms()
     try:
@@ -1204,6 +1278,16 @@ def advance_life_to_now(*, ledger: Any, person_id: str = DEFAULT_PERSON_ID, reas
         consume=True,
     )
     after = synthesize_life_state_from_organs(ledger=ledger, base_state=after, person_id=resolved, source_experience_event_id=str(experience.get("event_id") or ""), now_ms=now)
+    after = apply_autonomous_self_cycle(
+        ledger=ledger,
+        person_id=resolved,
+        state=after,
+        now_ms=now,
+        elapsed_ms=elapsed_ms,
+        reason=reason,
+        environment=environment,
+        source_experience_event_id=str(experience.get("event_id") or ""),
+    )
     scene, motive, _ = _scene(after, reason=reason)
     after["motives"] = _motives(scene, motive, _pressures(after))
     after["embodiment"].update(_embodiment(scene, motive, after))
@@ -1218,17 +1302,234 @@ def advance_life_to_now(*, ledger: Any, person_id: str = DEFAULT_PERSON_ID, reas
     return {"status": "OK", "event_id": state_event_id, "experience_event_id": experience.get("event_id"), "state_version_before": int(before.get("version") or 1), "state_version_after": int(after.get("version") or 1), "state": after, "environment": environment, "elapsed_ms": elapsed_ms, "life_causality": director, "visible_channels": visible}
 
 
+def _build_inner_life_snapshot_from_state(*, ledger: Any, person_id: str, state: Mapping[str, Any]) -> dict[str, Any]:
+    inner = _map(state.get("inner_world"))
+    autonomy = _map(state.get("autonomy"))
+    self_growth = _map(state.get("self_growth"))
+    affect = _map(state.get("affect"))
+    needs = _map(state.get("needs"))
+    pressure = _map(state.get("life_pressure"))
+    environment = _map(state.get("environment"))
+    organ_runtime = _map(state.get("organ_runtime"))
+    if not organ_runtime.get("organ_count"):
+        try:
+            organ_runtime = _map(get_organ_runtime_state(ledger=ledger, person_id=person_id))
+        except Exception:
+            organ_runtime = {}
+
+    def _inner_text(value: Any) -> str:
+        text = str(value or "").strip()
+        if not text:
+            return ""
+        mojibake_markers = ("ä", "å", "ç", "è", "é", "ï¼", "ã", "Â")
+        if any(marker in text for marker in mojibake_markers):
+            return ""
+        if "_" in text and " " not in text and len(text) < 80:
+            return ""
+        return text
+
+    env_time = _map(environment.get("time"))
+    env_context = _map(environment.get("context"))
+    day_phase = str(
+        environment.get("day_phase")
+        or env_time.get("day_phase")
+        or env_context.get("day_phase")
+        or ""
+    ).strip()
+    meal_phase = str(
+        environment.get("meal_phase")
+        or env_time.get("meal_phase")
+        or env_context.get("meal_phase")
+        or ""
+    ).strip()
+    expires_at_ms = int(inner.get("expires_at_ms") or 0)
+    inner_expired = bool(not expires_at_ms or expires_at_ms <= _now_ms())
+
+    attention_target = "" if inner_expired else _inner_text(inner.get("attention_target"))
+    if not attention_target:
+        if _clamp(pressure.get("work")) >= 0.35:
+            attention_target = "work_environment"
+        elif _clamp(pressure.get("relationship")) >= 0.35 or _clamp(needs.get("contact")) >= 0.35:
+            attention_target = "user_contact"
+        elif _clamp(pressure.get("dream")) >= 0.25:
+            attention_target = "dream_residue"
+        elif _clamp(pressure.get("fatigue")) >= 0.45 or _clamp(needs.get("rest")) >= 0.45:
+            attention_target = "body_rhythm"
+        elif day_phase or meal_phase:
+            attention_target = "current_environment"
+        else:
+            attention_target = "ambient_presence"
+
+    preoccupation = "" if inner_expired else _inner_text(inner.get("current_preoccupation"))
+    if not preoccupation:
+        if _clamp(pressure.get("work")) >= 0.35:
+            preoccupation = "后台环境是否有未完成变化"
+        elif _clamp(pressure.get("relationship")) >= 0.35 or _clamp(needs.get("contact")) >= 0.35:
+            preoccupation = "最近一次可见互动是否需要承接"
+        elif _clamp(pressure.get("dream")) >= 0.25:
+            preoccupation = "梦境余韵是否仍在影响情绪底色"
+        elif day_phase or meal_phase:
+            preoccupation = "当前时段和身体节律"
+        else:
+            preoccupation = "维持在场感"
+
+    dialogue_bias = "" if inner_expired else _inner_text(inner.get("dialogue_bias"))
+    if not dialogue_bias:
+        bias_parts = ["先依据真实时段、最近可见事件和用户当下话语理解语境"]
+        if day_phase:
+            bias_parts.append(f"当前时段={day_phase}")
+        if meal_phase:
+            bias_parts.append(f"生活节律={meal_phase}")
+        bias_parts.append("内心状态只影响语气和注意力，不替代事实上下文")
+        dialogue_bias = "；".join(bias_parts)
+
+    return {
+        "being": {
+            "alive_status": _map(state.get("runtime")).get("alive_status") or "alive",
+            "last_integrated_ms": _map(state.get("runtime")).get("last_integrated_ms"),
+            "continuity": _clamp(needs.get("memory_consolidation"), 0.2),
+        },
+        "drive": {
+            "contact": _clamp(needs.get("contact")),
+            "rest": _clamp(needs.get("rest")),
+            "repair": _clamp(affect.get("tension")),
+            "play": _clamp(needs.get("play"), 0.0),
+            "curiosity": _clamp(pressure.get("work")),
+            "inhibition": _clamp(max(float(pressure.get("fatigue") or 0.0), float(affect.get("irritation") or 0.0))),
+        },
+        "attention": {
+            "mode": "anchored" if attention_target != "ambient_presence" else "diffuse",
+            "target": attention_target,
+            "stability": _clamp(1.0 - float(affect.get("arousal") or 0.0) * 0.5, 0.5),
+        },
+        "preoccupation": {
+            "object": preoccupation,
+            "pressure": _clamp(max(float(pressure.get("dream") or 0.0), float(pressure.get("relationship") or 0.0) * 0.5)),
+            "expires_at_ms": int(inner.get("expires_at_ms") or 0),
+        },
+        "expression_bias": {
+            "dialogue": dialogue_bias,
+            "voice": str(_map(state.get("embodiment")).get("voice_tone") or ""),
+            "body": str(_map(state.get("embodiment")).get("idle_animation") or ""),
+        },
+        "inner_world": inner,
+        "organ_runtime": {
+            "organ_count": int(organ_runtime.get("organ_count") or 0),
+            "top_organs": list(organ_runtime.get("top_organs") or [])[:8],
+            "synthesis": _map(organ_runtime.get("synthesis")),
+        },
+    }
+
+
+def advance_inner_life_to_now(
+    *,
+    ledger: Any,
+    person_id: str = DEFAULT_PERSON_ID,
+    reason: str = "inner_snapshot",
+    incoming_event: Mapping[str, Any] | None = None,
+    force: bool = False,
+) -> dict[str, Any]:
+    """Advance 23-organ runtime to now and return the current inner-life snapshot.
+
+    This is the semantic entrypoint for the digital-life inner state. External events are
+    perturbations; ticks are sampling/landing points. The returned snapshot is a view over
+    the current organ-synthesized state, not a generated monologue.
+    """
+    result = advance_life_to_now(
+        ledger=ledger,
+        person_id=person_id,
+        reason=reason,
+        incoming_event=incoming_event,
+        force=force,
+    )
+    state = _map(result.get("state"))
+    snapshot = _build_inner_life_snapshot_from_state(ledger=ledger, person_id=person_id, state=state)
+    result["inner_life_snapshot"] = snapshot
+    return result
+
+
+
 def get_life_runtime_health(*, ledger: Any, person_id: str = DEFAULT_PERSON_ID) -> dict[str, Any]:
+    ensure_life_schema(ledger)
     state = get_life_state(ledger, person_id)
-    runtime = _map(state.get("runtime"))
-    clock = _map(state.get("clock"))
     now = _now_ms()
-    interval_ms = _int_env("HOST_LIFE_TICK_INTERVAL_SEC", 300, 30, 3600) * 1000
-    last = int(runtime.get("last_integrated_ms") or clock.get("last_tick_ms") or 0)
-    elapsed = max(0, now - last) if last else 0
-    running = _LIFE_LOOP_TASK is not None and not _LIFE_LOOP_TASK.done()
-    status = _continuous_alive_status(elapsed_ms=elapsed, interval_ms=interval_ms, loop_running=running)
-    return {"person_id": str(person_id or DEFAULT_PERSON_ID), "running": running, "alive_status": status, "last_integrated_ms": last, "last_heartbeat_ms": int(runtime.get("last_heartbeat_ms") or 0), "elapsed_since_integrated_ms": elapsed, "next_tick_due_ms": last + interval_ms if last else 0, "missed_tick_count": int(runtime.get("missed_tick_count") or 0), "catchup_count": int(runtime.get("catchup_count") or 0), "state_version": int(state.get("version") or 1), "last_error": str(runtime.get("last_error") or "")}
+    runtime = _map(state.get("runtime"))
+    last_integrated = int(runtime.get("last_integrated_ms") or 0)
+    tick_interval = _int_env("HOST_LIFE_TICK_INTERVAL_SEC", 60, 30, 3600)
+    age_ms = max(0, now - last_integrated) if last_integrated else 0
+    alive_status = "alive"
+    if not last_integrated:
+        alive_status = "stale"
+    elif age_ms > tick_interval * 2000:
+        alive_status = "stale"
+    elif age_ms > tick_interval * 1000:
+        alive_status = "degraded_alive"
+    inner = _map(state.get("inner_world"))
+    expires_at = int(_float(inner.get("preoccupation_expires_at_ms") or inner.get("expires_at_ms")))
+    stale_preoccupation_count = 1 if _text(inner.get("current_preoccupation"), 240) and expires_at and now >= expires_at else 0
+    organ_state = get_organ_runtime_state(ledger=ledger, person_id=person_id)
+    organs = _map(organ_state.get("organs"))
+    organ_saturation_count = 0
+    for value in organs.values():
+        item = _map(value)
+        if _float(item.get("activation")) >= 0.985 and _float(item.get("pressure")) >= 0.985:
+            organ_saturation_count += 1
+    rows = _conn(ledger).execute(
+        "SELECT event_kind, content_summary, evidence_json, created_at_ms FROM life_experience_event WHERE person_id=? AND source_kind='inner_world' ORDER BY created_at_ms DESC LIMIT 20",
+        (str(person_id or DEFAULT_PERSON_ID),),
+    ).fetchall()
+    last_monologue_ms = 0
+    signatures: list[str] = []
+    for row in rows:
+        if str(row[0] or "") == "inner_stream_tick" and not last_monologue_ms:
+            last_monologue_ms = int(row[3] or 0)
+        if str(row[0] or "") == "inner_numeric_tick":
+            evidence = _loads(row[2], {})
+            signatures.append(str(_map(evidence).get("signature") or row[1] or ""))
+    duplicate_inner_numeric_streak = 0
+    if signatures:
+        first = signatures[0]
+        for sig in signatures:
+            if sig == first:
+                duplicate_inner_numeric_streak += 1
+            else:
+                break
+    action = _map(state.get("life_action"))
+    ineligible = 0
+    kind = str(action.get("action_kind") or "")
+    if kind == "dream_afterglow" and not _dream_action_eligible(state):
+        ineligible = 1
+    if kind in {"work_watch", "work_done_react"} and not _work_action_eligible(state):
+        ineligible = 1
+    last_autonomous_cycle_ms = int(_float(autonomy.get("last_autonomous_cycle_ms")))
+    last_learning_cycle_ms = int(_float(self_growth.get("last_learning_cycle_ms") or autonomy.get("last_learning_cycle_ms")))
+    active_agenda = [item for item in list(inner.get("self_agenda") or []) if isinstance(item, Mapping)]
+    autonomous_cycle_stalled_minutes = round(max(0, now - last_autonomous_cycle_ms) / 60000.0, 2) if last_autonomous_cycle_ms else None
+    learning_loop_stalled_minutes = round(max(0, now - last_learning_cycle_ms) / 60000.0, 2) if last_learning_cycle_ms else None
+    empty_attention_minutes = autonomous_cycle_stalled_minutes if not _text(autonomy.get("current_attention") or inner.get("attention_kind"), 80) else 0
+    self_agenda_empty_minutes = autonomous_cycle_stalled_minutes if not active_agenda else 0
+    return {
+        "person_id": str(person_id or DEFAULT_PERSON_ID),
+        "alive_status": alive_status,
+        "last_integrated_ms": last_integrated,
+        "age_ms": age_ms,
+        "tick_interval_s": tick_interval,
+        "stale_preoccupation_count": stale_preoccupation_count,
+        "organ_saturation_count": organ_saturation_count,
+        "monologue_stalled_minutes": round(max(0, now - last_monologue_ms) / 60000.0, 2) if last_monologue_ms else None,
+        "ineligible_action_selected_count": ineligible,
+        "duplicate_inner_numeric_streak": duplicate_inner_numeric_streak,
+        "autonomous_cycle_stalled_minutes": autonomous_cycle_stalled_minutes,
+        "empty_attention_minutes": empty_attention_minutes,
+        "self_agenda_empty_minutes": self_agenda_empty_minutes,
+        "body_loop_stalled_minutes": autonomous_cycle_stalled_minutes if str(autonomy.get("body_loop_status") or "") != "state_driven" else 0,
+        "user_input_dependency_detected": bool(autonomy.get("user_input_required_for_progress", False) or not active_agenda),
+        "learning_loop_stalled_minutes": learning_loop_stalled_minutes,
+        "growth_state_stale_minutes": learning_loop_stalled_minutes,
+        "inner_world": {"attention_kind": _text(inner.get("attention_kind"), 80), "current_preoccupation": _text(inner.get("current_preoccupation"), 160), "monologue_due": bool(inner.get("monologue_due")), "monologue_suppression_reason": _text(inner.get("monologue_suppression_reason"), 160)},
+        "autonomy": {"current_attention": _text(autonomy.get("current_attention"), 80), "active_agenda_count": len(active_agenda), "user_input_required_for_progress": bool(autonomy.get("user_input_required_for_progress", False))},
+        "self_growth": {"current_learning_focus": _text(self_growth.get("current_learning_focus"), 80), "recent_growth_signal_count": len(list(self_growth.get("recent_growth_signals") or []))},
+    }
 
 
 def get_current_environment(*, ledger: Any, person_id: str = DEFAULT_PERSON_ID) -> dict[str, Any]:
@@ -1245,7 +1546,7 @@ def get_current_environment(*, ledger: Any, person_id: str = DEFAULT_PERSON_ID) 
 
 
 async def run_life_tick(*, ledger: Any, person_id: str = DEFAULT_PERSON_ID, reason: str = "periodic_tick", force_dispatch: bool = False) -> dict[str, Any]:
-    integrated = advance_life_to_now(ledger=ledger, person_id=person_id, reason=reason, force=True)
+    integrated = advance_inner_life_to_now(ledger=ledger, person_id=person_id, reason=reason, force=True)
     after = _map(integrated.get("state")) or get_life_state(ledger, person_id)
     pack = _map(integrated.get("life_causality")) or build_life_director_pack(ledger=ledger, person_id=person_id, reason=reason)
     action = _map(pack.get("life_action")) or build_life_action_plan(state=after, director_pack=pack, source_kind=reason)
@@ -1499,8 +1800,53 @@ def get_recent_causality(*, ledger: Any, person_id: str = DEFAULT_PERSON_ID, lim
     experience = list(get_recent_life_experience(ledger=ledger, person_id=person_id, limit=limit).get("items") or [])
     proactive_episodes = list(get_recent_proactive_episodes(ledger=ledger, person_id=person_id, limit=limit).get("items") or [])
     latest_state = get_life_state(ledger, person_id)
-    return {"person_id": person_id, "latest_state": latest_state, "runtime_health": get_life_runtime_health(ledger=ledger, person_id=person_id), "environment": _map(latest_state.get("environment")), "last_tick_result": dict(_LAST_TICK_RESULT), "state_events": events, "dialogue_influence": dialogs, "embodiment_dispatches": dispatches, "work_events": works, "proactive_outbox": proactive, "life_experience": experience, "organ_runtime": {"organ_count": organ_state.get("organ_count"), "top_organs": organ_state.get("top_organs", [])}, "proactive_episodes": proactive_episodes}
+    learning_state = _map(latest_state.get("learning_state"))
+    self_growth = _map(latest_state.get("self_growth"))
+    inner = _map(latest_state.get("inner_world"))
+    return {"person_id": person_id, "latest_state": latest_state, "runtime_health": get_life_runtime_health(ledger=ledger, person_id=person_id), "environment": _map(latest_state.get("environment")), "last_tick_result": dict(_LAST_TICK_RESULT), "state_events": events, "dialogue_influence": dialogs, "embodiment_dispatches": dispatches, "work_events": works, "proactive_outbox": proactive, "life_experience": experience, "organ_runtime": {"organ_count": organ_state.get("organ_count"), "top_organs": organ_state.get("top_organs", [])}, "proactive_episodes": proactive_episodes, "autonomous_chain": {"self_agenda": list(inner.get("self_agenda") or [])[:8], "learning_signals": list(learning_state.get("learning_signals") or [])[:8], "growth_signals": list(self_growth.get("recent_growth_signals") or [])[:8], "active_projects": list(self_growth.get("active_projects") or [])[:8]}}
 
+
+
+def recalibrate_inner_life_state(*, ledger: Any, person_id: str = DEFAULT_PERSON_ID) -> dict[str, Any]:
+    ensure_life_schema(ledger)
+    resolved = str(person_id or DEFAULT_PERSON_ID)
+    before = get_life_state(ledger, resolved)
+    now = _now_ms()
+    after = copy.deepcopy(before)
+    inner = _map(after.get("inner_world"))
+    numeric = _map(inner.get("numeric_state"))
+    anchor = _text(numeric.get("current_preoccupation") or numeric.get("attention_target"), 180)
+    if not anchor:
+        inner.update({"current_preoccupation": "", "attention_target": "", "unresolved_loop": "", "preoccupation_expires_at_ms": 0, "monologue_due": False, "monologue_suppression_reason": _text(inner.get("monologue_suppression_reason") or "RECALIBRATED_NO_CONCRETE_ANCHOR", 160)})
+    if not _text(inner.get("dream_residue"), 240):
+        pressure = _map(after.get("life_pressure"))
+        pressure["dream"] = min(_clamp(pressure.get("dream")), 0.12)
+        after["life_pressure"] = pressure
+        if str(_map(after.get("life_action")).get("action_kind") or "") == "dream_afterglow":
+            after["life_action"] = {}
+    after["inner_world"] = inner
+    after["version"] = int(after.get("version") or 1) + 1
+    _save_state(ledger, after)
+    conn = _conn(ledger)
+    adjusted = 0
+    for row in conn.execute("SELECT organ_id, state_json FROM organ_runtime_state WHERE person_id=?", (resolved,)).fetchall():
+        organ_id = str(row[0] or "")
+        state = _loads(row[1], {})
+        if not isinstance(state, dict):
+            continue
+        changed = False
+        for key, cap in (("activation", 0.78), ("pressure", 0.76), ("fatigue", 0.88)):
+            value = _float(state.get(key))
+            if value > 0.94:
+                state[key] = cap
+                changed = True
+        if changed:
+            state["updated_at_ms"] = now
+            conn.execute("UPDATE organ_runtime_state SET state_json=?, updated_at_ms=? WHERE person_id=? AND organ_id=?", (_dumps(state), now, resolved, organ_id))
+            adjusted += 1
+    conn.commit()
+    event = append_life_experience(ledger=ledger, person_id=resolved, session_id="inner_life_recalibration", source_kind="system", event_kind="inner_life_recalibrated", content_summary="inner life state recalibrated", evidence={"cleared_stale_preoccupation": not bool(anchor), "adjusted_organs": adjusted}, salience=0.12, valence=0.0, uncertainty=0.02, now_ms=now, consume=False)
+    return {"status": "OK", "person_id": resolved, "adjusted_organs": adjusted, "event_id": event.get("event_id"), "state_version": int(after.get("version") or 1)}
 
 def start_life_continuity_loop(*, ledger: Any, logger: Any | None = None) -> dict[str, Any]:
     global _LIFE_LOOP_TASK, _LIFE_LOOP_STOP
@@ -1513,7 +1859,7 @@ def start_life_continuity_loop(*, ledger: Any, logger: Any | None = None) -> dic
         loop = asyncio.get_running_loop()
     except RuntimeError:
         return {"running": False, "status": "DEGRADED", "reason_code": "NO_RUNNING_EVENT_LOOP"}
-    interval = _int_env("HOST_LIFE_TICK_INTERVAL_SEC", 300, 30, 3600); _LIFE_LOOP_STOP = asyncio.Event(); _LIFE_LOOP_TASK = loop.create_task(_life_loop_runner(ledger=ledger, stop_event=_LIFE_LOOP_STOP, interval_s=interval, logger=logger or LOGGER))
+    interval = _int_env("HOST_LIFE_TICK_INTERVAL_SEC", 60, 30, 3600); _LIFE_LOOP_STOP = asyncio.Event(); _LIFE_LOOP_TASK = loop.create_task(_life_loop_runner(ledger=ledger, stop_event=_LIFE_LOOP_STOP, interval_s=interval, logger=logger or LOGGER))
     return {"running": True, "status": "OK", "interval_s": interval}
 
 
@@ -1550,4 +1896,4 @@ async def stop_life_continuity_loop() -> dict[str, Any]:
     return {"running": False, "status": "STOPPED"}
 
 
-__all__ = ["advance_life_to_now", "attempt_life_proactive_push", "build_life_action_plan", "build_life_director_pack", "dispatch_life_embodiment", "ensure_life_schema", "get_current_embodiment", "get_current_environment", "get_current_life_action", "get_life_runtime_health", "get_life_state", "get_recent_causality", "get_recent_proactive_outbox", "record_dialogue_aftereffect", "record_life_experience", "record_work_environment_event", "run_life_tick", "start_life_continuity_loop", "stop_life_continuity_loop"]
+__all__ = ["advance_inner_life_to_now", "advance_life_to_now", "attempt_life_proactive_push", "build_life_action_plan", "build_life_director_pack", "dispatch_life_embodiment", "ensure_life_schema", "get_current_embodiment", "get_current_environment", "get_current_life_action", "get_life_runtime_health", "get_life_state", "get_recent_causality", "get_recent_proactive_outbox", "record_dialogue_aftereffect", "record_life_experience", "record_work_environment_event", "run_life_tick", "recalibrate_inner_life_state", "start_life_continuity_loop", "stop_life_continuity_loop"]

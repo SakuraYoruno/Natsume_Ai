@@ -6,7 +6,7 @@ from fastapi import APIRouter, Body, Query
 
 from host_brain.app.dependencies import get_ledger
 from host_brain.runtime.life_continuity import (
-    advance_life_to_now,
+    advance_inner_life_to_now,
     attempt_life_proactive_push,
     get_current_environment,
     get_current_life_action,
@@ -24,6 +24,7 @@ from host_brain.runtime.life_organs import (
     get_recent_life_experience,
     get_recent_proactive_episodes,
 )
+from host_brain.runtime.autonomous_self import get_growth_state, get_learning_recent
 
 router = APIRouter(prefix="/v1/digital-life", tags=["digital-life"])
 
@@ -46,6 +47,16 @@ async def digital_life_environment_current(person_id: str = Query("default")) ->
 @router.get("/causality/recent")
 async def digital_life_causality_recent(person_id: str = Query("default"), limit: int = Query(20, ge=1, le=100)) -> dict[str, Any]:
     return get_recent_causality(ledger=get_ledger(), person_id=person_id, limit=limit)
+
+
+@router.get("/growth/state")
+async def digital_life_growth_state(person_id: str = Query("default")) -> dict[str, Any]:
+    return get_growth_state(ledger=get_ledger(), person_id=person_id)
+
+
+@router.get("/learning/recent")
+async def digital_life_learning_recent(person_id: str = Query("default"), limit: int = Query(20, ge=1, le=100)) -> dict[str, Any]:
+    return get_learning_recent(ledger=get_ledger(), person_id=person_id, limit=limit)
 
 
 @router.post("/work-event")
@@ -79,12 +90,23 @@ async def digital_life_tick(payload: dict[str, Any] = Body(default_factory=dict)
 @router.post("/advance")
 async def digital_life_advance(payload: dict[str, Any] = Body(default_factory=dict)) -> dict[str, Any]:
     incoming = payload.get("incoming_event")
-    return advance_life_to_now(
+    return advance_inner_life_to_now(
         ledger=get_ledger(),
         person_id=str(payload.get("person_id") or "default"),
         reason=str(payload.get("reason") or "manual_advance"),
         incoming_event=incoming if isinstance(incoming, dict) else {},
         force=bool(payload.get("force", True)),
+    )
+
+
+@router.get("/inner-drive/current")
+async def digital_life_inner_drive_current(person_id: str = Query("default"), force: bool = Query(False)) -> dict[str, Any]:
+    return advance_inner_life_to_now(
+        ledger=get_ledger(),
+        person_id=person_id or "default",
+        reason="debug_inner_drive_current",
+        incoming_event={"source_kind": "debug_inner_drive_current"},
+        force=force,
     )
 
 

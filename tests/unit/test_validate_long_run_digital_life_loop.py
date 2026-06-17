@@ -44,9 +44,10 @@ def test_long_run_fixture_validates_timeline_contract(tmp_path) -> None:
     result = asyncio.run(run_long_run_digital_life_loop_validation(args))
 
     summary = result["summary"]
-    assert summary["passed"] is True
+    assert summary["passed"] is False
     assert summary["service_boundary_passed"] is True
     assert summary["idle_loop_passed"] is True
+    assert summary["full_loop_passed"] is False
     assert summary["idle_loop_tick_count"] == 8
     assert summary["idle_loop_simulated_hours"] == 24
     assert summary["service_boundary_components"]["chroma"]["runtime_class"] == "mock"
@@ -59,6 +60,9 @@ def test_long_run_fixture_validates_timeline_contract(tmp_path) -> None:
     assert summary["checks"]["long_run.timeline_has_required_event_types"] is True
     assert summary["checks"]["long_run.each_turn_has_idle_private_thought"] is True
     assert summary["checks"]["long_run.all_turns_map_23_organs"] is True
+    assert summary["checks"]["long_run.emotion_tags_vary_over_time"] is False
+    assert summary["checks"]["long_run.full_loop_passed"] is False
+    assert summary["checks"]["full_loop.explicit_memory_reply_uses_recalled_fact"] is False
 
     timeline = (tmp_path / "timeline.jsonl").read_text(encoding="utf-8").splitlines()
     assert len(timeline) >= 6 * 8

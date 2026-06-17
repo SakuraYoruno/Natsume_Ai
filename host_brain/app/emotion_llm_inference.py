@@ -305,7 +305,7 @@ def _sync_llm_emotion_call(
     result = complete_llm_with_pool_sync(
         request_id=f"emotion_inference::{int(time.time() * 1000)}",
         scene_type="EMOTION",
-        cognitive_tier="C",
+        cognitive_tier="B",
         provider_name=provider_name,
         model_id=model_id,
         api_key=api_key,

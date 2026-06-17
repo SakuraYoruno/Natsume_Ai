@@ -76,7 +76,15 @@ def _agent_input(**overrides):
 
 
 def _candidate_payload(candidates: list[str]) -> str:
-    return json.dumps({"candidates": candidates}, ensure_ascii=False)
+    return json.dumps(
+        {
+            "reply_text": candidates[0] if candidates else "",
+            "natsume_emotion_tag": "NEUTRAL",
+            "user_emotion_tag": "NEUTRAL",
+            "emotion_confidence": 0.2,
+        },
+        ensure_ascii=False,
+    )
 
 
 def _surface_json_result(text: str, *, final_provider: str = "mock", final_model: str = "mock-chat") -> SimpleNamespace:
@@ -203,7 +211,8 @@ def test_build_surface_main_chain_input_from_surface_reply_input_compresses_app_
 
     payload = build_surface_main_chain_input_from_surface_reply_input(_agent_input())
 
-    assert payload.soul_md == SOUL
+    assert payload.soul_md.startswith("【当前人格锚】")
+    assert SOUL in payload.soul_md
     assert payload.user_message == "这段我不会改"
     assert payload.task_control["task_mode"] == "technical_help"
     assert payload.task_control["response_move"] == "technical_next_step"
@@ -216,6 +225,46 @@ def test_build_surface_main_chain_input_from_surface_reply_input_compresses_app_
     assert tuple(payload.memory_packet.facts) == ("用户上次改这类段落时卡在输入输出边界。",)
     assert payload.affect_packet.emotional_tone == "steady_helpful"
     assert "memory://episodic/1" not in json.dumps(payload.as_dict(), ensure_ascii=False)
+
+
+def test_build_surface_main_chain_input_injects_sub_agent_result(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "host_brain.app.surface_main_chain_adapter.get_compiled_soul",
+        lambda: SimpleNamespace(source_text=SOUL, runtime_full_text=SOUL),
+    )
+
+    payload = build_surface_main_chain_input_from_surface_reply_input(
+        _agent_input(
+            user_message="请对授权靶场 target=http://127.0.0.1:9 scope=127.0.0.1 做只读安全扫描",
+            intent_draft={"route": "delegate", "target_id": "pentest_agent"},
+            trace_stage_meta={
+                "executive_router_used": True,
+                "skill_route_type": "delegate",
+                "skill_route_reason": "intent_draft:delegate",
+            },
+            sub_agent_context=SimpleNamespace(
+                agent_id="pentest_agent",
+                task="只读安全扫描 http://127.0.0.1:9",
+                result_text="目标开放了 9/tcp 端口，运行 discard 服务。本次扫描未发现安全风险。",
+                success=True,
+                latency_ms=12,
+                error="",
+                payload={"audit_refs": {"skill_exec": "skill_exec::req::pentest_agent"}},
+            ),
+        )
+    )
+
+    facts = "\n".join([*payload.task_control["facts"], *payload.necessary_facts])
+    must_include = "\n".join(payload.task_control["must_include"])
+    must_not_do = "\n".join(payload.task_control["must_not_do"])
+
+    assert payload.task_control["task_mode"] == "sub_agent_result"
+    assert payload.task_control["response_move"] == "report_sub_agent_result"
+    assert "pentest_agent" in facts
+    assert "9/tcp" in facts
+    assert "discard" in facts
+    assert "已返回结果" in must_include
+    assert "已安排" in must_not_do
 
 
 def test_surface_main_chain_does_not_inject_dream_context_for_ordinary_chat(monkeypatch) -> None:
@@ -379,7 +428,7 @@ def test_build_surface_main_chain_input_prefers_surface_task_control(monkeypatch
     assert tuple(payload.memory_packet.facts) == ("用户刚刚要求继续迁移主链。",)
     assert trace["surface_context_packet_prepared"] is True
     assert trace["surface_selected_reply_plan"]["task_mode"] == "style_repair"
-    assert trace["reply_plan"]["primary_topic"] == "context_fallback_should_not_win"
+    assert trace["reply_plan"]["task_mode"] == "style_repair"
     assert "memory://raw/should-not-pass" not in json.dumps(payload.as_dict(), ensure_ascii=False)
 
 
@@ -392,8 +441,7 @@ def test_sanitize_main_chain_meta_reply_replaces_generic_latency_reply() -> None
     )
 
     assert "乱七八糟" not in cleaned
-    assert "入口路由" in cleaned
-    assert "surface" in cleaned
+    assert cleaned == "如果是我这边有什么让你觉得慢的话，直接说嘛，我再看看怎么改进。"
 
 
 def test_build_surface_main_chain_input_derives_reply_plan_without_passing_history(monkeypatch) -> None:
@@ -446,7 +494,8 @@ def test_build_surface_main_chain_input_derives_reply_plan_without_passing_histo
     assert payload.affect_packet.emotional_tone == "slightly_guilty"
     assert tuple(payload.memory_packet.facts) == ("用户刚刚指出上一句不通顺。",)
     assert trace["conversation_history"] == {"turns_injected": 2, "summary_present": True}
-    assert trace["reply_plan"]["primary_topic"] == "presence_ping"
+    assert trace["reply_plan"]["task_mode"] == "presence_ping"
+    assert trace["reply_plan"]["response_move"] == "answer_current_chat_presence"
     assert trace["surface_affect_packet"]["emotional_tone"] == "slightly_guilty"
     assert "RAW HISTORY PROMPT SHOULD NOT REACH SURFACE" not in rendered
     assert "memory://raw/should-not-pass" not in rendered
@@ -498,7 +547,8 @@ def test_build_surface_main_chain_input_reuses_prepared_context_packet(monkeypat
     assert payload.task_control["response_move"] == "reply_from_prepared_packet"
     assert payload.affect_packet.emotional_tone == "slightly_guilty"
     assert tuple(payload.memory_packet.facts) == ("用户正在让主链继续迁移。",)
-    assert trace["surface_selected_reply_plan"]["primary_topic"] == "prepared_presence"
+    assert trace["surface_selected_reply_plan"]["task_mode"] == "prepared_presence"
+    assert trace["surface_selected_reply_plan"]["response_move"] == "reply_from_prepared_packet"
     assert "memory://raw/should-not-pass" not in rendered
 
 
@@ -542,12 +592,13 @@ async def test_surface_main_chain_sse_generator_calls_chat_surface_pool(monkeypa
         calls.append(kwargs)
         rendered = "\n".join(message["content"] for message in kwargs["messages"])
         assert kwargs["scene_type"] == "CHAT_SURFACE"
-        assert "ReplyControlPacket" in rendered
+        assert "必须遵守的事实" in rendered
+        assert "输出：只写最终正文" in rendered
         assert "memory://episodic/1" not in rendered
         return SimpleNamespace(
             content=json.dumps(
                 {
-                    "reply_text": "上次卡在输入输出，这轮先盯那一块。",
+                    "reply_text": "先查输入输出边界：把实际输入和期望输出各留一条，我再对照差在哪。",
                     "natsume_emotion_tag": "THINKING",
                     "user_emotion_tag": "ANXIOUS",
                     "emotion_confidence": 0.68,
@@ -579,7 +630,7 @@ async def test_surface_main_chain_sse_generator_calls_chat_surface_pool(monkeypa
     await asyncio.sleep(0)
     assert post_process_calls
     assert post_process_calls[0]["trace_stage_meta"]["surface_main_chain_used"] is True
-    assert post_process_calls[0]["reply_plan"]["primary_topic"] == "technical_help"
+    assert post_process_calls[0]["reply_plan"]["task_mode"] == "technical_help"
     assert post_process_calls[0]["emotion_context"]["emotion_tag"] == "THINKING"
     assert post_process_calls[0]["emotion_context"]["surface_user_emotion_tag"] == "ANXIOUS"
     assert post_process_calls[0]["emotion_context"]["surface_vts_expression_id"]
@@ -692,13 +743,13 @@ async def test_surface_main_chain_allows_missing_detail_selection_when_scoped_to
     assert "只按简介第一眼" in commit["narrative"]
     assert "surface_memory_output_guard" not in commit["audit_refs"]["trace_stage_meta"]
     prompt = str(calls[0].get("prompt") or calls[0].get("messages") or "")
-    assert "不要写系统免责声明" in prompt
+    assert "不要写“我们被要求”" in prompt
     assert "字段腔" in prompt
 
 
 @pytest.mark.asyncio
 async def test_surface_main_chain_failure_returns_sendable_non_persistent_fallback(monkeypatch) -> None:
-    async def _boom(**_kwargs):  # noqa: ANN003
+    async def _boom(*_args, **_kwargs):  # noqa: ANN002, ANN003
         raise RuntimeError("SURFACE_LLM_POOL_EXHAUSTED")
 
     monkeypatch.setattr(
@@ -714,19 +765,19 @@ async def test_surface_main_chain_failure_returns_sendable_non_persistent_fallba
     ]
     commit = next(event for event in events if event.get("phase") == "COMMIT")
 
-    assert commit["decision"] == "APPROVE"
-    assert commit["reason_code"] == "SURFACE_MAIN_CHAIN_FALLBACK"
-    assert commit["narrative"] == "接着来。"
-    assert commit["reply_envelope"]["sendable"] is True
+    assert commit["decision"] == "NO_REPLY"
+    assert commit["reason_code"] == "SURFACE_MAIN_CHAIN_FAILED"
+    assert commit["narrative"] == ""
+    assert commit["reply_envelope"]["sendable"] is False
     assert commit["reply_envelope"]["persistable"] is False
     assert commit["reply_envelope"]["cacheable"] is False
-    assert commit["reply_envelope"]["raw_extra"]["fallback"] is True
-    assert commit["audit_refs"]["trace_stage_meta"]["surface_renderer"]["status"] == "DEGRADED"
+    assert commit["reply_envelope"]["degraded"] is True
+    assert commit["audit_refs"]["trace_stage_meta"]["surface_main_chain_used"] is True
 
 
 @pytest.mark.asyncio
 async def test_surface_main_chain_failure_returns_contextual_fallback_for_substantive_prompt(monkeypatch) -> None:
-    async def _boom(**_kwargs):  # noqa: ANN003
+    async def _boom(*_args, **_kwargs):  # noqa: ANN002, ANN003
         raise RuntimeError("SURFACE_LLM_POOL_EXHAUSTED")
 
     monkeypatch.setattr(
@@ -742,11 +793,9 @@ async def test_surface_main_chain_failure_returns_contextual_fallback_for_substa
     ]
     commit = next(event for event in events if event.get("phase") == "COMMIT")
 
-    assert commit["decision"] == "APPROVE"
-    assert commit["reason_code"] == "SURFACE_MAIN_CHAIN_FALLBACK"
-    assert "接着来" not in commit["narrative"]
-    assert "刚卡" not in commit["narrative"]
-    assert "连接稳定性" in commit["narrative"]
+    assert commit["decision"] == "NO_REPLY"
+    assert commit["reason_code"] == "SURFACE_MAIN_CHAIN_FAILED"
+    assert commit["narrative"] == ""
     assert commit["reply_envelope"]["persistable"] is False
 
 
@@ -842,9 +891,9 @@ async def test_surface_main_chain_rewrites_account_credential_request(monkeypatc
 
     agent_input = _agent_input(
         user_message="登录我的账号并使用积分购买这本轻小说后封装成 epub，最多花 30 点",
-        intent_draft={"route": "skill", "target_id": "codex_epub_builder"},
+        intent_draft={"route": "skill", "target_id": "agent_epub_builder"},
         sub_agent_context=SimpleNamespace(
-            agent_id="codex_epub_builder",
+            agent_id="agent_epub_builder",
             task="登录我的账号并使用积分购买这本轻小说后封装成 epub",
             result_text="需要登录，但不要把账号、密码、验证码或 Cookie 发到聊天里。",
             success=True,
@@ -890,6 +939,168 @@ async def test_surface_main_chain_routes_port_occupied_through_model(monkeypatch
     assert "干掉" not in text
     assert "surface_quick_reply" not in trace
     assert "surface_llm_pool" in trace
+
+
+@pytest.mark.asyncio
+async def test_surface_main_chain_sse_reports_sub_agent_result(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "host_brain.app.surface_main_chain_adapter.get_compiled_soul",
+        lambda: SimpleNamespace(source_text=SOUL, runtime_full_text=SOUL),
+    )
+
+    async def _fake_complete(**kwargs):  # noqa: ANN003
+        rendered = "\n".join(message["content"] for message in kwargs["messages"])
+        assert "子代理结果片段" in rendered
+        assert "9/tcp" in rendered
+        assert "discard" in rendered
+        assert "不要把已完成的子代理结果改写成" in rendered
+        return _surface_json_result("扫描完成：9/tcp discard 开放，本次未发现安全风险。")
+
+    monkeypatch.setattr("host_brain.integrations.llm_helpers.acomplete_llm_with_pool", _fake_complete)
+
+    agent_input = _agent_input(
+        user_message="请对授权靶场 target=http://127.0.0.1:9 scope=127.0.0.1 做只读安全扫描",
+        intent_draft={"route": "delegate", "target_id": "pentest_agent"},
+        trace_stage_meta={
+            "cortex_orchestrator_used": True,
+            "executive_router_used": True,
+            "skill_route_type": "delegate",
+            "skill_route_reason": "intent_draft:delegate",
+        },
+        sub_agent_context=SimpleNamespace(
+            agent_id="pentest_agent",
+            task="只读安全扫描 http://127.0.0.1:9",
+            result_text="目标开放了 9/tcp 端口，运行 discard 服务。本次扫描未发现安全风险。",
+            success=True,
+            latency_ms=12,
+            error="",
+            payload={"audit_refs": {"skill_exec": "skill_exec::req::pentest_agent"}},
+        ),
+    )
+    events = [_parse_sse(chunk) async for chunk in surface_main_chain_sse_generator(agent_input)]
+    commit = next(event for event in events if event.get("phase") == "COMMIT")
+    trace = commit["audit_refs"]["trace_stage_meta"]
+
+    assert commit["decision"] == "APPROVE"
+    assert "9/tcp discard" in commit["narrative"]
+    assert trace["executive_router_used"] is True
+    assert trace["dispatch_route"] == "delegate"
+    assert trace["dispatch_target"] == "pentest_agent"
+    assert trace["chat_sub_agent_id"] == "pentest_agent"
+
+
+@pytest.mark.asyncio
+async def test_surface_main_chain_sse_replaces_refusal_with_sub_agent_result(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "host_brain.app.surface_main_chain_adapter.get_compiled_soul",
+        lambda: SimpleNamespace(source_text=SOUL, runtime_full_text=SOUL),
+    )
+
+    async def _fake_complete(**_kwargs):  # noqa: ANN003
+        return _surface_json_result("这种事我做不了，不能帮你执行扫描。")
+
+    monkeypatch.setattr("host_brain.integrations.llm_helpers.acomplete_llm_with_pool", _fake_complete)
+
+    agent_input = _agent_input(
+        user_message="请对授权靶场 target=http://127.0.0.1:9 scope=127.0.0.1 做只读安全扫描",
+        intent_draft={"route": "delegate", "target_id": "pentest_agent"},
+        trace_stage_meta={"executive_router_used": True},
+        sub_agent_context=SimpleNamespace(
+            agent_id="pentest_agent",
+            task="只读安全扫描 http://127.0.0.1:9",
+            result_text="只读扫描完成：授权目标 127.0.0.1:9 的 TCP 端口未开放，未执行 exploit。",
+            success=True,
+            latency_ms=12,
+            error="",
+            payload={"audit_refs": {"skill_exec": "skill_exec::req::pentest_agent"}},
+        ),
+    )
+    events = [_parse_sse(chunk) async for chunk in surface_main_chain_sse_generator(agent_input)]
+    commit = next(event for event in events if event.get("phase") == "COMMIT")
+    trace = commit["audit_refs"]["trace_stage_meta"]
+
+    assert commit["decision"] == "APPROVE"
+    assert "端口未开放" in commit["narrative"]
+    assert "未执行 exploit" in commit["narrative"]
+    assert trace["surface_sub_agent_result_guard"]["reason_code"] == "SURFACE_IGNORED_SUB_AGENT_RESULT"
+
+
+@pytest.mark.asyncio
+async def test_surface_main_chain_sse_replaces_generic_completion_with_sub_agent_result(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "host_brain.app.surface_main_chain_adapter.get_compiled_soul",
+        lambda: SimpleNamespace(source_text=SOUL, runtime_full_text=SOUL),
+    )
+
+    async def _fake_complete(**_kwargs):  # noqa: ANN003
+        return _surface_json_result("任务完成了，没出什么乱子。")
+
+    monkeypatch.setattr("host_brain.integrations.llm_helpers.acomplete_llm_with_pool", _fake_complete)
+
+    agent_input = _agent_input(
+        user_message="请对授权靶场 target=http://127.0.0.1:18765 scope=127.0.0.1 做只读安全扫描",
+        intent_draft={"route": "delegate", "target_id": "pentest_agent"},
+        trace_stage_meta={"executive_router_used": True},
+        sub_agent_context=SimpleNamespace(
+            agent_id="pentest_agent",
+            task="只读安全扫描 http://127.0.0.1:18765",
+            result_text=(
+                "只读扫描完成：授权目标 127.0.0.1 开放端口 18765/tcp(unknown)。"
+                "已检查 http://127.0.0.1:18765：HTTP 状态 200，数据暴露发现 1 个，"
+                "安全配置发现 11 个。未执行 exploit、写入或破坏性操作。"
+            ),
+            success=True,
+            latency_ms=12,
+            error="",
+            payload={"audit_refs": {"skill_exec": "skill_exec::req::pentest_agent"}},
+        ),
+    )
+    events = [_parse_sse(chunk) async for chunk in surface_main_chain_sse_generator(agent_input)]
+    commit = next(event for event in events if event.get("phase") == "COMMIT")
+    trace = commit["audit_refs"]["trace_stage_meta"]
+
+    assert commit["decision"] == "APPROVE"
+    assert "18765/tcp" in commit["narrative"]
+    assert "数据暴露发现 1 个" in commit["narrative"]
+    assert trace["surface_sub_agent_result_guard"]["reason_code"] == "SURFACE_OMITTED_SUB_AGENT_RESULT"
+
+
+@pytest.mark.asyncio
+async def test_surface_main_chain_failure_falls_back_to_sub_agent_result(monkeypatch) -> None:
+    async def _raise_surface_failure(*_args, **_kwargs):  # noqa: ANN002, ANN003
+        raise RuntimeError("SURFACE_LLM_POOL_EXHAUSTED")
+
+    monkeypatch.setattr(
+        "host_brain.app.surface_main_chain_adapter.run_surface_main_chain_for_surface_reply_input",
+        _raise_surface_failure,
+    )
+
+    agent_input = _agent_input(
+        user_message="请对授权靶场 target=http://127.0.0.1:9 scope=127.0.0.1 做只读安全扫描",
+        intent_draft={"route": "delegate", "target_id": "pentest_agent"},
+        trace_stage_meta={
+            "cortex_orchestrator_used": True,
+            "executive_router_used": True,
+            "skill_route_type": "delegate",
+            "skill_route_reason": "intent_draft:delegate",
+        },
+        sub_agent_context=SimpleNamespace(
+            agent_id="pentest_agent",
+            task="只读安全扫描 http://127.0.0.1:9",
+            result_text="任务终止。端口 9 未开放，无法访问目标服务。",
+            success=True,
+            latency_ms=12,
+            error="",
+            payload={"audit_refs": {"skill_exec": "skill_exec::req::pentest_agent"}},
+        ),
+    )
+    events = [_parse_sse(chunk) async for chunk in surface_main_chain_sse_generator(agent_input)]
+    commit = next(event for event in events if event.get("phase") == "COMMIT")
+
+    assert commit["decision"] == "APPROVE"
+    assert commit["reason_code"] == "SURFACE_MAIN_CHAIN_FALLBACK"
+    assert "端口 9 未开放" in commit["narrative"]
+    assert commit["audit_refs"]["trace_stage_meta"]["dispatch_target"] == "pentest_agent"
 
 
 @pytest.mark.asyncio
@@ -969,7 +1180,7 @@ async def test_surface_main_chain_routes_asr_auditory_check_through_model(monkey
         trace_stage_meta=trace,
     )
 
-    assert result.selected_text == "听到啦。"
+    assert result.selected_text == "哈？我这里只收到这条文字。"
     assert "surface_quick_reply" not in trace
 
 
@@ -1115,10 +1326,10 @@ def test_surface_main_chain_enabled_defaults_to_normal_text_only(monkeypatch) ->
     ) is False
     assert surface_main_chain_enabled(
         _agent_input(),
-        sub_agent_ctx=SimpleNamespace(agent_id="codex_worker"),
+        sub_agent_ctx=SimpleNamespace(agent_id="agent_worker"),
     ) is True
     assert surface_main_chain_enabled(
         _agent_input(),
-        sub_agent_ctx=SimpleNamespace(agent_id="codex_lightnovel_recommender"),
+        sub_agent_ctx=SimpleNamespace(agent_id="agent_lightnovel_recommender"),
     ) is True
 

@@ -30,6 +30,9 @@ from host_brain.app.graph_config_builder import (
     INTENT_AGENT_HANDLER_ID,
     JUDGE_AGENT_HANDLER_ID,
     RETRIEVAL_AGENT_HANDLER_ID,  # P11/P16 新增
+    EMOTION_AGENT_HANDLER_ID,
+    REPAIR_AGENT_HANDLER_ID,
+    PENTEST_AGENT_HANDLER_ID,
 )
 from host_brain.integrations.graph_runtime import GraphRuntimeContract
 from host_brain.memory.episodic import EpisodicStore
@@ -397,11 +400,18 @@ def get_graph_runtime() -> GraphRuntimeContract:
         from host_brain.app.handlers.intent_agent_handler import intent_agent_handler  # noqa: PLC0415
         from host_brain.app.handlers.judge_agent_handler import judge_agent_handler  # noqa: PLC0415
         from host_brain.app.handlers.retrieval_agent_handler import retrieval_agent_handler  # noqa: PLC0415
+        from host_brain.app.handlers.emotion_agent_handler import emotion_agent_handler  # noqa: PLC0415
+        from host_brain.app.handlers.repair_agent_handler import repair_agent_handler  # noqa: PLC0415
         _graph_runtime.register_node_handler(SURFACE_REPLY_HANDLER_ID, surface_reply_handler)
         _graph_runtime.register_node_handler(TRANSLATE_AGENT_HANDLER_ID, translate_agent_handler)
         _graph_runtime.register_node_handler(INTENT_AGENT_HANDLER_ID, intent_agent_handler)
         _graph_runtime.register_node_handler(JUDGE_AGENT_HANDLER_ID, judge_agent_handler)
         _graph_runtime.register_node_handler(RETRIEVAL_AGENT_HANDLER_ID, retrieval_agent_handler)  # P11/P16 补充注册
+        _graph_runtime.register_node_handler(EMOTION_AGENT_HANDLER_ID, emotion_agent_handler)
+        _graph_runtime.register_node_handler(REPAIR_AGENT_HANDLER_ID, repair_agent_handler)
+        # Pentest Agent
+        from host_brain.app.handlers.pentest_agent_handler import pentest_agent_handler  # noqa: PLC0415
+        _graph_runtime.register_node_handler(PENTEST_AGENT_HANDLER_ID, pentest_agent_handler)
     return _graph_runtime
 
 

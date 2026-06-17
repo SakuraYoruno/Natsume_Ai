@@ -5,7 +5,7 @@ import sqlite3
 import time
 from types import SimpleNamespace
 
-from host_brain.codex_runtime.lightnovel_deep_reviewer import (
+from host_brain.agent_runtime.lightnovel_deep_reviewer import (
     _cards_signature,
     _extract_cards,
     review_lightnovel_selection_from_memory_packet,
@@ -431,7 +431,7 @@ def test_lightnovel_deep_review_cache_hit_backfills_current_collection_item(monk
         source = store.write_background_episode(
             event_source="codex_production",
             event_id="recommendation-source-cache-backfill",
-            task_id="codex_lightnovel_recommender",
+            task_id="agent_lightnovel_recommender",
             status="COMPLETED",
             detail="给用户推荐了 2 本轻小说。",
             person_id="person-test",
@@ -717,7 +717,7 @@ def test_lightnovel_deep_review_persists_backlink_to_source_recommendation(monke
         source = store.write_background_episode(
             event_source="codex_production",
             event_id="recommendation-source",
-            task_id="codex_lightnovel_recommender",
+            task_id="agent_lightnovel_recommender",
             status="COMPLETED",
             detail="给用户推荐了 2 本轻小说。",
             person_id="person-test",
@@ -817,7 +817,7 @@ def test_lightnovel_deep_review_writes_body_evidence_back_to_collection_entity(m
         source = store.write_background_episode(
             event_source="codex_production",
             event_id="recommendation-source-real-items",
-            task_id="codex_lightnovel_recommender",
+            task_id="agent_lightnovel_recommender",
             status="COMPLETED",
             detail="给用户推荐了 2 本轻小说。",
             person_id="person-test",

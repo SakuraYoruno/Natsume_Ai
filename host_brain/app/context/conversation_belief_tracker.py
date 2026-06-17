@@ -292,6 +292,18 @@ def build_conversation_understanding_pack(
         semantic_intent=semantic_intent,
         pragmatic_frame=pragmatic_frame,
     )
+    dialogue_frame: dict[str, Any] = {}
+    try:
+        from host_brain.app.context.dialogue_frame import build_dialogue_frame  # noqa: PLC0415
+
+        dialogue_frame = build_dialogue_frame(
+            current_user_message=text,
+            recent_turns=recent_turns,
+            recent_recommendation_context=recent_recommendation_context,
+            previous_belief=previous_belief,
+        )
+    except Exception:
+        dialogue_frame = {}
     belief = build_belief_state(
         text=text,
         references=references,
@@ -300,6 +312,21 @@ def build_conversation_understanding_pack(
         pragmatic_frame=pragmatic_frame,
         previous_belief=previous_belief,
     )
+    if str(dialogue_frame.get("status") or "") == "RESOLVED":
+        target = _mapping(dialogue_frame.get("target"))
+        belief = dict(belief)
+        belief["active_topic"] = _text(target.get("target_label"), limit=180) or belief.get("active_topic")
+        belief["referenced_object"] = {
+            "target_kind": _text(target.get("target_kind"), limit=80),
+            "target_id": _text(target.get("detail_url") or target.get("source_turn_id"), limit=180),
+            "target_label": _text(target.get("target_label"), limit=180),
+            "confidence": float(dialogue_frame.get("confidence") or 0.0),
+        }
+        belief["user_goal"] = _text(dialogue_frame.get("user_goal"), limit=220) or belief.get("user_goal")
+        belief["selected_intent"] = _text(dialogue_frame.get("intent"), limit=100) or belief.get("selected_intent")
+        belief["confidence"] = max(float(belief.get("confidence") or 0.0), float(dialogue_frame.get("confidence") or 0.0))
+        belief["open_questions"] = []
+        belief["update_reason"] = "dialogue_frame+reference+hypothesis+pragmatic_frame"
     open_questions = list(belief.get("open_questions") or [])
     confidence = float(belief.get("confidence") or 0.0)
     low_reference_confidence = any(
@@ -337,6 +364,7 @@ def build_conversation_understanding_pack(
             limit=120,
         ),
         "belief_state": belief,
+        "dialogue_frame": dialogue_frame,
         "resolved_references": references,
         "intent_hypotheses": hypotheses,
         "selected_intent": belief.get("selected_intent"),

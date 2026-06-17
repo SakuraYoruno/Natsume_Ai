@@ -82,18 +82,30 @@ def _belief_can_drive_reply(belief: Mapping[str, Any], *, now_ms: int | None = N
     return True
 
 
-def _last_life_proactive_turn(conn: Any, *, session_id: str, limit: int = 12) -> dict[str, Any]:
+def _last_life_proactive_turn(
+    conn: Any,
+    *,
+    session_id: str,
+    limit: int = 12,
+    before_ms: int | None = None,
+) -> dict[str, Any]:
     if not session_id:
         return {}
+    clauses = ["session_id=?"]
+    params: list[Any] = [session_id]
+    if before_ms:
+        clauses.append("ts_ms <= ?")
+        params.append(int(before_ms))
+    params.append(max(1, int(limit)))
     rows = conn.execute(
-        """
+        f"""
 SELECT turn_id, request_id, role, content, ts_ms, turn_index, metadata
 FROM conversation_turn
-WHERE session_id=?
+WHERE {' AND '.join(clauses)}
 ORDER BY ts_ms DESC
 LIMIT ?
 """,
-        (session_id, max(1, int(limit))),
+        params,
     ).fetchall()
     for row in rows:
         metadata = _mapping(_loads(row["metadata"], {}))
@@ -141,7 +153,15 @@ LIMIT 1
     }
 
 
-def _recent_memory_events(conn: Any, *, person_id: str, session_id: str, visibility: str, limit: int) -> list[dict[str, Any]]:
+def _recent_memory_events(
+    conn: Any,
+    *,
+    person_id: str,
+    session_id: str,
+    visibility: str,
+    limit: int,
+    before_ms: int | None = None,
+) -> list[dict[str, Any]]:
     if not _table_exists(conn, "memory_event"):
         return []
     clauses = ["person_id=?", "active=1"]
@@ -152,6 +172,9 @@ def _recent_memory_events(conn: Any, *, person_id: str, session_id: str, visibil
     if visibility:
         clauses.append("visibility=?")
         params.append(visibility)
+    if before_ms:
+        clauses.append("created_at_ms <= ?")
+        params.append(int(before_ms))
     params.append(max(1, min(int(limit or 8), 50)))
     rows = conn.execute(
         f"""
@@ -183,6 +206,42 @@ LIMIT ?
             }
         )
     return list(reversed(events))
+
+
+def _current_request_user_event_boundary(
+    conn: Any,
+    *,
+    person_id: str,
+    session_id: str,
+    request_id: str,
+) -> int:
+    rid = _text(request_id, limit=180)
+    if not rid or not _table_exists(conn, "memory_event"):
+        return 0
+    clauses = ["person_id=?", "role='user'", "active=1", "json_extract(refs_json, '$.request_id')=?"]
+    params: list[Any] = [person_id, rid]
+    if session_id:
+        clauses.append("session_id=?")
+        params.append(session_id)
+    try:
+        row = conn.execute(
+            f"""
+SELECT created_at_ms
+FROM memory_event
+WHERE {' AND '.join(clauses)}
+ORDER BY created_at_ms ASC, id ASC
+LIMIT 1
+""",
+            params,
+        ).fetchone()
+    except Exception:
+        return 0
+    if row is None:
+        return 0
+    try:
+        return int(row["created_at_ms"] or 0)
+    except Exception:
+        return 0
 
 
 def _event_time_ms(event: Mapping[str, Any] | None) -> int:
@@ -314,6 +373,7 @@ def build_memory_context_debug(
     person_id: str = "default",
     user_message: str = "",
     current_user_message: str = "",
+    request_id: str = "",
     limit: int = 8,
 ) -> dict[str, Any]:
     conn = _conn(ledger)
@@ -321,14 +381,29 @@ def build_memory_context_debug(
     sid = _text(session_id, limit=180)
     pid = _text(person_id, limit=120) or "default"
     message = _text(user_message or current_user_message, limit=500)
+    rid = _text(request_id, limit=180)
     selected_context: dict[str, Any] = {
         "current_user_message": message,
     }
     suppressed: list[dict[str, Any]] = []
     reason_codes: list[str] = []
 
-    recent_visible_events = _recent_memory_events(conn, person_id=pid, session_id=sid, visibility="visible", limit=limit)
-    current_boundary_ms = _current_message_event_boundary(recent_visible_events, message=message)
+    current_boundary_ms = _current_request_user_event_boundary(
+        conn,
+        person_id=pid,
+        session_id=sid,
+        request_id=rid,
+    )
+    recent_visible_events = _recent_memory_events(
+        conn,
+        person_id=pid,
+        session_id=sid,
+        visibility="visible",
+        limit=limit,
+        before_ms=current_boundary_ms or None,
+    )
+    if not current_boundary_ms:
+        current_boundary_ms = _current_message_event_boundary(recent_visible_events, message=message)
     if current_boundary_ms:
         recent_visible_events = [
             event for event in recent_visible_events if _event_time_ms(event) <= current_boundary_ms
@@ -349,15 +424,21 @@ def build_memory_context_debug(
 
     recent_turns: list[dict[str, Any]] = []
     if sid:
+        turn_clauses = ["session_id=?"]
+        turn_params: list[Any] = [sid]
+        if current_boundary_ms:
+            turn_clauses.append("ts_ms <= ?")
+            turn_params.append(int(current_boundary_ms))
+        turn_params.append(max(1, int(limit)))
         rows = conn.execute(
-            """
+            f"""
 SELECT turn_id, request_id, role, content, ts_ms, turn_index, metadata
 FROM conversation_turn
-WHERE session_id=?
+WHERE {' AND '.join(turn_clauses)}
 ORDER BY ts_ms DESC
 LIMIT ?
 """,
-            (sid, max(1, int(limit))),
+            turn_params,
         ).fetchall()
         for row in reversed(rows):
             recent_turns.append(
@@ -372,7 +453,7 @@ LIMIT ?
                 }
             )
     selected_context["current_session_recent_turns"] = recent_turns
-    proactive_turn = _last_life_proactive_turn(conn, session_id=sid)
+    proactive_turn = _last_life_proactive_turn(conn, session_id=sid, before_ms=current_boundary_ms or None)
     if proactive_turn:
         selected_context["previous_life_proactive_turn"] = proactive_turn
     pending_proactive_episode = _last_pending_proactive_episode(conn, person_id=pid, now_ms=now)
@@ -394,6 +475,29 @@ LIMIT ?
                 },
             }
     binding_decision = _binding_decision(message=message, visible_events=recent_visible_events, pending_episode=pending_proactive_episode)
+    conversation_event_resolution: dict[str, Any] = {}
+    try:
+        from host_brain.app.conversation_event_resolver import resolve_conversation_event_action  # noqa: PLC0415
+
+        conversation_event_resolution = resolve_conversation_event_action(
+            ledger=conn,
+            person_id=pid,
+            session_id=sid,
+            current_user_message=message,
+            now_ms=now,
+            before_ms=current_boundary_ms or None,
+        )
+    except Exception as exc:
+        conversation_event_resolution = {
+            "schema_version": "Natsume.conversation_event_resolution.v1",
+            "status": "UNRESOLVED",
+            "reason_code": "CONVERSATION_EVENT_RESOLVER_ERROR",
+            "error": str(exc)[:200],
+        }
+    selected_context["conversation_event_resolution"] = conversation_event_resolution
+    if str(conversation_event_resolution.get("status") or "") == "RESOLVED":
+        reason = str(conversation_event_resolution.get("reason_code") or "CONVERSATION_EVENT_RESOLVED")
+        reason_codes.append(reason)
 
     belief = {}
     if sid and _table_exists(conn, "conversation_belief_state"):
@@ -415,6 +519,28 @@ LIMIT 1
                 suppressed.append({"layer": "short_term_belief", "reason_code": "BELIEF_EXPIRED_OR_LOW_CONFIDENCE", "item": belief})
                 reason_codes.append("BELIEF_EXPIRED_OR_LOW_CONFIDENCE")
 
+    dialogue_frame: dict[str, Any] = {}
+    try:
+        from host_brain.app.context.dialogue_frame import build_dialogue_frame  # noqa: PLC0415
+
+        dialogue_frame = build_dialogue_frame(
+            current_user_message=message,
+            recent_turns=recent_turns,
+            recent_visible_events=recent_visible_events,
+            conversation_event_resolution=conversation_event_resolution,
+            previous_belief=belief,
+        )
+    except Exception as exc:
+        dialogue_frame = {
+            "schema_version": "Natsume.dialogue_frame.v1",
+            "status": "UNRESOLVED",
+            "reason_code": "DIALOGUE_FRAME_ERROR",
+            "error": str(exc)[:200],
+        }
+    selected_context["dialogue_frame"] = dialogue_frame
+    if str(dialogue_frame.get("status") or "") == "RESOLVED":
+        reason_codes.append("DIALOGUE_FRAME_RESOLVED")
+
     pref_rows = conn.execute(
         """
 SELECT domain, profile_json, updated_at_ms
@@ -434,27 +560,33 @@ LIMIT 5
         """
 SELECT delivery_id, domain, items_json, created_at_ms
 FROM recommendation_delivery_log
-WHERE person_id=?
+WHERE active=1
+  AND (
+    person_id=?
+    OR (? != '' AND session_id=?)
+    OR (? != '' AND conversation_id=?)
+  )
 ORDER BY created_at_ms DESC
 LIMIT 3
 """,
-        (pid,),
+        (pid, sid, sid, sid, sid),
     ).fetchall() if _table_exists(conn, "recommendation_delivery_log") else []
     selected_context["bound_recommendation_feedback"] = [
         {"delivery_id": row["delivery_id"], "domain": row["domain"], "items": _loads(row["items_json"], []), "created_at_ms": row["created_at_ms"]}
         for row in delivery_rows
     ]
 
-    if _binding_suppresses_long_term_evidence(binding_decision):
+    if _binding_suppresses_long_term_evidence(binding_decision) or bool(_mapping(dialogue_frame).get("suppress_long_term_memory")):
         memory_rows = []
         suppressed.append(
             {
                 "layer": "long_term_memory_evidence",
-                "reason_code": "SUPPRESSED_BY_RECENT_VISIBLE_BINDING",
+                "reason_code": "SUPPRESSED_BY_DIALOGUE_FRAME" if bool(_mapping(dialogue_frame).get("suppress_long_term_memory")) else "SUPPRESSED_BY_RECENT_VISIBLE_BINDING",
                 "binding": binding_decision,
+                "dialogue_frame": dialogue_frame,
             }
         )
-        reason_codes.append("SUPPRESSED_BY_RECENT_VISIBLE_BINDING")
+        reason_codes.append("SUPPRESSED_BY_DIALOGUE_FRAME" if bool(_mapping(dialogue_frame).get("suppress_long_term_memory")) else "SUPPRESSED_BY_RECENT_VISIBLE_BINDING")
     else:
         memory_rows = conn.execute(
             """
@@ -528,6 +660,7 @@ LIMIT 8
             "pending_life_proactive_episode": pending_proactive_episode,
         },
         "binding_decision": binding_decision,
+        "conversation_event_resolution": selected_context.get("conversation_event_resolution", {}),
         "layer_order": list(LAYER_ORDER),
         "suppressed_items": suppressed,
         "reason_codes": sorted(set(reason_codes)),
@@ -603,6 +736,8 @@ WHERE deleted_at IS NULL
   AND source_memory_ids NOT LIKE '%lifeexp_%'
   AND source_memory_ids NOT LIKE '%turn::%'
   AND source_memory_ids NOT LIKE '%conversation_turn%'
+  AND source_memory_ids NOT LIKE '%life_episode::%'
+  AND source_memory_ids NOT LIKE '%life_memory_collection::%'
 """
     ).fetchone()[0] if _table_exists(conn, "semantic_memory") else 0
     health = {

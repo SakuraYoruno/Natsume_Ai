@@ -187,7 +187,7 @@ def build_bio_ops_runtime_trace(
         "active_silence": silence,
         "response_breathing": breathing,
         "owner_behavior_overlay": owner_behavior_overlay,
-        "forbidden_actions": ["codex_worker", "long_reasoning", "skill_execution"]
+        "forbidden_actions": ["agent_worker", "long_reasoning", "skill_execution"]
         if bool(dict(reflex).get("matched"))
         else [],
     }

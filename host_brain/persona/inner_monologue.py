@@ -185,6 +185,38 @@ _LIVELINESS_OVERWRITTEN_PHRASES = (
     "心里的线",
     "温柔的余地",
 )
+_LIVELINESS_GENERIC_PHRASES = (
+    "安静了一阵子",
+    "安静了好久",
+    "安静了很久",
+    "屏幕安静",
+    "空白处",
+    "空落落",
+    "呼吸轻了",
+    "呼吸轻些",
+    "喉咙轻轻卡",
+    "喉咙卡",
+    "手指也跟着顿",
+    "慢半拍的小表情",
+    "小表情还在",
+    "想靠近一点",
+    "有点想靠近",
+    "靠近感",
+    "还在不在",
+    "不想打扰",
+    "轻轻戳",
+    "戳你一下",
+    "冒泡",
+    "等你回来",
+    "等你回",
+    "怕太满",
+    "怕太急",
+    "想说点什么",
+    "说点什么",
+    "没有动静",
+    "在不在",
+    "我在这里",
+)
 _THOUGHT_FORM_MARKERS = {
     "body_signal": ("手", "指尖", "胸口", "呼吸", "眼睛", "肩", "胃", "热", "冷", "绷", "累", "慢"),
     "scene_notice": ("屏幕", "光标", "输入框", "空白", "桌宠", "表情", "键盘", "看见"),
@@ -198,6 +230,7 @@ _DISTILL_BLOCKING_QUALITY_FLAGS = {
     "meta_reply_strategy",
     "abstract_system_language",
     "overwritten_prose",
+    "generic_presence_filler",
     "overexplained",
     "multi_sentence",
 }
@@ -665,6 +698,9 @@ def score_inner_note_liveliness(
     if any(phrase in value for phrase in _LIVELINESS_OVERWRITTEN_PHRASES):
         flags.append("overwritten_prose")
         score -= 0.28
+    if any(phrase in value for phrase in _LIVELINESS_GENERIC_PHRASES):
+        flags.append("generic_presence_filler")
+        score -= 0.36
     if value.count("，") >= 4:
         flags.append("overexplained")
         score -= 0.18
@@ -722,13 +758,13 @@ def build_inner_life_source_packet(
     candidates: list[dict[str, Any]] = [
         {
             "thought_form": "scene_notice",
-            "seed": "屏幕安静了一会儿，注意力在空白处停了一下",
-            "note_shape": "从眼前画面开始，半句感受即可",
+            "seed": "没有新的可见事件，只是一条低显著静默采样",
+            "note_shape": "没有具体对象或环境变化时，返回空 note",
         },
         {
             "thought_form": "quiet_drift",
-            "seed": "没有新输入时，那点等待感只是轻轻浮上来",
-            "note_shape": "不要解释等待，写一个短暂停顿",
+            "seed": "注意力暂时没有落到具体对象上",
+            "note_shape": "不要把静默编成等待感；除非有具体来源，否则 stay_quiet",
         },
     ]
     if fatigue >= 0.34 or stress >= 0.34 or sensory_load >= 0.34:
@@ -739,27 +775,27 @@ def build_inner_life_source_packet(
                 "note_shape": "先写身体或注意力的小反应，再带一点情绪",
             }
         )
-    if topic:
+    if _inner_topic_is_concrete_anchor(topic):
         candidates.append(
             {
                 "thought_form": "memory_flash",
-                "seed": f"刚才的{topic}又闪回来一点",
-                "note_shape": "像记忆残片，不要写成复盘总结",
+                "seed": f"一个具体对象还没收口：{topic}",
+                "note_shape": "只围绕这个具体对象，不复述用户句式，不写泛化偏好",
             }
         )
     if loneliness >= 0.36 or anticipation >= 0.36:
         candidates.append(
             {
                 "thought_form": "interrupted_impulse",
-                "seed": "有点想靠近，又怕一下子太满",
-                "note_shape": "写冲动被自己轻轻打断的那一下",
+                "seed": "想开口，但没有找到新的具体落点",
+                "note_shape": "没有具体落点时返回空 note，不写靠近或打扰",
             }
         )
         candidates.append(
             {
                 "thought_form": "ambivalence",
-                "seed": "想说点什么，又拿不准这一刻该不该靠太近",
-                "note_shape": "保留矛盾，不要给结论",
+                "seed": "主动欲望升了一点，但缺少足够证据支撑一句话",
+                "note_shape": "保留抑制，不要把它写成在不在或等你",
             }
         )
 
@@ -781,8 +817,10 @@ def build_inner_life_source_packet(
         "recent_forms": [item for item in recent_forms if item],
         "rules": [
             "note must grow from selected.seed before any interpretation",
+            "empty note is allowed when selected.seed has no concrete object",
             "keep note ordinary, partial, and private",
             "do not turn the seed into a reply plan or quality critique",
+            "do not turn silence into presence filler",
         ],
     }
 
@@ -790,6 +828,40 @@ def build_inner_life_source_packet(
 def _thought_id(*, user_id: str, ts_ms: int, text: str, focus: str) -> str:
     digest = hashlib.sha1(f"{user_id}|{ts_ms}|{focus}|{text}".encode("utf-8")).hexdigest()
     return f"thought_{digest[:16]}"
+
+
+def _inner_topic_is_concrete_anchor(topic: Any) -> bool:
+    value = str(topic or "").strip()
+    if not value:
+        return False
+    compact = re.sub(r"[\s，,。.!！?？;；：:、…~～\"“”'‘’]", "", value)
+    if len(compact) < 4 or len(compact) > 48:
+        return False
+    vague_terms = (
+        "这种类型",
+        "这个类型",
+        "那种类型",
+        "这种",
+        "这个",
+        "那个",
+        "这些",
+        "那些",
+        "喜欢",
+        "不喜欢",
+        "好不好",
+        "是不是",
+        "怎么样",
+        "怎么了",
+        "继续",
+        "然后呢",
+        "刚才",
+        "话题",
+        "消息",
+        "回复",
+    )
+    if any(term in compact for term in vague_terms):
+        return False
+    return any(marker in value for marker in ("《", "》", "http", "封面", "epub", "每日推荐", "桌宠", "VTS", "QQ", "OneBot", "NapCat"))
 
 
 def _finalize_private_text(value: Any) -> str:

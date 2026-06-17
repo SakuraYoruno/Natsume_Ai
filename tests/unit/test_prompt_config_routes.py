@@ -12,13 +12,14 @@ def _client() -> TestClient:
     return TestClient(app)
 
 
-def test_prompt_config_templates_returns_retired_empty_catalog() -> None:
+def test_prompt_config_templates_returns_versioned_prompt_spec_catalog() -> None:
     response = _client().get("/prompt-config/templates")
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["items"] == []
-    assert payload["total"] == 0
+    assert payload["total"] > 0
+    assert any(item["template_id"] == "react_loop.prompt_templates" for item in payload["items"])
+    assert all(item["source"] == "prompt_spec" for item in payload["items"])
     assert payload["retired"] is True
 
 
@@ -29,6 +30,7 @@ def test_prompt_config_template_detail_exposes_prompt_spec_shape() -> None:
     item = response.json()["item"]
     assert item["template_id"] == "multimodal_observer.model_prompt.templates"
     assert item["source"] == "prompt_spec"
+    assert item["version"].startswith("v")
     assert item["content_type"] == "json"
     assert "image_system_prompt" in item["resolved_content"]
 

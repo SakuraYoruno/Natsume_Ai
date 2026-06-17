@@ -56,7 +56,7 @@ def test_persistent_self_state_updates_from_inner_event(monkeypatch, tmp_path) -
     sm._PERSISTENT_SELF_CACHE.clear()
 
     state = sm.load_persistent_self_state(user_id="u-self")
-    assert "当前 Soul" in state["self_identity"]
+    assert "Soul.md 定义的数字生命" in state["self_identity"]
     assert state["self_update_count"] == 0
 
     updated = sm.observe_persistent_self_event(

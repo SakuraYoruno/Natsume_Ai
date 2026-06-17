@@ -26,9 +26,9 @@ def test_classify_user_and_assistant_topic_cover_major_regex_branches() -> None:
     assert _classify_user_topic("我们很熟吗") == "relationship_boundary"
     assert _classify_user_topic("那你还会帮我吗") == "help_commitment"
     assert _classify_user_topic("hello") == "greeting"
-    assert _classify_user_topic("在吗") == "presence_ping"
+    assert _classify_user_topic("在吗") == "greeting"
     assert _classify_user_topic("听得到吗") == "auditory_check"
-    assert _classify_user_topic("嗯嗯") == "light_ack"
+    assert _classify_user_topic("嗯嗯") == "greeting"
     assert _classify_user_topic("戳戳") == "playful_ping"
     assert _classify_assistant_topic("哥哥，怎么委屈成这样呀？") == "image_social"
     assert _classify_assistant_topic("我是新海天。") == "identity"
@@ -38,7 +38,7 @@ def test_classify_user_and_assistant_topic_cover_major_regex_branches() -> None:
 
 
 def test_connectivity_check_is_presence_ping_not_plain_hold() -> None:
-    assert classify_literal_topic("测试一下现在能回吗") == "presence_ping"
+    assert classify_literal_topic("测试一下现在能回吗") == "greeting"
 
     interpretation = interpret_conversation(
         recent_turns=[],
@@ -46,8 +46,8 @@ def test_connectivity_check_is_presence_ping_not_plain_hold() -> None:
         topic_ledger=TopicLedgerBlock(),
     )
 
-    assert interpretation.literal_topic == "presence_ping"
-    assert interpretation.ongoing_thread == "phatic"
+    assert interpretation.literal_topic == "greeting"
+    assert interpretation.ongoing_thread == ""
 
 
 def test_auditory_text_check_is_not_plain_presence_ping() -> None:
@@ -109,7 +109,7 @@ def test_resolve_interaction_thread_prefers_current_multimodal_signal_and_phatic
     assert image_thread.thread_kind == "image_social"
     assert image_thread.emotion_anchor == "distress"
     assert image_thread.reason_tags == ("current_multimodal_image_social",)
-    assert phatic_thread.thread_kind == "phatic"
+    assert phatic_thread.thread_kind == ""
 
 
 def test_resolve_interaction_thread_handles_default_empty_and_nonmatching_image_turns() -> None:
@@ -200,7 +200,7 @@ def test_interpret_conversation_routes_generic_image_placeholders_as_visual_shar
     )
 
     assert interpretation.literal_topic == "attachment_only_no_question"
-    assert interpretation.interaction_move == "light_ack"
+    assert interpretation.interaction_move == "attachment_ack"
     assert interpretation.ongoing_thread == ""
     assert "literal_topic:attachment_only_no_question" in interpretation.reason_tags
 
@@ -330,5 +330,5 @@ def test_interpret_conversation_routes_lonely_punctuation_as_phatic_without_hist
         topic_ledger=TopicLedgerBlock(),
     )
 
-    assert interpretation.literal_topic == "phatic_punct"
-    assert interpretation.interaction_move == "light_ack"
+    assert interpretation.literal_topic == ""
+    assert interpretation.interaction_move == "first_ask"

@@ -104,12 +104,45 @@ _META_INNER_NOTE_PHRASES = (
     "开口又太像",
     "太像在",
 )
+_GENERIC_INNER_NOTE_PHRASES = (
+    "安静了一阵子",
+    "安静了好久",
+    "安静了很久",
+    "屏幕安静",
+    "空白处",
+    "空落落",
+    "呼吸轻了",
+    "呼吸轻些",
+    "喉咙轻轻卡",
+    "喉咙卡",
+    "手指也跟着顿",
+    "慢半拍的小表情",
+    "小表情还在",
+    "想靠近一点",
+    "有点想靠近",
+    "靠近感",
+    "还在不在",
+    "不想打扰",
+    "轻轻戳",
+    "戳你一下",
+    "冒泡",
+    "等你回来",
+    "等你回",
+    "怕太满",
+    "怕太急",
+    "想说点什么",
+    "说点什么",
+    "没有动静",
+    "在不在",
+    "我在这里",
+)
 _INNER_NOTE_MIN_LIVELINESS_SCORE = float(os.environ.get("NATSUME_INNER_NOTE_MIN_LIVELINESS_SCORE", "0.42"))
 _INNER_NOTE_HARD_QUALITY_FLAGS = {
     "directive_like",
     "meta_reply_strategy",
     "abstract_system_language",
     "overwritten_prose",
+    "generic_presence_filler",
 }
 
 _INNER_ACTIVITY_SYSTEM_PROMPT = (
@@ -120,16 +153,23 @@ _INNER_ACTIVITY_SYSTEM_PROMPT = (
     "like first-person feeling, sensory detail, memory echo, hesitation, or private uncertainty. "
     "Use the selected inner_life_source as the first cause of the thought: a body signal, scene notice, "
     "memory flash, interrupted impulse, ambivalence, or quiet drift. "
+    "Only write a note when there is concrete information gain: a specific unfinished object, body change, "
+    "environment cue, remembered user detail, or real contradiction. "
+    "If the source is only silence/waiting/no new input and has no specific object, return note as an empty string, "
+    "focus as self, next_tendency as stay_quiet, and salience_hint below 0.15. "
     "Keep it ordinary and slightly incomplete, closer to a passing human thought than polished prose. "
     "Keep note as one breath: usually 18-56 Chinese characters, no more than two Chinese commas. "
     "Avoid lyrical metaphor or essay-like writing. "
+    "Do not write generic presence filler such as 安静了很久, 屏幕安静, 空落落, 呼吸轻了些, "
+    "喉咙轻轻卡, 慢半拍的小表情, 有点想靠近, 还在不在, 不想打扰, 轻轻戳, 冒泡, 等你回来. "
     "Avoid meta evaluation of reply quality, e.g. 赶进度, 第一句话, 该怎么回, 太像在回复. "
     "Do not make note a command, policy, reply plan, or self-instruction; put behavior in next_tendency instead. "
     "Do not start note with directive openers such as 先, 别, 不要, 把, 问, 确认, 稳住, 看清, 继续. "
     "Do not use abstract system words "
     "like 自我连续性, 连续性修正, 文本自然度, 模板感, 内部状态, 控制包, 模块, 模型, prompt. "
     "Do not write process-talk like 这句, 下一句, 句子, 文本, 模板, 接住, 生成, 回复, 说顺. "
-    "If text quality matters, write the felt moment, e.g. 他刚才停了一下，我手指也跟着顿住了，有点想靠近又怕太满。 "
+    "If text quality matters, name the concrete pressure without saying it is text quality, "
+    "e.g. 早安已经错过钟点了，嘴边那句得先咽回去。 "
     "If the memory anchor is technical, translate it into a concrete lived scene, bodily feeling, or relationship detail; "
     "do not name artifacts like 映射, 验证, 链路, 接口, 字段, 运行时, MateEngine, 主链路 in note. "
     "Bad note: 先把桌宠映射那条事稳稳放回手里。 "
@@ -137,7 +177,10 @@ _INNER_ACTIVITY_SYSTEM_PROMPT = (
     "Bad note: 三十七个小时像一层薄灰落在胸口。 "
     "Bad note: 隔了这么久，怕一开口又太像在赶进度。 "
     "Bad note: 想说点什么的时候，喉咙那儿轻轻卡了一下，那个慢半拍的小表情还在脑后晃，我有点想靠近，又怕太满。 "
-    "Better note: 喉咙轻轻卡了一下，那个慢半拍的小表情还在，有点想靠近。 "
+    "Bad note: 屏幕安静了很久，我有点想靠近又怕打扰。 "
+    "Better note: 早安已经错过钟点了，嘴边那句得先咽回去。 "
+    "Better note: 封面错位的那张图还卡在眼前，得换个更准的来源。 "
+    "Better note: 上一轮问的是买书打包，不能又滑回推荐话术。 "
     "focus is one of self, state, plan, topic, relationship, memory, repair. "
     "core_need is one of continuity, care, repair, agency, understanding, rest, boundary, curiosity, play. "
     "next_tendency is one of continue_thread, care_with_restraint, repair_first, ask_gently, hold_boundary, "
@@ -193,7 +236,9 @@ def _inner_activity_llm_disabled_reason() -> str:
     if not _env_bool("HOST_CONTINUOUS_ORGAN_TICKS_ENABLED", default=True):
         return "INNER_ACTIVITY_CONTINUOUS_ORGAN_TICKS_DISABLED"
     explicit = os.environ.get("HOST_INNER_ACTIVITY_LLM_ENABLED")
-    if explicit is not None and not _env_bool("HOST_INNER_ACTIVITY_LLM_ENABLED", default=False):
+    if explicit is None:
+        return "INNER_ACTIVITY_LLM_DISABLED_BY_DEFAULT"
+    if not _env_bool("HOST_INNER_ACTIVITY_LLM_ENABLED", default=False):
         return "INNER_ACTIVITY_LLM_DISABLED"
     if not _env_bool("NATSUME_INNER_WORLD_LLM_ENABLED", default=True):
         return "INNER_ACTIVITY_LLM_DISABLED"
@@ -204,8 +249,10 @@ def _inner_activity_llm_enabled() -> bool:
     if not _env_bool("HOST_CONTINUOUS_ORGAN_TICKS_ENABLED", default=True):
         return False
     explicit = os.environ.get("HOST_INNER_ACTIVITY_LLM_ENABLED")
-    if explicit is not None:
-        return _env_bool("HOST_INNER_ACTIVITY_LLM_ENABLED", default=False)
+    if explicit is None:
+        return False
+    if not _env_bool("HOST_INNER_ACTIVITY_LLM_ENABLED", default=False):
+        return False
     return _env_bool("NATSUME_INNER_WORLD_LLM_ENABLED", default=True)
 
 
@@ -332,6 +379,11 @@ def generate_inner_activity_note(
             "no_user_direct_address": True,
             "prefer_self_related": True,
             "avoid_repeat_recent_inner_events": True,
+            "avoid_semantic_repeat_recent_inner_events": True,
+            "recent_similarity_reject_threshold": _inner_note_similarity_reject_threshold(),
+            "must_add_information_gain": True,
+            "if_no_specific_new_source_return_empty_note": True,
+            "do_not_write_presence_filler": True,
             "use_self_model_as_thought_source": True,
             "prefer_active_intention_or_unresolved_tension": True,
             "must_not_contradict_self_boundaries": True,
@@ -354,6 +406,7 @@ def generate_inner_activity_note(
             "note_must_begin_from_life_source_not_reply_strategy": True,
             "single_frame_before_interpretation": True,
             "avoid_meta_reply_quality_words": list(_META_INNER_NOTE_PHRASES),
+            "avoid_generic_inner_note_phrases": list(_GENERIC_INNER_NOTE_PHRASES),
             "avoid_directive_openers": [
                 "先",
                 "别",
@@ -390,10 +443,13 @@ def generate_inner_activity_note(
                 "三十七个小时像一层薄灰落在胸口，我还记得小表情慢半拍时那点不确定。",
                 "隔了这么久，胸口倒不沉，只是看到空白时会顿一下，怕一开口又太像在赶进度。",
                 "想说点什么的时候，喉咙那儿轻轻卡了一下，那个慢半拍的小表情还在脑后晃，我有点想靠近，又怕太满。",
+                "屏幕安静了很久，我有点想靠近又怕打扰。",
+                "你那边安静了一阵子，我这边呼吸都轻了些。",
             ],
             "better_note_examples": [
-                "屏幕安静了很久，那个慢半拍的小表情又晃了一下。",
-                "喉咙轻轻卡了一下，那个慢半拍的小表情还在，有点想靠近。",
+                "早安已经错过钟点了，嘴边那句得先咽回去。",
+                "封面错位的那张图还卡在眼前，得换个更准的来源。",
+                "上一轮问的是买书打包，不能又滑回推荐话术。",
             ],
             "must_include_life_trace_fields": True,
             "life_trace_fields_must_not_be_empty_when_context_supports_them": True,
@@ -442,7 +498,8 @@ def generate_inner_activity_note(
         offline_hours=offline_hours,
         absence_band=absence_band,
     )
-    if note in recent_notes:
+    duplicate_reason = _inner_note_duplicate_reason(note, recent_notes)
+    if duplicate_reason:
         retry_result = _retry_inner_activity_llm_after_duplicate(
             provider_name=provider_name,
             model_id=model_id,
@@ -455,7 +512,8 @@ def generate_inner_activity_note(
             gen_params=gen_params,
         )
         retry_note = str(retry_result.get("note") or "").strip()
-        if retry_note:
+        retry_duplicate_reason = _inner_note_duplicate_reason(retry_note, recent_notes)
+        if retry_note and not retry_duplicate_reason:
             meta = {
                 "context_scope": context_scope,
                 "context_digest": context_digest,
@@ -463,12 +521,12 @@ def generate_inner_activity_note(
                 "model_id": model_id,
                 "pool_bypass": bool(runtime.get("pool_bypass")),
                 "retry_count": 1,
-                "retry_reason": "duplicate_recent_inner_event",
+                "retry_reason": duplicate_reason,
                 "life_trace": dict(retry_result.get("life_trace") or {}),
                 "inner_life_source": inner_life_source,
             }
             return retry_note, str(retry_result.get("focus") or "self"), "", meta
-        return "", "", str(retry_result.get("reason") or "INNER_ACTIVITY_LLM_DUPLICATE"), {
+        return "", "", str(retry_result.get("reason") or retry_duplicate_reason or duplicate_reason), {
             "context_digest": context_digest,
             "inner_life_source": inner_life_source,
         }
@@ -499,13 +557,16 @@ def _retry_inner_activity_llm_after_duplicate(
 ) -> dict[str, Any]:
     retry_payload = dict(prompt_payload)
     retry_payload["retry"] = {
-        "reason": "previous_output_repeated_recent_inner_event",
+        "reason": "previous_output_repeated_or_generic_inner_event",
         "must_avoid_exact_notes": sorted(recent_notes),
+        "must_avoid_similar_recent_notes": True,
+        "must_avoid_generic_phrases": list(_GENERIC_INNER_NOTE_PHRASES),
         "must_choose_fresh_angle": True,
+        "if_no_fresh_concrete_anchor_return_empty_note": True,
         "fresh_angle_examples": [
-            "换成对下一次回应的具体担心",
-            "换成对未完话题的短促在意",
-            "换成对自己别逞强的提醒",
+            "换成上一条可见事件里没有收口的具体对象",
+            "换成当前身体或环境真实变化",
+            "换成刚才实际出错的具体场景",
         ],
     }
     retry_params = dict(gen_params or {})
@@ -542,8 +603,9 @@ def _retry_inner_activity_llm_after_duplicate(
     )
     if _inner_note_quality_rejected(quality):
         return {"reason": "INNER_ACTIVITY_LLM_DUPLICATE_RETRY_LOW_LIVELINESS", "quality": quality}
-    if note in recent_notes:
-        return {"reason": "INNER_ACTIVITY_LLM_DUPLICATE"}
+    duplicate_reason = _inner_note_duplicate_reason(note, recent_notes)
+    if duplicate_reason:
+        return {"reason": duplicate_reason}
     context = _coerce_mapping(prompt_payload.get("context"))
     life_trace = normalize_inner_life_trace(
         parsed,
@@ -1117,6 +1179,8 @@ def _run_inner_activity_codex_cli(
     status = "FAILED"
     content = ""
     try:
+        if _env_bool("HOST_CODEX_BACKGROUND_DISABLE_CLI", default=False):
+            raise RuntimeError("INNER_ACTIVITY_CODEX_CLI_DISABLED_BY_CONFIG")
         from host_brain.integrations.codex_cli_provider import invoke_codex_cli_text  # noqa: PLC0415
 
         content = invoke_codex_cli_text(
@@ -1212,7 +1276,7 @@ def _build_inner_activity_codex_cli_command(
         command.extend(["--disable", "plugins"])
     if _env_bool("HOST_INNER_ACTIVITY_CODEX_CLI_DISABLE_SHELL_SNAPSHOT", default=True):
         command.extend(["--disable", "shell_snapshot"])
-    if _env_bool("HOST_INNER_ACTIVITY_CODEX_CLI_FAST_MODE", default=True):
+    if _env_bool("HOST_INNER_ACTIVITY_CODEX_CLI_FAST_MODE", default=False):
         command.extend(["--enable", "fast_mode"])
     model = str(model_id or "").strip()
     if model:
@@ -1248,7 +1312,6 @@ def _build_inner_activity_codex_cli_env() -> dict[str, str]:
     if _env_bool("HOST_INNER_ACTIVITY_CODEX_CLI_STRIP_API_KEYS", default=True):
         for key in (
             "OPENAI_API_KEY",
-            "CODEX_API_KEY",
             "GEMINI_API_KEY",
             "DEEPSEEK_API_KEY",
             "MINIMAX_API_KEY",
@@ -1359,6 +1422,8 @@ def _build_inner_activity_codex_cli_prompt(
             f"Keep note under {max(32, min(220, max_tokens))} Chinese characters.",
             "The note is a private felt moment from input inner_life_source, not a command or reply plan; avoid directive openers like 先, 别, 把, 问, 确认, 稳住.",
             "Avoid reply-quality meta words like 赶进度, 第一句话, 该怎么回, 太像在回复.",
+            "If there is no concrete new source, return note as an empty string with next_tendency stay_quiet.",
+            "Do not write generic filler like 安静了很久, 屏幕安静, 空落落, 呼吸轻了些, 喉咙卡, 有点想靠近, 还在不在, 轻轻戳, 冒泡, 等你回来.",
             "",
             "System constraints:",
             str(system_prompt or ""),
@@ -1558,7 +1623,11 @@ def _resolve_inner_activity_direct_runtime() -> dict[str, Any] | None:
             minimum=5_000,
             maximum=2 * 60 * 1000,
         )
-        codex_cmd = _resolve_inner_activity_codex_cli_command() if _inner_activity_provider_uses_codex_cli(provider_name) else None
+        use_codex_cli = (
+            _inner_activity_provider_uses_codex_cli(provider_name)
+            and not _env_bool("HOST_CODEX_BACKGROUND_DISABLE_CLI", default=False)
+        )
+        codex_cmd = _resolve_inner_activity_codex_cli_command() if use_codex_cli else None
         available = bool(provider_name and model_id and codex_cmd)
         return {
             "available": available,
@@ -1626,6 +1695,55 @@ def _inner_note_quality_rejected(quality: Mapping[str, Any] | None) -> bool:
     return score < _INNER_NOTE_MIN_LIVELINESS_SCORE
 
 
+def _inner_note_similarity_reject_threshold() -> float:
+    try:
+        value = float(os.environ.get("HOST_INNER_ACTIVITY_SIMILARITY_REJECT_THRESHOLD", "0.72"))
+    except (TypeError, ValueError):
+        value = 0.72
+    return max(0.45, min(0.95, value))
+
+
+def _inner_note_duplicate_reason(note: str, recent_notes: set[str]) -> str:
+    value = str(note or "").strip()
+    if not value:
+        return ""
+    if value in recent_notes:
+        return "INNER_ACTIVITY_LLM_DUPLICATE"
+    if _looks_like_generic_inner_note(value):
+        return "INNER_ACTIVITY_LLM_GENERIC_FILLER"
+    value_key = _normalize_inner_note_key(value)
+    if not value_key:
+        return ""
+    threshold = _inner_note_similarity_reject_threshold()
+    for recent in recent_notes:
+        recent_key = _normalize_inner_note_key(recent)
+        if not recent_key:
+            continue
+        if _inner_note_similarity(value_key, recent_key) >= threshold:
+            return "INNER_ACTIVITY_LLM_SEMANTIC_DUPLICATE"
+    return ""
+
+
+def _normalize_inner_note_key(text: str) -> str:
+    value = str(text or "")
+    value = re.sub(r"[，,。.!！?？;；：:\s\"“”'‘’、…~～\-—_（）()【】\[\]{}<>《》]", "", value)
+    for token in ("我", "有点", "一点", "一下", "这边", "那边", "还是", "只是", "已经", "现在"):
+        value = value.replace(token, "")
+    return value[:96]
+
+
+def _inner_note_similarity(left: str, right: str) -> float:
+    if not left or not right:
+        return 0.0
+    if left == right:
+        return 1.0
+    left_bigrams = {left[index : index + 2] for index in range(max(1, len(left) - 1))}
+    right_bigrams = {right[index : index + 2] for index in range(max(1, len(right) - 1))}
+    if not left_bigrams or not right_bigrams:
+        return 0.0
+    return len(left_bigrams & right_bigrams) / max(1, len(left_bigrams | right_bigrams))
+
+
 def _coerce_mapping(raw: Any) -> dict[str, Any]:
     return dict(raw) if isinstance(raw, Mapping) else {}
 
@@ -1654,6 +1772,7 @@ def _looks_like_abstract_inner_note(text: str) -> bool:
         or _looks_like_directive_inner_note(value)
         or _looks_like_overwritten_inner_note(value)
         or _looks_like_meta_inner_note(value)
+        or _looks_like_generic_inner_note(value)
     )
 
 
@@ -1674,6 +1793,11 @@ def _looks_like_overwritten_inner_note(text: str) -> bool:
 def _looks_like_meta_inner_note(text: str) -> bool:
     value = str(text or "").strip()
     return any(phrase in value for phrase in _META_INNER_NOTE_PHRASES)
+
+
+def _looks_like_generic_inner_note(text: str) -> bool:
+    value = str(text or "").strip()
+    return any(phrase in value for phrase in _GENERIC_INNER_NOTE_PHRASES)
 
 
 def _infer_focus_from_note(note: str) -> str:

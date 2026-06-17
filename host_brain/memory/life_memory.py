@@ -1,4 +1,4 @@
-"""Episode-first memory store for the digital-life memory SSOT.
+﻿"""Episode-first memory store for the digital-life memory SSOT.
 
 The first version keeps SQLite as the source of truth and treats every user
 turn, perception, scheduler event, and inner stream item as a life episode with
@@ -7512,7 +7512,7 @@ def _semantic_text_is_sensitive_or_noise(text: str) -> bool:
     if any(
         token in compact
         for token in (
-            "codexproductionjobcodex_lightnovel_recommender",
+            "codexproductionjobagent_lightnovel_recommender",
             "lightnovel_recommendation_delivery",
             "lightnovel_gateway_delivery",
             "轻小说推荐报告",
@@ -7552,7 +7552,7 @@ def _semantic_looks_like_recommendation_report(compact: str) -> bool:
             "命中偏好",
             "lightnovel_recommendation_delivery",
             "lightnovel_gateway_delivery",
-            "codex_lightnovel_recommender",
+            "agent_lightnovel_recommender",
         )
     )
 
@@ -8296,3 +8296,4 @@ __all__ = [
     "COLLECTION_SCOPE_RECENT",
     "COLLECTION_SCOPE_DELIVERY",
 ]
+

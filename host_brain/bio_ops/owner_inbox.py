@@ -15,7 +15,7 @@ from typing import Any
 from host_brain.bio_ops.adoption import ADOPTION_DECISION_ACCEPTED, ADOPTION_DECISION_REJECTED
 from host_brain.bio_ops.artifact_store import BioOpsArtifactStore, DEFAULT_BIO_OPS_ROOT
 from host_brain.bio_ops.safety import BIO_OPS_OWNER_ORGANS, is_bio_ops_sensitive_path
-from host_brain.codex_runtime.artifact_store import REPO_ROOT, sanitize_segment
+from host_brain.agent_runtime.artifact_store import REPO_ROOT, sanitize_segment
 from host_brain.core.ids import now_ms
 
 

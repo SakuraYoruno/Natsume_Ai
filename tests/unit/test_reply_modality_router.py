@@ -71,7 +71,7 @@ def test_router_does_not_auto_voice_text_greeting_by_default(monkeypatch) -> Non
     )
 
     assert decision.response_form == "text"
-    assert decision.response_form_reason == "phatic_text"
+    assert decision.response_form_reason == "default_text"
 
 
 def test_router_uses_text_for_auditory_check_without_audio() -> None:
@@ -82,7 +82,7 @@ def test_router_uses_text_for_auditory_check_without_audio() -> None:
     )
 
     assert decision.response_form == "text"
-    assert decision.response_form_reason == "phatic_text"
+    assert decision.response_form_reason == "default_text"
 
 
 def test_router_routes_close_inbound_voice_to_voice() -> None:
@@ -92,9 +92,9 @@ def test_router_routes_close_inbound_voice_to_voice() -> None:
         multimodal={"primary_modality": "voice"},
     )
 
-    assert decision.response_form == "voice"
-    assert decision.response_form_reason == "voice_echo_close"
-    assert decision.render_profile == "zh_voice"
+    assert decision.response_form == "text"
+    assert decision.response_form_reason == "default_text"
+    assert decision.render_profile == "zh_text"
 
 
 def test_router_honors_explicit_voice_request() -> None:

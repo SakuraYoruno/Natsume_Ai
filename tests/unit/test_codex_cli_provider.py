@@ -54,14 +54,13 @@ def test_codex_cli_provider_invokes_exec_without_api_key(monkeypatch, tmp_path) 
     assert "plugins" in captured["cmd"]
     assert "shell_snapshot" in captured["cmd"]
     assert "personality" in captured["cmd"]
-    assert "--enable" in captured["cmd"]
-    assert "fast_mode" in captured["cmd"]
+    assert "--enable" not in captured["cmd"]
+    assert "fast_mode" not in captured["cmd"]
     assert "-c" in captured["cmd"]
     assert 'model_reasoning_effort="none"' in captured["cmd"]
     assert "--ephemeral" not in captured["cmd"]
     assert "--sandbox" in captured["cmd"]
     assert "OPENAI_API_KEY" not in captured["env"]
-    assert "CODEX_API_KEY" not in captured["env"]
     assert "Return exactly one valid JSON object" in str(captured["input"])
 
 

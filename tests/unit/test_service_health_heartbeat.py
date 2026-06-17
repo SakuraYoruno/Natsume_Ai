@@ -103,9 +103,9 @@ def test_keepalive_ollama_local_model_is_disabled_project_wide() -> None:
         patch.dict(
             "os.environ",
             {
-                "HOST_LOCAL_14B_KEEPALIVE_ENABLED": "true",
-                "HOST_LOCAL_14B_KEEPALIVE_TTL": "720h",
-                "HOST_LOCAL_14B_KEEPALIVE_TIMEOUT_MS": "9000",
+                "HOST_LOCAL_LLM_KEEPALIVE_ENABLED": "true",
+                "HOST_LOCAL_LLM_KEEPALIVE_TTL": "720h",
+                "HOST_LOCAL_LLM_KEEPALIVE_TIMEOUT_MS": "9000",
             },
             clear=False,
         ),
@@ -119,7 +119,7 @@ def test_keepalive_ollama_local_model_is_disabled_project_wide() -> None:
 def test_local_ollama_keepalive_flag_is_forced_off() -> None:
     from host_brain.observability import service_health_heartbeat as heartbeat
 
-    with patch.dict("os.environ", {"HOST_LOCAL_14B_KEEPALIVE_ENABLED": "true"}, clear=False):
+    with patch.dict("os.environ", {"HOST_LOCAL_LLM_KEEPALIVE_ENABLED": "true"}, clear=False):
         assert heartbeat._is_local_ollama_keepalive_enabled() is False
 
 
@@ -134,12 +134,12 @@ def test_probe_llm_nodes_skips_local_ollama_when_host_14b_disabled() -> None:
             "_probe_gemini_cloud",
             new=AsyncMock(return_value={"status": "UP", "latency_ms": 12, "detail": "ok"}),
         ),
-        patch.dict("os.environ", {"HOST_CHAT_HOST_14B_ENABLED": "false"}, clear=False),
+        patch.dict("os.environ", {"HOST_CHAT_LOCAL_LLM_ENABLED": "false"}, clear=False),
     ):
         result = asyncio.run(heartbeat._probe_llm_nodes())
 
     assert result["host_local_14b"]["status"] == "SKIPPED"
-    assert "HOST_CHAT_HOST_14B_ENABLED=false" in result["host_local_14b"]["detail"]
+    assert "HOST_CHAT_LOCAL_LLM_ENABLED=false" in result["host_local_14b"]["detail"]
 
 
 def test_probe_llm_nodes_skips_local_ollama_when_base_url_is_remote() -> None:
@@ -156,9 +156,9 @@ def test_probe_llm_nodes_skips_local_ollama_when_base_url_is_remote() -> None:
         patch.dict(
             "os.environ",
             {
-                "HOST_CHAT_HOST_14B_ENABLED": "true",
-                "HOST_CHAT_HOST_14B_PROVIDER": "openai",
-                "HOST_CHAT_HOST_14B_BASE_URL": "http://192.168.1.101:11434",
+                "HOST_CHAT_LOCAL_LLM_ENABLED": "true",
+                "HOST_CHAT_LOCAL_LLM_PROVIDER": "openai",
+                "HOST_CHAT_LOCAL_LLM_BASE_URL": "http://192.168.1.101:11434",
             },
             clear=False,
         ),
@@ -166,7 +166,7 @@ def test_probe_llm_nodes_skips_local_ollama_when_base_url_is_remote() -> None:
         result = asyncio.run(heartbeat._probe_llm_nodes())
 
     assert result["host_local_14b"]["status"] == "SKIPPED"
-    assert "HOST_CHAT_HOST_14B_BASE_URL=http://192.168.1.101:11434" in result["host_local_14b"]["detail"]
+    assert "HOST_CHAT_LOCAL_LLM_BASE_URL=http://192.168.1.101:11434" in result["host_local_14b"]["detail"]
 
 
 def test_run_once_defers_llm_probe_when_resource_gate_blocks(monkeypatch) -> None:

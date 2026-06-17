@@ -62,7 +62,7 @@ def test_generate_inner_activity_note_ignores_heavy_background_disable(monkeypat
 
     assert note == ""
     assert focus == ""
-    assert reason == "NO_MODEL"
+    assert reason == "INNER_ACTIVITY_LLM_DISABLED_BY_DEFAULT"
     assert meta == {}
 
 

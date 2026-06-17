@@ -29,7 +29,7 @@ def test_synthesize_runtime_capability_picks_code_executor() -> None:
     )
 
     assert spec.route_type == "skill"
-    assert spec.target_id == "codex_worker"
+    assert spec.target_id == "agent_worker"
     assert spec.skill_family == "code"
     assert "RuntimeCapability" in spec.task
     assert registry.get(spec.runtime_capability_id) is not None

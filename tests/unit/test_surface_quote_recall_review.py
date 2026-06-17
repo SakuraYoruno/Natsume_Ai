@@ -47,6 +47,9 @@ def test_selected_cases_rejects_unknown_case() -> None:
 
 
 def test_review_surface_quote_case_outputs_query_model_and_guidance(monkeypatch) -> None:
+    quote_mod.clear_surface_original_quote_bank_cache()
+    monkeypatch.setattr(quote_mod, "_query_riddle_joker_dialogue_tsv", lambda query, *, top_k: [])
+    monkeypatch.setattr(quote_mod, "_query_riddle_joker_dialogue_vector_collection", lambda query, *, top_k: [])
     monkeypatch.setattr(
         quote_mod,
         "_query_surface_original_quote_collection",
@@ -72,6 +75,9 @@ def test_review_surface_quote_case_outputs_query_model_and_guidance(monkeypatch)
 
 
 def test_review_keeps_disabled_morning_as_empty(monkeypatch) -> None:
+    quote_mod.clear_surface_original_quote_bank_cache()
+    monkeypatch.setattr(quote_mod, "_query_riddle_joker_dialogue_tsv", lambda query, *, top_k: [])
+    monkeypatch.setattr(quote_mod, "_query_riddle_joker_dialogue_vector_collection", lambda query, *, top_k: [])
     monkeypatch.setattr(
         quote_mod,
         "_query_surface_original_quote_collection",
@@ -95,6 +101,9 @@ def test_review_keeps_disabled_morning_as_empty(monkeypatch) -> None:
 
 
 def test_build_and_write_review_outputs(tmp_path, monkeypatch) -> None:
+    quote_mod.clear_surface_original_quote_bank_cache()
+    monkeypatch.setattr(quote_mod, "_query_riddle_joker_dialogue_tsv", lambda query, *, top_k: [])
+    monkeypatch.setattr(quote_mod, "_query_riddle_joker_dialogue_vector_collection", lambda query, *, top_k: [])
     monkeypatch.setattr(
         quote_mod,
         "_query_surface_original_quote_collection",

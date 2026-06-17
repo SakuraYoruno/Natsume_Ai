@@ -24,7 +24,7 @@ from host_brain.app.relational_chat_detector import build_relational_chat_reason
 from host_brain.app.runtime_capability_synthesizer import synthesize_runtime_capability
 from host_brain.app.skill_dag_planner import SkillDagNode, SkillDagPlan, build_skill_dag_plan
 from host_brain.app.skill_family_router import build_skill_route_decision
-from host_brain.codex_runtime.skill_ids import CODEX_RUNTIME_RUN_MODE_BY_SKILL_ID, is_codex_runtime_skill
+from host_brain.agent_runtime.skill_ids import AGENT_RUN_MODE_BY_SKILL_ID, is_agent_runtime_skill
 from host_brain.skills.executor_registry import dispatch_executor_payload
 
 
@@ -549,7 +549,7 @@ def _looks_like_simple_technical_advice(user_message: str, intent_draft: dict[st
         return False
     draft = dict(intent_draft or {}) if isinstance(intent_draft, dict) else {}
     target_id = _normalize_text(draft.get("target_id") or draft.get("skill_id"), lower=True)
-    if target_id and target_id not in {"", "codex_worker", "intent_agent"}:
+    if target_id and target_id not in {"", "agent_worker", "intent_agent"}:
         return False
     return True
 
@@ -562,7 +562,7 @@ def _looks_like_simple_task_split_advice(user_message: str, intent_draft: dict[s
         return False
     draft = dict(intent_draft or {}) if isinstance(intent_draft, dict) else {}
     target_id = _normalize_text(draft.get("target_id") or draft.get("skill_id"), lower=True)
-    if target_id and target_id not in {"", "intent_agent", "codex_worker"}:
+    if target_id and target_id not in {"", "intent_agent", "agent_worker"}:
         return False
     return True
 
@@ -718,13 +718,13 @@ def _merge_plan_node_args(
         merged_args["user_message"] = task_text
     if normalized_target == "memory_store" and not _normalize_text(merged_args.get("content")):
         merged_args["content"] = task_text
-    if is_codex_runtime_skill(normalized_target):
+    if is_agent_runtime_skill(normalized_target):
         if not _normalize_text(merged_args.get("task")):
             merged_args["task"] = _normalize_text(merged_args.get("problem_statement")) or task_text
         if not _normalize_text(merged_args.get("problem_statement")):
             merged_args["problem_statement"] = _normalize_text(merged_args.get("task")) or task_text
         if not _normalize_text(merged_args.get("run_mode"), lower=True):
-            merged_args["run_mode"] = CODEX_RUNTIME_RUN_MODE_BY_SKILL_ID.get(normalized_target, "worker")
+            merged_args["run_mode"] = AGENT_RUN_MODE_BY_SKILL_ID.get(normalized_target, "worker")
         if (
             _normalize_text(merged_args.get("run_mode"), lower=True) != "inspect"
             and not _normalize_text(merged_args.get("workspace_strategy"), lower=True)
@@ -911,7 +911,7 @@ def _execute_skill(
         )
 
     args = _extract_skill_args(intent_draft, request_body, task_text)
-    if is_codex_runtime_skill(skill_id):
+    if is_agent_runtime_skill(skill_id):
         args.setdefault("approval_confirmed", True)
         args.setdefault("confirmed", True)
         if approval_token_ref:

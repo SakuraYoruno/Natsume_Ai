@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from host_brain.codex_runtime.prompt_profiles import build_codex_prompt
-from host_brain.codex_runtime.work_order import CodexWorkOrder
-from host_brain.skills.codex_runtime_registry import build_codex_runtime_skill_registry
+from host_brain.agent_runtime.prompt_profiles import build_agent_prompt
+from host_brain.agent_runtime.work_order import AgentWorkOrder
+from host_brain.skills.agent_runtime_registry import build_agent_runtime_skill_registry
 
 
 def test_codex_bio_ops_skill_wrappers_emit_bio_ops_work_orders() -> None:
-    registry = build_codex_runtime_skill_registry()
+    registry = build_agent_runtime_skill_registry()
 
     for skill_id, capability in {
         "codex_organ_scan": "organ_wiring_audit",
@@ -24,7 +24,7 @@ def test_codex_bio_ops_skill_wrappers_emit_bio_ops_work_orders() -> None:
 
 
 def test_codex_bio_ops_prompt_is_proposal_only(tmp_path) -> None:
-    order = CodexWorkOrder.from_mapping(
+    order = AgentWorkOrder.from_mapping(
         {
             "work_order_id": "wo-bio",
             "domain": "bio_ops",
@@ -36,7 +36,7 @@ def test_codex_bio_ops_prompt_is_proposal_only(tmp_path) -> None:
         }
     )
 
-    prompt = build_codex_prompt(order, workspace=tmp_path)
+    prompt = build_agent_prompt(order, workspace=tmp_path)
 
     assert "BioOps proposal-only execution" in prompt
     assert "Do not modify files" in prompt

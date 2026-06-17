@@ -111,83 +111,25 @@ def test_load_host_config_injects_resolved_key_into_process_env(tmp_path: Path, 
     assert host_config.os.environ.get("GEMINI_API_KEY") == "sk-gemini-injected"
 
 
-def test_load_host_config_resolves_codex_key_ref_and_redacts_snapshot(tmp_path: Path, monkeypatch) -> None:
-    key_profiles_file = tmp_path / "key_profiles.runtime.json"
-    secret_store_file = tmp_path / "secret_store.runtime.local.json"
-
-    _write_json(
-        key_profiles_file,
-        {
-            "current_epoch": 20260301,
-            "host_node_id": "natsu-node-99",
-            "profiles": [
-                {
-                    "provider": "codex",
-                    "node_id": "natsu-node-99",
-                    "scope": "host.llm",
-                    "secret_ref": "sec://codex/natsu-node-99",
-                    "rotation_epoch": 20270101,
-                    "status": "active",
-                }
-            ],
-        },
-    )
-    _write_json(
-        secret_store_file,
-        {
-            "sec://codex/natsu-node-99": "sk-codex-demo-value",
+def test_load_host_config_rejects_codex_as_host_llm_provider() -> None:
+    result = host_config.load_host_config(
+        env={
+            "Natsume_ENV": "prod",
+            "HOST_LLM_PROVIDER": "codex",
+            "HOST_COLD_START_ALLOWED": "false",
         },
     )
 
-    monkeypatch.setattr(host_config, "DEFAULT_KEY_PROFILES", key_profiles_file)
-    monkeypatch.setattr(host_config, "DEFAULT_KEY_PROFILES_FALLBACK", key_profiles_file)
-    monkeypatch.setattr(host_config, "DEFAULT_SECRET_STORE", secret_store_file)
-    monkeypatch.setattr(host_config, "DEFAULT_SECRET_STORE_FALLBACK", secret_store_file)
-
-    env = {
-        "Natsume_ENV": "prod",
-        "HOST_LLM_PROVIDER": "codex",
-        "HOST_COLD_START_ALLOWED": "false",
-        "CODEX_API_KEY_REF": "sec://codex/natsu-node-99",
-    }
-    result = host_config.load_host_config(env=env)
-    assert result.success, result.as_dict()
-    assert result.config is not None
-    assert result.config.llm_provider == "codex"
-    assert result.config.codex_api_key == "sk-codex-demo-value"
-    assert result.config.llm_api_key == "sk-codex-demo-value"
-    assert result.config.llm_api_key_ref == "sec://codex/natsu-node-99"
-    assert result.config.key_profile_status == "resolved"
-
-    snapshot = host_config.export_host_config_snapshot(
-        env=env,
-        node_id="natsu-node-99",
-        current_epoch=20260301,
-        key_profiles=[
-            {
-                "provider": "codex",
-                "node_id": "natsu-node-99",
-                "scope": "host.llm",
-                "secret_ref": "sec://codex/natsu-node-99",
-                "rotation_epoch": 20270101,
-                "status": "active",
-            }
-        ],
-        secret_store={"sec://codex/natsu-node-99": "sk-codex-demo-value"},
-    )
-    assert snapshot.success, snapshot.as_dict()
-    assert snapshot.snapshot is not None
-    assert snapshot.snapshot["values"]["codex_api_key"] == "<redacted>"
-    assert "CODEX_API_KEY" in snapshot.snapshot["redacted_keys"]
+    assert result.success is False
+    assert result.reason_code == host_config.CONFIG_VALUE_INVALID
+    assert result.issues[0].field == "HOST_LLM_PROVIDER"
 
 
-def test_build_host_runtime_statuses_accepts_codex_cli_without_key(monkeypatch) -> None:
-    monkeypatch.setattr(host_config, "codex_cli_lm_available", lambda: True)
-
+def test_build_host_runtime_statuses_accepts_mock_provider_without_key() -> None:
     result = host_config.load_host_config(
         env={
             "Natsume_ENV": "dev",
-            "HOST_LLM_PROVIDER": "codex",
+            "HOST_LLM_PROVIDER": "mock",
             "HOST_COLD_START_ALLOWED": "true",
         },
     )
@@ -197,7 +139,7 @@ def test_build_host_runtime_statuses_accepts_codex_cli_without_key(monkeypatch) 
     statuses = host_config.build_host_runtime_statuses(result.config)
 
     assert statuses["host.integrations.llm_gateway"]["available"] is True
-    assert statuses["host.integrations.llm_gateway"]["detail"] == "llm gateway enabled via Codex CLI"
+    assert statuses["host.integrations.llm_gateway"]["detail"] == "llm gateway enabled"
 
 
 def test_load_host_config_resolves_auxiliary_provider_refs(tmp_path: Path, monkeypatch) -> None:

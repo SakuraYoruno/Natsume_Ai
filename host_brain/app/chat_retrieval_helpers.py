@@ -470,6 +470,112 @@ def _maybe_recall_collection_fastpath(
     return None
 
 
+def _recent_lightnovel_delivery_packet_payload(
+    *,
+    packet_payload: Mapping[str, Any],
+    message: str,
+    person_id: str,
+    session_id: str,
+) -> dict[str, Any]:
+    try:
+        from host_brain.app.dependencies import get_ledger  # noqa: PLC0415
+        from host_brain.app.user_preference_store import build_user_preference_pack  # noqa: PLC0415
+    except Exception:
+        return dict(packet_payload or {})
+
+    try:
+        preference_pack = build_user_preference_pack(
+            person_id=str(person_id or "").strip() or None,
+            query_text=str(message or ""),
+            session_id=str(session_id or "").strip() or None,
+            conversation_id=str(session_id or "").strip() or None,
+            ledger=get_ledger(),
+        )
+    except Exception:
+        return dict(packet_payload or {})
+    if not isinstance(preference_pack, Mapping):
+        return dict(packet_payload or {})
+    recent_context = preference_pack.get("recent_recommendation_context")
+    if not isinstance(recent_context, Mapping):
+        return dict(packet_payload or {})
+    raw_items = recent_context.get("items")
+    if not isinstance(raw_items, list):
+        return dict(packet_payload or {})
+    referenced_item = recent_context.get("referenced_item")
+    source_items = [referenced_item] if isinstance(referenced_item, Mapping) and referenced_item else raw_items[:6]
+    review_items: list[dict[str, Any]] = []
+    for item in source_items:
+        if not isinstance(item, Mapping):
+            continue
+        rank = _coerce_int(item.get("rank"), default=0)
+        title = str(item.get("title") or "").strip()
+        detail_url = str(item.get("detail_url") or "").strip()
+        if not title and not detail_url:
+            continue
+        review_item = {
+            "index": rank or len(review_items) + 1,
+            "rank": rank or len(review_items) + 1,
+            "title": title,
+            "detail_url": detail_url,
+            "source_ref": detail_url,
+            "selection_reason": str(item.get("selection_reason") or "").strip(),
+            "intro_snippet": str(item.get("intro_snippet") or "").strip(),
+            "content_access_state": str(item.get("content_access_state") or "").strip(),
+        }
+        review_items.append({key: value for key, value in review_item.items() if value not in ("", None, [], {})})
+    if not review_items:
+        return dict(packet_payload or {})
+
+    payload = dict(packet_payload or {})
+    trace = dict(payload.get("trace") or {}) if isinstance(payload.get("trace"), Mapping) else {}
+    existing = list(trace.get("selected_collection_items") or []) if isinstance(trace.get("selected_collection_items"), list) else []
+    seen = {
+        (str(item.get("detail_url") or item.get("source_ref") or ""), str(item.get("title") or ""))
+        for item in existing
+        if isinstance(item, Mapping)
+    }
+    for item in review_items:
+        key = (str(item.get("detail_url") or item.get("source_ref") or ""), str(item.get("title") or ""))
+        if key not in seen:
+            existing.append(item)
+            seen.add(key)
+    trace["selected_collection_items"] = existing
+    plan = dict(trace.get("plan") or {}) if isinstance(trace.get("plan"), Mapping) else {}
+    domains = [
+        str(item)
+        for item in list(plan.get("target_domains") or [])
+        if str(item).strip()
+    ]
+    if "lightnovel_recommendation" not in domains:
+        domains.append("lightnovel_recommendation")
+    plan["target_domains"] = domains
+    trace["plan"] = plan
+    payload["trace"] = trace
+
+    facts = list(payload.get("facts") or []) if isinstance(payload.get("facts"), list) else []
+    fact_parts = []
+    for item in review_items[:6]:
+        rank = _coerce_int(item.get("rank") or item.get("index"), default=0)
+        title = str(item.get("title") or "").strip()
+        detail_url = str(item.get("detail_url") or "").strip()
+        intro = str(item.get("intro_snippet") or "").strip()
+        if title or detail_url:
+            fact_parts.append(
+                f"{rank}. {title}｜详情：{detail_url}" + (f"｜简介：{intro[:160]}" if intro else "")
+            )
+    if fact_parts:
+        facts.append("可比较证据：" + "；".join(fact_parts))
+        payload["facts"] = list(dict.fromkeys(str(item) for item in facts if str(item).strip()))
+    source_refs = list(payload.get("source_refs") or []) if isinstance(payload.get("source_refs"), list) else []
+    for item in review_items:
+        detail_url = str(item.get("detail_url") or "").strip()
+        if detail_url and detail_url not in source_refs:
+            source_refs.append(detail_url)
+    if source_refs:
+        payload["source_refs"] = source_refs
+    return payload
+
+
 def _maybe_retry_surface_memory_recall_with_expanded_scope(
     *,
     packet: Any,
@@ -633,13 +739,19 @@ async def _maybe_apply_lightnovel_deep_review(
     try:
         from dataclasses import replace  # noqa: PLC0415
 
-        from host_brain.codex_runtime.lightnovel_deep_reviewer import (  # noqa: PLC0415
+        from host_brain.agent_runtime.lightnovel_deep_reviewer import (  # noqa: PLC0415
             review_lightnovel_selection_from_memory_packet,
             should_deep_review_lightnovel_selection,
         )
     except Exception:
         return packet
     packet_payload = packet.as_dict() if hasattr(packet, "as_dict") else {}
+    packet_payload = _recent_lightnovel_delivery_packet_payload(
+        packet_payload=packet_payload,
+        message=message,
+        person_id=person_id,
+        session_id=session_id,
+    )
     if not should_deep_review_lightnovel_selection(user_message=message, packet=packet_payload):
         return packet
     started_ms = int(time.time() * 1000)
@@ -668,7 +780,12 @@ async def _maybe_apply_lightnovel_deep_review(
     fact = str(review.get("fact") or "").strip()
     if not fact:
         return packet
-    packet_payload = packet.as_dict() if hasattr(packet, "as_dict") else packet_payload
+    packet_payload = _recent_lightnovel_delivery_packet_payload(
+        packet_payload=packet.as_dict() if hasattr(packet, "as_dict") else packet_payload,
+        message=message,
+        person_id=person_id,
+        session_id=session_id,
+    )
     previous_facts = list(getattr(packet, "facts", ()) or [])
     anchor_fact = _lightnovel_recommendation_anchor_fact(packet_payload)
     if anchor_fact and (
@@ -935,7 +1052,7 @@ async def _maybe_apply_generic_evidence_review(
     try:
         from dataclasses import replace  # noqa: PLC0415
 
-        from host_brain.codex_runtime.generic_evidence_reviewer import (  # noqa: PLC0415
+        from host_brain.agent_runtime.generic_evidence_reviewer import (  # noqa: PLC0415
             review_generic_evidence_from_memory_packet,
             should_review_generic_evidence,
         )

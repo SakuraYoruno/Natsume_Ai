@@ -128,7 +128,7 @@ _RESOURCE_GATE_HEAVY_TASK_IDS = {
     "retrieval_runtime_warmup",
     "long_term_memory_distillation",
     "distillation_engine_periodic",
-    "codex_immune_auto_dispatch_tick",
+    "agent_immune_auto_dispatch_tick",
     "proactive_talk_periodic",
     "evolution_cycle_daily",
     "diary_writer_daily",
@@ -794,7 +794,7 @@ class SystemResourceManager:
             result = complete_llm_with_pool_sync(
                 request_id=f"resource-manager::{now_ms()}",
                 scene_type="RESOURCE_MANAGEMENT",
-                cognitive_tier="RESOURCE_MANAGER" if explicit_single_model else "C",
+                cognitive_tier="C",
                 provider_name=provider_name,
                 model_id=model_id,
                 api_key=api_key,

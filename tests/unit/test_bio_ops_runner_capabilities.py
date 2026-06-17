@@ -88,13 +88,13 @@ def test_bio_ops_runner_blocks_sensitive_and_ownerless_candidate(tmp_path) -> No
 
 def test_reflex_attention_and_truthfulness_helpers() -> None:
     reflex = classify_reflex_stimulus("好的")
-    attention = classify_attention_budget("好的", planned_path=["retrieval", "chat_llm", "codex_worker"])
+    attention = classify_attention_budget("好的", planned_path=["retrieval", "chat_llm", "agent_worker"])
     truth = audit_truthfulness_claims("我已经帮你保存了", evidence_refs=[])
 
     assert reflex["matched"] is True
     assert reflex["reflex_type"] == "short_ack"
     assert attention["overprocessed"] is True
-    assert "codex_worker" in attention["forbidden_actions"]
+    assert "agent_worker" in attention["forbidden_actions"]
     assert truth["issue"] == "unsupported_completion_claim"
 
 

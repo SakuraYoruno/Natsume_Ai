@@ -354,7 +354,7 @@ def render_reactivity_hint_with_pool(
         result = complete_llm_with_pool_sync(
             request_id=f"reactivity::{int(time.time() * 1000)}",
             scene_type="EMOTION_REACTIVITY",
-            cognitive_tier="C",
+            cognitive_tier="B",
             messages=[
                 {"role": "system", "content": system_prompt},
                 {

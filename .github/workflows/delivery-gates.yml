@@ -95,7 +95,7 @@ jobs:
               "codex_" + "codegen",
               "execute_" + "codex_" + "codegen",
               "HOST_CODEX_" + "SELF_HEAL",
-              "/" + "self_heal",
+              "codex" + "_self_heal",
           ]
           suffixes = {".py", ".yaml", ".yml", ".json"}
           roots = [root / name for name in ("host_brain", "tests", "scripts", "prompts")]

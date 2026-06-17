@@ -14,7 +14,7 @@ from typing import Any
 
 from host_brain.bio_ops.artifact_store import BioOpsArtifactStore
 from host_brain.bio_ops.owner_inbox import BIO_OPS_OWNER_IMPORT_CHANNELS, resolve_owner_import_channel
-from host_brain.codex_runtime.artifact_store import REPO_ROOT, sanitize_segment
+from host_brain.agent_runtime.artifact_store import REPO_ROOT, sanitize_segment
 from host_brain.core.ids import now_ms
 
 

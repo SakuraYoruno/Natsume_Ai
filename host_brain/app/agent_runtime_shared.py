@@ -22,7 +22,7 @@ from host_brain.app.sub_agent_governor import chat_lite_governor
 from host_brain.app.sub_agent_protocol import ALL_AGENT_IDS
 from host_brain.app.response_form_contract import derive_render_profile_for_response_form
 from host_brain.bond.user_identity import resolve_person_id
-from host_brain.codex_runtime.skill_ids import is_codex_runtime_skill
+from host_brain.agent_runtime.skill_ids import is_agent_runtime_skill
 
 # ---------------------------------------------------------------------------
 # 纯工具函数从 core/runtime_helpers.py 导入（向后兼容重新导出）
@@ -285,7 +285,7 @@ _CLARIFICATION_DIRECT_QUERY_RE = re.compile(
 _TASK_CONTEXT_KEYWORDS = (
     "思路", "方案", "步骤", "实现", "代码", "函数", "模块", "接口", "逻辑", "架构", "设计",
     "分析", "整理", "计划", "从哪里开始", "下一步", "接下来", "具体", "展开", "继续写",
-    "贪吃蛇", "codex", "codex_worker", "agent", "work", "tool", "翻译", "实现思路",
+    "贪吃蛇", "codex", "agent_worker", "agent", "work", "tool", "翻译", "实现思路",
 )
 
 _EMOTION_INFER_KEYWORDS: list[tuple[str, str]] = [
@@ -1505,9 +1505,9 @@ class _SubAgentGatewayAdapter:
         self._timeout_sec = max(1.0, float(timeout_ms) / 1000.0)
         self._temperature = 0.3
         try:
-            from host_brain.integrations.codex_cli_provider import codex_cli_lm_available  # noqa: PLC0415
+            from host_brain.integrations.codex_cli_provider import codex_cli_lm_allowed_for_background, codex_cli_lm_available  # noqa: PLC0415
 
-            self._use_codex_cli = self.provider_name == "codex" and not self._api_key and codex_cli_lm_available()
+            self._use_codex_cli = self.provider_name == "codex" and not self._api_key and codex_cli_lm_allowed_for_background()
         except Exception:
             self._use_codex_cli = False
         self._fallback_model_ids = self._resolve_fallback_model_ids(
@@ -2333,18 +2333,18 @@ def _render_delegated_result_naturally(
     )
     empty_visible_templates = _mapping_section(templates, "empty_visible_result")
     if not visible or _DELEGATE_INTERNAL_MARKER_RE.search(visible):
-        if is_codex_runtime_skill(agent_id):
-            return _mapping_text(empty_visible_templates, "codex_worker")
+        if is_agent_runtime_skill(agent_id):
+            return _mapping_text(empty_visible_templates, "agent_worker")
         return _mapping_text(empty_visible_templates, "default")
 
     if reply_template and "{agent_result}" in reply_template:
         rendered = reply_template.replace("{agent_result}", visible).strip()
         if rendered:
             return rendered
-    if is_codex_runtime_skill(agent_id):
+    if is_agent_runtime_skill(agent_id):
         return _mapping_text(
             templates,
-            "codex_worker_prefix_template",
+            "agent_worker_prefix_template",
             agent_result=visible,
         ).strip()
     return visible

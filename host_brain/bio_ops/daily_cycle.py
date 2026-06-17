@@ -14,7 +14,7 @@ from host_brain.bio_ops.artifact_store import BioOpsArtifactStore
 from host_brain.bio_ops.contracts import BioOpsSchedule
 from host_brain.bio_ops.owner_inbox import BioOpsOwnerInbox
 from host_brain.bio_ops.runner import BioOpsRunner
-from host_brain.codex_runtime.artifact_store import REPO_ROOT, sanitize_segment
+from host_brain.agent_runtime.artifact_store import REPO_ROOT, sanitize_segment
 from host_brain.core.ids import now_ms
 
 

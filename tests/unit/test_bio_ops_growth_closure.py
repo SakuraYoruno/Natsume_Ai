@@ -121,12 +121,12 @@ def test_cognitive_load_shedding_pauses_low_priority_background_work(tmp_path) -
             "capability": "cognitive_load_shedding",
             "mode": "audit",
             "owner_organ": "prefrontal_agent",
-            "inputs": {"active_tasks": ["codex_worker", "dream_compile", "weekly_evolution_scan"], "codex_queue_size": 3},
+            "inputs": {"active_tasks": ["agent_worker", "dream_compile", "weekly_evolution_scan"], "codex_queue_size": 3},
         }
     )
-    shedding = shed_cognitive_load({"active_tasks": ["codex_worker"], "codex_queue_size": 3})
+    shedding = shed_cognitive_load({"active_tasks": ["agent_worker"], "codex_queue_size": 3})
 
     assert result["status"] == "PROPOSED"
     assert "dream_compile" in result["findings"][0]["paused"]
     assert "immune_monitor" in result["findings"][0]["kept"]
-    assert shedding["reason"] == "codex_worker_active"
+    assert shedding["reason"] == "agent_worker_active"

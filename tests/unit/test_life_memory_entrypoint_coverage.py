@@ -228,7 +228,7 @@ def test_coverage_report_audits_semantic_entity_sources() -> None:
             store.write_background_episode(
                 event_source="codex_production",
                 event_id=f"entity-semantic-delivery-{index}",
-                task_id="codex_lightnovel_recommender",
+                task_id="agent_lightnovel_recommender",
                 status="COMPLETED",
                 detail="给用户推荐了 1 本轻小说。",
                 person_id="owner",

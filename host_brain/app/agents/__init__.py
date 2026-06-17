@@ -12,6 +12,8 @@ from host_brain.app.agents.agent_registry import (
     AGENT_ID_SAFETY,
     AGENT_ID_JUDGE,
     AGENT_ID_RENDERER,
+    AGENT_ID_REPAIR,
+    AGENT_ID_PENTEST,
     is_agent_allowed,
     get_agent_meta,
 )

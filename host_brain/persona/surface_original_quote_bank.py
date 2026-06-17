@@ -5,6 +5,7 @@ import difflib
 import json
 import os
 import re
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
@@ -22,6 +23,12 @@ _KANA_RE = re.compile(r"[\u3040-\u30ff]")
 _ASCII_WORD_RE = re.compile(r"[A-Za-z]{2,}")
 _COPY_NORMALIZE_RE = re.compile(r"[\s，。！？!?、,.；;：:\"'“”‘’「」『』（）()\[\]{}~～…]+")
 _SKIP_RISK_TIERS = frozenset({"explicit_unsafe", "unsafe_plot_line", "rhythm_fragment"})
+_TEMPORAL_CORRECTION_QUOTE_SKIP_RE = re.compile(
+    r"(?:现在|当前|都|几点|什么时候|下午|晚上|夜里|半夜|午夜|零点|不是早上|还早上|怎么还|怎么又).{0,12}"
+    r"(?:早上好|早安|早啊|早呀|上午好|早晨好)|"
+    r"(?:早上好|早安|早啊|早呀|上午好|早晨好).{0,12}"
+    r"(?:现在|当前|都|几点|什么时候|下午|晚上|夜里|半夜|午夜|零点|不是早上|还早上|怎么还|怎么又)"
+)
 
 _RUNTIME_PLOT_MARKERS = (
     "新海君",
@@ -199,6 +206,20 @@ _SCENE_BLOCKED_MARKERS: dict[str, tuple[str, ...]] = {
         "午休",
         "早饭了",
         "睡回笼觉",
+        "睡糊",
+        "睡迷糊",
+        "没睡醒",
+        "刚醒",
+        "刚睡醒",
+        "迷糊",
+        "糊涂",
+        "脑子",
+        "屏幕",
+        "盯",
+        "看你",
+        "装傻",
+        "逗我",
+        "故意",
     ),
     "return_chat": ("每周回来", "周末回家", "回家住"),
     "lover_presence": (
@@ -347,6 +368,7 @@ def clear_surface_original_quote_bank_cache() -> None:
     _VECTOR_CLIENT_CACHE.clear()
     _VECTOR_ROW_CACHE.clear()
     _RIDDLE_JOKER_ROW_CACHE.clear()
+    _QUOTE_SELECTION_CACHE.clear()
 
 
 def surface_original_quotes_enabled() -> bool:
@@ -362,9 +384,21 @@ def select_surface_original_quotes(query: SurfaceOriginalQuoteQuery, *, limit: i
         return SurfaceOriginalQuoteSelection(query=query, degraded=True, reason=f"SURFACE_ORIGINAL_QUOTES_{policy.mode.upper()}")
 
     effective_limit = max(1, min(int(limit or query.limit or 12), int(query.limit or 12), int(policy.max_quotes or 1)))
+    cache_ttl_s = _quote_selection_cache_ttl_s()
+    cache_key = _quote_selection_cache_key(query, limit=effective_limit, policy=policy)
+    if cache_ttl_s > 0:
+        cached = _QUOTE_SELECTION_CACHE.get(cache_key)
+        now_s = time.monotonic()
+        if cached and (now_s - cached[0]) <= cache_ttl_s:
+            return cached[1]
     candidate_top_k = max(policy.candidate_top_k, effective_limit * 4)
+    rows: list[dict[str, Any]] = []
+    vector_error = ""
+    if _riddle_joker_lexical_first_enabled():
+        rows = _query_riddle_joker_dialogue_tsv(query, top_k=candidate_top_k)
     try:
-        rows = _query_riddle_joker_dialogue_vector_collection(query, top_k=candidate_top_k)
+        if not rows:
+            rows = _query_riddle_joker_dialogue_vector_collection(query, top_k=candidate_top_k)
     except Exception as exc:
         rows = []
         vector_error = f"RIDDLE_JOKER_DIALOGUE_VECTOR_UNAVAILABLE:{type(exc).__name__}"
@@ -390,12 +424,22 @@ def select_surface_original_quotes(query: SurfaceOriginalQuoteQuery, *, limit: i
     quotes = [SurfaceOriginalQuote.from_vector_row(row) for row in rows]
     ranked = _rank_quotes(quotes, query=query)
     selected = tuple(ranked[:effective_limit])
-    return SurfaceOriginalQuoteSelection(
+    selection = SurfaceOriginalQuoteSelection(
         quotes=selected,
         query=query,
         degraded=not bool(selected),
         reason="" if selected else "SURFACE_ORIGINAL_QUOTES_EMPTY_VECTOR_RESULT",
     )
+    if cache_ttl_s > 0:
+        _QUOTE_SELECTION_CACHE[cache_key] = (time.monotonic(), selection)
+    return selection
+
+
+def _surface_quote_guidance_skip_for_temporal_correction(query: SurfaceOriginalQuoteQuery) -> bool:
+    value = re.sub(r"\s+", "", str(getattr(query, "user_message", "") or ""))
+    if not value:
+        return False
+    return bool(_TEMPORAL_CORRECTION_QUOTE_SKIP_RE.search(value))
 
 
 def render_surface_original_quote_guidance(
@@ -404,6 +448,8 @@ def render_surface_original_quote_guidance(
     limit: int = 12,
     policy: SurfaceOriginalQuotePolicy | None = None,
 ) -> str:
+    if _surface_quote_guidance_skip_for_temporal_correction(query):
+        return ""
     active_policy = policy or surface_original_quote_policy_for_scene(query.scene_id)
     if not active_policy.enabled:
         return ""
@@ -572,6 +618,31 @@ def surface_original_quote_similarity_hits(
 _VECTOR_CLIENT_CACHE: dict[tuple[str, int], Any] = {}
 _VECTOR_ROW_CACHE: dict[tuple[str, str, int], list[dict[str, Any]]] = {}
 _RIDDLE_JOKER_ROW_CACHE: dict[str, list[dict[str, Any]]] = {}
+_QUOTE_SELECTION_CACHE: dict[tuple[Any, ...], tuple[float, SurfaceOriginalQuoteSelection]] = {}
+
+
+def _quote_selection_cache_ttl_s() -> float:
+    raw = str(os.environ.get("HOST_SURFACE_ORIGINAL_QUOTE_CACHE_TTL_S") or "").strip()
+    try:
+        value = float(raw)
+    except Exception:
+        value = 600.0
+    return max(0.0, min(3600.0, value))
+
+
+def _quote_selection_cache_key(query: SurfaceOriginalQuoteQuery, *, limit: int, policy: SurfaceOriginalQuotePolicy) -> tuple[Any, ...]:
+    return (
+        str(query.scene_id or ""),
+        str(query.user_message or "")[:256],
+        tuple(str(item or "") for item in query.intent_tags[:8]),
+        tuple(str(item or "") for item in query.emotion_tags[:8]),
+        tuple(str(item or "") for item in query.style_moves[:8]),
+        str(query.relationship_stage or ""),
+        int(limit or query.limit or 0),
+        str(policy.mode or ""),
+        int(policy.max_quotes or 0),
+        int(policy.candidate_top_k or 0),
+    )
 
 
 def _query_surface_original_quote_collection(
@@ -1131,6 +1202,11 @@ def _riddle_joker_dialogue_min_score() -> float:
 def _riddle_joker_lexical_fallback_enabled() -> bool:
     raw = str(os.environ.get("HOST_RIDDLE_JOKER_DIALOGUE_LEXICAL_FALLBACK", "0")).strip().lower()
     return raw in {"1", "true", "yes", "on"}
+
+
+def _riddle_joker_lexical_first_enabled() -> bool:
+    raw = str(os.environ.get("HOST_SURFACE_RIDDLE_JOKER_LEXICAL_FIRST", "1")).strip().lower()
+    return raw not in {"0", "false", "no", "off"}
 
 
 def _quote_limit_env(name: str, default: int) -> int:

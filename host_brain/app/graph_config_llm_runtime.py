@@ -33,7 +33,7 @@ from host_brain.app.provider_factory import (
     resolve_host_llm_model_id,
 )
 from host_brain.app.model_router import resolve_gemini_model_route
-from host_brain.integrations.codex_cli_provider import codex_cli_lm_available, resolve_codex_cli_model
+from host_brain.integrations.codex_cli_provider import codex_cli_lm_allowed_for_background, codex_cli_lm_available, resolve_codex_cli_model
 from host_brain.app.prompt_builder import (
     SCENE_CHAT,
     SCENE_EXEC_INTENT,
@@ -51,7 +51,7 @@ _HOST_CHAT_14B_DEFAULT_MODEL_ID = "qwen3:14b"
 _HOST_CHAT_14B_FALLBACK_API_KEY = "host-local-placeholder-key"
 _HOST_CHAT_14B_DEFAULT_BASE_URL = "http://127.0.0.1:11434/v1"
 _HOST_CHAT_CLOUD_DEFAULT_PROVIDER = PROVIDER_GEMINI
-_PROVIDERS_REQUIRING_API_KEY = frozenset({PROVIDER_OPENAI, PROVIDER_CODEX, PROVIDER_GEMINI, PROVIDER_DEEPSEEK, PROVIDER_MINIMAX})
+_PROVIDERS_REQUIRING_API_KEY = frozenset({PROVIDER_OPENAI, PROVIDER_GEMINI, PROVIDER_DEEPSEEK, PROVIDER_MINIMAX})
 _AGENT_CODEX_MIGRATION_DEFAULT_EXCLUDED_ROLES = frozenset({"surface_reply"})
 _VISION_SCENE_NAMES = frozenset({SCENE_VISION_UI.upper(), "SCENE_VISION_UI", "VISION_UI"})
 
@@ -92,6 +92,17 @@ def _parse_csv_tokens(value: Any) -> set[str]:
     return tokens
 
 
+def _env_value(name: str, legacy_name: str | None = None, default: str = "") -> str:
+    value = str(os.environ.get(name) or "").strip()
+    if value:
+        return value
+    if legacy_name:
+        legacy_value = str(os.environ.get(legacy_name) or "").strip()
+        if legacy_value:
+            return legacy_value
+    return default
+
+
 def _agent_codex_migration_enabled(role: str) -> bool:
     if not _parse_bool(os.environ.get("HOST_AGENT_CODEX_MIGRATION_ENABLED"), default=False):
         return False
@@ -113,7 +124,7 @@ def _agent_codex_migration_enabled(role: str) -> bool:
     }
     if included and normalized_role not in included:
         return False
-    return codex_cli_lm_available()
+    return codex_cli_lm_allowed_for_background()
 
 
 def _resolve_agent_codex_model_id() -> str:
@@ -125,7 +136,7 @@ def _surface_reply_codex_experiment_enabled(role: str) -> bool:
         return False
     if not _parse_bool(os.environ.get("HOST_SURFACE_REPLY_CODEX_EXPERIMENT_ENABLED") or os.environ.get("HOST_CHAT_AGENT_CODEX_EXPERIMENT_ENABLED"), default=False):
         return False
-    return codex_cli_lm_available()
+    return codex_cli_lm_allowed_for_background()
 
 
 def _resolve_surface_reply_codex_model_id() -> str:
@@ -152,7 +163,12 @@ def _provider_requires_api_key(provider_name: str) -> bool:
 
 def _provider_api_key_env_name(provider_name: str) -> str | None:
     provider = str(provider_name or "").strip().lower()
-    mapping = {PROVIDER_OPENAI: "OPENAI_API_KEY", PROVIDER_CODEX: "CODEX_API_KEY", PROVIDER_GEMINI: "GEMINI_API_KEY", PROVIDER_DEEPSEEK: "DEEPSEEK_API_KEY", PROVIDER_MINIMAX: "MINIMAX_API_KEY"}
+    mapping = {
+        PROVIDER_OPENAI: "OPENAI_API_KEY",
+        PROVIDER_GEMINI: "GEMINI_API_KEY",
+        PROVIDER_DEEPSEEK: "DEEPSEEK_API_KEY",
+        PROVIDER_MINIMAX: "MINIMAX_API_KEY",
+    }
     return mapping.get(provider)
 
 
@@ -173,8 +189,10 @@ def _is_provider_available(*, provider_name: str, api_key: str | None, configure
         return False
     if provider == PROVIDER_DISABLED:
         return False
-    if provider == PROVIDER_CODEX and not str(api_key or "").strip() and codex_cli_lm_available():
-        return True
+    if provider == PROVIDER_CODEX:
+        return bool(str(api_key or "").strip()) or (
+            codex_cli_lm_allowed_for_background() and codex_cli_lm_available()
+        )
     if _provider_requires_api_key(provider) and not str(api_key or "").strip():
         return False
     return True
@@ -221,7 +239,11 @@ def _resolve_host_14b_base_url(*, provider_name: str) -> str | None:
     provider = str(provider_name or "").strip().lower()
     if provider != PROVIDER_OPENAI:
         return None
-    raw = str(os.environ.get("HOST_CHAT_HOST_14B_BASE_URL") or os.environ.get("HOST_OPENAI_BASE_URL") or _HOST_CHAT_14B_DEFAULT_BASE_URL).strip()
+    raw = _env_value(
+        "HOST_CHAT_LOCAL_LLM_BASE_URL",
+        "HOST_CHAT_HOST_14B_BASE_URL",
+        _env_value("HOST_OPENAI_BASE_URL", default=_HOST_CHAT_14B_DEFAULT_BASE_URL),
+    )
     return _normalize_openai_compat_base_url(raw)
 
 
@@ -259,12 +281,12 @@ async def _probe_http_endpoint_async(*, url: str, timeout_ms: int) -> tuple[bool
 
 
 def _resolve_host_14b_health_status(*, provider_name: str, timeout_ms: int) -> tuple[bool, str]:
-    if not _parse_bool(os.environ.get("HOST_CHAT_HOST_14B_HEALTHCHECK_ENABLED"), default=False):
-        return True, "HOST_14B_HEALTHCHECK_DISABLED"
-    ready_value = os.environ.get("HOST_CHAT_HOST_14B_READY")
+    if not _parse_bool(_env_value("HOST_CHAT_LOCAL_LLM_HEALTHCHECK_ENABLED", "HOST_CHAT_HOST_14B_HEALTHCHECK_ENABLED"), default=False):
+        return True, "HOST_LOCAL_LLM_HEALTHCHECK_DISABLED"
+    ready_value = _env_value("HOST_CHAT_LOCAL_LLM_READY", "HOST_CHAT_HOST_14B_READY")
     if ready_value is not None and not _parse_bool(ready_value, default=True):
-        return False, "HOST_14B_READY_FLAG_DOWN"
-    health_url = str(os.environ.get("HOST_CHAT_HOST_14B_HEALTHCHECK_URL") or "").strip()
+        return False, "HOST_LOCAL_LLM_READY_FLAG_DOWN"
+    health_url = _env_value("HOST_CHAT_LOCAL_LLM_HEALTHCHECK_URL", "HOST_CHAT_HOST_14B_HEALTHCHECK_URL")
     probe_urls: list[str] = []
     if health_url:
         probe_urls.append(health_url)
@@ -277,16 +299,16 @@ def _resolve_host_14b_health_status(*, provider_name: str, timeout_ms: int) -> t
             probe_urls.append(f"{root_base}/api/tags")
     if not probe_urls:
         if ready_value is not None:
-            return _parse_bool(ready_value, default=True), "HOST_14B_READY_FLAG_ONLY"
-        return True, "HOST_14B_NO_PROBE_URL"
+            return _parse_bool(ready_value, default=True), "HOST_LOCAL_LLM_READY_FLAG_ONLY"
+        return True, "HOST_LOCAL_LLM_NO_PROBE_URL"
     first_failure = ""
     for url in probe_urls:
         ok, detail = _probe_http_endpoint(url=url, timeout_ms=timeout_ms)
         if ok:
-            return True, f"HOST_14B_PROBE_OK:{detail}"
+            return True, f"HOST_LOCAL_LLM_PROBE_OK:{detail}"
         if not first_failure:
             first_failure = detail
-    return False, f"HOST_14B_PROBE_FAILED:{first_failure or 'unknown'}"
+    return False, f"HOST_LOCAL_LLM_PROBE_FAILED:{first_failure or 'unknown'}"
 
 
 async def _resolve_host_14b_health_status_async(*, provider_name: str, timeout_ms: int) -> tuple[bool, str]:
@@ -367,7 +389,7 @@ async def _resolve_host_llm_runtime_core(*, rollout_key: str | None = None, scen
     raw_minimax_base = str(os.environ.get("HOST_MINIMAX_BASE_URL") or "https://api.minimaxi.com/v1").strip() or "https://api.minimaxi.com/v1"
     candidate_map: dict[str, dict[str, Any]] = {
         "gemini": {"chain_name": "gemini", "provider_name": PROVIDER_GEMINI, "model_id": gemini_cloud_model_id, "api_key": gemini_cloud_api_key, "base_url_override": _normalize_openai_compat_base_url(str(os.environ.get("HOST_GEMINI_BASE_URL") or "https://generativelanguage.googleapis.com/v1beta/openai").strip()), "route_reason_code": "HOST_CLOUD_CHAIN_PRIMARY_GEMINI", "route_detail": "selected Gemini as primary remote provider", "route_meta": dict(gemini_cloud_route)},
-        "codex": {"chain_name": "codex", "provider_name": PROVIDER_CODEX, "model_id": _resolve_cloud_provider_model_id(chain_name="codex"), "api_key": codex_api_key, "base_url_override": _resolve_codex_base_url(), "route_reason_code": "HOST_CLOUD_CHAIN_FALLBACK_CODEX", "route_detail": "Gemini unavailable; using Codex relay as remote fallback"},
+        "codex": {"chain_name": "codex", "provider_name": "codex", "model_id": _resolve_cloud_provider_model_id(chain_name="codex"), "api_key": codex_api_key, "base_url_override": _resolve_codex_base_url(), "route_reason_code": "HOST_CLOUD_CHAIN_FALLBACK_CODEX", "route_detail": "Gemini unavailable; using Codex relay as remote fallback"},
         "deepseek": {"chain_name": "deepseek", "provider_name": PROVIDER_DEEPSEEK, "model_id": _resolve_cloud_provider_model_id(chain_name="deepseek"), "api_key": deepseek_api_key, "base_url_override": _normalize_openai_compat_base_url(str(os.environ.get("HOST_DEEPSEEK_BASE_URL") or "https://api.deepseek.com/v1").strip()), "route_reason_code": "HOST_CLOUD_CHAIN_FALLBACK_DEEPSEEK", "route_detail": "Gemini/Codex unavailable; using DeepSeek as remote fallback"},
         "minimax": {"chain_name": "minimax", "provider_name": PROVIDER_MINIMAX, "model_id": minimax_cloud_model_id, "api_key": minimax_api_key, "base_url_override": raw_minimax_base, "route_reason_code": "HOST_CLOUD_CHAIN_PRIMARY_MINIMAX", "route_detail": "selected MiniMax as primary remote provider"},
     }
@@ -424,28 +446,37 @@ async def _resolve_host_llm_runtime_core(*, rollout_key: str | None = None, scen
 
     host_14b_candidate_runtime: dict[str, Any] = {}
     host_14b_ready = False
-    host_14b_unavailable_reason = "HOST_14B_NOT_EVALUATED"
-    host_14b_enabled = _parse_bool(os.environ.get("HOST_CHAT_HOST_14B_ENABLED"), default=False)
+    host_14b_unavailable_reason = "HOST_LOCAL_LLM_NOT_EVALUATED"
+    host_14b_enabled = _parse_bool(_env_value("HOST_CHAT_LOCAL_LLM_ENABLED", "HOST_CHAT_HOST_14B_ENABLED"), default=False)
+    host_14b_force_cloud = _parse_bool(os.environ.get("HOST_CHAT_FORCE_CLOUD"), default=False)
+    normalized_scene_type = str(scene_type or SCENE_CHAT).strip().upper() or SCENE_CHAT
+    host_14b_chat_preferred = normalized_scene_type == SCENE_CHAT.upper() and not _is_vision_scene(scene_type)
     gray_rollout = _evaluate_host_chat_gray_rollout(rollout_key=rollout_key, scene_type=scene_type)
 
-    if selected_remote_candidate is not None:
+    if not host_14b_enabled:
+        host_14b_unavailable_reason = "HOST_CHAT_LOCAL_LLM_DISABLED"
+        if selected_remote_candidate is None:
+            route_reason_code = "HOST_CHAT_LOCAL_LLM_DISABLED"
+            route_detail = "HOST_CHAT_LOCAL_LLM_ENABLED=false"
+    elif host_14b_force_cloud:
+        host_14b_unavailable_reason = "HOST_CHAT_FORCE_CLOUD"
+        if selected_remote_candidate is None:
+            route_reason_code = "HOST_CHAT_FORCE_CLOUD"
+            route_detail = "HOST_CHAT_FORCE_CLOUD=true"
+    elif selected_remote_candidate is not None and not host_14b_chat_preferred:
         host_14b_unavailable_reason = "HOST_CLOUD_CHAIN_REMOTE_PROVIDER_SELECTED"
-    elif not host_14b_enabled:
-        route_reason_code = "HOST_CHAT_HOST_14B_DISABLED"
-        route_detail = "HOST_CHAT_HOST_14B_ENABLED=false"
-        host_14b_unavailable_reason = "HOST_CHAT_HOST_14B_DISABLED"
     else:
-        host_14b_provider = str(os.environ.get("HOST_CHAT_HOST_14B_PROVIDER") or _HOST_CHAT_14B_DEFAULT_PROVIDER).strip().lower() or _HOST_CHAT_14B_DEFAULT_PROVIDER
-        host_14b_model_id = str(os.environ.get("HOST_CHAT_HOST_14B_MODEL_ID") or _HOST_CHAT_14B_DEFAULT_MODEL_ID).strip() or _HOST_CHAT_14B_DEFAULT_MODEL_ID
-        host_14b_timeout_ms = _parse_int(os.environ.get("HOST_CHAT_HOST_14B_TIMEOUT_MS"), default=_default_host_14b_timeout_ms(provider_name=host_14b_provider, cloud_timeout_ms=cloud_timeout_ms), min_value=800, max_value=120_000)
-        host_14b_api_key = _resolve_provider_api_key(provider_name=host_14b_provider, preferred_api_key=str(os.environ.get("HOST_CHAT_HOST_14B_API_KEY") or "").strip() or None)
+        host_14b_provider = _env_value("HOST_CHAT_LOCAL_LLM_PROVIDER", "HOST_CHAT_HOST_14B_PROVIDER", _HOST_CHAT_14B_DEFAULT_PROVIDER).lower() or _HOST_CHAT_14B_DEFAULT_PROVIDER
+        host_14b_model_id = _env_value("HOST_CHAT_LOCAL_LLM_MODEL_ID", "HOST_CHAT_HOST_14B_MODEL_ID", _HOST_CHAT_14B_DEFAULT_MODEL_ID) or _HOST_CHAT_14B_DEFAULT_MODEL_ID
+        host_14b_timeout_ms = _parse_int(_env_value("HOST_CHAT_LOCAL_LLM_TIMEOUT_MS", "HOST_CHAT_HOST_14B_TIMEOUT_MS"), default=_default_host_14b_timeout_ms(provider_name=host_14b_provider, cloud_timeout_ms=cloud_timeout_ms), min_value=800, max_value=120_000)
+        host_14b_api_key = _resolve_provider_api_key(provider_name=host_14b_provider, preferred_api_key=_env_value("HOST_CHAT_LOCAL_LLM_API_KEY", "HOST_CHAT_HOST_14B_API_KEY") or None)
         if _provider_requires_api_key(host_14b_provider) and not host_14b_api_key:
-            if _parse_bool(os.environ.get("HOST_CHAT_HOST_14B_ALLOW_EMPTY_KEY"), default=True):
+            if _parse_bool(_env_value("HOST_CHAT_LOCAL_LLM_ALLOW_EMPTY_KEY", "HOST_CHAT_HOST_14B_ALLOW_EMPTY_KEY"), default=True):
                 host_14b_api_key = _HOST_CHAT_14B_FALLBACK_API_KEY
             else:
-                route_reason_code = "HOST_CHAT_HOST_14B_KEY_MISSING"
+                route_reason_code = "HOST_CHAT_LOCAL_LLM_KEY_MISSING"
                 route_detail = f"{_provider_api_key_env_name(host_14b_provider) or 'api_key'} missing"
-                host_14b_unavailable_reason = "HOST_CHAT_HOST_14B_KEY_MISSING"
+                host_14b_unavailable_reason = "HOST_CHAT_LOCAL_LLM_KEY_MISSING"
         host_14b_available = _is_provider_available(provider_name=host_14b_provider, api_key=host_14b_api_key, configured_available=True)
         host_14b_base_url_override = _resolve_host_14b_base_url(provider_name=host_14b_provider)
         host_14b_candidate_runtime = {"provider_name": host_14b_provider, "model_id": host_14b_model_id, "timeout_ms": host_14b_timeout_ms, "llm_api_key": host_14b_api_key, "available": bool(host_14b_available), "base_url_override": host_14b_base_url_override, "provider_fn": (build_host_provider_fn(provider_name=host_14b_provider, model_id=host_14b_model_id, api_key=host_14b_api_key, timeout_ms=host_14b_timeout_ms, base_url_override=host_14b_base_url_override) if host_14b_available else None)}
@@ -465,18 +496,23 @@ async def _resolve_host_llm_runtime_core(*, rollout_key: str | None = None, scen
                 chat_base_url_override = host_14b_base_url_override
                 chat_provider_fn = host_14b_candidate_runtime.get("provider_fn") or build_host_provider_fn(provider_name=chat_provider_name, model_id=chat_model_id, api_key=chat_llm_api_key, timeout_ms=chat_timeout_ms, base_url_override=chat_base_url_override)
                 route_target = HOST_CHAT_ROUTE_HOST_14B
-                route_reason_code = "HOST_CLOUD_CHAIN_FALLBACK_LOCAL"
-                route_detail = "all remote providers unavailable; using local host 14b as final fallback"
+                if selected_remote_candidate is not None and host_14b_chat_preferred:
+                    route_reason_code = "HOST_CHAT_LOCAL_LLM_PRIMARY"
+                    route_detail = "HOST_CHAT_LOCAL_LLM_ENABLED=true; using healthy local LLM for chat"
+                else:
+                    route_reason_code = "HOST_CLOUD_CHAIN_FALLBACK_LOCAL"
+                    route_detail = "all remote providers unavailable; using local host 14b as final fallback"
             else:
-                route_reason_code = "HOST_CHAT_HOST_14B_UNHEALTHY"
-                route_detail = health_detail
-                host_14b_unavailable_reason = str(health_detail or "HOST_CHAT_HOST_14B_UNHEALTHY")
+                host_14b_unavailable_reason = str(health_detail or "HOST_CHAT_LOCAL_LLM_UNHEALTHY")
+                if selected_remote_candidate is None:
+                    route_reason_code = "HOST_CHAT_LOCAL_LLM_UNHEALTHY"
+                    route_detail = health_detail
         elif route_reason_code == "HOST_CHAT_ROUTE_CLOUD_DEFAULT":
-            route_reason_code = "HOST_CHAT_HOST_14B_UNAVAILABLE"
-            route_detail = "host 14b provider unavailable"
-            host_14b_unavailable_reason = "HOST_CHAT_HOST_14B_UNAVAILABLE"
+            route_reason_code = "HOST_CHAT_LOCAL_LLM_UNAVAILABLE"
+            route_detail = "local LLM provider unavailable"
+            host_14b_unavailable_reason = "HOST_CHAT_LOCAL_LLM_UNAVAILABLE"
         elif not host_14b_available and not host_14b_unavailable_reason:
-            host_14b_unavailable_reason = "HOST_CHAT_HOST_14B_UNAVAILABLE"
+            host_14b_unavailable_reason = "HOST_CHAT_LOCAL_LLM_UNAVAILABLE"
 
     # RoutingMatrix 接入
     routing_matrix_decision: dict[str, Any] = {}
@@ -498,7 +534,9 @@ async def _resolve_host_llm_runtime_core(*, rollout_key: str | None = None, scen
         _runtime_changed = False
         _not_applied_reason: str | None = None
         if _selected_model == HOST_CHAT_ROUTE_CLOUD:
-            if route_target != HOST_CHAT_ROUTE_CLOUD and cloud_available:
+            if route_target == HOST_CHAT_ROUTE_HOST_14B and route_reason_code == "HOST_CHAT_LOCAL_LLM_PRIMARY":
+                _not_applied_reason = "HOST_CHAT_LOCAL_LLM_PRIMARY"
+            elif route_target != HOST_CHAT_ROUTE_CLOUD and cloud_available:
                 chat_provider_name = cloud_provider_name
                 chat_model_id = cloud_model_id
                 chat_timeout_ms = cloud_timeout_ms
@@ -545,6 +583,13 @@ async def _resolve_host_llm_runtime_core(*, rollout_key: str | None = None, scen
         "cloud_llm_api_key": cloud_llm_api_key, "cloud_available": cloud_available, "cloud_provider_fn": cloud_provider_fn,
         "cloud_base_url_override": cloud_base_url_override, "cloud_model_route": cloud_model_route,
         "remote_chain_status": remote_chain_status, "gray_rollout": dict(gray_rollout),
+        "host_14b_ready": host_14b_ready,
+        "host_14b_unavailable_reason": host_14b_unavailable_reason,
+        "local_llm_ready": host_14b_ready,
+        "local_llm_unavailable_reason": host_14b_unavailable_reason,
+        "host_14b_candidate_runtime": {
+            k: v for k, v in host_14b_candidate_runtime.items() if k != "provider_fn"
+        },
         "routing_matrix_decision": routing_matrix_decision,
     }
 
@@ -662,7 +707,7 @@ def _resolve_agent_llm_runtime_v2(*, base_runtime: dict[str, Any], role: str, mo
 
 def resolve_surface_reply_llm_runtime(*, base_runtime: dict) -> dict:
     """Surface reply 主链的 LLM 运行时配置。"""
-    return _resolve_agent_llm_runtime_v2(base_runtime=base_runtime, role="surface_reply", model_env_name="HOST_SURFACE_REPLY_MODEL_ID", timeout_env_name="HOST_SURFACE_REPLY_TIMEOUT_MS", fallback_model_env_names=("HOST_CHAT_AGENT_MODEL_ID",), fallback_timeout_env_names=("HOST_CHAT_AGENT_TIMEOUT_MS",), timeout_default_ms=30_000, timeout_max_ms=120_000, gen_params={"temperature": 0.78, "top_p": 0.9, "max_tokens": 220})
+    return _resolve_agent_llm_runtime_v2(base_runtime=base_runtime, role="surface_reply", model_env_name="HOST_SURFACE_REPLY_MODEL_ID", timeout_env_name="HOST_SURFACE_REPLY_TIMEOUT_MS", fallback_model_env_names=("HOST_CHAT_AGENT_MODEL_ID",), fallback_timeout_env_names=("HOST_CHAT_AGENT_TIMEOUT_MS",), timeout_default_ms=30_000, timeout_max_ms=120_000, gen_params={"temperature": 0.78, "top_p": 0.9, "max_tokens": 700})
 
 
 def resolve_executive_router_llm_runtime(*, base_runtime: dict) -> dict:

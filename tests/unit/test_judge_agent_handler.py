@@ -36,7 +36,7 @@ from host_brain.app.handlers.judge_agent_handler import (
 # Fixtures
 # ---------------------------------------------------------------------------
 
-def _make_gateway(final_answer: str = "selected_agent=codex_worker, confidence=0.85, reason=最高置信度") -> MagicMock:
+def _make_gateway(final_answer: str = "selected_agent=agent_worker, confidence=0.85, reason=最高置信度") -> MagicMock:
     """构造直接给出 final_answer 的 mock gateway。"""
     gateway = MagicMock()
     gateway.complete.return_value = {
@@ -69,7 +69,7 @@ def _make_gateway_tool_then_answer(tool_name: str = "compare_artifacts") -> Magi
                             "tool": tool_name,
                             "args": {
                                 "artifacts": {
-                                    "codex_worker": {"confidence": 0.85, "summary": "代码草案", "risk_flags": []},
+                                    "agent_worker": {"confidence": 0.85, "summary": "代码草案", "risk_flags": []},
                                     "translate_agent": {"confidence": 0.60, "summary": "翻译结果", "risk_flags": []},
                                 }
                             },
@@ -81,9 +81,9 @@ def _make_gateway_tool_then_answer(tool_name: str = "compare_artifacts") -> Magi
         return {
             "content": json.dumps(
                 {
-                    "thought": "比较完毕，codex_worker 最优",
+                    "thought": "比较完毕，agent_worker 最优",
                     "action_type": "final_answer",
-                    "final_answer": "selected_agent=codex_worker, confidence=0.85, reason=最高置信度",
+                    "final_answer": "selected_agent=agent_worker, confidence=0.85, reason=最高置信度",
                 },
                 ensure_ascii=False,
             )
@@ -98,8 +98,8 @@ def _make_payload(
     user_input: str = "请裁判工件",
 ) -> dict[str, Any]:
     default_artifacts = {
-        "codex_worker": {
-            "artifact_ref": "artifact://req-001/codex_worker_1000",
+        "agent_worker": {
+            "artifact_ref": "artifact://req-001/agent_worker_1000",
             "summary": "代码草案已生成",
             "confidence": 0.85,
             "risk_flags": [],
@@ -262,9 +262,9 @@ class TestDegradedPaths:
 
     def test_high_risk_artifact_degraded(self):
         """含高风险标记的工件导致 judge_result.status == 'DEGRADED'。"""
-        gateway = _make_gateway("selected_agent=codex_worker, confidence=0.85, reason=高风险")
+        gateway = _make_gateway("selected_agent=agent_worker, confidence=0.85, reason=高风险")
         artifacts = {
-            "codex_worker": {
+            "agent_worker": {
                 "artifact_ref": "artifact://req/code_1",
                 "summary": "代码草案",
                 "confidence": 0.85,
@@ -319,7 +319,7 @@ class TestEvaluateArtifactTool:
                 "risk_flags": [],
                 "artifact_ref": "artifact://req/code_1",
             },
-            "agent_id": "codex_worker",
+            "agent_id": "agent_worker",
         })
         assert "quality" in result
         assert result["quality"] in {"HIGH", "MEDIUM", "LOW"}
@@ -396,12 +396,12 @@ class TestCompareArtifactsTool:
         """正常比较返回 recommended 和 scores。"""
         result = _tool_compare_artifacts({
             "artifacts": {
-                "codex_worker": {"confidence": 0.85, "summary": "代码草案", "risk_flags": []},
+                "agent_worker": {"confidence": 0.85, "summary": "代码草案", "risk_flags": []},
                 "translate_agent": {"confidence": 0.60, "summary": "翻译结果", "risk_flags": []},
             }
         })
         assert "recommended" in result
-        assert result["recommended"] == "codex_worker"
+        assert result["recommended"] == "agent_worker"
         assert "scores" in result
 
     def test_recommends_highest_confidence(self):
@@ -466,7 +466,7 @@ class TestCompareArtifactsTool:
         """通过 execute_tool 调用 compare_artifacts 可正常执行。"""
         result = execute_tool("compare_artifacts", {
             "artifacts": {
-                "codex_worker": {"confidence": 0.8, "summary": "ok", "risk_flags": []},
+                "agent_worker": {"confidence": 0.8, "summary": "ok", "risk_flags": []},
             }
         })
         assert "recommended" in result or "error" in result
@@ -543,21 +543,21 @@ class TestParseJudgeFinalAnswer:
     def test_parse_selected_agent(self):
         """正确解析 selected_agent。"""
         artifacts = {
-            "codex_worker": {"confidence": 0.85, "risk_flags": []},
+            "agent_worker": {"confidence": 0.85, "risk_flags": []},
             "translate_agent": {"confidence": 0.60, "risk_flags": []},
         }
         agent, conf, reason = _parse_judge_final_answer(
-            "selected_agent=codex_worker, confidence=0.85, reason=最高置信度",
+            "selected_agent=agent_worker, confidence=0.85, reason=最高置信度",
             artifacts,
         )
-        assert agent == "codex_worker"
+        assert agent == "agent_worker"
         assert conf == pytest.approx(0.85, abs=0.01)
 
     def test_parse_confidence(self):
         """正确解析 confidence。"""
-        artifacts = {"codex_worker": {"confidence": 0.9, "risk_flags": []}}
+        artifacts = {"agent_worker": {"confidence": 0.9, "risk_flags": []}}
         _, conf, _ = _parse_judge_final_answer(
-            "selected_agent=codex_worker, confidence=0.9, reason=ok",
+            "selected_agent=agent_worker, confidence=0.9, reason=ok",
             artifacts,
         )
         assert conf == pytest.approx(0.9, abs=0.01)
@@ -577,23 +577,23 @@ class TestParseJudgeFinalAnswer:
 
     def test_empty_final_answer(self):
         """空 final_answer 时回退到置信度最高的工件。"""
-        artifacts = {"codex_worker": {"confidence": 0.7, "risk_flags": []}}
+        artifacts = {"agent_worker": {"confidence": 0.7, "risk_flags": []}}
         agent, conf, reason = _parse_judge_final_answer("", artifacts)
-        assert agent == "codex_worker"
+        assert agent == "agent_worker"
 
     def test_empty_artifacts(self):
         """空工件时返回 None。"""
-        agent, conf, reason = _parse_judge_final_answer("selected_agent=codex_worker", {})
+        agent, conf, reason = _parse_judge_final_answer("selected_agent=agent_worker", {})
         assert agent is None
 
     def test_unknown_agent_fallback(self):
         """final_answer 中的 agent_id 不在工件中时回退。"""
-        artifacts = {"codex_worker": {"confidence": 0.7, "risk_flags": []}}
+        artifacts = {"agent_worker": {"confidence": 0.7, "risk_flags": []}}
         agent, conf, reason = _parse_judge_final_answer(
             "selected_agent=unknown_agent, confidence=0.9, reason=ok",
             artifacts,
         )
-        # 回退到 codex_worker
-        assert agent == "codex_worker"
+        # 回退到 agent_worker
+        assert agent == "agent_worker"
 
 

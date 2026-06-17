@@ -3,24 +3,24 @@ from __future__ import annotations
 from pathlib import Path
 import subprocess
 
-from host_brain.codex_runtime import CodexRuntimeExecutor
-from host_brain.codex_runtime.artifact_store import CodexArtifactStore
-from host_brain.codex_runtime.executor import _build_codex_command, _build_codex_subprocess_env
-from host_brain.codex_runtime.work_order import CodexWorkOrder
+from host_brain.agent_runtime import AgentRuntimeExecutor
+from host_brain.agent_runtime.artifact_store import AgentArtifactStore
+from host_brain.agent_runtime.executor import _build_codex_command, _build_codex_subprocess_env
+from host_brain.agent_runtime.work_order import AgentWorkOrder
 
 
 def test_codex_runtime_executor_blocks_write_payload_without_work_order() -> None:
-    from host_brain.codex_runtime import execute_codex_runtime_payload
+    from host_brain.agent_runtime import execute_agent_runtime_payload
 
-    result = execute_codex_runtime_payload({"run_mode": "worker", "task": "edit files"})
+    result = execute_agent_runtime_payload({"run_mode": "worker", "task": "edit files"})
 
     assert result["status"] == "BLOCKED"
-    assert result["reason_code"] == "CODEX_WORKORDER_REQUIRED"
+    assert result["reason_code"] == "AGENT_WORKORDER_REQUIRED"
 
 
 def test_codex_runtime_executor_degrades_when_cli_missing(monkeypatch, tmp_path) -> None:
-    monkeypatch.setattr("host_brain.codex_runtime.executor.codex_cli_command", lambda: None)
-    result = CodexRuntimeExecutor(artifact_store=CodexArtifactStore(tmp_path)).execute(
+    monkeypatch.setattr("host_brain.agent_runtime.executor.codex_cli_command", lambda: None)
+    result = AgentRuntimeExecutor(artifact_store=AgentArtifactStore(tmp_path)).execute(
         {
             "work_order_id": "wo-cli-missing",
             "domain": "code",
@@ -40,7 +40,7 @@ def test_codex_runtime_executor_degrades_when_cli_missing(monkeypatch, tmp_path)
 
 
 def test_codex_runtime_executor_blocks_unconfirmed_worker(tmp_path) -> None:
-    result = CodexRuntimeExecutor(artifact_store=CodexArtifactStore(tmp_path)).execute(
+    result = AgentRuntimeExecutor(artifact_store=AgentArtifactStore(tmp_path)).execute(
         {
             "work_order_id": "wo-unconfirmed",
             "domain": "code",
@@ -58,7 +58,7 @@ def test_codex_runtime_executor_blocks_unconfirmed_worker(tmp_path) -> None:
 
 
 def test_codex_runtime_command_honors_model_override(tmp_path) -> None:
-    order = CodexWorkOrder.from_mapping(
+    order = AgentWorkOrder.from_mapping(
         {
             "work_order_id": "wo-model",
             "domain": "code",
@@ -119,12 +119,12 @@ def test_codex_runtime_passes_absolute_last_message_path(monkeypatch, tmp_path) 
             output_path.write_text("done", encoding="utf-8")
             return '{"type":"thread.started","thread_id":"thread-ok"}\n', ""
 
-    monkeypatch.setattr("host_brain.codex_runtime.executor.codex_cli_command", lambda: "codex")
-    monkeypatch.setattr("host_brain.codex_runtime.executor.subprocess.Popen", FakePopen)
-    monkeypatch.setattr("host_brain.codex_runtime.executor._collect_git_summary", lambda _workspace: {"changed_files": [], "status_map": {}})
-    monkeypatch.setattr("host_brain.codex_runtime.executor._diff_git_summary", lambda _before, _after: {"changed_files": []})
+    monkeypatch.setattr("host_brain.agent_runtime.executor.codex_cli_command", lambda: "codex")
+    monkeypatch.setattr("host_brain.agent_runtime.executor.subprocess.Popen", FakePopen)
+    monkeypatch.setattr("host_brain.agent_runtime.executor._collect_git_summary", lambda _workspace: {"changed_files": [], "status_map": {}})
+    monkeypatch.setattr("host_brain.agent_runtime.executor._diff_git_summary", lambda _before, _after: {"changed_files": []})
 
-    result = CodexRuntimeExecutor(artifact_store=CodexArtifactStore(Path("relative_runs"))).execute(
+    result = AgentRuntimeExecutor(artifact_store=AgentArtifactStore(Path("relative_runs"))).execute(
         {
             "work_order_id": "wo-absolute-output",
             "domain": "code",
@@ -161,13 +161,13 @@ def test_codex_runtime_timeout_persists_partial_logs(monkeypatch, tmp_path) -> N
             self.returncode = -9
             return "", "after kill stderr"
 
-    monkeypatch.setattr("host_brain.codex_runtime.executor.codex_cli_command", lambda: "codex")
-    monkeypatch.setattr("host_brain.codex_runtime.executor.subprocess.Popen", FakePopen)
-    monkeypatch.setattr("host_brain.codex_runtime.executor._terminate_process_tree", lambda _proc: None)
-    monkeypatch.setattr("host_brain.codex_runtime.executor._collect_git_summary", lambda _workspace: {"changed_files": [], "status_map": {}})
-    monkeypatch.setattr("host_brain.codex_runtime.executor._diff_git_summary", lambda _before, _after: {"changed_files": []})
+    monkeypatch.setattr("host_brain.agent_runtime.executor.codex_cli_command", lambda: "codex")
+    monkeypatch.setattr("host_brain.agent_runtime.executor.subprocess.Popen", FakePopen)
+    monkeypatch.setattr("host_brain.agent_runtime.executor._terminate_process_tree", lambda _proc: None)
+    monkeypatch.setattr("host_brain.agent_runtime.executor._collect_git_summary", lambda _workspace: {"changed_files": [], "status_map": {}})
+    monkeypatch.setattr("host_brain.agent_runtime.executor._diff_git_summary", lambda _before, _after: {"changed_files": []})
 
-    result = CodexRuntimeExecutor(artifact_store=CodexArtifactStore(tmp_path)).execute(
+    result = AgentRuntimeExecutor(artifact_store=AgentArtifactStore(tmp_path)).execute(
         {
             "work_order_id": "wo-timeout",
             "domain": "code",

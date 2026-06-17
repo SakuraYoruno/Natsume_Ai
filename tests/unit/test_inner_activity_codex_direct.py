@@ -60,7 +60,6 @@ def test_run_inner_activity_llm_calls_codex_cli_and_logs_tokens(monkeypatch) -> 
     monkeypatch.setenv("HOST_INNER_ACTIVITY_CODEX_MIN_INTERVAL_MS", "0")
     monkeypatch.setenv("HOST_INNER_ACTIVITY_RESULT_CACHE_TTL_MS", "0")
     monkeypatch.setenv("OPENAI_API_KEY", "must-not-leak")
-    monkeypatch.setenv("CODEX_API_KEY", "must-not-leak")
     monkeypatch.setattr(agent.shutil, "which", lambda name: "C:/tools/codex.exe" if name == "codex" else None)
     ledger = SQLiteLedger(":memory:", check_same_thread=False)
     monkeypatch.setattr("host_brain.app.dependencies.get_ledger", lambda: ledger)

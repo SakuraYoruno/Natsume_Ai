@@ -12,7 +12,7 @@ from host_brain.app.bond_routes import router as bond_router, set_bond_engine_pr
 from host_brain.app.canon_routes import router as canon_router, set_ledger_provider as _set_canon_ledger_provider
 from host_brain.app.health_routes import router as health_router
 from host_brain.app.input_routes import router as input_router
-from host_brain.app.internal_codex_routes import router as internal_codex_router
+from host_brain.app.internal_agent_routes import router as internal_codex_router
 from host_brain.app.internal_security_immune_routes import router as internal_security_immune_router
 from host_brain.app.internal_tribe_routes import router as internal_tribe_router
 from host_brain.app.digital_life_routes import router as digital_life_router

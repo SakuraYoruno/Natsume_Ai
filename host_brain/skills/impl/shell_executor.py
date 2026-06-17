@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import logging
 import subprocess
+from host_brain.core.subprocess_utils import run as _subprocess_run
 from pathlib import Path
 from typing import Any
 
@@ -86,7 +87,7 @@ def execute_shell_run(payload: dict[str, Any]) -> dict[str, Any]:
         env.update({str(k): str(v) for k, v in env_extra.items()})
 
     try:
-        result = subprocess.run(
+        result = _subprocess_run(
             command,
             shell=True,
             cwd=cwd or None,
@@ -196,7 +197,7 @@ def execute_shell_run_test(payload: dict[str, Any]) -> dict[str, Any]:
 
     try:
         import os
-        result = subprocess.run(
+        result = _subprocess_run(
             normalized_command,
             shell=True,
             cwd=cwd or None,

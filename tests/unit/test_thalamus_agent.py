@@ -287,10 +287,10 @@ def test_thalamus_keeps_actionable_workspace_requests_on_codex_skill() -> None:
 
     assert inspect_decision is not None
     assert inspect_decision["route"] == "skill"
-    assert inspect_decision["target_id"] == "codex_inspect"
+    assert inspect_decision["target_id"] == "agent_inspect"
     assert write_decision is not None
     assert write_decision["route"] == "skill"
-    assert write_decision["target_id"] == "codex_worker"
+    assert write_decision["target_id"] == "agent_worker"
 
 
 def test_thalamus_routes_strict_recent_assistant_query_to_recent_turn() -> None:
@@ -302,13 +302,13 @@ def test_thalamus_routes_strict_recent_assistant_query_to_recent_turn() -> None:
     assert decision["reason_code"] == "RULE_RECENT_TURN"
 
 
-def test_thalamus_routes_plugin_build_request_to_codex_worker() -> None:
+def test_thalamus_routes_plugin_build_request_to_agent_worker() -> None:
     decision = classify_task_intent_by_rules("做个统计 token 消耗的插件")
 
     assert decision is not None
     assert decision["route"] == "skill"
-    assert decision["target_id"] == "codex_worker"
-    assert decision["reason_code"] == "RULE_FORCE_codex_worker"
+    assert decision["target_id"] == "agent_worker"
+    assert decision["reason_code"] == "RULE_FORCE_agent_worker"
 
 
 def test_classify_and_compile_intent_draft_routes_system_info_tool() -> None:
@@ -519,7 +519,7 @@ def test_classify_and_compile_intent_draft_prefers_lightnovel_recommender_over_g
     )
 
     assert compiled["route"] == "skill"
-    assert compiled["target_id"] == "codex_lightnovel_recommender"
+    assert compiled["target_id"] == "agent_lightnovel_recommender"
     assert compiled["route_reason"] == "THALAMUS_RULE_CODEX_PRODUCTION"
     assert compiled["args"]["site_adapter"] == "lightnovel.fun"
 
@@ -538,7 +538,7 @@ def test_classify_and_compile_intent_draft_does_not_treat_detail_url_as_eta_prog
     )
 
     assert compiled["route"] == "skill"
-    assert compiled["target_id"] == "codex_epub_builder"
+    assert compiled["target_id"] == "agent_epub_builder"
     assert compiled["route_reason"] == "THALAMUS_RULE_CODEX_PRODUCTION"
     assert compiled["args"]["run_mode"] == "worker"
     assert compiled["args"]["workspace_strategy"] == "temp_workspace"
@@ -868,9 +868,9 @@ def test_classify_and_compile_intent_draft_falls_back_to_cortex_classifier_when_
         new=AsyncMock(
             return_value={
                 "route": "skill",
-                "target_id": "codex_worker",
+                "target_id": "agent_worker",
                 "task": "please fix the failing test",
-                "reason_code": "LLM_ROUTE_codex_worker",
+                "reason_code": "LLM_ROUTE_agent_worker",
                 "confidence": 0.93,
                 "route_source": "llm",
             }
@@ -888,7 +888,7 @@ def test_classify_and_compile_intent_draft_falls_back_to_cortex_classifier_when_
 
     classify_mock.assert_awaited_once()
     assert compiled["route"] == "skill"
-    assert compiled["target_id"] == "codex_worker"
+    assert compiled["target_id"] == "agent_worker"
     assert compiled["route_source"] == "llm"
 
 
@@ -900,9 +900,9 @@ def test_classify_task_intent_rejects_low_confidence_llm_route_when_rules_miss()
             new=AsyncMock(
                 return_value={
                     "route": "skill",
-                    "target_id": "codex_worker",
+                    "target_id": "agent_worker",
                     "task": "ambiguous fallback request",
-                    "reason_code": "LLM_ROUTE_codex_worker",
+                    "reason_code": "LLM_ROUTE_agent_worker",
                     "confidence": 0.41,
                     "route_source": "llm",
                 }
@@ -991,7 +991,7 @@ def test_classify_task_intent_strips_llm_chat_target_when_rules_miss() -> None:
             new=AsyncMock(
                 return_value={
                     "route": "chat",
-                    "target_id": "codex_worker",
+                    "target_id": "agent_worker",
                     "task": "ambiguous fallback request",
                     "reason_code": "LLM_ROUTE_CHAT",
                     "confidence": 0.95,
@@ -1058,22 +1058,22 @@ def test_classify_task_intent_by_rules_routes_open_settings_to_open_app() -> Non
     assert decision["reason_code"] == "THALAMUS_RULE_OPEN_APP"
 
 
-def test_classify_task_intent_by_rules_routes_workspace_inspection_to_codex_inspect() -> None:
+def test_classify_task_intent_by_rules_routes_workspace_inspection_to_agent_inspect() -> None:
     decision = classify_task_intent_by_rules("查看完整主链")
 
     assert decision is not None
     assert decision["route"] == "skill"
-    assert decision["target_id"] == "codex_inspect"
+    assert decision["target_id"] == "agent_inspect"
     assert decision["reason_code"] == "THALAMUS_RULE_CODEX_WORKSPACE_INSPECT"
     assert decision["args"]["workspace_strategy"] == "runtime_repo"
 
 
-def test_classify_task_intent_by_rules_routes_workspace_work_to_codex_worker() -> None:
+def test_classify_task_intent_by_rules_routes_workspace_work_to_agent_worker() -> None:
     decision = classify_task_intent_by_rules("开始优化意图识别和路由")
 
     assert decision is not None
     assert decision["route"] == "skill"
-    assert decision["target_id"] == "codex_worker"
+    assert decision["target_id"] == "agent_worker"
     assert decision["reason_code"] == "THALAMUS_RULE_CODEX_WORKSPACE_WORKER"
     assert decision["args"]["run_mode"] == "worker"
 
@@ -1083,7 +1083,7 @@ def test_classify_task_intent_by_rules_routes_frontend_browser_verification_to_c
 
     assert decision is not None
     assert decision["route"] == "skill"
-    assert decision["target_id"] == "codex_frontend_acceptance"
+    assert decision["target_id"] == "agent_frontend_acceptance"
     assert decision["reason_code"] == "THALAMUS_RULE_CODEX_PRODUCTION"
     assert decision["args"]["start_background"] is True
 
@@ -1093,7 +1093,7 @@ def test_classify_task_intent_by_rules_routes_browser_research_to_production_ski
 
     assert decision is not None
     assert decision["route"] == "skill"
-    assert decision["target_id"] == "codex_browser_research"
+    assert decision["target_id"] == "browser_research"
     assert decision["reason_code"] == "THALAMUS_RULE_CODEX_PRODUCTION"
 
 
@@ -1102,7 +1102,7 @@ def test_classify_task_intent_by_rules_routes_web_corpus_collection_to_productio
 
     assert decision is not None
     assert decision["route"] == "skill"
-    assert decision["target_id"] == "codex_web_corpus_collector"
+    assert decision["target_id"] == "agent_web_corpus_collector"
     assert decision["reason_code"] == "THALAMUS_RULE_CODEX_PRODUCTION"
 
 
@@ -1111,7 +1111,7 @@ def test_classify_task_intent_by_rules_routes_epub_packaging_to_production_skill
 
     assert decision is not None
     assert decision["route"] == "skill"
-    assert decision["target_id"] == "codex_epub_builder"
+    assert decision["target_id"] == "agent_epub_builder"
     assert decision["reason_code"] == "THALAMUS_RULE_CODEX_PRODUCTION"
 
 
@@ -1120,7 +1120,7 @@ def test_classify_task_intent_by_rules_routes_lightnovel_recommendation_to_produ
 
     assert decision is not None
     assert decision["route"] == "skill"
-    assert decision["target_id"] == "codex_lightnovel_recommender"
+    assert decision["target_id"] == "agent_lightnovel_recommender"
     assert decision["reason_code"] == "THALAMUS_RULE_CODEX_PRODUCTION"
 
 
@@ -1129,19 +1129,19 @@ def test_classify_task_intent_by_rules_routes_lightnovel_recommendation_selectio
 
     assert decision is not None
     assert decision["route"] == "skill"
-    assert decision["target_id"] == "codex_epub_builder"
+    assert decision["target_id"] == "agent_epub_builder"
     assert decision["reason_code"] == "THALAMUS_RULE_CODEX_PRODUCTION"
     assert decision["args"]["recommendation_index"] == 1
     assert decision["args"]["site_adapter"] == "lightnovel.fun"
     assert decision["args"]["start_background"] is True
 
 
-def test_classify_task_intent_by_rules_routes_repo_commit_phrase_to_codex_worker() -> None:
+def test_classify_task_intent_by_rules_routes_repo_commit_phrase_to_agent_worker() -> None:
     decision = classify_task_intent_by_rules("继续整理提交")
 
     assert decision is not None
     assert decision["route"] == "skill"
-    assert decision["target_id"] == "codex_worker"
+    assert decision["target_id"] == "agent_worker"
     assert decision["reason_code"] == "THALAMUS_RULE_CODEX_WORKSPACE_WORKER"
 
 
@@ -1246,7 +1246,7 @@ def test_classify_task_intent_by_rules_routes_style_name_to_chat() -> None:
     assert decision["reason_code"] == "RULE_CONTEXTUAL_CHAT_FOLLOWUP"
 
 
-def test_classify_task_intent_by_rules_readonly_code_plan_not_codex_worker() -> None:
+def test_classify_task_intent_by_rules_readonly_code_plan_not_agent_worker() -> None:
     decision = classify_task_intent_by_rules("给我一个完整方案，不要改代码")
 
     assert decision is not None
@@ -1284,6 +1284,42 @@ def test_classify_task_intent_routes_gateway_status_reply_check_to_chat() -> Non
     assert decision["target_id"] == ""
     assert decision["route_source"] == "thalamus.rule"
     assert decision["reason_code"] == "THALAMUS_RULE_STATUS_REPLY_CHECK"
+
+
+def test_classify_task_intent_routes_authorized_pentest_to_pentest_agent() -> None:
+    decision = classify_task_intent_by_rules("帮我对 target=example.com 做授权安全扫描，只做侦察和配置审计")
+
+    assert decision is not None
+    assert decision["route"] == "delegate"
+    assert decision["target_id"] == "pentest_agent"
+    assert decision["route_source"] == "thalamus.rule"
+    assert decision["reason_code"] == "THALAMUS_RULE_PENTEST_AGENT"
+    assert decision["args"]["allow_exploit"] is False
+    assert decision["args"]["scope_hint_present"] is True
+
+
+def test_classify_task_intent_keeps_security_advice_out_of_pentest_agent() -> None:
+    decision = classify_task_intent_by_rules("SQL 注入是什么，应该怎么防？")
+
+    assert decision is None or decision.get("target_id") != "pentest_agent"
+
+
+def test_classify_and_compile_intent_draft_routes_pentest_message_only() -> None:
+    agent = ThalamusAgent()
+
+    compiled = _run(
+        agent.classify_and_compile_intent_draft(
+            request_id="req-thalamus-pentest",
+            session_id="session-thalamus-pentest",
+            user_message="对目标：https://example.com 做授权漏洞评估，只允许只读检查",
+            person_id="person-001",
+        )
+    )
+
+    assert compiled["route"] == "delegate"
+    assert compiled["target_id"] == "pentest_agent"
+    assert compiled["action"] == "exec_intent"
+    assert compiled["args"]["text"] == "对目标：https://example.com 做授权漏洞评估，只允许只读检查"
 
 
 def test_classify_task_intent_does_not_treat_codex_name_as_code_request() -> None:
@@ -1335,7 +1371,7 @@ def test_classify_task_intent_keeps_real_test_work_on_codex() -> None:
 
     assert decision is not None
     assert decision["route"] == "skill"
-    assert decision["target_id"] == "codex_worker"
+    assert decision["target_id"] == "agent_worker"
 
 
 def test_classify_task_intent_fastpath_routes_english_greeting_to_chat() -> None:
@@ -1440,7 +1476,7 @@ def test_classify_and_compile_intent_draft_routes_self_heal_to_codex() -> None:
     )
 
     assert compiled["route"] == "skill"
-    assert compiled["target_id"] == "codex_self_heal"
+    assert compiled["target_id"] == "agent_self_heal"
     assert compiled["route_reason"] == "THALAMUS_RULE_CODEX_SELF_HEAL"
     assert compiled["args"]["run_mode"] == "self_heal"
     assert compiled["args"]["workspace_strategy"] == "runtime_repo"
@@ -1461,9 +1497,9 @@ def test_classify_and_compile_intent_draft_routes_production_brief_to_codex_back
     )
 
     assert compiled["route"] == "skill"
-    assert compiled["target_id"] == "codex_workbench_brief"
-    assert compiled["route_reason"] == "THALAMUS_RULE_CODEX_PRODUCTION"
-    assert compiled["args"]["run_mode"] == "research"
+    assert compiled["target_id"] == "agent_epub_builder"
+    assert compiled["route_reason"] == "THALAMUS_RULE_CODEX_EPUB_RECENT_RECOMMENDATION_CONTEXT"
+    assert compiled["args"]["run_mode"] == "worker"
     assert compiled["args"]["start_background"] is True
     assert compiled["args"]["workspace_strategy"] == "temp_workspace"
 
@@ -1482,7 +1518,7 @@ def test_classify_and_compile_intent_draft_routes_frontend_acceptance_to_runtime
     )
 
     assert compiled["route"] == "skill"
-    assert compiled["target_id"] == "codex_frontend_acceptance"
+    assert compiled["target_id"] == "agent_frontend_acceptance"
     assert compiled["route_reason"] == "THALAMUS_RULE_CODEX_PRODUCTION"
     assert compiled["args"]["run_mode"] == "inspect"
     assert compiled["args"]["workspace_strategy"] == "runtime_repo"
@@ -1503,7 +1539,7 @@ def test_classify_and_compile_intent_draft_routes_epub_builder_to_temp_workspace
     )
 
     assert compiled["route"] == "skill"
-    assert compiled["target_id"] == "codex_epub_builder"
+    assert compiled["target_id"] == "agent_epub_builder"
     assert compiled["args"]["run_mode"] == "worker"
     assert compiled["args"]["workspace_strategy"] == "temp_workspace"
 
@@ -1522,7 +1558,7 @@ def test_classify_and_compile_intent_draft_routes_recommendation_selection_to_ep
     )
 
     assert compiled["route"] == "skill"
-    assert compiled["target_id"] == "codex_epub_builder"
+    assert compiled["target_id"] == "agent_epub_builder"
     assert compiled["args"]["run_mode"] == "worker"
     assert compiled["args"]["workspace_strategy"] == "temp_workspace"
     assert compiled["args"]["recommendation_index"] == 1
@@ -1543,7 +1579,7 @@ def test_classify_and_compile_intent_draft_routes_lightnovel_recommender_to_temp
     )
 
     assert compiled["route"] == "skill"
-    assert compiled["target_id"] == "codex_lightnovel_recommender"
+    assert compiled["target_id"] == "agent_lightnovel_recommender"
     assert compiled["args"]["run_mode"] == "worker"
     assert compiled["args"]["workspace_strategy"] == "temp_workspace"
     assert compiled["args"]["site_adapter"] == "lightnovel.fun"
@@ -1563,7 +1599,7 @@ def test_classify_and_compile_intent_draft_defaults_runtime_repo_for_codex_code_
     )
 
     assert compiled["route"] == "skill"
-    assert compiled["target_id"] == "codex_worker"
+    assert compiled["target_id"] == "agent_worker"
     assert compiled["args"]["workspace_strategy"] == "runtime_repo"
     assert compiled["args"]["run_mode"] == "worker"
     assert compiled["args"]["task"] == "please fix the failing test and show me the code"
@@ -1583,7 +1619,7 @@ def test_classify_and_compile_intent_draft_uses_inspect_temp_workspace_for_light
     )
 
     assert compiled["route"] == "skill"
-    assert compiled["target_id"] == "codex_inspect"
+    assert compiled["target_id"] == "agent_inspect"
     assert compiled["args"]["run_mode"] == "inspect"
     assert compiled["args"]["allow_temp_workspace"] is True
     assert "workspace_strategy" not in compiled["args"]

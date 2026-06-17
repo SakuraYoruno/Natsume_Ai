@@ -648,7 +648,7 @@ def test_multimodal_backend_uses_dedicated_multimodal_tier(monkeypatch) -> None:
 
     assert raw
     assert captured["scene_type"] == "MULTIMODAL"
-    assert captured["cognitive_tier"] == "MULTIMODAL"
+    assert captured["cognitive_tier"] == "B"
     assert captured["provider_name"] == "gemini"
 
 

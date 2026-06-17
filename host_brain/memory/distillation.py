@@ -84,12 +84,12 @@ class PoolSummaryClient:
         self,
         *,
         scene_type: str = "MEMORY_DISTILLATION",
-        cognitive_tier: str = "D",
+        cognitive_tier: str = "B",
         timeout_ms: int = 2600,
         render_target_lang: str = "zh",
     ) -> None:
         self._scene_type = str(scene_type or "MEMORY_DISTILLATION").strip().upper() or "MEMORY_DISTILLATION"
-        self._cognitive_tier = str(cognitive_tier or "D").strip().upper() or "D"
+        self._cognitive_tier = str(cognitive_tier or "B").strip().upper() or "B"
         self._timeout_ms = max(800, int(timeout_ms))
         self._render_target_lang = "ja" if str(render_target_lang or "").strip().lower() == "ja" else "zh"
 
@@ -247,7 +247,7 @@ def build_default_llm_summary_client(
 ) -> LlmSummaryClient:
     return PoolSummaryClient(
         scene_type="MEMORY_DISTILLATION",
-        cognitive_tier="D",
+        cognitive_tier="B",
         timeout_ms=timeout_ms,
         render_target_lang=render_target_lang,
     )
@@ -941,7 +941,7 @@ _LIFE_DISTILLATION_NOISE_TOKENS = (
     "lightnovel_recommendation_delivery",
     "lightnovel_recommendation_deep_review",
     "lightnovel_gateway_delivery",
-    "codexproductionjobcodex_lightnovel_recommender",
+    "codexproductionjobagent_lightnovel_recommender",
     "轻小说推荐报告",
     "详情:https://www.lightnovel.fun",
     "详情：http://www.lightnovel.fun",
@@ -963,7 +963,7 @@ def _sanitize_life_distillation_text(*, text: str, metadata: Mapping[str, Any]) 
         should_distill = False
     if action in _LIFE_DISTILLATION_NOISE_ACTIONS:
         return None
-    inner_event = event_source in {"inner_world", "inner_stream", "inner_activity"}
+    inner_event = event_source in {"inner_world", "inner_stream", "inner_activity"} or _looks_like_private_inner_event(action)
     if inner_event and not should_distill:
         return None
 
@@ -1021,7 +1021,7 @@ def _life_llm_source_text(*, fallback_text: str, metadata: Mapping[str, Any]) ->
         should_distill = False
     if action in _LIFE_DISTILLATION_NOISE_ACTIONS:
         return None
-    if event_source in {"inner_world", "inner_stream", "inner_activity"} and not should_distill:
+    if (event_source in {"inner_world", "inner_stream", "inner_activity"} or _looks_like_private_inner_event(action)) and not should_distill:
         return None
     truth_state = str(metadata.get("truth_state") or "").strip().upper()
     if truth_state in {"CORRECTED", "SUPPRESSED"}:
@@ -1097,6 +1097,8 @@ def _semantic_statement_from_life_text(statement: str, *, action: str, allow_use
     if len(body) < 4:
         return None
     compact = _compact_text(body)
+    if _looks_like_private_inner_event(compact):
+        return None
     if _life_distillation_text_is_noise(compact):
         return None
     if _life_preference_has_unresolved_pronoun(compact):
@@ -1112,6 +1114,21 @@ def _semantic_statement_from_life_text(statement: str, *, action: str, allow_use
     if _is_life_stable_fact(compact):
         return f"稳定事实：{body}"
     return None
+
+
+def _looks_like_private_inner_event(value: Any) -> bool:
+    compact = _compact_text(value)
+    return any(
+        token in compact
+        for token in (
+            "innerworld",
+            "innerstream",
+            "inneractivity",
+            "innerworldmonologuetick",
+            "innerstreamtick",
+            "innerthought",
+        )
+    )
 
 
 def _life_semantic_body(statement: str) -> str:

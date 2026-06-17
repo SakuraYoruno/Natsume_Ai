@@ -572,7 +572,7 @@ class TestAuditRetentionContract(unittest.TestCase):
                 event_source="codex_production",
                 event_id="old-lightnovel-delivery",
                 request_id="req_old_lightnovel_delivery",
-                intent_id="codex_lightnovel_recommender",
+                intent_id="agent_lightnovel_recommender",
                 person_id="owner",
                 session_id="qq_dm_owner",
                 task_id="lightnovel_recommendation_delivery",

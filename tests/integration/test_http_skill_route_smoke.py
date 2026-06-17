@@ -12,7 +12,7 @@ import host_brain.app.dependencies as deps
 import host_brain.app.asgi as host_api
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.skills.builtin_registry import build_builtin_skill_registry
-from host_brain.skills.codex_runtime_registry import CodexRuntimeSkillProvider
+from host_brain.skills.agent_runtime_registry import AgentRuntimeSkillProvider
 
 
 class _FakeIntentEngine:
@@ -200,9 +200,9 @@ def test_http_chat_route_infers_session_summary_from_natural_language(monkeypatc
         _close_client(client, ledger)
 
 
-def test_http_chat_route_infers_codex_worker_from_code_request(monkeypatch) -> None:
+def test_http_chat_route_infers_agent_worker_from_code_request(monkeypatch) -> None:
     client, ledger = _build_client(monkeypatch)
-    deps._skill_registry.register_decorated(CodexRuntimeSkillProvider())
+    deps._skill_registry.register_decorated(AgentRuntimeSkillProvider())
     captured: dict[str, Any] = {}
 
     def _fake_dispatch(payload: dict[str, Any]) -> dict[str, Any]:
@@ -233,7 +233,7 @@ def test_http_chat_route_infers_codex_worker_from_code_request(monkeypatch) -> N
         commit_event = next(event for event in events if event.get("phase") == "COMMIT")
 
         assert route_event["route_type"] == "skill"
-        assert route_event["target_id"] == "codex_worker"
+        assert route_event["target_id"] == "agent_worker"
         assert commit_event["decision"] == "APPROVE"
         assert "print('fixed')" in str(commit_event.get("narrative") or "")
         assert captured["payload"]["tool"] == "codex_runtime"
@@ -245,7 +245,7 @@ def test_http_chat_route_infers_codex_worker_from_code_request(monkeypatch) -> N
         request_id = str(commit_event["request_id"])
         trace = ledger.trace_request(request_id)
         assert len(trace["skill_exec_log"]) == 1
-        assert trace["skill_exec_log"][0]["skill_name"] == "codex_worker"
+        assert trace["skill_exec_log"][0]["skill_name"] == "agent_worker"
         assert trace["skill_exec_log"][0]["result_status"] == "SUCCESS"
     finally:
         _close_client(client, ledger)
@@ -253,7 +253,7 @@ def test_http_chat_route_infers_codex_worker_from_code_request(monkeypatch) -> N
 
 def test_http_chat_route_uses_lightweight_codex_mode_for_simple_snippet_request(monkeypatch) -> None:
     client, ledger = _build_client(monkeypatch)
-    deps._skill_registry.register_decorated(CodexRuntimeSkillProvider())
+    deps._skill_registry.register_decorated(AgentRuntimeSkillProvider())
     captured: dict[str, Any] = {}
 
     def _fake_dispatch(payload: dict[str, Any]) -> dict[str, Any]:
@@ -284,7 +284,7 @@ def test_http_chat_route_uses_lightweight_codex_mode_for_simple_snippet_request(
         commit_event = next(event for event in events if event.get("phase") == "COMMIT")
 
         assert route_event["route_type"] == "skill"
-        assert route_event["target_id"] == "codex_inspect"
+        assert route_event["target_id"] == "agent_inspect"
         assert commit_event["decision"] == "APPROVE"
         assert "dedupe_by_frequency" in str(commit_event.get("narrative") or "")
         work_order = captured["payload"]["work_order"]
@@ -294,9 +294,9 @@ def test_http_chat_route_uses_lightweight_codex_mode_for_simple_snippet_request(
         _close_client(client, ledger)
 
 
-def test_http_chat_route_infers_codex_self_heal_task(monkeypatch) -> None:
+def test_http_chat_route_infers_agent_self_heal_task(monkeypatch) -> None:
     client, ledger = _build_client(monkeypatch)
-    deps._skill_registry.register_decorated(CodexRuntimeSkillProvider())
+    deps._skill_registry.register_decorated(AgentRuntimeSkillProvider())
     captured: dict[str, Any] = {}
 
     def _fake_dispatch(payload: dict[str, Any]) -> dict[str, Any]:
@@ -326,7 +326,7 @@ def test_http_chat_route_infers_codex_self_heal_task(monkeypatch) -> None:
         route_event = next(event for event in events if event.get("phase") == "EXECUTIVE_ROUTE")
 
         assert route_event["route_type"] == "skill"
-        assert route_event["target_id"] == "codex_self_heal"
+        assert route_event["target_id"] == "agent_self_heal"
         work_order = captured["payload"]["work_order"]
         assert work_order["domain"] == "immune"
         assert work_order["run_mode"] == "self_heal"
@@ -485,7 +485,7 @@ def test_http_chat_route_executes_skill_plan(monkeypatch) -> None:
 
 def test_http_chat_route_skill_plan_preserves_codex_workspace_strategy(monkeypatch) -> None:
     client, ledger = _build_client(monkeypatch)
-    deps._skill_registry.register_decorated(CodexRuntimeSkillProvider())
+    deps._skill_registry.register_decorated(AgentRuntimeSkillProvider())
     captured: list[dict[str, Any]] = []
 
     def _fake_dispatch(payload: dict[str, Any]) -> dict[str, Any]:
@@ -511,10 +511,10 @@ def test_http_chat_route_skill_plan_preserves_codex_workspace_strategy(monkeypat
                         {
                             "step_index": 1,
                             "route": "skill",
-                            "target_id": "codex_worker",
+                            "target_id": "agent_worker",
                             "description": "fix the failing test",
                             "task_description": "fix the failing test",
-                            "route_reason": "test:http_plan:codex_worker",
+                            "route_reason": "test:http_plan:agent_worker",
                             "allow_parallel": True,
                             "skill_family": "code",
                             "risk_level": 2,
@@ -554,7 +554,7 @@ def test_http_chat_route_skill_plan_preserves_codex_workspace_strategy(monkeypat
         request_id = str(commit_event["request_id"])
         trace = ledger.trace_request(request_id)
         assert sorted(row["skill_name"] for row in trace["skill_exec_log"]) == [
-            "codex_worker",
+            "agent_worker",
             "session_summary",
         ]
     finally:
