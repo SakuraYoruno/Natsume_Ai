@@ -18,6 +18,7 @@ from host_brain.app.internal_tribe_routes import router as internal_tribe_router
 from host_brain.app.digital_life_routes import router as digital_life_router
 from host_brain.app.memory_routes import router as memory_router
 from host_brain.app.mateengine_routes import router as mateengine_router
+from host_brain.app.pentest_routes import router as pentest_router
 from host_brain.app.prompt_config_routes import router as prompt_config_router
 from host_brain.app.tool_routes import router as tool_router, tool_kits_alias_router, set_tool_providers as _set_tool_providers
 from host_brain.scheduler.scheduler_routes import router as scheduler_router, set_scheduler_providers as _set_scheduler_providers
@@ -68,6 +69,7 @@ def register_host_routers(app: FastAPI) -> None:
     app.include_router(digital_life_router)
     app.include_router(memory_router)
     app.include_router(mateengine_router)
+    app.include_router(pentest_router)
     app.include_router(health_router)
 
 
