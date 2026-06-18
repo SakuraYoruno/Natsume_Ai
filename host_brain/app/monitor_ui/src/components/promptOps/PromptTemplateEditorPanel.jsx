@@ -3,7 +3,20 @@ import { Database, FileText, Wand2 } from 'lucide-react'
 import EmptyStateCard from '../EmptyStateCard.jsx'
 import NoticeBanner from '../NoticeBanner.jsx'
 
+function formatTemplateContent(content) {
+  if (content === null || content === undefined || content === '') return '—'
+  if (typeof content === 'string') return content
+  if (typeof content === 'number' || typeof content === 'boolean') return String(content)
+  try {
+    return JSON.stringify(content, null, 2)
+  } catch {
+    return String(content)
+  }
+}
+
 function ContentCard({ icon: Icon, title, content, mono = false }) {
+  const displayContent = formatTemplateContent(content)
+
   return (
     <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
       <div className="mb-2 flex items-center gap-2 text-xs font-medium text-gray-700">
@@ -14,7 +27,7 @@ function ContentCard({ icon: Icon, title, content, mono = false }) {
           mono ? 'font-mono' : ''
         }`}
       >
-        {content || '—'}
+        {displayContent}
       </pre>
     </div>
   )
