@@ -194,6 +194,21 @@ _PENTEST_EXEC_MARKER_RE = re.compile(
     r")",
     re.IGNORECASE,
 )
+_PENTEST_STRUCTURED_SCOPE_RE = re.compile(
+    r"("
+    r"\btarget\s*[:=]\s*\S+.{0,160}\bscope\s*[:=]\s*\S+"
+    r"|\bscope\s*[:=]\s*\S+.{0,160}\btarget\s*[:=]\s*\S+"
+    r")",
+    re.IGNORECASE,
+)
+_PENTEST_OPERATION_HINT_RE = re.compile(
+    r"("
+    r"read[-_\s]?only|no\s+exploit|without\s+exploit|forbid(?:den)?\s+exploit"
+    r"|pentest|penetration\s+test|security\s+scan|vulnerability|vuln|recon(?:naissance)?|scan|audit|exploit"
+    r"|授权|只读|禁止|安全扫描|漏洞扫描|漏洞评估|安全评估|端口扫描|资产侦察|配置审计|侦察|审计"
+    r")",
+    re.IGNORECASE,
+)
 _PENTEST_SCOPE_HINT_RE = re.compile(
     r"("
     r"\b(?:target|scope|host|domain|url)\s*[:=]"
@@ -1948,12 +1963,15 @@ def _build_pentest_route_seed(text: str) -> dict[str, Any] | None:
     normalized = _normalize_text(text)
     if not normalized:
         return None
-    if not _PENTEST_EXEC_MARKER_RE.search(normalized):
+    has_exec_marker = bool(_PENTEST_EXEC_MARKER_RE.search(normalized))
+    has_structured_scope = bool(_PENTEST_STRUCTURED_SCOPE_RE.search(normalized))
+    has_operation_hint = bool(_PENTEST_OPERATION_HINT_RE.search(normalized))
+    if not has_exec_marker and not (has_structured_scope and has_operation_hint):
         return None
     if _PENTEST_ADVICE_ONLY_RE.search(normalized):
         return None
 
-    has_scope_hint = bool(_PENTEST_SCOPE_HINT_RE.search(normalized))
+    has_scope_hint = bool(_PENTEST_SCOPE_HINT_RE.search(normalized) or has_structured_scope)
     if not has_scope_hint:
         return None
 
@@ -2114,6 +2132,10 @@ def _build_direct_route_seed(text: str) -> dict[str, Any] | None:
     if codex_production_seed is not None:
         return codex_production_seed
 
+    pentest_seed = _build_pentest_route_seed(cleaned)
+    if pentest_seed is not None:
+        return pentest_seed
+
     browser_seed = _build_browser_observation_route_seed(cleaned)
     if browser_seed is not None:
         return browser_seed
@@ -2129,10 +2151,6 @@ def _build_direct_route_seed(text: str) -> dict[str, Any] | None:
     frontend_audit_seed = _build_frontend_audit_route_seed(cleaned)
     if frontend_audit_seed is not None:
         return frontend_audit_seed
-
-    pentest_seed = _build_pentest_route_seed(cleaned)
-    if pentest_seed is not None:
-        return pentest_seed
 
     if _looks_like_open_app_request(cleaned):
         return {
