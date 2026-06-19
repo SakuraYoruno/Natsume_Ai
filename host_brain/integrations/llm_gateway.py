@@ -495,9 +495,20 @@ class LlmGatewayContract:
             return False, SERVICE_UNAVAILABLE_DEPENDENCY, "llm provider marked unavailable"
         if provider_name == PROVIDER_DISABLED:
             return False, SERVICE_UNAVAILABLE_DEPENDENCY, "llm provider disabled by config"
+        if provider_name == PROVIDER_CODEX:
+            if api_key:
+                return True, "", ""
+            try:
+                from host_brain.integrations.codex_cli_provider import codex_cli_lm_allowed_for_background
+
+                cli_available = codex_cli_lm_allowed_for_background()
+            except Exception:
+                cli_available = False
+            if cli_available:
+                return True, "", ""
+            return False, SERVICE_UNAVAILABLE_COLD_START, "OPENAI_API_KEY missing and Codex CLI unavailable"
         provider_to_env_key = {
             PROVIDER_OPENAI: "OPENAI_API_KEY",
-            PROVIDER_CODEX: "OPENAI_API_KEY",
             PROVIDER_GEMINI: "GEMINI_API_KEY",
             PROVIDER_DEEPSEEK: "DEEPSEEK_API_KEY",
         }
@@ -674,7 +685,7 @@ def _load_api_key_from_env(provider_name: str) -> str | None:
 
     支持的环境变量：
     - openai: OPENAI_API_KEY
-    - codex: OPENAI_API_KEY
+    - codex: OPENAI_API_KEY（未设置时可由 Codex CLI fallback 承接）
     - gemini: GEMINI_API_KEY
     - deepseek: DEEPSEEK_API_KEY
     - anthropic: ANTHROPIC_API_KEY

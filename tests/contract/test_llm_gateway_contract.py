@@ -1,6 +1,8 @@
 import json
+import os
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from host_brain.airlock.sanitizer import EgressGateResult
 from host_brain.audit.sqlite_ledger import SQLiteLedger
@@ -146,31 +148,32 @@ class TestLlmGatewayContract(unittest.TestCase):
 
     def test_gateway_provider_unavailable_codex_deepseek_or_gemini_cold_start_degrades(self) -> None:
         prompt = _load_json(FIXTURES / "good" / "prompt_payload.json")
-        for provider_name, profile_id in (
-            (PROVIDER_CODEX, "mp.codex.v1"),
-            (PROVIDER_DEEPSEEK, "mp.deepseek.v1"),
-            (PROVIDER_GEMINI, "mp.gemini.v1"),
-        ):
-            ledger = SQLiteLedger(db_path=":memory:")
-            gateway = LlmGatewayContract(
-                ledger=ledger,
-                provider_name=provider_name,
-                api_key=None,
-                available=True,
-            )
-            result = gateway.generate(
-                request_id=f"req_llm_gateway_{provider_name}",
-                model_profile_id=profile_id,
-                prompt_payload=prompt,
-                ts_ms=1_800_030_000_005,
-            )
-            self.assertFalse(result.success)
-            self.assertEqual(STATUS_DEGRADED, result.status)
-            self.assertEqual(S_LLM_GATEWAY_PROVIDER, result.stage)
-            self.assertEqual(SERVICE_UNAVAILABLE_COLD_START, result.reason_code)
-            self.assertEqual(provider_name, result.output["provider"])
-            self.assertTrue(result.output["draft_only"])
-            ledger.close()
+        with patch.dict(os.environ, {"HOST_CODEX_BACKGROUND_DISABLE_CLI": "true"}, clear=False):
+            for provider_name, profile_id in (
+                (PROVIDER_CODEX, "mp.codex.v1"),
+                (PROVIDER_DEEPSEEK, "mp.deepseek.v1"),
+                (PROVIDER_GEMINI, "mp.gemini.v1"),
+            ):
+                ledger = SQLiteLedger(db_path=":memory:")
+                gateway = LlmGatewayContract(
+                    ledger=ledger,
+                    provider_name=provider_name,
+                    api_key=None,
+                    available=True,
+                )
+                result = gateway.generate(
+                    request_id=f"req_llm_gateway_{provider_name}",
+                    model_profile_id=profile_id,
+                    prompt_payload=prompt,
+                    ts_ms=1_800_030_000_005,
+                )
+                self.assertFalse(result.success)
+                self.assertEqual(STATUS_DEGRADED, result.status)
+                self.assertEqual(S_LLM_GATEWAY_PROVIDER, result.stage)
+                self.assertEqual(SERVICE_UNAVAILABLE_COLD_START, result.reason_code)
+                self.assertEqual(provider_name, result.output["provider"])
+                self.assertTrue(result.output["draft_only"])
+                ledger.close()
 
     def test_gateway_egress_blocked_returns_airlock_reason(self) -> None:
         payload = _load_json(FIXTURES / "bad" / "egress_blocked_payload.json")

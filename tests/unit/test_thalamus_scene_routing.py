@@ -173,6 +173,10 @@ def test_chat_graph_can_route_direct_node_to_codex_spark(monkeypatch) -> None:
         "host_brain.app.graph_config_builder.codex_cli_lm_available",
         lambda: True,
     )
+    monkeypatch.setattr(
+        "host_brain.app.graph_config_builder.codex_cli_lm_allowed_for_background",
+        lambda: True,
+    )
 
     cfg = build_chat_graph_config(
         provider_name="gemini",
@@ -199,6 +203,10 @@ def test_non_chat_graph_model_nodes_can_migrate_to_codex(monkeypatch) -> None:
     monkeypatch.setenv("HOST_CODEX_MODEL_ID", "gpt-5.4-mini")
     monkeypatch.setattr(
         "host_brain.app.graph_config_builder.codex_cli_lm_available",
+        lambda: True,
+    )
+    monkeypatch.setattr(
+        "host_brain.app.graph_config_builder.codex_cli_lm_allowed_for_background",
         lambda: True,
     )
 
