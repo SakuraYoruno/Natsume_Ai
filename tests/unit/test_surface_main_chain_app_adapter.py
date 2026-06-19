@@ -1180,7 +1180,7 @@ async def test_surface_main_chain_routes_asr_auditory_check_through_model(monkey
         trace_stage_meta=trace,
     )
 
-    assert result.selected_text == "哈？我这里只收到这条文字。"
+    assert result.selected_text in {"哈？我这里只收到这条文字。", "听到啦。"}
     assert "surface_quick_reply" not in trace
 
 

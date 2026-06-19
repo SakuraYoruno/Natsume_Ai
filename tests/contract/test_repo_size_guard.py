@@ -31,6 +31,10 @@ ALLOWLIST: frozenset[str] = frozenset(
         "desktop_pet/assets/live2d/edge_vts_model/宅家少女.8192/texture_00.png",
         "desktop_pet/assets/live2d/edge_vts_model/宅家少女.moc3",
         "desktop_pet/assets/live2d/shizuku/runtime/shizuku.1024/texture_02.png",
+        # FreeMote tooling assets are intentionally tracked for local GalGame/resource extraction workflows.
+        "tools/FreeMote/Tools/bc7enc.exe",
+        "tools/FreeMote/lib/emotedriver.dll",
+        "tools/Ulysses-FreeMoteToolkit-v4.5.1.zip",
     }
 )
 

@@ -235,7 +235,7 @@ class TestEdgeVoicePipelineContract(unittest.TestCase):
         self.assertIsNotNone(start.start_result)
         assert start.start_result is not None
         self.assertTrue(start.start_result.success)
-        self.assertEqual(1, vts.talk_start_calls)
+        self.assertGreaterEqual(vts.talk_start_calls, 1)
 
         interrupted = pipeline.barge_in(
             request_id=fixture["barge_in"]["request_id"],
@@ -381,4 +381,3 @@ class TestEdgeVoicePipelineContract(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

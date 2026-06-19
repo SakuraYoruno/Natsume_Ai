@@ -497,6 +497,7 @@ class LlmGatewayContract:
             return False, SERVICE_UNAVAILABLE_DEPENDENCY, "llm provider disabled by config"
         provider_to_env_key = {
             PROVIDER_OPENAI: "OPENAI_API_KEY",
+            PROVIDER_CODEX: "OPENAI_API_KEY",
             PROVIDER_GEMINI: "GEMINI_API_KEY",
             PROVIDER_DEEPSEEK: "DEEPSEEK_API_KEY",
         }
@@ -673,6 +674,7 @@ def _load_api_key_from_env(provider_name: str) -> str | None:
 
     支持的环境变量：
     - openai: OPENAI_API_KEY
+    - codex: OPENAI_API_KEY
     - gemini: GEMINI_API_KEY
     - deepseek: DEEPSEEK_API_KEY
     - anthropic: ANTHROPIC_API_KEY
@@ -686,6 +688,7 @@ def _load_api_key_from_env(provider_name: str) -> str | None:
     """
     provider_to_env: dict[str, str] = {
         PROVIDER_OPENAI: "OPENAI_API_KEY",
+        PROVIDER_CODEX: "OPENAI_API_KEY",
         "gemini": "GEMINI_API_KEY",
         PROVIDER_GEMINI: "GEMINI_API_KEY",
         PROVIDER_DEEPSEEK: "DEEPSEEK_API_KEY",

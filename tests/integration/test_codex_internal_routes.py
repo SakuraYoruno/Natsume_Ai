@@ -98,7 +98,7 @@ def test_codex_internal_work_order_execute_persists_explicit_owner_directive(mon
     try:
         store = LifeMemoryStore(ledger=ledger)
         monkeypatch.setattr("host_brain.app.dependencies.get_life_memory_store", lambda: store)
-        monkeypatch.setattr("host_brain.app.internal_codex_routes.AgentRuntimeExecutor", FakeExecutor)
+        monkeypatch.setattr("host_brain.app.internal_agent_routes.AgentRuntimeExecutor", FakeExecutor)
 
         work_order = _work_order()
         work_order["metadata"] = {
@@ -129,7 +129,7 @@ def test_codex_internal_work_order_execute_does_not_persist_unmarked_work_order(
     try:
         store = LifeMemoryStore(ledger=ledger)
         monkeypatch.setattr("host_brain.app.dependencies.get_life_memory_store", lambda: store)
-        monkeypatch.setattr("host_brain.app.internal_codex_routes.AgentRuntimeExecutor", FakeExecutor)
+        monkeypatch.setattr("host_brain.app.internal_agent_routes.AgentRuntimeExecutor", FakeExecutor)
 
         response = _client().post("/internal/codex/work-orders/execute", json={"work_order": _work_order()})
 
