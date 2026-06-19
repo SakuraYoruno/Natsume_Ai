@@ -161,7 +161,7 @@ export function buildMainChainReshapeModel({
         `Trace ${lifeBodyDerived.activeTraceFeedCount ?? 0}`,
         `Session ${lifeBodyDerived.recentSessionCount ?? 0}`,
       ],
-      '/trace'
+      '/observability/trace'
     ),
     stage(
       'guard',
@@ -177,7 +177,7 @@ export function buildMainChainReshapeModel({
         `告警 ${criticalAlerts}/${warningAlerts}`,
         `非 live ${nonLiveSlots.length}`,
       ],
-      '/alerts'
+      '/observability/alerts'
     ),
     stage(
       'context',
@@ -192,7 +192,7 @@ export function buildMainChainReshapeModel({
         `动机 ${dominantMotive || '--'}`,
         `回复 ${replyPosture || '--'}`,
       ],
-      '/self-model'
+      '/life/self-model'
     ),
     stage(
       'memory',
@@ -207,7 +207,7 @@ export function buildMainChainReshapeModel({
         `记忆 lineage ${lifeBodyDerived.memoryLineageCount ?? 0}`,
         `设定/记忆样本 ${hasMemorySamples ? '有' : '待样本'}`,
       ],
-      '/memory'
+      '/life/memory'
     ),
     stage(
       'organs',
@@ -222,7 +222,7 @@ export function buildMainChainReshapeModel({
         `注册 ${organCoverage.label}`,
         `映射 ${organCoverage.mappedLabel}`,
       ],
-      '/digital-life'
+      '/cockpit'
     ),
     stage(
       'growth',
@@ -235,7 +235,7 @@ export function buildMainChainReshapeModel({
         `成长信号 ${hasGrowth ? '有' : '待样本'}`,
         `主病灶 ${lifeBodyModel.primaryPathology?.title || '未形成'}`,
       ],
-      '/self-model'
+      '/life/self-model'
     ),
     stage(
       'output',
@@ -243,7 +243,7 @@ export function buildMainChainReshapeModel({
       outputLoop.status,
       outputLoop.detail,
       outputLoop.evidence,
-      '/gateway'
+      '/execution/gateway'
     ),
     stage(
       'tick',
@@ -259,7 +259,7 @@ export function buildMainChainReshapeModel({
         `tick ${tickStatus.tickHealth}`,
         `idle ${tickStatus.idleTickCount}`,
       ],
-      '/automation'
+      '/execution/automation'
     ),
   ]
 

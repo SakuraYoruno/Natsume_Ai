@@ -14,9 +14,10 @@ import EmptyStateCard from '../components/EmptyStateCard.jsx'
 import MetricCard from '../components/MetricCard.jsx'
 import NoticeBanner from '../components/NoticeBanner.jsx'
 import SampleMeta from '../components/obs/SampleMeta.jsx'
+import { runAgentLoopStream } from '../features/execution/api.js'
 import PageHero from '../components/PageHero.jsx'
 import { resolveLoadState } from '../models/loadState.js'
-import { useAgentLoopConsoleQuery } from '../queries/agentLoopQueries.js'
+import { useAgentLoopConsoleQuery } from '../features/execution/queries.js'
 import useAppStore from '../store/useAppStore.js'
 
 function parseSseBlock(block) {
@@ -138,10 +139,8 @@ export default function AgentLoop() {
     abortRef.current = controller
 
     try {
-      const response = await fetch('/v1/agent/run', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+      const response = await runAgentLoopStream(
+        {
           goal: goal.trim(),
           max_rounds: maxRounds,
           round_timeout_sec: roundTimeout,
@@ -149,12 +148,12 @@ export default function AgentLoop() {
           use_mock: useMock,
           use_edge_rpc: useEdgeRpc,
           image_upload_consent: imageConsent,
-        }),
-        signal: controller.signal,
-      })
+        },
+        { signal: controller.signal }
+      )
 
-      if (!response.ok || !response.body) {
-        throw new Error(`HTTP ${response.status}`)
+      if (!response.body) {
+        throw new Error('响应缺少事件流')
       }
 
       const reader = response.body.getReader()

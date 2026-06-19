@@ -9,7 +9,7 @@ import SampleMeta from '../components/obs/SampleMeta.jsx'
 import PageHero from '../components/PageHero.jsx'
 import TimeWindowSelect from '../components/TimeWindowSelect.jsx'
 import { resolveLoadState } from '../models/loadState.js'
-import { usePathologiesQuery } from '../queries/lifeBodyQueries.js'
+import { usePathologiesQuery } from '../features/life/queries.js'
 import useAppStore from '../store/useAppStore.js'
 
 const WINDOW_OPTIONS = [

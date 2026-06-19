@@ -12,8 +12,8 @@ import {
   usePermissionStatsQuery,
   useSchedulerGateStatsQuery,
   useUiAssertionStatsQuery,
-} from '../../queries/diagnosticQueries.js'
-import { useTraceTribeFeedQuery } from '../../queries/traceQueries.js'
+} from '../../features/observability/diagnosticQueries.js'
+import { useTraceTribeFeedQuery } from '../../features/observability/traceQueries.js'
 import { formatTime, SectionQueryMeta, StatCard } from './insightsGroupShared.jsx'
 
 function TribeEventsSection({ windowMinutes, pollingEnabled = false, pollingInterval = 30, pollingTick = 0 }) {
@@ -207,7 +207,7 @@ function SchedulerGateStatsSection({ windowMinutes, pollingEnabled = false, poll
         if (normalized) search.set(key, normalized)
       })
       const query = search.toString()
-      navigate(`/automation${query ? `?${query}` : ''}`)
+      navigate(`/execution/automation${query ? `?${query}` : ''}`)
     },
     [navigate],
   )

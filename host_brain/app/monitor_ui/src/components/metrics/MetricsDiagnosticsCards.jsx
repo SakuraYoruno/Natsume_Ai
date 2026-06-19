@@ -12,7 +12,7 @@ import {
   usePromptBuilderStatsQuery,
   useSemanticRecallStatsQuery,
   useStateArbiterStatsQuery,
-} from '../../queries/diagnosticQueries.js'
+} from '../../features/observability/diagnosticQueries.js'
 
 function hasMetricSamples(data, sampleKeys = []) {
   if (!data) return false

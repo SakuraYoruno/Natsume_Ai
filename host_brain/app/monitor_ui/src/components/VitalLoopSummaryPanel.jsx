@@ -75,7 +75,7 @@ export default function VitalLoopSummaryPanel({ runtimeSnapshot, compact = false
           <Activity size={15} className="text-primary" />
           <h2 className="text-sm font-semibold text-gray-800">器官稳态摘要</h2>
           {showDetailLink ? (
-            <Link to="/overview" className="ml-auto text-xs font-medium text-primary hover:text-primary-700">
+            <Link to="/observability/overview" className="ml-auto text-xs font-medium text-primary hover:text-primary-700">
               查看器官级观测
             </Link>
           ) : null}
@@ -103,7 +103,7 @@ export default function VitalLoopSummaryPanel({ runtimeSnapshot, compact = false
         <Activity size={15} className="text-primary" />
         <h2 className="text-sm font-semibold text-gray-800">器官稳态摘要</h2>
         {showDetailLink ? (
-          <Link to="/overview" className="ml-auto text-xs font-medium text-primary hover:text-primary-700">
+          <Link to="/observability/overview" className="ml-auto text-xs font-medium text-primary hover:text-primary-700">
             查看器官级观测
           </Link>
         ) : null}

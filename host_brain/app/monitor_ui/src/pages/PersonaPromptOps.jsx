@@ -20,7 +20,7 @@ import { resolveLoadState } from '../models/loadState.js'
 import {
   usePersonaPromptCatalogQuery,
   usePromptTemplateDetailQuery,
-} from '../queries/promptQueries.js'
+} from '../features/operations/queries.js'
 import useAppStore from '../store/useAppStore.js'
 
 const PromptTemplateEditorPanel = React.lazy(() => import('../components/promptOps/PromptTemplateEditorPanel.jsx'))
@@ -131,7 +131,7 @@ export default function PersonaPromptOps() {
           <p className="text-sm text-gray-500">按人格语义查看 YAML 默认文案、当前生效值与现存 runtime override。</p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
-          <button className="btn-secondary" onClick={() => navigate('/prompt-config')}>
+          <button className="btn-secondary" onClick={() => navigate('/operations/prompt')}>
             <FileText size={14} /> 打开通用模板页
           </button>
           <button className="btn-secondary" onClick={handleRefreshView} disabled={refreshingView}>

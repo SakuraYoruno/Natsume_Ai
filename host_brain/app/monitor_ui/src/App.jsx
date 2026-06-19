@@ -1,40 +1,9 @@
-﻿import React, { Suspense } from 'react'
-import { HashRouter, Navigate, Route, Routes } from 'react-router-dom'
+import React, { Suspense } from 'react'
+import { HashRouter, Navigate, Route, Routes, useParams } from 'react-router-dom'
 import { Toaster } from 'react-hot-toast'
 import ErrorBoundary from './components/ErrorBoundary.jsx'
 import Layout from './components/Layout.jsx'
-import {
-  AgentLoop,
-  Alerts,
-  Automation,
-  Bond,
-  Canon,
-  ChatDebug,
-  CodexBioOpsObservability,
-  DigitalLifeOverview,
-  EmotionDashboard,
-  Gateway,
-  InnerWorldDashboard,
-  Insights,
-  LifeTimelinePage,
-  LogStream,
-  MemoryBrowser,
-  Metrics,
-  Overview,
-  PathologyCenterPage,
-  PathologyDetailPage,
-  PersonaPromptOps,
-  PromptConfig,
-  RenderPolicyDashboard,
-  RuntimeMode,
-  SelfModelDashboard,
-  Sessions,
-  SkillsHub,
-  SystemConfig,
-  Tools,
-  Trace,
-} from './routes/routeLoaders.js'
-
+import { legacyRedirects, routeManifest } from './app/routeManifest.jsx'
 
 function RouteLoading() {
   return (
@@ -74,44 +43,37 @@ function withSuspense(element) {
   return <Suspense fallback={<RouteLoading />}>{element}</Suspense>
 }
 
+function routePath(path) {
+  return String(path || '').replace(/^\//, '')
+}
+
+function LegacyRedirect({ to }) {
+  const params = useParams()
+  const target = Object.entries(params).reduce(
+    (path, [key, value]) => path.replace(`:${key}`, encodeURIComponent(value || '')),
+    to,
+  )
+  return <Navigate to={target} replace />
+}
+
 export default function App() {
   return (
     <ErrorBoundary>
       <HashRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
         <Routes>
           <Route path="/" element={<Layout />}>
-            <Route index element={<Navigate to="/digital-life" replace />} />
-            <Route path="digital-life" element={withSuspense(<DigitalLifeOverview />)} />
-            <Route path="codex-bio-ops" element={withSuspense(<CodexBioOpsObservability />)} />
-            <Route path="life-timeline" element={withSuspense(<LifeTimelinePage />)} />
-            <Route path="pathologies" element={withSuspense(<PathologyCenterPage />)} />
-            <Route path="pathologies/:pathologyId" element={withSuspense(<PathologyDetailPage />)} />
-            <Route path="overview" element={withSuspense(<Overview />)} />
-            <Route path="sessions" element={withSuspense(<Sessions />)} />
-            <Route path="trace/*" element={withSuspense(<Trace />)} />
-            <Route path="metrics" element={withSuspense(<Metrics />)} />
-            <Route path="insights/*" element={withSuspense(<Insights />)} />
-            <Route path="chat-debug" element={withSuspense(<ChatDebug />)} />
-            <Route path="alerts" element={withSuspense(<Alerts />)} />
-            <Route path="logs" element={withSuspense(<LogStream />)} />
-            <Route path="emotion" element={withSuspense(<EmotionDashboard />)} />
-            <Route path="memory" element={withSuspense(<MemoryBrowser />)} />
-            <Route path="system" element={withSuspense(<SystemConfig />)} />
-            <Route path="prompt-config" element={withSuspense(<PromptConfig />)} />
-            <Route path="persona-config" element={withSuspense(<PersonaPromptOps />)} />
-            <Route path="runtime-mode" element={withSuspense(<RuntimeMode />)} />
-            <Route path="inner-world" element={withSuspense(<InnerWorldDashboard />)} />
-            <Route path="response-policy" element={withSuspense(<RenderPolicyDashboard />)} />
-            <Route path="render-policy" element={<Navigate to="/response-policy" replace />} />
-            <Route path="self-model" element={withSuspense(<SelfModelDashboard />)} />
-            <Route path="canon" element={withSuspense(<Canon />)} />
-            <Route path="bond" element={withSuspense(<Bond />)} />
-            <Route path="tools" element={withSuspense(<Tools />)} />
-            <Route path="automation" element={withSuspense(<Automation />)} />
-            <Route path="agent" element={withSuspense(<AgentLoop />)} />
-            <Route path="gateway" element={withSuspense(<Gateway />)} />
-            <Route path="skills" element={withSuspense(<SkillsHub />)} />
-            <Route path="wechat" element={<Navigate to="/gateway" replace />} />
+            <Route index element={<Navigate to="/cockpit" replace />} />
+            {routeManifest.map((route) => (
+              <Route key={route.path} path={routePath(route.path)} element={withSuspense(route.element)} />
+            ))}
+            {legacyRedirects.map((redirect) => (
+              <Route
+                key={`${redirect.from}->${redirect.to}`}
+                path={routePath(redirect.from)}
+                element={<LegacyRedirect to={redirect.to} />}
+              />
+            ))}
+            <Route path="*" element={<Navigate to="/cockpit" replace />} />
           </Route>
         </Routes>
         <Toaster position="top-right" toastOptions={{ duration: 4000, style: { fontSize: '13px' } }} />

@@ -1,8 +1,9 @@
 import React, { useEffect, useMemo, useState } from 'react'
-import { Play, RefreshCw, Search, Wrench, X } from 'lucide-react'
+import { Link } from 'react-router-dom'
+import { Play, RefreshCw, Search, ShieldAlert, Wrench, X } from 'lucide-react'
 import {
   executeTool,
-} from '../api/tools.js'
+} from '../features/execution/api.js'
 import DigitalLifeRuntimeCard from '../components/DigitalLifeRuntimeCard.jsx'
 import EmptyStateCard from '../components/EmptyStateCard.jsx'
 import OrganSystemOverview from '../components/lifeBody/OrganSystemOverview.jsx'
@@ -18,7 +19,8 @@ import {
   refreshActionPlanStatsQuery,
   refreshPermissionStatsQuery,
   useToolsCatalogQuery,
-} from '../queries/toolsQueries.js'
+} from '../features/execution/queries.js'
+import { fetchPentestCapabilities } from '../features/security/api.js'
 import useAppStore from '../store/useAppStore.js'
 
 const SIDE_EFFECT_STYLES = {
@@ -33,6 +35,137 @@ const AUTH_LEVEL_STYLES = {
 }
 
 const ToolsOperationsSection = React.lazy(() => import('../components/tools/ToolsOperationsSection.jsx'))
+
+const PENTEST_PHASE_LABELS = {
+  phase1_passive: 'Phase 1 Passive',
+  phase2_active: 'Phase 2 Active',
+  phase3_vuln: 'Phase 3 Vuln',
+  correlation: 'Correlation',
+  phase4_exploit: 'Phase 4 Exploit',
+  phase5_post_exploit: 'Phase 5 Post',
+  phase6_report: 'Phase 6 Report',
+}
+
+const PENTEST_RISK_STYLES = [
+  { max: 0, label: 'low', className: 'bg-green-100 text-green-700' },
+  { max: 2, label: 'medium', className: 'bg-yellow-100 text-yellow-700' },
+  { max: 4, label: 'high', className: 'bg-orange-100 text-orange-700' },
+  { max: Number.POSITIVE_INFINITY, label: 'critical', className: 'bg-red-100 text-red-700' },
+]
+
+function isPentestTool(tool) {
+  return String(tool?.id || '').startsWith('pentest_')
+}
+
+function flattenPentestTools(capabilities) {
+  const groups = capabilities?.groups || {}
+  return Object.entries(groups).flatMap(([phase, items]) =>
+    (items || []).map((tool) => ({ ...tool, phase })),
+  )
+}
+
+function resolvePentestRiskStyle(risk) {
+  const numericRisk = Number(risk || 0)
+  return PENTEST_RISK_STYLES.find((item) => numericRisk <= item.max) || PENTEST_RISK_STYLES[0]
+}
+
+function PentestToolMetadataSection({ capabilities, loading, error, onRefresh }) {
+  const pentestTools = useMemo(() => flattenPentestTools(capabilities), [capabilities])
+  const readonlyCount = useMemo(() => pentestTools.filter((tool) => tool.readonly).length, [pentestTools])
+  const sideEffectCount = useMemo(() => pentestTools.filter((tool) => tool.side_effect).length, [pentestTools])
+
+  return (
+    <section className="rounded-xl border border-orange-100 bg-orange-50/55 p-4 shadow-sm">
+      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+        <div className="min-w-0">
+          <div className="inline-flex items-center gap-2 text-sm font-semibold text-orange-800">
+            <ShieldAlert size={16} />
+            Pentest tools metadata
+          </div>
+          <p className="mt-1 text-sm text-orange-700">
+            Pentest Agent 能力只在这里展示元信息；运行入口固定进入带 scope、Lab Mode 和 approval rail 的 Security Lab。
+          </p>
+        </div>
+        <div className="flex shrink-0 flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={onRefresh}
+            disabled={loading}
+            className="inline-flex items-center gap-1.5 rounded border border-orange-200 bg-white/80 px-3 py-1.5 text-xs font-semibold text-orange-700 hover:bg-orange-50 disabled:opacity-50"
+          >
+            <RefreshCw size={13} className={loading ? 'animate-spin' : ''} />
+            刷新能力
+          </button>
+          <Link
+            to="/security/pentest"
+            className="inline-flex items-center gap-1.5 rounded bg-orange-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-orange-700"
+          >
+            <ShieldAlert size={13} />
+            打开 Pentest Lab
+          </Link>
+        </div>
+      </div>
+
+      {error ? (
+        <NoticeBanner variant="warning" title="Pentest tools metadata 降级" className="mt-3">
+          {error}
+        </NoticeBanner>
+      ) : null}
+
+      <div className="mt-4 grid grid-cols-2 gap-2 md:grid-cols-4">
+        <div className="rounded-lg border border-orange-100 bg-white/85 px-3 py-2">
+          <div className="text-lg font-bold text-gray-800">{loading && !capabilities ? '...' : capabilities?.count ?? pentestTools.length}</div>
+          <div className="text-xs text-gray-500">能力总数</div>
+        </div>
+        <div className="rounded-lg border border-orange-100 bg-white/85 px-3 py-2">
+          <div className="text-lg font-bold text-green-700">{readonlyCount}</div>
+          <div className="text-xs text-gray-500">readonly</div>
+        </div>
+        <div className="rounded-lg border border-orange-100 bg-white/85 px-3 py-2">
+          <div className="text-lg font-bold text-red-700">{sideEffectCount}</div>
+          <div className="text-xs text-gray-500">side-effect gated</div>
+        </div>
+        <div className="rounded-lg border border-orange-100 bg-white/85 px-3 py-2">
+          <div className="text-lg font-bold text-orange-700">
+            {(capabilities?.phases || Object.keys(capabilities?.groups || {})).length || 0}
+          </div>
+          <div className="text-xs text-gray-500">phases</div>
+        </div>
+      </div>
+
+      <div className="mt-3 max-h-72 divide-y divide-orange-100 overflow-y-auto rounded-lg border border-orange-100 bg-white/88">
+        {loading && pentestTools.length === 0 ? (
+          <LoadingNotice>正在读取 Pentest Agent 能力清单...</LoadingNotice>
+        ) : pentestTools.length === 0 ? (
+          <EmptyStateCard title="暂无 Pentest 能力元信息" hint="后端 /v1/pentest/capabilities 当前没有返回工具清单。" className="p-5" />
+        ) : (
+          pentestTools.map((tool) => {
+            const risk = resolvePentestRiskStyle(tool.risk)
+            return (
+              <div key={tool.id} className="grid grid-cols-1 gap-2 px-3 py-2.5 text-sm md:grid-cols-[minmax(0,1fr)_8rem_8rem_7rem] md:items-center">
+                <div className="min-w-0">
+                  <div className="truncate font-semibold text-gray-800">{tool.name || tool.id}</div>
+                  <div className="mt-0.5 truncate font-mono text-xs text-gray-500">{tool.id}</div>
+                  <div className="mt-1 line-clamp-1 text-xs text-gray-500">{tool.description || '暂无描述'}</div>
+                </div>
+                <div className="text-xs font-semibold text-gray-500">{PENTEST_PHASE_LABELS[tool.phase] || tool.phase}</div>
+                <div className="flex flex-wrap gap-1">
+                  <span className={`rounded px-1.5 py-0.5 text-xs font-semibold ${risk.className}`}>risk {tool.risk ?? 0} · {risk.label}</span>
+                  {tool.lab_only ? <span className="rounded bg-red-50 px-1.5 py-0.5 text-xs font-semibold text-red-700">lab-only</span> : null}
+                </div>
+                <div className="flex flex-wrap gap-1 md:justify-end">
+                  <span className={`rounded px-1.5 py-0.5 text-xs font-semibold ${tool.readonly ? 'bg-green-100 text-green-700' : 'bg-orange-100 text-orange-700'}`}>
+                    {tool.readonly ? 'readonly' : 'side-effect'}
+                  </span>
+                </div>
+              </div>
+            )
+          })
+        )}
+      </div>
+    </section>
+  )
+}
 
 function ToolCard({ tool, selected, onClick }) {
   const sideEffect = SIDE_EFFECT_STYLES[tool.side_effect_level] || SIDE_EFFECT_STYLES.READ
@@ -83,6 +216,28 @@ function ExecutePanel({ tool, onClose }) {
   })
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState(null)
+
+  if (isPentestTool(tool)) {
+    return (
+      <div className="space-y-3 rounded-lg border border-orange-200 bg-orange-50/80 p-4">
+        <div className="flex items-center justify-between">
+          <h3 className="text-sm font-semibold text-orange-800">Pentest 工具由 Security Lab 接管</h3>
+          <button onClick={onClose} className="inline-flex h-7 w-7 items-center justify-center rounded text-orange-500 hover:bg-orange-100">
+            <X size={15} />
+          </button>
+        </div>
+        <p className="text-sm text-orange-700">
+          {tool.id} 属于 Pentest Agent 能力清单。执行入口已迁移到带 scope、Lab Mode 和 approval rail 的 Pentest Lab。
+        </p>
+        <Link
+          to="/security/pentest"
+          className="inline-flex w-full items-center justify-center gap-1.5 rounded border border-orange-300 bg-white/85 px-4 py-2 text-sm font-semibold text-orange-700 hover:bg-orange-50"
+        >
+          打开 Pentest Lab
+        </Link>
+      </div>
+    )
+  }
 
   const handleExecute = async () => {
     setResult(null)
@@ -213,6 +368,9 @@ export default function Tools() {
   const [showRuntimeContext, setShowRuntimeContext] = useState(false)
   const [filter, setFilter] = useState('ALL')
   const [query, setQuery] = useState('')
+  const [pentestCapabilities, setPentestCapabilities] = useState(null)
+  const [pentestLoading, setPentestLoading] = useState(true)
+  const [pentestError, setPentestError] = useState('')
   const {
     health,
     tools,
@@ -228,6 +386,23 @@ export default function Tools() {
     pollingTick,
     pollingInterval,
   })
+
+  const loadPentestCapabilities = async () => {
+    setPentestLoading(true)
+    setPentestError('')
+    try {
+      const data = await fetchPentestCapabilities()
+      setPentestCapabilities(data)
+    } catch (error) {
+      setPentestError(error.message || String(error))
+    } finally {
+      setPentestLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    void loadPentestCapabilities()
+  }, [])
 
   useEffect(() => {
     if (!selectedTool) return
@@ -294,6 +469,7 @@ export default function Tools() {
       refreshPermissionStatsQuery({ windowMinutes: 1440 }),
       refreshActionPlanStatsQuery({ windowMinutes: 1440 }),
       reloadRuntime(),
+      loadPentestCapabilities(),
     ])
   }
 
@@ -350,6 +526,13 @@ export default function Tools() {
       {!catalogError && !loading && !refreshing && toolsLoadState === LOAD_STATES.NO_SAMPLE ? (
         <NoticeBanner variant="info">当前系统还没有可观测的工具目录样本。</NoticeBanner>
       ) : null}
+
+      <PentestToolMetadataSection
+        capabilities={pentestCapabilities}
+        loading={pentestLoading}
+        error={pentestError}
+        onRefresh={loadPentestCapabilities}
+      />
 
       <details
         className="overflow-hidden rounded-xl border border-white/80 bg-white/86 shadow-sm"
@@ -504,10 +687,18 @@ export default function Tools() {
 
                 <button
                   onClick={() => setExecuteTarget(executeTarget?.id === selectedTool.id ? null : selectedTool)}
-                  className="inline-flex w-full items-center justify-center gap-1.5 rounded border border-blue-300 px-4 py-2 text-sm font-medium text-blue-600 transition-colors hover:bg-blue-50"
+                  className={`inline-flex w-full items-center justify-center gap-1.5 rounded border px-4 py-2 text-sm font-medium transition-colors ${
+                    isPentestTool(selectedTool)
+                      ? 'border-orange-300 text-orange-700 hover:bg-orange-50'
+                      : 'border-blue-300 text-blue-600 hover:bg-blue-50'
+                  }`}
                 >
                   <Play size={14} />
-                  {executeTarget?.id === selectedTool.id ? '收起执行面板' : '执行该工具'}
+                  {executeTarget?.id === selectedTool.id
+                    ? '收起执行面板'
+                    : isPentestTool(selectedTool)
+                      ? '查看 Pentest Lab 入口'
+                      : '执行该工具'}
                 </button>
               </div>
 

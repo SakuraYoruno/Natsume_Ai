@@ -13,7 +13,7 @@ import {
   Wifi,
   Zap,
 } from 'lucide-react'
-import { resetWeChatChannel } from '../api/gateway.js'
+import { resetWeChatChannel } from '../features/execution/api.js'
 import MetricCard from '../components/MetricCard.jsx'
 import EmptyStateCard from '../components/EmptyStateCard.jsx'
 import OrganSystemOverview from '../components/lifeBody/OrganSystemOverview.jsx'
@@ -25,7 +25,7 @@ import SectionHeading from '../components/SectionHeading.jsx'
 import TimeWindowSelect from '../components/TimeWindowSelect.jsx'
 import { LOAD_STATES, resolveLoadState } from '../models/loadState.js'
 import { buildMotorOrganSystemModel } from '../models/organSystemModel.js'
-import { useGatewayOverviewQuery } from '../queries/gatewayQueries.js'
+import { useGatewayOverviewQuery } from '../features/execution/queries.js'
 import useAppStore from '../store/useAppStore.js'
 
 const PLATFORM_META = {
@@ -326,7 +326,7 @@ export default function Gateway() {
       </div>
 
       <DrilldownLink
-        to="/trace"
+        to="/observability/trace"
         label="进入 Trace"
         hint="如果平台健康但用户仍感知异常，优先从 request 级链路继续追 Gateway 前后的主流程。"
       />

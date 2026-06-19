@@ -21,10 +21,10 @@ import StatusBadge from '../components/StatusBadge.jsx'
 import TimeWindowSelect from '../components/TimeWindowSelect.jsx'
 import useDigitalLifeRuntimeSignals from '../hooks/useDigitalLifeRuntimeSignals.js'
 import { resolveLoadState } from '../models/loadState.js'
-import { useSystemOverviewQuery } from '../queries/overviewQueries.js'
+import { useSystemOverviewQuery } from '../features/observability/queries.js'
 import {
   connectHealthWebSocket,
-} from '../api/obs.js'
+} from '../features/observability/api.js'
 import useAppStore from '../store/useAppStore.js'
 
 const WINDOW_OPTIONS = [

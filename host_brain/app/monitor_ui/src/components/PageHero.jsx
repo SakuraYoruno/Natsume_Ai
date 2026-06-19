@@ -24,7 +24,7 @@ export default function PageHero({
               {eyebrow}
             </div>
           ) : null}
-          <div className="mt-3 text-2xl font-bold text-gray-900">{title ?? '—'}</div>
+          <h1 className="mt-3 text-2xl font-bold text-gray-900">{title ?? '—'}</h1>
           <div className="mt-1 max-w-3xl text-sm leading-6 text-gray-600">{description ?? '—'}</div>
         </div>
 

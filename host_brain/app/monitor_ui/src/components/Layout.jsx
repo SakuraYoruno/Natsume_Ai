@@ -1,93 +1,20 @@
 ﻿import React, { useEffect, useState } from 'react'
 import { NavLink, Outlet, useLocation } from 'react-router-dom'
 import {
-  BarChart2,
-  Activity,
-  Bell,
-  BookOpen,
-  Bot,
-  Brain,
-  Clock,
-  Database,
-  FileText,
-  GitBranch,
-  Heart,
-  LayoutDashboard,
-  Lightbulb,
   Menu,
-  MessageSquare,
-  MoonStar,
-  Package,
   PauseCircle,
-  Radio,
   RefreshCw,
-  ScrollText,
-  SendHorizontal,
-  Settings,
-  Smile,
-  Sparkles,
-  Wand2,
-  Wrench,
   X,
-  Zap,
 } from 'lucide-react'
 import ForgeRiskActionBar from './ForgeRiskActionBar.jsx'
 import useAppStore from '../store/useAppStore.js'
 import useDigitalLifeRuntimeSignals from '../hooks/useDigitalLifeRuntimeSignals.js'
-import { useCapabilityGapStatsQuery } from '../queries/diagnosticQueries.js'
+import { useCapabilityGapStatsQuery } from '../features/observability/diagnosticQueries.js'
 import { preloadRoute } from '../routes/routeLoaders.js'
+import { NAV_SECTIONS as MANIFEST_NAV_SECTIONS } from '../app/routeManifest.jsx'
 import { buildDigitalLifeAlerts } from '../utils/runtimeHealth.js'
 
-const NAV_SECTIONS = [
-  {
-    title: '数字生命体',
-    items: [
-      { to: '/digital-life', icon: Zap, label: '总览' },
-      { to: '/life-timeline', icon: Activity, label: '生命时间轴' },
-      { to: '/pathologies', icon: Bell, label: '病灶中心' },
-      { to: '/emotion', icon: Smile, label: '情绪' },
-      { to: '/bond', icon: Heart, label: '关系' },
-      { to: '/memory', icon: Database, label: '记忆' },
-      { to: '/runtime-mode', icon: Zap, label: '存在态' },
-      { to: '/inner-world', icon: MoonStar, label: '内在世界' },
-      { to: '/response-policy', icon: Sparkles, label: '回复策略' },
-      { to: '/self-model', icon: Brain, label: '自我模型' },
-    ],
-  },
-  {
-    title: '运营',
-    items: [
-      { to: '/prompt-config', icon: FileText, label: '提示词' },
-      { to: '/persona-config', icon: Wand2, label: '人格文案' },
-      { to: '/system', icon: Settings, label: '系统底座' },
-      { to: '/canon', icon: BookOpen, label: '设定管理' },
-    ],
-  },
-  {
-    title: '器官级观测',
-    items: [
-      { to: '/overview', icon: LayoutDashboard, label: '生命体征' },
-      { to: '/sessions', icon: MessageSquare, label: '神经会话' },
-      { to: '/trace', icon: GitBranch, label: '神经链路' },
-      { to: '/codex-bio-ops', icon: GitBranch, label: 'Codex / BioOps' },
-      { to: '/metrics', icon: BarChart2, label: '代谢指标' },
-      { to: '/insights', icon: Lightbulb, label: '皮层洞察' },
-      { to: '/chat-debug', icon: SendHorizontal, label: '神经调试' },
-      { to: '/alerts', icon: Bell, label: '免疫告警' },
-      { to: '/logs', icon: ScrollText, label: '生理日志' },
-    ],
-  },
-  {
-    title: '外周执行',
-    items: [
-      { to: '/gateway', icon: Radio, label: '感官网关' },
-      { to: '/skills', icon: Package, label: '行为技能' },
-      { to: '/tools', icon: Wrench, label: '执行工具' },
-      { to: '/automation', icon: Clock, label: '节律调度' },
-      { to: '/agent', icon: Bot, label: '反射回路' },
-    ],
-  },
-]
+const NAV_SECTIONS = MANIFEST_NAV_SECTIONS
 
 const INTERVAL_OPTIONS = [15, 30, 60]
 
@@ -222,11 +149,11 @@ export default function Layout() {
     : null
 
   const sectionBadges = {
-    数字生命体: runtimeAlertBadge,
+    'Life Systems': runtimeAlertBadge,
   }
 
   const itemBadges = {
-    '/alerts': runtimeAlertBadge,
+    '/observability/alerts': runtimeAlertBadge,
   }
 
   return (

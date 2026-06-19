@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { Heart, RefreshCw, ShieldCheck, Sparkles, Users } from 'lucide-react'
-import { submitBondEvent } from '../api/bond.js'
+import { submitBondEvent } from '../features/life/api.js'
 import EmptyStateCard from '../components/EmptyStateCard.jsx'
 import KeyValueRow from '../components/KeyValueRow.jsx'
 import OrganSystemOverview from '../components/lifeBody/OrganSystemOverview.jsx'
@@ -10,7 +10,7 @@ import SampleMeta from '../components/obs/SampleMeta.jsx'
 import PageHero from '../components/PageHero.jsx'
 import { LOAD_STATES, resolveLoadState } from '../models/loadState.js'
 import { buildBondOrganSystemModel } from '../models/organSystemModel.js'
-import { useBondOverviewQuery, useBondUserDetailQuery } from '../queries/bondQueries.js'
+import { useBondOverviewQuery, useBondUserDetailQuery } from '../features/life/queries.js'
 import useAppStore from '../store/useAppStore.js'
 import {
   formatDateTime,

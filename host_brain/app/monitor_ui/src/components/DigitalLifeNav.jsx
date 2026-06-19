@@ -14,17 +14,17 @@ import {
 } from 'lucide-react'
 
 const ITEMS = [
-  { to: '/digital-life', label: '总览', icon: Sparkles },
-  { to: '/life-timeline', label: '生命时间轴', icon: Activity },
-  { to: '/pathologies', label: '病灶中心', icon: Bell },
-  { to: '/emotion', label: '情绪', icon: Waves },
-  { to: '/bond', label: '关系', icon: Heart },
-  { to: '/memory', label: '记忆', icon: Database },
-  { to: '/runtime-mode', label: '存在态', icon: Orbit },
-  { to: '/inner-world', label: '内在世界', icon: MoonStar },
-  { to: '/response-policy', label: '回复策略', icon: Sparkles },
-  { to: '/self-model', label: '自我模型', icon: Brain },
-  { to: '/persona-config', label: '人格文案', icon: Wand2 },
+  { to: '/cockpit', label: '总览', icon: Sparkles },
+  { to: '/life/timeline', label: '生命时间轴', icon: Activity },
+  { to: '/life/pathologies', label: '病灶中心', icon: Bell },
+  { to: '/life/emotion', label: '情绪', icon: Waves },
+  { to: '/life/relationship', label: '关系', icon: Heart },
+  { to: '/life/memory', label: '记忆', icon: Database },
+  { to: '/life/runtime-mode', label: '存在态', icon: Orbit },
+  { to: '/life/inner-world', label: '内在世界', icon: MoonStar },
+  { to: '/life/response-policy', label: '回复策略', icon: Sparkles },
+  { to: '/life/self-model', label: '自我模型', icon: Brain },
+  { to: '/operations/persona', label: '人格文案', icon: Wand2 },
 ]
 
 export default function DigitalLifeNav() {

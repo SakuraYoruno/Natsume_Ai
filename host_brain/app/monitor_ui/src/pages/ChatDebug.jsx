@@ -17,9 +17,10 @@ import NoticeBanner from '../components/NoticeBanner.jsx'
 import PageHero from '../components/PageHero.jsx'
 import InlineQueryMeta from '../components/obs/InlineQueryMeta.jsx'
 import { getTraceNodeDisplayName } from '../components/trace/traceNodeText.js'
+import { sendChatDebugStream } from '../features/observability/api.js'
 import useDigitalLifeRuntimeSignals from '../hooks/useDigitalLifeRuntimeSignals.js'
 import { resolveLoadState } from '../models/loadState.js'
-import { useTraceSnapshotQuery } from '../queries/traceQueries.js'
+import { useTraceSnapshotQuery } from '../features/observability/traceQueries.js'
 import useAppStore from '../store/useAppStore.js'
 import {
   formatAlertTitle,
@@ -201,18 +202,16 @@ export default function ChatDebug() {
     let eventCount = 0
 
     try {
-      const response = await fetch('/v1/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+      const response = await sendChatDebugStream(
+        {
           message: userText,
           session_id: `debug-${Date.now()}`,
-        }),
-        signal: controller.signal,
-      })
+        },
+        { signal: controller.signal }
+      )
 
-      if (!response.ok || !response.body) {
-        throw new Error(`HTTP ${response.status}`)
+      if (!response.body) {
+        throw new Error('响应缺少事件流')
       }
 
       const reader = response.body.getReader()
@@ -424,13 +423,13 @@ export default function ChatDebug() {
               <div className="text-gray-400">Request ID</div>
               {requestId ? (
                 <div className="mt-1 space-y-2">
-                  <a href={`#/trace/${requestId}`} className="inline-flex items-center gap-1 font-mono text-primary hover:underline">
+                  <a href={`#/observability/trace/${requestId}`} className="inline-flex items-center gap-1 font-mono text-primary hover:underline">
                     <CheckCircle2 size={12} />
                     {requestId}
                   </a>
                   <div className="flex flex-wrap items-center gap-2">
-                    <a href={`#/trace/${requestId}`} className="btn-primary text-xs">打开 Trace 详情</a>
-                    <a href="#/trace" className="btn-secondary text-xs">回到链路总览</a>
+                    <a href={`#/observability/trace/${requestId}`} className="btn-primary text-xs">打开 Trace 详情</a>
+                    <a href="#/observability/trace" className="btn-secondary text-xs">回到链路总览</a>
                   </div>
                 </div>
               ) : (

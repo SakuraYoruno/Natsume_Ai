@@ -18,7 +18,7 @@ export default function DigitalLifeCapabilitySection({ model }) {
     <LifeSection
       title="Capability Gap & Forge Loop"
       hint="Expose gap pressure and forge runtime quality directly in the life-body overview."
-      actionTo="/insights/global"
+      actionTo="/observability/insights/global"
       actionLabel="Open Global Insights"
     >
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">

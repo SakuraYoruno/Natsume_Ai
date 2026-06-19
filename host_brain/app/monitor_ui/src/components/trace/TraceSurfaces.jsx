@@ -1,5 +1,6 @@
 import React from 'react'
 import LoadingNotice from '../LoadingNotice.jsx'
+import RenderValue from '../../shared/ui/RenderValue.jsx'
 
 export function HomeSummaryCard({ icon: Icon, title, value, caption, toneClassName = 'text-gray-900' }) {
   return (
@@ -10,7 +11,9 @@ export function HomeSummaryCard({ icon: Icon, title, value, caption, toneClassNa
         </span>
         <div className="min-w-0 flex-1">
           <div className="text-xs font-medium text-gray-500">{title}</div>
-          <div className={`mt-1 break-all text-sm font-semibold leading-6 ${toneClassName}`}>{value}</div>
+          <div className={`mt-1 break-all text-sm font-semibold leading-6 ${toneClassName}`}>
+            <RenderValue value={value} />
+          </div>
           {caption ? <div className="mt-1 break-all text-xs leading-5 text-gray-500">{caption}</div> : null}
         </div>
       </div>
@@ -68,7 +71,9 @@ export function TraceMetricCard({ label, value, hint = null, valueClassName = ''
   return (
     <div className="rounded-xl border border-primary-100/70 bg-white/82 p-4">
       <div className="text-xs font-medium text-gray-500">{label}</div>
-      <div className={`mt-1 break-all text-lg font-semibold text-gray-900 ${valueClassName}`}>{value ?? '-'}</div>
+      <div className={`mt-1 break-all text-lg font-semibold text-gray-900 ${valueClassName}`}>
+        <RenderValue value={value} empty="-" />
+      </div>
       {hint ? <div className="mt-1 text-xs text-gray-400">{hint}</div> : null}
     </div>
   )
@@ -78,7 +83,9 @@ export function TraceMiniStat({ label, value, hint = null, toneClassName = 'text
   return (
     <div className="rounded-xl border border-primary-100/70 bg-white/72 p-3">
       <div className="text-xs font-medium text-gray-500">{label}</div>
-      <div className={`mt-1 break-all text-sm font-semibold ${toneClassName}`}>{value ?? '-'}</div>
+      <div className={`mt-1 break-all text-sm font-semibold ${toneClassName}`}>
+        <RenderValue value={value} empty="-" />
+      </div>
       {hint ? <div className="mt-1 text-xs text-gray-500">{hint}</div> : null}
     </div>
   )

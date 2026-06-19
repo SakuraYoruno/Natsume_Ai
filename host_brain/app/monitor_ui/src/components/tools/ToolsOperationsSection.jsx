@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react'
-import { installCustomSkillProvider } from '../../api/tools.js'
+import { installCustomSkillProvider } from '../../features/execution/api.js'
 import EmptyStateCard from '../EmptyStateCard.jsx'
 import LoadingNotice from '../LoadingNotice.jsx'
 import NoticeBanner from '../NoticeBanner.jsx'
@@ -10,7 +10,7 @@ import {
   useCustomSkillProviderTemplateQuery,
   useCustomSkillProvidersQuery,
   usePermissionStatsQuery,
-} from '../../queries/toolsQueries.js'
+} from '../../features/execution/queries.js'
 
 const PROVIDER_STATUS_LABELS = {
   ACTIVE: '已启用',

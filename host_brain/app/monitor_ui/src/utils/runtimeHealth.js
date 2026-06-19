@@ -82,7 +82,7 @@ export function buildDigitalLifeAlerts(snapshot, options = {}) {
       ts_ms: tsMs,
       severity: 'warning',
       source: 'runtime',
-      to: '/runtime-mode',
+      to: '/life/runtime-mode',
     })
   }
 
@@ -95,7 +95,7 @@ export function buildDigitalLifeAlerts(snapshot, options = {}) {
       ts_ms: tsMs,
       severity: 'warning',
       source: 'runtime',
-      to: '/digital-life',
+      to: '/cockpit',
     })
   }
 
@@ -107,7 +107,7 @@ export function buildDigitalLifeAlerts(snapshot, options = {}) {
       ts_ms: tsMs,
       severity: 'warning',
       source: 'runtime',
-      to: '/digital-life',
+      to: '/cockpit',
     })
   }
 
@@ -127,7 +127,7 @@ export function buildDigitalLifeAlerts(snapshot, options = {}) {
       ts_ms: tsMs,
       severity: riskLevel === 'high' || riskLevel === 'critical' ? 'critical' : 'warning',
       source: 'runtime',
-      to: '/self-model',
+      to: '/life/self-model',
     })
   }
 
@@ -139,7 +139,7 @@ export function buildDigitalLifeAlerts(snapshot, options = {}) {
       ts_ms: tsMs,
       severity: 'warning',
       source: 'runtime',
-      to: '/response-policy',
+      to: '/life/response-policy',
     })
   }
 
@@ -151,7 +151,7 @@ export function buildDigitalLifeAlerts(snapshot, options = {}) {
       ts_ms: tsMs,
       severity: 'info',
       source: 'runtime',
-      to: '/response-policy',
+      to: '/life/response-policy',
     })
   }
 
@@ -163,7 +163,7 @@ export function buildDigitalLifeAlerts(snapshot, options = {}) {
       ts_ms: tsMs,
       severity: 'critical',
       source: 'prompt',
-      to: '/prompt-config',
+      to: '/operations/prompt',
     })
   }
 
@@ -175,7 +175,7 @@ export function buildDigitalLifeAlerts(snapshot, options = {}) {
       ts_ms: tsMs,
       severity: 'warning',
       source: 'prompt',
-      to: '/prompt-config',
+      to: '/operations/prompt',
     })
   }
 
@@ -201,7 +201,7 @@ export function buildDigitalLifeAlerts(snapshot, options = {}) {
         ts_ms: tsMs,
         severity: tickHealth === 'stalled' ? 'critical' : 'warning',
         source: 'runtime',
-        to: '/inner-world',
+        to: '/life/inner-world',
       })
     }
 
@@ -213,7 +213,7 @@ export function buildDigitalLifeAlerts(snapshot, options = {}) {
         ts_ms: tsMs,
         severity: 'warning',
         source: 'runtime',
-        to: '/automation',
+        to: '/execution/automation',
       })
     }
 
@@ -225,7 +225,7 @@ export function buildDigitalLifeAlerts(snapshot, options = {}) {
         ts_ms: tsMs,
         severity: 'critical',
         source: 'runtime',
-        to: '/inner-world',
+        to: '/life/inner-world',
       })
     }
   }
@@ -244,7 +244,7 @@ export function buildDigitalLifeAlerts(snapshot, options = {}) {
       ts_ms: tsMs,
       severity: interoceptiveIndex >= 0.88 || recoveryUrgency >= 0.85 ? 'critical' : 'warning',
       source: 'runtime',
-      to: '/overview',
+      to: '/observability/overview',
     })
   }
 
@@ -262,7 +262,7 @@ export function buildDigitalLifeAlerts(snapshot, options = {}) {
       ts_ms: tsMs,
       severity: vestibularStability === 'critical' || vestibularJitter >= 0.82 ? 'critical' : 'warning',
       source: 'runtime',
-      to: '/overview',
+      to: '/observability/overview',
     })
   }
 
@@ -281,7 +281,7 @@ export function buildDigitalLifeAlerts(snapshot, options = {}) {
       ts_ms: tsMs,
       severity: 'warning',
       source: 'runtime',
-      to: '/overview',
+      to: '/observability/overview',
     })
   }
 
@@ -298,7 +298,7 @@ export function buildDigitalLifeAlerts(snapshot, options = {}) {
       ts_ms: tsMs,
       severity: homeostasisStatus === 'critical' ? 'critical' : 'warning',
       source: 'runtime',
-      to: '/overview',
+      to: '/observability/overview',
     })
   }
 
@@ -318,7 +318,7 @@ export function buildDigitalLifeAlerts(snapshot, options = {}) {
       ts_ms: tsMs,
       severity: 'critical',
       source: 'forge-runtime',
-      to: '/alerts?reason_code=FORGE_RUNTIME_CRITICAL_PROPOSALS',
+      to: '/observability/alerts?reason_code=FORGE_RUNTIME_CRITICAL_PROPOSALS',
     })
   } else if (unhealthyProposals > 0) {
     alerts.push({
@@ -331,7 +331,7 @@ export function buildDigitalLifeAlerts(snapshot, options = {}) {
       ts_ms: tsMs,
       severity: 'warning',
       source: 'forge-runtime',
-      to: '/alerts?reason_code=FORGE_RUNTIME_UNHEALTHY_PROPOSALS',
+      to: '/observability/alerts?reason_code=FORGE_RUNTIME_UNHEALTHY_PROPOSALS',
     })
   }
 

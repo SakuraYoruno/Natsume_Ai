@@ -1,6 +1,6 @@
 import React, { useState } from 'react'
 import toast from 'react-hot-toast'
-import { submitCanonProposal } from '../api/canon.js'
+import { submitCanonProposal } from '../features/operations/api.js'
 import {
   BookOpen,
   FilePlus,
@@ -19,7 +19,7 @@ import {
   useCanonDocumentsQuery,
   useCanonProposalsQuery,
   useCanonVaultStatsQuery,
-} from '../queries/canonQueries.js'
+} from '../features/operations/queries.js'
 
 const CanonProposalsSection = React.lazy(() => import('../components/canon/CanonProposalsSection.jsx'))
 const CanonDocumentsSection = React.lazy(() => import('../components/canon/CanonDocumentsSection.jsx'))

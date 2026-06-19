@@ -11,7 +11,7 @@ import useAppStore from '../store/useAppStore.js'
 import {
   switchSysMode,
   updateAutoRules,
-} from '../api/runtimeMode.js'
+} from '../features/life/api.js'
 import EmptyStateCard from '../components/EmptyStateCard.jsx'
 import LoadingNotice from '../components/LoadingNotice.jsx'
 import MetricCard from '../components/MetricCard.jsx'
@@ -21,7 +21,7 @@ import SampleMeta from '../components/obs/SampleMeta.jsx'
 import PageHero from '../components/PageHero.jsx'
 import { LOAD_STATES, resolveLoadState } from '../models/loadState.js'
 import { buildRuntimeModeOrganSystemModel } from '../models/organSystemModel.js'
-import { useRuntimeModeConsoleQuery } from '../queries/runtimeModeQueries.js'
+import { useRuntimeModeConsoleQuery } from '../features/life/queries.js'
 import { DASH, formatMode, MODE_META } from '../utils/digitalLife.js'
 
 const MODE_ORDER = ['normal', 'focus', 'gaming', 'sleep', 'maintenance', 'locked']

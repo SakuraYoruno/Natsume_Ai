@@ -11,7 +11,7 @@ import PageHero from '../components/PageHero.jsx'
 import ViewportLazySection from '../components/obs/ViewportLazySection.jsx'
 import useDigitalLifeRuntimeSignals from '../hooks/useDigitalLifeRuntimeSignals.js'
 import { resolveLoadState } from '../models/loadState.js'
-import { useMetricsOverviewQuery } from '../queries/metricsQueries.js'
+import { useMetricsOverviewQuery } from '../features/observability/queries.js'
 import useAppStore from '../store/useAppStore.js'
 
 const MetricsDiagnosticsCards = React.lazy(() => import('../components/metrics/MetricsDiagnosticsCards.jsx'))

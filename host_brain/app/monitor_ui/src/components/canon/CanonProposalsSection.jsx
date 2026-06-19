@@ -4,7 +4,7 @@ import {
   approveCanonProposal,
   rejectCanonProposal,
   rollbackCanonProposal,
-} from '../../api/canon.js'
+} from '../../features/operations/api.js'
 import {
   CheckCircle,
   ChevronDown,

@@ -18,7 +18,7 @@ import PageHero from '../components/PageHero.jsx'
 import TimeWindowSelect from '../components/TimeWindowSelect.jsx'
 import useDigitalLifeRuntimeSignals from '../hooks/useDigitalLifeRuntimeSignals.js'
 import { resolveLoadState } from '../models/loadState.js'
-import { useSystemConfigQuery } from '../queries/systemConfigQueries.js'
+import { useSystemConfigQuery } from '../features/operations/queries.js'
 import useAppStore from '../store/useAppStore.js'
 import { formatMode, formatReplyPosture } from '../utils/digitalLife.js'
 
