@@ -517,7 +517,7 @@ export function fetchMetricsTimeseries(params = {}) {
   const { time_range, ...rest } = params
   const rangeMinutes = time_range ? timeRangeToMinutes(time_range) : 60
   // 根据时间范围自动选择合适的聚合间隔
-  const intervalMinutes = rangeMinutes <= 60 ? 5 : rangeMinutes <= 360 ? 30 : rangeMinutes <= 1440 ? 60 : 360
+  const intervalMinutes = rangeMinutes <= 60 ? 5 : rangeMinutes <= 360 ? 30 : 60
   const mapped = {
     ...rest,
     range_minutes: rangeMinutes,

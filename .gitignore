@@ -3,9 +3,11 @@
 Thumbs.db
 
 # --- Skills Hub（外部安装的 skill，用户数据，不纳入版本管理）---
-skills/
+skills/*
 !skills/example-echo/
+!skills/example-echo/**
 !skills/pentest/
+!skills/pentest/**
 !host_brain/skills/
 !host_brain/skills/project_locator.py
 !host_brain/skills/codex_task_builder.py

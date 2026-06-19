@@ -91,6 +91,7 @@ class GovernedToolNode:
         ts_ms = int(time.time() * 1000)
 
         # 1. Governor 门控（保留，不可绕过）
+        governor_approved = False
         if self._governor is not None and tool_calls:
             try:
                 tribe_params = self._get_tribe_params()
@@ -109,6 +110,7 @@ class GovernedToolNode:
                         "committed_route_token": route_token,
                         "tribe_governor_params": tribe_params,
                     }
+                governor_approved = True
             except Exception as exc:
                 _logger.warning("GovernedToolNode: Governor 门控异常（降级允许执行）: %s", exc)
 
@@ -117,6 +119,8 @@ class GovernedToolNode:
         for tc in tool_calls:
             tool_name = str(tc.get("tool") or "").strip()
             tool_args = dict(tc.get("args") or {})
+            if governor_approved:
+                tool_args["_governor_approved"] = True
             result = self._execute_tool(tool_name, tool_args)
             tool_results.append({
                 "tool": tool_name,

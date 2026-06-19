@@ -44,6 +44,7 @@ import {
 } from '../components/trace/TraceRequestRuntimePanels.jsx'
 import {
   ISSUE_STATUSES,
+  RUNNING_STATUSES,
   buildRetrievalRuntimeMeta,
   formatDateTime,
   formatIntent,

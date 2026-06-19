@@ -3102,17 +3102,17 @@ def export_sessions_csv(
     # 数据行
     import datetime as _dt
     for r in rows:
-        ts = r.get("ts_ms") or 0
+        ts = r.ts_ms or 0
         dt_str = _dt.datetime.fromtimestamp(ts / 1000).strftime("%Y-%m-%d %H:%M:%S") if ts else ""
         writer.writerow([
-            r.get("request_id", ""),
-            r.get("session_id", ""),
+            r.request_id,
+            r.session_id or "",
             ts,
             dt_str,
-            r.get("status", ""),
-            r.get("decision", ""),
-            r.get("reason_code", ""),
-            r.get("duration_ms", ""),
+            r.status or "",
+            r.decision or "",
+            r.reason_code or "",
+            r.total_latency_ms or "",
         ])
 
     output.seek(0)

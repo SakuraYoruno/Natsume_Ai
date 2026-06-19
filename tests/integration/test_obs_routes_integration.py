@@ -644,6 +644,16 @@ def test_sessions_keyword_matches_input_preview(client):
     assert data["items"][0]["request_id"] == "req-int-002"
 
 
+def test_sessions_export_csv_with_filters(client):
+    """Regression: CSV export writes SessionItem rows without dict-style access."""
+    resp = client.get("/obs/sessions/export?window_minutes=10080&keyword=req-int-001&status=ok")
+    assert resp.status_code == 200
+    assert resp.headers["content-type"].startswith("text/csv")
+    text = resp.text
+    assert "request_id,session_id,ts_ms,datetime,status,decision,reason_code,total_latency_ms" in text
+    assert "req-int-001" in text
+
+
 def test_gateway_stats_reads_channel_io_log(client, ledger):
     """Gateway stats should work against current ledger schema without audit_log."""
     now = int(time.time() * 1000)

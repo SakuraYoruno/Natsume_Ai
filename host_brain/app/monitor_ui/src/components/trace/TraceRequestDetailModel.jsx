@@ -12,7 +12,7 @@ import CustomNode from './CustomNode.jsx'
 import { getTraceNodeDisplayName, normalizeTraceNodeKey } from './traceNodeText.js'
 
 export const ISSUE_STATUSES = new Set(['DEGRADED', 'FAIL', 'FAILED', 'ERROR', 'DOWN', 'REJECT', 'REJECTED'])
-const RUNNING_STATUSES = new Set(['RUNNING', 'STARTED'])
+export const RUNNING_STATUSES = new Set(['RUNNING', 'STARTED'])
 const TRACE_NODE_TYPES = { customNode: CustomNode }
 const TRACE_STAGE_GROUPS = [
   {

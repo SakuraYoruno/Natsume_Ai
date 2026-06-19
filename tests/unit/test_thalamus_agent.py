@@ -1298,6 +1298,19 @@ def test_classify_task_intent_routes_authorized_pentest_to_pentest_agent() -> No
     assert decision["args"]["scope_hint_present"] is True
 
 
+def test_classify_task_intent_routes_structured_scope_pentest_hint_to_agent() -> None:
+    decision = classify_task_intent_by_rules(
+        "target=http://127.0.0.1:8888 scope=127.0.0.1 readonly scan, no exploit"
+    )
+
+    assert decision is not None
+    assert decision["route"] == "delegate"
+    assert decision["target_id"] == "pentest_agent"
+    assert decision["reason_code"] == "THALAMUS_RULE_PENTEST_AGENT"
+    assert decision["args"]["allow_exploit"] is False
+    assert decision["args"]["scope_hint_present"] is True
+
+
 def test_classify_task_intent_keeps_security_advice_out_of_pentest_agent() -> None:
     decision = classify_task_intent_by_rules("SQL 注入是什么，应该怎么防？")
 
