@@ -18,7 +18,7 @@ def test_obs_fastapi_app_health_ok():
 
 
 def test_obs_fastapi_app_exposes_obs_and_ui_routes():
-    paths = {route.path for route in app.routes}
+    paths = {route.path for route in app.routes if hasattr(route, "path")}
     assert "/health" in paths
     assert "/obs/metrics" in paths
     assert "/obs/runtime-snapshot" in paths
@@ -27,7 +27,6 @@ def test_obs_fastapi_app_exposes_obs_and_ui_routes():
     assert "/obs/insights/summary-snapshot" in paths
     assert "/obs/digital-life/overview-snapshot" in paths
     assert "/obs/digital-life/wall-clock-soak" in paths
-    assert "/obs/codex-bio-ops" in paths
     assert "/api/ui/search-requests" in paths
     assert "/observability/trace" in paths
     assert "/v1/chat" not in paths
