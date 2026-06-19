@@ -4,7 +4,7 @@ import InsightSection from './InsightSection.jsx'
 import {
   useCanonProposalStatsQuery,
   useStateArbiterStatsQuery,
-} from '../../queries/diagnosticQueries.js'
+} from '../../features/observability/diagnosticQueries.js'
 import { SectionQueryMeta, StatCard } from './insightsGroupShared.jsx'
 
 function StateArbiterStatsSection({ windowMinutes, pollingEnabled = false, pollingInterval = 30, pollingTick = 0 }) {

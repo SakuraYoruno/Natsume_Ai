@@ -2,7 +2,7 @@ import React, { useCallback, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import toast from 'react-hot-toast'
 import { Clock3, Download, ExternalLink, RefreshCw, Search } from 'lucide-react'
-import { exportSessionsCsv } from '../api/sessions.js'
+import { exportSessionsCsv } from '../features/observability/api.js'
 import DigitalLifeRuntimeCard from '../components/DigitalLifeRuntimeCard.jsx'
 import EmptyStateCard from '../components/EmptyStateCard.jsx'
 import LivingPulseStrip from '../components/LivingPulseStrip.jsx'
@@ -14,7 +14,7 @@ import StatusBadge from '../components/StatusBadge.jsx'
 import TimeWindowSelect from '../components/TimeWindowSelect.jsx'
 import useDigitalLifeRuntimeSignals from '../hooks/useDigitalLifeRuntimeSignals.js'
 import { LOAD_STATES, resolveLoadState } from '../models/loadState.js'
-import { useSessionsListQuery } from '../queries/sessionsQueries.js'
+import { useSessionsListQuery } from '../features/observability/queries.js'
 import useAppStore from '../store/useAppStore.js'
 import { compactText, DASH, formatAlertTitle, formatDateTime } from '../utils/digitalLife.js'
 import { sanitizeRecentRequests } from '../utils/sessionList.js'
@@ -269,7 +269,7 @@ export default function Sessions() {
   const openSessionTrace = useCallback((requestId) => {
     if (!requestId) return
       setSelectedRequestId(requestId)
-      navigate(`/trace/${requestId}`)
+      navigate(`/observability/trace/${requestId}`)
   }, [navigate, setSelectedRequestId])
 
   return (

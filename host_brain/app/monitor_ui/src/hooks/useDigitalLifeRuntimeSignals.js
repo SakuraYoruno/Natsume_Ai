@@ -1,6 +1,6 @@
 import { useCallback } from 'react'
 import useAppStore from '../store/useAppStore.js'
-import { useRuntimeSignalsQuery } from '../queries/runtimeQueries.js'
+import { useRuntimeSignalsQuery } from '../features/life/queries.js'
 
 export default function useDigitalLifeRuntimeSignals(options = {}) {
   const {

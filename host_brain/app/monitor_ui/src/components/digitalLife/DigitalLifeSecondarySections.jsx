@@ -81,7 +81,7 @@ export default function DigitalLifeSecondarySections({ model }) {
             definition="体征核心指标来自运行快照，用于快速判定是否继续向情绪、关系、策略或 Trace 深钻。"
           />
           <DrilldownLink
-            to="/trace"
+            to="/observability/trace"
             label="进入 Trace"
             hint="如果体征异常，优先沿 request / session / tick 主链继续排查。"
           />
@@ -91,7 +91,7 @@ export default function DigitalLifeSecondarySections({ model }) {
       <LifeSection
         title="非监督成长"
         hint="成长面板不再是独立后台模块，而是生命体连续性的一部分。"
-        actionTo="/self-model"
+        actionTo="/life/self-model"
         actionLabel="查看详情"
       >
         {growthSignals.hasAnyGrowth ? (
@@ -207,7 +207,7 @@ export default function DigitalLifeSecondarySections({ model }) {
             definition="平均记忆成功率只统计当前窗口内有样本的子系统；无样本会保持中性展示，不再误报为 0%。"
           />
           <DrilldownLink
-            to="/memory"
+            to="/life/memory"
             label="查看记忆详情"
             hint="从这里继续下钻到子系统成功率、蒸馏与常驻设定。"
           />
@@ -216,4 +216,3 @@ export default function DigitalLifeSecondarySections({ model }) {
     </>
   )
 }
-

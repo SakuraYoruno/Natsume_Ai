@@ -17,7 +17,7 @@ import {
   useChainStatsQuery,
   useErrorHeatmapQuery,
   useFailureStatsQuery,
-} from '../../queries/diagnosticQueries.js'
+} from '../../features/observability/diagnosticQueries.js'
 import { formatAlertTitle, humanizeToken } from '../../utils/digitalLife.js'
 import {
   formatTime,

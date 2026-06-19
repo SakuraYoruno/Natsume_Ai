@@ -3,8 +3,8 @@ import toast from 'react-hot-toast'
 import {
   approveCapabilityForgeProposal,
   rollbackCapabilityForgeProposal,
-} from '../api/forge.js'
-import { useCapabilityForgeProposalsQuery } from '../queries/forgeQueries.js'
+} from '../features/operations/api.js'
+import { useCapabilityForgeProposalsQuery } from '../features/operations/queries.js'
 
 const APPROVER_ID = 'ui.forge_risk_bar'
 const OPERATOR_ID = 'ui.forge_risk_bar'
@@ -185,10 +185,10 @@ export default function ForgeRiskActionBar({
         {busyAction === 'rollback' ? 'Rolling back...' : 'Rollback'}
       </button>
 
-      <a className="font-medium hover:underline" href="#/alerts?reason_code=FORGE_RUNTIME_CRITICAL_PROPOSALS">
+      <a className="font-medium hover:underline" href="#/observability/alerts?reason_code=FORGE_RUNTIME_CRITICAL_PROPOSALS">
         Alert Drill-down
       </a>
-      <a className="font-medium hover:underline" href="#/insights/global?focus=forge-risk">
+      <a className="font-medium hover:underline" href="#/observability/insights/global?focus=forge-risk">
         Forge Insights
       </a>
     </div>

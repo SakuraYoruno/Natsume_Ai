@@ -207,7 +207,7 @@ export default function LifeBodyTopology({ lifeState, organSystems = [], organSt
               {primaryPathology ? (
                 <div className="mt-3 flex flex-wrap items-center justify-center gap-2">
                   <Link
-                    to={primaryPathology.detailPath || `/pathologies/${encodeURIComponent(primaryPathology.id)}`}
+                    to={primaryPathology.detailPath || `/life/pathologies/${encodeURIComponent(primaryPathology.id)}`}
                     className="inline-flex items-center rounded-full border border-primary-200 bg-primary-50 px-3 py-1 text-xs font-medium text-primary-700 hover:border-primary-300 hover:bg-primary-100"
                   >
                     查看病灶详情

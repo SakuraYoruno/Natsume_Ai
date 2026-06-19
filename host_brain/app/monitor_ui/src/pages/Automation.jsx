@@ -5,7 +5,7 @@ import {
   disableSchedulerTask,
   enableSchedulerTask,
   triggerSchedulerTask,
-} from '../api/automation.js'
+} from '../features/execution/api.js'
 import EmptyStateCard from '../components/EmptyStateCard.jsx'
 import LivingPulseStrip from '../components/LivingPulseStrip.jsx'
 import { LazyLoadingNotice, LoadingNotice } from '../components/LoadingNotice.jsx'
@@ -20,7 +20,7 @@ import { buildEndocrineOrganSystemModel } from '../models/organSystemModel.js'
 import {
   useAutomationOverviewQuery,
   refreshSchedulerHistoryQuery,
-} from '../queries/automationQueries.js'
+} from '../features/execution/queries.js'
 import useAppStore from '../store/useAppStore.js'
 
 const STATUS_STYLES = {

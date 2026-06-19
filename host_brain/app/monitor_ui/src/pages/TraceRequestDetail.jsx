@@ -9,7 +9,7 @@ import {
 } from 'lucide-react'
 import {
   connectTraceRequestLive,
-} from '../api/obs.js'
+} from '../features/observability/api.js'
 import EmptyStateCard from '../components/EmptyStateCard.jsx'
 import LivingPulseStrip from '../components/LivingPulseStrip.jsx'
 import LoadingNotice from '../components/LoadingNotice.jsx'
@@ -52,13 +52,13 @@ import {
   getSummaryOutputText,
   normalizeStatus,
 } from '../components/trace/TraceRequestDetailModel.jsx'
-import { useImmuneGateReplayQuery } from '../queries/automationQueries.js'
+import { useImmuneGateReplayQuery } from '../features/execution/queries.js'
 import {
   useTraceRetrievalRuntimeQuery,
   useTraceSnapshotQuery,
   useTraceStreamEventsQuery,
   useTraceTribeEventsQuery,
-} from '../queries/traceQueries.js'
+} from '../features/observability/traceQueries.js'
 import useAppStore from '../store/useAppStore.js'
 
 export default function TraceRequestDetail() {
@@ -280,7 +280,7 @@ export default function TraceRequestDetail() {
 
       <div className="card space-y-3 p-4">
         <div className="flex items-center gap-3 flex-wrap">
-          <button className="btn-secondary text-xs" onClick={() => navigate('/trace')}>
+          <button className="btn-secondary text-xs" onClick={() => navigate('/observability/trace')}>
             <ArrowLeft size={14} />
             返回
           </button>
@@ -292,7 +292,7 @@ export default function TraceRequestDetail() {
             {traceData ? <StatusBadge status={normalizeStatus(traceData.status)} label={traceData.status} /> : null}
             {requestId ? (
               <a
-                href={`#/automation?immune_replay_request_id=${encodeURIComponent(requestId)}`}
+                href={`#/execution/automation?immune_replay_request_id=${encodeURIComponent(requestId)}`}
                 className="btn-secondary text-xs"
               >
                 打开 Immune Ops

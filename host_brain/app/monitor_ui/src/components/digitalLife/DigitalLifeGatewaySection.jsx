@@ -128,7 +128,7 @@ export default function DigitalLifeGatewaySection({ model }) {
     <LifeSection
       title="人体闭环健康（Gateway）"
       hint="展示请求从即时确认、进度触达到偏航修复与终态收束的健康度。"
-      actionTo="/gateway"
+      actionTo="/execution/gateway"
       actionLabel="查看通道详情"
     >
       <div className="mb-4">

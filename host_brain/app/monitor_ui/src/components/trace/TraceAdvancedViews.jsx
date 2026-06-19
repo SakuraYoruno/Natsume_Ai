@@ -265,7 +265,7 @@ function GroupDagView({ groupId, traceData, onSelectNode }) {
     <div className="flex h-full min-h-0 flex-1 flex-col">
       <div className="card mb-4 space-y-3 p-4">
         <div className="flex flex-wrap items-center gap-3">
-          <button className="btn-secondary text-xs" onClick={() => navigate('/trace')}>
+          <button className="btn-secondary text-xs" onClick={() => navigate('/observability/trace')}>
             <ArrowLeft size={14} />
             返回
           </button>
@@ -394,7 +394,7 @@ export function FullChainView({ traceData, onSelectNode }) {
     <div className="flex h-full min-h-0 flex-1 flex-col">
       <div className="card mb-4 space-y-3 p-4">
         <div className="flex flex-wrap items-center gap-3">
-          <button className="btn-secondary text-xs" onClick={() => navigate('/trace')}>
+          <button className="btn-secondary text-xs" onClick={() => navigate('/observability/trace')}>
             <ArrowLeft size={14} />
             返回
           </button>

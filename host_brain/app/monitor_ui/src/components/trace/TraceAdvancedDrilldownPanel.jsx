@@ -43,7 +43,7 @@ export default function TraceAdvancedDrilldownPanel({
                     background: isActive ? g.bg : '#FFFFFF',
                     boxShadow: isActive ? `0 0 0 1px ${g.color}22, 0 2px 8px ${g.color}11` : undefined,
                   }}
-                  onClick={() => navigate(`/trace/group/${g.id}`)}
+                  onClick={() => navigate(`/observability/trace/group/${g.id}`)}
                 >
                   <div className="flex items-start justify-between mb-3">
                     <span
@@ -102,7 +102,7 @@ export default function TraceAdvancedDrilldownPanel({
           <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_18rem] gap-4">
             <button
               className="flex w-full items-center gap-4 rounded-xl border-2 border-dashed border-primary-200 p-4 text-left transition-all hover:border-blue-400 hover:bg-blue-50"
-              onClick={() => navigate('/trace/full')}
+              onClick={() => navigate('/observability/trace/full')}
             >
               <span className="flex items-center justify-center w-10 h-10 rounded-lg bg-blue-50 text-blue-600 shrink-0">
                 <Layers size={20} />

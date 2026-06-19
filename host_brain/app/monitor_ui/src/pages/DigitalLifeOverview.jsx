@@ -31,9 +31,9 @@ import TimeWindowSelect from '../components/TimeWindowSelect.jsx'
 import VitalLoopSummaryPanel from '../components/VitalLoopSummaryPanel.jsx'
 import useLifeBodyPageData from '../hooks/useLifeBodyPageData.js'
 import { buildMainChainReshapeModel } from '../models/mainChainReshapeModel.js'
-import { useDigitalLifeWallClockSoakQuery } from '../queries/digitalLifeQueries.js'
-import { useAvatarStateQuery } from '../queries/runtimeQueries.js'
-import { postAvatarBehavior } from '../api/runtime.js'
+import { useDigitalLifeWallClockSoakQuery } from '../features/life/queries.js'
+import { useAvatarStateQuery } from '../features/life/queries.js'
+import { postAvatarBehavior } from '../features/life/api.js'
 import {
   compactText,
   formatTrend,
@@ -197,7 +197,7 @@ export default function DigitalLifeOverview() {
         title: '存在态轴',
         desc: `${modeMeta.emoji} ${modeMeta.label} · ${modeMeta.desc}`,
         status: hasRuntimeSnapshot ? 'wired' : 'pending',
-        actionTo: '/runtime-mode',
+        actionTo: '/life/runtime-mode',
         actionLabel: '查看存在态轴',
       },
       {
@@ -209,7 +209,7 @@ export default function DigitalLifeOverview() {
           ? `${currentBondStage} · 趋势 ${formatTrend(bondState.trend)}`
           : '关系系统已在线，但当前窗口仍缺少阶段样本。',
         status: !hasRuntimeSnapshot ? 'pending' : bondState.current_stage ? 'wired' : 'degraded',
-        actionTo: '/bond',
+        actionTo: '/life/relationship',
         actionLabel: '查看关系',
       },
       {
@@ -225,7 +225,7 @@ export default function DigitalLifeOverview() {
           : topEmotion || runtimeSnapshot?.slot_status?.emotion_context === 'live'
             ? 'wired'
             : 'degraded',
-        actionTo: '/emotion',
+        actionTo: '/life/emotion',
         actionLabel: '查看情绪',
       },
       {
@@ -237,7 +237,7 @@ export default function DigitalLifeOverview() {
           ? `平均成功率 ${avgMemorySuccessRate}% · ${sampledMemorySubsystemCount}/${configuredMemorySubsystemCount} 个子系统有样本`
           : '记忆页已接入，但当前窗口还没有记忆流量样本。',
         status: hasMemoryData && hasMemorySamples ? 'wired' : 'pending',
-        actionTo: '/memory',
+        actionTo: '/life/memory',
         actionLabel: '查看记忆',
       },
       {
@@ -249,7 +249,7 @@ export default function DigitalLifeOverview() {
           ? `意愿 ${silenceState.willingness_level} · 姿态 ${replyPosture}`
           : '策略系统已接入，但当前窗口缺少稳定快照。',
         status: !hasRuntimeSnapshot ? 'pending' : silenceState.willingness_level ? 'wired' : 'degraded',
-        actionTo: '/response-policy',
+        actionTo: '/life/response-policy',
         actionLabel: '查看策略',
       },
       {
@@ -267,7 +267,7 @@ export default function DigitalLifeOverview() {
           : growthSignals.hasAnyGrowth || selfModelSnapshot.recent_mood_trend
             ? 'wired'
             : 'degraded',
-        actionTo: '/self-model',
+        actionTo: '/life/self-model',
         actionLabel: '查看自我模型',
       },
       {
@@ -279,7 +279,7 @@ export default function DigitalLifeOverview() {
           ? `${absenceBand} · 等待话题 ${(offlineState.anticipation_topics || []).length} 个`
           : '内在世界可访问，当前尚未形成完整离线态快照。',
         status: !hasRuntimeSnapshot ? 'pending' : offlineState.absence_band ? 'wired' : 'degraded',
-        actionTo: '/inner-world',
+        actionTo: '/life/inner-world',
         actionLabel: '查看内在世界',
       },
       {
@@ -289,7 +289,7 @@ export default function DigitalLifeOverview() {
           ? `降级 ${servicesData.degraded ?? 0} · 离线 ${servicesData.down ?? 0} · 未知 ${servicesData.unknown ?? 0} · 活跃子系统 ${activeSubsystemCount}`
           : '神经底座状态暂时不可见。',
         status: servicesData ? 'wired' : 'degraded',
-        actionTo: '/system',
+        actionTo: '/operations/system',
         actionLabel: '查看神经底座',
       },
     ],
@@ -523,7 +523,7 @@ export default function DigitalLifeOverview() {
           <LifeSection
             title="Capability Gap & Forge Loop"
             hint="Expose gap pressure and forge runtime quality directly in the life-body overview."
-            actionTo="/insights/global"
+            actionTo="/observability/insights/global"
             actionLabel="Open Global Insights"
           >
             <LazyLoadingNotice>
@@ -537,7 +537,7 @@ export default function DigitalLifeOverview() {
             <LifeSection
               title="Capability Gap & Forge Loop"
               hint="Expose gap pressure and forge runtime quality directly in the life-body overview."
-              actionTo="/insights/global"
+              actionTo="/observability/insights/global"
               actionLabel="Open Global Insights"
           >
               <LoadingNotice>
@@ -557,7 +557,7 @@ export default function DigitalLifeOverview() {
           <LifeSection
             title="人体闭环健康（Gateway）"
             hint="展示请求从即时确认、进度触达到偏航修复与终态收束的健康度。"
-            actionTo="/gateway"
+            actionTo="/execution/gateway"
             actionLabel="查看通道详情"
           >
             <LazyLoadingNotice>
@@ -571,7 +571,7 @@ export default function DigitalLifeOverview() {
             <LifeSection
               title="人体闭环健康（Gateway）"
               hint="展示请求从即时确认、进度触达到偏航修复与终态收束的健康度。"
-              actionTo="/gateway"
+              actionTo="/execution/gateway"
               actionLabel="查看通道详情"
           >
               <LoadingNotice>

@@ -8,7 +8,7 @@ import NoticeBanner from '../components/NoticeBanner.jsx'
 import PageHero from '../components/PageHero.jsx'
 import SampleMeta from '../components/obs/SampleMeta.jsx'
 import { LOAD_STATES, resolveLoadState } from '../models/loadState.js'
-import { useSkillsHubQuery } from '../queries/skillsHubQueries.js'
+import { useSkillsHubQuery } from '../features/execution/queries.js'
 import useAppStore from '../store/useAppStore.js'
 
 const CLEARANCE_STYLES = {

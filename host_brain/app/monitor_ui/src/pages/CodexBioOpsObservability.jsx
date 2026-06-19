@@ -43,8 +43,8 @@ import {
   TrustFoundationPanel,
 } from '../components/bioOps/BioOpsCapabilityPanels.jsx'
 import useAppStore from '../store/useAppStore.js'
-import { runCodexBioOpsDailyCycle } from '../api/obs.js'
-import { useCodexBioOpsObservabilityQuery } from '../queries/codexBioOpsQueries.js'
+import { runCodexBioOpsDailyCycle } from '../features/observability/api.js'
+import { useCodexBioOpsObservabilityQuery } from '../features/observability/queries.js'
 
 export default function CodexBioOpsObservability() {
   const pollingEnabled = useAppStore((state) => state.pollingEnabled)

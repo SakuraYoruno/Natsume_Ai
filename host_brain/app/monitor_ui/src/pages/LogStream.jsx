@@ -7,7 +7,7 @@ import SampleMeta from '../components/obs/SampleMeta.jsx'
 import PageHero from '../components/PageHero.jsx'
 import useDigitalLifeRuntimeSignals from '../hooks/useDigitalLifeRuntimeSignals.js'
 import { LOAD_STATES, resolveLoadState } from '../models/loadState.js'
-import { useErrorLogBatchQuery } from '../queries/logQueries.js'
+import { useErrorLogBatchQuery } from '../features/observability/queries.js'
 import useAppStore from '../store/useAppStore.js'
 import { formatAlertTitle, humanizeToken } from '../utils/digitalLife.js'
 

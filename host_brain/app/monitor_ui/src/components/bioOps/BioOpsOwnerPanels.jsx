@@ -16,7 +16,7 @@ import {
   materializeCodexBioOpsOwnerIntakePackets,
   rejectCodexBioOpsAdoption,
   rejectCodexBioOpsOwnerState,
-} from '../../api/obs.js'
+} from '../../features/observability/api.js'
 
 export function PendingAdoptions({ items, runId, onChanged }) {
   const rows = Array.isArray(items) ? items : []

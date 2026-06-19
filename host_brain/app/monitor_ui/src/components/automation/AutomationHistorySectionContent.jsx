@@ -4,7 +4,7 @@ import LoadingNotice from '../LoadingNotice.jsx'
 import NoticeBanner from '../NoticeBanner.jsx'
 import SampleMeta from '../obs/SampleMeta.jsx'
 import { LOAD_STATES, resolveLoadState } from '../../models/loadState.js'
-import { useSchedulerHistoryQuery } from '../../queries/automationQueries.js'
+import { useSchedulerHistoryQuery } from '../../features/execution/queries.js'
 
 function SchedulerTimelineChart({ tasks }) {
   if (!tasks || tasks.length === 0) return null

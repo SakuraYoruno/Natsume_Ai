@@ -10,7 +10,7 @@ import PageHero from '../components/PageHero.jsx'
 import TimeWindowSelect from '../components/TimeWindowSelect.jsx'
 import useDigitalLifeRuntimeSignals from '../hooks/useDigitalLifeRuntimeSignals.js'
 import { resolveLoadState } from '../models/loadState.js'
-import { useInsightsSummaryQuery } from '../queries/insightsQueries.js'
+import { useInsightsSummaryQuery } from '../features/observability/queries.js'
 import useAppStore from '../store/useAppStore.js'
 
 const InsightsGlobalGroup = React.lazy(() => import('../components/insights/InsightsGlobalGroup.jsx'))
@@ -233,7 +233,7 @@ export default function Insights() {
               type="button"
               key={g.id}
               className={`card-hover group w-full cursor-pointer p-0 text-left ${g.bg}`}
-              onClick={() => navigate(`/insights/${g.id}`)}
+              onClick={() => navigate(`/observability/insights/${g.id}`)}
             >
               <div className="space-y-4 p-6">
                 <div className="flex items-center justify-between">
@@ -259,7 +259,7 @@ export default function Insights() {
       ) : (
         <div className="space-y-8">
           <div className="card p-4">
-            <button className="btn-secondary" onClick={() => navigate('/insights')}>
+            <button className="btn-secondary" onClick={() => navigate('/observability/insights')}>
               <ArrowLeft size={16} /> 返回分组
             </button>
           </div>

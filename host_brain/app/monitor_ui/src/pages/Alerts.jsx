@@ -23,7 +23,7 @@ import useDigitalLifeRuntimeSignals from '../hooks/useDigitalLifeRuntimeSignals.
 import { createRequestRefs } from '../models/observabilityRefs.js'
 import { buildImmuneOrganSystemModel } from '../models/organSystemModel.js'
 import { resolveLoadState } from '../models/loadState.js'
-import { useAlertsCenterQuery } from '../queries/alertsQueries.js'
+import { useAlertsCenterQuery } from '../features/observability/queries.js'
 import useAppStore from '../store/useAppStore.js'
 import { classNames, compactText, formatAlertTitle, formatDateTime, formatServiceStatus, humanizeToken } from '../utils/digitalLife.js'
 import { buildDigitalLifeAlerts } from '../utils/runtimeHealth.js'
@@ -140,7 +140,7 @@ function AlertCard({ alert }) {
               </span>
             ) : null}
             {alert?.request_id ? (
-              <a href={`#/trace/${alert.request_id}`} className="text-primary hover:underline">
+              <a href={`#/observability/trace/${alert.request_id}`} className="text-primary hover:underline">
                 打开 Trace
               </a>
             ) : null}
@@ -179,7 +179,7 @@ export default function Alerts() {
     const nextSearch = params.toString()
     navigate(
       {
-        pathname: '/alerts',
+        pathname: '/observability/alerts',
         search: nextSearch ? `?${nextSearch}` : '',
       },
       { replace: true }
@@ -246,7 +246,7 @@ export default function Alerts() {
         ts_ms: Date.now(),
         severity: String(service.status || '').toUpperCase() === 'DOWN' ? 'critical' : 'warning',
         source: 'service-health',
-        to: '/overview',
+        to: '/observability/overview',
       })),
     [healthRes]
   )
@@ -390,7 +390,7 @@ export default function Alerts() {
       {isForgeRiskFiltered ? (
         <NoticeBanner variant="info" title="Forge Risk Drill-down">
           <span className="mr-2">{`filter=${filterCode}`}</span>
-          <a href="#/insights/global?focus=forge-risk" className="font-medium text-primary hover:underline">
+          <a href="#/observability/insights/global?focus=forge-risk" className="font-medium text-primary hover:underline">
             打开 Forge 全局洞察
           </a>
         </NoticeBanner>

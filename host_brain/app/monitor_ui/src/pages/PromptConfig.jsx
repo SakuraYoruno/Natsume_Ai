@@ -20,7 +20,7 @@ import { resolveLoadState } from '../models/loadState.js'
 import {
   usePromptTemplateDetailQuery,
   usePromptTemplateListQuery,
-} from '../queries/promptQueries.js'
+} from '../features/operations/queries.js'
 import useAppStore from '../store/useAppStore.js'
 
 const PromptTemplateEditorPanel = React.lazy(() => import('../components/promptOps/PromptTemplateEditorPanel.jsx'))
@@ -124,7 +124,7 @@ export default function PromptConfig() {
           <p className="text-sm text-gray-500">查看主链路提示词、守卫兜底与版本化 PromptSpec，正式变更统一回到代码目录。</p>
         </div>
         <div className="flex items-center gap-2">
-          <Link to="/persona-config" className="btn-secondary">
+          <Link to="/operations/persona" className="btn-secondary">
             <Wand2 size={14} /> 人格运营
           </Link>
           <button className="btn-secondary" onClick={handleRefreshView} disabled={refreshingView}>

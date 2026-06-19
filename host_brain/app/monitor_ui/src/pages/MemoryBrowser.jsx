@@ -10,7 +10,7 @@ import SectionHeading from '../components/SectionHeading.jsx'
 import TimeWindowSelect from '../components/TimeWindowSelect.jsx'
 import { LOAD_STATES, resolveLoadState } from '../models/loadState.js'
 import { buildMemoryOrganSystemModel } from '../models/organSystemModel.js'
-import { useMemoryOverviewQuery } from '../queries/memoryQueries.js'
+import { useMemoryOverviewQuery } from '../features/life/queries.js'
 import useAppStore from '../store/useAppStore.js'
 import { getSuccessRateTone, summarizeSuccessRateSamples } from '../utils/successRate.js'
 
@@ -312,4 +312,3 @@ export default function MemoryBrowser() {
     </div>
   )
 }
-

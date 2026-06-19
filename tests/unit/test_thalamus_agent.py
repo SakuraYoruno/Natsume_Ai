@@ -1499,20 +1499,21 @@ def test_classify_and_compile_intent_draft_routes_self_heal_to_codex() -> None:
 def test_classify_and_compile_intent_draft_routes_production_brief_to_codex_background() -> None:
     agent = ThalamusAgent()
 
-    compiled = _run(
-        agent.classify_and_compile_intent_draft(
-            request_id="req-thalamus-production-brief",
-            session_id="session-thalamus-production-brief",
-            user_message="生成一个今日工作简报，后台异步跑就行",
-            source="chat_handler",
-            ts_ms=1776349003520,
+    with patch("host_brain.app.user_preference_store.build_user_preference_pack", return_value={}):
+        compiled = _run(
+            agent.classify_and_compile_intent_draft(
+                request_id="req-thalamus-production-brief",
+                session_id="session-thalamus-production-brief",
+                user_message="生成一个今日工作简报，后台异步跑就行",
+                source="chat_handler",
+                ts_ms=1776349003520,
+            )
         )
-    )
 
     assert compiled["route"] == "skill"
-    assert compiled["target_id"] == "agent_epub_builder"
-    assert compiled["route_reason"] == "THALAMUS_RULE_CODEX_EPUB_RECENT_RECOMMENDATION_CONTEXT"
-    assert compiled["args"]["run_mode"] == "worker"
+    assert compiled["target_id"] == "agent_workbench_brief"
+    assert compiled["route_reason"] == "THALAMUS_RULE_CODEX_PRODUCTION"
+    assert compiled["args"]["run_mode"] == "research"
     assert compiled["args"]["start_background"] is True
     assert compiled["args"]["workspace_strategy"] == "temp_workspace"
 

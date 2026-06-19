@@ -6,6 +6,54 @@ const devApiTarget = process.env.VITE_DEV_API_TARGET || 'http://127.0.0.1:18080'
 const devObsApiTarget = process.env.VITE_DEV_OBS_API_TARGET || 'http://127.0.0.1:18082'
 const devHostApiTarget = process.env.VITE_DEV_HOST_API_TARGET || devApiTarget
 
+const apiProxy = {
+  '/obs': {
+    target: devObsApiTarget,
+    changeOrigin: true,
+    ws: true,
+  },
+  '/api': {
+    target: devObsApiTarget,
+    changeOrigin: true,
+  },
+  '/metrics': {
+    target: devHostApiTarget,
+    changeOrigin: true,
+  },
+  '/ui': {
+    target: devObsApiTarget,
+    changeOrigin: true,
+  },
+  '/prompt-config': {
+    target: devHostApiTarget,
+    changeOrigin: true,
+  },
+  '/canon': {
+    target: devHostApiTarget,
+    changeOrigin: true,
+  },
+  '/bond': {
+    target: devHostApiTarget,
+    changeOrigin: true,
+  },
+  '/tools': {
+    target: devHostApiTarget,
+    changeOrigin: true,
+  },
+  '/scheduler': {
+    target: devHostApiTarget,
+    changeOrigin: true,
+  },
+  '/v1': {
+    target: devHostApiTarget,
+    changeOrigin: true,
+  },
+  '/internal': {
+    target: devHostApiTarget,
+    changeOrigin: true,
+  },
+}
+
 export default defineConfig({
   plugins: [react()],
   base: '/monitor/',
@@ -45,48 +93,9 @@ export default defineConfig({
   },
   server: {
     port: 5173,
-    proxy: {
-      '/obs': {
-        target: devObsApiTarget,
-        changeOrigin: true,
-        ws: true,
-      },
-      '/api': {
-        target: devObsApiTarget,
-        changeOrigin: true,
-      },
-      '/metrics': {
-        target: devHostApiTarget,
-        changeOrigin: true,
-      },
-      '/ui': {
-        target: devObsApiTarget,
-        changeOrigin: true,
-      },
-      '/prompt-config': {
-        target: devHostApiTarget,
-        changeOrigin: true,
-      },
-      '/canon': {
-        target: devHostApiTarget,
-        changeOrigin: true,
-      },
-      '/bond': {
-        target: devHostApiTarget,
-        changeOrigin: true,
-      },
-      '/tools': {
-        target: devHostApiTarget,
-        changeOrigin: true,
-      },
-      '/scheduler': {
-        target: devHostApiTarget,
-        changeOrigin: true,
-      },
-      '/v1': {
-        target: devHostApiTarget,
-        changeOrigin: true,
-      },
-    },
+    proxy: apiProxy,
+  },
+  preview: {
+    proxy: apiProxy,
   },
 })

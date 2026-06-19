@@ -11,7 +11,7 @@ import PageHero from '../components/PageHero.jsx'
 import TimeWindowSelect from '../components/TimeWindowSelect.jsx'
 import { buildLifeTimelinePath, buildPathologyCenterPath } from '../models/lifeBodyRoutes.js'
 import { resolveLoadState } from '../models/loadState.js'
-import { usePathologiesQuery } from '../queries/lifeBodyQueries.js'
+import { usePathologiesQuery } from '../features/life/queries.js'
 import useAppStore from '../store/useAppStore.js'
 
 const WINDOW_OPTIONS = [
@@ -139,7 +139,7 @@ export default function PathologyDetailPage() {
 
             <div className="flex flex-wrap items-center gap-2">
               <Link
-                to={pathology ? buildPathologyCenterPath({ organId: pathology.organId }) : '/pathologies'}
+                to={pathology ? buildPathologyCenterPath({ organId: pathology.organId }) : '/life/pathologies'}
                 className="inline-flex items-center rounded-full border border-gray-200 bg-white px-3 py-1 text-xs font-medium text-gray-700 hover:border-gray-300 hover:bg-gray-50"
               >
                 返回病灶中心
@@ -213,7 +213,7 @@ export default function PathologyDetailPage() {
                 {availablePathologies.map((item) => (
                   <Link
                     key={item.id}
-                    to={item.detailPath || `/pathologies/${encodeURIComponent(item.id)}`}
+                    to={item.detailPath || `/life/pathologies/${encodeURIComponent(item.id)}`}
                     className="rounded-full border border-primary-200 bg-primary-50 px-3 py-1 text-xs font-medium text-primary-700 hover:border-primary-300 hover:bg-primary-100"
                   >
                     {item.organLabel} · {item.title}

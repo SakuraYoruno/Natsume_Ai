@@ -63,7 +63,7 @@ function StageNode({ item, index, total }) {
         <div className="pointer-events-none absolute left-[1.15rem] top-10 hidden h-[calc(100%-0.5rem)] w-px bg-gray-200 md:block" />
       ) : null}
       <Link
-        to={item.to || '/digital-life'}
+        to={item.to || '/cockpit'}
         className={`group block rounded-2xl border p-3 transition hover:-translate-y-0.5 hover:shadow-sm ${statusClass}`}
       >
         <div className="flex items-start gap-3">
@@ -132,7 +132,7 @@ export default function MainChainReshapePanel({ model }) {
             <span className="font-semibold text-gray-700">断链判定</span>
             {model.gaps?.length ? (
               model.gaps.map((item) => (
-                <Link key={item.id} to={item.to || '/digital-life'} className="rounded-full border border-orange-200 bg-orange-50 px-2.5 py-1 text-orange-700 hover:border-orange-300">
+                <Link key={item.id} to={item.to || '/cockpit'} className="rounded-full border border-orange-200 bg-orange-50 px-2.5 py-1 text-orange-700 hover:border-orange-300">
                   {item.title}
                 </Link>
               ))

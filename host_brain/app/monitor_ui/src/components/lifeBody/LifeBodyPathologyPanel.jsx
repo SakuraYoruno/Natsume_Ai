@@ -77,7 +77,7 @@ export default function LifeBodyPathologyPanel({ pathologies = [] }) {
                 <div className="mt-4">
                   <div className="flex flex-wrap items-center gap-2">
                     <Link
-                      to={item.detailPath || `/pathologies/${encodeURIComponent(item.id)}`}
+                      to={item.detailPath || `/life/pathologies/${encodeURIComponent(item.id)}`}
                       className="inline-flex items-center rounded-full border border-primary-200 bg-primary-50 px-3 py-1 text-xs font-medium text-primary-700 hover:border-primary-300 hover:bg-primary-100"
                     >
                       查看病灶详情

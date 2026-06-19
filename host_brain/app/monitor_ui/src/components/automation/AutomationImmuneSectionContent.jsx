@@ -8,7 +8,7 @@ import { LOAD_STATES, resolveLoadState } from '../../models/loadState.js'
 import {
   useImmuneGateReplayQuery,
   useImmuneGateStatsQuery,
-} from '../../queries/automationQueries.js'
+} from '../../features/execution/queries.js'
 
 function formatPercent(value, digits = 0) {
   const numeric = Number(value)
@@ -168,7 +168,7 @@ function ImmuneGateOpsPanel({
             {replayLoading || replayRefreshing ? '回放中…' : '回放'}
           </button>
           <a
-            href="#/prompt-config?keyword=immune_agent.runtime_rules&scope=immune_agent"
+            href="#/operations/prompt?keyword=immune_agent.runtime_rules&scope=immune_agent"
             className="btn-secondary border-blue-200 text-xs text-blue-700"
           >
             编辑规则
@@ -323,7 +323,7 @@ function ImmuneGateOpsPanel({
             <div className="text-xs font-semibold text-violet-800">免疫回放</div>
             {replayPayload?.request_id ? (
               <a
-                href={`#/trace/${encodeURIComponent(replayPayload.request_id)}`}
+                href={`#/observability/trace/${encodeURIComponent(replayPayload.request_id)}`}
                 className="btn-secondary border-blue-200 px-2 py-0.5 text-[11px] text-blue-700"
               >
                 打开链路

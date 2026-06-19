@@ -23,10 +23,10 @@ import TraceAdvancedDrilldownPanel from './TraceAdvancedDrilldownPanel.jsx'
 import TraceHistoryPanel from './TraceHistoryPanel.jsx'
 import { GROUPS, buildImmuneStageMeta, getTraceGroupNodeIds, getTraceGroupState } from './traceFlowModel.js'
 import useDigitalLifeRuntimeSignals from '../../hooks/useDigitalLifeRuntimeSignals.js'
-import { useSessionsListQuery } from '../../queries/sessionsQueries.js'
-import { useTraceLiveSnapshotQuery, useTraceSnapshotQuery, useTraceTribeFeedQuery } from '../../queries/traceQueries.js'
+import { useSessionsListQuery } from '../../features/observability/queries.js'
+import { useTraceLiveSnapshotQuery, useTraceSnapshotQuery, useTraceTribeFeedQuery } from '../../features/observability/traceQueries.js'
 import { sanitizeRecentRequests } from '../../utils/sessionList.js'
-import { connectTraceLiveFeed } from '../../api/obs.js'
+import { connectTraceLiveFeed } from '../../features/observability/api.js'
 import useAppStore from '../../store/useAppStore.js'
 
 const TraceInlineFullChainOverview = React.lazy(() => import('./TraceAdvancedViews.jsx').then((module) => ({ default: module.InlineFullChainOverview })))
@@ -340,7 +340,7 @@ export default function TraceHome({ traceData, setTraceData, traceInfo, setTrace
 
   const openRequestTrace = (requestId) => {
     setSelectedRequestId(requestId)
-    navigate(`/trace/${requestId}`)
+    navigate(`/observability/trace/${requestId}`)
   }
 
   const latestRequest = recentRequests[0] ?? null
@@ -671,7 +671,7 @@ export default function TraceHome({ traceData, setTraceData, traceInfo, setTrace
               </button>
               <button
                 className="btn-secondary text-xs"
-                onClick={() => navigate('/insights/safety')}
+                onClick={() => navigate('/observability/insights/safety')}
               >
                 打开 Insights
               </button>
@@ -853,7 +853,7 @@ export default function TraceHome({ traceData, setTraceData, traceInfo, setTrace
               traceData={traceData}
               requestId={selectedRequestId}
               onOpenDetail={() => selectedRequestId && openRequestTrace(selectedRequestId)}
-              onOpenStandalone={() => navigate('/trace/full')}
+              onOpenStandalone={() => navigate('/observability/trace/full')}
               onHide={() => setInlineOverviewVisible(false)}
               renderImmuneStageTags={renderImmuneStageTags}
               getLiveTraceStageClasses={getLiveTraceStageClasses}

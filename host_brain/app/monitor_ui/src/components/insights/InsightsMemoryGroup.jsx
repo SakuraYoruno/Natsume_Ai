@@ -5,7 +5,7 @@ import InsightSection from './InsightSection.jsx'
 import {
   useContextCompressorStatsQuery,
   useEpisodicStoreStatsQuery,
-} from '../../queries/diagnosticQueries.js'
+} from '../../features/observability/diagnosticQueries.js'
 import {
   formatTime,
   SectionQueryMeta,
