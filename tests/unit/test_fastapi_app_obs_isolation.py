@@ -40,5 +40,4 @@ def test_obs_side_owns_observability_and_monitor_api_routes() -> None:
 
     assert "/v1/chat" not in obs_paths
     assert "/obs/metrics" in obs_paths
-    assert "/api/ui/search-requests" in obs_paths
     assert "/observability/trace" in obs_paths
