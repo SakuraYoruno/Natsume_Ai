@@ -1398,7 +1398,7 @@ def test_repeated_time_and_percent_formatters_use_shared_module() -> None:
         "features/observability/components/trace/traceLiveSurfaceModel.js",
         "features/observability/components/trace/TraceRequestDetailModel.jsx",
         "features/operations/components/canon/CanonProposalsSection.jsx",
-        "pages/ChatDebug.jsx",
+        "features/observability/components/chatDebug/ChatDebugConsoleSections.jsx",
         "pages/CodexBioOpsObservability.jsx",
         "features/operations/promptOpsModel.js",
         "pages/RuntimeMode.jsx",
@@ -2395,6 +2395,9 @@ def test_tools_page_delegates_catalog_and_execution_ui_to_execution_feature() ->
 
 def test_chat_debug_streaming_and_trace_models_are_split() -> None:
     chat_debug_page = (MONITOR_SRC / "pages" / "ChatDebug.jsx").read_text(encoding="utf-8")
+    chat_debug_sections = (
+        MONITOR_SRC / "features" / "observability" / "components" / "chatDebug" / "ChatDebugConsoleSections.jsx"
+    ).read_text(encoding="utf-8")
     chat_model = (MONITOR_SRC / "features" / "observability" / "chatDebugModel.js").read_text(encoding="utf-8")
     sse_streaming = (MONITOR_SRC / "shared" / "streaming" / "sse.js").read_text(encoding="utf-8")
 
@@ -2419,14 +2422,24 @@ def test_chat_debug_streaming_and_trace_models_are_split() -> None:
 
     assert "shared/streaming/sse.js" in chat_debug_page
     assert "features/observability/chatDebugModel.js" in chat_debug_page
+    assert "ChatDebugConsoleSections.jsx" in chat_debug_page
     assert "consumeSseBuffer(buffer)" in chat_debug_page
     assert "buildChatDebugTraceView({" in chat_debug_page
     assert "traceLoadState" in chat_debug_page
     assert "traceNodeCount" in chat_debug_page
+    assert "function ChatDebugEventRow(" in chat_debug_sections
+    assert "function ChatDebugPhaseBadge(" in chat_debug_sections
+    assert "ChatDebugMainColumn" in chat_debug_sections
+    assert "ChatTraceSidebar" in chat_debug_sections
     assert "resolveLoadState({" in chat_model
     assert "buildChatDebugTraceLoadState({" in chat_model
     assert "buildChatDebugHeroMetaItems({" in chat_model
 
+    assert "function PhaseBadge(" not in chat_debug_page
+    assert "function EventRow(" not in chat_debug_page
+    assert "getTraceNodeDisplayName" not in chat_debug_page
+    assert "formatEventPhase" not in chat_debug_page
+    assert "formatTime(" not in chat_debug_page
     assert "function parseSseBlock(" not in chat_debug_page
     assert "function consumeSseBuffer(" not in chat_debug_page
     assert "function truncateDebugText(" not in chat_debug_page
