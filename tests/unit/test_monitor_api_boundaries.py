@@ -465,6 +465,31 @@ def test_trace_observability_components_are_not_left_under_global_components() -
     assert violations == []
 
 
+def test_trace_request_detail_surface_is_feature_owned() -> None:
+    page = MONITOR_SRC / "pages" / "TraceRequestDetail.jsx"
+    surface = OBSERVABILITY_TRACE_COMPONENTS / "TraceRequestDetailSurface.jsx"
+    page_source = page.read_text(encoding="utf-8")
+    surface_source = surface.read_text(encoding="utf-8")
+
+    assert surface.exists()
+    assert "TraceRequestDetailSurface.jsx" in page_source
+    assert "export default function TraceRequestDetailSurface(" in surface_source
+    for forbidden in [
+        "PageHero",
+        "LivingPulseStrip",
+        "TraceMetricCard",
+        "TraceMiniStat",
+        "TraceSectionCard",
+        "NodeDetailPanel",
+        "StageOverviewPanel",
+        "ImmuneReplayPanel",
+        "StatusBadge",
+        "LoadingNotice",
+        "NoticeBanner",
+    ]:
+        assert forbidden not in page_source
+
+
 def test_observability_data_containers_are_not_left_under_global_components() -> None:
     legacy_dirs = [
         MONITOR_SRC / "components" / "bioOps",
