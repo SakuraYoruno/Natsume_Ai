@@ -1,1 +1,0 @@
-import{c as e,s as t}from"./httpClient-Uf73qqm8.js";import{i as n}from"./obsClient-BU7xOz_h.js";function r(r={}){return n(e(t.operations.promptBuilderStats,{},r))}export{r as t};
