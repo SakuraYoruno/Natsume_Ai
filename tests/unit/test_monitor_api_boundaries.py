@@ -986,6 +986,9 @@ def test_trace_unified_timeline_model_lives_in_trace_feature_module() -> None:
     detail_model = (OBSERVABILITY_TRACE_COMPONENTS / "TraceRequestDetailModel.jsx").read_text(encoding="utf-8")
     timeline_model = (OBSERVABILITY_TRACE_COMPONENTS / "traceUnifiedTimelineModel.js").read_text(encoding="utf-8")
     runtime_panels = (OBSERVABILITY_TRACE_COMPONENTS / "TraceRequestRuntimePanels.jsx").read_text(encoding="utf-8")
+    unified_timeline_panel = (
+        OBSERVABILITY_TRACE_COMPONENTS / "runtimePanels" / "UnifiedTimelinePanel.jsx"
+    ).read_text(encoding="utf-8")
 
     for export_name in [
         "resolveTribeEventStageId",
@@ -998,10 +1001,10 @@ def test_trace_unified_timeline_model_lives_in_trace_feature_module() -> None:
         assert export_name in timeline_model
 
     assert "from './traceUnifiedTimelineModel.js'" in detail_model
-    assert "from './traceUnifiedTimelineModel.js'" in runtime_panels
+    assert "from '../traceUnifiedTimelineModel.js'" in unified_timeline_panel
     assert "buildUnifiedTimelineItems as buildTraceUnifiedTimelineItems" in detail_model
     assert "return buildTraceUnifiedTimelineItems(nodes, tribeEvents" in detail_model
-    assert "buildUnifiedTimelineView({ items, typeFilter, stageFilter, keyword })" in runtime_panels
+    assert "buildUnifiedTimelineView({ items, typeFilter, stageFilter, keyword })" in unified_timeline_panel
     assert "stageLabel: getStableStageLabel(stageId)" in timeline_model
     assert "TRACE_TIMELINE_STAGE_ORDER.filter((stageId) => stageIds.has(stageId))" in timeline_model
     assert "function resolveTribeEventStageId(" not in detail_model
@@ -1098,6 +1101,9 @@ def test_trace_request_runtime_model_lives_in_trace_feature_module() -> None:
 
 def test_trace_request_runtime_panel_model_lives_in_trace_feature_module() -> None:
     runtime_panels = (OBSERVABILITY_TRACE_COMPONENTS / "TraceRequestRuntimePanels.jsx").read_text(encoding="utf-8")
+    runtime_panel_dir = OBSERVABILITY_TRACE_COMPONENTS / "runtimePanels"
+    subgraph_flow_panel = (runtime_panel_dir / "SubgraphMiniFlow.jsx").read_text(encoding="utf-8")
+    unified_timeline_panel = (runtime_panel_dir / "UnifiedTimelinePanel.jsx").read_text(encoding="utf-8")
     panel_model = (OBSERVABILITY_TRACE_COMPONENTS / "traceRequestRuntimePanelModel.js").read_text(encoding="utf-8")
 
     for export_name in [
@@ -1110,6 +1116,11 @@ def test_trace_request_runtime_panel_model_lives_in_trace_feature_module() -> No
 
     assert "from './traceRequestRuntimePanelModel.js'" in runtime_panels
     assert "export { buildDeltaEntries, buildSubgraphFlow, dedupeStreamEvents, mergeDeltaEntries }" in runtime_panels
+    assert "export { default as StageOverviewPanel } from './runtimePanels/StageOverviewPanel.jsx'" in runtime_panels
+    assert "export { default as UnifiedTimelinePanel } from './runtimePanels/UnifiedTimelinePanel.jsx'" in runtime_panels
+    assert "ReactFlow" in subgraph_flow_panel
+    assert "@xyflow/react/dist/style.css" in subgraph_flow_panel
+    assert "buildUnifiedTimelineView({ items, typeFilter, stageFilter, keyword })" in unified_timeline_panel
     assert "MarkerType } from '@xyflow/react'" in panel_model
     assert "applyDagreLayout } from '../../../../utils/traceLayout.js'" in panel_model
     assert "getTraceNodeDisplayName } from './traceNodeText.js'" in panel_model
@@ -1327,6 +1338,10 @@ def test_trace_live_history_and_runtime_panels_render_dynamic_values_safely() ->
     history_panel = (OBSERVABILITY_TRACE_COMPONENTS / "TraceHistoryPanel.jsx").read_text(encoding="utf-8")
     advanced_views = (OBSERVABILITY_TRACE_COMPONENTS / "TraceAdvancedViews.jsx").read_text(encoding="utf-8")
     runtime_panels = (OBSERVABILITY_TRACE_COMPONENTS / "TraceRequestRuntimePanels.jsx").read_text(encoding="utf-8")
+    runtime_panel_sources = "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in (OBSERVABILITY_TRACE_COMPONENTS / "runtimePanels").glob("*.jsx")
+    )
 
     assert trace_surfaces.count("<RenderValue value={hint}") >= 3
     assert "<RenderValue value={caption}" in trace_surfaces
@@ -1335,9 +1350,9 @@ def test_trace_live_history_and_runtime_panels_render_dynamic_values_safely() ->
     assert "<RenderValue value={code} />" in live_surfaces
     assert "<RenderValue value={item.input_preview || item.request_id} />" in history_panel
     assert advanced_views.count("<RenderValue value=") >= 4
-    assert runtime_panels.count("<RenderValue value=") >= 8
-    assert "-reason-${code}" not in runtime_panels
-    assert "-rule-${rule}" not in runtime_panels
+    assert runtime_panel_sources.count("<RenderValue value=") >= 8
+    assert "-reason-${code}" not in runtime_panel_sources
+    assert "-rule-${rule}" not in runtime_panel_sources
 
 
 def test_cross_feature_runtime_observability_fetchers_live_in_shared_api() -> None:
