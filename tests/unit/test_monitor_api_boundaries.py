@@ -1453,7 +1453,8 @@ def test_repeated_time_and_percent_formatters_use_shared_module() -> None:
         "features/observability/components/trace/traceLiveSurfaceModel.js",
         "features/observability/components/trace/TraceRequestDetailModel.jsx",
         "features/operations/components/canon/CanonProposalsSection.jsx",
-        "features/observability/components/chatDebug/ChatDebugConsoleSections.jsx",
+        "features/observability/components/chatDebug/ChatDebugEventStream.jsx",
+        "features/observability/components/chatDebug/ChatTraceSidebar.jsx",
         "pages/CodexBioOpsObservability.jsx",
         "features/operations/promptOpsModel.js",
         "pages/RuntimeMode.jsx",
@@ -2453,6 +2454,15 @@ def test_chat_debug_streaming_and_trace_models_are_split() -> None:
     chat_debug_sections = (
         MONITOR_SRC / "features" / "observability" / "components" / "chatDebug" / "ChatDebugConsoleSections.jsx"
     ).read_text(encoding="utf-8")
+    chat_debug_main = (
+        MONITOR_SRC / "features" / "observability" / "components" / "chatDebug" / "ChatDebugMainColumn.jsx"
+    ).read_text(encoding="utf-8")
+    chat_trace_sidebar = (
+        MONITOR_SRC / "features" / "observability" / "components" / "chatDebug" / "ChatTraceSidebar.jsx"
+    ).read_text(encoding="utf-8")
+    chat_event_stream = (
+        MONITOR_SRC / "features" / "observability" / "components" / "chatDebug" / "ChatDebugEventStream.jsx"
+    ).read_text(encoding="utf-8")
     chat_model = (MONITOR_SRC / "features" / "observability" / "chatDebugModel.js").read_text(encoding="utf-8")
     sse_streaming = (MONITOR_SRC / "shared" / "streaming" / "sse.js").read_text(encoding="utf-8")
 
@@ -2482,10 +2492,17 @@ def test_chat_debug_streaming_and_trace_models_are_split() -> None:
     assert "buildChatDebugTraceView({" in chat_debug_page
     assert "traceLoadState" in chat_debug_page
     assert "traceNodeCount" in chat_debug_page
-    assert "function ChatDebugEventRow(" in chat_debug_sections
-    assert "function ChatDebugPhaseBadge(" in chat_debug_sections
+    assert "function ChatDebugEventRow(" in chat_event_stream
+    assert "function ChatDebugPhaseBadge(" in chat_event_stream
     assert "ChatDebugMainColumn" in chat_debug_sections
     assert "ChatTraceSidebar" in chat_debug_sections
+    assert "ChatDebugHeader" in chat_debug_main
+    assert "ChatTranscriptPanel" in chat_debug_main
+    assert "ChatInputBar" in chat_debug_main
+    assert "ChatDebugEventStream" in chat_trace_sidebar
+    assert "getTraceNodeDisplayName" in chat_trace_sidebar
+    assert "formatEventPhase" in chat_trace_sidebar
+    assert "formatTime(" in chat_trace_sidebar
     assert "resolveLoadState({" in chat_model
     assert "buildChatDebugTraceLoadState({" in chat_model
     assert "buildChatDebugHeroMetaItems({" in chat_model
@@ -2499,6 +2516,11 @@ def test_chat_debug_streaming_and_trace_models_are_split() -> None:
     assert "function consumeSseBuffer(" not in chat_debug_page
     assert "function truncateDebugText(" not in chat_debug_page
     assert "resolveLoadState" not in chat_debug_page
+    assert "function ChatDebugEventRow(" not in chat_debug_sections
+    assert "function ChatDebugPhaseBadge(" not in chat_debug_sections
+    assert "getTraceNodeDisplayName" not in chat_debug_sections
+    assert "formatEventPhase" not in chat_debug_sections
+    assert "formatTime(" not in chat_debug_sections
     assert "getChatDebugChainEvents(sseEvents)" not in chat_debug_page
     assert "getLatestTraceNode(traceSnapshot)" not in chat_debug_page
     assert "getTraceIssueCount(traceSnapshot)" not in chat_debug_page
