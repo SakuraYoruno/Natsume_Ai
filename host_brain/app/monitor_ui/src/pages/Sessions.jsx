@@ -3,10 +3,12 @@ import { useNavigate } from 'react-router-dom'
 import toast from 'react-hot-toast'
 import { exportSessionsCsv } from '../features/observability/sessionsApi.js'
 import SessionsConsoleSurface from '../features/observability/components/sessions/SessionsConsoleSurface.jsx'
+import DigitalLifeRuntimeCard from '../features/life/components/DigitalLifeRuntimeCard.jsx'
 import useDigitalLifeRuntimeSignals from '../hooks/useDigitalLifeRuntimeSignals.js'
 import { useSessionsListQuery } from '../features/observability/sessionsQueries.js'
 import {
   SESSIONS_PAGE_SIZE,
+  buildSessionCardView,
   buildSessionTracePath,
   buildSessionsExportParams,
   buildSessionsQueryView,
@@ -116,6 +118,21 @@ export default function Sessions() {
     setPage(1)
   }, [])
 
+  const sampleMetaView = useMemo(() => ({
+    loadState: sampleMeta.loadState,
+    windowMinutes: sampleMeta.windowMinutes,
+    sampleSize: sampleMeta.sampleSize,
+    sampleLabel: sampleMeta.sampleLabel,
+    updatedAt: sampleMeta.updatedAt,
+    source: sampleMeta.source,
+    definition: sampleMeta.definition,
+  }), [sampleMeta])
+
+  const sessionCards = useMemo(
+    () => sessions.map((item) => ({ item, view: buildSessionCardView(item) })),
+    [sessions]
+  )
+
   const openSessionTrace = useCallback((requestId) => {
     if (!requestId) return
     setSelectedRequestId(requestId)
@@ -131,14 +148,14 @@ export default function Sessions() {
       heroTitle={heroTitle}
       heroDescription={heroDescription}
       heroMetaItems={heroMetaItems}
-      sampleMeta={sampleMeta}
+      sampleMeta={sampleMetaView}
       pulseNodes={pulseNodes}
       listError={listError}
       suppressedCount={suppressedCount}
       showNoSampleNotice={showNoSampleNotice}
-      runtimeSnapshot={runtimeSnapshot}
-      promptStats={promptStats}
+      runtimeCard={<DigitalLifeRuntimeCard runtimeSnapshot={runtimeSnapshot} promptStats={promptStats} compact />}
       sessions={sessions}
+      sessionCards={sessionCards}
       summary={summary}
       keyword={keyword}
       status={status}

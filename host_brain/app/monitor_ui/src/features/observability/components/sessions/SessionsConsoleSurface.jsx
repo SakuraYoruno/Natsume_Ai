@@ -1,6 +1,5 @@
 import React from 'react'
 import { Clock3, Download, ExternalLink, RefreshCw, Search } from 'lucide-react'
-import DigitalLifeRuntimeCard from '../../../life/components/DigitalLifeRuntimeCard.jsx'
 import EmptyStateCard from '../../../../shared/ui/EmptyStateCard.jsx'
 import LivingPulseStrip from '../../../../shared/ui/LivingPulseStrip.jsx'
 import MetricCard from '../../../../shared/ui/MetricCard.jsx'
@@ -12,7 +11,6 @@ import TimeWindowSelect from '../../../../shared/ui/TimeWindowSelect.jsx'
 import {
   SESSIONS_PAGE_SIZE,
   SESSIONS_WINDOW_OPTIONS,
-  buildSessionCardView,
   getSessionsWindowLabel,
 } from '../../sessionsModel.js'
 import { DASH } from '../../../../utils/digitalLife.js'
@@ -41,9 +39,7 @@ function FlowSection({ title, hint, children }) {
   )
 }
 
-function SessionCard({ item, onOpen }) {
-  const view = buildSessionCardView(item)
-
+function SessionCard({ item, view, onOpen }) {
   return (
     <button
       className={`group w-full rounded-2xl border ${view.tone.border} ${view.tone.bg} p-4 text-left shadow-sm transition duration-200 hover:-translate-y-0.5 hover:shadow-md`}
@@ -229,6 +225,7 @@ function SessionsStreamSection({
   listError,
   refreshing,
   sessions,
+  sessionCards,
   onOpenSession,
 }) {
   return (
@@ -243,10 +240,10 @@ function SessionsStreamSection({
         />
       ) : null}
 
-      {!loading && !listError && sessions.length > 0 ? (
+      {!loading && !listError && sessionCards.length > 0 ? (
         <div className="grid gap-3 xl:grid-cols-2">
-          {sessions.map((item) => (
-            <SessionCard key={item.request_id} item={item} onOpen={onOpenSession} />
+          {sessionCards.map(({ item, view }) => (
+            <SessionCard key={item.request_id} item={item} view={view} onOpen={onOpenSession} />
           ))}
         </div>
       ) : null}
@@ -294,9 +291,9 @@ export default function SessionsConsoleSurface({
   listError,
   suppressedCount,
   showNoSampleNotice,
-  runtimeSnapshot,
-  promptStats,
+  runtimeCard,
   sessions,
+  sessionCards,
   summary,
   keyword,
   status,
@@ -359,7 +356,7 @@ export default function SessionsConsoleSurface({
         showNoSampleNotice={showNoSampleNotice}
       />
 
-      <DigitalLifeRuntimeCard runtimeSnapshot={runtimeSnapshot} promptStats={promptStats} compact />
+      {runtimeCard}
 
       <SessionsVitalsSection sessions={sessions} summary={summary} />
 
@@ -379,6 +376,7 @@ export default function SessionsConsoleSurface({
         listError={listError}
         refreshing={refreshing}
         sessions={sessions}
+        sessionCards={sessionCards}
         onOpenSession={onOpenSession}
       />
 
