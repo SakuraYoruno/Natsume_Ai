@@ -3229,6 +3229,10 @@ def test_pentest_run_detail_model_lives_in_security_feature() -> None:
     run_detail_page = (MONITOR_SRC / "pages" / "SecurityPentestRunDetail.jsx").read_text(encoding="utf-8")
     run_detail_surface = (MONITOR_SRC / "features" / "security" / "components" / "SecurityPentestRunDetailSurface.jsx").read_text(encoding="utf-8")
     run_detail_model = (MONITOR_SRC / "features" / "security" / "pentestRunDetailModel.js").read_text(encoding="utf-8")
+    run_detail_components = MONITOR_SRC / "features" / "security" / "components" / "pentestRunDetail"
+    attack_graph_panel = (run_detail_components / "AttackGraphPanel.jsx").read_text(encoding="utf-8")
+    live_timeline_section = (run_detail_components / "LiveTimelineSection.jsx").read_text(encoding="utf-8")
+    approval_rail_section = (run_detail_components / "ApprovalRailSection.jsx").read_text(encoding="utf-8")
 
     for export_name in [
         "normalizePentestEvent",
@@ -3242,13 +3246,16 @@ def test_pentest_run_detail_model_lives_in_security_feature() -> None:
         assert f"export function {export_name}(" in run_detail_model
 
     assert "features/security/pentestRunDetailModel.js" in run_detail_page
-    assert "buildPentestAttackGraph(run)" in run_detail_surface
+    assert "buildPentestAttackGraph(run)" in attack_graph_panel
     assert "buildPentestApprovalRailView(run, environment)" in run_detail_page
     assert "buildPentestRunHeroMetaItems(run, loading)" in run_detail_page
     assert "mergeRunWithExistingEvents(runData, previousRun)" in run_detail_page
     assert "mergePentestEvents(previousRun?.events || [], [normalized])" in run_detail_page
     assert "normalizePentestEvent(event)" in run_detail_page
-    assert "pentestEventKey(event)" in run_detail_surface
+    assert "pentestEventKey(event)" in live_timeline_section
+    assert "ApprovalRailSection" in run_detail_surface
+    assert "AttackGraphPanel" in run_detail_surface
+    assert "LiveTimelineSection" in run_detail_surface
 
     assert "function normalizePentestEvent(" not in run_detail_page
     assert "function pentestEventKey(" not in run_detail_page
@@ -3256,8 +3263,11 @@ def test_pentest_run_detail_model_lives_in_security_feature() -> None:
     assert "function mergeRunWithExistingEvents(" not in run_detail_page
     assert "ScopeGuard" not in run_detail_page
     assert "const openSideEffectSteps" not in run_detail_page
+    assert "const openSideEffectSteps" not in run_detail_surface
     assert "const approvalRecorded" not in run_detail_page
+    assert "const approvalRecorded" not in run_detail_surface
     assert "const continuationLabel = !approvalRequired" not in run_detail_page
+    assert "const continuationLabel = !approvalRequired" not in approval_rail_section
     assert "canApprove: Boolean(approvalRequired && environment?.lab_mode" in run_detail_model
     assert "canContinue: Boolean(approvalRequired && environment?.lab_mode" in run_detail_model
 
