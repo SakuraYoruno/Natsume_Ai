@@ -1,74 +1,41 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react'
+﻿import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowDown, Database, Pause, Play, RefreshCw, Search, Trash2 } from 'lucide-react'
-import DigitalLifeRuntimeCard from '../components/DigitalLifeRuntimeCard.jsx'
-import EmptyStateCard from '../components/EmptyStateCard.jsx'
-import NoticeBanner from '../components/NoticeBanner.jsx'
-import SampleMeta from '../components/obs/SampleMeta.jsx'
-import PageHero from '../components/PageHero.jsx'
+import DigitalLifeRuntimeCard from '../features/life/components/DigitalLifeRuntimeCard.jsx'
+import EmptyStateCard from '../shared/ui/EmptyStateCard.jsx'
+import NoticeBanner from '../shared/ui/NoticeBanner.jsx'
+import SampleMeta from '../shared/ui/observability/SampleMeta.jsx'
+import PageHero from '../shared/ui/PageHero.jsx'
 import useDigitalLifeRuntimeSignals from '../hooks/useDigitalLifeRuntimeSignals.js'
-import { LOAD_STATES, resolveLoadState } from '../models/loadState.js'
-import { useErrorLogBatchQuery } from '../features/observability/queries.js'
+import { useErrorLogBatchQuery } from '../features/observability/logQueries.js'
+import {
+  buildLogLineView,
+  buildLogLiveStatusLabel,
+  buildLogStreamViewModel,
+  clampLogPollingInterval,
+  filterLogEntries,
+  getLogBatchEntries,
+  mergeLogEntries,
+} from '../features/observability/logStreamModel.js'
 import useAppStore from '../store/useAppStore.js'
-import { formatAlertTitle, humanizeToken } from '../utils/digitalLife.js'
-
-function formatTime(tsMs) {
-  if (!tsMs) return ''
-  return new Date(tsMs).toLocaleTimeString('zh-CN', {
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    fractionalSecondDigits: 3,
-  })
-}
-
-const LEVEL_STYLES = {
-  ERROR: { bg: 'bg-red-50', text: 'text-red-700', badge: 'bg-red-100 text-red-700' },
-  WARNING: { bg: 'bg-orange-50', text: 'text-orange-600', badge: 'bg-orange-100 text-orange-700' },
-  INFO: { bg: '', text: 'text-gray-700', badge: 'bg-blue-100 text-blue-700' },
-  DEBUG: { bg: '', text: 'text-gray-500', badge: 'bg-gray-100 text-gray-500' },
-}
-
-function classifyLogLevel(entry) {
-  const reasonCode = String(entry?.reason_code || '').toUpperCase()
-  if (reasonCode.includes('BLOCK') || reasonCode.includes('FAIL')) return 'ERROR'
-  if (reasonCode.includes('DEGRADE') || reasonCode.includes('TIMEOUT')) return 'WARNING'
-  return 'INFO'
-}
 
 function LogLine({ entry, highlight }) {
-  const level = classifyLogLevel(entry)
-  const style = LEVEL_STYLES[level] || LEVEL_STYLES.INFO
-  const text = `[${entry.stage ? humanizeToken(entry.stage) : '—'}] ${entry.reason_code ? formatAlertTitle(entry.reason_code) : '—'} | ${entry.detail || ''}`
-
-  if (highlight) {
-    const escaped = highlight.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-    const regex = new RegExp(`(${escaped})`, 'gi')
-    const parts = text.split(regex)
-
-    return (
-      <div className={`flex gap-2 border-b border-gray-100 px-3 py-1 font-mono text-xs ${style.bg}`}>
-        <span className="w-20 shrink-0 text-gray-400">{formatTime(entry.ts_ms)}</span>
-        <span className={`shrink-0 rounded px-1.5 py-0 text-[10px] font-semibold ${style.badge}`}>{level}</span>
-        <span className={`${style.text} break-all`}>
-          {parts.map((part, index) => (
-            index % 2 === 1 ? (
-              <mark key={`${entry.ts_ms}-${index}`} className="rounded bg-yellow-200 px-0.5 text-yellow-900">
-                {part}
-              </mark>
-            ) : (
-              <React.Fragment key={`${entry.ts_ms}-${index}`}>{part}</React.Fragment>
-            )
-          ))}
-        </span>
-      </div>
-    )
-  }
+  const { level, style, timeLabel, parts } = buildLogLineView(entry, highlight)
 
   return (
     <div className={`flex gap-2 border-b border-gray-100 px-3 py-1 font-mono text-xs ${style.bg}`}>
-      <span className="w-20 shrink-0 text-gray-400">{formatTime(entry.ts_ms)}</span>
+      <span className="w-20 shrink-0 text-gray-400">{timeLabel}</span>
       <span className={`shrink-0 rounded px-1.5 py-0 text-[10px] font-semibold ${style.badge}`}>{level}</span>
-      <span className={`${style.text} break-all`}>{text}</span>
+      <span className={`${style.text} break-all`}>
+        {parts.map((part, index) => (
+          part.highlighted ? (
+            <mark key={`${entry.ts_ms}-${index}`} className="rounded bg-yellow-200 px-0.5 text-yellow-900">
+              {part.text}
+            </mark>
+          ) : (
+            <React.Fragment key={`${entry.ts_ms}-${index}`}>{part.text}</React.Fragment>
+          )
+        ))}
+      </span>
     </div>
   )
 }
@@ -102,17 +69,13 @@ export default function LogStream() {
     limit: 100,
     pollingEnabled: pollingEnabled && !paused,
     pollingTick,
-    pollingInterval: Math.min(pollingInterval, 15),
+    pollingInterval: clampLogPollingInterval(pollingInterval),
   })
 
   useEffect(() => {
-    const entries = logBatch?.recent_errors || logBatch?.errors || []
+    const entries = getLogBatchEntries(logBatch)
     if (!entries.length) return
-    setLogs((prev) => {
-      const existing = new Set(prev.map((item) => `${item.ts_ms}-${item.reason_code}-${item.stage}`))
-      const next = entries.filter((item) => !existing.has(`${item.ts_ms}-${item.reason_code}-${item.stage}`))
-      return [...prev, ...next].slice(-500)
-    })
+    setLogs((prev) => mergeLogEntries(prev, entries))
   }, [lastUpdatedAt, logBatch])
 
   useEffect(() => {
@@ -121,22 +84,23 @@ export default function LogStream() {
     }
   }, [logs, autoScroll])
 
-  const batchEntries = logBatch?.recent_errors || logBatch?.errors || []
-  const logLoadState = resolveLoadState({
-    loading: loading || refreshing,
-    error: batchError && logs.length === 0 ? new Error(batchError) : null,
-    hasData: Boolean(logBatch || logs.length > 0),
-    hasSamples: logs.length > 0 || batchEntries.length > 0,
-    available: Boolean(logBatch || logs.length > 0),
+  const filtered = useMemo(
+    () => filterLogEntries(logs, { keyword, levelFilter }),
+    [keyword, levelFilter, logs],
+  )
+  const { heroMetaItems, sampleMeta, noticeView } = buildLogStreamViewModel({
+    logBatch,
+    logs,
+    filteredCount: filtered.length,
+    batchError,
+    loading,
+    refreshing,
     stale,
+    lastUpdatedAt,
+    pollingInterval,
+    autoScroll,
+    windowMinutes: 60,
   })
-
-  const filtered = useMemo(() => logs.filter((entry) => {
-    if (keyword && !JSON.stringify(entry).toLowerCase().includes(keyword.toLowerCase())) return false
-    if (levelFilter === 'ERROR' && classifyLogLevel(entry) !== 'ERROR') return false
-    if (levelFilter === 'WARNING' && classifyLogLevel(entry) !== 'WARNING') return false
-    return true
-  }), [keyword, levelFilter, logs])
 
   return (
     <div className="space-y-6">
@@ -151,35 +115,30 @@ export default function LogStream() {
         title={paused ? '生理日志流当前已暂停' : '生理日志流正在实时更新'}
         description="支持关键词高亮、级别过滤、自动滚动和快速清空，适合盯运行时异常与神经链路抖动。"
         gradientClass="from-slate-50 via-white to-cyan-50"
-        metaItems={[
-          `当前显示：${filtered.length} 条`,
-          `缓存总量：${logs.length} 条`,
-          `拉取周期：${Math.min(pollingInterval, 15)}s`,
-          autoScroll ? '自动滚动：开启' : '自动滚动：关闭',
-        ]}
+        metaItems={heroMetaItems}
         aside={(
           <SampleMeta
             className="max-w-md"
-            loadState={logLoadState}
-            windowMinutes={60}
-            sampleSize={logs.length}
-            sampleLabel="日志"
-            updatedAt={lastUpdatedAt}
-            source="errors"
-            definition="日志流页会持续拉取最近错误批次并在页面内累积成滚动日志；暂停只会停止轮询，不会清空已收集的日志。"
+            loadState={sampleMeta.loadState}
+            windowMinutes={sampleMeta.windowMinutes}
+            sampleSize={sampleMeta.sampleSize}
+            sampleLabel={sampleMeta.sampleLabel}
+            updatedAt={sampleMeta.updatedAt}
+            source={sampleMeta.source}
+            definition={sampleMeta.definition}
           />
         )}
       />
 
       <DigitalLifeRuntimeCard runtimeSnapshot={runtimeSnapshot} promptStats={promptStats} compact />
 
-      {batchError ? (
-        <NoticeBanner variant={logs.length > 0 ? 'warning' : 'error'} title="日志批次加载异常">
-          {batchError}
+      {noticeView.batchError ? (
+        <NoticeBanner variant={noticeView.batchErrorVariant} title="日志批次加载异常">
+          {noticeView.batchError}
         </NoticeBanner>
       ) : null}
 
-      {!batchError && !loading && !refreshing && logLoadState === LOAD_STATES.NO_SAMPLE ? (
+      {noticeView.noSample ? (
         <NoticeBanner variant="info" title="当前暂无生理日志">
           系统当前还没有可观测的错误或异常日志写入。
         </NoticeBanner>
@@ -220,7 +179,7 @@ export default function LogStream() {
           <div className="flex items-center gap-4 px-1 text-xs text-gray-500">
             <span><Database size={11} className="inline" /> {filtered.length}/{logs.length} 条</span>
             <span className={paused ? 'font-medium text-orange-500' : 'text-green-500'}>
-              {paused ? '⏸ 已暂停' : `● 实时：${Math.min(pollingInterval, 15)}s`}
+              {buildLogLiveStatusLabel({ paused, pollingInterval })}
             </span>
             {keyword ? <span className="text-yellow-600">搜索: "{keyword}"</span> : null}
           </div>

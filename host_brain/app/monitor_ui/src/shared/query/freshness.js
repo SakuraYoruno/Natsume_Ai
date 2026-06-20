@@ -25,6 +25,7 @@ export const OBS_STALE_TIMES = Object.freeze({
   runtimeMode: 45_000,
   wechat: 60_000,
   skillsHub: 90_000,
+  securityImmune: 60_000,
   sessions: 45_000,
   errorLogs: 15_000,
   promptConfig: 60_000,

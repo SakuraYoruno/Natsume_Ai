@@ -1,5 +1,6 @@
 import { ENDPOINT_REGISTRY, endpointPath } from '../../shared/api/endpointRegistry.js'
-import { httpGet, httpPost, httpText } from '../../shared/api/httpClient.js'
+import { endpointGet, endpointPost } from '../../shared/api/endpointClient.js'
+import { httpText } from '../../shared/api/httpClient.js'
 
 const { pentest, securityImmune } = ENDPOINT_REGISTRY
 
@@ -21,28 +22,30 @@ export const PENTEST_RUN_EVENT_TYPES = Object.freeze([
   'chain_advanced',
   'report_ready',
   'side_effect_approved',
+  'side_effect_continue_start',
+  'side_effect_continued',
   'run_canceled',
   'run_failed',
 ])
 
 export function fetchPentestCapabilities() {
-  return httpGet(pentest.capabilities.path)
+  return endpointGet(pentest.capabilities)
 }
 
 export function fetchPentestEnvironment() {
-  return httpGet(pentest.environment.path)
+  return endpointGet(pentest.environment)
 }
 
 export function createPentestRun(payload) {
-  return httpPost(pentest.runs.path, payload)
+  return endpointPost(pentest.runs, payload)
 }
 
 export function fetchPentestRuns(limit = 20) {
-  return httpGet(endpointPath(pentest.runs, {}, { limit }))
+  return endpointGet(pentest.runs, { limit })
 }
 
 export function fetchPentestRun(runId) {
-  return httpGet(endpointPath(pentest.run, { runId }))
+  return endpointGet(pentest.run, {}, { runId })
 }
 
 export function pentestRunEventsPath(runId) {
@@ -93,30 +96,34 @@ export function subscribePentestRunEvents(runId, { onOpen, onEvent, onError } = 
 
 export function fetchPentestReport(runId, format = 'markdown') {
   return format === 'json'
-    ? httpGet(endpointPath(pentest.report, { runId }, { format }))
+    ? endpointGet(pentest.report, { format }, { runId })
     : httpText(endpointPath(pentest.report, { runId }, { format }))
 }
 
 export function cancelPentestRun(runId) {
-  return httpPost(endpointPath(pentest.cancel, { runId }), {})
+  return endpointPost(pentest.cancel, {}, { runId })
 }
 
 export function approvePentestSideEffect(runId) {
-  return httpPost(endpointPath(pentest.approveSideEffect, { runId }), {})
+  return endpointPost(pentest.approveSideEffect, {}, { runId })
+}
+
+export function continuePentestSideEffect(runId, payload = {}) {
+  return endpointPost(pentest.continueSideEffect, payload, { runId })
 }
 
 export function fetchSecurityRuntime() {
-  return httpGet(securityImmune.runtime.path)
+  return endpointGet(securityImmune.runtime)
 }
 
 export function fetchSecurityAssets() {
-  return httpGet(securityImmune.assets.path)
+  return endpointGet(securityImmune.assets)
 }
 
 export function fetchSecurityIncidents(minRisk = 'low') {
-  return httpGet(endpointPath(securityImmune.incidents, {}, { min_risk: minRisk }))
+  return endpointGet(securityImmune.incidents, { min_risk: minRisk })
 }
 
 export function runSecurityHuntOnce(reason = 'manual_web_trigger') {
-  return httpPost(securityImmune.huntRunOnce.path, { reason }, { timeoutMs: 15000 })
+  return endpointPost(securityImmune.huntRunOnce, { reason }, {}, {}, { timeoutMs: 15000 })
 }

@@ -1,12 +1,12 @@
 import { ENDPOINT_REGISTRY } from '../../shared/api/endpointRegistry.js'
-import { httpGet, httpPost } from '../../shared/api/httpClient.js'
+import { endpointGet, endpointPost } from '../../shared/api/endpointClient.js'
 
 const { integrations } = ENDPOINT_REGISTRY
 
 export function fetchBodyIntegrationBundle() {
   return Promise.allSettled([
-    httpGet(integrations.mateCapabilities.path),
-    httpGet(integrations.mateHealth.path),
+    endpointGet(integrations.mateCapabilities),
+    endpointGet(integrations.mateHealth),
   ]).then((results) => ({
     capabilities: unwrap(results[0]),
     health: unwrap(results[1]),
@@ -18,11 +18,11 @@ export function fetchBodyIntegrationBundle() {
 }
 
 export function sendMateEngineAction(payload) {
-  return httpPost(integrations.mateAction.path, payload)
+  return endpointPost(integrations.mateAction, payload)
 }
 
 export function sendMateEngineSay(payload) {
-  return httpPost(integrations.mateSay.path, payload)
+  return endpointPost(integrations.mateSay, payload)
 }
 
 function unwrap(result) {

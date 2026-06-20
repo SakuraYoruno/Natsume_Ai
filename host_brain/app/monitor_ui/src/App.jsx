@@ -1,8 +1,8 @@
-import React, { Suspense } from 'react'
+﻿import React, { Suspense } from 'react'
 import { HashRouter, Navigate, Route, Routes, useParams } from 'react-router-dom'
 import { Toaster } from 'react-hot-toast'
-import ErrorBoundary from './components/ErrorBoundary.jsx'
-import Layout from './components/Layout.jsx'
+import ErrorBoundary from './shared/ui/ErrorBoundary.jsx'
+import Layout from './app/shell/Layout.jsx'
 import { legacyRedirects, routeManifest } from './app/routeManifest.jsx'
 
 function RouteLoading() {

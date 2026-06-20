@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react'
+﻿import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import {
   AlertTriangle,
@@ -11,22 +11,25 @@ import {
   Wrench,
   XCircle,
 } from 'lucide-react'
-import DigitalLifeRuntimeCard from '../components/DigitalLifeRuntimeCard.jsx'
-import EmptyStateCard from '../components/EmptyStateCard.jsx'
-import OrganSystemOverview from '../components/lifeBody/OrganSystemOverview.jsx'
-import MetricCard from '../components/MetricCard.jsx'
-import NoticeBanner from '../components/NoticeBanner.jsx'
-import SampleMeta from '../components/obs/SampleMeta.jsx'
-import PageHero from '../components/PageHero.jsx'
-import TimeWindowSelect from '../components/TimeWindowSelect.jsx'
+import DigitalLifeRuntimeCard from '../features/life/components/DigitalLifeRuntimeCard.jsx'
+import EmptyStateCard from '../shared/ui/EmptyStateCard.jsx'
+import OrganSystemOverview from '../features/life/components/lifeBody/OrganSystemOverview.jsx'
+import MetricCard from '../shared/ui/MetricCard.jsx'
+import NoticeBanner from '../shared/ui/NoticeBanner.jsx'
+import SampleMeta from '../shared/ui/observability/SampleMeta.jsx'
+import PageHero from '../shared/ui/PageHero.jsx'
+import TimeWindowSelect from '../shared/ui/TimeWindowSelect.jsx'
 import useDigitalLifeRuntimeSignals from '../hooks/useDigitalLifeRuntimeSignals.js'
-import { createRequestRefs } from '../models/observabilityRefs.js'
-import { buildImmuneOrganSystemModel } from '../models/organSystemModel.js'
-import { resolveLoadState } from '../models/loadState.js'
-import { useAlertsCenterQuery } from '../features/observability/queries.js'
+import { useAlertsCenterQuery } from '../features/observability/alertsQueries.js'
 import useAppStore from '../store/useAppStore.js'
-import { classNames, compactText, formatAlertTitle, formatDateTime, formatServiceStatus, humanizeToken } from '../utils/digitalLife.js'
-import { buildDigitalLifeAlerts } from '../utils/runtimeHealth.js'
+import {
+  buildAlertCardView,
+  buildAlertsCenterView,
+  buildAlertsFilterSearch,
+  getAlertsFilterCodeFromSearch,
+  getAlertReasonBreakdownBarWidth,
+} from '../features/observability/alertsModel.js'
+import { classNames, formatAlertTitle, formatDateTime, humanizeToken } from '../utils/digitalLife.js'
 
 const WINDOW_OPTIONS = [
   { label: '1h', value: 60 },
@@ -35,92 +38,36 @@ const WINDOW_OPTIONS = [
   { label: '7d', value: 10080 },
 ]
 
-const SEVERITY_RANK = {
-  critical: 0,
-  warning: 1,
-  info: 2,
-  resolved: 3,
-}
-
-const FORGE_REASON_CODES = new Set([
-  'FORGE_RUNTIME_CRITICAL_PROPOSALS',
-  'FORGE_RUNTIME_UNHEALTHY_PROPOSALS',
-])
-
-const SEVERITY_META = {
-  critical: {
-    icon: XCircle,
-    badge: 'text-red-700 bg-red-50 border-red-200',
-    card: 'border-red-200 bg-red-50/70',
-    accent: 'bg-red-500',
-    label: '严重',
-  },
-  warning: {
-    icon: AlertTriangle,
-    badge: 'text-orange-700 bg-orange-50 border-orange-200',
-    card: 'border-orange-200 bg-orange-50/70',
-    accent: 'bg-orange-400',
-    label: '警告',
-  },
-  info: {
-    icon: Bell,
-    badge: 'text-blue-700 bg-blue-50 border-blue-200',
-    card: 'border-blue-200 bg-blue-50/70',
-    accent: 'bg-blue-400',
-    label: '提示',
-  },
-  resolved: {
-    icon: BellOff,
-    badge: 'text-green-700 bg-green-50 border-green-200',
-    card: 'border-green-200 bg-green-50/70',
-    accent: 'bg-green-500',
-    label: '已恢复',
-  },
-}
-
-function normalizeAlertSeverity(alert) {
-  if (alert?.severity) return String(alert.severity).toLowerCase()
-  const reasonCode = String(alert?.reason_code || '').toUpperCase()
-  if (reasonCode.includes('TIMEOUT') || reasonCode.includes('BLOCK') || reasonCode.includes('DOWN')) {
-    return 'critical'
-  }
-  return 'warning'
-}
-
-function buildAlertTitle(alert) {
-  return (
-    alert?.title
-    || (alert?.reason_code ? formatAlertTitle(alert.reason_code) : '')
-    || (alert?.event_type ? humanizeToken(alert.event_type) : '')
-    || '未分类告警'
-  )
-}
-
-function buildAlertDetail(alert) {
-  if (alert?.detail) return compactText(alert.detail, 180)
-  if (alert?.stage) return `阶段：${humanizeToken(alert.stage)}`
-  return '暂无更多细节。'
+const SEVERITY_ICONS = {
+  critical: XCircle,
+  warning: AlertTriangle,
+  info: Bell,
+  resolved: BellOff,
 }
 
 function AlertCard({ alert }) {
-  const severity = normalizeAlertSeverity(alert)
-  const meta = SEVERITY_META[severity] || SEVERITY_META.info
-  const Icon = meta.icon
-  const title = buildAlertTitle(alert)
-  const detail = buildAlertDetail(alert)
+  const {
+    severity,
+    badgeClass,
+    cardClass,
+    severityLabel,
+    title,
+    detail,
+  } = buildAlertCardView(alert)
+  const Icon = SEVERITY_ICONS[severity] || SEVERITY_ICONS.info
 
   return (
-    <div className={classNames('card border p-4 transition-colors', meta.card)}>
+    <div className={classNames('card border p-4 transition-colors', cardClass)}>
       <div className="flex items-start gap-3">
-        <div className={classNames('mt-0.5 rounded-xl border p-2', meta.badge)}>
+        <div className={classNames('mt-0.5 rounded-xl border p-2', badgeClass)}>
           <Icon size={15} />
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex min-w-0 items-center gap-2">
               <span className="truncate text-sm font-semibold text-gray-800">{title}</span>
-              <span className={classNames('rounded-full border px-2 py-0.5 text-[11px] font-medium', meta.badge)}>
-                {meta.label}
+              <span className={classNames('rounded-full border px-2 py-0.5 text-[11px] font-medium', badgeClass)}>
+                {severityLabel}
               </span>
             </div>
             <span className="shrink-0 text-xs text-gray-400">{formatDateTime(alert.ts_ms)}</span>
@@ -169,18 +116,10 @@ export default function Alerts() {
   const applyFilterCode = useCallback((nextCode) => {
     const next = String(nextCode || '').trim()
     setFilterCode(next)
-
-    const params = new URLSearchParams(location.search)
-    if (next) {
-      params.set('reason_code', next)
-    } else {
-      params.delete('reason_code')
-    }
-    const nextSearch = params.toString()
     navigate(
       {
         pathname: '/observability/alerts',
-        search: nextSearch ? `?${nextSearch}` : '',
+        search: buildAlertsFilterSearch(location.search, next),
       },
       { replace: true }
     )
@@ -214,130 +153,55 @@ export default function Alerts() {
   })
 
   useEffect(() => {
-    const params = new URLSearchParams(location.search)
-    const reasonCode = String(params.get('reason_code') || '').trim()
-    setFilterCode(reasonCode)
+    setFilterCode(getAlertsFilterCodeFromSearch(location.search))
   }, [location.search])
 
-  const runtimeAlerts = useMemo(
-    () => buildDigitalLifeAlerts(runtimeSnapshot, { promptStats, capabilityGapData }),
-    [runtimeSnapshot, promptStats, capabilityGapData]
-  )
-
-  const alerts = useMemo(
-    () => (errorRes?.recent_errors || errorRes?.errors || []).map((item) => ({
-      ...item,
-      title: item.title || (item.reason_code ? formatAlertTitle(item.reason_code) : ''),
-      severity: normalizeAlertSeverity(item),
-    })),
-    [errorRes]
-  )
-
-  const serviceAlerts = useMemo(
-    () => (healthRes?.services || [])
-      .filter((service) => ['DOWN', 'DEGRADED'].includes(String(service.status || '').toUpperCase()))
-      .map((service) => ({
-        reason_code: `SERVICE_${String(service.status || '').toUpperCase()}`,
-        title: `${service.display_name || service.service_id} ${formatServiceStatus(service.status)}`,
-        detail: compactText(
-          service.status_detail || `当前状态：${formatServiceStatus(service.status)}`,
-          180
-        ),
-        ts_ms: Date.now(),
-        severity: String(service.status || '').toUpperCase() === 'DOWN' ? 'critical' : 'warning',
-        source: 'service-health',
-        to: '/observability/overview',
-      })),
-    [healthRes]
-  )
-
-  const allAlerts = useMemo(
-    () => [...runtimeAlerts, ...serviceAlerts, ...alerts].sort((left, right) => {
-      const severityDelta = (SEVERITY_RANK[normalizeAlertSeverity(left)] ?? 99)
-        - (SEVERITY_RANK[normalizeAlertSeverity(right)] ?? 99)
-      if (severityDelta !== 0) return severityDelta
-      return Number(right.ts_ms || 0) - Number(left.ts_ms || 0)
-    }),
-    [alerts, runtimeAlerts, serviceAlerts]
-  )
-
-  const reasonBreakdown = useMemo(() => {
-    const counter = new Map()
-    allAlerts.forEach((item) => {
-      const key = String(item.reason_code || 'UNKNOWN')
-      counter.set(key, (counter.get(key) || 0) + 1)
-    })
-    return Array.from(counter.entries())
-      .sort((left, right) => right[1] - left[1])
-      .slice(0, 8)
-  }, [allAlerts])
-
-  const filteredAlerts = useMemo(() => {
-    if (!filterCode) return allAlerts
-    return allAlerts.filter((item) => String(item.reason_code || '').toLowerCase() === filterCode.toLowerCase())
-  }, [allAlerts, filterCode])
-
-  const criticalCount = filteredAlerts.filter((item) => normalizeAlertSeverity(item) === 'critical').length
-  const warningCount = filteredAlerts.filter((item) => normalizeAlertSeverity(item) === 'warning').length
-  const infoCount = filteredAlerts.filter((item) => normalizeAlertSeverity(item) === 'info').length
-  const isForgeRiskFiltered = FORGE_REASON_CODES.has(String(filterCode || '').toUpperCase())
-  const alertsUpdatedAt = Math.max(lastUpdatedAt || 0, runtimeUpdatedAt || 0) || null
-  const topReasonLabel = reasonBreakdown[0]?.[0] ? formatAlertTitle(reasonBreakdown[0][0]) : ''
-  const representativeRefs = useMemo(
-    () => createRequestRefs(filteredAlerts.filter((item) => item?.request_id).slice(0, 2)),
-    [filteredAlerts]
-  )
-  const alertsLoadState = resolveLoadState({
-    loading: loading || refreshing,
+  const {
+    serviceAlerts,
+    allAlerts,
+    reasonBreakdown,
+    filteredAlerts,
+    criticalCount,
+    warningCount,
+    infoCount,
+    isForgeRiskFiltered,
+    immuneOrganModel,
+    heroContent,
+    heroMetaItems,
+    sampleMeta,
+  } = useMemo(() => buildAlertsCenterView({
+    runtimeSnapshot,
+    promptStats,
+    capabilityGapData,
+    errorRes,
+    healthRes,
+    loading,
+    refreshing,
     error,
-    hasData: Boolean(errorRes || healthRes || capabilityGapData || runtimeSnapshot),
-    hasSamples: allAlerts.length > 0,
-    available: true,
+    lastUpdatedAt,
+    runtimeUpdatedAt,
     stale,
-  })
-  const immuneOrganModel = useMemo(() => buildImmuneOrganSystemModel({
-    loadState: alertsLoadState,
-    updatedAt: alertsUpdatedAt,
-    totalAlerts: filteredAlerts.length,
-    criticalCount,
-    warningCount,
-    infoCount,
-    runtimeAlertCount: runtimeAlerts.length,
-    serviceAlertCount: serviceAlerts.length,
-    errorEventCount: alerts.length,
-    topReasonLabel,
     filterCode,
-    representativeRefs,
+    windowMinutes,
   }), [
-    alerts.length,
-    alertsLoadState,
-    alertsUpdatedAt,
-    criticalCount,
+    capabilityGapData,
+    error,
+    errorRes,
     filterCode,
-    filteredAlerts.length,
-    infoCount,
-    representativeRefs,
-    runtimeAlerts.length,
-    serviceAlerts.length,
-    topReasonLabel,
-    warningCount,
+    healthRes,
+    lastUpdatedAt,
+    loading,
+    promptStats,
+    refreshing,
+    runtimeSnapshot,
+    runtimeUpdatedAt,
+    stale,
+    windowMinutes,
   ])
 
   const handleRefresh = useCallback(async () => {
     await Promise.allSettled([refetch(), reloadRuntime()])
   }, [refetch, reloadRuntime])
-
-  const heroTitle = criticalCount > 0
-    ? `${criticalCount} 条严重告警待处理`
-    : filteredAlerts.length > 0
-      ? `当前窗口共有 ${filteredAlerts.length} 条告警`
-      : '当前窗口无告警'
-
-  const heroDescription = filterCode
-    ? `已按 ${formatAlertTitle(filterCode)} 过滤，方便集中处理同类问题。`
-    : filteredAlerts.length > 0
-      ? '已聚合数字生命体运行时告警、器官异常和错误事件，便于按严重度快速收敛。'
-      : '当前时间窗口内未发现运行时异常、器官离线或高优先级错误。'
 
   return (
     <div className="space-y-6">
@@ -358,25 +222,20 @@ export default function Alerts() {
       <PageHero
         icon={Siren}
         eyebrow="数字生命体免疫告警总览"
-        title={heroTitle}
-        description={heroDescription}
+        title={heroContent.title}
+        description={heroContent.description}
         gradientClass="from-rose-50 via-white to-orange-50"
-        metaItems={[
-          `时间窗口：${windowMinutes} 分钟`,
-          `运行时告警：${runtimeAlerts.length}`,
-          `器官异常：${serviceAlerts.length}`,
-          `错误事件：${alerts.length}`,
-        ]}
+        metaItems={heroMetaItems}
         aside={(
           <SampleMeta
             className="max-w-md"
-            loadState={alertsLoadState}
-            windowMinutes={windowMinutes}
-            sampleSize={allAlerts.length}
-            sampleLabel="告警项"
-            updatedAt={alertsUpdatedAt}
-            source="runtime + errors + services + capability gap"
-            definition="告警中心把运行态、器官健康和错误事件合并成同一套告警流，便于按 reason_code 和严重度集中处理。"
+            loadState={sampleMeta.loadState}
+            windowMinutes={sampleMeta.windowMinutes}
+            sampleSize={sampleMeta.sampleSize}
+            sampleLabel={sampleMeta.sampleLabel}
+            updatedAt={sampleMeta.updatedAt}
+            source={sampleMeta.source}
+            definition={sampleMeta.definition}
           />
         )}
       />
@@ -443,7 +302,7 @@ export default function Alerts() {
                     <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-white">
                       <div
                         className="h-full rounded-full bg-primary"
-                        style={{ width: `${Math.min(100, (count / Math.max(allAlerts.length, 1)) * 100)}%` }}
+                        style={{ width: getAlertReasonBreakdownBarWidth(count, allAlerts.length) }}
                       />
                     </div>
                     <div className="mt-2 truncate font-mono text-[11px] text-gray-400">{code}</div>

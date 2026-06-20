@@ -16,7 +16,7 @@ import {
   fetchSemanticRecallStats,
   fetchStateArbiterStats,
   fetchUIAssertionStats,
-} from './api.js'
+} from './diagnosticsApi.js'
 import { OBS_STALE_TIMES } from '../../shared/query/freshness.js'
 import { OBS_QUERY_KEYS } from '../../shared/query/queryKeys.js'
 import useObservabilityQuery from '../../shared/query/useObservabilityQuery.js'

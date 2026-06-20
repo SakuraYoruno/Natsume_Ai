@@ -11,16 +11,20 @@ import {
   User,
   Zap,
 } from 'lucide-react'
-import DigitalLifeRuntimeCard from '../components/DigitalLifeRuntimeCard.jsx'
-import EmptyStateCard from '../components/EmptyStateCard.jsx'
-import NoticeBanner from '../components/NoticeBanner.jsx'
-import PageHero from '../components/PageHero.jsx'
-import InlineQueryMeta from '../components/obs/InlineQueryMeta.jsx'
-import { getTraceNodeDisplayName } from '../components/trace/traceNodeText.js'
-import { sendChatDebugStream } from '../features/observability/api.js'
+import DigitalLifeRuntimeCard from '../features/life/components/DigitalLifeRuntimeCard.jsx'
+import EmptyStateCard from '../shared/ui/EmptyStateCard.jsx'
+import NoticeBanner from '../shared/ui/NoticeBanner.jsx'
+import PageHero from '../shared/ui/PageHero.jsx'
+import InlineQueryMeta from '../shared/ui/observability/InlineQueryMeta.jsx'
+import { getTraceNodeDisplayName } from '../features/observability/components/trace/traceNodeText.js'
+import { sendChatDebugStream } from '../features/observability/chatDebugApi.js'
+import {
+  buildChatDebugTraceView,
+} from '../features/observability/chatDebugModel.js'
 import useDigitalLifeRuntimeSignals from '../hooks/useDigitalLifeRuntimeSignals.js'
-import { resolveLoadState } from '../models/loadState.js'
 import { useTraceSnapshotQuery } from '../features/observability/traceQueries.js'
+import { formatTime } from '../shared/formatters.js'
+import { consumeSseBuffer } from '../shared/streaming/sse.js'
 import useAppStore from '../store/useAppStore.js'
 import {
   formatAlertTitle,
@@ -29,29 +33,6 @@ import {
   formatSceneType,
   humanizeToken,
 } from '../utils/digitalLife.js'
-
-function parseSseBlock(block) {
-  const data = block
-    .split('\n')
-    .filter((line) => line.startsWith('data:'))
-    .map((line) => line.slice(5).trim())
-    .join('\n')
-
-  if (!data) return null
-
-  try {
-    return JSON.parse(data)
-  } catch (_) {
-    return { raw: data }
-  }
-}
-
-function consumeSseBuffer(buffer) {
-  const chunks = buffer.split('\n\n')
-  const remainder = chunks.pop() ?? ''
-  const events = chunks.map(parseSseBlock).filter(Boolean)
-  return { events, remainder }
-}
 
 function PhaseBadge({ phase }) {
   const styles = {
@@ -70,7 +51,7 @@ function PhaseBadge({ phase }) {
 }
 
 function EventRow({ event, index }) {
-  const ts = event.ts_ms ? new Date(event.ts_ms).toLocaleTimeString('zh-CN') : `#${index + 1}`
+  const ts = formatTime(event.ts_ms, { placeholder: `#${index + 1}` })
   const phase = String(event.phase || event.event || '?').toUpperCase()
 
   return (
@@ -91,12 +72,6 @@ function EventRow({ event, index }) {
       </div>
     </div>
   )
-}
-
-function truncateDebugText(value, maxLength = 160) {
-  const normalized = String(value || '').trim().replace(/\s+/g, ' ')
-  if (!normalized) return ''
-  return normalized.length > maxLength ? `${normalized.slice(0, maxLength - 1)}…` : normalized
 }
 
 export default function ChatDebug() {
@@ -143,39 +118,38 @@ export default function ChatDebug() {
     eventsEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [sseEvents])
 
-  const chainEvents = useMemo(
-    () => sseEvents.filter((event) => event.node_id || String(event.phase || '').toUpperCase() === 'NODE'),
-    [sseEvents]
-  )
-  const latestEvent = sseEvents[sseEvents.length - 1] ?? null
-  const traceSummary = traceSnapshot?.summary ?? {}
-  const traceLatestNode = useMemo(() => {
-    const nodes = Array.isArray(traceSnapshot?.nodes) ? [...traceSnapshot.nodes] : []
-    if (nodes.length === 0) return null
-    nodes.sort((a, b) => (a?.ts_ms ?? 0) - (b?.ts_ms ?? 0))
-    return nodes[nodes.length - 1]
-  }, [traceSnapshot])
-  const traceIssueCount = useMemo(() => (
-    Array.isArray(traceSnapshot?.nodes)
-      ? traceSnapshot.nodes.filter((node) => ['DEGRADED', 'FAIL', 'FAILED', 'ERROR', 'DOWN', 'REJECT', 'REJECTED'].includes(String(node?.status || '').toUpperCase())).length
-      : 0
-  ), [traceSnapshot])
-  const traceInputPreview = truncateDebugText(traceSummary.input_text || chatHistory.filter((item) => item.role === 'user').slice(-1)[0]?.content, 180)
-  const traceOutputPreview = truncateDebugText(
-    traceSummary.output_text
-    || traceSummary.failure_event
-    || currentResponse
-    || chatHistory.filter((item) => item.role === 'assistant').slice(-1)[0]?.content,
-    180
-  )
-  const traceLoadState = resolveLoadState({
-    loading: traceLoading || traceRefreshing,
-    error: traceError,
-    hasData: Boolean(traceSnapshot),
-    hasSamples: (traceSnapshot?.node_count ?? traceSnapshot?.nodes?.length ?? 0) > 0,
-    available: Boolean(requestId),
-    stale: traceStale,
-  })
+  const {
+    chainEvents,
+    latestEvent,
+    traceLatestNode,
+    traceIssueCount,
+    traceNodeCount,
+    traceBusy,
+    traceInputPreview,
+    traceOutputPreview,
+    traceLoadState,
+    heroMetaItems,
+  } = useMemo(() => buildChatDebugTraceView({
+    sseEvents,
+    chatHistory,
+    currentResponse,
+    traceSnapshot,
+    traceError,
+    traceLoading,
+    traceRefreshing,
+    traceStale,
+    requestId,
+  }), [
+    chatHistory,
+    currentResponse,
+    requestId,
+    sseEvents,
+    traceError,
+    traceLoading,
+    traceRefreshing,
+    traceSnapshot,
+    traceStale,
+  ])
 
   useEffect(() => {
     if (requestId && !streaming) {
@@ -296,12 +270,7 @@ export default function ChatDebug() {
             title={streaming ? '当前正在流式反射调试' : '手动发起一次神经反射调试'}
             description="适合联调 SSE 事件流、回复生成、神经节点推进以及请求到 Trace 的跳转联动。"
             gradientClass="from-pink-50 via-white to-blue-50"
-            metaItems={[
-              `历史消息：${chatHistory.length}`,
-              `SSE 事件：${sseEvents.length}`,
-              traceSnapshot?.status ? `Trace：${traceSnapshot.status}` : `链路节点：${chainEvents.length}`,
-              requestId ? '已有 Request ID' : '等待新请求',
-            ]}
+            metaItems={heroMetaItems}
           />
         </div>
 
@@ -403,8 +372,8 @@ export default function ChatDebug() {
             </div>
             <div className="flex items-center gap-2">
               {requestId ? (
-                <button className="btn-secondary text-xs" onClick={() => void refetchTraceSnapshot()} disabled={traceLoading || traceRefreshing}>
-                  {traceLoading ? <Loader2 size={12} className="animate-spin" /> : '刷新 Trace'}
+                <button className="btn-secondary text-xs" onClick={() => void refetchTraceSnapshot()} disabled={traceBusy}>
+                  {traceBusy ? <Loader2 size={12} className="animate-spin" /> : '刷新 Trace'}
                 </button>
               ) : null}
               <span className="text-xs text-gray-400">{chainEvents.length} 节点事件</span>
@@ -445,7 +414,7 @@ export default function ChatDebug() {
               <div className="rounded-lg bg-gray-50 px-3 py-2">
                 <div className="text-gray-400">节点 / 事件</div>
                 <div className="mt-1 font-medium text-gray-800">
-                  {traceSnapshot?.node_count ?? chainEvents.length} / {sseEvents.length}
+                  {traceNodeCount} / {sseEvents.length}
                 </div>
               </div>
               <div className="rounded-lg bg-gray-50 px-3 py-2">
@@ -486,7 +455,7 @@ export default function ChatDebug() {
                 {latestEvent ? `${formatEventPhase(String(latestEvent.phase || latestEvent.event || '?').toUpperCase())}` : '等待事件'}
               </div>
               <div className="mt-1 text-gray-500">
-                {latestEvent ? `${latestEvent.node_id || '无节点'} · ${new Date(latestEvent.ts_ms).toLocaleTimeString('zh-CN')}` : '发起请求后会自动更新'}
+                {latestEvent ? `${latestEvent.node_id || '无节点'} · ${formatTime(latestEvent.ts_ms, { placeholder: '-' })}` : '发起请求后会自动更新'}
               </div>
             </div>
 

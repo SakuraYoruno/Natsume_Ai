@@ -1,4 +1,4 @@
-﻿import React, { useMemo, useState } from 'react'
+﻿import React, { useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
   Activity,
@@ -9,96 +9,56 @@ import {
   Smile,
   Zap,
 } from 'lucide-react'
-import EmptyStateCard from '../components/EmptyStateCard.jsx'
-import OrganSystemOverview from '../components/lifeBody/OrganSystemOverview.jsx'
-import MetricCard from '../components/MetricCard.jsx'
-import NoticeBanner from '../components/NoticeBanner.jsx'
-import SampleMeta from '../components/obs/SampleMeta.jsx'
-import PageHero from '../components/PageHero.jsx'
-import TimeWindowSelect from '../components/TimeWindowSelect.jsx'
+import EmptyStateCard from '../shared/ui/EmptyStateCard.jsx'
+import OrganSystemOverview from '../features/life/components/lifeBody/OrganSystemOverview.jsx'
+import MetricCard from '../shared/ui/MetricCard.jsx'
+import NoticeBanner from '../shared/ui/NoticeBanner.jsx'
+import SampleMeta from '../shared/ui/observability/SampleMeta.jsx'
+import PageHero from '../shared/ui/PageHero.jsx'
+import TimeWindowSelect from '../shared/ui/TimeWindowSelect.jsx'
 import useDigitalLifeRuntimeSignals from '../hooks/useDigitalLifeRuntimeSignals.js'
-import { LOAD_STATES, resolveLoadState } from '../models/loadState.js'
-import { buildLimbicOrganSystemModel } from '../models/organSystemModel.js'
-import { useEmotionOverviewQuery } from '../features/life/queries.js'
+import {
+  EMOTION_WINDOW_OPTIONS,
+  buildEmotionDashboardViewModel,
+} from '../features/life/emotionDashboardModel.js'
+import { useEmotionOverviewQuery } from '../features/life/emotionQueries.js'
 import useAppStore from '../store/useAppStore.js'
-import { formatEmotionTag, formatNumber, formatStage } from '../utils/digitalLife.js'
-import { getSuccessRateTone } from '../utils/successRate.js'
 
-const MOOD_STYLES = {
-  calm: { icon: Meh, color: 'text-blue-500', bg: 'bg-blue-50', label: '平静' },
-  steady: { icon: Meh, color: 'text-gray-500', bg: 'bg-gray-50', label: '稳定' },
-  engaged: { icon: Smile, color: 'text-green-600', bg: 'bg-green-50', label: '活跃' },
-  tired: { icon: Frown, color: 'text-orange-500', bg: 'bg-orange-50', label: '疲惫' },
-  critical: { icon: Frown, color: 'text-red-600', bg: 'bg-red-50', label: '临界' },
+const MOOD_ICONS = {
+  calm: Meh,
+  steady: Meh,
+  engaged: Smile,
+  tired: Frown,
+  critical: Frown,
 }
 
-const EMOTION_COLORS = {
-  HAPPY: '#22c55e',
-  EXCITED: '#eab308',
-  SAD: '#3b82f6',
-  SADNESS: '#3b82f6',
-  ANGRY: '#ef4444',
-  ANGER: '#ef4444',
-  NEUTRAL: '#9ca3af',
-  SURPRISED: '#a855f7',
-  SURPRISE: '#a855f7',
-  CONFUSED: '#f97316',
-  CALM: '#06b6d4',
-  LOVE: '#ec4899',
-  CURIOUS: '#8b5cf6',
-  SHY: '#f472b6',
-  BORED: '#6b7280',
-}
-
-const WINDOW_OPTIONS = [
-  { label: '1h', value: 60 },
-  { label: '6h', value: 360 },
-  { label: '24h', value: 1440 },
-  { label: '7d', value: 10080 },
-]
-
-const GATE_LABELS = {
-  open: '开放',
-  cautious: '谨慎',
-  protective: '保护',
-}
-
-function HormoneBar({ label, value, color }) {
-  const numeric = Math.max(0, Math.min(1, Number(value || 0)))
+function HormoneBar({ view }) {
   return (
     <div className="space-y-1">
       <div className="flex items-center justify-between text-xs">
-        <span className="text-gray-600">{label}</span>
-        <span className="font-mono font-semibold" style={{ color }}>{numeric.toFixed(2)}</span>
+        <span className="text-gray-600">{view.label}</span>
+        <span className="font-mono font-semibold" style={{ color: view.color }}>{view.valueLabel}</span>
       </div>
       <div className="h-1.5 overflow-hidden rounded-full bg-gray-100">
-        <div className="h-full rounded-full" style={{ width: `${(numeric * 100).toFixed(0)}%`, backgroundColor: color }} />
+        <div className="h-full rounded-full" style={{ width: view.width, backgroundColor: view.color }} />
       </div>
     </div>
   )
 }
 
-function Gauge({ label, value, color }) {
-  const numeric = Number(value || 0)
-  const percent = ((numeric + 1) / 2) * 100
-  const colorMap = {
-    'text-green-600': '#22c55e',
-    'text-blue-600': '#3b82f6',
-    'text-purple-600': '#a855f7',
-  }
-
+function Gauge({ view }) {
   return (
     <div className="space-y-1">
       <div className="flex items-center justify-between text-xs">
-        <span className="text-gray-600">{label}</span>
-        <span className={`font-mono font-bold ${color}`}>{numeric.toFixed(2)}</span>
+        <span className="text-gray-600">{view.label}</span>
+        <span className={`font-mono font-bold ${view.color}`}>{view.valueLabel}</span>
       </div>
       <div className="h-2 overflow-hidden rounded-full bg-gray-200">
         <div
           className="h-full rounded-full transition-all duration-500"
           style={{
-            width: `${percent.toFixed(0)}%`,
-            backgroundColor: colorMap[color] || '#a855f7',
+            width: view.width,
+            backgroundColor: view.backgroundColor,
           }}
         />
       </div>
@@ -142,83 +102,38 @@ export default function EmotionDashboard() {
     windowMinutes,
   })
 
-  const emotionContext = runtimeSnapshot?.emotion_context || {}
-  const selfModel = runtimeSnapshot?.self_model_snapshot || {}
-  const bondState = runtimeSnapshot?.bond_state || {}
-  const topEmotions = vtsData?.top_emotions || []
-  const endocrineState = runtimeSnapshot?.endocrine_state || emotionContext?.endocrine_state || {}
-  const emotionIntensity = Number(
-    emotionContext.emotion_intensity ?? emotionContext?.emotion_timeline_summary?.avg_intensity ?? 0
-  )
-  const bondEventCount = Number(bondState.event_count || 0)
-  const bondTemperature = Math.max(0, Math.min(1, bondEventCount / 500))
-
-  const emotionState = {
-    valence: Number(
-      emotionContext?.user_emotion_profile?.avg_valence
-        ?? emotionContext?.emotion_timeline_summary?.avg_valence
-        ?? 0
-    ),
-    arousal: Number(emotionContext?.user_emotion_profile?.avg_arousal ?? emotionIntensity ?? 0),
-    dominance: Number(selfModel?.emotional_stability ?? 0),
-    mood: String(emotionContext.mood_state || 'steady').toLowerCase(),
-    emotionTag: String(emotionContext.emotion_tag || 'NEUTRAL').toUpperCase(),
-    bondStage: String(bondState.current_stage || 'STRANGER').toUpperCase(),
-  }
-
-  const moodStyle = MOOD_STYLES[emotionState.mood] || MOOD_STYLES.steady
-  const MoodIcon = moodStyle.icon
-  const emotionTagLabel = formatEmotionTag(emotionState.emotionTag)
-  const bondStageLabel = formatStage(emotionState.bondStage)
-  const gateState = String(endocrineState?.gate_state || 'open').toLowerCase()
-  const gateLabel = GATE_LABELS[gateState] || gateState
-  const gateTone = gateState === 'protective' ? 'text-red-600' : gateState === 'cautious' ? 'text-orange-500' : 'text-green-600'
-  const emotionObservabilityData = Boolean(runtimeSnapshot || vtsData || memoryData)
-  const emotionSampleCount = Number(vtsData?.total_events ?? topEmotions.length ?? 0)
-  const emotionHasSamples = Boolean(runtimeSnapshot?.emotion_context || emotionSampleCount > 0)
-  const emotionLoadState = resolveLoadState({
-    loading: loading || refreshing || runtimeLoading,
-    error: error || runtimeError,
-    hasData: emotionObservabilityData,
-    hasSamples: emotionHasSamples,
-    available: emotionObservabilityData,
+  const {
+    emotionState,
+    moodStyle,
+    emotionTagLabel,
+    bondStageLabel,
+    gateView,
+    bondMetrics,
+    sampleCount,
+    loadState,
+    updatedAt,
+    heroView,
+    noticeView,
+    limbicOrganModel,
+    metricCards,
+    gauges,
+    hormoneBars,
+    topEmotionRows,
+    vtsStatCards,
+    memorySubsystemRows,
+  } = buildEmotionDashboardViewModel({
+    runtimeSnapshot,
+    vtsData,
+    memoryData,
+    loading,
+    refreshing,
+    runtimeLoading,
+    error,
+    runtimeError,
+    lastUpdatedAt,
+    runtimeUpdatedAt,
   })
-  const emotionUpdatedAt = Math.max(lastUpdatedAt || 0, runtimeUpdatedAt || 0) || null
-  const limbicOrganModel = useMemo(() => buildLimbicOrganSystemModel({
-    loadState: emotionLoadState,
-    updatedAt: emotionUpdatedAt,
-    moodLabel: moodStyle.label,
-    moodKey: emotionState.mood,
-    emotionTagLabel,
-    bondStageLabel,
-    relationshipTemperature: bondTemperature,
-    bondEventCount,
-    gateLabel,
-    gateState,
-    degradeRate: vtsData?.degrade_rate,
-    applyRate: vtsData?.apply_rate,
-    talkGateAllowed: vtsData?.talk_gate_allowed,
-    sampleCount: emotionSampleCount,
-    cortisolLevel: endocrineState?.cortisol_level,
-    emotionalStability: emotionHasSamples ? (100 - Number(vtsData?.degrade_rate || 0)) : null,
-  }), [
-    bondEventCount,
-    bondStageLabel,
-    bondTemperature,
-    emotionHasSamples,
-    emotionLoadState,
-    emotionSampleCount,
-    emotionState.mood,
-    emotionTagLabel,
-    emotionUpdatedAt,
-    endocrineState?.cortisol_level,
-    gateLabel,
-    gateState,
-    moodStyle.label,
-    vtsData?.apply_rate,
-    vtsData?.degrade_rate,
-    vtsData?.talk_gate_allowed,
-  ])
+  const MoodIcon = MOOD_ICONS[emotionState.mood] || MOOD_ICONS.steady
 
   return (
     <div className="space-y-6">
@@ -228,7 +143,7 @@ export default function EmotionDashboard() {
           <p className="text-sm text-gray-500">统一查看情绪三维、表情分布与关系温度。</p>
         </div>
         <div className="flex items-center gap-2">
-          <TimeWindowSelect value={windowMinutes} onChange={setWindowMinutes} options={WINDOW_OPTIONS} />
+          <TimeWindowSelect value={windowMinutes} onChange={setWindowMinutes} options={EMOTION_WINDOW_OPTIONS} />
           <button className="btn-secondary" onClick={() => refetch()} disabled={loading || refreshing}>
             <RefreshCw size={14} className={loading || refreshing ? 'animate-spin' : ''} />
             刷新
@@ -239,36 +154,32 @@ export default function EmotionDashboard() {
       <PageHero
         icon={Heart}
         eyebrow="边缘系统快照"
-        title={moodStyle.label}
-        description={`主情绪 ${emotionTagLabel} · 关系阶段 ${formatStage(emotionState.bondStage)} · 数据来自运行快照与 VTS 聚合。`}
+        title={heroView.title}
+        description={heroView.description}
         gradientClass="from-primary-50 via-white to-rose-50"
-        metaItems={[
-          `主情绪：${emotionTagLabel}`,
-          `关系温度：${(bondTemperature * 100).toFixed(0)}%`,
-          `表情样本：${topEmotions.length}`,
-        ]}
+        metaItems={heroView.metaItems}
         aside={(
           <SampleMeta
             className="max-w-md"
-            loadState={emotionLoadState}
+            loadState={loadState}
             windowMinutes={windowMinutes}
-            sampleSize={emotionSampleCount}
+            sampleSize={sampleCount}
             sampleLabel="VTS 事件"
-            updatedAt={emotionUpdatedAt}
+            updatedAt={updatedAt}
             source="runtime snapshot + /obs/vts/stats"
             definition="情绪页优先融合运行快照与 VTS 聚合；无样本时仍可保留运行态上下文，但不会把空窗误报成失败。"
           />
         )}
       />
 
-      {error ? <NoticeBanner variant="error">{error.message}</NoticeBanner> : null}
-      {!error && runtimeError ? <NoticeBanner variant="warning">{runtimeError}</NoticeBanner> : null}
-      {!error && !loading && !refreshing && !runtimeLoading && emotionLoadState === LOAD_STATES.UNAVAILABLE ? (
+      {noticeView.error ? <NoticeBanner variant="error">{noticeView.errorMessage}</NoticeBanner> : null}
+      {noticeView.runtimeWarning ? <NoticeBanner variant="warning">{noticeView.runtimeWarning}</NoticeBanner> : null}
+      {noticeView.unavailable ? (
         <NoticeBanner variant="warning">
           情绪观测数据当前暂不可用，页面会保留中性空态并等待运行快照或 VTS 聚合恢复。
         </NoticeBanner>
       ) : null}
-      {!error && !loading && !refreshing && !runtimeLoading && emotionLoadState === LOAD_STATES.NO_SAMPLE ? (
+      {noticeView.noSample ? (
         <NoticeBanner variant="info">
           当前窗口还没有足够的表情样本，页面主要展示运行快照中的情绪上下文与关系温度。
         </NoticeBanner>
@@ -277,10 +188,9 @@ export default function EmotionDashboard() {
       <OrganSystemOverview model={limbicOrganModel} />
 
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <MetricCard label="当前情绪" value={emotionTagLabel} hint={moodStyle.label} tone="text-pink-600" />
-        <MetricCard label="关系阶段" value={bondStageLabel} hint={`事件 ${bondEventCount} 次`} tone="text-purple-600" />
-        <MetricCard label="内分泌门控" value={gateLabel} hint={`cortisol ${(Number(endocrineState?.cortisol_level || 0)).toFixed(2)}`} tone={gateTone} />
-        <MetricCard label="对话放行" value={vtsData?.talk_gate_allowed ?? 0} hint={`表情降级率 ${vtsData?.degrade_rate ?? 0}%`} tone="text-blue-600" />
+        {metricCards.map((card) => (
+          <MetricCard key={card.label} label={card.label} value={card.value} hint={card.hint} tone={card.tone} />
+        ))}
       </div>
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
@@ -304,18 +214,18 @@ export default function EmotionDashboard() {
             </div>
           </div>
           <div className="space-y-3">
-            <Gauge label="效价" value={emotionState.valence} color="text-green-600" />
-            <Gauge label="唤醒" value={emotionState.arousal} color="text-blue-600" />
-            <Gauge label="稳定度" value={emotionState.dominance} color="text-purple-600" />
+            {gauges.map((gauge) => (
+              <Gauge key={gauge.label} view={gauge} />
+            ))}
           </div>
           <div className="space-y-2 border-t pt-3">
             <div className="text-xs font-medium text-gray-600">边缘系统基调（Endocrine）</div>
-            <HormoneBar label="Dopamine" value={endocrineState?.dopamine_level} color="#c026d3" />
-            <HormoneBar label="Serotonin" value={endocrineState?.serotonin_level} color="#059669" />
-            <HormoneBar label="Cortisol" value={endocrineState?.cortisol_level} color="#d97706" />
+            {hormoneBars.map((bar) => (
+              <HormoneBar key={bar.label} view={bar} />
+            ))}
             <div className="flex items-center justify-between text-xs">
               <span className="text-gray-500">Gate</span>
-              <span className={`font-semibold ${gateTone}`}>{gateLabel}</span>
+              <span className={`font-semibold ${gateView.gateTone}`}>{gateView.gateLabel}</span>
             </div>
           </div>
         </div>
@@ -325,17 +235,17 @@ export default function EmotionDashboard() {
             <Activity size={14} className="text-indigo-500" />
             情绪标签分布
           </h2>
-          {topEmotions.length > 0 ? (
+          {topEmotionRows.length > 0 ? (
             <div className="space-y-2">
-              {topEmotions.map((emotion) => (
-                <div key={emotion.emotion_tag} className="flex items-center gap-2">
-                  <span className="w-20 shrink-0 truncate text-xs text-gray-600">{formatEmotionTag(emotion.emotion_tag)}</span>
+              {topEmotionRows.map((emotion) => (
+                <div key={emotion.key} className="flex items-center gap-2">
+                  <span className="w-20 shrink-0 truncate text-xs text-gray-600">{emotion.label}</span>
                   <div className="h-4 flex-1 overflow-hidden rounded-full bg-gray-100">
                     <div
                       className="h-full rounded-full"
                       style={{
                         width: `${emotion.pct}%`,
-                        backgroundColor: EMOTION_COLORS[emotion.emotion_tag] || '#9ca3af',
+                        backgroundColor: emotion.color,
                       }}
                     />
                   </div>
@@ -348,22 +258,14 @@ export default function EmotionDashboard() {
             <EmptyStateCard title="暂无情绪样本" hint="等待情绪样本进入后再展示分布。" className="p-6" />
           )}
 
-          {vtsData ? (
+          {vtsStatCards.length > 0 ? (
             <div className="grid grid-cols-3 gap-2 border-t pt-2 text-center text-xs">
-              <div>
-                <div className="text-lg font-bold text-green-600">{vtsData.apply_rate ?? 0}%</div>
-                <div className="text-gray-500">表情应用率</div>
-              </div>
-              <div>
-                <div className={`text-lg font-bold ${vtsData.degrade_rate > 10 ? 'text-orange-500' : 'text-gray-400'}`}>
-                  {vtsData.degrade_rate ?? 0}%
+              {vtsStatCards.map((card) => (
+                <div key={card.label}>
+                  <div className={`text-lg font-bold ${card.className}`}>{card.value}</div>
+                  <div className="text-gray-500">{card.label}</div>
                 </div>
-                <div className="text-gray-500">降级率</div>
-              </div>
-              <div>
-                <div className="text-lg font-bold text-blue-600">{vtsData.talk_gate_allowed ?? 0}</div>
-                <div className="text-gray-500">放行次数</div>
-              </div>
+              ))}
             </div>
           ) : null}
         </div>
@@ -383,13 +285,13 @@ export default function EmotionDashboard() {
                   r="50"
                   fill="none"
                   stroke="#ec4899"
-                  strokeDasharray={`${bondTemperature * 314} 314`}
+                  strokeDasharray={bondMetrics.bondTemperatureArc}
                   strokeLinecap="round"
                   transform="rotate(-90 60 60)"
                   className="transition-all duration-1000"
                 />
                 <text x="60" y="55" textAnchor="middle" className="fill-gray-800 text-lg font-bold">
-                  {(bondTemperature * 100).toFixed(0)}°
+                  {bondMetrics.bondTemperatureDegree}
                 </text>
                 <text x="60" y="72" textAnchor="middle" className="fill-gray-500 text-[10px]">
                   {bondStageLabel}
@@ -404,21 +306,21 @@ export default function EmotionDashboard() {
               <div className="text-gray-500">当前阶段</div>
             </div>
             <div className="card p-2 text-center">
-              <div className="font-bold text-gray-700">{formatNumber(bondTemperature, 2)}</div>
+              <div className="font-bold text-gray-700">{bondMetrics.bondTemperatureFormatted}</div>
               <div className="text-gray-500">温度值</div>
             </div>
           </div>
 
-          {memoryData?.subsystems ? (
+          {memorySubsystemRows.length > 0 ? (
             <div className="space-y-1 border-t pt-2">
               <div className="mb-1 text-xs font-medium text-gray-600">记忆子系统成功率</div>
-              {memoryData.subsystems.map((subsystem) => (
-                <div key={subsystem.subsystem} className="flex items-center justify-between text-xs">
-                  <span className="text-gray-600">{subsystem.display_name}</span>
+              {memorySubsystemRows.map((subsystem) => (
+                <div key={subsystem.key} className="flex items-center justify-between text-xs">
+                  <span className="text-gray-600">{subsystem.label}</span>
                   <span
-                    className={getSuccessRateTone(subsystem.success_rate)}
+                    className={subsystem.tone}
                   >
-                    {subsystem.success_rate ?? '—'}%
+                    {subsystem.successRate}%
                   </span>
                 </div>
               ))}

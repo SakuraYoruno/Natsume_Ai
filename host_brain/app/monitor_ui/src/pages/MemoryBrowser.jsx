@@ -1,30 +1,16 @@
 ﻿import React, { useMemo, useState } from 'react'
 import { Archive, BookOpen, Brain, Database, RefreshCw } from 'lucide-react'
-import EmptyStateCard from '../components/EmptyStateCard.jsx'
-import OrganSystemOverview from '../components/lifeBody/OrganSystemOverview.jsx'
-import MetricCard from '../components/MetricCard.jsx'
-import NoticeBanner from '../components/NoticeBanner.jsx'
-import SampleMeta from '../components/obs/SampleMeta.jsx'
-import PageHero from '../components/PageHero.jsx'
-import SectionHeading from '../components/SectionHeading.jsx'
-import TimeWindowSelect from '../components/TimeWindowSelect.jsx'
-import { LOAD_STATES, resolveLoadState } from '../models/loadState.js'
-import { buildMemoryOrganSystemModel } from '../models/organSystemModel.js'
-import { useMemoryOverviewQuery } from '../features/life/queries.js'
+import EmptyStateCard from '../shared/ui/EmptyStateCard.jsx'
+import OrganSystemOverview from '../features/life/components/lifeBody/OrganSystemOverview.jsx'
+import MetricCard from '../shared/ui/MetricCard.jsx'
+import NoticeBanner from '../shared/ui/NoticeBanner.jsx'
+import SampleMeta from '../shared/ui/observability/SampleMeta.jsx'
+import PageHero from '../shared/ui/PageHero.jsx'
+import SectionHeading from '../shared/ui/SectionHeading.jsx'
+import TimeWindowSelect from '../shared/ui/TimeWindowSelect.jsx'
+import { useMemoryOverviewQuery } from '../features/life/memoryQueries.js'
+import { buildMemoryBrowserViewModel, MEMORY_BROWSER_WINDOW_OPTIONS } from '../features/life/memoryBrowserModel.js'
 import useAppStore from '../store/useAppStore.js'
-import { getSuccessRateTone, summarizeSuccessRateSamples } from '../utils/successRate.js'
-
-const WINDOW_OPTIONS = [
-  { label: '1h', value: 60 },
-  { label: '6h', value: 360 },
-  { label: '24h', value: 1440 },
-  { label: '7d', value: 10080 },
-]
-
-function formatDocStatus(status) {
-  if (status === 'ACTIVE') return '生效中'
-  return status || '—'
-}
 
 export default function MemoryBrowser() {
   const pollingEnabled = useAppStore((state) => state.pollingEnabled)
@@ -51,59 +37,43 @@ export default function MemoryBrowser() {
     pollingInterval,
   })
 
-  const subsystems = memoryData?.subsystems || []
-  const docs = canonDocs?.documents || canonDocs?.items || []
-  const worldDocs = residentContext?.world_canon_documents || docs
-  const personaDocs = residentContext?.persona_resident_documents || []
-  const residentDocCount = worldDocs.length + personaDocs.length
-  const hasMemoryObservabilityData = Boolean(
-    memoryData || episodicData || distillData || canonDocs || compressData || residentContext
-  )
-  const subsystemOperationCount = subsystems.reduce((sum, item) => sum + Number(item?.total || 0), 0)
   const {
-    averageRate: avgSuccessRate,
-    sampledCount: sampledSubsystemCount,
-    configuredCount: configuredSubsystemCount,
-  } = summarizeSuccessRateSamples(subsystems)
-  const hasSubsystemSamples = avgSuccessRate != null
-
-  const hasMemoryTraffic = (
-    sampledSubsystemCount > 0
-    || worldDocs.length > 0
-    || personaDocs.length > 0
-    || (episodicData?.total_writes ?? 0) > 0
-    || (distillData?.total_cycles ?? 0) > 0
-    || (compressData?.total_compressions ?? 0) > 0
-  )
-  const memoryLoadState = resolveLoadState({
-    loading: loading || refreshing,
-    error,
-    hasData: hasMemoryObservabilityData,
-    hasSamples: hasMemoryTraffic,
-    available: hasMemoryObservabilityData,
-  })
-  const memoryOrganModel = useMemo(() => buildMemoryOrganSystemModel({
-    loadState: memoryLoadState,
-    updatedAt: lastUpdatedAt,
-    hasData: hasMemoryObservabilityData,
-    hasSamples: hasMemoryTraffic,
-    averageSuccessRate: avgSuccessRate,
-    sampledSubsystemCount,
-    configuredSubsystemCount,
-    residentDocCount,
-    distillCycles: distillData?.total_cycles,
-    episodicWrites: episodicData?.total_writes,
-  }), [
-    avgSuccessRate,
-    configuredSubsystemCount,
-    distillData?.total_cycles,
-    episodicData?.total_writes,
-    hasMemoryObservabilityData,
-    hasMemoryTraffic,
-    lastUpdatedAt,
+    worldDocs,
+    personaDocs,
+    subsystemOperationCount,
+    hasSubsystemSamples,
     memoryLoadState,
-    residentDocCount,
-    sampledSubsystemCount,
+    memoryOrganModel,
+    subsystemMetricCards,
+    heroTitle,
+    heroDescription,
+    heroMetaItems,
+    showUnavailableNotice,
+    showNoSampleNotice,
+  } = useMemo(() => buildMemoryBrowserViewModel({
+    memoryData,
+    episodicData,
+    distillData,
+    canonDocs,
+    compressData,
+    residentContext,
+    loading,
+    refreshing,
+    error,
+    lastUpdatedAt,
+    windowMinutes,
+  }), [
+    canonDocs,
+    compressData,
+    distillData,
+    episodicData,
+    error,
+    lastUpdatedAt,
+    loading,
+    memoryData,
+    refreshing,
+    residentContext,
+    windowMinutes,
   ])
 
   return (
@@ -114,7 +84,7 @@ export default function MemoryBrowser() {
           <p className="text-sm text-gray-500">情景记忆、蒸馏历史与主设定文档。</p>
         </div>
         <div className="flex items-center gap-2">
-          <TimeWindowSelect value={windowMinutes} onChange={setWindowMinutes} options={WINDOW_OPTIONS} />
+          <TimeWindowSelect value={windowMinutes} onChange={setWindowMinutes} options={MEMORY_BROWSER_WINDOW_OPTIONS} />
           <button className="btn-secondary" onClick={() => refetch()} disabled={loading || refreshing}>
             <RefreshCw size={14} className={loading || refreshing ? 'animate-spin' : ''} />
             刷新
@@ -125,18 +95,10 @@ export default function MemoryBrowser() {
       <PageHero
         icon={Database}
         eyebrow="海马体记忆总览"
-        title={configuredSubsystemCount > 0 ? `${configuredSubsystemCount} 个记忆子系统` : '记忆链路待采样'}
-        description={
-          hasSubsystemSamples
-            ? `近窗口平均成功率 ${avgSuccessRate}% · ${sampledSubsystemCount}/${configuredSubsystemCount} 个子系统有样本 · 常驻设定 ${residentDocCount} 份`
-            : '当前窗口还没有足够的记忆流量样本。'
-        }
+        title={heroTitle}
+        description={heroDescription}
         gradientClass="from-primary-50 via-white to-cyan-50"
-        metaItems={[
-          `窗口：${windowMinutes} 分钟`,
-          `常驻设定：${residentDocCount} 份`,
-          `情景写入：${episodicData?.total_writes ?? 0}`,
-        ]}
+        metaItems={heroMetaItems}
         aside={(
           <SampleMeta
             className="max-w-md"
@@ -153,13 +115,13 @@ export default function MemoryBrowser() {
 
       {error ? <NoticeBanner variant="error">{error.message}</NoticeBanner> : null}
 
-      {!error && !loading && !refreshing && memoryLoadState === LOAD_STATES.UNAVAILABLE ? (
+      {showUnavailableNotice ? (
         <NoticeBanner variant="warning">
           记忆观测接口当前未返回可用数据，页面会保留中性空态而不是把不可用误报成 0。
         </NoticeBanner>
       ) : null}
 
-      {!error && !loading && !refreshing && memoryLoadState === LOAD_STATES.NO_SAMPLE ? (
+      {showNoSampleNotice ? (
         <NoticeBanner variant="info">
           当前还是空样本初始态。记忆链路尚未产生可观测数据时，卡片显示 0 或空列表属于预期。
         </NoticeBanner>
@@ -169,13 +131,13 @@ export default function MemoryBrowser() {
 
       {hasSubsystemSamples ? (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-          {subsystems.map((subsystem) => (
+          {subsystemMetricCards.map((card) => (
             <MetricCard
-              key={subsystem.subsystem}
-              label={subsystem.display_name}
-              value={subsystem.success_rate != null ? `${subsystem.success_rate}%` : '—'}
-              hint={`${subsystem.total ?? 0} 次操作`}
-              tone={getSuccessRateTone(subsystem.success_rate)}
+              key={card.key}
+              label={card.label}
+              value={card.value}
+              hint={card.hint}
+              tone={card.tone}
               variant="stacked"
             />
           ))}

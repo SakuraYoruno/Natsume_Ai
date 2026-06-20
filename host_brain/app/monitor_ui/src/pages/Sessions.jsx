@@ -2,76 +2,31 @@ import React, { useCallback, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import toast from 'react-hot-toast'
 import { Clock3, Download, ExternalLink, RefreshCw, Search } from 'lucide-react'
-import { exportSessionsCsv } from '../features/observability/api.js'
-import DigitalLifeRuntimeCard from '../components/DigitalLifeRuntimeCard.jsx'
-import EmptyStateCard from '../components/EmptyStateCard.jsx'
-import LivingPulseStrip from '../components/LivingPulseStrip.jsx'
-import MetricCard from '../components/MetricCard.jsx'
-import NoticeBanner from '../components/NoticeBanner.jsx'
-import SampleMeta from '../components/obs/SampleMeta.jsx'
-import PageHero from '../components/PageHero.jsx'
-import StatusBadge from '../components/StatusBadge.jsx'
-import TimeWindowSelect from '../components/TimeWindowSelect.jsx'
+import { exportSessionsCsv } from '../features/observability/sessionsApi.js'
+import DigitalLifeRuntimeCard from '../features/life/components/DigitalLifeRuntimeCard.jsx'
+import EmptyStateCard from '../shared/ui/EmptyStateCard.jsx'
+import LivingPulseStrip from '../shared/ui/LivingPulseStrip.jsx'
+import MetricCard from '../shared/ui/MetricCard.jsx'
+import NoticeBanner from '../shared/ui/NoticeBanner.jsx'
+import SampleMeta from '../shared/ui/observability/SampleMeta.jsx'
+import PageHero from '../shared/ui/PageHero.jsx'
+import StatusBadge from '../shared/ui/StatusBadge.jsx'
+import TimeWindowSelect from '../shared/ui/TimeWindowSelect.jsx'
 import useDigitalLifeRuntimeSignals from '../hooks/useDigitalLifeRuntimeSignals.js'
-import { LOAD_STATES, resolveLoadState } from '../models/loadState.js'
-import { useSessionsListQuery } from '../features/observability/queries.js'
+import { useSessionsListQuery } from '../features/observability/sessionsQueries.js'
+import {
+  SESSIONS_PAGE_SIZE,
+  SESSIONS_WINDOW_OPTIONS,
+  buildSessionCardView,
+  buildSessionTracePath,
+  buildSessionsExportParams,
+  buildSessionsQueryView,
+  getNextSessionsPage,
+  getPreviousSessionsPage,
+  getSessionsWindowLabel,
+} from '../features/observability/sessionsModel.js'
 import useAppStore from '../store/useAppStore.js'
-import { compactText, DASH, formatAlertTitle, formatDateTime } from '../utils/digitalLife.js'
-import { sanitizeRecentRequests } from '../utils/sessionList.js'
-
-const PAGE_SIZE = 20
-
-const WINDOW_OPTIONS = [
-  { label: '1h', value: 60, timeRange: '1h' },
-  { label: '6h', value: 360, timeRange: '6h' },
-  { label: '24h', value: 1440, timeRange: '24h' },
-  { label: '7d', value: 10080, timeRange: '7d' },
-]
-
-function getWindowLabel(minutes) {
-  return WINDOW_OPTIONS.find((option) => option.value === minutes)?.label || `${minutes}m`
-}
-
-function normalizeStatus(status) {
-  const value = String(status || '').toLowerCase()
-  if (value === 'ok' || value === 'success') return 'healthy'
-  if (value === 'rejected') return 'degraded'
-  if (value === 'error' || value === 'fail') return 'error'
-  return 'unknown'
-}
-
-function getStatusTone(status) {
-  switch (normalizeStatus(status)) {
-    case 'healthy':
-      return {
-        ring: 'bg-emerald-400',
-        border: 'border-emerald-200',
-        bg: 'bg-emerald-50/80',
-        badge: 'bg-emerald-100 text-emerald-700 border-emerald-200',
-      }
-    case 'degraded':
-      return {
-        ring: 'bg-amber-400',
-        border: 'border-amber-200',
-        bg: 'bg-amber-50/80',
-        badge: 'bg-amber-100 text-amber-700 border-amber-200',
-      }
-    case 'error':
-      return {
-        ring: 'bg-rose-400',
-        border: 'border-rose-200',
-        bg: 'bg-rose-50/80',
-        badge: 'bg-rose-100 text-rose-700 border-rose-200',
-      }
-    default:
-      return {
-        ring: 'bg-slate-400',
-        border: 'border-slate-200',
-        bg: 'bg-white',
-        badge: 'bg-slate-100 text-slate-700 border-slate-200',
-      }
-  }
-}
+import { DASH } from '../utils/digitalLife.js'
 
 function FlowSection({ title, hint, children }) {
   return (
@@ -98,42 +53,39 @@ function FlowSection({ title, hint, children }) {
 }
 
 function SessionCard({ item, onOpen }) {
-  const tone = getStatusTone(item.status)
-  const preview = compactText(item.input_preview || '暂无输入摘要', 180)
-  const latency = item.total_latency_ms != null ? `${item.total_latency_ms} ms` : DASH
-  const reason = item.reason_code ? formatAlertTitle(item.reason_code) : '暂无显式原因'
+  const view = buildSessionCardView(item)
 
   return (
     <button
-      className={`group w-full rounded-2xl border ${tone.border} ${tone.bg} p-4 text-left shadow-sm transition duration-200 hover:-translate-y-0.5 hover:shadow-md`}
+      className={`group w-full rounded-2xl border ${view.tone.border} ${view.tone.bg} p-4 text-left shadow-sm transition duration-200 hover:-translate-y-0.5 hover:shadow-md`}
       onClick={() => onOpen(item.request_id)}
     >
       <div className="flex items-start gap-3">
-        <span className={`mt-1 h-3.5 w-3.5 shrink-0 rounded-full ${tone.ring} ring-4 ring-white/70`} />
+        <span className={`mt-1 h-3.5 w-3.5 shrink-0 rounded-full ${view.tone.ring} ring-4 ring-white/70`} />
         <div className="min-w-0 flex-1">
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
-              <div className="truncate text-sm font-semibold text-gray-900">{preview}</div>
+              <div className="truncate text-sm font-semibold text-gray-900">{view.preview}</div>
               <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-gray-500">
-                <span className="font-mono">{item.request_id?.slice(0, 18) || DASH}</span>
-                <span>{item.session_id || DASH}</span>
-                <span>{formatDateTime(item.ts_ms)}</span>
+                <span className="font-mono">{view.requestLabel}</span>
+                <span>{view.sessionLabel}</span>
+                <span>{view.timeLabel}</span>
               </div>
             </div>
-            <StatusBadge status={normalizeStatus(item.status)} label={item.status || 'UNKNOWN'} />
+            <StatusBadge status={view.normalizedStatus} label={view.statusLabel} />
           </div>
 
-          <div className="mt-3 text-sm leading-6 text-gray-700">{preview}</div>
+          <div className="mt-3 text-sm leading-6 text-gray-700">{view.preview}</div>
 
           <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
-            <span className={`inline-flex items-center rounded-full border px-2.5 py-1 font-medium ${tone.badge}`}>
+            <span className={`inline-flex items-center rounded-full border px-2.5 py-1 font-medium ${view.tone.badge}`}>
               神经链路回放
             </span>
             <span className="inline-flex items-center rounded-full border border-gray-200 bg-white/80 px-2.5 py-1 text-gray-600">
-              耗时 {latency}
+              耗时 {view.latencyLabel}
             </span>
             <span className="inline-flex items-center rounded-full border border-gray-200 bg-white/80 px-2.5 py-1 text-gray-600">
-              {reason}
+              {view.reasonLabel}
             </span>
           </div>
         </div>
@@ -191,7 +143,7 @@ export default function Sessions() {
     refetch,
   } = useSessionsListQuery({
     page,
-    pageSize: PAGE_SIZE,
+    pageSize: SESSIONS_PAGE_SIZE,
     keyword,
     status,
     windowMinutes,
@@ -200,47 +152,43 @@ export default function Sessions() {
     pollingInterval,
   })
 
-  const rawItems = sessionsData?.items || []
-  const sessions = useMemo(
-    () => sanitizeRecentRequests(rawItems, { keyword }),
-    [keyword, rawItems],
-  )
-  const suppressedCount = Math.max(0, rawItems.length - sessions.length)
-  const total = sessionsData?.total || 0
-  const currentPage = sessionsData?.page || page
-  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
-  const sessionsLoadState = resolveLoadState({
-    loading: loading || refreshing,
-    error: listError && !sessionsData ? new Error(listError) : null,
-    hasData: Boolean(sessionsData),
-    hasSamples: total > 0 || sessions.length > 0,
-    available: Boolean(sessionsData),
+  const {
+    sessions,
+    suppressedCount,
+    total,
+    currentPage,
+    totalPages,
+    summary,
+    pulseNodes,
+    heroTitle,
+    heroDescription,
+    heroMetaItems,
+    showNoSampleNotice,
+    sampleMeta,
+  } = useMemo(() => buildSessionsQueryView({
+    sessionsData,
+    listError,
+    loading,
+    refreshing,
     stale,
-  })
-
-  const summary = useMemo(() => {
-    const healthyCount = sessions.filter((item) => normalizeStatus(item.status) === 'healthy').length
-    const degradedCount = sessions.filter((item) => normalizeStatus(item.status) === 'degraded').length
-    const errorCount = sessions.filter((item) => normalizeStatus(item.status) === 'error').length
-    const latencyValues = sessions
-      .map((item) => Number(item.total_latency_ms))
-      .filter((value) => Number.isFinite(value) && value > 0)
-
-    const avgLatency = latencyValues.length > 0
-      ? Math.round(latencyValues.reduce((sum, value) => sum + value, 0) / latencyValues.length)
-      : null
-
-    return { healthyCount, degradedCount, errorCount, avgLatency }
-  }, [sessions])
-
-  const pulseNodes = useMemo(() => ([
-    { label: '当前页', value: `${sessions.length}/${PAGE_SIZE}`, tone: 'primary', active: true },
-    { label: '顺流', value: String(summary.healthyCount), tone: 'teal', active: summary.healthyCount > 0 },
-    { label: '回撤', value: String(summary.degradedCount), tone: 'amber', active: summary.degradedCount > 0 },
-    { label: '异常', value: String(summary.errorCount), tone: 'rose', active: summary.errorCount > 0 },
-    { label: '平均耗时', value: summary.avgLatency != null ? `${summary.avgLatency}ms` : '--', tone: 'violet', active: summary.avgLatency != null },
-    { label: '时间窗', value: getWindowLabel(windowMinutes), tone: 'gray', active: true },
-  ]), [sessions.length, summary, windowMinutes])
+    lastUpdatedAt,
+    page,
+    pageSize: SESSIONS_PAGE_SIZE,
+    keyword,
+    status,
+    windowMinutes,
+  }), [
+    keyword,
+    lastUpdatedAt,
+    listError,
+    loading,
+    page,
+    refreshing,
+    sessionsData,
+    stale,
+    status,
+    windowMinutes,
+  ])
 
   const handleSearch = useCallback(() => {
     if (page !== 1) {
@@ -253,11 +201,7 @@ export default function Sessions() {
   const handleExport = useCallback(async () => {
     setExporting(true)
     try {
-      await exportSessionsCsv({
-        window_minutes: windowMinutes,
-        keyword: keyword || undefined,
-        status: status || undefined,
-      })
+      await exportSessionsCsv(buildSessionsExportParams({ windowMinutes, keyword, status }))
       toast.success('CSV 导出已开始')
     } catch (exportError) {
       toast.error(`导出失败：${exportError.message}`)
@@ -268,8 +212,8 @@ export default function Sessions() {
 
   const openSessionTrace = useCallback((requestId) => {
     if (!requestId) return
-      setSelectedRequestId(requestId)
-      navigate(`/observability/trace/${requestId}`)
+    setSelectedRequestId(requestId)
+    navigate(buildSessionTracePath(requestId))
   }, [navigate, setSelectedRequestId])
 
   return (
@@ -280,7 +224,7 @@ export default function Sessions() {
           <p className="text-sm text-gray-500">把最近请求看成生命回声流，先看节律，再进入单条链路。</p>
         </div>
         <div className="flex items-center gap-2">
-          <TimeWindowSelect value={windowMinutes} onChange={setWindowMinutes} options={WINDOW_OPTIONS} />
+          <TimeWindowSelect value={windowMinutes} onChange={setWindowMinutes} options={SESSIONS_WINDOW_OPTIONS} />
           <button className="btn-secondary" onClick={handleExport} disabled={exporting}>
             <Download size={14} className={exporting ? 'animate-pulse' : ''} />
             {exporting ? '导出中' : '导出 CSV'}
@@ -295,29 +239,20 @@ export default function Sessions() {
       <PageHero
         icon={Clock3}
         eyebrow="神经会话回声面板"
-        title={`最近 ${getWindowLabel(windowMinutes)} 共 ${total} 条请求`}
-        description={
-          keyword || status
-            ? `当前过滤生效${keyword ? `，关键词“${keyword}”` : ''}${status ? `，状态 ${status}` : ''}。`
-            : '可按关键词、状态和时间窗口筛选请求，再进入神经链路查看完整传导路径。'
-        }
+        title={heroTitle}
+        description={heroDescription}
         gradientClass="from-sky-50 via-white to-indigo-50"
-        metaItems={[
-          `当前页：${currentPage} / ${totalPages}`,
-          `顺流：${summary.healthyCount}`,
-          `回撤：${summary.degradedCount}`,
-          `异常：${summary.errorCount}`,
-        ]}
+        metaItems={heroMetaItems}
         aside={(
           <SampleMeta
             className="max-w-md"
-            loadState={sessionsLoadState}
-            windowMinutes={windowMinutes}
-            sampleSize={total}
-            sampleLabel="请求"
-            updatedAt={lastUpdatedAt}
-            source="sessions"
-            definition="会话页按时间窗、关键词和状态聚合最近请求流；筛掉的噪声记录会单独提示，不会混入有效样本。"
+            loadState={sampleMeta.loadState}
+            windowMinutes={sampleMeta.windowMinutes}
+            sampleSize={sampleMeta.sampleSize}
+            sampleLabel={sampleMeta.sampleLabel}
+            updatedAt={sampleMeta.updatedAt}
+            source={sampleMeta.source}
+            definition={sampleMeta.definition}
           />
         )}
       />
@@ -340,7 +275,7 @@ export default function Sessions() {
         </NoticeBanner>
       ) : null}
 
-      {!listError && !loading && !refreshing && sessionsLoadState === LOAD_STATES.NO_SAMPLE ? (
+      {showNoSampleNotice ? (
         <NoticeBanner variant="info" title="当前窗口暂无会话沉积">
           当前筛选条件下还没有可展示的请求样本。
         </NoticeBanner>
@@ -392,7 +327,7 @@ export default function Sessions() {
           </select>
 
           <div className="rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-500">
-            时间窗：{getWindowLabel(windowMinutes)}
+            时间窗：{getSessionsWindowLabel(windowMinutes)}
           </div>
 
           <button className="btn-primary justify-center" onClick={handleSearch}>
@@ -401,7 +336,7 @@ export default function Sessions() {
         </div>
       </FlowSection>
 
-      <FlowSection title="会话沉积流" hint={`共 ${total} 条，单页 ${PAGE_SIZE} 条。`}>
+      <FlowSection title="会话沉积流" hint={`共 ${total} 条，单页 ${SESSIONS_PAGE_SIZE} 条。`}>
         {loading && !sessionsData ? <SessionSkeleton /> : null}
 
         {!loading && !refreshing && !listError && sessions.length === 0 ? (
@@ -428,8 +363,7 @@ export default function Sessions() {
             className="btn-secondary px-3 py-1.5 text-xs"
             disabled={currentPage <= 1}
             onClick={() => {
-              const nextPage = Math.max(1, currentPage - 1)
-              setPage(nextPage)
+              setPage(getPreviousSessionsPage(currentPage))
             }}
           >
             上一页
@@ -441,8 +375,7 @@ export default function Sessions() {
             className="btn-secondary px-3 py-1.5 text-xs"
             disabled={currentPage >= totalPages}
             onClick={() => {
-              const nextPage = Math.min(totalPages, currentPage + 1)
-              setPage(nextPage)
+              setPage(getNextSessionsPage(currentPage, totalPages))
             }}
           >
             下一页

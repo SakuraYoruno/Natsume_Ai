@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+﻿import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Bot,
   CheckCircle2,
@@ -10,63 +10,29 @@ import {
   XCircle,
   Zap,
 } from 'lucide-react'
-import EmptyStateCard from '../components/EmptyStateCard.jsx'
-import MetricCard from '../components/MetricCard.jsx'
-import NoticeBanner from '../components/NoticeBanner.jsx'
-import SampleMeta from '../components/obs/SampleMeta.jsx'
+import EmptyStateCard from '../shared/ui/EmptyStateCard.jsx'
+import MetricCard from '../shared/ui/MetricCard.jsx'
+import NoticeBanner from '../shared/ui/NoticeBanner.jsx'
+import SampleMeta from '../shared/ui/observability/SampleMeta.jsx'
 import { runAgentLoopStream } from '../features/execution/api.js'
-import PageHero from '../components/PageHero.jsx'
-import { resolveLoadState } from '../models/loadState.js'
-import { useAgentLoopConsoleQuery } from '../features/execution/queries.js'
+import PageHero from '../shared/ui/PageHero.jsx'
+import { useAgentLoopConsoleQuery } from '../features/execution/agentLoopQueries.js'
+import {
+  buildAgentLoopConsoleViewModel,
+  buildAgentLoopRouteErrorEvent,
+  buildAgentLoopRunRequest,
+  buildAgentLoopRunSummary,
+  getAgentLoopPhaseClass,
+  isAgentLoopRunReady,
+  isAgentLoopDoneEvent,
+} from '../features/execution/agentLoopModel.js'
+import { formatTime } from '../shared/formatters.js'
+import { consumeSseBuffer } from '../shared/streaming/sse.js'
 import useAppStore from '../store/useAppStore.js'
 
-function parseSseBlock(block) {
-  const data = block
-    .split('\n')
-    .filter((line) => line.startsWith('data:'))
-    .map((line) => line.slice(5).trim())
-    .join('\n')
-
-  if (!data) return null
-
-  try {
-    return JSON.parse(data)
-  } catch (_) {
-    return { raw: data }
-  }
-}
-
-function consumeSseBuffer(buffer) {
-  const chunks = buffer.split('\n\n')
-  const remainder = chunks.pop() ?? ''
-  const events = chunks.map(parseSseBlock).filter(Boolean)
-  return { events, remainder }
-}
-
-function formatTime(tsMs) {
-  if (!tsMs) return '—'
-  return new Date(tsMs).toLocaleTimeString('zh-CN', {
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-  })
-}
-
 function PhaseBadge({ phase }) {
-  const map = {
-    AGENT_INIT: 'bg-blue-100 text-blue-700',
-    LOOP_START: 'bg-indigo-100 text-indigo-700',
-    ROUND_START: 'bg-purple-100 text-purple-700',
-    SCREENSHOT_DONE: 'bg-cyan-100 text-cyan-700',
-    PLAN_GENERATED: 'bg-yellow-100 text-yellow-700',
-    EXECUTE_DONE: 'bg-orange-100 text-orange-700',
-    ROUND_DONE: 'bg-teal-100 text-teal-700',
-    LOOP_DONE: 'bg-green-100 text-green-700',
-    ROUTE_ERROR: 'bg-red-100 text-red-700',
-  }
-
   return (
-    <span className={`rounded px-2 py-0.5 text-xs font-medium ${map[phase] || 'bg-gray-100 text-gray-600'}`}>
+    <span className={`rounded px-2 py-0.5 text-xs font-medium ${getAgentLoopPhaseClass(phase)}`}>
       {phase || 'UNKNOWN'}
     </span>
   )
@@ -111,26 +77,48 @@ export default function AgentLoop() {
     eventsEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [events])
 
-  const runSummary = useMemo(() => {
-    if (!loopResult) return null
-    return {
-      success: Boolean(loopResult.goal_achieved),
-      rounds: loopResult.total_rounds ?? '—',
-      latency: loopResult.total_latency_ms ?? '—',
-    }
-  }, [loopResult])
-
-  const agentLoopLoadState = resolveLoadState({
-    loading: loading || refreshing,
-    error: error || (infoError ? new Error(infoError) : null) || (statsError ? new Error(statsError) : null),
-    hasData: Boolean(agentInfo || agentLoopStats || uiAssertionData || loopHistory.length > 0),
-    hasSamples: Boolean((agentLoopStats?.total_loops ?? 0) > 0 || loopHistory.length > 0 || (uiAssertionData?.total_assertions ?? 0) > 0),
-    available: true,
+  const runSummary = useMemo(() => buildAgentLoopRunSummary(loopResult), [loopResult])
+  const {
+    loadState: agentLoopLoadState,
+    heroTitle,
+    heroMetaItems,
+    sampleSize,
+    metricCards,
+  } = useMemo(() => buildAgentLoopConsoleViewModel({
+    agentInfo,
+    agentLoopStats,
+    uiAssertionData,
+    loopHistory,
+    loading,
+    refreshing,
+    error,
+    infoError,
+    statsError,
     stale,
-  })
+  }), [
+    agentInfo,
+    agentLoopStats,
+    error,
+    infoError,
+    loading,
+    loopHistory,
+    refreshing,
+    stale,
+    statsError,
+    uiAssertionData,
+  ])
 
   const handleRun = useCallback(async () => {
-    if (!goal.trim()) return
+    const request = buildAgentLoopRunRequest({
+      goal,
+      maxRounds,
+      roundTimeout,
+      totalTimeout,
+      useMock,
+      useEdgeRpc,
+      imageConsent,
+    })
+    if (!request) return
 
     setRunning(true)
     setEvents([])
@@ -140,15 +128,7 @@ export default function AgentLoop() {
 
     try {
       const response = await runAgentLoopStream(
-        {
-          goal: goal.trim(),
-          max_rounds: maxRounds,
-          round_timeout_sec: roundTimeout,
-          total_timeout_sec: totalTimeout,
-          use_mock: useMock,
-          use_edge_rpc: useEdgeRpc,
-          image_upload_consent: imageConsent,
-        },
+        request,
         { signal: controller.signal }
       )
 
@@ -171,7 +151,7 @@ export default function AgentLoop() {
         for (const event of nextEvents) {
           const normalizedEvent = { ...event, _ts: Date.now() }
           setEvents((previous) => [...previous, normalizedEvent])
-          if (String(event.phase || '').toUpperCase() === 'LOOP_DONE') {
+          if (isAgentLoopDoneEvent(event)) {
             setLoopResult(event)
           }
         }
@@ -182,7 +162,7 @@ export default function AgentLoop() {
       if (error.name !== 'AbortError') {
         setEvents((previous) => [
           ...previous,
-          { phase: 'ROUTE_ERROR', error: error.message || '执行失败', _ts: Date.now() },
+          buildAgentLoopRouteErrorEvent(error),
         ])
       }
     } finally {
@@ -215,20 +195,15 @@ export default function AgentLoop() {
       <PageHero
         icon={Zap}
         eyebrow="自动化执行回路"
-        title={agentInfo ? `默认 ${agentInfo.default_max_rounds} 轮 / ${agentInfo.default_round_timeout_sec}s` : '等待配置加载'}
+        title={heroTitle}
         description="适合做端到端页面动作验证、视觉观测和自动执行链复验。"
         gradientClass="from-indigo-50 via-white to-sky-50"
-        metaItems={[
-          `总执行：${agentLoopStats?.total_loops ?? 0}`,
-          `达成率：${agentLoopStats?.achievement_rate != null ? `${agentLoopStats.achievement_rate}%` : '—'}`,
-          `UI 断言：${uiAssertionData?.total_assertions ?? 0}`,
-          `敏感拦截：${uiAssertionData?.sensitive_blocked ?? 0}`,
-        ]}
+        metaItems={heroMetaItems}
         aside={(
           <SampleMeta
             className="max-w-md"
             loadState={agentLoopLoadState}
-            sampleSize={(agentLoopStats?.total_loops ?? 0) + loopHistory.length}
+            sampleSize={sampleSize}
             sampleLabel="执行样本"
             updatedAt={lastUpdatedAt}
             source="agent info + loop stats + history"
@@ -242,10 +217,15 @@ export default function AgentLoop() {
       {error ? <NoticeBanner variant="error" title="Agent Loop 数据加载失败">{error.message}</NoticeBanner> : null}
 
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <MetricCard label="目标达成率" value={agentLoopStats?.achievement_rate != null ? `${agentLoopStats.achievement_rate}%` : '—'} hint={`成功 ${agentLoopStats?.achieved ?? 0} / ${agentLoopStats?.total_loops ?? 0}`} tone="text-green-600" />
-        <MetricCard label="平均轮次" value={agentLoopStats?.avg_rounds ?? '—'} hint={`失败 ${agentLoopStats?.failed ?? 0}`} tone="text-blue-600" />
-        <MetricCard label="敏感 UI 拦截" value={uiAssertionData?.sensitive_blocked ?? '—'} hint={`拦截率 ${uiAssertionData?.block_rate != null ? `${uiAssertionData.block_rate}%` : '—'}`} tone="text-orange-500" />
-        <MetricCard label="后置失败" value={uiAssertionData?.postcondition_failed ?? '—'} hint={`前置失败 ${uiAssertionData?.precondition_failed ?? 0}`} tone="text-rose-600" />
+        {metricCards.map((card) => (
+          <MetricCard
+            key={card.key}
+            label={card.label}
+            value={card.value}
+            hint={card.hint}
+            tone={card.tone}
+          />
+        ))}
       </div>
 
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-[360px_minmax(0,1fr)]">
@@ -303,7 +283,7 @@ export default function AgentLoop() {
               <button
                 className="flex flex-1 items-center justify-center gap-1.5 rounded bg-indigo-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
                 onClick={handleRun}
-                disabled={running || !goal.trim()}
+                disabled={running || !isAgentLoopRunReady(goal)}
               >
                 {running ? <RefreshCw size={14} className="animate-spin" /> : <Play size={14} />}
                 {running ? '执行中' : '启动'}

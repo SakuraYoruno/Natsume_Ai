@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useCallback } from 'react'
+﻿import React, { useMemo, useState, useCallback } from 'react'
 import {
   Cpu,
   Database,
@@ -9,27 +9,29 @@ import {
   Shield,
   Zap,
 } from 'lucide-react'
-import DigitalLifeRuntimeCard from '../components/DigitalLifeRuntimeCard.jsx'
-import EmptyStateCard from '../components/EmptyStateCard.jsx'
-import MetricCard from '../components/MetricCard.jsx'
-import NoticeBanner from '../components/NoticeBanner.jsx'
-import SampleMeta from '../components/obs/SampleMeta.jsx'
-import PageHero from '../components/PageHero.jsx'
-import TimeWindowSelect from '../components/TimeWindowSelect.jsx'
+import DigitalLifeRuntimeCard from '../features/life/components/DigitalLifeRuntimeCard.jsx'
+import EmptyStateCard from '../shared/ui/EmptyStateCard.jsx'
+import MetricCard from '../shared/ui/MetricCard.jsx'
+import NoticeBanner from '../shared/ui/NoticeBanner.jsx'
+import SampleMeta from '../shared/ui/observability/SampleMeta.jsx'
+import PageHero from '../shared/ui/PageHero.jsx'
+import TimeWindowSelect from '../shared/ui/TimeWindowSelect.jsx'
 import useDigitalLifeRuntimeSignals from '../hooks/useDigitalLifeRuntimeSignals.js'
-import { resolveLoadState } from '../models/loadState.js'
-import { useSystemConfigQuery } from '../features/operations/queries.js'
+import { useSystemConfigQuery } from '../features/operations/systemConfigQueries.js'
+import {
+  SYSTEM_CONFIG_WINDOW_OPTIONS,
+  buildSystemConfigViewModel,
+} from '../features/operations/systemConfigModel.js'
 import useAppStore from '../store/useAppStore.js'
-import { formatMode, formatReplyPosture } from '../utils/digitalLife.js'
 
-const WINDOW_OPTIONS = [
-  { label: '1h', value: 60 },
-  { label: '6h', value: 360 },
-  { label: '24h', value: 1440 },
-  { label: '7d', value: 10080 },
-]
-
-const FALLBACK_TEXT = '—'
+const SYSTEM_CONFIG_METRIC_ICONS = {
+  cpu: Cpu,
+  database: Database,
+  git_branch: GitBranch,
+  search: SearchCheck,
+  shield: Shield,
+  zap: Zap,
+}
 
 export default function SystemConfig() {
   const pollingEnabled = useAppStore((state) => state.pollingEnabled)
@@ -66,25 +68,45 @@ export default function SystemConfig() {
     windowMinutes,
   })
 
-  const routeStats = routeData?.model_routes || []
-  const callStats = callData?.models || []
-  const rateKeys = rateData?.top_keys || []
-  const notLiveSlots = useMemo(
-    () => Object.values(runtimeSnapshot?.slot_status || {}).filter((status) => status !== 'live').length,
-    [runtimeSnapshot]
-  )
-
-  const replyPosture = formatReplyPosture(runtimeSnapshot?.runtime_summary?.reply_posture?.style || FALLBACK_TEXT)
-  const sysMode = formatMode(runtimeSnapshot?.sys_mode || FALLBACK_TEXT)
-  const systemConfigUpdatedAt = Math.max(lastUpdatedAt || 0, runtimeUpdatedAt || 0) || null
-  const systemConfigLoadState = resolveLoadState({
-    loading: loading || refreshing,
+  const {
+    sysMode,
+    loadState: systemConfigLoadState,
+    updatedAt: systemConfigUpdatedAt,
+    heroDescription,
+    heroMetaItems,
+    sampleSize,
+    metricCards,
+    routeRows,
+    callRows,
+    rateKeyRows,
+    retrievalRuntimeView,
+  } = useMemo(() => buildSystemConfigViewModel({
+    routeData,
+    callData,
+    rateData,
+    healthData,
+    retrievalRuntime,
+    runtimeSnapshot,
+    loading,
+    refreshing,
     error,
-    hasData: Boolean(routeData || callData || rateData || healthData || retrievalRuntime),
-    hasSamples: Boolean(routeStats.length || callStats.length || healthData?.total || retrievalRuntime?.latest),
-    available: true,
     stale,
-  })
+    lastUpdatedAt,
+    runtimeUpdatedAt,
+  }), [
+    callData,
+    error,
+    healthData,
+    lastUpdatedAt,
+    loading,
+    rateData,
+    refreshing,
+    retrievalRuntime,
+    routeData,
+    runtimeSnapshot,
+    runtimeUpdatedAt,
+    stale,
+  ])
 
   const handleRefresh = useCallback(async () => {
     await Promise.allSettled([refetch(), reloadRuntime()])
@@ -98,7 +120,7 @@ export default function SystemConfig() {
           <p className="text-sm text-gray-500">查看模型路由、检索运行时、限流后端与基础器官状态。</p>
         </div>
         <div className="flex items-center gap-2">
-          <TimeWindowSelect value={windowMinutes} onChange={setWindowMinutes} options={WINDOW_OPTIONS} />
+          <TimeWindowSelect value={windowMinutes} onChange={setWindowMinutes} options={SYSTEM_CONFIG_WINDOW_OPTIONS} />
           <button className="btn-secondary" onClick={handleRefresh} disabled={loading || refreshing}>
             <RefreshCw size={14} className={loading || refreshing ? 'animate-spin' : ''} />
             刷新
@@ -114,20 +136,15 @@ export default function SystemConfig() {
         icon={Settings}
         eyebrow="神经系统运行底座"
         title={sysMode}
-        description={`当前硬状态为 ${sysMode}，回复姿态为 ${replyPosture}，未在线槽位数量为 ${notLiveSlots}。`}
+        description={heroDescription}
         gradientClass="from-primary-50 via-white to-sky-50"
-        metaItems={[
-          `器官：${healthData ? `${healthData.up}/${healthData.total}` : FALLBACK_TEXT}`,
-          `未知器官：${healthData?.unknown ?? FALLBACK_TEXT}`,
-          `限流后端：${rateData?.backend_type || FALLBACK_TEXT}`,
-          `检索套件：${retrievalRuntime?.suite_profile || '自定义'}`,
-        ]}
+        metaItems={heroMetaItems}
         aside={(
           <SampleMeta
             className="max-w-md"
             loadState={systemConfigLoadState}
             windowMinutes={windowMinutes}
-            sampleSize={routeStats.length + callStats.length + (healthData?.total ?? 0)}
+            sampleSize={sampleSize}
             sampleLabel="底座对象"
             updatedAt={systemConfigUpdatedAt}
             source="system-config queries + runtime"
@@ -137,60 +154,17 @@ export default function SystemConfig() {
       />
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <MetricCard
-          label="写入嵌入模型"
-          value={retrievalRuntime?.episodic_write_embedding_model_id || FALLBACK_TEXT}
-          icon={Database}
-          variant="stacked"
-          tone={retrievalRuntime?.read_write_model_aligned ? 'text-green-600' : 'text-orange-500'}
-          hint={retrievalRuntime?.episodic_write_embedding_provider || FALLBACK_TEXT}
-        />
-        <MetricCard
-          label="读取嵌入模型"
-          value={retrievalRuntime?.latest?.embedding_model_id || FALLBACK_TEXT}
-          icon={SearchCheck}
-          variant="stacked"
-          tone={retrievalRuntime?.latest?.fallback_embedding_used ? 'text-orange-500' : 'text-blue-600'}
-          hint={retrievalRuntime?.latest?.effective_embedding_provider || FALLBACK_TEXT}
-        />
-        <MetricCard
-          label="读写一致性"
-          value={retrievalRuntime?.read_write_model_aligned ? '对齐' : '漂移'}
-          icon={Zap}
-          variant="stacked"
-          tone={retrievalRuntime?.read_write_model_aligned ? 'text-green-600' : 'text-orange-500'}
-          hint={retrievalRuntime?.suite_profile || '自定义'}
-        />
-        <MetricCard
-          label="限流后端"
-          value={rateData?.backend_type || FALLBACK_TEXT}
-          icon={Shield}
-          variant="stacked"
-          tone={rateData?.is_degraded ? 'text-orange-500' : 'text-green-600'}
-          hint={rateData?.is_degraded ? `降级：${rateData.degrade_reason}` : '正常'}
-        />
-        <MetricCard
-          label="模型路由数"
-          value={routeStats.length || FALLBACK_TEXT}
-          icon={GitBranch}
-          variant="stacked"
-          tone="text-blue-600"
-        />
-        <MetricCard
-          label="调用模型数"
-          value={callStats.length || FALLBACK_TEXT}
-          icon={Cpu}
-          variant="stacked"
-          tone="text-purple-600"
-        />
-        <MetricCard
-          label="器官健康"
-          value={healthData?.up ?? FALLBACK_TEXT}
-          icon={Zap}
-          variant="stacked"
-          tone="text-green-600"
-          hint={healthData ? `${healthData.total} 总计 / ${healthData.degraded} 降级 / ${healthData.down} 离线 / ${healthData.unknown} 未知` : ''}
-        />
+        {metricCards.map((card) => (
+          <MetricCard
+            key={card.key}
+            label={card.label}
+            value={card.value}
+            icon={SYSTEM_CONFIG_METRIC_ICONS[card.iconKey]}
+            variant={card.variant}
+            tone={card.tone}
+            hint={card.hint}
+          />
+        ))}
       </div>
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
@@ -199,14 +173,14 @@ export default function SystemConfig() {
             <GitBranch size={14} className="mr-1 inline" />
             模型路由决策
           </h2>
-          {routeStats.length > 0 ? (
+          {routeRows.length > 0 ? (
             <div className="space-y-2">
-              {routeStats.map((route) => (
-                <div key={route.model_id || route.route_id} className="rounded bg-gray-50 px-3 py-2 text-xs">
-                  <div className="font-mono text-gray-700">{route.model_id || route.route_id}</div>
+              {routeRows.map((route) => (
+                <div key={route.key} className="rounded bg-gray-50 px-3 py-2 text-xs">
+                  <div className="font-mono text-gray-700">{route.id}</div>
                   <div className="mt-1 flex items-center justify-between text-gray-500">
-                    <span>选择 {route.select_count ?? 0} 次</span>
-                    <span>降级 {route.degrade_count ?? 0} 次</span>
+                    <span>选择 {route.selectCount} 次</span>
+                    <span>降级 {route.degradeCount} 次</span>
                   </div>
                 </div>
               ))}
@@ -221,15 +195,15 @@ export default function SystemConfig() {
             <Cpu size={14} className="mr-1 inline" />
             模型调用统计
           </h2>
-          {callStats.length > 0 ? (
+          {callRows.length > 0 ? (
             <div className="space-y-2">
-              {callStats.map((model) => (
-                <div key={model.model_id} className="rounded bg-gray-50 px-3 py-2 text-xs">
-                  <div className="font-mono text-gray-700">{model.model_id}</div>
+              {callRows.map((model) => (
+                <div key={model.key} className="rounded bg-gray-50 px-3 py-2 text-xs">
+                  <div className="font-mono text-gray-700">{model.modelId}</div>
                   <div className="mt-1 flex items-center justify-between text-gray-500">
-                    <span>{model.call_count ?? 0} 次调用</span>
-                    <span>{model.total_tokens ?? 0} tok</span>
-                    <span>{model.avg_latency_ms != null ? `${Number(model.avg_latency_ms).toFixed(0)} ms` : FALLBACK_TEXT}</span>
+                    <span>{model.callCount} 次调用</span>
+                    <span>{model.totalTokens} tok</span>
+                    <span>{model.latencyLabel}</span>
                   </div>
                 </div>
               ))}
@@ -244,12 +218,12 @@ export default function SystemConfig() {
             <Shield size={14} className="mr-1 inline" />
             限流活跃键
           </h2>
-          {rateKeys.length > 0 ? (
+          {rateKeyRows.length > 0 ? (
             <div className="max-h-48 space-y-1 overflow-y-auto">
-              {rateKeys.map((keyItem, index) => (
-                <div key={index} className="flex items-center justify-between rounded bg-gray-50 px-3 py-1.5 text-xs">
-                  <span className="truncate font-mono text-gray-600">{keyItem.key}</span>
-                  <span className={keyItem.remaining <= 0 ? 'font-bold text-red-500' : 'text-gray-500'}>
+              {rateKeyRows.map((keyItem) => (
+                <div key={keyItem.key} className="flex items-center justify-between rounded bg-gray-50 px-3 py-1.5 text-xs">
+                  <span className="truncate font-mono text-gray-600">{keyItem.label}</span>
+                  <span className={keyItem.exhausted ? 'font-bold text-red-500' : 'text-gray-500'}>
                     {keyItem.current}/{keyItem.limit}
                   </span>
                 </div>
@@ -265,15 +239,15 @@ export default function SystemConfig() {
             <Database size={14} className="mr-1 inline" />
             检索运行时
           </h2>
-          {retrievalRuntime ? (
+          {retrievalRuntimeView ? (
             <div className="space-y-2 text-sm">
               <div className="rounded bg-gray-50 px-3 py-2">
                 <div className="text-xs text-gray-400">当前套件</div>
-                <div className="mt-1 font-medium text-gray-800">{retrievalRuntime.suite_profile || '自定义'}</div>
+                <div className="mt-1 font-medium text-gray-800">{retrievalRuntimeView.suiteProfile}</div>
               </div>
               <div className="rounded bg-gray-50 px-3 py-2">
                 <div className="text-xs text-gray-400">读取嵌入 Provider</div>
-                <div className="mt-1 font-medium text-gray-800">{retrievalRuntime.latest?.effective_embedding_provider || FALLBACK_TEXT}</div>
+                <div className="mt-1 font-medium text-gray-800">{retrievalRuntimeView.readEmbeddingProvider}</div>
               </div>
             </div>
           ) : (

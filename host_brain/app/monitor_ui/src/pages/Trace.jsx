@@ -1,11 +1,11 @@
 import React, { useState } from 'react'
 import { Routes, Route } from 'react-router-dom'
-import TraceHome from '../components/trace/TraceHome.jsx'
-import { TracePageFallback } from '../components/trace/TraceSurfaces.jsx'
+import TraceHome from '../features/observability/components/trace/TraceHome.jsx'
+import { TracePageFallback } from '../features/observability/components/trace/TraceSurfaces.jsx'
 
 const TraceRequestDetail = React.lazy(() => import('./TraceRequestDetail.jsx'))
-const TraceFullChainView = React.lazy(() => import('../components/trace/TraceAdvancedViews.jsx').then((module) => ({ default: module.FullChainView })))
-const TraceGroupDagRoute = React.lazy(() => import('../components/trace/TraceAdvancedViews.jsx').then((module) => ({ default: module.GroupDagRoute })))
+const TraceFullChainView = React.lazy(() => import('../features/observability/components/trace/TraceAdvancedViews.jsx').then((module) => ({ default: module.FullChainView })))
+const TraceGroupDagRoute = React.lazy(() => import('../features/observability/components/trace/TraceAdvancedViews.jsx').then((module) => ({ default: module.GroupDagRoute })))
 export default function Trace() {
   const [traceData, setTraceData] = useState(null)
   const [traceInfo, setTraceInfo] = useState(null)

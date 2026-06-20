@@ -1,8 +1,8 @@
-import React, { useEffect, useState } from 'react'
+﻿import React, { useEffect, useState } from 'react'
 import { Gamepad2, RefreshCw, Send } from 'lucide-react'
-import PageHero from '../components/PageHero.jsx'
-import NoticeBanner from '../components/NoticeBanner.jsx'
-import StatusBadge from '../components/StatusBadge.jsx'
+import PageHero from '../shared/ui/PageHero.jsx'
+import NoticeBanner from '../shared/ui/NoticeBanner.jsx'
+import StatusBadge from '../shared/ui/StatusBadge.jsx'
 import JsonBlock from '../shared/ui/JsonBlock.jsx'
 import {
   fetchBodyIntegrationBundle,

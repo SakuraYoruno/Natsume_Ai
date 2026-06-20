@@ -1,7 +1,7 @@
 ﻿import { useCallback, useMemo } from 'react'
 import { buildLifeBodyModel } from '../models/lifeBodyModel.js'
 import { resolveLoadState } from '../models/loadState.js'
-import { useLifeBodyQuery } from '../features/life/queries.js'
+import { useLifeBodyQuery } from '../features/life/lifeBodyQueries.js'
 import useAppStore from '../store/useAppStore.js'
 import {
   formatAbsenceBand,

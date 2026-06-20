@@ -1,6 +1,6 @@
 import { ENDPOINT_REGISTRY, endpointPath } from '../../shared/api/endpointRegistry.js'
-import { httpGet, httpPost, httpRequest, httpStreamPost } from '../../shared/api/httpClient.js'
-import { obsGet, obsPost } from '../../shared/api/obsClient.js'
+import { endpointGet, endpointPost, endpointRequest } from '../../shared/api/endpointClient.js'
+import { httpStreamPost } from '../../shared/api/httpClient.js'
 
 const { execution } = ENDPOINT_REGISTRY
 
@@ -8,56 +8,51 @@ const REQUEST_TIMEOUT_MS = 35_000
 const SSE_HEADERS = { Accept: 'text/event-stream' }
 
 export { sendChatDebugStream } from '../../shared/api/chatDebug.js'
+export {
+  fetchAgentLoopHistory,
+  fetchAgentLoopStats,
+  fetchPermissionStats,
+  fetchSchedulerHistory,
+  fetchUIAssertionStats,
+} from '../../shared/api/runtimeObservability.js'
 
 export function fetchAgentInfo() {
-  return httpGet(execution.agentInfo.path)
-}
-
-export function fetchAgentLoopStats(params = {}) {
-  return getObs(execution.agentLoopStats, params)
-}
-
-export function fetchAgentLoopHistory(params = {}) {
-  return getObs(execution.agentLoopHistory, params)
-}
-
-export function fetchUIAssertionStats(params = {}) {
-  return getObs(execution.uiAssertionStats, params)
+  return endpointGet(execution.agentInfo)
 }
 
 export function runAgentLoopStream(payload, options = {}) {
-  return httpStreamPost(execution.agentRun.path, payload, {
+  return httpStreamPost(endpointPath(execution.agentRun), payload, {
     ...options,
     headers: { ...SSE_HEADERS, ...(options.headers || {}) },
   })
 }
 
 export function fetchGatewayStats(params = {}) {
-  return getObs(execution.gatewayStats, params)
+  return endpointGet(execution.gatewayStats, params)
 }
 
 export function fetchWeChatStats(params = {}) {
-  return getObs(execution.wechatStats, params)
+  return endpointGet(execution.wechatStats, params)
 }
 
 export function resetWeChatChannel(params = {}) {
-  return obsPost(endpointPath(execution.wechatReset, {}, params), {})
+  return endpointPost(execution.wechatReset, {}, {}, params)
 }
 
 export function fetchSchedulerTasks() {
-  return getObs(execution.schedulerTasks)
+  return endpointGet(execution.schedulerTasks)
 }
 
 export function fetchSchedulerHealth() {
-  return getObs(execution.schedulerHealth)
+  return endpointGet(execution.schedulerHealth)
 }
 
 export function fetchResourceManagerStatus() {
-  return getObs(execution.resourceManagerStatus)
+  return endpointGet(execution.resourceManagerStatus)
 }
 
 export function fetchImmuneGateStats(params = {}) {
-  return getObs(execution.immuneGateStats, params)
+  return endpointGet(execution.immuneGateStats, params)
 }
 
 export function fetchImmuneGateReplay(requestId, params = {}) {
@@ -65,7 +60,7 @@ export function fetchImmuneGateReplay(requestId, params = {}) {
   if (!normalizedRequestId) {
     throw new Error('request_id is required')
   }
-  return getObs(execution.immuneGateReplay, params, { requestId: normalizedRequestId })
+  return endpointGet(execution.immuneGateReplay, params, { requestId: normalizedRequestId })
 }
 
 export function enableSchedulerTask(taskId) {
@@ -80,55 +75,47 @@ export function triggerSchedulerTask(taskId) {
   return postWithoutBody(execution.schedulerTaskTrigger, { taskId })
 }
 
-export function fetchSchedulerHistory(params = {}) {
-  return getObs(execution.schedulerHistory, params)
-}
-
 export function fetchToolHealth() {
-  return getObs(execution.toolHealth)
+  return endpointGet(execution.toolHealth)
 }
 
 export function fetchToolMetaPack(params = {}) {
-  return getObs(execution.toolMetaPack, params)
+  return endpointGet(execution.toolMetaPack, params)
 }
 
 export function fetchToolMeta(toolId) {
-  return getObs(execution.toolMeta, {}, { toolId })
+  return endpointGet(execution.toolMeta, {}, { toolId })
 }
 
 export function executeTool(body) {
-  return httpPost(endpointPath(execution.toolExecute), body, { timeoutMs: REQUEST_TIMEOUT_MS })
+  return endpointPost(execution.toolExecute, body, {}, {}, { timeoutMs: REQUEST_TIMEOUT_MS })
 }
 
 export function fetchCustomSkillProviders() {
-  return getObs(execution.customSkillProviders)
+  return endpointGet(execution.customSkillProviders)
 }
 
 export function fetchCustomSkillProviderTemplate() {
-  return getObs(execution.customSkillProviderTemplate)
+  return endpointGet(execution.customSkillProviderTemplate)
 }
 
 export function installCustomSkillProvider(body) {
-  return httpPost(endpointPath(execution.customSkillProviderInstall), body, { timeoutMs: REQUEST_TIMEOUT_MS })
-}
-
-export function fetchPermissionStats(params = {}) {
-  return getObs(execution.permissionStats, params)
+  return endpointPost(execution.customSkillProviderInstall, body, {}, {}, { timeoutMs: REQUEST_TIMEOUT_MS })
 }
 
 export function fetchActionPlanStats(params = {}) {
-  return getObs(execution.actionPlanStats, params)
+  return endpointGet(execution.actionPlanStats, params)
 }
 
 export function fetchSkillsHubStats() {
-  return getObs(execution.skillsHubStats)
+  return endpointGet(execution.skillsHubStats)
 }
 
 export function fetchTribeBundle() {
   return Promise.allSettled([
-    httpGet(execution.tribeSummary.path),
-    httpGet(execution.tribeEvents.path),
-    httpGet(execution.tribeSubscribers.path),
+    endpointGet(execution.tribeSummary),
+    endpointGet(execution.tribeEvents),
+    endpointGet(execution.tribeSubscribers),
   ]).then((results) => ({
     summary: unwrap(results[0]),
     events: unwrap(results[1]),
@@ -141,24 +128,21 @@ export function fetchTribeBundle() {
 }
 
 export function fetchEdgeCommandStatus() {
-  return httpGet(execution.edgeStatus.path)
+  return endpointGet(execution.edgeStatus)
 }
 
 export function pushEdgeCommand(payload) {
-  return httpPost(execution.edgePush.path, payload)
+  return endpointPost(execution.edgePush, payload)
 }
 
 function unwrap(result) {
   return result.status === 'fulfilled' ? result.value : null
 }
 
-function getObs(entry, params = {}, pathParams = {}) {
-  return obsGet(endpointPath(entry, pathParams, params))
-}
-
 function postWithoutBody(entry, pathParams = {}) {
-  return httpRequest(endpointPath(entry, pathParams), {
+  return endpointRequest(entry, {
     method: 'POST',
-    timeoutMs: REQUEST_TIMEOUT_MS,
+    pathParams,
+    options: { timeoutMs: REQUEST_TIMEOUT_MS },
   })
 }

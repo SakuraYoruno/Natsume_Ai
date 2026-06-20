@@ -1,119 +1,110 @@
-import { ENDPOINT_REGISTRY, endpointPath } from '../../shared/api/endpointRegistry.js'
-import { httpGet } from '../../shared/api/httpClient.js'
-import { obsGet, obsPost, obsPut } from '../../shared/api/obsClient.js'
+import { ENDPOINT_REGISTRY } from '../../shared/api/endpointRegistry.js'
+import { endpointGet, endpointPost, endpointPut } from '../../shared/api/endpointClient.js'
 
 const { digitalLife } = ENDPOINT_REGISTRY
 const LIFE_RUNTIME_TIMEOUT_MS = 6_000
 
+export { fetchPromptBuilderStats } from '../../shared/api/promptBuilderStats.js'
+export {
+  fetchCanonDocuments,
+  fetchContextCompressorStats,
+  fetchDistillationStats,
+  fetchEpisodicStoreStats,
+} from '../../shared/api/sharedObservability.js'
+
 export function fetchDigitalLifeOverviewSnapshot(params = {}) {
-  return getObs(digitalLife.overviewSnapshot, params)
+  return endpointGet(digitalLife.overviewSnapshot, params)
 }
 
 export function fetchDigitalLifeWallClockSoak(params = {}) {
-  return getObs(digitalLife.wallClockSoak, params)
+  return endpointGet(digitalLife.wallClockSoak, params)
 }
 
 export function fetchLifeBody(params = {}) {
-  return getObs(digitalLife.lifeBody, params)
+  return endpointGet(digitalLife.lifeBody, params)
 }
 
 export function fetchLifeTimeline(params = {}) {
-  return getObs(digitalLife.lifeTimeline, params)
+  return endpointGet(digitalLife.lifeTimeline, params)
 }
 
 export function fetchPathologies(params = {}) {
-  return getObs(digitalLife.pathologies, params)
+  return endpointGet(digitalLife.pathologies, params)
 }
 
 export function fetchAvatarState(params = {}) {
-  return getObs(digitalLife.avatarState, params)
+  return endpointGet(digitalLife.avatarState, params)
 }
 
 export function postAvatarBehavior(body = {}) {
-  return obsPost(endpointPath(digitalLife.avatarBehavior), body || {})
+  return endpointPost(digitalLife.avatarBehavior, body || {})
 }
 
 export function fetchDigitalLifeRuntimeSnapshot(params = {}) {
-  return getObs(digitalLife.runtimeSnapshot, params)
+  return endpointGet(digitalLife.runtimeSnapshot, params)
 }
 
 export function fetchMemoryStats(params = {}) {
-  return getObs(digitalLife.memoryStats, params)
-}
-
-export function fetchCanonDocuments() {
-  return getObs(digitalLife.canonDocuments)
+  return endpointGet(digitalLife.memoryStats, params)
 }
 
 export function fetchResidentMemoryContext() {
-  return getObs(digitalLife.residentMemoryContext)
-}
-
-export function fetchDistillationStats(params = {}) {
-  return getObs(digitalLife.distillationStats, params)
-}
-
-export function fetchContextCompressorStats(params = {}) {
-  return getObs(digitalLife.contextCompressorStats, params)
-}
-
-export function fetchEpisodicStoreStats(params = {}) {
-  return getObs(digitalLife.episodicStoreStats, params)
+  return endpointGet(digitalLife.residentMemoryContext)
 }
 
 export function fetchBondHealth() {
-  return getObs(digitalLife.bondHealth)
+  return endpointGet(digitalLife.bondHealth)
 }
 
 export function fetchBondUsers() {
-  return getObs(digitalLife.bondUsers)
+  return endpointGet(digitalLife.bondUsers)
 }
 
 export function fetchBondStage(userId) {
-  return getObs(digitalLife.bondStage, {}, { userId })
+  return endpointGet(digitalLife.bondStage, {}, { userId })
 }
 
 export function fetchBondSummary(userId) {
-  return getObs(digitalLife.bondSummary, {}, { userId })
+  return endpointGet(digitalLife.bondSummary, {}, { userId })
 }
 
 export function submitBondEvent(body) {
-  return obsPost(endpointPath(digitalLife.bondEvent), body)
+  return endpointPost(digitalLife.bondEvent, body)
 }
 
 export function fetchSysModeStatus() {
-  return obsGet(digitalLife.sysMode.path)
+  return endpointGet(digitalLife.sysMode)
 }
 
 export function switchSysMode(body) {
-  return obsPost(endpointPath(digitalLife.sysMode), body)
+  return endpointPost(digitalLife.sysMode, body)
 }
 
 export function fetchSysModeHistory(params = {}) {
-  return getObs(digitalLife.sysModeHistory, params)
+  return endpointGet(digitalLife.sysModeHistory, params)
 }
 
 export function updateAutoRules(body) {
-  return obsPut(endpointPath(digitalLife.sysModeAutoRules), body)
+  return endpointPut(digitalLife.sysModeAutoRules, body)
 }
 
 export function postSysModeEvent(eventType) {
-  return obsPost(endpointPath(digitalLife.sysModeEvent, {}, { event_type: eventType }), {})
+  return endpointPost(digitalLife.sysModeEvent, {}, {}, { event_type: eventType })
 }
 
 export function fetchVtsStats(params = {}) {
-  return getObs(digitalLife.vtsStats, params)
+  return endpointGet(digitalLife.vtsStats, params)
 }
 
 export function fetchLifeRuntimeBundle() {
   return Promise.allSettled([
-    fetchLifeRuntimePart(digitalLife.state.path),
-    fetchLifeRuntimePart(digitalLife.runtimeHealth.path),
-    fetchLifeRuntimePart(digitalLife.environment.path),
-    fetchLifeRuntimePart(digitalLife.organs.path),
-    fetchLifeRuntimePart(digitalLife.experience.path),
-    fetchLifeRuntimePart(digitalLife.memoryHealth.path),
-    fetchLifeRuntimePart(digitalLife.memoryEvents.path),
+    fetchLifeRuntimePart(digitalLife.state),
+    fetchLifeRuntimePart(digitalLife.runtimeHealth),
+    fetchLifeRuntimePart(digitalLife.environment),
+    fetchLifeRuntimePart(digitalLife.organs),
+    fetchLifeRuntimePart(digitalLife.experience),
+    fetchLifeRuntimePart(digitalLife.memoryHealth),
+    fetchLifeRuntimePart(digitalLife.memoryEvents),
   ]).then((results) => ({
     state: unwrap(results[0]),
     runtimeHealth: unwrap(results[1]),
@@ -129,12 +120,8 @@ export function fetchLifeRuntimeBundle() {
   }))
 }
 
-function fetchLifeRuntimePart(path) {
-  return httpGet(path, { timeoutMs: LIFE_RUNTIME_TIMEOUT_MS })
-}
-
-function getObs(entry, params = {}, pathParams = {}) {
-  return obsGet(endpointPath(entry, pathParams, params))
+function fetchLifeRuntimePart(entry) {
+  return endpointGet(entry, {}, {}, { timeoutMs: LIFE_RUNTIME_TIMEOUT_MS })
 }
 
 function unwrap(result) {

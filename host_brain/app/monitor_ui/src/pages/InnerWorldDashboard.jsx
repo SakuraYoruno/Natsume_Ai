@@ -1,4 +1,4 @@
-import React from 'react'
+﻿import React from 'react'
 import {
   Clock3,
   MessageSquareDashed,
@@ -7,13 +7,13 @@ import {
   Sparkles,
   Waves,
 } from 'lucide-react'
-import EmptyStateCard from '../components/EmptyStateCard.jsx'
-import KeyValueRow from '../components/KeyValueRow.jsx'
-import MetricCard from '../components/MetricCard.jsx'
-import NoticeBanner from '../components/NoticeBanner.jsx'
-import PageHero from '../components/PageHero.jsx'
-import BackgroundRuntimeCard from '../components/BackgroundRuntimeCard.jsx'
-import InnerContinuityCard from '../components/InnerContinuityCard.jsx'
+import EmptyStateCard from '../shared/ui/EmptyStateCard.jsx'
+import KeyValueRow from '../shared/ui/KeyValueRow.jsx'
+import MetricCard from '../shared/ui/MetricCard.jsx'
+import NoticeBanner from '../shared/ui/NoticeBanner.jsx'
+import PageHero from '../shared/ui/PageHero.jsx'
+import BackgroundRuntimeCard from '../features/life/components/BackgroundRuntimeCard.jsx'
+import InnerContinuityCard from '../features/life/components/InnerContinuityCard.jsx'
 import useDigitalLifeRuntimeSignals from '../hooks/useDigitalLifeRuntimeSignals.js'
 import useAppStore from '../store/useAppStore.js'
 import {

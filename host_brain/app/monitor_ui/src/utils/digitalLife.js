@@ -1,5 +1,10 @@
 ﻿export const DASH = '—'
 
+import {
+  formatDateTime as formatSharedDateTime,
+  formatNumber as formatSharedNumber,
+} from '../shared/formatters.js'
+
 export const MODE_META = {
   normal: {
     emoji: '🟢',
@@ -372,23 +377,24 @@ export function formatStage(stage) {
 export function formatDateTime(tsMs) {
   if (tsMs == null || tsMs === '') return DASH
   if (typeof tsMs === 'string' && Number.isNaN(Number(tsMs))) {
-    const date = new Date(tsMs)
-    return Number.isNaN(date.getTime()) ? DASH : date.toLocaleString('zh-CN', { hour12: false })
+    const parsedMs = Date.parse(tsMs)
+    return Number.isNaN(parsedMs)
+      ? DASH
+      : formatSharedDateTime(parsedMs, { placeholder: DASH, options: { hour12: false } })
   }
   const numeric = Number(tsMs)
   if (!Number.isFinite(numeric)) return DASH
   const ms = numeric < 1e12 ? numeric * 1000 : numeric
-  const date = new Date(ms)
-  return Number.isNaN(date.getTime()) ? DASH : date.toLocaleString('zh-CN', { hour12: false })
+  return formatSharedDateTime(ms, { placeholder: DASH, options: { hour12: false } })
 }
 
 export function formatNumber(value, digits = 2) {
   const numeric = Number(value)
   if (!Number.isFinite(numeric)) return DASH
-  return new Intl.NumberFormat('zh-CN', {
-    maximumFractionDigits: digits,
+  return formatSharedNumber(numeric, digits, {
+    placeholder: DASH,
     minimumFractionDigits: digits > 0 && Math.abs(numeric) < 10 ? Math.min(digits, 2) : 0,
-  }).format(numeric)
+  })
 }
 
 export function formatBoolean(value, yes = '是', no = '否') {

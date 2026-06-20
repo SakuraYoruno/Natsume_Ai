@@ -1,35 +1,20 @@
-import React, { useEffect, useMemo, useState } from 'react'
+﻿import React, { useEffect, useState } from 'react'
 import { Heart, RefreshCw, ShieldCheck, Sparkles, Users } from 'lucide-react'
 import { submitBondEvent } from '../features/life/api.js'
-import EmptyStateCard from '../components/EmptyStateCard.jsx'
-import KeyValueRow from '../components/KeyValueRow.jsx'
-import OrganSystemOverview from '../components/lifeBody/OrganSystemOverview.jsx'
-import MetricCard from '../components/MetricCard.jsx'
-import NoticeBanner from '../components/NoticeBanner.jsx'
-import SampleMeta from '../components/obs/SampleMeta.jsx'
-import PageHero from '../components/PageHero.jsx'
-import { LOAD_STATES, resolveLoadState } from '../models/loadState.js'
-import { buildBondOrganSystemModel } from '../models/organSystemModel.js'
-import { useBondOverviewQuery, useBondUserDetailQuery } from '../features/life/queries.js'
-import useAppStore from '../store/useAppStore.js'
+import EmptyStateCard from '../shared/ui/EmptyStateCard.jsx'
+import KeyValueRow from '../shared/ui/KeyValueRow.jsx'
+import OrganSystemOverview from '../features/life/components/lifeBody/OrganSystemOverview.jsx'
+import MetricCard from '../shared/ui/MetricCard.jsx'
+import NoticeBanner from '../shared/ui/NoticeBanner.jsx'
+import SampleMeta from '../shared/ui/observability/SampleMeta.jsx'
+import PageHero from '../shared/ui/PageHero.jsx'
 import {
-  formatDateTime,
-  formatStage,
-  formatTransitionStatus,
-  formatTrend,
-} from '../utils/digitalLife.js'
-
-const STAGE_COLORS = {
-  STRANGER: '#94a3b8',
-  ACQUAINTANCE: '#60a5fa',
-  FRIEND: '#34d399',
-  CLOSE: '#22c55e',
-  CLOSE_FRIEND: '#a78bfa',
-  COMPANION: '#f472b6',
-  CONFIDANT: '#ec4899',
-  INTIMATE: '#ef4444',
-  SOULMATE: '#f59e0b',
-}
+  buildBondDashboardViewModel,
+  buildBondStageDistribution,
+  buildBondSubmitSuccessMessage,
+} from '../features/life/bondModel.js'
+import { useBondOverviewQuery, useBondUserDetailQuery } from '../features/life/bondQueries.js'
+import useAppStore from '../store/useAppStore.js'
 
 const UPDATE_KIND_OPTIONS = [
   { value: 'INTERACTION', label: '日常互动' },
@@ -50,18 +35,10 @@ const EMOTION_TAG_OPTIONS = [
   { value: 'DISGUST', label: '排斥' },
 ]
 
-function formatHealthStatus(status) {
-  if (!status) return '—'
-  if (status === 'OK') return '正常'
-  if (status === 'DEGRADED') return '降级'
-  if (status === 'DOWN') return '离线'
-  return status
-}
-
 function StageDistribution({ items }) {
-  const total = items.reduce((sum, item) => sum + item.count, 0)
+  const distribution = buildBondStageDistribution(items)
 
-  if (!items.length || total <= 0) {
+  if (!distribution.items.length || distribution.total <= 0) {
     return (
       <EmptyStateCard
         title="暂无阶段分布"
@@ -73,20 +50,19 @@ function StageDistribution({ items }) {
 
   return (
     <div className="space-y-2">
-      {items.map((item) => {
-        const percent = (item.count / total) * 100
+      {distribution.items.map((item) => {
         return (
           <div key={item.stage} className="space-y-1">
             <div className="flex items-center justify-between text-xs">
-              <span className="text-gray-700">{formatStage(item.stage)}</span>
-              <span className="text-gray-400">{item.count} · {percent.toFixed(0)}%</span>
+              <span className="text-gray-700">{item.label}</span>
+              <span className="text-gray-400">{item.count} · {item.percentLabel}</span>
             </div>
             <div className="h-2 overflow-hidden rounded-full bg-gray-100">
               <div
                 className="h-full rounded-full"
                 style={{
-                  width: `${percent}%`,
-                  backgroundColor: STAGE_COLORS[item.stage] || '#cbd5e1',
+                  width: item.width,
+                  backgroundColor: item.color,
                 }}
               />
             </div>
@@ -260,46 +236,28 @@ export default function Bond() {
     }
   }, [selectedUser, users])
 
-  const bondLoadState = resolveLoadState({
-    loading: loading || refreshing,
-    error: overviewError,
-    hasData: Boolean(health || users.length > 0 || stageDist.length > 0),
-    hasSamples: users.length > 0 || stageSampleCount > 0 || Number(health?.user_count ?? 0) > 0,
-    available: Boolean(health || users.length > 0 || stageDist.length > 0),
+  const {
+    heroView,
+    sampleMeta,
+    noticeView,
+    organModel,
+    metricCards,
+    detailView,
+  } = buildBondDashboardViewModel({
+    health,
+    users,
+    stageDist,
+    stageSampleCount,
+    overviewError,
+    loading,
+    refreshing,
     stale,
+    lastUpdatedAt,
+    selectedUser,
+    userDetail,
+    detailError,
+    detailUpdatedAt,
   })
-  const bondUpdatedAt = Math.max(lastUpdatedAt || 0, detailUpdatedAt || 0) || null
-  const currentStageLabel = formatStage(userDetail?.current_stage)
-  const currentTrendLabel = formatTrend(userDetail?.trend)
-  const lastEventLabel = formatDateTime(userDetail?.last_event_ts_ms)
-  const bondOrganModel = useMemo(() => buildBondOrganSystemModel({
-    loadState: bondLoadState,
-    updatedAt: bondUpdatedAt,
-    healthStatus: formatHealthStatus(health?.status),
-    selectedUser,
-    userCount: health?.user_count ?? users.length,
-    stageSampleCount,
-    currentStageLabel,
-    trendLabel: currentTrendLabel,
-    totalScore: userDetail?.total_score,
-    eventCount: userDetail?.event_count,
-    capabilityHint: userDetail?.capability_hint,
-    lastEventLabel,
-  }), [
-    bondLoadState,
-    bondUpdatedAt,
-    currentStageLabel,
-    currentTrendLabel,
-    health?.status,
-    health?.user_count,
-    lastEventLabel,
-    selectedUser,
-    stageSampleCount,
-    userDetail?.capability_hint,
-    userDetail?.event_count,
-    userDetail?.total_score,
-    users.length,
-  ])
 
   const handleSubmitEvent = async (body) => {
     setSubmitLoading(true)
@@ -340,47 +298,40 @@ export default function Bond() {
       <PageHero
         icon={Heart}
         eyebrow="社交脑快照"
-        title={selectedUser || formatHealthStatus(health?.status)}
-        description={
-          selectedUser
-            ? '当前正在查看该用户的关系阶段、趋势与能力提示。'
-            : '这里集中展示社交脑健康度、阶段分布与关系事件录入。'
-        }
+        title={heroView.title}
+        description={heroView.description}
         gradientClass="from-primary-50 via-white to-rose-50"
-        metaItems={[
-          `引擎状态：${formatHealthStatus(health?.status)}`,
-          `用户数：${health?.user_count ?? users.length}`,
-          `分布样本：${stageSampleCount}`,
-          `已选用户：${selectedUser || '未选择'}`,
-        ]}
+        metaItems={heroView.metaItems}
         aside={(
           <SampleMeta
             className="max-w-md"
-            loadState={bondLoadState}
-            sampleSize={stageSampleCount}
-            sampleLabel="关系样本"
-            updatedAt={bondUpdatedAt}
-            source="bond / stage"
-            definition="社交脑页聚合关系健康、用户列表、阶段分布与当前用户详情；无样本、暂不可用与加载失败会明确区分。"
+            loadState={sampleMeta.loadState}
+            sampleSize={sampleMeta.sampleSize}
+            sampleLabel={sampleMeta.sampleLabel}
+            updatedAt={sampleMeta.updatedAt}
+            source={sampleMeta.source}
+            definition={sampleMeta.definition}
           />
         )}
       />
 
-      {overviewError ? <NoticeBanner variant="error" title="关系数据加载失败">{overviewError}</NoticeBanner> : null}
+      {noticeView.overviewError ? (
+        <NoticeBanner variant="error" title="关系数据加载失败">{noticeView.overviewError}</NoticeBanner>
+      ) : null}
 
-      {!overviewError && !loading && !refreshing && bondLoadState === LOAD_STATES.NO_SAMPLE ? (
+      {noticeView.noSample ? (
         <NoticeBanner variant="info" title="关系链路待采样">
           当前还没有可用的 Bond 用户或阶段样本，页面会保留中性空态。
         </NoticeBanner>
       ) : null}
 
-      {!overviewError && !loading && !refreshing && bondLoadState === LOAD_STATES.UNAVAILABLE ? (
+      {noticeView.unavailable ? (
         <NoticeBanner variant="warning" title="关系观测暂不可用">
           Bond 相关接口当前未返回可用快照，建议稍后重试。
         </NoticeBanner>
       ) : null}
 
-      <OrganSystemOverview model={bondOrganModel} />
+      <OrganSystemOverview model={organModel} />
 
       {submitResult ? (
         <NoticeBanner
@@ -388,16 +339,15 @@ export default function Bond() {
           title={submitResult.ok ? '关系事件已提交' : '关系事件提交失败'}
         >
           {submitResult.ok
-            ? `${formatStage(submitResult.data.from_stage)} → ${formatStage(submitResult.data.to_stage)}，${formatTransitionStatus(submitResult.data.transition_status)}，积分变化 ${submitResult.data.score_delta > 0 ? '+' : ''}${submitResult.data.score_delta ?? 0}`
+            ? buildBondSubmitSuccessMessage(submitResult.data)
             : submitResult.error}
         </NoticeBanner>
       ) : null}
 
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <MetricCard label="引擎状态" value={formatHealthStatus(health?.status)} hint={`用户 ${health?.user_count ?? users.length}`} tone="text-green-600" />
-        <MetricCard label="当前阶段" value={currentStageLabel} hint={`趋势 ${currentTrendLabel}`} tone="text-pink-600" />
-        <MetricCard label="累计积分" value={userDetail?.total_score ?? '—'} hint={`事件 ${userDetail?.event_count ?? 0} 次`} tone="text-purple-600" />
-        <MetricCard label="最近事件" value={lastEventLabel} hint={userDetail?.capability_hint || '等待选择用户'} tone="text-blue-600" />
+        {metricCards.map((card) => (
+          <MetricCard key={card.label} label={card.label} value={card.value} hint={card.hint} tone={card.tone} />
+        ))}
       </div>
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-[320px_minmax(0,1fr)_360px]">
@@ -443,21 +393,15 @@ export default function Bond() {
             </div>
             {detailLoading || detailRefreshing ? (
               <NoticeBanner variant="info">正在加载用户关系详情…</NoticeBanner>
-            ) : detailError ? (
+            ) : detailView.errorMessage ? (
               <NoticeBanner variant="warning" title="用户详情暂不可用">
-                {detailError}
-                {detailUpdatedAt ? ` · 最近更新时间 ${formatDateTime(detailUpdatedAt)}` : ''}
+                {detailView.errorMessage}
               </NoticeBanner>
             ) : userDetail ? (
               <div className="space-y-3">
-                <KeyValueRow label="用户 ID" value={userDetail.user_id} />
-                <KeyValueRow label="当前阶段" value={formatStage(userDetail.current_stage)} />
-                <KeyValueRow label="阶段序号" value={userDetail.stage_index} />
-                <KeyValueRow label="累计积分" value={userDetail.total_score} />
-                <KeyValueRow label="事件次数" value={userDetail.event_count} />
-                <KeyValueRow label="趋势" value={formatTrend(userDetail.trend)} />
-                <KeyValueRow label="能力提示" value={userDetail.capability_hint} />
-                <KeyValueRow label="最近事件" value={formatDateTime(userDetail.last_event_ts_ms)} />
+                {detailView.rows.map((row) => (
+                  <KeyValueRow key={row.label} label={row.label} value={row.value} />
+                ))}
               </div>
             ) : (
               <EmptyStateCard title="请选择一个用户" hint="选择后这里会显示该用户的关系快照。" className="p-4" />

@@ -1,45 +1,56 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useMemo, useState } from 'react'
 import { Bug, RefreshCw, ShieldCheck } from 'lucide-react'
-import PageHero from '../components/PageHero.jsx'
-import NoticeBanner from '../components/NoticeBanner.jsx'
-import StatusBadge from '../components/StatusBadge.jsx'
+import PageHero from '../shared/ui/PageHero.jsx'
+import NoticeBanner from '../shared/ui/NoticeBanner.jsx'
+import StatusBadge from '../shared/ui/StatusBadge.jsx'
 import JsonBlock from '../shared/ui/JsonBlock.jsx'
+import { runSecurityHuntOnce } from '../features/security/api.js'
+import { useSecurityImmuneQuery } from '../features/security/securityImmuneQueries.js'
 import {
-  fetchSecurityAssets,
-  fetchSecurityIncidents,
-  fetchSecurityRuntime,
-  runSecurityHuntOnce,
-} from '../features/security/api.js'
+  SECURITY_MIN_RISK_OPTIONS,
+  buildSecurityImmuneViewModel,
+} from '../features/security/securityImmuneModel.js'
+import useAppStore from '../store/useAppStore.js'
 
 export default function SecurityImmune() {
-  const [runtime, setRuntime] = useState(null)
-  const [assets, setAssets] = useState(null)
-  const [incidents, setIncidents] = useState(null)
+  const pollingEnabled = useAppStore((s) => s.pollingEnabled)
+  const pollingInterval = useAppStore((s) => s.pollingInterval)
+  const pollingTick = useAppStore((s) => s.pollingTick)
   const [minRisk, setMinRisk] = useState('low')
-  const [loading, setLoading] = useState(true)
-  const [errors, setErrors] = useState([])
   const [huntResult, setHuntResult] = useState(null)
   const [runningHunt, setRunningHunt] = useState(false)
-
-  const riskCounts = useMemo(() => incidents?.risk_counts || runtime?.risk_counts || {}, [incidents, runtime])
-
-  const load = async () => {
-    setLoading(true)
-    const results = await Promise.allSettled([
-      fetchSecurityRuntime(),
-      fetchSecurityAssets(),
-      fetchSecurityIncidents(minRisk),
-    ])
-    setRuntime(results[0].status === 'fulfilled' ? results[0].value : null)
-    setAssets(results[1].status === 'fulfilled' ? results[1].value : null)
-    setIncidents(results[2].status === 'fulfilled' ? results[2].value : null)
-    setErrors(results.filter((item) => item.status === 'rejected').map((item) => item.reason?.message || String(item.reason)))
-    setLoading(false)
-  }
-
-  useEffect(() => {
-    void load()
-  }, [minRisk])
+  const {
+    runtime,
+    assets,
+    incidents,
+    partialErrors,
+    loading,
+    refreshing,
+    error,
+    refetch,
+  } = useSecurityImmuneQuery({
+    minRisk,
+    pollingEnabled,
+    pollingTick,
+    pollingInterval,
+  })
+  const busy = loading || refreshing
+  const errors = useMemo(() => [
+    ...(partialErrors || []),
+    ...(error ? [error.message] : []),
+  ], [error, partialErrors])
+  const {
+    heroMetaItems,
+    riskCards,
+    incidentRows,
+    hasIncidentRows,
+    runtimeBadge,
+  } = useMemo(() => buildSecurityImmuneViewModel({
+    runtime,
+    assets,
+    incidents,
+    loading: busy,
+  }), [assets, busy, incidents, runtime])
 
   const runHunt = async () => {
     setRunningHunt(true)
@@ -47,7 +58,7 @@ export default function SecurityImmune() {
     try {
       const result = await runSecurityHuntOnce('manual_web_security_immune')
       setHuntResult({ ok: true, data: result })
-      await load()
+      await refetch()
     } catch (error) {
       setHuntResult({ ok: false, error: error.message || String(error) })
     } finally {
@@ -63,11 +74,7 @@ export default function SecurityImmune() {
         title="Security Immune"
         description="内网资产、风险事件和免疫巡检运行态。页面接入 /obs/security/*，手动 hunt 走 internal gated route。"
         gradientClass="from-emerald-50 via-white to-rose-50"
-        metaItems={[
-          `${assets?.asset_count ?? 0} assets`,
-          `${incidents?.incident_count ?? 0} incidents`,
-          loading ? 'loading' : 'ready',
-        ]}
+        metaItems={heroMetaItems}
       />
 
       {errors.length > 0 ? (
@@ -83,10 +90,10 @@ export default function SecurityImmune() {
       ) : null}
 
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-        {['critical', 'high', 'medium', 'low'].map((risk) => (
-          <div key={risk} className="rounded-lg border border-white/80 bg-white/86 px-3 py-2 shadow-sm">
-            <div className="text-lg font-bold text-gray-800">{riskCounts[risk] ?? 0}</div>
-            <div className="text-xs capitalize text-gray-500">{risk}</div>
+        {riskCards.map((card) => (
+          <div key={card.risk} className="rounded-lg border border-white/80 bg-white/86 px-3 py-2 shadow-sm">
+            <div className="text-lg font-bold text-gray-800">{card.value}</div>
+            <div className="text-xs capitalize text-gray-500">{card.risk}</div>
           </div>
         ))}
       </div>
@@ -101,27 +108,32 @@ export default function SecurityImmune() {
                 value={minRisk}
                 onChange={(event) => setMinRisk(event.target.value)}
               >
-                {['low', 'medium', 'high', 'critical'].map((risk) => (
+                {SECURITY_MIN_RISK_OPTIONS.map((risk) => (
                   <option key={risk} value={risk}>{risk}</option>
                 ))}
               </select>
-              <button type="button" onClick={load} className="inline-flex items-center gap-1 rounded border border-gray-200 px-2 py-1 text-xs font-semibold text-gray-600 hover:bg-gray-50">
+              <button
+                type="button"
+                onClick={() => { void refetch() }}
+                disabled={busy}
+                className="inline-flex items-center gap-1 rounded border border-gray-200 px-2 py-1 text-xs font-semibold text-gray-600 hover:bg-gray-50 disabled:opacity-50"
+              >
                 <RefreshCw size={12} />
                 刷新
               </button>
             </div>
           </div>
           <div className="space-y-2">
-            {(incidents?.incidents || []).length === 0 ? (
+            {!hasIncidentRows ? (
               <div className="rounded-lg border border-gray-100 bg-gray-50 p-3 text-sm text-gray-500">当前风险阈值下没有 incident。</div>
             ) : (
-              incidents.incidents.map((incident, index) => (
-                <div key={incident.incident_id || index} className="rounded-lg border border-gray-100 bg-white p-3">
+              incidentRows.map((incident) => (
+                <div key={incident.key} className="rounded-lg border border-gray-100 bg-white p-3">
                   <div className="flex items-center justify-between gap-2">
-                    <span className="text-sm font-semibold text-gray-800">{incident.title || incident.kind || `Incident ${index + 1}`}</span>
-                    <span className="rounded bg-red-50 px-2 py-0.5 text-xs font-semibold text-red-700">{incident.risk || 'unknown'}</span>
+                    <span className="text-sm font-semibold text-gray-800">{incident.title}</span>
+                    <span className="rounded bg-red-50 px-2 py-0.5 text-xs font-semibold text-red-700">{incident.risk}</span>
                   </div>
-                  <div className="mt-1 text-xs text-gray-500">{incident.detail || incident.reason || '无详情'}</div>
+                  <div className="mt-1 text-xs text-gray-500">{incident.detail}</div>
                 </div>
               ))
             )}
@@ -132,9 +144,9 @@ export default function SecurityImmune() {
           <section className="rounded-xl border border-white/80 bg-white/86 p-4 shadow-sm">
             <div className="mb-3 flex items-center justify-between">
               <h2 className="text-base font-semibold text-gray-800">Runtime</h2>
-              <StatusBadge status={runtime ? 'healthy' : 'degraded'} label={runtime ? 'connected' : 'degraded'} />
+              <StatusBadge status={runtimeBadge.status} label={runtimeBadge.label} />
             </div>
-            <JsonBlock data={runtime || { loading }} />
+            <JsonBlock data={runtime || { loading: busy }} />
           </section>
 
           <section className="rounded-xl border border-white/80 bg-white/86 p-4 shadow-sm">

@@ -9,26 +9,26 @@ import {
 } from 'lucide-react'
 import {
   connectTraceRequestLive,
-} from '../features/observability/api.js'
-import EmptyStateCard from '../components/EmptyStateCard.jsx'
-import LivingPulseStrip from '../components/LivingPulseStrip.jsx'
-import LoadingNotice from '../components/LoadingNotice.jsx'
-import NoticeBanner from '../components/NoticeBanner.jsx'
-import NodeDetailPanel from '../components/trace/NodeDetailPanel.jsx'
-import PageHero from '../components/PageHero.jsx'
-import StatusBadge from '../components/StatusBadge.jsx'
+} from '../features/observability/traceApi.js'
+import EmptyStateCard from '../shared/ui/EmptyStateCard.jsx'
+import LivingPulseStrip from '../shared/ui/LivingPulseStrip.jsx'
+import LoadingNotice from '../shared/ui/LoadingNotice.jsx'
+import NoticeBanner from '../shared/ui/NoticeBanner.jsx'
+import NodeDetailPanel from '../features/observability/components/trace/NodeDetailPanel.jsx'
+import PageHero from '../shared/ui/PageHero.jsx'
+import StatusBadge from '../shared/ui/StatusBadge.jsx'
 import {
   TraceMetricCard as MetricCard,
   TraceMiniStat as MiniStat,
   TraceSectionCard as SectionCard,
-} from '../components/trace/TraceSurfaces.jsx'
+} from '../features/observability/components/trace/TraceSurfaces.jsx'
 import {
   AuditSummaryPanel,
   RawJsonDetails,
   RecallSummaryPanel,
   RetrievalRuntimeOverviewPanel,
   TextPreviewCard,
-} from '../components/trace/TraceRequestSummaryPanels.jsx'
+} from '../features/observability/components/trace/TraceRequestSummaryPanels.jsx'
 import {
   ImmuneReplayPanel,
   LiveEntriesPanel,
@@ -41,7 +41,7 @@ import {
   buildDeltaEntries,
   dedupeStreamEvents,
   mergeDeltaEntries,
-} from '../components/trace/TraceRequestRuntimePanels.jsx'
+} from '../features/observability/components/trace/TraceRequestRuntimePanels.jsx'
 import {
   ISSUE_STATUSES,
   RUNNING_STATUSES,
@@ -51,8 +51,8 @@ import {
   getSummaryInputText,
   getSummaryOutputText,
   normalizeStatus,
-} from '../components/trace/TraceRequestDetailModel.jsx'
-import { useImmuneGateReplayQuery } from '../features/execution/queries.js'
+} from '../features/observability/components/trace/TraceRequestDetailModel.jsx'
+import { useImmuneGateReplayQuery } from '../features/execution/automationQueries.js'
 import {
   useTraceRetrievalRuntimeQuery,
   useTraceSnapshotQuery,

@@ -27,6 +27,7 @@ export const ENDPOINT_REGISTRY = Object.freeze({
     report: { service: 'host', path: '/v1/pentest/runs/:runId/report', risk: 'medium' },
     cancel: { service: 'host', path: '/v1/pentest/runs/:runId/cancel', risk: 'medium' },
     approveSideEffect: { service: 'host', path: '/v1/pentest/runs/:runId/approve-side-effect', risk: 'high' },
+    continueSideEffect: { service: 'host', path: '/v1/pentest/runs/:runId/continue-side-effect', risk: 'high' },
   },
   securityImmune: {
     runtime: { service: 'obs', path: '/obs/security/runtime', risk: 'low' },

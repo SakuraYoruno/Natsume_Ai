@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react'
+﻿import React, { useMemo, useState } from 'react'
 import {
   Activity,
   CheckCircle2,
@@ -9,13 +9,13 @@ import {
   ShieldCheck,
   Sparkles,
 } from 'lucide-react'
-import EmptyStateCard from '../components/EmptyStateCard.jsx'
-import NoticeBanner from '../components/NoticeBanner.jsx'
+import EmptyStateCard from '../shared/ui/EmptyStateCard.jsx'
+import NoticeBanner from '../shared/ui/NoticeBanner.jsx'
 import {
   BioOpsSkeletonGrid,
   MetricTile,
   Section,
-} from '../components/bioOps/BioOpsSurfaces.jsx'
+} from '../features/observability/components/bioOps/BioOpsSurfaces.jsx'
 import {
   ArtifactList,
   BenefitCard,
@@ -25,9 +25,9 @@ import {
   GroupTable,
   RuntimeTraceList,
   StatusDistribution,
-} from '../components/bioOps/BioOpsSummarySections.jsx'
-import { OwnerInboxPanel, PendingAdoptions } from '../components/bioOps/BioOpsOwnerPanels.jsx'
-import { CapabilityWorkbench } from '../components/bioOps/BioOpsWorkbench.jsx'
+} from '../features/observability/components/bioOps/BioOpsSummarySections.jsx'
+import { OwnerInboxPanel, PendingAdoptions } from '../features/observability/components/bioOps/BioOpsOwnerPanels.jsx'
+import { CapabilityWorkbench } from '../features/observability/components/bioOps/BioOpsWorkbench.jsx'
 import {
   AdaptiveRepairPanel,
   AffectLearningPanel,
@@ -41,10 +41,40 @@ import {
   RelationshipLayerPanel,
   SelfGovernancePanel,
   TrustFoundationPanel,
-} from '../components/bioOps/BioOpsCapabilityPanels.jsx'
+} from '../features/observability/components/bioOps/BioOpsCapabilityPanels.jsx'
 import useAppStore from '../store/useAppStore.js'
-import { runCodexBioOpsDailyCycle } from '../features/observability/api.js'
-import { useCodexBioOpsObservabilityQuery } from '../features/observability/queries.js'
+import { runCodexBioOpsDailyCycle } from '../features/observability/bioOpsApi.js'
+import {
+  buildBioOpsCapabilitySections,
+  buildBioOpsMetricTiles,
+  getBioOpsObservabilityViewData,
+  isBioOpsKeyBenefitObservable,
+} from '../features/observability/bioOpsModel.js'
+import { useCodexBioOpsObservabilityQuery } from '../features/observability/codexBioOpsQueries.js'
+import { formatDateTime } from '../shared/formatters.js'
+
+const BIO_OPS_CAPABILITY_PANELS = {
+  inner_mechanisms: InnerMechanismPanel,
+  trust_foundation: TrustFoundationPanel,
+  natural_interaction: NaturalInteractionPanel,
+  relationship_layer: RelationshipLayerPanel,
+  inner_life: InnerLifePanel,
+  self_governance: SelfGovernancePanel,
+  growth_closure: GrowthClosurePanel,
+  memory_narrative: MemoryNarrativePanel,
+  affect_learning: AffectLearningPanel,
+  presence_channel: PresenceChannelPanel,
+  drive_trust: DriveTrustPanel,
+  adaptive_repair: AdaptiveRepairPanel,
+}
+
+const BIO_OPS_METRIC_ICONS = {
+  codexInspect: GitBranch,
+  blockedWrite: Lock,
+  bioOpsCapabilities: Sparkles,
+  ownerPending: ShieldCheck,
+  hardCutScan: CheckCircle2,
+}
 
 export default function CodexBioOpsObservability() {
   const pollingEnabled = useAppStore((state) => state.pollingEnabled)
@@ -61,175 +91,21 @@ export default function CodexBioOpsObservability() {
     pollingTick,
   })
   const data = query.data || null
-  const codex = data?.codex_runtime || {}
-  const bioOps = data?.bio_ops || {}
-  const innerMechanisms = bioOps.inner_mechanisms || {}
-  const trustFoundation = bioOps.trust_foundation || {}
-  const naturalInteraction = bioOps.natural_interaction || {}
-  const relationshipLayer = bioOps.relationship_layer || {}
-  const innerLife = bioOps.inner_life || {}
-  const selfGovernance = bioOps.self_governance || {}
-  const growthClosure = bioOps.growth_closure || {}
-  const memoryNarrative = bioOps.memory_narrative || {}
-  const affectLearning = bioOps.affect_learning || {}
-  const presenceChannel = bioOps.presence_channel || {}
-  const driveTrust = bioOps.drive_trust || {}
-  const adaptiveRepair = bioOps.adaptive_repair || {}
-  const inspect = codex.inspect || {}
-  const blockedWrite = codex.blocked_write || {}
-  const pendingAdoptions = Array.isArray(bioOps.pending_adoptions) ? bioOps.pending_adoptions : []
-  const statusCounts = bioOps.status_counts || {}
-  const totalBioOps = useMemo(
-    () => Object.values(statusCounts).reduce((sum, value) => sum + Number(value || 0), 0),
-    [statusCounts]
+  const bioOpsView = useMemo(() => getBioOpsObservabilityViewData(data), [data])
+  const {
+    codex,
+    bioOps,
+    inspect,
+    blockedWrite,
+    pendingAdoptions,
+    statusCounts,
+  } = bioOpsView
+  const capabilitySections = useMemo(
+    () => buildBioOpsCapabilitySections(bioOps, BIO_OPS_CAPABILITY_PANELS),
+    [bioOps]
   )
-  const capabilitySections = useMemo(() => [
-    {
-      key: 'inner_mechanisms',
-      title: 'Inner Mechanisms',
-      subtitle: '第三份文档的最小可落地机制：先纳入 BioOps 审计和 owner gate，再决定是否升级主路径。',
-      hint: 'Promise、反射弧、边界',
-      status: 'OWNER_GATED',
-      count: innerMechanisms.capability_count,
-      statusCounts: innerMechanisms.status_counts,
-      summary: innerMechanisms,
-      Panel: InnerMechanismPanel,
-    },
-    {
-      key: 'trust_foundation',
-      title: 'Trust Foundation',
-      subtitle: '可信基础层：授权梯度、真实约束、能力谦逊和不确定性表达统一变成可观测 gate。',
-      hint: '授权、真实、能力边界',
-      status: 'TRACED',
-      count: trustFoundation.capability_count,
-      statusCounts: trustFoundation.status_counts,
-      summary: trustFoundation,
-      Panel: TrustFoundationPanel,
-    },
-    {
-      key: 'natural_interaction',
-      title: 'Natural Interaction',
-      subtitle: '自然交互层：主观时间、情绪惯性、上下文重力和自我打断统一进入低风险 trace。',
-      hint: '呼吸式回复、主观时间',
-      status: 'TRACED',
-      count: naturalInteraction.capability_count,
-      statusCounts: naturalInteraction.status_counts,
-      summary: naturalInteraction,
-      Panel: NaturalInteractionPanel,
-    },
-    {
-      key: 'relationship_layer',
-      title: 'Relationship Layer',
-      subtitle: '长期关系层：契约、摩擦、修复曲线、依恋风格、沉默记忆和边界守护保持可观测。',
-      hint: '契约、摩擦、修复',
-      status: 'REPORT_ONLY',
-      count: relationshipLayer.capability_count,
-      statusCounts: relationshipLayer.status_counts,
-      summary: relationshipLayer,
-      Panel: RelationshipLayerPanel,
-    },
-    {
-      key: 'inner_life',
-      title: 'Inner Life',
-      subtitle: '内在生命层：梦境排练、象征记忆、记忆质感、自我模型、生命脉搏和个人神话保持报告模式。',
-      hint: '梦境、象征、自我模型',
-      status: 'REPORT_ONLY',
-      count: innerLife.capability_count,
-      statusCounts: innerLife.status_counts,
-      summary: innerLife,
-      Panel: InnerLifePanel,
-    },
-    {
-      key: 'self_governance',
-      title: 'Self Governance',
-      subtitle: '自我治理层：价值层级、伦理复盘、边界膜、尊严守护、身份连续性和内在议会保持可观测。',
-      hint: '价值、伦理、边界',
-      status: 'REPORT_ONLY',
-      count: selfGovernance.capability_count,
-      statusCounts: selfGovernance.status_counts,
-      summary: selfGovernance,
-      Panel: SelfGovernancePanel,
-    },
-    {
-      key: 'growth_closure',
-      title: 'Growth Closure',
-      subtitle: '成长与收束层：想法池、阶段门、存在负载、未闭环和认知卸载让项目能继续收尾。',
-      hint: '阶段、负载、收束',
-      status: 'REPORT_ONLY',
-      count: growthClosure.capability_count,
-      statusCounts: growthClosure.status_counts,
-      summary: growthClosure,
-      Panel: GrowthClosurePanel,
-    },
-    {
-      key: 'memory_narrative',
-      title: 'Memory Narrative',
-      subtitle: '记忆与叙事层：情节、书架、认知地标、叙事身份、自我连续性和梦化压缩保持可审计。',
-      hint: '情节、叙事、连续性',
-      status: 'REPORT_ONLY',
-      count: memoryNarrative.capability_count,
-      statusCounts: memoryNarrative.status_counts,
-      summary: memoryNarrative,
-      Panel: MemoryNarrativePanel,
-    },
-    {
-      key: 'affect_learning',
-      title: 'Affect Learning',
-      subtitle: '情绪学习层：内在温度、免疫耐受、情绪消化、后悔信号、喜悦强化和失败隔离保持报告模式。',
-      hint: '温度、消化、强化',
-      status: 'REPORT_ONLY',
-      count: affectLearning.capability_count,
-      statusCounts: affectLearning.status_counts,
-      summary: affectLearning,
-      Panel: AffectLearningPanel,
-    },
-    {
-      key: 'presence_channel',
-      title: 'Presence & Channel',
-      subtitle: '通道与存在感层：通道灵魂、长任务陪伴、注意力地形、静默陪伴、社交面具、仪式和温柔降级保持可观测。',
-      hint: '通道、陪伴、仪式',
-      status: 'REPORT_ONLY',
-      count: presenceChannel.capability_count,
-      statusCounts: presenceChannel.status_counts,
-      summary: presenceChannel,
-      Panel: PresenceChannelPanel,
-    },
-    {
-      key: 'drive_trust',
-      title: 'Drive & Trust',
-      subtitle: '驱动力与信任层：信任梯度、信任恒温器、意图代谢、驱动力冲突、愿望格和 Need/Want/Impulse 保持报告模式。',
-      hint: '信任、意图、愿望',
-      status: 'REPORT_ONLY',
-      count: driveTrust.capability_count,
-      statusCounts: driveTrust.status_counts,
-      summary: driveTrust,
-      Panel: DriveTrustPanel,
-    },
-    {
-      key: 'adaptive_repair',
-      title: 'Adaptive Repair',
-      subtitle: '适应与修复层：用户镜像、身体可塑、关系修复、叙事调试、隐性偏好和自愈故事保持可审计。',
-      hint: '镜像、修复、偏好',
-      status: 'OWNER_GATED',
-      count: adaptiveRepair.capability_count,
-      statusCounts: adaptiveRepair.status_counts,
-      summary: adaptiveRepair,
-      Panel: AdaptiveRepairPanel,
-    },
-  ], [
-    adaptiveRepair,
-    affectLearning,
-    driveTrust,
-    growthClosure,
-    innerLife,
-    innerMechanisms,
-    memoryNarrative,
-    naturalInteraction,
-    presenceChannel,
-    relationshipLayer,
-    selfGovernance,
-    trustFoundation,
-  ])
+  const metricTiles = useMemo(() => buildBioOpsMetricTiles(bioOpsView), [bioOpsView])
+  const keyBenefitObservable = isBioOpsKeyBenefitObservable({ data, codex, inspect, blockedWrite })
   const runDailyCycle = async () => {
     setDailyRunning(true)
     setDailyRunError(null)
@@ -324,46 +200,17 @@ export default function CodexBioOpsObservability() {
       {data?.artifact_available ? (
         <>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5">
-            <MetricTile
-              icon={GitBranch}
-              tone="green"
-              label="Codex inspect"
-              value={inspect.status || '—'}
-              status={inspect.status}
-              hint={inspect.codex_model || 'ResultContract'}
-            />
-            <MetricTile
-              icon={Lock}
-              tone="red"
-              label="写入阻断"
-              value={blockedWrite.status || '—'}
-              status={blockedWrite.status}
-              hint={blockedWrite.reason_code || 'policy gate'}
-            />
-            <MetricTile
-              icon={Sparkles}
-              tone="indigo"
-              label="BioOps 能力"
-              value={bioOps.capability_count ?? totalBioOps}
-              status="TRACED"
-              hint={`${statusCounts.PROPOSED || 0} proposals · ${statusCounts.CANDIDATE || 0} candidates`}
-            />
-            <MetricTile
-              icon={ShieldCheck}
-              tone="amber"
-              label="Owner 待审"
-              value={pendingAdoptions.length || statusCounts.CANDIDATE || 0}
-              status={pendingAdoptions.length ? 'OWNER_GATED' : 'REPORT_ONLY'}
-              hint="长期状态不由 Codex 直写"
-            />
-            <MetricTile
-              icon={CheckCircle2}
-              tone={codex.hard_cut_scan?.passed ? 'green' : 'amber'}
-              label="硬切扫描"
-              value={codex.hard_cut_scan?.passed ? 'PASS' : 'CHECK'}
-              status={codex.hard_cut_scan?.passed ? 'PASS' : 'CHECK'}
-              hint={`pytest ${codex.pytest?.exit_code ?? '—'} · scan ${codex.hard_cut_scan?.exit_code ?? '—'}`}
-            />
+            {metricTiles.map((tile) => (
+              <MetricTile
+                key={tile.key}
+                icon={BIO_OPS_METRIC_ICONS[tile.iconKey]}
+                tone={tile.tone}
+                label={tile.label}
+                value={tile.value}
+                status={tile.status}
+                hint={tile.hint}
+              />
+            ))}
           </div>
 
           <Section title="项目收益" subtitle="这里展示的是两个方案对工程闭环的直接收益，不是一次性说明文档。">
@@ -422,7 +269,7 @@ export default function CodexBioOpsObservability() {
           <Section
             title="证据 artifacts"
             subtitle="WebUI 读取这些文件并压缩成上面的操作视图；需要深挖时按路径打开原始产物。"
-            aside={query.lastUpdatedAt ? <span className="text-xs text-gray-400">updated {new Date(query.lastUpdatedAt).toLocaleString()}</span> : null}
+            aside={query.lastUpdatedAt ? <span className="text-xs text-gray-400">updated {formatDateTime(query.lastUpdatedAt)}</span> : null}
           >
             <ArtifactList artifacts={data.artifacts} />
           </Section>
@@ -453,7 +300,7 @@ export default function CodexBioOpsObservability() {
         </NoticeBanner>
       ) : null}
 
-      {data?.artifact_available && codex.hard_cut_scan?.passed && blockedWrite.status === 'BLOCKED' && inspect.status === 'EXECUTED' ? (
+      {keyBenefitObservable ? (
         <NoticeBanner variant="success" title="两个方案的关键收益已可观测">
           执行可控、敏感写入被拦截、BioOps 候选进入 owner gate、Chat/Planner 行为 trace 已接入 WebUI。
         </NoticeBanner>

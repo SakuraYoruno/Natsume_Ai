@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react'
+﻿import React, { useEffect, useMemo, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import {
   RefreshCw,
@@ -8,35 +8,41 @@ import {
   Wand2,
   ShieldCheck,
 } from 'lucide-react'
-import DigitalLifeRuntimeCard from '../components/DigitalLifeRuntimeCard.jsx'
-import EmptyStateCard from '../components/EmptyStateCard.jsx'
-import LoadingNotice from '../components/LoadingNotice.jsx'
-import MetricCard from '../components/MetricCard.jsx'
-import NoticeBanner from '../components/NoticeBanner.jsx'
-import SampleMeta from '../components/obs/SampleMeta.jsx'
-import PageHero from '../components/PageHero.jsx'
+import DigitalLifeRuntimeCard from '../features/life/components/DigitalLifeRuntimeCard.jsx'
+import EmptyStateCard from '../shared/ui/EmptyStateCard.jsx'
+import LoadingNotice from '../shared/ui/LoadingNotice.jsx'
+import MetricCard from '../shared/ui/MetricCard.jsx'
+import NoticeBanner from '../shared/ui/NoticeBanner.jsx'
+import SampleMeta from '../shared/ui/observability/SampleMeta.jsx'
+import PageHero from '../shared/ui/PageHero.jsx'
 import useDigitalLifeRuntimeSignals from '../hooks/useDigitalLifeRuntimeSignals.js'
-import { resolveLoadState } from '../models/loadState.js'
 import {
   usePromptTemplateDetailQuery,
   usePromptTemplateListQuery,
-} from '../features/operations/queries.js'
+} from '../features/operations/promptQueries.js'
+import {
+  buildPromptFilterOptions,
+  buildPromptTemplateListMetaState,
+  buildPromptTemplateSampleMeta,
+  buildPromptTemplateSummary,
+  formatPromptTemplateUpdatedAt,
+  getNextPromptTemplateSelection,
+  getPromptContentTypeBadgeView,
+  getPromptFiltersFromSearchParams,
+  getPromptSourceBadgeView,
+} from '../features/operations/promptOpsModel.js'
 import useAppStore from '../store/useAppStore.js'
 
-const PromptTemplateEditorPanel = React.lazy(() => import('../components/promptOps/PromptTemplateEditorPanel.jsx'))
+const PromptTemplateEditorPanel = React.lazy(() => import('../features/operations/components/promptOps/PromptTemplateEditorPanel.jsx'))
 
 function SourceBadge({ source }) {
-  const cls = source === 'override'
-    ? 'bg-green-100 text-green-700 border-green-200'
-    : 'bg-gray-100 text-gray-600 border-gray-200'
-  return <span className={`inline-flex items-center px-2 py-0.5 rounded border text-xs font-medium ${cls}`}>{source}</span>
+  const view = getPromptSourceBadgeView(source)
+  return <span className={`inline-flex items-center px-2 py-0.5 rounded border text-xs font-medium ${view.className}`}>{view.label}</span>
 }
 
 function TypeBadge({ value }) {
-  const cls = value === 'json'
-    ? 'bg-purple-100 text-purple-700 border-purple-200'
-    : 'bg-blue-100 text-blue-700 border-blue-200'
-  return <span className={`inline-flex items-center px-2 py-0.5 rounded border text-xs font-medium ${cls}`}>{value}</span>
+  const view = getPromptContentTypeBadgeView(value)
+  return <span className={`inline-flex items-center px-2 py-0.5 rounded border text-xs font-medium ${view.className}`}>{view.label}</span>
 }
 
 export default function PromptConfig() {
@@ -50,10 +56,7 @@ export default function PromptConfig() {
   })
 
   const [filters, setFilters] = useState(() => ({
-    keyword: String(searchParams.get('keyword') || ''),
-    scope: String(searchParams.get('scope') || ''),
-    category: String(searchParams.get('category') || ''),
-    source: String(searchParams.get('source') || ''),
+    ...getPromptFiltersFromSearchParams(searchParams),
   }))
   const [selectedId, setSelectedId] = useState('')
   const [refreshingView, setRefreshingView] = useState(false)
@@ -77,35 +80,28 @@ export default function PromptConfig() {
     refetch: refetchDetail,
   } = usePromptTemplateDetailQuery({ templateId: selectedId })
 
-  const scopes = useMemo(() => [...new Set(items.map((item) => item.scope).filter(Boolean))], [items])
-  const categories = useMemo(() => [...new Set(items.map((item) => item.category).filter(Boolean))], [items])
+  const scopes = useMemo(() => buildPromptFilterOptions(items, 'scope'), [items])
+  const categories = useMemo(() => buildPromptFilterOptions(items, 'category'), [items])
 
-  const summary = useMemo(() => ({
-    total: items.length,
-    override: items.filter((item) => item.source === 'override').length,
-    json: items.filter((item) => item.content_type === 'json').length,
-    guarded: items.filter((item) => String(item.category || '').includes('fallback') || String(item.category || '').includes('guard')).length,
-  }), [items])
+  const summary = useMemo(() => buildPromptTemplateSummary(items), [items])
 
   useEffect(() => {
-    if (!items.length) {
-      setSelectedId('')
-      return
-    }
-    const hasCurrent = items.some((item) => item.template_id === selectedId)
-    if (!selectedId || !hasCurrent) {
-      setSelectedId(items[0].template_id)
-    }
+    const nextSelectedId = getNextPromptTemplateSelection(items, selectedId)
+    if (nextSelectedId !== selectedId) setSelectedId(nextSelectedId)
   }, [items, selectedId])
 
-  const listMetaState = resolveLoadState({
-    loading: listLoading || listRefreshing,
-    error: listError,
-    hasData: Boolean(templatesData),
-    hasSamples: true,
-    available: Boolean(templatesData),
-    stale: listStale,
-  })
+  const listMetaState = useMemo(() => buildPromptTemplateListMetaState({
+    templatesData,
+    listError,
+    listLoading,
+    listRefreshing,
+    listStale,
+  }), [listError, listLoading, listRefreshing, listStale, templatesData])
+  const sampleMeta = useMemo(() => buildPromptTemplateSampleMeta({
+    listMetaState,
+    summary,
+    listUpdatedAt,
+  }), [listMetaState, listUpdatedAt, summary])
 
   const handleRefreshView = async () => {
     setRefreshingView(true)
@@ -145,12 +141,12 @@ export default function PromptConfig() {
           <div className="space-y-3">
             <SampleMeta
               className="max-w-xl"
-              loadState={listMetaState}
-              sampleSize={summary.total}
-              sampleLabel="模板"
-              updatedAt={listUpdatedAt}
-              source="prompt-config"
-              definition="提示模板页当前是只读观测台：展示版本化 PromptSpec 与当前生效值；不再提供前端编辑入口。"
+              loadState={sampleMeta.loadState}
+              sampleSize={sampleMeta.sampleSize}
+              sampleLabel={sampleMeta.sampleLabel}
+              updatedAt={sampleMeta.updatedAt}
+              source={sampleMeta.source}
+              definition={sampleMeta.definition}
             />
             <div className="max-w-xl rounded-xl border border-orange-100 bg-orange-50 px-4 py-3 text-xs leading-6 text-orange-800">
               PromptSpec 是当前真源。这里适合做线上核对和差异排查，不再承担模板编辑职责。
@@ -292,7 +288,7 @@ export default function PromptConfig() {
                     <div>source：{selected.source}</div>
                     <div>override：{selected.has_override ? 'yes' : 'no'}</div>
                     <div>enabled：{selected.enabled ? 'yes' : 'no'}</div>
-                    <div>updated：{selected.updated_at_ts_ms ? new Date(selected.updated_at_ts_ms).toLocaleString('zh-CN') : '-'}</div>
+                    <div>updated：{formatPromptTemplateUpdatedAt(selected.updated_at_ts_ms)}</div>
                     {selected.content_type === 'json' ? (
                       <div className="text-orange-500">JSON 类型模板当前只读展示；正式修改请直接更新 YAML。</div>
                     ) : null}

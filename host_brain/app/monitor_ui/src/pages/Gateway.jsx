@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useMemo } from 'react'
+import React, { useState, useMemo } from 'react'
 import {
   RefreshCw,
   MessageSquare,
@@ -14,67 +14,74 @@ import {
   Zap,
 } from 'lucide-react'
 import { resetWeChatChannel } from '../features/execution/api.js'
-import MetricCard from '../components/MetricCard.jsx'
-import EmptyStateCard from '../components/EmptyStateCard.jsx'
-import OrganSystemOverview from '../components/lifeBody/OrganSystemOverview.jsx'
-import NoticeBanner from '../components/NoticeBanner.jsx'
-import DrilldownLink from '../components/obs/DrilldownLink.jsx'
-import SampleMeta from '../components/obs/SampleMeta.jsx'
-import PageHero from '../components/PageHero.jsx'
-import SectionHeading from '../components/SectionHeading.jsx'
-import TimeWindowSelect from '../components/TimeWindowSelect.jsx'
-import { LOAD_STATES, resolveLoadState } from '../models/loadState.js'
-import { buildMotorOrganSystemModel } from '../models/organSystemModel.js'
-import { useGatewayOverviewQuery } from '../features/execution/queries.js'
+import MetricCard from '../shared/ui/MetricCard.jsx'
+import EmptyStateCard from '../shared/ui/EmptyStateCard.jsx'
+import OrganSystemOverview from '../features/life/components/lifeBody/OrganSystemOverview.jsx'
+import NoticeBanner from '../shared/ui/NoticeBanner.jsx'
+import DrilldownLink from '../shared/ui/observability/DrilldownLink.jsx'
+import SampleMeta from '../shared/ui/observability/SampleMeta.jsx'
+import PageHero from '../shared/ui/PageHero.jsx'
+import SectionHeading from '../shared/ui/SectionHeading.jsx'
+import TimeWindowSelect from '../shared/ui/TimeWindowSelect.jsx'
+import { useGatewayOverviewQuery } from '../features/execution/gatewayQueries.js'
+import { buildGatewayViewModel, GATEWAY_WINDOW_OPTIONS } from '../features/execution/gatewayModel.js'
+import { formatDateTime } from '../shared/formatters.js'
+import {
+  GATEWAY_STATUS_BADGE_CLASSES,
+  GATEWAY_STATUS_LABELS,
+  GATEWAY_PLATFORM_META,
+  GATEWAY_STATUS_TEXT_CLASSES,
+} from '../shared/statusMeta.js'
 import useAppStore from '../store/useAppStore.js'
 
-const PLATFORM_META = {
-  wechat: { label: '微信', color: '#07C160', icon: MessageSquare },
-  qq: { label: 'QQ', color: '#12B7F5', icon: MessageSquare },
-  telegram: { label: 'Telegram', color: '#0088CC', icon: Send },
-  feishu: { label: '飞书', color: '#3370FF', icon: Zap },
-  wecom: { label: '企业微信', color: '#2B7CE9', icon: Radio },
-  line: { label: 'LINE', color: '#00B900', icon: MessageSquare },
+const PLATFORM_ICONS = {
+  wechat: MessageSquare,
+  qq: MessageSquare,
+  telegram: Send,
+  feishu: Zap,
+  wecom: Radio,
+  line: MessageSquare,
 }
 
-const WINDOW_OPTIONS = [
-  { label: '1h', value: 60 },
-  { label: '6h', value: 360 },
-  { label: '24h', value: 1440 },
-  { label: '7d', value: 10080 },
-]
+const GATEWAY_METRIC_ICONS = {
+  inbound: ArrowDownToLine,
+  outbound: Send,
+  errors: XCircle,
+  humanize: Zap,
+}
 
-function formatTime(tsMs) {
-  if (!tsMs) return '—'
-  return new Date(tsMs).toLocaleString('zh-CN', {
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-  })
+const GATEWAY_TIME_OPTIONS = Object.freeze({
+  month: '2-digit',
+  day: '2-digit',
+  hour: '2-digit',
+  minute: '2-digit',
+  second: '2-digit',
+})
+
+const GATEWAY_STATUS_ICONS = {
+  UP: CheckCircle,
+  DEGRADED: AlertTriangle,
+  DOWN: XCircle,
+  UNKNOWN: HelpCircle,
 }
 
 function StatusBadge({ status }) {
-  const map = {
-    UP: { icon: CheckCircle, color: 'text-green-600', bg: 'bg-green-50 border-green-200', label: '在线' },
-    DEGRADED: { icon: AlertTriangle, color: 'text-orange-500', bg: 'bg-orange-50 border-orange-200', label: '降级' },
-    DOWN: { icon: XCircle, color: 'text-red-500', bg: 'bg-red-50 border-red-200', label: '离线' },
-    UNKNOWN: { icon: HelpCircle, color: 'text-gray-400', bg: 'bg-gray-50 border-gray-200', label: '未知' },
-  }
-  const cfg = map[status] ?? map.UNKNOWN
-  const Icon = cfg.icon
+  const key = String(status || 'UNKNOWN').toUpperCase()
+  const Icon = GATEWAY_STATUS_ICONS[key] ?? GATEWAY_STATUS_ICONS.UNKNOWN
+  const color = GATEWAY_STATUS_TEXT_CLASSES[key] ?? GATEWAY_STATUS_TEXT_CLASSES.UNKNOWN
+  const bg = GATEWAY_STATUS_BADGE_CLASSES[key] ?? GATEWAY_STATUS_BADGE_CLASSES.UNKNOWN
+  const label = GATEWAY_STATUS_LABELS[key] ?? GATEWAY_STATUS_LABELS.UNKNOWN
   return (
-    <span className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-semibold ${cfg.color} ${cfg.bg}`}>
+    <span className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-semibold ${color} ${bg}`}>
       <Icon size={12} />
-      {cfg.label}
+      {label}
     </span>
   )
 }
 
 function PlatformCard({ data }) {
-  const meta = PLATFORM_META[data.platform] || { label: data.platform, color: '#666', icon: MessageSquare }
-  const Icon = meta.icon
+  const meta = GATEWAY_PLATFORM_META[data.platform] || { label: data.platform, color: '#666' }
+  const Icon = PLATFORM_ICONS[data.platform] || MessageSquare
 
   return (
     <div className="card space-y-3 p-4" style={{ borderLeft: `4px solid ${meta.color}` }}>
@@ -128,7 +135,7 @@ function PlatformCard({ data }) {
       ) : null}
 
       {data.last_event_ts_ms ? (
-        <div className="text-xs text-gray-400">最后活动：{formatTime(data.last_event_ts_ms)}</div>
+        <div className="text-xs text-gray-400">最后活动：{formatDateTime(data.last_event_ts_ms, { options: GATEWAY_TIME_OPTIONS })}</div>
       ) : null}
     </div>
   )
@@ -171,57 +178,28 @@ export default function Gateway() {
     }
   }
 
-  const platforms = data?.platforms ?? []
-  const activePlatforms = platforms.filter(
-    (item) => item.status === 'UP' || (item.inbound_count ?? 0) > 0 || (item.outbound_count ?? 0) > 0
-  )
-  const isInitialState =
-    !!data &&
-    (data.total_inbound ?? 0) === 0 &&
-    (data.total_outbound ?? 0) === 0 &&
-    (data.total_errors ?? 0) === 0
-
-  const hasWeChatRateLimits = (wechatDetail?.rate_limits ?? []).length > 0
-  const hasWeChatEvents = (wechatDetail?.recent_events ?? []).length > 0
-  const gatewayEventCount = Number(data?.total_inbound ?? 0) + Number(data?.total_outbound ?? 0) + Number(data?.total_errors ?? 0)
-  const downPlatformCount = platforms.filter((item) => item.status === 'DOWN').length
-  const degradedPlatformCount = platforms.filter((item) => item.status === 'DEGRADED').length
-  const gatewayLoadState = resolveLoadState({
-    loading: loading || refreshing,
-    error,
-    hasData: Boolean(data || wechatDetail),
-    hasSamples: !isInitialState && gatewayEventCount > 0,
-    available: Boolean(data || wechatDetail),
-  })
-  const motorOrganModel = useMemo(() => buildMotorOrganSystemModel({
-    loadState: gatewayLoadState,
-    updatedAt: lastUpdatedAt,
-    platformCount: platforms.length,
-    activePlatformCount: activePlatforms.length,
-    downPlatformCount,
-    degradedPlatformCount,
-    totalInbound: data?.total_inbound,
-    totalOutbound: data?.total_outbound,
-    totalErrors: data?.total_errors,
-    humanizeEnabled: data?.humanize_enabled,
-    humanizeTypingSpeed: data?.humanize_typing_speed_cps,
-    rateLimitCount: wechatDetail?.rate_limits?.length,
-    recentEventCount: wechatDetail?.recent_events?.length,
-  }), [
-    activePlatforms.length,
-    data?.humanize_enabled,
-    data?.humanize_typing_speed_cps,
-    data?.total_errors,
-    data?.total_inbound,
-    data?.total_outbound,
-    degradedPlatformCount,
-    downPlatformCount,
+  const {
+    platforms,
+    gatewayEventCount,
+    hasWeChatRateLimits,
+    hasWeChatEvents,
     gatewayLoadState,
+    motorOrganModel,
+    heroTitle,
+    heroDescription,
+    heroMetaItems,
+    metricCards,
+    showUnavailableNotice,
+    showNoSampleNotice,
+  } = useMemo(() => buildGatewayViewModel({
+    data,
+    wechatDetail,
+    loading,
+    refreshing,
+    error,
     lastUpdatedAt,
-    platforms.length,
-    wechatDetail?.rate_limits?.length,
-    wechatDetail?.recent_events?.length,
-  ])
+    windowMinutes,
+  }), [data, error, lastUpdatedAt, loading, refreshing, wechatDetail, windowMinutes])
 
   return (
     <div className="space-y-6">
@@ -234,7 +212,7 @@ export default function Gateway() {
           <TimeWindowSelect
             value={windowMinutes}
             onChange={setWindowMinutes}
-            options={WINDOW_OPTIONS}
+            options={GATEWAY_WINDOW_OPTIONS}
             className="rounded border border-gray-300 px-2 py-1.5 text-xs"
           />
           <button className="btn-secondary" onClick={() => refetch()} disabled={loading || refreshing}>
@@ -246,18 +224,10 @@ export default function Gateway() {
       <PageHero
         icon={MessageSquare}
         eyebrow="跨平台消息总线"
-        title={`${platforms.length} 平台`}
-        description={
-          isInitialState
-            ? '当前窗口暂无流量样本，平台卡显示的是适配器健康态。'
-            : `近窗口入站 ${data?.total_inbound ?? 0}，出站 ${data?.total_outbound ?? 0}，错误 ${data?.total_errors ?? 0}。`
-        }
+        title={heroTitle}
+        description={heroDescription}
         gradientClass="from-primary-50 via-white to-emerald-50"
-        metaItems={[
-          `在线平台：${activePlatforms.length}`,
-          `拟人化：${data?.humanize_enabled ? '开启' : '关闭'}`,
-          `窗口：${windowMinutes} 分钟`,
-        ]}
+        metaItems={heroMetaItems}
         aside={(
           <SampleMeta
             className="max-w-md"
@@ -273,13 +243,13 @@ export default function Gateway() {
       />
 
       {error ? <NoticeBanner variant="error">{error.message}</NoticeBanner> : null}
-      {!error && !loading && !refreshing && gatewayLoadState === LOAD_STATES.UNAVAILABLE ? (
+      {showUnavailableNotice ? (
         <NoticeBanner variant="warning">
           网关观测接口当前未返回可用数据，页面会保留中性空态，避免把不可用误判为空流量。
         </NoticeBanner>
       ) : null}
 
-      {!error && !loading && !refreshing && gatewayLoadState === LOAD_STATES.NO_SAMPLE ? (
+      {showNoSampleNotice ? (
         <div className="card p-4 text-sm text-gray-500">
           <div className="mb-1 text-xs text-gray-400">
             当前数据为空流量初始态，页面显示的是健康快照，不是接口故障。
@@ -291,38 +261,17 @@ export default function Gateway() {
       <OrganSystemOverview model={motorOrganModel} />
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <MetricCard
-          label="总入站"
-          value={data?.total_inbound ?? '—'}
-          tone="text-blue-600"
-          icon={ArrowDownToLine}
-          variant="stacked"
-          hint=""
-        />
-        <MetricCard
-          label="总出站"
-          value={data?.total_outbound ?? '—'}
-          tone="text-green-600"
-          icon={Send}
-          variant="stacked"
-          hint=""
-        />
-        <MetricCard
-          label="总错误"
-          value={data?.total_errors ?? '—'}
-          tone={(data?.total_errors ?? 0) > 0 ? 'text-red-500' : 'text-gray-400'}
-          icon={XCircle}
-          variant="stacked"
-          hint=""
-        />
-        <MetricCard
-          label="拟人化"
-          value={data?.humanize_enabled ? '开启' : '关闭'}
-          hint={data?.humanize_enabled ? `字速 ${data?.humanize_typing_speed_cps ?? '—'} 字/秒` : '已关闭'}
-          tone={data?.humanize_enabled ? 'text-green-600' : 'text-gray-400'}
-          icon={Zap}
-          variant="stacked"
-        />
+        {metricCards.map((card) => (
+          <MetricCard
+            key={card.key}
+            label={card.label}
+            value={card.value}
+            tone={card.tone}
+            icon={GATEWAY_METRIC_ICONS[card.key]}
+            variant="stacked"
+            hint={card.hint}
+          />
+        ))}
       </div>
 
       <DrilldownLink
@@ -381,7 +330,7 @@ export default function Gateway() {
               <div className="max-h-48 space-y-1 overflow-y-auto">
                 {wechatDetail.recent_events.slice(0, 15).map((event, index) => (
                   <div key={`event-${index}`} className="flex items-center gap-2 rounded bg-gray-50 px-3 py-1.5 text-xs">
-                    <span className="shrink-0 text-gray-400">{formatTime(event.ts_ms)}</span>
+                    <span className="shrink-0 text-gray-400">{formatDateTime(event.ts_ms, { options: GATEWAY_TIME_OPTIONS })}</span>
                     <span className="truncate font-mono text-gray-600">{event.event_type || event.audit_tag || '—'}</span>
                   </div>
                 ))}

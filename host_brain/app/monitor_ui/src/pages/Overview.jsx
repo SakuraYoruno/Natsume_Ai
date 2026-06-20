@@ -9,22 +9,26 @@ import {
   Wifi,
   WifiOff,
 } from 'lucide-react'
-import ServiceCard from '../components/ServiceCard.jsx'
-import DigitalLifeRuntimeCard from '../components/DigitalLifeRuntimeCard.jsx'
-import EmptyStateCard from '../components/EmptyStateCard.jsx'
-import MetricCard from '../components/MetricCard.jsx'
-import LivingPulseStrip from '../components/LivingPulseStrip.jsx'
-import NoticeBanner from '../components/NoticeBanner.jsx'
-import SampleMeta from '../components/obs/SampleMeta.jsx'
-import PageHero from '../components/PageHero.jsx'
-import StatusBadge from '../components/StatusBadge.jsx'
-import TimeWindowSelect from '../components/TimeWindowSelect.jsx'
+import ServiceCard from '../shared/ui/ServiceCard.jsx'
+import DigitalLifeRuntimeCard from '../features/life/components/DigitalLifeRuntimeCard.jsx'
+import EmptyStateCard from '../shared/ui/EmptyStateCard.jsx'
+import MetricCard from '../shared/ui/MetricCard.jsx'
+import LivingPulseStrip from '../shared/ui/LivingPulseStrip.jsx'
+import NoticeBanner from '../shared/ui/NoticeBanner.jsx'
+import SampleMeta from '../shared/ui/observability/SampleMeta.jsx'
+import PageHero from '../shared/ui/PageHero.jsx'
+import StatusBadge from '../shared/ui/StatusBadge.jsx'
+import TimeWindowSelect from '../shared/ui/TimeWindowSelect.jsx'
 import useDigitalLifeRuntimeSignals from '../hooks/useDigitalLifeRuntimeSignals.js'
-import { resolveLoadState } from '../models/loadState.js'
-import { useSystemOverviewQuery } from '../features/observability/queries.js'
+import { useSystemOverviewQuery } from '../features/observability/overviewQueries.js'
 import {
   connectHealthWebSocket,
-} from '../features/observability/api.js'
+} from '../features/observability/overviewApi.js'
+import {
+  buildOverviewQueryView,
+  getSubsystemFootnote,
+  getSubsystemHeadline,
+} from '../features/observability/overviewModel.js'
 import useAppStore from '../store/useAppStore.js'
 
 const WINDOW_OPTIONS = [
@@ -33,42 +37,6 @@ const WINDOW_OPTIONS = [
   { label: '6h', value: 360 },
   { label: '24h', value: 1440 },
 ]
-
-const SUBSYSTEM_STATUS_ORDER = {
-  down: 0,
-  degraded: 1,
-  up: 2,
-  unknown: 3,
-}
-
-function normalizeSubsystemStatus(subsystem) {
-  const raw = String(subsystem?.status || '').toUpperCase()
-  if (raw === 'UP' || raw === 'OK' || raw === 'HEALTHY') return 'up'
-  if (raw === 'DEGRADED' || raw === 'WARN') return 'degraded'
-  if (raw === 'DOWN' || raw === 'FAIL' || raw === 'FAILED' || raw === 'ERROR') return 'down'
-
-  const rate = subsystem?.success_rate
-  if (rate == null) return 'unknown'
-  if (rate >= 80) return 'up'
-  if (rate >= 50) return 'degraded'
-  return 'down'
-}
-
-function getSubsystemHeadline(subsystem) {
-  if ((subsystem?.total ?? 0) <= 0) return '当前窗口无调用'
-  if (subsystem?.detail) return subsystem.detail
-  if (subsystem?.success_rate != null) return `成功率 ${subsystem.success_rate}%`
-  return `当前窗口 ${subsystem?.total ?? 0} 次调用`
-}
-
-function getSubsystemFootnote(subsystem) {
-  if ((subsystem?.total ?? 0) <= 0) return '空闲'
-  const parts = [`成功 ${subsystem?.success ?? 0}/${subsystem?.total ?? 0}`]
-  if ((subsystem?.degraded ?? 0) > 0) parts.push(`降级 ${subsystem.degraded}`)
-  if ((subsystem?.failed ?? 0) > 0) parts.push(`失败 ${subsystem.failed}`)
-  if ((subsystem?.blocked ?? 0) > 0) parts.push(`拦截 ${subsystem.blocked}`)
-  return parts.join(' · ')
-}
 
 export default function Overview() {
   const pollingEnabled = useAppStore((state) => state.pollingEnabled)
@@ -164,43 +132,44 @@ export default function Overview() {
       clearTimeout(wsReconnectTimer.current)
     }
   }, [connectWs, pageVisible])
-  const data = wsConnected && liveHealthData ? liveHealthData : (healthData || liveHealthData)
-  const overviewUpdatedAt = Math.max(lastUpdatedAt || 0, liveHealthUpdatedAt || 0) || null
-  const overviewLoadState = resolveLoadState({
-    loading: loading || refreshing,
+  const {
+    data,
+    services,
+    edgeServices,
+    llmNodes,
+    activeSubsystems,
+    pulseNodes,
+    heroMetaItems,
+    sampleMeta,
+  } = useMemo(() => buildOverviewQueryView({
+    wsConnected,
+    liveHealthData,
+    healthData,
+    liveHealthUpdatedAt,
+    lastUpdatedAt,
+    subsysData,
+    agentLoopData,
+    uiAssertionData,
+    loading,
+    refreshing,
     error,
-    hasData: Boolean(data || subsysData || agentLoopData || uiAssertionData),
-    hasSamples: Boolean((data?.services ?? []).length || (subsysData?.subsystems ?? []).length || (agentLoopData?.total_loops ?? 0) > 0),
-    available: true,
     stale,
-  })
-  const services = data?.services ?? []
-  const edgeServices = useMemo(
-    () => services.filter((service) => service.service_type === 'edge'),
-    [services]
-  )
-  const llmNodes = useMemo(
-    () => services.filter((service) => service.service_type !== 'edge'),
-    [services]
-  )
-  const activeSubsystems = useMemo(
-    () => [...(subsysData?.subsystems ?? [])]
-      .filter((item) => (item?.total ?? 0) > 0)
-      .sort((a, b) => {
-        const statusDelta = (SUBSYSTEM_STATUS_ORDER[normalizeSubsystemStatus(a)] ?? 99)
-          - (SUBSYSTEM_STATUS_ORDER[normalizeSubsystemStatus(b)] ?? 99)
-        if (statusDelta !== 0) return statusDelta
-        return (b?.last_ts ?? 0) - (a?.last_ts ?? 0)
-      }),
-    [subsysData]
-  )
-  const runningCount = Number(agentLoopData?.running_count ?? 0)
-  const pulseNodes = [
-    { label: '中枢稳态', value: wsConnected ? '实时观测' : '轮询观测', tone: 'primary', active: true },
-    { label: '外周器官', value: data?.up != null ? `${data.up}/${data.total ?? '—'}` : '—', tone: 'teal', active: true },
-    { label: '节律推进', value: runningCount > 0 ? `${runningCount} 个节律在动` : '静息', tone: 'violet', active: runningCount > 0 },
-    { label: '执行护栏', value: uiAssertionData?.block_rate != null ? `${uiAssertionData.block_rate}%` : '—', tone: 'amber', active: uiAssertionData?.block_rate != null },
-  ]
+    windowMinutes,
+  }), [
+    agentLoopData,
+    error,
+    healthData,
+    lastUpdatedAt,
+    liveHealthData,
+    liveHealthUpdatedAt,
+    loading,
+    refreshing,
+    stale,
+    subsysData,
+    uiAssertionData,
+    windowMinutes,
+    wsConnected,
+  ])
 
   return (
     <div className="space-y-6">
@@ -224,23 +193,17 @@ export default function Overview() {
         title={wsConnected ? 'WebSocket 实时器官观测中' : '轮询模式器官观测中'}
         description="这页聚焦数字生命体中枢稳态、器官子系统活跃度与整体是否平衡。"
         gradientClass="from-primary-50 via-white to-sky-50"
-        metaItems={[
-          `服务总数：${data?.total ?? '—'}`,
-          `降级：${data?.degraded ?? '—'}`,
-          `离线：${data?.down ?? '—'}`,
-          `未知：${data?.unknown ?? '—'}`,
-          `活跃子系统：${activeSubsystems.length}`,
-        ]}
+        metaItems={heroMetaItems}
         aside={(
           <SampleMeta
             className="max-w-md"
-            loadState={overviewLoadState}
-            windowMinutes={windowMinutes}
-            sampleSize={services.length + activeSubsystems.length}
-            sampleLabel="观测对象"
-            updatedAt={overviewUpdatedAt}
-            source={wsConnected ? 'health websocket + overview queries' : 'overview queries'}
-            definition="Overview 保留实时健康快照，同时通过查询层统一拉取器官子系统、执行护栏与界面断言摘要。"
+            loadState={sampleMeta.loadState}
+            windowMinutes={sampleMeta.windowMinutes}
+            sampleSize={sampleMeta.sampleSize}
+            sampleLabel={sampleMeta.sampleLabel}
+            updatedAt={sampleMeta.updatedAt}
+            source={sampleMeta.source}
+            definition={sampleMeta.definition}
           />
         )}
       />
@@ -337,7 +300,7 @@ export default function Overview() {
                       <div className="text-sm font-medium text-gray-800">{subsystem.display_name || subsystem.subsystem}</div>
                       <div className="mt-1 text-xs text-gray-500">{getSubsystemHeadline(subsystem)}</div>
                     </div>
-                    <StatusBadge status={normalizeSubsystemStatus(subsystem)} />
+                    <StatusBadge status={subsystem.normalizedStatus} />
                   </div>
                   <div className="mt-2 text-xs text-gray-400">{getSubsystemFootnote(subsystem)}</div>
                 </div>
