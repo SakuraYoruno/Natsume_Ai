@@ -1486,6 +1486,14 @@ def test_repeated_time_and_percent_formatters_use_shared_module() -> None:
 
 def test_digital_life_gateway_view_model_lives_in_life_feature() -> None:
     component = (MONITOR_SRC / "features" / "life" / "components" / "DigitalLifeGatewaySection.jsx").read_text(encoding="utf-8")
+    gateway_components_dir = MONITOR_SRC / "features" / "life" / "components" / "digitalLifeGateway"
+    trend_panel = (gateway_components_dir / "GatewayTrendPanel.jsx").read_text(encoding="utf-8")
+    hotspot_panel = (gateway_components_dir / "GatewayHotspotsPanel.jsx").read_text(encoding="utf-8")
+    hotspot_trend_panel = (gateway_components_dir / "GatewayHotspotTrendPanel.jsx").read_text(encoding="utf-8")
+    hotspot_cards = (gateway_components_dir / "GatewayHotspotCards.jsx").read_text(encoding="utf-8")
+    source_correlation_panel = (gateway_components_dir / "GatewaySourceCorrelationPanel.jsx").read_text(encoding="utf-8")
+    diagnostics_panel = (gateway_components_dir / "GatewayDiagnosticsPanel.jsx").read_text(encoding="utf-8")
+    remediation_panel = (gateway_components_dir / "GatewayRemediationPanel.jsx").read_text(encoding="utf-8")
     model = (MONITOR_SRC / "features" / "life" / "digitalLifeGatewayModel.js").read_text(encoding="utf-8")
 
     for export_name in [
@@ -1503,6 +1511,19 @@ def test_digital_life_gateway_view_model_lives_in_life_feature() -> None:
 
     assert "digitalLifeGatewayModel.js" in component
     assert "buildDigitalLifeGatewayView(model)" in component
+    assert "GatewayTrendPanel" in component
+    assert "GatewayLoopStatsPanel" in component
+    assert "GatewayRemediationPanel" in component
+    assert "GatewayHotspotsPanel" in remediation_panel
+    assert "GatewayDiagnosticsPanel" in remediation_panel
+    assert "GatewayHotspotTrendPanel" in hotspot_panel
+    assert "GatewaySourceCorrelationPanel" in hotspot_panel
+    assert "GatewayHotspotCards" in hotspot_panel
+    assert "getHumanoidHotspotTrendColor" in hotspot_trend_panel
+    assert "getHumanoidSourceImpactClass" in source_correlation_panel
+    assert "getHumanoidHotspotSeverityClass" in hotspot_cards
+    assert "getHumanoidDiagnosticStatusClass" in diagnostics_panel
+    assert "hasAlertsData && humanoidAlertStatus !== 'healthy'" in trend_panel
     assert "shared/formatters.js" in model
     assert "function toTrendIntervalMinutes(" not in component
     assert "function getHumanoidTrendTone(" not in component
@@ -1512,6 +1533,9 @@ def test_digital_life_gateway_view_model_lives_in_life_feature() -> None:
     assert "function getHumanoidSourceImpactClass(" not in component
     assert "function getHumanoidHotspotTrendColor(" not in component
     assert "formatPercent(" not in component
+    assert "LineChart" not in component
+    assert "RepresentativeRequests" not in component
+    assert "compactText(" not in component
     assert "timeseries_closed_loop_rate" not in component
     assert "timeseries_total_gateway_requests" not in component
     assert "humanoidTrendRequestSeries.reduce" not in component
