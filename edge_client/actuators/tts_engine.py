@@ -1815,7 +1815,11 @@ def _load_modern_sovits_model(
             "Ensure EDGE_TTS_MODEL_PATH points to a GPT-SoVITS root directory."
         ) from exc
 
-    custom_cfg = _build_modern_tts_custom_config(model_root=model_root, device=device)
+    custom_cfg = _build_modern_tts_custom_config(
+        model_root=model_root,
+        device=device,
+        voice_bank_path=voice_bank_path,
+    )
     tts = TTS(TTS_Config({"custom": custom_cfg}))
 
     manifest = _load_tts_model_manifest(model_root=model_root, voice_bank_path=voice_bank_path)
@@ -2575,8 +2579,16 @@ def _configure_modern_sv_path(model_root: str) -> None:
         return
 
 
-def _build_modern_tts_custom_config(*, model_root: str, device: str) -> dict[str, Any]:
-    t2s_weights_path, vits_weights_path = _resolve_modern_weights(model_root)
+def _build_modern_tts_custom_config(
+    *,
+    model_root: str,
+    device: str,
+    voice_bank_path: str | None = None,
+) -> dict[str, Any]:
+    t2s_weights_path, vits_weights_path = _resolve_modern_weights(
+        model_root,
+        voice_bank_path=voice_bank_path,
+    )
     version = _detect_model_version(t2s_weights_path=t2s_weights_path, vits_weights_path=vits_weights_path)
 
     bert_base_path = os.path.join(
@@ -2602,8 +2614,8 @@ def _build_modern_tts_custom_config(*, model_root: str, device: str) -> dict[str
     }
 
 
-def _resolve_modern_weights(model_root: str) -> tuple[str, str]:
-    manifest_weights = _resolve_manifest_weight_paths(model_root)
+def _resolve_modern_weights(model_root: str, *, voice_bank_path: str | None = None) -> tuple[str, str]:
+    manifest_weights = _resolve_manifest_weight_paths(model_root, voice_bank_path=voice_bank_path)
     if manifest_weights is not None:
         return manifest_weights
 
@@ -2674,7 +2686,10 @@ def _summarize_tts_model_artifacts(*, model_path: str, voice_bank_path: str | No
         summary["manifest"] = {"error": str(exc)}
 
     try:
-        t2s_weights_path, vits_weights_path = _resolve_modern_weights(model_root)
+        t2s_weights_path, vits_weights_path = _resolve_modern_weights(
+            model_root,
+            voice_bank_path=voice_bank_path,
+        )
         summary["weights"] = {
             "t2s": t2s_weights_path,
             "vits": vits_weights_path,
@@ -2691,8 +2706,8 @@ def _summarize_tts_model_artifacts(*, model_path: str, voice_bank_path: str | No
     return summary
 
 
-def _resolve_manifest_weight_paths(model_root: str) -> tuple[str, str] | None:
-    manifest = _load_tts_model_manifest(model_root=model_root, voice_bank_path=None)
+def _resolve_manifest_weight_paths(model_root: str, *, voice_bank_path: str | None = None) -> tuple[str, str] | None:
+    manifest = _load_tts_model_manifest(model_root=model_root, voice_bank_path=voice_bank_path)
     weights = manifest.get("weights")
     if not isinstance(weights, dict):
         return None

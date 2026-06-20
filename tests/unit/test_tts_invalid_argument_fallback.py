@@ -335,6 +335,52 @@ def test_resolve_modern_weights_prefers_manifest_weights(tmp_path) -> None:
     assert sovits_path == str(selected_sovits)
 
 
+def test_resolve_modern_weights_prefers_voice_bank_manifest(tmp_path) -> None:
+    model_root = tmp_path / "gsv"
+    gpt_dir = model_root / "GPT_weights_v2ProPlus"
+    sovits_dir = model_root / "SoVITS_weights_v2ProPlus"
+    gpt_dir.mkdir(parents=True)
+    sovits_dir.mkdir(parents=True)
+
+    root_gpt = gpt_dir / "root-e10.ckpt"
+    root_sovits = sovits_dir / "root_e8_s1000.pth"
+    voice_gpt = gpt_dir / "voice-e10.ckpt"
+    voice_sovits = sovits_dir / "voice_e8_s2000.pth"
+    for path in (root_gpt, root_sovits, voice_gpt, voice_sovits):
+        path.write_bytes(b"weight")
+
+    root_manifest = {
+        "schema_version": 1,
+        "voice_language": "zh",
+        "weights": {
+            "t2s": root_gpt.relative_to(model_root).as_posix(),
+            "vits": root_sovits.relative_to(model_root).as_posix(),
+        },
+    }
+    voice_manifest = {
+        "schema_version": 1,
+        "voice_language": "zh",
+        "weights": {
+            "t2s": voice_gpt.relative_to(model_root).as_posix(),
+            "vits": voice_sovits.relative_to(model_root).as_posix(),
+        },
+    }
+    (model_root / "natsume_gpt_sovits_model_manifest.json").write_text(
+        json.dumps(root_manifest),
+        encoding="utf-8",
+    )
+    voice_manifest_path = model_root / "natsume_gpt_sovits_model_manifest.aimis.json"
+    voice_manifest_path.write_text(json.dumps(voice_manifest), encoding="utf-8")
+
+    gpt_path, sovits_path = tts_engine._resolve_modern_weights(  # noqa: SLF001
+        str(model_root),
+        voice_bank_path=str(voice_manifest_path),
+    )
+
+    assert gpt_path == str(voice_gpt)
+    assert sovits_path == str(voice_sovits)
+
+
 def test_find_first_weight_uses_latest_mtime_not_lexicographic_name(tmp_path) -> None:
     model_root = tmp_path / "gsv"
     weight_dir = model_root / "SoVITS_weights_v2ProPlus"
