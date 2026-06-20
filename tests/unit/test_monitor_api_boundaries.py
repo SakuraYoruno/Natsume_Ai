@@ -522,6 +522,7 @@ def test_digital_life_cockpit_sections_are_not_left_under_global_components() ->
     feature_dir = MONITOR_SRC / "features" / "life" / "components"
     page = MONITOR_SRC / "pages" / "DigitalLifeOverview.jsx"
     expected_files = [
+        "DigitalLifeOverviewSurface.jsx",
         "DigitalLifeCapabilitySection.jsx",
         "DigitalLifeGatewaySection.jsx",
         "DigitalLifeSecondarySections.jsx",
@@ -534,6 +535,35 @@ def test_digital_life_cockpit_sections_are_not_left_under_global_components() ->
     assert [name for name in expected_files if not (feature_dir / name).exists()] == []
     assert "../components/digitalLife" not in page_source
     assert "../features/life/components" in page_source
+
+
+def test_digital_life_overview_surface_is_feature_owned() -> None:
+    page = MONITOR_SRC / "pages" / "DigitalLifeOverview.jsx"
+    surface = MONITOR_SRC / "features" / "life" / "components" / "DigitalLifeOverviewSurface.jsx"
+    page_source = page.read_text(encoding="utf-8")
+    surface_source = surface.read_text(encoding="utf-8")
+
+    assert surface.exists()
+    assert "DigitalLifeOverviewSurface from '../features/life/components/DigitalLifeOverviewSurface.jsx'" in page_source
+    assert "export default function DigitalLifeOverviewSurface(" in surface_source
+
+    for stale_component in [
+        "AvatarStateCard",
+        "BackgroundRuntimeCard",
+        "DigitalLifeRuntimeCard",
+        "DigitalLifeWallClockSoakCard",
+        "LifeBodyFocusPanel",
+        "LifeBodyPathologyPanel",
+        "LifeBodyTimeline",
+        "LifeBodyTopology",
+        "LifeBodyVitalsStrip",
+        "PageHero",
+        "SampleMeta",
+        "TimeWindowSelect",
+        "ViewportLazySection",
+        "VitalLoopSummaryPanel",
+    ]:
+        assert stale_component not in page_source
 
 
 def test_life_body_components_are_not_left_under_global_components() -> None:
