@@ -10,6 +10,7 @@ import AutomationResourceSchedulingPanel from '../features/execution/components/
 import AutomationTaskExecutionSection from '../features/execution/components/AutomationTaskExecutionSection.jsx'
 import LivingPulseStrip from '../shared/ui/LivingPulseStrip.jsx'
 import { LazyLoadingNotice, LoadingNotice } from '../shared/ui/LoadingNotice.jsx'
+import DigitalLifeRuntimeCard from '../features/life/components/DigitalLifeRuntimeCard.jsx'
 import OrganSystemOverview from '../features/life/components/lifeBody/OrganSystemOverview.jsx'
 import NoticeBanner from '../shared/ui/NoticeBanner.jsx'
 import SampleMeta from '../shared/ui/observability/SampleMeta.jsx'
@@ -288,8 +289,13 @@ export default function Automation() {
                   pollingInterval={pollingInterval}
                   pollingTick={pollingTick}
                   initialReplayRequestId={immuneReplayRequestId}
-                  runtimeSnapshot={runtimeSnapshot}
-                  promptStats={promptStats}
+                  runtimeCard={(
+                    <DigitalLifeRuntimeCard
+                      runtimeSnapshot={runtimeSnapshot}
+                      promptStats={promptStats}
+                      compact
+                    />
+                  )}
                 />
               </React.Suspense>
             </ViewportLazySection>

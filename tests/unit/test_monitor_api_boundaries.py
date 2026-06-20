@@ -37,7 +37,7 @@ LEGACY_FEATURE_API_IMPORT = re.compile(
 )
 IMPORT_SOURCE = re.compile(r"from\s+['\"](?P<source>[^'\"]+)['\"]")
 SIBLING_FEATURE_IMPORT = re.compile(
-    r"from\s+['\"]\.\./(?P<feature>execution|integrations|life|observability|operations|security)/"
+    r"from\s+['\"](?:\.\./)+(?P<feature>execution|integrations|life|observability|operations|security)/"
 )
 LEGACY_API_DIRECT_REQUEST = re.compile(
     r"\b(?:obsGet|obsPost|obsPut|httpRequest|httpGet|httpPost)\b|\bfetch\s*\("
@@ -434,6 +434,17 @@ def test_execution_feature_containers_are_not_left_under_global_components() -> 
     assert [path.as_posix() for path in legacy_dirs if path.exists()] == []
     assert [path.as_posix() for path in legacy_paths if path.exists()] == []
     assert violations == []
+
+
+def test_agent_loop_console_sections_are_feature_owned() -> None:
+    page = MONITOR_SRC / "pages" / "AgentLoop.jsx"
+    feature_component = MONITOR_SRC / "features" / "execution" / "components" / "AgentLoopConsoleSections.jsx"
+    page_source = page.read_text(encoding="utf-8")
+
+    assert feature_component.exists()
+    assert "AgentLoopConsoleSections.jsx" in page_source
+    assert "function PhaseBadge" not in page_source
+    assert "isAgentLoopRunReady" not in page_source
 
 
 def test_trace_observability_components_are_not_left_under_global_components() -> None:
@@ -1362,7 +1373,7 @@ def test_repeated_time_and_percent_formatters_use_shared_module() -> None:
     shared = SHARED_FORMATTERS.read_text(encoding="utf-8")
     digital_life_utils = (MONITOR_SRC / "utils" / "digitalLife.js").read_text(encoding="utf-8")
     migrated_files = {
-        "pages/AgentLoop.jsx": ["function formatTime("],
+        "features/execution/components/AgentLoopConsoleSections.jsx": ["function formatTime("],
         "features/execution/components/AutomationResourceSchedulingPanel.jsx": [
             "function formatPercent(",
             "function formatLocalTime(",
@@ -1920,6 +1931,7 @@ def test_remaining_execution_queries_are_split_and_monolith_is_retired() -> None
 def test_agent_loop_stream_and_view_model_lives_in_execution_feature() -> None:
     agent_loop_page = (MONITOR_SRC / "pages" / "AgentLoop.jsx").read_text(encoding="utf-8")
     agent_loop_model = (MONITOR_SRC / "features" / "execution" / "agentLoopModel.js").read_text(encoding="utf-8")
+    agent_loop_sections = (MONITOR_SRC / "features" / "execution" / "components" / "AgentLoopConsoleSections.jsx").read_text(encoding="utf-8")
     shared_sse = (MONITOR_SRC / "shared" / "streaming" / "sse.js").read_text(encoding="utf-8")
 
     assert "export function parseSseBlock(" in shared_sse
@@ -1948,10 +1960,10 @@ def test_agent_loop_stream_and_view_model_lives_in_execution_feature() -> None:
     assert "buildAgentLoopRunRequest({" in agent_loop_page
     assert "buildAgentLoopRunSummary(loopResult)" in agent_loop_page
     assert "buildAgentLoopRouteErrorEvent(error)" in agent_loop_page
-    assert "getAgentLoopPhaseClass(phase)" in agent_loop_page
     assert "isAgentLoopDoneEvent(event)" in agent_loop_page
-    assert "isAgentLoopRunReady(goal)" in agent_loop_page
     assert "metricCards.map((card)" in agent_loop_page
+    assert "getAgentLoopPhaseClass(phase)" in agent_loop_sections
+    assert "isAgentLoopRunReady(goal)" in agent_loop_sections
 
     for forbidden in [
         "function parseSseBlock(",

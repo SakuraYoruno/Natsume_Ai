@@ -5,7 +5,6 @@ import {
   Activity, Bookmark, Layers,
   Clock3, Shield,
 } from 'lucide-react'
-import DigitalLifeRuntimeCard from '../../../life/components/DigitalLifeRuntimeCard.jsx'
 import EmptyStateCard from '../../../../shared/ui/EmptyStateCard.jsx'
 import LivingPulseStrip from '../../../../shared/ui/LivingPulseStrip.jsx'
 import NoticeBanner from '../../../../shared/ui/NoticeBanner.jsx'
@@ -53,7 +52,17 @@ import { connectTraceLiveFeed } from '../../traceApi.js'
 import useAppStore from '../../../../store/useAppStore.js'
 
 const TraceInlineFullChainOverview = React.lazy(() => import('./TraceAdvancedViews.jsx').then((module) => ({ default: module.InlineFullChainOverview })))
-export default function TraceHome({ traceData, setTraceData, traceInfo, setTraceInfo, loading, setLoading, error, setError }) {
+export default function TraceHome({
+  traceData,
+  setTraceData,
+  traceInfo,
+  setTraceInfo,
+  loading,
+  setLoading,
+  error,
+  setError,
+  renderRuntimeCard = null,
+}) {
   const [inputId, setInputId] = useState('')
   const [recentKeyword, setRecentKeyword] = useState('')
   const [recentStatusFilter, setRecentStatusFilter] = useState('')
@@ -533,13 +542,9 @@ export default function TraceHome({ traceData, setTraceData, traceInfo, setTrace
         )}
       </div>
 
-      {runtimeSnapshot && (
-        <DigitalLifeRuntimeCard
-          runtimeSnapshot={runtimeSnapshot}
-          promptStats={promptBuilderData}
-          compact
-        />
-      )}
+      {runtimeSnapshot && typeof renderRuntimeCard === 'function'
+        ? renderRuntimeCard({ runtimeSnapshot, promptStats: promptBuilderData })
+        : null}
 
       {selectedRequestId && (
         <div className="card flex items-center gap-3 flex-wrap px-4 py-3">

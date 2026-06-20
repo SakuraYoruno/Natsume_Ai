@@ -1,5 +1,4 @@
 ﻿import React, { useCallback, useEffect, useState } from 'react'
-import DigitalLifeRuntimeCard from '../../life/components/DigitalLifeRuntimeCard.jsx'
 import EmptyStateCard from '../../../shared/ui/EmptyStateCard.jsx'
 import LivingPulseStrip from '../../../shared/ui/LivingPulseStrip.jsx'
 import NoticeBanner from '../../../shared/ui/NoticeBanner.jsx'
@@ -402,12 +401,11 @@ export default function AutomationImmuneSectionContent({
   pollingInterval,
   pollingTick,
   initialReplayRequestId = '',
-  runtimeSnapshot,
-  promptStats,
+  runtimeCard = null,
 }) {
   return (
     <>
-      <DigitalLifeRuntimeCard runtimeSnapshot={runtimeSnapshot} promptStats={promptStats} compact />
+      {runtimeCard}
       <ImmuneGateOpsPanel
         pollingEnabled={pollingEnabled}
         pollingInterval={pollingInterval}
