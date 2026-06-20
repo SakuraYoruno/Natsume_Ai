@@ -1,14 +1,20 @@
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[2]
+MONITOR_UI_ROOT = ROOT / "host_brain" / "app" / "monitor_ui"
 MONITOR_SRC = ROOT / "host_brain" / "app" / "monitor_ui" / "src"
 ROUTE_MANIFEST = MONITOR_SRC / "app" / "routeManifest.jsx"
 ROUTE_LOADERS = MONITOR_SRC / "routes" / "routeLoaders.js"
+PACKAGE_JSON = MONITOR_UI_ROOT / "package.json"
+PLAYWRIGHT_CONFIG = MONITOR_UI_ROOT / "playwright.config.js"
+ROUTE_SMOKE_SPEC = MONITOR_UI_ROOT / "e2e" / "monitor-route-smoke.spec.js"
+INTERACTION_SMOKE_SPEC = MONITOR_UI_ROOT / "e2e" / "monitor-interactions-smoke.spec.js"
 
 NAV_GROUPS = {
     "Cockpit",
@@ -136,3 +142,43 @@ def test_page_loader_orphans_are_documented_legacy_entries() -> None:
     unexpected = sorted(_loader_keys() - canonical_loader_keys)
 
     assert unexpected == []
+
+
+def test_monitor_ui_has_manifest_driven_playwright_route_smoke() -> None:
+    package_data = json.loads(PACKAGE_JSON.read_text(encoding="utf-8"))
+    scripts = package_data.get("scripts", {})
+
+    assert package_data.get("devDependencies", {}).get("@playwright/test")
+    assert scripts.get("test:e2e") == "npm run build && playwright test"
+    assert scripts.get("test:e2e:routes") == "npm run build && playwright test e2e/monitor-route-smoke.spec.js"
+    assert scripts.get("test:e2e:interactions") == "npm run build && playwright test e2e/monitor-interactions-smoke.spec.js"
+
+    config = PLAYWRIGHT_CONFIG.read_text(encoding="utf-8")
+    assert "defineConfig" in config
+    assert "MONITOR_UI_BASE_URL" in config
+    assert "npm run preview -- --host 127.0.0.1 --port 4173" in config
+    assert "reuseExistingServer: true" in config
+
+    spec = ROUTE_SMOKE_SPEC.read_text(encoding="utf-8")
+    assert "src/app/routeManifest.jsx" in spec
+    assert "smokeTest" in spec
+    assert "legacyPaths" in spec
+    assert "page.on('pageerror'" in spec
+    assert "Failed to fetch dynamically imported module" in spec
+    assert "new URL(`#${concreteRoutePath(routePath)}`, baseURL)" in spec
+
+    interaction_spec = INTERACTION_SMOKE_SPEC.read_text(encoding="utf-8")
+    for route_path in [
+        "/security/pentest",
+        "/execution/tools",
+        "/execution/automation",
+        "/observability/insights",
+    ]:
+        assert route_path in interaction_spec
+    for expected_fixture in [
+        "stubPentestApis",
+        "stubToolsApis",
+        "stubAutomationApis",
+        "stubInsightsApis",
+    ]:
+        assert f"async function {expected_fixture}(" in interaction_spec

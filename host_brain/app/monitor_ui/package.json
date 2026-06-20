@@ -6,7 +6,10 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test:e2e": "npm run build && playwright test",
+    "test:e2e:routes": "npm run build && playwright test e2e/monitor-route-smoke.spec.js",
+    "test:e2e:interactions": "npm run build && playwright test e2e/monitor-interactions-smoke.spec.js"
   },
   "dependencies": {
     "@dagrejs/dagre": "^2.0.4",
@@ -21,6 +24,7 @@
     "zustand": "^5.0.2"
   },
   "devDependencies": {
+    "@playwright/test": "^1.61.0",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^5.2.0",
