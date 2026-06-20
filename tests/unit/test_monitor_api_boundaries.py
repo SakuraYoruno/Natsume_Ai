@@ -3227,6 +3227,7 @@ def test_pentest_display_metadata_lives_in_shared_module() -> None:
 
 def test_pentest_run_detail_model_lives_in_security_feature() -> None:
     run_detail_page = (MONITOR_SRC / "pages" / "SecurityPentestRunDetail.jsx").read_text(encoding="utf-8")
+    run_detail_surface = (MONITOR_SRC / "features" / "security" / "components" / "SecurityPentestRunDetailSurface.jsx").read_text(encoding="utf-8")
     run_detail_model = (MONITOR_SRC / "features" / "security" / "pentestRunDetailModel.js").read_text(encoding="utf-8")
 
     for export_name in [
@@ -3241,13 +3242,13 @@ def test_pentest_run_detail_model_lives_in_security_feature() -> None:
         assert f"export function {export_name}(" in run_detail_model
 
     assert "features/security/pentestRunDetailModel.js" in run_detail_page
-    assert "buildPentestAttackGraph(run)" in run_detail_page
+    assert "buildPentestAttackGraph(run)" in run_detail_surface
     assert "buildPentestApprovalRailView(run, environment)" in run_detail_page
     assert "buildPentestRunHeroMetaItems(run, loading)" in run_detail_page
     assert "mergeRunWithExistingEvents(runData, previousRun)" in run_detail_page
     assert "mergePentestEvents(previousRun?.events || [], [normalized])" in run_detail_page
     assert "normalizePentestEvent(event)" in run_detail_page
-    assert "pentestEventKey(event)" in run_detail_page
+    assert "pentestEventKey(event)" in run_detail_surface
 
     assert "function normalizePentestEvent(" not in run_detail_page
     assert "function pentestEventKey(" not in run_detail_page
@@ -3259,6 +3260,32 @@ def test_pentest_run_detail_model_lives_in_security_feature() -> None:
     assert "const continuationLabel = !approvalRequired" not in run_detail_page
     assert "canApprove: Boolean(approvalRequired && environment?.lab_mode" in run_detail_model
     assert "canContinue: Boolean(approvalRequired && environment?.lab_mode" in run_detail_model
+
+
+def test_pentest_run_detail_surface_is_feature_owned() -> None:
+    page = MONITOR_SRC / "pages" / "SecurityPentestRunDetail.jsx"
+    surface = MONITOR_SRC / "features" / "security" / "components" / "SecurityPentestRunDetailSurface.jsx"
+    page_source = page.read_text(encoding="utf-8")
+    surface_source = surface.read_text(encoding="utf-8")
+
+    assert surface.exists()
+    assert "SecurityPentestRunDetailSurface from '../features/security/components/SecurityPentestRunDetailSurface.jsx'" in page_source
+    assert "export default function SecurityPentestRunDetailSurface(" in surface_source
+
+    for stale_component in [
+        "AttackGraph",
+        "CheckCircle2",
+        "FileText",
+        "JsonBlock",
+        "Link",
+        "NoticeBanner",
+        "PageHero",
+        "RefreshCw",
+        "ShieldAlert",
+        "StatusBadge",
+        "XCircle",
+    ]:
+        assert stale_component not in page_source
 
 
 def test_security_immune_query_and_view_model_live_in_security_feature() -> None:
