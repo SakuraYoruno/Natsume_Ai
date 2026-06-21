@@ -917,6 +917,19 @@ def test_trace_visual_metadata_lives_in_trace_feature_module() -> None:
 
 def test_trace_advanced_view_model_lives_in_trace_feature_module() -> None:
     advanced_views = (OBSERVABILITY_TRACE_COMPONENTS / "TraceAdvancedViews.jsx").read_text(encoding="utf-8")
+    full_chain_view = (
+        OBSERVABILITY_TRACE_COMPONENTS / "advancedViews" / "FullChainView.jsx"
+    ).read_text(encoding="utf-8")
+    gantt_view = (
+        OBSERVABILITY_TRACE_COMPONENTS / "advancedViews" / "GanttView.jsx"
+    ).read_text(encoding="utf-8")
+    group_dag_view = (
+        OBSERVABILITY_TRACE_COMPONENTS / "advancedViews" / "GroupDagView.jsx"
+    ).read_text(encoding="utf-8")
+    inline_overview = (
+        OBSERVABILITY_TRACE_COMPONENTS / "advancedViews" / "InlineFullChainOverview.jsx"
+    ).read_text(encoding="utf-8")
+    advanced_view_surfaces = "\n".join([full_chain_view, gantt_view, group_dag_view, inline_overview])
     advanced_view_model = (OBSERVABILITY_TRACE_COMPONENTS / "traceAdvancedViewModel.js").read_text(encoding="utf-8")
 
     for export_name in [
@@ -930,26 +943,64 @@ def test_trace_advanced_view_model_lives_in_trace_feature_module() -> None:
     ]:
         assert f"export function {export_name}(" in advanced_view_model
 
-    assert "from './traceAdvancedViewModel.js'" in advanced_views
-    assert "buildTraceAdvancedFlowData(" in advanced_views
-    assert "computeTraceGanttTimeline(traceData)" in advanced_views
-    assert "filterTraceGanttTimeline(timeline, filter)" in advanced_views
-    assert "buildTraceGanttRowView(node, totalMs)" in advanced_views
-    assert "buildGroupDagFlowInputs({" in advanced_views
-    assert "buildGroupDagHeaderMeta({" in advanced_views
-    assert "function buildFlowData(" not in advanced_views
-    assert "function computeGanttTimeline(" not in advanced_views
-    assert "MarkerType" not in advanced_views
-    assert "applyDagreLayout" not in advanced_views
-    assert "getTraceNodeDisplayName" not in advanced_views
-    assert "resolveTraceNodeTypeColor" not in advanced_views
-    assert "FULL_CHAIN_SCHEMA" not in advanced_views
-    assert "buildImmuneStageMeta" not in advanced_views
-    assert "getTraceGroupNodeIds" not in advanced_views
-    assert "Object.fromEntries" not in advanced_views
-    assert "new Set(group.nodeIds)" not in advanced_views
-    assert "Array.from({ length: 6" not in advanced_views
-    assert "Math.max(((node.latency_ms" not in advanced_views
+    assert "from './advancedViews/FullChainView.jsx'" in advanced_views
+    assert "from './advancedViews/GroupDagView.jsx'" in advanced_views
+    assert "from './advancedViews/InlineFullChainOverview.jsx'" in advanced_views
+    assert "from '../traceAdvancedViewModel.js'" in advanced_view_surfaces
+    assert "buildTraceAdvancedFlowData(" in full_chain_view
+    assert "buildTraceAdvancedFlowData(" in inline_overview
+    assert "computeTraceGanttTimeline(traceData)" in gantt_view
+    assert "filterTraceGanttTimeline(timeline, filter)" in gantt_view
+    assert "buildTraceGanttRowView(node, totalMs)" in gantt_view
+    assert "buildGroupDagFlowInputs({" in group_dag_view
+    assert "buildGroupDagHeaderMeta({" in group_dag_view
+    assert "function buildFlowData(" not in advanced_view_surfaces
+    assert "function computeGanttTimeline(" not in advanced_view_surfaces
+    assert "MarkerType" not in advanced_view_surfaces
+    assert "applyDagreLayout" not in advanced_view_surfaces
+    assert "getTraceNodeDisplayName" not in advanced_view_surfaces
+    assert "resolveTraceNodeTypeColor" not in advanced_view_surfaces
+    assert "FULL_CHAIN_SCHEMA" not in advanced_view_surfaces
+    assert "buildImmuneStageMeta" not in advanced_view_surfaces
+    assert "getTraceGroupNodeIds" not in advanced_view_surfaces
+    assert "Object.fromEntries" not in advanced_view_surfaces
+    assert "new Set(group.nodeIds)" not in advanced_view_surfaces
+    assert "Array.from({ length: 6" not in advanced_view_surfaces
+    assert "Math.max(((node.latency_ms" not in advanced_view_surfaces
+
+
+def test_trace_advanced_views_are_split_by_surface() -> None:
+    aggregate = (OBSERVABILITY_TRACE_COMPONENTS / "TraceAdvancedViews.jsx").read_text(encoding="utf-8")
+    full_chain_view = (
+        OBSERVABILITY_TRACE_COMPONENTS / "advancedViews" / "FullChainView.jsx"
+    ).read_text(encoding="utf-8")
+    gantt_view = (
+        OBSERVABILITY_TRACE_COMPONENTS / "advancedViews" / "GanttView.jsx"
+    ).read_text(encoding="utf-8")
+    group_dag_view = (
+        OBSERVABILITY_TRACE_COMPONENTS / "advancedViews" / "GroupDagView.jsx"
+    ).read_text(encoding="utf-8")
+    inline_overview = (
+        OBSERVABILITY_TRACE_COMPONENTS / "advancedViews" / "InlineFullChainOverview.jsx"
+    ).read_text(encoding="utf-8")
+
+    assert "export { default as FullChainView }" in aggregate
+    assert "export { GroupDagRoute }" in aggregate
+    assert "export { default as InlineFullChainOverview }" in aggregate
+    assert "ReactFlow" not in aggregate
+    assert "useNodesState" not in aggregate
+    assert "useEffect" not in aggregate
+
+    assert "export default function FullChainView(" in full_chain_view
+    assert "export default function GanttView(" in gantt_view
+    assert "export default function GroupDagView(" in group_dag_view
+    assert "export function GroupDagRoute(" in group_dag_view
+    assert "export default function InlineFullChainOverview(" in inline_overview
+    assert "NodeDetailPanel" in full_chain_view
+    assert "NodeDetailPanel" in group_dag_view
+    assert "NodeDetailPanel" in inline_overview
+    assert "buildTraceGanttTicks(totalMs)" in gantt_view
+    assert "getLiveTraceFlow(traceData)" in inline_overview
 
 
 def test_trace_stage_model_lives_in_trace_feature_module() -> None:
@@ -1380,7 +1431,10 @@ def test_trace_live_history_and_runtime_panels_render_dynamic_values_safely() ->
     live_surfaces = (OBSERVABILITY_TRACE_COMPONENTS / "TraceLiveSurfaces.jsx").read_text(encoding="utf-8")
     live_model = (OBSERVABILITY_TRACE_COMPONENTS / "traceLiveSurfaceModel.js").read_text(encoding="utf-8")
     history_panel = (OBSERVABILITY_TRACE_COMPONENTS / "TraceHistoryPanel.jsx").read_text(encoding="utf-8")
-    advanced_views = (OBSERVABILITY_TRACE_COMPONENTS / "TraceAdvancedViews.jsx").read_text(encoding="utf-8")
+    advanced_view_sources = "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in (OBSERVABILITY_TRACE_COMPONENTS / "advancedViews").glob("*.jsx")
+    )
     runtime_panels = (OBSERVABILITY_TRACE_COMPONENTS / "TraceRequestRuntimePanels.jsx").read_text(encoding="utf-8")
     runtime_panel_sources = "\n".join(
         path.read_text(encoding="utf-8")
@@ -1393,7 +1447,7 @@ def test_trace_live_history_and_runtime_panels_render_dynamic_values_safely() ->
     assert "const preview = pickLiveTracePreviewValue(candidate)" in live_model
     assert "<RenderValue value={code} />" in live_surfaces
     assert "<RenderValue value={item.input_preview || item.request_id} />" in history_panel
-    assert advanced_views.count("<RenderValue value=") >= 4
+    assert advanced_view_sources.count("<RenderValue value=") >= 4
     assert runtime_panel_sources.count("<RenderValue value=") >= 8
     assert "-reason-${code}" not in runtime_panel_sources
     assert "-rule-${rule}" not in runtime_panel_sources
