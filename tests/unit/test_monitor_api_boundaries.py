@@ -1269,6 +1269,8 @@ def test_trace_request_runtime_panel_model_lives_in_trace_feature_module() -> No
 
 def test_trace_live_surface_model_lives_in_trace_feature_module() -> None:
     live_surfaces = (OBSERVABILITY_TRACE_COMPONENTS / "TraceLiveSurfaces.jsx").read_text(encoding="utf-8")
+    live_preview_panels = (OBSERVABILITY_TRACE_COMPONENTS / "TraceLivePreviewPanels.jsx").read_text(encoding="utf-8")
+    immune_tags = (OBSERVABILITY_TRACE_COMPONENTS / "TraceImmuneStageTags.jsx").read_text(encoding="utf-8")
     live_model = (OBSERVABILITY_TRACE_COMPONENTS / "traceLiveSurfaceModel.js").read_text(encoding="utf-8")
 
     for export_name in [
@@ -1291,13 +1293,18 @@ def test_trace_live_surface_model_lives_in_trace_feature_module() -> None:
         assert f"export function {export_name}(" in live_model
 
     assert "from './traceLiveSurfaceModel.js'" in live_surfaces
+    assert "from './TraceLivePreviewPanels.jsx'" in live_surfaces
+    assert "from './TraceImmuneStageTags.jsx'" in live_surfaces
+    assert "function LiveTracePreviewPanel(" in live_preview_panels
+    assert "function LiveTracePreview(" in live_preview_panels
+    assert "function LiveTraceStreamPreview(" in live_preview_panels
     assert "formatDateTime } from '../../../../shared/formatters.js'" in live_model
     assert "formatAlertTitle, humanizeToken } from '../../../../utils/digitalLife.js'" in live_model
     assert "getLatestPrimaryTraceNode" in live_model
     assert "normalizeTraceGroupNodeId" in live_model
     assert "const preview = pickLiveTracePreviewValue(candidate)" in live_model
-    assert "function renderImmuneStageTags(" in live_surfaces
-    assert "<RenderValue value={code} />" in live_surfaces
+    assert "function renderImmuneStageTags(" in immune_tags
+    assert "<RenderValue value={code} />" in immune_tags
 
     assert "function getLiveTraceStageClasses(" not in live_surfaces
     assert "function getLiveTraceOutputPreview(" not in live_surfaces
@@ -1321,6 +1328,8 @@ def test_trace_live_surface_model_lives_in_trace_feature_module() -> None:
     assert "humanizeToken" not in live_surfaces
     assert "getLatestPrimaryTraceNode" not in live_surfaces
     assert "normalizeTraceGroupNodeId" not in live_surfaces
+    assert "buildLiveTraceMetrics(session, trace)" not in live_surfaces
+    assert "recentTimelineEntries.map((entry)" not in live_surfaces
 
 
 def test_trace_home_model_lives_in_trace_feature_module() -> None:
@@ -1525,6 +1534,7 @@ def test_tools_execution_results_use_shared_json_block() -> None:
 def test_trace_live_history_and_runtime_panels_render_dynamic_values_safely() -> None:
     trace_surfaces = (OBSERVABILITY_TRACE_COMPONENTS / "TraceSurfaces.jsx").read_text(encoding="utf-8")
     live_surfaces = (OBSERVABILITY_TRACE_COMPONENTS / "TraceLiveSurfaces.jsx").read_text(encoding="utf-8")
+    immune_tags = (OBSERVABILITY_TRACE_COMPONENTS / "TraceImmuneStageTags.jsx").read_text(encoding="utf-8")
     live_model = (OBSERVABILITY_TRACE_COMPONENTS / "traceLiveSurfaceModel.js").read_text(encoding="utf-8")
     history_panel = (OBSERVABILITY_TRACE_COMPONENTS / "TraceHistoryPanel.jsx").read_text(encoding="utf-8")
     advanced_view_sources = "\n".join(
@@ -1541,7 +1551,8 @@ def test_trace_live_history_and_runtime_panels_render_dynamic_values_safely() ->
     assert "<RenderValue value={caption}" in trace_surfaces
     assert "<RenderValue value={description}" in trace_surfaces
     assert "const preview = pickLiveTracePreviewValue(candidate)" in live_model
-    assert "<RenderValue value={code} />" in live_surfaces
+    assert "from './TraceImmuneStageTags.jsx'" in live_surfaces
+    assert "<RenderValue value={code} />" in immune_tags
     assert "<RenderValue value={item.input_preview || item.request_id} />" in history_panel
     assert advanced_view_sources.count("<RenderValue value=") >= 4
     assert runtime_panel_sources.count("<RenderValue value=") >= 8
