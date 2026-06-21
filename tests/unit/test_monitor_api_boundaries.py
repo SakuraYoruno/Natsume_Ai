@@ -1246,6 +1246,7 @@ def test_trace_live_surface_model_lives_in_trace_feature_module() -> None:
 
 def test_trace_home_model_lives_in_trace_feature_module() -> None:
     trace_home = (OBSERVABILITY_TRACE_COMPONENTS / "TraceHome.jsx").read_text(encoding="utf-8")
+    trace_home_controller = (OBSERVABILITY_TRACE_COMPONENTS / "traceHomeController.js").read_text(encoding="utf-8")
     trace_home_model = (OBSERVABILITY_TRACE_COMPONENTS / "traceHomeModel.js").read_text(encoding="utf-8")
 
     for export_name in [
@@ -1272,28 +1273,40 @@ def test_trace_home_model_lives_in_trace_feature_module() -> None:
     ]:
         assert f"export function {export_name}(" in trace_home_model
 
-    assert "from './traceHomeModel.js'" in trace_home
-    assert "buildTraceRecentRequests({" in trace_home
-    assert "getSelectedTraceSessionForQuery({" in trace_home
-    assert "buildTraceTribeFeedParams({" in trace_home
-    assert "buildTraceLiveSnapshotParams({ liveTraceLimit, recentKeyword })" in trace_home
-    assert "buildTraceLiveFeedConnectParams({ liveTraceLimit, recentKeyword })" in trace_home
-    assert "getTracePayloadItems(payload)" in trace_home
-    assert "getTracePayloadItems(liveSnapshotQuery.liveSnapshot)" in trace_home
-    assert "pruneTraceTimelineEntriesForSnapshot(previous, items)" in trace_home
-    assert "buildTraceInfoFromTrace(selectedTraceQuery.traceSnapshot)" in trace_home
-    assert "buildTraceInfoFromTrace(item.trace)" in trace_home
-    assert "buildTraceSearchState(inputId)" in trace_home
-    assert "navigate(buildTraceDetailPath(requestId))" in trace_home
-    assert "getTraceOverviewFocusAction({ requestId, traceData, liveTraceItems })" in trace_home
-    assert "getLiveTraceItemFocusAction({" in trace_home
-    assert "buildTraceGroupStats(traceData)" in trace_home
-    assert "getTraceStatusHealth(traceInfo)" in trace_home
-    assert "buildSelectedTraceRequestContext({" in trace_home
-    assert "getNextAutoTraceSelection({ liveTraceItems, selectedRequestId, traceData })" in trace_home
-    assert "getTraceLiveFeedStatus({" in trace_home
-    assert "buildTraceHistoryViewState({" in trace_home
-    assert "buildTracePulseNodes({" in trace_home
+    assert "from './traceHomeModel.js'" in trace_home_controller
+    assert "buildTraceRecentRequests({" in trace_home_controller
+    assert "getSelectedTraceSessionForQuery({" in trace_home_controller
+    assert "buildTraceTribeFeedParams({" in trace_home_controller
+    assert "buildTraceLiveSnapshotParams({ liveTraceLimit, recentKeyword })" in trace_home_controller
+    assert "buildTraceLiveFeedConnectParams({ liveTraceLimit, recentKeyword })" in trace_home_controller
+    assert "getTracePayloadItems(payload)" in trace_home_controller
+    assert "getTracePayloadItems(liveSnapshotQuery.liveSnapshot)" in trace_home_controller
+    assert "pruneTraceTimelineEntriesForSnapshot(previous, items)" in trace_home_controller
+    assert "buildTraceInfoFromTrace(selectedTraceQuery.traceSnapshot)" in trace_home_controller
+    assert "buildTraceInfoFromTrace(item.trace)" in trace_home_controller
+    assert "buildTraceSearchState(inputId)" in trace_home_controller
+    assert "navigate(buildTraceDetailPath(requestId))" in trace_home_controller
+    assert "getTraceOverviewFocusAction({ requestId, traceData, liveTraceItems })" in trace_home_controller
+    assert "getLiveTraceItemFocusAction({" in trace_home_controller
+    assert "buildTraceGroupStats(traceData)" in trace_home_controller
+    assert "getTraceStatusHealth(traceInfo)" in trace_home_controller
+    assert "buildSelectedTraceRequestContext({" in trace_home_controller
+    assert "getNextAutoTraceSelection({ liveTraceItems, selectedRequestId, traceData })" in trace_home_controller
+    assert "getTraceLiveFeedStatus({" in trace_home_controller
+    assert "buildTraceHistoryViewState({" in trace_home_controller
+    assert "buildTracePulseNodes({" in trace_home_controller
+    assert "useTraceHomeController" in trace_home
+    assert "traceHomeController.js" in trace_home
+    assert "useEffect" not in trace_home
+    assert "useState" not in trace_home
+    assert "useCallback" not in trace_home
+    assert "useMemo" not in trace_home
+    assert "connectTraceLiveFeed" not in trace_home
+    assert "useSessionsListQuery" not in trace_home
+    assert "useTraceLiveSnapshotQuery" not in trace_home
+    assert "useTraceSnapshotQuery" not in trace_home
+    assert "useTraceTribeFeedQuery" not in trace_home
+    assert "useAppStore" not in trace_home
     assert "new Map(recentRequestsBase" not in trace_home
     assert "const params = { limit: selectedRequestId ? 200 : 60 }" not in trace_home
     assert "getTraceGroupState(" not in trace_home
@@ -1336,8 +1349,8 @@ def test_trace_home_linked_tribe_events_panel_is_split() -> None:
 
     assert "TraceHomeControlConsole from './traceHome/TraceHomeControlConsole.jsx'" in trace_home
     assert "<TraceHomeControlConsole" in trace_home
-    assert "onRefreshTribeEvents={() => { void tribeFeedQuery.refetch() }}" in trace_home
-    assert "onOpenTribeInsights={() => navigate('/observability/insights/safety')}" in trace_home
+    assert "onRefreshTribeEvents={() => { void traceHome.refreshTribeEvents() }}" in trace_home
+    assert "onOpenTribeInsights={() => traceHome.navigate('/observability/insights/safety')}" in trace_home
 
     assert "TraceLinkedTribeEventsPanel from '../TraceLinkedTribeEventsPanel.jsx'" in control_console
     assert "<TraceLinkedTribeEventsPanel" in control_console
@@ -2310,6 +2323,9 @@ def test_observability_queries_are_split_and_monolith_is_retired() -> None:
         "TraceHome.jsx": (
             MONITOR_SRC / "features" / "observability" / "components" / "trace" / "TraceHome.jsx"
         ).read_text(encoding="utf-8"),
+        "traceHomeController.js": (
+            MONITOR_SRC / "features" / "observability" / "components" / "trace" / "traceHomeController.js"
+        ).read_text(encoding="utf-8"),
     }
 
     assert not observability_queries_path.exists()
@@ -2364,7 +2380,7 @@ def test_observability_queries_are_split_and_monolith_is_retired() -> None:
         "Insights.jsx": "features/observability/insightsQueries.js",
         "LogStream.jsx": "features/observability/logQueries.js",
         "CodexBioOpsObservability.jsx": "features/observability/codexBioOpsQueries.js",
-        "TraceHome.jsx": "../../sessionsQueries.js",
+        "traceHomeController.js": "../../sessionsQueries.js",
     }
     for name, expected_import in expected_imports.items():
         assert expected_import in pages[name], name
