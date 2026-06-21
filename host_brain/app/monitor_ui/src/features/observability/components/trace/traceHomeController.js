@@ -9,8 +9,7 @@ import {
   getTraceIssueCount,
   getTraceRunningCount,
   isTribeEventLinkedToSelection,
-  mergeLiveTraceTimelineEntries,
-} from './TraceLiveSurfaces.jsx'
+} from './traceLiveSurfaceModel.js'
 import { GROUPS } from './traceFlowModel.js'
 import {
   buildSelectedTraceRequestContext,
@@ -18,8 +17,6 @@ import {
   buildTraceGroupStats,
   buildTraceHistoryViewState,
   buildTraceInfoFromTrace,
-  buildTraceLiveFeedConnectParams,
-  buildTraceLiveSnapshotParams,
   buildTracePulseNodes,
   buildTraceRecentRequests,
   buildTraceSearchState,
@@ -30,15 +27,13 @@ import {
   getTraceLiveFeedStatus,
   getTraceLiveModeLabel,
   getTraceOverviewFocusAction,
-  getTracePayloadItems,
   getTraceStatusHealth,
-  pruneTraceTimelineEntriesForSnapshot,
 } from './traceHomeModel.js'
+import { useTraceHomeLiveFeed } from './useTraceHomeLiveFeed.js'
 import useDigitalLifeRuntimeSignals from '../../../../hooks/useDigitalLifeRuntimeSignals.js'
 import { useSessionsListQuery } from '../../sessionsQueries.js'
-import { useTraceLiveSnapshotQuery, useTraceSnapshotQuery, useTraceTribeFeedQuery } from '../../traceQueries.js'
+import { useTraceSnapshotQuery, useTraceTribeFeedQuery } from '../../traceQueries.js'
 import { sanitizeRecentRequests } from '../../../../utils/sessionList.js'
-import { connectTraceLiveFeed } from '../../traceApi.js'
 import useAppStore from '../../../../store/useAppStore.js'
 
 export function useTraceHomeController({
@@ -57,11 +52,6 @@ export function useTraceHomeController({
   const [historyExpanded, setHistoryExpanded] = useState(false)
   const [inlineOverviewVisible, setInlineOverviewVisible] = useState(false)
   const [advancedViewsExpanded, setAdvancedViewsExpanded] = useState(false)
-  const [liveTraceItems, setLiveTraceItems] = useState([])
-  const [liveTraceTimelineEntries, setLiveTraceTimelineEntries] = useState({})
-  const [liveFeedError, setLiveFeedError] = useState(null)
-  const [liveFeedConnected, setLiveFeedConnected] = useState(false)
-  const [liveFeedLastTs, setLiveFeedLastTs] = useState(null)
   const inlineOverviewRef = useRef(null)
   const navigate = useNavigate()
   const pollingEnabled = useAppStore((s) => s.pollingEnabled)
@@ -72,6 +62,21 @@ export function useTraceHomeController({
   const setSelectedRequestId = useAppStore((s) => s.setSelectedRequestId)
   const liveFeedEnabled = pollingEnabled && pageVisible
   const liveTraceLimit = recentKeyword ? 12 : 6
+  const {
+    liveFeedConnected,
+    liveFeedLastTs,
+    liveTraceError,
+    liveTraceItems,
+    liveTraceLoading,
+    liveTraceTimelineEntries,
+    refreshLiveSnapshot,
+  } = useTraceHomeLiveFeed({
+    liveFeedEnabled,
+    liveTraceLimit,
+    pollingTick,
+    pollingInterval,
+    recentKeyword,
+  })
   const { runtimeSnapshot, promptStats: promptBuilderData } = useDigitalLifeRuntimeSignals({
     pollingEnabled: liveFeedEnabled,
     pollingInterval,
@@ -88,16 +93,6 @@ export function useTraceHomeController({
     pollingTick,
     pollingInterval,
   })
-  const liveSnapshotParams = useMemo(() => (
-    buildTraceLiveSnapshotParams({ liveTraceLimit, recentKeyword })
-  ), [liveTraceLimit, recentKeyword])
-  const liveSnapshotQuery = useTraceLiveSnapshotQuery({
-    queryParams: liveSnapshotParams,
-    enabled: true,
-    pollingEnabled: liveFeedEnabled,
-    pollingTick,
-    pollingInterval: Math.max(10, pollingInterval),
-  })
   const recentRequestsBase = useMemo(() => (
     sanitizeRecentRequests(recentRequestsQuery.sessionsData?.items, { keyword: recentKeyword })
   ), [recentKeyword, recentRequestsQuery.sessionsData?.items])
@@ -107,8 +102,6 @@ export function useTraceHomeController({
     liveTraceItems,
   }), [liveTraceItems, recentKeyword, recentRequestsBase])
   const recentLoading = recentRequestsQuery.loading || recentRequestsQuery.refreshing
-  const liveTraceLoading = liveSnapshotQuery.loading || liveSnapshotQuery.refreshing
-  const liveTraceError = liveFeedError || liveSnapshotQuery.liveSnapshotError
   const selectedSessionForQuery = useMemo(() => getSelectedTraceSessionForQuery({
     liveTraceItems,
     recentRequests,
@@ -156,91 +149,6 @@ export function useTraceHomeController({
       setInlineOverviewVisible(true)
     }
   }, [setError, setSelectedRequestId])
-
-  useEffect(() => {
-    if (!liveFeedEnabled) {
-      setLiveFeedConnected(false)
-      return undefined
-    }
-
-    let closed = false
-    let connection
-    setLiveFeedError(null)
-
-    try {
-      connection = connectTraceLiveFeed(
-        buildTraceLiveFeedConnectParams({ liveTraceLimit, recentKeyword }),
-        {
-          onOpen: () => {
-            if (closed) return
-            setLiveFeedConnected(true)
-            setLiveFeedError(null)
-          },
-          onSnapshot: (payload) => {
-            if (closed) return
-            const items = getTracePayloadItems(payload)
-            setLiveFeedConnected(true)
-            setLiveFeedLastTs(payload?.timestamp ?? Date.now())
-            if (items.length > 0) {
-              setLiveTraceItems(items)
-            }
-            setLiveTraceTimelineEntries((previous) => pruneTraceTimelineEntriesForSnapshot(previous, items))
-            setLiveFeedError(null)
-          },
-          onDelta: (payload) => {
-            if (closed) return
-            const items = getTracePayloadItems(payload)
-            if (items.length === 0) return
-            setLiveFeedConnected(true)
-            setLiveFeedLastTs(payload?.timestamp ?? Date.now())
-            setLiveTraceTimelineEntries((previous) => mergeLiveTraceTimelineEntries(previous, items))
-          },
-          onHeartbeat: (payload) => {
-            if (closed) return
-            setLiveFeedConnected(true)
-            setLiveFeedLastTs(payload?.timestamp ?? Date.now())
-          },
-          onError: (payload) => {
-            if (closed) return
-            setLiveFeedError(payload?.detail || '实时链路流异常')
-          },
-          onConnectionError: () => {
-            if (closed) return
-            setLiveFeedConnected(false)
-          },
-        }
-      )
-    } catch (connectionError) {
-      setLiveFeedConnected(false)
-      setLiveFeedError(connectionError.message)
-      return undefined
-    }
-
-    return () => {
-      closed = true
-      connection?.close?.()
-    }
-  }, [liveFeedEnabled, recentKeyword, liveTraceLimit])
-
-  useEffect(() => {
-    const items = getTracePayloadItems(liveSnapshotQuery.liveSnapshot)
-    if (items.length === 0) {
-      if (!liveFeedConnected) {
-        setLiveTraceItems([])
-      }
-      return
-    }
-    if (liveFeedConnected && liveTraceItems.length > 0) return
-    setLiveTraceItems(items)
-    if (!liveFeedLastTs && liveSnapshotQuery.liveSnapshot?.timestamp) {
-      setLiveFeedLastTs(liveSnapshotQuery.liveSnapshot.timestamp)
-    }
-  }, [liveFeedConnected, liveFeedLastTs, liveSnapshotQuery.liveSnapshot, liveTraceItems.length])
-
-  useEffect(() => {
-    setLiveTraceItems([])
-    setLiveTraceTimelineEntries({})
-  }, [recentKeyword])
 
   useEffect(() => {
     setLoading(selectedTraceQuery.loading)
@@ -470,7 +378,7 @@ export function useTraceHomeController({
     traceSearch,
     tribeEventsError,
     tribeEventsLoading,
-    refreshLiveData: () => Promise.allSettled([recentRequestsQuery.refetch(), liveSnapshotQuery.refetch()]),
+    refreshLiveData: () => Promise.allSettled([recentRequestsQuery.refetch(), refreshLiveSnapshot()]),
     refreshRecentRequests: recentRequestsQuery.refetch,
     refreshTribeEvents: tribeFeedQuery.refetch,
   }
