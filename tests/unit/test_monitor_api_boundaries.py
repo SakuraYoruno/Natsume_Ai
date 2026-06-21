@@ -1276,16 +1276,24 @@ def test_trace_home_model_lives_in_trace_feature_module() -> None:
 
 def test_trace_home_linked_tribe_events_panel_is_split() -> None:
     trace_home = (OBSERVABILITY_TRACE_COMPONENTS / "TraceHome.jsx").read_text(encoding="utf-8")
+    control_console = (
+        OBSERVABILITY_TRACE_COMPONENTS / "traceHome" / "TraceHomeControlConsole.jsx"
+    ).read_text(encoding="utf-8")
     tribe_panel = (
         OBSERVABILITY_TRACE_COMPONENTS / "TraceLinkedTribeEventsPanel.jsx"
     ).read_text(encoding="utf-8")
 
-    assert "TraceLinkedTribeEventsPanel from './TraceLinkedTribeEventsPanel.jsx'" in trace_home
-    assert "<TraceLinkedTribeEventsPanel" in trace_home
-    assert "selectedRequestId={selectedRequestId}" in trace_home
-    assert "linkedTribeEventList={linkedTribeEventList}" in trace_home
-    assert "onRefresh={() => { void tribeFeedQuery.refetch() }}" in trace_home
-    assert "onOpenInsights={() => navigate('/observability/insights/safety')}" in trace_home
+    assert "TraceHomeControlConsole from './traceHome/TraceHomeControlConsole.jsx'" in trace_home
+    assert "<TraceHomeControlConsole" in trace_home
+    assert "onRefreshTribeEvents={() => { void tribeFeedQuery.refetch() }}" in trace_home
+    assert "onOpenTribeInsights={() => navigate('/observability/insights/safety')}" in trace_home
+
+    assert "TraceLinkedTribeEventsPanel from '../TraceLinkedTribeEventsPanel.jsx'" in control_console
+    assert "<TraceLinkedTribeEventsPanel" in control_console
+    assert "selectedRequestId={selectedRequestId}" in control_console
+    assert "linkedTribeEventList={linkedTribeEventList}" in control_console
+    assert "onRefresh={onRefreshTribeEvents}" in control_console
+    assert "onOpenInsights={onOpenTribeInsights}" in control_console
 
     assert "export default function TraceLinkedTribeEventsPanel(" in tribe_panel
     assert "Tribe 事件联动" in tribe_panel
@@ -1299,6 +1307,42 @@ def test_trace_home_linked_tribe_events_panel_is_split() -> None:
     assert "formatEventPayloadPreview(event?.payload" not in trace_home
     assert "Tribe 事件读取失败" not in trace_home
     assert "当前请求暂无 Tribe 事件" not in trace_home
+
+
+def test_trace_home_surface_sections_are_split() -> None:
+    trace_home = (OBSERVABILITY_TRACE_COMPONENTS / "TraceHome.jsx").read_text(encoding="utf-8")
+    summary_band = (
+        OBSERVABILITY_TRACE_COMPONENTS / "traceHome" / "TraceHomeSummaryBand.jsx"
+    ).read_text(encoding="utf-8")
+    control_console = (
+        OBSERVABILITY_TRACE_COMPONENTS / "traceHome" / "TraceHomeControlConsole.jsx"
+    ).read_text(encoding="utf-8")
+    active_feed = (
+        OBSERVABILITY_TRACE_COMPONENTS / "traceHome" / "TraceHomeActiveFeedPanel.jsx"
+    ).read_text(encoding="utf-8")
+
+    assert "TraceHomeSummaryBand from './traceHome/TraceHomeSummaryBand.jsx'" in trace_home
+    assert "TraceHomeControlConsole from './traceHome/TraceHomeControlConsole.jsx'" in trace_home
+    assert "TraceHomeActiveFeedPanel from './traceHome/TraceHomeActiveFeedPanel.jsx'" in trace_home
+    assert "<TraceHomeSummaryBand" in trace_home
+    assert "<TraceHomeControlConsole" in trace_home
+    assert "<TraceHomeActiveFeedPanel" in trace_home
+
+    assert "PageHero" in summary_band
+    assert "LivingPulseStrip" in summary_band
+    assert "HomeSummaryCard" in summary_band
+    assert "TraceSection" in control_console
+    assert "Search size={13}" in control_console
+    assert "LiveTraceCard" in active_feed
+    assert "LiveTraceStreamPreview" in active_feed
+    assert "EmptyStateCard" in active_feed
+
+    assert "PageHero" not in trace_home
+    assert "LivingPulseStrip" not in trace_home
+    assert "HomeSummaryCard" not in trace_home
+    assert "TraceSection" not in trace_home
+    assert "LiveTraceCard" not in trace_home
+    assert "LiveTraceStreamPreview" not in trace_home
 
 
 def test_trace_summary_panels_use_shared_json_block() -> None:
