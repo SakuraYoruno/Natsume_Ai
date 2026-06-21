@@ -2111,6 +2111,9 @@ def test_automation_queries_are_split_from_execution_query_monolith() -> None:
     immune_replay_api = (MONITOR_SRC / "shared" / "api" / "immuneGate.js").read_text(encoding="utf-8")
     immune_replay_query = (MONITOR_SRC / "shared" / "query" / "useImmuneGateReplayQuery.js").read_text(encoding="utf-8")
     automation_page = (MONITOR_SRC / "pages" / "Automation.jsx").read_text(encoding="utf-8")
+    automation_controller = (
+        MONITOR_SRC / "features" / "execution" / "automationDashboardController.js"
+    ).read_text(encoding="utf-8")
     trace_detail = (MONITOR_SRC / "pages" / "TraceRequestDetail.jsx").read_text(encoding="utf-8")
     trace_detail_controller = (
         MONITOR_SRC / "features" / "observability" / "traceRequestDetailController.js"
@@ -2150,12 +2153,14 @@ def test_automation_queries_are_split_from_execution_query_monolith() -> None:
     assert "export default function useImmuneGateReplayQuery" in immune_replay_query
     assert "fetchImmuneGateReplay(normalizedRequestId" in immune_replay_query
     assert "OBS_QUERY_KEYS.immuneGateReplay" in immune_replay_query
-    assert "features/execution/automationQueries.js" in automation_page
+    assert "features/execution/automationDashboardController.js" in automation_page
+    assert "./automationQueries.js" in automation_controller
     assert "shared/query/useImmuneGateReplayQuery.js" in trace_detail_controller
     assert "../execution/automationQueries.js" not in trace_detail_controller
     assert "../automationQueries.js" in immune_section
     assert "../automationQueries.js" in history_section
     assert "features/execution/queries.js" not in automation_page
+    assert "features/execution/queries.js" not in automation_controller
     assert "features/execution/queries.js" not in trace_detail
     assert "features/execution/queries.js" not in trace_detail_controller
     assert "from '../queries.js'" not in immune_section
@@ -2825,6 +2830,9 @@ def test_automation_status_metadata_lives_in_shared_module() -> None:
 
 def test_automation_resource_model_lives_in_execution_feature() -> None:
     automation_page = (MONITOR_SRC / "pages" / "Automation.jsx").read_text(encoding="utf-8")
+    automation_surface = (
+        MONITOR_SRC / "features" / "execution" / "components" / "AutomationDashboardSurface.jsx"
+    ).read_text(encoding="utf-8")
     dashboard_model = (MONITOR_SRC / "features" / "execution" / "automationDashboardModel.js").read_text(encoding="utf-8")
     resource_panel = (
         MONITOR_SRC
@@ -2855,7 +2863,7 @@ def test_automation_resource_model_lives_in_execution_feature() -> None:
 
     assert "automationResourceModel.js" in dashboard_model
     assert "features/execution/automationResourceModel.js" not in automation_page
-    assert "features/execution/components/AutomationResourceSchedulingPanel.jsx" in automation_page
+    assert "./AutomationResourceSchedulingPanel.jsx" in automation_surface
     assert "from '../automationResourceModel.js'" in resource_panel
     assert "buildResourceSchedulingView(summary, resourceManager)" in resource_panel
     assert "buildResourceGateDecisionRowView(row)" in resource_panel
@@ -2882,6 +2890,12 @@ def test_automation_resource_model_lives_in_execution_feature() -> None:
 
 def test_automation_task_view_model_lives_in_execution_feature() -> None:
     automation_page = (MONITOR_SRC / "pages" / "Automation.jsx").read_text(encoding="utf-8")
+    automation_controller = (
+        MONITOR_SRC / "features" / "execution" / "automationDashboardController.js"
+    ).read_text(encoding="utf-8")
+    automation_surface = (
+        MONITOR_SRC / "features" / "execution" / "components" / "AutomationDashboardSurface.jsx"
+    ).read_text(encoding="utf-8")
     task_section = (
         MONITOR_SRC
         / "features"
@@ -2900,13 +2914,13 @@ def test_automation_task_view_model_lives_in_execution_feature() -> None:
     ]:
         assert f"export function {export_name}(" in task_model
 
-    assert "features/execution/automationTaskModel.js" in automation_page
-    assert "features/execution/components/AutomationTaskExecutionSection.jsx" in automation_page
+    assert "./automationTaskModel.js" in automation_controller
+    assert "./AutomationTaskExecutionSection.jsx" in automation_surface
     assert "from '../automationTaskModel.js'" in task_section
     assert "getTaskView(item)" in task_section
-    assert "getAutomationTaskUrlFilters(searchParams)" in automation_page
-    assert "buildAutomationClearedTaskFilterParams(searchParams)" in automation_page
-    assert "buildAutomationTaskSelectionView({" in automation_page
+    assert "getAutomationTaskUrlFilters(searchParams)" in automation_controller
+    assert "buildAutomationClearedTaskFilterParams(searchParams)" in automation_controller
+    assert "buildAutomationTaskSelectionView({" in automation_controller
     assert "taskMatchesAutomationFilters(item, { reasonFilter, gateFilter, keyword })" in task_model
     assert "filteredTasks.find((item) => item.task?.task_id === selectedTaskId)" in task_model
     assert "new URLSearchParams(searchParams)" in task_model
@@ -2940,6 +2954,12 @@ def test_automation_task_view_model_lives_in_execution_feature() -> None:
 
 def test_automation_scheduler_model_lives_in_execution_feature() -> None:
     automation_page = (MONITOR_SRC / "pages" / "Automation.jsx").read_text(encoding="utf-8")
+    automation_controller = (
+        MONITOR_SRC / "features" / "execution" / "automationDashboardController.js"
+    ).read_text(encoding="utf-8")
+    automation_surface = (
+        MONITOR_SRC / "features" / "execution" / "components" / "AutomationDashboardSurface.jsx"
+    ).read_text(encoding="utf-8")
     dashboard_model = (MONITOR_SRC / "features" / "execution" / "automationDashboardModel.js").read_text(encoding="utf-8")
     task_section = (
         MONITOR_SRC
@@ -2960,7 +2980,7 @@ def test_automation_scheduler_model_lives_in_execution_feature() -> None:
     ]:
         assert export_name in scheduler_model
 
-    assert "features/execution/automationDashboardModel.js" in automation_page
+    assert "./automationDashboardModel.js" in automation_controller
     assert "automationSchedulerModel.js" in dashboard_model
     assert "getAutomationSchedulerState(health)" in dashboard_model
     assert "getAutomationTaskCounts(tasks, filteredTasks)" in dashboard_model
@@ -2984,11 +3004,17 @@ def test_automation_scheduler_model_lives_in_execution_feature() -> None:
     assert "tasks.filter((item) => item.health?.status === 'RUNNING')" not in automation_page
     assert "tasks.filter((item) => item.health?.status === 'FAILED')" not in automation_page
     assert "resourceSummary.deferred > 0 ? 'amber' : 'teal'" not in automation_page
-    assert "metaItems={heroMetaItems}" in automation_page
+    assert "metaItems={heroMetaItems}" in automation_surface
 
 
 def test_automation_dashboard_view_model_lives_in_execution_feature() -> None:
     automation_page = (MONITOR_SRC / "pages" / "Automation.jsx").read_text(encoding="utf-8")
+    automation_controller = (
+        MONITOR_SRC / "features" / "execution" / "automationDashboardController.js"
+    ).read_text(encoding="utf-8")
+    automation_surface = (
+        MONITOR_SRC / "features" / "execution" / "components" / "AutomationDashboardSurface.jsx"
+    ).read_text(encoding="utf-8")
     dashboard_model = (MONITOR_SRC / "features" / "execution" / "automationDashboardModel.js").read_text(encoding="utf-8")
 
     for export_name in [
@@ -3000,12 +3026,13 @@ def test_automation_dashboard_view_model_lives_in_execution_feature() -> None:
     ]:
         assert f"export function {export_name}(" in dashboard_model
 
-    assert "features/execution/automationDashboardModel.js" in automation_page
-    assert "buildAutomationDashboardViewModel({" in automation_page
-    assert "sampleMeta.loadState" in automation_page
-    assert "noticeView.overviewError" in automation_page
-    assert "noticeView.noSample" in automation_page
-    assert "OrganSystemOverview model={endocrineOrganModel}" in automation_page
+    assert "./automationDashboardModel.js" in automation_controller
+    assert "buildAutomationDashboardViewModel({" in automation_controller
+    assert "sampleMeta.loadState" in automation_surface
+    assert "noticeView.overviewError" in automation_surface
+    assert "noticeView.noSample" in automation_surface
+    assert "renderOrganOverview(endocrineOrganModel)" in automation_surface
+    assert "renderOrganOverview={(model) => <OrganSystemOverview model={model} />}" in automation_page
 
     for forbidden in [
         "LOAD_STATES",
@@ -3026,6 +3053,12 @@ def test_automation_dashboard_view_model_lives_in_execution_feature() -> None:
 
 def test_automation_page_delegates_execution_ui_to_feature_components() -> None:
     automation_page = (MONITOR_SRC / "pages" / "Automation.jsx").read_text(encoding="utf-8")
+    automation_controller = (
+        MONITOR_SRC / "features" / "execution" / "automationDashboardController.js"
+    ).read_text(encoding="utf-8")
+    automation_surface = (
+        MONITOR_SRC / "features" / "execution" / "components" / "AutomationDashboardSurface.jsx"
+    ).read_text(encoding="utf-8")
     section = (
         MONITOR_SRC
         / "features"
@@ -3048,8 +3081,12 @@ def test_automation_page_delegates_execution_ui_to_feature_components() -> None:
         / "AutomationTaskExecutionSection.jsx"
     ).read_text(encoding="utf-8")
 
-    assert "features/execution/components/AutomationResourceSchedulingPanel.jsx" in automation_page
-    assert "features/execution/components/AutomationTaskExecutionSection.jsx" in automation_page
+    assert "features/execution/components/AutomationDashboardSurface.jsx" in automation_page
+    assert "features/execution/automationDashboardController.js" in automation_page
+    assert "export function useAutomationDashboardController()" in automation_controller
+    assert "export default function AutomationDashboardSurface(" in automation_surface
+    assert "./AutomationResourceSchedulingPanel.jsx" in automation_surface
+    assert "./AutomationTaskExecutionSection.jsx" in automation_surface
     assert "from './AutomationSection.jsx'" in resource_panel
     assert "from './AutomationSection.jsx'" in task_section
     assert "export default function AutomationSection(" in section
