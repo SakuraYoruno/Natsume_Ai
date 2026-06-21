@@ -472,6 +472,9 @@ def test_trace_request_detail_surface_is_feature_owned() -> None:
     page_source = page.read_text(encoding="utf-8")
     surface_source = surface.read_text(encoding="utf-8")
     controller_source = controller.read_text(encoding="utf-8")
+    view_model_source = (
+        MONITOR_SRC / "features" / "observability" / "traceRequestDetailViewModel.js"
+    ).read_text(encoding="utf-8")
 
     assert surface.exists()
     assert controller.exists()
@@ -513,13 +516,16 @@ def test_trace_request_detail_surface_is_feature_owned() -> None:
         "useTraceRetrievalRuntimeQuery({",
         "useImmuneGateReplayQuery({",
         "useAppStore((state) => state.pollingEnabled)",
-        "dedupeStreamEvents(traceData?.stream_events, fallbackEvents)",
-        "buildRetrievalRuntimeMeta(retrievalRuntime)",
-        "getSummaryInputText(summary)",
-        "getSummaryOutputText(summary)",
+        "dedupeStreamEvents(matched.trace.stream_events, previous)",
         "navigate('/observability/trace')",
     ]:
         assert controller_token in controller_source
+    for view_model_token in [
+        "buildRetrievalRuntimeMeta(retrievalRuntime)",
+        "getSummaryInputText(summary)",
+        "getSummaryOutputText(summary)",
+    ]:
+        assert view_model_token in view_model_source
 
 
 def test_observability_data_containers_are_not_left_under_global_components() -> None:
@@ -1321,6 +1327,7 @@ def test_trace_home_model_lives_in_trace_feature_module() -> None:
     trace_home = (OBSERVABILITY_TRACE_COMPONENTS / "TraceHome.jsx").read_text(encoding="utf-8")
     trace_home_controller = (OBSERVABILITY_TRACE_COMPONENTS / "traceHomeController.js").read_text(encoding="utf-8")
     trace_home_model = (OBSERVABILITY_TRACE_COMPONENTS / "traceHomeModel.js").read_text(encoding="utf-8")
+    trace_home_live_feed = (OBSERVABILITY_TRACE_COMPONENTS / "useTraceHomeLiveFeed.js").read_text(encoding="utf-8")
 
     for export_name in [
         "buildTraceRecentRequests",
@@ -1350,11 +1357,12 @@ def test_trace_home_model_lives_in_trace_feature_module() -> None:
     assert "buildTraceRecentRequests({" in trace_home_controller
     assert "getSelectedTraceSessionForQuery({" in trace_home_controller
     assert "buildTraceTribeFeedParams({" in trace_home_controller
-    assert "buildTraceLiveSnapshotParams({ liveTraceLimit, recentKeyword })" in trace_home_controller
-    assert "buildTraceLiveFeedConnectParams({ liveTraceLimit, recentKeyword })" in trace_home_controller
-    assert "getTracePayloadItems(payload)" in trace_home_controller
-    assert "getTracePayloadItems(liveSnapshotQuery.liveSnapshot)" in trace_home_controller
-    assert "pruneTraceTimelineEntriesForSnapshot(previous, items)" in trace_home_controller
+    assert "useTraceHomeLiveFeed({" in trace_home_controller
+    assert "buildTraceLiveSnapshotParams({ liveTraceLimit, recentKeyword })" in trace_home_live_feed
+    assert "buildTraceLiveFeedConnectParams({ liveTraceLimit, recentKeyword })" in trace_home_live_feed
+    assert "getTracePayloadItems(payload)" in trace_home_live_feed
+    assert "getTracePayloadItems(liveSnapshotQuery.liveSnapshot)" in trace_home_live_feed
+    assert "pruneTraceTimelineEntriesForSnapshot(previous, items)" in trace_home_live_feed
     assert "buildTraceInfoFromTrace(selectedTraceQuery.traceSnapshot)" in trace_home_controller
     assert "buildTraceInfoFromTrace(item.trace)" in trace_home_controller
     assert "buildTraceSearchState(inputId)" in trace_home_controller
@@ -1750,17 +1758,20 @@ def test_digital_life_overview_view_model_lives_in_life_feature() -> None:
     page = (MONITOR_SRC / "pages" / "DigitalLifeOverview.jsx").read_text(encoding="utf-8")
     controller = (MONITOR_SRC / "features" / "life" / "digitalLifeOverviewController.js").read_text(encoding="utf-8")
     model = (MONITOR_SRC / "features" / "life" / "digitalLifeOverviewModel.js").read_text(encoding="utf-8")
+    wired_domains_model = (
+        MONITOR_SRC / "features" / "life" / "digitalLifeWiredDomainsModel.js"
+    ).read_text(encoding="utf-8")
 
     for export_name in [
         "getDigitalLifePollingInterval",
         "buildDigitalLifeHeroDescription",
         "buildDigitalLifeHeroMetaItems",
         "buildDigitalLifeCapabilitySectionModel",
-        "buildDigitalLifeWiredDomains",
         "buildDigitalLifeSecondarySectionsModel",
         "buildDigitalLifeGatewaySectionModel",
     ]:
         assert f"export function {export_name}(" in model
+    assert "export function buildDigitalLifeWiredDomains(" in wired_domains_model
 
     assert "features/life/digitalLifeOverviewController.js" in page
     assert "./digitalLifeOverviewModel.js" in controller
@@ -3614,6 +3625,7 @@ def test_pentest_display_metadata_lives_in_shared_module() -> None:
     tool_execute_panel = (
         MONITOR_SRC / "features" / "execution" / "components" / "ToolExecutePanel.jsx"
     ).read_text(encoding="utf-8")
+    pentest_lab_model = (MONITOR_SRC / "features" / "security" / "pentestLabModel.js").read_text(encoding="utf-8")
 
     for export_name in [
         "PENTEST_PHASE_OPTIONS",
@@ -3627,7 +3639,7 @@ def test_pentest_display_metadata_lives_in_shared_module() -> None:
     ]:
         assert export_name in shared
 
-    assert "shared/pentestMeta.js" in pentest_page
+    assert "shared/pentestMeta.js" in pentest_lab_model
     assert "const PHASE_OPTIONS" not in pentest_page
     assert "function phaseCounts(" not in pentest_page
     assert "label: 'Phase 1 Passive'" not in pentest_page
@@ -4242,6 +4254,11 @@ def test_insights_dashboard_view_model_lives_in_observability_feature() -> None:
 
 def test_insights_global_view_model_lives_in_observability_feature() -> None:
     component = (OBSERVABILITY_COMPONENTS / "insights" / "InsightsGlobalGroup.jsx").read_text(encoding="utf-8")
+    section_sources = "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in sorted((OBSERVABILITY_COMPONENTS / "insights" / "global").glob("*.jsx"))
+    )
+    surface_sources = f"{component}\n{section_sources}"
     model = (MONITOR_SRC / "features" / "observability" / "insightsGlobalModel.js").read_text(encoding="utf-8")
 
     for export_name in [
@@ -4261,11 +4278,11 @@ def test_insights_global_view_model_lives_in_observability_feature() -> None:
     ]:
         assert export_name in model
 
-    assert "insightsGlobalModel.js" in component
-    assert "buildChainNodeLatencyRows(data?.node_stats)" in component
-    assert "buildErrorHeatmapView(data)" in component
-    assert "buildForgeRuntimeQualityRows(qualityItems)" in component
-    assert "buildGovernorDecisionStatCards(govData)" in component
+    assert "insightsGlobalModel.js" in surface_sources
+    assert "buildChainNodeLatencyRows(data?.node_stats)" in surface_sources
+    assert "buildErrorHeatmapView(data)" in surface_sources
+    assert "buildForgeRuntimeQualityRows(qualityItems)" in surface_sources
+    assert "buildGovernorDecisionStatCards(govData)" in surface_sources
     assert "resolveInsightsChainNodeColor" not in component
     assert "Math.max(" not in component
     assert "Math.min(" not in component
@@ -4284,6 +4301,11 @@ def test_insights_global_view_model_lives_in_observability_feature() -> None:
 
 def test_insights_safety_view_model_lives_in_observability_feature() -> None:
     component = (OBSERVABILITY_COMPONENTS / "insights" / "InsightsSafetyGroup.jsx").read_text(encoding="utf-8")
+    section_sources = "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in sorted((OBSERVABILITY_COMPONENTS / "insights" / "safety").glob("*.jsx"))
+    )
+    surface_sources = f"{component}\n{section_sources}"
     model = (MONITOR_SRC / "features" / "observability" / "insightsSafetyModel.js").read_text(encoding="utf-8")
 
     for export_name in [
@@ -4304,11 +4326,11 @@ def test_insights_safety_view_model_lives_in_observability_feature() -> None:
     ]:
         assert f"export function {export_name}(" in model
 
-    assert "insightsSafetyModel.js" in component
-    assert "buildTribeFeedParams({ eventTypeFilter, sourceFilter, targetFilter })" in component
-    assert "buildTribeEventTypeSummary(items)" in component
-    assert "buildAutomationGatePath(params)" in component
-    assert "buildQaViolationStatCards(qaData)" in component
+    assert "insightsSafetyModel.js" in surface_sources
+    assert "buildTribeFeedParams({ eventTypeFilter, sourceFilter, targetFilter })" in surface_sources
+    assert "buildTribeEventTypeSummary(items)" in surface_sources
+    assert "buildAutomationGatePath(params)" in surface_sources
+    assert "buildQaViolationStatCards(qaData)" in surface_sources
 
     assert "new Map(" not in component
     assert "Object.entries(params)" not in component
@@ -4327,6 +4349,7 @@ def test_digital_life_runtime_status_metadata_lives_in_shared_module() -> None:
     runtime_card = (MONITOR_SRC / "features" / "life" / "components" / "DigitalLifeRuntimeCard.jsx").read_text(encoding="utf-8")
     soak_card = (MONITOR_SRC / "features" / "life" / "components" / "DigitalLifeWallClockSoakCard.jsx").read_text(encoding="utf-8")
     organ_model = (MONITOR_SRC / "models" / "organSystemModel.js").read_text(encoding="utf-8")
+    organ_core_model = (MONITOR_SRC / "models" / "organSystemCore.js").read_text(encoding="utf-8")
     runtime_mode = (MONITOR_SRC / "pages" / "RuntimeMode.jsx").read_text(encoding="utf-8")
     runtime_mode_model = (MONITOR_SRC / "features" / "life" / "runtimeModeModel.js").read_text(encoding="utf-8")
     bond_page = (MONITOR_SRC / "pages" / "Bond.jsx").read_text(encoding="utf-8")
@@ -4374,7 +4397,8 @@ def test_digital_life_runtime_status_metadata_lives_in_shared_module() -> None:
     assert "const LAYER_CLASS" not in soak_card
     assert "const MODE_COLOR_CLASS" not in runtime_mode
     assert "ring-2 ring-green-500 bg-green-50 border-green-300" not in runtime_mode
-    assert "shared/statusMeta.js" in organ_model
+    assert "organSystemCore.js" in organ_model
+    assert "shared/statusMeta.js" in organ_core_model
     assert "ORGAN_STATUS_META" not in organ_model
     assert "className: 'border-" not in organ_model
     assert "shared/statusMeta.js" in bond_model

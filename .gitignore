@@ -96,6 +96,8 @@ data/*.sqlite3
 
 # --- models/ 下载的模型文件 (never commit) ---
 models/
+!host_brain/app/monitor_ui/src/models/
+!host_brain/app/monitor_ui/src/models/**
 
 # --- host_brain ---
 # Runtime DB and state files
