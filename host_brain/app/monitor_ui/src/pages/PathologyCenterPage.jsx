@@ -1,15 +1,27 @@
-import React, { useMemo, useState } from 'react'
+﻿import React, { useMemo, useState } from 'react'
 import { Activity, RefreshCw } from 'lucide-react'
 import { useSearchParams } from 'react-router-dom'
-import EmptyStateCard from '../components/EmptyStateCard.jsx'
-import LifeBodyPathologyPanel from '../components/lifeBody/LifeBodyPathologyPanel.jsx'
-import MetricCard from '../components/MetricCard.jsx'
-import NoticeBanner from '../components/NoticeBanner.jsx'
-import SampleMeta from '../components/obs/SampleMeta.jsx'
-import PageHero from '../components/PageHero.jsx'
-import TimeWindowSelect from '../components/TimeWindowSelect.jsx'
-import { resolveLoadState } from '../models/loadState.js'
-import { usePathologiesQuery } from '../features/life/queries.js'
+import EmptyStateCard from '../shared/ui/EmptyStateCard.jsx'
+import LifeBodyPathologyPanel from '../features/life/components/lifeBody/LifeBodyPathologyPanel.jsx'
+import MetricCard from '../shared/ui/MetricCard.jsx'
+import NoticeBanner from '../shared/ui/NoticeBanner.jsx'
+import SampleMeta from '../shared/ui/observability/SampleMeta.jsx'
+import PageHero from '../shared/ui/PageHero.jsx'
+import TimeWindowSelect from '../shared/ui/TimeWindowSelect.jsx'
+import {
+  buildPathologyCenterHeroMetaItems,
+  buildPathologyCenterHeroTitle,
+  buildPathologyCenterQueryView,
+  buildPathologyFilterParams,
+  buildPathologyOrganOptions,
+  buildPathologySeverityOptions,
+  filterPathologiesBySelection,
+  getHottestPathologyOrgan,
+  getPathologyFilterSelection,
+  summarizePathologyOrgans,
+  summarizePathologySeverity,
+} from '../features/life/pathologyCenterModel.js'
+import { usePathologiesQuery } from '../features/life/lifeBodyQueries.js'
 import useAppStore from '../store/useAppStore.js'
 
 const WINDOW_OPTIONS = [
@@ -31,98 +43,70 @@ export default function PathologyCenterPage() {
     pollingTick,
     pollingInterval,
   })
-  const allPathologies = pathologyQuery.data?.items || []
-  const hasPathologyPayload = Boolean(pathologyQuery.data)
-  const pathologyLoadError = hasPathologyPayload ? null : pathologyQuery.error
-  const pathologyRefreshWarning = hasPathologyPayload ? pathologyQuery.error : null
-  const organSystems = pathologyQuery.data?.organSystems || []
-  const primaryPathology = pathologyQuery.data?.primaryPathology || null
-  const overviewTrackedSections = hasPathologyPayload ? 1 : 0
-  const overviewUpdatedAt = pathologyQuery.lastUpdatedAt || pathologyQuery.data?.timestamp || null
-  const overviewLoadState = resolveLoadState({
-    loading: pathologyQuery.loading || pathologyQuery.refreshing,
-    error: pathologyLoadError,
-    hasData: hasPathologyPayload,
-    hasSamples: allPathologies.length > 0,
-    available: true,
+  const {
+    allPathologies,
+    hasPathologyPayload,
+    pathologyLoadError,
+    pathologyRefreshWarning,
+    organSystems,
+    primaryPathology,
+    sampleMeta,
+  } = useMemo(() => buildPathologyCenterQueryView({
+    pathologyData: pathologyQuery.data,
+    pathologyError: pathologyQuery.error,
+    loading: pathologyQuery.loading,
+    refreshing: pathologyQuery.refreshing,
     stale: pathologyQuery.stale,
-  })
-  const selectedOrgan = String(searchParams.get('organ') || 'ALL')
-  const selectedSeverity = String(searchParams.get('severity') || 'ALL')
+    lastUpdatedAt: pathologyQuery.lastUpdatedAt,
+    windowMinutes,
+  }), [
+    pathologyQuery.data,
+    pathologyQuery.error,
+    pathologyQuery.lastUpdatedAt,
+    pathologyQuery.loading,
+    pathologyQuery.refreshing,
+    pathologyQuery.stale,
+    windowMinutes,
+  ])
+  const { selectedOrgan, selectedSeverity } = useMemo(
+    () => getPathologyFilterSelection(searchParams),
+    [searchParams]
+  )
   const hasAnyPathologies = allPathologies.length > 0
   const hasPathologyError = !hasPathologyPayload && Boolean(pathologyQuery.error)
 
-  const organOptions = useMemo(() => {
-    const counts = new Map()
-    organSystems.forEach((item) => {
-      counts.set(item.id, { key: item.id, label: item.name, count: 0 })
-    })
-    allPathologies.forEach((item) => {
-      const current = counts.get(item.organId) || { key: item.organId, label: item.organLabel || item.organId, count: 0 }
-      current.count += 1
-      counts.set(item.organId, current)
-    })
-    const options = Array.from(counts.values()).filter((item) => item.count > 0 || item.key === selectedOrgan)
-    return [{ key: 'ALL', label: '全部器官', count: allPathologies.length }, ...options]
-  }, [allPathologies, organSystems, selectedOrgan])
+  const organOptions = useMemo(() => buildPathologyOrganOptions({
+    allPathologies,
+    organSystems,
+    selectedOrgan,
+  }), [allPathologies, organSystems, selectedOrgan])
 
-  const severityOptions = useMemo(() => {
-    const counts = new Map([
-      ['critical', { key: 'critical', label: '高风险', count: 0 }],
-      ['warning', { key: 'warning', label: '波动', count: 0 }],
-      ['info', { key: 'info', label: '提示', count: 0 }],
-    ])
-    allPathologies.forEach((item) => {
-      const current = counts.get(item.severity) || { key: item.severity, label: item.severity || '未分类', count: 0 }
-      current.count += 1
-      counts.set(item.severity, current)
-    })
-    return [{ key: 'ALL', label: '全部级别', count: allPathologies.length }, ...Array.from(counts.values())]
-  }, [allPathologies])
+  const severityOptions = useMemo(() => buildPathologySeverityOptions(allPathologies), [allPathologies])
 
-  const filteredPathologies = useMemo(
-    () => allPathologies.filter((item) => {
-      if (selectedOrgan !== 'ALL' && item.organId !== selectedOrgan) return false
-      if (selectedSeverity !== 'ALL' && item.severity !== selectedSeverity) return false
-      return true
-    }),
-    [allPathologies, selectedOrgan, selectedSeverity]
-  )
+  const filteredPathologies = useMemo(() => filterPathologiesBySelection({
+    allPathologies,
+    selectedOrgan,
+    selectedSeverity,
+  }), [allPathologies, selectedOrgan, selectedSeverity])
   const hasPathologies = filteredPathologies.length > 0
 
   const updateFilters = (nextOrgan, nextSeverity) => {
-    const params = new URLSearchParams(searchParams)
-    if (nextOrgan && nextOrgan !== 'ALL') {
-      params.set('organ', nextOrgan)
-    } else {
-      params.delete('organ')
-    }
-    if (nextSeverity && nextSeverity !== 'ALL') {
-      params.set('severity', nextSeverity)
-    } else {
-      params.delete('severity')
-    }
-    setSearchParams(params, { replace: true })
+    setSearchParams(buildPathologyFilterParams(searchParams, nextOrgan, nextSeverity), { replace: true })
   }
 
-  const severitySummary = useMemo(
-    () => filteredPathologies.reduce((acc, item) => {
-      acc[item.severity] = (acc[item.severity] || 0) + 1
-      acc[item.organLabel] = (acc[item.organLabel] || 0) + 0
-      return acc
-    }, {}),
-    [filteredPathologies]
+  const severitySummary = useMemo(() => summarizePathologySeverity(filteredPathologies), [filteredPathologies])
+  const organSummary = useMemo(() => summarizePathologyOrgans(filteredPathologies), [filteredPathologies])
+  const hottestOrgan = getHottestPathologyOrgan(organSummary)
+  const heroTitle = buildPathologyCenterHeroTitle({
+    hasPathologyError,
+    hasPathologies,
+    filteredCount: filteredPathologies.length,
+    hasAnyPathologies,
+  })
+  const heroMetaItems = useMemo(
+    () => buildPathologyCenterHeroMetaItems(severitySummary, hottestOrgan),
+    [hottestOrgan, severitySummary]
   )
-
-  const organSummary = useMemo(
-    () => filteredPathologies.reduce((acc, item) => {
-      acc[item.organLabel] = (acc[item.organLabel] || 0) + 1
-      return acc
-    }, {}),
-    [filteredPathologies]
-  )
-
-  const hottestOrgan = Object.entries(organSummary).sort((left, right) => right[1] - left[1])[0]?.[0] || '暂无'
 
   return (
     <div className="space-y-6">
@@ -143,25 +127,21 @@ export default function PathologyCenterPage() {
       <PageHero
         icon={Activity}
         eyebrow="Pathology Center"
-        title={hasPathologyError ? '病灶视图暂不可用' : hasPathologies ? `${filteredPathologies.length} 个当前病灶` : hasAnyPathologies ? '当前过滤条件下没有病灶' : '当前没有形成稳定病灶'}
+        title={heroTitle}
         description="病灶中心优先回答：哪个器官最异常、异常正在影响什么行为，以及应该先沿哪个页面或哪条 request 往下追。"
         gradientClass="from-rose-50 via-white to-orange-50"
-        metaItems={[
-          `高风险：${severitySummary.critical || 0}`,
-          `波动：${severitySummary.warning || 0}`,
-          `最热器官：${hottestOrgan}`,
-        ]}
+        metaItems={heroMetaItems}
         aside={(
           <SampleMeta
             className="max-w-md"
-            loadState={overviewLoadState}
-            loadStateDetail={pathologyLoadError || pathologyRefreshWarning}
-            windowMinutes={windowMinutes}
-            sampleSize={overviewTrackedSections}
-            sampleLabel="病灶聚合"
-            updatedAt={overviewUpdatedAt}
-            source="/obs/pathologies"
-            definition="病灶中心页现在直接消费 obs sidecar 的专用病灶接口，由后端统一汇总 runtime alerts、Gateway hotspots 与 Forge runtime 风险。"
+            loadState={sampleMeta.loadState}
+            loadStateDetail={sampleMeta.loadStateDetail}
+            windowMinutes={sampleMeta.windowMinutes}
+            sampleSize={sampleMeta.sampleSize}
+            sampleLabel={sampleMeta.sampleLabel}
+            updatedAt={sampleMeta.updatedAt}
+            source={sampleMeta.source}
+            definition={sampleMeta.definition}
           />
         )}
       />

@@ -1,121 +1,108 @@
-import React, { useEffect, useMemo, useState } from 'react'
+﻿import React, { useEffect, useMemo, useState } from 'react'
 import { Activity, RefreshCw } from 'lucide-react'
 import { useSearchParams } from 'react-router-dom'
-import EmptyStateCard from '../components/EmptyStateCard.jsx'
-import LifeBodyTimeline from '../components/lifeBody/LifeBodyTimeline.jsx'
-import MetricCard from '../components/MetricCard.jsx'
-import NoticeBanner from '../components/NoticeBanner.jsx'
-import SampleMeta from '../components/obs/SampleMeta.jsx'
-import PageHero from '../components/PageHero.jsx'
-import TimeWindowSelect from '../components/TimeWindowSelect.jsx'
-import { resolveLoadState } from '../models/loadState.js'
-import { useLifeTimelineQuery } from '../features/life/queries.js'
+import EmptyStateCard from '../shared/ui/EmptyStateCard.jsx'
+import LifeBodyTimeline from '../features/life/components/lifeBody/LifeBodyTimeline.jsx'
+import MetricCard from '../shared/ui/MetricCard.jsx'
+import NoticeBanner from '../shared/ui/NoticeBanner.jsx'
+import SampleMeta from '../shared/ui/observability/SampleMeta.jsx'
+import PageHero from '../shared/ui/PageHero.jsx'
+import TimeWindowSelect from '../shared/ui/TimeWindowSelect.jsx'
+import { useLifeTimelineQuery } from '../features/life/lifeBodyQueries.js'
+import {
+  LIFE_TIMELINE_ALL_FILTER,
+  LIFE_TIMELINE_WINDOW_OPTIONS,
+  buildLifeTimelineFilterParams,
+  buildLifeTimelineFocusNotice,
+  buildLifeTimelineHeroMetaItems,
+  buildLifeTimelineHeroTitle,
+  buildLifeTimelineLatestEventHint,
+  buildLifeTimelineOrganOptions,
+  buildLifeTimelineQueryView,
+  buildLifeTimelineQueryFilters,
+  buildLifeTimelineTypeOptions,
+  countLifeTimelineEventTypes,
+  filterLifeTimelineEvents,
+  getLifeTimelineFilterSelection,
+  getLifeTimelineSelectedOrganCount,
+} from '../features/life/lifeTimelineModel.js'
 import useAppStore from '../store/useAppStore.js'
-
-const WINDOW_OPTIONS = [
-  { label: '1h', value: 60 },
-  { label: '6h', value: 360 },
-  { label: '24h', value: 1440 },
-  { label: '7d', value: 10080 },
-]
 
 export default function LifeTimelinePage() {
   const [searchParams, setSearchParams] = useSearchParams()
+  const initialSelection = getLifeTimelineFilterSelection(searchParams)
   const [windowMinutes, setWindowMinutes] = useState(360)
-  const [selectedType, setSelectedType] = useState(String(searchParams.get('type') || 'ALL'))
-  const [selectedOrgan, setSelectedOrgan] = useState(String(searchParams.get('organ') || 'ALL'))
-  const selectedRequestId = String(searchParams.get('request_id') || '').trim()
-  const selectedSessionId = String(searchParams.get('session_id') || '').trim()
-  const selectedTickId = String(searchParams.get('tick_id') || '').trim()
+  const [selectedType, setSelectedType] = useState(initialSelection.selectedType)
+  const [selectedOrgan, setSelectedOrgan] = useState(initialSelection.selectedOrgan)
+  const { selectedRequestId, selectedSessionId, selectedTickId } = initialSelection
+  const queryFilters = buildLifeTimelineQueryFilters(initialSelection)
   const pollingEnabled = useAppStore((state) => state.pollingEnabled)
   const pollingInterval = useAppStore((state) => state.pollingInterval)
   const pollingTick = useAppStore((state) => state.pollingTick)
   const timelineQuery = useLifeTimelineQuery({
     windowMinutes,
-    eventType: selectedType !== 'ALL' ? selectedType : '',
-    organ: selectedOrgan !== 'ALL' ? selectedOrgan : '',
-    requestId: selectedRequestId,
-    sessionId: selectedSessionId,
-    tickId: selectedTickId,
+    ...queryFilters,
     pollingEnabled,
     pollingTick,
     pollingInterval,
   })
-  const timelineItems = timelineQuery.data?.items || []
-  const hasTimelinePayload = Boolean(timelineQuery.data)
-  const timelineLoadError = hasTimelinePayload ? null : timelineQuery.error
-  const timelineRefreshWarning = hasTimelinePayload ? timelineQuery.error : null
-  const primaryPathology = timelineQuery.data?.primaryPathology || null
-  const primaryOrgan = timelineQuery.data?.primaryOrgan || null
-  const overviewTrackedSections = hasTimelinePayload ? 1 : 0
-  const overviewUpdatedAt = timelineQuery.lastUpdatedAt || timelineQuery.data?.timestamp || null
-  const overviewLoadState = resolveLoadState({
-    loading: timelineQuery.loading || timelineQuery.refreshing,
-    error: timelineLoadError,
-    hasData: hasTimelinePayload,
-    hasSamples: timelineItems.length > 0,
-    available: true,
+  const {
+    timelineItems,
+    hasTimelinePayload,
+    timelineLoadError,
+    timelineRefreshWarning,
+    primaryPathology,
+    primaryOrgan,
+    sampleMeta,
+  } = useMemo(() => buildLifeTimelineQueryView({
+    timelineData: timelineQuery.data,
+    timelineError: timelineQuery.error,
+    loading: timelineQuery.loading,
+    refreshing: timelineQuery.refreshing,
     stale: timelineQuery.stale,
-  })
+    lastUpdatedAt: timelineQuery.lastUpdatedAt,
+    windowMinutes,
+  }), [
+    timelineQuery.data,
+    timelineQuery.error,
+    timelineQuery.lastUpdatedAt,
+    timelineQuery.loading,
+    timelineQuery.refreshing,
+    timelineQuery.stale,
+    windowMinutes,
+  ])
 
   const eventTypes = useMemo(
-    () => new Set(timelineItems.map((item) => item.type)).size,
+    () => countLifeTimelineEventTypes(timelineItems),
     [timelineItems]
   )
-  const typeOptions = useMemo(() => {
-    const counts = new Map()
-    timelineItems.forEach((item) => {
-      const key = item.type || 'unknown'
-      const label = item.typeLabel || key
-      const current = counts.get(key) || { key, label, count: 0 }
-      current.count += 1
-      counts.set(key, current)
-    })
-    return [{ key: 'ALL', label: '全部事件', count: timelineItems.length }, ...Array.from(counts.values())]
-  }, [timelineItems])
-  const organOptions = useMemo(() => {
-    const counts = new Map()
-    timelineItems.forEach((item) => {
-      const key = item.organId || 'unknown'
-      const label = item.organLabel || key
-      const current = counts.get(key) || { key, label, count: 0 }
-      current.count += 1
-      counts.set(key, current)
-    })
-    return [{ key: 'ALL', label: '全部器官', count: timelineItems.length }, ...Array.from(counts.values())]
-  }, [timelineItems])
+  const typeOptions = useMemo(() => buildLifeTimelineTypeOptions(timelineItems), [timelineItems])
+  const organOptions = useMemo(() => buildLifeTimelineOrganOptions(timelineItems), [timelineItems])
   const filteredEvents = useMemo(
-    () => timelineItems.filter((item) => {
-      if (selectedType !== 'ALL' && item.type !== selectedType) return false
-      if (selectedOrgan !== 'ALL' && item.organId !== selectedOrgan) return false
-      return true
-    }),
+    () => filterLifeTimelineEvents({ items: timelineItems, selectedType, selectedOrgan }),
     [timelineItems, selectedOrgan, selectedType]
   )
   const latestEvent = filteredEvents[0] || null
   const hasTimelineEvents = timelineItems.length > 0
   const hasTimelineError = !hasTimelinePayload && Boolean(timelineQuery.error)
+  const requestFocusNotice = buildLifeTimelineFocusNotice('request', selectedRequestId)
+  const sessionFocusNotice = buildLifeTimelineFocusNotice('session', selectedSessionId)
+  const tickFocusNotice = buildLifeTimelineFocusNotice('tick', selectedTickId)
+  const latestEventHint = buildLifeTimelineLatestEventHint({
+    selectedRequestId,
+    selectedSessionId,
+    selectedTickId,
+    latestEvent,
+  })
 
   useEffect(() => {
-    const nextType = String(searchParams.get('type') || 'ALL')
-    const nextOrgan = String(searchParams.get('organ') || 'ALL')
-    setSelectedType(nextType)
-    setSelectedOrgan(nextOrgan)
+    const selection = getLifeTimelineFilterSelection(searchParams)
+    setSelectedType(selection.selectedType)
+    setSelectedOrgan(selection.selectedOrgan)
   }, [searchParams])
 
   const updateFilters = (nextType, nextOrgan) => {
-    const params = new URLSearchParams(searchParams)
-    if (nextType && nextType !== 'ALL') {
-      params.set('type', nextType)
-    } else {
-      params.delete('type')
-    }
-    if (nextOrgan && nextOrgan !== 'ALL') {
-      params.set('organ', nextOrgan)
-    } else {
-      params.delete('organ')
-    }
-    setSearchParams(params, { replace: true })
+    setSearchParams(buildLifeTimelineFilterParams(searchParams, nextType, nextOrgan), { replace: true })
   }
 
   return (
@@ -126,7 +113,7 @@ export default function LifeTimelinePage() {
           <p className="text-sm text-gray-500">把生命体最近经历过的状态变化、节律推进和执行闭环重新拉回同一条时间线上。</p>
         </div>
         <div className="flex items-center gap-2">
-          <TimeWindowSelect value={windowMinutes} onChange={setWindowMinutes} options={WINDOW_OPTIONS} />
+          <TimeWindowSelect value={windowMinutes} onChange={setWindowMinutes} options={LIFE_TIMELINE_WINDOW_OPTIONS} />
           <button className="btn-secondary" onClick={timelineQuery.refetch} disabled={timelineQuery.loading || timelineQuery.refreshing}>
             <RefreshCw size={14} className={timelineQuery.loading || timelineQuery.refreshing ? 'animate-spin' : ''} />
             刷新
@@ -137,25 +124,29 @@ export default function LifeTimelinePage() {
       <PageHero
         icon={Activity}
         eyebrow="Life Timeline"
-        title={hasTimelineError ? '生命事件暂不可用' : hasTimelineEvents ? `最近 ${timelineItems.length} 个生命事件` : '当前还没有可读生命事件'}
+        title={buildLifeTimelineHeroTitle({
+          hasTimelineError,
+          hasTimelineEvents,
+          itemCount: timelineItems.length,
+        })}
         description="这一页优先回答：这个数字生命刚刚经历了什么、哪些事件正在影响它当前的器官状态，以及下一步该沿哪条链继续追。"
         gradientClass="from-cyan-50 via-white to-primary-50"
-        metaItems={[
-          `事件类型：${eventTypes}`,
-          `主病灶：${primaryPathology?.title || '暂无'}`,
-          `最紧张器官：${primaryOrgan?.name || '暂无'}`,
-        ]}
+        metaItems={buildLifeTimelineHeroMetaItems({
+          eventTypeCount: eventTypes,
+          primaryPathology,
+          primaryOrgan,
+        })}
         aside={(
           <SampleMeta
             className="max-w-md"
-            loadState={overviewLoadState}
-            loadStateDetail={timelineLoadError || timelineRefreshWarning}
-            windowMinutes={windowMinutes}
-            sampleSize={overviewTrackedSections}
-            sampleLabel="聚合投影"
-            updatedAt={overviewUpdatedAt}
-            source="/obs/life-timeline"
-            definition="生命时间轴页现在直接消费 obs sidecar 的专用时间轴接口；当前已统一投影 request / bond / memory / tick / immune，但还不是最终统一事件总线。"
+            loadState={sampleMeta.loadState}
+            loadStateDetail={sampleMeta.loadStateDetail}
+            windowMinutes={sampleMeta.windowMinutes}
+            sampleSize={sampleMeta.sampleSize}
+            sampleLabel={sampleMeta.sampleLabel}
+            updatedAt={sampleMeta.updatedAt}
+            source={sampleMeta.source}
+            definition={sampleMeta.definition}
           />
         )}
       />
@@ -166,19 +157,19 @@ export default function LifeTimelinePage() {
           {timelineRefreshWarning.message}
         </NoticeBanner>
       ) : null}
-      {selectedRequestId ? (
-        <NoticeBanner variant="info" title="当前已按 request_id 聚焦">
-          {`正在只看 request ${selectedRequestId.slice(0, 18)}${selectedRequestId.length > 18 ? '…' : ''} 的生命事件链。`}
+      {requestFocusNotice ? (
+        <NoticeBanner variant="info" title={requestFocusNotice.title}>
+          {requestFocusNotice.message}
         </NoticeBanner>
       ) : null}
-      {selectedSessionId ? (
-        <NoticeBanner variant="info" title="当前已按 session_id 聚焦">
-          {`正在只看 session ${selectedSessionId.slice(0, 18)}${selectedSessionId.length > 18 ? '…' : ''} 的生命事件链。`}
+      {sessionFocusNotice ? (
+        <NoticeBanner variant="info" title={sessionFocusNotice.title}>
+          {sessionFocusNotice.message}
         </NoticeBanner>
       ) : null}
-      {selectedTickId ? (
-        <NoticeBanner variant="info" title="当前已按 tick_id 聚焦">
-          {`正在只看 tick ${selectedTickId.slice(0, 18)}${selectedTickId.length > 18 ? '…' : ''} 的生命事件链。`}
+      {tickFocusNotice ? (
+        <NoticeBanner variant="info" title={tickFocusNotice.title}>
+          {tickFocusNotice.message}
         </NoticeBanner>
       ) : null}
 
@@ -186,20 +177,17 @@ export default function LifeTimelinePage() {
         <>
           <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
             <MetricCard label="当前事件数" value={filteredEvents.length} hint="过滤后的结果" tone="text-primary" />
-            <MetricCard label="事件类型" value={eventTypes} hint={`已选 ${selectedType === 'ALL' ? '全部' : selectedType}`} tone="text-blue-600" />
-            <MetricCard label="器官范围" value={selectedOrgan === 'ALL' ? organOptions.length - 1 : 1} hint={selectedOrgan === 'ALL' ? '全部器官' : selectedOrgan} tone="text-indigo-600" />
+            <MetricCard label="事件类型" value={eventTypes} hint={`已选 ${selectedType === LIFE_TIMELINE_ALL_FILTER ? '全部' : selectedType}`} tone="text-blue-600" />
+            <MetricCard
+              label="器官范围"
+              value={getLifeTimelineSelectedOrganCount(selectedOrgan, organOptions)}
+              hint={selectedOrgan === LIFE_TIMELINE_ALL_FILTER ? '全部器官' : selectedOrgan}
+              tone="text-indigo-600"
+            />
             <MetricCard
               label="最近事件"
               value={latestEvent?.typeLabel || '—'}
-              hint={
-                selectedRequestId
-                  ? `request ${selectedRequestId.slice(0, 12)}…`
-                  : selectedSessionId
-                    ? `session ${selectedSessionId.slice(0, 12)}…`
-                    : selectedTickId
-                      ? `tick ${selectedTickId.slice(0, 12)}…`
-                      : latestEvent?.title || '暂无'
-              }
+              hint={latestEventHint}
               tone="text-emerald-600"
             />
           </div>

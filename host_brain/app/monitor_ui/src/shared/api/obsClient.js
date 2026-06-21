@@ -56,6 +56,10 @@ export function obsPut(path, body = {}, params = {}, options = {}) {
   return requestObs(url, { ...options, method: 'PUT', body: body || {} })
 }
 
+export function obsRequest(path, options = {}) {
+  return requestObs(path, options)
+}
+
 export function createObsEventSource(path, params = {}) {
   if (typeof window === 'undefined' || typeof window.EventSource === 'undefined') {
     throw new Error('EventSource not available')

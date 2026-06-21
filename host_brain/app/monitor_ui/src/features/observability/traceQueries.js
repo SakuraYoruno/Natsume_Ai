@@ -5,7 +5,7 @@ import {
   fetchTraceNodes,
   fetchTraceStreamEvents,
   fetchTribeEvents,
-} from './api.js'
+} from './traceApi.js'
 import { OBS_STALE_TIMES } from '../../shared/query/freshness.js'
 import { OBS_QUERY_KEYS } from '../../shared/query/queryKeys.js'
 import useObservabilityQuery from '../../shared/query/useObservabilityQuery.js'

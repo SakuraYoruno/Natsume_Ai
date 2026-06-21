@@ -253,6 +253,10 @@ def test_chat_runtime_can_experiment_on_codex_spark(monkeypatch) -> None:
         "host_brain.app.graph_config_llm_runtime.codex_cli_lm_available",
         lambda: True,
     )
+    monkeypatch.setattr(
+        "host_brain.app.graph_config_llm_runtime.codex_cli_lm_allowed_for_background",
+        lambda: True,
+    )
 
     runtime = graph_builder.resolve_surface_reply_llm_runtime(
         base_runtime={
@@ -293,6 +297,10 @@ def test_non_surface_reply_runtime_migrates_to_codex_cli(monkeypatch) -> None:
     monkeypatch.setenv("HOST_CODEX_MODEL_ID", "gpt-5.4-mini")
     monkeypatch.setattr(
         "host_brain.app.graph_config_llm_runtime.codex_cli_lm_available",
+        lambda: True,
+    )
+    monkeypatch.setattr(
+        "host_brain.app.graph_config_llm_runtime.codex_cli_lm_allowed_for_background",
         lambda: True,
     )
 

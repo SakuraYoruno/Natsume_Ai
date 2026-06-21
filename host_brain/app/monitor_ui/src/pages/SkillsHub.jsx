@@ -3,31 +3,26 @@ import {
   RefreshCw, Package, CheckCircle, XCircle,
   Shield, Search, FolderOpen, Globe, Zap,
 } from 'lucide-react'
-import EmptyStateCard from '../components/EmptyStateCard.jsx'
-import NoticeBanner from '../components/NoticeBanner.jsx'
-import PageHero from '../components/PageHero.jsx'
-import SampleMeta from '../components/obs/SampleMeta.jsx'
-import { LOAD_STATES, resolveLoadState } from '../models/loadState.js'
-import { useSkillsHubQuery } from '../features/execution/queries.js'
+import EmptyStateCard from '../shared/ui/EmptyStateCard.jsx'
+import NoticeBanner from '../shared/ui/NoticeBanner.jsx'
+import PageHero from '../shared/ui/PageHero.jsx'
+import SampleMeta from '../shared/ui/observability/SampleMeta.jsx'
+import { useSkillsHubQuery } from '../features/execution/skillsHubQueries.js'
+import { buildSkillsHubViewModel, SKILL_SOURCE_FILTER_ALL } from '../features/execution/skillsHubModel.js'
+import { SKILL_CLEARANCE_STYLES, SKILL_SOURCE_STYLES } from '../shared/statusMeta.js'
 import useAppStore from '../store/useAppStore.js'
 
-const CLEARANCE_STYLES = {
-  LOW:    { bg: 'bg-green-100',  text: 'text-green-700',  label: 'LOW' },
-  MEDIUM: { bg: 'bg-yellow-100', text: 'text-yellow-700', label: 'MEDIUM' },
-  HIGH:   { bg: 'bg-red-100',    text: 'text-red-700',    label: 'HIGH' },
-}
-
-const SOURCE_STYLES = {
-  builtin:  { bg: 'bg-blue-100',   text: 'text-blue-700',   label: '内置', icon: Package },
-  local:    { bg: 'bg-green-100',  text: 'text-green-700',  label: '本地', icon: FolderOpen },
-  github:   { bg: 'bg-purple-100', text: 'text-purple-700', label: 'GitHub', icon: Globe },
-  external: { bg: 'bg-orange-100', text: 'text-orange-700', label: '外部', icon: FolderOpen },
-  hub:      { bg: 'bg-indigo-100', text: 'text-indigo-700', label: 'Hub', icon: Zap },
+const SOURCE_ICONS = {
+  builtin: Package,
+  local: FolderOpen,
+  github: Globe,
+  external: FolderOpen,
+  hub: Zap,
 }
 
 function SourcePill({ source }) {
-  const src = SOURCE_STYLES[source] || SOURCE_STYLES.builtin
-  const SrcIcon = src.icon
+  const src = SKILL_SOURCE_STYLES[source] || SKILL_SOURCE_STYLES.builtin
+  const SrcIcon = SOURCE_ICONS[source] || SOURCE_ICONS.builtin
   return (
     <span className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs ${src.bg} ${src.text}`}>
       <SrcIcon size={10} />
@@ -58,14 +53,7 @@ function RiskDots({ value }) {
   )
 }
 
-function SummaryStrip({ data, filteredCount }) {
-  const items = [
-    { label: 'Hub 状态', value: data?.hub_enabled ? '开启' : '关闭', tone: data?.hub_enabled ? 'text-green-600' : 'text-gray-400' },
-    { label: '总技能数', value: data?.total_skills ?? '—', tone: 'text-blue-600' },
-    { label: '已加载', value: data?.loaded_skills ?? '—', tone: 'text-green-600' },
-    { label: '加载失败', value: data?.failed_skills ?? 0, tone: Number(data?.failed_skills || 0) > 0 ? 'text-red-500' : 'text-gray-400' },
-    { label: '当前结果', value: filteredCount, tone: 'text-gray-800' },
-  ]
+function SummaryStrip({ items }) {
   return (
     <div className="overflow-hidden rounded-xl border border-white/80 bg-white/86 shadow-sm">
       <div className="grid grid-cols-2 divide-x divide-y divide-gray-100 sm:grid-cols-5 sm:divide-y-0">
@@ -102,7 +90,7 @@ function SkillDirectory({ title, icon: Icon, skills }) {
         </div>
         <div className="max-h-[680px] divide-y divide-gray-100 overflow-y-auto">
           {rows.map((skill) => {
-            const clearance = CLEARANCE_STYLES[skill.clearance] || CLEARANCE_STYLES.LOW
+            const clearance = SKILL_CLEARANCE_STYLES[skill.clearance] || SKILL_CLEARANCE_STYLES.LOW
             const loaded = skill.status === 'loaded'
             return (
               <div
@@ -154,7 +142,7 @@ export default function SkillsHub() {
   const pollingTick = useAppStore((s) => s.pollingTick)
 
   const [filter, setFilter] = useState('')
-  const [sourceFilter, setSourceFilter] = useState('ALL')
+  const [sourceFilter, setSourceFilter] = useState(SKILL_SOURCE_FILTER_ALL)
   const {
     hubData: data,
     hubError,
@@ -169,52 +157,27 @@ export default function SkillsHub() {
     pollingInterval,
   })
 
-  const skills = data?.skills ?? []
-  const sourceOptions = useMemo(() => {
-    const values = Array.from(new Set(skills.map((skill) => skill.source || 'builtin'))).sort()
-    return ['ALL', ...values]
-  }, [skills])
-  const filtered = useMemo(() => {
-    const keyword = filter.trim().toLowerCase()
-    return skills.filter((skill) => {
-      const source = skill.source || 'builtin'
-      const sourceMatched = sourceFilter === 'ALL' || source === sourceFilter
-      if (!sourceMatched) return false
-      if (!keyword) return true
-      return [
-        skill.name,
-        source,
-        skill.author,
-        skill.status,
-        skill.clearance,
-      ].some((value) => String(value || '').toLowerCase().includes(keyword))
-    })
-  }, [filter, skills, sourceFilter])
-  const sourceGroups = useMemo(() => {
-    const groups = new Map()
-    filtered.forEach((skill) => {
-      const source = skill.source || 'builtin'
-      if (!groups.has(source)) groups.set(source, [])
-      groups.get(source).push(skill)
-    })
-    const order = ['builtin', 'hub', 'local', 'github', 'external']
-    return Array.from(groups.entries()).sort(([left], [right]) => {
-      const leftIndex = order.indexOf(left)
-      const rightIndex = order.indexOf(right)
-      if (leftIndex !== -1 || rightIndex !== -1) {
-        return (leftIndex === -1 ? order.length : leftIndex) - (rightIndex === -1 ? order.length : rightIndex)
-      }
-      return left.localeCompare(right)
-    })
-  }, [filtered])
-  const skillsHubLoadState = resolveLoadState({
-    loading: loading || refreshing,
-    error: hubError && !data ? new Error(hubError) : null,
-    hasData: Boolean(data),
-    hasSamples: skills.length > 0,
-    available: Boolean(data),
+  const {
+    sourceOptions,
+    filtered,
+    sourceGroups,
+    summaryItems,
+    heroTitle,
+    heroMetaItems,
+    emptyState,
+    sampleMeta,
+    noticeView,
+    externalDirsView,
+  } = useMemo(() => buildSkillsHubViewModel({
+    data,
+    filter,
+    sourceFilter,
+    hubError,
+    loading,
+    refreshing,
     stale,
-  })
+    lastUpdatedAt,
+  }), [data, filter, hubError, lastUpdatedAt, loading, refreshing, sourceFilter, stale])
 
   return (
     <div className="space-y-6">
@@ -231,37 +194,32 @@ export default function SkillsHub() {
       <PageHero
         icon={Package}
         eyebrow="技能与能力扩展"
-        title={data?.hub_enabled ? 'Skills Hub 已启用' : 'Skills Hub 当前未启用'}
+        title={heroTitle}
         description="集中查看内置技能、Hub / 外部技能来源、加载状态以及风险等级，方便统一收口技能侧能力。"
         gradientClass="from-emerald-50 via-white to-indigo-50"
-        metaItems={[
-          `技能总数：${data?.total_skills ?? 0}`,
-          `已加载：${data?.loaded_skills ?? 0}`,
-          `加载失败：${data?.failed_skills ?? 0}`,
-          `过滤结果：${filtered.length}`,
-        ]}
+        metaItems={heroMetaItems}
         aside={(
           <SampleMeta
             className="max-w-md"
-            loadState={skillsHubLoadState}
-            sampleSize={skills.length}
-            sampleLabel="技能"
-            updatedAt={lastUpdatedAt}
-            source="skills hub"
-            definition="技能中心页聚合技能总览、来源分布和过滤结果；搜索为空结果不会被误判为系统无样本。"
+            loadState={sampleMeta.loadState}
+            sampleSize={sampleMeta.sampleSize}
+            sampleLabel={sampleMeta.sampleLabel}
+            updatedAt={sampleMeta.updatedAt}
+            source={sampleMeta.source}
+            definition={sampleMeta.definition}
           />
         )}
       />
 
-      {hubError && <NoticeBanner variant={data ? 'warning' : 'error'}>{hubError}</NoticeBanner>}
+      {noticeView.hubError && <NoticeBanner variant={noticeView.hubErrorVariant}>{noticeView.hubError}</NoticeBanner>}
 
-      {!hubError && !loading && !refreshing && skillsHubLoadState === LOAD_STATES.NO_SAMPLE && (
+      {noticeView.showNoSample && (
         <NoticeBanner variant="info">当前还没有已加载技能样本，页面会保留中性空态。</NoticeBanner>
       )}
 
-      <SummaryStrip data={data} filteredCount={filtered.length} />
+      <SummaryStrip items={summaryItems} />
 
-      {data?.external_dirs_scanned && data.external_dirs_scanned.length > 0 && (
+      {externalDirsView.hasExternalDirs && (
         <details className="overflow-hidden rounded-xl border border-white/80 bg-white/86 shadow-sm">
           <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 text-sm font-semibold text-gray-700">
             <span className="inline-flex min-w-0 items-center gap-2">
@@ -269,13 +227,13 @@ export default function SkillsHub() {
               已扫描外部目录
             </span>
             <span className="rounded-full border border-gray-200 bg-gray-50 px-2 py-0.5 text-xs text-gray-500">
-              {data.external_dirs_scanned.length}
+              {externalDirsView.count}
             </span>
           </summary>
           <div className="flex flex-wrap gap-2 border-t border-gray-100 px-4 py-3">
-            {data.external_dirs_scanned.map((d, i) => (
-              <span key={i} className="inline-flex items-center gap-1 rounded bg-gray-100 px-2 py-1 text-xs text-gray-600">
-                <FolderOpen size={11} />{d}
+            {externalDirsView.rows.map((item) => (
+              <span key={item.key} className="inline-flex items-center gap-1 rounded bg-gray-100 px-2 py-1 text-xs text-gray-600">
+                <FolderOpen size={11} />{item.path}
               </span>
             ))}
           </div>
@@ -294,12 +252,8 @@ export default function SkillsHub() {
             />
           </div>
           <div className="flex shrink-0 gap-1 overflow-x-auto rounded-lg border border-gray-200 bg-gray-50 p-1">
-            {sourceOptions.map((source) => {
+            {sourceOptions.map(({ source, label, count }) => {
               const active = sourceFilter === source
-              const sourceCount = source === 'ALL'
-                ? skills.length
-                : skills.filter((skill) => (skill.source || 'builtin') === source).length
-              const label = source === 'ALL' ? '全部' : (SOURCE_STYLES[source]?.label || source)
               return (
                 <button
                   type="button"
@@ -309,7 +263,7 @@ export default function SkillsHub() {
                   }`}
                   onClick={() => setSourceFilter(source)}
                 >
-                  {label} {sourceCount}
+                  {label} {count}
                 </button>
               )
             })}
@@ -317,19 +271,19 @@ export default function SkillsHub() {
         </div>
       </div>
 
-      {sourceGroups.map(([source, rows]) => (
+      {sourceGroups.map(({ source, title, rows }) => (
         <SkillDirectory
           key={source}
-          title={source === 'builtin' ? '内置技能' : `${SOURCE_STYLES[source]?.label || source} 技能`}
-          icon={source === 'builtin' ? Package : SOURCE_STYLES[source]?.icon || Globe}
+          title={title}
+          icon={source === 'builtin' ? Package : SOURCE_ICONS[source] || Globe}
           skills={rows}
         />
       ))}
 
       {!loading && filtered.length === 0 && (
         <EmptyStateCard
-          title={filter || sourceFilter !== 'ALL' ? '没有匹配的技能' : '暂无已加载技能'}
-          hint={filter || sourceFilter !== 'ALL' ? '请尝试更换关键字或来源筛选。' : '等待 SkillsHub 拉取后将展示在此。'}
+          title={emptyState.title}
+          hint={emptyState.hint}
           className="py-12"
         />
       )}

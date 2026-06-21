@@ -309,6 +309,7 @@ def test_llm_pool_keeps_codex_cli_candidate_without_key(monkeypatch, tmp_path) -
 
 def test_provider_factory_uses_codex_cli_when_key_missing(monkeypatch) -> None:
     monkeypatch.setattr(provider_factory, "codex_cli_lm_available", lambda: True)
+    monkeypatch.setattr(provider_factory, "codex_cli_lm_allowed_for_background", lambda: True)
     monkeypatch.setattr(
         provider_factory,
         "invoke_codex_cli_text",
@@ -331,6 +332,7 @@ def test_provider_factory_uses_codex_cli_when_key_missing(monkeypatch) -> None:
 
 def test_runtime_marks_codex_cli_available_without_key(monkeypatch) -> None:
     monkeypatch.setattr(graph_config_llm_runtime, "codex_cli_lm_available", lambda: True)
+    monkeypatch.setattr(graph_config_llm_runtime, "codex_cli_lm_allowed_for_background", lambda: True)
 
     assert graph_config_llm_runtime._is_provider_available(  # noqa: SLF001
         provider_name="codex",

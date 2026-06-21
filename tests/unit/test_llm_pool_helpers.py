@@ -169,6 +169,7 @@ def test_non_chat_pool_prefers_codex_cli_migration(monkeypatch: pytest.MonkeyPat
     monkeypatch.setenv("HOST_CODEX_MODEL_ID", "gpt-5.4-mini")
     monkeypatch.delenv("HOST_LLM_POOL_CODEX_MODEL_ID", raising=False)
     monkeypatch.setattr(helpers, "codex_cli_lm_available", lambda: True)
+    monkeypatch.setattr(helpers, "codex_cli_lm_allowed_for_background", lambda: True)
 
     candidates = helpers._resolve_pool_candidates(
         cognitive_tier="B",
@@ -187,6 +188,7 @@ def test_chat_pool_keeps_fast_provider_first(monkeypatch: pytest.MonkeyPatch) ->
     monkeypatch.setenv("HOST_LLM_POOL_CODEX_MIGRATION_ENABLED", "true")
     monkeypatch.setenv("HOST_LLM_POOL_TIER_A", "gemini:gemini-pro")
     monkeypatch.setattr(helpers, "codex_cli_lm_available", lambda: True)
+    monkeypatch.setattr(helpers, "codex_cli_lm_allowed_for_background", lambda: True)
 
     candidates = helpers._resolve_pool_candidates(
         cognitive_tier="A",
@@ -261,6 +263,7 @@ def test_exec_intent_scene_pool_can_bypass_codex_migration(monkeypatch: pytest.M
     monkeypatch.setenv("HOST_LLM_POOL_SCENE_EXEC_INTENT_TIER_C", "deepseek:deepseek-v4-flash")
     monkeypatch.setenv("DEEPSEEK_API_KEY", "deep-key")
     monkeypatch.setattr(helpers, "codex_cli_lm_available", lambda: True)
+    monkeypatch.setattr(helpers, "codex_cli_lm_allowed_for_background", lambda: True)
 
     candidates = helpers._resolve_pool_candidates(
         cognitive_tier="C",

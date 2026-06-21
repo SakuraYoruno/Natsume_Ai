@@ -27,6 +27,7 @@ export const OBS_QUERY_KEYS = Object.freeze({
   runtimeModeConsole: () => ['runtime-mode-console'],
   wechatChannel: (windowMinutes) => ['wechat-channel', windowMinutes],
   skillsHub: () => ['skills-hub'],
+  securityImmune: (minRisk) => ['security-immune', minRisk || 'low'],
   sessionsList: (params) => ['sessions-list', params],
   errorLogBatch: (windowMinutes, limit) => ['error-log-batch', windowMinutes, limit],
   promptTemplateList: (params) => ['prompt-template-list', params],

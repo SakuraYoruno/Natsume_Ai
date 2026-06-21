@@ -5,50 +5,27 @@ import {
   Heart,
   MoonStar,
   Orbit,
-  RefreshCw,
   Settings,
   Sparkles,
   Waves,
 } from 'lucide-react'
-import BackgroundRuntimeCard from '../components/BackgroundRuntimeCard.jsx'
-import AvatarStateCard from '../components/AvatarStateCard.jsx'
-import { LifeSection } from '../components/digitalLife/digitalLifeSectionShared.jsx'
-import SampleMeta from '../components/obs/SampleMeta.jsx'
-import ViewportLazySection from '../components/obs/ViewportLazySection.jsx'
-import DigitalLifeRuntimeCard from '../components/DigitalLifeRuntimeCard.jsx'
-import DigitalLifeWallClockSoakCard from '../components/DigitalLifeWallClockSoakCard.jsx'
-import MainChainReshapePanel from '../components/digitalLife/MainChainReshapePanel.jsx'
-import EmptyStateCard from '../components/EmptyStateCard.jsx'
-import LifeBodyPathologyPanel from '../components/lifeBody/LifeBodyPathologyPanel.jsx'
-import LifeBodyFocusPanel from '../components/lifeBody/LifeBodyFocusPanel.jsx'
-import LifeBodyTimeline from '../components/lifeBody/LifeBodyTimeline.jsx'
-import LifeBodyTopology from '../components/lifeBody/LifeBodyTopology.jsx'
-import LifeBodyVitalsStrip from '../components/lifeBody/LifeBodyVitalsStrip.jsx'
-import { LazyLoadingNotice, LoadingNotice } from '../components/LoadingNotice.jsx'
-import NoticeBanner from '../components/NoticeBanner.jsx'
-import PageHero from '../components/PageHero.jsx'
-import TimeWindowSelect from '../components/TimeWindowSelect.jsx'
-import VitalLoopSummaryPanel from '../components/VitalLoopSummaryPanel.jsx'
+import DigitalLifeOverviewSurface from '../features/life/components/DigitalLifeOverviewSurface.jsx'
 import useLifeBodyPageData from '../hooks/useLifeBodyPageData.js'
 import { buildMainChainReshapeModel } from '../models/mainChainReshapeModel.js'
-import { useDigitalLifeWallClockSoakQuery } from '../features/life/queries.js'
-import { useAvatarStateQuery } from '../features/life/queries.js'
+import {
+  useAvatarStateQuery,
+  useDigitalLifeWallClockSoakQuery,
+} from '../features/life/digitalLifeQueries.js'
 import { postAvatarBehavior } from '../features/life/api.js'
 import {
-  compactText,
-  formatTrend,
-} from '../utils/digitalLife.js'
-
-const DigitalLifeCapabilitySection = React.lazy(() => import('../components/digitalLife/DigitalLifeCapabilitySection.jsx'))
-const DigitalLifeGatewaySection = React.lazy(() => import('../components/digitalLife/DigitalLifeGatewaySection.jsx'))
-const DigitalLifeSecondarySections = React.lazy(() => import('../components/digitalLife/DigitalLifeSecondarySections.jsx'))
-
-const WINDOW_OPTIONS = [
-  { label: '1h', value: 60 },
-  { label: '6h', value: 360 },
-  { label: '24h', value: 1440 },
-  { label: '7d', value: 10080 },
-]
+  buildDigitalLifeCapabilitySectionModel,
+  buildDigitalLifeGatewaySectionModel,
+  buildDigitalLifeHeroDescription,
+  buildDigitalLifeHeroMetaItems,
+  buildDigitalLifeSecondarySectionsModel,
+  buildDigitalLifeWiredDomains,
+  getDigitalLifePollingInterval,
+} from '../features/life/digitalLifeOverviewModel.js'
 
 export default function DigitalLifeOverview() {
   const [windowMinutes, setWindowMinutes] = useState(360)
@@ -119,12 +96,12 @@ export default function DigitalLifeOverview() {
   const wallClockSoakQuery = useDigitalLifeWallClockSoakQuery({
     pollingEnabled,
     pollingTick,
-    pollingInterval: Math.max(60, Number(pollingInterval || 60)),
+    pollingInterval: getDigitalLifePollingInterval(pollingInterval, 60),
   })
   const avatarStateQuery = useAvatarStateQuery({
     pollingEnabled,
     pollingTick,
-    pollingInterval: Math.max(15, Number(pollingInterval || 15)),
+    pollingInterval: getDigitalLifePollingInterval(pollingInterval, 15),
   })
   const mainChainReshapeModel = useMemo(
     () => buildMainChainReshapeModel({
@@ -181,118 +158,31 @@ export default function DigitalLifeOverview() {
       setAvatarCommandBusy(false)
     }
   }
-  const forgeQualitySummary = capabilityGapData?.forge_runtime_quality?.summary || {}
-  const forgeQualityItems = capabilityGapData?.forge_runtime_quality?.items || []
-  const forgeRiskItems = [...forgeQualityItems]
-    .sort((left, right) => Number(left?.health_score ?? 0) - Number(right?.health_score ?? 0))
-    .slice(0, 3)
-  const avgForgeHealth = Number(forgeQualitySummary?.avg_health_score ?? 0)
-  const forgeCriticalCount = Number(forgeQualitySummary?.critical_proposals ?? 0)
-  const forgeUnhealthyCount = Number(forgeQualitySummary?.unhealthy_proposals ?? 0)
-  const hasHumanoidLoopData = Boolean(humanoidLoopData)
   const wiredDomains = useMemo(
-    () => [
-      {
-        icon: Orbit,
-        title: '存在态轴',
-        desc: `${modeMeta.emoji} ${modeMeta.label} · ${modeMeta.desc}`,
-        status: hasRuntimeSnapshot ? 'wired' : 'pending',
-        actionTo: '/life/runtime-mode',
-        actionLabel: '查看存在态轴',
-      },
-      {
-        icon: Heart,
-        title: '关系状态',
-        desc: !hasRuntimeSnapshot
-          ? '等待运行快照恢复后补齐关系阶段与趋势摘要。'
-          : bondState.current_stage
-          ? `${currentBondStage} · 趋势 ${formatTrend(bondState.trend)}`
-          : '关系系统已在线，但当前窗口仍缺少阶段样本。',
-        status: !hasRuntimeSnapshot ? 'pending' : bondState.current_stage ? 'wired' : 'degraded',
-        actionTo: '/life/relationship',
-        actionLabel: '查看关系',
-      },
-      {
-        icon: Waves,
-        title: '情绪与表情',
-        desc: !hasRuntimeSnapshot && !topEmotion
-          ? '等待运行快照恢复后补齐情绪与表情摘要。'
-          : topEmotion
-          ? `当前情绪 ${currentEmotion} · VTS 降级率 ${vtsData?.degrade_rate ?? 0}%`
-          : '情绪上下文已接入，但当前窗口还没有可用的表情样本。',
-        status: !hasRuntimeSnapshot && !topEmotion
-          ? 'pending'
-          : topEmotion || runtimeSnapshot?.slot_status?.emotion_context === 'live'
-            ? 'wired'
-            : 'degraded',
-        actionTo: '/life/emotion',
-        actionLabel: '查看情绪',
-      },
-      {
-        icon: Database,
-        title: '记忆系统',
-        desc: !hasMemoryData
-          ? '记忆统计暂时不可用，等待接口恢复后再刷新摘要。'
-          : hasMemorySamples
-          ? `平均成功率 ${avgMemorySuccessRate}% · ${sampledMemorySubsystemCount}/${configuredMemorySubsystemCount} 个子系统有样本`
-          : '记忆页已接入，但当前窗口还没有记忆流量样本。',
-        status: hasMemoryData && hasMemorySamples ? 'wired' : 'pending',
-        actionTo: '/life/memory',
-        actionLabel: '查看记忆',
-      },
-      {
-        icon: Sparkles,
-        title: '回复策略',
-        desc: !hasRuntimeSnapshot
-          ? '等待运行快照恢复后补齐意愿与姿态摘要。'
-          : silenceState.willingness_level
-          ? `意愿 ${silenceState.willingness_level} · 姿态 ${replyPosture}`
-          : '策略系统已接入，但当前窗口缺少稳定快照。',
-        status: !hasRuntimeSnapshot ? 'pending' : silenceState.willingness_level ? 'wired' : 'degraded',
-        actionTo: '/life/response-policy',
-        actionLabel: '查看策略',
-      },
-      {
-        icon: Brain,
-        title: '自我模型',
-        desc: !hasRuntimeSnapshot
-          ? '等待运行快照恢复后补齐成长与自我观察摘要。'
-          : growthSignals.hasAnyGrowth
-          ? growthSignals.overviewSummary
-          : selfModelSnapshot.recent_mood_trend
-            ? `近期情绪趋势 ${formatTrend(selfModelSnapshot.recent_mood_trend)}`
-            : '自我模型在线，等待更多成长样本聚合。',
-        status: !hasRuntimeSnapshot
-          ? 'pending'
-          : growthSignals.hasAnyGrowth || selfModelSnapshot.recent_mood_trend
-            ? 'wired'
-            : 'degraded',
-        actionTo: '/life/self-model',
-        actionLabel: '查看自我模型',
-      },
-      {
-        icon: MoonStar,
-        title: '内在世界',
-        desc: !hasRuntimeSnapshot
-          ? '等待运行快照恢复后补齐离线态与期待话题摘要。'
-          : offlineState.absence_band
-          ? `${absenceBand} · 等待话题 ${(offlineState.anticipation_topics || []).length} 个`
-          : '内在世界可访问，当前尚未形成完整离线态快照。',
-        status: !hasRuntimeSnapshot ? 'pending' : offlineState.absence_band ? 'wired' : 'degraded',
-        actionTo: '/life/inner-world',
-        actionLabel: '查看内在世界',
-      },
-      {
-        icon: Settings,
-        title: '神经底座',
-        desc: servicesData
-          ? `降级 ${servicesData.degraded ?? 0} · 离线 ${servicesData.down ?? 0} · 未知 ${servicesData.unknown ?? 0} · 活跃子系统 ${activeSubsystemCount}`
-          : '神经底座状态暂时不可见。',
-        status: servicesData ? 'wired' : 'degraded',
-        actionTo: '/operations/system',
-        actionLabel: '查看神经底座',
-      },
-    ],
+    () => buildDigitalLifeWiredDomains({
+      icons: { Brain, Database, Heart, MoonStar, Orbit, Settings, Sparkles, Waves },
+      activeSubsystemCount,
+      absenceBand,
+      avgMemorySuccessRate,
+      bondState,
+      configuredMemorySubsystemCount,
+      currentBondStage,
+      currentEmotion,
+      growthSignals,
+      hasMemoryData,
+      hasMemorySamples,
+      hasRuntimeSnapshot,
+      modeMeta,
+      offlineState,
+      replyPosture,
+      runtimeSnapshot,
+      sampledMemorySubsystemCount,
+      selfModelSnapshot,
+      servicesData,
+      silenceState,
+      topEmotion,
+      vtsData,
+    }),
     [
       activeSubsystemCount,
       absenceBand,
@@ -320,293 +210,82 @@ export default function DigitalLifeOverview() {
       runtimeSnapshot?.slot_status?.emotion_context,
     ]
   )
-  const secondarySectionsModel = {
-    windowMinutes,
-    vtsData,
-    bondState,
-    currentEmotion,
-    currentBondStage,
-    dominantMotive,
-    replyPosture,
-    nonLiveSlots,
-    riskLevel,
-    runtimeAlerts,
-    runtimeVitalsLoadState,
-    runtimeSnapshot,
-    runtimeUpdatedAt,
-    growthSignals,
-    compactText,
-    wiredDomains,
-    modeMeta,
+  const secondarySectionsModel = buildDigitalLifeSecondarySectionsModel({
     absenceBand,
-    renderPolicy,
+    avgMemorySuccessRate,
+    bondState,
+    currentBondStage,
+    currentEmotion,
+    dominantMotive,
+    growthSignals,
     hasMemoryData,
     hasMemorySamples,
-    avgMemorySuccessRate,
-    memoryOverviewLoadState,
-    sampledMemorySubsystemCount,
-    lastOverviewUpdatedAt,
     hasRuntimeSnapshot,
-  }
-  const capabilitySectionModel = {
-    capabilityGapData,
-    forgeQualitySummary,
-    avgForgeHealth,
-    forgeCriticalCount,
-    forgeUnhealthyCount,
-    forgeRiskItems,
-  }
-  const gatewaySectionModel = {
+    lastOverviewUpdatedAt,
+    memoryOverviewLoadState,
+    modeMeta,
+    nonLiveSlots,
+    renderPolicy,
+    replyPosture,
+    riskLevel,
+    runtimeAlerts,
+    runtimeSnapshot,
+    runtimeUpdatedAt,
+    runtimeVitalsLoadState,
+    sampledMemorySubsystemCount,
+    vtsData,
     windowMinutes,
-    updatedAt: lastOverviewUpdatedAt,
-    loadState: gatewayLoopLoadState,
-    humanoidLoopData,
-    humanoidLoopTrendData,
+    wiredDomains,
+  })
+  const capabilitySectionModel = buildDigitalLifeCapabilitySectionModel(capabilityGapData)
+  const gatewaySectionModel = buildDigitalLifeGatewaySectionModel({
+    gatewayLoopLoadState,
     humanoidLoopAlertsData,
-    humanoidLoopRemediationData,
+    humanoidLoopData,
     humanoidLoopDiagnosticsData,
     humanoidLoopHotspotsData,
     humanoidLoopHotspotTrendData,
+    humanoidLoopRemediationData,
     humanoidLoopSourceCorrelationData,
-  }
+    humanoidLoopTrendData,
+    lastOverviewUpdatedAt,
+    windowMinutes,
+  })
+  const heroDescription = buildDigitalLifeHeroDescription({ runtimeSnapshot, lifeBodyModel, hasRuntimeSnapshot })
+  const heroMetaItems = buildDigitalLifeHeroMetaItems({ modeMeta, lifeBodyModel, replyPosture })
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-xl font-semibold text-gray-900">数字生命体总览</h1>
-          <p className="text-sm text-gray-500">以数字生命体为主体，统一呈现关系、情绪、记忆、策略和器官稳态。</p>
-        </div>
-        <div className="flex items-center gap-2">
-          <TimeWindowSelect value={windowMinutes} onChange={setWindowMinutes} options={WINDOW_OPTIONS} />
-          <button
-            className="btn-secondary"
-            onClick={refreshDashboard}
-            disabled={loading || refreshing || runtimeLoading || wallClockSoakQuery.loading || wallClockSoakQuery.refreshing}
-          >
-            <RefreshCw
-              size={14}
-              className={
-                loading || refreshing || runtimeLoading || wallClockSoakQuery.loading || wallClockSoakQuery.refreshing || avatarStateQuery.refreshing
-                  ? 'animate-spin'
-                  : ''
-              }
-            />
-            刷新
-          </button>
-        </div>
-      </div>
-
-      <PageHero
-        icon={Sparkles}
-        eyebrow="数字生命驾驶舱"
-        title={`${modeMeta.emoji} ${lifeBodyModel.lifeState.label}`}
-        description={compactText(
-          runtimeSnapshot?.runtime_summary?.headline
-            || `${lifeBodyModel.lifeState.summary}${hasRuntimeSnapshot ? ' 生命流正在穿过关系、记忆、节律与执行层。' : ''}`,
-          160
-        )}
-        gradientClass="from-primary-50 via-white to-pink-50"
-        showPulseRail={false}
-        metaItems={[
-          `存在态：${modeMeta.label}`,
-          `最紧张器官：${lifeBodyModel.primaryOrgan?.name || '待判定'}`,
-          `主病灶：${lifeBodyModel.primaryPathology?.title || '当前未形成'}`,
-          `回复：${replyPosture}`,
-        ]}
-        aside={(
-          <SampleMeta
-            className="max-w-md"
-            compact
-            loadState={overviewLoadState}
-            loadStateDetail={error || refreshWarning}
-            windowMinutes={windowMinutes}
-            sampleSize={overviewTrackedSections}
-            sampleLabel="关键分区"
-            updatedAt={overviewUpdatedAt}
-            source="/obs/life-body aggregate"
-            definition="驾驶舱现在优先走 obs sidecar 的生命体聚合接口，再在前端补主体化视图层；关键分区数量表示当前窗口中已成功返回数据的核心观测分区数。"
-          />
-        )}
-      />
-
-      <MainChainReshapePanel model={mainChainReshapeModel} />
-      <LifeBodyVitalsStrip vitals={lifeBodyModel.vitalSigns} />
-      <LifeBodyFocusPanel guidance={lifeBodyModel.diagnosticGuidance} />
-
-      <LifeSection
-        title="桌宠表现链路"
-        hint="把 Host 对话、Edge 行为状态、MateEngine/VRM 驱动和危险热键拦截放在一张只读卡片里。"
-      >
-        <AvatarStateCard
-          data={avatarStateQuery.avatarState}
-          loading={avatarStateQuery.loading}
-          refreshing={avatarStateQuery.refreshing}
-          error={avatarStateQuery.error}
-          commandError={avatarCommandError}
-          behaviorBusy={avatarCommandBusy}
-          updatedAt={avatarStateQuery.lastUpdatedAt}
-          onRefresh={() => avatarStateQuery.refetch()}
-          onBehavior={applyAvatarBehavior}
-        />
-      </LifeSection>
-
-      <div className="grid gap-6 xl:grid-cols-[minmax(0,1.8fr)_minmax(320px,0.95fr)]">
-        <LifeBodyTopology
-          lifeState={lifeBodyModel.lifeState}
-          organSystems={lifeBodyModel.organSystems}
-          organStatusCounts={lifeBodyModel.organStatusCounts}
-          primaryPathology={lifeBodyModel.primaryPathology}
-          primaryOrganId={lifeBodyModel.primaryOrgan?.id}
-        />
-        <LifeBodyPathologyPanel pathologies={lifeBodyModel.pathologies} />
-      </div>
-
-      <LifeBodyTimeline events={lifeBodyModel.timelineEvents} />
-
-      {error ? <NoticeBanner variant="error" title="总览统计加载失败">{error.message}</NoticeBanner> : null}
-      {refreshWarning ? (
-        <NoticeBanner variant="warning" title="总览刷新失败，当前展示旧快照">
-          {refreshWarning.message}
-        </NoticeBanner>
-      ) : null}
-      {runtimeError ? (
-        <NoticeBanner
-          variant="info"
-          title={/404|Not Found/i.test(runtimeError) ? '运行快照暂不可用' : '运行快照加载异常'}
-        >
-          {/404|Not Found/i.test(runtimeError)
-            ? '当前环境没有接到运行快照，但页面其余部分仍可正常浏览。'
-            : runtimeError}
-        </NoticeBanner>
-      ) : null}
-
-      <LifeSection
-        title="真实墙钟闭环验证"
-        hint="只读读取当前 24h wall-clock soak 记录，用来确认主链、器官映射与后台 tick 是否持续推进。"
-      >
-        <DigitalLifeWallClockSoakCard
-          data={wallClockSoakQuery.data}
-          loading={wallClockSoakQuery.loading}
-          refreshing={wallClockSoakQuery.refreshing}
-          error={wallClockSoakQuery.error}
-          onRefresh={wallClockSoakQuery.refetch}
-        />
-      </LifeSection>
-
-      {runtimeSnapshot ? (
-        <LifeSection
-          title="生命体细部解剖"
-          hint="上面先看主体、器官和病灶；下面继续看运行细部、稳态与节律剖面。"
-        >
-          <div className="space-y-4">
-          <DigitalLifeRuntimeCard
-            runtimeSnapshot={runtimeSnapshot}
-            promptStats={promptStats}
-            capabilityGapData={capabilityGapData}
-          />
-          <VitalLoopSummaryPanel runtimeSnapshot={runtimeSnapshot} showDetailLink />
-          <BackgroundRuntimeCard runtimeSnapshot={runtimeSnapshot} />
-          </div>
-        </LifeSection>
-      ) : !runtimeLoading ? (
-        <EmptyStateCard
-          title="暂时没有数字生命体快照"
-          hint="请先产生一次完整对话或等待采样完成。"
-        />
-      ) : null}
-
-      <ViewportLazySection
-        rootMargin="180px 0px"
-        eagerAfterMs={1200}
-        fallback={(
-          <LifeSection
-            title="Capability Gap & Forge Loop"
-            hint="Expose gap pressure and forge runtime quality directly in the life-body overview."
-            actionTo="/observability/insights/global"
-            actionLabel="Open Global Insights"
-          >
-            <LazyLoadingNotice>
-              正在准备 gap pressure 与 forge runtime 视图…
-            </LazyLoadingNotice>
-          </LifeSection>
-        )}
-      >
-        <React.Suspense
-          fallback={(
-            <LifeSection
-              title="Capability Gap & Forge Loop"
-              hint="Expose gap pressure and forge runtime quality directly in the life-body overview."
-              actionTo="/observability/insights/global"
-              actionLabel="Open Global Insights"
-          >
-              <LoadingNotice>
-                正在载入 gap pressure 与 forge runtime 视图…
-              </LoadingNotice>
-            </LifeSection>
-          )}
-        >
-          <DigitalLifeCapabilitySection model={capabilitySectionModel} />
-        </React.Suspense>
-      </ViewportLazySection>
-
-      <ViewportLazySection
-        rootMargin="240px 0px"
-        eagerAfterMs={1200}
-        fallback={(
-          <LifeSection
-            title="人体闭环健康（Gateway）"
-            hint="展示请求从即时确认、进度触达到偏航修复与终态收束的健康度。"
-            actionTo="/execution/gateway"
-            actionLabel="查看通道详情"
-          >
-            <LazyLoadingNotice>
-              正在准备闭环趋势、病灶热区和自愈建议视图…
-            </LazyLoadingNotice>
-          </LifeSection>
-        )}
-      >
-        <React.Suspense
-          fallback={(
-            <LifeSection
-              title="人体闭环健康（Gateway）"
-              hint="展示请求从即时确认、进度触达到偏航修复与终态收束的健康度。"
-              actionTo="/execution/gateway"
-              actionLabel="查看通道详情"
-          >
-              <LoadingNotice>
-                正在载入闭环趋势、病灶热区和自愈建议视图…
-              </LoadingNotice>
-            </LifeSection>
-          )}
-        >
-          <DigitalLifeGatewaySection model={gatewaySectionModel} />
-        </React.Suspense>
-      </ViewportLazySection>
-
-      <ViewportLazySection
-        rootMargin="200px 0px"
-        eagerAfterMs={1200}
-        fallback={(
-          <LifeSection title="生命体次级分区" hint="体征、成长、器官联通态与体内快照会在进入视口后加载。">
-            <LazyLoadingNotice>
-              正在准备次级生命体分区…
-            </LazyLoadingNotice>
-          </LifeSection>
-        )}
-      >
-        <React.Suspense
-          fallback={(
-            <LifeSection title="生命体次级分区" hint="体征、成长、器官联通态与体内快照会在进入视口后加载。">
-              <LoadingNotice>
-                正在载入次级生命体分区…
-              </LoadingNotice>
-            </LifeSection>
-          )}
-        >
-          <DigitalLifeSecondarySections model={secondarySectionsModel} />
-        </React.Suspense>
-      </ViewportLazySection>
-    </div>
+    <DigitalLifeOverviewSurface
+      windowMinutes={windowMinutes}
+      onWindowMinutesChange={setWindowMinutes}
+      onRefreshDashboard={refreshDashboard}
+      loading={loading}
+      refreshing={refreshing}
+      error={error}
+      refreshWarning={refreshWarning}
+      runtimeLoading={runtimeLoading}
+      runtimeError={runtimeError}
+      runtimeSnapshot={runtimeSnapshot}
+      promptStats={promptStats}
+      capabilityGapData={capabilityGapData}
+      modeMeta={modeMeta}
+      lifeBodyModel={lifeBodyModel}
+      hasRuntimeSnapshot={hasRuntimeSnapshot}
+      replyPosture={replyPosture}
+      overviewLoadState={overviewLoadState}
+      overviewTrackedSections={overviewTrackedSections}
+      overviewUpdatedAt={overviewUpdatedAt}
+      heroDescription={heroDescription}
+      heroMetaItems={heroMetaItems}
+      mainChainReshapeModel={mainChainReshapeModel}
+      wallClockSoakQuery={wallClockSoakQuery}
+      avatarStateQuery={avatarStateQuery}
+      avatarCommandBusy={avatarCommandBusy}
+      avatarCommandError={avatarCommandError}
+      onApplyAvatarBehavior={applyAvatarBehavior}
+      capabilitySectionModel={capabilitySectionModel}
+      gatewaySectionModel={gatewaySectionModel}
+      secondarySectionsModel={secondarySectionsModel}
+    />
   )
 }

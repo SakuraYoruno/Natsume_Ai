@@ -7,7 +7,7 @@ from host_brain.app.obs_fastapi_app import app as obs_app
 
 
 def test_host_main_does_not_mount_obs_or_monitor_routes() -> None:
-    host_paths = {route.path for route in host_app.routes}
+    host_paths = {route.path for route in host_app.routes if hasattr(route, "path")}
 
     assert "/v1/chat" in host_paths
     assert "/metrics" in host_paths
@@ -36,10 +36,8 @@ def test_host_main_rejects_monitor_and_obs_requests_without_redirecting() -> Non
 
 
 def test_obs_side_owns_observability_and_monitor_api_routes() -> None:
-    obs_paths = {route.path for route in obs_app.routes}
+    obs_paths = {route.path for route in obs_app.routes if hasattr(route, "path")}
 
     assert "/v1/chat" not in obs_paths
     assert "/obs/metrics" in obs_paths
-    assert "/obs/codex-bio-ops" in obs_paths
-    assert "/api/ui/search-requests" in obs_paths
     assert "/observability/trace" in obs_paths

@@ -1,7 +1,7 @@
-import React, { useEffect, useState } from 'react'
+﻿import React, { useEffect, useState } from 'react'
 import { Network, RefreshCw } from 'lucide-react'
-import PageHero from '../components/PageHero.jsx'
-import NoticeBanner from '../components/NoticeBanner.jsx'
+import PageHero from '../shared/ui/PageHero.jsx'
+import NoticeBanner from '../shared/ui/NoticeBanner.jsx'
 import JsonBlock from '../shared/ui/JsonBlock.jsx'
 import { fetchTribeBundle } from '../features/execution/api.js'
 

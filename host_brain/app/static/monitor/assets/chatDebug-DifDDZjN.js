@@ -1,1 +1,0 @@
-import{a as e,s as t}from"./httpClient-Uf73qqm8.js";var n={Accept:`text/event-stream`};function r(r,i={}){return e(t.execution.chatDebug.path,r,{...i,headers:{...n,...i.headers||{}}})}export{r as t};

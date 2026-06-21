@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react'
+﻿import React, { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   Database,
@@ -8,39 +8,39 @@ import {
   Heart,
   Sparkles,
 } from 'lucide-react'
-import DigitalLifeRuntimeCard from '../components/DigitalLifeRuntimeCard.jsx'
-import EmptyStateCard from '../components/EmptyStateCard.jsx'
-import LoadingNotice from '../components/LoadingNotice.jsx'
-import MetricCard from '../components/MetricCard.jsx'
-import NoticeBanner from '../components/NoticeBanner.jsx'
-import SampleMeta from '../components/obs/SampleMeta.jsx'
-import PageHero from '../components/PageHero.jsx'
+import DigitalLifeRuntimeCard from '../features/life/components/DigitalLifeRuntimeCard.jsx'
+import EmptyStateCard from '../shared/ui/EmptyStateCard.jsx'
+import LoadingNotice from '../shared/ui/LoadingNotice.jsx'
+import MetricCard from '../shared/ui/MetricCard.jsx'
+import NoticeBanner from '../shared/ui/NoticeBanner.jsx'
+import SampleMeta from '../shared/ui/observability/SampleMeta.jsx'
+import PageHero from '../shared/ui/PageHero.jsx'
 import useDigitalLifeRuntimeSignals from '../hooks/useDigitalLifeRuntimeSignals.js'
-import { resolveLoadState } from '../models/loadState.js'
+import { usePersonaPromptCatalogQuery } from '../features/operations/personaQueries.js'
+import { usePromptTemplateDetailQuery } from '../features/operations/promptQueries.js'
 import {
-  usePersonaPromptCatalogQuery,
-  usePromptTemplateDetailQuery,
-} from '../features/operations/queries.js'
+  buildPersonaPromptCatalogLoadState,
+  buildPersonaPromptSampleMeta,
+  buildPersonaPromptSummary,
+  findSelectedPersonaPromptEntry,
+  flattenPersonaPromptEntries,
+  formatPromptTemplateUpdatedAt,
+  getNextPersonaPromptSelection,
+  getPromptContentTypeBadgeView,
+  getPromptSourceBadgeView,
+} from '../features/operations/promptOpsModel.js'
 import useAppStore from '../store/useAppStore.js'
 
-const PromptTemplateEditorPanel = React.lazy(() => import('../components/promptOps/PromptTemplateEditorPanel.jsx'))
+const PromptTemplateEditorPanel = React.lazy(() => import('../features/operations/components/promptOps/PromptTemplateEditorPanel.jsx'))
 
 function SourceBadge({ source }) {
-  const cls = source === 'override'
-    ? 'bg-green-100 text-green-700 border-green-200'
-    : 'bg-gray-100 text-gray-600 border-gray-200'
-  return <span className={`inline-flex items-center px-2 py-0.5 rounded border text-xs font-medium ${cls}`}>{source === 'override' ? '已覆盖' : '默认'}</span>
+  const view = getPromptSourceBadgeView(source, { resolveLabel: true })
+  return <span className={`inline-flex items-center px-2 py-0.5 rounded border text-xs font-medium ${view.className}`}>{view.label}</span>
 }
 
 function TypeBadge({ value }) {
-  const cls = value === 'json'
-    ? 'bg-purple-100 text-purple-700 border-purple-200'
-    : 'bg-blue-100 text-blue-700 border-blue-200'
-  return <span className={`inline-flex items-center px-2 py-0.5 rounded border text-xs font-medium ${cls}`}>{value === 'json' ? '结构化' : '文本'}</span>
-}
-
-function flattenEntries(bundles) {
-  return bundles.flatMap((bundle) => bundle.entries || [])
+  const view = getPromptContentTypeBadgeView(value, { resolveLabel: true })
+  return <span className={`inline-flex items-center px-2 py-0.5 rounded border text-xs font-medium ${view.className}`}>{view.label}</span>
 }
 
 export default function PersonaPromptOps() {
@@ -76,43 +76,33 @@ export default function PersonaPromptOps() {
   } = usePromptTemplateDetailQuery({ templateId: selectedId })
 
   useEffect(() => {
-    const entryIds = flattenEntries(bundles).map((entry) => entry.template_id)
-    if (!entryIds.length) {
-      setSelectedId('')
-      return
-    }
     setSelectedId((current) => {
-      if (!current || !entryIds.includes(current)) return entryIds[0]
-      return current
+      const nextSelectedId = getNextPersonaPromptSelection(bundles, current)
+      return nextSelectedId === current ? current : nextSelectedId
     })
   }, [bundles])
 
-  const selectedEntry = useMemo(() => {
-    for (const bundle of bundles) {
-      const entry = (bundle.entries || []).find((item) => item.template_id === selectedId)
-      if (entry) {
-        return { bundle, entry }
-      }
-    }
-    return null
-  }, [bundles, selectedId])
+  const selectedEntry = useMemo(
+    () => findSelectedPersonaPromptEntry(bundles, selectedId),
+    [bundles, selectedId],
+  )
 
-  const entries = useMemo(() => flattenEntries(bundles), [bundles])
-  const summary = useMemo(() => ({
-    bundles: bundles.length,
-    entries: entries.length,
-    override: entries.filter((entry) => entry.item?.source === 'override').length,
-    json: entries.filter((entry) => entry.item?.content_type === 'json').length,
-  }), [bundles, entries])
+  const entries = useMemo(() => flattenPersonaPromptEntries(bundles), [bundles])
+  const summary = useMemo(() => buildPersonaPromptSummary({ bundles, entries }), [bundles, entries])
 
-  const catalogLoadState = resolveLoadState({
-    loading: catalogLoading || catalogRefreshing,
-    error: catalogError,
-    hasData: Boolean(catalogData),
-    hasSamples: Number(summary.entries) > 0,
-    available: Boolean(catalogData),
-    stale: catalogStale,
-  })
+  const catalogLoadState = useMemo(() => buildPersonaPromptCatalogLoadState({
+    catalogData,
+    catalogError,
+    catalogLoading,
+    catalogRefreshing,
+    catalogStale,
+    summary,
+  }), [catalogData, catalogError, catalogLoading, catalogRefreshing, catalogStale, summary])
+  const sampleMeta = useMemo(() => buildPersonaPromptSampleMeta({
+    catalogLoadState,
+    summary,
+    catalogUpdatedAt,
+  }), [catalogLoadState, catalogUpdatedAt, summary])
 
   const handleRefreshView = async () => {
     setRefreshingView(true)
@@ -152,12 +142,12 @@ export default function PersonaPromptOps() {
           <div className="space-y-3">
             <SampleMeta
               className="max-w-xl"
-              loadState={catalogLoadState}
-              sampleSize={summary.entries}
-              sampleLabel="模板"
-              updatedAt={catalogUpdatedAt}
-              source="persona-first-batch"
-              definition="人格文案页当前是只读观测台：展示专题包、YAML 默认值、当前生效值与现存 override，不再提供前端编辑入口。"
+              loadState={sampleMeta.loadState}
+              sampleSize={sampleMeta.sampleSize}
+              sampleLabel={sampleMeta.sampleLabel}
+              updatedAt={sampleMeta.updatedAt}
+              source={sampleMeta.source}
+              definition={sampleMeta.definition}
             />
             <div className="max-w-xl rounded-xl border border-pink-100 bg-pink-50 px-4 py-3 text-xs leading-6 text-pink-800">
               YAML 已经是唯一真源。这里更适合做人格表达核对和 drift 排查，而不是在线改文案。
@@ -312,7 +302,7 @@ export default function PersonaPromptOps() {
                     <div>source：{selected.source}</div>
                     <div>override：{selected.has_override ? 'yes' : 'no'}</div>
                     <div>enabled：{selected.enabled ? 'yes' : 'no'}</div>
-                    <div>updated：{selected.updated_at_ts_ms ? new Date(selected.updated_at_ts_ms).toLocaleString('zh-CN') : '-'}</div>
+                    <div>updated：{formatPromptTemplateUpdatedAt(selected.updated_at_ts_ms)}</div>
                     {selected.content_type === 'json' ? (
                       <div className="text-orange-500">JSON 类型模板当前只读展示；正式修改请直接更新 YAML。</div>
                     ) : null}

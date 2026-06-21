@@ -1,17 +1,21 @@
 import React, { useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { Activity, RefreshCw } from 'lucide-react'
-import EmptyStateCard from '../components/EmptyStateCard.jsx'
-import OrganSystemOverview from '../components/lifeBody/OrganSystemOverview.jsx'
-import LifeBodyTimeline from '../components/lifeBody/LifeBodyTimeline.jsx'
-import MetricCard from '../components/MetricCard.jsx'
-import NoticeBanner from '../components/NoticeBanner.jsx'
-import SampleMeta from '../components/obs/SampleMeta.jsx'
-import PageHero from '../components/PageHero.jsx'
-import TimeWindowSelect from '../components/TimeWindowSelect.jsx'
+import EmptyStateCard from '../shared/ui/EmptyStateCard.jsx'
+import OrganSystemOverview from '../features/life/components/lifeBody/OrganSystemOverview.jsx'
+import LifeBodyTimeline from '../features/life/components/lifeBody/LifeBodyTimeline.jsx'
+import MetricCard from '../shared/ui/MetricCard.jsx'
+import NoticeBanner from '../shared/ui/NoticeBanner.jsx'
+import SampleMeta from '../shared/ui/observability/SampleMeta.jsx'
+import PageHero from '../shared/ui/PageHero.jsx'
+import TimeWindowSelect from '../shared/ui/TimeWindowSelect.jsx'
 import { buildLifeTimelinePath, buildPathologyCenterPath } from '../models/lifeBodyRoutes.js'
-import { resolveLoadState } from '../models/loadState.js'
-import { usePathologiesQuery } from '../features/life/queries.js'
+import { usePathologiesQuery } from '../features/life/lifeBodyQueries.js'
+import { buildPathologyDetailQueryView } from '../features/life/pathologyCenterModel.js'
+import {
+  LIFE_BODY_PATHOLOGY_SEVERITY_LABELS,
+  LIFE_BODY_PATHOLOGY_SEVERITY_TONES,
+} from '../shared/statusMeta.js'
 import useAppStore from '../store/useAppStore.js'
 
 const WINDOW_OPTIONS = [
@@ -20,12 +24,6 @@ const WINDOW_OPTIONS = [
   { label: '24h', value: 1440 },
   { label: '7d', value: 10080 },
 ]
-
-const SEVERITY_META = {
-  critical: { label: '高风险', tone: 'text-red-600' },
-  warning: { label: '波动', tone: 'text-orange-500' },
-  info: { label: '提示', tone: 'text-blue-600' },
-}
 
 export default function PathologyDetailPage() {
   const params = useParams()
@@ -41,24 +39,34 @@ export default function PathologyDetailPage() {
     pollingTick,
     pollingInterval,
   })
-  const availablePathologies = pathologyQuery.data?.items || []
-  const hasPathologyPayload = Boolean(pathologyQuery.data)
-  const pathologyLoadError = hasPathologyPayload ? null : pathologyQuery.error
-  const pathologyRefreshWarning = hasPathologyPayload ? pathologyQuery.error : null
-  const pathology = pathologyQuery.data?.focusedItem || null
-  const relatedOrgan = pathologyQuery.data?.focusedOrgan || null
-  const relatedEvents = pathologyQuery.data?.relatedEvents || []
-  const overviewTrackedSections = hasPathologyPayload ? 1 : 0
-  const overviewUpdatedAt = pathologyQuery.lastUpdatedAt || pathologyQuery.data?.timestamp || null
-  const overviewLoadState = resolveLoadState({
-    loading: pathologyQuery.loading || pathologyQuery.refreshing,
-    error: pathologyLoadError,
-    hasData: hasPathologyPayload,
-    hasSamples: Boolean(pathology),
-    available: true,
+  const {
+    availablePathologies,
+    pathologyLoadError,
+    pathologyRefreshWarning,
+    pathology,
+    relatedOrgan,
+    relatedEvents,
+    sampleMeta,
+  } = React.useMemo(() => buildPathologyDetailQueryView({
+    pathologyData: pathologyQuery.data,
+    pathologyError: pathologyQuery.error,
+    loading: pathologyQuery.loading,
+    refreshing: pathologyQuery.refreshing,
     stale: pathologyQuery.stale,
-  })
-  const severityMeta = SEVERITY_META[pathology?.severity] || SEVERITY_META.info
+    lastUpdatedAt: pathologyQuery.lastUpdatedAt,
+    windowMinutes,
+  }), [
+    pathologyQuery.data,
+    pathologyQuery.error,
+    pathologyQuery.lastUpdatedAt,
+    pathologyQuery.loading,
+    pathologyQuery.refreshing,
+    pathologyQuery.stale,
+    windowMinutes,
+  ])
+  const severityLevel = String(pathology?.severity || 'info')
+  const severityLabel = LIFE_BODY_PATHOLOGY_SEVERITY_LABELS[severityLevel] || LIFE_BODY_PATHOLOGY_SEVERITY_LABELS.info
+  const severityTone = LIFE_BODY_PATHOLOGY_SEVERITY_TONES[severityLevel] || LIFE_BODY_PATHOLOGY_SEVERITY_TONES.info
   const hasPathologyError = !pathology && Boolean(pathologyLoadError)
 
   return (
@@ -86,7 +94,7 @@ export default function PathologyDetailPage() {
           : pathology ? pathology.symptom : '这通常表示病灶已经从当前时间窗口消退，或当前 URL 指向了一个旧病灶。'}
         gradientClass="from-rose-50 via-white to-orange-50"
         metaItems={pathology ? [
-          `级别：${severityMeta.label}`,
+          `级别：${severityLabel}`,
           `持续：${pathology.durationLabel}`,
           `来源：${pathology.source}`,
           `器官：${pathology.organLabel}`,
@@ -97,14 +105,14 @@ export default function PathologyDetailPage() {
         aside={(
           <SampleMeta
             className="max-w-md"
-            loadState={overviewLoadState}
-            loadStateDetail={pathologyLoadError || pathologyRefreshWarning}
-            windowMinutes={windowMinutes}
-            sampleSize={overviewTrackedSections}
-            sampleLabel="病灶详情"
-            updatedAt={overviewUpdatedAt}
-            source="/obs/pathologies"
-            definition="病灶详情页现在直接消费 obs sidecar 的专用病灶接口，并由后端返回聚焦病灶、所属器官和相关生命事件。"
+            loadState={sampleMeta.loadState}
+            loadStateDetail={sampleMeta.loadStateDetail}
+            windowMinutes={sampleMeta.windowMinutes}
+            sampleSize={sampleMeta.sampleSize}
+            sampleLabel={sampleMeta.sampleLabel}
+            updatedAt={sampleMeta.updatedAt}
+            source={sampleMeta.source}
+            definition={sampleMeta.definition}
           />
         )}
       />
@@ -119,7 +127,7 @@ export default function PathologyDetailPage() {
       {pathology ? (
         <>
           <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-            <MetricCard label="病灶级别" value={severityMeta.label} hint={pathology.source} tone={severityMeta.tone} />
+            <MetricCard label="病灶级别" value={severityLabel} hint={pathology.source} tone={severityTone} />
             <MetricCard label="影响器官" value={pathology.organLabel} hint={pathology.durationLabel} tone="text-primary" />
             <MetricCard label="代表请求" value={pathology.representativeRefs?.length || 0} hint="可直接进入 Trace" tone="text-blue-600" />
             <MetricCard label="相关事件" value={relatedEvents.length} hint="来自生命时间轴" tone="text-indigo-600" />

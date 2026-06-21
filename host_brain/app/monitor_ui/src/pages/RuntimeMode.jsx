@@ -1,10 +1,6 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react'
+import React, { useMemo, useState } from 'react'
 import {
-  Clock3,
-  MoonStar,
   RefreshCw,
-  ShieldAlert,
-  Sun,
   Zap,
 } from 'lucide-react'
 import useAppStore from '../store/useAppStore.js'
@@ -12,126 +8,41 @@ import {
   switchSysMode,
   updateAutoRules,
 } from '../features/life/api.js'
-import EmptyStateCard from '../components/EmptyStateCard.jsx'
-import LoadingNotice from '../components/LoadingNotice.jsx'
-import MetricCard from '../components/MetricCard.jsx'
-import NoticeBanner from '../components/NoticeBanner.jsx'
-import OrganSystemOverview from '../components/lifeBody/OrganSystemOverview.jsx'
-import SampleMeta from '../components/obs/SampleMeta.jsx'
-import PageHero from '../components/PageHero.jsx'
-import { LOAD_STATES, resolveLoadState } from '../models/loadState.js'
-import { buildRuntimeModeOrganSystemModel } from '../models/organSystemModel.js'
-import { useRuntimeModeConsoleQuery } from '../features/life/queries.js'
-import { DASH, formatMode, MODE_META } from '../utils/digitalLife.js'
+import EmptyStateCard from '../shared/ui/EmptyStateCard.jsx'
+import LoadingNotice from '../shared/ui/LoadingNotice.jsx'
+import MetricCard from '../shared/ui/MetricCard.jsx'
+import NoticeBanner from '../shared/ui/NoticeBanner.jsx'
+import OrganSystemOverview from '../features/life/components/lifeBody/OrganSystemOverview.jsx'
+import SampleMeta from '../shared/ui/observability/SampleMeta.jsx'
+import PageHero from '../shared/ui/PageHero.jsx'
+import { useRuntimeModeConsoleQuery } from '../features/life/runtimeModeQueries.js'
+import {
+  buildRuntimeModeAutoRulePatch,
+  buildRuntimeModeSwitchConfirmMessage,
+  buildRuntimeModeSwitchPayload,
+  buildRuntimeModeViewModel,
+  formatRuntimeModeSourceText,
+} from '../features/life/runtimeModeModel.js'
+import { formatDateTime } from '../shared/formatters.js'
+import { formatMode } from '../utils/digitalLife.js'
 
-const MODE_ORDER = ['normal', 'focus', 'gaming', 'sleep', 'maintenance', 'locked']
-
-const MODE_COLOR_CLASS = {
-  normal: {
-    active: 'ring-2 ring-green-500 bg-green-50 border-green-300',
-    hover: 'hover:bg-green-50 hover:border-green-300',
-  },
-  focus: {
-    active: 'ring-2 ring-blue-500 bg-blue-50 border-blue-300',
-    hover: 'hover:bg-blue-50 hover:border-blue-300',
-  },
-  gaming: {
-    active: 'ring-2 ring-purple-500 bg-purple-50 border-purple-300',
-    hover: 'hover:bg-purple-50 hover:border-purple-300',
-  },
-  sleep: {
-    active: 'ring-2 ring-indigo-500 bg-indigo-50 border-indigo-300',
-    hover: 'hover:bg-indigo-50 hover:border-indigo-300',
-  },
-  maintenance: {
-    active: 'ring-2 ring-yellow-500 bg-yellow-50 border-yellow-300',
-    hover: 'hover:bg-yellow-50 hover:border-yellow-300',
-  },
-  locked: {
-    active: 'ring-2 ring-red-500 bg-red-50 border-red-300',
-    hover: 'hover:bg-red-50 hover:border-red-300',
-  },
-  fallback: {
-    active: 'ring-2 ring-gray-500 bg-gray-50 border-gray-300',
-    hover: '',
-  },
-}
-
-const AUTO_RULE_DEFS = {
-  gaming_detect: {
-    label: '检测游戏进程',
-    desc: '识别到游戏场景后自动切换到游戏态。',
-  },
-  gaming_exit: {
-    label: '游戏退出回收',
-    desc: '游戏结束后回到正常态，恢复日常陪伴逻辑。',
-  },
-  idle_to_sleep: {
-    label: '空闲转睡眠',
-    desc: '长时间空闲并进入夜间窗口后自动转入睡眠态。',
-  },
-  wakeup_on_msg: {
-    label: '消息唤醒',
-    desc: '在睡眠态收到消息时自动唤醒。',
-  },
-  morning_wakeup: {
-    label: '晨间唤醒',
-    desc: '晨间首次交互时从睡眠态切回在线态。',
-  },
-}
-
-const STATE_AXIS_ITEMS = [
-  {
-    title: '生命体存在态轴',
-    desc: '决定当前处于什么硬状态，是数字生命体最外层的状态开关。',
-  },
-  {
-    title: '离线时长',
-    desc: 'absence_band 与 reconnect_style 影响重连氛围，不直接等于 sys_mode。',
-  },
-  {
-    title: '回复姿态',
-    desc: 'reply_posture 决定这轮会更温柔、克制、平衡还是收敛。',
-  },
-  {
-    title: '内在驱动',
-    desc: '动机、反思与风险护栏会继续塑造为什么这样回应。',
-  },
-]
-
-function mapSourceText(source = '') {
-  if (source === 'manual') return '手动'
-  if (source === 'auto_gaming') return '游戏自动'
-  if (source === 'auto_idle') return '睡眠自动'
-  if (source === 'auto_wakeup') return '唤醒自动'
-  if (source === 'skill') return '技能'
-  if (source.startsWith('auto')) return '自动'
-  return source || 'unknown'
-}
-
-function ModeButton({ mode, currentMode, validTransitions, onSwitch, switching }) {
-  const meta = MODE_META[mode] || { emoji: '❔', label: mode, desc: '' }
-  const isActive = mode === currentMode
-  const canSwitch = validTransitions.includes(mode) && !isActive
-  const isDisabled = !canSwitch && !isActive
-  const colors = MODE_COLOR_CLASS[mode] || MODE_COLOR_CLASS.fallback
-
+function ModeButton({ view, onSwitch, switching }) {
   return (
     <button
       className={[
         'relative flex min-h-[112px] flex-col items-center justify-center gap-1 rounded-xl border px-4 py-3 text-center transition-all duration-200',
-        isActive ? `${colors.active} shadow-sm` : 'border-gray-200 bg-white',
-        canSwitch ? `${colors.hover} cursor-pointer` : '',
-        isDisabled ? 'cursor-not-allowed opacity-40' : '',
+        view.isActive ? `${view.colors.active} shadow-sm` : 'border-gray-200 bg-white',
+        view.canSwitch ? `${view.colors.hover} cursor-pointer` : '',
+        view.isDisabled ? 'cursor-not-allowed opacity-40' : '',
       ].join(' ').trim()}
-      onClick={() => canSwitch && onSwitch(mode)}
-      disabled={isDisabled || switching}
-      title={isActive ? `当前模式：${meta.label}` : canSwitch ? `切换到 ${meta.label}` : `当前无法直接切换到 ${meta.label}`}
+      onClick={() => view.canSwitch && onSwitch(view.mode)}
+      disabled={view.isDisabled || switching}
+      title={view.title}
     >
-      <span className="text-2xl">{meta.emoji}</span>
-      <span className="text-sm font-semibold text-gray-800">{meta.label}</span>
-      <span className="text-[11px] leading-5 text-gray-500">{meta.desc}</span>
-      {isActive ? (
+      <span className="text-2xl">{view.meta.emoji}</span>
+      <span className="text-sm font-semibold text-gray-800">{view.meta.label}</span>
+      <span className="text-[11px] leading-5 text-gray-500">{view.meta.desc}</span>
+      {view.isActive ? (
         <span className="absolute -right-1 -top-1 flex h-3 w-3">
           <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-green-400 opacity-75" />
           <span className="relative inline-flex h-3 w-3 rounded-full bg-green-500" />
@@ -163,19 +74,14 @@ export default function RuntimeMode() {
   })
 
   const handleSwitch = async (targetMode) => {
-    const meta = MODE_META[targetMode] || { label: targetMode, semantic: '' }
-    if (!window.confirm(`确认切换到 ${meta.label}？\n\n${meta.semantic || meta.desc || ''}`)) {
+    if (!window.confirm(buildRuntimeModeSwitchConfirmMessage(targetMode))) {
       return
     }
 
     setSwitching(true)
     setSwitchResult(null)
     try {
-      const result = await switchSysMode({
-        target_mode: targetMode,
-        reason: 'WebUI 手动切换',
-        source: 'manual',
-      })
+      const result = await switchSysMode(buildRuntimeModeSwitchPayload(targetMode))
       setSwitchResult(result)
       await refetch()
     } catch (switchError) {
@@ -188,53 +94,33 @@ export default function RuntimeMode() {
 
   const handleToggleRule = async (ruleKey, currentValue) => {
     try {
-      await updateAutoRules({ rules: { [ruleKey]: !currentValue } })
+      await updateAutoRules(buildRuntimeModeAutoRulePatch(ruleKey, currentValue))
       await refetch()
     } catch (updateError) {
       console.warn('Failed to update auto rule:', updateError)
     }
   }
 
-  const currentMode = String(status?.sys_mode || 'normal').toLowerCase()
-  const currentMeta = MODE_META[currentMode] || MODE_META.normal
-  const validTransitions = status?.valid_transitions || []
-  const autoRules = status?.auto_rules || {}
-  const enabledRules = useMemo(
-    () => Object.entries(AUTO_RULE_DEFS).filter(([key]) => autoRules[key] !== false).length,
-    [autoRules]
-  )
-  const runtimeModeLoadState = resolveLoadState({
-    loading: loading || refreshing,
-    error: consoleError && !status ? new Error(consoleError) : null,
-    hasData: Boolean(status || history.length > 0),
-    hasSamples: Boolean(status || history.length > 0),
-    available: Boolean(status || history.length > 0),
-    stale,
-  })
-  const endocrineOrganModel = useMemo(() => buildRuntimeModeOrganSystemModel({
-    loadState: runtimeModeLoadState,
-    updatedAt: lastUpdatedAt,
-    currentModeLabel: currentMeta.label,
-    currentModeKey: currentMode,
-    schedulerLabel: currentMeta.scheduler,
-    idleMinutes: status?.idle_minutes,
-    validTransitionCount: validTransitions.length,
-    enabledRuleCount: enabledRules,
-    totalRuleCount: Object.keys(AUTO_RULE_DEFS).length,
-    isNightTime: status?.is_night_time,
-    degraded: status?.degraded,
-  }), [
-    currentMeta.label,
-    currentMeta.scheduler,
-    currentMode,
-    enabledRules,
-    lastUpdatedAt,
+  const {
     runtimeModeLoadState,
-    status?.degraded,
-    status?.idle_minutes,
-    status?.is_night_time,
-    validTransitions.length,
-  ])
+    endocrineOrganModel,
+    modeButtons,
+    autoRuleRows,
+    stateAxisItems,
+    heroTitle,
+    heroDescription,
+    heroMetaItems,
+    metricCards,
+    showUnavailableNotice,
+  } = useMemo(() => buildRuntimeModeViewModel({
+    status,
+    history,
+    loading,
+    refreshing,
+    consoleError,
+    stale,
+    lastUpdatedAt,
+  }), [consoleError, history, lastUpdatedAt, loading, refreshing, stale, status])
 
   return (
     <div className="space-y-6">
@@ -252,15 +138,10 @@ export default function RuntimeMode() {
       <PageHero
         icon={Zap}
         eyebrow="当前生命体状态"
-        title={`${currentMeta.emoji} ${currentMeta.label}`}
-        description={currentMeta.semantic}
+        title={heroTitle}
+        description={heroDescription}
         gradientClass="from-primary-50 via-white to-indigo-50"
-        metaItems={[
-          `空闲：${status?.idle_minutes ?? 0} 分钟`,
-          `可切换：${validTransitions.length} 项`,
-          `自动规则：${enabledRules}/${Object.keys(AUTO_RULE_DEFS).length}`,
-          status?.is_night_time ? '夜间窗口' : '日间窗口',
-        ]}
+        metaItems={heroMetaItems}
         aside={(
           <SampleMeta
             className="max-w-md"
@@ -291,28 +172,31 @@ export default function RuntimeMode() {
 
       {consoleError ? <NoticeBanner variant={status ? 'warning' : 'error'} title="状态同步异常">{consoleError}</NoticeBanner> : null}
 
-      {!consoleError && !loading && !refreshing && runtimeModeLoadState === LOAD_STATES.UNAVAILABLE ? (
+      {showUnavailableNotice ? (
         <NoticeBanner variant="warning">生命体存在态轴当前未返回可用快照。</NoticeBanner>
       ) : null}
 
       <OrganSystemOverview model={endocrineOrganModel} />
 
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <MetricCard label="当前模式" value={currentMeta.label} hint={currentMeta.scheduler} tone="text-primary" />
-        <MetricCard label="空闲时间" value={`${status?.idle_minutes ?? 0} 分钟`} hint="用于辅助自动切换" tone="text-blue-600" />
-        <MetricCard label="时间窗口" value={status?.is_night_time ? '夜间' : '日间'} hint={status?.is_night_time ? '适合睡眠态' : '适合在线态'} tone="text-indigo-600" />
-        <MetricCard label="自动规则" value={`${enabledRules}/${Object.keys(AUTO_RULE_DEFS).length}`} hint={status?.degraded ? '当前生命体存在态轴降级' : '生命体存在态轴正常'} tone={status?.degraded ? 'text-orange-500' : 'text-green-600'} />
+        {metricCards.map((card) => (
+          <MetricCard
+            key={card.key}
+            label={card.label}
+            value={card.value}
+            hint={card.hint}
+            tone={card.tone}
+          />
+        ))}
       </div>
 
       <div className="card p-5 shadow-sm">
         <h2 className="mb-3 text-sm font-semibold text-gray-800">可切换模式</h2>
         <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
-          {MODE_ORDER.map((mode) => (
+          {modeButtons.map((view) => (
             <ModeButton
-              key={mode}
-              mode={mode}
-              currentMode={currentMode}
-              validTransitions={validTransitions}
+              key={view.mode}
+              view={view}
               onSwitch={handleSwitch}
               switching={switching}
             />
@@ -327,36 +211,33 @@ export default function RuntimeMode() {
         <div className="card p-5 shadow-sm">
           <h2 className="mb-3 text-sm font-semibold text-gray-800">自动切换规则</h2>
           <div className="space-y-3">
-            {Object.entries(AUTO_RULE_DEFS).map(([key, rule]) => {
-              const enabled = autoRules[key] !== false
-              return (
-                <div key={key} className="flex items-center justify-between gap-4">
-                  <div>
-                    <div className="text-sm font-medium text-gray-700">{rule.label}</div>
-                    <div className="text-xs leading-5 text-gray-400">{rule.desc}</div>
-                  </div>
-                  <button
-                    className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors ${
-                      enabled ? 'bg-primary' : 'bg-gray-300'
-                    }`}
-                    onClick={() => handleToggleRule(key, enabled)}
-                  >
-                    <span
-                      className={`inline-block h-4 w-4 rounded-full bg-white shadow-sm transition-transform ${
-                        enabled ? 'translate-x-6' : 'translate-x-1'
-                      }`}
-                    />
-                  </button>
+            {autoRuleRows.map((rule) => (
+              <div key={rule.key} className="flex items-center justify-between gap-4">
+                <div>
+                  <div className="text-sm font-medium text-gray-700">{rule.label}</div>
+                  <div className="text-xs leading-5 text-gray-400">{rule.desc}</div>
                 </div>
-              )
-            })}
+                <button
+                  className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors ${
+                    rule.enabled ? 'bg-primary' : 'bg-gray-300'
+                  }`}
+                  onClick={() => handleToggleRule(rule.key, rule.enabled)}
+                >
+                  <span
+                    className={`inline-block h-4 w-4 rounded-full bg-white shadow-sm transition-transform ${
+                      rule.enabled ? 'translate-x-6' : 'translate-x-1'
+                    }`}
+                  />
+                </button>
+              </div>
+            ))}
           </div>
         </div>
 
         <div className="card p-5 shadow-sm">
           <h2 className="mb-3 text-sm font-semibold text-gray-800">不是只有存在态轴</h2>
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-            {STATE_AXIS_ITEMS.map((item) => (
+            {stateAxisItems.map((item) => (
               <div key={item.title} className="rounded-xl border border-gray-200 bg-gray-50 p-4">
                 <div className="text-sm font-semibold text-gray-800">{item.title}</div>
                 <p className="mt-2 text-xs leading-5 text-gray-500">{item.desc}</p>
@@ -375,8 +256,8 @@ export default function RuntimeMode() {
                 <span className="font-medium text-gray-700">
                   {formatMode(item.from_mode)} → {formatMode(item.to_mode)}
                 </span>
-                <span className="rounded bg-gray-200 px-1.5 py-0.5 text-gray-600">{mapSourceText(item.source)}</span>
-                <span className="text-gray-400">{new Date(item.ts_ms).toLocaleString('zh-CN')}</span>
+                <span className="rounded bg-gray-200 px-1.5 py-0.5 text-gray-600">{formatRuntimeModeSourceText(item.source)}</span>
+                <span className="text-gray-400">{formatDateTime(item.ts_ms)}</span>
                 {!item.success ? <span className="text-red-500">失败</span> : null}
               </div>
             ))}

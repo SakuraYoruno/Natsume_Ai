@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+﻿import React, { useState } from 'react'
 import toast from 'react-hot-toast'
 import { submitCanonProposal } from '../features/operations/api.js'
 import {
@@ -7,40 +7,35 @@ import {
   Lock,
   RefreshCw,
 } from 'lucide-react'
-import EmptyStateCard from '../components/EmptyStateCard.jsx'
-import LoadingNotice from '../components/LoadingNotice.jsx'
-import MetricCard from '../components/MetricCard.jsx'
-import NoticeBanner from '../components/NoticeBanner.jsx'
-import SampleMeta from '../components/obs/SampleMeta.jsx'
-import PageHero from '../components/PageHero.jsx'
-import SectionHeading from '../components/SectionHeading.jsx'
-import { resolveLoadState } from '../models/loadState.js'
+import EmptyStateCard from '../shared/ui/EmptyStateCard.jsx'
+import LoadingNotice from '../shared/ui/LoadingNotice.jsx'
+import MetricCard from '../shared/ui/MetricCard.jsx'
+import NoticeBanner from '../shared/ui/NoticeBanner.jsx'
+import SampleMeta from '../shared/ui/observability/SampleMeta.jsx'
+import PageHero from '../shared/ui/PageHero.jsx'
+import SectionHeading from '../shared/ui/SectionHeading.jsx'
+import {
+  CANON_PAGE_SIZE,
+  CANON_TABS,
+  buildCanonViewModel,
+  getCanonTabState,
+} from '../features/operations/canonModel.js'
 import {
   useCanonDocumentsQuery,
   useCanonProposalsQuery,
   useCanonVaultStatsQuery,
-} from '../features/operations/queries.js'
+} from '../features/operations/canonQueries.js'
 
-const CanonProposalsSection = React.lazy(() => import('../components/canon/CanonProposalsSection.jsx'))
-const CanonDocumentsSection = React.lazy(() => import('../components/canon/CanonDocumentsSection.jsx'))
-const CanonSubmitModal = React.lazy(() => import('../components/canon/CanonSubmitModal.jsx'))
-
-const MANIFEST_STATUS_LABELS = {
-  ACTIVE: '生效中',
-  active: '生效中',
-  UNDONE: '已撤销',
-  GC: '已回收',
-}
-
-const PAGE_SIZE = 20
+const CanonProposalsSection = React.lazy(() => import('../features/operations/components/canon/CanonProposalsSection.jsx'))
+const CanonDocumentsSection = React.lazy(() => import('../features/operations/components/canon/CanonDocumentsSection.jsx'))
+const CanonSubmitModal = React.lazy(() => import('../features/operations/components/canon/CanonSubmitModal.jsx'))
 
 export default function Canon() {
   const [statusFilter, setStatusFilter] = useState('')
   const [page, setPage] = useState(1)
   const [showSubmitModal, setShowSubmitModal] = useState(false)
   const [activeTab, setActiveTab] = useState('proposals')
-  const proposalsActive = activeTab === 'proposals'
-  const documentsActive = activeTab === 'documents'
+  const { proposalsActive, documentsActive } = getCanonTabState(activeTab)
 
   const {
     proposalsData,
@@ -55,7 +50,7 @@ export default function Canon() {
   } = useCanonProposalsQuery({
     status: statusFilter,
     page,
-    pageSize: PAGE_SIZE,
+    pageSize: CANON_PAGE_SIZE,
     enabled: proposalsActive,
   })
   const {
@@ -80,24 +75,37 @@ export default function Canon() {
     refetch: refetchVaultStats,
   } = useCanonVaultStatsQuery({ limit: 10 })
 
-  const activeError = proposalsActive ? proposalsError : documentsError
-  const activeLoadState = resolveLoadState({
-    loading: proposalsActive
-      ? proposalsLoading || proposalsRefreshing
-      : documentsLoading || documentsRefreshing,
-    error: activeError,
-    hasData: proposalsActive ? Boolean(proposalsData) : Boolean(documentsData),
-    hasSamples: proposalsActive ? total > 0 : documents.length > 0,
-    available: proposalsActive ? Boolean(proposalsData) : Boolean(documentsData),
-    stale: proposalsActive ? proposalsStale : documentsStale,
-  })
-  const vaultLoadState = resolveLoadState({
-    loading: vaultLoading || vaultRefreshing,
-    error: vaultError,
-    hasData: Boolean(vaultData),
-    hasSamples: Number(vaultData?.total_manifests ?? 0) > 0,
-    available: Boolean(vaultData),
-    stale: vaultStale,
+  const {
+    activeError,
+    vaultLoadState,
+    heroView,
+    refreshing,
+    vaultMetricCards,
+    vaultProgress,
+    recentManifestRows,
+  } = buildCanonViewModel({
+    activeTab,
+    statusFilter,
+    proposalsData,
+    proposals,
+    total,
+    proposalsError,
+    proposalsLoading,
+    proposalsRefreshing,
+    proposalsStale,
+    proposalsUpdatedAt,
+    documentsData,
+    documents,
+    documentsError,
+    documentsLoading,
+    documentsRefreshing,
+    documentsStale,
+    documentsUpdatedAt,
+    vaultData,
+    vaultError,
+    vaultLoading,
+    vaultRefreshing,
+    vaultStale,
   })
 
   const handleSubmit = async (formData) => {
@@ -118,29 +126,19 @@ export default function Canon() {
         <PageHero
           icon={BookOpen}
           eyebrow="设定管理"
-          title={proposalsActive ? '提案审核' : '文档浏览'}
+          title={heroView.title}
           description="管理世界设定提案、主设定文档与变更清单。"
           gradientClass="from-primary-50 via-white to-violet-50"
-          metaItems={[
-            proposalsActive ? `提案数：${total}` : `文档数：${documents.length}`,
-            `清单：${vaultData?.total_manifests ?? 0}`,
-            proposalsActive
-              ? `状态过滤：${statusFilter || '全部'}`
-              : `当前标签：主设定文档`,
-          ]}
+          metaItems={heroView.metaItems}
           aside={(
             <SampleMeta
               className="max-w-md"
-              loadState={activeLoadState}
-              sampleSize={proposalsActive ? total : documents.length}
-              sampleLabel={proposalsActive ? '提案' : '文档'}
-              updatedAt={proposalsActive ? proposalsUpdatedAt : documentsUpdatedAt}
-              source={proposalsActive ? 'canon proposals' : 'canon documents'}
-              definition={
-                proposalsActive
-                  ? '提案审核与主设定文档已拆成独立模块；未打开的标签页不会再提前装配重型表格与卡片。'
-                  : '主设定文档现在按标签页独立加载；切回提案页时才会装配审核表格与操作逻辑。'
-              }
+              loadState={heroView.sampleMeta.loadState}
+              sampleSize={heroView.sampleMeta.sampleSize}
+              sampleLabel={heroView.sampleMeta.sampleLabel}
+              updatedAt={heroView.sampleMeta.updatedAt}
+              source={heroView.sampleMeta.source}
+              definition={heroView.sampleMeta.definition}
             />
           )}
         />
@@ -154,16 +152,7 @@ export default function Canon() {
           >
             <RefreshCw
               size={13}
-              className={
-                proposalsLoading
-                || proposalsRefreshing
-                || documentsLoading
-                || documentsRefreshing
-                || vaultLoading
-                || vaultRefreshing
-                  ? 'animate-spin'
-                  : ''
-              }
+              className={refreshing ? 'animate-spin' : ''}
             />
             刷新
           </button>
@@ -187,10 +176,9 @@ export default function Canon() {
         <div className="card border border-gray-200 p-4">
           <SectionHeading icon={Lock} title="变更清单统计" tone="text-violet-600" />
           <div className="mb-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <MetricCard label="总清单" value={vaultData.total_manifests ?? 0} variant="stacked" />
-            <MetricCard label="生效中" value={vaultData.active_count ?? 0} variant="stacked" tone="text-green-600" />
-            <MetricCard label="已撤销" value={vaultData.undone_count ?? 0} variant="stacked" tone="text-orange-500" />
-            <MetricCard label="已回收" value={vaultData.gc_count ?? 0} variant="stacked" tone="text-gray-500" />
+            {vaultMetricCards.map((card) => (
+              <MetricCard key={card.label} label={card.label} value={card.value} variant="stacked" tone={card.tone} />
+            ))}
           </div>
 
           <div className="mb-3">
@@ -210,22 +198,22 @@ export default function Canon() {
             </NoticeBanner>
           ) : null}
 
-          {vaultData.total_manifests > 0 ? (
+          {vaultProgress ? (
             <div className="mb-3">
               <div className="mb-1 flex justify-between text-xs text-gray-400">
-                <span>生效中 {Math.round((vaultData.active_count / vaultData.total_manifests) * 100)}%</span>
-                <span>已撤销 {Math.round((vaultData.undone_count / vaultData.total_manifests) * 100)}%</span>
-                <span>已回收 {Math.round((vaultData.gc_count / vaultData.total_manifests) * 100)}%</span>
+                {vaultProgress.map((item) => (
+                  <span key={item.label}>{item.label} {item.pctLabel}</span>
+                ))}
               </div>
               <div className="flex h-2 overflow-hidden rounded">
-                <div className="bg-green-500" style={{ width: `${(vaultData.active_count / vaultData.total_manifests) * 100}%` }} />
-                <div className="bg-orange-400" style={{ width: `${(vaultData.undone_count / vaultData.total_manifests) * 100}%` }} />
-                <div className="bg-gray-300" style={{ width: `${(vaultData.gc_count / vaultData.total_manifests) * 100}%` }} />
+                {vaultProgress.map((item) => (
+                  <div key={item.label} className={item.className} style={{ width: item.width }} />
+                ))}
               </div>
             </div>
           ) : null}
 
-          {Array.isArray(vaultData.recent_manifests) && vaultData.recent_manifests.length > 0 ? (
+          {recentManifestRows.length > 0 ? (
             <div className="overflow-x-auto">
               <table className="w-full text-xs">
                 <thead className="border-b border-gray-100 bg-gray-50">
@@ -238,30 +226,24 @@ export default function Canon() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-50">
-                  {vaultData.recent_manifests.map((item, index) => (
-                    <tr key={`${item.manifest_id}-${index}`} className="hover:bg-gray-50">
-                      <td className="max-w-[120px] truncate px-3 py-1.5 font-mono text-violet-600" title={item.manifest_id}>
-                        {item.manifest_id || '—'}
+                  {recentManifestRows.map((item) => (
+                    <tr key={item.key} className="hover:bg-gray-50">
+                      <td className="max-w-[120px] truncate px-3 py-1.5 font-mono text-violet-600" title={item.manifestTitle}>
+                        {item.manifestId}
                       </td>
-                      <td className="px-3 py-1.5 text-gray-500">{item.artifact_type || '—'}</td>
+                      <td className="px-3 py-1.5 text-gray-500">{item.artifactType}</td>
                       <td className="px-3 py-1.5">
                         <span
-                          className={`rounded border px-1.5 py-0.5 font-medium ${
-                            item.status === 'ACTIVE'
-                              ? 'border-green-200 bg-green-50 text-green-700'
-                              : item.status === 'UNDONE'
-                                ? 'border-orange-200 bg-orange-50 text-orange-700'
-                                : 'border-gray-200 bg-gray-100 text-gray-500'
-                          }`}
+                          className={`rounded border px-1.5 py-0.5 font-medium ${item.statusClassName}`}
                         >
-                          {MANIFEST_STATUS_LABELS[item.status] || item.status || '—'}
+                          {item.statusLabel}
                         </span>
                       </td>
                       <td className="px-3 py-1.5 text-center">
-                        {item.is_reversible ? <span className="text-green-600">✓</span> : <span className="text-gray-300">—</span>}
+                        {item.reversible ? <span className="text-green-600">✓</span> : <span className="text-gray-300">—</span>}
                       </td>
-                      <td className="max-w-[160px] truncate px-3 py-1.5 text-gray-400" title={item.summary}>
-                        {item.summary || '—'}
+                      <td className="max-w-[160px] truncate px-3 py-1.5 text-gray-400" title={item.summaryTitle}>
+                        {item.summary}
                       </td>
                     </tr>
                   ))}
@@ -275,10 +257,7 @@ export default function Canon() {
       ) : null}
 
       <div className="flex border-b border-gray-200">
-        {[
-          { key: 'proposals', label: '提案列表' },
-          { key: 'documents', label: '主设定文档' },
-        ].map((item) => (
+        {CANON_TABS.map((item) => (
           <button
             key={item.key}
             className={`border-b-2 px-4 py-2 text-sm font-medium transition-colors ${
@@ -310,7 +289,7 @@ export default function Canon() {
             setStatusFilter={setStatusFilter}
             page={page}
             setPage={setPage}
-            pageSize={PAGE_SIZE}
+            pageSize={CANON_PAGE_SIZE}
             refetchProposals={refetchProposals}
             refetchDocuments={refetchDocuments}
             refetchVaultStats={refetchVaultStats}

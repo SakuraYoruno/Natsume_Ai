@@ -1,7 +1,7 @@
-import React from 'react'
-import EmptyStateCard from '../../components/EmptyStateCard.jsx'
-import { LoadingNotice } from '../../components/LoadingNotice.jsx'
-import NoticeBanner from '../../components/NoticeBanner.jsx'
+﻿import React from 'react'
+import EmptyStateCard from './EmptyStateCard.jsx'
+import { LoadingNotice } from './LoadingNotice.jsx'
+import NoticeBanner from './NoticeBanner.jsx'
 
 export default function DataState({ loading, error, empty, emptyTitle = '暂无数据', emptyHint = '当前接口没有返回样本。', children }) {
   if (loading) {

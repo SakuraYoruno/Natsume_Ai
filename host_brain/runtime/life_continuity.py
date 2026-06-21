@@ -126,16 +126,26 @@ def ensure_life_schema(ledger: Any) -> None:
     global _SCHEMA_READY
     conn = _conn(ledger)
     conn_id = id(conn)
-    if conn_id in _SCHEMA_READY_CONNECTIONS:
+    if conn_id in _SCHEMA_READY_CONNECTIONS and _life_schema_tables_exist(conn):
         return
     with _LOCK:
-        if conn_id in _SCHEMA_READY_CONNECTIONS:
+        if conn_id in _SCHEMA_READY_CONNECTIONS and _life_schema_tables_exist(conn):
             return
         for sql in SCHEMA_SQL:
             conn.execute(sql)
         conn.commit()
         _SCHEMA_READY_CONNECTIONS.add(conn_id)
         _SCHEMA_READY = True
+
+
+def _life_schema_tables_exist(conn: Any) -> bool:
+    try:
+        row = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='digital_life_state' LIMIT 1"
+        ).fetchone()
+    except Exception:
+        return False
+    return bool(row)
 
 
 def _day_phase(ts_ms: int) -> str:

@@ -36,8 +36,65 @@ env:
   PYTEST_ADDOPTS: "--tb=short -p no:warnings"
 
 jobs:
-  stable-tests:
-    name: stable pytest (unit / contract / integration)
+  stable-unit-tests:
+    name: stable pytest unit shard ${{ matrix.shard_index }} / 6
+    runs-on: windows-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        shard_index: [0, 1, 2, 3, 4, 5]
+        shard_total: [6]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m pip install pytest==9.0.2 pytest-asyncio pytest-cov pytest-subtests httpx requests PyYAML pillow openai
+
+      - name: Run stable unit pytest shard
+        shell: pwsh
+        run: |
+          $files = @(Get-ChildItem tests/unit -Recurse -Filter "test_*.py" | Sort-Object FullName)
+          $selected = @()
+          for ($i = 0; $i -lt $files.Count; $i++) {
+            if (($i % ${{ matrix.shard_total }}) -eq ${{ matrix.shard_index }}) {
+              $selected += $files[$i].FullName
+            }
+          }
+          if ($selected.Count -eq 0) {
+            throw "No unit tests selected for shard ${{ matrix.shard_index }}"
+          }
+          "Selected $($selected.Count) unit test files for shard ${{ matrix.shard_index }} / ${{ matrix.shard_total }}" | Tee-Object -FilePath pytest-stable-unit-shard-${{ matrix.shard_index }}.txt
+          $selected | Add-Content -Path pytest-stable-unit-shard-${{ matrix.shard_index }}.txt
+          python -m pytest $selected `
+            -q `
+            -m "not e2e and not hw and not prod_env and not runtime_probe and not docker and not ci_unstable" `
+            --maxfail=1 `
+            --junitxml=pytest-stable-unit-shard-${{ matrix.shard_index }}.xml
+
+      - name: Upload stable unit pytest report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: pytest-stable-unit-shard-${{ matrix.shard_index }}-report
+          path: |
+            pytest-stable-unit-shard-${{ matrix.shard_index }}.xml
+            pytest-stable-unit-shard-${{ matrix.shard_index }}.txt
+
+  stable-contract-integration-tests:
+    name: stable pytest contract / integration
     runs-on: windows-latest
     timeout-minutes: 30
     steps:
@@ -56,22 +113,23 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt
-          python -m pip install pytest pytest-asyncio pytest-cov pytest-subtests httpx requests PyYAML pillow openai
+          python -m pip install pytest==9.0.2 pytest-asyncio pytest-cov pytest-subtests httpx requests PyYAML pillow openai
 
-      - name: Run stable pytest
+      - name: Run stable contract and integration pytest
         shell: pwsh
         run: |
-          python -m pytest tests/unit tests/contract tests/integration `
+          python -m pytest tests/contract tests/integration `
             -q `
             -m "not e2e and not hw and not prod_env and not runtime_probe and not docker and not ci_unstable" `
-            --junitxml=pytest-stable.xml
+            --maxfail=1 `
+            --junitxml=pytest-stable-contract-integration.xml
 
-      - name: Upload stable pytest report
+      - name: Upload stable contract and integration pytest report
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: pytest-stable-report
-          path: pytest-stable.xml
+          name: pytest-stable-contract-integration-report
+          path: pytest-stable-contract-integration.xml
 
   delivery-gate:
     name: delivery gate (static / docs / hard-cut)
@@ -160,7 +218,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt
-          python -m pip install pytest pytest-asyncio pytest-cov pytest-subtests httpx requests PyYAML pillow openai
+          python -m pip install pytest==9.0.2 pytest-asyncio pytest-cov pytest-subtests httpx requests PyYAML pillow openai
 
       - name: Run full pytest
         shell: pwsh
