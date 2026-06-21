@@ -2270,6 +2270,9 @@ def test_life_queries_are_split_and_monolith_is_retired() -> None:
 
     pages_and_hooks = {
         "Bond.jsx": (MONITOR_SRC / "pages" / "Bond.jsx").read_text(encoding="utf-8"),
+        "bondDashboardController.js": (
+            MONITOR_SRC / "features" / "life" / "bondDashboardController.js"
+        ).read_text(encoding="utf-8"),
         "DigitalLifeOverview.jsx": (MONITOR_SRC / "pages" / "DigitalLifeOverview.jsx").read_text(encoding="utf-8"),
         "digitalLifeOverviewController.js": (
             MONITOR_SRC / "features" / "life" / "digitalLifeOverviewController.js"
@@ -2340,7 +2343,8 @@ def test_life_queries_are_split_and_monolith_is_retired() -> None:
         assert fetcher_name not in life_queries
 
     expected_imports = {
-        "Bond.jsx": "features/life/bondQueries.js",
+        "Bond.jsx": "features/life/bondDashboardController.js",
+        "bondDashboardController.js": "./bondQueries.js",
         "DigitalLifeOverview.jsx": "features/life/digitalLifeOverviewController.js",
         "digitalLifeOverviewController.js": "./digitalLifeQueries.js",
         "EmotionDashboard.jsx": "features/life/emotionQueries.js",
@@ -4310,6 +4314,10 @@ def test_runtime_mode_view_model_lives_in_life_feature() -> None:
 def test_bond_view_model_lives_in_life_feature() -> None:
     bond_page = (MONITOR_SRC / "pages" / "Bond.jsx").read_text(encoding="utf-8")
     bond_model = (MONITOR_SRC / "features" / "life" / "bondModel.js").read_text(encoding="utf-8")
+    bond_controller = (MONITOR_SRC / "features" / "life" / "bondDashboardController.js").read_text(encoding="utf-8")
+    bond_surface = (
+        MONITOR_SRC / "features" / "life" / "components" / "BondDashboardSurface.jsx"
+    ).read_text(encoding="utf-8")
 
     for export_name in [
         "formatBondHealthStatus",
@@ -4330,15 +4338,37 @@ def test_bond_view_model_lives_in_life_feature() -> None:
     ]:
         assert f"export function {export_name}(" in bond_model
 
-    assert "features/life/bondModel.js" in bond_page
-    assert "buildBondDashboardViewModel({" in bond_page
-    assert "buildBondStageDistribution(items)" in bond_page
-    assert "buildBondSubmitSuccessMessage(submitResult.data)" in bond_page
-    assert "sampleMeta.loadState" in bond_page
-    assert "noticeView.noSample" in bond_page
-    assert "noticeView.unavailable" in bond_page
-    assert "metricCards.map" in bond_page
-    assert "detailView.rows.map" in bond_page
+    assert "BondDashboardSurface" in bond_page
+    assert "useBondDashboardController" in bond_page
+    assert "export function useBondDashboardController()" in bond_controller
+    assert "export default function BondDashboardSurface(" in bond_surface
+    assert "buildBondDashboardViewModel({" in bond_controller
+    assert "useBondOverviewQuery({" in bond_controller
+    assert "useBondUserDetailQuery({" in bond_controller
+    assert "submitBondEvent(body)" in bond_controller
+    assert "useAppStore((state) => state.pollingEnabled)" in bond_controller
+    assert "buildBondStageDistribution(items)" in bond_surface
+    assert "buildBondSubmitSuccessMessage(submitResult.data)" in bond_surface
+    assert "sampleMeta.loadState" in bond_surface
+    assert "noticeView.noSample" in bond_surface
+    assert "noticeView.unavailable" in bond_surface
+    assert "metricCards.map" in bond_surface
+    assert "detailView.rows.map" in bond_surface
+
+    for page_forbidden in [
+        "features/life/bondModel.js",
+        "features/life/bondQueries.js",
+        "submitBondEvent",
+        "useAppStore",
+        "useBondOverviewQuery",
+        "useBondUserDetailQuery",
+        "buildBondDashboardViewModel",
+        "buildBondStageDistribution",
+        "buildBondSubmitSuccessMessage",
+        "metricCards.map",
+        "detailView.rows.map",
+    ]:
+        assert page_forbidden not in bond_page
 
     assert "function formatHealthStatus(" not in bond_page
     assert "LOAD_STATES" not in bond_page
