@@ -1634,7 +1634,7 @@ def test_repeated_time_and_percent_formatters_use_shared_module() -> None:
             "function formatPercent(",
             "function formatLocalTime(",
         ],
-        "pages/Gateway.jsx": ["function formatTime("],
+        "features/execution/components/gateway/GatewayPlatformCard.jsx": ["function formatTime("],
         "features/observability/logStreamModel.js": ["function formatTime("],
         "features/execution/components/AutomationImmuneSectionContent.jsx": ["function formatPercent("],
         "features/operations/components/canon/CanonDocumentsSection.jsx": ["function formatDateTime("],
@@ -2216,6 +2216,7 @@ def test_remaining_execution_queries_are_split_and_monolith_is_retired() -> None
     wechat_queries = (MONITOR_SRC / "features" / "execution" / "wechatQueries.js").read_text(encoding="utf-8")
     agent_loop_page = (MONITOR_SRC / "pages" / "AgentLoop.jsx").read_text(encoding="utf-8")
     gateway_page = (MONITOR_SRC / "pages" / "Gateway.jsx").read_text(encoding="utf-8")
+    gateway_controller = (MONITOR_SRC / "features" / "execution" / "gatewayController.js").read_text(encoding="utf-8")
     skills_page = (MONITOR_SRC / "pages" / "SkillsHub.jsx").read_text(encoding="utf-8")
 
     assert not execution_queries_path.exists()
@@ -2241,9 +2242,10 @@ def test_remaining_execution_queries_are_split_and_monolith_is_retired() -> None
         assert fetcher_name not in execution_queries
 
     assert "features/execution/agentLoopQueries.js" in agent_loop_page
-    assert "features/execution/gatewayQueries.js" in gateway_page
+    assert "./gatewayQueries.js" in gateway_controller
     assert "features/execution/skillsHubQueries.js" in skills_page
-    for source in [agent_loop_page, gateway_page, skills_page]:
+    assert "features/execution/gatewayQueries.js" not in gateway_page
+    for source in [agent_loop_page, gateway_page, gateway_controller, skills_page]:
         assert "features/execution/queries.js" not in source
 
 
@@ -3376,6 +3378,12 @@ def test_alerts_view_model_lives_in_observability_feature() -> None:
 def test_gateway_status_metadata_lives_in_shared_module() -> None:
     shared = SHARED_STATUS_META.read_text(encoding="utf-8")
     gateway_page = (MONITOR_SRC / "pages" / "Gateway.jsx").read_text(encoding="utf-8")
+    gateway_status_badge = (
+        MONITOR_SRC / "features" / "execution" / "components" / "gateway" / "GatewayStatusBadge.jsx"
+    ).read_text(encoding="utf-8")
+    gateway_platform_card = (
+        MONITOR_SRC / "features" / "execution" / "components" / "gateway" / "GatewayPlatformCard.jsx"
+    ).read_text(encoding="utf-8")
 
     for export_name in [
         "GATEWAY_STATUS_LABELS",
@@ -3385,20 +3393,46 @@ def test_gateway_status_metadata_lives_in_shared_module() -> None:
     ]:
         assert export_name in shared
 
-    assert "shared/statusMeta.js" in gateway_page
-    assert "const map = {" not in gateway_page
-    assert "const PLATFORM_META" not in gateway_page
-    assert "label: '在线'" not in gateway_page
-    assert "label: '微信'" not in gateway_page
-    assert "color: '#07C160'" not in gateway_page
-    assert "bg-green-50 border-green-200" not in gateway_page
-    assert "color: 'text-green-600'" not in gateway_page
+    assert "shared/statusMeta.js" in gateway_status_badge
+    assert "shared/statusMeta.js" in gateway_platform_card
+    assert "shared/statusMeta.js" not in gateway_page
+    for source in [gateway_page, gateway_status_badge, gateway_platform_card]:
+        assert "const map = {" not in source
+        assert "const PLATFORM_META" not in source
+        assert "label: '在线'" not in source
+        assert "label: '微信'" not in source
+        assert "color: '#07C160'" not in source
+        assert "bg-green-50 border-green-200" not in source
+        assert "color: 'text-green-600'" not in source
 
 
 def test_gateway_view_model_lives_in_execution_feature() -> None:
     gateway_page = (MONITOR_SRC / "pages" / "Gateway.jsx").read_text(encoding="utf-8")
+    gateway_controller = (MONITOR_SRC / "features" / "execution" / "gatewayController.js").read_text(encoding="utf-8")
+    gateway_surface = (
+        MONITOR_SRC / "features" / "execution" / "components" / "GatewaySurface.jsx"
+    ).read_text(encoding="utf-8")
+    gateway_platforms_section = (
+        MONITOR_SRC / "features" / "execution" / "components" / "gateway" / "GatewayPlatformsSection.jsx"
+    ).read_text(encoding="utf-8")
+    gateway_platform_card = (
+        MONITOR_SRC / "features" / "execution" / "components" / "gateway" / "GatewayPlatformCard.jsx"
+    ).read_text(encoding="utf-8")
+    gateway_wechat_detail = (
+        MONITOR_SRC / "features" / "execution" / "components" / "gateway" / "GatewayWeChatDetailCard.jsx"
+    ).read_text(encoding="utf-8")
     gateway_model = (MONITOR_SRC / "features" / "execution" / "gatewayModel.js").read_text(encoding="utf-8")
 
+    assert "GatewaySurface from '../features/execution/components/GatewaySurface.jsx'" in gateway_page
+    assert "useGatewayController" in gateway_page
+    assert "OrganSystemOverview" in gateway_page
+    assert "export function useGatewayController()" in gateway_controller
+    assert "export default function GatewaySurface(" in gateway_surface
+    assert "GatewayPlatformsSection" in gateway_surface
+    assert "GatewayPlatformCard" in gateway_platforms_section
+    assert "GatewayWeChatDetailCard" in gateway_surface
+    assert "formatDateTime" in gateway_platform_card
+    assert "formatDateTime" in gateway_wechat_detail
     assert "export const GATEWAY_WINDOW_OPTIONS" in gateway_model
     for export_name in [
         "getGatewayPlatforms",
@@ -3415,11 +3449,12 @@ def test_gateway_view_model_lives_in_execution_feature() -> None:
     ]:
         assert f"export function {export_name}(" in gateway_model
 
-    assert "features/execution/gatewayModel.js" in gateway_page
-    assert "buildGatewayViewModel({" in gateway_page
-    assert "GATEWAY_WINDOW_OPTIONS" in gateway_page
-    assert "metricCards.map((card)" in gateway_page
-    assert "GATEWAY_METRIC_ICONS[card.key]" in gateway_page
+    assert "./gatewayModel.js" in gateway_controller
+    assert "buildGatewayViewModel({" in gateway_controller
+    assert "GATEWAY_WINDOW_OPTIONS" in gateway_surface
+    assert "metricCards.map((card)" in gateway_surface
+    assert "GATEWAY_METRIC_ICONS[card.key]" in gateway_surface
+    assert "resetWeChatChannel({ reason: 'manual_ui' })" in gateway_controller
 
     for forbidden in [
         "const WINDOW_OPTIONS = [",
@@ -3440,6 +3475,7 @@ def test_gateway_view_model_lives_in_execution_feature() -> None:
         "data?.total_errors ?? '—'",
     ]:
         assert forbidden not in gateway_page
+        assert forbidden not in gateway_surface
 
 
 def test_log_stream_level_metadata_lives_in_shared_module() -> None:
