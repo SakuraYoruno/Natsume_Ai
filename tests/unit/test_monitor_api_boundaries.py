@@ -2438,6 +2438,9 @@ def test_observability_queries_are_split_and_monolith_is_retired() -> None:
         "Sessions.jsx": (MONITOR_SRC / "pages" / "Sessions.jsx").read_text(encoding="utf-8"),
         "Metrics.jsx": (MONITOR_SRC / "pages" / "Metrics.jsx").read_text(encoding="utf-8"),
         "Alerts.jsx": (MONITOR_SRC / "pages" / "Alerts.jsx").read_text(encoding="utf-8"),
+        "alertsController.js": (
+            MONITOR_SRC / "features" / "observability" / "alertsController.js"
+        ).read_text(encoding="utf-8"),
         "Insights.jsx": (MONITOR_SRC / "pages" / "Insights.jsx").read_text(encoding="utf-8"),
         "LogStream.jsx": (MONITOR_SRC / "pages" / "LogStream.jsx").read_text(encoding="utf-8"),
         "CodexBioOpsObservability.jsx": (
@@ -2499,7 +2502,8 @@ def test_observability_queries_are_split_and_monolith_is_retired() -> None:
         "Overview.jsx": "features/observability/overviewQueries.js",
         "Sessions.jsx": "features/observability/sessionsQueries.js",
         "Metrics.jsx": "features/observability/metricsQueries.js",
-        "Alerts.jsx": "features/observability/alertsQueries.js",
+        "Alerts.jsx": "features/observability/alertsController.js",
+        "alertsController.js": "./alertsQueries.js",
         "Insights.jsx": "features/observability/insightsQueries.js",
         "LogStream.jsx": "features/observability/logQueries.js",
         "CodexBioOpsObservability.jsx": "features/observability/codexBioOpsQueries.js",
@@ -3301,6 +3305,21 @@ def test_alert_severity_metadata_lives_in_shared_module() -> None:
 
 def test_alerts_view_model_lives_in_observability_feature() -> None:
     alerts_page = (MONITOR_SRC / "pages" / "Alerts.jsx").read_text(encoding="utf-8")
+    alerts_controller = (
+        MONITOR_SRC / "features" / "observability" / "alertsController.js"
+    ).read_text(encoding="utf-8")
+    alerts_surface = (
+        MONITOR_SRC / "features" / "observability" / "components" / "alerts" / "AlertsCenterSurface.jsx"
+    ).read_text(encoding="utf-8")
+    alert_card = (
+        MONITOR_SRC / "features" / "observability" / "components" / "alerts" / "AlertCard.jsx"
+    ).read_text(encoding="utf-8")
+    filter_panel = (
+        MONITOR_SRC / "features" / "observability" / "components" / "alerts" / "AlertsReasonFilterPanel.jsx"
+    ).read_text(encoding="utf-8")
+    list_panel = (
+        MONITOR_SRC / "features" / "observability" / "components" / "alerts" / "AlertsListPanel.jsx"
+    ).read_text(encoding="utf-8")
     alerts_model = (MONITOR_SRC / "features" / "observability" / "alertsModel.js").read_text(encoding="utf-8")
 
     for export_name in [
@@ -3328,13 +3347,24 @@ def test_alerts_view_model_lives_in_observability_feature() -> None:
     ]:
         assert export_name in alerts_model
 
-    assert "features/observability/alertsModel.js" in alerts_page
-    assert "buildAlertCardView(alert)" in alerts_page
-    assert "getAlertsFilterCodeFromSearch(location.search)" in alerts_page
-    assert "buildAlertsFilterSearch(location.search, next)" in alerts_page
-    assert "buildAlertsCenterView({" in alerts_page
-    assert "sampleMeta.loadState" in alerts_page
-    assert "getAlertReasonBreakdownBarWidth(count, allAlerts.length)" in alerts_page
+    assert "AlertsCenterSurface from '../features/observability/components/alerts/AlertsCenterSurface.jsx'" in alerts_page
+    assert "useAlertsCenterController" in alerts_page
+    assert "DigitalLifeRuntimeCard" in alerts_page
+    assert "OrganSystemOverview" in alerts_page
+    assert "export function useAlertsCenterController()" in alerts_controller
+    assert "export default function AlertsCenterSurface(" in alerts_surface
+    assert "export default function AlertCard(" in alert_card
+    assert "export default function AlertsReasonFilterPanel(" in filter_panel
+    assert "export default function AlertsListPanel(" in list_panel
+    assert "./alertsModel.js" in alerts_controller
+    assert "buildAlertCardView(alert)" in alert_card
+    assert "getAlertsFilterCodeFromSearch(location.search)" in alerts_controller
+    assert "buildAlertsFilterSearch(location.search, next)" in alerts_controller
+    assert "buildAlertsCenterView({" in alerts_controller
+    assert "sampleMeta.loadState" in alerts_surface
+    assert "getAlertReasonBreakdownBarWidth(count, allAlertsCount)" in filter_panel
+    assert "RuntimeCardComponent" in alerts_surface
+    assert "OrganOverviewComponent" in alerts_surface
     assert "buildDigitalLifeAlerts(runtimeSnapshot" in alerts_model
     assert "createRequestRefs(filteredAlerts.filter" in alerts_model
     assert "buildImmuneOrganSystemModel({" in alerts_model
@@ -3369,6 +3399,9 @@ def test_alerts_view_model_lives_in_observability_feature() -> None:
     assert "ALERT_SEVERITY_CARD_CLASSES" not in alerts_page
     assert "ALERT_SEVERITY_LABELS" not in alerts_page
     assert "FORGE_REASON_CODES" not in alerts_page
+    assert "useAlertsCenterQuery" not in alerts_page
+    assert "useDigitalLifeRuntimeSignals" not in alerts_page
+    assert "features/observability/alertsModel.js" not in alerts_page
     assert "formatServiceStatus" not in alerts_page
     assert "compactText(" not in alerts_page
     assert "reason_code: `SERVICE_${String(service.status" not in alerts_page
