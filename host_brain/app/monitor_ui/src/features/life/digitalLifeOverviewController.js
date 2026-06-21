@@ -1,14 +1,4 @@
 import { useMemo, useState } from 'react'
-import {
-  Brain,
-  Database,
-  Heart,
-  MoonStar,
-  Orbit,
-  Settings,
-  Sparkles,
-  Waves,
-} from 'lucide-react'
 import useLifeBodyPageData from '../../hooks/useLifeBodyPageData.js'
 import { buildMainChainReshapeModel } from '../../models/mainChainReshapeModel.js'
 import {
@@ -22,9 +12,9 @@ import {
   buildDigitalLifeHeroDescription,
   buildDigitalLifeHeroMetaItems,
   buildDigitalLifeSecondarySectionsModel,
-  buildDigitalLifeWiredDomains,
   getDigitalLifePollingInterval,
 } from './digitalLifeOverviewModel.js'
+import { buildDigitalLifeWiredDomains } from './digitalLifeWiredDomainsModel.js'
 
 export function useDigitalLifeOverviewController() {
   const [windowMinutes, setWindowMinutes] = useState(360)
@@ -160,7 +150,6 @@ export function useDigitalLifeOverviewController() {
 
   const wiredDomains = useMemo(
     () => buildDigitalLifeWiredDomains({
-      icons: { Brain, Database, Heart, MoonStar, Orbit, Settings, Sparkles, Waves },
       activeSubsystemCount,
       absenceBand,
       avgMemorySuccessRate,
