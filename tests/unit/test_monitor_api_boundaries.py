@@ -1464,11 +1464,13 @@ def test_tools_execution_results_use_shared_json_block() -> None:
     tool_execute_panel = (
         MONITOR_SRC / "features" / "execution" / "components" / "ToolExecutePanel.jsx"
     ).read_text(encoding="utf-8")
-    tools_operations = (MONITOR_SRC / "features" / "execution" / "components" / "ToolsOperationsSection.jsx").read_text(encoding="utf-8")
+    custom_provider_form = (
+        MONITOR_SRC / "features" / "execution" / "components" / "CustomSkillProviderForm.jsx"
+    ).read_text(encoding="utf-8")
 
     for rel, source in {
         "features/execution/components/ToolExecutePanel.jsx": tool_execute_panel,
-        "features/execution/components/ToolsOperationsSection.jsx": tools_operations,
+        "features/execution/components/CustomSkillProviderForm.jsx": custom_provider_form,
     }.items():
         assert "shared/ui/JsonBlock.jsx" in source, rel
         assert "JSON.stringify(result.data" not in source, rel
@@ -1608,7 +1610,7 @@ def test_repeated_time_and_percent_formatters_use_shared_module() -> None:
         "features/operations/components/canon/CanonDocumentsSection.jsx",
         "features/life/digitalLifeGatewayModel.js",
         "features/operations/components/promptOps/PromptTemplateEditorPanel.jsx",
-        "features/execution/components/ToolsOperationsSection.jsx",
+        "features/execution/components/CustomSkillProviderList.jsx",
         "features/observability/components/insights/InsightsStateGroup.jsx",
         "features/observability/components/insights/InsightsLlmGroup.jsx",
         "features/observability/components/insights/insightsGroupShared.jsx",
@@ -1794,7 +1796,7 @@ def test_canon_and_provider_status_metadata_live_in_shared_module() -> None:
             "const STATUS_STYLES",
             "const PROPOSAL_STATUS_LABELS",
         ],
-        "features/execution/components/ToolsOperationsSection.jsx": [
+        "features/execution/components/CustomSkillProviderList.jsx": [
             "const PROVIDER_STATUS_LABELS",
             "const styles = {",
         ],
@@ -2605,8 +2607,11 @@ def test_system_config_view_model_lives_in_operations_feature() -> None:
 
 
 def test_tools_operations_model_lives_in_execution_feature() -> None:
-    component = (
-        MONITOR_SRC / "features" / "execution" / "components" / "ToolsOperationsSection.jsx"
+    installer = (
+        MONITOR_SRC / "features" / "execution" / "components" / "CustomSkillProviderInstaller.jsx"
+    ).read_text(encoding="utf-8")
+    stats_panels = (
+        MONITOR_SRC / "features" / "execution" / "components" / "ToolsOperationsStatsPanels.jsx"
     ).read_text(encoding="utf-8")
     model = (MONITOR_SRC / "features" / "execution" / "toolsOperationsModel.js").read_text(encoding="utf-8")
 
@@ -2621,15 +2626,16 @@ def test_tools_operations_model_lives_in_execution_feature() -> None:
     ]:
         assert export_name in model
 
-    assert "toolsOperationsModel.js" in component
-    assert "CUSTOM_SKILL_PROVIDER_DEFAULT_FORM" in component
-    assert "mergeCustomSkillProviderTemplate(prev, templateData)" in component
-    assert "mergeCustomSkillProviderTemplate(prev, nextTemplate)" in component
-    assert "buildCustomSkillProviderInstallRequest(form)" in component
-    assert "getCustomSkillProvidersLoadState({" in component
-    assert "getCustomSkillProviderTemplateLoadState({" in component
-    assert "buildPermissionGuardStatsView({" in component
-    assert "buildActionPlanStatsView({" in component
+    assert "toolsOperationsModel.js" in installer
+    assert "CUSTOM_SKILL_PROVIDER_DEFAULT_FORM" in installer
+    assert "mergeCustomSkillProviderTemplate(prev, templateData)" in installer
+    assert "mergeCustomSkillProviderTemplate(prev, nextTemplate)" in installer
+    assert "buildCustomSkillProviderInstallRequest(form)" in installer
+    assert "getCustomSkillProvidersLoadState({" in installer
+    assert "getCustomSkillProviderTemplateLoadState({" in installer
+    assert "toolsOperationsModel.js" in stats_panels
+    assert "buildPermissionGuardStatsView({" in stats_panels
+    assert "buildActionPlanStatsView({" in stats_panels
 
     for forbidden in [
         "models/loadState.js",
@@ -2649,7 +2655,8 @@ def test_tools_operations_model_lives_in_execution_feature() -> None:
         "{ label: '总校验次数'",
         "{ label: '总计划数'",
     ]:
-        assert forbidden not in component
+        assert forbidden not in installer
+        assert forbidden not in stats_panels
 
 
 def test_tools_page_delegates_catalog_and_execution_ui_to_execution_feature() -> None:
