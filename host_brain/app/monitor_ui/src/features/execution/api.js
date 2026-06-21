@@ -15,6 +15,7 @@ export {
   fetchSchedulerHistory,
   fetchUIAssertionStats,
 } from '../../shared/api/runtimeObservability.js'
+export { fetchImmuneGateReplay } from '../../shared/api/immuneGate.js'
 
 export function fetchAgentInfo() {
   return endpointGet(execution.agentInfo)
@@ -53,14 +54,6 @@ export function fetchResourceManagerStatus() {
 
 export function fetchImmuneGateStats(params = {}) {
   return endpointGet(execution.immuneGateStats, params)
-}
-
-export function fetchImmuneGateReplay(requestId, params = {}) {
-  const normalizedRequestId = String(requestId || '').trim()
-  if (!normalizedRequestId) {
-    throw new Error('request_id is required')
-  }
-  return endpointGet(execution.immuneGateReplay, params, { requestId: normalizedRequestId })
 }
 
 export function enableSchedulerTask(taskId) {

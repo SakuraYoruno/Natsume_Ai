@@ -468,11 +468,16 @@ def test_trace_observability_components_are_not_left_under_global_components() -
 def test_trace_request_detail_surface_is_feature_owned() -> None:
     page = MONITOR_SRC / "pages" / "TraceRequestDetail.jsx"
     surface = OBSERVABILITY_TRACE_COMPONENTS / "TraceRequestDetailSurface.jsx"
+    controller = MONITOR_SRC / "features" / "observability" / "traceRequestDetailController.js"
     page_source = page.read_text(encoding="utf-8")
     surface_source = surface.read_text(encoding="utf-8")
+    controller_source = controller.read_text(encoding="utf-8")
 
     assert surface.exists()
+    assert controller.exists()
     assert "TraceRequestDetailSurface.jsx" in page_source
+    assert "useTraceRequestDetailController" in page_source
+    assert "export function useTraceRequestDetailController()" in controller_source
     assert "export default function TraceRequestDetailSurface(" in surface_source
     for forbidden in [
         "PageHero",
@@ -486,8 +491,35 @@ def test_trace_request_detail_surface_is_feature_owned() -> None:
         "StatusBadge",
         "LoadingNotice",
         "NoticeBanner",
+        "connectTraceRequestLive",
+        "useTraceSnapshotQuery",
+        "useTraceStreamEventsQuery",
+        "useTraceTribeEventsQuery",
+        "useTraceRetrievalRuntimeQuery",
+        "useImmuneGateReplayQuery",
+        "useAppStore",
+        "dedupeStreamEvents",
+        "buildRetrievalRuntimeMeta",
+        "getSummaryInputText",
+        "getSummaryOutputText",
     ]:
         assert forbidden not in page_source
+
+    for controller_token in [
+        "connectTraceRequestLive(requestId",
+        "useTraceSnapshotQuery({",
+        "useTraceStreamEventsQuery({",
+        "useTraceTribeEventsQuery({",
+        "useTraceRetrievalRuntimeQuery({",
+        "useImmuneGateReplayQuery({",
+        "useAppStore((state) => state.pollingEnabled)",
+        "dedupeStreamEvents(traceData?.stream_events, fallbackEvents)",
+        "buildRetrievalRuntimeMeta(retrievalRuntime)",
+        "getSummaryInputText(summary)",
+        "getSummaryOutputText(summary)",
+        "navigate('/observability/trace')",
+    ]:
+        assert controller_token in controller_source
 
 
 def test_observability_data_containers_are_not_left_under_global_components() -> None:
@@ -2076,8 +2108,13 @@ def test_tools_queries_are_split_from_execution_query_monolith() -> None:
 def test_automation_queries_are_split_from_execution_query_monolith() -> None:
     execution_queries = _read_optional(MONITOR_SRC / "features" / "execution" / "queries.js")
     automation_queries = (MONITOR_SRC / "features" / "execution" / "automationQueries.js").read_text(encoding="utf-8")
+    immune_replay_api = (MONITOR_SRC / "shared" / "api" / "immuneGate.js").read_text(encoding="utf-8")
+    immune_replay_query = (MONITOR_SRC / "shared" / "query" / "useImmuneGateReplayQuery.js").read_text(encoding="utf-8")
     automation_page = (MONITOR_SRC / "pages" / "Automation.jsx").read_text(encoding="utf-8")
     trace_detail = (MONITOR_SRC / "pages" / "TraceRequestDetail.jsx").read_text(encoding="utf-8")
+    trace_detail_controller = (
+        MONITOR_SRC / "features" / "observability" / "traceRequestDetailController.js"
+    ).read_text(encoding="utf-8")
     immune_section = (
         MONITOR_SRC / "features" / "execution" / "components" / "AutomationImmuneSectionContent.jsx"
     ).read_text(encoding="utf-8")
@@ -2088,7 +2125,6 @@ def test_automation_queries_are_split_from_execution_query_monolith() -> None:
     for export_name in [
         "useAutomationOverviewQuery",
         "useImmuneGateStatsQuery",
-        "useImmuneGateReplayQuery",
         "useSchedulerHistoryQuery",
         "refreshSchedulerHistoryQuery",
     ]:
@@ -2100,22 +2136,31 @@ def test_automation_queries_are_split_from_execution_query_monolith() -> None:
         "fetchSchedulerHealth",
         "fetchResourceManagerStatus",
         "fetchImmuneGateStats",
-        "fetchImmuneGateReplay",
         "fetchSchedulerHistory",
     ]:
         assert fetcher_name in automation_queries
         assert fetcher_name not in execution_queries
 
+    assert "export { default as useImmuneGateReplayQuery } from '../../shared/query/useImmuneGateReplayQuery.js'" in automation_queries
+    assert "export function useImmuneGateReplayQuery" not in automation_queries
+    assert "fetchImmuneGateReplay" not in automation_queries
+    assert "export function fetchImmuneGateReplay" in immune_replay_api
+    assert "ENDPOINT_REGISTRY" in immune_replay_api
+    assert "endpointGet(execution.immuneGateReplay" in immune_replay_api
+    assert "export default function useImmuneGateReplayQuery" in immune_replay_query
+    assert "fetchImmuneGateReplay(normalizedRequestId" in immune_replay_query
+    assert "OBS_QUERY_KEYS.immuneGateReplay" in immune_replay_query
     assert "features/execution/automationQueries.js" in automation_page
-    assert "features/execution/automationQueries.js" in trace_detail
+    assert "shared/query/useImmuneGateReplayQuery.js" in trace_detail_controller
+    assert "../execution/automationQueries.js" not in trace_detail_controller
     assert "../automationQueries.js" in immune_section
     assert "../automationQueries.js" in history_section
     assert "features/execution/queries.js" not in automation_page
     assert "features/execution/queries.js" not in trace_detail
+    assert "features/execution/queries.js" not in trace_detail_controller
     assert "from '../queries.js'" not in immune_section
     assert "from '../queries.js'" not in history_section
     assert "OBS_QUERY_KEYS.automationOverview" in automation_queries
-    assert "OBS_QUERY_KEYS.immuneGateReplay" in automation_queries
     assert "OBS_QUERY_KEYS.schedulerHistory" in automation_queries
 
 
