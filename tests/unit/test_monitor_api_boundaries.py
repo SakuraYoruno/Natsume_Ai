@@ -2604,6 +2604,9 @@ def test_tools_page_delegates_catalog_and_execution_ui_to_execution_feature() ->
 
 def test_chat_debug_streaming_and_trace_models_are_split() -> None:
     chat_debug_page = (MONITOR_SRC / "pages" / "ChatDebug.jsx").read_text(encoding="utf-8")
+    chat_controller = (
+        MONITOR_SRC / "features" / "observability" / "chatDebugController.js"
+    ).read_text(encoding="utf-8")
     chat_debug_sections = (
         MONITOR_SRC / "features" / "observability" / "components" / "chatDebug" / "ChatDebugConsoleSections.jsx"
     ).read_text(encoding="utf-8")
@@ -2638,11 +2641,14 @@ def test_chat_debug_streaming_and_trace_models_are_split() -> None:
     ]:
         assert f"export function {export_name}(" in chat_model
 
-    assert "shared/streaming/sse.js" in chat_debug_page
-    assert "features/observability/chatDebugModel.js" in chat_debug_page
+    assert "chatDebugController.js" in chat_debug_page
+    assert "shared/streaming/sse.js" in chat_controller
+    assert "from './chatDebugModel.js'" in chat_controller
     assert "ChatDebugConsoleSections.jsx" in chat_debug_page
-    assert "consumeSseBuffer(buffer)" in chat_debug_page
-    assert "buildChatDebugTraceView({" in chat_debug_page
+    assert "consumeSseBuffer(buffer)" in chat_controller
+    assert "buildChatDebugTraceView({" in chat_controller
+    assert "sendChatDebugStream(" in chat_controller
+    assert "useTraceSnapshotQuery({" in chat_controller
     assert "traceLoadState" in chat_debug_page
     assert "traceNodeCount" in chat_debug_page
     assert "function ChatDebugEventRow(" in chat_event_stream
@@ -2665,6 +2671,17 @@ def test_chat_debug_streaming_and_trace_models_are_split() -> None:
     assert "getTraceNodeDisplayName" not in chat_debug_page
     assert "formatEventPhase" not in chat_debug_page
     assert "formatTime(" not in chat_debug_page
+    assert "sendChatDebugStream" not in chat_debug_page
+    assert "useTraceSnapshotQuery" not in chat_debug_page
+    assert "useDigitalLifeRuntimeSignals" not in chat_debug_page
+    assert "consumeSseBuffer" not in chat_debug_page
+    assert "useAppStore" not in chat_debug_page
+    assert "useState" not in chat_debug_page
+    assert "useEffect" not in chat_debug_page
+    assert "useMemo" not in chat_debug_page
+    assert "useCallback" not in chat_debug_page
+    assert "useRef" not in chat_debug_page
+    assert "buildChatDebugTraceView" not in chat_debug_page
     assert "function parseSseBlock(" not in chat_debug_page
     assert "function consumeSseBuffer(" not in chat_debug_page
     assert "function truncateDebugText(" not in chat_debug_page
