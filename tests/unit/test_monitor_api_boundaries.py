@@ -555,6 +555,13 @@ def test_digital_life_cockpit_sections_are_not_left_under_global_components() ->
     page = MONITOR_SRC / "pages" / "DigitalLifeOverview.jsx"
     expected_files = [
         "DigitalLifeOverviewSurface.jsx",
+        "DigitalLifeOverviewHeader.jsx",
+        "DigitalLifeHeroSection.jsx",
+        "DigitalLifeAvatarSection.jsx",
+        "DigitalLifeOverviewNotices.jsx",
+        "DigitalLifeWallClockSection.jsx",
+        "DigitalLifeRuntimeDetailSection.jsx",
+        "DigitalLifeLazySections.jsx",
         "DigitalLifeCapabilitySection.jsx",
         "DigitalLifeGatewaySection.jsx",
         "DigitalLifeSecondarySections.jsx",
@@ -583,6 +590,16 @@ def test_digital_life_overview_surface_is_feature_owned() -> None:
     assert "useDigitalLifeOverviewController" in page_source
     assert "export function useDigitalLifeOverviewController()" in controller_source
     assert "export default function DigitalLifeOverviewSurface(" in surface_source
+    for section_name in [
+        "DigitalLifeOverviewHeader",
+        "DigitalLifeHeroSection",
+        "DigitalLifeAvatarSection",
+        "DigitalLifeOverviewNotices",
+        "DigitalLifeWallClockSection",
+        "DigitalLifeRuntimeDetailSection",
+        "DigitalLifeLazySections",
+    ]:
+        assert section_name in surface_source
 
     for stale_component in [
         "AvatarStateCard",
@@ -601,6 +618,25 @@ def test_digital_life_overview_surface_is_feature_owned() -> None:
         "VitalLoopSummaryPanel",
     ]:
         assert stale_component not in page_source
+
+    for stale_surface_detail in [
+        "AvatarStateCard",
+        "BackgroundRuntimeCard",
+        "DigitalLifeRuntimeCard",
+        "DigitalLifeWallClockSoakCard",
+        "EmptyStateCard",
+        "LazyLoadingNotice",
+        "LoadingNotice",
+        "NoticeBanner",
+        "PageHero",
+        "RefreshCw",
+        "SampleMeta",
+        "Sparkles",
+        "TimeWindowSelect",
+        "ViewportLazySection",
+        "VitalLoopSummaryPanel",
+    ]:
+        assert stale_surface_detail not in surface_source
 
 
 def test_life_body_components_are_not_left_under_global_components() -> None:
