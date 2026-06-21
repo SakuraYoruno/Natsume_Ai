@@ -3682,7 +3682,14 @@ def test_bio_ops_page_view_model_lives_in_observability_feature() -> None:
 
 
 def test_bio_ops_owner_panel_view_model_lives_in_observability_feature() -> None:
-    component = (OBSERVABILITY_COMPONENTS / "bioOps" / "BioOpsOwnerPanels.jsx").read_text(encoding="utf-8")
+    aggregate = (OBSERVABILITY_COMPONENTS / "bioOps" / "BioOpsOwnerPanels.jsx").read_text(encoding="utf-8")
+    pending_adoptions = (
+        OBSERVABILITY_COMPONENTS / "bioOps" / "owner" / "PendingAdoptions.jsx"
+    ).read_text(encoding="utf-8")
+    owner_inbox = (
+        OBSERVABILITY_COMPONENTS / "bioOps" / "owner" / "OwnerInboxPanel.jsx"
+    ).read_text(encoding="utf-8")
+    component = f"{aggregate}\n{pending_adoptions}\n{owner_inbox}"
     model = (MONITOR_SRC / "features" / "observability" / "bioOpsOwnerModel.js").read_text(encoding="utf-8")
 
     for export_name in [
@@ -3694,12 +3701,15 @@ def test_bio_ops_owner_panel_view_model_lives_in_observability_feature() -> None
     ]:
         assert f"export function {export_name}" in model
 
-    assert "bioOpsOwnerModel.js" in component
-    assert "getBioOpsPendingAdoptionReview({ items, selectedId, detail })" in component
-    assert "buildBioOpsOwnerInboxViewModel({" in component
-    assert "buildBioOpsAdoptionDecisionBody(decision, active)" in component
-    assert "buildBioOpsOwnerStateReviewBody(decision, ownerOrgan)" in component
-    assert "getBioOpsOwnerRunParams(runId)" in component
+    assert "export { default as OwnerInboxPanel } from './owner/OwnerInboxPanel.jsx'" in aggregate
+    assert "export { default as PendingAdoptions } from './owner/PendingAdoptions.jsx'" in aggregate
+    assert "bioOpsOwnerModel.js" not in aggregate
+    assert "getBioOpsPendingAdoptionReview({ items, selectedId, detail })" in pending_adoptions
+    assert "buildBioOpsAdoptionDecisionBody(decision, active)" in pending_adoptions
+    assert "getBioOpsOwnerRunParams(runId)" in pending_adoptions
+    assert "buildBioOpsOwnerInboxViewModel({" in owner_inbox
+    assert "buildBioOpsOwnerStateReviewBody(decision, ownerOrgan)" in owner_inbox
+    assert "getBioOpsOwnerRunParams(runId)" in owner_inbox
 
     for forbidden in [
         "Array.isArray(data?.items)",
@@ -3720,6 +3730,31 @@ def test_bio_ops_owner_panel_view_model_lives_in_observability_feature() -> None
         "runId ? { run_id: runId } : {}",
     ]:
         assert forbidden not in component
+
+
+def test_bio_ops_owner_panels_are_split_by_workflow() -> None:
+    aggregate = (OBSERVABILITY_COMPONENTS / "bioOps" / "BioOpsOwnerPanels.jsx").read_text(encoding="utf-8")
+    pending_adoptions = (
+        OBSERVABILITY_COMPONENTS / "bioOps" / "owner" / "PendingAdoptions.jsx"
+    ).read_text(encoding="utf-8")
+    owner_inbox = (
+        OBSERVABILITY_COMPONENTS / "bioOps" / "owner" / "OwnerInboxPanel.jsx"
+    ).read_text(encoding="utf-8")
+
+    assert "export { default as PendingAdoptions }" in aggregate
+    assert "export { default as OwnerInboxPanel }" in aggregate
+    assert "export default function PendingAdoptions(" in pending_adoptions
+    assert "export default function OwnerInboxPanel(" in owner_inbox
+    assert "fetchCodexBioOpsAdoptionDetail" in pending_adoptions
+    assert "acceptCodexBioOpsAdoption" in pending_adoptions
+    assert "rejectCodexBioOpsAdoption" in pending_adoptions
+    assert "fetchCodexBioOpsOwnerInbox" in owner_inbox
+    assert "materializeCodexBioOpsOwnerInbox" in owner_inbox
+    assert "consumeCodexBioOpsOwnerQueues" in owner_inbox
+
+    assert "useState" not in aggregate
+    assert "fetchCodexBioOpsOwnerInbox" not in pending_adoptions
+    assert "fetchCodexBioOpsAdoptionDetail" not in owner_inbox
 
 
 def test_metrics_overview_view_model_lives_in_observability_feature() -> None:
