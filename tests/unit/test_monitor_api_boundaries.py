@@ -540,11 +540,16 @@ def test_digital_life_cockpit_sections_are_not_left_under_global_components() ->
 def test_digital_life_overview_surface_is_feature_owned() -> None:
     page = MONITOR_SRC / "pages" / "DigitalLifeOverview.jsx"
     surface = MONITOR_SRC / "features" / "life" / "components" / "DigitalLifeOverviewSurface.jsx"
+    controller = MONITOR_SRC / "features" / "life" / "digitalLifeOverviewController.js"
     page_source = page.read_text(encoding="utf-8")
     surface_source = surface.read_text(encoding="utf-8")
+    controller_source = controller.read_text(encoding="utf-8")
 
     assert surface.exists()
+    assert controller.exists()
     assert "DigitalLifeOverviewSurface from '../features/life/components/DigitalLifeOverviewSurface.jsx'" in page_source
+    assert "useDigitalLifeOverviewController" in page_source
+    assert "export function useDigitalLifeOverviewController()" in controller_source
     assert "export default function DigitalLifeOverviewSurface(" in surface_source
 
     for stale_component in [
@@ -1673,6 +1678,7 @@ def test_digital_life_gateway_view_model_lives_in_life_feature() -> None:
 
 def test_digital_life_overview_view_model_lives_in_life_feature() -> None:
     page = (MONITOR_SRC / "pages" / "DigitalLifeOverview.jsx").read_text(encoding="utf-8")
+    controller = (MONITOR_SRC / "features" / "life" / "digitalLifeOverviewController.js").read_text(encoding="utf-8")
     model = (MONITOR_SRC / "features" / "life" / "digitalLifeOverviewModel.js").read_text(encoding="utf-8")
 
     for export_name in [
@@ -1686,20 +1692,39 @@ def test_digital_life_overview_view_model_lives_in_life_feature() -> None:
     ]:
         assert f"export function {export_name}(" in model
 
-    assert "features/life/digitalLifeOverviewModel.js" in page
-    assert "getDigitalLifePollingInterval(pollingInterval, 60)" in page
-    assert "getDigitalLifePollingInterval(pollingInterval, 15)" in page
-    assert "buildDigitalLifeWiredDomains({" in page
-    assert "buildDigitalLifeCapabilitySectionModel(capabilityGapData)" in page
-    assert "buildDigitalLifeSecondarySectionsModel({" in page
-    assert "buildDigitalLifeGatewaySectionModel({" in page
-    assert "buildDigitalLifeHeroDescription({ runtimeSnapshot, lifeBodyModel, hasRuntimeSnapshot })" in page
-    assert "buildDigitalLifeHeroMetaItems({ modeMeta, lifeBodyModel, replyPosture })" in page
+    assert "features/life/digitalLifeOverviewController.js" in page
+    assert "./digitalLifeOverviewModel.js" in controller
+    assert "getDigitalLifePollingInterval(pollingInterval, 60)" in controller
+    assert "getDigitalLifePollingInterval(pollingInterval, 15)" in controller
+    assert "buildDigitalLifeWiredDomains({" in controller
+    assert "buildDigitalLifeCapabilitySectionModel(capabilityGapData)" in controller
+    assert "buildDigitalLifeSecondarySectionsModel({" in controller
+    assert "buildDigitalLifeGatewaySectionModel({" in controller
+    assert "buildDigitalLifeHeroDescription({ runtimeSnapshot, lifeBodyModel, hasRuntimeSnapshot })" in controller
+    assert "buildDigitalLifeHeroMetaItems({ modeMeta, lifeBodyModel, replyPosture })" in controller
+    assert "postAvatarBehavior({ behavior_id: behaviorId, source: 'monitor_digital_life' })" in controller
+    assert "useLifeBodyPageData({ windowMinutes })" in controller
+    assert "useDigitalLifeWallClockSoakQuery({" in controller
+    assert "useAvatarStateQuery({" in controller
+
+    for controller_only_token in [
+        "useLifeBodyPageData",
+        "useDigitalLifeWallClockSoakQuery",
+        "useAvatarStateQuery",
+        "postAvatarBehavior",
+        "buildMainChainReshapeModel",
+        "buildDigitalLifeWiredDomains",
+    ]:
+        assert controller_only_token not in page
 
     assert "compactText(" not in page
     assert "formatTrend(" not in page
     assert ".sort((left, right) => Number(left?.health_score" not in page
     assert "forge_runtime_quality?.items" not in page
+    assert "compactText(" not in controller
+    assert "formatTrend(" not in controller
+    assert ".sort((left, right) => Number(left?.health_score" not in controller
+    assert "forge_runtime_quality?.items" not in controller
     assert "actionTo: '/life/runtime-mode'" not in page
     assert "等待运行快照恢复后补齐关系阶段" not in page
     assert "生命流正在穿过关系、记忆、节律与执行层" not in page
@@ -2201,6 +2226,9 @@ def test_life_queries_are_split_and_monolith_is_retired() -> None:
     pages_and_hooks = {
         "Bond.jsx": (MONITOR_SRC / "pages" / "Bond.jsx").read_text(encoding="utf-8"),
         "DigitalLifeOverview.jsx": (MONITOR_SRC / "pages" / "DigitalLifeOverview.jsx").read_text(encoding="utf-8"),
+        "digitalLifeOverviewController.js": (
+            MONITOR_SRC / "features" / "life" / "digitalLifeOverviewController.js"
+        ).read_text(encoding="utf-8"),
         "EmotionDashboard.jsx": (MONITOR_SRC / "pages" / "EmotionDashboard.jsx").read_text(encoding="utf-8"),
         "LifeTimelinePage.jsx": (MONITOR_SRC / "pages" / "LifeTimelinePage.jsx").read_text(encoding="utf-8"),
         "MemoryBrowser.jsx": (MONITOR_SRC / "pages" / "MemoryBrowser.jsx").read_text(encoding="utf-8"),
@@ -2268,7 +2296,8 @@ def test_life_queries_are_split_and_monolith_is_retired() -> None:
 
     expected_imports = {
         "Bond.jsx": "features/life/bondQueries.js",
-        "DigitalLifeOverview.jsx": "features/life/digitalLifeQueries.js",
+        "DigitalLifeOverview.jsx": "features/life/digitalLifeOverviewController.js",
+        "digitalLifeOverviewController.js": "./digitalLifeQueries.js",
         "EmotionDashboard.jsx": "features/life/emotionQueries.js",
         "LifeTimelinePage.jsx": "features/life/lifeBodyQueries.js",
         "MemoryBrowser.jsx": "features/life/memoryQueries.js",
