@@ -1,39 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import {
-  formatRecentTraceTime,
-  getLiveTraceCurrentLabel,
-  getLiveTraceOutputPreview,
-  getSessionDisplayTitle,
-  getTraceActiveStageMeta,
-  getTraceIssueCount,
-  getTraceRunningCount,
-  isTribeEventLinkedToSelection,
-} from './traceLiveSurfaceModel.js'
 import { GROUPS } from './traceFlowModel.js'
 import {
-  buildSelectedTraceRequestContext,
   buildTraceDetailPath,
   buildTraceGroupStats,
-  buildTraceHistoryViewState,
   buildTraceInfoFromTrace,
-  buildTracePulseNodes,
-  buildTraceRecentRequests,
-  buildTraceSearchState,
-  buildTraceTribeFeedParams,
   getLiveTraceItemFocusAction,
   getNextAutoTraceSelection,
-  getSelectedTraceSessionForQuery,
-  getTraceLiveFeedStatus,
-  getTraceLiveModeLabel,
   getTraceOverviewFocusAction,
-  getTraceStatusHealth,
 } from './traceHomeModel.js'
-import { useTraceHomeLiveFeed } from './useTraceHomeLiveFeed.js'
-import useDigitalLifeRuntimeSignals from '../../../../hooks/useDigitalLifeRuntimeSignals.js'
-import { useSessionsListQuery } from '../../sessionsQueries.js'
-import { useTraceSnapshotQuery, useTraceTribeFeedQuery } from '../../traceQueries.js'
-import { sanitizeRecentRequests } from '../../../../utils/sessionList.js'
+import { buildTraceHomeControllerView } from './traceHomeControllerView.js'
+import { useTraceHomeDataSources } from './useTraceHomeDataSources.js'
 import useAppStore from '../../../../store/useAppStore.js'
 
 export function useTraceHomeController({
@@ -61,7 +38,6 @@ export function useTraceHomeController({
   const selectedRequestId = useAppStore((s) => s.selectedRequestId)
   const setSelectedRequestId = useAppStore((s) => s.setSelectedRequestId)
   const liveFeedEnabled = pollingEnabled && pageVisible
-  const liveTraceLimit = recentKeyword ? 12 : 6
   const {
     liveFeedConnected,
     liveFeedLastTs,
@@ -69,75 +45,27 @@ export function useTraceHomeController({
     liveTraceItems,
     liveTraceLoading,
     liveTraceTimelineEntries,
-    refreshLiveSnapshot,
-  } = useTraceHomeLiveFeed({
-    liveFeedEnabled,
-    liveTraceLimit,
-    pollingTick,
-    pollingInterval,
-    recentKeyword,
-  })
-  const { runtimeSnapshot, promptStats: promptBuilderData } = useDigitalLifeRuntimeSignals({
-    pollingEnabled: liveFeedEnabled,
-    pollingInterval,
-    windowMinutes: 60,
-    minIntervalSeconds: 10,
-  })
-  const recentRequestsQuery = useSessionsListQuery({
-    page: 1,
-    pageSize: 12,
-    keyword: recentKeyword,
-    status: recentStatusFilter,
-    windowMinutes: 1440,
-    pollingEnabled: liveFeedEnabled,
-    pollingTick,
-    pollingInterval,
-  })
-  const recentRequestsBase = useMemo(() => (
-    sanitizeRecentRequests(recentRequestsQuery.sessionsData?.items, { keyword: recentKeyword })
-  ), [recentKeyword, recentRequestsQuery.sessionsData?.items])
-  const recentRequests = useMemo(() => buildTraceRecentRequests({
-    recentKeyword,
-    recentRequestsBase,
-    liveTraceItems,
-  }), [liveTraceItems, recentKeyword, recentRequestsBase])
-  const recentLoading = recentRequestsQuery.loading || recentRequestsQuery.refreshing
-  const selectedSessionForQuery = useMemo(() => getSelectedTraceSessionForQuery({
-    liveTraceItems,
+    promptBuilderData,
+    recentLoading,
     recentRequests,
-    selectedRequestId,
-  }), [liveTraceItems, recentRequests, selectedRequestId])
-  const selectedSessionIdForQuery = String(
-    selectedSessionForQuery?.session_id
-    ?? traceData?.summary?.session_id
-    ?? ''
-  ).trim()
-  const selectedConversationIdForQuery = String(
-    selectedSessionForQuery?.conversation_id
-    ?? traceData?.summary?.conversation_id
-    ?? ''
-  ).trim()
-  const tribeFeedParams = useMemo(() => buildTraceTribeFeedParams({
-    selectedRequestId,
-    selectedSessionIdForQuery,
+    recentRequestsQuery,
+    refreshLiveSnapshot,
+    runtimeSnapshot,
     selectedConversationIdForQuery,
-  }), [selectedConversationIdForQuery, selectedRequestId, selectedSessionIdForQuery])
-  const tribeFeedQuery = useTraceTribeFeedQuery({
-    queryParams: tribeFeedParams,
-    enabled: Boolean(selectedRequestId || selectedSessionIdForQuery || selectedConversationIdForQuery),
-    pollingEnabled: liveFeedEnabled,
-    pollingTick,
-    pollingInterval: Math.max(10, pollingInterval),
-  })
-  const tribeEvents = Array.isArray(tribeFeedQuery.tribeFeedPayload?.items) ? tribeFeedQuery.tribeFeedPayload.items : []
-  const tribeEventsLoading = tribeFeedQuery.loading || tribeFeedQuery.refreshing
-  const tribeEventsError = tribeFeedQuery.tribeFeedError
-  const selectedTraceQuery = useTraceSnapshotQuery({
-    requestId: selectedRequestId,
-    enabled: Boolean(selectedRequestId),
-    pollingEnabled: liveFeedEnabled && !liveFeedConnected,
+    selectedSessionIdForQuery,
+    selectedTraceQuery,
+    tribeEvents,
+    tribeEventsError,
+    tribeEventsLoading,
+    tribeFeedQuery,
+  } = useTraceHomeDataSources({
+    liveFeedEnabled,
     pollingTick,
     pollingInterval,
+    recentKeyword,
+    recentStatusFilter,
+    selectedRequestId,
+    traceData,
   })
 
   const load = useCallback(async (id, options = {}) => {
@@ -204,8 +132,25 @@ export function useTraceHomeController({
     navigate(buildTraceDetailPath(requestId))
   }, [navigate, setSelectedRequestId])
 
-  const latestRequest = recentRequests[0] ?? null
-  const traceSearch = buildTraceSearchState(inputId)
+  const traceHomeView = buildTraceHomeControllerView({
+    historyExpanded,
+    inputId,
+    liveFeedConnected,
+    liveFeedEnabled,
+    liveFeedLastTs,
+    liveTraceError,
+    liveTraceItems,
+    liveTraceTimelineEntries,
+    pageVisible,
+    pollingEnabled,
+    recentKeyword,
+    recentRequests,
+    selectedRequestId,
+    traceData,
+    traceInfo,
+    tribeEvents,
+  })
+  const { traceSearch } = traceHomeView
 
   const handleTraceSearch = useCallback(() => {
     if (traceSearch.action === 'clear') {
@@ -220,69 +165,6 @@ export function useTraceHomeController({
     setHistoryExpanded(false)
     setRecentKeyword(traceSearch.value)
   }, [load, traceSearch.action, traceSearch.value])
-
-  const { healthy: currentTraceHealthy } = getTraceStatusHealth(traceInfo)
-  const { className: liveFeedStatusClass, text: liveFeedStatusText } = getTraceLiveFeedStatus({
-    pollingEnabled,
-    pageVisible,
-    liveFeedConnected,
-  })
-  const {
-    selectedLiveTraceItem,
-    selectedSessionFallback,
-    selectedTraceTitleSource,
-    selectedLiveTraceTimelineEntries,
-    selectedSessionId,
-    selectedConversationId,
-    linkedTribeEvents,
-    linkedTribeEventList,
-  } = buildSelectedTraceRequestContext({
-    liveTraceItems,
-    recentRequests,
-    selectedRequestId,
-    traceData,
-    liveTraceTimelineEntries,
-    tribeEvents,
-    matchTribeEvent: isTribeEventLinkedToSelection,
-  })
-  const selectedLiveTraceTitle = selectedRequestId
-    ? getSessionDisplayTitle(selectedSessionFallback, selectedTraceTitleSource)
-    : null
-  const {
-    isHistorySearchMode,
-    shouldAutoShowHistory,
-    showHistoryPanel,
-    activeFeedTitle,
-    activeFeedDescription,
-    activeListTitle,
-    activeListDescription,
-    activeCountLabel,
-    historySectionHint,
-    canCollapseHistory,
-  } = buildTraceHistoryViewState({
-    recentKeyword,
-    liveFeedConnected,
-    liveTraceItems,
-    liveTraceError,
-    historyExpanded,
-  })
-  const selectedTraceStageMeta = getTraceActiveStageMeta(traceData)
-  const selectedIssueCount = getTraceIssueCount(traceData)
-  const selectedRunningCount = getTraceRunningCount(traceData)
-  const selectedCurrentNodeLabel = traceData ? getLiveTraceCurrentLabel(traceData) : '等待选中请求'
-  const selectedOutputPreview = traceData ? getLiveTraceOutputPreview(traceData) : ''
-  const liveModeLabel = getTraceLiveModeLabel({ pollingEnabled, pageVisible, liveFeedConnected })
-  const liveModeCaption = liveFeedLastTs
-    ? `最近事件 ${formatRecentTraceTime(liveFeedLastTs)}`
-    : (liveTraceItems.length > 0 ? `${liveTraceItems.length} 条活跃请求` : '等待活跃请求')
-  const tracePulseNodes = buildTracePulseNodes({
-    selectedLiveTraceTitle,
-    selectedCurrentNodeLabel,
-    selectedTraceStageMeta,
-    liveModeLabel,
-    liveFeedEnabled,
-    linkedTribeEvents,
-  })
 
   const focusRequestOverview = useCallback((requestId) => {
     const action = getTraceOverviewFocusAction({ requestId, traceData, liveTraceItems })
@@ -313,33 +195,17 @@ export function useTraceHomeController({
   }, [applyTraceSelection, load])
 
   return {
-    activeCountLabel,
-    activeFeedDescription,
-    activeFeedTitle,
-    activeListDescription,
-    activeListTitle,
     advancedViewsExpanded,
-    canCollapseHistory,
-    currentTraceHealthy,
     error,
     focusLiveTraceItem,
     focusRequestOverview,
     groupStats,
     handleTraceSearch,
-    historySectionHint,
     inlineOverviewRef,
     inlineOverviewVisible,
     inputId,
-    isHistorySearchMode,
-    latestRequest,
-    linkedTribeEventList,
-    linkedTribeEvents,
     liveFeedConnected,
     liveFeedLastTs,
-    liveFeedStatusClass,
-    liveFeedStatusText,
-    liveModeCaption,
-    liveModeLabel,
     liveTraceError,
     liveTraceItems,
     liveTraceLoading,
@@ -352,17 +218,7 @@ export function useTraceHomeController({
     recentRequests,
     recentStatusFilter,
     runtimeSnapshot,
-    selectedConversationId,
-    selectedCurrentNodeLabel,
-    selectedIssueCount,
-    selectedLiveTraceItem,
-    selectedLiveTraceTimelineEntries,
-    selectedLiveTraceTitle,
-    selectedOutputPreview,
     selectedRequestId,
-    selectedRunningCount,
-    selectedSessionId,
-    selectedTraceStageMeta,
     setAdvancedViewsExpanded,
     setHistoryExpanded,
     setInlineOverviewVisible,
@@ -371,11 +227,9 @@ export function useTraceHomeController({
     setRecentStatusFilter,
     setTraceData,
     setTraceInfo,
-    showHistoryPanel,
     traceGroupCount: GROUPS.length,
+    ...traceHomeView,
     traceInfo,
-    tracePulseNodes,
-    traceSearch,
     tribeEventsError,
     tribeEventsLoading,
     refreshLiveData: () => Promise.allSettled([recentRequestsQuery.refetch(), refreshLiveSnapshot()]),

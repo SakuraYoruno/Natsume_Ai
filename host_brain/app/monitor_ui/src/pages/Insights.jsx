@@ -1,8 +1,7 @@
-﻿import React, { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { RefreshCw, ShieldCheck, AlertTriangle, Bot, Database, Tv, GitMerge, Activity, ArrowLeft } from 'lucide-react'
 import DigitalLifeRuntimeCard from '../features/life/components/DigitalLifeRuntimeCard.jsx'
-import LoadingNotice from '../shared/ui/LoadingNotice.jsx'
 import LivingPulseStrip from '../shared/ui/LivingPulseStrip.jsx'
 import NoticeBanner from '../shared/ui/NoticeBanner.jsx'
 import SampleMeta from '../shared/ui/observability/SampleMeta.jsx'
@@ -14,14 +13,9 @@ import {
   buildInsightsDashboardViewModel,
 } from '../features/observability/insightsDashboardModel.js'
 import { useInsightsSummaryQuery } from '../features/observability/insightsQueries.js'
+import InsightsDetailPane from '../features/observability/components/insights/InsightsDetailPane.jsx'
 import useAppStore from '../store/useAppStore.js'
 
-const InsightsGlobalGroup = React.lazy(() => import('../features/observability/components/insights/InsightsGlobalGroup.jsx'))
-const InsightsMemoryGroup = React.lazy(() => import('../features/observability/components/insights/InsightsMemoryGroup.jsx'))
-const InsightsLlmGroup = React.lazy(() => import('../features/observability/components/insights/InsightsLlmGroup.jsx'))
-const InsightsSafetyGroup = React.lazy(() => import('../features/observability/components/insights/InsightsSafetyGroup.jsx'))
-const InsightsStateGroup = React.lazy(() => import('../features/observability/components/insights/InsightsStateGroup.jsx'))
-const InsightsVtsGroup = React.lazy(() => import('../features/observability/components/insights/InsightsVtsGroup.jsx'))
 
 const INSIGHT_GROUP_ICONS = {
   activity: Activity,
@@ -32,7 +26,6 @@ const INSIGHT_GROUP_ICONS = {
   shield: ShieldCheck,
   tv: Tv,
 }
-
 function getInsightIcon(iconKey) {
   return INSIGHT_GROUP_ICONS[iconKey] || Activity
 }
@@ -219,108 +212,21 @@ export default function Insights() {
           })}
         </div>
       ) : (
-        <div className="space-y-8">
-          <div className="card p-4">
-            <button className="btn-secondary" onClick={() => navigate('/observability/insights')}>
-              <ArrowLeft size={16} /> 返回分组
-            </button>
-          </div>
-
-          {currentGroup === 'global' && (
-            <React.Suspense
-              fallback={(
-                <div className="card p-4">
-                  <LoadingNotice>正在加载全局异常洞察…</LoadingNotice>
-                </div>
-              )}
-            >
-              <InsightsGlobalGroup
-                windowMinutes={windowMinutes}
-                govData={govData}
-                errData={errData}
-                focusTarget={focusTarget}
-                {...deepQueryProps}
-              />
-            </React.Suspense>
-          )}
-
-          {currentGroup === 'memory' && (
-            <React.Suspense
-              fallback={(
-                <div className="card p-4">
-                  <LoadingNotice>正在加载记忆器官洞察…</LoadingNotice>
-                </div>
-              )}
-            >
-              <InsightsMemoryGroup
-                windowMinutes={windowMinutes}
-                subsysData={subsysData}
-                memoryData={memoryData}
-                {...deepQueryProps}
-              />
-            </React.Suspense>
-          )}
-
-          {currentGroup === 'llm' && (
-            <React.Suspense
-              fallback={(
-                <div className="card p-4">
-                  <LoadingNotice>正在加载执行与推理洞察…</LoadingNotice>
-                </div>
-              )}
-            >
-              <InsightsLlmGroup
-                windowMinutes={windowMinutes}
-                agentData={agentData}
-                llmCallData={llmCallData}
-                {...deepQueryProps}
-              />
-            </React.Suspense>
-          )}
-
-          {currentGroup === 'safety' && (
-            <React.Suspense
-              fallback={(
-                <div className="card p-4">
-                  <LoadingNotice>正在加载安全与护栏洞察…</LoadingNotice>
-                </div>
-              )}
-            >
-              <InsightsSafetyGroup
-                windowMinutes={windowMinutes}
-                qaData={qaData}
-                {...deepQueryProps}
-              />
-            </React.Suspense>
-          )}
-
-          {currentGroup === 'state' && (
-            <React.Suspense
-              fallback={(
-                <div className="card p-4">
-                  <LoadingNotice>正在加载状态与规范洞察…</LoadingNotice>
-                </div>
-              )}
-            >
-              <InsightsStateGroup
-                windowMinutes={windowMinutes}
-                {...deepQueryProps}
-              />
-            </React.Suspense>
-          )}
-
-          {currentGroup === 'vts' && (
-            <React.Suspense
-              fallback={(
-                <div className="card p-4">
-                  <LoadingNotice>正在加载表情通道洞察…</LoadingNotice>
-                </div>
-              )}
-            >
-              <InsightsVtsGroup vtsData={vtsData} />
-            </React.Suspense>
-          )}
-        </div>
+        <InsightsDetailPane
+          agentData={agentData}
+          currentGroup={currentGroup}
+          deepQueryProps={deepQueryProps}
+          errData={errData}
+          focusTarget={focusTarget}
+          govData={govData}
+          llmCallData={llmCallData}
+          memoryData={memoryData}
+          navigate={navigate}
+          qaData={qaData}
+          subsysData={subsysData}
+          vtsData={vtsData}
+          windowMinutes={windowMinutes}
+        />
       )}
 
     </div>
