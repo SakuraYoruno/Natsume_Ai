@@ -8,6 +8,7 @@ import {
 import '@xyflow/react/dist/style.css'
 import dagre from '@dagrejs/dagre'
 import { Activity, Bug, GitBranch, LockKeyhole } from 'lucide-react'
+import { PENTEST_COPY } from '../../../../shared/content/terminology.js'
 import AttackGraphNode from './AttackGraphNode.jsx'
 
 const NODE_TYPES = { attackGraphNode: AttackGraphNode }
@@ -121,10 +122,19 @@ export default function AttackGraphCanvas({ graph, className = '' }) {
   return (
     <div className={`space-y-3 ${className}`}>
       <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
-        <SummaryTile icon={GitBranch} label="Nodes" value={summary.nodes ?? nodes.length} tone="border-cyan-100 bg-cyan-50/70 text-cyan-800" />
-        <SummaryTile icon={Activity} label="Edges" value={summary.edges ?? graph?.edges?.length ?? 0} tone="border-blue-100 bg-blue-50/70 text-blue-800" />
-        <SummaryTile icon={Bug} label="Findings" value={summary.findings ?? 0} tone="border-rose-100 bg-rose-50/70 text-rose-800" />
-        <SummaryTile icon={LockKeyhole} label="Gates" value={summary.gated ?? 0} tone="border-orange-100 bg-orange-50/70 text-orange-800" />
+        <SummaryTile icon={GitBranch} label="节点" value={summary.nodes ?? nodes.length} tone="border-cyan-100 bg-cyan-50/70 text-cyan-800" />
+        <SummaryTile icon={Activity} label="连线" value={summary.edges ?? graph?.edges?.length ?? 0} tone="border-blue-100 bg-blue-50/70 text-blue-800" />
+        <SummaryTile icon={Bug} label="发现" value={summary.findings ?? 0} tone="border-rose-100 bg-rose-50/70 text-rose-800" />
+        <SummaryTile icon={LockKeyhole} label="门禁" value={summary.gated ?? 0} tone="border-orange-100 bg-orange-50/70 text-orange-800" />
+      </div>
+
+      <div className="grid grid-cols-1 gap-2 md:grid-cols-4">
+        {PENTEST_COPY.graphLegend.map((item) => (
+          <div key={item.key} className={`rounded-lg border px-3 py-2 ${item.className}`}>
+            <div className="text-xs font-semibold">{item.label}</div>
+            <div className="mt-0.5 text-[11px] leading-4 opacity-80">{item.detail}</div>
+          </div>
+        ))}
       </div>
 
       <div className="h-[360px] overflow-hidden rounded-xl border border-gray-200 bg-slate-50">
@@ -164,7 +174,10 @@ export default function AttackGraphCanvas({ graph, className = '' }) {
               {selectedNode.riskLabel}
             </span>
           </div>
-          <div className="mt-1 text-xs text-gray-500">{selectedNode.meta || 'no metadata'}</div>
+          <div className="mt-1 text-xs text-gray-500">{selectedNode.meta || '暂无节点元信息'}</div>
+          {selectedNode.evidenceCount ? (
+            <div className="mt-1 text-xs font-semibold text-cyan-700">{selectedNode.evidenceCount} 条 evidence refs</div>
+          ) : null}
         </div>
       ) : null}
     </div>
