@@ -188,6 +188,16 @@ async function stubInsightsApis(page) {
 }
 
 test.describe('Monitor interaction smoke', () => {
+  test('Cockpit command rail exposes Life Systems quick routes', async ({ page, baseURL }) => {
+    await stubCommonReadApis(page)
+    await page.goto(monitorUrl(baseURL, '/cockpit'), { waitUntil: 'domcontentloaded' })
+    await expect(page.getByRole('heading', { name: '现在先处理什么' })).toBeVisible()
+    await expect(page.getByText('观测 Gate')).toBeVisible()
+
+    await page.locator('a[href="#/life/pathologies"]').filter({ hasText: '只看已经形成的异常模式' }).click()
+    await expect.poll(() => new URL(page.url()).hash).toBe('#/life/pathologies')
+  })
+
   test('Pentest wizard toggles lab-only controls and keeps readonly path available', async ({ page, baseURL }) => {
     await stubPentestApis(page)
     await page.goto(monitorUrl(baseURL, '/security/pentest'), { waitUntil: 'domcontentloaded' })

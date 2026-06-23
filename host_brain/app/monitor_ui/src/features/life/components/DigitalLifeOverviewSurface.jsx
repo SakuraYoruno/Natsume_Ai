@@ -1,7 +1,9 @@
 import React from 'react'
 import DigitalLifeAvatarSection from './DigitalLifeAvatarSection.jsx'
+import DigitalLifeCommandRail from './DigitalLifeCommandRail.jsx'
 import DigitalLifeHeroSection from './DigitalLifeHeroSection.jsx'
 import DigitalLifeLazySections from './DigitalLifeLazySections.jsx'
+import DigitalLifeNav from './DigitalLifeNav.jsx'
 import DigitalLifeOverviewHeader from './DigitalLifeOverviewHeader.jsx'
 import DigitalLifeOverviewNotices from './DigitalLifeOverviewNotices.jsx'
 import DigitalLifeRuntimeDetailSection from './DigitalLifeRuntimeDetailSection.jsx'
@@ -64,6 +66,8 @@ export default function DigitalLifeOverviewSurface({
         refreshAnimating={refreshAnimating}
       />
 
+      <DigitalLifeNav />
+
       <DigitalLifeHeroSection
         modeMeta={modeMeta}
         lifeBodyModel={lifeBodyModel}
@@ -75,6 +79,17 @@ export default function DigitalLifeOverviewSurface({
         windowMinutes={windowMinutes}
         overviewTrackedSections={overviewTrackedSections}
         overviewUpdatedAt={overviewUpdatedAt}
+      />
+
+      <DigitalLifeCommandRail
+        dashboardBusy={dashboardBusy}
+        error={error}
+        hasRuntimeSnapshot={hasRuntimeSnapshot}
+        lifeBodyModel={lifeBodyModel}
+        onRefreshDashboard={onRefreshDashboard}
+        overviewLoadState={overviewLoadState}
+        refreshWarning={refreshWarning}
+        runtimeError={runtimeError}
       />
 
       <MainChainReshapePanel model={mainChainReshapeModel} />

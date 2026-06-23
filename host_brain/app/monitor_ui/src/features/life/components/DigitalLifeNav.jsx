@@ -12,26 +12,36 @@ import {
   Wand2,
   Waves,
 } from 'lucide-react'
+import { LIFE_COPY, NAV_LABELS } from '../../../shared/content/terminology.js'
 
-const ITEMS = [
-  { to: '/cockpit', label: '总览', icon: Sparkles },
-  { to: '/life/timeline', label: '生命时间轴', icon: Activity },
-  { to: '/life/pathologies', label: '病灶中心', icon: Bell },
-  { to: '/life/emotion', label: '情绪', icon: Waves },
-  { to: '/life/relationship', label: '关系', icon: Heart },
-  { to: '/life/memory', label: '记忆', icon: Database },
-  { to: '/life/runtime-mode', label: '存在态', icon: Orbit },
-  { to: '/life/inner-world', label: '内在世界', icon: MoonStar },
-  { to: '/life/response-policy', label: '回复策略', icon: Sparkles },
-  { to: '/life/self-model', label: '自我模型', icon: Brain },
-  { to: '/operations/persona', label: '人格文案', icon: Wand2 },
-]
+const ICONS = {
+  cockpit: Sparkles,
+  lifeTimeline: Activity,
+  pathologies: Bell,
+  emotion: Waves,
+  relationship: Heart,
+  memory: Database,
+  lifeRuntime: Activity,
+  runtimeMode: Orbit,
+  innerWorld: MoonStar,
+  responsePolicy: Wand2,
+  selfModel: Brain,
+}
+
+const ITEMS = LIFE_COPY.navItems.map((item) => ({
+  ...item,
+  label: NAV_LABELS[item.labelKey] || item.labelKey,
+  icon: ICONS[item.labelKey] || Sparkles,
+}))
 
 export default function DigitalLifeNav() {
   return (
-    <div className="rounded-2xl border border-gray-200 bg-white p-3 shadow-sm">
-      <div className="mb-2 text-xs font-medium tracking-wide text-gray-400">
-        数字生命体导航
+    <div className="rounded-xl border border-white/80 bg-white/86 p-3 shadow-sm">
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+        <div className="text-xs font-semibold uppercase tracking-wide text-primary/75">
+          {LIFE_COPY.lifeNavTitle}
+        </div>
+        <div className="text-xs text-gray-400">{LIFE_COPY.lifeNavHint}</div>
       </div>
       <div className="flex flex-wrap gap-2">
         {ITEMS.map(({ to, label, icon: Icon }) => (

@@ -85,6 +85,38 @@ export const DATA_STATE_COPY = Object.freeze({
   },
 })
 
+export const LIFE_COPY = Object.freeze({
+  cockpitTitle: '数字生命体总览',
+  cockpitSubtitle: '把运行快照、器官状态、病灶、事件链和策略动作放在同一个工作台。',
+  cockpitEyebrow: 'Cockpit / Life Systems',
+  commandRailTitle: '现在先处理什么',
+  commandRailDescription: '首屏优先回答三件事：数据是否可信、哪个器官或病灶最该看、下一步入口在哪里。',
+  gateTitle: '观测 Gate',
+  quickLinksTitle: '常用入口',
+  guidanceTitle: '优先动作',
+  lifeNavTitle: 'Life Systems',
+  lifeNavHint: '按系统域快速跳转，标签与左侧主导航保持一致。',
+  quickLinks: [
+    { key: 'timeline', to: '/life/timeline', label: '时间轴', detail: '按事件顺序回看状态变化。' },
+    { key: 'pathologies', to: '/life/pathologies', label: '病灶', detail: '只看已经形成的异常模式。' },
+    { key: 'runtime', to: '/life/runtime', label: '运行态', detail: '检查 runtime 与 memory 接入。' },
+    { key: 'memory', to: '/life/memory', label: '记忆', detail: '定位记忆召回和样本质量。' },
+  ],
+  navItems: [
+    { to: '/cockpit', labelKey: 'cockpit' },
+    { to: '/life/timeline', labelKey: 'lifeTimeline' },
+    { to: '/life/pathologies', labelKey: 'pathologies' },
+    { to: '/life/emotion', labelKey: 'emotion' },
+    { to: '/life/relationship', labelKey: 'relationship' },
+    { to: '/life/memory', labelKey: 'memory' },
+    { to: '/life/runtime', labelKey: 'lifeRuntime' },
+    { to: '/life/runtime-mode', labelKey: 'runtimeMode' },
+    { to: '/life/inner-world', labelKey: 'innerWorld' },
+    { to: '/life/response-policy', labelKey: 'responsePolicy' },
+    { to: '/life/self-model', labelKey: 'selfModel' },
+  ],
+})
+
 export const PENTEST_COPY = Object.freeze({
   labTitle: '渗透实验室',
   labEyebrow: 'Security Lab / Pentest Agent',
