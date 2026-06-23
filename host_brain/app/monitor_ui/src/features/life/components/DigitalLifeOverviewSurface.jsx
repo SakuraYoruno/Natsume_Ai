@@ -37,6 +37,7 @@ export default function DigitalLifeOverviewSurface({
   overviewUpdatedAt,
   heroDescription,
   heroMetaItems,
+  commandRailModel,
   mainChainReshapeModel,
   wallClockSoakQuery,
   avatarStateQuery,
@@ -82,14 +83,10 @@ export default function DigitalLifeOverviewSurface({
       />
 
       <DigitalLifeCommandRail
+        model={commandRailModel}
         dashboardBusy={dashboardBusy}
-        error={error}
-        hasRuntimeSnapshot={hasRuntimeSnapshot}
-        lifeBodyModel={lifeBodyModel}
         onRefreshDashboard={onRefreshDashboard}
-        overviewLoadState={overviewLoadState}
         refreshWarning={refreshWarning}
-        runtimeError={runtimeError}
       />
 
       <MainChainReshapePanel model={mainChainReshapeModel} />

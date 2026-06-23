@@ -106,6 +106,156 @@ async function stubOverviewApis(page) {
   }))
 }
 
+async function stubCockpitApis(page) {
+  await stubCommonReadApis(page)
+  await page.route('**/obs/life-body**', (route) => fulfillJson(route, {
+    timestamp: '2026-06-20T08:00:00Z',
+    derived: {
+      hasRuntimeSnapshot: true,
+      hasMemoryData: true,
+      hasMemorySamples: true,
+      avgMemorySuccessRate: 91,
+      sampledMemorySubsystemCount: 3,
+      configuredMemorySubsystemCount: 4,
+      currentEmotion: 'CALM',
+      currentBondStage: 'FRIEND',
+      replyPosture: 'steady',
+      riskLevel: 'low',
+      overviewUpdatedAt: '2026-06-20T08:00:00Z',
+      runtimeUpdatedAt: '2026-06-20T08:00:00Z',
+    },
+    runtimeSnapshot: {
+      timestamp: '2026-06-20T08:00:00Z',
+      sys_mode: 'normal',
+      background_runtime: { status: 'healthy' },
+      emotion_context: { emotion_tag: 'CALM' },
+      bond_state: { current_stage: 'FRIEND', trend: 'up' },
+      runtime_summary: {
+        headline: '情绪、记忆和执行层均有样本，当前需要先确认情绪层波动。',
+        reply_posture: { style: 'steady' },
+      },
+      self_reflection_pulse: {
+        narrative_guardrails: { risk_level: 'low' },
+      },
+    },
+    memoryData: {
+      subsystems: [
+        { name: 'semantic', success_rate: 94 },
+        { name: 'episodic', success_rate: 88 },
+      ],
+    },
+    servicesData: {
+      total: 2,
+      up: 2,
+      services: [],
+    },
+    model: {
+      organSystems: [
+        {
+          id: 'emotion',
+          name: '情绪层',
+          status: 'warning',
+          summary: '情绪样本存在短时振幅，需要先确认是否来自最近输入。',
+          drilldownPath: '/life/emotion',
+          drilldownLabel: '查看情绪',
+        },
+        {
+          id: 'memory',
+          name: '记忆层',
+          status: 'stable',
+          summary: '记忆召回保持稳定。',
+          drilldownPath: '/life/memory',
+          drilldownLabel: '查看记忆',
+        },
+      ],
+      organStatusCounts: { warning: 1, stable: 1 },
+      primaryOrgan: {
+        id: 'emotion',
+        name: '情绪层',
+        status: 'warning',
+        summary: '情绪样本存在短时振幅，需要先确认是否来自最近输入。',
+        drilldownPath: '/life/emotion',
+        drilldownLabel: '查看情绪',
+      },
+      pathologies: [
+        {
+          id: 'emotion-wave',
+          organId: 'emotion',
+          organLabel: '情绪层',
+          title: '情绪振幅异常',
+          severity: 'warning',
+          symptom: '最近窗口出现连续情绪振幅升高。',
+          impactLabel: '可能影响回复姿态和执行节律。',
+          detailPath: '/life/pathologies/emotion-wave',
+        },
+      ],
+      primaryPathology: {
+        id: 'emotion-wave',
+        organId: 'emotion',
+        organLabel: '情绪层',
+        title: '情绪振幅异常',
+        severity: 'warning',
+        symptom: '最近窗口出现连续情绪振幅升高。',
+        impactLabel: '可能影响回复姿态和执行节律。',
+        detailPath: '/life/pathologies/emotion-wave',
+      },
+      timelineEvents: [
+        {
+          id: 'evt-emotion-1',
+          type: 'pathology',
+          organId: 'emotion',
+          organLabel: '情绪层',
+          title: '情绪振幅升高',
+          detail: '最近一次输入触发情绪振幅上升。',
+          severity: 'warning',
+          to: '/life/timeline?organ=emotion&type=pathology',
+        },
+        {
+          id: 'evt-memory-1',
+          type: 'memory',
+          organId: 'memory',
+          organLabel: '记忆层',
+          title: '记忆召回成功',
+          detail: '记忆召回命中率保持稳定。',
+          severity: 'info',
+          to: '/life/timeline?organ=memory',
+        },
+      ],
+      diagnosticGuidance: {
+        summary: '当前最该先处理的是情绪层的病灶，然后回到生命事件链确认影响范围。',
+        actions: [
+          {
+            id: 'pathology',
+            tone: 'warning',
+            title: '情绪层 · 情绪振幅异常',
+            detail: '最近窗口出现连续情绪振幅升高。',
+            to: '/life/pathologies/emotion-wave',
+            label: '进入病灶详情',
+          },
+          {
+            id: 'organ',
+            tone: 'warning',
+            title: '情绪层',
+            detail: '情绪样本存在短时振幅，需要先确认是否来自最近输入。',
+            to: '/life/emotion',
+            label: '查看情绪',
+          },
+        ],
+      },
+    },
+  }))
+  await page.route('**/obs/digital-life/wall-clock-soak**', (route) => fulfillJson(route, {
+    status: 'PASS',
+    verdict: 'PASS',
+    updated_at: '2026-06-20T08:00:00Z',
+  }))
+  await page.route('**/obs/avatar/state**', (route) => fulfillJson(route, {
+    ok: true,
+    behavior_id: 'idle',
+    updated_at: '2026-06-20T08:00:00Z',
+  }))
+}
+
 async function stubPentestApis(page) {
   await stubCommonReadApis(page)
   await page.route('**/v1/pentest/environment**', (route) => fulfillJson(route, {
@@ -524,12 +674,18 @@ test.describe('Monitor interaction smoke', () => {
   })
 
   test('Cockpit command rail exposes Life Systems quick routes', async ({ page, baseURL }) => {
-    await stubCommonReadApis(page)
+    await stubCockpitApis(page)
     await page.goto(monitorUrl(baseURL, '/cockpit'), { waitUntil: 'domcontentloaded' })
     await expect(page.getByRole('heading', { name: '现在先处理什么' })).toBeVisible()
-    await expect(page.getByText('观测 Gate')).toBeVisible()
+    const mission = page.getByRole('region', { name: 'Cockpit Mission Control' })
+    await expect(mission).toBeVisible()
+    await expect(mission.getByText('Mission brief')).toBeVisible()
+    await expect(mission.getByText('先处理 情绪层 · 情绪振幅异常')).toBeVisible()
+    await expect(mission.getByText('观测可信度')).toBeVisible()
+    await expect(mission.getByText('首要入口')).toBeVisible()
+    await expect(mission.getByRole('link', { name: /进入主病灶/ })).toHaveAttribute('href', '#/life/pathologies/emotion-wave')
 
-    await page.locator('a[href="#/life/pathologies"]').filter({ hasText: '只看已经形成的异常模式' }).click()
+    await mission.locator('a[href="#/life/pathologies"]').filter({ hasText: '只看已经形成的异常模式' }).click()
     await expect.poll(() => new URL(page.url()).hash).toBe('#/life/pathologies')
   })
 

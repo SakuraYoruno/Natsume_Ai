@@ -5,15 +5,19 @@ import {
   AlertTriangle,
   ArrowRight,
   CheckCircle2,
+  Clock3,
+  Compass,
   Database,
+  Gauge,
   HeartPulse,
   RefreshCw,
   Route,
+  ShieldCheck,
   Stethoscope,
+  Target,
   Waypoints,
 } from 'lucide-react'
 import { LIFE_COPY } from '../../../shared/content/terminology.js'
-import { getLoadStateMeta } from '../../../models/loadState.js'
 import { LIFE_BODY_TONE_CLASSES, LIFE_BODY_TONE_LABELS } from '../../../shared/statusMeta.js'
 import DataState from '../../../shared/ui/DataState.jsx'
 
@@ -31,20 +35,149 @@ const QUICK_LINK_ICONS = {
   memory: Database,
 }
 
+const METRIC_ICONS = {
+  trust: ShieldCheck,
+  runtime: Gauge,
+  organs: HeartPulse,
+  samples: Clock3,
+}
+
+const MISSION_STATUS_META = {
+  healthy: {
+    label: '可直接诊断',
+    className: 'border-emerald-200 bg-emerald-50/65',
+    badgeClassName: 'border-emerald-200 bg-emerald-100 text-emerald-700',
+  },
+  attention: {
+    label: '需要处理',
+    className: 'border-orange-200 bg-orange-50/65',
+    badgeClassName: 'border-orange-200 bg-orange-100 text-orange-700',
+  },
+  degraded: {
+    label: '观测降级',
+    className: 'border-blue-200 bg-blue-50/65',
+    badgeClassName: 'border-blue-200 bg-blue-100 text-blue-700',
+  },
+  blocked: {
+    label: '先恢复链路',
+    className: 'border-red-200 bg-red-50/70',
+    badgeClassName: 'border-red-200 bg-red-100 text-red-700',
+  },
+}
+
+const GATE_STATE_META = {
+  ready: {
+    icon: CheckCircle2,
+    className: 'border-emerald-200 bg-emerald-50/70',
+    textClassName: 'text-emerald-700',
+    iconClassName: 'text-emerald-600',
+  },
+  warning: {
+    icon: AlertTriangle,
+    className: 'border-orange-200 bg-orange-50/70',
+    textClassName: 'text-orange-700',
+    iconClassName: 'text-orange-600',
+  },
+  blocked: {
+    icon: AlertTriangle,
+    className: 'border-red-200 bg-red-50/70',
+    textClassName: 'text-red-700',
+    iconClassName: 'text-red-600',
+  },
+}
+
+const METRIC_TONE_CLASSES = {
+  ready: 'border-emerald-200 bg-emerald-50/70 text-emerald-700',
+  degraded: 'border-orange-200 bg-orange-50/70 text-orange-700',
+  blocked: 'border-red-200 bg-red-50/70 text-red-700',
+}
+
 function GateCard({ label, state, detail }) {
-  const ready = state === 'ready'
+  const meta = GATE_STATE_META[state] || GATE_STATE_META.warning
+  const Icon = meta.icon
+
   return (
-    <div className={`rounded-lg border px-3 py-3 ${ready ? 'border-emerald-200 bg-emerald-50/70' : 'border-orange-200 bg-orange-50/70'}`}>
+    <div className={`rounded-lg border px-3 py-3 ${meta.className}`}>
       <div className="flex items-center justify-between gap-2">
         <div className="text-xs font-semibold text-gray-800">{label}</div>
-        {ready ? (
-          <CheckCircle2 size={14} className="text-emerald-600" />
-        ) : (
-          <AlertTriangle size={14} className="text-orange-600" />
-        )}
+        <Icon size={14} className={meta.iconClassName} />
       </div>
-      <div className={`mt-1 text-xs leading-5 ${ready ? 'text-emerald-700' : 'text-orange-700'}`}>
+      <div className={`mt-1 text-xs leading-5 ${meta.textClassName}`}>
         {detail}
+      </div>
+    </div>
+  )
+}
+
+function MetricCard({ item }) {
+  const Icon = METRIC_ICONS[item.key] || Activity
+  const toneClass = METRIC_TONE_CLASSES[item.tone] || METRIC_TONE_CLASSES.degraded
+
+  return (
+    <div className="rounded-lg border border-white/80 bg-white/86 px-3 py-3 shadow-sm">
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex min-w-0 items-center gap-2">
+          <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-white/80 bg-white text-primary shadow-sm">
+            <Icon size={15} />
+          </span>
+          <div className="min-w-0">
+            <div className="truncate text-xs font-semibold text-gray-500">{item.label}</div>
+            <div className="truncate text-sm font-semibold text-gray-900">{item.value}</div>
+          </div>
+        </div>
+        <span className={`shrink-0 rounded-full border px-2 py-0.5 text-[11px] font-medium ${toneClass}`}>
+          {item.tone === 'ready' ? 'OK' : item.tone === 'blocked' ? 'Block' : 'Watch'}
+        </span>
+      </div>
+      <div className="mt-2 line-clamp-2 text-xs leading-5 text-gray-500">{item.detail}</div>
+    </div>
+  )
+}
+
+function MissionBrief({ model, dashboardBusy, onRefreshDashboard }) {
+  const statusMeta = MISSION_STATUS_META[model.status] || MISSION_STATUS_META.degraded
+  const primaryAction = model.primaryAction || { label: '查看 Cockpit', to: '/cockpit', detail: '' }
+  const secondaryAction = model.secondaryAction || { label: '查看时间轴', to: '/life/timeline', detail: '' }
+
+  return (
+    <div className={`self-start rounded-lg border p-4 ${statusMeta.className}`}>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="inline-flex items-center gap-1 text-xs font-semibold uppercase tracking-wide text-primary/75">
+              <Compass size={13} />
+              Mission brief
+            </span>
+            <span className={`rounded-full border px-2 py-0.5 text-[11px] font-semibold ${statusMeta.badgeClassName}`}>
+              {statusMeta.label}
+            </span>
+          </div>
+          <h3 className="mt-2 text-lg font-semibold leading-7 text-gray-950">{model.headline}</h3>
+          <p className="mt-1 max-w-3xl text-sm leading-6 text-gray-600">{model.summary}</p>
+          <div className="mt-2 text-xs leading-5 text-gray-500">
+            主路径：{primaryAction.detail}
+          </div>
+        </div>
+
+        <div className="flex w-full flex-col gap-2 sm:w-auto sm:min-w-[180px]">
+          <Link to={primaryAction.to} className="btn-primary justify-center">
+            <Target size={14} />
+            {primaryAction.label}
+          </Link>
+          <Link to={secondaryAction.to} className="btn-secondary justify-center">
+            <Route size={14} />
+            {secondaryAction.label}
+          </Link>
+          <button
+            type="button"
+            className="btn-secondary justify-center"
+            disabled={dashboardBusy}
+            onClick={onRefreshDashboard}
+          >
+            <RefreshCw size={14} className={dashboardBusy ? 'animate-spin' : ''} />
+            重新同步
+          </button>
+        </div>
       </div>
     </div>
   )
@@ -97,56 +230,28 @@ function QuickLink({ item }) {
 }
 
 export default function DigitalLifeCommandRail({
+  model,
   dashboardBusy,
-  error,
-  hasRuntimeSnapshot,
-  lifeBodyModel,
   onRefreshDashboard,
-  overviewLoadState,
   refreshWarning,
-  runtimeError,
 }) {
-  const guidanceActions = lifeBodyModel?.diagnosticGuidance?.actions || []
-  const loadMeta = getLoadStateMeta(overviewLoadState)
-  const pathologies = lifeBodyModel?.pathologies || []
-  const events = lifeBodyModel?.timelineEvents || []
-  const runtimeIssue = runtimeError || (!hasRuntimeSnapshot ? 'no runtime snapshot' : null)
-
-  const gates = [
-    {
-      label: '总览聚合',
-      state: error ? 'blocked' : 'ready',
-      detail: error ? '观测聚合加载失败，页面会显示降级状态。' : loadMeta.description,
-    },
-    {
-      label: '运行快照',
-      state: runtimeIssue ? 'blocked' : 'ready',
-      detail: runtimeIssue ? '缺少 runtime snapshot，器官排序可信度会下降。' : 'runtime 已接入，可用于判断存在态和执行层。',
-    },
-    {
-      label: '病灶/事件',
-      state: pathologies.length || events.length ? 'ready' : 'blocked',
-      detail: pathologies.length || events.length ? `${pathologies.length} 个病灶，${events.length} 条事件可追踪。` : '当前窗口没有稳定病灶或事件样本。',
-    },
-  ]
+  const railModel = model || {}
+  const guidanceActions = railModel.guidanceActions || []
+  const gates = railModel.gates || []
+  const metricCards = railModel.metricCards || []
 
   return (
-    <section className="rounded-xl border border-white/80 bg-white/86 p-4 shadow-card backdrop-blur-sm">
+    <section
+      aria-label="Cockpit Mission Control"
+      id="cockpit-mission-control"
+      className="rounded-xl border border-white/80 bg-white/86 p-4 shadow-card backdrop-blur-sm"
+    >
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="text-xs font-semibold uppercase tracking-wide text-primary/75">Cockpit workflow</div>
           <h2 className="mt-1 text-base font-semibold text-gray-900">{LIFE_COPY.commandRailTitle}</h2>
           <p className="mt-1 max-w-3xl text-sm leading-6 text-gray-500">{LIFE_COPY.commandRailDescription}</p>
         </div>
-        <button
-          type="button"
-          className="btn-secondary"
-          disabled={dashboardBusy}
-          onClick={onRefreshDashboard}
-        >
-          <RefreshCw size={14} className={dashboardBusy ? 'animate-spin' : ''} />
-          重新同步
-        </button>
       </div>
 
       {refreshWarning ? (
@@ -159,11 +264,24 @@ export default function DigitalLifeCommandRail({
         />
       ) : null}
 
-      <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1.1fr)_minmax(280px,0.75fr)_minmax(280px,0.75fr)]">
+      <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1.25fr)_minmax(320px,0.75fr)]">
+        <MissionBrief
+          model={railModel}
+          dashboardBusy={dashboardBusy}
+          onRefreshDashboard={onRefreshDashboard}
+        />
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+          {metricCards.map((item) => (
+            <MetricCard key={item.key} item={item} />
+          ))}
+        </div>
+      </div>
+
+      <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(300px,0.8fr)_minmax(280px,0.72fr)]">
         <div>
           <div className="mb-2 text-xs font-semibold text-gray-500">{LIFE_COPY.guidanceTitle}</div>
           <div className="grid gap-2">
-            {guidanceActions.slice(0, 3).map((item) => (
+            {guidanceActions.map((item) => (
               <GuidanceAction key={`${item.id}-${item.title}`} item={item} />
             ))}
           </div>
