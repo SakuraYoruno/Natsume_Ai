@@ -153,6 +153,23 @@ export const TRACE_COPY = Object.freeze({
   ],
 })
 
+export const EDGE_COMMAND_COPY = Object.freeze({
+  heroEyebrow: 'Execution / Edge Command',
+  heroTitle: '边缘命令控制台',
+  heroDescription: '把 Edge 下行链路状态、显式控制门、payload 校验和 push 结果放在同一个 gated console，避免高风险命令混在普通 JSON 面板里。',
+  commandRailTitle: 'Edge Command Gate',
+  commandRailDescription: '发送前先确认四件事：Host 能读到 Edge 状态、Edge pusher 已启用、控制门由操作者显式打开、payload JSON 可解析。',
+  gateTitle: '发送 Gate',
+  focusTitle: '建议路径',
+  quickLinksTitle: '相关入口',
+  quickLinks: [
+    { key: 'gateway', to: '/execution/gateway', label: 'Gateway', detail: '检查 Edge / WeChat 网关事件和通道健康。' },
+    { key: 'agentLoop', to: '/execution/agent-loop', label: 'Agent Loop', detail: '从自动执行回路验证端侧动作效果。' },
+    { key: 'tools', to: '/execution/tools', label: 'Tools', detail: '查看工具能力、side-effect 和执行入口。' },
+    { key: 'trace', to: '/observability/trace', label: 'Trace', detail: '追踪命令相关 request 和 edge 节点。' },
+  ],
+})
+
 export const PENTEST_COPY = Object.freeze({
   labTitle: '渗透实验室',
   labEyebrow: 'Security Lab / Pentest Agent',

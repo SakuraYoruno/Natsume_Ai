@@ -324,6 +324,22 @@ async function stubTraceApis(page) {
   await page.route('**/obs/tribe/events**', (route) => fulfillJson(route, { items: [] }))
 }
 
+async function stubEdgeCommandApis(page) {
+  await stubCommonReadApis(page)
+  await page.route('**/internal/edge_command/status', (route) => fulfillJson(route, {
+    enabled: true,
+    edge_base_url: 'http://127.0.0.1:19090',
+    queue_depth: 0,
+  }))
+  await page.route('**/internal/edge_command/push', async (route) => {
+    await fulfillJson(route, {
+      ok: true,
+      command_id: 'edge-smoke-command',
+      echo: await route.request().postDataJSON(),
+    })
+  })
+}
+
 test.describe('Monitor interaction smoke', () => {
   test('Observability overview exposes triage rail and Trace route', async ({ page, baseURL }) => {
     await stubOverviewApis(page)
@@ -435,5 +451,31 @@ test.describe('Monitor interaction smoke', () => {
 
     await fullChainLink.click()
     await expect.poll(() => new URL(page.url()).hash).toBe('#/observability/trace/full')
+  })
+
+  test('Edge command validates payload and requires the control gate', async ({ page, baseURL }) => {
+    await stubEdgeCommandApis(page)
+    await page.goto(monitorUrl(baseURL, '/execution/edge-command'), { waitUntil: 'domcontentloaded' })
+    await expect(page.getByRole('heading', { name: 'Edge Command Gate' })).toBeVisible()
+    await expect(page.getByText('发送 Gate')).toBeVisible()
+
+    const sendButton = page.getByRole('button', { name: '发送到 Edge' })
+    await expect(sendButton).toBeDisabled()
+    await expect(page.getByText('开启控制门后才能发送。')).toBeVisible()
+
+    await page.getByRole('checkbox', { name: '开启控制门' }).check()
+    await expect(sendButton).toBeEnabled()
+
+    const payloadInput = page.getByLabel('payload JSON')
+    await payloadInput.fill('{bad json')
+    await expect(payloadInput).toHaveAttribute('aria-invalid', 'true')
+    await expect(page.getByText(/payload JSON 无效/).first()).toBeVisible()
+    await expect(sendButton).toBeDisabled()
+
+    await payloadInput.fill('{"emotion_tag":"CALM","intensity":0.2}')
+    await expect(sendButton).toBeEnabled()
+    await sendButton.click()
+    await expect(page.getByText('Push 完成')).toBeVisible()
+    await expect(page.getByText('edge-smoke-command')).toBeVisible()
   })
 })
