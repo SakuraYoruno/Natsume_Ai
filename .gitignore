@@ -156,6 +156,7 @@ flows/exports/
 !host_brain/release/release_manifest.py
 
 .codebuddy
+.workbuddy/
 
 # --- Repository noise / generated evidence ---
 /artifacts/
