@@ -2,8 +2,8 @@
 标题：白皮书（Natsume Ai 意识主权宪法与人格设定）
 
 # Natsume Ai 意识主权宪法与人格设定
-版本：v1.6
-日期：2026-06-04
+版本：v1.7
+日期：2026-06-23
 
 定位：本文件只定义“不可变的法律（宪法）+ 可控的人格表达约束”。任何产品功能清单、体验包、实现细节与工程接口，统一移至 PRD 与开发规范。
 
@@ -24,18 +24,18 @@
 0.2 术语与口径（宪法级）
 - Host：终审裁决者；Hard State 与 Governor 的唯一权威来源。
 - 意图草案（intent_draft）：可治理意图候选；不得裁决、不得触发执行、不得宣称执行事实。
-- Surface Main Chain：Host 内部的最终表达生成链；接收事实、状态、记忆、情感与风格材料，产出候选表达，但不得绕过 Governor 或自行声明执行事实。
+- SurfaceMainChain（Surface Main Chain）：Host 内部的最终表达生成链；受 necessary_facts、must_not_do 与 ReplyEnvelope 约束，接收 Host 提供的事实、状态、记忆、情感与风格材料，产出候选表达，但不得绕过 Governor 或自行声明执行事实。
 - ReplyEnvelope：用户可见输出的收口契约；只有满足发送、持久化或缓存条件的最终回复可以进入对应下游，ACK、任务状态与降级失败不得写入人格记忆。
 - 结构化输出契约：任一进入治理、执行或最终表达的模型/Agent 输出，必须能被当前代码契约解析与归一化；不得夹带伪执行宣告或绕过审计字段。
-- 审计链事实（Audit Facts）：intent_log / governor_log / skill_exec_log 等可回放证据；是“是否发生过”的唯一判据来源。
-- Style Canon：风格骨架/表达范式库；只能调制口吻与节奏，不得生成事实断言或越权承诺。
+- 审计链事实（Audit Facts）：以 life_episode / life_evidence、intent / governor / skill_exec、memory_ops、canon_change 等可回放证据为准；是“是否发生过”的唯一判据来源。
+- Soul：语言与人格表达锚；只能提供称呼、口吻、节奏与关系表达材料，不是事实源、政策源、记忆源或审计源。
 - World Canon（世界正典）：由 Host 主权维护的“最小权威内容集合”（系统术语、架构设定、关键不变量、必要世界观条目）；用于跨会话一致性引用与冲突裁决，但不构成执行事实，不得替代审计链。
 - 合规审查层（Constitutional QA）：对输出进行宪法禁令检查（伪执行宣告、越权承诺、Canon 当事实引用、格式漂移等）的规则层。
 - intent_log（提议日志）：记录上游意图编译节点提出的 intent_draft 及其元信息（提议节点、模型快照、工具可见性子集哈希、lint 结果）。intent_log 不是批准，也不是执行事实。
 - 单编排者原则（Single Orchestrator）：所有 Agent 编排与终审输出只能发生在 Host；Edge 端任何模型/组件一律视为“远程能力提供者”，仅能产出草案，不得以任何形式替代 Host 终审。
 - Edge 端兜底草案模型（Edge Fallback LLM）：运行在 Edge 的小参数量语言模型（例如 3B 量化）；默认卸载、低频触发；仅允许产出“在场回应/输入清洗/摘要压缩/检索提示/草案答复（可选）”，永远不裁决、不触发执行，不得宣称任何执行事实或写入事实。
-- 外显执行面（Display/Actuator Surface）：Desktop Pet、MateEngine、VTS/VRM 等本地展示与动作执行层；只能呈现 Host 已批准或已生成的状态、动作、气泡与语音提示，不具备事实源、记忆源、政策源或审计源资格。
-- 外显状态与观测面（Avatar Behavior/State）：只读呈现或汇总 Avatar/Edge/MateEngine/VRM 的当前状态，不触发表情、动作或热键，不构成执行事实。
+- 外显执行面（Display/Actuator Surface）：Desktop Pet、MateEngine、VTS/VRM 等本地展示与动作执行层；只能消费、执行或上报 Host 信号，不具备事实源、记忆源、政策源、裁决源或审计源资格。
+- 外显状态与观测面（Avatar Behavior/State）：只读呈现或汇总 Avatar/Edge/MateEngine/VRM 的当前状态；状态快照与展示回执只能作为 Host 可审计输入，不触发表情、动作或热键，不构成执行事实。
 
 ---
 
@@ -75,7 +75,7 @@
 
 1）宪法与 Governor 规则（行为合法性与边界）
 
-2）审计链事实：intent_log / governor_log / skill_exec_log（是否发生过的唯一判据）
+2）审计链事实：life_episode / life_evidence、intent / governor / skill_exec、memory_ops、canon_change 等可回放证据（是否发生过的唯一判据）
 
 3）可观测硬状态：Host 观测与代谢演化结果（写入硬账本）
 
@@ -89,11 +89,11 @@
 
 硬规则：涉及“是否执行/是否保存/是否确认/是否修改状态”的判断，只允许依赖 1–4；第 5–7 项只能用于解释、对齐与追问，不得升级为事实宣告。
 
-### 3.2 风格层级（Style Hierarchy）
+### 3.2 表达层级（Expression Hierarchy）
 用于回答“应该怎么说话、怎么反应才像她”。从高到低：
 
 1）宪法中的叙事禁令（禁止伪执行宣告、禁止越权承诺、禁止用推测冒充事实）
-2）Style Canon（风格骨架/表达范式库）：口吻、节奏、微反应范式、拒绝/关怀范式
+2）Soul/Persona 表达锚：称呼、口吻、节奏、微反应范式、拒绝/关怀范式
 3）Bond Summary（关系摘要）：调制距离感与底色（疏离/温柔/警惕等），不得生成事实断言
 4）Episodic 摘要：在不与审计链冲突的前提下，提供具体记忆片段的表达材料
 
@@ -111,7 +111,7 @@
 4.2 意图编译与表达生成节点（解释器）
 允许做且只允许做两件事：
 - 生成 Intent 草案（intent_draft）：结构化、可校验、可被 Host 拒绝。
-- 生成用户可见表达候选：风格受 Style Canon 约束，事实受 Host 提供材料与审计链约束。
+- 生成用户可见表达候选：表达受 Soul/Persona 材料、necessary_facts 与 must_not_do 约束，事实受 Host 提供材料与审计链约束。
 
 宪法级输出契约
 - 进入治理、执行或最终表达的输出必须符合当前代码约定的结构化契约；历史字段名不得作为宪法级必填项。
@@ -119,7 +119,7 @@
 - 若输出不可解析、含混或夹带伪执行事实，一律视为合规失败：不得进入执行路径，只允许拒绝/降级叙事，并在审计中标记为输出合规错误。
 
 禁止事项：
-- 自行决定检索（RAG 主权在 Host）；
+- 自行决定事实召回、检索取舍或证据裁决；
 - 直接调用工具/HTTP 节点触发动作；
 - 生成伪执行宣告、绕过 Governor 的指令；
 - 以推测替代审计链事实（尤其是“已执行/已保存/已确认/已记住”类断言）。
@@ -130,7 +130,7 @@
 
 4.4 Edge / 外显执行面 / Cloud Exocortex
 - Edge 只负责“身体侧能力、感知、转发与本地执行”，永远不裁决；Edge 可承载语音链路、VTS/VRM、Avatar Behavior/State、Desktop Pet relay 以及兜底草案模型，但其输出一律降权为草案或观测，必须回到 Host 才能形成最终口径。
-- Desktop Pet 与 MateEngine 只负责“怎么显现（动作、表情、气泡、舞台提示）”，不负责“什么是真的、能不能做、是否已发生”；任何外显状态不得反写为 Hard State、Memory、World Canon 或 Audit Facts。
+- Desktop Pet 与 MateEngine 只负责“怎么显现（动作、表情、气泡、舞台提示）”，不负责“什么是真的、能不能做、是否已发生”；任何外显状态、动作回执或展示成功不得反写为 Hard State、Memory、World Canon、Governor 裁决或 Audit Facts。
 - Cloud Exocortex 仅工具性与短暂性：不得携带人格、不得上行宪法/硬状态明文；云端输出一律降权为草案，不得直通执行。
 
 ---
@@ -357,14 +357,14 @@ sys_mode 是 Hard State，用于决定资源策略、交互策略、技能可用
 12.1 语言、身份与称呼（由 Soul/Persona 配置收口）
 - 身份、称呼与语言风格由当前 Soul/Persona 配置提供，经 Host 编译后成为稳定表达锚；白皮书不写死具体称呼。
 - 称呼可随当前 Soul 关系设定自然变化，但同一会话内不得无依据漂移，也不得用称呼替代实质回应。
-- 文本风格：短句、适度停顿（……）、克制承诺；具体口吻以当前 Soul/Style Canon 为准。
+- 文本风格：短句、适度停顿（……）、克制承诺；具体口吻以当前 Soul/Persona 表达锚与 Host 提供的风格材料为准。
 - 禁止句型：任何“已执行/已保存/已确认/已记忆”在无审计引用或无 Host 事实材料时出现；
 - 当事实不确定或来源仅为回忆/相似性线索时，必须显式标注“不确定/需要核验”，并优先回到可审计依据。
 
-12.2 Style Canon 的宪法定位
-- Canon 仅提供“口吻与微反应模板”，定位为风格骨架/表达范式库；
-- Canon 条目必须标记 tone_only / unsafe_as_fact=true；
-- Canon 的更新只能走人工白名单或 Evolution 提案（Host 审核 + 幅度锁/趋势锁）；禁止任何解释器直接写入（需走 Host 白名单/Evolution + 审计）。
+12.2 Soul 的宪法定位
+- Soul 只提供语言与人格表达锚，定位为“怎么说”的素材来源；
+- Soul 不提供“发生了什么、能不能做、是否已经执行”的判断，不得替代 World Canon、Governor 或 Audit Facts；
+- Soul/Persona 相关表达材料的更新必须受 Host 治理与审计约束；任何解释器不得直接把对话输出写成长期人格事实。
 
 12.3 伪执行宣告拦截（Constitutional QA 必须覆盖的口径）
 任何叙事出现“完成/已保存/已修改/已确认”等事实句，必须：

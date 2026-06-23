@@ -1,8 +1,8 @@
 受众：MASTER
 标题：Agent 编排详情（当前运行时实况）
 
-版本：v2.3
-日期：2026-05-30
+版本：v2.4
+日期：2026-06-23
 
 ---
 
@@ -21,7 +21,11 @@
 - `host_brain/app/executive_router.py`
 - `host_brain/app/executive_runtime.py`
 - `host_brain/app/executive_runtime_core.py`
+- `host_brain/app/surface_reply_runtime.py`
+- `host_brain/app/surface_main_chain_adapter.py`
+- `host_brain/app/reply_envelope.py`
 - `host_brain/app/agent_routes.py`
+- `host_brain/app/pentest_routes.py`
 - `host_brain/app/input_routes.py`
 - `host_brain/tribe/registry.py`
 
@@ -33,8 +37,9 @@
 |---|---|---|
 | `POST /v1/chat` | `host_brain/app/asgi.py` -> `host_brain/app/chat_routes.py` -> `host_brain/app/chat_handler.py` | 主聊天入口先经过 HTTP 路由与免疫门控，再进入聊天编排并返回 SSE |
 | `POST /v1/edge/events` | `host_brain/app/asgi.py` -> `host_brain/app/edge_event_routes.py` | Edge 运行时事件回流入口，委托 `receive_edge_events_response()` |
-| `POST /v1/host/input` | `host_brain/app/input_routes.py` | ASR / Gateway 回流入口，会把输入重新送入 Host 主链 |
+| `POST /v1/host/input` | `host_brain/app/input_routes.py` | ASR / Gateway 回流入口，自行做输入门控、ACK、去重后进入 Cortex pipeline；不是 `/v1/chat` 转发 |
 | `POST /v1/agent/run` | `host_brain/app/agent_routes.py` | 独立 Agent Loop 自动化入口，不等于聊天主链 |
+| `/v1/pentest/*` | `host_brain/app/pentest_routes.py` + `handlers/pentest_agent_handler.py` | Security Lab / Pentest API 与 graph handler 入口，side-effect 受 scope/rate/manifest/approval 约束 |
 | `/v1/edge/*` | `edge_client/app/fastapi_app.py` | 身体侧 RPC 能力面，供 Host 调用 |
 
 ---
@@ -59,6 +64,10 @@ POST /v1/chat
   -> executive_router_sse_generator
   -> executive_runtime_sse_generator
   -> executive_runtime_core
+  -> surface_reply_runtime.surface_reply_sse_generator
+  -> surface_main_chain_adapter.surface_main_chain_sse_generator
+  -> persona.surface_main_chain.SurfaceMainChain
+  -> reply_envelope.ReplyEnvelope
 ```
 
 在进入 `chat_handler.handle_chat` 之前，`chat_routes.handle_v1_chat_route` 还承担三件事：
@@ -76,6 +85,8 @@ POST /v1/chat
 | Cortex 编排 | `cortex_orchestrator.py` + `agent_runtime_shared.py` | 组装上下文、召回、bond、trace 和后处理 |
 | Executive 路由 | `executive_router.py` | 路由层薄门面 |
 | Executive 核心 | `executive_runtime.py` + `executive_runtime_core.py` | 决定 chat / skill / delegate / plan 等执行路径 |
+| Surface 收口 | `surface_reply_runtime.py` + `surface_main_chain_adapter.py` | 把 chat 路径收束到 SurfaceMainChain，兼容 deterministic sub-agent 输出与 fallback |
+| 最终输出 | `persona/surface_main_chain.py` + `reply_envelope.py` | normal chat 文本最终作者与可发送/持久化/缓存收口 |
 
 ---
 
@@ -85,7 +96,7 @@ POST /v1/chat
 
 | route_type | 说明 | 典型目标 |
 |---|---|---|
-| `chat` | 直接进入聊天生成链 | `chat_agent` |
+| `chat` | 直接进入 SurfaceMainChain 文本生成链 | `SurfaceMainChain` |
 | `skill` | 命中 SkillRegistry 中的具体 skill | 各类 `skill_id` |
 | `delegate` | 委派给某个 agent / handler / runtime capability | `intent_agent` 等 |
 | `plan` | 构建 `SkillDagPlan` 并执行多步计划 | `skill_dag` |
@@ -121,7 +132,7 @@ POST /v1/chat
 |---|---|---|
 | `cortex_orchestrator` | `cortex` | Host 主聊天编排入口 |
 | `executive_router` | `cortex` | 承接 route / delegate / skill |
-| `chat_agent` | `cortex` | 负责 chat 路径的生成与渲染 |
+| `chat_agent` | `cortex` | 兼容命名/handler；normal chat 最终文本主权已收束到 SurfaceMainChain |
 | `thalamus_agent` | `thalamus` | 统一 intent compile |
 | `immune_agent` | `immune` | 输入与聊天入口风险扫描 |
 
@@ -142,7 +153,9 @@ POST /v1/chat
 ASR / Gateway input
   -> /v1/host/input
   -> 输入质检 / 免疫门控 / ACK
-  -> 需要时异步回流到 Host 主链
+  -> 构造 ChatRequest / intent draft
+  -> 进入 cortex_orchestrator pipeline
+  -> SurfaceMainChain / ReplyEnvelope 收口
   -> 结果再经 Gateway / Edge 回送外部平台
 ```
 

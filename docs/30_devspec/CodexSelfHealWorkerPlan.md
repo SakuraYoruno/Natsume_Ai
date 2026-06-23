@@ -7,11 +7,12 @@
 
 ## Overview
 
-## 0. 当前链路入口映射（2026-05-30）
+## 0. 当前链路入口映射（2026-06-23）
 
 本文件为历史设计稿（2026-04-24 标记为 `SUPERSEDED`），其执行入口与运行语义不再代表主链真相。当前代码链路应按以下口径读取：
 
-- 统一入口：`POST /v1/chat` -> `fastapi_app.py` -> `chat_handler` -> `thalamus_agent.classify_and_compile_intent_draft()` -> `Governor.evaluate_intent()` -> `executive_runtime`。
+- 统一入口：`POST /v1/chat` -> `host_brain.app.asgi:app` -> `app_factory` / `router_registry` -> `chat_routes.handle_v1_chat_route()` -> `chat_handler.handle_chat()` -> `thalamus_agent.classify_and_compile_intent_draft()` -> `Governor.evaluate_intent()` -> `cortex_orchestrator` / `agent_runtime_shared` -> `executive_runtime_core` -> `surface_reply_runtime` -> `SurfaceMainChain` -> `ReplyEnvelope`。
+- Agent/Codex 写模式的当前契约是 `AgentWorkOrder` + `WorkspacePolicy` + `approval_policy`；历史 `codex_codegen` / `codex_self_heal` 术语不得作为运行入口依据。
 - 审计事实入口：`intent_log`、`governor_log`、`skill_exec_log`、`sqlite_ledger`。
 - 当前 Codex 自愈链路与运行态状态见：
   - `docs/30_devspec/DevSpec.md`

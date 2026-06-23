@@ -1,8 +1,8 @@
 受众：MASTER
 标题：Gateway 中文文字链路完整节点分析（当前代码实况）
 
-版本：v2.0
-日期：2026-04-19
+版本：v2.1
+日期：2026-06-23
 
 ---
 
@@ -21,7 +21,12 @@
 - `host_brain/app/input_service_ack.py`
 - `host_brain/app/schemas.py`
 - `host_brain/app/agent_runtime_shared.py`
-- `host_brain/app/chat_agent.py`
+- `host_brain/app/surface_reply_runtime.py`
+- `host_brain/app/surface_main_chain_adapter.py`
+- `host_brain/app/reply_envelope.py`
+- `host_brain/persona/surface_main_chain.py`
+- `host_brain/app/chat_retrieval_helpers.py`
+- `host_brain/retrieval/recall_fusion.py`
 - `host_brain/channels/edge_rpc_client.py`
 
 ---
@@ -40,8 +45,10 @@
   -> POST /v1/host/input
   -> input_routes._run_cortex_orchestrator_pipeline()
   -> ChatRequest(render_target_lang="zh")
-  -> cortex_orchestrator / executive runtime / chat_agent
-  -> COMMIT narrative
+  -> cortex_orchestrator / executive runtime
+  -> surface_reply_runtime / surface_main_chain_adapter
+  -> SurfaceMainChain
+  -> ReplyEnvelope COMMIT
   -> input_routes._deliver_gateway_reply()
   -> host_brain/channels/edge_rpc_client.py
   -> POST /v1/gateway/reply
@@ -148,12 +155,13 @@ Gateway 消息进入 Host 的真实入口是：
 - Gateway 通道固定注入 `'zh'`
 - 未指定时才做语言推断
 
-### 4.4 ChatAgent 侧口径
+### 4.4 SurfaceMainChain / ReplyEnvelope 侧口径
 
-`host_brain/app/chat_agent.py` 当前输入结构 `SurfaceReplyInput` 里也明确写着：
+Gateway 文本最终仍由 SurfaceMainChain 生成，并由 ReplyEnvelope 收口。`render_target_lang="zh"` 会作为 Host 构造的请求上下文进入后续编排，约束最终文字通道：
 
-- `render_target_lang: str = "zh"`
-- 文字通道永远 `zh`
+- SurfaceMainChain 只生成用户可见文本，不直接声明执行事实。
+- ReplyEnvelope 决定该文本是否可发送、可持久化、可缓存。
+- Gateway ACK、任务状态和失败降级不得写入人格记忆。
 
 这进一步保证了 Gateway 文本回复会走中文输出。
 
@@ -168,17 +176,18 @@ input_routes
   -> cortex_orchestrator
   -> agent_runtime_shared
   -> chat_retrieval_helpers._run_retrieval
-  -> hippocampus_agent.recall
-  -> RetrievalOrchestrator / RetrievalPipeline
+  -> RecallFusionServiceContract.recall(...)
+  -> surface_memory_recall / MemoryRecallPacket
+  -> SurfaceMainChain facts
 ```
 
-在这条链里，`render_target_lang` 也会继续下传到检索侧。
+在这条链里，召回层只提供候选事实和 evidence refs；最终是否进入表达由 surface memory recall、packet compiler、necessary_facts / must_not_do 与 ReplyEnvelope 收口共同决定。
 
-因此，当前 Gateway 中文链的“中文保障”不只在生成侧，也会影响：
+因此，当前 Gateway 中文链的“中文保障”主要来自：
 
-- retrieval route 选择
-- query plan / evidence pack
-- prompt 槽位构建
+- `ChatRequest(render_target_lang="zh")`
+- SurfaceMainChain 对中文文字通道的收口
+- Gateway 出站层只发送 ReplyEnvelope 允许发送的最终文本
 
 ---
 
@@ -235,9 +244,9 @@ input_routes
 当前代码的关键现实是：
 
 - Gateway 文字输出固定中文
-- Gateway 入口默认抑制 ChatAgent 在 COMMIT 后直接补发 Edge TTS / VTS
+- Gateway 入口默认抑制 Edge TTS / VTS 的直接补发，避免文字平台重复播报
 - 如需语音二次回复，会在 `_deliver_gateway_reply()` 中走独立语音分支
-- `chat_agent.py` 内部句级 TTS 仍明确写着 `lang_hint="ja"`
+- 语音附加链不得反向改变 Gateway 文字 COMMIT 的事实与语言
 
 所以本文讨论的是“中文文字链路”。
 可选语音回复是另一条附加链，不应再和文字主链混写成旧的单一 `top_agent` 方案。
@@ -258,4 +267,5 @@ input_routes
 
 1. Gateway 入站先在 Edge 侧标准化，再上报到 `POST /v1/host/input`。
 2. Host 用 `ChatRequest(render_target_lang="zh")` 把文字通道固定到中文。
-3. 最终回送统一经 `post_gateway_reply()` 和 Gateway `OutboundDispatcher` 完成。
+3. SurfaceMainChain 生成最终文本，ReplyEnvelope 收口。
+4. 最终回送统一经 `post_gateway_reply()` 和 Gateway `OutboundDispatcher` 完成。

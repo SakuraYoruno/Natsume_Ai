@@ -1,9 +1,9 @@
 受众：MASTER
 标题：文档地图（唯一入口）
 
-版本：v5.1
-日期：2026-06-08
-维护：2026-06-08（surface_reply 重构同步：PRD v2.1 / DevSpec v2.1 / ModelPlane v1.7 / theory 契约版本跟进）
+版本：v5.2
+日期：2026-06-23
+维护：2026-06-23（主链校准：PRD v2.2 / DevSpec v2.2 / 架构事实 v3.3 / theory 契约版本跟进；旧 Agentic RAG 文件名改为当前召回架构兼容入口）
 
 本仓库所有"应该读什么、从哪里开工、哪些文档禁止当任务来源"，以本文件为准。
 
@@ -59,17 +59,18 @@
 - 实现层的任务来源只能是 DevTasks（以及 AGENTS 工作规范）；不得把白皮书/PRD/Theory/Trace 当任务来源。
 - Project（文档代理）负责把讨论沉淀到 PRD/DevSpec/DevTasks，并维护 Trace 覆盖关系。
 
-当前代码优先阅读顺序（2026-06-05）：
+当前代码优先阅读顺序（2026-06-23）：
 - `[LIVING]` `README.md`：仓库入口与运行面总览
-- `[LIVING]` `docs/50_project/arch/CURRENT_CODE_ARCHITECTURE.md` (v3.2)：当前代码事实总览
-- `[LIVING]` `docs/50_project/arch/CORE_MODULES_DETAILED_REFERENCE.md` (v3.2)：主链核心模块
+- `[LIVING]` `docs/50_project/arch/CURRENT_CODE_ARCHITECTURE.md` (v3.3)：当前代码事实总览
+- `[LIVING]` `docs/50_project/arch/CORE_MODULES_DETAILED_REFERENCE.md` (v3.3)：主链核心模块
 - `[LIVING]` `docs/50_project/arch/DIGITAL_LIFE_BODY_FRONTEND_ARCHITECTURE_20260419.md`：前端主体化信息架构
-- `[LIVING]` `docs/50_project/arch/dataflow_report.md` (v3.2)：请求流与回流补充
+- `[LIVING]` `docs/50_project/arch/dataflow_report.md` (v3.3)：请求流与回流补充
+- `[LIVING]` `docs/50_project/arch/AGENTIC_RAG_ARCHITECTURE.md` (v3.0)：当前召回与记忆数据流（旧文件名兼容保留）
 - `[LIVING]` `docs/50_project/arch/diagrams/00_INDEX.md` (v1.0)：架构图册（7 张 Mermaid 图）
 - `[LIVING]` `docs/30_devspec/desktop_pet_runtime.md`：Desktop Pet 运行面契约
 - `[LIVING]` `docs/30_devspec/mateengine_bridge.md`：MateEngine Bridge 契约
 - `[LIVING]` `docs/15_theory/RETRIEVAL_LAYER_CONTRACT.md` (v3.0)：RecallFusionServiceContract
-- `[LIVING]` `docs/15_theory/TOOLS_MEMORY_LAYER_CONTRACT.md` (v3.1)：LifeMemoryStore SSOT + tools
+- `[LIVING]` `docs/15_theory/TOOLS_MEMORY_LAYER_CONTRACT.md` (v3.2)：LifeMemoryStore SSOT + tools
 - `[LIVING]` `docs/60_trace/requirements_trace.md`：需求到设计/测试映射
 
 ---
@@ -82,13 +83,13 @@
 
 ## 2）需求文档（PRD）
 
-- `[LIVING]` docs/20_prd/PRD.md (v2.1)
+- `[LIVING]` docs/20_prd/PRD.md (v2.2)
   用途：基于当前代码事实的系统能力描述。覆盖 5 运行面、Chat/Surface/Gateway/Emotion/Memory/Canon/Tribe/Obs/Avatar/Voice/Mode/Codex/Security/Scheduler 功能域。
   读者：MASTER、Project（文档代理）。
 
 ## 3）开发文档（DevSpec + 任务 + 模型平面）
 
-- `[LIVING]` docs/30_devspec/DevSpec.md (v2.1)
+- `[LIVING]` docs/30_devspec/DevSpec.md (v2.2)
   用途：当前代码的工程契约参考手册。每条契约可追溯到具体 .py 文件。
   读者：实现层（主要）、MASTER。
 
@@ -164,11 +165,11 @@
 
 ### 5.3 架构文档（当前事实）
 
-- `[LIVING]` docs/50_project/arch/CURRENT_CODE_ARCHITECTURE.md (v3.2)
+- `[LIVING]` docs/50_project/arch/CURRENT_CODE_ARCHITECTURE.md (v3.3)
   用途：当前代码事实总览——运行面、主入口、路由面、聊天主链、Tribe family 现状。
   读者：MASTER、Project、实现层。
 
-- `[LIVING]` docs/50_project/arch/CORE_MODULES_DETAILED_REFERENCE.md (v3.2)
+- `[LIVING]` docs/50_project/arch/CORE_MODULES_DETAILED_REFERENCE.md (v3.3)
   用途：核心模块定位与职责边界。
   读者：MASTER、Project、实现层。
 
@@ -180,7 +181,7 @@
   用途：智能模式切换系统——6 种模式、ModeTransitionService、ActivityMonitor。已验证与代码一致。
   读者：MASTER、实现层。
 
-- `[LIVING]` docs/50_project/arch/dataflow_report.md (v3.2)
+- `[LIVING]` docs/50_project/arch/dataflow_report.md (v3.3)
   用途：系统数据流全景报告——请求流、回流、模块间数据交换。
   读者：MASTER、Project、实现层。
 
@@ -188,7 +189,7 @@
   用途：架构图册总目录——7 张 Mermaid 图。
   读者：MASTER、Project、实现层。
 
-- `[LIVING]` docs/50_project/arch/GATEWAY_ZH_CHAIN_NODE_ANALYSIS.md
+- `[LIVING]` docs/50_project/arch/GATEWAY_ZH_CHAIN_NODE_ANALYSIS.md (v2.1)
   用途：Gateway 中文文字链路完整节点分析（当前代码实况）。已验证与代码一致。
   读者：MASTER、架构参考。
 
@@ -196,8 +197,12 @@
   用途：统一消息网关设计（混合文档，文首已加当前代码校准说明；正文含历史方案留痕）。
   读者：MASTER、Project、实现层。
 
-- `[LIVING]` docs/50_project/arch/AGENT_ORCHESTRATION_DETAIL.md (v2.3)
+- `[LIVING]` docs/50_project/arch/AGENT_ORCHESTRATION_DETAIL.md (v2.4)
   用途：Agent 编排详情（当前运行时实况）。已验证与代码一致。
+  读者：MASTER、Project、实现层。
+
+- `[LIVING]` docs/50_project/arch/AGENTIC_RAG_ARCHITECTURE.md (v3.0)
+  用途：当前召回与记忆数据流。文件名保留旧 `AGENTIC_RAG` 兼容名，但正文已按 RecallFusion + LifeMemoryStore + SurfaceMainChain 当前链路重写。
   读者：MASTER、Project、实现层。
 
 - `[LIVING]` docs/50_project/arch/NATSUME_AI_FULL_LLM_CAPABILITY_RESTORATION_PLAN_20260422.md
@@ -211,10 +216,6 @@
 ### 5.4 架构文档（历史留痕）
 
 以下文档为历史方案/蓝图/重构计划，已被当前代码主链取代，仅作历史对照：
-
-- `[ARCHIVE]` docs/50_project/arch/AGENTIC_RAG_ARCHITECTURE.md
-  用途：Agentic RAG 架构历史留痕——旧 hippocampus_agent → retrieval 主链已移除。
-  读者：MASTER、实现层（历史对照）。
 
 - `[ARCHIVE]` docs/50_project/arch/PHASE_X_INTELLIGENT_ORCHESTRATION.md
   用途：Phase X 智能编排层六大方案留痕（2026-03-29）。
@@ -327,13 +328,13 @@
 - `[LIVING]` docs/15_theory/INTEGRATIONS_LAYER_CONTRACT.md (v3.0) — integrations 层接口契约
 - `[LIVING]` docs/15_theory/RETRIEVAL_LAYER_CONTRACT.md (v3.0) — retrieval 层接口契约
 - `[LIVING]` docs/15_theory/GOVERNOR_SCHEDULER_CONTRACT.md (v3.0) — governor + scheduler 契约
-- `[LIVING]` docs/15_theory/TOOLS_MEMORY_LAYER_CONTRACT.md (v3.1) — tools + memory 契约
-- `[LIVING]` docs/15_theory/PERIPHERAL_LAYERS_CONTRACT.md (v2.2) — 外围层契约（airlock/bond/channels/vision/lsp/mcp）
-- `[LIVING]` docs/15_theory/APP_AUDIT_SKILLS_CONTRACT.md (v3.1) — 应用/审计/技能层契约
+- `[LIVING]` docs/15_theory/TOOLS_MEMORY_LAYER_CONTRACT.md (v3.2) — tools + memory 契约
+- `[LIVING]` docs/15_theory/PERIPHERAL_LAYERS_CONTRACT.md (v2.3) — 外围层契约（airlock/bond/channels/vision/lsp/mcp）
+- `[LIVING]` docs/15_theory/APP_AUDIT_SKILLS_CONTRACT.md (v3.2) — 应用/审计/技能层契约
 
 ### 8.2 架构全景
 
-- `[LIVING]` docs/15_theory/architecture_overview.md (v3.1) — 整体架构全景文档（Mermaid 图 + 运行面说明）
+- `[LIVING]` docs/15_theory/architecture_overview.md (v3.2) — 整体架构全景文档（Mermaid 图 + 运行面说明）
   读者：MASTER、Project、实现层（查阅对齐）。
 
 ### 8.3 理论基础
