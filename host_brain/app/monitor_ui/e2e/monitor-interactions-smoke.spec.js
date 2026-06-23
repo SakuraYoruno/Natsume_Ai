@@ -127,6 +127,80 @@ async function stubPentestApis(page) {
   })
 }
 
+async function stubPentestRunDetailApis(page) {
+  await stubCommonReadApis(page)
+  await page.addInitScript(() => {
+    window.EventSource = class StubEventSource {
+      constructor() {
+        setTimeout(() => this.onerror?.({ type: 'error' }), 0)
+      }
+
+      addEventListener() {}
+
+      close() {}
+    }
+  })
+  await page.route('**/v1/pentest/environment**', (route) => fulfillJson(route, {
+    lab_mode: true,
+    allow_exploit: true,
+    use_kali: false,
+    oob_enabled: false,
+  }))
+  await page.route('**/v1/pentest/runs/smoke-lab-run/report**', async (route) => {
+    const format = new URL(route.request().url()).searchParams.get('format')
+    if (format === 'json') {
+      await fulfillJson(route, {
+        run_id: 'smoke-lab-run',
+        findings: 1,
+        artifact_ref: 'artifacts/pentest/smoke-lab-run.md',
+      })
+      return
+    }
+    await route.fulfill({
+      status: 200,
+      contentType: 'text/markdown',
+      body: '# Pentest smoke report\n\nFinding: Debug endpoint exposed.',
+    })
+  })
+  await page.route('**/v1/pentest/runs/smoke-lab-run', (route) => fulfillJson(route, {
+    run_id: 'smoke-lab-run',
+    status: 'waiting_approval',
+    target: 'http://127.0.0.1:4173/monitor/',
+    scope: ['127.0.0.1', 'localhost'],
+    mode: 'lab_full',
+    phases: ['phase1_passive', 'phase2_active', 'phase3_vuln', 'phase4_exploit'],
+    approval_required: true,
+    pending_side_effect_steps: [
+      {
+        phase: 'phase4_exploit',
+        tool_id: 'pentest.safe_lab_exploit',
+        target: 'http://127.0.0.1:4173/monitor/',
+        execution_mode: 'lab',
+        status: 'pending',
+      },
+    ],
+    guard_stats: {
+      scope_allowed: 4,
+      side_effect_blocked: 1,
+    },
+    findings: [
+      {
+        title: 'Debug endpoint exposed',
+        severity: 'HIGH',
+        description: 'A debug-only route is reachable inside the authorized lab scope.',
+      },
+    ],
+    events: [
+      { seq: 1, type: 'run_created', ts_ms: 1782260000000, message: 'Run created' },
+      { seq: 2, type: 'approval_required', ts_ms: 1782260001000, message: 'Phase4 requires approval' },
+    ],
+    audit_ref: 'audit://pentest/smoke-lab-run',
+    artifact_refs: {
+      markdown: 'artifacts/pentest/smoke-lab-run.md',
+    },
+  }))
+}
+
 async function stubToolsApis(page) {
   await stubCommonReadApis(page)
   const tools = [
@@ -419,6 +493,20 @@ test.describe('Monitor interaction smoke', () => {
 
     await modeSelect.selectOption('readonly')
     await expect(createRunButton).toBeEnabled()
+  })
+
+  test('Pentest run detail summarizes attack path and approval gate', async ({ page, baseURL }) => {
+    await stubPentestRunDetailApis(page)
+    await page.goto(monitorUrl(baseURL, '/security/pentest/runs/smoke-lab-run'), { waitUntil: 'domcontentloaded' })
+
+    await expect(page.getByRole('heading', { name: /渗透任务详情/ })).toBeVisible()
+    await expect(page.getByText('Run Mission Brief')).toBeVisible()
+    await expect(page.getByText('需要记录 Side-effect Approval')).toBeVisible()
+    await expect(page.getByText('ScopeGuard').first()).toBeVisible()
+    await expect(page.getByText('phase4_exploit').first()).toBeVisible()
+    await expect(page.getByRole('complementary').getByText('Debug endpoint exposed')).toBeVisible()
+    await expect(page.getByText('攻击路径可视化')).toBeVisible()
+    await expect(page.getByRole('button', { name: '记录 Side-effect Approval' })).toBeEnabled()
   })
 
   test('Tools catalog supports search, side-effect filters, and detail selection', async ({ page, baseURL }) => {
