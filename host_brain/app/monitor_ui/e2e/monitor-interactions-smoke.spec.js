@@ -340,6 +340,42 @@ async function stubEdgeCommandApis(page) {
   })
 }
 
+async function stubTribeApis(page) {
+  await stubCommonReadApis(page)
+  await page.route('**/internal/tribe_state/summary', (route) => fulfillJson(route, {
+    status: 'healthy',
+    total_agents: 3,
+    agents: ['agent.alpha', 'agent.planner', 'tool.runner'],
+  }))
+  await page.route('**/internal/tribe_event/recent', (route) => fulfillJson(route, {
+    items: [
+      {
+        event_id: 'evt-plan-1',
+        event_type: 'agent.plan.created',
+        source_agent: 'agent.alpha',
+        target_agent: 'agent.planner',
+        topic: 'planning',
+        ts_ms: 1782260000000,
+      },
+      {
+        event_id: 'evt-tool-1',
+        event_type: 'agent.tool.result',
+        source_agent: 'tool.runner',
+        target_agent: 'agent.alpha',
+        topic: 'tools',
+        ts_ms: 1782260001000,
+      },
+    ],
+  }))
+  await page.route('**/internal/tribe_event/subscribers', (route) => fulfillJson(route, {
+    total_handlers: 2,
+    handlers: [
+      { handler: 'planner.handler', event_type: 'agent.plan.created' },
+      { handler: 'tool.handler', event_type: 'agent.tool.result' },
+    ],
+  }))
+}
+
 test.describe('Monitor interaction smoke', () => {
   test('Observability overview exposes triage rail and Trace route', async ({ page, baseURL }) => {
     await stubOverviewApis(page)
@@ -477,5 +513,30 @@ test.describe('Monitor interaction smoke', () => {
     await sendButton.click()
     await expect(page.getByText('Push 完成')).toBeVisible()
     await expect(page.getByText('edge-smoke-command')).toBeVisible()
+  })
+
+  test('Tribe console filters event bus samples and links to Agent Loop', async ({ page, baseURL }) => {
+    await stubTribeApis(page)
+    await page.goto(monitorUrl(baseURL, '/execution/tribe'), { waitUntil: 'domcontentloaded' })
+    await expect(page.getByRole('heading', { name: 'Tribe 协作入口' })).toBeVisible()
+    await expect(page.getByText('Tribe Gate')).toBeVisible()
+    const eventCards = page.locator('article')
+    const planEvent = eventCards.filter({ hasText: 'agent.plan.created' })
+    const toolEvent = eventCards.filter({ hasText: 'agent.tool.result' })
+    await expect(planEvent).toBeVisible()
+    await expect(toolEvent).toBeVisible()
+
+    const searchInput = page.getByLabel('搜索 Tribe 事件')
+    await searchInput.fill('tool.runner')
+    await expect(toolEvent).toBeVisible()
+    await expect(planEvent).toBeHidden()
+    await expect(page.getByText('已应用事件筛选：1/2')).toBeVisible()
+
+    await page.getByRole('button', { name: '清除' }).click()
+    await expect(searchInput).toHaveValue('')
+    await expect(planEvent).toBeVisible()
+
+    await page.getByRole('link', { name: /Agent Loop 查看智能体循环/ }).click()
+    await expect.poll(() => new URL(page.url()).hash).toBe('#/execution/agent-loop')
   })
 })

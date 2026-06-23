@@ -170,6 +170,23 @@ export const EDGE_COMMAND_COPY = Object.freeze({
   ],
 })
 
+export const TRIBE_COPY = Object.freeze({
+  heroEyebrow: 'Execution / Tribe',
+  heroTitle: 'Tribe 协作总线',
+  heroDescription: '把 Tribe state、event bus、订阅者和最近事件收敛成协作诊断台。先判断总线是否可观测，再按事件类型或 agent 追协作链。',
+  commandRailTitle: 'Tribe 协作入口',
+  commandRailDescription: '首屏先回答：状态接口是否可用、事件总线有没有样本、订阅者是否在线，以及下一步该看事件、订阅还是执行链路。',
+  gateTitle: 'Tribe Gate',
+  focusTitle: '建议路径',
+  quickLinksTitle: '相关入口',
+  quickLinks: [
+    { key: 'agentLoop', to: '/execution/agent-loop', label: 'Agent Loop', detail: '查看智能体循环和最近执行历史。' },
+    { key: 'tools', to: '/execution/tools', label: 'Tools', detail: '核对工具能力和 side-effect 元数据。' },
+    { key: 'trace', to: '/observability/trace', label: 'Trace', detail: '追踪协作事件关联的 request 链路。' },
+    { key: 'logs', to: '/observability/logs', label: 'Logs', detail: '查看总线异常、订阅失败和后端日志。' },
+  ],
+})
+
 export const PENTEST_COPY = Object.freeze({
   labTitle: '渗透实验室',
   labEyebrow: 'Security Lab / Pentest Agent',
