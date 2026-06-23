@@ -6,6 +6,7 @@ import TraceHistoryPanel from './TraceHistoryPanel.jsx'
 import TraceHomeActiveFeedPanel from './traceHome/TraceHomeActiveFeedPanel.jsx'
 import TraceHomeControlConsole from './traceHome/TraceHomeControlConsole.jsx'
 import TraceHomeSummaryBand from './traceHome/TraceHomeSummaryBand.jsx'
+import TraceHomeTriageRail from './traceHome/TraceHomeTriageRail.jsx'
 import { useTraceHomeController } from './traceHomeController.js'
 
 const TraceInlineFullChainOverview = React.lazy(() => import('./TraceAdvancedViews.jsx').then((module) => ({ default: module.InlineFullChainOverview })))
@@ -51,6 +52,22 @@ export default function TraceHome({
         traceGroupCount={traceHome.traceGroupCount}
         traceInfo={traceHome.traceInfo}
         tracePulseNodes={traceHome.tracePulseNodes}
+      />
+
+      <TraceHomeTriageRail
+        currentTraceHealthy={traceHome.currentTraceHealthy}
+        latestRequest={traceHome.latestRequest}
+        liveFeedConnected={traceHome.liveFeedConnected}
+        liveFeedStatusText={traceHome.liveFeedStatusText}
+        liveTraceError={traceHome.liveTraceError}
+        liveTraceItems={traceHome.liveTraceItems}
+        pollingEnabled={traceHome.pollingEnabled}
+        recentLoading={traceHome.recentLoading}
+        recentRequests={traceHome.recentRequests}
+        selectedIssueCount={traceHome.selectedIssueCount}
+        selectedRequestId={traceHome.selectedRequestId}
+        selectedTraceStageMeta={traceHome.selectedTraceStageMeta}
+        traceInfo={traceHome.traceInfo}
       />
 
       <TraceHomeControlConsole

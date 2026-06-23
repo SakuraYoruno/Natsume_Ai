@@ -136,6 +136,23 @@ export const OBSERVABILITY_COPY = Object.freeze({
   ],
 })
 
+export const TRACE_COPY = Object.freeze({
+  heroEyebrow: 'Observability / Trace',
+  heroTitle: '请求链路排障台',
+  heroDescription: '围绕 request_id 追踪输入、检索、规划、工具调用、护栏和输出节点，先判断链路是否可观测，再进入单条请求或完整链路图。',
+  commandRailTitle: 'Trace 排障入口',
+  commandRailDescription: '首屏先回答：实时流是否连通、当前有没有样本、选中的请求是否健康，以及下一步应该看详情、总览图还是会话样本。',
+  gateTitle: 'Trace Gate',
+  quickLinksTitle: '常用入口',
+  focusTitle: '建议路径',
+  quickLinks: [
+    { key: 'full', to: '/observability/trace/full', label: '完整链路图', detail: '打开大图模式，按阶段查看请求路径。' },
+    { key: 'sessions', to: '/observability/sessions', label: '会话样本', detail: '从 session / conversation 回看上下文。' },
+    { key: 'metrics', to: '/observability/metrics', label: '指标趋势', detail: '用延迟、失败率和拒绝率确认影响面。' },
+    { key: 'safety', to: '/observability/insights/safety', label: '护栏洞察', detail: '检查 policy、immune 与 UI assertion 拦截。' },
+  ],
+})
+
 export const PENTEST_COPY = Object.freeze({
   labTitle: '渗透实验室',
   labEyebrow: 'Security Lab / Pentest Agent',

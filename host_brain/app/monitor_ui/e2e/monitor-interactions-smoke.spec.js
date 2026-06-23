@@ -245,6 +245,85 @@ async function stubInsightsApis(page) {
   }
 }
 
+async function stubTraceApis(page) {
+  await stubCommonReadApis(page)
+  const requestId = 'req_trace_smoke'
+  const traceSnapshot = {
+    request_id: requestId,
+    status: 'OK',
+    total_latency_ms: 128,
+    timestamp: '2026-06-20T08:00:00Z',
+    summary: {
+      session_id: 'sess_trace_smoke',
+      conversation_id: 'conv_trace_smoke',
+      request_id: requestId,
+    },
+    nodes: [
+      {
+        id: 'input',
+        name: 'Input capture',
+        stage: 'input',
+        status: 'OK',
+        latency_ms: 12,
+        output: 'User request normalized',
+      },
+      {
+        id: 'planner',
+        name: 'Planner',
+        stage: 'plan',
+        status: 'OK',
+        latency_ms: 48,
+        output: 'Route selected',
+      },
+    ],
+  }
+  await page.route('**/obs/trace-feed/snapshot**', (route) => fulfillJson(route, {
+    items: [
+      {
+        session: {
+          request_id: requestId,
+          session_id: 'sess_trace_smoke',
+          conversation_id: 'conv_trace_smoke',
+          status: 'OK',
+          last_ts: '2026-06-20T08:00:00Z',
+        },
+        trace: traceSnapshot,
+      },
+    ],
+    last_ts: '2026-06-20T08:00:00Z',
+  }))
+  await page.route('**/obs/trace-feed/live**', (route) => fulfillJson(route, {
+    items: [
+      {
+        session: {
+          request_id: requestId,
+          session_id: 'sess_trace_smoke',
+          conversation_id: 'conv_trace_smoke',
+          status: 'OK',
+          last_ts: '2026-06-20T08:00:00Z',
+        },
+        trace: traceSnapshot,
+      },
+    ],
+    last_ts: '2026-06-20T08:00:00Z',
+  }))
+  await page.route('**/obs/trace-snapshot/**', (route) => fulfillJson(route, traceSnapshot))
+  await page.route('**/obs/sessions**', (route) => fulfillJson(route, {
+    items: [
+      {
+        request_id: requestId,
+        session_id: 'sess_trace_smoke',
+        conversation_id: 'conv_trace_smoke',
+        status: 'OK',
+        last_ts: '2026-06-20T08:00:00Z',
+        message: 'Trace smoke request',
+      },
+    ],
+    total: 1,
+  }))
+  await page.route('**/obs/tribe/events**', (route) => fulfillJson(route, { items: [] }))
+}
+
 test.describe('Monitor interaction smoke', () => {
   test('Observability overview exposes triage rail and Trace route', async ({ page, baseURL }) => {
     await stubOverviewApis(page)
@@ -344,5 +423,17 @@ test.describe('Monitor interaction smoke', () => {
     await backButton.focus()
     await page.keyboard.press('Enter')
     await expect.poll(() => new URL(page.url()).hash).toBe('#/observability/insights')
+  })
+
+  test('Trace home exposes triage rail and full-chain route', async ({ page, baseURL }) => {
+    await stubTraceApis(page)
+    await page.goto(monitorUrl(baseURL, '/observability/trace'), { waitUntil: 'domcontentloaded' })
+    await expect(page.getByRole('heading', { name: 'Trace 排障入口' })).toBeVisible()
+    await expect(page.getByText('Trace Gate')).toBeVisible()
+    const fullChainLink = page.getByRole('link', { name: /完整链路图 打开大图模式/ })
+    await expect(fullChainLink).toBeVisible()
+
+    await fullChainLink.click()
+    await expect.poll(() => new URL(page.url()).hash).toBe('#/observability/trace/full')
   })
 })

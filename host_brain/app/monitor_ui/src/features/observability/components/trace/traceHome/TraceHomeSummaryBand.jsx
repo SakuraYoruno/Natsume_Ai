@@ -1,6 +1,7 @@
 import { Activity, Bookmark, Clock3, Layers, Shield } from 'lucide-react'
 import LivingPulseStrip from '../../../../../shared/ui/LivingPulseStrip.jsx'
 import PageHero from '../../../../../shared/ui/PageHero.jsx'
+import { TRACE_COPY } from '../../../../../shared/content/terminology.js'
 import { HomeSummaryCard } from '../TraceSurfaces.jsx'
 
 export default function TraceHomeSummaryBand({
@@ -25,9 +26,9 @@ export default function TraceHomeSummaryBand({
     <>
       <PageHero
         icon={Activity}
-        eyebrow="神经传导 Trace"
-        title="数字生命体神经链路可视化"
-        description="从感官输入、检索规划、人格上下文到响应输出，统一查看当前请求的完整神经传导路径。"
+        eyebrow={TRACE_COPY.heroEyebrow}
+        title={TRACE_COPY.heroTitle}
+        description={TRACE_COPY.heroDescription}
         gradientClass="from-blue-50 via-white to-violet-50"
         metaItems={[
           `活跃请求：${liveTraceItems.length}`,
