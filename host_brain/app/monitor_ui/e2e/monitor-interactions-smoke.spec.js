@@ -151,7 +151,7 @@ async function stubPentestRunDetailApis(page) {
     if (format === 'json') {
       await fulfillJson(route, {
         run_id: 'smoke-lab-run',
-        findings: 1,
+        findings: 2,
         artifact_ref: 'artifacts/pentest/smoke-lab-run.md',
       })
       return
@@ -159,7 +159,7 @@ async function stubPentestRunDetailApis(page) {
     await route.fulfill({
       status: 200,
       contentType: 'text/markdown',
-      body: '# Pentest smoke report\n\nFinding: Debug endpoint exposed.',
+      body: '# Pentest smoke report\n\nFinding: Debug endpoint exposed.\n\nArtifact: artifacts/pentest/smoke-lab-run.md',
     })
   })
   await page.route('**/v1/pentest/runs/smoke-lab-run', (route) => fulfillJson(route, {
@@ -188,6 +188,15 @@ async function stubPentestRunDetailApis(page) {
         title: 'Debug endpoint exposed',
         severity: 'HIGH',
         description: 'A debug-only route is reachable inside the authorized lab scope.',
+        target: 'http://127.0.0.1:4173/monitor/debug',
+        evidence_refs: ['evidence://smoke/debug-route', 'artifact://headers/debug'],
+        recommendation: 'Disable debug routes outside the isolated lab scope.',
+      },
+      {
+        title: 'TLS info disclosure',
+        severity: 'LOW',
+        description: 'A non-sensitive TLS banner is visible during passive collection.',
+        target: 'http://127.0.0.1:4173/monitor/',
       },
     ],
     events: [
@@ -504,9 +513,23 @@ test.describe('Monitor interaction smoke', () => {
     await expect(page.getByText('需要记录 Side-effect Approval')).toBeVisible()
     await expect(page.getByText('ScopeGuard').first()).toBeVisible()
     await expect(page.getByText('phase4_exploit').first()).toBeVisible()
-    await expect(page.getByRole('complementary').getByText('Debug endpoint exposed')).toBeVisible()
+    const sidePanel = page.getByRole('complementary')
+    await expect(sidePanel.getByText('Debug endpoint exposed')).toBeVisible()
+    await expect(sidePanel.getByText('TLS info disclosure')).toBeVisible()
     await expect(page.getByText('攻击路径可视化')).toBeVisible()
     await expect(page.getByRole('button', { name: '记录 Side-effect Approval' })).toBeEnabled()
+
+    await sidePanel.getByLabel('搜索 Findings').fill('debug')
+    await expect(sidePanel.getByText('Debug endpoint exposed')).toBeVisible()
+    await expect(sidePanel.getByText('TLS info disclosure')).toBeHidden()
+    await sidePanel.getByRole('button', { name: '清除' }).click()
+    await sidePanel.getByRole('button', { name: 'High+' }).click()
+    await expect(sidePanel.getByText('Debug endpoint exposed')).toBeVisible()
+    await expect(sidePanel.getByText('TLS info disclosure')).toBeHidden()
+
+    await page.getByRole('button', { name: 'json' }).click()
+    await expect(page.getByText('Artifact ref：')).toBeVisible()
+    await expect(page.getByText('artifact_ref')).toBeVisible()
   })
 
   test('Tools catalog supports search, side-effect filters, and detail selection', async ({ page, baseURL }) => {
