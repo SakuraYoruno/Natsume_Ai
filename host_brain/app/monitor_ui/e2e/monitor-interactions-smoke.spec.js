@@ -485,6 +485,9 @@ test.describe('Monitor interaction smoke', () => {
     await stubPentestApis(page)
     await page.goto(monitorUrl(baseURL, '/security/pentest'), { waitUntil: 'domcontentloaded' })
     await expect(page.getByRole('heading', { name: 'Run Wizard' })).toBeVisible()
+    const mission = page.getByRole('region', { name: 'Pentest Mission Control' })
+    await expect(mission).toBeVisible()
+    await expect(mission.getByText('可以创建 readonly run')).toBeVisible()
 
     const targetInput = page.getByLabel('Target')
     const scopeInput = page.getByLabel('Scope')
@@ -498,10 +501,18 @@ test.describe('Monitor interaction smoke', () => {
 
     await modeSelect.selectOption('lab_full')
     await expect(page.getByText('Lab Mode OFF，lab_full 已禁用')).toBeVisible()
+    await expect(mission.getByText('Lab Mode OFF 阻断 lab_full')).toBeVisible()
     await expect(createRunButton).toBeDisabled()
 
     await modeSelect.selectOption('readonly')
+    await targetInput.fill('http://example.com/')
+    await expect(mission.getByText('Target host 未命中 scope')).toBeVisible()
+    await expect(createRunButton).toBeDisabled()
+
+    await targetInput.fill('http://127.0.0.1:4173/monitor/')
     await expect(createRunButton).toBeEnabled()
+    await mission.getByRole('button', { name: /Phase 矩阵/ }).click()
+    await expect(page.locator('#pentest-phase-matrix')).toBeVisible()
   })
 
   test('Pentest run detail summarizes attack path and approval gate', async ({ page, baseURL }) => {
