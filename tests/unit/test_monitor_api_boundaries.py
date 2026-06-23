@@ -468,11 +468,19 @@ def test_trace_observability_components_are_not_left_under_global_components() -
 def test_trace_request_detail_surface_is_feature_owned() -> None:
     page = MONITOR_SRC / "pages" / "TraceRequestDetail.jsx"
     surface = OBSERVABILITY_TRACE_COMPONENTS / "TraceRequestDetailSurface.jsx"
+    controller = MONITOR_SRC / "features" / "observability" / "traceRequestDetailController.js"
     page_source = page.read_text(encoding="utf-8")
     surface_source = surface.read_text(encoding="utf-8")
+    controller_source = controller.read_text(encoding="utf-8")
+    view_model_source = (
+        MONITOR_SRC / "features" / "observability" / "traceRequestDetailViewModel.js"
+    ).read_text(encoding="utf-8")
 
     assert surface.exists()
+    assert controller.exists()
     assert "TraceRequestDetailSurface.jsx" in page_source
+    assert "useTraceRequestDetailController" in page_source
+    assert "export function useTraceRequestDetailController()" in controller_source
     assert "export default function TraceRequestDetailSurface(" in surface_source
     for forbidden in [
         "PageHero",
@@ -486,8 +494,38 @@ def test_trace_request_detail_surface_is_feature_owned() -> None:
         "StatusBadge",
         "LoadingNotice",
         "NoticeBanner",
+        "connectTraceRequestLive",
+        "useTraceSnapshotQuery",
+        "useTraceStreamEventsQuery",
+        "useTraceTribeEventsQuery",
+        "useTraceRetrievalRuntimeQuery",
+        "useImmuneGateReplayQuery",
+        "useAppStore",
+        "dedupeStreamEvents",
+        "buildRetrievalRuntimeMeta",
+        "getSummaryInputText",
+        "getSummaryOutputText",
     ]:
         assert forbidden not in page_source
+
+    for controller_token in [
+        "connectTraceRequestLive(requestId",
+        "useTraceSnapshotQuery({",
+        "useTraceStreamEventsQuery({",
+        "useTraceTribeEventsQuery({",
+        "useTraceRetrievalRuntimeQuery({",
+        "useImmuneGateReplayQuery({",
+        "useAppStore((state) => state.pollingEnabled)",
+        "dedupeStreamEvents(matched.trace.stream_events, previous)",
+        "navigate('/observability/trace')",
+    ]:
+        assert controller_token in controller_source
+    for view_model_token in [
+        "buildRetrievalRuntimeMeta(retrievalRuntime)",
+        "getSummaryInputText(summary)",
+        "getSummaryOutputText(summary)",
+    ]:
+        assert view_model_token in view_model_source
 
 
 def test_observability_data_containers_are_not_left_under_global_components() -> None:
@@ -523,6 +561,13 @@ def test_digital_life_cockpit_sections_are_not_left_under_global_components() ->
     page = MONITOR_SRC / "pages" / "DigitalLifeOverview.jsx"
     expected_files = [
         "DigitalLifeOverviewSurface.jsx",
+        "DigitalLifeOverviewHeader.jsx",
+        "DigitalLifeHeroSection.jsx",
+        "DigitalLifeAvatarSection.jsx",
+        "DigitalLifeOverviewNotices.jsx",
+        "DigitalLifeWallClockSection.jsx",
+        "DigitalLifeRuntimeDetailSection.jsx",
+        "DigitalLifeLazySections.jsx",
         "DigitalLifeCapabilitySection.jsx",
         "DigitalLifeGatewaySection.jsx",
         "DigitalLifeSecondarySections.jsx",
@@ -540,12 +585,27 @@ def test_digital_life_cockpit_sections_are_not_left_under_global_components() ->
 def test_digital_life_overview_surface_is_feature_owned() -> None:
     page = MONITOR_SRC / "pages" / "DigitalLifeOverview.jsx"
     surface = MONITOR_SRC / "features" / "life" / "components" / "DigitalLifeOverviewSurface.jsx"
+    controller = MONITOR_SRC / "features" / "life" / "digitalLifeOverviewController.js"
     page_source = page.read_text(encoding="utf-8")
     surface_source = surface.read_text(encoding="utf-8")
+    controller_source = controller.read_text(encoding="utf-8")
 
     assert surface.exists()
+    assert controller.exists()
     assert "DigitalLifeOverviewSurface from '../features/life/components/DigitalLifeOverviewSurface.jsx'" in page_source
+    assert "useDigitalLifeOverviewController" in page_source
+    assert "export function useDigitalLifeOverviewController()" in controller_source
     assert "export default function DigitalLifeOverviewSurface(" in surface_source
+    for section_name in [
+        "DigitalLifeOverviewHeader",
+        "DigitalLifeHeroSection",
+        "DigitalLifeAvatarSection",
+        "DigitalLifeOverviewNotices",
+        "DigitalLifeWallClockSection",
+        "DigitalLifeRuntimeDetailSection",
+        "DigitalLifeLazySections",
+    ]:
+        assert section_name in surface_source
 
     for stale_component in [
         "AvatarStateCard",
@@ -564,6 +624,25 @@ def test_digital_life_overview_surface_is_feature_owned() -> None:
         "VitalLoopSummaryPanel",
     ]:
         assert stale_component not in page_source
+
+    for stale_surface_detail in [
+        "AvatarStateCard",
+        "BackgroundRuntimeCard",
+        "DigitalLifeRuntimeCard",
+        "DigitalLifeWallClockSoakCard",
+        "EmptyStateCard",
+        "LazyLoadingNotice",
+        "LoadingNotice",
+        "NoticeBanner",
+        "PageHero",
+        "RefreshCw",
+        "SampleMeta",
+        "Sparkles",
+        "TimeWindowSelect",
+        "ViewportLazySection",
+        "VitalLoopSummaryPanel",
+    ]:
+        assert stale_surface_detail not in surface_source
 
 
 def test_life_body_components_are_not_left_under_global_components() -> None:
@@ -1190,6 +1269,8 @@ def test_trace_request_runtime_panel_model_lives_in_trace_feature_module() -> No
 
 def test_trace_live_surface_model_lives_in_trace_feature_module() -> None:
     live_surfaces = (OBSERVABILITY_TRACE_COMPONENTS / "TraceLiveSurfaces.jsx").read_text(encoding="utf-8")
+    live_preview_panels = (OBSERVABILITY_TRACE_COMPONENTS / "TraceLivePreviewPanels.jsx").read_text(encoding="utf-8")
+    immune_tags = (OBSERVABILITY_TRACE_COMPONENTS / "TraceImmuneStageTags.jsx").read_text(encoding="utf-8")
     live_model = (OBSERVABILITY_TRACE_COMPONENTS / "traceLiveSurfaceModel.js").read_text(encoding="utf-8")
 
     for export_name in [
@@ -1212,13 +1293,18 @@ def test_trace_live_surface_model_lives_in_trace_feature_module() -> None:
         assert f"export function {export_name}(" in live_model
 
     assert "from './traceLiveSurfaceModel.js'" in live_surfaces
+    assert "from './TraceLivePreviewPanels.jsx'" in live_surfaces
+    assert "from './TraceImmuneStageTags.jsx'" in live_surfaces
+    assert "function LiveTracePreviewPanel(" in live_preview_panels
+    assert "function LiveTracePreview(" in live_preview_panels
+    assert "function LiveTraceStreamPreview(" in live_preview_panels
     assert "formatDateTime } from '../../../../shared/formatters.js'" in live_model
     assert "formatAlertTitle, humanizeToken } from '../../../../utils/digitalLife.js'" in live_model
     assert "getLatestPrimaryTraceNode" in live_model
     assert "normalizeTraceGroupNodeId" in live_model
     assert "const preview = pickLiveTracePreviewValue(candidate)" in live_model
-    assert "function renderImmuneStageTags(" in live_surfaces
-    assert "<RenderValue value={code} />" in live_surfaces
+    assert "function renderImmuneStageTags(" in immune_tags
+    assert "<RenderValue value={code} />" in immune_tags
 
     assert "function getLiveTraceStageClasses(" not in live_surfaces
     assert "function getLiveTraceOutputPreview(" not in live_surfaces
@@ -1242,11 +1328,15 @@ def test_trace_live_surface_model_lives_in_trace_feature_module() -> None:
     assert "humanizeToken" not in live_surfaces
     assert "getLatestPrimaryTraceNode" not in live_surfaces
     assert "normalizeTraceGroupNodeId" not in live_surfaces
+    assert "buildLiveTraceMetrics(session, trace)" not in live_surfaces
+    assert "recentTimelineEntries.map((entry)" not in live_surfaces
 
 
 def test_trace_home_model_lives_in_trace_feature_module() -> None:
     trace_home = (OBSERVABILITY_TRACE_COMPONENTS / "TraceHome.jsx").read_text(encoding="utf-8")
+    trace_home_controller = (OBSERVABILITY_TRACE_COMPONENTS / "traceHomeController.js").read_text(encoding="utf-8")
     trace_home_model = (OBSERVABILITY_TRACE_COMPONENTS / "traceHomeModel.js").read_text(encoding="utf-8")
+    trace_home_live_feed = (OBSERVABILITY_TRACE_COMPONENTS / "useTraceHomeLiveFeed.js").read_text(encoding="utf-8")
 
     for export_name in [
         "buildTraceRecentRequests",
@@ -1272,28 +1362,41 @@ def test_trace_home_model_lives_in_trace_feature_module() -> None:
     ]:
         assert f"export function {export_name}(" in trace_home_model
 
-    assert "from './traceHomeModel.js'" in trace_home
-    assert "buildTraceRecentRequests({" in trace_home
-    assert "getSelectedTraceSessionForQuery({" in trace_home
-    assert "buildTraceTribeFeedParams({" in trace_home
-    assert "buildTraceLiveSnapshotParams({ liveTraceLimit, recentKeyword })" in trace_home
-    assert "buildTraceLiveFeedConnectParams({ liveTraceLimit, recentKeyword })" in trace_home
-    assert "getTracePayloadItems(payload)" in trace_home
-    assert "getTracePayloadItems(liveSnapshotQuery.liveSnapshot)" in trace_home
-    assert "pruneTraceTimelineEntriesForSnapshot(previous, items)" in trace_home
-    assert "buildTraceInfoFromTrace(selectedTraceQuery.traceSnapshot)" in trace_home
-    assert "buildTraceInfoFromTrace(item.trace)" in trace_home
-    assert "buildTraceSearchState(inputId)" in trace_home
-    assert "navigate(buildTraceDetailPath(requestId))" in trace_home
-    assert "getTraceOverviewFocusAction({ requestId, traceData, liveTraceItems })" in trace_home
-    assert "getLiveTraceItemFocusAction({" in trace_home
-    assert "buildTraceGroupStats(traceData)" in trace_home
-    assert "getTraceStatusHealth(traceInfo)" in trace_home
-    assert "buildSelectedTraceRequestContext({" in trace_home
-    assert "getNextAutoTraceSelection({ liveTraceItems, selectedRequestId, traceData })" in trace_home
-    assert "getTraceLiveFeedStatus({" in trace_home
-    assert "buildTraceHistoryViewState({" in trace_home
-    assert "buildTracePulseNodes({" in trace_home
+    assert "from './traceHomeModel.js'" in trace_home_controller
+    assert "buildTraceRecentRequests({" in trace_home_controller
+    assert "getSelectedTraceSessionForQuery({" in trace_home_controller
+    assert "buildTraceTribeFeedParams({" in trace_home_controller
+    assert "useTraceHomeLiveFeed({" in trace_home_controller
+    assert "buildTraceLiveSnapshotParams({ liveTraceLimit, recentKeyword })" in trace_home_live_feed
+    assert "buildTraceLiveFeedConnectParams({ liveTraceLimit, recentKeyword })" in trace_home_live_feed
+    assert "getTracePayloadItems(payload)" in trace_home_live_feed
+    assert "getTracePayloadItems(liveSnapshotQuery.liveSnapshot)" in trace_home_live_feed
+    assert "pruneTraceTimelineEntriesForSnapshot(previous, items)" in trace_home_live_feed
+    assert "buildTraceInfoFromTrace(selectedTraceQuery.traceSnapshot)" in trace_home_controller
+    assert "buildTraceInfoFromTrace(item.trace)" in trace_home_controller
+    assert "buildTraceSearchState(inputId)" in trace_home_controller
+    assert "navigate(buildTraceDetailPath(requestId))" in trace_home_controller
+    assert "getTraceOverviewFocusAction({ requestId, traceData, liveTraceItems })" in trace_home_controller
+    assert "getLiveTraceItemFocusAction({" in trace_home_controller
+    assert "buildTraceGroupStats(traceData)" in trace_home_controller
+    assert "getTraceStatusHealth(traceInfo)" in trace_home_controller
+    assert "buildSelectedTraceRequestContext({" in trace_home_controller
+    assert "getNextAutoTraceSelection({ liveTraceItems, selectedRequestId, traceData })" in trace_home_controller
+    assert "getTraceLiveFeedStatus({" in trace_home_controller
+    assert "buildTraceHistoryViewState({" in trace_home_controller
+    assert "buildTracePulseNodes({" in trace_home_controller
+    assert "useTraceHomeController" in trace_home
+    assert "traceHomeController.js" in trace_home
+    assert "useEffect" not in trace_home
+    assert "useState" not in trace_home
+    assert "useCallback" not in trace_home
+    assert "useMemo" not in trace_home
+    assert "connectTraceLiveFeed" not in trace_home
+    assert "useSessionsListQuery" not in trace_home
+    assert "useTraceLiveSnapshotQuery" not in trace_home
+    assert "useTraceSnapshotQuery" not in trace_home
+    assert "useTraceTribeFeedQuery" not in trace_home
+    assert "useAppStore" not in trace_home
     assert "new Map(recentRequestsBase" not in trace_home
     assert "const params = { limit: selectedRequestId ? 200 : 60 }" not in trace_home
     assert "getTraceGroupState(" not in trace_home
@@ -1336,8 +1439,8 @@ def test_trace_home_linked_tribe_events_panel_is_split() -> None:
 
     assert "TraceHomeControlConsole from './traceHome/TraceHomeControlConsole.jsx'" in trace_home
     assert "<TraceHomeControlConsole" in trace_home
-    assert "onRefreshTribeEvents={() => { void tribeFeedQuery.refetch() }}" in trace_home
-    assert "onOpenTribeInsights={() => navigate('/observability/insights/safety')}" in trace_home
+    assert "onRefreshTribeEvents={() => { void traceHome.refreshTribeEvents() }}" in trace_home
+    assert "onOpenTribeInsights={() => traceHome.navigate('/observability/insights/safety')}" in trace_home
 
     assert "TraceLinkedTribeEventsPanel from '../TraceLinkedTribeEventsPanel.jsx'" in control_console
     assert "<TraceLinkedTribeEventsPanel" in control_console
@@ -1414,11 +1517,13 @@ def test_tools_execution_results_use_shared_json_block() -> None:
     tool_execute_panel = (
         MONITOR_SRC / "features" / "execution" / "components" / "ToolExecutePanel.jsx"
     ).read_text(encoding="utf-8")
-    tools_operations = (MONITOR_SRC / "features" / "execution" / "components" / "ToolsOperationsSection.jsx").read_text(encoding="utf-8")
+    custom_provider_form = (
+        MONITOR_SRC / "features" / "execution" / "components" / "CustomSkillProviderForm.jsx"
+    ).read_text(encoding="utf-8")
 
     for rel, source in {
         "features/execution/components/ToolExecutePanel.jsx": tool_execute_panel,
-        "features/execution/components/ToolsOperationsSection.jsx": tools_operations,
+        "features/execution/components/CustomSkillProviderForm.jsx": custom_provider_form,
     }.items():
         assert "shared/ui/JsonBlock.jsx" in source, rel
         assert "JSON.stringify(result.data" not in source, rel
@@ -1429,6 +1534,7 @@ def test_tools_execution_results_use_shared_json_block() -> None:
 def test_trace_live_history_and_runtime_panels_render_dynamic_values_safely() -> None:
     trace_surfaces = (OBSERVABILITY_TRACE_COMPONENTS / "TraceSurfaces.jsx").read_text(encoding="utf-8")
     live_surfaces = (OBSERVABILITY_TRACE_COMPONENTS / "TraceLiveSurfaces.jsx").read_text(encoding="utf-8")
+    immune_tags = (OBSERVABILITY_TRACE_COMPONENTS / "TraceImmuneStageTags.jsx").read_text(encoding="utf-8")
     live_model = (OBSERVABILITY_TRACE_COMPONENTS / "traceLiveSurfaceModel.js").read_text(encoding="utf-8")
     history_panel = (OBSERVABILITY_TRACE_COMPONENTS / "TraceHistoryPanel.jsx").read_text(encoding="utf-8")
     advanced_view_sources = "\n".join(
@@ -1445,7 +1551,8 @@ def test_trace_live_history_and_runtime_panels_render_dynamic_values_safely() ->
     assert "<RenderValue value={caption}" in trace_surfaces
     assert "<RenderValue value={description}" in trace_surfaces
     assert "const preview = pickLiveTracePreviewValue(candidate)" in live_model
-    assert "<RenderValue value={code} />" in live_surfaces
+    assert "from './TraceImmuneStageTags.jsx'" in live_surfaces
+    assert "<RenderValue value={code} />" in immune_tags
     assert "<RenderValue value={item.input_preview || item.request_id} />" in history_panel
     assert advanced_view_sources.count("<RenderValue value=") >= 4
     assert runtime_panel_sources.count("<RenderValue value=") >= 8
@@ -1546,7 +1653,7 @@ def test_repeated_time_and_percent_formatters_use_shared_module() -> None:
             "function formatPercent(",
             "function formatLocalTime(",
         ],
-        "pages/Gateway.jsx": ["function formatTime("],
+        "features/execution/components/gateway/GatewayPlatformCard.jsx": ["function formatTime("],
         "features/observability/logStreamModel.js": ["function formatTime("],
         "features/execution/components/AutomationImmuneSectionContent.jsx": ["function formatPercent("],
         "features/operations/components/canon/CanonDocumentsSection.jsx": ["function formatDateTime("],
@@ -1558,7 +1665,7 @@ def test_repeated_time_and_percent_formatters_use_shared_module() -> None:
         "features/operations/components/canon/CanonDocumentsSection.jsx",
         "features/life/digitalLifeGatewayModel.js",
         "features/operations/components/promptOps/PromptTemplateEditorPanel.jsx",
-        "features/execution/components/ToolsOperationsSection.jsx",
+        "features/execution/components/CustomSkillProviderList.jsx",
         "features/observability/components/insights/InsightsStateGroup.jsx",
         "features/observability/components/insights/InsightsLlmGroup.jsx",
         "features/observability/components/insights/insightsGroupShared.jsx",
@@ -1660,33 +1767,56 @@ def test_digital_life_gateway_view_model_lives_in_life_feature() -> None:
 
 def test_digital_life_overview_view_model_lives_in_life_feature() -> None:
     page = (MONITOR_SRC / "pages" / "DigitalLifeOverview.jsx").read_text(encoding="utf-8")
+    controller = (MONITOR_SRC / "features" / "life" / "digitalLifeOverviewController.js").read_text(encoding="utf-8")
     model = (MONITOR_SRC / "features" / "life" / "digitalLifeOverviewModel.js").read_text(encoding="utf-8")
+    wired_domains_model = (
+        MONITOR_SRC / "features" / "life" / "digitalLifeWiredDomainsModel.js"
+    ).read_text(encoding="utf-8")
 
     for export_name in [
         "getDigitalLifePollingInterval",
         "buildDigitalLifeHeroDescription",
         "buildDigitalLifeHeroMetaItems",
         "buildDigitalLifeCapabilitySectionModel",
-        "buildDigitalLifeWiredDomains",
         "buildDigitalLifeSecondarySectionsModel",
         "buildDigitalLifeGatewaySectionModel",
     ]:
         assert f"export function {export_name}(" in model
+    assert "export function buildDigitalLifeWiredDomains(" in wired_domains_model
 
-    assert "features/life/digitalLifeOverviewModel.js" in page
-    assert "getDigitalLifePollingInterval(pollingInterval, 60)" in page
-    assert "getDigitalLifePollingInterval(pollingInterval, 15)" in page
-    assert "buildDigitalLifeWiredDomains({" in page
-    assert "buildDigitalLifeCapabilitySectionModel(capabilityGapData)" in page
-    assert "buildDigitalLifeSecondarySectionsModel({" in page
-    assert "buildDigitalLifeGatewaySectionModel({" in page
-    assert "buildDigitalLifeHeroDescription({ runtimeSnapshot, lifeBodyModel, hasRuntimeSnapshot })" in page
-    assert "buildDigitalLifeHeroMetaItems({ modeMeta, lifeBodyModel, replyPosture })" in page
+    assert "features/life/digitalLifeOverviewController.js" in page
+    assert "./digitalLifeOverviewModel.js" in controller
+    assert "getDigitalLifePollingInterval(pollingInterval, 60)" in controller
+    assert "getDigitalLifePollingInterval(pollingInterval, 15)" in controller
+    assert "buildDigitalLifeWiredDomains({" in controller
+    assert "buildDigitalLifeCapabilitySectionModel(capabilityGapData)" in controller
+    assert "buildDigitalLifeSecondarySectionsModel({" in controller
+    assert "buildDigitalLifeGatewaySectionModel({" in controller
+    assert "buildDigitalLifeHeroDescription({ runtimeSnapshot, lifeBodyModel, hasRuntimeSnapshot })" in controller
+    assert "buildDigitalLifeHeroMetaItems({ modeMeta, lifeBodyModel, replyPosture })" in controller
+    assert "postAvatarBehavior({ behavior_id: behaviorId, source: 'monitor_digital_life' })" in controller
+    assert "useLifeBodyPageData({ windowMinutes })" in controller
+    assert "useDigitalLifeWallClockSoakQuery({" in controller
+    assert "useAvatarStateQuery({" in controller
+
+    for controller_only_token in [
+        "useLifeBodyPageData",
+        "useDigitalLifeWallClockSoakQuery",
+        "useAvatarStateQuery",
+        "postAvatarBehavior",
+        "buildMainChainReshapeModel",
+        "buildDigitalLifeWiredDomains",
+    ]:
+        assert controller_only_token not in page
 
     assert "compactText(" not in page
     assert "formatTrend(" not in page
     assert ".sort((left, right) => Number(left?.health_score" not in page
     assert "forge_runtime_quality?.items" not in page
+    assert "compactText(" not in controller
+    assert "formatTrend(" not in controller
+    assert ".sort((left, right) => Number(left?.health_score" not in controller
+    assert "forge_runtime_quality?.items" not in controller
     assert "actionTo: '/life/runtime-mode'" not in page
     assert "等待运行快照恢复后补齐关系阶段" not in page
     assert "生命流正在穿过关系、记忆、节律与执行层" not in page
@@ -1724,7 +1854,7 @@ def test_canon_and_provider_status_metadata_live_in_shared_module() -> None:
             "const STATUS_STYLES",
             "const PROPOSAL_STATUS_LABELS",
         ],
-        "features/execution/components/ToolsOperationsSection.jsx": [
+        "features/execution/components/CustomSkillProviderList.jsx": [
             "const PROVIDER_STATUS_LABELS",
             "const styles = {",
         ],
@@ -2038,8 +2168,16 @@ def test_tools_queries_are_split_from_execution_query_monolith() -> None:
 def test_automation_queries_are_split_from_execution_query_monolith() -> None:
     execution_queries = _read_optional(MONITOR_SRC / "features" / "execution" / "queries.js")
     automation_queries = (MONITOR_SRC / "features" / "execution" / "automationQueries.js").read_text(encoding="utf-8")
+    immune_replay_api = (MONITOR_SRC / "shared" / "api" / "immuneGate.js").read_text(encoding="utf-8")
+    immune_replay_query = (MONITOR_SRC / "shared" / "query" / "useImmuneGateReplayQuery.js").read_text(encoding="utf-8")
     automation_page = (MONITOR_SRC / "pages" / "Automation.jsx").read_text(encoding="utf-8")
+    automation_controller = (
+        MONITOR_SRC / "features" / "execution" / "automationDashboardController.js"
+    ).read_text(encoding="utf-8")
     trace_detail = (MONITOR_SRC / "pages" / "TraceRequestDetail.jsx").read_text(encoding="utf-8")
+    trace_detail_controller = (
+        MONITOR_SRC / "features" / "observability" / "traceRequestDetailController.js"
+    ).read_text(encoding="utf-8")
     immune_section = (
         MONITOR_SRC / "features" / "execution" / "components" / "AutomationImmuneSectionContent.jsx"
     ).read_text(encoding="utf-8")
@@ -2050,7 +2188,6 @@ def test_automation_queries_are_split_from_execution_query_monolith() -> None:
     for export_name in [
         "useAutomationOverviewQuery",
         "useImmuneGateStatsQuery",
-        "useImmuneGateReplayQuery",
         "useSchedulerHistoryQuery",
         "refreshSchedulerHistoryQuery",
     ]:
@@ -2062,22 +2199,33 @@ def test_automation_queries_are_split_from_execution_query_monolith() -> None:
         "fetchSchedulerHealth",
         "fetchResourceManagerStatus",
         "fetchImmuneGateStats",
-        "fetchImmuneGateReplay",
         "fetchSchedulerHistory",
     ]:
         assert fetcher_name in automation_queries
         assert fetcher_name not in execution_queries
 
-    assert "features/execution/automationQueries.js" in automation_page
-    assert "features/execution/automationQueries.js" in trace_detail
+    assert "export { default as useImmuneGateReplayQuery } from '../../shared/query/useImmuneGateReplayQuery.js'" in automation_queries
+    assert "export function useImmuneGateReplayQuery" not in automation_queries
+    assert "fetchImmuneGateReplay" not in automation_queries
+    assert "export function fetchImmuneGateReplay" in immune_replay_api
+    assert "ENDPOINT_REGISTRY" in immune_replay_api
+    assert "endpointGet(execution.immuneGateReplay" in immune_replay_api
+    assert "export default function useImmuneGateReplayQuery" in immune_replay_query
+    assert "fetchImmuneGateReplay(normalizedRequestId" in immune_replay_query
+    assert "OBS_QUERY_KEYS.immuneGateReplay" in immune_replay_query
+    assert "features/execution/automationDashboardController.js" in automation_page
+    assert "./automationQueries.js" in automation_controller
+    assert "shared/query/useImmuneGateReplayQuery.js" in trace_detail_controller
+    assert "../execution/automationQueries.js" not in trace_detail_controller
     assert "../automationQueries.js" in immune_section
     assert "../automationQueries.js" in history_section
     assert "features/execution/queries.js" not in automation_page
+    assert "features/execution/queries.js" not in automation_controller
     assert "features/execution/queries.js" not in trace_detail
+    assert "features/execution/queries.js" not in trace_detail_controller
     assert "from '../queries.js'" not in immune_section
     assert "from '../queries.js'" not in history_section
     assert "OBS_QUERY_KEYS.automationOverview" in automation_queries
-    assert "OBS_QUERY_KEYS.immuneGateReplay" in automation_queries
     assert "OBS_QUERY_KEYS.schedulerHistory" in automation_queries
 
 
@@ -2090,6 +2238,7 @@ def test_remaining_execution_queries_are_split_and_monolith_is_retired() -> None
     wechat_queries = (MONITOR_SRC / "features" / "execution" / "wechatQueries.js").read_text(encoding="utf-8")
     agent_loop_page = (MONITOR_SRC / "pages" / "AgentLoop.jsx").read_text(encoding="utf-8")
     gateway_page = (MONITOR_SRC / "pages" / "Gateway.jsx").read_text(encoding="utf-8")
+    gateway_controller = (MONITOR_SRC / "features" / "execution" / "gatewayController.js").read_text(encoding="utf-8")
     skills_page = (MONITOR_SRC / "pages" / "SkillsHub.jsx").read_text(encoding="utf-8")
 
     assert not execution_queries_path.exists()
@@ -2115,9 +2264,10 @@ def test_remaining_execution_queries_are_split_and_monolith_is_retired() -> None
         assert fetcher_name not in execution_queries
 
     assert "features/execution/agentLoopQueries.js" in agent_loop_page
-    assert "features/execution/gatewayQueries.js" in gateway_page
+    assert "./gatewayQueries.js" in gateway_controller
     assert "features/execution/skillsHubQueries.js" in skills_page
-    for source in [agent_loop_page, gateway_page, skills_page]:
+    assert "features/execution/gatewayQueries.js" not in gateway_page
+    for source in [agent_loop_page, gateway_page, gateway_controller, skills_page]:
         assert "features/execution/queries.js" not in source
 
 
@@ -2187,7 +2337,13 @@ def test_life_queries_are_split_and_monolith_is_retired() -> None:
 
     pages_and_hooks = {
         "Bond.jsx": (MONITOR_SRC / "pages" / "Bond.jsx").read_text(encoding="utf-8"),
+        "bondDashboardController.js": (
+            MONITOR_SRC / "features" / "life" / "bondDashboardController.js"
+        ).read_text(encoding="utf-8"),
         "DigitalLifeOverview.jsx": (MONITOR_SRC / "pages" / "DigitalLifeOverview.jsx").read_text(encoding="utf-8"),
+        "digitalLifeOverviewController.js": (
+            MONITOR_SRC / "features" / "life" / "digitalLifeOverviewController.js"
+        ).read_text(encoding="utf-8"),
         "EmotionDashboard.jsx": (MONITOR_SRC / "pages" / "EmotionDashboard.jsx").read_text(encoding="utf-8"),
         "LifeTimelinePage.jsx": (MONITOR_SRC / "pages" / "LifeTimelinePage.jsx").read_text(encoding="utf-8"),
         "MemoryBrowser.jsx": (MONITOR_SRC / "pages" / "MemoryBrowser.jsx").read_text(encoding="utf-8"),
@@ -2254,8 +2410,10 @@ def test_life_queries_are_split_and_monolith_is_retired() -> None:
         assert fetcher_name not in life_queries
 
     expected_imports = {
-        "Bond.jsx": "features/life/bondQueries.js",
-        "DigitalLifeOverview.jsx": "features/life/digitalLifeQueries.js",
+        "Bond.jsx": "features/life/bondDashboardController.js",
+        "bondDashboardController.js": "./bondQueries.js",
+        "DigitalLifeOverview.jsx": "features/life/digitalLifeOverviewController.js",
+        "digitalLifeOverviewController.js": "./digitalLifeQueries.js",
         "EmotionDashboard.jsx": "features/life/emotionQueries.js",
         "LifeTimelinePage.jsx": "features/life/lifeBodyQueries.js",
         "MemoryBrowser.jsx": "features/life/memoryQueries.js",
@@ -2302,6 +2460,9 @@ def test_observability_queries_are_split_and_monolith_is_retired() -> None:
         "Sessions.jsx": (MONITOR_SRC / "pages" / "Sessions.jsx").read_text(encoding="utf-8"),
         "Metrics.jsx": (MONITOR_SRC / "pages" / "Metrics.jsx").read_text(encoding="utf-8"),
         "Alerts.jsx": (MONITOR_SRC / "pages" / "Alerts.jsx").read_text(encoding="utf-8"),
+        "alertsController.js": (
+            MONITOR_SRC / "features" / "observability" / "alertsController.js"
+        ).read_text(encoding="utf-8"),
         "Insights.jsx": (MONITOR_SRC / "pages" / "Insights.jsx").read_text(encoding="utf-8"),
         "LogStream.jsx": (MONITOR_SRC / "pages" / "LogStream.jsx").read_text(encoding="utf-8"),
         "CodexBioOpsObservability.jsx": (
@@ -2309,6 +2470,9 @@ def test_observability_queries_are_split_and_monolith_is_retired() -> None:
         ).read_text(encoding="utf-8"),
         "TraceHome.jsx": (
             MONITOR_SRC / "features" / "observability" / "components" / "trace" / "TraceHome.jsx"
+        ).read_text(encoding="utf-8"),
+        "traceHomeController.js": (
+            MONITOR_SRC / "features" / "observability" / "components" / "trace" / "traceHomeController.js"
         ).read_text(encoding="utf-8"),
     }
 
@@ -2360,11 +2524,12 @@ def test_observability_queries_are_split_and_monolith_is_retired() -> None:
         "Overview.jsx": "features/observability/overviewQueries.js",
         "Sessions.jsx": "features/observability/sessionsQueries.js",
         "Metrics.jsx": "features/observability/metricsQueries.js",
-        "Alerts.jsx": "features/observability/alertsQueries.js",
+        "Alerts.jsx": "features/observability/alertsController.js",
+        "alertsController.js": "./alertsQueries.js",
         "Insights.jsx": "features/observability/insightsQueries.js",
         "LogStream.jsx": "features/observability/logQueries.js",
         "CodexBioOpsObservability.jsx": "features/observability/codexBioOpsQueries.js",
-        "TraceHome.jsx": "../../sessionsQueries.js",
+        "traceHomeController.js": "../../sessionsQueries.js",
     }
     for name, expected_import in expected_imports.items():
         assert expected_import in pages[name], name
@@ -2506,8 +2671,11 @@ def test_system_config_view_model_lives_in_operations_feature() -> None:
 
 
 def test_tools_operations_model_lives_in_execution_feature() -> None:
-    component = (
-        MONITOR_SRC / "features" / "execution" / "components" / "ToolsOperationsSection.jsx"
+    installer = (
+        MONITOR_SRC / "features" / "execution" / "components" / "CustomSkillProviderInstaller.jsx"
+    ).read_text(encoding="utf-8")
+    stats_panels = (
+        MONITOR_SRC / "features" / "execution" / "components" / "ToolsOperationsStatsPanels.jsx"
     ).read_text(encoding="utf-8")
     model = (MONITOR_SRC / "features" / "execution" / "toolsOperationsModel.js").read_text(encoding="utf-8")
 
@@ -2522,15 +2690,16 @@ def test_tools_operations_model_lives_in_execution_feature() -> None:
     ]:
         assert export_name in model
 
-    assert "toolsOperationsModel.js" in component
-    assert "CUSTOM_SKILL_PROVIDER_DEFAULT_FORM" in component
-    assert "mergeCustomSkillProviderTemplate(prev, templateData)" in component
-    assert "mergeCustomSkillProviderTemplate(prev, nextTemplate)" in component
-    assert "buildCustomSkillProviderInstallRequest(form)" in component
-    assert "getCustomSkillProvidersLoadState({" in component
-    assert "getCustomSkillProviderTemplateLoadState({" in component
-    assert "buildPermissionGuardStatsView({" in component
-    assert "buildActionPlanStatsView({" in component
+    assert "toolsOperationsModel.js" in installer
+    assert "CUSTOM_SKILL_PROVIDER_DEFAULT_FORM" in installer
+    assert "mergeCustomSkillProviderTemplate(prev, templateData)" in installer
+    assert "mergeCustomSkillProviderTemplate(prev, nextTemplate)" in installer
+    assert "buildCustomSkillProviderInstallRequest(form)" in installer
+    assert "getCustomSkillProvidersLoadState({" in installer
+    assert "getCustomSkillProviderTemplateLoadState({" in installer
+    assert "toolsOperationsModel.js" in stats_panels
+    assert "buildPermissionGuardStatsView({" in stats_panels
+    assert "buildActionPlanStatsView({" in stats_panels
 
     for forbidden in [
         "models/loadState.js",
@@ -2550,7 +2719,8 @@ def test_tools_operations_model_lives_in_execution_feature() -> None:
         "{ label: '总校验次数'",
         "{ label: '总计划数'",
     ]:
-        assert forbidden not in component
+        assert forbidden not in installer
+        assert forbidden not in stats_panels
 
 
 def test_tools_page_delegates_catalog_and_execution_ui_to_execution_feature() -> None:
@@ -2588,6 +2758,9 @@ def test_tools_page_delegates_catalog_and_execution_ui_to_execution_feature() ->
 
 def test_chat_debug_streaming_and_trace_models_are_split() -> None:
     chat_debug_page = (MONITOR_SRC / "pages" / "ChatDebug.jsx").read_text(encoding="utf-8")
+    chat_controller = (
+        MONITOR_SRC / "features" / "observability" / "chatDebugController.js"
+    ).read_text(encoding="utf-8")
     chat_debug_sections = (
         MONITOR_SRC / "features" / "observability" / "components" / "chatDebug" / "ChatDebugConsoleSections.jsx"
     ).read_text(encoding="utf-8")
@@ -2622,11 +2795,14 @@ def test_chat_debug_streaming_and_trace_models_are_split() -> None:
     ]:
         assert f"export function {export_name}(" in chat_model
 
-    assert "shared/streaming/sse.js" in chat_debug_page
-    assert "features/observability/chatDebugModel.js" in chat_debug_page
+    assert "chatDebugController.js" in chat_debug_page
+    assert "shared/streaming/sse.js" in chat_controller
+    assert "from './chatDebugModel.js'" in chat_controller
     assert "ChatDebugConsoleSections.jsx" in chat_debug_page
-    assert "consumeSseBuffer(buffer)" in chat_debug_page
-    assert "buildChatDebugTraceView({" in chat_debug_page
+    assert "consumeSseBuffer(buffer)" in chat_controller
+    assert "buildChatDebugTraceView({" in chat_controller
+    assert "sendChatDebugStream(" in chat_controller
+    assert "useTraceSnapshotQuery({" in chat_controller
     assert "traceLoadState" in chat_debug_page
     assert "traceNodeCount" in chat_debug_page
     assert "function ChatDebugEventRow(" in chat_event_stream
@@ -2649,6 +2825,17 @@ def test_chat_debug_streaming_and_trace_models_are_split() -> None:
     assert "getTraceNodeDisplayName" not in chat_debug_page
     assert "formatEventPhase" not in chat_debug_page
     assert "formatTime(" not in chat_debug_page
+    assert "sendChatDebugStream" not in chat_debug_page
+    assert "useTraceSnapshotQuery" not in chat_debug_page
+    assert "useDigitalLifeRuntimeSignals" not in chat_debug_page
+    assert "consumeSseBuffer" not in chat_debug_page
+    assert "useAppStore" not in chat_debug_page
+    assert "useState" not in chat_debug_page
+    assert "useEffect" not in chat_debug_page
+    assert "useMemo" not in chat_debug_page
+    assert "useCallback" not in chat_debug_page
+    assert "useRef" not in chat_debug_page
+    assert "buildChatDebugTraceView" not in chat_debug_page
     assert "function parseSseBlock(" not in chat_debug_page
     assert "function consumeSseBuffer(" not in chat_debug_page
     assert "function truncateDebugText(" not in chat_debug_page
@@ -2714,6 +2901,9 @@ def test_automation_status_metadata_lives_in_shared_module() -> None:
 
 def test_automation_resource_model_lives_in_execution_feature() -> None:
     automation_page = (MONITOR_SRC / "pages" / "Automation.jsx").read_text(encoding="utf-8")
+    automation_surface = (
+        MONITOR_SRC / "features" / "execution" / "components" / "AutomationDashboardSurface.jsx"
+    ).read_text(encoding="utf-8")
     dashboard_model = (MONITOR_SRC / "features" / "execution" / "automationDashboardModel.js").read_text(encoding="utf-8")
     resource_panel = (
         MONITOR_SRC
@@ -2744,7 +2934,7 @@ def test_automation_resource_model_lives_in_execution_feature() -> None:
 
     assert "automationResourceModel.js" in dashboard_model
     assert "features/execution/automationResourceModel.js" not in automation_page
-    assert "features/execution/components/AutomationResourceSchedulingPanel.jsx" in automation_page
+    assert "./AutomationResourceSchedulingPanel.jsx" in automation_surface
     assert "from '../automationResourceModel.js'" in resource_panel
     assert "buildResourceSchedulingView(summary, resourceManager)" in resource_panel
     assert "buildResourceGateDecisionRowView(row)" in resource_panel
@@ -2771,6 +2961,12 @@ def test_automation_resource_model_lives_in_execution_feature() -> None:
 
 def test_automation_task_view_model_lives_in_execution_feature() -> None:
     automation_page = (MONITOR_SRC / "pages" / "Automation.jsx").read_text(encoding="utf-8")
+    automation_controller = (
+        MONITOR_SRC / "features" / "execution" / "automationDashboardController.js"
+    ).read_text(encoding="utf-8")
+    automation_surface = (
+        MONITOR_SRC / "features" / "execution" / "components" / "AutomationDashboardSurface.jsx"
+    ).read_text(encoding="utf-8")
     task_section = (
         MONITOR_SRC
         / "features"
@@ -2789,13 +2985,13 @@ def test_automation_task_view_model_lives_in_execution_feature() -> None:
     ]:
         assert f"export function {export_name}(" in task_model
 
-    assert "features/execution/automationTaskModel.js" in automation_page
-    assert "features/execution/components/AutomationTaskExecutionSection.jsx" in automation_page
+    assert "./automationTaskModel.js" in automation_controller
+    assert "./AutomationTaskExecutionSection.jsx" in automation_surface
     assert "from '../automationTaskModel.js'" in task_section
     assert "getTaskView(item)" in task_section
-    assert "getAutomationTaskUrlFilters(searchParams)" in automation_page
-    assert "buildAutomationClearedTaskFilterParams(searchParams)" in automation_page
-    assert "buildAutomationTaskSelectionView({" in automation_page
+    assert "getAutomationTaskUrlFilters(searchParams)" in automation_controller
+    assert "buildAutomationClearedTaskFilterParams(searchParams)" in automation_controller
+    assert "buildAutomationTaskSelectionView({" in automation_controller
     assert "taskMatchesAutomationFilters(item, { reasonFilter, gateFilter, keyword })" in task_model
     assert "filteredTasks.find((item) => item.task?.task_id === selectedTaskId)" in task_model
     assert "new URLSearchParams(searchParams)" in task_model
@@ -2829,6 +3025,12 @@ def test_automation_task_view_model_lives_in_execution_feature() -> None:
 
 def test_automation_scheduler_model_lives_in_execution_feature() -> None:
     automation_page = (MONITOR_SRC / "pages" / "Automation.jsx").read_text(encoding="utf-8")
+    automation_controller = (
+        MONITOR_SRC / "features" / "execution" / "automationDashboardController.js"
+    ).read_text(encoding="utf-8")
+    automation_surface = (
+        MONITOR_SRC / "features" / "execution" / "components" / "AutomationDashboardSurface.jsx"
+    ).read_text(encoding="utf-8")
     dashboard_model = (MONITOR_SRC / "features" / "execution" / "automationDashboardModel.js").read_text(encoding="utf-8")
     task_section = (
         MONITOR_SRC
@@ -2849,7 +3051,7 @@ def test_automation_scheduler_model_lives_in_execution_feature() -> None:
     ]:
         assert export_name in scheduler_model
 
-    assert "features/execution/automationDashboardModel.js" in automation_page
+    assert "./automationDashboardModel.js" in automation_controller
     assert "automationSchedulerModel.js" in dashboard_model
     assert "getAutomationSchedulerState(health)" in dashboard_model
     assert "getAutomationTaskCounts(tasks, filteredTasks)" in dashboard_model
@@ -2873,11 +3075,17 @@ def test_automation_scheduler_model_lives_in_execution_feature() -> None:
     assert "tasks.filter((item) => item.health?.status === 'RUNNING')" not in automation_page
     assert "tasks.filter((item) => item.health?.status === 'FAILED')" not in automation_page
     assert "resourceSummary.deferred > 0 ? 'amber' : 'teal'" not in automation_page
-    assert "metaItems={heroMetaItems}" in automation_page
+    assert "metaItems={heroMetaItems}" in automation_surface
 
 
 def test_automation_dashboard_view_model_lives_in_execution_feature() -> None:
     automation_page = (MONITOR_SRC / "pages" / "Automation.jsx").read_text(encoding="utf-8")
+    automation_controller = (
+        MONITOR_SRC / "features" / "execution" / "automationDashboardController.js"
+    ).read_text(encoding="utf-8")
+    automation_surface = (
+        MONITOR_SRC / "features" / "execution" / "components" / "AutomationDashboardSurface.jsx"
+    ).read_text(encoding="utf-8")
     dashboard_model = (MONITOR_SRC / "features" / "execution" / "automationDashboardModel.js").read_text(encoding="utf-8")
 
     for export_name in [
@@ -2889,12 +3097,13 @@ def test_automation_dashboard_view_model_lives_in_execution_feature() -> None:
     ]:
         assert f"export function {export_name}(" in dashboard_model
 
-    assert "features/execution/automationDashboardModel.js" in automation_page
-    assert "buildAutomationDashboardViewModel({" in automation_page
-    assert "sampleMeta.loadState" in automation_page
-    assert "noticeView.overviewError" in automation_page
-    assert "noticeView.noSample" in automation_page
-    assert "OrganSystemOverview model={endocrineOrganModel}" in automation_page
+    assert "./automationDashboardModel.js" in automation_controller
+    assert "buildAutomationDashboardViewModel({" in automation_controller
+    assert "sampleMeta.loadState" in automation_surface
+    assert "noticeView.overviewError" in automation_surface
+    assert "noticeView.noSample" in automation_surface
+    assert "renderOrganOverview(endocrineOrganModel)" in automation_surface
+    assert "renderOrganOverview={(model) => <OrganSystemOverview model={model} />}" in automation_page
 
     for forbidden in [
         "LOAD_STATES",
@@ -2915,6 +3124,12 @@ def test_automation_dashboard_view_model_lives_in_execution_feature() -> None:
 
 def test_automation_page_delegates_execution_ui_to_feature_components() -> None:
     automation_page = (MONITOR_SRC / "pages" / "Automation.jsx").read_text(encoding="utf-8")
+    automation_controller = (
+        MONITOR_SRC / "features" / "execution" / "automationDashboardController.js"
+    ).read_text(encoding="utf-8")
+    automation_surface = (
+        MONITOR_SRC / "features" / "execution" / "components" / "AutomationDashboardSurface.jsx"
+    ).read_text(encoding="utf-8")
     section = (
         MONITOR_SRC
         / "features"
@@ -2937,8 +3152,12 @@ def test_automation_page_delegates_execution_ui_to_feature_components() -> None:
         / "AutomationTaskExecutionSection.jsx"
     ).read_text(encoding="utf-8")
 
-    assert "features/execution/components/AutomationResourceSchedulingPanel.jsx" in automation_page
-    assert "features/execution/components/AutomationTaskExecutionSection.jsx" in automation_page
+    assert "features/execution/components/AutomationDashboardSurface.jsx" in automation_page
+    assert "features/execution/automationDashboardController.js" in automation_page
+    assert "export function useAutomationDashboardController()" in automation_controller
+    assert "export default function AutomationDashboardSurface(" in automation_surface
+    assert "./AutomationResourceSchedulingPanel.jsx" in automation_surface
+    assert "./AutomationTaskExecutionSection.jsx" in automation_surface
     assert "from './AutomationSection.jsx'" in resource_panel
     assert "from './AutomationSection.jsx'" in task_section
     assert "export default function AutomationSection(" in section
@@ -3108,6 +3327,21 @@ def test_alert_severity_metadata_lives_in_shared_module() -> None:
 
 def test_alerts_view_model_lives_in_observability_feature() -> None:
     alerts_page = (MONITOR_SRC / "pages" / "Alerts.jsx").read_text(encoding="utf-8")
+    alerts_controller = (
+        MONITOR_SRC / "features" / "observability" / "alertsController.js"
+    ).read_text(encoding="utf-8")
+    alerts_surface = (
+        MONITOR_SRC / "features" / "observability" / "components" / "alerts" / "AlertsCenterSurface.jsx"
+    ).read_text(encoding="utf-8")
+    alert_card = (
+        MONITOR_SRC / "features" / "observability" / "components" / "alerts" / "AlertCard.jsx"
+    ).read_text(encoding="utf-8")
+    filter_panel = (
+        MONITOR_SRC / "features" / "observability" / "components" / "alerts" / "AlertsReasonFilterPanel.jsx"
+    ).read_text(encoding="utf-8")
+    list_panel = (
+        MONITOR_SRC / "features" / "observability" / "components" / "alerts" / "AlertsListPanel.jsx"
+    ).read_text(encoding="utf-8")
     alerts_model = (MONITOR_SRC / "features" / "observability" / "alertsModel.js").read_text(encoding="utf-8")
 
     for export_name in [
@@ -3135,13 +3369,24 @@ def test_alerts_view_model_lives_in_observability_feature() -> None:
     ]:
         assert export_name in alerts_model
 
-    assert "features/observability/alertsModel.js" in alerts_page
-    assert "buildAlertCardView(alert)" in alerts_page
-    assert "getAlertsFilterCodeFromSearch(location.search)" in alerts_page
-    assert "buildAlertsFilterSearch(location.search, next)" in alerts_page
-    assert "buildAlertsCenterView({" in alerts_page
-    assert "sampleMeta.loadState" in alerts_page
-    assert "getAlertReasonBreakdownBarWidth(count, allAlerts.length)" in alerts_page
+    assert "AlertsCenterSurface from '../features/observability/components/alerts/AlertsCenterSurface.jsx'" in alerts_page
+    assert "useAlertsCenterController" in alerts_page
+    assert "DigitalLifeRuntimeCard" in alerts_page
+    assert "OrganSystemOverview" in alerts_page
+    assert "export function useAlertsCenterController()" in alerts_controller
+    assert "export default function AlertsCenterSurface(" in alerts_surface
+    assert "export default function AlertCard(" in alert_card
+    assert "export default function AlertsReasonFilterPanel(" in filter_panel
+    assert "export default function AlertsListPanel(" in list_panel
+    assert "./alertsModel.js" in alerts_controller
+    assert "buildAlertCardView(alert)" in alert_card
+    assert "getAlertsFilterCodeFromSearch(location.search)" in alerts_controller
+    assert "buildAlertsFilterSearch(location.search, next)" in alerts_controller
+    assert "buildAlertsCenterView({" in alerts_controller
+    assert "sampleMeta.loadState" in alerts_surface
+    assert "getAlertReasonBreakdownBarWidth(count, allAlertsCount)" in filter_panel
+    assert "RuntimeCardComponent" in alerts_surface
+    assert "OrganOverviewComponent" in alerts_surface
     assert "buildDigitalLifeAlerts(runtimeSnapshot" in alerts_model
     assert "createRequestRefs(filteredAlerts.filter" in alerts_model
     assert "buildImmuneOrganSystemModel({" in alerts_model
@@ -3176,6 +3421,9 @@ def test_alerts_view_model_lives_in_observability_feature() -> None:
     assert "ALERT_SEVERITY_CARD_CLASSES" not in alerts_page
     assert "ALERT_SEVERITY_LABELS" not in alerts_page
     assert "FORGE_REASON_CODES" not in alerts_page
+    assert "useAlertsCenterQuery" not in alerts_page
+    assert "useDigitalLifeRuntimeSignals" not in alerts_page
+    assert "features/observability/alertsModel.js" not in alerts_page
     assert "formatServiceStatus" not in alerts_page
     assert "compactText(" not in alerts_page
     assert "reason_code: `SERVICE_${String(service.status" not in alerts_page
@@ -3185,6 +3433,12 @@ def test_alerts_view_model_lives_in_observability_feature() -> None:
 def test_gateway_status_metadata_lives_in_shared_module() -> None:
     shared = SHARED_STATUS_META.read_text(encoding="utf-8")
     gateway_page = (MONITOR_SRC / "pages" / "Gateway.jsx").read_text(encoding="utf-8")
+    gateway_status_badge = (
+        MONITOR_SRC / "features" / "execution" / "components" / "gateway" / "GatewayStatusBadge.jsx"
+    ).read_text(encoding="utf-8")
+    gateway_platform_card = (
+        MONITOR_SRC / "features" / "execution" / "components" / "gateway" / "GatewayPlatformCard.jsx"
+    ).read_text(encoding="utf-8")
 
     for export_name in [
         "GATEWAY_STATUS_LABELS",
@@ -3194,20 +3448,46 @@ def test_gateway_status_metadata_lives_in_shared_module() -> None:
     ]:
         assert export_name in shared
 
-    assert "shared/statusMeta.js" in gateway_page
-    assert "const map = {" not in gateway_page
-    assert "const PLATFORM_META" not in gateway_page
-    assert "label: '在线'" not in gateway_page
-    assert "label: '微信'" not in gateway_page
-    assert "color: '#07C160'" not in gateway_page
-    assert "bg-green-50 border-green-200" not in gateway_page
-    assert "color: 'text-green-600'" not in gateway_page
+    assert "shared/statusMeta.js" in gateway_status_badge
+    assert "shared/statusMeta.js" in gateway_platform_card
+    assert "shared/statusMeta.js" not in gateway_page
+    for source in [gateway_page, gateway_status_badge, gateway_platform_card]:
+        assert "const map = {" not in source
+        assert "const PLATFORM_META" not in source
+        assert "label: '在线'" not in source
+        assert "label: '微信'" not in source
+        assert "color: '#07C160'" not in source
+        assert "bg-green-50 border-green-200" not in source
+        assert "color: 'text-green-600'" not in source
 
 
 def test_gateway_view_model_lives_in_execution_feature() -> None:
     gateway_page = (MONITOR_SRC / "pages" / "Gateway.jsx").read_text(encoding="utf-8")
+    gateway_controller = (MONITOR_SRC / "features" / "execution" / "gatewayController.js").read_text(encoding="utf-8")
+    gateway_surface = (
+        MONITOR_SRC / "features" / "execution" / "components" / "GatewaySurface.jsx"
+    ).read_text(encoding="utf-8")
+    gateway_platforms_section = (
+        MONITOR_SRC / "features" / "execution" / "components" / "gateway" / "GatewayPlatformsSection.jsx"
+    ).read_text(encoding="utf-8")
+    gateway_platform_card = (
+        MONITOR_SRC / "features" / "execution" / "components" / "gateway" / "GatewayPlatformCard.jsx"
+    ).read_text(encoding="utf-8")
+    gateway_wechat_detail = (
+        MONITOR_SRC / "features" / "execution" / "components" / "gateway" / "GatewayWeChatDetailCard.jsx"
+    ).read_text(encoding="utf-8")
     gateway_model = (MONITOR_SRC / "features" / "execution" / "gatewayModel.js").read_text(encoding="utf-8")
 
+    assert "GatewaySurface from '../features/execution/components/GatewaySurface.jsx'" in gateway_page
+    assert "useGatewayController" in gateway_page
+    assert "OrganSystemOverview" in gateway_page
+    assert "export function useGatewayController()" in gateway_controller
+    assert "export default function GatewaySurface(" in gateway_surface
+    assert "GatewayPlatformsSection" in gateway_surface
+    assert "GatewayPlatformCard" in gateway_platforms_section
+    assert "GatewayWeChatDetailCard" in gateway_surface
+    assert "formatDateTime" in gateway_platform_card
+    assert "formatDateTime" in gateway_wechat_detail
     assert "export const GATEWAY_WINDOW_OPTIONS" in gateway_model
     for export_name in [
         "getGatewayPlatforms",
@@ -3224,11 +3504,12 @@ def test_gateway_view_model_lives_in_execution_feature() -> None:
     ]:
         assert f"export function {export_name}(" in gateway_model
 
-    assert "features/execution/gatewayModel.js" in gateway_page
-    assert "buildGatewayViewModel({" in gateway_page
-    assert "GATEWAY_WINDOW_OPTIONS" in gateway_page
-    assert "metricCards.map((card)" in gateway_page
-    assert "GATEWAY_METRIC_ICONS[card.key]" in gateway_page
+    assert "./gatewayModel.js" in gateway_controller
+    assert "buildGatewayViewModel({" in gateway_controller
+    assert "GATEWAY_WINDOW_OPTIONS" in gateway_surface
+    assert "metricCards.map((card)" in gateway_surface
+    assert "GATEWAY_METRIC_ICONS[card.key]" in gateway_surface
+    assert "resetWeChatChannel({ reason: 'manual_ui' })" in gateway_controller
 
     for forbidden in [
         "const WINDOW_OPTIONS = [",
@@ -3249,6 +3530,7 @@ def test_gateway_view_model_lives_in_execution_feature() -> None:
         "data?.total_errors ?? '—'",
     ]:
         assert forbidden not in gateway_page
+        assert forbidden not in gateway_surface
 
 
 def test_log_stream_level_metadata_lives_in_shared_module() -> None:
@@ -3354,6 +3636,7 @@ def test_pentest_display_metadata_lives_in_shared_module() -> None:
     tool_execute_panel = (
         MONITOR_SRC / "features" / "execution" / "components" / "ToolExecutePanel.jsx"
     ).read_text(encoding="utf-8")
+    pentest_lab_model = (MONITOR_SRC / "features" / "security" / "pentestLabModel.js").read_text(encoding="utf-8")
 
     for export_name in [
         "PENTEST_PHASE_OPTIONS",
@@ -3367,7 +3650,7 @@ def test_pentest_display_metadata_lives_in_shared_module() -> None:
     ]:
         assert export_name in shared
 
-    assert "shared/pentestMeta.js" in pentest_page
+    assert "shared/pentestMeta.js" in pentest_lab_model
     assert "const PHASE_OPTIONS" not in pentest_page
     assert "function phaseCounts(" not in pentest_page
     assert "label: 'Phase 1 Passive'" not in pentest_page
@@ -3982,6 +4265,11 @@ def test_insights_dashboard_view_model_lives_in_observability_feature() -> None:
 
 def test_insights_global_view_model_lives_in_observability_feature() -> None:
     component = (OBSERVABILITY_COMPONENTS / "insights" / "InsightsGlobalGroup.jsx").read_text(encoding="utf-8")
+    section_sources = "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in sorted((OBSERVABILITY_COMPONENTS / "insights" / "global").glob("*.jsx"))
+    )
+    surface_sources = f"{component}\n{section_sources}"
     model = (MONITOR_SRC / "features" / "observability" / "insightsGlobalModel.js").read_text(encoding="utf-8")
 
     for export_name in [
@@ -4001,11 +4289,11 @@ def test_insights_global_view_model_lives_in_observability_feature() -> None:
     ]:
         assert export_name in model
 
-    assert "insightsGlobalModel.js" in component
-    assert "buildChainNodeLatencyRows(data?.node_stats)" in component
-    assert "buildErrorHeatmapView(data)" in component
-    assert "buildForgeRuntimeQualityRows(qualityItems)" in component
-    assert "buildGovernorDecisionStatCards(govData)" in component
+    assert "insightsGlobalModel.js" in surface_sources
+    assert "buildChainNodeLatencyRows(data?.node_stats)" in surface_sources
+    assert "buildErrorHeatmapView(data)" in surface_sources
+    assert "buildForgeRuntimeQualityRows(qualityItems)" in surface_sources
+    assert "buildGovernorDecisionStatCards(govData)" in surface_sources
     assert "resolveInsightsChainNodeColor" not in component
     assert "Math.max(" not in component
     assert "Math.min(" not in component
@@ -4024,6 +4312,11 @@ def test_insights_global_view_model_lives_in_observability_feature() -> None:
 
 def test_insights_safety_view_model_lives_in_observability_feature() -> None:
     component = (OBSERVABILITY_COMPONENTS / "insights" / "InsightsSafetyGroup.jsx").read_text(encoding="utf-8")
+    section_sources = "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in sorted((OBSERVABILITY_COMPONENTS / "insights" / "safety").glob("*.jsx"))
+    )
+    surface_sources = f"{component}\n{section_sources}"
     model = (MONITOR_SRC / "features" / "observability" / "insightsSafetyModel.js").read_text(encoding="utf-8")
 
     for export_name in [
@@ -4044,11 +4337,11 @@ def test_insights_safety_view_model_lives_in_observability_feature() -> None:
     ]:
         assert f"export function {export_name}(" in model
 
-    assert "insightsSafetyModel.js" in component
-    assert "buildTribeFeedParams({ eventTypeFilter, sourceFilter, targetFilter })" in component
-    assert "buildTribeEventTypeSummary(items)" in component
-    assert "buildAutomationGatePath(params)" in component
-    assert "buildQaViolationStatCards(qaData)" in component
+    assert "insightsSafetyModel.js" in surface_sources
+    assert "buildTribeFeedParams({ eventTypeFilter, sourceFilter, targetFilter })" in surface_sources
+    assert "buildTribeEventTypeSummary(items)" in surface_sources
+    assert "buildAutomationGatePath(params)" in surface_sources
+    assert "buildQaViolationStatCards(qaData)" in surface_sources
 
     assert "new Map(" not in component
     assert "Object.entries(params)" not in component
@@ -4067,6 +4360,7 @@ def test_digital_life_runtime_status_metadata_lives_in_shared_module() -> None:
     runtime_card = (MONITOR_SRC / "features" / "life" / "components" / "DigitalLifeRuntimeCard.jsx").read_text(encoding="utf-8")
     soak_card = (MONITOR_SRC / "features" / "life" / "components" / "DigitalLifeWallClockSoakCard.jsx").read_text(encoding="utf-8")
     organ_model = (MONITOR_SRC / "models" / "organSystemModel.js").read_text(encoding="utf-8")
+    organ_core_model = (MONITOR_SRC / "models" / "organSystemCore.js").read_text(encoding="utf-8")
     runtime_mode = (MONITOR_SRC / "pages" / "RuntimeMode.jsx").read_text(encoding="utf-8")
     runtime_mode_model = (MONITOR_SRC / "features" / "life" / "runtimeModeModel.js").read_text(encoding="utf-8")
     bond_page = (MONITOR_SRC / "pages" / "Bond.jsx").read_text(encoding="utf-8")
@@ -4114,7 +4408,8 @@ def test_digital_life_runtime_status_metadata_lives_in_shared_module() -> None:
     assert "const LAYER_CLASS" not in soak_card
     assert "const MODE_COLOR_CLASS" not in runtime_mode
     assert "ring-2 ring-green-500 bg-green-50 border-green-300" not in runtime_mode
-    assert "shared/statusMeta.js" in organ_model
+    assert "organSystemCore.js" in organ_model
+    assert "shared/statusMeta.js" in organ_core_model
     assert "ORGAN_STATUS_META" not in organ_model
     assert "className: 'border-" not in organ_model
     assert "shared/statusMeta.js" in bond_model
@@ -4203,6 +4498,10 @@ def test_runtime_mode_view_model_lives_in_life_feature() -> None:
 def test_bond_view_model_lives_in_life_feature() -> None:
     bond_page = (MONITOR_SRC / "pages" / "Bond.jsx").read_text(encoding="utf-8")
     bond_model = (MONITOR_SRC / "features" / "life" / "bondModel.js").read_text(encoding="utf-8")
+    bond_controller = (MONITOR_SRC / "features" / "life" / "bondDashboardController.js").read_text(encoding="utf-8")
+    bond_surface = (
+        MONITOR_SRC / "features" / "life" / "components" / "BondDashboardSurface.jsx"
+    ).read_text(encoding="utf-8")
 
     for export_name in [
         "formatBondHealthStatus",
@@ -4223,15 +4522,37 @@ def test_bond_view_model_lives_in_life_feature() -> None:
     ]:
         assert f"export function {export_name}(" in bond_model
 
-    assert "features/life/bondModel.js" in bond_page
-    assert "buildBondDashboardViewModel({" in bond_page
-    assert "buildBondStageDistribution(items)" in bond_page
-    assert "buildBondSubmitSuccessMessage(submitResult.data)" in bond_page
-    assert "sampleMeta.loadState" in bond_page
-    assert "noticeView.noSample" in bond_page
-    assert "noticeView.unavailable" in bond_page
-    assert "metricCards.map" in bond_page
-    assert "detailView.rows.map" in bond_page
+    assert "BondDashboardSurface" in bond_page
+    assert "useBondDashboardController" in bond_page
+    assert "export function useBondDashboardController()" in bond_controller
+    assert "export default function BondDashboardSurface(" in bond_surface
+    assert "buildBondDashboardViewModel({" in bond_controller
+    assert "useBondOverviewQuery({" in bond_controller
+    assert "useBondUserDetailQuery({" in bond_controller
+    assert "submitBondEvent(body)" in bond_controller
+    assert "useAppStore((state) => state.pollingEnabled)" in bond_controller
+    assert "buildBondStageDistribution(items)" in bond_surface
+    assert "buildBondSubmitSuccessMessage(submitResult.data)" in bond_surface
+    assert "sampleMeta.loadState" in bond_surface
+    assert "noticeView.noSample" in bond_surface
+    assert "noticeView.unavailable" in bond_surface
+    assert "metricCards.map" in bond_surface
+    assert "detailView.rows.map" in bond_surface
+
+    for page_forbidden in [
+        "features/life/bondModel.js",
+        "features/life/bondQueries.js",
+        "submitBondEvent",
+        "useAppStore",
+        "useBondOverviewQuery",
+        "useBondUserDetailQuery",
+        "buildBondDashboardViewModel",
+        "buildBondStageDistribution",
+        "buildBondSubmitSuccessMessage",
+        "metricCards.map",
+        "detailView.rows.map",
+    ]:
+        assert page_forbidden not in bond_page
 
     assert "function formatHealthStatus(" not in bond_page
     assert "LOAD_STATES" not in bond_page
