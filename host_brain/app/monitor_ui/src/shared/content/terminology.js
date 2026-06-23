@@ -117,6 +117,25 @@ export const LIFE_COPY = Object.freeze({
   ],
 })
 
+export const OBSERVABILITY_COPY = Object.freeze({
+  overviewTitle: '观测总览',
+  overviewSubtitle: '从健康快照、子系统、Trace、指标和告警判断当前系统应先追哪条线。',
+  overviewEyebrow: 'Observability / Control Plane',
+  heroEyebrow: 'Observability Control Plane',
+  heroDescription: '这页把实时健康、服务状态、执行护栏和运行摘要收敛成一个排障入口。先看 Gate，再决定进入 Trace、Metrics、Alerts 或 Sessions。',
+  commandRailTitle: '排障入口',
+  commandRailDescription: '首屏先回答：观测链是否连通、样本是否足够、当前更像服务问题还是执行护栏问题。',
+  gateTitle: '观测 Gate',
+  quickLinksTitle: '常用入口',
+  focusTitle: '建议路径',
+  quickLinks: [
+    { key: 'trace', to: '/observability/trace', label: '链路 Trace', detail: '按 request / node / stage 追调用链。' },
+    { key: 'metrics', to: '/observability/metrics', label: '指标 Metrics', detail: '看请求量、拒绝率和延迟走势。' },
+    { key: 'alerts', to: '/observability/alerts', label: '告警', detail: '聚焦需要处理的异常与原因码。' },
+    { key: 'sessions', to: '/observability/sessions', label: '会话 Sessions', detail: '回看会话流和执行上下文。' },
+  ],
+})
+
 export const PENTEST_COPY = Object.freeze({
   labTitle: '渗透实验室',
   labEyebrow: 'Security Lab / Pentest Agent',

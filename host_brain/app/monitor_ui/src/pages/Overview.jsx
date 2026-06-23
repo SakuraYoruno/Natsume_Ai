@@ -19,6 +19,7 @@ import SampleMeta from '../shared/ui/observability/SampleMeta.jsx'
 import PageHero from '../shared/ui/PageHero.jsx'
 import StatusBadge from '../shared/ui/StatusBadge.jsx'
 import TimeWindowSelect from '../shared/ui/TimeWindowSelect.jsx'
+import { OBSERVABILITY_COPY } from '../shared/content/terminology.js'
 import useDigitalLifeRuntimeSignals from '../hooks/useDigitalLifeRuntimeSignals.js'
 import { useSystemOverviewQuery } from '../features/observability/overviewQueries.js'
 import {
@@ -26,6 +27,7 @@ import {
   getSubsystemFootnote,
   getSubsystemHeadline,
 } from '../features/observability/overviewModel.js'
+import ObservabilityCommandRail from '../features/observability/components/overview/ObservabilityCommandRail.jsx'
 import { useOverviewHealthWebSocket } from '../features/observability/useOverviewHealthWebSocket.js'
 import useAppStore from '../store/useAppStore.js'
 
@@ -110,8 +112,9 @@ export default function Overview() {
     <div className="space-y-6">
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div>
-          <h1 className="text-xl font-semibold text-gray-900">器官级观测</h1>
-          <p className="text-sm text-gray-500">查看数字生命体的中枢稳态、活跃器官子系统与当前运行摘要。</p>
+          <div className="text-xs font-semibold uppercase tracking-wide text-primary/75">{OBSERVABILITY_COPY.overviewEyebrow}</div>
+          <h1 className="mt-1 text-xl font-semibold text-gray-900">{OBSERVABILITY_COPY.overviewTitle}</h1>
+          <p className="text-sm text-gray-500">{OBSERVABILITY_COPY.overviewSubtitle}</p>
         </div>
         <div className="flex items-center gap-2">
           <TimeWindowSelect value={windowMinutes} onChange={setWindowMinutes} options={WINDOW_OPTIONS} />
@@ -124,9 +127,9 @@ export default function Overview() {
 
       <PageHero
         icon={Server}
-        eyebrow="数字生命体器官科观"
+        eyebrow={OBSERVABILITY_COPY.heroEyebrow}
         title={wsConnected ? 'WebSocket 实时器官观测中' : '轮询模式器官观测中'}
-        description="这页聚焦数字生命体中枢稳态、器官子系统活跃度与整体是否平衡。"
+        description={OBSERVABILITY_COPY.heroDescription}
         gradientClass="from-primary-50 via-white to-sky-50"
         metaItems={heroMetaItems}
         aside={(
@@ -141,6 +144,21 @@ export default function Overview() {
             definition={sampleMeta.definition}
           />
         )}
+      />
+
+      <ObservabilityCommandRail
+        activeSubsystems={activeSubsystems}
+        agentLoopData={agentLoopData}
+        data={data}
+        error={error}
+        loading={loading}
+        onRefresh={() => refetch()}
+        overviewLoadState={sampleMeta.loadState}
+        refreshing={refreshing}
+        sampleMeta={sampleMeta}
+        uiAssertionData={uiAssertionData}
+        wsAlerts={wsAlerts}
+        wsConnected={wsConnected}
       />
 
       <LivingPulseStrip

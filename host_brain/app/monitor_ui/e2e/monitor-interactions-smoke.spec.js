@@ -48,6 +48,64 @@ async function stubCommonReadApis(page) {
   }))
 }
 
+async function stubOverviewApis(page) {
+  await stubCommonReadApis(page)
+  await page.route('**/obs/services/health**', (route) => fulfillJson(route, {
+    total: 3,
+    up: 2,
+    degraded: 1,
+    down: 0,
+    unknown: 0,
+    services: [
+      {
+        service_id: 'edge-gateway',
+        display_name: 'Edge Gateway',
+        service_type: 'edge',
+        status: 'UP',
+        p95_ms: 42,
+        success_rate: 99,
+      },
+      {
+        service_id: 'llm-router',
+        display_name: 'LLM Router',
+        service_type: 'llm',
+        status: 'DEGRADED',
+        p95_ms: 380,
+        success_rate: 82,
+      },
+    ],
+  }))
+  await page.route('**/obs/subsystems/stats**', (route) => fulfillJson(route, {
+    subsystems: [
+      {
+        subsystem: 'trace.pipeline',
+        display_name: 'Trace Pipeline',
+        total: 12,
+        success: 10,
+        failed: 1,
+        degraded: 1,
+        success_rate: 83,
+        last_ts: 1782260000000,
+      },
+    ],
+  }))
+  await page.route('**/obs/agent_loop/stats**', (route) => fulfillJson(route, {
+    total_loops: 8,
+    achieved: 6,
+    failed: 2,
+    running_count: 1,
+    achievement_rate: 75,
+    avg_rounds: 3.2,
+  }))
+  await page.route('**/obs/ui-assertion/stats**', (route) => fulfillJson(route, {
+    total_assertions: 20,
+    block_rate: 10,
+    sensitive_blocked: 2,
+    precondition_failed: 1,
+    postcondition_failed: 1,
+  }))
+}
+
 async function stubPentestApis(page) {
   await stubCommonReadApis(page)
   await page.route('**/v1/pentest/environment**', (route) => fulfillJson(route, {
@@ -188,6 +246,17 @@ async function stubInsightsApis(page) {
 }
 
 test.describe('Monitor interaction smoke', () => {
+  test('Observability overview exposes triage rail and Trace route', async ({ page, baseURL }) => {
+    await stubOverviewApis(page)
+    await page.goto(monitorUrl(baseURL, '/observability/overview'), { waitUntil: 'domcontentloaded' })
+    await expect(page.getByRole('heading', { name: '排障入口' })).toBeVisible()
+    await expect(page.getByText('观测 Gate')).toBeVisible()
+    await expect(page.getByText('先看告警与服务状态')).toBeVisible()
+
+    await page.locator('a[href="#/observability/trace"]').filter({ hasText: '按 request / node / stage 追调用链' }).click()
+    await expect.poll(() => new URL(page.url()).hash).toBe('#/observability/trace')
+  })
+
   test('Cockpit command rail exposes Life Systems quick routes', async ({ page, baseURL }) => {
     await stubCommonReadApis(page)
     await page.goto(monitorUrl(baseURL, '/cockpit'), { waitUntil: 'domcontentloaded' })
