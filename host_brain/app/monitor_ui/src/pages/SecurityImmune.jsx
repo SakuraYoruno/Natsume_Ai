@@ -4,7 +4,9 @@ import PageHero from '../shared/ui/PageHero.jsx'
 import NoticeBanner from '../shared/ui/NoticeBanner.jsx'
 import StatusBadge from '../shared/ui/StatusBadge.jsx'
 import JsonBlock from '../shared/ui/JsonBlock.jsx'
+import DataState from '../shared/ui/DataState.jsx'
 import { runSecurityHuntOnce } from '../features/security/api.js'
+import SecurityImmuneCommandRail from '../features/security/components/SecurityImmuneCommandRail.jsx'
 import { useSecurityImmuneQuery } from '../features/security/securityImmuneQueries.js'
 import {
   SECURITY_MIN_RISK_OPTIONS,
@@ -45,12 +47,15 @@ export default function SecurityImmune() {
     incidentRows,
     hasIncidentRows,
     runtimeBadge,
+    mission,
+    gateCards,
   } = useMemo(() => buildSecurityImmuneViewModel({
     runtime,
     assets,
     incidents,
+    partialErrors,
     loading: busy,
-  }), [assets, busy, incidents, runtime])
+  }), [assets, busy, incidents, partialErrors, runtime])
 
   const runHunt = async () => {
     setRunningHunt(true)
@@ -83,6 +88,17 @@ export default function SecurityImmune() {
         </NoticeBanner>
       ) : null}
 
+      <SecurityImmuneCommandRail
+        mission={mission}
+        gateCards={gateCards}
+        minRisk={minRisk}
+        onMinRiskChange={setMinRisk}
+        onRefresh={() => { void refetch() }}
+        onRunHunt={runHunt}
+        busy={busy}
+        runningHunt={runningHunt}
+      />
+
       {huntResult ? (
         <NoticeBanner variant={huntResult.ok ? 'success' : 'warning'} title={huntResult.ok ? 'Hunt 已完成' : 'Hunt 失败'}>
           {huntResult.ok ? <JsonBlock data={huntResult.data} className="mt-2" /> : huntResult.error}
@@ -91,19 +107,24 @@ export default function SecurityImmune() {
 
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
         {riskCards.map((card) => (
-          <div key={card.risk} className="rounded-lg border border-white/80 bg-white/86 px-3 py-2 shadow-sm">
+          <div key={card.risk} className={`rounded-lg border px-3 py-2 shadow-sm ${card.className}`}>
             <div className="text-lg font-bold text-gray-800">{card.value}</div>
-            <div className="text-xs capitalize text-gray-500">{card.risk}</div>
+            <div className="text-xs capitalize opacity-80">{card.label}</div>
           </div>
         ))}
       </div>
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
-        <section className="rounded-xl border border-white/80 bg-white/86 p-4 shadow-sm">
+        <section id="security-immune-incidents" className="rounded-xl border border-white/80 bg-white/86 p-4 shadow-sm">
           <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-            <h2 className="text-base font-semibold text-gray-800">Incidents</h2>
+            <div>
+              <h2 className="text-base font-semibold text-gray-800">Incidents</h2>
+              <p className="mt-0.5 text-xs text-gray-500">按风险阈值查看需要人工复核或处置的免疫事件。</p>
+            </div>
             <div className="flex items-center gap-2">
+              <label htmlFor="security-immune-min-risk" className="sr-only">Minimum risk</label>
               <select
+                id="security-immune-min-risk"
                 className="rounded border border-gray-300 px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-primary-200"
                 value={minRisk}
                 onChange={(event) => setMinRisk(event.target.value)}
@@ -124,10 +145,14 @@ export default function SecurityImmune() {
             </div>
           </div>
           <div className="space-y-2">
-            {!hasIncidentRows ? (
-              <div className="rounded-lg border border-gray-100 bg-gray-50 p-3 text-sm text-gray-500">当前风险阈值下没有 incident。</div>
-            ) : (
-              incidentRows.map((incident) => (
+            <DataState
+              loading={loading && !incidents}
+              state={!loading && !hasIncidentRows ? 'no_sample' : undefined}
+              title="当前风险阈值下没有 incident"
+              hint="可以降低 min risk，或运行一次 Hunt 拉取最新安全样本。"
+              compact
+            >
+              {incidentRows.map((incident) => (
                 <div key={incident.key} className="rounded-lg border border-gray-100 bg-white p-3">
                   <div className="flex items-center justify-between gap-2">
                     <span className="text-sm font-semibold text-gray-800">{incident.title}</span>
@@ -135,13 +160,13 @@ export default function SecurityImmune() {
                   </div>
                   <div className="mt-1 text-xs text-gray-500">{incident.detail}</div>
                 </div>
-              ))
-            )}
+              ))}
+            </DataState>
           </div>
         </section>
 
         <aside className="space-y-4">
-          <section className="rounded-xl border border-white/80 bg-white/86 p-4 shadow-sm">
+          <section id="security-immune-runtime" className="rounded-xl border border-white/80 bg-white/86 p-4 shadow-sm">
             <div className="mb-3 flex items-center justify-between">
               <h2 className="text-base font-semibold text-gray-800">Runtime</h2>
               <StatusBadge status={runtimeBadge.status} label={runtimeBadge.label} />
@@ -149,7 +174,7 @@ export default function SecurityImmune() {
             <JsonBlock data={runtime || { loading: busy }} />
           </section>
 
-          <section className="rounded-xl border border-white/80 bg-white/86 p-4 shadow-sm">
+          <section id="security-immune-hunt" className="rounded-xl border border-white/80 bg-white/86 p-4 shadow-sm">
             <div className="mb-3 flex items-center gap-2">
               <Bug size={16} className="text-primary" />
               <h2 className="text-base font-semibold text-gray-800">Manual Hunt</h2>
@@ -164,7 +189,7 @@ export default function SecurityImmune() {
             </button>
           </section>
 
-          <section className="rounded-xl border border-white/80 bg-white/86 p-4 shadow-sm">
+          <section id="security-immune-assets" className="rounded-xl border border-white/80 bg-white/86 p-4 shadow-sm">
             <h2 className="mb-3 text-base font-semibold text-gray-800">Assets</h2>
             <JsonBlock data={assets || {}} />
           </section>

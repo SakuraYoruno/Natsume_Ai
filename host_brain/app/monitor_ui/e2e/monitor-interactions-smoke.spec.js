@@ -210,6 +210,58 @@ async function stubPentestRunDetailApis(page) {
   }))
 }
 
+async function stubSecurityImmuneApis(page) {
+  await stubCommonReadApis(page)
+  const riskOrder = { low: 1, medium: 2, high: 3, critical: 4 }
+  const allIncidents = [
+    {
+      incident_id: 'incident-high-powershell',
+      title: 'Suspicious PowerShell execution',
+      risk: 'high',
+      detail: 'Encoded PowerShell launched from endpoint-1.',
+    },
+    {
+      incident_id: 'incident-low-smb',
+      title: 'Legacy SMB service exposed',
+      risk: 'low',
+      detail: 'SMBv1-compatible service observed on lab subnet.',
+    },
+  ]
+  await page.route('**/obs/security/runtime', (route) => fulfillJson(route, {
+    asset_count: 2,
+    incident_count: 2,
+    risk_counts: { low: 1, high: 1 },
+    generated_ts_ms: 1782260000000,
+  }))
+  await page.route('**/obs/security/assets', (route) => fulfillJson(route, {
+    asset_count: 2,
+    assets: [
+      { asset_id: 'endpoint-1', hostname: 'endpoint-1', os_family: 'Windows' },
+      { asset_id: 'edge-node-1', hostname: 'edge-node-1', os_family: 'Linux' },
+    ],
+    generated_ts_ms: 1782260000000,
+  }))
+  await page.route('**/obs/security/incidents**', (route) => {
+    const minRisk = new URL(route.request().url()).searchParams.get('min_risk') || 'low'
+    const threshold = riskOrder[minRisk] || riskOrder.low
+    const incidents = allIncidents.filter((incident) => (riskOrder[incident.risk] || 0) >= threshold)
+    return fulfillJson(route, {
+      incident_count: incidents.length,
+      incidents,
+      risk_counts: { low: 1, high: 1 },
+      generated_ts_ms: 1782260000000,
+    })
+  })
+  await page.route('**/internal/security/hunt/run-once', async (route) => {
+    await fulfillJson(route, {
+      ok: true,
+      reason: (await route.request().postDataJSON()).reason,
+      asset_count: 2,
+      incident_count: 2,
+    })
+  })
+}
+
 async function stubToolsApis(page) {
   await stubCommonReadApis(page)
   const tools = [
@@ -541,6 +593,31 @@ test.describe('Monitor interaction smoke', () => {
     await page.getByRole('button', { name: 'json' }).click()
     await expect(page.getByText('Artifact ref：')).toBeVisible()
     await expect(page.getByText('artifact_ref')).toBeVisible()
+  })
+
+  test('Security Immune gate filters incidents and runs a manual hunt', async ({ page, baseURL }) => {
+    await stubSecurityImmuneApis(page)
+    await page.goto(monitorUrl(baseURL, '/security/immune'), { waitUntil: 'domcontentloaded' })
+    await expect(page.getByRole('heading', { name: 'Security Immune', exact: true })).toBeVisible()
+
+    const gate = page.getByRole('region', { name: 'Security Immune Gate' })
+    await expect(gate).toBeVisible()
+    await expect(gate.getByText('存在 High incident')).toBeVisible()
+    await expect(gate.getByText('2 assets')).toBeVisible()
+    await expect(gate.getByText('2 open')).toBeVisible()
+    await expect(page.getByText('Suspicious PowerShell execution')).toBeVisible()
+    await expect(page.getByText('Legacy SMB service exposed')).toBeVisible()
+
+    await page.getByLabel('Security Immune minimum risk').selectOption('high')
+    await expect(page.getByText('Suspicious PowerShell execution')).toBeVisible()
+    await expect(page.getByText('Legacy SMB service exposed')).toBeHidden()
+
+    await gate.getByRole('button', { name: /Incidents/ }).click()
+    await expect(page.locator('#security-immune-incidents')).toBeVisible()
+
+    await gate.getByRole('button', { name: 'Run Hunt' }).click()
+    await expect(page.getByText('Hunt 已完成')).toBeVisible()
+    await expect(page.getByText('manual_web_security_immune')).toBeVisible()
   })
 
   test('Tools catalog supports search, side-effect filters, and detail selection', async ({ page, baseURL }) => {
