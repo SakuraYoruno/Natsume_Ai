@@ -256,6 +256,108 @@ async function stubCockpitApis(page) {
   }))
 }
 
+async function stubLifeTimelineApis(page) {
+  await stubCommonReadApis(page)
+  await page.route('**/obs/life-timeline**', (route) => fulfillJson(route, {
+    timestamp: '2026-06-20T08:00:00Z',
+    primaryOrgan: {
+      id: 'emotion',
+      name: '情绪层',
+    },
+    primaryPathology: {
+      id: 'emotion-wave',
+      organId: 'emotion',
+      organLabel: '情绪层',
+      title: '情绪振幅异常',
+      impactLabel: '可能影响回复姿态和执行节律。',
+      detailPath: '/life/pathologies/emotion-wave',
+    },
+    items: [
+      {
+        id: 'evt-emotion-1',
+        type: 'pathology',
+        typeLabel: '病灶',
+        organId: 'emotion',
+        organLabel: '情绪层',
+        title: '情绪振幅升高',
+        detail: '最近一次输入触发情绪振幅上升。',
+        severity: 'warning',
+        timestamp: '2026-06-20T08:00:00Z',
+        to: '/life/pathologies/emotion-wave',
+        linkLabel: '进入病灶详情',
+      },
+      {
+        id: 'evt-memory-1',
+        type: 'memory',
+        typeLabel: '记忆',
+        organId: 'memory',
+        organLabel: '记忆层',
+        title: '记忆召回成功',
+        detail: '语义记忆召回命中率保持稳定。',
+        severity: 'info',
+        timestamp: '2026-06-20T07:58:00Z',
+        to: '/life/memory',
+        linkLabel: '查看记忆',
+      },
+    ],
+  }))
+}
+
+async function stubPathologyCenterApis(page) {
+  await stubCommonReadApis(page)
+  await page.route('**/obs/pathologies**', (route) => fulfillJson(route, {
+    timestamp: '2026-06-20T08:00:00Z',
+    organSystems: [
+      { id: 'emotion', name: '情绪层' },
+      { id: 'memory', name: '记忆层' },
+    ],
+    primaryPathology: {
+      id: 'emotion-wave',
+      organId: 'emotion',
+      organLabel: '情绪层',
+      title: '情绪振幅异常',
+      severity: 'critical',
+      symptom: '最近窗口出现连续情绪振幅升高。',
+      durationLabel: '最近 6h',
+      impactLabel: '可能影响回复姿态和执行节律。',
+      source: 'runtime alerts',
+      detailPath: '/life/pathologies/emotion-wave',
+      recommendedPath: '/life/emotion',
+      recommendedLabel: '查看情绪',
+    },
+    items: [
+      {
+        id: 'emotion-wave',
+        organId: 'emotion',
+        organLabel: '情绪层',
+        title: '情绪振幅异常',
+        severity: 'critical',
+        symptom: '最近窗口出现连续情绪振幅升高。',
+        durationLabel: '最近 6h',
+        impactLabel: '可能影响回复姿态和执行节律。',
+        source: 'runtime alerts',
+        detailPath: '/life/pathologies/emotion-wave',
+        recommendedPath: '/life/emotion',
+        recommendedLabel: '查看情绪',
+      },
+      {
+        id: 'memory-drift',
+        organId: 'memory',
+        organLabel: '记忆层',
+        title: '记忆召回漂移',
+        severity: 'warning',
+        symptom: '部分记忆召回样本置信度下降。',
+        durationLabel: '最近 24h',
+        impactLabel: '可能影响上下文连续性。',
+        source: 'memory health',
+        detailPath: '/life/pathologies/memory-drift',
+        recommendedPath: '/life/memory',
+        recommendedLabel: '查看记忆',
+      },
+    ],
+  }))
+}
+
 async function stubPentestApis(page) {
   await stubCommonReadApis(page)
   await page.route('**/v1/pentest/environment**', (route) => fulfillJson(route, {
@@ -686,6 +788,40 @@ test.describe('Monitor interaction smoke', () => {
     await expect(mission.getByRole('link', { name: /进入主病灶/ })).toHaveAttribute('href', '#/life/pathologies/emotion-wave')
 
     await mission.locator('a[href="#/life/pathologies"]').filter({ hasText: '只看已经形成的异常模式' }).click()
+    await expect.poll(() => new URL(page.url()).hash).toBe('#/life/pathologies')
+  })
+
+  test('Life timeline command rail follows filters and clears scope', async ({ page, baseURL }) => {
+    await stubLifeTimelineApis(page)
+    await page.goto(monitorUrl(baseURL, '/life/timeline'), { waitUntil: 'domcontentloaded' })
+    const rail = page.getByRole('region', { name: 'Life Timeline Command Rail' })
+    await expect(rail).toBeVisible()
+    await expect(rail.getByRole('heading', { name: '下一步追哪条链' })).toBeVisible()
+    await expect(rail.getByText('先追 情绪振幅升高')).toBeVisible()
+    await expect(rail.getByText('可见事件')).toBeVisible()
+
+    await page.getByRole('button', { name: /记忆 · 1/ }).click()
+    await expect.poll(() => new URL(page.url()).hash).toBe('#/life/timeline?type=memory')
+    await expect(rail.getByText('先追 记忆召回成功')).toBeVisible()
+
+    await rail.getByRole('link', { name: '清除过滤' }).click()
+    await expect.poll(() => new URL(page.url()).hash).toBe('#/life/timeline')
+  })
+
+  test('Pathology center command rail exposes primary pathology and filter recovery', async ({ page, baseURL }) => {
+    await stubPathologyCenterApis(page)
+    await page.goto(monitorUrl(baseURL, '/life/pathologies'), { waitUntil: 'domcontentloaded' })
+    const rail = page.getByRole('region', { name: 'Pathology Command Rail' })
+    await expect(rail).toBeVisible()
+    await expect(rail.getByRole('heading', { name: '先处理哪个病灶' })).toBeVisible()
+    await expect(rail.getByText('先处理 情绪层 · 情绪振幅异常')).toBeVisible()
+    await expect(rail.getByRole('link', { name: /进入主病灶/ })).toHaveAttribute('href', '#/life/pathologies/emotion-wave')
+
+    await page.getByRole('button', { name: /高风险 · 1/ }).click()
+    await expect.poll(() => new URL(page.url()).hash).toBe('#/life/pathologies?severity=critical')
+    await expect(rail.getByText('可见病灶')).toBeVisible()
+
+    await rail.getByRole('link', { name: '清除过滤' }).click()
     await expect.poll(() => new URL(page.url()).hash).toBe('#/life/pathologies')
   })
 
