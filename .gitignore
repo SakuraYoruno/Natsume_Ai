@@ -40,6 +40,7 @@ ENV/
 
 # --- Node.js ---
 node_modules/
+host_brain/app/monitor_ui/test-results/
 
 # --- Build / package artifacts ---
 build/
