@@ -565,6 +565,17 @@ async function stubToolsApis(page) {
       : tools
     return fulfillJson(route, { tool_meta_pack: filteredTools })
   })
+  await page.route('**/tools/execute', async (route) => {
+    const body = await route.request().postDataJSON()
+    await fulfillJson(route, {
+      ok: true,
+      tool_id: body.tool_id,
+      intent_id: body.intent_id,
+      session_id: body.session_id,
+      args: body.args,
+      approval_token_ref: body.approval_token_ref || null,
+    })
+  })
 }
 
 async function stubAutomationApis(page) {
@@ -1155,6 +1166,10 @@ test.describe('Monitor interaction smoke', () => {
     await stubToolsApis(page)
     await page.goto(monitorUrl(baseURL, '/execution/tools'), { waitUntil: 'domcontentloaded' })
     await expect(page.getByRole('heading', { name: '工具管理' })).toBeVisible()
+    const gate = page.getByRole('region', { name: 'Tools Execution Gate' })
+    await expect(gate).toBeVisible()
+    await expect(gate.getByText('目录可执行，写入工具需要审批')).toBeVisible()
+    await expect(gate.getByText('2 tools')).toBeVisible()
 
     const searchInput = page.getByPlaceholder('搜索工具名或描述...')
     await expect(page.getByText('Read Echo')).toBeVisible()
@@ -1167,7 +1182,20 @@ test.describe('Monitor interaction smoke', () => {
     await page.getByRole('button', { name: '写入（1）' }).click()
     await expect(page.getByText('Write Note')).toBeVisible()
     await page.getByRole('button', { name: /Write Note/ }).click()
+    await expect(gate.getByText('写入工具需要审批令牌')).toBeVisible()
+    await expect(page.locator('#tools-detail-panel').getByText('Execution Gate：写入工具需要审批令牌')).toBeVisible()
+    await expect(page.getByText('审批确认').first()).toBeVisible()
     await expect(page.getByRole('button', { name: '执行该工具' })).toBeVisible()
+    await page.getByRole('button', { name: '执行该工具' }).click()
+    await expect(page.getByText('执行工具：Write Note')).toBeVisible()
+    await expect(page.getByText('写入工具必须填写审批令牌引用。')).toBeVisible()
+    const submitExecutionButton = page.getByRole('button', { name: '执行', exact: true })
+    await expect(submitExecutionButton).toBeDisabled()
+    await page.getByPlaceholder('approval_token_ref').fill('approval://smoke')
+    await expect(submitExecutionButton).toBeEnabled()
+    await submitExecutionButton.click()
+    await expect(page.getByText('执行完成')).toBeVisible()
+    await expect(page.locator('pre').filter({ hasText: '"tool_id": "write.note"' })).toBeVisible()
   })
 
   test('Automation filters tasks and exposes clear-filter state', async ({ page, baseURL }) => {

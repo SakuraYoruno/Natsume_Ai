@@ -189,6 +189,26 @@ export const TRIBE_COPY = Object.freeze({
   ],
 })
 
+export const EXECUTION_TOOLS_COPY = Object.freeze({
+  heroEyebrow: 'Execution / Tools',
+  heroTitle: '工具管理',
+  heroDescription: '把工具目录、只读/写入权限、Pentest 分流和人工执行门禁放在同一个工作台。先判断能不能执行，再决定进入普通执行、审批令牌或 Security Lab。',
+  commandRailTitle: 'Tools Execution Gate',
+  commandRailDescription: '首屏先回答：工具目录是否可信、当前筛选是否影响样本、选中工具能否直接执行、写入或 Pentest 能力由哪条审批路径接管。',
+  gateTitle: '执行 Gate',
+  focusTitle: '下一步动作',
+  catalogTitle: 'Tool Catalog',
+  detailTitle: 'Tool Detail',
+  pentestTitle: 'Pentest Metadata',
+  runtimeTitle: 'Runtime Context',
+  quickLinks: [
+    { key: 'catalog', label: 'Catalog', targetId: 'tools-catalog-workspace', detail: '搜索、筛选并选择工具。' },
+    { key: 'detail', label: 'Detail', targetId: 'tools-detail-panel', detail: '查看权限、schema 与执行入口。' },
+    { key: 'pentest', label: 'Pentest', targetId: 'tools-pentest-metadata', detail: '只展示元信息，运行跳转 Security Lab。' },
+    { key: 'runtime', label: 'Runtime', targetId: 'tools-runtime-context', detail: '展开工具器官和运行态上下文。' },
+  ],
+})
+
 export const INTEGRATIONS_COPY = Object.freeze({
   bodyTitle: '身体集成',
   bodyEyebrow: 'Integrations / Body Bridge',

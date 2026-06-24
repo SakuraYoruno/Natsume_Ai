@@ -3,7 +3,18 @@ import { Play } from 'lucide-react'
 import EmptyStateCard from '../../../shared/ui/EmptyStateCard.jsx'
 import { isPentestTool } from '../../../shared/pentestMeta.js'
 import { TOOL_AUTH_LEVEL_STYLES, TOOL_SIDE_EFFECT_STYLES } from '../../../shared/statusMeta.js'
+import { buildToolExecutionGate } from '../toolsCatalogModel.js'
 import ToolExecutePanel from './ToolExecutePanel.jsx'
+
+function gateToneClass(tone) {
+  return {
+    green: 'border-green-100 bg-green-50 text-green-700',
+    amber: 'border-amber-100 bg-amber-50 text-amber-700',
+    orange: 'border-orange-100 bg-orange-50 text-orange-700',
+    red: 'border-red-100 bg-red-50 text-red-700',
+    gray: 'border-gray-100 bg-gray-50 text-gray-600',
+  }[tone] || 'border-gray-100 bg-gray-50 text-gray-600'
+}
 
 export default function ToolDetailPanel({
   executeTarget,
@@ -12,15 +23,16 @@ export default function ToolDetailPanel({
   selectedTool,
 }) {
   if (!selectedTool) {
-    return <EmptyStateCard title="请选择一个工具" hint="左侧点击任意工具后可查看详情和执行入口。" />
+    return <div id="tools-detail-panel" className="scroll-mt-24"><EmptyStateCard title="请选择一个工具" hint="左侧点击任意工具后可查看详情和执行入口。" /></div>
   }
 
   const sideEffect = TOOL_SIDE_EFFECT_STYLES[selectedTool.side_effect_level] || TOOL_SIDE_EFFECT_STYLES.READ
   const auth = TOOL_AUTH_LEVEL_STYLES[selectedTool.auth_level] || TOOL_AUTH_LEVEL_STYLES.NONE
   const executeOpen = executeTarget?.id === selectedTool.id
+  const gate = buildToolExecutionGate(selectedTool)
 
   return (
-    <>
+    <div id="tools-detail-panel" className="scroll-mt-24">
       <div className="space-y-3 rounded-lg border border-gray-200 bg-white p-4">
         <div className="flex items-start justify-between">
           <div>
@@ -38,6 +50,11 @@ export default function ToolDetailPanel({
         </div>
 
         <p className="text-sm text-gray-600">{selectedTool.desc || '暂无描述'}</p>
+
+        <div className={`rounded-lg border px-3 py-2 text-sm ${gateToneClass(gate.tone)}`}>
+          <div className="font-semibold">Execution Gate：{gate.title}</div>
+          <div className="mt-1 text-xs leading-5">{gate.detail}</div>
+        </div>
 
         <div className="grid grid-cols-2 gap-3 text-xs">
           <div className="rounded bg-gray-50 p-2">
@@ -82,6 +99,6 @@ export default function ToolDetailPanel({
       {executeOpen ? (
         <ToolExecutePanel tool={selectedTool} onClose={onCloseExecute} />
       ) : null}
-    </>
+    </div>
   )
 }

@@ -90,6 +90,10 @@ export function useToolsDashboardController() {
       filter,
       query,
       runtimeSnapshot,
+      selectedTool,
+      pentestCapabilities,
+      pentestLoading,
+      pentestError,
     }),
     [
       catalog.catalogError,
@@ -100,8 +104,12 @@ export function useToolsDashboardController() {
       catalog.stale,
       catalog.tools,
       filter,
+      pentestCapabilities,
+      pentestError,
+      pentestLoading,
       query,
       runtimeSnapshot,
+      selectedTool,
     ],
   )
 

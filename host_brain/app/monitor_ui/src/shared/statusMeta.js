@@ -46,7 +46,9 @@ export const TOOL_SIDE_EFFECT_STYLES = Object.freeze({
 export const TOOL_AUTH_LEVEL_STYLES = Object.freeze({
   NONE: Object.freeze({ bg: 'bg-gray-100', text: 'text-gray-600', label: '无需确认' }),
   APPROVAL: Object.freeze({ bg: 'bg-yellow-100', text: 'text-yellow-700', label: '审批确认' }),
+  APPROVAL_REQUIRED: Object.freeze({ bg: 'bg-yellow-100', text: 'text-yellow-700', label: '审批确认' }),
   CONFIRM: Object.freeze({ bg: 'bg-red-100', text: 'text-red-700', label: '高风险确认' }),
+  CONFIRM_REQUIRED: Object.freeze({ bg: 'bg-red-100', text: 'text-red-700', label: '高风险确认' }),
 })
 
 export const SKILL_CLEARANCE_STYLES = Object.freeze({

@@ -7,8 +7,10 @@ import NoticeBanner from '../../../shared/ui/NoticeBanner.jsx'
 import SampleMeta from '../../../shared/ui/observability/SampleMeta.jsx'
 import ViewportLazySection from '../../../shared/ui/observability/ViewportLazySection.jsx'
 import PageHero from '../../../shared/ui/PageHero.jsx'
+import { EXECUTION_TOOLS_COPY } from '../../../shared/content/terminology.js'
 import ToolDetailPanel from './ToolDetailPanel.jsx'
 import ToolsCatalogBrowser from './ToolsCatalogBrowser.jsx'
+import ToolsExecutionCommandRail from './ToolsExecutionCommandRail.jsx'
 import ToolsPentestMetadataSection from './ToolsPentestMetadataSection.jsx'
 
 const ToolsOperationsSection = React.lazy(() => import('./ToolsOperationsSection.jsx'))
@@ -19,7 +21,7 @@ function ToolsHeader({ loading, refreshing, runtimeLoading, onRefresh }) {
   return (
     <div className="flex items-center justify-between">
       <div>
-        <h1 className="text-xl font-bold text-gray-800">工具管理</h1>
+        <h1 className="text-xl font-bold text-gray-800">{EXECUTION_TOOLS_COPY.heroTitle}</h1>
         <p className="mt-0.5 text-sm text-gray-500">统一查看工具目录、权限等级、健康状态与手动执行入口。</p>
       </div>
       <button onClick={onRefresh} disabled={busy} className="btn-secondary">
@@ -34,11 +36,12 @@ function ToolsHero({ heroView, sampleMeta }) {
   return (
     <PageHero
       icon={Wrench}
-      eyebrow="工具与权限"
+      eyebrow={EXECUTION_TOOLS_COPY.heroEyebrow}
       title={heroView.title}
-      description="可在这里检查工具 catalog、读写权限分布、自定义 provider 状态，以及人工执行入口。"
+      description={EXECUTION_TOOLS_COPY.heroDescription}
       gradientClass="from-emerald-50 via-white to-cyan-50"
       metaItems={heroView.metaItems}
+      showPulseRail={false}
       aside={(
         <SampleMeta
           className="max-w-md"
@@ -77,6 +80,7 @@ function ToolsRuntimeContext({
 }) {
   return (
     <details
+      id="tools-runtime-context"
       className="overflow-hidden rounded-xl border border-white/80 bg-white/86 shadow-sm"
       onToggle={(event) => onRuntimeContextToggle(event.currentTarget.open)}
     >
@@ -133,7 +137,7 @@ function ToolsCatalogWorkspace({
   onToggleExecute,
 }) {
   return (
-    <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1.1fr)_minmax(360px,0.9fr)]">
+    <div id="tools-catalog-workspace" className="grid scroll-mt-24 grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1.1fr)_minmax(360px,0.9fr)]">
       <div className="space-y-3">
         <ToolsCatalogBrowser
           filter={filter}
@@ -228,7 +232,9 @@ export default function ToolsDashboardSurface({
     sampleMeta,
     noticeView,
     healthMetricCards,
+    commandRailView,
   } = view
+  const busy = loading || refreshing || runtimeLoading || pentestLoading
 
   return (
     <div className="space-y-6">
@@ -241,6 +247,13 @@ export default function ToolsDashboardSurface({
 
       <ToolsHero heroView={heroView} sampleMeta={sampleMeta} />
       <ToolsNotices noticeView={noticeView} />
+
+      <ToolsExecutionCommandRail
+        mission={commandRailView.mission}
+        gateCards={commandRailView.gateCards}
+        onRefresh={onRefresh}
+        busy={busy}
+      />
 
       <ToolsPentestMetadataSection
         capabilities={pentestCapabilities}
