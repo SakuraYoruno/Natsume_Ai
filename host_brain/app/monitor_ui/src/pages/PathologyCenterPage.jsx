@@ -2,6 +2,7 @@
 import { Activity, RefreshCw } from 'lucide-react'
 import { useSearchParams } from 'react-router-dom'
 import EmptyStateCard from '../shared/ui/EmptyStateCard.jsx'
+import LifeSystemsCommandRail from '../features/life/components/LifeSystemsCommandRail.jsx'
 import LifeBodyPathologyPanel from '../features/life/components/lifeBody/LifeBodyPathologyPanel.jsx'
 import MetricCard from '../shared/ui/MetricCard.jsx'
 import NoticeBanner from '../shared/ui/NoticeBanner.jsx'
@@ -9,6 +10,7 @@ import SampleMeta from '../shared/ui/observability/SampleMeta.jsx'
 import PageHero from '../shared/ui/PageHero.jsx'
 import TimeWindowSelect from '../shared/ui/TimeWindowSelect.jsx'
 import {
+  buildPathologyCenterCommandRailModel,
   buildPathologyCenterHeroMetaItems,
   buildPathologyCenterHeroTitle,
   buildPathologyCenterQueryView,
@@ -107,6 +109,29 @@ export default function PathologyCenterPage() {
     () => buildPathologyCenterHeroMetaItems(severitySummary, hottestOrgan),
     [hottestOrgan, severitySummary]
   )
+  const commandRailModel = useMemo(() => buildPathologyCenterCommandRailModel({
+    hasPathologyPayload,
+    hasPathologyError,
+    pathologyRefreshWarning,
+    allPathologies,
+    filteredPathologies,
+    selectedOrgan,
+    selectedSeverity,
+    primaryPathology,
+    severitySummary,
+    hottestOrgan,
+  }), [
+    allPathologies,
+    filteredPathologies,
+    hasPathologyError,
+    hasPathologyPayload,
+    hottestOrgan,
+    pathologyRefreshWarning,
+    primaryPathology,
+    selectedOrgan,
+    selectedSeverity,
+    severitySummary,
+  ])
 
   return (
     <div className="space-y-6">
@@ -152,6 +177,13 @@ export default function PathologyCenterPage() {
           {pathologyRefreshWarning.message}
         </NoticeBanner>
       ) : null}
+
+      <LifeSystemsCommandRail
+        ariaLabel="Pathology Command Rail"
+        model={commandRailModel}
+        onRefresh={pathologyQuery.refetch}
+        refreshing={pathologyQuery.loading || pathologyQuery.refreshing}
+      />
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
         <MetricCard label="高风险病灶" value={severitySummary.critical || 0} hint="需要优先处理" tone="text-red-600" />

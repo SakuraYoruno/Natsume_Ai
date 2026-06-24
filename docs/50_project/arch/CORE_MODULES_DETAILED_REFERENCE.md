@@ -1,8 +1,9 @@
 受众：MASTER
 标题：核心模块详细参考（当前代码实况）
 
-版本：v3.2
-日期：2026-06-05
+版本：v3.3
+日期：2026-06-23
+分析锚点：dev@b28c20a2
 定位：基于当前仓库真实代码结构，整理处在主链上的模块、入口关系与职责边界。供故障定位、新成员入门和文档对齐使用。若历史方案文档与本文冲突，以本文与代码为准。
 
 # 核心模块详细参考（当前代码实况）
@@ -20,15 +21,18 @@
 
 ```mermaid
 graph TD
-    U["用户 / 外部平台 / Edge"] --> ASGI["host_brain/app/asgi.py（app = create_app()）"]
+    U["用户 / API Client"] --> ASGI["host_brain/app/asgi.py（app = create_app()）"]
     ASGI --> FAC["host_brain/app/app_factory.py（create_host_fastapi_app）"]
     FAC --> REG["host_brain/app/router_registry.py（register_host_routers）"]
 
-    ASGI --> CR["host_brain/app/chat_routes.py（handle_v1_chat_route）"]
+    ASGI --> CHAT_EP["asgi.chat_endpoint"]
+    CHAT_EP --> CR["host_brain/app/chat_routes.py（handle_v1_chat_route）"]
     CR --> IMG["host_brain/app/chat_immune_gate.py"]
     CR --> CH["host_brain/app/chat_handler.py（handle_chat）"]
     CH --> SSEU["_unified_chat_sse_generator"]
-    SSEU --> CO["host_brain/app/cortex_orchestrator.py"]
+    SSEU --> THAL["thalamus_agent.classify_and_compile_intent_draft"]
+    THAL --> GOV["Governor / IntentDecisionEngine.evaluate_intent"]
+    GOV --> CO["host_brain/app/cortex_orchestrator.py"]
     CO --> ARS["host_brain/app/agent_runtime_shared.py（_cortex_orchestrator_sse_generator_impl）"]
     ARS --> EROUT["host_brain/app/executive_router.py"]
     EROUT --> EXEC["host_brain/app/executive_runtime.py"]
@@ -41,10 +45,11 @@ graph TD
     PRUN --> ENV["host_brain/app/reply_envelope.py"]
     ENV --> POST["host_brain/app/surface_reply_postprocessor.py"]
 
-    U --> INPUT["host_brain/app/input_routes.py（/v1/host/input）"]
-    INPUT --> CO
+    EXT["ASR / Gateway"] --> INPUT["host_brain/app/input_routes.py（/v1/host/input）"]
+    INPUT --> ING["校验 / 噪声门 / 去重 / Immune gate / 内部 ChatRequest"]
+    ING --> CO
 
-    U --> GWS["edge_client/gateway/server.py"]
+    PLAT["外部平台"] --> GWS["edge_client/gateway/server.py"]
     GWS --> GWR["edge_client/gateway/router.py"]
     GWR --> GWN["edge_client/gateway/normalizer.py"]
     GWN --> INPUT
@@ -93,7 +98,7 @@ graph TD
 
 当前职责：
 
-- `register_host_routers(app)`：按固定顺序 `include_router`：`canon_router`、`scheduler_router`、`host_scheduler_router(prefix="/host-scheduler")`、`tool_router`、`tool_kits_alias_router`、`prompt_config_router`、`bond_router`、`agent_router`、`input_router`、`internal_tribe_router`、`internal_codex_router`、`internal_security_immune_router`、`mateengine_router`、`health_router`
+- `register_host_routers(app)`：按固定顺序 `include_router`：`canon_router`、`scheduler_router`、`host_scheduler_router(prefix="/host-scheduler")`、`tool_router`、`tool_kits_alias_router`、`prompt_config_router`、`bond_router`、`agent_router`、`input_router`、`internal_tribe_router`、`internal_codex_router`、`internal_security_immune_router`、`digital_life_router`、`memory_router`、`mateengine_router`、`pentest_router`、`health_router`
 - `wire_route_providers(...)`：装配各路由的回调 provider（在 `app_factory` 之前调用）
 
 为什么核心：**Host Main 全部业务路由的唯一注册点**，避免分散注册导致的顺序歧义。
@@ -196,6 +201,8 @@ graph TD
 
 为什么核心：**Surface 主链与旧链的开关枢纽**；任何 chat reply 必须经过这里。
 
+主权边界：`surface_reply_runtime.py` 是 SSE 入口、兼容 fallback 与 sub-agent 抑制枢纽，不拥有 normal chat 最终文本。当前最终文本主权在 `persona.surface_main_chain.SurfaceMainChain`，对外 commit 主权在 `reply_envelope.py`。
+
 ### 4.10 `host_brain/app/surface_reply_preprocessor.py`（1623 行）
 
 当前职责：从 `surface_reply_runtime.py` 拆分出来的"输入预处理与配置渲染"部分：
@@ -274,7 +281,7 @@ graph TD
 
 | 文件 | 职责 |
 |---|---|
-| `chat_agent_handler.py` | ChatAgent 的 handler — 渲染路由与 surface 调用 |
+| `chat_agent_handler.py` | ChatAgent 兼容 handler — 只能进入受控 surface 调用，不拥有 normal chat 最终文本 |
 | `intent_agent_handler.py` / `intent_agent_entry_handler.py` | Intent agent 的 handler 与入口 handler |
 | `emotion_agent_handler.py` | 情绪 agent handler |
 | `judge_agent_handler.py` | Judge agent handler（收口裁判汇总） |
@@ -450,12 +457,15 @@ graph TD
 
 当前职责：episodic 兼容层（部分查询路径仍走这里）+ 内存图（关联结构）。
 
-### 11.5 `memory/canon_world_store.py` / `canon_style_store.py` / `canon_helpers.py` / `canon_schemas.py` / `canon_sync.py` / `canon_vector_*`
+### 11.5 `memory/canon_world_store.py` / `canon_helpers.py` / `canon_schemas.py` / `canon_sync.py` / `canon_vector_*`
 
-当前职责：Canon 三件套（world / style / character）：
+当前职责：Canon 记忆投影与同步层：
 
-- 显式真源（人物设定 / 世界观 / 风格 anchor）
-- vector projection 与 auto-sync 把 canon 投影到向量空间
+- `canon_world_store.py` 提供 world canon 的存储访问
+- `canon_helpers.py` / `canon_schemas.py` 提供 canon 通用 schema 与 helper
+- `canon_sync.py` / `canon_vector_*` 负责 vector projection 与 auto-sync，把 canon 投影到向量空间
+
+当前源码没有 `memory/canon_style_store.py`，也没有 `host_brain/canon/style/`；不要把 StyleCanon 写成活动模块。
 
 ### 11.6 `memory/chroma_client.py`
 
@@ -535,10 +545,16 @@ interoception / motor_cortex / cerebellum / glymphatic / vestibular
 
 当前职责：`/v1/host/input` 入口：
 
-- 接收 ASR / Gateway 归一化 input
-- 调用 `input_service_*`（ack / log / quality / gateway）做规范化与回写
-- 触发 chat handler 或 thread resolver
-- input dispatch 使用专用线程池
+- 接收 ASR / Gateway 归一化 input；只接受 `ASR` 与 `GATEWAY` 两类 source
+- 自行做字段校验：ASR 需要 final text + session_id；Gateway 需要 content/attachments、conversation_id、platform
+- ASR 走 `_evaluate_asr_noise_gate`，非 final 或噪声段直接 `IGNORED`
+- Gateway 走 `_build_gateway_dedupe_key` / `_mark_gateway_dedupe` 去重，并处理多模态 placeholder、recent multimodal restore、progress fastpath、immediate ack / route-started voice ack
+- 调用 `_evaluate_immune_gate_for_input`，BLOCK 时直接拒绝并写入 `IMMUNE_BLOCKED_HIGH_RISK`
+- 解析 `person_id`，推进 foreground inner-life catchup，记录显式反馈 shadow log
+- 之后由 `_dispatch_to_graph → _run_cortex_orchestrator_pipeline` 构造内部 `ChatRequest`，直接调用 `cortex_orchestrator_sse_generator` 收集 COMMIT
+- Gateway 最终文本/语音/媒体回推由 `_deliver_gateway_reply`、`post_gateway_reply`、`_send_gateway_voice_reply` 负责
+
+边界说明：`/v1/host/input` 不是 `/v1/chat` 的转发层，也不调用 `chat_routes.handle_v1_chat_route` 或 `chat_handler.handle_chat`。它与 `/v1/chat` 共享 Cortex 之后的编排/Surface 主链，但拥有自己的 ingress 校验、噪声门、去重、Immune gate 和回推语义。
 
 ### 13.2 `host_brain/app/edge_event_routes.py`
 
@@ -609,9 +625,9 @@ interoception / motor_cortex / cerebellum / glymphatic / vestibular
 
 陪伴整合：BioOps trace 在 `chat_routes.handle_v1_chat_route` 中被构建并写入 `request.state.bio_ops_runtime_trace`，commit 阶段写回 SSE。
 
-## 15. Codex Runtime（host_brain/codex_runtime/）
+## 15. Agent Runtime WorkOrder / Codex Runtime（host_brain/codex_runtime/）
 
-新增 **WorkOrder-first** 执行面：
+当前 **WorkOrder-first** 执行面；Host 路由以 `/internal/codex/*` 暴露 preview/execute/jobs/owner-directives/immune dispatch，数据契约以 `CodexWorkOrder` 为中心：
 
 - `work_order.py`：`CodexWorkOrder` 数据契约
 - `result_contract.py`：`CodexRuntimeResult`
@@ -628,7 +644,7 @@ interoception / motor_cortex / cerebellum / glymphatic / vestibular
 - `verification_policy.py` / `review_policy.py` / `workspace_policy.py`：策略层
 - `immune.py` / `job_registry.py` / `prompt_profiles.py` / `skill_ids.py` / `artifact_store.py`：基础设施
 
-入口路由：`/internal/codex/work-orders/preview|execute`、`/internal/codex/owner-directives`、`/internal/codex/jobs/{job_id}`、`/internal/codex/immune/proposal|dispatch|auto-state`。
+入口路由：`/internal/codex/work-orders/preview|execute`、`/internal/codex/owner-directives`、`/internal/codex/jobs/{job_id}`、`/internal/codex/immune/proposal|dispatch|auto-state`。这是 Agent Runtime 的 WorkOrder 执行面，不是 normal chat 最终文本作者。
 
 ## 16. Security Immune（host_brain/security_immune/）
 
@@ -643,6 +659,18 @@ interoception / motor_cortex / cerebellum / glymphatic / vestibular
 入口路由：`/internal/security/runtime`、`/internal/security/hunt/run-once`、`/internal/security/probe/heartbeat`。
 
 与 chat 主链关系：`chat_immune_gate.py` 是 chat 入口的免疫闸门；`security_immune` 是更广的"授权网络防御"，两者协同但互不替代。
+
+### 16.1 `/v1/pentest` 授权工作台
+
+`host_brain/app/pentest_routes.py` 注册 `APIRouter(prefix="/v1/pentest", tags=["pentest"])`，是当前授权 pentest Web/API 入口：
+
+- `GET /capabilities`、`GET /environment` 暴露工具能力与环境探测
+- `POST /runs` 创建 run，`GET /runs` / `GET /runs/{run_id}` / `GET /runs/{run_id}/events` 查询状态与 SSE 事件
+- `POST /runs/{run_id}/cancel` 取消 run
+- `POST /runs/{run_id}/approve-side-effect` 与 `POST /runs/{run_id}/continue-side-effect` 承接高风险副作用审批闭环
+- `GET /runs/{run_id}/report` 输出 markdown/json 报告
+
+边界：该路由依赖 `host_brain.pentest` 的 ScopeGuard、RateLimiter、executor guard、tool specs/executors 与 autonomous kernel；它是授权安全实验执行面，不是 chat 主链、记忆源或人格策略源。
 
 ## 17. Observability Backend（host_brain/app/obs_*.py）
 
@@ -664,6 +692,19 @@ interoception / motor_cortex / cerebellum / glymphatic / vestibular
 
 预热缓存：在 lifespan 启动时同步预热 `runtime_snapshot`、`trace_feed`、`insights_summary`、`digital_life_overview`、`life_body`，启动后周期刷新。
 
+### 17.1 Monitor UI feature-sliced 前端
+
+Monitor UI 源码位于 `host_brain/app/monitor_ui/src/`，当前结构不是旧 `components/Layout.jsx` 单层页面堆叠，而是 feature-sliced：
+
+- `App.jsx`：HashRouter / Routes / legacy redirect / Suspense 壳
+- `app/routeManifest.jsx`：导航与路由事实源，定义 `ROUTE_NAV_GROUPS`：Cockpit、Life Systems、Observability、Operations、Execution、Security Lab、Integrations
+- `app/shell/Layout.jsx`：应用 shell、导航、全局风险 action bar、route preload
+- `routes/routeLoaders.js`：lazy page loader
+- `features/life`、`features/observability`、`features/operations`、`features/execution`、`features/security`、`features/integrations`：各业务域 controller / query / model / components
+- `shared/`：通用 UI、API endpoint registry、query keys 等共享层
+
+当前重要页面包括 `/cockpit`、`/observability/bio-ops`、`/security/pentest`、`/security/pentest/runs/:runId`、`/security/immune`、`/integrations/body`。`features/life/components/AvatarStateCard.jsx` 只展示和下发外显行为，Edge/DesktopPet/MateEngine/VTS/VRM 不提供记忆、人格策略或审计事实。
+
 ## 18. Bond / Canon / Scheduler / Tools
 
 ### 18.1 Bond（`host_brain/bond/`）
@@ -673,13 +714,12 @@ interoception / motor_cortex / cerebellum / glymphatic / vestibular
 
 ### 18.2 Canon（`host_brain/canon/`）
 
-三大 canon 子系统：
+当前活动 canon 子系统：
 
 - `character/`：人物 canon
-- `style/`：风格 canon
 - `world/`：世界 canon
 
-与 `memory/canon_*` 协同：memory 端做 vector projection 与 auto-sync，canon 端做"显式真源"管理。
+与 `memory/canon_*` 协同：memory 端做 vector projection 与 auto-sync，canon 端做人物 / 世界的"显式真源"管理。当前没有 `host_brain/canon/style/`，也没有 `memory/canon_style_store.py`；StyleCanon 不应写入当前活动架构。
 
 ### 18.3 Scheduler（`host_brain/scheduler/`）
 
@@ -719,6 +759,8 @@ interoception / motor_cortex / cerebellum / glymphatic / vestibular
 | 旧的 `chat_context_builder.py` | 已删除；上下文构建拆分到 `surface_main_chain.py` + `surface_reply_preprocessor.py` + `host_brain/app/context/` 子包 |
 | Tribe family 灰度开关 | 已全部删除（P0~P4 批次） |
 | `style_canon` / `persona_utterance` 召回路由 | 已删除（`refactor(retrieval): 彻底删除废弃的 ...`） |
+| `StyleCanon` / `host_brain/canon/style/` / `memory/canon_style_store.py` | 当前源码没有这些活动路径；不要写成当前模块 |
+| `/v1/host/input` 作为 `/v1/chat` 转发层 | 不成立；当前是 ASR/Gateway ingress，自行校验、噪声门、去重、Immune gate，并直接进入 Cortex orchestrator pipeline |
 | 旧 `surface_renderer` 路径 | 已退役（`remove retired surface renderer path`） |
 | `test-only emotion utterance recall index` | 已删除 |
 | `code_agent_handler.py` | 已删除（chat 路径已不再依赖） |
@@ -726,7 +768,7 @@ interoception / motor_cortex / cerebellum / glymphatic / vestibular
 
 ## 21. 关键不变量（与 CURRENT_CODE_ARCHITECTURE 一致）
 
-1. normal chat 文本最终作者只能是 `SurfaceMainChain`。
+1. normal chat 文本最终作者只能是 `SurfaceMainChain`，最终对外 commit 由 `ReplyEnvelope` 包装。
 2. 旧链能力只能注入 facts/state/memory/perception，不能写最终回复。
 3. 媒体场景（图片/贴纸/表情）的最终作者是结构化 `reply_modality_router`。
 4. 文本质量回归（A/B 不通过）的旧链能力不允许进入 normal chat live path。
@@ -734,3 +776,5 @@ interoception / motor_cortex / cerebellum / glymphatic / vestibular
 6. 23 个 tribe family 没有灰度开关，全部直接生效。
 7. life memory（`LifeMemoryStore`）是当前记忆 SSOT；vector / semantic 是衍生层。
 8. Desktop Pet / MateEngine / VTS / VRM 只属于外显执行与状态观测面，不提供记忆、人格策略或审计事实。
+9. `/v1/host/input` 是 ASR/Gateway ingress，不转发 `/v1/chat`。
+10. `StyleCanon` 不是当前活动模块；当前源码没有 `host_brain/canon/style/` 与 `memory/canon_style_store.py`。

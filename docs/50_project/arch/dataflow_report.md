@@ -1,15 +1,15 @@
 受众：MASTER
-标题：当前数据流报告（2026-06-04）
+标题：当前数据流报告（dev@b28c20a2）
 
-版本：v3.2
-日期：2026-06-05
-定位：基于当前仓库代码，描述 `/v1/chat` / `/v1/host/input` / `/v1/edge/events` / Unified Message Gateway / Observability / Desktop Pet / MateEngine Bridge 等主流量路径的真实走向。若历史方案文档与本文冲突，以本文与代码为准。
+版本：v3.3
+日期：2026-06-23
+定位：基于当前仓库代码，描述 `/v1/chat` / `/v1/host/input` / `/v1/edge/events` / surface recall / ReplyEnvelope 后效 / Unified Message Gateway / Observability / Desktop Pet / MateEngine Bridge 等主流量路径的真实走向。若历史方案文档与本文冲突，以本文与代码为准。
 
-# 当前数据流报告（2026-06-04）
+# 当前数据流报告（dev@b28c20a2）
 
 ## 0. 代码证据入口
 
-本文所有数据流以下列文件为证据：
+本文的数据流以下列文件为主要证据：
 
 进程入口：
 - `host_brain/__main__.py`
@@ -23,506 +23,348 @@ Host Main FastAPI 装配：
 - `host_brain/app/app_factory.py`
 - `host_brain/app/router_registry.py`
 
-Chat 主链：
+Chat / Surface 主链：
 - `host_brain/app/chat_routes.py`
 - `host_brain/app/chat_immune_gate.py`
 - `host_brain/app/chat_handler.py`
 - `host_brain/app/cortex_orchestrator.py`
 - `host_brain/app/agent_runtime_shared.py`
-- `host_brain/app/executive_router.py` / `executive_runtime.py` / `executive_runtime_core.py`
-- `host_brain/app/surface_reply_runtime.py` / `surface_reply_preprocessor.py` / `surface_reply_postprocessor.py` / `surface_main_chain.py`
+- `host_brain/app/executive_router.py`
+- `host_brain/app/executive_runtime.py`
+- `host_brain/app/executive_runtime_core.py`
+- `host_brain/app/surface_reply_runtime.py`
+- `host_brain/app/surface_reply_preprocessor.py`
+- `host_brain/app/surface_reply_postprocessor.py`
 - `host_brain/app/surface_main_chain_adapter.py`
-- `host_brain/persona/surface_main_chain.py` / `surface_packet_compiler.py` / `surface_runtime.py`
+- `host_brain/app/reply_envelope.py`
+- `host_brain/persona/surface_main_chain.py`
+- `host_brain/persona/surface_packet_compiler.py`
+- `host_brain/persona/surface_runtime.py`
 
-Input 与 Edge：
+召回 / 记忆：
+- `host_brain/app/chat_retrieval_helpers.py`
+- `host_brain/persona/surface_memory_recall.py`
+- `host_brain/retrieval/recall_fusion.py`
+- `host_brain/retrieval/recall_fusion_stores.py`
+- `host_brain/retrieval/recall_fusion_config.py`
+- `host_brain/retrieval/recall_schemas.py`
+- `host_brain/memory/life_memory.py`
+- `host_brain/audit/sqlite_ledger.py`
+- `host_brain/audit/ledger_schema.py`
+- `host_brain/core/prompt_context.py`
+- `host_brain/memory/canon_world_store.py`
+
+Input / Edge / 外显面：
 - `host_brain/app/input_routes.py`
 - `host_brain/app/edge_event_routes.py`
+- `host_brain/app/system_handler.py`
 - `host_brain/channels/edge_rpc_client.py`
-- `edge_client/gateway/server.py` / `router.py` / `normalizer.py`
+- `edge_client/gateway/server.py`
+- `edge_client/gateway/router.py`
+- `edge_client/gateway/normalizer.py`
 - `edge_client/gateway/adapters/`
-- `edge_client/app/fastapi_app.py`
 - `edge_client/runtime/voice_pipeline.py`
 - `edge_client/runtime/avatar_behavior.py`
-
-Desktop Pet / MateEngine：
-- `desktop_pet/main.cjs`
 - `host_brain/app/mateengine_routes.py`
 - `host_brain/channels/mateengine.py`
 
 观测：
 - `host_brain/app/obs_fastapi_app.py`
 - `host_brain/app/obs_routes_*.py`
-- `host_brain/app/obs_routes_stats_system.py`
-- `host_brain/app/monitor_ui/src/components/AvatarStateCard.jsx`
+- `host_brain/app/monitor_ui/src/`
 
 ## 1. 当前运行面与流量入口
 
 | 流量类型 | 入口 | 处理面 | 出口 |
 |---|---|---|---|
-| 用户聊天 | `POST /v1/chat`（Host Main 8000） | `chat_routes → chat_immune_gate → chat_handler → cortex → executive → surface_reply → SurfaceMainChain` | SSE token 流 |
-| 平台消息入站 | Gateway adapter（19000）→ `POST /v1/host/input`（Host Main） | `input_routes → cortex_orchestrator` | SSE 或 ack |
-| Edge 事件回流 | `POST /v1/edge/events`（Host Main） | `edge_event_routes` | ack |
-| Edge 能力调用 | Host → Edge RPC（17800） | Host 主动出站 | 同步响应 |
-| Desktop Pet 控制 | Host → Desktop Pet 直连（18788）或 Host → Edge → Desktop Pet | `edge_rpc_client.post_desktop_pet` / `POST /v1/edge/desktop_pet` | 本地桌宠窗口动作 |
-| MateEngine 表现层 | Host `/v1/mateengine/*` 或 chat lifecycle cue | `mateengine_routes` / `host_brain.channels.mateengine` | UDP signal 32145 或 bridge HTTP 18770 |
-| 观测数据查询 | Monitor UI → Obs Backend（18082） | `obs_routes_*` | JSON |
+| 用户聊天 | `POST /v1/chat`（Host Main） | `chat_routes -> chat_immune_gate -> chat_handler -> cortex -> executive -> surface_reply -> SurfaceMainChain` | SSE：`PRESENCE -> COMMIT -> POST` |
+| 平台消息入站 | Gateway adapter -> `POST /v1/host/input` | `input_routes -> cortex_orchestrator`，chat-bound 时复用 chat 主链 | SSE 或 ack |
+| Edge 事件回流 | `POST /v1/edge/events` | `edge_event_routes` / `system_handler.receive_edge_events_response` | ack、遥测、必要的表现层/关系信号 |
+| Edge 能力调用 | Host -> Edge RPC | `host_brain/channels/edge_rpc_client.py` | 同步执行结果 |
+| Desktop Pet 控制 | Host -> Desktop Pet 直连或 Host -> Edge -> Desktop Pet | `edge_rpc_client.post_desktop_pet` / `POST /v1/edge/desktop_pet` | 本地桌宠动作 |
+| MateEngine 表现层 | Host `/v1/mateengine/*` 或 chat lifecycle cue | `mateengine_routes` / `host_brain.channels.mateengine` | UDP signal 或 bridge HTTP |
+| 观测数据查询 | Monitor UI -> Obs Backend | `obs_routes_*` | JSON |
+
+Edge / Desktop Pet / MateEngine / VTS / VRM 均是外显执行或遥测面。它们可以上报状态、事件和执行结果，但不是事实裁决源，不能替代 SQLiteLedger、LifeMemoryStore 或 WorldCanonStore 的事实边界。
 
 ## 2. `/v1/chat` 主链
 
-### 2.1 入口层（`asgi.py` + `app_factory.py`）
+### 2.1 入口层
 
-```
-uvicorn → host_brain.app.asgi:app
-  → app_factory.create_host_fastapi_app(...)
-  → 全局中间件链：
-      add_request_id_and_audit（attach request_id, count metrics, audit）
-      configure_http_middleware（CORS / GZip 等）
-  → router_registry.register_host_routers（注入业务路由）
-  → 直接注册 /v1/chat、/v1/edge/events、/metrics、/
-  → /v1/chat 委托 chat_endpoint(request_body, request)
-        → handle_v1_chat_route(...)（chat_routes.py）
+```text
+uvicorn -> host_brain.app.asgi:app
+  -> app_factory.create_host_fastapi_app(...)
+  -> router_registry.register_host_routers(...)
+  -> POST /v1/chat
+  -> chat_routes.handle_v1_chat_route(...)
 ```
 
-`chat_endpoint` 接收 `ChatRequest`：
+`ChatRequest` 进入后携带 message、session/person、reply target、attachments/multimodal observations、emotion context、intent draft、render target 等运行时字段。
 
-- `message` / `session_id` / `person_id` / `reply_channel` / `reply_target` / `input_source`
-- `attachments` / `multimodal_observations` / `attachment_summary`
-- `emotion_tag` / `emotion_intensity` / `emotion_context` / `intent_draft`
-- `render_target_lang` / `suppress_edge_tts` / 其它运行时偏好
+### 2.2 Immune gate 与 handler
 
-### 2.2 `chat_routes.handle_v1_chat_route`
+`chat_routes.handle_v1_chat_route` 在进入 chat handler 前完成：
 
-职责：
+1. `notify_user_interaction()`：触发用户活动信号。
+2. `build_chat_bio_ops_preflight_trace(...)`：构建 BioOps trace 并写入 request state。
+3. `evaluate_immune_gate_fn(...)`：得到 ALLOW / REPORT / BLOCK。
+4. `schedule_immune_gate_fn(...)`：异步写 ledger，不阻塞主链。
+5. BLOCK 直接返回拒绝型 COMMIT；REPORT 记录并继续放行；ALLOW 委托 `chat_handler.handle_chat`。
 
-1. `notify_user_interaction()`：触发用户活动信号（被 ANS / inner_world / proactive 使用）
-2. `build_chat_bio_ops_preflight_trace(request_body)`：构建 BioOps trace（即使失败也降级），写入 `request.state.bio_ops_runtime_trace`
-3. `evaluate_immune_gate_fn(request_body)` → 得到 immune 决策（ALLOW / REPORT / BLOCK）
-4. 异常时降级为 `IMMUNE_EVALUATE_DEGRADED + ALLOW`
-5. `schedule_immune_gate_fn(...)`：异步把 immune 决策写到 ledger（不阻塞主链）
-6. **BLOCK** 时直接返回 `sse_single_commit({phase: COMMIT, decision: REJECT, reason_code: IMMUNE_BLOCKED_HIGH_RISK, ...})`
-7. **REPORT** 时只写 info 日志、继续放行
-8. 否则委托 `handle_chat_fn(request_body, request, metrics)`
+`chat_handler.handle_chat` 负责 metrics、request/session/person 解析、GATEWAY 中文渲染偏好、`HOST_SYS_MODE` 门控，然后返回 `_unified_chat_sse_generator(...)` 的 `StreamingResponse`。
 
-### 2.3 `chat_handler.handle_chat`
+### 2.3 统一 SSE 编排
 
-职责：
-
-1. `metrics.inc_chat()`
-2. 解析 `request_id` / `session_id` / `person_id` / `render_target_lang`
-   - GATEWAY 输入强制 `render_target_lang = "zh"`
-3. **sys_mode 门控**：
-   - `HOST_SYS_MODE=locked` → 拒绝（`SYS_MODE_LOCKED` SSE）
-   - `HOST_SYS_MODE=maintenance` → 维护提示（`SYS_MODE_MAINTENANCE` SSE）
-4. 否则返回 `StreamingResponse(_unified_chat_sse_generator(...))`
-
-### 2.4 `_unified_chat_sse_generator` 阶段
-
-```
+```text
 PRESENCE(THINKING)
-  ↓
-thalamus_agent.classify_and_compile_intent_draft(...)
-  → 产出 canonical intent_draft（route=chat/delegate/skill/plan）
-  → 推断 scene_type（默认 SCENE_CHAT）
-  ↓
-_evaluate_governor_with_timing(...)（在 _GOVERNOR_EXECUTOR 线程池）
-  → governor_result（approved/declined/...）
-  ↓
-PRESENCE(GOV_APPROVED)
-  ↓
-cortex_orchestrator_sse_generator(...)
-  → record_user_turn（conversation/writer）
-  → agent_runtime_shared._cortex_orchestrator_sse_generator_impl(...)
+  -> thalamus_agent.classify_and_compile_intent_draft(...)
+  -> _evaluate_governor_with_timing(...)
+  -> PRESENCE(GOV_APPROVED)
+  -> cortex_orchestrator_sse_generator(...)
+  -> record_user_turn(...)
+  -> agent_runtime_shared._cortex_orchestrator_sse_generator_impl(...)
 ```
 
-## 3. `cortex_orchestrator` 数据流
+Governor 决策在 surface 回复前完成；immune gate 必须早于 chat handler。SSE 阶段顺序保持 `PRESENCE -> COMMIT -> POST`。
 
-实际实现都在 `agent_runtime_shared._cortex_orchestrator_sse_generator_impl`。
+## 3. Cortex / Executive / Surface 数据流
 
-### 3.1 编排步骤
+`agent_runtime_shared._cortex_orchestrator_sse_generator_impl` 是当前 chat 主链的实际编排核心：
 
-```
-1. airlock_sanitize_input(message) → sanitized_message
-2. 触发 retrieval prefetch（surface chain 之前的 fact 预取）
-   - prefetch_retrieval_persona_inputs：拿 bond / canon / style / character
-   - timeout 由 _resolve_retrieval_timeout_seconds 控制
-3. 直接路由 fastpath 检查（多个 try）：
-   - _maybe_build_task_progress_fastpath
-   - _maybe_build_recent_turn_answer
-   - _maybe_build_contextual_memory_answer
-   - _maybe_build_contextual_style_answer
-   - _maybe_build_contextual_session_answer
-   - _maybe_build_previous_meaning_answer
-   命中任一则直接产出 commit（不进 LLM）
-4. 否则进入 executive 层：
-   executive_router_sse_generator(...)
-     → executive_runtime_sse_generator(...)
-       → _executive_runtime_core_sse_generator_impl(...)
-         → 决策 route 类型 → surface_reply_sse_generator(...)
-5. commit 之后：
-   _async_post_process(...) 调度副作用（不阻塞 SSE 流）：
-     - TTS 落地（trigger_tts_after_commit + broca_to_tts_params）
-     - life_memory 写回（_write_surface_main_chain_memory_sync）
-     - bond stage 更新
-     - observability trace 落盘
-     - PII egress scrub
-6. MateEngine lifecycle cue（不写事实源）：
-   - `_send_delayed_mateengine_thinking_cue` 在长思考时发送 thinking cue
-   - `_send_mateengine_state_cue` 按 intent / event 推断 listening、thinking、speaking、home 等状态
-   - COMMIT 后 `_send_mateengine_chat_bubble` 提取回复文本与 `reply_envelope.performance` / `audit.natsume_emotion_tag`，发送本地桌宠说话状态与气泡
-   - 该链路只驱动本地表现层，不改变 memory / policy / audit 的事实判定
+```text
+1. airlock_sanitize_input(message)
+2. retrieval/persona prefetch
+3. direct fastpath 尝试
+4. executive_router_sse_generator(...)
+5. executive_runtime_core 决策 route=chat/delegate/skill/plan
+6. route=chat/delegate 时进入 surface_reply_sse_generator(...)
+7. SurfaceMainChain 生成最终文本
+8. ReplyEnvelope 包装 COMMIT
+9. commit 后调度 POST 后效
 ```
 
-### 3.2 直接路由 fastpath（不经 LLM）
+当前 direct fastpath 包括 task progress、recent turn、contextual memory、contextual style、contextual session、previous meaning 等快速回答。这里的 contextual style 是会话/上下文快速路径，不表示存在 `canon_style_store.py`、`host_brain/canon/style/` 或 StyleCanon 召回 route。
 
-| Fastpath | 用户意图举例 | 出处 |
+Executive 当前 route：
+
+| Route | 含义 | 后续 |
 |---|---|---|
-| `task_progress` | "进度怎么样" / "做完了吗" | `_maybe_build_task_progress_fastpath` |
-| `recent_turn` | "刚刚我说什么" / "你刚说什么" | `_maybe_build_recent_turn_answer` |
-| `contextual_memory` | "你记得 X 吗" | `_maybe_build_contextual_memory_answer` |
-| `contextual_style` | "你刚才那种语气" | `_maybe_build_contextual_style_answer` |
-| `contextual_session` | "刚刚我们聊到哪" | `_maybe_build_contextual_session_answer` |
-| `previous_meaning` | "刚才那句啥意思" | `_maybe_build_previous_meaning_answer` |
+| `chat` | 普通聊天 | `surface_reply_sse_generator` -> SurfaceMainChain |
+| `delegate` | 委派给指定 agent | 带 sub-agent context 进入 surface reply |
+| `skill` | 调用 skill/tool | tool/skill broker，结果写审计 |
+| `plan` | 多步任务规划 | 生成多步计划并汇总输出 |
 
-`_legacy_direct_text_routes_enabled()`（默认 false）控制旧的直接文本路由是否启用，仅作 A/B 用途。
+## 4. 当前 surface recall 链路
 
-### 3.3 Retrieval 与 SurfacePacket
+当前 surface recall 不走旧 Agentic RAG stack；入口由 `host_brain/app/chat_retrieval_helpers.py:_run_retrieval` 与 `RecallFusionServiceContract` 驱动，并在 surface memory recall / packet compiler 中转成给 SurfaceMainChain 的事实输入。
 
-```
-RecallFusionServiceContract（host_brain/retrieval/recall_fusion.py）
-  → 多路召回：vector（Chroma）+ FTS5（FullTextSearcher）+ canon stores + life_memory + world store + artifact vault
-  → hybrid fusion（vector_weight + fts_weight）
-  → 候选过滤：anaphoric selection、deep review、specific item reference、broad collection
-  → 输出 RecallFusionResult
-↓
-host_brain/persona/surface_memory_recall.py
-  → 决定 RECALL_POLICY_MUST/MAY/NO
-  → 应用 surface_memory_recall_decision_matrix
-  → 产出 MemoryRecallPacket（必要事实 + 时间锚 + 引语，已压缩）
-↓
-host_brain/persona/surface_packet_compiler.py
-  → 联合 SurfaceAffectControlPacket / SurfaceInfluencePacket
-  → 编译为 CompiledSurfaceInput（SurfaceTaskControl + facts + style anchor + must_not_do）
-↓
-host_brain/persona/surface_runtime.py
-  → 多候选生成 + 重排 + observation_codes + natsume_emotion_tag
-  → 输出 SurfaceRuntimeResult
+```text
+SurfaceMainChain input build
+  -> chat_retrieval_helpers._run_retrieval(...)
+  -> _build_surface_memory_recall_service()
+  -> RecallFusionServiceContract(recall runtime config)
+  -> surface_memory_recall.py
+  -> MemoryRecallPacket / evidence rows
+  -> surface_packet_compiler.py
+  -> CompiledSurfaceInput
+  -> SurfaceRuntime.run(...)
 ```
 
-## 4. `executive_runtime` 路由流
+当前主 surface recall routes：
 
-### 4.1 当前路由类型
-
-| Route | 含义 | 终点 |
+| route_id | store_id | 角色 |
 |---|---|---|
-| `chat` | 普通聊天 | `surface_reply_sse_generator` → SurfaceMainChain |
-| `delegate` | 委派给指定 agent | `surface_reply_sse_generator`（带 sub_agent_context） |
-| `skill` | 调用某个 skill | tool/skill broker |
-| `plan` | 多步任务规划 | `_maybe_build_multi_step_plan` → 多回合执行 |
+| `surface_life_collection` | `life_memory_collection` | life memory 集合快速取回，偏 SSOT 聚合视图 |
+| `surface_life_episode` | `life_episode` | LifeMemoryStore 的 episode/evidence 事实取回 |
+| `surface_semantic` | `semantic_memory` | SQLite 长期语义蒸馏层，需带来源/provenance |
+| `surface_episodic` | `episodic_vector` | 向量兼容层，衍生召回 |
+| `surface_sqlite` | `sqlite_ledger` | intent/governor/skill/memory/retrieval 等 ledger 记录 |
+| `surface_neo4j` | `neo4j_bond` | 关系/bond 图或 SQLite 降级 |
 
-### 4.2 路由判断顺序（`executive_runtime_core`）
+`world_canon` 和 `artifact_vault` 在通用 `recall_fusion_config.py` / store 实现中仍存在能力定义，但不是当前 surface 主链的 route 配置。不要把 WorldCanon 写成 surface recall route。
 
-```
-_hard_rule_route(intent_draft, user_message)
-  优先 hard rules：
-    - explicit skill target → skill route
-    - explicit delegate target → delegate route
-    - 多步请求 → plan route
-    - simple technical advice → chat route
-    - simple task split → chat route
-    - 默认 → chat route
+## 5. 记忆 SSOT 与衍生层
 
-_should_force_complex_plan(...)
-  覆盖：当 prefrontal / cortex_route_decider 强制要求复杂规划时
+当前记忆 SSOT 是 `host_brain/memory/life_memory.py` 的 `LifeMemoryStore`。SQLite 是 source of truth；vector / semantic / graph 是衍生层或兼容层。
 
-最终输出 (route, target, plan_meta)
-```
+`SQLiteLedger` schema 覆盖：
 
-### 4.3 路由决策的辅助器
+| 类别 | 代表表 |
+|---|---|
+| 意图 / 治理 / skill 审计 | `intent_log`、`governor_log`、`skill_exec_log` |
+| 记忆操作与生命记忆 | `memory_ops_log`、`life_episode`、`life_evidence`、`life_episode_link`、`life_memory_collection*` |
+| Canon / world canon 审计 | `canon_proposal_log`、`canon_change_log`、`world_canon_doc` 等 `canon_*` 表 |
+| 语义记忆 | `semantic_memory` |
+| 召回观测 | `retrieval_event_log` |
 
-- `host_brain/tribe/cortex_route_decider.py`：双层意图分类 + G1 TTS 兜底
-- `host_brain/tribe/cortex_intent_analyzer.py`：意图解析
-- `host_brain/tribe/prefrontal_agent.py:plan_response`：前额叶决策
-- `host_brain/tribe/thalamus_agent.py`：canonical intent 收口
+因此：
+- `life_episode` / `life_evidence` 是可追溯事实主体。
+- `semantic_memory` 是长期语义蒸馏结果，不应脱离 source refs 当成原始事实。
+- `episodic_vector` / Chroma 是衍生索引，不是事实真源。
+- `sqlite_ledger` 可证明链路日志、决策和执行记录。
 
-### 4.4 不同 route 的后续流向
+## 6. WorldCanon 边界
 
-```
-route=chat
-  → executive_runtime_core 直接 stream_chat_route → surface_reply_sse_generator
-  → SurfaceReplyRuntime 检查 surface chain，启用时走 surface_main_chain_sse_generator
+WorldCanon 的 SSOT 是 `host_brain/memory/canon_world_store.py:WorldCanonStore`，默认文件根为 `host_brain/canon/world`，并通过 ledger 同步 `world_canon_doc`。
 
-route=delegate
-  → 把任务交给 sub-agent（如 prefrontal / specific tribe agent）
-  → 返回时 surface_reply runtime 决定是否保留 sub-agent 结果给用户
+WorldCanon 进入 prompt 的主要路径是：
 
-route=skill
-  → 调 tool_broker.execute_skill（host_brain/tools / skills/）
-  → commit 时附带 skill 结果
-
-route=plan
-  → 生成多步计划 → 分别执行 → 汇总 commit
+```text
+host_brain/core/prompt_context.py:build_world_canon_slot(...)
+  -> WorldCanonStore.scan_documents()
+  -> prompt_context["authoritative"]
+  -> kind="world_canon"
+  -> evidence_level="CANON_REFERENCE_ONLY"
+  -> unsafe_as_fact=True
+  -> reference_mode="citation_only"
 ```
 
-## 5. `surface_reply` 输出流
+含义：
+- WorldCanon 是世界设定 / 典籍引用的权威槽位。
+- WorldCanon 不能证明某件事已经执行、已经保存、已经被用户确认。
+- prompt validation 会拒绝 world canon 内容中混入执行事实。
+- WorldCanon 不应被写成 surface recall route，也不应和不存在的 StyleCanon 一起写入 StateArbiter 优先级。
 
+当前源码没有 `canon_style_store.py`，也没有 `host_brain/canon/style/`。StyleCanon 不是当前 recall route。
+
+## 7. SurfaceMainChain -> ReplyEnvelope -> 后效
+
+当前 normal chat 文本的最终作者是 SurfaceMainChain。Surface 生成后由 `ReplyEnvelope` 包装成 COMMIT：
+
+```text
+surface_main_chain_adapter
+  -> run_surface_main_chain_for_chat_input(...)
+  -> SurfaceRuntimeResult
+  -> ReplyEnvelope.final_reply(
+       source="surface_main_chain",
+       audit={
+         request_id,
+         observation_codes,
+         natsume_emotion_tag,
+         user_emotion_tag,
+         vts_expression_id,
+         emotion_confidence
+       }
+     )
+  -> COMMIT SSE
 ```
-surface_reply_sse_generator(agent_input: SurfaceReplyInput)
-  ↓
-检查 surface_main_chain_required(agent_input, sub_agent_ctx)
-检查 surface_main_chain_enabled(agent_input, sub_agent_ctx)
-  ↓
-启用 → 委托 surface_main_chain_sse_generator(agent_input, ...)
-        ↓
-        build_surface_main_chain_input_from_chat_input
-        run_surface_main_chain_for_chat_input
-          → SurfaceRuntime.run(...)
-          → SurfaceRuntimeResult
-        ↓
-        _apply_surface_memory_output_guard（按 readiness、deep review、misc guard 调整）
-        _sanitize_main_chain_meta_reply（去掉元语言）
-        ↓
-        通过 reply_envelope 包装成 COMMIT SSE
-        ↓
-        surface_reply_postprocessor.schedule_async_post_process
-          - log_input_completed（input ack 写入）
-          - scrub_pii_egress（出站 PII 净化）
-          - trigger_tts_after_commit（按 broca 参数）
-          - _write_surface_main_chain_memory_sync（life memory 回写）
 
-未启用（fallback / sub-agent bypass）
-```
+COMMIT 之后才调度副作用：
 
-SSE 三阶段：
-
-| 阶段 | 出现时机 | 是否阻塞流 |
+| 后效 | 代码路径 | 事实边界 |
 |---|---|---|
-| `PRESENCE` | THINKING / GOV_APPROVED / SCENE / RUNTIME_HINT | 否（轻量 ping） |
-| `COMMIT` | 文本完成、reply 决策 | 是（commit 必须完成） |
-| `POST` | commit 之后异步副作用 | 否（不影响用户接收） |
+| memory 写入 | `agent_runtime_shared._async_post_process(...)` -> `_write_surface_main_chain_memory_sync` | 写入 LifeMemoryStore / SQLiteLedger，属于事实写回 |
+| emotion flow | Surface audit 中的 `natsume_emotion_tag` / `user_emotion_tag` -> `_surface_emotion_context(...)` -> TTS/VTS/表现层 | 情感上下文参与表现和后续调制，不替代记忆事实 |
+| bond flow | `bond_summary` 进入 surface affect control 与 `_async_post_process(...)`，Edge emotion event 可触发 `post_process_bond_update` | bond 更新需经对应引擎/ledger，不由外显面裁决 |
+| life aftereffect | `_schedule_surface_life_aftereffect(...)` -> `host_brain.runtime.life_continuity.record_dialogue_aftereffect(...)` | 对话后效异步记录，不阻塞 COMMIT |
+| TTS / Desktop Pet / MateEngine | postprocessor、`edge_rpc_client`、`mateengine.py` | 外显执行，不是事实真源 |
+| observability | audit / retrieval / latency trace 写入 | 可观测记录，不生成用户事实 |
 
-## 6. `/v1/host/input` 回流链
+## 8. `/v1/host/input` 回流链
 
-### 6.1 输入源
+输入源：
+- Gateway 把平台消息归一化后 POST 到 `/v1/host/input`。
+- Edge ASR 把识别结果作为 input 上报。
+- 自动化或 proactive 任务可通过 input 路径触发 chat-bound 或 perception-only 流程。
 
-- 网关：`edge_client/gateway/router.py` 把平台消息归一化后 POST 到 `/v1/host/input`
-- ASR：Edge 的 `runtime/voice_pipeline.py` 把识别结果作为 input 上报
-- 自动化任务：scheduler 触发的"主动发声"也走 input 路径（`emotional_proactive` 等）
-
-### 6.2 当前回流流程
-
-```
+```text
 POST /v1/host/input
-  ↓
-input_routes.handle_input_request
-  ↓
-input_service_quality（去重、长度门槛）
-input_service_log（写 ledger）
-input_service_ack（生成 ack）
-input_service_gateway（gateway 特定逻辑：thread resolve、media merge）
-  ↓
-分支：
-  - chat-bound → 调用 cortex_orchestrator_sse_generator（同 /v1/chat 主链）
-  - perception-only → 写 perception episode 入 life_memory，不触发 chat
-  - 系统事件 → 派发 tribe_event
-  ↓
-ack response（含 input_id / decision / queue_state）
+  -> input_routes.handle_input_request
+  -> input_service_quality / input_service_log / input_service_ack / input_service_gateway
+  -> chat-bound: cortex_orchestrator_sse_generator(...)
+  -> perception-only: 写 perception episode 入 life memory
+  -> system event: 派发 tribe_event
+  -> ack response
 ```
 
-## 7. Host ↔ Edge 调用链
+`/v1/host/input` 可以落 ack、输入日志、感知 episode；当它触发 chat-bound 路径时，最终输出仍回到 SurfaceMainChain / ReplyEnvelope 语义。
 
-### 7.1 Host → Edge（host_brain/channels/edge_rpc_client.py）
+## 9. Host <-> Edge 与外显面
 
-主要能力：
+Host -> Edge 主要能力：
 
 - `/v1/edge/health`
 - `/v1/edge/avatar_state`
-- `/v1/edge/speak`（TTS）
-- `/v1/edge/barge_in`（打断）
-- `/v1/edge/asr`（ASR 控制）
-- `/v1/edge/vts`（虚拟形象 / avatar behavior）
-- `/v1/edge/desktop_pet`（Electron 桌宠转发）
-- `/v1/edge/fallback/*`
+- `/v1/edge/speak`
+- `/v1/edge/barge_in`
+- `/v1/edge/asr`
+- `/v1/edge/vts`
+- `/v1/edge/desktop_pet`
 - `/v1/edge/screenshot`
-- `/v1/edge/automate`（桌面自动化）
+- `/v1/edge/automate`
 - `/v1/edge/visual_locate`
-- `/v1/edge/proactive_push` / `proactive_messages`
-- `/v1/edge/wx/*`（微信查询能力）
+- `/v1/edge/proactive_push`
+- `/v1/edge/wx/*`
 
-### 7.2 Edge → Host
+Edge -> Host：
 
-- 文本 / 语音 / 多媒体 → Gateway 归一化 → `POST /v1/host/input`
-- 状态 / 事件 → `POST /v1/edge/events`
+- 文本 / 语音 / 多媒体 -> Gateway 归一化 -> `/v1/host/input`
+- 状态 / 事件 -> `/v1/edge/events`
 
-### 7.3 `POST /v1/edge/events`
+`POST /v1/edge/events` 接收 EdgeEventsRequest，写审计/遥测，必要时派发 tribe event、驱动 VTS emotion 或触发 bond 更新任务。它仍然是回流与遥测入口，不是「用户事实已成立」的裁决源。
 
-入口：`host_brain/app/edge_event_routes.handle_edge_events_route`
+Desktop Pet 与 MateEngine：
 
-- 接收 EdgeEventsRequest
-- 写 ledger（audit）
-- 必要时 emit tribe_event（唤起 ANS / inner_world / language_system）
-- 返回 EdgeEventsResponse（ack 状态 + 处理摘要）
-
-### 7.4 Desktop Pet / MateEngine 外显流
-
-Desktop Pet 直连路径：
-
-```
-Host 表现层副作用
-  ↓
-host_brain/channels/edge_rpc_client.post_desktop_pet(...)
-  ↓ HOST_DESKTOP_PET_DIRECT_ENABLED=true（默认）
-desktop_pet/main.cjs
-  - GET /health
-  - POST /action
-  ↓
-Electron 透明窗口 / Live2D renderer
+```text
+Host postprocessor / lifecycle cue
+  -> edge_rpc_client.post_desktop_pet(...) 或 mateengine.py
+  -> local Desktop Pet / MateEngine bridge
+  -> 动作、气泡、口型、姿态、状态展示
 ```
 
-Desktop Pet Edge 转发路径：
+这条链路只承载外显执行与状态展示，不提供 memory / policy / audit 的事实结论。
 
-```
-Host
-  ↓ HOST_DESKTOP_PET_DIRECT_ENABLED=false
-Edge RPC POST /v1/edge/desktop_pet
-  ↓ EDGE_DESKTOP_PET_BASE_URL（默认 http://127.0.0.1:18788）
-desktop_pet/main.cjs /action
-```
+## 10. Unified Message Gateway 闭环
 
-MateEngine 路径：
-
-```
-/v1/chat lifecycle cue 或 /v1/mateengine/* Host API
-  ↓
-host_brain/channels/mateengine.py
-  ├─ UDP signal: 127.0.0.1:32145
-  └─ HTTP bridge: http://127.0.0.1:18770
-  ↓
-MateEngine 本地桌面表现层
-```
-
-这两条链路都属于外显执行面；它们可以展示状态、口型、气泡、动作和姿态，但不成为 memory / policy / audit 的事实来源。
-
-## 8. Unified Message Gateway 闭环
-
-```
+```text
 External Platform
-  ↓ webhook / poll / 长连接
-edge_client/gateway/adapters/<platform>.py
-  - wechat_adapter / qq_adapter / feishu_adapter / wecom_adapter / telegram_adapter / line_adapter
-  ↓ raw_event
-edge_client/gateway/router.py
-  - 平台路由 + thread resolve
-  ↓ 平台格式
-edge_client/gateway/normalizer.py
-  - 归一化为统一 input contract（含 attachment、reply_target、input_source=GATEWAY）
-  ↓
-edge_client/channels/input_reporter.py / channels/base.py
-  - POST 到 host_brain /v1/host/input
-  ↓
-host_brain.input_routes → cortex_orchestrator → ... → COMMIT
-  ↓ reply
-edge_client/gateway/humanize_sender.py
-  - 拆分长文本为人类节奏的多条
-  ↓
-adapter.send 出站 → 平台
+  -> edge_client/gateway/adapters/<platform>.py
+  -> raw_event
+  -> edge_client/gateway/router.py
+  -> edge_client/gateway/normalizer.py
+  -> edge_client/channels/input_reporter.py
+  -> host_brain /v1/host/input
+  -> cortex_orchestrator / SurfaceMainChain
+  -> ReplyEnvelope COMMIT
+  -> edge_client/gateway/humanize_sender.py
+  -> adapter.send
 ```
 
-新增：
+Gateway 的职责是平台协议适配、thread resolve、附件归一化、输入上报和出站节奏处理；它不拥有记忆事实或最终事实裁决。
 
-- `gateway/media/video_handler.py`：视频附件处理
-- `gateway/models.py`：扩展的 gateway 数据模型
-- gateway 多模态附件 pipeline（`feat: add gateway multimodal attachment pipeline`）
-- 队列重试持久化（`Persist gateway input retry queue`）
+## 11. Observability 数据流
 
-## 9. 观测与前端数据流
+Host Main 与 Observability 是两个独立 ASGI app。Obs Backend 读取 ledger、运行时 metrics、聚合查询与 UI API：
 
-### 9.1 独立观测后端
-
-```
+```text
 host_brain/obs_main.py
-  ↓ 加载 host_brain.app.obs_fastapi_app:app
-host_brain/app/obs_fastapi_app.py
-  - lifespan：预热 digital_life_overview / insights_summary / life_body 缓存
-  - include_router：
-      web_ui_router            (/api/ui/*)
-      obs_router               (/obs/*)
-      obs_health_router        (/obs/* health 子集)
-      obs_trace_router         (/obs/trace/*)
-      obs_summary_router       (/obs/* summary)
-      obs_life_body_router     (/obs/life-body/*)
-      obs_digital_life_soak_router (/obs/digital-life-soak/*)
-  - 中间件：CORS + GZip
+  -> host_brain.app.obs_fastapi_app:app
+  -> /api/ui/* / /obs/*
+  -> SQLiteLedger / observability queries / runtime metrics
 ```
 
-数据来源：
+Monitor UI 可展示 sessions、trace、metrics、memory、bond、gateway、skills、automation、avatar state 等视图。Avatar 行为按钮最终仍走 Edge / VTS 控制，是高层行为控制与观测，不直接写事实源。
 
-- `audit/sqlite_ledger`（trace、metrics、incidents）
-- `host_brain/observability/queries`（聚合查询）
-- 实时进程内 metrics（按需拉取 Host Main 进程 / 自身缓存）
-
-### 9.2 Monitor UI 页面组（30+ 页）
-
-```
-host_brain/app/monitor_ui/src/App.jsx
-  ↓ React Router + lazy loading
-routeLoaders.js（30+ lazy import）
-  ↓
-Layout.jsx（4 大导航 + 32 个菜单项）
-  ↓
-pages/<Page>.jsx + components/<topic>/*.jsx
-  ↓
-queries/<topic>Queries.js（统一封装 API 调用 + 缓存）
-  ↓
-Obs Backend /api/ui/* + /obs/*
-```
-
-页面分组（与 Layout 一致）：
-
-- 数字生命体：`DigitalLifeOverview / LifeTimelinePage / PathologyCenterPage / EmotionDashboard / Bond / MemoryBrowser / RuntimeMode / InnerWorldDashboard / RenderPolicyDashboard / SelfModelDashboard`
-- 运营：`PromptConfig / PersonaPromptOps / SystemConfig / Canon`
-- 器官级观测：`Overview / Sessions / Trace / CodexBioOpsObservability / Metrics / Insights / ChatDebug / Alerts / LogStream`
-- 外周执行：`Gateway / SkillsHub / Tools / Automation / AgentLoop`
-
-Avatar 状态观测：
-
-```
-DigitalLifeOverview
-  ↓ useAvatarStateQuery / AvatarStateCard
-obs.js fetchAvatarState()
-  ↓
-GET /obs/avatar/state
-  ↓ host_brain.channels.edge_rpc_client.post_vts(action="status")
-POST /v1/edge/vts
-  ↓
-edge_client.runtime.avatar_behavior.build_avatar_behavior_state
-```
-
-Monitor UI 的 avatar 行为按钮走 `POST /obs/avatar/behavior` → `edge_rpc_client.post_avatar_behavior()` → `POST /v1/edge/vts`，属于安全的高层行为控制，不直接写 VTS 热键或 MateEngine 事实状态。
-
-## 10. 当前已废弃的旧口径（不要再按这些读）
+## 12. 当前已废弃的旧口径
 
 | 旧描述 | 当前事实 |
 |---|---|
-| Host Main 入口是 `host_brain/app/fastapi_app.py` | 入口是 `host_brain.app.asgi:app`，由 `app_factory + router_registry` 装配 |
-| Host Main 同时承担观测后端 | Host Main 与 Observability 是两个独立进程；Host Main 仅保留兼容 `/obs/*` |
-| `prompt_builder` 是 normal chat 主作者 | normal chat 主作者是 `SurfaceMainChain`；prompt_builder 仅供旧链路或非 chat 任务 |
-| Agentic RAG pipeline 提供 chat 召回 | Agentic RAG stack 已从 `retrieval/__init__.py` 移除；当前走 `RecallFusionServiceContract` + `surface_memory_recall` |
-| Tribe family 通过灰度开关启用 | 灰度开关已全部删除；23 个 family 全部直接生效 |
-| `chat_context_builder.py` 提供 chat 上下文 | 该文件已删除；上下文构建拆到 `surface_main_chain.py` + `surface_reply_preprocessor.py` + `host_brain/app/context/` |
-| `code_agent_handler.py` 是 chat 路径之一 | 已删除；不再被 chat 路径依赖 |
-| `executive_runtime` 是单文件 1 万行巨石 | 已拆为 `executive_router.py`（薄壳） + `executive_runtime.py`（路由薄层） + `executive_runtime_core.py`（核心决策） |
-| Surface 主链是实验链 | Surface 主链已是 normal chat 默认作者（`Make surface main chain default for text chat`） |
-| 旧 `surface_renderer` 路径仍然存在 | 已退役（`remove retired surface renderer path`） |
-| `style_canon` / `persona_utterance` 召回路由 | 已删除 |
+| Agentic RAG stack 提供 chat 召回 | 当前 surface recall 走 `_run_retrieval` + `RecallFusionServiceContract`；不要写 `RetrievalOrchestrator` / `RetrievalPipeline` / `QueryPlanner` / `AgenticRetrievalLoop` |
+| `world_canon` 是当前 surface recall route | WorldCanon 主要通过 `build_world_canon_slot` 进入 authoritative slot，不是当前 surface route |
+| `StyleCanon` / `canon_style_store.py` 是召回源 | 当前源码没有 `canon_style_store.py` 和 `host_brain/canon/style/` |
+| vector / semantic 是记忆真源 | SQLite / LifeMemoryStore 是 SSOT；vector / semantic 是衍生层 |
+| Edge 外显状态可证明事实 | Edge 只上报遥测/执行结果；事实写回由 ledger / LifeMemoryStore / canon store 边界裁决 |
+| Surface 主链是实验链 | SurfaceMainChain 是 normal chat 默认最终作者 |
+| prompt_builder 是 normal chat 主作者 | normal chat 最终作者是 SurfaceMainChain |
+| Host Main 同时承担 Obs Backend | Host Main 与 Observability 是独立 ASGI app |
 
-## 11. 关键不变量
+## 13. 关键不变量
 
 1. normal chat 文本最终作者只能是 `SurfaceMainChain`。
-2. 旧链能力只能注入 facts/state/memory/perception，不能写最终回复。
-3. 媒体场景的最终作者是 `reply_modality_router`。
-4. SSE 三阶段 `PRESENCE → COMMIT → POST` 不可颠倒。
-5. immune gate（`chat_immune_gate`）必须在 chat handler 之前执行。
-6. life memory 是当前记忆 SSOT；vector / semantic 是衍生层。
-7. Host Main 与 Observability 是两个独立 ASGI app。
-8. Desktop Pet / MateEngine / VTS / VRM 只承载外显执行与状态观测，不提供记忆、人格策略或审计事实。
-8. 23 个 tribe family 没有灰度开关，全部直接生效。
+2. 当前记忆 SSOT 是 `LifeMemoryStore` + SQLiteLedger；vector / semantic / episodic_vector 是衍生层。
+3. 当前 surface recall routes 是 `life_memory_collection`、`life_episode`、`semantic_memory`、`episodic_vector`、`sqlite_ledger`、`neo4j_bond`。
+4. WorldCanon 是 `WorldCanonStore` 的 authoritative slot 输入，不是当前 surface recall route；`unsafe_as_fact=True`、`reference_mode="citation_only"`。
+5. 不存在 StyleCanon 召回 route 或 `canon_style_store.py` 事实源。
+6. ReplyEnvelope COMMIT 完成后，memory 写入、emotion/bond flow、life aftereffect、TTS/外显执行再异步落地。
+7. Edge 外显面只承载遥测、状态和执行结果，不是事实裁决源。
+8. SSE 三阶段 `PRESENCE -> COMMIT -> POST` 不可颠倒。

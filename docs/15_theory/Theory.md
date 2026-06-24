@@ -2,8 +2,8 @@
 标题：理论文档（Theory：架构原理与理论框架）
 
 # Natsume Ai 理论文档（Theory Paper）
-版本：v1.3.0
-维护日期：2026-06-04
+版本：v1.4.0
+维护日期：2026-06-23
 适用：本地优先部署（Host_Brain + Edge Client + Desktop Pet / MateEngine / VTS / VRM + Avatar Behavior/State + 可选云端/多代理扩展能力）
 定位：解释“为什么这样设计、理论上要保证什么、怎样判定系统没有跑偏”，用于指导实现与评审。
 
@@ -36,7 +36,7 @@
 
 ### 2.1 角色分层的理论意义
 
-1）模型/Agent 候选层（intent_draft / planning draft / Surface Main Chain）= 解释与表达候选生成者：负责把输入变成可治理草案与候选表达。
+1）模型/Agent 候选层（intent_draft / planning draft / SurfaceMainChain）= 解释与表达候选生成者：负责把输入变成可治理草案与候选表达；SurfaceMainChain 是最终表达生成链，但仍受 necessary_facts、must_not_do 与 ReplyEnvelope 约束。
 2）Host = 仲裁者与最终收口者：负责判断“合法/不合法、可执行/不可执行”，并运行 Orchestrator/Governor、ReplyEnvelope 与审计链。
 3）Skills / Tools / MCP / Edge 能力 = 能力载体：只做受控执行或观测，不做裁决。
 4）Desktop Pet / MateEngine / VTS / VRM / Avatar Behavior/State = 外显或观测面：只呈现或回传 Host 已允许的展示信号，不反向定义事实。
@@ -87,38 +87,40 @@
 
 - 有 Intent（请求对象）  
 - 有 Governor 决策（APPROVE/REJECT + reason_code + rule_trace）  
-- 若执行：有 Skill / Tool / 通道执行记录（skill_exec_log / channel_io_log / avatar_action_log 或当前等价审计记录 + 结果摘要 + 必要票据引用）
-- 若涉及隔离、外发或可逆资产：有 airlock_log / manifest_ref / undo_token 或当前等价引用
+- 若执行：有 skill_exec / tool 执行记录、结果摘要与必要票据引用
+- 若写入记忆或长期事实：有 life_episode / life_evidence 与 memory_ops 证据
+- 若变更权威内容集合：有 canon_change 证据
+- 若涉及隔离、外发或可逆资产：有 airlock、manifest_ref、undo_token 或当前等价引用
 
 因此“是否执行/是否保存/是否确认”只能由审计链回答。
 
 ### 4.2 审计链的工程等价物
 审计链本质上是一条可连接的因果链：  
-user_input → intent_log → governor_log → token_ref（如需）→ skill_exec_log / channel_io_log → artifact_refs
+user_input → intent / governor → token_ref（如需）→ skill_exec / tool result → life_evidence / memory_ops / canon_change / artifact_refs
 
 系统对外的一切“完成性表述”必须可追溯到该链。  
 这是避免“语言先行、事实补写”的唯一可靠手段。
 
 ---
 
-## 5. 两套层级：Truth Hierarchy 与 Style Hierarchy
+## 5. 两套层级：Truth Hierarchy 与 Expression Hierarchy
 
 该体系是本架构的关键修正：把“现实事实”与“说话方式”彻底分离。
 
 ### 5.1 Truth Hierarchy（真相层级）
 用途：决定“什么可作为裁决依据、什么可当作现实陈述”。  
-典型排序：宪法/规则 > 审计链事实 > 可观测硬状态 > Host 单写 Bond 关系状态 > Episodic 召回线索。
+典型排序：宪法/规则 > 审计链事实 > 可观测硬状态 > Host 单写 Bond 关系状态 > World Canon > Episodic 召回线索。
 
 理论依据：  
 - 需要一个可比较的“证据强度”序；  
 - 裁决只依赖高证据强度来源，避免向量相似性（Episodic）误召回导致越权。  
 
-### 5.2 Style Hierarchy（风格层级）
+### 5.2 Expression Hierarchy（表达层级）
 用途：决定“应该怎么说话、怎么反应像她”。  
-排序：叙事约束（禁止伪执行）> Style Canon（风格骨架）> Bond Summary（距离感调制）> Episodic 摘要（素材）。  
+排序：叙事约束（禁止伪执行）> Soul/Persona 表达锚 > Bond Summary（距离感调制）> Episodic 摘要（素材）。
 
 理论依据：  
-- Style Canon 是“语言肌肉记忆库”，不能产出新事实；  
+- Soul 是语言与人格锚，只能提供口吻、称呼、节奏与关系表达材料，不能产出新事实；
 - 风格必须被真相约束：风格不可覆盖事实，且不可推导授权。  
 
 ### 5.3 冲突处理的形式化规则
@@ -169,7 +171,7 @@ undo_token：证明“可逆操作已产出可回放回滚材料”。
 
 ---
 
-## 8. 记忆理论：Episodic、Style Canon 与 World Canon 的分工
+## 8. 记忆理论：Episodic、Soul 与 World Canon 的分工
 
 ### 8.1 Episodic（经历记忆）的目的
 Episodic 提供“可检索的经历线索”，让系统在对话中能引用“发生过的相似情境”。  
@@ -177,13 +179,13 @@ Episodic 提供“可检索的经历线索”，让系统在对话中能引用�
 
 关键约束：每条 Episodic 必须带 evidence_refs，否则不写入（防止幻觉固化）。
 
-### 8.2 Style Canon（风格骨架库）的目的
-Style Canon 不是剧情事实库，而是“表达范式库”：  
-- 口吻、句式、停顿、微反应模板  
-- 拒绝/安抚/追问的范式  
-- 风格禁令（禁止伪执行、禁止越权承诺、禁止 Canon 当事实）  
+### 8.2 Soul/Persona 表达锚的目的
+Soul/Persona 不是剧情事实库，也不是政策或审计模块，而是“语言与人格锚”：
+- 口吻、称呼、句式、停顿、微反应材料
+- 拒绝/安抚/追问的表达范式
+- 风格禁令（禁止伪执行、禁止越权承诺、禁止把设定当事实）
 
-Canon 必须主权归 Host，并以 Evolution/人工白名单慢变，避免对话注入污染。  
+Soul/Persona 材料必须经 Host 收口后进入 SurfaceMainChain，并受 necessary_facts、must_not_do 与 ReplyEnvelope 约束。
 其效力仅限“怎么说”，不得提供“发生了什么”。
 
 ### 8.3 World Canon（世界正典）的目的
@@ -199,11 +201,11 @@ World Canon 的效力是“一致性引用与冲突裁决”，不是执行事�
 ### 8.4 “现实关联度”提升的理论路径
 现实关联来自：审计链事实 + 近期对话 + Episodic（带证据）  
 一致性来自：World Canon（权威内容锚点）  
-表达一致来自：Style Canon（风格锚点）  
+表达一致来自：Soul/Persona（语言与人格锚点）
 
 因此“更像活着”不是“多背剧情”，而是：  
 - 更严格的证据链写入门禁；  
-- 更清晰的权威内容集合（World Canon）与表达集合（Style Canon）分离；  
+- 更清晰的权威内容集合（World Canon）与表达材料（Soul/Persona）分离；
 - 更一致的拒绝与执行叙事绑定（审计链优先）。  
 
 ---
@@ -245,7 +247,7 @@ LLM 自发漂移不可控且不可审计。
 
 ---
 
-## 11. 分域存储选型的理论解释（Ledger / Bond / Episodic / Style Canon / World Canon / Vault）
+## 11. 分域存储选型的理论解释（Ledger / Bond / Episodic / Soul / World Canon / Vault）
 
 ### 11.1 SQLite：硬账本与审计索引枢纽（Ledger SSOT）
 优势：本地优先、事务、结构化、易回放、依赖最小。  
@@ -271,10 +273,10 @@ LLM 自发漂移不可控且不可审计。
 为什么需要向量：人类回忆是相似触发而非精确键值检索；  
 强约束：必须以 evidence_refs 绑定审计；无证据不写入；生命周期（衰减/合并/删除）必须可审计。
 
-### 11.4 Style Canon：风格资产主权存储
-用途：稳定“怎么说”，包括模板、拒绝范式、语气策略与禁令。  
+### 11.4 Soul/Persona：表达锚与风格材料
+用途：稳定“怎么说”，包括称呼、语气、拒绝范式、关系表达与禁令。
 
-要求：版本化、可迁移、可审计；只影响口吻，不提供事实；必须与事实证据字段隔离注入。
+要求：只能作为 tone-only 表达材料进入 Host 收口链路；不提供事实、政策、长期记忆或执行证据；必须与事实证据字段隔离注入。
 
 ### 11.5 World Canon：最小权威内容集合主权存储
 用途：稳定“说的内容是否一致”，包括系统术语、架构设定、关键不变量、必要世界观条目。  
@@ -283,14 +285,14 @@ LLM 自发漂移不可控且不可审计。
 - 版本化与可审计更新（白名单/Evolution 提案）  
 - 可引用但非执行事实  
 - 与 Episodic 分离：Episodic 是线索，World Canon 是权威条目  
-- 与 Style Canon 分离：Style 是表达，World 是内容
+- 与 Soul/Persona 分离：Soul 是表达锚，World 是内容一致性锚
 
 ### 11.6 Artifact Vault：证据与可逆材料仓
 用途：保存脱敏报告、必要截图资产、回滚材料等证据资产，支撑 LSP、可撤销与审计回放。
 
 要求：manifest 可追溯、GC 可审计且不破坏 undo 窗口。
 
-结论：分域存储不是“技术炫技”，而是把“事实/关系/线索/表达/权威内容/证据材料”拆开治理，避免任一库越权成为“万能真相”。
+结论：分域存储不是“技术炫技”，而是把“事实/关系/线索/表达锚/权威内容/证据材料”拆开治理，避免任一库越权成为“万能真相”。
 
 ---
 
@@ -309,8 +311,8 @@ LLM 自发漂移不可控且不可审计。
 
 ## 13. 典型反模式（Anti-patterns）清单
 
-1）让解释器自行做检索决策（RAG 主权丢失）。  
-2）把 Canon 当事实库（风格覆盖事实）。  
+1）让解释器自行做事实召回、检索取舍或证据裁决。
+2）把表达设定、Soul 或 World Canon 当执行事实库。
 3）把 Episodic 当事实依据（相似性覆盖证据）。  
 4）用对话确认代替 confirm_token（口头授权漏洞）。  
 5）多处写 Bond 或 snapshot（双写破坏 SSOT）。  
@@ -333,11 +335,11 @@ LLM 自发漂移不可控且不可审计。
 - 意识主权：终审权属于 Host 规则与审计链。  
 - Intent：语言→代码的唯一结构化边界对象。  
 - Governor：裁决器，输出 APPROVE/REJECT + reason_code + rule_trace。  
-- Surface Main Chain：Host 内部最终表达生成链，产出候选表达但不越过 Governor 或事实门禁。
+- SurfaceMainChain：Host 内部最终表达生成链，受 necessary_facts、must_not_do 与 ReplyEnvelope 约束，产出候选表达但不越过 Governor 或事实门禁。
 - ReplyEnvelope：用户可见输出的收口契约，只有 final_reply 可发送、持久化或进入对应缓存。
 - approval/confirm/undo token：执行许可、不可逆确认、可逆回滚票据。  
 - Truth Hierarchy：事实证据强度序。  
-- Style Hierarchy：风格约束序。  
+- Expression Hierarchy：表达约束序。
 - Bond：Host 单写的关系向量/关系事件域。
 - Episodic：经历索引（向量召回，带证据）。  
-- Style Canon：表达范式库（tone-only，不产事实）。
+- Soul：语言与人格表达锚（tone-only，不产事实）。

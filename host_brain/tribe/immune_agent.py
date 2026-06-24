@@ -1132,10 +1132,53 @@ class ImmuneAgent:
             bus.subscribe("BOND_STAGE_CHANGED", self._on_bond_stage_changed_immune)
             # FIX-4.1：订阅免疫威胁检测事件，同步到 GovernorRulesCache（L3 → L2 通道）
             bus.subscribe("IMMUNE_THREAT_DETECTED", self._on_immune_threat_detected)
+            # Pentest finding events — log confirmed findings for threat awareness
+            bus.subscribe("pentest.finding.confirmed", self._on_pentest_finding)
+            bus.subscribe("pentest.run.completed", self._on_pentest_run_completed)
         except Exception as exc:
             import logging  # noqa: PLC0415
             logging.getLogger("Natsume.tribe.immune_agent").warning(
                 "ImmuneAgent 订阅注册失败（降级）: %s", exc
+            )
+
+    async def _on_pentest_finding(self, event: Any) -> None:
+        """处理 pentest.finding.confirmed 事件 — 记录已确认的渗透发现用于威胁感知。"""
+        try:
+            import logging  # noqa: PLC0415
+            _log = logging.getLogger("Natsume.tribe.immune_agent")
+            payload = dict(getattr(event, "payload", None) or {})
+            _log.warning(
+                "Pentest finding confirmed: type=%s severity=%s target=%s",
+                payload.get("finding_type", "unknown"),
+                payload.get("severity", "unknown"),
+                payload.get("target", "unknown"),
+            )
+            # 记录到免疫计数器供后续分析
+            with self._lock:
+                self._counters["pentest_findings_confirmed"] = self._counters.get("pentest_findings_confirmed", 0) + 1
+        except Exception as exc:
+            import logging  # noqa: PLC0415
+            logging.getLogger("Natsume.tribe.immune_agent").debug(
+                "ImmuneAgent._on_pentest_finding 异常（降级）: %s", exc,
+            )
+
+    async def _on_pentest_run_completed(self, event: Any) -> None:
+        """处理 pentest.run.completed 事件 — 记录渗透运行完成摘要。"""
+        try:
+            import logging  # noqa: PLC0415
+            _log = logging.getLogger("Natsume.tribe.immune_agent")
+            payload = dict(getattr(event, "payload", None) or {})
+            _log.info(
+                "Pentest run completed: engagement=%s success=%s steps=%s findings=%s",
+                payload.get("engagement_id", "?"),
+                payload.get("success", False),
+                payload.get("total_steps", 0),
+                payload.get("confirmed_findings", 0),
+            )
+        except Exception as exc:
+            import logging  # noqa: PLC0415
+            logging.getLogger("Natsume.tribe.immune_agent").debug(
+                "ImmuneAgent._on_pentest_run_completed 异常（降级）: %s", exc,
             )
 
     async def _on_immune_threat_detected(self, event: Any) -> None:

@@ -1,6 +1,7 @@
 import React from 'react'
 import { RefreshCw } from 'lucide-react'
 import TimeWindowSelect from '../../../shared/ui/TimeWindowSelect.jsx'
+import { LIFE_COPY } from '../../../shared/content/terminology.js'
 
 const WINDOW_OPTIONS = [
   { label: '1h', value: 60 },
@@ -19,8 +20,9 @@ export default function DigitalLifeOverviewHeader({
   return (
     <div className="flex flex-wrap items-center justify-between gap-3">
       <div>
-        <h1 className="text-xl font-semibold text-gray-900">数字生命体总览</h1>
-        <p className="text-sm text-gray-500">以数字生命体为主体，统一呈现关系、情绪、记忆、策略和器官稳态。</p>
+        <div className="text-xs font-semibold uppercase tracking-wide text-primary/75">{LIFE_COPY.cockpitEyebrow}</div>
+        <h1 className="mt-1 text-xl font-semibold text-gray-900">{LIFE_COPY.cockpitTitle}</h1>
+        <p className="text-sm text-gray-500">{LIFE_COPY.cockpitSubtitle}</p>
       </div>
       <div className="flex items-center gap-2">
         <TimeWindowSelect value={windowMinutes} onChange={onWindowMinutesChange} options={WINDOW_OPTIONS} />

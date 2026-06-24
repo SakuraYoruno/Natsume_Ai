@@ -17,6 +17,7 @@ export default function SessionsFilterSection({
           <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
           <input
             className="w-full rounded-xl border border-gray-200 py-2 pl-9 pr-3 text-sm text-gray-700 outline-none transition focus:border-primary focus:ring-2 focus:ring-primary-100"
+            aria-label="搜索会话"
             placeholder="搜索 request_id、session_id 或输入摘要"
             value={keyword}
             onChange={(event) => onKeywordChange(event.target.value)}
@@ -28,6 +29,7 @@ export default function SessionsFilterSection({
 
         <select
           className="rounded-xl border border-gray-200 px-3 py-2 text-sm text-gray-700 outline-none transition focus:border-primary focus:ring-2 focus:ring-primary-100"
+          aria-label="会话状态筛选"
           value={status}
           onChange={(event) => onStatusChange(event.target.value)}
         >

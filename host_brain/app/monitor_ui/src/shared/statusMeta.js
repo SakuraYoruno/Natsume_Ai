@@ -46,7 +46,9 @@ export const TOOL_SIDE_EFFECT_STYLES = Object.freeze({
 export const TOOL_AUTH_LEVEL_STYLES = Object.freeze({
   NONE: Object.freeze({ bg: 'bg-gray-100', text: 'text-gray-600', label: '无需确认' }),
   APPROVAL: Object.freeze({ bg: 'bg-yellow-100', text: 'text-yellow-700', label: '审批确认' }),
+  APPROVAL_REQUIRED: Object.freeze({ bg: 'bg-yellow-100', text: 'text-yellow-700', label: '审批确认' }),
   CONFIRM: Object.freeze({ bg: 'bg-red-100', text: 'text-red-700', label: '高风险确认' }),
+  CONFIRM_REQUIRED: Object.freeze({ bg: 'bg-red-100', text: 'text-red-700', label: '高风险确认' }),
 })
 
 export const SKILL_CLEARANCE_STYLES = Object.freeze({
@@ -85,11 +87,13 @@ export const AUTOMATION_IMMUNE_RUNTIME_STATUS_CLASSES = Object.freeze({
 
 export const PROMPT_SOURCE_BADGE_CLASSES = Object.freeze({
   override: 'bg-green-100 text-green-700 border-green-200',
+  prompt_spec: 'bg-blue-100 text-blue-700 border-blue-200',
   default: 'bg-gray-100 text-gray-600 border-gray-200',
 })
 
 export const PROMPT_SOURCE_LABELS = Object.freeze({
   override: '已覆盖',
+  prompt_spec: 'PromptSpec',
   default: '默认',
 })
 

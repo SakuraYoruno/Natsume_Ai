@@ -1,13 +1,13 @@
 受众：MASTER
 标题：host_brain/tools/ + memory/ 层接口契约（当前代码实况）
 
-版本：v3.1
-日期：2026-06-08
+版本：v3.2
+日期：2026-06-23
 归属：docs/15_theory/
 
 ---
 
-定位：本文描述当前代码里的 `host_brain/tools/` 与 `host_brain/memory/` 层。**memory 层的事实主源已迁移到 `LifeMemoryStore`，旧的 `episodic` 主作者地位已被取代**；tools 层已扩展 6 个新工具实现。请以本文与代码为准。
+定位：本文描述当前代码里的 `host_brain/tools/` 与 `host_brain/memory/` 层。**memory 层的记忆事实主源已迁移到 `LifeMemoryStore`，旧的 `episodic` 主作者地位已被取代**；执行与写入事实以 life_episode / life_evidence、intent / governor / skill_exec、memory_ops、canon_change 等可回放证据为准；tools 层已扩展 6 个新工具实现。请以本文与代码为准。
 
 ## 0. 代码证据入口
 
@@ -26,7 +26,7 @@ Memory 层：
 - `host_brain/memory/distillation.py`
 - `host_brain/memory/episodic.py`（兼容层）
 - `host_brain/memory/episodic_memory_graph.py`
-- `host_brain/memory/canon_world_store.py` / `canon_style_store.py` / `canon_helpers.py` / `canon_schemas.py` / `canon_sync.py` / `canon_vector_projection.py` / `canon_vector_auto_sync.py`
+- `host_brain/memory/canon_world_store.py` / `canon_helpers.py` / `canon_schemas.py` / `canon_sync.py` / `canon_vector_projection.py` / `canon_vector_auto_sync.py`
 - `host_brain/memory/chroma_client.py`
 - `host_brain/memory/context_compressor.py`
 - `host_brain/memory/consolidation_trigger.py`
@@ -54,14 +54,14 @@ caller (surface_reply / executive / skill 实现)
 
 ### 1.2 Memory 层
 
-memory 层当前是**多源记忆系统**，但**事实 SSOT 唯一**：
+memory 层当前是**多源记忆系统**，但**记忆事实 SSOT 唯一**：
 
 | 子系统 | 角色 | 文件 |
 |---|---|---|
-| `LifeMemoryStore` | **当前事实 SSOT**，所有 user / perception / scheduler / inner item 入库为 life episode + evidence | `life_memory.py` |
+| `LifeMemoryStore` | **当前记忆事实 SSOT**，所有 user / perception / scheduler / inner item 入库为 life episode + evidence；不替代执行审计链 | `life_memory.py` |
 | Long-term distillation | 长期蒸馏（防递归），把 episodic → semantic | `long_term_distiller.py` / `distillation.py` |
 | `episodic` | **兼容层**，仍被部分查询路径使用，不再是主作者 | `episodic.py` |
-| Canon 三件套 | character / style / world 的显式真源 | `canon_*.py` |
+| World Canon / Persona 边界 | World Canon 维护最小权威内容集合；Soul/Persona 是语言与人格锚；当前源码没有独立风格 canon 存储模块 | `canon_world_store.py` / `soul_runtime.py` |
 | Vector projection | Canon → Chroma 自动同步 | `canon_vector_projection.py` / `canon_vector_auto_sync.py` |
 | Context compressor | surface chain 之前的上下文压缩（不是最终作者） | `context_compressor.py` |
 | Consolidation trigger | 何时触发 sleep replay | `consolidation_trigger.py` |
@@ -225,16 +225,15 @@ ToolExecutionResult = ToolBroker.execute(
 - `episodic_memory_graph.py`：episodic 关联图
 - **不再是 chat 主链记忆主作者**；新写入应走 `LifeMemoryStore`
 
-### 3.6 Canon 三件套
+### 3.6 Canon 与 Soul/Persona 边界
 
 - `canon_world_store.py`：世界 canon 存储
-- `canon_style_store.py`：风格 canon 存储
 - `canon_helpers.py` / `canon_schemas.py`：辅助与 schema
 - `canon_sync.py`：canon 同步入口
 - `canon_vector_projection.py`：把 canon 投影到向量空间（给 retrieval 层 `world_canon` 路由用）
 - `canon_vector_auto_sync.py`：canon 写入时的自动向量同步
 
-Canon 的"显式真源"性质：人物 / 世界 / 风格 设定的最终可信来源是 canon，而不是 LifeMemoryStore。
+World Canon 的显式权威只限于系统术语、架构设定、关键不变量与必要世界观条目的内容一致性；它不是执行事实，不替代审计链。当前源码没有独立风格 canon 存储模块；Soul/Persona 提供语言与人格锚，也不是事实源、政策源、长期记忆源或审计源。
 
 ### 3.7 Chroma client
 
@@ -280,7 +279,7 @@ Canon 的"显式真源"性质：人物 / 世界 / 风格 设定的最终可信�
          │
 ┌────────▼────────────────────────────────────────────────┐
 │ memory/life_memory（life episode SSOT）                 │
-│ memory/canon_world_store / canon_style_store            │
+│ memory/canon_world_store（内容一致性）                  │
 │ memory/episodic（兼容层）                               │
 │ memory/chroma_client（向量库）                           │
 └─────────────────────────────────────────────────────────┘
@@ -300,11 +299,12 @@ Canon 的"显式真源"性质：人物 / 世界 / 风格 设定的最终可信�
 1. 任何 tool 调用必须经过 `ToolBroker.execute(...)`，不允许绕过 broker 直接调 handler。
 2. `ToolCatalog` 是 tool meta SSOT；任何注册必须经过 `ToolCatalog.register` 或 `bulk_register`。
 3. WRITE 类工具必须通过 `token_service.validate_execution_tokens` 校验。
-4. `LifeMemoryStore` 是当前**记忆事实 SSOT**；新写入应走 LifeMemory，不应直接写 episodic。
-5. Canon 三件套是"显式真源"，与 life memory 不冲突时 canon 优先。
+4. `LifeMemoryStore` 是当前**记忆事实 SSOT**；新写入应走 LifeMemory，不应直接写 episodic；ACK、任务状态与失败降级不得写入人格记忆。
+5. World Canon 是 Host 维护的最小权威内容集合，只负责内容一致性与冲突裁决；它不是执行事实，不替代 life_episode / life_evidence、intent / governor / skill_exec、memory_ops、canon_change 等可回放证据。
 6. 向量库（Chroma）只是衍生层；canon / life_memory 是源，向量是投影。
 7. `context_compressor` 不写最终回复，只产出压缩摘要。
 8. `episodic` 是兼容层，新代码不应将其作为主入口。
+9. Soul/Persona 与风格材料只影响表达，不提供事实、政策、长期记忆或裁决；SurfaceMainChain 仍必须受 necessary_facts、must_not_do 与 ReplyEnvelope 收口约束。
 
 ---
 
@@ -316,5 +316,7 @@ Canon 的"显式真源"性质：人物 / 世界 / 风格 设定的最终可信�
 | Tools 层只有 catalog + broker 骨架 | 已扩展为 catalog + broker + selector + mcp_adapter + 6 个具体 tool 实现 |
 | `MCPAdapter` 是薄映射器 | 已含 schema 收敛、安全策略、超时与重试 |
 | Tool 调用可以绕过 broker（用于性能） | 不允许；任何 tool 调用必走 broker |
-| Memory 层只有 distillation 与 canon | 已扩展为 life_memory + life_memory_query + long_term_distiller + canon 三件套 + chroma + context_compressor + consolidation_trigger + memory_worth_evaluator |
-| 向量库是事实 SSOT | 不是；向量是投影层，源是 life_memory + canon |
+| Memory 层只有 distillation 与 canon | 已扩展为 life_memory + life_memory_query + long_term_distiller + World Canon + chroma + context_compressor + consolidation_trigger + memory_worth_evaluator |
+| 向量库是事实 SSOT | 不是；向量是投影层，源是 life_memory 与 Host 维护的权威内容 |
+| 独立风格 canon 存储是活动主链或独立事实源 | 不是；当前源码没有独立风格 canon 存储模块，表达主链由 SurfaceMainChain 收口 |
+| World Canon 可声明执行事实 | 不是；World Canon 只解决内容一致性，执行与写入事实必须回到审计证据 |

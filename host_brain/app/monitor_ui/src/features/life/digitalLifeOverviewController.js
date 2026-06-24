@@ -8,6 +8,7 @@ import {
 import { postAvatarBehavior } from './api.js'
 import {
   buildDigitalLifeCapabilitySectionModel,
+  buildDigitalLifeCommandRailModel,
   buildDigitalLifeGatewaySectionModel,
   buildDigitalLifeHeroDescription,
   buildDigitalLifeHeroMetaItems,
@@ -243,6 +244,15 @@ export function useDigitalLifeOverviewController() {
   })
   const heroDescription = buildDigitalLifeHeroDescription({ runtimeSnapshot, lifeBodyModel, hasRuntimeSnapshot })
   const heroMetaItems = buildDigitalLifeHeroMetaItems({ modeMeta, lifeBodyModel, replyPosture })
+  const commandRailModel = buildDigitalLifeCommandRailModel({
+    error,
+    refreshWarning,
+    runtimeError,
+    hasRuntimeSnapshot,
+    lifeBodyModel,
+    overviewLoadState,
+    overviewTrackedSections,
+  })
 
   return {
     windowMinutes,
@@ -266,6 +276,7 @@ export function useDigitalLifeOverviewController() {
     overviewUpdatedAt,
     heroDescription,
     heroMetaItems,
+    commandRailModel,
     mainChainReshapeModel,
     wallClockSoakQuery,
     avatarStateQuery,

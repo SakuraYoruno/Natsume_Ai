@@ -12,6 +12,7 @@ import {
   buildSessionTracePath,
   buildSessionsExportParams,
   buildSessionsQueryView,
+  buildSessionsTriageRailModel,
   getNextSessionsPage,
   getPreviousSessionsPage,
 } from '../features/observability/sessionsModel.js'
@@ -92,6 +93,27 @@ export default function Sessions() {
     status,
     windowMinutes,
   ])
+  const triageRail = useMemo(() => buildSessionsTriageRailModel({
+    sessions,
+    summary,
+    total,
+    keyword,
+    status,
+    windowMinutes,
+    loading,
+    refreshing,
+    listError,
+  }), [
+    keyword,
+    listError,
+    loading,
+    refreshing,
+    sessions,
+    status,
+    summary,
+    total,
+    windowMinutes,
+  ])
 
   const handleSearch = useCallback(() => {
     if (page !== 1) {
@@ -115,6 +137,12 @@ export default function Sessions() {
 
   const handleStatusChange = useCallback((nextStatus) => {
     setStatus(nextStatus)
+    setPage(1)
+  }, [])
+
+  const handleClearFilters = useCallback(() => {
+    setKeyword('')
+    setStatus('')
     setPage(1)
   }, [])
 
@@ -154,6 +182,7 @@ export default function Sessions() {
       suppressedCount={suppressedCount}
       showNoSampleNotice={showNoSampleNotice}
       runtimeCard={<DigitalLifeRuntimeCard runtimeSnapshot={runtimeSnapshot} promptStats={promptStats} compact />}
+      triageRail={triageRail}
       sessions={sessions}
       sessionCards={sessionCards}
       summary={summary}
@@ -168,6 +197,7 @@ export default function Sessions() {
       onRefresh={refetch}
       onKeywordChange={setKeyword}
       onStatusChange={handleStatusChange}
+      onClearFilters={handleClearFilters}
       onSearch={handleSearch}
       onOpenSession={openSessionTrace}
       onPreviousPage={() => setPage(getPreviousSessionsPage(currentPage))}

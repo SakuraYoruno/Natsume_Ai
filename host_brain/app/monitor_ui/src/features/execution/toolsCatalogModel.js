@@ -1,4 +1,4 @@
-import { flattenPentestTools } from '../../shared/pentestMeta.js'
+import { flattenPentestTools, isPentestTool } from '../../shared/pentestMeta.js'
 
 export function getPentestToolMetadataView(capabilities) {
   const pentestTools = flattenPentestTools(capabilities)
@@ -25,6 +25,56 @@ export function getToolsCatalogCounts(tools = []) {
   return {
     readCount: items.filter((tool) => tool.side_effect_level === 'READ').length,
     writeCount: items.filter((tool) => tool.side_effect_level === 'WRITE').length,
+  }
+}
+
+export function normalizeToolAuthLevel(authLevel) {
+  const value = String(authLevel || 'NONE').toUpperCase()
+  if (value === 'APPROVAL_REQUIRED') return 'APPROVAL'
+  if (value === 'CONFIRM_REQUIRED') return 'CONFIRM'
+  return value
+}
+
+export function buildToolExecutionGate(tool, form = null) {
+  if (!tool) {
+    return {
+      tone: 'gray',
+      label: 'select',
+      title: '先选择一个工具',
+      detail: '左侧选择工具后，这里会展示只读、写入审批或 Security Lab 分流原因。',
+      canExecute: false,
+    }
+  }
+
+  if (isPentestTool(tool)) {
+    return {
+      tone: 'orange',
+      label: 'security lab',
+      title: 'Pentest 工具由 Security Lab 接管',
+      detail: '该能力需要 scope、Lab Mode、attack path 和 approval rail，不能从普通工具执行面板直接运行。',
+      canExecute: false,
+    }
+  }
+
+  if (tool.side_effect_level === 'WRITE') {
+    const hasApproval = Boolean(form?.approval_token_ref?.trim())
+    return {
+      tone: hasApproval ? 'amber' : 'orange',
+      label: 'approval',
+      title: hasApproval ? '审批令牌已填写' : '写入工具需要审批令牌',
+      detail: hasApproval
+        ? '当前表单已提供 approval_token_ref，提交后仍由后端执行策略做最终校验。'
+        : '写入工具会改变外部状态，必须填写 approval_token_ref 才能提交执行请求。',
+      canExecute: hasApproval,
+    }
+  }
+
+  return {
+    tone: 'green',
+    label: 'readonly',
+    title: '只读工具可直接执行',
+    detail: '该工具不声明写入副作用，可从当前面板提交一次人工执行请求。',
+    canExecute: true,
   }
 }
 

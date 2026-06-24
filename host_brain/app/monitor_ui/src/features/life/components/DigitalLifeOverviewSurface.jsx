@@ -1,7 +1,10 @@
-import React from 'react'
+import React, { useMemo, useState } from 'react'
 import DigitalLifeAvatarSection from './DigitalLifeAvatarSection.jsx'
+import DigitalLifeCommandRail from './DigitalLifeCommandRail.jsx'
+import DigitalLifeFocusLens from './DigitalLifeFocusLens.jsx'
 import DigitalLifeHeroSection from './DigitalLifeHeroSection.jsx'
 import DigitalLifeLazySections from './DigitalLifeLazySections.jsx'
+import DigitalLifeNav from './DigitalLifeNav.jsx'
 import DigitalLifeOverviewHeader from './DigitalLifeOverviewHeader.jsx'
 import DigitalLifeOverviewNotices from './DigitalLifeOverviewNotices.jsx'
 import DigitalLifeRuntimeDetailSection from './DigitalLifeRuntimeDetailSection.jsx'
@@ -12,6 +15,7 @@ import LifeBodyPathologyPanel from './lifeBody/LifeBodyPathologyPanel.jsx'
 import LifeBodyTimeline from './lifeBody/LifeBodyTimeline.jsx'
 import LifeBodyTopology from './lifeBody/LifeBodyTopology.jsx'
 import LifeBodyVitalsStrip from './lifeBody/LifeBodyVitalsStrip.jsx'
+import { buildDigitalLifeFocusLensModel } from '../digitalLifeOverviewModel.js'
 
 export default function DigitalLifeOverviewSurface({
   windowMinutes,
@@ -35,6 +39,7 @@ export default function DigitalLifeOverviewSurface({
   overviewUpdatedAt,
   heroDescription,
   heroMetaItems,
+  commandRailModel,
   mainChainReshapeModel,
   wallClockSoakQuery,
   avatarStateQuery,
@@ -45,6 +50,7 @@ export default function DigitalLifeOverviewSurface({
   gatewaySectionModel,
   secondarySectionsModel,
 }) {
+  const [focusLensMode, setFocusLensMode] = useState('priority')
   const dashboardBusy = Boolean(
     loading
       || refreshing
@@ -53,6 +59,11 @@ export default function DigitalLifeOverviewSurface({
       || wallClockSoakQuery.refreshing
   )
   const refreshAnimating = Boolean(dashboardBusy || avatarStateQuery.refreshing)
+  const focusLensModel = useMemo(
+    () => buildDigitalLifeFocusLensModel(lifeBodyModel, focusLensMode),
+    [focusLensMode, lifeBodyModel]
+  )
+  const visibleLifeBodyModel = focusLensModel.visibleModel || lifeBodyModel
 
   return (
     <div className="space-y-6">
@@ -63,6 +74,8 @@ export default function DigitalLifeOverviewSurface({
         dashboardBusy={dashboardBusy}
         refreshAnimating={refreshAnimating}
       />
+
+      <DigitalLifeNav />
 
       <DigitalLifeHeroSection
         modeMeta={modeMeta}
@@ -77,8 +90,20 @@ export default function DigitalLifeOverviewSurface({
         overviewUpdatedAt={overviewUpdatedAt}
       />
 
+      <DigitalLifeCommandRail
+        model={commandRailModel}
+        dashboardBusy={dashboardBusy}
+        onRefreshDashboard={onRefreshDashboard}
+        refreshWarning={refreshWarning}
+      />
+
+      <DigitalLifeFocusLens
+        model={focusLensModel}
+        onModeChange={setFocusLensMode}
+      />
+
       <MainChainReshapePanel model={mainChainReshapeModel} />
-      <LifeBodyVitalsStrip vitals={lifeBodyModel.vitalSigns} />
+      <LifeBodyVitalsStrip vitals={visibleLifeBodyModel.vitalSigns} />
       <LifeBodyFocusPanel guidance={lifeBodyModel.diagnosticGuidance} />
 
       <DigitalLifeAvatarSection
@@ -90,16 +115,16 @@ export default function DigitalLifeOverviewSurface({
 
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1.8fr)_minmax(320px,0.95fr)]">
         <LifeBodyTopology
-          lifeState={lifeBodyModel.lifeState}
-          organSystems={lifeBodyModel.organSystems}
-          organStatusCounts={lifeBodyModel.organStatusCounts}
+          lifeState={visibleLifeBodyModel.lifeState}
+          organSystems={visibleLifeBodyModel.organSystems}
+          organStatusCounts={visibleLifeBodyModel.organStatusCounts}
           primaryPathology={lifeBodyModel.primaryPathology}
           primaryOrganId={lifeBodyModel.primaryOrgan?.id}
         />
-        <LifeBodyPathologyPanel pathologies={lifeBodyModel.pathologies} />
+        <LifeBodyPathologyPanel pathologies={visibleLifeBodyModel.pathologies} />
       </div>
 
-      <LifeBodyTimeline events={lifeBodyModel.timelineEvents} />
+      <LifeBodyTimeline events={visibleLifeBodyModel.timelineEvents} />
 
       <DigitalLifeOverviewNotices
         error={error}

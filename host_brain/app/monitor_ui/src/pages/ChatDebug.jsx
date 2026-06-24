@@ -10,11 +10,12 @@ export default function ChatDebug() {
   const chatDebug = useChatDebugController()
 
   return (
-    <div className="flex h-[calc(100vh-7rem)] gap-4">
+    <div className="grid min-h-[calc(100vh-7rem)] grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_24rem]">
       <ChatDebugMainColumn
         stats={chatDebug.stats}
         streaming={chatDebug.streaming}
         heroMetaItems={chatDebug.heroMetaItems}
+        commandRail={chatDebug.commandRail}
         runtimeCard={(
           <DigitalLifeRuntimeCard
             runtimeSnapshot={chatDebug.runtimeSnapshot}
@@ -30,6 +31,8 @@ export default function ChatDebug() {
         setMessage={chatDebug.setMessage}
         onSend={chatDebug.sendMessage}
         onStop={chatDebug.stopStream}
+        onUseSample={chatDebug.useSamplePrompt}
+        onRefreshTrace={() => void chatDebug.refetchTraceSnapshot()}
       />
 
       <ChatTraceSidebar

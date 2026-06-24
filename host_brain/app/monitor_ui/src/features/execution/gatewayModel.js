@@ -37,6 +37,14 @@ export function countGatewayPlatformsByStatus(platforms, status) {
   return rows.filter((item) => item?.status === status).length
 }
 
+export function getWeChatRateLimits(wechatDetail) {
+  return Array.isArray(wechatDetail?.rate_limits) ? wechatDetail.rate_limits : []
+}
+
+export function getWeChatRecentEvents(wechatDetail) {
+  return Array.isArray(wechatDetail?.recent_events) ? wechatDetail.recent_events : []
+}
+
 export function buildGatewayLoadState({ data, wechatDetail, loading = false, refreshing = false, error = null } = {}) {
   const gatewayEventCount = getGatewayEventCount(data)
   return resolveLoadState({
@@ -94,6 +102,215 @@ export function buildGatewayMetricCards(data) {
   ]
 }
 
+function buildGatewayFocusAction({
+  data,
+  error,
+  gatewayEventCount,
+  hasData,
+  isLoading,
+  rateLimitCount,
+  downPlatformCount,
+  degradedPlatformCount,
+}) {
+  if (error) {
+    return {
+      icon: 'alert',
+      title: '先恢复网关观测接口',
+      detail: 'Gateway stats 请求失败，页面保持只读降级。优先查看日志或 Host/Obs 连接状态。',
+      label: '查看日志',
+      to: '/observability/logs',
+      state: 'blocked',
+    }
+  }
+
+  if (isLoading) {
+    return {
+      icon: 'radio',
+      title: '正在同步网关快照',
+      detail: '等待 Gateway 与 WeChat stats 返回后，再判断平台健康和路由风险。',
+      label: '刷新状态',
+      action: 'refresh',
+      state: 'warning',
+    }
+  }
+
+  if (downPlatformCount > 0 || degradedPlatformCount > 0) {
+    const parts = [
+      downPlatformCount > 0 ? `${downPlatformCount} 个平台离线` : null,
+      degradedPlatformCount > 0 ? `${degradedPlatformCount} 个平台降级` : null,
+    ].filter(Boolean).join('，')
+    return {
+      icon: 'wifi',
+      title: '先处理平台健康',
+      detail: `${parts}。先定位具体平台，再决定是否进入日志或 Trace。`,
+      label: '定位平台健康',
+      action: 'platforms',
+      state: downPlatformCount > 0 ? 'blocked' : 'warning',
+    }
+  }
+
+  if (rateLimitCount > 0) {
+    return {
+      icon: 'message',
+      title: '复核 WeChat 频率限制',
+      detail: `${rateLimitCount} 条频率限制命中，先确认是否需要重置或降低发送速率。`,
+      label: '定位微信通道',
+      action: 'wechat',
+      state: 'warning',
+    }
+  }
+
+  if (gatewayEventCount > 0) {
+    return {
+      icon: 'trace',
+      title: '沿 Trace 复核路由链路',
+      detail: `窗口内已有 ${gatewayEventCount} 条入站、出站或错误事件，可继续追 request 级链路。`,
+      label: '进入 Trace',
+      to: '/observability/trace',
+      state: 'ready',
+    }
+  }
+
+  if (hasData || data) {
+    return {
+      icon: 'edge',
+      title: '当前是空流量健康态',
+      detail: '接口可读但没有流量样本。若在联调下行能力，下一步进入 Edge Command 触发可追踪命令。',
+      label: '进入 Edge Command',
+      to: '/execution/edge-command',
+      state: 'warning',
+    }
+  }
+
+  return {
+    icon: 'radio',
+    title: '等待网关数据源接入',
+    detail: '当前没有 Gateway 或 WeChat 快照，先刷新或确认 Observability Backend 已启动。',
+    label: '刷新状态',
+    action: 'refresh',
+    state: 'blocked',
+  }
+}
+
+export function buildGatewayCommandRailView({
+  data,
+  wechatDetail,
+  platforms,
+  activePlatforms,
+  gatewayEventCount,
+  downPlatformCount,
+  degradedPlatformCount,
+  loading = false,
+  refreshing = false,
+  error = null,
+} = {}) {
+  const isLoading = loading || refreshing
+  const hasData = Boolean(data || wechatDetail)
+  const totalPlatformCount = platforms.length
+  const activePlatformCount = activePlatforms.length
+  const totalErrors = Number(data?.total_errors ?? 0)
+  const rateLimitCount = getWeChatRateLimits(wechatDetail).length
+  const wechatEventCount = getWeChatRecentEvents(wechatDetail).length
+  const riskSignalCount = totalErrors + downPlatformCount + degradedPlatformCount + rateLimitCount
+  const focusAction = buildGatewayFocusAction({
+    data,
+    error,
+    gatewayEventCount,
+    hasData,
+    isLoading,
+    rateLimitCount,
+    downPlatformCount,
+    degradedPlatformCount,
+  })
+  const telemetryState = error ? 'blocked' : (isLoading ? 'warning' : (hasData ? 'ready' : 'blocked'))
+  const platformState = totalPlatformCount === 0
+    ? 'warning'
+    : downPlatformCount > 0
+      ? 'blocked'
+      : degradedPlatformCount > 0
+        ? 'warning'
+        : 'ready'
+  const wechatState = !wechatDetail ? 'warning' : (rateLimitCount > 0 ? 'warning' : 'ready')
+  const evidenceState = gatewayEventCount > 0 ? 'ready' : (hasData ? 'warning' : 'blocked')
+
+  return {
+    state: focusAction.state,
+    statusLabel: error
+      ? '网关观测降级'
+      : downPlatformCount > 0
+        ? `${downPlatformCount} 个平台离线`
+        : degradedPlatformCount > 0
+          ? `${degradedPlatformCount} 个平台降级`
+          : rateLimitCount > 0
+            ? `${rateLimitCount} 条 WeChat 限制`
+            : gatewayEventCount > 0
+              ? '路由样本可追踪'
+              : '空流量健康态',
+    focusAction,
+    gateCards: [
+      {
+        label: 'Telemetry',
+        state: telemetryState,
+        detail: error ? 'Gateway stats 请求失败。' : (isLoading ? '正在同步 Gateway / WeChat stats。' : (hasData ? '数据源已返回。' : '暂无可用快照。')),
+      },
+      {
+        label: 'Platform Health',
+        state: platformState,
+        detail: totalPlatformCount
+          ? `${activePlatformCount}/${totalPlatformCount} active，${downPlatformCount} down，${degradedPlatformCount} degraded。`
+          : '当前窗口没有平台快照。',
+      },
+      {
+        label: 'WeChat Channel',
+        state: wechatState,
+        detail: wechatDetail ? `${rateLimitCount} 条限制，${wechatEventCount} 条最近事件。` : 'WeChat stats 未返回，按可降级通道处理。',
+      },
+      {
+        label: 'Routing Evidence',
+        state: evidenceState,
+        detail: gatewayEventCount > 0 ? `${gatewayEventCount} 条路由事件可继续追 Trace。` : '当前窗口没有可追踪路由事件。',
+      },
+    ],
+    handoffSteps: [
+      {
+        key: 'telemetry',
+        label: 'Telemetry Source',
+        value: isLoading ? 'syncing' : (hasData ? 'gateway + wechat' : 'missing'),
+        detail: hasData ? 'Gateway stats 或 WeChat detail 至少一个数据源可读。' : '没有可读快照时只展示降级指引。',
+        state: telemetryState,
+      },
+      {
+        key: 'platforms',
+        label: 'Platform Coverage',
+        value: totalPlatformCount ? `${activePlatformCount}/${totalPlatformCount} active` : 'no platform',
+        detail: totalPlatformCount ? `${downPlatformCount} down / ${degradedPlatformCount} degraded。` : '平台列表为空，无法判断分平台健康。',
+        state: platformState,
+      },
+      {
+        key: 'risk',
+        label: 'Risk Hotspot',
+        value: riskSignalCount ? `${riskSignalCount} signals` : 'clear',
+        detail: `${totalErrors} errors，${downPlatformCount} down，${degradedPlatformCount} degraded，${rateLimitCount} WeChat limits。`,
+        state: downPlatformCount > 0 || totalErrors > 0 ? 'blocked' : (riskSignalCount > 0 ? 'warning' : 'ready'),
+      },
+      {
+        key: 'wechat',
+        label: 'WeChat Channel',
+        value: wechatDetail ? `${rateLimitCount} limits / ${wechatEventCount} events` : 'not connected',
+        detail: wechatDetail ? '微信通道详情可用于确认节流和最近消息事件。' : '微信详情不可用时不影响其他平台健康判断。',
+        state: wechatState,
+      },
+      {
+        key: 'handoff',
+        label: 'Next Handoff',
+        value: focusAction.to ? focusAction.label : focusAction.title,
+        detail: focusAction.detail,
+        state: focusAction.state,
+      },
+    ],
+  }
+}
+
 export function buildGatewayViewModel({
   data,
   wechatDetail,
@@ -110,6 +327,8 @@ export function buildGatewayViewModel({
   const downPlatformCount = countGatewayPlatformsByStatus(platforms, 'DOWN')
   const degradedPlatformCount = countGatewayPlatformsByStatus(platforms, 'DEGRADED')
   const gatewayLoadState = buildGatewayLoadState({ data, wechatDetail, loading, refreshing, error })
+  const hasWeChatRateLimits = getWeChatRateLimits(wechatDetail).length > 0
+  const hasWeChatEvents = getWeChatRecentEvents(wechatDetail).length > 0
   const motorOrganModel = buildMotorOrganSystemModel({
     loadState: gatewayLoadState,
     updatedAt: lastUpdatedAt,
@@ -132,8 +351,8 @@ export function buildGatewayViewModel({
     activePlatformCount: activePlatforms.length,
     gatewayEventCount,
     isInitialState: initialState,
-    hasWeChatRateLimits: (wechatDetail?.rate_limits ?? []).length > 0,
-    hasWeChatEvents: (wechatDetail?.recent_events ?? []).length > 0,
+    hasWeChatRateLimits,
+    hasWeChatEvents,
     downPlatformCount,
     degradedPlatformCount,
     gatewayLoadState,
@@ -146,6 +365,18 @@ export function buildGatewayViewModel({
       windowMinutes,
     }),
     metricCards: buildGatewayMetricCards(data),
+    commandRailView: buildGatewayCommandRailView({
+      data,
+      wechatDetail,
+      platforms,
+      activePlatforms,
+      gatewayEventCount,
+      downPlatformCount,
+      degradedPlatformCount,
+      loading,
+      refreshing,
+      error,
+    }),
     showUnavailableNotice: !error && !loading && !refreshing && gatewayLoadState === LOAD_STATES.UNAVAILABLE,
     showNoSampleNotice: !error && !loading && !refreshing && gatewayLoadState === LOAD_STATES.NO_SAMPLE,
   }

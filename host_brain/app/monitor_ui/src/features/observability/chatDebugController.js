@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { sendChatDebugStream } from './chatDebugApi.js'
-import { buildChatDebugTraceView } from './chatDebugModel.js'
+import {
+  buildChatDebugCommandRailModel,
+  buildChatDebugTraceView,
+} from './chatDebugModel.js'
 import { useTraceSnapshotQuery } from './traceQueries.js'
 import useDigitalLifeRuntimeSignals from '../../hooks/useDigitalLifeRuntimeSignals.js'
 import { consumeSseBuffer } from '../../shared/streaming/sse.js'
@@ -70,6 +73,34 @@ export function useChatDebugController() {
     traceRefreshing,
     traceSnapshot,
     traceStale,
+  ])
+
+  const commandRail = useMemo(() => buildChatDebugCommandRailModel({
+    message,
+    streaming,
+    error,
+    stats,
+    requestId,
+    sseEvents,
+    chainEvents: traceView.chainEvents,
+    traceSnapshot,
+    traceBusy: traceView.traceBusy,
+    traceIssueCount: traceView.traceIssueCount,
+    traceLatestNode: traceView.traceLatestNode,
+    latestEvent: traceView.latestEvent,
+  }), [
+    error,
+    message,
+    requestId,
+    sseEvents,
+    stats,
+    streaming,
+    traceSnapshot,
+    traceView.chainEvents,
+    traceView.latestEvent,
+    traceView.traceBusy,
+    traceView.traceIssueCount,
+    traceView.traceLatestNode,
   ])
 
   useEffect(() => {
@@ -172,10 +203,16 @@ export function useChatDebugController() {
     setStreaming(false)
   }, [])
 
+  const useSamplePrompt = useCallback(() => {
+    if (streaming) return
+    setMessage('请用一句话说明当前系统状态，并触发一次可追踪的调试链路。')
+  }, [streaming])
+
   return {
     ...traceView,
     chatEndRef,
     chatHistory,
+    commandRail,
     currentResponse,
     error,
     eventsEndRef,
@@ -190,6 +227,7 @@ export function useChatDebugController() {
     stats,
     stopStream,
     streaming,
+    useSamplePrompt,
     traceError,
     traceSnapshot,
     traceUpdatedAt,

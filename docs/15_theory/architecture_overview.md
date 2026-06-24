@@ -1,8 +1,8 @@
 受众：MASTER
 标题：Natsume AI 整体架构全景文档
 
-版本：v3.1
-日期：2026-06-08
+版本：v3.2
+日期：2026-06-23
 定位：以当前代码为锚点，对系统的运行面、主链、Edge/Gateway/Observability 关系做高层总览。本文偏“整体理解”，细节以 `docs/50_project/arch/` 下的代码事实文档为准。
 
 # Natsume AI 整体架构全景文档
@@ -36,7 +36,7 @@ graph TB
 
 ## 二、Host Main 的角色
 
-Host Main 负责所有真正的业务执行主权：
+Host Main 负责所有真正的事实、记忆、政策、审计与业务执行主权：
 
 - `/v1/chat`
 - `/v1/host/input`
@@ -59,8 +59,8 @@ Host Main 负责所有真正的业务执行主权：
 Host 仍然是：
 
 - 最终路由裁决点
-- 记忆与 Bond 副写主点
-- 审计与 trace 主写入点
+- 事实、记忆与 Bond 写入主点
+- 政策、审计与 trace 主写入点
 - Edge 能力调用发起方
 
 ## 三、聊天主链的当前形态
@@ -89,7 +89,7 @@ flowchart LR
 - `/v1/chat` 的 HTTP 首跳由 `host_brain/app/asgi.py` + `host_brain/app/app_factory.py` 退示的 `chat_endpoint` 接住，再委托给 `chat_routes.handle_v1_chat_route` 与 `chat_handler.handle_chat`；`chat_handler.py` 是进入主编排前的薄层
 - `cortex_orchestrator` 是聊天编排中段收口点
 - `executive_runtime_core.py` 是当前真正的执行与路由核心
-- `surface_reply_runtime.py` 是人格渲染路由者；**normal chat 的最终文本作者是 `host_brain/persona/surface_main_chain.py` (SurfaceMainChain)**，旧 `prompt_builder` 链路仅作为辅助 facts / state 提供者
+- `surface_reply_runtime.py` 是人格渲染路由者；**normal chat 的最终文本作者是 `host_brain/persona/surface_main_chain.py` (SurfaceMainChain)**，受 necessary_facts、must_not_do 与 ReplyEnvelope 收口约束；旧 `prompt_builder` 链路仅作为辅助 facts / state 提供者
 
 ## 四、外部输入与平台消息链
 
@@ -109,13 +109,13 @@ flowchart TD
 这条链现在有两个重要特征：
 
 1. Gateway 消息不再通过旧的 `SCENE_GATEWAY -> SceneRouter` 结构进入主链。
-2. `input_routes.py` 本身已经承担了 ACK、进度推送、重对齐通知等网关控制逻辑，不再只是一个“转发壳”。
+2. `input_routes.py` 本身已经承担了 ACK、进度推送、重对齐通知等网关控制逻辑，不再只是一个“转发壳”；这些 ACK 与状态消息不得被当作人格记忆写入事实。
 
 补充：播放状态、资源门控、inline waiters 等 Edge 运行时事件当前走 `POST /v1/edge/events`，而不是 `POST /v1/host/input`。
 
 ## 五、Edge 的角色
 
-Edge 现在并不只是“语音播放端”，而是本地执行与感知中枢。
+Edge 现在并不只是“语音播放端”，而是本地执行与感知中枢；它只能消费、执行或上报 Host 信号，不产事实、政策、长期记忆或裁决。
 
 当前 Edge RPC 的主要能力面包括：
 
@@ -124,7 +124,7 @@ Edge 现在并不只是“语音播放端”，而是本地执行与感知中枢
 - `vts`
 - `screenshot`
 - `automate`
-- `visual_locate`
+- `visual_locate`（保留 RPC 面，但当前返回 `VLM_REMOVED`，不提供 Edge 侧 VLM 视觉定位）
 - `proactive_push / proactive_messages`
 - `fallback/*`
 - `wx/*`
@@ -132,7 +132,7 @@ Edge 现在并不只是“语音播放端”，而是本地执行与感知中枢
 因此，Edge 当前架构更接近：
 
 ```text
-Edge = 语音执行 + 桌面自动化 + 视觉定位 + 本地桥接查询 + 事件回传
+Edge = 语音执行 + 桌面截图 + 坐标/热键自动化 + 本地桥接查询 + 事件回传
 ```
 
 而不是单纯的：
@@ -140,6 +140,8 @@ Edge = 语音执行 + 桌面自动化 + 视觉定位 + 本地桥接查询 + 事�
 ```text
 Edge = TTS/VTS 附件服务
 ```
+
+需要区分的是：本地截图、坐标动作和 Host 侧 Playwright 自动化工具仍然存在；Edge 侧 VLM 视觉定位当前不存在，`visual_locate` 不能被文档或实现当成可用定位事实源。
 
 ## 六、Unified Message Gateway 的位置
 

@@ -1164,8 +1164,8 @@ def _ensure_pentest_tools_registered() -> None:
     _PENTEST_TOOLS_REGISTERED = True
 
     try:
-        from skills.pentest.tools.tool_specs import PENTEST_TOOL_SPECS, PENTEST_TOOL_IDS  # noqa: PLC0415
-        from skills.pentest.tools.tool_executors import EXECUTOR_MAP  # noqa: PLC0415
+        from host_brain.pentest.tools.tool_specs import PENTEST_TOOL_SPECS, PENTEST_TOOL_IDS  # noqa: PLC0415
+        from host_brain.pentest.tools.tool_executors import EXECUTOR_MAP  # noqa: PLC0415
     except ImportError:
         return
 

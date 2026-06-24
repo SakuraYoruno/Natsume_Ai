@@ -2,6 +2,7 @@
 import { Activity, RefreshCw } from 'lucide-react'
 import { useSearchParams } from 'react-router-dom'
 import EmptyStateCard from '../shared/ui/EmptyStateCard.jsx'
+import LifeSystemsCommandRail from '../features/life/components/LifeSystemsCommandRail.jsx'
 import LifeBodyTimeline from '../features/life/components/lifeBody/LifeBodyTimeline.jsx'
 import MetricCard from '../shared/ui/MetricCard.jsx'
 import NoticeBanner from '../shared/ui/NoticeBanner.jsx'
@@ -14,6 +15,7 @@ import {
   LIFE_TIMELINE_WINDOW_OPTIONS,
   buildLifeTimelineFilterParams,
   buildLifeTimelineFocusNotice,
+  buildLifeTimelineCommandRailModel,
   buildLifeTimelineHeroMetaItems,
   buildLifeTimelineHeroTitle,
   buildLifeTimelineLatestEventHint,
@@ -94,6 +96,39 @@ export default function LifeTimelinePage() {
     selectedTickId,
     latestEvent,
   })
+  const commandRailModel = useMemo(() => buildLifeTimelineCommandRailModel({
+    hasTimelinePayload,
+    hasTimelineError,
+    timelineRefreshWarning,
+    timelineItems,
+    filteredEvents,
+    latestEvent,
+    selectedType,
+    selectedOrgan,
+    selectedRequestId,
+    selectedSessionId,
+    selectedTickId,
+    eventTypeCount: eventTypes,
+    organOptions,
+    primaryPathology,
+    primaryOrgan,
+  }), [
+    eventTypes,
+    filteredEvents,
+    hasTimelineError,
+    hasTimelinePayload,
+    latestEvent,
+    organOptions,
+    primaryOrgan,
+    primaryPathology,
+    selectedOrgan,
+    selectedRequestId,
+    selectedSessionId,
+    selectedTickId,
+    selectedType,
+    timelineItems,
+    timelineRefreshWarning,
+  ])
 
   useEffect(() => {
     const selection = getLifeTimelineFilterSelection(searchParams)
@@ -172,6 +207,13 @@ export default function LifeTimelinePage() {
           {tickFocusNotice.message}
         </NoticeBanner>
       ) : null}
+
+      <LifeSystemsCommandRail
+        ariaLabel="Life Timeline Command Rail"
+        model={commandRailModel}
+        onRefresh={timelineQuery.refetch}
+        refreshing={timelineQuery.loading || timelineQuery.refreshing}
+      />
 
       {hasTimelineEvents ? (
         <>

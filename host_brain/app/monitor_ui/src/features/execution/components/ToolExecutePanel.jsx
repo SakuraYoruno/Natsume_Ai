@@ -1,11 +1,21 @@
-import React, { useState } from 'react'
+import React, { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Play, X } from 'lucide-react'
 import { executeTool } from '../api.js'
 import JsonBlock from '../../../shared/ui/JsonBlock.jsx'
 import NoticeBanner from '../../../shared/ui/NoticeBanner.jsx'
 import { isPentestTool } from '../../../shared/pentestMeta.js'
-import { buildToolExecutionRequest } from '../toolsCatalogModel.js'
+import { buildToolExecutionGate, buildToolExecutionRequest } from '../toolsCatalogModel.js'
+
+function gateToneClass(tone) {
+  return {
+    green: 'border-green-100 bg-green-50 text-green-700',
+    amber: 'border-amber-100 bg-amber-50 text-amber-700',
+    orange: 'border-orange-100 bg-orange-50 text-orange-700',
+    red: 'border-red-100 bg-red-50 text-red-700',
+    gray: 'border-gray-100 bg-gray-50 text-gray-600',
+  }[tone] || 'border-gray-100 bg-gray-50 text-gray-600'
+}
 
 export default function ToolExecutePanel({ tool, onClose }) {
   const [form, setForm] = useState({
@@ -16,6 +26,8 @@ export default function ToolExecutePanel({ tool, onClose }) {
   })
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState(null)
+  const gate = useMemo(() => buildToolExecutionGate(tool, form), [form, tool])
+  const executionRequest = useMemo(() => buildToolExecutionRequest(tool, form), [form, tool])
 
   if (isPentestTool(tool)) {
     return (
@@ -41,7 +53,6 @@ export default function ToolExecutePanel({ tool, onClose }) {
 
   const handleExecute = async () => {
     setResult(null)
-    const executionRequest = buildToolExecutionRequest(tool, form)
     if (!executionRequest.ok) {
       setResult({ ok: false, error: executionRequest.error })
       return
@@ -65,6 +76,11 @@ export default function ToolExecutePanel({ tool, onClose }) {
         <button onClick={onClose} className="inline-flex h-7 w-7 items-center justify-center rounded text-gray-400 hover:bg-gray-50 hover:text-gray-600">
           <X size={15} />
         </button>
+      </div>
+
+      <div className={`rounded-lg border px-3 py-2 text-sm ${gateToneClass(gate.tone)}`}>
+        <div className="font-semibold">Execution Gate：{gate.title}</div>
+        <div className="mt-1 text-xs leading-5">{gate.detail}</div>
       </div>
 
       <div className="grid grid-cols-2 gap-3">
@@ -111,12 +127,18 @@ export default function ToolExecutePanel({ tool, onClose }) {
 
       <button
         onClick={handleExecute}
-        disabled={loading}
+        disabled={loading || !executionRequest.ok}
         className="inline-flex w-full items-center justify-center gap-1.5 rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700 disabled:opacity-50"
       >
         <Play size={14} />
         {loading ? '执行中...' : '执行'}
       </button>
+
+      {!executionRequest.ok ? (
+        <div className="rounded border border-orange-100 bg-orange-50 px-3 py-2 text-xs leading-5 text-orange-700">
+          {executionRequest.error}
+        </div>
+      ) : null}
 
       {result ? (
         result.ok ? (

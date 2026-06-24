@@ -4,7 +4,7 @@ import EmptyStateCard from '../../../../shared/ui/EmptyStateCard.jsx'
 
 export default function ChatTranscriptPanel({ chatHistory, currentResponse, chatEndRef }) {
   return (
-    <div className="card mt-3 flex-1 space-y-3 overflow-y-auto p-4">
+    <div className="card mt-3 min-h-[22rem] space-y-3 overflow-y-auto p-4 xl:max-h-[42rem]">
       {chatHistory.length === 0 ? (
         <EmptyStateCard
           title="发一条消息开始调试"
@@ -25,7 +25,7 @@ export default function ChatTranscriptPanel({ chatHistory, currentResponse, chat
           ) : null}
 
           <div
-            className={`max-w-[80%] rounded-lg px-3 py-2 text-sm ${
+            className={`max-w-[min(42rem,86%)] rounded-lg px-3 py-2 text-sm ${
               item.role === 'user'
                 ? 'bg-primary text-white'
                 : item.role === 'error'

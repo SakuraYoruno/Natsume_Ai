@@ -2,6 +2,7 @@ import React from 'react'
 import { Sparkles } from 'lucide-react'
 import NoticeBanner from '../../../../shared/ui/NoticeBanner.jsx'
 import PageHero from '../../../../shared/ui/PageHero.jsx'
+import ChatDebugCommandRail from './ChatDebugCommandRail.jsx'
 import ChatDebugHeader from './ChatDebugHeader.jsx'
 import ChatInputBar from './ChatInputBar.jsx'
 import ChatTranscriptPanel from './ChatTranscriptPanel.jsx'
@@ -10,6 +11,7 @@ export default function ChatDebugMainColumn({
   stats,
   streaming,
   heroMetaItems,
+  commandRail,
   runtimeCard,
   error,
   chatHistory,
@@ -19,9 +21,11 @@ export default function ChatDebugMainColumn({
   setMessage,
   onSend,
   onStop,
+  onUseSample,
+  onRefreshTrace,
 }) {
   return (
-    <div className="flex min-w-0 flex-1 flex-col">
+    <div className="flex min-w-0 flex-col">
       <ChatDebugHeader stats={stats} />
 
       <div className="mt-3">
@@ -34,6 +38,16 @@ export default function ChatDebugMainColumn({
           metaItems={heroMetaItems}
         />
       </div>
+
+      <ChatDebugCommandRail
+        model={commandRail}
+        streaming={streaming}
+        message={message}
+        onSend={onSend}
+        onStop={onStop}
+        onUseSample={onUseSample}
+        onRefreshTrace={onRefreshTrace}
+      />
 
       {runtimeCard}
 

@@ -1,8 +1,8 @@
 受众：MASTER
 标题：host_brain 核心应用层契约（当前代码实况：app / audit / skills / observability）
 
-版本：v3.1
-日期：2026-06-04
+版本：v3.2
+日期：2026-06-23
 归属：docs/15_theory/
 
 ---
@@ -26,8 +26,14 @@
 - `host_brain/app/executive_router.py`
 - `host_brain/app/executive_runtime.py`
 - `host_brain/app/executive_runtime_core.py`
+- `host_brain/app/surface_reply_runtime.py`
+- `host_brain/app/surface_main_chain_adapter.py`
+- `host_brain/app/reply_envelope.py`
 - `host_brain/app/input_routes.py`
 - `host_brain/app/agent_routes.py`
+- `host_brain/app/pentest_routes.py`
+- `host_brain/app/digital_life_routes.py`
+- `host_brain/app/mateengine_routes.py`
 - `host_brain/app/web_ui.py`
 - `host_brain/app/obs_routes_life_body.py`
 - `host_brain/audit/sqlite_ledger.py`
@@ -57,6 +63,12 @@ Host Main FastAPI 装配由三件套完成：`host_brain/app/asgi.py`（按 `app
 - `POST /v1/host/input`
 - `POST /v1/agent/run`
 - `GET /v1/agent/info`
+- `/v1/digital-life/*`
+- `/v1/memory/*`
+- `/v1/mateengine/*`
+- `/v1/pentest/*`
+- `/internal/codex/*`
+- `/internal/security/*`
 - `/canon/*`
 - `/scheduler/*`
 - `/host-scheduler/*`
@@ -71,7 +83,7 @@ Host Main FastAPI 装配由三件套完成：`host_brain/app/asgi.py`（按 `app
 - `/metrics`
 - `/panel`
 
-其中 `/v1/host/input` 由 `host_brain/app/input_routes.py` 提供，`/v1/agent/*` 由 `host_brain/app/agent_routes.py` 提供，`/api/ui/*` 由 `host_brain/app/web_ui.py` 提供，`/obs/*` 在主应用中保留兼容挂载，同时也有独立 Obs Backend。
+其中 `/v1/host/input` 由 `host_brain/app/input_routes.py` 提供，`/v1/agent/*` 由 `host_brain/app/agent_routes.py` 提供，`/v1/pentest/*` 由 `host_brain/app/pentest_routes.py` 提供，`/api/ui/*` 由 `host_brain/app/web_ui.py` 提供，`/obs/*` 在主应用中保留兼容挂载，同时也有独立 Obs Backend。
 
 ### 1.3 当前 `/v1/chat` 主链
 
@@ -79,7 +91,7 @@ Host Main FastAPI 装配由三件套完成：`host_brain/app/asgi.py`（按 `app
 
 ```text
 POST /v1/chat
-  -> host_brain.app.app_factory.chat_endpoint
+  -> host_brain.app.asgi.chat_endpoint
   -> host_brain.app.chat_routes.handle_v1_chat_route
   -> host_brain.app.chat_immune_gate.evaluate_immune_gate_for_chat
   -> host_brain.app.chat_immune_gate.schedule_chat_immune_gate_event
@@ -98,6 +110,10 @@ POST /v1/chat
        -> plan
        -> recent_turn
        -> task_progress
+  -> surface_reply_runtime.surface_reply_sse_generator
+  -> surface_main_chain_adapter.surface_main_chain_sse_generator
+  -> persona.surface_main_chain.SurfaceMainChain
+  -> reply_envelope.ReplyEnvelope
 ```
 
 在进入 `chat_handler.handle_chat` 之前，`chat_routes.handle_v1_chat_route` 会处理 `request_id`、immune gate 审查与异步审计记录；若 immune gate 返回 BLOCK，会直接在 HTTP 路由层返回 SSE，不再进入后续编排链。
@@ -112,6 +128,8 @@ POST /v1/chat
 | 共享编排实现 | `host_brain/app/agent_runtime_shared.py` | 召回、bond、上下文、trace、后处理、SSE 贯通 |
 | Executive 路由 | `host_brain/app/executive_router.py` | 路由层薄门面 |
 | Executive 执行 | `host_brain/app/executive_runtime.py` + `host_brain/app/executive_runtime_core.py` | skill-first 路由、计划执行、恢复策略、chat 回落 |
+| Surface 收口 | `host_brain/app/surface_reply_runtime.py` + `surface_main_chain_adapter.py` | normal chat 文本进入 SurfaceMainChain；兼容 fallback 与 deterministic sub-agent 结果在此收口 |
+| 最终表达 | `host_brain/persona/surface_main_chain.py` + `host_brain/app/reply_envelope.py` | SurfaceMainChain 生成最终文本，ReplyEnvelope 决定可发送、可持久化、可缓存 |
 
 ### 1.4 当前外部输入与独立 Agent Loop 入口
 
@@ -119,8 +137,10 @@ POST /v1/chat
 
 | 入口 | 当前模块 | 说明 |
 |---|---|---|
-| `POST /v1/host/input` | `host_brain/app/input_routes.py` | 接收 ASR / Gateway 回流；做输入质检、免疫门控、ACK、异步回流到 Host 主链 |
+| `POST /v1/host/input` | `host_brain/app/input_routes.py` | 接收 ASR / Gateway 回流；做输入质检、噪声门、去重、免疫门控与 ACK，然后直接进入 Cortex orchestrator pipeline，不是 `/v1/chat` 转发 |
+| `POST /v1/edge/events` | `host_brain/app/asgi.py` + `system_handler.py` | Edge runtime events 回流入口，用于语音/外显/运行态事件上报，不作为用户输入 |
 | `POST /v1/agent/run` | `host_brain/app/agent_routes.py` | 独立 Agent Loop 兼容入口，可选择 Mock / Edge RPC / legacy external client，不属于 `/v1/chat` 主链，也不代表当前聊天主链具备屏幕自动执行主权 |
+| `/v1/pentest/*` | `host_brain/app/pentest_routes.py` + `handlers/pentest_agent_handler.py` | Security Lab / Pentest API；side-effect 工具仍需 scope、rate、manifest、allow_exploit 与 approval token |
 
 补充：`POST /v1/host/input` 当前只接受 `ASR` / `GATEWAY` 两类归一化输入；其他 Edge 运行时事件走 `POST /v1/edge/events`。
 
@@ -290,7 +310,7 @@ POST /v1/chat
 
 当前 `host_brain` 应用层的主事实是：
 
-1. `/v1/chat` 主链已经收敛到 `chat_routes.handle_v1_chat_route -> chat_handler.handle_chat -> thalamus_agent -> Governor -> cortex_orchestrator -> agent_runtime_shared -> executive_router -> executive_runtime -> executive_runtime_core`；最终文本作者为 `host_brain/persona/surface_main_chain.py`。
+1. `/v1/chat` 主链已经收敛到 `asgi.chat_endpoint -> chat_routes.handle_v1_chat_route -> chat_handler.handle_chat -> thalamus_agent -> Governor -> cortex_orchestrator -> agent_runtime_shared -> executive_router -> executive_runtime -> executive_runtime_core -> surface_reply_runtime -> surface_main_chain_adapter -> SurfaceMainChain -> ReplyEnvelope`。
 2. Audit 以 `SQLiteLedger` 为枢纽，但表结构与写接口已持续演进，不应再复用旧表数口径。
 3. Skills 以 `SkillRegistry + SkillLoader + executor_registry` 为当前执行契约，且来源是动态扩展的。
 4. Observability 采用“主应用兼容挂载 + 独立 Obs Backend + Monitor UI”三层结构。

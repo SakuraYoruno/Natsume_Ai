@@ -9,10 +9,12 @@ export default function ChatInputBar({
   onStop,
 }) {
   return (
-    <div className="mt-3 flex gap-2">
-      <input
-        className="flex-1 rounded-lg border border-gray-300 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary-200"
-        placeholder="输入消息，按 Enter 发送"
+    <div className="mt-3 flex flex-col gap-2 rounded-xl border border-white/80 bg-white/86 p-3 shadow-sm sm:flex-row sm:items-end">
+      <textarea
+        rows={3}
+        className="min-h-[5.75rem] flex-1 resize-y rounded-lg border border-gray-300 px-3 py-2.5 text-sm leading-6 focus:outline-none focus:ring-2 focus:ring-primary-200"
+        aria-label="聊天调试输入"
+        placeholder="输入一条用于调试的消息"
         value={message}
         onChange={(event) => setMessage(event.target.value)}
         onKeyDown={(event) => {
@@ -24,12 +26,12 @@ export default function ChatInputBar({
         disabled={streaming}
       />
       {streaming ? (
-        <button className="btn-secondary px-4" onClick={onStop}>
+        <button className="btn-secondary justify-center px-4 sm:min-h-[2.75rem]" onClick={onStop}>
           <AlertTriangle size={14} />
           停止
         </button>
       ) : (
-        <button className="btn-primary px-4" onClick={onSend} disabled={!message.trim()}>
+        <button className="btn-primary justify-center px-4 sm:min-h-[2.75rem]" onClick={onSend} disabled={!message.trim()}>
           <Send size={14} />
           发送
         </button>

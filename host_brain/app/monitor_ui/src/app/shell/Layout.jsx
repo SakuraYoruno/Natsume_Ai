@@ -1,6 +1,7 @@
 ﻿import React, { useEffect, useState } from 'react'
 import { NavLink, Outlet, useLocation } from 'react-router-dom'
 import {
+  ChevronRight,
   Menu,
   PauseCircle,
   RefreshCw,
@@ -33,7 +34,18 @@ function NavBadge({ value, severity = 'info' }) {
   )
 }
 
-function NavPill({ to, icon: Icon, label, onClick, badge = null, compact = false }) {
+function findActiveNav(pathname) {
+  const path = pathname || '/cockpit'
+  for (const section of NAV_SECTIONS) {
+    const activeItem = section.items.find((item) => path === item.to || path.startsWith(`${item.to}/`))
+    if (activeItem) {
+      return { section, item: activeItem }
+    }
+  }
+  return { section: NAV_SECTIONS[0], item: NAV_SECTIONS[0]?.items[0] }
+}
+
+function NavPill({ to, icon: Icon, label, onClick, badge = null, compact = false, block = false }) {
   const handlePrefetch = () => {
     void preloadRoute(to)
   }
@@ -46,7 +58,7 @@ function NavPill({ to, icon: Icon, label, onClick, badge = null, compact = false
       onFocus={handlePrefetch}
       onTouchStart={handlePrefetch}
       className={({ isActive }) =>
-        `inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap border font-medium transition-all ${
+        `${block ? 'flex w-full justify-start' : 'inline-flex shrink-0'} min-w-0 items-center gap-1.5 whitespace-nowrap border font-medium transition-all ${
           compact ? 'rounded-lg px-2 py-1 text-xs' : 'rounded-xl px-3 py-1.5 text-sm'
         } ${
           isActive
@@ -55,37 +67,196 @@ function NavPill({ to, icon: Icon, label, onClick, badge = null, compact = false
         }`
       }
     >
-      <Icon size={15} />
-      {label}
+      <Icon size={15} className="shrink-0" />
+      <span className="truncate">{label}</span>
       {badge ? <NavBadge value={badge.value} severity={badge.severity} /> : null}
     </NavLink>
   )
 }
 
-function DesktopNav({ sectionBadges, itemBadges }) {
+function SectionTab({ section, active = false, badge = null }) {
+  const target = section.items[0]?.to || '/cockpit'
+  const handlePrefetch = () => {
+    void preloadRoute(target)
+  }
+
+  return (
+    <NavLink
+      to={target}
+      onMouseEnter={handlePrefetch}
+      onFocus={handlePrefetch}
+      onTouchStart={handlePrefetch}
+      aria-label={`进入 ${section.title}`}
+      className={`inline-flex shrink-0 items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs font-semibold transition-all ${
+        active
+          ? 'border-primary-200 bg-primary-50 text-primary shadow-sm'
+          : 'border-transparent text-gray-500 hover:border-primary-100 hover:bg-white/80 hover:text-gray-800'
+      }`}
+    >
+      <span>{section.title}</span>
+      {badge ? <NavBadge value={badge.value} severity={badge.severity} /> : null}
+    </NavLink>
+  )
+}
+
+function DesktopNav({ activeNav, sectionBadges, itemBadges }) {
+  const currentSection = activeNav?.section || NAV_SECTIONS[0]
+  const currentItem = activeNav?.item || currentSection?.items?.[0]
+
   return (
     <nav
-      className="hidden min-w-0 flex-wrap items-center gap-2 rounded-xl border border-primary-100/70 bg-white/76 px-2 py-1.5 shadow-sm backdrop-blur-sm lg:flex"
+      className="hidden min-w-0 overflow-hidden rounded-xl border border-primary-100/70 bg-white/76 shadow-sm backdrop-blur-sm lg:block"
       role="navigation"
       aria-label="主导航"
     >
-      {NAV_SECTIONS.map((section) => (
-        <React.Fragment key={section.title}>
-          <span className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-primary-100/80 bg-primary-50/70 px-2 py-1 text-[11px] font-semibold text-primary-700">
+      <div className="flex min-w-0 items-center justify-between gap-3 border-b border-primary-100/70 px-2 py-1.5">
+        <div className="flex min-w-0 items-center gap-1.5 overflow-x-auto">
+          {NAV_SECTIONS.map((section) => (
+            <SectionTab
+              key={section.title}
+              section={section}
+              active={currentSection?.title === section.title}
+              badge={sectionBadges[section.title]}
+            />
+          ))}
+        </div>
+        <div className="hidden shrink-0 items-center gap-1.5 rounded-lg border border-primary-100/70 bg-primary-50/55 px-2 py-1 text-xs text-primary-700 xl:flex">
+          <span className="font-semibold">{currentSection?.title}</span>
+          <ChevronRight size={13} />
+          <span className="max-w-36 truncate text-gray-600">{currentItem?.label}</span>
+        </div>
+      </div>
+      <div
+        className="flex min-w-0 items-center gap-2 overflow-x-auto px-2 py-1.5"
+        aria-label={`${currentSection?.title || '当前领域'} 子导航`}
+      >
+        <span className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-primary-100/80 bg-primary-50/70 px-2 py-1 text-[11px] font-semibold text-primary-700">
+          {currentSection?.title}
+          {sectionBadges[currentSection?.title] ? (
+            <NavBadge
+              value={sectionBadges[currentSection.title].value}
+              severity={sectionBadges[currentSection.title].severity}
+            />
+          ) : null}
+        </span>
+        {(currentSection?.items || []).map((item) => (
+          <NavPill key={item.to} {...item} badge={itemBadges[item.to]} compact />
+        ))}
+      </div>
+    </nav>
+  )
+}
+
+function MobileCurrentRoute({ activeNav, runtimeAlertBadge, onOpenMenu }) {
+  if (!activeNav?.section || !activeNav?.item) return null
+  const { section, item } = activeNav
+  const Icon = item.icon
+  return (
+    <button
+      type="button"
+      className="flex w-full min-w-0 items-center justify-between gap-3 rounded-xl border border-primary-100/70 bg-white/78 px-3 py-2 text-left shadow-sm backdrop-blur-sm lg:hidden"
+      onClick={onOpenMenu}
+      aria-label={`打开导航菜单：${section.title} / ${item.label}`}
+    >
+      <span className="flex min-w-0 items-center gap-2">
+        <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-primary-100 bg-primary-50 text-primary">
+          <Icon size={16} />
+        </span>
+        <span className="min-w-0">
+          <span className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-gray-400">
             {section.title}
-            {sectionBadges[section.title] ? (
-              <NavBadge
-                value={sectionBadges[section.title].value}
-                severity={sectionBadges[section.title].severity}
-              />
+            {section.title === 'Life Systems' && runtimeAlertBadge ? (
+              <NavBadge value={runtimeAlertBadge.value} severity={runtimeAlertBadge.severity} />
             ) : null}
           </span>
-          {section.items.map((item) => (
-            <NavPill key={item.to} {...item} badge={itemBadges[item.to]} compact />
-          ))}
-        </React.Fragment>
-      ))}
-    </nav>
+          <span className="block truncate text-sm font-semibold text-gray-800">{item.label}</span>
+        </span>
+      </span>
+      <span className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-gray-200 bg-gray-50 px-2 py-1 text-xs font-medium text-gray-500">
+        菜单
+        <ChevronRight size={14} />
+      </span>
+    </button>
+  )
+}
+
+function MobileNavDrawer({
+  activeNav,
+  itemBadges,
+  mobileMenuOpen,
+  onClose,
+  sectionBadges,
+}) {
+  if (!mobileMenuOpen) return null
+  return (
+    <>
+      <button
+        type="button"
+        className="fixed inset-0 z-[60] bg-slate-950/30 backdrop-blur-[1px] lg:hidden"
+        onClick={onClose}
+        aria-label="关闭导航遮罩"
+      />
+      <nav
+        className="fixed inset-y-0 left-0 z-[70] flex w-[min(22rem,calc(100vw-2rem))] flex-col border-r border-primary-100/70 bg-slate-50 shadow-2xl lg:hidden"
+        role="navigation"
+        aria-label="移动端导航"
+      >
+        <div className="border-b border-primary-100/70 bg-white/88 px-4 py-3">
+          <div className="flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <div className="text-base font-bold tracking-tight text-primary">Natsume AI</div>
+              <div className="truncate text-xs text-gray-500">
+                {activeNav?.section?.title || 'Console'} / {activeNav?.item?.label || '导航'}
+              </div>
+            </div>
+            <button
+              type="button"
+              className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-gray-200 bg-gray-50 text-gray-600 transition-colors hover:bg-gray-100"
+              onClick={onClose}
+              aria-label="关闭导航菜单"
+            >
+              <X size={18} />
+            </button>
+          </div>
+        </div>
+
+        <div className="flex-1 overflow-y-auto px-3 py-3">
+          {NAV_SECTIONS.map((section) => {
+            const isCurrentSection = activeNav?.section?.title === section.title
+            return (
+              <section
+                key={section.title}
+                className={`border-b border-primary-100/70 py-2 last:border-b-0 ${
+                  isCurrentSection ? 'rounded-xl border border-primary-100 bg-white/76 px-2 shadow-sm' : 'px-2'
+                }`}
+              >
+                <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-gray-400">
+                  <span>{section.title}</span>
+                  {sectionBadges[section.title] ? (
+                    <NavBadge
+                      value={sectionBadges[section.title].value}
+                      severity={sectionBadges[section.title].severity}
+                    />
+                  ) : null}
+                </div>
+                <div className="grid grid-cols-1 gap-1">
+                  {section.items.map((item) => (
+                    <NavPill
+                      key={item.to}
+                      {...item}
+                      badge={itemBadges[item.to]}
+                      block
+                      compact={false}
+                      onClick={onClose}
+                    />
+                  ))}
+                </div>
+              </section>
+            )
+          })}
+        </div>
+      </nav>
+    </>
   )
 }
 
@@ -100,6 +271,7 @@ export default function Layout() {
   const setPageVisible = useAppStore((state) => state.setPageVisible)
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const location = useLocation()
+  const activeNav = findActiveNav(location.pathname)
   const {
     statsData: capabilityGapData,
   } = useCapabilityGapStatsQuery({
@@ -117,7 +289,22 @@ export default function Layout() {
 
   useEffect(() => {
     setMobileMenuOpen(false)
-  }, [location.pathname])
+  }, [location.pathname, location.search])
+
+  useEffect(() => {
+    if (!mobileMenuOpen) {
+      return undefined
+    }
+    const handleKeyDown = (event) => {
+      if (event.key === 'Escape') {
+        setMobileMenuOpen(false)
+      }
+    }
+    document.addEventListener('keydown', handleKeyDown)
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [mobileMenuOpen])
 
   useEffect(() => {
     const syncPageVisibility = () => {
@@ -167,13 +354,14 @@ export default function Layout() {
           <div className="flex items-center justify-between gap-4">
             <div className="flex items-center gap-2">
               <button
-                className="rounded p-1.5 text-gray-500 transition-colors hover:bg-gray-100 lg:hidden"
+                type="button"
+                className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-gray-200 bg-white/75 text-gray-500 transition-colors hover:bg-gray-100 lg:hidden"
                 onClick={() => setMobileMenuOpen((value) => !value)}
-                aria-label="切换导航菜单"
+                aria-label={mobileMenuOpen ? '关闭主导航菜单' : '打开主导航菜单'}
               >
                 {mobileMenuOpen ? <X size={20} /> : <Menu size={20} />}
               </button>
-              <div>
+              <div className="min-w-0">
                 <div className="text-lg font-bold tracking-tight text-primary">Natsume AI</div>
                 <div className="hidden text-xs text-gray-400 sm:block">数字生命体控制台</div>
               </div>
@@ -214,46 +402,23 @@ export default function Layout() {
             pollingTick={pollingTick}
           />
 
-          <DesktopNav sectionBadges={sectionBadges} itemBadges={itemBadges} />
+          <MobileCurrentRoute
+            activeNav={activeNav}
+            runtimeAlertBadge={runtimeAlertBadge}
+            onOpenMenu={() => setMobileMenuOpen(true)}
+          />
+
+          <DesktopNav activeNav={activeNav} sectionBadges={sectionBadges} itemBadges={itemBadges} />
         </div>
       </header>
 
-      {mobileMenuOpen ? (
-        <>
-          <div className="fixed inset-0 z-40 bg-black/30 lg:hidden" onClick={() => setMobileMenuOpen(false)} />
-          <nav
-            className="fixed bottom-0 left-0 top-[72px] z-50 w-72 overflow-y-auto border-r border-primary-100/70 bg-slate-50/94 shadow-xl backdrop-blur lg:hidden"
-            role="navigation"
-            aria-label="移动端导航"
-          >
-            <div className="space-y-3 p-3">
-              {NAV_SECTIONS.map((section) => (
-                <div key={section.title} className="rounded-xl border border-primary-100/70 bg-gradient-to-br from-white/86 to-primary-50/55 p-2">
-                  <div className="flex items-center gap-1.5 px-2 py-1 text-[11px] font-semibold uppercase tracking-wide text-gray-400">
-                    <span>{section.title}</span>
-                    {sectionBadges[section.title] ? (
-                      <NavBadge
-                        value={sectionBadges[section.title].value}
-                        severity={sectionBadges[section.title].severity}
-                      />
-                    ) : null}
-                  </div>
-                  <div className="space-y-1">
-                    {section.items.map((item) => (
-                      <NavPill
-                        key={item.to}
-                        {...item}
-                        badge={itemBadges[item.to]}
-                        onClick={() => setMobileMenuOpen(false)}
-                      />
-                    ))}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </nav>
-        </>
-      ) : null}
+      <MobileNavDrawer
+        activeNav={activeNav}
+        itemBadges={itemBadges}
+        mobileMenuOpen={mobileMenuOpen}
+        onClose={() => setMobileMenuOpen(false)}
+        sectionBadges={sectionBadges}
+      />
 
       <main className="relative z-10 mx-auto flex w-full max-w-[1760px] min-w-0 flex-1 flex-col px-4 py-6 sm:px-6 lg:px-8">
         <Outlet />

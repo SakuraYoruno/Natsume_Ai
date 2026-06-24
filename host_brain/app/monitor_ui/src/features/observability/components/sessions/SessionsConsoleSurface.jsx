@@ -7,6 +7,7 @@ import SessionsHeader from './SessionsHeader.jsx'
 import SessionsNotices from './SessionsNotices.jsx'
 import SessionsPagination from './SessionsPagination.jsx'
 import SessionsStreamSection from './SessionsStreamSection.jsx'
+import SessionsTriageRail from './SessionsTriageRail.jsx'
 import SessionsVitalsSection from './SessionsVitalsSection.jsx'
 
 export default function SessionsConsoleSurface({
@@ -23,6 +24,7 @@ export default function SessionsConsoleSurface({
   suppressedCount,
   showNoSampleNotice,
   runtimeCard,
+  triageRail,
   sessions,
   sessionCards,
   summary,
@@ -37,6 +39,7 @@ export default function SessionsConsoleSurface({
   onRefresh,
   onKeywordChange,
   onStatusChange,
+  onClearFilters,
   onSearch,
   onOpenSession,
   onPreviousPage,
@@ -88,6 +91,14 @@ export default function SessionsConsoleSurface({
       />
 
       {runtimeCard}
+
+      <SessionsTriageRail
+        model={triageRail}
+        onOpenSession={onOpenSession}
+        onSetStatus={onStatusChange}
+        onClearFilters={onClearFilters}
+        onRefresh={onRefresh}
+      />
 
       <SessionsVitalsSection sessions={sessions} summary={summary} />
 

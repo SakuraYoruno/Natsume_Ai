@@ -6,8 +6,6 @@ Thumbs.db
 skills/*
 !skills/example-echo/
 !skills/example-echo/**
-!skills/pentest/
-!skills/pentest/**
 !host_brain/skills/
 !host_brain/skills/project_locator.py
 !host_brain/skills/codex_task_builder.py
@@ -40,6 +38,7 @@ ENV/
 
 # --- Node.js ---
 node_modules/
+host_brain/app/monitor_ui/test-results/
 
 # --- Build / package artifacts ---
 build/
@@ -156,6 +155,7 @@ flows/exports/
 !host_brain/release/release_manifest.py
 
 .codebuddy
+.workbuddy/
 
 # --- Repository noise / generated evidence ---
 /artifacts/
@@ -164,3 +164,4 @@ flows/exports/
 test_output.txt
 tools/_*.png
 xianyu_item.png
+host_brain/canon/world/.locks/

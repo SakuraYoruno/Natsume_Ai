@@ -39,10 +39,17 @@ export default function InsightsDetailPane({
   vtsData,
   windowMinutes,
 }) {
+  const handleBackToGroups = () => {
+    navigate('/observability/insights')
+    if (window.location.hash !== '#/observability/insights') {
+      window.location.hash = '#/observability/insights'
+    }
+  }
+
   return (
     <div className="space-y-8">
       <div className="card p-4">
-        <button className="btn-secondary" onClick={() => navigate('/observability/insights')}>
+        <button type="button" className="btn-secondary" onClick={handleBackToGroups}>
           <ArrowLeft size={16} /> 返回分组
         </button>
       </div>

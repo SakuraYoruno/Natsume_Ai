@@ -1,0 +1,50 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "Host Brain (主 API)",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-m", "host_brain"],
+      "port": 18080
+    },
+    {
+      "name": "Host Observability (OBS 可观测性)",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-m", "host_brain.obs_main"],
+      "port": 18082
+    },
+    {
+      "name": "Edge RPC Gateway",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-m", "edge_client"],
+      "port": 17800
+    },
+    {
+      "name": "Unified Message Gateway (消息网关)",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-m", "edge_client.gateway.server"],
+      "port": 19000
+    },
+    {
+      "name": "Monitor UI (监控前端)",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev"],
+      "port": 5173,
+      "cwd": "${workspaceFolder}/host_brain/app/monitor_ui"
+    },
+    {
+      "name": "Desktop Pet (桌面宠物)",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["start"],
+      "port": 18788,
+      "cwd": "${workspaceFolder}/desktop_pet"
+    },
+    {
+      "name": "VRM Bridge (3D Avatar)",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["server.mjs"],
+      "port": 18760,
+      "cwd": "${workspaceFolder}/tools/vrm_bridge"
+    }
+  ]
+}
