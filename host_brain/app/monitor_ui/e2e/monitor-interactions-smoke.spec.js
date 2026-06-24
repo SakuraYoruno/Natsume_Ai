@@ -637,30 +637,36 @@ async function stubTraceApis(page) {
   const requestId = 'req_trace_smoke'
   const traceSnapshot = {
     request_id: requestId,
-    status: 'OK',
+    status: 'DEGRADED',
     total_latency_ms: 128,
     timestamp: '2026-06-20T08:00:00Z',
     summary: {
       session_id: 'sess_trace_smoke',
       conversation_id: 'conv_trace_smoke',
       request_id: requestId,
+      decision: 'review',
+      task_type: 'trace_smoke',
     },
     nodes: [
       {
+        node_id: 'input',
         id: 'input',
         name: 'Input capture',
         stage: 'input',
         status: 'OK',
         latency_ms: 12,
         output: 'User request normalized',
+        ts_ms: 1781942400000,
       },
       {
+        node_id: 'planner',
         id: 'planner',
-        name: 'Planner',
+        name: 'Planner guard',
         stage: 'plan',
-        status: 'OK',
+        status: 'DEGRADED',
         latency_ms: 48,
-        output: 'Route selected',
+        output: 'Route selected with fallback policy',
+        ts_ms: 1781942400100,
       },
     ],
   }
@@ -694,7 +700,43 @@ async function stubTraceApis(page) {
     ],
     last_ts: '2026-06-20T08:00:00Z',
   }))
+  await page.route('**/obs/trace/**/stream_events', (route) => fulfillJson(route, {
+    events: [
+      {
+        event_id: 'stream-1',
+        type: 'node.degraded',
+        node_id: 'planner',
+        message: 'Planner guard used fallback policy',
+        ts_ms: 1781942400100,
+      },
+    ],
+  }))
+  await page.route('**/obs/trace/req_trace_smoke', (route) => fulfillJson(route, traceSnapshot))
   await page.route('**/obs/trace-snapshot/**', (route) => fulfillJson(route, traceSnapshot))
+  await page.route('**/obs/retrieval/runtime**', (route) => fulfillJson(route, {
+    suite_profile: 'smoke',
+    read_write_model_aligned: false,
+    recent_embedding_fallbacks: 1,
+    latest: {
+      embedding_model_id: 'text-embedding-smoke',
+      effective_embedding_provider: 'fixture',
+      fallback_embedding_used: true,
+      fallback_embedding_reason_code: 'fixture_fallback',
+      ts_ms: 1781942400200,
+    },
+  }))
+  await page.route('**/obs/immune-gate/replay/**', (route) => fulfillJson(route, {
+    request_id: requestId,
+    events: [
+      {
+        event_id: 'immune-1',
+        decision: 'review',
+        risk_level: 'medium',
+        reason_code: 'planner_fallback',
+        ts_ms: 1781942400100,
+      },
+    ],
+  }))
   await page.route('**/obs/sessions**', (route) => fulfillJson(route, {
     items: [
       {
@@ -978,6 +1020,27 @@ test.describe('Monitor interaction smoke', () => {
 
     await fullChainLink.click()
     await expect.poll(() => new URL(page.url()).hash).toBe('#/observability/trace/full')
+  })
+
+  test('Trace request detail triage rail focuses issue evidence', async ({ page, baseURL }) => {
+    await stubTraceApis(page)
+    await page.goto(monitorUrl(baseURL, '/observability/trace/req_trace_smoke'), { waitUntil: 'domcontentloaded' })
+
+    await expect(page.getByRole('heading', { name: '请求级 Trace 深入查看' })).toBeVisible()
+    const triageRail = page.locator('[aria-label="Trace Request Triage Rail"]')
+    await expect(triageRail).toBeVisible()
+    await expect(triageRail.getByText('Trace Triage')).toBeVisible()
+    await expect(triageRail.getByText('先处理 1 个异常/降级节点')).toBeVisible()
+    await expect(triageRail.getByText('读写漂移')).toBeVisible()
+
+    await triageRail.getByRole('button', { name: '定位异常节点' }).click()
+    await expect(page.locator('#trace-node-detail')).toContainText('降级')
+    await expect(page.locator('#trace-node-detail')).toContainText('Route selected with fallback policy')
+
+    await expect(triageRail.getByRole('link', { name: '打开 Immune Ops' })).toHaveAttribute(
+      'href',
+      /#\/execution\/automation\?immune_replay_request_id=req_trace_smoke/,
+    )
   })
 
   test('Edge command validates payload and requires the control gate', async ({ page, baseURL }) => {

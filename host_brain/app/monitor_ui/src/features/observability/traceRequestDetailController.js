@@ -142,13 +142,14 @@ export function useTraceRequestDetailController() {
 
   const viewModel = useMemo(
     () => buildTraceRequestDetailViewModel({
+      requestId,
       traceData,
       fallbackEvents,
       tribeEvents,
       retrievalRuntime,
       liveConnected,
     }),
-    [fallbackEvents, liveConnected, retrievalRuntime, traceData, tribeEvents]
+    [fallbackEvents, liveConnected, requestId, retrievalRuntime, traceData, tribeEvents]
   )
   const {
     nodes,
@@ -162,6 +163,7 @@ export function useTraceRequestDetailController() {
     subgraphs,
     retrievalMeta,
     liveModeText,
+    triageRail,
     tracePulseNodes,
     traceDegraded,
     degradedMessage,
@@ -201,6 +203,7 @@ export function useTraceRequestDetailController() {
     tribeEvents,
     retrievalMeta,
     retrievalRuntime,
+    triageRail,
     immuneReplay,
     immuneReplayLoading,
     immuneReplayError,

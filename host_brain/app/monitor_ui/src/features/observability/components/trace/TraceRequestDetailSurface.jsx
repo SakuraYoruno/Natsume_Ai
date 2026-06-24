@@ -22,6 +22,7 @@ export default function TraceRequestDetailSurface({
   tribeEvents,
   retrievalMeta,
   retrievalRuntime,
+  triageRail,
   immuneReplay,
   immuneReplayLoading,
   immuneReplayError,
@@ -103,6 +104,7 @@ export default function TraceRequestDetailSurface({
           tribeEvents={tribeEvents}
           retrievalMeta={retrievalMeta}
           retrievalRuntime={retrievalRuntime}
+          triageRail={triageRail}
           immuneReplay={immuneReplay}
           immuneReplayLoading={immuneReplayLoading}
           immuneReplayError={immuneReplayError}

@@ -1,6 +1,7 @@
 import EmptyStateCard from '../../../../shared/ui/EmptyStateCard.jsx'
 import NodeDetailPanel from './NodeDetailPanel.jsx'
 import TraceRequestDetailMetrics from './TraceRequestDetailMetrics.jsx'
+import TraceRequestTriageRail from './TraceRequestTriageRail.jsx'
 import {
   TraceRequestSummarySection,
   TraceRetrievalRuntimeSection,
@@ -31,6 +32,7 @@ export default function TraceRequestDetailLoadedContent({
   tribeEvents,
   retrievalMeta,
   retrievalRuntime,
+  triageRail,
   immuneReplay,
   immuneReplayLoading,
   immuneReplayError,
@@ -47,6 +49,8 @@ export default function TraceRequestDetailLoadedContent({
 }) {
   return (
     <>
+      <TraceRequestTriageRail model={triageRail} onSelectNode={onSelectNode} />
+
       <TraceRequestDetailMetrics
         traceData={traceData}
         nodes={nodes}
@@ -59,17 +63,21 @@ export default function TraceRequestDetailLoadedContent({
         liveConnected={liveConnected}
       />
 
-      <StageOverviewPanel nodes={nodes} selectedNode={selectedNode} onSelectNode={onSelectNode} />
+      <div id="trace-stage-overview" className="scroll-mt-4">
+        <StageOverviewPanel nodes={nodes} selectedNode={selectedNode} onSelectNode={onSelectNode} />
+      </div>
 
-      <ImmuneReplayPanel
-        replay={immuneReplay}
-        loading={immuneReplayLoading}
-        error={immuneReplayError}
-        requestId={requestId}
-        onReload={onReloadImmuneReplay}
-      />
+      <div id="trace-immune-replay" className="scroll-mt-4">
+        <ImmuneReplayPanel
+          replay={immuneReplay}
+          loading={immuneReplayLoading}
+          error={immuneReplayError}
+          requestId={requestId}
+          onReload={onReloadImmuneReplay}
+        />
+      </div>
 
-      <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]">
+      <div id="trace-summary" className="grid scroll-mt-4 grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]">
         <TraceRequestSummarySection
           summary={summary}
           inputPreview={inputPreview}
@@ -82,7 +90,7 @@ export default function TraceRequestDetailLoadedContent({
         />
       </div>
 
-      <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+      <div id="trace-stream-events" className="grid scroll-mt-4 grid-cols-1 gap-4 xl:grid-cols-2">
         <SubgraphsPanel subgraphs={subgraphs} selectedNode={selectedNode} onSelectNode={onSelectNode} />
         <StreamEventsPanel events={streamEvents} loading={eventsLoading} error={eventsError} />
       </div>
@@ -106,7 +114,7 @@ export default function TraceRequestDetailLoadedContent({
           <NodeTimelinePanel nodes={nodes} selectedNode={selectedNode} onSelectNode={onSelectNode} />
         </div>
 
-        <div className="xl:sticky xl:top-4">
+        <div id="trace-node-detail" className="scroll-mt-4 xl:sticky xl:top-4">
           {selectedNode ? <NodeDetailPanel node={selectedNode} onClose={() => onSelectNode(null)} /> : <EmptyStateCard title="请选择节点" hint="选中左侧节点后可查看输入、输出与链路元数据。" className="p-6" />}
         </div>
       </div>
