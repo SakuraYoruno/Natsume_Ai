@@ -20,8 +20,8 @@ function graphDirection(nodes = []) {
 }
 
 function graphMinZoom(nodes = [], direction) {
-  if (direction === 'TB') return nodes.length >= 11 ? 0.38 : 0.46
-  if (nodes.length >= 7) return 0.52
+  if (direction === 'TB') return nodes.length >= 11 ? 0.32 : 0.38
+  if (nodes.length >= 7) return 0.48
   if (nodes.length >= 5) return 0.62
   return 0.72
 }
@@ -138,7 +138,6 @@ export default function AttackGraphCanvas({ graph, className = '' }) {
   const flowData = useMemo(() => buildFlowData(graph, setSelectedNode, layoutDirection), [graph, layoutDirection])
   const summary = graph?.summary || {}
   const minZoom = graphMinZoom(nodes, layoutDirection)
-  const shouldFitView = nodes.length <= 4
   const defaultViewport = layoutDirection === 'TB'
     ? { x: 24, y: 28, zoom: minZoom }
     : { x: 28, y: 110, zoom: minZoom }
@@ -161,15 +160,15 @@ export default function AttackGraphCanvas({ graph, className = '' }) {
         ))}
       </div>
 
-      <div className={`${layoutDirection === 'TB' ? 'h-[560px] md:h-[480px]' : 'h-[260px] md:h-[300px]'} overflow-hidden rounded-xl border border-gray-200 bg-slate-50`}>
+      <div className={`${layoutDirection === 'TB' ? 'h-[620px] md:h-[560px]' : 'h-[300px] md:h-[330px]'} overflow-hidden rounded-xl border border-gray-200 bg-slate-50`}>
         <ReactFlow
           key={graph?.graphId || 'attack-graph'}
           nodes={flowData.nodes}
           edges={flowData.edges}
           nodeTypes={NODE_TYPES}
-          fitView={shouldFitView}
+          fitView
           defaultViewport={defaultViewport}
-          fitViewOptions={{ padding: layoutDirection === 'TB' ? 0.05 : 0.08, minZoom, maxZoom: 1.05 }}
+          fitViewOptions={{ padding: layoutDirection === 'TB' ? 0.12 : 0.14, minZoom, maxZoom: layoutDirection === 'TB' ? 0.9 : 1.1 }}
           minZoom={minZoom}
           maxZoom={1.8}
           nodesDraggable={false}
