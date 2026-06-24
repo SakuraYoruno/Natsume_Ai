@@ -26,6 +26,8 @@ AGENT_PRODUCTION_SKILL_IDS: frozenset[str] = frozenset(
         "agent_web_corpus_collector",
         "agent_lightnovel_recommender",
         "agent_epub_builder",
+        "pentest_autonomous",
+        "pentest_experience_distillation",
     }
 )
 
