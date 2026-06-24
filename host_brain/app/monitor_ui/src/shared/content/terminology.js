@@ -211,6 +211,11 @@ export const PENTEST_COPY = Object.freeze({
   runTitle: '渗透任务详情',
   runEyebrow: 'Pentest Run Detail',
   runDescription: '实时查看任务事件、攻击路径、发现、报告和 side-effect 审批状态。',
+  runCommandRailTitle: 'Run Decision Rail',
+  runCommandRailDescription: '把 run 状态、Lab gate、approval、finding、timeline 和 report 压缩成下一步操作。',
+  runCommandRailFocusTitle: '下一步动作',
+  runCommandRailGateTitle: '执行 Gate',
+  runCommandRailEvidenceTitle: '证据摘要',
   workflow: [
     { key: 'scope', title: '1. 授权范围', detail: 'target 必须命中 scope，越界会被 ScopeGuard 拦截。' },
     { key: 'plan', title: '2. 计划路径', detail: '根据 mode 与 phases 生成可解释攻击图。' },
