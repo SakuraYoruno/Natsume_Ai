@@ -1216,6 +1216,13 @@ test.describe('Monitor interaction smoke', () => {
     await page.goto(monitorUrl(baseURL, '/security/immune'), { waitUntil: 'domcontentloaded' })
     await expect(page.getByRole('heading', { name: '安全免疫', exact: true })).toBeVisible()
 
+    const heroStatus = page.getByRole('region', { name: 'Security Immune hero status' })
+    await expect(heroStatus).toBeVisible()
+    await expect(heroStatus.getByText('存在 High incident')).toBeVisible()
+    await expect(heroStatus.getByText('connected')).toBeVisible()
+    await expect(heroStatus.getByText('2 assets')).toBeVisible()
+    await expect(heroStatus.getByText('1 high+')).toBeVisible()
+
     const gate = page.getByRole('region', { name: 'Security Immune Gate' })
     await expect(gate).toBeVisible()
     await expect(gate.getByText('存在 High incident')).toBeVisible()

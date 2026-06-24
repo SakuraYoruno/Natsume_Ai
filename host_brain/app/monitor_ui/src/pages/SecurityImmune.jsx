@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react'
-import { Bug, Filter, RefreshCw, Search, ShieldCheck, X } from 'lucide-react'
+import { Activity, Bug, Crosshair, DatabaseZap, Filter, RefreshCw, Search, ShieldCheck, X } from 'lucide-react'
 import PageHero from '../shared/ui/PageHero.jsx'
 import NoticeBanner from '../shared/ui/NoticeBanner.jsx'
 import StatusBadge from '../shared/ui/StatusBadge.jsx'
@@ -31,6 +31,77 @@ function toneClass(tone) {
     orange: 'border-orange-100 bg-orange-50 text-orange-700',
     red: 'border-red-100 bg-red-50 text-red-700',
   }[tone] || 'border-gray-100 bg-gray-50 text-gray-600'
+}
+
+function HeroSignal({ icon: Icon, label, value, detail, tone = 'green' }) {
+  return (
+    <div className="rounded-lg border border-white/80 bg-white/84 px-3 py-2 shadow-sm">
+      <div className="flex items-center justify-between gap-2">
+        <span className="inline-flex min-w-0 items-center gap-1.5 text-xs font-semibold text-gray-500">
+          <Icon size={13} className="shrink-0 text-primary" />
+          <span className="truncate">{label}</span>
+        </span>
+        <span className={`shrink-0 rounded border px-1.5 py-0.5 text-[11px] font-semibold ${toneClass(tone)}`}>
+          {value}
+        </span>
+      </div>
+      <div className="mt-1 line-clamp-2 text-xs leading-5 text-gray-500">{detail}</div>
+    </div>
+  )
+}
+
+function SecurityImmuneHeroStatus({
+  mission,
+  runtime,
+  assets,
+  incidents,
+  minRisk,
+  runningHunt,
+}) {
+  const riskCounts = incidents?.risk_counts || runtime?.risk_counts || {}
+  const criticalHighCount = Number(riskCounts.critical || 0) + Number(riskCounts.high || 0)
+  const assetCount = Number(assets?.asset_count ?? runtime?.asset_count ?? 0)
+  const incidentCount = Number(incidents?.incident_count ?? runtime?.incident_count ?? 0)
+  const runtimeReady = Boolean(runtime)
+
+  return (
+    <div role="region" aria-label="Security Immune hero status" className="w-full max-w-xl space-y-2">
+      <div className={`rounded-lg border px-3 py-2 text-sm ${toneClass(mission.tone)}`}>
+        <div className="font-bold">{mission.title}</div>
+        <div className="mt-1 text-xs leading-5">{mission.detail}</div>
+      </div>
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+        <HeroSignal
+          icon={Activity}
+          label="Runtime"
+          value={runtimeReady ? 'connected' : 'degraded'}
+          detail={runtimeReady ? '/obs/security/runtime 可读' : '等待 runtime 快照或降级回退'}
+          tone={runtimeReady ? 'green' : 'orange'}
+        />
+        <HeroSignal
+          icon={DatabaseZap}
+          label="Assets"
+          value={`${assetCount} assets`}
+          detail={assetCount > 0 ? 'endpoint asset 快照已接入' : '缺少资产样本，建议运行 hunt'}
+          tone={assetCount > 0 ? 'green' : 'orange'}
+        />
+        <HeroSignal
+          icon={Crosshair}
+          label="Incidents"
+          value={`${criticalHighCount} high+`}
+          detail={`${incidentCount} open；当前 min risk ${minRisk}`}
+          tone={criticalHighCount > 0 ? 'red' : incidentCount > 0 ? 'amber' : 'green'}
+        />
+        <HeroSignal
+          icon={Bug}
+          label="Manual Hunt"
+          value={runningHunt ? 'running' : 'gated'}
+          detail="internal gated route 可触发一次巡检。"
+          tone={runningHunt ? 'blue' : 'green'}
+        />
+      </div>
+    </div>
+  )
 }
 
 function IncidentTriageSummary({ triage, visibleCount, totalCount, onRunHunt, runningHunt }) {
@@ -176,6 +247,17 @@ export default function SecurityImmune() {
         description={SECURITY_IMMUNE_COPY.heroDescription}
         gradientClass="from-emerald-50 via-white to-rose-50"
         metaItems={heroMetaItems}
+        aside={(
+          <SecurityImmuneHeroStatus
+            mission={mission}
+            runtime={runtime}
+            assets={assets}
+            incidents={incidents}
+            minRisk={minRisk}
+            runningHunt={runningHunt}
+          />
+        )}
+        showPulseRail={false}
       />
 
       {errors.length > 0 ? (
