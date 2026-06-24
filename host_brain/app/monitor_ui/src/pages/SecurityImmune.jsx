@@ -1,5 +1,19 @@
 import React, { useMemo, useState } from 'react'
-import { Activity, Bug, Crosshair, DatabaseZap, Filter, RefreshCw, Search, ShieldCheck, X } from 'lucide-react'
+import {
+  Activity,
+  AlertTriangle,
+  Bug,
+  ClipboardCheck,
+  Crosshair,
+  DatabaseZap,
+  FileSearch,
+  Filter,
+  ListChecks,
+  RefreshCw,
+  Search,
+  ShieldCheck,
+  X,
+} from 'lucide-react'
 import PageHero from '../shared/ui/PageHero.jsx'
 import NoticeBanner from '../shared/ui/NoticeBanner.jsx'
 import StatusBadge from '../shared/ui/StatusBadge.jsx'
@@ -48,6 +62,10 @@ function HeroSignal({ icon: Icon, label, value, detail, tone = 'green' }) {
       <div className="mt-1 line-clamp-2 text-xs leading-5 text-gray-500">{detail}</div>
     </div>
   )
+}
+
+function scrollToSection(sectionId) {
+  document.getElementById(sectionId)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
 }
 
 function SecurityImmuneHeroStatus({
@@ -143,6 +161,167 @@ function IncidentTriageSummary({ triage, visibleCount, totalCount, onRunHunt, ru
           {runningHunt ? 'Hunt 运行中' : '运行一次 Hunt'}
         </button>
       ) : null}
+    </section>
+  )
+}
+
+function SecurityEvidenceHandoff({
+  triage,
+  visibleCount,
+  totalCount,
+  minRisk,
+  runningHunt,
+  onFocusIncidents,
+  onFocusHighPlus,
+  onFocusNeedsEvidence,
+  onRunHunt,
+}) {
+  const incident = triage.primaryIncident
+  const checklist = [
+    {
+      key: 'scope',
+      icon: Crosshair,
+      label: 'Scope',
+      value: incident ? incident.asset : 'empty',
+      detail: incident ? `source: ${incident.source}` : '当前阈值下没有 incident，可保持监控。',
+      tone: incident ? 'blue' : 'green',
+    },
+    {
+      key: 'evidence',
+      icon: FileSearch,
+      label: 'Evidence',
+      value: incident ? (incident.hasEvidence ? `${incident.evidenceCount} refs` : 'missing') : 'empty',
+      detail: incident?.hasEvidence ? '证据引用可交接到审计链。' : '缺少 evidence refs 的事件需要先补采样。',
+      tone: incident?.hasEvidence ? 'green' : 'orange',
+    },
+    {
+      key: 'action',
+      icon: ListChecks,
+      label: 'Action',
+      value: incident?.actionLabel || 'monitor',
+      detail: incident?.actionDetail || '没有需要处置的事件。',
+      tone: incident?.actionTone || 'green',
+    },
+    {
+      key: 'audit',
+      icon: ClipboardCheck,
+      label: 'Audit',
+      value: incident?.auditRef ? 'ledger linked' : 'artifact pending',
+      detail: incident?.auditRef || 'Hunt 结果和处置记录会进入 audit/artifacts。',
+      tone: incident?.auditRef ? 'green' : 'amber',
+    },
+  ]
+
+  return (
+    <section
+      id="security-immune-evidence-handoff"
+      aria-label="Security Immune Evidence Handoff"
+      className="rounded-xl border border-white/80 bg-white/88 p-4 shadow-sm"
+    >
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div className="min-w-0">
+          <div className="inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-emerald-700">
+            <FileSearch size={14} />
+            Security Evidence Handoff
+          </div>
+          <h2 className="mt-1 text-base font-semibold text-gray-900">
+            {incident ? incident.title : '当前没有待交接 incident'}
+          </h2>
+          <p className="mt-1 max-w-3xl text-xs leading-5 text-gray-500">
+            {incident
+              ? `${incident.risk.toUpperCase()} · ${incident.asset} · ${incident.recommendation}`
+              : '页面会保留手动 hunt、风险阈值和空态说明，避免 Security Lab 在无样本时只剩空白。'}
+          </p>
+        </div>
+        <div className="grid min-w-[240px] grid-cols-3 gap-2 text-center text-xs">
+          <div className="rounded-lg border border-gray-100 bg-gray-50 px-2 py-2">
+            <div className="text-base font-bold text-gray-900">{totalCount}</div>
+            <div className="text-gray-500">incidents</div>
+          </div>
+          <div className="rounded-lg border border-gray-100 bg-gray-50 px-2 py-2">
+            <div className="text-base font-bold text-gray-900">{visibleCount}</div>
+            <div className="text-gray-500">visible</div>
+          </div>
+          <div className="rounded-lg border border-gray-100 bg-gray-50 px-2 py-2">
+            <div className="text-base font-bold text-gray-900">{minRisk}</div>
+            <div className="text-gray-500">min risk</div>
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-4 grid grid-cols-1 gap-3 lg:grid-cols-4">
+        {checklist.map(({ key, icon: Icon, label, value, detail, tone }) => (
+          <div key={key} className={`rounded-lg border px-3 py-3 ${toneClass(tone)}`}>
+            <div className="flex items-center justify-between gap-2">
+              <span className="inline-flex min-w-0 items-center gap-1.5 text-xs font-semibold uppercase tracking-wide">
+                <Icon size={13} className="shrink-0" />
+                <span className="truncate">{label}</span>
+              </span>
+              <span className="shrink-0 rounded bg-white/70 px-1.5 py-0.5 text-[11px] font-semibold">{value}</span>
+            </div>
+            <div className="mt-2 line-clamp-3 text-xs leading-5">{detail}</div>
+          </div>
+        ))}
+      </div>
+
+      <div className="mt-4 grid grid-cols-1 gap-3 xl:grid-cols-[minmax(0,1fr)_280px]">
+        <div className="rounded-lg border border-slate-100 bg-slate-50/80 p-3">
+          <div className="mb-2 flex items-center gap-2 text-xs font-semibold text-slate-700">
+            <ClipboardCheck size={13} />
+            Evidence refs
+          </div>
+          {incident?.evidenceRefs?.length > 0 ? (
+            <div className="flex flex-wrap gap-1.5">
+              {incident.evidenceRefs.map((ref) => (
+                <span key={ref} className="max-w-full truncate rounded border border-cyan-200 bg-white px-2 py-1 text-[11px] font-semibold text-cyan-700">
+                  {ref}
+                </span>
+              ))}
+            </div>
+          ) : (
+            <div className="inline-flex items-start gap-2 rounded border border-orange-200 bg-orange-50 px-3 py-2 text-xs leading-5 text-orange-800">
+              <AlertTriangle size={14} className="mt-0.5 shrink-0" />
+              <span>当前优先事件缺少 evidence refs，建议先运行 Hunt 或回到 incident 列表定位缺证据样本。</span>
+            </div>
+          )}
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2 rounded-lg border border-gray-100 bg-gray-50/80 p-3">
+          <button
+            type="button"
+            onClick={onFocusIncidents}
+            className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50"
+          >
+            <Crosshair size={13} />
+            定位 incidents
+          </button>
+          <button
+            type="button"
+            onClick={onFocusHighPlus}
+            className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-orange-200 bg-orange-50 px-3 py-2 text-xs font-semibold text-orange-700 hover:bg-orange-100"
+          >
+            <ShieldCheck size={13} />
+            只看 High+
+          </button>
+          <button
+            type="button"
+            onClick={onFocusNeedsEvidence}
+            className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-700 hover:bg-amber-100"
+          >
+            <FileSearch size={13} />
+            只看缺证据
+          </button>
+          <button
+            type="button"
+            disabled={runningHunt}
+            onClick={onRunHunt}
+            className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-xs font-semibold text-white hover:bg-primary-700 disabled:opacity-50"
+          >
+            <Bug size={13} />
+            {runningHunt ? 'Hunt 运行中' : '运行 Hunt'}
+          </button>
+        </div>
+      </div>
     </section>
   )
 }
@@ -275,6 +454,24 @@ export default function SecurityImmune() {
         onRunHunt={runHunt}
         busy={busy}
         runningHunt={runningHunt}
+      />
+
+      <SecurityEvidenceHandoff
+        triage={triage}
+        visibleCount={visibleIncidentRows.length}
+        totalCount={incidentRows.length}
+        minRisk={minRisk}
+        runningHunt={runningHunt}
+        onFocusIncidents={() => scrollToSection('security-immune-incidents')}
+        onFocusHighPlus={() => {
+          setIncidentFocus('high_plus')
+          scrollToSection('security-immune-incidents')
+        }}
+        onFocusNeedsEvidence={() => {
+          setIncidentFocus('needs_evidence')
+          scrollToSection('security-immune-incidents')
+        }}
+        onRunHunt={runHunt}
       />
 
       {huntResult ? (

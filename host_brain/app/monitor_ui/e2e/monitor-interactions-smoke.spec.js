@@ -490,6 +490,7 @@ async function stubSecurityImmuneApis(page) {
       asset_id: 'endpoint-1',
       source: 'edr.rule.powershell.encoded',
       evidence_refs: ['evidence://security/powershell-encoded'],
+      audit_ref: 'ledger://security/incident-high-powershell',
       recommendation: 'Isolate endpoint-1 and confirm the encoded command lineage.',
     },
     {
@@ -1401,14 +1402,29 @@ test.describe('Monitor interaction smoke', () => {
     await expect(incidentsSection.getByText('Suspicious PowerShell execution', { exact: true })).toBeVisible()
     await expect(incidentsSection.getByText('Legacy SMB service exposed', { exact: true })).toBeVisible()
 
+    const evidenceHandoff = page.getByRole('region', { name: 'Security Immune Evidence Handoff' })
+    await expect(evidenceHandoff).toBeVisible()
+    await expect(evidenceHandoff.getByText('Security Evidence Handoff')).toBeVisible()
+    await expect(evidenceHandoff.getByText('Suspicious PowerShell execution', { exact: true })).toBeVisible()
+    await expect(evidenceHandoff.getByText('evidence://security/powershell-encoded')).toBeVisible()
+    await expect(evidenceHandoff.getByText('ledger linked')).toBeVisible()
+    await expect(evidenceHandoff.getByText('隔离/确认')).toBeVisible()
+    await evidenceHandoff.getByRole('button', { name: '只看缺证据' }).click()
+    await expect(incidentsSection.getByText('Legacy SMB service exposed', { exact: true })).toBeVisible()
+    await expect(incidentsSection.getByText('Suspicious PowerShell execution', { exact: true })).toBeHidden()
+    await evidenceHandoff.getByRole('button', { name: '只看 High+' }).click()
+    await expect(incidentsSection.getByText('Suspicious PowerShell execution', { exact: true })).toBeVisible()
+    await expect(incidentsSection.getByText('Legacy SMB service exposed', { exact: true })).toBeHidden()
+    await page.getByRole('button', { name: '全部' }).click()
+
     await page.getByLabel('搜索 Security Incidents').fill('smb')
     await expect(incidentsSection.getByText('Legacy SMB service exposed', { exact: true })).toBeVisible()
     await expect(incidentsSection.getByText('Suspicious PowerShell execution', { exact: true })).toBeHidden()
     await page.getByLabel('清除 Security Incident 搜索').click()
-    await page.getByRole('button', { name: '缺证据' }).click()
+    await page.getByRole('button', { name: '缺证据', exact: true }).click()
     await expect(incidentsSection.getByText('Legacy SMB service exposed', { exact: true })).toBeVisible()
     await expect(incidentsSection.getByText('Suspicious PowerShell execution', { exact: true })).toBeHidden()
-    await page.getByRole('button', { name: '全部' }).click()
+    await page.getByRole('button', { name: '全部', exact: true }).click()
 
     await page.getByLabel('Security Immune minimum risk').selectOption('high')
     await expect(incidentsSection.getByText('Suspicious PowerShell execution', { exact: true })).toBeVisible()

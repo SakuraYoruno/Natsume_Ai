@@ -50,12 +50,26 @@ export function buildSecurityRiskCards(riskCounts = {}) {
   }))
 }
 
-function countEvidenceRefs(incident) {
-  if (Array.isArray(incident?.evidence_refs)) return incident.evidence_refs.length
-  if (Array.isArray(incident?.evidence)) return incident.evidence.length
-  if (Array.isArray(incident?.artifacts)) return incident.artifacts.length
-  if (incident?.evidence_ref || incident?.artifact_ref) return 1
-  return 0
+function collectIncidentEvidenceRefs(incident) {
+  const refs = []
+  const listSources = [
+    incident?.evidence_refs,
+    incident?.evidence,
+    incident?.artifacts,
+  ]
+  const scalarSources = [
+    incident?.evidence_ref,
+    incident?.artifact_ref,
+    incident?.report_ref,
+  ]
+
+  listSources.forEach((value) => {
+    if (Array.isArray(value)) refs.push(...value)
+  })
+  scalarSources.forEach((value) => {
+    if (value) refs.push(value)
+  })
+  return Array.from(new Set(refs.filter(Boolean).map(String)))
 }
 
 function incidentAssetLabel(incident) {
@@ -75,12 +89,43 @@ function incidentRecommendation(incident, risk) {
   return '复核样本来源，必要时降低风险阈值继续观察。'
 }
 
+function incidentActionState(incident, risk, evidenceCount) {
+  if (incident?.blocked_reason) {
+    return {
+      label: 'blocked',
+      tone: 'orange',
+      detail: incident.blocked_reason,
+    }
+  }
+  if (evidenceCount === 0) {
+    return {
+      label: '补证据',
+      tone: 'orange',
+      detail: '先补 endpoint/network evidence，再进入处置或归档。',
+    }
+  }
+  if (securityRiskRank(risk) >= SECURITY_RISK_RANK.high) {
+    return {
+      label: '隔离/确认',
+      tone: 'red',
+      detail: '证据已具备，优先确认影响面并执行 gated 处置。',
+    }
+  }
+  return {
+    label: '复核',
+    tone: 'green',
+    detail: '保留证据链，继续观察或降级归档。',
+  }
+}
+
 export function buildSecurityIncidentRows(incidents) {
   const rows = Array.isArray(incidents?.incidents) ? incidents.incidents : []
   return rows
     .map((incident, index) => {
       const risk = normalizeSecurityRisk(incident.risk || incident.severity || incident.level)
-      const evidenceCount = countEvidenceRefs(incident)
+      const evidenceRefs = collectIncidentEvidenceRefs(incident)
+      const evidenceCount = evidenceRefs.length
+      const actionState = incidentActionState(incident, risk, evidenceCount)
       return {
         key: incident.incident_id || incident.id || `incident-${index}`,
         title: incident.title || incident.kind || `Incident ${index + 1}`,
@@ -91,8 +136,14 @@ export function buildSecurityIncidentRows(incidents) {
         asset: incidentAssetLabel(incident),
         status: incident.status || incident.state || 'open',
         source: incident.source || incident.detector || incident.rule_id || 'security immune',
+        evidenceRefs,
         evidenceCount,
         evidenceLabel: evidenceCount > 0 ? `${evidenceCount} evidence refs` : 'needs evidence',
+        hasEvidence: evidenceCount > 0,
+        actionLabel: actionState.label,
+        actionTone: actionState.tone,
+        actionDetail: actionState.detail,
+        auditRef: incident.audit_ref || incident.audit_event_ref || incident.ledger_ref || null,
         recommendation: incidentRecommendation(incident, risk),
       }
     })
@@ -122,6 +173,7 @@ export function filterSecurityIncidentRows(rows = [], { query = '', focus = 'all
       incident.asset,
       incident.status,
       incident.source,
+      incident.evidenceRefs?.join(' '),
       incident.recommendation,
     ].join(' ').toLowerCase()
     return haystack.includes(normalizedQuery)
