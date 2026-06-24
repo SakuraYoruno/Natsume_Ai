@@ -91,6 +91,8 @@ export const LIFE_COPY = Object.freeze({
   cockpitEyebrow: 'Cockpit / Life Systems',
   commandRailTitle: '现在先处理什么',
   commandRailDescription: '首屏优先回答三件事：数据是否可信、哪个器官或病灶最该看、下一步入口在哪里。',
+  focusLensTitle: 'Cockpit Focus Lens',
+  focusLensDescription: '在同一页切换优先链、全景和事件视角，让下方器官图、病灶和时间轴只展示当前判断需要的样本。',
   gateTitle: '观测 Gate',
   quickLinksTitle: '常用入口',
   guidanceTitle: '优先动作',

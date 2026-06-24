@@ -972,6 +972,17 @@ test.describe('Monitor interaction smoke', () => {
     await expect(mission.getByText('首要入口')).toBeVisible()
     await expect(mission.getByRole('link', { name: /进入主病灶/ })).toHaveAttribute('href', '#/life/pathologies/emotion-wave')
 
+    const lens = page.getByRole('region', { name: 'Cockpit Focus Lens' })
+    await expect(lens).toBeVisible()
+    await expect(lens.getByText('当前聚焦 情绪层')).toBeVisible()
+    await expect(page.getByText('记忆召回成功')).toBeHidden()
+    await lens.getByRole('button', { name: /事件/ }).click()
+    await expect(lens.getByText('按最近事件回看生命链')).toBeVisible()
+    await expect(page.getByText('记忆召回成功')).toBeVisible()
+    await lens.getByRole('button', { name: /全景/ }).click()
+    await expect(lens.getByText('全景查看所有生命体样本')).toBeVisible()
+    await expect(page.getByText('记忆层')).toBeVisible()
+
     await mission.locator('a[href="#/life/pathologies"]').filter({ hasText: '只看已经形成的异常模式' }).click()
     await expect.poll(() => new URL(page.url()).hash).toBe('#/life/pathologies')
   })

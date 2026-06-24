@@ -34,6 +34,25 @@ function normalizeList(value) {
   return Array.isArray(value) ? value : []
 }
 
+function buildOrganStatusCounts(organSystems = []) {
+  return organSystems.reduce((counts, item) => {
+    const key = item?.status || 'pending'
+    counts[key] = (counts[key] || 0) + 1
+    return counts
+  }, {})
+}
+
+function uniqueById(items = []) {
+  const seen = new Set()
+  return items.filter((item) => {
+    const id = String(item?.id || '').trim()
+    if (!id) return true
+    if (seen.has(id)) return false
+    seen.add(id)
+    return true
+  })
+}
+
 function buildCockpitPrimaryAction({
   hasRuntimeSnapshot,
   primaryPathology,
@@ -95,6 +114,86 @@ function buildCockpitSecondaryAction({
     label: '回看生命时间轴',
     to: '/life/timeline',
     detail: '从最近事件判断是否需要继续追踪。',
+  }
+}
+
+export const DIGITAL_LIFE_FOCUS_LENS_OPTIONS = Object.freeze([
+  {
+    key: 'priority',
+    label: '优先链',
+    detail: '只看主病灶、异常器官和直接相关事件。',
+  },
+  {
+    key: 'panorama',
+    label: '全景',
+    detail: '保留全部器官、病灶和时间轴样本。',
+  },
+  {
+    key: 'events',
+    label: '事件',
+    detail: '按最近事件覆盖的器官回看上下文。',
+  },
+])
+
+export function buildDigitalLifeFocusLensModel(lifeBodyModel = {}, mode = 'priority') {
+  const lensMode = DIGITAL_LIFE_FOCUS_LENS_OPTIONS.some((item) => item.key === mode) ? mode : 'priority'
+  const organSystems = normalizeList(lifeBodyModel.organSystems)
+  const pathologies = normalizeList(lifeBodyModel.pathologies)
+  const timelineEvents = normalizeList(lifeBodyModel.timelineEvents)
+  const primaryOrgan = lifeBodyModel.primaryOrgan || null
+  const primaryPathology = lifeBodyModel.primaryPathology || pathologies[0] || null
+  const pressuredOrganIds = organSystems
+    .filter((item) => ['critical', 'warning', 'degraded'].includes(String(item?.status || '').toLowerCase()))
+    .map((item) => item.id)
+  const primaryIds = [primaryOrgan?.id, primaryPathology?.organId, ...pressuredOrganIds].filter(Boolean)
+  const eventOrganIds = timelineEvents.map((item) => item?.organId).filter(Boolean)
+  const focusIds = new Set(lensMode === 'events' ? eventOrganIds : primaryIds)
+
+  const filteredOrganSystems = lensMode === 'panorama'
+    ? organSystems
+    : uniqueById(organSystems.filter((item) => focusIds.has(item?.id)))
+  const filteredPathologies = lensMode === 'panorama'
+    ? pathologies
+    : pathologies.filter((item) => lensMode === 'events' ? eventOrganIds.includes(item?.organId) : focusIds.has(item?.organId))
+  const filteredTimelineEvents = lensMode === 'panorama'
+    ? timelineEvents
+    : timelineEvents.filter((item) => lensMode === 'events' ? true : focusIds.has(item?.organId) || item?.type === 'pathology')
+
+  const visibleOrganSystems = filteredOrganSystems.length > 0 ? filteredOrganSystems : organSystems
+  const visiblePathologies = filteredPathologies.length > 0 ? filteredPathologies : pathologies
+  const visibleTimelineEvents = filteredTimelineEvents.length > 0 ? filteredTimelineEvents : timelineEvents
+  const selectedOption = DIGITAL_LIFE_FOCUS_LENS_OPTIONS.find((item) => item.key === lensMode)
+
+  const headline = lensMode === 'priority'
+    ? primaryPathology
+      ? `当前聚焦 ${primaryPathology.organLabel || primaryOrgan?.name || '主链'}`
+      : primaryOrgan
+        ? `当前聚焦 ${primaryOrgan.name}`
+        : '当前没有明确主链，显示可用样本'
+    : lensMode === 'events'
+      ? '按最近事件回看生命链'
+      : '全景查看所有生命体样本'
+
+  return {
+    mode: lensMode,
+    options: DIGITAL_LIFE_FOCUS_LENS_OPTIONS,
+    headline,
+    description: selectedOption?.detail || '',
+    counts: {
+      organs: visibleOrganSystems.length,
+      pathologies: visiblePathologies.length,
+      events: visibleTimelineEvents.length,
+      totalOrgans: organSystems.length,
+      totalPathologies: pathologies.length,
+      totalEvents: timelineEvents.length,
+    },
+    visibleModel: {
+      ...lifeBodyModel,
+      organSystems: visibleOrganSystems,
+      organStatusCounts: buildOrganStatusCounts(visibleOrganSystems),
+      pathologies: visiblePathologies,
+      timelineEvents: visibleTimelineEvents,
+    },
   }
 }
 

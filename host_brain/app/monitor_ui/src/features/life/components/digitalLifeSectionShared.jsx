@@ -45,7 +45,6 @@ export function LifeSection({ title, hint, actionTo, actionLabel, children }) {
   return (
     <section
       className="card relative overflow-hidden p-5"
-      style={{ contentVisibility: 'auto', containIntrinsicSize: '960px' }}
     >
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_left,_rgba(41,112,255,0.05),_transparent_38%),radial-gradient(circle_at_bottom_right,_rgba(16,185,129,0.05),_transparent_34%)]" />
       <div className="relative">
