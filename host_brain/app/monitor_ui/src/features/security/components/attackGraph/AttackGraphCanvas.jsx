@@ -19,6 +19,13 @@ function graphDirection(nodes = []) {
   return nodes.length >= 9 ? 'TB' : 'LR'
 }
 
+function graphMinZoom(nodes = [], direction) {
+  if (direction === 'TB') return nodes.length >= 11 ? 0.38 : 0.46
+  if (nodes.length >= 7) return 0.52
+  if (nodes.length >= 5) return 0.62
+  return 0.72
+}
+
 function applyAttackGraphLayout(nodes, edges, direction) {
   const graph = new dagre.graphlib.Graph()
   graph.setDefaultEdgeLabel(() => ({}))
@@ -130,6 +137,11 @@ export default function AttackGraphCanvas({ graph, className = '' }) {
   const layoutDirection = useMemo(() => graphDirection(nodes), [nodes])
   const flowData = useMemo(() => buildFlowData(graph, setSelectedNode, layoutDirection), [graph, layoutDirection])
   const summary = graph?.summary || {}
+  const minZoom = graphMinZoom(nodes, layoutDirection)
+  const shouldFitView = nodes.length <= 4
+  const defaultViewport = layoutDirection === 'TB'
+    ? { x: 24, y: 28, zoom: minZoom }
+    : { x: 28, y: 110, zoom: minZoom }
 
   return (
     <div className={`space-y-3 ${className}`}>
@@ -149,15 +161,16 @@ export default function AttackGraphCanvas({ graph, className = '' }) {
         ))}
       </div>
 
-      <div className={`${layoutDirection === 'TB' ? 'h-[560px] md:h-[480px]' : 'h-[360px]'} overflow-hidden rounded-xl border border-gray-200 bg-slate-50`}>
+      <div className={`${layoutDirection === 'TB' ? 'h-[560px] md:h-[480px]' : 'h-[260px] md:h-[300px]'} overflow-hidden rounded-xl border border-gray-200 bg-slate-50`}>
         <ReactFlow
           key={graph?.graphId || 'attack-graph'}
           nodes={flowData.nodes}
           edges={flowData.edges}
           nodeTypes={NODE_TYPES}
-          fitView
-          fitViewOptions={{ padding: layoutDirection === 'TB' ? 0.05 : 0.08, minZoom: 0.18, maxZoom: 1.05 }}
-          minZoom={0.18}
+          fitView={shouldFitView}
+          defaultViewport={defaultViewport}
+          fitViewOptions={{ padding: layoutDirection === 'TB' ? 0.05 : 0.08, minZoom, maxZoom: 1.05 }}
+          minZoom={minZoom}
           maxZoom={1.8}
           nodesDraggable={false}
           nodesConnectable={false}

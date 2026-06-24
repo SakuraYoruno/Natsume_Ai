@@ -1131,6 +1131,10 @@ test.describe('Monitor interaction smoke', () => {
     const plannedNarrative = page.getByRole('region', { name: 'Planned Attack Path Narrative' })
     await expect(plannedNarrative).toBeVisible()
     await expect(plannedNarrative.getByText('Readonly run 可直接创建')).toBeVisible()
+    const preflightReadout = page.getByRole('region', { name: 'Pentest Preflight Readout' })
+    await expect(preflightReadout).toBeVisible()
+    await expect(preflightReadout.getByText('ScopeGuard ready')).toBeVisible()
+    await expect(preflightReadout.getByText('Report Artifact')).toBeVisible()
 
     const targetInput = page.getByLabel('Target')
     const scopeInput = page.getByLabel('Scope')
@@ -1147,6 +1151,7 @@ test.describe('Monitor interaction smoke', () => {
     await expect(page.getByText('Lab Mode OFF，lab_full 已禁用')).toBeVisible()
     await expect(mission.getByText('Lab Mode OFF 阻断 lab_full')).toBeVisible()
     await expect(plannedNarrative.getByText('先处理 Approval Rail')).toBeVisible()
+    await expect(preflightReadout.getByText('Lab Mode OFF', { exact: true })).toBeVisible()
     await expect(createRunButton).toBeDisabled()
 
     await modeSelect.selectOption('readonly')
