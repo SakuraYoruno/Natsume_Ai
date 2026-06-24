@@ -1848,12 +1848,27 @@ test.describe('Monitor interaction smoke', () => {
     await page.goto(monitorUrl(baseURL, '/execution/edge-command'), { waitUntil: 'domcontentloaded' })
     await expect(page.getByRole('heading', { name: 'Edge Command Gate' })).toBeVisible()
     await expect(page.getByText('发送 Gate')).toBeVisible()
+    const handoff = page.getByRole('region', { name: 'Edge Dispatch Handoff' })
+    await expect(handoff).toBeVisible()
+    await expect(handoff.getByText('Command Envelope')).toBeVisible()
+    await expect(handoff.getByText('3/5 ready')).toBeVisible()
 
     const sendButton = page.getByRole('button', { name: '发送到 Edge' })
     await expect(sendButton).toBeDisabled()
     await expect(page.getByText('开启控制门后才能发送。')).toBeVisible()
 
     await page.getByRole('checkbox', { name: '开启控制门' }).check()
+    await expect(handoff.getByText('4/5 ready')).toBeVisible()
+    await expect(sendButton).toBeEnabled()
+
+    const targetInput = page.getByLabel('target_agent')
+    await targetInput.fill('')
+    await expect(sendButton).toBeDisabled()
+    await expect(page.getByText(/命令字段无效/)).toBeVisible()
+    await expect(handoff.getByText(/缺少 target_agent/)).toBeVisible()
+    await page.getByRole('button', { name: /定位命令字段/ }).click()
+    await expect(targetInput).toBeFocused()
+    await targetInput.fill('edge.somatic')
     await expect(sendButton).toBeEnabled()
 
     const payloadInput = page.getByLabel('payload JSON')
@@ -1866,7 +1881,8 @@ test.describe('Monitor interaction smoke', () => {
     await expect(sendButton).toBeEnabled()
     await sendButton.click()
     await expect(page.getByText('Push 完成')).toBeVisible()
-    await expect(page.getByText('edge-smoke-command')).toBeVisible()
+    await expect(handoff.getByText('edge-smoke-command')).toBeVisible()
+    await expect(handoff.getByText('5/5 ready')).toBeVisible()
   })
 
   test('Tribe console filters event bus samples and links to Agent Loop', async ({ page, baseURL }) => {

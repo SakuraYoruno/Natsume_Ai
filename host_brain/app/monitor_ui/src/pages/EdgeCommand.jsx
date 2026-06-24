@@ -22,6 +22,24 @@ function parsePayloadJson(value) {
   }
 }
 
+function validateCommandForm(form) {
+  const fields = ['command_type', 'target_agent', 'source_agent']
+  const missing = fields.filter((key) => !String(form?.[key] || '').trim())
+  if (missing.length) {
+    return {
+      valid: false,
+      missing,
+      error: `缺少 ${missing.join(', ')}。`,
+      label: `${fields.length - missing.length}/${fields.length} fields`,
+    }
+  }
+  return {
+    valid: true,
+    missing: [],
+    label: `${form.command_type} -> ${form.target_agent}`,
+  }
+}
+
 export default function EdgeCommand() {
   const [status, setStatus] = useState(null)
   const [error, setError] = useState('')
@@ -35,8 +53,12 @@ export default function EdgeCommand() {
   })
   const [pushResult, setPushResult] = useState(null)
   const [pushing, setPushing] = useState(false)
+  const commandTypeRef = useRef(null)
+  const targetAgentRef = useRef(null)
+  const sourceAgentRef = useRef(null)
   const payloadRef = useRef(null)
   const payloadValidation = useMemo(() => parsePayloadJson(payloadText), [payloadText])
+  const formValidation = useMemo(() => validateCommandForm(form), [form])
 
   const load = async () => {
     setLoading(true)
@@ -55,16 +77,33 @@ export default function EdgeCommand() {
     void load()
   }, [])
 
-  const canPush = controlGate && status?.enabled && payloadValidation.valid
+  const focusCommandField = () => {
+    const firstMissing = formValidation.missing[0]
+    const refMap = {
+      command_type: commandTypeRef,
+      target_agent: targetAgentRef,
+      source_agent: sourceAgentRef,
+    }
+    refMap[firstMissing]?.current?.focus()
+  }
+
+  const canPush = controlGate && status?.enabled && formValidation.valid && payloadValidation.valid
   const disabledReason = !status?.enabled
     ? 'Edge pusher 当前不可用。'
     : !controlGate
       ? '开启控制门后才能发送。'
-      : !payloadValidation.valid
-        ? `payload JSON 无效：${payloadValidation.error}`
-        : ''
+      : !formValidation.valid
+        ? `命令字段无效：${formValidation.error}`
+        : !payloadValidation.valid
+          ? `payload JSON 无效：${payloadValidation.error}`
+          : ''
 
   const push = async () => {
+    if (!formValidation.valid) {
+      setPushResult({ ok: false, error: formValidation.error })
+      focusCommandField()
+      return
+    }
     if (!payloadValidation.valid) {
       setPushResult({ ok: false, error: payloadValidation.error })
       payloadRef.current?.focus()
@@ -103,10 +142,14 @@ export default function EdgeCommand() {
       <EdgeCommandGateRail
         controlGate={controlGate}
         error={error}
+        formValidation={formValidation}
         loading={loading}
         onEnableGate={() => setControlGate(true)}
+        onFocusCommand={focusCommandField}
         onFocusPayload={() => payloadRef.current?.focus()}
         payloadValidation={payloadValidation}
+        pushing={pushing}
+        pushResult={pushResult}
         status={status}
       />
 
@@ -177,12 +220,25 @@ export default function EdgeCommand() {
               <label key={key} className="block">
                 <span className="mb-1 block text-xs font-semibold text-gray-500">{key}</span>
                 <input
+                  ref={key === 'command_type' ? commandTypeRef : key === 'target_agent' ? targetAgentRef : sourceAgentRef}
+                  aria-invalid={!String(form[key] || '').trim()}
                   className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-200"
                   value={form[key]}
                   onChange={(event) => setForm((prev) => ({ ...prev, [key]: event.target.value }))}
                 />
+                {!String(form[key] || '').trim() ? (
+                  <span className="mt-1 block text-xs text-red-600">必填字段。</span>
+                ) : null}
               </label>
             ))}
+            <div
+              aria-label="Edge command review"
+              className={`rounded-lg border px-3 py-2 text-xs leading-5 ${formValidation.valid ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-red-200 bg-red-50 text-red-700'}`}
+            >
+              {formValidation.valid
+                ? `Command envelope 可发送：${formValidation.label}`
+                : `Command envelope 需要补齐：${formValidation.error}`}
+            </div>
             <label className="block">
               <span className="mb-1 block text-xs font-semibold text-gray-500">payload JSON</span>
               <textarea
