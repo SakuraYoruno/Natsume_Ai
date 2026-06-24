@@ -1045,6 +1045,33 @@ async function stubBodyIntegrationApis(page) {
 }
 
 test.describe('Monitor interaction smoke', () => {
+  test('Mobile navigation shows route context and closes after route change', async ({ page, baseURL }) => {
+    await page.setViewportSize({ width: 390, height: 1000 })
+    await stubPentestApis(page)
+    await stubTraceApis(page)
+    await page.goto(monitorUrl(baseURL, '/security/pentest'), { waitUntil: 'domcontentloaded' })
+
+    await expect(page.getByRole('heading', { name: '渗透实验室' })).toBeVisible()
+    const currentRouteButton = page.getByRole('button', { name: /打开导航菜单：Security Lab \/ 渗透实验室/ })
+    await expect(currentRouteButton).toBeVisible()
+    await expect(currentRouteButton).toContainText('Security Lab')
+    await expect(currentRouteButton).toContainText('渗透实验室')
+
+    await currentRouteButton.click()
+    const mobileNav = page.getByRole('navigation', { name: '移动端导航' })
+    await expect(mobileNav).toBeVisible()
+    await expect(mobileNav.getByText('Security Lab', { exact: true })).toBeVisible()
+    await expect(mobileNav.getByRole('link', { name: /链路 Trace/ })).toBeVisible()
+
+    await mobileNav.getByRole('link', { name: /链路 Trace/ }).click()
+    await expect.poll(() => new URL(page.url()).hash).toBe('#/observability/trace')
+    await expect(mobileNav).toBeHidden()
+    await expect(page.getByRole('button', { name: /打开导航菜单：Observability \/ 链路 Trace/ })).toBeVisible()
+    await expect
+      .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1))
+      .toBe(true)
+  })
+
   test('Observability overview exposes triage rail and Trace route', async ({ page, baseURL }) => {
     await stubOverviewApis(page)
     await page.goto(monitorUrl(baseURL, '/observability/overview'), { waitUntil: 'domcontentloaded' })
