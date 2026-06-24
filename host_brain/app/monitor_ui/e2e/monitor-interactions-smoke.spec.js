@@ -386,6 +386,15 @@ async function stubPentestApis(page) {
   })
 }
 
+async function stubPentestDegradedApis(page) {
+  await stubCommonReadApis(page)
+  await page.route('**/v1/pentest/**', (route) => route.fulfill({
+    status: 502,
+    contentType: 'application/json',
+    body: JSON.stringify({ detail: 'Pentest backend unavailable in smoke' }),
+  }))
+}
+
 async function stubPentestRunDetailApis(page) {
   await stubCommonReadApis(page)
   await page.addInitScript(() => {
@@ -1232,6 +1241,27 @@ test.describe('Monitor interaction smoke', () => {
     await expect(createRunButton).toBeEnabled()
     await mission.getByRole('button', { name: /Phase 矩阵/ }).click()
     await expect(page.locator('#pentest-phase-matrix')).toBeVisible()
+  })
+
+  test('Pentest degraded state explains backend loss and keeps planning usable', async ({ page, baseURL }) => {
+    await stubPentestDegradedApis(page)
+    await page.goto(monitorUrl(baseURL, '/security/pentest'), { waitUntil: 'domcontentloaded' })
+
+    const degraded = page.getByRole('region', { name: 'Pentest Degraded Operations' })
+    await expect(degraded).toBeVisible()
+    await expect(degraded.getByText('Pentest Lab 降级运行')).toBeVisible()
+    await expect(degraded.getByText(/Host Main 暂时没有返回 Pentest 数据/)).toBeVisible()
+    await expect(degraded.getByText(/Pentest backend unavailable/)).toBeVisible()
+    await expect(degraded.getByText('Scope 预检')).toBeVisible()
+    await expect(degraded.getByText('攻击路径规划')).toBeVisible()
+    await expect(degraded.getByText('工具清单', { exact: true })).toBeVisible()
+    await expect(degraded.getByText('创建 Run', { exact: true })).toBeVisible()
+    await expect(degraded.getByRole('button', { name: '重新连接' })).toBeVisible()
+
+    await expect(page.getByRole('heading', { name: 'Run Wizard' })).toBeVisible()
+    await expect(page.getByRole('region', { name: 'Pentest Run Readiness' })).toBeVisible()
+    await expect(page.getByRole('region', { name: 'Pentest Preflight Readout' })).toBeVisible()
+    await expect(page.getByRole('region', { name: 'Planned Attack Path Narrative' })).toBeVisible()
   })
 
   test('Pentest wizard stays readable on mobile viewport', async ({ page, baseURL }) => {
