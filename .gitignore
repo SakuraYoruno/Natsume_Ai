@@ -164,3 +164,4 @@ flows/exports/
 test_output.txt
 tools/_*.png
 xianyu_item.png
+host_brain/canon/world/.locks/
