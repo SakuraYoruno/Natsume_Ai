@@ -261,6 +261,8 @@ export const PENTEST_COPY = Object.freeze({
   runCommandRailFocusTitle: '下一步动作',
   runCommandRailGateTitle: '执行 Gate',
   runCommandRailEvidenceTitle: '证据摘要',
+  creationResultTitle: 'Run 已创建',
+  creationResultDescription: 'Host Main 已接收创建请求。后续状态、timeline、finding、approval 与 report 以详情页为准。',
   workflow: [
     { key: 'scope', title: '1. 授权范围', detail: 'target 必须命中 scope，越界会被 ScopeGuard 拦截。' },
     { key: 'plan', title: '2. 计划路径', detail: '根据 mode 与 phases 生成可解释攻击图。' },

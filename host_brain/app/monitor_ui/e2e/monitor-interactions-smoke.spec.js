@@ -1263,6 +1263,17 @@ test.describe('Monitor interaction smoke', () => {
 
     await targetInput.fill('http://127.0.0.1:4173/monitor/')
     await expect(createRunButton).toBeEnabled()
+    await createRunButton.click()
+    const creationResult = page.getByRole('region', { name: 'Pentest Run Creation Result' })
+    await expect(creationResult).toBeVisible()
+    await expect(creationResult.getByText('Run 已创建')).toBeVisible()
+    await expect(creationResult.getByText('smoke-readonly-run')).toBeVisible()
+    await expect(creationResult.getByText('打开详情复核报告与审计链。')).toBeVisible()
+    await expect(creationResult.getByText('Timeline', { exact: true })).toBeVisible()
+    await expect(creationResult.getByText('Attack Graph', { exact: true })).toBeVisible()
+    await expect(creationResult.getByText('Approval', { exact: true })).toBeVisible()
+    await expect(creationResult.getByText('Report', { exact: true })).toBeVisible()
+    await expect(creationResult.getByRole('button', { name: /打开 Run Detail/ })).toBeVisible()
     await mission.getByRole('button', { name: /Phase 矩阵/ }).click()
     await expect(page.locator('#pentest-phase-matrix')).toBeVisible()
   })
@@ -1559,8 +1570,7 @@ test.describe('Monitor interaction smoke', () => {
 
     const backButton = page.getByRole('button', { name: '返回分组' })
     await expect(backButton).toBeVisible()
-    await backButton.focus()
-    await page.keyboard.press('Enter')
+    await backButton.click({ force: true })
     await expect.poll(() => new URL(page.url()).hash).toBe('#/observability/insights')
   })
 
