@@ -1145,6 +1145,21 @@ async function stubBodyIntegrationApis(page) {
   })
 }
 
+async function stubBodyIntegrationDegradedApis(page) {
+  await stubCommonReadApis(page)
+  await page.route('**/v1/mateengine/capabilities', (route) => fulfillJson(route, {
+    actions: ['state', 'say'],
+    events: ['body.state.changed'],
+    presets: ['idle'],
+  }))
+  await page.route('**/v1/mateengine/health', (route) => fulfillJson(route, {
+    ok: false,
+    status: 'degraded',
+    host: '127.0.0.1',
+    port: 18770,
+  }))
+}
+
 test.describe('Monitor interaction smoke', () => {
   test('Desktop navigation scopes secondary links to the active section', async ({ page, baseURL }) => {
     await page.setViewportSize({ width: 1440, height: 1000 })
@@ -1889,6 +1904,14 @@ test.describe('Monitor interaction smoke', () => {
     await expect(gate.getByText('身体动作链路可发送')).toBeVisible()
     await expect(gate.getByText('3 个动作可见')).toBeVisible()
     await expect(gate.getByText('2 个事件类型可见')).toBeVisible()
+    const handoff = page.getByRole('region', { name: 'Body Dispatch Handoff' })
+    await expect(handoff).toBeVisible()
+    await expect(handoff.getByText('Bridge Health')).toBeVisible()
+    await expect(handoff.getByText('Capability Catalog')).toBeVisible()
+    await expect(handoff.getByText('Current Intent')).toBeVisible()
+    await expect(handoff.getByText('Dispatch Result')).toBeVisible()
+    await expect(handoff.getByText('3/4 ready')).toBeVisible()
+    await expect(handoff.getByText('ready to send')).toBeVisible()
 
     await gate.getByRole('button', { name: /定位动作控制台/ }).click()
     await page.getByLabel('Body action').selectOption('say')
@@ -1905,6 +1928,24 @@ test.describe('Monitor interaction smoke', () => {
     await page.getByRole('button', { name: '发送 say' }).click()
 
     await expect(page.getByText('发送完成')).toBeVisible()
-    await expect(page.getByText('mate-smoke-say')).toBeVisible()
+    await expect(page.locator('pre').filter({ hasText: 'mate-smoke-say' })).toBeVisible()
+    await expect(handoff.getByText('4/4 ready')).toBeVisible()
+    await expect(handoff.getByText('mate-smoke-say', { exact: true })).toBeVisible()
+  })
+
+  test('Body integration gate locks dispatch when MateEngine health is degraded', async ({ page, baseURL }) => {
+    await stubBodyIntegrationDegradedApis(page)
+    await page.goto(monitorUrl(baseURL, '/integrations/body'), { waitUntil: 'domcontentloaded' })
+
+    await expect(page.getByRole('heading', { name: '身体集成' })).toBeVisible()
+    const gate = page.locator('[aria-label="Body Bridge Gate"]')
+    await expect(gate).toBeVisible()
+    await expect(gate.getByText('MateEngine bridge 未确认在线')).toBeVisible()
+    await expect(gate.getByText('身体桥需确认')).toBeVisible()
+    const handoff = page.getByRole('region', { name: 'Body Dispatch Handoff' })
+    await expect(handoff).toBeVisible()
+    await expect(handoff.getByText('degraded')).toBeVisible()
+    await expect(handoff.getByText('locked', { exact: true })).toBeVisible()
+    await expect(page.getByRole('button', { name: '发送 state' })).toBeDisabled()
   })
 })

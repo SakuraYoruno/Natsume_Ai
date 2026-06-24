@@ -27,6 +27,31 @@ const CARD_TONES = {
   blocked: 'border-red-200 bg-red-50/70 text-red-700',
 }
 
+const FOCUS_TONES = {
+  ready: 'border-emerald-200 bg-emerald-50/70',
+  syncing: 'border-blue-200 bg-blue-50/70',
+  degraded: 'border-orange-200 bg-orange-50/70',
+  blocked: 'border-red-200 bg-red-50/70',
+}
+
+const HANDOFF_META = {
+  ready: {
+    className: 'border-emerald-200 bg-emerald-50/70 text-emerald-800',
+    dotClassName: 'bg-emerald-500',
+    label: 'OK',
+  },
+  warning: {
+    className: 'border-orange-200 bg-orange-50/70 text-orange-800',
+    dotClassName: 'bg-orange-500',
+    label: 'Watch',
+  },
+  blocked: {
+    className: 'border-red-200 bg-red-50/70 text-red-800',
+    dotClassName: 'bg-red-500',
+    label: 'Locked',
+  },
+}
+
 function GateCard({ item }) {
   const ready = item.state === 'ready'
   const blocked = item.state === 'blocked'
@@ -126,6 +151,54 @@ function QuickLink({ item }) {
   )
 }
 
+function HandoffStep({ step, index }) {
+  const meta = HANDOFF_META[step.state] || HANDOFF_META.warning
+
+  return (
+    <div className={`h-full rounded-lg border px-3 py-3 ${meta.className}`}>
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 text-xs font-semibold">
+            <span className={`h-2 w-2 rounded-full ${meta.dotClassName}`} />
+            <span>{index + 1}. {step.label}</span>
+          </div>
+          <div className="mt-1 break-all text-sm font-bold text-gray-950">{step.value}</div>
+        </div>
+        <span className="shrink-0 rounded-full border border-current/20 bg-white/70 px-2 py-0.5 text-[11px] font-semibold">
+          {meta.label}
+        </span>
+      </div>
+      <div className="mt-2 line-clamp-2 min-h-10 text-xs leading-5 opacity-85">{step.detail}</div>
+    </div>
+  )
+}
+
+function BodyDispatchHandoff({ steps = [] }) {
+  if (!steps.length) return null
+
+  return (
+    <section aria-label="Body Dispatch Handoff" className="mt-4 rounded-xl border border-gray-100 bg-white/88 p-3 shadow-sm">
+      <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <div className="inline-flex items-center gap-2 text-sm font-bold text-gray-900">
+            <GitBranch size={15} className="text-primary" />
+            Body Dispatch Handoff
+          </div>
+          <div className="mt-0.5 text-xs leading-5 text-gray-500">把桥接健康、能力目录、当前意图和最近一次写入结果连成可复核链路。</div>
+        </div>
+        <span className="w-fit rounded border border-cyan-100 bg-cyan-50 px-2 py-1 text-xs font-semibold text-cyan-700">
+          {steps.filter((step) => step.state === 'ready').length}/{steps.length} ready
+        </span>
+      </div>
+      <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-4">
+        {steps.map((step, index) => (
+          <HandoffStep key={step.key} step={step} index={index} />
+        ))}
+      </div>
+    </section>
+  )
+}
+
 export default function BodyIntegrationCommandRail({
   loading = false,
   model,
@@ -135,6 +208,7 @@ export default function BodyIntegrationCommandRail({
 }) {
   if (!model) return null
   const ready = model.status === 'ready'
+  const focusToneClass = FOCUS_TONES[model.focus?.tone] || FOCUS_TONES.degraded
 
   return (
     <section
@@ -155,7 +229,7 @@ export default function BodyIntegrationCommandRail({
       <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(280px,0.85fr)_minmax(280px,0.75fr)]">
         <div>
           <div className="mb-2 text-xs font-semibold text-gray-500">{INTEGRATIONS_COPY.focusTitle}</div>
-          <div className="rounded-lg border border-emerald-200 bg-emerald-50/70 p-4">
+          <div className={`rounded-lg border p-4 ${focusToneClass}`}>
             <div className="text-lg font-semibold leading-7 text-gray-950">{model.headline}</div>
             <p className="mt-1 text-sm leading-6 text-gray-600">{model.description}</p>
             <div className="mt-3">
@@ -188,6 +262,8 @@ export default function BodyIntegrationCommandRail({
           </div>
         </div>
       </div>
+
+      <BodyDispatchHandoff steps={model.handoffSteps} />
 
       <div className="mt-4">
         <div className="mb-2 text-xs font-semibold text-gray-500">{INTEGRATIONS_COPY.quickLinksTitle}</div>

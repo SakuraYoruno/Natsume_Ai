@@ -37,9 +37,10 @@ export default function BodyIntegration() {
     action,
     bundle,
     loading,
+    result,
     sayText,
     sending,
-  }), [action, bundle, loading, sayText, sending])
+  }), [action, bundle, loading, result, sayText, sending])
 
   const sendAction = async () => {
     if (!model.canSend) return
