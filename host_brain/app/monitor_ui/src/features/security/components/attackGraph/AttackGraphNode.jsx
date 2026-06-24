@@ -39,6 +39,9 @@ function statusClassName(status) {
 const AttackGraphNode = memo(({ data, selected }) => {
   const Icon = NODE_ICON[data.type] || GitBranch
   const statusClass = statusClassName(data.status)
+  const vertical = data.layoutDirection === 'TB'
+  const targetPosition = vertical ? Position.Top : Position.Left
+  const sourcePosition = vertical ? Position.Bottom : Position.Right
 
   return (
     <div
@@ -72,8 +75,8 @@ const AttackGraphNode = memo(({ data, selected }) => {
           ))}
         </div>
       </div>
-      <Handle type="target" position={Position.Left} style={{ background: '#94A3B8', width: 7, height: 7 }} />
-      <Handle type="source" position={Position.Right} style={{ background: '#94A3B8', width: 7, height: 7 }} />
+      <Handle type="target" position={targetPosition} style={{ background: '#94A3B8', width: 7, height: 7 }} />
+      <Handle type="source" position={sourcePosition} style={{ background: '#94A3B8', width: 7, height: 7 }} />
     </div>
   )
 })

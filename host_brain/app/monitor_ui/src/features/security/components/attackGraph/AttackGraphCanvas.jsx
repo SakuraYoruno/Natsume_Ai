@@ -12,13 +12,23 @@ import { PENTEST_COPY } from '../../../../shared/content/terminology.js'
 import AttackGraphNode from './AttackGraphNode.jsx'
 
 const NODE_TYPES = { attackGraphNode: AttackGraphNode }
-const NODE_WIDTH = 210
-const NODE_HEIGHT = 94
+const NODE_WIDTH = 190
+const NODE_HEIGHT = 92
 
-function applyAttackGraphLayout(nodes, edges) {
+function graphDirection(nodes = []) {
+  return nodes.length >= 9 ? 'TB' : 'LR'
+}
+
+function applyAttackGraphLayout(nodes, edges, direction) {
   const graph = new dagre.graphlib.Graph()
   graph.setDefaultEdgeLabel(() => ({}))
-  graph.setGraph({ rankdir: 'LR', nodesep: 28, ranksep: 78, marginx: 48, marginy: 42 })
+  graph.setGraph({
+    rankdir: direction,
+    nodesep: direction === 'TB' ? 22 : 20,
+    ranksep: direction === 'TB' ? 48 : 58,
+    marginx: direction === 'TB' ? 34 : 36,
+    marginy: direction === 'TB' ? 30 : 34,
+  })
 
   nodes.forEach((node) => {
     graph.setNode(node.id, { width: NODE_WIDTH, height: NODE_HEIGHT })
@@ -50,7 +60,7 @@ function edgeColor(edge) {
   return '#0891B2'
 }
 
-function buildFlowData(graph, onSelect) {
+function buildFlowData(graph, onSelect, direction) {
   const nodes = (graph?.nodes || []).map((node) => ({
     id: node.id,
     type: 'attackGraphNode',
@@ -60,6 +70,7 @@ function buildFlowData(graph, onSelect) {
     ariaRole: 'presentation',
     data: {
       ...node,
+      layoutDirection: direction,
       onSelect,
     },
   }))
@@ -98,7 +109,7 @@ function buildFlowData(graph, onSelect) {
       },
     }
   })
-  return applyAttackGraphLayout(nodes, edges)
+  return applyAttackGraphLayout(nodes, edges, direction)
 }
 
 function SummaryTile({ icon: Icon, label, value, tone }) {
@@ -115,9 +126,10 @@ function SummaryTile({ icon: Icon, label, value, tone }) {
 
 export default function AttackGraphCanvas({ graph, className = '' }) {
   const [selectedNode, setSelectedNode] = useState(null)
-  const flowData = useMemo(() => buildFlowData(graph, setSelectedNode), [graph])
-  const summary = graph?.summary || {}
   const nodes = graph?.nodes || []
+  const layoutDirection = useMemo(() => graphDirection(nodes), [nodes])
+  const flowData = useMemo(() => buildFlowData(graph, setSelectedNode, layoutDirection), [graph, layoutDirection])
+  const summary = graph?.summary || {}
 
   return (
     <div className={`space-y-3 ${className}`}>
@@ -137,14 +149,14 @@ export default function AttackGraphCanvas({ graph, className = '' }) {
         ))}
       </div>
 
-      <div className="h-[360px] overflow-hidden rounded-xl border border-gray-200 bg-slate-50">
+      <div className={`${layoutDirection === 'TB' ? 'h-[560px] md:h-[480px]' : 'h-[360px]'} overflow-hidden rounded-xl border border-gray-200 bg-slate-50`}>
         <ReactFlow
           key={graph?.graphId || 'attack-graph'}
           nodes={flowData.nodes}
           edges={flowData.edges}
           nodeTypes={NODE_TYPES}
           fitView
-          fitViewOptions={{ padding: 0.08, minZoom: 0.18, maxZoom: 0.95 }}
+          fitViewOptions={{ padding: layoutDirection === 'TB' ? 0.05 : 0.08, minZoom: 0.18, maxZoom: 1.05 }}
           minZoom={0.18}
           maxZoom={1.8}
           nodesDraggable={false}
