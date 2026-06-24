@@ -1045,6 +1045,32 @@ async function stubBodyIntegrationApis(page) {
 }
 
 test.describe('Monitor interaction smoke', () => {
+  test('Desktop navigation scopes secondary links to the active section', async ({ page, baseURL }) => {
+    await page.setViewportSize({ width: 1440, height: 1000 })
+    await stubPentestApis(page)
+    await stubOverviewApis(page)
+    await stubTraceApis(page)
+    await page.goto(monitorUrl(baseURL, '/security/pentest'), { waitUntil: 'domcontentloaded' })
+
+    const mainNav = page.getByRole('navigation', { name: '主导航' })
+    await expect(mainNav).toBeVisible()
+    await expect(mainNav.getByRole('link', { name: '进入 Security Lab' })).toBeVisible()
+    await expect(mainNav.getByRole('link', { name: /渗透实验室/ })).toBeVisible()
+    await expect(mainNav.getByRole('link', { name: /安全免疫/ })).toBeVisible()
+    await expect(mainNav.getByRole('link', { name: /链路 Trace/ })).toHaveCount(0)
+
+    await mainNav.getByRole('link', { name: '进入 Observability' }).click()
+    await expect.poll(() => new URL(page.url()).hash).toBe('#/observability/overview')
+    await expect(mainNav.getByText('Observability', { exact: true })).toBeVisible()
+    await expect(mainNav.getByRole('link', { name: /链路 Trace/ })).toBeVisible()
+
+    await mainNav.getByRole('link', { name: /链路 Trace/ }).click()
+    await expect.poll(() => new URL(page.url()).hash).toBe('#/observability/trace')
+    await expect
+      .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1))
+      .toBe(true)
+  })
+
   test('Mobile navigation shows route context and closes after route change', async ({ page, baseURL }) => {
     await page.setViewportSize({ width: 390, height: 1000 })
     await stubPentestApis(page)

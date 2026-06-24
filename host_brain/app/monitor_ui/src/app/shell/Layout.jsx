@@ -74,29 +74,75 @@ function NavPill({ to, icon: Icon, label, onClick, badge = null, compact = false
   )
 }
 
-function DesktopNav({ sectionBadges, itemBadges }) {
+function SectionTab({ section, active = false, badge = null }) {
+  const target = section.items[0]?.to || '/cockpit'
+  const handlePrefetch = () => {
+    void preloadRoute(target)
+  }
+
+  return (
+    <NavLink
+      to={target}
+      onMouseEnter={handlePrefetch}
+      onFocus={handlePrefetch}
+      onTouchStart={handlePrefetch}
+      aria-label={`进入 ${section.title}`}
+      className={`inline-flex shrink-0 items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs font-semibold transition-all ${
+        active
+          ? 'border-primary-200 bg-primary-50 text-primary shadow-sm'
+          : 'border-transparent text-gray-500 hover:border-primary-100 hover:bg-white/80 hover:text-gray-800'
+      }`}
+    >
+      <span>{section.title}</span>
+      {badge ? <NavBadge value={badge.value} severity={badge.severity} /> : null}
+    </NavLink>
+  )
+}
+
+function DesktopNav({ activeNav, sectionBadges, itemBadges }) {
+  const currentSection = activeNav?.section || NAV_SECTIONS[0]
+  const currentItem = activeNav?.item || currentSection?.items?.[0]
+
   return (
     <nav
-      className="hidden min-w-0 flex-wrap items-center gap-2 rounded-xl border border-primary-100/70 bg-white/76 px-2 py-1.5 shadow-sm backdrop-blur-sm lg:flex"
+      className="hidden min-w-0 overflow-hidden rounded-xl border border-primary-100/70 bg-white/76 shadow-sm backdrop-blur-sm lg:block"
       role="navigation"
       aria-label="主导航"
     >
-      {NAV_SECTIONS.map((section) => (
-        <React.Fragment key={section.title}>
-          <span className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-primary-100/80 bg-primary-50/70 px-2 py-1 text-[11px] font-semibold text-primary-700">
-            {section.title}
-            {sectionBadges[section.title] ? (
-              <NavBadge
-                value={sectionBadges[section.title].value}
-                severity={sectionBadges[section.title].severity}
-              />
-            ) : null}
-          </span>
-          {section.items.map((item) => (
-            <NavPill key={item.to} {...item} badge={itemBadges[item.to]} compact />
+      <div className="flex min-w-0 items-center justify-between gap-3 border-b border-primary-100/70 px-2 py-1.5">
+        <div className="flex min-w-0 items-center gap-1.5 overflow-x-auto">
+          {NAV_SECTIONS.map((section) => (
+            <SectionTab
+              key={section.title}
+              section={section}
+              active={currentSection?.title === section.title}
+              badge={sectionBadges[section.title]}
+            />
           ))}
-        </React.Fragment>
-      ))}
+        </div>
+        <div className="hidden shrink-0 items-center gap-1.5 rounded-lg border border-primary-100/70 bg-primary-50/55 px-2 py-1 text-xs text-primary-700 xl:flex">
+          <span className="font-semibold">{currentSection?.title}</span>
+          <ChevronRight size={13} />
+          <span className="max-w-36 truncate text-gray-600">{currentItem?.label}</span>
+        </div>
+      </div>
+      <div
+        className="flex min-w-0 items-center gap-2 overflow-x-auto px-2 py-1.5"
+        aria-label={`${currentSection?.title || '当前领域'} 子导航`}
+      >
+        <span className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-primary-100/80 bg-primary-50/70 px-2 py-1 text-[11px] font-semibold text-primary-700">
+          {currentSection?.title}
+          {sectionBadges[currentSection?.title] ? (
+            <NavBadge
+              value={sectionBadges[currentSection.title].value}
+              severity={sectionBadges[currentSection.title].severity}
+            />
+          ) : null}
+        </span>
+        {(currentSection?.items || []).map((item) => (
+          <NavPill key={item.to} {...item} badge={itemBadges[item.to]} compact />
+        ))}
+      </div>
     </nav>
   )
 }
@@ -362,7 +408,7 @@ export default function Layout() {
             onOpenMenu={() => setMobileMenuOpen(true)}
           />
 
-          <DesktopNav sectionBadges={sectionBadges} itemBadges={itemBadges} />
+          <DesktopNav activeNav={activeNav} sectionBadges={sectionBadges} itemBadges={itemBadges} />
         </div>
       </header>
 
