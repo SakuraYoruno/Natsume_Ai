@@ -231,6 +231,43 @@ class MetaLearningLoop:
                     confidence=0.9,
                 ))
 
+            # ── Pentest-specific adjustment rules ──────────────────────────
+            if m.module_name.startswith("pentest.") and m.module_name != "pentest.chain":
+                if m.total_invocations > 5:
+                    success_rate = m.success_count / m.total_invocations if m.total_invocations else 0
+                    if success_rate < 0.2:
+                        adjustments.append(ParameterAdjustment(
+                            module_name=m.module_name,
+                            parameter_name="success_rate_alert",
+                            current_value=success_rate,
+                            suggested_value=0.3,
+                            reason=f"Pentest tool {m.module_name} success rate only {success_rate:.1%} — consider alternative approach",
+                            confidence=0.8,
+                        ))
+
+            if m.module_name == "pentest.chain":
+                if m.total_invocations > 3:
+                    chain_success_rate = m.success_count / m.total_invocations
+                    if chain_success_rate < 0.3:
+                        adjustments.append(ParameterAdjustment(
+                            module_name=m.module_name,
+                            parameter_name="chain_completion_rate",
+                            current_value=chain_success_rate,
+                            suggested_value=0.5,
+                            reason=f"Chain completion rate only {chain_success_rate:.1%} — review action selection strategy",
+                            confidence=0.7,
+                        ))
+                    retryable = m.custom_metrics.get("retryable_failures", 0)
+                    if retryable > m.total_invocations * 0.3:
+                        adjustments.append(ParameterAdjustment(
+                            module_name=m.module_name,
+                            parameter_name="retry_rate_too_high",
+                            current_value=retryable / m.total_invocations,
+                            suggested_value=0.1,
+                            reason=f"Retryable failure rate {retryable/m.total_invocations:.1%} — network or scope issues",
+                            confidence=0.6,
+                        ))
+
         return adjustments
 
     @staticmethod
