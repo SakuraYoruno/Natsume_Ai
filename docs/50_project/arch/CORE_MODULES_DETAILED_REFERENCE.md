@@ -670,7 +670,7 @@ interoception / motor_cortex / cerebellum / glymphatic / vestibular
 - `POST /runs/{run_id}/approve-side-effect` 与 `POST /runs/{run_id}/continue-side-effect` 承接高风险副作用审批闭环
 - `GET /runs/{run_id}/report` 输出 markdown/json 报告
 
-边界：该路由依赖 `skills.pentest.*` 的 ScopeGuard、RateLimiter、executor guard、tool specs/executors 与 autonomous kernel；它是授权安全实验执行面，不是 chat 主链、记忆源或人格策略源。
+边界：该路由依赖 `host_brain.pentest` 的 ScopeGuard、RateLimiter、executor guard、tool specs/executors 与 autonomous kernel；它是授权安全实验执行面，不是 chat 主链、记忆源或人格策略源。
 
 ## 17. Observability Backend（host_brain/app/obs_*.py）
 

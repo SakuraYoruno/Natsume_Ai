@@ -6,8 +6,6 @@ Thumbs.db
 skills/*
 !skills/example-echo/
 !skills/example-echo/**
-!skills/pentest/
-!skills/pentest/**
 !host_brain/skills/
 !host_brain/skills/project_locator.py
 !host_brain/skills/codex_task_builder.py

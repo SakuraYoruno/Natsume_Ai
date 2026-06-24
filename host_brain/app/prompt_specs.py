@@ -712,7 +712,7 @@ _SPECS: dict[str, PromptSpec] = {
         content=_PENTEST_AGENT_SYSTEM_PROMPT,
         category="agent_prompt",
         scope="pentest_agent",
-        change_note="moved from skills.pentest.agent into unified versioned prompt registry",
+        change_note="moved from host_brain.pentest into unified versioned prompt registry",
     ),
     "repair_agent_handler.runtime_texts": _spec(
         "repair_agent_handler.runtime_texts",
