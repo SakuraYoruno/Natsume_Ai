@@ -15,6 +15,7 @@ export default function ChatDebug() {
         stats={chatDebug.stats}
         streaming={chatDebug.streaming}
         heroMetaItems={chatDebug.heroMetaItems}
+        commandRail={chatDebug.commandRail}
         runtimeCard={(
           <DigitalLifeRuntimeCard
             runtimeSnapshot={chatDebug.runtimeSnapshot}
@@ -30,6 +31,8 @@ export default function ChatDebug() {
         setMessage={chatDebug.setMessage}
         onSend={chatDebug.sendMessage}
         onStop={chatDebug.stopStream}
+        onUseSample={chatDebug.useSamplePrompt}
+        onRefreshTrace={() => void chatDebug.refetchTraceSnapshot()}
       />
 
       <ChatTraceSidebar

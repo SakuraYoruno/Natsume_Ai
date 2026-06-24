@@ -67,6 +67,137 @@ export function buildChatDebugHeroMetaItems({
   ]
 }
 
+export function buildChatDebugCommandRailModel({
+  message = '',
+  streaming = false,
+  error = null,
+  stats = null,
+  requestId = null,
+  sseEvents = [],
+  chainEvents = [],
+  traceSnapshot = null,
+  traceBusy = false,
+  traceIssueCount = 0,
+  traceLatestNode = null,
+  latestEvent = null,
+} = {}) {
+  const hasMessage = Boolean(String(message || '').trim())
+  const hasRequest = Boolean(requestId)
+  const eventCount = Array.isArray(sseEvents) ? sseEvents.length : 0
+  const chainCount = Array.isArray(chainEvents) ? chainEvents.length : 0
+  const nodeCount = traceSnapshot?.node_count ?? traceSnapshot?.nodes?.length ?? chainCount
+  const traceStatus = traceSnapshot?.status || (hasRequest ? (traceBusy ? '拉取中' : '待补齐') : '等待请求')
+  const latestStage = traceLatestNode?.node_id || latestEvent?.node_id || latestEvent?.phase || '暂无事件'
+
+  let status = 'idle'
+  let headline = '先输入一条消息，启动一次可追踪调试'
+  let description = '发送后左侧看回复，右侧看 SSE 事件、request_id 和 Trace 入口。建议先用一条短消息确认链路是否可追踪。'
+  let primaryAction = hasMessage
+    ? { kind: 'send', label: '发送调试消息', detail: '发送后自动清空输入并监听 SSE 事件。' }
+    : { kind: 'sample', label: '填入调试样例', detail: '填入一条短消息，便于快速验证链路。' }
+  let secondaryAction = hasRequest
+    ? { kind: 'openTrace', requestId, label: '打开 Trace 详情', detail: '查看完整请求链路和节点证据。' }
+    : { kind: 'noop', label: '等待 Request ID', detail: '请求开始后会自动生成 request_id。' }
+
+  if (streaming) {
+    status = 'streaming'
+    headline = '正在流式调试，先观察事件推进'
+    description = '当前请求正在生成回复。优先看右侧事件流是否持续推进，必要时停止流式请求。'
+    primaryAction = { kind: 'stop', label: '停止流式请求', detail: '中断当前请求并保留已收到事件。' }
+    secondaryAction = hasRequest
+      ? { kind: 'openTrace', requestId, label: '打开 Trace 详情', detail: 'Trace 可能仍在补齐。' }
+      : { kind: 'noop', label: '等待 Request ID', detail: 'SSE 事件出现后会自动更新。' }
+  } else if (error) {
+    status = 'blocked'
+    headline = '请求失败，先恢复发送链路'
+    description = String(error || '请求失败')
+    primaryAction = hasMessage
+      ? { kind: 'send', label: '重试发送', detail: '保留当前输入并重新发起请求。' }
+      : { kind: 'sample', label: '填入调试样例', detail: '先用样例排除空输入问题。' }
+    secondaryAction = { kind: 'sample', label: '换用样例', detail: '用稳定短消息重测。' }
+  } else if (traceIssueCount > 0) {
+    status = 'attention'
+    headline = `Trace 已返回，${traceIssueCount} 个节点需要关注`
+    description = '调试回复已经落到 Trace。先打开详情页看异常节点、输入输出和护栏回放。'
+    primaryAction = { kind: 'openTrace', requestId, label: '打开 Trace 详情', detail: '打开详情页核对异常节点和输入输出证据。' }
+    secondaryAction = { kind: 'refreshTrace', label: '刷新 Trace', detail: '重新拉取当前 request 的链路快照。' }
+  } else if (hasRequest) {
+    status = 'ready'
+    headline = '已拿到 Request ID，可进入 Trace 复核'
+    description = '本次聊天已经具备可下钻 request。可打开 Trace 详情核对阶段覆盖、流式事件和回复输出。'
+    primaryAction = { kind: 'openTrace', requestId, label: '打开 Trace 详情', detail: '打开详情页核对阶段覆盖和回复输出。' }
+    secondaryAction = { kind: 'refreshTrace', label: '刷新 Trace', detail: traceBusy ? 'Trace 正在刷新。' : '拉取最新链路快照。' }
+  } else if (hasMessage) {
+    status = 'ready'
+    headline = '消息已就绪，可以发起调试'
+    description = '发送后会实时收集 SSE 事件并自动捕获 request_id。'
+  }
+
+  return {
+    status,
+    eyebrow: 'Chat Debug Command',
+    title: '聊天调试控制台',
+    headline,
+    description,
+    primaryAction,
+    secondaryAction,
+    cards: [
+      {
+        key: 'input',
+        label: '输入状态',
+        value: hasMessage ? '已就绪' : (hasRequest ? '已发送' : '待输入'),
+        detail: hasMessage
+          ? truncateDebugText(message, 72)
+          : (hasRequest ? '本次请求已提交，可继续输入下一条。' : '可以填入样例或手动输入。'),
+        tone: hasMessage || hasRequest ? 'ready' : 'degraded',
+      },
+      {
+        key: 'events',
+        label: 'SSE 事件',
+        value: String(eventCount),
+        detail: `链路节点事件 ${chainCount}`,
+        tone: eventCount > 0 ? 'ready' : 'degraded',
+      },
+      {
+        key: 'trace',
+        label: 'Trace 状态',
+        value: traceStatus,
+        detail: hasRequest ? `节点 ${nodeCount} · 待关注 ${traceIssueCount}` : '等待 request_id。',
+        tone: traceIssueCount > 0 ? 'degraded' : (hasRequest ? 'ready' : 'blocked'),
+      },
+      {
+        key: 'latest',
+        label: '最新阶段',
+        value: truncateDebugText(latestStage, 32) || '暂无',
+        detail: stats ? `${stats.elapsed}ms · ${stats.eventCount} 事件` : '发送后显示耗时和事件数。',
+        tone: latestEvent || traceLatestNode ? 'ready' : 'degraded',
+      },
+    ],
+    gates: [
+      {
+        label: '输入',
+        state: hasMessage || streaming || hasRequest ? 'ready' : 'warning',
+        detail: hasMessage ? '消息可发送。' : (streaming || hasRequest ? '请求已发出。' : '尚未输入消息。'),
+      },
+      {
+        label: '流式',
+        state: streaming ? 'warning' : (eventCount > 0 ? 'ready' : 'warning'),
+        detail: streaming ? '正在接收 SSE。' : (eventCount > 0 ? '事件流已记录。' : '等待请求开始。'),
+      },
+      {
+        label: 'Request',
+        state: hasRequest ? 'ready' : 'blocked',
+        detail: hasRequest ? requestId : '还没有 request_id。',
+      },
+      {
+        label: 'Trace',
+        state: traceIssueCount > 0 ? 'warning' : (traceSnapshot ? 'ready' : (hasRequest ? 'warning' : 'blocked')),
+        detail: traceIssueCount > 0 ? `${traceIssueCount} 个节点需关注。` : (traceSnapshot ? 'Trace 快照已可读。' : '等待 Trace 快照。'),
+      },
+    ],
+  }
+}
+
 export function buildChatDebugTraceLoadState({
   traceSnapshot = null,
   traceError = null,

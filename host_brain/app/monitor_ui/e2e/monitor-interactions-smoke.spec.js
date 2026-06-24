@@ -809,6 +809,55 @@ async function stubSessionsApis(page) {
   })
 }
 
+async function stubChatDebugApis(page) {
+  await stubCommonReadApis(page)
+  const requestId = 'req_chat_debug_smoke'
+  const traceSnapshot = {
+    request_id: requestId,
+    status: 'OK',
+    total_latency_ms: 340,
+    summary: {
+      input_text: '请用一句话说明当前系统状态，并触发一次可追踪的调试链路。',
+      output_text: '系统处于可追踪调试状态。',
+    },
+    nodes: [
+      {
+        node_id: 'input',
+        id: 'input',
+        name: 'Input capture',
+        stage: 'input',
+        status: 'OK',
+        ts_ms: 1781942420000,
+      },
+      {
+        node_id: 'response',
+        id: 'response',
+        name: 'Response render',
+        stage: 'output',
+        status: 'OK',
+        ts_ms: 1781942420300,
+        output: '系统处于可追踪调试状态。',
+      },
+    ],
+  }
+  await page.route('**/v1/chat', (route) => route.fulfill({
+    status: 200,
+    contentType: 'text/event-stream',
+    body: [
+      `data: ${JSON.stringify({ event: 'request.started', phase: 'PRESENCE', request_id: requestId, ts_ms: 1781942420000 })}`,
+      '',
+      `data: ${JSON.stringify({ event: 'node.input', phase: 'NODE', node_id: 'input', request_id: requestId, ts_ms: 1781942420100 })}`,
+      '',
+      `data: ${JSON.stringify({ event: 'node.output', phase: 'NODE', node_id: 'response', request_id: requestId, ts_ms: 1781942420300 })}`,
+      '',
+      `data: ${JSON.stringify({ event: 'message.final', phase: 'COMMIT', content: '系统处于可追踪调试状态。', request_id: requestId, ts_ms: 1781942420400 })}`,
+      '',
+      '',
+    ].join('\n'),
+  }))
+  await page.route(`**/obs/trace/${requestId}`, (route) => fulfillJson(route, traceSnapshot))
+}
+
 async function stubEdgeCommandApis(page) {
   await stubCommonReadApis(page)
   await page.route('**/internal/edge_command/status', (route) => fulfillJson(route, {
@@ -1089,6 +1138,28 @@ test.describe('Monitor interaction smoke', () => {
 
     await triageRail.getByRole('button', { name: '打开推荐 Trace' }).click()
     await expect.poll(() => new URL(page.url()).hash).toBe('#/observability/trace/req_session_error')
+  })
+
+  test('Chat debug command rail sends a traceable smoke request', async ({ page, baseURL }) => {
+    await stubChatDebugApis(page)
+    await page.goto(monitorUrl(baseURL, '/observability/chat-debug'), { waitUntil: 'domcontentloaded' })
+
+    await expect(page.getByRole('heading', { name: '神经反射调试', exact: true })).toBeVisible()
+    const commandRail = page.locator('[aria-label="Chat Debug Command Rail"]')
+    await expect(commandRail).toBeVisible()
+    await expect(commandRail.getByText('先输入一条消息，启动一次可追踪调试')).toBeVisible()
+
+    await commandRail.getByRole('button', { name: '填入调试样例' }).click()
+    await expect(page.getByLabel('聊天调试输入')).toHaveValue(/可追踪的调试链路/)
+    await commandRail.getByRole('button', { name: '发送调试消息' }).click()
+
+    await expect(commandRail.getByText('已拿到 Request ID，可进入 Trace 复核')).toBeVisible()
+    await expect(commandRail.getByText('req_chat_debug_smoke', { exact: true })).toBeVisible()
+    await expect(page.locator('pre').filter({ hasText: '系统处于可追踪调试状态。' })).toBeVisible()
+    await expect(page.getByText('4 条')).toBeVisible()
+
+    await commandRail.getByRole('link', { name: '打开 Trace 详情' }).click()
+    await expect.poll(() => new URL(page.url()).hash).toBe('#/observability/trace/req_chat_debug_smoke')
   })
 
   test('Trace home exposes triage rail and full-chain route', async ({ page, baseURL }) => {
