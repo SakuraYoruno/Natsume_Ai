@@ -430,7 +430,14 @@ async function stubPentestRunDetailApis(page) {
       body: '# Pentest smoke report\n\nFinding: Debug endpoint exposed.\n\nArtifact: artifacts/pentest/smoke-lab-run.md',
     })
   })
-  await page.route('**/v1/pentest/runs/smoke-lab-run', (route) => fulfillJson(route, {
+  const pendingStep = {
+    phase: 'phase4_exploit',
+    tool_id: 'pentest.safe_lab_exploit',
+    target: 'http://127.0.0.1:4173/monitor/',
+    execution_mode: 'lab',
+    status: 'pending',
+  }
+  const baseRun = {
     run_id: 'smoke-lab-run',
     status: 'waiting_approval',
     target: 'http://127.0.0.1:4173/monitor/',
@@ -438,15 +445,7 @@ async function stubPentestRunDetailApis(page) {
     mode: 'lab_full',
     phases: ['phase1_passive', 'phase2_active', 'phase3_vuln', 'phase4_exploit'],
     approval_required: true,
-    pending_side_effect_steps: [
-      {
-        phase: 'phase4_exploit',
-        tool_id: 'pentest.safe_lab_exploit',
-        target: 'http://127.0.0.1:4173/monitor/',
-        execution_mode: 'lab',
-        status: 'pending',
-      },
-    ],
+    pending_side_effect_steps: [pendingStep],
     guard_stats: {
       scope_allowed: 4,
       side_effect_blocked: 1,
@@ -475,7 +474,99 @@ async function stubPentestRunDetailApis(page) {
     artifact_refs: {
       markdown: 'artifacts/pentest/smoke-lab-run.md',
     },
-  }))
+  }
+  const approvalTokenRef = 'pentest_web_approval::smoke-lab-run'
+  const approvedRun = {
+    ...baseRun,
+    side_effect_approval: {
+      approved: true,
+      approved_ts_ms: 1782260002000,
+      approval_token_ref: approvalTokenRef,
+    },
+    pending_side_effect_steps: [
+      {
+        ...pendingStep,
+        status: 'approved',
+        approval_token_ref: approvalTokenRef,
+      },
+    ],
+    events: [
+      ...baseRun.events,
+      {
+        seq: 3,
+        type: 'side_effect_approved',
+        ts_ms: 1782260002000,
+        message: '已记录 Phase4/5 side-effect approval token',
+      },
+    ],
+  }
+  const completedStep = {
+    ...approvedRun.pending_side_effect_steps[0],
+    status: 'completed',
+    continued_ts_ms: 1782260003000,
+    continuation_id: 'side_effect_continuation::smoke-lab-run::phase4_exploit:pentest.safe_lab_exploit',
+  }
+  const continuation = {
+    continuation_id: completedStep.continuation_id,
+    completed: true,
+    simulated: true,
+    executed: false,
+    step_index: 0,
+    step: approvedRun.pending_side_effect_steps[0],
+    reason: 'web_approval_rail',
+    approval_token_ref: approvalTokenRef,
+    continued_ts_ms: 1782260003000,
+    completed_count: 1,
+    pending_count: 0,
+  }
+  const continuedRun = {
+    ...approvedRun,
+    status: 'COMPLETED',
+    result_code: 'SIDE_EFFECT_CONTINUATION_COMPLETED',
+    pending_side_effect_steps: [completedStep],
+    side_effect_continuation: continuation,
+    side_effect_continuations: [continuation],
+    findings: [
+      ...baseRun.findings,
+      {
+        title: 'Approved side-effect continuation recorded',
+        severity: 'INFO',
+        description: 'Lab approval was converted into an auditable continuation artifact.',
+        target: 'http://127.0.0.1:4173/monitor/',
+        evidence_refs: ['artifact://continuation/smoke-lab-run'],
+      },
+    ],
+    events: [
+      ...approvedRun.events,
+      {
+        seq: 4,
+        type: 'side_effect_continue_start',
+        ts_ms: 1782260003000,
+        message: '开始执行已批准 side-effect continuation',
+      },
+      {
+        seq: 5,
+        type: 'side_effect_continued',
+        ts_ms: 1782260004000,
+        message: '已完成 approved side-effect continuation；默认未执行真实 exploit 命令。',
+      },
+      {
+        seq: 6,
+        type: 'report_ready',
+        ts_ms: 1782260005000,
+        message: 'Side-effect continuation report artifact 已刷新',
+      },
+    ],
+    audit_ref: 'audit://pentest/smoke-lab-run/continued',
+    artifact_refs: {
+      markdown: 'artifacts/pentest/smoke-lab-run.md',
+      json: 'artifacts/pentest/smoke-lab-run.json',
+      continuation: 'artifacts/pentest/smoke-lab-run-continuation.json',
+    },
+  }
+  await page.route('**/v1/pentest/runs/smoke-lab-run/approve-side-effect', (route) => fulfillJson(route, approvedRun))
+  await page.route('**/v1/pentest/runs/smoke-lab-run/continue-side-effect', (route) => fulfillJson(route, continuedRun))
+  await page.route('**/v1/pentest/runs/smoke-lab-run', (route) => fulfillJson(route, baseRun))
 }
 
 async function stubSecurityImmuneApis(page) {
@@ -1382,6 +1473,13 @@ test.describe('Monitor interaction smoke', () => {
     const approvalRail = page.getByRole('region', { name: 'Pentest Approval Rail' })
     await expect(approvalRail).toBeVisible()
     await expect(approvalRail.getByText('等待审批记录')).toBeVisible()
+    const closureChecklist = approvalRail.getByRole('region', { name: 'Approval Closure Checklist' })
+    await expect(closureChecklist).toBeVisible()
+    await expect(closureChecklist.getByText('Approval Closure Checklist')).toBeVisible()
+    await expect(closureChecklist.getByText('Approval Record', { exact: true })).toBeVisible()
+    await expect(closureChecklist.getByText('pending approval')).toBeVisible()
+    await expect(closureChecklist.getByText('Continuation', { exact: true })).toBeVisible()
+    await expect(closureChecklist.getByText('waiting approval')).toBeVisible()
     await expect(approvalRail.getByText('Approval Gate Timeline')).toBeVisible()
     await expect(approvalRail.getByText('approval pending')).toBeVisible()
     await expect(approvalRail.getByText('Audit Packet')).toBeVisible()
@@ -1400,6 +1498,33 @@ test.describe('Monitor interaction smoke', () => {
     await expect(page.getByText('artifact_ref')).toBeVisible()
   })
 
+  test('Pentest run detail completes approval continuation handoff', async ({ page, baseURL }) => {
+    await stubPentestRunDetailApis(page)
+    await page.goto(monitorUrl(baseURL, '/security/pentest/runs/smoke-lab-run'), { waitUntil: 'domcontentloaded' })
+
+    const approvalRail = page.getByRole('region', { name: 'Pentest Approval Rail' })
+    const closureChecklist = approvalRail.getByRole('region', { name: 'Approval Closure Checklist' })
+    await expect(closureChecklist.getByText('Approval closure pending')).toBeVisible()
+    await expect(closureChecklist.getByText('pending approval')).toBeVisible()
+
+    await approvalRail.getByRole('button', { name: '记录 Side-effect Approval' }).click()
+    await expect(page.getByText('side-effect approval 已记录')).toBeVisible()
+    await expect(closureChecklist.getByText('Approval recorded, continuation pending')).toBeVisible()
+    await expect(closureChecklist.getByText('approved', { exact: true })).toBeVisible()
+    await expect(closureChecklist.getByText('ready', { exact: true })).toBeVisible()
+    await expect(approvalRail.getByRole('button', { name: '执行已批准步骤' })).toBeEnabled()
+    await expect(page.getByRole('region', { name: 'Pentest Run hero status' }).getByText('continuation ready')).toBeVisible()
+
+    await approvalRail.getByRole('button', { name: '执行已批准步骤' }).click()
+    await expect(page.getByText('approved side-effect continuation 已完成')).toBeVisible()
+    await expect(closureChecklist.getByText('Approval closure completed')).toBeVisible()
+    await expect(closureChecklist.getByText('completed', { exact: true })).toBeVisible()
+    await expect(closureChecklist.getByText('Report Review')).toBeVisible()
+    await expect(closureChecklist.getByText('linked', { exact: true })).toBeVisible()
+    await expect(approvalRail.getByRole('button', { name: 'Continuation 已完成' })).toBeDisabled()
+    await expect(page.locator('#pentest-run-findings').getByText('Approved side-effect continuation recorded', { exact: true })).toBeVisible()
+  })
+
   test('Pentest run detail stays readable on mobile viewport', async ({ page, baseURL }) => {
     await page.setViewportSize({ width: 390, height: 1000 })
     await stubPentestRunDetailApis(page)
@@ -1411,6 +1536,7 @@ test.describe('Monitor interaction smoke', () => {
     await expect(page.getByRole('region', { name: 'Runtime Attack Evidence Flow' })).toBeVisible()
     await expect(page.getByRole('region', { name: 'Report Delivery Checklist' })).toBeVisible()
     await expect(page.getByRole('region', { name: 'Pentest Approval Rail' })).toBeVisible()
+    await expect(page.getByRole('region', { name: 'Approval Closure Checklist' })).toBeVisible()
     await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1)).toBe(true)
   })
 
