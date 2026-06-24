@@ -1028,6 +1028,9 @@ test.describe('Monitor interaction smoke', () => {
     const mission = page.getByRole('region', { name: 'Pentest Mission Control' })
     await expect(mission).toBeVisible()
     await expect(mission.getByText('可以创建 readonly run')).toBeVisible()
+    const plannedNarrative = page.getByRole('region', { name: 'Planned Attack Path Narrative' })
+    await expect(plannedNarrative).toBeVisible()
+    await expect(plannedNarrative.getByText('Readonly run 可直接创建')).toBeVisible()
 
     const targetInput = page.getByLabel('Target')
     const scopeInput = page.getByLabel('Scope')
@@ -1042,11 +1045,13 @@ test.describe('Monitor interaction smoke', () => {
     await modeSelect.selectOption('lab_full')
     await expect(page.getByText('Lab Mode OFF，lab_full 已禁用')).toBeVisible()
     await expect(mission.getByText('Lab Mode OFF 阻断 lab_full')).toBeVisible()
+    await expect(plannedNarrative.getByText('先处理 Approval Rail')).toBeVisible()
     await expect(createRunButton).toBeDisabled()
 
     await modeSelect.selectOption('readonly')
     await targetInput.fill('http://example.com/')
     await expect(mission.getByText('Target host 未命中 scope')).toBeVisible()
+    await expect(plannedNarrative.getByText('先处理 ScopeGuard')).toBeVisible()
     await expect(createRunButton).toBeDisabled()
 
     await targetInput.fill('http://127.0.0.1:4173/monitor/')
@@ -1076,6 +1081,10 @@ test.describe('Monitor interaction smoke', () => {
     await expect(sidePanel.getByText('Debug endpoint exposed')).toBeVisible()
     await expect(sidePanel.getByText('TLS info disclosure')).toBeVisible()
     await expect(page.getByText('攻击路径可视化')).toBeVisible()
+    const runtimeNarrative = page.getByRole('region', { name: 'Run Attack Path Narrative' })
+    await expect(runtimeNarrative).toBeVisible()
+    await expect(runtimeNarrative.getByText('等待 Side-effect Approval')).toBeVisible()
+    await expect(runtimeNarrative.getByText('处理 Approval Rail')).toBeVisible()
     await expect(page.getByRole('button', { name: '记录 Side-effect Approval' })).toBeEnabled()
 
     await sidePanel.getByLabel('搜索 Findings').fill('debug')
