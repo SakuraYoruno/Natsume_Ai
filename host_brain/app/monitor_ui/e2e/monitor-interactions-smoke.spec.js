@@ -578,6 +578,85 @@ async function stubToolsApis(page) {
   })
 }
 
+async function stubPromptConfigApis(page) {
+  await stubCommonReadApis(page)
+  const templates = [
+    {
+      template_id: 'react_loop.prompt_templates',
+      description: 'Agent loop planner prompts',
+      purpose: 'Plan tool use and response strategy.',
+      scope: 'agent',
+      category: 'planner',
+      source: 'prompt_spec',
+      content_type: 'json',
+      locale: '*',
+      enabled: true,
+      has_override: false,
+      version: 3,
+      updated_at_ts_ms: 1782260000000,
+      default_content: { system: 'Plan carefully.', user: 'Use available tools.' },
+      resolved_content: { system: 'Plan carefully.', user: 'Use available tools.' },
+      override_content: null,
+    },
+    {
+      template_id: 'safety.guard.fallback',
+      description: 'Safety guard fallback response',
+      purpose: 'Provide a fallback when guardrails block execution.',
+      scope: 'safety',
+      category: 'guard_fallback',
+      source: 'override',
+      content_type: 'text',
+      locale: '*',
+      enabled: true,
+      has_override: true,
+      version: 7,
+      updated_at_ts_ms: 1782260001000,
+      default_content: 'Default guard fallback.',
+      resolved_content: 'Runtime override guard fallback.',
+      override_content: 'Runtime override guard fallback.',
+    },
+    {
+      template_id: 'persona.response.style',
+      description: 'Persona response style prompt',
+      purpose: 'Control persona style.',
+      scope: 'persona',
+      category: 'style',
+      source: 'prompt_spec',
+      content_type: 'text',
+      locale: '*',
+      enabled: true,
+      has_override: false,
+      version: 2,
+      updated_at_ts_ms: 1782260002000,
+      default_content: 'Default persona style.',
+      resolved_content: 'Default persona style.',
+      override_content: null,
+    },
+  ]
+
+  await page.route('**/prompt-config/templates**', (route) => {
+    const url = new URL(route.request().url())
+    const match = url.pathname.match(/\/prompt-config\/templates\/(.+)$/)
+    if (match) {
+      const templateId = decodeURIComponent(match[1])
+      const item = templates.find((template) => template.template_id === templateId)
+      return fulfillJson(route, { item: item || templates[0] })
+    }
+
+    const keyword = url.searchParams.get('keyword')?.toLowerCase() || ''
+    const scope = url.searchParams.get('scope')?.toLowerCase() || ''
+    const category = url.searchParams.get('category')?.toLowerCase() || ''
+    const source = url.searchParams.get('source')?.toLowerCase() || ''
+    const items = templates
+      .filter((template) => !keyword || `${template.template_id} ${template.description} ${template.purpose}`.toLowerCase().includes(keyword))
+      .filter((template) => !scope || template.scope.toLowerCase().includes(scope))
+      .filter((template) => !category || template.category.toLowerCase().includes(category))
+      .filter((template) => !source || template.source.toLowerCase().includes(source))
+      .map(({ default_content, resolved_content, override_content, ...template }) => template)
+    return fulfillJson(route, { items })
+  })
+}
+
 async function stubAutomationApis(page) {
   await stubCommonReadApis(page)
   await page.route('**/scheduler/tasks**', (route) => fulfillJson(route, [
@@ -1196,6 +1275,33 @@ test.describe('Monitor interaction smoke', () => {
     await submitExecutionButton.click()
     await expect(page.getByText('执行完成')).toBeVisible()
     await expect(page.locator('pre').filter({ hasText: '"tool_id": "write.note"' })).toBeVisible()
+  })
+
+  test('Prompt config decision rail filters templates and surfaces overrides', async ({ page, baseURL }) => {
+    await stubPromptConfigApis(page)
+    await page.goto(monitorUrl(baseURL, '/operations/prompt'), { waitUntil: 'domcontentloaded' })
+    await expect(page.getByRole('heading', { name: '提示与兜底模板总览' })).toBeVisible()
+
+    const rail = page.getByRole('region', { name: 'PromptSpec Decision Rail' })
+    await expect(rail).toBeVisible()
+    await expect(rail.getByText('目录可读，存在覆盖模板')).toBeVisible()
+    await expect(rail.getByText('3 templates')).toBeVisible()
+    await expect(rail.getByText('code-side')).toBeVisible()
+
+    const catalog = page.locator('#prompt-template-catalog')
+    const detail = page.locator('#prompt-template-detail')
+    await expect(catalog.getByRole('button').filter({ hasText: 'react_loop.prompt_templates' })).toBeVisible()
+    await expect(catalog.getByRole('button').filter({ hasText: 'persona.response.style' })).toBeVisible()
+    await page.getByLabel('Prompt category filter').selectOption('guard_fallback')
+    await expect(rail.getByText('当前模板存在 runtime override')).toBeVisible()
+    await expect(catalog.getByRole('button').filter({ hasText: 'safety.guard.fallback' })).toBeVisible()
+    await expect(catalog.getByRole('button').filter({ hasText: 'react_loop.prompt_templates' })).toBeHidden()
+    await expect(detail.getByText('当前存在运行时覆盖')).toBeVisible()
+    await expect(detail.getByText('Runtime override guard fallback.').first()).toBeVisible()
+
+    await rail.getByRole('button', { name: /定位 Detail/ }).click()
+    await expect(detail).toBeVisible()
+    await expect(rail.getByRole('link', { name: /人格运营/ })).toHaveAttribute('href', '#/operations/persona')
   })
 
   test('Automation filters tasks and exposes clear-filter state', async ({ page, baseURL }) => {

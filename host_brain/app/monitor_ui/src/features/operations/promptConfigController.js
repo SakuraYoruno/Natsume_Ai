@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom'
 import useDigitalLifeRuntimeSignals from '../../hooks/useDigitalLifeRuntimeSignals.js'
 import useAppStore from '../../store/useAppStore.js'
 import {
+  buildPromptDecisionRailModel,
   buildPromptFilterOptions,
   buildPromptTemplateListMetaState,
   buildPromptTemplateSampleMeta,
@@ -69,6 +70,37 @@ export function usePromptConfigController() {
     [listMetaState, listQuery.lastUpdatedAt, summary],
   )
 
+  const decisionRail = useMemo(
+    () => buildPromptDecisionRailModel({
+      filters,
+      listMetaState,
+      listError: listQuery.listError,
+      listLoading: listQuery.loading,
+      listRefreshing: listQuery.refreshing,
+      items: listQuery.items,
+      summary,
+      selected: detailQuery.item,
+      detailError: detailQuery.detailError,
+      detailLoading: detailQuery.loading,
+      detailRefreshing: detailQuery.refreshing,
+      runtimeSnapshot,
+    }),
+    [
+      detailQuery.detailError,
+      detailQuery.item,
+      detailQuery.loading,
+      detailQuery.refreshing,
+      filters,
+      listMetaState,
+      listQuery.items,
+      listQuery.listError,
+      listQuery.loading,
+      listQuery.refreshing,
+      runtimeSnapshot,
+      summary,
+    ],
+  )
+
   const refreshView = useCallback(async () => {
     setRefreshingView(true)
     try {
@@ -98,6 +130,7 @@ export function usePromptConfigController() {
     categories,
     summary,
     sampleMeta,
+    decisionRail,
     selected: detailQuery.item,
     detailLoading: detailQuery.loading,
     detailRefreshing: detailQuery.refreshing,

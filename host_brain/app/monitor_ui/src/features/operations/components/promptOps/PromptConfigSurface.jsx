@@ -15,21 +15,23 @@ import MetricCard from '../../../../shared/ui/MetricCard.jsx'
 import NoticeBanner from '../../../../shared/ui/NoticeBanner.jsx'
 import SampleMeta from '../../../../shared/ui/observability/SampleMeta.jsx'
 import PageHero from '../../../../shared/ui/PageHero.jsx'
+import { OPERATIONS_PROMPT_COPY } from '../../../../shared/content/terminology.js'
 import {
   formatPromptTemplateUpdatedAt,
   getPromptContentTypeBadgeView,
   getPromptSourceBadgeView,
 } from '../../promptOpsModel.js'
+import PromptDecisionRail from './PromptDecisionRail.jsx'
 
 const PromptTemplateEditorPanel = React.lazy(() => import('./PromptTemplateEditorPanel.jsx'))
 
 function SourceBadge({ source }) {
-  const view = getPromptSourceBadgeView(source)
+  const view = getPromptSourceBadgeView(source, { resolveLabel: true })
   return <span className={`inline-flex items-center rounded border px-2 py-0.5 text-xs font-medium ${view.className}`}>{view.label}</span>
 }
 
 function TypeBadge({ value }) {
-  const view = getPromptContentTypeBadgeView(value)
+  const view = getPromptContentTypeBadgeView(value, { resolveLabel: true })
   return <span className={`inline-flex items-center rounded border px-2 py-0.5 text-xs font-medium ${view.className}`}>{view.label}</span>
 }
 
@@ -37,7 +39,7 @@ function PromptConfigHeader({ refreshingView, onRefreshView }) {
   return (
     <div className="flex flex-wrap items-center justify-between gap-3">
       <div>
-        <h1 className="text-xl font-semibold text-gray-900">提示与兜底模板总览</h1>
+        <h1 className="text-xl font-semibold text-gray-900">{OPERATIONS_PROMPT_COPY.heroTitle}</h1>
         <p className="text-sm text-gray-500">查看主链路提示词、守卫兜底与版本化 PromptSpec，正式变更统一回到代码目录。</p>
       </div>
       <div className="flex items-center gap-2">
@@ -58,10 +60,11 @@ function PromptConfigHero({ summary, sampleMeta }) {
   return (
     <PageHero
       icon={FileText}
-      eyebrow="数字生命体提示模板观测台"
+      eyebrow={OPERATIONS_PROMPT_COPY.heroEyebrow}
       title={summary.total}
-      description="这里只读展示 code-side PromptSpec 默认值与当前生效值，帮助判断线上到底吃了哪套模板。"
+      description={OPERATIONS_PROMPT_COPY.heroDescription}
       gradientClass="from-primary-50 via-white to-indigo-50"
+      showPulseRail={false}
       aside={(
         <div className="space-y-3">
           <SampleMeta
@@ -118,6 +121,7 @@ function PromptFilterPanel({
         <div className="grid grid-cols-3 gap-2">
           <select
             className="rounded border border-gray-300 px-2 py-2 text-xs"
+            aria-label="Prompt scope filter"
             value={filters.scope}
             onChange={(event) => onFilterChange('scope', event.target.value)}
           >
@@ -126,6 +130,7 @@ function PromptFilterPanel({
           </select>
           <select
             className="rounded border border-gray-300 px-2 py-2 text-xs"
+            aria-label="Prompt category filter"
             value={filters.category}
             onChange={(event) => onFilterChange('category', event.target.value)}
           >
@@ -134,6 +139,7 @@ function PromptFilterPanel({
           </select>
           <select
             className="rounded border border-gray-300 px-2 py-2 text-xs"
+            aria-label="Prompt source filter"
             value={filters.source}
             onChange={(event) => onFilterChange('source', event.target.value)}
           >
@@ -265,6 +271,7 @@ export default function PromptConfigSurface({
   categories,
   summary,
   sampleMeta,
+  decisionRail,
   selected,
   detailLoading,
   detailRefreshing,
@@ -277,11 +284,21 @@ export default function PromptConfigSurface({
   onRefreshList,
   onRefreshView,
 }) {
+  const busy = refreshingView || listLoading || listRefreshing || detailLoading || detailRefreshing
+
   return (
     <div className="space-y-6">
       <PromptConfigHeader refreshingView={refreshingView} onRefreshView={onRefreshView} />
-      <DigitalLifeRuntimeCard runtimeSnapshot={runtimeSnapshot} promptStats={promptStats} compact />
+      <div id="prompt-runtime-context" className="scroll-mt-24">
+        <DigitalLifeRuntimeCard runtimeSnapshot={runtimeSnapshot} promptStats={promptStats} compact />
+      </div>
       <PromptConfigHero summary={summary} sampleMeta={sampleMeta} />
+
+      <PromptDecisionRail
+        decisionRail={decisionRail}
+        onRefreshView={onRefreshView}
+        busy={busy}
+      />
 
       <NoticeBanner variant="info" title="前端已切换为只读模式">
         默认模板来自 code-side PromptSpec。当前页面只展示 default / resolved 内容，前端不再提供保存、恢复默认或启用覆盖入口。
@@ -293,10 +310,12 @@ export default function PromptConfigSurface({
         </NoticeBanner>
       ) : null}
 
-      <PromptSummaryCards summary={summary} scopes={scopes} categories={categories} />
+      <div id="prompt-summary-cards" className="scroll-mt-24">
+        <PromptSummaryCards summary={summary} scopes={scopes} categories={categories} />
+      </div>
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-[360px,1fr]">
-        <div className="card space-y-4 p-4">
+        <div id="prompt-template-catalog" className="card scroll-mt-24 space-y-4 p-4">
           <PromptFilterPanel
             filters={filters}
             scopes={scopes}
@@ -315,7 +334,7 @@ export default function PromptConfigSurface({
           />
         </div>
 
-        <div className="card p-5">
+        <div id="prompt-template-detail" className="card scroll-mt-24 p-5">
           <PromptTemplateDetail
             selected={selected}
             detailLoading={detailLoading}

@@ -209,6 +209,27 @@ export const EXECUTION_TOOLS_COPY = Object.freeze({
   ],
 })
 
+export const OPERATIONS_PROMPT_COPY = Object.freeze({
+  heroEyebrow: 'Operations / PromptSpec',
+  heroTitle: '提示与兜底模板总览',
+  heroDescription: '只读核对 code-side PromptSpec、当前生效内容、守卫兜底和现存 override。先确认真源与筛选范围，再进入单个模板差异。',
+  commandRailTitle: 'PromptSpec Decision Rail',
+  commandRailDescription: '首屏先回答：模板目录是否可信、筛选是否缩小了判断范围、当前模板是否存在 runtime override、详情是否已经同步。',
+  gateTitle: 'Prompt Gate',
+  focusTitle: '建议动作',
+  catalogTitle: 'Catalog',
+  selectionTitle: 'Selection',
+  detailTitle: 'Resolved Detail',
+  sourceTitle: 'Source Truth',
+  quickLinksTitle: '相关入口',
+  quickLinks: [
+    { key: 'catalog', label: 'Catalog', targetId: 'prompt-template-catalog', detail: '搜索、筛选并选择模板。' },
+    { key: 'detail', label: 'Detail', targetId: 'prompt-template-detail', detail: '查看 YAML 默认值、当前生效值和 override。' },
+    { key: 'summary', label: 'Summary', targetId: 'prompt-summary-cards', detail: '核对数量、覆盖、JSON 和 Guard/Fallback 分布。' },
+    { key: 'runtime', label: 'Runtime', targetId: 'prompt-runtime-context', detail: '检查 prompt builder 与运行态上下文。' },
+  ],
+})
+
 export const INTEGRATIONS_COPY = Object.freeze({
   bodyTitle: '身体集成',
   bodyEyebrow: 'Integrations / Body Bridge',
