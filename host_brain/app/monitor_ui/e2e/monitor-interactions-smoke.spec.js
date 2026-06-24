@@ -1114,6 +1114,68 @@ async function stubTribeApis(page) {
   }))
 }
 
+async function stubGatewayApis(page) {
+  await stubCommonReadApis(page)
+  await page.route('**/obs/gateway/stats**', (route) => fulfillJson(route, {
+    total_inbound: 12,
+    total_outbound: 8,
+    total_errors: 2,
+    humanize_enabled: true,
+    humanize_typing_speed_cps: 8,
+    platforms: [
+      {
+        platform: 'wechat',
+        status: 'UP',
+        inbound_count: 8,
+        outbound_count: 5,
+        error_count: 0,
+        avg_latency_ms: 42,
+        bridge_status: 'connected',
+        last_event_ts_ms: 1782260000000,
+      },
+      {
+        platform: 'telegram',
+        status: 'DEGRADED',
+        inbound_count: 3,
+        outbound_count: 2,
+        error_count: 2,
+        avg_latency_ms: 180,
+        status_detail: 'Webhook retrying',
+        bridge_status: 'retrying',
+        last_event_ts_ms: 1782260001000,
+      },
+      {
+        platform: 'qq',
+        status: 'DOWN',
+        inbound_count: 1,
+        outbound_count: 1,
+        error_count: 0,
+        status_detail: 'adapter offline',
+      },
+    ],
+  }))
+  await page.route('**/obs/wechat/stats**', (route) => fulfillJson(route, {
+    rate_limits: [
+      {
+        key: 'send_text',
+        current: 10,
+        limit: 10,
+        remaining: 0,
+      },
+    ],
+    recent_events: [
+      {
+        ts_ms: 1782260000000,
+        event_type: 'wechat.message.received',
+      },
+    ],
+  }))
+  await page.route('**/obs/wechat/reset**', (route) => fulfillJson(route, {
+    ok: true,
+    detail: 'rate limits reset',
+  }))
+}
+
 async function stubBodyIntegrationApis(page) {
   await stubCommonReadApis(page)
   await page.route('**/v1/mateengine/capabilities', (route) => fulfillJson(route, {
@@ -1926,6 +1988,39 @@ test.describe('Monitor interaction smoke', () => {
 
     await page.getByRole('link', { name: /Agent Loop 查看智能体循环/ }).click()
     await expect.poll(() => new URL(page.url()).hash).toBe('#/execution/agent-loop')
+  })
+
+  test('Gateway routing gate surfaces platform risk and WeChat reset handoff', async ({ page, baseURL }) => {
+    await stubGatewayApis(page)
+    await page.goto(monitorUrl(baseURL, '/execution/gateway'), { waitUntil: 'domcontentloaded' })
+
+    await expect(page.getByRole('heading', { name: '统一消息网关' })).toBeVisible()
+    const gate = page.getByRole('region', { name: 'Gateway Routing Gate' })
+    await expect(gate).toBeVisible()
+    await expect(gate.getByText('Gateway Routing Gate')).toBeVisible()
+    await expect(gate.getByText('Platform Health')).toBeVisible()
+    await expect(gate.getByText('3/3 active，1 down，1 degraded。')).toBeVisible()
+
+    const handoff = page.getByRole('region', { name: 'Gateway Routing Handoff' })
+    await expect(handoff).toBeVisible()
+    await expect(handoff.getByText('Platform Coverage')).toBeVisible()
+    await expect(handoff.getByText('1 down / 1 degraded')).toBeVisible()
+    await expect(handoff.getByText('WeChat Channel')).toBeVisible()
+    await expect(handoff.getByText('1 limits / 1 events')).toBeVisible()
+
+    await gate.getByRole('button', { name: /定位平台健康/ }).click()
+    await expect(page.locator('#gateway-platform-health')).toBeVisible()
+    await expect(page.getByText('Telegram')).toBeVisible()
+    await expect(page.getByText('adapter offline')).toBeVisible()
+
+    const wechatDetail = page.locator('#gateway-wechat-detail')
+    await expect(wechatDetail.getByText('send_text')).toBeVisible()
+    await expect(wechatDetail.getByText('wechat.message.received')).toBeVisible()
+    await page.getByRole('button', { name: '重置频率限制' }).click()
+    await expect(page.getByText('rate limits reset')).toBeVisible()
+
+    await gate.getByRole('link', { name: /Trace 追踪 Gateway/ }).click()
+    await expect.poll(() => new URL(page.url()).hash).toBe('#/observability/trace')
   })
 
   test('Body integration gate validates say text and sends through MateEngine', async ({ page, baseURL }) => {

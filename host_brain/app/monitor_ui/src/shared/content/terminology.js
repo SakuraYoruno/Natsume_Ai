@@ -191,6 +191,26 @@ export const TRIBE_COPY = Object.freeze({
   ],
 })
 
+export const GATEWAY_COPY = Object.freeze({
+  heroEyebrow: 'Execution / Gateway',
+  heroTitle: '统一消息网关',
+  heroSubtitle: '六平台消息路由 · 拟人化发送 · 语音视频通话',
+  heroDescription: '把跨平台消息路由、平台健康、WeChat 频率限制和 Trace 交接放在同一个观测入口。先判断通道是否可信，再进入平台、Trace 或 Edge Command。',
+  commandRailTitle: 'Gateway Routing Gate',
+  commandRailDescription: '首屏先回答：网关观测是否连通、平台是否有离线或降级、WeChat 是否触发限制、下一步该看平台健康还是 Trace。',
+  gateTitle: '路由 Gate',
+  focusTitle: '建议路径',
+  quickLinksTitle: '相关入口',
+  handoffTitle: 'Gateway Routing Handoff',
+  handoffDescription: '把数据源、平台覆盖、风险热点、WeChat 通道和下一步入口连成一条可复核路由链路。',
+  quickLinks: [
+    { key: 'trace', to: '/observability/trace', label: 'Trace', detail: '追踪 Gateway 前后的 request 级链路。' },
+    { key: 'edgeCommand', to: '/execution/edge-command', label: 'Edge Command', detail: '检查下行命令状态和 gated push。' },
+    { key: 'tribe', to: '/execution/tribe', label: 'Tribe', detail: '确认协作事件是否继续流转。' },
+    { key: 'logs', to: '/observability/logs', label: 'Logs', detail: '查看网关、桥接和适配器异常。' },
+  ],
+})
+
 export const EXECUTION_TOOLS_COPY = Object.freeze({
   heroEyebrow: 'Execution / Tools',
   heroTitle: '工具管理',

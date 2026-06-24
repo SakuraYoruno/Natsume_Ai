@@ -1,4 +1,4 @@
-import React from 'react'
+import React, { useRef } from 'react'
 import {
   ArrowDownToLine,
   MessageSquare,
@@ -13,7 +13,9 @@ import PageHero from '../../../shared/ui/PageHero.jsx'
 import TimeWindowSelect from '../../../shared/ui/TimeWindowSelect.jsx'
 import DrilldownLink from '../../../shared/ui/observability/DrilldownLink.jsx'
 import SampleMeta from '../../../shared/ui/observability/SampleMeta.jsx'
+import { GATEWAY_COPY } from '../../../shared/content/terminology.js'
 import { GATEWAY_WINDOW_OPTIONS } from '../gatewayModel.js'
+import GatewayCommandRail from './GatewayCommandRail.jsx'
 import GatewayPlatformsSection from './gateway/GatewayPlatformsSection.jsx'
 import GatewayWeChatDetailCard from './gateway/GatewayWeChatDetailCard.jsx'
 
@@ -42,6 +44,7 @@ export default function GatewaySurface({
   heroDescription,
   heroMetaItems,
   metricCards,
+  commandRailView,
   showUnavailableNotice,
   showNoSampleNotice,
   wechatDetail,
@@ -50,12 +53,18 @@ export default function GatewaySurface({
   onResetWeChat,
   OrganOverviewComponent,
 }) {
+  const platformSectionRef = useRef(null)
+  const wechatSectionRef = useRef(null)
+  const scrollToSection = (ref) => {
+    ref.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-xl font-semibold text-gray-900">统一消息网关</h1>
-          <p className="mt-0.5 text-sm text-gray-500">六平台消息路由 · 拟人化发送 · 语音视频通话</p>
+          <h1 className="text-xl font-semibold text-gray-900">{GATEWAY_COPY.heroTitle}</h1>
+          <p className="mt-0.5 text-sm text-gray-500">{GATEWAY_COPY.heroSubtitle}</p>
         </div>
         <div className="flex items-center gap-2">
           <TimeWindowSelect
@@ -72,7 +81,7 @@ export default function GatewaySurface({
 
       <PageHero
         icon={MessageSquare}
-        eyebrow="跨平台消息总线"
+        eyebrow={GATEWAY_COPY.heroEyebrow}
         title={heroTitle}
         description={heroDescription}
         gradientClass="from-primary-50 via-white to-emerald-50"
@@ -89,6 +98,14 @@ export default function GatewaySurface({
             definition="Gateway 页同时展示平台健康态和窗口内消息事件；空流量与接口不可用会明确区分。"
           />
         )}
+      />
+
+      <GatewayCommandRail
+        busy={loading || refreshing}
+        view={commandRailView}
+        onFocusPlatforms={() => scrollToSection(platformSectionRef)}
+        onFocusWeChat={() => scrollToSection(wechatSectionRef)}
+        onRefresh={onRefresh}
       />
 
       {error ? <NoticeBanner variant="error">{error.message}</NoticeBanner> : null}
@@ -129,16 +146,20 @@ export default function GatewaySurface({
         hint="如果平台健康但用户仍感知异常，优先从 request 级链路继续追 Gateway 前后的主流程。"
       />
 
-      <GatewayPlatformsSection platforms={platforms} />
+      <div id="gateway-platform-health" ref={platformSectionRef} className="scroll-mt-24">
+        <GatewayPlatformsSection platforms={platforms} />
+      </div>
 
-      <GatewayWeChatDetailCard
-        wechatDetail={wechatDetail}
-        hasWeChatRateLimits={hasWeChatRateLimits}
-        hasWeChatEvents={hasWeChatEvents}
-        resetting={resetting}
-        resetMsg={resetMsg}
-        onResetWeChat={onResetWeChat}
-      />
+      <div id="gateway-wechat-detail" ref={wechatSectionRef} className="scroll-mt-24">
+        <GatewayWeChatDetailCard
+          wechatDetail={wechatDetail}
+          hasWeChatRateLimits={hasWeChatRateLimits}
+          hasWeChatEvents={hasWeChatEvents}
+          resetting={resetting}
+          resetMsg={resetMsg}
+          onResetWeChat={onResetWeChat}
+        />
+      </div>
     </div>
   )
 }
