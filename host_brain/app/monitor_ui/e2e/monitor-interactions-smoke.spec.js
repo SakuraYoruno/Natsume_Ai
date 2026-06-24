@@ -1134,6 +1134,12 @@ test.describe('Monitor interaction smoke', () => {
     const mission = page.getByRole('region', { name: 'Pentest Mission Control' })
     await expect(mission).toBeVisible()
     await expect(mission.getByText('可以创建 readonly run')).toBeVisible()
+    const readiness = page.getByRole('region', { name: 'Pentest Run Readiness' })
+    await expect(readiness).toBeVisible()
+    await expect(readiness.getByText('Readonly run 已就绪')).toBeVisible()
+    await expect(readiness.getByText('4/4 ready')).toBeVisible()
+    await expect(readiness.getByText('Target & Scope')).toBeVisible()
+    await expect(readiness.getByText('Evidence Contract')).toBeVisible()
     const plannedNarrative = page.getByRole('region', { name: 'Planned Attack Path Narrative' })
     await expect(plannedNarrative).toBeVisible()
     await expect(plannedNarrative.getByText('Readonly run 可直接创建')).toBeVisible()
@@ -1156,6 +1162,8 @@ test.describe('Monitor interaction smoke', () => {
     await expect(heroStatus.getByText('Lab gate blocked')).toBeVisible()
     await expect(page.getByText('Lab Mode OFF，lab_full 已禁用')).toBeVisible()
     await expect(mission.getByText('Lab Mode OFF 阻断 lab_full')).toBeVisible()
+    await expect(readiness.getByText('创建前仍有阻断项')).toBeVisible()
+    await expect(readiness.getByText('3/4 ready')).toBeVisible()
     await expect(plannedNarrative.getByText('先处理 Approval Rail')).toBeVisible()
     await expect(preflightReadout.getByText('Lab Mode OFF', { exact: true })).toBeVisible()
     await expect(createRunButton).toBeDisabled()
@@ -1163,6 +1171,7 @@ test.describe('Monitor interaction smoke', () => {
     await modeSelect.selectOption('readonly')
     await targetInput.fill('http://example.com/')
     await expect(mission.getByText('Target host 未命中 scope')).toBeVisible()
+    await expect(readiness.getByText('Target host 未命中 scope')).toHaveCount(2)
     await expect(plannedNarrative.getByText('先处理 ScopeGuard')).toBeVisible()
     await expect(createRunButton).toBeDisabled()
 
@@ -1170,6 +1179,18 @@ test.describe('Monitor interaction smoke', () => {
     await expect(createRunButton).toBeEnabled()
     await mission.getByRole('button', { name: /Phase 矩阵/ }).click()
     await expect(page.locator('#pentest-phase-matrix')).toBeVisible()
+  })
+
+  test('Pentest wizard stays readable on mobile viewport', async ({ page, baseURL }) => {
+    await page.setViewportSize({ width: 390, height: 1000 })
+    await stubPentestApis(page)
+    await page.goto(monitorUrl(baseURL, '/security/pentest'), { waitUntil: 'domcontentloaded' })
+
+    await expect(page.getByRole('heading', { name: 'Run Wizard' })).toBeVisible()
+    await expect(page.getByRole('region', { name: 'Pentest Run Readiness' })).toBeVisible()
+    await expect(page.getByRole('region', { name: 'Pentest Preflight Readout' })).toBeVisible()
+    await expect(page.locator('#pentest-attack-path')).toBeVisible()
+    await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1)).toBe(true)
   })
 
   test('Pentest run detail summarizes attack path and approval gate', async ({ page, baseURL }) => {
