@@ -26,7 +26,7 @@ export default function ChatTraceSidebar({
   onRefreshTrace,
 }) {
   return (
-    <div className="flex w-96 shrink-0 flex-col gap-3">
+    <aside className="flex min-w-0 flex-col gap-3 xl:sticky xl:top-4 xl:max-h-[calc(100vh-8rem)] xl:overflow-y-auto xl:pr-1">
       <div className="card p-4">
         <div className="flex items-center justify-between gap-2">
           <div className="text-sm font-semibold text-gray-800">
@@ -127,6 +127,6 @@ export default function ChatTraceSidebar({
       </div>
 
       <ChatDebugEventStream sseEvents={sseEvents} eventsEndRef={eventsEndRef} />
-    </div>
+    </aside>
   )
 }

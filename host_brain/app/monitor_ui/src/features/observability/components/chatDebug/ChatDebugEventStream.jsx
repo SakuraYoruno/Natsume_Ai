@@ -52,7 +52,7 @@ function ChatDebugEventRow({ event, index }) {
 
 export default function ChatDebugEventStream({ sseEvents, eventsEndRef }) {
   return (
-    <div className="card flex-1 overflow-y-auto p-3">
+    <div className="card min-h-[18rem] overflow-y-auto p-3 xl:flex-1">
       <div className="mb-2 flex items-center justify-between">
         <div className="text-sm font-semibold text-gray-800">
           <Sparkles size={14} className="mr-1 inline" />

@@ -25,7 +25,7 @@ export default function ChatDebugMainColumn({
   onRefreshTrace,
 }) {
   return (
-    <div className="flex min-w-0 flex-1 flex-col">
+    <div className="flex min-w-0 flex-col">
       <ChatDebugHeader stats={stats} />
 
       <div className="mt-3">

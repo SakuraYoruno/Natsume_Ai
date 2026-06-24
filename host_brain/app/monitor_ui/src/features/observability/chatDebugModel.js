@@ -88,6 +88,49 @@ export function buildChatDebugCommandRailModel({
   const nodeCount = traceSnapshot?.node_count ?? traceSnapshot?.nodes?.length ?? chainCount
   const traceStatus = traceSnapshot?.status || (hasRequest ? (traceBusy ? '拉取中' : '待补齐') : '等待请求')
   const latestStage = traceLatestNode?.node_id || latestEvent?.node_id || latestEvent?.phase || '暂无事件'
+  const traceReady = Boolean(traceSnapshot)
+  const handoffSteps = [
+    {
+      key: 'prompt',
+      label: 'Prompt',
+      value: hasMessage ? 'ready' : (hasRequest ? 'sent' : 'empty'),
+      detail: hasMessage
+        ? truncateDebugText(message, 84)
+        : (hasRequest ? '输入已提交到调试链路。' : '先填入样例或手动输入。'),
+      state: hasMessage || hasRequest || streaming ? 'ready' : 'warning',
+    },
+    {
+      key: 'stream',
+      label: 'SSE Stream',
+      value: streaming ? 'receiving' : `${eventCount} events`,
+      detail: eventCount > 0 ? `${chainCount} 个节点事件已记录。` : '等待后端事件流。',
+      state: streaming || eventCount > 0 ? 'ready' : 'warning',
+    },
+    {
+      key: 'request',
+      label: 'Request ID',
+      value: requestId || 'pending',
+      detail: hasRequest ? '已写入全局 selectedRequestId，可下钻 Trace。' : '等待 SSE 返回 request_id。',
+      state: hasRequest ? 'ready' : 'blocked',
+    },
+    {
+      key: 'trace',
+      label: 'Trace Snapshot',
+      value: traceReady ? (traceSnapshot.status || 'ready') : (traceBusy ? 'loading' : 'pending'),
+      detail: traceReady
+        ? `${nodeCount} 个节点 · ${traceIssueCount} 个待关注。`
+        : (hasRequest ? 'request_id 已有，等待 Trace 快照补齐。' : '没有 request_id 时不会拉取。'),
+      state: traceIssueCount > 0 ? 'warning' : (traceReady ? 'ready' : (hasRequest ? 'warning' : 'blocked')),
+    },
+    {
+      key: 'detail',
+      label: 'Detail Handoff',
+      value: hasRequest ? 'openable' : 'locked',
+      detail: hasRequest ? 'Trace 详情入口已可用。' : '拿到 request_id 后解锁详情页。',
+      state: hasRequest ? 'ready' : 'blocked',
+      requestId,
+    },
+  ]
 
   let status = 'idle'
   let headline = '先输入一条消息，启动一次可追踪调试'
@@ -173,6 +216,7 @@ export function buildChatDebugCommandRailModel({
         tone: latestEvent || traceLatestNode ? 'ready' : 'degraded',
       },
     ],
+    handoffSteps,
     gates: [
       {
         label: '输入',

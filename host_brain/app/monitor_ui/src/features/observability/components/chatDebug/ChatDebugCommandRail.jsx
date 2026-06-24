@@ -11,6 +11,7 @@ import {
   Send,
   Square,
   Target,
+  Workflow,
 } from 'lucide-react'
 
 const STATUS_META = {
@@ -73,6 +74,24 @@ const CARD_TONES = {
   ready: 'border-emerald-200 bg-emerald-50/70 text-emerald-700',
   degraded: 'border-orange-200 bg-orange-50/70 text-orange-700',
   blocked: 'border-red-200 bg-red-50/70 text-red-700',
+}
+
+const HANDOFF_META = {
+  ready: {
+    className: 'border-emerald-200 bg-emerald-50/70 text-emerald-800',
+    dotClassName: 'bg-emerald-500',
+    label: 'OK',
+  },
+  warning: {
+    className: 'border-orange-200 bg-orange-50/70 text-orange-800',
+    dotClassName: 'bg-orange-500',
+    label: 'Watch',
+  },
+  blocked: {
+    className: 'border-red-200 bg-red-50/70 text-red-800',
+    dotClassName: 'bg-red-500',
+    label: 'Locked',
+  },
 }
 
 function ActionButton({
@@ -166,6 +185,64 @@ function GateCard({ item }) {
   )
 }
 
+function HandoffStep({ step, index }) {
+  const meta = HANDOFF_META[step.state] || HANDOFF_META.warning
+  const value = String(step.value || '').trim()
+  const content = (
+    <div className={`h-full rounded-lg border px-3 py-3 ${meta.className}`}>
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 text-xs font-semibold">
+            <span className={`h-2 w-2 rounded-full ${meta.dotClassName}`} />
+            <span>{index + 1}. {step.label}</span>
+          </div>
+          <div className="mt-1 truncate text-sm font-bold text-gray-950">{value}</div>
+        </div>
+        <span className="shrink-0 rounded-full border border-current/20 bg-white/70 px-2 py-0.5 text-[11px] font-semibold">
+          {meta.label}
+        </span>
+      </div>
+      <div className="mt-2 line-clamp-2 min-h-10 text-xs leading-5 opacity-85">{step.detail}</div>
+    </div>
+  )
+
+  if (step.key === 'detail' && step.requestId) {
+    return (
+      <Link to={`/observability/trace/${step.requestId}`} className="block min-w-[13rem] focus:outline-none focus:ring-2 focus:ring-primary-200">
+        {content}
+      </Link>
+    )
+  }
+
+  return <div className="min-w-[13rem]">{content}</div>
+}
+
+function DebugTraceHandoff({ steps = [] }) {
+  if (!steps.length) return null
+
+  return (
+    <section aria-label="Debug Trace Handoff" className="mt-4 rounded-xl border border-gray-100 bg-white/88 p-3 shadow-sm">
+      <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <div className="inline-flex items-center gap-2 text-sm font-bold text-gray-900">
+            <Workflow size={15} className="text-primary" />
+            Debug Trace Handoff
+          </div>
+          <div className="mt-0.5 text-xs leading-5 text-gray-500">从输入、SSE、request_id 到 Trace 快照和详情页的交付链。</div>
+        </div>
+        <span className="w-fit rounded border border-cyan-100 bg-cyan-50 px-2 py-1 text-xs font-semibold text-cyan-700">
+          {steps.filter((step) => step.state === 'ready').length}/{steps.length} ready
+        </span>
+      </div>
+      <div className="mt-3 flex gap-2 overflow-x-auto pb-1">
+        {steps.map((step, index) => (
+          <HandoffStep key={step.key} step={step} index={index} />
+        ))}
+      </div>
+    </section>
+  )
+}
+
 export default function ChatDebugCommandRail({
   model,
   streaming = false,
@@ -179,6 +256,7 @@ export default function ChatDebugCommandRail({
   const statusMeta = STATUS_META[model.status] || STATUS_META.idle
   const cards = model.cards || []
   const gates = model.gates || []
+  const handoffSteps = model.handoffSteps || []
 
   return (
     <section
@@ -232,6 +310,8 @@ export default function ChatDebugCommandRail({
           ))}
         </div>
       ) : null}
+
+      <DebugTraceHandoff steps={handoffSteps} />
     </section>
   )
 }

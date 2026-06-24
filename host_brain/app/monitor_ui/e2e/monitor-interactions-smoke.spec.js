@@ -1420,18 +1420,39 @@ test.describe('Monitor interaction smoke', () => {
     const commandRail = page.locator('[aria-label="Chat Debug Command Rail"]')
     await expect(commandRail).toBeVisible()
     await expect(commandRail.getByText('先输入一条消息，启动一次可追踪调试')).toBeVisible()
+    const handoff = page.getByRole('region', { name: 'Debug Trace Handoff' })
+    await expect(handoff).toBeVisible()
+    await expect(handoff.getByText('Prompt')).toBeVisible()
+    await expect(handoff.getByText('SSE Stream')).toBeVisible()
+    await expect(handoff.getByText('Request ID')).toBeVisible()
+    await expect(handoff.getByText('Trace Snapshot')).toBeVisible()
+    await expect(handoff.getByText('Detail Handoff')).toBeVisible()
 
     await commandRail.getByRole('button', { name: '填入调试样例' }).click()
     await expect(page.getByLabel('聊天调试输入')).toHaveValue(/可追踪的调试链路/)
     await commandRail.getByRole('button', { name: '发送调试消息' }).click()
 
     await expect(commandRail.getByText('已拿到 Request ID，可进入 Trace 复核')).toBeVisible()
-    await expect(commandRail.getByText('req_chat_debug_smoke', { exact: true })).toBeVisible()
+    await expect(commandRail.getByText('req_chat_debug_smoke', { exact: true })).toHaveCount(2)
+    await expect(handoff.getByText('4 events')).toBeVisible()
+    await expect(handoff.getByText('5/5 ready')).toBeVisible()
     await expect(page.locator('pre').filter({ hasText: '系统处于可追踪调试状态。' })).toBeVisible()
     await expect(page.getByText('4 条')).toBeVisible()
 
     await commandRail.getByRole('link', { name: '打开 Trace 详情' }).click()
     await expect.poll(() => new URL(page.url()).hash).toBe('#/observability/trace/req_chat_debug_smoke')
+  })
+
+  test('Chat debug stays readable on mobile viewport', async ({ page, baseURL }) => {
+    await page.setViewportSize({ width: 390, height: 1000 })
+    await stubChatDebugApis(page)
+    await page.goto(monitorUrl(baseURL, '/observability/chat-debug'), { waitUntil: 'domcontentloaded' })
+
+    await expect(page.getByRole('heading', { name: '神经反射调试', exact: true })).toBeVisible()
+    await expect(page.getByRole('region', { name: 'Debug Trace Handoff' })).toBeVisible()
+    await expect(page.getByText('当前请求链路')).toBeVisible()
+    await expect(page.getByLabel('聊天调试输入')).toBeVisible()
+    await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1)).toBe(true)
   })
 
   test('Trace home exposes triage rail and full-chain route', async ({ page, baseURL }) => {
