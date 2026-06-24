@@ -28,6 +28,7 @@ import {
   getSubsystemHeadline,
 } from '../features/observability/overviewModel.js'
 import ObservabilityCommandRail from '../features/observability/components/overview/ObservabilityCommandRail.jsx'
+import ObservabilityEvidenceHandoff from '../features/observability/components/overview/ObservabilityEvidenceHandoff.jsx'
 import { useOverviewHealthWebSocket } from '../features/observability/useOverviewHealthWebSocket.js'
 import useAppStore from '../store/useAppStore.js'
 
@@ -78,6 +79,7 @@ export default function Overview() {
     pulseNodes,
     heroMetaItems,
     sampleMeta,
+    evidenceHandoff,
   } = useMemo(() => buildOverviewQueryView({
     wsConnected,
     liveHealthData,
@@ -87,6 +89,7 @@ export default function Overview() {
     subsysData,
     agentLoopData,
     uiAssertionData,
+    wsAlerts,
     loading,
     refreshing,
     error,
@@ -105,6 +108,7 @@ export default function Overview() {
     subsysData,
     uiAssertionData,
     windowMinutes,
+    wsAlerts,
     wsConnected,
   ])
 
@@ -160,6 +164,8 @@ export default function Overview() {
         wsAlerts={wsAlerts}
         wsConnected={wsConnected}
       />
+
+      <ObservabilityEvidenceHandoff handoff={evidenceHandoff} />
 
       <LivingPulseStrip
         title="器官脉冲"

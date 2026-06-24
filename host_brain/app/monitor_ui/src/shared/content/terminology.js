@@ -130,6 +130,8 @@ export const OBSERVABILITY_COPY = Object.freeze({
   gateTitle: '观测 Gate',
   quickLinksTitle: '常用入口',
   focusTitle: '建议路径',
+  evidenceHandoffKicker: 'Observability Evidence Handoff',
+  evidenceHandoffTitle: '排障证据交接',
   quickLinks: [
     { key: 'trace', to: '/observability/trace', label: '链路 Trace', detail: '按 request / node / stage 追调用链。' },
     { key: 'metrics', to: '/observability/metrics', label: '指标 Metrics', detail: '看请求量、拒绝率和延迟走势。' },
