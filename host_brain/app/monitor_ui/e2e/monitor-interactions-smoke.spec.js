@@ -753,6 +753,62 @@ async function stubTraceApis(page) {
   await page.route('**/obs/tribe/events**', (route) => fulfillJson(route, { items: [] }))
 }
 
+async function stubSessionsApis(page) {
+  await stubCommonReadApis(page)
+  const sessions = [
+    {
+      request_id: 'req_session_error',
+      session_id: 'sess_error',
+      conversation_id: 'conv_error',
+      status: 'error',
+      input_preview: 'Planner failed while resolving tool evidence',
+      reason_code: 'planner_timeout',
+      total_latency_ms: 1880,
+      ts_ms: 1781942410000,
+      last_ts: '2026-06-20T08:00:10Z',
+    },
+    {
+      request_id: 'req_session_rejected',
+      session_id: 'sess_rejected',
+      conversation_id: 'conv_rejected',
+      status: 'rejected',
+      input_preview: 'Request rejected by policy gate',
+      reason_code: 'policy_gate',
+      total_latency_ms: 420,
+      ts_ms: 1781942405000,
+      last_ts: '2026-06-20T08:00:05Z',
+    },
+    {
+      request_id: 'req_session_ok',
+      session_id: 'sess_ok',
+      conversation_id: 'conv_ok',
+      status: 'ok',
+      input_preview: 'Healthy memory lookup and response',
+      total_latency_ms: 220,
+      ts_ms: 1781942400000,
+      last_ts: '2026-06-20T08:00:00Z',
+    },
+  ]
+  await page.route('**/obs/sessions**', (route) => {
+    const url = new URL(route.request().url())
+    const status = url.searchParams.get('status')
+    const keyword = (url.searchParams.get('keyword') || '').toLowerCase()
+    const items = sessions.filter((item) => {
+      const statusMatch = !status || item.status === status
+      const keywordMatch = !keyword
+        || item.request_id.toLowerCase().includes(keyword)
+        || item.session_id.toLowerCase().includes(keyword)
+        || item.input_preview.toLowerCase().includes(keyword)
+      return statusMatch && keywordMatch
+    })
+    return fulfillJson(route, {
+      items,
+      total: items.length,
+      page: 1,
+    })
+  })
+}
+
 async function stubEdgeCommandApis(page) {
   await stubCommonReadApis(page)
   await page.route('**/internal/edge_command/status', (route) => fulfillJson(route, {
@@ -1008,6 +1064,31 @@ test.describe('Monitor interaction smoke', () => {
     await backButton.focus()
     await page.keyboard.press('Enter')
     await expect.poll(() => new URL(page.url()).hash).toBe('#/observability/insights')
+  })
+
+  test('Sessions triage rail filters issue requests and opens Trace evidence', async ({ page, baseURL }) => {
+    await stubSessionsApis(page)
+    await page.goto(monitorUrl(baseURL, '/observability/sessions'), { waitUntil: 'domcontentloaded' })
+
+    await expect(page.getByRole('heading', { name: '神经会话沉积' })).toBeVisible()
+    const triageRail = page.locator('[aria-label="Sessions Triage Rail"]')
+    await expect(triageRail).toBeVisible()
+    await expect(triageRail.getByText('先处理 1 条异常请求')).toBeVisible()
+    await expect(triageRail.getByText('req_session_error', { exact: true })).toBeVisible()
+
+    await triageRail.getByRole('button', { name: '只看异常' }).click()
+    await expect(page.getByLabel('会话状态筛选')).toHaveValue('error')
+    await expect(triageRail.getByRole('button', { name: '打开推荐 Trace' })).toBeVisible()
+    await expect(page.getByText('req_session_rejected')).toHaveCount(0)
+    await expect(triageRail.getByText('当前页样本')).toBeVisible()
+
+    await triageRail.getByRole('button', { name: '清空筛选' }).click()
+    await expect(page.getByLabel('会话状态筛选')).toHaveValue('')
+    await expect(triageRail.getByText('3/3')).toBeVisible()
+    await expect(triageRail.getByText('当前查看全部状态。')).toBeVisible()
+
+    await triageRail.getByRole('button', { name: '打开推荐 Trace' }).click()
+    await expect.poll(() => new URL(page.url()).hash).toBe('#/observability/trace/req_session_error')
   })
 
   test('Trace home exposes triage rail and full-chain route', async ({ page, baseURL }) => {

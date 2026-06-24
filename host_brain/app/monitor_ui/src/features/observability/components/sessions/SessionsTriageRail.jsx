@@ -1,0 +1,228 @@
+import {
+  AlertTriangle,
+  ArrowRight,
+  CheckCircle2,
+  Clock3,
+  Filter,
+  GitBranch,
+  RefreshCw,
+  Search,
+  ShieldCheck,
+  Target,
+} from 'lucide-react'
+
+const STATUS_META = {
+  healthy: {
+    label: '可继续下钻',
+    className: 'border-emerald-200 bg-emerald-50/70',
+    badgeClassName: 'border-emerald-200 bg-emerald-100 text-emerald-700',
+  },
+  attention: {
+    label: '优先排障',
+    className: 'border-orange-200 bg-orange-50/70',
+    badgeClassName: 'border-orange-200 bg-orange-100 text-orange-700',
+  },
+  degraded: {
+    label: '需要复核',
+    className: 'border-blue-200 bg-blue-50/70',
+    badgeClassName: 'border-blue-200 bg-blue-100 text-blue-700',
+  },
+  slow: {
+    label: '慢请求',
+    className: 'border-violet-200 bg-violet-50/70',
+    badgeClassName: 'border-violet-200 bg-violet-100 text-violet-700',
+  },
+  empty: {
+    label: '等待样本',
+    className: 'border-slate-200 bg-slate-50/80',
+    badgeClassName: 'border-slate-200 bg-slate-100 text-slate-600',
+  },
+  'empty-filter': {
+    label: '筛选无命中',
+    className: 'border-amber-200 bg-amber-50/70',
+    badgeClassName: 'border-amber-200 bg-amber-100 text-amber-700',
+  },
+  blocked: {
+    label: '数据不可用',
+    className: 'border-red-200 bg-red-50/70',
+    badgeClassName: 'border-red-200 bg-red-100 text-red-700',
+  },
+}
+
+const GATE_META = {
+  ready: {
+    icon: CheckCircle2,
+    className: 'border-emerald-200 bg-emerald-50/70',
+    textClassName: 'text-emerald-700',
+    iconClassName: 'text-emerald-600',
+  },
+  warning: {
+    icon: AlertTriangle,
+    className: 'border-orange-200 bg-orange-50/70',
+    textClassName: 'text-orange-700',
+    iconClassName: 'text-orange-600',
+  },
+  blocked: {
+    icon: AlertTriangle,
+    className: 'border-red-200 bg-red-50/70',
+    textClassName: 'text-red-700',
+    iconClassName: 'text-red-600',
+  },
+}
+
+const CARD_ICONS = {
+  visible: Search,
+  issues: ShieldCheck,
+  latency: Clock3,
+  lead: GitBranch,
+}
+
+const CARD_TONES = {
+  ready: 'border-emerald-200 bg-emerald-50/70 text-emerald-700',
+  degraded: 'border-orange-200 bg-orange-50/70 text-orange-700',
+  blocked: 'border-red-200 bg-red-50/70 text-red-700',
+}
+
+function RailAction({
+  action,
+  primary = false,
+  onOpenSession,
+  onSetStatus,
+  onClearFilters,
+  onRefresh,
+}) {
+  if (!action) return null
+  const Icon = action.kind === 'openSession'
+    ? Target
+    : action.kind === 'setStatus'
+      ? Filter
+      : action.kind === 'refresh'
+        ? RefreshCw
+        : ArrowRight
+  const disabled = action.kind === 'openSession' && !action.requestId
+
+  return (
+    <button
+      type="button"
+      className={`${primary ? 'btn-primary' : 'btn-secondary'} justify-center`}
+      disabled={disabled}
+      onClick={() => {
+        if (action.kind === 'openSession') onOpenSession?.(action.requestId)
+        if (action.kind === 'setStatus') onSetStatus?.(action.status)
+        if (action.kind === 'clearFilters') onClearFilters?.()
+        if (action.kind === 'refresh') onRefresh?.()
+      }}
+    >
+      <Icon size={14} />
+      {action.label}
+    </button>
+  )
+}
+
+function EvidenceCard({ item }) {
+  const Icon = CARD_ICONS[item.key] || Search
+  const toneClass = CARD_TONES[item.tone] || CARD_TONES.ready
+
+  return (
+    <div className="rounded-lg border border-white/80 bg-white/86 px-3 py-3 shadow-sm">
+      <div className="flex items-start justify-between gap-2">
+        <div className="flex min-w-0 items-start gap-2">
+          <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-white/80 bg-white text-primary shadow-sm">
+            <Icon size={15} />
+          </span>
+          <div className="min-w-0">
+            <div className="truncate text-xs font-semibold text-gray-500">{item.label}</div>
+            <div className="truncate text-sm font-semibold text-gray-900">{item.value}</div>
+          </div>
+        </div>
+        <span className={`shrink-0 rounded-full border px-2 py-0.5 text-[11px] font-medium ${toneClass}`}>
+          {item.tone === 'blocked' ? 'Block' : item.tone === 'degraded' ? 'Watch' : 'OK'}
+        </span>
+      </div>
+      <div className="mt-2 line-clamp-2 text-xs leading-5 text-gray-500">{item.detail}</div>
+    </div>
+  )
+}
+
+function GateCard({ item }) {
+  const meta = GATE_META[item.state] || GATE_META.warning
+  const Icon = meta.icon
+
+  return (
+    <div className={`rounded-lg border px-3 py-3 ${meta.className}`}>
+      <div className="flex items-center justify-between gap-2">
+        <div className="text-xs font-semibold text-gray-800">{item.label}</div>
+        <Icon size={14} className={meta.iconClassName} />
+      </div>
+      <div className={`mt-1 text-xs leading-5 ${meta.textClassName}`}>{item.detail}</div>
+    </div>
+  )
+}
+
+export default function SessionsTriageRail({
+  model,
+  onOpenSession,
+  onSetStatus,
+  onClearFilters,
+  onRefresh,
+}) {
+  if (!model) return null
+  const statusMeta = STATUS_META[model.status] || STATUS_META.degraded
+  const cards = model.cards || []
+  const gates = model.gates || []
+
+  return (
+    <section
+      aria-label="Sessions Triage Rail"
+      className="rounded-xl border border-white/80 bg-white/86 p-4 shadow-card backdrop-blur-sm"
+    >
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="text-xs font-semibold uppercase tracking-wide text-primary/75">{model.eyebrow || 'Sessions Triage'}</div>
+          <h2 className="mt-1 text-base font-semibold text-gray-900">{model.title || '会话排障入口'}</h2>
+        </div>
+      </div>
+
+      <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1.15fr)_minmax(360px,0.85fr)]">
+        <div className={`self-start rounded-lg border p-4 ${statusMeta.className}`}>
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="inline-flex items-center gap-1 text-xs font-semibold uppercase tracking-wide text-primary/75">
+                  <Target size={13} />
+                  First request
+                </span>
+                <span className={`rounded-full border px-2 py-0.5 text-[11px] font-semibold ${statusMeta.badgeClassName}`}>
+                  {statusMeta.label}
+                </span>
+              </div>
+              <h3 className="mt-2 text-lg font-semibold leading-7 text-gray-950">{model.headline}</h3>
+              <p className="mt-1 max-w-3xl text-sm leading-6 text-gray-600">{model.description}</p>
+              {model.primaryAction?.detail ? (
+                <div className="mt-2 text-xs leading-5 text-gray-500">建议动作：{model.primaryAction.detail}</div>
+              ) : null}
+            </div>
+            <div className="flex w-full flex-col gap-2 sm:w-auto sm:min-w-[180px]">
+              <RailAction action={model.primaryAction} primary onOpenSession={onOpenSession} onSetStatus={onSetStatus} onClearFilters={onClearFilters} onRefresh={onRefresh} />
+              <RailAction action={model.secondaryAction} onOpenSession={onOpenSession} onSetStatus={onSetStatus} onClearFilters={onClearFilters} onRefresh={onRefresh} />
+            </div>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+          {cards.map((item) => (
+            <EvidenceCard key={item.key} item={item} />
+          ))}
+        </div>
+      </div>
+
+      {gates.length ? (
+        <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          {gates.map((item) => (
+            <GateCard key={item.label} item={item} />
+          ))}
+        </div>
+      ) : null}
+    </section>
+  )
+}
