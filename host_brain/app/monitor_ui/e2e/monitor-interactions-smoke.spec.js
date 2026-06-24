@@ -21,6 +21,13 @@ async function stubCommonReadApis(page) {
     total: 0,
     active_templates: 0,
   }))
+  await page.route('**/obs/capability-gaps/stats**', (route) => fulfillJson(route, {
+    detected_total: 0,
+    active_runtime_capabilities: 0,
+    hotspots: [],
+    forge_candidates: [],
+    forge_runtime_quality: null,
+  }))
   await page.route('**/v1/pentest/capabilities**', (route) => fulfillJson(route, {
     count: 2,
     tools_by_phase: {
@@ -910,6 +917,37 @@ async function stubTribeApis(page) {
   }))
 }
 
+async function stubBodyIntegrationApis(page) {
+  await stubCommonReadApis(page)
+  await page.route('**/v1/mateengine/capabilities', (route) => fulfillJson(route, {
+    actions: ['state', 'pose', 'say'],
+    events: ['body.state.changed', 'body.say.completed'],
+    presets: ['idle', 'wave'],
+  }))
+  await page.route('**/v1/mateengine/health', (route) => fulfillJson(route, {
+    ok: true,
+    status: 'healthy',
+    host: '127.0.0.1',
+    port: 18770,
+  }))
+  await page.route('**/v1/mateengine/action', async (route) => {
+    await fulfillJson(route, {
+      ok: true,
+      accepted: true,
+      request_id: 'mate-smoke-action',
+      echo: await route.request().postDataJSON(),
+    })
+  })
+  await page.route('**/v1/mateengine/say', async (route) => {
+    await fulfillJson(route, {
+      ok: true,
+      accepted: true,
+      request_id: 'mate-smoke-say',
+      echo: await route.request().postDataJSON(),
+    })
+  })
+}
+
 test.describe('Monitor interaction smoke', () => {
   test('Observability overview exposes triage rail and Trace route', async ({ page, baseURL }) => {
     await stubOverviewApis(page)
@@ -1244,5 +1282,34 @@ test.describe('Monitor interaction smoke', () => {
 
     await page.getByRole('link', { name: /Agent Loop 查看智能体循环/ }).click()
     await expect.poll(() => new URL(page.url()).hash).toBe('#/execution/agent-loop')
+  })
+
+  test('Body integration gate validates say text and sends through MateEngine', async ({ page, baseURL }) => {
+    await stubBodyIntegrationApis(page)
+    await page.goto(monitorUrl(baseURL, '/integrations/body'), { waitUntil: 'domcontentloaded' })
+
+    await expect(page.getByRole('heading', { name: '身体集成' })).toBeVisible()
+    const gate = page.locator('[aria-label="Body Bridge Gate"]')
+    await expect(gate).toBeVisible()
+    await expect(gate.getByText('身体动作链路可发送')).toBeVisible()
+    await expect(gate.getByText('3 个动作可见')).toBeVisible()
+    await expect(gate.getByText('2 个事件类型可见')).toBeVisible()
+
+    await gate.getByRole('button', { name: /定位动作控制台/ }).click()
+    await page.getByLabel('Body action').selectOption('say')
+    const sayInput = page.getByLabel('Body say text')
+    await sayInput.fill('')
+    await expect(sayInput).toHaveAttribute('aria-invalid', 'true')
+    await expect(page.getByRole('button', { name: '发送 say' })).toBeDisabled()
+    await expect(gate.getByText('Say 动作需要先填写文本')).toBeVisible()
+
+    await gate.getByRole('button', { name: /定位文本框/ }).click()
+    await expect(sayInput).toBeFocused()
+    await sayInput.fill('身体桥 smoke say')
+    await expect(page.getByRole('button', { name: '发送 say' })).toBeEnabled()
+    await page.getByRole('button', { name: '发送 say' }).click()
+
+    await expect(page.getByText('发送完成')).toBeVisible()
+    await expect(page.getByText('mate-smoke-say')).toBeVisible()
   })
 })

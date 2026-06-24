@@ -1,14 +1,17 @@
-﻿import React, { useEffect, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { Gamepad2, RefreshCw, Send } from 'lucide-react'
 import PageHero from '../shared/ui/PageHero.jsx'
 import NoticeBanner from '../shared/ui/NoticeBanner.jsx'
 import StatusBadge from '../shared/ui/StatusBadge.jsx'
 import JsonBlock from '../shared/ui/JsonBlock.jsx'
+import { INTEGRATIONS_COPY } from '../shared/content/terminology.js'
 import {
   fetchBodyIntegrationBundle,
   sendMateEngineAction,
   sendMateEngineSay,
 } from '../features/integrations/api.js'
+import { buildBodyIntegrationModel } from '../features/integrations/bodyIntegrationModel.js'
+import BodyIntegrationCommandRail from '../features/integrations/components/BodyIntegrationCommandRail.jsx'
 
 export default function BodyIntegration() {
   const [bundle, setBundle] = useState(null)
@@ -17,6 +20,8 @@ export default function BodyIntegration() {
   const [sayText, setSayText] = useState('Natsume body bridge test')
   const [result, setResult] = useState(null)
   const [sending, setSending] = useState(false)
+  const consoleRef = useRef(null)
+  const sayTextRef = useRef(null)
 
   const load = async () => {
     setLoading(true)
@@ -28,13 +33,26 @@ export default function BodyIntegration() {
     void load()
   }, [])
 
+  const model = useMemo(() => buildBodyIntegrationModel({
+    action,
+    bundle,
+    loading,
+    sayText,
+    sending,
+  }), [action, bundle, loading, sayText, sending])
+
   const sendAction = async () => {
+    if (!model.canSend) return
     setSending(true)
     setResult(null)
     try {
       const payload = action === 'say'
         ? await sendMateEngineSay({ text: sayText, emotion: 'neutral', ttl: 6 })
-        : await sendMateEngineAction({ action, state: action === 'state' ? 'idle' : undefined, preset: action === 'pose' ? 'idle' : undefined })
+        : await sendMateEngineAction({
+          action,
+          state: action === 'state' ? 'idle' : undefined,
+          preset: action === 'pose' ? 'idle' : undefined,
+        })
       setResult({ ok: true, data: payload })
     } catch (error) {
       setResult({ ok: false, error: error.message || String(error) })
@@ -43,19 +61,37 @@ export default function BodyIntegration() {
     }
   }
 
+  const focusActionConsole = () => {
+    consoleRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  }
+
+  const focusSayText = () => {
+    focusActionConsole()
+    window.setTimeout(() => sayTextRef.current?.focus(), 150)
+  }
+
   return (
     <div className="space-y-5">
       <PageHero
         icon={Gamepad2}
-        eyebrow="Integrations"
-        title="Body / MateEngine"
-        description="桌宠身体桥、MateEngine 能力和本地动作链路状态。写入动作保留在显式按钮后触发。"
+        eyebrow={INTEGRATIONS_COPY.bodyEyebrow}
+        title={INTEGRATIONS_COPY.bodyTitle}
+        description={INTEGRATIONS_COPY.bodyDescription}
         gradientClass="from-amber-50 via-white to-cyan-50"
         metaItems={[
-          bundle?.health?.status || (loading ? 'loading' : 'unknown'),
-          `${bundle?.capabilities?.events?.length ?? 0} events`,
-          `${bundle?.capabilities?.actions?.length ?? 0} actions`,
+          model.summary.healthLabel,
+          `${model.summary.eventCount} events`,
+          `${model.summary.actionCount} actions`,
+          model.summary.hostLabel,
         ]}
+      />
+
+      <BodyIntegrationCommandRail
+        loading={loading}
+        model={model}
+        onFocusConsole={focusActionConsole}
+        onFocusText={focusSayText}
+        onRefresh={() => void load()}
       />
 
       {bundle?.errors?.length ? (
@@ -71,10 +107,13 @@ export default function BodyIntegration() {
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_380px]">
         <section className="rounded-xl border border-white/80 bg-white/86 p-4 shadow-sm">
-          <div className="mb-3 flex items-center justify-between">
-            <h2 className="text-base font-semibold text-gray-800">MateEngine Status</h2>
-            <button type="button" onClick={load} className="inline-flex items-center gap-1 rounded border border-gray-200 px-2 py-1 text-xs font-semibold text-gray-600 hover:bg-gray-50">
-              <RefreshCw size={12} />
+          <div className="mb-3 flex items-start justify-between gap-3">
+            <div>
+              <h2 className="text-base font-semibold text-gray-800">MateEngine Status</h2>
+              <p className="mt-1 text-xs leading-5 text-gray-500">原始 bundle 保留在这里，便于核对 health、capabilities 和降级错误。</p>
+            </div>
+            <button type="button" onClick={load} className="btn-secondary text-xs" disabled={loading}>
+              <RefreshCw size={12} className={loading ? 'animate-spin' : ''} />
               刷新
             </button>
           </div>
@@ -85,12 +124,16 @@ export default function BodyIntegration() {
           <JsonBlock data={bundle || { loading }} />
         </section>
 
-        <aside className="rounded-xl border border-white/80 bg-white/86 p-4 shadow-sm">
-          <h2 className="mb-3 text-base font-semibold text-gray-800">Action Console</h2>
+        <aside ref={consoleRef} className="rounded-xl border border-white/80 bg-white/86 p-4 shadow-sm">
+          <div className="mb-3">
+            <h2 className="text-base font-semibold text-gray-800">Action Console</h2>
+            <p className="mt-1 text-xs leading-5 text-gray-500">所有写入动作都从这里显式发送；空文本或桥接未就绪时按钮保持禁用。</p>
+          </div>
           <div className="space-y-3">
             <label className="block">
               <span className="mb-1 block text-xs font-semibold text-gray-500">Action</span>
               <select
+                aria-label="Body action"
                 className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-200"
                 value={action}
                 onChange={(event) => setAction(event.target.value)}
@@ -104,20 +147,31 @@ export default function BodyIntegration() {
               <label className="block">
                 <span className="mb-1 block text-xs font-semibold text-gray-500">Text</span>
                 <textarea
+                  ref={sayTextRef}
+                  aria-label="Body say text"
+                  aria-invalid={!sayText.trim()}
                   className="h-24 w-full resize-none rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-200"
                   value={sayText}
                   onChange={(event) => setSayText(event.target.value)}
                 />
+                {!sayText.trim() ? (
+                  <span className="mt-1 block text-xs text-red-600">Say 文本不能为空。</span>
+                ) : null}
               </label>
+            ) : null}
+            {!model.canSend ? (
+              <div className="rounded-lg border border-orange-200 bg-orange-50/70 px-3 py-2 text-xs leading-5 text-orange-700">
+                {model.focus?.detail || '当前动作暂不可发送。'}
+              </div>
             ) : null}
             <button
               type="button"
-              disabled={sending}
+              disabled={!model.canSend}
               onClick={sendAction}
-              className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-white hover:bg-primary-700 disabled:opacity-50"
+              className="btn-primary w-full justify-center disabled:opacity-50"
             >
               <Send size={14} />
-              {sending ? '发送中...' : '发送'}
+              {sending ? '发送中...' : `发送 ${action}`}
             </button>
           </div>
         </aside>

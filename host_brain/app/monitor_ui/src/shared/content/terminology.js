@@ -187,6 +187,23 @@ export const TRIBE_COPY = Object.freeze({
   ],
 })
 
+export const INTEGRATIONS_COPY = Object.freeze({
+  bodyTitle: '身体集成',
+  bodyEyebrow: 'Integrations / Body Bridge',
+  bodyDescription: '把 MateEngine 能力、桥接健康、事件/动作目录和桌宠身体动作放在同一个显式控制台。写入动作只通过本页按钮触发。',
+  commandRailTitle: 'Body Bridge Gate',
+  commandRailDescription: '首屏先确认四件事：MateEngine 是否在线、动作目录是否返回、事件桥是否有样本、当前动作是否可以安全发送。',
+  gateTitle: '发送 Gate',
+  focusTitle: '建议动作',
+  quickLinksTitle: '相关入口',
+  quickLinks: [
+    { key: 'edgeCommand', to: '/execution/edge-command', label: 'Edge Command', detail: '检查边缘命令状态和 gated push。' },
+    { key: 'gateway', to: '/execution/gateway', label: 'Gateway', detail: '核对 Edge / WeChat 网关通道健康。' },
+    { key: 'chatDebug', to: '/observability/chat-debug', label: 'Chat Debug', detail: '用一次可追踪请求验证身体动作链路。' },
+    { key: 'cockpit', to: '/cockpit', label: 'Cockpit', detail: '回到数字生命体总览确认运行态影响。' },
+  ],
+})
+
 export const PENTEST_COPY = Object.freeze({
   labTitle: '渗透实验室',
   labEyebrow: 'Security Lab / Pentest Agent',
