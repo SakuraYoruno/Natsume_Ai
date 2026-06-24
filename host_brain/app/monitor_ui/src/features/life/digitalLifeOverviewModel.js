@@ -117,6 +117,85 @@ function buildCockpitSecondaryAction({
   }
 }
 
+function buildCockpitDecisionReadout({
+  error,
+  refreshWarning,
+  runtimeIssue,
+  status,
+  primaryAction,
+  secondaryAction,
+  primaryPathology,
+  primaryOrgan,
+  pathologies,
+  timelineEvents,
+  overviewTrackedSections,
+  loadMeta,
+}) {
+  const focusTitle = primaryPathology
+    ? `${primaryPathology.organLabel || primaryOrgan?.name || '主病灶'} · ${primaryPathology.title}`
+    : primaryOrgan?.name || '等待主链'
+  const focusDetail = primaryPathology?.symptom
+    || primaryPathology?.impactLabel
+    || primaryOrgan?.summary
+    || `${pathologies.length} 个病灶，${timelineEvents.length} 条事件样本。`
+  const trustTitle = error
+    ? '聚合接口失败'
+    : runtimeIssue
+      ? 'Runtime 待恢复'
+      : refreshWarning
+        ? '旧快照可读'
+        : `${Number(overviewTrackedSections || 0)}/6 分区可信`
+  const trustDetail = error
+    ? '先恢复 /obs/life-body 聚合，再判断生命体态势。'
+    : runtimeIssue
+      ? '缺少 runtime snapshot，存在态和执行层判断会降级。'
+      : refreshWarning
+        ? '当前保留最近一次成功数据，刷新后再确认是否变化。'
+        : loadMeta.description
+
+  return {
+    status,
+    cards: [
+      {
+        key: 'next',
+        label: 'Next action',
+        title: primaryAction.label,
+        detail: primaryAction.detail,
+        to: primaryAction.to,
+        tone: status === 'blocked' ? 'red' : status === 'attention' ? 'orange' : 'green',
+        cta: '打开入口',
+      },
+      {
+        key: 'evidence',
+        label: 'Why this first',
+        title: focusTitle,
+        detail: compactText(focusDetail, 96),
+        to: primaryPathology?.detailPath || primaryOrgan?.drilldownPath || secondaryAction.to,
+        tone: primaryPathology ? 'orange' : primaryOrgan ? 'blue' : 'gray',
+        cta: primaryPathology ? '查看证据' : '查看上下文',
+      },
+      {
+        key: 'trust',
+        label: 'Data confidence',
+        title: trustTitle,
+        detail: compactText(trustDetail, 100),
+        to: error || runtimeIssue ? '/observability/overview' : '/life/runtime',
+        tone: error || runtimeIssue ? 'red' : refreshWarning ? 'orange' : 'green',
+        cta: error || runtimeIssue ? '恢复链路' : '核对运行态',
+      },
+      {
+        key: 'fallback',
+        label: 'Fallback path',
+        title: secondaryAction.label,
+        detail: secondaryAction.detail,
+        to: secondaryAction.to,
+        tone: 'blue',
+        cta: '备用入口',
+      },
+    ],
+  }
+}
+
 export const DIGITAL_LIFE_FOCUS_LENS_OPTIONS = Object.freeze([
   {
     key: 'priority',
@@ -302,6 +381,20 @@ export function buildDigitalLifeCommandRailModel({
       detail: `${primaryAction.label}：${primaryAction.detail}`,
     },
   ]
+  const decisionReadout = buildCockpitDecisionReadout({
+    error,
+    refreshWarning,
+    runtimeIssue,
+    status,
+    primaryAction,
+    secondaryAction,
+    primaryPathology,
+    primaryOrgan,
+    pathologies,
+    timelineEvents,
+    overviewTrackedSections,
+    loadMeta,
+  })
 
   return {
     status,
@@ -309,6 +402,7 @@ export function buildDigitalLifeCommandRailModel({
     summary,
     primaryAction,
     secondaryAction,
+    decisionReadout,
     metricCards,
     gates,
     guidanceActions,

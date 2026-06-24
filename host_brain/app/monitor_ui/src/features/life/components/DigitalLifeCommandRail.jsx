@@ -92,6 +92,25 @@ const METRIC_TONE_CLASSES = {
   blocked: 'border-red-200 bg-red-50/70 text-red-700',
 }
 
+const DECISION_TONE_CLASSES = {
+  green: 'border-emerald-100 bg-emerald-50/80 text-emerald-800',
+  orange: 'border-orange-100 bg-orange-50/80 text-orange-800',
+  red: 'border-red-100 bg-red-50/80 text-red-800',
+  blue: 'border-blue-100 bg-blue-50/80 text-blue-800',
+  gray: 'border-gray-100 bg-gray-50/80 text-gray-700',
+}
+
+const DECISION_ICONS = {
+  next: Target,
+  evidence: Stethoscope,
+  trust: ShieldCheck,
+  fallback: Route,
+}
+
+function decisionToneClass(tone) {
+  return DECISION_TONE_CLASSES[tone] || DECISION_TONE_CLASSES.gray
+}
+
 function GateCard({ label, state, detail }) {
   const meta = GATE_STATE_META[state] || GATE_STATE_META.warning
   const Icon = meta.icon
@@ -104,6 +123,70 @@ function GateCard({ label, state, detail }) {
       </div>
       <div className={`mt-1 text-xs leading-5 ${meta.textClassName}`}>
         {detail}
+      </div>
+    </div>
+  )
+}
+
+function DecisionCard({ item }) {
+  const Icon = DECISION_ICONS[item.key] || Compass
+  const content = (
+    <>
+      <div className="flex items-start justify-between gap-2">
+        <span className="inline-flex min-w-0 items-center gap-1.5 text-xs font-semibold">
+          <Icon size={14} className="shrink-0" />
+          <span className="truncate">{item.label}</span>
+        </span>
+        <span className="shrink-0 rounded border border-white/75 bg-white/75 px-1.5 py-0.5 text-[11px] font-semibold">
+          {item.tone}
+        </span>
+      </div>
+      <div className="mt-2 line-clamp-2 text-sm font-bold leading-5 text-gray-950">{item.title}</div>
+      <div className="mt-1 line-clamp-2 text-xs leading-5">{item.detail}</div>
+      <div className="mt-3 inline-flex items-center gap-1 text-xs font-semibold">
+        {item.cta || '打开'}
+        <ArrowRight size={12} />
+      </div>
+    </>
+  )
+
+  if (item.to) {
+    return (
+      <Link
+        to={item.to}
+        className={`group rounded-lg border px-3 py-3 transition hover:-translate-y-0.5 hover:shadow-sm ${decisionToneClass(item.tone)}`}
+      >
+        {content}
+      </Link>
+    )
+  }
+
+  return (
+    <div className={`rounded-lg border px-3 py-3 ${decisionToneClass(item.tone)}`}>
+      {content}
+    </div>
+  )
+}
+
+function DecisionReadout({ readout }) {
+  const cards = readout?.cards || []
+  if (!cards.length) return null
+
+  return (
+    <div role="region" aria-label="Cockpit Decision Readout" className="mt-4">
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+        <div className="inline-flex items-center gap-1.5 text-xs font-semibold text-gray-600">
+          <Compass size={14} className="text-primary" />
+          决策读数
+        </div>
+        <span className="rounded-full border border-gray-200 bg-white/80 px-2 py-0.5 text-[11px] font-semibold text-gray-500">
+          {readout.status || 'unknown'}
+        </span>
+      </div>
+      <div className="grid grid-cols-1 gap-2 md:grid-cols-2 xl:grid-cols-4">
+        {cards.map((item) => (
+          <DecisionCard key={item.key} item={item} />
+        ))}
       </div>
     </div>
   )
@@ -263,6 +346,8 @@ export default function DigitalLifeCommandRail({
           className="mt-3"
         />
       ) : null}
+
+      <DecisionReadout readout={railModel.decisionReadout} />
 
       <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1.25fr)_minmax(320px,0.75fr)]">
         <MissionBrief
