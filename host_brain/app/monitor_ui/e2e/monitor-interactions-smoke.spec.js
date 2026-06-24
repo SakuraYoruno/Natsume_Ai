@@ -1085,6 +1085,12 @@ test.describe('Monitor interaction smoke', () => {
     await expect(runtimeNarrative).toBeVisible()
     await expect(runtimeNarrative.getByText('等待 Side-effect Approval')).toBeVisible()
     await expect(runtimeNarrative.getByText('处理 Approval Rail')).toBeVisible()
+    const approvalRail = page.getByRole('region', { name: 'Pentest Approval Rail' })
+    await expect(approvalRail).toBeVisible()
+    await expect(approvalRail.getByText('等待审批记录')).toBeVisible()
+    await expect(approvalRail.getByText('Approval Gate Timeline')).toBeVisible()
+    await expect(approvalRail.getByText('approval pending')).toBeVisible()
+    await expect(approvalRail.getByText('Audit Packet')).toBeVisible()
     await expect(page.getByRole('button', { name: '记录 Side-effect Approval' })).toBeEnabled()
 
     await sidePanel.getByLabel('搜索 Findings').fill('debug')
