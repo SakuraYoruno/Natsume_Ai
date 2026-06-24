@@ -49,6 +49,7 @@ function buildTraceRequestTriageRailModel({
   const traceStatus = String(traceData?.status || '').trim() || '待加载'
   const evidenceCount = streamEvents.length + subgraphs.length + tribeEvents.length
   const lastEvidenceTs = streamEvents[0]?.ts_ms || tribeEvents[0]?.ts_ms || null
+  const runtimeDrift = retrievalMeta?.alignment === '读写漂移'
 
   let status = 'healthy'
   let headline = '请求链路完整，可从阶段概览进入节点'
@@ -127,6 +128,82 @@ function buildTraceRequestTriageRailModel({
         detail: '从实时列表重新选择 request。',
       }
 
+  const handoffSteps = [
+    {
+      key: 'snapshot',
+      label: 'Snapshot',
+      value: traceStatus,
+      detail: traceData ? `${nodeCount} 个节点已落盘。` : '等待 trace snapshot 返回。',
+      state: traceData ? 'ready' : 'blocked',
+      action: {
+        kind: 'section',
+        targetId: traceData ? 'trace-stage-overview' : 'trace-summary',
+        label: traceData ? '查看阶段' : '查看摘要',
+      },
+    },
+    {
+      key: 'issue',
+      label: 'Issue Node',
+      value: firstIssueLabel || 'none',
+      detail: issueNodeCount > 0 ? `${issueNodeCount} 个异常/降级节点需要复核。` : '当前没有异常节点。',
+      state: issueNodeCount > 0 ? 'warning' : 'ready',
+      action: issueNodeCount > 0
+        ? {
+            kind: 'node',
+            node: firstIssueNode,
+            targetId: 'trace-node-detail',
+            label: '定位节点',
+          }
+        : {
+            kind: 'section',
+            targetId: 'trace-stage-overview',
+            label: '查看阶段',
+          },
+    },
+    {
+      key: 'evidence',
+      label: 'Evidence Feed',
+      value: `${evidenceCount} refs`,
+      detail: `stream ${streamEvents.length} · subgraph ${subgraphs.length} · Tribe ${tribeEvents.length}`,
+      state: evidenceCount > 0 ? 'ready' : 'warning',
+      action: {
+        kind: 'section',
+        targetId: 'trace-stream-events',
+        label: '查看证据',
+      },
+    },
+    {
+      key: 'runtime',
+      label: 'Runtime Context',
+      value: retrievalMeta?.alignment || 'unknown',
+      detail: retrievalMeta?.embeddingModel || '暂无 retrieval runtime 样本。',
+      state: runtimeDrift ? 'warning' : 'ready',
+      action: {
+        kind: 'section',
+        targetId: 'trace-summary',
+        label: '查看运行时',
+      },
+    },
+    {
+      key: 'repair',
+      label: 'Repair Handoff',
+      value: requestId ? 'Immune Ops' : 'Trace Feed',
+      detail: requestId ? '带 request_id 跳到自动化/免疫回放入口。' : '缺 request_id 时回到 Trace Feed。',
+      state: requestId ? 'ready' : 'blocked',
+      action: requestId
+        ? {
+            kind: 'route',
+            to: `/execution/automation?immune_replay_request_id=${encodeURIComponent(requestId)}`,
+            label: '打开 Immune Ops',
+          }
+        : {
+            kind: 'route',
+            to: '/observability/trace',
+            label: '返回 Trace Feed',
+          },
+    },
+  ]
+
   return {
     status,
     eyebrow: 'Trace Triage',
@@ -135,6 +212,7 @@ function buildTraceRequestTriageRailModel({
     description,
     primaryAction,
     secondaryAction,
+    handoffSteps,
     cards: [
       {
         key: 'status',

@@ -1476,16 +1476,43 @@ test.describe('Monitor interaction smoke', () => {
     await expect(triageRail).toBeVisible()
     await expect(triageRail.getByText('Trace Triage')).toBeVisible()
     await expect(triageRail.getByText('先处理 1 个异常/降级节点')).toBeVisible()
-    await expect(triageRail.getByText('读写漂移')).toBeVisible()
+    await expect(triageRail.getByText('读写漂移')).toHaveCount(2)
+    const handoff = page.getByRole('region', { name: 'Trace Evidence Handoff' })
+    await expect(handoff).toBeVisible()
+    await expect(handoff.getByText('Snapshot')).toBeVisible()
+    await expect(handoff.getByText('Issue Node')).toBeVisible()
+    await expect(handoff.getByText('Evidence Feed')).toBeVisible()
+    await expect(handoff.getByText('Runtime Context')).toBeVisible()
+    await expect(handoff.getByText('Repair Handoff')).toBeVisible()
+    await expect(handoff.getByText('3/5 ready')).toBeVisible()
+    await expect(handoff.getByText('1 refs')).toBeVisible()
 
     await triageRail.getByRole('button', { name: '定位异常节点' }).click()
     await expect(page.locator('#trace-node-detail')).toContainText('降级')
     await expect(page.locator('#trace-node-detail')).toContainText('Route selected with fallback policy')
+    await handoff.getByRole('button', { name: '定位节点' }).click()
+    await expect(page.locator('#trace-node-detail')).toContainText('planner')
 
-    await expect(triageRail.getByRole('link', { name: '打开 Immune Ops' })).toHaveAttribute(
+    await expect(triageRail.getByRole('link', { name: '打开 Immune Ops' }).first()).toHaveAttribute(
       'href',
       /#\/execution\/automation\?immune_replay_request_id=req_trace_smoke/,
     )
+    await expect(handoff.getByRole('link', { name: '打开 Immune Ops' })).toHaveAttribute(
+      'href',
+      /#\/execution\/automation\?immune_replay_request_id=req_trace_smoke/,
+    )
+  })
+
+  test('Trace request detail stays readable on mobile viewport', async ({ page, baseURL }) => {
+    await page.setViewportSize({ width: 390, height: 1000 })
+    await stubTraceApis(page)
+    await page.goto(monitorUrl(baseURL, '/observability/trace/req_trace_smoke'), { waitUntil: 'domcontentloaded' })
+
+    await expect(page.getByRole('heading', { name: '请求级 Trace 深入查看' })).toBeVisible()
+    await expect(page.getByRole('region', { name: 'Trace Evidence Handoff' })).toBeVisible()
+    await expect(page.locator('#trace-stage-overview')).toBeVisible()
+    await expect(page.locator('#trace-node-detail')).toBeVisible()
+    await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1)).toBe(true)
   })
 
   test('Edge command validates payload and requires the control gate', async ({ page, baseURL }) => {

@@ -6,11 +6,13 @@ import {
   ArrowRight,
   CheckCircle2,
   Crosshair,
+  Database,
   GitBranch,
   Radio,
   Route,
   ShieldCheck,
   TimerReset,
+  Workflow,
 } from 'lucide-react'
 
 const STATUS_META = {
@@ -80,6 +82,32 @@ const CARD_TONES = {
   blocked: 'border-red-200 bg-red-50/70 text-red-700',
 }
 
+const HANDOFF_META = {
+  ready: {
+    className: 'border-emerald-200 bg-emerald-50/70 text-emerald-800',
+    badgeClassName: 'border-emerald-200 bg-emerald-100 text-emerald-700',
+    label: 'OK',
+  },
+  warning: {
+    className: 'border-orange-200 bg-orange-50/70 text-orange-800',
+    badgeClassName: 'border-orange-200 bg-orange-100 text-orange-700',
+    label: 'Review',
+  },
+  blocked: {
+    className: 'border-red-200 bg-red-50/70 text-red-800',
+    badgeClassName: 'border-red-200 bg-red-100 text-red-700',
+    label: 'Block',
+  },
+}
+
+const HANDOFF_ICONS = {
+  snapshot: GitBranch,
+  issue: AlertTriangle,
+  evidence: Radio,
+  runtime: Database,
+  repair: ShieldCheck,
+}
+
 function scrollToSection(targetId) {
   if (!targetId || typeof document === 'undefined') return
   document.getElementById(targetId)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
@@ -111,6 +139,85 @@ function TriageAction({ action, primary = false, onSelectNode }) {
       <Icon size={14} />
       {action.label}
     </button>
+  )
+}
+
+function HandoffAction({ action, onSelectNode }) {
+  if (!action) return null
+  const Icon = action.kind === 'node' ? Crosshair : action.kind === 'route' ? Route : ArrowRight
+
+  if (action.kind === 'route') {
+    return (
+      <Link to={action.to} className="mt-3 inline-flex w-full items-center justify-center gap-1.5 rounded-lg border border-current/20 bg-white/80 px-2 py-1.5 text-xs font-semibold hover:bg-white">
+        <Icon size={13} />
+        {action.label}
+      </Link>
+    )
+  }
+
+  return (
+    <button
+      type="button"
+      className="mt-3 inline-flex w-full items-center justify-center gap-1.5 rounded-lg border border-current/20 bg-white/80 px-2 py-1.5 text-xs font-semibold hover:bg-white"
+      onClick={() => {
+        if (action.kind === 'node' && action.node) onSelectNode?.(action.node)
+        scrollToSection(action.targetId)
+      }}
+    >
+      <Icon size={13} />
+      {action.label}
+    </button>
+  )
+}
+
+function HandoffStep({ step, index, onSelectNode }) {
+  const meta = HANDOFF_META[step.state] || HANDOFF_META.warning
+  const Icon = HANDOFF_ICONS[step.key] || Activity
+
+  return (
+    <article className={`min-w-[13.5rem] rounded-lg border px-3 py-3 shadow-sm ${meta.className}`}>
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <div className="flex items-center gap-1.5 text-xs font-semibold">
+            <Icon size={13} className="shrink-0" />
+            <span className="truncate">{index + 1}. {step.label}</span>
+          </div>
+          <div className="mt-1 truncate text-sm font-bold text-gray-950">{step.value}</div>
+        </div>
+        <span className={`shrink-0 rounded-full border px-2 py-0.5 text-[11px] font-semibold ${meta.badgeClassName}`}>
+          {meta.label}
+        </span>
+      </div>
+      <div className="mt-2 line-clamp-2 min-h-10 text-xs leading-5 opacity-85">{step.detail}</div>
+      <HandoffAction action={step.action} onSelectNode={onSelectNode} />
+    </article>
+  )
+}
+
+function TraceEvidenceHandoff({ steps = [], onSelectNode }) {
+  if (!steps.length) return null
+  const readyCount = steps.filter((step) => step.state === 'ready').length
+
+  return (
+    <section aria-label="Trace Evidence Handoff" className="mt-4 rounded-xl border border-gray-100 bg-white/88 p-3 shadow-sm">
+      <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <div className="inline-flex items-center gap-2 text-sm font-bold text-gray-900">
+            <Workflow size={15} className="text-primary" />
+            Trace Evidence Handoff
+          </div>
+          <div className="mt-0.5 text-xs leading-5 text-gray-500">从快照、异常节点、证据面、运行时到修复入口的排障交接链。</div>
+        </div>
+        <span className="w-fit rounded border border-cyan-100 bg-cyan-50 px-2 py-1 text-xs font-semibold text-cyan-700">
+          {readyCount}/{steps.length} ready
+        </span>
+      </div>
+      <div className="mt-3 flex gap-2 overflow-x-auto pb-1">
+        {steps.map((step, index) => (
+          <HandoffStep key={step.key} step={step} index={index} onSelectNode={onSelectNode} />
+        ))}
+      </div>
+    </section>
   )
 }
 
@@ -159,6 +266,7 @@ export default function TraceRequestTriageRail({ model, onSelectNode }) {
   const statusMeta = STATUS_META[model.status] || STATUS_META.degraded
   const cards = model.cards || []
   const gates = model.gates || []
+  const handoffSteps = model.handoffSteps || []
 
   return (
     <section
@@ -212,6 +320,8 @@ export default function TraceRequestTriageRail({ model, onSelectNode }) {
           ))}
         </div>
       ) : null}
+
+      <TraceEvidenceHandoff steps={handoffSteps} onSelectNode={onSelectNode} />
     </section>
   )
 }
