@@ -1,5 +1,6 @@
 import React from 'react'
 import { Activity, ArrowRight, Bug, Crosshair, DatabaseZap, ShieldCheck } from 'lucide-react'
+import { SECURITY_IMMUNE_COPY } from '../../../shared/content/terminology.js'
 
 function scrollToSection(id) {
   if (typeof document === 'undefined') return
@@ -66,10 +67,10 @@ export default function SecurityImmuneCommandRail({
         <div className="min-w-0">
           <div className="inline-flex items-center gap-2 text-sm font-semibold text-gray-800">
             <ShieldCheck size={16} className="text-primary" />
-            <h2 id="security-immune-command-title">Security Immune Gate</h2>
+            <h2 id="security-immune-command-title">{SECURITY_IMMUNE_COPY.commandRailTitle}</h2>
           </div>
           <p className="mt-1 text-xs leading-5 text-gray-500">
-            先判断 runtime、资产样本、incident 队列和手动巡检是否可用，再进入原始数据和风险列表。
+            {SECURITY_IMMUNE_COPY.commandRailDescription}
           </p>
         </div>
         <div className={`rounded-lg border px-3 py-2 text-sm ${toneClass(mission.tone)}`}>

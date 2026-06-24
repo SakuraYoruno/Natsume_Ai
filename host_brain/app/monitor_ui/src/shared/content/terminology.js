@@ -237,6 +237,26 @@ export const PENTEST_COPY = Object.freeze({
   ],
 })
 
+export const SECURITY_IMMUNE_COPY = Object.freeze({
+  heroTitle: '安全免疫',
+  heroEyebrow: 'Security Lab / Immune',
+  heroDescription: '把安全运行态、资产样本、incident 队列和手动 hunt 收敛成一个值班台。先判断免疫链是否可信，再处理 High+ 事件。',
+  commandRailTitle: 'Security Immune Gate',
+  commandRailDescription: '首屏先回答：安全 runtime 是否可读、资产样本是否足够、incident 是否需要人工处置、manual hunt 是否可执行。',
+  triageTitle: 'Incident Triage Workbench',
+  triageDescription: '按风险、资产、证据和建议动作复核 incident，优先处理 High+ 与缺少证据的异常。',
+  runtimeTitle: 'Runtime Snapshot',
+  assetsTitle: 'Asset Evidence',
+  manualHuntTitle: 'Manual Hunt',
+  manualHuntDescription: '通过 internal gated route 触发一次安全巡检，结果写回当前页面和后端审计链。',
+  quickLinks: [
+    { key: 'incidents', label: 'Incidents', targetId: 'security-immune-incidents', detail: '复核需要人工确认的安全事件。' },
+    { key: 'runtime', label: 'Runtime', targetId: 'security-immune-runtime', detail: '确认 /obs/security/runtime 是否可信。' },
+    { key: 'assets', label: 'Assets', targetId: 'security-immune-assets', detail: '核对 endpoint asset 快照。' },
+    { key: 'hunt', label: 'Manual Hunt', targetId: 'security-immune-hunt', detail: '触发一次 gated hunt run。' },
+  ],
+})
+
 export function copyFor(map, key, fallback = key) {
   return map?.[key] ?? fallback
 }

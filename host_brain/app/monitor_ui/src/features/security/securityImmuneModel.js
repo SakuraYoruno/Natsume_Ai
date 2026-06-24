@@ -1,5 +1,13 @@
 export const SECURITY_RISK_LEVELS = Object.freeze(['critical', 'high', 'medium', 'low'])
 export const SECURITY_MIN_RISK_OPTIONS = Object.freeze(['low', 'medium', 'high', 'critical'])
+export const SECURITY_INCIDENT_FOCUS_OPTIONS = Object.freeze(['all', 'high_plus', 'needs_evidence'])
+export const SECURITY_RISK_RANK = Object.freeze({
+  critical: 4,
+  high: 3,
+  medium: 2,
+  low: 1,
+  unknown: 0,
+})
 export const SECURITY_RISK_STYLES = Object.freeze({
   critical: 'border-red-200 bg-red-50 text-red-700',
   high: 'border-orange-200 bg-orange-50 text-orange-700',
@@ -7,6 +15,15 @@ export const SECURITY_RISK_STYLES = Object.freeze({
   low: 'border-green-200 bg-green-50 text-green-700',
   unknown: 'border-gray-200 bg-gray-50 text-gray-600',
 })
+
+export function normalizeSecurityRisk(value) {
+  const normalized = String(value || '').trim().toLowerCase()
+  return SECURITY_RISK_RANK[normalized] == null ? 'unknown' : normalized
+}
+
+export function securityRiskRank(value) {
+  return SECURITY_RISK_RANK[normalizeSecurityRisk(value)] ?? 0
+}
 
 export function getSecurityRiskCounts({ runtime, incidents } = {}) {
   return incidents?.risk_counts || runtime?.risk_counts || {}
@@ -33,20 +50,122 @@ export function buildSecurityRiskCards(riskCounts = {}) {
   }))
 }
 
+function countEvidenceRefs(incident) {
+  if (Array.isArray(incident?.evidence_refs)) return incident.evidence_refs.length
+  if (Array.isArray(incident?.evidence)) return incident.evidence.length
+  if (Array.isArray(incident?.artifacts)) return incident.artifacts.length
+  if (incident?.evidence_ref || incident?.artifact_ref) return 1
+  return 0
+}
+
+function incidentAssetLabel(incident) {
+  return incident?.hostname
+    || incident?.asset_hostname
+    || incident?.asset_id
+    || incident?.target
+    || incident?.source
+    || 'asset pending'
+}
+
+function incidentRecommendation(incident, risk) {
+  if (incident?.recommendation) return incident.recommendation
+  if (securityRiskRank(risk) >= SECURITY_RISK_RANK.high) {
+    return '先隔离影响面、确认证据，再执行处置动作。'
+  }
+  return '复核样本来源，必要时降低风险阈值继续观察。'
+}
+
 export function buildSecurityIncidentRows(incidents) {
   const rows = Array.isArray(incidents?.incidents) ? incidents.incidents : []
-  return rows.map((incident, index) => ({
-    key: incident.incident_id || `incident-${index}`,
-    title: incident.title || incident.kind || `Incident ${index + 1}`,
-    risk: incident.risk || 'unknown',
-    detail: incident.detail || incident.reason || '无详情',
-  }))
+  return rows
+    .map((incident, index) => {
+      const risk = normalizeSecurityRisk(incident.risk || incident.severity || incident.level)
+      const evidenceCount = countEvidenceRefs(incident)
+      return {
+        key: incident.incident_id || incident.id || `incident-${index}`,
+        title: incident.title || incident.kind || `Incident ${index + 1}`,
+        risk,
+        riskRank: securityRiskRank(risk),
+        className: SECURITY_RISK_STYLES[risk] || SECURITY_RISK_STYLES.unknown,
+        detail: incident.detail || incident.reason || incident.description || '无详情',
+        asset: incidentAssetLabel(incident),
+        status: incident.status || incident.state || 'open',
+        source: incident.source || incident.detector || incident.rule_id || 'security immune',
+        evidenceCount,
+        evidenceLabel: evidenceCount > 0 ? `${evidenceCount} evidence refs` : 'needs evidence',
+        recommendation: incidentRecommendation(incident, risk),
+      }
+    })
+    .sort((left, right) => right.riskRank - left.riskRank || left.title.localeCompare(right.title))
 }
 
 export function buildSecurityRuntimeBadge(runtime) {
   return runtime
     ? { status: 'healthy', label: 'connected' }
     : { status: 'degraded', label: 'degraded' }
+}
+
+export function filterSecurityIncidentRows(rows = [], { query = '', focus = 'all' } = {}) {
+  const normalizedQuery = String(query || '').trim().toLowerCase()
+  return rows.filter((incident) => {
+    const focusMatch = focus === 'high_plus'
+      ? incident.riskRank >= SECURITY_RISK_RANK.high
+      : focus === 'needs_evidence'
+        ? incident.evidenceCount === 0
+        : true
+    if (!focusMatch) return false
+    if (!normalizedQuery) return true
+    const haystack = [
+      incident.title,
+      incident.risk,
+      incident.detail,
+      incident.asset,
+      incident.status,
+      incident.source,
+      incident.recommendation,
+    ].join(' ').toLowerCase()
+    return haystack.includes(normalizedQuery)
+  })
+}
+
+export function buildSecurityImmuneTriage({ incidentRows = [], loading = false, minRisk = 'low' } = {}) {
+  const highPlus = incidentRows.filter((incident) => incident.riskRank >= SECURITY_RISK_RANK.high)
+  const needsEvidence = incidentRows.filter((incident) => incident.evidenceCount === 0)
+  const primaryIncident = highPlus[0] || incidentRows[0] || null
+
+  if (loading && incidentRows.length === 0) {
+    return {
+      tone: 'blue',
+      title: '正在同步 incident 队列',
+      detail: '等待 incidents 接口返回后再判断处置优先级。',
+      action: '等待样本',
+      primaryIncident: null,
+      highPlusCount: 0,
+      needsEvidenceCount: 0,
+    }
+  }
+
+  if (!primaryIncident) {
+    return {
+      tone: 'green',
+      title: `${minRisk}+ 阈值下暂无 incident`,
+      detail: '可以保持监控，或运行一次 Manual Hunt 重新采样。',
+      action: '保持监控或运行 Hunt',
+      primaryIncident: null,
+      highPlusCount: 0,
+      needsEvidenceCount: 0,
+    }
+  }
+
+  return {
+    tone: primaryIncident.riskRank >= SECURITY_RISK_RANK.high ? 'red' : 'amber',
+    title: `先处理 ${primaryIncident.title}`,
+    detail: `${primaryIncident.risk.toUpperCase()} · ${primaryIncident.asset} · ${primaryIncident.evidenceLabel}`,
+    action: primaryIncident.recommendation,
+    primaryIncident,
+    highPlusCount: highPlus.length,
+    needsEvidenceCount: needsEvidence.length,
+  }
 }
 
 export function buildSecurityImmuneMission({
@@ -169,6 +288,7 @@ export function buildSecurityImmuneViewModel({
   incidents,
   loading = false,
   partialErrors = [],
+  minRisk = 'low',
 } = {}) {
   const riskCounts = getSecurityRiskCounts({ runtime, incidents })
   const incidentRows = buildSecurityIncidentRows(incidents)
@@ -181,5 +301,6 @@ export function buildSecurityImmuneViewModel({
     runtimeBadge: buildSecurityRuntimeBadge(runtime),
     mission: buildSecurityImmuneMission({ runtime, assets, incidents, loading, partialErrors }),
     gateCards: buildSecurityImmuneGateCards({ runtime, assets, incidents, loading, partialErrors }),
+    triage: buildSecurityImmuneTriage({ incidentRows, loading, minRisk }),
   }
 }

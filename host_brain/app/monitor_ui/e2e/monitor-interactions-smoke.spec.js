@@ -478,12 +478,18 @@ async function stubSecurityImmuneApis(page) {
       title: 'Suspicious PowerShell execution',
       risk: 'high',
       detail: 'Encoded PowerShell launched from endpoint-1.',
+      asset_id: 'endpoint-1',
+      source: 'edr.rule.powershell.encoded',
+      evidence_refs: ['evidence://security/powershell-encoded'],
+      recommendation: 'Isolate endpoint-1 and confirm the encoded command lineage.',
     },
     {
       incident_id: 'incident-low-smb',
       title: 'Legacy SMB service exposed',
       risk: 'low',
       detail: 'SMBv1-compatible service observed on lab subnet.',
+      asset_id: 'edge-node-1',
+      source: 'network.scan.smb',
     },
   ]
   await page.route('**/obs/security/runtime', (route) => fulfillJson(route, {
@@ -1109,19 +1115,33 @@ test.describe('Monitor interaction smoke', () => {
   test('Security Immune gate filters incidents and runs a manual hunt', async ({ page, baseURL }) => {
     await stubSecurityImmuneApis(page)
     await page.goto(monitorUrl(baseURL, '/security/immune'), { waitUntil: 'domcontentloaded' })
-    await expect(page.getByRole('heading', { name: 'Security Immune', exact: true })).toBeVisible()
+    await expect(page.getByRole('heading', { name: '安全免疫', exact: true })).toBeVisible()
 
     const gate = page.getByRole('region', { name: 'Security Immune Gate' })
     await expect(gate).toBeVisible()
     await expect(gate.getByText('存在 High incident')).toBeVisible()
     await expect(gate.getByText('2 assets')).toBeVisible()
     await expect(gate.getByText('2 open')).toBeVisible()
-    await expect(page.getByText('Suspicious PowerShell execution')).toBeVisible()
-    await expect(page.getByText('Legacy SMB service exposed')).toBeVisible()
+    const triage = page.getByRole('region', { name: 'Security Immune Triage' })
+    await expect(triage).toBeVisible()
+    await expect(triage.getByText('先处理 Suspicious PowerShell execution')).toBeVisible()
+    await expect(triage.getByText('1 evidence refs')).toBeVisible()
+    const incidentsSection = page.locator('#security-immune-incidents')
+    await expect(incidentsSection.getByText('Suspicious PowerShell execution', { exact: true })).toBeVisible()
+    await expect(incidentsSection.getByText('Legacy SMB service exposed', { exact: true })).toBeVisible()
+
+    await page.getByLabel('搜索 Security Incidents').fill('smb')
+    await expect(incidentsSection.getByText('Legacy SMB service exposed', { exact: true })).toBeVisible()
+    await expect(incidentsSection.getByText('Suspicious PowerShell execution', { exact: true })).toBeHidden()
+    await page.getByLabel('清除 Security Incident 搜索').click()
+    await page.getByRole('button', { name: '缺证据' }).click()
+    await expect(incidentsSection.getByText('Legacy SMB service exposed', { exact: true })).toBeVisible()
+    await expect(incidentsSection.getByText('Suspicious PowerShell execution', { exact: true })).toBeHidden()
+    await page.getByRole('button', { name: '全部' }).click()
 
     await page.getByLabel('Security Immune minimum risk').selectOption('high')
-    await expect(page.getByText('Suspicious PowerShell execution')).toBeVisible()
-    await expect(page.getByText('Legacy SMB service exposed')).toBeHidden()
+    await expect(incidentsSection.getByText('Suspicious PowerShell execution', { exact: true })).toBeVisible()
+    await expect(incidentsSection.getByText('Legacy SMB service exposed', { exact: true })).toBeHidden()
 
     await gate.getByRole('button', { name: /Incidents/ }).click()
     await expect(page.locator('#security-immune-incidents')).toBeVisible()
