@@ -457,10 +457,11 @@ def _resolve_desktop_pet_touch_type(emotion_tag: str | None) -> str | None:
 
 
 def _normalize_emotion_tag(value: str | None) -> str | None:
-    normalized = str(value or "").strip().upper().replace("-", "_").replace(" ", "_")
-    if not normalized:
+    from host_brain.core.emotion_constants import normalize_emotion_tag  # noqa: PLC0415
+    raw = str(value or "").strip()
+    if not raw:
         return None
-    return VTS_EMOTION_TAG_ALIASES.get(normalized, normalized)
+    return normalize_emotion_tag(raw)
 
 
 def _log_result(

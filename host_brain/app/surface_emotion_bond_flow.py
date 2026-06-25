@@ -218,17 +218,8 @@ def apply_surface_emotion_bond_flow(
 
 
 def _normalize_emotion_tag(value: Any) -> str:
-    text = str(value or "NEUTRAL").strip().upper().replace("-", "_").replace(" ", "_")
-    aliases = {
-        "ANGER": "ANGRY",
-        "ANNOYANCE": "ANNOYED",
-        "ANXIETY": "ANXIOUS",
-        "EXHAUSTION": "EXHAUSTED",
-        "HAPPINESS": "HAPPY",
-        "LOVE": "LOVING",
-        "SADNESS": "SAD",
-    }
-    return aliases.get(text, text or "NEUTRAL")
+    from host_brain.core.emotion_constants import normalize_emotion_tag  # noqa: PLC0415
+    return normalize_emotion_tag(value)
 
 
 def _extract_emotion_valence(emotion: Mapping[str, Any], *, tag: str) -> float:

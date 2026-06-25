@@ -18,29 +18,8 @@ VIOLATION_UNKNOWN_FIELD = "LLM_UNKNOWN_FIELD"
 VIOLATION_FALSE_EXECUTION_CLAIM = "FALSE_EXECUTION_CLAIM"
 VIOLATION_CANON_AS_FACT = "CANON_AS_FACT_VIOLATION"
 
-# M26-E：emotion_tag 合法枚举值（与 core_output_contract.json 保持一致）
-# M28-L（OPT-34）：补全 10 种缺失情感的枚举值，与 channels/vts.py EMOTION_TO_EXPRESSION_ID 保持一致
-VALID_EMOTION_TAGS: frozenset[str] = frozenset({
-    # 原有 6 种
-    "NEUTRAL",
-    "HAPPY",
-    "SAD",
-    "ANGRY",
-    "SURPRISED",
-    "THINKING",
-    # M26-E 补充 2 种
-    "CALM",
-    "EXCITED",
-    # M28-L（OPT-34）新增 8 种
-    "FRUSTRATED",
-    "ANXIOUS",
-    "LOVING",
-    "EMBARRASSED",
-    "CONFUSED",
-    "BORED",
-    "PROUD",
-    "GRATEFUL",
-})
+# M26-E：emotion_tag 合法枚举值 — 导入自权威来源
+from host_brain.core.emotion_constants import VALID_EMOTION_TAGS  # noqa: E402
 DEFAULT_EMOTION_TAG = "NEUTRAL"
 VIOLATION_INVALID_EMOTION_TAG = "LLM_INVALID_EMOTION_TAG"
 

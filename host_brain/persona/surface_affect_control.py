@@ -458,23 +458,8 @@ def _affect_state_anchor(emotion: Mapping[str, Any]) -> str:
 
 
 def _normalize_emotion_tag(value: Any) -> str:
-    text = _clean_text(value).upper().replace("-", "_").replace(" ", "_")
-    aliases = {
-        "ANGER": "ANGRY",
-        "ANNOYANCE": "ANNOYED",
-        "COMFORT": "CALM",
-        "EXHAUSTION": "EXHAUSTED",
-        "HAPPINESS": "HAPPY",
-        "JOYFUL": "JOY",
-        "LOVE": "LOVING",
-        "SADNESS": "SAD",
-        "GUILT": "GUILTY",
-        "ASHAMED": "ASHAMED",
-        "SHAME": "ASHAMED",
-        "EMBARRASSMENT": "EMBARRASSED",
-        "IRRITATED": "ANNOYED",
-    }
-    return aliases.get(text, text)
+    from host_brain.core.emotion_constants import normalize_emotion_tag  # noqa: PLC0415
+    return normalize_emotion_tag(_clean_text(value))
 
 
 def _relationship_distance_family(distance: str) -> str:

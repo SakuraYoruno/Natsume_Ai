@@ -11,42 +11,24 @@ import math
 from typing import Any
 
 from host_brain.core.metabolism import EmotionVector
+from host_brain.core.emotion_constants import EMOTION_TAG_TO_VAD
 
 
-_EMOTION_HINTS: dict[str, dict[str, Any]] = {
-    "HAPPY": {
-        "terms": ("happy", "开心", "高兴", "うれしい", "嬉しい", "楽しい", "好き"),
-        "vector": (0.55, 0.20, 0.00),
-    },
-    "EXCITED": {
-        "terms": ("excited", "兴奋", "激动", "最高", "やばい", "すごい"),
-        "vector": (0.55, 0.55, 0.10),
-    },
-    "SAD": {
-        "terms": ("sad", "难过", "伤心", "悲しい", "つらい", "寂しい"),
-        "vector": (-0.55, -0.25, -0.10),
-    },
-    "ANGRY": {
-        "terms": ("angry", "生气", "烦死", "烦", "むかつく", "腹立つ"),
-        "vector": (-0.65, 0.45, 0.20),
-    },
-    "ANXIOUS": {
-        "terms": ("anxious", "紧张", "担心", "不安", "心配", "こわい", "怖い"),
-        "vector": (-0.35, 0.35, -0.15),
-    },
-    "CALM": {
-        "terms": ("calm", "安心", "平静", "冷静", "落ち着", "ゆっくり"),
-        "vector": (0.15, -0.35, 0.00),
-    },
-    "THINKING": {
-        "terms": ("think", "maybe", "想想", "考虑", "怎么", "为什么", "どう", "かな"),
-        "vector": (0.00, 0.05, 0.35),
-    },
-    "SURPRISED": {
-        "terms": ("surprised", "惊讶", "居然", "まさか", "えっ", "真的假的"),
-        "vector": (0.10, 0.55, 0.05),
-    },
+# ASR keyword matching lists (edge-specific, multilingual)
+_EMOTION_KEYWORDS: dict[str, tuple[str, ...]] = {
+    "HAPPY": ("happy", "开心", "高兴", "うれしい", "嬉しい", "楽しい", "好き"),
+    "EXCITED": ("excited", "兴奋", "激动", "最高", "やばい", "すごい"),
+    "SAD": ("sad", "难过", "伤心", "悲しい", "つらい", "寂しい"),
+    "ANGRY": ("angry", "生气", "烦死", "烦", "むかつく", "腹立つ"),
+    "ANXIOUS": ("anxious", "紧张", "担心", "不安", "心配", "こわい", "怖い"),
+    "CALM": ("calm", "安心", "平静", "冷静", "落ち着", "ゆっくり"),
+    "THINKING": ("think", "maybe", "想想", "考虑", "怎么", "为什么", "どう", "かな"),
+    "SURPRISED": ("surprised", "惊讶", "居然", "まさか", "えっ", "真的假的"),
 }
+
+# Edge-side VAD scale factor: more conservative than host-side canonical values.
+# Each VAD vector is derived from emotion_constants.EMOTION_TAG_TO_VAD * EDGE_VAD_SCALE.
+EDGE_VAD_SCALE: float = 0.85
 
 
 def infer_asr_emotion(
@@ -76,9 +58,10 @@ def infer_asr_emotion(
     dominance = 0.0
     matched_terms: list[str] = []
 
-    for hint in _EMOTION_HINTS.values():
-        vector = hint["vector"]
-        for term in hint["terms"]:
+    for tag, keywords in _EMOTION_KEYWORDS.items():
+        canonical_vector = EMOTION_TAG_TO_VAD.get(tag, (0.0, 0.0, 0.0))
+        vector = tuple(v * EDGE_VAD_SCALE for v in canonical_vector)
+        for term in keywords:
             if str(term).lower() not in normalized:
                 continue
             matched_terms.append(str(term))

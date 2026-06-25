@@ -45,8 +45,9 @@ _TTS_LANGUAGE_ALIASES = {
 
 
 def _normalize_emotion_tag(value: Any) -> str:
-    normalized = str(value or "").strip().upper()
-    return re.sub(r"[^A-Z0-9_]+", "_", normalized).strip("_")
+    from host_brain.core.emotion_constants import normalize_emotion_tag  # noqa: PLC0415
+    result = normalize_emotion_tag(value)
+    return result
 
 
 def _default_speak_emotion_tag() -> str:
