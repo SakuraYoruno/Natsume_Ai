@@ -112,6 +112,13 @@ def _reset_host_brain_runtime_state(*, env_snapshot: dict[str, str] | None = Non
         pass
 
     try:
+        from host_brain.pentest.executor_guard import reset_guard
+
+        reset_guard()
+    except Exception:
+        pass
+
+    try:
         bond_routes = sys.modules.get("host_brain.app.bond_routes")
         asgi_app = sys.modules.get("host_brain.app.asgi")
         if bond_routes is not None:

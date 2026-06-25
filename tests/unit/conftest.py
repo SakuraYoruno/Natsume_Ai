@@ -4,6 +4,25 @@ from __future__ import annotations
 import json
 from typing import Any
 
+import pytest
+
+
+@pytest.fixture()
+def pentest_guard():
+    """为需要 side-effect executor 的测试安装一个宽松的全局 ScopeGuard。
+
+    测试结束时自动 reset_guard()，保证单测隔离。
+    """
+    from host_brain.pentest.executor_guard import init_guard, reset_guard
+    from host_brain.pentest.rate_limiter import RateLimiter
+    from host_brain.pentest.scope import ScopeGuard
+
+    scope = ScopeGuard()
+    scope.set_scope(["127.0.0.1", "127.0.0.2", "10.0.0.0/8", "192.168.0.0/16"])
+    init_guard(scope, RateLimiter(), strict=False)
+    yield
+    reset_guard()
+
 
 def parse_sse_commit(response) -> dict[str, Any]:
     """从 SSE 响应中解析最后一个 COMMIT 事件。"""
