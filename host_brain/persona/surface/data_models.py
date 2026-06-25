@@ -141,3 +141,17 @@ class RelationshipControlAxes:
 
 
 GenerateSurface = Callable[[list[dict[str, str]]], str | Awaitable[str]]
+
+_PUNCT_RE = re.compile(r"[\s，。！？!?,.、~～…\u201c\u201d\"'：:；;（）()\[\]{}]+")
+_CJK_CHAR_RE = re.compile(r"[\u4e00-\u9fff]")
+
+
+def normalize_surface_chat_punctuation(text: str) -> str:
+    value = str(text or "").strip()
+    if not value or not _CJK_CHAR_RE.search(value):
+        return value
+    value = re.sub(r"(?<=[\u4e00-\u9fff])\?(?=[\u4e00-\u9fff]|$)", "？", value)
+    value = re.sub(r"(?<=[\u4e00-\u9fff])!(?=[\u4e00-\u9fff]|$)", "！", value)
+    value = re.sub(r"(?<=[\u4e00-\u9fff]),(?=[\u4e00-\u9fff])", "，", value)
+    value = re.sub(r"(?<=[\u4e00-\u9fff])\.(?=[\u4e00-\u9fff]|$)", "。", value)
+    return value

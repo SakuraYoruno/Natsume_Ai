@@ -35,6 +35,7 @@ __all__ = [
     "memory_carryover_facts",
     "merged_facts",
     "merged_must_not_do",
+    "normalize_surface_chat_punctuation",
     "parse_surface_candidates",
     "relationship_control_axes_for_distance",
     "run_isolated_surface_generation",
