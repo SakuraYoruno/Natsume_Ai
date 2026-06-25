@@ -1,6 +1,6 @@
 """内置 Skill 注册表工厂（M44-B）。
 
-将系统内置的 4 个 Skill 注册到 SkillRegistry，并设置正确的 risk_level，
+将系统内置的 7 个 Skill 注册到 SkillRegistry，并设置正确的 risk_level，
 使 M42 分层治理能对这些 Skill 生效。
 
 内置 Skill 均为只读/无副作用操作，risk_level=1（CACHE 通道），
@@ -11,7 +11,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from host_brain.skills.registry import SkillMeta, SkillRegistry
+from host_brain.skills.registry import SkillRegistry
+from host_brain.skills.registration import register_skill
 
 
 def _builtin_noop_handler(args: dict[str, Any], ctx: dict[str, Any]) -> dict[str, Any]:
@@ -105,6 +106,15 @@ def _session_summary_handler(args: dict[str, Any], ctx: dict[str, Any]) -> dict[
     }
 
 
+# Common kwargs shared by all builtin noop skills.
+_COMMON_SKILL_KWARGS: dict[str, Any] = {
+    "clearance": "LOW",
+    "risk_level": 1,
+    "scope": "host",
+    "reversible": False,
+}
+
+
 def build_builtin_skill_registry() -> SkillRegistry:
     """构建包含系统内置 Skill 的 SkillRegistry。
 
@@ -129,87 +139,66 @@ def build_builtin_skill_registry() -> SkillRegistry:
     registry = SkillRegistry()
 
     # narrative_only：只读叙事生成（最低风险，CACHE 通道）
-    registry.register(SkillMeta(
+    register_skill(
         skill_name="narrative_only",
-        clearance="LOW",
-        risk_level=1,
-        scope="host",
-        reversible=False,
         handler=_builtin_noop_handler,
-        require_confirm=False,
         description="只读叙事生成，不执行任何副作用操作。",
-    ))
+        skill_registry=registry,
+        **_COMMON_SKILL_KWARGS,
+    )
 
     # memory_recall：只读记忆检索（最低风险，CACHE 通道）
-    registry.register(SkillMeta(
+    register_skill(
         skill_name="memory_recall",
-        clearance="LOW",
-        risk_level=1,
-        scope="host",
-        reversible=False,
         handler=_builtin_noop_handler,
-        require_confirm=False,
         description="只读记忆检索，从 EpisodicStore 中召回历史记忆片段。",
-    ))
+        skill_registry=registry,
+        **_COMMON_SKILL_KWARGS,
+    )
 
     # noop：空操作（最低风险，CACHE 通道）
-    registry.register(SkillMeta(
+    register_skill(
         skill_name="noop",
-        clearance="LOW",
-        risk_level=1,
-        scope="host",
-        reversible=False,
         handler=_builtin_noop_handler,
-        require_confirm=False,
         description="空操作占位符，用于测试和降级场景。",
-    ))
+        skill_registry=registry,
+        **_COMMON_SKILL_KWARGS,
+    )
 
     # read_only_status：只读状态查询（最低风险，CACHE 通道）
-    registry.register(SkillMeta(
+    register_skill(
         skill_name="read_only_status",
-        clearance="LOW",
-        risk_level=1,
-        scope="host",
-        reversible=False,
         handler=_builtin_noop_handler,
-        require_confirm=False,
         description="只读状态查询，返回系统当前运行状态摘要。",
-    ))
+        skill_registry=registry,
+        **_COMMON_SKILL_KWARGS,
+    )
 
     # emotion_query：查询当前情感状态快照（最低风险，CACHE 通道）
-    registry.register(SkillMeta(
+    register_skill(
         skill_name="emotion_query",
-        clearance="LOW",
-        risk_level=1,
-        scope="host",
-        reversible=False,
         handler=_emotion_query_handler,
-        require_confirm=False,
         description="查询当前会话的情感状态快照（mood_state / emotion_tag / intensity）。",
-    ))
+        skill_registry=registry,
+        **_COMMON_SKILL_KWARGS,
+    )
 
     # bond_query：查询 Bond 积分和阶段（最低风险，CACHE 通道）
-    registry.register(SkillMeta(
+    register_skill(
         skill_name="bond_query",
-        clearance="LOW",
-        risk_level=1,
-        scope="host",
-        reversible=False,
         handler=_bond_query_handler,
-        require_confirm=False,
         description="查询当前会话的 Bond 积分和关系阶段（FRIEND / CLOSE_FRIEND / CONFIDANT / SOULMATE）。",
-    ))
+        skill_registry=registry,
+        **_COMMON_SKILL_KWARGS,
+    )
 
     # session_summary：生成会话轻量摘要（最低风险，CACHE 通道）
-    registry.register(SkillMeta(
+    register_skill(
         skill_name="session_summary",
-        clearance="LOW",
-        risk_level=1,
-        scope="host",
-        reversible=False,
         handler=_session_summary_handler,
-        require_confirm=False,
         description="生成当前会话的轻量摘要（session_id / turn_count / user_message_preview）。",
-    ))
+        skill_registry=registry,
+        **_COMMON_SKILL_KWARGS,
+    )
 
     return registry
