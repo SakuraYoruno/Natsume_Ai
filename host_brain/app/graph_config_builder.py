@@ -5,14 +5,9 @@
 
 from __future__ import annotations
 
-import asyncio
-import hashlib
 import os
-import urllib.error
-import urllib.request
 from typing import Any, Callable
 
-from host_brain.app.config import load_host_config
 from host_brain.integrations.llm_gateway import (
     PROVIDER_CODEX,
     PROVIDER_DEEPSEEK,
@@ -44,84 +39,54 @@ from host_brain.app.provider_factory import (
     resolve_gemini_primary_fallback_model_id,
     resolve_host_llm_model_id,
 )
-from host_brain.app.model_router import resolve_gemini_model_route
 from host_brain.integrations.codex_cli_provider import codex_cli_lm_allowed_for_background, codex_cli_lm_available, resolve_codex_cli_model
 
-CHAT_GRAPH_NODE_ORDER: list[str] = [
-    CHAT_DIRECT_NODE_ID,
-    "core_reasoner_primary",
-    "core_reasoner_secondary",
-    "planner_constraints",
-    "tool_planner",
-    "safety_verifier",
-    "consistency_verifier",
-    "renderer_ja_c_style",
-    "workbench_translate",
-    "workbench_code_assist",
-]
-CHAT_INTENT_SOURCE_NODE_ID = "core_reasoner_primary"
-SCENE_TYPE_AUTO = "AUTO"
-_GRAPH_CODEX_MIGRATION_DEFAULT_EXCLUDED_SCENES = frozenset({SCENE_CHAT, SCENE_VISION_UI})
-
-# M-MA1：Supervisor 分派节点常量
-SUPERVISOR_DISPATCH_NODE_ID = "supervisor_dispatch"
-SUPERVISOR_DISPATCH_HANDLER_ID = "supervisor_dispatch"
-
-# M-MA5：各 Agent Handler 节点常量
-SURFACE_REPLY_NODE_ID = "surface_reply_node"
-SURFACE_REPLY_HANDLER_ID = "surface_reply"
-TRANSLATE_AGENT_NODE_ID = "translate_agent_node"
-TRANSLATE_AGENT_HANDLER_ID = "translate_agent"
-INTENT_AGENT_NODE_ID = "intent_agent_node"
-INTENT_AGENT_HANDLER_ID = "intent_agent"
-# P1/P4 意图图入口节点：内部实现为 intent_agent_subgraph（透明子图）
-INTENT_AGENT_ENTRY_NODE_ID = "intent_agent_entry"
-INTENT_AGENT_ENTRY_HANDLER_ID = "intent_agent_entry"
-JUDGE_AGENT_NODE_ID = "judge_agent_node"
-JUDGE_AGENT_HANDLER_ID = "judge_agent"
-RETRIEVAL_AGENT_NODE_ID = "retrieval_agent_node"  # P11 新增
-RETRIEVAL_AGENT_HANDLER_ID = "retrieval_agent"    # P11 新增
-EMOTION_AGENT_NODE_ID = "emotion_agent_node"       # 方向 G Phase 2 新增
-EMOTION_AGENT_HANDLER_ID = "emotion_agent"          # 方向 G Phase 2 新增
-REPAIR_AGENT_NODE_ID = "repair_agent_node"
-REPAIR_AGENT_HANDLER_ID = "repair_agent"
-PENTEST_AGENT_NODE_ID = "pentest_agent_node"
-PENTEST_AGENT_HANDLER_ID = "pentest_agent"
-# P16：M-MA6 动态路由虚拟节点（graph_executor 直接分派，不再经过 agent_dispatch_handler）
-AGENT_DISPATCH_NODE_ID = "agent_dispatch_node"
-AGENT_DISPATCH_HANDLER_ID = "agent_dispatch"  # 保留常量供其他模块引用，不再用于 binding
-
-# 客户端允许显式指定的场景类型白名单
-# 供 chat_handler.py 校验客户端传入的 scene_type，统一维护避免两处同步
-# [选项一] SCENE_VISION_UI 已有完整实现（chat_handler_vision.py），加入白名单
-# 注意：VISION_UI 场景需要客户端传入 image_upload_consent=true 才允许上传图片
-# AUTO：显式走多 agent 编排（supervisor_dispatch）；默认已统一图+动态路由，可不传
-ALLOWED_EXPLICIT_SCENE_TYPES: frozenset[str] = frozenset({
-    SCENE_CHAT,
-    SCENE_WORK_CODE,
-    SCENE_WORK_TRANSLATE,
-    SCENE_EXEC_INTENT,
-    SCENE_VISION_UI,
+# ---------------------------------------------------------------------------
+# Constants re-exported from graph_config_constants.py (backward compat)
+# ---------------------------------------------------------------------------
+from host_brain.app.graph_config_constants import (  # noqa: E402
+    CHAT_GRAPH_NODE_ORDER,
+    CHAT_INTENT_SOURCE_NODE_ID,
     SCENE_TYPE_AUTO,
-})
-
-HOST_CHAT_ROUTE_HOST_14B = "host_14b"
-HOST_CHAT_ROUTE_CLOUD = "cloud"
-HOST_CHAT_ROUTE_SKILLS = "skills"
-
-ROUTE_DECISION_VERSION = "route.v1"
-ROUTE_TARGET_HOST = "host"
-ROUTE_TARGET_EDGE = "edge"
-ROUTE_TARGET_CLOUD = "cloud"
-ROUTE_TARGET_SKILLS = "skills"
-
-_HOST_CHAT_14B_DEFAULT_PROVIDER = PROVIDER_OPENAI
-_HOST_CHAT_14B_DEFAULT_MODEL_ID = "qwen3:14b"
-_HOST_CHAT_14B_FALLBACK_API_KEY = "host-local-placeholder-key"
-_HOST_CHAT_14B_DEFAULT_BASE_URL = "http://127.0.0.1:11434/v1"
-_HOST_CHAT_CLOUD_DEFAULT_PROVIDER = PROVIDER_GEMINI
-_PROVIDERS_REQUIRING_API_KEY = frozenset({PROVIDER_OPENAI, PROVIDER_GEMINI, PROVIDER_DEEPSEEK})
-
+    _GRAPH_CODEX_MIGRATION_DEFAULT_EXCLUDED_SCENES,
+    SUPERVISOR_DISPATCH_NODE_ID,
+    SUPERVISOR_DISPATCH_HANDLER_ID,
+    SURFACE_REPLY_NODE_ID,
+    SURFACE_REPLY_HANDLER_ID,
+    TRANSLATE_AGENT_NODE_ID,
+    TRANSLATE_AGENT_HANDLER_ID,
+    INTENT_AGENT_NODE_ID,
+    INTENT_AGENT_HANDLER_ID,
+    INTENT_AGENT_ENTRY_NODE_ID,
+    INTENT_AGENT_ENTRY_HANDLER_ID,
+    JUDGE_AGENT_NODE_ID,
+    JUDGE_AGENT_HANDLER_ID,
+    RETRIEVAL_AGENT_NODE_ID,
+    RETRIEVAL_AGENT_HANDLER_ID,
+    EMOTION_AGENT_NODE_ID,
+    EMOTION_AGENT_HANDLER_ID,
+    REPAIR_AGENT_NODE_ID,
+    REPAIR_AGENT_HANDLER_ID,
+    PENTEST_AGENT_NODE_ID,
+    PENTEST_AGENT_HANDLER_ID,
+    AGENT_DISPATCH_NODE_ID,
+    AGENT_DISPATCH_HANDLER_ID,
+    ALLOWED_EXPLICIT_SCENE_TYPES,
+    HOST_CHAT_ROUTE_HOST_14B,
+    HOST_CHAT_ROUTE_CLOUD,
+    HOST_CHAT_ROUTE_SKILLS,
+    ROUTE_DECISION_VERSION,
+    ROUTE_TARGET_HOST,
+    ROUTE_TARGET_EDGE,
+    ROUTE_TARGET_CLOUD,
+    ROUTE_TARGET_SKILLS,
+    _HOST_CHAT_14B_DEFAULT_PROVIDER,
+    _HOST_CHAT_14B_DEFAULT_MODEL_ID,
+    _HOST_CHAT_14B_FALLBACK_API_KEY,
+    _HOST_CHAT_14B_DEFAULT_BASE_URL,
+    _HOST_CHAT_CLOUD_DEFAULT_PROVIDER,
+    _PROVIDERS_REQUIRING_API_KEY,
+)
 
 def _parse_bool(value: Any, default: bool = False) -> bool:
     if value is None:
@@ -251,82 +216,6 @@ def _resolve_surface_reply_codex_model_id() -> str:
     )
 
 
-def _stable_bucket_0_99(value: str) -> int:
-    text = str(value or "").strip()
-    if not text:
-        return 0
-    digest = hashlib.sha256(text.encode("utf-8", errors="ignore")).hexdigest()
-    return int(digest[:8], 16) % 100
-
-
-def _evaluate_host_chat_gray_rollout(
-    *,
-    rollout_key: str | None,
-    scene_type: str | None,
-) -> dict[str, Any]:
-    enabled = _parse_bool(os.environ.get("HOST_CHAT_GRAY_ENABLED"), default=False)
-    percent = _parse_int(
-        os.environ.get("HOST_CHAT_GRAY_PERCENT"),
-        default=100,
-        min_value=0,
-        max_value=100,
-    )
-    scope_scenes = {
-        str(item).strip().upper()
-        for item in _parse_csv_tokens(os.environ.get("HOST_CHAT_GRAY_SCENES") or "CHAT")
-        if str(item).strip()
-    }
-    allowlist = _parse_csv_tokens(os.environ.get("HOST_CHAT_GRAY_USER_ALLOWLIST"))
-    normalized_scene = str(scene_type or SCENE_CHAT).strip().upper() or SCENE_CHAT
-    key_value = str(rollout_key or "").strip()
-
-    result: dict[str, Any] = {
-        "enabled": enabled,
-        "percent": percent,
-        "scene_type": normalized_scene,
-        "scope_scenes": sorted(scope_scenes),
-        "rollout_key": (key_value or None),
-        "bucket": None,
-        "allowlist_hit": False,
-        "in_rollout": True,
-        "reason_code": "HOST_CHAT_GRAY_DISABLED",
-        "detail": "gray rollout disabled",
-    }
-    if not enabled:
-        return result
-
-    if scope_scenes and normalized_scene not in scope_scenes:
-        result["in_rollout"] = False
-        result["reason_code"] = "HOST_CHAT_GRAY_SCENE_EXCLUDED"
-        result["detail"] = f"scene_type={normalized_scene} not in gray scope"
-        return result
-
-    if key_value and key_value in allowlist:
-        result["allowlist_hit"] = True
-        result["reason_code"] = "HOST_CHAT_GRAY_ALLOWLIST_MATCH"
-        result["detail"] = "rollout key hit allowlist"
-        return result
-
-    if not key_value:
-        include_without_key = percent >= 100
-        result["in_rollout"] = include_without_key
-        result["reason_code"] = (
-            "HOST_CHAT_GRAY_NO_KEY_INCLUDED" if include_without_key else "HOST_CHAT_GRAY_NO_KEY_EXCLUDED"
-        )
-        result["detail"] = "rollout key missing"
-        return result
-
-    bucket = _stable_bucket_0_99(key_value)
-    in_rollout = bucket < percent
-    result["bucket"] = bucket
-    result["in_rollout"] = in_rollout
-    if in_rollout:
-        result["reason_code"] = "HOST_CHAT_GRAY_BUCKET_INCLUDED"
-        result["detail"] = f"bucket={bucket} < percent={percent}"
-    else:
-        result["reason_code"] = "HOST_CHAT_GRAY_BUCKET_EXCLUDED"
-        result["detail"] = f"bucket={bucket} >= percent={percent}"
-    return result
 
 
 def _provider_requires_api_key(provider_name: str) -> bool:
@@ -374,137 +263,8 @@ def _normalize_openai_compat_base_url(value: str | None) -> str | None:
     return f"{base_url}/v1"
 
 
-def _resolve_cloud_provider_model_id(*, chain_name: str) -> str:
-    normalized_chain = str(chain_name or "").strip().lower()
-    if normalized_chain == "gemini":
-        return str(os.environ.get("HOST_GEMINI_MODEL_ID") or "gemini-2.5-flash-lite").strip() or "gemini-2.5-flash-lite"
-    if normalized_chain == "codex":
-        return resolve_codex_cli_model(os.environ.get("HOST_CODEX_MODEL_ID"))
-    if normalized_chain == "deepseek":
-        return str(os.environ.get("HOST_DEEPSEEK_MODEL_ID") or "deepseek-v4-flash").strip() or "deepseek-v4-flash"
-    return "mock-default"
 
 
-def _resolve_codex_base_url() -> str | None:
-    raw = str(
-        os.environ.get("HOST_CODEX_BASE_URL")
-        or os.environ.get("HOST_OPENAI_BASE_URL")
-        or ""
-    ).strip()
-    if not raw:
-        return None
-    return _normalize_openai_compat_base_url(raw)
-
-
-def _split_api_and_root_base(base_url: str | None) -> tuple[str | None, str | None]:
-    normalized = _normalize_openai_compat_base_url(base_url)
-    if not normalized:
-        return None, None
-    root = normalized[:-3].rstrip("/") if normalized.lower().endswith("/v1") else normalized.rstrip("/")
-    return normalized, (root or normalized)
-
-
-def _resolve_host_14b_base_url(*, provider_name: str) -> str | None:
-    provider = str(provider_name or "").strip().lower()
-    if provider != PROVIDER_OPENAI:
-        return None
-    raw = _env_value(
-        "HOST_CHAT_LOCAL_LLM_BASE_URL",
-        "HOST_CHAT_HOST_14B_BASE_URL",
-        _env_value("HOST_OPENAI_BASE_URL", default=_HOST_CHAT_14B_DEFAULT_BASE_URL),
-    )
-    return _normalize_openai_compat_base_url(raw)
-
-
-def _default_host_14b_timeout_ms(*, provider_name: str, cloud_timeout_ms: int) -> int:
-    """Give local Ollama enough time on CPU-class hosts before timing out."""
-    provider = str(provider_name or "").strip().lower()
-    default_timeout_ms = int(cloud_timeout_ms)
-    if provider != PROVIDER_OPENAI:
-        return default_timeout_ms
-    base_url = str(_resolve_host_14b_base_url(provider_name=provider_name) or "").strip().lower()
-    if "127.0.0.1:11434" in base_url or "localhost:11434" in base_url:
-        return max(default_timeout_ms, 90_000)
-    return default_timeout_ms
-
-
-def _probe_http_endpoint(*, url: str, timeout_ms: int) -> tuple[bool, str]:
-    """同步 HTTP 探测（仅供 asyncio.to_thread 包装后调用，不得在事件循环中直接调用）。"""
-    endpoint = str(url or "").strip()
-    if not endpoint:
-        return False, "empty_probe_url"
-    timeout_sec = max(0.2, float(max(100, int(timeout_ms))) / 1000.0)
-    req = urllib.request.Request(
-        endpoint,
-        headers={
-            "Accept": "application/json",
-            "User-Agent": "NatsumeHost14BHealthProbe/1.0",
-        },
-        method="GET",
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=timeout_sec) as resp:
-            code = int(getattr(resp, "status", 200) or 200)
-        if 200 <= code < 500:
-            return True, f"http_{code}"
-        return False, f"http_{code}"
-    except urllib.error.URLError as exc:
-        return False, f"url_error:{exc}"
-    except Exception as exc:  # pragma: no cover - defensive guard
-        return False, f"probe_error:{exc}"
-
-
-async def _probe_http_endpoint_async(*, url: str, timeout_ms: int) -> tuple[bool, str]:
-    """异步 HTTP 探测——通过 asyncio.to_thread 包装同步探测，不阻塞事件循环。"""
-    return await asyncio.to_thread(_probe_http_endpoint, url=url, timeout_ms=timeout_ms)
-
-
-def _resolve_host_14b_health_status(*, provider_name: str, timeout_ms: int) -> tuple[bool, str]:
-    if not _parse_bool(_env_value("HOST_CHAT_LOCAL_LLM_HEALTHCHECK_ENABLED", "HOST_CHAT_HOST_14B_HEALTHCHECK_ENABLED"), default=False):
-        return True, "HOST_LOCAL_LLM_HEALTHCHECK_DISABLED"
-
-    ready_value = _env_value("HOST_CHAT_LOCAL_LLM_READY", "HOST_CHAT_HOST_14B_READY")
-    if ready_value is not None and not _parse_bool(ready_value, default=True):
-        return False, "HOST_LOCAL_LLM_READY_FLAG_DOWN"
-
-    health_url = _env_value("HOST_CHAT_LOCAL_LLM_HEALTHCHECK_URL", "HOST_CHAT_HOST_14B_HEALTHCHECK_URL")
-    probe_urls: list[str] = []
-    if health_url:
-        probe_urls.append(health_url)
-    else:
-        api_base, root_base = _split_api_and_root_base(_resolve_host_14b_base_url(provider_name=provider_name))
-        if api_base:
-            probe_urls.append(f"{api_base}/models")
-        if root_base:
-            probe_urls.append(f"{root_base}/health")
-            probe_urls.append(f"{root_base}/api/tags")
-
-    if not probe_urls:
-        if ready_value is not None:
-            return _parse_bool(ready_value, default=True), "HOST_LOCAL_LLM_READY_FLAG_ONLY"
-        return True, "HOST_LOCAL_LLM_NO_PROBE_URL"
-
-    first_failure = ""
-    for url in probe_urls:
-        ok, detail = _probe_http_endpoint(url=url, timeout_ms=timeout_ms)
-        if ok:
-            return True, f"HOST_LOCAL_LLM_PROBE_OK:{detail}"
-        if not first_failure:
-            first_failure = detail
-    return False, f"HOST_LOCAL_LLM_PROBE_FAILED:{first_failure or 'unknown'}"
-
-
-async def _resolve_host_14b_health_status_async(*, provider_name: str, timeout_ms: int) -> tuple[bool, str]:
-    """异步版本的 14B 健康探测——在事件循环中调用此函数，不阻塞事件循环。
-
-    修复审计问题 #1：原 _resolve_host_14b_health_status 使用同步 urllib 在事件循环中
-    直接调用，会阻塞事件循环最多 3s。此函数通过 asyncio.to_thread 包装解决该问题。
-    """
-    return await asyncio.to_thread(
-        _resolve_host_14b_health_status,
-        provider_name=provider_name,
-        timeout_ms=timeout_ms,
-    )
 
 
 def build_chat_graph(
@@ -1108,207 +868,6 @@ def _build_graph_config_by_profile(
 # Phase XV: 三套 Agent 专用 LLM 运行时解析
 # ---------------------------------------------------------------------------
 
-def _legacy_resolve_surface_reply_llm_runtime(*, base_runtime: dict) -> dict:
-    """SurfaceReply（旧角色本人）的 LLM 运行时配置。
-
-    追求「好」：高质量模型 + 高温度 + 流式输出 + 双语生成能力。
-    默认使用 gemini-2.5-pro，可通过 HOST_SURFACE_REPLY_MODEL_ID 覆盖；旧 HOST_CHAT_AGENT_MODEL_ID 仅兼容读取。
-
-    Args:
-        base_runtime: 来自 resolve_host_llm_runtime_async() 的基础运行时
-
-    Returns:
-        SurfaceReply 专用 LLM 运行时 dict，可直接传给 astream_llm_chunks()
-    """
-    model_id = str(
-        os.environ.get("HOST_SURFACE_REPLY_MODEL_ID") or os.environ.get("HOST_CHAT_AGENT_MODEL_ID") or "gemini-2.5-pro"
-    ).strip() or "gemini-2.5-pro"
-    timeout_ms = max(800, _parse_int(
-        os.environ.get("HOST_SURFACE_REPLY_TIMEOUT_MS") or os.environ.get("HOST_CHAT_AGENT_TIMEOUT_MS"),
-        default=30_000,
-        min_value=800,
-        max_value=120_000,
-    ))
-    return {
-        **base_runtime,
-        "model_id": model_id,
-        "chat_model_id": model_id,
-        "timeout_ms": timeout_ms,
-        "chat_timeout_ms": timeout_ms,
-        # SurfaceReply 专属 gen_params：高温度让回复更自然有变化
-        "agent_gen_params": {
-            "temperature": 0.8,
-            "top_p": 0.92,
-        },
-        "agent_role": "surface_reply",
-    }
-
-
-def _legacy_resolve_executive_router_llm_runtime(*, base_runtime: dict) -> dict:
-    """ExecutiveRouter 的旧版 LLM 运行时配置。
-
-    追求「快」：轻量模型 + 低温度 + 非流式 + 严格 JSON 输出。
-    默认使用 gemini-2.5-flash-lite，可通过 HOST_DISPATCH_AGENT_MODEL_ID 覆盖。
-
-    Args:
-        base_runtime: 来自 resolve_host_llm_runtime_async() 的基础运行时
-
-    Returns:
-        ExecutiveRouter 专用 LLM 运行时 dict
-    """
-    model_id = str(
-        os.environ.get("HOST_DISPATCH_AGENT_MODEL_ID") or "gemini-2.5-flash-lite"
-    ).strip() or "gemini-2.5-flash-lite"
-    timeout_ms = max(800, _parse_int(
-        os.environ.get("HOST_DISPATCH_AGENT_TIMEOUT_MS"),
-        default=5_000,
-        min_value=800,
-        max_value=30_000,
-    ))
-    return {
-        **base_runtime,
-        "model_id": model_id,
-        "chat_model_id": model_id,
-        "timeout_ms": timeout_ms,
-        "chat_timeout_ms": timeout_ms,
-        # Executive Router 专属 gen_params：低温度确保路由判断稳定可预测
-        "agent_gen_params": {
-            "temperature": 0.1,
-            "top_p": 0.80,
-        },
-        "agent_role": "executive_router",
-    }
-
-
-def _legacy_resolve_subagent_llm_runtime(*, base_runtime: dict) -> dict:
-    """SubAgent（code/translate/intent/vision）的 LLM 运行时配置。
-
-    追求「准」：中等质量模型 + 低温度 + 非流式 + 多轮工具调用。
-    默认使用 gemini-2.5-pro，可通过 HOST_SUBAGENT_MODEL_ID 覆盖。
-
-    Args:
-        base_runtime: 来自 resolve_host_llm_runtime_async() 的基础运行时
-
-    Returns:
-        SubAgent 专用 LLM 运行时 dict，可直接传给 ReAct 循环的 gateway 构建
-    """
-    model_id = str(
-        os.environ.get("HOST_SUBAGENT_MODEL_ID") or "gemini-2.5-pro"
-    ).strip() or "gemini-2.5-pro"
-    timeout_ms = max(800, _parse_int(
-        os.environ.get("HOST_SUBAGENT_TIMEOUT_MS"),
-        default=30_000,
-        min_value=800,
-        max_value=120_000,
-    ))
-    return {
-        **base_runtime,
-        "model_id": model_id,
-        "chat_model_id": model_id,
-        "timeout_ms": timeout_ms,
-        "chat_timeout_ms": timeout_ms,
-        # SubAgent 专属 gen_params：低温度保证代码/翻译准确性
-        "agent_gen_params": {
-            "temperature": 0.3,
-            "top_p": 0.85,
-        },
-        "agent_role": "sub_agent",
-    }
-
-
-def _resolve_non_gemini_agent_model_id_v2(
-    *,
-    provider_name: str,
-    base_runtime: dict[str, Any],
-    model_env_names: tuple[str, ...],
-) -> str:
-    for model_env_name in model_env_names:
-        explicit_model = str(os.environ.get(model_env_name) or "").strip()
-        if explicit_model and not explicit_model.lower().startswith("gemini-"):
-            return explicit_model
-    base_model_id = str(
-        base_runtime.get("model_id")
-        or base_runtime.get("chat_model_id")
-        or ""
-    ).strip()
-    if base_model_id:
-        return base_model_id
-    return resolve_host_llm_model_id(provider_name)
-
-
-def _first_non_empty_env(*env_names: str) -> str | None:
-    for env_name in env_names:
-        value = str(os.environ.get(env_name) or "").strip()
-        if value:
-            return value
-    return None
-
-
-def _resolve_agent_llm_runtime_v2(
-    *,
-    base_runtime: dict[str, Any],
-    role: str,
-    model_env_name: str,
-    timeout_env_name: str,
-    timeout_default_ms: int,
-    timeout_max_ms: int,
-    gen_params: dict[str, float],
-    fallback_model_env_names: tuple[str, ...] = (),
-    fallback_timeout_env_names: tuple[str, ...] = (),
-) -> dict[str, Any]:
-    provider_name = str(base_runtime.get("provider_name") or PROVIDER_GEMINI).strip().lower() or PROVIDER_GEMINI
-    timeout_value = _first_non_empty_env(timeout_env_name, *fallback_timeout_env_names)
-    timeout_ms = max(
-        800,
-        _parse_int(
-            timeout_value,
-            default=timeout_default_ms,
-            min_value=800,
-            max_value=timeout_max_ms,
-        ),
-    )
-    selected_api_key = str(
-        base_runtime.get("llm_api_key")
-        or base_runtime.get("chat_llm_api_key")
-        or ""
-    ).strip() or None
-    model_route: dict[str, Any] = {}
-    if provider_name == PROVIDER_GEMINI:
-        model_route = resolve_gemini_model_route(
-            role=role,
-            preferred_api_key=selected_api_key,
-            route_key=(
-                str(base_runtime.get("route_reason_code") or "").strip()
-                or str(base_runtime.get("route_target") or "").strip()
-                or None
-            ),
-        )
-        model_id = str(
-            model_route.get("model_id")
-            or base_runtime.get("model_id")
-            or base_runtime.get("chat_model_id")
-            or "gemini-2.5-flash-lite"
-        ).strip() or "gemini-2.5-flash-lite"
-        selected_api_key = str(model_route.get("api_key") or selected_api_key or "").strip() or None
-    else:
-        model_id = _resolve_non_gemini_agent_model_id_v2(
-            provider_name=provider_name,
-            base_runtime=base_runtime,
-            model_env_names=(model_env_name, *fallback_model_env_names),
-        )
-
-    return {
-        **base_runtime,
-        "model_id": model_id,
-        "chat_model_id": model_id,
-        "timeout_ms": timeout_ms,
-        "chat_timeout_ms": timeout_ms,
-        "llm_api_key": selected_api_key,
-        "chat_llm_api_key": selected_api_key,
-        "agent_gen_params": dict(gen_params),
-        "agent_role": role,
-        "agent_model_route": (model_route or None),
-    }
 
 
 def resolve_surface_reply_llm_runtime(*, base_runtime: dict) -> dict:
