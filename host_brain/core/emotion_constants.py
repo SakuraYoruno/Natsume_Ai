@@ -53,6 +53,62 @@ EMOTION_TAG_ZH: dict[str, str] = {
 }
 
 
+# ---------------------------------------------------------------------------
+# 权威别名表——将各种非规范标签映射到 16 种规范标签
+# ---------------------------------------------------------------------------
+# 合并自 emotion_context._SEMANTIC_EMOTION_TAG_ALIASES,
+# vts_runtime_mapping.VTS_EMOTION_TAG_ALIASES,
+# surface_affect_control._normalize_emotion_tag,
+# surface_emotion_bond_flow._normalize_emotion_tag.
+#
+# 中间非规范目标（ANNOYED, EXHAUSTED, JOY, GUILTY, ASHAMED）
+# 已全部解析为规范标签。
+
+EMOTION_TAG_ALIASES: dict[str, str] = {
+    # → HAPPY
+    "HAPPINESS": "HAPPY",
+    "JOY": "HAPPY",
+    "JOYFUL": "HAPPY",
+    "DELIGHT": "HAPPY",
+    "PLAYFUL": "HAPPY",
+    # → EXCITED
+    "EXCITEMENT": "EXCITED",
+    # → SAD
+    "SADNESS": "SAD",
+    "GRIEF": "SAD",
+    "HURT": "SAD",
+    # → CALM
+    "COMFORT": "CALM",
+    "SOOTHING": "CALM",
+    "WARM": "CALM",
+    # → THINKING
+    "SERIOUS": "THINKING",
+    # → ANGRY
+    "ANGER": "ANGRY",
+    # → FRUSTRATED
+    "ANNOYED": "FRUSTRATED",
+    "ANNOYANCE": "FRUSTRATED",
+    "IRRITATED": "FRUSTRATED",
+    # → LOVING
+    "LOVE": "LOVING",
+    "AFFECTION": "LOVING",
+    "COQUETTISH": "LOVING",
+    # → EMBARRASSED
+    "GUILT": "EMBARRASSED",
+    "GUILTY": "EMBARRASSED",
+    "ASHAMED": "EMBARRASSED",
+    "SHAME": "EMBARRASSED",
+    "SHY": "EMBARRASSED",
+    "EMBARRASSMENT": "EMBARRASSED",
+    # → ANXIOUS
+    "ANXIETY": "ANXIOUS",
+    # → BORED
+    "EXHAUSTION": "BORED",
+    "EXHAUSTED": "BORED",
+    "TIRED": "BORED",
+}
+
+
 def get_vad(emotion_tag: str) -> tuple[float, float, float]:
     """将情感标签映射为 VAD 三维向量。
 
@@ -64,3 +120,20 @@ def get_vad(emotion_tag: str) -> tuple[float, float, float]:
     """
     tag = str(emotion_tag or "NEUTRAL").strip().upper() or "NEUTRAL"
     return EMOTION_TAG_TO_VAD.get(tag, (0.0, 0.0, 0.0))
+
+
+def normalize_emotion_tag(value: str | None) -> str:
+    """将任意情感标签归一化为 16 种规范标签之一。
+
+    处理步骤：strip → upper → 替换非字母数字字符 → 解析别名。
+    未知标签原样返回（大写形式）。
+    """
+    import re as _re
+    text = str(value or "NEUTRAL").strip()
+    if not text:
+        return "NEUTRAL"
+    text = text.upper().replace("-", "_").replace(" ", "_")
+    text = _re.sub(r"[^A-Z0-9_]+", "_", text).strip("_")
+    if not text:
+        return "NEUTRAL"
+    return EMOTION_TAG_ALIASES.get(text, text)

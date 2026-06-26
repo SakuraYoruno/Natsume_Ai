@@ -79,14 +79,10 @@ def _parse_float_env(name: str, *, default: float, min_value: float, max_value: 
 
 
 # ---------------------------------------------------------------------------
-# 有效情感标签白名单
+# 有效情感标签白名单 — 导入自权威来源
 # ---------------------------------------------------------------------------
 
-_VALID_EMOTION_TAGS: frozenset[str] = frozenset({
-    "HAPPY", "SAD", "ANGRY", "EXCITED", "CALM", "THINKING", "LOVING",
-    "EMBARRASSED", "CONFUSED", "BORED", "PROUD", "GRATEFUL",
-    "ANXIOUS", "FRUSTRATED", "SURPRISED", "NEUTRAL",
-})
+from host_brain.core.emotion_constants import VALID_EMOTION_TAGS as _VALID_EMOTION_TAGS  # noqa: E402
 
 
 # ---------------------------------------------------------------------------

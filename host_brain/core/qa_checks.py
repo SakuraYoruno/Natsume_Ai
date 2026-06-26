@@ -19,9 +19,7 @@ DEFAULT_EMOTION_TAG = "NEUTRAL"
 VIOLATION_WCANON_SLOT = "WCANON_SLOT_VIOLATION"
 VIOLATION_INVALID_EMOTION_TAG = "LLM_INVALID_EMOTION_TAG"
 
-VALID_EMOTION_TAGS: frozenset[str] = frozenset({
-    "NEUTRAL", "HAPPY", "SAD", "ANGRY", "SURPRISED", "THINKING", "CALM", "EXCITED",
-})
+from host_brain.core.emotion_constants import VALID_EMOTION_TAGS  # noqa: E402
 # ---------------------------------------------------------------------------
 # F-33：WCANON_SLOT_VIOLATION 告警接口（R113-1）
 # ---------------------------------------------------------------------------

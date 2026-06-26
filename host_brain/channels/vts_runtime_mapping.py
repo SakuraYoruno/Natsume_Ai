@@ -29,26 +29,7 @@ DEFAULT_EMOTION_TO_HOTKEY: dict[str, str] = {
 DEFAULT_VTS_HOTKEY_CONFIG_PATH = (
     Path(__file__).resolve().parents[2] / "configs" / "vts" / "vts_hotkey_config.yaml"
 )
-VTS_EMOTION_TAG_ALIASES: dict[str, str] = {
-    "AFFECTION": "LOVING",
-    "ANNOYED": "FRUSTRATED",
-    "ASHAMED": "EMBARRASSED",
-    "COQUETTISH": "LOVING",
-    "DELIGHT": "HAPPY",
-    "EXCITEMENT": "EXCITED",
-    "GRIEF": "SAD",
-    "GUILT": "EMBARRASSED",
-    "GUILTY": "EMBARRASSED",
-    "HAPPINESS": "HAPPY",
-    "HURT": "SAD",
-    "JOY": "HAPPY",
-    "LOVE": "LOVING",
-    "PLAYFUL": "HAPPY",
-    "SERIOUS": "THINKING",
-    "SHY": "EMBARRASSED",
-    "SOOTHING": "CALM",
-    "WARM": "CALM",
-}
+VTS_EMOTION_TAG_ALIASES: dict[str, str] = {}  # Deprecated — use emotion_constants.EMOTION_TAG_ALIASES
 
 
 def get_default_vts_hotkey_config_path() -> str:
