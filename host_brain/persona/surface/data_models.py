@@ -42,6 +42,51 @@ class ReplyControlPacket(_StrictModel):
     facts: list[str] = Field(default_factory=list)
     style_anchor: list[str] = Field(default_factory=list)
 
+    # --- Inner-state leakage fields (life-feel renovation) ---
+    # Abstracted inner-life signals so the surface LLM can feel the character's
+    # current inner weather without seeing raw private thoughts.
+    inner_weather: str = Field(
+        default="",
+        description="1-2 sentence natural-language description of the character's "
+        "current inner state (e.g. '有点闷闷的，想说点什么又不确定该不该开口').",
+    )
+    body_state_hint: str = Field(
+        default="",
+        description="Body-state hint derived from fatigue/drowsiness/loneliness "
+        "(e.g. '困了，脑子转得慢').",
+    )
+    care_signal: float = Field(
+        default=0.0,
+        ge=0.0,
+        le=1.0,
+        description="Care drive intensity [0.0, 1.0]. High values nudge the "
+        "response toward warmth and concern.",
+    )
+    continuity_signal: float = Field(
+        default=0.0,
+        ge=0.0,
+        le=1.0,
+        description="Continuity drive intensity [0.0, 1.0]. High values suggest "
+        "picking up unfinished threads.",
+    )
+    tension_hint: str = Field(
+        default="",
+        description="Short description of active inner tension "
+        "(e.g. '想靠近又怕打扰').",
+    )
+    liveliness: float = Field(
+        default=0.5,
+        ge=0.0,
+        le=1.0,
+        description="Overall liveliness / energy [0.0, 1.0]. Low values suggest "
+        "slower, shorter, lower-energy replies.",
+    )
+    active_loops: int = Field(
+        default=0,
+        ge=0,
+        description="Number of open conversation loops still on the character's mind.",
+    )
+
 
 class IsolatedSurfaceInput(_StrictModel):
     soul_md: str
@@ -50,6 +95,14 @@ class IsolatedSurfaceInput(_StrictModel):
     facts: list[str] = Field(default_factory=list)
     must_not_do: list[str] = Field(default_factory=list)
     case_id: str = ""
+    # --- Inner-state leakage fields (mirrored from ReplyControlPacket) ---
+    inner_weather: str = ""
+    body_state_hint: str = ""
+    care_signal: float = 0.0
+    continuity_signal: float = 0.0
+    tension_hint: str = ""
+    liveliness: float = 0.5
+    active_loops: int = 0
 
 
 @dataclass(frozen=True)

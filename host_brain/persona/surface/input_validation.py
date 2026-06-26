@@ -25,6 +25,20 @@ from host_brain.persona.surface.util import (
 )
 
 
+def _coerce_float(value: Any, *, default: float = 0.0) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return float(default)
+
+
+def _coerce_int(value: Any, *, default: int = 0) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return int(default)
+
+
 def _is_forbidden_key(key: Any) -> bool:
     normalized = str(key or "").strip().lower()
     if normalized in _FORBIDDEN_INPUT_KEYS:
@@ -82,6 +96,14 @@ def build_isolated_surface_input(
         "facts": _optional_list(payload.get("facts")),
         "must_not_do": _optional_list(payload.get("must_not_do")),
         "case_id": _clean_text(payload.get("case_id")),
+        # --- Inner-state leakage pass-through ---
+        "inner_weather": _clean_text(payload.get("inner_weather")),
+        "body_state_hint": _clean_text(payload.get("body_state_hint")),
+        "care_signal": _coerce_float(payload.get("care_signal")),
+        "continuity_signal": _coerce_float(payload.get("continuity_signal")),
+        "tension_hint": _clean_text(payload.get("tension_hint")),
+        "liveliness": _coerce_float(payload.get("liveliness")) if payload.get("liveliness") is not None else 0.5,
+        "active_loops": _coerce_int(payload.get("active_loops")),
     }
     if not request_payload["soul_md"]:
         raise ValueError("isolated surface input requires soul_md")

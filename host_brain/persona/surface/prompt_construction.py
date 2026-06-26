@@ -541,10 +541,39 @@ def build_isolated_surface_messages(request: IsolatedSurfaceInput) -> list[dict[
         "",
         "## TurnSurfaceContract",
         json.dumps(turn_contract_payload, ensure_ascii=False, indent=2, sort_keys=True),
+    ]
+
+    # --- Inner-state leakage section ---
+    # Inject a natural-language inner-weather block so the LLM can feel
+    # the character's current inner life.  This is deliberately separate
+    # from the raw JSON to ensure the LLM reads and uses it.
+    _inner_lines: list[str] = []
+    if request.inner_weather:
+        _inner_lines.append(f"内在天气：{request.inner_weather}")
+    if request.body_state_hint:
+        _inner_lines.append(f"身体感知：{request.body_state_hint}")
+    if request.care_signal >= 0.25:
+        _inner_lines.append(f"关怀驱动：{request.care_signal:.0%}")
+    if request.continuity_signal >= 0.25:
+        _inner_lines.append(f"连续性驱动：{request.continuity_signal:.0%}")
+    if request.tension_hint:
+        _inner_lines.append(f"内在张力：{request.tension_hint}")
+    if request.liveliness < 0.30:
+        _inner_lines.append("活力偏低，节奏放慢")
+    if request.active_loops >= 2:
+        _inner_lines.append(f"心里还挂着{request.active_loops}件事")
+    if _inner_lines:
+        user_parts.extend([
+            "",
+            "## 内在状态（你当前的内在天气，用它来让回复更有生命感，但不要直接复述这些描述）",
+            "\n".join(_inner_lines),
+        ])
+
+    user_parts.extend([
         "",
         "## 必要事实",
         "\n".join(f"- {item}" for item in surface_prompt_facts(request)) or "- 无",
-    ]
+    ])
     action_guidance = response_move_action_guidance(request)
     if action_guidance:
         user_parts.extend(["", action_guidance])

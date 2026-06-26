@@ -53,12 +53,19 @@ _FORBIDDEN_KEY_HINTS = (
     "module_advice",
 )
 _ALLOWED_TOP_LEVEL_KEYS = {
+    "active_loops",
+    "body_state_hint",
+    "care_signal",
     "case_id",
+    "continuity_signal",
     "control",
     "facts",
+    "inner_weather",
+    "liveliness",
     "must_not_do",
     "reply_control_packet",
     "soul_md",
+    "tension_hint",
     "user_message",
 }
 _SURFACE_QUOTE_QUERY_BY_SCENE: dict[str, dict[str, tuple[str, ...] | str]] = {
