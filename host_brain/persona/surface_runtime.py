@@ -680,13 +680,28 @@ def _direct_surface_messages_from_request(request: IsolatedSurfaceInput) -> list
             "",
             "当前用户消息：",
             str(request.user_message or "").strip(),
+        ]
+        # --- Inner-state leakage for compact mode ---
+        _compact_inner_parts: list[str] = []
+        if request.inner_weather:
+            _compact_inner_parts.append(request.inner_weather)
+        if request.body_state_hint:
+            _compact_inner_parts.append(request.body_state_hint)
+        if request.tension_hint:
+            _compact_inner_parts.append(request.tension_hint)
+        if _compact_inner_parts:
+            user_lines.extend([
+                "",
+                "你当前的感受：" + "，".join(_compact_inner_parts),
+            ])
+        user_lines.extend([
             "",
             "必须遵守的事实：",
             fact_lines,
             "",
             "禁止项：",
             must_lines,
-        ]
+        ])
         if quote_guidance:
             user_lines.extend(["", quote_guidance])
         user_lines.extend(

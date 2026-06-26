@@ -484,6 +484,13 @@ def execute_proactive_talk(
 
     if llm_generator:
         try:
+            # --- Memory context for life-feel proactive greetings ---
+            recent_memories = ctx.get("recent_memories") or []
+            pending_topics = ctx.get("pending_topics") or []
+            last_user_emotion = ctx.get("last_user_emotion") or ""
+            absence_hours = _compute_absence_hours(last_ts, ts)
+            inner_weather = ctx.get("inner_weather") or ""
+
             llm_input = {
                 "task": "proactive_talk",
                 "time_period": time_period,
@@ -491,7 +498,7 @@ def execute_proactive_talk(
                 "topic_hint": args.get("topic_hint"),
                 "bond_summary": ctx.get("bond_summary", {}),
                 "ts_ms": ts,
-                # 方向 B：情感驱动问候上下文
+                # Direction B: emotion-driven greeting context
                 "emotion_hint": emotion_hint,
                 "emotion_context": emotion_context or {},
                 "motive_state": motive_state,
@@ -499,6 +506,12 @@ def execute_proactive_talk(
                 "render_policy": render_policy,
                 "scene_awareness": scene_awareness,
                 "scene_hint": scene_hint,
+                # Life-feel: memory-grounded proactive context
+                "recent_memories": recent_memories,
+                "pending_topics": pending_topics,
+                "last_user_emotion": last_user_emotion,
+                "absence_hours": absence_hours,
+                "inner_weather": inner_weather,
             }
             llm_result = llm_generator(llm_input)
             greeting = str(llm_result.get("greeting", llm_result.get("content", "")))

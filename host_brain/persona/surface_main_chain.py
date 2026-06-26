@@ -20,10 +20,16 @@ _ALLOWED_INPUT_KEYS = frozenset(
     {
         "affect_control_packet",
         "affect_packet",
+        "body_state_hint",
+        "care_signal",
         "case_id",
+        "continuity_signal",
+        "inner_weather",
+        "liveliness",
         "max_facts",
         "max_must_not_do",
         "max_style_anchors",
+        "active_loops",
         "influence_packet",
         "memory_packet",
         "memory_recall_packet",
@@ -34,6 +40,7 @@ _ALLOWED_INPUT_KEYS = frozenset(
         "surface_affect_packet",
         "surface_influence_packet",
         "task_control",
+        "tension_hint",
         "user_message",
     }
 )
@@ -61,6 +68,14 @@ class SurfaceMainChainInput:
     max_facts: int = 8
     max_style_anchors: int = 10
     max_must_not_do: int = 12
+    # --- Inner-state leakage fields (life-feel renovation A5) ---
+    inner_weather: str = ""
+    body_state_hint: str = ""
+    care_signal: float = 0.0
+    continuity_signal: float = 0.0
+    tension_hint: str = ""
+    liveliness: float = 0.5
+    active_loops: int = 0
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -77,6 +92,14 @@ class SurfaceMainChainInput:
             "max_facts": int(self.max_facts),
             "max_style_anchors": int(self.max_style_anchors),
             "max_must_not_do": int(self.max_must_not_do),
+            # --- Inner-state leakage fields ---
+            "inner_weather": self.inner_weather,
+            "body_state_hint": self.body_state_hint,
+            "care_signal": float(self.care_signal),
+            "continuity_signal": float(self.continuity_signal),
+            "tension_hint": self.tension_hint,
+            "liveliness": float(self.liveliness),
+            "active_loops": int(self.active_loops),
         }
 
 
@@ -148,6 +171,14 @@ def compile_surface_main_chain_input(payload: SurfaceMainChainInput | Mapping[st
         max_facts=_coerce_int(values.get("max_facts"), default=8),
         max_style_anchors=_coerce_int(values.get("max_style_anchors"), default=10),
         max_must_not_do=_coerce_int(values.get("max_must_not_do"), default=12),
+        # --- Inner-state leakage pass-through ---
+        inner_weather=_clean_text(values.get("inner_weather")),
+        body_state_hint=_clean_text(values.get("body_state_hint")),
+        care_signal=float(values.get("care_signal") or 0.0),
+        continuity_signal=float(values.get("continuity_signal") or 0.0),
+        tension_hint=_clean_text(values.get("tension_hint")),
+        liveliness=float(values.get("liveliness") or 0.5),
+        active_loops=int(values.get("active_loops") or 0),
     )
 
 

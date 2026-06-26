@@ -10,7 +10,7 @@ from .reply_tactics import canonical_tactic_signature, describe_tactic_signature
 
 
 _GENERIC_ASSISTANT_RE = re.compile(r"(AI助手|人工智能|很高兴和你交流|请告诉我你需要什么帮助)")
-_HALF_SENTENCE_RE = re.compile(r"^(?:嗯|哎|诶|啊|哦|唔|当然|因为|只是|也不是|看情况)[。！？?!～~…，,\s]*$")
+_HALF_SENTENCE_RE = re.compile(r"^(?:嗯嗯|哎呀|当然啦|也不是|看情况)[。！？?!～~…，,\s]*$")
 _PROMISE_RESTATE_RE = re.compile(r"(我会帮你|我会继续帮你|我当然会继续帮你|我会一直帮你)")
 _OPEN_FLOOR_RE = re.compile(r"(直接问|直接说|想问别的|还有别的|真正想问的|那就说吧|就说吧|往下问什么|还想往下问什么|还想问什么|想问什么|是不是想问别的|你其实想问什么|你要问别的就直说|还想问我什么)")
 _LIGHT_PROBE_RE = re.compile(r"(还在确认|还是想确认|又来确认|还想再问|还想听|是在确认|为什么还在问|哪一部分|哪部分|确认的是哪|想问我的名字吧|不是名字吧|其实想问|怎么又问起这个|怎么又问这个|连我都认不出来)")

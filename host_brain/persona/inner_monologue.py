@@ -333,7 +333,132 @@ class InnerMonologueDigest:
         }
 
 
-def build_private_inner_thought_event(
+# ---------------------------------------------------------------------------
+# Inner weather hint — bridges inner monologue to surface generation
+# ---------------------------------------------------------------------------
+
+# Mapping from dominant_need to natural-language Chinese weather fragments.
+_NEED_WEATHER: dict[str, str] = {
+    "care": "想靠近一点",
+    "continuity": "在意还没说完的事",
+    "repair": "想缓和一下",
+    "agency": "想自己做点什么",
+    "understanding": "想弄清楚",
+    "rest": "有点倦",
+    "boundary": "想收一点",
+    "curiosity": "好奇你那边怎样了",
+    "play": "想轻松一下",
+}
+
+# Mapping from dominant_tendency to behavioral tone fragments.
+_TENDENCY_WEATHER: dict[str, str] = {
+    "care_with_restraint": "想关心但不确定合不合适",
+    "continue_thread": "心里还挂着刚才的事",
+    "repair_first": "先缓和比较安心",
+    "ask_gently": "想轻轻问一下",
+    "hold_boundary": "先收着",
+    "stay_quiet": "不太想说话",
+    "play_lightly": "想找点轻松的",
+    "stabilize_tone": "先稳住",
+    "observe_more": "想再看看",
+}
+
+# Mapping from dominant_thought_form to body-sense flavour.
+_THOUGHT_FORM_BODY: dict[str, str] = {
+    "body_signal": "身体有一点感觉",
+    "scene_notice": "注意到一些细节",
+    "memory_flash": "闪过一个画面",
+    "interrupted_impulse": "话到嘴边顿了一下",
+    "ambivalence": "心里有点矛盾",
+    "quiet_drift": "思绪轻轻飘了一下",
+}
+
+
+def build_inner_weather_hint(
+    digest: "InnerMonologueDigest",
+    *,
+    fatigue: float = 0.0,
+    drowsiness: float = 0.0,
+    loneliness: float = 0.0,
+) -> str:
+    """Compress the full inner-monologue digest into a 1-3 sentence
+    natural-language 'inner weather' description.
+
+    The output is meant to be injected into the surface prompt so the
+    LLM can produce responses that *feel* like they come from a
+    character who is currently experiencing an inner life — without
+    leaking raw private thought text.
+
+    Examples of output:
+      - "有点闷闷的，胸口不太舒服，想说点什么又不太确定该不该开口"
+      - "精神还不错，在想昨天的事，有点想你"
+      - "困了，但还有件事没放下，脑子转得慢"
+    """
+    parts: list[str] = []
+
+    # 1. Body-state foundation.
+    body = _compose_body_hint(
+        fatigue=fatigue, drowsiness=drowsiness, loneliness=loneliness,
+    )
+    if body:
+        parts.append(body)
+
+    # 2. Dominant inner focus.
+    need_hint = _NEED_WEATHER.get(digest.dominant_need, "")
+    if need_hint:
+        parts.append(need_hint)
+
+    # 3. Tendency tint.
+    tendency_hint = _TENDENCY_WEATHER.get(digest.dominant_tendency, "")
+    if tendency_hint and tendency_hint != need_hint:
+        parts.append(tendency_hint)
+
+    # 4. Thought-form body resonance (only if liveliness is moderate+).
+    if digest.liveliness_score >= 0.30:
+        form_hint = _THOUGHT_FORM_BODY.get(digest.dominant_thought_form, "")
+        if form_hint:
+            parts.append(form_hint)
+
+    # 5. Open-loop weight — if there are many open loops, add a hint.
+    if digest.open_loop_count >= 3:
+        parts.append(f"有{digest.open_loop_count}个事还没放下")
+    elif digest.open_loop_count == 1:
+        parts.append("有件事还没放下")
+
+    # 6. Compose and truncate.
+    hint = "，".join(dict.fromkeys(parts))  # deduplicate while preserving order
+    if len(hint) > 120:
+        hint = hint[:117] + "……"
+    return hint
+
+
+def _compose_body_hint(
+    *,
+    fatigue: float = 0.0,
+    drowsiness: float = 0.0,
+    loneliness: float = 0.0,
+) -> str:
+    """Derive a short body-state phrase from the three dimensions."""
+    segments: list[str] = []
+
+    if drowsiness >= 0.60:
+        segments.append("困了")
+    elif drowsiness >= 0.30:
+        segments.append("有点犯困")
+
+    if fatigue >= 0.60:
+        segments.append("累了")
+    elif fatigue >= 0.30:
+        segments.append("有点乏")
+
+    if loneliness >= 0.60:
+        segments.append("有点想你")
+    elif loneliness >= 0.30:
+        segments.append("有一点想念")
+
+    if not segments:
+        return ""
+    return "、".join(segments)
     *,
     note: str,
     focus: str = "",
@@ -1252,6 +1377,7 @@ __all__ = [
     "InnerThoughtEvent",
     "build_inner_life_source_packet",
     "build_inner_monologue_digest",
+    "build_inner_weather_hint",
     "build_private_inner_thought_event",
     "normalize_inner_life_trace",
     "score_inner_note_liveliness",

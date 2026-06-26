@@ -141,6 +141,14 @@ def compile_reply_control_packet(
     max_facts: int = 8,
     max_style_anchors: int = 10,
     max_must_not_do: int = 12,
+    # --- Inner-state leakage fields (life-feel renovation) ---
+    inner_weather: str = "",
+    body_state_hint: str = "",
+    care_signal: float = 0.0,
+    continuity_signal: float = 0.0,
+    tension_hint: str = "",
+    liveliness: float = 0.5,
+    active_loops: int = 0,
 ) -> SurfacePacketCompileResult:
     """Merge compressed task, memory, and affect controls into one surface packet.
 
@@ -224,18 +232,26 @@ def compile_reply_control_packet(
         limit=max_must_not_do,
         max_chars=160,
     )
-    packet = ReplyControlPacket(
-        response_move=task.response_move or "reply_current_turn",
-        task_mode=task.task_mode or "daily_chat",
-        emotional_tone=emotional_tone,
-        relationship_distance=relationship_distance,
-        information_budget=task.information_budget or "short",
-        question_budget=max(0, int(task.question_budget or 0)),
-        must_include=_string_list(_clean_list([*task.must_include, *memory_recall_required_terms], max_chars=80)),
-        must_not_do=_string_list(packet_must_not_do),
-        facts=_string_list(facts),
-        style_anchor=_string_list(packet_style_anchor),
-    )
+packet = ReplyControlPacket(
+    response_move=task.response_move or "reply_current_turn",
+    task_mode=task.task_mode or "daily_chat",
+    emotional_tone=emotional_tone,
+    relationship_distance=relationship_distance,
+    information_budget=task.information_budget or "short",
+    question_budget=max(0, int(task.question_budget or 0)),
+    must_include=_string_list(_clean_list([*task.must_include, *memory_recall_required_terms], max_chars=80)),
+    must_not_do=_string_list(packet_must_not_do),
+    facts=_string_list(facts),
+    style_anchor=_string_list(packet_style_anchor),
+    # Inner-state leakage fields (生命感改造 A5)
+    inner_weather=inner_weather or "",
+    body_state_hint=body_state_hint or "",
+    care_signal=care_signal,
+    continuity_signal=continuity_signal,
+    tension_hint=tension_hint or "",
+    liveliness=liveliness,
+    active_loops=active_loops,
+)
     trace = {
         "task_mode": packet.task_mode,
         "response_move": packet.response_move,
@@ -304,6 +320,14 @@ def compile_surface_input(
     max_facts: int = 8,
     max_style_anchors: int = 10,
     max_must_not_do: int = 12,
+    # --- Inner-state leakage pass-through ---
+    inner_weather: str = "",
+    body_state_hint: str = "",
+    care_signal: float = 0.0,
+    continuity_signal: float = 0.0,
+    tension_hint: str = "",
+    liveliness: float = 0.5,
+    active_loops: int = 0,
 ) -> CompiledSurfaceInput:
     compiled = compile_reply_control_packet(
         user_message=user_message,
@@ -324,6 +348,15 @@ def compile_surface_input(
             "soul_md": soul_md,
             "user_message": user_message,
             "reply_control_packet": compiled.packet,
+            # Life-feel: pass-through inner-state to IsolatedSurfaceInput
+            "inner_weather": inner_weather,
+            "body_state_hint": body_state_hint,
+            "care_signal": care_signal,
+            "continuity_signal": continuity_signal,
+            "tension_hint": tension_hint,
+            "liveliness": liveliness,
+            "active_loops": active_loops,
+        }
         }
     )
     return CompiledSurfaceInput(

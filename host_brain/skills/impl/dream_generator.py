@@ -518,23 +518,34 @@ def execute_dream_generator(
 
     dream_usage_policy = {
         "schema": "Natsume.dream_usage_policy.v1",
-        "mode": "ambient_low_weight",
+        "mode": "ambient_with_soft_reference",
         "direct_mention_default": False,
         "allowed_uses": [
             "tone_coloring",
             "motif_echo",
             "emotional_residue",
             "soft_self_continuity",
+            "soft_direct_reference",
         ],
         "direct_mention_allowed_when": [
             "user_asks_about_dreams",
             "dream_topic_is_naturally_relevant",
             "quiet_reflective_context",
+            "reunion_after_long_absence",
+            "late_night_intimate_context",
+            "user_shares_emotional_vulnerability",
+        ],
+        "soft_reference_allowed_when": [
+            "reunion_after_long_absence",
+            "late_night_intimate_context",
+            "inner_world_tick_has_dream_residue",
+            "user_mentions_sleep_or_dreams",
         ],
         "avoid": [
             "forced_i_dreamed_opening",
             "explaining_dream_source_profile",
             "treating_dream_as_fact",
+            "verbatim_dream_recount",
         ],
     }
 

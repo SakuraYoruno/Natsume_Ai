@@ -76,7 +76,7 @@ class GalgameTextContract:
     forbidden_surface: tuple[str, ...] = ()
     max_questions: int = 1
     target_min_chars: int = 4
-    target_max_chars: int = 48
+    target_max_chars: int = 80
     notes: tuple[str, ...] = field(default_factory=tuple)
 
     def as_dict(self) -> dict[str, Any]:
