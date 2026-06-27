@@ -60,9 +60,10 @@ AGENT_INTENT = "intent_agent"
 AGENT_VISION = "vision_agent"
 AGENT_REPAIR = "repair_agent"
 AGENT_PENTEST = "pentest_agent"
+AGENT_PENTEST_ATTACK = "pentest_attack_agent"
 
 ALL_AGENT_IDS: frozenset[str] = frozenset({
-    AGENT_TRANSLATE, AGENT_INTENT, AGENT_VISION, AGENT_REPAIR, AGENT_PENTEST,
+    AGENT_TRANSLATE, AGENT_INTENT, AGENT_VISION, AGENT_REPAIR, AGENT_PENTEST, AGENT_PENTEST_ATTACK,
 })
 
 # 子 Agent 能力描述（注入 Cortex Orchestrator prompt，供 LLM 判断调度）
@@ -105,6 +106,7 @@ _DEFAULT_AGENT_CAPABILITIES: dict[str, str] = {
     AGENT_VISION: "视觉分析：分析图片或截图内容，提取 UI 元素与关键信息",
     AGENT_REPAIR: "环境修复专家：当浏览器、依赖或运行环境缺失时，尝试自动安装并恢复执行能力",
     AGENT_PENTEST: "渗透测试专家：PTES 六阶段框架（被动侦察→主动侦察→漏洞评估→漏洞利用→后渗透→报告）",
+    AGENT_PENTEST_ATTACK: "渗透攻击专家：全链路自主攻击（侦察→打点→提权→横移→域控→持久化），执行完整攻击链不限于测试",
 }
 
 
@@ -164,6 +166,8 @@ class SubAgentDispatcher:
         try:
             from host_brain.app.handlers.pentest_agent_handler import pentest_agent_handler
             self._handler_map[AGENT_PENTEST] = pentest_agent_handler
+            from host_brain.app.handlers.pentest_attack_agent_handler import pentest_attack_agent_handler
+            self._handler_map[AGENT_PENTEST_ATTACK] = pentest_attack_agent_handler
         except ImportError:
             pass
 

@@ -637,6 +637,14 @@ def _load_api_key_from_env(provider_name: str) -> str | None:
     if not env_key:
         return None
     value = os.environ.get(env_key, "").strip()
+    if not value:
+        # 尝试 _REF 变体：DEEPSEEK_API_KEY_REF → sec://... → 解析
+        ref_env = f"{env_key}_REF"
+        ref_value = os.environ.get(ref_env, "").strip()
+        if ref_value and ref_value.startswith("sec://"):
+            value = _load_api_key_from_runtime_profiles(provider_name) or ""
+            if value:
+                os.environ[env_key] = value  # 缓存到 env 避免重复解析
     if value:
         return value
     if (

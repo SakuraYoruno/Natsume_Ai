@@ -66,6 +66,7 @@ REPAIR_AGENT_NODE_ID = "repair_agent_node"
 REPAIR_AGENT_HANDLER_ID = "repair_agent"
 PENTEST_AGENT_NODE_ID = "pentest_agent_node"
 PENTEST_AGENT_HANDLER_ID = "pentest_agent"
+PENTEST_ATTACK_AGENT_HANDLER_ID = "pentest_attack_agent"
 # P16: dynamic routing virtual node
 AGENT_DISPATCH_NODE_ID = "agent_dispatch_node"
 AGENT_DISPATCH_HANDLER_ID = "agent_dispatch"

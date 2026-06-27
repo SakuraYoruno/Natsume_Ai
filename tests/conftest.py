@@ -215,6 +215,9 @@ def _reset_host_brain_singletons():
 
 def pytest_configure(config: pytest.Config) -> None:
     config.addinivalue_line("markers", "asyncio: run test in asyncio event loop")
+    # 测试环境强制同步执行 pentest kernel（跑完才返回），
+    # 避免后台线程竞态导致断言在 run 完成前执行。
+    os.environ.setdefault("PENTEST_BACKGROUND_RUN", "0")
 
 
 # ─────────────────────────────────────────────────────

@@ -1317,6 +1317,57 @@ def test_classify_task_intent_keeps_security_advice_out_of_pentest_agent() -> No
     assert decision is None or decision.get("target_id") != "pentest_agent"
 
 
+def test_classify_task_intent_routes_takeover_intent_to_autonomous_redteam() -> None:
+    """清场/拿域意图 → autonomous_redteam + domain_takeover goal。"""
+    decision = classify_task_intent_by_rules(
+        "授权渗透测试 scope=10.10.10.0/24，把这个域端了，拿下域控"
+    )
+
+    assert decision is not None
+    assert decision["route"] == "delegate"
+    assert decision["target_id"] == "pentest_agent"
+    assert decision["args"]["strategy"] == "autonomous_redteam"
+    assert decision["args"]["goal"] == {"goal_type": "domain_takeover"}
+    assert decision["args"]["allow_exploit"] is False  # 安全门：种子层面仍禁 exploit
+    assert decision["args"]["scope_hint_present"] is True
+
+
+def test_classify_task_intent_takeover_with_getshell() -> None:
+    """getshell + 全量拿下 → domain_takeover。"""
+    decision = classify_task_intent_by_rules(
+        "授权渗透测试，scope=192.168.1.0/24，全部 getshell，一网打尽"
+    )
+
+    assert decision is not None
+    assert decision["args"]["strategy"] == "autonomous_redteam"
+    assert decision["args"]["goal"] == {"goal_type": "domain_takeover"}
+
+
+def test_classify_task_intent_takeover_with_lateral() -> None:
+    """横向清场语义 → domain_takeover。"""
+    decision = classify_task_intent_by_rules(
+        "授权渗透测试 scope=172.16.0.0/16，横向移动拿下所有内网主机"
+    )
+
+    assert decision is not None
+    assert decision["args"]["strategy"] == "autonomous_redteam"
+    assert decision["args"]["goal"] == {"goal_type": "domain_takeover"}
+
+
+def test_classify_task_intent_plain_scan_no_takeover() -> None:
+    """普通扫描不触发 takeover——仍走默认只读路径。"""
+    decision = classify_task_intent_by_rules(
+        "帮我对 target=example.com 做授权安全扫描，只做侦察和配置审计"
+    )
+
+    assert decision is not None
+    assert decision["target_id"] == "pentest_agent"
+    # 无 strategy → handler 会走 _maybe_run_deterministic_readonly_workflow
+    assert decision["args"].get("strategy") is None
+    assert decision["args"].get("goal") is None
+    assert decision["args"]["allow_exploit"] is False
+
+
 def test_classify_and_compile_intent_draft_routes_pentest_message_only() -> None:
     agent = ThalamusAgent()
 

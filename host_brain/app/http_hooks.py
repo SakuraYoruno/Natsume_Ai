@@ -1185,6 +1185,23 @@ def runtime_lifespan(
                     _lightnovel_recovery_exc,
                 )
             try:
+                from host_brain.app.pentest_event_bus import (  # noqa: PLC0415
+                    recover_zombie_pentest_runs,
+                )
+
+                asyncio.create_task(
+                    asyncio.to_thread(recover_zombie_pentest_runs, max_age_hours=72)
+                )
+                new_module_statuses["pentest_zombie_recovery"] = "OK (scheduled)"
+            except Exception as _pentest_recovery_exc:
+                new_module_statuses["pentest_zombie_recovery"] = (
+                    f"DEGRADED: {_pentest_recovery_exc}"
+                )
+                logger.warning(
+                    "Pentest zombie run recovery startup degraded: %s",
+                    _pentest_recovery_exc,
+                )
+            try:
                 if not _background_tasks_enabled:
                     new_module_statuses["life_continuity_loop"] = "SKIPPED: HOST_BACKGROUND_TASKS_ENABLED=false"
                 else:
