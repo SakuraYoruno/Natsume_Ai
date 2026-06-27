@@ -318,12 +318,180 @@ def extract_learning_signals(*, ledger: Any, person_id: str, state: Mapping[str,
         signals.append({"signal_kind": "style_repetition_penalty", "strength": 0.58, "candidate_delta": {"habit": "avoid_repeating_time_mismatch_greeting", "trait": "restraint", "delta": 0.006}, "evidence_refs": []})
     if any(_text(_map(item).get("kind"), 80) == "memory_consolidation" for item in agenda):
         signals.append({"signal_kind": "closure_pressure", "strength": 0.34, "candidate_delta": {"habit": "keep_recent_visible_event_binding", "delta": 0.003}, "evidence_refs": []})
+    closure = _map(state.get("dialogue_closure"))
+    closure_ts = int(_float(closure.get("ts_ms")))
+    if closure_ts > 0 and now_ms - closure_ts <= _CLOSURE_STALE_MS and str(closure.get("verdict")) == "flat":
+        signals.append({"signal_kind": "inner_state_flat", "strength": round(_clamp(1.0 - _float(closure.get("closure_score"))), 3), "candidate_delta": {"trait": "warmth", "delta": 0.005, "habit": "let_inner_state_reach_words"}, "evidence_refs": []})
     if not signals:
         signals.append({"signal_kind": "quiet_homeostasis", "strength": 0.18, "candidate_delta": {"habit": "prefer_body_presence_over_empty_proactive", "delta": 0.002}, "evidence_refs": []})
     return signals[:6]
 
 
-def _self_reward(*, state: Mapping[str, Any], signals: Sequence[Mapping[str, Any]], agenda: Sequence[Mapping[str, Any]]) -> dict[str, float]:
+# ── A2: 对话内心态闭环（dialogue inner-state closure）──
+# 衡量"注入 prompt 的内心态是否真的反映在回复里"，把"我们注入了状态"升级为"我们能证明状态起作用"。
+# closure 在 record_dialogue_aftereffect 计算并写入 life state；下一次自我循环的 _self_reward
+# 用 presence/coherence 两维融合它——她的自我奖励从此取决于"她的话有没有带着她的内心"。
+_CLOSURE_MAX_WEIGHT = 0.5
+_CLOSURE_FRESH_MS = 20 * 60 * 1000
+_CLOSURE_STALE_MS = 90 * 60 * 1000
+
+# 七海"在场"的表达标记：亲昵称呼 / 语气词 / 毒舌锋利 / 软省略
+_PRESENCE_WARM_MARKERS = ("阿晓", "欧尼酱", "哥哥", "老哥")
+_PRESENCE_PARTICLE_MARKERS = ("呀", "啦", "嘛", "哦", "呢", "诶", "嘿", "~", "～", "♪")
+_PRESENCE_TEASE_MARKERS = ("恶心", "笨蛋", "废柴", "真是的", "切", "哼")
+_PRESENCE_SOFT_MARKERS = ("……", "...", "唔", "嗯")
+# 助手味：把她降格成工具的标记
+_ASSISTANT_FLAVOR_MARKERS = (
+    "请问", "为您", "有什么可以帮", "根据您", "如下", "很高兴为您", "作为一个", "作为 ai",
+    "作为ai", "我可以帮助", "以下是", "希望对您有帮助", "如有任何", "随时为您",
+)
+
+
+def _reply_presence_markers(text: str) -> dict[str, Any]:
+    body = str(text or "").strip()
+    if not body:
+        return {"expressiveness": 0.0, "edge": 0.0, "assistant": 0, "length": 0, "warm": 0, "particle": 0, "tease": 0}
+    lowered = body.lower()
+    warm = sum(1 for m in _PRESENCE_WARM_MARKERS if m in body)
+    particle = sum(body.count(m) for m in _PRESENCE_PARTICLE_MARKERS)
+    tease = sum(1 for m in _PRESENCE_TEASE_MARKERS if m in body)
+    soft = sum(1 for m in _PRESENCE_SOFT_MARKERS if m in body)
+    excite = body.count("!") + body.count("！")
+    assistant = sum(1 for m in _ASSISTANT_FLAVOR_MARKERS if m in lowered)
+    expressiveness = _clamp(
+        warm * 0.22 + min(particle, 4) * 0.10 + tease * 0.14 + soft * 0.10 + min(excite, 3) * 0.06
+    )
+    edge = _clamp(tease * 0.32 + (0.14 if ("哼" in body or "切" in body) else 0.0))
+    return {"expressiveness": expressiveness, "edge": edge, "assistant": int(assistant), "length": len(body), "warm": int(warm), "particle": int(particle), "tease": int(tease)}
+
+
+def compute_dialogue_state_closure(
+    *,
+    before_state: Mapping[str, Any],
+    reply_text: str,
+    user_message: str = "",
+    now_ms: int | None = None,
+) -> dict[str, Any]:
+    """衡量这次回复是否带着注入的内心态，返回 presence/coherence 两维 closure 与裁决。"""
+    now = int(now_ms or _now_ms())
+    affect = _map(_map(before_state).get("affect"))
+    inner = _map(_map(before_state).get("inner_world"))
+    numeric = _map(inner.get("numeric_state"))
+    loneliness = _clamp(affect.get("loneliness"))
+    attachment = _clamp(affect.get("attachment_warmth"), 0.42)
+    irritation = _clamp(affect.get("irritation"))
+    tension = _clamp(affect.get("tension"))
+    inner_valence = _float(affect.get("valence"))
+    anticipation = _clamp(numeric.get("anticipation_value") or inner.get("anticipation"))
+
+    markers = _reply_presence_markers(reply_text)
+    expressiveness = _float(markers.get("expressiveness"))
+    edge = _float(markers.get("edge"))
+    assistant = int(markers.get("assistant") or 0)
+
+    # 表达需求：孤独/依恋/期待越高，她越"想表达"，回复越该带温度
+    # B1 耦合：内在天气越疲惫/收缩（reply_brevity_bias 高），表达需求越低——
+    # 此时一句短而安静的回复是"贴合状态"，不该被判成助手味的 flat。
+    weather = _map(_map(before_state).get("inner_weather"))
+    brevity = _clamp(weather.get("reply_brevity_bias"))
+    demand = _clamp((0.30 + loneliness * 0.42 + (attachment - 0.42) * 0.5 + anticipation * 0.24) * (1.0 - brevity * 0.5))
+    shortfall = max(0.0, demand - expressiveness)
+    presence = _clamp(1.0 - shortfall * 1.3 - assistant * 0.18)
+
+    # 情绪方向一致性：内心负面却甜腻、内心暖却助手味，都算自我矛盾
+    negative_inner = _clamp(irritation * 0.6 + tension * 0.5 - max(0.0, inner_valence) * 0.4)
+    contradiction = 0.0
+    if negative_inner >= 0.45 and edge <= 0.05 and expressiveness >= 0.42:
+        contradiction = max(contradiction, (negative_inner - 0.2) * 0.8)
+    if attachment >= 0.60 and expressiveness <= 0.20 and assistant >= 1:
+        contradiction = max(contradiction, (attachment - 0.4) * 0.9)
+    coherence = _clamp(1.0 - contradiction)
+
+    score = round(presence * 0.6 + coherence * 0.4, 4)
+    verdict = "leaked" if score >= 0.66 else "partial" if score >= 0.42 else "flat"
+    return {
+        "ts_ms": now,
+        "closure_score": score,
+        "presence_closure": round(presence, 4),
+        "coherence_closure": round(coherence, 4),
+        "verdict": verdict,
+        "demand": round(demand, 4),
+        "expressiveness": round(expressiveness, 4),
+        "edge": round(edge, 4),
+        "assistant_flavor_hits": assistant,
+        "reply_len": int(markers.get("length") or 0),
+        "injected_signature": {
+            "loneliness": round(loneliness, 3),
+            "attachment_warmth": round(attachment, 3),
+            "irritation": round(irritation, 3),
+            "tension": round(tension, 3),
+            "anticipation": round(anticipation, 3),
+            "inner_valence": round(inner_valence, 3),
+        },
+    }
+
+
+def _closure_reward_weight(closure: Mapping[str, Any], now_ms: int) -> float:
+    ts = int(_float(_map(closure).get("ts_ms")))
+    if ts <= 0:
+        return 0.0
+    age = now_ms - ts
+    if age <= _CLOSURE_FRESH_MS:
+        return _CLOSURE_MAX_WEIGHT
+    if age >= _CLOSURE_STALE_MS:
+        return 0.0
+    span = max(1, _CLOSURE_STALE_MS - _CLOSURE_FRESH_MS)
+    return round(_CLOSURE_MAX_WEIGHT * (1.0 - (age - _CLOSURE_FRESH_MS) / span), 4)
+
+
+# ── B1: 内在天气交叉耦合（inner-weather cross-coupling）──
+# 把疲劳 / 孤独 / 烦躁从"各 tick 各的"升级为一份共享天气：三组耦合系数由同一批输入派生，
+# 因此天然 co-vary——又累又烦时回复更短、记忆更易失真；空又想找人时主动外呼倾向升高。
+# reply_brevity_bias 直接喂回 A2 闭环（疲惫时的短回复算"贴合状态"而非"助手味的 flat"）；
+# memory_distortion_bias 作为发布给记忆层的耦合系数（记忆层消费见后续接线，避免 runtime 反向依赖）。
+def derive_inner_weather(affect: Mapping[str, Any], inner_world: Mapping[str, Any] | None = None) -> dict[str, Any]:
+    a = _map(affect)
+    fatigue = _clamp(a.get("fatigue"))
+    loneliness = _clamp(a.get("loneliness"))
+    energy = _clamp(a.get("energy"), 0.6)
+    agitation = _clamp(_float(a.get("irritation")) * 0.6 + _float(a.get("tension")) * 0.6)
+    low_energy = _clamp(1.0 - energy)
+    inner = _map(inner_world)
+    numeric = _map(inner.get("numeric_state"))
+    anticipation = _clamp(numeric.get("anticipation_value") or inner.get("anticipation"))
+
+    reply_brevity_bias = _clamp(max(fatigue, low_energy * 0.8, agitation * 0.7))
+    memory_distortion_bias = _clamp(fatigue * 0.4 + loneliness * 0.3 + agitation * 0.3)
+    reach_out_bias = _clamp(loneliness * 0.7 + anticipation * 0.3 - agitation * 0.2 - fatigue * 0.15)
+    expressiveness_ceiling = _clamp(1.0 - reply_brevity_bias * 0.6)
+    withdrawn = bool(reply_brevity_bias >= 0.5 and reach_out_bias < 0.5)
+
+    if fatigue >= 0.6 or low_energy >= 0.6:
+        label = "低气压·乏力"
+    elif agitation >= 0.5:
+        label = "闷·烦躁"
+    elif loneliness >= 0.55:
+        label = "空·想找人"
+    elif reach_out_bias >= 0.5:
+        label = "微亮·想靠近"
+    else:
+        label = "平稳"
+
+    return {
+        "label": label,
+        "fatigue": round(fatigue, 3),
+        "loneliness": round(loneliness, 3),
+        "agitation": round(agitation, 3),
+        "energy": round(energy, 3),
+        "reply_brevity_bias": round(reply_brevity_bias, 3),
+        "memory_distortion_bias": round(memory_distortion_bias, 3),
+        "reach_out_bias": round(reach_out_bias, 3),
+        "expressiveness_ceiling": round(expressiveness_ceiling, 3),
+        "withdrawn": withdrawn,
+    }
+
+
+def _self_reward(*, state: Mapping[str, Any], signals: Sequence[Mapping[str, Any]], agenda: Sequence[Mapping[str, Any]], now_ms: int | None = None) -> dict[str, float]:
     p = _map(state.get("life_pressure"))
     continuity = 1.0 if agenda else 0.0
     repetition_penalty = max([_float(s.get("strength")) for s in signals if str(s.get("signal_kind")) == "style_repetition_penalty"] or [0.0])
@@ -338,6 +506,14 @@ def _self_reward(*, state: Mapping[str, Any], signals: Sequence[Mapping[str, Any
         "aesthetic": _clamp(0.64 - repetition_penalty * 0.35),
         "attachment": _clamp(_float(p.get("relationship"))),
     }
+    # A2 闭环：用最近一次对话 closure 融合 presence/coherence——奖励取决于"话里有没有带着内心"
+    closure = _map(state.get("dialogue_closure"))
+    closure_weight = _closure_reward_weight(closure, int(now_ms or _now_ms()))
+    if closure_weight > 0.0:
+        values["presence"] = _clamp(values["presence"] * (1.0 - closure_weight) + _clamp(closure.get("presence_closure")) * closure_weight)
+        values["coherence"] = _clamp(values["coherence"] * (1.0 - closure_weight) + _clamp(closure.get("coherence_closure")) * closure_weight)
+        values["dialogue_closure_weight"] = round(closure_weight, 4)
+        values["dialogue_closure_score"] = round(_float(closure.get("closure_score")), 4)
     values["score"] = round(sum(values[key] * SELF_REWARD_WEIGHTS[key] for key in SELF_REWARD_WEIGHTS), 4)
     return values
 
@@ -379,6 +555,8 @@ def _update_projects(projects: list[dict[str, Any]], *, attention: str, signals:
             should_touch = True
         if "style_repetition_penalty" in signal_kinds and project_id == "refine_surface_style":
             should_touch = True
+        if "inner_state_flat" in signal_kinds and project_id == "refine_surface_style":
+            should_touch = True
         if project_id == "maintain_body_presence" and attention in {"body_presence", "rest_recovery", "environment_awareness"}:
             should_touch = True
         if should_touch:
@@ -390,6 +568,121 @@ def _update_projects(projects: list[dict[str, Any]], *, attention: str, signals:
                     patterns.insert(0, signal)
             project["learned_patterns"] = patterns[:8]
     return projects
+
+
+# ── A1: 自主项目自生成与退休（emergent project genesis / retirement）──
+# 让 self_projects 从经历里自生自灭，而不是一份固定菜单：经历里反复出现且没被现有项目覆盖
+# 的主题，被提案成一条新的涌现项目；完成或长期不碰的涌现项目自动退休。默认项目（origin!=emergent）
+# 是她的核心常驻议程，永不退休。主题抽取目前是确定性启发式（CJK bigram 复现），已为后续 LLM 命名留出空间。
+_EMERGENT_MAX_ACTIVE = 3
+_EMERGENT_MIN_EVENTS = 3
+_EMERGENT_RETIRE_IDLE_MS = 14 * 24 * 3600 * 1000
+_EMERGENT_PRUNE_MS = 30 * 24 * 3600 * 1000
+_EMERGENT_SKIP_SOURCE_KINDS = frozenset({"autonomous_self", "embodiment_dispatch", "life_runtime", "manual_ingest"})
+_EMERGENT_STOPWORDS = frozenset({
+    "阿晓", "欧尼", "哥哥", "老哥", "今天", "现在", "已经", "可以", "什么", "这个", "那个", "一个",
+    "我们", "自己", "没有", "就是", "这样", "因为", "所以", "但是", "如果", "然后", "需要", "一下",
+    "still", "none", "event", "tick", "cycle", "state", "phase", "idle", "reason", "agenda", "body",
+})
+
+
+def _emergent_active_count(projects: Sequence[Mapping[str, Any]]) -> int:
+    return sum(1 for p in projects if str(_map(p).get("origin")) == "emergent" and str(_map(p).get("status") or "active") == "active")
+
+
+def _theme_tokens(text: str) -> list[str]:
+    body = str(text or "")
+    tokens: list[str] = []
+    for run in re.findall(r"[一-鿿]{2,}", body):
+        for i in range(len(run) - 1):
+            tokens.append(run[i:i + 2])
+    for word in re.findall(r"[A-Za-z][A-Za-z0-9]{2,}", body.lower()):
+        tokens.append(word)
+    return [t for t in tokens if t not in _EMERGENT_STOPWORDS]
+
+
+def _theme_is_covered(theme: str, projects: Sequence[Mapping[str, Any]]) -> bool:
+    if not theme:
+        return True
+    for raw in projects:
+        p = _map(raw)
+        blob = " ".join([
+            _text(p.get("theme"), 80), _text(p.get("title"), 120), _text(p.get("motive"), 200),
+            _text(p.get("next_step"), 200), " ".join(_text(x, 40) for x in _list(p.get("learned_patterns"))),
+        ])
+        if theme in blob:
+            return True
+    return False
+
+
+def _propose_emergent_projects(projects: list[dict[str, Any]], *, ledger: Any, person_id: str, now_ms: int) -> list[dict[str, Any]]:
+    if _emergent_active_count(projects) >= _EMERGENT_MAX_ACTIVE:
+        return projects
+    events = [
+        e for e in _recent_memory_events(ledger=ledger, person_id=person_id, limit=40)
+        if str(_map(e).get("source_kind")) not in _EMERGENT_SKIP_SOURCE_KINDS and _text(_map(e).get("content_summary"), 200)
+    ]
+    if len(events) < _EMERGENT_MIN_EVENTS:
+        return projects
+    freq: dict[str, int] = {}
+    weight: dict[str, float] = {}
+    for e in events:
+        salience = _clamp(_map(e).get("salience"), 0.3)
+        for token in set(_theme_tokens(_map(e).get("content_summary"))):
+            freq[token] = freq.get(token, 0) + 1
+            weight[token] = weight.get(token, 0.0) + salience
+    # 确定性 tie-break：复现事件数 → 累计显著性 → 长度 → 字典序
+    candidates = sorted(
+        ((tok, cnt) for tok, cnt in freq.items() if cnt >= _EMERGENT_MIN_EVENTS),
+        key=lambda kv: (kv[1], round(weight.get(kv[0], 0.0), 3), len(kv[0]), kv[0]),
+        reverse=True,
+    )
+    for theme, count in candidates:
+        if _theme_is_covered(theme, projects):
+            continue
+        confidence = min(1.0, count / 6.0)
+        if confidence < 0.3:
+            continue
+        project_id = f"emergent_{theme}"
+        if any(str(_map(p).get("project_id")) == project_id for p in projects):
+            continue
+        projects.append({
+            "project_id": project_id,
+            "origin": "emergent",
+            "theme": theme,
+            "title": f"持续关注「{theme}」",
+            "motive": f"「{theme}」最近在经历里反复出现，把它从临时刺激变成一条能为阿晓推进的线。",
+            "status": "active",
+            "progress": 0.0,
+            "confidence": round(confidence, 3),
+            "evidence_count": int(count),
+            "next_step": f"回看最近关于「{theme}」的经历，找出能为阿晓做的一件具体小事。",
+            "created_at_ms": now_ms,
+            "last_worked_at_ms": 0,
+            "evidence_refs": [],
+            "learned_patterns": [],
+        })
+        break  # 每个周期最多自生成一个，避免一次塞爆议程
+    return projects
+
+
+def _retire_projects(projects: list[dict[str, Any]], *, now_ms: int) -> list[dict[str, Any]]:
+    kept: list[dict[str, Any]] = []
+    for raw in projects:
+        p = dict(_map(raw))
+        if str(p.get("origin")) == "emergent" and str(p.get("status") or "active") == "active":
+            progress = _float(p.get("progress"))
+            last = int(_float(p.get("last_worked_at_ms"))) or int(_float(p.get("created_at_ms")))
+            if progress >= 0.98:
+                p.update({"status": "retired", "retired_reason": "completed", "retired_at_ms": now_ms})
+            elif last and now_ms - last > _EMERGENT_RETIRE_IDLE_MS:
+                p.update({"status": "retired", "retired_reason": "idle", "retired_at_ms": now_ms})
+        if str(p.get("origin")) == "emergent" and str(p.get("status")) == "retired":
+            retired_at = int(_float(p.get("retired_at_ms")))
+            if retired_at and now_ms - retired_at > _EMERGENT_PRUNE_MS:
+                continue  # 退休很久的涌现项目从账本剔除，避免无限累积
+        kept.append(p)
+    return kept
 
 
 def apply_autonomous_self_cycle(
@@ -413,13 +706,16 @@ def apply_autonomous_self_cycle(
     signals = extract_learning_signals(ledger=ledger, person_id=resolved, state=after, agenda=agenda, now_ms=now)
     self_growth = _map(after.get("self_growth"))
     traits, applied_deltas, suppressed_deltas = _apply_trait_deltas(_map(self_growth.get("adaptive_traits")), signals)
+    merged_projects = _merge_projects(after.get("self_projects"), now)
+    merged_projects = _propose_emergent_projects(merged_projects, ledger=ledger, person_id=resolved, now_ms=now)
     projects = _update_projects(
-        _merge_projects(after.get("self_projects"), now),
+        merged_projects,
         attention=str(attention.get("current_attention") or ""),
         signals=signals,
         now_ms=now,
     )
-    reward = _self_reward(state=after, signals=signals, agenda=agenda)
+    projects = _retire_projects(projects, now_ms=now)
+    reward = _self_reward(state=after, signals=signals, agenda=agenda, now_ms=now)
     active_project = next((item for item in projects if str(item.get("status") or "active") == "active" and int(item.get("last_worked_at_ms") or 0) == now), projects[0] if projects else {})
     autonomy = {
         "alive_status": "alive",
@@ -451,6 +747,7 @@ def apply_autonomous_self_cycle(
     after["inner_world"] = inner
     after["autonomy"] = autonomy
     after["self_projects"] = projects
+    after["inner_weather"] = derive_inner_weather(after.get("affect"), after.get("inner_world"))
     after["learning_state"] = {
         "last_learning_cycle_ms": now,
         "recent_clusters": _cluster_signals(signals),
@@ -558,6 +855,7 @@ def build_adaptive_self_pack(state: Mapping[str, Any]) -> dict[str, Any]:
     projects = list(growth.get("active_projects") or state.get("self_projects") or [])[:6]
     return {
         "current_attention": _text(autonomy.get("current_attention") or inner.get("attention_kind"), 80),
+        "inner_weather": _map(state.get("inner_weather")),
         "active_agenda": [
             {"kind": _text(_map(item).get("kind"), 80), "summary": _text(_map(item).get("summary"), 160), "priority": _float(_map(item).get("priority"))}
             for item in _list(inner.get("self_agenda"))[:5]

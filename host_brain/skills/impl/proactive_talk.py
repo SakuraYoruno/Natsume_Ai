@@ -315,6 +315,16 @@ def _get_time_period() -> str:
         return "night"
 
 
+def _compute_absence_hours(last_ts: int | None, ts: int) -> float:
+    """缺席小时数 = (now - 上次互动) / 3_600_000；last_ts 未知或异常时返回 0.0。"""
+    if last_ts is None:
+        return 0.0
+    try:
+        return max(0.0, (int(ts) - int(last_ts)) / 3_600_000.0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
 def execute_proactive_talk(
     args: dict[str, Any],
     context: dict[str, Any] | None = None,
