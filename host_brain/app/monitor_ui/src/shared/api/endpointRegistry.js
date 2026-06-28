@@ -39,6 +39,7 @@ export const ENDPOINT_REGISTRY = Object.freeze({
     agentLoopHistory: SHARED_ENDPOINTS.agentLoopHistory,
     agentLoopStats: SHARED_ENDPOINTS.agentLoopStats,
     capabilityGapStats: { service: 'obs', path: '/obs/capability-gaps/stats', risk: 'low' },
+    proactiveAutonomy: { service: 'obs', path: '/obs/proactive-autonomy', risk: 'low' },
     codexBioOps: SHARED_ENDPOINTS.codexBioOps,
     codexBioOpsAdoptions: { service: 'obs', path: '/obs/codex-bio-ops/adoptions', risk: 'low' },
     codexBioOpsAdoption: { service: 'obs', path: '/obs/codex-bio-ops/adoptions/:candidateId', risk: 'low' },
