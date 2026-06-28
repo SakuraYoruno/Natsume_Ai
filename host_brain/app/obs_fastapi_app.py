@@ -38,6 +38,7 @@ from host_brain.app.obs_routes_life_body import (
     stop_life_body_warm_cache,
 )
 from host_brain.app.obs_routes_digital_life_soak import router as obs_digital_life_soak_router
+from host_brain.app.obs_routes_proactive_autonomy import router as obs_proactive_autonomy_router
 from host_brain.app.obs_routes_sysmode import (
     get_runtime_snapshot_warm_status,
     start_runtime_snapshot_warm_cache,
@@ -106,6 +107,7 @@ app.include_router(obs_trace_router)
 app.include_router(obs_summary_router)
 app.include_router(obs_life_body_router)
 app.include_router(obs_digital_life_soak_router)
+app.include_router(obs_proactive_autonomy_router)
 
 _cors_origins_raw = os.environ.get(
     "Natsume_CORS_ORIGINS",
