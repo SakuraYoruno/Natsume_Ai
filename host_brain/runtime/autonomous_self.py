@@ -606,6 +606,12 @@ def _update_projects(projects: list[dict[str, Any]], *, attention: str, signals:
                 if signal and signal not in patterns:
                     patterns.insert(0, signal)
             project["learned_patterns"] = patterns[:8]
+            # A1 收尾：next_step 随推进重生成，不再冻结在创建时（涌现项目让它反映攒了多少念头）
+            if str(project.get("origin")) == "emergent":
+                theme = str(project.get("theme") or project.get("title") or "").strip()
+                prog = int(round(_float(project.get("progress")) * 100))
+                if theme:
+                    project["next_step"] = f"已为「{theme}」攒了 {prog}% 的念头，下一步想找阿晓聊聊、为他做件具体的小事。"
     return projects
 
 
