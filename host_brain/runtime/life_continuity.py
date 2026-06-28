@@ -25,6 +25,7 @@ from host_brain.runtime.life_organs import (
 )
 from host_brain.runtime.autonomous_self import (
     apply_autonomous_self_cycle,
+    apply_proactive_outcome,
     build_adaptive_self_pack,
     compute_dialogue_state_closure,
 )
@@ -1673,6 +1674,12 @@ async def record_dialogue_aftereffect(*, ledger: Any, person_id: str = DEFAULT_P
     before = get_life_state(ledger, resolved); after = copy.deepcopy(before); now = _now_ms()
     dialogue_closure = compute_dialogue_state_closure(before_state=before, reply_text=reply_text, user_message=text, now_ms=now)
     proactive_episode = close_pending_proactive_episode_for_user_reply(ledger=ledger, person_id=resolved, session_id=session_id or conversation_id, request_id=request_id, user_message=text, now_ms=now)
+    if proactive_episode:
+        # C2-4: 用户回应了一条待定主动 → 把落地结果 EMA 进耐久 reach_out_calibration（被暖回↑、被嫌烦↓）
+        from host_brain.persona.emotional_proactive import classify_proactive_reply  # noqa: PLC0415
+
+        _reply_mode, _reply_warmth = classify_proactive_reply(text)
+        apply_proactive_outcome(after, outcome="annoyed" if _reply_mode == "boundary" else "responded", reply_warmth=_reply_warmth, now_ms=now)
     clock = _map(after.get("clock")); clock["last_user_seen_ms"] = now; clock["idle_minutes"] = 0; after["clock"] = clock
     p = _pressures(after); p["absence"] = 0.0; affect = _map(after.get("affect")); needs = _map(after.get("needs"))
     if any(t in text for t in ("慢", "半天", "怎么还", "不对", "没效果", "牛头不对马嘴")):

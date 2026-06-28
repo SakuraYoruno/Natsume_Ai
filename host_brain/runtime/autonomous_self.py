@@ -491,6 +491,45 @@ def derive_inner_weather(affect: Mapping[str, Any], inner_world: Mapping[str, An
     }
 
 
+# ── C2-4: 主动落地回流校准（reach-out calibration）──
+# 主动消息的落地结果（被暖回/被嫌烦/被忽略）EMA 累积成一个耐久校准值，反过来阻尼主动就绪度——
+# 她借此学会"该不该、该多频地找你"，而不是每次只调本地冷却。
+_CALIBRATION_BASELINE = 0.6
+
+
+def get_reach_out_calibration(state: Mapping[str, Any]) -> float:
+    cal = _map(_map(state).get("reach_out_calibration"))
+    if "value" not in cal:
+        return _CALIBRATION_BASELINE
+    return _clamp(cal.get("value"), _CALIBRATION_BASELINE)
+
+
+def apply_proactive_outcome(state: dict[str, Any], *, outcome: str, reply_warmth: float = 0.5, now_ms: int | None = None) -> dict[str, Any]:
+    """把一次主动的落地结果 EMA 进耐久校准：被暖回↑、被嫌烦/忽略↓。"""
+    now = int(now_ms or _now_ms())
+    cal = _map(state.get("reach_out_calibration"))
+    value = _clamp(cal.get("value"), _CALIBRATION_BASELINE)
+    samples = int(_float(cal.get("samples")))
+    o = str(outcome or "").strip().lower()
+    if o in {"annoyed", "boundary", "rejected"}:
+        target = 0.15
+    elif o in {"ignored", "no_reply"}:
+        target = 0.35
+    elif o in {"responded", "replied"}:
+        target = _clamp(0.7 + _clamp(reply_warmth) * 0.3)
+    else:
+        target = value
+    new_value = _clamp(value + (target - value) * 0.3)  # EMA 步长 0.3
+    state["reach_out_calibration"] = {
+        "value": round(new_value, 4),
+        "samples": samples + 1,
+        "last_outcome": o,
+        "last_reply_warmth": round(_clamp(reply_warmth), 3),
+        "updated_at_ms": now,
+    }
+    return state
+
+
 def _self_reward(*, state: Mapping[str, Any], signals: Sequence[Mapping[str, Any]], agenda: Sequence[Mapping[str, Any]], now_ms: int | None = None) -> dict[str, float]:
     p = _map(state.get("life_pressure"))
     continuity = 1.0 if agenda else 0.0

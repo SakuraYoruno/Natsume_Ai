@@ -364,17 +364,36 @@ def execute_proactive_talk(
             "ts_ms": ts,
         }
 
-    # 空闲时间检查
+    # 空闲时间检查（C2-2：readiness 软化）
     idle_threshold = int(args.get("idle_threshold_ms", DEFAULT_IDLE_THRESHOLD_MS))
-    last_ts = ctx.get("last_interaction_ts")
-    if last_ts is not None:
-        elapsed = ts - int(last_ts)
-        if elapsed < idle_threshold:
+    # readiness 高=有理由/冲动→缩短空闲门槛早点开口；极低→即便空闲很久也按兵不动。
+    # readiness 缺省（None）时行为与旧版完全一致（向后兼容）。
+    readiness_raw = ctx.get("proactive_readiness")
+    readiness = float(readiness_raw) if readiness_raw is not None else None
+    effective_threshold = idle_threshold
+    if readiness is not None:
+        if readiness >= 0.66:
+            effective_threshold = int(idle_threshold * 0.4)
+        elif readiness <= 0.20:
+            effective_threshold = int(idle_threshold * 1.6)
+        if readiness <= 0.12:
             return {
                 "status": STATUS_REJECTED,
                 "event_id": event_id,
                 "reason_code": SCHED_CONDITION_UNMET,
-                "detail": f"idle time {elapsed}ms < threshold {idle_threshold}ms",
+                "detail": f"proactive readiness {readiness:.2f} too low; holding",
+                "request_id": request_id,
+                "ts_ms": ts,
+            }
+    last_ts = ctx.get("last_interaction_ts")
+    if last_ts is not None:
+        elapsed = ts - int(last_ts)
+        if elapsed < effective_threshold:
+            return {
+                "status": STATUS_REJECTED,
+                "event_id": event_id,
+                "reason_code": SCHED_CONDITION_UNMET,
+                "detail": f"idle time {elapsed}ms < threshold {effective_threshold}ms (readiness={readiness})",
                 "elapsed_ms": elapsed,
                 "request_id": request_id,
                 "ts_ms": ts,
@@ -522,6 +541,9 @@ def execute_proactive_talk(
                 "last_user_emotion": last_user_emotion,
                 "absence_hours": absence_hours,
                 "inner_weather": inner_weather,
+                # C2-2: 意图驱动——让主动开场能落到她真实在惦记的项目上
+                "active_projects": ctx.get("active_projects") or [],
+                "intention_hint": ctx.get("intention_hint") or "",
             }
             llm_result = llm_generator(llm_input)
             greeting = str(llm_result.get("greeting", llm_result.get("content", "")))
@@ -541,11 +563,16 @@ def execute_proactive_talk(
                 "ts_ms": ts,
             }
     if (not llm_generator) or (fallback_to_template and not greeting.strip()):
-        greeting = _build_template_greeting(
-            user_name=user_name,
-            time_period=time_period,
-            scene_awareness=scene_awareness,
-        )
+        intention_hint = str(ctx.get("intention_hint") or "").strip()
+        if intention_hint:
+            # C2-3: 模板兜底也用意图开场——LLM 失败/缺席时，开场仍 grounded 在真实项目上
+            greeting = intention_hint
+        else:
+            greeting = _build_template_greeting(
+                user_name=user_name,
+                time_period=time_period,
+                scene_awareness=scene_awareness,
+            )
 
     greeting = _apply_render_policy_to_proactive_text(greeting, render_policy)
 
