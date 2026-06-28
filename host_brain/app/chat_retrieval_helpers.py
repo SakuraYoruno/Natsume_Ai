@@ -201,6 +201,20 @@ def filter_retrieval_evidence_items_for_prompt(
     }
 
 
+def _surface_memory_distortion_bias(person_id: str | None) -> float:
+    """B1 记忆变糊：从 life-state 内在天气读 memory_distortion_bias（app 层读，作 float 传给召回；失败=0.0）。"""
+    try:
+        from host_brain.app.dependencies import get_ledger  # noqa: PLC0415
+        from host_brain.runtime.life_continuity import get_life_state  # noqa: PLC0415
+
+        weather = get_life_state(get_ledger(), str(person_id or "default")).get("inner_weather")
+        if isinstance(weather, dict):
+            return max(0.0, min(1.0, float(weather.get("memory_distortion_bias") or 0.0)))
+    except Exception:
+        return 0.0
+    return 0.0
+
+
 async def _run_retrieval(
     *,
     request_id: str,
@@ -307,6 +321,7 @@ async def _run_retrieval(
                     target_store_ids=plan.target_store_ids,
                     time_lookback_days=plan.time_lookback_days,
                     max_facts=plan.max_facts,
+                    distortion_bias=_surface_memory_distortion_bias(person_id),
                     max_chars_per_fact=plan.max_chars_per_fact,
                     validation_requirements=plan.validation_requirements,
                     temporal_scope=plan.temporal_scope,
