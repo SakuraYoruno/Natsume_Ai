@@ -42,7 +42,7 @@ _INFO_SEEKING_QUESTION_RE: re.Pattern[str] = re.compile(
 # ---------------------------------------------------------------------------
 
 _CANDIDATE_LABEL_SPLIT_RE: re.Pattern[str] = re.compile(
-    r"(?:^|[\r\n\s]+)(?:candidate|response|reply|候选|回复)\s*\d*[\s:：、.-\]*",
+    r"(?:^|[\r\n\s]+)(?:candidate|response|reply|候选|回复)\s*\d*[\s:：、.-]*",
     re.IGNORECASE,
 )
 

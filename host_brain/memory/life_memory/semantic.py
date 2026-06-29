@@ -8,15 +8,28 @@ from __future__ import annotations
 
 import re
 from collections.abc import Mapping, Sequence
+from datetime import datetime, timedelta, timezone
 from typing import Any, TYPE_CHECKING
 
 from .constants import *
 from .constants import (
     _ANAPHORIC_SELECTION_RE,
+    _LOCAL_MEMORY_TZ,
     _SEMANTIC_PRIORITY_MEMORY_CLASSES,
     _SYNTHETIC_ID_MARKERS,
     _SYNTHETIC_SOURCE_MARKERS,
 )
+from host_brain.memory.life_memory_query import (
+    DOMAIN_LIGHTNOVEL_RECOMMENDATION,
+    DOMAIN_RECOMMENDATION,
+    TEMPORAL_CURRENT,
+    TEMPORAL_DATE_PREFIX,
+    TEMPORAL_DAY_BEFORE_YESTERDAY,
+    TEMPORAL_RECENT_DAYS,
+    TEMPORAL_TODAY,
+    TEMPORAL_YESTERDAY,
+)
+
 from .utils import (
     _clean_text,
     _clamp_unit,
@@ -47,13 +60,19 @@ from .utils import (
     _open_loop_close_reason_for_status,
     _open_loop_status_from_tags,
     _normalize_open_loop_status_tags,
+    _normalize_semantic_statement,
     _open_loop_title_from_summary,
+    _owner_alias_person_ids,
     _semantic_text_is_sensitive_or_noise,
     _semantic_text_has_secret,
     _semantic_operational_failure_summary,
     _semantic_extract_field,
     _semantic_skip_reason_for_texts,
     _semantic_statement_body,
+    _episode_memory_class_from_metadata,
+    _importance_keyword_boost,
+    _semantic_is_memory_system_directive,
+    _semantic_relationship_feedback_body,
 )
 
 if TYPE_CHECKING:
@@ -231,16 +250,6 @@ def _collection_domain_for_episode(*, action: str, summary: Any, metadata: Mappi
     if "recommendation" in explicit or "recommendation" in text or "推荐" in text:
         return DOMAIN_RECOMMENDATION
     return explicit or "generic_item"
-
-
-def _owner_alias_person_ids(person_id: str | None) -> list[str]:
-    person = _clean_text(person_id)
-    aliases = ["", "default"]
-    if person:
-        aliases.append(person)
-    if person in {"owner", "user", "main_user", "master"}:
-        aliases.extend(["owner", "user", "main_user", "master"])
-    return list(dict.fromkeys(aliases))
 
 
 def _collection_summary_text(
@@ -2349,15 +2358,6 @@ def _semantic_key_hint(*, kind: str, body: str) -> str:
     return ""
 
 
-def _normalize_semantic_statement(text: str) -> str:
-    value = _clean_text(text, limit=700)
-    value = re.sub(r"^(User|Assistant|Perception)\s*[:：]\s*", "", value).strip()
-    value = re.sub(r"^(记忆线索|长期记忆|召回线索)\s*[:：]\s*", "", value).strip()
-    value = re.sub(r"^行动记忆：[^；;]{1,120}[；;]\s*", "", value).strip()
-    value = re.sub(r"^(记住|请记住|以后记住)[，,：:\s]*", "", value).strip()
-    value = re.sub(r"^记得[，,：:\s]*", "", value).strip()
-    value = re.sub(r"^(?:再补一个|补一个|一个)?(?:长对话测试事实|项目事实|测试事实|记忆事实)[，,：:\s]*", "", value).strip()
-    return value.strip("。；; \n\t")
 
 
 

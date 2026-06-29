@@ -14,19 +14,41 @@ from typing import Any
 from host_brain.persona.surface.fact_handling import memory_alignment_terms, merged_must_not_do
 from host_brain.persona.surface.util import _clean_list, _clean_text
 from host_brain.persona.surface.relationship_affect import (
-    _relationship_control_axes_for_distance,
+    relationship_control_axes_for_distance as _relationship_control_axes_for_distance,
     _relationship_distance_family,
     _relationship_marker_hits,
     _relationship_style_profile,
 )
 from host_brain.persona.surface.continuity_detectors import (
-    _positive_stage_scene_blocked,
     _signature_texture_relevant,
 )
-from host_brain.persona.surface.scene_quality import (
+from host_brain.persona.surface.relationship_affect import (
+    _positive_stage_scene_blocked,
+)
+from host_brain.persona.surface_scene_quality_pack import (
     select_surface_scene_quality_sample,
 )
-from host_brain.persona.surface.signature_texture import signature_texture_hits
+
+
+# ---------------------------------------------------------------------------
+# Signature texture hits (extracted from scoring_texture.py)
+# ---------------------------------------------------------------------------
+
+
+def signature_texture_hits(text: str) -> list[str]:
+    """Return canonical signature texture tags present in *text*."""
+    tags: list[str] = []
+    if "后面再说" in text or "后面讲" in text or "回头再聊" in text:
+        tags.append("care_behind_tease")
+    if any(c in text for c in ("害羞", "脸红", "耳朵红", "低头", "别说了")):
+        tags.append("shy_affection")
+    if any(c in text for c in ("其实", "说实话", "说真的", "不骗你")):
+        tags.append("flat_confession")
+    if any(c in text for c in ("算了", "不管了", "懒得管")):
+        tags.append("flat_giveup")
+    if any(c in text for c in ("算了", "不管了", "懒得管")):
+        tags.append("flat_resign")
+    return _clean_list(tags)
 
 
 # ---------------------------------------------------------------------------
