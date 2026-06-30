@@ -2,8 +2,8 @@
 标题：产品需求文档（PRD）
 
 # Natsume Ai 产品需求文档（PRD）
-版本：v2.2
-日期：2026-06-23
+版本：v2.3
+日期：2026-06-30
 定位：基于当前代码事实的系统能力描述，记录系统实际提供的入口、边界、执行契约与验收口径。
 
 ---
@@ -52,14 +52,15 @@ Host Main 由 `host_brain/app/asgi.py` 暴露 ASGI app，并通过 `app_factory`
 
 ### FR-SURFACE：人格渲染
 
-- 55+ 模块位于 `host_brain/persona/`，包括：
-  - `surface_main_chain.py`（主链入口，SurfaceMainChain）
-  - `surface_memory_recall.py`（记忆召回注入）
-  - `inner_monologue.py`、`motive_engine.py`
-  - `text_quality_gate.py`、`galgame_taste_guard.py`
-  - `isolated_surface_harness.py`（隔离测试 harness）
+- 75 文件位于 `host_brain/persona/`（120+ 类），按 Phase I-XVI 组织，包括：
+  - `persona_engine.py`（Persona 引擎，7 维特质向量）+ `personality_traits.py`
+  - `inner_world.py`（2,565 行，离线状态机）+ `inner_activity_agent.py` + `inner_monologue.py`
+  - `surface_main_chain.py` → `surface_runtime.py`（2,668 行）→ `surface_memory_recall.py`（4,539 行）→ `surface_packet_compiler.py`
+  - `surface/candidate_scoring.py`（1,912 行）→ `surface/scoring/`（6 文件评分管线：parse → stage_positions → control_affect → texture）
+  - `proactive_voice.py`（1,477 行，6 种场景主动表达）+ `emotional_proactive.py`
+  - `text_quality_gate.py`、`galgame_text_contract.py`（1,631 行）
 - 人格设定文件：`Soul.md`（项目根目录）。
-- Surface 层只能渲染已裁决事实、记忆候选、风格约束与情绪标签，不得新增事实、升级承诺强度或引入新 intent。
+- Surface 层渲染已裁决事实、记忆候选、风格约束与情绪标签。Inner-state leakage 通过 `ReplyControlPacket`（7 字段）影响 LLM tone，不暴露原始私密思维。
 
 ### FR-GATEWAY：多平台消息网关
 
@@ -152,11 +153,27 @@ Host Main 由 `host_brain/app/asgi.py` 暴露 ASGI app，并通过 `app_factory`
 
 ### FR-SECURITY-LAB：Pentest 安全实验室
 
-- `/v1/pentest` 当前存在，是 Security Lab 入口，不是普通工具页直接执行危险动作。
-- 已暴露入口包括：capabilities、environment、runs、run detail、events、cancel、approve-side-effect、continue-side-effect、report。
+- `/v1/pentest` 是 Security Lab 入口，124 个 Python 文件分为 10 个子系统。
+- API 入口：capabilities、environment、runs、run detail、events、cancel、approve-side-effect、continue-side-effect、report、knowledge ingest/stats。
+- ToolSpec：88 个，Executor：92 个，Side-effect：37 个，0 缺 executor。
+- 规划器：3 条路径（MCTS + ReAct + CognitiveEngine），由 `PENTEST_COGNITIVE_KERNEL` 环境变量控制。
+- Agent 子包（`pentest/agent/`，31 文件）：cognitive_engine、belief_model、goal_model、evolution_core、meta_cognition 等。
+- Adversarial 子包（9 文件）：红蓝对抗 game loop + 遗传算法策略协同进化（pop=20）。
+- Swarm 子包（8 文件）：多 agent 协调器 + 消息总线 + 图合并。
+- Online 子包（5 文件）：三层安全门控（ONLINE_SCAN_MODE=offline|manual + AuthorizationManager + RateGovernor 硬编码限速）。
 - Phase1-3 与 report 默认可作为 readonly/fixture 工作流；Phase4/5 side-effect 必须经过安全实验室护栏。
-- Phase4/5 side-effect 需要同时满足 `allow_exploit`、Governor/approval token、scope guard、rate guard、engagement manifest guard；不得写成无条件执行。
-- 当前 Web continuation 默认记录受控计划与审计 artifact，不默认发起真实 exploit 命令。
+- Phase4/5 side-effect 需要同时满足 `allow_exploit`、Governor/approval token、scope guard、rate guard、engagement manifest guard。
+
+### FR-PROACTIVE：主动自主性
+
+- Proactive 回路：`DigitalLifeSupervisor.tick_loop()` → `autonomous_self.apply_autonomous_self_cycle()`（8 维奖励权重 + 7 维自适应特质）→ `PersonaProactiveVoice.evaluate()`（6 种场景，24h per-type 冷却）→ Edge RPC proactive_push。
+- API 端点：
+  - `POST /v1/digital-life/proactive/attempt` — 手动触发（dry_run/forced）
+  - `GET /v1/digital-life/proactive/recent` — 近期 outbox
+  - `GET /v1/digital-life/proactive/episodes/recent` — 近期 episodes
+- 观测端点：`GET /obs/proactive-autonomy` — proactive autonomy 快照（inner_weather/reach_out_calibration/active_projects/proactive_readiness/top_intention/dialogue_closure）
+- Monitor UI：`/proactive-autonomy` 页面（ProactiveAutonomyDashboard）
+- 持久化：`life_continuity.py`（1,920 行）SQLite `proactive_life_outbox` 表
 
 ### FR-SCHEDULER：调度系统
 
