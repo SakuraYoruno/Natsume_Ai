@@ -76,14 +76,27 @@ class EmotionalProactiveAftereffect:
         return asdict(self)
 
 
+def _resolve_reach_out_bias(inner: Mapping[str, Any], inner_weather: Mapping[str, Any] | None) -> float:
+    """B1 内在天气的 reach_out_bias 当唯一冲动源；天气缺失时从 inner_state 派生兜底（与 B1 公式同形）。"""
+    weather = dict(inner_weather or {})
+    if "reach_out_bias" in weather:
+        return _clamp(_coerce_float(weather.get("reach_out_bias"), 0.0))
+    loneliness = _clamp(_coerce_float(inner.get("loneliness"), 0.0))
+    anticipation = _clamp(_coerce_float(inner.get("anticipation"), 0.0))
+    return _clamp(loneliness * 0.7 + anticipation * 0.3)
+
+
 def build_emotional_proactive_episode(
     *,
     inner_state: Mapping[str, Any] | None = None,
+    inner_weather: Mapping[str, Any] | None = None,
     bond_summary: Mapping[str, Any] | None = None,
     scene_awareness: Mapping[str, Any] | None = None,
     now_ms: int | None = None,
     last_foreground_ts_ms: int = 0,
     last_proactive_outbox_ts_ms: int = 0,
+    active_projects: Any = None,
+    self_change_note: str = "",
 ) -> EmotionalProactiveEpisode:
     """Build one proactive episode from inner pressure and social risk."""
 
@@ -119,6 +132,8 @@ def build_emotional_proactive_episode(
         first_presence_pull = 0.55
 
     share_impulse = _share_impulse(latest_inner_note=latest_inner_note, inner=inner)
+    reach_out_bias = _resolve_reach_out_bias(inner, inner_weather)
+    project_nudge_pull, nudge_project = _project_nudge_pull(active_projects, ts_ms)
     attachment_pull = _clamp(relationship_permission * 0.70 + effective_loneliness * 0.30)
     tenderness = _clamp(relationship_permission * 0.38 + effective_loneliness * 0.34 + max(0.0, drifted_valence) * 0.18)
     worry_drive = _worry_drive(hour=_hour_from_ms(ts_ms), offline_hours=offline_hours, arousal=drifted_arousal)
@@ -135,6 +150,8 @@ def build_emotional_proactive_episode(
     )
     if no_prior_contact:
         emotional_drive = max(emotional_drive, 0.43)
+    # C2-5: 用 B1 内在天气的 reach_out_bias 统一冲动源——天气与主动 co-vary（只上调不下调，向后兼容）
+    emotional_drive = _clamp(emotional_drive + max(0.0, reach_out_bias - emotional_drive) * 0.5)
 
     disturbance_risk = _disturbance_risk(
         scene_awareness=scene,
@@ -155,6 +172,8 @@ def build_emotional_proactive_episode(
         playful_pull=playful_pull,
         topics=topics,
         hour=_hour_from_ms(ts_ms),
+        project_nudge_pull=project_nudge_pull,
+        has_self_change=bool(self_change_note),
     )
     chosen_action = _choose_action(emotional_drive=emotional_drive, disturbance_risk=disturbance_risk)
     send_allowed = chosen_action in SEND_ACTIONS
@@ -166,6 +185,8 @@ def build_emotional_proactive_episode(
         action=chosen_action,
         latest_inner_note=latest_inner_note,
         topics=topics,
+        project=nudge_project,
+        self_change_note=self_change_note,
     )
     felt_reason = _felt_reason(
         motive=motive,
@@ -204,6 +225,8 @@ def build_emotional_proactive_episode(
             "anticipation": round(anticipation, 3),
             "effective_anticipation": round(effective_anticipation, 3),
             "share_impulse": round(share_impulse, 3),
+            "reach_out_bias": round(reach_out_bias, 3),
+            "project_nudge_pull": round(project_nudge_pull, 3),
             "attachment_pull": round(attachment_pull, 3),
             "tenderness": round(tenderness, 3),
             "worry_drive": round(worry_drive, 3),
@@ -228,6 +251,7 @@ def build_emotional_proactive_episode(
             "no_prior_contact": no_prior_contact,
             "latest_inner_note": latest_inner_note,
             "anticipation_topics": topics,
+            "project_nudge_id": str(nudge_project.get("project_id") or ""),
             "last_foreground_ts_ms": int(last_foreground_ts_ms or 0),
             "last_proactive_outbox_ts_ms": int(last_proactive_outbox_ts_ms or 0),
             "scene_tags": _coerce_str_list(scene.get("scene_tags")),
@@ -477,6 +501,49 @@ def _disturbance_risk(
     return _clamp(risk)
 
 
+def _project_nudge_pull(active_projects: Any, now_ms: int) -> tuple[float, dict[str, Any]]:
+    """从活跃自主项目里挑一个'想问问阿晓'的，返回 (冲动, 项目)。最近碰过/中段进度/自生项目更想分享。"""
+    best_pull = 0.0
+    best_project: dict[str, Any] = {}
+    for raw in list(active_projects or []):
+        p = dict(raw) if isinstance(raw, Mapping) else {}
+        if not p or str(p.get("status") or "active") != "active":
+            continue
+        progress = _clamp(_coerce_float(p.get("progress"), 0.0))
+        if progress <= 0.04 or progress >= 0.96:
+            continue  # 刚起步或已完成，不打扰
+        last = _coerce_int(p.get("last_worked_at_ms"), 0)
+        recency = 0.0
+        if last > 0:
+            age_days = max(0.0, (now_ms - last) / 86_400_000.0)
+            recency = max(0.0, 1.0 - age_days / 10.0)  # 10 天内线性衰减
+        emergent_bonus = 0.12 if str(p.get("origin")) == "emergent" else 0.0
+        # 校准：意图在情绪低-中时能赢，但极度孤独/担心仍压过它（lonely_murmur 可达 0.76）
+        pull = _clamp(0.26 + recency * 0.24 + progress * 0.10 + emergent_bonus)
+        if pull > best_pull:
+            best_pull, best_project = pull, p
+    return best_pull, best_project
+
+
+def _project_nudge_opening(project: Mapping[str, Any]) -> str:
+    p = dict(project or {})
+    title = (str(p.get("title") or p.get("theme") or "我最近在弄的一件事")).strip()[:40]
+    nxt = (str(p.get("next_step") or "")).strip()[:60]
+    if nxt:
+        return f"我最近一直在想「{title}」这事，{nxt}——顺便想问问你。你忙的话先收着。"
+    return f"我最近一直在想「{title}」这事，想顺便问问你的想法。你忙的话不用回。"
+
+
+def compute_proactive_readiness(*, reach_out_bias: float, active_projects: Any, anticipation: float, now_ms: int, calibration: float | None = None) -> float:
+    """主动就绪度 = max(天气冲动, 项目成熟, 期待*0.7)，再按耐久校准阻尼（C2-4：被冷落则降低主动）。"""
+    project_pull, _ = _project_nudge_pull(active_projects, now_ms)
+    base = _clamp(max(_clamp(reach_out_bias), project_pull, _clamp(anticipation) * 0.7))
+    if calibration is None:
+        return base
+    factor = min(1.0, _clamp(calibration) + 0.4)  # 校准 >=0.6 不阻尼；越低越压
+    return _clamp(base * factor)
+
+
 def _pick_motive(
     *,
     no_prior_contact: bool,
@@ -490,6 +557,8 @@ def _pick_motive(
     playful_pull: float,
     topics: list[str],
     hour: int,
+    project_nudge_pull: float = 0.0,
+    has_self_change: bool = False,
 ) -> str:
     scores = {
         "presence_check": (0.72 if no_prior_contact else 0.10) + effective_loneliness * 0.22,
@@ -500,6 +569,8 @@ def _pick_motive(
         "soft_care": worry_drive * 0.78 + tenderness * 0.24,
         "playful_ping": playful_pull * 0.72,
         "quiet_goodnight": (0.64 if hour >= 23 or hour < 2 else 0.0) + tenderness * 0.18,
+        "project_nudge": project_nudge_pull,
+        "share_growth": 0.58 if has_self_change else 0.0,
     }
     return max(scores.items(), key=lambda item: item[1])[0]
 
@@ -518,7 +589,12 @@ def _choose_action(*, emotional_drive: float, disturbance_risk: float) -> str:
     return ACTION_QUIET_PRESENCE
 
 
-def _opening_message(*, motive: str, action: str, latest_inner_note: str, topics: list[str]) -> str:
+def _opening_message(*, motive: str, action: str, latest_inner_note: str, topics: list[str], project: Mapping[str, Any] | None = None, self_change_note: str = "") -> str:
+    if motive == "project_nudge":
+        return _project_nudge_opening(project or {})
+    if motive == "share_growth":
+        note = (self_change_note or "").strip()[:48] or "我最近好像有点不一样了"
+        return f"我突然发现：{note}。想跟你说一声。"
     if motive == "presence_check":
         return "我刚刚醒在这里，想轻轻冒个泡。你忙的话不用回。"
     if motive == "affection_pull":

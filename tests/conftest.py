@@ -112,6 +112,13 @@ def _reset_host_brain_runtime_state(*, env_snapshot: dict[str, str] | None = Non
         pass
 
     try:
+        from host_brain.pentest.executor_guard import reset_guard
+
+        reset_guard()
+    except Exception:
+        pass
+
+    try:
         bond_routes = sys.modules.get("host_brain.app.bond_routes")
         asgi_app = sys.modules.get("host_brain.app.asgi")
         if bond_routes is not None:
@@ -208,6 +215,9 @@ def _reset_host_brain_singletons():
 
 def pytest_configure(config: pytest.Config) -> None:
     config.addinivalue_line("markers", "asyncio: run test in asyncio event loop")
+    # 测试环境强制同步执行 pentest kernel（跑完才返回），
+    # 避免后台线程竞态导致断言在 run 完成前执行。
+    os.environ.setdefault("PENTEST_BACKGROUND_RUN", "0")
 
 
 # ─────────────────────────────────────────────────────

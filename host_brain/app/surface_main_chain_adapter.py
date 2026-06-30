@@ -19,6 +19,9 @@ from host_brain.persona.surface_affect_control import (
 )
 from host_brain.persona.surface_main_chain import SurfaceMainChain, SurfaceMainChainInput, SurfaceMainChainResult
 from host_brain.persona.surface_memory_recall import MemoryRecallPacket, memory_recall_packet_from_mapping
+from host_brain.persona.inner_monologue import build_inner_weather_hint, InnerMonologueDigest
+from host_brain.persona.body_sense import get_body_sense_model
+from host_brain.tribe.default_mode_agent import get_default_mode_agent
 
 
 _MEMORY_PACKET_KEYS = (
@@ -294,6 +297,46 @@ def build_surface_main_chain_input_from_surface_reply_input(
     )
     preference_query_owned = _surface_user_preference_query_owned(agent_input)
     autonomous_self_owned = _surface_autonomous_self_task(task_control)
+
+    # --- Inner-state leakage (life-feel renovation A5) ---
+    # Bridge DefaultModeAgent runtime state into surface so the LLM
+    # can feel the character's inner weather without seeing raw thoughts.
+    _inner_weather = ""
+    _body_state_hint = ""
+    _care_signal = 0.0
+    _continuity_signal = 0.0
+    _tension_hint = ""
+    _liveliness = 0.5
+    _active_loops = 0
+    try:
+        agent = get_default_mode_agent()
+        state = agent.export_runtime_state()
+        inner_monologue = state.get("inner_monologue") or {}
+
+        # Build InnerMonologueDigest for inner-weather generation.
+        _digest = _build_digest_from_inner_monologue(inner_monologue)
+        body_sense = get_body_sense_model().get_state()
+        _inner_weather = build_inner_weather_hint(
+            _digest,
+            fatigue=body_sense.fatigue,
+            drowsiness=body_sense.drowsiness,
+            loneliness=body_sense.loneliness,
+        )
+        _body_state_hint = body_sense.body_sense_hint
+
+        # Map drive signals.
+        _care_signal = float(inner_monologue.get("care_drive") or 0.0)
+        _continuity_signal = float(inner_monologue.get("continuity_drive") or 0.0)
+        _liveliness = float(inner_monologue.get("liveliness_score") or 0.5)
+        _active_loops = int(inner_monologue.get("open_loop_count") or 0)
+
+        # Extract tension hint from self-directive.
+        unresolved = list(state.get("unresolved_tensions") or [])
+        if unresolved:
+            _tension_hint = unresolved[0]
+    except Exception:
+        pass
+
     return SurfaceMainChainInput(
         soul_md=_surface_soul_chat_anchor(soul),
         user_message=str(getattr(agent_input, "user_message", "") or "").strip(),
@@ -323,6 +366,14 @@ def build_surface_main_chain_input_from_surface_reply_input(
         ),
         max_facts=14 if autonomous_self_owned else 12 if preference_query_owned else 8,
         max_must_not_do=24,
+        # --- Inner-state leakage fields (life-feel renovation A5) ---
+        inner_weather=_inner_weather,
+        body_state_hint=_body_state_hint,
+        care_signal=_care_signal,
+        continuity_signal=_continuity_signal,
+        tension_hint=_tension_hint,
+        liveliness=_liveliness,
+        active_loops=_active_loops,
     )
 
 
@@ -4695,7 +4746,33 @@ def _coerce_int(value: Any, *, default: int) -> int:
         return int(default)
 
 
+def _build_digest_from_inner_monologue(inner_monologue: Mapping[str, Any]) -> InnerMonologueDigest:
+    """Rehydrate an InnerMonologueDigest from the dict form of export_runtime_state."""
+    return InnerMonologueDigest(
+        thought_stream_active=bool(inner_monologue.get("thought_stream_active")),
+        private_thought_count=int(inner_monologue.get("private_thought_count") or 0),
+        dominant_focus=str(inner_monologue.get("dominant_focus") or "self"),
+        emotion_tag=str(inner_monologue.get("emotion_tag") or "calm"),
+        salience=float(inner_monologue.get("salience") or 0.0),
+        care_drive=float(inner_monologue.get("care_drive") or 0.0),
+        continuity_drive=float(inner_monologue.get("continuity_drive") or 0.0),
+        repair_drive=float(inner_monologue.get("repair_drive") or 0.0),
+        open_loop_count=int(inner_monologue.get("open_loop_count") or 0),
+        should_distill_to_memory=bool(inner_monologue.get("should_distill_to_memory")),
+        dominant_need=str(inner_monologue.get("dominant_need") or "agency"),
+        dominant_tendency=str(inner_monologue.get("dominant_tendency") or "observe_more"),
+        novelty_score=float(inner_monologue.get("novelty_score") or 0.0),
+        dominant_thought_form=str(inner_monologue.get("dominant_thought_form") or "quiet_drift"),
+        liveliness_score=float(inner_monologue.get("liveliness_score") or 0.5),
+        quality_flags=tuple(str(item) for item in list(inner_monologue.get("quality_flags") or [])),
+        memory_anchor_count=int(inner_monologue.get("memory_anchor_count") or 0),
+        style_anchor=tuple(str(item) for item in list(inner_monologue.get("style_anchor") or [])),
+        must_not_do=tuple(str(item) for item in list(inner_monologue.get("must_not_do") or [])),
+    )
+
+
 __all__ = [
+    "_build_digest_from_inner_monologue",
     "build_surface_context_payload_from_adapter",
     "build_surface_main_chain_input_from_surface_reply_input",
     "run_surface_main_chain_for_surface_reply_input",

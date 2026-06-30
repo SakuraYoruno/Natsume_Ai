@@ -33,6 +33,7 @@ from host_brain.app.graph_config_builder import (
     EMOTION_AGENT_HANDLER_ID,
     REPAIR_AGENT_HANDLER_ID,
     PENTEST_AGENT_HANDLER_ID,
+    PENTEST_ATTACK_AGENT_HANDLER_ID,
 )
 from host_brain.integrations.graph_runtime import GraphRuntimeContract
 from host_brain.memory.episodic import EpisodicStore
@@ -412,6 +413,8 @@ def get_graph_runtime() -> GraphRuntimeContract:
         # Pentest Agent
         from host_brain.app.handlers.pentest_agent_handler import pentest_agent_handler  # noqa: PLC0415
         _graph_runtime.register_node_handler(PENTEST_AGENT_HANDLER_ID, pentest_agent_handler)
+        from host_brain.app.handlers.pentest_attack_agent_handler import pentest_attack_agent_handler  # noqa: PLC0415
+        _graph_runtime.register_node_handler(PENTEST_ATTACK_AGENT_HANDLER_ID, pentest_attack_agent_handler)
     return _graph_runtime
 
 

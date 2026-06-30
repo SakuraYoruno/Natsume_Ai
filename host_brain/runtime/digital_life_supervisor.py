@@ -718,8 +718,16 @@ class DigitalLifeSupervisor:
             or args.get("scene_awareness")
             or {}
         )
+        inner_state = self._inner_world_state()
+        try:
+            from host_brain.runtime.autonomous_self import derive_inner_weather  # noqa: PLC0415
+
+            inner_weather = derive_inner_weather(inner_state, inner_state)
+        except Exception:
+            inner_weather = None
         episode = build_emotional_proactive_episode(
-            inner_state=self._inner_world_state(),
+            inner_state=inner_state,
+            inner_weather=inner_weather,
             bond_summary=bond_summary,
             scene_awareness=dict(scene_awareness or {}) if isinstance(scene_awareness, Mapping) else {},
             now_ms=_now_ms(),

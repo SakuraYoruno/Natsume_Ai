@@ -26,6 +26,16 @@ export const PENTEST_RUN_EVENT_TYPES = Object.freeze([
   'side_effect_continued',
   'run_canceled',
   'run_failed',
+  // Phase 3/4: 自治过程事件
+  'frontier_expanded',
+  'host_owned',
+  'lateral_move',
+  'credential_harvested',
+  'coverage_progress',
+  'domain_admin_reached',
+  'domain_takeover_complete',
+  'goal_achieved',
+  'credential_candidates_captured',
 ])
 
 export function fetchPentestCapabilities() {

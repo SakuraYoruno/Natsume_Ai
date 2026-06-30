@@ -640,7 +640,7 @@ def _weights_for_scene(scene_id: str) -> dict[str, float]:
         weights["template_density"] = 0.9
     elif scene_id in _HIGH_EMOTION_SCENES:
         weights["context_fit"] = 1.45
-        weights["emotional_containment"] = 1.45
+        weights["emotional_containment"] = 0.85  # reduced: high-emotion scenes need space to breathe
         weights["distance_control"] = 1.15
         weights["spoken_chat_texture"] = 1.2
         weights["implied_fact_risk"] = 1.2

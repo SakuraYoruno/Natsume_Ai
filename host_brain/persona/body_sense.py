@@ -65,13 +65,25 @@ _LONELINESS_THRESHOLD_ACHING  = 0.85
 _FATIGUE_WILLINGNESS_PENALTY_MAX = 0.35   # 极度疲劳最多降低 35% 意愿
 
 # 困倦对表达风格的影响（注入 prompt 的文本）
-_DROWSY_STYLE_HINTS: dict[str, str] = {}
+_DROWSY_STYLE_HINTS: dict[str, str] = {
+    "SLEEPY": "有点困了，回复短一点，语气放慢",
+    "DROWSY": "很困了，话能少就少，偶尔顿一下",
+    "ASLEEP": "已经困得不行了，话说不利索",
+}
 
 # 疲劳对表达风格的影响
-_FATIGUE_STYLE_HINTS: dict[str, str] = {}
+_FATIGUE_STYLE_HINTS: dict[str, str] = {
+    "TIRED": "聊了有一阵了，语气可以偷一点懒",
+    "WEARY": "有点累了，句子短一点也正常",
+    "EXHAUSTED": "真的很累了，说话直一点别撑着",
+}
 
 # 孤独感对表达风格的影响
-_LONELINESS_STYLE_HINTS: dict[str, str] = {}
+_LONELINESS_STYLE_HINTS: dict[str, str] = {
+    "LONELY": "有一点想对方，语气可以稍微温一点",
+    "LONGING": "挺想念的，感情可以流露一点",
+    "ACHING": "心里空落落的，想说话但是怕说太多",
+}
 
 
 def _load_style_hint_templates() -> dict[str, Any]:

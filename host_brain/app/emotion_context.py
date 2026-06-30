@@ -33,22 +33,7 @@ from host_brain.core.metabolism import (
 
 logger = logging.getLogger(__name__)
 
-_SEMANTIC_EMOTION_TAG_ALIASES: dict[str, str] = {
-    "HAPPINESS": "HAPPY",
-    "JOY": "HAPPY",
-    "DELIGHT": "HAPPY",
-    "EXCITEMENT": "EXCITED",
-    "SADNESS": "SAD",
-    "GRIEF": "SAD",
-    "COMFORT": "CALM",
-    "SOOTHING": "CALM",
-    "SERIOUS": "THINKING",
-    "ANGER": "ANGRY",
-    "PLAYFUL": "HAPPY",
-    "COQUETTISH": "LOVING",
-    "AFFECTION": "LOVING",
-    "LOVE": "LOVING",
-}
+_SEMANTIC_EMOTION_TAG_ALIASES: dict[str, str] = {}  # Deprecated — use emotion_constants.normalize_emotion_tag
 
 
 @dataclass(frozen=True)
@@ -342,11 +327,11 @@ def normalize_chat_emotion_context(raw: Mapping[str, Any] | None) -> dict[str, A
 
 
 def _normalize_runtime_emotion_tag(value: Any) -> str | None:
-    normalized = str(value or "").strip().upper()
-    if not normalized:
+    raw = str(value or "").strip()
+    if not raw:
         return None
-    normalized = normalized.replace("-", "_").replace(" ", "_")
-    return _SEMANTIC_EMOTION_TAG_ALIASES.get(normalized, normalized)
+    from host_brain.core.emotion_constants import normalize_emotion_tag  # noqa: PLC0415
+    return normalize_emotion_tag(raw)
 
 
 def infer_bootstrap_emotion_from_text(text: str) -> EmotionBootstrapResult:

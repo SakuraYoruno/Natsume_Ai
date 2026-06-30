@@ -11,6 +11,7 @@ skills/*
 !host_brain/skills/codex_task_builder.py
 
 # --- Editors ---
+.claude/
 .idea/
 .vscode/
 .vs/
@@ -45,6 +46,8 @@ build/
 dist/
 *.egg-info/
 pip-wheel-metadata/
+integrations/**/bin/
+integrations/**/obj/
 
 # --- Coverage / test reports ---
 .coverage
@@ -60,6 +63,7 @@ artifacts/trial_run_reports/*.json
 *.log
 *.tmp
 *.temp
+/.tmp/
 tmp/
 temp/
 .cache/
@@ -75,6 +79,7 @@ temp/
 !.env.experimental.example
 
 # --- data/ runtime artifacts (never commit) ---
+/identifier.sqlite
 /data~.xp3/
 # JDK / Neo4j 安装包及解压目录
 data/install/
@@ -103,6 +108,8 @@ models/
 host_brain/data/
 host_brain/data/*.db
 host_brain/data/*.sqlite3
+host_brain/pentest/data/*.db
+host_brain/pentest/data/*.sqlite3
 
 # Large local vector/model cache
 host_brain/core/data/chroma_db/

@@ -226,6 +226,94 @@ _PENTEST_ADVICE_ONLY_RE = re.compile(
     r"|what\s+is|explain|how\s+to|mitigat|defen[cs]e)",
     re.IGNORECASE,
 )
+_PENTEST_TAKEOVER_RE = re.compile(
+    r"("
+    r"端(?:了|掉)|拿下|打(?:下|穿|通)|攻(?:下|克|破|陷)|清(?:场|剿|空)|横(?:向|扫|移)"
+    r"|全(?:域|网)|一(?:锅端|网打尽)|彻底|完全|所有(?:节点|主机|机器|服务器)"
+    r"|domain\s+(?:admin|takeover|compromise)|take\s*over|full\s+(?:compromise|takeover)"
+    r"|getshell|get\s+shell|(?:全部|所有).{0,6}(?:拿下|打掉|攻破|干掉)"
+    r"|拿下.{0,6}(?:域控|域|内网|所有|全部)"
+    r"|(?:域控|内网|域|全(?:部|网)).{0,6}(?:拿下|端掉|打掉|攻破)"
+    r"|compromise\s+(?:the\s+)?(?:domain|entire|all\s+(?:hosts|machines|nodes))"
+    r")",
+    re.IGNORECASE,
+)
+
+# ── 多意图分类：每种渗透目标有独立正则 → goal_type 映射 ──
+_PENTEST_INTENT_SHELL_RE = re.compile(
+    r"("
+    r"拿\s*shell|弹\s*shell|get\s*shell|webshell|反弹|reverse\s*shell"
+    r"|(?:拿|弹|搞|要).{0,4}(?:shell|权限|webshell)"
+    r"|(?:弄|打|搞|开).{0,4}(?:一个shell|个shell)"
+    r"|shell\s*(?:access|权限)"
+    r")",
+    re.IGNORECASE,
+)
+_PENTEST_INTENT_ROOT_RE = re.compile(
+    r"("
+    r"提权|root|system|administrator|特权|(?:提到|升到|搞到|拿到).{0,4}(?:root|system|管理员|最高权限)"
+    r"|privilege\s+escalat|privesc|(?:get|gain)\s+(?:root|system|admin)"
+    r")",
+    re.IGNORECASE,
+)
+_PENTEST_INTENT_FLAG_RE = re.compile(
+    r"("
+    r"flag|ctf|夺旗|读\s*(?:flag|标志)|找\s*(?:flag|标志)|(?:拿|读|找).{0,3}flag"
+    r"|capture\s+(?:the\s+)?flag"
+    r")",
+    re.IGNORECASE,
+)
+_PENTEST_INTENT_CHAIN_RE = re.compile(
+    r"("
+    r"攻击链|打穿|深度|(?:尽可能|尽量|能走多远走多远).{0,6}(?:深|远|多)"
+    r"|attack\s+chain|deep\s+exploit|maximum\s+depth"
+    r"|(?:挖|找).{0,4}(?:链|path|深度)"
+    r")",
+    re.IGNORECASE,
+)
+_PENTEST_INTENT_SERVICE_RE = re.compile(
+    r"("
+    r"(?:拿下|打掉|攻破|搞定|搞掉).{0,6}(?:服务|应用|网站|app|api|数据库|容器)"
+    r"|(?:审计|渗透|测试|检查).{0,6}(?:服务|应用|网站|app|api|数据库|容器)"
+    r"|compromise\s+(?:the\s+)?(?:service|application|website|api|database)"
+    r"|service\s+compromise|(?:特定|指定|某个|这个|那个).{0,4}(?:服务|应用)"
+    r")",
+    re.IGNORECASE,
+)
+_PENTEST_INTENT_CRITICAL_RE = re.compile(
+    r"("
+    r"(?:挖|找|搞|弄).{0,4}(?:高危|严重|critical|high).{0,4}(?:漏洞|洞|vuln|finding)"
+    r"|(?:找出|发现|确认).{0,4}(?:高危|严重|critical|high)"
+    r"|n\s*_?\s*critical|N_CRITICAL"
+    r")",
+    re.IGNORECASE,
+)
+_PENTEST_INTENT_DOMAIN_ADMIN_RE = re.compile(
+    r"("
+    r"域管|domain\s+admin|域(?:管理|控)员|da(?:权限|账号|账户)?"
+    r"|(?:拿|搞|升|提).{0,4}(?:域管|domain\s+admin|da)"
+    r"|kerberos.*(?:admin|域管)|dcsync"
+    r")",
+    re.IGNORECASE,
+)
+
+_PENTEST_PROGRESS_QUERY_RE = re.compile(
+    r"("
+    # 明确战况/攻击进度查询（正向匹配）
+    r"打(?:到哪|到哪里|得怎么样|得如何|完了没|到哪了|到哪里了)"
+    r"|(?:现在|目前|当前).{0,4}(?:进度|战况|打得)"
+    r"|(?:进度|战况|战报).{0,2}(?:如何|怎么样|怎样|报告|汇报)"
+    r"|(?:汇报|报告).{0,2}(?:进度|战况)"
+    r"|(?:到|打到).{0,2}(?:哪一步|第几步|哪了|哪里了)"
+    r"|(?:how.*(?:going|progress)|what.*(?:progress|next)|update.*progress)"
+    r")",
+    re.IGNORECASE,
+)
+# 否定词：排除非渗透上下文的查询（情绪状态、系统状态等）
+_PENTEST_PROGRESS_NEGATIVE_RE = re.compile(
+    r"(情绪|心情|感情|心理|系统状态|服务状态|健康状态)",
+    re.IGNORECASE,
+)
 _FRONTEND_ROUTE_AUDIT_RE = re.compile(
     r"((前端|页面|ui|UI|monitor).{0,18}(路由|导航|断链|覆盖|巡检|审计|检查)"
     r"|(路由|导航).{0,18}(断链|覆盖|巡检|审计|检查)"
@@ -1975,6 +2063,34 @@ def _build_pentest_route_seed(text: str) -> dict[str, Any] | None:
     if not has_scope_hint:
         return None
 
+    goal_type, strategy = _classify_pentest_intent(normalized)
+
+    args: dict[str, Any] = {
+        "text": normalized,
+        "user_message": normalized,
+        "scope_hint_present": has_scope_hint,
+        "allow_exploit": False,
+    }
+
+    if goal_type is not None:
+        args["strategy"] = strategy
+        args["goal"] = {"goal_type": goal_type}
+        # allow_exploit 仍为 False，由 handler 的安全门（显式授权语 + lab 模式 +
+        # 合法 manifest）二次判定后才放行。
+    else:
+        # ── 正则未命中 → LLM 意图分类 fallback ──
+        llm_goal, llm_confidence = _classify_pentest_intent_by_llm(normalized)
+        if llm_goal is not None:
+            args["strategy"] = "autonomous_redteam"
+            args["goal"] = {"goal_type": llm_goal}
+            args["_classified_by"] = "llm"
+            args["_llm_confidence"] = llm_confidence
+        elif llm_confidence is not None and llm_confidence >= 0.0:
+            # LLM 响应了但无法确定 → 主动追问
+            args["action"] = "clarify_intent"
+            args["_needs_clarification"] = True
+        # else: LLM 不可用 → 不设 strategy/goal，handler 走只读扫描（现有行为）
+
     return {
         "route": "delegate",
         "target_id": "pentest_agent",
@@ -1982,11 +2098,121 @@ def _build_pentest_route_seed(text: str) -> dict[str, Any] | None:
         "reason_code": "THALAMUS_RULE_PENTEST_AGENT",
         "confidence": 0.93,
         "route_source": "thalamus.rule",
+        "args": args,
+    }
+
+
+def _classify_pentest_intent(normalized: str) -> tuple[str | None, str | None]:
+    """根据用户输入文本分类渗透意图 → (goal_type, strategy)。
+
+    Returns:
+        (goal_type, strategy) — 若未匹配任何自治意图则返回 (None, None)，
+        此时 handler 走只读扫描路径。
+    """
+    # 细粒度意图优先（避免"拿下"/"打"等宽泛词抢跑）
+    _FINE_GRAINED: list[tuple[str, str]] = [
+        ("_PENTEST_INTENT_DOMAIN_ADMIN_RE", "domain_admin"),
+        ("_PENTEST_INTENT_ROOT_RE", "root"),
+        ("_PENTEST_INTENT_FLAG_RE", "read_flag"),
+        ("_PENTEST_INTENT_CHAIN_RE", "chain_depth"),
+        ("_PENTEST_INTENT_CRITICAL_RE", "n_critical"),
+        ("_PENTEST_INTENT_SERVICE_RE", "service_compromise"),
+    ]
+    for ref_name, goal_type in _FINE_GRAINED:
+        regex = globals().get(ref_name)
+        if regex is not None and regex.search(normalized):
+            return (goal_type, "autonomous_redteam")
+    # 清场/全域拿下 — 必须在 shell 之前检查，因为"全部 getshell"是 takeover
+    if _PENTEST_TAKEOVER_RE.search(normalized):
+        return ("domain_takeover", "autonomous_redteam")
+    # Shell 最后：纯 getshell 不带清场语义
+    if _PENTEST_INTENT_SHELL_RE.search(normalized):
+        return ("shell", "autonomous_redteam")
+    return (None, None)
+
+
+def _classify_pentest_intent_by_llm(normalized: str) -> tuple[str | None, float | None]:
+    """正则未命中时，用 LLM 分类渗透意图。
+
+    Returns:
+        (goal_type, confidence) 或 (None, None) 表示 LLM 不可用。
+        confidence=None 表示 LLM 未响应 / 不可用（fallback 到只读）。
+        confidence>=0 表示 LLM 响应了但无法确定 → 触发追问。
+    """
+    try:
+        from host_brain.pentest.llm_react_planner import _call_llm, _llm_available  # noqa: PLC0415
+
+        if not _llm_available():
+            return (None, None)
+
+        system = (
+            "你是一个渗透测试意图分类器。根据用户输入判断他们的渗透目标类型。"
+            "只返回 JSON：{\"goal_type\": \"<type>\", \"confidence\": 0.0-1.0}。"
+            "如果用户只是咨询/学习/了解/扫描看看（不是让执行渗透利用），返回 {\"goal_type\": \"none\"}。"
+            "\n\n可选 goal_type：\n"
+            "- shell: 用户想要获取 shell 访问权限\n"
+            "- root: 用户想要提权到 root/system\n"
+            "- domain_admin: 用户想要获取域管理员权限\n"
+            "- domain_takeover: 用户想要完全控制整个域/内网\n"
+            "- read_flag: CTF 场景，用户想要找到 flag\n"
+            "- chain_depth: 用户想要尽可能深入攻击链\n"
+            "- n_critical: 用户想要找到多个高危漏洞\n"
+            "- service_compromise: 用户想要拿下特定服务/应用\n"
+            "- none: 用户只是咨询/学习/扫描/了解，不执行利用"
+        )
+        user = f"用户输入：{normalized}\n\n请返回 JSON："
+
+        result = _call_llm(system, user, temperature=0.0, timeout_ms=8000)
+        if not result:
+            return (None, None)
+
+        import json
+        data = json.loads(result.strip())
+        goal_type = str(data.get("goal_type") or "").strip()
+        confidence = float(data.get("confidence", 0.5))
+
+        if goal_type in ("", "none"):
+            return (None, confidence)  # LLM 认为不需要自治 → 只读
+        if goal_type in (
+            "shell", "root", "domain_admin", "domain_takeover",
+            "read_flag", "chain_depth", "n_critical", "service_compromise",
+        ):
+            if confidence >= 0.6:
+                return (goal_type, confidence)
+            else:
+                # 低置信度 → 追问
+                return (None, confidence)
+        # 不在已知 goal_type 中 → 追问
+        return (None, confidence)
+    except Exception:
+        return (None, None)
+
+
+def _build_pentest_progress_seed(text: str) -> dict[str, Any] | None:
+    """检测"打到哪了/战况/进度"类查询，路由到 pentest_agent 做进度快照。
+
+    与 _build_pentest_route_seed 不同，此 seed 不触发扫描或自治——
+    仅查询当前活动 run 的事件总线快照并以自然语言汇报。
+    """
+    normalized = _normalize_text(text)
+    if not normalized:
+        return None
+    if not _PENTEST_PROGRESS_QUERY_RE.search(normalized):
+        return None
+    # 否定守卫：排除非渗透语境（情绪/系统状态等）
+    if _PENTEST_PROGRESS_NEGATIVE_RE.search(normalized):
+        return None
+    return {
+        "route": "delegate",
+        "target_id": "pentest_agent",
+        "task": normalized,
+        "reason_code": "THALAMUS_RULE_PENTEST_PROGRESS",
+        "confidence": 0.92,
+        "route_source": "thalamus.rule",
         "args": {
             "text": normalized,
             "user_message": normalized,
-            "scope_hint_present": has_scope_hint,
-            "allow_exploit": False,
+            "action": "task_progress",
         },
     }
 
@@ -2135,6 +2361,10 @@ def _build_direct_route_seed(text: str) -> dict[str, Any] | None:
     pentest_seed = _build_pentest_route_seed(cleaned)
     if pentest_seed is not None:
         return pentest_seed
+
+    pentest_progress_seed = _build_pentest_progress_seed(cleaned)
+    if pentest_progress_seed is not None:
+        return pentest_progress_seed
 
     browser_seed = _build_browser_observation_route_seed(cleaned)
     if browser_seed is not None:

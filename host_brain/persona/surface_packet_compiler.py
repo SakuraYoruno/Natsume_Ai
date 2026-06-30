@@ -141,6 +141,14 @@ def compile_reply_control_packet(
     max_facts: int = 8,
     max_style_anchors: int = 10,
     max_must_not_do: int = 12,
+    # --- Inner-state leakage fields (life-feel renovation) ---
+    inner_weather: str = "",
+    body_state_hint: str = "",
+    care_signal: float = 0.0,
+    continuity_signal: float = 0.0,
+    tension_hint: str = "",
+    liveliness: float = 0.5,
+    active_loops: int = 0,
 ) -> SurfacePacketCompileResult:
     """Merge compressed task, memory, and affect controls into one surface packet.
 
@@ -235,6 +243,14 @@ def compile_reply_control_packet(
         must_not_do=_string_list(packet_must_not_do),
         facts=_string_list(facts),
         style_anchor=_string_list(packet_style_anchor),
+        # Inner-state leakage fields (生命感改造 A5)
+        inner_weather=inner_weather or "",
+        body_state_hint=body_state_hint or "",
+        care_signal=care_signal,
+        continuity_signal=continuity_signal,
+        tension_hint=tension_hint or "",
+        liveliness=liveliness,
+        active_loops=active_loops,
     )
     trace = {
         "task_mode": packet.task_mode,
@@ -304,6 +320,14 @@ def compile_surface_input(
     max_facts: int = 8,
     max_style_anchors: int = 10,
     max_must_not_do: int = 12,
+    # --- Inner-state leakage pass-through ---
+    inner_weather: str = "",
+    body_state_hint: str = "",
+    care_signal: float = 0.0,
+    continuity_signal: float = 0.0,
+    tension_hint: str = "",
+    liveliness: float = 0.5,
+    active_loops: int = 0,
 ) -> CompiledSurfaceInput:
     compiled = compile_reply_control_packet(
         user_message=user_message,
@@ -317,6 +341,13 @@ def compile_surface_input(
         max_facts=max_facts,
         max_style_anchors=max_style_anchors,
         max_must_not_do=max_must_not_do,
+        inner_weather=inner_weather,
+        body_state_hint=body_state_hint,
+        care_signal=care_signal,
+        continuity_signal=continuity_signal,
+        tension_hint=tension_hint,
+        liveliness=liveliness,
+        active_loops=active_loops,
     )
     request = build_isolated_surface_input(
         {
@@ -324,6 +355,14 @@ def compile_surface_input(
             "soul_md": soul_md,
             "user_message": user_message,
             "reply_control_packet": compiled.packet,
+            # Life-feel: pass-through inner-state to IsolatedSurfaceInput
+            "inner_weather": inner_weather,
+            "body_state_hint": body_state_hint,
+            "care_signal": care_signal,
+            "continuity_signal": continuity_signal,
+            "tension_hint": tension_hint,
+            "liveliness": liveliness,
+            "active_loops": active_loops,
         }
     )
     return CompiledSurfaceInput(

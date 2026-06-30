@@ -315,6 +315,14 @@ def build_surface_input_from_three_layer_context(
     affect_packet: Any | None = None,
     max_facts: int = 6,
     max_recent_turns: int = 6,
+    # --- Inner-state leakage fields (life-feel renovation A5) ---
+    inner_weather: str = "",
+    body_state_hint: str = "",
+    care_signal: float = 0.0,
+    continuity_signal: float = 0.0,
+    tension_hint: str = "",
+    liveliness: float = 0.5,
+    active_loops: int = 0,
 ) -> IsolatedSurfaceInput:
     control = build_reply_control_packet_from_context(
         context,
@@ -329,6 +337,14 @@ def build_surface_input_from_three_layer_context(
             "soul_md": soul_md,
             "user_message": context.current_user_message,
             "reply_control_packet": control,
+            # --- Inner-state leakage pass-through ---
+            "inner_weather": inner_weather,
+            "body_state_hint": body_state_hint,
+            "care_signal": care_signal,
+            "continuity_signal": continuity_signal,
+            "tension_hint": tension_hint,
+            "liveliness": liveliness,
+            "active_loops": active_loops,
         }
     )
 
@@ -360,6 +376,14 @@ _TURN_REQUEST_KEYS = {
     "must_not_do",
     "reply_control_packet",
     "user_message",
+    # --- Inner-state leakage fields (life-feel renovation A5) ---
+    "inner_weather",
+    "body_state_hint",
+    "care_signal",
+    "continuity_signal",
+    "tension_hint",
+    "liveliness",
+    "active_loops",
 }
 
 

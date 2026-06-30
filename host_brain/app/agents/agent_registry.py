@@ -22,6 +22,7 @@ AGENT_ID_RETRIEVAL = "retrieval_agent"  # P11 新增
 AGENT_ID_EMOTION = "emotion_agent"    # 方向 G Phase 2 新增
 AGENT_ID_REPAIR = "repair_agent"
 AGENT_ID_PENTEST = "pentest_agent"  # 渗透测试 Agent (PTES 六阶段)
+AGENT_ID_PENTEST_ATTACK = "pentest_attack_agent"  # 渗透攻击 Agent (全链路自主攻击)
 
 # ---------------------------------------------------------------------------
 # Agent Allowlist（Supervisor 分派时的合法目标集合）
@@ -39,6 +40,7 @@ AGENT_ALLOWLIST: frozenset[str] = frozenset({
     AGENT_ID_EMOTION,    # 方向 G Phase 2 新增
     AGENT_ID_REPAIR,
     AGENT_ID_PENTEST,
+    AGENT_ID_PENTEST_ATTACK,
 })
 
 # ---------------------------------------------------------------------------
@@ -145,6 +147,16 @@ _AGENT_META: dict[str, dict[str, Any]] = {
         "has_side_effects": True,              # Exploit/Post-Exploit 阶段有副作用
         "risk_level": "high",
         "description": "授权渗透测试：PTES 六阶段框架（被动侦察→主动侦察→漏洞评估→漏洞利用→后渗透→报告）",
+    },
+    AGENT_ID_PENTEST_ATTACK: {
+        "agent_id": AGENT_ID_PENTEST_ATTACK,
+        "display_name": "PentestAttackAgent",
+        "node_id": "pentest_attack_agent_node",
+        "fast_path": False,
+        "allow_parallel": False,
+        "has_side_effects": True,
+        "risk_level": "critical",              # 攻击级，高于测试
+        "description": "渗透攻击：全链路自主攻击（侦察→打点→提权→横移→域控→持久化），不限于测试",
     },
 }
 

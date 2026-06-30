@@ -576,6 +576,14 @@ def recall_surface_memory_for_context(
     )
 
 
+def _distorted_max_facts(max_facts: int, distortion_bias: float) -> int:
+    """B1 记忆变糊：内在天气失真偏置高时，对话里浮现的记忆更少（保底 1 条，轻雾不动）。"""
+    db = max(0.0, min(1.0, float(distortion_bias or 0.0)))
+    if db < 0.4:
+        return int(max_facts)
+    return max(1, round(int(max_facts) * (1.0 - db * 0.5)))
+
+
 def recall_surface_memory_packet(
     *,
     recall_service: Any,
@@ -594,6 +602,7 @@ def recall_surface_memory_packet(
     target_store_ids: Sequence[str] | None = None,
     time_lookback_days: int | None = None,
     max_facts: int = 4,
+    distortion_bias: float = 0.0,
     max_chars_per_fact: int = 96,
     validation_requirements: Sequence[str] | None = None,
     temporal_scope: str = "",
@@ -638,7 +647,7 @@ def recall_surface_memory_packet(
     return build_surface_memory_recall_packet(
         result,
         query=query,
-        max_facts=max_facts,
+        max_facts=_distorted_max_facts(max_facts, distortion_bias),
         max_chars_per_fact=max_chars_per_fact,
         validation_requirements=validation_requirements,
         temporal_scope=temporal_scope,

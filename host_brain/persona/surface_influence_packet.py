@@ -40,6 +40,14 @@ class AffectInfluence:
     irritation_bias: float = 0.0
     must_not_do: tuple[str, ...] = ()
     style_anchor: tuple[str, ...] = ()
+    # --- Inner-state leakage fields ---
+    inner_weather: str = ""
+    body_state_hint: str = ""
+    care_signal: float = 0.0
+    continuity_signal: float = 0.0
+    tension_hint: str = ""
+    liveliness: float = 0.5
+    active_loops: int = 0
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -50,6 +58,13 @@ class AffectInfluence:
             "irritation_bias": round(float(self.irritation_bias or 0.0), 4),
             "must_not_do": list(self.must_not_do),
             "style_anchor": list(self.style_anchor),
+            "inner_weather": self.inner_weather,
+            "body_state_hint": self.body_state_hint,
+            "care_signal": round(float(self.care_signal or 0.0), 4),
+            "continuity_signal": round(float(self.continuity_signal or 0.0), 4),
+            "tension_hint": self.tension_hint,
+            "liveliness": round(float(self.liveliness or 0.5), 4),
+            "active_loops": int(self.active_loops or 0),
         }
 
 
@@ -465,6 +480,13 @@ def _affect_from_mapping(raw: Any) -> AffectInfluence:
         irritation_bias=_clamp01(payload.get("irritation_bias")),
         must_not_do=tuple(_clean_list(_coerce_sequence(payload.get("must_not_do")), limit=6)),
         style_anchor=tuple(_clean_list(_coerce_sequence(payload.get("style_anchor")), limit=6)),
+        inner_weather=_clean_text(payload.get("inner_weather")),
+        body_state_hint=_clean_text(payload.get("body_state_hint")),
+        care_signal=_clamp01(payload.get("care_signal")),
+        continuity_signal=_clamp01(payload.get("continuity_signal")),
+        tension_hint=_clean_text(payload.get("tension_hint")),
+        liveliness=_clamp01(payload.get("liveliness")) if payload.get("liveliness") is not None else 0.5,
+        active_loops=_coerce_int(payload.get("active_loops"), default=0),
     )
 
 

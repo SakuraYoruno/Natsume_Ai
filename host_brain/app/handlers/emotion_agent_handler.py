@@ -228,7 +228,7 @@ def _parse_emotion_analysis(final_answer: str) -> dict[str, Any]:
     except (_json.JSONDecodeError, TypeError, ValueError):
         pass
 
-    from host_brain.app.emotion_llm_inference import _VALID_EMOTION_TAGS  # noqa: PLC0415
+    from host_brain.core.emotion_constants import VALID_EMOTION_TAGS as _VALID_EMOTION_TAGS  # noqa: PLC0415
 
     text_upper = text.upper()
     for tag in _VALID_EMOTION_TAGS:

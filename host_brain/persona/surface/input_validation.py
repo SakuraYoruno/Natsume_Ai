@@ -1,0 +1,112 @@
+"""Input validation for isolated surface generation.
+
+Extracted from isolated_surface_harness.py — validators that ensure
+incoming payloads are structurally sound and free of forbidden keys.
+"""
+from __future__ import annotations
+
+from collections.abc import Mapping, Sequence
+from typing import Any
+
+from host_brain.persona.surface.data_models import (
+    IsolatedSurfaceInput,
+    ReplyControlPacket,
+)
+from host_brain.persona.surface.scene_constants import (
+    _ALLOWED_TOP_LEVEL_KEYS,
+    _FORBIDDEN_INPUT_KEYS,
+    _FORBIDDEN_KEY_HINTS,
+)
+from host_brain.persona.surface.util import (
+    _clean_text,
+    _model_dump,
+    _optional_list,
+    _validate_model,
+)
+
+
+def _coerce_float(value: Any, *, default: float = 0.0) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return float(default)
+
+
+def _coerce_int(value: Any, *, default: int = 0) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return int(default)
+
+
+def _is_forbidden_key(key: Any) -> bool:
+    normalized = str(key or "").strip().lower()
+    if normalized in _FORBIDDEN_INPUT_KEYS:
+        return True
+    return any(hint in normalized for hint in _FORBIDDEN_KEY_HINTS)
+
+
+def find_forbidden_input_paths(payload: Any, *, prefix: str = "") -> tuple[str, ...]:
+    paths: list[str] = []
+    if isinstance(payload, Mapping):
+        for key, value in payload.items():
+            key_text = str(key)
+            path = f"{prefix}.{key_text}" if prefix else key_text
+            if _is_forbidden_key(key_text):
+                paths.append(path)
+            paths.extend(find_forbidden_input_paths(value, prefix=path))
+    elif isinstance(payload, Sequence) and not isinstance(payload, (str, bytes, bytearray)):
+        for index, item in enumerate(payload):
+            paths.extend(find_forbidden_input_paths(item, prefix=f"{prefix}[{index}]"))
+    return tuple(dict.fromkeys(paths))
+
+
+def build_isolated_surface_input(
+    payload: Mapping[str, Any], *, soul_md: str | None = None
+) -> IsolatedSurfaceInput:
+    unexpected = sorted(
+        str(key) for key in payload.keys() if str(key) not in _ALLOWED_TOP_LEVEL_KEYS
+    )
+    if unexpected:
+        raise ValueError(
+            "isolated surface input contains unexpected fields: "
+            + ", ".join(unexpected[:8])
+        )
+    forbidden_paths = find_forbidden_input_paths(payload)
+    if forbidden_paths:
+        raise ValueError(
+            "isolated surface input contains forbidden raw context: "
+            + ", ".join(forbidden_paths[:8])
+        )
+
+    control_payload = payload.get("control", payload.get("reply_control_packet", {}))
+    if isinstance(control_payload, ReplyControlPacket):
+        control = control_payload
+    elif isinstance(control_payload, Mapping):
+        control = _validate_model(ReplyControlPacket, control_payload)  # type: ignore[assignment]
+    else:
+        raise ValueError("isolated surface input requires a mapping ReplyControlPacket")
+
+    request_payload = {
+        "soul_md": _clean_text(
+            soul_md if soul_md is not None else payload.get("soul_md")
+        ),
+        "user_message": _clean_text(payload.get("user_message")),
+        "control": control,
+        "facts": _optional_list(payload.get("facts")),
+        "must_not_do": _optional_list(payload.get("must_not_do")),
+        "case_id": _clean_text(payload.get("case_id")),
+        # --- Inner-state leakage pass-through ---
+        "inner_weather": _clean_text(payload.get("inner_weather")),
+        "body_state_hint": _clean_text(payload.get("body_state_hint")),
+        "care_signal": _coerce_float(payload.get("care_signal")),
+        "continuity_signal": _coerce_float(payload.get("continuity_signal")),
+        "tension_hint": _clean_text(payload.get("tension_hint")),
+        "liveliness": _coerce_float(payload.get("liveliness")) if payload.get("liveliness") is not None else 0.5,
+        "active_loops": _coerce_int(payload.get("active_loops")),
+    }
+    if not request_payload["soul_md"]:
+        raise ValueError("isolated surface input requires soul_md")
+    if not request_payload["user_message"]:
+        raise ValueError("isolated surface input requires user_message")
+    return _validate_model(IsolatedSurfaceInput, request_payload)  # type: ignore[return-value]

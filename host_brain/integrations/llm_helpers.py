@@ -637,6 +637,14 @@ def _load_api_key_from_env(provider_name: str) -> str | None:
     if not env_key:
         return None
     value = os.environ.get(env_key, "").strip()
+    if not value:
+        # 尝试 _REF 变体：DEEPSEEK_API_KEY_REF → sec://... → 解析
+        ref_env = f"{env_key}_REF"
+        ref_value = os.environ.get(ref_env, "").strip()
+        if ref_value and ref_value.startswith("sec://"):
+            value = _load_api_key_from_runtime_profiles(provider_name) or ""
+            if value:
+                os.environ[env_key] = value  # 缓存到 env 避免重复解析
     if value:
         return value
     if (
@@ -1279,16 +1287,13 @@ def _extract_openai_compat_text(payload: Mapping[str, Any]) -> str:
         content_text = _extract_text_from_response_content(container.get("content"))
         if content_text:
             return content_text
-        # reasoning_content is the model's hidden/thinking channel.  Treating it
-        # as final content leaks chain-of-thought / prompt analysis into user
-        # visible replies.  Keep the legacy behavior only behind an explicit
-        # opt-in for debugging compatibility.
+        # reasoning_content: deepseek 等模型的推理链输出。
+        # content 为空时自动回退到 reasoning_content（默认行为）。
+        # 设 HOST_LLM_ACCEPT_REASONING_CONTENT_AS_TEXT=0 可强制禁用。
         reasoning = container.get("reasoning_content")
-        if (
-            _parse_bool_env("HOST_LLM_ACCEPT_REASONING_CONTENT_AS_TEXT", default=False)
-            and isinstance(reasoning, str)
-            and reasoning.strip()
-        ):
+        if isinstance(reasoning, str) and reasoning.strip():
+            if not _parse_bool_env("HOST_LLM_ACCEPT_REASONING_CONTENT_AS_TEXT", default=True):
+                return ""
             return reasoning.strip()
         return ""
 

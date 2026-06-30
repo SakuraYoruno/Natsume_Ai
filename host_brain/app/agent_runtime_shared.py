@@ -2895,6 +2895,34 @@ async def _cortex_orchestrator_sse_generator_impl(
         conversation_id=getattr(request_body, "reply_target", None),
     )
 
+    # Record user turn for conversation history (moved from cortex_orchestrator)
+    try:
+        from host_brain.conversation.writer import record_user_turn  # noqa: PLC0415
+
+        record_user_turn(
+            request_id=request_id,
+            session_id=session_id,
+            person_id=person_id,
+            content=str(getattr(request_body, "message", "") or ""),
+            ts_ms=int(time.time() * 1000),
+            lang=str(getattr(request_body, "render_target_lang", None) or "zh").strip().lower() or "zh",
+            metadata={
+                "input_source": str(getattr(request_body, "input_source", None) or "").strip(),
+                "reply_channel": str(getattr(request_body, "reply_channel", None) or "").strip(),
+                "platform": str(getattr(request_body, "reply_channel", None) or "").strip(),
+                "reply_target": str(getattr(request_body, "reply_target", None) or getattr(request_body, "conversation_id", None) or "").strip(),
+                "conversation_id": str(getattr(request_body, "reply_target", None) or getattr(request_body, "conversation_id", None) or "").strip(),
+                "from_id": str(getattr(request_body, "from_id", None) or "").strip(),
+                "msg_id": str(getattr(request_body, "msg_id", None) or "").strip(),
+                "reply_to_msg_id": str(getattr(request_body, "reply_to_msg_id", None) or "").strip(),
+                "attachments": list(getattr(request_body, "attachments", []) or []),
+                "multimodal_observations": dict(getattr(request_body, "multimodal_observations", {}) or {}),
+                "attachment_summary": str(getattr(request_body, "attachment_summary", "") or "").strip(),
+            },
+        )
+    except Exception:
+        pass
+
     sanitized_message, airlock_passed = _sanitize_input(user_message)
     if not airlock_passed:
         yield _emit_sse(
@@ -3547,7 +3575,7 @@ async def _cortex_orchestrator_sse_generator_impl(
         )
         return
 
-    from host_brain.app.executive_router import executive_router_sse_generator  # noqa: PLC0415
+    from host_brain.app.executive_runtime_core import _executive_runtime_core_impl as executive_router_sse_generator  # noqa: PLC0415
 
     _logger.info(
         "[%s] cortex_orchestrator stage_summary prefetch_ms=%s retrieval_wait_ms=%s prompt_filter_ms=%s "
