@@ -110,11 +110,11 @@ Gateway 通常由 Edge bootstrap 组装运行；配置入口在 `edge_client/con
 
 ## 主要文档
 
-- 文档地图：`docs/00_index/00_DOCMAP.md`
-- 当前代码架构：`docs/50_project/arch/CURRENT_CODE_ARCHITECTURE.md`
-- 核心模块参考：`docs/50_project/arch/CORE_MODULES_DETAILED_REFERENCE.md`
-- Pentest 专项架构：`docs/50_project/arch/PENTEST_MODULES_ARCHITECTURE.md`
-- Pentest 能力边界：`host_brain/pentest/CAPABILITY.md`
-- 数据流报告：`docs/50_project/arch/dataflow_report.md`
-- 工程契约：`docs/30_devspec/DevSpec.md`
-- 人格定义：`Soul.md`
+- 文档地图：[`docs/00_index/00_DOCMAP.md`](docs/00_index/00_DOCMAP.md)
+- 当前代码架构：[`docs/50_project/arch/CURRENT_CODE_ARCHITECTURE.md`](docs/50_project/arch/CURRENT_CODE_ARCHITECTURE.md)
+- 核心模块参考：[`docs/50_project/arch/CORE_MODULES_DETAILED_REFERENCE.md`](docs/50_project/arch/CORE_MODULES_DETAILED_REFERENCE.md)
+- Pentest 专项架构：[`docs/50_project/arch/PENTEST_MODULES_ARCHITECTURE.md`](docs/50_project/arch/PENTEST_MODULES_ARCHITECTURE.md)
+- Pentest 能力边界：[`host_brain/pentest/CAPABILITY.md`](host_brain/pentest/CAPABILITY.md)
+- 数据流报告：[`docs/50_project/arch/dataflow_report.md`](docs/50_project/arch/dataflow_report.md)
+- 工程契约：[`docs/30_devspec/DevSpec.md`](docs/30_devspec/DevSpec.md)
+- 人格定义：[`Soul.md`](Soul.md)
