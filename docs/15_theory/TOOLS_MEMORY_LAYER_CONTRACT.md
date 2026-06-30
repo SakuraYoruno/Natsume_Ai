@@ -1,8 +1,8 @@
 受众：MASTER
 标题：host_brain/tools/ + memory/ 层接口契约（当前代码实况）
 
-版本：v3.2
-日期：2026-06-23
+版本：v3.3
+日期：2026-06-30
 归属：docs/15_theory/
 
 ---
@@ -20,7 +20,10 @@ Tools 层：
 - `host_brain/tools/host_command_executor.py`、`browser_automation.py`、`file_forensics.py`、`file_organizer.py`、`secret_vault.py`、`system_monitor.py`（具体 tool 实现）
 
 Memory 层：
-- `host_brain/memory/life_memory.py`（`LifeMemoryStore` —— 当前 SSOT）
+- `host_brain/memory/life_memory/store.py`（`LifeMemoryStore` —— 当前 SSOT，`life_memory/` 子包 7 文件，8,718 行）
+- `host_brain/memory/life_memory/semantic.py`（语义记忆操作，2,411 行）
+- `host_brain/memory/life_memory/consolidator.py`（`LifeMemoryConsolidator`，925 行）
+- `host_brain/memory/life_memory/sleep.py`（`MemorySleepReplayTask`，183 行）
 - `host_brain/memory/life_memory_query.py`（`plan_life_memory_query`）
 - `host_brain/memory/long_term_distiller.py`（持久化语义蒸馏）
 - `host_brain/memory/distillation.py`
@@ -58,7 +61,7 @@ memory 层当前是**多源记忆系统**，但**记忆事实 SSOT 唯一**：
 
 | 子系统 | 角色 | 文件 |
 |---|---|---|
-| `LifeMemoryStore` | **当前记忆事实 SSOT**，所有 user / perception / scheduler / inner item 入库为 life episode + evidence；不替代执行审计链 | `life_memory.py` |
+| `LifeMemoryStore` | **当前记忆事实 SSOT**，所有 user / perception / scheduler / inner item 入库为 life episode + evidence；不替代执行审计链 | `life_memory/store.py` |
 | Long-term distillation | 长期蒸馏（防递归），把 episodic → semantic | `long_term_distiller.py` / `distillation.py` |
 | `episodic` | **兼容层**，仍被部分查询路径使用，不再是主作者 | `episodic.py` |
 | World Canon / Persona 边界 | World Canon 维护最小权威内容集合；Soul/Persona 是语言与人格锚；当前源码没有独立风格 canon 存储模块 | `canon_world_store.py` / `soul_runtime.py` |
@@ -170,7 +173,7 @@ ToolExecutionResult = ToolBroker.execute(
 
 ### 3.1 `LifeMemoryStore`（当前 SSOT）
 
-存储后端：SQLite，`life_memory.py` 是 8000+ 行的大 module。
+存储后端：SQLite，`life_memory/` 子包（7 文件，8,718 行，已从单文件 8,000+ 行分解为 store/semantic/consolidator/sleep/utils/constants/models）。
 
 **记忆条目核心字段**：
 
@@ -199,7 +202,7 @@ ToolExecutionResult = ToolBroker.execute(
 - 语料范围（current session / cross-session）
 - domain（lightnovel_recommendation / recommendation 等）
 
-### 3.2 `LifeMemoryConsolidator`（life_memory.py 内）
+### 3.2 `LifeMemoryConsolidator`（`life_memory/consolidator.py`）
 
 - sleep replay 压缩：选 episode 子集合并
 - 语义蒸馏：把 episodic 内容浓缩到 semantic 层，避免无限增长
