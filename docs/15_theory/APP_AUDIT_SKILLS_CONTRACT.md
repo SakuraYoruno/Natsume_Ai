@@ -1,8 +1,8 @@
 受众：MASTER
 标题：host_brain 核心应用层契约（当前代码实况：app / audit / skills / observability）
 
-版本：v3.2
-日期：2026-06-23
+版本：v3.3
+日期：2026-06-30
 归属：docs/15_theory/
 
 ---
