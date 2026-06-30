@@ -1,11 +1,9 @@
 受众：MASTER
-标题：当前数据流报告（dev@b28c20a2）
+标题：当前数据流报告
 
-版本：v3.3
-日期：2026-06-23
-定位：基于当前仓库代码，描述 `/v1/chat` / `/v1/host/input` / `/v1/edge/events` / surface recall / ReplyEnvelope 后效 / Unified Message Gateway / Observability / Desktop Pet / MateEngine Bridge 等主流量路径的真实走向。若历史方案文档与本文冲突，以本文与代码为准。
-
-# 当前数据流报告（dev@b28c20a2）
+版本：v4.0
+日期：2026-06-30
+定位：基于当前仓库代码，全面描述所有主流量路径。若历史方案文档与本文冲突，以本文与代码为准。
 
 ## 0. 代码证据入口
 
@@ -72,6 +70,45 @@ Input / Edge / 外显面：
 - `host_brain/app/obs_fastapi_app.py`
 - `host_brain/app/obs_routes_*.py`
 - `host_brain/app/monitor_ui/src/`
+
+Pentest Agent 与子系统：
+- `host_brain/pentest/agent/cognitive_engine.py`
+- `host_brain/pentest/agent/evolution_core.py`
+- `host_brain/pentest/agent/tool_registry.py`
+- `host_brain/pentest/agent/belief_model.py`
+- `host_brain/pentest/agent/goal_model.py`
+- `host_brain/pentest/agent/compat.py`
+- `host_brain/pentest/adversarial/adversarial_kernel.py`
+- `host_brain/pentest/adversarial/game_loop.py`
+- `host_brain/pentest/adversarial/red_mutation.py`
+- `host_brain/pentest/adversarial/blue_detector.py`
+- `host_brain/pentest/adversarial/blue_learner.py`
+- `host_brain/pentest/adversarial/strategy_coevolution.py`
+- `host_brain/pentest/adversarial/scoring.py`
+- `host_brain/pentest/swarm/coordinator.py`
+- `host_brain/pentest/swarm/message_bus.py`
+- `host_brain/pentest/swarm/task_distributor.py`
+- `host_brain/pentest/swarm/agent_lifecycle.py`
+- `host_brain/pentest/online/safety_gate.py`
+- `host_brain/pentest/online/authorization.py`
+- `host_brain/pentest/online/rate_governor.py`
+- `host_brain/pentest/online/target_queue.py`
+
+Persona Surface 管线：
+- `host_brain/persona/surface/candidate_scoring.py`
+- `host_brain/persona/surface/scoring/parse.py`
+- `host_brain/persona/surface/scoring/stage_positions.py`
+- `host_brain/persona/surface/scoring/control_affect.py`
+- `host_brain/persona/surface/scoring/texture.py`
+
+Proactive Autonomy：
+- `host_brain/runtime/autonomous_self.py`
+- `host_brain/runtime/digital_life_supervisor.py`
+- `host_brain/runtime/life_continuity.py`
+- `host_brain/persona/proactive_voice.py`
+- `host_brain/persona/emotional_proactive.py`
+- `host_brain/app/digital_life_routes.py`
+- `host_brain/app/obs_routes_proactive_autonomy.py`
 
 ## 1. 当前运行面与流量入口
 
@@ -185,7 +222,18 @@ SurfaceMainChain input build
 
 ## 5. 记忆 SSOT 与衍生层
 
-当前记忆 SSOT 是 `host_brain/memory/life_memory.py` 的 `LifeMemoryStore`。SQLite 是 source of truth；vector / semantic / graph 是衍生层或兼容层。
+当前记忆 SSOT 是 `host_brain/memory/life_memory/store.py` 的 `LifeMemoryStore`。SQLite 是 source of truth；vector / semantic / graph 是衍生层或兼容层。
+
+`host_brain/memory/life_memory/` 子包（7 文件，8,718 行）：
+- `store.py`（3,275 行）— `LifeMemoryStore` 主存储
+- `semantic.py`（2,411 行）— 语义记忆操作
+- `consolidator.py`（925 行）— `LifeMemoryConsolidator`
+- `sleep.py`（183 行）— `MemorySleepReplayTask`
+- `utils.py`（1,664 行）— 辅助工具
+- `constants.py`（172 行）— 真值状态、episode 类型、保留层级
+- `models.py`（22 行）— 数据模型
+
+顶层 `memory/` 包（16 文件）：canon 世界存储（763 行）、ChromaDB 客户端（783 行）、episodic 记忆（1,000 行）、蒸馏（1,238 行）、上下文压缩（440 行）、记忆价值评估（206 行）。
 
 `SQLiteLedger` schema 覆盖：
 
@@ -368,3 +416,154 @@ Monitor UI 可展示 sessions、trace、metrics、memory、bond、gateway、skil
 6. ReplyEnvelope COMMIT 完成后，memory 写入、emotion/bond flow、life aftereffect、TTS/外显执行再异步落地。
 7. Edge 外显面只承载遥测、状态和执行结果，不是事实裁决源。
 8. SSE 三阶段 `PRESENCE -> COMMIT -> POST` 不可颠倒。
+
+## 14. Pentest Agent Cognitive Loop
+
+```text
+PentestAgentKernel (autonomous_kernel.py, 3,172 行)
+  → CognitiveEngine.generate_hypotheses()  (agent/cognitive_engine.py, 834 行)
+      → LLM 假设生成 + 信念加权评分
+  → BeliefModel.update()                    (agent/belief_model.py, 394 行)
+      → 贝叶斯信念系统（ToolBelief/PatternBelief/CapabilityBelief），时间衰减
+  → GoalModel.select_action()               (agent/goal_model.py, 416 行)
+      → 显式目标声明（shell/root/domain_admin/domain_takeover/read_flag/chain_depth/n_critical）
+  → ToolRegistry.resolve()                  (agent/tool_registry.py, 796 行)
+      → Capability enum (30+ intent types) → EnvTag → ToolCapability → ToolSpec
+  → guarded executor                        (executor_guard.py)
+      → ScopeGuard + RateLimiter + allow_exploit + approval token
+  → EvolutionCore.observe()                 (agent/evolution_core.py, 693 行)
+  → EvolutionCore.reflect()
+  → EvolutionCore.adapt()
+  → EvolutionCore.evolve()
+      → 组合 KnowledgeBase + ExperienceRetriever + CampaignMemory + FailureClassifier
+  → loop
+```
+
+三条规划路径选择（`agent/compat.py:LegacyKernelAdapter`）：
+- `PENTEST_COGNITIVE_KERNEL=1` → CognitiveEngine（假设生成 + 信念评分）
+- `PENTEST_COGNITIVE_KERNEL=0` → MCTSPlanner（`mcts_planner.py`, 1,111 行）或 LLMReActPlanner（`llm_react_planner.py`, 710 行）
+
+MetaCognition（`agent/meta_cognition.py`, 288 行）实时监控决策质量、异常检测、策略热切换、后行动评审。
+
+## 15. Adversarial Game Loop
+
+```text
+AdversarialHook (adversarial/adversarial_kernel.py, 注入到 autonomous_kernel._observe_success)
+  → GameLoop.run_round() (adversarial/game_loop.py, 136 行)
+    → RedMutationEngine.mutate()    (adversarial/red_mutation.py, 190 行)
+        → payload/tool/timing/route 变异
+        → TTP fallback map + payload variant map
+    → BlueDetector.evaluate()       (adversarial/blue_detector.py, 134 行)
+        → 评估 red action 是否被检测
+    → RedMutationEngine.adapt()     → 红队适应
+    → BlueLearner.learn()           (adversarial/blue_learner.py, 137 行)
+        → 从 red 成功中学习检测规则
+    → AdversarialScoring.score()    (adversarial/scoring.py, 167 行)
+        → RoundScore / GameSummary
+  → StrategyCoevolution.evolve()    (adversarial/strategy_coevolution.py, 250 行)
+      → 遗传算法：pop=20, elite=4, tournament=3, crossover=0.7, mutation=0.15
+      → red attack strategies + blue detection rules 协同进化
+  → AdversarialArchive.record()     (adversarial/archive.py, 157 行)
+      → AttackStrategy / DetectionRule 存档
+```
+
+## 16. Swarm Coordinator 消息流
+
+```text
+SwarmCoordinator (swarm/coordinator.py, 388 行)
+  → TaskDistributor.shard()          (swarm/task_distributor.py, 114 行)
+      → 按 IP/CIDR/service/phase 分片
+  → AgentLifecycleManager.spawn()    (swarm/agent_lifecycle.py, 162 行)
+      → 生成/监控/终止/重启 agent（heartbeat 机制）
+  → RoleSpecialization.assign()      (swarm/role_specialization.py, 178 行)
+      → RECON | VULN | EXPLOIT | POST | AD | GENERAL | BLUE | MANAGER
+  → MessageBus.publish()             (swarm/message_bus.py, 75 行)
+      → 内存 pub/sub，500 msg buffer，线程安全
+  → GraphMerger.merge()              (swarm/graph_merge.py, 140 行)
+      → AttackGraph 合并 + MergeConflict 解决
+  → SwarmResult
+```
+
+## 17. Online Safety Gate 三层控制流
+
+```text
+SafetyGate.check() (online/safety_gate.py, 223 行)
+  → Layer 1: ONLINE_SCAN_MODE check
+      仅 offline | manual（无 auto 模式）
+  → Layer 2: AuthorizationManager.verify() (online/authorization.py, 204 行)
+      proof types: bug_bounty | pentest_contract | internal_lab
+  → Layer 3: RateGovernor.check() (online/rate_governor.py, 111 行)
+      硬编码限速（不可配置/不可绕过）：
+      google_dork 10/day, shodan 30/min, censys 20/min,
+      dns_query 100/min, crtsh 15/min, subdomain_hunt 50/min
+      最小 target 间隔 5s
+  → TargetQueue.enqueue() (online/target_queue.py, 127 行)
+      仅手动 API 添加，永不自动发现
+```
+
+## 18. Persona Surface Scoring 管线
+
+```text
+SurfaceMainChain.run() (persona/surface_main_chain.py, 250 行)
+  → SurfaceRuntime.generate()              (persona/surface_runtime.py, 2,668 行)
+      → LLM 调用，生成候选回复
+  → SurfaceMemoryRecall (persona/surface_memory_recall.py, 4,539 行)
+      → 记忆召回计划与 evidence 组织
+  → SurfacePacketCompiler (persona/surface_packet_compiler.py, 713 行)
+      → 多包编译为 CompiledSurfaceInput
+  → CandidateScoring.score_candidates()    (persona/surface/candidate_scoring.py, 1,912 行)
+    → scoring/parse.py (262 行)
+        → 候选解析、问题预算计数、控制违规检测
+    → scoring/stage_positions.py (406 行)
+        → 场景位置评分（back/morning/low-energy/self-doubt/positive 五种位置）
+    → scoring/control_affect.py (398 行)
+        → 控制情感评分（情绪基调 + 关系距离双轴）
+    → scoring/texture.py (273 行)
+        → 纹理评分（签名纹理命中 + 场景质量样本评分）
+  → 最终选择最高分候选
+```
+
+Inner-state leakage 路径：
+```text
+OfflineInnerWorld.tick() (persona/inner_world.py, 2,565 行)
+  → InnerWorldState (loneliness 0.05/hr accumulation, anticipation 0.03/hr)
+  → ReplyControlPacket {
+      inner_weather, body_state_hint, care_signal,
+      continuity_signal, tension_hint, liveliness, active_loops
+    }
+  → IsolatedSurfaceInput
+  → SurfaceRuntime → LLM prompt 生成
+```
+
+## 19. Proactive Autonomy 回路
+
+```text
+DigitalLifeSupervisor.tick_loop() (runtime/digital_life_supervisor.py, 1,235 行)
+  → CORE_TICK_TASK_IDS: inner_world_numeric_tick, inner_world_monologue_tick,
+                        silence_tick, body_sense_tick, emotion_decay_tick
+  → autonomous_self.apply_autonomous_self_cycle() (runtime/autonomous_self.py, 1,009 行)
+    → 8 维 SELF_REWARD_WEIGHTS (continuity/coherence/competence/curiosity/
+       restraint/presence/aesthetic/attachment)
+    → 7 维 DEFAULT_ADAPTIVE_TRAITS (curiosity/assertiveness/playfulness/
+       sensitivity/resilience/restraint/warmth)
+    → compute_dialogue_state_closure()
+    → apply_proactive_outcome()
+  → PersonaProactiveVoice.evaluate() (persona/proactive_voice.py, 1,477 行)
+    → 场景感知 (LATE_NIGHT/LONG_ABSENT/POST_INTENSE/
+                 TOPIC_FOLLOWUP/MORNING_GREET/HOLIDAY_GREET)
+    → 24h per-type 冷却门控
+  → EmotionalProactiveEpisode (persona/emotional_proactive.py, 845 行)
+    → 冲动追踪与衰减
+  → proactive_voice.generate() → ProactiveExpression
+  → life_continuity.record_proactive_outbox() (runtime/life_continuity.py, 1,920 行)
+    → SQLite proactive_life_outbox 表
+  → Edge RPC proactive_push → 外显执行
+
+API 端点：
+- POST /v1/digital-life/proactive/attempt — 手动触发（支持 dry-run + forced）
+- GET  /v1/digital-life/proactive/recent — 近期 outbox 条目
+- GET  /v1/digital-life/proactive/episodes/recent — 近期 proactive episodes
+- GET  /obs/proactive-autonomy — proactive autonomy 快照
+    （inner_weather, reach_out_calibration, active_projects,
+      proactive_readiness, top_intention, dialogue_closure）
+```
