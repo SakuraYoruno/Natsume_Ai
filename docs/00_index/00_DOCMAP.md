@@ -1,9 +1,9 @@
 受众：MASTER
 标题：文档地图（唯一入口）
 
-版本：v5.2
-日期：2026-06-23
-维护：2026-06-23（主链校准：PRD v2.2 / DevSpec v2.2 / 架构事实 v3.3 / theory 契约版本跟进；旧 Agentic RAG 文件名改为当前召回架构兼容入口）
+版本：v5.3
+日期：2026-06-30
+维护：2026-06-30（核心架构事实对齐到 v4.1；补齐 Pentest 专项架构入口；README / CURRENT_CODE_ARCHITECTURE / CORE_MODULES_DETAILED_REFERENCE / CAPABILITY 与代码路径同步）
 
 本仓库所有"应该读什么、从哪里开工、哪些文档禁止当任务来源"，以本文件为准。
 
@@ -59,12 +59,14 @@
 - 实现层的任务来源只能是 DevTasks（以及 AGENTS 工作规范）；不得把白皮书/PRD/Theory/Trace 当任务来源。
 - Project（文档代理）负责把讨论沉淀到 PRD/DevSpec/DevTasks，并维护 Trace 覆盖关系。
 
-当前代码优先阅读顺序（2026-06-23）：
+当前代码优先阅读顺序（2026-06-30）：
 - `[LIVING]` `README.md`：仓库入口与运行面总览
-- `[LIVING]` `docs/50_project/arch/CURRENT_CODE_ARCHITECTURE.md` (v3.3)：当前代码事实总览
-- `[LIVING]` `docs/50_project/arch/CORE_MODULES_DETAILED_REFERENCE.md` (v3.3)：主链核心模块
+- `[LIVING]` `docs/50_project/arch/CURRENT_CODE_ARCHITECTURE.md` (v4.2)：当前代码事实总览
+- `[LIVING]` `docs/50_project/arch/CORE_MODULES_DETAILED_REFERENCE.md` (v4.2)：主链核心模块
+- `[LIVING]` `docs/50_project/arch/PENTEST_MODULES_ARCHITECTURE.md` (v1.1)：Pentest 专项模块架构
+- `[LIVING]` `host_brain/pentest/CAPABILITY.md` (v2.3)：Pentest 能力边界与安全约束
 - `[LIVING]` `docs/50_project/arch/DIGITAL_LIFE_BODY_FRONTEND_ARCHITECTURE_20260419.md`：前端主体化信息架构
-- `[LIVING]` `docs/50_project/arch/dataflow_report.md` (v3.3)：请求流与回流补充
+- `[LIVING]` `docs/50_project/arch/dataflow_report.md` (v4.0)：请求流与回流补充（含 Pentest/Adversarial/Swarm/Online/Proactive 数据流）
 - `[LIVING]` `docs/50_project/arch/AGENTIC_RAG_ARCHITECTURE.md` (v3.0)：当前召回与记忆数据流（旧文件名兼容保留）
 - `[LIVING]` `docs/50_project/arch/diagrams/00_INDEX.md` (v1.0)：架构图册（7 张 Mermaid 图）
 - `[LIVING]` `docs/30_devspec/desktop_pet_runtime.md`：Desktop Pet 运行面契约
@@ -165,12 +167,20 @@
 
 ### 5.3 架构文档（当前事实）
 
-- `[LIVING]` docs/50_project/arch/CURRENT_CODE_ARCHITECTURE.md (v3.3)
-  用途：当前代码事实总览——运行面、主入口、路由面、聊天主链、Tribe family 现状。
+- `[LIVING]` docs/50_project/arch/CURRENT_CODE_ARCHITECTURE.md (v4.2)
+  用途：当前代码事实总览——运行面、主入口、路由面、聊天主链、Persona/Surface 管线、Pentest 双规划器、Tribe 规模、Monitor UI 路由分组、Digital Life 18 端点。
   读者：MASTER、Project、实现层。
 
-- `[LIVING]` docs/50_project/arch/CORE_MODULES_DETAILED_REFERENCE.md (v3.3)
-  用途：核心模块定位与职责边界。
+- `[LIVING]` docs/50_project/arch/CORE_MODULES_DETAILED_REFERENCE.md (v4.2)
+  用途：核心模块定位与职责边界（含 persona surface/scoring 管线、life_memory 子包）。
+  读者：MASTER、Project、实现层。
+
+- `[LIVING]` docs/50_project/arch/PENTEST_MODULES_ARCHITECTURE.md (v1.1)
+  用途：Pentest 子系统专项架构索引。覆盖 tools、agent（31 文件清单）、adversarial、swarm、online、report（标注存根）、data 与安全边界、双规划器说明。
+  读者：MASTER、Project、实现层。
+
+- `[LIVING]` host_brain/pentest/CAPABILITY.md (v2.3)
+  用途：Pentest 能力边界、ToolSpec/Executor 计数、side-effect guard、agent 模块能力矩阵（31 模块）。
   读者：MASTER、Project、实现层。
 
 - `[LIVING]` docs/50_project/arch/DIGITAL_LIFE_BODY_FRONTEND_ARCHITECTURE_20260419.md

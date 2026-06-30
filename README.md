@@ -3,134 +3,118 @@
 
 # Natsume AI
 
-Natsume AI 是一个围绕“数字生命体”构建的运行时仓库。当前代码已经形成 7 个清晰的运行/外显面：`Host Brain` 主应用、独立 `Observability` 后端、`Edge RPC`、`Unified Message Gateway`、基于 React 的 `Monitor UI`、本地 `Desktop Pet`，以及 `MateEngine Bridge` 桌面表现层。
+版本：v6.1 Living
+代码对齐日期：2026-06-30
 
-这份 README 只保留代码事实和入口导航。更细的设计说明请直接进入文档区，不再把大量阶段性方案和历史结构塞在首页。
+Natsume AI 是一个围绕“数字生命体”构建的本地运行时仓库。当前代码的核心不是单一聊天服务，而是 Host Brain、Observability、Edge RPC、Unified Message Gateway、Monitor UI、Desktop Pet、MateEngine/VRM 桥接等多个运行面协同。
 
-## 文档协作与维护
+本 README 只保留可从当前代码直接核验的入口、目录和导航。实现细节以 `docs/50_project/arch/CURRENT_CODE_ARCHITECTURE.md`、`docs/50_project/arch/CORE_MODULES_DETAILED_REFERENCE.md` 和实际代码为准。
 
-- 文档新增与修改需先补齐两行标准头：
-  - `受众：MASTER|CODEX|PROJECT`
-  - `标题：...`
-- 文档更新优先遵守 `docs/00_index/00_DOCMAP.md` 的入口口径，按 `受众` 归类：MASTER 为事实真源与总盘，CODEX 为实现层与设计事实，PROJECT 为项目执行与任务层。
-- 需要历史复盘/归档的文件建议放入 `docs/*/test_reports`、`docs/45_testing`，避免参与实时实现层事实判断。
-- CI 的 `doc_gate` 会检查 markdown 头；`doc_freshness` 仍只看核心事实链路变更，历史归档不会阻断 PR 合入。
+## 文档规则
 
-## 当前代码现状
+- 所有 Markdown 文件必须以两行开头：`受众：MASTER|CODEX|PROJECT` 和 `标题：...`。
+- `[LIVING]` 文档跟随代码变化；发生冲突时，以代码为事实源。
+- 架构事实入口在 `docs/50_project/arch/`，历史计划和阶段复盘只作为追溯资料。
 
-- Host 主应用入口：`host_brain/__main__.py`，默认端口 `8000`
-- Observability 后端入口：`host_brain/obs_main.py`，默认端口 `18082`
-- Edge RPC 入口：`edge_client/__main__.py`，默认端口 `17800`
-- Unified Message Gateway 入口：`edge_client/gateway/bootstrap.py`，默认端口 `19000`
-- Gateway 当前适配器：`wechat`、`qq`、`feishu`、`wecom`、`telegram`、`line`
-- Desktop Pet Electron 入口：`desktop_pet/main.cjs`，默认本地控制端口 `18788`
-- MateEngine Host 路由入口：`host_brain/app/mateengine_routes.py`，路由前缀 `/v1/mateengine`
-- MateEngine Host 通道：`host_brain/channels/mateengine.py`，默认 UDP signal 端口 `32145`，默认 bridge HTTP `http://127.0.0.1:18770`
-- Tribe 注册表当前定义 `23` 个 family spec，见 `host_brain/tribe/registry.py`
-- Monitor UI 源码位于 `host_brain/app/monitor_ui/`，构建产物位于 `host_brain/app/static/monitor/`
+## 当前运行面
 
-## 仓库结构
+| 运行面 | 入口 | 端口/配置 | 当前事实 |
+|---|---|---|---|
+| Host Brain | `host_brain/__main__.py` -> `host_brain.app.asgi:app` | `HOST_APP_PORT`，CLI fallback `8000`；示例环境常设 `18080` | 主 API、聊天、工具、记忆、数字生命、Pentest 路由 |
+| Observability | `host_brain/obs_main.py` -> `host_brain.app.obs_fastapi_app:app` | `HOST_OBS_APP_PORT`，fallback `18082` | 独立 FastAPI app，承接 `/obs/*`、`/api/ui/*` 等监控流量 |
+| Monitor Proxy | `scripts/runtime/start_monitor_proxy.ps1` | `HOST_MONITOR_PROXY_PORT`，fallback `18180` | Nginx 代理 `/monitor/` 静态资产、Host upstream 和 Obs upstream |
+| Edge RPC | `edge_client/__main__.py` | `EDGE_RPC_PORT`，fallback `17800` | Edge 侧 ASR/TTS/avatar/resource gate 等 RPC 能力 |
+| Unified Gateway | `edge_client/gateway/bootstrap.py` + `edge_client/gateway/server.py` | `EDGE_GATEWAY_PORT`，fallback `19000` | 平台 webhook、统一输入回流、平台回复分发 |
+| Desktop Pet | `desktop_pet/main.cjs` | `NATSUME_DESKTOP_PET_PORT`，fallback `18788` | Electron + Live2D 本地桌宠，提供 `/health` 与 `/action` |
+| MateEngine/VRM | `host_brain/channels/mateengine.py`、`edge_client/config.py` | MateEngine UDP `32145`，VRM bridge `18770` | Host 侧动作/说话桥接，Edge 侧 VRM bridge 配置 |
+
+## 代码主干
+
+| 路径 | 当前规模 | 说明 |
+|---|---:|---|
+| `host_brain/app/` | 228 Python 文件 | Host FastAPI、主链、路由、Obs app、Monitor UI 后端接口 |
+| `host_brain/persona/` | 75 Python 文件 | 人格、内心世界、回复规划、Surface 主链与评分 |
+| `host_brain/persona/surface/` | 17 Python 文件 | Surface 数据模型、输入校验、prompt、候选评分、scoring 子包 |
+| `host_brain/pentest/` | 124 Python 文件 | 授权渗透测试代理、工具执行、安全边界、报告和自主 agent |
+| `host_brain/runtime/` | 6 Python 文件 | 数字生命后台 tick、连续性、器官状态、自主发起 |
+| `host_brain/memory/` | 24 Python 文件 | LifeMemoryStore、召回融合、Canon、上下文压缩 |
+| `host_brain/tribe/` | 34 Python 文件 | 23 个 family spec、25 个默认 agent descriptor、事件总线 |
+| `host_brain/governor/` | 10 Python 文件 | 决策、规则、tier policy、rate limit、token budget |
+| `host_brain/skills/impl/` | 25 executor 文件 | 普通 skill executor；Pentest 不走这里注册 |
+| `edge_client/` | 80 Python 文件 | Edge RPC、Gateway、平台适配器、Edge tribe bridge |
+| `desktop_pet/` | Electron 项目 | Live2D 桌宠本地窗口与 HTTP 控制面 |
+
+## 关键入口
+
+### Chat 主链
 
 ```text
-Natsume_Ai/
-├─ host_brain/                 # Host 主脑：聊天、治理、观测、调度、Tribe、记忆、工具
-│  ├─ app/                     # FastAPI 应用、运行时、监控前端源码
-│  ├─ tribe/                   # 23 个 tribe family 及事件/注册表
-│  ├─ memory/ retrieval/ bond/ # 记忆、检索、关系系统
-│  ├─ observability/           # 观测聚合与指标
-│  └─ scheduler/               # 调度器
-├─ edge_client/                # Edge RPC、语音执行、网关、平台适配器
-├─ desktop_pet/                # Electron + Live2D 本地桌宠运行时
-├─ integrations/mateengine/    # MateEngine Bridge / patcher 集成资产
-├─ configs/                    # 模型、部署、发布、密钥模板
-├─ docs/                       # 白皮书 / PRD / DevSpec / Project / Trace
-├─ scripts/runtime/            # Host 侧启动、停止、运维脚本
-├─ tests/                      # unit / integration / fixtures
-└─ tools/                      # 诊断、回放、静态扫描、文档门禁
+POST /v1/chat
+  -> host_brain/app/app_factory.py 注册 endpoint
+  -> host_brain/app/chat_routes.py::handle_v1_chat_route()
+  -> host_brain/app/chat_handler.py::handle_chat()
+  -> host_brain/app/agent_runtime_shared.py
+  -> host_brain/app/executive_runtime_core.py
+  -> host_brain/app/surface_main_chain_adapter.py
+  -> host_brain/persona/surface_main_chain.py
 ```
 
-## 主要代码入口
+### Host 路由事实
 
-- 聊天入口：`POST /v1/chat`
-  - `host_brain/app/asgi.py`
-  - `host_brain/app/app_factory.py`
-  - `host_brain/app/chat_routes.py`
-  - `host_brain/app/chat_handler.py`
-  - `host_brain/app/cortex_orchestrator.py`
-  - `host_brain/app/executive_router.py`
-  - `host_brain/app/executive_runtime.py`
-  - `host_brain/app/executive_runtime_core.py`
-  - `host_brain/app/surface_reply_runtime.py`
-- Edge 事件回流：`POST /v1/edge/events`
-- 外部输入回流：`POST /v1/host/input`（当前接收 ASR / Gateway 归一化输入；其他 Edge 运行时事件走 `POST /v1/edge/events`）
-- Edge 能力入口：`/v1/edge/health`、`/v1/edge/avatar_state`、`/v1/edge/speak`、`/v1/edge/barge_in`、`/v1/edge/asr`、`/v1/edge/vts`、`/v1/edge/desktop_pet`、`/v1/edge/fallback/*`、`/v1/edge/screenshot`、`/v1/edge/automate`、`/v1/edge/visual_locate`、`/v1/edge/proactive_push`、`/v1/edge/proactive_messages`、`/v1/edge/wx/*`
-- Desktop Pet 本地入口：`GET http://127.0.0.1:18788/health`、`POST http://127.0.0.1:18788/action`
-- MateEngine Host 入口：`GET /v1/mateengine/capabilities`、`GET /v1/mateengine/health`、`POST /v1/mateengine/signal`、`POST /v1/mateengine/say`、`POST /v1/mateengine/action`
-- 监控与观测：`/obs/*`、`/api/ui/*`、`/panel`、`/monitor/*`
+`host_brain/app/router_registry.py` 当前注册：`/canon`、`/scheduler`、`/host-scheduler/*`、`/tools`、`/prompt-config`、`/bond`、`/v1/agent`、`/v1/host/input`、`/internal/*`、`/v1/digital-life`（含 `/proactive/*`）、`/v1/memory`、`/v1/mateengine`、`/v1/pentest`、`/health`、`/ready` 等。Observability 路由（`/obs/*`、`/api/ui/*`）由独立 `obs_fastapi_app.py` 装配，含 `/obs/proactive-autonomy` 快照端点。
 
-## Monitor UI 当前页面
+`/v1/chat` 和 `/v1/edge/events` 由 `host_brain/app/app_factory.py` 单独注册，不是 `router_registry.py` 中的普通 router include。
 
-Monitor UI 现在已经不是单一的“监控页”，而是围绕数字生命体拆成 4 组导航：
+### Monitor UI
 
-- 数字生命体：`总览`、`生命时间轴`、`病灶中心`、`情绪`、`关系`、`记忆`、`存在态`、`内在世界`、`回复策略`、`自我模型`
-- 运营：`提示词`、`人格文案`、`系统底座`、`设定管理`
-- 器官级观测：`生命体征`、`神经会话`、`神经链路`、`代谢指标`、`皮层洞察`、`神经调试`、`免疫告警`、`生理日志`
-- 外周执行：`感官网关`、`行为技能`、`执行工具`、`节律调度`、`反射回路`
+React 源码位于 `host_brain/app/monitor_ui/src/`。当前 `routeManifest.jsx` 注册 37 条路由，其中 35 条进入导航，分为 Cockpit、Life Systems、Observability、Operations、Execution、Security Lab、Integrations 七组。构建产物位于 `host_brain/app/static/monitor/`，由 monitor proxy 脚本通过 `/monitor/` 对外提供。
 
-对应源码入口见：
+### Pentest
 
-- `host_brain/app/monitor_ui/src/App.jsx`
-- `host_brain/app/monitor_ui/src/components/Layout.jsx`
-- `host_brain/app/monitor_ui/src/routes/routeLoaders.js`
-- `host_brain/app/monitor_ui/src/components/AvatarStateCard.jsx`
+Pentest 使用独立调度链路，不在 `host_brain/skills/impl/` 普通 skill executor 中实现。当前事实：
 
-## 推荐阅读顺序
+- ToolSpec 真源：`host_brain/pentest/tools/tool_specs.py`（88 个 ToolSpec）
+- Executor 真源：`host_brain/pentest/tools/tool_executors.py`（92 个 executor，6,029 行）
+- 88 个 ToolSpec，92 个 executor，37 个 side-effect ToolSpec，0 个缺 executor
+- Kali bridge 有 17 个 wrapper class
+- 规划器：MCTS（`mcts_planner.py`）+ ReAct（`llm_react_planner.py`）+ Cognitive（`agent/cognitive_engine.py`）三条路径
+- Agent 子包：`pentest/agent/` 31 文件（8,906 行），含认知引擎、信念模型、目标模型、演化核心
+- Adversarial：`pentest/adversarial/` 9 文件 — 红蓝对抗 game loop + 策略协同进化
+- Swarm：`pentest/swarm/` 8 文件 — 多 agent 协调器 + 消息总线 + 图合并
+- Online：`pentest/online/` 5 文件 — 安全门控、授权管理、速率治理
+- 入口文档：`host_brain/pentest/CAPABILITY.md`（v2.3）
+- 专项架构：`docs/50_project/arch/PENTEST_MODULES_ARCHITECTURE.md`（v1.1）
 
-1. [docs/00_index/00_DOCMAP.md](docs/00_index/00_DOCMAP.md)
-2. [docs/50_project/arch/CURRENT_CODE_ARCHITECTURE.md](docs/50_project/arch/CURRENT_CODE_ARCHITECTURE.md)
-3. [docs/50_project/arch/CORE_MODULES_DETAILED_REFERENCE.md](docs/50_project/arch/CORE_MODULES_DETAILED_REFERENCE.md)
-4. [docs/50_project/arch/DIGITAL_LIFE_BODY_FRONTEND_ARCHITECTURE_20260419.md](docs/50_project/arch/DIGITAL_LIFE_BODY_FRONTEND_ARCHITECTURE_20260419.md)
-5. [docs/50_project/arch/dataflow_report.md](docs/50_project/arch/dataflow_report.md)
-6. [docs/60_trace/requirements_trace.md](docs/60_trace/requirements_trace.md)
-7. [docs/30_devspec/desktop_pet_runtime.md](docs/30_devspec/desktop_pet_runtime.md)
-8. [docs/30_devspec/mateengine_bridge.md](docs/30_devspec/mateengine_bridge.md)
-
-如果旧文档与当前代码不一致，请优先以 `CURRENT_CODE_ARCHITECTURE.md`、`CORE_MODULES_DETAILED_REFERENCE.md` 和实际代码为准。
-
-## 启动方式
-
-Windows 环境优先使用仓库自带脚本：
-
-- `scripts/runtime/start_host_side.ps1`
-- `scripts/runtime/stop_host_side.ps1`
-
-手动入口：
+## 快速启动
 
 ```powershell
-python -m host_brain --startup-check
-python -m host_brain.obs_main
-python -m edge_client
-```
+# Host Brain
+python -m host_brain --port 18080
 
-本地桌宠入口：
+# Observability
+python -m host_brain.obs_main --port 18082
 
-```powershell
+# Edge RPC
+python -m edge_client --port 17800
+
+# Monitor proxy
+powershell -ExecutionPolicy Bypass -File scripts/runtime/start_monitor_proxy.ps1
+
+# Desktop Pet
 cd desktop_pet
-npm run start
+npm install
+npm start
 ```
 
-## 技术栈
+Gateway 通常由 Edge bootstrap 组装运行；配置入口在 `edge_client/config.py`，平台范围由 `EDGE_GATEWAY_PLATFORMS` 控制，当前支持 `wechat`、`qq`、`feishu`、`wecom`、`telegram`、`line`。
 
-- Backend：Python、FastAPI
-- Frontend：React 18、Vite、Tailwind CSS、ECharts、XYFlow、Zustand
-- Desktop runtime：Electron、PixiJS、pixi-live2d-display、Live2D Cubism
-- MateEngine integration：Python HTTP/UDP bridge、C# patcher/plugin assets
-- Storage：SQLite、Chroma、Neo4j
-- Runtime pattern：SSE、Tribe event bus、Edge RPC、gateway adapters、desktop pet action bridge、MateEngine signal/action bridge
+## 主要文档
 
-## 说明
-
-- `README.md` 现在只做仓库入口，不再承担完整架构白皮书角色
-- 阶段性方案、历史计划和封板报告仍保留在 `docs/50_project/`、`docs/50_release/`、`docs/60_trace/`
-- 监控前端最近有较大重构，涉及“生命时间轴 / 病灶中心 / 数字生命体导航”的页面变化时，请优先检查 `host_brain/app/monitor_ui/src/`
-- 涉及本地桌宠、MateEngine、Avatar 状态或 Edge 语音/表情联动时，请同时检查 `desktop_pet/`、`host_brain/channels/mateengine.py`、`host_brain/app/mateengine_routes.py`、`edge_client/runtime/voice_pipeline.py` 与 `edge_client/runtime/avatar_behavior.py`
+- 文档地图：`docs/00_index/00_DOCMAP.md`
+- 当前代码架构：`docs/50_project/arch/CURRENT_CODE_ARCHITECTURE.md`
+- 核心模块参考：`docs/50_project/arch/CORE_MODULES_DETAILED_REFERENCE.md`
+- Pentest 专项架构：`docs/50_project/arch/PENTEST_MODULES_ARCHITECTURE.md`
+- Pentest 能力边界：`host_brain/pentest/CAPABILITY.md`
+- 数据流报告：`docs/50_project/arch/dataflow_report.md`
+- 工程契约：`docs/30_devspec/DevSpec.md`
+- 人格定义：`Soul.md`
