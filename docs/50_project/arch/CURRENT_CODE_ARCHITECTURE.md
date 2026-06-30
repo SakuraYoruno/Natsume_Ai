@@ -1,412 +1,347 @@
 受众：MASTER
-标题：当前代码架构总览（2026-06-23）
+标题：当前代码架构总览
 
-版本：v3.3
-日期：2026-06-23
-分析锚点：dev@b28c20a2
-定位：以当前仓库代码为唯一真源，描述运行面、入口、主链、目录与监控前端结构。若历史方案文档与本文冲突，以本文与代码为准。
+# CURRENT_CODE_ARCHITECTURE
 
-# 当前代码架构总览（2026-06-23）
+版本：v4.2 Living
+最后同步：2026-06-30
 
-## 0. 快速导航
+本文件记录当前工作区代码事实。若本文与代码冲突，以代码为准；若历史文档与本文冲突，以本文和代码为准。
 
-- 仓库入口：`README.md`
-- 核心模块详解：`docs/50_project/arch/CORE_MODULES_DETAILED_REFERENCE.md`
-- 数据流补充：`docs/50_project/arch/dataflow_report.md`
-- 前端主体化方案：`docs/50_project/arch/DIGITAL_LIFE_BODY_FRONTEND_ARCHITECTURE_20260419.md`
-- Desktop Pet 契约：`docs/30_devspec/desktop_pet_runtime.md`
-- MateEngine Bridge 契约：`docs/30_devspec/mateengine_bridge.md`
-- 历史架构快照：`docs/_history/2026-04-22_arch_snapshot/`
+## 1. 运行面
 
-## 0.1 Normal Chat 主链记忆（高优先级，2026-05-30 续期）
+| 运行面 | 入口 | 配置/端口 | 说明 |
+|---|---|---|---|
+| Host Main | `host_brain/__main__.py` -> `host_brain.app.asgi:app` | `HOST_APP_PORT`，CLI fallback `8000` | 主 API、聊天主链、工具、记忆、数字生命、Pentest |
+| Obs Backend | `host_brain/obs_main.py` -> `host_brain.app.obs_fastapi_app:app` | `HOST_OBS_APP_PORT`，fallback `18082` | 独立监控后端；包含 `/obs/*` 和 `/api/ui/*` |
+| Monitor Proxy | `scripts/runtime/start_monitor_proxy.ps1` | `HOST_MONITOR_PROXY_PORT`，fallback `18180` | Nginx 静态代理 `/monitor/`，并代理 Host/Obs upstream |
+| Edge RPC | `edge_client/__main__.py` | `EDGE_RPC_PORT`，fallback `17800` | Edge 侧 FastAPI RPC |
+| Unified Gateway | `edge_client/gateway/bootstrap.py` | `EDGE_GATEWAY_PORT`，fallback `19000` | 平台消息 webhook、输入回流、回复分发 |
+| Desktop Pet | `desktop_pet/main.cjs` | `NATSUME_DESKTOP_PET_PORT`，fallback `18788` | Electron + Live2D 本地窗口与 HTTP 控制面 |
+| MateEngine/VRM | `host_brain/channels/mateengine.py`、`edge_client/config.py` | UDP `32145`，bridge `18770` | Host MateEngine signal/action，Edge VRM bridge 配置 |
 
-这条记录是后续 normal chat 重构的**主线约束**。若历史方案、旧链文档或局部测试与本节冲突，以本节为准。
+## 2. 目录规模
 
-- 旧 `prompt_builder` 主链是「完整能力库」，**不是**当前 normal chat 文本质量阶段的 live 主链。
-- `/v1/chat` 当前 live 主链是 **SurfaceMainChain + ReplyEnvelope**：
-  `asgi.chat_endpoint → chat_routes.handle_v1_chat_route → chat_handler.handle_chat/_unified_chat_sse_generator → thalamus_agent.classify_and_compile_intent_draft → Governor/IntentDecisionEngine.evaluate_intent → cortex_orchestrator → agent_runtime_shared → executive_router → executive_runtime → executive_runtime_core → surface_reply_runtime.surface_reply_sse_generator → surface_main_chain_adapter.surface_main_chain_sse_generator → persona.surface_main_chain.SurfaceMainChain → ReplyEnvelope`。
-- 文本质量未过关前，不再继续把旧链能力模块塞回 normal chat live path。
-- 旧链能力（reply_plan、validator、fallback、fastpath、transport ack、thread resolver、cache、memory）只能向 SurfaceMainChain 提供 `facts / state / memory / perception / performance / media action`，不能写最终人格回复。
-- normal chat 最终文本作者**只能**是 `SurfaceMainChain`，最终对外 commit 由 `ReplyEnvelope` 包装；不是旧 `ChatAgent`、也不是 `SurfaceReply` body。媒体场景（图片、贴纸、表情包）的最终作者只能是结构化 reaction/media selector（`reply_modality_router.py`）。
-- `/v1/host/input` 不是转发 `/v1/chat`。它是 ASR/Gateway ingress，独立完成字段校验、ASR 噪声门、Gateway 去重、多模态暂存、Immune gate、person_id / inner-life catchup 后，直接构造内部 `ChatRequest` 进入 Cortex orchestrator pipeline。
-- 任何模块若导致文本质量下降，只能保留在实验链或非聊天任务链，不进入 normal chat 主线。
-- 子代理（sub-agent）回复必要时绕过 surface chain，但仍受 `surface_reply_postprocessor` 的 airlock 净化与 envelope 包装。
+| 路径 | 当前规模 | 说明 |
+|---|---:|---|
+| `host_brain/app/` | 228 `.py` | Host app、chat 主链、路由、Obs app、monitor-facing API |
+| `host_brain/persona/` | 75 `.py` | Persona、inner world、reply plan、Surface 主链 |
+| `host_brain/persona/surface/` | 17 `.py` | Surface 数据模型、prompt、校验、候选评分和 scoring 子包 |
+| `host_brain/pentest/` | 124 `.py` | Pentest 工具、agent、adversarial、swarm、online、安全边界 |
+| `host_brain/runtime/` | 6 `.py` | 数字生命后台 tick、连续性、器官与自主发起 |
+| `host_brain/memory/` | 24 `.py` | LifeMemoryStore、召回、Canon、上下文压缩 |
+| `host_brain/tribe/` | 34 `.py` | HostTribeRegistry、事件总线、agent 实现 |
+| `host_brain/governor/` | 10 `.py` | 决策治理、规则、rate limit、token budget |
+| `host_brain/skills/impl/` | 25 executor 文件 | 普通 skill executor；不包含 Pentest 执行器 |
+| `edge_client/` | 80 `.py` | Edge RPC、Gateway、平台适配器 |
+| `host_brain/app/monitor_ui/src/` | 458 源文件 | React Monitor UI 源码 |
 
-## 1. 代码证据入口
+## 3. Host Main 装配
 
-以下文件构成当前代码架构的**直接证据入口**，文档表述若与这些文件不符，以代码为准：
-
-进程入口：
-- `host_brain/__main__.py` — Host Main 进程入口
-- `host_brain/obs_main.py` — Observability 后端进程入口
-- `edge_client/__main__.py` — Edge RPC 进程入口
-- `edge_client/gateway/bootstrap.py` — Unified Message Gateway 进程入口
-- `desktop_pet/main.cjs` — Electron + Live2D 本地桌宠进程入口
-
-Host Main FastAPI 装配：
-- `host_brain/app/asgi.py` — ASGI 入口与 `app = create_app()`
-- `host_brain/app/app_factory.py` — `create_host_fastapi_app()`
-- `host_brain/app/router_registry.py` — 注册全部 Host Main 路由
-- `host_brain/app/digital_life_routes.py` — `/v1/digital-life/*` 数字生命体运行态 API
-- `host_brain/app/memory_routes.py` — `/v1/memory/*` 记忆调试 / rebuild / sanitize API
-- `host_brain/app/mateengine_routes.py` — `/v1/mateengine/*` Host 路由
-- `host_brain/app/pentest_routes.py` — `/v1/pentest/*` 授权 pentest 工作台 API
-- `host_brain/channels/mateengine.py` — MateEngine UDP signal / HTTP bridge 通道
-
-Chat 主链与编排：
-- `host_brain/app/chat_routes.py` — `/v1/chat` 鉴权 / immune gate 入口
-- `host_brain/app/chat_handler.py` — `handle_chat` 与统一 SSE 生成器
-- `host_brain/app/cortex_orchestrator.py` — Cortex 编排入口（薄壳）
-- `host_brain/app/agent_runtime_shared.py` — 编排与回流主体（巨型实现层）
-- `host_brain/app/executive_router.py` / `executive_runtime.py` / `executive_runtime_core.py`
-- `host_brain/app/surface_reply_runtime.py`、`surface_reply_preprocessor.py`、`surface_reply_postprocessor.py`、`surface_main_chain.py`
-- `host_brain/app/surface_main_chain_adapter.py` — Surface 主链 SSE 适配器
-- `host_brain/persona/surface_main_chain.py` — Surface 主链 facade
-- `host_brain/persona/surface_runtime.py`、`surface_packet_compiler.py`、`isolated_surface_harness.py`
-
-输入入口：
-- `host_brain/app/input_routes.py` — `/v1/host/input`（Gateway / ASR 归一化输入）
-- `host_brain/app/edge_event_routes.py` — `/v1/edge/events`
-
-观测入口：
-- `host_brain/app/obs_fastapi_app.py` — 独立 Observability App
-- `host_brain/app/obs_routes_*.py` — `/obs/*` 路由族
-
-Tribe / 23 个器官族：
-- `host_brain/tribe/registry.py` — `_DEFAULT_FAMILY_SPECS` 23 项
-- `host_brain/tribe/__init__.py` — 23 个 agent 类与单例 getter
-
-Monitor UI：
-- `host_brain/app/monitor_ui/src/App.jsx`
-- `host_brain/app/monitor_ui/src/app/routeManifest.jsx`
-- `host_brain/app/monitor_ui/src/app/shell/Layout.jsx`
-- `host_brain/app/monitor_ui/src/routes/routeLoaders.js`
-- `host_brain/app/monitor_ui/src/features/`
-- `host_brain/app/monitor_ui/src/features/life/components/AvatarStateCard.jsx`
-
-## 2. 当前运行面
-
-| 运行面 | 入口文件 | 默认端口 | 当前职责 |
-|---|---|---:|---|
-| Host Main | `host_brain/__main__.py`（→ `host_brain.app.asgi:app`） | 8000 | 主聊天入口、Tribe / 调度 / Tool / Bond / Canon / Prompt / Internal / Health / Input 等业务路由，兼容 `/obs/*` |
-| Observability Backend | `host_brain/obs_main.py`（→ `host_brain.app.obs_fastapi_app:app`） | 18082 | 独立观测后端，承接重型监控查询、Monitor UI Web 资源、`/api/ui/*` 与 `/obs/*` |
-| Edge RPC | `edge_client/__main__.py` | 17800 | TTS、ASR、VTS/VRM、avatar state、desktop pet 转发、barge-in、截图、自动化、视觉定位、主动推送、fallback、微信查询等能力入口 |
-| Unified Message Gateway | `edge_client/gateway/bootstrap.py` | 19000 | 外部平台消息接入与回推 |
-| Monitor UI Source | `host_brain/app/monitor_ui/` | - | React 监控前端源码 |
-| Monitor UI Static | `host_brain/app/static/monitor/` | - | 构建产物，由 Observability Backend 静态托管（也支持 Host Main fallback） |
-| Desktop Pet | `desktop_pet/main.cjs` | 18788 | Electron 透明本地桌宠窗口，直接渲染 Live2D 并暴露 `/health`、`/action` |
-| MateEngine Bridge | `host_brain/channels/mateengine.py` + `host_brain/app/mateengine_routes.py` | 32145 / 18770 | Host 到 MateEngine 的本地表现层桥，支持 signal、say、state、pose、mouth、gesture/action sequence |
-
-补充说明：
-
-- Host Main 仍保留 `/obs/*` 兼容入口（位于 `obs_routes_*.py` 的内嵌路由），主要用于本地一体化运行排障。
-- `host_brain/app/asgi.py + app_factory.py + router_registry.py` 三件套替代了旧的 `fastapi_app.py`（Host 端旧文件已删除；obs 端 `obs_fastapi_app.py` 仍保留，因为 obs 后端是独立进程）。
-- Observability Backend 启动时会预热 `runtime snapshot`、`trace feed`、`insights summary`、`digital-life overview`、`life-body` 五类缓存。
-- Desktop Pet 与 MateEngine 都是本地外显面，不是记忆、人格策略或审计事实来源；Host 仍是决策与事实主权域。
-
-## 3. 代码目录主干
+`host_brain/app/app_factory.py` 是 Host FastAPI 装配点：
 
 ```text
-Natsume_Ai/
-├─ host_brain/                 # Host 主脑
-│  ├─ __main__.py              # Host Main 进程入口
-│  ├─ obs_main.py              # Observability 后端进程入口
-│  ├─ app/                     # FastAPI、聊天运行时、obs 路由、监控前端源码
-│  │  ├─ asgi.py / app_factory.py / router_registry.py   # Host Main FastAPI 装配
-│  │  ├─ chat_routes.py / chat_handler.py                # /v1/chat 入口
-│  │  ├─ surface_reply_runtime.py / surface_reply_preprocessor.py /
-│  │  │   surface_reply_postprocessor.py / surface_main_chain.py
-│  │  ├─ surface_main_chain_adapter.py / surface_context_packet.py /
-│  │  │   surface_emotion_bond_flow.py
-│  │  ├─ cortex_orchestrator.py / executive_*.py /
-│  │  │   agent_runtime_shared.py（编排实现主体）
-│  │  ├─ obs_*.py             # 内嵌 /obs/* 路由（Host 兼容 + Obs 后端共用）
-│  │  ├─ obs_fastapi_app.py   # Observability 后端 FastAPI app
-│  │  ├─ digital_life_routes.py / memory_routes.py / pentest_routes.py
-│  │  │                         # 数字生命体、记忆调试、授权 pentest API
-│  │  ├─ mateengine_routes.py # /v1/mateengine/* 本地桌宠表现层路由
-│  │  ├─ monitor_ui/          # React feature-sliced 前端源码（7 大导航 + 35+ route）
-│  │  └─ static/monitor/      # 构建产物
-│  ├─ tribe/                  # 23 个器官族 agent + 事件总线 + 注册表 + handoff
-│  ├─ persona/                # Surface 主链全家桶 + 情绪/人格/沉默/孤独/成长
-│  │  ├─ surface_main_chain.py / surface_runtime.py /
-│  │  │   surface_packet_compiler.py / surface_memory_recall.py /
-│  │  │   surface_affect_control.py / surface_influence_packet.py /
-│  │  │   surface_organ_influence.py / surface_original_quote_bank.py /
-│  │  │   surface_scene_quality_pack.py / surface_low_info_guidance.py
-│  │  ├─ isolated_surface_harness.py / isolated_surface_continuity.py
-│  │  ├─ inner_world.py / inner_activity_agent.py / offline_continuity.py
-│  │  ├─ inner_monologue.py / motive_engine.py
-│  │  ├─ text_quality_gate.py / galgame_taste_guard.py
-│  │  ├─ emotional_silence.py / emotional_proactive.py /
-│  │  │   evolution_orchestrator.py / interaction_pattern_analyzer.py
-│  │  └─ galgame_text_contract.py / galgame_text_scorer.py / sample_guided_text_scorer.py
-│  ├─ memory/                 # 记忆 SSOT
-│  │  ├─ life_memory.py（LifeMemoryStore，SQLite-backed life episodes）
-│  │  ├─ life_memory_query.py / long_term_distiller.py / distillation.py
-│  │  ├─ episodic.py / episodic_memory_graph.py / chroma_client.py
-│  │  ├─ canon_world_store.py / canon_helpers.py / canon_schemas.py /
-│  │  │   canon_sync.py / canon_vector_*（当前无 canon_style_store.py）
-│  │  └─ context_compressor.py / consolidation_trigger.py / memory_worth_evaluator.py
-│  ├─ retrieval/              # 召回融合层
-│  │  ├─ recall_fusion.py（RecallFusionServiceContract）
-│  │  ├─ recall_fusion_stores.py / recall_fusion_config.py
-│  │  ├─ full_text_searcher.py（FTS5 混合检索）
-│  │  └─ hybrid_fusion.py / audit_preview.py / recall_schemas.py
-│  ├─ bio_ops/                # Codex Bio-Operations Layer（proposal-only）
-│  │  ├─ adoption.py / capabilities.py / contracts.py
-│  │  ├─ daily_cycle.py / owner_inbox.py / owner_consumer.py
-│  │  ├─ runtime_trace.py / scheduler.py / workflow.py / safety.py
-│  ├─ codex_runtime/          # WorkOrder-first 执行面
-│  │  ├─ executor.py / production_executor.py / production_studio.py
-│  │  ├─ work_order.py / result_contract.py / verification_policy.py
-│  │  ├─ studios/             # code / finance / research / skill_forge
-│  │  ├─ lightnovel_deep_reviewer.py / lightnovel_epub_builder.py /
-│  │  │   browser_researcher.py / generic_evidence_reviewer.py
-│  ├─ security_immune/        # 授权网络防御免疫层
-│  │  ├─ agent.py / policy.py / actions.py / models.py
-│  │  ├─ providers/ / evidence.py / local_sensor.py / verdict.py
-│  ├─ bond/                   # Bond 关系动力（Stage / 用户身份）
-│  ├─ canon/                  # 人物 / 世界 canon（当前没有 style/ 活动子系统）
-│  ├─ governor/ scheduler/    # 治理与调度
-│  ├─ observability/          # 观测聚合与查询
-│  ├─ conversation/ core/ audit/ release/ tools/ skills/ mcp/
-│  ├─ channels/
-│  │  └─ mateengine.py       # MateEngine UDP signal / HTTP bridge 通道
-│  ├─ integrations/ reasoning/ runtime/ lsp/ evolution_lab/
-│  ├─ immune_memory/ organ_ops/ airlock/
-│  └─ app/
-│     ├─ handlers/            # 9 个 Agent handler（chat/emotion/intent/judge/repair/retrieval/supervisor/translate）
-│     ├─ context/             # 21 个上下文模块（interaction/dialogue/drive/affect/soul/topic/persona_expression 等）
-│     ├─ agents/              # 4 个 Agent 基础设施（contract/registry/react_loop/tool_registry）
-│     ├─ memory/              # 5 个 App 层记忆模块（state_arbiter/memory_guard/distillation_engine/episodic_store）
-│     ├─ automation/          # 3 个自动化模块（task_scheduler/scheduler_routes/host_desktop）
-│     ├─ vision/              # 5 个视觉模块（action_planner/agent_loop/clawdbot_protocol/ui_assertion/edge_rpc_client）
-│     ├─ llm/                 # 模型路由矩阵（routing_matrix）
-│     ├─ schemas/             # 核心数据结构（agent_envelope/memory_types/routing_types）
-│     ├─ settings/            # 7 个 Settings 模块（base/core/llm/observability/tribe/capability_forge）
-│     ├─ recall/              # 语义召回（semantic_recall）
-│     └─ graph/               # 图类型定义（chain_types）
-├─ edge_client/                # Edge RPC、语音执行、网关、平台适配器
-│  ├─ __main__.py / app/ runtime/ senses/ actuators/ rpc/
-│  ├─ runtime/avatar_behavior.py / voice_pipeline.py  # avatar 状态与语音/口型行为链
-│  ├─ actuators/fanout_avatar_driver.py / vts_driver.py / vrm_bridge_driver.py
-│  ├─ gateway/                # Unified Message Gateway
-│  │  ├─ bootstrap.py / server.py / router.py / normalizer.py /
-│  │  │   humanize_sender.py / models.py
-│  │  ├─ adapters/            # wechat / qq / feishu / wecom / telegram / line
-│  │  └─ media/
-│  ├─ channels/               # 通道基类与 input reporter
-│  ├─ tribe/                  # 边缘侧 peripheral / somatic agent
-│  └─ security_probe/         # 边缘侧安全采集
-├─ desktop_pet/                # Electron + PixiJS + Live2D 透明本地桌宠
-├─ integrations/mateengine/    # MateEngine patcher / bridge plugin 集成资产
-├─ configs/                   # 模型 / 部署 / 发布 / 密钥模板
-├─ data/                      # 风格库 / 样本库（surface_scene_quality_pack 等）
-├─ docs/                      # 白皮书 / PRD / DevSpec / Project / Trace
-├─ scripts/runtime/           # Host 侧启动 / 停止 / 运维脚本
-├─ tests/                     # unit / integration / acceptance / fixtures
-└─ tools/                     # 诊断 / 回放 / 静态扫描 / 文档门禁
+create_host_fastapi_app()
+  -> wire_route_providers()
+  -> register_host_routers(app)
+  -> configure_http_middleware(app)
+  -> app.post("/v1/chat")(chat_endpoint)
+  -> app.post("/v1/edge/events")(edge_events_endpoint)
+  -> app.get("/metrics")
+  -> app.get("/")
 ```
 
-## 4. Host Main FastAPI 装配（2026-05-30 关键变化）
+`host_brain/app/router_registry.py` 当前 include 顺序：
 
-旧的单文件 `host_brain/app/fastapi_app.py` 已被三件套替换，进程内组装顺序：
-
-```
-host_brain/__main__.py
-  → 加载 .env / 启动 startup-check
-  → uvicorn.run("host_brain.app.asgi:app")
-host_brain/app/asgi.py
-  → app = create_app() → host_brain/app/app_factory.create_host_fastapi_app(...)
-host_brain/app/app_factory.py
-  → 注入 lifespan / metrics / 各 dependency provider
-  → register_host_routers(app)（来自 router_registry）
-  → configure_http_middleware(app)
-  → 全局异常 handler、request-id 中间件
-  → 显式注册 /v1/chat、/v1/edge/events、/metrics、/
-host_brain/app/router_registry.py
-  → wire_route_providers(...)（注入 ledger/tool/bond/scheduler 等）
-  → 顺序 include_router：
-       canon_router, scheduler_router, host_scheduler_router,
-       tool_router, tool_kits_alias_router, prompt_config_router,
-       bond_router, agent_router, input_router,
-       internal_tribe_router, internal_codex_router,
-       internal_security_immune_router,
-       digital_life_router, memory_router, mateengine_router,
-       pentest_router, health_router
+```text
+canon -> scheduler -> host_scheduler(/host-scheduler) -> tools -> tool alias
+-> prompt_config -> bond -> agent -> input -> internal_tribe
+-> internal_codex -> internal_security_immune -> digital_life
+-> memory -> mateengine -> pentest -> health
 ```
 
-## 5. 主链 SSE 路径（normal chat）
+注意：`/v1/chat` 与 `/v1/edge/events` 是 `app_factory.py` 直接注册，不在 `router_registry.py` include 列表中。
+
+Observability 路由（`host_brain/app/obs_routes_*.py`，23 个文件，~14K 行）不在 `router_registry.py` 中注册，而是通过 `host_brain/app/obs_routes.py` 聚合器在 `obs_fastapi_app.py` 中单独装配。
+
+## 4. Host 路由前缀
+
+| 前缀 | 模块 | 说明 |
+|---|---|---|
+| `/v1/chat` | `app_factory.py` + `chat_routes.py` | SSE 聊天入口 |
+| `/v1/edge/events` | `app_factory.py` | Edge 事件回流 |
+| `/canon` | `canon_routes.py` | Canon proposal/document/hotword |
+| `/scheduler` | `host_brain/scheduler/scheduler_routes.py` | Scheduler API |
+| `/host-scheduler/*` | `app/automation/scheduler_routes.py` | Host scheduler API |
+| `/tools` | `tool_routes.py` | Tool catalog、execute、custom providers、hub |
+| `/prompt-config` | `prompt_config_routes.py` | Prompt template/catalog |
+| `/bond` | `bond_routes.py` | 关系与羁绊状态 |
+| `/v1/agent` | `agent_routes.py` | Agent run/info |
+| `/v1/host/input` | `input_routes.py` | ASR/Gateway 统一输入回流 |
+| `/internal/*` | `internal_tribe_routes.py`、`internal_agent_routes.py`、`internal_security_immune_routes.py` | 内部 Tribe/Codex/security API |
+| `/v1/digital-life` | `digital_life_routes.py` | 数字生命状态、tick、主动发起、器官（18 个端点含 3 个 proactive） |
+| `/v1/digital-life/proactive/*` | `digital_life_routes.py` | Proactive 主动发起（attempt/recent/episodes） |
+| `/obs/proactive-autonomy` | `obs_routes_proactive_autonomy.py` | Proactive autonomy 快照 |
+| `/v1/memory` | `memory_routes.py` | 记忆健康、事件、重建、清理 |
+| `/v1/mateengine` | `mateengine_routes.py` | capabilities/health/signal/say/action |
+| `/v1/pentest` | `pentest_routes.py` | Pentest capabilities/environment/runs/events/report/knowledge |
+| `/health`、`/ready`、`/startup` | `health_routes.py` | 健康与启动状态 |
+| `/metrics` | `app_factory.py` | Host runtime metrics |
+
+## 5. Chat 主链
 
 ```mermaid
-graph TD
-    U["用户 / API Client"] --> ASGI["asgi.chat_endpoint"]
-    ASGI --> CR["chat_routes.handle_v1_chat_route"]
-    CR --> IMG["chat_immune_gate.evaluate_immune_gate_for_chat"]
-    IMG --> CH["chat_handler.handle_chat"]
-    CH --> SSEU["_unified_chat_sse_generator"]
-    SSEU --> THAL["thalamus_agent.classify_and_compile_intent_draft"]
-    THAL --> GOV["Governor / IntentDecisionEngine.evaluate_intent"]
-    GOV --> CO["cortex_orchestrator_sse_generator"]
-    CO --> ARS["agent_runtime_shared._cortex_orchestrator_sse_generator_impl"]
-    ARS --> ER["executive_router → executive_runtime → executive_runtime_core"]
-    ER --> CAG["surface_reply_runtime.surface_reply_sse_generator"]
-    CAG --> SMC["surface_main_chain_adapter.surface_main_chain_sse_generator"]
-    SMC --> PSMC["persona.surface_main_chain.SurfaceMainChain"]
-    PSMC --> COMP["persona.surface_packet_compiler.compile_surface_input"]
-    COMP --> RUN["persona.surface_runtime.SurfaceRuntime"]
-    RUN --> ENV["app.reply_envelope（COMMIT 包装）"]
-    ENV --> POST["surface_reply_postprocessor（airlock + 异步副作用）"]
-    POST --> OUT["SSE token 流回客户端"]
+sequenceDiagram
+    participant U as "Client"
+    participant AF as "app_factory"
+    participant CR as "chat_routes"
+    participant CH as "chat_handler"
+    participant AS as "agent_runtime_shared"
+    participant ER as "executive_runtime_core"
+    participant SA as "surface_main_chain_adapter"
+    participant SMC as "SurfaceMainChain"
 
-    SSEU -. record_user_turn .-> CONV["conversation/writer"]
-    CAG -. retrieval .-> RF["retrieval.recall_fusion / persona.surface_memory_recall"]
-    RF --> LM["memory.life_memory.LifeMemoryStore"]
+    U->>AF: POST /v1/chat
+    AF->>CR: handle_v1_chat_route()
+    CR->>CH: handle_chat()
+    CH->>AS: shared runtime / cortex SSE
+    AS->>ER: route, skill-first, sub-agent dispatch
+    ER-->>AS: render output / agent output
+    AS-->>CH: stream stages
+    CH->>SA: run_surface_main_chain_for_surface_reply_input()
+    SA->>SMC: plan recall, build messages, generate surface reply
+    SMC-->>SA: SurfaceMainChainResult
+    SA-->>CH: postprocessed reply tokens
+    CH-->>U: SSE stream
 ```
 
-要点：
+关键文件：
 
-- **SSE 三阶段**：`PRESENCE → COMMIT → POST`。前端只渲染 `PRESENCE`/`COMMIT`，后处理在 `POST` 静默落地。
-- **Surface 主链**默认对所有 normal chat 启用，由 `surface_main_chain_required()` 与 `surface_main_chain_enabled()` 二重判断；sub-agent 场景可绕过。
-- **Immune Gate** 在路由层执行（`chat_routes.py`），决定是否拒绝或仅 report。
-- **Thalamus** 统一收口 canonical intent（route=chat/delegate/skill/plan）。
-- **Governor** 鉴权使用线程池 (`HOST_GOVERNOR_EXECUTOR_WORKERS`)。
+| 文件 | 职责 |
+|---|---|
+| `host_brain/app/chat_routes.py` | `/v1/chat` request wrapper、immune gate、BioOps preflight |
+| `host_brain/app/chat_handler.py` | 主 SSE generator |
+| `host_brain/app/agent_runtime_shared.py` | 共享 runtime hub、检索预取、子 agent gateway |
+| `host_brain/app/executive_runtime_core.py` | skill-first 执行、硬规则路由、多步任务、sub-agent dispatch |
+| `host_brain/app/surface_main_chain_adapter.py` | App 层到 Persona Surface 主链的桥接 |
+| `host_brain/persona/surface_main_chain.py` | SurfaceMainChain 入口 |
+| `host_brain/persona/surface_runtime.py` | 直接 LLM 生成、task mode、hard gate 检查 |
+| `host_brain/persona/surface_memory_recall.py` | Surface 记忆召回计划与 evidence 组织 |
+| `host_brain/persona/surface_packet_compiler.py` | ReplyControlPacket 编译 |
 
-## 6. 路由表（Host Main）
+## 6. Persona / Surface
 
-| Prefix | Router 来源 | 主要端点 |
+当前 Persona 层（75 文件，120+ 类）按 Phase I-XVI 组织。主干管线：
+
+### 6.1 人格与状态
+
+| 组 | 关键文件 | 行数 | 说明 |
+|---|---|---|---|
+| 核心引擎 | `persona_engine.py`、`personality_traits.py` | 520 + 396 | 7 维特质向量（warmth/curiosity/humor/sensitivity/assertiveness/playfulness/resilience）、表达 hint、Canon JSON 持久化 |
+| 内在世界 | `inner_world.py`、`inner_activity_agent.py`、`inner_monologue.py` | 2,565 + 1,829 + 1,387 | 离线状态机（loneliness 0.05/hr accumulation）、独白质量评分、体感模型 |
+| 情感系统 | `emotional_proactive.py`、`emotional_silence.py`、`emotion_persistence.py`、`emotion_reactivity.py` | 845 + 727 + 552 + 386 | 主动发起冲动、沉默状态引擎、跨会话持久化、反应性调校 |
+| 成长演化 | `evolution_orchestrator.py`、`evolution_desire_engine.py`、`trait_drift_guard.py`、`drift_detector.py`、`emergent_growth_engine.py` | 964 + 664 + 435 + 686 + 501 | 演化编排、意愿引擎、特质漂移守护、涌现成长 |
+| 主动语音 | `proactive_voice.py` | 1,477 | 场景感知主动表达（LATE_NIGHT/LONG_ABSENT/POST_INTENSE/TOPIC_FOLLOWUP/MORNING_GREET/HOLIDAY_GREET），24h 冷却 |
+
+### 6.2 回复规划与质量
+
+| 组 | 关键文件 | 行数 | 说明 |
+|---|---|---|---|
+| 回复规划 | `reply_plan.py`、`reply_tactics.py`、`reply_validator.py` | 2,172 + 287 + 1,254 | 回复轨迹规划、战术选择、质量校验 V2 |
+| 文本质量 | `text_quality_gate.py`、`galgame_text_contract.py`、`galgame_text_scorer.py`、`sample_guided_text_scorer.py` | 1,118 + 1,631 + 383 + 1,203 | 文本质量门控、Visual Novel 风格契约与评分 |
+| 动机 | `motive_engine.py`、`motive_runtime.py` | 448 + 143 | reach_out/continuity/withdraw/self_protect 动机计算 |
+
+### 6.3 Surface 生成管线
+
+```text
+SurfaceMainChain (surface_main_chain.py, 250 行)
+  → SurfaceRuntime (surface_runtime.py, 2,668 行) — LLM 运行时编排
+  → SurfaceMemoryRecall (surface_memory_recall.py, 4,539 行) — 记忆召回注入
+  → SurfacePacketCompiler (surface_packet_compiler.py, 713 行) — 多包编译为统一输入
+  → CandidateScoring (surface/candidate_scoring.py, 1,912 行) — 候选评分与选择
+    → scoring/parse.py (262 行) — 候选解析、问题预算计数
+    → scoring/stage_positions.py (406 行) — 场景位置评分（back/morning/low-energy/self-doubt/positive）
+    → scoring/control_affect.py (398 行) — 情感控制评分（情绪基调 + 关系距离）
+    → scoring/texture.py (273 行) — 纹理评分（签名纹理命中 + 场景质量样本评分）
+    → scoring/constants.py (37 行) — 本地评分常量
+```
+
+### 6.4 关键数据模型
+
+- **`ReplyControlPacket`**：inner-state leakage 字段 — `inner_weather`、`body_state_hint`、`care_signal`、`continuity_signal`、`tension_hint`、`liveliness`、`active_loops`。将角色内部状态泄漏给 Surface LLM，但不暴露原始私密思维。
+- **`SurfaceInfluencePacket`**：7 种子影响类型 — Task、Affect、Relationship、Memory、Continuity、Safety、Delivery。
+- **`IsolatedSurfaceInput`**：Pydantic v1/v2 双兼容，携带 MemoryRecallPacket + ReplyControlPacket + SurfaceInfluencePacket。
+- **`PersonalityTraits`**：7 维连续向量 [0.0, 1.0]，阈值触发表达 hint（非开关）。
+
+### 6.5 `persona/surface/` 子包
+
+共 17 个 Python 文件（11 个 surface/ 根 + 6 个 scoring/）：
+
+| 模块 | 行数 | 职责 |
 |---|---|---|
-| `/v1/chat` | `app_factory` 直接注册 | POST 聊天入口（SSE） |
-| `/v1/edge/events` | `app_factory` 直接注册 | POST Edge 事件回流 |
-| `/v1/host/input` | `input_routes` | POST Gateway/ASR 归一化输入 |
-| `/v1/digital-life/*` | `digital_life_routes` | 数字生命体 state/runtime/environment/growth/proactive/organs/experience |
-| `/v1/memory/*` | `memory_routes` | 记忆上下文 debug、health、recent events、rebuild、sanitize、spine backfill |
-| `/v1/agent/*` | `agent_routes` | Agent loop 操作 |
-| `/v1/mateengine/*` | `mateengine_routes` | MateEngine capabilities / health / signal / say / action |
-| `/v1/pentest/*` | `pentest_routes` | 授权 pentest capabilities/environment/runs/report/side-effect approval |
-| `/canon/*` | `canon_routes` | Canon 提案、文档、记录 |
-| `/bond/*` | `bond_routes` | Bond stage、interaction 状态 |
-| `/scheduler/*` | `scheduler.scheduler_routes` | 持久化调度器 |
-| `/host-scheduler/*` | `app.automation.scheduler_routes` | Automation 内嵌调度 |
-| `/tools/*` + 别名 | `tool_routes` | Tool catalog / broker / kits |
-| `/prompt-config/*` | `prompt_config_routes` | 提示词模板治理 |
-| `/internal/tribe_*`, `/internal/llm/gemini_key`, `/internal/edge_command/*`, `/internal/immune/reset` | `internal_tribe_routes` | 内部 tribe 状态 / 事件 / immune reset |
-| `/internal/codex/*` | `internal_codex_routes` | Agent Runtime WorkOrder preview/execute、jobs、owner-directives、immune proposal/dispatch |
-| `/internal/security/*` | `internal_security_immune_routes` | Security immune runtime / hunt / probe |
-| `/health` `/ready` `/startup` `/health/mcp` `/health/canon_sync` `/health/env-readiness` `/obs/metrics` | `health_routes` | 健康与诊断 |
-| `/metrics` `/` `/docs` `/redoc` | `app_factory` 直接注册 | Prometheus / 根重定向 |
+| `candidate_scoring.py` | 1,912 | 核心候选评分和选择管线 |
+| `scene_constants.py` | 1,587 | 场景标记常量（back/morning/low-energy 等） |
+| `continuity_detectors.py` | 1,140 | 连续性/边界/场景相关性检测 |
+| `prompt_construction.py` | 717 | Surface LLM 调用的 prompt 构造 |
+| `relationship_affect.py` | 360 | 关系距离和情感基调评分 |
+| `scoring_texture.py` | 251 | 纹理评分桥接 |
+| `fact_handling.py` | 226 | Fact 处理与 must-not-do 合并 |
+| `data_models.py` | 210 | ReplyControlPacket、IsolatedSurfaceInput 等数据模型 |
+| `input_validation.py` | 112 | Surface 输入校验 |
+| `util.py` | 56 | 纯文本/集合工具函数 |
+| `scoring/` (6 文件) | ~1,395 | 评分子管线（见 6.3） |
 
-注：
+## 7. Pentest
 
-- `/obs/*` 在 Host Main 上以兼容方式存在（部分路由），完整 `/obs/*` 与 `/api/ui/*` 主战场在 Observability Backend。
-- `/v1/host/input` 是 ASR/Gateway ingress，不是 `/v1/chat` 的转发别名。它在 `input_routes.receive_input` 内完成 ASR/Gateway 校验、ASR 噪声门、Gateway 去重、Immune gate、身份解析、inner-life catchup 和 gateway progress fastpath；之后由 `_dispatch_to_graph → _run_cortex_orchestrator_pipeline` 构造内部 `ChatRequest`，直接调用 `cortex_orchestrator_sse_generator` 并收集 COMMIT。Gateway 入口的最终回推由 `_deliver_gateway_reply` 负责。
-- `/v1/edge/events` 是 Edge events 入口，用于 Edge 状态、本地能力、VTS/VRM 等事件回流。
+Pentest 不属于普通 skill executor。它有独立 API、handler、ToolSpec、executor 和安全 guard。
 
-Edge RPC 主要能力入口（`edge_client/app/fastapi_app.py`）：
+| 事实 | 当前值 |
+|---|---|
+| ToolSpec 文件 | `host_brain/pentest/tools/tool_specs.py` |
+| Executor 文件 | `host_brain/pentest/tools/tool_executors.py`（6,029 行） |
+| ToolSpec 数 | 88 |
+| Executor 数 | 92 |
+| Side-effect ToolSpec 数 | 37 |
+| 缺 executor 的 ToolSpec | 0 |
+| Kali wrapper class | 17 |
+| API prefix | `/v1/pentest` |
+| Handler | `host_brain/app/handlers/pentest_agent_handler.py`（1,604 行）、`pentest_attack_agent_handler.py`（172 行） |
+| 专项文档 | `docs/50_project/arch/PENTEST_MODULES_ARCHITECTURE.md`、`host_brain/pentest/CAPABILITY.md` |
 
-- `GET /v1/edge/health`
-- `GET /v1/edge/avatar_state`
-- `POST /v1/edge/speak`
-- `POST /v1/edge/barge_in`
-- `POST /v1/edge/asr`
-- `POST /v1/edge/vts`
-- `POST /v1/edge/desktop_pet`
-- `POST /v1/edge/fallback/*`
-- `POST /v1/edge/screenshot`
-- `POST /v1/edge/automate`
-- `POST /v1/edge/visual_locate`
-- `POST /v1/edge/proactive_push`
-- `GET /v1/edge/proactive_messages`
-- `POST /v1/edge/wx/*`
+### 7.1 规划器（三条路径）
 
-## 7. Observability Backend 路由表
+当前存在三条规划路径，由 `agent/compat.py:LegacyKernelAdapter` 和环境变量 `PENTEST_COGNITIVE_KERNEL` 控制：
 
-| Prefix | Router 来源 | 主要端点 |
+| 规划器 | 文件 | 行数 | 说明 |
+|---|---|---|---|
+| MCTS | `mcts_planner.py` | 1,111 | 经典蒙特卡洛树搜索 |
+| ReAct | `llm_react_planner.py` | 710 | LLM 驱动的 ReAct 循环（Thought→Action→Observation） |
+| Cognitive | `agent/cognitive_engine.py` | 834 | LLM 假设生成 + 信念加权评分，替代旧 action_policy + MCTS 管线 |
+
+### 7.2 Agent 内部子包
+
+`pentest/agent/`（31 文件，8,906 行）核心模块按职责分组：
+
+| 组 | 关键文件 | 行数 | 说明 |
+|---|---|---|---|
+| 认知 | `cognitive_engine.py`、`meta_cognition.py`、`situation_analyzer.py` | 834 + 288 + 352 | LLM 假设生成、实时决策质量监控、态势分析 |
+| 信念/目标 | `belief_model.py`、`goal_model.py` | 394 + 416 | 贝叶斯信念系统（时间衰减）、显式目标声明（shell/root/domain_admin 等） |
+| 演化 | `evolution_core.py` | 693 | Observe→Reflect→Adapt→Evolve 统一循环 |
+| 攻击 | `attack_planner.py`、`exploit_engine.py`、`payload_factory.py`、`attack_chain.py`、`vuln_chain.py` | 333 + 323 + 290 + 213 + 189 | 攻击规划、利用引擎、payload 工厂 |
+| 知识 | `knowledge.py`、`threat_intel.py`、`online_research.py` | 316 + 319 + 534 | 运行时知识库 + WorldCanon 持久化、在线研究聚合 |
+| 约束 | `opsec.py`、`budget.py`、`reward.py` | 433 + 75 + 102 | OPSEC 规则与规避、多维预算、奖励画像（4 种 profile） |
+| 策略 | `strategy_escalator.py`、`playbook.py`、`biz_logic_probe.py` | 256 + 225 + 215 | 策略升级、可复用攻击模板、业务逻辑探测 |
+
+### 7.3 报告模块
+
+- `phase6_report.py`（492 行）：实际报告生成入口。
+- `report/json_report.py`（5 行）/ `report/markdown_report.py`（20 行）：存根，实际逻辑在 `phase6_report.py`。
+- `report/compliance.py`（139 行）：PCI-DSS 4.0 / HIPAA / SOC2 / ISO 27001 / GDPR 合规映射。
+
+安全边界：
+
+- `ScopeGuard`、`RateLimiter`、`ExecutorGuard` 在 executor 层参与执行前校验。
+- Side-effect 工具还需要 `allow_exploit`、Governor/approval token 和 manifest guard。
+- Web 侧 Phase 4/5 approval 端点要求 `PENTEST_WEB_LAB_MODE=true`。
+- `ONLINE_SCAN_MODE` 只有 `offline` 与 `manual`，没有 `auto`。
+
+## 8. Tribe
+
+`host_brain/tribe/`：34 文件，23,534 行。
+
+- `registry.py`：`_DEFAULT_FAMILY_SPECS`（23 个 family spec），`_bootstrap_default_agents()`（实际 bootstrap 24 个默认 `TribeAgentDescriptor`）。
+- Agent class 总计 26 个（23 个 brain-region agent + `cortex_intent_analyzer`、`cortex_context_collector`、`edge_command_pusher`）。
+- Agent 大小分布（按行数降序）：
+
+| Agent 文件 | 行数 |
+|---|---:|
+| `thalamus_agent.py` | 4,014 |
+| `limbic_agent.py` | 1,922 |
+| `prefrontal_agent.py` | 1,584 |
+| `immune_agent.py` | 1,469 |
+| `tribe_state.py` | 1,119 |
+| `social_brain_agent.py` | 1,116 |
+| `ans_agent.py` | 1,051 |
+| `pain_reward_agent.py` | 817 |
+| `cortex_agent.py` | 780 |
+| `hippocampus_agent.py` | 781 |
+| `motor_cortex_agent.py` | 664 |
+| `language_system_agent.py` | 619 |
+| `default_mode_agent.py` | 515 |
+| `peripheral_agent.py` | 506 |
+| `endocrine_agent.py` | 481 |
+| `circadian_agent.py` | 469 |
+| `mirror_neuron_agent.py` | 462 |
+| `glymphatic_agent.py` | 453 |
+| `cerebellum_agent.py` | 446 |
+| `somatic_agent.py` | 422 |
+| `proprioception_agent.py` | 432 |
+| `interoception_agent.py` | 432 |
+| `initiative_governor_agent.py` | 420 |
+| `vestibular_agent.py` | 348 |
+
+- 辅助模块：`event_bus.py`（374 行，pub/sub 事件总线，1,024 事件环形缓冲）、`handoff.py`（145 行）、`cortex_route_decider.py`（131 行）、`cortex_context_collector.py`（441 行）、`edge_command_pusher.py`（343 行，独立运行能力，不在 registry 默认 family 列表中）。
+- 当前 family：`cortex, thalamus, ans, hippocampus, limbic, prefrontal, social_brain, endocrine, immune, pain_reward, language, somatic, peripheral, circadian, proprioception, initiative_governor, default_mode, mirror_neuron, interoception, motor_cortex, cerebellum, glymphatic, vestibular`。
+
+## 9. Monitor UI
+
+源文件：`host_brain/app/monitor_ui/src/app/routeManifest.jsx`
+
+- 当前 route manifest：37 条 route，35 条进入导航。
+- 静态构建产物：`host_brain/app/static/monitor/`。
+- 运行暴露方式：`scripts/runtime/start_monitor_proxy.ps1` 生成 Nginx 配置，将 `/monitor/` 指向静态目录，并将 `/obs/`、`/api/ui/` 代理到 Obs backend。
+- Host app 当前没有在 `app_factory.py` 里直接 `mount("/monitor", ...)`。
+
+### 9.1 导航分组
+
+| 导航组 | 路由数 | 代表路由 |
 |---|---|---|
-| `/api/ui/*` | `web_ui` | Monitor UI 配置/状态/资源 |
-| `/obs/*` | `obs_routes`（含 health/sessions/trace/metrics 子路由 include） | 主观测 API |
-| `/obs/*` | `obs_routes_health` / `obs_routes_trace` / `obs_routes_summary` / `obs_routes_life_body` / `obs_routes_digital_life_soak` | health 检查、trace 落盘、digital life overview、life body、24h soak |
+| Cockpit | 1 | `/cockpit` — DigitalLifeOverview |
+| Life Systems | 7 | `/life/timeline`、`/inner-world`、`/proactive-autonomy`、`/life/runtime`、`/emotion-dashboard`、`/life/body`、`/life/self-model` |
+| Observability | 3 | `/observability/trace`、`/observability/sessions`、`/observability/metrics` |
+| Operations | 8 | `/chat/debug`、`/tools`、`/canon`、`/bond`、`/gateway` 等 |
+| Execution | 5 | Skills、Automation、Scheduler、Agent 配置等 |
+| Security Lab | 3 | `/security/pentest`、`/security/pentest/detail`、`/security/immune` |
+| Integrations | 8 | `/integrations/*` — 各平台（微信/QQ/飞书/Telegram/Line 等）配置页 |
 
-预热缓存：digital_life_overview / insights_summary / life_body 在 lifespan 启动时同步预热并周期刷新。
+## 10. Digital Life 运行时
 
-## 8. Tribe 23 个器官族（registry 真源）
+`/v1/digital-life`（`digital_life_routes.py`，175 行）提供 18 个端点。`/obs/proactive-autonomy`（`obs_routes_proactive_autonomy.py`，94 行）提供 proactive autonomy 快照。
 
-代码事实（`host_brain/tribe/registry.py:_DEFAULT_FAMILY_SPECS`）：
+### 10.1 端点分类
 
+| 类别 | 端点 | 说明 |
+|---|---|---|
+| 状态 | `GET /state`、`GET /runtime/health`、`GET /environment/current` | 完整状态快照、运行时健康、环境信息 |
+| 器官 | `GET /organs/state` | 23 个器官的运行时状态（limbic/social_brain/hippocampus/default_mode/circadian/glymphatic/endocrine/immune/prefrontal/initiative_governor/motor_cortex/cerebellum/vestibular/somatic/interoception/thalamus/language_system/mirror_neuron/pain_reward/ans/peripheral/proprioception/cortex） |
+| 驱动/体现 | `GET /inner-drive/current`、`GET /embodiment/current`、`GET /action/current` | 内在驱动、当前体现、当前生命行为 |
+| 生命周期 | `POST /tick`、`POST /advance` | 手动 tick、推进内部生命到当前时刻 |
+| **Proactive** | `POST /proactive/attempt`、`GET /proactive/recent`、`GET /proactive/episodes/recent` | 主动发起尝试（支持 dry-run）、近期 outbox、近期 proactive episodes |
+| 经验 | `GET /experience/recent`、`POST /experience/ingest` | 近期经验、经验摄入 |
+| 成长 | `GET /growth/state`、`GET /learning/recent`、`GET /causality/recent` | 成长状态、近期学习事件、因果链 |
+| 工作环境 | `POST /work-event` | 记录工作环境事件 |
+
+### 10.2 Proactive 回路
+
+```text
+DigitalLifeSupervisor.tick_loop() (runtime/digital_life_supervisor.py, 1,235 行)
+  → autonomous_self.apply_autonomous_self_cycle() (1,009 行)
+    → 8 维自适应特质评分 (curiosity/assertiveness/playfulness/sensitivity/resilience/restraint/warmth)
+    → compute_dialogue_state_closure()
+  → PersonaProactiveVoice.evaluate() (persona/proactive_voice.py, 1,477 行)
+    → 场景匹配 (LATE_NIGHT/LONG_ABSENT/POST_INTENSE/TOPIC_FOLLOWUP/MORNING_GREET/HOLIDAY_GREET)
+    → 24h per-type 冷却
+  → EmotionalProactiveEpisode 追踪 (persona/emotional_proactive.py, 845 行)
+  → proactive_voice.generate() → ProactiveExpression
+  → life_continuity.record_proactive_outbox()
+  → Edge RPC proactive_push → 外显执行
 ```
-cortex, thalamus, ans, hippocampus, limbic, prefrontal,
-social_brain, endocrine, immune, pain_reward, language,
-somatic, peripheral, circadian, proprioception,
-initiative_governor, default_mode, mirror_neuron,
-interoception, motor_cortex, cerebellum, glymphatic, vestibular
-```
 
-23 个 family。每个 family 至少绑定一个默认 agent（`HostTribeRegistry._bootstrap_default_agents`）。
+## 11. 已知仍需同步的文档
 
-family 升级状态：
+本轮已同步 README、当前架构、核心模块参考、Pentest 能力边界和 Pentest 专项架构。以下文档仍可能含旧口径，需要按后续任务逐个校正：
 
-- 全部 23 个 family 已完成 P0~P4 批次的"A 级升级"；
-- 历史的灰度开关（feat-flag）已在 P0~P4 各批次中**全部删除**；
-- 升级总览见 `docs/35_quality/ORGAN_TRIBE_UPGRADE_PLAN.md`（已标记完成）。
-
-## 9. Monitor UI 当前结构
-
-Monitor UI 当前是 React + HashRouter 的 **feature-sliced** 架构：`App.jsx` 只装配路由壳，导航事实来自 `app/routeManifest.jsx`，布局在 `app/shell/Layout.jsx`，页面通过 `routes/routeLoaders.js` lazy load，业务代码下沉到 `features/{life,observability,operations,execution,security,integrations}`。
-
-当前导航分组（`ROUTE_NAV_GROUPS`）：
-
-- **Cockpit**：`/cockpit`
-- **Life Systems**：生命时间轴、病灶、情绪、关系、记忆、运行态、存在态、内在世界、回复策略、自我
-- **Observability**：生命体征、Sessions、Trace、BioOps、Metrics、Insights、调试、告警、日志
-- **Operations**：Prompt、Persona、System、Canon
-- **Execution**：Gateway、Skills、Tools、Automation、Agent Loop、Tribe、Edge Command
-- **Security Lab**：Pentest、Pentest run detail、Security Immune
-- **Integrations**：Body Integration
-
-数字生命体总览页通过 `features/life/components/DigitalLifeAvatarSection.jsx` 挂载 `AvatarStateCard.jsx`，只读展示 Edge / MateEngine / VRM 的 avatar 驱动、语音口型、安全开关与行为状态；行为按钮通过 `/obs/avatar/behavior` 走 Edge avatar behavior 接口。Edge/DesktopPet/MateEngine/VTS/VRM 在 UI 中是外显执行与观测面，不是事实、记忆或政策源。
-
-新增/当前重点页面（vs. 2026-04-22 快照）：
-
-- `/observability/bio-ops`（legacy `/codex-bio-ops`）— `CodexBioOpsObservability.jsx`：BioOps & Codex Runtime 统一观测
-- `/life/timeline`（legacy `/life-timeline`）— `LifeTimelinePage.jsx`：生命时间轴
-- `/life/pathologies` + `/life/pathologies/:pathologyId` — 病灶中心 / 病灶详情
-- `/security/pentest` + `/security/pentest/runs/:runId` — 授权 pentest 工作台与 run detail
-- 多个旧高密度页面（Trace / Insights / Automation / Tools / Gateway 等）已拆入 `features/<domain>/components/` 与对应 controller/model/query 文件
-
-## 10. 推荐阅读顺序（2026-06-23）
-
-1. `README.md`
-2. `docs/50_project/arch/CURRENT_CODE_ARCHITECTURE.md`（本文件）
-3. `docs/50_project/arch/CORE_MODULES_DETAILED_REFERENCE.md`
-4. `docs/50_project/arch/dataflow_report.md`
-5. `docs/50_project/arch/DIGITAL_LIFE_BODY_FRONTEND_ARCHITECTURE_20260419.md`
-6. `docs/30_devspec/desktop_pet_runtime.md`
-7. `docs/30_devspec/mateengine_bridge.md`
-8. `docs/15_theory/architecture_overview.md`
-9. `docs/60_trace/requirements_trace.md`
-
-## 11. 不再代表当前事实的文档
-
-下列文档已被重写或归档；如发现冲突以新版与代码为准：
-
-- 旧版 `CURRENT_CODE_ARCHITECTURE.md`（v2.2，2026-04-22）→ `docs/_history/2026-04-22_arch_snapshot/`
-- 旧版 `CORE_MODULES_DETAILED_REFERENCE.md`（v2.1，2026-04-19）→ 同上
-- 旧版 `dataflow_report.md` → 同上
-- 任何提到 `host_brain/app/fastapi_app.py` 作为 Host Main 入口的文档段落（已被 `asgi.py + app_factory.py` 替代）
-- 任何把 `prompt_builder` 作为"normal chat 主作者"的描述（已转为 SurfaceMainChain）
-- 任何把"灰度开关"作为 tribe family 状态描述的章节（开关已全数删除）
-- 任何把 `/v1/host/input` 描述为转发 `/v1/chat` 的段落（当前它是独立 ASR/Gateway ingress，并直接进入 Cortex orchestrator pipeline）
-- 任何把 `StyleCanon` / `host_brain/canon/style/` / `memory/canon_style_store.py` 写成当前活动模块的段落（当前源码没有这些活动路径）
-
-## 12. 关键不变量（与 0.1 一致）
-
-1. normal chat 文本最终作者只能是 `SurfaceMainChain`。
-2. 旧链能力只能注入 facts/state/memory/perception，不能写最终回复。
-3. 媒体场景（图片/贴纸/表情）的最终作者是结构化 `reply_modality_router`。
-4. 文本质量回归（A/B 不通过）的旧链能力不允许进入 normal chat live path。
-5. Observability Backend 的预热失败不阻断 Host Main 启动；反之亦然。
-6. Host Main 与 Obs Backend 是两个独立 ASGI app，不能彼此 import 路由实现细节。
-7. Desktop Pet / MateEngine / VTS / VRM 都是外显执行面，不是记忆、人格策略或审计事实来源。
-8. `/v1/host/input` 是 ASR/Gateway ingress，自行执行校验、噪声门、去重、Immune gate 和 Gateway 回推；不是 `/v1/chat` wrapper。
-9. `StyleCanon` 不是当前活动模块；当前源码没有 `host_brain/canon/style/` 与 `memory/canon_style_store.py`。
+- `docs/30_devspec/DevSpec.md`
+- `docs/20_prd/PRD.md`
+- `docs/15_theory/*`
+- `Soul.md`
