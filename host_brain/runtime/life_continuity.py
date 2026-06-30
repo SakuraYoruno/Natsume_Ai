@@ -25,7 +25,9 @@ from host_brain.runtime.life_organs import (
 )
 from host_brain.runtime.autonomous_self import (
     apply_autonomous_self_cycle,
+    apply_proactive_outcome,
     build_adaptive_self_pack,
+    compute_dialogue_state_closure,
 )
 
 LOGGER = logging.getLogger("Natsume.life_continuity")
@@ -1670,7 +1672,14 @@ async def record_dialogue_aftereffect(*, ledger: Any, person_id: str = DEFAULT_P
     ensure_life_schema(ledger); resolved = str(person_id or DEFAULT_PERSON_ID); text = str(user_message or "")
     advance_life_to_now(ledger=ledger, person_id=resolved, reason="assistant_reply", incoming_event={"session_id": session_id, "request_id": request_id, "user_message": _text(text, 240)}, force=False)
     before = get_life_state(ledger, resolved); after = copy.deepcopy(before); now = _now_ms()
+    dialogue_closure = compute_dialogue_state_closure(before_state=before, reply_text=reply_text, user_message=text, now_ms=now)
     proactive_episode = close_pending_proactive_episode_for_user_reply(ledger=ledger, person_id=resolved, session_id=session_id or conversation_id, request_id=request_id, user_message=text, now_ms=now)
+    if proactive_episode:
+        # C2-4: 用户回应了一条待定主动 → 把落地结果 EMA 进耐久 reach_out_calibration（被暖回↑、被嫌烦↓）
+        from host_brain.persona.emotional_proactive import classify_proactive_reply  # noqa: PLC0415
+
+        _reply_mode, _reply_warmth = classify_proactive_reply(text)
+        apply_proactive_outcome(after, outcome="annoyed" if _reply_mode == "boundary" else "responded", reply_warmth=_reply_warmth, now_ms=now)
     clock = _map(after.get("clock")); clock["last_user_seen_ms"] = now; clock["idle_minutes"] = 0; after["clock"] = clock
     p = _pressures(after); p["absence"] = 0.0; affect = _map(after.get("affect")); needs = _map(after.get("needs"))
     if any(t in text for t in ("慢", "半天", "怎么还", "不对", "没效果", "牛头不对马嘴")):
@@ -1683,10 +1692,10 @@ async def record_dialogue_aftereffect(*, ledger: Any, person_id: str = DEFAULT_P
     after["life_pressure"] = p; affect["mood"] = _mood(p, affect); after["affect"] = affect; after["needs"] = needs; after["continuity"] = {**_map(after.get("continuity")), "last_interaction_digest": _text(text or reply_text, 160)}; after["version"] = int(after.get("version") or 1) + 1
     source_experience_event_id = str(_map(_map(proactive_episode).get("organ_delta_after")).get("event_id") or "")
     after = synthesize_life_state_from_organs(ledger=ledger, base_state=after, person_id=resolved, source_experience_event_id=source_experience_event_id, now_ms=now)
-    scene, motive, _ = _scene(after, user_message=text, reason="dialogue_aftereffect"); after["embodiment"].update(_embodiment(scene, motive, after)); after = _remember_proactive_target_in_state(after, platform=platform, conversation_id=conversation_id); _save_state(ledger, after)
+    scene, motive, _ = _scene(after, user_message=text, reason="dialogue_aftereffect"); after["embodiment"].update(_embodiment(scene, motive, after)); after = _remember_proactive_target_in_state(after, platform=platform, conversation_id=conversation_id); after["dialogue_closure"] = dialogue_closure; _save_state(ledger, after)
     director = dict(life_director or {}) or build_life_director_pack(ledger=ledger, person_id=resolved, session_id=session_id, user_message=text, reason="dialogue_aftereffect")
     action = build_life_action_plan(state=after, director_pack=director, source_kind="dialogue_aftereffect"); after["life_action"] = action; _save_state(ledger, after); director["life_action"] = action
-    visible = list(director.get("visible_obligation") or ["status_panel", "dialogue"]); causality = {"state_version_before": int(before.get("version") or 1), "state_version_after": int(after.get("version") or 1), "applied_sources": _dialogue_sources(director, text), "changed_fields": _changed(before, after), "dialogue_effect": str(director.get("dialogue_influence") or "weak"), "embodiment_effect": str(_map(director.get("organ_life_influence")).get("embodiment_effect") or "weak"), "life_visibility": "ok" if visible else "failed", "visible_channels": visible, "life_action": action, "proactive_episode_binding": proactive_episode, "source_experience_event_id": source_experience_event_id, "private_leak_blocked": True}
+    visible = list(director.get("visible_obligation") or ["status_panel", "dialogue"]); causality = {"state_version_before": int(before.get("version") or 1), "state_version_after": int(after.get("version") or 1), "applied_sources": _dialogue_sources(director, text), "changed_fields": _changed(before, after), "dialogue_effect": str(director.get("dialogue_influence") or "weak"), "embodiment_effect": str(_map(director.get("organ_life_influence")).get("embodiment_effect") or "weak"), "life_visibility": "ok" if visible else "failed", "visible_channels": visible, "life_action": action, "proactive_episode_binding": proactive_episode, "source_experience_event_id": source_experience_event_id, "dialogue_closure": dialogue_closure, "private_leak_blocked": True}
     _append_state_event(ledger, resolved, "dialogue_aftereffect", "foreground_turn", before, after, causality, visible)
     _conn(ledger).execute("INSERT INTO dialogue_life_influence_log(event_id, request_id, person_id, session_id, user_message, reply_text, life_director_json, life_causality_json, created_at_ms) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)", (_event_id("lifedlg"), request_id, resolved, session_id, _text(text, 1000), _text(reply_text, 1000), _dumps(director), _dumps(causality), now)); _conn(ledger).commit()
     if _bool_env("HOST_LIFE_DIALOGUE_AFTEREFFECT_EMBODIMENT_ENABLED", True):

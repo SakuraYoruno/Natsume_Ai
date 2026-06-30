@@ -16,7 +16,7 @@ from host_brain.persona.surface.continuity_detectors import (
     _signature_texture_relevant,
 )
 from host_brain.persona.surface.relationship_affect import (
-    _relationship_control_axes_for_distance,
+    relationship_control_axes_for_distance as _relationship_control_axes_for_distance,
     _relationship_style_profile,
 )
 from host_brain.persona.surface.scene_constants import (

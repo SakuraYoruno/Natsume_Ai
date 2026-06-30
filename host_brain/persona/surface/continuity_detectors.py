@@ -6,11 +6,13 @@ and test-surface language in generated candidates.
 """
 from __future__ import annotations
 
+import re
 from collections.abc import Sequence
 
 from host_brain.persona.surface.data_models import IsolatedSurfaceInput
 from host_brain.persona.surface.fact_handling import (
     _continuity_boundary_relevant,
+    _memory_alignment_relevant,
     _relationship_memory_boundary_relevant,
     _short_continue_scene_relevant,
     memory_alignment_terms,
@@ -46,6 +48,8 @@ from host_brain.persona.surface.scene_constants import (
     _ORIGINAL_QUOTE_PERSONA_LEAK_RE,
     _POSITIVE_STAGE_SCENE_BLOCKING_PREFIXES,
     _RAW_CONTEXT_BACKFILL_RE,
+    _SELF_DOUBT_TASKS,
+    _SELF_DOUBT_USER_MARKERS,
     _SHORT_CONTINUE_MEMORY_OVERDISPLAY_PHRASES,
     _SHORT_CONTINUE_UNPROVIDED_TECH_DETAIL_PHRASES,
     _SURFACE_PROCESS_META_ALWAYS,
@@ -1116,3 +1120,21 @@ def _presence_repair_relevant(request: IsolatedSurfaceInput) -> bool:
     ):
         return True
     return False
+
+
+def _self_doubt_scene_relevant(request: IsolatedSurfaceInput) -> bool:
+    """Return True when the request is in a self-doubt scene."""
+    task_mode = _clean_text(
+        request.control.task_mode or request.control.response_move
+    ).lower()
+    response_move = _clean_text(request.control.response_move).lower()
+    user_message = _clean_text(request.user_message)
+    user_has_marker = any(
+        marker in user_message for marker in _SELF_DOUBT_USER_MARKERS
+    )
+    return bool(
+        task_mode in _SELF_DOUBT_TASKS
+        or response_move in _SELF_DOUBT_TASKS
+        or (task_mode == "high_emotion" and user_has_marker)
+        or user_has_marker
+    )

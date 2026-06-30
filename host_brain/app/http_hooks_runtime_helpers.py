@@ -1551,6 +1551,54 @@ def run_proactive_intent_dispatch(
         except Exception as policy_exc:
             logger.debug("proactive render_policy compute failed（忽略）: %s", policy_exc)
 
+    # C2-2: 状态驱动主动——从 life-state 取项目/天气，算就绪度与意图开场。
+    # life-state 无信号（新系统/loop 未跑）时 readiness 保持 None，execute 回退纯空闲门（向后兼容，绝不误 hold）。
+    proactive_active_projects: list[Any] = []
+    proactive_inner_weather_label = ""
+    proactive_reach_out_bias = 0.0
+    proactive_calibration: float | None = None
+    try:
+        _life_ledger = get_ledger() if callable(get_ledger) else None
+        if _life_ledger is not None:
+            from host_brain.runtime.life_continuity import get_life_state  # noqa: PLC0415
+
+            _life = get_life_state(_life_ledger, persona_user_id or "default")
+            _weather = _as_plain_dict(_life.get("inner_weather"))
+            proactive_inner_weather_label = str(_weather.get("label") or "")
+            proactive_reach_out_bias = float(_weather.get("reach_out_bias") or 0.0)
+            _growth = _as_plain_dict(_life.get("self_growth"))
+            proactive_active_projects = list(_growth.get("active_projects") or _life.get("self_projects") or [])
+            from host_brain.runtime.autonomous_self import get_reach_out_calibration  # noqa: PLC0415
+
+            proactive_calibration = get_reach_out_calibration(_life)
+    except Exception as life_exc:
+        logger.debug("proactive life-state fetch failed（忽略）: %s", life_exc)
+
+    proactive_readiness: float | None = None
+    proactive_intention_hint = ""
+    if proactive_inner_weather_label or proactive_active_projects:
+        try:
+            from host_brain.persona.emotional_proactive import (  # noqa: PLC0415
+                _project_nudge_opening,
+                _project_nudge_pull,
+                compute_proactive_readiness,
+            )
+
+            _now_ms = int(_time.time() * 1000)
+            proactive_readiness = compute_proactive_readiness(
+                reach_out_bias=proactive_reach_out_bias,
+                active_projects=proactive_active_projects,
+                anticipation=0.0,
+                now_ms=_now_ms,
+                calibration=proactive_calibration,
+            )
+            _nudge_pull, _nudge_project = _project_nudge_pull(proactive_active_projects, _now_ms)
+            if _nudge_pull >= 0.5 and _nudge_project:
+                proactive_intention_hint = _project_nudge_opening(_nudge_project)
+        except Exception as readiness_exc:
+            logger.debug("proactive readiness compute failed（忽略）: %s", readiness_exc)
+            proactive_readiness = None
+
     context = {
         "sys_mode": resolved_sys_mode,
         "request_id": system_intent.get("request_id"),
@@ -1564,6 +1612,11 @@ def run_proactive_intent_dispatch(
         "motive_state": motive_state,
         "render_policy": render_policy,
         "scene_awareness": system_intent.get("scene_awareness") or args.get("scene_awareness") or {},
+        "inner_weather": proactive_inner_weather_label,
+        "active_projects": proactive_active_projects,
+        "proactive_readiness": proactive_readiness,
+        "intention_hint": proactive_intention_hint,
+        "pending_topics": list(recent_topics[:3]),
     }
     return execute_proactive_talk(args=args, context=context)
 

@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import re
 import time
+import uuid
 from collections.abc import Mapping, Sequence
+from datetime import datetime, timedelta
 from typing import Any
 
 from host_brain.audit.sqlite_ledger import SQLiteLedger
@@ -22,6 +24,11 @@ from host_brain.memory.life_memory_query import (
 )
 
 from .constants import *
+from .constants import (
+    _ANAPHORIC_EVENT_KINDS,
+    _LOCAL_MEMORY_TZ,
+    _RECALL_FETCH_LIMIT_FACTOR,
+)
 from .models import EpisodeRecallPacket
 from .utils import (
     now_ts_ms,
@@ -60,7 +67,10 @@ from .utils import (
     _classify_life_memory_policy,
     _with_memory_policy_metadata,
     _decay_rate_per_day,
+    _normalize_open_loop_status,
     _normalize_refs,
+    _open_loop_close_reason_for_status,
+    _owner_alias_person_ids,
     strong_evidence_refs,
     derive_episode_id,
     derive_evidence_id,
@@ -73,6 +83,76 @@ from .utils import (
     _preference_query_wants_relationship_feedback,
     _query_wants_closed_open_loop,
 )
+
+from .semantic import (  # noqa: E402
+    _attachment_looks_visual,
+    _collection_day_key,
+    _collection_domain_for_episode,
+    _collection_id,
+    _collection_item_canonical_key,
+    _collection_item_episode_anchor_is_synthetic,
+    _collection_item_has_recallable_anchor,
+    _collection_item_is_synthetic,
+    _collection_item_key,
+    _collection_item_recall_line,
+    _collection_item_resolved_canonical_title,
+    _collection_item_review_evidence_metadata,
+    _collection_item_source_ref,
+    _collection_item_summary,
+    _collection_item_title,
+    _collection_scope_boost,
+    _collection_scope_key,
+    _collection_scope_window_days,
+    _collection_summary_text,
+    _collection_summary_text_for_collection,
+    _entity_id,
+    _entity_key_from_item,
+    _entity_mention_matches_daily_scope,
+    _entity_mention_recall_line,
+    _entity_normalized_key,
+    _plan_requires_exact_collection_count,
+    _scope_keys_for_collection_plan,
+    _semantic_referenced_episode_ids,
+    _trusted_active_episode_ids,
+)
+
+
+def _background_salience(*, source: str, status: str | None, detail: str | None) -> float:
+    """Compute a baseline salience score for a background episode.
+
+    Higher scores for inner-world events (thought/feeling), perception
+    events (vision/voice), and error/failure statuses.
+    """
+    source_key = str(source or "").strip().lower()
+    status_key = str(status or "").strip().upper()
+    score = 0.30
+    if source_key in {"inner_world", "inner_stream", "inner_activity"}:
+        score += 0.12
+    if source_key in {"vision", "screen_ocr", "camera", "camera_recognition", "perception", "voice", "audio", "asr"}:
+        score += 0.14
+    if source_key in {"action", "gateway", "channel", "skill", "mcp", "tool", "sandbox", "avatar", "clawd", "codex_production", "browser"}:
+        score += 0.08
+    if status_key in {"ERROR", "FAILED", "DEGRADED", "SUSPENDED", "DEFERRED", "HEARTBEAT_ALERT", "EDGE_PROBE_ALERT"}:
+        score += 0.25
+    if status_key in {"COMPLETED", "SUCCESS", "SENT", "EXECUTED"}:
+        score += 0.04
+    if _clean_text(detail):
+        score += 0.08
+    return _clamp_unit(score)
+
+
+def _chat_salience(*, user_message: str, assistant_reply: str, has_perception: bool) -> float:
+    """Compute salience for a chat episode."""
+    text = f"{user_message}\n{assistant_reply}".lower()
+    score = 0.36
+    if has_perception:
+        score += 0.18
+    if any(token in text for token in ("记住", "以后", "别忘", "纠正", "不对", "错了", "remember", "wrong")):
+        score += 0.20
+    if len(text) > 500:
+        score += 0.06
+    return _clamp_unit(score)
+
 
 class LifeMemoryStore:
     """SQLite-backed life episode store."""
@@ -1134,6 +1214,8 @@ class LifeMemoryStore:
         metadata = _json_loads(episode.get("metadata"), fallback={})
         if not isinstance(metadata, dict):
             metadata = {}
+        from .semantic import _extract_collection_items_from_metadata  # noqa: PLC0415
+
         items = _extract_collection_items_from_metadata(metadata)
         if not items:
             return {"status": "SKIPPED", "reason_code": "NO_COLLECTION_ITEMS", "episode_id": eid}

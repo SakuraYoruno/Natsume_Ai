@@ -33,6 +33,16 @@ def now_ts_ms() -> int:
     return int(time.time() * 1000)
 
 
+def _owner_alias_person_ids(person_id: str | None) -> list[str]:
+    person = _clean_text(person_id)
+    aliases = ["", "default"]
+    if person:
+        aliases.append(person)
+    if person in {"owner", "user", "main_user", "master"}:
+        aliases.extend(["owner", "user", "main_user", "master"])
+    return list(dict.fromkeys(aliases))
+
+
 def _stable_hash(value: str, *, size: int = 32) -> str:
     return hashlib.sha256(value.encode("utf-8", errors="ignore")).hexdigest()[:size]
 
@@ -978,6 +988,17 @@ def _semantic_extract_field(statement: str, field: str) -> str:
         return ""
     value = _clean_text(match.group(1), limit=220)
     return re.sub(r"^(result_text|artifacts)\s*[=:：].*$", "", value, flags=re.IGNORECASE).strip()
+
+
+def _normalize_semantic_statement(text: str) -> str:
+    value = _clean_text(text, limit=700)
+    value = re.sub(r"^(User|Assistant|Perception)\s*[:：]\s*", "", value).strip()
+    value = re.sub(r"^(记忆线索|长期记忆|召回线索)\s*[:：]\s*", "", value).strip()
+    value = re.sub(r"^行动记忆：[^；;]{1,120}[；;]\s*", "", value).strip()
+    value = re.sub(r"^(记住|请记住|以后记住)[，,：:\s]*", "", value).strip()
+    value = re.sub(r"^记得[，,：:\s]*", "", value).strip()
+    value = re.sub(r"^(?:再补一个|补一个|一个)?(?:长对话测试事实|项目事实|测试事实|记忆事实)[，,：:\s]*", "", value).strip()
+    return value.strip("。；; \n\t")
 
 
 def _semantic_skip_reason_for_texts(texts: Sequence[str], *, episode: Mapping[str, Any]) -> str:

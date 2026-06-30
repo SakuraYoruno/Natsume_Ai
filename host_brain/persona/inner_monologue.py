@@ -459,6 +459,9 @@ def _compose_body_hint(
     if not segments:
         return ""
     return "、".join(segments)
+
+
+def build_private_inner_thought_event(
     *,
     note: str,
     focus: str = "",

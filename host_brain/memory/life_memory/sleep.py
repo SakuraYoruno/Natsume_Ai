@@ -19,6 +19,13 @@ from .utils import (
 from .store import LifeMemoryStore
 from .consolidator import LifeMemoryConsolidator
 from . import semantic as _semantic_mod
+from .semantic import (  # noqa: PLC0415
+    _merge_semantic_cleanup_reports,
+    _semantic_referenced_episode_ids,
+    _should_compact_sleep_candidate,
+    _sleep_compaction_group_key,
+    _sleep_compaction_payload,
+)
 
 class MemorySleepReplayTask:
     """Offline replay selector for high-salience trusted episodes."""

@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import hashlib
 import re
 import time
 from collections.abc import Mapping, Sequence
 from typing import Any
 
 from .constants import *
+from .constants import _SEMANTIC_PRIORITY_MEMORY_CLASSES  # noqa: F811 (private name not exported via *)
 from .utils import (
     _clean_text,
     _clamp_unit,
@@ -18,10 +20,38 @@ from .utils import (
     _stable_hash,
     _normalize_refs,
     _metadata_float,
+    now_ts_ms,
     _semantic_statement_is_lookup_question,
 )
 from .store import LifeMemoryStore
 from . import semantic as _semantic_mod
+from .semantic import (  # noqa: PLC0415 — explicit private imports from semantic
+    _count_reason_codes,
+    _merge_collection_semantic_proposal,
+    _merge_semantic_summaries,
+    _semantic_action_pattern_proposals,
+    _semantic_existing_summary_should_be_replaced,
+    _semantic_kind_priority,
+    _semantic_memory_prune_reason,
+    _semantic_proposal_from_collection,
+    _semantic_proposal_from_correction_row,
+    _semantic_proposal_from_entity,
+    _semantic_proposal_matches_query,
+    _semantic_proposals_are_same_collection_scope,
+    _semantic_proposals_from_episode,
+    _semantic_source_memory_ids,
+    _semantic_source_texts,
+    _semantic_taxonomy_tags,
+    _sqlite_table_exists,
+    _stale_collection_semantic_ids,
+)
+from .utils import (  # noqa: PLC0415 — explicit private imports from utils
+    _episode_memory_class_from_metadata,
+    _normalize_open_loop_status_tags,
+    _open_loop_status_from_tags,
+    _open_loop_title_from_summary,
+    _semantic_skip_reason_for_texts,
+)
 
 class LifeMemoryConsolidator:
     """Build semantic candidates only from trusted life episodes."""

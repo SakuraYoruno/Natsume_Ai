@@ -69,6 +69,7 @@ from host_brain.app.graph_config_constants import (  # noqa: E402
     REPAIR_AGENT_HANDLER_ID,
     PENTEST_AGENT_NODE_ID,
     PENTEST_AGENT_HANDLER_ID,
+    PENTEST_ATTACK_AGENT_HANDLER_ID,
     AGENT_DISPATCH_NODE_ID,
     AGENT_DISPATCH_HANDLER_ID,
     ALLOWED_EXPLICIT_SCENE_TYPES,
@@ -708,6 +709,7 @@ def _build_graph_config_by_profile(
             EMOTION_AGENT_HANDLER_ID,  # 方向 G Phase 2 新增
             REPAIR_AGENT_HANDLER_ID,
             PENTEST_AGENT_HANDLER_ID,
+            PENTEST_ATTACK_AGENT_HANDLER_ID,
         ]
         node_bindings = [
             {
