@@ -1,31 +1,35 @@
 受众：MASTER
 标题：Natsume AI 整体架构全景文档
 
-版本：v3.2
-日期：2026-06-23
-定位：以当前代码为锚点，对系统的运行面、主链、Edge/Gateway/Observability 关系做高层总览。本文偏“整体理解”，细节以 `docs/50_project/arch/` 下的代码事实文档为准。
+版本：v3.3
+日期：2026-06-30
+定位：以当前代码为锚点，对系统的运行面、主链、Edge/Gateway/Observability/Pentest/Proactive 关系做高层总览。本文偏“整体理解”，细节以 `docs/50_project/arch/` 下的代码事实文档为准。
 
 # Natsume AI 整体架构全景文档
 
 ## 一、当前整体架构
 
-当前系统已经从“单一 Host + 附属 Edge”演进为 5 个协同运行面：
+当前系统已经从”单一 Host + 附属 Edge”演进为 **7 个协同运行面**：
 
-1. Host Main
-2. Observability Backend
-3. Edge RPC
-4. Unified Message Gateway
-5. Monitor UI
+1. **Host Main** — 主 API、聊天主链、工具、记忆、数字生命、Pentest
+2. **Observability Backend** — 独立监控后端（`/obs/*`、`/api/ui/*`）
+3. **Monitor Proxy** — Nginx 代理 `/monitor/` 静态资产 + Host/Obs upstream
+4. **Edge RPC** — Edge 侧 ASR/TTS/avatar/resource gate RPC
+5. **Unified Message Gateway** — 多平台 webhook、统一输入回流、回复分发
+6. **Desktop Pet** — Electron + Live2D 本地桌宠窗口
+7. **MateEngine/VRM Bridge** — Host 侧动作/说话桥接 + Edge 侧 VRM bridge
 
 ```mermaid
 graph TB
-    USER["用户 / 外部平台 / 前端"] --> HOST["Host Main<br/>host_brain/__main__.py<br/>(host_brain.app.asgi:app)<br/>:8000"]
-    USER --> OBS["Observability Backend<br/>host_brain/obs_main.py<br/>(host_brain.app.obs_fastapi_app:app)<br/>:18082"]
-    HOST --> EDGE["Edge RPC<br/>edge_client/__main__.py<br/>(端口由 EDGE_RPC_PORT 配置，默认 17800)"]
-    USER --> GATEWAY["Unified Message Gateway<br/>edge_client/gateway/server.py<br/>:19000"]
+    USER["用户 / 外部平台 / 前端"] --> HOST["Host Main<br/>:8000<br/>主 API/Chat/Pentest/Digital Life"]
+    USER --> OBS["Obs Backend<br/>:18082<br/>/obs/*, /api/ui/*"]
+    USER --> GATEWAY["Unified Gateway<br/>:19000<br/>6 平台 webhook"]
     GATEWAY --> HOST
-    OBS --> MON["Monitor UI<br/>host_brain/app/monitor_ui/"]
-    HOST --> MON
+    HOST --> EDGE["Edge RPC<br/>:17800<br/>ASR/TTS/Avatar"]
+    EDGE --> DP["Desktop Pet<br/>:18788<br/>Live2D 桌宠"]
+    EDGE --> ME["MateEngine/VRM<br/>UDP :32145 / :18770"]
+    OBS --> PROXY["Monitor Proxy<br/>:18180<br/>Nginx /monitor/"]
+    HOST --> PROXY
 ```
 
 这意味着当前架构不应该再被理解成：
@@ -38,11 +42,14 @@ graph TB
 
 Host Main 负责所有真正的事实、记忆、政策、审计与业务执行主权：
 
-- `/v1/chat`
-- `/v1/host/input`
-- `/v1/edge/events`
-- tools / canon / bond / scheduler / prompt-config
-- monitor 静态资源托管
+- `/v1/chat` — 主对话入口（SSE）
+- `/v1/host/input` — Gateway/ASR ingress
+- `/v1/edge/events` — Edge 事件回流
+- `/v1/pentest` — Pentest 安全实验室（88 ToolSpec、92 executor、3 条规划路径）
+- `/v1/digital-life` — 数字生命运行时（18 端点，含 `/proactive/*`）
+- tools / canon / bond / scheduler / prompt-config / memory / mateengine
+- `/health`、`/ready`、`/metrics`
+- Monitor 静态资源托管（通过 monitor proxy 暴露）
 
 当前主权边界可以概括为：
 

@@ -1,8 +1,8 @@
 受众：MASTER
 标题：host_brain/integrations/ 层接口契约（当前代码实况）
 
-版本：v3.0
-日期：2026-05-30
+版本：v3.1
+日期：2026-06-30
 归属：docs/15_theory/
 
 ---

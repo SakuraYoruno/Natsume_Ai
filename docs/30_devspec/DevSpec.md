@@ -2,8 +2,8 @@
 标题：开发规格 DevSpec（当前代码工程契约参考）
 
 # Natsume Ai 开发规格（DevSpec）
-版本：v2.2
-日期：2026-06-23
+版本：v2.3
+日期：2026-06-30
 定位：当前代码的工程契约参考手册。每条契约应能追溯到具体文件、路由或运行时边界。
 
 ---
@@ -312,6 +312,62 @@ Pentest side-effect 规则：
 - 三联画：intent_log / governor_log / skill_exec_log。
 - Pentest Lab 将 `manifest_ref`、`approval_token_ref`、artifact refs 写入 skill_exec 审计。
 
+### 10.6 Pentest Agent 内部契约
+
+**CognitiveEngine**（`pentest/agent/cognitive_engine.py`，834 行）：
+- 输入：态势分析结果 + 信念模型快照 + 目标模型当前状态
+- 输出：加权假设列表（Hypothesis），每条含 action + confidence + rationale
+- 接口：`generate_hypotheses(situation, beliefs, goals) -> list[Hypothesis]`
+- 约束：不可绕过 scope/rate/approval guard；不可在 readonly 模式下产生 side-effect 假设
+
+**ToolRegistry**（`pentest/agent/tool_registry.py`，796 行）：
+- 意图→工具映射：30+ Capability × EnvTag → ToolCapability → ToolSpec
+- 接口：`resolve(intent: Capability, env: EnvTag) -> list[ToolCapability]`
+- 约束：side-effect 工具只在 `allow_exploit=true` 时返回
+
+**EvolutionCore**（`pentest/agent/evolution_core.py`，693 行）：
+- 循环：observe(结果) → reflect(反思) → adapt(适应) → evolve(演化)
+- 组合：KnowledgeBase + ExperienceRetriever + CampaignMemory + FailureClassifier
+- 约束：演化结果持久化到 WorldCanon；不可覆盖 immutable baseline
+
+**规划器选择**（`pentest/agent/compat.py`，77 行）：
+- `PENTEST_COGNITIVE_KERNEL=1` → CognitiveEngine
+- `PENTEST_COGNITIVE_KERNEL=0` → MCTSPlanner 或 LLMReActPlanner
+- LegacyKernelAdapter 负责透明切换
+
+### 10.7 Persona Surface Scoring 契约
+
+**评分管线**（`persona/surface/`，17 文件）：
+```text
+CandidateScoring.score_candidates()
+  → parse: 候选解析 + 问题预算计数（scoring/parse.py, 262 行）
+  → stage_positions: 场景位置评分 5 种位置（scoring/stage_positions.py, 406 行）
+  → control_affect: 情感控制评分 双轴（scoring/control_affect.py, 398 行）
+  → texture: 纹理评分（scoring/texture.py, 273 行）
+```
+
+**Inner-state leakage**：
+- `ReplyControlPacket`（`surface/data_models.py`）：7 个泄漏字段 — inner_weather/body_state_hint/care_signal/continuity_signal/tension_hint/liveliness/active_loops
+- 约束：泄漏不可暴露原始私密思维；仅影响 LLM prompt 的 tone 和风格
+
+### 10.8 Digital Life Proactive 回路契约
+
+**自主循环**（`runtime/autonomous_self.py`，1,009 行）：
+- 8 维 SELF_REWARD_WEIGHTS：continuity/coherence/competence/curiosity/restraint/presence/aesthetic/attachment
+- 7 维 ADAPTIVE_TRAITS：curiosity/assertiveness/playfulness/sensitivity/resilience/restraint/warmth
+- 接口：`apply_autonomous_self_cycle(life_state) -> AdaptiveSelfPack`
+
+**Proactive Voice**（`persona/proactive_voice.py`，1,477 行）：
+- 6 种场景：LATE_NIGHT/LONG_ABSENT/POST_INTENSE/TOPIC_FOLLOWUP/MORNING_GREET/HOLIDAY_GREET
+- 24h per-type 冷却门控
+- 接口：`evaluate(inner_world_snapshot) -> ProactiveExpression | None`
+
+**端点**：
+- `POST /v1/digital-life/proactive/attempt` — 手动触发（dry_run/forced）
+- `GET /v1/digital-life/proactive/recent` — 近期 outbox
+- `GET /v1/digital-life/proactive/episodes/recent` — 近期 episodes
+- `GET /obs/proactive-autonomy` — proactive autonomy 快照
+
 ---
 
 ## 11. 路由表
@@ -380,8 +436,8 @@ Pentest side-effect 规则：
 
 ## 14. 当前代码事实入口
 
-- `docs/50_project/arch/CURRENT_CODE_ARCHITECTURE.md` — 模块全景。
-- `docs/50_project/arch/dataflow_report.md` — 数据流报告。
-- `docs/50_project/arch/CORE_MODULES_DETAILED_REFERENCE.md` — 模块详细参考。
-- `docs/15_theory/APP_AUDIT_SKILLS_CONTRACT.md` — 应用/审计/技能层契约。
-- `docs/30_devspec/ModelPlane.md` — 模型平面治理。
+- `docs/50_project/arch/CURRENT_CODE_ARCHITECTURE.md`（v4.2）— 模块全景。
+- `docs/50_project/arch/dataflow_report.md`（v4.0）— 数据流报告。
+- `docs/50_project/arch/CORE_MODULES_DETAILED_REFERENCE.md`（v4.2）— 模块详细参考。
+- `docs/50_project/arch/PENTEST_MODULES_ARCHITECTURE.md`（v1.1）— Pentest 专项架构。
+- `host_brain/pentest/CAPABILITY.md`（v2.3）— Pentest 能力边界。

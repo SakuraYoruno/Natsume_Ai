@@ -1,8 +1,8 @@
 受众：MASTER
 标题：host_brain 外围层接口契约（airlock / bond / channels / vision / lsp / mcp）
 
-版本：v2.3
-日期：2026-06-23
+版本：v2.4
+日期：2026-06-30
 归属：docs/15_theory/
 
 ---
