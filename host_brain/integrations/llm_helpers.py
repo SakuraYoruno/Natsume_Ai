@@ -314,6 +314,37 @@ def _resolve_pool_attempt_timeout_ms(
             maximum=10 * 60 * 1000,
         )
         resolved_timeout_ms = max(resolved_timeout_ms, floor_ms)
+    scene_token = _pool_env_token(scene_type) if str(scene_type or "").strip() else ""
+    tier_token = _pool_env_token(cognitive_tier) if str(cognitive_tier or "").strip() else ""
+    provider_token = _pool_env_token(provider_name) if str(provider_name or "").strip() else ""
+    hard_cap_names: list[str] = []
+    if scene_token and tier_token and provider_token:
+        hard_cap_names.append(f"HOST_LLM_POOL_SCENE_{scene_token}_TIER_{tier_token}_{provider_token}_ATTEMPT_TIMEOUT_HARD_CAP_MS")
+    if scene_token and provider_token:
+        hard_cap_names.append(f"HOST_LLM_POOL_SCENE_{scene_token}_{provider_token}_ATTEMPT_TIMEOUT_HARD_CAP_MS")
+    if scene_token and tier_token:
+        hard_cap_names.append(f"HOST_LLM_POOL_SCENE_{scene_token}_TIER_{tier_token}_ATTEMPT_TIMEOUT_HARD_CAP_MS")
+    if scene_token:
+        hard_cap_names.append(f"HOST_LLM_POOL_SCENE_{scene_token}_ATTEMPT_TIMEOUT_HARD_CAP_MS")
+    if tier_token and provider_token:
+        hard_cap_names.append(f"HOST_LLM_POOL_TIER_{tier_token}_{provider_token}_ATTEMPT_TIMEOUT_HARD_CAP_MS")
+    if tier_token:
+        hard_cap_names.append(f"HOST_LLM_POOL_TIER_{tier_token}_ATTEMPT_TIMEOUT_HARD_CAP_MS")
+    hard_cap_names.extend([
+        "HOST_LLM_POOL_ATTEMPT_TIMEOUT_HARD_CAP_MS",
+        "PENTEST_LLM_ATTEMPT_TIMEOUT_HARD_CAP_MS",
+    ])
+    for env_name in hard_cap_names:
+        raw_value = str(os.environ.get(env_name) or "").strip()
+        if raw_value:
+            hard_cap_ms = _parse_int_env(
+                env_name,
+                default=resolved_timeout_ms,
+                minimum=250,
+                maximum=10 * 60 * 1000,
+            )
+            resolved_timeout_ms = min(resolved_timeout_ms, hard_cap_ms)
+            break
     return resolved_timeout_ms
 
 
