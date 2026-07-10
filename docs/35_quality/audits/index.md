@@ -3,7 +3,7 @@
 
 # 质量审计子目录
 
-版本：v1.2
+版本：v1.3
 维护日期：2026-07-10
 标签：当前执行证据 + 历史归档
 
@@ -20,6 +20,7 @@
 - `NLE_WP00_VALIDATION_REPORT_20260710.md`：TASK-0461 实现、门禁与封板验收证据。
 - `NLE_WP00_VALIDATION_REPORT_TEMPLATE.md`：TASK-0461 封板交付模板。
 - `NLE_WP10_TASK0463_VALIDATION_20260710.md`：Pentest Domain Store、中央 migration 与 shadow-only 验收证据。
+- `NLE_WP20_TASK0466_VALIDATION_20260710.md`：Canonical contracts、schema snapshot 与兼容验收证据。
 - `RUNTIME_CHAIN_ACCEPTANCE_20260531.md`
 - `MEMORY_SYSTEM_INTEGRITY_TEST_20260531.md`
 - `audit_report_20260311.md`

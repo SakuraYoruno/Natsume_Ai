@@ -406,9 +406,29 @@ def merge_plan_steps_with_dag(*, steps: list[dict[str, Any]], dag_plan: SkillDag
     return merged_steps
 
 
+def __getattr__(name: str) -> Any:
+    """Lazily re-export canonical graph contracts without changing this planner."""
+
+    if name in {"CanonicalTaskGraph", "CanonicalTaskNode", "TaskGraph", "TaskNode"}:
+        from host_brain.agent_runtime.task_graph import TaskGraph, TaskNode  # noqa: PLC0415
+
+        exports = {
+            "CanonicalTaskGraph": TaskGraph,
+            "CanonicalTaskNode": TaskNode,
+            "TaskGraph": TaskGraph,
+            "TaskNode": TaskNode,
+        }
+        return exports[name]
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
 __all__ = [
+    "CanonicalTaskGraph",
+    "CanonicalTaskNode",
     "SkillDagNode",
     "SkillDagPlan",
+    "TaskGraph",
+    "TaskNode",
     "build_skill_dag_plan",
     "merge_plan_steps_with_dag",
 ]

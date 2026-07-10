@@ -410,7 +410,7 @@ Pop-Location
 | TASK-0463 | WP-10 / PR-003 | Pentest Domain Store | WP-00 | 2–3 日 | 高 | DONE |
 | TASK-0464 | WP-11 / PR-004 | 回填与 Domain-only 切换 | WP-10 | 2–4 日 | 高 | PLANNED |
 | TASK-0465 | WP-12 / PR-005 | Canon Apply 唯一入口 | WP-11 | 2–3 日 | 高 | PLANNED |
-| TASK-0466 | WP-20 / PR-006 | Canonical Contracts | WP-00 | 2–3 日 | 中 | PLANNED |
+| TASK-0466 | WP-20 / PR-006 | Canonical Contracts | WP-00 | 2–3 日 | 中 | DONE |
 | TASK-0467 | WP-21 / PR-007 | Durable TaskStore | WP-20 | 4–6 日 | 高 | PLANNED |
 | TASK-0468 | WP-22 / PR-008 | Planner Adapters | WP-20 | 2–3 日 | 高 | PLANNED |
 | TASK-0469 | WP-23 / PR-009 | Shadow Scheduler | WP-01/21/22 | 4–6 日 | 高 | PLANNED |
@@ -520,7 +520,7 @@ Pop-Location
 
 ### TASK-0466 / LTE-WP-20：冻结 Canonical Contracts
 
-- 状态：`PLANNED`
+- 状态：`DONE`（2026-07-10；T-NLE-04、schema snapshot 与 v2/v3 双向兼容验收通过）
 - 目标：以纯契约和 adapter 方式落地 WorkOrder v3、TaskGraph、TaskEvent、VerificationResult、ReviewItem；不改变主链执行。
 - 代码事实：现有 `SkillDagPlan`、`PlanGraph`、`AgentWorkOrder` 与 governed Graph 各有部分语义，但没有统一 revision/lineage。
 - 前置任务：TASK-0461。
