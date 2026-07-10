@@ -3,8 +3,8 @@
 
 # CURRENT_CODE_ARCHITECTURE
 
-版本：v4.2 Living
-最后同步：2026-06-30
+版本：v4.3 Living
+最后同步：2026-07-10
 
 本文件记录当前工作区代码事实。若本文与代码冲突，以代码为准；若历史文档与本文冲突，以本文和代码为准。
 
@@ -228,9 +228,11 @@ Pentest 不属于普通 skill executor。它有独立 API、handler、ToolSpec�
 | 信念/目标 | `belief_model.py`、`goal_model.py` | 394 + 416 | 贝叶斯信念系统（时间衰减）、显式目标声明（shell/root/domain_admin 等） |
 | 演化 | `evolution_core.py` | 693 | Observe→Reflect→Adapt→Evolve 统一循环 |
 | 攻击 | `attack_planner.py`、`exploit_engine.py`、`payload_factory.py`、`attack_chain.py`、`vuln_chain.py` | 333 + 323 + 290 + 213 + 189 | 攻击规划、利用引擎、payload 工厂 |
-| 知识 | `knowledge.py`、`threat_intel.py`、`online_research.py` | 316 + 319 + 534 | 运行时知识库 + WorldCanon 持久化、在线研究聚合 |
+| 知识 | `knowledge_store.py`、`knowledge.py`、`threat_intel.py`、`online_research.py` | 领域 SQLite Store + runtime adapters | Pentest 自有持久化、promotion candidate、在线研究聚合；active 路径不直接读写 WorldCanon |
 | 约束 | `opsec.py`、`budget.py`、`reward.py` | 433 + 75 + 102 | OPSEC 规则与规避、多维预算、奖励画像（4 种 profile） |
 | 策略 | `strategy_escalator.py`、`playbook.py`、`biz_logic_probe.py` | 256 + 225 + 215 | 策略升级、可复用攻击模板、业务逻辑探测 |
+
+Pentest 知识的默认运行模式为 `HOST_PENTEST_KNOWLEDGE_MODE=domain`，DB 默认路径按模块绝对锚定。成功链、反思、pitfall、command 与 technique 都通过 `PentestKnowledgeAccess` 进入 `pentest-domain-*` namespace；需要进入通用 Canon 的内容只生成 `PENDING_REVIEW` promotion candidate。若 legacy 目录存在 eligible 文档，domain access 必须验证目标 DB 内的 cutover receipt 以及 source/target count+digest，否则 fail closed。`shadow` 提供全部 legacy JSON 中 Pentest eligible 文档的只读回滚读取与对账，新写仍只进入领域 Store。迁移工具执行闭集扫描和 `backfill -> shadow -> bounded stable final_delta`；CLI 要求 legacy writer quiesce，只有稳定对账成功才写 `VERIFIED` receipt，且不删除或改写旧 Canon 文件。
 
 ### 7.3 报告模块
 

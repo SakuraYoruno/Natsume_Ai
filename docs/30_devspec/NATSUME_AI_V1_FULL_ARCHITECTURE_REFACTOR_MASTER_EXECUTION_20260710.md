@@ -8,7 +8,7 @@
 状态：READY_FOR_PROGRAM_EXECUTION
 文档类型：DevTasks / Master Execution Contract
 程序任务编号：TASK-0461～TASK-0622，共 162 项，禁止复用、跳号或重定义
-当前执行入口：TASK-0461、TASK-0462、TASK-0463、TASK-0466 已完成；M48-A / TASK-0464、TASK-0467、TASK-0468 已解锁；M48-B 通过入口 Gate 后可并行；M49～M57 状态为 PROGRAMMED
+当前执行入口：TASK-0461～TASK-0464、TASK-0466 已完成；M48-A / TASK-0465、TASK-0467、TASK-0468 已解锁；M48-B 通过入口 Gate 后可并行；M49～M57 状态为 PROGRAMMED
 代码基线：dev@1ec8be1a8a20397627855aa946c0ff8aaaa87b72
 工作区状态：dirty；已有未提交业务代码、运行数据和本地配置必须原位保护
 完整目标蓝图：docs/50_project/arch/NATSUME_AI_V1_FULL_ARCHITECTURE_TARGET_20260710.md
@@ -258,7 +258,7 @@ M48-B 从 `PROGRAMMED` 解锁为 `PLANNED` 前必须同时满足：
 | TASK-0461 | 基线、范围与边界固化 | DONE | 2026-07-10；manifest、精确例外与自动化验收已确认 |
 | TASK-0462 | Trace 最小化与敏感信息治理 | DONE | 2026-07-10；durable/propagated raw thought 为 0，T-NLE-12 通过 |
 | TASK-0463 | Pentest 领域存储 | DONE | 2026-07-10；Domain Store、0050 migration、只读 shadow 与 T-NLE-02 通过 |
-| TASK-0464 | Pentest 回填与 domain-only 切换 | PLANNED | M48-A 权威任务卡 |
+| TASK-0464 | Pentest 回填与 domain-only 切换 | DONE | 2026-07-10；87 scanned / 83 eligible、83/83、stable final-delta、receipt gate、domain-only、promotion candidate 与 T-NLE-02 通过；部署目标需独立 receipt |
 | TASK-0465 | Canon Apply 单写入口 | PLANNED | M48-A 权威任务卡 |
 | TASK-0466 | Canonical contracts 基础 | DONE | 2026-07-10；v2/v3 adapter、TaskGraph/Event、Verification/Review/Budget 合同通过 |
 | TASK-0467 | Durable TaskStore | PLANNED | M48-A 权威任务卡 |

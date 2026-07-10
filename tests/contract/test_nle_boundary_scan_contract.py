@@ -24,16 +24,14 @@ def test_t_nle_01_production_boundary_baseline_is_exact_and_current() -> None:
     scanner = _load_scanner()
     report = scanner.scan_report(ROOT, policy_path=POLICY)
 
-    assert report["policy_id"] == "TASK-0461_NLE_BOUNDARY_BASELINE"
+    assert report["policy_id"] == "TASK-0464_NLE_BOUNDARY_DOMAIN_CUTOVER"
     assert report["violations"] == []
     counts = Counter(row["rule_id"] for row in report["existing_debt"])
     assert counts == {
         "NLE-BND-EDGE-HOST-IMPL": 3,
         "NLE-BND-AGENTRUNTIME-APP": 1,
-        "NLE-BND-PENTEST-WORLDCANON-IMPORT": 9,
-        "NLE-BND-PENTEST-WORLDCANON-UPSERT": 8,
     }
-    assert len(report["existing_debt"]) == 21
+    assert len(report["existing_debt"]) == 4
     for row in report["existing_debt"]:
         assert row["path"].endswith(".py")
         assert row["symbol"]

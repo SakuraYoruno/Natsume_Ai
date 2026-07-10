@@ -3,8 +3,8 @@
 
 # CORE_MODULES_DETAILED_REFERENCE
 
-版本：v4.2 Living
-最后同步：2026-06-30
+版本：v4.3 Living
+最后同步：2026-07-10
 
 本文件是实现层查代码的模块索引，不替代代码。每个条目只写当前文件实际承担的职责，避免把历史计划或未接线方案写成已实现事实。
 
@@ -243,6 +243,12 @@ Pentest 的工具不在 `host_brain/skills/impl/`；它们位于 `host_brain/pen
 | `host_brain/pentest/rate_limiter.py` | RateLimiter |
 | `host_brain/pentest/executor_guard.py` | ExecutorGuard 与 `guarded()` |
 | `host_brain/pentest/manifest.py` | EngagementManifest、HMAC approval token |
+| `host_brain/pentest/knowledge_store.py` | Pentest 领域知识 SQLite Store、domain/shadow access、cutover receipt、只读 legacy adapter、跨 lineage 防覆盖、secret/evidence 边界与 promotion candidate；默认 domain-only，receipt 不匹配则 fail closed |
+| `host_brain/pentest/agent/knowledge.py` | KnowledgeBase 领域 adapter；active reader/writer 不构造 WorldCanon Store/VectorQuery |
+| `host_brain/pentest/campaign_memory.py`、`experience_retriever.py` | 攻击记忆和经验检索的领域 Store 调用者；按旧类型语义兼容返回 |
+| `host_brain/pentest/knowledge_ingester.py`、`writeup_ingester.py` | `pentest-domain-*` 领域写入与 content-addressed source ref；不持久化任意原始 label/basename/source/path |
+| `host_brain/pentest/failure_classifier.py` | rules-first 失败分类；`PENTEST_LLM_DISABLED=1` 禁止 LLM slow-path，pytest 默认 rules-only |
+| `scripts/pentest/migrate_pentest_canon_knowledge.py` | 全 Canon JSON 闭集扫描、只读 backfill/shadow、有限稳定 final-delta、collision 检查、VERIFIED receipt 与无正文 manifest 生成；要求 legacy writer quiesce |
 | `host_brain/pentest/kali_bridge.py` | 17 个 Kali wrapper class |
 | `host_brain/pentest/tools/asset_discovery.py` | Shodan/Censys helper、K8s audit、CI/CD scan |
 | `host_brain/pentest/tools/headless_crawler.py` | Playwright/HTTP crawler executor helper |

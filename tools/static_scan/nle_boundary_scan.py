@@ -57,7 +57,7 @@ def validate_policy(policy: dict[str, Any]) -> None:
             raise ValueError(f"duplicate NLE boundary rule_id: {rule_id}")
         rule_ids.add(rule_id)
         kind = _required_text(rule, "kind")
-        if kind in {"import", "module_import", "call_attribute"}:
+        if kind in {"import", "module_import", "call_attribute", "call_name"}:
             roots = rule.get("source_roots")
             if not isinstance(roots, list) or not roots:
                 raise ValueError(f"{rule_id} requires source_roots")
@@ -75,6 +75,12 @@ def validate_policy(policy: dict[str, Any]) -> None:
                 raise ValueError(f"{rule_id} requires attributes")
             for attribute in attributes:
                 _validate_exact_symbol(str(attribute), field=f"{rule_id}.attributes")
+        elif kind == "call_name":
+            names = rule.get("names")
+            if not isinstance(names, list) or not names:
+                raise ValueError(f"{rule_id} requires names")
+            for name in names:
+                _validate_exact_symbol(str(name), field=f"{rule_id}.names")
         elif kind == "forbidden_path":
             paths = rule.get("paths")
             if not isinstance(paths, list) or not paths:
@@ -133,7 +139,7 @@ def scan_report(
     violations: list[dict[str, Any]] = []
     for rule in policy["rules"]:
         kind = str(rule["kind"])
-        if kind in {"import", "module_import", "call_attribute"}:
+        if kind in {"import", "module_import", "call_attribute", "call_name"}:
             _scan_source_rule(
                 repo_root=repo_root,
                 rule=rule,
@@ -273,7 +279,7 @@ def _scan_source_rule(
                             symbol=symbol,
                             line=line,
                         )
-            else:
+            elif str(rule["kind"]) == "call_attribute":
                 attributes = {str(value) for value in rule["attributes"]}
                 for node in ast.walk(tree):
                     if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
@@ -285,6 +291,35 @@ def _scan_source_rule(
                         rule_id=str(rule["rule_id"]),
                         path=relative_path,
                         symbol=str(node.func.attr),
+                        line=int(getattr(node, "lineno", 0) or 0),
+                    )
+            else:
+                names = {str(value) for value in rule["names"]}
+                aliases = set(names)
+                for node in ast.walk(tree):
+                    if not isinstance(node, ast.ImportFrom):
+                        continue
+                    for alias in node.names:
+                        if str(alias.name) in names:
+                            aliases.add(str(alias.asname or alias.name))
+                for node in ast.walk(tree):
+                    if not isinstance(node, ast.Call):
+                        continue
+                    matched_name = ""
+                    if isinstance(node.func, ast.Name) and str(node.func.id) in aliases:
+                        matched_name = str(node.func.id)
+                    elif isinstance(node.func, ast.Attribute) and str(node.func.attr) in names:
+                        matched_name = str(node.func.attr)
+                    if not matched_name:
+                        continue
+                    _add_finding(
+                        findings,
+                        rule_id=str(rule["rule_id"]),
+                        path=relative_path,
+                        symbol=next(
+                            (name for name in sorted(names) if name == matched_name),
+                            sorted(names)[0],
+                        ),
                         line=int(getattr(node, "lineno", 0) or 0),
                     )
 

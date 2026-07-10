@@ -5,7 +5,7 @@
 
 版本：v1.1
 日期：2026-07-10
-状态：`READY_FOR_EXECUTION`（文档已正式化；代码任务均为 `PLANNED`，尚未开始）
+状态：`READY_FOR_EXECUTION`（TASK-0461～TASK-0464、TASK-0466 已 `DONE`；其余任务按依赖保持 `PLANNED`）
 文档类型：DevTasks / Execution Contract
 任务编号：`TASK-0461`～`TASK-0486`
 逻辑工作包：`LTE-WP-00`～`LTE-WP-80`
@@ -408,7 +408,7 @@ Pop-Location
 | TASK-0461 | WP-00 / PR-001 | 基线冻结与边界门禁 | 无 | 2–3 日 | 中 | DONE |
 | TASK-0462 | WP-01 / PR-002 | Trace 数据最小化 | WP-00 | 1–2 日 | 高 | DONE |
 | TASK-0463 | WP-10 / PR-003 | Pentest Domain Store | WP-00 | 2–3 日 | 高 | DONE |
-| TASK-0464 | WP-11 / PR-004 | 回填与 Domain-only 切换 | WP-10 | 2–4 日 | 高 | PLANNED |
+| TASK-0464 | WP-11 / PR-004 | 回填与 Domain-only 切换 | WP-10 | 2–4 日 | 高 | DONE |
 | TASK-0465 | WP-12 / PR-005 | Canon Apply 唯一入口 | WP-11 | 2–3 日 | 高 | PLANNED |
 | TASK-0466 | WP-20 / PR-006 | Canonical Contracts | WP-00 | 2–3 日 | 中 | DONE |
 | TASK-0467 | WP-21 / PR-007 | Durable TaskStore | WP-20 | 4–6 日 | 高 | PLANNED |
@@ -488,7 +488,7 @@ Pop-Location
 
 ### TASK-0464 / LTE-WP-11：Pentest 回填与 Domain-only 切换
 
-- 状态：`PLANNED`
+- 状态：`DONE`（2026-07-10；87 scanned / 83 eligible、83/83、stable final-delta、receipt gate、domain-only 与 promotion candidate 验收通过；部署目标需独立 receipt）
 - 目标：完成历史回填、shadow 对账和 final delta 后，让 Pentest 只写/只读 domain store，并将 Canon 更新降为 promotion candidate。
 - 代码事实：`autonomous_kernel.py` 会把成功攻击链直接 upsert 到 Canon；不能使用持续双写作为迁移方案。
 - 前置任务：TASK-0463。
@@ -500,7 +500,7 @@ Pop-Location
 - 关联需求/测试：FR-NLE-001；T-NLE-02。
 - 停止条件：任一内容或 evidence ref 无法对账，或 shadow 检索关键样本漂移。
 - 回滚：回到 `shadow` 读取；旧 Canon 保持只读，不恢复直接写。
-- 审批：切换 `HOST_PENTEST_KNOWLEDGE_MODE=domain` 前需 MASTER 确认迁移报告。
+- 审批：本线程 MASTER blanket execution authorization 已覆盖切流确认；验证报告与迁移 manifest 已冻结。
 
 ### TASK-0465 / LTE-WP-12：CanonApplyService 唯一写入口
 
@@ -921,4 +921,4 @@ Pop-Location
 
 ## 13. 首个执行动作
 
-正式开工入口只有 `TASK-0461 / LTE-WP-00`。在 TASK-0461 的 baseline manifest 获得确认前，TASK-0462、TASK-0463、TASK-0466 不得修改运行时代码；允许继续进行只读代码盘点和测试收集。
+初始开工入口只有 `TASK-0461 / LTE-WP-00`；其 baseline manifest Gate 已于 2026-07-10 满足。当前 TASK-0461～TASK-0464、TASK-0466 已完成，TASK-0465、TASK-0467、TASK-0468 已按依赖解锁；其余任务仍须等待各自前置 Gate。

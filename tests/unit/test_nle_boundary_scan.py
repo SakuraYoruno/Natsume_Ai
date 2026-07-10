@@ -30,17 +30,29 @@ def test_nle_boundary_scan_rejects_each_unlisted_high_risk_edge() -> None:
     )
 
     assert report["existing_debt"] == []
-    assert len(report["violations"]) == 5
+    assert len(report["violations"]) == 8
     assert {row["rule_id"] for row in report["violations"]} == {
         "NLE-BND-EDGE-HOST-IMPL",
         "NLE-BND-AGENTRUNTIME-APP",
         "NLE-BND-PENTEST-WORLDCANON-IMPORT",
         "NLE-BND-PENTEST-WORLDCANON-UPSERT",
+        "NLE-BND-PENTEST-CANON-VECTOR-READER",
         "NLE-BND-NO-PARALLEL-LIFE-ROOT",
     }
     assert {row["violation_type"] for row in report["violations"]} == {
         scanner.UNLISTED_DEPENDENCY
     }
+    vector_violations = [
+        row
+        for row in report["violations"]
+        if row["rule_id"] == "NLE-BND-PENTEST-CANON-VECTOR-READER"
+    ]
+    assert {row["path"] for row in vector_violations} == {
+        "host_brain/pentest/new_canon_vector_alias.py",
+        "host_brain/pentest/new_canon_vector_module.py",
+        "host_brain/pentest/new_canon_vector_reader.py",
+    }
+    assert {row["symbol"] for row in vector_violations} == {"CanonVectorQuery"}
 
 
 def test_nle_boundary_policy_rejects_glob_allowlist_entries() -> None:
