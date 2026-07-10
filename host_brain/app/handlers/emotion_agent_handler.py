@@ -12,6 +12,7 @@ from host_brain.app.prompt_template_store import (
     resolve_prompt_template_json_merged,
     resolve_prompt_template_text,
 )
+from host_brain.core.trace_redaction import public_decision_summary
 from host_brain.integrations.graph_subgraph import write_agent_artifact_to_state
 
 
@@ -79,6 +80,7 @@ def emotion_agent_handler(
         )
 
         out["react_scratchpad"] = react_result.to_scratchpad_dict()
+        out["agent_output"] = react_result.to_public_output_dict()
         emotion_analysis = _parse_emotion_analysis(react_result.final_answer)
 
         artifact_ref = f"artifact://{request_id}/{AGENT_ID_EMOTION}_{int(time.time() * 1000)}"
@@ -208,7 +210,7 @@ def _parse_emotion_analysis(final_answer: str) -> dict[str, Any]:
 
     result: dict[str, Any] = {
         "recommended_emotion_tag": "NEUTRAL",
-        "reasoning": final_answer[:200],
+        "reasoning": public_decision_summary(final_answer, max_chars=200),
     }
 
     text = str(final_answer or "").strip()
@@ -223,7 +225,7 @@ def _parse_emotion_analysis(final_answer: str) -> dict[str, Any]:
             elif "natsume_emotion" in parsed:
                 result["recommended_emotion_tag"] = str(parsed["natsume_emotion"]).strip().upper()
             if "reasoning" in parsed:
-                result["reasoning"] = str(parsed["reasoning"])[:200]
+                result["reasoning"] = public_decision_summary(parsed["reasoning"], max_chars=200)
             return result
     except (_json.JSONDecodeError, TypeError, ValueError):
         pass

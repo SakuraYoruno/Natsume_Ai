@@ -20,6 +20,7 @@ from host_brain.agent_runtime.verification_policy import VerificationPolicy
 from host_brain.agent_runtime.work_order import AgentWorkOrder
 from host_brain.agent_runtime.workspace_policy import WorkspacePolicy
 from host_brain.core.ids import new_event_id, now_ms
+from host_brain.core.trace_redaction import sanitize_public_payload
 from host_brain.evolution_lab import validate_evolution_branch
 from host_brain.integrations.codex_cli_provider import build_codex_cli_env, codex_cli_command
 
@@ -521,7 +522,7 @@ class AgentRuntimeExecutor:
         return result.to_dict()
 
     def _persist_result(self, run_dir: Path, result: AgentResult, *, order: AgentWorkOrder, event_id: str, ts_ms: int) -> None:
-        metadata = {
+        metadata = sanitize_public_payload({
             "event_id": event_id,
             "ts_ms": ts_ms,
             "work_order_id": order.work_order_id,
@@ -529,7 +530,7 @@ class AgentRuntimeExecutor:
             "run_mode": order.run_mode,
             "artifact_dir": str(run_dir),
             **dict(result.metadata or {}),
-        }
+        })
         self.artifact_store.write_json(run_dir / "metadata.json", metadata)
         self.artifact_store.write_json(run_dir / "result.json", result.to_dict())
         if not (run_dir / "changed_files.json").exists():

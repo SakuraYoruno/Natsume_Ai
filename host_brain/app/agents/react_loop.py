@@ -29,6 +29,12 @@ from host_brain.app.agents.tool_registry import (
 )
 from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged
 from host_brain.app.sub_agent_context import render_agent_context_envelope_for_prompt
+from host_brain.core.trace_redaction import (
+    build_public_agent_output,
+    build_redacted_trace,
+    build_redacted_trace_step,
+    trace_input_refs,
+)
 
 
 def _load_template_mapping(template_id: str) -> dict[str, Any]:
@@ -67,15 +73,8 @@ class ReactStep:
     ts_ms: int = field(default_factory=lambda: int(time.time() * 1000))
 
     def to_dict(self) -> dict[str, Any]:
-        return {
-            "step": self.step,
-            "thought": self.thought,
-            "action_type": self.action_type,
-            "action": self.action,
-            "observation": self.observation,
-            "final_answer": self.final_answer,
-            "ts_ms": self.ts_ms,
-        }
+        """Return the public trace step; raw thought stays process-local."""
+        return build_redacted_trace_step(self)
 
 
 @dataclass
@@ -88,19 +87,26 @@ class ReactResult:
     total_steps: int
     confidence: float = 0.8
     risk_flags: list[str] = field(default_factory=list)
+    input_refs: list[str] = field(default_factory=list)
+    ts_ms: int = field(default_factory=lambda: int(time.time() * 1000))
 
     def to_scratchpad_dict(self) -> dict[str, Any]:
-        """转换为 react_scratchpad 格式，写入 payload。"""
-        return {
-            "agent_id": self.agent_id,
-            "steps": [s.to_dict() for s in self.steps],
-            "final_answer": self.final_answer,
-            "total_steps": self.total_steps,
-            "stopped_reason": self.stopped_reason,
-            "confidence": self.confidence,
-            "risk_flags": list(self.risk_flags),
-            "ts_ms": int(time.time() * 1000),
-        }
+        """Convert to the redacted, fixed-allowlist scratchpad contract."""
+        return build_redacted_trace(
+            agent_id=self.agent_id,
+            steps=self.steps,
+            stopped_reason=self.stopped_reason,
+            confidence=self.confidence,
+            risk_flags=self.risk_flags,
+            input_refs=self.input_refs,
+            final_answer=self.final_answer,
+            total_steps=self.total_steps,
+            ts_ms=self.ts_ms,
+        )
+
+    def to_public_output_dict(self) -> dict[str, Any]:
+        """Return the complete sanitized user-facing output channel."""
+        return build_public_agent_output(self.final_answer)
 
 
 # ---------------------------------------------------------------------------
@@ -294,14 +300,16 @@ def _parse_llm_react_output(raw_output: str) -> dict[str, Any]:
             raise ValueError("not a dict")
         return parsed
     except (json.JSONDecodeError, ValueError):
-        # 解析失败：把原始输出作为 final_answer
+        # Unstructured model output may contain hidden reasoning.  Keep the
+        # failure observable without propagating the raw body.
         return {
-            "thought": _mapping_text(
-                templates,
-                "parse_failure_thought",
-            ),
+            "thought": "",
             "action_type": "final_answer",
-            "final_answer": raw,
+            "final_answer": _mapping_text(
+                templates,
+                "parse_failure_final_answer",
+                default="Agent response could not be parsed into a publishable decision.",
+            ),
         }
 
 
@@ -345,6 +353,7 @@ def run_react_loop(
     steps: list[ReactStep] = []
     risk_flags: list[str] = []
     templates = _load_template_mapping("react_loop.prompt_templates")
+    durable_input_refs = trace_input_refs(ctx, raw_input=user_input)
 
     # 构建 GovernedToolNode（LangGraph ToolNode + Governor 门控）
     # 将 ToolSpec 列表转换为 LangChain Tool 格式
@@ -474,7 +483,11 @@ def run_react_loop(
                 step=step_num,
                 thought=thought,
                 action_type="tool_call",
-                action={"tool": tool_id, "args": tool_args},
+                action={
+                    "tool": tool_id,
+                    "args": tool_args,
+                    "tool_ids": [str(call.get("tool") or "") for call in tool_calls_input],
+                },
                 observation=observation,
                 final_answer=None,
             ))
@@ -508,7 +521,6 @@ def run_react_loop(
             last_step = steps[-1]
             final_answer = str(
                 last_step.final_answer
-                or last_step.thought
                 or _mapping_text(templates, "max_steps_final_answer")
             )
     else:
@@ -524,6 +536,7 @@ def run_react_loop(
         total_steps=len(steps),
         confidence=confidence,
         risk_flags=risk_flags,
+        input_refs=durable_input_refs,
     )
 
 
@@ -666,9 +679,9 @@ async def astream_react_loop(
             risk_flags=["ASTREAM_TIMEOUT"],
         )
 
-    # 逐步 yield 每个 ReactStep
+    # Streaming is an external propagation boundary: yield only redacted maps.
     for step in final_result.steps:
-        yield step
+        yield build_redacted_trace_step(step, input_refs=final_result.input_refs)
 
-    # 最后 yield ReactResult
-    yield final_result
+    # The terminal item crosses the same propagation boundary as each step.
+    yield final_result.to_scratchpad_dict()

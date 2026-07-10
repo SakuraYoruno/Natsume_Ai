@@ -25,6 +25,11 @@ from host_brain.agent_runtime.agent_tools import (
 )
 from host_brain.agent_runtime.result_contract import AgentResult
 from host_brain.agent_runtime.work_order import AgentWorkOrder
+from host_brain.core.trace_redaction import (
+    build_redacted_trace,
+    build_redacted_trace_step,
+    trace_input_refs,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -98,16 +103,13 @@ class AgentStep:
         self.final_answer = final_answer
         self.duration_ms = duration_ms
 
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "step": self.step,
-            "thought": self.thought,
-            "tool_id": self.tool_id,
-            "tool_args": self.tool_args,
-            "observation": self.observation,
-            "final_answer": self.final_answer,
-            "duration_ms": self.duration_ms,
-        }
+    def to_dict(self, *, input_refs: list[str] | None = None) -> dict[str, Any]:
+        """Serialize only the redacted trace contract.
+
+        ``thought`` remains available to the in-process loop but is never part
+        of a durable or propagated representation.
+        """
+        return build_redacted_trace_step(self, input_refs=input_refs)
 
 
 # ---------------------------------------------------------------------------
@@ -161,7 +163,7 @@ def _parse_llm_action(raw_text: str) -> dict[str, Any]:
             "thought": "",
             "tool_id": "agent_finish",
             "tool_args": {},
-            "final_answer": raw_text,
+            "final_answer": "Agent response could not be parsed into a publishable action.",
             "_parse_error": True,
         }
 
@@ -197,8 +199,9 @@ def _extract_final_answer(action: dict[str, Any], *, raw_output: str = "") -> st
                 if isinstance(inner, str) and inner.strip():
                     return inner.strip()
 
-    # 4. fallback
-    return str(raw_output or "").strip()
+    # 4. Raw model output can contain hidden reasoning.  Never promote it to a
+    # public final answer merely because the structured field is absent.
+    return "Agent completed without a publishable final answer."
 
 
 def _build_summary(final_answer: str, *, stopped_reason: str, max_chars: int = 280) -> str:
@@ -389,6 +392,14 @@ class AgentExecutor:
         last_model = ""
 
         objective_msg = f"Execute the WorkOrder.\n\nObjective: {work_order.objective}"
+        durable_input_refs = trace_input_refs(
+            {
+                "request_id": request_id,
+                "work_order_id": work_order.work_order_id,
+                "input_refs": work_order.metadata.get("input_refs") or [],
+            },
+            raw_input=work_order.objective,
+        )
 
         for step_num in range(1, self._max_steps + 1):
             elapsed_ms = int((time.time() - start_ts) * 1000)
@@ -469,7 +480,7 @@ class AgentExecutor:
                             "thought": "",
                             "tool_id": "agent_finish",
                             "tool_args": {},
-                            "final_answer": raw_output,
+                            "final_answer": "Agent response could not be parsed into a publishable action.",
                         }
                 break  # 解析成功或重试耗尽
 
@@ -526,6 +537,18 @@ class AgentExecutor:
         status = "EXECUTED" if stopped_reason == "FINISH" else "DEGRADED"
         summary = _build_summary(final_answer, stopped_reason=stopped_reason)
 
+        redacted_trace = build_redacted_trace(
+            agent_id="natsume_agent",
+            steps=steps,
+            stopped_reason=stopped_reason,
+            confidence=1.0 if stopped_reason == "FINISH" else 0.0,
+            risk_flags=risk_flags,
+            input_refs=durable_input_refs,
+            final_answer=final_answer,
+            total_steps=len(steps),
+            ts_ms=int(time.time() * 1000),
+        )
+
         return AgentResult(
             status=status,
             work_order_id=work_order.work_order_id,
@@ -546,10 +569,9 @@ class AgentExecutor:
                 "total_steps": len(steps),
                 "stopped_reason": stopped_reason,
                 "max_steps": self._max_steps,
-                "steps": [s.to_dict() for s in steps],
+                "trace": redacted_trace,
             },
         )
 
 
 __all__ = ["AgentExecutor", "agent_enabled"]
-

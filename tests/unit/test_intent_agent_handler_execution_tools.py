@@ -69,10 +69,13 @@ def test_intent_agent_handler_can_execute_run_skill_tool() -> None:
     scratchpad = dict(out.get("react_scratchpad") or {})
     steps = list(scratchpad.get("steps") or [])
     assert len(steps) >= 2
-    assert steps[0]["action"]["tool"] == "run_skill"
-    assert steps[0]["observation"]["status"] == "SUCCESS"
-    assert steps[0]["observation"]["skill_name"] == "memory_store"
-    assert scratchpad.get("final_answer") == "stored"
+    assert steps[0]["tool_id"] == "run_skill"
+    assert steps[0]["outcome"] == "OBSERVED"
+    assert steps[0]["payload_hash"]
+    assert "action" not in steps[0]
+    assert "observation" not in steps[0]
+    assert scratchpad.get("decision_summary") == "stored"
+    assert out["agent_output"]["text"] == "stored"
 
 
 def test_intent_agent_handler_can_dispatch_sub_agent_tool() -> None:
@@ -104,7 +107,9 @@ def test_intent_agent_handler_can_dispatch_sub_agent_tool() -> None:
     scratchpad = dict(out.get("react_scratchpad") or {})
     steps = list(scratchpad.get("steps") or [])
     assert len(steps) >= 2
-    assert steps[0]["action"]["tool"] == "dispatch_sub_agent"
-    assert steps[0]["observation"]["status"] == "SUCCESS"
-    assert steps[0]["observation"]["agent_id"] == "translate_agent"
-    assert "delegate_ok:translate_agent" in str(steps[0]["observation"]["result"])
+    assert steps[0]["tool_id"] == "dispatch_sub_agent"
+    assert steps[0]["outcome"] == "OBSERVED"
+    assert steps[0]["payload_hash"]
+    assert "action" not in steps[0]
+    assert "observation" not in steps[0]
+    assert out["agent_output"]["text"] == "delegated"

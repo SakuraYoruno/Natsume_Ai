@@ -71,7 +71,8 @@ def test_repair_agent_handler_returns_success_summary(monkeypatch) -> None:
         {"request_id": "req-001", "previous_agent_result": "BROWSER_UNAVAILABLE"},
     )
 
-    assert out["react_scratchpad"]["final_answer"] == "浏览器后端已经补齐，可以重试原任务。"
+    assert out["react_scratchpad"]["decision_summary"] == "浏览器后端已经补齐，可以重试原任务。"
+    assert out["agent_output"]["text"] == "浏览器后端已经补齐，可以重试原任务。"
     assert out["repair_agent_trace"]["success"] is True
 
 

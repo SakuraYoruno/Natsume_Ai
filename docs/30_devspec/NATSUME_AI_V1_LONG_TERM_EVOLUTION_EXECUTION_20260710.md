@@ -406,7 +406,7 @@ Pop-Location
 | TASK | WP / 逻辑 PR | 工作包 | 依赖 | 预估 | 风险 | 状态 |
 |---|---|---|---|---:|---|---|
 | TASK-0461 | WP-00 / PR-001 | 基线冻结与边界门禁 | 无 | 2–3 日 | 中 | DONE |
-| TASK-0462 | WP-01 / PR-002 | Trace 数据最小化 | WP-00 | 1–2 日 | 高 | PLANNED |
+| TASK-0462 | WP-01 / PR-002 | Trace 数据最小化 | WP-00 | 1–2 日 | 高 | DONE |
 | TASK-0463 | WP-10 / PR-003 | Pentest Domain Store | WP-00 | 2–3 日 | 高 | DONE |
 | TASK-0464 | WP-11 / PR-004 | 回填与 Domain-only 切换 | WP-10 | 2–4 日 | 高 | PLANNED |
 | TASK-0465 | WP-12 / PR-005 | Canon Apply 唯一入口 | WP-11 | 2–3 日 | 高 | PLANNED |
@@ -456,7 +456,7 @@ Pop-Location
 
 ### TASK-0462 / LTE-WP-01：Trace 数据最小化
 
-- 状态：`PLANNED`
+- 状态：`DONE`（2026-07-10；T-NLE-12、公开输出兼容与泄漏负例验收通过）
 - 目标：在新增持久层前停止 durable/propagated raw thought，统一改为可公开的 `decision_summary`、input/evidence refs 与 payload hash。
 - 代码事实：`agent_runtime/agent_executor.py` 和 `app/agents/react_loop.py` 会把原始 `thought` 写入可传播结构。
 - 前置任务：TASK-0461。

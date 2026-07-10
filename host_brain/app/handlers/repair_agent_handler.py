@@ -13,6 +13,7 @@ from typing import Any
 
 from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged
 from host_brain.app.sub_agent_protocol import AGENT_REPAIR
+from host_brain.core.trace_redaction import build_public_agent_output, redact_legacy_trace_payload
 from host_brain.integrations.graph_subgraph import write_agent_artifact_to_state
 
 _logger = logging.getLogger(__name__)
@@ -384,7 +385,7 @@ def repair_agent_handler(payload: dict[str, Any], context: dict[str, Any] | None
     try:
         repair_result = _build_repair_result(task_text=task_text, previous_error=previous_error)
         final_answer = str(repair_result.get("summary") or "").strip()
-        out["react_scratchpad"] = {
+        out["react_scratchpad"] = redact_legacy_trace_payload({
             "agent_id": AGENT_REPAIR,
             "steps": [],
             "final_answer": final_answer,
@@ -393,7 +394,8 @@ def repair_agent_handler(payload: dict[str, Any], context: dict[str, Any] | None
             "confidence": 0.9 if repair_result.get("success") else 0.4,
             "risk_flags": [],
             "ts_ms": int(time.time() * 1000),
-        }
+        })
+        out["agent_output"] = build_public_agent_output(final_answer)
         artifact_ref = f"artifact://{request_id}/{AGENT_REPAIR}_{int(time.time() * 1000)}"
         write_agent_artifact_to_state(
             out,

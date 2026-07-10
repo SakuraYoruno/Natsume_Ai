@@ -11,6 +11,7 @@ from host_brain.agent_runtime import AgentRuntimeExecutor, AgentWorkOrder
 from host_brain.agent_runtime.immune import build_immune_proposal_from_report
 from host_brain.agent_runtime.job_registry import GLOBAL_AGENT_JOB_REGISTRY
 from host_brain.core.ids import now_ms
+from host_brain.core.trace_redaction import sanitize_public_payload
 
 router = APIRouter(prefix="/internal/codex", tags=["internal-codex"])
 
@@ -255,7 +256,10 @@ async def get_codex_job(job_id: str) -> dict[str, Any]:
     job = GLOBAL_AGENT_JOB_REGISTRY.get(job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="CODEX_JOB_NOT_FOUND")
-    return job
+    # Jobs created before the redacted trace schema may still carry legacy
+    # ``thought`` fields in memory.  Read them compatibly but never re-publish
+    # those fields through the API adapter.
+    return dict(sanitize_public_payload(job))
 
 
 async def _live_report(source: str) -> dict[str, Any]:

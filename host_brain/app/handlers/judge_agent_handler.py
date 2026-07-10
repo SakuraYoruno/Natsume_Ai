@@ -10,6 +10,7 @@ from host_brain.app.agents.agent_registry import AGENT_ID_JUDGE
 from host_brain.app.agents.react_loop import run_react_loop
 from host_brain.app.agents.tool_registry import get_tools_for_agent
 from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged
+from host_brain.core.trace_redaction import public_decision_summary
 
 
 def _load_template_mapping(template_id: str) -> dict[str, Any]:
@@ -111,6 +112,7 @@ def judge_agent_handler(
         )
 
         out["react_scratchpad"] = react_result.to_scratchpad_dict()
+        out["agent_output"] = react_result.to_public_output_dict()
 
         if react_result.stopped_reason == "ERROR":
             out["judge_result"] = {
@@ -227,7 +229,7 @@ def _parse_judge_final_answer(
 
     reason_match = re.search(r"reason\s*=\s*([^\n,]+)", final_answer)
     if reason_match:
-        reason = reason_match.group(1).strip()[:100]
+        reason = public_decision_summary(reason_match.group(1), max_chars=100)
 
     if selected_agent is None:
         valid = {aid: art for aid, art in agent_artifacts.items() if not art.get("error")}

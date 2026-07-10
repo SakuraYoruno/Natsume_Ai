@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
+from host_brain.core.trace_redaction import sanitize_public_payload
+
 
 AGENT_RESULT_STATUSES = {
     "QUEUED",
@@ -41,7 +43,10 @@ class AgentResult:
             raise ValueError(f"unsupported agent result status: {self.status}")
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        # The result is returned by HTTP/job adapters and written to result.json.
+        # Keep legacy fields readable, but never re-publish raw reasoning or
+        # sensitive bodies that may still exist in historical metadata.
+        return dict(sanitize_public_payload(asdict(self)))
 
 
 def blocked_result(

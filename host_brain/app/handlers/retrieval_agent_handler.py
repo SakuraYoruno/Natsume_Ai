@@ -77,6 +77,7 @@ def retrieval_agent_handler(
         )
 
         out["react_scratchpad"] = react_result.to_scratchpad_dict()
+        out["agent_output"] = react_result.to_public_output_dict()
 
         retrieval_payload = dict((payload.get("workbench_retrieval") or {}).get("payload") or {})
         retrieval_source = str(retrieval_payload.get("source") or "knowledge_base").strip()

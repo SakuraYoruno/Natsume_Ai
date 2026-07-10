@@ -20,6 +20,14 @@ from host_brain.app.sub_agent_context import (
     build_agent_context_envelope,
     project_legacy_context_for_sub_agent,
 )
+from host_brain.core.trace_redaction import (
+    content_ref,
+    public_decision_summary,
+    public_output_text,
+    read_decision_summary,
+    read_public_agent_output,
+    sanitize_public_payload,
+)
 
 _logger = logging.getLogger("Natsume.sub_agent")
 
@@ -297,17 +305,23 @@ class SubAgentDispatcher:
             agent_artifact = artifacts.get(req.agent_id) or {}
             summary = str(agent_artifact.get("summary") or "").strip()
 
-            # 也从 react_scratchpad 提取 final_answer
+            # The complete publishable result is independent from the trace.
+            # Legacy scratchpads remain readable, but are centrally sanitized.
+            output_envelope = result_payload.get("agent_output") or {}
+            final_answer = read_public_agent_output(output_envelope).strip()
             scratchpad = result_payload.get("react_scratchpad") or {}
-            final_answer = str(scratchpad.get("final_answer") or summary or "").strip()
+            if not final_answer:
+                final_answer = read_public_agent_output(scratchpad).strip()
+            if not final_answer:
+                final_answer = read_decision_summary(scratchpad, fallback=summary).strip()
 
             if not final_answer:
                 # 兜底：从 narrative 提取
                 narrative_raw = result_payload.get("narrative") or result_payload.get("output") or {}
                 if isinstance(narrative_raw, dict):
-                    final_answer = str(narrative_raw.get("text") or "").strip()
+                    final_answer = public_output_text(narrative_raw.get("text")).strip()
                 elif isinstance(narrative_raw, str):
-                    final_answer = narrative_raw.strip()
+                    final_answer = public_output_text(narrative_raw).strip()
 
             # repair_agent 的 success 语义特殊：
             # 不能用 final_answer 是否非空来判断（修复失败时也会有 summary 文本），
@@ -361,7 +375,7 @@ class SubAgentDispatcher:
                 success=repair_success,
                 agent_id=req.agent_id,
                 result=final_answer,
-                audit_refs=audit_refs,
+                audit_refs=dict(sanitize_public_payload(audit_refs)),
                 latency_ms=latency_ms,
             )
             self._log_dispatch(req, resp)
@@ -393,7 +407,7 @@ class SubAgentDispatcher:
             resp = SubAgentResponse(
                 success=False,
                 agent_id=req.agent_id,
-                error=str(exc)[:200],
+                error=public_output_text(str(exc))[:200],
                 latency_ms=latency_ms,
             )
             self._log_dispatch(req, resp)
@@ -405,9 +419,12 @@ class SubAgentDispatcher:
             from host_brain.app.dependencies import get_ledger  # noqa: PLC0415
             ledger = get_ledger()
             result_code = "SUB_AGENT_OK" if resp.success else "SUB_AGENT_FAILED"
-            result_digest = str(resp.result or resp.error or "").strip()
-            if not result_digest:
-                result_digest = f"agent={resp.agent_id} success={str(bool(resp.success)).lower()}"
+            raw_result = str(resp.result or resp.error or "").strip()
+            result_digest = public_decision_summary(
+                raw_result,
+                fallback=f"agent={resp.agent_id} success={str(bool(resp.success)).lower()}",
+            )
+            result_ref = content_ref("sub-agent-output", raw_result or result_digest)
             ledger.log_skill_exec({
                 "request_id": req.request_id,
                 "intent_id": f"intent::{req.request_id}::{resp.agent_id}",
@@ -418,8 +435,8 @@ class SubAgentDispatcher:
                 "undo_token_ref": None,
                 "result_status": "OK" if resp.success else "FAILED",
                 "result_code": result_code,
-                "result_digest": result_digest[:4000],
-                "evidence_ref": f"sub_agent::{req.request_id}::{resp.agent_id}",
+                "result_digest": result_digest,
+                "evidence_ref": result_ref,
                 "manifest_ref": None,
                 "ts_ms": int(time.time() * 1000),
             })

@@ -9,7 +9,7 @@
 ## 维护记录（2026-07-10）
 
 - 本次增量：登记完整架构目标与正式执行程序，新增 FR-ARCH-001～010、R-183～R-192，以及 M48-B～M57 → TASK-0487～0622 → T-ARCH-01～30 的发布级 Gate 映射。
-- 状态口径：T-ARCH 编号只表示测试契约已定义；正式程序状态为 READY_FOR_PROGRAM_EXECUTION。M48-A 的 TASK-0461、TASK-0463、TASK-0466 已于 2026-07-10 完成，其余 TASK-0462～0486 为 PLANNED，其中 TASK-0462、0464、0467、0468 已通过前置 Gate 解锁；M48-B～M57 的 TASK-0487～0622 为 PROGRAMMED 且尚未解锁实施。所有任务必须经过依赖 Gate、自动化测试与 Seal 证据后才能改为 DONE。
+- 状态口径：T-ARCH 编号只表示测试契约已定义；正式程序状态为 READY_FOR_PROGRAM_EXECUTION。M48-A 的 TASK-0461、TASK-0462、TASK-0463、TASK-0466 已于 2026-07-10 完成，其余 TASK-0464～0486 为 PLANNED，其中 TASK-0464、0467、0468 已通过前置 Gate 解锁；M48-B～M57 的 TASK-0487～0622 为 PROGRAMMED 且尚未解锁实施。所有任务必须经过依赖 Gate、自动化测试与 Seal 证据后才能改为 DONE。
 - 本次同步范围：M48 长期演化安全收敛的 PRD、DevSpec、DevTasks 与 T-NLE 正式闭环。
 - 新增映射：FR-NLE-001～005 → DevSpec §15 → TASK-0461～0486 → T-NLE-01～24。
 - 代码状态：正式执行文档已冻结；M48-A 代码任务为 PLANNED，M48-B 任务为 PROGRAMMED 且尚未解锁，不把文档完成误报为能力已实现。

@@ -64,6 +64,7 @@ def intent_agent_handler(
             )
 
             out["react_scratchpad"] = react_result.to_scratchpad_dict()
+            out["agent_output"] = react_result.to_public_output_dict()
 
             artifact_ref = f"artifact://{request_id}/{AGENT_ID_INTENT}_{int(time.time() * 1000)}"
             write_agent_artifact_to_state(

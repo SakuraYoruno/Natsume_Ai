@@ -144,6 +144,9 @@ def test_retrieval_agent_react_path_can_call_markdown_kb(monkeypatch) -> None:
     )
 
     steps = result["react_scratchpad"]["steps"]
-    assert steps[0]["action"]["tool"] == "search_knowledge"
-    assert steps[0]["observation"]["items"][0]["source"] == "markdown_kb"
+    assert steps[0]["tool_id"] == "search_knowledge"
+    assert steps[0]["outcome"] == "OBSERVED"
+    assert "action" not in steps[0]
+    assert "observation" not in steps[0]
+    assert result["agent_output"]["text"] == "GraphRAG 资料已从 Agent 指南召回。"
     assert result["retrieval_agent_trace"]["stopped_reason"] == "FINAL_ANSWER"
