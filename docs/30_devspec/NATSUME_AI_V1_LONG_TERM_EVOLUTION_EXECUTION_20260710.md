@@ -405,7 +405,7 @@ Pop-Location
 
 | TASK | WP / 逻辑 PR | 工作包 | 依赖 | 预估 | 风险 | 状态 |
 |---|---|---|---|---:|---|---|
-| TASK-0461 | WP-00 / PR-001 | 基线冻结与边界门禁 | 无 | 2–3 日 | 中 | PLANNED |
+| TASK-0461 | WP-00 / PR-001 | 基线冻结与边界门禁 | 无 | 2–3 日 | 中 | DONE |
 | TASK-0462 | WP-01 / PR-002 | Trace 数据最小化 | WP-00 | 1–2 日 | 高 | PLANNED |
 | TASK-0463 | WP-10 / PR-003 | Pentest Domain Store | WP-00 | 2–3 日 | 高 | PLANNED |
 | TASK-0464 | WP-11 / PR-004 | 回填与 Domain-only 切换 | WP-10 | 2–4 日 | 高 | PLANNED |
@@ -440,7 +440,7 @@ Pop-Location
 
 ### TASK-0461 / LTE-WP-00：冻结基线与架构边界门禁
 
-- 状态：`PLANNED`
+- 状态：`DONE`（2026-07-10；MASTER 已确认 baseline manifest，并授权按完整 Goal 自动推进）
 - 目标：形成可复现的 M48 基线，区分现有用户改动、活跃调用路径、死代码和生成数据，并把关键禁止依赖变成静态门禁。
 - 代码事实：当前工作区 dirty；现有 static scan 仅覆盖 Bond SSOT 与 no-rule-degrade；`.pre-commit-config.yaml` 指向不存在的文档 lint 路径。
 - 前置任务：无。

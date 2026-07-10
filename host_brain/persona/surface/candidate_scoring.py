@@ -1094,7 +1094,7 @@ def _question_budget_count(text):
 def _question_segment_before(text, marker_index):
     prefix = text[:marker_index]
     segment = _QUESTION_SEGMENT_SPLIT_RE.split(prefix)[-1]
-    return re.sub(r"[「」『』""\"'（）()\[\]\s~～…]+", "", segment)
+    return re.sub(r"""[「」『』"'（）()\[\]\s~～…]+""", "", segment)
 
 
 def _allowed_rhetorical_question_segment(segment):

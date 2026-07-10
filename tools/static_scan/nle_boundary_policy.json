@@ -1,0 +1,208 @@
+{
+  "schema_version": 1,
+  "policy_id": "TASK-0461_NLE_BOUNDARY_BASELINE",
+  "rules": [
+    {
+      "rule_id": "NLE-BND-EDGE-HOST-IMPL",
+      "kind": "module_import",
+      "source_roots": ["edge_client"],
+      "forbidden_module_prefixes": ["host_brain.app", "host_brain.audit"],
+      "module_scope_only": true
+    },
+    {
+      "rule_id": "NLE-BND-AGENTRUNTIME-APP",
+      "kind": "module_import",
+      "source_roots": ["host_brain/agent_runtime"],
+      "forbidden_module_prefixes": ["host_brain.app"],
+      "module_scope_only": true
+    },
+    {
+      "rule_id": "NLE-BND-PENTEST-WORLDCANON-IMPORT",
+      "kind": "import",
+      "source_roots": ["host_brain/pentest"],
+      "forbidden_module_prefixes": ["host_brain.memory.canon_world_store"],
+      "module_scope_only": false
+    },
+    {
+      "rule_id": "NLE-BND-PENTEST-WORLDCANON-UPSERT",
+      "kind": "call_attribute",
+      "source_roots": ["host_brain/pentest"],
+      "attributes": ["upsert_document"]
+    },
+    {
+      "rule_id": "NLE-BND-NO-PARALLEL-LIFE-ROOT",
+      "kind": "forbidden_path",
+      "paths": ["host_brain/life"]
+    }
+  ],
+  "allowlist": [
+    {
+      "rule_id": "NLE-BND-EDGE-HOST-IMPL",
+      "path": "edge_client/rpc/fallback_llm.py",
+      "symbol": "host_brain.audit.sqlite_ledger.SQLiteLedger",
+      "owner": "EDGE_RUNTIME",
+      "reason": "Existing Edge fallback audit coupling captured by TASK-0461.",
+      "remove_task": "M55_EDGE_RUNTIME"
+    },
+    {
+      "rule_id": "NLE-BND-EDGE-HOST-IMPL",
+      "path": "edge_client/rpc/resource_gate.py",
+      "symbol": "host_brain.audit.sqlite_ledger.SQLiteLedger",
+      "owner": "EDGE_RUNTIME",
+      "reason": "Existing Edge resource-gate audit coupling captured by TASK-0461.",
+      "remove_task": "M55_EDGE_RUNTIME"
+    },
+    {
+      "rule_id": "NLE-BND-EDGE-HOST-IMPL",
+      "path": "edge_client/rpc/voice.py",
+      "symbol": "host_brain.audit.sqlite_ledger.SQLiteLedger",
+      "owner": "EDGE_RUNTIME",
+      "reason": "Existing Edge voice audit coupling captured by TASK-0461.",
+      "remove_task": "M55_EDGE_RUNTIME"
+    },
+    {
+      "rule_id": "NLE-BND-AGENTRUNTIME-APP",
+      "path": "host_brain/agent_runtime/agent_tools.py",
+      "symbol": "host_brain.app.agents.tool_registry.ToolSpec",
+      "owner": "AGENT_RUNTIME",
+      "reason": "Existing module-level ToolSpec dependency captured by TASK-0461.",
+      "remove_task": "M50_AGENT_RUNTIME"
+    },
+    {
+      "rule_id": "NLE-BND-PENTEST-WORLDCANON-IMPORT",
+      "path": "host_brain/pentest/action_policy.py",
+      "symbol": "host_brain.memory.canon_world_store.WorldCanonStore",
+      "owner": "PENTEST_DOMAIN",
+      "reason": "Existing direct WorldCanon import captured by TASK-0461.",
+      "remove_task": "TASK-0463"
+    },
+    {
+      "rule_id": "NLE-BND-PENTEST-WORLDCANON-IMPORT",
+      "path": "host_brain/pentest/agent/evolution_core.py",
+      "symbol": "host_brain.memory.canon_world_store.WorldCanonStore",
+      "owner": "PENTEST_DOMAIN",
+      "reason": "Existing direct WorldCanon import captured by TASK-0461.",
+      "remove_task": "TASK-0463"
+    },
+    {
+      "rule_id": "NLE-BND-PENTEST-WORLDCANON-IMPORT",
+      "path": "host_brain/pentest/agent/knowledge.py",
+      "symbol": "host_brain.memory.canon_world_store.WorldCanonStore",
+      "owner": "PENTEST_DOMAIN",
+      "reason": "Existing direct WorldCanon import captured by TASK-0461.",
+      "remove_task": "TASK-0463"
+    },
+    {
+      "rule_id": "NLE-BND-PENTEST-WORLDCANON-IMPORT",
+      "path": "host_brain/pentest/agent/llm_mcts_advisor.py",
+      "symbol": "host_brain.memory.canon_world_store.WorldCanonStore",
+      "owner": "PENTEST_DOMAIN",
+      "reason": "Existing direct WorldCanon import captured by TASK-0461.",
+      "remove_task": "TASK-0463"
+    },
+    {
+      "rule_id": "NLE-BND-PENTEST-WORLDCANON-IMPORT",
+      "path": "host_brain/pentest/autonomous_kernel.py",
+      "symbol": "host_brain.memory.canon_world_store.WorldCanonStore",
+      "owner": "PENTEST_DOMAIN",
+      "reason": "Existing direct WorldCanon import captured by TASK-0461.",
+      "remove_task": "TASK-0463"
+    },
+    {
+      "rule_id": "NLE-BND-PENTEST-WORLDCANON-IMPORT",
+      "path": "host_brain/pentest/campaign_memory.py",
+      "symbol": "host_brain.memory.canon_world_store.get_world_canon_store",
+      "owner": "PENTEST_DOMAIN",
+      "reason": "Existing direct WorldCanon accessor import captured by TASK-0461.",
+      "remove_task": "TASK-0463"
+    },
+    {
+      "rule_id": "NLE-BND-PENTEST-WORLDCANON-IMPORT",
+      "path": "host_brain/pentest/experience_retriever.py",
+      "symbol": "host_brain.memory.canon_world_store.WorldCanonStore",
+      "owner": "PENTEST_DOMAIN",
+      "reason": "Existing direct WorldCanon import captured by TASK-0461.",
+      "remove_task": "TASK-0463"
+    },
+    {
+      "rule_id": "NLE-BND-PENTEST-WORLDCANON-IMPORT",
+      "path": "host_brain/pentest/knowledge_ingester.py",
+      "symbol": "host_brain.memory.canon_world_store.WorldCanonStore",
+      "owner": "PENTEST_DOMAIN",
+      "reason": "Existing direct WorldCanon import captured by TASK-0461.",
+      "remove_task": "TASK-0463"
+    },
+    {
+      "rule_id": "NLE-BND-PENTEST-WORLDCANON-IMPORT",
+      "path": "host_brain/pentest/writeup_ingester.py",
+      "symbol": "host_brain.memory.canon_world_store.WorldCanonStore",
+      "owner": "PENTEST_DOMAIN",
+      "reason": "Existing direct WorldCanon import captured by TASK-0461.",
+      "remove_task": "TASK-0463"
+    },
+    {
+      "rule_id": "NLE-BND-PENTEST-WORLDCANON-UPSERT",
+      "path": "host_brain/pentest/agent/evolution_core.py",
+      "symbol": "upsert_document",
+      "owner": "PENTEST_DOMAIN",
+      "reason": "Existing direct WorldCanon mutation captured by TASK-0461.",
+      "remove_task": "TASK-0463"
+    },
+    {
+      "rule_id": "NLE-BND-PENTEST-WORLDCANON-UPSERT",
+      "path": "host_brain/pentest/agent/knowledge.py",
+      "symbol": "upsert_document",
+      "owner": "PENTEST_DOMAIN",
+      "reason": "Existing direct WorldCanon mutation captured by TASK-0461.",
+      "remove_task": "TASK-0463"
+    },
+    {
+      "rule_id": "NLE-BND-PENTEST-WORLDCANON-UPSERT",
+      "path": "host_brain/pentest/agent/llm_mcts_advisor.py",
+      "symbol": "upsert_document",
+      "owner": "PENTEST_DOMAIN",
+      "reason": "Existing direct WorldCanon mutation captured by TASK-0461.",
+      "remove_task": "TASK-0463"
+    },
+    {
+      "rule_id": "NLE-BND-PENTEST-WORLDCANON-UPSERT",
+      "path": "host_brain/pentest/autonomous_kernel.py",
+      "symbol": "upsert_document",
+      "owner": "PENTEST_DOMAIN",
+      "reason": "Existing direct WorldCanon mutation captured by TASK-0461.",
+      "remove_task": "TASK-0463"
+    },
+    {
+      "rule_id": "NLE-BND-PENTEST-WORLDCANON-UPSERT",
+      "path": "host_brain/pentest/campaign_memory.py",
+      "symbol": "upsert_document",
+      "owner": "PENTEST_DOMAIN",
+      "reason": "Existing direct WorldCanon mutation captured by TASK-0461.",
+      "remove_task": "TASK-0463"
+    },
+    {
+      "rule_id": "NLE-BND-PENTEST-WORLDCANON-UPSERT",
+      "path": "host_brain/pentest/experience_retriever.py",
+      "symbol": "upsert_document",
+      "owner": "PENTEST_DOMAIN",
+      "reason": "Existing direct WorldCanon mutation captured by TASK-0461.",
+      "remove_task": "TASK-0463"
+    },
+    {
+      "rule_id": "NLE-BND-PENTEST-WORLDCANON-UPSERT",
+      "path": "host_brain/pentest/knowledge_ingester.py",
+      "symbol": "upsert_document",
+      "owner": "PENTEST_DOMAIN",
+      "reason": "Existing direct WorldCanon mutation captured by TASK-0461.",
+      "remove_task": "TASK-0463"
+    },
+    {
+      "rule_id": "NLE-BND-PENTEST-WORLDCANON-UPSERT",
+      "path": "host_brain/pentest/writeup_ingester.py",
+      "symbol": "upsert_document",
+      "owner": "PENTEST_DOMAIN",
+      "reason": "Existing direct WorldCanon mutation captured by TASK-0461.",
+      "remove_task": "TASK-0463"
+    }
+  ]
+}

@@ -3,9 +3,9 @@
 
 # 质量审计子目录
 
-版本：v1.0
-维护日期：2026-05-31
-标签：历史归档
+版本：v1.1
+维护日期：2026-07-10
+标签：当前执行证据 + 历史归档
 
 本目录存放定期审计记录，建议按审核周期查询。
 
@@ -15,6 +15,10 @@
 3. 回到对应 `PRD` 或 `DevSpec` 条目确认落地情况。
 
 ## 关键文件
+- `NLE_WP00_BASELINE_REPORT_20260710.md`：TASK-0461 仓库整理、调用路径与测试冻结基线。
+- `NLE_WP00_BASELINE_MANIFEST_20260710.json`：原 dirty 工作树的机器可读路径、状态与 SHA-256 清单。
+- `NLE_WP00_VALIDATION_REPORT_20260710.md`：TASK-0461 实现、门禁与验收证据；等待 MASTER 确认。
+- `NLE_WP00_VALIDATION_REPORT_TEMPLATE.md`：TASK-0461 封板交付模板。
 - `RUNTIME_CHAIN_ACCEPTANCE_20260531.md`
 - `MEMORY_SYSTEM_INTEGRITY_TEST_20260531.md`
 - `audit_report_20260311.md`

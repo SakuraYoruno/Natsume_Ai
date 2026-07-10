@@ -6,7 +6,7 @@
 日期：2026-07-10
 定位：以当前代码事实为基线，记录已提供能力与已批准待实施需求的入口、边界和验收口径；规划项必须显式标注，不能写成已实现事实。
 
-状态说明：`FR-NLE-001`～`FR-NLE-005` 是 M48-A `READY_FOR_EXECUTION` 规划项，其 `TASK-0461～0486` 为 `PLANNED`；`FR-ARCH-001`～`FR-ARCH-010` 是 M48～M57 `ADOPTED_TARGET_ARCHITECTURE` 目标需求，`TASK-0487～0622` 为尚未解锁实施的 `PROGRAMMED`。其余章节主要描述 2026-06-30 已核验的当前能力。规划项只有在对应 TASK、测试与 Seal 证据成立后才转为已实现事实。
+状态说明：`FR-NLE-001`～`FR-NLE-005` 是 M48-A `READY_FOR_EXECUTION` 规划项；`TASK-0461` 已于 2026-07-10 完成，`TASK-0462～0486` 为 `PLANNED`，其中 TASK-0462、0463、0466 已通过前置 Gate 解锁。`FR-ARCH-001`～`FR-ARCH-010` 是 M48～M57 `ADOPTED_TARGET_ARCHITECTURE` 目标需求，`TASK-0487～0622` 为尚未解锁实施的 `PROGRAMMED`。其余章节主要描述 2026-06-30 已核验的当前能力。规划项只有在对应 TASK、测试与 Seal 证据成立后才转为已实现事实。
 
 ---
 
