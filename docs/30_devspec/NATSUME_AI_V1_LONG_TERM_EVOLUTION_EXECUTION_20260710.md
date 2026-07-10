@@ -407,7 +407,7 @@ Pop-Location
 |---|---|---|---|---:|---|---|
 | TASK-0461 | WP-00 / PR-001 | 基线冻结与边界门禁 | 无 | 2–3 日 | 中 | DONE |
 | TASK-0462 | WP-01 / PR-002 | Trace 数据最小化 | WP-00 | 1–2 日 | 高 | PLANNED |
-| TASK-0463 | WP-10 / PR-003 | Pentest Domain Store | WP-00 | 2–3 日 | 高 | PLANNED |
+| TASK-0463 | WP-10 / PR-003 | Pentest Domain Store | WP-00 | 2–3 日 | 高 | DONE |
 | TASK-0464 | WP-11 / PR-004 | 回填与 Domain-only 切换 | WP-10 | 2–4 日 | 高 | PLANNED |
 | TASK-0465 | WP-12 / PR-005 | Canon Apply 唯一入口 | WP-11 | 2–3 日 | 高 | PLANNED |
 | TASK-0466 | WP-20 / PR-006 | Canonical Contracts | WP-00 | 2–3 日 | 中 | PLANNED |
@@ -472,7 +472,7 @@ Pop-Location
 
 ### TASK-0463 / LTE-WP-10：建立 Pentest 领域知识 Store
 
-- 状态：`PLANNED`
+- 状态：`DONE`（2026-07-10；T-NLE-02、中央 0050 migration 与只读 shadow 验收通过）
 - 目标：提供 Pentest 自有知识接口、schema 和只读 shadow adapter，不切换现有调用者。
 - 代码事实：Pentest 至少 9 个模块引用 WorldCanon；`campaign_memory.py` 存在失效导入/签名并吞异常，不能视为可靠迁移源。
 - 前置任务：TASK-0461。
