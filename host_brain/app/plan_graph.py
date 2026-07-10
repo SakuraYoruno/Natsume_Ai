@@ -23,10 +23,13 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 import logging
 import threading
 import time
-from typing import Annotated, Any, TypedDict
+from typing import Annotated, Any, Mapping, TypedDict
+from urllib.parse import quote
 
 from langchain_core.runnables import RunnableLambda
 from langgraph.graph import END, START, StateGraph
@@ -36,6 +39,19 @@ from host_brain.conversation import build_chat_messages, conversation_max_turns
 from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged
 
 _logger = logging.getLogger("Natsume.plan_graph")
+
+CANONICAL_PLANNER_SHADOW_ONLY = "CANONICAL_PLANNER_SHADOW_ONLY"
+
+
+def _shadow_digest(value: Any) -> str:
+    payload = json.dumps(
+        value,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    )
+    return f"sha256:{hashlib.sha256(payload.encode('utf-8')).hexdigest()}"
 
 
 def _load_prompt_templates() -> dict[str, Any]:
@@ -95,6 +111,10 @@ class PlanGraphState(TypedDict):
     intent_draft: dict[str, Any]               # 来自上游的 intent_draft
     emotion_context: dict[str, Any]            # 情感上下文
     failed: bool                               # 是否有关键节点失败
+    graph_id: str                              # canonical graph identity（opt-in）
+    graph_revision: int                        # canonical graph revision（opt-in）
+    execution_batches: list[list[str]]         # upstream dependency batches（opt-in）
+    planner_shadow_comparison: dict[str, Any]  # read-only comparison payload
 
 
 class TaskState(TypedDict):
@@ -111,6 +131,240 @@ class TaskState(TypedDict):
     success: bool
     latency_ms: int
     error: str
+
+
+def canonical_planner_adapter_enabled(explicit: bool | None = None) -> bool:
+    """Resolve the opt-in switch; production behavior remains legacy by default."""
+
+    if explicit is not None:
+        return bool(explicit)
+    from host_brain.app.settings import get_core_settings  # noqa: PLC0415
+
+    return bool(get_core_settings().canonical_planner_adapter_enabled)
+
+
+def _coerce_parent_work_order(value: Any) -> Any | None:
+    if value is None:
+        return None
+    from host_brain.agent_runtime.work_order import WorkOrderV3  # noqa: PLC0415
+
+    if isinstance(value, WorkOrderV3):
+        value.validate()
+        return value
+    if isinstance(value, Mapping):
+        return WorkOrderV3.from_mapping(value)
+    from host_brain.agent_runtime.contract_errors import (  # noqa: PLC0415
+        SUB_AGENT_LINEAGE_INVALID,
+        ContractViolation,
+    )
+
+    raise ContractViolation(
+        SUB_AGENT_LINEAGE_INVALID,
+        "canonical planner parent_work_order must be a WorkOrder mapping",
+    )
+
+
+def _coerce_existing_plan(
+    *,
+    canonical_plan: Any | None,
+    upstream_plan: Any | None,
+    parent_work_order: Any | None,
+) -> Any:
+    from host_brain.agent_runtime.contract_errors import (  # noqa: PLC0415
+        TASK_GRAPH_INVALID,
+        ContractViolation,
+    )
+    from host_brain.agent_runtime.planner_adapter import (  # noqa: PLC0415
+        CanonicalPlannerOutput,
+        GraphRevisionIdentity,
+        adapt_skill_dag_plan,
+    )
+
+    if isinstance(canonical_plan, CanonicalPlannerOutput):
+        canonical_plan.validate()
+        return canonical_plan
+    if isinstance(canonical_plan, Mapping):
+        return CanonicalPlannerOutput.from_mapping(canonical_plan)
+    if upstream_plan is None:
+        raise ContractViolation(
+            TASK_GRAPH_INVALID,
+            "canonical planner mode requires an upstream plan; second planning is forbidden",
+        )
+    if parent_work_order is None:
+        raise ContractViolation(
+            TASK_GRAPH_INVALID,
+            "upstream SkillDag adaptation requires parent WorkOrder lineage",
+        )
+    source_plan_id = str(getattr(upstream_plan, "plan_id", "") or "").strip()
+    if not source_plan_id:
+        raise ContractViolation(
+            TASK_GRAPH_INVALID,
+            "upstream plan does not expose SkillDagPlan.plan_id",
+        )
+    identity = GraphRevisionIdentity(
+        graph_id=str(parent_work_order.task_graph_id or source_plan_id).strip(),
+        revision=max(1, int(parent_work_order.graph_revision or 1)),
+        root_work_order_id=parent_work_order.root_work_order_id,
+    )
+    return adapt_skill_dag_plan(
+        upstream_plan,
+        identity=identity,
+        planner_ref=f"planner://skill-dag/{source_plan_id}",
+        created_at=int(
+            dict(parent_work_order.metadata or {}).get("created_ts_ms")
+            or dict(parent_work_order.metadata or {}).get("ts_ms")
+            or 0
+        ),
+    )
+
+
+def prepare_existing_plan_graph_state(
+    *,
+    plan: Any,
+    parent_work_order: Any | None,
+    request_id: str,
+    session_id: str,
+    person_id: str,
+    user_message: str,
+    intent_draft: Mapping[str, Any] | None = None,
+    emotion_context: Mapping[str, Any] | None = None,
+    shadow_comparison: Mapping[str, Any] | None = None,
+) -> PlanGraphState:
+    """Project an existing canonical plan into PlanGraph state without replanning."""
+
+    from host_brain.agent_runtime.contract_errors import (  # noqa: PLC0415
+        SUB_AGENT_LINEAGE_INVALID,
+        ContractViolation,
+    )
+    from host_brain.agent_runtime.planner_adapter import (  # noqa: PLC0415
+        CanonicalPlannerOutput,
+        build_child_work_order_for_plan_node,
+    )
+
+    canonical = (
+        plan
+        if isinstance(plan, CanonicalPlannerOutput)
+        else CanonicalPlannerOutput.from_mapping(plan if isinstance(plan, Mapping) else {})
+    )
+    canonical.validate()
+    parent = _coerce_parent_work_order(parent_work_order)
+    if parent is not None and parent.root_work_order_id != canonical.identity.root_work_order_id:
+        raise ContractViolation(
+            SUB_AGENT_LINEAGE_INVALID,
+            "PlanGraph parent WorkOrder root differs from canonical graph root",
+        )
+    if parent is not None and parent.task_graph_id is not None and (
+        parent.task_graph_id != canonical.identity.graph_id
+        or parent.graph_revision != canonical.identity.revision
+    ):
+        raise ContractViolation(
+            SUB_AGENT_LINEAGE_INVALID,
+            "PlanGraph parent WorkOrder graph identity differs from canonical revision",
+        )
+
+    sub_tasks: list[dict[str, Any]] = []
+    for task_index, node in enumerate(canonical.nodes):
+        child_projection: dict[str, Any] = {}
+        request_projection: dict[str, Any] = {}
+        if node.route_type in {"delegate", "chat"}:
+            if parent is None:
+                raise ContractViolation(
+                    SUB_AGENT_LINEAGE_INVALID,
+                    f"sub-agent node {node.node_id} requires parent WorkOrder lineage",
+                )
+            child = build_child_work_order_for_plan_node(
+                parent_work_order=parent,
+                plan=canonical,
+                node_id=node.node_id,
+            )
+            child_payload = child.to_dict()
+            from host_brain.app.sub_agent_protocol import (  # noqa: PLC0415
+                build_sub_agent_request_from_child_work_order,
+            )
+
+            request = build_sub_agent_request_from_child_work_order(
+                child_work_order=child,
+                agent_id=node.target_id,
+                request_id=f"{request_id}::{node.node_id}",
+                session_id=session_id,
+                context_refs=node.dependency_refs,
+                context={
+                    "source": "plan_graph_canonical_shadow",
+                    "graph_id": canonical.identity.graph_id,
+                    "graph_revision": canonical.identity.revision,
+                },
+            )
+            request_contract = dict(
+                (request.context or {}).get("canonical_sub_agent_request") or {}
+            )
+            child_projection = {
+                "work_order_ref": (
+                    "artifact://work-order/"
+                    f"{quote(child.work_order_id, safe='')}"
+                ),
+                "work_order_digest": _shadow_digest(child_payload),
+                "work_order_id": child.work_order_id,
+                "root_work_order_id": child.root_work_order_id,
+                "parent_work_order_id": child.parent_work_order_id,
+                "task_graph_id": child.task_graph_id,
+                "graph_revision": child.graph_revision,
+                "task_node_id": child.task_node_id,
+            }
+            request_projection = {
+                "agent_id": request.agent_id,
+                "request_ref": (
+                    "artifact://sub-agent-request/"
+                    f"{quote(request.request_id, safe='')}"
+                ),
+                "request_digest": _shadow_digest(request_contract),
+                "context_refs": list(request_contract.get("context_refs") or []),
+            }
+        sub_tasks.append(
+            {
+                "task_index": task_index,
+                "node_id": node.node_id,
+                "task_description_digest": _shadow_digest(node.task_description),
+                "route_type": node.route_type,
+                "target_id": node.target_id,
+                "depends_on": list(node.dependencies),
+                "dependency_refs": list(node.dependency_refs),
+                "dependency_context": "\n".join(node.dependency_refs),
+                "allow_parallel": node.allow_parallel,
+                "graph_id": canonical.identity.graph_id,
+                "graph_revision": canonical.identity.revision,
+                "child_work_order_projection": child_projection,
+                "sub_agent_request_projection": request_projection,
+            }
+        )
+
+    return {
+        "request_id": str(request_id or ""),
+        "session_id": str(session_id or ""),
+        "person_id": str(person_id or ""),
+        "user_message": str(user_message or ""),
+        "sub_tasks": sub_tasks,
+        "task_results": [],
+        "final_answer": "",
+        "plan_trace": [
+            {
+                "node": "consume_existing_plan",
+                "status": "OK",
+                "source_kind": canonical.source_kind,
+                "source_plan_id": canonical.source_plan_id,
+                "graph_id": canonical.identity.graph_id,
+                "graph_revision": canonical.identity.revision,
+                "sub_task_count": len(sub_tasks),
+                "replanned": False,
+            }
+        ],
+        "intent_draft": dict(intent_draft or {}),
+        "emotion_context": dict(emotion_context or {}),
+        "failed": not bool(sub_tasks),
+        "graph_id": canonical.identity.graph_id,
+        "graph_revision": canonical.identity.revision,
+        "execution_batches": [list(batch) for batch in canonical.execution_batches],
+        "planner_shadow_comparison": dict(shadow_comparison or {}),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -224,7 +478,7 @@ def _route_to_tasks(state: PlanGraphState) -> list[Send] | str:
             "task_description": str(task.get("task_description") or ""),
             "route_type": str(task.get("route_type") or "delegate"),
             "target_id": str(task.get("target_id") or "intent_agent"),
-            "dependency_context": "",  # 简化：并行子任务不传递依赖上下文
+            "dependency_context": str(task.get("dependency_context") or ""),
             "result": "",
             "success": False,
             "latency_ms": 0,
@@ -574,6 +828,49 @@ def get_plan_graph() -> Any:
     return _plan_graph_instance
 
 
+def _build_existing_plan_shadow_result(
+    *,
+    initial_state: PlanGraphState,
+    canonical_plan: Any,
+) -> dict[str, Any]:
+    """Return PlanGraph's existing-plan shadow view without dispatching work."""
+
+    canonical_plan.validate()
+    plan_trace = list(initial_state.get("plan_trace") or [])
+    for batch_index, batch in enumerate(list(initial_state.get("execution_batches") or [])):
+        plan_trace.append(
+            {
+                "node": "shadow_existing_plan_batch",
+                "status": "READY",
+                "batch_index": batch_index,
+                "node_ids": list(batch or []),
+                "parallel": len(list(batch or [])) > 1,
+            }
+        )
+    return {
+        "success": False,
+        "final_answer": "",
+        "sub_tasks": list(initial_state.get("sub_tasks") or []),
+        "task_results": [],
+        "plan_trace": plan_trace,
+        "latency_ms": 0,
+        "graph_id": str(initial_state.get("graph_id") or ""),
+        "graph_revision": int(initial_state.get("graph_revision") or 0),
+        "parallel_enabled": any(
+            len(list(batch or [])) > 1
+            for batch in list(initial_state.get("execution_batches") or [])
+        ),
+        "planner_shadow_comparison": dict(
+            initial_state.get("planner_shadow_comparison") or {}
+        ),
+        "canonical_plan_input": canonical_plan.to_shadow_projection(),
+        "shadow_only": True,
+        "shadow_status": "READY",
+        "external_side_effect_count": 0,
+        "reason_code": CANONICAL_PLANNER_SHADOW_ONLY,
+    }
+
+
 async def run_plan_graph(
     *,
     request_id: str,
@@ -582,8 +879,15 @@ async def run_plan_graph(
     user_message: str,
     intent_draft: dict[str, Any] | None = None,
     emotion_context: dict[str, Any] | None = None,
+    upstream_plan: Any | None = None,
+    canonical_plan: Any | None = None,
+    parent_work_order: Any | None = None,
+    canonical_planner_enabled: bool | None = None,
 ) -> dict[str, Any]:
-    """异步执行规划父子图。
+    """异步执行 legacy 父子图，或生成 opt-in canonical shadow 结果。
+
+    canonical adapter 开关只验证和投影上游计划；它不会调度 skill、
+    sub-agent 或 synthesize LLM。真实执行切流留给后续 scheduler 任务。
 
     Returns:
         {
@@ -596,23 +900,65 @@ async def run_plan_graph(
         }
     """
     ts_start = int(time.time() * 1000)
-    graph = get_plan_graph()
-
-    initial_state: PlanGraphState = {
-        "request_id": request_id,
-        "session_id": session_id,
-        "person_id": person_id,
-        "user_message": user_message,
-        "sub_tasks": [],
-        "task_results": [],
-        "final_answer": "",
-        "plan_trace": [],
-        "intent_draft": dict(intent_draft or {}),
-        "emotion_context": dict(emotion_context or {}),
-        "failed": False,
-    }
 
     try:
+        if canonical_planner_adapter_enabled(canonical_planner_enabled):
+            from host_brain.agent_runtime.planner_adapter import (  # noqa: PLC0415
+                CanonicalPlannerOutput,
+                build_planner_shadow_comparison,
+                validate_same_graph_revision,
+            )
+
+            parent = _coerce_parent_work_order(parent_work_order)
+            source_plan = _coerce_existing_plan(
+                canonical_plan=canonical_plan,
+                upstream_plan=upstream_plan,
+                parent_work_order=parent,
+            )
+            # Serialize then parse at the PlanGraph boundary.  This proves the
+            # consumer did not mint a second graph identity or revision.
+            consumer_plan = CanonicalPlannerOutput.from_mapping(
+                source_plan.to_plan_graph_input()
+            )
+            validate_same_graph_revision(source_plan, consumer_plan)
+            shadow_comparison = build_planner_shadow_comparison(
+                source_plan,
+                consumer_plan,
+            )
+            canonical_state = prepare_existing_plan_graph_state(
+                plan=consumer_plan,
+                parent_work_order=parent,
+                request_id=request_id,
+                session_id=session_id,
+                person_id=person_id,
+                user_message=user_message,
+                intent_draft=intent_draft,
+                emotion_context=emotion_context,
+                shadow_comparison=shadow_comparison,
+            )
+            return _build_existing_plan_shadow_result(
+                initial_state=canonical_state,
+                canonical_plan=consumer_plan,
+            )
+
+        graph = get_plan_graph()
+        initial_state: PlanGraphState = {
+            "request_id": request_id,
+            "session_id": session_id,
+            "person_id": person_id,
+            "user_message": user_message,
+            "sub_tasks": [],
+            "task_results": [],
+            "final_answer": "",
+            "plan_trace": [],
+            "intent_draft": dict(intent_draft or {}),
+            "emotion_context": dict(emotion_context or {}),
+            "failed": False,
+            "graph_id": "",
+            "graph_revision": 0,
+            "execution_batches": [],
+            "planner_shadow_comparison": {},
+        }
         # LangGraph 图执行（同步 invoke 包装为异步）
         final_state = await asyncio.to_thread(
             graph.invoke,
@@ -645,13 +991,17 @@ async def run_plan_graph(
             "task_results": [],
             "plan_trace": [{"node": "run_plan_graph", "status": "FAILED", "error": str(exc)[:200]}],
             "latency_ms": latency_ms,
+            "reason_code": str(getattr(exc, "reason_code", "PLAN_GRAPH_FAILED")),
         }
 
 
 __all__ = [
     "PlanGraphState",
     "TaskState",
+    "CANONICAL_PLANNER_SHADOW_ONLY",
     "build_plan_graph",
+    "canonical_planner_adapter_enabled",
     "get_plan_graph",
+    "prepare_existing_plan_graph_state",
     "run_plan_graph",
 ]

@@ -19,8 +19,8 @@
 - 关联需求：`FR-NLE-001`～`FR-NLE-005`、`FR-ARCH-001`～`FR-ARCH-010`。
 - 关联测试：`T-NLE-01`～`T-NLE-24`、`T-ARCH-01`～`T-ARCH-30`。
 - 唯一首个执行入口：`TASK-0461 / LTE-WP-00`。M48-A 内部依赖以 M48-A 详细执行文档为准；跨里程碑依赖、切流、停止、回滚和最终退役以 Master 执行文档为准。
-- 最近完成任务：`TASK-0461～TASK-0467` 于 2026-07-10 完成；Trace 已禁止 raw thought 新写入，Pentest 已完成 domain-only 机制，WorldCanon 仅允许 signed approval + durable token 的 `CanonApplyService` 写入；TaskStore 已具备 trusted-clock CAS/lease、Ed25519 outcome reconciliation、cancel-wait recovery、强绑定 outbox 与 strict durable read，但 AgentJobRegistry 仍是 read authority，未切 canonical scheduler。
-- 当前已解锁任务：`TASK-0468 / LTE-WP-22`。
+- 最近完成任务：`TASK-0461～TASK-0468` 于 2026-07-10 完成；TaskStore 与 Planner Adapter 已具备 durable/shadow 合同，但 AgentJobRegistry 仍是 read authority，未切 canonical scheduler 或 Worker 主链。
+- 当前已解锁任务：`TASK-0469 / LTE-WP-23`。
 
 本文件后续的 `TASK-0000`～`TASK-0460` 保留为历史任务记录；与完整架构程序冲突时，不得用历史任务覆盖当前代码基线、Master 程序或对应阶段的正式任务卡。
 

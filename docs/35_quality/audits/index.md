@@ -3,7 +3,7 @@
 
 # 质量审计子目录
 
-版本：v1.7
+版本：v1.8
 维护日期：2026-07-10
 标签：当前执行证据 + 历史归档
 
@@ -26,6 +26,7 @@
 - `NLE_WP12_TASK0465_VALIDATION_20260710.md`：signed Canon Apply、durable token/journal、fence/lease/recovery 与 raw writer 静态闭集验收证据。
 - `NLE_WP20_TASK0466_VALIDATION_20260710.md`：Canonical contracts、schema snapshot 与兼容验收证据。
 - `NLE_WP21_TASK0467_VALIDATION_20260710.md`：Durable TaskStore、trusted-clock lease、Ed25519 reconciliation、cancel-wait、强绑定 outbox 与 legacy shadow 验收证据。
+- `NLE_WP22_TASK0468_VALIDATION_20260710.md`：same-revision Planner adapters、dependency refs、Child WorkOrder request 与 shadow-only 验收证据。
 - `RUNTIME_CHAIN_ACCEPTANCE_20260531.md`
 - `MEMORY_SYSTEM_INTEGRITY_TEST_20260531.md`
 - `audit_report_20260311.md`

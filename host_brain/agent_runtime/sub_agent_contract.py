@@ -35,6 +35,70 @@ def _positive_int(value: Any, *, field_name: str) -> int:
     return parsed
 
 
+def validate_planner_target_binding(
+    child_work_order: WorkOrderV3,
+    *,
+    agent_id: str,
+    require_binding: bool = False,
+) -> None:
+    """Reject cross-agent replay of a planner-authorized child WorkOrder."""
+
+    from host_brain.agent_runtime.planner_adapter import (  # noqa: PLC0415
+        PLANNER_ROUTE_TYPE_METADATA_KEY,
+        PLANNER_TARGET_BINDING_METADATA_KEY,
+        PLANNER_TARGET_ID_METADATA_KEY,
+        build_planner_target_binding,
+    )
+
+    metadata = dict(child_work_order.metadata or {})
+    route_type = str(metadata.get(PLANNER_ROUTE_TYPE_METADATA_KEY) or "").strip().lower()
+    target_id = str(metadata.get(PLANNER_TARGET_ID_METADATA_KEY) or "").strip()
+    binding = str(metadata.get(PLANNER_TARGET_BINDING_METADATA_KEY) or "").strip()
+    has_any_binding = bool(route_type or target_id or binding)
+    if require_binding and not (route_type and target_id and binding):
+        raise ContractViolation(
+            SUB_AGENT_LINEAGE_INVALID,
+            "canonical child WorkOrder requires a complete planner target binding",
+        )
+    if not has_any_binding:
+        return
+    if not (route_type and target_id and binding):
+        raise ContractViolation(
+            SUB_AGENT_LINEAGE_INVALID,
+            "planner target binding metadata is incomplete",
+        )
+    if route_type not in {"delegate", "chat"}:
+        raise ContractViolation(
+            SUB_AGENT_ADAPTER_INVALID,
+            f"planner route {route_type} cannot dispatch a sub-agent",
+        )
+    if str(agent_id or "").strip() != target_id:
+        raise ContractViolation(
+            SUB_AGENT_ADAPTER_INVALID,
+            f"child WorkOrder is bound to {target_id}, not {agent_id}",
+        )
+    if target_id not in set(child_work_order.capability_requirements):
+        raise ContractViolation(
+            SUB_AGENT_ADAPTER_INVALID,
+            "child WorkOrder capability requirements do not bind the target agent",
+        )
+    expected = build_planner_target_binding(
+        child_work_order_id=child_work_order.work_order_id,
+        root_work_order_id=child_work_order.root_work_order_id,
+        parent_work_order_id=str(child_work_order.parent_work_order_id or ""),
+        graph_id=str(child_work_order.task_graph_id or ""),
+        graph_revision=child_work_order.graph_revision,
+        node_id=str(child_work_order.task_node_id or ""),
+        route_type=route_type,
+        target_id=target_id,
+    )
+    if binding != expected:
+        raise ContractViolation(
+            SUB_AGENT_LINEAGE_INVALID,
+            "planner target binding digest does not match child lineage",
+        )
+
+
 @dataclass(frozen=True, slots=True)
 class SubAgentSpec:
     agent_id: str
@@ -133,6 +197,10 @@ class SubAgentRequestContract:
     ) -> "SubAgentRequestContract":
         spec.validate()
         child_work_order.validate()
+        validate_planner_target_binding(
+            child_work_order,
+            agent_id=spec.agent_id,
+        )
         request = cls(
             request_id=str(request_id or "").strip(),
             session_id=str(session_id or "").strip(),
@@ -171,6 +239,7 @@ class SubAgentRequestContract:
                 SUB_AGENT_LINEAGE_INVALID,
                 "child work_order_id must differ from parent and root WorkOrder IDs",
             )
+        validate_planner_target_binding(child, agent_id=self.agent_id)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -250,4 +319,5 @@ __all__ = [
     "SubAgentRequestContract",
     "SubAgentSpec",
     "adapt_child_work_order_to_sub_agent_request",
+    "validate_planner_target_binding",
 ]

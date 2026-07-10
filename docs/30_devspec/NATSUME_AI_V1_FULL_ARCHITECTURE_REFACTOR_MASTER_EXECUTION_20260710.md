@@ -8,7 +8,7 @@
 状态：READY_FOR_PROGRAM_EXECUTION
 文档类型：DevTasks / Master Execution Contract
 程序任务编号：TASK-0461～TASK-0622，共 162 项，禁止复用、跳号或重定义
-当前执行入口：TASK-0461～TASK-0467 已完成；M48-A / TASK-0468 已解锁；M48-B 通过入口 Gate 后可并行；M49～M57 状态为 PROGRAMMED
+当前执行入口：TASK-0461～TASK-0468 已完成；M48-A / TASK-0469 已解锁；M48-B 通过入口 Gate 后可并行；M49～M57 状态为 PROGRAMMED
 代码基线：dev@1ec8be1a8a20397627855aa946c0ff8aaaa87b72
 工作区状态：dirty；已有未提交业务代码、运行数据和本地配置必须原位保护
 完整目标蓝图：docs/50_project/arch/NATSUME_AI_V1_FULL_ARCHITECTURE_TARGET_20260710.md
@@ -262,7 +262,7 @@ M48-B 从 `PROGRAMMED` 解锁为 `PLANNED` 前必须同时满足：
 | TASK-0465 | Canon Apply 单写入口 | DONE | 2026-07-10；signed authority、0053 durable token/journal、target fence/lease/recovery、raw writer 静态闭集与 T-NLE-03 通过 |
 | TASK-0466 | Canonical contracts 基础 | DONE | 2026-07-10；v2/v3 adapter、TaskGraph/Event、Verification/Review/Budget 合同通过 |
 | TASK-0467 | Durable TaskStore | DONE | 2026-07-10；trusted-clock CAS/lease、terminal lease cleanup、Ed25519 action/outcome reconciliation、cancel-wait、finite strict durable read、强绑定 outbox 与 ordered legacy shadow 通过 |
-| TASK-0468 | Planner adapters | PLANNED | M48-A 权威任务卡 |
+| TASK-0468 | Planner adapters | DONE | 2026-07-10；same-revision adapters、dependency refs、Child WorkOrder request、shadow-only 与 T-NLE-05 通过 |
 | TASK-0469 | Shadow scheduler | PLANNED | M48-A 权威任务卡 |
 | TASK-0470 | Verification 与证据 | PLANNED | M48-A 权威任务卡 |
 | TASK-0471 | Acceptance judge | PLANNED | M48-A 权威任务卡 |

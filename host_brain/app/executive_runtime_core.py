@@ -1385,6 +1385,16 @@ async def _execute_skill_dag(
                          or str(request_body).strip()[:500] if request_body else "",
             intent_draft=dict(intent_draft or {}),
             emotion_context=dict(emotion_context or {}),
+            upstream_plan=plan,
+            parent_work_order=(
+                dict((intent_draft or {}).get("canonical_work_order") or {})
+                if isinstance((intent_draft or {}).get("canonical_work_order"), dict)
+                else (
+                    dict((intent_draft or {}).get("work_order") or {})
+                    if isinstance((intent_draft or {}).get("work_order"), dict)
+                    else None
+                )
+            ),
         )
         plan_trace = list(pg_result.get("plan_trace") or [])
         success = bool(pg_result.get("success"))
@@ -1403,20 +1413,52 @@ async def _execute_skill_dag(
                 skill_family="executive",
                 success=success,
                 result_text=final_answer,
-                error_text="" if success else "PLAN_GRAPH_FAILED",
+                error_text=(
+                    ""
+                    if success
+                    else str(pg_result.get("reason_code") or "PLAN_GRAPH_FAILED")
+                ),
                 latency_ms=latency_ms,
                 payload={
-                    "plan": plan.as_dict(),
+                    "plan": (
+                        dict(pg_result.get("canonical_plan_input") or {})
+                        if bool(pg_result.get("shadow_only"))
+                        else plan.as_dict()
+                    ),
                     "plan_trace": plan_trace,
                     "sub_tasks": list(pg_result.get("sub_tasks") or []),
                     "task_results": list(pg_result.get("task_results") or []),
+                    **(
+                        {
+                            "graph_id": str(pg_result.get("graph_id") or ""),
+                            "graph_revision": int(pg_result.get("graph_revision") or 0),
+                        }
+                        if str(pg_result.get("graph_id") or "")
+                        else {}
+                    ),
+                    **(
+                        {
+                            "planner_shadow_comparison": dict(
+                                pg_result.get("planner_shadow_comparison") or {}
+                            ),
+                            "canonical_plan_input": dict(
+                                pg_result.get("canonical_plan_input") or {}
+                            ),
+                        }
+                        if pg_result.get("canonical_plan_input")
+                        else {}
+                    ),
                 },
             ),
             {
                 "plan_id": plan.plan_id,
                 "plan_trace": plan_trace,
-                "parallel_enabled": True,  # plan_graph 始终并行
-                "engine": "langgraph_plan_graph",
+                "parallel_enabled": bool(pg_result.get("parallel_enabled", True)),
+                "engine": (
+                    "canonical_planner_shadow"
+                    if bool(pg_result.get("shadow_only"))
+                    else "langgraph_plan_graph"
+                ),
             },
         )
     except Exception as pg_exc:

@@ -48,6 +48,9 @@ class CoreSettings(BaseSettings):
     skill_dag_parallel_window: int = Field(
         default=4, ge=1, le=16, alias="HOST_SKILL_DAG_PARALLEL_WINDOW"
     )
+    canonical_planner_adapter_enabled: bool = Field(
+        default=False, alias="HOST_CANONICAL_PLANNER_ADAPTER_ENABLED"
+    )
     sys_mode: str = Field(default="normal", alias="HOST_SYS_MODE")
 
     @classmethod
@@ -86,6 +89,13 @@ class CoreSettings(BaseSettings):
                 domain=domain, field_name="skill_dag_parallel_window",
                 env_key="HOST_SKILL_DAG_PARALLEL_WINDOW",
                 default_value=4, current_value=s.skill_dag_parallel_window, is_required=False,
+            ),
+            inspect_setting(
+                domain=domain, field_name="canonical_planner_adapter_enabled",
+                env_key="HOST_CANONICAL_PLANNER_ADAPTER_ENABLED",
+                default_value=False,
+                current_value=s.canonical_planner_adapter_enabled,
+                is_required=False,
             ),
             inspect_setting(
                 domain=domain, field_name="sys_mode",

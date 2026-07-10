@@ -136,6 +136,156 @@ def _runtime_text(key: str, **kwargs: Any) -> str:
 AGENT_CAPABILITIES = get_agent_capabilities()
 
 
+SUB_AGENT_REGISTRY_VIEW_SCHEMA_VERSION = "Natsume.agent.sub_agent_registry_view.v1"
+
+
+@dataclass(frozen=True, slots=True)
+class SubAgentRegistryEntry:
+    """Read-only compatibility view over the app-level sub-agent registry."""
+
+    agent_id: str
+    capability: str
+    default_timeout_ms: int = 30_000
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "agent_id": self.agent_id,
+            "capability": self.capability,
+            "default_timeout_ms": self.default_timeout_ms,
+        }
+
+
+def get_sub_agent_registry_view() -> dict[str, Any]:
+    """Return a deterministic view; it does not load handlers or dispatch work."""
+
+    capabilities = get_agent_capabilities()
+    entries = [
+        SubAgentRegistryEntry(
+            agent_id=agent_id,
+            capability=str(capabilities.get(agent_id) or "").strip(),
+        )
+        for agent_id in sorted(ALL_AGENT_IDS)
+    ]
+    return {
+        "schema_version": SUB_AGENT_REGISTRY_VIEW_SCHEMA_VERSION,
+        "agents": [entry.to_dict() for entry in entries],
+    }
+
+
+def resolve_sub_agent_registry_entry(agent_id: str) -> SubAgentRegistryEntry:
+    """Resolve an app agent without exposing mutable dispatcher internals."""
+
+    normalized = str(agent_id or "").strip()
+    view = get_sub_agent_registry_view()
+    for payload in list(view.get("agents") or []):
+        if str(payload.get("agent_id") or "").strip() == normalized:
+            return SubAgentRegistryEntry(
+                agent_id=normalized,
+                capability=str(payload.get("capability") or "").strip(),
+                default_timeout_ms=int(payload.get("default_timeout_ms") or 30_000),
+            )
+    from host_brain.agent_runtime.contract_errors import (  # noqa: PLC0415
+        SUB_AGENT_ADAPTER_INVALID,
+        ContractViolation,
+    )
+
+    raise ContractViolation(
+        SUB_AGENT_ADAPTER_INVALID,
+        f"sub-agent is not present in registry view: {normalized}",
+    )
+
+
+def build_sub_agent_request_from_child_work_order(
+    *,
+    child_work_order: Any,
+    agent_id: str,
+    request_id: str,
+    session_id: str = "",
+    context_refs: tuple[str, ...] | list[str] = (),
+    timeout_ms: int | None = None,
+    context: Mapping[str, Any] | None = None,
+) -> SubAgentRequest:
+    """Bridge a validated child WorkOrder into the legacy dispatcher shape.
+
+    This is the only constructor used by the canonical planner path.  Existing
+    direct ``SubAgentRequest`` construction remains available for legacy callers
+    until their parent WorkOrder lineage exists.
+    """
+
+    from host_brain.agent_runtime.sub_agent_contract import (  # noqa: PLC0415
+        SubAgentRequestAdapter,
+        SubAgentSpec,
+        validate_planner_target_binding,
+    )
+    from host_brain.agent_runtime.work_order import WorkOrderV3  # noqa: PLC0415
+
+    child = (
+        child_work_order
+        if isinstance(child_work_order, WorkOrderV3)
+        else WorkOrderV3.from_mapping(
+            child_work_order if isinstance(child_work_order, Mapping) else {}
+        )
+    )
+    entry = resolve_sub_agent_registry_entry(agent_id)
+    if not entry.capability:
+        from host_brain.agent_runtime.contract_errors import (  # noqa: PLC0415
+            SUB_AGENT_ADAPTER_INVALID,
+            ContractViolation,
+        )
+
+        raise ContractViolation(
+            SUB_AGENT_ADAPTER_INVALID,
+            f"sub-agent registry capability is empty: {entry.agent_id}",
+        )
+    validate_planner_target_binding(
+        child,
+        agent_id=entry.agent_id,
+        require_binding=True,
+    )
+    resolved_timeout_ms = int(
+        entry.default_timeout_ms if timeout_ms is None else timeout_ms
+    )
+    resolved_timeout_ms = max(1, resolved_timeout_ms)
+    spec = SubAgentSpec(
+        agent_id=entry.agent_id,
+        capability_requirements=tuple(child.capability_requirements),
+        allowed_actions=tuple(child.allowed_actions),
+        timeout_ms=resolved_timeout_ms,
+        max_attempts=1,
+        context_contract={
+            "task_source": "child_work_order",
+            "requires_lineage": True,
+        },
+    )
+    resolved_context_refs_list: list[str] = []
+    for item in (*tuple(child.input_refs), *tuple(context_refs or ())):
+        normalized = str(item or "").strip()
+        if normalized and normalized not in resolved_context_refs_list:
+            resolved_context_refs_list.append(normalized)
+    resolved_context_refs = tuple(resolved_context_refs_list)
+    contract = SubAgentRequestAdapter.adapt(
+        child_work_order=child,
+        spec=spec,
+        request_id=request_id,
+        session_id=session_id,
+        context_refs=resolved_context_refs,
+    )
+    legacy = contract.to_legacy_mapping()
+    protected_context = dict(legacy.get("context") or {})
+    merged_context = dict(context or {})
+    merged_context.update(protected_context)
+    merged_context["canonical_sub_agent_request"] = contract.to_dict()
+    return SubAgentRequest(
+        agent_id=str(legacy.get("agent_id") or "").strip(),
+        task=str(legacy.get("task") or "").strip(),
+        user_message=str(legacy.get("user_message") or "").strip(),
+        request_id=str(legacy.get("request_id") or "").strip(),
+        session_id=str(legacy.get("session_id") or "").strip(),
+        context=merged_context,
+        timeout_ms=int(legacy.get("timeout_ms") or resolved_timeout_ms),
+    )
+
+
 class SubAgentDispatcher:
     """子 Agent 统一调度器。
 

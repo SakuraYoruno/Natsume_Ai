@@ -10,6 +10,18 @@ from host_brain.agent_runtime.budget_policy import (
 )
 from host_brain.agent_runtime.contract_errors import ContractViolation
 from host_brain.agent_runtime.executor import AgentRuntimeExecutor, execute_agent_runtime_payload
+from host_brain.agent_runtime.planner_adapter import (
+    PLANNER_NEEDS_INPUT,
+    CanonicalPlannerOutput,
+    GraphRevisionIdentity,
+    PlannerNodeView,
+    adapt_planning_agent_plan,
+    adapt_skill_dag_plan,
+    build_child_work_order_for_plan_node,
+    build_planner_target_binding,
+    build_planner_shadow_comparison,
+    validate_same_graph_revision,
+)
 from host_brain.agent_runtime.production_executor import execute_agent_production_payload
 from host_brain.agent_runtime.result_contract import AgentResult
 from host_brain.agent_runtime.review_policy import (
@@ -22,6 +34,7 @@ from host_brain.agent_runtime.sub_agent_contract import (
     SubAgentRequestAdapter,
     SubAgentRequestContract,
     SubAgentSpec,
+    validate_planner_target_binding,
 )
 from host_brain.agent_runtime.task_graph import (
     TaskEvent,
@@ -55,11 +68,15 @@ __all__ = [
     "BudgetPolicy",
     "BudgetReservation",
     "BudgetReservationStatus",
+    "CanonicalPlannerOutput",
     "ContractViolation",
     "DurableTaskStore",
     "Ed25519ReconciliationProofVerifier",
     "IdempotencyRecoveryAction",
     "OutboxMessage",
+    "GraphRevisionIdentity",
+    "PlannerNodeView",
+    "PLANNER_NEEDS_INPUT",
     "ReviewItem",
     "ReviewResumePhase",
     "ReviewStatus",
@@ -77,10 +94,17 @@ __all__ = [
     "VerificationStatus",
     "WorkOrder",
     "WorkOrderV3",
+    "adapt_planning_agent_plan",
+    "adapt_skill_dag_plan",
     "agent_enabled",
     "build_reconciliation_attestation_binding",
     "build_outbox_payload_ref",
     "build_operation_fingerprint",
+    "build_child_work_order_for_plan_node",
+    "build_planner_target_binding",
+    "build_planner_shadow_comparison",
     "execute_agent_production_payload",
     "execute_agent_runtime_payload",
+    "validate_same_graph_revision",
+    "validate_planner_target_binding",
 ]

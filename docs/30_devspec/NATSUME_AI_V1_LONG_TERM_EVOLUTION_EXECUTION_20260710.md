@@ -5,7 +5,7 @@
 
 版本：v1.1
 日期：2026-07-10
-状态：`READY_FOR_EXECUTION`（TASK-0461～TASK-0467 已 `DONE`；其余任务按依赖 Gate 保持 `PLANNED`）
+状态：`READY_FOR_EXECUTION`（TASK-0461～TASK-0468 已 `DONE`；其余任务按依赖 Gate 推进）
 文档类型：DevTasks / Execution Contract
 任务编号：`TASK-0461`～`TASK-0486`
 逻辑工作包：`LTE-WP-00`～`LTE-WP-80`
@@ -414,7 +414,7 @@ Pop-Location
 | TASK-0465 | WP-12 / PR-005 | Canon Apply 唯一入口 | WP-11 | 2–3 日 | 高 | DONE |
 | TASK-0466 | WP-20 / PR-006 | Canonical Contracts | WP-00 | 2–3 日 | 中 | DONE |
 | TASK-0467 | WP-21 / PR-007 | Durable TaskStore | WP-20 | 4–6 日 | 高 | DONE |
-| TASK-0468 | WP-22 / PR-008 | Planner Adapters | WP-20 | 2–3 日 | 高 | PLANNED |
+| TASK-0468 | WP-22 / PR-008 | Planner Adapters | WP-20 | 2–3 日 | 高 | DONE |
 | TASK-0469 | WP-23 / PR-009 | Shadow Scheduler | WP-01/21/22 | 4–6 日 | 高 | PLANNED |
 | TASK-0470 | WP-30 / PR-010 | Verification Gate | WP-23 | 3–4 日 | 高 | PLANNED |
 | TASK-0471 | WP-31 / PR-011 | Acceptance Judge | WP-30 | 2–3 日 | 高 | PLANNED |
@@ -555,7 +555,7 @@ Pop-Location
 
 ### TASK-0468 / LTE-WP-22：统一 Planner 输出同一 Graph Revision
 
-- 状态：`PLANNED`
+- 状态：`DONE`（2026-07-10；same-revision adapters、dependency refs、Child WorkOrder request、shadow-only 与 T-NLE-05 通过）
 - 目标：PlanningAgent、SkillDag 和 PlanGraph 只生成/适配一个 canonical graph revision，停止普通复杂任务二次规划，并让 SubAgentRequest 由 Child WorkOrder lineage 构造。
 - 代码事实：`executive_runtime_core` 调用 `run_plan_graph()` 时未传原 plan；`PlanGraph` 虽保存 depends_on，却把所有子任务并发 Send 且 dependency_context 为空。
 - 前置任务：TASK-0466。

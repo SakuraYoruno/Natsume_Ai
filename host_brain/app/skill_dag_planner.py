@@ -409,6 +409,23 @@ def merge_plan_steps_with_dag(*, steps: list[dict[str, Any]], dag_plan: SkillDag
 def __getattr__(name: str) -> Any:
     """Lazily re-export canonical graph contracts without changing this planner."""
 
+    if name in {
+        "CanonicalPlannerOutput",
+        "GraphRevisionIdentity",
+        "adapt_skill_dag_plan",
+    }:
+        from host_brain.agent_runtime.planner_adapter import (  # noqa: PLC0415
+            CanonicalPlannerOutput,
+            GraphRevisionIdentity,
+            adapt_skill_dag_plan,
+        )
+
+        planner_exports = {
+            "CanonicalPlannerOutput": CanonicalPlannerOutput,
+            "GraphRevisionIdentity": GraphRevisionIdentity,
+            "adapt_skill_dag_plan": adapt_skill_dag_plan,
+        }
+        return planner_exports[name]
     if name in {"CanonicalTaskGraph", "CanonicalTaskNode", "TaskGraph", "TaskNode"}:
         from host_brain.agent_runtime.task_graph import TaskGraph, TaskNode  # noqa: PLC0415
 
@@ -425,10 +442,13 @@ def __getattr__(name: str) -> Any:
 __all__ = [
     "CanonicalTaskGraph",
     "CanonicalTaskNode",
+    "CanonicalPlannerOutput",
+    "GraphRevisionIdentity",
     "SkillDagNode",
     "SkillDagPlan",
     "TaskGraph",
     "TaskNode",
+    "adapt_skill_dag_plan",
     "build_skill_dag_plan",
     "merge_plan_steps_with_dag",
 ]
