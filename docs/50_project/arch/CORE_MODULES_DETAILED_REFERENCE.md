@@ -43,6 +43,19 @@ chat_routes -> chat_handler -> agent_runtime_shared -> executive_runtime_core
   -> surface_main_chain_adapter -> persona.surface_main_chain
 ```
 
+### 2.1 Canonical Task Runtime（shadow）
+
+| 模块 | 当前职责 | 边界 |
+|---|---|---|
+| `host_brain/agent_runtime/task_graph.py` | 冻结 v1 TaskGraph/TaskNode/Event 合同、兼容反序列化与合法状态迁移 | 只定义合同，不调度、不执行；durable strict validation 在 Store 层 |
+| `host_brain/agent_runtime/budget_policy.py` | 冻结 v1 Budget policy/reservation/amount 合同与迁移规则 | 纯策略与合同；public parser 兼容语义不由 Store 重定义 |
+| `host_brain/agent_runtime/task_store.py` | 0052+0054 SQLite TaskStore：Graph/Node/Attempt/Lease/Heartbeat、CAS、取消/恢复、Budget、transactional outbox、legacy shadow | 可信 clock；reservation 绑定 active attempt lease/owner/fence；expiry/cancel 先 `RECOVERY_REQUIRED` |
+| `host_brain/agent_runtime/job_registry.py` | 旧内存 AgentJobRegistry；可显式注入 TaskStore 做 redacted dual-write/shadow reconciliation | read authority 仍为 `LEGACY` |
+| `host_brain/audit/migrations/0052_task_runtime.sql` | Task runtime 基础 central expand-only schema | 已落地 migration 保持不可变 |
+| `host_brain/audit/migrations/0054_task_runtime_recovery.sql` | forward-only lease-fenced recovery/attestation 升级 | 0053 由 TASK-0465 串行集成；完整 catalog gate 在合并后执行 |
+
+Idempotency recovery 的三种 action 都要求 Ed25519 authority attestation：COMMIT 绑定 `COMMIT + SIDE_EFFECT_CONFIRMED + receipt_ref`，RELEASE/REACQUIRE 分别绑定自身 action + `NO_SIDE_EFFECT`；签名同时绑定 reservation、business fingerprint、recovery version、actor 与 attestation ref，动作间不可替换。运行时仅持公钥 verifier，私钥/签发器不在 runtime。COMMIT/RELEASE 可在原 lease 失效后终结；REACQUIRE 必须持新 active lease/fence。终态 attempt 同事务关闭 lease，startup 清理崩溃遗留 active lease；取消会清理 node 全部 active lease，未澄清 reservation 阻止 node 进入 `CANCELLED`。0052 任意 legacy receipt 原值仅留审计 raw 列，普通 read 只返回 safe ref/digest。当前 shadow 阶段没有 canonical worker 或副作用执行切流。
+
 ## 3. Persona / Surface
 
 ### 3.1 人格和内在状态

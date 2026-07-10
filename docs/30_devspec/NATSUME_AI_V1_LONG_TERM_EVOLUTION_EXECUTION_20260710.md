@@ -5,7 +5,7 @@
 
 版本：v1.1
 日期：2026-07-10
-状态：`READY_FOR_EXECUTION`（TASK-0461～TASK-0466 已 `DONE`；其余任务按依赖保持 `PLANNED`）
+状态：`READY_FOR_EXECUTION`（TASK-0461～TASK-0467 已 `DONE`；其余任务按依赖 Gate 保持 `PLANNED`）
 文档类型：DevTasks / Execution Contract
 任务编号：`TASK-0461`～`TASK-0486`
 逻辑工作包：`LTE-WP-00`～`LTE-WP-80`
@@ -115,7 +115,9 @@ TaskNode: node_id, dependencies, route, input_refs, output_contract,
 TaskAttempt: attempt_id, node_id, attempt_no, owner_id, lease_until,
              heartbeat_at, started_at, finished_at, result_ref, usage_ref
 IdempotencyReservation: scope, operation_fingerprint, reservation_status,
-                        owner_attempt_id, result_ref, expires_at
+                        attempt_id, lease_id, owner_id, fencing_token, expires_at,
+                        receipt_ref, recovery_reason, reconciler_actor,
+                        attestation_ref/digest/key/signature/action/outcome/version
 BudgetReservation: budget_id, scope, token/tool/time/concurrency/retry/cost limits,
                    reserved, consumed, status, status_version
 ```
@@ -411,7 +413,7 @@ Pop-Location
 | TASK-0464 | WP-11 / PR-004 | 回填与 Domain-only 切换 | WP-10 | 2–4 日 | 高 | DONE |
 | TASK-0465 | WP-12 / PR-005 | Canon Apply 唯一入口 | WP-11 | 2–3 日 | 高 | DONE |
 | TASK-0466 | WP-20 / PR-006 | Canonical Contracts | WP-00 | 2–3 日 | 中 | DONE |
-| TASK-0467 | WP-21 / PR-007 | Durable TaskStore | WP-20 | 4–6 日 | 高 | PLANNED |
+| TASK-0467 | WP-21 / PR-007 | Durable TaskStore | WP-20 | 4–6 日 | 高 | DONE |
 | TASK-0468 | WP-22 / PR-008 | Planner Adapters | WP-20 | 2–3 日 | 高 | PLANNED |
 | TASK-0469 | WP-23 / PR-009 | Shadow Scheduler | WP-01/21/22 | 4–6 日 | 高 | PLANNED |
 | TASK-0470 | WP-30 / PR-010 | Verification Gate | WP-23 | 3–4 日 | 高 | PLANNED |
@@ -537,15 +539,15 @@ Pop-Location
 
 ### TASK-0467 / LTE-WP-21：Durable TaskStore、Attempt、Lease 与 Outbox
 
-- 状态：`PLANNED`
+- 状态：`DONE`（2026-07-10；T-NLE-06 含可信时钟、lease-fenced Ed25519 reconciliation、cancel/wait recovery、strict durable read 与 legacy-authoritative shadow 对账验收通过，未切 durable read authority）
 - 目标：把内存 JobRegistry 升级为具备 CAS、attempt ownership、worker lease、heartbeat、取消和启动恢复的 durable store。
 - 代码事实：当前 `AgentJobRegistry` 仅内存；仅增加 SQLite 表不足以保证恢复和副作用幂等。
 - 前置任务：TASK-0466。
 - In Scope：TaskGraph/Node/Attempt/Lease/IdempotencyReservation/BudgetReservation/Outbox 表与事务 API；legacy dual-write、shadow read 和对账。
 - Out of Scope：canonical scheduler 切流、SSE adapter。
-- 主要路径：`host_brain/agent_runtime/task_store.py`（新）、`job_registry.py`、`host_brain/audit/migrations/<next>_task_runtime.sql`、启动恢复测试。
-- 输出：durable store、CAS transitions、lease reclaim、business idempotency reservation、Budget reservation/usage、transactional outbox。
-- 验收：T-NLE-06；重启恢复、竞争 CAS、lease 超时接管、重复 operation fingerprint 不产生第二副作用预留；预算预留/消费/超限可对账。
+- 主要路径：`host_brain/agent_runtime/task_store.py`（新）、`job_registry.py`、`host_brain/audit/migrations/0052_task_runtime.sql`、forward-only `0054_task_runtime_recovery.sql`、启动恢复测试。
+- 输出：durable store、可信 clock CAS transitions、lease reclaim、business idempotency reservation、Ed25519 outcome attestation recovery、Budget reservation/usage、强绑定 transactional outbox。
+- 验收：T-NLE-06；重启恢复、竞争 CAS、caller 不可回拨 lease 时间；terminal attempt 同事务关闭 lease，startup/direct cancel 清理 orphan active lease；expiry/cancel reservation 先进入 `RECOVERY_REQUIRED`；COMMIT 必须有绑定 `COMMIT + SIDE_EFFECT_CONFIRMED + receipt` 的 authority signature，RELEASE/REACQUIRE 分别绑定自身 action + `NO_SIDE_EFFECT`，且仅 REACQUIRE 要求新 active lease/fence；未知 key、假 receipt、篡改、旧 version、action substitution、跨 reservation/replay 拒绝；取消原子 fence worker，未澄清 reservation 阻止 node 终态；0052 全 receipt 值域无损迁移且 runtime 不泄漏 raw；重复 fingerprint 始终一行；outbox 精确绑定 event/aggregate/attempt/payload/trusted availability/durable evidence；durable JSON 递归拒绝 duplicate keys 与 NaN/±Infinity 并在损坏时 fail closed，同时冻结 v1 public parser 兼容语义不变；legacy shadow 拒绝乱序/同时间冲突；预算可对账。
 - 关联需求/测试：FR-NLE-002；T-NLE-06。
 - 停止条件：legacy/new 对账存在不可解释差异，或状态与 outbox 不能同事务提交。
 - 回滚：保持 shadow-only，旧 JobRegistry 继续读；不删除新表。
@@ -866,7 +868,7 @@ Pop-Location
 | T-NLE-03 | Canon Apply signed authority + token/subject/version/hash/target/base/session/evidence/expiry/once 绑定；per-target fence/lease/crash recovery；direct Store/Canon file write 为 0 |
 | T-NLE-04 | WorkOrder v2/v3 兼容；TaskGraph/Review/Verification schema 与非法迁移拒绝 |
 | T-NLE-05 | 只规划一次；同一 graph revision；依赖有效；Child WorkOrder lineage；cycle fail closed |
-| T-NLE-06 | TaskStore CAS/attempt/lease/heartbeat/recovery/idempotency/budget/outbox 原子性 |
+| T-NLE-06 | TaskStore CAS/attempt/lease/heartbeat/cancel-wait recovery；可信 clock、Ed25519 outcome attestation、旧 fence/replay 拒绝、strict durable read、legacy 时序、budget/outbox 原子性 |
 | T-NLE-07 | Shadow scheduler 无副作用；READY/依赖/retry/cancel/recovery 决策可回放 |
 | T-NLE-08 | Verification required 时 FAIL/ERROR/NOT_RUN 均不得 ACCEPT |
 | T-NLE-09 | Acceptance criteria 逐项 evidence；确定性 FAIL 不可被 LLM 覆盖 |

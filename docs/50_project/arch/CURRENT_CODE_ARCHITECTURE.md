@@ -32,6 +32,7 @@
 | `host_brain/memory/` | 24 `.py` | LifeMemoryStore、召回、Canon、上下文压缩 |
 | `host_brain/tribe/` | 34 `.py` | HostTribeRegistry、事件总线、agent 实现 |
 | `host_brain/governor/` | 10 `.py` | 决策治理、规则、rate limit、token budget |
+| `host_brain/agent_runtime/` | 28 `.py` | Agent v2 执行适配、canonical v3 contracts、durable TaskStore shadow |
 | `host_brain/skills/impl/` | 25 executor 文件 | 普通 skill executor；不包含 Pentest 执行器 |
 | `edge_client/` | 80 `.py` | Edge RPC、Gateway、平台适配器 |
 | `host_brain/app/monitor_ui/src/` | 458 源文件 | React Monitor UI 源码 |
@@ -128,6 +129,32 @@ sequenceDiagram
 | `host_brain/persona/surface_runtime.py` | 直接 LLM 生成、task mode、hard gate 检查 |
 | `host_brain/persona/surface_memory_recall.py` | Surface 记忆召回计划与 evidence 组织 |
 | `host_brain/persona/surface_packet_compiler.py` | ReplyControlPacket 编译 |
+
+### 5.1 Canonical Task Runtime（当前为 legacy-authoritative shadow）
+
+```text
+AgentJobRegistry (LEGACY read authority)
+  -> optional redacted mirror/reconcile
+  -> DurableTaskStore (0052 base + 0054 recovery)
+       -> TaskGraph / TaskNode CAS
+       -> Attempt -> active Lease(owner, fencing_token, expiry) -> Heartbeat
+       -> IdempotencyReservation -> RECOVERY_REQUIRED
+              -> Ed25519 SIDE_EFFECT_CONFIRMED + receipt -> COMMITTED
+              \-> Ed25519 NO_SIDE_EFFECT -> RELEASED / lease-fenced REACQUIRE
+       -> BudgetReservation
+       -> transactional Outbox(event/aggregate/attempt/payload/time/evidence bound)
+```
+
+- `host_brain/agent_runtime/task_store.py` 不创建 schema；0052/0054 未应用、缺 recovery 字段或缺 `RECOVERY_REQUIRED` 状态时拒绝启动。0052 不可变；0054 是 forward-only upgrade。
+- 所有公开 mutation 只读构造时注入的可信 clock，不接受 caller `now`。reservation 与正常 commit/renew 绑定 active attempt lease、owner 和 fencing token；lease 接管后旧 worker 无法提交，expiry 只能先进入 `RECOVERY_REQUIRED`。
+- reconciliation action 全部验证 Ed25519 公钥 attestation。COMMIT/RELEASE 不要求原 lease 仍活跃；REACQUIRE 必须绑定新 active lease/fence。签名绑定 action、outcome、reservation/fingerprint、recovery version、actor、attestation ref，并在 COMMIT 时额外绑定 receipt；RELEASE 与 REACQUIRE 签名不可互换。
+- node cancel 同事务把 attempt 置为 `CANCEL_REQUESTED`、active lease 置为 `CANCELLED`、RESERVED operation 置为 `RECOVERY_REQUIRED`。未澄清 operation 存在时 node 保持 `CANCEL_REQUESTED`；signed COMMIT/RELEASE 后才可由 startup recovery 收敛 `CANCELLED`。
+- attempt 进入 SUCCEEDED/FAILED/CANCELLED 时同事务关闭 lease；startup 会独立清理 terminal attempt 的 orphan active lease。direct cancel 清理 node 下所有 active lease，不以 attempt live 状态为前提。
+- Outbox 事件精确绑定 aggregate/version/event/attempt 与 canonical `taskstore://event/...` payload；availability 来自可信 clock，evidence 仅接受有界 durable refs。任何不匹配都回滚状态。
+- Graph/Node/Budget/Outbox/legacy snapshot 的 durable JSON 会重验 schema、结构和 SQL/JSON identity，并递归拒绝 duplicate keys 与 NaN/±Infinity；损坏时返回稳定错误，不降级为空对象，也不覆盖原行。
+- 0052 legacy receipt 的完整原值仅保存在 0054 audit raw 列；普通 Store read 对 COMMITTED 行返回安全 `legacy-receipt://` ref、digest 与 null marker，不返回 raw/control/oversize 内容。
+- legacy shadow 拒绝旧 `updated_at_ms`；相同时间相同 digest 幂等，相同时间不同 digest CAS 冲突，防止乱序状态回滚。
+- 当前没有 canonical scheduler/worker 主链切流；`AgentJobRegistry` 仍是唯一读权威，shadow 故障不改变旧 API 返回。
 
 ## 6. Persona / Surface
 

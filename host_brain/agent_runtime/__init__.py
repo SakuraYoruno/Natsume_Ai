@@ -30,6 +30,17 @@ from host_brain.agent_runtime.task_graph import (
     TaskNode,
     TaskNodeStatus,
 )
+from host_brain.agent_runtime.task_store import (
+    AttemptStatus,
+    DurableTaskStore,
+    Ed25519ReconciliationProofVerifier,
+    IdempotencyRecoveryAction,
+    OutboxMessage,
+    TaskStoreError,
+    build_outbox_payload_ref,
+    build_reconciliation_attestation_binding,
+    build_operation_fingerprint,
+)
 from host_brain.agent_runtime.verification_policy import VerificationResult, VerificationStatus
 from host_brain.agent_runtime.work_order import AgentWorkOrder, WorkOrder, WorkOrderV3
 
@@ -38,12 +49,17 @@ __all__ = [
     "AgentRuntimeExecutor",
     "AgentResult",
     "AgentWorkOrder",
+    "AttemptStatus",
     "BudgetAmount",
     "BudgetExceededAction",
     "BudgetPolicy",
     "BudgetReservation",
     "BudgetReservationStatus",
     "ContractViolation",
+    "DurableTaskStore",
+    "Ed25519ReconciliationProofVerifier",
+    "IdempotencyRecoveryAction",
+    "OutboxMessage",
     "ReviewItem",
     "ReviewResumePhase",
     "ReviewStatus",
@@ -56,11 +72,15 @@ __all__ = [
     "TaskGraphStatus",
     "TaskNode",
     "TaskNodeStatus",
+    "TaskStoreError",
     "VerificationResult",
     "VerificationStatus",
     "WorkOrder",
     "WorkOrderV3",
     "agent_enabled",
+    "build_reconciliation_attestation_binding",
+    "build_outbox_payload_ref",
+    "build_operation_fingerprint",
     "execute_agent_production_payload",
     "execute_agent_runtime_payload",
 ]
