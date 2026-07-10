@@ -1,10 +1,26 @@
 受众：CODEX
 标题：DevTasks（任务清单：唯一可执行任务来源）
 
-版本：v2.0
-日期：2026-06-04
+版本：v2.2
+日期：2026-07-10
 
 本文件只包含"Codex 可执行任务条目"。任务条目必须来自 DevSpec 的工程契约拆解，并反向引用 PRD 的 FR 编号与测试编号 T-…；不得在本文件中讨论白皮书/PRD 的文字解释。
+
+唯一性口径：本文件是任务注册与路由 SSOT；`TASK-0461～0486` 的完整任务卡委托给 M48-A 详细执行文档，`TASK-0487～0622` 的完整任务卡委托给 Master 执行文档。两份被委托文档均须由本文件登记后才可作为实现入口，架构蓝图、PRD、DevSpec 和 Trace 不能直接生成未登记任务。
+
+## 当前活动程序：M48～M57 完整架构重构
+
+- 完整程序执行文档：`docs/30_devspec/NATSUME_AI_V1_FULL_ARCHITECTURE_REFACTOR_MASTER_EXECUTION_20260710.md`
+- 完整目标蓝图：`docs/50_project/arch/NATSUME_AI_V1_FULL_ARCHITECTURE_TARGET_20260710.md`
+- 程序任务编号：`TASK-0461`～`TASK-0622`，共 162 项，编号不得复用或跳号。
+- 当前可执行批次：M48-A，`TASK-0461`～`TASK-0486`，详细任务卡见 `NATSUME_AI_V1_LONG_TERM_EVOLUTION_EXECUTION_20260710.md`。
+- 平台安全批次：M48-B，`TASK-0487`～`TASK-0496`；须满足 Master 文档规定的 M48-B 入口 Gate 后启动。
+- 后续批次：M49～M57，`TASK-0497`～`TASK-0622`，状态为 `PROGRAMMED`；只能按依赖 Gate 解锁，不能因任务已编号而越级实施。
+- 关联需求：`FR-NLE-001`～`FR-NLE-005`、`FR-ARCH-001`～`FR-ARCH-010`。
+- 关联测试：`T-NLE-01`～`T-NLE-24`、`T-ARCH-01`～`T-ARCH-30`。
+- 唯一首个执行入口：`TASK-0461 / LTE-WP-00`。M48-A 内部依赖以 M48-A 详细执行文档为准；跨里程碑依赖、切流、停止、回滚和最终退役以 Master 执行文档为准。
+
+本文件后续的 `TASK-0000`～`TASK-0460` 保留为历史任务记录；与完整架构程序冲突时，不得用历史任务覆盖当前代码基线、Master 程序或对应阶段的正式任务卡。
 
 ### 当前任务与主链入口（2026-06-04）
 

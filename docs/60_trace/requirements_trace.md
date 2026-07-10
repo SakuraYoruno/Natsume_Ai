@@ -1,11 +1,19 @@
 受众：MASTER
 标题：需求可追溯性矩阵（Requirements Trace）
 
-版本：v1.8
+版本：v2.0
 
-定位：以“条目式矩阵”维护 PRD（FR）→ DevSpec（章节/契约点）→ DevTasks（TASK）→ Tests（T-xx）的覆盖关系；requirements_trace.csv 可继续承载表格视图（若未维护或滞后，以本 md 为准）。
+定位：以“条目式矩阵”维护 PRD（FR）→ DevSpec（章节/契约点）→ DevTasks（TASK）→ Tests（T-xx）的覆盖关系；当前未维护 `requirements_trace.csv`，本 Markdown 是追溯 SSOT。
 
 ---
+## 维护记录（2026-07-10）
+
+- 本次增量：登记完整架构目标与正式执行程序，新增 FR-ARCH-001～010、R-183～R-192，以及 M48-B～M57 → TASK-0487～0622 → T-ARCH-01～30 的发布级 Gate 映射。
+- 状态口径：T-ARCH 编号只表示测试契约已定义；正式程序状态为 READY_FOR_PROGRAM_EXECUTION。M48-A 的 TASK-0461～0486 为 PLANNED，M48-B～M57 的 TASK-0487～0622 为 PROGRAMMED 且尚未解锁实施；必须经过依赖 Gate、自动化测试与 Seal 证据后才能改为 DONE。
+- 本次同步范围：M48 长期演化安全收敛的 PRD、DevSpec、DevTasks 与 T-NLE 正式闭环。
+- 新增映射：FR-NLE-001～005 → DevSpec §15 → TASK-0461～0486 → T-NLE-01～24。
+- 代码状态：正式执行文档已冻结；M48-A 代码任务为 PLANNED，M48-B 任务为 PROGRAMMED 且尚未解锁，不把文档完成误报为能力已实现。
+
 ## 维护记录（2026-06-04）
 - 本次同步范围：PRD v1.6、DevSpec v1.9、ModelPlane v1.5、DevTasks v2.0 的当前代码口径校准；不新增 PRD 需求编号。
 - 代码与文档事实：`/v1/chat` 主链以 `chat_routes.py`、`chat_handler.py`、`thalamus_agent`、`Governor`、`agent_runtime_shared`、`executive_runtime_core`、`chat_agent`、`surface_main_chain_adapter` 与 `ReplyEnvelope` 为当前收口；屏幕/图像相关能力只作为高门槛观测或兼容场景，不构成默认本地界面执行；Bond 后端可为 SQLite/内存/Neo4j，不把 Neo4j 写死为唯一 SSOT。
@@ -1267,3 +1275,185 @@
 - 验收测试（T-xx）：T-Gov-01；T-GOV-R8-01~04；T-SCHED-02
 - 当前进展（2026-03-18）：PRD/DevSpec 已同步 R1~R8 与六模式 sys_mode 门控矩阵，测试映射已登记。
 - 覆盖状态：SPEC_READY
+
+## R-178（M48 领域与 Canon 写边界收敛）
+
+- 系统级需求：Domain Pack 只写领域状态；Pentest 知识迁出 WorldCanon；Canon Apply 使用绑定授权和唯一写入口。
+- PRD 需求编号（FR）：FR-NLE-001；FR-CANON；FR-SECURITY-LAB。
+- 来源：Natsume AI V1 长期演化能力重构正式执行文档 §9 TASK-0461、TASK-0463～0465。
+- DevSpec 落点：DevSpec §15.1。
+- DevTasks（TASK）：TASK-0461；TASK-0463～TASK-0465。
+- 验收测试（T-xx）：T-NLE-01～03；T-WCanon-01～03；T-SSOT-01。
+- 当前进展（2026-07-10）：正式契约和任务卡已冻结，代码尚未实施。
+- 覆盖状态：READY_FOR_EXECUTION
+
+## R-179（M48 Canonical Task Runtime 与治理闭环）
+
+- 系统级需求：复杂任务只规划一次；Graph/Node/Attempt/Lease/幂等持久化；Verification/Judge/Review 完成后再切主链。
+- PRD 需求编号（FR）：FR-NLE-002；FR-NLE-003；FR-AGENT-RUNTIME；FR-SECURITY。
+- 来源：Natsume AI V1 长期演化能力重构正式执行文档 §3、§4、§9 TASK-0466～0473。
+- DevSpec 落点：DevSpec §15.2～15.3。
+- DevTasks（TASK）：TASK-0466～TASK-0473。
+- 验收测试（T-xx）：T-NLE-04～11；T-Orch-01；T-Gov-01。
+- 当前进展（2026-07-10）：正式依赖顺序、状态机、切流和回滚条件已冻结，代码尚未实施。
+- 覆盖状态：READY_FOR_EXECUTION
+
+## R-180（M48 Runtime Event 与 Context 治理）
+
+- 系统级需求：停止 durable raw thought；关键事件先持久化再广播；SSE cursor 补发；Context 使用引用授权与 token 预算。
+- PRD 需求编号（FR）：FR-NLE-003；FR-OBS；NFR-AUDIT；NFR-SAFETY。
+- 来源：Natsume AI V1 长期演化能力重构正式执行文档 §3.6、§9 TASK-0462、TASK-0474～0475。
+- DevSpec 落点：DevSpec §15.4。
+- DevTasks（TASK）：TASK-0462；TASK-0474～TASK-0475。
+- 验收测试（T-xx）：T-NLE-12～13；T-Audit-01；T-Replay-01。
+- 当前进展（2026-07-10）：事件与 Context 契约已冻结，代码尚未实施。
+- 覆盖状态：READY_FOR_EXECUTION
+
+## R-181（M48 Digital Life 长期演化最小闭环）
+
+- 系统级需求：Life OCC、只读 WorldProjection、Appraisal/Bond 证据链、SceneDecision 与只收紧权限的 ActionArbiter。
+- PRD 需求编号（FR）：FR-NLE-004；FR-EMOTION；FR-PROACTIVE；FR-BOND-RIFT-001。
+- 来源：Natsume AI V1 长期演化能力重构正式执行文档 §9 TASK-0476～0479。
+- DevSpec 落点：DevSpec §15.5。
+- DevTasks（TASK）：TASK-0476～TASK-0479。
+- 验收测试（T-xx）：T-NLE-14～17；T-50～T-54；T-BOND-RIFT-01～02。
+- 当前进展（2026-07-10）：数据所有权、兼容投影和仲裁权力边界已冻结，代码尚未实施。
+- 覆盖状态：READY_FOR_EXECUTION
+
+## R-182（M48 安全升级、Operator 观测与发布封板）
+
+- 系统级需求：Capability maturity 只收紧权限；DegradationState 可恢复；Identity Snapshot 可审查；现有 Monitor UI 增量呈现并完成回滚演练。
+- PRD 需求编号（FR）：FR-NLE-005；FR-OBS；NFR-RELIABILITY；NFR-SAFETY。
+- 来源：Natsume AI V1 长期演化能力重构正式执行文档 §9 TASK-0480～0486。
+- DevSpec 落点：DevSpec §15.6～15.7。
+- DevTasks（TASK）：TASK-0480～TASK-0486。
+- 验收测试（T-xx）：T-NLE-18～24；T-Boot-01；T-Svc-01；T-Release-01。
+- 当前进展（2026-07-10）：能力、降级、身份、UI 与 Seal 任务已冻结，代码尚未实施。
+- 覆盖状态：READY_FOR_EXECUTION
+
+## M48-B～M57 完整架构重构（R-183～R-192）
+
+下表登记每个里程碑的主需求映射，不表示需求只在该阶段生效。`FR-ARCH-001` 由 M49 建界、M57 终验；`FR-ARCH-002` 由 M48-B/M49 建界，并在 M50、M55、M56 的 Host/Edge/Query 切片中持续验收。
+
+| 里程碑 | FR | Trace | DevTasks | Tests |
+|---|---|---|---|---|
+| M48-B | FR-ARCH-002；FR-ARCH-007～009 | R-183 | TASK-0487～0496 | T-ARCH-01～03 |
+| M49 | FR-ARCH-001～002 | R-184 | TASK-0497～0510 | T-ARCH-04～06 |
+| M50 | FR-ARCH-003 | R-185 | TASK-0511～0524 | T-ARCH-07～09 |
+| M51 | FR-ARCH-004 | R-186 | TASK-0525～0538 | T-ARCH-10～12 |
+| M52 | FR-ARCH-005 | R-187 | TASK-0539～0552 | T-ARCH-13～15 |
+| M53 | FR-ARCH-006 | R-188 | TASK-0553～0566 | T-ARCH-16～18 |
+| M54 | FR-ARCH-007 | R-189 | TASK-0567～0580 | T-ARCH-19～21 |
+| M55 | FR-ARCH-008 | R-190 | TASK-0581～0594 | T-ARCH-22～24 |
+| M56 | FR-ARCH-009 | R-191 | TASK-0595～0608 | T-ARCH-25～27 |
+| M57 | FR-ARCH-010 | R-192 | TASK-0609～0622 | T-ARCH-28～30 |
+
+## R-183（M48-B 平台 P0 安全封口）
+
+- 系统级需求：统一 Host/Obs/Gateway/Bridge 写接口的身份与授权边界，修复 webhook/reply、Skill 安装、Pentest 审批、本地 Bridge 暴露和端口冲突等 P0 风险，并建立可审计的服务拓扑。
+- PRD 需求编号（FR）：FR-ARCH-002；FR-ARCH-007～009。
+- 来源：完整架构目标 §2.5、§4、§9、§14、§16；完整架构重构正式执行程序 M48-B。
+- DevSpec 落点：DevSpec §16.14；完整架构重构正式执行程序 §M48-B。
+- DevTasks（TASK）：TASK-0487～TASK-0496。
+- 验收测试（T-xx）：T-ARCH-01～03。
+- 当前进展（2026-07-10）：目标、任务范围与 Gate 已登记；正式程序已就绪，任务为 PROGRAMMED，尚未解锁实施。
+- 覆盖状态：READY_FOR_PROGRAM_EXECUTION
+
+## R-184（M49 Contracts、Kernel、Composition 与依赖治理）
+
+- 系统级需求：提取版本化共享 contracts 和稳定 kernel ports，以唯一 Composition Root 管理生命周期，建立依赖护栏，并为 Host/Worker/Query 隔离装配及 Edge 后续独立安装提供合同与 composition 前提。
+- PRD 需求编号（FR）：FR-ARCH-001～002。
+- 来源：完整架构目标 §2.1～2.2、§4～6、§14、§16；完整架构重构正式执行程序 M49。
+- DevSpec 落点：DevSpec §16.14；完整架构重构正式执行程序 §M49。
+- DevTasks（TASK）：TASK-0497～TASK-0510。
+- 验收测试（T-xx）：T-ARCH-04～06。
+- 当前进展（2026-07-10）：目标、任务范围与 Gate 已登记；正式程序已就绪，任务为 PROGRAMMED，尚未解锁实施。
+- 覆盖状态：READY_FOR_PROGRAM_EXECUTION
+
+## R-185（M50 Host Application 与 Task/Agent Runtime 分层）
+
+- 系统级需求：将接口、应用编排、领域规则与基础设施分层，建立唯一 Canonical Task/Agent Runtime，收敛重复 planner/executor/scheduler 并以可度量 facade 完成巨石拆分和退役。
+- PRD 需求编号（FR）：FR-ARCH-003。
+- 来源：完整架构目标 §2.1～2.2、§5～6、§14、§16；完整架构重构正式执行程序 M50。
+- DevSpec 落点：DevSpec §16.14；完整架构重构正式执行程序 §M50。
+- DevTasks（TASK）：TASK-0511～TASK-0524。
+- 验收测试（T-xx）：T-ARCH-07～09。
+- 当前进展（2026-07-10）：目标、任务范围与 Gate 已登记；正式程序已就绪，任务为 PROGRAMMED，尚未解锁实施。
+- 覆盖状态：READY_FOR_PROGRAM_EXECUTION
+
+## R-186（M51 Digital Life Kernel、Surface 与 Identity）
+
+- 系统级需求：收敛 Digital Life 的时钟、状态、写者、Scene/Surface/Action 边界，建立可重放 journal 和版本化 Identity migration/regression/rollback 闭环。
+- PRD 需求编号（FR）：FR-ARCH-004。
+- 来源：完整架构目标 §2.3、§7～8、§14～16；完整架构重构正式执行程序 M51。
+- DevSpec 落点：DevSpec §16.14；完整架构重构正式执行程序 §M51。
+- DevTasks（TASK）：TASK-0525～TASK-0538。
+- 验收测试（T-xx）：T-ARCH-10～12。
+- 当前进展（2026-07-10）：目标、任务范围与 Gate 已登记；正式程序已就绪，任务为 PROGRAMMED，尚未解锁实施。
+- 覆盖状态：READY_FOR_PROGRAM_EXECUTION
+
+## R-187（M52 Memory、Knowledge、Event 与 Persistence）
+
+- 系统级需求：以 Storage Catalog、component-scoped migrations、EventStore/outbox 和可重建 projections 明确数据所有权；隔离领域知识并使 Canon promotion、备份恢复和 schema 演进可验证。
+- PRD 需求编号（FR）：FR-ARCH-005。
+- 来源：完整架构目标 §2.4、§7、§10、§14、§16；完整架构重构正式执行程序 M52。
+- DevSpec 落点：DevSpec §16.14；完整架构重构正式执行程序 §M52。
+- DevTasks（TASK）：TASK-0539～TASK-0552。
+- 验收测试（T-xx）：T-ARCH-13～15。
+- 当前进展（2026-07-10）：目标、任务范围与 Gate 已登记；正式程序已就绪，任务为 PROGRAMMED，尚未解锁实施。
+- 覆盖状态：READY_FOR_PROGRAM_EXECUTION
+
+## R-188（M53 Domain Pack 与 Capability Platform）
+
+- 系统级需求：提供版本化 Domain Pack SDK/manifest 和统一 Capability Catalog/执行门；将 Pentest 迁入隔离 Lab 和共享任务治理，禁止领域反向依赖平台及直接污染 WorldCanon。
+- PRD 需求编号（FR）：FR-ARCH-006。
+- 来源：完整架构目标 §2.5～2.6、§11～12、§14、§16；完整架构重构正式执行程序 M53。
+- DevSpec 落点：DevSpec §16.14；完整架构重构正式执行程序 §M53。
+- DevTasks（TASK）：TASK-0553～TASK-0566。
+- 验收测试（T-xx）：T-ARCH-16～18。
+- 当前进展（2026-07-10）：目标、任务范围与 Gate 已登记；正式程序已就绪，任务为 PROGRAMMED，尚未解锁实施。
+- 覆盖状态：READY_FOR_PROGRAM_EXECUTION
+
+## R-189（M54 Model、Prompt、Governor 与 Security Plane）
+
+- 系统级需求：统一 Model Gateway、Prompt/Context assets、Governor grant 和 Skill/Provider 供应链，使模型调用、授权、出网和不受信代码执行具备单一门禁、审计、隔离及回滚。
+- PRD 需求编号（FR）：FR-ARCH-007。
+- 来源：完整架构目标 §2.5～2.6、§9、§11、§14、§16；完整架构重构正式执行程序 M54。
+- DevSpec 落点：DevSpec §16.14；完整架构重构正式执行程序 §M54。
+- DevTasks（TASK）：TASK-0567～TASK-0580。
+- 验收测试（T-xx）：T-ARCH-19～21。
+- 当前进展（2026-07-10）：目标、任务范围与 Gate 已登记；正式程序已就绪，任务为 PROGRAMMED，尚未解锁实施。
+- 覆盖状态：READY_FOR_PROGRAM_EXECUTION
+
+## R-190（M55 Edge、Gateway、Voice、Avatar 与 Device Runtime）
+
+- 系统级需求：由独立 Edge Device Runtime 统一拥有 Gateway、Voice、Avatar 与设备副作用，消除 Host 直连旁路、Host/Edge 循环依赖、端口碰撞和分散情绪映射，并提供版本化具身协议与安全降级。
+- PRD 需求编号（FR）：FR-ARCH-008。
+- 来源：完整架构目标 §4～6、§9、§14、§16；完整架构重构正式执行程序 M55。
+- DevSpec 落点：DevSpec §16.14；完整架构重构正式执行程序 §M55。
+- DevTasks（TASK）：TASK-0581～TASK-0594。
+- 验收测试（T-xx）：T-ARCH-22～24。
+- 当前进展（2026-07-10）：目标、任务范围与 Gate 已登记；正式程序已就绪，任务为 PROGRAMMED，尚未解锁实施。
+- 覆盖状态：READY_FOR_PROGRAM_EXECUTION
+
+## R-191（M56 Query/Observability Plane 与 Operator Console）
+
+- 系统级需求：将 Obs 收敛为只读 Query Plane，以版本化 read model、OpenAPI 生成 client、role/capability 授权和统一 correlation 构造可回放、可运维且满足 SLO 的 Operator Console。
+- PRD 需求编号（FR）：FR-ARCH-009。
+- 来源：完整架构目标 §2.7、§4、§10、§13～14、§16；完整架构重构正式执行程序 M56。
+- DevSpec 落点：DevSpec §16.14；完整架构重构正式执行程序 §M56。
+- DevTasks（TASK）：TASK-0595～TASK-0608。
+- 验收测试（T-xx）：T-ARCH-25～27。
+- 当前进展（2026-07-10）：目标、任务范围与 Gate 已登记；正式程序已就绪，任务为 PROGRAMMED，尚未解锁实施。
+- 覆盖状态：READY_FOR_PROGRAM_EXECUTION
+
+## R-192（M57 Evolution Lab、Decompat、Release 与最终封板）
+
+- 系统级需求：建立隔离 Evolution Lab 与受治理的 Skill/Identity promotion；完成兼容层和重复运行时退役，并以可复现 ReleaseManifest v2、组件矩阵 CI、灾备和回滚演练完成最终封板。
+- PRD 需求编号（FR）：FR-ARCH-010。
+- 来源：完整架构目标 §14～17；完整架构重构正式执行程序 M57。
+- DevSpec 落点：DevSpec §16.14；完整架构重构正式执行程序 §M57。
+- DevTasks（TASK）：TASK-0609～TASK-0622。
+- 验收测试（T-xx）：T-ARCH-28～30。
+- 当前进展（2026-07-10）：目标、任务范围与 Gate 已登记；正式程序已就绪，任务为 PROGRAMMED，尚未解锁实施。
+- 覆盖状态：READY_FOR_PROGRAM_EXECUTION

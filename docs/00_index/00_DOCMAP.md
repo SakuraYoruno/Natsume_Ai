@@ -1,9 +1,9 @@
 受众：MASTER
 标题：文档地图（唯一入口）
 
-版本：v5.3
-日期：2026-06-30
-维护：2026-06-30（核心架构事实对齐到 v4.1；补齐 Pentest 专项架构入口；README / CURRENT_CODE_ARCHITECTURE / CORE_MODULES_DETAILED_REFERENCE / CAPABILITY 与代码路径同步）
+版本：v5.5
+日期：2026-07-10
+维护：2026-07-10（登记完整架构目标、M48～M57 正式 CODEX 执行入口，以及 FR-ARCH/TASK/T-ARCH/Trace 闭环）
 
 本仓库所有"应该读什么、从哪里开工、哪些文档禁止当任务来源"，以本文件为准。
 
@@ -85,19 +85,27 @@
 
 ## 2）需求文档（PRD）
 
-- `[LIVING]` docs/20_prd/PRD.md (v2.3)
-  用途：基于当前代码事实的系统能力描述。覆盖 7 运行面、Chat/Surface/Gateway/Emotion/Memory/Canon/Tribe/Obs/Avatar/Voice/Mode/Codex/Security/Pentest/Proactive/Scheduler 功能域。
+- `[LIVING]` docs/20_prd/PRD.md (v2.5)
+  用途：基于当前代码事实的系统能力描述。覆盖现有运行面、FR-NLE-001～005 的 M48-A 安全地基，以及 FR-ARCH-001～010 的完整架构目标需求。
   读者：MASTER、Project（文档代理）。
 
 ## 3）开发文档（DevSpec + 任务 + 模型平面）
 
-- `[LIVING]` docs/30_devspec/DevSpec.md (v2.3)
-  用途：当前代码的工程契约参考手册。含 Pentest agent 内部契约、Persona surface scoring 管线、Proactive autonomy 回路契约。
+- `[LIVING]` docs/30_devspec/DevSpec.md (v2.5)
+  用途：当前代码的工程契约参考手册。含既有运行合同、M48-A 安全收敛契约，以及 §16 的 M48～M57 完整目标架构合同。
   读者：实现层（主要）、MASTER。
 
-- `[ARCHIVE]` docs/30_devspec/DevTasks.md
-  用途：实现层可逐条执行的任务清单（历史追踪；任务编号与代码现状可能不同步，属于正常现象）。
-  读者：实现层（历史参考）。
+- `[LIVING]` docs/30_devspec/NATSUME_AI_V1_LONG_TERM_EVOLUTION_EXECUTION_20260710.md
+  用途：M48-A 安全地基详细执行入口；定义 TASK-0461～0486、依赖、切流、停止、回滚与 T-NLE-01～24 验收。
+  读者：实现层（主要）、MASTER。
+
+- `[LIVING]` docs/30_devspec/NATSUME_AI_V1_FULL_ARCHITECTURE_REFACTOR_MASTER_EXECUTION_20260710.md
+  用途：完整架构重构正式 CODEX 执行入口；统一编排 M48-A/M48-B、M49～M57、TASK-0461～0622、FR-ARCH-001～010 与 T-ARCH-01～30，并定义依赖 Gate、切流、停止、回滚和封板证据。
+  读者：实现层（唯一完整程序入口）、MASTER、Project。
+
+- `[LIVING]` docs/30_devspec/DevTasks.md
+  用途：实现层任务总入口；当前指向 M48～M57 Master 程序和 M48-A 详细执行文档，TASK-0000～0460 保留为历史追踪。
+  读者：实现层。
 
 - `[LIVING]` docs/30_devspec/ModelPlane.md (v1.7)
   用途：模型平面规格（模型节点分工、路由、降级、出网最小化、审计字段）。
@@ -167,9 +175,17 @@
 
 ### 5.3 架构文档（当前事实）
 
+- `[LIVING]` docs/50_project/arch/NATSUME_AI_V1_FULL_ARCHITECTURE_TARGET_20260710.md (v1.0)
+  用途：基于实际代码审计的完整目标架构蓝图；定义最终运行拓扑、包边界、Bounded Context、唯一真相源、M48～M57 路线图与最终架构 Gate。它不是直接任务来源，实施以完整架构重构正式执行程序为准。
+  读者：MASTER、Project、实现层（架构依据）。
+
 - `[LIVING]` docs/50_project/arch/CURRENT_CODE_ARCHITECTURE.md (v4.2)
   用途：当前代码事实总览——运行面、主入口、路由面、聊天主链、Persona/Surface 管线、Pentest 双规划器、Tribe 规模、Monitor UI 路由分组、Digital Life 18 端点。
   读者：MASTER、Project、实现层。
+
+- `[LIVING]` docs/50_project/arch/NATSUME_AI_V1_LONG_TERM_EVOLUTION_REFACTOR_PLAN_20260710.md
+  用途：M48-A 的代码事实审计、局部架构裁决与迁移依据；不是完整目标架构或直接任务来源。
+  读者：MASTER、Project、实现层（背景与证据）。
 
 - `[LIVING]` docs/50_project/arch/CORE_MODULES_DETAILED_REFERENCE.md (v4.2)
   用途：核心模块定位与职责边界（含 persona surface/scoring 管线、life_memory 子包）。
