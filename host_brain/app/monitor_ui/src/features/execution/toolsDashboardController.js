@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import useDigitalLifeRuntimeSignals from '../../hooks/useDigitalLifeRuntimeSignals.js'
 import useAppStore from '../../store/useAppStore.js'
-import { fetchPentestCapabilities } from '../security/api.js'
+import { fetchPentestCapabilities } from './api.js'
 import { reconcileSelectedTool } from './toolsCatalogModel.js'
 import { buildToolsDashboardViewModel } from './toolsDashboardModel.js'
 import {

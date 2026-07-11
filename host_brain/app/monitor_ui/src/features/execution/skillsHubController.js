@@ -2,8 +2,6 @@ import { useMemo, useState } from 'react'
 import useAppStore from '../../store/useAppStore.js'
 import { buildSkillsHubViewModel, SKILL_SOURCE_FILTER_ALL } from './skillsHubModel.js'
 import { useSkillsHubQuery } from './skillsHubQueries.js'
-import { useGovernanceSnapshotQuery } from '../governance/governanceQueries.js'
-import { buildGovernanceViewModel } from '../governance/governanceModel.js'
 
 export function useSkillsHubController() {
   const pollingEnabled = useAppStore((s) => s.pollingEnabled)
@@ -17,12 +15,6 @@ export function useSkillsHubController() {
     pollingTick,
     pollingInterval,
   })
-  const governanceQuery = useGovernanceSnapshotQuery({ pollingEnabled, pollingTick, pollingInterval })
-  const governance = useMemo(
-    () => buildGovernanceViewModel(governanceQuery.data),
-    [governanceQuery.data],
-  )
-
   const view = useMemo(
     () => buildSkillsHubViewModel({
       data: query.hubData,
@@ -47,15 +39,16 @@ export function useSkillsHubController() {
   )
 
   return {
+    pollingEnabled,
+    pollingInterval,
+    pollingTick,
     filter,
     sourceFilter,
     loading: query.loading,
     refreshing: query.refreshing,
     view,
-    governance,
-    governanceError: governanceQuery.error,
     onFilterChange: setFilter,
     onSourceFilterChange: setSourceFilter,
-    onRefresh: () => Promise.allSettled([query.refetch(), governanceQuery.refetch()]),
+    onRefresh: query.refetch,
   }
 }

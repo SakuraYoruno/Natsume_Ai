@@ -15,7 +15,6 @@ import NoticeBanner from '../../../shared/ui/NoticeBanner.jsx'
 import SampleMeta from '../../../shared/ui/observability/SampleMeta.jsx'
 import PageHero from '../../../shared/ui/PageHero.jsx'
 import { SKILL_CLEARANCE_STYLES, SKILL_SOURCE_STYLES } from '../../../shared/statusMeta.js'
-import CapabilityGovernanceSection from '../../governance/components/CapabilityGovernanceSection.jsx'
 
 const SOURCE_ICONS = {
   builtin: Package,
@@ -250,6 +249,7 @@ function SkillsHubFilters({
 }
 
 export default function SkillsHubSurface({
+  CapabilityGovernanceSection,
   filter,
   sourceFilter,
   loading,
@@ -285,7 +285,9 @@ export default function SkillsHubSurface({
       ) : null}
 
       <SummaryStrip items={summaryItems} />
-      <CapabilityGovernanceSection model={governance} queryError={governanceError} />
+      {CapabilityGovernanceSection ? (
+        <CapabilityGovernanceSection model={governance} queryError={governanceError} />
+      ) : null}
       <ExternalDirsPanel externalDirsView={externalDirsView} />
 
       <SkillsHubFilters

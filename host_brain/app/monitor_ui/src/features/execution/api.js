@@ -2,7 +2,7 @@ import { ENDPOINT_REGISTRY, endpointPath } from '../../shared/api/endpointRegist
 import { endpointGet, endpointPost, endpointRequest } from '../../shared/api/endpointClient.js'
 import { httpStreamPost } from '../../shared/api/httpClient.js'
 
-const { execution } = ENDPOINT_REGISTRY
+const { execution, pentest } = ENDPOINT_REGISTRY
 
 const REQUEST_TIMEOUT_MS = 35_000
 const SSE_HEADERS = { Accept: 'text/event-stream' }
@@ -70,6 +70,10 @@ export function triggerSchedulerTask(taskId) {
 
 export function fetchToolHealth() {
   return endpointGet(execution.toolHealth)
+}
+
+export function fetchPentestCapabilities() {
+  return endpointGet(pentest.capabilities)
 }
 
 export function fetchToolMetaPack(params = {}) {
