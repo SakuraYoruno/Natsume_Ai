@@ -76,6 +76,9 @@ class CoreSettings(BaseSettings):
     nle_life_views_enabled: bool = Field(
         default=False, alias="HOST_NLE_LIFE_VIEWS_ENABLED"
     )
+    nle_governance_views_enabled: bool = Field(
+        default=False, alias="HOST_NLE_GOVERNANCE_VIEWS_ENABLED"
+    )
     sys_mode: str = Field(default="normal", alias="HOST_SYS_MODE")
 
     @classmethod
@@ -174,6 +177,13 @@ class CoreSettings(BaseSettings):
                 env_key="HOST_NLE_LIFE_VIEWS_ENABLED",
                 default_value=False,
                 current_value=s.nle_life_views_enabled,
+                is_required=False,
+            ),
+            inspect_setting(
+                domain=domain, field_name="nle_governance_views_enabled",
+                env_key="HOST_NLE_GOVERNANCE_VIEWS_ENABLED",
+                default_value=False,
+                current_value=s.nle_governance_views_enabled,
                 is_required=False,
             ),
             inspect_setting(
