@@ -45,6 +45,13 @@ from host_brain.agent_runtime.review_store import (
     ReviewStore,
     ReviewStoreError,
 )
+from host_brain.agent_runtime.runtime_router import (
+    CanonicalRuntimeRouter,
+    RuntimeAssignment,
+    RuntimeExecutor,
+    RuntimeMode,
+    RuntimeRouterError,
+)
 from host_brain.agent_runtime.sub_agent_contract import (
     SubAgentRequestAdapter,
     SubAgentRequestContract,
@@ -96,6 +103,7 @@ __all__ = [
     "BudgetReservation",
     "BudgetReservationStatus",
     "CanonicalPlannerOutput",
+    "CanonicalRuntimeRouter",
     "CanonicalShadowScheduler",
     "ContractViolation",
     "DurableTaskStore",
@@ -111,6 +119,10 @@ __all__ = [
     "ReviewStore",
     "ReviewStoreError",
     "ReviewType",
+    "RuntimeAssignment",
+    "RuntimeExecutor",
+    "RuntimeMode",
+    "RuntimeRouterError",
     "SchedulerAction",
     "SchedulerDecision",
     "SchedulerShadowReport",

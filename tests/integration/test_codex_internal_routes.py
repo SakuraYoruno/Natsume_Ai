@@ -149,6 +149,38 @@ def test_codex_internal_work_order_execute_does_not_persist_unmarked_work_order(
         ledger.close()
 
 
+def test_codex_internal_work_order_execute_attaches_legacy_runtime_assignment(monkeypatch) -> None:
+    class FakeExecutor:
+        def execute(self, order):
+            return {
+                "status": "EXECUTED",
+                "work_order_id": order.work_order_id,
+                "runtime_assignment": order.metadata["runtime_assignment"],
+            }
+
+    monkeypatch.setattr("host_brain.app.internal_agent_routes.AgentRuntimeExecutor", FakeExecutor)
+
+    response = _client().post("/internal/codex/work-orders/execute", json={"work_order": _work_order()})
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["runtime_assignment"]["executor"] == "legacy"
+    assert payload["result"]["runtime_assignment"]["executor"] == "legacy"
+
+
+def test_codex_internal_runtime_drain_report_reads_legacy_registry() -> None:
+    GLOBAL_AGENT_JOB_REGISTRY.reset()
+    job = GLOBAL_AGENT_JOB_REGISTRY.create(kind="codex_work_order", work_order=_work_order())
+
+    response = _client().get("/internal/codex/runtime/drain-report")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["drain"]["drained"] is False
+    assert job["job_id"] in payload["drain"]["legacy_open_job_ids"]
+    GLOBAL_AGENT_JOB_REGISTRY.reset()
+
+
 def test_codex_internal_review_routes_resume_once(tmp_path, monkeypatch) -> None:
     db_path = tmp_path / "review-routes.sqlite3"
     with sqlite3.connect(str(db_path)) as conn:

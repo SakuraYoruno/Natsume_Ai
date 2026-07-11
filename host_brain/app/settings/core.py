@@ -23,7 +23,7 @@ from .base import SettingsFieldReport, inspect_setting
 
 LogLevel = Literal["DEBUG", "INFO", "WARN", "WARNING", "ERROR"]
 RuntimeEnv = Literal["dev", "test", "prod"]
-TaskRuntimeMode = Literal["legacy", "shadow"]
+TaskRuntimeMode = Literal["legacy", "shadow", "canonical"]
 
 
 class CoreSettings(BaseSettings):
@@ -57,6 +57,15 @@ class CoreSettings(BaseSettings):
     )
     task_runtime_shadow_owner: str = Field(
         default="", alias="HOST_TASK_RUNTIME_SHADOW_OWNER"
+    )
+    task_runtime_canary_percent: int = Field(
+        default=0, ge=0, le=100, alias="HOST_TASK_RUNTIME_CANARY_PERCENT"
+    )
+    task_runtime_kill_switch: bool = Field(
+        default=False, alias="HOST_TASK_RUNTIME_KILL_SWITCH"
+    )
+    task_runtime_canonical_owner: str = Field(
+        default="", alias="HOST_TASK_RUNTIME_CANONICAL_OWNER"
     )
     sys_mode: str = Field(default="normal", alias="HOST_SYS_MODE")
 
@@ -114,6 +123,27 @@ class CoreSettings(BaseSettings):
                 domain=domain, field_name="task_runtime_shadow_owner",
                 env_key="HOST_TASK_RUNTIME_SHADOW_OWNER",
                 default_value="", current_value=s.task_runtime_shadow_owner,
+                is_required=False,
+            ),
+            inspect_setting(
+                domain=domain, field_name="task_runtime_canary_percent",
+                env_key="HOST_TASK_RUNTIME_CANARY_PERCENT",
+                default_value=0,
+                current_value=s.task_runtime_canary_percent,
+                is_required=False,
+            ),
+            inspect_setting(
+                domain=domain, field_name="task_runtime_kill_switch",
+                env_key="HOST_TASK_RUNTIME_KILL_SWITCH",
+                default_value=False,
+                current_value=s.task_runtime_kill_switch,
+                is_required=False,
+            ),
+            inspect_setting(
+                domain=domain, field_name="task_runtime_canonical_owner",
+                env_key="HOST_TASK_RUNTIME_CANONICAL_OWNER",
+                default_value="",
+                current_value=s.task_runtime_canonical_owner,
                 is_required=False,
             ),
             inspect_setting(

@@ -3,7 +3,7 @@
 
 # 质量审计子目录
 
-版本：v1.11
+版本：v1.12
 维护日期：2026-07-11
 标签：当前执行证据 + 历史归档
 
@@ -28,6 +28,7 @@
 - `NLE_WP21_TASK0467_VALIDATION_20260710.md`：Durable TaskStore、trusted-clock lease、Ed25519 reconciliation、cancel-wait、强绑定 outbox 与 legacy shadow 验收证据。
 - `NLE_WP22_TASK0468_VALIDATION_20260710.md`：same-revision Planner adapters、dependency refs、Child WorkOrder request 与 shadow-only 验收证据。
 - `NLE_WP23_TASK0469_VALIDATION_20260711.md`：read-only Canonical Scheduler shadow、durable snapshot、retry/recovery/budget 与 legacy diff 验收证据。
+- `NLE_WP24_TASK0473_VALIDATION_20260711.md`：canonical runtime mode router、canary/kill switch、legacy drain、cross-executor resume guard 与 T-NLE-11 验收证据。
 - `NLE_WP30_TASK0470_VALIDATION_20260711.md`：fail-closed Verification runner、required gate、TaskStore 状态门与 T-NLE-08 验收证据。
 - `NLE_WP31_TASK0471_VALIDATION_20260711.md`：AcceptanceJudgement、criterion verdict、Executor acceptance 字段、TaskStore ACCEPTED 状态门与 T-NLE-09 验收证据。
 - `NLE_WP32_TASK0472_VALIDATION_20260711.md`：Durable ReviewStore、绑定 resume token、一次性 PRE/POST resume 与 T-NLE-10 验收证据。

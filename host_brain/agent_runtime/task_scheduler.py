@@ -405,12 +405,15 @@ def evaluate_configured_shadow(
     budget_allowed: Mapping[str, bool] | None = None,
     legacy_decisions: Sequence[Mapping[str, Any]] | None = None,
 ) -> SchedulerShadowReport | None:
-    """Feature-flagged shadow adapter; legacy mode is a strict no-op."""
+    """Feature-flagged scheduler adapter; legacy mode is a strict no-op."""
     mode = _text(runtime_mode).lower()
     if mode == "legacy":
         return None
-    if mode != "shadow":
-        raise ShadowSchedulerError(SCHEDULER_SNAPSHOT_INVALID, "runtime mode must be legacy or shadow")
+    if mode not in {"shadow", "canonical"}:
+        raise ShadowSchedulerError(
+            SCHEDULER_SNAPSHOT_INVALID,
+            "runtime mode must be legacy, shadow, or canonical",
+        )
     owner = _text(configured_owner)
     if not owner or _text(confirmed_owner) != owner:
         raise ShadowSchedulerError(SCHEDULER_OWNER_REQUIRED, "shadow runtime owner confirmation does not match")

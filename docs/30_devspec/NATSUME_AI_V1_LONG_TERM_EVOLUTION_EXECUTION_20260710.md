@@ -5,7 +5,7 @@
 
 版本：v1.1
 日期：2026-07-10
-状态：`READY_FOR_EXECUTION`（TASK-0461～TASK-0472 已 `DONE`；其余任务按依赖 Gate 推进）
+状态：`READY_FOR_EXECUTION`（TASK-0461～TASK-0473 已 `DONE`；其余任务按依赖 Gate 推进）
 文档类型：DevTasks / Execution Contract
 任务编号：`TASK-0461`～`TASK-0486`
 逻辑工作包：`LTE-WP-00`～`LTE-WP-80`
@@ -419,7 +419,7 @@ Pop-Location
 | TASK-0470 | WP-30 / PR-010 | Verification Gate | WP-23 | 3–4 日 | 高 | DONE |
 | TASK-0471 | WP-31 / PR-011 | Acceptance Judge | WP-30 | 2–3 日 | 高 | DONE |
 | TASK-0472 | WP-32 / PR-012 | Review / Resume | WP-21/23 | 3–5 日 | 高 | DONE |
-| TASK-0473 | WP-24 / PR-013 | Canonical 主链切流 | WP-31/32 | 2–4 日 | 极高 | PLANNED |
+| TASK-0473 | WP-24 / PR-013 | Canonical 主链切流 | WP-31/32 | 2–4 日 | 极高 | DONE |
 | TASK-0474 | WP-40 / PR-014 | Runtime Event / SSE Replay | WP-24 | 3–5 日 | 高 | PLANNED |
 | TASK-0475 | WP-41 / PR-015 | Context 引用与预算治理 | WP-40 | 2–3 日 | 中 | PLANNED |
 | TASK-0476 | WP-50 / PR-016 | Life OCC 与 schema migration | WP-40 | 2–4 日 | 高 | PLANNED |
@@ -635,7 +635,7 @@ Pop-Location
 
 ### TASK-0473 / LTE-WP-24：Canonical Runtime 主链切流
 
-- 状态：`PLANNED`
+- 状态：`DONE`（2026-07-11；runtime mode router、new-task assignment、canary owner gate、kill switch、legacy drain report、cross-executor resume guard 与 T-NLE-11 验收通过；生产默认仍为 legacy/0% canary）
 - 目标：只对新任务启用 canonical scheduler；存量 legacy 任务 drain，禁止跨执行器 resume。
 - 代码事实：在 TaskStore、Verification、Judge、Review 完成前切流会扩大“执行完成但未接受”漏洞。
 - 前置任务：TASK-0471、TASK-0472。

@@ -18,6 +18,12 @@ from host_brain.agent_runtime import (
 )
 from host_brain.agent_runtime.immune import build_immune_proposal_from_report
 from host_brain.agent_runtime.job_registry import GLOBAL_AGENT_JOB_REGISTRY
+from host_brain.agent_runtime.runtime_router import (
+    CanonicalRuntimeRouter,
+    RuntimeRouterError,
+    build_legacy_drain_report,
+)
+from host_brain.app.settings.core import get_core_settings
 from host_brain.core.ids import now_ms
 from host_brain.core.trace_redaction import sanitize_public_payload
 
@@ -65,6 +71,38 @@ def _raise_review_store_error(exc: ReviewStoreError) -> None:
     if exc.reason_code in {"REVIEW_STORE_INVALID", "REVIEW_CHECKPOINT_REQUIRED"}:
         status = 400
     raise HTTPException(status_code=status, detail=exc.to_dict())
+
+
+def _runtime_owner_confirmation(order: AgentWorkOrder) -> str:
+    metadata = _mapping(order.metadata)
+    return (
+        _text(metadata.get("task_runtime_owner_confirmation"))
+        or _text(metadata.get("runtime_owner_confirmation"))
+        or _text(metadata.get("confirmed_owner"))
+    )
+
+
+def _attach_runtime_assignment(order: AgentWorkOrder) -> tuple[AgentWorkOrder, dict[str, Any]]:
+    settings = get_core_settings()
+    metadata = _mapping(order.metadata)
+    router = CanonicalRuntimeRouter(
+        mode=settings.task_runtime_mode,
+        canary_percent=settings.task_runtime_canary_percent,
+        kill_switch=settings.task_runtime_kill_switch,
+        canonical_owner=settings.task_runtime_canonical_owner or settings.task_runtime_shadow_owner,
+        confirmed_owner=_runtime_owner_confirmation(order),
+    )
+    existing = metadata.get("runtime_assignment")
+    assignment = (
+        router.preserve_existing_assignment(existing, work_order_id=order.work_order_id)
+        if isinstance(existing, Mapping)
+        else router.assign_new_task(order.work_order_id)
+    )
+    payload = order.to_dict()
+    next_metadata = _mapping(payload.get("metadata"))
+    next_metadata["runtime_assignment"] = assignment.to_dict()
+    payload["metadata"] = next_metadata
+    return AgentWorkOrder.from_mapping(payload), assignment.to_dict()
 
 
 def _extract_owner_directive(
@@ -246,15 +284,31 @@ async def execute_work_order(
 ) -> dict[str, Any]:
     order = AgentWorkOrder.from_mapping(payload.get("work_order") if isinstance(payload.get("work_order"), dict) else payload)
     order.validate()
+    try:
+        order, runtime_assignment = _attach_runtime_assignment(order)
+    except RuntimeRouterError as exc:
+        raise HTTPException(status_code=409, detail=exc.to_dict()) from exc
     owner_directive_memory = _persist_owner_directive_from_payload(payload, order=order)
     if background:
         job = _start_background_job(kind="codex_work_order", work_order=order.to_dict())
-        response = {"accepted": True, "background": True, "job_id": job["job_id"], "work_order": order.to_dict()}
+        response = {
+            "accepted": True,
+            "background": True,
+            "job_id": job["job_id"],
+            "work_order": order.to_dict(),
+            "runtime_assignment": runtime_assignment,
+        }
         if owner_directive_memory.get("attempted"):
             response["owner_directive_memory"] = owner_directive_memory
         return response
     result = AgentRuntimeExecutor().execute(order)
-    response = {"accepted": True, "background": False, "job_id": None, "result": result}
+    response = {
+        "accepted": True,
+        "background": False,
+        "job_id": None,
+        "result": result,
+        "runtime_assignment": runtime_assignment,
+    }
     if owner_directive_memory.get("attempted"):
         response["owner_directive_memory"] = owner_directive_memory
     return response
@@ -356,6 +410,14 @@ async def get_codex_job(job_id: str) -> dict[str, Any]:
     return dict(sanitize_public_payload(job))
 
 
+@router.get("/runtime/drain-report")
+async def get_runtime_drain_report() -> dict[str, Any]:
+    return {
+        "accepted": True,
+        "drain": build_legacy_drain_report(GLOBAL_AGENT_JOB_REGISTRY.list_jobs()),
+    }
+
+
 async def _live_report(source: str) -> dict[str, Any]:
     source_key = "readiness" if str(source or "").strip().lower() in {"ready", "readiness"} else "health"
     if source_key == "readiness":
@@ -399,6 +461,11 @@ async def dispatch_immune_work_order(
     approval = dict(work_order.get("approval_policy") or {})
     approval["confirmed"] = bool(confirmed)
     work_order["approval_policy"] = approval
+    try:
+        assigned_order, runtime_assignment = _attach_runtime_assignment(AgentWorkOrder.from_mapping(work_order))
+    except RuntimeRouterError as exc:
+        raise HTTPException(status_code=409, detail=exc.to_dict()) from exc
+    work_order = assigned_order.to_dict()
     if background:
         job = _start_background_job(kind="codex_immune", work_order=work_order)
         with _immune_auto_state_lock:
@@ -411,8 +478,14 @@ async def dispatch_immune_work_order(
                     "last_result_status": "QUEUED",
                 }
             )
-        return {"accepted": True, "background": True, "job_id": job["job_id"], "proposal": proposal}
-    result = AgentRuntimeExecutor().execute(AgentWorkOrder.from_mapping(work_order))
+        return {
+            "accepted": True,
+            "background": True,
+            "job_id": job["job_id"],
+            "proposal": proposal,
+            "runtime_assignment": runtime_assignment,
+        }
+    result = AgentRuntimeExecutor().execute(assigned_order)
     with _immune_auto_state_lock:
         _immune_auto_state.update(
             {
@@ -423,7 +496,14 @@ async def dispatch_immune_work_order(
                 "last_result_status": result.get("status"),
             }
         )
-    return {"accepted": True, "background": False, "job_id": None, "proposal": proposal, "dispatch": result}
+    return {
+        "accepted": True,
+        "background": False,
+        "job_id": None,
+        "proposal": proposal,
+        "dispatch": result,
+        "runtime_assignment": runtime_assignment,
+    }
 
 
 @router.get("/immune/auto-state")

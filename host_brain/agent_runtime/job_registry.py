@@ -157,6 +157,13 @@ class AgentJobRegistry:
             report = self._reconciliation.get(job_id)
             return dict(report) if isinstance(report, dict) else None
 
+    def list_jobs(self) -> list[dict[str, Any]]:
+        with self._lock:
+            return [
+                dict(job)
+                for _, job in sorted(self._jobs.items(), key=lambda item: item[0])
+            ]
+
     def reset(self) -> None:
         with self._lock:
             self._jobs.clear()
