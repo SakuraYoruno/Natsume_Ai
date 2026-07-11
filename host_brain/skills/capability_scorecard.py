@@ -722,7 +722,7 @@ def scorecard_from_tool_meta(
         raise ValueError("ToolMeta adapter requires tool_id/id")
     version = _ref_part(_field(meta, "version", "current"))
     return build_capability_scorecard(
-        capability_id=f"{provider}::{tool_id}",
+        capability_id=f"mcp::{provider}::{tool_id}",
         source_kind=SOURCE_TOOL_META,
         source_ref=f"tool-registry://{_ref_part(provider)}/{_ref_part(tool_id)}/{version}",
         risk=canonical_risk_from_tool_meta(meta),

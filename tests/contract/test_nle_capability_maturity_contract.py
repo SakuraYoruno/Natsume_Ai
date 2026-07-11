@@ -8,7 +8,9 @@ from host_brain.governor.capability_policy import CapabilityGovernorPolicyAdapte
 from host_brain.governor.decision import IntentDecisionEngine
 from host_brain.governor.route_token import RouteToken
 from host_brain.governor.tier_policy import ApprovalTier, GovernorTierPolicy
+from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.mcp.tool_registry import ToolMeta
+from host_brain.mcp.tool_registry import MCPToolRegistry
 from host_brain.pentest.agent.tool_registry import ToolDescriptor
 from host_brain.app.agents.agent_contract import AgentRuntime
 from host_brain.skills.capability_scorecard import (
@@ -27,6 +29,7 @@ from host_brain.skills.capability_scorecard import (
     scorecard_from_tool_meta,
 )
 from host_brain.skills.registry import SkillMeta, SkillRegistry
+from host_brain.skills.capability_scorecard_provider import FederatedCapabilityScorecardProvider
 
 
 @dataclass
@@ -244,6 +247,155 @@ def test_t_nle_18_enabled_policy_missing_or_forged_scorecard_fails_closed() -> N
     forged = _scorecard(level=5).to_dict()
     forged["static_maturity_ceiling"] = 0
     assert adapter.evaluate(_Skill(risk_level=1), scorecard=forged).effective_risk == 5
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("maturity_level_value", 99),
+        ("maturity_level_value", -1),
+        ("maturity_level_value", True),
+        ("maturity_level_value", 3.5),
+        ("maturity_level_value", "3"),
+        ("maturity_level_value", []),
+        ("maturity_level_value", "L99"),
+        ("static_maturity_ceiling", 99),
+        ("static_maturity_ceiling", -1),
+        ("static_maturity_ceiling", False),
+        ("static_maturity_ceiling", 3.0),
+        ("static_maturity_ceiling", "5"),
+        ("static_maturity_ceiling", {}),
+        ("canonical_risk", True),
+        ("canonical_risk", 1.0),
+        ("canonical_risk", "1"),
+        ("schema_version", "Natsume.capability.scorecard.v999"),
+        ("policy_effect", "RELAX"),
+        ("read_only", "true"),
+    ],
+)
+def test_t_nle_18_corrupt_scorecard_fields_never_clamp_or_relax(field: str, value: object) -> None:
+    forged = _scorecard(level=3, risk=1).to_dict()
+    forged[field] = value
+    adapter = CapabilityGovernorPolicyAdapter(enabled=True)
+    decision = adapter.evaluate(_Skill(risk_level=1), scorecard=forged)
+    assert decision.effective_risk == 5
+    policy = GovernorTierPolicy(adapter)
+    assert policy.get_approval_tier(_Skill(risk_level=1), scorecard=forged) is ApprovalTier.AIRLOCK
+
+
+def test_t_nle_18_federated_provider_reads_all_real_sources_without_mutation() -> None:
+    skills = SkillRegistry()
+    skills.register(
+        SkillMeta(
+            skill_name="read_status",
+            clearance="LOW",
+            risk_level=1,
+            scope="host",
+            reversible=True,
+            handler=lambda args, ctx: {"status": "OK"},
+        )
+    )
+    mcp = MCPToolRegistry(":memory:")
+    mcp.register(
+        ToolMeta(
+            provider_id="provider",
+            tool_id="lookup",
+            name="Lookup",
+            description="read-only lookup",
+            access_level="PUBLIC",
+            risk_level="LOW",
+            reversible=True,
+        )
+    )
+    pentest = ToolDescriptor(
+        tool_id="pentest_probe",
+        label="Probe",
+        description="verification",
+        intent="verify",
+        risk_level=1,
+        impact_level="verification",
+    )
+    pentest_tools = {pentest.tool_id: pentest}
+    provider = FederatedCapabilityScorecardProvider(
+        skill_registry=skills,
+        mcp_registry=mcp,
+        pentest_get=pentest_tools.get,
+        pentest_all=lambda: tuple(pentest_tools.values()),
+        clock=lambda: 1000,
+    )
+    sync_count = len(mcp.sync_log())
+
+    skill_card = provider.get("read_status")
+    mcp_card = provider.get("mcp::provider::lookup")
+    pentest_card = provider.get("pentest_probe")
+    agent_card = provider.project_agent_runtime(
+        AgentRuntime(plan_id="plan", active_agent_id="research", risk_mode="guarded")
+    )
+
+    assert skill_card is not None and skill_card.source_kind == "SKILL_META"
+    assert skill_card.maturity_level == 3
+    assert mcp_card is not None and mcp_card.source_kind == "TOOL_META"
+    assert mcp_card.capability_id == "mcp::provider::lookup"
+    assert mcp_card.maturity_level == 2
+    assert pentest_card is not None and pentest_card.source_kind == "PENTEST_TOOL_DESCRIPTOR"
+    assert agent_card.source_kind == "AGENT_MODE"
+    assert agent_card.maturity_level == 2
+    assert all(card.evidence for card in provider.list_all())
+    assert skills.list_skill_names() == ["read_status"]
+    assert len(mcp.sync_log()) == sync_count
+    mcp.close()
+
+
+def test_t_nle_18_production_composition_injects_live_scorecard_provider(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from host_brain.app import dependencies
+
+    registry = SkillRegistry()
+    registry.register(
+        SkillMeta(
+            skill_name="production_reader",
+            clearance="LOW",
+            risk_level=1,
+            scope="host",
+            reversible=True,
+            handler=lambda args, ctx: {"status": "OK"},
+        )
+    )
+    monkeypatch.setenv("HOST_CAPABILITY_MATURITY_POLICY_ENABLED", "true")
+    monkeypatch.setattr(dependencies, "_skill_registry", registry)
+    monkeypatch.setattr(dependencies, "_mcp_tool_registry", None)
+    monkeypatch.setattr(dependencies, "_capability_scorecard_provider", None)
+    monkeypatch.setattr(dependencies, "_intent_engine", None)
+    monkeypatch.setattr(dependencies, "_ledger", SQLiteLedger(":memory:"))
+    monkeypatch.setattr(dependencies, "_token_service", None)
+    monkeypatch.setattr(dependencies, "_policy_cache", None)
+    monkeypatch.setattr(dependencies, "_sync_mcp_skills_into_registry", lambda _: None)
+
+    engine = dependencies.get_intent_engine()
+    provider = engine._tier_policy._capability_policy.scorecard_provider
+    assert isinstance(provider, FederatedCapabilityScorecardProvider)
+    assert provider("production_reader") is not None
+
+    now = 10_000
+    result = engine.evaluate_intent(
+        {
+            "schema_version": "Natsume.intent.v1",
+            "id": "intent::production-reader::1",
+            "ts_ms": now - 1,
+            "session_id": "session::production-reader",
+            "seq": 1,
+            "type": "skill_call",
+            "action": "production_reader",
+            "target": "host",
+            "args": {},
+            "nonce": "nonce::production-reader::1",
+        },
+        current_ms=now,
+        governance_snapshot={"trust_level": 80, "energy_level": 80},
+    )
+    assert result["decision"] == "APPROVE"
+    assert result["committed_route_token"]["token"] != RouteToken.GOV_AIRLOCK_REVIEW.value
 
 
 def test_t_nle_18_intent_engine_consumes_scorecard_only_when_enabled(monkeypatch: pytest.MonkeyPatch) -> None:

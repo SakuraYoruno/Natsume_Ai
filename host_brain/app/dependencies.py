@@ -60,6 +60,7 @@ from host_brain.skills.builtin_registry import build_builtin_skill_registry
 from host_brain.skills.mcp_skill_bridge import register_mcp_tools_into_skill_registry
 from host_brain.skills.provider_catalog import register_configured_skill_providers
 from host_brain.skills.registry import SkillRegistry
+from host_brain.skills.capability_scorecard_provider import FederatedCapabilityScorecardProvider
 from host_brain.tools.broker import ToolBroker
 from host_brain.tools.catalog import ToolCatalog
 
@@ -97,6 +98,7 @@ _token_service: Optional[TokenService] = None
 _intent_engine: Optional[IntentDecisionEngine] = None
 _skill_registry: Optional[SkillRegistry] = None
 _policy_cache: Optional[GovernorPolicyCache] = None
+_capability_scorecard_provider: Optional[FederatedCapabilityScorecardProvider] = None
 _mcp_tool_registry: Optional[MCPToolRegistry] = None
 _mcp_tool_broker: Optional[MCPToolBroker] = None
 _tool_catalog: Optional[ToolCatalog] = None
@@ -712,9 +714,10 @@ def get_skill_registry() -> SkillRegistry:
 
 def refresh_skill_registry() -> SkillRegistry:
     """Clear cached registry-dependent singletons and rebuild skills."""
-    global _skill_registry, _intent_engine
+    global _skill_registry, _intent_engine, _capability_scorecard_provider
     _skill_registry = None
     _intent_engine = None
+    _capability_scorecard_provider = None
     return get_skill_registry()
 
 
@@ -725,14 +728,53 @@ def get_policy_cache() -> GovernorPolicyCache:
     return _policy_cache
 
 
+def get_capability_scorecard_provider(
+    *,
+    skill_registry: SkillRegistry | None = None,
+) -> FederatedCapabilityScorecardProvider:
+    """Return the read-only federated projection used by Governor policy."""
+
+    global _capability_scorecard_provider
+    registry = skill_registry if skill_registry is not None else get_skill_registry()
+    mcp_registry = _mcp_tool_registry
+    current_skill_registry = getattr(_capability_scorecard_provider, "_skill_registry", None)
+    current_mcp_registry = getattr(_capability_scorecard_provider, "_mcp_registry", None)
+    if (
+        _capability_scorecard_provider is None
+        or current_skill_registry is not registry
+        or current_mcp_registry is not mcp_registry
+    ):
+        def _get_pentest_tool(tool_id: str):
+            from host_brain.pentest.agent.tool_registry import get  # noqa: PLC0415
+
+            return get(tool_id)
+
+        def _all_pentest_tools():
+            from host_brain.pentest.agent.tool_registry import all_descriptors  # noqa: PLC0415
+
+            return all_descriptors()
+
+        _capability_scorecard_provider = FederatedCapabilityScorecardProvider(
+            skill_registry=registry,
+            mcp_registry=mcp_registry,
+            pentest_get=_get_pentest_tool,
+            pentest_all=_all_pentest_tools,
+        )
+    return _capability_scorecard_provider
+
+
 def get_intent_engine() -> IntentDecisionEngine:
     global _intent_engine
     if _intent_engine is None:
+        skill_registry = get_skill_registry()
         _intent_engine = IntentDecisionEngine(
             ledger=get_ledger(),
             token_service=get_token_service(),
-            registry=get_skill_registry(),
+            registry=skill_registry,
             policy_cache=get_policy_cache(),
+            capability_scorecard_provider=get_capability_scorecard_provider(
+                skill_registry=skill_registry,
+            ),
         )
     return _intent_engine
 

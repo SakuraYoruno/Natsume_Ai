@@ -10,6 +10,7 @@ from typing import Any
 
 CAPABILITY_POLICY_DECISION_SCHEMA_VERSION = "Natsume.capability.policy_decision.v1"
 CAPABILITY_MATURITY_POLICY_ENV = "HOST_CAPABILITY_MATURITY_POLICY_ENABLED"
+_MISSING = object()
 
 
 def _env_bool(name: str, *, default: bool) -> bool:
@@ -26,21 +27,24 @@ def _value(source: Any, name: str, default: Any = None) -> Any:
 
 
 def _risk(value: Any) -> int:
-    try:
-        resolved = int(value)
-    except (TypeError, ValueError):
+    if isinstance(value, bool) or not isinstance(value, int):
         return 5
-    return resolved if 1 <= resolved <= 5 else 5
+    return value if 1 <= value <= 5 else 5
 
 
-def _maturity(value: Any) -> int:
-    if isinstance(value, str) and value.strip().upper().startswith("L"):
-        value = value.strip()[1:]
-    try:
-        return max(0, min(5, int(value)))
-    except (TypeError, ValueError):
-        # Unknown/malformed maturity fails closed when the policy is enabled.
-        return 0
+def _maturity(value: Any, *, allow_label: bool = False) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        resolved = value
+    elif allow_label and isinstance(value, str):
+        normalized = value.strip().upper()
+        if len(normalized) != 2 or normalized[0] != "L" or normalized[1] not in "012345":
+            return None
+        resolved = int(normalized[1])
+    else:
+        return None
+    return resolved if 0 <= resolved <= 5 else None
 
 
 @dataclass(frozen=True, slots=True)
@@ -129,7 +133,7 @@ class CapabilityGovernorPolicyAdapter:
         scorecard_capability = str(_value(resolved, "capability_id", "") or "").strip()
         schema_version = str(_value(resolved, "schema_version", "") or "").strip()
         policy_effect = str(_value(resolved, "policy_effect", "") or "").strip().upper()
-        read_only = bool(_value(resolved, "read_only", False))
+        read_only = _value(resolved, "read_only", False) is True
         if (
             not capability_id
             or scorecard_capability != capability_id
@@ -150,15 +154,23 @@ class CapabilityGovernorPolicyAdapter:
                 reasons=("SCORECARD_BINDING_INVALID_FAIL_CLOSED",),
             )
 
-        maturity = _maturity(
-            _value(resolved, "maturity_level_value", _value(resolved, "maturity_level", 0))
+        raw_maturity_value = _value(resolved, "maturity_level_value", _MISSING)
+        maturity = (
+            _maturity(_value(resolved, "maturity_level", _MISSING), allow_label=True)
+            if raw_maturity_value is _MISSING
+            else _maturity(raw_maturity_value)
         )
         scorecard_static_risk = _risk(
             _value(resolved, "canonical_risk", _value(resolved, "static_risk_floor", static_risk))
         )
-        declared_ceiling = _maturity(_value(resolved, "static_maturity_ceiling", 0))
+        declared_ceiling = _maturity(_value(resolved, "static_maturity_ceiling", _MISSING))
         expected_ceiling = {1: 5, 2: 5, 3: 4, 4: 2, 5: 1}[scorecard_static_risk]
-        if declared_ceiling > expected_ceiling or maturity > declared_ceiling:
+        if (
+            maturity is None
+            or declared_ceiling is None
+            or declared_ceiling > expected_ceiling
+            or maturity > declared_ceiling
+        ):
             return CapabilityPolicyDecision(
                 capability_id=capability_id,
                 enabled=True,
