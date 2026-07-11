@@ -1377,7 +1377,7 @@
 - DevSpec 落点：DevSpec §16.14；完整架构重构正式执行程序 §M48-B。
 - DevTasks（TASK）：TASK-0487～TASK-0496。
 - 验收测试（T-xx）：T-ARCH-01～03。
-- 当前进展（2026-07-11）：M48-B Entry Gate 五项条款均 PASS。TASK-0487 已完成并 default-off；125 定向 unit/contract、31 既有 migration regression 和 1 次 TASK-0487 integration wave 通过。TASK-0488 正在实现 Gateway raw-body/header 平台验签与 durable inbox/outbox/ack/DLQ/replay；实际 Obs/Bridge cutover 仍由 TASK-0489/0494 承接。
+- 当前进展（2026-07-11）：M48-B Entry Gate 五项条款均 PASS。TASK-0487 已完成并 default-off；TASK-0488 已完成 raw-body 平台验签、0059 durable inbox/outbox/ack/DLQ/fencing/reconciliation、Host receipt、非 HTTP producer 与 fail-closed lifecycle，定向 unit/contract 及唯一一次 `2 passed` integration wave 通过。TASK-0489 正在迁移 Obs mutation 并建立 Query-only 边界；Bridge cutover 仍由 TASK-0494 承接。
 - 覆盖状态：IN_PROGRESS
 
 ## R-184（M49 Contracts、Kernel、Composition 与依赖治理）
