@@ -85,7 +85,7 @@ export default function TaskRuntime() {
     locatorModel?.taskGraphId
       ? selectLatestExecutionForGraph(indexModel.executions, locatorModel.taskGraphId)
       : null
-  ), [indexModel.executions, locatorModel?.taskGraphId])
+  ), [indexModel.executions, locatorModel])
 
   const defaultSelectedKey = indexModel.executions.length
     ? `${indexModel.executions[0].graph_id}@${indexModel.executions[0].revision}`

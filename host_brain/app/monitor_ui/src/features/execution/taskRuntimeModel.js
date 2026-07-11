@@ -6,7 +6,15 @@ export const REVIEW_LOCATOR_SCHEMA_VERSION = 'Natsume.operator.review_locator.v1
 
 const TERMINAL_GRAPH_STATUSES = new Set(['COMPLETED', 'FAILED', 'CANCELLED'])
 const REVIEW_ID_MAX_LENGTH = 512
-const CONTROL_CHARACTER_PATTERN = /[\u0000-\u001f\u007f]/
+
+/** @param {string} value */
+function hasControlCharacter(value) {
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index)
+    if (code <= 31 || code === 127) return true
+  }
+  return false
+}
 
 /** @param {unknown} value */
 function asObject(value) {
@@ -34,9 +42,12 @@ function strictText(value) {
   return typeof value === 'string' ? value.trim() : ''
 }
 
-/** @param {unknown} value */
+/**
+ * @param {unknown} value
+ * @returns {number | null}
+ */
 function strictInteger(value) {
-  return Number.isSafeInteger(value) ? value : null
+  return typeof value === 'number' && Number.isSafeInteger(value) ? value : null
 }
 
 /** @param {unknown} value */
@@ -52,7 +63,7 @@ function validReviewId(value) {
   const reviewId = strictText(value)
   return reviewId
     && reviewId.length <= REVIEW_ID_MAX_LENGTH
-    && !CONTROL_CHARACTER_PATTERN.test(reviewId)
+    && !hasControlCharacter(reviewId)
     ? reviewId
     : ''
 }
