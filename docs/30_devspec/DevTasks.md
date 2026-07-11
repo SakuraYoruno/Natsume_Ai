@@ -14,13 +14,13 @@
 - 完整目标蓝图：`docs/50_project/arch/NATSUME_AI_V1_FULL_ARCHITECTURE_TARGET_20260710.md`
 - 程序任务编号：`TASK-0461`～`TASK-0622`，共 162 项，编号不得复用或跳号。
 - 当前可执行批次：M48-A，`TASK-0461`～`TASK-0486`，详细任务卡见 `NATSUME_AI_V1_LONG_TERM_EVOLUTION_EXECUTION_20260710.md`。
-- 平台安全批次：M48-B，`TASK-0487`～`TASK-0496`；Entry Gate 已于 2026-07-11 在仅限本地 default-off 实施范围内批准，`TASK-0487` 已 `DONE`，`TASK-0488` 为 `PLANNED`。
+- 平台安全批次：M48-B，`TASK-0487`～`TASK-0496`；Entry Gate 已于 2026-07-11 在仅限本地 default-off 实施范围内批准，`TASK-0487` 已 `DONE`，`TASK-0488` 为 `IN_PROGRESS`。
 - 后续批次：M49～M57，`TASK-0497`～`TASK-0622`，状态为 `PROGRAMMED`；只能按依赖 Gate 解锁，不能因任务已编号而越级实施。
 - 关联需求：`FR-NLE-001`～`FR-NLE-005`、`FR-ARCH-001`～`FR-ARCH-010`。
 - 关联测试：`T-NLE-01`～`T-NLE-24`、`T-ARCH-01`～`T-ARCH-30`。
 - 唯一首个执行入口：`TASK-0461 / LTE-WP-00`。M48-A 内部依赖以 M48-A 详细执行文档为准；跨里程碑依赖、切流、停止、回滚和最终退役以 Master 执行文档为准。
 - 最近完成任务：`TASK-0461～TASK-0485` 已完成；Capability Maturity、durable DegradationState、Release Identity Snapshot、Execution/Review UI、Life evolution UI 与 Capability/Health/Identity governance UI 已按 T-NLE-01～23 落地，新增 read route/UI 默认关闭且不扩大写权限。
-- 当前任务：M48-A 的 `TASK-0486 / LTE-WP-80` 继续 `BLOCKED` 于真实 identity/live/prod/MASTER Seal；独立的 M48-B Entry Gate 已 OPEN。`TASK-0487` 已完成 identity contract、Secure Ingress fail-closed 决策链、0058 durable security state 与四 surface adapter contract；运行 mode 默认 OFF，无 production/live/物理切流。`TASK-0488` 为 `PLANNED`，TASK-0489～0622 仍为 `PROGRAMMED`。
+- 当前任务：M48-A 的 `TASK-0486 / LTE-WP-80` 继续 `BLOCKED` 于真实 identity/live/prod/MASTER Seal；独立的 M48-B Entry Gate 已 OPEN。`TASK-0487` 已完成且 default-off。`TASK-0488` 正在实施 Gateway raw-body/header 平台验签、durable inbox/outbox/ack/DLQ/replay 与 Host delivery；TASK-0489～0622 仍为 `PROGRAMMED`。
 
 本文件后续的 `TASK-0000`～`TASK-0460` 保留为历史任务记录；与完整架构程序冲突时，不得用历史任务覆盖当前代码基线、Master 程序或对应阶段的正式任务卡。
 

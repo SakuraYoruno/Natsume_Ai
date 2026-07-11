@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock
 from fastapi.testclient import TestClient
 
 from host_brain.app.asgi import app as host_app
+from host_brain.app.input_service_gateway import HostGatewayIngressOutcome
 
 
 def _allow_input_immune_gate(**_kwargs) -> dict[str, object]:  # noqa: ANN003
@@ -20,6 +21,23 @@ def _build_client(monkeypatch) -> TestClient:  # noqa: ANN001
     monkeypatch.setattr(
         "host_brain.app.input_routes._evaluate_immune_gate_for_input",
         _allow_input_immune_gate,
+    )
+    monkeypatch.setattr(
+        "host_brain.app.input_routes._evaluate_host_gateway_ingress",
+        lambda **_kwargs: HostGatewayIngressOutcome(
+            allowed=True,
+            duplicate=False,
+            reason_code="SECURE_INGRESS_ALLOWED",
+            claim_ref="secure-ingress-claim://host-input-test",
+            audit_ref="secure-ingress-audit://host-input-test",
+            principal_id="service.edge.gateway.test",
+            idempotency_key="host-input-test",
+            body_sha256="0" * 64,
+        ),
+    )
+    monkeypatch.setattr(
+        "host_brain.app.input_routes._complete_host_gateway_ingress",
+        lambda **_kwargs: True,
     )
     return TestClient(host_app, raise_server_exceptions=False)
 
@@ -155,12 +173,11 @@ def test_v1_host_input_asr_http_accepts_final_segment(monkeypatch) -> None:
 def test_v1_host_input_http_rejects_when_immune_gate_blocks(monkeypatch) -> None:
     dispatch_mock = AsyncMock(return_value=None)
     monkeypatch.setattr("host_brain.app.input_routes._dispatch_to_graph", dispatch_mock)
+    client = _build_client(monkeypatch)
     monkeypatch.setattr(
         "host_brain.app.input_routes._evaluate_immune_gate_for_input",
         lambda **_kwargs: {"decision": "BLOCK", "reason_codes": ["PROMPT_INJECTION_DETECTED"]},
     )
-
-    client = TestClient(host_app, raise_server_exceptions=False)
     try:
         response = client.post(
             "/v1/host/input",

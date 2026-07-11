@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json
+import logging
+import re
 from pathlib import Path
 
 from edge_client.gateway.adapters.wechat_adapter import WeChatAdapter
@@ -141,6 +144,133 @@ def test_wechat_adapter_parse_wxautox4_hook_payload_prefers_roomid_for_group() -
     assert message.from_id == "wxid_member_01"
     assert message.is_group is True
     assert message.raw_extra["roomid"] == "12345@chatroom"
+
+
+def test_wechat_adapter_missing_platform_identity_is_deterministic_across_key_order() -> None:
+    adapter = WeChatAdapter(None, self_wxid=None)
+    first_payload = {
+        "sender": "wxid_alice",
+        "receiver": "local_wechat",
+        "content": "same authenticated message",
+        "msg_type": "1",
+    }
+    reordered_payload = {
+        "msg_type": "1",
+        "content": "same authenticated message",
+        "receiver": "local_wechat",
+        "sender": "wxid_alice",
+    }
+
+    first = adapter.parse_inbound(first_payload)
+    retried = adapter.parse_inbound(reordered_payload)
+
+    assert first is not None
+    assert retried is not None
+    assert first.msg_id == retried.msg_id
+    assert re.fullmatch(r"wechat-sha256-[0-9a-f]{64}", first.msg_id)
+    assert first.ts_ms == retried.ts_ms == 0
+    assert first.as_report_payload() == retried.as_report_payload()
+
+
+def test_wechat_adapter_digest_identity_binds_semantic_message_content() -> None:
+    adapter = WeChatAdapter(None, self_wxid=None)
+    base = {
+        "sender": "wxid_alice",
+        "receiver": "local_wechat",
+        "msg_type": "1",
+    }
+
+    first = adapter.parse_inbound({**base, "content": "message one"})
+    different = adapter.parse_inbound({**base, "content": "message two"})
+
+    assert first is not None
+    assert different is not None
+    assert first.msg_id != different.msg_id
+    assert first.ts_ms == different.ts_ms == 0
+
+
+def test_wechat_adapter_prefers_platform_id_and_platform_time_aliases() -> None:
+    adapter = WeChatAdapter(None, self_wxid=None)
+
+    message = adapter.parse_inbound(
+        {
+            "MsgId": 987654321,
+            "CreateTime": "1774453000",
+            "sender": "wxid_alice",
+            "receiver": "local_wechat",
+            "content": "platform identity",
+            "msg_type": "1",
+        }
+    )
+
+    assert message is not None
+    assert message.msg_id == "987654321"
+    assert message.ts_ms == 1774453000000
+
+
+def test_wechat_adapter_excludes_auth_tokens_and_raw_bodies_from_identity_and_result() -> None:
+    adapter = WeChatAdapter(None, self_wxid=None)
+    semantic_payload = {
+        "sender": "wxid_alice",
+        "receiver": "local_wechat",
+        "content": "redacted transport fields",
+        "msg_type": "1",
+    }
+    first = adapter.parse_inbound(
+        {
+            **semantic_payload,
+            "token": "token-secret-one",
+            "raw_body": b"raw-body-one",
+            "metadata": {
+                "access_token": "nested-token-one",
+                "custom_auth_token": "nested-custom-token-one",
+                "request_body": "nested-raw-body-one",
+                "keep": "safe-metadata",
+            },
+        }
+    )
+    retried = adapter.parse_inbound(
+        {
+            "metadata": {
+                "keep": "safe-metadata",
+                "request_body": "nested-raw-body-two",
+                "access_token": "nested-token-two",
+                "custom_auth_token": "nested-custom-token-two",
+            },
+            **semantic_payload,
+            "raw_body": b"raw-body-two",
+            "token": "token-secret-two",
+        }
+    )
+
+    assert first is not None
+    assert retried is not None
+    assert first.msg_id == retried.msg_id
+    assert first.raw_extra["metadata"] == {"keep": "safe-metadata"}
+    encoded_result = json.dumps(first.as_report_payload(), ensure_ascii=False)
+    for forbidden in (
+        "token-secret-one",
+        "nested-token-one",
+        "nested-custom-token-one",
+        "raw-body-one",
+        "nested-raw-body-one",
+    ):
+        assert forbidden not in encoded_result
+
+
+def test_wechat_adapter_parse_failure_log_never_echoes_payload_value(monkeypatch, caplog) -> None:
+    adapter = WeChatAdapter(None, self_wxid=None)
+    secret = "token-and-raw-body-must-not-be-logged"
+
+    def _raise_with_payload_value(_payload):
+        raise ValueError(secret)
+
+    monkeypatch.setattr(adapter, "_resolve_inbound_conversation_id", _raise_with_payload_value)
+    caplog.set_level(logging.WARNING)
+
+    assert adapter.parse_inbound({"token": secret, "raw_body": secret}) is None
+    assert "error_type=ValueError" in caplog.text
+    assert secret not in caplog.text
 
 
 def test_wechat_adapter_health_reports_webhook_only_when_bridge_keeps_db_service(monkeypatch) -> None:

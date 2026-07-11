@@ -10,9 +10,9 @@ class _StubReporter:
         self.last_payload: dict | None = None
         self.last_source: InputSourceType | None = None
 
-    def _send(self, payload, source):  # noqa: ANN001
+    def report_gateway_payload(self, payload):  # noqa: ANN001
         self.last_payload = dict(payload)
-        self.last_source = source
+        self.last_source = InputSourceType.GATEWAY
         return InputReportResult(
             success=True,
             source=InputSourceType.GATEWAY,

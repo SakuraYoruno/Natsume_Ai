@@ -3,11 +3,16 @@
 from __future__ import annotations
 
 from dataclasses import replace
+import hashlib
 import logging
 import time
 from typing import Any
 
-from edge_client.channels.input_reporter import EdgeInputReporter, InputReportResult
+from edge_client.channels.input_reporter import (
+    EdgeInputReporter,
+    InputReportResult,
+    InputSourceType,
+)
 from edge_client.gateway.models import MsgType, UnifiedMessage
 from edge_client.tribe.channel_agent import ChannelAgent
 from edge_client.tribe.peripheral_agent import PeripheralAgent
@@ -45,9 +50,17 @@ class GatewayRouter:
         routed_msg = self._maybe_apply_voice_asr(msg)
         payload = routed_msg.as_report_payload()
 
-        from edge_client.channels.input_reporter import InputSourceType
-
-        result = self._reporter._send(payload, InputSourceType.GATEWAY)
+        report_payload = getattr(self._reporter, "report_gateway_payload", None)
+        if callable(report_payload):
+            result = report_payload(payload)
+        else:
+            result = InputReportResult(
+                success=False,
+                source=InputSourceType.GATEWAY,
+                reason_code="REPORTER_CONTRACT_UNAVAILABLE",
+                detail="report_gateway_payload is not available",
+                cached=False,
+            )
         if result.success:
             self._stats["routed"] += 1
         elif result.cached:
@@ -60,7 +73,9 @@ class GatewayRouter:
             "msg_id": routed_msg.msg_id,
             "msg_type": routed_msg.msg_type.value,
             "content_len": len(str(routed_msg.content or "")),
-            "content_preview": str(routed_msg.content or "")[:80],
+            "content_sha256": hashlib.sha256(
+                str(routed_msg.content or "").encode("utf-8")
+            ).hexdigest(),
             "success": bool(result.success),
             "cached": bool(result.cached),
             "reason_code": result.reason_code,

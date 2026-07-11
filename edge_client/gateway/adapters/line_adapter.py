@@ -21,8 +21,6 @@ import hashlib
 import hmac
 import json
 import logging
-import time
-import uuid
 from typing import Any
 
 import httpx
@@ -115,9 +113,9 @@ class LineAdapter(AbstractPlatformAdapter):
             ]
           }
 
-        注意：LINE 一次 webhook 可以推送多个 events，但本接口设计上
-        Gateway server 层在路由 webhook 请求时会拆分为单个 event 调用。
-        若收到完整的 events 数组，只处理第一个 message 事件。
+        Gateway server 层对已验签的 events[] 进行拆分，并对每个
+        event 独立调用本方法。保留完整 envelope 兼容分支仅供旧的
+        离线调用者；HTTP 入口不会通过该分支丢弃后续事件。
         """
         # 处理单个 event（由 server 层拆分后传入）
         event = raw_payload
@@ -142,10 +140,28 @@ class LineAdapter(AbstractPlatformAdapter):
         message = event.get("message") or {}
         source = event.get("source") or {}
 
-        message_id = str(message.get("id") or str(uuid.uuid4()))
+        message_id = str(message.get("id") or "").strip()
+        if not message_id:
+            webhook_event_id = str(event.get("webhookEventId") or "").strip()
+            if webhook_event_id:
+                message_id = f"line-event:{webhook_event_id}"
+            else:
+                # Missing platform IDs must not introduce random UUIDs: a LINE
+                # retry must normalize to the same durable idempotency payload.
+                canonical_event = json.dumps(
+                    event,
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                    default=str,
+                ).encode("utf-8")
+                message_id = f"line-event-sha256:{hashlib.sha256(canonical_event).hexdigest()}"
         message_type = str(message.get("type") or "text")
         timestamp_ms = event.get("timestamp")
-        ts_ms = int(timestamp_ms) if timestamp_ms else int(time.time() * 1000)
+        try:
+            ts_ms = int(timestamp_ms) if timestamp_ms is not None else 0
+        except (TypeError, ValueError):
+            ts_ms = 0
 
         # 发送者 ID
         source_type = str(source.get("type") or "user")

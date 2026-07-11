@@ -193,26 +193,65 @@ Surface 禁令：
 
 6 平台适配器：wechat、qq、feishu、wecom、telegram、line。
 
-全链路：
+TASK-0488 后的 HTTP Webhook 主链：
 ```
-平台 Webhook
+平台原始 HTTP Webhook
   → gateway/server.py
+  → webhook_security.py（保留 exact body/header/query，先验签/认证解密）
   → adapter.parse_inbound()
   → MessageNormalizer.normalize()
-  → GatewayRouter.route()
-  → EdgeInputReporter._send()
+  → GatewayDeliveryRuntime.accept_inbound()
+  → 0059 gateway_transport_inbox（commit 后才返回 accepted）
+  → fenced worker / dispatch_started
+  → EdgeInputReporter.deliver_gateway_payload()
   → POST /v1/host/input
+  → TASK-0487 Host Secure Ingress + durable claim
   → input_routes 后续主链
   → edge_rpc_client.post_gateway_reply()
-  → POST /v1/gateway/reply
-  → OutboundDispatcher.dispatch()
+  → signed POST /v1/gateway/reply
+  → 0059 gateway_transport_outbox
+  → OutboundDispatcher.prepare_payload()（零副作用冻结/选 adapter）
+  → fenced worker / dispatch_started
+  → OutboundDispatcher.dispatch_prepared()（至多调用一次）
   → platform adapter.send_reply()
+  → adapter-confirmation ACK；不确定副作用入 DLQ 且禁止自动重发
 ```
+
+`EDGE_GATEWAY_TRANSPORT_MODE` 默认 `LEGACY_DRAIN`：拒绝新 HTTP intake，
+只排空旧兼容重试队列；`SHADOW` 只执行 raw-body 认证验证，不持久化、
+不返回 durable ACK，也不启动副作用 worker；只有 `DURABLE` 执行持久化和
+Host/平台投递。非法 mode 回退 `LEGACY_DRAIN`。
+`EDGE_GATEWAY_ACCEPT_NEW_INTAKE=false` 可同时停止 HTTP、DB watcher 与 Telegram
+新输入，DURABLE worker 继续排空；仅在 `pending=0`、无 claimed 且
+`reconciliation_required=false` 后切换 `LEGACY_DRAIN`。凭据、verifier 与 0059
+schema 在任何 producer/worker 前完成 preflight；HTTP bind/readiness 或 Telegram
+连接失败会逆序停止 server、producer、平台连接与 worker，禁止 orphan runtime。
+Inbox/outbox 以业务幂等键、tenant/principal、payload digest、ordering key、
+lease/fencing 和 attempt ledger 约束重复、乱序与重启恢复；DLQ replay 必须携带
+operator ref，原记录原位恢复，不能创建第二身份。
+
+平台原始 body 仅在请求内存中用于认证；0059 只保存 SHA-256 与字节数，不保存
+明文原始 body。LINE 使用 exact raw-body HMAC；飞书和企微在运行装配中默认完成认证解密；
+QQ、WeChat HTTP bridge、Telegram 以及 Host reply 使用 Natsume internal raw-body
+HMAC。Host reply 使用独立密钥，禁止回退通用 Edge RPC key。DURABLE 下 DB watcher /
+MTProto 等非 HTTP 入口与 HTTP 共用 0059 inbox，不再写 legacy reporter cache；
+`LEGACY_DRAIN` 仅排空已存在的兼容队列。共享 channel SDK 与 composition port
+由 `TASK-0592` 收口；Edge 对 Host Store/签名实现的临时导入由 `TASK-0493`、
+`TASK-0584` 移除，禁止复制 Store 形成第二真相源。
+
+当前 adapter 的布尔成功只能证明本地 `ADAPTER_CONFIRMED`，不能冒充远端平台
+message ID/receipt；provider receipt 对账由 `TASK-0592` 移除。Gateway proof 的
+独立 durable replay/rate claim 同样由 `TASK-0592` 补齐；Host response receipt 的独立
+签名与 `/v1/host/input` raw middleware 前置审计分别由 `TASK-0592`、`TASK-0512`
+收口，以上限制不得在 TASK-0488 证据中写成已完成能力。
 
 关键文件：
 - `edge_client/gateway/server.py` — Gateway 服务入口。
-- `edge_client/gateway/adapter/` — 各平台适配器。
-- `edge_client/gateway/router.py` — 消息路由。
+- `edge_client/gateway/webhook_security.py` — 平台 raw-body 验签与认证解密。
+- `edge_client/gateway/delivery_runtime.py` — durable worker 和切流 mode。
+- `host_brain/eventing/gateway_transport.py` — 0059 inbox/outbox/attempt 唯一 Store。
+- `edge_client/gateway/adapters/` — 各平台适配器。
+- `edge_client/gateway/router.py` — 非 HTTP 兼容消息路由。
 - `host_brain/channels/edge_rpc_client.py` — Host → Edge/Gateway 推送。
 
 ---

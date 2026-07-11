@@ -32,8 +32,8 @@ def test_central_catalog_guard_accepts_only_frozen_duplicate_and_gap() -> None:
 
     assert report.status == STATUS_READY, report.as_dict()
     assert report.reason_code is None
-    assert report.asset_count == 43
-    assert report.latest_version == 58
+    assert report.asset_count == 44
+    assert report.latest_version == 59
     assert report.duplicate_versions == []
     assert report.missing_versions == []
 
@@ -51,17 +51,17 @@ def test_empty_database_replays_all_physical_assets_and_second_run_skips(
     assert first.success, first.as_dict()
     assert first.summary == {
         "scope": "sqlite",
-        "current_version": 58,
-        "latest_version": 58,
-        "applied_count": 43,
+        "current_version": 59,
+        "latest_version": 59,
+        "applied_count": 44,
         "skipped_count": 0,
         "failed_count": 0,
     }
 
     conn = sqlite3.connect(str(db_path))
     try:
-        assert conn.execute("SELECT COUNT(*) FROM schema_migrations").fetchone() == (42,)
-        assert conn.execute("SELECT COUNT(*) FROM schema_migration_assets").fetchone() == (43,)
+        assert conn.execute("SELECT COUNT(*) FROM schema_migrations").fetchone() == (43,)
+        assert conn.execute("SELECT COUNT(*) FROM schema_migration_assets").fetchone() == (44,)
         assert conn.execute(
             "SELECT name FROM schema_migrations WHERE migration_id = 9"
         ).fetchone() == ("agent_loop_log",)
@@ -99,11 +99,46 @@ def test_empty_database_replays_all_physical_assets_and_second_run_skips(
 
     second = runner.apply_migrations(request_id="task0487-empty-2", ts_ms=11)
     assert second.success, second.as_dict()
-    assert second.summary["current_version"] == 58
-    assert second.summary["latest_version"] == 58
+    assert second.summary["current_version"] == 59
+    assert second.summary["latest_version"] == 59
     assert second.summary["applied_count"] == 0
-    assert second.summary["skipped_count"] == 43
+    assert second.summary["skipped_count"] == 44
     assert second.summary["failed_count"] == 0
+
+
+def test_existing_0058_database_upgrades_in_place_to_0059(tmp_path: Path) -> None:
+    pre_0059_catalog = _copy_catalog(tmp_path)
+    (pre_0059_catalog / "0059_gateway_transport.sql").unlink()
+    db_path = tmp_path / "upgrade-from-0058.sqlite3"
+
+    before = SQLiteMigrationRunner(
+        db_path=db_path,
+        migrations_dir=pre_0059_catalog,
+    ).apply_migrations(request_id="task0488-upgrade-before", ts_ms=50)
+    assert before.success, before.as_dict()
+    assert before.summary["current_version"] == 58
+
+    upgraded = SQLiteMigrationRunner(
+        db_path=db_path,
+        migrations_dir=CENTRAL_CATALOG,
+    ).apply_migrations(request_id="task0488-upgrade-0059", ts_ms=51)
+    assert upgraded.success, upgraded.as_dict()
+    assert upgraded.summary["current_version"] == 59
+    assert upgraded.summary["applied_count"] == 1
+    with sqlite3.connect(str(db_path)) as conn:
+        assert conn.execute(
+            """
+            SELECT checksum, disposition
+            FROM schema_migration_assets
+            WHERE asset_key = '0059#gateway_transport'
+            """
+        ).fetchone() == (
+            "bad91de55866c6e9ffffed8a8d249abf077b146bce6b3705a5f95d11b91a8944",
+            "APPLIED",
+        )
+        assert conn.execute(
+            "SELECT COUNT(*) FROM gateway_transport_inbox"
+        ).fetchone() == (0,)
 
 
 def test_failed_explicit_transaction_does_not_commit_partial_business_ddl(

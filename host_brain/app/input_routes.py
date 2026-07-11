@@ -13,6 +13,8 @@ from __future__ import annotations
 import asyncio
 from concurrent.futures import Future, ThreadPoolExecutor
 import hashlib
+import inspect
+import json
 import logging
 import os
 import re
@@ -20,7 +22,7 @@ import threading
 import time
 from typing import Any
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from host_brain.core.ids import new_request_id
@@ -44,6 +46,9 @@ from host_brain.app.input_service_log import (
     get_request_skill_exec_rows as _get_request_skill_exec_rows,
 )
 from host_brain.app.input_service_gateway import (
+    HostGatewayIngressOutcome as _HostGatewayIngressOutcome,
+    complete_host_gateway_ingress as _complete_host_gateway_ingress,
+    evaluate_host_gateway_ingress as _evaluate_host_gateway_ingress,
     looks_like_progress_query as _looks_like_progress_query_for_ack_skip,
     looks_like_execution_intent as _looks_like_execution_intent_for_ack,
     normalize_route_confidence as _normalize_route_confidence,
@@ -151,6 +156,9 @@ class InputResponse(BaseModel):
     status: str
     detail: str
     ts_ms: int
+    receipt_ref: str | None = None
+    body_sha256: str | None = None
+    idempotency_sha256: str | None = None
 
 
 # ── 本文件保留的 ASR 相关工具函数（未迁移，仅在本文件使用）──────────────────
@@ -1208,13 +1216,82 @@ def _resolve_gateway_voice_emotion_tag(emotion_tag: str | None) -> str | None:
     return configured or None
 
 
+def _gateway_ingress_rejection_http_status(reason_code: str) -> int:
+    reason = str(reason_code or "").strip().upper()
+    if any(marker in reason for marker in ("UNAVAILABLE", "DISABLED", "BACKEND", "INTERNAL_ERROR")):
+        return 503
+    if "RATE_LIMIT" in reason:
+        return 429
+    if "SCOPE" in reason:
+        return 403
+    if any(marker in reason for marker in ("REPLAY", "CONFLICT", "DUPLICATE")):
+        return 409
+    return 401
+
+
+def _persist_gateway_ingress_result(
+    ingress: _HostGatewayIngressOutcome | None,
+    *,
+    request_id: str,
+    status: str,
+    at_ms: int,
+) -> bool:
+    if ingress is None:
+        return True
+    result_ref = _host_input_result_ref(request_id=request_id, status=status)
+    return _complete_host_gateway_ingress(
+        claim_ref=ingress.claim_ref,
+        result_ref=result_ref,
+        at_ms=at_ms,
+    )
+
+
+def _host_input_result_ref(*, request_id: str, status: str) -> str:
+    return f"host-input-result://{request_id}/{str(status).strip().upper()}"
+
+
+def _host_input_receipt_fields(
+    ingress: _HostGatewayIngressOutcome,
+    *,
+    receipt_ref: str,
+) -> dict[str, str | None]:
+    idempotency_key = str(ingress.idempotency_key or "")
+    return {
+        "receipt_ref": str(receipt_ref or "") or None,
+        "body_sha256": str(ingress.body_sha256 or "") or None,
+        "idempotency_sha256": (
+            hashlib.sha256(idempotency_key.encode("utf-8")).hexdigest()
+            if idempotency_key
+            else None
+        ),
+    }
+
+
+async def _read_input_raw_body(body: InputPayload, request: Any) -> bytes:
+    """Read exact HTTP bytes; retain a deterministic direct-call test seam."""
+
+    reader = getattr(request, "body", None)
+    if callable(reader):
+        candidate = reader()
+        if inspect.isawaitable(candidate):
+            candidate = await candidate
+        if isinstance(candidate, (bytes, bytearray, memoryview)):
+            return bytes(candidate)
+    return json.dumps(
+        body.model_dump(exclude_none=True),
+        ensure_ascii=False,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
+
+
 @router.post("/input", response_model=InputResponse)
 async def receive_input(body: InputPayload, request: Request) -> InputResponse:
-    _ = request
     request_id = new_request_id()
     ts_ms = int(time.time() * 1000)
     raw_source = str(body.source or "").upper().strip()
     source, source_alias_platform = _normalize_input_source(raw_source)
+    gateway_ingress: _HostGatewayIngressOutcome | None = None
     gateway_dedupe_key: str | None = None
     gateway_dedupe_expiry: float | None = None
 
@@ -1276,7 +1353,53 @@ async def receive_input(body: InputPayload, request: Request) -> InputResponse:
             ts_ms=ts_ms,
         )
 
+    # Authentication is selected by the /v1/host/input transport surface,
+    # never by the caller-controlled source field.  This closes the former
+    # GATEWAY -> ASR relabel bypass while preserving structural validation
+    # before the durable idempotency claim.
+    gateway_ingress = _evaluate_host_gateway_ingress(
+        request=request,
+        raw_body=await _read_input_raw_body(body, request),
+        received_at_ms=ts_ms,
+    )
+    if gateway_ingress.duplicate:
+        existing = str(gateway_ingress.existing_result_ref or "")
+        if not existing:
+            raise HTTPException(
+                status_code=409,
+                detail="host input is already claimed and has no durable result",
+            )
+        if existing.rsplit("/", 1)[-1] in {"ACCEPTED", "COMPLETED"}:
+            return InputResponse(
+                success=True,
+                request_id=request_id,
+                source=source,
+                status="IGNORED",
+                detail=f"duplicate host input delivery: {gateway_ingress.reason_code}",
+                ts_ms=ts_ms,
+                **_host_input_receipt_fields(
+                    gateway_ingress,
+                    receipt_ref=existing,
+                ),
+            )
+        raise HTTPException(
+            status_code=409,
+            detail="host input previously completed without acceptance",
+        )
+    if not gateway_ingress.allowed:
+        raise HTTPException(
+            status_code=_gateway_ingress_rejection_http_status(gateway_ingress.reason_code),
+            detail=f"host secure ingress rejected: {gateway_ingress.reason_code}",
+        )
+
     payload = body.model_dump(exclude_none=True)
+    payload["secure_ingress"] = {
+        "claim_ref": gateway_ingress.claim_ref,
+        "audit_ref": gateway_ingress.audit_ref,
+        "principal_id": gateway_ingress.principal_id,
+        "idempotency_key": gateway_ingress.idempotency_key,
+        "body_sha256": gateway_ingress.body_sha256,
+    }
     if source == "GATEWAY":
         payload["source"] = "GATEWAY"
         if source_alias_platform and not str(payload.get("platform") or "").strip():
@@ -1293,7 +1416,7 @@ async def receive_input(body: InputPayload, request: Request) -> InputResponse:
                 payload["content"] = placeholder_text
                 payload["content_is_multimodal_placeholder"] = True
                 text = placeholder_text
-    if source == "GATEWAY":
+    if source == "GATEWAY" and gateway_ingress is None:
         gateway_dedupe_key = _build_gateway_dedupe_key(payload=body, text=text)
         gateway_dedupe_expiry = _mark_gateway_dedupe(gateway_dedupe_key)
         if gateway_dedupe_expiry:
@@ -1375,6 +1498,17 @@ async def receive_input(body: InputPayload, request: Request) -> InputResponse:
             detail="immune gate blocked high-risk input",
             ts_ms=ts_ms,
         )
+        result_persisted = _persist_gateway_ingress_result(
+            gateway_ingress,
+            request_id=request_id,
+            status="REJECTED",
+            at_ms=ts_ms,
+        )
+        if not result_persisted:
+            raise HTTPException(
+                status_code=503,
+                detail="gateway durable rejection result unavailable",
+            )
         return InputResponse(
             success=False,
             request_id=request_id,
@@ -1477,13 +1611,31 @@ async def receive_input(body: InputPayload, request: Request) -> InputResponse:
             ts_ms=ts_ms,
         )
         if handled_by_progress_fastpath:
+            completed_ms = int(time.time() * 1000)
+            if not _persist_gateway_ingress_result(
+                gateway_ingress,
+                request_id=request_id,
+                status="COMPLETED",
+                at_ms=completed_ms,
+            ):
+                raise HTTPException(
+                    status_code=503,
+                    detail="gateway durable acceptance result unavailable",
+                )
             return InputResponse(
                 success=True,
                 request_id=request_id,
                 source=source,
                 status="COMPLETED",
                 detail="gateway progress fastpath replied",
-                ts_ms=int(time.time() * 1000),
+                ts_ms=completed_ms,
+                **_host_input_receipt_fields(
+                    gateway_ingress,
+                    receipt_ref=_host_input_result_ref(
+                        request_id=request_id,
+                        status="COMPLETED",
+                    ),
+                ),
             )
 
     try:
@@ -1495,6 +1647,16 @@ async def receive_input(body: InputPayload, request: Request) -> InputResponse:
             payload=payload,
             ts_ms=ts_ms,
         )
+        if not _persist_gateway_ingress_result(
+            gateway_ingress,
+            request_id=request_id,
+            status="ACCEPTED",
+            at_ms=int(time.time() * 1000),
+        ):
+            raise HTTPException(
+                status_code=503,
+                detail="gateway durable acceptance result unavailable",
+            )
         return InputResponse(
             success=True,
             request_id=request_id,
@@ -1502,11 +1664,26 @@ async def receive_input(body: InputPayload, request: Request) -> InputResponse:
             status="ACCEPTED",
             detail="input accepted for processing",
             ts_ms=ts_ms,
+            **_host_input_receipt_fields(
+                gateway_ingress,
+                receipt_ref=_host_input_result_ref(
+                    request_id=request_id,
+                    status="ACCEPTED",
+                ),
+            ),
         )
     except Exception as exc:
         if gateway_dedupe_key:
             _release_gateway_dedupe(gateway_dedupe_key, expected_expiry=gateway_dedupe_expiry)
         _logger.error("input_routes: dispatch failed source=%s request_id=%s: %s", source, request_id, exc)
+        _persist_gateway_ingress_result(
+            gateway_ingress,
+            request_id=request_id,
+            status="ERROR",
+            at_ms=int(time.time() * 1000),
+        )
+        if isinstance(exc, HTTPException):
+            raise
         return InputResponse(
             success=False,
             request_id=request_id,

@@ -351,6 +351,9 @@ class TestEdgeRpcCalls(unittest.IsolatedAsyncioTestCase):
         with patch(
             "host_brain.channels.edge_rpc_client._resolve_gateway_base_urls",
             return_value=["http://gateway.remote:19000"],
+        ), patch(
+            "host_brain.channels.edge_rpc_client._resolve_gateway_reply_hmac_key",
+            return_value="task0488-gateway-reply-test-key",
         ):
             with patch("httpx.AsyncClient", return_value=failing_client):
                 with patch("host_brain.channels.edge_rpc_client._resolve_retries", return_value=0):
@@ -390,6 +393,9 @@ class TestEdgeRpcCalls(unittest.IsolatedAsyncioTestCase):
         with patch(
             "host_brain.channels.edge_rpc_client._resolve_gateway_base_urls",
             return_value=["http://gateway.remote:19000"],
+        ), patch(
+            "host_brain.channels.edge_rpc_client._resolve_gateway_reply_hmac_key",
+            return_value="task0488-gateway-reply-test-key",
         ):
             with patch("httpx.AsyncClient", return_value=client):
                 with patch("host_brain.channels.edge_rpc_client._resolve_retries", return_value=0):
@@ -402,6 +408,31 @@ class TestEdgeRpcCalls(unittest.IsolatedAsyncioTestCase):
         self.assertEqual("queued", result.status)
         self.assertIsNone(result.reason_code)
         self.assertEqual("outbound queued", result.detail)
+        call = client.post.await_args
+        self.assertEqual(
+            b'{"content":"hello","wait_result":false}',
+            call.kwargs["content"],
+        )
+        self.assertIn("X-Natsume-Webhook-Signature", call.kwargs["headers"])
+        self.assertNotIn("json", call.kwargs)
+
+    async def test_post_to_gateway_missing_signing_key_fails_before_network(self) -> None:
+        with patch(
+            "host_brain.channels.edge_rpc_client._resolve_gateway_base_urls",
+            return_value=["http://gateway.remote:19000"],
+        ), patch(
+            "host_brain.channels.edge_rpc_client._resolve_gateway_reply_hmac_key",
+            return_value=None,
+        ), patch("httpx.AsyncClient") as client:
+            result = await _post_to_gateway(
+                path="/v1/gateway/reply",
+                payload={"content": "hello"},
+            )
+
+        self.assertFalse(result.success)
+        self.assertEqual("REJECTED", result.status)
+        self.assertEqual("GATEWAY_REPLY_AUTH_UNAVAILABLE", result.reason_code)
+        client.assert_not_called()
 
 
 class TestEdgeRpcWrappers(unittest.IsolatedAsyncioTestCase):
@@ -457,6 +488,9 @@ class TestEdgeRpcWrappers(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual("/v1/gateway/reply", post_to_gateway.await_args.kwargs["path"])
         self.assertEqual(18000, post_to_gateway.await_args.kwargs["request_timeout_ms"])
+        gateway_payload = dict(post_to_gateway.await_args.kwargs["payload"])
+        delivery_id = gateway_payload.pop("delivery_id")
+        self.assertRegex(delivery_id, r"^reply:[0-9a-f]{64}$")
         self.assertEqual(
             {
                 "request_id": "req-gateway",
@@ -467,8 +501,42 @@ class TestEdgeRpcWrappers(unittest.IsolatedAsyncioTestCase):
                 "wait_result": True,
                 "timeout_ms": 15000,
             },
-            post_to_gateway.await_args.kwargs["payload"],
+            gateway_payload,
         )
+
+    async def test_gateway_reply_delivery_id_is_per_message_and_retry_stable(self) -> None:
+        accepted = EdgeRpcCallResult(
+            success=True,
+            status="sent",
+            reason_code=None,
+            detail="ok",
+            event={},
+            latency_ms=1,
+        )
+        with patch(
+            "host_brain.channels.edge_rpc_client._post_to_gateway",
+            new=AsyncMock(return_value=accepted),
+        ) as post_to_gateway:
+            common = {
+                "platform": "qq",
+                "conversation_id": "qq_dm_delivery",
+                "request_id": "correlation-shared",
+                "wait_result": False,
+            }
+            await post_gateway_reply(content="progress 1", **common)
+            await post_gateway_reply(content="progress 1", **common)
+            await post_gateway_reply(content="final result", **common)
+
+        delivery_ids = [
+            call.kwargs["payload"]["delivery_id"]
+            for call in post_to_gateway.await_args_list
+        ]
+        assert delivery_ids[0] == delivery_ids[1]
+        assert delivery_ids[0] != delivery_ids[2]
+        assert {
+            call.kwargs["payload"]["request_id"]
+            for call in post_to_gateway.await_args_list
+        } == {"correlation-shared"}
 
     def test_gateway_reply_action_memory_sync_writes_life_action(self) -> None:
         import host_brain.channels.edge_rpc_client as edge_rpc

@@ -4,7 +4,10 @@ import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
+import pytest
+
 import host_brain.app.input_routes as input_routes_module
+from host_brain.app.input_service_gateway import HostGatewayIngressOutcome
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.app.input_routes import (
     InputPayload,
@@ -19,6 +22,29 @@ from host_brain.app.input_routes import (
 
 def _run(coro):
     return asyncio.run(coro)
+
+
+@pytest.fixture(autouse=True)
+def _secure_host_input(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        input_routes_module,
+        "_evaluate_host_gateway_ingress",
+        lambda **_kwargs: HostGatewayIngressOutcome(
+            allowed=True,
+            duplicate=False,
+            reason_code="SECURE_INGRESS_ALLOWED",
+            claim_ref="secure-ingress-claim://unit-dispatch",
+            audit_ref="secure-ingress-audit://unit-dispatch",
+            principal_id="service.edge.input.unit",
+            idempotency_key="unit-dispatch",
+            body_sha256="0" * 64,
+        ),
+    )
+    monkeypatch.setattr(
+        input_routes_module,
+        "_complete_host_gateway_ingress",
+        lambda **_kwargs: True,
+    )
 
 
 def test_receive_input_rejects_placeholder_gateway_conversation_id() -> None:
@@ -175,7 +201,7 @@ def test_receive_input_gateway_progress_fastpath_fallbacks_to_dispatch() -> None
     assert dispatch_mock.await_count == 1
 
 
-def test_receive_input_gateway_duplicate_msg_id_is_ignored() -> None:
+def test_receive_input_gateway_durable_duplicate_is_ignored() -> None:
     body = InputPayload(
         source="GATEWAY",
         platform="qq",
@@ -186,20 +212,44 @@ def test_receive_input_gateway_duplicate_msg_id_is_ignored() -> None:
         content="hello",
     )
     dispatch_mock = AsyncMock(return_value=None)
-    input_routes_module._GATEWAY_DEDUPE_CACHE.clear()
+    ingress_results = [
+        HostGatewayIngressOutcome(
+            allowed=True,
+            duplicate=False,
+            reason_code="SECURE_INGRESS_ALLOWED",
+            claim_ref="secure-ingress-claim://unit-duplicate",
+            audit_ref="secure-ingress-audit://unit-duplicate-first",
+            principal_id="service.edge.input.unit",
+            idempotency_key="unit-dispatch-duplicate",
+            body_sha256="1" * 64,
+        ),
+        HostGatewayIngressOutcome(
+            allowed=False,
+            duplicate=True,
+            reason_code="SECURE_INGRESS_IDEMPOTENCY_DUPLICATE",
+            audit_ref="secure-ingress-audit://unit-duplicate-second",
+            existing_result_ref="host-input-result://unit-first/ACCEPTED",
+            principal_id="service.edge.input.unit",
+            idempotency_key="unit-dispatch-duplicate",
+            body_sha256="1" * 64,
+        ),
+    ]
 
     with patch("host_brain.app.input_routes._dispatch_to_graph", new=dispatch_mock), patch(
         "host_brain.app.input_routes._try_handle_gateway_progress_fastpath",
         new=AsyncMock(return_value=False),
+    ), patch(
+        "host_brain.app.input_routes._evaluate_host_gateway_ingress",
+        side_effect=ingress_results,
     ), patch("host_brain.app.input_routes._log_input_event"):
         first = _run(receive_input(body, SimpleNamespace()))
         second = _run(receive_input(body, SimpleNamespace()))
 
     assert first.status == "ACCEPTED"
     assert second.status == "IGNORED"
-    assert "duplicate gateway input ignored" in second.detail
+    assert "duplicate host input delivery" in second.detail
+    assert second.receipt_ref == "host-input-result://unit-first/ACCEPTED"
     assert dispatch_mock.await_count == 1
-    input_routes_module._GATEWAY_DEDUPE_CACHE.clear()
 
 
 def test_receive_input_gateway_attachment_only_sync_dispatches_to_graph() -> None:

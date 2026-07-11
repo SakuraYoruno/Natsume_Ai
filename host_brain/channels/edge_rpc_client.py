@@ -535,6 +535,17 @@ def _resolve_hmac_key() -> str | None:
     return resolve_host_edge_rpc_shared_key()
 
 
+def _resolve_gateway_reply_hmac_key() -> str | None:
+    """Resolve the isolated Host -> Gateway reply credential only."""
+
+    key = str(os.environ.get("HOST_GATEWAY_REPLY_HMAC_SECRET") or "").strip()
+    if key:
+        return key
+    return _resolve_secret_store_ref(
+        str(os.environ.get("HOST_GATEWAY_REPLY_HMAC_SECRET_REF") or "").strip()
+    )
+
+
 def _resolve_allow_insecure() -> bool:
     raw = str(
         os.environ.get("HOST_EDGE_RPC_ALLOW_INSECURE_AUTH")
@@ -771,13 +782,61 @@ async def _post_to_gateway(
     t0 = int(time.time() * 1000)
     last_exc: Exception | None = None
     attempts: list[str] = []
+    shared_secret = str(_resolve_gateway_reply_hmac_key() or "")
+    if not shared_secret:
+        return EdgeRpcCallResult(
+            success=False,
+            status="REJECTED",
+            reason_code="GATEWAY_REPLY_AUTH_UNAVAILABLE",
+            detail="gateway reply signing key is not configured",
+            event={},
+            latency_ms=0,
+        )
+    try:
+        body = json.dumps(
+            payload,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("utf-8")
+    except (TypeError, ValueError):
+        return EdgeRpcCallResult(
+            success=False,
+            status="REJECTED",
+            reason_code="GATEWAY_REPLY_PAYLOAD_INVALID",
+            detail="gateway reply payload is not canonical JSON",
+            event={},
+            latency_ms=0,
+        )
+    timestamp = str(int(time.time()))
+    nonce = uuid.uuid4().hex
+    canonical = (
+        "natsume-webhook-v1\n"
+        "internal_reply\n"
+        "POST\n"
+        f"{path}\n"
+        f"{timestamp}\n"
+        f"{nonce}\n"
+    ).encode("utf-8") + body
+    signature = _hmac.new(
+        shared_secret.encode("utf-8"),
+        canonical,
+        hashlib.sha256,
+    ).hexdigest()
+    auth_headers = {
+        "Content-Type": "application/json; charset=utf-8",
+        "X-Natsume-Webhook-Timestamp": timestamp,
+        "X-Natsume-Webhook-Nonce": nonce,
+        "X-Natsume-Webhook-Signature": signature,
+    }
 
     for base_url in base_urls:
         url = f"{base_url}{path}"
         for attempt in range(retries + 1):
             try:
                 async with httpx.AsyncClient(timeout=float(timeout_ms) / 1000.0, trust_env=False) as client:
-                    resp = await client.post(url, json=payload)
+                    resp = await client.post(url, content=body, headers=auth_headers)
                 latency_ms = max(0, int(time.time() * 1000) - t0)
                 if resp.status_code == 200:
                     try:
@@ -786,7 +845,14 @@ async def _post_to_gateway(
                         raw_body = {}
                     body = raw_body if isinstance(raw_body, Mapping) else {}
                     status_text = str(body.get("status") or "unknown").strip().lower()
-                    success_statuses = {"sent", "queued", "accepted", "ok"}
+                    success_statuses = {
+                        "sent",
+                        "queued",
+                        "accepted",
+                        "acked",
+                        "duplicate",
+                        "ok",
+                    }
                     success = status_text in success_statuses or bool(body.get("success"))
                     reason_code = None if success else str(body.get("reason_code") or "GATEWAY_REPLY_FAILED")
                     detail = str(body.get("detail") or f"gateway reply status={status_text or 'unknown'}")
@@ -1424,6 +1490,7 @@ async def post_gateway_reply(
     media_path: str | None = None,
     raw_extra: Mapping[str, Any] | None = None,
     request_id: str | None = None,
+    delivery_id: str | None = None,
     wait_result: bool = True,
     timeout_ms: int = 12000,
 ) -> EdgeRpcCallResult:
@@ -1437,7 +1504,9 @@ async def post_gateway_reply(
         conversation_id: 会话 ID（群 ID 或私聊 ID）
         content: 回复文本内容
         msg_type: 消息类型（默认 text）
-        request_id: 请求 ID（可选）
+        request_id: 输入/任务 correlation ID（可选）
+        delivery_id: 单条回复的稳定业务幂等 ID；省略时由 correlation +
+            目标/内容/类型/安全元数据确定性派生
         wait_result: 是否等待发送结果（默认 True）
         timeout_ms: 超时时间（ms，默认 12000）
 
@@ -1445,8 +1514,30 @@ async def post_gateway_reply(
         EdgeRpcCallResult
     """
     req_id = request_id or new_request_id()
+    normalized_raw_extra = dict(raw_extra) if isinstance(raw_extra, Mapping) else {}
+    delivery_material = json.dumps(
+        {
+            "platform": str(platform or "").strip().lower(),
+            "conversation_id": str(conversation_id or "").strip(),
+            "content": str(content),
+            "msg_type": str(msg_type or "text").strip().lower(),
+            "media_path": str(media_path or "").strip(),
+            "raw_extra": normalized_raw_extra,
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
+    stable_delivery_id = str(delivery_id or "").strip() or (
+        "reply:"
+        + hashlib.sha256(
+            str(req_id).encode("utf-8") + b"\n" + delivery_material
+        ).hexdigest()
+    )
     payload: dict[str, Any] = {
         "request_id": req_id,
+        "delivery_id": stable_delivery_id,
         "platform": str(platform or "").strip().lower(),
         "conversation_id": str(conversation_id or "").strip(),
         "content": str(content),
@@ -1456,8 +1547,8 @@ async def post_gateway_reply(
     }
     if str(media_path or "").strip():
         payload["media_path"] = str(media_path).strip()
-    if isinstance(raw_extra, Mapping) and raw_extra:
-        payload["raw_extra"] = dict(raw_extra)
+    if normalized_raw_extra:
+        payload["raw_extra"] = normalized_raw_extra
     gateway_timeout_ms = max(_resolve_timeout_ms(), 12_000)
     if bool(wait_result):
         gateway_timeout_ms = max(int(gateway_timeout_ms), int(timeout_ms) + 3_000)
@@ -1467,9 +1558,11 @@ async def post_gateway_reply(
         request_timeout_ms=gateway_timeout_ms,
     )
     _logger.debug(
-        "post_gateway_reply platform=%s conversation_id=%s wait=%s -> %s latency=%dms",
+        "post_gateway_reply platform=%s conversation_sha256=%s wait=%s -> %s latency=%dms",
         payload["platform"],
-        payload["conversation_id"],
+        hashlib.sha256(
+            str(payload["conversation_id"]).encode("utf-8")
+        ).hexdigest()[:16],
         payload["wait_result"],
         result.status,
         result.latency_ms,

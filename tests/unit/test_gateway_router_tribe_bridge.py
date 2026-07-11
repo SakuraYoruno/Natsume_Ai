@@ -9,7 +9,7 @@ class _StubReporter:
     def __init__(self, result: InputReportResult) -> None:
         self._result = result
 
-    def _send(self, payload, source):  # noqa: ANN001
+    def report_gateway_payload(self, payload):  # noqa: ANN001
         return self._result
 
 

@@ -28,8 +28,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 import random
-import time
 from typing import Any
 
 from edge_client.gateway.adapters.base import AbstractPlatformAdapter
@@ -37,6 +37,8 @@ from edge_client.gateway.models import GatewayAttachment, MsgType, Platform, Uni
 from edge_client.runtime_texts import edge_runtime_text
 
 logger = logging.getLogger("Natsume.edge.gateway.adapters.telegram")
+
+_MAX_TIMESTAMP_MS = (1 << 63) - 1
 
 # Telegram 消息类型 → 统一消息类型映射
 _TG_MEDIA_TYPE_MAP: dict[str, MsgType] = {
@@ -295,9 +297,7 @@ class TelegramAdapter(AbstractPlatformAdapter):
         # 会话 ID
         conversation_id = f"tg_group_{chat_id}" if is_group else f"tg_dm_{chat_id}"
 
-        ts_ms = int(raw_payload.get("ts", 0)) * 1000
-        if ts_ms == 0:
-            ts_ms = int(time.time() * 1000)
+        ts_ms = self._resolve_inbound_ts_ms(raw_payload)
 
         return UnifiedMessage(
             msg_id=msg_id,
@@ -342,8 +342,10 @@ class TelegramAdapter(AbstractPlatformAdapter):
                 return False
 
             loop = self._event_loop
-            if loop is None or loop.is_closed():
-                loop = asyncio.new_event_loop()
+            if loop is None or loop.is_closed() or not loop.is_running():
+                logger.error("TelegramAdapter: 事件循环不可用，拒绝发送")
+                self._stats["send_errors"] += 1
+                return False
 
             future = asyncio.run_coroutine_threadsafe(
                 self._send_reply_async(chat_id, reply),
@@ -454,8 +456,19 @@ class TelegramAdapter(AbstractPlatformAdapter):
             f"tg_group_{chat_id}" if is_group else f"tg_dm_{chat_id}"
         )
 
-        # 时间戳
-        ts_ms = int(message.date.timestamp() * 1000) if message.date else int(time.time() * 1000)
+        # 时间戳：平台未提供日期时保留稳定 unknown，不使用本地墙钟。
+        ts_ms = 0
+        message_date = getattr(message, "date", None)
+        if message_date is not None:
+            try:
+                resolved_ts = self._coerce_epoch_ms(
+                    message_date.timestamp(),
+                    multiplier=1000,
+                )
+            except (AttributeError, OSError, OverflowError, TypeError, ValueError):
+                resolved_ts = None
+            if resolved_ts is not None:
+                ts_ms = resolved_ts
 
         return UnifiedMessage(
             msg_id=msg_id,
@@ -522,6 +535,46 @@ class TelegramAdapter(AbstractPlatformAdapter):
 
         logger.warning("TelegramAdapter: 空回复，跳过发送")
         return False
+
+    @staticmethod
+    def _coerce_epoch_ms(raw_value: Any, *, multiplier: int) -> int | None:
+        """Convert one epoch value without accepting unstable coercions."""
+
+        if isinstance(raw_value, bool) or raw_value is None:
+            return None
+        if not isinstance(raw_value, (int, float, str)):
+            return None
+        try:
+            parsed = float(str(raw_value).strip())
+        except (TypeError, ValueError, OverflowError):
+            return None
+        if not math.isfinite(parsed) or parsed < 0:
+            return None
+        resolved = int(parsed * multiplier)
+        if resolved < 0 or resolved > _MAX_TIMESTAMP_MS:
+            return None
+        return resolved
+
+    @classmethod
+    def _resolve_inbound_ts_ms(cls, raw_payload: dict[str, Any]) -> int:
+        """Resolve explicit millisecond/second aliases, or stable unknown ``0``."""
+
+        for key, multiplier in (
+            ("ts_ms", 1),
+            ("timestamp_ms", 1),
+            ("ts", 1000),
+            ("timestamp", 1000),
+        ):
+            if key not in raw_payload:
+                continue
+            raw_value = raw_payload.get(key)
+            if raw_value is None or raw_value == "":
+                continue
+            resolved = cls._coerce_epoch_ms(raw_value, multiplier=multiplier)
+            # A present-but-invalid higher-priority alias is ambiguous and must
+            # not silently fall through to a different timestamp field.
+            return resolved if resolved is not None else 0
+        return 0
 
     async def _send_text_with_typing(
         self,

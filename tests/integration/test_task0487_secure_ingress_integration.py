@@ -41,7 +41,7 @@ def _migrated_db(tmp_path: Path) -> Path:
         migrations_dir=MIGRATIONS,
     ).apply_migrations(request_id="task0487-integration", ts_ms=NOW - 1)
     assert result.success, result.as_dict()
-    assert result.summary["current_version"] == 58
+    assert result.summary["current_version"] == 59
     return db_path
 
 

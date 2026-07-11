@@ -3,7 +3,34 @@ from __future__ import annotations
 import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
+
+import host_brain.app.input_routes as input_routes_module
+from host_brain.app.input_service_gateway import HostGatewayIngressOutcome
 from host_brain.app.input_routes import InputPayload, receive_input
+
+
+@pytest.fixture(autouse=True)
+def _secure_host_input(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        input_routes_module,
+        "_evaluate_host_gateway_ingress",
+        lambda **_kwargs: HostGatewayIngressOutcome(
+            allowed=True,
+            duplicate=False,
+            reason_code="SECURE_INGRESS_ALLOWED",
+            claim_ref="secure-ingress-claim://unit-smoke",
+            audit_ref="secure-ingress-audit://unit-smoke",
+            principal_id="service.edge.input.unit",
+            idempotency_key="unit-smoke",
+            body_sha256="0" * 64,
+        ),
+    )
+    monkeypatch.setattr(
+        input_routes_module,
+        "_complete_host_gateway_ingress",
+        lambda **_kwargs: True,
+    )
 
 
 def test_receive_input_smoke_gateway_dispatches_to_graph():

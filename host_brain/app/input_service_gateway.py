@@ -6,9 +6,14 @@
 
 from __future__ import annotations
 
+import base64
+from dataclasses import dataclass
 import json
+import os
+from pathlib import Path
 import re
-from typing import Any
+import time
+from typing import Any, Mapping
 
 # ---------------------------------------------------------------------------
 # 常量
@@ -30,6 +35,308 @@ _GATEWAY_ACK_ACTION_MARKERS: tuple[str, ...] = (
     "排查", "测试", "验证", "启动", "停止", "重启",
     "run", "execute", "build", "fix", "test", "deploy", "search",
 )
+
+
+_HOST_GATEWAY_SECURITY_HEADERS = frozenset(
+    {
+        b"x-natsume-identity",
+        b"x-natsume-proof",
+        b"x-natsume-idempotency-key",
+        b"x-natsume-nonce",
+        b"x-natsume-correlation-id",
+    }
+)
+
+
+@dataclass(frozen=True, slots=True)
+class HostGatewayIngressOutcome:
+    """Secret-free result of the Edge -> Host Secure Ingress cutover."""
+
+    allowed: bool
+    duplicate: bool
+    reason_code: str
+    claim_ref: str | None = None
+    audit_ref: str | None = None
+    existing_result_ref: str | None = None
+    principal_id: str | None = None
+    idempotency_key: str | None = None
+    body_sha256: str | None = None
+
+
+def complete_host_gateway_ingress(
+    *,
+    claim_ref: str | None,
+    result_ref: str,
+    at_ms: int | None = None,
+    env: Mapping[str, str] | None = None,
+    db_path: str | Path | None = None,
+) -> bool:
+    """Attach a durable Host acceptance result to a committed ingress claim."""
+
+    if not str(claim_ref or "").strip() or not str(result_ref or "").strip():
+        return False
+    source = os.environ if env is None else env
+    from host_brain.secure_ingress import SQLiteSecureIngressStore  # noqa: PLC0415
+
+    resolved_db_path = Path(
+        str(
+            db_path
+            or source.get("NATSUME_AUDIT_DB")
+            or source.get("Natsume_AUDIT_DB")
+            or "host_brain/data/audit.sqlite3"
+        )
+    )
+    store = None
+    try:
+        store = SQLiteSecureIngressStore(resolved_db_path)
+        store.complete_claim(
+            claim_ref=str(claim_ref),
+            result_ref=str(result_ref),
+            at_ms=int(at_ms if at_ms is not None else time.time() * 1000),
+        )
+        return True
+    except Exception:
+        return False
+    finally:
+        if store is not None:
+            try:
+                store.close()
+            except Exception:
+                pass
+
+
+def _single_security_headers(request: Any) -> dict[str, str]:
+    """Read exact ASGI headers and reject ambiguous security header repeats."""
+
+    raw_headers = list((getattr(request, "scope", {}) or {}).get("headers") or ())
+    selected: dict[bytes, bytes] = {}
+    for raw_name, raw_value in raw_headers:
+        name = bytes(raw_name).strip().lower()
+        if name not in _HOST_GATEWAY_SECURITY_HEADERS:
+            continue
+        if name in selected:
+            raise ValueError("HOST_GATEWAY_SECURITY_HEADER_AMBIGUOUS")
+        selected[name] = bytes(raw_value).strip()
+    return {
+        name.decode("ascii"): value.decode("ascii")
+        for name, value in selected.items()
+    }
+
+
+def _decode_identity_header(value: str) -> bytes:
+    encoded = str(value or "").strip()
+    if not encoded or len(encoded) > 16_384:
+        raise ValueError("HOST_GATEWAY_IDENTITY_INVALID")
+    padding = "=" * (-len(encoded) % 4)
+    try:
+        return base64.b64decode(
+            encoded + padding,
+            altchars=b"-_",
+            validate=True,
+        )
+    except Exception as exc:
+        raise ValueError("HOST_GATEWAY_IDENTITY_INVALID") from exc
+
+
+def _secure_ingress_secret_resolver(
+    env: Mapping[str, str],
+):
+    configured: dict[str, str] = {}
+    raw_mapping = str(env.get("HOST_SECURE_INGRESS_HMAC_SECRETS_JSON") or "").strip()
+    if raw_mapping:
+        try:
+            parsed = json.loads(raw_mapping)
+        except Exception:
+            parsed = None
+        if isinstance(parsed, dict):
+            configured = {
+                str(key): str(value)
+                for key, value in parsed.items()
+                if str(key).strip() and isinstance(value, str) and value
+            }
+    edge_key_id = str(
+        env.get("HOST_EDGE_GATEWAY_HMAC_KEY_ID") or "edge.gateway.hmac.v1"
+    ).strip()
+    edge_secret = str(
+        env.get("HOST_EDGE_GATEWAY_HMAC_SECRET") or ""
+    )
+    if edge_key_id and edge_secret:
+        configured.setdefault(edge_key_id, edge_secret)
+
+    def _resolve(authority: Any) -> str | None:
+        return configured.get(str(getattr(authority, "key_id", "") or ""))
+
+    return _resolve
+
+
+def evaluate_host_gateway_ingress(
+    *,
+    request: Any,
+    raw_body: bytes,
+    received_at_ms: int | None = None,
+    env: Mapping[str, str] | None = None,
+    db_path: str | Path | None = None,
+) -> HostGatewayIngressOutcome:
+    """Verify one Edge -> Host delivery before Gateway business side effects.
+
+    The client sends a base64url encoded ``IngressIdentityEnvelope`` and an
+    ephemeral proof in separate headers.  Raw request bytes are bound into the
+    TASK-0487 canonical signature and are never rendered into errors or audit
+    metadata.
+    """
+
+    source = os.environ if env is None else env
+    from natsume_contracts.identity import (  # noqa: PLC0415
+        CredentialProof,
+        CredentialProofKind,
+        parse_identity_envelope,
+    )
+    from host_brain.secure_ingress import (  # noqa: PLC0415
+        CredentialVerifierRegistry,
+        FileEmergencyAuditSink,
+        HmacSha256CredentialVerifier,
+        IngressReasonCode,
+        IngressSurface,
+        SecureIngressAdapter,
+        SecureIngressMode,
+        SecureIngressService,
+        SQLiteSecureIngressStore,
+        build_surface_request,
+        load_secure_ingress_mode,
+    )
+
+    mode = load_secure_ingress_mode(source)
+    if mode is not SecureIngressMode.ENFORCE:
+        return HostGatewayIngressOutcome(
+            allowed=False,
+            duplicate=False,
+            reason_code="HOST_GATEWAY_SECURE_INGRESS_DISABLED",
+        )
+
+    resolved_db_path = Path(
+        str(
+            db_path
+            or source.get("NATSUME_AUDIT_DB")
+            or source.get("Natsume_AUDIT_DB")
+            or "host_brain/data/audit.sqlite3"
+        )
+    )
+    store = None
+    try:
+        store = SQLiteSecureIngressStore(resolved_db_path)
+        verifier = CredentialVerifierRegistry(
+            {
+                # Registry dispatch remains scheme-owned by TASK-0487.
+                # The wire contract currently admits only the seeded HMAC key.
+                CredentialProofKind.HMAC_SHA256: HmacSha256CredentialVerifier(
+                    secret_resolver=_secure_ingress_secret_resolver(source),
+                )
+            }
+        )
+        service = SecureIngressService(
+            principal_store=store,
+            credential_verifier=verifier,
+            attempt_limiter=store,
+            rate_limiter=store,
+            state_store=store,
+            emergency_audit_sink=FileEmergencyAuditSink(
+                resolved_db_path.with_suffix(".secure-ingress-emergency.jsonl")
+            ),
+        )
+        adapter = SecureIngressAdapter(service=service, mode=mode)
+        now_ms = int(received_at_ms if received_at_ms is not None else time.time() * 1000)
+        try:
+            headers = _single_security_headers(request)
+            identity = parse_identity_envelope(
+                _decode_identity_header(headers.get("x-natsume-identity", ""))
+            )
+            proof = headers.get("x-natsume-proof", "")
+            idempotency_key = headers.get("x-natsume-idempotency-key", "")
+            nonce = headers.get("x-natsume-nonce", "")
+            correlation_id = headers.get("x-natsume-correlation-id") or None
+            credential = CredentialProof(
+                metadata=identity.credential_proof,
+                raw_proof=proof,
+            )
+            # The transport identifier is part of TASK-0487 canonical auth.
+            # It must be stable on both sides of NAT/proxies; the observed peer
+            # address is intentionally not client-signed and remains transport
+            # telemetry rather than caller-controlled identity.
+            transport_key = f"principal:{identity.principal.principal_id}"
+            ingress_request = build_surface_request(
+                surface=IngressSurface.HOST,
+                identity=identity,
+                credential=credential,
+                method=str(getattr(request, "method", "POST") or "POST").upper(),
+                normalized_path=str(getattr(getattr(request, "url", None), "path", "/v1/host/input")),
+                idempotency_key=idempotency_key,
+                nonce=nonce,
+                raw_body=bytes(raw_body),
+                received_at_epoch_ms=now_ms,
+                transport_key=transport_key,
+                correlation_id=correlation_id,
+            )
+        except Exception:
+            policy_request = build_surface_request(
+                surface=IngressSurface.HOST,
+                identity=None,
+                credential=None,
+                method="POST",
+                normalized_path="/v1/host/input",
+                idempotency_key="invalid-contract",
+                nonce="invalid-contract",
+                raw_body=b"",
+                received_at_epoch_ms=now_ms,
+                transport_key="http:invalid-contract",
+            )
+            decision = service.reject_unparsed_attempt(
+                transport_key=policy_request.transport_key,
+                surface=policy_request.surface,
+                method=policy_request.method,
+                normalized_path=policy_request.normalized_path,
+                action=policy_request.action,
+                required_scopes=policy_request.required_scopes,
+                received_at_epoch_ms=now_ms,
+            )
+            return HostGatewayIngressOutcome(
+                allowed=False,
+                duplicate=False,
+                reason_code=decision.reason_code.value,
+                audit_ref=decision.audit_ref,
+            )
+
+        outcome = adapter.evaluate(ingress_request)
+        decision = outcome.decision
+        if decision is None:
+            return HostGatewayIngressOutcome(
+                allowed=False,
+                duplicate=False,
+                reason_code="HOST_GATEWAY_SECURE_INGRESS_UNAVAILABLE",
+            )
+        duplicate = decision.reason_code is IngressReasonCode.IDEMPOTENCY_DUPLICATE
+        return HostGatewayIngressOutcome(
+            allowed=bool(outcome.permit_execution),
+            duplicate=duplicate,
+            reason_code=decision.reason_code.value,
+            claim_ref=decision.claim_ref,
+            audit_ref=decision.audit_ref,
+            existing_result_ref=decision.existing_result_ref,
+            principal_id=ingress_request.principal_id,
+            idempotency_key=ingress_request.idempotency_key,
+            body_sha256=ingress_request.body_sha256,
+        )
+    except Exception:
+        return HostGatewayIngressOutcome(
+            allowed=False,
+            duplicate=False,
+            reason_code="HOST_GATEWAY_SECURE_INGRESS_UNAVAILABLE",
+        )
+    finally:
+        if store is not None:
+            try:
+                store.close()
+            except Exception:
+                pass
 
 
 # ---------------------------------------------------------------------------
@@ -210,6 +517,9 @@ def extract_first_json_object(raw_text: str) -> dict[str, Any] | None:
 
 
 __all__ = [
+    "HostGatewayIngressOutcome",
+    "complete_host_gateway_ingress",
+    "evaluate_host_gateway_ingress",
     "looks_like_progress_query",
     "looks_like_execution_intent",
     "build_gateway_skill_manifest_lines",
