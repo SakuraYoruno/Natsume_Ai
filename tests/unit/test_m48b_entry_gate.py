@@ -21,39 +21,39 @@ def _packet() -> dict[str, object]:
     return deepcopy(dict(load_m48b_entry_gate_packet(PACKET)))
 
 
-def test_registered_packet_is_blocked_only_on_master_approval() -> None:
+def test_registered_packet_opens_after_scoped_master_approval() -> None:
     result = evaluate_m48b_entry_gate(root=ROOT, packet=_packet())
 
-    assert result.status == "BLOCKED"
+    assert result.status == "OPEN"
     assert result.clause_status == {
         "1": "PASS",
-        "2": "BLOCKED",
+        "2": "PASS",
         "3": "PASS",
         "4": "PASS",
         "5": "PASS",
     }
-    assert [issue.reason_code for issue in result.issues] == [
-        "M48B_MASTER_APPROVAL_PENDING"
-    ]
+    assert result.issues == ()
     assert result.checked_isolation_domains == 5
     assert result.checked_p0_slices == 9
 
 
-def test_external_master_approval_is_required_to_open_gate() -> None:
+def test_pending_or_unscoped_master_approval_blocks_gate() -> None:
     packet = _packet()
     packet["master_approval"] = {
         "required": True,
-        "status": "APPROVED",
+        "status": "PENDING",
         "approver_role": "MASTER",
-        "approval_ref": "evidence://master/m48b-entry-gate/test",
+        "approval_ref": "unavailable://master/m48b-entry-gate/test",
         "scope": "test",
     }
 
     result = evaluate_m48b_entry_gate(root=ROOT, packet=packet)
 
-    assert result.status == "OPEN"
-    assert result.issues == ()
-    assert set(result.clause_status.values()) == {"PASS"}
+    assert result.status == "BLOCKED"
+    assert result.clause_status["2"] == "BLOCKED"
+    assert [issue.reason_code for issue in result.issues] == [
+        "M48B_MASTER_APPROVAL_PENDING"
+    ]
 
 
 def test_missing_p0_control_fails_closed_even_with_approval() -> None:
@@ -93,7 +93,7 @@ def test_all_isolation_harnesses_are_ephemeral_and_no_effect(
     assert len(secrets) == len(EXPECTED_DOMAINS)
 
 
-def test_runner_writes_deterministic_blocked_result(tmp_path: Path) -> None:
+def test_runner_writes_deterministic_open_result(tmp_path: Path) -> None:
     first_output = tmp_path / "first.json"
     second_output = tmp_path / "second.json"
 
@@ -110,8 +110,8 @@ def test_runner_writes_deterministic_blocked_result(tmp_path: Path) -> None:
         pretty=True,
     )
 
-    assert first_exit == second_exit == runner.EXIT_BLOCKED
+    assert first_exit == second_exit == runner.EXIT_OPEN
     assert first == second
-    assert first["status"] == "BLOCKED"
+    assert first["status"] == "OPEN"
     assert first_output.read_bytes() == second_output.read_bytes()
     assert json.loads(first_output.read_text(encoding="utf-8")) == first

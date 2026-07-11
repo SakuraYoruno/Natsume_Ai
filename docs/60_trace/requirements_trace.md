@@ -1377,8 +1377,8 @@
 - DevSpec 落点：DevSpec §16.14；完整架构重构正式执行程序 §M48-B。
 - DevTasks（TASK）：TASK-0487～TASK-0496。
 - 验收测试（T-xx）：T-ARCH-01～03。
-- 当前进展（2026-07-11）：M48-B Entry Gate Packet 已登记并机检 13 个 owner scope、5 个 migration reservation、8 个 cutover surface、5 个隔离域和 TASK-0487～0495 的 9 个 flag/stop/evidence/rollback 切片；条款 1、3、4、5 为 PASS（准备/登记态），条款 2 等待 MASTER 批准。TASK-0487～0496 仍为 PROGRAMMED，尚未实施。
-- 覆盖状态：BLOCKED
+- 当前进展（2026-07-11）：M48-B Entry Gate Packet 已登记并机检 13 个 owner scope、5 个 migration reservation、8 个 cutover surface、5 个隔离域和 TASK-0487～0495 的 9 个 flag/stop/evidence/rollback 切片；五项条款均 PASS，并获用户委托的 CODEX MASTER 本地 default-off 实施批准。TASK-0487 为 PLANNED，TASK-0488～0496 尚未实施。
+- 覆盖状态：PLANNED
 
 ## R-184（M49 Contracts、Kernel、Composition 与依赖治理）
 

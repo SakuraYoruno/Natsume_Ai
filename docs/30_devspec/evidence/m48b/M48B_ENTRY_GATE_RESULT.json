@@ -6,20 +6,14 @@
   "checked_p0_slices": 9,
   "clause_status": {
     "1": "PASS",
-    "2": "BLOCKED",
+    "2": "PASS",
     "3": "PASS",
     "4": "PASS",
     "5": "PASS"
   },
-  "issues": [
-    {
-      "clause": 2,
-      "detail": "MASTER has not approved the owner/migration/cutover matrix",
-      "reason_code": "M48B_MASTER_APPROVAL_PENDING"
-    }
-  ],
+  "issues": [],
   "master_approval_required": true,
   "milestone": "M48-B",
   "schema_version": "natsume.m48b.entry-gate-result.v1",
-  "status": "BLOCKED"
+  "status": "OPEN"
 }

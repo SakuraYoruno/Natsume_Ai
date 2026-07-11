@@ -1,7 +1,7 @@
 """Fail-closed evaluator for the M48-B Entry Gate packet.
 
 This module validates preparation evidence and can report that the gate is
-open only when an external MASTER approval reference is present.  It does not
+open only when a separate MASTER approval reference is present.  It does not
 implement any TASK-0487+ production behavior.
 """
 
@@ -160,12 +160,15 @@ def evaluate_m48b_entry_gate(
     if not isinstance(approval, Mapping):
         raise ValueError("master_approval must be an object")
     approval_ref = str(approval.get("approval_ref", ""))
+    approval_ref_valid = bool(approval_ref) and not approval_ref.startswith("unavailable://")
+    if approval_ref_valid and "://" not in approval_ref:
+        approval_ref_valid = (root_path / approval_ref).is_file()
     if (
         approval.get("required") is not True
         or approval.get("status") != "APPROVED"
         or approval.get("approver_role") != "MASTER"
-        or not approval_ref
-        or approval_ref.startswith("unavailable://")
+        or not _nonempty(approval, ("approver_identity", "approval_basis", "approved_packet_commit", "scope"))
+        or not approval_ref_valid
     ):
         _add(issues, "M48B_MASTER_APPROVAL_PENDING", "MASTER has not approved the owner/migration/cutover matrix", 2)
 

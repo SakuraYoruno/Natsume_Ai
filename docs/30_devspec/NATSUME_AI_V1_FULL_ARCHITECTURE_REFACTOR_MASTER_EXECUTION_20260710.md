@@ -8,7 +8,7 @@
 状态：READY_FOR_PROGRAM_EXECUTION
 文档类型：DevTasks / Master Execution Contract
 程序任务编号：TASK-0461～TASK-0622，共 162 项，禁止复用、跳号或重定义
-当前执行入口：TASK-0461～TASK-0485 已完成；TASK-0486 本地 Release Seal/rollback 资产已完成但状态为 BLOCKED，等待 identity continuity、获批生产演练和 MASTER Seal；M48-B Entry Gate Packet 已完成并通过定向机检，Gate 仅因 MASTER owner/migration/cutover 批准缺失而保持 BLOCKED；M49～M57 状态为 PROGRAMMED
+当前执行入口：TASK-0461～TASK-0485 已完成；TASK-0486 本地 Release Seal/rollback 资产已完成但状态为 BLOCKED，等待 identity continuity、获批生产演练和 MASTER Seal；M48-B Entry Gate Packet 已通过机检和用户委托的 CODEX MASTER 本地实施审批，Gate 为 OPEN，TASK-0487 为 PLANNED；M49～M57 状态为 PROGRAMMED
 代码基线：dev@1ec8be1a8a20397627855aa946c0ff8aaaa87b72
 工作区状态：dirty；已有未提交业务代码、运行数据和本地配置必须原位保护
 完整目标蓝图：docs/50_project/arch/NATSUME_AI_V1_FULL_ARCHITECTURE_TARGET_20260710.md
@@ -294,7 +294,7 @@ M48-B 从 `PROGRAMMED` 解锁为 `PLANNED` 前必须同时满足：
 
 | TASK | 冻结工作项 | Status | Dependencies | Main landing | Estimate | Verifiable exit |
 |---|---|---|---|---|---:|---|
-| TASK-0487 | Secure Ingress principal/signature/scope/rate/idempotency fail-closed | PROGRAMMED | M48-B Entry Gate,TASK-0461 | host_brain/secure_ingress；natsume_contracts/identity | 2～4d | Host/Obs/Gateway/Bridge 写请求缺任一安全要素均拒绝并写稳定 reason/audit |
+| TASK-0487 | Secure Ingress principal/signature/scope/rate/idempotency fail-closed | PLANNED | M48-B Entry Gate,TASK-0461 | host_brain/secure_ingress；natsume_contracts/identity | 2～4d | Host/Obs/Gateway/Bridge 写请求缺任一安全要素均拒绝并写稳定 reason/audit |
 | TASK-0488 | Gateway raw-body verification、replay protection 与 durable inbox/outbox | PROGRAMMED | TASK-0487 | edge_client/gateway；host_brain/app/input_service_gateway.py；host_brain/eventing | 2～4d | 平台签名使用原始 body/header；重复/乱序/重启不重复交付，DLQ 可回放 |
 | TASK-0489 | Obs command relocation 与 Query-only 边界 | PROGRAMMED | TASK-0487 | host_brain/app/obs_routes_core.py；host_brain/observability | 2～3d | Obs 写 handler 为 0；原写动作经 Secure Ingress，权限负例全部 fail closed |
 | TASK-0490 | Skill/Provider supply-chain quarantine 与 sandbox 封口 | PROGRAMMED | TASK-0487,TASK-0462 | host_brain/skills；host_brain/integrations/providers | 2～4d | 未签名/无 digest/SBOM/未隔离 bundle 不能热导入 Host；拒绝可审计 |

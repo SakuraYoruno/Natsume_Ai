@@ -3,7 +3,7 @@
 
 # M48-B Entry Gate Packet
 
-状态：`READY_FOR_MASTER_REVIEW`；Gate 仍为 `BLOCKED`，TASK-0487～0496 保持 `PROGRAMMED`。
+状态：`APPROVED_FOR_LOCAL_IMPLEMENTATION`；Entry Gate 为 `OPEN`，TASK-0487 已解锁为 `PLANNED`。生产/live/物理切流不在本批准范围内。
 
 机器可读 SSOT：`M48B_ENTRY_GATE_PACKET.json`。机检结果：`M48B_ENTRY_GATE_RESULT.json`。
 
@@ -12,12 +12,12 @@
 | 条款 | 准备结果 | 说明 |
 |---|---|---|
 | 1. TASK-0461 基线与 dirty owner | PASS | 基线 manifest 26 项，hash 与 TASK-0461 冻结值一致；M48-A 当前冻结于 `29bedcaf`。 |
-| 2. 文件、migration、切流 owner | BLOCKED | 13 个文件 scope、5 个 migration reservation、8 个 cutover surface 已唯一登记；等待 MASTER 批准。 |
+| 2. 文件、migration、切流 owner | PASS | 13 个文件 scope、5 个 migration reservation、8 个 cutover surface 已唯一登记，并获用户委托的 CODEX MASTER 批准。 |
 | 3. 五域负例隔离 | PASS（准备态） | Gateway、Obs、Pentest、Skill/Provider、Bridge 均登记 test-only principal、每测临时 secret、loopback channel、禁止真实进程/物理副作用；共享 harness 为 `tests/fixtures/m48b_isolation.py`。 |
 | 4. 中央 migration catalog | PASS（登记态） | 唯一 catalog 为 `host_brain/audit/migrations`；0058～0062 已预留，禁止第二 catalog 和历史 SQL 重写。 |
 | 5. P0 flag/stop/evidence/rollback | PASS（登记态） | TASK-0487～0495 九个切片均已登记；flag 仍为计划配置，不代表功能已实现。 |
 
-只有条款 2 获 MASTER 明确批准后，Gate 才能从 `BLOCKED` 变为 `OPEN`。本 Packet 不能自签批准，也不把任何 TASK-0487+ 能力描述为已实现。
+五项条款均满足后，Gate 已从 `BLOCKED` 变为 `OPEN`。批准只解锁本地 default-off 实现；本 Packet 不把任何 TASK-0487+ 能力描述为已实现，也不授权生产/live/物理副作用切流。
 
 M48-A 的 532 个变更文件以 `030ad1f98^..29bedcaf` 整体冻结。MASTER 批准后，只把 JSON matrix 明列的 M48-B scope 临时转交对应 primary owner；其余 M48-A 文件、历史证据与 0050～0057 migrations 不转交。
 
@@ -54,9 +54,10 @@ Rollback 恢复的是旧的稳定处理面，不恢复匿名写、无签名 webh
 - 失败修复：只重跑失败项和受影响边界，不重复未变化的整套测试。
 - TASK-0621/0622：所有任务完成后统一执行一次全量真实环境验收与最终发布门禁。
 
-## MASTER 审批槽
+## MASTER 审批
 
-- 状态：`PENDING`
+- 状态：`APPROVED`
+- 身份：`USER_DELEGATED_CODEX_MASTER`
 - 审批范围：文件 owner、migration owner、cutover owner、protected-WIP reservation、catalog baseline debt disposition
-- 当前 ref：`unavailable://master/m48b-entry-gate`
-- 解锁规则：审批状态必须为 `APPROVED`、角色必须为 `MASTER`，且 approval ref 不能使用 `unavailable://`。
+- 当前 ref：`M48B_ENTRY_GATE_MASTER_APPROVAL.md`
+- 限制：仅本地 default-off implementation；不授权生产数据迁移、live service、外部消息、真实 Pentest、设备或物理动作。
