@@ -1,6 +1,13 @@
 """Agent runtime v2 execution plane with canonical v3 contract exports."""
 
 from host_brain.agent_runtime.agent_executor import AgentExecutor, agent_enabled
+from host_brain.agent_runtime.acceptance_judge import (
+    AcceptanceCriterionStatus,
+    AcceptanceCriterionVerdict,
+    AcceptanceDecision,
+    AcceptanceJudgement,
+    judge_acceptance_result,
+)
 from host_brain.agent_runtime.budget_policy import (
     BudgetAmount,
     BudgetExceededAction,
@@ -74,6 +81,10 @@ __all__ = [
     "AgentRuntimeExecutor",
     "AgentResult",
     "AgentWorkOrder",
+    "AcceptanceCriterionStatus",
+    "AcceptanceCriterionVerdict",
+    "AcceptanceDecision",
+    "AcceptanceJudgement",
     "AttemptStatus",
     "BudgetAmount",
     "BudgetExceededAction",
@@ -124,6 +135,7 @@ __all__ = [
     "execute_agent_runtime_payload",
     "evaluate_configured_shadow",
     "evaluate_task_runtime_shadow",
+    "judge_acceptance_result",
     "validate_same_graph_revision",
     "validate_planner_target_binding",
 ]

@@ -5,7 +5,7 @@
 
 版本：v1.1
 日期：2026-07-10
-状态：`READY_FOR_EXECUTION`（TASK-0461～TASK-0470 已 `DONE`；其余任务按依赖 Gate 推进）
+状态：`READY_FOR_EXECUTION`（TASK-0461～TASK-0471 已 `DONE`；其余任务按依赖 Gate 推进）
 文档类型：DevTasks / Execution Contract
 任务编号：`TASK-0461`～`TASK-0486`
 逻辑工作包：`LTE-WP-00`～`LTE-WP-80`
@@ -417,7 +417,7 @@ Pop-Location
 | TASK-0468 | WP-22 / PR-008 | Planner Adapters | WP-20 | 2–3 日 | 高 | DONE |
 | TASK-0469 | WP-23 / PR-009 | Shadow Scheduler | WP-01/21/22 | 4–6 日 | 高 | DONE |
 | TASK-0470 | WP-30 / PR-010 | Verification Gate | WP-23 | 3–4 日 | 高 | DONE |
-| TASK-0471 | WP-31 / PR-011 | Acceptance Judge | WP-30 | 2–3 日 | 高 | PLANNED |
+| TASK-0471 | WP-31 / PR-011 | Acceptance Judge | WP-30 | 2–3 日 | 高 | DONE |
 | TASK-0472 | WP-32 / PR-012 | Review / Resume | WP-21/23 | 3–5 日 | 高 | PLANNED |
 | TASK-0473 | WP-24 / PR-013 | Canonical 主链切流 | WP-31/32 | 2–4 日 | 极高 | PLANNED |
 | TASK-0474 | WP-40 / PR-014 | Runtime Event / SSE Replay | WP-24 | 3–5 日 | 高 | PLANNED |
@@ -603,15 +603,15 @@ Pop-Location
 
 ### TASK-0471 / LTE-WP-31：Acceptance Criteria 与 Judge
 
-- 状态：`PLANNED`
+- 状态：`DONE`
 - 目标：逐项判定 acceptance criteria，将确定性证据、Critic 候选与最终 Judge 决策分层。
-- 代码事实：当前 acceptance criteria 主要作为 prompt 内容，没有逐项可回放判定。
+- 完成事实：新增 `AcceptanceJudgement` / criterion verdict 合同、deterministic evaluator、Critic candidate 分层和 final decision；Executor 对有 acceptance criteria 的结果写入 `acceptance`；`DurableTaskStore.transition_node(... ACCEPTED ...)` 必须携带 `ACCEPT` judgement、PASS criteria、graph/node/work_order 绑定与 outbox evidence refs。
 - 前置任务：TASK-0470。
 - In Scope：criteria schema、deterministic evaluators、evidence matrix、Judge verdict。
 - Out of Scope：新增自由行动 LLM Agent、ReviewStore。
 - 主要路径：`host_brain/agent_runtime/generic_evidence_reviewer.py`、`result_contract.py`、`executor.py`、tests。
 - 输出：criterion-level verdict 与 `ACCEPT|RETRY|SPLIT|REVIEW|FAIL` 决策。
-- 验收：T-NLE-09；每条 verdict 有 evidence ref；确定性 FAIL 不可被 LLM 改为 ACCEPT。
+- 验收：T-NLE-09 已通过；每条 verdict 有 evidence ref；确定性 FAIL 不可被 LLM/critic candidate 改为 ACCEPT。
 - 关联需求/测试：FR-NLE-003；T-NLE-09。
 - 停止条件：Judge 无法区分“执行成功”和“符合验收”。
 - 回滚：回到 deterministic verification-only 并阻止自动 ACCEPT；不放宽门禁。

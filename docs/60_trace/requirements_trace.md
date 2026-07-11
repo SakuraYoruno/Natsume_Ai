@@ -9,8 +9,9 @@
 ## 维护记录（2026-07-11）
 
 - 本次增量：TASK-0470 / T-NLE-08 完成，Verification 从报告字段升级为 fail-closed 状态门；命令验证增加 allowlist、timeout、workspace policy 与结构化 reason code。
-- 状态口径：M48-A 的 TASK-0461～TASK-0470 已完成，TASK-0471～0486 仍按依赖 Gate 保持 PLANNED；M48-B～M57 的 TASK-0487～0622 为 PROGRAMMED 且尚未解锁实施。
-- 代码状态：`VerificationResult` schema 更严格；`DurableTaskStore.transition_node` 对 `VERIFIED/VERIFICATION_FAILED` 强制验证结果、graph/node/work_order 绑定与 outbox evidence refs；Executor 对 required verification 非 PASS 返回 `BLOCKED`，不再把验证失败的执行结果作为可验收完成。
+- 本次增量：TASK-0471 / T-NLE-09 完成，Acceptance Judge 具备 criterion verdict、evidence refs、Critic candidate 分层与 final decision；`ACCEPTED` 状态需要 `ACCEPT` judgement。
+- 状态口径：M48-A 的 TASK-0461～TASK-0471 已完成，TASK-0472～0486 仍按依赖 Gate 保持 PLANNED；M48-B～M57 的 TASK-0487～0622 为 PROGRAMMED 且尚未解锁实施。
+- 代码状态：`VerificationResult` schema 更严格；`DurableTaskStore.transition_node` 对 `VERIFIED/VERIFICATION_FAILED` 强制验证结果、graph/node/work_order 绑定与 outbox evidence refs；Executor 对 required verification 非 PASS 返回 `BLOCKED`。新增 `AcceptanceJudgement` schema；`DurableTaskStore.transition_node` 对 `ACCEPTED` 强制 acceptance judgement 与 evidence refs；Executor 对 acceptance criteria 生成 `acceptance` 决策，不再把执行成功等同于验收成功。
 
 ## 维护记录（2026-07-10）
 

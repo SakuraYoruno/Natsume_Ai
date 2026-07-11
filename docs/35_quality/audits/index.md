@@ -29,6 +29,7 @@
 - `NLE_WP22_TASK0468_VALIDATION_20260710.md`：same-revision Planner adapters、dependency refs、Child WorkOrder request 与 shadow-only 验收证据。
 - `NLE_WP23_TASK0469_VALIDATION_20260711.md`：read-only Canonical Scheduler shadow、durable snapshot、retry/recovery/budget 与 legacy diff 验收证据。
 - `NLE_WP30_TASK0470_VALIDATION_20260711.md`：fail-closed Verification runner、required gate、TaskStore 状态门与 T-NLE-08 验收证据。
+- `NLE_WP31_TASK0471_VALIDATION_20260711.md`：AcceptanceJudgement、criterion verdict、Executor acceptance 字段、TaskStore ACCEPTED 状态门与 T-NLE-09 验收证据。
 - `RUNTIME_CHAIN_ACCEPTANCE_20260531.md`
 - `MEMORY_SYSTEM_INTEGRITY_TEST_20260531.md`
 - `audit_report_20260311.md`

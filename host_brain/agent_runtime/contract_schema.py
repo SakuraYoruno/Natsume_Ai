@@ -15,7 +15,15 @@ from host_brain.agent_runtime.budget_policy import (
     BudgetReservation,
     BudgetReservationStatus,
 )
+from host_brain.agent_runtime.acceptance_judge import (
+    ACCEPTANCE_JUDGEMENT_SCHEMA_VERSION,
+    AcceptanceCriterionStatus,
+    AcceptanceCriterionVerdict,
+    AcceptanceDecision,
+    AcceptanceJudgement,
+)
 from host_brain.agent_runtime.contract_errors import (
+    ACCEPTANCE_JUDGEMENT_INVALID,
     BUDGET_POLICY_INVALID,
     BUDGET_RESERVATION_INVALID,
     BUDGET_TRANSITION_INVALID,
@@ -97,6 +105,31 @@ def build_contract_schema_snapshot() -> dict[str, Any]:
     """Return the frozen wire-surface snapshot used by T-NLE-04."""
 
     contracts = {
+        "AcceptanceCriterionVerdict": _entry(
+            AcceptanceCriterionVerdict,
+            schema_version=None,
+            required_fields=[
+                "criterion_id",
+                "criterion_text",
+                "verdict",
+                "evidence_refs",
+                "deterministic",
+            ],
+            enum_fields={"verdict": AcceptanceCriterionStatus},
+        ),
+        "AcceptanceJudgement": _entry(
+            AcceptanceJudgement,
+            schema_version=ACCEPTANCE_JUDGEMENT_SCHEMA_VERSION,
+            required_fields=[
+                "schema_version",
+                "judgement_id",
+                "work_order_id",
+                "decision",
+                "criteria",
+                "evidence_refs",
+            ],
+            enum_fields={"decision": AcceptanceDecision},
+        ),
         "BudgetAmount": _entry(
             BudgetAmount,
             schema_version=None,
@@ -250,6 +283,7 @@ def build_contract_schema_snapshot() -> dict[str, Any]:
     }
     reason_codes = sorted(
         {
+            ACCEPTANCE_JUDGEMENT_INVALID,
             BUDGET_POLICY_INVALID,
             BUDGET_RESERVATION_INVALID,
             BUDGET_TRANSITION_INVALID,

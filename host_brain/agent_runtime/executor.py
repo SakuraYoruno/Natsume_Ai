@@ -11,6 +11,11 @@ from host_brain.core.subprocess_utils import run as _subprocess_run
 import sys
 from typing import Any
 
+from host_brain.agent_runtime.acceptance_judge import (
+    ACCEPTANCE_CRITERION_FAILED,
+    AcceptanceDecision,
+    judge_acceptance_result,
+)
 from host_brain.agent_runtime.agent_executor import AgentExecutor, agent_enabled
 from host_brain.agent_runtime.artifact_store import AgentArtifactStore
 from host_brain.agent_runtime.prompt_profiles import build_agent_prompt, prompt_profile_name
@@ -208,6 +213,42 @@ def _apply_required_verification_gate(result: AgentResult, order: AgentWorkOrder
         "reason_code": reason,
     }
     result.metadata = metadata
+    return result
+
+
+def _apply_acceptance_judge(result: AgentResult, order: AgentWorkOrder) -> AgentResult:
+    if not order.acceptance_criteria:
+        return result
+    critic_candidate = None
+    if isinstance(result.metadata.get("acceptance_critic"), dict):
+        critic_candidate = dict(result.metadata.get("acceptance_critic") or {})
+    judgement = judge_acceptance_result(
+        result.to_dict(),
+        work_order_id=order.work_order_id,
+        acceptance_criteria=tuple(order.acceptance_criteria),
+        critic_candidate=critic_candidate,
+        task_graph_id=str(order.metadata.get("task_graph_id") or "").strip() or None,
+        task_node_id=str(order.metadata.get("task_node_id") or "").strip() or None,
+        attempt_id=str(order.metadata.get("attempt_id") or "").strip() or None,
+        started_at_ms=None,
+        finished_at_ms=now_ms(),
+    )
+    result.acceptance = judgement.to_dict()
+    metadata = dict(result.metadata or {})
+    metadata["acceptance_judge"] = {
+        "decision": judgement.decision.value,
+        "reason_code": judgement.reason_code,
+        "criterion_count": len(judgement.criteria),
+    }
+    result.metadata = metadata
+    if judgement.decision is AcceptanceDecision.FAIL and result.status == "EXECUTED":
+        result.status = "FAILED"
+        result.summary = "Agent WorkOrder failed acceptance criteria."
+        result.reason_code = ACCEPTANCE_CRITERION_FAILED
+        result.detail = f"acceptance decision={judgement.decision.value} reason_code={judgement.reason_code}"
+        result.risk_flags = list(dict.fromkeys([*result.risk_flags, "acceptance_failed"]))
+    elif judgement.decision is AcceptanceDecision.REVIEW:
+        result.review_required = True
     return result
 
 
@@ -422,6 +463,7 @@ class AgentRuntimeExecutor:
             self.artifact_store.write_json(run_dir / "changed_files.json", git_summary)
             self.artifact_store.write_json(run_dir / "verification.json", verification)
             agent_result = _apply_required_verification_gate(agent_result, order)
+            agent_result = _apply_acceptance_judge(agent_result, order)
             self._persist_result(run_dir, agent_result, order=order, event_id=event_id, ts_ms=ts)
             return agent_result.to_dict()
 
@@ -583,6 +625,7 @@ class AgentRuntimeExecutor:
                 detail=str(exc),
             )
         result = _apply_required_verification_gate(result, order)
+        result = _apply_acceptance_judge(result, order)
         self._persist_result(run_dir, result, order=order, event_id=event_id, ts_ms=ts)
         return result.to_dict()
 

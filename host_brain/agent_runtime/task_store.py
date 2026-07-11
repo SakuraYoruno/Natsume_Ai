@@ -41,6 +41,10 @@ from host_brain.agent_runtime.budget_policy import (
     BudgetReservationStatus,
     validate_budget_transition,
 )
+from host_brain.agent_runtime.acceptance_judge import (
+    AcceptanceGate,
+    AcceptanceJudgement,
+)
 from host_brain.agent_runtime.contract_errors import ContractViolation
 from host_brain.agent_runtime.task_graph import (
     TaskGraph,
@@ -800,6 +804,7 @@ class DurableTaskStore:
         target_status: TaskNodeStatus | str,
         outbox: OutboxMessage,
         verification_result: VerificationResult | Mapping[str, Any] | None = None,
+        acceptance_judgement: AcceptanceJudgement | Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         ts_ms = self._now()
         with self._transaction() as conn:
@@ -811,6 +816,7 @@ class DurableTaskStore:
                     TASK_STORE_INVALID,
                     "node cancellation must use request_cancel_node for atomic fencing",
                 )
+            node_payload = _validated_node_payload(row)
             if target in {TaskNodeStatus.VERIFIED, TaskNodeStatus.VERIFICATION_FAILED}:
                 graph_row = self._require_graph(conn, graph_id, graph_revision)
                 try:
@@ -824,7 +830,20 @@ class DurableTaskStore:
                     )
                 except ContractViolation as exc:
                     raise TaskStoreError(exc.reason_code, exc.detail) from exc
-            node_payload = _validated_node_payload(row)
+            if target is TaskNodeStatus.ACCEPTED:
+                graph_row = self._require_graph(conn, graph_id, graph_revision)
+                try:
+                    AcceptanceGate.validate_node_transition(
+                        acceptance_judgement,
+                        target_status=target.value,
+                        graph_id=str(graph_id),
+                        node_id=str(node_id),
+                        root_work_order_id=str(graph_row["root_work_order_id"]),
+                        node_acceptance_criteria=tuple(node_payload.get("acceptance_criteria") or ()),
+                        outbox_evidence_refs=outbox.evidence_refs,
+                    )
+                except ContractViolation as exc:
+                    raise TaskStoreError(exc.reason_code, exc.detail) from exc
             node_payload["status"] = target.value
             node_payload["status_version"] = int(expected_version) + 1
             cancel_ts = ts_ms if target is TaskNodeStatus.CANCEL_REQUESTED else row["cancellation_requested_ts_ms"]

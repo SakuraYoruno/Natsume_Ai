@@ -21,6 +21,12 @@ from host_brain.agent_runtime.budget_policy import (
     BudgetReservation,
     BudgetReservationStatus,
 )
+from host_brain.agent_runtime.acceptance_judge import (
+    ACCEPTANCE_EVIDENCE_REQUIRED,
+    ACCEPTANCE_REQUIRED_NOT_ACCEPTED,
+    AcceptanceJudgement,
+    judge_acceptance_result,
+)
 import host_brain.agent_runtime.task_store as task_store_module
 from host_brain.agent_runtime.job_registry import AgentJobRegistry
 from host_brain.agent_runtime.task_graph import (
@@ -210,6 +216,26 @@ def _verification_result(
     )
 
 
+def _acceptance_judgement(*, returncode: int = 0) -> AcceptanceJudgement:
+    return judge_acceptance_result(
+        {
+            "status": "EXECUTED",
+            "work_order_id": "work-order::graph-1",
+            "summary": "Agent WorkOrder executed.",
+            "result_text": "exit code is zero",
+            "verification": {
+                "status": "PASS",
+                "evidence_refs": ["verification://verify-pass/check/1/pass"],
+            },
+            "metadata": {"returncode": returncode},
+        },
+        work_order_id="work-order::graph-1",
+        acceptance_criteria=("exit code is zero",),
+        task_graph_id="graph-1",
+        task_node_id="node-1",
+    )
+
+
 def _create_attempt(
     store: DurableTaskStore,
     *,
@@ -343,6 +369,75 @@ def test_t_nle_08_verified_transition_requires_pass_result_and_bound_evidence(tm
         if event["event_type"] == "TASK_NODE_VERIFIED"
     ]
     assert verified_events[-1]["evidence_refs"] == list(verification.evidence_refs)
+
+
+def test_t_nle_09_accepted_transition_requires_acceptance_judgement_and_evidence(tmp_path: Path) -> None:
+    store = _migrated_store(tmp_path)
+    store.create_graph(
+        _graph(node_status=TaskNodeStatus.WAITING_ACCEPTANCE_REVIEW),
+        outbox=_event("TASK_GRAPH", "graph-1", 0, "TASK_GRAPH_CREATED"),
+    )
+    passing = _acceptance_judgement(returncode=0)
+    failing = _acceptance_judgement(returncode=1)
+
+    with pytest.raises(TaskStoreError) as missing_judgement:
+        store.transition_node(
+            "graph-1",
+            1,
+            "node-1",
+            expected_version=0,
+            target_status=TaskNodeStatus.ACCEPTED,
+            outbox=_event("TASK_NODE", "graph-1@1/node-1", 1, "TASK_NODE_ACCEPTED"),
+        )
+    assert missing_judgement.value.reason_code == ACCEPTANCE_REQUIRED_NOT_ACCEPTED
+
+    with pytest.raises(TaskStoreError) as failed_judgement:
+        store.transition_node(
+            "graph-1",
+            1,
+            "node-1",
+            expected_version=0,
+            target_status=TaskNodeStatus.ACCEPTED,
+            outbox=_event(
+                "TASK_NODE",
+                "graph-1@1/node-1",
+                1,
+                "TASK_NODE_ACCEPTED",
+                evidence_refs=failing.evidence_refs,
+            ),
+            acceptance_judgement=failing,
+        )
+    assert failed_judgement.value.reason_code == ACCEPTANCE_REQUIRED_NOT_ACCEPTED
+
+    with pytest.raises(TaskStoreError) as missing_evidence:
+        store.transition_node(
+            "graph-1",
+            1,
+            "node-1",
+            expected_version=0,
+            target_status=TaskNodeStatus.ACCEPTED,
+            outbox=_event("TASK_NODE", "graph-1@1/node-1", 1, "TASK_NODE_ACCEPTED"),
+            acceptance_judgement=passing,
+        )
+    assert missing_evidence.value.reason_code == ACCEPTANCE_EVIDENCE_REQUIRED
+
+    accepted = store.transition_node(
+        "graph-1",
+        1,
+        "node-1",
+        expected_version=0,
+        target_status=TaskNodeStatus.ACCEPTED,
+        outbox=_event(
+            "TASK_NODE",
+            "graph-1@1/node-1",
+            1,
+            "TASK_NODE_ACCEPTED",
+            evidence_refs=passing.evidence_refs,
+        ),
+        acceptance_judgement=passing,
+    )
+
+    assert accepted["status"] == "ACCEPTED"
 
 
 def test_t_nle_06_requires_forward_0054_recovery_migration(tmp_path: Path) -> None:

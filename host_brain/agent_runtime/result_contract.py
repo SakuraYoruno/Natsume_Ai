@@ -30,6 +30,7 @@ class AgentResult:
     artifacts_dir: str = ""
     thread_id: str | None = None
     verification: dict[str, Any] = field(default_factory=lambda: {"status": "NOT_RUN"})
+    acceptance: dict[str, Any] = field(default_factory=lambda: {"decision": "NOT_RUN"})
     risk_flags: list[str] = field(default_factory=list)
     review_required: bool = True
     next_actions: list[str] = field(default_factory=list)

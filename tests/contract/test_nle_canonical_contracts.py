@@ -15,6 +15,7 @@ from host_brain.agent_runtime.budget_policy import (
     BudgetReservationStatus,
     validate_budget_transition,
 )
+from host_brain.agent_runtime.acceptance_judge import ACCEPTANCE_JUDGEMENT_SCHEMA_VERSION
 from host_brain.agent_runtime.contract_errors import (
     BUDGET_RESERVATION_INVALID,
     CONTRACT_VERSION_UNSUPPORTED,
@@ -419,6 +420,7 @@ def test_t_nle_04_schema_snapshot_matches_frozen_fixture() -> None:
     assert expected["contracts"]["TaskNode"]["schema_version"] == TASK_NODE_SCHEMA_VERSION
     assert expected["contracts"]["TaskEvent"]["schema_version"] == TASK_EVENT_SCHEMA_VERSION
     assert expected["contracts"]["VerificationResult"]["schema_version"] == VERIFICATION_RESULT_SCHEMA_VERSION
+    assert expected["contracts"]["AcceptanceJudgement"]["schema_version"] == ACCEPTANCE_JUDGEMENT_SCHEMA_VERSION
     assert expected["contracts"]["ReviewItem"]["schema_version"] == REVIEW_ITEM_SCHEMA_VERSION
     assert expected["contracts"]["BudgetPolicy"]["schema_version"] == BUDGET_POLICY_SCHEMA_VERSION
     assert expected["contracts"]["SubAgentSpec"]["schema_version"] == SUB_AGENT_SPEC_SCHEMA_VERSION

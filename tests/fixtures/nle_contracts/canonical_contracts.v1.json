@@ -1,6 +1,18 @@
 {
   "snapshot_version": "Natsume.agent.canonical_contracts.snapshot.v1",
   "contracts": {
+    "AcceptanceCriterionVerdict": {
+      "schema_version": null,
+      "fields": ["criterion_id", "criterion_text", "verdict", "evidence_refs", "deterministic", "reason_code", "critic_verdict"],
+      "required_fields": ["criterion_id", "criterion_text", "verdict", "evidence_refs", "deterministic"],
+      "enum_fields": {"verdict": ["PASS", "FAIL", "UNKNOWN"]}
+    },
+    "AcceptanceJudgement": {
+      "schema_version": "Natsume.agent.acceptance_judgement.v1",
+      "fields": ["judgement_id", "work_order_id", "decision", "criteria", "task_graph_id", "task_node_id", "attempt_id", "reason_code", "evidence_refs", "critic_candidate", "started_at_ms", "finished_at_ms", "schema_version"],
+      "required_fields": ["schema_version", "judgement_id", "work_order_id", "decision", "criteria", "evidence_refs"],
+      "enum_fields": {"decision": ["ACCEPT", "RETRY", "SPLIT", "REVIEW", "FAIL"]}
+    },
     "BudgetAmount": {
       "schema_version": null,
       "fields": ["token_count", "tool_call_count", "time_ms", "concurrency", "retry_count", "model_cost_micros"],
@@ -75,5 +87,5 @@
       "enum_fields": {}
     }
   },
-  "reason_codes": ["BUDGET_POLICY_INVALID", "BUDGET_RESERVATION_INVALID", "BUDGET_TRANSITION_INVALID", "CONTRACT_FIELD_INVALID", "CONTRACT_VERSION_REQUIRED", "CONTRACT_VERSION_UNSUPPORTED", "PLAN_CYCLE", "REVIEW_ITEM_INVALID", "REVIEW_TRANSITION_INVALID", "SUB_AGENT_ADAPTER_INVALID", "SUB_AGENT_LINEAGE_INVALID", "TASK_GRAPH_INVALID", "TASK_TRANSITION_INVALID", "VERIFICATION_RESULT_INVALID"]
+  "reason_codes": ["ACCEPTANCE_JUDGEMENT_INVALID", "BUDGET_POLICY_INVALID", "BUDGET_RESERVATION_INVALID", "BUDGET_TRANSITION_INVALID", "CONTRACT_FIELD_INVALID", "CONTRACT_VERSION_REQUIRED", "CONTRACT_VERSION_UNSUPPORTED", "PLAN_CYCLE", "REVIEW_ITEM_INVALID", "REVIEW_TRANSITION_INVALID", "SUB_AGENT_ADAPTER_INVALID", "SUB_AGENT_LINEAGE_INVALID", "TASK_GRAPH_INVALID", "TASK_TRANSITION_INVALID", "VERIFICATION_RESULT_INVALID"]
 }
