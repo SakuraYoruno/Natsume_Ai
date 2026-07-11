@@ -91,13 +91,17 @@ def test_route_validator_fails_closed_on_missing_or_inconsistent_pair() -> None:
 
 def test_governor_and_tool_broker_share_process_token_service(monkeypatch) -> None:
     import host_brain.app.dependencies as dependencies
+    from host_brain.skills.registry import SkillRegistry
+
+    skill_registry = SkillRegistry()
 
     monkeypatch.setattr(dependencies, "_token_service", None)
     monkeypatch.setattr(dependencies, "_tool_broker", None)
     monkeypatch.setattr(dependencies, "_intent_engine", None)
+    monkeypatch.setattr(dependencies, "_capability_scorecard_provider", None)
     monkeypatch.setattr(dependencies, "get_ledger", lambda: object())
     monkeypatch.setattr(dependencies, "get_tool_catalog", lambda: object())
-    monkeypatch.setattr(dependencies, "get_skill_registry", lambda: object())
+    monkeypatch.setattr(dependencies, "get_skill_registry", lambda: skill_registry)
     monkeypatch.setattr(dependencies, "get_policy_cache", lambda: object())
 
     token_service = dependencies.get_token_service()
