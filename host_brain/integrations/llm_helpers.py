@@ -796,7 +796,7 @@ def _build_minimax_standard_payload(
     params = dict(gen_params or {})
     temperature = float(params.get("temperature", 0.4))
     top_p = float(params.get("top_p", 0.9))
-    max_tokens = None  # None = let API decide (DeepSeek has 1M context)
+    max_tokens = 1024
     for token_key in ("max_tokens", "max_output_tokens", "max_completion_tokens"):
         raw_value = params.get(token_key)
         try:
