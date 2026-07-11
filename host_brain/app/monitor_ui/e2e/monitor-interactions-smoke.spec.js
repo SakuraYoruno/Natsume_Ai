@@ -1807,7 +1807,8 @@ test.describe('Monitor interaction smoke', () => {
     await expect(heroStatus.getByText('存在 High incident')).toBeVisible()
     await expect(heroStatus.getByText('connected')).toBeVisible()
     await expect(heroStatus.getByText('2 assets')).toBeVisible()
-    await expect(heroStatus.getByText('1 high+')).toBeVisible()
+    await expect(heroStatus.getByText('2 open')).toBeVisible()
+    await expect(heroStatus.getByText('1 个 high+ 需要优先处理')).toBeVisible()
 
     const gate = page.getByRole('region', { name: 'Security Immune Gate' })
     await expect(gate).toBeVisible()
