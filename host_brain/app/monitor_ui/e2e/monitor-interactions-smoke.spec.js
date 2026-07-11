@@ -367,6 +367,7 @@ async function stubPathologyCenterApis(page) {
 
 async function stubPentestApis(page) {
   await stubCommonReadApis(page)
+  await stubAuthorizedPentestGovernance(page)
   await page.route('**/v1/pentest/environment**', (route) => fulfillJson(route, {
     lab_mode: false,
     allow_exploit: false,
@@ -397,6 +398,7 @@ async function stubPentestDegradedApis(page) {
 
 async function stubPentestRunDetailApis(page) {
   await stubCommonReadApis(page)
+  await stubAuthorizedPentestGovernance(page)
   await page.addInitScript(() => {
     window.EventSource = class StubEventSource {
       constructor() {
@@ -567,6 +569,19 @@ async function stubPentestRunDetailApis(page) {
   await page.route('**/v1/pentest/runs/smoke-lab-run/approve-side-effect', (route) => fulfillJson(route, approvedRun))
   await page.route('**/v1/pentest/runs/smoke-lab-run/continue-side-effect', (route) => fulfillJson(route, continuedRun))
   await page.route('**/v1/pentest/runs/smoke-lab-run', (route) => fulfillJson(route, baseRun))
+}
+
+async function stubAuthorizedPentestGovernance(page) {
+  await page.route('**/obs/governance/snapshot**', (route) => fulfillJson(route, {
+    schema_version: 'Natsume.governance.snapshot.v1',
+    domain_isolation: {
+      pentest: {
+        lab_mode: true,
+        high_risk_entry_enabled: true,
+        reason_codes: ['AUTHORIZED_LAB'],
+      },
+    },
+  }))
 }
 
 async function stubSecurityImmuneApis(page) {
