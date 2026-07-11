@@ -49,6 +49,10 @@ from host_brain.memory.canon_world_store import (
     _normalize_tags,
     compute_world_canon_hash,
 )
+from host_brain.observability.degradation_state import (
+    DegradationStateError,
+    require_degradation_capability,
+)
 
 
 JOURNAL_PREPARED = "PREPARED"
@@ -580,6 +584,15 @@ class CanonApplyService:
     def apply(self, command: CanonApplyCommand) -> CanonApplyResult:
         if not isinstance(command, CanonApplyCommand):
             raise TypeError("command must be CanonApplyCommand")
+        try:
+            require_degradation_capability(
+                capability_id="canon_apply",
+                static_risk_level=5,
+            )
+        except DegradationStateError as exc:
+            # Preserve Canon's stable machine-readable boundary contract while
+            # ensuring no clock, journal, token burn, or file mutation happens.
+            raise CanonApplyError(exc.reason_code, exc.detail) from exc
         now_value = self._clock_ms()
         prepared = self._prepare(command, now_value)
         self._fault("after_prepare", command.apply_id)

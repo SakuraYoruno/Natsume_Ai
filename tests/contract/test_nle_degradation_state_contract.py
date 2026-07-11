@@ -3,10 +3,20 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
+import sqlite3
 
 import pytest
 
+from host_brain.agent_runtime.review_policy import (
+    ReviewItem,
+    ReviewResumePhase,
+    ReviewStatus,
+    ReviewType,
+)
+from host_brain.agent_runtime.review_store import ReviewStore
 from host_brain.core.resource_manager import assess_background_task_pressure
+from host_brain.integrations.runtime_events import RuntimeEventStore
 from host_brain.observability.degradation_state import (
     DEGRADATION_DEGRADED,
     DEGRADATION_ENTERED,
@@ -19,11 +29,14 @@ from host_brain.observability.degradation_state import (
     DegradationStateMachine,
     FAULT_POLICIES,
     build_fault_injection_matrix,
+    degradation_policy_config,
+    evaluate_degradation_front_door,
     get_degradation_state,
     reconcile_service_observations,
     reconcile_startup_statuses,
     run_isolated_fault_injection_matrix,
 )
+from host_brain.tribe.event_bus import InMemoryTribeEventBus
 
 
 def _enter(machine: DegradationStateMachine, dependency: str = "MODEL", now_ms: int = 1000):
@@ -36,6 +49,15 @@ def _enter(machine: DegradationStateMachine, dependency: str = "MODEL", now_ms: 
         detail="fake failure",
         injected=True,
     )
+
+
+def _durable_db(tmp_path: Path) -> Path:
+    db_path = tmp_path / "degradation.sqlite3"
+    migrations = Path(__file__).resolve().parents[2] / "host_brain" / "audit" / "migrations"
+    with sqlite3.connect(str(db_path)) as conn:
+        for name in ("0055_agent_runtime_review_store.sql", "0056_runtime_events.sql"):
+            conn.executescript((migrations / name).read_text(encoding="utf-8"))
+    return db_path
 
 
 def test_t_nle_19_initial_read_model_is_versioned_and_read_only() -> None:
@@ -140,7 +162,9 @@ def test_t_nle_19_healthy_probe_recovers_dependency_but_does_not_expand_capabili
     assert gate["can_reduce_risk"] is False
 
 
-def test_t_nle_19_only_approved_review_can_release_recovered_restrictions() -> None:
+def test_t_nle_19_only_bound_one_time_review_can_release_recovered_restrictions(
+    tmp_path: Path,
+) -> None:
     machine = DegradationStateMachine()
     _enter(machine)
     machine.recover_dependency(
@@ -150,27 +174,71 @@ def test_t_nle_19_only_approved_review_can_release_recovered_restrictions() -> N
         now_ms=1001,
     )
 
+    db_path = tmp_path / "review.sqlite3"
+    migration = (
+        Path(__file__).resolve().parents[2]
+        / "host_brain"
+        / "audit"
+        / "migrations"
+        / "0055_agent_runtime_review_store.sql"
+    )
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.executescript(migration.read_text(encoding="utf-8"))
+    store = ReviewStore(db_path, clock=lambda: 1_002)
+    binding = machine.recovery_review_binding("MODEL")
+    store.create_review(
+        ReviewItem(
+            review_id="review-model-recovery",
+            review_type=ReviewType.PRE_EXECUTION_APPROVAL,
+            subject_ref=binding["subject_ref"],
+            subject_version=binding["subject_version"],
+            requester="degradation-state",
+            reason="evidence-backed capability recovery",
+            risk_level=5,
+            side_effects=tuple(binding["side_effects"]),
+            evidence_refs=tuple(binding["evidence_refs"]),
+            status=ReviewStatus.PENDING,
+            expires_at=60_000,
+            resume_phase=ReviewResumePhase.PRE_EXECUTION,
+            checkpoint_id=binding["checkpoint_id"],
+        )
+    )
     with pytest.raises(DegradationStateError) as review_required:
         machine.acknowledge_recovery(
             dependency_id="MODEL",
-            review_approved=False,
-            evidence_refs=("review-evidence://model/rejected",),
-            reviewer_ref="reviewer://monitor/operator",
+            review_store=store,
+            review_id="review-model-recovery",
+            resume_token_ref="review_resume::invalid",
             now_ms=1002,
         )
-    assert review_required.value.reason_code == "DEGRADATION_REVIEW_REQUIRED"
-
+    assert machine.snapshot().status == DEGRADATION_RECOVERY_PENDING
+    approved = store.approve_review(
+        "review-model-recovery",
+        actor_id="operator",
+        expected_subject_ref=binding["subject_ref"],
+        expected_subject_version=binding["subject_version"],
+        expected_resume_phase=ReviewResumePhase.PRE_EXECUTION,
+        expected_checkpoint_id=binding["checkpoint_id"],
+    )
     transition = machine.acknowledge_recovery(
         dependency_id="MODEL",
-        review_approved=True,
-        evidence_refs=("review-evidence://model/approved",),
-        reviewer_ref="reviewer://monitor/operator",
+        review_store=store,
+        review_id="review-model-recovery",
+        resume_token_ref=approved["resume_token_ref"],
         now_ms=1003,
     )
     state = machine.snapshot().as_dict()
     assert transition.current_state == DEGRADATION_HEALTHY
     assert state["status"] == DEGRADATION_HEALTHY
     assert state["affected_capabilities"] == ()
+    with pytest.raises(DegradationStateError):
+        machine.acknowledge_recovery(
+            dependency_id="MODEL",
+            review_store=store,
+            review_id="review-model-recovery",
+            resume_token_ref=approved["resume_token_ref"],
+            now_ms=1004,
+        )
 
 
 def test_t_nle_19_service_observation_matrix_enters_and_recovers_without_external_io() -> None:
@@ -331,3 +399,133 @@ def test_t_nle_19_duplicate_concurrent_failure_is_one_transition() -> None:
     assert sum(item is not None for item in transitions) == 1
     assert machine.snapshot().revision == 1
     assert len(machine.runtime_events()) == 1
+
+
+def test_t_nle_19_durable_replay_preserves_latch_and_review_ack_across_restart(
+    tmp_path: Path,
+) -> None:
+    db_path = _durable_db(tmp_path)
+    first = DegradationStateMachine(event_store=RuntimeEventStore(db_path))
+    _enter(first, dependency="MEMORY")
+    first.recover_dependency(
+        dependency_id="MEMORY",
+        status="UP",
+        evidence_refs=("probe-evidence://memory/up/1001",),
+        source_ref="probe-source://memory/1001",
+        now_ms=1001,
+    )
+
+    restored = DegradationStateMachine(event_store=RuntimeEventStore(db_path))
+    assert restored.snapshot().status == DEGRADATION_RECOVERY_PENDING
+    assert restored.snapshot().restored_event_count == 2
+    assert restored.evaluate_capability(
+        capability_id="memory_write", static_risk_level=4
+    )["decision"] == "BLOCK"
+
+    review_store = ReviewStore(db_path, clock=lambda: 1002)
+    binding = restored.recovery_review_binding("MEMORY")
+    review_store.create_review(
+        ReviewItem(
+            review_id="review-memory-recovery",
+            review_type=ReviewType.PRE_EXECUTION_APPROVAL,
+            subject_ref=binding["subject_ref"],
+            subject_version=binding["subject_version"],
+            requester="degradation-state",
+            reason="restart-safe recovery",
+            risk_level=5,
+            side_effects=tuple(binding["side_effects"]),
+            evidence_refs=tuple(binding["evidence_refs"]),
+            status=ReviewStatus.PENDING,
+            expires_at=60_000,
+            resume_phase=ReviewResumePhase.PRE_EXECUTION,
+            checkpoint_id=binding["checkpoint_id"],
+        )
+    )
+    approved = review_store.approve_review(
+        "review-memory-recovery",
+        actor_id="operator",
+        expected_subject_ref=binding["subject_ref"],
+        expected_subject_version=binding["subject_version"],
+        expected_resume_phase=ReviewResumePhase.PRE_EXECUTION,
+        expected_checkpoint_id=binding["checkpoint_id"],
+    )
+    restored.acknowledge_recovery(
+        dependency_id="MEMORY",
+        review_store=review_store,
+        review_id="review-memory-recovery",
+        resume_token_ref=approved["resume_token_ref"],
+        now_ms=1003,
+    )
+    final = DegradationStateMachine(event_store=RuntimeEventStore(db_path))
+    assert final.snapshot().status == DEGRADATION_HEALTHY
+    assert final.snapshot().restored_event_count == 3
+
+
+def test_t_nle_19_durable_append_precedes_event_bus_notification(tmp_path: Path) -> None:
+    db_path = _durable_db(tmp_path)
+    store = RuntimeEventStore(db_path)
+
+    class CheckingBus(InMemoryTribeEventBus):
+        def publish(self, event):  # type: ignore[no-untyped-def]
+            assert len(store.list_events_for_aggregates(
+                aggregate_refs=(("DEGRADATION_STATE", "runtime-degradation"),)
+            )) == 1
+            return super().publish(event)
+
+    bus = CheckingBus()
+    machine = DegradationStateMachine(event_store=store, event_bus=bus)
+    _enter(machine, dependency="TTS")
+    assert bus.recent(limit=1)[0].event_type == DEGRADATION_ENTERED
+    assert machine.snapshot().durability_status == "READY"
+
+
+def test_t_nle_19_corrupt_replay_and_unavailable_state_fail_closed(tmp_path: Path) -> None:
+    db_path = _durable_db(tmp_path)
+    machine = DegradationStateMachine(event_store=RuntimeEventStore(db_path))
+    _enter(machine)
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.execute(
+            "UPDATE runtime_event_timeline SET aggregate_version = 3 "
+            "WHERE aggregate_type = 'DEGRADATION_STATE'"
+        )
+    corrupted = DegradationStateMachine(event_store=RuntimeEventStore(db_path))
+    assert corrupted.snapshot().durability_status == "FAILED"
+    assert corrupted.evaluate_capability(
+        capability_id="high_risk_execution", static_risk_level=5
+    )["reason_code"] == "DEGRADATION_STATE_UNAVAILABLE"
+
+    unavailable = DegradationStateMachine(durability_required=True)
+    assert unavailable.evaluate_capability(
+        capability_id="canon_apply", static_risk_level=5
+    )["decision"] == "BLOCK"
+
+
+def test_t_nle_19_invalid_disabled_flags_and_upstream_policy_are_restrict_only(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    machine = DegradationStateMachine()
+    monkeypatch.setenv("HOST_DEGRADATION_STATE_ENABLED", "garbage")
+    assert degradation_policy_config()["status"] == "INVALID_FAIL_CLOSED"
+    invalid = evaluate_degradation_front_door(
+        capability_id="canon_apply",
+        static_risk_level=5,
+        machine=machine,
+    )
+    assert invalid["allowed"] is False
+    assert invalid["reason_code"] == "DEGRADATION_POLICY_INVALID"
+
+    monkeypatch.setenv("HOST_DEGRADATION_STATE_ENABLED", "true")
+    upstream = evaluate_degradation_front_door(
+        capability_id="model_inference",
+        static_risk_level=1,
+        capability_policy_decision={
+            "decision": "BLOCK",
+            "allowed": False,
+            "reason_code": "CAPABILITY_POLICY_DENIED",
+            "effective_risk_level": 4,
+        },
+        machine=machine,
+    )
+    assert upstream["allowed"] is False
+    assert upstream["reason_code"] == "CAPABILITY_POLICY_DENIED"
+    assert upstream["effective_risk_level"] == 4

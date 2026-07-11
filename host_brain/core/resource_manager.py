@@ -244,6 +244,16 @@ def _apply_degradation_state_gate(
     static_risk_level: int,
 ) -> dict[str, Any]:
     state = _as_dict(degradation_state)
+    unavailable = bool(
+        state.get("state_read_failed")
+        or str(state.get("status") or "").upper() == "UNAVAILABLE"
+        or (
+            bool(state.get("durability_required"))
+            and str(state.get("durability_status") or "").upper() != "READY"
+        )
+        or str(state.get("policy_status") or "").upper()
+        in {"INVALID_FAIL_CLOSED", "DISABLED_RESTRICTED"}
+    )
     raw_restrictions = state.get("capability_restrictions")
     restrictions = [
         _as_dict(row)
@@ -261,17 +271,19 @@ def _apply_degradation_state_gate(
         ),
         None,
     )
-    if not capability_id or restriction is None:
+    if not capability_id:
         return decision
-    high_risk = bool(restriction.get("high_risk")) or int(static_risk_level) >= 3
+    if restriction is None and not (unavailable and int(static_risk_level) >= 3):
+        return decision
+    high_risk = unavailable or bool(restriction and restriction.get("high_risk")) or int(static_risk_level) >= 3
     out = dict(decision)
     out["degradation_state_revision"] = state.get("revision")
     out["degradation_status"] = state.get("status")
     out["degradation_capability_id"] = capability_id
     out["degradation_restriction"] = {
-        "status": restriction.get("status"),
-        "origin_dependencies": list(restriction.get("origin_dependencies") or []),
-        "safe_fallbacks": list(restriction.get("safe_fallbacks") or []),
+        "status": restriction.get("status") if restriction else "UNAVAILABLE",
+        "origin_dependencies": list(restriction.get("origin_dependencies") or []) if restriction else [],
+        "safe_fallbacks": list(restriction.get("safe_fallbacks") or []) if restriction else [],
         "automatic_release": False,
         "permission_effect": "RESTRICT_ONLY",
     }
@@ -280,8 +292,16 @@ def _apply_degradation_state_gate(
             {
                 "allowed": False,
                 "decision": "defer",
-                "reason_code": "DEPENDENCY_DEGRADED_HIGH_RISK_BLOCKED",
-                "detail": "affected high-risk capability is disabled by DegradationState",
+                "reason_code": (
+                    "DEGRADATION_STATE_UNAVAILABLE"
+                    if unavailable
+                    else "DEPENDENCY_DEGRADED_HIGH_RISK_BLOCKED"
+                ),
+                "detail": (
+                    "DegradationState could not be read; high-risk work fails closed"
+                    if unavailable
+                    else "affected high-risk capability is disabled by DegradationState"
+                ),
                 "retry_after_s": max(int(out.get("retry_after_s") or 0), 300),
             }
         )
@@ -711,8 +731,14 @@ class SystemResourceManager:
             from host_brain.observability.degradation_state import get_degradation_state  # noqa: PLC0415
 
             degradation_state = get_degradation_state()
-        except Exception:
-            degradation_state = {}
+        except Exception as exc:
+            degradation_state = {
+                "status": "UNAVAILABLE",
+                "durability_required": True,
+                "durability_status": "FAILED",
+                "state_read_failed": True,
+                "error_type": type(exc).__name__,
+            }
         with self._lock:
             return {
                 "running": self._running,
@@ -817,8 +843,14 @@ class SystemResourceManager:
             from host_brain.observability.degradation_state import get_degradation_state  # noqa: PLC0415
 
             degradation_state = get_degradation_state()
-        except Exception:
-            degradation_state = {}
+        except Exception as exc:
+            degradation_state = {
+                "status": "UNAVAILABLE",
+                "durability_required": True,
+                "durability_status": "FAILED",
+                "state_read_failed": True,
+                "error_type": type(exc).__name__,
+            }
         decision = assess_background_task_pressure(
             task_id=task_id,
             pressure=pressure,

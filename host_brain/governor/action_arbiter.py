@@ -10,6 +10,10 @@ from dataclasses import asdict, is_dataclass
 from typing import Any
 
 from host_brain.governor.route_token import validate_governor_route_token
+from host_brain.observability.degradation_state import (
+    evaluate_degradation_front_door,
+    infer_degradation_capability,
+)
 
 
 ACTION_ARBITER_SCHEMA_VERSION = "Natsume.action_arbiter.decision.v1"
@@ -29,6 +33,7 @@ ARBITER_TOKEN_REQUIRED = "ARBITER_TOKEN_REQUIRED"
 ARBITER_SCOPE_MISMATCH = "ARBITER_SCOPE_MISMATCH"
 ARBITER_USER_GOAL_MISMATCH = "ARBITER_USER_GOAL_MISMATCH"
 ARBITER_EXPLICIT_USER_GOAL_PRESERVED = "ARBITER_EXPLICIT_USER_GOAL_PRESERVED"
+ARBITER_DEGRADATION_BLOCKED = "ARBITER_DEGRADATION_BLOCKED"
 
 _EXECUTABLE_ROUTE_TOKENS = frozenset({"GOV_OK_RENDER", "GOV_OK_CACHED", "GOV_OK_RULE"})
 _PAUSED_ROUTE_TOKENS = frozenset({"GOV_AIRLOCK_REVIEW"})
@@ -310,16 +315,58 @@ def arbitrate_action(
         reasons.append("ACTION_ARBITER_DISABLED_GOVERNOR_PRESERVED")
     elif scene_expired:
         reasons.append("SCENE_DECISION_EXPIRED_IGNORED")
-    if not reasons:
-        reasons.append("ARBITER_NO_ADDITIONAL_RESTRICTION")
 
     effective_action_kind = approved_action_kind if binding_valid and approved_action_kind else action_kind
     effective_scope = approved_scope if binding_valid and approved_scope else requested_scope
+    capability_id = infer_degradation_capability(
+        action.get("capability_id"),
+        effective_action_kind,
+        effective_scope,
+        action.get("capability_tags"),
+        default=("high_risk_execution" if effective_risk >= 3 else "general_execution"),
+    )
+    capability_policy_decision = action.get("capability_policy_decision")
+    if not isinstance(capability_policy_decision, Mapping):
+        capability_policy_decision = governor.get("capability_policy_decision")
+    degradation_decision = evaluate_degradation_front_door(
+        capability_id=capability_id,
+        static_risk_level=effective_risk,
+        capability_policy_decision=(
+            capability_policy_decision
+            if isinstance(capability_policy_decision, Mapping)
+            else None
+        ),
+    )
+    degradation_allowed = bool(
+        degradation_decision.get(
+            "allowed",
+            degradation_decision.get("allowed_by_degradation", False),
+        )
+    )
+    if not degradation_allowed:
+        was_already_blocked = decision == ARBITER_BLOCK
+        decision = ARBITER_BLOCK
+        if not was_already_blocked:
+            execution_state = "BLOCKED"
+        reasons.extend(
+            [
+                ARBITER_DEGRADATION_BLOCKED,
+                str(
+                    degradation_decision.get("reason_code")
+                    or "DEGRADATION_STATE_UNAVAILABLE"
+                ),
+            ]
+        )
+        restrictions.append("dependency_degradation_fail_closed")
+    if not reasons:
+        reasons.append("ARBITER_NO_ADDITIONAL_RESTRICTION")
+
     user_goal_preserved = bool(user_goal_matches and (not enabled or (action_matches and scope_matches)))
     seed_payload = {
         "action_kind": effective_action_kind,
         "binding_ref": binding.get("binding_ref"),
         "decision": decision,
+        "degradation_decision": degradation_decision.get("decision"),
         "governor": governor_status,
         "risk": effective_risk,
         "route_token": route_token,
@@ -355,6 +402,8 @@ def arbitrate_action(
         ),
         "scene_expired": scene_expired,
         "restrictions": restrictions,
+        "degradation_capability_id": capability_id,
+        "degradation_decision": degradation_decision,
         "explicit_user_goal": explicit_user_goal,
         "user_goal_ref": str(intent.get("goal_ref") or scene.get("user_goal_ref") or "").strip(),
         "user_goal_preserved": user_goal_preserved,

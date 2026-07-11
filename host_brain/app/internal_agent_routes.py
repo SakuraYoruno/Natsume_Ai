@@ -32,6 +32,10 @@ from host_brain.integrations.runtime_events import (
     RuntimeEventError,
     RuntimeEventStore,
 )
+from host_brain.observability.degradation_state import (
+    DegradationStateError,
+    require_degradation_capability,
+)
 
 router = APIRouter(prefix="/internal/codex", tags=["internal-codex"])
 
@@ -99,6 +103,27 @@ def _raise_review_store_error(exc: ReviewStoreError) -> None:
 def _raise_runtime_event_error(exc: RuntimeEventError) -> None:
     status = 503 if exc.reason_code == "RUNTIME_EVENT_SCHEMA_NOT_READY" else 400
     raise HTTPException(status_code=status, detail=exc.to_dict())
+
+
+def _require_degradation_http(
+    *,
+    capability_id: str,
+    static_risk_level: int,
+) -> dict[str, Any]:
+    try:
+        return require_degradation_capability(
+            capability_id=capability_id,
+            static_risk_level=static_risk_level,
+        )
+    except DegradationStateError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "reason_code": exc.reason_code,
+                "detail": exc.detail,
+                "capability_id": capability_id,
+            },
+        ) from exc
 
 
 def _runtime_event_next_cursor(events: list[dict[str, Any]], *, after: int) -> int:
@@ -438,6 +463,10 @@ async def reject_review(review_id: str, payload: dict[str, Any] | None = Body(de
 
 @router.post("/reviews/{review_id}/resume")
 async def resume_review(review_id: str, payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
+    _require_degradation_http(
+        capability_id="remote_review_resume",
+        static_risk_level=4,
+    )
     body = _mapping(payload)
     try:
         resume = _get_review_store().resume_review(
@@ -514,6 +543,10 @@ async def stream_runtime_events_sse(
     source_kind: str | None = Query(None),
     last_event_id: str | None = Header(default=None, alias="Last-Event-ID"),
 ) -> StreamingResponse:
+    _require_degradation_http(
+        capability_id="runtime_event_stream",
+        static_risk_level=3,
+    )
     _require_runtime_event_replay_enabled()
     replay_after = _runtime_event_replay_after(after=after, last_event_id=last_event_id)
     try:

@@ -30,6 +30,9 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from host_brain.core.ids import new_request_id, now_ms
+from host_brain.observability.degradation_state import (
+    evaluate_degradation_front_door,
+)
 
 _logger = logging.getLogger("Natsume.edge_rpc_client")
 _EDGE_CLOCK_OFFSET_TTL_MS = 30_000
@@ -65,6 +68,43 @@ class EdgeRpcCallResult:
             "event": dict(self.event),
             "latency_ms": self.latency_ms,
         }
+
+
+def _edge_degradation_rejection(
+    *,
+    capability_id: str,
+    static_risk_level: int,
+    request_id: str,
+) -> EdgeRpcCallResult | None:
+    """Return a normal RPC rejection without crossing the Edge boundary."""
+    decision = evaluate_degradation_front_door(
+        capability_id=capability_id,
+        static_risk_level=static_risk_level,
+    )
+    allowed = bool(
+        decision.get(
+            "allowed",
+            decision.get("allowed_by_degradation", False),
+        )
+    )
+    if allowed:
+        return None
+    reason_code = str(
+        decision.get("reason_code") or "DEGRADATION_STATE_UNAVAILABLE"
+    )
+    return EdgeRpcCallResult(
+        success=False,
+        status="REJECTED",
+        reason_code=reason_code,
+        detail=f"degradation gate blocked {capability_id}: {reason_code}",
+        event={
+            "request_id": request_id,
+            "capability_id": capability_id,
+            "degradation_decision": dict(decision),
+            "external_side_effects": False,
+        },
+        latency_ms=0,
+    )
 
 
 def _env_bool(name: str, *, default: bool = False) -> bool:
@@ -798,6 +838,14 @@ async def post_vts(
     emotion_tag: 仅 set_expression 时需要（如 HAPPY / SAD / NEUTRAL）
     action_id: body_action 时的动作 ID（如 wave / lean_in / nod）
     """
+    req_id = request_id or new_request_id()
+    blocked = _edge_degradation_rejection(
+        capability_id="avatar_control",
+        static_risk_level=3,
+        request_id=req_id,
+    )
+    if blocked is not None:
+        return blocked
     payload: dict[str, Any] = {"action": str(action).strip().lower()}
     if emotion_tag:
         payload["emotion_tag"] = str(emotion_tag).strip().upper()
@@ -810,7 +858,7 @@ async def post_vts(
     result = await _post_to_edge(
         path="/v1/edge/vts",
         payload=payload,
-        request_id=request_id,
+        request_id=req_id,
     )
     _logger.debug(
         "post_vts action=%s action_id=%s emotion=%s → %s latency=%dms",
@@ -836,6 +884,14 @@ async def post_avatar_behavior(
     interrupted | speaking.  The Edge behavior layer maps this to expression,
     talk state, and optional body action.
     """
+    req_id = request_id or new_request_id()
+    blocked = _edge_degradation_rejection(
+        capability_id="avatar_control",
+        static_risk_level=3,
+        request_id=req_id,
+    )
+    if blocked is not None:
+        return blocked
     payload: dict[str, Any] = {
         "action": "behavior",
         "behavior_id": str(behavior_id or "").strip().lower(),
@@ -855,7 +911,7 @@ async def post_avatar_behavior(
     result = await _post_to_edge(
         path="/v1/edge/vts",
         payload=payload,
-        request_id=request_id,
+        request_id=req_id,
     )
     _logger.debug(
         "post_avatar_behavior behavior_id=%s -> %s latency=%dms",
@@ -1086,6 +1142,13 @@ async def post_speak(
     emotion_intensity: 情感强度 [0,1]（可选，供 TTS/VTS 使用）
     """
     req_id = request_id or new_request_id()
+    blocked = _edge_degradation_rejection(
+        capability_id="voice_output",
+        static_risk_level=3,
+        request_id=req_id,
+    )
+    if blocked is not None:
+        return blocked
     resolved_session_id = str(session_id or "").strip() or f"sess::{req_id}"
     resolved_utterance_id = str(utterance_id or "").strip() or f"utt::{req_id}"
     normalized_text = (

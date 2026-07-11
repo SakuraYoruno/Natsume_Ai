@@ -1,10 +1,9 @@
-"""Unified dependency degradation state for the existing runtime guardians.
+"""Durable, fail-closed dependency degradation state.
 
-The module owns no background thread and performs no external I/O.  Existing
-startup, heartbeat, health and resource-manager paths feed observations into a
-single process-local state machine.  A healthy probe can recover a dependency,
-but it cannot automatically re-enable a capability that was tightened while
-the dependency was unhealthy.
+RuntimeEventStore is the recovery truth.  The in-memory reducer is only a read
+model and EventBus is only a low-latency notification path.  A healthy probe
+never expands capability by itself: recovery is bound to a durable ReviewItem
+and its one-time resume token.
 """
 
 from __future__ import annotations
@@ -18,6 +17,7 @@ import threading
 import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass
+from pathlib import Path
 from types import MappingProxyType
 from typing import Any
 
@@ -42,6 +42,11 @@ DEGRADATION_EVIDENCE_INVALID = "DEGRADATION_EVIDENCE_INVALID"
 DEGRADATION_HEALTH_EVIDENCE_INVALID = "DEGRADATION_HEALTH_EVIDENCE_INVALID"
 DEGRADATION_REVIEW_REQUIRED = "DEGRADATION_REVIEW_REQUIRED"
 DEGRADATION_UNKNOWN_DEPENDENCY = "DEGRADATION_UNKNOWN_DEPENDENCY"
+DEGRADATION_STATE_UNAVAILABLE = "DEGRADATION_STATE_UNAVAILABLE"
+DEGRADATION_DURABLE_EVENT_FAILED = "DEGRADATION_DURABLE_EVENT_FAILED"
+DEGRADATION_REPLAY_INVALID = "DEGRADATION_REPLAY_INVALID"
+DEGRADATION_POLICY_DISABLED = "DEGRADATION_POLICY_DISABLED"
+DEGRADATION_POLICY_INVALID = "DEGRADATION_POLICY_INVALID"
 DEGRADATION_FAULT_INJECTION_NOT_ISOLATED = (
     "DEGRADATION_FAULT_INJECTION_NOT_ISOLATED"
 )
@@ -299,6 +304,11 @@ class DegradationTransition:
     observed_at_ms: int
     injected: bool
     detail_digest: str
+    review_subject_ref: str | None = None
+    review_subject_version: int | None = None
+    review_checkpoint_id: str | None = None
+    review_id: str | None = None
+    resume_result_ref: str | None = None
     permission_effect: str = "RESTRICT_ONLY"
     external_side_effects: bool = False
 
@@ -324,6 +334,13 @@ class DegradationState:
     last_transition: dict[str, Any] | None
     transition_count: int
     policy_enabled: bool
+    policy_status: str = "ENABLED"
+    durability_required: bool = False
+    durability_status: str = "NOT_REQUIRED"
+    restored_event_count: int = 0
+    last_durable_cursor: int = 0
+    last_durable_error: str | None = None
+    event_bus_status: str = "NOT_CONFIGURED"
     read_only: bool = True
     permission_effect: str = "RESTRICT_ONLY"
     recovery_requires_health_evidence: bool = True
@@ -341,6 +358,10 @@ class DegradationStateMachine:
         self,
         *,
         event_sink: Callable[[Any], Any] | None = None,
+        event_store: Any | None = None,
+        event_bus: Any | None = None,
+        durability_required: bool = False,
+        restore_from_store: bool = True,
         max_transition_history: int = 128,
     ) -> None:
         self._lock = threading.RLock()
@@ -354,7 +375,21 @@ class DegradationStateMachine:
         self._history: list[DegradationTransition] = []
         self._events: list[Any] = []
         self._event_sink = event_sink
+        self._event_store = event_store
+        self._event_bus = event_bus
+        self._durability_required = bool(durability_required or event_store is not None)
+        self._durability_status = (
+            "READY" if event_store is not None else (
+                "UNAVAILABLE" if self._durability_required else "NOT_REQUIRED"
+            )
+        )
+        self._restored_event_count = 0
+        self._last_durable_cursor = 0
+        self._last_durable_error: str | None = None
+        self._event_bus_status = "READY" if event_bus is not None else "NOT_CONFIGURED"
         self._max_transition_history = max(1, int(max_transition_history))
+        if event_store is not None and restore_from_store:
+            self.restore_from_event_store()
 
     def _state_status(self) -> str:
         if self._active:
@@ -375,6 +410,11 @@ class DegradationStateMachine:
         observed_at_ms: int,
         injected: bool,
         detail: str,
+        review_subject_ref: str | None = None,
+        review_subject_version: int | None = None,
+        review_checkpoint_id: str | None = None,
+        review_id: str | None = None,
+        resume_result_ref: str | None = None,
     ) -> DegradationTransition:
         self._revision += 1
         policy = FAULT_POLICIES[dependency_id]
@@ -402,6 +442,11 @@ class DegradationStateMachine:
             observed_at_ms=observed_at_ms,
             injected=bool(injected),
             detail_digest=f"sha256:{_digest(str(detail or ''))}",
+            review_subject_ref=review_subject_ref,
+            review_subject_version=review_subject_version,
+            review_checkpoint_id=review_checkpoint_id,
+            review_id=review_id,
+            resume_result_ref=resume_result_ref,
         )
         self._updated_at_ms = observed_at_ms
         self._history.append(transition)
@@ -410,11 +455,242 @@ class DegradationStateMachine:
 
     def _emit(self, transition: DegradationTransition) -> None:
         event = build_degradation_runtime_event(transition)
+        if self._event_store is not None:
+            try:
+                record = self._event_store.append_event(event)
+                if int(record.get("aggregate_version", -1)) != transition.revision:
+                    raise ValueError("durable aggregate version mismatch")
+                self._last_durable_cursor = int(record.get("cursor") or 0)
+                self._durability_status = "READY"
+                self._last_durable_error = None
+            except Exception as exc:
+                self._durability_status = "FAILED"
+                self._last_durable_error = f"{type(exc).__name__}: {exc}"
+                raise DegradationStateError(
+                    DEGRADATION_DURABLE_EVENT_FAILED,
+                    "degradation transition could not be durably appended",
+                ) from exc
+        elif self._durability_required:
+            self._durability_status = "UNAVAILABLE"
+            self._last_durable_error = "RuntimeEventStore is not configured"
+            raise DegradationStateError(
+                DEGRADATION_STATE_UNAVAILABLE,
+                "durable degradation state is unavailable",
+            )
         with self._lock:
             self._events.append(event)
             self._events = self._events[-self._max_transition_history :]
         if self._event_sink is not None:
             self._event_sink(event)
+        if self._event_bus is not None:
+            try:
+                from host_brain.tribe.event_bus import TribeEvent  # noqa: PLC0415
+
+                self._event_bus.publish(
+                    TribeEvent(
+                        event_id=transition.transition_id,
+                        event_type=transition.event_type,
+                        source_agent="degradation_state",
+                        target_agent=None,
+                        payload={
+                            "dependency_id": transition.dependency_id,
+                            "dependency_status": transition.dependency_status,
+                            "revision": transition.revision,
+                            "current_state": transition.current_state,
+                            "runtime_event_ref": str(event.event_id),
+                            "permission_effect": "RESTRICT_ONLY",
+                        },
+                        ts_ms=transition.observed_at_ms,
+                    )
+                )
+                self._event_bus_status = "READY"
+            except Exception as exc:
+                # Durable append already succeeded; notification loss must never
+                # roll back or broaden the authoritative state.
+                self._event_bus_status = "FAILED"
+                self._last_durable_error = (
+                    self._last_durable_error
+                    or f"EventBus {type(exc).__name__}: {exc}"
+                )
+
+    def _reset_reducer(self) -> None:
+        self._active.clear()
+        self._pending.clear()
+        self._restriction_origins.clear()
+        self._revision = 0
+        self._entered_at_ms = None
+        self._updated_at_ms = 0
+        self._recovered_at_ms = None
+        self._history.clear()
+        self._events.clear()
+
+    def _restore_record(self, record: Mapping[str, Any]) -> None:
+        revision = int(record.get("aggregate_version") or 0)
+        if revision != self._revision + 1:
+            raise DegradationStateError(
+                DEGRADATION_REPLAY_INVALID,
+                f"non-contiguous degradation aggregate version: {revision}",
+            )
+        event_type = str(record.get("event_type") or "").strip()
+        if event_type not in {
+            DEGRADATION_ENTERED,
+            DEGRADATION_RECOVERY_OBSERVED,
+            DEGRADATION_RECOVERY_ACKNOWLEDGED,
+        }:
+            raise DegradationStateError(
+                DEGRADATION_REPLAY_INVALID,
+                f"unsupported degradation event type: {event_type}",
+            )
+        payload = dict(record.get("payload") or {})
+        dependency = _dependency_id(payload.get("dependency_id"))
+        policy = FAULT_POLICIES[dependency]
+        expected_affected = tuple(payload.get("affected_capabilities") or ())
+        expected_high_risk = tuple(payload.get("high_risk_capabilities") or ())
+        if expected_affected != policy.affected_capabilities or expected_high_risk != policy.high_risk_capabilities:
+            raise DegradationStateError(
+                DEGRADATION_REPLAY_INVALID,
+                f"fault policy drift detected while replaying {dependency}",
+            )
+        observed = int(record.get("ts_ms") or 0)
+        refs = tuple(str(item) for item in (record.get("evidence_refs") or ()))
+        source_ref = str(record.get("source_ref") or "")
+        previous = self._state_status()
+        status = str(payload.get("dependency_status") or "")
+        if event_type == DEGRADATION_ENTERED:
+            self._pending.pop(dependency, None)
+            self._active[dependency] = {
+                "dependency_id": dependency,
+                "status": status,
+                "entered_at_ms": observed,
+                "source_ref": source_ref,
+                "evidence_refs": refs,
+                "injected": bool(payload.get("injected")),
+            }
+            for capability in policy.affected_capabilities:
+                self._restriction_origins.setdefault(capability, set()).add(dependency)
+            self._entered_at_ms = self._entered_at_ms or observed
+        elif event_type == DEGRADATION_RECOVERY_OBSERVED:
+            if dependency not in self._active:
+                raise DegradationStateError(
+                    DEGRADATION_REPLAY_INVALID,
+                    f"recovery event has no active dependency: {dependency}",
+                )
+            self._active.pop(dependency, None)
+            self._pending[dependency] = {
+                "dependency_id": dependency,
+                "status": status,
+                "observed_at_ms": observed,
+                "source_ref": source_ref,
+                "evidence_refs": refs,
+                "review_required": True,
+                "review_subject_ref": str(payload.get("review_subject_ref") or ""),
+                "review_subject_version": int(payload.get("review_subject_version") or 0),
+                "review_checkpoint_id": str(payload.get("review_checkpoint_id") or ""),
+            }
+            if not all(
+                (
+                    self._pending[dependency]["review_subject_ref"],
+                    self._pending[dependency]["review_subject_version"] == revision,
+                    self._pending[dependency]["review_checkpoint_id"],
+                )
+            ):
+                raise DegradationStateError(
+                    DEGRADATION_REPLAY_INVALID,
+                    f"recovery review binding is invalid: {dependency}",
+                )
+            self._recovered_at_ms = observed
+        else:
+            pending = self._pending.get(dependency)
+            if pending is None:
+                raise DegradationStateError(
+                    DEGRADATION_REPLAY_INVALID,
+                    f"acknowledgement has no pending recovery: {dependency}",
+                )
+            if (
+                str(payload.get("review_subject_ref") or "") != pending["review_subject_ref"]
+                or int(payload.get("review_subject_version") or 0) != pending["review_subject_version"]
+                or str(payload.get("review_checkpoint_id") or "") != pending["review_checkpoint_id"]
+                or not str(payload.get("review_id") or "")
+                or not str(payload.get("resume_result_ref") or "")
+            ):
+                raise DegradationStateError(
+                    DEGRADATION_REPLAY_INVALID,
+                    f"acknowledgement review binding mismatch: {dependency}",
+                )
+            self._pending.pop(dependency, None)
+            for capability in list(self._restriction_origins):
+                self._restriction_origins[capability].discard(dependency)
+                if not self._restriction_origins[capability]:
+                    self._restriction_origins.pop(capability, None)
+        self._revision = revision
+        self._updated_at_ms = observed
+        current = self._state_status()
+        transition = DegradationTransition(
+            schema_version=str(payload.get("transition_schema_version") or DEGRADATION_TRANSITION_SCHEMA_VERSION),
+            transition_id=str(payload.get("transition_id") or ""),
+            event_type=event_type,
+            revision=revision,
+            dependency_id=dependency,
+            dependency_status=status,
+            previous_state=str(payload.get("previous_state") or previous),
+            current_state=str(payload.get("current_state") or current),
+            source_ref=source_ref,
+            evidence_refs=refs,
+            affected_capabilities=policy.affected_capabilities,
+            high_risk_capabilities=policy.high_risk_capabilities,
+            observed_at_ms=observed,
+            injected=bool(payload.get("injected")),
+            detail_digest=str(payload.get("detail_digest") or ""),
+            review_subject_ref=payload.get("review_subject_ref"),
+            review_subject_version=payload.get("review_subject_version"),
+            review_checkpoint_id=payload.get("review_checkpoint_id"),
+            review_id=payload.get("review_id"),
+            resume_result_ref=payload.get("resume_result_ref"),
+        )
+        if transition.current_state != current:
+            raise DegradationStateError(
+                DEGRADATION_REPLAY_INVALID,
+                f"replayed state mismatch at revision {revision}",
+            )
+        self._history.append(transition)
+        self._history = self._history[-self._max_transition_history :]
+        if current == DEGRADATION_HEALTHY:
+            self._entered_at_ms = None
+
+    def restore_from_event_store(self) -> int:
+        if self._event_store is None:
+            self._durability_status = "UNAVAILABLE"
+            return 0
+        try:
+            records: list[dict[str, Any]] = []
+            cursor = 0
+            while True:
+                page = self._event_store.list_events_for_aggregates(
+                    aggregate_refs=(("DEGRADATION_STATE", "runtime-degradation"),),
+                    after_cursor=cursor,
+                    limit=1000,
+                )
+                if not page:
+                    break
+                records.extend(page)
+                cursor = int(page[-1]["cursor"])
+                if len(page) < 1000:
+                    break
+            with self._lock:
+                self._reset_reducer()
+                for record in records:
+                    self._restore_record(record)
+                self._restored_event_count = len(records)
+                self._last_durable_cursor = cursor
+                self._durability_status = "READY"
+                self._last_durable_error = None
+            return len(records)
+        except Exception as exc:
+            with self._lock:
+                self._reset_reducer()
+                self._durability_status = "FAILED"
+                self._last_durable_error = f"{type(exc).__name__}: {exc}"
+            return 0
 
     def enter_degradation(
         self,
@@ -492,6 +768,13 @@ class DegradationStateMachine:
             if dependency not in self._active:
                 return None
             previous = self._state_status()
+            next_revision = self._revision + 1
+            review_subject_ref = (
+                f"degradation-recovery://runtime/{dependency.lower()}"
+            )
+            review_checkpoint_id = (
+                f"checkpoint://degradation/{dependency.lower()}/{next_revision}"
+            )
             self._active.pop(dependency, None)
             self._pending[dependency] = {
                 "dependency_id": dependency,
@@ -500,6 +783,9 @@ class DegradationStateMachine:
                 "source_ref": _durable_ref(source_ref, namespace="degradation-source"),
                 "evidence_refs": refs,
                 "review_required": True,
+                "review_subject_ref": review_subject_ref,
+                "review_subject_version": next_revision,
+                "review_checkpoint_id": review_checkpoint_id,
             }
             self._recovered_at_ms = observed
             transition = self._build_transition(
@@ -512,6 +798,9 @@ class DegradationStateMachine:
                 observed_at_ms=observed,
                 injected=injected,
                 detail=detail,
+                review_subject_ref=review_subject_ref,
+                review_subject_version=next_revision,
+                review_checkpoint_id=review_checkpoint_id,
             )
         self._emit(transition)
         return transition
@@ -520,25 +809,73 @@ class DegradationStateMachine:
         self,
         *,
         dependency_id: str,
-        review_approved: bool,
-        evidence_refs: Sequence[str],
-        reviewer_ref: str,
+        review_store: Any,
+        review_id: str,
+        resume_token_ref: str,
         now_ms: int | None = None,
     ) -> DegradationTransition:
         dependency = _dependency_id(dependency_id)
-        if not bool(review_approved):
-            raise DegradationStateError(
-                DEGRADATION_REVIEW_REQUIRED,
-                "capability expansion requires an approved recovery review",
-            )
-        refs = _evidence_refs(evidence_refs)
-        reviewer = _durable_ref(reviewer_ref, namespace="reviewer")
         observed = int(now_ms if now_ms is not None else time.time() * 1000)
         with self._lock:
             if dependency in self._active or dependency not in self._pending:
                 raise DegradationStateError(
                     DEGRADATION_REVIEW_REQUIRED,
                     f"{dependency} has no evidence-backed pending recovery",
+                )
+            pending = copy.deepcopy(self._pending[dependency])
+        subject_ref = str(pending["review_subject_ref"])
+        subject_version = int(pending["review_subject_version"])
+        checkpoint_id = str(pending["review_checkpoint_id"])
+        result_ref = (
+            f"degradation-recovery://runtime/{dependency.lower()}/"
+            f"ack/{subject_version}/{_digest(str(review_id))[:16]}"
+        )
+        try:
+            resumed = review_store.resume_review(
+                str(review_id),
+                resume_token_ref=str(resume_token_ref),
+                subject_ref=subject_ref,
+                subject_version=subject_version,
+                resume_phase="PRE_EXECUTION",
+                checkpoint_id=checkpoint_id,
+                resume_result_ref=result_ref,
+            )
+        except Exception as exc:
+            reason = str(getattr(exc, "reason_code", DEGRADATION_REVIEW_REQUIRED))
+            raise DegradationStateError(
+                reason,
+                "recovery review token was not accepted for this dependency checkpoint",
+            ) from exc
+        review_record = dict(resumed.get("review") or {})
+        review_item = dict(review_record.get("review") or {})
+        if (
+            str(review_item.get("status") or "") != "CONSUMED"
+            or str(review_item.get("subject_ref") or "") != subject_ref
+            or int(review_item.get("subject_version") or -1) != subject_version
+            or str(resumed.get("checkpoint_id") or "") != checkpoint_id
+            or str(resumed.get("resume_phase") or "") != "PRE_EXECUTION"
+            or bool(resumed.get("replay_side_effects"))
+        ):
+            raise DegradationStateError(
+                DEGRADATION_REVIEW_REQUIRED,
+                "ReviewStore returned a non-bound recovery resume decision",
+            )
+        refs = _evidence_refs(
+            tuple(pending.get("evidence_refs") or ())
+            + (
+                f"review-item://{str(review_id)}",
+                str(resumed.get("resume_result_ref") or result_ref),
+            )
+        )
+        reviewer = _durable_ref(
+            review_item.get("decision_actor"), namespace="reviewer"
+        )
+        with self._lock:
+            current_pending = self._pending.get(dependency)
+            if current_pending != pending or dependency in self._active:
+                raise DegradationStateError(
+                    DEGRADATION_REVIEW_REQUIRED,
+                    "recovery state changed while its review was being consumed",
                 )
             previous = self._state_status()
             self._pending.pop(dependency, None)
@@ -557,11 +894,37 @@ class DegradationStateMachine:
                 observed_at_ms=observed,
                 injected=False,
                 detail="approved recovery review",
+                review_subject_ref=subject_ref,
+                review_subject_version=subject_version,
+                review_checkpoint_id=checkpoint_id,
+                review_id=str(review_id),
+                resume_result_ref=str(resumed.get("resume_result_ref") or result_ref),
             )
             if self._state_status() == DEGRADATION_HEALTHY:
                 self._entered_at_ms = None
         self._emit(transition)
         return transition
+
+    def recovery_review_binding(self, dependency_id: str) -> dict[str, Any]:
+        """Return the exact immutable ReviewItem subject/checkpoint binding."""
+        dependency = _dependency_id(dependency_id)
+        with self._lock:
+            pending = copy.deepcopy(self._pending.get(dependency))
+        if not pending:
+            raise DegradationStateError(
+                DEGRADATION_REVIEW_REQUIRED,
+                f"{dependency} has no evidence-backed pending recovery",
+            )
+        return {
+            "dependency_id": dependency,
+            "subject_ref": pending["review_subject_ref"],
+            "subject_version": pending["review_subject_version"],
+            "resume_phase": "PRE_EXECUTION",
+            "checkpoint_id": pending["review_checkpoint_id"],
+            "risk_level": 5,
+            "side_effects": ["capability_reenable"],
+            "evidence_refs": list(pending.get("evidence_refs") or ()),
+        }
 
     def observe(
         self,
@@ -597,7 +960,12 @@ class DegradationStateMachine:
             )
         return None
 
-    def snapshot(self, *, policy_enabled: bool = True) -> DegradationState:
+    def snapshot(
+        self,
+        *,
+        policy_enabled: bool = True,
+        policy_status: str = "ENABLED",
+    ) -> DegradationState:
         with self._lock:
             high_risk_by_capability = {
                 capability
@@ -667,6 +1035,13 @@ class DegradationStateMachine:
                 last_transition=last,
                 transition_count=self._revision,
                 policy_enabled=bool(policy_enabled),
+                policy_status=str(policy_status),
+                durability_required=self._durability_required,
+                durability_status=self._durability_status,
+                restored_event_count=self._restored_event_count,
+                last_durable_cursor=self._last_durable_cursor,
+                last_durable_error=self._last_durable_error,
+                event_bus_status=self._event_bus_status,
             )
 
     def transition_history(self) -> tuple[dict[str, Any], ...]:
@@ -682,10 +1057,15 @@ class DegradationStateMachine:
         *,
         capability_id: str,
         static_risk_level: int,
+        policy_enabled: bool | None = None,
+        policy_status: str | None = None,
     ) -> dict[str, Any]:
         capability = str(capability_id or "").strip().lower()
         risk_level = _risk(static_risk_level)
-        state = self.snapshot()
+        config = degradation_policy_config()
+        enabled = config["enabled"] if policy_enabled is None else bool(policy_enabled)
+        status = str(policy_status or config["status"])
+        state = self.snapshot(policy_enabled=enabled, policy_status=status)
         restriction = next(
             (
                 dict(row)
@@ -694,9 +1074,17 @@ class DegradationStateMachine:
             ),
             None,
         )
+        state_unavailable = bool(
+            self._durability_required and self._durability_status != "READY"
+        )
+        policy_fail_closed = status in {"INVALID_FAIL_CLOSED", "DISABLED_RESTRICTED"}
         blocked = bool(
             restriction
             and (bool(restriction.get("high_risk")) or risk_level >= _HIGH_RISK_THRESHOLD)
+        )
+        blocked = blocked or bool(
+            risk_level >= _HIGH_RISK_THRESHOLD
+            and (state_unavailable or policy_fail_closed)
         )
         restricted = restriction is not None
         decision = "BLOCK" if blocked else ("DEGRADE" if restricted else "UNCHANGED")
@@ -709,7 +1097,13 @@ class DegradationStateMachine:
             "static_risk_level": risk_level,
             "effective_risk_level": risk_level,
             "reason_code": (
-                "DEPENDENCY_DEGRADED_HIGH_RISK_BLOCKED"
+                DEGRADATION_STATE_UNAVAILABLE
+                if blocked and state_unavailable
+                else DEGRADATION_POLICY_INVALID
+                if blocked and status == "INVALID_FAIL_CLOSED"
+                else DEGRADATION_POLICY_DISABLED
+                if blocked and status == "DISABLED_RESTRICTED"
+                else "DEPENDENCY_DEGRADED_HIGH_RISK_BLOCKED"
                 if blocked
                 else (
                     "DEPENDENCY_DEGRADED_SAFE_FALLBACK"
@@ -728,6 +1122,9 @@ class DegradationStateMachine:
             "can_reduce_risk": False,
             "can_bypass_review": False,
             "can_bypass_token": False,
+            "policy_enabled": enabled,
+            "policy_status": status,
+            "durability_status": self._durability_status,
         }
 
 
@@ -750,6 +1147,16 @@ def build_degradation_runtime_event(transition: DegradationTransition) -> Any:
         "external_side_effects": False,
         "detail_digest": transition.detail_digest,
     }
+    for key in (
+        "review_subject_ref",
+        "review_subject_version",
+        "review_checkpoint_id",
+        "review_id",
+        "resume_result_ref",
+    ):
+        value = getattr(transition, key)
+        if value is not None:
+            payload[key] = value
     return RuntimeEvent.create(
         event_type=transition.event_type,
         source_kind="SYSTEM",
@@ -765,23 +1172,88 @@ def build_degradation_runtime_event(transition: DegradationTransition) -> Any:
     )
 
 
+def degradation_policy_config() -> dict[str, Any]:
+    raw_value = os.environ.get("HOST_DEGRADATION_STATE_ENABLED")
+    if raw_value is None or not str(raw_value).strip():
+        return {"enabled": True, "status": "ENABLED_DEFAULT", "raw": None}
+    raw = str(raw_value).strip().lower()
+    if raw in {"1", "true", "yes", "on"}:
+        return {"enabled": True, "status": "ENABLED", "raw": raw_value}
+    if raw in {"0", "false", "no", "off"}:
+        # Rollback stops new projection; it may never silently reopen a
+        # high-risk capability or discard a restored latch.
+        return {"enabled": False, "status": "DISABLED_RESTRICTED", "raw": raw_value}
+    return {"enabled": True, "status": "INVALID_FAIL_CLOSED", "raw": raw_value}
+
+
 def degradation_policy_enabled() -> bool:
-    raw = str(os.environ.get("HOST_DEGRADATION_STATE_ENABLED") or "true").strip().lower()
-    return raw in {"1", "true", "yes", "on"}
+    return bool(degradation_policy_config()["enabled"])
 
 
-_GLOBAL_MACHINE = DegradationStateMachine()
+_GLOBAL_MACHINE: DegradationStateMachine | None = None
+_GLOBAL_MACHINE_LOCK = threading.RLock()
+
+
+def _default_runtime_event_db_path() -> Path:
+    raw_path = str(os.environ.get("HOST_RUNTIME_EVENT_DB_PATH") or "").strip()
+    if raw_path:
+        return Path(raw_path).expanduser()
+    return Path(__file__).resolve().parents[1] / "data" / "audit.sqlite3"
+
+
+def _build_global_degradation_state_machine() -> DegradationStateMachine:
+    try:
+        from host_brain.integrations.runtime_events import RuntimeEventStore  # noqa: PLC0415
+
+        store = RuntimeEventStore(_default_runtime_event_db_path())
+    except Exception as exc:
+        machine = DegradationStateMachine(
+            durability_required=True,
+            restore_from_store=False,
+        )
+        machine._durability_status = "FAILED"  # noqa: SLF001
+        machine._last_durable_error = f"{type(exc).__name__}: {exc}"  # noqa: SLF001
+        return machine
+    try:
+        from host_brain.app.internal_tribe_routes import get_tribe_event_bus  # noqa: PLC0415
+
+        bus = get_tribe_event_bus()
+    except Exception:
+        bus = None
+    return DegradationStateMachine(
+        event_store=store,
+        event_bus=bus,
+        durability_required=True,
+        restore_from_store=True,
+    )
 
 
 def get_degradation_state_machine() -> DegradationStateMachine:
-    return _GLOBAL_MACHINE
+    global _GLOBAL_MACHINE
+    with _GLOBAL_MACHINE_LOCK:
+        if _GLOBAL_MACHINE is None:
+            _GLOBAL_MACHINE = _build_global_degradation_state_machine()
+        return _GLOBAL_MACHINE
+
+
+def set_global_degradation_state_machine(
+    machine: DegradationStateMachine | None,
+) -> None:
+    """Composition/test hook; ``None`` forces a fresh durable restore."""
+    global _GLOBAL_MACHINE
+    with _GLOBAL_MACHINE_LOCK:
+        _GLOBAL_MACHINE = machine
 
 
 def get_degradation_state(
     *, machine: DegradationStateMachine | None = None,
 ) -> dict[str, Any]:
-    target = machine or _GLOBAL_MACHINE
-    return target.snapshot(policy_enabled=degradation_policy_enabled()).as_dict()
+    target = machine or get_degradation_state_machine()
+    config = degradation_policy_config()
+    return target.snapshot(
+        policy_enabled=bool(config["enabled"]),
+        policy_status=str(config["status"]),
+    ).as_dict()
 
 
 def evaluate_degradation_capability(
@@ -790,10 +1262,118 @@ def evaluate_degradation_capability(
     static_risk_level: int,
     machine: DegradationStateMachine | None = None,
 ) -> dict[str, Any]:
-    return (machine or _GLOBAL_MACHINE).evaluate_capability(
+    return (machine or get_degradation_state_machine()).evaluate_capability(
         capability_id=capability_id,
         static_risk_level=static_risk_level,
     )
+
+
+def infer_degradation_capability(
+    *values: Any,
+    default: str = "high_risk_execution",
+) -> str:
+    """Infer the narrow capability id used by heterogeneous front doors."""
+    haystack = " ".join(str(value or "").lower() for value in values)
+    mappings = (
+        (("canon",), "canon_apply"),
+        (("pentest", "exploit", "security_lab"), "pentest_execution"),
+        (("tts", "speak", "voice", "audio"), "voice_output"),
+        (("vts", "avatar", "live2d"), "avatar_control"),
+        (("review", "resume"), "remote_review_resume"),
+        (("sse", "event_stream", "runtime stream"), "runtime_event_stream"),
+        (("memory_write", "memory store", "remember"), "memory_write"),
+        (("planning", "planner", "autonomous"), "autonomous_planning"),
+        (("upgrade", "install", "plugin"), "capability_upgrade"),
+    )
+    for needles, capability in mappings:
+        if any(needle in haystack for needle in needles):
+            return capability
+    return str(default or "high_risk_execution").strip().lower()
+
+
+def evaluate_degradation_front_door(
+    *,
+    capability_id: str,
+    static_risk_level: int,
+    capability_policy_decision: Mapping[str, Any] | None = None,
+    machine: DegradationStateMachine | None = None,
+) -> dict[str, Any]:
+    """Compose upstream capability policy with degradation, restrict-only."""
+    upstream = dict(capability_policy_decision or {})
+    risk_candidates = [static_risk_level]
+    for key in ("effective_risk_level", "canonical_risk", "risk_level"):
+        if upstream.get(key) is not None:
+            risk_candidates.append(upstream[key])
+    effective_risk = max(_risk(value) for value in risk_candidates)
+    degradation = evaluate_degradation_capability(
+        capability_id=capability_id,
+        static_risk_level=effective_risk,
+        machine=machine,
+    )
+    upstream_decision = str(upstream.get("decision") or "UNCHANGED").upper()
+    upstream_allowed = bool(upstream.get("allowed", upstream.get("allowed_by_policy", True)))
+    upstream_blocked = not upstream_allowed or upstream_decision in {
+        "BLOCK",
+        "DENY",
+        "REJECT",
+        "AIRLOCK",
+    }
+    degradation_blocked = not bool(degradation["allowed_by_degradation"])
+    blocked = upstream_blocked or degradation_blocked
+    if upstream_blocked:
+        decision = "BLOCK"
+        reason_code = str(
+            upstream.get("reason_code") or "CAPABILITY_POLICY_BLOCKED"
+        )
+    elif degradation_blocked:
+        decision = "BLOCK"
+        reason_code = str(degradation["reason_code"])
+    elif upstream_decision == "DEGRADE" or degradation["decision"] == "DEGRADE":
+        decision = "DEGRADE"
+        reason_code = str(
+            upstream.get("reason_code")
+            if upstream_decision == "DEGRADE"
+            else degradation["reason_code"]
+        )
+    else:
+        decision = "UNCHANGED"
+        reason_code = "NO_ADDITIONAL_DEGRADATION_RESTRICTION"
+    return {
+        **degradation,
+        "decision": decision,
+        "allowed": not blocked,
+        "allowed_by_composed_policy": not blocked,
+        "reason_code": reason_code,
+        "effective_risk_level": effective_risk,
+        "upstream_policy_decision": upstream_decision,
+        "upstream_allowed": upstream_allowed,
+        "permission_effect": "RESTRICT_ONLY",
+        "can_expand_scope": False,
+        "can_reduce_risk": False,
+        "can_bypass_review": False,
+        "can_bypass_token": False,
+    }
+
+
+def require_degradation_capability(
+    *,
+    capability_id: str,
+    static_risk_level: int,
+    capability_policy_decision: Mapping[str, Any] | None = None,
+    machine: DegradationStateMachine | None = None,
+) -> dict[str, Any]:
+    decision = evaluate_degradation_front_door(
+        capability_id=capability_id,
+        static_risk_level=static_risk_level,
+        capability_policy_decision=capability_policy_decision,
+        machine=machine,
+    )
+    if not decision["allowed"]:
+        raise DegradationStateError(
+            str(decision["reason_code"]),
+            f"{capability_id} is blocked by the composed degradation gate",
+        )
+    return decision
 
 
 def build_fault_injection_matrix() -> dict[str, Any]:
@@ -915,7 +1495,7 @@ def reconcile_service_observations(
     enabled: bool | None = None,
 ) -> tuple[dict[str, Any], ...]:
     """Reduce a service probe batch; unknown/deferred signals never recover."""
-    target = machine or _GLOBAL_MACHINE
+    target = machine or get_degradation_state_machine()
     policy_enabled = degradation_policy_enabled() if enabled is None else bool(enabled)
     if not policy_enabled:
         return ()
@@ -1017,6 +1597,11 @@ __all__ = [
     "DEGRADATION_RECOVERY_OBSERVED",
     "DEGRADATION_RECOVERY_PENDING",
     "DEGRADATION_REVIEW_REQUIRED",
+    "DEGRADATION_STATE_UNAVAILABLE",
+    "DEGRADATION_DURABLE_EVENT_FAILED",
+    "DEGRADATION_REPLAY_INVALID",
+    "DEGRADATION_POLICY_DISABLED",
+    "DEGRADATION_POLICY_INVALID",
     "DEGRADATION_STATE_SCHEMA_VERSION",
     "DEGRADATION_TRANSITION_SCHEMA_VERSION",
     "DegradationState",
@@ -1028,10 +1613,15 @@ __all__ = [
     "build_degradation_runtime_event",
     "build_fault_injection_matrix",
     "degradation_policy_enabled",
+    "degradation_policy_config",
     "evaluate_degradation_capability",
+    "evaluate_degradation_front_door",
     "get_degradation_state",
     "get_degradation_state_machine",
+    "infer_degradation_capability",
     "reconcile_service_observations",
     "reconcile_startup_statuses",
     "run_isolated_fault_injection_matrix",
+    "require_degradation_capability",
+    "set_global_degradation_state_machine",
 ]

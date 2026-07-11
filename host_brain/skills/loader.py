@@ -10,6 +10,10 @@ from host_brain.core.errors import SKILL_TOKEN_MISSING, TOKEN_INVALID, UNDO_REQU
 from host_brain.core.ids import new_event_id, now_ms
 from host_brain.governor.tier_policy import AuditTier
 from host_brain.governor.tokens import TokenService
+from host_brain.observability.degradation_state import (
+    evaluate_degradation_front_door,
+    infer_degradation_capability,
+)
 from host_brain.skills.executor_registry import dispatch_executor_payload
 from host_brain.skills.registry import SkillRegistry
 
@@ -105,6 +109,66 @@ class SkillLoader:
                 thread_id=thread_id,
                 turn_id=turn_id,
                 ts_ms=now_value,
+            )
+
+        # Check degradation before validating/consuming one-time execution
+        # tokens.  A dependency failure must neither invoke the handler nor
+        # burn authority that was never exercised.
+        capability_id = infer_degradation_capability(
+            intent.get("capability_id"),
+            skill_name,
+            meta.scope,
+            meta.family,
+            meta.capability_tags,
+            default=(
+                "high_risk_execution"
+                if int(meta.risk_level) >= 3
+                else "general_execution"
+            ),
+        )
+        capability_policy_decision = governor_output.get(
+            "capability_policy_decision"
+        )
+        if not isinstance(capability_policy_decision, dict):
+            capability_policy_decision = intent.get("capability_policy_decision")
+        degradation_decision = evaluate_degradation_front_door(
+            capability_id=capability_id,
+            static_risk_level=int(meta.risk_level),
+            capability_policy_decision=(
+                capability_policy_decision
+                if isinstance(capability_policy_decision, dict)
+                else None
+            ),
+        )
+        if not bool(
+            degradation_decision.get(
+                "allowed",
+                degradation_decision.get("allowed_by_degradation", False),
+            )
+        ):
+            reason_code = str(
+                degradation_decision.get("reason_code")
+                or "DEGRADATION_STATE_UNAVAILABLE"
+            )
+            return self._log_and_return(
+                intent_id=intent_id,
+                skill_name=skill_name,
+                approval_token_ref=approval_token_ref,
+                confirm_token_ref=confirm_token_ref,
+                result_status="REJECTED",
+                result_code=reason_code,
+                result_digest=(
+                    f"degradation gate blocked {capability_id}: {reason_code}"
+                ),
+                evidence_ref=None,
+                manifest_ref=None,
+                undo_token_ref=None,
+                request_id=request_id,
+                thread_id=thread_id,
+                turn_id=turn_id,
+                ts_ms=now_value,
+                governor_output=governor_output,
+                runtime_payload={"degradation_decision": degradation_decision},
             )
 
         token_result = self.token_service.validate_execution_tokens(

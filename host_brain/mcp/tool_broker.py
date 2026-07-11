@@ -29,6 +29,10 @@ from host_brain.core.errors import (
 )
 from host_brain.core.ids import now_ms
 from host_brain.mcp.tool_registry import MCPToolRegistry, ToolMeta
+from host_brain.observability.degradation_state import (
+    evaluate_degradation_front_door,
+    infer_degradation_capability,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -123,7 +127,57 @@ class MCPToolBroker:
                 ts_ms=now_value,
             )
 
-        # 3. Invoke handler
+        # 3. Shared degradation gate.  This must run before handler lookup or
+        # invocation so a degraded high-risk capability cannot cross the MCP
+        # side-effect boundary even with an otherwise valid Governor token.
+        static_risk_level = {
+            "LOW": 1,
+            "MEDIUM": 3,
+            "HIGH": 4,
+        }.get(str(meta.risk_level or "").strip().upper(), 5)
+        capability_id = infer_degradation_capability(
+            provider_id,
+            tool_id,
+            meta.name,
+            meta.description,
+            meta.domain_tags,
+            default=(
+                "high_risk_execution"
+                if static_risk_level >= 3
+                else "general_execution"
+            ),
+        )
+        degradation_decision = evaluate_degradation_front_door(
+            capability_id=capability_id,
+            static_risk_level=static_risk_level,
+        )
+        if not bool(
+            degradation_decision.get(
+                "allowed",
+                degradation_decision.get("allowed_by_degradation", False),
+            )
+        ):
+            reason_code = str(
+                degradation_decision.get("reason_code")
+                or "DEGRADATION_STATE_UNAVAILABLE"
+            )
+            return self._reject(
+                exec_id=exec_id,
+                request_id=req_id,
+                intent_id=intent_id,
+                session_id=session_id,
+                seq=seq,
+                provider_id=provider_id,
+                tool_id=tool_id,
+                reason_code=reason_code,
+                detail=(
+                    f"degradation gate blocked {capability_id}: "
+                    f"{reason_code}"
+                ),
+                ts_ms=now_value,
+            )
+
+        # 4. Invoke handler
         handler = self._handlers.get(_handler_key(provider_id, tool_id))
         if handler is None:
             return self._reject(
@@ -182,7 +236,7 @@ class MCPToolBroker:
                 ts_ms=now_value,
             )
 
-        # 4. Audit
+        # 5. Audit
         self._log_exec(
             exec_id=exec_id,
             request_id=req_id,
