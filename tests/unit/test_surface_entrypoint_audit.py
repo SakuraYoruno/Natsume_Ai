@@ -13,6 +13,8 @@ TOOLS = ROOT / "tools"
 _LOW_LEVEL_SURFACE_FILES = {
     Path("host_brain/persona/isolated_surface_harness.py"),
     Path("host_brain/persona/isolated_surface_continuity.py"),
+    Path("host_brain/persona/surface/data_models.py"),
+    Path("host_brain/persona/surface/input_validation.py"),
     Path("host_brain/persona/surface_packet_compiler.py"),
     Path("host_brain/persona/surface_runtime.py"),
 }

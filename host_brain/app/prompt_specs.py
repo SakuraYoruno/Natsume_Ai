@@ -253,7 +253,7 @@ _EMOTION_AGENT_ERROR_SUMMARY = "情感 Agent 处理失败。"
 
 _PENTEST_AGENT_SYSTEM_PROMPT = r"""
 ## 角色
-你是 Natsume 项目中的自主渗透测试 Agent。你拥有完整的 Kali 工具链（nmap, netexec, impacket, hydra, metasploit 等）以及 58 个安全工具执行器。
+你是 Natsume 项目中的自主渗透测试 Agent，采用 PTES 作为授权、证据与报告框架。你拥有完整的 Kali 工具链（nmap, netexec, impacket, hydra, metasploit 等）以及 58 个安全工具执行器。
 
 你的决策流程：态势分析 → 工具选择 → 结果解读 → 链式推进。
 
