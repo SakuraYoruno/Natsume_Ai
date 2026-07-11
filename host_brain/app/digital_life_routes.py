@@ -1,10 +1,11 @@
 ﻿from __future__ import annotations
 
+import os
 from typing import Any
 
 from fastapi import APIRouter, Body, Query
 
-from host_brain.app.dependencies import get_ledger
+from host_brain.app.dependencies import get_ledger, get_state_arbiter
 from host_brain.runtime.life_continuity import (
     advance_inner_life_to_now,
     attempt_life_proactive_push,
@@ -25,8 +26,14 @@ from host_brain.runtime.life_organs import (
     get_recent_proactive_episodes,
 )
 from host_brain.runtime.autonomous_self import get_growth_state, get_learning_recent
+from host_brain.runtime.world_model import build_world_snapshot
 
 router = APIRouter(prefix="/v1/digital-life", tags=["digital-life"])
+
+
+def _life_projection_enabled() -> bool:
+    raw = str(os.environ.get("HOST_LIFE_PROJECTION_ENABLED") or "true").strip().lower()
+    return raw not in {"0", "false", "no", "off"}
 
 
 @router.get("/state")
@@ -47,6 +54,22 @@ async def digital_life_environment_current(person_id: str = Query("default")) ->
 @router.get("/causality/recent")
 async def digital_life_causality_recent(person_id: str = Query("default"), limit: int = Query(20, ge=1, le=100)) -> dict[str, Any]:
     return get_recent_causality(ledger=get_ledger(), person_id=person_id, limit=limit)
+
+
+@router.get("/world/snapshot")
+async def digital_life_world_snapshot(
+    person_id: str = Query("default"),
+    session_id: str = Query(""),
+    fact_key: list[str] | None = Query(None),
+) -> dict[str, Any]:
+    return await build_world_snapshot(
+        ledger=get_ledger(),
+        person_id=person_id,
+        state_arbiter=get_state_arbiter(),
+        fact_keys=list(fact_key or []),
+        session_id=session_id,
+        enabled=_life_projection_enabled(),
+    )
 
 
 @router.get("/growth/state")

@@ -5,7 +5,7 @@
 
 版本：v1.1
 日期：2026-07-10
-状态：`READY_FOR_EXECUTION`（TASK-0461～TASK-0476 已 `DONE`；其余任务按依赖 Gate 推进）
+状态：`READY_FOR_EXECUTION`（TASK-0461～TASK-0477 已 `DONE`；其余任务按依赖 Gate 推进）
 文档类型：DevTasks / Execution Contract
 任务编号：`TASK-0461`～`TASK-0486`
 逻辑工作包：`LTE-WP-00`～`LTE-WP-80`
@@ -423,7 +423,7 @@ Pop-Location
 | TASK-0474 | WP-40 / PR-014 | Runtime Event / SSE Replay | WP-24 | 3–5 日 | 高 | DONE |
 | TASK-0475 | WP-41 / PR-015 | Context 引用与预算治理 | WP-40 | 2–3 日 | 中 | DONE |
 | TASK-0476 | WP-50 / PR-016 | Life OCC 与 schema migration | WP-40 | 2–4 日 | 高 | DONE |
-| TASK-0477 | WP-51 / PR-017 | WorldProjection | WP-50 | 2–4 日 | 中 | PLANNED |
+| TASK-0477 | WP-51 / PR-017 | WorldProjection | WP-50 | 2–4 日 | 中 | DONE |
 | TASK-0478 | WP-52 / PR-018 | Appraisal / Bond 收敛 | WP-50 | 2–4 日 | 高 | PLANNED |
 | TASK-0479 | WP-53 / PR-019 | Scene / ActionArbiter | WP-51/52 | 2–4 日 | 高 | PLANNED |
 | TASK-0480 | WP-60 / PR-020 | Capability Maturity | WP-53 | 2–3 日 | 高 | PLANNED |
@@ -683,7 +683,7 @@ Pop-Location
 
 ### TASK-0476 / LTE-WP-50：Digital Life OCC 与 Schema Migration
 
-- 状态：`PLANNED`
+- 状态：`DONE`
 - 目标：将 `digital_life_state` 的无条件 upsert 改为 expected-version CAS，并把 inline schema 迁入受控 migration catalog。
 - 代码事实：`life_continuity.py` 已有 versioned snapshot/event/outbox，但保存没有 `WHERE version=base_version`。
 - 前置任务：TASK-0474。
@@ -713,6 +713,7 @@ Pop-Location
 - 停止条件：任一 projection 可直接提升为 Canon/Memory 或覆盖源状态。
 - 回滚：关闭 `HOST_LIFE_PROJECTION_ENABLED`；来源状态不受影响。
 - 审批：无写入审批。
+- 完成证据（2026-07-11）：新增 `host_brain/runtime/world_model.py`、`GET /v1/digital-life/world/snapshot` 与 T-NLE-15；空库 projection 不初始化 `digital_life_state`，facts 强制携带 source/confidence/observed/expires/epistemic/conflict，StateArbiter 冲突与过期 work fact 可见，未提供 world 写路由或 write facade。
 
 ### TASK-0478 / LTE-WP-52：Appraisal 与 Bond 单写路径收敛
 
