@@ -31,6 +31,7 @@ def _card() -> dict[str, object]:
         "status": "STABLE",
         "upgrade_candidate": {
             "candidate_ref": "capability-upgrade://repo-reader/L4",
+            "operator_review_id": "review-capability-repo-reader-l4",
             "review_authority": "MASTER",
             "status": "REVIEW_REQUIRED",
             "proposed_level": "L4",
@@ -119,6 +120,7 @@ def _identity() -> dict[str, object]:
             "mutation_effect": "NONE",
             "review_candidate": {
                 "candidate_ref": "identity-review://safe",
+                "operator_review_id": "review-identity-safe",
                 "review_lane": "MASTER",
                 "status": "PENDING",
                 "diff_ref": "identity-diff://safe",
@@ -149,6 +151,8 @@ def test_t_nle_23_view_is_read_only_and_upgrade_is_review_only() -> None:
     assert item["automatic_upgrade_available"] is False
     assert item["upgrade_candidate"]["review_authority"] == "MASTER"
     assert item["upgrade_candidate"]["automatic_upgrade_available"] is False
+    assert item["upgrade_candidate"]["review_ref"] == "review-capability-repo-reader-l4"
+    assert item["upgrade_candidate"]["materialized_to_review_store"] is True
 
 
 def test_t_nle_23_degradation_exposes_failure_recovery_and_high_risk_latch() -> None:
@@ -184,12 +188,14 @@ def test_t_nle_23_identity_diff_links_review_without_private_values() -> None:
     assert identity["current_snapshot_ref"] == "identity-snapshot://current"
     assert identity["release_ref"] == "release://v2"
     assert identity["gate"]["status"] == "REVIEW_REQUIRED"
-    assert identity["gate"]["review_candidate"]["review_ref"] == "identity-review://safe"
+    assert identity["gate"]["review_candidate"]["candidate_ref"] == "identity-review://safe"
+    assert identity["gate"]["review_candidate"]["review_ref"] == "review-identity-safe"
+    assert identity["gate"]["review_candidate"]["materialized_to_review_store"] is True
     assert identity["gate"]["review_candidate"]["automatic_apply"] is False
     assert identity["identity_acceptance_available"] is False
     assert identity["review"] == {
         "required": True,
-        "review_ref": "identity-review://safe",
+        "review_ref": "review-identity-safe",
         "status": "PENDING",
     }
     serialized = json.dumps(identity, ensure_ascii=False, sort_keys=True)
@@ -197,6 +203,34 @@ def test_t_nle_23_identity_diff_links_review_without_private_values() -> None:
     assert "previous_value" not in serialized and "current_value" not in serialized
     assert "self_model" not in identity["current"]
     assert "bond" not in identity["previous"]
+
+
+def test_t_nle_23_candidate_refs_never_masquerade_as_materialized_reviews() -> None:
+    card = _card()
+    card["upgrade_candidate"] = dict(card["upgrade_candidate"])
+    card["upgrade_candidate"].pop("operator_review_id")
+    identity_source = _identity()
+    identity_source["gate"] = dict(identity_source["gate"])
+    identity_source["gate"]["review_candidate"] = dict(
+        identity_source["gate"]["review_candidate"]
+    )
+    identity_source["gate"]["review_candidate"].pop("operator_review_id")
+
+    view = build_governance_view(
+        capability_scorecards=[card],
+        degradation_state={},
+        identity=identity_source,
+        generated_at_ms=3000,
+    )
+
+    upgrade = view["capabilities"]["items"][0]["upgrade_candidate"]
+    assert upgrade["candidate_ref"].startswith("capability-upgrade://")
+    assert upgrade["review_ref"] is None
+    assert upgrade["materialized_to_review_store"] is False
+    identity_review = view["identity"]["review"]
+    assert identity_review["required"] is True
+    assert identity_review["review_ref"] is None
+    assert view["identity"]["gate"]["review_candidate"]["materialized_to_review_store"] is False
 
 
 def test_t_nle_23_non_lab_never_exposes_executable_high_risk_pentest_entry() -> None:

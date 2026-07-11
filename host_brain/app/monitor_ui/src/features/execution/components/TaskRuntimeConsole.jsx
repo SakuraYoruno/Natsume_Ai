@@ -173,6 +173,8 @@ export function TaskVerificationPanel({ verification = [] }) {
 
 export function TaskReviewPanel({
   reviews = [],
+  focusedReviewId = '',
+  restrictCommandsToFocused = false,
   actorId,
   setActorId,
   resumeTokens,
@@ -208,11 +210,24 @@ export function TaskReviewPanel({
             const action = review.actionState || {}
             const busy = busyReviewId === review.review_id
             const token = resumeTokens[review.review_id] || ''
+            const focused = Boolean(focusedReviewId && focusedReviewId === review.review_id)
+            const commandsEnabled = !restrictCommandsToFocused || focused
             return (
-              <article key={review.review_id} className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
+              <article
+                key={review.review_id}
+                aria-current={focused ? 'true' : undefined}
+                className={`rounded-2xl border bg-white p-4 shadow-sm ${focused ? 'border-violet-400 ring-2 ring-violet-100' : 'border-gray-200'}`}
+              >
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
-                    <div className="text-sm font-semibold text-gray-900">{review.review_id}</div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <div className="text-sm font-semibold text-gray-900">{review.review_id}</div>
+                      {focused ? (
+                        <span className="rounded-full bg-violet-100 px-2 py-1 text-[10px] font-semibold text-violet-700">
+                          深链目标
+                        </span>
+                      ) : null}
+                    </div>
                     <div className="mt-1 text-xs text-gray-500">{review.review_type} · {review.resume_phase}</div>
                   </div>
                   <StatusBadge status={review.status} />
@@ -228,7 +243,13 @@ export function TaskReviewPanel({
                   </div>
                 ) : null}
 
-                {action.canApprove || action.canReject ? (
+                {!commandsEnabled && (action.canApprove || action.canReject || action.canResume) ? (
+                  <div className="mt-3 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-xs font-medium text-gray-600">
+                    深链模式下仅目标 Review 开放命令。
+                  </div>
+                ) : null}
+
+                {commandsEnabled && (action.canApprove || action.canReject) ? (
                   <div className="mt-4 flex flex-wrap gap-2">
                     <button
                       className="btn-primary"
@@ -247,7 +268,7 @@ export function TaskReviewPanel({
                   </div>
                 ) : null}
 
-                {action.canResume ? (
+                {commandsEnabled && action.canResume ? (
                   <div className="mt-4 rounded-2xl border border-violet-100 bg-violet-50/60 p-3">
                     <label className="block text-xs font-medium text-violet-800">
                       Resume token {review.review_id}

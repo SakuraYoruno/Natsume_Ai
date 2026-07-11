@@ -17,6 +17,7 @@ from host_brain.core.trace_redaction import public_decision_summary
 
 EXECUTION_INDEX_SCHEMA_VERSION = "Natsume.operator.execution_index.v1"
 EXECUTION_REVIEW_SCHEMA_VERSION = "Natsume.operator.execution_review.v1"
+REVIEW_LOCATOR_SCHEMA_VERSION = "Natsume.operator.review_locator.v1"
 
 _TERMINAL_GRAPH_STATUSES = frozenset({"COMPLETED", "FAILED", "CANCELLED"})
 _TERMINAL_NODE_STATUSES = frozenset({"ACCEPTED", "FAILED", "CANCELLED"})
@@ -477,6 +478,24 @@ class OperatorReadModelService:
         records = self._task_store.list_graphs(limit=limit)
         return build_execution_index_read_model(records, generated_at_ms=self._clock())
 
+    def get_review(self, review_id: str) -> dict[str, Any]:
+        """Locate one durable review without exposing its stored private payload."""
+
+        generated_at_ms = self._clock()
+        review = _review_view(
+            self._review_store.get_review(review_id),
+            generated_at_ms=generated_at_ms,
+        )
+        return {
+            "schema_version": REVIEW_LOCATOR_SCHEMA_VERSION,
+            "generated_at_ms": generated_at_ms,
+            "read_only": True,
+            "found": True,
+            "review_id": review["review_id"],
+            "task_graph_id": review["task_graph_id"],
+            "review": review,
+        }
+
     def get_execution(
         self,
         graph_id: str,
@@ -536,6 +555,7 @@ class OperatorReadModelService:
 __all__ = [
     "EXECUTION_INDEX_SCHEMA_VERSION",
     "EXECUTION_REVIEW_SCHEMA_VERSION",
+    "REVIEW_LOCATOR_SCHEMA_VERSION",
     "OperatorReadModelService",
     "build_execution_index_read_model",
     "build_execution_review_read_model",

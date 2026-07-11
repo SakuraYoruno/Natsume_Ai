@@ -8,6 +8,11 @@ import {
 } from './taskRuntimeModel.js'
 
 const { execution } = ENDPOINT_REGISTRY
+const TASK_REVIEW_LOCATOR_ENDPOINT = Object.freeze({
+  service: 'obs',
+  path: '/obs/task-runtime/review-locator',
+  risk: 'low',
+})
 
 export function fetchTaskRuntimeExecutions(params = {}) {
   return endpointGet(execution.taskRuntimeExecutions, params)
@@ -15,6 +20,12 @@ export function fetchTaskRuntimeExecutions(params = {}) {
 
 export function fetchTaskRuntimeExecution(graphId, params = {}) {
   return endpointGet(execution.taskRuntimeExecution, params, { graphId })
+}
+
+export function fetchTaskReviewLocator(reviewId) {
+  const value = typeof reviewId === 'string' ? reviewId.trim() : ''
+  if (!value) throw new Error('review_id is required')
+  return endpointGet(TASK_REVIEW_LOCATOR_ENDPOINT, { review_id: value })
 }
 
 export function approveTaskReview(review, actorId) {

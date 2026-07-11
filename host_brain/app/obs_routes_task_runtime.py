@@ -90,6 +90,18 @@ async def list_task_runtime_executions(
         _raise_read_model_error(exc)
 
 
+@router.get("/task-runtime/review-locator")
+async def get_task_runtime_review_locator(
+    review_id: str = Query(..., min_length=1, max_length=512),
+    service: OperatorReadModelService = Depends(_get_operator_read_model_service),
+) -> dict[str, Any]:
+    _require_operator_views_enabled()
+    try:
+        return service.get_review(review_id)
+    except (TaskStoreError, ReviewStoreError, RuntimeEventError) as exc:
+        _raise_read_model_error(exc)
+
+
 @router.get("/task-runtime/executions/{graph_id}")
 async def get_task_runtime_execution(
     graph_id: str,
@@ -111,6 +123,7 @@ async def get_task_runtime_execution(
 
 
 __all__ = [
+    "get_task_runtime_review_locator",
     "get_task_runtime_execution",
     "list_task_runtime_executions",
     "set_operator_read_model_service_provider",

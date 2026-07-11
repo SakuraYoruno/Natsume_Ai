@@ -80,7 +80,7 @@ test('normalizes maturity, static risk, degradation evidence and review links', 
     upgradeCandidate: {
       reviewRef: 'review://upgrade/search',
       status: 'PENDING',
-      href: '/execution/task-runtime?review_ref=review%3A%2F%2Fupgrade%2Fsearch',
+      href: '/execution/task-runtime?review_id=review%3A%2F%2Fupgrade%2Fsearch',
     },
   })
   assert.equal(model.degradation.highRiskLatched, true)
@@ -91,7 +91,7 @@ test('identity view is an allowlist and never carries private before/after value
   const model = buildGovernanceViewModel(snapshot())
   assert.equal(model.identity.privateBodyIncluded, false)
   assert.equal(model.identity.review.required, true)
-  assert.match(model.identity.review.href, /review_ref=/)
+  assert.match(model.identity.review.href, /review_id=/)
   assert.deepEqual(model.identity.diff.items[0], {
     section: 'persona',
     field: 'boundary_digest',
@@ -117,6 +117,29 @@ test('fails closed when automatic upgrade or private identity body is advertised
   assert.equal(privateIdentity.safe, false)
   assert.equal(privateIdentity.identity, null)
   assert.match(privateIdentity.error, /私密正文/)
+})
+
+test('fails closed when identity is unavailable or a major diff lacks durable Review', () => {
+  const unavailable = buildGovernanceViewModel(snapshot({
+    identity: {
+      status: 'UNAVAILABLE',
+      private_body_included: false,
+      diff: { severity: 'UNAVAILABLE', items: [] },
+      review: { required: false, review_ref: null, status: 'UNAVAILABLE' },
+    },
+  }))
+  assert.equal(unavailable.safe, false)
+  assert.equal(unavailable.identity.available, false)
+  assert.equal(unavailable.identity.review.status, 'UNAVAILABLE')
+  assert.match(unavailable.error, /无法判定/)
+
+  const missingReview = snapshot()
+  missingReview.identity.review = { required: true, review_ref: '', status: 'PENDING' }
+  const major = buildGovernanceViewModel(missingReview)
+  assert.equal(major.safe, false)
+  assert.equal(major.identity.review.bound, false)
+  assert.equal(major.identity.review.href, '')
+  assert.match(major.error, /未绑定 durable Review/)
 })
 
 test('rejects object refs and invalid maturity without coercion or clamping', () => {

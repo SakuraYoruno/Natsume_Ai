@@ -11,12 +11,15 @@ from fastapi import HTTPException
 from host_brain.agent_runtime.operator_read_model import (
     EXECUTION_INDEX_SCHEMA_VERSION,
     EXECUTION_REVIEW_SCHEMA_VERSION,
+    REVIEW_LOCATOR_SCHEMA_VERSION,
     OperatorReadModelService,
     build_execution_index_read_model,
     build_execution_review_read_model,
 )
+from host_brain.agent_runtime.review_store import REVIEW_STORE_NOT_FOUND, ReviewStoreError
 from host_brain.app.obs_routes_task_runtime import (
     _get_operator_read_model_service,
+    get_task_runtime_review_locator,
     get_task_runtime_execution,
     list_task_runtime_executions,
 )
@@ -275,6 +278,10 @@ class _ReviewStore:
         self.calls.append(("list_reviews", task_graph_id, limit))
         return [_review("review-pending", status="PENDING", expires_at=2_000)]
 
+    def get_review(self, review_id: str) -> dict:
+        self.calls.append(("get_review", review_id))
+        return _review(review_id, status="PENDING", expires_at=2_000)
+
 
 class _EventStore:
     def __init__(self) -> None:
@@ -309,6 +316,77 @@ def test_t_nle_21_service_uses_only_store_read_facades() -> None:
         assert not any(name.startswith(("write", "create", "update", "approve", "reject", "resume")) for name, *_ in store.calls)
 
 
+def test_t_nle_21_review_locator_is_public_read_only_and_allows_unbound_review() -> None:
+    reviews = _ReviewStore()
+    service = OperatorReadModelService(
+        task_store=_TaskStore(),
+        review_store=reviews,
+        event_store=_EventStore(),
+        clock=lambda: 1_000,
+    )
+    review_id = "review://governance/upgrade/search"
+    record = _review(review_id, status="PENDING", expires_at=2_000)
+    record["task_graph_id"] = None
+
+    def get_review(requested_review_id: str) -> dict:
+        reviews.calls.append(("get_review", requested_review_id))
+        return record
+
+    reviews.get_review = get_review  # type: ignore[method-assign]
+    locator = service.get_review(review_id)
+
+    assert locator == {
+        "schema_version": REVIEW_LOCATOR_SCHEMA_VERSION,
+        "generated_at_ms": 1_000,
+        "read_only": True,
+        "found": True,
+        "review_id": review_id,
+        "task_graph_id": None,
+        "review": locator["review"],
+    }
+    assert locator["review"]["review_id"] == review_id
+    assert locator["review"]["task_graph_id"] is None
+    assert "must-not-leak" not in json.dumps(locator, ensure_ascii=False)
+    assert reviews.calls == [("get_review", review_id)]
+    assert not any(
+        name.startswith(("write", "create", "update", "approve", "reject", "resume"))
+        for name, *_ in reviews.calls
+    )
+
+
+def test_t_nle_21_review_locator_fails_closed_when_review_does_not_exist(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("HOST_NLE_OPERATOR_VIEWS_ENABLED", "true")
+    get_core_settings.cache_clear()
+    reviews = _ReviewStore()
+
+    def get_review(review_id: str) -> dict:
+        reviews.calls.append(("get_review", review_id))
+        raise ReviewStoreError(REVIEW_STORE_NOT_FOUND, f"ReviewItem not found: {review_id}")
+
+    reviews.get_review = get_review  # type: ignore[method-assign]
+    service = OperatorReadModelService(
+        task_store=_TaskStore(),
+        review_store=reviews,
+        event_store=_EventStore(),
+        clock=lambda: 1_000,
+    )
+
+    with pytest.raises(HTTPException) as missing:
+        asyncio.run(
+            get_task_runtime_review_locator(
+                review_id="review://missing/item",
+                service=service,
+            )
+        )
+
+    assert missing.value.status_code == 404
+    assert missing.value.detail["reason_code"] == REVIEW_STORE_NOT_FOUND
+    assert reviews.calls == [("get_review", "review://missing/item")]
+    get_core_settings.cache_clear()
+
+
 def test_t_nle_21_obs_routes_honor_operator_feature_flag(monkeypatch: pytest.MonkeyPatch) -> None:
     service = OperatorReadModelService(
         task_store=_TaskStore(),
@@ -330,6 +408,12 @@ def test_t_nle_21_obs_routes_honor_operator_feature_flag(monkeypatch: pytest.Mon
     monkeypatch.setenv("HOST_NLE_OPERATOR_VIEWS_ENABLED", "true")
     get_core_settings.cache_clear()
     index = asyncio.run(list_task_runtime_executions(limit=10, service=service))
+    locator = asyncio.run(
+        get_task_runtime_review_locator(
+            review_id="review://governance/upgrade/search",
+            service=service,
+        )
+    )
     detail = asyncio.run(
         get_task_runtime_execution(
             "graph-1",
@@ -340,6 +424,8 @@ def test_t_nle_21_obs_routes_honor_operator_feature_flag(monkeypatch: pytest.Mon
         )
     )
     assert index["schema_version"] == EXECUTION_INDEX_SCHEMA_VERSION
+    assert locator["schema_version"] == REVIEW_LOCATOR_SCHEMA_VERSION
+    assert locator["review_id"] == "review://governance/upgrade/search"
     assert detail["schema_version"] == EXECUTION_REVIEW_SCHEMA_VERSION
 
     get_core_settings.cache_clear()

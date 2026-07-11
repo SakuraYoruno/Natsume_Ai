@@ -74,10 +74,14 @@ export default function GovernanceHealthSection({ model, queryError = null }) {
             </div>
             <div className="flex items-center justify-between gap-3 rounded-lg border border-violet-100 bg-violet-50 p-3 text-xs">
               <span className="font-semibold text-violet-800">Review: {identity.review.status}</span>
-              {identity.review.required && identity.review.href ? (
+              {!identity.available ? (
+                <span className="font-semibold text-amber-700">Review 状态未知 / 无法判定</span>
+              ) : identity.review.required && identity.review.href ? (
                 <Link className="inline-flex items-center gap-1 font-semibold text-violet-700 hover:underline" to={identity.review.href}>
                   打开重大差异 Review <ArrowUpRight size={11} />
                 </Link>
+              ) : identity.diff.severity === 'MAJOR' ? (
+                <span className="font-semibold text-red-700">缺少 durable Review，已阻断</span>
               ) : <span className="text-violet-500">无需确认</span>}
             </div>
             <p className="text-[11px] text-gray-400">private_body_included=false；仅显示字段级差异与引用，不渲染人格或记忆正文。</p>

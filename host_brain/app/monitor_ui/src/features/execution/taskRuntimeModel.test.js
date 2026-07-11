@@ -3,9 +3,14 @@ import test from 'node:test'
 
 import {
   EXECUTION_REVIEW_SCHEMA_VERSION,
+  REVIEW_LOCATOR_SCHEMA_VERSION,
   buildReviewResumePayload,
   buildTaskRuntimeViewModel,
+  focusExecutionReview,
   getReviewActionState,
+  normalizeReviewLocator,
+  parseTaskReviewDeepLink,
+  selectLatestExecutionForGraph,
 } from './taskRuntimeModel.js'
 
 function review(status, overrides = {}) {
@@ -99,4 +104,60 @@ test('view model orders cursor events and dedupes replay keys', () => {
   assert.deepEqual(model.timeline.map((event) => event.cursor), [1, 2])
   assert.equal(model.metrics.events, 2)
   assert.equal(model.reviews.find((item) => item.status === 'EXPIRED').actionState.canApprove, false)
+})
+
+function locatorPayload(overrides = {}) {
+  return {
+    schema_version: REVIEW_LOCATOR_SCHEMA_VERSION,
+    generated_at_ms: 2_000,
+    read_only: true,
+    found: true,
+    review_id: 'review-deep-link',
+    task_graph_id: null,
+    review: {
+      ...review('PENDING', {
+        review_id: 'review-deep-link',
+        review_type: 'IDENTITY_CHANGE',
+        requester: 'release-governor',
+        reason: 'durable public reason',
+        risk_level: 4,
+        task_graph_id: null,
+      }),
+    },
+    ...overrides,
+  }
+}
+
+test('review deep-link parser rejects blank and duplicate ids', () => {
+  assert.deepEqual(parseTaskReviewDeepLink('?review_id=review%3A%2F%2Fone'), {
+    active: true,
+    reviewId: 'review://one',
+    error: null,
+  })
+  assert.ok(parseTaskReviewDeepLink('?review_id=&review_id=two').error)
+})
+
+test('locator accepts graphless public Review and fails closed on mismatch', () => {
+  const locator = normalizeReviewLocator(locatorPayload(), 'review-deep-link')
+  assert.equal(locator.compatible, true)
+  assert.equal(locator.found, true)
+  assert.equal(locator.taskGraphId, null)
+  assert.equal(locator.review.actionState.canApprove, true)
+  assert.equal(normalizeReviewLocator(locatorPayload(), 'review-other').compatible, false)
+  assert.equal(normalizeReviewLocator(locatorPayload({ read_only: false }), 'review-deep-link').found, false)
+})
+
+test('graph locator chooses latest revision and requires one exact execution Review', () => {
+  assert.equal(selectLatestExecutionForGraph([
+    { graph_id: 'graph-1', revision: 2, updated_ts_ms: 10 },
+    { graph_id: 'graph-1', revision: 7, updated_ts_ms: 5 },
+    { graph_id: 'graph-2', revision: 9, updated_ts_ms: 20 },
+  ], 'graph-1').revision, 7)
+  const focused = focusExecutionReview([
+    review('PENDING'),
+    review('APPROVED', { review_id: 'review-deep-link' }),
+  ], 'review-deep-link')
+  assert.equal(focused.found, true)
+  assert.equal(focused.reviews[0].review_id, 'review-deep-link')
+  assert.equal(focusExecutionReview([], 'review-deep-link').found, false)
 })

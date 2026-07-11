@@ -44,7 +44,7 @@ function asRisk(value) {
 /** @param {unknown} reviewRef */
 function reviewHref(reviewRef) {
   const value = asText(reviewRef)
-  return value ? `${REVIEW_ROUTE}?review_ref=${encodeURIComponent(value)}` : ''
+  return value ? `${REVIEW_ROUTE}?review_id=${encodeURIComponent(value)}` : ''
 }
 
 /** @param {unknown} value */
@@ -58,6 +58,7 @@ function normalizeCapabilities(value, { hideUpgradeCandidates = false } = {}) {
     const canonicalRisk = asRisk(item.canonical_risk)
     const valid = maturity.valid && ceiling.valid && canonicalRisk !== null
     const reviewRef = valid && !hideUpgradeCandidates ? asText(upgrade.review_ref) : ''
+    const candidateAvailable = Object.keys(upgrade).length > 0
     return {
       valid,
       capabilityId: asText(item.capability_id) || 'unknown-capability',
@@ -71,7 +72,11 @@ function normalizeCapabilities(value, { hideUpgradeCandidates = false } = {}) {
       evidenceRefs: asStringList(item.evidence_refs),
       upgradeCandidate: {
         reviewRef,
-        status: reviewRef ? (asText(upgrade.status) || 'PENDING') : 'HIDDEN',
+        status: reviewRef
+          ? (asText(upgrade.status) || 'PENDING')
+          : candidateAvailable && valid && !hideUpgradeCandidates
+            ? 'AWAITING_REVIEW_STORE'
+            : 'HIDDEN',
         href: reviewHref(reviewRef),
       },
     }
@@ -106,6 +111,16 @@ function normalizeIdentity(value) {
   const diff = asObject(item.diff)
   const review = asObject(item.review)
   const privateBodyIncluded = item.private_body_included !== false
+  const status = asText(item.status) || 'UNKNOWN'
+  const severity = asText(diff.severity) || 'NONE'
+  const reviewRef = asText(review.review_ref)
+  const reviewRequired = review.required === true
+  const statusAvailable = !['UNKNOWN', 'UNAVAILABLE'].includes(status.toUpperCase())
+  const majorDifference = severity.toUpperCase() === 'MAJOR'
+    || asArray(diff.items || diff.differences).some((candidate) => (
+      asText(asObject(candidate).severity).toUpperCase() === 'MAJOR'
+    ))
+  const reviewBound = !majorDifference || (reviewRequired && Boolean(reviewRef))
   const diffItems = privateBodyIncluded
     ? []
     : asArray(diff.items || diff.differences).map((candidate) => {
@@ -118,20 +133,23 @@ function normalizeIdentity(value) {
       }
     })
   return {
-    safe: !privateBodyIncluded,
-    status: asText(item.status) || 'UNKNOWN',
+    safe: !privateBodyIncluded && statusAvailable && reviewBound,
+    renderSafe: !privateBodyIncluded,
+    available: statusAvailable,
+    status,
     currentSnapshotRef: asText(item.current_snapshot_ref),
     releaseRef: asText(item.release_ref),
     privateBodyIncluded,
     diff: {
-      severity: asText(diff.severity) || 'NONE',
+      severity,
       items: diffItems,
     },
     review: {
-      required: review.required === true,
-      reviewRef: asText(review.review_ref),
-      status: asText(review.status) || 'NOT_REQUIRED',
-      href: reviewHref(review.review_ref),
+      required: reviewRequired,
+      bound: reviewBound,
+      reviewRef,
+      status: asText(review.status) || (statusAvailable ? 'NOT_REQUIRED' : 'UNAVAILABLE'),
+      href: reviewHref(reviewRef),
     },
   }
 }
@@ -160,17 +178,24 @@ export function buildGovernanceViewModel(value) {
   })
   const capabilitySafe = capabilities.every((item) => item.valid)
   const safe = !automaticUpgradeAvailable && identity.safe && capabilitySafe
+  const identityError = identity.privateBodyIncluded
+    ? '身份快照包含私密正文标记，已停止渲染 identity diff。'
+    : !identity.available
+      ? '身份快照不可用，Review 状态无法判定，已按未知状态 fail-closed。'
+      : !identity.review.bound
+        ? '身份存在重大差异但未绑定 durable Review，已阻断确认入口。'
+        : null
   return {
     available: true,
     safe,
     error: automaticUpgradeAvailable
       ? '治理快照意外声明可自动升级，已隐藏升级候选。'
-      : (!identity.safe
-          ? '身份快照包含私密正文标记，已停止渲染 identity diff。'
+      : (identityError
+          ? identityError
           : (!capabilitySafe ? '能力成熟度或静态风险字段非法，已按 UNKNOWN fail-closed。' : null)),
     automaticUpgradeAvailable,
     capabilities,
     degradation: normalizeDegradation(payload.degradation),
-    identity: identity.safe ? identity : null,
+    identity: identity.renderSafe ? identity : null,
   }
 }

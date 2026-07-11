@@ -52,10 +52,15 @@ def _capability_item(value: Any) -> dict[str, Any]:
     raw_candidate = _mapping(card.get("upgrade_candidate"))
     candidate = None
     if raw_candidate:
+        operator_review_id = _text(
+            raw_candidate.get("operator_review_id")
+            or raw_candidate.get("review_id")
+            or raw_candidate.get("review_ref")
+        )
         candidate = {
-            "review_ref": _text(
-                raw_candidate.get("candidate_ref") or raw_candidate.get("review_ref")
-            ),
+            "candidate_ref": _text(raw_candidate.get("candidate_ref")),
+            "review_ref": operator_review_id or None,
+            "materialized_to_review_store": bool(operator_review_id),
             "review_authority": _text(raw_candidate.get("review_authority"), 32),
             "status": _text(raw_candidate.get("status"), 32),
             "proposed_level": _text(raw_candidate.get("proposed_level"), 16),
@@ -233,8 +238,15 @@ def _identity(value: Mapping[str, Any] | None) -> dict[str, Any]:
     raw_candidate = _mapping(raw_gate.get("review_candidate"))
     candidate = None
     if raw_candidate:
+        operator_review_id = _text(
+            raw_candidate.get("operator_review_id")
+            or raw_candidate.get("review_id")
+            or raw_candidate.get("review_ref")
+        )
         candidate = {
-            "review_ref": _text(raw_candidate.get("candidate_ref") or raw_candidate.get("review_ref")),
+            "candidate_ref": _text(raw_candidate.get("candidate_ref")),
+            "review_ref": operator_review_id or None,
+            "materialized_to_review_store": bool(operator_review_id),
             "review_lane": _text(raw_candidate.get("review_lane"), 32),
             "status": _text(raw_candidate.get("status"), 32),
             "diff_ref": _text(raw_candidate.get("diff_ref")),
