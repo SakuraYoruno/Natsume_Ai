@@ -4,6 +4,7 @@ import json
 from types import SimpleNamespace
 
 import host_brain.app.graph_config_builder as graph_builder
+import host_brain.app.graph_config_llm_runtime as graph_runtime
 import host_brain.app.model_router as model_router
 from host_brain.app import config as host_config
 
@@ -37,7 +38,7 @@ def _patch_runtime_dependencies(
     deepseek_api_key: str | None = "sk-deepseek",
 ) -> None:
     monkeypatch.setattr(
-        graph_builder,
+        graph_runtime,
         "load_host_config",
         lambda: _mock_config_result(
             timeout_ms=timeout_ms,
@@ -47,7 +48,7 @@ def _patch_runtime_dependencies(
         ),
     )
     monkeypatch.setattr(
-        graph_builder,
+        graph_runtime,
         "build_host_provider_fn",
         lambda **kwargs: {
             "provider_name": kwargs.get("provider_name"),
@@ -56,12 +57,12 @@ def _patch_runtime_dependencies(
         },
     )
     monkeypatch.setattr(
-        graph_builder,
+        graph_runtime,
         "_resolve_host_14b_health_status",
         lambda **kwargs: (True, "ok"),
     )
     monkeypatch.setattr(
-        graph_builder,
+        graph_runtime,
         "_resolve_host_14b_health_status_async",
         lambda **kwargs: (True, "ok"),
     )
