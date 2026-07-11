@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import json
 import os
+import socket
 import uuid
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import pytest
 
@@ -31,6 +33,19 @@ def _load_env_file(path: str) -> dict[str, str]:
         key, value = line.split('=', 1)
         values[key.strip()] = value.strip().strip('"').strip("'")
     return values
+
+
+def _require_chroma_runtime(endpoint: str) -> None:
+    parsed = urlsplit(endpoint)
+    host = parsed.hostname
+    port = parsed.port or (443 if parsed.scheme == 'https' else 80)
+    if not host:
+        pytest.skip('Chroma prod_env unavailable: endpoint host is missing')
+    try:
+        with socket.create_connection((host, port), timeout=0.25):
+            pass
+    except OSError:
+        pytest.skip(f'Chroma prod_env unavailable: {host}:{port} is not reachable')
 
 
 @pytest.fixture(autouse=True)
@@ -75,6 +90,7 @@ def test_memory_prod_chroma_runtime_and_probe_status() -> None:
 def test_memory_prod_persistent_chroma_collection_roundtrip() -> None:
     cfg_result = load_chroma_runtime_config(local_overrides=_load_env_file('.env'))
     assert cfg_result.success and cfg_result.config is not None
+    _require_chroma_runtime(cfg_result.config.endpoint)
     collection_name = 'codex_memory_hub_' + uuid.uuid4().hex[:8]
     client = PersistentChromaClient(
         endpoint=cfg_result.config.endpoint,
@@ -101,6 +117,9 @@ def test_memory_prod_persistent_chroma_collection_roundtrip() -> None:
 
 
 def test_memory_prod_episodic_rejects_missing_evidence_and_empty_text() -> None:
+    cfg_result = load_chroma_runtime_config(local_overrides=_load_env_file('.env'))
+    assert cfg_result.success and cfg_result.config is not None
+    _require_chroma_runtime(cfg_result.config.endpoint)
     store = deps.get_episodic_store()
 
     missing = store.write_memory(text='should fail', evidence_refs=[])

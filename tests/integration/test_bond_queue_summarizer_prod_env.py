@@ -40,7 +40,11 @@ def _prod_env(monkeypatch):
 
 def _make_client() -> tuple[Neo4jBondClient, object]:
     config_result = load_neo4j_runtime_config(local_overrides=_load_env_file('.env'))
-    assert config_result.success and config_result.config is not None
+    if not config_result.success or config_result.config is None:
+        pytest.skip(
+            'Neo4j prod_env unavailable: '
+            f'{config_result.reason_code or "runtime configuration missing"}'
+        )
     client = build_neo4j_bond_client(config=config_result.config)
     assert isinstance(client, Neo4jBondClient)
     return client, config_result.config
