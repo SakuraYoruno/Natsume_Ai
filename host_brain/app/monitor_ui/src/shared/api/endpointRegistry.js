@@ -18,6 +18,9 @@ const SHARED_ENDPOINTS = Object.freeze({
 })
 
 export const ENDPOINT_REGISTRY = Object.freeze({
+  governance: {
+    snapshot: { service: 'obs', path: '/obs/governance/snapshot', risk: 'low' },
+  },
   pentest: {
     capabilities: { service: 'host', path: '/v1/pentest/capabilities', risk: 'low' },
     environment: { service: 'host', path: '/v1/pentest/environment', risk: 'low' },
