@@ -14,6 +14,10 @@ from host_brain.core.errors import (
 )
 from host_brain.mcp.tool_broker import MCPToolBroker
 from host_brain.mcp.tool_registry import MCPToolRegistry, ToolMeta
+from host_brain.observability.degradation_state import (
+    DegradationStateMachine,
+    set_global_degradation_state_machine,
+)
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -150,10 +154,14 @@ class TestMCPBrokerContract(unittest.TestCase):
     """T-MCP-02~03: MCPToolBroker 调用链、Token 治理、降级验收测试。"""
 
     def setUp(self) -> None:
+        set_global_degradation_state_machine(DegradationStateMachine())
         self.registry = MCPToolRegistry(db_path=":memory:")
         self.ledger = SQLiteLedger(db_path=":memory:")
         self.broker = MCPToolBroker(registry=self.registry, ledger=self.ledger)
         self.ts_base = 1_800_000_000_000
+
+    def tearDown(self) -> None:
+        set_global_degradation_state_machine(None)
 
     def _register_tools(self) -> None:
         self.registry.register(_make_read_meta())

@@ -7,10 +7,25 @@ import sqlite3
 from unittest.mock import patch
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+import pytest
 
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.memory.canon_world_store import WorldCanonStore
 from host_brain.memory.long_term_distiller import LongTermMemoryDistiller
+from host_brain.observability.degradation_state import (
+    DegradationStateMachine,
+    set_global_degradation_state_machine,
+)
+
+
+@pytest.fixture(autouse=True)
+def _isolated_degradation_machine(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("HOST_DEGRADATION_STATE_ENABLED", "true")
+    set_global_degradation_state_machine(DegradationStateMachine())
+    try:
+        yield
+    finally:
+        set_global_degradation_state_machine(None)
 
 
 def _install_canon_apply_schema(db_path: Path) -> None:
