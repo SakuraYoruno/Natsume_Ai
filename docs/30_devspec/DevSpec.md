@@ -733,6 +733,15 @@ TASK-0489 本地实现口径（implementation commit `3bc7eb7309f757dc40a6bc1516
 - 当前状态为 `IMPLEMENTED_AWAITING_PROTECTED_HANDOFF`，不是完成切流：受保护的 `host_brain/app/router_registry.py` 仍由 `MASTER / auto-jp-media-translation` 持有，Host production tree 尚未 mount command router，也未在 lifespan 构造/`aclose()` composition。handoff 前所有旧 mutation 保持拒绝，绝不恢复匿名 Obs writer。
 - JSONL journal 当前仍为 lock 内全量校验且 128 MiB 后 fail closed；validated index、segment rollover/archive 由后续 persistence 工作承接，不得在未解决前宣称长期高吞吐 production ready。
 
+TASK-0490 本地实现口径（implementation commit `161daa3c3c3bface5f98d2d212a44a4faa0a1816`）：
+
+- `HOST_SUPPLY_CHAIN_ACTIVATION_MODE` 只接受 `BUILTINS_ONLY`、`QUARANTINE`、`STAGED`；默认和非法配置均收敛到 fail-closed 的 `BUILTINS_ONLY`。`QUARANTINE` 只验证并隔离，`STAGED` 最多写入 durable `STAGED`；TASK-0490 不在 Host 进程内 import、activate 或 execute 外部 Python。
+- 严格 signed manifest 将 `bundle_kind`、`publisher_id`、name/version、完整 canonical inventory、SBOM 和 sandbox policy 绑定到专用 signer trust statement。调用方 kind/publisher 必须与签名身份一致；重复/非有限 JSON、未知字段、path traversal/歧义/碰撞、symlink/reparse/special file 和 depth/count/size 超限均 fail closed。
+- physical quarantine 采用 content-addressed 目录、无跟随链接的有界复制、fsync、临时目录复验、per-digest 跨进程锁与原子 no-replace 发布。source 或 manifest/evidence 在 verify→quarantine 间切换时，必须在 durable catalog mutation 前拒绝。
+- catalog migration `0060_skill_supply_chain.sql` 的 SHA-256 为 `ea7471978f063b6152f3f1699f6896fe5782bede412214b2162b3592b9a1618e`；bundle/append-only operation 表只保存 digest、signer、SBOM、sandbox、state/fencing 与 audit refs，不保存 raw bundle、signature 或 secret，repository 不在 runtime 建表。
+- 旧 Hub source install/search、raw custom-provider install/package import 和 package-manager auto-repair 在网络、subprocess、active package mutation 之前拒绝。focused unit/security/contract 为 `136 passed, 2 skipped`；integration 首次且仅一次 `1 passed`；独立审计已清零 TASK-owned P0/P1。
+- 当前状态为 `IMPLEMENTED_AWAITING_PROTECTED_HANDOFF`：受保护的 `host_brain/skills/provider_catalog.py` 仍有 `HOST_SKILL_EXTRA_PROVIDERS` production dynamic import；新 signed intake route 也尚未接 TASK-0487 SecureIngress 与 durable decision audit。两项 handoff 和 production construction test 落地前不得标 DONE，也不得宣称 production activation/sandbox execution。rollback 固定为 `BUILTINS_ONLY`，并保持旧 Hub/custom/extra/auto-repair 开关关闭。
+
 ### 16.12 Evolution、Identity 与 Release 合同
 
 - Evolution Lab 提供 benchmark、scenario、counterfactual、Skill Compiler、feedback proposal 和 identity migration analysis；输出只能进入受治理 proposal/review，不得直接改写生产状态。

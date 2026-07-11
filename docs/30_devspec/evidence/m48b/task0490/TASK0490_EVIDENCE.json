@@ -1,0 +1,96 @@
+{
+  "schema_version": "natsume.m48b.task-evidence.v1",
+  "task_id": "TASK-0490",
+  "milestone": "M48-B",
+  "status": "IMPLEMENTED_AWAITING_PROTECTED_HANDOFF",
+  "baseline_commit": "48ed8ae660d4c7e474a4debee908eaa45d69c3d8",
+  "implementation_commit": "161daa3c3c3bface5f98d2d212a44a4faa0a1816",
+  "recorded_at": "2026-07-11",
+  "scope": {
+    "activation_modes": ["BUILTINS_ONLY", "QUARANTINE", "STAGED"],
+    "default_mode": "BUILTINS_ONLY",
+    "invalid_mode": "BUILTINS_ONLY with terminal policy rejection",
+    "signed_bundle_kinds": ["SKILL", "PROVIDER"],
+    "manifest_signature_algorithm": "hmac-sha256",
+    "catalog_signature_algorithm": "HMAC_SHA256",
+    "dedicated_trust_mapping_env": "HOST_SUPPLY_CHAIN_HMAC_KEYS_JSON",
+    "maximum_service_state": "STAGED",
+    "production_activation_or_sandbox_execution": false,
+    "legacy_hub_install_enabled": false,
+    "legacy_raw_provider_install_enabled": false,
+    "external_python_import_enabled": false,
+    "package_manager_auto_repair_enabled": false
+  },
+  "security_invariants": [
+    "BUILTINS_ONLY is the default and invalid configuration fail-closed target; it rejects external bundles before scanning or reading their source",
+    "a signed manifest binds bundle kind, publisher, name, version, complete canonical inventory, SBOM and sandbox policy to a dedicated signer trust statement",
+    "caller-supplied kind and publisher must exactly match the signed identity and cannot relabel a SKILL as a PROVIDER or spoof a publisher",
+    "duplicate JSON keys, non-finite values, unknown manifest fields, path ambiguity, case collisions, traversal, symlinks, reparse points, special files and configured depth/count/size limits fail closed",
+    "verification and quarantine contain no dynamic import, exec, subprocess, package-manager or active-package overwrite path",
+    "physical quarantine is content-addressed, bounded, copied without following links, fsynced, reverified and atomically published under a per-digest cross-process owner",
+    "a source or signed-manifest switch between verification and quarantine is rejected before any durable catalog mutation",
+    "0060 records only digest, signer, SBOM, sandbox, state, fencing and audit references; raw bundle bytes, signatures and secrets are not database columns",
+    "the task-owned intake service stops at QUARANTINED or STAGED and never imports, activates or executes external Python",
+    "legacy Hub source install/search, raw custom-provider install and auto-repair reject before network, filesystem mutation, subprocess or package-manager execution"
+  ],
+  "migration": {
+    "asset": "host_brain/audit/migrations/0060_skill_supply_chain.sql",
+    "sha256": "ea7471978f063b6152f3f1699f6896fe5782bede412214b2162b3592b9a1618e",
+    "latest_version": 60,
+    "tables": ["skill_supply_chain_bundle", "skill_supply_chain_operation"],
+    "bundle_states": ["QUARANTINED", "STAGED", "ACTIVE", "REJECTED"],
+    "runtime_inline_ddl": false,
+    "private_material_columns": false,
+    "task_owned_service_reaches_active": false
+  },
+  "validation": [
+    {
+      "kind": "focused_unit_security_contract_wave",
+      "scope": "core verifier, physical quarantine, intake service, durable store, legacy Hub/custom-provider/auto-repair boundaries, migration catalog compatibility",
+      "result": "136 passed, 2 skipped"
+    },
+    {
+      "kind": "task_integration_wave",
+      "command": "python -m pytest -q --tb=short tests/integration/test_task0490_skill_supply_chain_integration.py",
+      "result": "1 passed",
+      "execution_count": 1,
+      "first_attempt_passed": true,
+      "coverage": "real 0060 migration, signed PROVIDER bundle verification, content-addressed physical quarantine, durable intake and idempotent replay, STAGED-only terminal state, tamper rejection and zero external-code import",
+      "external_or_physical_effects": false
+    },
+    {
+      "kind": "independent_security_audit",
+      "result": "P0/P1 cleared for TASK-0490-owned implementation and tests"
+    }
+  ],
+  "protected_handoff": {
+    "status": "REQUIRED_BEFORE_DONE",
+    "protected_file": "host_brain/skills/provider_catalog.py",
+    "current_runtime_gaps": [
+      "the protected production provider catalog still owns HOST_SKILL_EXTRA_PROVIDERS and can dynamically import configured Python modules",
+      "there is no production signed-bundle intake route wired through TASK-0487 SecureIngress with a durable decision audit"
+    ],
+    "required_merge": [
+      "preserve the existing protected provider_catalog.py WIP while making BUILTINS_ONLY, QUARANTINE and STAGED bypass every HOST_SKILL_EXTRA_PROVIDERS dynamic-import path",
+      "route external Skill/Provider intake only to the signed quarantine service; do not restore legacy Hub source installation, raw custom-provider drop-ins or package-manager auto-repair",
+      "place the new signed intake route behind TASK-0487 SecureIngress with authenticated principal, explicit scope, rate, nonce and idempotency enforcement",
+      "append a durable allow/reject decision audit without persisting raw bundle bytes, signature material, secrets or unverified identity metadata",
+      "add production construction tests proving the provider catalog cannot import an external module and the signed intake reaches quarantine/STAGED but never Host-process activation or execution"
+    ],
+    "stop_condition": "Do not mark TASK-0490 DONE and do not claim production activation or sandbox execution until both protected handoffs and their production construction tests land"
+  },
+  "deferred_capabilities": [
+    {
+      "capability": "sandbox worker execution and governed external-bundle activation/rollback",
+      "remove_by": "TASK-0520,TASK-0554,TASK-0572,TASK-0576",
+      "current_behavior": "verified external bundles stop at physical quarantine or durable STAGED state"
+    }
+  ],
+  "rollback": [
+    "Set HOST_SUPPLY_CHAIN_ACTIVATION_MODE=BUILTINS_ONLY; absent and invalid values already converge to this fail-closed mode.",
+    "Keep HOST_SKILL_HUB_ENABLED=false, HOST_SKILL_CUSTOM_PROVIDERS_ENABLED=false, HOST_SKILL_EXTRA_PROVIDERS empty and HOST_SKILL_AUTO_REPAIR_ENABLED=false.",
+    "Retain the expand-only 0060 catalog, quarantine contents and audit references for reconciliation; do not delete evidence to permit a retry.",
+    "Never roll back to raw Python source installation, Host-process external imports, package-manager auto-repair or an unsigned active-package overwrite."
+  ],
+  "live_prod_pentest_or_physical_effects_executed": false
+}
