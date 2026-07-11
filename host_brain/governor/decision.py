@@ -12,8 +12,9 @@ from host_brain.core.metabolism import (
     hard_state_ref,
     normalize_hard_state,
 )
-from host_brain.governor.policy_cache import GovernorPolicyCache
 from host_brain.governor.action_arbiter import build_governed_action_binding
+from host_brain.governor.capability_policy import CapabilityGovernorPolicyAdapter
+from host_brain.governor.policy_cache import GovernorPolicyCache
 from host_brain.governor.rules import evaluate_governor_gates
 from host_brain.governor.route_token import CommittedRouteDecision, RouteToken, compile_route_decision
 from host_brain.governor.schemas import (
@@ -42,6 +43,7 @@ class IntentDecisionEngine:
         # M42：分层治理注入点（可选，向后兼容）
         registry: Any | None = None,
         policy_cache: GovernorPolicyCache | None = None,
+        capability_scorecard_provider: Any | None = None,
     ) -> None:
         self.ledger = ledger if ledger is not None else SQLiteLedger(":memory:")
         self.token_service = token_service
@@ -49,7 +51,15 @@ class IntentDecisionEngine:
         # M42：分层治理组件（可选注入，未注入时保持现有行为）
         self._registry = registry
         self._policy_cache = policy_cache
-        self._tier_policy = GovernorTierPolicy() if registry is not None else None
+        self._tier_policy = (
+            GovernorTierPolicy(
+                CapabilityGovernorPolicyAdapter(
+                    scorecard_provider=capability_scorecard_provider,
+                )
+            )
+            if registry is not None
+            else None
+        )
 
     def evaluate_intent(
         self,
