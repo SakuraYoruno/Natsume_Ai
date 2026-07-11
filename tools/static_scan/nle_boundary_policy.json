@@ -59,22 +59,22 @@
         {
           "path": "host_brain/memory/canon_apply_service.py",
           "symbol": "WorldCanonStore._delete_authorized_document",
-          "line": 1315
+          "line": 1328
         },
         {
           "path": "host_brain/memory/canon_apply_service.py",
           "symbol": "WorldCanonStore._CANON_APPLY_PERMIT",
-          "line": 1320
+          "line": 1333
         },
         {
           "path": "host_brain/memory/canon_apply_service.py",
           "symbol": "WorldCanonStore._replace_authorized_payload",
-          "line": 1323
+          "line": 1336
         },
         {
           "path": "host_brain/memory/canon_apply_service.py",
           "symbol": "WorldCanonStore._CANON_APPLY_PERMIT",
-          "line": 1328
+          "line": 1341
         },
         {
           "path": "host_brain/memory/canon_world_store.py",
