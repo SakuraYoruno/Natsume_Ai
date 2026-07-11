@@ -8,7 +8,7 @@
 状态：READY_FOR_PROGRAM_EXECUTION
 文档类型：DevTasks / Master Execution Contract
 程序任务编号：TASK-0461～TASK-0622，共 162 项，禁止复用、跳号或重定义
-当前执行入口：TASK-0461～TASK-0477 已完成；M48-A / TASK-0478 已解锁；M48-B 通过入口 Gate 后可并行；M49～M57 状态为 PROGRAMMED
+当前执行入口：TASK-0461～TASK-0478 已完成；M48-A / TASK-0479 已解锁；M48-B 通过入口 Gate 后可并行；M49～M57 状态为 PROGRAMMED
 代码基线：dev@1ec8be1a8a20397627855aa946c0ff8aaaa87b72
 工作区状态：dirty；已有未提交业务代码、运行数据和本地配置必须原位保护
 完整目标蓝图：docs/50_project/arch/NATSUME_AI_V1_FULL_ARCHITECTURE_TARGET_20260710.md
@@ -272,7 +272,7 @@ M48-B 从 `PROGRAMMED` 解锁为 `PLANNED` 前必须同时满足：
 | TASK-0475 | Context refs 与预算 | DONE | 2026-07-11；AgentContextEnvelope v2、context refs 授权、token budget/actual estimate、truncation reason、pollution fail-closed、dispatcher 安全审计摘要与 T-NLE-13 通过 |
 | TASK-0476 | Life OCC | DONE | 2026-07-11；0057 OCC migration、expected-version CAS command facade、冲突/显式 fallback audit、20 并发无 silent overwrite 与 T-NLE-14 通过；未迁移生产副本 |
 | TASK-0477 | WorldProjection | DONE | 2026-07-11；只读 WorldSnapshot read model、GET snapshot API、source/confidence/TTL/conflict/epistemic facts、空库不初始化 Life state、无写 API 与 T-NLE-15 通过 |
-| TASK-0478 | Appraisal 与 Bond | PLANNED | M48-A 权威任务卡 |
+| TASK-0478 | Appraisal 与 Bond | DONE | 2026-07-11；确定性 AppraisalRecord replay、只读 BondProjection、Bond API/验证器统一 command path、rift/repair/boundary/vector 兼容、关系权限不变、T-SSOT-01 扩展与 T-NLE-16 通过 |
 | TASK-0479 | Scene / ActionArbiter | PLANNED | M48-A 权威任务卡 |
 | TASK-0480 | Capability maturity | PLANNED | M48-A 权威任务卡 |
 | TASK-0481 | Degradation policy | PLANNED | M48-A 权威任务卡 |

@@ -213,6 +213,9 @@ class BondDynamicsWriter:
                     "transition_status": stage_transition.transition_status,
                     "score_delta": stage_transition.score_delta,
                     "total_score": stage_transition.total_score,
+                    "transition_id": stage_transition.transition_id,
+                    "detail": stage_transition.detail,
+                    "evidence_refs": list(stage_transition.evidence_refs),
                 }
                 if stage_transition is not None
                 else None

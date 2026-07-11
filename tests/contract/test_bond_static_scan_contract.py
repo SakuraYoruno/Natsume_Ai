@@ -35,6 +35,16 @@ class TestBondStaticScanContract(unittest.TestCase):
         violations = scanner.scan_file(allowed_file)
         self.assertEqual([], violations)
 
+    def test_t_ssot_01_flags_direct_stage_and_score_mutation_fixture(self) -> None:
+        scanner = _load_scan_module()
+        bad_file = FIXTURES / "bad" / "non_single_writer_stage_example.py"
+        violations = scanner.scan_file(bad_file)
+        messages = [str(item["message"]) for item in violations]
+        self.assertEqual(3, len(violations))
+        self.assertTrue(any("apply_event" in message for message in messages))
+        self.assertTrue(any("total_score" in message for message in messages))
+        self.assertTrue(any("current_stage" in message for message in messages))
+
     def test_t_ssot_01_repo_scan_is_clean_for_runtime_sources(self) -> None:
         scanner = _load_scan_module()
         violations = scanner.scan_repo(ROOT)

@@ -101,6 +101,7 @@ _mcp_tool_broker: Optional[MCPToolBroker] = None
 _tool_catalog: Optional[ToolCatalog] = None
 _tool_broker: Optional[ToolBroker] = None
 _bond_stage_engine: Optional[BondStageEngine] = None
+_bond_dynamics_writer: Optional[BondDynamicsWriter] = None
 _bond_update_queue: Optional[BondUpdateQueue] = None
 _episodic_store: Optional[EpisodicStore] = None
 _life_memory_store: Optional[LifeMemoryStore] = None
@@ -592,6 +593,24 @@ def get_bond_neo4j_client():
     if sqlite_path:
         return SqliteBondClient(db_path=sqlite_path or None)
     return InMemoryNeo4jBondClient()
+
+
+def get_bond_dynamics_writer() -> BondDynamicsWriter:
+    """Return the governed synchronous Bond command writer for API calls."""
+    global _bond_dynamics_writer
+    ledger = get_ledger()
+    stage_engine = get_bond_stage_engine()
+    if (
+        _bond_dynamics_writer is None
+        or _bond_dynamics_writer.ledger is not ledger
+        or getattr(_bond_dynamics_writer, "_stage_engine", None) is not stage_engine
+    ):
+        _bond_dynamics_writer = BondDynamicsWriter(
+            ledger=ledger,
+            neo4j_client=get_bond_neo4j_client(),
+            stage_engine=stage_engine,
+        )
+    return _bond_dynamics_writer
 
 
 def get_bond_update_queue() -> BondUpdateQueue:

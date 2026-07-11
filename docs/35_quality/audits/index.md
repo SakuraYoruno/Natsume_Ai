@@ -3,7 +3,7 @@
 
 # 质量审计子目录
 
-版本：v1.14
+版本：v1.15
 维护日期：2026-07-11
 标签：当前执行证据 + 历史归档
 
@@ -31,6 +31,9 @@
 - `NLE_WP24_TASK0473_VALIDATION_20260711.md`：canonical runtime mode router、canary/kill switch、legacy drain、cross-executor resume guard 与 T-NLE-11 验收证据。
 - `NLE_WP40_TASK0474_VALIDATION_20260711.md`：durable runtime event timeline、TaskStore outbox publisher、JSON/SSE replay、dedupe 与敏感字段 fail-closed gate 验收证据。
 - `NLE_WP41_TASK0475_VALIDATION_20260711.md`：AgentContextEnvelope v2、context refs 授权、token budget/actual estimate、truncation reason、pollution fail-closed 与 T-NLE-13 验收证据。
+- `NLE_WP50_TASK0476_VALIDATION_20260711.md`：Digital Life expected-version OCC、0057 migration、冲突/显式 fallback audit 与并发验收证据。
+- `NLE_WP51_TASK0477_VALIDATION_20260711.md`：只读 WorldProjection、source/confidence/TTL/conflict/epistemic facts 与无反写验收证据。
+- `NLE_WP52_TASK0478_VALIDATION_20260711.md`：确定性 Appraisal replay、只读 BondProjection、BondDynamics 单写收敛与 rift/repair/boundary 验收证据。
 - `NLE_WP30_TASK0470_VALIDATION_20260711.md`：fail-closed Verification runner、required gate、TaskStore 状态门与 T-NLE-08 验收证据。
 - `NLE_WP31_TASK0471_VALIDATION_20260711.md`：AcceptanceJudgement、criterion verdict、Executor acceptance 字段、TaskStore ACCEPTED 状态门与 T-NLE-09 验收证据。
 - `NLE_WP32_TASK0472_VALIDATION_20260711.md`：Durable ReviewStore、绑定 resume token、一次性 PRE/POST resume 与 T-NLE-10 验收证据。

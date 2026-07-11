@@ -160,27 +160,24 @@ class FixtureRecallService:
 
 class ApplyingBondQueue:
     def __init__(self, engine: Any) -> None:
+        from host_brain.bond.bond_dynamics import BondDynamicsWriter  # noqa: PLC0415
+
         self.engine = engine
+        self.writer = BondDynamicsWriter(stage_engine=engine)
         self.payloads: list[dict[str, Any]] = []
         self.results: list[Any] = []
 
     def enqueue(self, payload: Mapping[str, Any]) -> dict[str, Any]:
         row = dict(payload)
         self.payloads.append(row)
-        result = self.engine.apply_event(
-            user_id=str(row.get("user_id") or ""),
-            update_kind=str(row.get("update_kind") or "INTERACTION_MINIMAL"),
-            evidence_refs=[str(item) for item in list(row.get("evidence_refs") or [])],
-            request_id=str(row.get("request_id") or ""),
-            ts_ms=int(row.get("ts_ms") or 0),
-            emotion_intensity=float(row.get("emotion_intensity") or 0.0),
-            emotion_valence=float(row.get("emotion_valence") or 0.0),
-        )
+        result = self.writer.apply_update(**row)
         self.results.append(result)
+        transition = dict(result.event.get("stage_transition") or {})
         return {
-            "status": "APPLIED",
+            "status": "APPLIED" if result.success else result.status,
             "queue_size": len(self.payloads),
-            "transition_status": getattr(result, "transition_status", ""),
+            "transition_status": transition.get("transition_status"),
+            "reason_code": result.reason_code,
         }
 
 

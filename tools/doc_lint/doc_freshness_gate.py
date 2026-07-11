@@ -128,8 +128,18 @@ def build_report(
             )
             continue
 
+        # PR/task-scoped runs only need to compare the documentation with the
+        # source files that triggered this rule.  Walking every historical
+        # source and spawning one ``git log`` per file made a focused gate take
+        # minutes on this repository.  Scheduled ``--check-all`` runs retain
+        # the complete baseline scan.
+        timestamp_sources = (
+            list(touched_sources.values())
+            if touched_sources and not check_all
+            else sources
+        )
         source_timestamps = {}
-        for source_path in sources:
+        for source_path in timestamp_sources:
             source_ts = _best_effort_timestamp(
                 source_path,
                 repo_root,
@@ -176,7 +186,7 @@ def build_report(
                     "doc_ts": int(doc_ts),
                     "rule_id": str(rule.get("id") or doc_rel),
                     "note": str(rule.get("note") or ""),
-                    "checked_source_count": len(sources),
+                    "checked_source_count": len(timestamp_sources),
                     "changed_source_count": len(touched_sources),
                     "sample_changed_or_recent_sources": [str(p) for p in stale_paths[:5]],
                     "max_age_days": max_age_days,

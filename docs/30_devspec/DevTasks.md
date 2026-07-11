@@ -19,8 +19,8 @@
 - 关联需求：`FR-NLE-001`～`FR-NLE-005`、`FR-ARCH-001`～`FR-ARCH-010`。
 - 关联测试：`T-NLE-01`～`T-NLE-24`、`T-ARCH-01`～`T-ARCH-30`。
 - 唯一首个执行入口：`TASK-0461 / LTE-WP-00`。M48-A 内部依赖以 M48-A 详细执行文档为准；跨里程碑依赖、切流、停止、回滚和最终退役以 Master 执行文档为准。
-- 最近完成任务：`TASK-0461～TASK-0477` 已完成；WorldProjection 已具备只读 snapshot read model，facts 含 source/confidence/observed/expires/epistemic/conflict 且不反写事实源。
-- 当前已解锁任务：`TASK-0478 / LTE-WP-52`；Appraisal/Bond 必须复用现有情绪、关系、主动行为能力，不建立平行状态真源。生产副本迁移仍需备份/dry-run 批准。
+- 最近完成任务：`TASK-0461～TASK-0478` 已完成；AppraisalRecord 可从既有 emotional episode/aftereffect 确定性回放，BondProjection 只读保留 texture/rift/repair/boundary/SocialBrain vector，生产写调用统一经 BondDynamics command。
+- 当前已解锁任务：`TASK-0479 / LTE-WP-53`；SceneDecision 只能影响表达/主动性，ActionArbiter 只能收紧 Governor，且不得覆盖用户显式目标。主动行为策略变化仍需 owner review。
 
 本文件后续的 `TASK-0000`～`TASK-0460` 保留为历史任务记录；与完整架构程序冲突时，不得用历史任务覆盖当前代码基线、Master 程序或对应阶段的正式任务卡。
 

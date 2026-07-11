@@ -94,6 +94,7 @@ def _reset_host_brain_runtime_state(*, env_snapshot: dict[str, str] | None = Non
         dep._mcp_tool_broker = None
         dep._shared_memory_index = None
         dep._milestone_tracker = None
+        dep._bond_dynamics_writer = None
         dep._hard_state = None
         dep._activity_monitor_ref = None
 
@@ -122,6 +123,8 @@ def _reset_host_brain_runtime_state(*, env_snapshot: dict[str, str] | None = Non
         bond_routes = sys.modules.get("host_brain.app.bond_routes")
         asgi_app = sys.modules.get("host_brain.app.asgi")
         if bond_routes is not None:
+            if hasattr(bond_routes, "set_bond_writer_provider"):
+                bond_routes.set_bond_writer_provider(None)
             if asgi_app is not None and hasattr(asgi_app, "resolve_bond_engine"):
                 bond_routes.set_bond_engine_provider(asgi_app.resolve_bond_engine)
             else:

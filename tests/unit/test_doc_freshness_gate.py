@@ -244,3 +244,54 @@ def test_modified_document_mtime_is_used_by_build_report(
     assert calls == 1
     assert report["status"] == "passed"
     assert report["summary"]["failure_count"] == 0
+
+
+def test_scoped_report_only_timestamps_triggering_sources(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = _init_repo(tmp_path)
+    doc = repo / "docs" / "target.md"
+    changed_source = repo / "src" / "changed.py"
+    untouched_source = repo / "src" / "untouched.py"
+    policy_path = repo / "freshness.json"
+    _write(doc, "documentation\n")
+    _write(changed_source, "CHANGED = 1\n")
+    _write(untouched_source, "UNTOUCHED = 1\n")
+    policy_path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "name": "scoped-policy",
+                "default_max_age_days": 30,
+                "rules": [
+                    {
+                        "id": "target",
+                        "doc": "docs/target.md",
+                        "sources": ["src/*.py"],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    _commit_all(repo, "baseline")
+
+    seen: list[Path] = []
+    real_timestamp = freshness._best_effort_timestamp
+
+    def recording_timestamp(path: Path, root: Path, *, dirty_paths: set[str]):
+        seen.append(path.resolve())
+        return real_timestamp(path, root, dirty_paths=dirty_paths)
+
+    monkeypatch.setattr(freshness, "_best_effort_timestamp", recording_timestamp)
+    report = freshness.build_report(
+        repo,
+        config=policy_path,
+        changed_files=[changed_source.relative_to(repo)],
+    )
+
+    assert report["status"] == "passed"
+    assert doc.resolve() in seen
+    assert changed_source.resolve() in seen
+    assert untouched_source.resolve() not in seen

@@ -16,6 +16,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from host_brain.app.surface_emotion_bond_flow import apply_surface_emotion_bond_flow  # noqa: E402
+from host_brain.bond.bond_dynamics import BondDynamicsWriter  # noqa: E402
 from host_brain.bond.bond_stage_engine import BondStageEngine  # noqa: E402
 from host_brain.bond.summarizer import derive_bond_summary  # noqa: E402
 from host_brain.persona.surface_affect_control import build_surface_affect_control_packet  # noqa: E402
@@ -139,26 +140,21 @@ class FixtureRecallService:
 class ApplyingBondQueue:
     def __init__(self, engine: BondStageEngine) -> None:
         self.engine = engine
+        self.writer = BondDynamicsWriter(stage_engine=engine)
         self.payloads: list[dict[str, Any]] = []
         self.results: list[Any] = []
 
     def enqueue(self, payload: Mapping[str, Any]) -> dict[str, Any]:
         row = dict(payload)
         self.payloads.append(row)
-        result = self.engine.apply_event(
-            user_id=str(row.get("user_id") or ""),
-            update_kind=str(row.get("update_kind") or "INTERACTION_MINIMAL"),
-            evidence_refs=[str(item) for item in list(row.get("evidence_refs") or [])],
-            request_id=str(row.get("request_id") or ""),
-            ts_ms=int(row.get("ts_ms") or 0),
-            emotion_intensity=float(row.get("emotion_intensity") or 0.0),
-            emotion_valence=float(row.get("emotion_valence") or 0.0),
-        )
+        result = self.writer.apply_update(**row)
         self.results.append(result)
+        transition = dict(result.event.get("stage_transition") or {})
         return {
-            "status": "APPLIED",
+            "status": "APPLIED" if result.success else result.status,
             "queue_size": len(self.payloads),
-            "transition_status": result.transition_status,
+            "transition_status": transition.get("transition_status"),
+            "reason_code": result.reason_code,
         }
 
 

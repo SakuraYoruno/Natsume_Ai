@@ -52,6 +52,14 @@ class EmotionalProactiveEpisode:
     def as_dict(self) -> dict[str, Any]:
         return asdict(self)
 
+    def to_appraisal_record(self) -> Any:
+        """Adapt this event to the replayable read model without writing state."""
+        from host_brain.persona.appraisal_adapter import (  # noqa: PLC0415
+            build_appraisal_from_emotional_episode,
+        )
+
+        return build_appraisal_from_emotional_episode(self)
+
 
 @dataclass(frozen=True)
 class EmotionalProactiveAftereffect:
@@ -74,6 +82,14 @@ class EmotionalProactiveAftereffect:
 
     def as_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+    def to_appraisal_record(self) -> Any:
+        """Adapt this feedback event while preserving boundary/repair meaning."""
+        from host_brain.persona.appraisal_adapter import (  # noqa: PLC0415
+            build_appraisal_from_emotional_aftereffect,
+        )
+
+        return build_appraisal_from_emotional_aftereffect(self)
 
 
 def _resolve_reach_out_bias(inner: Mapping[str, Any], inner_weather: Mapping[str, Any] | None) -> float:

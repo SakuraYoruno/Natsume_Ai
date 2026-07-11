@@ -5,7 +5,7 @@
 
 版本：v1.1
 日期：2026-07-10
-状态：`READY_FOR_EXECUTION`（TASK-0461～TASK-0477 已 `DONE`；其余任务按依赖 Gate 推进）
+状态：`READY_FOR_EXECUTION`（TASK-0461～TASK-0478 已 `DONE`；其余任务按依赖 Gate 推进）
 文档类型：DevTasks / Execution Contract
 任务编号：`TASK-0461`～`TASK-0486`
 逻辑工作包：`LTE-WP-00`～`LTE-WP-80`
@@ -424,7 +424,7 @@ Pop-Location
 | TASK-0475 | WP-41 / PR-015 | Context 引用与预算治理 | WP-40 | 2–3 日 | 中 | DONE |
 | TASK-0476 | WP-50 / PR-016 | Life OCC 与 schema migration | WP-40 | 2–4 日 | 高 | DONE |
 | TASK-0477 | WP-51 / PR-017 | WorldProjection | WP-50 | 2–4 日 | 中 | DONE |
-| TASK-0478 | WP-52 / PR-018 | Appraisal / Bond 收敛 | WP-50 | 2–4 日 | 高 | PLANNED |
+| TASK-0478 | WP-52 / PR-018 | Appraisal / Bond 收敛 | WP-50 | 2–4 日 | 高 | DONE |
 | TASK-0479 | WP-53 / PR-019 | Scene / ActionArbiter | WP-51/52 | 2–4 日 | 高 | PLANNED |
 | TASK-0480 | WP-60 / PR-020 | Capability Maturity | WP-53 | 2–3 日 | 高 | PLANNED |
 | TASK-0481 | WP-61 / PR-021 | Degradation State | WP-53 | 2–3 日 | 中 | PLANNED |
@@ -700,7 +700,7 @@ Pop-Location
 
 ### TASK-0477 / LTE-WP-51：只读 WorldProjection
 
-- 状态：`PLANNED`
+- 状态：`DONE`
 - 目标：从现有 Life、environment、work events、active task、StateArbiter、Canon refs 和 health 构建可过期只读投影。
 - 代码事实：现有 StateArbiter 解决事实来源优先级，不是动作意图仲裁；WorldProjection 不能成为新真源。
 - 前置任务：TASK-0476。
@@ -717,7 +717,7 @@ Pop-Location
 
 ### TASK-0478 / LTE-WP-52：Appraisal 与 Bond 单写路径收敛
 
-- 状态：`PLANNED`
+- 状态：`DONE`
 - 目标：建立 `event → appraisal → affect/drive → episode/expression` 证据链，并让 Bond score/stage 成为兼容投影而非唯一事实。
 - 代码事实：`EmotionalProactiveEpisode` 已有 felt reason/evidence/aftereffect；Bond 已有质感、裂痕/修复和 SocialBrain 多维向量。
 - 前置任务：TASK-0476。
@@ -730,6 +730,7 @@ Pop-Location
 - 停止条件：score/stage 变化可绕过 evidence/command 直接修改权限。
 - 回滚：关闭 adapter/projection；保留现有 BondDynamics SSOT。
 - 审批：任何关系权限语义变化必须 MASTER Review；本任务默认不改变权限。
+- 完成证据（2026-07-11）：新增 `Natsume.appraisal.record.v1` 纯适配器、`Natsume.bond.projection.v1` 只读 projection、detached `peek_state()` 与 T-NLE-16；episode/aftereffect 可确定性回放到 appraisal、affect/drive、episode/expression/bond signal，boundary 只产生 `WITHDRAW_PROACTIVE_EXPRESSION` 且 permission effect 为 `NONE`。`POST /bond/event` 与两个真实闭环验证器已改走 `BondDynamicsWriter.apply_update()`；扩展 T-SSOT-01 static scan，禁止生产源码绕过 command 调用 stage write 或直接改 `total_score/current_stage/rift`。rift/repair、texture、SocialBrain vector 与 score/stage 兼容字段均保留，未创建平行 BondState、未改变关系权限。
 
 ### TASK-0479 / LTE-WP-53：ScenePolicy 与 ActionArbiter
 

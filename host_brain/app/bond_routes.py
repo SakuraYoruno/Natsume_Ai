@@ -21,11 +21,8 @@ from pydantic import BaseModel, Field
 from host_brain.bond.bond_stage_engine import (
     STAGE_ORDER,
     BondStageEngine,
-    StageTransitionResult,
-    TRANSITION_STATUS_PROMOTED,
-    TRANSITION_STATUS_DEMOTED,
-    TRANSITION_STATUS_STABLE,
 )
+from host_brain.bond.bond_dynamics import BondDynamicsWriter
 from host_brain.bond.user_identity import collapse_bond_user_ids, resolve_bond_user_id
 from host_brain.core.ids import new_request_id
 
@@ -41,6 +38,7 @@ router = APIRouter(prefix="/bond", tags=["bond"])
 # 依赖注入
 # ---------------------------------------------------------------------------
 _engine_provider: Optional[Callable[[], BondStageEngine]] = None
+_writer_provider: Optional[Callable[[], BondDynamicsWriter]] = None
 
 
 def set_bond_engine_provider(provider: Optional[Callable[[], BondStageEngine]]) -> None:
@@ -49,10 +47,26 @@ def set_bond_engine_provider(provider: Optional[Callable[[], BondStageEngine]]) 
     _engine_provider = provider
 
 
+def set_bond_writer_provider(provider: Optional[Callable[[], BondDynamicsWriter]]) -> None:
+    """Inject the governed BondDynamics command writer used by POST routes."""
+    global _writer_provider
+    _writer_provider = provider
+
+
 def _get_engine() -> BondStageEngine:
     if _engine_provider is not None:
         return _engine_provider()
     raise RuntimeError("BondStageEngine provider not configured")
+
+
+def _get_writer() -> BondDynamicsWriter:
+    if _writer_provider is not None:
+        return _writer_provider()
+    # Isolated router tests historically inject only the stage engine.  The
+    # fallback still goes through BondDynamicsWriter and therefore keeps the
+    # single-writer/evidence contract; production wiring injects the configured
+    # persistent writer provider.
+    return BondDynamicsWriter(stage_engine=_get_engine())
 
 
 # ---------------------------------------------------------------------------
@@ -259,32 +273,54 @@ async def submit_bond_event(body: BondEventRequest) -> BondEventResponse:
         )
 
     try:
-        engine = _get_engine()
+        writer = _get_writer()
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc))
 
     try:
-        result: StageTransitionResult = engine.apply_event(
-            user_id=resolve_bond_user_id(body.user_id),
-            update_kind=body.update_kind,
-            evidence_refs=refs,
+        canonical_user_id = resolve_bond_user_id(body.user_id)
+        result = writer.apply_update(
             request_id=request_id,
+            intent_id=f"bond_event:{request_id}",
+            session_id="bond_api",
+            seq=0,
+            user_id=canonical_user_id,
+            topic_id="bond_event",
+            capability_hint="bond_stage_event",
+            evidence_refs=refs,
+            payload={"source": "bond_api"},
+            update_kind=body.update_kind,
             ts_ms=ts_ms,
-            # 修复审计问题 #9：使用请求体中的情感参数，默认 0.5
+            emotion_tag=str(body.emotion_tag or "NEUTRAL"),
             emotion_intensity=float(body.emotion_intensity if body.emotion_intensity is not None else 0.5),
         )
+        if not result.success:
+            raise HTTPException(
+                status_code=409,
+                detail=result.detail,
+                headers={"X-Reason-Code": str(result.reason_code or "BOND_UPDATE_REJECTED")},
+            )
+        transition = result.event.get("stage_transition")
+        if not isinstance(transition, dict):
+            raise HTTPException(
+                status_code=503,
+                detail="Bond stage projection unavailable after governed write",
+                headers={"X-Reason-Code": "BOND_STAGE_PROJECTION_UNAVAILABLE"},
+            )
         return BondEventResponse(
-            user_id=result.user_id,
-            from_stage=result.from_stage,
-            to_stage=result.to_stage,
-            transition_status=result.transition_status,
-            score_delta=result.score_delta,
-            total_score=result.total_score,
-            transition_id=result.transition_id,
-            detail=result.detail,
+            user_id=canonical_user_id,
+            from_stage=str(transition.get("from_stage") or ""),
+            to_stage=str(transition.get("to_stage") or ""),
+            transition_status=str(transition.get("transition_status") or ""),
+            score_delta=int(transition.get("score_delta") or 0),
+            total_score=int(transition.get("total_score") or 0),
+            transition_id=str(transition.get("transition_id") or result.event.get("event_id") or ""),
+            detail=str(transition.get("detail") or result.detail),
             request_id=request_id,
             timestamp=ts_ms,
         )
+    except HTTPException:
+        raise
     except Exception as exc:
         _logger.error("submit_bond_event 接口异常: %s", exc, extra={"request_id": request_id})
         raise HTTPException(status_code=500, detail=str(exc))

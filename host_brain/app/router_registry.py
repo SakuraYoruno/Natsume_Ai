@@ -8,7 +8,11 @@ from fastapi import FastAPI
 
 from host_brain.app.agent_routes import router as agent_router
 from host_brain.app.automation.scheduler_routes import router as host_scheduler_router
-from host_brain.app.bond_routes import router as bond_router, set_bond_engine_provider as _set_bond_engine_provider
+from host_brain.app.bond_routes import (
+    router as bond_router,
+    set_bond_engine_provider as _set_bond_engine_provider,
+    set_bond_writer_provider as _set_bond_writer_provider,
+)
 from host_brain.app.canon_routes import router as canon_router, set_ledger_provider as _set_canon_ledger_provider
 from host_brain.app.health_routes import router as health_router
 from host_brain.app.input_routes import router as input_router
@@ -39,6 +43,9 @@ def wire_route_providers(
         ledger_provider=get_ledger,
     )
     _set_bond_engine_provider(get_bond_engine)
+    from host_brain.app.dependencies import get_bond_dynamics_writer  # noqa: PLC0415
+
+    _set_bond_writer_provider(get_bond_dynamics_writer)
     try:
         from host_brain.scheduler.health import SchedulerHealthReporter  # noqa: PLC0415
         from host_brain.scheduler.task_registry import SchedulerTaskRegistry  # noqa: PLC0415

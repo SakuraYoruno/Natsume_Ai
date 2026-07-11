@@ -20,10 +20,12 @@ import logging
 import json
 import math
 import re
+from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any, Mapping
 
 from host_brain.audit.sqlite_ledger import SQLiteLedger
+from host_brain.core.errors import BOND_EVIDENCE_REQUIRED
 from host_brain.core.ids import new_request_id, now_ms
 
 _logger = logging.getLogger("Natsume.bond_stage_engine")
@@ -578,6 +580,15 @@ class BondStageEngine:
 
         M27-E：emotion_intensity > 0.7 的互动额外加权 1.5x（OPT-26）。
         """
+        refs = list(
+            dict.fromkeys(
+                str(ref).strip()
+                for ref in list(evidence_refs or [])
+                if str(ref).strip()
+            )
+        )
+        if not refs:
+            raise ValueError(BOND_EVIDENCE_REQUIRED)
         req_id = request_id or new_request_id()
         ts = int(ts_ms if ts_ms is not None else now_ms())
         uid = str(user_id).strip()
@@ -650,7 +661,7 @@ class BondStageEngine:
             transition_status=transition_status,
             score_delta=delta,
             total_score=state.total_score,
-            evidence_refs=list(evidence_refs),
+            evidence_refs=refs,
             transition_id=transition_id,
             ts_ms=ts,
             detail=detail,
@@ -772,6 +783,22 @@ class BondStageEngine:
     def get_state(self, user_id: str) -> BondScoreState:
         """获取用户当前 Bond 积分状态。"""
         return self._get_or_create_state(str(user_id).strip())
+
+    def peek_state(self, user_id: str) -> BondScoreState | None:
+        """Read a detached state snapshot without creating/logging a new user.
+
+        Persisted state may be replayed from the existing audit log, but this
+        method never populates ``_states`` and never emits the legacy INIT row.
+        Returning a deep copy also prevents projection consumers from mutating
+        the live in-process score/stage object.
+        """
+        uid = str(user_id or "").strip()
+        if not uid:
+            return None
+        state = self._states.get(uid)
+        if state is None:
+            state = self._restore_state_from_log(uid)
+        return deepcopy(state) if state is not None else None
 
     def get_bond_state(self, *, session_id: str | None = None, user_id: str | None = None) -> BondStateSnapshot:
         identity = str(user_id or session_id or "").strip()
