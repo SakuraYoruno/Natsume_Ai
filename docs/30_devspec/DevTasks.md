@@ -19,8 +19,8 @@
 - 关联需求：`FR-NLE-001`～`FR-NLE-005`、`FR-ARCH-001`～`FR-ARCH-010`。
 - 关联测试：`T-NLE-01`～`T-NLE-24`、`T-ARCH-01`～`T-ARCH-30`。
 - 唯一首个执行入口：`TASK-0461 / LTE-WP-00`。M48-A 内部依赖以 M48-A 详细执行文档为准；跨里程碑依赖、切流、停止、回滚和最终退役以 Master 执行文档为准。
-- 最近完成任务：`TASK-0461～TASK-0475` 已完成；AgentContextEnvelope 已升级为 v2，具备 context refs 授权、token budget/actual estimate、truncation reason、pollution fail-closed、dispatcher 安全审计摘要与 runtime event 安全投影。
-- 当前已解锁任务：`TASK-0476 / LTE-WP-50`；生产副本迁移前仍需备份/dry-run 批准。
+- 最近完成任务：`TASK-0461～TASK-0476` 已完成；Digital Life state 已具备 expected-version CAS、0057 OCC migration、冲突/显式 fallback 审计与 T-NLE-14 并发验证。
+- 当前已解锁任务：`TASK-0477 / LTE-WP-51`；WorldProjection 必须只读且不得反写事实源。生产副本迁移仍需备份/dry-run 批准。
 
 本文件后续的 `TASK-0000`～`TASK-0460` 保留为历史任务记录；与完整架构程序冲突时，不得用历史任务覆盖当前代码基线、Master 程序或对应阶段的正式任务卡。
 

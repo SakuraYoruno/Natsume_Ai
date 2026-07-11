@@ -5,7 +5,7 @@
 
 版本：v1.1
 日期：2026-07-10
-状态：`READY_FOR_EXECUTION`（TASK-0461～TASK-0475 已 `DONE`；其余任务按依赖 Gate 推进）
+状态：`READY_FOR_EXECUTION`（TASK-0461～TASK-0476 已 `DONE`；其余任务按依赖 Gate 推进）
 文档类型：DevTasks / Execution Contract
 任务编号：`TASK-0461`～`TASK-0486`
 逻辑工作包：`LTE-WP-00`～`LTE-WP-80`
@@ -422,7 +422,7 @@ Pop-Location
 | TASK-0473 | WP-24 / PR-013 | Canonical 主链切流 | WP-31/32 | 2–4 日 | 极高 | DONE |
 | TASK-0474 | WP-40 / PR-014 | Runtime Event / SSE Replay | WP-24 | 3–5 日 | 高 | DONE |
 | TASK-0475 | WP-41 / PR-015 | Context 引用与预算治理 | WP-40 | 2–3 日 | 中 | DONE |
-| TASK-0476 | WP-50 / PR-016 | Life OCC 与 schema migration | WP-40 | 2–4 日 | 高 | PLANNED |
+| TASK-0476 | WP-50 / PR-016 | Life OCC 与 schema migration | WP-40 | 2–4 日 | 高 | DONE |
 | TASK-0477 | WP-51 / PR-017 | WorldProjection | WP-50 | 2–4 日 | 中 | PLANNED |
 | TASK-0478 | WP-52 / PR-018 | Appraisal / Bond 收敛 | WP-50 | 2–4 日 | 高 | PLANNED |
 | TASK-0479 | WP-53 / PR-019 | Scene / ActionArbiter | WP-51/52 | 2–4 日 | 高 | PLANNED |
@@ -667,7 +667,7 @@ Pop-Location
 
 ### TASK-0475 / LTE-WP-41：Context 引用授权与 Token 预算
 
-- 状态：`PLANNED`
+- 状态：`DONE`
 - 目标：在现有 `AgentContextEnvelope` 上增加 tokenizer 预算、source refs、授权 profile、截断和污染审计。
 - 代码事实：现有 bounded context、角色 profile、敏感键脱敏已存在，不需要新建第二套 Context Pack。
 - 前置任务：TASK-0474。
@@ -696,6 +696,7 @@ Pop-Location
 - 停止条件：任何版本丢失、不可解释覆盖或 migration 对账失败。
 - 回滚：退回单写者模式；保留 schema 扩展，不恢复无条件多写。
 - 审批：迁移生产副本前需备份与 dry-run 报告批准。
+- 完成证据（2026-07-11）：新增 `0057_life_occ.sql`、`LifeStateCommandService`、`digital_life_state_occ_event`、T-NLE-14；20 并发 expected-version command 仅 1 个 APPLIED、19 个 CONFLICT，旧 state 行保留，migration 重复执行幂等。生产副本未迁移。
 
 ### TASK-0477 / LTE-WP-51：只读 WorldProjection
 

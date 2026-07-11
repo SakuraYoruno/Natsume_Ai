@@ -1,11 +1,13 @@
 ﻿from __future__ import annotations
 
 import asyncio
+import contextlib
 import copy
 import json
 import logging
 import os
 import re
+import sqlite3
 import threading
 import time
 import uuid
@@ -38,16 +40,22 @@ _LOCK = threading.RLock()
 _LIFE_LOOP_TASK: asyncio.Task[Any] | None = None
 _LIFE_LOOP_STOP: asyncio.Event | None = None
 _LAST_TICK_RESULT: dict[str, Any] = {}
+LIFE_STATE_OCC_CONFLICT = "LIFE_STATE_OCC_CONFLICT"
+LIFE_STATE_SINGLE_WRITER_FALLBACK = "LIFE_STATE_SINGLE_WRITER_FALLBACK"
+LIFE_STATE_COMMAND_INVALID = "LIFE_STATE_COMMAND_INVALID"
 
 SCHEMA_SQL: tuple[str, ...] = (
     "CREATE TABLE IF NOT EXISTS digital_life_state (person_id TEXT PRIMARY KEY, version INTEGER NOT NULL DEFAULT 1, state_json TEXT NOT NULL, updated_at_ms INTEGER NOT NULL)",
     "CREATE TABLE IF NOT EXISTS digital_life_state_event (id INTEGER PRIMARY KEY AUTOINCREMENT, event_id TEXT NOT NULL UNIQUE, person_id TEXT NOT NULL, source_kind TEXT NOT NULL, event_type TEXT NOT NULL, delta_json TEXT NOT NULL DEFAULT '{}', state_before_json TEXT NOT NULL DEFAULT '{}', state_after_json TEXT NOT NULL DEFAULT '{}', visible_channels_json TEXT NOT NULL DEFAULT '[]', created_at_ms INTEGER NOT NULL)",
+    "CREATE TABLE IF NOT EXISTS digital_life_state_occ_event (id INTEGER PRIMARY KEY AUTOINCREMENT, event_id TEXT NOT NULL UNIQUE, person_id TEXT NOT NULL, expected_version INTEGER, actual_version INTEGER, attempted_version INTEGER, status TEXT NOT NULL CHECK(status IN ('APPLIED','CONFLICT','FALLBACK_APPLIED')), reason_code TEXT NOT NULL, command_ref TEXT, source_kind TEXT NOT NULL DEFAULT 'life_state_command', created_at_ms INTEGER NOT NULL)",
     "CREATE TABLE IF NOT EXISTS dialogue_life_influence_log (id INTEGER PRIMARY KEY AUTOINCREMENT, event_id TEXT NOT NULL UNIQUE, request_id TEXT, person_id TEXT NOT NULL, session_id TEXT, user_message TEXT NOT NULL DEFAULT '', reply_text TEXT NOT NULL DEFAULT '', life_director_json TEXT NOT NULL DEFAULT '{}', life_causality_json TEXT NOT NULL DEFAULT '{}', created_at_ms INTEGER NOT NULL)",
     "CREATE TABLE IF NOT EXISTS embodiment_dispatch_log (id INTEGER PRIMARY KEY AUTOINCREMENT, dispatch_id TEXT NOT NULL UNIQUE, person_id TEXT NOT NULL, source_kind TEXT NOT NULL, target_json TEXT NOT NULL DEFAULT '{}', status TEXT NOT NULL DEFAULT 'UNKNOWN', reason_code TEXT, result_json TEXT NOT NULL DEFAULT '{}', created_at_ms INTEGER NOT NULL)",
     "CREATE TABLE IF NOT EXISTS work_environment_event (id INTEGER PRIMARY KEY AUTOINCREMENT, event_id TEXT NOT NULL UNIQUE, person_id TEXT NOT NULL, session_id TEXT, request_id TEXT, event_type TEXT NOT NULL, work_id TEXT, summary TEXT NOT NULL DEFAULT '', urgency TEXT NOT NULL DEFAULT 'medium', emotional_effect_json TEXT NOT NULL DEFAULT '{}', created_at_ms INTEGER NOT NULL, active INTEGER NOT NULL DEFAULT 1)",
     "CREATE TABLE IF NOT EXISTS proactive_life_outbox (id INTEGER PRIMARY KEY AUTOINCREMENT, outbox_id TEXT NOT NULL UNIQUE, person_id TEXT NOT NULL, source_kind TEXT NOT NULL, motive TEXT NOT NULL DEFAULT '', pressure REAL NOT NULL DEFAULT 0.0, target_json TEXT NOT NULL DEFAULT '{}', message_json TEXT NOT NULL DEFAULT '{}', gate_json TEXT NOT NULL DEFAULT '{}', status TEXT NOT NULL DEFAULT 'UNKNOWN', reason_code TEXT, result_json TEXT NOT NULL DEFAULT '{}', created_at_ms INTEGER NOT NULL)",
     *ORGAN_SCHEMA_SQL,
+    "CREATE INDEX IF NOT EXISTS idx_digital_life_state_person_version ON digital_life_state(person_id, version)",
     "CREATE INDEX IF NOT EXISTS idx_digital_life_state_event_person_ts ON digital_life_state_event(person_id, created_at_ms DESC)",
+    "CREATE INDEX IF NOT EXISTS idx_digital_life_state_occ_person_ts ON digital_life_state_occ_event(person_id, created_at_ms DESC)",
     "CREATE INDEX IF NOT EXISTS idx_dialogue_life_influence_request ON dialogue_life_influence_log(request_id)",
     "CREATE INDEX IF NOT EXISTS idx_dialogue_life_influence_person_ts ON dialogue_life_influence_log(person_id, created_at_ms DESC)",
     "CREATE INDEX IF NOT EXISTS idx_embodiment_dispatch_person_ts ON embodiment_dispatch_log(person_id, created_at_ms DESC)",
@@ -198,14 +206,386 @@ def _normalize_state(state: Mapping[str, Any], person_id: str) -> dict[str, Any]
     return _normalize_inner_world_continuity(_suppress_stale_work_pressure(merged))
 
 
-def _save_state(ledger: Any, state: Mapping[str, Any]) -> None:
+class LifeStateOCCConflict(RuntimeError):
+    """Raised when a digital_life_state CAS write observes a stale expected_version."""
+
+    def __init__(self, result: Mapping[str, Any]) -> None:
+        self.result = dict(result)
+        self.reason_code = str(self.result.get("reason_code") or LIFE_STATE_OCC_CONFLICT)
+        super().__init__(f"{self.reason_code}: person_id={self.result.get('person_id')} expected={self.result.get('expected_version')} actual={self.result.get('actual_version')}")
+
+
+def _write_guard(ledger: Any) -> contextlib.AbstractContextManager[Any]:
+    lock = getattr(ledger, "_write_lock", None)
+    if lock is None:
+        return contextlib.nullcontext()
+    return lock
+
+
+def _life_state_version(conn: Any, person_id: str) -> int | None:
+    row = conn.execute("SELECT version FROM digital_life_state WHERE person_id=?", (person_id,)).fetchone()
+    if not row:
+        return None
+    try:
+        return int(row[0])
+    except Exception:
+        return None
+
+
+def _append_life_state_occ_event(
+    conn: Any,
+    *,
+    person_id: str,
+    expected_version: int | None,
+    actual_version: int | None,
+    attempted_version: int | None,
+    status: str,
+    reason_code: str,
+    command_ref: str = "",
+    source_kind: str = "life_state_command",
+) -> str:
+    event_id = _event_id("lifeocc")
+    conn.execute(
+        "INSERT INTO digital_life_state_occ_event(event_id, person_id, expected_version, actual_version, attempted_version, status, reason_code, command_ref, source_kind, created_at_ms) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            event_id,
+            str(person_id or DEFAULT_PERSON_ID),
+            expected_version,
+            actual_version,
+            attempted_version,
+            status,
+            reason_code,
+            str(command_ref or ""),
+            str(source_kind or "life_state_command"),
+            _now_ms(),
+        ),
+    )
+    return event_id
+
+
+def _save_state(
+    ledger: Any,
+    state: Mapping[str, Any],
+    *,
+    expected_version: int | None = None,
+    command_ref: str = "",
+    source_kind: str = "life_continuity",
+    allow_single_writer_fallback: bool = True,
+) -> dict[str, Any]:
+    """Persist digital_life_state with expected-version CAS.
+
+    expected_version=None is retained as an explicit single-writer fallback for legacy
+    in-process callers and tests; it records an OCC fallback audit row and never uses
+    the previous silent ON CONFLICT overwrite path.
+    """
+
+    ensure_life_schema(ledger)
     payload = dict(state or {})
     person_id = str(payload.get("person_id") or DEFAULT_PERSON_ID)
-    _conn(ledger).execute(
-        "INSERT INTO digital_life_state(person_id, version, state_json, updated_at_ms) VALUES(?, ?, ?, ?) ON CONFLICT(person_id) DO UPDATE SET version=excluded.version, state_json=excluded.state_json, updated_at_ms=excluded.updated_at_ms",
-        (person_id, int(payload.get("version") or 1), _dumps(payload), _now_ms()),
-    )
-    _conn(ledger).commit()
+    attempted_version = int(payload.get("version") or 1)
+    payload["person_id"] = person_id
+    payload["version"] = attempted_version
+    conn = _conn(ledger)
+    with _write_guard(ledger):
+        actual_before = _life_state_version(conn, person_id)
+        now = _now_ms()
+        if expected_version is None:
+            if not allow_single_writer_fallback:
+                raise ValueError("expected_version is required when single-writer fallback is disabled")
+            if actual_before is None:
+                try:
+                    conn.execute(
+                        "INSERT INTO digital_life_state(person_id, version, state_json, updated_at_ms) VALUES(?, ?, ?, ?)",
+                        (person_id, attempted_version, _dumps(payload), now),
+                    )
+                except sqlite3.IntegrityError:
+                    actual_before = _life_state_version(conn, person_id)
+                    conn.execute(
+                        "UPDATE digital_life_state SET version=?, state_json=?, updated_at_ms=? WHERE person_id=?",
+                        (attempted_version, _dumps(payload), now, person_id),
+                    )
+            else:
+                conn.execute(
+                    "UPDATE digital_life_state SET version=?, state_json=?, updated_at_ms=? WHERE person_id=?",
+                    (attempted_version, _dumps(payload), now, person_id),
+                )
+            occ_event_id = _append_life_state_occ_event(
+                conn,
+                person_id=person_id,
+                expected_version=None,
+                actual_version=actual_before,
+                attempted_version=attempted_version,
+                status="FALLBACK_APPLIED",
+                reason_code=LIFE_STATE_SINGLE_WRITER_FALLBACK,
+                command_ref=command_ref,
+                source_kind=source_kind,
+            )
+            conn.commit()
+            return {
+                "status": "FALLBACK_APPLIED",
+                "reason_code": LIFE_STATE_SINGLE_WRITER_FALLBACK,
+                "person_id": person_id,
+                "expected_version": None,
+                "actual_version": actual_before,
+                "attempted_version": attempted_version,
+                "state_version_after": attempted_version,
+                "occ_event_id": occ_event_id,
+            }
+
+        expected = int(expected_version)
+        if actual_before is None:
+            if expected != 0:
+                occ_event_id = _append_life_state_occ_event(
+                    conn,
+                    person_id=person_id,
+                    expected_version=expected,
+                    actual_version=None,
+                    attempted_version=attempted_version,
+                    status="CONFLICT",
+                    reason_code=LIFE_STATE_OCC_CONFLICT,
+                    command_ref=command_ref,
+                    source_kind=source_kind,
+                )
+                conn.commit()
+                result = {
+                    "status": "CONFLICT",
+                    "reason_code": LIFE_STATE_OCC_CONFLICT,
+                    "person_id": person_id,
+                    "expected_version": expected,
+                    "actual_version": None,
+                    "attempted_version": attempted_version,
+                    "occ_event_id": occ_event_id,
+                }
+                raise LifeStateOCCConflict(result)
+            try:
+                conn.execute(
+                    "INSERT INTO digital_life_state(person_id, version, state_json, updated_at_ms) VALUES(?, ?, ?, ?)",
+                    (person_id, attempted_version, _dumps(payload), now),
+                )
+            except sqlite3.IntegrityError:
+                actual = _life_state_version(conn, person_id)
+                occ_event_id = _append_life_state_occ_event(
+                    conn,
+                    person_id=person_id,
+                    expected_version=expected,
+                    actual_version=actual,
+                    attempted_version=attempted_version,
+                    status="CONFLICT",
+                    reason_code=LIFE_STATE_OCC_CONFLICT,
+                    command_ref=command_ref,
+                    source_kind=source_kind,
+                )
+                conn.commit()
+                result = {
+                    "status": "CONFLICT",
+                    "reason_code": LIFE_STATE_OCC_CONFLICT,
+                    "person_id": person_id,
+                    "expected_version": expected,
+                    "actual_version": actual,
+                    "attempted_version": attempted_version,
+                    "occ_event_id": occ_event_id,
+                }
+                raise LifeStateOCCConflict(result)
+        else:
+            cur = conn.execute(
+                "UPDATE digital_life_state SET version=?, state_json=?, updated_at_ms=? WHERE person_id=? AND version=?",
+                (attempted_version, _dumps(payload), now, person_id, expected),
+            )
+            if int(getattr(cur, "rowcount", 0) or 0) != 1:
+                actual = _life_state_version(conn, person_id)
+                occ_event_id = _append_life_state_occ_event(
+                    conn,
+                    person_id=person_id,
+                    expected_version=expected,
+                    actual_version=actual,
+                    attempted_version=attempted_version,
+                    status="CONFLICT",
+                    reason_code=LIFE_STATE_OCC_CONFLICT,
+                    command_ref=command_ref,
+                    source_kind=source_kind,
+                )
+                conn.commit()
+                result = {
+                    "status": "CONFLICT",
+                    "reason_code": LIFE_STATE_OCC_CONFLICT,
+                    "person_id": person_id,
+                    "expected_version": expected,
+                    "actual_version": actual,
+                    "attempted_version": attempted_version,
+                    "occ_event_id": occ_event_id,
+                }
+                raise LifeStateOCCConflict(result)
+
+        occ_event_id = _append_life_state_occ_event(
+            conn,
+            person_id=person_id,
+            expected_version=expected,
+            actual_version=actual_before,
+            attempted_version=attempted_version,
+            status="APPLIED",
+            reason_code="",
+            command_ref=command_ref,
+            source_kind=source_kind,
+        )
+        conn.commit()
+        return {
+            "status": "APPLIED",
+            "reason_code": "",
+            "person_id": person_id,
+            "expected_version": expected,
+            "actual_version": actual_before,
+            "attempted_version": attempted_version,
+            "state_version_after": attempted_version,
+            "occ_event_id": occ_event_id,
+        }
+
+
+def _record_life_state_occ_conflict(
+    ledger: Any,
+    *,
+    person_id: str,
+    expected_version: int,
+    actual_version: int | None,
+    attempted_version: int,
+    command_ref: str = "",
+    source_kind: str = "life_state_command",
+) -> dict[str, Any]:
+    ensure_life_schema(ledger)
+    conn = _conn(ledger)
+    with _write_guard(ledger):
+        occ_event_id = _append_life_state_occ_event(
+            conn,
+            person_id=person_id,
+            expected_version=int(expected_version),
+            actual_version=actual_version,
+            attempted_version=int(attempted_version),
+            status="CONFLICT",
+            reason_code=LIFE_STATE_OCC_CONFLICT,
+            command_ref=command_ref,
+            source_kind=source_kind,
+        )
+        conn.commit()
+    return {
+        "status": "CONFLICT",
+        "reason_code": LIFE_STATE_OCC_CONFLICT,
+        "person_id": person_id,
+        "expected_version": int(expected_version),
+        "actual_version": actual_version,
+        "attempted_version": int(attempted_version),
+        "occ_event_id": occ_event_id,
+    }
+
+
+def _deep_merge_dict(base: Mapping[str, Any], patch: Mapping[str, Any]) -> dict[str, Any]:
+    merged = copy.deepcopy(dict(base or {}))
+    for key, value in dict(patch or {}).items():
+        if isinstance(value, Mapping) and isinstance(merged.get(key), Mapping):
+            merged[key] = _deep_merge_dict(merged[key], value)  # type: ignore[arg-type]
+        else:
+            merged[key] = copy.deepcopy(value)
+    return merged
+
+
+class LifeStateCommandService:
+    """Thin expected-version command facade for digital_life_state."""
+
+    def __init__(self, ledger: Any) -> None:
+        self.ledger = ledger
+        ensure_life_schema(ledger)
+
+    def read_state(self, person_id: str = DEFAULT_PERSON_ID) -> dict[str, Any]:
+        return get_life_state(self.ledger, str(person_id or DEFAULT_PERSON_ID))
+
+    def apply_state_command(
+        self,
+        *,
+        person_id: str = DEFAULT_PERSON_ID,
+        expected_version: int,
+        patch: Mapping[str, Any] | None = None,
+        state_patch: Mapping[str, Any] | None = None,
+        mutator: Any | None = None,
+        command_ref: str = "",
+        source_kind: str = "life_state_command",
+        event_type: str = "state_command_applied",
+        visible_channels: Sequence[str] | None = None,
+    ) -> dict[str, Any]:
+        resolved = str(person_id or DEFAULT_PERSON_ID)
+        expected = int(expected_version)
+        before = get_life_state(self.ledger, resolved)
+        actual = int(before.get("version") or 1)
+        attempted = expected + 1
+        if actual != expected:
+            conflict = _record_life_state_occ_conflict(
+                self.ledger,
+                person_id=resolved,
+                expected_version=expected,
+                actual_version=actual,
+                attempted_version=attempted,
+                command_ref=command_ref,
+                source_kind=source_kind,
+            )
+            conflict.update({"conflict": True, "state_version_before": expected, "state_version_after": actual})
+            return conflict
+
+        after = copy.deepcopy(before)
+        effective_patch = patch if patch is not None else state_patch
+        if effective_patch:
+            after = _deep_merge_dict(after, effective_patch)
+        if mutator is not None:
+            candidate = mutator(copy.deepcopy(after))
+            if candidate is not None:
+                if not isinstance(candidate, Mapping):
+                    raise ValueError(f"{LIFE_STATE_COMMAND_INVALID}: mutator must return a mapping or None")
+                after = dict(candidate)
+        after["person_id"] = resolved
+        after["version"] = attempted
+        try:
+            write_result = _save_state(
+                self.ledger,
+                after,
+                expected_version=expected,
+                command_ref=command_ref,
+                source_kind=source_kind,
+                allow_single_writer_fallback=False,
+            )
+        except LifeStateOCCConflict as exc:
+            result = dict(exc.result)
+            result.update({"conflict": True, "state_version_before": expected, "state_version_after": result.get("actual_version")})
+            return result
+        event_id = _append_state_event(
+            self.ledger,
+            resolved,
+            source_kind,
+            event_type,
+            before,
+            after,
+            {"command_ref": str(command_ref or ""), "changed_fields": _changed(before, after), "occ_event_id": write_result.get("occ_event_id")},
+            list(visible_channels or ["status_panel"]),
+        )
+        return {
+            "status": "APPLIED",
+            "reason_code": "",
+            "conflict": False,
+            "person_id": resolved,
+            "expected_version": expected,
+            "actual_version": actual,
+            "attempted_version": attempted,
+            "state_version_before": expected,
+            "state_version_after": attempted,
+            "event_id": event_id,
+            "occ_event_id": write_result.get("occ_event_id"),
+            "state": after,
+        }
+
+    def apply_command(self, **kwargs: Any) -> dict[str, Any]:
+        return self.apply_state_command(**kwargs)
+
+    def apply_patch(self, **kwargs: Any) -> dict[str, Any]:
+        return self.apply_state_command(**kwargs)
+
+
+def apply_life_state_command(*, ledger: Any, **kwargs: Any) -> dict[str, Any]:
+    return LifeStateCommandService(ledger).apply_state_command(**kwargs)
 
 
 def _append_state_event(ledger: Any, person_id: str, source_kind: str, event_type: str, before: Mapping[str, Any], after: Mapping[str, Any], delta: Mapping[str, Any], visible: Sequence[str]) -> str:
@@ -227,8 +607,16 @@ def get_life_state(ledger: Any, person_id: str = DEFAULT_PERSON_ID) -> dict[str,
         if isinstance(state, dict) and state:
             return _normalize_state(state, resolved)
     state = _default_state(resolved)
-    _save_state(ledger, state)
-    _append_state_event(ledger, resolved, "init", "state_initialized", {}, state, {"created": True}, ["status_panel"])
+    try:
+        _save_state(ledger, state, expected_version=0, command_ref="state_initialized", source_kind="init", allow_single_writer_fallback=False)
+        _append_state_event(ledger, resolved, "init", "state_initialized", {}, state, {"created": True}, ["status_panel"])
+    except LifeStateOCCConflict:
+        row = _conn(ledger).execute("SELECT state_json FROM digital_life_state WHERE person_id=?", (resolved,)).fetchone()
+        if row:
+            existing = _loads(row[0], {})
+            if isinstance(existing, dict) and existing:
+                return _normalize_state(existing, resolved)
+        raise
     return copy.deepcopy(state)
 
 
@@ -1002,7 +1390,7 @@ def _update_proactive_state_after_attempt(*, ledger: Any, person_id: str, outbox
         proactive["last_life_trigger"] = str(binding.get("trigger") or "")
     after["proactive"] = proactive
     after["version"] = int(after.get("version") or 1) + 1
-    _save_state(ledger, after)
+    _save_state(ledger, after, expected_version=int(state.get("version") or 1), command_ref=outbox_id, source_kind="life_proactive_attempt", allow_single_writer_fallback=False)
 
 
 def _should_suppress_periodic_work_proactive(*, source_kind: str, director_pack: Mapping[str, Any], force: bool, motive: str) -> bool:
@@ -1167,9 +1555,11 @@ async def attempt_life_proactive_push(*, ledger: Any, person_id: str = DEFAULT_P
         _update_proactive_state_after_attempt(ledger=ledger, person_id=resolved, outbox_id=outbox_id, target=target, status=status, reason_code=reason, motive=motive, now_ms=now, state_binding=state_binding)
     proactive_life_experience_id = str(proactive_memory.get("life_experience_event_id") or "")
     if status == "SENT" and proactive_life_experience_id:
-        organ_after = synthesize_life_state_from_organs(ledger=ledger, base_state=get_life_state(ledger, resolved), person_id=resolved, source_experience_event_id=proactive_life_experience_id, now_ms=now)
-        organ_after["version"] = int(organ_after.get("version") or 1) + 1
-        _save_state(ledger, organ_after)
+        organ_before = get_life_state(ledger, resolved)
+        organ_expected = int(organ_before.get("version") or 1)
+        organ_after = synthesize_life_state_from_organs(ledger=ledger, base_state=organ_before, person_id=resolved, source_experience_event_id=proactive_life_experience_id, now_ms=now)
+        organ_after["version"] = organ_expected + 1
+        _save_state(ledger, organ_after, expected_version=organ_expected, command_ref=proactive_life_experience_id, source_kind="life_proactive_organs", allow_single_writer_fallback=False)
     return {"outbox_id": outbox_id, "status": status, "reason_code": reason, "motive": motive, "pressure": round(float(pressure), 3), "target": target, "message": message, "gate": gate, "result": result, "proactive_episode": proactive_episode, "memory_event_id": str(proactive_memory.get("memory_event_id") or ""), "life_experience_event_id": proactive_life_experience_id}
 
 
@@ -1303,11 +1693,13 @@ def advance_life_to_now(*, ledger: Any, person_id: str = DEFAULT_PERSON_ID, reas
     scene, motive, _ = _scene(after, reason=reason)
     after["motives"] = _motives(scene, motive, _pressures(after))
     after["embodiment"].update(_embodiment(scene, motive, after))
-    _save_state(ledger, after)
+    _save_state(ledger, after, expected_version=int(before.get("version") or 1), command_ref=str(experience.get("event_id") or ""), source_kind="life_integrated", allow_single_writer_fallback=False)
     director = build_life_director_pack(ledger=ledger, person_id=resolved, reason=reason)
     action = build_life_action_plan(state=after, director_pack=director, source_kind=reason)
+    action_expected = int(after.get("version") or 1)
     after["life_action"] = action
-    _save_state(ledger, after)
+    after["version"] = action_expected + 1
+    _save_state(ledger, after, expected_version=action_expected, command_ref=str(experience.get("event_id") or ""), source_kind="life_action_plan", allow_single_writer_fallback=False)
     director["life_action"] = action
     visible = list(director.get("visible_obligation") or ["status_panel"])
     state_event_id = _append_state_event(ledger, resolved, "life_integrated", reason, before, after, {"changed_fields": _changed(before, after), "life_causality": director, "environment": environment, "experience": experience}, visible)
@@ -1650,8 +2042,19 @@ async def record_work_environment_event(*, ledger: Any, event_type: str, person_
         consume=True,
     )
     after = synthesize_life_state_from_organs(ledger=ledger, base_state=after, person_id=resolved, source_experience_event_id=str(experience.get("event_id") or ""), now_ms=now)
-    scene, motive, _ = _scene(after, reason="work_event"); after["embodiment"].update(_embodiment(scene, motive, after)); after = _remember_proactive_target_in_state(after, platform=platform, conversation_id=conversation_id); _save_state(ledger, after)
-    pack = build_life_director_pack(ledger=ledger, person_id=resolved, reason="work_event"); action = build_life_action_plan(state=after, director_pack=pack, source_kind=f"work_event:{event_type}"); after["life_action"] = action; _save_state(ledger, after); pack["life_action"] = action; visible = list(pack.get("visible_obligation") or ["status_panel"]); event_id = _append_state_event(ledger, resolved, "work_environment_event", event_type, before, after, {"emotional_effect": effect, "summary": _text(summary), "life_action": action}, visible)
+    scene, motive, _ = _scene(after, reason="work_event")
+    after["embodiment"].update(_embodiment(scene, motive, after))
+    after = _remember_proactive_target_in_state(after, platform=platform, conversation_id=conversation_id)
+    _save_state(ledger, after, expected_version=int(before.get("version") or 1), command_ref=str(experience.get("event_id") or workenv_id), source_kind="work_environment_event", allow_single_writer_fallback=False)
+    pack = build_life_director_pack(ledger=ledger, person_id=resolved, reason="work_event")
+    action = build_life_action_plan(state=after, director_pack=pack, source_kind=f"work_event:{event_type}")
+    action_expected = int(after.get("version") or 1)
+    after["life_action"] = action
+    after["version"] = action_expected + 1
+    _save_state(ledger, after, expected_version=action_expected, command_ref=str(experience.get("event_id") or workenv_id), source_kind="life_action_plan", allow_single_writer_fallback=False)
+    pack["life_action"] = action
+    visible = list(pack.get("visible_obligation") or ["status_panel"])
+    event_id = _append_state_event(ledger, resolved, "work_environment_event", event_type, before, after, {"emotional_effect": effect, "summary": _text(summary), "life_action": action}, visible)
     dispatch = await dispatch_life_embodiment(ledger=ledger, person_id=resolved, director_pack=pack, source_kind=f"work_event:{event_type}", force=event_type in {"task_started", "task_done", "task_failed", "task_blocked"})
     proactive = await attempt_life_proactive_push(ledger=ledger, person_id=resolved, director_pack=pack, source_kind=f"work_event:{event_type}", platform=platform, conversation_id=conversation_id, content=proactive_content, force=event_type in {"task_started", "task_done", "task_failed", "task_blocked"}, dry_run=False) if _bool_env("HOST_LIFE_WORK_EVENT_PROACTIVE_ENABLED", True) else {}
     return {"event_id": event_id, "state": after, "life_director": pack, "embodiment_dispatch": dispatch, "proactive_attempt": proactive}
@@ -1692,9 +2095,18 @@ async def record_dialogue_aftereffect(*, ledger: Any, person_id: str = DEFAULT_P
     after["life_pressure"] = p; affect["mood"] = _mood(p, affect); after["affect"] = affect; after["needs"] = needs; after["continuity"] = {**_map(after.get("continuity")), "last_interaction_digest": _text(text or reply_text, 160)}; after["version"] = int(after.get("version") or 1) + 1
     source_experience_event_id = str(_map(_map(proactive_episode).get("organ_delta_after")).get("event_id") or "")
     after = synthesize_life_state_from_organs(ledger=ledger, base_state=after, person_id=resolved, source_experience_event_id=source_experience_event_id, now_ms=now)
-    scene, motive, _ = _scene(after, user_message=text, reason="dialogue_aftereffect"); after["embodiment"].update(_embodiment(scene, motive, after)); after = _remember_proactive_target_in_state(after, platform=platform, conversation_id=conversation_id); after["dialogue_closure"] = dialogue_closure; _save_state(ledger, after)
+    scene, motive, _ = _scene(after, user_message=text, reason="dialogue_aftereffect")
+    after["embodiment"].update(_embodiment(scene, motive, after))
+    after = _remember_proactive_target_in_state(after, platform=platform, conversation_id=conversation_id)
+    after["dialogue_closure"] = dialogue_closure
+    _save_state(ledger, after, expected_version=int(before.get("version") or 1), command_ref=request_id, source_kind="dialogue_aftereffect", allow_single_writer_fallback=False)
     director = dict(life_director or {}) or build_life_director_pack(ledger=ledger, person_id=resolved, session_id=session_id, user_message=text, reason="dialogue_aftereffect")
-    action = build_life_action_plan(state=after, director_pack=director, source_kind="dialogue_aftereffect"); after["life_action"] = action; _save_state(ledger, after); director["life_action"] = action
+    action = build_life_action_plan(state=after, director_pack=director, source_kind="dialogue_aftereffect")
+    action_expected = int(after.get("version") or 1)
+    after["life_action"] = action
+    after["version"] = action_expected + 1
+    _save_state(ledger, after, expected_version=action_expected, command_ref=request_id, source_kind="life_action_plan", allow_single_writer_fallback=False)
+    director["life_action"] = action
     visible = list(director.get("visible_obligation") or ["status_panel", "dialogue"]); causality = {"state_version_before": int(before.get("version") or 1), "state_version_after": int(after.get("version") or 1), "applied_sources": _dialogue_sources(director, text), "changed_fields": _changed(before, after), "dialogue_effect": str(director.get("dialogue_influence") or "weak"), "embodiment_effect": str(_map(director.get("organ_life_influence")).get("embodiment_effect") or "weak"), "life_visibility": "ok" if visible else "failed", "visible_channels": visible, "life_action": action, "proactive_episode_binding": proactive_episode, "source_experience_event_id": source_experience_event_id, "dialogue_closure": dialogue_closure, "private_leak_blocked": True}
     _append_state_event(ledger, resolved, "dialogue_aftereffect", "foreground_turn", before, after, causality, visible)
     _conn(ledger).execute("INSERT INTO dialogue_life_influence_log(event_id, request_id, person_id, session_id, user_message, reply_text, life_director_json, life_causality_json, created_at_ms) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)", (_event_id("lifedlg"), request_id, resolved, session_id, _text(text, 1000), _text(reply_text, 1000), _dumps(director), _dumps(causality), now)); _conn(ledger).commit()
@@ -1730,7 +2142,7 @@ async def dispatch_life_embodiment(*, ledger: Any, person_id: str = DEFAULT_PERS
         except Exception as exc:
             if status == "APPLIED": status = "DEGRADED"; reason = "MATEENGINE_DISPATCH_FAILED"
             result["mateengine"] = {"status": "DEGRADED", "detail": str(exc)[:240]}
-    after = copy.deepcopy(state); emb = _map(after.get("embodiment")); emb.update(target); emb.update({"last_dispatch_ms": now, "last_dispatch_id": req_id}); after["embodiment"] = emb; after["version"] = int(after.get("version") or 1) + 1; _save_state(ledger, after)
+    after = copy.deepcopy(state); emb = _map(after.get("embodiment")); emb.update(target); emb.update({"last_dispatch_ms": now, "last_dispatch_id": req_id}); after["embodiment"] = emb; after["version"] = int(after.get("version") or 1) + 1; _save_state(ledger, after, expected_version=int(state.get("version") or 1), command_ref=req_id, source_kind="embodiment_dispatch", allow_single_writer_fallback=False)
     dispatch_id = _event_id("lifebody"); _conn(ledger).execute("INSERT INTO embodiment_dispatch_log(dispatch_id, person_id, source_kind, target_json, status, reason_code, result_json, created_at_ms) VALUES(?, ?, ?, ?, ?, ?, ?, ?)", (dispatch_id, person_id, source_kind, _dumps(target), status, reason, _dumps(result), now)); _conn(ledger).commit()
     try:
         experience = append_life_experience(
@@ -1746,9 +2158,10 @@ async def dispatch_life_embodiment(*, ledger: Any, person_id: str = DEFAULT_PERS
             now_ms=now,
             consume=True,
         )
+        organ_expected = int(after.get("version") or 1)
         organ_after = synthesize_life_state_from_organs(ledger=ledger, base_state=after, person_id=person_id, source_experience_event_id=str(experience.get("event_id") or ""), now_ms=now)
-        organ_after["version"] = int(organ_after.get("version") or 1) + 1
-        _save_state(ledger, organ_after)
+        organ_after["version"] = organ_expected + 1
+        _save_state(ledger, organ_after, expected_version=organ_expected, command_ref=str(experience.get("event_id") or ""), source_kind="embodiment_organs", allow_single_writer_fallback=False)
         result["life_experience_event_id"] = str(experience.get("event_id") or "")
     except Exception as exc:
         result["life_experience_error"] = type(exc).__name__
@@ -1793,11 +2206,13 @@ def record_life_experience(*, ledger: Any, person_id: str = DEFAULT_PERSON_ID, s
     after = synthesize_life_state_from_organs(ledger=ledger, base_state=before, person_id=resolved, source_experience_event_id=str(experience.get("event_id") or ""), now_ms=now) if consume else copy.deepcopy(before)
     if consume:
         after["version"] = int(after.get("version") or 1) + 1
-        _save_state(ledger, after)
+        _save_state(ledger, after, expected_version=int(before.get("version") or 1), command_ref=str(experience.get("event_id") or ""), source_kind="life_experience", allow_single_writer_fallback=False)
     director = build_life_director_pack(ledger=ledger, person_id=resolved, reason=event_kind)
     action = build_life_action_plan(state=after, director_pack=director, source_kind=event_kind)
+    action_expected = int(after.get("version") or 1)
     after["life_action"] = action
-    _save_state(ledger, after)
+    after["version"] = action_expected + 1
+    _save_state(ledger, after, expected_version=action_expected, command_ref=str(experience.get("event_id") or ""), source_kind="life_action_plan", allow_single_writer_fallback=False)
     visible = list(director.get("visible_obligation") or ["status_panel"])
     state_event_id = _append_state_event(ledger, resolved, "life_experience", event_kind, before, after, {"experience": experience, "life_action": action}, visible)
     return {"event_id": experience.get("event_id"), "memory_event_id": experience.get("memory_event_id"), "state_event_id": state_event_id, "state": after, "life_director": director, "life_action": action, "visible_channels": visible, "experience": experience}
@@ -1847,7 +2262,7 @@ def recalibrate_inner_life_state(*, ledger: Any, person_id: str = DEFAULT_PERSON
             after["life_action"] = {}
     after["inner_world"] = inner
     after["version"] = int(after.get("version") or 1) + 1
-    _save_state(ledger, after)
+    _save_state(ledger, after, expected_version=int(before.get("version") or 1), command_ref="inner_life_recalibration", source_kind="inner_life_recalibration", allow_single_writer_fallback=False)
     conn = _conn(ledger)
     adjusted = 0
     for row in conn.execute("SELECT organ_id, state_json FROM organ_runtime_state WHERE person_id=?", (resolved,)).fetchall():
