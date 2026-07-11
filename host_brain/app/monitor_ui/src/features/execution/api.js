@@ -72,7 +72,7 @@ export function fetchToolHealth() {
   return endpointGet(execution.toolHealth)
 }
 
-export function fetchPentestCapabilities() {
+export function fetchToolsPentestCapabilities() {
   return endpointGet(pentest.capabilities)
 }
 

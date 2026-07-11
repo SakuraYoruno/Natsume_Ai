@@ -1335,6 +1335,8 @@ def test_trace_live_surface_model_lives_in_trace_feature_module() -> None:
 def test_trace_home_model_lives_in_trace_feature_module() -> None:
     trace_home = (OBSERVABILITY_TRACE_COMPONENTS / "TraceHome.jsx").read_text(encoding="utf-8")
     trace_home_controller = (OBSERVABILITY_TRACE_COMPONENTS / "traceHomeController.js").read_text(encoding="utf-8")
+    trace_home_controller_view = (OBSERVABILITY_TRACE_COMPONENTS / "traceHomeControllerView.js").read_text(encoding="utf-8")
+    trace_home_data_sources = (OBSERVABILITY_TRACE_COMPONENTS / "useTraceHomeDataSources.js").read_text(encoding="utf-8")
     trace_home_model = (OBSERVABILITY_TRACE_COMPONENTS / "traceHomeModel.js").read_text(encoding="utf-8")
     trace_home_live_feed = (OBSERVABILITY_TRACE_COMPONENTS / "useTraceHomeLiveFeed.js").read_text(encoding="utf-8")
 
@@ -1363,10 +1365,12 @@ def test_trace_home_model_lives_in_trace_feature_module() -> None:
         assert f"export function {export_name}(" in trace_home_model
 
     assert "from './traceHomeModel.js'" in trace_home_controller
-    assert "buildTraceRecentRequests({" in trace_home_controller
-    assert "getSelectedTraceSessionForQuery({" in trace_home_controller
-    assert "buildTraceTribeFeedParams({" in trace_home_controller
-    assert "useTraceHomeLiveFeed({" in trace_home_controller
+    assert "from './traceHomeModel.js'" in trace_home_controller_view
+    assert "from './traceHomeModel.js'" in trace_home_data_sources
+    assert "buildTraceRecentRequests({" in trace_home_data_sources
+    assert "getSelectedTraceSessionForQuery({" in trace_home_data_sources
+    assert "buildTraceTribeFeedParams({" in trace_home_data_sources
+    assert "useTraceHomeLiveFeed({" in trace_home_data_sources
     assert "buildTraceLiveSnapshotParams({ liveTraceLimit, recentKeyword })" in trace_home_live_feed
     assert "buildTraceLiveFeedConnectParams({ liveTraceLimit, recentKeyword })" in trace_home_live_feed
     assert "getTracePayloadItems(payload)" in trace_home_live_feed
@@ -1374,17 +1378,17 @@ def test_trace_home_model_lives_in_trace_feature_module() -> None:
     assert "pruneTraceTimelineEntriesForSnapshot(previous, items)" in trace_home_live_feed
     assert "buildTraceInfoFromTrace(selectedTraceQuery.traceSnapshot)" in trace_home_controller
     assert "buildTraceInfoFromTrace(item.trace)" in trace_home_controller
-    assert "buildTraceSearchState(inputId)" in trace_home_controller
+    assert "buildTraceSearchState(inputId)" in trace_home_controller_view
     assert "navigate(buildTraceDetailPath(requestId))" in trace_home_controller
     assert "getTraceOverviewFocusAction({ requestId, traceData, liveTraceItems })" in trace_home_controller
     assert "getLiveTraceItemFocusAction({" in trace_home_controller
     assert "buildTraceGroupStats(traceData)" in trace_home_controller
-    assert "getTraceStatusHealth(traceInfo)" in trace_home_controller
-    assert "buildSelectedTraceRequestContext({" in trace_home_controller
+    assert "getTraceStatusHealth(traceInfo)" in trace_home_controller_view
+    assert "buildSelectedTraceRequestContext({" in trace_home_controller_view
     assert "getNextAutoTraceSelection({ liveTraceItems, selectedRequestId, traceData })" in trace_home_controller
-    assert "getTraceLiveFeedStatus({" in trace_home_controller
-    assert "buildTraceHistoryViewState({" in trace_home_controller
-    assert "buildTracePulseNodes({" in trace_home_controller
+    assert "getTraceLiveFeedStatus({" in trace_home_controller_view
+    assert "buildTraceHistoryViewState({" in trace_home_controller_view
+    assert "buildTracePulseNodes({" in trace_home_controller_view
     assert "useTraceHomeController" in trace_home
     assert "traceHomeController.js" in trace_home
     assert "useEffect" not in trace_home
@@ -1655,7 +1659,7 @@ def test_repeated_time_and_percent_formatters_use_shared_module() -> None:
         ],
         "features/execution/components/gateway/GatewayPlatformCard.jsx": ["function formatTime("],
         "features/observability/logStreamModel.js": ["function formatTime("],
-        "features/execution/components/AutomationImmuneSectionContent.jsx": ["function formatPercent("],
+        "features/execution/components/automationImmune/ImmuneGateOpsPanel.jsx": ["function formatPercent("],
         "features/operations/components/canon/CanonDocumentsSection.jsx": ["function formatDateTime("],
         "features/operations/components/canon/CanonProposalsSection.jsx": ["function formatDateTime("],
         "features/life/digitalLifeGatewayModel.js": ["function formatPercent("],
@@ -1675,9 +1679,9 @@ def test_repeated_time_and_percent_formatters_use_shared_module() -> None:
         "features/operations/components/canon/CanonProposalsSection.jsx",
         "features/observability/components/chatDebug/ChatDebugEventStream.jsx",
         "features/observability/components/chatDebug/ChatTraceSidebar.jsx",
-        "pages/CodexBioOpsObservability.jsx",
+        "features/observability/components/bioOps/CodexBioOpsObservabilitySurface.jsx",
         "features/operations/promptOpsModel.js",
-        "pages/RuntimeMode.jsx",
+        "features/life/components/RuntimeModeSurface.jsx",
     ]
 
     assert "export function formatTime(" in shared
@@ -1887,6 +1891,9 @@ def test_canon_and_provider_status_metadata_live_in_shared_module() -> None:
 def test_canon_view_model_lives_in_operations_feature() -> None:
     page = (MONITOR_SRC / "pages" / "Canon.jsx").read_text(encoding="utf-8")
     model = (MONITOR_SRC / "features" / "operations" / "canonModel.js").read_text(encoding="utf-8")
+    vault_section = (
+        MONITOR_SRC / "features" / "operations" / "components" / "canon" / "CanonVaultStatsSection.jsx"
+    ).read_text(encoding="utf-8")
 
     assert "export const CANON_PAGE_SIZE" in model
     assert "export const CANON_TABS" in model
@@ -1908,9 +1915,9 @@ def test_canon_view_model_lives_in_operations_feature() -> None:
     assert "buildCanonViewModel({" in page
     assert "CANON_TABS.map" in page
     assert "CANON_PAGE_SIZE" in page
-    assert "vaultMetricCards.map" in page
-    assert "vaultProgress.map" in page
-    assert "recentManifestRows.map" in page
+    assert "vaultMetricCards.map" in vault_section
+    assert "vaultProgress.map" in vault_section
+    assert "recentManifestRows.map" in vault_section
 
     for forbidden in [
         "resolveLoadState",
@@ -1940,7 +1947,9 @@ def test_canon_view_model_lives_in_operations_feature() -> None:
 
 def test_skills_hub_display_metadata_lives_in_shared_module() -> None:
     shared = SHARED_STATUS_META.read_text(encoding="utf-8")
-    skills_hub = (MONITOR_SRC / "pages" / "SkillsHub.jsx").read_text(encoding="utf-8")
+    skills_hub = (
+        MONITOR_SRC / "features" / "execution" / "components" / "SkillsHubSurface.jsx"
+    ).read_text(encoding="utf-8")
 
     for export_name in [
         "SKILL_CLEARANCE_STYLES",
@@ -1958,6 +1967,12 @@ def test_skills_hub_display_metadata_lives_in_shared_module() -> None:
 
 def test_skills_hub_view_model_lives_in_execution_feature() -> None:
     skills_page = (MONITOR_SRC / "pages" / "SkillsHub.jsx").read_text(encoding="utf-8")
+    skills_controller = (
+        MONITOR_SRC / "features" / "execution" / "skillsHubController.js"
+    ).read_text(encoding="utf-8")
+    skills_surface = (
+        MONITOR_SRC / "features" / "execution" / "components" / "SkillsHubSurface.jsx"
+    ).read_text(encoding="utf-8")
     skills_model = (MONITOR_SRC / "features" / "execution" / "skillsHubModel.js").read_text(encoding="utf-8")
 
     for export_name in [
@@ -1978,13 +1993,14 @@ def test_skills_hub_view_model_lives_in_execution_feature() -> None:
     ]:
         assert f"export function {export_name}(" in skills_model
 
-    assert "features/execution/skillsHubModel.js" in skills_page
-    assert "buildSkillsHubViewModel({" in skills_page
-    assert "SKILL_SOURCE_FILTER_ALL" in skills_page
-    assert "sampleMeta.loadState" in skills_page
-    assert "noticeView.showNoSample" in skills_page
-    assert "externalDirsView.hasExternalDirs" in skills_page
-    assert "externalDirsView.rows.map" in skills_page
+    assert "./skillsHubModel.js" in skills_controller
+    assert "buildSkillsHubViewModel({" in skills_controller
+    assert "SKILL_SOURCE_FILTER_ALL" in skills_controller
+    assert "sampleMeta.loadState" in skills_surface
+    assert "noticeView.showNoSample" in skills_surface
+    assert "externalDirsView.hasExternalDirs" in skills_surface
+    assert "externalDirsView.rows.map" in skills_surface
+    assert "features/execution/skillsHubController.js" in skills_page
     assert "buildSkillsHubLoadState({" in skills_model
     assert "resolveLoadState({" in skills_model
     assert "LOAD_STATES.NO_SAMPLE" in skills_model
@@ -2039,6 +2055,9 @@ def test_tools_execution_badge_metadata_lives_in_shared_module() -> None:
 
 def test_tools_catalog_model_lives_in_execution_feature() -> None:
     tools_page = (MONITOR_SRC / "pages" / "Tools.jsx").read_text(encoding="utf-8")
+    tools_controller = (
+        MONITOR_SRC / "features" / "execution" / "toolsDashboardController.js"
+    ).read_text(encoding="utf-8")
     pentest_section = (
         MONITOR_SRC / "features" / "execution" / "components" / "ToolsPentestMetadataSection.jsx"
     ).read_text(encoding="utf-8")
@@ -2058,11 +2077,11 @@ def test_tools_catalog_model_lives_in_execution_feature() -> None:
     ]:
         assert f"export function {export_name}(" in tools_model
 
-    assert "features/execution/toolsCatalogModel.js" in tools_page
-    assert "features/execution/toolsDashboardModel.js" in tools_page
+    assert "./toolsCatalogModel.js" in tools_controller
+    assert "./toolsDashboardModel.js" in tools_controller
     assert "getPentestToolMetadataView(capabilities)" in pentest_section
     assert "buildToolExecutionRequest(tool, form)" in execute_panel
-    assert "reconcileSelectedTool({ selectedTool, executeTarget, tools })" in tools_page
+    assert "reconcileSelectedTool({" in tools_controller
     assert "filterToolsBySideEffect(toolItems, filter)" in dashboard_model
     assert "getToolsCatalogCounts(toolItems)" in dashboard_model
     assert "buildToolsHeroMetaItems({" in dashboard_model
@@ -2085,6 +2104,12 @@ def test_tools_catalog_model_lives_in_execution_feature() -> None:
 
 def test_tools_dashboard_view_model_lives_in_execution_feature() -> None:
     tools_page = (MONITOR_SRC / "pages" / "Tools.jsx").read_text(encoding="utf-8")
+    tools_controller = (
+        MONITOR_SRC / "features" / "execution" / "toolsDashboardController.js"
+    ).read_text(encoding="utf-8")
+    tools_surface = (
+        MONITOR_SRC / "features" / "execution" / "components" / "ToolsDashboardSurface.jsx"
+    ).read_text(encoding="utf-8")
     dashboard_model = (MONITOR_SRC / "features" / "execution" / "toolsDashboardModel.js").read_text(encoding="utf-8")
 
     for export_name in [
@@ -2097,12 +2122,13 @@ def test_tools_dashboard_view_model_lives_in_execution_feature() -> None:
     ]:
         assert f"export function {export_name}(" in dashboard_model
 
-    assert "features/execution/toolsDashboardModel.js" in tools_page
-    assert "buildToolsDashboardViewModel({" in tools_page
-    assert "sampleMeta.loadState" in tools_page
-    assert "noticeView.showUnavailable" in tools_page
-    assert "noticeView.showNoSample" in tools_page
-    assert "OrganSystemOverview model={toolsOrganModel}" in tools_page
+    assert "./toolsDashboardModel.js" in tools_controller
+    assert "buildToolsDashboardViewModel({" in tools_controller
+    assert "sampleMeta.loadState" in tools_surface
+    assert "noticeView.showUnavailable" in tools_surface
+    assert "noticeView.showNoSample" in tools_surface
+    assert "OrganSystemOverview model={toolsOrganModel}" in tools_surface
+    assert "features/execution/toolsDashboardController.js" in tools_page
 
     for forbidden in [
         "LOAD_STATES",
@@ -2129,6 +2155,9 @@ def test_tools_queries_are_split_from_execution_query_monolith() -> None:
     execution_queries = _read_optional(MONITOR_SRC / "features" / "execution" / "queries.js")
     tools_queries = (MONITOR_SRC / "features" / "execution" / "toolsQueries.js").read_text(encoding="utf-8")
     tools_page = (MONITOR_SRC / "pages" / "Tools.jsx").read_text(encoding="utf-8")
+    tools_controller = (
+        MONITOR_SRC / "features" / "execution" / "toolsDashboardController.js"
+    ).read_text(encoding="utf-8")
     operations_section = (
         MONITOR_SRC / "features" / "execution" / "components" / "ToolsOperationsSection.jsx"
     ).read_text(encoding="utf-8")
@@ -2156,9 +2185,10 @@ def test_tools_queries_are_split_from_execution_query_monolith() -> None:
         assert fetcher_name in tools_queries
         assert fetcher_name not in execution_queries
 
-    assert "features/execution/toolsQueries.js" in tools_page
+    assert "./toolsQueries.js" in tools_controller
     assert "../toolsQueries.js" in operations_section
     assert "features/execution/queries.js" not in tools_page
+    assert "./queries.js" not in tools_controller
     assert "from '../queries.js'" not in operations_section
     assert "OBS_QUERY_KEYS.toolsCatalog" in tools_queries
     assert "OBS_QUERY_KEYS.toolPermissionStats" in tools_queries
@@ -2217,7 +2247,10 @@ def test_automation_queries_are_split_from_execution_query_monolith() -> None:
     assert "./automationQueries.js" in automation_controller
     assert "shared/query/useImmuneGateReplayQuery.js" in trace_detail_controller
     assert "../execution/automationQueries.js" not in trace_detail_controller
-    assert "../automationQueries.js" in immune_section
+    immune_panel = (
+        MONITOR_SRC / "features" / "execution" / "components" / "automationImmune" / "ImmuneGateOpsPanel.jsx"
+    ).read_text(encoding="utf-8")
+    assert "../../automationQueries.js" in immune_panel
     assert "../automationQueries.js" in history_section
     assert "features/execution/queries.js" not in automation_page
     assert "features/execution/queries.js" not in automation_controller
@@ -2240,6 +2273,9 @@ def test_remaining_execution_queries_are_split_and_monolith_is_retired() -> None
     gateway_page = (MONITOR_SRC / "pages" / "Gateway.jsx").read_text(encoding="utf-8")
     gateway_controller = (MONITOR_SRC / "features" / "execution" / "gatewayController.js").read_text(encoding="utf-8")
     skills_page = (MONITOR_SRC / "pages" / "SkillsHub.jsx").read_text(encoding="utf-8")
+    skills_controller = (
+        MONITOR_SRC / "features" / "execution" / "skillsHubController.js"
+    ).read_text(encoding="utf-8")
 
     assert not execution_queries_path.exists()
 
@@ -2265,9 +2301,9 @@ def test_remaining_execution_queries_are_split_and_monolith_is_retired() -> None
 
     assert "features/execution/agentLoopQueries.js" in agent_loop_page
     assert "./gatewayQueries.js" in gateway_controller
-    assert "features/execution/skillsHubQueries.js" in skills_page
+    assert "./skillsHubQueries.js" in skills_controller
     assert "features/execution/gatewayQueries.js" not in gateway_page
-    for source in [agent_loop_page, gateway_page, gateway_controller, skills_page]:
+    for source in [agent_loop_page, gateway_page, gateway_controller, skills_page, skills_controller]:
         assert "features/execution/queries.js" not in source
 
 
@@ -2347,9 +2383,15 @@ def test_life_queries_are_split_and_monolith_is_retired() -> None:
         "EmotionDashboard.jsx": (MONITOR_SRC / "pages" / "EmotionDashboard.jsx").read_text(encoding="utf-8"),
         "LifeTimelinePage.jsx": (MONITOR_SRC / "pages" / "LifeTimelinePage.jsx").read_text(encoding="utf-8"),
         "MemoryBrowser.jsx": (MONITOR_SRC / "pages" / "MemoryBrowser.jsx").read_text(encoding="utf-8"),
+        "memoryBrowserController.js": (
+            MONITOR_SRC / "features" / "life" / "memoryBrowserController.js"
+        ).read_text(encoding="utf-8"),
         "PathologyCenterPage.jsx": (MONITOR_SRC / "pages" / "PathologyCenterPage.jsx").read_text(encoding="utf-8"),
         "PathologyDetailPage.jsx": (MONITOR_SRC / "pages" / "PathologyDetailPage.jsx").read_text(encoding="utf-8"),
         "RuntimeMode.jsx": (MONITOR_SRC / "pages" / "RuntimeMode.jsx").read_text(encoding="utf-8"),
+        "runtimeModeController.js": (
+            MONITOR_SRC / "features" / "life" / "runtimeModeController.js"
+        ).read_text(encoding="utf-8"),
         "useDigitalLifeRuntimeSignals.js": (
             MONITOR_SRC / "hooks" / "useDigitalLifeRuntimeSignals.js"
         ).read_text(encoding="utf-8"),
@@ -2416,10 +2458,12 @@ def test_life_queries_are_split_and_monolith_is_retired() -> None:
         "digitalLifeOverviewController.js": "./digitalLifeQueries.js",
         "EmotionDashboard.jsx": "features/life/emotionQueries.js",
         "LifeTimelinePage.jsx": "features/life/lifeBodyQueries.js",
-        "MemoryBrowser.jsx": "features/life/memoryQueries.js",
+        "MemoryBrowser.jsx": "features/life/memoryBrowserController.js",
+        "memoryBrowserController.js": "./memoryQueries.js",
         "PathologyCenterPage.jsx": "features/life/lifeBodyQueries.js",
         "PathologyDetailPage.jsx": "features/life/lifeBodyQueries.js",
-        "RuntimeMode.jsx": "features/life/runtimeModeQueries.js",
+        "RuntimeMode.jsx": "features/life/runtimeModeController.js",
+        "runtimeModeController.js": "./runtimeModeQueries.js",
         "useDigitalLifeRuntimeSignals.js": "features/life/digitalLifeQueries.js",
         "useLifeBodyPageData.js": "features/life/lifeBodyQueries.js",
     }
@@ -2459,6 +2503,9 @@ def test_observability_queries_are_split_and_monolith_is_retired() -> None:
         "Overview.jsx": (MONITOR_SRC / "pages" / "Overview.jsx").read_text(encoding="utf-8"),
         "Sessions.jsx": (MONITOR_SRC / "pages" / "Sessions.jsx").read_text(encoding="utf-8"),
         "Metrics.jsx": (MONITOR_SRC / "pages" / "Metrics.jsx").read_text(encoding="utf-8"),
+        "metricsOverviewController.js": (
+            MONITOR_SRC / "features" / "observability" / "metricsOverviewController.js"
+        ).read_text(encoding="utf-8"),
         "Alerts.jsx": (MONITOR_SRC / "pages" / "Alerts.jsx").read_text(encoding="utf-8"),
         "alertsController.js": (
             MONITOR_SRC / "features" / "observability" / "alertsController.js"
@@ -2468,11 +2515,17 @@ def test_observability_queries_are_split_and_monolith_is_retired() -> None:
         "CodexBioOpsObservability.jsx": (
             MONITOR_SRC / "pages" / "CodexBioOpsObservability.jsx"
         ).read_text(encoding="utf-8"),
+        "codexBioOpsController.js": (
+            MONITOR_SRC / "features" / "observability" / "codexBioOpsController.js"
+        ).read_text(encoding="utf-8"),
         "TraceHome.jsx": (
             MONITOR_SRC / "features" / "observability" / "components" / "trace" / "TraceHome.jsx"
         ).read_text(encoding="utf-8"),
         "traceHomeController.js": (
             MONITOR_SRC / "features" / "observability" / "components" / "trace" / "traceHomeController.js"
+        ).read_text(encoding="utf-8"),
+        "useTraceHomeDataSources.js": (
+            MONITOR_SRC / "features" / "observability" / "components" / "trace" / "useTraceHomeDataSources.js"
         ).read_text(encoding="utf-8"),
     }
 
@@ -2523,13 +2576,16 @@ def test_observability_queries_are_split_and_monolith_is_retired() -> None:
     expected_imports = {
         "Overview.jsx": "features/observability/overviewQueries.js",
         "Sessions.jsx": "features/observability/sessionsQueries.js",
-        "Metrics.jsx": "features/observability/metricsQueries.js",
+        "Metrics.jsx": "features/observability/metricsOverviewController.js",
+        "metricsOverviewController.js": "./metricsQueries.js",
         "Alerts.jsx": "features/observability/alertsController.js",
         "alertsController.js": "./alertsQueries.js",
         "Insights.jsx": "features/observability/insightsQueries.js",
         "LogStream.jsx": "features/observability/logQueries.js",
-        "CodexBioOpsObservability.jsx": "features/observability/codexBioOpsQueries.js",
-        "traceHomeController.js": "../../sessionsQueries.js",
+        "CodexBioOpsObservability.jsx": "features/observability/codexBioOpsController.js",
+        "codexBioOpsController.js": "./codexBioOpsQueries.js",
+        "traceHomeController.js": "./useTraceHomeDataSources.js",
+        "useTraceHomeDataSources.js": "../../sessionsQueries.js",
     }
     for name, expected_import in expected_imports.items():
         assert expected_import in pages[name], name
@@ -2551,6 +2607,9 @@ def test_operations_queries_are_split_and_monolith_is_retired() -> None:
 
     surfaces = {
         "PromptConfig.jsx": (MONITOR_SRC / "pages" / "PromptConfig.jsx").read_text(encoding="utf-8"),
+        "promptConfigController.js": (
+            MONITOR_SRC / "features" / "operations" / "promptConfigController.js"
+        ).read_text(encoding="utf-8"),
         "PersonaPromptOps.jsx": (MONITOR_SRC / "pages" / "PersonaPromptOps.jsx").read_text(encoding="utf-8"),
         "SystemConfig.jsx": (MONITOR_SRC / "pages" / "SystemConfig.jsx").read_text(encoding="utf-8"),
         "Canon.jsx": (MONITOR_SRC / "pages" / "Canon.jsx").read_text(encoding="utf-8"),
@@ -2599,7 +2658,8 @@ def test_operations_queries_are_split_and_monolith_is_retired() -> None:
         assert fetcher_name not in operations_queries
 
     expected_imports = {
-        "PromptConfig.jsx": "features/operations/promptQueries.js",
+        "PromptConfig.jsx": "features/operations/promptConfigController.js",
+        "promptConfigController.js": "./promptQueries.js",
         "PersonaPromptOps.jsx": "features/operations/personaQueries.js",
         "SystemConfig.jsx": "features/operations/systemConfigQueries.js",
         "Canon.jsx": "features/operations/canonQueries.js",
@@ -2725,6 +2785,9 @@ def test_tools_operations_model_lives_in_execution_feature() -> None:
 
 def test_tools_page_delegates_catalog_and_execution_ui_to_execution_feature() -> None:
     tools_page = (MONITOR_SRC / "pages" / "Tools.jsx").read_text(encoding="utf-8")
+    tools_surface = (
+        MONITOR_SRC / "features" / "execution" / "components" / "ToolsDashboardSurface.jsx"
+    ).read_text(encoding="utf-8")
     catalog_browser = (
         MONITOR_SRC / "features" / "execution" / "components" / "ToolsCatalogBrowser.jsx"
     ).read_text(encoding="utf-8")
@@ -2738,9 +2801,10 @@ def test_tools_page_delegates_catalog_and_execution_ui_to_execution_feature() ->
         MONITOR_SRC / "features" / "execution" / "components" / "ToolsPentestMetadataSection.jsx"
     ).read_text(encoding="utf-8")
 
-    assert "features/execution/components/ToolsCatalogBrowser.jsx" in tools_page
-    assert "features/execution/components/ToolDetailPanel.jsx" in tools_page
-    assert "features/execution/components/ToolsPentestMetadataSection.jsx" in tools_page
+    assert "./ToolsCatalogBrowser.jsx" in tools_surface
+    assert "./ToolDetailPanel.jsx" in tools_surface
+    assert "./ToolsPentestMetadataSection.jsx" in tools_surface
+    assert "features/execution/components/ToolsDashboardSurface.jsx" in tools_page
     assert "ToolExecutePanel" in detail_panel
     assert "executeTool(" in execute_panel
     assert "getPentestToolMetadataView(capabilities)" in pentest_section
@@ -2879,7 +2943,7 @@ def test_automation_status_metadata_lives_in_shared_module() -> None:
             "border-rose-200 bg-rose-50/70 text-rose-700",
             "border-sky-200 bg-sky-50/70 text-sky-700",
         ],
-        "features/execution/components/AutomationImmuneSectionContent.jsx": [
+        "features/execution/components/automationImmune/ImmuneGateOpsPanel.jsx": [
             "border-green-200 bg-green-50 text-green-700",
             "border-orange-200 bg-orange-50 text-orange-700",
         ],
@@ -2974,6 +3038,12 @@ def test_automation_task_view_model_lives_in_execution_feature() -> None:
         / "components"
         / "AutomationTaskExecutionSection.jsx"
     ).read_text(encoding="utf-8")
+    task_row = (
+        MONITOR_SRC / "features" / "execution" / "components" / "AutomationTaskRow.jsx"
+    ).read_text(encoding="utf-8")
+    task_detail = (
+        MONITOR_SRC / "features" / "execution" / "components" / "AutomationTaskDetailPanel.jsx"
+    ).read_text(encoding="utf-8")
     task_model = (MONITOR_SRC / "features" / "execution" / "automationTaskModel.js").read_text(encoding="utf-8")
 
     for export_name in [
@@ -2987,8 +3057,10 @@ def test_automation_task_view_model_lives_in_execution_feature() -> None:
 
     assert "./automationTaskModel.js" in automation_controller
     assert "./AutomationTaskExecutionSection.jsx" in automation_surface
-    assert "from '../automationTaskModel.js'" in task_section
-    assert "getTaskView(item)" in task_section
+    assert "from '../automationTaskModel.js'" in task_row
+    assert "from '../automationTaskModel.js'" in task_detail
+    assert "getTaskView(item)" in task_row
+    assert "getTaskView(item)" in task_detail
     assert "getAutomationTaskUrlFilters(searchParams)" in automation_controller
     assert "buildAutomationClearedTaskFilterParams(searchParams)" in automation_controller
     assert "buildAutomationTaskSelectionView({" in automation_controller
@@ -3176,7 +3248,7 @@ def test_prompt_source_and_type_badge_metadata_lives_in_shared_module() -> None:
     shared = SHARED_STATUS_META.read_text(encoding="utf-8")
     prompt_ops_model = (MONITOR_SRC / "features" / "operations" / "promptOpsModel.js").read_text(encoding="utf-8")
     migrated_files = {
-        "pages/PromptConfig.jsx": [
+        "features/operations/components/promptOps/PromptConfigSurface.jsx": [
             "bg-green-100 text-green-700 border-green-200",
             "bg-gray-100 text-gray-600 border-gray-200",
             "bg-purple-100 text-purple-700 border-purple-200",
@@ -3202,14 +3274,23 @@ def test_prompt_source_and_type_badge_metadata_lives_in_shared_module() -> None:
     for rel, forbidden in migrated_files.items():
         source = (MONITOR_SRC / rel).read_text(encoding="utf-8")
         assert "shared/statusMeta.js" not in source
-        assert "features/operations/promptOpsModel.js" in source
+        assert "promptOpsModel.js" in source
         for needle in forbidden:
             assert needle not in source, rel
 
 
 def test_prompt_ops_view_model_lives_in_operations_feature() -> None:
     prompt_page = (MONITOR_SRC / "pages" / "PromptConfig.jsx").read_text(encoding="utf-8")
+    prompt_controller = (
+        MONITOR_SRC / "features" / "operations" / "promptConfigController.js"
+    ).read_text(encoding="utf-8")
+    prompt_surface = (
+        MONITOR_SRC / "features" / "operations" / "components" / "promptOps" / "PromptConfigSurface.jsx"
+    ).read_text(encoding="utf-8")
     persona_page = (MONITOR_SRC / "pages" / "PersonaPromptOps.jsx").read_text(encoding="utf-8")
+    persona_catalog = (
+        MONITOR_SRC / "features" / "operations" / "components" / "promptOps" / "PersonaPromptCatalogPanel.jsx"
+    ).read_text(encoding="utf-8")
     prompt_ops_model = (MONITOR_SRC / "features" / "operations" / "promptOpsModel.js").read_text(encoding="utf-8")
 
     for export_name in [
@@ -3239,16 +3320,17 @@ def test_prompt_ops_view_model_lives_in_operations_feature() -> None:
     assert "safeItems.filter((item) => item?.source === 'override')" in prompt_ops_model
     assert "safeEntries.filter((entry) => entry?.item?.content_type === 'json')" in prompt_ops_model
 
-    assert "getPromptFiltersFromSearchParams(searchParams)" in prompt_page
-    assert "buildPromptFilterOptions(items, 'scope')" in prompt_page
-    assert "buildPromptTemplateSummary(items)" in prompt_page
-    assert "buildPromptTemplateListMetaState({" in prompt_page
-    assert "buildPromptTemplateSampleMeta({" in prompt_page
-    assert "sampleMeta.loadState" in prompt_page
-    assert "getNextPromptTemplateSelection(items, selectedId)" in prompt_page
-    assert "getPromptSourceBadgeView(source)" in prompt_page
-    assert "getPromptContentTypeBadgeView(value)" in prompt_page
-    assert "formatPromptTemplateUpdatedAt(selected.updated_at_ts_ms)" in prompt_page
+    assert "getPromptFiltersFromSearchParams(searchParams)" in prompt_controller
+    assert "buildPromptFilterOptions(listQuery.items, 'scope')" in prompt_controller
+    assert "buildPromptTemplateSummary(listQuery.items)" in prompt_controller
+    assert "buildPromptTemplateListMetaState({" in prompt_controller
+    assert "buildPromptTemplateSampleMeta({" in prompt_controller
+    assert "getNextPromptTemplateSelection(listQuery.items, selectedId)" in prompt_controller
+    assert "sampleMeta.loadState" in prompt_surface
+    assert "getPromptSourceBadgeView(source" in prompt_surface
+    assert "getPromptContentTypeBadgeView(value" in prompt_surface
+    assert "formatPromptTemplateUpdatedAt(selected.updated_at_ts_ms)" in prompt_surface
+    assert "features/operations/promptConfigController.js" in prompt_page
 
     assert "flattenPersonaPromptEntries(bundles)" in persona_page
     assert "buildPersonaPromptSummary({ bundles, entries })" in persona_page
@@ -3257,8 +3339,8 @@ def test_prompt_ops_view_model_lives_in_operations_feature() -> None:
     assert "sampleMeta.loadState" in persona_page
     assert "getNextPersonaPromptSelection(bundles, current)" in persona_page
     assert "findSelectedPersonaPromptEntry(bundles, selectedId)" in persona_page
-    assert "getPromptSourceBadgeView(source, { resolveLabel: true })" in persona_page
-    assert "getPromptContentTypeBadgeView(value, { resolveLabel: true })" in persona_page
+    assert "getPromptSourceBadgeView(source, { resolveLabel: true })" in persona_catalog
+    assert "getPromptContentTypeBadgeView(value, { resolveLabel: true })" in persona_catalog
     assert "formatPromptTemplateUpdatedAt(selected.updated_at_ts_ms)" in persona_page
 
     for source in [prompt_page, persona_page]:
@@ -3730,7 +3812,7 @@ def test_pentest_run_detail_surface_is_feature_owned() -> None:
     assert controller.exists()
     assert "SecurityPentestRunDetailSurface from '../features/security/components/SecurityPentestRunDetailSurface.jsx'" in page_source
     assert "usePentestRunDetailController" in page_source
-    assert "export function usePentestRunDetailController(runId)" in controller_source
+    assert "export function usePentestRunDetailController(runId, { governancePentest } = {})" in controller_source
     assert "export default function SecurityPentestRunDetailSurface(" in surface_source
     assert "subscribePentestRunEvents(runId" in controller_source
     assert "approvePentestSideEffect(runId)" in controller_source
@@ -3801,7 +3883,7 @@ def test_security_immune_query_and_view_model_live_in_security_feature() -> None
     assert "buildSecurityImmuneViewModel({" in page
     assert "SECURITY_MIN_RISK_OPTIONS.map" in page
     assert "riskCards.map" in page
-    assert "incidentRows.map" in page
+    assert "visibleIncidentRows.map" in page
     assert "StatusBadge status={runtimeBadge.status}" in page
     assert "runSecurityHuntOnce('manual_web_security_immune')" in page
 
@@ -4017,6 +4099,9 @@ def test_bio_ops_status_metadata_lives_in_shared_module() -> None:
 
 def test_bio_ops_page_view_model_lives_in_observability_feature() -> None:
     page = (MONITOR_SRC / "pages" / "CodexBioOpsObservability.jsx").read_text(encoding="utf-8")
+    controller = (
+        MONITOR_SRC / "features" / "observability" / "codexBioOpsController.js"
+    ).read_text(encoding="utf-8")
     model = (MONITOR_SRC / "features" / "observability" / "bioOpsModel.js").read_text(encoding="utf-8")
 
     for export_name in [
@@ -4030,11 +4115,12 @@ def test_bio_ops_page_view_model_lives_in_observability_feature() -> None:
     ]:
         assert export_name in model
 
-    assert "features/observability/bioOpsModel.js" in page
-    assert "getBioOpsObservabilityViewData(data)" in page
-    assert "buildBioOpsCapabilitySections(bioOps, BIO_OPS_CAPABILITY_PANELS)" in page
-    assert "buildBioOpsMetricTiles(bioOpsView)" in page
-    assert "isBioOpsKeyBenefitObservable({" in page
+    assert "./bioOpsModel.js" in controller
+    assert "getBioOpsObservabilityViewData(data)" in controller
+    assert "buildBioOpsCapabilitySections(bioOps, BIO_OPS_CAPABILITY_PANELS)" in controller
+    assert "buildBioOpsMetricTiles(bioOpsView)" in controller
+    assert "isBioOpsKeyBenefitObservable({" in controller
+    assert "features/observability/codexBioOpsController.js" in page
     assert "const capabilitySections = useMemo(() => [" not in page
     assert "Object.values(statusCounts).reduce" not in page
     assert "title: 'Inner Mechanisms'" not in page
@@ -4052,7 +4138,10 @@ def test_bio_ops_owner_panel_view_model_lives_in_observability_feature() -> None
     owner_inbox = (
         OBSERVABILITY_COMPONENTS / "bioOps" / "owner" / "OwnerInboxPanel.jsx"
     ).read_text(encoding="utf-8")
-    component = f"{aggregate}\n{pending_adoptions}\n{owner_inbox}"
+    owner_inbox_hook = (
+        OBSERVABILITY_COMPONENTS / "bioOps" / "owner" / "useOwnerInboxPanel.js"
+    ).read_text(encoding="utf-8")
+    component = f"{aggregate}\n{pending_adoptions}\n{owner_inbox}\n{owner_inbox_hook}"
     model = (MONITOR_SRC / "features" / "observability" / "bioOpsOwnerModel.js").read_text(encoding="utf-8")
 
     for export_name in [
@@ -4070,9 +4159,9 @@ def test_bio_ops_owner_panel_view_model_lives_in_observability_feature() -> None
     assert "getBioOpsPendingAdoptionReview({ items, selectedId, detail })" in pending_adoptions
     assert "buildBioOpsAdoptionDecisionBody(decision, active)" in pending_adoptions
     assert "getBioOpsOwnerRunParams(runId)" in pending_adoptions
-    assert "buildBioOpsOwnerInboxViewModel({" in owner_inbox
-    assert "buildBioOpsOwnerStateReviewBody(decision, ownerOrgan)" in owner_inbox
-    assert "getBioOpsOwnerRunParams(runId)" in owner_inbox
+    assert "buildBioOpsOwnerInboxViewModel({" in owner_inbox_hook
+    assert "buildBioOpsOwnerStateReviewBody(decision, ownerOrgan)" in owner_inbox_hook
+    assert "getBioOpsOwnerRunParams(runId)" in owner_inbox_hook
 
     for forbidden in [
         "Array.isArray(data?.items)",
@@ -4103,6 +4192,9 @@ def test_bio_ops_owner_panels_are_split_by_workflow() -> None:
     owner_inbox = (
         OBSERVABILITY_COMPONENTS / "bioOps" / "owner" / "OwnerInboxPanel.jsx"
     ).read_text(encoding="utf-8")
+    owner_inbox_hook = (
+        OBSERVABILITY_COMPONENTS / "bioOps" / "owner" / "useOwnerInboxPanel.js"
+    ).read_text(encoding="utf-8")
 
     assert "export { default as PendingAdoptions }" in aggregate
     assert "export { default as OwnerInboxPanel }" in aggregate
@@ -4111,9 +4203,10 @@ def test_bio_ops_owner_panels_are_split_by_workflow() -> None:
     assert "fetchCodexBioOpsAdoptionDetail" in pending_adoptions
     assert "acceptCodexBioOpsAdoption" in pending_adoptions
     assert "rejectCodexBioOpsAdoption" in pending_adoptions
-    assert "fetchCodexBioOpsOwnerInbox" in owner_inbox
-    assert "materializeCodexBioOpsOwnerInbox" in owner_inbox
-    assert "consumeCodexBioOpsOwnerQueues" in owner_inbox
+    assert "useOwnerInboxPanel({ runId })" in owner_inbox
+    assert "fetchCodexBioOpsOwnerInbox" in owner_inbox_hook
+    assert "materializeCodexBioOpsOwnerInbox" in owner_inbox_hook
+    assert "consumeCodexBioOpsOwnerQueues" in owner_inbox_hook
 
     assert "useState" not in aggregate
     assert "fetchCodexBioOpsOwnerInbox" not in pending_adoptions
@@ -4122,6 +4215,12 @@ def test_bio_ops_owner_panels_are_split_by_workflow() -> None:
 
 def test_metrics_overview_view_model_lives_in_observability_feature() -> None:
     page = (MONITOR_SRC / "pages" / "Metrics.jsx").read_text(encoding="utf-8")
+    controller = (
+        MONITOR_SRC / "features" / "observability" / "metricsOverviewController.js"
+    ).read_text(encoding="utf-8")
+    surface = (
+        MONITOR_SRC / "features" / "observability" / "components" / "metrics" / "MetricsOverviewSurface.jsx"
+    ).read_text(encoding="utf-8")
     model = (MONITOR_SRC / "features" / "observability" / "metricsOverviewModel.js").read_text(encoding="utf-8")
 
     assert "export const METRICS_TIME_RANGES" in model
@@ -4141,12 +4240,13 @@ def test_metrics_overview_view_model_lives_in_observability_feature() -> None:
     ]:
         assert f"export function {export_name}(" in model
 
-    assert "features/observability/metricsOverviewModel.js" in page
-    assert "getMetricsRangeConfig(timeRange)" in page
-    assert "buildMetricsOverviewViewModel({" in page
-    assert "METRICS_TIME_RANGES.map" in page
-    assert "summaryCards.map" in page
-    assert "rateLimitView.topKeyRows.map" in page
+    assert "./metricsOverviewModel.js" in controller
+    assert "getMetricsRangeConfig(timeRange)" in controller
+    assert "buildMetricsOverviewViewModel({" in controller
+    assert "timeRanges.map" in surface
+    assert "cards.map" in surface
+    assert "rateLimitView.topKeyRows.map" in surface
+    assert "features/observability/metricsOverviewController.js" in page
 
     for forbidden in [
         "const TIME_RANGES = [",
@@ -4441,6 +4541,12 @@ def test_digital_life_runtime_status_metadata_lives_in_shared_module() -> None:
 
 def test_runtime_mode_view_model_lives_in_life_feature() -> None:
     runtime_mode = (MONITOR_SRC / "pages" / "RuntimeMode.jsx").read_text(encoding="utf-8")
+    runtime_controller = (
+        MONITOR_SRC / "features" / "life" / "runtimeModeController.js"
+    ).read_text(encoding="utf-8")
+    runtime_surface = (
+        MONITOR_SRC / "features" / "life" / "components" / "RuntimeModeSurface.jsx"
+    ).read_text(encoding="utf-8")
     runtime_model = (MONITOR_SRC / "features" / "life" / "runtimeModeModel.js").read_text(encoding="utf-8")
 
     for export_name in [
@@ -4463,16 +4569,17 @@ def test_runtime_mode_view_model_lives_in_life_feature() -> None:
     ]:
         assert export_name in runtime_model
 
-    assert "features/life/runtimeModeModel.js" in runtime_mode
-    assert "buildRuntimeModeViewModel({" in runtime_mode
-    assert "buildRuntimeModeSwitchConfirmMessage(targetMode)" in runtime_mode
-    assert "switchSysMode(buildRuntimeModeSwitchPayload(targetMode))" in runtime_mode
-    assert "updateAutoRules(buildRuntimeModeAutoRulePatch(ruleKey, currentValue))" in runtime_mode
-    assert "formatRuntimeModeSourceText(item.source)" in runtime_mode
-    assert "modeButtons.map((view)" in runtime_mode
-    assert "autoRuleRows.map((rule)" in runtime_mode
-    assert "stateAxisItems.map((item)" in runtime_mode
-    assert "metricCards.map((card)" in runtime_mode
+    assert "./runtimeModeModel.js" in runtime_controller
+    assert "buildRuntimeModeViewModel({" in runtime_controller
+    assert "buildRuntimeModeSwitchConfirmMessage(targetMode)" in runtime_controller
+    assert "switchSysMode(buildRuntimeModeSwitchPayload(targetMode))" in runtime_controller
+    assert "updateAutoRules(buildRuntimeModeAutoRulePatch(ruleKey, currentValue))" in runtime_controller
+    assert "formatRuntimeModeSourceText(item.source)" in runtime_surface
+    assert "modeButtons.map((view)" in runtime_surface
+    assert "autoRuleRows.map((rule)" in runtime_surface
+    assert "stateAxisItems.map((item)" in runtime_surface
+    assert "metricCards.map((card)" in runtime_surface
+    assert "features/life/runtimeModeController.js" in runtime_mode
 
     for forbidden in [
         "const MODE_ORDER",
@@ -4531,7 +4638,10 @@ def test_bond_view_model_lives_in_life_feature() -> None:
     assert "useBondUserDetailQuery({" in bond_controller
     assert "submitBondEvent(body)" in bond_controller
     assert "useAppStore((state) => state.pollingEnabled)" in bond_controller
-    assert "buildBondStageDistribution(items)" in bond_surface
+    bond_stage_distribution = (
+        MONITOR_SRC / "features" / "life" / "components" / "bond" / "BondStageDistribution.jsx"
+    ).read_text(encoding="utf-8")
+    assert "buildBondStageDistribution(items)" in bond_stage_distribution
     assert "buildBondSubmitSuccessMessage(submitResult.data)" in bond_surface
     assert "sampleMeta.loadState" in bond_surface
     assert "noticeView.noSample" in bond_surface
@@ -4658,6 +4768,12 @@ def test_pathology_center_model_lives_in_life_feature() -> None:
 
 def test_memory_browser_view_model_lives_in_life_feature() -> None:
     memory_page = (MONITOR_SRC / "pages" / "MemoryBrowser.jsx").read_text(encoding="utf-8")
+    memory_controller = (
+        MONITOR_SRC / "features" / "life" / "memoryBrowserController.js"
+    ).read_text(encoding="utf-8")
+    memory_surface = (
+        MONITOR_SRC / "features" / "life" / "components" / "MemoryBrowserSurface.jsx"
+    ).read_text(encoding="utf-8")
     memory_model = (MONITOR_SRC / "features" / "life" / "memoryBrowserModel.js").read_text(encoding="utf-8")
 
     assert "export const MEMORY_BROWSER_WINDOW_OPTIONS" in memory_model
@@ -4675,11 +4791,12 @@ def test_memory_browser_view_model_lives_in_life_feature() -> None:
     ]:
         assert f"export function {export_name}(" in memory_model
 
-    assert "features/life/memoryBrowserModel.js" in memory_page
-    assert "MEMORY_BROWSER_WINDOW_OPTIONS" in memory_page
-    assert "buildMemoryBrowserViewModel({" in memory_page
-    assert "memoryLoadState" in memory_page
-    assert "subsystemMetricCards.map((card)" in memory_page
+    assert "./memoryBrowserModel.js" in memory_controller
+    assert "MEMORY_BROWSER_WINDOW_OPTIONS" in memory_controller
+    assert "buildMemoryBrowserViewModel({" in memory_controller
+    assert "memoryLoadState" in memory_surface
+    assert "subsystemMetricCards.map((card)" in memory_surface
+    assert "features/life/memoryBrowserController.js" in memory_page
 
     for forbidden in [
         "const WINDOW_OPTIONS = [",
@@ -4796,6 +4913,10 @@ def test_emotion_dashboard_display_metadata_lives_in_shared_module() -> None:
 def test_emotion_dashboard_view_model_lives_in_life_feature() -> None:
     page = (MONITOR_SRC / "pages" / "EmotionDashboard.jsx").read_text(encoding="utf-8")
     model = (MONITOR_SRC / "features" / "life" / "emotionDashboardModel.js").read_text(encoding="utf-8")
+    views = (MONITOR_SRC / "features" / "life" / "emotionDashboardViews.js").read_text(encoding="utf-8")
+    panels = (
+        MONITOR_SRC / "features" / "life" / "components" / "emotion" / "EmotionDashboardPanels.jsx"
+    ).read_text(encoding="utf-8")
 
     assert "export const EMOTION_WINDOW_OPTIONS" in model
     assert "export const EMOTION_GAUGE_COLOR_MAP" in model
@@ -4821,17 +4942,17 @@ def test_emotion_dashboard_view_model_lives_in_life_feature() -> None:
         "buildEmotionLimbicOrganModel",
         "buildEmotionDashboardViewModel",
     ]:
-        assert f"export function {export_name}(" in model
+        assert f"export function {export_name}(" in f"{model}\n{views}"
 
     assert "features/life/emotionDashboardModel.js" in page
     assert "buildEmotionDashboardViewModel({" in page
     assert "EMOTION_WINDOW_OPTIONS" in page
     assert "metricCards.map" in page
-    assert "gauges.map" in page
-    assert "hormoneBars.map" in page
-    assert "topEmotionRows.map" in page
-    assert "vtsStatCards.map" in page
-    assert "memorySubsystemRows.map" in page
+    assert "gauges.map" in panels
+    assert "hormoneBars.map" in panels
+    assert "topEmotionRows.map" in panels
+    assert "vtsStatCards.map" in panels
+    assert "memorySubsystemRows.map" in panels
 
     for forbidden in [
         "resolveLoadState",
@@ -4867,6 +4988,8 @@ def test_emotion_dashboard_view_model_lives_in_life_feature() -> None:
 def test_self_model_dashboard_view_model_lives_in_life_feature() -> None:
     page = (MONITOR_SRC / "pages" / "SelfModelDashboard.jsx").read_text(encoding="utf-8")
     model = (MONITOR_SRC / "features" / "life" / "selfModelDashboardModel.js").read_text(encoding="utf-8")
+    cards = (MONITOR_SRC / "features" / "life" / "selfModelDashboardCards.js").read_text(encoding="utf-8")
+    sections = (MONITOR_SRC / "features" / "life" / "selfModelDashboardSections.js").read_text(encoding="utf-8")
 
     assert "export const SELF_MODEL_RUNTIME_WINDOW_MINUTES" in model
     for export_name in [
@@ -4887,7 +5010,7 @@ def test_self_model_dashboard_view_model_lives_in_life_feature() -> None:
         "buildSelfModelListBlocks",
         "buildSelfModelDashboardViewModel",
     ]:
-        assert f"export function {export_name}(" in model
+        assert f"export function {export_name}(" in f"{model}\n{cards}\n{sections}"
 
     assert "features/life/selfModelDashboardModel.js" in page
     assert "SELF_MODEL_RUNTIME_WINDOW_MINUTES" in page
