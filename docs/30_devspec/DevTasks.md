@@ -19,8 +19,8 @@
 - 关联需求：`FR-NLE-001`～`FR-NLE-005`、`FR-ARCH-001`～`FR-ARCH-010`。
 - 关联测试：`T-NLE-01`～`T-NLE-24`、`T-ARCH-01`～`T-ARCH-30`。
 - 唯一首个执行入口：`TASK-0461 / LTE-WP-00`。M48-A 内部依赖以 M48-A 详细执行文档为准；跨里程碑依赖、切流、停止、回滚和最终退役以 Master 执行文档为准。
-- 最近完成任务：`TASK-0461～TASK-0479`、`TASK-0483` 已完成；Execution/Review Operator UI 已提供版本化只读 DAG、attempt、budget、verification、review、token-bound resume 与 cursor replay，并通过 96 项 Monitor E2E 和集成后 206 项全量 NLE。
-- 当前并行波次：`TASK-0480～TASK-0482` 与 `TASK-0484` 已解锁；TASK-0485 等待 0480～0482，TASK-0486 等待 M48-A 全部任务。各任务保持独立提交，主动行为策略变化需 owner review，成熟度升级需 MASTER 批准。
+- 最近完成任务：`TASK-0461～TASK-0485` 已完成；Capability Maturity、durable DegradationState、Release Identity Snapshot、Execution/Review UI、Life evolution UI 与 Capability/Health/Identity governance UI 已按 T-NLE-01～23 落地，新增 read route/UI 默认关闭且不扩大写权限。
+- 当前任务：`TASK-0486 / LTE-WP-80`，执行 M48-A 全链验收、迁移对账、故障注入、Monitor build/E2E、rollback drill 与 Seal Result；最终 `SEALED` 仍需 MASTER 明确批准。M48-B Entry Gate 尚未获 MASTER 批准，`TASK-0487～0622` 保持 `PROGRAMMED`，不得越级实施。
 
 本文件后续的 `TASK-0000`～`TASK-0460` 保留为历史任务记录；与完整架构程序冲突时，不得用历史任务覆盖当前代码基线、Master 程序或对应阶段的正式任务卡。
 

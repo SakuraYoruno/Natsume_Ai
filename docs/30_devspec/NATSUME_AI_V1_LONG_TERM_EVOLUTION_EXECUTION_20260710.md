@@ -5,7 +5,7 @@
 
 版本：v1.1
 日期：2026-07-10
-状态：`READY_FOR_EXECUTION`（TASK-0461～TASK-0479、TASK-0483 已 `DONE`；其余任务按依赖 Gate 推进）
+状态：`READY_FOR_EXECUTION`（TASK-0461～TASK-0485 已 `DONE`；TASK-0486 按 Release Seal Gate 推进）
 文档类型：DevTasks / Execution Contract
 任务编号：`TASK-0461`～`TASK-0486`
 逻辑工作包：`LTE-WP-00`～`LTE-WP-80`
@@ -426,12 +426,12 @@ Pop-Location
 | TASK-0477 | WP-51 / PR-017 | WorldProjection | WP-50 | 2–4 日 | 中 | DONE |
 | TASK-0478 | WP-52 / PR-018 | Appraisal / Bond 收敛 | WP-50 | 2–4 日 | 高 | DONE |
 | TASK-0479 | WP-53 / PR-019 | Scene / ActionArbiter | WP-51/52 | 2–4 日 | 高 | DONE |
-| TASK-0480 | WP-60 / PR-020 | Capability Maturity | WP-53 | 2–3 日 | 高 | PLANNED |
-| TASK-0481 | WP-61 / PR-021 | Degradation State | WP-53 | 2–3 日 | 中 | PLANNED |
-| TASK-0482 | WP-62 / PR-022 | Identity Snapshot | WP-53 | 2–3 日 | 高 | PLANNED |
+| TASK-0480 | WP-60 / PR-020 | Capability Maturity | WP-53 | 2–3 日 | 高 | DONE |
+| TASK-0481 | WP-61 / PR-021 | Degradation State | WP-53 | 2–3 日 | 中 | DONE |
+| TASK-0482 | WP-62 / PR-022 | Identity Snapshot | WP-53 | 2–3 日 | 高 | DONE |
 | TASK-0483 | WP-70 / PR-023 | Execution / Review UI | WP-24/40 | 2–4 日 | 中 | DONE |
-| TASK-0484 | WP-71 / PR-024 | Life UI | WP-51/52/53 | 2–4 日 | 中 | PLANNED |
-| TASK-0485 | WP-72 / PR-025 | Capability / Health / Identity UI | WP-60/61/62 | 2–4 日 | 中 | PLANNED |
+| TASK-0484 | WP-71 / PR-024 | Life UI | WP-51/52/53 | 2–4 日 | 中 | DONE |
+| TASK-0485 | WP-72 / PR-025 | Capability / Health / Identity UI | WP-60/61/62 | 2–4 日 | 中 | DONE |
 | TASK-0486 | WP-80 / PR-026 | Release Seal 与回滚演练 | 全部 | 2–3 日 | 高 | PLANNED |
 
 逻辑 PR 编号用于文档和审计，不预占 GitHub 实际 PR 号。每个 TASK 独立交付；出现必要的跨任务修改时，先修订任务边界，不在同一 PR 私自夹带后续工作包。
@@ -751,7 +751,7 @@ Pop-Location
 
 ### TASK-0480 / LTE-WP-60：Federated Capability Maturity
 
-- 状态：`PLANNED`
+- 状态：`DONE`
 - 目标：在现有 SkillMeta、ToolMeta、Pentest ToolDescriptor 和 Agent mode 上建立 federated scorecard，不立即重写各 registry。
 - 代码事实：当前风险量表分散且尺度不同；成熟度不能成为提权捷径。
 - 前置任务：TASK-0479。
@@ -764,10 +764,11 @@ Pop-Location
 - 停止条件：成熟度使原本需审批的动作无审批执行。
 - 回滚：Governor 忽略 scorecard；保留静态风险和降级记录。
 - 审批：每次升级需要 MASTER 批准。
+- 完成证据（2026-07-11）：新增 federated `CapabilityScorecard`、canonical risk adapter、L0～L5 maturity、评测 evidence 与非执行型 MASTER Review upgrade candidate；实际 provider 聚合 Skill、MCP、Pentest 和 Agent Runtime registry 并注入真实 IntentDecisionEngine。自动流程只能降级，static risk ceiling、Review 和既有 Governor 裁决均不可被成熟度放宽；启用策略时缺失或伪造 scorecard fail-closed，`HOST_CAPABILITY_MATURITY_POLICY_ENABLED=false` 为默认回滚。T-NLE-18 `35 passed`。
 
 ### TASK-0481 / LTE-WP-61：统一 DegradationState
 
-- 状态：`PLANNED`
+- 状态：`DONE`
 - 目标：扩展现有 startup/health/heartbeat/resource manager，形成进入、恢复、证据和影响能力统一状态机。
 - 代码事实：长期守护底座已经存在，不需要新建平行 runtime_guardian。
 - 前置任务：TASK-0479。
@@ -780,10 +781,11 @@ Pop-Location
 - 停止条件：降级时仍开放受影响高风险能力，或恢复没有健康证据。
 - 回滚：保持能力禁用；不自动恢复等级。
 - 审批：故障演练涉及外部服务时需运行窗口批准。
+- 完成证据（2026-07-11）：统一 DegradationState 已接入 RuntimeEventStore durable restore/transition/recovery events，并用绑定 subject/version/checkpoint 的一次性 ReviewStore resume 控制恢复。受影响能力门禁已进入 ActionArbiter、MCP、Skill、Canon、Pentest、TTS、VTS、SSE 与 remote resume 前门；状态读取失败、flag 非法或恢复证据不足均 fail-closed。关闭 `HOST_DEGRADATION_STATE_ENABLED` 仅停止新投影，不清除已锁存的高风险限制。T-NLE-19 两个合同文件合计 `19 passed`。
 
 ### TASK-0482 / LTE-WP-62：Release Identity Snapshot
 
-- 状态：`PLANNED`
+- 状态：`DONE`
 - 目标：复用 SelfModel、漂移检测、启动快照与 release manifest 生成可比较、可审查的人格连续性快照。
 - 代码事实：身份相关组件已存在；V1 只做 snapshot/diff/review，不做自动人格迁移。
 - 前置任务：TASK-0479。
@@ -796,6 +798,7 @@ Pop-Location
 - 停止条件：hash/ref 无法定位来源，或 diff 需要泄漏私密内容才可解释。
 - 回滚：禁用新快照发布门禁；不自动修改人格数据。
 - 审批：重大差异必须 MASTER Review。
+- 完成证据（2026-07-11）：新增 immutable Release Identity Snapshot、可定位来源的 hash/ref、字段级 diff、重大差异 MASTER Review candidate、release manifest binding 与精确 previous-release rollback plan；快照不复制私密人格或 memory 正文，不自动修改人格数据。`HOST_RELEASE_IDENTITY_SNAPSHOT_ENABLED=false` 默认关闭发布门禁。T-NLE-20 `11 passed`。
 
 ### TASK-0483 / LTE-WP-70：Execution、Trace 与 Review UI
 
@@ -816,7 +819,7 @@ Pop-Location
 
 ### TASK-0484 / LTE-WP-71：Life World、Appraisal、Bond 与 Scene UI
 
-- 状态：`PLANNED`
+- 状态：`DONE`
 - 目标：在 Cockpit/Life 页面展示 World source/confidence/TTL/conflict、Appraisal evidence、Bond projection 和 Scene/Arbiter decision。
 - 代码事实：现有 Life/Cockpit 页面可扩展；推断状态不能被 UI 呈现为确定事实。
 - 前置任务：TASK-0477、TASK-0478、TASK-0479。
@@ -829,10 +832,11 @@ Pop-Location
 - 停止条件：UI 隐藏来源/过期或允许未审批写入 Life Core。
 - 回滚：隐藏新页面/section；不影响 Life 后端。
 - 审批：无写入审批。
+- 完成证据（2026-07-11）：新增 versioned Life evolution read model 与 `/obs/life-evolution` 只读 route，实际观察 DigitalLifeSupervisor appraisal、ProactiveVoice、Surface、Executive SceneDecision 与 ActionArbiter；World source/confidence/TTL/conflict、Appraisal evidence、Bond projection 和 Scene/Arbiter decision 均保留来源语义，空 scene 显式 `UNAVAILABLE`。浏览器不能伪造 Governor authority，preview 固定无 handler/executor/外部副作用且不写 Life/Persona/Bond/Memory。`HOST_NLE_LIFE_VIEWS_ENABLED=false` 隐藏 route/UI，`HOST_LIFE_PROJECTION_ENABLED=false` 关闭 scene 软投影。T-NLE-22 `12 passed`、Node model `4 passed`、相关 T-NLE-17 `12 passed`，Vite build 通过。
 
 ### TASK-0485 / LTE-WP-72：Capability、Health 与 Identity UI
 
-- 状态：`PLANNED`
+- 状态：`DONE`
 - 目标：在现有 Skills/Operations/Security Lab 页面显示 maturity、static risk、degradation、identity diff 和 Pentest 隔离状态。
 - 代码事实：现有 Skills、Health、Security Lab 页面已经存在；Pentest 高风险路由必须明确 Lab 边界。
 - 前置任务：TASK-0480、TASK-0481、TASK-0482。
@@ -845,6 +849,7 @@ Pop-Location
 - 停止条件：UI 通过普通 mutation 绕过 Review，或泄漏私密 identity/memory 正文。
 - 回滚：隐藏新视图；后端门禁继续生效。
 - 审批：任何升级/身份确认仍由 MASTER 执行。
+- 完成证据（2026-07-11）：新增 versioned governance snapshot 与 `/obs/governance/snapshot`，在 Skills、System Config 与 Security Pentest 页面只读呈现 capability maturity/static risk/evidence、degradation reason/restriction/recovery、identity field diff/Review 与 Pentest domain isolation。候选只有 materialize 到 durable ReviewStore 后才生成 `review_id` 定位链接；TaskRuntime 通过只读 locator 定位并严格匹配 Review，MAJOR identity 缺 Review、identity unavailable、非 Lab 或 governance unavailable 均 fail-closed。顶层和 capability payload 固定 `automatic_upgrade_available=false`，identity 不包含 private body；create/approve/continue 高风险入口在 API 调用前门禁。`HOST_NLE_GOVERNANCE_VIEWS_ENABLED=false` 在 provider 构造前 404，隐藏增量视图但不关闭后端安全门。T-NLE-23 focused backend、Node 与 Pentest isolation tests 通过，Vite build 通过。
 
 ### TASK-0486 / LTE-WP-80：M48 Release Seal 与回滚演练
 

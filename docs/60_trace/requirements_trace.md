@@ -18,17 +18,22 @@
 - 本次增量：TASK-0477 / T-NLE-15 完成，只读 WorldProjection 提供 `Natsume.world_projection.v1` snapshot、GET read API、source/confidence/observed/expires/epistemic/conflict facts、StateArbiter 冲突可见、过期 fact 可见，且空库查询不初始化 Life state。
 - 本次增量：TASK-0478 / T-NLE-16 完成，新增 `Natsume.appraisal.record.v1` 确定性 emotional event adapter 与 `Natsume.bond.projection.v1` 只读 projection；Bond API/真实闭环验证器统一经 `BondDynamicsWriter.apply_update()`，T-SSOT-01 同时阻止 stage direct call 与 score/stage/rift 直接改写，boundary 不改变关系权限。
 - 本次增量：TASK-0479 / T-NLE-17 完成，新增 source-preserving SceneDecision、ProactiveVoice/Surface adapter、Governor intent/action/scope/risk/token binding、fail-closed route/AIRLOCK gate、shared TokenService handler 前门、Governor-monotonic ActionArbiter 与 dry-run Runtime Event；显式用户目标优先，scene/affect/relationship 只能收紧主动性和表达。
+- 本次增量：TASK-0480 / T-NLE-18 完成，federated capability scorecard 从实际 Skill/MCP/Pentest/Agent registry 生成 canonical risk 与 L0～L5 maturity；自动流程只允许降级，升级仅形成带 evidence 的 MASTER Review candidate，Governor policy 只收紧。
+- 本次增量：TASK-0481 / T-NLE-19 完成，DegradationState 具备 durable restore、transition/recovery evidence、一次性 Review resume，并在 ActionArbiter、MCP、Skill、Canon、Pentest、TTS/VTS/SSE 和 remote resume 前门 fail-closed。
+- 本次增量：TASK-0482 / T-NLE-20 完成，Release Identity Snapshot 提供 immutable snapshot、字段级 diff、重大差异 MASTER Review、private-body exclusion 与前一 release ref rollback。
 - 本次增量：TASK-0483 / T-NLE-21 完成，新增 versioned Execution/Review operator read model、只读 Obs routes、DAG/attempt/budget/verification/review/token-bound resume/cursor replay UI 与回滚门；Monitor E2E 96/96、集成后全量 NLE 206 passed。
-- 状态口径：M48-A 的 TASK-0461～TASK-0479、TASK-0483 已完成，TASK-0480～0482、TASK-0484～0486 按 DAG 保持 PLANNED/并行实施；M48-B Entry Gate 尚缺 MASTER 批准，TASK-0487～0622 仍为 PROGRAMMED。
+- 本次增量：TASK-0484 / T-NLE-22 完成，Life evolution read views 从实际 World/Appraisal/Bond/Scene/ActionArbiter producer 构建版本化只读投影，空值不伪造，preview 不执行且不写 Life Core。
+- 本次增量：TASK-0485 / T-NLE-23 完成，governance snapshot 与 Skills/System Config/Security UI 显示 maturity、risk、degradation、recovery、identity diff 和 Pentest isolation；无自动升级，非 Lab 高风险入口 fail-closed，Review 链接只指向真实 durable Review。
+- 状态口径：M48-A 的 TASK-0461～TASK-0485 已完成，TASK-0486 按 Release Seal Gate 推进；M48-B Entry Gate 尚缺 MASTER 批准，TASK-0487～0622 仍为 PROGRAMMED。
 - 代码状态：`VerificationResult` schema 更严格；`DurableTaskStore.transition_node` 对 `VERIFIED/VERIFICATION_FAILED` 强制验证结果、graph/node/work_order 绑定与 outbox evidence refs；Executor 对 required verification 非 PASS 返回 `BLOCKED`。新增 `AcceptanceJudgement` schema；`DurableTaskStore.transition_node` 对 `ACCEPTED` 强制 acceptance judgement 与 evidence refs；Executor 对 acceptance criteria 生成 `acceptance` 决策，不再把执行成功等同于验收成功。新增 `ReviewStore` 与 0055 migration；Review resume token 绑定 review/subject/version/phase/checkpoint，过期、串用、重复 resume 均 fail-closed；声明 durable review 的写 WorkOrder 不能仅靠 `confirmed=true` 通过。新增 `CanonicalRuntimeRouter`；`CoreSettings` 支持 `legacy|shadow|canonical`、canary、kill switch 和 canonical owner，默认仍为 legacy/0% canary。新增 `RuntimeEventStore` 与 0056 migration；runtime replay 受 `HOST_RUNTIME_EVENT_REPLAY_ENABLED` 默认关闭保护，EventBus 继续只是通知投影。新增 ContextEnvelope v2；私有/raw refs 与污染上下文 fail-closed，公共输出仅保留 refs/计数/预算摘要。新增 Digital Life OCC：`digital_life_state` 支持 expected-version CAS、冲突结果和 OCC audit，旧 fallback 为显式 single-writer 兼容路径。新增 WorldProjection：只读 `WorldProjectionReadModel` 与 GET snapshot API，不写 Life/Canon/Memory。新增 Appraisal/Bond convergence：纯事件适配器不替代 VAD/inner weather，BondProjection 只读并将 score/stage 标为兼容投影，所有生产写调用收敛到有 evidence 的 BondDynamics command。
 
 ## 维护记录（2026-07-10）
 
 - 本次增量：登记完整架构目标与正式执行程序，新增 FR-ARCH-001～010、R-183～R-192，以及 M48-B～M57 → TASK-0487～0622 → T-ARCH-01～30 的发布级 Gate 映射。
-- 状态口径：T-ARCH 编号只表示测试契约已定义；正式程序状态为 READY_FOR_PROGRAM_EXECUTION。M48-A 的 TASK-0461～TASK-0479、TASK-0483 已完成；TASK-0480～0482、TASK-0484～0486 按依赖 Gate 为 PLANNED。M48-B～M57 的 TASK-0487～0622 为 PROGRAMMED 且尚未解锁实施。所有任务必须经过依赖 Gate、自动化测试与 Seal 证据后才能改为 DONE。
+- 状态口径：T-ARCH 编号只表示测试契约已定义；正式程序状态为 READY_FOR_PROGRAM_EXECUTION。M48-A 的 TASK-0461～TASK-0485 已完成，TASK-0486 按 Release Seal Gate 推进。M48-B～M57 的 TASK-0487～0622 为 PROGRAMMED 且尚未解锁实施。所有任务必须经过依赖 Gate、自动化测试与 Seal 证据后才能改为 DONE。
 - 本次同步范围：M48 长期演化安全收敛的 PRD、DevSpec、DevTasks 与 T-NLE 正式闭环。
 - 新增映射：FR-NLE-001～005 → DevSpec §15 → TASK-0461～0486 → T-NLE-01～24。
-- 代码状态：正式执行文档已冻结；M48-A 的 TASK-0461～0469 为 DONE，其余任务按依赖 Gate 保持 PLANNED；Scheduler 只完成 owner-confirmed read-only shadow，不把文档或 shadow 完成误报为 Worker 主链已切换。
+- 代码状态：正式执行文档已冻结；M48-A 的 TASK-0461～TASK-0485 为 DONE，TASK-0486 保持 PLANNED；尚未生成 M48 Seal Result，也未解锁 M48-B。
 
 ## 维护记录（2026-06-04）
 - 本次同步范围：PRD v1.6、DevSpec v1.9、ModelPlane v1.5、DevTasks v2.0 的当前代码口径校准；不新增 PRD 需求编号。
@@ -1344,7 +1349,7 @@
 - DevSpec 落点：DevSpec §15.6～15.7。
 - DevTasks（TASK）：TASK-0480～TASK-0486。
 - 验收测试（T-xx）：T-NLE-18～24；T-Boot-01；T-Svc-01；T-Release-01。
-- 当前进展（2026-07-11）：TASK-0483 / T-NLE-21 已完成；Operator read model 与 UI 只读呈现 DAG、attempt、budget、verification、review/resume 和 cursor timeline，flag 关闭时在依赖构造前 404，resume 不存在空 token/confirmed 旁路。TASK-0480～0482、0484～0486 继续按 DAG 实施。
+- 当前进展（2026-07-11）：TASK-0480～TASK-0485 / T-NLE-18～23 已完成。Capability maturity 只收紧；DegradationState durable 且高风险入口 fail-closed；Identity Snapshot 不含私密正文并要求重大差异 MASTER Review；Execution/Review、Life evolution 与 Governance UI 均使用 versioned read model、默认关闭且不新增写旁路。TASK-0486 / T-NLE-24 的全链验收、回滚演练与 Seal Result 尚待完成。
 - 覆盖状态：PARTIAL_DONE
 
 ## M48-B～M57 完整架构重构（R-183～R-192）
