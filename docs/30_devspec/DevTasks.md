@@ -1,8 +1,8 @@
 受众：CODEX
 标题：DevTasks（任务清单：唯一可执行任务来源）
 
-版本：v2.4
-日期：2026-07-10
+版本：v2.5
+日期：2026-07-11
 
 本文件只包含"Codex 可执行任务条目"。任务条目必须来自 DevSpec 的工程契约拆解，并反向引用 PRD 的 FR 编号与测试编号 T-…；不得在本文件中讨论白皮书/PRD 的文字解释。
 
@@ -19,8 +19,8 @@
 - 关联需求：`FR-NLE-001`～`FR-NLE-005`、`FR-ARCH-001`～`FR-ARCH-010`。
 - 关联测试：`T-NLE-01`～`T-NLE-24`、`T-ARCH-01`～`T-ARCH-30`。
 - 唯一首个执行入口：`TASK-0461 / LTE-WP-00`。M48-A 内部依赖以 M48-A 详细执行文档为准；跨里程碑依赖、切流、停止、回滚和最终退役以 Master 执行文档为准。
-- 最近完成任务：`TASK-0461～TASK-0471` 已完成；Acceptance Judge 已具备 criterion-level verdict、evidence refs、final decision 和 `ACCEPTED` 状态门；AgentJobRegistry 仍是 authority，未切 Worker 主链。
-- 当前已解锁任务：`TASK-0472 / LTE-WP-32`。
+- 最近完成任务：`TASK-0461～TASK-0472` 已完成；Durable ReviewStore 已具备绑定 subject version/checkpoint 的一次性 PRE/POST resume token，过期/串用/重复 resume fail-closed；AgentJobRegistry 仍是 authority，未切 Worker 主链。
+- 当前已解锁任务：`TASK-0473 / LTE-WP-40`。
 
 本文件后续的 `TASK-0000`～`TASK-0460` 保留为历史任务记录；与完整架构程序冲突时，不得用历史任务覆盖当前代码基线、Master 程序或对应阶段的正式任务卡。
 

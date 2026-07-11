@@ -2,12 +2,20 @@
 
 from __future__ import annotations
 
+import os
+from pathlib import Path
 import threading
 from typing import Any, Mapping
 
 from fastapi import APIRouter, Body, HTTPException, Query
 
-from host_brain.agent_runtime import AgentRuntimeExecutor, AgentWorkOrder
+from host_brain.agent_runtime import (
+    AgentRuntimeExecutor,
+    AgentWorkOrder,
+    ReviewItem,
+    ReviewStore,
+    ReviewStoreError,
+)
 from host_brain.agent_runtime.immune import build_immune_proposal_from_report
 from host_brain.agent_runtime.job_registry import GLOBAL_AGENT_JOB_REGISTRY
 from host_brain.core.ids import now_ms
@@ -44,6 +52,19 @@ def _bool_flag(value: Any, *, default: bool = False) -> bool:
     if normalized in {"0", "false", "no", "off"}:
         return False
     return bool(default)
+
+
+def _get_review_store() -> ReviewStore:
+    raw_path = _text(os.environ.get("HOST_AGENT_REVIEW_DB_PATH"))
+    db_path = Path(raw_path).expanduser() if raw_path else Path(__file__).resolve().parents[1] / "data" / "audit.sqlite3"
+    return ReviewStore(db_path)
+
+
+def _raise_review_store_error(exc: ReviewStoreError) -> None:
+    status = 503 if exc.reason_code == "REVIEW_STORE_SCHEMA_NOT_READY" else 409
+    if exc.reason_code in {"REVIEW_STORE_INVALID", "REVIEW_CHECKPOINT_REQUIRED"}:
+        status = 400
+    raise HTTPException(status_code=status, detail=exc.to_dict())
 
 
 def _extract_owner_directive(
@@ -249,6 +270,79 @@ async def ingest_owner_directive(payload: dict[str, Any] = Body(...)) -> dict[st
     if status in {"FAILED", "SKIPPED"}:
         raise HTTPException(status_code=503, detail=reason or "OWNER_DIRECTIVE_MEMORY_UNAVAILABLE")
     return {"accepted": True, "owner_directive_memory": owner_directive_memory}
+
+
+@router.post("/reviews")
+async def create_review(payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
+    review_payload = _mapping(payload.get("review")) or _mapping(payload)
+    try:
+        review = ReviewItem.from_mapping(review_payload)
+        record = _get_review_store().create_review(
+            review,
+            work_order_id=_text(payload.get("work_order_id")) or None,
+            task_graph_id=_text(payload.get("task_graph_id")) or None,
+            task_node_id=_text(payload.get("task_node_id")) or None,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="REVIEW_PAYLOAD_INVALID") from exc
+    except ReviewStoreError as exc:
+        _raise_review_store_error(exc)
+    return {"accepted": True, "review": record}
+
+
+@router.post("/reviews/{review_id}/approve")
+async def approve_review(review_id: str, payload: dict[str, Any] | None = Body(default=None)) -> dict[str, Any]:
+    body = _mapping(payload)
+    try:
+        approved = _get_review_store().approve_review(
+            review_id,
+            actor_id=_text(body.get("actor_id") or body.get("reviewer_id")) or "reviewer",
+            expected_subject_ref=_text(body.get("subject_ref")) or None,
+            expected_subject_version=(
+                int(body["subject_version"]) if body.get("subject_version") is not None else None
+            ),
+            expected_resume_phase=_text(body.get("resume_phase")) or None,
+            expected_checkpoint_id=_text(body.get("checkpoint_id")) or None,
+            ttl_ms=int(body["ttl_ms"]) if body.get("ttl_ms") is not None else None,
+        )
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail="REVIEW_APPROVAL_PAYLOAD_INVALID") from exc
+    except ReviewStoreError as exc:
+        _raise_review_store_error(exc)
+    return {"accepted": True, **approved}
+
+
+@router.post("/reviews/{review_id}/reject")
+async def reject_review(review_id: str, payload: dict[str, Any] | None = Body(default=None)) -> dict[str, Any]:
+    body = _mapping(payload)
+    try:
+        record = _get_review_store().reject_review(
+            review_id,
+            actor_id=_text(body.get("actor_id") or body.get("reviewer_id")) or "reviewer",
+        )
+    except ReviewStoreError as exc:
+        _raise_review_store_error(exc)
+    return {"accepted": True, "review": record}
+
+
+@router.post("/reviews/{review_id}/resume")
+async def resume_review(review_id: str, payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
+    body = _mapping(payload)
+    try:
+        resume = _get_review_store().resume_review(
+            review_id,
+            resume_token_ref=_text(body.get("resume_token_ref")),
+            subject_ref=_text(body.get("subject_ref")),
+            subject_version=int(body.get("subject_version")),
+            resume_phase=_text(body.get("resume_phase")),
+            checkpoint_id=_text(body.get("checkpoint_id")),
+            resume_result_ref=_text(body.get("resume_result_ref")) or None,
+        )
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail="REVIEW_RESUME_PAYLOAD_INVALID") from exc
+    except ReviewStoreError as exc:
+        _raise_review_store_error(exc)
+    return {"accepted": True, "resume": resume}
 
 
 @router.get("/jobs/{job_id}")

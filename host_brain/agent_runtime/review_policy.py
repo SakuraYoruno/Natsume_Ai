@@ -211,9 +211,22 @@ class ReviewItem:
 
 
 class ReviewPolicy:
+    def durable_review_required(self, work_order: AgentWorkOrder) -> bool:
+        if bool(work_order.review_policy.get("durable_review_required")):
+            return True
+        if bool(work_order.review_policy.get("require_durable_review")):
+            return True
+        if bool(work_order.approval_policy.get("require_review_token")):
+            return True
+        if bool(work_order.approval_policy.get("review_id")):
+            return True
+        return False
+
     def review_required(self, work_order: AgentWorkOrder) -> bool:
         if "review_required" in work_order.review_policy:
             return bool(work_order.review_policy.get("review_required"))
+        if self.durable_review_required(work_order):
+            return True
         return bool(work_order.requires_write)
 
 

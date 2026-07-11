@@ -41,6 +41,10 @@ from host_brain.agent_runtime.review_policy import (
     ReviewStatus,
     ReviewType,
 )
+from host_brain.agent_runtime.review_store import (
+    ReviewStore,
+    ReviewStoreError,
+)
 from host_brain.agent_runtime.sub_agent_contract import (
     SubAgentRequestAdapter,
     SubAgentRequestContract,
@@ -104,6 +108,8 @@ __all__ = [
     "ReviewItem",
     "ReviewResumePhase",
     "ReviewStatus",
+    "ReviewStore",
+    "ReviewStoreError",
     "ReviewType",
     "SchedulerAction",
     "SchedulerDecision",

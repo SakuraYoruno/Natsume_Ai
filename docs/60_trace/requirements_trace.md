@@ -10,8 +10,9 @@
 
 - 本次增量：TASK-0470 / T-NLE-08 完成，Verification 从报告字段升级为 fail-closed 状态门；命令验证增加 allowlist、timeout、workspace policy 与结构化 reason code。
 - 本次增量：TASK-0471 / T-NLE-09 完成，Acceptance Judge 具备 criterion verdict、evidence refs、Critic candidate 分层与 final decision；`ACCEPTED` 状态需要 `ACCEPT` judgement。
-- 状态口径：M48-A 的 TASK-0461～TASK-0471 已完成，TASK-0472～0486 仍按依赖 Gate 保持 PLANNED；M48-B～M57 的 TASK-0487～0622 为 PROGRAMMED 且尚未解锁实施。
-- 代码状态：`VerificationResult` schema 更严格；`DurableTaskStore.transition_node` 对 `VERIFIED/VERIFICATION_FAILED` 强制验证结果、graph/node/work_order 绑定与 outbox evidence refs；Executor 对 required verification 非 PASS 返回 `BLOCKED`。新增 `AcceptanceJudgement` schema；`DurableTaskStore.transition_node` 对 `ACCEPTED` 强制 acceptance judgement 与 evidence refs；Executor 对 acceptance criteria 生成 `acceptance` 决策，不再把执行成功等同于验收成功。
+- 本次增量：TASK-0472 / T-NLE-10 完成，Review / Resume 从布尔提示升级为 durable ReviewStore、绑定 subject version/checkpoint 的一次性 resume token、PRE/POST 分态与稳定拒绝码。
+- 状态口径：M48-A 的 TASK-0461～TASK-0472 已完成，TASK-0473～0486 仍按依赖 Gate 保持 PLANNED；M48-B～M57 的 TASK-0487～0622 为 PROGRAMMED 且尚未解锁实施。
+- 代码状态：`VerificationResult` schema 更严格；`DurableTaskStore.transition_node` 对 `VERIFIED/VERIFICATION_FAILED` 强制验证结果、graph/node/work_order 绑定与 outbox evidence refs；Executor 对 required verification 非 PASS 返回 `BLOCKED`。新增 `AcceptanceJudgement` schema；`DurableTaskStore.transition_node` 对 `ACCEPTED` 强制 acceptance judgement 与 evidence refs；Executor 对 acceptance criteria 生成 `acceptance` 决策，不再把执行成功等同于验收成功。新增 `ReviewStore` 与 0055 migration；Review resume token 绑定 review/subject/version/phase/checkpoint，过期、串用、重复 resume 均 fail-closed；声明 durable review 的写 WorkOrder 不能仅靠 `confirmed=true` 通过。
 
 ## 维护记录（2026-07-10）
 

@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from pathlib import Path
+import sqlite3
+
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -7,6 +10,10 @@ from host_brain.app.internal_agent_routes import router
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.agent_runtime.job_registry import GLOBAL_AGENT_JOB_REGISTRY
 from host_brain.memory.life_memory import LifeMemoryStore
+
+
+ROOT = Path(__file__).resolve().parents[2]
+REVIEW_STORE_MIGRATION = ROOT / "host_brain" / "audit" / "migrations" / "0055_agent_runtime_review_store.sql"
 
 
 def _client() -> TestClient:
@@ -140,3 +147,73 @@ def test_codex_internal_work_order_execute_does_not_persist_unmarked_work_order(
         assert ledger.life_episode == []
     finally:
         ledger.close()
+
+
+def test_codex_internal_review_routes_resume_once(tmp_path, monkeypatch) -> None:
+    db_path = tmp_path / "review-routes.sqlite3"
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.executescript(REVIEW_STORE_MIGRATION.read_text(encoding="utf-8"))
+    monkeypatch.setenv("HOST_AGENT_REVIEW_DB_PATH", str(db_path))
+    client = _client()
+    review = {
+        "schema_version": "Natsume.agent.review_item.v1",
+        "review_id": "review-route-1",
+        "review_type": "POST_EXECUTION_ACCEPTANCE",
+        "subject_ref": "work-order://route/1",
+        "subject_version": 1,
+        "requester": "codex-route",
+        "reason": "acceptance checkpoint requires owner review",
+        "risk_level": 3,
+        "side_effects": ["write_files"],
+        "evidence_refs": ["evidence://route/review/1"],
+        "status": "PENDING",
+        "expires_at": 9_999_999_999_999,
+        "resume_phase": "POST_EXECUTION_ACCEPTANCE",
+        "checkpoint_id": "checkpoint://route/post/1",
+        "resume_count": 0,
+    }
+
+    create_response = client.post("/internal/codex/reviews", json={"review": review})
+    assert create_response.status_code == 200
+
+    approve_response = client.post(
+        "/internal/codex/reviews/review-route-1/approve",
+        json={
+            "actor_id": "owner",
+            "subject_ref": "work-order://route/1",
+            "subject_version": 1,
+            "resume_phase": "POST_EXECUTION_ACCEPTANCE",
+            "checkpoint_id": "checkpoint://route/post/1",
+        },
+    )
+    assert approve_response.status_code == 200
+    resume_token = approve_response.json()["resume_token_ref"]
+
+    resume_response = client.post(
+        "/internal/codex/reviews/review-route-1/resume",
+        json={
+            "resume_token_ref": resume_token,
+            "subject_ref": "work-order://route/1",
+            "subject_version": 1,
+            "resume_phase": "POST_EXECUTION_ACCEPTANCE",
+            "checkpoint_id": "checkpoint://route/post/1",
+            "resume_result_ref": "review-resume://route/post/1",
+        },
+    )
+    assert resume_response.status_code == 200
+    assert resume_response.json()["resume"]["resume_action"] == "RETURN_POST_EXECUTION_CHECKPOINT"
+    assert resume_response.json()["resume"]["replay_side_effects"] is False
+
+    duplicate_response = client.post(
+        "/internal/codex/reviews/review-route-1/resume",
+        json={
+            "resume_token_ref": resume_token,
+            "subject_ref": "work-order://route/1",
+            "subject_version": 1,
+            "resume_phase": "POST_EXECUTION_ACCEPTANCE",
+            "checkpoint_id": "checkpoint://route/post/1",
+            "resume_result_ref": "review-resume://route/post/duplicate",
+        },
+    )
+    assert duplicate_response.status_code == 409
+    assert duplicate_response.json()["detail"]["reason_code"] == "REVIEW_RESUME_ALREADY_CONSUMED"
