@@ -24,9 +24,70 @@ MAX_EVIDENCE_ITEMS = 8
 MAX_EVIDENCE_CHARS = 520
 MAX_PROMPT_CHARS = 6_000
 MAX_LEGACY_VALUE_CHARS = 500
+AGENT_CONTEXT_ENVELOPE_SCHEMA_VERSION = "Natsume.sub_agent.context.v2"
+
+CONTEXT_ENVELOPE_INVALID = "CONTEXT_ENVELOPE_INVALID"
+CONTEXT_REF_INVALID = "CONTEXT_REF_INVALID"
+CONTEXT_REF_UNAUTHORIZED = "CONTEXT_REF_UNAUTHORIZED"
+CONTEXT_POLLUTION_DETECTED = "CONTEXT_POLLUTION_DETECTED"
+CONTEXT_TOKEN_BUDGET_EXCEEDED = "CONTEXT_TOKEN_BUDGET_EXCEEDED"
 
 _SENSITIVE_KEY_RE = re.compile(
     r"(api[_-]?key|secret|token|cookie|authorization|password|passwd|credential|密钥|密码)",
+    re.IGNORECASE,
+)
+_DURABLE_REFERENCE_RE = re.compile(
+    r"^[a-z][a-z0-9+._-]{1,31}://"
+    r"[A-Za-z0-9][A-Za-z0-9._~:/?#\[\]@!$&'()*+,;=%-]{0,511}$"
+)
+_PRIVATE_REF_SCHEMES = frozenset(
+    {
+        "private",
+        "secret",
+        "token",
+        "cookie",
+        "credential",
+        "raw",
+    }
+)
+_PRIVATE_REF_PREFIXES = (
+    "memory://raw",
+    "memory://private",
+    "memory://secret",
+    "private://",
+    "secret://",
+    "token://",
+    "cookie://",
+    "credential://",
+)
+_DEFAULT_ALLOWED_REF_SCHEMES = frozenset(
+    {
+        "artifact",
+        "context",
+        "conversation",
+        "evidence",
+        "ledger",
+        "life_episode",
+        "planner",
+        "review",
+        "semantic",
+        "source",
+        "task",
+        "taskstore",
+        "verification",
+        "workorder",
+    }
+)
+_TASK_LOCAL_REF_SCHEMES = frozenset({"artifact", "context", "planner", "task", "taskstore", "workorder"})
+_PUBLIC_DERIVED_REF_SCHEMES = frozenset(
+    {"conversation", "evidence", "ledger", "life_episode", "review", "semantic", "source", "verification"}
+)
+_POLLUTION_RE = re.compile(
+    r"("
+    r"ignore (?:all )?(?:previous|above) instructions|"
+    r"system prompt|developer message|jailbreak|prompt injection|"
+    r"忽略(?:以上|之前|所有)指令|泄露系统提示|越狱|绕过安全"
+    r")",
     re.IGNORECASE,
 )
 _BULKY_CONTEXT_KEYS = {
@@ -51,6 +112,18 @@ _BULKY_CONTEXT_KEYS = {
 }
 
 
+class ContextEnvelopeError(RuntimeError):
+    """Fail-closed context envelope error with a stable reason code."""
+
+    def __init__(self, reason_code: str, detail: str) -> None:
+        self.reason_code = str(reason_code or CONTEXT_ENVELOPE_INVALID)
+        self.detail = str(detail or "context envelope operation failed")
+        super().__init__(f"{self.reason_code}: {self.detail}")
+
+    def to_dict(self) -> dict[str, str]:
+        return {"reason_code": self.reason_code, "detail": self.detail}
+
+
 @dataclass(frozen=True)
 class AgentContextEnvelope:
     schema_version: str
@@ -63,6 +136,10 @@ class AgentContextEnvelope:
     memory_packet: dict[str, Any] = field(default_factory=dict)
     semantic_facts: list[str] = field(default_factory=list)
     evidence_pack: dict[str, Any] = field(default_factory=dict)
+    context_refs: list[str] = field(default_factory=list)
+    authorization: dict[str, Any] = field(default_factory=dict)
+    token_budget: dict[str, Any] = field(default_factory=dict)
+    pollution_report: dict[str, Any] = field(default_factory=dict)
     tool_budget: dict[str, Any] = field(default_factory=dict)
     forbidden_context: list[str] = field(default_factory=list)
     scratchpad_summary: str = ""
@@ -81,6 +158,10 @@ class AgentContextEnvelope:
             "memory_packet": dict(self.memory_packet),
             "semantic_facts": list(self.semantic_facts),
             "evidence_pack": dict(self.evidence_pack),
+            "context_refs": list(self.context_refs),
+            "authorization": dict(self.authorization),
+            "token_budget": dict(self.token_budget),
+            "pollution_report": dict(self.pollution_report),
             "tool_budget": dict(self.tool_budget),
             "forbidden_context": list(self.forbidden_context),
             "scratchpad_summary": self.scratchpad_summary,
@@ -107,6 +188,7 @@ class AgentContextProfile:
     semantic_fact_limit: int = MAX_FACTS
     semantic_fact_chars: int = MAX_FACT_CHARS
     scratchpad_chars: int = 700
+    token_budget_tokens: int = 2_400
 
 
 _DEFAULT_AGENT_CONTEXT_PROFILE = AgentContextProfile(profile_id="default")
@@ -127,6 +209,7 @@ _AGENT_CONTEXT_PROFILES: dict[str, AgentContextProfile] = {
         evidence_chars=420,
         semantic_fact_limit=4,
         scratchpad_chars=500,
+        token_budget_tokens=2_000,
     ),
     "intent_agent": AgentContextProfile(
         profile_id="intent",
@@ -143,6 +226,7 @@ _AGENT_CONTEXT_PROFILES: dict[str, AgentContextProfile] = {
         evidence_chars=480,
         semantic_fact_limit=3,
         scratchpad_chars=500,
+        token_budget_tokens=1_600,
     ),
     "repair_agent": AgentContextProfile(
         profile_id="repair",
@@ -159,6 +243,7 @@ _AGENT_CONTEXT_PROFILES: dict[str, AgentContextProfile] = {
         evidence_chars=700,
         semantic_fact_limit=2,
         scratchpad_chars=900,
+        token_budget_tokens=1_800,
     ),
     "retrieval_agent": AgentContextProfile(
         profile_id="retrieval",
@@ -175,6 +260,7 @@ _AGENT_CONTEXT_PROFILES: dict[str, AgentContextProfile] = {
         evidence_chars=520,
         semantic_fact_limit=4,
         scratchpad_chars=400,
+        token_budget_tokens=2_000,
     ),
     "vision_agent": AgentContextProfile(
         profile_id="vision",
@@ -191,6 +277,7 @@ _AGENT_CONTEXT_PROFILES: dict[str, AgentContextProfile] = {
         evidence_chars=520,
         semantic_fact_limit=2,
         scratchpad_chars=500,
+        token_budget_tokens=2_000,
     ),
     "pentest_agent": AgentContextProfile(
         profile_id="pentest",
@@ -207,6 +294,7 @@ _AGENT_CONTEXT_PROFILES: dict[str, AgentContextProfile] = {
         evidence_chars=800,
         semantic_fact_limit=2,
         scratchpad_chars=2000,
+        token_budget_tokens=2_600,
     ),
     "judge_agent": AgentContextProfile(
         profile_id="judge",
@@ -223,6 +311,7 @@ _AGENT_CONTEXT_PROFILES: dict[str, AgentContextProfile] = {
         evidence_chars=560,
         semantic_fact_limit=2,
         scratchpad_chars=500,
+        token_budget_tokens=1_800,
     ),
 }
 
@@ -256,27 +345,62 @@ def build_agent_context_envelope(
         "truncated_fields": [],
         "dropped_legacy_keys": sorted(key for key in raw.keys() if str(key) in _BULKY_CONTEXT_KEYS),
     }
+    pollution_report = _detect_context_pollution(raw, trace=trace)
     conversation_window = _build_conversation_window(raw, profile=profile, trace=trace)
     memory_packet = _build_memory_packet(raw, profile=profile, trace=trace)
     semantic_facts = _semantic_facts(raw, memory_packet=memory_packet, profile=profile, trace=trace)
     evidence_pack = _build_evidence_pack(raw, profile=profile, trace=trace)
+    context_refs, authorization = _authorize_context_refs(
+        raw,
+        agent_id=agent_id,
+        memory_packet=memory_packet,
+        evidence_pack=evidence_pack,
+        trace=trace,
+    )
     tool_budget = _build_tool_budget(raw, timeout_ms=timeout_ms)
     forbidden_context = _forbidden_context(raw)
     metadata = _metadata_projection(raw, trace=trace)
+    base_payload = _drop_empty(
+        {
+            "schema_version": AGENT_CONTEXT_ENVELOPE_SCHEMA_VERSION,
+            "agent_id": _text(agent_id, limit=80, trace=trace, field="agent_id"),
+            "request_id": _text(request_id, limit=120, trace=trace, field="request_id"),
+            "session_id": _text(session_id, limit=160, trace=trace, field="session_id"),
+            "task_brief": _text(task, limit=1_200, trace=trace, field="task_brief"),
+            "user_message": _text(user_message or task, limit=1_200, trace=trace, field="user_message"),
+            "conversation_window": conversation_window,
+            "memory_packet": memory_packet,
+            "semantic_facts": semantic_facts,
+            "evidence_pack": evidence_pack,
+            "context_refs": context_refs,
+            "authorization": authorization,
+            "pollution_report": pollution_report,
+            "tool_budget": tool_budget,
+            "forbidden_context": forbidden_context,
+            "scratchpad_summary": _text(raw.get("scratchpad_summary"), limit=profile.scratchpad_chars, trace=trace, field="scratchpad_summary"),
+            "metadata": metadata,
+            "trace": trace,
+        }
+    )
+    token_budget = _build_context_token_budget(raw, profile=profile, envelope_payload=base_payload, trace=trace)
     return AgentContextEnvelope(
-        schema_version="Natsume.sub_agent.context.v1",
-        agent_id=_text(agent_id, limit=80, trace=trace, field="agent_id"),
-        request_id=_text(request_id, limit=120, trace=trace, field="request_id"),
-        session_id=_text(session_id, limit=160, trace=trace, field="session_id"),
-        task_brief=_text(task, limit=1_200, trace=trace, field="task_brief"),
-        user_message=_text(user_message or task, limit=1_200, trace=trace, field="user_message"),
+        schema_version=AGENT_CONTEXT_ENVELOPE_SCHEMA_VERSION,
+        agent_id=base_payload.get("agent_id", ""),
+        request_id=base_payload.get("request_id", ""),
+        session_id=base_payload.get("session_id", ""),
+        task_brief=base_payload.get("task_brief", ""),
+        user_message=base_payload.get("user_message", ""),
         conversation_window=conversation_window,
         memory_packet=memory_packet,
         semantic_facts=semantic_facts,
         evidence_pack=evidence_pack,
+        context_refs=context_refs,
+        authorization=authorization,
+        token_budget=token_budget,
+        pollution_report=pollution_report,
         tool_budget=tool_budget,
         forbidden_context=forbidden_context,
-        scratchpad_summary=_text(raw.get("scratchpad_summary"), limit=profile.scratchpad_chars, trace=trace, field="scratchpad_summary"),
+        scratchpad_summary=base_payload.get("scratchpad_summary", ""),
         metadata=metadata,
         trace=trace,
     )
@@ -380,6 +504,296 @@ def render_agent_context_envelope_for_prompt(context: Mapping[str, Any] | None) 
         "Use this bounded context only as task background. Do not assume raw history, "
         "raw logs, secrets, or unlisted retrieval rows are available.\n"
         f"{payload}"
+    )
+
+
+def build_context_runtime_event_payload(envelope: Mapping[str, Any] | AgentContextEnvelope) -> dict[str, Any]:
+    """Return the safe runtime-event projection for a context envelope.
+
+    This intentionally excludes task text, user text, snippets, facts, and
+    conversation turns. Runtime Event / UI surfaces only need refs, counts,
+    token accounting, and authorization outcome.
+    """
+
+    payload = envelope.as_dict() if isinstance(envelope, AgentContextEnvelope) else dict(envelope or {})
+    conversation_window = dict(payload.get("conversation_window") or {})
+    memory_packet = dict(payload.get("memory_packet") or {})
+    evidence_pack = dict(payload.get("evidence_pack") or {})
+    return _drop_empty(
+        {
+            "schema_version": "Natsume.sub_agent.context_event_summary.v1",
+            "context_schema_version": _text(payload.get("schema_version"), limit=80),
+            "agent_id": _text(payload.get("agent_id"), limit=80),
+            "request_ref": f"request://{_text(payload.get('request_id'), limit=120)}"
+            if _text(payload.get("request_id"), limit=120)
+            else "",
+            "session_ref": f"session://{_text(payload.get('session_id'), limit=160)}"
+            if _text(payload.get("session_id"), limit=160)
+            else "",
+            "context_refs": list(payload.get("context_refs") or []),
+            "context_authorization": _context_authorization_public_summary(payload.get("authorization")),
+            "token_budget": _small_mapping(dict(payload.get("token_budget") or {}), max_items=12, depth=2),
+            "pollution_report": _small_mapping(dict(payload.get("pollution_report") or {}), max_items=12, depth=2),
+            "counts": {
+                "conversation_turns": len(list(conversation_window.get("recent_turns") or [])),
+                "memory_facts": len(list(memory_packet.get("facts") or [])),
+                "evidence_items": len(list(evidence_pack.get("items") or [])),
+                "semantic_facts": len(list(payload.get("semantic_facts") or [])),
+            },
+        }
+    )
+
+
+def estimate_context_tokens(value: Any) -> int:
+    """Deterministic local tokenizer estimate used for budget accounting.
+
+    CJK characters are counted as one token; non-CJK characters use a conservative
+    four-characters-per-token heuristic. The input is canonicalized as JSON when
+    possible so repeated builds produce the same estimate.
+    """
+
+    try:
+        text = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    except TypeError:
+        text = str(value)
+    if not text:
+        return 0
+    cjk = sum(1 for char in text if "\u3400" <= char <= "\u9fff")
+    other = len(text) - cjk
+    return max(1, cjk + ((other + 3) // 4))
+
+
+def _detect_context_pollution(
+    raw: Mapping[str, Any],
+    *,
+    trace: dict[str, Any],
+) -> dict[str, Any]:
+    hits: list[dict[str, Any]] = []
+    for path, value in _iter_context_strings(raw, path="context"):
+        if path.endswith((".user_message", ".task", ".task_brief")):
+            continue
+        if _POLLUTION_RE.search(value):
+            hits.append({"path": path, "reason_code": CONTEXT_POLLUTION_DETECTED})
+    if hits:
+        trace["pollution_hits"] = hits[:8]
+        raise ContextEnvelopeError(
+            CONTEXT_POLLUTION_DETECTED,
+            f"context pollution detected at {hits[0]['path']}",
+        )
+    return {"status": "PASS", "reason_code": None, "hit_count": 0}
+
+
+def _iter_context_strings(value: Any, *, path: str) -> list[tuple[str, str]]:
+    rows: list[tuple[str, str]] = []
+    if isinstance(value, Mapping):
+        for raw_key, raw_value in value.items():
+            key = str(raw_key or "").strip()
+            if key in {"gateway", "_gateway"}:
+                continue
+            rows.extend(_iter_context_strings(raw_value, path=f"{path}.{key}" if key else path))
+        return rows
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
+        for index, item in enumerate(list(value)[:64]):
+            rows.extend(_iter_context_strings(item, path=f"{path}[{index}]"))
+        return rows
+    if isinstance(value, str):
+        rows.append((path, value[:2_000]))
+    return rows
+
+
+def _authorize_context_refs(
+    raw: Mapping[str, Any],
+    *,
+    agent_id: str,
+    memory_packet: Mapping[str, Any],
+    evidence_pack: Mapping[str, Any],
+    trace: dict[str, Any],
+) -> tuple[list[str], dict[str, Any]]:
+    config = _context_authorization_config(raw, agent_id=agent_id)
+    refs = _collect_context_refs(raw, memory_packet=memory_packet, evidence_pack=evidence_pack)
+    authorized: list[str] = []
+    scopes: dict[str, int] = {}
+    for ref in refs:
+        normalized = _validate_context_ref(ref)
+        scope = _context_ref_scope(normalized)
+        if not _context_ref_allowed(normalized, scope=scope, config=config):
+            trace.setdefault("rejected_context_refs", []).append(
+                {"ref": normalized, "scope": scope, "reason_code": CONTEXT_REF_UNAUTHORIZED}
+            )
+            raise ContextEnvelopeError(
+                CONTEXT_REF_UNAUTHORIZED,
+                f"context ref is not authorized for {config['profile_id']}: {normalized}",
+            )
+        if normalized not in authorized:
+            authorized.append(normalized)
+            scopes[scope] = scopes.get(scope, 0) + 1
+    return authorized, _drop_empty(
+        {
+            "schema_version": "Natsume.sub_agent.context_authorization.v1",
+            "profile_id": config["profile_id"],
+            "allowed_scopes": list(config["allowed_scopes"]),
+            "allow_private_refs": bool(config["allow_private_refs"]),
+            "authorized_ref_count": len(authorized),
+            "ref_scopes": scopes,
+        }
+    )
+
+
+def _context_authorization_config(raw: Mapping[str, Any], *, agent_id: str) -> dict[str, Any]:
+    auth_raw = raw.get("context_authorization_profile") or raw.get("context_auth_profile") or {}
+    auth = dict(auth_raw) if isinstance(auth_raw, Mapping) else {}
+    allowed_schemes = set(_DEFAULT_ALLOWED_REF_SCHEMES)
+    allowed_schemes.update(_text_list(auth.get("allowed_ref_schemes"), limit=32, max_chars=48))
+    allow_private = bool(auth.get("allow_private_refs") or auth.get("allow_private_context"))
+    allowed_scopes = set(_text_list(auth.get("allowed_ref_scopes"), limit=8, max_chars=64))
+    if not allowed_scopes:
+        allowed_scopes = {"task_local", "public_derived"}
+    if allow_private:
+        allowed_scopes.add("private")
+        allowed_schemes.update(_PRIVATE_REF_SCHEMES)
+        if "memory" in _text_list(auth.get("allowed_ref_schemes"), limit=32, max_chars=48):
+            allowed_schemes.add("memory")
+    return {
+        "profile_id": _text(auth.get("profile_id") or f"{agent_id or 'sub_agent'}:default", limit=120),
+        "allowed_ref_schemes": frozenset(allowed_schemes),
+        "allowed_scopes": frozenset(allowed_scopes),
+        "allow_private_refs": allow_private,
+        "allowed_ref_prefixes": tuple(_text_list(auth.get("allowed_ref_prefixes"), limit=32, max_chars=180)),
+    }
+
+
+def _collect_context_refs(
+    raw: Mapping[str, Any],
+    *,
+    memory_packet: Mapping[str, Any],
+    evidence_pack: Mapping[str, Any],
+) -> list[str]:
+    refs: list[str] = []
+
+    def add(value: Any) -> None:
+        for ref in _text_list(value, limit=128, max_chars=520):
+            if ref and ref not in refs:
+                refs.append(ref)
+
+    add(raw.get("context_refs"))
+    add(raw.get("source_refs"))
+    add(raw.get("evidence_refs"))
+    canonical = raw.get("canonical_sub_agent_request")
+    if isinstance(canonical, Mapping):
+        add(canonical.get("context_refs"))
+    child = raw.get("child_work_order")
+    if isinstance(child, Mapping):
+        add(child.get("input_refs"))
+    add(memory_packet.get("evidence_refs"))
+    add(memory_packet.get("source_refs"))
+    for item in list(dict(evidence_pack).get("items") or []):
+        if isinstance(item, Mapping):
+            add(item.get("source_ref"))
+    return refs
+
+
+def _validate_context_ref(value: Any) -> str:
+    ref = _text(value, limit=520)
+    if not ref or not _DURABLE_REFERENCE_RE.fullmatch(ref):
+        raise ContextEnvelopeError(CONTEXT_REF_INVALID, f"context ref must be a durable reference: {ref}")
+    return ref
+
+
+def _context_ref_scope(ref: str) -> str:
+    normalized = ref.lower()
+    scheme = normalized.split("://", 1)[0]
+    if scheme in _PRIVATE_REF_SCHEMES or any(normalized.startswith(prefix) for prefix in _PRIVATE_REF_PREFIXES):
+        return "private"
+    if scheme in _TASK_LOCAL_REF_SCHEMES:
+        return "task_local"
+    if scheme in _PUBLIC_DERIVED_REF_SCHEMES:
+        return "public_derived"
+    return "external"
+
+
+def _context_ref_allowed(ref: str, *, scope: str, config: Mapping[str, Any]) -> bool:
+    normalized = ref.lower()
+    scheme = normalized.split("://", 1)[0]
+    if any(normalized.startswith(prefix) for prefix in _PRIVATE_REF_PREFIXES) and not config.get("allow_private_refs"):
+        return False
+    if scope not in set(config.get("allowed_scopes") or ()):
+        return False
+    if scheme in set(config.get("allowed_ref_schemes") or ()):
+        return True
+    return any(normalized.startswith(prefix.lower()) for prefix in tuple(config.get("allowed_ref_prefixes") or ()))
+
+
+def _build_context_token_budget(
+    raw: Mapping[str, Any],
+    *,
+    profile: AgentContextProfile,
+    envelope_payload: Mapping[str, Any],
+    trace: dict[str, Any],
+) -> dict[str, Any]:
+    budget_tokens = _context_budget_limit(raw, profile=profile)
+    estimated_tokens = estimate_context_tokens(envelope_payload)
+    enforce = bool(raw.get("enforce_context_token_budget"))
+    within_budget = estimated_tokens <= budget_tokens
+    trace["context_token_budget"] = {
+        "budget_tokens": budget_tokens,
+        "estimated_tokens": estimated_tokens,
+        "within_budget": within_budget,
+        "enforced": enforce,
+    }
+    if enforce and not within_budget:
+        raise ContextEnvelopeError(
+            CONTEXT_TOKEN_BUDGET_EXCEEDED,
+            f"context token estimate {estimated_tokens} exceeds budget {budget_tokens}",
+        )
+    return {
+        "schema_version": "Natsume.sub_agent.context_token_budget.v1",
+        "estimator": "Natsume.context_token_estimator.v1",
+        "budget_tokens": budget_tokens,
+        "estimated_tokens": estimated_tokens,
+        "actual_tokens": estimated_tokens,
+        "within_budget": within_budget,
+        "enforced": enforce,
+    }
+
+
+def _context_budget_limit(raw: Mapping[str, Any], *, profile: AgentContextProfile) -> int:
+    candidates = [
+        raw.get("context_token_budget"),
+        raw.get("max_context_tokens"),
+    ]
+    token_budget = raw.get("token_budget")
+    if isinstance(token_budget, Mapping):
+        candidates.extend(
+            [
+                token_budget.get("context_tokens"),
+                token_budget.get("max_context_tokens"),
+                token_budget.get("budget_tokens"),
+            ]
+        )
+    agent_budget = raw.get("agent_budget")
+    if isinstance(agent_budget, Mapping):
+        candidates.append(agent_budget.get("context_tokens"))
+    for candidate in candidates:
+        try:
+            parsed = int(candidate)
+        except (TypeError, ValueError):
+            continue
+        if parsed > 0:
+            return max(1, parsed)
+    return int(profile.token_budget_tokens)
+
+
+def _context_authorization_public_summary(value: Any) -> dict[str, Any]:
+    auth = dict(value) if isinstance(value, Mapping) else {}
+    return _drop_empty(
+        {
+            "schema_version": auth.get("schema_version"),
+            "profile_id": auth.get("profile_id"),
+            "allowed_scopes": list(auth.get("allowed_scopes") or []),
+            "allow_private_refs": bool(auth.get("allow_private_refs")),
+            "authorized_ref_count": int(auth.get("authorized_ref_count") or 0),
+            "ref_scopes": dict(auth.get("ref_scopes") or {}),
+        }
     )
 
 
@@ -685,6 +1099,14 @@ def _text(value: Any, *, limit: int, trace: dict[str, Any] | None = None, field:
     if limit > 0 and len(text) > limit:
         if trace is not None and field:
             trace.setdefault("truncated_fields", []).append(field)
+            trace.setdefault("truncation_reasons", []).append(
+                {
+                    "field": field,
+                    "reason_code": "CONTEXT_FIELD_CHAR_LIMIT",
+                    "limit": int(limit),
+                    "original_chars": len(text),
+                }
+            )
         return text[: max(0, int(limit) - 1)].rstrip() + "…"
     return text
 
@@ -698,9 +1120,18 @@ def _drop_empty(value: dict[str, Any]) -> dict[str, Any]:
 
 
 __all__ = [
+    "AGENT_CONTEXT_ENVELOPE_SCHEMA_VERSION",
     "AgentContextProfile",
     "AgentContextEnvelope",
+    "CONTEXT_ENVELOPE_INVALID",
+    "CONTEXT_POLLUTION_DETECTED",
+    "CONTEXT_REF_INVALID",
+    "CONTEXT_REF_UNAUTHORIZED",
+    "CONTEXT_TOKEN_BUDGET_EXCEEDED",
+    "ContextEnvelopeError",
     "build_agent_context_envelope",
+    "build_context_runtime_event_payload",
+    "estimate_context_tokens",
     "hydrate_sub_agent_context",
     "profile_for_sub_agent",
     "project_legacy_context_for_sub_agent",

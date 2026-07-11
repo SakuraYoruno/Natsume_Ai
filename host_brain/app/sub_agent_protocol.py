@@ -17,7 +17,9 @@ from typing import Any, Mapping
 
 from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged
 from host_brain.app.sub_agent_context import (
+    ContextEnvelopeError,
     build_agent_context_envelope,
+    build_context_runtime_event_payload,
     project_legacy_context_for_sub_agent,
 )
 from host_brain.core.trace_redaction import (
@@ -411,15 +413,34 @@ class SubAgentDispatcher:
         started_ms = int(time.time() * 1000)
 
         raw_context = dict(req.context or {})
-        agent_context_envelope = build_agent_context_envelope(
-            agent_id=req.agent_id,
-            task=req.task,
-            user_message=req.user_message,
-            request_id=req.request_id,
-            session_id=req.session_id,
-            context=raw_context,
-            timeout_ms=req.timeout_ms,
-        ).as_dict()
+        try:
+            agent_context_envelope = build_agent_context_envelope(
+                agent_id=req.agent_id,
+                task=req.task,
+                user_message=req.user_message,
+                request_id=req.request_id,
+                session_id=req.session_id,
+                context=raw_context,
+                timeout_ms=req.timeout_ms,
+            ).as_dict()
+        except ContextEnvelopeError as exc:
+            latency_ms = int(time.time() * 1000) - started_ms
+            resp = SubAgentResponse(
+                success=False,
+                agent_id=req.agent_id,
+                error=exc.reason_code,
+                audit_refs={
+                    "agent_id": req.agent_id,
+                    "agent_context": {
+                        "status": "REJECTED",
+                        "reason_code": exc.reason_code,
+                        "detail": public_decision_summary(exc.detail),
+                    },
+                },
+                latency_ms=latency_ms,
+            )
+            self._log_dispatch(req, resp)
+            return resp
         legacy_context = project_legacy_context_for_sub_agent(raw_context)
 
         # 构建 handler 入参（兼容现有 handler 的 payload/context 接口）。
@@ -506,11 +527,15 @@ class SubAgentDispatcher:
                 "risk_flags": agent_artifact.get("risk_flags"),
                 "agent_context": {
                     "schema_version": agent_context_envelope.get("schema_version"),
+                    "runtime_event_summary": build_context_runtime_event_payload(agent_context_envelope),
                     "conversation_turns": len(
                         list(dict(agent_context_envelope.get("conversation_window") or {}).get("recent_turns") or [])
                     ),
                     "memory_fact_count": len(list(dict(agent_context_envelope.get("memory_packet") or {}).get("facts") or [])),
                     "evidence_item_count": len(list(dict(agent_context_envelope.get("evidence_pack") or {}).get("items") or [])),
+                    "token_budget": dict(agent_context_envelope.get("token_budget") or {}),
+                    "context_authorization": dict(agent_context_envelope.get("authorization") or {}),
+                    "pollution_report": dict(agent_context_envelope.get("pollution_report") or {}),
                     "trace": dict(agent_context_envelope.get("trace") or {}),
                 },
             }

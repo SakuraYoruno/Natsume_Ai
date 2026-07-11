@@ -3,7 +3,7 @@
 
 # 质量审计子目录
 
-版本：v1.13
+版本：v1.14
 维护日期：2026-07-11
 标签：当前执行证据 + 历史归档
 
@@ -30,6 +30,7 @@
 - `NLE_WP23_TASK0469_VALIDATION_20260711.md`：read-only Canonical Scheduler shadow、durable snapshot、retry/recovery/budget 与 legacy diff 验收证据。
 - `NLE_WP24_TASK0473_VALIDATION_20260711.md`：canonical runtime mode router、canary/kill switch、legacy drain、cross-executor resume guard 与 T-NLE-11 验收证据。
 - `NLE_WP40_TASK0474_VALIDATION_20260711.md`：durable runtime event timeline、TaskStore outbox publisher、JSON/SSE replay、dedupe 与敏感字段 fail-closed gate 验收证据。
+- `NLE_WP41_TASK0475_VALIDATION_20260711.md`：AgentContextEnvelope v2、context refs 授权、token budget/actual estimate、truncation reason、pollution fail-closed 与 T-NLE-13 验收证据。
 - `NLE_WP30_TASK0470_VALIDATION_20260711.md`：fail-closed Verification runner、required gate、TaskStore 状态门与 T-NLE-08 验收证据。
 - `NLE_WP31_TASK0471_VALIDATION_20260711.md`：AcceptanceJudgement、criterion verdict、Executor acceptance 字段、TaskStore ACCEPTED 状态门与 T-NLE-09 验收证据。
 - `NLE_WP32_TASK0472_VALIDATION_20260711.md`：Durable ReviewStore、绑定 resume token、一次性 PRE/POST resume 与 T-NLE-10 验收证据。

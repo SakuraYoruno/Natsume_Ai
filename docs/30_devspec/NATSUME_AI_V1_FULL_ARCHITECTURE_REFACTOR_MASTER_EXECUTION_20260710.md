@@ -8,7 +8,7 @@
 状态：READY_FOR_PROGRAM_EXECUTION
 文档类型：DevTasks / Master Execution Contract
 程序任务编号：TASK-0461～TASK-0622，共 162 项，禁止复用、跳号或重定义
-当前执行入口：TASK-0461～TASK-0474 已完成；M48-A / TASK-0475 已解锁；M48-B 通过入口 Gate 后可并行；M49～M57 状态为 PROGRAMMED
+当前执行入口：TASK-0461～TASK-0475 已完成；M48-A / TASK-0476 已解锁；M48-B 通过入口 Gate 后可并行；M49～M57 状态为 PROGRAMMED
 代码基线：dev@1ec8be1a8a20397627855aa946c0ff8aaaa87b72
 工作区状态：dirty；已有未提交业务代码、运行数据和本地配置必须原位保护
 完整目标蓝图：docs/50_project/arch/NATSUME_AI_V1_FULL_ARCHITECTURE_TARGET_20260710.md
@@ -269,7 +269,7 @@ M48-B 从 `PROGRAMMED` 解锁为 `PLANNED` 前必须同时满足：
 | TASK-0472 | Review 与 resume | DONE | 2026-07-11；0055 ReviewStore migration、durable ReviewStore、绑定 resume token、一次性 PRE/POST resume API 与 T-NLE-10 通过；未切 Worker 主链 |
 | TASK-0473 | Canonical main cutover | DONE | 2026-07-11；runtime mode router、new-task assignment、canary owner gate、kill switch、legacy drain report、cross-executor resume guard 与 T-NLE-11 通过；生产默认仍为 legacy/0% canary |
 | TASK-0474 | Runtime event 与 SSE | DONE | 2026-07-11；0056 runtime_event_timeline、durable cursor/backfill、TaskStore outbox publisher、Tribe/reference adapters、内部 JSON/SSE replay、dedupe key 与敏感字段 fail-closed gate 通过；replay 默认关闭，需 `HOST_RUNTIME_EVENT_REPLAY_ENABLED=true` |
-| TASK-0475 | Context refs 与预算 | PLANNED | M48-A 权威任务卡 |
+| TASK-0475 | Context refs 与预算 | DONE | 2026-07-11；AgentContextEnvelope v2、context refs 授权、token budget/actual estimate、truncation reason、pollution fail-closed、dispatcher 安全审计摘要与 T-NLE-13 通过 |
 | TASK-0476 | Life OCC | PLANNED | M48-A 权威任务卡 |
 | TASK-0477 | WorldProjection | PLANNED | M48-A 权威任务卡 |
 | TASK-0478 | Appraisal 与 Bond | PLANNED | M48-A 权威任务卡 |
