@@ -35,6 +35,10 @@ from host_brain.memory.canon_apply_service import (
     resolve_world_canon_root,
 )
 from host_brain.memory.canon_world_store import WorldCanonStore, compute_world_canon_hash
+from host_brain.observability.degradation_state import (
+    DegradationStateMachine,
+    set_global_degradation_state_machine,
+)
 from host_brain.pentest.knowledge_store import PentestKnowledgeEntry, PentestKnowledgeStore
 
 
@@ -45,6 +49,17 @@ CANON_MIGRATION = (
     / "migrations"
     / "0053_canon_apply.sql"
 )
+
+
+@pytest.fixture(autouse=True)
+def _isolated_degradation_machine(monkeypatch: pytest.MonkeyPatch):
+    """Keep Canon contracts independent from an ignored runtime audit DB."""
+    monkeypatch.setenv("HOST_DEGRADATION_STATE_ENABLED", "true")
+    set_global_degradation_state_machine(DegradationStateMachine())
+    try:
+        yield
+    finally:
+        set_global_degradation_state_machine(None)
 
 
 def _install_canon_schema(
