@@ -15,6 +15,7 @@ from host_brain.persona.surface.continuity_detectors import (
 from host_brain.persona.surface.scene_constants import (
     _LOVER_RELATIONSHIP_STAGES,
     _SIGNATURE_FLAT_SAFE_RE,
+    _SIGNATURE_TEXTURE_STAGES,
     _SURFACE_SCENE_QUALITY_SCORING_SCENES,
 )
 from host_brain.persona.surface.scoring.control_affect import (
@@ -96,7 +97,7 @@ def _apply_signature_texture_scoring(
         reason_codes.append("SIGNATURE_TEXTURE_MATCH:" + ",".join(hits[:5]))
         return min(9.0, delta)
 
-    if stage in _LOVER_RELATIONSHIP_STAGES and 6 <= len(text) <= 46:
+    if stage in _SIGNATURE_TEXTURE_STAGES and 6 <= len(text) <= 46:
         missing_is_visible = (
             bool(_SIGNATURE_FLAT_SAFE_RE.search(text))
             or not any(

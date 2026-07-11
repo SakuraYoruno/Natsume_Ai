@@ -184,6 +184,7 @@ from host_brain.persona.surface.scene_constants import (
     _SHORT_CONTINUE_MEMORY_OVERDISPLAY_PHRASES,
     _SHORT_CONTINUE_UNPROVIDED_TECH_DETAIL_PHRASES,
     _SIGNATURE_FLAT_SAFE_RE,
+    _SIGNATURE_TEXTURE_STAGES,
     _SURFACE_SCENE_QUALITY_SCORING_SCENES,
     _SURFACE_QUOTE_SCENE_ALIASES,
     _TECHNICAL_TASK_MODES,
@@ -657,7 +658,7 @@ def _apply_signature_texture_scoring(request, text, dimensions, reason_codes):
         reason_codes.append("SIGNATURE_TEXTURE_MATCH:" + ",".join(hits[:5]))
         return min(9.0, delta)
 
-    if stage in _LOVER_RELATIONSHIP_STAGES and 6 <= len(text) <= 46:
+    if stage in _SIGNATURE_TEXTURE_STAGES and 6 <= len(text) <= 46:
         missing_is_visible = bool(_SIGNATURE_FLAT_SAFE_RE.search(text)) or not any(
             _relationship_marker_hit(text, marker) for marker in relationship_profile.prefer_markers
         )
