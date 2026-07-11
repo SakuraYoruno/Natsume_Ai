@@ -1,0 +1,384 @@
+{
+  "schema_version": "natsume.m48b.entry-gate-packet.v1",
+  "packet_id": "m48b-entry-gate-20260711",
+  "milestone": "M48-B",
+  "status": "READY_FOR_MASTER_REVIEW",
+  "baseline": {
+    "task_0461_status": "DONE",
+    "task_0461_commit": "030ad1f98aef134a337ad29430f8668c3aff90df",
+    "m48a_frozen_head": "29bedcaf77138f73b1e032d6e2323711425b277c",
+    "manifest_ref": "docs/35_quality/audits/NLE_WP00_BASELINE_MANIFEST_20260710.json",
+    "manifest_sha256": "3c71ae4f0a84f68026b4e6c1545368d7a4b1746dbe4ab24f0e5c580e1471289a",
+    "protected_entry_count": 26,
+    "policy": "All protected user WIP, Pentest runtime canon data, ignored DB/model/secret/cache remain no-touch until their recorded owner transfers them."
+  },
+  "master_approval": {
+    "required": true,
+    "status": "PENDING",
+    "approver_role": "MASTER",
+    "approval_ref": "unavailable://master/m48b-entry-gate",
+    "scope": "M48-A/M48-B file ownership, migration owner, cutover surface, protected-WIP reservation and catalog-debt disposition"
+  },
+  "m48a_frozen_ownership": {
+    "commit_range": "030ad1f98aef134a337ad29430f8668c3aff90df^..29bedcaf77138f73b1e032d6e2323711425b277c",
+    "changed_file_count": 532,
+    "primary_owner": "TASK-0461 through TASK-0486 frozen at M48-A head",
+    "transfer_policy": "After MASTER approval, only the explicit M48-B scopes below transfer a modification lease to their primary owner. Every other M48-A path remains frozen. Historical evidence and migration 0050-0057 never transfer."
+  },
+  "file_ownership": [
+    {
+      "scope_id": "secure-ingress-contract",
+      "path_scope": "host_brain/secure_ingress/**; natsume_contracts/identity/**",
+      "primary_owner": "TASK-0487",
+      "secondary_consumers": ["TASK-0488", "TASK-0489", "TASK-0491", "TASK-0494"],
+      "previous_owner": "M48-A frozen baseline",
+      "coordination": "TASK-0487 exclusively creates and changes the contract; consumers depend on the versioned interface only."
+    },
+    {
+      "scope_id": "edge-rpc-auth",
+      "path_scope": "edge_client/rpc/auth.py",
+      "primary_owner": "TASK-0487",
+      "secondary_consumers": ["TASK-0493"],
+      "previous_owner": "repository baseline",
+      "coordination": "TASK-0487 moves identity decisions to contracts; TASK-0493 adds the import guard only after that change."
+    },
+    {
+      "scope_id": "gateway-transport",
+      "path_scope": "edge_client/gateway/server.py; edge_client/gateway/router.py; edge_client/gateway/normalizer.py; edge_client/gateway/outbound.py; edge_client/gateway/bootstrap.py; edge_client/gateway/adapters/wechat_adapter.py; edge_client/channels/input_reporter.py; host_brain/app/input_routes.py; host_brain/app/input_service_gateway.py",
+      "primary_owner": "TASK-0488",
+      "secondary_consumers": ["TASK-0487", "TASK-0493", "TASK-0494"],
+      "previous_owner": "repository baseline",
+      "coordination": "TASK-0488 owns raw verification and durable delivery; bootstrap/WeChat edits are serialized before TASK-0494."
+    },
+    {
+      "scope_id": "obs-command-relocation",
+      "path_scope": "host_brain/app/obs_routes*.py; host_brain/observability/**",
+      "primary_owner": "TASK-0489",
+      "secondary_consumers": ["TASK-0495"],
+      "previous_owner": "M48-A frozen baseline",
+      "coordination": "TASK-0489 exclusively relocates mutating endpoints; domain owners expose commands through adapters."
+    },
+    {
+      "scope_id": "skill-provider-supply-chain",
+      "path_scope": "host_brain/skills/custom_provider_installer.py; host_brain/skills/loader.py; host_brain/skills/hot_loader.py; host_brain/skills/hub/**; host_brain/integrations/providers/**",
+      "primary_owner": "TASK-0490",
+      "secondary_consumers": ["TASK-0487", "TASK-0495"],
+      "previous_owner": "repository baseline",
+      "coordination": "TASK-0490 owns quarantine and activation. Protected provider_catalog.py and agent_runtime_registry.py remain no-touch pending owner handoff."
+    },
+    {
+      "scope_id": "pentest-secure-run",
+      "path_scope": "host_brain/app/pentest_routes.py; host_brain/pentest/**; Pentest-specific host_brain/governor adapter",
+      "primary_owner": "TASK-0491",
+      "secondary_consumers": ["TASK-0487", "TASK-0495"],
+      "previous_owner": "M48-A frozen baseline",
+      "coordination": "TASK-0491 exclusively owns real-principal binding, Lab isolation and shared RunStore integration."
+    },
+    {
+      "scope_id": "service-catalog-composition",
+      "path_scope": "host_brain/service_catalog/**; host_brain/composition/**",
+      "primary_owner": "TASK-0492",
+      "secondary_consumers": ["TASK-0493", "TASK-0494"],
+      "previous_owner": "new scope",
+      "coordination": "TASK-0492 exclusively creates endpoint ownership and startup conflict checks."
+    },
+    {
+      "scope_id": "edge-import-guard",
+      "path_scope": "tools/architecture/**; edge_client contracts-only guard and compatibility manifest",
+      "primary_owner": "TASK-0493",
+      "secondary_consumers": ["TASK-0488", "TASK-0494"],
+      "previous_owner": "new scope",
+      "coordination": "TASK-0493 owns guard policy; it may not concurrently modify files leased to TASK-0488 or TASK-0494."
+    },
+    {
+      "scope_id": "bridge-exposure",
+      "path_scope": "tools/mateengine_bridge_server.py; integrations/mateengine/**; desktop_pet/**; tools/wxautox4_bridge.py",
+      "primary_owner": "TASK-0494",
+      "secondary_consumers": ["TASK-0487", "TASK-0488", "TASK-0492", "TASK-0493"],
+      "previous_owner": "repository baseline",
+      "coordination": "TASK-0494 starts only after TASK-0492 and TASK-0493 and exclusively owns bridge exposure changes."
+    },
+    {
+      "scope_id": "p0-cross-domain-tests",
+      "path_scope": "tests/security/**; tests/e2e/**; tests/model_plane/** cross-domain M48-B matrix",
+      "primary_owner": "TASK-0495",
+      "secondary_consumers": ["TASK-0488", "TASK-0489", "TASK-0490", "TASK-0491", "TASK-0494"],
+      "previous_owner": "repository baseline",
+      "coordination": "TASK-0495 owns cross-domain scenarios; each domain task owns its newly named focused unit tests."
+    },
+    {
+      "scope_id": "m48b-seal-evidence",
+      "path_scope": "docs/30_devspec/evidence/m48b/** after Entry Gate Packet",
+      "primary_owner": "TASK-0496",
+      "secondary_consumers": ["TASK-0487", "TASK-0488", "TASK-0489", "TASK-0490", "TASK-0491", "TASK-0492", "TASK-0493", "TASK-0494", "TASK-0495"],
+      "previous_owner": "Entry Gate preparation",
+      "coordination": "TASK-0496 owns Seal aggregation; earlier tasks publish immutable evidence references only."
+    },
+    {
+      "scope_id": "protected-wip-skill-provider",
+      "path_scope": "host_brain/skills/provider_catalog.py; host_brain/skills/agent_runtime_registry.py; tests/unit/test_codex_skill_wrappers.py",
+      "primary_owner": "MASTER / auto-jp-media-translation",
+      "secondary_consumers": ["TASK-0490"],
+      "previous_owner": "TASK-0461 frozen dirty owner",
+      "coordination": "No-touch. TASK-0490 must use a new adapter or wait for an explicit WIP handoff and three-way merge."
+    },
+    {
+      "scope_id": "protected-wip-router-runtime",
+      "path_scope": "host_brain/app/router_registry.py; host_brain/agent_runtime/production_executor.py; host_brain/agent_runtime/production_studio.py; host_brain/agent_runtime/skill_ids.py",
+      "primary_owner": "MASTER / auto-jp-media-translation",
+      "secondary_consumers": ["TASK-0487", "TASK-0489", "TASK-0490", "TASK-0491", "TASK-0494"],
+      "previous_owner": "TASK-0461 frozen dirty owner",
+      "coordination": "No-touch. New adapters are built first; final wiring waits for explicit WIP handoff."
+    }
+  ],
+  "migration_catalog": {
+    "path": "host_brain/audit/migrations",
+    "runner": "host_brain/audit/migration_runner.py",
+    "guard": "host_brain/audit/migration_guard.py",
+    "catalog_steward": "TASK-0487",
+    "allow_secondary_catalog": false,
+    "change_policy": "expand_only",
+    "historical_assets_immutable": true,
+    "baseline_debt": {
+      "owner": "TASK-0487 catalog steward with MASTER-approved disposition",
+      "facts": "duplicate 0009 and missing 0023-0038 make the current full catalog non-green",
+      "disposition": "Do not rewrite historical SQL. TASK-0487 must add a checksum-bound compatibility policy to the existing runner/guard before applying 0058+, and TASK-0540 remains the final catalog consolidation owner.",
+      "stop_condition": "Stop before any schema cutover if the full catalog guard or empty/old DB clone is not fail-closed and reproducible."
+    }
+  },
+  "migration_registry": [
+    {
+      "asset": "0058_secure_ingress.sql",
+      "primary_owner": "TASK-0487",
+      "schema_scope": "principal/signature nonce/rate/idempotency/audit",
+      "policy": "expand-only; absorb Secure Ingress inline DDL; do not modify 0001-0057"
+    },
+    {
+      "asset": "0059_gateway_transport.sql",
+      "primary_owner": "TASK-0488",
+      "schema_scope": "durable inbox/outbox/ack/DLQ/replay",
+      "policy": "expand-only; no private Gateway migration runner"
+    },
+    {
+      "asset": "0060_skill_supply_chain.sql",
+      "primary_owner": "TASK-0490",
+      "schema_scope": "bundle digest/signature/SBOM/quarantine/activation",
+      "policy": "expand-only; protected WIP paths remain untouched"
+    },
+    {
+      "asset": "0061_pentest_run_store.sql",
+      "primary_owner": "TASK-0491",
+      "schema_scope": "Pentest run/approval/receipt only if 0052/0055/0056 cannot express it",
+      "policy": "optional expand-only asset; prefer shared stores; never modify 0050/0051"
+    },
+    {
+      "asset": "0062_service_catalog.sql",
+      "primary_owner": "TASK-0492",
+      "schema_scope": "endpoint ownership only if durable catalog state is required",
+      "policy": "optional expand-only asset; do not create an empty schema"
+    }
+  ],
+  "cutover_matrix": [
+    {
+      "surface_id": "host-input",
+      "primary_owner": "TASK-0488",
+      "security_owner": "TASK-0487",
+      "cutover": "Secure Ingress shadow then enforced raw input delivery",
+      "rollback": "Return to shadow or reject writes; never restore anonymous writes."
+    },
+    {
+      "surface_id": "gateway-webhook-reply",
+      "primary_owner": "TASK-0488",
+      "security_owner": "TASK-0487",
+      "cutover": "raw-body verification to durable inbox, ack, outbox and DLQ",
+      "rollback": "Disable new delivery, drain durable records, keep legacy route read/drain-only."
+    },
+    {
+      "surface_id": "obs-write-endpoints",
+      "primary_owner": "TASK-0489",
+      "security_owner": "TASK-0487",
+      "cutover": "relocate all Obs mutations to Secure Ingress Host commands",
+      "rollback": "Disable relocated command and reject mutation; do not restore unauthenticated Obs writes."
+    },
+    {
+      "surface_id": "skill-provider-install-load",
+      "primary_owner": "TASK-0490",
+      "security_owner": "TASK-0487",
+      "cutover": "quarantine, verify, sandbox and staged activation before import",
+      "rollback": "Disable the candidate bundle and use approved built-ins; never restore unsigned hot import."
+    },
+    {
+      "surface_id": "pentest-run-approve-continue",
+      "primary_owner": "TASK-0491",
+      "security_owner": "TASK-0487",
+      "cutover": "real principal and token to shared RunStore under Lab isolation",
+      "rollback": "Disable active execution and retain read-only evidence; never restore self-signed authority."
+    },
+    {
+      "surface_id": "service-endpoint-18770",
+      "primary_owner": "TASK-0492",
+      "security_owner": "TASK-0494",
+      "cutover": "single endpoint owner and startup preflight conflict rejection",
+      "rollback": "Stop the candidate owner and restore the approved loopback owner only; never auto-steal a port."
+    },
+    {
+      "surface_id": "edge-host-imports",
+      "primary_owner": "TASK-0493",
+      "security_owner": "TASK-0492",
+      "cutover": "freeze current debt, reject new Host implementation imports, then replace each old edge with contracts",
+      "rollback": "Revert only the affected adapter; CI guard remains enabled for new violations."
+    },
+    {
+      "surface_id": "mateengine-desktop-bridge",
+      "primary_owner": "TASK-0494",
+      "security_owner": "TASK-0487",
+      "cutover": "loopback by default; explicit remote scope/auth/nonce/rate/audit when approved",
+      "rollback": "Disable remote binding and bridge processes, preserve audit, use recording/no-device mode."
+    }
+  ],
+  "isolation_harness_ref": "tests/fixtures/m48b_isolation.py",
+  "isolation_fixtures": [
+    {
+      "domain": "gateway",
+      "principal": "test:m48b:gateway",
+      "test_secret_source": "ephemeral secrets.token_urlsafe per test",
+      "channel": "test+loopback://m48b/gateway",
+      "network_policy": "loopback_only",
+      "process_policy": "deny",
+      "physical_effects_allowed": false,
+      "adapter_policy": "TestClient/raw bytes plus recording outbound; no platform webhook or production token"
+    },
+    {
+      "domain": "obs",
+      "principal": "test:m48b:obs",
+      "test_secret_source": "ephemeral secrets.token_urlsafe per test",
+      "channel": "test+loopback://m48b/obs",
+      "network_policy": "loopback_only",
+      "process_policy": "deny",
+      "physical_effects_allowed": false,
+      "adapter_policy": "in-process query/command adapters with temporary SQLite and recording providers"
+    },
+    {
+      "domain": "pentest",
+      "principal": "test:m48b:pentest",
+      "test_secret_source": "ephemeral secrets.token_urlsafe per test",
+      "channel": "test+loopback://m48b/pentest",
+      "network_policy": "loopback_only",
+      "process_policy": "deny",
+      "physical_effects_allowed": false,
+      "adapter_policy": "reserved loopback fixtures only; no private/LAN egress, exploit process or real probe"
+    },
+    {
+      "domain": "skill_provider",
+      "principal": "test:m48b:skill_provider",
+      "test_secret_source": "ephemeral secrets.token_urlsafe per test",
+      "channel": "test+loopback://m48b/skill_provider",
+      "network_policy": "loopback_only",
+      "process_policy": "deny",
+      "physical_effects_allowed": false,
+      "adapter_policy": "temporary quarantine and fake provider registry; no pip/npm/GitHub or Host import"
+    },
+    {
+      "domain": "bridge",
+      "principal": "test:m48b:bridge",
+      "test_secret_source": "ephemeral secrets.token_urlsafe per test",
+      "channel": "test+loopback://m48b/bridge",
+      "network_policy": "loopback_only",
+      "process_policy": "deny",
+      "physical_effects_allowed": false,
+      "adapter_policy": "ephemeral loopback port and recording device sink; no UDP forward, window control or hardware"
+    }
+  ],
+  "p0_registry": [
+    {
+      "task_id": "TASK-0487",
+      "feature_flag": "HOST_SECURE_INGRESS_MODE",
+      "default": "OFF; planned values OFF|SHADOW|ENFORCE",
+      "implementation_status": "PLANNED",
+      "stop_condition": "Any missing principal/scope/signature-or-token/rate/idempotency accepted, unstable reason/audit, replay, cross-principal reuse or secret exposure.",
+      "evidence_path": "docs/30_devspec/evidence/m48b/task0487",
+      "rollback": "Set OFF or SHADOW, stop new writes and keep legacy surface deny-by-default; never enable existing insecure bypass flags."
+    },
+    {
+      "task_id": "TASK-0488",
+      "feature_flag": "EDGE_GATEWAY_TRANSPORT_MODE",
+      "default": "LEGACY_DRAIN; planned values LEGACY_DRAIN|SHADOW|DURABLE",
+      "implementation_status": "PLANNED",
+      "stop_condition": "Raw signature failure accepted, duplicate/out-of-order/restart causes duplicate delivery, or inbox/outbox/DLQ loses sequence or payload integrity.",
+      "evidence_path": "docs/30_devspec/evidence/m48b/task0488",
+      "rollback": "Set LEGACY_DRAIN, disable new intake with EDGE_GATEWAY_ENABLED=false if needed, drain durable records and prohibit anonymous delivery."
+    },
+    {
+      "task_id": "TASK-0489",
+      "feature_flag": "HOST_OBS_COMMAND_RELOCATION_MODE",
+      "default": "LEGACY_AUDIT; planned values LEGACY_AUDIT|SHADOW|QUERY_ONLY",
+      "implementation_status": "PLANNED",
+      "stop_condition": "Any Obs write handler remains at final cutover, a query writes, Secure Ingress is bypassed, or a second authority appears.",
+      "evidence_path": "docs/30_devspec/evidence/m48b/task0489",
+      "rollback": "Return to SHADOW and reject affected mutations; restore no unauthenticated Obs writer."
+    },
+    {
+      "task_id": "TASK-0490",
+      "feature_flag": "HOST_SUPPLY_CHAIN_ACTIVATION_MODE",
+      "default": "BUILTINS_ONLY; planned values BUILTINS_ONLY|QUARANTINE|STAGED",
+      "implementation_status": "PLANNED",
+      "existing_kill_switches": ["HOST_SKILL_HUB_ENABLED=false", "HOST_SKILL_CUSTOM_PROVIDERS_ENABLED=false"],
+      "stop_condition": "Unsigned, digest/SBOM-missing or unsandboxed bundle imports; sandbox/secret/egress escape; provider exception silently selects a fake fallback.",
+      "evidence_path": "docs/30_devspec/evidence/m48b/task0490",
+      "rollback": "Set BUILTINS_ONLY, disable hub/custom providers and quarantine the candidate; never restore untrusted hot import."
+    },
+    {
+      "task_id": "TASK-0491",
+      "feature_flag": "HOST_PENTEST_SECURE_RUN_MODE",
+      "default": "READ_ONLY; planned values READ_ONLY|SHADOW|LAB_ENFORCED",
+      "implementation_status": "PLANNED",
+      "existing_kill_switches": ["PENTEST_WEB_LAB_MODE=false", "PENTEST_ALLOW_EXPLOIT=false", "PENTEST_WEB_RUN_REAL_PROBES=false"],
+      "stop_condition": "Mock/self-signed authority accepted, non-Lab network/process action, knowledge leakage, duplicate effect or missing receipt.",
+      "evidence_path": "docs/30_devspec/evidence/m48b/task0491",
+      "rollback": "Set READ_ONLY and all existing kill switches false; keep domain evidence and prohibit active probes."
+    },
+    {
+      "task_id": "TASK-0492",
+      "feature_flag": "HOST_SERVICE_CATALOG_MODE",
+      "default": "AUDIT; planned values AUDIT|PREFLIGHT|ENFORCE",
+      "implementation_status": "PLANNED",
+      "stop_condition": "Endpoint lacks unique owner/protocol/health, port conflict is not rejected before startup, or a public bind is unauthenticated.",
+      "evidence_path": "docs/30_devspec/evidence/m48b/task0492",
+      "rollback": "Set AUDIT, stop the candidate service and restore only the approved loopback owner; never auto-reassign 18770."
+    },
+    {
+      "task_id": "TASK-0493",
+      "feature_flag": "EDGE_CONTRACTS_ONLY_GUARD_MODE",
+      "default": "FREEZE_NEW; planned values FREEZE_NEW|REPORT|ENFORCE",
+      "implementation_status": "PLANNED",
+      "stop_condition": "New Edge-to-Host implementation import, Edge standalone install/import failure or contract negotiation regression.",
+      "evidence_path": "docs/30_devspec/evidence/m48b/task0493",
+      "rollback": "Revert the affected adapter while FREEZE_NEW remains active; do not disable the guard to accept new debt."
+    },
+    {
+      "task_id": "TASK-0494",
+      "feature_flag": "NATSUME_BRIDGE_EXPOSURE_MODE",
+      "default": "DISABLED; planned values DISABLED|LOOPBACK|REMOTE_APPROVED",
+      "implementation_status": "PLANNED",
+      "existing_kill_switches": ["HOST_MATEENGINE_BRIDGE_ENABLED=false", "EDGE_WECHAT_BRIDGE_ENABLED=false", "EDGE_VRM_BRIDGE_MOUTH_UDP_ENABLED=false"],
+      "stop_condition": "Non-loopback default bind, remote access without auth/scope/rate/audit, replayed device action or any real window/device mis-action.",
+      "evidence_path": "docs/30_devspec/evidence/m48b/task0494",
+      "rollback": "Set DISABLED, stop bridge processes, retain audit and use recording/no-device mode."
+    },
+    {
+      "task_id": "TASK-0495",
+      "feature_flag": "M48B_P0_VALIDATION_PROFILE",
+      "default": "ISOLATED_ONLY; test-only immutable profile",
+      "implementation_status": "REGISTERED",
+      "stop_condition": "Any golden/negative/fault case is not repeatable, escapes isolation, performs physical I/O or accepts a broad-exception fake fallback.",
+      "evidence_path": "docs/30_devspec/evidence/m48b/task0495",
+      "rollback": "Stop the wave, close every slice through its registered kill switch and preserve failed evidence for diagnosis."
+    }
+  ],
+  "test_cadence": {
+    "small_task": "focused unit/contract/static checks only",
+    "large_slice": "one integration/golden/recovery wave at the slice merge task",
+    "final_program": "one unified full real-environment validation after all tasks are complete",
+    "rerun_policy": "rerun only failed or changed boundaries; never repeat an unchanged full wave"
+  }
+}

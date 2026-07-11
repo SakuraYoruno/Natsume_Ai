@@ -34,6 +34,14 @@ from .m48_seal import (
     load_m48_seal_manifest,
     validate_m48_seal_bundle,
 )
+from .m48b_entry_gate import (
+    M48B_ENTRY_GATE_PACKET_SCHEMA_VERSION,
+    M48B_ENTRY_GATE_RESULT_SCHEMA_VERSION,
+    M48BEntryGateIssue,
+    M48BEntryGateResult,
+    evaluate_m48b_entry_gate,
+    load_m48b_entry_gate_packet,
+)
 from .release_manifest import (
     M8_MIGRATION_DIRS,
     S_RELEASE_CHECKLIST,
@@ -71,6 +79,10 @@ __all__ = [
     "M48_SEAL_EVIDENCE_SCHEMA_VERSION",
     "M48_SEAL_MANIFEST_SCHEMA_VERSION",
     "M48_SEAL_RESULT_SCHEMA_VERSION",
+    "M48B_ENTRY_GATE_PACKET_SCHEMA_VERSION",
+    "M48B_ENTRY_GATE_RESULT_SCHEMA_VERSION",
+    "M48BEntryGateIssue",
+    "M48BEntryGateResult",
     "S_RELEASE_CHECKLIST",
     "STATUS_FAILED",
     "STATUS_READY",
@@ -82,8 +94,10 @@ __all__ = [
     "diff_identity_snapshots",
     "evaluate_identity_release_gate",
     "evaluate_m48_release_seal",
+    "evaluate_m48b_entry_gate",
     "generate_m8_manifest",
     "load_m48_seal_manifest",
+    "load_m48b_entry_gate_packet",
     "validate_m48_seal_bundle",
     "validate_release_bundle",
 ]

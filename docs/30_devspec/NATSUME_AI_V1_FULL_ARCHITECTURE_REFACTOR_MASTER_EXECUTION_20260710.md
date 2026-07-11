@@ -8,7 +8,7 @@
 状态：READY_FOR_PROGRAM_EXECUTION
 文档类型：DevTasks / Master Execution Contract
 程序任务编号：TASK-0461～TASK-0622，共 162 项，禁止复用、跳号或重定义
-当前执行入口：TASK-0461～TASK-0485 已完成；TASK-0486 本地 Release Seal/rollback 资产已完成但状态为 BLOCKED，等待 identity continuity、获批生产演练和 MASTER Seal；M48-B Entry Gate 尚未获 MASTER 批准；M49～M57 状态为 PROGRAMMED
+当前执行入口：TASK-0461～TASK-0485 已完成；TASK-0486 本地 Release Seal/rollback 资产已完成但状态为 BLOCKED，等待 identity continuity、获批生产演练和 MASTER Seal；M48-B Entry Gate Packet 已完成并通过定向机检，Gate 仅因 MASTER owner/migration/cutover 批准缺失而保持 BLOCKED；M49～M57 状态为 PROGRAMMED
 代码基线：dev@1ec8be1a8a20397627855aa946c0ff8aaaa87b72
 工作区状态：dirty；已有未提交业务代码、运行数据和本地配置必须原位保护
 完整目标蓝图：docs/50_project/arch/NATSUME_AI_V1_FULL_ARCHITECTURE_TARGET_20260710.md
@@ -582,6 +582,13 @@ M57 Gate：Evolution 输出只能进入 proposal/review；身份和能力激活�
 | Security | identity/signature/scope/rate/replay/airlock/sandbox/secret/SBOM/quarantine/negative matrix |
 | Performance | latency、throughput、memory、DB lock、queue lag、model cost、GPU/resource、frontend bundle |
 | Release | clean install、Edge standalone、Electron/.NET/Unity bridge、reproducible build、rollback drill |
+
+验证按交付边界分层执行，禁止把阶段 Seal 级成本重复摊到每个原子任务：
+
+1. 普通小任务只运行变更相关的 unit、contract 与 static checks，并在任务证据中记录选择范围；不运行全仓或整阶段测试。
+2. 大型 vertical slice、跨域汇合任务和阶段 Seal 各运行一次对应 integration、golden path、recovery/rollback wave；同一未变化 wave 不因后续小修重复执行。
+3. 失败修复只重跑失败项与受影响边界；下一次全波验证留到新的大型汇合点。
+4. TASK-0621 / TASK-0622 在全部实现任务完成后统一运行一次全量离线套件、真实依赖/设备隔离环境实测与最终发布门禁。此前不得用重复全量实测替代定向证据，也不得把定向通过冒充最终实测。
 
 目标任务落地后，至少提供以下可执行检查；路径尚未存在时由对应任务创建，不得把缺测试解释为通过：
 
