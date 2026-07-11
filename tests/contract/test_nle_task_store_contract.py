@@ -54,6 +54,12 @@ from host_brain.agent_runtime.task_store import (
     build_reconciliation_attestation_binding,
     build_operation_fingerprint,
 )
+from host_brain.agent_runtime.verification_policy import (
+    VERIFICATION_EVIDENCE_REQUIRED,
+    VERIFICATION_REQUIRED_NOT_PASSED,
+    VerificationResult,
+    VerificationStatus,
+)
 from host_brain.audit.migration_runner import SQLiteMigrationRunner
 
 
@@ -112,6 +118,7 @@ def _event(
     *,
     idempotency_key: str | None = None,
     attempt_id: str | None = None,
+    evidence_refs: tuple[str, ...] = (),
 ) -> OutboxMessage:
     unique = uuid.uuid4().hex
     return OutboxMessage.create(
@@ -126,6 +133,7 @@ def _event(
         ),
         idempotency_key=idempotency_key or f"event:{unique}",
         attempt_id=attempt_id,
+        evidence_refs=evidence_refs,
     )
 
 
@@ -180,6 +188,28 @@ def _create_graph(store: DurableTaskStore, *, graph_id: str = "graph-1") -> None
     )
 
 
+def _verification_result(
+    *,
+    status: VerificationStatus = VerificationStatus.PASS,
+    graph_id: str = "graph-1",
+    node_id: str = "node-1",
+    work_order_id: str = "work-order::graph-1",
+) -> VerificationResult:
+    return VerificationResult(
+        verification_id=f"verify-{status.value.lower()}",
+        work_order_id=work_order_id,
+        required=True,
+        status=status,
+        task_graph_id=graph_id,
+        task_node_id=node_id,
+        reason_code=None if status is VerificationStatus.PASS else f"VERIFICATION_{status.value}",
+        evidence_refs=(f"verification://verify-{status.value.lower()}/check/1/sha256-{status.value.lower()}",),
+        checks=({"status": status.value},),
+        started_at_ms=100,
+        finished_at_ms=101,
+    )
+
+
 def _create_attempt(
     store: DurableTaskStore,
     *,
@@ -211,6 +241,7 @@ def _advance_node_to_waiting_acceptance(store: DurableTaskStore) -> None:
         ),
         start=1,
     ):
+        verification = _verification_result() if target is TaskNodeStatus.VERIFIED else None
         store.transition_node(
             "graph-1",
             1,
@@ -222,8 +253,96 @@ def _advance_node_to_waiting_acceptance(store: DurableTaskStore) -> None:
                 "graph-1@1/node-1",
                 expected_version + 1,
                 f"TASK_NODE_{target.value}",
+                evidence_refs=verification.evidence_refs if verification else (),
             ),
+            verification_result=verification,
         )
+
+
+@pytest.mark.parametrize(
+    "status",
+    (VerificationStatus.FAIL, VerificationStatus.ERROR, VerificationStatus.NOT_RUN),
+)
+def test_t_nle_08_required_verification_non_pass_cannot_reach_verified_or_accepted(
+    tmp_path: Path,
+    status: VerificationStatus,
+) -> None:
+    store = _migrated_store(tmp_path)
+    store.create_graph(
+        _graph(node_status=TaskNodeStatus.VERIFYING),
+        outbox=_event("TASK_GRAPH", "graph-1", 0, "TASK_GRAPH_CREATED"),
+    )
+    verification = _verification_result(status=status)
+
+    with pytest.raises(TaskStoreError) as error:
+        store.transition_node(
+            "graph-1",
+            1,
+            "node-1",
+            expected_version=0,
+            target_status=TaskNodeStatus.VERIFIED,
+            outbox=_event(
+                "TASK_NODE",
+                "graph-1@1/node-1",
+                1,
+                "TASK_NODE_VERIFIED",
+                evidence_refs=verification.evidence_refs,
+            ),
+            verification_result=verification,
+        )
+
+    assert error.value.reason_code == VERIFICATION_REQUIRED_NOT_PASSED
+    assert store.get_node("graph-1", 1, "node-1")["status"] == "VERIFYING"
+    with sqlite3.connect(str(store.db_path)) as conn:
+        accepted_count = conn.execute(
+            "SELECT COUNT(*) FROM task_runtime_node WHERE status = 'ACCEPTED'"
+        ).fetchone()[0]
+    assert accepted_count == 0
+
+
+def test_t_nle_08_verified_transition_requires_pass_result_and_bound_evidence(tmp_path: Path) -> None:
+    store = _migrated_store(tmp_path)
+    store.create_graph(
+        _graph(node_status=TaskNodeStatus.VERIFYING),
+        outbox=_event("TASK_GRAPH", "graph-1", 0, "TASK_GRAPH_CREATED"),
+    )
+    verification = _verification_result()
+
+    with pytest.raises(TaskStoreError) as missing_evidence:
+        store.transition_node(
+            "graph-1",
+            1,
+            "node-1",
+            expected_version=0,
+            target_status=TaskNodeStatus.VERIFIED,
+            outbox=_event("TASK_NODE", "graph-1@1/node-1", 1, "TASK_NODE_VERIFIED"),
+            verification_result=verification,
+        )
+    assert missing_evidence.value.reason_code == VERIFICATION_EVIDENCE_REQUIRED
+
+    verified = store.transition_node(
+        "graph-1",
+        1,
+        "node-1",
+        expected_version=0,
+        target_status=TaskNodeStatus.VERIFIED,
+        outbox=_event(
+            "TASK_NODE",
+            "graph-1@1/node-1",
+            1,
+            "TASK_NODE_VERIFIED",
+            evidence_refs=verification.evidence_refs,
+        ),
+        verification_result=verification,
+    )
+
+    assert verified["status"] == "VERIFIED"
+    verified_events = [
+        event
+        for event in store.list_pending_outbox()
+        if event["event_type"] == "TASK_NODE_VERIFIED"
+    ]
+    assert verified_events[-1]["evidence_refs"] == list(verification.evidence_refs)
 
 
 def test_t_nle_06_requires_forward_0054_recovery_migration(tmp_path: Path) -> None:

@@ -16,7 +16,11 @@ from host_brain.agent_runtime.artifact_store import AgentArtifactStore
 from host_brain.agent_runtime.prompt_profiles import build_agent_prompt, prompt_profile_name
 from host_brain.agent_runtime.result_contract import AgentResult, blocked_result
 from host_brain.agent_runtime.review_policy import ReviewPolicy
-from host_brain.agent_runtime.verification_policy import VerificationPolicy
+from host_brain.agent_runtime.verification_policy import (
+    VERIFICATION_REQUIRED_NOT_PASSED,
+    VerificationGate,
+    VerificationPolicy,
+)
 from host_brain.agent_runtime.work_order import AgentWorkOrder
 from host_brain.agent_runtime.workspace_policy import WorkspacePolicy
 from host_brain.core.ids import new_event_id, now_ms
@@ -183,6 +187,28 @@ def _terminate_process_tree(proc: subprocess.Popen[str]) -> None:
 def _metadata_text(order: AgentWorkOrder, key: str, env_name: str) -> str:
     value = str(order.metadata.get(key) or os.environ.get(env_name) or "").strip()
     return value
+
+
+def _apply_required_verification_gate(result: AgentResult, order: AgentWorkOrder) -> AgentResult:
+    if not VerificationGate.required_plan_not_passed(order.verification_plan, result.verification):
+        return result
+    verification = dict(result.verification or {})
+    status = str(verification.get("status") or "NOT_RUN").strip() or "NOT_RUN"
+    reason = str(verification.get("reason_code") or VERIFICATION_REQUIRED_NOT_PASSED).strip()
+    result.status = "BLOCKED"
+    result.summary = "Agent WorkOrder blocked because required verification did not pass."
+    result.reason_code = VERIFICATION_REQUIRED_NOT_PASSED
+    result.detail = f"required verification status={status} reason_code={reason}"
+    result.review_required = True
+    result.risk_flags = list(dict.fromkeys([*result.risk_flags, "required_verification_failed"]))
+    metadata = dict(result.metadata or {})
+    metadata["verification_gate"] = {
+        "required": True,
+        "status": status,
+        "reason_code": reason,
+    }
+    result.metadata = metadata
+    return result
 
 
 _CODEX_REASONING_EFFORTS = {"none", "minimal", "low", "medium", "high", "xhigh"}
@@ -386,6 +412,7 @@ class AgentRuntimeExecutor:
                 workspace=resolution.path,
                 request_id=str(order.metadata.get("request_id") or "").strip() or None,
                 intent_id=event_id,
+                work_order_id=order.work_order_id,
             )
             # 合并 agent 元数据
             agent_result.verification = verification
@@ -394,6 +421,7 @@ class AgentRuntimeExecutor:
             agent_result.artifacts_dir = str(run_dir)
             self.artifact_store.write_json(run_dir / "changed_files.json", git_summary)
             self.artifact_store.write_json(run_dir / "verification.json", verification)
+            agent_result = _apply_required_verification_gate(agent_result, order)
             self._persist_result(run_dir, agent_result, order=order, event_id=event_id, ts_ms=ts)
             return agent_result.to_dict()
 
@@ -459,6 +487,7 @@ class AgentRuntimeExecutor:
                 workspace=resolution.path,
                 request_id=str(order.metadata.get("request_id") or "").strip() or None,
                 intent_id=event_id,
+                work_order_id=order.work_order_id,
             )
             self.artifact_store.write_json(run_dir / "changed_files.json", git_summary)
             self.artifact_store.write_json(run_dir / "verification.json", verification)
@@ -553,6 +582,7 @@ class AgentRuntimeExecutor:
                 reason_code="CODEX_EXECUTOR_ERROR",
                 detail=str(exc),
             )
+        result = _apply_required_verification_gate(result, order)
         self._persist_result(run_dir, result, order=order, event_id=event_id, ts_ms=ts)
         return result.to_dict()
 

@@ -6,6 +6,12 @@
 定位：以“条目式矩阵”维护 PRD（FR）→ DevSpec（章节/契约点）→ DevTasks（TASK）→ Tests（T-xx）的覆盖关系；当前未维护 `requirements_trace.csv`，本 Markdown 是追溯 SSOT。
 
 ---
+## 维护记录（2026-07-11）
+
+- 本次增量：TASK-0470 / T-NLE-08 完成，Verification 从报告字段升级为 fail-closed 状态门；命令验证增加 allowlist、timeout、workspace policy 与结构化 reason code。
+- 状态口径：M48-A 的 TASK-0461～TASK-0470 已完成，TASK-0471～0486 仍按依赖 Gate 保持 PLANNED；M48-B～M57 的 TASK-0487～0622 为 PROGRAMMED 且尚未解锁实施。
+- 代码状态：`VerificationResult` schema 更严格；`DurableTaskStore.transition_node` 对 `VERIFIED/VERIFICATION_FAILED` 强制验证结果、graph/node/work_order 绑定与 outbox evidence refs；Executor 对 required verification 非 PASS 返回 `BLOCKED`，不再把验证失败的执行结果作为可验收完成。
+
 ## 维护记录（2026-07-10）
 
 - 本次增量：登记完整架构目标与正式执行程序，新增 FR-ARCH-001～010、R-183～R-192，以及 M48-B～M57 → TASK-0487～0622 → T-ARCH-01～30 的发布级 Gate 映射。

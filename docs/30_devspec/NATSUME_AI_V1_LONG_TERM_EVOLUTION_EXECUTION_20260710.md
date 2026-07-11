@@ -5,7 +5,7 @@
 
 版本：v1.1
 日期：2026-07-10
-状态：`READY_FOR_EXECUTION`（TASK-0461～TASK-0469 已 `DONE`；其余任务按依赖 Gate 推进）
+状态：`READY_FOR_EXECUTION`（TASK-0461～TASK-0470 已 `DONE`；其余任务按依赖 Gate 推进）
 文档类型：DevTasks / Execution Contract
 任务编号：`TASK-0461`～`TASK-0486`
 逻辑工作包：`LTE-WP-00`～`LTE-WP-80`
@@ -416,7 +416,7 @@ Pop-Location
 | TASK-0467 | WP-21 / PR-007 | Durable TaskStore | WP-20 | 4–6 日 | 高 | DONE |
 | TASK-0468 | WP-22 / PR-008 | Planner Adapters | WP-20 | 2–3 日 | 高 | DONE |
 | TASK-0469 | WP-23 / PR-009 | Shadow Scheduler | WP-01/21/22 | 4–6 日 | 高 | DONE |
-| TASK-0470 | WP-30 / PR-010 | Verification Gate | WP-23 | 3–4 日 | 高 | PLANNED |
+| TASK-0470 | WP-30 / PR-010 | Verification Gate | WP-23 | 3–4 日 | 高 | DONE |
 | TASK-0471 | WP-31 / PR-011 | Acceptance Judge | WP-30 | 2–3 日 | 高 | PLANNED |
 | TASK-0472 | WP-32 / PR-012 | Review / Resume | WP-21/23 | 3–5 日 | 高 | PLANNED |
 | TASK-0473 | WP-24 / PR-013 | Canonical 主链切流 | WP-31/32 | 2–4 日 | 极高 | PLANNED |
@@ -587,15 +587,15 @@ Pop-Location
 
 ### TASK-0470 / LTE-WP-30：Verification Provider 与 Fail-Closed Gate
 
-- 状态：`PLANNED`
+- 状态：`DONE`
 - 目标：将 Verification 从附属报告升级为状态门禁，并为命令验证增加 allowlist、timeout、workspace policy 和结构化错误。
-- 代码事实：当前 VerificationPolicy 直接运行命令；Executor 不用验证结果决定最终接受状态。
+- 完成事实：`VerificationPolicy` 已改为 fail-closed allowlist runner；`VerificationResult` 严格 schema 化；`DurableTaskStore.transition_node(... VERIFIED/VERIFICATION_FAILED ...)` 必须携带绑定 graph/node/work_order 的验证结果和 outbox evidence refs；Executor 对 `verification_plan.required=true` 的非 PASS 结果统一返回 `BLOCKED`。
 - 前置任务：TASK-0469。
 - In Scope：provider contract、`PASS/FAIL/ERROR/NOT_RUN`、安全 runner、required verification gate。
 - Out of Scope：Acceptance Judge、人工 Review UI。
 - 主要路径：`host_brain/agent_runtime/verification_policy.py`、`executor.py`、sandbox/tool policy adapters、tests。
 - 输出：VerificationResult、evidence refs、状态迁移和稳定 reason codes。
-- 验收：T-NLE-08；required `FAIL/ERROR/NOT_RUN → ACCEPTED` 数量为 0；超时和禁止命令均结构化失败。
+- 验收：T-NLE-08 已通过；required `FAIL/ERROR/NOT_RUN → VERIFIED/ACCEPTED` 数量为 0；超时、禁止命令和 workspace escape 均结构化失败。
 - 关联需求/测试：FR-NLE-003；T-NLE-08。
 - 停止条件：任一验证命令可逃逸 workspace/allowlist，或验证异常被当作通过。
 - 回滚：关闭新任务执行；不能回退为验证失败仍接受。

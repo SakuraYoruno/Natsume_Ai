@@ -50,6 +50,10 @@ from host_brain.agent_runtime.task_graph import (
     validate_task_graph_transition,
     validate_task_node_transition,
 )
+from host_brain.agent_runtime.verification_policy import (
+    VerificationGate,
+    VerificationResult,
+)
 from host_brain.core.ids import now_ms
 
 
@@ -795,6 +799,7 @@ class DurableTaskStore:
         expected_version: int,
         target_status: TaskNodeStatus | str,
         outbox: OutboxMessage,
+        verification_result: VerificationResult | Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         ts_ms = self._now()
         with self._transaction() as conn:
@@ -806,6 +811,19 @@ class DurableTaskStore:
                     TASK_STORE_INVALID,
                     "node cancellation must use request_cancel_node for atomic fencing",
                 )
+            if target in {TaskNodeStatus.VERIFIED, TaskNodeStatus.VERIFICATION_FAILED}:
+                graph_row = self._require_graph(conn, graph_id, graph_revision)
+                try:
+                    VerificationGate.validate_node_transition(
+                        verification_result,
+                        target_status=target.value,
+                        graph_id=str(graph_id),
+                        node_id=str(node_id),
+                        root_work_order_id=str(graph_row["root_work_order_id"]),
+                        outbox_evidence_refs=outbox.evidence_refs,
+                    )
+                except ContractViolation as exc:
+                    raise TaskStoreError(exc.reason_code, exc.detail) from exc
             node_payload = _validated_node_payload(row)
             node_payload["status"] = target.value
             node_payload["status_version"] = int(expected_version) + 1
