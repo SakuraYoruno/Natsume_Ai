@@ -5,7 +5,7 @@
 
 版本：v1.1
 日期：2026-07-10
-状态：`READY_FOR_EXECUTION`（TASK-0461～TASK-0473 已 `DONE`；其余任务按依赖 Gate 推进）
+状态：`READY_FOR_EXECUTION`（TASK-0461～TASK-0474 已 `DONE`；其余任务按依赖 Gate 推进）
 文档类型：DevTasks / Execution Contract
 任务编号：`TASK-0461`～`TASK-0486`
 逻辑工作包：`LTE-WP-00`～`LTE-WP-80`
@@ -420,7 +420,7 @@ Pop-Location
 | TASK-0471 | WP-31 / PR-011 | Acceptance Judge | WP-30 | 2–3 日 | 高 | DONE |
 | TASK-0472 | WP-32 / PR-012 | Review / Resume | WP-21/23 | 3–5 日 | 高 | DONE |
 | TASK-0473 | WP-24 / PR-013 | Canonical 主链切流 | WP-31/32 | 2–4 日 | 极高 | DONE |
-| TASK-0474 | WP-40 / PR-014 | Runtime Event / SSE Replay | WP-24 | 3–5 日 | 高 | PLANNED |
+| TASK-0474 | WP-40 / PR-014 | Runtime Event / SSE Replay | WP-24 | 3–5 日 | 高 | DONE |
 | TASK-0475 | WP-41 / PR-015 | Context 引用与预算治理 | WP-40 | 2–3 日 | 中 | PLANNED |
 | TASK-0476 | WP-50 / PR-016 | Life OCC 与 schema migration | WP-40 | 2–4 日 | 高 | PLANNED |
 | TASK-0477 | WP-51 / PR-017 | WorldProjection | WP-50 | 2–4 日 | 中 | PLANNED |
@@ -571,7 +571,7 @@ Pop-Location
 
 ### TASK-0469 / LTE-WP-23：Canonical Scheduler Shadow
 
-- 状态：`PLANNED`
+- 状态：`DONE`（2026-07-11；0056 runtime_event_timeline、durable cursor/backfill、TaskStore outbox publisher、Tribe/reference adapters、内部 JSON/SSE replay、dedupe key 与敏感字段 fail-closed gate 验收通过；replay 默认关闭，需 `HOST_RUNTIME_EVENT_REPLAY_ENABLED=true`）
 - 目标：实现 READY 选择、依赖阻断、retry/backoff、取消和恢复，但 shadow 阶段禁止真实副作用。
 - 代码事实：现有 retry/idempotency 字段缺少完整 runtime consumer；旧依赖感知执行器已不可达。
 - 前置任务：TASK-0462、TASK-0467、TASK-0468。

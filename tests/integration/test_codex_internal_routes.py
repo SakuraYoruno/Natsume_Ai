@@ -7,13 +7,16 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from host_brain.app.internal_agent_routes import router
+from host_brain.app.settings.core import get_core_settings
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.agent_runtime.job_registry import GLOBAL_AGENT_JOB_REGISTRY
+from host_brain.integrations.runtime_events import RuntimeEvent, RuntimeEventStore
 from host_brain.memory.life_memory import LifeMemoryStore
 
 
 ROOT = Path(__file__).resolve().parents[2]
 REVIEW_STORE_MIGRATION = ROOT / "host_brain" / "audit" / "migrations" / "0055_agent_runtime_review_store.sql"
+RUNTIME_EVENT_MIGRATION = ROOT / "host_brain" / "audit" / "migrations" / "0056_runtime_events.sql"
 
 
 def _client() -> TestClient:
@@ -249,3 +252,85 @@ def test_codex_internal_review_routes_resume_once(tmp_path, monkeypatch) -> None
     )
     assert duplicate_response.status_code == 409
     assert duplicate_response.json()["detail"]["reason_code"] == "REVIEW_RESUME_ALREADY_CONSUMED"
+
+
+def _runtime_route_event(index: int) -> RuntimeEvent:
+    return RuntimeEvent.create(
+        event_type="TASK_GRAPH_CREATED",
+        source_kind="TASK",
+        source_ref=f"task://route/runtime-event-{index}",
+        aggregate_type="TASK_GRAPH",
+        aggregate_id=f"route-runtime-event-{index}",
+        aggregate_version=index,
+        payload_ref=f"taskstore://event/TASK_GRAPH/route-runtime-event-{index}/{index}",
+        payload={
+            "aggregate_type": "TASK_GRAPH",
+            "aggregate_id": f"route-runtime-event-{index}",
+            "aggregate_version": index,
+            "payload_ref": f"taskstore://event/TASK_GRAPH/route-runtime-event-{index}/{index}",
+        },
+        evidence_refs=(f"evidence://route/runtime-event/{index}",),
+        ts_ms=1_700_000_000_000 + index,
+    )
+
+
+def test_codex_internal_runtime_events_route_replays_cursor(tmp_path, monkeypatch) -> None:
+    db_path = tmp_path / "runtime-event-routes.sqlite3"
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.executescript(RUNTIME_EVENT_MIGRATION.read_text(encoding="utf-8"))
+    store = RuntimeEventStore(db_path)
+    first = store.append_event(_runtime_route_event(1))
+    second = store.append_event(_runtime_route_event(2))
+    monkeypatch.setenv("HOST_RUNTIME_EVENT_DB_PATH", str(db_path))
+    monkeypatch.setenv("HOST_RUNTIME_EVENT_REPLAY_ENABLED", "true")
+    get_core_settings.cache_clear()
+
+    response = _client().get(f"/internal/codex/runtime/events?after={first['cursor']}&limit=10")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["event_count"] == 1
+    assert payload["next_cursor"] == second["cursor"]
+    assert payload["events"][0]["cursor"] == second["cursor"]
+    assert payload["events"][0]["dedupe_key"] == second["dedupe_key"]
+    get_core_settings.cache_clear()
+
+
+def test_codex_internal_runtime_events_sse_replays_after_last_event_id(tmp_path, monkeypatch) -> None:
+    db_path = tmp_path / "runtime-event-sse-routes.sqlite3"
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.executescript(RUNTIME_EVENT_MIGRATION.read_text(encoding="utf-8"))
+    store = RuntimeEventStore(db_path)
+    first = store.append_event(_runtime_route_event(1))
+    second = store.append_event(_runtime_route_event(2))
+    monkeypatch.setenv("HOST_RUNTIME_EVENT_DB_PATH", str(db_path))
+    monkeypatch.setenv("HOST_RUNTIME_EVENT_REPLAY_ENABLED", "true")
+    get_core_settings.cache_clear()
+
+    response = _client().get(
+        "/internal/codex/runtime/events/sse?limit=10",
+        headers={"Last-Event-ID": str(first["cursor"])},
+    )
+
+    assert response.status_code == 200
+    assert "text/event-stream" in response.headers.get("content-type", "")
+    assert f"id: {second['cursor']}" in response.text
+    assert '"event_id":"' in response.text
+    assert str(first["event_id"]) not in response.text
+    assert "event: runtime_event_cursor" in response.text
+    get_core_settings.cache_clear()
+
+
+def test_codex_internal_runtime_events_route_respects_replay_flag(tmp_path, monkeypatch) -> None:
+    db_path = tmp_path / "runtime-event-disabled-routes.sqlite3"
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.executescript(RUNTIME_EVENT_MIGRATION.read_text(encoding="utf-8"))
+    monkeypatch.setenv("HOST_RUNTIME_EVENT_DB_PATH", str(db_path))
+    monkeypatch.delenv("HOST_RUNTIME_EVENT_REPLAY_ENABLED", raising=False)
+    get_core_settings.cache_clear()
+
+    response = _client().get("/internal/codex/runtime/events")
+
+    assert response.status_code == 409
+    assert response.json()["detail"]["reason_code"] == "RUNTIME_EVENT_REPLAY_DISABLED"
+    get_core_settings.cache_clear()

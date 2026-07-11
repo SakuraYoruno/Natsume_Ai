@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 import threading
 from typing import Any, Mapping
 
-from fastapi import APIRouter, Body, HTTPException, Query
+from fastapi import APIRouter, Body, Header, HTTPException, Query
+from fastapi.responses import StreamingResponse
 
 from host_brain.agent_runtime import (
     AgentRuntimeExecutor,
@@ -26,6 +28,10 @@ from host_brain.agent_runtime.runtime_router import (
 from host_brain.app.settings.core import get_core_settings
 from host_brain.core.ids import now_ms
 from host_brain.core.trace_redaction import sanitize_public_payload
+from host_brain.integrations.runtime_events import (
+    RuntimeEventError,
+    RuntimeEventStore,
+)
 
 router = APIRouter(prefix="/internal/codex", tags=["internal-codex"])
 
@@ -66,11 +72,62 @@ def _get_review_store() -> ReviewStore:
     return ReviewStore(db_path)
 
 
+def _get_runtime_event_store() -> RuntimeEventStore:
+    raw_path = _text(os.environ.get("HOST_RUNTIME_EVENT_DB_PATH"))
+    db_path = Path(raw_path).expanduser() if raw_path else Path(__file__).resolve().parents[1] / "data" / "audit.sqlite3"
+    return RuntimeEventStore(db_path)
+
+
+def _require_runtime_event_replay_enabled() -> None:
+    if not get_core_settings().runtime_event_replay_enabled:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "reason_code": "RUNTIME_EVENT_REPLAY_DISABLED",
+                "detail": "set HOST_RUNTIME_EVENT_REPLAY_ENABLED=true to expose durable runtime replay",
+            },
+        )
+
+
 def _raise_review_store_error(exc: ReviewStoreError) -> None:
     status = 503 if exc.reason_code == "REVIEW_STORE_SCHEMA_NOT_READY" else 409
     if exc.reason_code in {"REVIEW_STORE_INVALID", "REVIEW_CHECKPOINT_REQUIRED"}:
         status = 400
     raise HTTPException(status_code=status, detail=exc.to_dict())
+
+
+def _raise_runtime_event_error(exc: RuntimeEventError) -> None:
+    status = 503 if exc.reason_code == "RUNTIME_EVENT_SCHEMA_NOT_READY" else 400
+    raise HTTPException(status_code=status, detail=exc.to_dict())
+
+
+def _runtime_event_next_cursor(events: list[dict[str, Any]], *, after: int) -> int:
+    if not events:
+        return int(after)
+    return int(events[-1]["cursor"])
+
+
+def _runtime_event_replay_after(*, after: int, last_event_id: str | None) -> int:
+    explicit_after = max(0, int(after))
+    if explicit_after > 0:
+        return explicit_after
+    raw_header = _text(last_event_id)
+    if not raw_header:
+        return 0
+    try:
+        return max(0, int(raw_header))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="RUNTIME_EVENT_LAST_EVENT_ID_INVALID") from exc
+
+
+def _format_runtime_sse_event(event_name: str, data: Mapping[str, Any], *, event_id: int | None = None) -> str:
+    lines = []
+    if event_id is not None:
+        lines.append(f"id: {int(event_id)}")
+    lines.append(f"event: {event_name}")
+    lines.append("data: " + json.dumps(dict(data), ensure_ascii=False, sort_keys=True, separators=(",", ":")))
+    lines.append("")
+    return "\n".join(lines) + "\n"
 
 
 def _runtime_owner_confirmation(order: AgentWorkOrder) -> str:
@@ -416,6 +473,83 @@ async def get_runtime_drain_report() -> dict[str, Any]:
         "accepted": True,
         "drain": build_legacy_drain_report(GLOBAL_AGENT_JOB_REGISTRY.list_jobs()),
     }
+
+
+@router.get("/runtime/events")
+async def list_runtime_events(
+    after: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=1000),
+    event_type: str | None = Query(None),
+    source_kind: str | None = Query(None),
+) -> dict[str, Any]:
+    _require_runtime_event_replay_enabled()
+    try:
+        events = _get_runtime_event_store().list_events(
+            after_cursor=after,
+            limit=limit,
+            event_type=event_type,
+            source_kind=source_kind,
+        )
+    except RuntimeEventError as exc:
+        _raise_runtime_event_error(exc)
+    return {
+        "accepted": True,
+        "schema_version": "Natsume.runtime.event.replay.v1",
+        "events": events,
+        "event_count": len(events),
+        "after": int(after),
+        "next_cursor": _runtime_event_next_cursor(events, after=after),
+        "client_dedupe": {
+            "field": "dedupe_key",
+            "rule": "ignore events whose dedupe_key has already been applied",
+        },
+    }
+
+
+@router.get("/runtime/events/sse")
+async def stream_runtime_events_sse(
+    after: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=1000),
+    event_type: str | None = Query(None),
+    source_kind: str | None = Query(None),
+    last_event_id: str | None = Header(default=None, alias="Last-Event-ID"),
+) -> StreamingResponse:
+    _require_runtime_event_replay_enabled()
+    replay_after = _runtime_event_replay_after(after=after, last_event_id=last_event_id)
+    try:
+        events = _get_runtime_event_store().list_events(
+            after_cursor=replay_after,
+            limit=limit,
+            event_type=event_type,
+            source_kind=source_kind,
+        )
+    except RuntimeEventError as exc:
+        _raise_runtime_event_error(exc)
+    next_cursor = _runtime_event_next_cursor(events, after=replay_after)
+
+    async def _event_stream():
+        for event in events:
+            yield _format_runtime_sse_event("runtime_event", event, event_id=int(event["cursor"]))
+        yield _format_runtime_sse_event(
+            "runtime_event_cursor",
+            {
+                "schema_version": "Natsume.runtime.event.cursor.v1",
+                "after": replay_after,
+                "next_cursor": next_cursor,
+                "event_count": len(events),
+                "client_dedupe_field": "dedupe_key",
+            },
+        )
+
+    return StreamingResponse(
+        _event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 async def _live_report(source: str) -> dict[str, Any]:

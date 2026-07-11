@@ -67,6 +67,9 @@ class CoreSettings(BaseSettings):
     task_runtime_canonical_owner: str = Field(
         default="", alias="HOST_TASK_RUNTIME_CANONICAL_OWNER"
     )
+    runtime_event_replay_enabled: bool = Field(
+        default=False, alias="HOST_RUNTIME_EVENT_REPLAY_ENABLED"
+    )
     sys_mode: str = Field(default="normal", alias="HOST_SYS_MODE")
 
     @classmethod
@@ -144,6 +147,13 @@ class CoreSettings(BaseSettings):
                 env_key="HOST_TASK_RUNTIME_CANONICAL_OWNER",
                 default_value="",
                 current_value=s.task_runtime_canonical_owner,
+                is_required=False,
+            ),
+            inspect_setting(
+                domain=domain, field_name="runtime_event_replay_enabled",
+                env_key="HOST_RUNTIME_EVENT_REPLAY_ENABLED",
+                default_value=False,
+                current_value=s.runtime_event_replay_enabled,
                 is_required=False,
             ),
             inspect_setting(
