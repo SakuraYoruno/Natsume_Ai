@@ -462,7 +462,6 @@ def get_digital_life_runtime_snapshot(
     )
 
 
-@router.post("/sys-mode", response_model=SysModeSwitchResponse)
 def switch_sys_mode(body: SysModeSwitchRequest):
     """切换系统运行模式（手动 / API 触发）。"""
     service = _get_mode_transition_service()
@@ -513,7 +512,6 @@ def get_sys_mode_history(
     )
 
 
-@router.put("/sys-mode/auto-rules")
 def update_auto_rules(body: AutoRulesUpdateRequest):
     """更新自动切换规则开关。"""
     service = _get_mode_transition_service()
@@ -524,7 +522,6 @@ def update_auto_rules(body: AutoRulesUpdateRequest):
     }
 
 
-@router.post("/sys-mode/event")
 def post_sys_mode_event(
     event_type: str = Query(..., description="事件类型"),
 ):

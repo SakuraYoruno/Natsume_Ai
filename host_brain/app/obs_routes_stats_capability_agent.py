@@ -727,7 +727,6 @@ def preview_capability_forge_proposal(body: CapabilityForgePreviewRequest) -> Ca
     return CapabilityForgePreviewResponse(timestamp=_now_ms(), candidate=dict(candidate), recommended_release_plan={"shadow": {"enabled": True}, "canary": {"enabled": True, "traffic_percent": int(body.canary_traffic_percent)}, "full": {"enabled": True}, "rollback": {"enabled": True, "observe_window_minutes": 30}}, recommendation=recommendation)
 
 
-@router.post("/capability-gaps/forge-proposals", response_model=CapabilityForgeProposalResponse)
 def create_capability_forge_proposal(body: CapabilityForgeCreateRequest) -> CapabilityForgeProposalResponse:
     from host_brain.app.dependencies import get_capability_forge_service
     try:
@@ -755,7 +754,6 @@ def get_capability_forge_proposal(proposal_id: str) -> CapabilityForgeProposalRe
     return CapabilityForgeProposalResponse(timestamp=_now_ms(), proposal=proposal)
 
 
-@router.post("/capability-gaps/forge-proposals/{proposal_id}/approve", response_model=CapabilityForgeProposalResponse)
 def approve_capability_forge_proposal(proposal_id: str, body: CapabilityForgeApproveRequest) -> CapabilityForgeProposalResponse:
     from host_brain.app.dependencies import get_capability_forge_service
     stage = str(body.target_stage or "").strip().lower()
@@ -772,7 +770,6 @@ def approve_capability_forge_proposal(proposal_id: str, body: CapabilityForgeApp
     return CapabilityForgeProposalResponse(timestamp=_now_ms(), proposal=proposal)
 
 
-@router.post("/capability-gaps/forge-proposals/{proposal_id}/rollback", response_model=CapabilityForgeProposalResponse)
 def rollback_capability_forge_proposal(proposal_id: str, body: CapabilityForgeRollbackRequest) -> CapabilityForgeProposalResponse:
     from host_brain.app.dependencies import get_capability_forge_service
     try:
@@ -784,7 +781,6 @@ def rollback_capability_forge_proposal(proposal_id: str, body: CapabilityForgeRo
     return CapabilityForgeProposalResponse(timestamp=_now_ms(), proposal=proposal)
 
 
-@router.post("/capability-gaps/forge-proposals/runtime-match", response_model=CapabilityForgeRuntimeMatchResponse)
 def capability_forge_runtime_match(body: CapabilityForgeRuntimeMatchRequest) -> CapabilityForgeRuntimeMatchResponse:
     from host_brain.app.dependencies import get_capability_forge_service
     decision = get_capability_forge_service().get_runtime_route_override(request_id=body.request_id, suggested_family=body.suggested_family, missing_capability_tags=body.missing_capability_tags, reason_code=body.reason_code)

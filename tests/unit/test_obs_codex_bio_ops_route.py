@@ -294,182 +294,92 @@ def test_codex_bio_ops_observability_compacts_latest_run(tmp_path, monkeypatch) 
     }
 
 
-def test_codex_bio_ops_adoption_decision_api_records_artifact(tmp_path, monkeypatch) -> None:
+def _tree_snapshot(root) -> dict[str, bytes]:
+    return {
+        str(path.relative_to(root)): path.read_bytes()
+        for path in root.rglob("*")
+        if path.is_file()
+    }
+
+
+def test_codex_bio_ops_legacy_mutations_are_unregistered_and_side_effect_free(
+    tmp_path,
+    monkeypatch,
+) -> None:
     run_dir = tmp_path / "20260425_120000"
     candidate_dir = run_dir / "bio_ops_task_artifacts" / "habit_compiler" / "task-1"
-    candidate = {
-        "candidate_id": "candidate-1",
-        "task_id": "task-1",
-        "capability": "habit_compiler",
-        "owner_organ": "social_brain_agent",
-        "output_kind": "habit_candidate",
-        "summary": "Habit candidate needs owner review.",
-        "payload": {"proposal": {"kind": "habit_candidate", "target": "candidate_queue"}},
-        "evidence_refs": ["chat:pattern"],
-        "artifacts": [{"artifact_type": "report", "path": str(candidate_dir / "report.md")}],
-        "risk_flags": [],
-        "review_required": True,
-        "next_actions": ["social_brain_agent must explicitly accept or reject this candidate."],
-        "status": "PENDING_REVIEW",
-        "created_at_ms": 1,
-    }
-    _write_json(candidate_dir / "adoption_candidate.json", candidate)
-
-    monkeypatch.setattr(route_module, "OBSERVABLE_EFFECTS_ROOT", tmp_path)
-    app = FastAPI()
-    app.include_router(route_module.router)
-    client = TestClient(app)
-
-    listed = client.get("/obs/codex-bio-ops/adoptions").json()
-    assert listed["ok"] is True
-    assert listed["count"] == 1
-    assert listed["adoptions"][0]["candidate_id"] == "candidate-1"
-    assert listed["adoptions"][0]["direct_long_term_write"] is False
-
-    detail = client.get("/obs/codex-bio-ops/adoptions/candidate-1").json()
-    assert detail["adoption"]["decision"] is None
-    assert detail["adoption"]["payload"]["proposal"]["kind"] == "habit_candidate"
-
-    forbidden = client.post(
-        "/obs/codex-bio-ops/adoptions/candidate-1/accept",
-        json={"owner_organ": "immune_agent"},
-    )
-    assert forbidden.status_code == 403
-
-    accepted = client.post(
-        "/obs/codex-bio-ops/adoptions/candidate-1/accept",
-        json={"owner_organ": "social_brain_agent", "operator": "pytest", "reason": "looks good"},
-    )
-    assert accepted.status_code == 200
-    accepted_payload = accepted.json()
-    assert accepted_payload["decision"]["decision"] == "OWNER_ACCEPTED"
-    assert accepted_payload["decision"]["direct_long_term_write"] is False
-    assert accepted_payload["decision"]["write_policy"] == "owner_decision_artifact_only"
-
-    decision_path = candidate_dir / "adoption_decision.json"
-    assert decision_path.exists()
-    decision = json.loads(decision_path.read_text(encoding="utf-8"))
-    assert decision["owner_organ"] == "social_brain_agent"
-    assert decision["decision"] == "OWNER_ACCEPTED"
-    assert decision["metadata"]["source_candidate_path"] == str(candidate_dir / "adoption_candidate.json")
-
-    assert client.get("/obs/codex-bio-ops/adoptions").json()["count"] == 0
-    decided = client.get("/obs/codex-bio-ops/adoptions?status=decided").json()
-    assert decided["count"] == 1
-    assert decided["adoptions"][0]["decision"]["decision"] == "OWNER_ACCEPTED"
-
-    inbox = client.get("/obs/codex-bio-ops/owner-inbox").json()
-    assert inbox["ok"] is True
-    assert inbox["status_counts"]["READY_FOR_OWNER_IMPORT"] == 1
-    assert inbox["items"][0]["import_allowed"] is True
-
-    materialized = client.post("/obs/codex-bio-ops/owner-inbox/materialize").json()
-    assert materialized["materialized_count"] == 1
-    owner_import_path = run_dir / "owner_inbox" / "social_brain_agent" / "candidate-1" / "owner_import_candidate.json"
-    assert owner_import_path.exists()
-    owner_import = json.loads(owner_import_path.read_text(encoding="utf-8"))
-    assert owner_import["write_policy"] == "owner_import_candidate_only"
-    assert owner_import["direct_long_term_write"] is False
-    assert owner_import["owner_channel"]["channel_id"] == "social_brain_candidate_queue"
-
-    import_candidates = client.get("/obs/codex-bio-ops/owner-inbox/import-candidates").json()
-    assert import_candidates["status_counts"]["READY_FOR_ORGAN_CONSUMPTION"] == 1
-
-    packets = client.post("/obs/codex-bio-ops/owner-inbox/intake-packets").json()
-    assert packets["packet_count"] == 1
-    owner_packet_path = run_dir / "owner_inbox" / "social_brain_agent" / "owner_intake_packet.json"
-    assert owner_packet_path.exists()
-    owner_packet = json.loads(owner_packet_path.read_text(encoding="utf-8"))
-    assert owner_packet["write_policy"] == "owner_intake_packet_only"
-    assert owner_packet["direct_long_term_write"] is False
-    assert owner_packet["import_candidates"][0]["owner_channel"]["state_owner"] == "social_brain_agent"
-
-    consumed = client.post("/obs/codex-bio-ops/owner-queues/consume").json()
-    assert consumed["queued_count"] == 1
-    owner_queue_path = (
-        run_dir
-        / "owner_queues"
-        / "social_brain_agent"
-        / "social_brain_candidate_queue"
-        / "candidate-1"
-        / "queue_item.json"
-    )
-    assert owner_queue_path.exists()
-    queue_item = json.loads(owner_queue_path.read_text(encoding="utf-8"))
-    assert queue_item["write_policy"] == "owner_queue_candidate_only"
-    assert queue_item["direct_long_term_write"] is False
-    assert queue_item["durable_write_performed"] is False
-
-    queues = client.get("/obs/codex-bio-ops/owner-queues").json()
-    assert queues["status_counts"]["QUEUED_FOR_OWNER"] == 1
-    assert queues["items"][0]["channel_id"] == "social_brain_candidate_queue"
-
-    owner_state_import = client.post("/obs/codex-bio-ops/owner-state/import").json()
-    assert owner_state_import["imported_count"] == 1
-    owner_state_path = (
-        run_dir
-        / "owner_state"
-        / "social_brain_agent"
-        / "social_brain_candidate_queue"
-        / "candidate-1"
-        / "owner_candidate_state.json"
-    )
-    assert owner_state_path.exists()
-    owner_state_payload = json.loads(owner_state_path.read_text(encoding="utf-8"))
-    assert owner_state_payload["write_policy"] == "owner_durable_candidate_only"
-    assert owner_state_payload["direct_long_term_write"] is False
-    assert owner_state_payload["durable_memory_write_performed"] is False
-
-    owner_state = client.get("/obs/codex-bio-ops/owner-state").json()
-    assert owner_state["status_counts"]["IMPORTED_FOR_OWNER_REVIEW"] == 1
-    assert owner_state["items"][0]["state_owner"] == "social_brain_agent"
-
-    accepted_state = client.post(
-        "/obs/codex-bio-ops/owner-state/candidate-1/accept",
-        json={"owner_organ": "social_brain_agent", "operator": "pytest", "reason": "accept runtime hint"},
-    ).json()
-    assert accepted_state["status"] == "OWNER_STATE_ACCEPTED"
-    assert accepted_state["owner_runtime_hint_write_performed"] is True
-    assert accepted_state["direct_long_term_write"] is False
-
-    hints = client.get("/obs/codex-bio-ops/owner-state/runtime-hints").json()
-    assert hints["count"] == 1
-    assert hints["items"][0]["write_policy"] == "owner_runtime_hint_only"
-    assert hints["items"][0]["direct_long_term_write"] is False
-
-    duplicate = client.post(
-        "/obs/codex-bio-ops/adoptions/candidate-1/reject",
-        json={"owner_organ": "social_brain_agent"},
-    )
-    assert duplicate.status_code == 409
-
-
-def test_codex_bio_ops_daily_cycle_api_writes_observable_run(tmp_path, monkeypatch) -> None:
-    monkeypatch.setattr(route_module, "OBSERVABLE_EFFECTS_ROOT", tmp_path)
-    app = FastAPI()
-    app.include_router(route_module.router)
-    client = TestClient(app)
-
-    response = client.post(
-        "/obs/codex-bio-ops/daily-cycle/run",
-        json={
-            "run_id": "daily-api-test",
-            "inputs": {
-                "evidence_refs": ["pytest:obs_daily"],
-                "message": "继续",
-                "planned_path": ["bio_ops_daily_cycle"],
-            },
+    _write_json(
+        candidate_dir / "adoption_candidate.json",
+        {
+            "candidate_id": "candidate-1",
+            "task_id": "task-1",
+            "capability": "habit_compiler",
+            "owner_organ": "social_brain_agent",
+            "output_kind": "habit_candidate",
+            "summary": "Habit candidate needs owner review.",
+            "payload": {"proposal": {"kind": "habit_candidate"}},
+            "evidence_refs": ["chat:pattern"],
+            "artifacts": [],
+            "risk_flags": [],
+            "review_required": True,
+            "next_actions": ["owner review required"],
+            "status": "PENDING_REVIEW",
+            "created_at_ms": 1,
         },
     )
+    monkeypatch.setattr(route_module, "OBSERVABLE_EFFECTS_ROOT", tmp_path)
+    app = FastAPI()
+    app.include_router(route_module.router)
+    client = TestClient(app)
 
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["ok"] is True
-    assert payload["run_id"] == "daily-api-test"
-    assert payload["direct_long_term_write"] is False
-    assert (tmp_path / "daily-api-test" / "bio_ops_daily_full.json").exists()
+    listed = client.get("/obs/codex-bio-ops/adoptions")
+    detail = client.get("/obs/codex-bio-ops/adoptions/candidate-1")
+    assert listed.status_code == 200
+    assert listed.json()["adoptions"][0]["candidate_id"] == "candidate-1"
+    assert detail.status_code == 200
+    assert detail.json()["adoption"]["decision"] is None
 
-    observed = client.get("/obs/codex-bio-ops?run_id=daily-api-test").json()
-    assert observed["ok"] is True
-    assert observed["bio_ops"]["capability_count"] == payload["bio_ops_capability_count"]
-    assert observed["bio_ops"]["pending_adoptions"]
+    before = _tree_snapshot(tmp_path)
+    removed_mutations = (
+        (
+            "/obs/codex-bio-ops/daily-cycle/run",
+            {"run_id": "must-not-exist", "inputs": {"message": "continue"}},
+        ),
+        (
+            "/obs/codex-bio-ops/adoptions/candidate-1/accept",
+            {"owner_organ": "social_brain_agent"},
+        ),
+        (
+            "/obs/codex-bio-ops/adoptions/candidate-1/reject",
+            {"owner_organ": "social_brain_agent"},
+        ),
+        ("/obs/codex-bio-ops/owner-inbox/materialize", {}),
+        ("/obs/codex-bio-ops/owner-inbox/intake-packets", {}),
+        ("/obs/codex-bio-ops/owner-queues/consume", {}),
+        ("/obs/codex-bio-ops/owner-state/import", {}),
+        (
+            "/obs/codex-bio-ops/owner-state/candidate-1/accept",
+            {"owner_organ": "social_brain_agent"},
+        ),
+        (
+            "/obs/codex-bio-ops/owner-state/candidate-1/reject",
+            {"owner_organ": "social_brain_agent"},
+        ),
+    )
+    for path, payload in removed_mutations:
+        response = client.post(path, json=payload)
+        assert response.status_code in {404, 405}, path
+    assert _tree_snapshot(tmp_path) == before
+    assert not (tmp_path / "must-not-exist").exists()
+
+    pure_queries = (
+        "/obs/codex-bio-ops/adoptions",
+        "/obs/codex-bio-ops/adoptions/candidate-1",
+        "/obs/codex-bio-ops/owner-inbox",
+        "/obs/codex-bio-ops/owner-inbox/import-candidates",
+        "/obs/codex-bio-ops/owner-queues",
+        "/obs/codex-bio-ops/owner-state",
+        "/obs/codex-bio-ops/owner-state/runtime-hints",
+    )
+    for path in pure_queries:
+        assert client.get(path).status_code == 200, path

@@ -773,7 +773,6 @@ def get_codex_bio_ops_observability(run_id: str | None = Query(default=None)) ->
     }
 
 
-@router.post("/codex-bio-ops/daily-cycle/run")
 def run_codex_bio_ops_daily_cycle(
     body: dict[str, Any] | None = Body(default=None),
 ) -> dict[str, Any]:
@@ -821,7 +820,6 @@ def get_codex_bio_ops_adoption(
     }
 
 
-@router.post("/codex-bio-ops/adoptions/{candidate_id}/accept")
 def accept_codex_bio_ops_adoption(
     candidate_id: str,
     run_id: str | None = Query(default=None),
@@ -835,7 +833,6 @@ def accept_codex_bio_ops_adoption(
     )
 
 
-@router.post("/codex-bio-ops/adoptions/{candidate_id}/reject")
 def reject_codex_bio_ops_adoption(
     candidate_id: str,
     run_id: str | None = Query(default=None),
@@ -869,7 +866,6 @@ def get_codex_bio_ops_owner_inbox(
     return payload
 
 
-@router.post("/codex-bio-ops/owner-inbox/materialize")
 def materialize_codex_bio_ops_owner_inbox(
     run_id: str | None = Query(default=None),
     owner_organ: str | None = Query(default=None),
@@ -900,7 +896,6 @@ def get_codex_bio_ops_owner_import_candidates(
     return payload
 
 
-@router.post("/codex-bio-ops/owner-inbox/intake-packets")
 def materialize_codex_bio_ops_owner_intake_packets(
     run_id: str | None = Query(default=None),
     owner_organ: str | None = Query(default=None),
@@ -932,7 +927,6 @@ def get_codex_bio_ops_owner_queues(
     return payload
 
 
-@router.post("/codex-bio-ops/owner-queues/consume")
 def consume_codex_bio_ops_owner_queues(
     run_id: str | None = Query(default=None),
     owner_organ: str | None = Query(default=None),
@@ -968,7 +962,6 @@ def get_codex_bio_ops_owner_state(
     return payload
 
 
-@router.post("/codex-bio-ops/owner-state/import")
 def import_codex_bio_ops_owner_state(
     run_id: str | None = Query(default=None),
     owner_organ: str | None = Query(default=None),
@@ -1034,7 +1027,6 @@ def _review_codex_bio_ops_owner_state(
     return result
 
 
-@router.post("/codex-bio-ops/owner-state/{candidate_id}/accept")
 def accept_codex_bio_ops_owner_state(
     candidate_id: str,
     run_id: str | None = Query(default=None),
@@ -1048,7 +1040,6 @@ def accept_codex_bio_ops_owner_state(
     )
 
 
-@router.post("/codex-bio-ops/owner-state/{candidate_id}/reject")
 def reject_codex_bio_ops_owner_state(
     candidate_id: str,
     run_id: str | None = Query(default=None),

@@ -87,7 +87,6 @@ class AvatarBehaviorRequest(BaseModel):
     source: Optional[str] = "monitor"
 
 
-@router.post("/avatar/behavior", response_model=Dict[str, Any])
 async def post_avatar_behavior_control(body: AvatarBehaviorRequest):
     """Apply a safe high-level avatar behavior from monitor controls."""
     now = _now_ms()
@@ -489,40 +488,6 @@ def get_wechat_stats(
         last_event_ts=last_event_ts,
         timestamp=now,
     )
-
-
-@router.post("/wechat/reset", response_model=Dict[str, Any])
-def reset_wechat_channel(
-    reason: Optional[str] = Query(None, description="重置原因"),
-):
-    """Ref #37: 手动重置 WeChat 通道状态（清除频率限制计数器）。"""
-    try:
-        from host_brain.channels.wechat import WeChatChannel  # noqa: PLC0415
-        _channel = WeChatChannel.get_instance()
-        if _channel is not None and hasattr(_channel, "reset_rate_limits"):
-            _channel.reset_rate_limits()
-            return {
-                "status": "OK",
-                "reason_code": "WECHAT_CHANNEL_RESET",
-                "detail": f"WeChat 通道频率限制已重置（原因：{reason or 'manual'}）",
-                "timestamp": _now_ms(),
-            }
-    except (ImportError, AttributeError):
-        pass
-    except Exception as exc:
-        logger.warning("WeChat 通道重置失败: %s", exc)
-        return {
-            "status": "DEGRADED",
-            "reason_code": "WECHAT_RESET_FAILED",
-            "detail": str(exc)[:200],
-            "timestamp": _now_ms(),
-        }
-    return {
-        "status": "OK",
-        "reason_code": "WECHAT_CHANNEL_RESET_NOOP",
-        "detail": "WeChat 通道重置（无状态实例，已记录）",
-        "timestamp": _now_ms(),
-    }
 
 
 # ---------------------------------------------------------------------------
