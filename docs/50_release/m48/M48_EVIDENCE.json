@@ -1,0 +1,231 @@
+{
+  "schema_version": "Natsume.release.m48_seal_evidence.v1",
+  "release_id": "release://natsume-ai/m48-a/2026-07-11",
+  "records": [
+    {
+      "evidence_id": "release_seal_contract",
+      "classification": "CONTRACT_TEST",
+      "status": "PASS",
+      "command": [
+        "python",
+        "-m",
+        "pytest",
+        "-q",
+        "tests/unit/test_run_m48_release_seal.py",
+        "tests/contract/test_nle_release_seal_contract.py"
+      ],
+      "evidence_refs": [
+        "repo://docs/35_quality/audits/NLE_WP80_TASK0486_VALIDATION_20260711.md",
+        "repo://host_brain/release/m48_seal.py"
+      ]
+    },
+    {
+      "evidence_id": "offline_release_integration",
+      "classification": "INTEGRATION_TEST",
+      "status": "PASS",
+      "command": [
+        "python",
+        "-m",
+        "pytest",
+        "-q",
+        "tests/integration/test_nle_release_seal_integration.py"
+      ],
+      "evidence_refs": [
+        "repo://tests/integration/test_nle_release_seal_integration.py",
+        "repo://docs/35_quality/audits/NLE_WP80_TASK0486_VALIDATION_20260711.md"
+      ]
+    },
+    {
+      "evidence_id": "final_python_wave",
+      "classification": "FULL_SUITE",
+      "status": "BLOCKED",
+      "command": [
+        "python",
+        "-u",
+        "-m",
+        "pytest",
+        "-vv",
+        "--tb=short",
+        "--durations=50",
+        "-o",
+        "faulthandler_timeout=300",
+        "--junitxml=artifacts/release/m48/evidence/pytest-full.xml"
+      ],
+      "evidence_refs": [
+        "artifact://release/m48/evidence/pytest-full.xml",
+        "artifact://release/m48/evidence/pytest-full.log",
+        "repo://docs/35_quality/audits/NLE_WP80_TASK0486_VALIDATION_20260711.md"
+      ]
+    },
+    {
+      "evidence_id": "targeted_failure_closure",
+      "classification": "TARGETED_REGRESSION",
+      "status": "PASS",
+      "command": [
+        "python",
+        "-m",
+        "pytest",
+        "-q",
+        "tests/unit/test_bond_phase5.py",
+        "tests/unit/test_monitor_api_boundaries.py",
+        "tests/unit/test_pentest_autonomous_redteam.py"
+      ],
+      "evidence_refs": [
+        "artifact://release/m48/evidence/pytest-pentest-autonomous-redteam.xml",
+        "repo://docs/35_quality/audits/NLE_WP80_TASK0486_VALIDATION_20260711.md"
+      ]
+    },
+    {
+      "evidence_id": "external_dependency_classification",
+      "classification": "PROD_ENV_TEST",
+      "status": "BLOCKED",
+      "command": [
+        "python",
+        "-m",
+        "pytest",
+        "-q",
+        "tests/integration/test_neo4j_prod_env.py",
+        "tests/integration/test_bond_queue_summarizer_prod_env.py",
+        "tests/integration/test_memory_hub_prod_env.py"
+      ],
+      "evidence_refs": [
+        "artifact://release/m48/evidence/pytest-focused-external-env-classification.xml",
+        "repo://docs/50_release/m48/KNOWN_LIMITATIONS.md"
+      ]
+    },
+    {
+      "evidence_id": "monitor_build_and_node",
+      "classification": "MONITOR_BUILD",
+      "status": "PASS",
+      "command": [
+        "npm",
+        "run",
+        "build"
+      ],
+      "evidence_refs": [
+        "repo://host_brain/app/static/monitor/index.html",
+        "repo://docs/35_quality/audits/NLE_WP80_TASK0486_VALIDATION_20260711.md"
+      ]
+    },
+    {
+      "evidence_id": "monitor_e2e_targeted_closure",
+      "classification": "MONITOR_E2E",
+      "status": "PASS",
+      "command": [
+        "npx",
+        "playwright",
+        "test",
+        "e2e/monitor-interactions-smoke.spec.js",
+        "--grep",
+        "Pentest|Security Immune|Tools catalog"
+      ],
+      "evidence_refs": [
+        "repo://host_brain/app/monitor_ui/e2e/monitor-interactions-smoke.spec.js",
+        "repo://docs/35_quality/audits/NLE_WP80_TASK0486_VALIDATION_20260711.md"
+      ]
+    },
+    {
+      "evidence_id": "migration_restart_replay_faults",
+      "classification": "OFFLINE_DRILL",
+      "status": "PASS",
+      "command": [
+        "python",
+        "-m",
+        "pytest",
+        "-q",
+        "tests/integration/test_nle_release_seal_integration.py"
+      ],
+      "evidence_refs": [
+        "repo://tests/integration/test_nle_release_seal_integration.py",
+        "repo://docs/50_release/m48/M48_ROLLBACK_MATRIX.md"
+      ]
+    },
+    {
+      "evidence_id": "static_and_doc_gate",
+      "classification": "DELIVERY_GATE",
+      "status": "PASS",
+      "command": [
+        "python",
+        "tools/doc_lint/delivery_gate.py",
+        "--root",
+        ".",
+        "--checks",
+        "static_scan,doc_gate",
+        "--doc-path",
+        ".github/workflows/README.md",
+        "--report-file",
+        "artifacts/release/m48/evidence/delivery_gate_report.json"
+      ],
+      "evidence_refs": [
+        "artifact://release/m48/evidence/delivery_gate_report.json",
+        "repo://docs/35_quality/audits/NLE_WP80_TASK0486_VALIDATION_20260711.md"
+      ]
+    },
+    {
+      "evidence_id": "identity_previous_release_continuity",
+      "classification": "IDENTITY_CONTINUITY",
+      "status": "BLOCKED",
+      "command": [
+        "git",
+        "log",
+        "--all",
+        "--",
+        "docs/50_release/m48"
+      ],
+      "evidence_refs": [
+        "unavailable://identity/previous-release",
+        "repo://docs/50_release/m48/M48_IDENTITY_STATUS.md"
+      ]
+    },
+    {
+      "evidence_id": "redis_live_integration",
+      "classification": "REDIS_INTEGRATION",
+      "status": "BLOCKED",
+      "command": [
+        "python",
+        "-m",
+        "pytest",
+        "-q",
+        "tests/integration/test_rate_limit_redis_integration.py"
+      ],
+      "evidence_refs": [
+        "unavailable://redis/test-url",
+        "repo://docs/50_release/m48/KNOWN_LIMITATIONS.md"
+      ]
+    },
+    {
+      "evidence_id": "live_service_probe",
+      "classification": "LIVE_SERVICE_PROBE",
+      "status": "BLOCKED",
+      "command": [
+        "powershell",
+        "-NoProfile",
+        "-Command",
+        "Get-NetTCPConnection -State Listen -LocalPort 18080,18082,6379"
+      ],
+      "evidence_refs": [
+        "unavailable://service/host-main",
+        "unavailable://service/observability",
+        "repo://docs/50_release/m48/KNOWN_LIMITATIONS.md"
+      ]
+    },
+    {
+      "evidence_id": "production_cutover_and_rollback",
+      "classification": "PRODUCTION_DRILL",
+      "status": "BLOCKED",
+      "command": [
+        "python",
+        "-m",
+        "pytest",
+        "-q",
+        "tests/integration/test_nle_release_seal_integration.py",
+        "-k",
+        "canary or rollback"
+      ],
+      "evidence_refs": [
+        "unavailable://production/approved-target",
+        "repo://docs/50_release/m48/M48_ROLLBACK_MATRIX.md"
+      ]
+    }
+  ]
+}

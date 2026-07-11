@@ -267,3 +267,5 @@ TaskStore 的持久化语义不仅是 SQLite 表，还包括：
 | Trace | `R-178`～`R-182` |
 
 架构基线状态为 ADOPTED 不等于代码已经完成。任何能力只有在对应 TASK、T-NLE、迁移/对账、回滚证据和 Seal Result 均成立后，才可从规划口径变成当前代码事实。
+
+当前执行状态（2026-07-11）：TASK-0461～TASK-0485 已完成；TASK-0486 已生成全链验证、rollback matrix 和机器可读 Seal Result，但状态为 `BLOCKED`，不得表述为 `SEALED`。阻塞项是受信 previous IdentitySnapshot、live/prod rollback target 与 MASTER 最终批准。

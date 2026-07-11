@@ -8,7 +8,7 @@
 状态：READY_FOR_PROGRAM_EXECUTION
 文档类型：DevTasks / Master Execution Contract
 程序任务编号：TASK-0461～TASK-0622，共 162 项，禁止复用、跳号或重定义
-当前执行入口：TASK-0461～TASK-0485 已完成；M48-A 当前仅剩 TASK-0486 Release Seal 与回滚演练；M48-B Entry Gate 尚未获 MASTER 批准；M49～M57 状态为 PROGRAMMED
+当前执行入口：TASK-0461～TASK-0485 已完成；TASK-0486 本地 Release Seal/rollback 资产已完成但状态为 BLOCKED，等待 identity continuity、获批生产演练和 MASTER Seal；M48-B Entry Gate 尚未获 MASTER 批准；M49～M57 状态为 PROGRAMMED
 代码基线：dev@1ec8be1a8a20397627855aa946c0ff8aaaa87b72
 工作区状态：dirty；已有未提交业务代码、运行数据和本地配置必须原位保护
 完整目标蓝图：docs/50_project/arch/NATSUME_AI_V1_FULL_ARCHITECTURE_TARGET_20260710.md
@@ -280,7 +280,7 @@ M48-B 从 `PROGRAMMED` 解锁为 `PLANNED` 前必须同时满足：
 | TASK-0483 | Execution UI | DONE | 2026-07-11；versioned operator read model、DAG/attempt/budget/verification/review/resume/cursor UI、96 E2E、deterministic build 与 T-NLE-21 通过 |
 | TASK-0484 | Life UI | DONE | 2026-07-11；producer-backed World/Appraisal/Bond/Scene/Arbiter 只读视图、trusted preview、无 Life 写入、默认关闭与 T-NLE-22 通过 |
 | TASK-0485 | Capability / Health / Identity UI | DONE | 2026-07-11；versioned governance snapshot、Skills/System Config/Security UI、durable Review locator、无自动升级、identity 正文隔离、Pentest Lab-only fail-closed 与 T-NLE-23 通过 |
-| TASK-0486 | M48-A Release Seal | PLANNED | M48-A 权威任务卡 |
+| TASK-0486 | M48-A Release Seal | BLOCKED | 2026-07-11；本地验证与 Seal Result 完成，阻塞于 previous identity、live/prod drill 与 MASTER Seal |
 
 ---
 
