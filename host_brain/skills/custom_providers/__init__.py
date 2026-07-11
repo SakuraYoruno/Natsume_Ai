@@ -1,5 +1,9 @@
-"""Custom skill providers loaded by `provider_catalog.py`.
+"""Retired legacy Python package for custom Skill providers.
 
-Drop a `*_provider.py` module here and expose `SKILL_PROVIDER_CLASS`.
-The provider will be auto-discovered on next registry rebuild / service restart.
+TASK-0490 deliberately prevents package import here.  Signed external bundles
+must remain in the supply-chain quarantine/staging area and may only contribute
+verified declarative metadata through the new adapter; copying Python into this
+package must never restore the old in-process hot-import path.
 """
+
+raise RuntimeError("SKILL_SUPPLY_CHAIN_LEGACY_PACKAGE_IMPORT_REJECTED")

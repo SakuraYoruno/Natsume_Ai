@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import ast
 import importlib
-import inspect
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -14,6 +13,9 @@ from host_brain.skills.provider_catalog import (
     CUSTOM_PROVIDER_DIR,
     CUSTOM_PROVIDER_PACKAGE,
 )
+
+
+_MAX_LEGACY_PROVIDER_BYTES = 256 * 1024
 
 
 @dataclass(frozen=True)
@@ -35,6 +37,8 @@ def normalize_provider_filename(filename: str) -> str:
     if not raw:
         raise ValueError("filename is required")
     name = Path(raw).name.strip()
+    if name != raw or "/" in raw or "\\" in raw:
+        raise ValueError("filename must not contain a path")
     if not name:
         raise ValueError("filename is required")
     if name in {"__init__.py", "README.md"}:
@@ -95,12 +99,18 @@ def get_provider_path(filename: str) -> Path:
 
 
 def write_provider_source(filename: str, source_code: str) -> Path:
+    """Reject the legacy raw-source installer before it can reach import paths.
+
+    A single Python source string cannot carry the TASK-0490 full inventory,
+    signature, SBOM and sandbox contract.  Signed bundles use the supply-chain
+    quarantine adapter; keeping this function as an explicit rejection lets
+    the existing HTTP route fail closed without writing into the active Python
+    package or silently preserving the old hot-import behavior.
+    """
+
     normalized = normalize_provider_filename(filename)
     validate_provider_source(source_code, filename=normalized)
-    CUSTOM_PROVIDER_DIR.mkdir(parents=True, exist_ok=True)
-    path = CUSTOM_PROVIDER_DIR / normalized
-    path.write_text(str(source_code).rstrip() + "\n", encoding="utf-8")
-    return path
+    raise ValueError("SKILL_SUPPLY_CHAIN_LEGACY_SOURCE_REJECTED")
 
 
 def load_provider_template() -> str:
@@ -108,35 +118,77 @@ def load_provider_template() -> str:
     return template_path.read_text(encoding="utf-8")
 
 
-def _extract_skill_names(provider_cls: type) -> tuple[str, ...]:
-    provider = provider_cls()
-    declarative_entries = getattr(provider, "__skill_meta_entries__", None)
-    if callable(declarative_entries):
-        return tuple(entry.skill_name for entry in declarative_entries())
+def _static_provider_metadata(
+    source: str,
+    *,
+    filename: str,
+) -> tuple[str, tuple[str, ...]]:
+    """Read provider metadata from AST without importing attacker code."""
 
-    names: list[str] = []
-    for attr_name in sorted(dir(provider)):
-        candidate = getattr(provider, attr_name)
-        cfg = getattr(candidate, "__skill_meta_config__", None)
-        if isinstance(cfg, dict):
-            names.append(str(cfg.get("skill_name") or attr_name).strip())
-    return tuple(names)
+    tree = ast.parse(source, filename=filename)
+    exported_class: str | None = None
+    for node in tree.body:
+        if not isinstance(node, ast.Assign):
+            continue
+        if not any(
+            isinstance(target, ast.Name)
+            and target.id == CUSTOM_PROVIDER_CLASS_ATTR
+            for target in node.targets
+        ):
+            continue
+        if isinstance(node.value, ast.Name):
+            exported_class = node.value.id
+        break
+    if not exported_class:
+        raise ValueError(f"provider source must define {CUSTOM_PROVIDER_CLASS_ATTR}")
+    if not any(
+        isinstance(node, ast.ClassDef) and node.name == exported_class
+        for node in tree.body
+    ):
+        raise ValueError("exported provider class is missing")
+
+    names: set[str] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        function_name = (
+            node.func.id
+            if isinstance(node.func, ast.Name)
+            else node.func.attr
+            if isinstance(node.func, ast.Attribute)
+            else ""
+        )
+        if function_name != "DeclarativeSkillSpec":
+            continue
+        for keyword in node.keywords:
+            if (
+                keyword.arg == "skill_name"
+                and isinstance(keyword.value, ast.Constant)
+                and isinstance(keyword.value.value, str)
+                and keyword.value.value.strip()
+            ):
+                names.add(keyword.value.value.strip())
+    return exported_class, tuple(sorted(names))
 
 
 def load_provider_info(path: Path, *, active_skill_names: set[str] | None = None) -> CustomProviderInfo:
-    module_name = invalidate_provider_module(path.name)
+    module_name = build_provider_module_name(path.name)
 
     class_name: str | None = None
     declared_skill_names: tuple[str, ...] = ()
     status = "STAGED"
     error: str | None = None
     try:
-        module = importlib.import_module(module_name)
-        provider_cls = getattr(module, CUSTOM_PROVIDER_CLASS_ATTR, None)
-        if not inspect.isclass(provider_cls):
-            raise TypeError(f"{CUSTOM_PROVIDER_CLASS_ATTR} is missing or not a class")
-        class_name = provider_cls.__name__
-        declared_skill_names = _extract_skill_names(provider_cls)
+        if path.is_symlink():
+            raise ValueError("SKILL_SUPPLY_CHAIN_SYMLINK_REJECTED")
+        size_bytes = path.stat().st_size
+        if size_bytes <= 0 or size_bytes > _MAX_LEGACY_PROVIDER_BYTES:
+            raise ValueError("SKILL_SUPPLY_CHAIN_FILE_SIZE_INVALID")
+        source = path.read_text(encoding="utf-8")
+        class_name, declared_skill_names = _static_provider_metadata(
+            source,
+            filename=path.name,
+        )
         if declared_skill_names and active_skill_names is not None:
             active = tuple(name for name in declared_skill_names if name in active_skill_names)
             status = "ACTIVE" if active and len(active) == len(declared_skill_names) else "STAGED"

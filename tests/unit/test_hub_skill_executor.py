@@ -102,26 +102,22 @@ def test_parse_github_source_supports_skillshub_alias() -> None:
 
 
 
-def test_search_remote_skills_with_status_without_registry_config_uses_clawhub_fallback(monkeypatch) -> None:
-    from host_brain.skills.hub.hub_installer import SearchResponse, SearchResult, search_remote_skills_with_status
+def test_search_remote_skills_with_status_without_registry_config_never_spawns_clawhub(monkeypatch) -> None:
+    from host_brain.skills.hub.hub_installer import search_remote_skills_with_status
 
     monkeypatch.delenv('HOST_SKILL_HUB_REGISTRY_URL', raising=False)
+    called = {'count': 0}
     monkeypatch.setattr(
         'host_brain.skills.hub.hub_installer._search_skills_via_clawhub_cli',
-        lambda query, skills_dir=None: SearchResponse(
-            results=[SearchResult(name='weather-like-test', version='', description='Weather Like Test', author='ClawHub', tags=['clawhub'])],
-            registry_url='https://clawhub.ai',
-            error=None,
-            discovery_sources=[{'name': 'ClawHub', 'url': 'https://clawhub.ai'}],
-        ),
+        lambda *args, **kwargs: called.__setitem__('count', called['count'] + 1),
     )
 
     result = search_remote_skills_with_status('weather')
 
-    assert len(result.results) == 1
-    assert result.results[0].name == 'weather-like-test'
+    assert result.results == []
     assert result.registry_url == 'https://clawhub.ai'
-    assert result.error is None
+    assert result.error == 'SUPPLY_CHAIN_EXTERNAL_BUNDLES_DISABLED'
+    assert called['count'] == 0
 
 
 
@@ -139,42 +135,23 @@ def test_parse_clawhub_search_output() -> None:
     assert rows[0].description == 'Weather Pollen'
 
 
-def test_install_skill_clawhub_source_uses_cli_bridge(monkeypatch, tmp_path) -> None:
+def test_install_skill_clawhub_source_is_rejected_before_cli_or_filesystem(monkeypatch, tmp_path) -> None:
     from host_brain.skills.hub.hub_installer import install_skill
 
     hub_dir = tmp_path / 'skills'
-    installed_dir = hub_dir / 'weather-like-test'
-    installed_dir.mkdir(parents=True)
-    (installed_dir / 'SKILL.md').write_text(
-        "---\n"
-        "name: \"weather-like-test\"\n"
-        "version: \"0.1.0\"\n"
-        "description: \"Weather Like Test\"\n"
-        "author: \"tester\"\n"
-        "clearance: LOW\n"
-        "risk_level: 1\n"
-        "scope: host\n"
-        "reversible: true\n"
-        "require_confirm: false\n"
-        "scheduler_allowed: true\n"
-        "tool: web_search\n"
-        "---\n",
-        encoding='utf-8',
+    called = {'count': 0}
+    monkeypatch.setattr(
+        'host_brain.skills.hub.hub_installer._run_clawhub_cli',
+        lambda *args, **kwargs: called.__setitem__('count', called['count'] + 1),
     )
-
-    class _Completed:
-        returncode = 0
-        stdout = 'installed ok'
-        stderr = ''
-
-    monkeypatch.setattr('host_brain.skills.hub.hub_installer._run_clawhub_cli', lambda *args, **kwargs: _Completed())
 
     result = install_skill('clawhub:weather-like-test', skills_dir=hub_dir, force=False)
 
-    assert result.success is True
-    assert result.name == 'weather-like-test'
+    assert result.success is False
     assert result.source == 'clawhub:weather-like-test'
-    assert result.install_dir.endswith('weather-like-test')
+    assert result.error == 'SUPPLY_CHAIN_EXTERNAL_BUNDLES_DISABLED'
+    assert called['count'] == 0
+    assert not hub_dir.exists()
 
 
 
