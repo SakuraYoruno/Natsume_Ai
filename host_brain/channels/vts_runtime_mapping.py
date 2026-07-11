@@ -4,6 +4,8 @@ import logging
 from pathlib import Path
 from typing import Any, Mapping
 
+from host_brain.core.emotion_constants import normalize_emotion_tag
+
 
 logger = logging.getLogger(__name__)
 
@@ -94,9 +96,7 @@ def normalize_runtime_emotion_tag(
     if normalized_fallback not in resolved_mapping:
         normalized_fallback = "NEUTRAL" if "NEUTRAL" in resolved_mapping else next(iter(resolved_mapping), "NEUTRAL")
 
-    tag = str(value or normalized_fallback).strip().upper() or normalized_fallback
-    tag = tag.replace("-", "_").replace(" ", "_")
-    tag = VTS_EMOTION_TAG_ALIASES.get(tag, tag)
+    tag = normalize_emotion_tag(str(value or normalized_fallback))
     return tag if tag in resolved_mapping else normalized_fallback
 
 
