@@ -11,10 +11,6 @@ import sys
 import pytest
 
 
-_PROD_ENV_TEST_FILES = {
-    "test_bond_phase5.py",
-}
-
 _RETIRED_PROMPT_SURFACE_COMPAT_TEST_FILES = {
     "test_action_planner.py",
     "test_agent_handler_prompt_templates.py",
@@ -60,7 +56,6 @@ _RETIRED_PROMPT_SURFACE_COMPAT_TEST_FILES = {
 }
 
 _CI_UNSTABLE_TEST_FILES = {
-    "test_bond_phase5.py",
     *_RETIRED_PROMPT_SURFACE_COMPAT_TEST_FILES,
 }
 
@@ -280,8 +275,6 @@ def pytest_collection_modifyitems(
             item.add_marker(pytest.mark.runtime_probe)
         if "_docker" in filename:
             item.add_marker(pytest.mark.docker)
-        if filename in _PROD_ENV_TEST_FILES:
-            item.add_marker(pytest.mark.prod_env)
         if filename in _CI_UNSTABLE_TEST_FILES:
             item.add_marker(pytest.mark.ci_unstable)
 
