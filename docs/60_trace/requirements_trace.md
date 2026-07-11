@@ -1377,8 +1377,8 @@
 - DevSpec 落点：DevSpec §16.14；完整架构重构正式执行程序 §M48-B。
 - DevTasks（TASK）：TASK-0487～TASK-0496。
 - 验收测试（T-xx）：T-ARCH-01～03。
-- 当前进展（2026-07-11）：M48-B Entry Gate Packet 已登记并机检 13 个 owner scope、5 个 migration reservation、8 个 cutover surface、5 个隔离域和 TASK-0487～0495 的 9 个 flag/stop/evidence/rollback 切片；五项条款均 PASS，并获用户委托的 CODEX MASTER 本地 default-off 实施批准。TASK-0487 为 PLANNED，TASK-0488～0496 尚未实施。
-- 覆盖状态：PLANNED
+- 当前进展（2026-07-11）：M48-B Entry Gate 五项条款均 PASS。TASK-0487 已完成 versioned identity contract、HMAC/opaque token verifier、pre/post-auth rate、durable idempotency/replay claim、原子 claim+audit、emergency WAL、四 surface server-owned policy、0058 schema 与 checksum-bound historical catalog compatibility；125 定向 unit/contract、31 既有 migration regression 和 1 次 TASK-0487 integration wave 通过。运行 mode 默认 OFF；实际 Gateway/Obs/Bridge route cutover 由 TASK-0488/0489/0494 承接。TASK-0488 为 PLANNED。
+- 覆盖状态：IN_PROGRESS
 
 ## R-184（M49 Contracts、Kernel、Composition 与依赖治理）
 
