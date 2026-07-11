@@ -1,0 +1,1 @@
+import{f as e,u as t}from"./endpointClient-BLGzo-AV.js";var n={Accept:`text/event-stream`};function r(r,i={}){return t(e.execution.chatDebug.path,r,{...i,headers:{...n,...i.headers||{}}})}export{r as t};

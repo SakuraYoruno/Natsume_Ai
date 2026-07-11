@@ -763,6 +763,13 @@ class DigitalLifeSupervisor:
         self._proactive_episode_count += 1
         self._last_proactive_episode_record = dict(record)
         self._record_event("proactive_emotional_episode", record)
+        try:
+            from host_brain.persona.life_evolution_observer import observe_appraisal_event  # noqa: PLC0415
+
+            observe_appraisal_event(episode, person_id=str(episode.get("person_id") or "default"))
+        except Exception:
+            # Observability must never block the proactive producer.
+            pass
         return record
 
     def _write_proactive_delivery_receipt(self, outbound: Mapping[str, Any]) -> dict[str, Any]:
@@ -832,6 +839,12 @@ class DigitalLifeSupervisor:
         self._proactive_aftereffect_count += 1
         self._last_proactive_aftereffect_record = dict(record)
         self._record_event("proactive_emotional_aftereffect", record)
+        try:
+            from host_brain.persona.life_evolution_observer import observe_appraisal_event  # noqa: PLC0415
+
+            observe_appraisal_event(aftereffect, person_id=str(aftereffect.get("person_id") or "default"))
+        except Exception:
+            pass
         return record
 
     def _compile_proactive_reply_intent(

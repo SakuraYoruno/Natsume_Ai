@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import time
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass
@@ -12,6 +13,12 @@ from typing import Any
 
 SCENE_DECISION_SCHEMA_VERSION = "Natsume.scene.decision.v1"
 SCENE_DECISION_DEFAULT_TTL_MS = 2 * 60 * 1000
+
+
+def life_projection_enabled() -> bool:
+    """Resolve the frozen rollout flag; absent/malformed is disabled."""
+    raw = str(os.environ.get("HOST_LIFE_PROJECTION_ENABLED") or "false").strip().lower()
+    return raw in {"1", "true", "yes", "on"}
 
 SCENE_PROACTIVE_ALLOW = "ALLOW"
 SCENE_PROACTIVE_CONTEXTUAL = "CONTEXTUAL"
@@ -296,4 +303,5 @@ __all__ = [
     "ScenePolicy",
     "build_scene_decision",
     "evaluate_proactive_scene",
+    "life_projection_enabled",
 ]

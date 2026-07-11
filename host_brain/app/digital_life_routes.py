@@ -1,6 +1,5 @@
 ﻿from __future__ import annotations
 
-import os
 from typing import Any
 
 from fastapi import APIRouter, Body, Query
@@ -32,8 +31,9 @@ router = APIRouter(prefix="/v1/digital-life", tags=["digital-life"])
 
 
 def _life_projection_enabled() -> bool:
-    raw = str(os.environ.get("HOST_LIFE_PROJECTION_ENABLED") or "true").strip().lower()
-    return raw not in {"0", "false", "no", "off"}
+    from host_brain.persona.scene_policy import life_projection_enabled
+
+    return life_projection_enabled()
 
 
 @router.get("/state")

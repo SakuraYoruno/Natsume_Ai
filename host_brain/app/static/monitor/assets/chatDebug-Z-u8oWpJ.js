@@ -1,1 +1,0 @@
-import{f as e,u as t}from"./endpointClient-KL75Ccm2.js";var n={Accept:`text/event-stream`};function r(r,i={}){return t(e.execution.chatDebug.path,r,{...i,headers:{...n,...i.headers||{}}})}export{r as t};

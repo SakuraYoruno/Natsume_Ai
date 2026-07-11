@@ -30,7 +30,6 @@ from __future__ import annotations
 import datetime
 import hashlib
 import logging
-import os
 import time
 from dataclasses import dataclass, field
 from typing import Any, Mapping
@@ -1008,6 +1007,7 @@ class PersonaProactiveVoice:
         from host_brain.persona.scene_policy import (  # noqa: PLC0415
             build_scene_decision,
             evaluate_proactive_scene,
+            life_projection_enabled,
         )
         decision_now_ms = ctx.get("now_ms", ctx.get("current_ts_ms"))
 
@@ -1018,9 +1018,20 @@ class PersonaProactiveVoice:
             activity_monitor=activity_monitor,
             user_goal_ref=str(ctx.get("user_goal_ref") or ""),
             now_ms=decision_now_ms,
-            enabled=str(os.environ.get("HOST_LIFE_PROJECTION_ENABLED") or "true").strip().lower()
-            not in {"0", "false", "no", "off"},
+            enabled=life_projection_enabled(),
         )
+        if any(scene.get(key) for key in ("scene_tags", "current_activity", "source_ref", "source_refs", "observed_at_ms")):
+            try:
+                from host_brain.persona.life_evolution_observer import observe_scene_decision  # noqa: PLC0415
+
+                observe_scene_decision(
+                    decision,
+                    person_id=str(ctx.get("person_id") or ctx.get("user_id") or "default"),
+                    source_kind="proactive_voice",
+                    source_ref=str(ctx.get("user_goal_ref") or ""),
+                )
+            except Exception:
+                pass
         return evaluate_proactive_scene(
             decision,
             proactive_scene_type=scene_type,

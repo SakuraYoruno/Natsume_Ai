@@ -15,6 +15,7 @@ import LifeBodyPathologyPanel from './lifeBody/LifeBodyPathologyPanel.jsx'
 import LifeBodyTimeline from './lifeBody/LifeBodyTimeline.jsx'
 import LifeBodyTopology from './lifeBody/LifeBodyTopology.jsx'
 import LifeBodyVitalsStrip from './lifeBody/LifeBodyVitalsStrip.jsx'
+import LifeEvolutionSection from './LifeEvolutionSection.jsx'
 import { buildDigitalLifeFocusLensModel } from '../digitalLifeOverviewModel.js'
 
 export default function DigitalLifeOverviewSurface({
@@ -42,6 +43,12 @@ export default function DigitalLifeOverviewSurface({
   commandRailModel,
   mainChainReshapeModel,
   wallClockSoakQuery,
+  lifeEvolutionUiEnabled,
+  lifeEvolutionQuery,
+  lifeEvolutionModel,
+  lifePreviewBusy,
+  lifePreviewError,
+  onRunLifeActionPreview,
   avatarStateQuery,
   avatarCommandBusy,
   avatarCommandError,
@@ -133,6 +140,16 @@ export default function DigitalLifeOverviewSurface({
       />
 
       <DigitalLifeWallClockSection wallClockSoakQuery={wallClockSoakQuery} />
+
+      {lifeEvolutionUiEnabled ? (
+        <LifeEvolutionSection
+          query={lifeEvolutionQuery}
+          model={lifeEvolutionModel}
+          previewBusy={lifePreviewBusy}
+          previewError={lifePreviewError}
+          onPreview={onRunLifeActionPreview}
+        />
+      ) : null}
 
       <DigitalLifeRuntimeDetailSection
         runtimeSnapshot={runtimeSnapshot}

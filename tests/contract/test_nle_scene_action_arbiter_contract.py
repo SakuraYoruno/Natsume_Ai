@@ -139,7 +139,8 @@ def test_t_nle_17_scene_decision_preserves_source_ttl_and_restrict_only_contract
     assert evaluate_proactive_scene(payload, proactive_scene_type=SCENE_MORNING_GREET, now_ms=NOW)[0] is True
 
 
-def test_t_nle_17_scene_policy_actually_changes_existing_proactive_voice_without_renewing_stale_input() -> None:
+def test_t_nle_17_scene_policy_actually_changes_existing_proactive_voice_without_renewing_stale_input(monkeypatch) -> None:
+    monkeypatch.setenv("HOST_LIFE_PROJECTION_ENABLED", "true")
     voice = PersonaProactiveVoice()
     blocked, blocked_reason = voice._scene_allows_scene(
         SCENE_MORNING_GREET,
@@ -178,7 +179,8 @@ def test_t_nle_17_scene_policy_actually_changes_existing_proactive_voice_without
     assert gaming_followup is True
 
 
-def test_t_nle_17_scene_decision_projects_into_surface_expression_without_changing_task() -> None:
+def test_t_nle_17_scene_decision_projects_into_surface_expression_without_changing_task(monkeypatch) -> None:
+    monkeypatch.setenv("HOST_LIFE_PROJECTION_ENABLED", "true")
     task_control = {"task_mode": "technical_help", "response_move": "answer"}
     scene, guardrails = _surface_scene_guardrails(
         scene_awareness={

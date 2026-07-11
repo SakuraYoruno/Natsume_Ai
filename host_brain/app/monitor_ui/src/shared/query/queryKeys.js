@@ -6,6 +6,7 @@ export const OBS_QUERY_KEYS = Object.freeze({
   avatarState: () => ['avatar-state'],
   digitalLifeOverview: (windowMinutes) => ['digital-life-overview', windowMinutes],
   digitalLifeWallClockSoak: () => ['digital-life-wall-clock-soak'],
+  lifeEvolution: (personId) => ['life-evolution', personId || 'default'],
   codexBioOpsObservability: (runId) => ['codex-bio-ops-observability', runId || 'latest'],
   memoryOverview: (windowMinutes) => ['memory-overview', windowMinutes],
   gatewayOverview: (windowMinutes) => ['gateway-overview', windowMinutes],

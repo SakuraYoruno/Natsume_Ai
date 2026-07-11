@@ -1,0 +1,1 @@
+import{n as e,r as t}from"./observabilityApiClient-FEqPYnJa.js";function n(n={}){return t(e.errors,n)}export{n as t};

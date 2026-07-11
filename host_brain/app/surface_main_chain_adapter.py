@@ -257,15 +257,10 @@ def _surface_scene_guardrails(
     now_ms: int,
 ) -> tuple[dict[str, Any], tuple[str, ...]]:
     """Project SceneDecision into expression-only Surface constraints."""
-    from host_brain.persona.scene_policy import build_scene_decision  # noqa: PLC0415
+    from host_brain.persona.scene_policy import build_scene_decision, life_projection_enabled  # noqa: PLC0415
 
     control = dict(task_control or {}) if isinstance(task_control, Mapping) else {}
-    enabled = str(os.environ.get("HOST_LIFE_PROJECTION_ENABLED") or "true").strip().lower() not in {
-        "0",
-        "false",
-        "no",
-        "off",
-    }
+    enabled = life_projection_enabled()
     decision = build_scene_decision(
         scene_awareness=scene_awareness,
         task_mode=str(control.get("task_mode") or control.get("response_move") or ""),
@@ -274,6 +269,21 @@ def _surface_scene_guardrails(
         enabled=enabled,
     )
     payload = decision.as_dict(now_ms=int(now_ms))
+    has_scene_observation = isinstance(scene_awareness, Mapping) and any(
+        scene_awareness.get(key)
+        for key in ("scene_tags", "current_activity", "source_ref", "source_refs", "observed_at_ms")
+    )
+    if has_scene_observation:
+        try:
+            from host_brain.persona.life_evolution_observer import observe_scene_decision  # noqa: PLC0415
+
+            observe_scene_decision(
+                payload,
+                source_kind="surface_main_chain",
+                source_ref=user_goal_ref,
+            )
+        except Exception:
+            pass
     if bool(payload.get("expired")) or not enabled:
         return payload, ()
     policy = str(payload.get("proactive_policy") or "ALLOW").upper()

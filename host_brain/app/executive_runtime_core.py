@@ -986,6 +986,28 @@ def _execute_skill(
                 },
                 now_ms=int(time.time() * 1000),
             )
+            try:
+                from host_brain.persona.life_evolution_observer import (  # noqa: PLC0415
+                    observe_action_arbiter_decision,
+                    observe_scene_decision,
+                )
+
+                observation_ref = f"request://{request_id}"
+                if scene_awareness:
+                    observe_scene_decision(
+                        scene_decision,
+                        person_id=person_id,
+                        source_kind="executive_runtime",
+                        source_ref=observation_ref,
+                    )
+                observe_action_arbiter_decision(
+                    action_arbiter_decision,
+                    person_id=person_id,
+                    source_kind="executive_runtime",
+                    source_ref=observation_ref,
+                )
+            except Exception:
+                pass
             if action_arbiter_decision.get("decision") == "BLOCK":
                 authority_error = str(
                     (action_arbiter_decision.get("reason_codes") or ["ACTION_ARBITER_BLOCKED"])[0]

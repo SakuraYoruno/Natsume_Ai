@@ -118,6 +118,8 @@ export const ENDPOINT_REGISTRY = Object.freeze({
     memoryEvents: { service: 'host', path: '/v1/memory/events/recent', risk: 'low' },
     overviewSnapshot: { service: 'obs', path: '/obs/digital-life/overview-snapshot', risk: 'low' },
     wallClockSoak: { service: 'obs', path: '/obs/digital-life/wall-clock-soak', risk: 'low' },
+    lifeEvolutionSnapshot: { service: 'obs', path: '/obs/life-evolution/snapshot', risk: 'low' },
+    lifeEvolutionPreview: { service: 'obs', path: '/obs/life-evolution/action-preview', risk: 'low' },
     lifeBody: { service: 'obs', path: '/obs/life-body', risk: 'low' },
     lifeTimeline: { service: 'obs', path: '/obs/life-timeline', risk: 'low' },
     pathologies: { service: 'obs', path: '/obs/pathologies', risk: 'low' },

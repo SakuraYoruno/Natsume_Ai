@@ -4,6 +4,7 @@ import {
   fetchDigitalLifeRuntimeSnapshot,
   fetchDigitalLifeOverviewSnapshot,
   fetchDigitalLifeWallClockSoak,
+  fetchLifeEvolutionSnapshot,
   fetchPromptBuilderStats,
 } from './api.js'
 import { OBS_STALE_TIMES } from '../../shared/query/freshness.js'
@@ -86,6 +87,31 @@ export function useDigitalLifeWallClockSoakQuery({
     pollingIntervalMs: pollingInterval * 1000,
     minPollingIntervalMs: 60_000,
     staleTimeMs: OBS_STALE_TIMES.wallClockSoak,
+  })
+}
+
+export function useLifeEvolutionQuery({
+  personId = 'default',
+  enabled = true,
+  pollingEnabled = false,
+  pollingTick = 0,
+  pollingInterval = 45,
+} = {}) {
+  const queryFn = useCallback(
+    async () => fetchLifeEvolutionSnapshot({ person_id: personId }),
+    [personId]
+  )
+
+  return useObservabilityQuery({
+    queryKey: OBS_QUERY_KEYS.lifeEvolution(personId),
+    queryFn,
+    enabled,
+    retryCount: 0,
+    pollingEnabled,
+    pollingTick,
+    pollingIntervalMs: Math.max(30, Number(pollingInterval || 45)) * 1000,
+    minPollingIntervalMs: 30_000,
+    staleTimeMs: OBS_STALE_TIMES.lifeEvolution,
   })
 }
 

@@ -35,6 +35,7 @@ import host_brain.app.obs_routes_sysmode as _obs_routes_sysmode  # noqa: F401
 import host_brain.app.obs_routes_agent_bio_ops  # noqa: F401
 import host_brain.app.obs_routes_security_immune  # noqa: F401
 import host_brain.app.obs_routes_task_runtime  # noqa: F401
+import host_brain.app.obs_routes_life_evolution  # noqa: F401
 
 _mode_transition_lock = _obs_routes_sysmode._mode_transition_lock
 _mode_transition_service = _obs_routes_sysmode._mode_transition_service

@@ -4,8 +4,9 @@ import { buildMainChainReshapeModel } from '../../models/mainChainReshapeModel.j
 import {
   useAvatarStateQuery,
   useDigitalLifeWallClockSoakQuery,
+  useLifeEvolutionQuery,
 } from './digitalLifeQueries.js'
-import { postAvatarBehavior } from './api.js'
+import { postAvatarBehavior, postLifeEvolutionPreview } from './api.js'
 import {
   buildDigitalLifeCapabilitySectionModel,
   buildDigitalLifeCommandRailModel,
@@ -16,11 +17,19 @@ import {
   getDigitalLifePollingInterval,
 } from './digitalLifeOverviewModel.js'
 import { buildDigitalLifeWiredDomains } from './digitalLifeWiredDomainsModel.js'
+import { buildLifeEvolutionModel } from './lifeEvolutionModel.js'
+
+const LIFE_EVOLUTION_BUILD_ENABLED = !['0', 'false', 'no', 'off'].includes(
+  String(import.meta.env?.VITE_NLE_LIFE_VIEWS_ENABLED ?? 'true').trim().toLowerCase()
+)
 
 export function useDigitalLifeOverviewController() {
   const [windowMinutes, setWindowMinutes] = useState(360)
   const [avatarCommandBusy, setAvatarCommandBusy] = useState(false)
   const [avatarCommandError, setAvatarCommandError] = useState(null)
+  const [lifePreview, setLifePreview] = useState(null)
+  const [lifePreviewBusy, setLifePreviewBusy] = useState(false)
+  const [lifePreviewError, setLifePreviewError] = useState(null)
   const {
     vtsData,
     servicesData,
@@ -90,6 +99,21 @@ export function useDigitalLifeOverviewController() {
     pollingTick,
     pollingInterval: getDigitalLifePollingInterval(pollingInterval, 15),
   })
+  const lifeEvolutionQuery = useLifeEvolutionQuery({
+    enabled: LIFE_EVOLUTION_BUILD_ENABLED,
+    pollingEnabled,
+    pollingTick,
+    pollingInterval: getDigitalLifePollingInterval(pollingInterval, 45),
+  })
+  const lifeEvolutionModel = useMemo(
+    () => buildLifeEvolutionModel(lifeEvolutionQuery.data, lifePreview),
+    [lifeEvolutionQuery.data, lifePreview]
+  )
+  const lifeEvolutionUiEnabled = Boolean(
+    LIFE_EVOLUTION_BUILD_ENABLED
+      && lifeEvolutionQuery.data?.schema_version
+      && !lifeEvolutionQuery.error
+  )
 
   const mainChainReshapeModel = useMemo(
     () => buildMainChainReshapeModel({
@@ -134,6 +158,32 @@ export function useDigitalLifeOverviewController() {
     void refreshAll()
     void wallClockSoakQuery.refetch()
     void avatarStateQuery.refetch()
+    if (LIFE_EVOLUTION_BUILD_ENABLED) void lifeEvolutionQuery.refetch()
+  }
+
+  const runLifeActionPreview = async () => {
+    setLifePreviewBusy(true)
+    setLifePreviewError(null)
+    try {
+      const result = await postLifeEvolutionPreview({
+        governor_decision: {},
+        proposed_action: {
+          action_kind: 'proactive_expression',
+          scope: 'conversation',
+          risk_level: 5,
+          is_proactive: true,
+          requires_token: true,
+        },
+        scene_decision: lifeEvolutionQuery.data?.scene || {},
+        user_intent: { explicit: false },
+        evidence_refs: lifeEvolutionQuery.data?.scene?.source_refs || [],
+      })
+      setLifePreview(result)
+    } catch (err) {
+      setLifePreviewError(err instanceof Error ? err : new Error(String(err)))
+    } finally {
+      setLifePreviewBusy(false)
+    }
   }
 
   const applyAvatarBehavior = async (behaviorId) => {
@@ -279,6 +329,12 @@ export function useDigitalLifeOverviewController() {
     commandRailModel,
     mainChainReshapeModel,
     wallClockSoakQuery,
+    lifeEvolutionUiEnabled,
+    lifeEvolutionQuery,
+    lifeEvolutionModel,
+    lifePreviewBusy,
+    lifePreviewError,
+    onRunLifeActionPreview: runLifeActionPreview,
     avatarStateQuery,
     avatarCommandBusy,
     avatarCommandError,
