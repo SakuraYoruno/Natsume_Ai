@@ -673,6 +673,87 @@ async def prime_core_service_cache_once() -> None:
         host_result = {"overall_status": "DOWN", "latency_ms": None, "sub_services": {}}
 
     _write_core_service_cache(now_ts=now_ts, edge_result=edge_result, host_result=host_result)
+    try:
+        _reconcile_degradation_observations(
+            now_ts=now_ts,
+            edge_result=edge_result,
+            host_result=host_result,
+            llm_results={},
+        )
+    except Exception as exc:
+        logger.warning("Prime degradation projection skipped: %s", exc)
+
+
+def _reconcile_degradation_observations(
+    *,
+    now_ts: int,
+    edge_result: Mapping[str, Any],
+    host_result: Mapping[str, Any],
+    llm_results: Mapping[str, Mapping[str, Any]],
+) -> tuple[dict[str, Any], ...]:
+    """Project existing heartbeat signals into the shared state machine."""
+    from host_brain.observability.degradation_state import (  # noqa: PLC0415
+        reconcile_service_observations,
+    )
+
+    rows: list[dict[str, Any]] = []
+    edge_sub_services = edge_result.get("sub_services")
+    if isinstance(edge_sub_services, Mapping):
+        for service_id in ("vts", "tts"):
+            row = edge_sub_services.get(service_id)
+            if isinstance(row, Mapping):
+                rows.append(
+                    {
+                        "service_id": service_id,
+                        "status": row.get("status"),
+                        "side": "edge",
+                        "last_check_ts": now_ts,
+                        "detail": row.get("detail"),
+                    }
+                )
+
+    host_sub_services = host_result.get("sub_services")
+    if isinstance(host_sub_services, Mapping):
+        for service_id in ("llm_gateway", "recall_fusion"):
+            row = host_sub_services.get(service_id)
+            if isinstance(row, Mapping):
+                rows.append(
+                    {
+                        "service_id": service_id,
+                        "status": row.get("status"),
+                        "side": "host",
+                        "last_check_ts": now_ts,
+                        "detail": row.get("detail"),
+                    }
+                )
+
+    if str(host_result.get("overall_status") or "").strip().upper() != "DOWN":
+        for service_id, row in llm_results.items():
+            if isinstance(row, Mapping):
+                rows.append(
+                    {
+                        "service_id": service_id,
+                        "status": row.get("status"),
+                        "side": "host",
+                        "last_check_ts": now_ts,
+                        "detail": row.get("detail"),
+                    }
+                )
+    elif not any(row.get("service_id") == "llm_gateway" for row in rows):
+        rows.append(
+            {
+                "service_id": "llm_gateway",
+                "status": "DOWN",
+                "side": "host",
+                "last_check_ts": now_ts,
+            }
+        )
+
+    return reconcile_service_observations(
+        rows,
+        source_ref=f"service-heartbeat://runtime/{int(now_ts)}",
+        now_ms=int(now_ts),
+    )
 
 
 def _resource_gate_llm_probe_decision() -> Dict[str, Any]:
@@ -769,6 +850,15 @@ async def run_once() -> None:
                 "detail": detail,
                 "deploy_type": LLM_NODE_REGISTRY.get(sid, {}).get("deploy_type", "unknown"),
             }
+    try:
+        _reconcile_degradation_observations(
+            now_ts=now_ts,
+            edge_result=edge_result,
+            host_result=host_result,
+            llm_results=llm_results,
+        )
+    except Exception as exc:
+        logger.warning("Heartbeat degradation projection skipped: %s", exc)
 
 
 def get_cached(service_id: str) -> Optional[Dict[str, Any]]:

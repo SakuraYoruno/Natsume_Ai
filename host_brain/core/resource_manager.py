@@ -203,6 +203,95 @@ def _has_any_reason(reasons: set[str], prefixes: tuple[str, ...]) -> bool:
     return any(any(reason.startswith(prefix) for prefix in prefixes) for reason in reasons)
 
 
+def _resolve_degradation_capability(
+    *,
+    task_id: str,
+    task_type: str,
+    uses_llm: bool,
+    explicit_capability_id: str = "",
+    explicit_risk_level: int | None = None,
+) -> tuple[str, int]:
+    explicit = str(explicit_capability_id or "").strip().lower()
+    if explicit:
+        try:
+            risk = max(1, min(5, int(explicit_risk_level or 5)))
+        except (TypeError, ValueError):
+            risk = 5
+        return explicit, risk
+    task_key = str(task_id or "").strip().lower()
+    task_type_key = str(task_type or "").strip().lower()
+    if task_type_key in {"memory_heavy", "retrieval_warmup", "embedding_warmup"} or any(
+        token in task_key for token in ("memory_distill", "retrieval", "canon_apply")
+    ):
+        return "memory_write", 4
+    if any(token in task_key for token in ("planner", "evolution", "capability_upgrade")):
+        return "autonomous_planning", 4
+    if bool(uses_llm) or task_type_key in {
+        "background_llm",
+        "heartbeat_llm",
+        "social_light_llm",
+        "proactive_llm",
+    }:
+        return "model_inference", 2
+    return "", 1
+
+
+def _apply_degradation_state_gate(
+    decision: dict[str, Any],
+    *,
+    degradation_state: Mapping[str, Any] | None,
+    capability_id: str,
+    static_risk_level: int,
+) -> dict[str, Any]:
+    state = _as_dict(degradation_state)
+    raw_restrictions = state.get("capability_restrictions")
+    restrictions = [
+        _as_dict(row)
+        for row in (
+            list(raw_restrictions)
+            if isinstance(raw_restrictions, (list, tuple))
+            else []
+        )
+    ]
+    restriction = next(
+        (
+            row
+            for row in restrictions
+            if str(row.get("capability_id") or "").strip().lower() == capability_id
+        ),
+        None,
+    )
+    if not capability_id or restriction is None:
+        return decision
+    high_risk = bool(restriction.get("high_risk")) or int(static_risk_level) >= 3
+    out = dict(decision)
+    out["degradation_state_revision"] = state.get("revision")
+    out["degradation_status"] = state.get("status")
+    out["degradation_capability_id"] = capability_id
+    out["degradation_restriction"] = {
+        "status": restriction.get("status"),
+        "origin_dependencies": list(restriction.get("origin_dependencies") or []),
+        "safe_fallbacks": list(restriction.get("safe_fallbacks") or []),
+        "automatic_release": False,
+        "permission_effect": "RESTRICT_ONLY",
+    }
+    if high_risk:
+        out.update(
+            {
+                "allowed": False,
+                "decision": "defer",
+                "reason_code": "DEPENDENCY_DEGRADED_HIGH_RISK_BLOCKED",
+                "detail": "affected high-risk capability is disabled by DegradationState",
+                "retry_after_s": max(int(out.get("retry_after_s") or 0), 300),
+            }
+        )
+    elif out.get("decision") == "allow":
+        out["decision"] = "degrade"
+        out["reason_code"] = "DEPENDENCY_DEGRADED_SAFE_FALLBACK"
+        out["detail"] = "dependency degraded; caller must use an enumerated safe fallback"
+    return out
+
+
 _RUNTIME_CPU_ONLY_REASONS = {
     "cpu_elevated",
     "cpu_high",
@@ -254,6 +343,9 @@ def assess_background_task_pressure(
     uses_llm: bool = False,
     uses_gpu: bool = False,
     reason: str = "background",
+    degradation_state: Mapping[str, Any] | None = None,
+    capability_id: str = "",
+    static_risk_level: int | None = None,
 ) -> dict[str, Any]:
     """Return resource-gate decision for a background task.
 
@@ -272,7 +364,7 @@ def assess_background_task_pressure(
     reason_tokens = {str(item).strip().lower() for item in reasons if str(item).strip()}
 
     if not _parse_bool_env("HOST_RESOURCE_MANAGER_GATE_ENABLED", default=True):
-        return {
+        base_decision = {
             "allowed": True,
             "decision": "allow",
             "reason_code": None,
@@ -280,6 +372,19 @@ def assess_background_task_pressure(
             "pressure_status": status,
             "detail": "resource gate disabled",
         }
+        resolved_capability, resolved_risk = _resolve_degradation_capability(
+            task_id=task_id,
+            task_type=task_type,
+            uses_llm=uses_llm,
+            explicit_capability_id=capability_id,
+            explicit_risk_level=static_risk_level,
+        )
+        return _apply_degradation_state_gate(
+            base_decision,
+            degradation_state=degradation_state,
+            capability_id=resolved_capability,
+            static_risk_level=resolved_risk,
+        )
 
     critical = task_key in _RESOURCE_GATE_CRITICAL_TASK_IDS or priority_token in {"P0", "CRITICAL"}
     memory_heavy = task_type_token == "memory_heavy" or task_key in {"long_term_memory_distillation", "distillation_engine_periodic"}
@@ -464,7 +569,7 @@ def assess_background_task_pressure(
             detail = "elevated resource pressure; defer heavy background task"
 
     allowed = decision == "allow"
-    return {
+    output = {
         "allowed": allowed,
         "decision": decision,
         "reason_code": reason_code,
@@ -497,6 +602,19 @@ def assess_background_task_pressure(
         "detail": detail,
         "reason": reason,
     }
+    resolved_capability, resolved_risk = _resolve_degradation_capability(
+        task_id=task_id,
+        task_type=task_type,
+        uses_llm=uses_llm,
+        explicit_capability_id=capability_id,
+        explicit_risk_level=static_risk_level,
+    )
+    return _apply_degradation_state_gate(
+        output,
+        degradation_state=degradation_state,
+        capability_id=resolved_capability,
+        static_risk_level=resolved_risk,
+    )
 
 
 class SystemResourceManager:
@@ -588,6 +706,13 @@ class SystemResourceManager:
         logger.info("SystemResourceManager stopped")
 
     def get_status(self) -> dict[str, Any]:
+        degradation_state: dict[str, Any] = {}
+        try:
+            from host_brain.observability.degradation_state import get_degradation_state  # noqa: PLC0415
+
+            degradation_state = get_degradation_state()
+        except Exception:
+            degradation_state = {}
         with self._lock:
             return {
                 "running": self._running,
@@ -607,6 +732,7 @@ class SystemResourceManager:
                 "last_snapshot": dict(self._last_snapshot),
                 "last_decision": dict(self._last_decision),
                 "last_actions": list(self._last_actions),
+                "degradation_state": degradation_state,
                 "status_path": str(self._status_path),
             }
 
@@ -676,6 +802,8 @@ class SystemResourceManager:
         uses_llm: bool = False,
         uses_gpu: bool = False,
         reason: str = "background",
+        capability_id: str = "",
+        static_risk_level: int | None = None,
     ) -> dict[str, Any]:
         with self._lock:
             pressure = _as_dict(_as_dict(self._last_snapshot).get("pressure"))
@@ -684,6 +812,13 @@ class SystemResourceManager:
             reasons = [str(item) for item in _as_list(pressure.get("reasons")) if str(item).strip()]
             reasons.append(f"llm_pressure_{decision_pressure.lower()}")
             pressure = {**pressure, "status": decision_pressure, "reasons": reasons}
+        degradation_state: dict[str, Any] = {}
+        try:
+            from host_brain.observability.degradation_state import get_degradation_state  # noqa: PLC0415
+
+            degradation_state = get_degradation_state()
+        except Exception:
+            degradation_state = {}
         decision = assess_background_task_pressure(
             task_id=task_id,
             pressure=pressure,
@@ -692,6 +827,9 @@ class SystemResourceManager:
             uses_llm=uses_llm,
             uses_gpu=uses_gpu,
             reason=reason,
+            degradation_state=degradation_state,
+            capability_id=capability_id,
+            static_risk_level=static_risk_level,
         )
         with self._lock:
             row = {**decision, "ts_ms": now_ms()}

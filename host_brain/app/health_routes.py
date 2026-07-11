@@ -10,7 +10,7 @@ import os
 import time
 from json import loads as json_loads
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, Mapping
 
 from fastapi import APIRouter, HTTPException, Query, status
 
@@ -96,6 +96,7 @@ async def build_live_health_report(
 
     _host_result = load_host_config()
     _runtime_statuses: dict[str, Any] = {}
+    _dep_probes: dict[str, Any] = {}
     if _host_result.success and _host_result.config is not None:
         _runtime_statuses = build_host_runtime_statuses(_host_result.config)
 
@@ -118,12 +119,38 @@ async def build_live_health_report(
                     detail=str(_edge_exc),
                 )
             )
-    return build_service_health_report(
+    health_report = build_service_health_report(
         runtime_statuses=_runtime_statuses,
         request_id=req_id,
         ledger=get_ledger(),
         ts_ms=ts_value,
     )
+    try:
+        from host_brain.observability.degradation_state import (  # noqa: PLC0415
+            get_degradation_state,
+            reconcile_service_observations,
+        )
+
+        if _dep_probes:
+            reconcile_service_observations(
+                [
+                    {
+                        "service_id": service_id,
+                        "status": "UP" if bool(dict(row or {}).get("available")) else "DOWN",
+                        "owner": "edge",
+                        "ts_ms": ts_value,
+                        "detail": dict(row or {}).get("detail"),
+                    }
+                    for service_id, row in _dep_probes.items()
+                    if isinstance(row, Mapping)
+                ],
+                source_ref=f"health-report://{req_id}",
+                now_ms=ts_value,
+            )
+        health_report["degradation_state"] = get_degradation_state()
+    except Exception as degradation_exc:
+        _logger.warning("Health degradation projection skipped: %s", degradation_exc)
+    return health_report
 
 
 async def build_live_readiness_report(
@@ -187,6 +214,14 @@ async def health_check(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Service health check failed",
         )
+
+
+@router.get("/health/degradation")
+async def degradation_health_state() -> Dict[str, Any]:
+    """Read-only unified dependency degradation snapshot."""
+    from host_brain.observability.degradation_state import get_degradation_state  # noqa: PLC0415
+
+    return get_degradation_state()
 
 
 @router.get("/ready", response_model=ReadinessResponse)
@@ -316,6 +351,12 @@ async def startup_report() -> Dict[str, Any]:
             ts_ms=ts_ms,
         )
         emit_runtime_bootstrap_logs(startup_report=report)
+        try:
+            from host_brain.observability.degradation_state import get_degradation_state  # noqa: PLC0415
+
+            report["degradation_state"] = get_degradation_state()
+        except Exception as degradation_exc:
+            _logger.warning("Startup degradation read model skipped: %s", degradation_exc)
         return {
             "request_id": request_id,
             "timestamp": ts_ms,

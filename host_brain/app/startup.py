@@ -823,7 +823,33 @@ def warmup_all(*, eager: bool = False) -> dict[str, str]:
         "startup.warmup_all 完成: %s",
         {k: v for k, v in statuses.items()},
     )
+    reconcile_startup_degradation(
+        statuses,
+        source_ref=f"startup-warmup://runtime/{int(time.time() * 1000)}",
+    )
     return statuses
+
+
+def reconcile_startup_degradation(
+    statuses: Mapping[str, Any],
+    *,
+    source_ref: str,
+    now_ms: int | None = None,
+) -> tuple[dict[str, Any], ...]:
+    """Feed startup probe outcomes into the shared degradation reducer.
+
+    This is a synchronous adapter only; it creates no guardian or background
+    loop and performs no durable write.
+    """
+    from host_brain.observability.degradation_state import (  # noqa: PLC0415
+        reconcile_startup_statuses,
+    )
+
+    return reconcile_startup_statuses(
+        statuses,
+        source_ref=source_ref,
+        now_ms=now_ms,
+    )
 
 
 __all__ = [
@@ -840,4 +866,5 @@ __all__ = [
     "warmup_codex_exec_intent_pool",
     "warmup_retrieval_runtime_basics",
     "warmup_all",
+    "reconcile_startup_degradation",
 ]

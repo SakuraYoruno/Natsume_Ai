@@ -3484,6 +3484,7 @@ def _compact_resource_manager_status(payload: dict[str, Any]) -> dict[str, Any]:
     last_actions = payload.get("last_actions") if isinstance(payload.get("last_actions"), list) else []
     last_gate_decisions = payload.get("last_gate_decisions") if isinstance(payload.get("last_gate_decisions"), list) else []
     last_llm_attempts = payload.get("last_llm_attempts") if isinstance(payload.get("last_llm_attempts"), list) else []
+    degradation_state = payload.get("degradation_state") if isinstance(payload.get("degradation_state"), dict) else {}
     return {
         "running": bool(payload.get("running")),
         "interval_s": payload.get("interval_s"),
@@ -3501,6 +3502,7 @@ def _compact_resource_manager_status(payload: dict[str, Any]) -> dict[str, Any]:
         "last_decision": last_decision,
         "last_actions": last_actions[:12],
         "last_gate_decisions": last_gate_decisions[:20],
+        "degradation_state": degradation_state,
         "status_path": payload.get("status_path"),
     }
 

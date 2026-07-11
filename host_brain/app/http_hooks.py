@@ -1218,6 +1218,22 @@ def runtime_lifespan(
             except Exception as _life_loop_exc:
                 new_module_statuses["life_continuity_loop"] = f"DEGRADED: {_life_loop_exc}"
                 logger.warning("LifeContinuity loop startup degraded: %s", _life_loop_exc)
+            try:
+                from host_brain.app.startup import reconcile_startup_degradation  # noqa: PLC0415
+
+                _degradation_ts_ms = int(time.time() * 1000)
+                reconcile_startup_degradation(
+                    new_module_statuses,
+                    source_ref=f"startup-probe://runtime/{_degradation_ts_ms}",
+                    now_ms=_degradation_ts_ms,
+                )
+            except Exception as _degradation_exc:
+                # Degradation projection must never make the existing startup
+                # guardian unavailable; its feature flag is the rollback path.
+                logger.warning(
+                    "Startup degradation projection skipped: %s",
+                    _degradation_exc,
+                )
             report = build_startup_report(
                 runtime_statuses=new_module_statuses,
                 dependency_probes=build_edge_dependency_probe_statuses(dependency_probes),
