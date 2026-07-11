@@ -8,7 +8,7 @@
 状态：READY_FOR_PROGRAM_EXECUTION
 文档类型：DevTasks / Master Execution Contract
 程序任务编号：TASK-0461～TASK-0622，共 162 项，禁止复用、跳号或重定义
-当前执行入口：TASK-0461～TASK-0485、TASK-0487～0488 已完成；TASK-0486 本地 Release Seal/rollback 资产继续 BLOCKED 于 identity/live/prod/MASTER Seal；M48-B Entry Gate 为 OPEN，TASK-0489 为 IN_PROGRESS；M49～M57 状态为 PROGRAMMED
+当前执行入口：TASK-0461～TASK-0485、TASK-0487～0488 已完成；TASK-0486 本地 Release Seal/rollback 资产继续 BLOCKED 于 identity/live/prod/MASTER Seal；M48-B Entry Gate 为 OPEN，TASK-0489 为 IMPLEMENTED_AWAITING_PROTECTED_HANDOFF，TASK-0490 为 IN_PROGRESS；M49～M57 状态为 PROGRAMMED
 代码基线：dev@1ec8be1a8a20397627855aa946c0ff8aaaa87b72
 工作区状态：dirty；已有未提交业务代码、运行数据和本地配置必须原位保护
 完整目标蓝图：docs/50_project/arch/NATSUME_AI_V1_FULL_ARCHITECTURE_TARGET_20260710.md
@@ -296,8 +296,8 @@ M48-B 从 `PROGRAMMED` 解锁为 `PLANNED` 前必须同时满足：
 |---|---|---|---|---|---:|---|
 | TASK-0487 | Secure Ingress principal/signature/scope/rate/idempotency fail-closed | DONE | M48-B Entry Gate,TASK-0461 | host_brain/secure_ingress；natsume_contracts/identity | 2～4d | 2026-07-11；v1 identity contract、HMAC/opaque token、双层 rate、durable claim+audit、emergency WAL、四 surface policy、0058 与 checksum-bound catalog compatibility 已通过 125 定向 unit/contract、31 既有 migration regression 和 1 次集成波；运行 mode 默认 OFF，实际 route cutover 由 0488/0489/0494 承接 |
 | TASK-0488 | Gateway raw-body verification、replay protection 与 durable inbox/outbox | DONE | TASK-0487 | edge_client/gateway；host_brain/app/input_service_gateway.py；host_brain/eventing | 2～4d | 2026-07-11；raw-body 平台验签、0059 durable inbox/outbox/ack/DLQ/fencing/reconciliation、Host receipt、非 HTTP producer 与 fail-closed lifecycle 已通过定向 unit/contract 及 1 次 `2 passed` integration wave；证据见 `evidence/m48b/task0488` |
-| TASK-0489 | Obs command relocation 与 Query-only 边界 | IN_PROGRESS | TASK-0487 | host_brain/app/obs_routes_core.py；host_brain/observability | 2～3d | Obs 写 handler 为 0；原写动作经 Secure Ingress，权限负例全部 fail closed |
-| TASK-0490 | Skill/Provider supply-chain quarantine 与 sandbox 封口 | PROGRAMMED | TASK-0487,TASK-0462 | host_brain/skills；host_brain/integrations/providers | 2～4d | 未签名/无 digest/SBOM/未隔离 bundle 不能热导入 Host；拒绝可审计 |
+| TASK-0489 | Obs command relocation 与 Query-only 边界 | IMPLEMENTED_AWAITING_PROTECTED_HANDOFF | TASK-0487 | host_brain/app/obs_routes_core.py；host_brain/observability | 2～3d | 2026-07-11；Obs 18 个基线 mutation route 已撤下，16 个真实 command family 经 SecureIngress typed port 装配，退役 WeChat phantom 稳定拒绝；113 focused unit/contract 通过，隔离 integration 首次发现旧 transport fixture 后定向修正为 1 passed。production mount/lifespan 因 protected `router_registry.py` owner 未 handoff，故不得标 DONE；证据见 `evidence/m48b/task0489` |
+| TASK-0490 | Skill/Provider supply-chain quarantine 与 sandbox 封口 | IN_PROGRESS | TASK-0487,TASK-0462 | host_brain/skills；host_brain/integrations/providers | 2～4d | 未签名/无 digest/SBOM/未隔离 bundle 不能热导入 Host；拒绝可审计 |
 | TASK-0491 | Pentest real principal/token、Lab-only isolation 与共享 RunStore | PROGRAMMED | TASK-0487,TASK-0463,TASK-0464 | host_brain/pentest；host_brain/governor | 2～4d | mock principal/自签授权旁路为 0；非 Lab 网络/进程操作稳定拒绝 |
 | TASK-0492 | Service Catalog、端口 owner 与 18770 冲突封口 | PROGRAMMED | TASK-0487 | host_brain/service_catalog；host_brain/composition | 2～3d | 每个 endpoint 有唯一 owner/protocol/health；启动前检测端口冲突并 fail closed |
 | TASK-0493 | Edge contracts-only 边界与 Host/Edge 循环导入护栏 | PROGRAMMED | TASK-0492 | edge_client；natsume_contracts；tools/architecture | 2～4d | 新增 edge_client→host_brain 实现导入会使 CI 失败；现存边有迁移清单 |

@@ -1377,7 +1377,7 @@
 - DevSpec 落点：DevSpec §16.14；完整架构重构正式执行程序 §M48-B。
 - DevTasks（TASK）：TASK-0487～TASK-0496。
 - 验收测试（T-xx）：T-ARCH-01～03。
-- 当前进展（2026-07-11）：M48-B Entry Gate 五项条款均 PASS。TASK-0487 已完成并 default-off；TASK-0488 已完成 raw-body 平台验签、0059 durable inbox/outbox/ack/DLQ/fencing/reconciliation、Host receipt、非 HTTP producer 与 fail-closed lifecycle，定向 unit/contract 及唯一一次 `2 passed` integration wave 通过。TASK-0489 正在迁移 Obs mutation 并建立 Query-only 边界；Bridge cutover 仍由 TASK-0494 承接。
+- 当前进展（2026-07-11）：M48-B Entry Gate 五项条款均 PASS。TASK-0487 已完成并 default-off；TASK-0488 已完成 raw-body 平台验签、0059 durable inbox/outbox/ack/DLQ/fencing/reconciliation、Host receipt、非 HTTP producer 与 fail-closed lifecycle。TASK-0489 已撤下 Obs 的 18 个基线 mutation route，装配 16 个真实 SecureIngress command family、durable outcome/owner/drain 与权限负例；113 focused unit/contract 通过，隔离 integration 的旧 transport fixture 经定向修正后 `1 passed`。因 protected `router_registry.py` 尚未 handoff，Host production mount/lifespan 不可达，状态为 `IMPLEMENTED_AWAITING_PROTECTED_HANDOFF` 而非 DONE。独立的 TASK-0490 已开始；Bridge cutover仍由 TASK-0494 承接。
 - 覆盖状态：IN_PROGRESS
 
 ## R-184（M49 Contracts、Kernel、Composition 与依赖治理）

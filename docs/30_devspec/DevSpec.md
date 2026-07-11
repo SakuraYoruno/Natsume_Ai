@@ -724,6 +724,15 @@ read-model / UI contribution
 - UI 不直接查询业务表、domain private store 或进程全局缓存；不得显示 raw thought、secret、cookie 或未授权 identity/memory 正文。
 - 前端 client 从版本化 OpenAPI 生成，并通过 typecheck、unit/component、a11y、E2E、权限矩阵和 degraded-state 测试。
 
+TASK-0489 本地实现口径（implementation commit `3bc7eb7309f757dc40a6bc15167eac67e3ea17d6`）：
+
+- Obs 实际应用的 18 个基线 mutation route 已全部撤下；静态审计为 111 个 route entry、104 个唯一 method/path、0 个 mutation，保留的 3 个 POST 均绑定到明确的纯查询 endpoint。7 个重复 GET entry 是 M56 projection/route 收敛债务，不含 writer。
+- 16 个具有真实 domain owner 的原写动作已形成 typed command manifest、server authority binding、domain port 与 `/v1/host/obs-commands/{command_id}` HTTP adapter。`capability_forge.runtime-match` 不是 operator command，继续由 Host 内部受治理服务调用；不存在生产 owner 的 `wechat.channel.reset` 已显式退役，未知/退役 command 稳定拒绝且不写 outcome WAL。
+- `HOST_OBS_COMMAND_RELOCATION_MODE` 默认 `LEGACY_AUDIT`；只有 `QUERY_ONLY + HOST_SECURE_INGRESS_MODE=ENFORCE` 才允许执行。`SHADOW` 只评估，不执行 domain side effect；非法配置、缺 secret/store/journal/owner 均 terminal OFF。
+- Outcome journal 使用 auth/preauth digest 域、checksum chain、durable head anchor、容量预检、文件/目录 fsync、跨进程锁和 composition-lifetime owner；claim/receipt gap 保守封为 `UNCERTAIN`，terminal replay 补齐中央 result receipt，shutdown 必须先关闭 admission 并 drain in-flight 后释放 owner。
+- 当前状态为 `IMPLEMENTED_AWAITING_PROTECTED_HANDOFF`，不是完成切流：受保护的 `host_brain/app/router_registry.py` 仍由 `MASTER / auto-jp-media-translation` 持有，Host production tree 尚未 mount command router，也未在 lifespan 构造/`aclose()` composition。handoff 前所有旧 mutation 保持拒绝，绝不恢复匿名 Obs writer。
+- JSONL journal 当前仍为 lock 内全量校验且 128 MiB 后 fail closed；validated index、segment rollover/archive 由后续 persistence 工作承接，不得在未解决前宣称长期高吞吐 production ready。
+
 ### 16.12 Evolution、Identity 与 Release 合同
 
 - Evolution Lab 提供 benchmark、scenario、counterfactual、Skill Compiler、feedback proposal 和 identity migration analysis；输出只能进入受治理 proposal/review，不得直接改写生产状态。
